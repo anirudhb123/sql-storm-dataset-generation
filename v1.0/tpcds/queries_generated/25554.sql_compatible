@@ -1,0 +1,39 @@
+
+WITH StringProcessing AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        LOWER(c.c_email_address) AS lowercase_email,
+        LENGTH(w.web_name) AS warehouse_name_length,
+        LEFT(w.w_warehouse_name, 5) AS warehouse_name_prefix,
+        REPLACE(ca.ca_street_name, 'Street', 'St.') AS compact_street_name,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender_description
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        warehouse w ON w.w_warehouse_sk = c.c_current_addr_sk
+    WHERE 
+        LENGTH(c.c_first_name) > 3 AND
+        LENGTH(c.c_last_name) > 3
+)
+SELECT 
+    full_name,
+    lowercase_email,
+    warehouse_name_length,
+    warehouse_name_prefix,
+    compact_street_name,
+    gender_description
+FROM 
+    StringProcessing
+ORDER BY 
+    warehouse_name_length DESC, 
+    full_name ASC
+FETCH FIRST 100 ROWS ONLY;

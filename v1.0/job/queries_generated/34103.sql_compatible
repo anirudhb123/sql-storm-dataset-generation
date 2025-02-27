@@ -1,0 +1,68 @@
+
+WITH RECURSIVE cast_hierarchy AS (
+    SELECT 
+        ci.id,
+        ci.person_id,
+        ci.movie_id,
+        1 AS level,
+        CAST(NULL AS VARCHAR) AS parent_role
+    FROM cast_info ci
+    WHERE ci.nr_order = 1
+
+    UNION ALL
+
+    SELECT 
+        ci.id,
+        ci.person_id,
+        ci.movie_id,
+        ch.level + 1,
+        ct.kind
+    FROM cast_info ci
+    JOIN cast_hierarchy ch ON ci.movie_id = ch.movie_id 
+    JOIN comp_cast_type ct ON ci.person_role_id = ct.id
+    WHERE ci.nr_order = ch.level + 1
+),
+movie_details AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        ak.name AS actor_name,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM aka_title mt
+    JOIN complete_cast cc ON mt.id = cc.movie_id
+    JOIN cast_info ci ON cc.subject_id = ci.id
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN movie_keyword k ON mt.id = k.movie_id
+    WHERE mt.production_year >= 2000
+    GROUP BY mt.id, mt.title, mt.production_year, ak.name
+),
+actor_movie_counts AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT mt.id) AS movie_count,
+        AVG(mt.production_year) AS avg_production_year
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    JOIN aka_title mt ON ci.movie_id = mt.id
+    WHERE ak.name IS NOT NULL
+    GROUP BY ak.name
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_name,
+    md.company_count,
+    md.keywords,
+    amc.movie_count,
+    amc.avg_production_year,
+    ch.level AS hierarchy_level
+FROM movie_details md
+JOIN actor_movie_counts amc ON md.actor_name = amc.actor_name
+LEFT JOIN cast_hierarchy ch ON ch.movie_id = md.movie_id AND ch.person_id IN (
+    SELECT ci.person_id 
+    FROM cast_info ci 
+    WHERE ci.movie_id = md.movie_id
+)
+ORDER BY md.production_year DESC, md.actor_name;

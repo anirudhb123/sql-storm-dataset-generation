@@ -1,0 +1,46 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales ws
+    JOIN 
+        web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+        AND wp.wp_creation_date_sk >= 20210101
+),
+AggregatedSales AS (
+    SELECT 
+        web_site_sk,
+        SUM(ws_net_paid) AS total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        rn <= 10
+    GROUP BY 
+        web_site_sk
+)
+SELECT 
+    w.w_warehouse_id,
+    a.total_sales,
+    COUNT(DISTINCT c.c_customer_id) AS unique_customers
+FROM 
+    AggregatedSales a
+JOIN 
+    warehouse w ON a.web_site_sk = w.w_warehouse_sk
+JOIN 
+    web_sales ws ON ws.ws_web_site_sk = a.web_site_sk
+JOIN 
+    customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+WHERE 
+    w.w_state = 'CA'
+GROUP BY 
+    w.w_warehouse_id, a.total_sales
+ORDER BY 
+    total_sales DESC
+LIMIT 5;

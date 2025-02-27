@@ -1,0 +1,73 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) as price_rank
+    FROM 
+        web_sales
+    WHERE
+        ws_sales_price > (SELECT AVG(ws_sales_price) FROM web_sales)
+), 
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+), 
+SalesSummary AS (
+    SELECT 
+        date_dim.d_year,
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS total_sales,
+        COUNT(DISTINCT cs.ws_order_number) AS order_count,
+        AVG(rs.ws_net_profit) AS avg_net_profit
+    FROM 
+        RankedSales rs
+    JOIN date_dim ON rs.ws_sold_date_sk = date_dim.d_date_sk
+    JOIN CustomerDemographics cd ON cd.c_customer_sk = rs.ws_item_sk
+    WHERE 
+        (cd.cd_marital_status = 'M' AND cd.cd_gender = 'F') OR 
+        (cd.cd_marital_status = 'S' AND cd.cd_purchase_estimate > 2000)
+    GROUP BY 
+        date_dim.d_year
+)
+SELECT 
+    y.d_year,
+    ss.total_sales,
+    ss.order_count,
+    ss.avg_net_profit,
+    RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank,
+    CASE 
+        WHEN ss.total_sales IS NULL THEN 'No Sales'
+        WHEN ss.total_sales > 100000 THEN 'High Sales'
+        ELSE 'Low Sales'
+    END AS sales_category
+FROM 
+    SalesSummary ss
+JOIN date_dim y ON ss.d_year = y.d_year
+ORDER BY 
+    ss.total_sales DESC
+FETCH FIRST 10 ROWS ONLY
+UNION ALL
+SELECT 
+    d_year, 
+    NULL, 
+    NULL, 
+    NULL, 
+    NULL AS sales_rank,
+    'No Data Available' AS sales_category
+FROM 
+    date_dim
+WHERE 
+    d_year NOT IN (SELECT d_year FROM SalesSummary)
+ORDER BY 
+    d_year;

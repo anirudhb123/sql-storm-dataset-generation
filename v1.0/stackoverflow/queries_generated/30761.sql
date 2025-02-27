@@ -1,0 +1,104 @@
+WITH RecursivePostTree AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        CAST(p.Title AS VARCHAR(MAX)) AS Path,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Questions
+
+    UNION ALL
+
+    SELECT 
+        a.Id, 
+        a.Title,
+        a.OwnerUserId,
+        CAST(r.Path + ' -> ' + a.Title AS VARCHAR(MAX)),
+        r.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostTree r ON a.ParentId = r.PostId
+)
+
+, UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+
+FinalData AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        up.PostId,
+        up.Title,
+        up.CreationDate,
+        up.CommentCount,
+        up.UpVotes,
+        up.DownVotes,
+        r.Path AS PostPath,
+        u.BadgeCount,
+        u.PostCount
+    FROM 
+        UserScores u
+    LEFT JOIN 
+        PostActivity up ON u.PostCount > 0
+    LEFT JOIN 
+        RecursivePostTree r ON up.PostId = r.PostId
+    WHERE 
+        r.Level <= 2
+)
+
+SELECT 
+    fd.UserId,
+    fd.DisplayName,
+    fd.PostId,
+    fd.Title,
+    fd.CreationDate,
+    fd.CommentCount,
+    fd.UpVotes - fd.DownVotes AS NetVotes,
+    fd.PostPath,
+    fd.BadgeCount,
+    ROW_NUMBER() OVER(PARTITION BY fd.UserId ORDER BY fd.CreationDate DESC) AS UserPostRank
+FROM 
+    FinalData fd
+WHERE 
+    fd.BadgeCount > 0 OR fd.CommentCount > 5
+ORDER BY 
+    NetVotes DESC, fd.CreationDate DESC;

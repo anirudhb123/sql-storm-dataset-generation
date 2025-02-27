@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        RANK() OVER (ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName, p.Score, p.ViewCount
+),
+TopPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.AnswerCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 10
+),
+PostWithBadges AS (
+    SELECT 
+        tp.Id,
+        tp.Title,
+        tp.CreationDate,
+        tp.Score,
+        tp.ViewCount,
+        tp.OwnerDisplayName,
+        tp.AnswerCount,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Badges b ON b.UserId = (SELECT Id FROM Users WHERE DisplayName = tp.OwnerDisplayName)
+    GROUP BY 
+        tp.Id, tp.Title, tp.CreationDate, tp.Score, tp.ViewCount, tp.OwnerDisplayName, tp.AnswerCount
+)
+SELECT 
+    pwb.Id,
+    pwb.Title,
+    pwb.CreationDate,
+    pwb.Score,
+    pwb.ViewCount,
+    pwb.OwnerDisplayName,
+    pwb.AnswerCount,
+    pwb.BadgeCount
+FROM 
+    PostWithBadges pwb
+ORDER BY 
+    pwb.Score DESC, 
+    pwb.CreationDate DESC;

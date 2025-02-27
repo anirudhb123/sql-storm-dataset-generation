@@ -1,0 +1,74 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS PriceRank
+    FROM 
+        web_sales
+), 
+AggregatedSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        SUM(rs.ws_sales_price) AS TotalSales,
+        COUNT(*) AS OrderCount
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.PriceRank <= 5
+    GROUP BY 
+        rs.ws_item_sk
+), 
+PromotionDetails AS (
+    SELECT 
+        p.p_promo_sk,
+        p.p_promo_name,
+        p.p_start_date_sk,
+        p.p_end_date_sk,
+        DATEDIFF(DAY, p.p_start_date_sk, p.p_end_date_sk) AS PromoDuration
+    FROM 
+        promotion p
+    WHERE 
+        p.p_discount_active = 'Y'
+), 
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        COUNT(DISTINCT ws.ws_order_number) AS PurchaseCount,
+        AVG(ws.ws_sales_price) AS AvgPurchaseValue
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender
+)
+SELECT 
+    a.ws_item_sk,
+    a.TotalSales,
+    a.OrderCount,
+    p.p_promo_name,
+    ci.cd_gender,
+    ci.PurchaseCount,
+    COALESCE(ci.AvgPurchaseValue, 0) AS AvgPurchaseValue,
+    CASE 
+        WHEN a.TotalSales > 1000 THEN 'High Value'
+        WHEN a.TotalSales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS SalesCategory
+FROM 
+    AggregatedSales a
+LEFT JOIN 
+    PromotionDetails p ON a.ws_item_sk = p.p_promo_sk
+JOIN 
+    CustomerInfo ci ON a.ws_item_sk IN (SELECT x.ws_item_sk FROM web_sales x WHERE ci.PurchaseCount > 0)
+WHERE 
+    (p.p_end_date_sk IS NULL OR p.p_end_date_sk >= CURRENT_DATE)
+    AND a.TotalSales IS NOT NULL
+ORDER BY 
+    a.TotalSales DESC,
+    ci.PurchaseCount DESC;

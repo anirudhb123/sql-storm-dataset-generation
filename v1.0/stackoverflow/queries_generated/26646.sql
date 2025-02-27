@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title AS PostTitle,
+        P.CreationDate AS PostCreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        P.Score AS PostScore,
+        P.AnswerCount AS TotalAnswers,
+        P.CommentCount AS TotalComments,
+        HOT.PostHotRank,
+        STUFF((SELECT ', ' + T.TagName
+               FROM Tags T
+               JOIN unnest(string_to_array(P.Tags, '>')) AS tag_id ON T.Id = tag_id::int
+               FOR XML PATH('')), 1, 2, '') AS ConcatenatedTags
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC) AS PostHotRank
+        FROM 
+            Votes
+        WHERE 
+            CreationDate > NOW() - INTERVAL '30 days'
+        GROUP BY 
+            PostId
+    ) AS HOT ON P.Id = HOT.PostId
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+),
+CommentedPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.PostTitle,
+        RP.OwnerDisplayName,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        Comments C ON RP.PostId = C.PostId
+    WHERE 
+        C.CreationDate < NOW() -- Only count comments made before now
+    GROUP BY 
+        RP.PostId, RP.PostTitle, RP.OwnerDisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.PostTitle,
+        RP.OwnerDisplayName,
+        RP.HotRank,
+        COALESCE(CP.CommentCount, 0) AS CommentCount
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        CommentedPosts CP ON RP.PostId = CP.PostId
+)
+
+SELECT 
+    FP.PostId,
+    FP.PostTitle,
+    FP.OwnerDisplayName,
+    FP.HotRank,
+    FP.CommentCount,
+    CASE 
+        WHEN FP.HotRank <= 10 THEN 'Hot'
+        WHEN FP.CommentCount > 5 THEN 'Active'
+        ELSE 'Quiet' 
+    END AS ActivityLevel,
+    FP.Tags AS Tags,
+    DATE_PART('year', AGE(FP.CreationDate)) AS AgeOfPost
+FROM 
+    FilteredPosts FP
+WHERE 
+    FP.HotRank IS NOT NULL
+ORDER BY 
+    FP.HotRank, FP.CommentCount DESC
+LIMIT 100;

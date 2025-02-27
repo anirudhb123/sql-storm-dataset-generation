@@ -1,0 +1,57 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT sr.sr_ticket_number) AS total_returns,
+        SUM(sr.sr_return_amt) AS total_return_amount
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_income_band_sk,
+        SUM(cd.cd_purchase_estimate) AS total_purchase_estimate
+    FROM 
+        customer_demographics cd
+    JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, ib.ib_income_band_sk
+),
+SalesDetails AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_sales_price) AS total_sales_amount
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY 
+        ws.ws_bill_customer_sk
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ib.ib_income_band_sk,
+    COALESCE(cr.total_returns, 0) AS total_returns,
+    COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+    COALESCE(sd.total_quantity_sold, 0) AS total_quantity_sold,
+    COALESCE(sd.total_sales_amount, 0) AS total_sales_amount
+FROM 
+    CustomerDemographics cd
+LEFT JOIN 
+    CustomerReturns cr ON cd.cd_demo_sk = cr.c_customer_sk
+LEFT JOIN 
+    SalesDetails sd ON cd.cd_demo_sk = sd.ws_bill_customer_sk
+ORDER BY 
+    cd.cd_gender, cd.cd_marital_status, ib.ib_income_band_sk;

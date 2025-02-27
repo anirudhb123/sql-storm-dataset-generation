@@ -1,0 +1,47 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_within_nation
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+TopSpendingSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY total_supply_cost DESC
+    LIMIT 5
+),
+MaterialsSupplied AS (
+    SELECT 
+        RANK() OVER (ORDER BY p.p_retailprice DESC) AS material_rank,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_supply_qty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_name, p.p_retailprice
+)
+SELECT 
+    r.r_name AS region_name,
+    rc.c_name AS customer_name,
+    rc.total_spent AS total_spending,
+    tss.s_name AS top_supplier,
+    tss.total_supply_cost AS total_supply_cost,
+    ms.p_name AS material_name,
+    ms.total_supply_qty AS material_quantity
+FROM RankedCustomers rc
+JOIN nation n ON rc.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN TopSpendingSuppliers tss ON MOD(rc.c_custkey, 5) = MOD(tss.s_suppkey, 5)
+JOIN MaterialsSupplied ms ON ms.material_rank <= 10
+WHERE rc.rank_within_nation <= 3
+ORDER BY r.r_name, rc.total_spending DESC;

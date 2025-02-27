@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title, 
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RN,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.Score IS NOT NULL AND p.ViewCount > 0
+),
+
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        COALESCE(pht.Name, 'No History') AS PostHistory,
+        SUM(CASE WHEN pht.Class = 1 THEN 1 ELSE 0 END) OVER (PARTITION BY rp.PostId) AS GoldBadges
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistory ph ON rp.PostId = ph.PostId
+    LEFT JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        rp.RN = 1
+),
+
+TopPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.ViewCount,
+        pd.Score,
+        pd.CommentCount,
+        CONCAT(COALESCE(pd.PostHistory, 'None'), ' - ', pd.GoldBadges, ' Gold Badges') AS PostSummary
+    FROM 
+        PostDetails pd
+    WHERE 
+        pd.ViewCount > (SELECT AVG(ViewCount) FROM Posts)
+        AND pd.Score > (SELECT AVG(Score) FROM Posts)
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.CommentCount,
+    tp.PostSummary,
+    CASE 
+        WHEN tp.CommentCount = 0 THEN 'No Comments'
+        WHEN tp.CommentCount < 5 THEN 'Few Comments'
+        ELSE 'Active Discussion'
+    END AS EngagementLevel,
+    CASE 
+        WHEN EXISTS(SELECT 1 FROM Votes v WHERE v.PostId = tp.PostId AND v.VoteTypeId = 2) THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS PopularityLabel
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY;
+
+-- Additionally, check for highly disputed posts
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COUNT(v.Id) AS DisputeCount
+FROM 
+    Posts p
+JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (3, 10)  -- Downvotes and Deletions
+WHERE 
+    p.CreationDate >= CURRENT_DATE - INTERVAL '1 month'
+GROUP BY 
+    p.Id, p.Title
+HAVING 
+    COUNT(v.Id) > 5
+ORDER BY 
+    DisputeCount DESC;

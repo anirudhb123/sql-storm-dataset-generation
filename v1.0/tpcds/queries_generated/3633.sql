@@ -1,0 +1,87 @@
+
+WITH RankedWebSales AS (
+    SELECT
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) as sales_rank
+    FROM
+        web_sales
+    WHERE
+        ws_sales_price > 0
+),
+TopSellingItems AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        SUM(ws_sales_price * ws_quantity) AS total_revenue
+    FROM
+        RankedWebSales
+    WHERE
+        sales_rank <= 5
+    GROUP BY
+        ws_item_sk
+),
+ItemDetails AS (
+    SELECT
+        i.item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        tsi.total_sold,
+        tsi.total_revenue
+    FROM
+        item i
+    JOIN TopSellingItems tsi ON i.i_item_sk = tsi.ws_item_sk
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE
+        c.c_birth_year < 1980
+    GROUP BY
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+SalesWithDemographics AS (
+    SELECT
+        it.item_id,
+        it.i_item_desc,
+        it.i_current_price,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.customer_count,
+        SUM(tsi.total_revenue) AS total_revenue
+    FROM
+        ItemDetails it
+    LEFT JOIN CustomerDemographics cd ON cd.cd_demo_sk IN (
+        SELECT DISTINCT c.c_current_cdemo_sk 
+        FROM customer c
+        WHERE c.c_first_shipto_date_sk IS NOT NULL
+    )
+    GROUP BY
+        it.item_id, it.i_item_desc, it.i_current_price, cd.cd_gender, cd.cd_marital_status, cd.customer_count
+)
+SELECT
+    sd.item_id,
+    sd.i_item_desc,
+    sd.i_current_price,
+    sd.cd_gender,
+    sd.cd_marital_status,
+    sd.customer_count,
+    COALESCE(sd.total_revenue, 0) AS total_revenue
+FROM
+    SalesWithDemographics sd
+WHERE
+    sd.total_revenue > (
+        SELECT AVG(total_revenue)
+        FROM SalesWithDemographics
+    )
+ORDER BY
+    total_revenue DESC;

@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(ws.ws_ship_date_sk, cs.cs_ship_date_sk) AS sale_date,
+        SUM(COALESCE(ws.ws_net_profit, cs.cs_net_profit, ss.ss_net_profit, 0)) AS total_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        c.c_birth_year >= 1970 
+        AND (c.c_current_cdemo_sk IS NOT NULL OR c.c_current_hdemo_sk IS NOT NULL)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, sale_date
+    UNION ALL
+    SELECT 
+        sh.c_customer_sk,
+        sh.c_first_name,
+        sh.c_last_name,
+        d.d_date_sk AS sale_date,
+        SUM(sh.total_profit) + COALESCE(ws.ws_net_profit, 0) AS total_profit
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        date_dim d ON d.d_date_sk = sh.sale_date + 1
+    LEFT JOIN 
+        web_sales ws ON ws.ws_ship_date_sk = d.d_date_sk AND ws.ws_bill_customer_sk = sh.c_customer_sk
+    WHERE 
+        d.d_date < CURRENT_DATE
+    GROUP BY 
+        sh.c_customer_sk, sh.c_first_name, sh.c_last_name, d.d_date_sk
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    COUNT(DISTINCT ws.ws_order_number) AS total_web_orders,
+    COUNT(DISTINCT cs.cs_order_number) AS total_catalog_orders,
+    MAX(s.sale_date) AS last_purchase_date,
+    SUM(s.total_profit) AS overall_profit
+FROM 
+    customer c
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+JOIN 
+    sales_hierarchy s ON c.c_customer_sk = s.c_customer_sk
+GROUP BY 
+    c.c_customer_sk, c.c_first_name, c.c_last_name
+HAVING 
+    overall_profit > (SELECT AVG(total_profit) FROM sales_hierarchy)
+ORDER BY 
+    overall_profit DESC
+LIMIT 10;

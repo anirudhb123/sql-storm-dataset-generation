@@ -1,0 +1,26 @@
+SELECT 
+    a.name AS actor_name, 
+    t.title AS movie_title, 
+    c.kind AS cast_kind, 
+    GROUP_CONCAT(DISTINCT k.keyword) AS keywords, 
+    COUNT(DISTINCT m.company_id) AS company_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    aka_title t ON c.movie_id = t.movie_id
+JOIN 
+    movie_keyword mk ON t.movie_id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_companies m ON t.movie_id = m.movie_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    a.name, t.title, c.kind
+HAVING 
+    COUNT(DISTINCT m.company_id) > 1
+ORDER BY 
+    actor_name, movie_title;

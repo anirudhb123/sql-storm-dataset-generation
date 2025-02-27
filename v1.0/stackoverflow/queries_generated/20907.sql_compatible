@@ -1,0 +1,102 @@
+
+WITH UserStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COALESCE(B.CountBadges, 0) AS BadgeCount,
+        COALESCE(V.TotalVotes, 0) AS TotalVotes,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM
+        Users U
+    LEFT JOIN (
+        SELECT
+            UserId,
+            COUNT(*) AS CountBadges
+        FROM
+            Badges
+        GROUP BY
+            UserId
+    ) B ON U.Id = B.UserId
+    LEFT JOIN (
+        SELECT
+            UserId,
+            COUNT(*) AS TotalVotes
+        FROM
+            Votes
+        GROUP BY
+            UserId
+    ) V ON U.Id = V.UserId
+),
+PostStats AS (
+    SELECT
+        P.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(COALESCE(P.Score, 0)) AS AvgScore
+    FROM
+        Posts P
+    GROUP BY
+        P.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT
+        PH.UserId,
+        COUNT(DISTINCT PH.PostId) AS ClosedPostCount
+    FROM
+        PostHistory PH
+    WHERE
+        PH.PostHistoryTypeId IN (10, 11) 
+    GROUP BY
+        PH.UserId
+),
+UserPerformance AS (
+    SELECT
+        U.UserId,
+        U.DisplayName,
+        U.Reputation,
+        PS.TotalPosts,
+        PS.TotalQuestions,
+        PS.TotalAnswers,
+        US.BadgeCount,
+        US.TotalVotes,
+        COALESCE(CP.ClosedPostCount, 0) AS ClosedPostCount,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS PerformanceRank
+    FROM
+        UserStats US
+    JOIN
+        PostStats PS ON US.UserId = PS.OwnerUserId
+    LEFT JOIN
+        ClosedPosts CP ON US.UserId = CP.UserId
+)
+SELECT
+    U.DisplayName,
+    U.Reputation,
+    U.TotalPosts,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    U.BadgeCount,
+    U.TotalVotes,
+    CASE 
+        WHEN U.ClosedPostCount > 0 THEN 'Active' 
+        ELSE 'Inactive' 
+    END AS UserStatus,
+    STRING_AGG(CONCAT_WS(' - ', P.Title, CAST(P.CreationDate AS DATE), COALESCE(PA.UserDisplayName, 'N/A')), '; ') AS RecentPosts
+FROM
+    UserPerformance U
+LEFT JOIN
+    Posts P ON U.UserId = P.OwnerUserId
+LEFT JOIN
+    Posts PA ON P.AcceptedAnswerId = PA.Id
+WHERE
+    U.Reputation > 100
+GROUP BY
+    U.DisplayName, U.Reputation, U.TotalPosts, U.TotalQuestions, U.TotalAnswers,
+    U.BadgeCount, U.TotalVotes, U.ClosedPostCount
+HAVING
+    COUNT(P.Id) > 1
+ORDER BY
+    U.PerformanceRank,
+    U.TotalPosts DESC;

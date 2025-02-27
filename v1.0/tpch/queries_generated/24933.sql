@@ -1,0 +1,35 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           pg_catalog.row_number() OVER (PARTITION BY s.s_suppkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT sph.s_suppkey, sph.s_name, sph.s_nationkey, sph.s_acctbal, 
+           (s.rank + 1)
+    FROM supplier_hierarchy sph
+    JOIN partsupp ps ON sph.s_suppkey = ps.ps_suppkey
+)
+SELECT 
+    p.p_partkey,
+    MAX(p.p_retailprice) AS max_price,
+    STRING_AGG(DISTINCT s.s_name || ' (Bal: ' || COALESCE(s.s_acctbal::text, 'N/A') || ')', '; ') AS supplier_names,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(l.l_quantity) FILTER (WHERE l.l_discount > 0) AS total_discounts,
+    CASE 
+        WHEN COUNT(DISTINCT o.o_orderkey) > 10 THEN 'High'
+        ELSE 'Low'
+    END AS order_priority_category
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN orders o ON o.o_orderkey = l.l_orderkey
+LEFT JOIN customer c ON c.c_custkey = o.o_custkey
+WHERE (s.s_acctbal > 100 OR s.s_acctbal IS NULL)
+  AND l.l_shipdate >= NOW() - INTERVAL '1 year'
+  AND (p.p_retailprice / NULLIF(ps.ps_supplycost, 0)) > 1
+GROUP BY p.p_partkey
+HAVING MAX(p.p_retailprice) BETWEEN 50 AND 100
+   OR EXISTS (SELECT 1 FROM nation n WHERE n.n_nationkey = s.s_nationkey AND n.n_name LIKE 'A%')
+ORDER BY max_price DESC, p.p_partkey ASC
+LIMIT 50;

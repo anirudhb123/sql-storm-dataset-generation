@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+OrdersWithDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+        COUNT(DISTINCT l.l_suppkey) AS SupplierCount
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS TotalAvailable
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    ORDER BY 
+        TotalAvailable DESC
+    LIMIT 10
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    rs.s_name AS TopSupplier,
+    rs.s_acctbal,
+    ow.TotalRevenue,
+    ow.SupplierCount,
+    CASE 
+        WHEN ow.TotalRevenue IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Present'
+    END AS RevenueStatus
+FROM 
+    part p
+LEFT JOIN 
+    RankedSuppliers rs ON p.p_partkey = rs.ps_partkey AND rs.SupplierRank = 1
+JOIN 
+    TopParts tp ON p.p_partkey = tp.ps_partkey
+LEFT JOIN 
+    OrdersWithDetails ow ON ow.o_orderkey IN (
+        SELECT l.l_orderkey 
+        FROM lineitem l 
+        WHERE l.l_partkey = p.p_partkey
+    )
+WHERE 
+    p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice) 
+        FROM part p2 
+        WHERE p2.p_type = p.p_type
+    )
+ORDER BY 
+    p.p_name;

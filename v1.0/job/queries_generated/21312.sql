@@ -1,0 +1,77 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM aka_title mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        ct.kind AS role
+    FROM cast_info ci
+    JOIN aka_name a ON a.person_id = ci.person_id
+    LEFT JOIN comp_cast_type ct ON ct.id = ci.person_role_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        MAX(CASE WHEN it.info = 'summary' THEN mi.info ELSE NULL END) AS summary,
+        COUNT(DISTINCT l.id) AS total_links
+    FROM movie_info mi
+    JOIN info_type it ON mi.info_type_id = it.id
+    LEFT JOIN movie_link l ON l.movie_id = mi.movie_id
+    GROUP BY mi.movie_id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    cd.actor_name,
+    cd.role,
+    mk.keywords,
+    COALESCE(mid.summary, 'No summary available') AS summary,
+    mid.total_links
+FROM movie_hierarchy mh
+LEFT JOIN cast_details cd ON cd.movie_id = mh.movie_id
+LEFT JOIN movie_keywords mk ON mk.movie_id = mh.movie_id
+LEFT JOIN movie_info_details mid ON mid.movie_id = mh.movie_id
+WHERE 
+    mh.production_year IS NOT NULL
+    AND (cd.role IS NOT NULL OR cd.role IS NULL)
+    AND mk.keywords IS NOT NULL
+ORDER BY 
+    mh.production_year DESC,
+    mh.title ASC
+LIMIT 100;
+
+Explanation of constructs used:
+- Common Table Expressions (CTEs) are used to build a recursive hierarchy of titles (movie_hierarchy) and separate aggregations for cast details, keywords, and movie information.
+- String aggregation is used to concatenate multiple keywords associated with a movie.
+- Conditional aggregation is applied to collect summaries from movie information with `MAX()`.
+- Outer joins are used to gather data and allow null values for the roles and keywords without excluding movies lacking this data.
+- The query includes a complex predicate involving logical conditions on NULL values.
+- The final selection includes an elaborate ordering to provide sorted results by production year and title, with a limit to return only the top 100 results.

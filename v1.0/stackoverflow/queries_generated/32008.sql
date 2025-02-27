@@ -1,0 +1,69 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        Posts p1 ON p2.ParentId = p1.Id
+)
+, UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges,
+        COUNT(b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ph.PostId,
+    ph.Title,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+    COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount,
+    SUM(p.ViewCount) AS TotalViews
+FROM 
+    RecursivePostHierarchy ph
+JOIN 
+    Users u ON ph.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON ph.PostId = c.PostId
+LEFT JOIN 
+    Votes v ON ph.PostId = v.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    ph.Level = 1
+GROUP BY 
+    ph.PostId, ph.Title, u.DisplayName, u.Reputation, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+ORDER BY 
+    SUM(v.VoteTypeId = 2) DESC, -- Sort by upvotes
+    TotalViews DESC
+LIMIT 50;

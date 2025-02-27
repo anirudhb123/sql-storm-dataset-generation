@@ -1,0 +1,57 @@
+
+WITH RECURSIVE Sales_Hierarchy AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_marital_status,
+        cd.cd_gender,
+        COALESCE(SUM(ss.ss_net_profit), 0) AS total_net_profit
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE
+        c.c_birth_year > 1980
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_marital_status, cd.cd_gender
+    UNION ALL
+    SELECT
+        sh.c_customer_sk,
+        sh.c_first_name,
+        sh.c_last_name,
+        sh.cd_marital_status,
+        sh.cd_gender,
+        COALESCE(SUM(ss.ss_net_profit), 0) AS total_net_profit
+    FROM
+        Sales_Hierarchy sh
+    JOIN
+        store_sales ss ON ss.ss_customer_sk = sh.c_customer_sk
+    GROUP BY
+        sh.c_customer_sk, sh.c_first_name, sh.c_last_name, sh.cd_marital_status, sh.cd_gender
+),
+Ranked_Sales AS (
+    SELECT
+        sh.*,
+        RANK() OVER (PARTITION BY sh.cd_gender ORDER BY sh.total_net_profit DESC) AS rank
+    FROM
+        Sales_Hierarchy sh
+)
+SELECT
+    ca.ca_city,
+    COUNT(DISTINCT r.c_customer_sk) AS customer_count,
+    AVG(r.total_net_profit) AS avg_net_profit,
+    STRING_AGG(DISTINCT r.c_first_name || ' ' || r.c_last_name, ', ') AS customer_names
+FROM
+    Ranked_Sales r
+JOIN
+    customer_address ca ON r.c_customer_sk = ca.ca_address_sk
+WHERE
+    r.rank <= 10
+    AND r.total_net_profit IS NOT NULL
+GROUP BY
+    ca.ca_city
+ORDER BY
+    avg_net_profit DESC;

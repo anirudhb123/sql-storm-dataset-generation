@@ -1,0 +1,41 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+    HAVING AVG(ps.ps_supplycost) < 50.00
+),
+OrderStats AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+  HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000.00
+),
+SupplierOrders AS (
+    SELECT s.s_suppkey, s.s_name, o.o_orderkey, o.o_orderdate, os.total_revenue
+    FROM RankedSuppliers s
+    LEFT JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    LEFT JOIN OrderStats os ON l.l_orderkey = os.o_orderkey
+)
+SELECT 
+    p.p_name,
+    s.s_name,
+    s.s_acctbal,
+    os.total_revenue,
+    cast('1998-10-01' as date) - os.o_orderdate AS days_since_order,
+    COALESCE(s.s_acctbal / NULLIF(os.total_revenue, 0), 0) AS balance_to_revenue_ratio
+FROM HighValueParts p
+JOIN SupplierOrders s ON p.p_partkey = l.l_partkey
+JOIN OrderStats os ON l.l_orderkey = os.o_orderkey
+WHERE os.total_revenue IS NOT NULL
+AND s.rn = 1
+ORDER BY s.s_acctbal DESC, p.p_retailprice ASC;

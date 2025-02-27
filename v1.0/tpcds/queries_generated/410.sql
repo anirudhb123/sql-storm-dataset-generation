@@ -1,0 +1,92 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+SalesSummary AS (
+    SELECT 
+        i.i_item_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_sales_count,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_net_profit IS NOT NULL
+    GROUP BY 
+        i.i_item_id
+),
+HighEarningSales AS (
+    SELECT 
+        item_id,
+        total_sales_count,
+        total_net_profit,
+        avg_net_profit,
+        CASE 
+            WHEN avg_net_profit > 100 THEN 'High'
+            WHEN avg_net_profit BETWEEN 50 AND 100 THEN 'Medium'
+            ELSE 'Low'
+        END AS earnings_category
+    FROM 
+        SalesSummary
+    WHERE 
+        total_sales_count > 5
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name
+    FROM 
+        customer c 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+TopSellingItems AS (
+    SELECT 
+        rws.ws_item_sk,
+        SUM(rws.ws_quantity) AS total_quantity,
+        SUM(rws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales rws
+    JOIN 
+        RankedSales rs ON rws.ws_item_sk = rs.ws_item_sk
+    WHERE 
+        rs.rank_profit <= 5
+    GROUP BY 
+        rws.ws_item_sk
+)
+SELECT 
+    ci.i_item_id,
+    ci.i_item_desc,
+    ch.earnings_category,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    SUM(ts.total_quantity) AS total_item_sold,
+    SUM(ts.total_profit) AS total_revenue
+FROM 
+    item ci
+LEFT JOIN 
+    HighEarningSales ch ON ci.i_item_sk = ch.item_id
+LEFT JOIN 
+    TopSellingItems ts ON ci.i_item_sk = ts.ws_item_sk
+LEFT JOIN 
+    CustomerDemographics cd ON cd.c_customer_id = (SELECT ws.ws_bill_customer_sk FROM web_sales ws WHERE ws.ws_item_sk = ci.i_item_sk LIMIT 1)
+GROUP BY 
+    ci.i_item_id, ci.i_item_desc, ch.earnings_category, cd.cd_gender, cd.cd_marital_status
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

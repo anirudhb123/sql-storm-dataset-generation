@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+UserVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY v.UserId
+),
+ClosedPosts AS (
+    SELECT DISTINCT
+        ph.PostId,
+        MIN(ph.CreationDate) as FirstClosedDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY ph.PostId
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        up.VoteCount AS UserVoteCount,
+        COALESCE(cp.FirstClosedDate, 'No Closure') AS ClosureDetails,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount
+    FROM RankedPosts rp
+    LEFT JOIN UserVotes up ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = up.UserId)
+    LEFT JOIN ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE rp.PostRank = 1
+)
+SELECT 
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.UserVoteCount,
+    pd.ClosureDetails,
+    pd.CommentCount,
+    CASE 
+        WHEN pd.Score IS NULL OR pd.Score < 0 THEN 'Low Score'
+        WHEN pd.ViewCount >= 1000 THEN 'Popular Post'
+        ELSE 'Moderate Engagement'
+    END AS EngagementLevel,
+    STRING_AGG(CONCAT('Post ', pd.PostId, ' - ', pd.Title), '; ') AS RelatedPostsSummary
+FROM PostDetails pd
+LEFT JOIN PostLinks pl ON pd.PostId = pl.PostId OR pd.PostId = pl.RelatedPostId
+GROUP BY pd.Title, pd.CreationDate, pd.Score, pd.ViewCount, pd.UserVoteCount, pd.ClosureDetails, pd.CommentCount
+HAVING COUNT(pl.Id) > 0 OR MAX(pd.ViewCount) BETWEEN 500 AND 1000
+ORDER BY pd.Score DESC, pd.CommentCount DESC
+LIMIT 10 OFFSET 5;

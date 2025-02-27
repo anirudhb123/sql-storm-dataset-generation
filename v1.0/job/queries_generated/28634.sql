@@ -1,0 +1,57 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ak.name ORDER BY ak.name) AS aka_names,
+        GROUP_CONCAT(DISTINCT kw.keyword ORDER BY kw.keyword) AS keywords,
+        COUNT(DISTINCT cc.subject_id) AS complete_cast_count
+    FROM 
+        title t
+    LEFT JOIN aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id
+),
+PersonMovieDetails AS (
+    SELECT 
+        p.id AS person_id,
+        p.name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count,
+        MIN(t.production_year) AS first_movie_year,
+        MAX(t.production_year) AS last_movie_year
+    FROM 
+        name p
+    JOIN cast_info ci ON p.id = ci.person_id
+    JOIN title t ON ci.movie_id = t.id
+    WHERE 
+        p.gender = 'F'
+    GROUP BY 
+        p.id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.aka_names,
+    md.keywords,
+    md.complete_cast_count,
+    pm.name AS main_actor_name,
+    pm.movies_count,
+    pm.first_movie_year,
+    pm.last_movie_year
+FROM 
+    MovieDetails md
+JOIN 
+    complete_cast c ON md.movie_id = c.movie_id
+JOIN 
+    person_info pi ON c.subject_id = pi.person_id
+JOIN 
+    PersonMovieDetails pm ON pi.person_id = pm.person_id
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

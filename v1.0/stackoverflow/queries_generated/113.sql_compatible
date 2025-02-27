@@ -1,0 +1,113 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        BadgeCount, 
+        GoldBadges, 
+        SilverBadges, 
+        BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY BadgeCount DESC, GoldBadges DESC) AS Rank
+    FROM 
+        UserBadges
+)
+SELECT 
+    U.DisplayName AS UserName,
+    COALESCE(P.QuestionCount, 0) AS TotalQuestions,
+    COALESCE(A.AnswerCount, 0) AS TotalAnswers,
+    UB.BadgeCount AS TotalBadges,
+    CASE 
+        WHEN UB.BadgeCount > 10 THEN 'Veteran'
+        WHEN UB.BadgeCount BETWEEN 5 AND 10 THEN 'Experienced'
+        ELSE 'Novice'
+    END AS ExperienceLevel,
+    CASE 
+        WHEN UB.GoldBadges > 0 THEN 'Yes' 
+        ELSE 'No' 
+    END AS HasGoldBadge,
+    P.AvgScore,
+    (SELECT AVG(Score) FROM Posts WHERE OwnerUserId = U.Id) AS UserAvgPostScore
+FROM 
+    Users U
+LEFT JOIN (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS QuestionCount,
+        AVG(Score) AS AvgScore
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        OwnerUserId
+) P ON U.Id = P.OwnerUserId
+LEFT JOIN (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS AnswerCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 2
+    GROUP BY 
+        OwnerUserId
+) A ON U.Id = A.OwnerUserId
+JOIN UserBadges UB ON U.Id = UB.UserId
+WHERE 
+    A.AnswerCount IS NULL OR A.AnswerCount > 5
+ORDER BY 
+    UB.BadgeCount DESC, U.Reputation DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY
+UNION ALL
+SELECT 
+    'Total' AS UserName,
+    SUM(COALESCE(P.QuestionCount, 0)) AS TotalQuestions,
+    SUM(COALESCE(A.AnswerCount, 0)) AS TotalAnswers,
+    SUM(UB.BadgeCount) AS TotalBadges,
+    NULL AS ExperienceLevel,
+    NULL AS HasGoldBadge,
+    AVG(P.AvgScore) AS AvgScore,
+    NULL AS UserAvgPostScore
+FROM 
+    Users U
+LEFT JOIN (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS QuestionCount,
+        AVG(Score) AS AvgScore
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        OwnerUserId
+) P ON U.Id = P.OwnerUserId
+LEFT JOIN (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS AnswerCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 2
+    GROUP BY 
+        OwnerUserId
+) A ON U.Id = A.OwnerUserId
+JOIN UserBadges UB ON U.Id = UB.UserId
+GROUP BY
+    UB.BadgeCount;

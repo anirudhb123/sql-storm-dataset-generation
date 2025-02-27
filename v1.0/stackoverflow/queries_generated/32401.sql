@@ -1,0 +1,52 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT Id, Reputation, CreationDate, LastAccessDate, DisplayName,
+           1 AS Level, 
+           CAST(DisplayName AS VARCHAR(255)) AS Path
+    FROM Users
+    WHERE Reputation > 1000
+
+    UNION ALL
+
+    SELECT u.Id, u.Reputation, u.CreationDate, u.LastAccessDate, u.DisplayName,
+           urc.Level + 1 AS Level,
+           CAST(urc.Path || ' -> ' || u.DisplayName AS VARCHAR(255)) AS Path
+    FROM Users u
+    JOIN UserReputationCTE urc ON u.Reputation > urc.Reputation
+    WHERE urc.Level < 5
+),
+PostDetails AS (
+    SELECT p.Id AS PostId, p.Title, p.Score, p.ViewCount, p.CreationDate,
+           p.OwnerUserId, p.Body, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPost
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserVoteDetails AS (
+    SELECT v.UserId, COUNT(v.Id) AS VoteCount, SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY v.UserId
+),
+ClosedPosts AS (
+    SELECT p.Id, p.Title, ph.CreationDate AS ClosedDate,
+           STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    LEFT JOIN CloseReasonTypes cr ON CAST(ph.Comment AS INT) = cr.Id
+    GROUP BY p.Id, p.Title, ph.CreationDate
+)
+SELECT 
+    ur.DisplayName AS UserDisplayName,
+    SUM(p.ViewCount) AS TotalViews,
+    COUNT(DISTINCT p.PostId) AS TotalPosts,
+    AVG(p.Score) AS AvgPostScore,
+    COALESCE(ud.VoteCount, 0) AS TotalVotes,
+    STRING_AGG(DISTINCT cp.Title || ' (Closed on: ' || cp.ClosedDate || ' due to: ' || COALESCE(cp.CloseReasons, 'N/A') || ')', '; ') AS ClosedPostTitles
+FROM UserReputationCTE ur
+JOIN PostDetails p ON ur.Id = p.OwnerUserId
+LEFT JOIN UserVoteDetails ud ON ur.Id = ud.UserId
+LEFT JOIN ClosedPosts cp ON p.PostId = cp.Id
+GROUP BY ur.DisplayName
+HAVING SUM(p.ViewCount) > 1000
+ORDER BY TotalViews DESC;

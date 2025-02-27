@@ -1,0 +1,57 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ai.person_id,
+        ak.name,
+        0 AS level
+    FROM 
+        cast_info ai
+    JOIN 
+        aka_name ak ON ai.person_id = ak.person_id
+    WHERE 
+        ak.name IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ca.person_id,
+        ak.name,
+        ah.level + 1
+    FROM 
+        actor_hierarchy ah 
+    JOIN 
+        cast_info ca ON ah.person_id = ca.movie_id
+    JOIN 
+        aka_name ak ON ca.person_id = ak.person_id
+)
+SELECT 
+    t.title AS movie_title,
+    t.production_year,
+    ak.name AS actor_name,
+    ah.level AS actor_level,
+    ARRAY_AGG(DISTINCT co.name) AS production_companies,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    SUM(CASE 
+        WHEN mii.info_type_id IS NOT NULL THEN 1 
+        ELSE 0 
+    END) AS info_count
+FROM 
+    title t
+LEFT JOIN 
+    cast_info ci ON t.id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN 
+    movie_info_idx mii ON t.id = mii.movie_id
+GROUP BY 
+    t.id, t.title, t.production_year, ak.name, ah.level
+ORDER BY 
+    t.production_year DESC, keyword_count DESC, actor_level ASC
+LIMIT 50;

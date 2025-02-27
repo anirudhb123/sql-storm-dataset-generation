@@ -1,0 +1,66 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        COALESCE(SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName,
+    u.TotalUpVotes,
+    u.TotalDownVotes,
+    u.TotalComments,
+    pd.PostId,
+    pd.Title,
+    pd.CommentCount,
+    pd.TotalBounty
+FROM 
+    UserActivity u
+INNER JOIN 
+    PostDetails pd ON u.UserId = pd.PostId
+WHERE 
+    u.TotalUpVotes > u.TotalDownVotes
+    AND pd.CommentCount > 5
+    AND pd.PostRank <= 3
+ORDER BY 
+    u.TotalUpVotes DESC, pd.TotalBounty DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Aggregate' AS DisplayName,
+    SUM(TotalUpVotes) AS TotalUpVotes,
+    SUM(TotalDownVotes) AS TotalDownVotes,
+    SUM(TotalComments) AS TotalComments,
+    NULL AS PostId,
+    NULL AS Title,
+    NULL AS CommentCount,
+    NULL AS TotalBounty
+FROM 
+    UserActivity
+WHERE 
+    TotalUpVotes > TotalDownVotes;

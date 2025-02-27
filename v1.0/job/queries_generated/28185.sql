@@ -1,0 +1,44 @@
+WITH StringMetrics AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS aka_name,
+        a.imdb_index AS aka_imdb_index,
+        t.title AS movie_title,
+        t.production_year,
+        p.name AS person_name,
+        LENGTH(a.name) AS name_length,
+        LENGTH(t.title) AS title_length,
+        LEVENSHTEIN(a.name, t.title) AS name_title_distance
+    FROM aka_name AS a
+    JOIN cast_info AS ci ON a.person_id = ci.person_id
+    JOIN title AS t ON ci.movie_id = t.id
+    JOIN name AS p ON a.person_id = p.imdb_id
+    WHERE a.name IS NOT NULL 
+      AND t.title IS NOT NULL 
+      AND t.production_year BETWEEN 2000 AND 2023
+),
+TopMetrics AS (
+    SELECT 
+        aka_id,
+        aka_name,
+        movie_title,
+        production_year,
+        person_name,
+        name_length,
+        title_length,
+        name_title_distance,
+        RANK() OVER (PARTITION BY production_year ORDER BY name_title_distance ASC) AS rank
+    FROM StringMetrics
+)
+SELECT 
+    t.production_year,
+    COUNT(*) AS total_entries,
+    AVG(name_length) AS avg_name_length,
+    AVG(title_length) AS avg_title_length,
+    MIN(name_title_distance) AS min_distance,
+    MAX(name_title_distance) AS max_distance,
+    STRING_AGG(CONCAT(person_name, ' (', aka_name, ')'), ', ') AS similar_names
+FROM TopMetrics AS t
+WHERE rank <= 10
+GROUP BY t.production_year
+ORDER BY t.production_year DESC;

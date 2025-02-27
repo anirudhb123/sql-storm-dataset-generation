@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT rp.Id) AS PostCount,
+    COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+    COALESCE(ub.GoldBadgeCount, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadgeCount, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadgeCount, 0) AS BronzeBadges,
+    SUM(rp.UpVotes) AS TotalUpVotes,
+    SUM(rp.DownVotes) AS TotalDownVotes
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = u.Id
+WHERE 
+    u.Reputation > 500
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(DISTINCT rp.Id) > 0
+ORDER BY 
+    TotalUpVotes DESC, PostCount DESC
+LIMIT 10;

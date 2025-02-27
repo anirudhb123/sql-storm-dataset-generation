@@ -1,0 +1,53 @@
+
+WITH AddressCounts AS (
+    SELECT 
+        ca_state, 
+        COUNT(*) as address_count,
+        STRING_AGG(ca_city, ', ') AS cities,
+        STRING_AGG(DISTINCT ca_street_type) AS street_types
+    FROM customer_address
+    GROUP BY ca_state
+),
+CustomerCounts AS (
+    SELECT 
+        cd_gender, 
+        COUNT(*) as demographic_count
+    FROM customer_demographics
+    GROUP BY cd_gender
+),
+ItemSummaries AS (
+    SELECT 
+        i_category, 
+        COUNT(*) as item_count, 
+        AVG(i_current_price) as avg_price,
+        MAX(i_current_price) as max_price,
+        MIN(i_current_price) as min_price
+    FROM item
+    GROUP BY i_category
+),
+SalesSummary AS (
+    SELECT 
+        COUNT(ss_ticket_number) AS total_sales,
+        SUM(ss_ext_sales_price) AS total_revenue,
+        AVG(ss_net_profit) AS avg_net_profit
+    FROM store_sales
+)
+SELECT 
+    ac.ca_state,
+    ac.address_count,
+    ac.cities,
+    ac.street_types,
+    cc.cd_gender,
+    cc.demographic_count,
+    is.item_count,
+    is.avg_price,
+    is.max_price,
+    is.min_price,
+    ss.total_sales,
+    ss.total_revenue,
+    ss.avg_net_profit
+FROM AddressCounts ac
+JOIN CustomerCounts cc ON cc.demographic_count > 100
+JOIN ItemSummaries is ON is.item_count > 50
+JOIN SalesSummary ss ON ss.total_sales > 1000
+ORDER BY ac.address_count DESC, cc.demographic_count DESC;

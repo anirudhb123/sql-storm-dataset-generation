@@ -1,0 +1,94 @@
+WITH RankedOrders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_orderdate,
+        o_orderstatus,
+        o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS rn
+    FROM 
+        orders
+    WHERE 
+        o_orderdate >= DATEADD(year, -1, GETDATE())
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        MIN(ps.ps_supplycost) AS min_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+SelectedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        ROUND(AVG(ps.ps_supplycost), 2) AS avg_supplycost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p1.p_retailprice) FROM part p1)
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+)
+SELECT 
+    c.c_name,
+    c.c_address,
+    cus.total_orders,
+    cus.total_spent,
+    cus.last_order_date,
+    po.p_name,
+    po.avg_supplycost,
+    ss.total_availqty,
+    ss.min_supplycost,
+    RANK() OVER (PARTITION BY c.c_custkey ORDER BY cus.total_spent DESC) AS spending_rank
+FROM 
+    CustomerStats cus
+JOIN 
+    customer c ON cus.c_custkey = c.c_custkey
+LEFT JOIN 
+    SelectedParts po ON po.p_partkey IN (
+        SELECT 
+            l.l_partkey
+        FROM 
+            lineitem l
+        JOIN 
+            rankedorders r ON l.l_orderkey = r.o_orderkey
+        WHERE 
+            r.rn <= 5
+    ) 
+LEFT JOIN 
+    SupplierSummary ss ON ss.s_suppkey IN (
+        SELECT 
+            ps.ps_suppkey
+        FROM 
+            partsupp ps
+        WHERE 
+            ps.ps_availqty > 100
+    )
+WHERE 
+    c.c_acctbal IS NOT NULL
+    AND cus.total_orders > 0
+ORDER BY 
+    c.c_name ASC,
+    cus.total_spent DESC;

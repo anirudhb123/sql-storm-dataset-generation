@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 year'
+    AND 
+        p.PostTypeId = 1 
+), 
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgeClass,
+        AVG(p.Score) AS AvgPostScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+), 
+TopQuestions AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.OwnerUserId,
+        um.Reputation,
+        ROW_NUMBER() OVER (ORDER BY rp.ViewCount DESC) AS ViewRank
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserMetrics um ON rp.OwnerUserId = um.UserId
+)
+SELECT 
+    tq.PostId,
+    tq.Title,
+    tq.ViewCount,
+    tq.Reputation,
+    CASE 
+        WHEN tq.Reputation > 1000 THEN 'High Reputation'
+        WHEN tq.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationCategory,
+    COALESCE(pht.Name, 'No History') AS PostHistoryType,
+    COALESCE(+ (SELECT COUNT(h.PostId)
+                FROM PostHistory h
+                WHERE h.PostId = tq.PostId
+                  AND h.CreationDate > cast('2024-10-01' as date) - INTERVAL '30 days'), 0) AS RecentHistoryCount,
+    CASE 
+        WHEN tq.ViewCount IS NULL THEN NULL
+        ELSE CASE 
+            WHEN tq.ViewCount >= 1000 THEN 'Popular'
+            ELSE 'Less Popular'
+            END
+    END AS Popularity
+FROM 
+    TopQuestions tq
+LEFT JOIN 
+    PostHistoryTypes pht ON pht.Id = (SELECT TOP 1 ph.PostHistoryTypeId 
+                                        FROM PostHistory ph 
+                                        WHERE ph.PostId = tq.PostId 
+                                        ORDER BY ph.CreationDate DESC)
+WHERE 
+    tq.ViewRank <= 10 
+ORDER BY 
+    tq.ViewCount DESC;

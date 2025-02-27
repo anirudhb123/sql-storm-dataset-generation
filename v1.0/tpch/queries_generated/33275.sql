@@ -1,0 +1,45 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 1 AS hierarchy_level
+    FROM customer c
+    WHERE c.c_acctbal > 1000
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, ch.hierarchy_level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal > 500
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderstatus, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderstatus
+),
+SuppliersWithParts AS (
+    SELECT ps.ps_partkey, s.s_suppkey, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_suppkey
+),
+FrequentParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.total_avail_qty) AS total_qty
+    FROM part p
+    JOIN SuppliersWithParts ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.total_avail_qty) > 1000
+)
+SELECT r.r_name, n.n_name, SUM(od.net_revenue) AS total_revenue,
+       COUNT(DISTINCT ch.c_custkey) AS unique_customers,
+       COUNT(DISTINCT fp.p_partkey) AS popular_parts
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN CustomerHierarchy ch ON n.n_nationkey = ch.c_nationkey
+LEFT JOIN OrderDetails od ON ch.c_custkey = od.o_orderkey
+LEFT JOIN FrequentParts fp ON od.o_orderkey = fp.p_partkey
+WHERE od.o_orderstatus = 'F'
+  AND (fp.total_qty IS NOT NULL OR fp.total_qty IS NULL)
+GROUP BY r.r_name, n.n_name
+ORDER BY total_revenue DESC
+LIMIT 50;

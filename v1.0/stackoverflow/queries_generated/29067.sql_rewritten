@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.ViewCount
+),
+TitleAnalysis AS (
+    SELECT 
+        PostId,
+        Title,
+        LENGTH(Title) AS TitleLength,
+        REGEXP_COUNT(Title, '[A-Za-z]') AS AlphaCount,
+        REGEXP_COUNT(Title, '[0-9]') AS DigitCount,
+        REGEXP_COUNT(Title, '[^A-Za-z0-9 ]') AS SpecialCharCount
+    FROM 
+        RankedPosts
+),
+FinalBenchmark AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        ta.TitleLength,
+        ta.AlphaCount,
+        ta.DigitCount,
+        ta.SpecialCharCount,
+        rp.UpVotes, 
+        rp.DownVotes, 
+        rp.CommentCount,
+        rp.ViewCount,
+        CASE 
+            WHEN rp.ViewRank <= 10 THEN 'Top 10 Views'
+            WHEN rp.ViewRank <= 50 THEN 'Top 50 Views'
+            ELSE 'Lower Ranked'
+        END AS ViewCategory
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TitleAnalysis ta ON rp.PostId = ta.PostId
+)
+SELECT 
+    ViewCategory,
+    AVG(TitleLength) AS AvgTitleLength,
+    AVG(AlphaCount) AS AvgAlphaCount,
+    AVG(DigitCount) AS AvgDigitCount,
+    AVG(SpecialCharCount) AS AvgSpecialCharCount,
+    SUM(UpVotes) AS TotalUpVotes,
+    SUM(DownVotes) AS TotalDownVotes,
+    SUM(CommentCount) AS TotalComments,
+    SUM(ViewCount) AS TotalViews
+FROM 
+    FinalBenchmark
+GROUP BY 
+    ViewCategory
+ORDER BY 
+    ViewCategory;

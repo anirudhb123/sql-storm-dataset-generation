@@ -1,0 +1,103 @@
+WITH RecursiveVotes AS (
+    SELECT 
+        P.Id AS PostId,
+        V.UserId,
+        V.VoteTypeId,
+        ROW_NUMBER() OVER (PARTITION BY V.UserId ORDER BY V.CreationDate DESC) AS VoteRank
+    FROM 
+        Votes V
+    JOIN 
+        Posts P ON V.PostId = P.Id
+    WHERE 
+        V.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 year' -- votes from the last year
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(*) AS CloseCount,
+        MIN(PH.CreationDate) AS FirstCloseDate
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId = 10 -- Closed posts
+    GROUP BY 
+        P.Id
+),
+TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(PC.CloseCount) AS TotalClosures
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    LEFT JOIN 
+        ClosedPosts PC ON P.Id = PC.PostId
+    GROUP BY 
+        T.TagName
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT PC.PostId) AS AnsweredQuestions
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Posts AP ON AP.AcceptedAnswerId = P.Id
+    LEFT JOIN 
+        ClosedPosts PC ON P.Id = PC.PostId
+    WHERE 
+        P.PostTypeId = 2 AND -- answered posts
+        P.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '6 months' -- in the last 6 months
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    T.TagName,
+    TS.PostCount,
+    TS.TotalClosures,
+    UR.BadgeCount,
+    UR.GoldBadges,
+    UR.SilverBadges,
+    UR.BronzeBadges,
+    R.VoteRank
+FROM 
+    UserReputation UR
+INNER JOIN 
+    TopUsers U ON UR.UserId = U.UserId
+LEFT JOIN 
+    TagStatistics TS ON TS.PostCount > 0
+LEFT JOIN 
+    RecursiveVotes R ON R.UserId = U.UserId
+WHERE 
+    U.Reputation > 1000 -- Filter for users with reputation greater than 1000
+    AND (TS.TotalClosures IS NULL OR TS.TotalClosures < 3) -- Less than 3 closures
+ORDER BY 
+    U.Reputation DESC, 
+    U.DisplayName ASC
+LIMIT 50; -- Limit results to top 50 users

@@ -1,0 +1,66 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_web_site_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        AVG(ws_net_profit) AS avg_net_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (
+            SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01'
+        ) AND (
+            SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-31'
+        )
+    GROUP BY 
+        ws_web_site_sk
+),
+customer_demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_purchase_estimate > 500
+),
+most_profitable_items AS (
+    SELECT 
+        i_item_sk,
+        i_item_id,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    JOIN 
+        item ON ws_item_sk = i_item_sk
+    GROUP BY 
+        i_item_sk, i_item_id
+    ORDER BY 
+        total_profit DESC
+    LIMIT 10
+)
+SELECT 
+    w.warehouse_name,
+    SUM(ss.total_sales) AS total_web_sales,
+    SUM(ss.order_count) AS total_orders,
+    COUNT(DISTINCT cd.cd_demo_sk) AS unique_customers,
+    mpi.i_item_id,
+    mpi.total_profit
+FROM 
+    warehouse w
+LEFT JOIN 
+    sales_summary ss ON ss.ws_web_site_sk = w.w_warehouse_sk
+LEFT JOIN 
+    customer c ON c.c_current_addr_sk = w.w_warehouse_sk
+LEFT JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+LEFT JOIN 
+    most_profitable_items mpi ON TRUE
+GROUP BY 
+    w.warehouse_name, mpi.i_item_id
+ORDER BY 
+    total_web_sales DESC, total_profit DESC;

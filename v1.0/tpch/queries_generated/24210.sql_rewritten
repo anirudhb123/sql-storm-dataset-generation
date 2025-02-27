@@ -1,0 +1,52 @@
+WITH ranked_part AS (
+    SELECT p.*, 
+           ROW_NUMBER() OVER (PARTITION BY p_type ORDER BY p_retailprice DESC) as price_rank
+    FROM part p
+    WHERE p_size IS NOT NULL AND p_retailprice > 0
+),
+customer_summary AS (
+    SELECT c.c_custkey, 
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer WHERE c_acctbal IS NOT NULL)
+    GROUP BY c.c_custkey
+),
+supplier_stats AS (
+    SELECT s.s_nationkey,
+           COUNT(DISTINCT ps.ps_partkey) AS unique_parts,
+           SUM(ps.ps_availqty) AS total_avail_qty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_nationkey
+),
+nations AS (
+    SELECT n.n_nationkey,
+           n.n_name,
+           r.r_name AS region_name,
+           COALESCE(s.total_avail_qty, 0) AS total_avail_qty
+    FROM nation n
+    FULL OUTER JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier_stats s ON n.n_nationkey = s.s_nationkey
+)
+SELECT r.r_name, 
+       p.p_type,
+       COUNT(DISTINCT c.c_custkey) AS customer_count,
+       AVG(cs.total_spent) AS avg_spent,
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned_quantity,
+       SUM(ps.ps_supplycost * l.l_quantity) AS total_supply_cost,
+       STRING_AGG(DISTINCT p.p_name, '; ') AS part_names
+FROM ranked_part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN nations r ON c.c_nationkey = r.n_nationkey
+LEFT JOIN customer_summary cs ON c.c_custkey = cs.c_custkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+WHERE r.total_avail_qty > 0 
+  AND (c.c_mktsegment = 'BUILDING' OR c.c_mktsegment IS NULL)
+  AND coalesce(o.o_orderdate, '2000-01-01') < '1997-10-01'
+GROUP BY r.r_name, p.p_type
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY avg_spent DESC, r.r_name ASC;

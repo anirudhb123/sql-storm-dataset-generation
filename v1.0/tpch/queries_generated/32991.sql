@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierRank AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey,
+           ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+NationalSales AS (
+    SELECT n.n_nationkey, n.n_name, SUM(o.o_totalprice) AS total_sales
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+SalesData AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           COALESCE(SUM(l.l_quantity * (1 - l.l_discount)), 0) AS total_qty_sold,
+           COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+           COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount) * (1 + l.l_tax)), 0) AS total_revenue_tax_inclusive
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+),
+TopSellingParts AS (
+    SELECT sd.*, RANK() OVER (ORDER BY sd.total_qty_sold DESC) AS part_rank
+    FROM SalesData sd
+    WHERE sd.total_qty_sold > 100
+),
+SupplierPerformance AS (
+    SELECT sr.s_suppkey, sr.s_name, sr.s_acctbal, ns.total_sales,
+           CASE 
+               WHEN sr.rank <= 5 THEN 'Top Supplier'
+               ELSE 'Other Supplier'
+           END AS performance_category
+    FROM SupplierRank sr
+    LEFT JOIN NationalSales ns ON sr.n_nationkey = ns.n_nationkey
+)
+SELECT tsp.p_partkey, tsp.p_name, tsp.p_brand, tsp.p_retailprice, 
+       tsp.total_qty_sold, tsp.total_revenue, tsp.total_revenue_tax_inclusive,
+       sp.s_name AS supplier_name, sp.performance_category
+FROM TopSellingParts tsp
+JOIN partsupp ps ON tsp.p_partkey = ps.ps_partkey
+JOIN SupplierPerformance sp ON ps.ps_suppkey = sp.s_suppkey
+WHERE sp.total_sales > 10000 OR sp.performance_category = 'Top Supplier'
+ORDER BY tsp.total_qty_sold DESC, sp.performance_category;

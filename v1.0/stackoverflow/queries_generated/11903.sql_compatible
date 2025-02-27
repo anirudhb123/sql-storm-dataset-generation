@@ -1,0 +1,49 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounties,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.AnswerCount) AS TotalAnswers,
+        AVG(CAST(p.CreationDate AS FLOAT)) AS AvgPostAge
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.BadgeCount,
+    u.TotalBounties,
+    u.Upvotes,
+    u.Downvotes,
+    COALESCE(ps.PostCount, 0) AS PostCount,
+    COALESCE(ps.TotalScore, 0) AS TotalScore,
+    COALESCE(ps.TotalViews, 0) AS TotalViews,
+    COALESCE(ps.TotalAnswers, 0) AS TotalAnswers,
+    COALESCE(ps.AvgPostAge, 0) AS AvgPostAge
+FROM 
+    UserStats u
+LEFT JOIN 
+    PostStats ps ON u.UserId = ps.OwnerUserId
+ORDER BY 
+    u.TotalBounties DESC, u.BadgeCount DESC, u.Upvotes DESC;

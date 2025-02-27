@@ -1,0 +1,68 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) as rn
+    FROM orders o
+    WHERE o.o_orderdate < CURRENT_DATE
+),
+high_value_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+customer_order_counts AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING COUNT(DISTINCT o.o_orderkey) > 0
+),
+order_line_summary AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate > DATEADD(month, -3, CURRENT_DATE)
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    c.c_name AS customer_name,
+    o.total_price,
+    ol.unique_parts,
+    ol.net_revenue,
+    CASE 
+        WHEN o.o_orderstatus = 'F' THEN 'Completed'
+        WHEN o.o_orderstatus = 'O' THEN 'Pending'
+        ELSE 'Other Status'
+    END AS order_status,
+    ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY ol.net_revenue DESC) AS order_rank
+FROM ranked_orders o
+LEFT JOIN order_line_summary ol ON o.o_orderkey = ol.l_orderkey
+LEFT JOIN high_value_suppliers s ON s.s_suppkey = (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps 
+    WHERE ps.ps_partkey = (
+        SELECT l.l_partkey 
+        FROM lineitem l 
+        WHERE l.l_orderkey = o.o_orderkey 
+        LIMIT 1
+    ) 
+    LIMIT 1
+)
+JOIN customer c ON o.o_custkey = c.c_custkey
+WHERE ol.unique_parts IS NOT NULL
+AND (o.o_totalprice > 100 OR ol.net_revenue > 500)
+ORDER BY o.o_orderkey DESC, order_rank;

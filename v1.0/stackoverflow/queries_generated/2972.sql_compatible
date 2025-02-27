@@ -1,0 +1,59 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS QuestionCount,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS AnswerCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 9 
+    WHERE U.Reputation > 100
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '|')) AS TagName,
+        COUNT(P.Id) AS UsageCount
+    FROM Posts P
+    JOIN Tags T ON T.Id = ANY(string_to_array(P.Tags, '<>'))
+    GROUP BY TagName
+    ORDER BY UsageCount DESC
+    LIMIT 10 
+),
+
+PostHistoryData AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        MAX(PH.CreationDate) AS LastModified,
+        STRING_AGG(PH.UserDisplayName, ', ') AS Editors
+    FROM PostHistory PH
+    GROUP BY PH.PostId, PH.PostHistoryTypeId
+)
+
+SELECT 
+    US.DisplayName AS UserName,
+    US.Reputation,
+    US.TotalPosts,
+    US.QuestionCount,
+    US.AnswerCount,
+    PT.TagName,
+    PT.UsageCount,
+    PHD.LastModified,
+    PHD.Editors
+FROM UserStats US
+LEFT OUTER JOIN PopularTags PT ON PT.TagName IN (
+    SELECT UNNEST(string_to_array(
+        (SELECT Tags FROM Posts WHERE OwnerUserId = US.UserId LIMIT 1), '|'))
+)
+LEFT JOIN PostHistoryData PHD ON US.TotalPosts = (
+    SELECT COUNT(*) FROM Posts WHERE OwnerUserId = US.UserId
+)
+WHERE US.ReputationRank <= 10
+ORDER BY US.Reputation DESC, PT.UsageCount DESC;

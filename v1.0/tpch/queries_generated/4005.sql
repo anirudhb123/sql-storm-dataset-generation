@@ -1,0 +1,62 @@
+WITH supplier_details AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+high_value_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+ranked_orders AS (
+    SELECT 
+        hvo.o_orderkey,
+        hvo.total_value,
+        ROW_NUMBER() OVER (ORDER BY hvo.total_value DESC) AS order_rank
+    FROM 
+        high_value_orders hvo
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT COALESCE(s.s_suppkey, 0)) AS supplier_count,
+    SUM(sd.total_supply_cost) AS total_supplier_cost,
+    AVG(ru.total_value) AS avg_high_value_order,
+    MAX(ru.total_value) AS max_high_value_order
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    supplier_details sd ON s.s_suppkey = sd.s_suppkey
+LEFT JOIN 
+    ranked_orders ru ON s.s_suppkey IN (
+        SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (
+            SELECT p.p_partkey FROM part p WHERE p.p_size > 20
+        )
+    )
+GROUP BY 
+    r.r_name
+ORDER BY 
+    supplier_count DESC, total_supplier_cost DESC
+LIMIT 10;

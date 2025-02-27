@@ -1,0 +1,73 @@
+WITH UserPosts AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+RecentPostActivity AS (
+    SELECT 
+        p.OwnerUserId, 
+        p.Title, 
+        p.CreationDate, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS ActivityRank
+    FROM 
+        Posts p
+    WHERE 
+        p.LastActivityDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+TopUsers AS (
+    SELECT 
+        up.UserId,
+        up.DisplayName,
+        up.PostCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        COALESCE(rpa.Title, 'No recent activity') AS RecentPostTitle,
+        COALESCE(rpa.CreationDate, 'N/A') AS RecentPostDate
+    FROM 
+        UserPosts up
+    LEFT JOIN 
+        UserBadges ub ON up.UserId = ub.UserId
+    LEFT JOIN 
+        RecentPostActivity rpa ON up.UserId = rpa.OwnerUserId
+    WHERE 
+        up.PostCount > 10
+    ORDER BY 
+        up.PostCount DESC
+)
+SELECT 
+    UserId,
+    DisplayName,
+    PostCount,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    RecentPostTitle,
+    RecentPostDate
+FROM 
+    TopUsers
+WHERE 
+    GoldBadges + SilverBadges > 0
+OR RecentPostDate <> 'N/A'
+ORDER BY 
+    PostCount DESC, GoldBadges DESC, SilverBadges DESC;

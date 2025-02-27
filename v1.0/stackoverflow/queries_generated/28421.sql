@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        COALESCE(COUNT(DISTINCT c.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        RANK() OVER (ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- We are focusing on Questions only
+    GROUP BY 
+        p.Id
+),
+
+PopularTags AS (
+    SELECT 
+        tag.TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Tags tag
+    JOIN 
+        Posts p ON tag.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        tag.TagName
+),
+
+HighScorePosts AS (
+    SELECT 
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        pt.Name AS PostType,
+        ARRAY_AGG(DISTINCT tag.TagName) AS RelatedTags
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostTypes pt ON pt.Id = (SELECT PostTypeId FROM Posts WHERE Id = rp.Id)
+    LEFT JOIN 
+        string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><') AS tag ON tag IS NOT NULL
+    WHERE 
+        rp.Rank <= 10
+    GROUP BY 
+        rp.Title, rp.CreationDate, rp.Score, pt.Name
+)
+
+SELECT 
+    hsp.Title,
+    hsp.CreationDate,
+    hsp.Score,
+    hsp.CommentCount,
+    hsp.PostType,
+    ht.PostCount AS PopularTagCount,
+    hsp.RelatedTags
+FROM 
+    HighScorePosts hsp
+LEFT JOIN 
+    (SELECT TagName, PostCount FROM PopularTags ORDER BY PostCount DESC LIMIT 5) ht ON ht.TagName = ANY(hsp.RelatedTags)
+ORDER BY 
+    hsp.Score DESC, hsp.CommentCount DESC;

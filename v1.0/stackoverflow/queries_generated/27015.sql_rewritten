@@ -1,0 +1,67 @@
+WITH PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(DISTINCT TRIM(BOTH '<>' FROM UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '>'))), ', ') AS PostTagsList,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(c.Id) AS CommentsCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1   
+    GROUP BY 
+        p.Id
+), 
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount,
+        SUM(pt.CommentsCount) AS TotalComments
+    FROM 
+        Tags t
+    JOIN 
+        PostTags pt ON pt.PostTagsList LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+), 
+UserEngagement AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    t.TagName,
+    t.PostCount,
+    t.TotalComments,
+    ue.DisplayName AS TopUser,
+    ue.Reputation,
+    ue.QuestionsAsked,
+    ue.TotalCommentScore
+FROM 
+    TagStatistics t,
+    LATERAL (
+        SELECT 
+            u.DisplayName,
+            u.Reputation,
+            ue.QuestionsAsked,
+            ue.TotalCommentScore
+        FROM 
+            UserEngagement ue
+        ORDER BY 
+            ue.TotalCommentScore DESC
+        LIMIT 1
+    ) ue
+ORDER BY 
+    t.TotalComments DESC, t.PostCount DESC
+LIMIT 10;

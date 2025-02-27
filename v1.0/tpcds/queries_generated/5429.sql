@@ -1,0 +1,50 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_id,
+        d.d_year,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS average_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        d.d_year BETWEEN 2019 AND 2023
+    GROUP BY 
+        ws.web_site_id, d.d_year
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        AVG(ws.ws_net_paid) AS average_spending
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_gender = 'F' AND cd.cd_marital_status = 'M'
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    s.web_site_id,
+    s.d_year,
+    s.total_quantity,
+    s.total_sales,
+    s.average_profit,
+    c.average_spending
+FROM 
+    sales_summary s
+LEFT JOIN 
+    customer_summary c ON s.web_site_id IN (SELECT ws.web_site_sk FROM web_sales ws)
+ORDER BY 
+    s.d_year DESC, total_sales DESC
+LIMIT 100;

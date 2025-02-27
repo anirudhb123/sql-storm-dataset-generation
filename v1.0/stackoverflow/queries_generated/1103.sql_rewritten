@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.PostTypeId = 1
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    WHERE 
+        u.Reputation > 1000 
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(*) > 50
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ua.PostsCount,
+    ua.TotalBounty,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    pt.TagName
+FROM 
+    Users u
+JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+JOIN 
+    RankedPosts rp ON ua.PostsCount > 0 
+LEFT JOIN 
+    (SELECT DISTINCT TagName FROM PopularTags) pt ON rp.Tags LIKE '%' || pt.TagName || '%'
+WHERE 
+    ua.TotalBounty > 0
+ORDER BY 
+    ua.TotalBounty DESC, 
+    rp.Score DESC
+LIMIT 100;

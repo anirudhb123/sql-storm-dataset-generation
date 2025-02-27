@@ -1,0 +1,82 @@
+
+WITH TagAnalytics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoredPosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativeScoredPosts,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.ViewCount) AS AvgViewsPerPost
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    GROUP BY 
+        t.TagName
+),
+UserEngagement AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        COUNT(c.Id) AS CommentsMade,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostInteractions AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        MAX(p.LastActivityDate) AS LastActive
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId
+)
+SELECT 
+    ta.TagName,
+    ta.PostCount,
+    ta.PositiveScoredPosts,
+    ta.NegativeScoredPosts,
+    ta.TotalViews,
+    ta.AvgViewsPerPost,
+    ue.UserId,
+    ue.DisplayName,
+    ue.PostsCreated,
+    ue.CommentsMade,
+    ue.TotalUpVotes,
+    ue.TotalDownVotes,
+    pi.PostId,
+    pi.Title,
+    pi.CommentCount,
+    pi.VoteCount,
+    pi.LastActive
+FROM 
+    TagAnalytics ta
+JOIN 
+    UserEngagement ue ON ue.PostsCreated > 0
+JOIN 
+    PostInteractions pi ON pi.CommentCount > 0
+WHERE 
+    ta.PostCount > 10 
+ORDER BY 
+    ta.TotalViews DESC,  
+    ue.TotalUpVotes DESC, 
+    pi.LastActive DESC;

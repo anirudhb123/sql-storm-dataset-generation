@@ -1,0 +1,98 @@
+
+WITH UserRankings AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS TotalAnswers,
+        SUM(V.BountyAmount) AS TotalBounty,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId 
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        TotalPosts DESC
+    LIMIT 5
+),
+PostsDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        U.DisplayName AS Author,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        T.TagName
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    JOIN 
+        Tags T ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '90 days'
+    AND
+        P.PostTypeId = 1
+),
+TopPosts AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.Author,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        (SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END)) AS NetVotes
+    FROM 
+        PostsDetails PD
+    LEFT JOIN 
+        Comments C ON PD.PostId = C.PostId
+    LEFT JOIN 
+        Votes V ON PD.PostId = V.PostId
+    GROUP BY 
+        PD.PostId, PD.Title, PD.Author
+    ORDER BY 
+        NetVotes DESC
+    LIMIT 10
+)
+SELECT 
+    UR.DisplayName AS TopUser,
+    UR.Reputation AS UserReputation,
+    UR.TotalQuestions,
+    UR.TotalAnswers,
+    UR.TotalBounty,
+    PT.TagName AS PopularTag,
+    TP.Title AS TopPostTitle,
+    TP.Author AS PostAuthor,
+    TP.CommentCount,
+    TP.UpVotes,
+    TP.DownVotes,
+    TP.NetVotes
+FROM 
+    UserRankings UR
+CROSS JOIN 
+    PopularTags PT
+JOIN 
+    TopPosts TP ON UR.TotalPosts > 0
+ORDER BY 
+    UR.ReputationRank, PT.TotalPosts DESC, TP.NetVotes DESC;

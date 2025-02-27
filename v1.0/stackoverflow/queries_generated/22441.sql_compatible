@@ -1,0 +1,62 @@
+
+WITH PostBadgeCounts AS (
+    SELECT p.OwnerUserId,
+           COUNT(DISTINCT b.Id) AS BadgeCount,
+           SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+           SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+           SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Posts p
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+    GROUP BY p.OwnerUserId
+),
+TopUsers AS (
+    SELECT u.Id,
+           u.DisplayName,
+           u.Reputation,
+           COALESCE(pbc.BadgeCount, 0) AS TotalBadges,
+           DENSE_RANK() OVER (ORDER BY COALESCE(pbc.BadgeCount, 0) DESC, u.Reputation DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN PostBadgeCounts pbc ON u.Id = pbc.OwnerUserId
+    WHERE u.Reputation > 1000 
+),
+
+PostStatistics AS (
+    SELECT p.OwnerUserId,
+           COUNT(p.Id) AS PostCount,
+           AVG(COALESCE(p.ViewCount, 0)) AS AvgViews,
+           MAX(p.CreationDate) AS LastPostDate
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+
+FinalStats AS (
+    SELECT tu.Id AS UserId,
+           tu.DisplayName,
+           tu.TotalBadges,
+           ps.PostCount,
+           ps.AvgViews,
+           CURRENT_DATE - ps.LastPostDate AS DaysSinceLastPost,
+           CASE 
+               WHEN tu.TotalBadges > 10 THEN 'Veteran'
+               WHEN tu.TotalBadges > 5 THEN 'Enthusiast'
+               ELSE 'Novice'
+           END AS UserCategory
+    FROM TopUsers tu
+    LEFT JOIN PostStatistics ps ON tu.Id = ps.OwnerUserId
+)
+
+SELECT UserId,
+       DisplayName,
+       TotalBadges,
+       PostCount,
+       AvgViews,
+       DaysSinceLastPost,
+       UserCategory,
+       CASE 
+           WHEN DaysSinceLastPost > 365 THEN 'Inactive'
+           ELSE 'Active'
+       END AS Activity
+FROM FinalStats
+WHERE UserRank <= 100 
+ORDER BY TotalBadges DESC, Reputation DESC;

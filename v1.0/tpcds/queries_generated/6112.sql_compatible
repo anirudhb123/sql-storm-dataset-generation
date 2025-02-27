@@ -1,0 +1,70 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS total_orders,
+        cd.cd_gender,
+        hd.hd_income_band_sk
+    FROM 
+        customer AS c
+    JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics AS hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 10000 AND 10030
+    GROUP BY 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        hd.hd_income_band_sk
+),
+IncomeAnalysis AS (
+    SELECT 
+        hd_income_band_sk,
+        COUNT(DISTINCT c_customer_sk) AS customer_count,
+        AVG(total_spent) AS avg_spent_per_customer,
+        SUM(total_orders) AS total_orders_per_income_band
+    FROM 
+        CustomerSales
+    GROUP BY 
+        hd_income_band_sk
+),
+GenderAnalysis AS (
+    SELECT 
+        cd_gender,
+        COUNT(DISTINCT c_customer_sk) AS customer_count,
+        AVG(total_spent) AS avg_spent_per_customer,
+        SUM(total_orders) AS total_orders_per_gender
+    FROM 
+        CustomerSales
+    GROUP BY 
+        cd_gender
+),
+FinalAnalysis AS (
+    SELECT 
+        i.hd_income_band_sk,
+        i.customer_count AS income_band_customer_count,
+        i.avg_spent_per_customer AS avg_spent_income_band,
+        i.total_orders_per_income_band,
+        g.cd_gender,
+        g.customer_count AS gender_customer_count,
+        g.avg_spent_per_customer AS avg_spent_gender,
+        g.total_orders_per_gender
+    FROM 
+        IncomeAnalysis AS i
+    FULL OUTER JOIN 
+        GenderAnalysis AS g ON i.hd_income_band_sk = g.cd_gender
+)
+SELECT 
+    * 
+FROM 
+    FinalAnalysis
+ORDER BY 
+    hd_income_band_sk, cd_gender;

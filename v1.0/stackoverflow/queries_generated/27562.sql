@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only considering Questions
+        AND p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) -- Only Questions from the last year
+),
+PostTags AS (
+    SELECT 
+        rp.PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        RankedPosts rp
+    JOIN 
+        STRING_SPLIT(rp.Tags, ',') tag ON tag.value = rp.Tags
+    JOIN 
+        Tags t ON t.TagName = TRIM(tag.value)
+    GROUP BY 
+        rp.PostId
+),
+PostHistoryInfo AS (
+    SELECT 
+        postId,
+        MAX(CASE WHEN pht.Name = 'Post Closed' THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN pht.Name = 'Edit Body' THEN ph.CreationDate END) AS LastEditDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        postId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    pt.Tags,
+    rp.ViewCount,
+    rp.Score,
+    phi.LastClosedDate,
+    phi.LastEditDate
+FROM 
+    RankedPosts rp
+JOIN 
+    PostTags pt ON rp.PostId = pt.PostId
+LEFT JOIN 
+    PostHistoryInfo phi ON rp.PostId = phi.PostId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

@@ -1,0 +1,62 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           CASE 
+               WHEN p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+               THEN 'Above Average' 
+               ELSE 'Below Average' 
+           END AS price_category
+    FROM part p
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_mktsegment, 
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_mktsegment
+),
+SupplierPartAvailability AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty,
+           COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END), 0) AS total_returned
+    FROM partsupp ps
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey AND ps.ps_suppkey = l.l_suppkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+CombinedResults AS (
+    SELECT o.o_orderkey, c.c_name, p.p_name, 
+           COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_price,
+           SUM(CASE WHEN l.l_linestatus = 'O' THEN 1 ELSE 0 END) AS open_lines
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN HighValueParts p ON l.l_partkey = p.p_partkey
+    GROUP BY o.o_orderkey, c.c_name, p.p_name
+)
+SELECT cr.c_name, cr.total_price, 
+       CASE 
+           WHEN cr.total_price > (SELECT AVG(total_price) FROM CombinedResults) 
+           THEN 'High Value' 
+           ELSE 'Low Value' 
+       END AS value_category,
+       COUNT(DISTINCT r.r_regionkey) AS total_regions_affected, 
+       AVG(CASE WHEN s.rn <= 5 THEN s.s_acctbal ELSE NULL END) AS avg_top_suppliers
+FROM CombinedResults cr
+LEFT JOIN RankedSuppliers s ON s.s_suppkey = (SELECT ps.ps_suppkey 
+                                                FROM SupplierPartAvailability ps 
+                                                WHERE ps.ps_partkey = (SELECT p.p_partkey 
+                                                                       FROM HighValueParts p 
+                                                                       WHERE p.p_name = (SELECT p_name 
+                                                                                         FROM HighValueParts 
+                                                                                         WHERE price_category = 'Above Average' 
+                                                                                         ORDER BY p.p_retailprice DESC 
+                                                                                         FETCH FIRST 1 ROW ONLY) 
+                                                                       FETCH FIRST 1 ROW ONLY))
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+GROUP BY cr.c_name, cr.total_price;

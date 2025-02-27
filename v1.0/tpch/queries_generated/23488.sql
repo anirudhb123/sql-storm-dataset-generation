@@ -1,0 +1,45 @@
+WITH RECURSIVE nation_trade AS (
+    SELECT n.n_nationkey,
+           n.n_name,
+           SUM(ps.ps_supplycost * l.l_quantity) AS total_trade_value,
+           ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * l.l_quantity) DESC) AS trade_rank
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+latest_orders AS (
+    SELECT o.o_orderkey,
+           o.o_orderstatus,
+           o.o_totalprice,
+           o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1995-01-01'
+),
+price_summary AS (
+    SELECT ps.ps_partkey,
+           COUNT(DISTINCT s.s_suppkey) AS number_of_suppliers,
+           AVG(ps.ps_supplycost) AS average_supply_cost,
+           MAX(ps.ps_supplycost) AS max_supply_cost,
+           MIN(ps.ps_supplycost) AS min_supply_cost,
+           CASE WHEN SUM(l.l_discount) > 0 THEN 'Discounted' ELSE 'Regular' END AS pricing_category
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_partkey
+)
+SELECT n.n_name, 
+       COALESCE(SUM(lt.total_trade_value), 0) AS total_trade_value,
+       COALESCE(MAX(ps.average_supply_cost), 0) AS max_average_supply_cost,
+       COALESCE(MAX(ps.max_supply_cost), 0) AS max_supply_cost,
+       COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       STRING_AGG(DISTINCT ps.pricing_category, ', ') AS supplier_pricing_categories
+FROM nation_trade lt
+FULL OUTER JOIN latest_orders o ON lt.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = o.o_custkey)
+LEFT JOIN price_summary ps ON ps.ps_partkey = (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey LIMIT 1)
+GROUP BY n.n_name
+HAVING SUM(lt.total_trade_value) > 10000
+   OR COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_trade_value DESC NULLS LAST;

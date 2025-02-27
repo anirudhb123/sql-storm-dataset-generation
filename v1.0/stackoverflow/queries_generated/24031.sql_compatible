@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank,
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+RecentPostScores AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Score,
+        r.ViewCount,
+        r.CommentCount,
+        CASE 
+            WHEN r.Score IS NULL THEN 0
+            WHEN r.Score < 0 THEN 'Low Score'
+            WHEN r.Score BETWEEN 0 AND 10 THEN 'Moderate Score'
+            ELSE 'High Score'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts r
+    WHERE 
+        r.Rank <= 10
+),
+PostVoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId IN (2, 3)) AS VoteCount, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+CombinedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        pvc.VoteCount,
+        pvc.UpVotes,
+        pvc.DownVotes,
+        rp.ScoreCategory
+    FROM 
+        RecentPostScores rp
+    LEFT JOIN 
+        PostVoteCounts pvc ON rp.PostId = pvc.PostId
+)
+SELECT 
+    cd.Title AS PostTitle,
+    cd.Score,
+    cd.VoteCount,
+    cd.CommentCount,
+    cd.ViewCount,
+    cd.ScoreCategory,
+    CASE 
+        WHEN cd.ViewCount IS NULL OR cd.ViewCount = 0 THEN 'No Views'
+        ELSE 'Has Views'
+    END AS ViewStatus,
+    COUNT(b.Id) AS BadgeCount
+FROM 
+    CombinedData cd
+LEFT JOIN 
+    Badges b ON cd.PostId = b.UserId
+WHERE 
+    cd.ScoreCategory IN ('Moderate Score', 'High Score')
+GROUP BY 
+    cd.Title, cd.Score, cd.VoteCount, cd.CommentCount, cd.ViewCount, cd.ScoreCategory
+HAVING 
+    COUNT(b.Id) > 0 OR cd.CommentCount > 5
+ORDER BY 
+    cd.Score DESC, cd.ViewCount ASC
+LIMIT 50;

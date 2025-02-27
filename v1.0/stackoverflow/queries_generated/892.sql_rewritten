@@ -1,0 +1,45 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN p.Score > 0 THEN p.Score ELSE 0 END), 0) AS TotalUpvotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END), 0) AS AcceptedAnswers,
+        COALESCE(AVG(EXTRACT(EPOCH FROM (p.LastActivityDate - p.CreationDate)) / 3600), 0) AS AvgHoursToActivity
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalUpvotes,
+        TotalPosts,
+        AcceptedAnswers,
+        AvgHoursToActivity,
+        RANK() OVER (ORDER BY TotalUpvotes DESC) AS Rank
+    FROM 
+        UserPostStats
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.TotalUpvotes,
+    tu.AcceptedAnswers,
+    ROUND(tu.AvgHoursToActivity, 2) AS AvgHoursToActivity,
+    (SELECT COUNT(*) FROM (SELECT DISTINCT Tags FROM Posts WHERE OwnerUserId = tu.UserId) AS UniqueTags) AS TagCount,
+    COALESCE((SELECT STRING_AGG(pt.Name, ', ') 
+              FROM PostHistory ph 
+              JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id 
+              WHERE ph.UserId = tu.UserId AND ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month' 
+              ORDER BY ph.CreationDate DESC), 'No Recent Changes') AS RecentPostChanges
+FROM 
+    TopUsers tu
+WHERE 
+    tu.Rank <= 10
+ORDER BY 
+    tu.Rank;

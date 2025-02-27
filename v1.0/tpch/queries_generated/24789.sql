@@ -1,0 +1,58 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal + sh.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey <> sh.s_suppkey AND sh.level < 5
+),
+ExpandedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_type, 
+           COALESCE(SUM(ps.ps_availqty), 0) AS total_avail_qty,
+           CASE 
+               WHEN p.p_retailprice IS NULL THEN 'Price Unknown'
+               ELSE CONCAT('Price: ', CAST(p.p_retailprice AS varchar))
+           END AS price_info
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_type
+),
+SupplierStats AS (
+    SELECT sh.s_suppkey, sh.s_name, AVG(sh.s_acctbal) AS avg_acctbal
+    FROM SupplierHierarchy sh
+    GROUP BY sh.s_suppkey, sh.s_name
+),
+OrdersDetailed AS (
+    SELECT o.o_orderkey, o.o_totalprice, COUNT(DISTINCT l.l_orderkey) AS total_line_items,
+           MAX(l.l_discount) AS max_discount
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F') 
+      AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+    GROUP BY o.o_orderkey, o.o_totalprice
+    HAVING MAX(l.l_discount) IS NOT NULL
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ps.avg_acctbal,
+    od.total_line_items,
+    od.max_discount,
+    CASE 
+        WHEN od.total_line_items IS NULL THEN 'No Line Items'
+        WHEN od.max_discount > 0.5 THEN 'High Discount'
+        ELSE 'Regular Discount'
+    END AS discount_category,
+    r.r_name
+FROM ExpandedParts p
+LEFT JOIN SupplierStats ps ON p.p_partkey = ps.s_suppkey
+LEFT JOIN OrdersDetailed od ON p.p_partkey = od.o_orderkey
+LEFT JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey 
+                                         FROM nation n 
+                                         WHERE n.n_nationkey = ps.s_nationkey LIMIT 1)
+ORDER BY discount_category DESC, p.p_name ASC 
+FETCH FIRST 100 ROWS ONLY;

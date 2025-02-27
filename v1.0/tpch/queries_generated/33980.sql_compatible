@@ -1,0 +1,48 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey AS supplier_id,
+        s.s_name AS supplier_name,
+        s.s_acctbal AS account_balance,
+        1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT 
+        ps.ps_suppkey AS supplier_id,
+        sh.supplier_name AS supplier_name,
+        sh.account_balance + (ps.ps_supplycost * ps.ps_availqty) AS account_balance,
+        sh.level + 1 AS level
+    FROM SupplierHierarchy sh
+    JOIN partsupp ps ON ps.ps_partkey IN (
+        SELECT p.p_partkey 
+        FROM part p 
+        WHERE p.p_size > 25
+    )
+    WHERE sh.level < 5
+), OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts,
+        o.o_orderstatus
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    SUM(os.total_revenue) AS total_revenue,
+    COUNT(DISTINCT sh.supplier_id) AS total_suppliers,
+    AVG(sh.account_balance) AS avg_supplier_balance
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey = sh.supplier_id)
+LEFT JOIN OrderSummary os ON n.n_nationkey = (SELECT c.n_nationkey FROM customer c WHERE c.c_custkey = os.o_orderkey)
+GROUP BY r.r_name, n.n_name
+HAVING SUM(os.total_revenue) > 5000 AND AVG(sh.account_balance) IS NOT NULL
+ORDER BY region_name, nation_name DESC;

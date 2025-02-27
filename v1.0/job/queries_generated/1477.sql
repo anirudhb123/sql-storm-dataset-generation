@@ -1,0 +1,70 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        movie_title,
+        production_year
+    FROM 
+        RankedTitles
+    WHERE 
+        rn <= 3
+),
+MoviesWithKeywords AS (
+    SELECT 
+        t.title,
+        k.keyword
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword IS NOT NULL
+),
+DistinctCompanies AS (
+    SELECT DISTINCT
+        c.name AS company_name,
+        mt.movie_id,
+        mt.subject_id
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        complete_cast mt ON mc.movie_id = mt.movie_id
+    WHERE 
+        c.country_code = 'USA'
+)
+SELECT 
+    a.actor_name,
+    COALESCE(m.movie_title, 'Unknown Title') AS movie_title,
+    COALESCE(k.keyword, 'No Keywords') AS keyword,
+    COUNT(DISTINCT dc.company_name) AS company_count,
+    AVG(CASE WHEN t.production_year IS NOT NULL THEN t.production_year ELSE NULL END) AS avg_production_year
+FROM 
+    TopActors a
+LEFT JOIN 
+    MoviesWithKeywords k ON a.movie_title = k.title
+LEFT JOIN 
+    DistinctCompanies dc ON a.production_year = dc.movie_id
+LEFT JOIN 
+    title t ON a.movie_title = t.title
+GROUP BY 
+    a.actor_name, m.movie_title, k.keyword
+ORDER BY 
+    a.actor_name;

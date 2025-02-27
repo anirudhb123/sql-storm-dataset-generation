@@ -1,0 +1,55 @@
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS unique_parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_name, n.n_name
+),
+OrderDetail AS (
+    SELECT 
+        c.c_name AS customer_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(l.l_orderkey) AS line_item_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        c.c_name, o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    ss.s_name AS supplier_name,
+    ss.nation_name,
+    ss.total_available_quantity,
+    ss.total_supply_cost,
+    ss.unique_parts_supplied,
+    od.customer_name,
+    od.o_orderkey,
+    od.o_orderdate,
+    od.total_order_value,
+    od.line_item_count
+FROM 
+    SupplierSummary ss
+JOIN 
+    OrderDetail od ON ss.unique_parts_supplied > 0
+WHERE 
+    ss.total_supply_cost > 10000
+ORDER BY 
+    total_order_value DESC, ss.total_supply_cost DESC;

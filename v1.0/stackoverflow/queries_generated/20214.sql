@@ -1,0 +1,92 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) -- For BountyStart and BountyClose
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COUNT(CM.Id) AS CommentCount,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 2 THEN PH.CreationDate END) AS LastBodyEditDate,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS TagsList
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments CM ON P.Id = CM.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        LATERAL unnest(string_to_array(P.Tags, ',')) AS T(TagName) ON TRUE
+    WHERE 
+        P.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score
+),
+
+PostComments AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(C.Id) AS TotalComments,
+        SUM(CASE WHEN C.Score > 0 THEN 1 ELSE 0 END) AS PositiveComments,
+        SUM(CASE WHEN C.Score < 0 THEN 1 ELSE 0 END) AS NegativeComments
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalPosts,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.TotalBounty,
+    P.PostId,
+    P.Title,
+    P.ViewCount,
+    P.Score,
+    P.CommentCount,
+    PC.TotalComments,
+    PC.PositiveComments,
+    PC.NegativeComments,
+    COALESCE(P.LastBodyEditDate, 'Never Edited') AS LastBodyEditDate,
+    CASE 
+        WHEN P.Score >= 10 THEN 'Highly Rated'
+        WHEN P.Score BETWEEN 5 AND 9 THEN 'Moderately Rated'
+        ELSE 'Low Rated'
+    END AS RatingCategory,
+    P.TagsList
+FROM 
+    UserStatistics U
+JOIN 
+    Posts P ON U.UserId = P.OwnerUserId 
+LEFT JOIN 
+    PostComments PC ON P.Id = PC.PostId
+WHERE 
+    U.TotalPosts > 5 AND U.Reputation > 50
+ORDER BY 
+    U.Reputation DESC, P.ViewCount DESC
+FETCH FIRST 100 ROWS ONLY;

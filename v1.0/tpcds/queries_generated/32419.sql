@@ -1,0 +1,60 @@
+
+WITH RECURSIVE sales_performance AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS item_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 365
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+top_items AS (
+    SELECT 
+        sp.ws_item_sk, 
+        sp.total_net_profit,
+        ROW_NUMBER() OVER (ORDER BY total_net_profit DESC) AS rank
+    FROM 
+        sales_performance sp
+    WHERE 
+        sp.item_rank = 1
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COUNT(DISTINCT t.ws_order_number) AS total_orders,
+    SUM(t.ws_quantity) AS total_quantity_sold,
+    SUM(t.ws_net_paid_inc_tax) AS total_sales,
+    CASE 
+        WHEN SUM(t.ws_net_profit) IS NULL THEN 'No Profit'
+        ELSE FORMAT(SUM(t.ws_net_profit), 'C') 
+    END AS total_net_profit,
+    COALESCE(s.user_email, 'Not Available') AS customer_email
+FROM 
+    top_items ti
+JOIN 
+    web_sales t ON ti.ws_item_sk = t.ws_item_sk
+JOIN 
+    item i ON t.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    customer c ON t.ws_bill_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    (SELECT 
+        c_customer_sk, 
+        c_email_address AS user_email 
+     FROM 
+        customer 
+     WHERE 
+        c_email_address IS NOT NULL) s ON c.c_customer_sk = s.c_customer_sk
+WHERE 
+    i.i_current_price > 50
+GROUP BY 
+    i.i_item_id, i.i_item_desc, s.user_email
+HAVING 
+    SUM(t.ws_net_profit) > 1000
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

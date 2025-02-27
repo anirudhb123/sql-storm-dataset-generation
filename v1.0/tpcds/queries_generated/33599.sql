@@ -1,0 +1,77 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn 
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws_item_sk
+),
+CategorySales AS (
+    SELECT 
+        i_category, 
+        SUM(total_sales) AS category_sales
+    FROM 
+        SalesCTE 
+    JOIN 
+        item ON item.i_item_sk = SalesCTE.ws_item_sk
+    WHERE 
+        item.i_brand IS NOT NULL
+    GROUP BY 
+        i_category
+),
+CustomerSales AS (
+    SELECT 
+        cd_gender,
+        SUM(ws_ext_sales_price) AS total_gender_sales
+    FROM 
+        web_sales
+    JOIN 
+        customer ON web_sales.ws_ship_customer_sk = customer.c_customer_sk
+    JOIN 
+        customer_demographics ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    GROUP BY 
+        cd_gender
+),
+FinalReport AS (
+    SELECT 
+        cs.cd_gender, 
+        cs.total_gender_sales, 
+        CASE 
+            WHEN cs.total_gender_sales > 10000 THEN 'High Sales'
+            WHEN cs.total_gender_sales BETWEEN 5000 AND 10000 THEN 'Medium Sales'
+            ELSE 'Low Sales'
+        END AS sales_category,
+        coalesce(ca.category_sales, 0) AS total_category_sales
+    FROM 
+        CustomerSales cs
+    LEFT JOIN 
+        CategorySales ca ON cs.cd_gender = 'M' -- Example joining on gender condition
+)
+SELECT 
+    f.cd_gender, 
+    f.total_gender_sales, 
+    f.sales_category, 
+    f.total_category_sales
+FROM 
+    FinalReport f
+WHERE 
+    f.total_gender_sales > (SELECT AVG(total_gender_sales) FROM CustomerSales)
+ORDER BY 
+    f.total_gender_sales DESC;
+
+UNION ALL
+
+SELECT 
+    'Overall' AS cd_gender, 
+    SUM(total_gender_sales) AS total_gender_sales, 
+    'Total' AS sales_category, 
+    SUM(total_category_sales) AS total_category_sales
+FROM 
+    FinalReport
+GROUP BY 
+    'Overall';

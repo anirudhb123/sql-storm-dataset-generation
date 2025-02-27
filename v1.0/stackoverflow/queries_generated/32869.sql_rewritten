@@ -1,0 +1,99 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rp ON p.ParentId = rp.Id
+),
+
+UserPostStatistics AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(COALESCE(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END, 0)) AS Questions,
+        SUM(COALESCE(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END, 0)) AS Answers,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostVoteCounts AS (
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title
+),
+
+PostHistoryTypesCounts AS (
+    
+    SELECT 
+        ph.PostId,
+        pht.Name AS HistoryType,
+        COUNT(ph.Id) AS CountOccurrences
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId, pht.Name
+)
+
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.TotalPosts,
+    up.Questions,
+    up.Answers,
+    up.TotalScore,
+    pp.Id AS PostId,
+    pp.Title,
+    pp.UpVotes,
+    pp.DownVotes,
+    pp.TotalVotes,
+    phc.HistoryType,
+    phc.CountOccurrences
+FROM 
+    UserPostStatistics up
+JOIN 
+    PostVoteCounts pp ON up.UserId = pp.Id
+LEFT JOIN 
+    PostHistoryTypesCounts phc ON pp.Id = phc.PostId
+WHERE 
+    up.TotalPosts > 10  
+ORDER BY 
+    up.TotalScore DESC, pp.TotalVotes DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

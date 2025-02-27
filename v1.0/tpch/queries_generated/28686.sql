@@ -1,0 +1,32 @@
+WITH CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS num_orders, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSuppliers AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_availqty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name
+    FROM CustomerOrders
+    WHERE total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+),
+TopParts AS (
+    SELECT p.p_partkey, p.p_name, ps.total_availqty
+    FROM PartSuppliers ps
+    WHERE ps.total_availqty > (SELECT AVG(total_availqty) FROM PartSuppliers)
+)
+SELECT 
+    hvc.c_custkey,
+    hvc.c_name,
+    tp.p_partkey,
+    tp.p_name,
+    tp.total_availqty
+FROM HighValueCustomers hvc
+JOIN lineitem li ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = hvc.c_custkey)
+JOIN TopParts tp ON li.l_partkey = tp.p_partkey
+ORDER BY hvc.c_custkey, tp.total_availqty DESC;

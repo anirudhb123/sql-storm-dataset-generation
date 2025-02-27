@@ -1,0 +1,72 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2458849 AND 2458880 -- Filter for specific date range (e.g., a month)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_sales,
+        cs.order_count,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.total_sales > 1000 -- Filter for high-value customers (e.g., total sales greater than $1000)
+),
+ReturnRates AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(sr.sr_item_sk) AS total_returns,
+        COUNT(DISTINCT sr.sr_ticket_number) AS return_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        hvc.c_customer_sk,
+        hvc.c_first_name,
+        hvc.c_last_name,
+        hvc.total_sales,
+        hvc.order_count,
+        COALESCE(rr.total_returns, 0) AS total_returns,
+        COALESCE(rr.return_count, 0) AS return_count
+    FROM 
+        HighValueCustomers hvc
+    LEFT JOIN 
+        ReturnRates rr ON hvc.c_customer_sk = rr.c_customer_sk
+)
+SELECT 
+    fr.c_customer_sk,
+    fr.c_first_name,
+    fr.c_last_name,
+    fr.total_sales,
+    fr.order_count,
+    fr.total_returns,
+    fr.return_count,
+    (fr.total_returns::decimal / NULLIF(fr.order_count, 0)) * 100 AS return_rate_percentage
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.total_sales DESC
+LIMIT 10; -- Output top 10 high-value customers with sales and return information

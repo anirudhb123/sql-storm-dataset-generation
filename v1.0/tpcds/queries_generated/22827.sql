@@ -1,0 +1,63 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) as rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' AND 
+        cd.cd_marital_status IN ('M', 'S') AND 
+        ws.ws_sold_date_sk BETWEEN 10000 AND 20000
+    GROUP BY 
+        ws.ws_item_sk, ws.ws_sold_date_sk
+    HAVING 
+        SUM(ws.ws_quantity) > 10
+),
+RankedSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.total_quantity,
+        rs.total_sales,
+        COALESCE(LEAD(rs.total_sales) OVER (ORDER BY rs.total_quantity DESC), 0) AS next_total_sales
+    FROM 
+        RecursiveSales rs
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    CASE 
+        WHEN rs.total_sales = 0 THEN 'No Sales'
+        WHEN rs.total_sales > 500 THEN 'High Earner'
+        WHEN rs.total_sales BETWEEN 100 AND 500 THEN 'Medium Earner'
+        ELSE 'Low Earner'
+    END AS sales_category,
+    (rs.total_sales - rs.next_total_sales) AS sales_difference
+FROM 
+    RankedSales rs
+JOIN 
+    item i ON rs.ws_item_sk = i.i_item_sk
+WHERE 
+    (rs.total_quantity > 15 OR rs.total_sales IS NOT NULL)
+ORDER BY 
+    sales_difference DESC, 
+    i.i_item_desc ASC
+LIMIT 100
+UNION
+SELECT 
+    NULL AS i_item_id,
+    'Total Returns' AS i_item_desc,
+    NULL AS sales_category,
+    SUM(sr_return_amt) AS sales_difference
+FROM 
+    store_returns sr
+WHERE 
+    sr_returned_date_sk NOT IN (SELECT DISTINCT ws_sold_date_sk FROM web_sales)
+    AND sr_return_quantity > 0;

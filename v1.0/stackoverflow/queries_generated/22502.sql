@@ -1,0 +1,79 @@
+WITH ranked_posts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        CASE 
+            WHEN p.IsLocked = 1 THEN 'Locked'
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+), user_reputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(v.CreationDate) AS LastVoteDate,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+), post_history_last_edited AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(ph.CreationDate) AS LastEdited 
+    FROM 
+        Posts p 
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5)
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName AS UserName,
+    up.Reputation AS UserReputation,
+    p.Id AS PostId,
+    p.Title AS PostTitle,
+    ph.LastEdited,
+    rp.PostStatus,
+    CASE 
+        WHEN rp.Score IS NULL THEN 'Score not available'
+        ELSE CAST(rp.Score AS VARCHAR)
+    END AS Score,
+    COALESCE(c.CommentCount, 0) AS TotalComments,
+    COALESCE(v.UpVoteCount, 0) AS UpVotes
+FROM 
+    Users up
+LEFT JOIN 
+    Posts p ON up.Id = p.OwnerUserId
+LEFT JOIN 
+    ranked_posts rp ON p.Id = rp.Id AND rp.rn = 1
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS CommentCount 
+     FROM Comments 
+     GROUP BY PostId) c ON p.Id = c.PostId
+LEFT JOIN 
+    user_reputation v ON up.Id = v.UserId
+LEFT JOIN 
+    post_history_last_edited ph ON p.Id = ph.PostId
+WHERE 
+    up.Reputation > 1000
+    AND (v.BadgeCount > 5 OR rp.PostStatus = 'Closed')
+ORDER BY 
+    UserReputation DESC, LastEdited DESC
+LIMIT 100;

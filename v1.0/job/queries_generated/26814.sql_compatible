@@ -1,0 +1,40 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER(PARTITION BY t.id ORDER BY t.production_year DESC) AS rank
+    FROM title t
+    JOIN movie_keyword mk ON t.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    WHERE t.production_year >= 2000
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        r.role AS role_name,
+        COUNT(*) AS role_count
+    FROM cast_info ci
+    JOIN role_type r ON ci.person_role_id = r.id
+    GROUP BY ci.movie_id, ci.person_id, r.role
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    cr.role_name,
+    cr.role_count,
+    COUNT(DISTINCT mci.company_id) AS production_company_count,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS associated_keywords
+FROM RankedTitles rt
+JOIN complete_cast cc ON rt.title_id = cc.movie_id
+JOIN CastRoles cr ON cc.movie_id = cr.movie_id
+JOIN movie_companies mci ON cc.movie_id = mci.movie_id
+JOIN company_name cn ON mci.company_id = cn.id
+JOIN movie_keyword mk ON rt.title_id = mk.movie_id
+WHERE rt.rank = 1
+GROUP BY rt.title, rt.production_year, cr.role_name, cr.role_count
+ORDER BY rt.production_year DESC, rt.title;

@@ -1,0 +1,81 @@
+
+WITH RECURSIVE RevenueCTE AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_net_paid) AS total_revenue
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_bill_customer_sk
+    HAVING 
+        SUM(ws_net_paid) IS NOT NULL
+),
+CustomerRanked AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cd.cd_gender, 'Unknown') AS gender,
+        COALESCE(cd.cd_marital_status, 'Unknown') AS marital_status,
+        ROW_NUMBER() OVER (PARTITION BY COALESCE(cd.cd_gender, 'Unknown') ORDER BY r.total_revenue DESC) AS revenue_rank,
+        r.total_revenue
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        RevenueCTE r ON c.c_customer_sk = r.customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cr.reason_desc AS return_reason,
+        SUM(ws.ws_quantity) AS total_purchases,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        CustomerRanked c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        store_returns sr ON sr.sr_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        reason cr ON sr.sr_reason_sk = cr.r_reason_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cr.reason_desc
+    HAVING 
+        SUM(ws.ws_quantity) > 0
+),
+FinalResults AS (
+    SELECT 
+        tc.c_customer_sk,
+        tc.c_first_name,
+        tc.c_last_name,
+        COALESCE(tc.total_sales, 0) AS total_sales,
+        COUNT(tc.return_reason) AS return_count,
+        MAX(tc.revenue_rank) AS max_revenue_rank
+    FROM 
+        TopCustomers tc
+    GROUP BY 
+        tc.c_customer_sk, tc.c_first_name, tc.c_last_name
+)
+SELECT 
+    f.c_customer_sk,
+    f.c_first_name,
+    f.c_last_name,
+    f.total_sales,
+    f.return_count,
+    CASE 
+        WHEN f.return_count > 5 THEN 'High Return'
+        WHEN f.total_sales < 100 THEN 'Low Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status
+FROM 
+    FinalResults f
+WHERE 
+    f.max_revenue_rank <= 10
+ORDER BY 
+    f.total_sales DESC, f.return_count;

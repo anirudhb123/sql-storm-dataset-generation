@@ -1,0 +1,40 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- Base case: Fetch all movies and their titles
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM aka_title mt
+    WHERE mt.kind_id = 1  -- Assuming kind_id = 1 is for 'movie'
+
+    UNION ALL
+    
+    -- Recursive case: Get linked movies (if any)
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT mh.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT mh.title, ', ') AS movie_titles,
+    AVG(mh.production_year) AS avg_production_year,
+    MAX(CASE WHEN c.note IS NOT NULL THEN c.note ELSE 'No Info' END) AS note_info
+FROM cast_info c
+JOIN aka_name a ON c.person_id = a.person_id
+JOIN complete_cast cc ON c.movie_id = cc.movie_id
+LEFT JOIN MovieHierarchy mh ON cc.movie_id = mh.movie_id
+WHERE a.name ILIKE '%John%'  -- Filter for names containing 'John'
+GROUP BY a.name
+ORDER BY total_movies DESC;
+
+-- Performance Benchmarking Note: 
+-- Adjust filters and JOIN conditions as necessary to produce varying results based on data volume.
+-- Additionally, explore the execution plan for potential optimization strategies.

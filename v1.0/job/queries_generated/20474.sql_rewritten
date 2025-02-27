@@ -1,0 +1,84 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mi.info, '; ') AS movie_info_notes
+    FROM 
+        movie_info mi
+    WHERE 
+        mi.info IS NOT NULL
+    GROUP BY 
+        mi.movie_id
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        r.role,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id, r.role
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT c.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_type_id) AS company_type_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+),
+FinalBenchmark AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        mi.movie_info_notes,
+        cr.role,
+        cr.role_count,
+        mc.company_names,
+        mc.company_type_count,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY rt.title_id) AS distinct_actor_count
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        MovieInfo mi ON rt.title_id = mi.movie_id
+    LEFT JOIN 
+        CastRoles cr ON rt.title_id = cr.movie_id
+    LEFT JOIN 
+        MovieCompanies mc ON rt.title_id = mc.movie_id
+    LEFT JOIN 
+        aka_name an ON rt.title_id = an.person_id 
+WHERE 
+    rt.rn = 1 
+    AND rt.production_year > 2000
+    AND (mc.company_type_count > 1 OR mc.company_names IS NULL)
+)
+
+SELECT 
+    title,
+    production_year,
+    COALESCE(movie_info_notes, 'No Info Available') AS info,
+    COALESCE(role, 'No Role Found') AS role,
+    COALESCE(role_count, 0) AS total_roles,
+    COALESCE(company_names, 'No Companies') AS companies,
+    distinct_actor_count
+FROM 
+    FinalBenchmark
+ORDER BY 
+    production_year DESC, title;

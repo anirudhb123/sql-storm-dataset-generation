@@ -1,0 +1,61 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), 
+Customer_Info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        ABS(DATEDIFF(CURDATE(), DATE(CONCAT(c.c_birth_year, '-', LPAD(c.c_birth_month, 2, '0'), '-', LPAD(c.c_birth_day, 2, '0'))))) AS age_in_days
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_preferred_cust_flag = 'Y'
+), 
+Top_Customers AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        RANK() OVER (PARTITION BY ci.cd_income_band_sk ORDER BY SUM(sc.ss_ext_sales_price) DESC) AS income_rank
+    FROM 
+        Customer_Info ci
+    LEFT JOIN 
+        store_sales sc ON ci.c_customer_sk = sc.ss_customer_sk
+    GROUP BY 
+        ci.c_customer_sk, ci.c_first_name, ci.c_last_name, ci.cd_gender
+)
+
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    COALESCE(SUM(sc.ss_ext_sales_price), 0) AS total_store_sales,
+    COALESCE(ts.total_sales, 0) AS total_web_sales
+FROM 
+    Customer_Info ci
+LEFT JOIN 
+    store_sales sc ON ci.c_customer_sk = sc.ss_customer_sk
+LEFT JOIN 
+    Sales_CTE ts ON sc.ss_item_sk = ts.ws_item_sk AND ts.sales_rank = 1
+WHERE
+    COALESCE(ts.total_sales, 0) > 1000
+GROUP BY 
+    ci.c_first_name, ci.c_last_name, ci.cd_gender
+HAVING 
+    COUNT(sc.ss_item_sk) > 2
+ORDER BY 
+    total_store_sales DESC, total_web_sales DESC;

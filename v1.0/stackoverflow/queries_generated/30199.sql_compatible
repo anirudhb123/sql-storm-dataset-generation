@@ -1,0 +1,97 @@
+
+WITH RecursiveTopPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN v.VoteTypeId IN (6, 10) THEN 1 END) AS CloseVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id
+),
+PostCommentStats AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+FilteredPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(pvs.UpVotes, 0) AS UpVotes,
+        COALESCE(pvs.DownVotes, 0) AS DownVotes,
+        COALESCE(pcs.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteStats pvs ON p.Id = pvs.PostId
+    LEFT JOIN 
+        PostCommentStats pcs ON p.Id = pcs.PostId
+    WHERE 
+        p.PostTypeId = 1 
+      AND 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 YEAR')
+),
+TopInteractions AS (
+    SELECT 
+        fp.Id,
+        fp.Title,
+        fp.CreationDate,
+        fp.Score,
+        fp.UpVotes,
+        fp.DownVotes,
+        fp.CommentCount,
+        CASE 
+            WHEN fp.UpVotes > fp.DownVotes THEN 'Positive Interaction'
+            WHEN fp.UpVotes < fp.DownVotes THEN 'Negative Interaction'
+            ELSE 'Neutral Interaction'
+        END AS InteractionType
+    FROM 
+        FilteredPosts fp
+    WHERE 
+        fp.rn <= 100 
+)
+
+SELECT 
+    u.DisplayName AS Owner,
+    ti.Title,
+    ti.CreationDate,
+    ti.Score,
+    ti.UpVotes,
+    ti.DownVotes,
+    ti.CommentCount,
+    ti.InteractionType
+FROM 
+    TopInteractions ti
+JOIN 
+    Users u ON ti.OwnerUserId = u.Id
+WHERE 
+    u.Reputation > 1000 
+ORDER BY 
+    ti.Score DESC, ti.CreationDate DESC;

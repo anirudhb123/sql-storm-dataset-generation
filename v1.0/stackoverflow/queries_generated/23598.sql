@@ -1,0 +1,83 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+UserPerformance AS (
+    SELECT 
+        UB.UserId,
+        UB.DisplayName,
+        PS.QuestionCount,
+        PS.AnswerCount,
+        PS.TotalViews,
+        PS.AverageScore,
+        UB.BadgeCount,
+        (COALESCE(UB.BadgeCount, 0) * 10 + (COALESCE(PS.QuestionCount, 0) * 5) + (COALESCE(PS.AnswerCount, 0) * 2)) AS PerformanceScore
+    FROM UserBadges UB
+    LEFT JOIN PostStatistics PS ON UB.UserId = PS.OwnerUserId
+),
+Ranking AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY PerformanceScore DESC) AS PerformanceRank
+    FROM UserPerformance
+),
+FinalOutput AS (
+    SELECT 
+        RankDetails.DisplayName,
+        RankDetails.QuestionCount,
+        RankDetails.AnswerCount,
+        RankDetails.TotalViews,
+        RankDetails.AverageScore,
+        RankDetails.BadgeCount,
+        RankDetails.PerformanceScore,
+        CASE 
+            WHEN RankDetails.PerformanceRank <= 10 THEN 'Top Contributor'
+            WHEN RankDetails.PerformanceRank <= 50 THEN 'Contributor'
+            ELSE 'Newbie'
+        END AS ContributorLevel
+    FROM Ranking RankDetails
+    WHERE RankDetails.PerformanceScore IS NOT NULL
+)
+SELECT 
+    F.DisplayName,
+    F.QuestionCount,
+    F.AnswerCount,
+    F.TotalViews,
+    F.AverageScore,
+    F.BadgeCount,
+    F.PerformanceScore,
+    F.ContributorLevel,
+    (
+        SELECT STRING_AGG(T.TagName, ', ') 
+        FROM Tags T 
+        WHERE T.Id IN (
+            SELECT DISTINCT UNNEST(string_to_array(SUBSTRING(P.Tags, 2, LENGTH(P.Tags)-2), '>'))::int)
+            FROM Posts P
+            WHERE P.OwnerUserId = F.UserId
+                AND P.PostTypeId = 1
+            LIMIT 5
+        )
+    ) AS TopTags
+FROM FinalOutput F
+WHERE F.BadgeCount IS NOT NULL
+ORDER BY F.PerformanceRank;
+
+This query comprehensively examines user performance based on their badges and their posts on StackOverflow. It combines several advanced SQL constructs including CTEs, window functions, and correlated subqueries, along with aggregate functions and some NULL logic handling. Additionally, it employs string manipulation to extract and aggregate the top tags associated with users' questions.

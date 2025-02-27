@@ -1,0 +1,79 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS user_id, 
+        u.DisplayName, 
+        COUNT(DISTINCT p.Id) AS total_posts, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS total_upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS total_downvotes,
+        MAX(p.CreationDate) AS last_post_date
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+ActiveUsers AS (
+    SELECT 
+        ua.user_id, 
+        ua.DisplayName,
+        RANK() OVER (ORDER BY ua.total_posts DESC, ua.total_upvotes DESC) AS user_rank,
+        LEAD(ua.DisplayName, 1) OVER (ORDER BY ua.total_posts DESC) AS next_user
+    FROM UserActivity ua
+    WHERE ua.total_posts > 0
+),
+TopUsers AS (
+    SELECT 
+        *
+    FROM ActiveUsers
+    WHERE user_rank <= 10
+),
+PostTags AS (
+    SELECT 
+        p.Id AS post_id,
+        unnest(string_to_array(p.Tags, '><')) AS tag
+    FROM Posts p
+    WHERE p.Tags IS NOT NULL
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS post_count,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS total_positive_votes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS total_negative_votes
+    FROM Tags t
+    LEFT JOIN PostTags pt ON pt.tag = t.TagName
+    LEFT JOIN Posts p ON pt.post_id = p.Id
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY t.TagName
+),
+PostsWithComments AS (
+    SELECT 
+        p.Id AS post_id,
+        p.Title,
+        COUNT(c.Id) AS comment_count,
+        SUM(CASE WHEN c.Score IS NULL THEN 1 ELSE 0 END) AS null_score_comments
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id, p.Title
+    HAVING COUNT(c.Id) > 0
+)
+SELECT 
+    tu.DisplayName AS top_user,
+    tu.user_rank,
+    ts.TagName AS most_popular_tag,
+    ts.post_count,
+    ts.total_positive_votes,
+    ts.total_negative_votes,
+    p.ComplaintsCount,
+    COALESCE(NULLIF(p.comment_count, 0), 'No Comments') AS comments_summary
+FROM TopUsers tu
+JOIN TagStatistics ts ON ts.total_positive_votes > 10
+JOIN PostsWithComments p ON p.post_id = (
+    SELECT p1.Id 
+    FROM Posts p1 
+    WHERE p1.OwnerUserId = tu.user_id 
+    ORDER BY p1.ViewCount DESC 
+    LIMIT 1
+)
+ORDER BY tu.user_rank, ts.post_count DESC
+LIMIT 5;

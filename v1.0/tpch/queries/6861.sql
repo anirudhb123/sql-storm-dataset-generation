@@ -1,0 +1,51 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        ROW_NUMBER() OVER (PARTITION BY YEAR(o.o_orderdate) ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+),
+SupplierPartPrices AS (
+    SELECT 
+        ps.ps_partkey, 
+        s.s_nationkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_nationkey
+),
+HighValueNations AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        AVG(spp.total_supplycost) AS avg_supplycost
+    FROM 
+        nation n
+    JOIN 
+        SupplierPartPrices spp ON n.n_nationkey = spp.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+    HAVING 
+        AVG(spp.total_supplycost) > 5000
+)
+SELECT 
+    ro.o_orderkey, 
+    ro.o_orderdate, 
+    ro.o_totalprice, 
+    hvn.n_name, 
+    hvn.avg_supplycost
+FROM 
+    RankedOrders ro
+JOIN 
+    HighValueNations hvn ON hvn.n_nationkey IN (SELECT DISTINCT s_nationkey FROM supplier s JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey WHERE ps.ps_partkey IN (SELECT DISTINCT ps_partkey FROM lineitem l WHERE l.l_orderkey = ro.o_orderkey))
+WHERE 
+    ro.order_rank <= 10
+ORDER BY 
+    ro.o_orderdate DESC, ro.o_totalprice DESC;

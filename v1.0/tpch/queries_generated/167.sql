@@ -1,0 +1,72 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        COUNT(ps.ps_partkey) AS supply_count
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+    HAVING 
+        SUM(ps.ps_supplycost) > 1000.00
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spending
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 5000.00
+)
+SELECT 
+    c.c_name AS customer_name, 
+    o.o_orderkey AS order_id, 
+    o.o_orderdate AS order_date, 
+    s.s_name AS supplier_name, 
+    p.p_name AS part_name,
+    ROUND(SUM(l.l_extendedprice * (1 - l.l_discount)), 2) AS total_price,
+    COUNT(DISTINCT l.l_orderkey) AS total_orders_count,
+    CASE 
+        WHEN COUNT(l.l_orderkey) > 10 THEN 'High Frequency'
+        ELSE 'Low Frequency'
+    END AS frequency_category
+FROM 
+    lineitem l
+JOIN 
+    RankedOrders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    part p ON l.l_partkey = p.p_partkey
+JOIN 
+    HighValueCustomers c ON o.o_custkey = c.c_custkey
+WHERE 
+    (s.s_acctbal IS NOT NULL AND s.s_acctbal > 500) OR s.s_acctbal IS NULL
+GROUP BY 
+    c.c_name, o.o_orderkey, o.o_orderdate, s.s_name, p.p_name
+HAVING 
+    SUM(l.l_extendedprice) > 1000
+ORDER BY 
+    total_price DESC, customer_name ASC;

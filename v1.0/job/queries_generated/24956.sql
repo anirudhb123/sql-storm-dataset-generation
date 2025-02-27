@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(cast_info_count.cast_count, 0) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COALESCE(cast_info_count.cast_count, 0) DESC) AS rank
+    FROM 
+        aka_title m
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            COUNT(*) AS cast_count
+        FROM 
+            cast_info
+        GROUP BY movie_id
+    ) AS cast_info_count ON m.id = cast_info_count.movie_id
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') -- Filter for movies
+),
+FirstAndLastMovie AS (
+    SELECT
+        m1.title AS first_title,
+        m2.title AS last_title
+    FROM 
+        rankedmovies m1
+    JOIN 
+        rankedmovies m2 ON m1.rank = 1 AND m2.rank = (SELECT MAX(rank) FROM RankedMovies)
+),
+CoActors AS (
+    SELECT 
+        ci1.person_id AS person_a,
+        ci2.person_id AS person_b,
+        COUNT(DISTINCT ci1.movie_id) AS co_stars
+    FROM 
+        cast_info ci1
+    JOIN 
+        cast_info ci2 ON ci1.movie_id = ci2.movie_id AND ci1.person_id <> ci2.person_id
+    GROUP BY 
+        ci1.person_id, ci2.person_id
+    HAVING 
+        COUNT(DISTINCT ci1.movie_id) > 1 -- only keep pairs that have acted together in multiple movies
+)
+SELECT 
+    f.first_title,
+    f.last_title,
+    ca.person_a,
+    ca.person_b,
+    ca.co_stars,
+    CASE 
+        WHEN ca.co_stars IS NULL THEN 'No co-stars found'
+        WHEN ca.co_stars < 5 THEN 'Low Collaboration'
+        WHEN ca.co_stars BETWEEN 5 AND 10 THEN 'Moderate Collaboration'
+        ELSE 'High Collaboration'
+    END AS collaboration_level
+FROM 
+    FirstAndLastMovie f
+LEFT JOIN 
+    CoActors ca ON true -- allows retrieval without filtering on specific conditions 
+WHERE 
+    f.first_title IS NOT NULL 
+ORDER BY 
+    ca.co_stars DESC NULLS LAST; -- ranks by co-stars while treating NULL as the least valuable

@@ -1,0 +1,62 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_sales_price) AS total_web_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+customer_details AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        CA.ca_state,
+        COALESCE(band.ib_lower_bound, 0) AS income_lower,
+        COALESCE(band.ib_upper_bound, 999999) AS income_upper
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics h ON cd.cd_demo_sk = h.hd_demo_sk
+    LEFT JOIN 
+        income_band band ON h.hd_income_band_sk = band.ib_income_band_sk
+    LEFT JOIN 
+        customer_address CA ON CA.ca_address_sk = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_current_cdemo_sk = cd.cd_demo_sk)
+),
+top_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_web_sales,
+        cs.order_count,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.income_lower,
+        cd.income_upper
+    FROM 
+        customer_sales cs
+    JOIN 
+        customer_details cd ON cs.c_customer_sk = cd.cd_demo_sk
+    WHERE 
+        cs.total_web_sales > (SELECT AVG(total_web_sales) FROM customer_sales)
+)
+SELECT 
+    ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY total_web_sales DESC) AS rank,
+    tc.c_customer_sk,
+    tc.total_web_sales,
+    tc.order_count,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    tc.income_lower,
+    tc.income_upper
+FROM 
+    top_customers tc
+WHERE 
+    tc.order_count > 1
+ORDER BY 
+    rank, tc.total_web_sales DESC;

@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE sh.level < 3
+),
+TotalRevenue AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+),
+BestSellingParts AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY l.l_partkey
+)
+SELECT 
+    p.p_name,
+    SUM(bsp.total_sales) AS sales,
+    sh.s_name AS supplier_name,
+    COUNT(DISTINCT tr.c_custkey) AS customer_count,
+    AVG(tr.total_revenue) AS avg_revenue
+FROM part p
+LEFT JOIN BestSellingParts bsp ON p.p_partkey = bsp.l_partkey
+LEFT JOIN supplier s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+LEFT JOIN TotalRevenue tr ON tr.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey))
+WHERE p.p_retailprice > 50.00
+GROUP BY p.p_name, sh.s_name
+HAVING SUM(bsp.total_sales) IS NOT NULL
+ORDER BY sales DESC, p.p_name;

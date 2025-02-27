@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        pt.Name AS PostType,
+        COUNT(c.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY COUNT(c.Id) DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName, pt.Name
+),
+
+PopularPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Author, 
+        PostType, 
+        CommentCount, 
+        UpVotes, 
+        DownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+)
+
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.Author,
+    pp.PostType,
+    pp.CommentCount,
+    pp.UpVotes,
+    pp.DownVotes,
+    COALESCE(SUBSTRING(p.Body FROM '[^<]*'), 'No content available') AS PostContent,
+    CONCAT('Tags: ', STRING_AGG(DISTINCT t.TagName, ', ')) AS TagList
+FROM 
+    PopularPosts pp
+LEFT JOIN 
+    Posts p ON pp.PostId = p.Id
+LEFT JOIN 
+    STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tagArray ON TRUE
+LEFT JOIN 
+    Tags t ON t.TagName = TRIM(tagArray)
+GROUP BY 
+    pp.PostId, pp.Title, pp.Author, pp.PostType, pp.CommentCount, pp.UpVotes, pp.DownVotes, p.Body
+ORDER BY 
+    pp.UpVotes DESC;

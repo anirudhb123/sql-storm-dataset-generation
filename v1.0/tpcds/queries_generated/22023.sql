@@ -1,0 +1,50 @@
+
+WITH Customer_Sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+), Top_Customers AS (
+    SELECT *
+    FROM Customer_Sales
+    WHERE profit_rank <= 10
+), Date_Stats AS (
+    SELECT
+        dd.d_month_seq,
+        COUNT(cc.cc_call_center_sk) AS call_centers,
+        AVG(ss.ss_net_profit) AS avg_store_profit,
+        MAX(ws.ws_net_profit) AS max_web_profit
+    FROM 
+        call_center cc 
+    LEFT JOIN 
+        store_sales ss ON cc.cc_call_center_sk = ss.ss_store_sk
+    LEFT JOIN 
+        date_dim dd ON ss.ss_sold_date_sk = dd.d_date_sk
+    GROUP BY 
+        dd.d_month_seq
+)
+SELECT 
+    tc.c_first_name,
+    tc.c_last_name,
+    COALESCE(ds.call_centers, 0) AS active_call_centers,
+    COALESCE(ds.avg_store_profit, 0) AS average_store_profit,
+    tc.total_orders,
+    tc.total_profit
+FROM 
+    Top_Customers tc
+FULL OUTER JOIN 
+    Date_Stats ds ON ds.d_month_seq = (SELECT MAX(d_month_seq) FROM date_dim) -- Using subquery approach to find current month
+WHERE 
+    tc.total_profit IS NOT NULL OR ds.avg_store_profit IS NOT NULL
+ORDER BY 
+    tc.total_profit DESC NULLS LAST,
+    ds.avg_store_profit DESC NULLS LAST;

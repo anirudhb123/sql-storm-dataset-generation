@@ -1,0 +1,80 @@
+WITH RECURSIVE UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        B.Name AS BadgeName,
+        B.Class,
+        B.Date AS AwardedDate,
+        ROW_NUMBER() OVER(PARTITION BY U.Id ORDER BY B.Date DESC) AS BadgeRank
+    FROM 
+        Users U
+    JOIN 
+        Badges B ON U.Id = B.UserId
+)
+
+, RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, P.OwnerUserId, P.Title, P.CreationDate, P.Score
+)
+
+, UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        COUNT(DISTINCT R.PostId) AS RelatedPostsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        RecentPosts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        UserBadges B ON U.Id = B.UserId AND B.BadgeRank <= 3
+    LEFT JOIN 
+        PostLinks R ON P.PostId = R.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.PostsCount,
+    UA.GoldBadges,
+    UA.SilverBadges,
+    UA.BronzeBadges,
+    UA.RelatedPostsCount,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.Upvotes,
+    RP.Downvotes,
+    RP.CommentCount
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    RecentPosts RP ON UA.UserId = RP.OwnerUserId
+WHERE 
+    UA.PostsCount > 0
+ORDER BY 
+    UA.PostsCount DESC, RP.CreationDate DESC
+LIMIT 100;

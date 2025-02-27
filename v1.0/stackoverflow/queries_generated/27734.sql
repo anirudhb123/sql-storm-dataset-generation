@@ -1,0 +1,51 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT pb.Id) AS TotalBadges,
+        AVG(u.Reputation) AS AvgUserReputation
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    LEFT JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    GROUP BY 
+        t.TagName
+),
+PostHistoryStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS EditComments
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  -- Considering title, body, and tags edits
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ts.TagName,
+    ts.TotalPosts,
+    ts.TotalViews,
+    ts.TotalBadges,
+    ts.AvgUserReputation,
+    phs.EditCount,
+    phs.LastEditDate,
+    phs.EditComments
+FROM 
+    TagStats ts
+LEFT JOIN 
+    PostHistoryStats phs ON phs.PostId IN (
+        SELECT Id FROM Posts WHERE Tags LIKE '%' || ts.TagName || '%'
+    )
+ORDER BY 
+    ts.TotalViews DESC,
+    ts.TotalPosts DESC;

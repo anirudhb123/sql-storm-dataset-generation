@@ -1,0 +1,61 @@
+
+WITH UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT BA.Id) AS TotalBadges,
+        SUM(VB.VotesCount) AS TotalVotes,
+        SUM(P.ViewCount) AS TotalViewCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Badges BA ON U.Id = BA.UserId
+    LEFT JOIN (
+        SELECT 
+            V.UserId,
+            V.PostId,
+            COUNT(V.Id) AS VotesCount
+        FROM Votes V
+        GROUP BY V.UserId, V.PostId
+    ) VB ON U.Id = VB.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM Posts P
+    LEFT JOIN LATERAL STRING_TO_ARRAY(P.Tags, ',') AS Tag ON TRUE
+    LEFT JOIN Tags T ON T.TagName = Tag
+    WHERE P.CreationDate >= DATE '2024-10-01' - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, P.AnswerCount, P.CommentCount
+)
+SELECT 
+    UE.UserId,
+    UE.DisplayName,
+    UE.TotalPosts,
+    UE.TotalComments,
+    UE.TotalBadges,
+    UE.TotalVotes,
+    UE.TotalViewCount,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.Tags
+FROM UserEngagement UE
+JOIN PostStatistics PS ON UE.TotalPosts > 10
+WHERE UE.TotalVotes > 100
+ORDER BY UE.TotalPosts DESC, PS.Score DESC
+LIMIT 50;

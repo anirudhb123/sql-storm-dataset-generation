@@ -1,0 +1,65 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ws_sold_date_sk,
+        1 AS level
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 20220101 AND 20221231
+    UNION ALL
+    SELECT 
+        s.ws_item_sk,
+        s.ws_order_number,
+        s.ws_quantity,
+        s.ws_sales_price,
+        s.ws_ext_sales_price + c.ws_ext_sales_price AS cumulative_sales,
+        s.ws_sold_date_sk,
+        level + 1
+    FROM web_sales s
+    JOIN SalesCTE c ON s.ws_order_number = c.ws_order_number AND c.level < 5
+),
+AggregateSales AS (
+    SELECT 
+        item.i_item_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        AVG(ws_sales_price) AS average_sales_price
+    FROM web_sales
+    JOIN item ON ws_item_sk = i_item_sk
+    GROUP BY item.i_item_id
+),
+CustomerStats AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_net_paid) AS total_spent
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+)
+SELECT
+    ASG.item_id,
+    ASG.total_sales,
+    ASG.total_orders,
+    CS.c_first_name,
+    CS.c_last_name,
+    CS.order_count,
+    CS.total_spent,
+    CASE 
+        WHEN CS.total_spent IS NULL THEN 'No Sales'
+        WHEN CS.total_spent > 1000 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_segment
+FROM AggregateSales ASG
+JOIN CustomerStats CS ON ASG.item_id = CS.c_customer_sk
+WHERE CS.order_count > 0
+ORDER BY ASG.total_sales DESC, CS.total_spent DESC
+LIMIT 100;

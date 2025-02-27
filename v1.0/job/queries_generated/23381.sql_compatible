@@ -1,0 +1,58 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id,
+           m.title,
+           0 AS level,
+           NULL AS parent_movie_id
+    FROM aka_title m
+    WHERE m.production_year = (SELECT MAX(production_year) FROM aka_title)
+
+    UNION ALL
+
+    SELECT m.id AS movie_id,
+           m.title,
+           mh.level + 1,
+           mh.movie_id AS parent_movie_id
+    FROM aka_title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+, top_cast AS (
+    SELECT c.movie_id,
+           a.name AS actor_name,
+           ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    WHERE c.nr_order IS NOT NULL
+)
+
+, relevant_movies AS (
+    SELECT mh.movie_id,
+           mh.title,
+           CASE
+               WHEN mh.level = 0 THEN 'Direct'
+               ELSE 'Linked'
+           END AS movie_relation,
+           COUNT(tc.actor_name) AS actor_count
+    FROM movie_hierarchy mh
+    LEFT JOIN top_cast tc ON mh.movie_id = tc.movie_id
+    GROUP BY mh.movie_id, mh.title, mh.level
+)
+
+SELECT rm.movie_id,
+       rm.title,
+       rm.movie_relation,
+       rm.actor_count,
+       COALESCE(NULLIF(rm.actor_count, 0), 'No Actors') AS actor_status,
+       (SELECT STRING_AGG(tc.actor_name, ', ') 
+        FROM top_cast tc 
+        WHERE tc.movie_id = rm.movie_id AND tc.actor_rank <= 3) AS top_actors,
+       CASE 
+           WHEN rm.actor_count >= 5 THEN 'Star-studded'
+           WHEN rm.actor_count BETWEEN 1 AND 4 THEN 'Moderate Cast'
+           ELSE 'No Cast'
+       END AS cast_quality
+FROM relevant_movies rm
+WHERE rm.movie_relation = 'Direct' OR (rm.movie_relation = 'Linked' AND rm.actor_count > 1)
+ORDER BY rm.actor_count DESC, rm.title ASC;

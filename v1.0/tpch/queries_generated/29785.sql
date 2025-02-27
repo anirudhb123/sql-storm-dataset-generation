@@ -1,0 +1,31 @@
+WITH RecursiveSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_phone, s.s_acctbal, s.s_comment, 0 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT ps.ps_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_phone, s.s_acctbal, s.s_comment, r.Level + 1
+    FROM partsupp ps
+    JOIN RecursiveSupplier r ON ps.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_brand = 'Brand#23' ORDER BY p.p_partkey LIMIT 1)
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE r.Level < 5
+),
+FilteredCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_address, c.c_phone, c.c_acctbal, c.c_mktsegment
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE n.n_name IN (SELECT DISTINCT n_name FROM nation WHERE n_comment LIKE '%European%')
+),
+StringProcessedOrders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate, o.o_orderpriority, 
+           LEFT(o.o_clerk, 10) AS ShortClerk, 
+           CONCAT('Order ', CAST(o.o_orderkey AS VARCHAR), ' of value ', CAST(o.o_totalprice AS VARCHAR)) AS OrderSummary
+    FROM orders o
+    JOIN FilteredCustomers fc ON o.o_custkey = fc.c_custkey
+)
+SELECT r.s_name, r.Level, c.c_name, o.OrderSummary
+FROM RecursiveSupplier r
+JOIN StringProcessedOrders o ON r.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_name LIKE '%Widget%'))
+JOIN FilteredCustomers c ON c.c_custkey = o.o_orderkey
+ORDER BY r.Level, c.c_name;

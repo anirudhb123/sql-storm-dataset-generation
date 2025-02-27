@@ -1,0 +1,32 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost,
+           ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name
+    FROM RankedSuppliers s
+    WHERE s.rn <= 5
+),
+CustomerOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_custkey
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-10-01'
+)
+SELECT c.c_custkey, SUM(co.o_totalprice) AS TotalSpent, COUNT(DISTINCT co.o_orderkey) AS OrdersCount, 
+       ts.s_suppkey, ts.s_name
+FROM CustomerOrders co
+JOIN TopSuppliers ts ON co.o_orderkey IN (
+    SELECT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_suppkey = ts.s_suppkey
+)
+JOIN customer c ON co.o_custkey = c.c_custkey
+GROUP BY c.c_custkey, ts.s_suppkey, ts.s_name
+ORDER BY TotalSpent DESC, OrdersCount DESC
+LIMIT 10;

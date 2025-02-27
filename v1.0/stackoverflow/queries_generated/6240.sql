@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) AS UpvoteCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 3) AS DownvoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        COUNT(DISTINCT rp.PostId) AS TotalPosts, 
+        SUM(rp.Score) AS TotalScore, 
+        SUM(rp.UpvoteCount) AS TotalUpvotes, 
+        SUM(rp.DownvoteCount) AS TotalDownvotes
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    us.UserId, 
+    us.DisplayName, 
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalScore,
+    us.TotalUpvotes,
+    us.TotalDownvotes,
+    DENSE_RANK() OVER (ORDER BY us.Reputation DESC) AS ReputationRank
+FROM 
+    UserStatistics us
+WHERE 
+    us.TotalPosts > 0
+ORDER BY 
+    us.Reputation DESC, 
+    us.TotalScore DESC
+LIMIT 10;

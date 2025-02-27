@@ -1,0 +1,74 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId IN (4, 5) THEN 1 ELSE 0 END) AS TotalTagWikis,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostsWithTagCount,
+        SUM(p.ViewCount) AS TotalTagViews,
+        AVG(p.Score) AS AverageTagScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON CONCAT('<', t.TagName, '>') = ANY(string_to_array(p.Tags, ','))
+    GROUP BY 
+        t.Id, t.TagName
+),
+ClosedPostStats AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerDisplayName,
+        ph.CreationDate AS ClosureDate,
+        ph.UserDisplayName AS ClosedBy,
+        ct.Name AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        CloseReasonTypes ct ON ph.Comment::int = ct.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    ups.DisplayName AS UserName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.TotalTagWikis,
+    ups.TotalViews,
+    ups.AverageScore,
+    ts.TagName,
+    ts.PostsWithTagCount,
+    ts.TotalTagViews,
+    ts.AverageTagScore,
+    cps.Title AS ClosedPostTitle,
+    cps.ClosureDate,
+    cps.ClosedBy,
+    cps.CloseReason
+FROM 
+    UserPostStats ups
+FULL OUTER JOIN 
+    TagStats ts ON ups.TotalPosts > 0  
+LEFT JOIN 
+    ClosedPostStats cps ON ups.UserId = (SELECT OwnerUserId FROM Posts WHERE Title = cps.Title LIMIT 1)
+ORDER BY 
+    ups.TotalPosts DESC, 
+    ts.PostsWithTagCount DESC
+LIMIT 100;

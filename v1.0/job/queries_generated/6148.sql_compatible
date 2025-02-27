@@ -1,0 +1,68 @@
+
+WITH movie_summary AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        ARRAY_AGG(DISTINCT c.company_name) AS production_companies
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+actor_summary AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name,
+        COALESCE(SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END), 0) AS movies_with_notes
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.id, ak.name
+),
+final_summary AS (
+    SELECT 
+        ms.movie_id,
+        ms.title,
+        ms.production_year,
+        ms.actor_count,
+        ms.keyword_count,
+        ms.production_companies,
+        a.actor_id,
+        a.name AS actor_name,
+        a.movies_with_notes
+    FROM 
+        movie_summary ms
+    LEFT JOIN 
+        actor_summary a ON ms.actor_count > 0
+)
+SELECT 
+    fs.movie_id,
+    fs.title,
+    fs.production_year,
+    fs.actor_count,
+    fs.keyword_count,
+    fs.production_companies,
+    fs.actor_id,
+    fs.actor_name,
+    fs.movies_with_notes
+FROM 
+    final_summary fs
+WHERE 
+    fs.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    fs.production_year DESC, fs.actor_count DESC;

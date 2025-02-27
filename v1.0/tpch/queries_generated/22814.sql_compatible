@@ -1,0 +1,47 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           CASE 
+               WHEN p.p_retailprice IS NULL THEN 'No Price'
+               ELSE 'Priced'
+           END AS price_status
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL
+),
+AggOrders AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1993-01-01' AND '1993-12-31'
+    GROUP BY o.o_orderkey
+),
+SupplierPartDetails AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty,
+           COALESCE(SUM(l.l_quantity), 0) AS total_sold
+    FROM partsupp ps
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey AND ps.ps_suppkey = l.l_suppkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+)
+SELECT p.p_name, 
+       COALESCE(s.s_name, 'Unknown') AS supplier_name,
+       r.r_name AS region_name,
+       SUM(spd.ps_availqty) AS available_quantity,
+       AVG(a.total_revenue) AS avg_order_revenue
+FROM HighValueParts p
+LEFT JOIN SupplierPartDetails spd ON p.p_partkey = spd.ps_partkey
+LEFT JOIN RankedSuppliers s ON spd.ps_suppkey = s.s_suppkey AND s.rn = 1
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN AggOrders a ON a.o_orderkey = spd.ps_suppkey
+WHERE (s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000) 
+   OR (p.price_status = 'No Price')
+GROUP BY p.p_name, s.s_name, r.r_name
+HAVING SUM(spd.ps_availqty) > 0
+ORDER BY avg_order_revenue DESC 
+LIMIT 10 OFFSET 5;

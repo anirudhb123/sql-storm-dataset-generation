@@ -1,0 +1,64 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rnk
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(year, -1, CURRENT_DATE)
+),
+
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+    HAVING COUNT(DISTINCT ps.ps_partkey) > 5
+),
+
+LineitemAggregates AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_amount,
+        COUNT(*) AS line_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+),
+
+CustomerNations AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, n.n_name
+    HAVING SUM(o.o_totalprice) > 5000
+)
+
+SELECT 
+    p.p_name,
+    p.p_container,
+    SUM(ps.ps_availqty) AS total_available,
+    COALESCE(SUM(la.total_line_amount), 0) AS total_line_amount,
+    COALESCE(MAX(cn.total_spent), 0) AS max_spent_by_customer,
+    r.*,
+    CASE 
+        WHEN rnk IS NOT NULL THEN 'Processed'
+        ELSE 'Pending'
+    END AS order_status_summary
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN LineitemAggregates la ON ps.ps_partkey = la.l_orderkey
+LEFT JOIN CustomerNations cn ON cn.c_custkey = la.l_orderkey
+LEFT JOIN RankedOrders r ON r.o_orderkey = la.l_orderkey
+WHERE p.p_retailprice BETWEEN 10 AND 100
+AND p.p_size IN (SELECT 1 UNION SELECT 2)
+GROUP BY p.p_partkey, p.p_name, p.p_container, r.o_orderkey, rnk
+ORDER BY total_available DESC, total_line_amount DESC;

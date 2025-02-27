@@ -1,0 +1,64 @@
+
+WITH Customer_Stats AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(COALESCE(ss.net_paid, 0) + COALESCE(cs.net_paid, 0) + COALESCE(ws.net_paid, 0)) AS total_spent,
+        COUNT(DISTINCT CASE WHEN ss.ticket_number IS NOT NULL THEN ss.ticket_number END) AS store_purchase_count,
+        COUNT(DISTINCT CASE WHEN ws.order_number IS NOT NULL THEN ws.order_number END) AS web_purchase_count,
+        COUNT(DISTINCT CASE WHEN cs.order_number IS NOT NULL THEN cs.order_number END) AS catalog_purchase_count,
+        COUNT(DISTINCT CASE WHEN cu.c_customer_sk IS NOT NULL THEN cu.c_customer_sk END) AS unique_customer_count
+    FROM customer AS c
+    LEFT JOIN store_sales AS ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN catalog_sales AS cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    LEFT JOIN web_sales AS ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN customer AS cu ON c.c_customer_sk = cu.c_customer_sk AND cu.c_current_cdemo_sk IS NOT NULL
+    GROUP BY c.c_customer_sk
+),
+Demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM customer_demographics AS cd
+    JOIN household_demographics AS hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    JOIN income_band AS ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE cd.cd_purchase_estimate > 1000
+),
+Date_Stats AS (
+    SELECT 
+        d.d_date_sk,
+        COUNT(DISTINCT ss.ticket_number) AS store_sales_count,
+        COUNT(DISTINCT ws.order_number) AS web_sales_count
+    FROM date_dim AS d
+    LEFT JOIN store_sales AS ss ON d.d_date_sk = ss.ss_sold_date_sk
+    LEFT JOIN web_sales AS ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_date_sk
+),
+Max_Spend AS (
+    SELECT 
+        MAX(total_spent) AS max_total_spent
+    FROM Customer_Stats
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.total_spent,
+    CASE 
+        WHEN cs.total_spent >= (SELECT max_total_spent FROM Max_Spend) * 0.8 THEN 'High Spender'
+        WHEN cs.total_spent BETWEEN (SELECT max_total_spent FROM Max_Spend) * 0.5 AND (SELECT max_total_spent FROM Max_Spend) * 0.8 THEN 'Moderate Spender'
+        ELSE 'Low Spender'
+    END AS spending_category,
+    d.cd_gender,
+    d.cd_marital_status,
+    d.ib_lower_bound,
+    d.ib_upper_bound,
+    ds.store_sales_count,
+    ds.web_sales_count
+FROM Customer_Stats AS cs
+LEFT JOIN Demographics AS d ON cs.c_customer_sk = d.cd_demo_sk
+LEFT JOIN Date_Stats AS ds ON ds.store_sales_count > 0 OR ds.web_sales_count > 0
+WHERE cs.total_spent IS NOT NULL
+AND (d.cd_gender IS NULL OR d.cd_gender IN ('M', 'F'))
+ORDER BY cs.total_spent DESC
+LIMIT 100;

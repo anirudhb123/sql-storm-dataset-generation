@@ -1,0 +1,54 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS Rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name, p.p_type
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS NetRevenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate < DATE '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SupplierHighValue AS (
+    SELECT 
+        hs.s_suppkey,
+        hs.s_name,
+        COUNT(DISTINCT hvo.o_orderkey) AS OrderCount,
+        SUM(hvo.NetRevenue) AS TotalRevenue
+    FROM RankedSuppliers hs
+    JOIN HighValueOrders hvo ON hs.s_suppkey = (SELECT ps.ps_suppkey
+                                                FROM partsupp ps
+                                                JOIN part p ON ps.ps_partkey = p.p_partkey
+                                                WHERE p.p_type IN (SELECT DISTINCT p_type FROM part)
+                                                AND ps.ps_supplycost * ps.ps_availqty = hs.TotalSupplyCost
+                                                LIMIT 1)
+    GROUP BY hs.s_suppkey, hs.s_name
+)
+
+SELECT 
+    sh.s_name,
+    sh.OrderCount,
+    sh.TotalRevenue,
+    r.r_name AS RegionName,
+    CASE 
+        WHEN sh.TotalRevenue IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Exists'
+    END AS RevenueStatus
+FROM SupplierHighValue sh
+LEFT JOIN nation n ON sh.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p))
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE sh.TotalRevenue > (SELECT AVG(TotalRevenue) FROM SupplierHighValue)
+ORDER BY sh.TotalRevenue DESC
+LIMIT 10;

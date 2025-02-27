@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        aka_title mt ON mh.linked_movie_id = mt.id
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+)
+SELECT 
+    a.name,
+    COUNT(c.id) AS total_cast,
+    AVG(CASE 
+        WHEN p.gender = 'F' THEN 1 
+        ELSE 0 
+    END) * 100 AS female_percentage,
+    STRING_AGG(DISTINCT m.title, ', ') AS movies,
+    MAX(CASE WHEN m.production_year = 2022 THEN m.title END) AS latest_movie_from_2022,
+    SUM(mh.level) AS total_link_level
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    movie_companies mc ON c.movie_id = mc.movie_id
+JOIN 
+    movie_hierarchy mh ON c.movie_id = mh.movie_id
+JOIN 
+    person_info p ON a.person_id = p.person_id
+JOIN 
+    aka_title m ON c.movie_id = m.id
+WHERE 
+    m.production_year IS NOT NULL
+    AND (m.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie') OR m.kind_id IS NULL)
+GROUP BY 
+    a.name
+HAVING 
+    COUNT(c.id) > 10
+ORDER BY 
+    female_percentage DESC, total_cast DESC
+LIMIT 50;

@@ -1,0 +1,56 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r.r_regionkey, r.r_name, 1 AS level
+    FROM region r
+    WHERE r.r_regionkey IS NOT NULL
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, rh.level + 1
+    FROM region r
+    JOIN RegionHierarchy rh ON r.r_regionkey = rh.r_regionkey
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_suppkey) AS supplier_count,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    rh.r_name AS region_name,
+    c.c_name AS customer_name,
+    COALESCE(p.p_name, 'N/A') AS part_name,
+    co.total_spent,
+    li.total_price,
+    li.supplier_count,
+    p.total_available,
+    p.avg_supply_cost
+FROM RegionHierarchy rh
+LEFT JOIN CustomerOrderSummary co ON rh.level = co.total_orders
+LEFT JOIN PartSupplierInfo p ON p.total_available > 10
+LEFT JOIN LineItemDetails li ON li.l_orderkey = co.c_custkey
+JOIN nation n ON n.n_nationkey = co.c_custkey
+WHERE co.total_spent IS NOT NULL
+  AND (p.avg_supply_cost > 50 OR p.p_name LIKE 'part%')
+ORDER BY rh.region_name, co.total_spent DESC;

@@ -1,0 +1,89 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year, 
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorCompanyStats AS (
+    SELECT 
+        p.person_id,
+        COALESCE(COUNT(DISTINCT mc.company_id), 0) AS company_count,
+        AVG(CASE 
+            WHEN mc.note IS NOT NULL THEN LENGTH(mc.note) 
+            ELSE 0 
+        END) AS avg_note_length
+    FROM 
+        person_info p
+    LEFT JOIN 
+        cast_info ci ON p.person_id = ci.person_id
+    LEFT JOIN 
+        movie_companies mc ON ci.movie_id = mc.movie_id
+    GROUP BY 
+        p.person_id
+),
+PopularKeywords AS (
+    SELECT 
+        mk.movie_id, 
+        k.keyword, 
+        COUNT(mk.id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword IS NOT NULL
+    GROUP BY 
+        mk.movie_id, k.keyword
+    HAVING 
+        COUNT(mk.id) > 3
+),
+AbsentActorTitles AS (
+    SELECT 
+        rt.title_id,
+        MAX(rt.title) AS title_name
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        cast_info ci ON rt.title_id = ci.movie_id
+    WHERE 
+        ci.person_id IS NULL
+    GROUP BY 
+        rt.title_id
+)
+SELECT 
+    rt.title AS title_name,
+    rt.production_year,
+    acs.company_count,
+    acs.avg_note_length,
+    ak.keyword,
+    ak.keyword_count
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    ActorCompanyStats acs ON acs.person_id = (
+        SELECT 
+            ci.person_id 
+        FROM 
+            cast_info ci 
+        WHERE 
+            ci.movie_id = rt.title_id 
+        ORDER BY 
+            RANDOM() 
+        LIMIT 1
+    )
+INNER JOIN 
+    PopularKeywords ak ON ak.movie_id = rt.title_id
+LEFT JOIN 
+    AbsentActorTitles aat ON aat.title_id = rt.title_id
+WHERE 
+    (rt.rn = 1 OR rt.production_year < 2000)
+    AND (acs.company_count > 0 OR aat.title_id IS NOT NULL)
+ORDER BY 
+    rt.production_year DESC, rt.title;

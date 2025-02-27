@@ -1,0 +1,70 @@
+WITH RegionSales AS (
+    SELECT 
+        r.r_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        r.r_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+),
+RankedSales AS (
+    SELECT 
+        r.*, 
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        RegionSales r
+),
+FilteredSales AS (
+    SELECT 
+        r.r_name,
+        r.total_sales,
+        r.total_orders,
+        r.unique_customers
+    FROM 
+        RankedSales r
+    WHERE 
+        r.sales_rank <= 5
+)
+
+SELECT 
+    fs.r_name,
+    fs.total_sales,
+    fs.total_orders,
+    fs.unique_customers,
+    COALESCE(p.p_name, 'No Products') AS best_selling_product
+FROM 
+    FilteredSales fs
+LEFT JOIN 
+    lineitem l ON fs.r_name IN (
+        SELECT DISTINCT n.n_name 
+        FROM nation n 
+        WHERE n.n_regionkey = (
+            SELECT r.r_regionkey 
+            FROM region r 
+            WHERE r.r_name = fs.r_name
+        )
+    )
+LEFT JOIN 
+    part p ON l.l_partkey = p.p_partkey
+WHERE 
+    l.l_returnflag = 'N'
+ORDER BY 
+    fs.total_sales DESC;

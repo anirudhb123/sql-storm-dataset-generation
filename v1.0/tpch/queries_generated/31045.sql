@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.Level < 5
+),
+OrderStats AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+           COUNT(DISTINCT l.l_partkey) AS DistinctParts,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS Rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS OrderCount, 
+           SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) IS NOT NULL
+)
+
+SELECT 
+    r.r_name AS Region, 
+    n.n_name AS Nation, 
+    sh.s_name AS SupplierName, 
+    SUM(os.TotalRevenue) AS TotalRevenueBySupplier,
+    co.OrderCount,
+    co.TotalSpent
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN OrderStats os ON sh.s_suppkey = os.o_orderkey
+JOIN CustomerOrders co ON n.n_nationkey = co.c_custkey
+GROUP BY r.r_name, n.n_name, sh.s_name, co.OrderCount, co.TotalSpent
+HAVING TotalRevenueBySupplier IS NOT NULL AND TotalRevenueBySupplier > 50000
+ORDER BY Region, Nation, TotalRevenueBySupplier DESC;

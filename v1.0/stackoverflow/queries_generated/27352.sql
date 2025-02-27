@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        p.CreationDate,
+        DENSE_RANK() OVER (PARTITION BY p.Tags ORDER BY COUNT(v.Id) DESC) AS TagRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Filtering for Questions
+        AND p.CreationDate >= DATEADD(year, -1, GETDATE())  -- Last year
+    GROUP BY 
+        p.Id, p.Title, p.Tags, p.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.CommentCount,
+        rp.VoteCount,
+        rp.CreationDate
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank = 1  -- Only top posts per tag
+),
+TaggedPostDetails AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.Tags,
+        tp.CommentCount,
+        tp.VoteCount,
+        STRING_AGG(pt.Name, ', ') AS PostTypeNames
+    FROM 
+        TopPosts tp
+    JOIN 
+        PostTypes pt ON pt.Id = (SELECT TOP 1 PostTypeId 
+                                  FROM Posts 
+                                  WHERE Id = tp.PostId)
+    GROUP BY 
+        tp.PostId, tp.Title, tp.Tags, tp.CommentCount, tp.VoteCount
+)
+SELECT 
+    tpd.*,
+    u.DisplayName AS TopAnswerer,
+    MAX(u.Reputation) AS TopReputation
+FROM 
+    TaggedPostDetails tpd
+LEFT JOIN 
+    Posts ans ON ans.AcceptedAnswerId = tpd.PostId
+LEFT JOIN 
+    Users u ON ans.OwnerUserId = u.Id
+GROUP BY 
+    tpd.PostId, tpd.Title, tpd.Tags, tpd.CommentCount, tpd.VoteCount, u.DisplayName
+ORDER BY 
+    tpd.VoteCount DESC, tpd.CommentCount DESC;

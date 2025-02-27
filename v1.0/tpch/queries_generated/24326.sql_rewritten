@@ -1,0 +1,59 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, n_comment, 1 AS level
+    FROM nation
+    WHERE n_name LIKE '%land%' 
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, n.n_comment, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+customer_summary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+part_supplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty * ps.ps_supplycost) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+line_sum AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+order_ranking AS (
+    SELECT o.o_orderkey, DENSE_RANK() OVER (ORDER BY SUM(l.total_line_value) DESC) AS order_rank
+    FROM orders o
+    JOIN line_sum l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(ps.total_cost) AS total_part_cost,
+    MAX(os.order_rank) AS max_order_rank
+FROM nation n
+LEFT JOIN customer_summary c ON c.c_custkey IN (
+    SELECT c.c_custkey 
+    FROM customer c 
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_nationkey = n.n_nationkey)
+)
+LEFT JOIN part_supplier ps ON ps.ps_partkey IN (
+    SELECT p.p_partkey 
+    FROM part p 
+    WHERE p.p_retailprice > (
+        SELECT AVG(p_avg.p_retailprice * 1.1) FROM part p_avg WHERE p_avg.p_size BETWEEN 0 AND 50
+    )
+)
+LEFT JOIN order_ranking os ON os.o_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_orderstatus = 'F'
+)
+WHERE n.n_regionkey IS NOT NULL
+GROUP BY n.n_name
+ORDER BY customer_count DESC, total_part_cost ASC
+OPTION (RECOMPILE);

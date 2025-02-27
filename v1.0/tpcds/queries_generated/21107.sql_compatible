@@ -1,0 +1,80 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_return_item_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt) AS total_return_amt,
+        RANK() OVER (PARTITION BY sr_return_item_sk ORDER BY SUM(sr_return_amt) DESC) AS rank_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_return_item_sk
+),
+HighValueReturns AS (
+    SELECT 
+        rr.return_count,
+        rr.total_return_amt,
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(sm.sm_type, 'Unknown') AS ship_mode
+    FROM 
+        RankedReturns rr
+    JOIN 
+        item i ON rr.sr_return_item_sk = i.i_item_sk
+    LEFT JOIN 
+        ship_mode sm ON sm.sm_ship_mode_sk = (
+            SELECT 
+                sm_ship_mode_sk 
+            FROM 
+                catalog_sales 
+            WHERE 
+                cs_item_sk = rr.sr_return_item_sk 
+            ORDER BY 
+                cs_net_profit DESC 
+            FETCH FIRST 1 ROW ONLY
+        )
+    WHERE 
+        rr.rank_amt <= 5
+),
+FilteredSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ws.ws_ship_date_sk,
+        d.d_date
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_shipped_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = EXTRACT(YEAR FROM DATE '2002-10-01') 
+        AND ws.ws_sales_price > 10 
+        AND NOT EXISTS (
+            SELECT 1 
+            FROM web_returns wr 
+            WHERE 
+                wr.wr_item_sk = ws.ws_item_sk 
+                AND wr.wr_returned_date_sk = d.d_date_sk
+        )
+)
+SELECT 
+    hvr.i_item_id,
+    hvr.i_item_desc,
+    hvr.ship_mode,
+    COUNT(DISTINCT fs.ws_order_number) AS total_orders,
+    SUM(CASE WHEN fs.ws_net_profit > 0 THEN fs.ws_net_profit ELSE 0 END) AS total_profit
+FROM 
+    HighValueReturns hvr
+LEFT JOIN 
+    FilteredSales fs ON hvr.i_item_id = fs.ws_item_sk
+GROUP BY 
+    hvr.i_item_id, 
+    hvr.i_item_desc, 
+    hvr.ship_mode
+HAVING 
+    SUM(CASE WHEN fs.ws_net_profit > 0 THEN fs.ws_net_profit ELSE 0 END) > 50
+ORDER BY 
+    total_orders DESC,
+    total_profit DESC;

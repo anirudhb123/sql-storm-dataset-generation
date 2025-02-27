@@ -1,0 +1,55 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_companies mc ON at.movie_id = mc.movie_id
+    GROUP BY 
+        at.title, at.production_year
+),
+top_movies AS (
+    SELECT 
+        title,
+        production_year
+    FROM 
+        ranked_movies
+    WHERE 
+        rank <= 5
+),
+actor_roles AS (
+    SELECT 
+        ak.name AS actor_name,
+        at.title AS movie_title,
+        ct.kind AS role
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    LEFT JOIN 
+        role_type ct ON ci.role_id = ct.id
+)
+SELECT 
+    tm.title, 
+    tm.production_year, 
+    STRING_AGG(DISTINCT ar.actor_name, ', ') AS actors,
+    COUNT(DISTINCT ar.role) AS unique_roles,
+    CASE 
+        WHEN COUNT(ar.role) > 0 THEN 'Has Roles' 
+        ELSE 'No Roles' 
+    END AS role_status
+FROM 
+    top_movies tm
+LEFT JOIN 
+    actor_roles ar ON tm.title = ar.movie_title
+GROUP BY 
+    tm.title, tm.production_year
+ORDER BY 
+    tm.production_year DESC, 
+    tm.title ASC;

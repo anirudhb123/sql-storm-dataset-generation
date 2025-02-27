@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.UpVotes,
+    ua.DownVotes,
+    ua.CommentCount,
+    ua.PostCount,
+    rp.Title AS HighestScorePostTitle,
+    rp.CreationDate AS PostCreatedDate,
+    cp.ClosedDate,
+    cp.Comment AS CloseReason
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    RankedPosts rp ON ua.UserId = rp.OwnerUserId AND rp.PostRank = 1
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.Id
+WHERE 
+    ua.PostCount > 0
+ORDER BY 
+    ua.UpVotes DESC, 
+    ua.DownVotes ASC NULLS LAST
+LIMIT 100;

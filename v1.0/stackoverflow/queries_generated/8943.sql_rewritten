@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+), HighScoringPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerDisplayName
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByScore <= 10
+), PostAnalytics AS (
+    SELECT 
+        h.Title,
+        h.CreationDate,
+        h.Score,
+        h.ViewCount,
+        h.OwnerDisplayName,
+        COALESCE(SUM(CASE WHEN p.Tags LIKE '%sql%' THEN 1 END), 0) AS SqlRelatedCount
+    FROM 
+        HighScoringPosts h
+    LEFT JOIN 
+        Posts p ON h.PostId = p.Id
+    GROUP BY 
+        h.Title, h.CreationDate, h.Score, h.ViewCount, h.OwnerDisplayName
+)
+SELECT 
+    OwnerDisplayName, 
+    COUNT(PostId) AS TotalPosts, 
+    AVG(Score) AS AverageScore, 
+    SUM(ViewCount) AS TotalViews, 
+    SUM(SqlRelatedCount) AS TotalSqlRelated
+FROM 
+    PostAnalytics
+GROUP BY 
+    OwnerDisplayName
+ORDER BY 
+    TotalPosts DESC
+LIMIT 5;

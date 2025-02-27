@@ -1,0 +1,33 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+)
+
+SELECT p.p_name, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       r.r_name AS region_name,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       DENSE_RANK() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank,
+       CASE 
+           WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) IS NULL THEN 'No Revenue'
+           ELSE 'Revenue Generated'
+       END AS revenue_status
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN supplier_hierarchy sh ON c.c_nationkey = sh.s_nationkey
+JOIN nation n ON sh.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+GROUP BY p.p_name, r.r_name
+HAVING total_revenue > 10000
+ORDER BY r.r_name, total_revenue DESC
+LIMIT 10;

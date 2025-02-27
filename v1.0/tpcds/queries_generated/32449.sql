@@ -1,0 +1,64 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        SUM(ws_ext_discount_amt) AS total_discount,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws_item_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.net_profit) AS total_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        cd.cd_purchase_estimate > 500
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+),
+detailed_returns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    COALESCE(d.total_quantity, 0) AS total_quantity_sold,
+    COALESCE(d.total_sales, 0) AS total_sales,
+    COALESCE(d.total_discount, 0) AS total_discount,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    COALESCE(r.total_return_amt, 0) AS total_return_amt,
+    ci.total_profit,
+    ci.cd_gender,
+    ci.cd_marital_status
+FROM 
+    item i
+LEFT JOIN 
+    sales_data d ON i.i_item_sk = d.ws_item_sk
+LEFT JOIN 
+    detailed_returns r ON i.i_item_sk = r.sr_item_sk
+JOIN 
+    customer_info ci ON ci.total_profit > 1000
+WHERE 
+    d.rank <= 5 OR ci.cd_gender = 'F'
+ORDER BY 
+    total_sales DESC, total_returns ASC;

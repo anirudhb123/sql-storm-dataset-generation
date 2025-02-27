@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) as supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+ProductSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2024-01-01'
+    GROUP BY 
+        l.l_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(cs.total_orders, 0) AS total_orders,
+    COALESCE(cs.total_spent, 0) AS total_spent,
+    s.s_name AS top_supplier
+FROM 
+    part p
+LEFT JOIN 
+    ProductSales ss ON p.p_partkey = ss.l_partkey
+LEFT JOIN 
+    CustomerOrderStats cs ON cs.total_orders > 0
+LEFT JOIN 
+    RankedSuppliers s ON s.s_suppkey = (
+        SELECT 
+            ps.ps_suppkey
+        FROM 
+            partsupp ps
+        WHERE 
+            ps.ps_partkey = p.p_partkey
+        ORDER BY 
+            ps.ps_supplycost ASC LIMIT 1
+    )
+WHERE 
+    p.p_size > 20
+ORDER BY 
+    total_sales DESC, p.p_name ASC;

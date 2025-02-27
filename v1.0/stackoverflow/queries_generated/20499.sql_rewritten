@@ -1,0 +1,98 @@
+WITH PostsRanked AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RankByType,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(vote.VoteTypeId = 2) - SUM(vote.VoteTypeId = 3), 0) AS NetVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes vote ON p.Id = vote.PostId
+    GROUP BY 
+        p.Id
+),
+RecentClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+        AND ph.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+PostLinkDetails AS (
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        lt.Name AS LinkType
+    FROM 
+        PostLinks pl
+    JOIN 
+        LinkTypes lt ON pl.LinkTypeId = lt.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        MAX(b.Class) AS MaxBadgeClass,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        STRING_AGG(DISTINCT p.Title, ', ') AS Posts
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC 
+    LIMIT 5
+)
+SELECT 
+    pr.PostId,
+    pr.Title,
+    pr.CreationDate,
+    pr.RankByType,
+    pr.CommentCount,
+    pr.NetVotes,
+    rcp.CloseReason,
+    pld.LinkType,
+    ub.MaxBadgeClass,
+    ub.BadgeCount,
+    pt.TagName,
+    pt.PostCount,
+    pt.Posts
+FROM 
+    PostsRanked pr
+LEFT JOIN 
+    RecentClosedPosts rcp ON pr.PostId = rcp.PostId
+LEFT JOIN 
+    PostLinkDetails pld ON pr.PostId = pld.PostId
+LEFT JOIN 
+    UserBadges ub ON pr.OwnerUserId = ub.UserId
+LEFT JOIN 
+    PopularTags pt ON pr.PostTypeId = CASE WHEN pr.PostTypeId = 1 THEN 1 ELSE NULL END
+WHERE 
+    pr.RankByType = 1
+    AND pr.CommentCount > 0
+    AND (pr.NetVotes IS NULL OR pr.NetVotes >= 0)
+    AND (rcp.CloseReason IS NULL OR rcp.CloseReason NOT LIKE '%duplicate%')
+ORDER BY 
+    pr.CreationDate DESC NULLS LAST
+LIMIT 100;

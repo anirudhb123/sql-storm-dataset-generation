@@ -1,0 +1,65 @@
+WITH RankedMovies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC, m.title) AS rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY m.id) AS total_cast
+    FROM
+        aka_title m
+    LEFT JOIN
+        cast_info c ON m.id = c.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+),
+MovieCompanyDetails AS (
+    SELECT
+        mc.movie_id,
+        mc.company_id,
+        COALESCE(cn.name, 'Unknown Company') AS company_name,
+        ct.kind AS company_type,
+        mc.note AS company_note
+    FROM
+        movie_companies mc
+    LEFT JOIN
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN
+        company_type ct ON mc.company_type_id = ct.id
+),
+EnhancedMovieInfo AS (
+    SELECT
+        r.movie_id,
+        r.title,
+        r.production_year,
+        r.total_cast,
+        STRING_AGG(DISTINCT m.info, '; ') FILTER (WHERE m.info IS NOT NULL) AS additional_info,
+        COUNT(DISTINCT kc.keyword) AS keyword_count
+    FROM
+        RankedMovies r
+    LEFT JOIN
+        movie_info m ON r.movie_id = m.movie_id
+    LEFT JOIN
+        movie_keyword mk ON r.movie_id = mk.movie_id
+    LEFT JOIN
+        keyword kc ON mk.keyword_id = kc.id
+    GROUP BY
+        r.movie_id, r.title, r.production_year, r.total_cast
+)
+SELECT
+    e.title,
+    e.production_year,
+    e.total_cast,
+    e.additional_info,
+    kc.company_name,
+    kc.company_type,
+    kc.company_note
+FROM
+    EnhancedMovieInfo e
+LEFT JOIN
+    MovieCompanyDetails kc ON e.movie_id = kc.movie_id
+WHERE 
+    e.total_cast > 5
+    AND e.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    e.production_year DESC, e.total_cast DESC
+LIMIT 100;

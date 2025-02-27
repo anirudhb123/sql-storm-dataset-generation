@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 5
+),
+CustomerSummary AS (
+    SELECT c.c_nationkey, 
+           COUNT(DISTINCT c.c_custkey) AS customer_count,
+           SUM(c.c_acctbal) AS total_acctbal
+    FROM customer c
+    GROUP BY c.c_nationkey
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, 
+           p.p_name,
+           ps.ps_supplycost,
+           ps.ps_availqty,
+           (ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_totalprice,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+)
+SELECT 
+    r.r_name, 
+    SUM(ps.total_cost) AS total_supply_cost,
+    SUM(o.o_totalprice) AS total_order_value,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    MAX(CASE WHEN o.o_orderpriority = 'HIGH' THEN o.o_totalprice ELSE NULL END) AS max_high_priority_order,
+    STRING_AGG(DISTINCT CONCAT(c.c_name, ' (', c.c_acctbal, ')'), ', ') AS customer_list
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN PartSupplierDetails ps ON c.c_custkey = ps.p_partkey
+LEFT JOIN RankedOrders o ON o.o_orderkey = ps.p_partkey
+WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_nationkey = n.n_nationkey)
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY total_supply_cost DESC;

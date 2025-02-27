@@ -1,0 +1,50 @@
+
+WITH RECURSIVE ct_part_suppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rnk
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+
+    UNION ALL
+
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost
+    FROM partsupp ps
+    JOIN ct_part_suppliers ctp ON ps.ps_partkey = ctp.ps_partkey
+    WHERE ps.ps_supplycost < ctp.ps_supplycost AND ctp.rnk < 5
+),
+avg_price_by_supplier AS (
+    SELECT s.s_suppkey, AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price
+    FROM lineitem l
+    JOIN supplier s ON l.l_suppkey = s.s_suppkey
+    GROUP BY s.s_suppkey
+),
+ordered_customer_data AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rnk
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+),
+high_value_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice
+    FROM ordered_customer_data o
+    WHERE o.rnk = 1 AND o.o_totalprice > 1000
+)
+
+SELECT p.p_name, p.p_retailprice, AVG(ctp.ps_supplycost) AS avg_supply_cost,
+       (SELECT COUNT(DISTINCT l.l_orderkey)
+        FROM lineitem l
+        WHERE l.l_partkey = p.p_partkey AND l.l_returnflag = 'R') AS return_count,
+       (SELECT SUM(o.o_totalprice) 
+        FROM high_value_orders o 
+        WHERE EXISTS (
+            SELECT 1 
+            FROM lineitem l 
+            WHERE l.l_orderkey = o.o_orderkey 
+              AND l.l_partkey = p.p_partkey
+        )) AS total_high_value_orders
+FROM part p
+LEFT JOIN ct_part_suppliers ctp ON p.p_partkey = ctp.ps_partkey
+GROUP BY p.p_name, p.p_retailprice
+HAVING COUNT(DISTINCT ctp.ps_suppkey) > 0 AND AVG(ctp.ps_supplycost) < 
+         (SELECT AVG(ps.ps_supplycost) FROM partsupp ps WHERE ps.ps_availqty > 0)
+ORDER BY avg_supply_cost DESC;

@@ -1,0 +1,70 @@
+WITH TagStatistics AS (
+    SELECT 
+        SUBSTRING(tag.Tags FROM 2 FOR LENGTH(tag.Tags) - 2) AS Tags,
+        COUNT(DISTINCT post.Id) AS PostCount,
+        COUNT(DISTINCT user.Id) AS UserCount,
+        SUM(post.ViewCount) AS TotalViews,
+        SUM(post.Score) AS TotalScore
+    FROM 
+        Posts post
+    JOIN 
+        Tags tag ON post.Tags LIKE '%' || tag.TagName || '%'
+    LEFT JOIN 
+        Users user ON post.OwnerUserId = user.Id
+    WHERE 
+        post.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        tag.Tags
+),
+TopTags AS (
+    SELECT 
+        Tags,
+        PostCount,
+        UserCount,
+        TotalViews,
+        TotalScore,
+        RANK() OVER (ORDER BY PostCount DESC) AS RankByPosts,
+        RANK() OVER (ORDER BY TotalScore DESC) AS RankByScore
+    FROM 
+        TagStatistics
+),
+HighScoreTags AS (
+    SELECT 
+        Tags,
+        PostCount,
+        UserCount,
+        TotalViews,
+        TotalScore
+    FROM 
+        TopTags
+    WHERE 
+        RankByScore <= 10 -- Top 10 by score
+),
+PopularTags AS (
+    SELECT 
+        Tags,
+        PostCount,
+        UserCount,
+        TotalViews,
+        TotalScore
+    FROM 
+        TopTags
+    WHERE 
+        RankByPosts <= 10 -- Top 10 by post count
+)
+SELECT 
+    COALESCE(ps.Tags, hs.Tags) AS TagName,
+    COALESCE(ps.PostCount, 0) AS PopularPostCount,
+    COALESCE(ps.UserCount, 0) AS PopularUserCount,
+    COALESCE(ps.TotalViews, 0) AS PopularTotalViews,
+    COALESCE(ps.TotalScore, 0) AS PopularTotalScore,
+    COALESCE(hs.PostCount, 0) AS HighScoringPostCount,
+    COALESCE(hs.UserCount, 0) AS HighScoringUserCount,
+    COALESCE(hs.TotalViews, 0) AS HighScoringTotalViews,
+    COALESCE(hs.TotalScore, 0) AS HighScoringTotalScore
+FROM 
+    HighScoreTags hs
+FULL OUTER JOIN 
+    PopularTags ps ON hs.Tags = ps.Tags
+ORDER BY 
+    COALESCE(ps.TotalScore, 0) DESC, COALESCE(hs.TotalScore, 0) DESC;

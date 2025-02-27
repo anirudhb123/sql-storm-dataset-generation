@@ -1,0 +1,61 @@
+
+WITH aggregated_movie_info AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT co.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = mt.id)
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+
+final_benchmark_result AS (
+    SELECT 
+        am.movie_id,
+        am.movie_title,
+        am.production_year,
+        am.keyword_count,
+        am.keywords,
+        am.company_names,
+        am.aka_names,
+        CASE 
+            WHEN am.keyword_count > 5 THEN 'High'
+            WHEN am.keyword_count BETWEEN 1 AND 5 THEN 'Moderate'
+            ELSE 'Low' 
+        END AS keyword_intensity
+    FROM 
+        aggregated_movie_info am
+)
+
+SELECT 
+    fbr.movie_id,
+    fbr.movie_title,
+    fbr.production_year,
+    fbr.keyword_count,
+    fbr.keywords,
+    fbr.company_names,
+    fbr.aka_names,
+    fbr.keyword_intensity
+FROM 
+    final_benchmark_result fbr
+WHERE 
+    fbr.keyword_intensity = 'High'
+ORDER BY 
+    fbr.production_year DESC,
+    fbr.movie_title ASC
+FETCH FIRST 100 ROWS ONLY;

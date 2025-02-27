@@ -1,0 +1,50 @@
+WITH UserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.UpVotes,
+        U.DownVotes,
+        (U.UpVotes - U.DownVotes) AS NetScore,
+        RANK() OVER (ORDER BY (U.UpVotes - U.DownVotes) DESC) AS Rank
+    FROM Users U
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        PT.Name AS PostType,
+        COALESCE(Acpt.Title, 'No Accepted Answer') AS AcceptedAnswerTitle,
+        U.DisplayName AS OwnerName,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentTotal,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM Posts P
+    LEFT JOIN Posts Acpt ON P.AcceptedAnswerId = Acpt.Id
+    INNER JOIN Users U ON P.OwnerUserId = U.Id
+    INNER JOIN PostTypes PT ON P.PostTypeId = PT.Id
+)
+SELECT 
+    DS.UserId,
+    DS.DisplayName,
+    DS.Reputation,
+    DS.NetScore,
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.ViewCount,
+    PD.PostType,
+    PD.AcceptedAnswerTitle,
+    PD.CommentTotal,
+    (CASE 
+        WHEN (PD.CommentTotal > 10 AND DS.NetScore > 50) THEN 'Elite Contributor'
+        WHEN (PD.CommentTotal BETWEEN 5 AND 10) THEN 'Moderate Contributor'
+        ELSE 'New Contributor'
+    END) AS ContributorStatus
+FROM UserScores DS
+JOIN PostDetails PD ON DS.UserId = PD.OwnerUserId
+WHERE PD.CreationDate >= NOW() - INTERVAL '1 year'
+AND PD.PostType IN (SELECT Id FROM PostTypes WHERE Name IN ('Question', 'Answer'))
+ORDER BY DS.Rank, PD.CreationDate DESC
+LIMIT 100;

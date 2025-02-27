@@ -1,0 +1,37 @@
+WITH UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        COUNT(DISTINCT C.Id) AS CommentsCount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        ROW_NUMBER() OVER (ORDER BY P.Score DESC) AS Rank
+    FROM Posts P
+    WHERE P.PostTypeId = 1 -- Only questions
+)
+SELECT 
+    UVC.UserId,
+    UVC.DisplayName,
+    UVC.UpVotes,
+    UVC.DownVotes,
+    UVC.PostsCount,
+    UVC.CommentsCount,
+    PP.PostId,
+    PP.Title AS PopularPostTitle,
+    PP.Score AS PopularPostScore
+FROM UserVoteCounts UVC
+JOIN PopularPosts PP ON UVC.UserId = P.OwnerUserId
+WHERE PP.Rank <= 10
+ORDER BY UVC.UpVotes DESC, UVC.DownVotes ASC, UVC.PostsCount DESC;

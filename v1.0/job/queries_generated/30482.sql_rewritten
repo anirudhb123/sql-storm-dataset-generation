@@ -1,0 +1,85 @@
+WITH RECURSIVE top_movies AS (
+    SELECT
+        m.id,
+        m.title,
+        m.production_year,
+        COALESCE(SUM(cast.n) FILTER (WHERE cast.role_id = 1), 0) AS num_leads, 
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(cast.n) FILTER (WHERE cast.role_id = 1), 0) DESC) AS rn
+    FROM
+        title m
+    LEFT JOIN 
+        (SELECT movie_id, COUNT(*) AS n 
+         FROM cast_info 
+         GROUP BY movie_id) cast ON m.id = cast.movie_id
+    GROUP BY m.id, m.title, m.production_year
+),
+
+movie_cast AS (
+    SELECT
+        c.movie_id,
+        a.name AS actor_name,
+        a.id AS actor_id,
+        m.title AS movie_title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_rank
+    FROM
+        cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN title m ON c.movie_id = m.id
+),
+
+combined_info AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mc.company_count, 0) AS company_count,
+        COALESCE(ki.keyword_count, 0) AS keyword_count,
+        COALESCE(i.info_count, 0) AS info_count
+    FROM
+        title m
+    LEFT JOIN (
+        SELECT
+            movie_id,
+            COUNT(DISTINCT company_id) AS company_count
+        FROM
+            movie_companies
+        GROUP BY movie_id
+    ) mc ON m.id = mc.movie_id
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            COUNT(DISTINCT keyword_id) AS keyword_count
+        FROM 
+            movie_keyword
+        GROUP BY movie_id
+    ) ki ON m.id = ki.movie_id
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            COUNT(DISTINCT info_type_id) AS info_count
+        FROM 
+            movie_info
+        GROUP BY movie_id
+    ) i ON m.id = i.movie_id
+)
+
+SELECT 
+    tm.title AS top_movie_title,
+    tm.production_year,
+    mc.actor_name,
+    mc.actor_rank,
+    ci.company_count,
+    ci.keyword_count,
+    ci.info_count
+FROM 
+    top_movies tm
+LEFT JOIN 
+    movie_cast mc ON tm.id = mc.movie_id
+JOIN 
+    combined_info ci ON tm.id = ci.movie_id
+WHERE 
+    tm.num_leads > 0
+ORDER BY 
+    tm.rn,
+    mc.actor_rank;

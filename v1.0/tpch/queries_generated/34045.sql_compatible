@@ -1,0 +1,48 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_name LIKE 'Supplier%'
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey AND sh.level < 3
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= DATE '1997-01-01'
+),
+PartSuppliers AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+DiscountedLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_discounted_price
+    FROM lineitem l
+    WHERE l.l_discount > 0.1
+    GROUP BY l.l_orderkey
+)
+SELECT nh.r_name AS region_name, 
+       STRING_AGG(DISTINCT s.s_name) AS suppliers, 
+       COUNT(DISTINCT co.o_orderkey) AS total_orders, 
+       SUM(ps.total_available) AS total_available_parts,
+       AVG(ps.average_supply_cost) AS avg_supply_cost,
+       COUNT(DISTINCT dli.l_orderkey) AS orders_with_discount
+FROM region nh
+LEFT JOIN nation n ON n.n_regionkey = nh.r_regionkey
+LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN CustomerOrders co ON co.c_custkey = s.s_suppkey
+LEFT JOIN PartSuppliers ps ON ps.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+LEFT JOIN DiscountedLineItems dli ON dli.l_orderkey = co.o_orderkey
+WHERE nh.r_name IS NOT NULL
+GROUP BY nh.r_name
+HAVING COUNT(DISTINCT co.o_orderkey) > 5
+ORDER BY region_name;

@@ -1,0 +1,68 @@
+WITH StringMetrics AS (
+    SELECT 
+        a.name AS actor_name,
+        mt.title AS movie_title,
+        LENGTH(a.name) AS name_length,
+        LENGTH(mt.title) AS title_length,
+        mt.production_year,
+        COUNT(DISTINCT kc.keyword) AS keyword_count,
+        STRING_AGG(DISTINCT kc.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT ci.subject_id::text, ', ') AS cast_roles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    JOIN 
+        title mt ON at.id = mt.id
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    WHERE 
+        mt.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        a.name, mt.title, mt.production_year
+),
+AverageStringLength AS (
+    SELECT 
+        AVG(name_length) AS avg_name_length,
+        AVG(title_length) AS avg_title_length
+    FROM 
+        StringMetrics
+),
+PopularKeywords AS (
+    SELECT 
+        keyword, 
+        COUNT(*) AS frequency
+    FROM 
+        StringMetrics
+    GROUP BY 
+        keyword
+    ORDER BY 
+        frequency DESC
+    LIMIT 10
+)
+SELECT 
+    sm.actor_name, 
+    sm.movie_title, 
+    sm.name_length, 
+    sm.title_length, 
+    sm.production_year, 
+    avgsl.avg_name_length, 
+    avgsl.avg_title_length, 
+    pk.keyword,
+    pk.frequency,
+    sm.cast_roles
+FROM 
+    StringMetrics sm
+CROSS JOIN 
+    AverageStringLength avgsl
+LEFT JOIN 
+    PopularKeywords pk ON sm.keywords LIKE '%' || pk.keyword || '%'
+ORDER BY 
+    sm.production_year DESC, 
+    sm.name_length DESC;
+
+This SQL query benchmarks string processing by collecting various metrics around actors' names, movie titles, and keywords associated with the movies released between 2000 and 2023. It calculates the length of names and titles while also summarizing keywords used in the movies, thus giving insights into string characteristics while leveraging multiple tables with joins and aggregations.

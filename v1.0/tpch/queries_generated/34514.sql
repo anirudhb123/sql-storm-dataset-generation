@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN SupplyChain sc ON s.s_nationkey = sc.s_nationkey
+    WHERE ps.ps_availqty > 0
+),
+AggregateData AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        AVG(ps.ps_supplycost) AS average_supply_cost,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN SupplyChain sc ON p.p_partkey = sc.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+FilteredData AS (
+    SELECT 
+        ad.p_partkey,
+        ad.p_name,
+        ad.total_revenue,
+        ad.total_orders,
+        ad.average_supply_cost
+    FROM AggregateData ad
+    WHERE ad.revenue_rank <= 5
+)
+SELECT 
+    p.p_name AS Part_Name,
+    COALESCE(fd.total_revenue, 0) AS Revenue,
+    COALESCE(fd.total_orders, 0) AS Orders,
+    COALESCE(fd.average_supply_cost, 0) AS Avg_Cost,
+    r.r_name AS Region_Name
+FROM part p
+LEFT JOIN FilteredData fd ON p.p_partkey = fd.p_partkey
+LEFT JOIN nation n ON p.p_partkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE r.r_name IS NOT NULL OR fd.total_revenue IS NOT NULL
+ORDER BY Revenue DESC, Part_Name;

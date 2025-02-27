@@ -1,0 +1,44 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        IF(cd.cd_dep_count > 0, 'Has Dependents', 'No Dependents') AS dependent_status,
+        SUBSTRING_INDEX(c.c_email_address, '@', -1) AS email_domain
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        ca.ca_city IS NOT NULL 
+        AND ca.ca_state IS NOT NULL
+),
+CountedCustomers AS (
+    SELECT 
+        cd.gender,
+        cd.marital_status,
+        COUNT(*) AS customer_count
+    FROM (
+        SELECT DISTINCT
+            cd.cd_gender AS gender,
+            cd.cd_marital_status AS marital_status
+        FROM customer c
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        WHERE cd.cd_gender IS NOT NULL
+    ) cd
+    GROUP BY cd.gender, cd.marital_status
+)
+SELECT
+    cd.full_name,
+    cd.ca_city,
+    cd.ca_state,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cc.customer_count
+FROM CustomerDetails cd
+LEFT JOIN CountedCustomers cc ON cd.cd_gender = cc.gender AND cd.cd_marital_status = cc.marital_status
+ORDER BY cd.ca_city, cd.full_name;

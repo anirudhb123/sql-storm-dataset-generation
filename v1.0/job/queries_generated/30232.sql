@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT
+        mv.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1 AS level
+    FROM
+        movie_link mv
+    JOIN
+        aka_title mt ON mv.linked_movie_id = mt.id
+    JOIN
+        movie_hierarchy mh ON mv.movie_id = mh.movie_id
+)
+
+SELECT
+    a.name AS actor_name,
+    at.title AS movie_title,
+    mh.level,
+    mh.production_year,
+    COUNT(CASE WHEN c.role_id IS NOT NULL THEN 1 END) AS roles_count,
+    COALESCE(k.keywords, 'No Keywords') AS keywords,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+FROM
+    cast_info c
+JOIN
+    aka_name a ON c.person_id = a.person_id
+JOIN
+    aka_title at ON c.movie_id = at.id
+JOIN
+    movie_hierarchy mh ON at.id = mh.movie_id
+LEFT JOIN
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN
+    company_name cn ON mc.company_id = cn.id
+WHERE
+    mh.production_year >= 2000
+    AND c.nr_order = 1
+GROUP BY
+    a.name, at.title, mh.level, mh.production_year, k.keywords
+ORDER BY
+    mh.level DESC, mh.production_year DESC, roles_count DESC;

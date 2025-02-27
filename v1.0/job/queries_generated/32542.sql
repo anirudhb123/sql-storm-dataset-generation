@@ -1,0 +1,53 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        aka_title m
+    INNER JOIN
+        movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE
+        mh.level < 3  -- Limit the recursion depth
+)
+
+SELECT
+    m.title AS Movie_Title,
+    mh.production_year AS Production_Year,
+    COUNT(DISTINCT ci.person_id) AS Total_Cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS Aka_Names,
+    SUM(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS Female_Cast,
+    SUM(CASE WHEN p.gender = 'M' THEN 1 ELSE 0 END) AS Male_Cast,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS Ranking
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN
+    name p ON p.id = ci.person_id
+GROUP BY
+    mh.movie_id, mh.title, mh.production_year
+HAVING
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY
+    mh.production_year DESC,
+    Total_Cast DESC;

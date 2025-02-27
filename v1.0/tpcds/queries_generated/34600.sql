@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT
+        c.c_customer_id,
+        SUM(ss.ss_net_profit) AS total_profit,
+        COUNT(ss.ss_ticket_number) AS total_sales,
+        1 AS level
+    FROM
+        customer c
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY
+        c.c_customer_id
+    
+    UNION ALL
+    
+    SELECT
+        sh.c_customer_id,
+        SUM(ss.ss_net_profit) AS total_profit,
+        COUNT(ss.ss_ticket_number) AS total_sales,
+        sh.level + 1
+    FROM
+        SalesHierarchy sh
+    JOIN store_sales ss ON ss.ss_customer_sk = sh.c_customer_id
+    GROUP BY
+        sh.c_customer_id
+)
+
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(d.d_year, 0) AS year,
+    SUM(ss.ss_net_profit) AS total_net_profit,
+    COUNT(DISTINCT ss.ss_ticket_number) AS number_of_sales,
+    ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY SUM(ss.ss_net_profit) DESC) AS sales_rank
+FROM 
+    customer c
+LEFT JOIN 
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN 
+    date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+GROUP BY 
+    c.c_customer_id, c.c_first_name, c.c_last_name, d.d_year
+HAVING 
+    total_net_profit > 10000
+ORDER BY 
+    year DESC, total_net_profit DESC
+LIMIT 10;

@@ -1,0 +1,64 @@
+
+WITH RECURSIVE PopularItems AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        SUM(ws_quantity) > 1000
+),
+SalesDetails AS (
+    SELECT 
+        st.s_store_id,
+        st.s_store_name,
+        ws.ws_item_sk,
+        COALESCE(SUM(ws.ws_quantity), 0) AS total_web_sales,
+        COALESCE(SUM(cs.cs_quantity), 0) AS total_catalog_sales,
+        COALESCE(SUM(ss.ss_quantity), 0) AS total_store_sales,
+        ROW_NUMBER() OVER (PARTITION BY st.s_store_id ORDER BY COALESCE(SUM(ws.ws_quantity), 0) DESC) AS web_rank,
+        ROW_NUMBER() OVER (PARTITION BY st.s_store_id ORDER BY COALESCE(SUM(cs.cs_quantity), 0) DESC) AS catalog_rank,
+        ROW_NUMBER() OVER (PARTITION BY st.s_store_id ORDER BY COALESCE(SUM(ss.ss_quantity), 0) DESC) AS store_rank
+    FROM 
+        store AS st
+    LEFT JOIN 
+        web_sales AS ws ON st.s_store_sk = ws.ws_warehouse_sk
+    LEFT JOIN 
+        catalog_sales AS cs ON st.s_store_sk = cs.cs_warehouse_sk
+    LEFT JOIN 
+        store_sales AS ss ON st.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        st.s_store_id, st.s_store_name, ws.ws_item_sk
+),
+FilteredSales AS (
+    SELECT 
+        sd.s_store_id,
+        sd.s_store_name,
+        pd.ws_item_sk,
+        pd.total_web_sales,
+        pd.total_catalog_sales,
+        pd.total_store_sales
+    FROM 
+        SalesDetails AS sd
+    JOIN 
+        PopularItems AS pd ON sd.ws_item_sk = pd.ws_item_sk
+    WHERE 
+        pd.total_quantity > 500 
+        AND sd.total_web_sales - sd.total_catalog_sales > 0
+)
+SELECT 
+    fs.s_store_id,
+    fs.s_store_name,
+    fs.ws_item_sk,
+    fs.total_web_sales,
+    fs.total_catalog_sales,
+    fs.total_store_sales,
+    (fs.total_web_sales + fs.total_catalog_sales + fs.total_store_sales) AS total_sales
+FROM 
+    FilteredSales AS fs
+ORDER BY 
+    total_sales DESC
+LIMIT 10;
+

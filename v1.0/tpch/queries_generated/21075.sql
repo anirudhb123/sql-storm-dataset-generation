@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS status_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+HighCostSuppliers AS (
+    SELECT 
+        s.s_suppkey
+    FROM 
+        SupplierParts s
+    WHERE 
+        s.total_cost > (
+            SELECT 
+                AVG(total_cost) 
+            FROM 
+                SupplierParts
+        )
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS net_revenue
+    FROM 
+        RankedOrders o
+    LEFT JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    os.o_orderkey, 
+    os.o_orderdate, 
+    COALESCE(os.net_revenue, 0) AS net_revenue,
+    CASE 
+        WHEN os.net_revenue > 10000 THEN 'High Revenue'
+        WHEN os.net_revenue IS NULL THEN 'No Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category,
+    (SELECT COUNT(*) FROM lineitem li WHERE li.l_orderkey = os.o_orderkey AND li.l_discount > 0.1) AS discounted_items_count
+FROM 
+    OrderStats os
+JOIN 
+    RankedOrders ro ON os.o_orderkey = ro.o_orderkey
+LEFT JOIN 
+    HighCostSuppliers hcs ON ro.o_orderkey IN (
+        SELECT p.ps_partkey 
+        FROM partsupp p
+        WHERE p.ps_suppkey = hcs.s_suppkey
+    )
+WHERE 
+    ro.status_rank <= 10
+    AND (hcs.s_suppkey IS NOT NULL OR ro.o_orderstatus = 'O')
+ORDER BY 
+    os.net_revenue DESC, os.o_orderdate ASC
+LIMIT 100;

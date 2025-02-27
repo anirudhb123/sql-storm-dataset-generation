@@ -1,0 +1,78 @@
+WITH RecursiveTagHierarchy AS (
+    -- Assume we define a recursive structure for tags (not present in the original schema)
+    SELECT Id, TagName, Count, 1 AS Level
+    FROM Tags 
+    WHERE IsModeratorOnly = 0 -- Selecting only non-moderator tags
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count, r.Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy r ON t.ExcerptPostId = r.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+TopPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM Posts p
+    WHERE p.OwnerUserId IS NOT NULL
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10 -- Close action
+    GROUP BY ph.PostId
+),
+UserStatistics AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.PostCount,
+        ur.Reputation,
+        tp.Score AS TopPostScore,
+        COUNT(cp.PostId) AS ClosedPostsCount
+    FROM UserReputation ur
+    LEFT JOIN TopPosts tp ON ur.UserId = tp.OwnerUserId AND tp.Rank = 1
+    LEFT JOIN ClosedPosts cp ON ur.UserId = cp.PostId
+    GROUP BY ur.UserId, ur.DisplayName, ur.PostCount, ur.Reputation, tp.Score
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.PostCount,
+    us.TopPostScore,
+    us.ClosedPostsCount,
+    CASE 
+        WHEN us.Reputation > 1000 THEN 'High Reputation'
+        WHEN us.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationCategory,
+    (SELECT COUNT(*) FROM Votes v WHERE v.UserId = us.UserId) AS TotalVotesGiven,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t
+     INNER JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%' 
+     WHERE p.OwnerUserId = us.UserId) AS UserTags
+FROM UserStatistics us
+WHERE us.ClosedPostsCount = 0 -- Exclude users with any closed posts
+ORDER BY us.Reputation DESC, us.TopPostScore DESC;

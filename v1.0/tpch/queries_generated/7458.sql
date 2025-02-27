@@ -1,0 +1,63 @@
+WITH PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        AVG(p.p_retailprice) AS avg_retail_price,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+    HAVING 
+        SUM(ps.ps_availqty) > 0
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2021-01-01' AND o.o_orderdate < DATE '2022-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierRegion AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    r.r_name,
+    pr.p_brand,
+    pd.total_available_qty,
+    pd.total_supply_cost,
+    os.total_revenue,
+    sr.supplier_count AS region_supplier_count,
+    pd.avg_retail_price
+FROM 
+    PartDetails pd
+JOIN 
+    SupplierRegion sr ON sr.supplier_count > 0
+JOIN 
+    (SELECT DISTINCT p_brand FROM part) pr ON pr.p_brand = pd.p_brand
+JOIN 
+    OrderSummary os ON os.total_revenue > 10000
+ORDER BY 
+    pd.total_supply_cost DESC, os.total_revenue ASC;

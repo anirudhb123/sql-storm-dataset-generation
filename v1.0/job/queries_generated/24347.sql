@@ -1,0 +1,59 @@
+WITH ranked_actors AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY COUNT(ci.movie_id) DESC) AS actor_rank,
+        COUNT(ci.movie_id) AS movie_count
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    GROUP BY a.person_id, a.name
+),
+movie_info_summary AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        SUM(CASE WHEN mi.info_type_id IS NOT NULL THEN 1 ELSE 0 END) AS info_count
+    FROM aka_title mt
+    LEFT JOIN movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_info mi ON mt.id = mi.movie_id
+    GROUP BY mt.id, mt.title, mt.production_year
+),
+actor_highlights AS (
+    SELECT 
+        ra.name,
+        ra.movie_count,
+        COUNT(mis.movie_id) AS info_movies_count
+    FROM ranked_actors ra
+    JOIN cast_info ci ON ra.person_id = ci.person_id
+    JOIN complete_cast cc ON ci.movie_id = cc.movie_id
+    LEFT JOIN movie_info_summary mis ON cc.movie_id = mis.movie_id
+    WHERE ra.actor_rank = 1
+    GROUP BY ra.name, ra.movie_count
+),
+movie_links AS (
+    SELECT 
+        ml.movie_id,
+        COUNT(DISTINCT ml.linked_movie_id) AS linked_movies,
+        MAX(CASE WHEN lt.link = 'remake' THEN 1 ELSE 0 END) AS has_remake
+    FROM movie_link ml
+    JOIN link_type lt ON ml.link_type_id = lt.id
+    GROUP BY ml.movie_id
+)
+SELECT 
+    ah.name AS actor_name,
+    ah.movie_count AS total_movies,
+    COALESCE(ml.linked_movies, 0) AS total_linked_movies,
+    ml.has_remake,
+    mis.keywords,
+    mis.company_count AS movie_company_count,
+    ah.info_movies_count
+FROM actor_highlights ah
+LEFT JOIN movie_links ml ON ah.movie_count = ml.movie_id
+LEFT JOIN movie_info_summary mis ON ah.movie_count = mis.title
+WHERE ah.movie_count > 10
+ORDER BY ah.movie_count DESC, actor_name
+LIMIT 100;

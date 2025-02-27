@@ -1,0 +1,65 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+)
+
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.PostCount,
+    us.QuestionCount,
+    us.AnswerCount AS UserAnswerCount,
+    us.UpvoteCount,
+    us.DownvoteCount,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score AS PostScore,
+    ps.ViewCount AS PostViewCount,
+    ps.CommentCount AS PostCommentCount,
+    ps.AnswerCount AS PostAnswerCount
+FROM 
+    UserStats us
+JOIN 
+    PostStats ps ON us.UserId = ps.OwnerUserId  -- Ensure to join with correct conditions if needed
+ORDER BY 
+    us.Reputation DESC, ps.Score DESC;

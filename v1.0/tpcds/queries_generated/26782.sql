@@ -1,0 +1,56 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd_cd_gender AS gender,
+        cd_marital_status AS marital_status,
+        cd_purchase_estimate AS purchase_estimate,
+        ca_city AS city,
+        ca_state AS state
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+ItemsSold AS (
+    SELECT 
+        ws_bill_customer_sk,
+        COUNT(ws_quantity) AS total_items_sold,
+        SUM(ws_net_paid) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+BenchmarkData AS (
+    SELECT 
+        cd.full_name,
+        cd.gender,
+        cd.marital_status,
+        cd.purchase_estimate,
+        cd.city,
+        cd.state,
+        COALESCE(is.total_items_sold, 0) AS items_sold,
+        COALESCE(is.total_sales, 0) AS total_sales
+    FROM 
+        CustomerDetails cd
+    LEFT JOIN 
+        ItemsSold is ON cd.c_customer_sk = is.ws_bill_customer_sk
+)
+SELECT 
+    COUNT(*) AS total_customers,
+    AVG(purchase_estimate) AS avg_purchase_estimate,
+    SUM(items_sold) AS total_items_sold,
+    SUM(total_sales) AS total_revenue,
+    COUNT(CASE WHEN gender = 'M' THEN 1 END) AS total_men,
+    COUNT(CASE WHEN gender = 'F' THEN 1 END) AS total_women,
+    city,
+    state
+FROM 
+    BenchmarkData
+GROUP BY 
+    city, state
+ORDER BY 
+    total_revenue DESC;

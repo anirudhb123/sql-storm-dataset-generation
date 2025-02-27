@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss.store_sk,
+        ss.customer_sk,
+        ss.sales_price,
+        ss.sales_price - ss.wholesale_cost AS profit,
+        ROW_NUMBER() OVER (PARTITION BY ss.store_sk ORDER BY ss.sales_price DESC) AS sales_rank
+    FROM store_sales ss
+    WHERE ss.sold_date_sk = (
+        SELECT MAX(ss2.sold_date_sk) 
+        FROM store_sales ss2 
+        WHERE ss2.store_sk = ss.store_sk
+    )
+),
+CustomerReturns AS (
+    SELECT 
+        sr.store_sk,
+        sr.returned_date_sk,
+        SUM(sr.return_quantity) AS total_returns,
+        SUM(sr.return_amt) AS total_return_amount
+    FROM store_returns sr
+    GROUP BY sr.store_sk, sr.returned_date_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        rs.store_sk,
+        COUNT(rs.customer_sk) AS unique_customers,
+        COALESCE(SUM(cr.total_returns), 0) AS total_returns,
+        COALESCE(SUM(cr.total_return_amount), 0.00) AS total_return_value,
+        SUM(rs.profit) AS total_profit,
+        SUM(rs.sales_price) AS total_sales
+    FROM RankedSales rs
+    LEFT JOIN CustomerReturns cr ON rs.store_sk = cr.store_sk
+    GROUP BY rs.store_sk
+),
+FinalMetrics AS (
+    SELECT 
+        sar.store_sk,
+        sar.total_sales,
+        sar.total_returns,
+        sar.total_return_value,
+        sar.total_profit,
+        sar.unique_customers,
+        CASE 
+            WHEN sar.total_sales = 0 THEN NULL 
+            ELSE (sar.total_profit / sar.total_sales) * 100 
+        END AS profit_margin_percentage,
+        CASE 
+            WHEN sar.total_returns = 0 THEN 'No Returns' 
+            ELSE 'Returns Processed' 
+        END AS return_status
+    FROM SalesAndReturns sar
+)
+SELECT 
+    f.store_sk,
+    f.total_sales,
+    f.total_returns,
+    f.total_return_value,
+    f.total_profit,
+    f.unique_customers,
+    COALESCE(FORMAT(f.profit_margin_percentage, 'P', 'en-US'), 'N/A') AS formatted_profit_margin,
+    f.return_status
+FROM FinalMetrics f
+WHERE 
+    (f.total_sales > 5000 OR f.total_profit < 1000)
+    AND (f.return_status IS NOT NULL OR f.unique_customers > 10)
+ORDER BY f.total_profit DESC, f.total_sales ASC
+LIMIT 100 OFFSET 20;

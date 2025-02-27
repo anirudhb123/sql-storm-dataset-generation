@@ -1,0 +1,61 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only questions as the root posts
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.ParentId,
+        p2.CreationDate,
+        p2.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p2.ParentId = rph.PostId
+)
+
+SELECT 
+    u.DisplayName AS Author,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    COALESCE(SUM(b.Class), 0) AS TotalBadges,
+    COALESCE(AVG(v.Score), 0) AS AvgVoteScore,
+    MAX(p.CreationDate) AS LastPostDate,
+    SUM(CASE 
+        WHEN p.ClosedDate IS NOT NULL THEN 1 
+        ELSE 0 
+    END) AS ClosedPostCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+WHERE 
+    u.Reputation > 1000 
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 0
+ORDER BY 
+    TotalPosts DESC
+LIMIT 10;

@@ -1,0 +1,77 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_returned_date_sk,
+        sr_return_quantity,
+        ROW_NUMBER() OVER(PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS rn
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity IS NOT NULL
+),
+CustomerDetails AS (
+    SELECT 
+        c_customer_id,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_credit_rating,
+        cd_demo_sk
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    WHERE 
+        cd_credit_rating IS NOT NULL
+),
+SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+MatchedReturns AS (
+    SELECT 
+        r.sr_item_sk,
+        r.sr_returned_date_sk,
+        r.sr_return_quantity,
+        sd.total_sales,
+        cd.full_name,
+        cd.cd_credit_rating
+    FROM 
+        RankedReturns r
+    LEFT JOIN 
+        SalesData sd ON r.sr_item_sk = sd.ws_item_sk
+    LEFT JOIN 
+        CustomerDetails cd ON r.sr_returned_date_sk IN (
+            SELECT 
+                d_date_sk 
+            FROM 
+                date_dim
+            WHERE 
+                d_date = (CURRENT_DATE - INTERVAL '30 days') 
+                OR d_date = (CURRENT_DATE - INTERVAL '60 days')
+        ) 
+    WHERE 
+        r.rn = 1
+)
+SELECT 
+    mr.sr_item_sk,
+    mr.sr_returned_date_sk,
+    COALESCE(mr.total_sales, 0) AS sales_in_return_period,
+    COALESCE(mr.sr_return_quantity, 0) AS return_quantity,
+    COUNT(mr.full_name) AS distinct_customers
+FROM 
+    MatchedReturns mr
+GROUP BY 
+    mr.sr_item_sk, 
+    mr.sr_returned_date_sk
+HAVING 
+    SUM(mr.return_quantity) > 0 AND COALESCE(MAX(mr.cd_credit_rating = 'Excellent'), FALSE) = TRUE
+ORDER BY 
+    return_quantity DESC, 
+    sales_in_return_period DESC
+LIMIT 10;

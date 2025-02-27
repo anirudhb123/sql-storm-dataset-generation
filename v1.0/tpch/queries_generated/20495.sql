@@ -1,0 +1,91 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_retailprice,
+        NTILE(5) OVER (ORDER BY p.p_retailprice) AS price_rank,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        o.o_clerk,
+        SUM(l.l_discount) OVER (PARTITION BY o.o_orderkey) AS total_discounted_price
+    FROM 
+        orders o
+    INNER JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') 
+        AND o.o_totalprice IS NOT NULL
+),
+NationComparison AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+FinalSelection AS (
+    SELECT 
+        rp.p_partkey,
+        rp.p_name,
+        rp.p_brand,
+        fo.o_orderkey,
+        fo.total_discounted_price,
+        nc.avg_acctbal,
+        CASE 
+            WHEN rp.price_rank = 5 THEN 'Most Expensive'
+            WHEN rp.price_rank = 1 THEN 'Least Expensive'
+            ELSE 'Mid-Range'
+        END AS price_category
+    FROM 
+        RankedParts rp
+    LEFT JOIN 
+        FilteredOrders fo ON rp.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = fo.o_orderkey)
+    FULL OUTER JOIN 
+        NationComparison nc ON rp.p_brand = LEFT(nc.n_name, 3) -- Obscure join condition based on brand and nation name
+    WHERE 
+        nc.avg_acctbal IS NULL OR nc.avg_acctbal > 1000.00
+)
+SELECT 
+    DISTINCT f.p_partkey, 
+    f.p_name, 
+    f.p_brand, 
+    f.o_orderkey, 
+    f.total_discounted_price,
+    f.price_category
+FROM 
+    FinalSelection f
+WHERE 
+    f.total_discounted_price < (SELECT AVG(total_discounted_price) FROM FinalSelection)
+UNION
+SELECT 
+    NULL AS p_partkey,
+    'Aggregate' AS p_name,
+    'N/A' AS p_brand,
+    NULL AS o_orderkey,
+    SUM(total_discounted_price) AS total_discounted_price,
+    'Total' AS price_category
+FROM 
+    FinalSelection 
+HAVING 
+    SUM(total_discounted_price) IS NOT NULL
+ORDER BY 
+    f.p_partkey ASC NULLS LAST, 
+    f.total_discounted_price DESC;

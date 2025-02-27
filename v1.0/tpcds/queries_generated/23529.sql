@@ -1,0 +1,67 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_state,
+        COUNT(DISTINCT ca_address_sk) AS address_count,
+        AVG(ca_gmt_offset) AS avg_gmt_offset,
+        MIN(ca_zip) AS min_zip,
+        MAX(ca_zip) AS max_zip
+    FROM customer_address
+    GROUP BY ca_state
+),
+CustomerDemographicStats AS (
+    SELECT 
+        cd_gender,
+        COUNT(cd_demo_sk) AS demographic_count,
+        SUM(cd_purchase_estimate) AS total_purchase_estimate,
+        AVG(cd_dep_count) AS avg_dependency
+    FROM customer_demographics
+    GROUP BY cd_gender
+),
+SalesPerformance AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_cdemo_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM web_sales
+    WHERE ws_sales_price > 0
+    GROUP BY ws_bill_customer_sk, ws_bill_cdemo_sk
+),
+CorrelatedReturns AS (
+    SELECT 
+        sr_store_sk,
+        SUM(sr_return_amt) AS total_return_amt,
+        COUNT(sr_ticket_number) AS total_returns,
+        (SELECT AVG(sr_return_quantity) 
+         FROM store_returns AS sr 
+         WHERE sr_returned_date_sk = sr2.sr_returned_date_sk) AS avg_return_quantity
+    FROM store_returns AS sr2
+    GROUP BY sr_store_sk
+)
+SELECT 
+    a.ca_state,
+    a.address_count,
+    a.avg_gmt_offset,
+    c.cd_gender,
+    c.demographic_count,
+    c.total_purchase_estimate,
+    s.total_net_profit,
+    r.total_return_amt,
+    r.avg_return_quantity
+FROM 
+    AddressStats AS a
+JOIN 
+    CustomerDemographicStats AS c ON a.address_count > 100
+LEFT JOIN 
+    SalesPerformance AS s ON c.demographic_count > 50 AND s.ws_bill_customer_sk IS NOT NULL
+FULL OUTER JOIN 
+    CorrelatedReturns AS r ON r.sr_store_sk IS NULL
+WHERE 
+    (a.min_zip < '10000' OR a.max_zip > '99999') 
+    AND (c.avg_dependency IS NULL OR c.avg_dependency > 2)
+    AND (s.total_net_profit > 5000 OR r.total_return_amt IS NOT NULL)
+ORDER BY 
+    a.address_count DESC, 
+    c.total_purchase_estimate DESC
+LIMIT 100;

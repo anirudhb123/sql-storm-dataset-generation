@@ -1,0 +1,52 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CD_DEMO_SK,
+        DATEDIFF(CURDATE(), STR_TO_DATE(CONCAT(c.c_birth_year, '-', c.c_birth_month, '-', c.c_birth_day), '%Y-%m-%d')) / 365 AS age
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+AddressInfo AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        REPLACE(ca.ca_street_name, 'Street', 'St') AS street_abbr,
+        ca.ca_zip
+    FROM 
+        customer_address ca
+),
+Analytics AS (
+    SELECT 
+        ci.full_name,
+        ci.age,
+        ai.street_abbr,
+        ai.ca_city,
+        ai.ca_state
+    FROM 
+        CustomerInfo ci
+    JOIN 
+        AddressInfo ai ON ci.c_customer_sk = ai.ca_address_sk
+    WHERE 
+        ci.age BETWEEN 18 AND 65 AND 
+        (ci.cd_gender = 'F' AND ci.cd_marital_status = 'M')
+)
+SELECT 
+    full_name,
+    age,
+    CONCAT(street_abbr, ', ', ca_city, ', ', ca_state) AS formatted_address
+FROM 
+    Analytics
+ORDER BY 
+    age DESC, 
+    full_name;

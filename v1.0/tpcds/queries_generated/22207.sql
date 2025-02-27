@@ -1,0 +1,59 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT sr_customer_sk, 
+           SUM(sr_return_quantity) AS total_returned_quantity, 
+           SUM(sr_return_amt) AS total_returned_amt
+    FROM store_returns
+    GROUP BY sr_customer_sk
+    HAVING SUM(sr_return_quantity) > 0
+),
+AggregateSales AS (
+    SELECT s_store_sk,
+           COUNT(DISTINCT ss_ticket_number) AS unique_sales_count,
+           SUM(ss_net_paid) AS total_sales_amt
+    FROM store_sales
+    GROUP BY s_store_sk
+),
+SalesGroup AS (
+    SELECT s_store_sk,
+           RANK() OVER (ORDER BY total_sales_amt DESC) AS store_rank
+    FROM AggregateSales
+),
+CustomerGenderStats AS (
+    SELECT cd_gender, 
+           COUNT(DISTINCT c_customer_sk) AS customer_count,
+           SUM(CASE WHEN cd_marital_status = 'M' THEN 1 ELSE 0 END) AS married_count
+    FROM customer_demographics
+    JOIN customer ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    GROUP BY cd_gender
+),
+JoinCondition AS (
+    SELECT ci.c_first_name || ' ' || ci.c_last_name AS customer_name,
+           ca.ca_city,
+           sr.total_returned_amt,
+           CASE
+               WHEN ci.c_birth_year IS NULL THEN 'Unknown'
+               ELSE CAST((EXTRACT(YEAR FROM CURRENT_DATE) - ci.c_birth_year) AS VARCHAR)
+           END AS customer_age,
+           RANK() OVER (PARTITION BY ci.c_birth_country ORDER BY sr.total_returned_amt DESC) AS country_rank
+    FROM CustomerReturns sr
+    JOIN customer ci ON sr.sr_customer_sk = ci.c_customer_sk
+    LEFT JOIN customer_address ca ON ci.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT DISTINCT jc.customer_name,
+                jc.ca_city,
+                COALESCE(jc.total_returned_amt, 0) AS total_returned_amt,
+                cg.customer_count,
+                cg.married_count,
+                sg.store_rank
+FROM JoinCondition jc
+LEFT JOIN CustomerGenderStats cg ON 1=1
+LEFT JOIN SalesGroup sg ON sg.s_store_sk = (
+    SELECT s_store_sk 
+    FROM store 
+    ORDER BY s_number_employees DESC 
+    LIMIT 1
+)
+WHERE jc.country_rank <= 5
+  AND (jc.total_returned_amt IS NULL OR jc.total_returned_amt > 100.00)
+ORDER BY jc.total_returned_amt DESC, jc.customer_name ASC;

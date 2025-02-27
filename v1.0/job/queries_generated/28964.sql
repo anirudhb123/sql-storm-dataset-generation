@@ -1,0 +1,48 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS title,
+        m.production_year,
+        MAX(k.keyword) AS most_frequent_keyword,
+        COUNT(c.id) AS total_cast_members
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        movie_keyword AS mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info AS c ON m.id = c.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.most_frequent_keyword,
+        COALESCE(AVG(CASE WHEN ci.note IS NOT NULL THEN 1 END) * 100.0 / COUNT(ci.id), 0) AS cast_note_percentage,
+        ROW_NUMBER() OVER (PARTITION BY rm.production_year ORDER BY rm.total_cast_members DESC) AS rank_by_cast
+    FROM 
+        RankedMovies AS rm
+    LEFT JOIN 
+        cast_info AS ci ON rm.movie_id = ci.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year, rm.most_frequent_keyword
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.most_frequent_keyword,
+    md.cast_note_percentage,
+    md.rank_by_cast
+FROM 
+    MovieDetails AS md
+WHERE 
+    md.production_year BETWEEN 1990 AND 2020
+ORDER BY 
+    md.production_year DESC, 
+    md.rank_by_cast ASC
+LIMIT 10;

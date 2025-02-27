@@ -1,0 +1,46 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY c.c_birth_year DESC) AS age_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status = 'M' AND 
+        cd.cd_gender = 'F'
+),
+AggregatedData AS (
+    SELECT 
+        ca.ca_state,
+        STRING_AGG(CONCAT(c.c_first_name, ' ', c.c_last_name) ORDER BY c.c_first_name) AS female_customers,
+        COUNT(*) AS total_females,
+        MAX(age_rank) AS max_age_rank
+    FROM 
+        RankedCustomers rc
+    JOIN 
+        customer_address ca ON rc.c_customer_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_state
+)
+
+SELECT 
+    ad.ca_state,
+    ad.female_customers,
+    ad.total_females,
+    ad.max_age_rank 
+FROM 
+    AggregatedData ad
+WHERE 
+    ad.total_females > 10
+ORDER BY 
+    ad.total_females DESC;

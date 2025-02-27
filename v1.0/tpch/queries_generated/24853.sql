@@ -1,0 +1,66 @@
+WITH RECURSIVE RegionalSales AS (
+    SELECT 
+        r.r_name AS region,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        r.r_name
+),
+CustomerSales AS (
+    SELECT 
+        c.c_name AS customer_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) IS NOT NULL
+),
+TopRegions AS (
+    SELECT 
+        region,
+        total_sales
+    FROM 
+        RegionalSales
+    WHERE 
+        sales_rank <= 3
+)
+SELECT 
+    cr.customer_name,
+    COALESCE(tr.region, 'No Region') AS region,
+    COALESCE(tr.total_sales, 0) AS region_sales,
+    cs.order_count,
+    cs.total_spent,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No Spending'
+        WHEN cs.total_spent > 10000 THEN 'High Roller'
+        ELSE 'Casual Spender'
+    END AS spending_category
+FROM 
+    CustomerSales cs
+FULL OUTER JOIN 
+    TopRegions tr ON tr.total_sales = (SELECT MAX(total_sales) FROM TopRegions)
+WHERE 
+    cs.order_count IS NOT NULL OR tr.region IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC NULLS LAST,
+    tr.region ASC
+LIMIT 10;

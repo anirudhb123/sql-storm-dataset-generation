@@ -1,0 +1,80 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        ROW_NUMBER() OVER (PARTITION BY sr_returning_customer_sk ORDER BY SUM(sr_return_quantity) DESC) AS rnk
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        RANK() OVER (PARTITION BY c.c_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        MAX(ws.ws_sales_price) AS max_price,
+        MIN(ws.ws_sales_price) AS min_price,
+        AVG(ws.ws_sales_price) AS avg_price
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_rec_end_date IS NULL
+    GROUP BY 
+        ws.ws_item_sk
+),
+CustomerReturnDetails AS (
+    SELECT 
+        cr.returning_customer_sk,
+        COALESCE(r.total_returned, 0) AS total_returned_quantity,
+        COALESCE(SUM(s.total_sales), 0) AS total_sales_value
+    FROM 
+        (SELECT DISTINCT sr_returning_customer_sk AS returning_customer_sk FROM store_returns) cr
+    LEFT JOIN 
+        RankedReturns r ON cr.returning_customer_sk = r.sr_returning_customer_sk
+    LEFT JOIN 
+        SalesData s ON s.ws_item_sk IN (
+            SELECT ws_item_sk 
+            FROM web_sales 
+            WHERE ws_bill_customer_sk = cr.returning_customer_sk
+        )
+    GROUP BY 
+        cr.returning_customer_sk
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cr.total_returned_quantity,
+    cr.total_sales_value
+FROM 
+    CustomerDetails cd
+JOIN 
+    CustomerReturnDetails cr ON cd.c_customer_sk = cr.returning_customer_sk
+WHERE 
+    cr.total_returned_quantity > 5
+    AND (cd.cd_marital_status IN ('M', 'S') OR cd.cd_purchase_estimate > 1000)
+    AND cd.gender_rank <= 10
+ORDER BY 
+    cr.total_returned_quantity DESC, 
+    cd.cd_purchase_estimate DESC
+LIMIT 50;

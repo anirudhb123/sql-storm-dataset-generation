@@ -1,0 +1,52 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_ext_sales_price DESC) AS rank
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+),
+HighValueReturns AS (
+    SELECT 
+        sr.store_sk,
+        SUM(sr.return_amt) AS total_return_amt,
+        SUM(sr.return_quantity) AS total_return_quantity
+    FROM store_returns sr
+    INNER JOIN RankedSales rs ON sr.sr_ticket_number = rs.ws_order_number
+    WHERE sr.return_quantity IS NOT NULL
+    GROUP BY sr.store_sk
+),
+JoinResults AS (
+    SELECT 
+        s.s_store_id,
+        COALESCE(hv.total_return_amt, 0) AS total_returns,
+        COUNT(DISTINCT ws.ws_order_number) AS unique_sales_count,
+        MAX(hd.hd_income_band_sk) AS highest_income_band
+    FROM store s
+    LEFT JOIN HighValueReturns hv ON s.s_store_sk = hv.store_sk
+    LEFT JOIN household_demographics hd ON hd.hd_demo_sk = s.s_closed_date_sk
+    LEFT JOIN web_sales ws ON ws.ws_ship_customer_sk = s.s_customer_sk
+    GROUP BY s.s_store_id
+),
+FinalResults AS (
+    SELECT 
+        j.s_store_id,
+        j.total_returns,
+        j.unique_sales_count,
+        j.highest_income_band,
+        CASE 
+            WHEN j.total_returns > 1000 THEN 'High Return'
+            WHEN j.total_returns BETWEEN 500 AND 1000 THEN 'Moderate Return'
+            ELSE 'Low Return'
+        END AS return_category
+    FROM JoinResults j
+    WHERE j.unique_sales_count > 0
+)
+SELECT 
+    *,
+    CONCAT('Store: ', s_store_id, ' | Returns: ', total_returns, ' | Unique Sales: ', unique_sales_count, ' | Return Category: ', return_category) AS display_info
+FROM FinalResults
+ORDER BY total_returns DESC, unique_sales_count;

@@ -1,0 +1,41 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS OrderRank,
+        c.c_nationkey
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+), 
+SupplierMetrics AS (
+    SELECT 
+        s.s_nationkey,
+        COUNT(DISTINCT ps.ps_partkey) AS TotalPartsSupplied,
+        SUM(ps.ps_supplycost) AS TotalSupplyCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_nationkey
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSaleValue,
+        SUM(l.l_tax) AS TotalTax,
+        SUM(l.l_quantity) AS TotalQuantity
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    n.n_name,
+    COALESCE(SUM(CASE WHEN ro.OrderRank = 1 THEN ro.o_totalprice END), 0) AS LatestOrderTotal,
+    COALESCE(SM.TotalPartsSupplied, 0) AS TotalPartsSupplied,
+    COALESCE(SM.TotalSupplyCost, 0) AS TotalSupplyCost,
+    COALESCE(SUM(lis.TotalSaleValue), 0) AS TotalSalesValue
+FROM nation n
+LEFT JOIN RankedOrders ro ON n.n_nationkey = ro.c_nationkey
+LEFT JOIN SupplierMetrics SM ON n.n_nationkey = SM.s_nationkey
+LEFT JOIN LineItemSummary lis ON ro.o_orderkey = lis.l_orderkey
+GROUP BY n.n_name
+HAVING COALESCE(SUM(lis.TotalSaleValue), 0) > 10000
+ORDER BY n.n_name;

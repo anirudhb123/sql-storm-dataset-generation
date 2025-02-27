@@ -1,0 +1,70 @@
+WITH CTE_AverageVotes AS (
+    SELECT 
+        PostId, 
+        AVG(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS AvgUpVotes,
+        AVG(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS AvgDownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+CTE_PostWithComments AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(c.PostedDate, '1970-01-01') AS PostedDate,
+        COALESCE(c.Text, 'No Comments') AS LastCommentText,
+        c.UserDisplayName AS LastCommentUser,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY c.CreationDate DESC) AS CommentRank
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount,
+            MAX(CreationDate) AS PostedDate,
+            MAX(Text) AS Text,
+            MAX(UserDisplayName) AS UserDisplayName
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title, 
+    p.CreationDate AS PostCreationDate,
+    p.ViewCount,
+    COALESCE(av.AvgUpVotes, 0) AS AvgUpVotes,
+    COALESCE(av.AvgDownVotes, 0) AS AvgDownVotes,
+    CASE 
+        WHEN ph.Count IS NULL THEN 'No History'
+        ELSE STRING_AGG(DISTINCT ph.Comment, ', ') 
+    END AS PostHistoryComments,
+    CASE 
+        WHEN pc.CommentRank = 1 THEN pc.LastCommentText
+        ELSE 'No Recent Comments'
+    END AS RecentCommentText,
+    CASE 
+        WHEN pc.CommentRank = 1 THEN pc.LastCommentUser
+        ELSE 'Unknown'
+    END AS RecentCommentUser
+FROM Posts p
+LEFT JOIN CTE_AverageVotes av ON p.Id = av.PostId
+LEFT JOIN (
+    SELECT 
+        PostId, 
+        COUNT(*) AS Count,
+        STRING_AGG(Comment, ' | ') AS Comment
+    FROM PostHistory
+    WHERE PostHistoryTypeId IN (10, 12, 13)
+    GROUP BY PostId
+) ph ON p.Id = ph.PostId
+LEFT JOIN CTE_PostWithComments pc ON p.Id = pc.PostId
+WHERE 
+    (p.OwnerUserId IS NOT NULL 
+    OR p.OwnerDisplayName IS NOT NULL)
+    AND (p.CreatedDate >= NOW() - INTERVAL '1 year') 
+    AND (p.ViewCount > 10)
+ORDER BY 
+    COALESCE(av.AvgUpVotes - av.AvgDownVotes, 0) DESC,
+    p.ViewCount DESC,
+    p.CreationDate ASC
+LIMIT 50;

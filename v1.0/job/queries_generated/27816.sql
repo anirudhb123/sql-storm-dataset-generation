@@ -1,0 +1,65 @@
+WITH enriched_movies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ak.name ORDER BY ak.name) AS alternate_names,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords,
+        COUNT(DISTINCT mc.company_id) AS production_companies_count
+    FROM 
+        aka_title t
+    INNER JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id IN (
+            SELECT person_id 
+            FROM cast_info ci 
+            WHERE ci.movie_id = t.id
+        )
+    GROUP BY 
+        t.id
+),
+high_keyword_movies AS (
+    SELECT 
+        em.title_id,
+        em.title,
+        em.production_year,
+        em.alternate_names,
+        em.keywords,
+        em.production_companies_count
+    FROM 
+        enriched_movies em
+    WHERE 
+        LENGTH(em.keywords) - LENGTH(REPLACE(em.keywords, ',', '')) + 1 > 10
+),
+popular_titles AS (
+    SELECT 
+        ht.title,
+        ht.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        high_keyword_movies ht
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = ht.title_id
+    GROUP BY 
+        ht.title_id, ht.title, ht.production_year
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 5
+)
+SELECT 
+    pt.title,
+    pt.production_year,
+    pt.cast_count,
+    em.alternate_names,
+    em.keywords,
+    em.production_companies_count
+FROM 
+    popular_titles pt
+JOIN 
+    enriched_movies em ON pt.title_id = em.title_id
+ORDER BY 
+    pt.production_year DESC, pt.cast_count DESC;

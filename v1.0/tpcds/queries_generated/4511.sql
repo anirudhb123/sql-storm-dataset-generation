@@ -1,0 +1,54 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_dep_count,
+        cd.cd_purchase_estimate,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND ws.ws_sold_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.ws_item_sk, ws.ws_sold_date_sk
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    ss.total_quantity,
+    ss.total_profit,
+    CASE 
+        WHEN cs.gender_rank <= 5 THEN 'Top 5'
+        ELSE 'Others'
+    END AS purchase_category
+FROM 
+    CustomerStats cs
+JOIN 
+    SalesData ss ON cs.c_customer_sk = ss.ws_bill_customer_sk
+WHERE 
+    cs.income_band = (SELECT ib_income_band_sk FROM income_band WHERE ib_lower_bound <= cs.cd_purchase_estimate AND ib_upper_bound >= cs.cd_purchase_estimate)
+    AND (ss.total_profit IS NOT NULL AND ss.total_profit > 0)
+ORDER BY 
+    ss.total_profit DESC, cs.c_last_name, cs.c_first_name
+LIMIT 100;

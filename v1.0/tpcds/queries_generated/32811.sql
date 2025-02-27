@@ -1,0 +1,48 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT ws.ship_date_sk, ws.item_sk, SUM(ws.ext_sales_price) AS total_sales, 1 AS level
+    FROM web_sales ws
+    GROUP BY ws.ship_date_sk, ws.item_sk
+    UNION ALL
+    SELECT ws.ship_date_sk, ws.item_sk, SUM(ws.ext_sales_price) AS total_sales, sh.level + 1
+    FROM web_sales ws
+    JOIN sales_hierarchy sh ON ws.item_sk = sh.item_sk AND ws.ship_date_sk > sh.ship_date_sk
+    GROUP BY ws.ship_date_sk, ws.item_sk, sh.level
+),
+customer_stats AS (
+    SELECT cd.cd_gender, 
+           COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+           SUM(cd.cd_purchase_estimate) AS total_estimate,
+           COUNT(DISTINCT CASE WHEN cd.cd_marital_status = 'M' THEN c.c_customer_sk END) AS married_customers,
+           COUNT(DISTINCT CASE WHEN cd.cd_marital_status = 'S' THEN c.c_customer_sk END) AS single_customers
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c.c_first_shipto_date_sk IS NOT NULL
+    GROUP BY cd.cd_gender
+),
+item_sales AS (
+    SELECT i.i_item_sk, 
+           i.i_item_id, 
+           SUM(ws.ws_quantity) AS total_quantity_sold,
+           SUM(ws.ws_ext_sales_price) AS total_sales_amount
+    FROM item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_item_id
+)
+SELECT ca.ca_state, 
+       cs.cd_gender, 
+       COALESCE(SUM(iss.total_sales_amount), 0) AS item_sales,
+       COALESCE(SUM(h.total_sales), 0) AS total_sales_hierarchy,
+       (SELECT SUM(total_sales) FROM sales_hierarchy WHERE item_sk IN (SELECT i_item_sk FROM item_sales)) AS total_recursive_sales,
+       cs.total_estimate,
+       CASE WHEN cs.total_customers > 0 THEN 
+            ROUND(CAST((SUM(iss.total_sales_amount) / cs.total_customers) AS DECIMAL(10,2)), 2)
+       ELSE 0 END AS avg_sales_per_customer
+FROM customer_address ca
+JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN customer_stats cs ON c.c_current_cdemo_sk = cs.cd_gender
+LEFT JOIN item_sales iss ON c.c_customer_sk = iss.i_item_sk
+LEFT JOIN sales_hierarchy h ON h.item_sk = iss.i_item_sk
+WHERE ca.ca_state IS NOT NULL
+GROUP BY ca.ca_state, cs.cd_gender, cs.total_estimate
+ORDER BY ca.ca_state, cs.cd_gender;

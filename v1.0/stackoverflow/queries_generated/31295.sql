@@ -1,0 +1,105 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -2, GETDATE())
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName, p.Score, p.ViewCount
+), PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 10
+), RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        DENSE_RANK() OVER (ORDER BY ph.CreationDate DESC) AS ActivityRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON p.Id = ph.PostId
+    WHERE 
+        ph.CreationDate >= DATEADD(MONTH, -1, GETDATE())
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    (SELECT STRING_AGG(tag.TagName, ', ') 
+        FROM PopularTags tag 
+        JOIN Posts post ON post.Tags LIKE CONCAT('%', tag.TagName, '%')
+        WHERE post.Id = rp.PostId) AS PopularTags,
+    (SELECT r.ActivityRank
+        FROM RecentActivity r
+        WHERE r.PostId = rp.PostId) AS RecentActivityRank
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC;
+
+-- Additional benchmarking on combined user metrics
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    ue.UserId,
+    ue.DisplayName,
+    ue.Reputation,
+    ue.UpVotes,
+    ue.DownVotes,
+    ue.PostsCount,
+    CASE 
+        WHEN ue.Reputation >= 1000 THEN 'High Engagement'
+        WHEN ue.Reputation BETWEEN 500 AND 999 THEN 'Medium Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM 
+    UserEngagement ue
+WHERE 
+    ue.UpVotes > ue.DownVotes
+ORDER BY 
+    ue.Reputation DESC;

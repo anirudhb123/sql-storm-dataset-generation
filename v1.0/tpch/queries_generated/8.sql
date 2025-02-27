@@ -1,0 +1,52 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+ActiveOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_totalprice, 
+        o.o_orderdate, 
+        COUNT(li.l_orderkey) AS total_items
+    FROM orders o
+    LEFT JOIN lineitem li ON o.o_orderkey = li.l_orderkey 
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate
+),
+NationSummary AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT 
+    p.p_name,
+    ps.ps_availqty,
+    ps.ps_supplycost,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    o.o_orderkey,
+    a.total_items,
+    n.n_name AS nation_name,
+    ns.total_acctbal,
+    RANK() OVER (PARTITION BY n.n_nationkey ORDER BY p.p_retailprice DESC) AS price_rank
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey AND s.rank = 1
+LEFT JOIN ActiveOrders o ON ps.ps_partkey = o.o_orderkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN NationSummary ns ON n.n_nationkey = ns.n_nationkey
+WHERE 
+    (p.p_retailprice > 50 OR ps.ps_availqty < 100)
+AND 
+    (s.s_name IS NOT NULL OR ns.supplier_count > 0)
+ORDER BY 
+    price_rank DESC, total_items ASC;

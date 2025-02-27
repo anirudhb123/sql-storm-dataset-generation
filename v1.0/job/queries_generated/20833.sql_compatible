@@ -1,0 +1,47 @@
+
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY mk.keyword) AS keyword_order
+    FROM aka_title mt
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+    WHERE mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        mt.id, 
+        mt.title, 
+        mt.production_year,
+        mt.kind_id,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY mk.keyword) AS keyword_order
+    FROM aka_title mt
+    INNER JOIN RecursiveMovieCTE rmt ON mt.production_year > rmt.production_year
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    STRING_AGG(mk.keyword, ', ') AS all_keywords,
+    ROUND(AVG(CASE WHEN pi.note IS NOT NULL THEN 1.0 ELSE 0 END) * 100, 2) AS active_participation_percentage,
+    CASE 
+        WHEN mt.production_year < 2010 THEN 'Classic' 
+        WHEN mt.production_year BETWEEN 2010 AND 2020 THEN 'Modern'
+        ELSE 'Recent'
+    END AS movie_category
+FROM aka_name a
+JOIN cast_info ci ON a.person_id = ci.person_id
+JOIN aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN person_info pi ON a.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'awards')
+WHERE a.name IS NOT NULL 
+AND (mk.keyword IS NULL OR mk.keyword <> 'unknown')
+GROUP BY a.name, mt.title, mt.production_year
+HAVING COUNT(DISTINCT mk.keyword) > 1
+ORDER BY active_participation_percentage DESC, movie_title ASC;

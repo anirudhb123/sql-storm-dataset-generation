@@ -1,0 +1,70 @@
+WITH RankedSupplier AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+ProductDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    c.c_name,
+    c.c_acctbal,
+    co.order_count,
+    co.total_spent,
+    p.p_name,
+    p.avg_price,
+    ps.ps_availqty,
+    ps.ps_supplycost,
+    s.s_name AS top_supplier
+FROM 
+    CustomerOrders co
+JOIN 
+    customer c ON co.c_custkey = c.c_custkey
+JOIN 
+    ProductDetails p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+LEFT JOIN 
+    RankedSupplier s ON s.s_suppkey = (SELECT r.s_suppkey FROM RankedSupplier r WHERE r.rank_acctbal = 1 AND r.ps_partkey = p.p_partkey)
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+WHERE 
+    p.total_returned > 100 AND 
+    c.c_acctbal IS NOT NULL AND 
+    c.c_acctbal > (
+        SELECT 
+            AVG(c2.c_acctbal) 
+        FROM 
+            customer c2 
+        WHERE 
+            c2.c_nationkey = c.c_nationkey
+    )
+ORDER BY 
+    co.total_spent DESC, 
+    c.c_name;

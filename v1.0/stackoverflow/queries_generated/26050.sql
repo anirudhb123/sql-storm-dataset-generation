@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Body,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.CreationDate DESC) AS RankByType,
+        pt.Name AS PostTypeName
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+AggregatedTags AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        PostId
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        COUNT(DISTINCT PostId) AS PostCount
+    FROM 
+        AggregatedTags
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(DISTINCT PostId) >= 10
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.*, 
+        tt.PostCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TopTags tt ON tt.Tag = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><'))
+    WHERE 
+        rp.RankByType <= 5
+),
+FrequentEditors AS (
+    SELECT 
+        UserId, 
+        COUNT(DISTINCT PostId) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 24) -- Edit Title, Edit Body, Suggested Edit Applied
+    GROUP BY 
+        UserId
+    HAVING 
+        COUNT(DISTINCT PostId) >= 5
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.Score,
+    p.Body,
+    p.PostTypeName,
+    e.UserId AS FrequentEditorId,
+    e.EditCount AS TotalEdits,
+    tt.PostCount AS RelatedTagPostCount
+FROM 
+    TopRankedPosts p
+LEFT JOIN 
+    FrequentEditors e ON e.UserId = p.OwnerUserId
+ORDER BY 
+    p.CreationDate DESC, 
+    p.Score DESC;

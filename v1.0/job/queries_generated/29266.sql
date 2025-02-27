@@ -1,0 +1,34 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    c.kind AS company_type,
+    COUNT(DISTINCT ci.id) AS role_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    STRING_AGG(DISTINCT pi.info, '; ') AS personal_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type c ON mc.company_type_id = c.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id
+WHERE 
+    a.name IS NOT NULL
+    AND ci.note IS NULL
+    AND t.production_year >= 2000
+GROUP BY 
+    a.name, t.title, t.production_year, c.kind
+ORDER BY 
+    COUNT(DISTINCT ci.id) DESC, t.production_year DESC;
+
+This query is designed to benchmark string processing within the context of a movie database. It retrieves the names of actors, their movies, the year of production, the type of companies involved in the movie, the count of unique roles they have played, associated keywords, and personal information. The results are aggregated and ordered in a way that highlights actors with the most diverse roles in recent years.

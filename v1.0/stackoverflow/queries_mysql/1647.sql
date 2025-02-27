@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 YEAR)
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+ClosedPostCount AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS ClosedPosts
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.Reputation,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(cpc.ClosedPosts, 0) AS ClosedPosts,
+    CASE 
+        WHEN rp.Score > 100 THEN 'High Score'
+        WHEN rp.Score BETWEEN 50 AND 100 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN 
+    ClosedPostCount cpc ON rp.OwnerUserId = cpc.UserId
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

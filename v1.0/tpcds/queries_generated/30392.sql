@@ -1,0 +1,68 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+StoreSalesCTE AS (
+    SELECT 
+        ss_item_sk, 
+        SUM(ss_net_paid) AS total_store_sales,
+        COUNT(ss_ticket_number) AS store_order_count
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT MAX(sold_date_sk) FROM web_sales) - 30
+    GROUP BY 
+        ss_item_sk
+),
+CombinedSales AS (
+    SELECT 
+        w.ws_item_sk,
+        w.total_sales,
+        COALESCE(s.total_store_sales, 0) AS total_store_sales,
+        COALESCE(s.order_count, 0) AS order_count,
+        s.store_order_count
+    FROM 
+        SalesCTE w
+    LEFT JOIN 
+        StoreSalesCTE s ON w.ws_item_sk = s.ss_item_sk
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_customer_sk,
+        MAX(CASE WHEN cd.cd_gender = 'M' THEN cd.cd_demo_sk END) AS male_demo_sk,
+        MAX(CASE WHEN cd.cd_gender = 'F' THEN cd.cd_demo_sk END) AS female_demo_sk
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    cs.ws_item_sk,
+    cs.total_sales,
+    cs.total_store_sales,
+    cs.order_count,
+    cs.store_order_count,
+    COUNT(DISTINCT cus.c_customer_sk) AS unique_customers,
+    COUNT(DISTINCT CASE WHEN cs.total_sales > cs.total_store_sales THEN cus.c_customer_sk END) AS customers_web_dominant
+FROM 
+    CombinedSales cs
+LEFT JOIN 
+    CustomerSummary cus ON cs.ws_item_sk IN (SELECT i_item_sk FROM item WHERE i_item_sk = cs.ws_item_sk)
+WHERE 
+    cs.total_sales IS NOT NULL
+GROUP BY 
+    cs.ws_item_sk, cs.total_sales, cs.total_store_sales, cs.order_count, cs.store_order_count
+ORDER BY 
+    cs.total_sales DESC
+LIMIT 10;
+

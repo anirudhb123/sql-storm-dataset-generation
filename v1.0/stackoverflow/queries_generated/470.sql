@@ -1,0 +1,60 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT V.Id) AS TotalVotes
+    FROM 
+        Posts P
+        LEFT JOIN Comments C ON P.Id = C.PostId
+        LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.PostTypeId
+),
+PopularPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.PostTypeId,
+        PS.TotalBounty,
+        PS.TotalComments,
+        PS.TotalVotes,
+        ROW_NUMBER() OVER (PARTITION BY PS.PostTypeId ORDER BY PS.TotalVotes DESC, PS.TotalComments DESC) AS PopularityRank
+    FROM 
+        PostStats PS
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.Rank,
+    PP.PostId,
+    PP.TotalBounty,
+    PP.TotalComments,
+    PP.TotalVotes,
+    CASE 
+        WHEN PP.PopularityRank <= 5 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    UserReputation U
+JOIN 
+    Posts P ON U.UserId = P.OwnerUserId
+JOIN 
+    PopularPosts PP ON P.Id = PP.PostId
+WHERE 
+    U.Reputation >= 1000
+    AND PP.TotalVotes > 0
+    AND PP.PostTypeId IN (1, 2) -- Only interested in Questions and Answers
+ORDER BY 
+    U.Reputation DESC, 
+    PP.TotalVotes DESC;

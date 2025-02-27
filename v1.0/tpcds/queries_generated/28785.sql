@@ -1,0 +1,55 @@
+
+WITH AddressDetails AS (
+    SELECT
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS Full_Address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM
+        customer_address
+    WHERE
+        ca_country = 'USA'
+),
+CustomerDetails AS (
+    SELECT
+        CONCAT(c_first_name, ' ', c_last_name) AS Full_Name,
+        cd_gender,
+        cd_marital_status,
+        cd.education_status,
+        cd_purchase_estimate
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT
+        ws_quantity,
+        ws_ext_sales_price,
+        ws_ext_tax,
+        ws_net_paid
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk IN (
+            SELECT d_date_sk FROM date_dim WHERE d_year = 2023
+        )
+)
+SELECT
+    ad.Full_Address,
+    ad.ca_city,
+    ad.ca_state,
+    cd.Full_Name,
+    cd.cd_gender,
+    SUM(sd.ws_quantity) AS Total_Quantity_Sold,
+    SUM(sd.ws_ext_sales_price) AS Total_Sales_Amount,
+    AVG(sd.ws_net_paid) AS Average_Net_Paid
+FROM
+    AddressDetails ad
+JOIN CustomerDetails cd ON ad.ca_country = 'USA'
+JOIN SalesData sd ON cd.c_current_addr_sk = ad.ca_address_sk
+GROUP BY
+    ad.Full_Address, ad.ca_city, ad.ca_state, cd.Full_Name, cd.cd_gender
+ORDER BY
+    Total_Sales_Amount DESC
+LIMIT 50;

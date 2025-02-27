@@ -1,0 +1,88 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopQuestions AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT A.Id) AS AnswerCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts A ON P.Id = A.ParentId
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, U.DisplayName
+    ORDER BY 
+        P.Score DESC
+    LIMIT 10
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        PH.UserDisplayName,
+        P.Title AS PostTitle,
+        PH.Comment,
+        ROW_NUMBER() OVER(PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS RowNum
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.PostCount,
+    US.CommentCount,
+    US.UpVoteCount,
+    US.DownVoteCount,
+    US.BadgeCount,
+    TQ.PostId AS TopQuestionPostId,
+    TQ.Title AS TopQuestionTitle,
+    TQ.CreationDate AS TopQuestionCreationDate,
+    TQ.Score AS TopQuestionScore,
+    TQ.OwnerDisplayName AS TopQuestionOwner,
+    RPH.PostId AS RecentPostHistoryPostId,
+    RPH.PostHistoryTypeId,
+    RPH.CreationDate AS RecentPostHistoryDate,
+    RPH.UserDisplayName AS RecentPostHistoryUser,
+    RPH.Comment AS RecentPostHistoryComment,
+    RPH.PostTitle AS RecentPostHistoryPostTitle
+FROM 
+    UserStats US
+LEFT JOIN 
+    TopQuestions TQ ON US.UserId = TQ.OwnerDisplayName
+LEFT JOIN 
+    RecentPostHistory RPH ON US.UserId = RPH.UserDisplayName AND RPH.RowNum = 1
+ORDER BY 
+    US.Reputation DESC, TQ.Score DESC;

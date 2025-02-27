@@ -1,0 +1,66 @@
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        COUNT(DISTINCT U.Id) AS UserCount,
+        STRING_AGG(DISTINCT U.DisplayName, ', ') AS Users,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    GROUP BY 
+        T.TagName
+),
+FrequentTaggers AS (
+    SELECT 
+        U.DisplayName,
+        COUNT(P.Id) AS PostsTagged,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    JOIN 
+        unnest(string_to_array(P.Tags, ',')) AS tag ON tag IS NOT NULL 
+    JOIN 
+        Tags T ON trim(tag) = T.TagName
+    GROUP BY 
+        U.DisplayName
+    HAVING COUNT(P.Id) > 10 
+),
+PostHistoryAggregation AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        STRING_AGG(CONCAT(PH.UserDisplayName, ': ', PH.Comment), '; ') AS EditComments
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    TS.TagName,
+    TS.PostCount,
+    TS.UserCount,
+    TS.TotalViews,
+    FT.DisplayName AS FrequentTagger,
+    FT.PostsTagged,
+    FT.TagsUsed,
+    PHA.EditCount,
+    PHA.LastEditDate,
+    PHA.EditComments
+FROM 
+    TagStatistics TS
+LEFT JOIN 
+    FrequentTaggers FT ON FT.TagsUsed LIKE '%' || TS.TagName || '%' 
+LEFT JOIN 
+    PostHistoryAggregation PHA ON PHA.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE '%' || TS.TagName || '%')
+ORDER BY 
+    TS.TotalViews DESC, 
+    TS.PostCount DESC;

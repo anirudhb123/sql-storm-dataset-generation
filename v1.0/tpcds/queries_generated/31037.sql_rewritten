@@ -1,0 +1,51 @@
+WITH RECURSIVE customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_customer_id
+), 
+high_value_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cs.total_sales,
+        cs.order_count
+    FROM customer c
+    JOIN customer_sales cs ON c.c_customer_sk = cs.c_customer_sk
+    WHERE cs.sales_rank <= 10
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(c.c_customer_sk) AS customer_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c.c_customer_sk IN (SELECT c_customer_sk FROM high_value_customers)
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+sales_by_gender AS (
+    SELECT 
+        cd.cd_gender,
+        SUM(cs.total_sales) AS total_sales,
+        SUM(cs.order_count) AS total_orders
+    FROM customer_demographics cd
+    JOIN high_value_customers hvc ON cd.cd_demo_sk = hvc.c_customer_sk
+    JOIN customer_sales cs ON hvc.c_customer_sk = cs.c_customer_sk
+    GROUP BY cd.cd_gender
+)
+SELECT 
+    sbg.cd_gender,
+    sbg.total_sales,
+    sbg.total_orders,
+    (SELECT AVG(total_sales) FROM sales_by_gender) AS avg_sales,
+    (SELECT SUM(total_orders) FROM sales_by_gender) AS total_orders_all
+FROM sales_by_gender sbg
+ORDER BY sbg.total_sales DESC
+LIMIT 5;

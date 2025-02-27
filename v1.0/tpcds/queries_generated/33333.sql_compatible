@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws_item_sk, 
+           SUM(ws_quantity) AS total_quantity,
+           SUM(ws_ext_sales_price) AS total_sales,
+           RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+), 
+AddressData AS (
+    SELECT c.c_customer_sk, 
+           ca.ca_address_sk, 
+           ca.ca_city, 
+           ca.ca_state,
+           cd.cd_marital_status
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+DateRange AS (
+    SELECT d.d_year AS year, 
+           COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year BETWEEN 2000 AND 2001
+    GROUP BY d.d_year
+), 
+SalesSummary AS (
+    SELECT year, 
+           SUM(total_orders) AS yearly_order_count,
+           SUM(CASE WHEN total_quantity > 100 THEN 1 ELSE 0 END) AS high_sales_items
+    FROM DateRange
+    GROUP BY year
+)
+SELECT ad.ca_city, 
+       ad.ca_state, 
+       s.ws_item_sk,
+       s.total_quantity,
+       s.total_sales,
+       ss.yearly_order_count,
+       ss.high_sales_items
+FROM SalesCTE s
+JOIN AddressData ad ON ad.c_customer_sk IN (
+    SELECT DISTINCT ws_bill_customer_sk 
+    FROM web_sales 
+    WHERE ws_item_sk = s.ws_item_sk
+)
+JOIN SalesSummary ss ON ss.year = EXTRACT(YEAR FROM DATE '2002-10-01')
+WHERE s.sales_rank <= 10
+ORDER BY ad.ca_state, ad.ca_city, s.total_sales DESC;

@@ -1,0 +1,61 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS title_rank
+    FROM 
+        title t
+    JOIN 
+        aka_title at ON t.id = at.movie_id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year, t.kind_id
+),
+PersonMovies AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.person_id, ak.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 3 -- Only consider persons with more than 3 movies
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name ORDER BY cn.name) AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rt.title_rank,
+    pm.name AS actor_name,
+    pm.movies_count,
+    COALESCE(mc.companies, 'No companies involved') AS involved_companies
+FROM 
+    RankedTitles rt
+JOIN 
+    PersonMovies pm ON rt.title_id = (SELECT mc.movie_id FROM movie_companies mc WHERE mc.movie_id = rt.title_id LIMIT 1)
+LEFT JOIN 
+    MovieCompanies mc ON rt.title_id = mc.movie_id
+WHERE 
+    rt.title_rank <= 5 -- Top 5 titles by production year
+ORDER BY 
+    rt.production_year DESC, 
+    rt.title_rank ASC, 
+    pm.movies_count DESC
+LIMIT 100;

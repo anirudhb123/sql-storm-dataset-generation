@@ -1,0 +1,87 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amount,
+        COUNT(*) AS total_returns,
+        AVG(sr_return_quantity) AS avg_return_qty
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        cr.sr_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cr.total_returned_amount,
+        cr.total_returns,
+        cr.avg_return_qty
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        customer c ON c.c_customer_sk = cr.sr_customer_sk
+    WHERE 
+        cr.total_returned_amount > (
+            SELECT 
+                AVG(total_returned_amount) 
+            FROM 
+                CustomerReturns
+        )
+),
+BestSellingItems AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+FrequentBuyers AS (
+    SELECT 
+        w.ws_customer_sk,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_customer_sk
+    HAVING 
+        COUNT(ws.ws_order_number) > (
+            SELECT 
+                AVG(order_count) 
+            FROM 
+                FrequentBuyers
+        )
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    c.c_email_address,
+    cr.total_returned_amount,
+    bsi.total_sales,
+    bsi.total_sold,
+    CASE 
+        WHEN cb.order_count IS NULL THEN 'No Orders'
+        ELSE 'Frequent Buyer'
+    END AS buyer_type
+FROM 
+    HighReturnCustomers cr
+LEFT JOIN 
+    BestSellingItems bsi ON bsi.ws_item_sk IN (
+        SELECT 
+            ws_item_sk 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_customer_sk = cr.sr_customer_sk
+    )
+LEFT JOIN 
+    FrequentBuyers cb ON cb.ws_customer_sk = cr.sr_customer_sk
+WHERE 
+    bsi.total_sales IS NOT NULL
+ORDER BY 
+    cr.total_returned_amount DESC, 
+    bsi.total_sales DESC;

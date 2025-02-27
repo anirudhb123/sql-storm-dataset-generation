@@ -1,0 +1,56 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT Id, Reputation, CreationDate, 
+           ROW_NUMBER() OVER (PARTITION BY CAST(CreationDate AS DATE) ORDER BY Reputation DESC) AS UserRank
+    FROM Users
+),
+PostStats AS (
+    SELECT p.Id AS PostId, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, p.AcceptedAnswerId,
+           COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+           COUNT(v.Id) AS TotalVotes,
+           MAX(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS HasUpVote,
+           (SELECT COUNT(c.Id) 
+            FROM Comments c 
+            WHERE c.PostId = p.Id) AS CommentCount,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, p.AcceptedAnswerId, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT ph.PostId, COUNT(*) AS CloseCount
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+),
+TagStats AS (
+    SELECT t.TagName, COUNT(p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    GROUP BY t.TagName
+),
+FinalStats AS (
+    SELECT ps.PostId, ps.Title, ps.CreationDate, ps.Score, ps.ViewCount, ps.AnswerCount,
+           ps.OwnerDisplayName, ps.TotalVotes, ps.HasUpVote, ps.CommentCount, 
+           COALESCE(cp.CloseCount, 0) AS CloseCount,
+           CASE WHEN tr.UserRank <= 10 THEN 'Top 10%' 
+                ELSE 'Others' END AS UserReputationRank,
+           tg.PostCount AS TotalTagPostCount
+    FROM PostStats ps
+    LEFT JOIN ClosedPosts cp ON ps.PostId = cp.PostId
+    LEFT JOIN UserReputationCTE tr ON ps.OwnerUserId = tr.Id
+    LEFT JOIN TagStats tg ON tg.PostCount >= 5
+)
+SELECT FS.*, 
+       CASE 
+           WHEN FS.HasUpVote = 1 THEN 'Upvoted'
+           ELSE 'Not Upvoted' 
+       END AS VoteStatus,
+       (CASE 
+            WHEN FS.CloseCount > 0 THEN 'Closed' 
+            ELSE 'Open' 
+        END) AS PostStatus
+FROM FinalStats FS
+WHERE FS.Score >= 10
+ORDER BY FS.CreationDate DESC, FS.Score DESC;

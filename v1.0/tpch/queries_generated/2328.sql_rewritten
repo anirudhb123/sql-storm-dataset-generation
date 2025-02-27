@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 0 AND
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+)
+SELECT 
+    r.s_name AS supplier_name,
+    n.n_name AS nation_name,
+    cu.c_name AS customer_name,
+    cu.total_spent,
+    cu.order_count,
+    COALESCE(s.total_supply_cost, 0) AS total_supply_cost
+FROM 
+    RankedSuppliers r
+FULL OUTER JOIN 
+    CustomerOrderSummary cu ON r.s_suppkey = cu.c_custkey
+JOIN 
+    nation n ON n.n_nationkey = r.s_suppkey 
+LEFT JOIN 
+    HighValueCustomers hc ON cu.c_custkey = hc.c_custkey
+WHERE 
+    r.rank = 1 OR hc.rank IS NOT NULL
+ORDER BY 
+    total_supply_cost DESC, total_spent DESC;

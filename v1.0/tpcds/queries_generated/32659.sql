@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_totals AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rank
+    FROM
+        web_sales ws
+    JOIN
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE
+        d.d_year = 2023
+    GROUP BY
+        ws.web_site_sk
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name || ' ' || c.c_last_name AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+top_customers AS (
+    SELECT
+        ci.full_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_purchase_estimate,
+        st.total_sales,
+        st.total_orders
+    FROM
+        customer_info ci
+    JOIN
+        sales_totals st ON ci.c_customer_sk = st.web_site_sk
+    WHERE
+        ci.gender_rank <= 10
+)
+SELECT
+    tc.full_name,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    tc.total_sales,
+    TC.total_orders,
+    CASE
+        WHEN tc.total_sales > 1000 THEN 'High Value'
+        WHEN tc.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value,
+    COALESCE(ROUND(tc.total_sales * 0.1, 2), 0) AS estimated_tax
+FROM
+    top_customers tc
+ORDER BY
+    tc.total_sales DESC
+LIMIT 50;

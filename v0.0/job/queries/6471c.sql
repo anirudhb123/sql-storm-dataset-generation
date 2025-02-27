@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id
+AND mi.note < '(Diving Scenes)' AND k.phonetic_code IN ('B3243', 'B436', 'E2152', 'J3261', 'N5126', 'S1265', 'S1361', 'W4316') AND mi.info < 'The appearance of the creatures was kept secret from the cast members until the first scene in which they encounter them was filmed. When the cast were finally filming the scene where the girls encounter the crawlers, the girls were genuinely scared and screamed the building down, running off set and laughing.' AND mk.id > 4338351 AND mi.id > 8187189 AND t.id > 336643;

@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY ps.ps_supplycost ASC) as supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+TotalSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2022-01-01'
+        AND l.l_shipdate < DATE '2023-01-01'
+    GROUP BY 
+        l.l_partkey
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice,
+        COALESCE(ts.total_sales, 0) AS total_sales
+    FROM 
+        part p
+    LEFT JOIN 
+        TotalSales ts ON p.p_partkey = ts.l_partkey
+)
+SELECT 
+    fp.p_partkey,
+    fp.p_name,
+    fp.p_brand,
+    fp.p_type,
+    fp.p_retailprice,
+    fp.total_sales,
+    rs.s_name,
+    rs.s_acctbal
+FROM 
+    FilteredParts fp
+LEFT JOIN 
+    RankedSuppliers rs ON fp.p_partkey = rs.s_suppkey
+WHERE 
+    fp.total_sales > 1000
+    OR (fp.p_retailprice > 50 AND rs.supp_rank = 1)
+ORDER BY 
+    fp.total_sales DESC,
+    fp.p_retailprice ASC;

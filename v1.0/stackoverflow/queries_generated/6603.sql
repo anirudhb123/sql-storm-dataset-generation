@@ -1,0 +1,63 @@
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(DISTINCT p.Id) AS TotalPosts, 
+        COUNT(DISTINCT c.Id) AS TotalComments, 
+        SUM(v.VoteTypeId = 2) AS Upvotes, 
+        SUM(v.VoteTypeId = 3) AS Downvotes,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.Score) AS AvgScore,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS Questions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS Answers
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    u.DisplayName, 
+    ue.TotalPosts, 
+    ue.TotalComments, 
+    psa.PostCount, 
+    psa.AvgScore, 
+    psa.TotalViews, 
+    ue.Upvotes, 
+    ue.Downvotes, 
+    ue.GoldBadges, 
+    ue.SilverBadges, 
+    ue.BronzeBadges,
+    (ue.Upvotes - ue.Downvotes) AS NetVotes
+FROM 
+    UserEngagement ue
+JOIN 
+    PostStats psa ON ue.UserId = psa.OwnerUserId
+JOIN 
+    Users u ON ue.UserId = u.Id
+ORDER BY 
+    NetVotes DESC, TotalViews DESC
+LIMIT 10;

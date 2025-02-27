@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT
+        a.title AS movie_title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY a.id) AS total_cast
+    FROM
+        aka_title a
+    LEFT JOIN
+        cast_info c ON c.movie_id = a.movie_id
+    WHERE
+        a.production_year IS NOT NULL
+        AND a.title IS NOT NULL
+),
+ActorsWithKeyword AS (
+    SELECT
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        COUNT(mk.keyword) AS keyword_count
+    FROM
+        aka_name ak
+    JOIN
+        cast_info ca ON ca.person_id = ak.person_id
+    JOIN
+        movie_keyword mk ON mk.movie_id = ca.movie_id
+    GROUP BY
+        ak.id
+    HAVING
+        COUNT(mk.keyword) > 1
+),
+DetailedMovieInfo AS (
+    SELECT
+        r.movie_title,
+        r.production_year,
+        r.rank,
+        COALESCE(a.actor_name, 'Unknown') AS lead_actor,
+        r.total_cast,
+        COALESCE(m.info, 'N/A') AS movie_note
+    FROM
+        RankedMovies r
+    LEFT JOIN
+        ActorsWithKeyword a ON r.rank = 1
+    LEFT JOIN
+        movie_info m ON m.movie_id = r.movie_id
+    WHERE
+        r.rank <= 10
+),
+FinalOutput AS (
+    SELECT
+        dmi.*,
+        CASE
+            WHEN dmi.total_cast > 5 THEN 'Ensemble Cast'
+            WHEN dmi.total_cast IS NULL THEN 'No Cast Info'
+            ELSE 'Minimal Cast'
+        END AS cast_description
+    FROM
+        DetailedMovieInfo dmi
+)
+SELECT
+    *,
+    CASE 
+        WHEN production_year < 2000 THEN 'Classic'
+        WHEN production_year BETWEEN 2000 AND 2010 THEN 'Modern Era'
+        ELSE 'Recent Release'
+    END AS era_category
+FROM
+    FinalOutput
+WHERE
+    era_category = 'Classic' 
+    OR cast_description = 'Ensemble Cast'
+ORDER BY
+    production_year DESC,
+    movie_title ASC;

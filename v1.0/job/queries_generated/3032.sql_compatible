@@ -1,0 +1,62 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS year_rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.title, a.production_year
+), MostPopularMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        year_rank <= 5
+), MovieDetails AS (
+    SELECT 
+        m.title, 
+        COALESCE(n.name, 'Unknown') AS actor_name, 
+        m.production_year,
+        k.keyword
+    FROM 
+        MostPopularMovies m
+    LEFT JOIN 
+        cast_info ci ON m.title = ci.note
+    LEFT JOIN 
+        aka_name n ON ci.person_id = n.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.title = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+), GroupedDetails AS (
+    SELECT 
+        production_year, 
+        STRING_AGG(DISTINCT actor_name, ', ') AS actors, 
+        STRING_AGG(DISTINCT keyword, ', ') AS keywords
+    FROM 
+        MovieDetails
+    GROUP BY 
+        production_year
+)
+SELECT 
+    g.production_year,
+    g.actors,
+    g.keywords,
+    COUNT(*) FILTER (WHERE g.keywords IS NOT NULL) AS movies_with_keywords
+FROM 
+    GroupedDetails g
+GROUP BY 
+    g.production_year, g.actors, g.keywords
+ORDER BY 
+    g.production_year DESC;

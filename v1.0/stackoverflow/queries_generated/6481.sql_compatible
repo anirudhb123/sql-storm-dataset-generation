@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(A.Id) AS AnswerCount,
+        COUNT(C.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RankByOwner
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Posts A ON A.ParentId = P.Id AND A.PostTypeId = 2
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, U.DisplayName
+),
+TopRankedPosts AS (
+    SELECT 
+        Id,
+        Title,
+        CreationDate,
+        Score,
+        OwnerDisplayName,
+        AnswerCount,
+        CommentCount,
+        RankByOwner
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByOwner = 1
+),
+PostDetails AS (
+    SELECT 
+        T.Id,
+        T.Title,
+        T.CreationDate,
+        T.Score,
+        T.OwnerDisplayName,
+        T.AnswerCount,
+        T.CommentCount,
+        PS.TagName,
+        PS.Count AS TagUsage
+    FROM 
+        TopRankedPosts T
+    LEFT JOIN 
+        UNNEST(string_to_array(SUBSTR(T.Tags, 2, LENGTH(T.Tags) - 2), '><')) AS PS(TagName) ON PS.TagName IS NOT NULL
+)
+SELECT 
+    PD.OwnerDisplayName,
+    COUNT(PD.Id) AS TotalPosts,
+    SUM(PD.Score) AS TotalScore,
+    AVG(PD.TagUsage) AS AverageTagUsage
+FROM 
+    PostDetails PD
+GROUP BY 
+    PD.OwnerDisplayName
+ORDER BY 
+    TotalScore DESC, TotalPosts DESC
+LIMIT 10;

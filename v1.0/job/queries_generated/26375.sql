@@ -1,0 +1,74 @@
+WITH MovieRatings AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        AVG(CASE WHEN c.person_role_id = 1 THEN 5 ELSE 0 END) AS average_actor_rating,
+        AVG(CASE WHEN c.person_role_id = 2 THEN 4.5 ELSE 0 END) AS average_director_rating,
+        COUNT(DISTINCT c.id) AS total_cast
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id
+),
+HighRatedMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        (average_actor_rating + average_director_rating) / NULLIF(total_cast, 0) AS overall_rating
+    FROM 
+        MovieRatings
+    WHERE 
+        total_cast > 5
+),
+PopularActors AS (
+    SELECT
+        ak.name AS actor_name,
+        COUNT(DISTINCT ca.movie_id) AS movies_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ca ON ak.person_id = ca.person_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.name
+    HAVING 
+        COUNT(DISTINCT ca.movie_id) > 3
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    hm.title AS high_rated_movie,
+    wm.actor_name AS popular_actor,
+    mw.keywords
+FROM 
+    HighRatedMovies hm
+JOIN 
+    MoviesWithKeywords mw ON hm.movie_id = mw.movie_id
+JOIN 
+    PopularActors wm ON hm.movie_id IN (
+        SELECT movie_id 
+        FROM cast_info 
+        WHERE person_id IN (
+            SELECT person_id 
+            FROM aka_name 
+            WHERE name = wm.actor_name
+        )
+    )
+ORDER BY 
+    hm.overall_rating DESC, 
+    wm.movies_count DESC;

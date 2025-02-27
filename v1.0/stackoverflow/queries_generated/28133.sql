@@ -1,0 +1,70 @@
+WITH PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        CONCAT('Tags: ', REPLACE(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><', ', ')) AS FormattedTags,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.Tags
+),
+UserDetails AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        ARRAY_AGG(b.Name) AS Badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.Views
+),
+EnhancedPostDetails AS (
+    SELECT 
+        pt.PostId,
+        pt.Title,
+        ud.DisplayName AS OwnerDisplayName,
+        pt.FormattedTags,
+        pt.CommentCount,
+        pt.UpVoteCount,
+        pt.DownVoteCount,
+        ud.Reputation,
+        ud.Views,
+        ud.Badges
+    FROM 
+        PostTags pt
+    JOIN 
+        UserDetails ud ON pt.OwnerUserId = ud.UserId
+)
+SELECT 
+    e.Title,
+    e.OwnerDisplayName,
+    e.FormattedTags,
+    e.CommentCount,
+    e.UpVoteCount,
+    e.DownVoteCount,
+    e.Reputation,
+    e.Views,
+    STRING_AGG(badge, ', ') AS Badges
+FROM 
+    EnhancedPostDetails e
+LEFT JOIN 
+    UNNEST(e.Badges) AS badge
+GROUP BY 
+    e.Title, e.OwnerDisplayName, e.FormattedTags, e.CommentCount, e.UpVoteCount, e.DownVoteCount, e.Reputation, e.Views
+ORDER BY 
+    e.UpVoteCount DESC, e.CommentCount DESC
+LIMIT 10;

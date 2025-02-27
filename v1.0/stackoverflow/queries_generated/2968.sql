@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT c.Comment, ' | ') AS CloseComments,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.PostHistoryTypeId = 10
+    LEFT JOIN 
+        Comments c ON ph.PostId = c.PostId
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(p.Tags, '><')) AS tag_name ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(BOTH '<>' FROM tag_name)
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    COALESCE(cpd.CloseCount, 0) AS CloseCount,
+    cpd.CloseComments,
+    pt.Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPostDetails cpd ON rp.Id = cpd.PostId
+LEFT JOIN 
+    PostTags pt ON rp.Id = pt.PostId
+WHERE 
+    rp.ScoreRank <= 5
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;
+

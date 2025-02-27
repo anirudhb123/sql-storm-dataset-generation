@@ -1,0 +1,57 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS Downvotes,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsUsed,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT DISTINCT unnest(string_to_array(p.Tags, '>')) AS tag FROM Posts p) AS tag ON tag IS NOT NULL
+    LEFT JOIN 
+        Tags t ON t.TagName = tag
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount
+),
+
+StringProcessedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        Upvotes,
+        Downvotes,
+        TagsUsed,
+        TRIM(BOTH ' ' FROM REPLACE(REPLACE(Title, ' ', ''), '-', '')) AS ProcessedTitle,
+        rn
+    FROM 
+        RankedPosts
+    WHERE 
+        rn = 1
+)
+
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    ViewCount,
+    Upvotes,
+    Downvotes,
+    TagsUsed,
+    ProcessedTitle,
+    LENGTH(ProcessedTitle) AS ProcessedTitleLength
+FROM 
+    StringProcessedPosts
+WHERE 
+    LENGTH(ProcessedTitle) > 0
+ORDER BY 
+    ViewCount DESC
+LIMIT 100;

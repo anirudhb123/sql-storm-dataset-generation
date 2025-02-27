@@ -1,0 +1,103 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotesCount,
+        COUNT(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 END) AS TotalVotesCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBountyAmount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        COALESCE(PH_VoteCount.Upvotes, 0) AS Upvotes,
+        COALESCE(PH_VoteCount.Downvotes, 0) AS Downvotes,
+        COALESCE(PH.CommentCount, 0) AS CommentCount,
+        P.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS Upvotes,
+            COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS Downvotes
+        FROM Votes
+        GROUP BY PostId
+    ) PH_VoteCount ON P.Id = PH_VoteCount.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) PH ON P.Id = PH.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.Comment AS CloseReason
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (10, 11) -- Closed or Reopened Posts
+)
+SELECT 
+    PS.Title,
+    PS.ViewCount,
+    PS.Score AS PostScore,
+    PS.Upvotes,
+    PS.Downvotes,
+    PS.CommentCount,
+    PS.UserPostRank,
+    U.DisplayName AS UserDisplayName,
+    COALESCE(CP.CloseReason, 'Not Closed') AS ClosureStatus,
+    CASE 
+        WHEN PS.AcceptedAnswerId IS NOT NULL THEN 'Has Accepted Answer'
+        ELSE 'No Accepted Answer'
+    END AS AnswerStatus
+FROM PostStatistics PS
+JOIN Users U ON PS.UserId = U.Id
+LEFT JOIN ClosedPosts CP ON PS.PostId = CP.PostId
+WHERE PS.ViewCount > 100
+AND PS.Score > 0
+ORDER BY PS.UserPostRank, PS.Score DESC
+LIMIT 50;
+
+-- Additional performance benchmarks
+EXPLAIN ANALYZE 
+SELECT 
+    U.Id,
+    U.DisplayName,
+    UPS.TotalVotesCount,
+    UPS.TotalBountyAmount,
+    COUNT(DISTINCT P.Id) AS PostCount
+FROM Users U
+JOIN UserVoteStats UPS ON U.Id = UPS.UserId
+LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+GROUP BY U.Id, UPS.TotalVotesCount, UPS.TotalBountyAmount
+HAVING COUNT(DISTINCT P.Id) > 5
+ORDER BY U.Reputation DESC;
+
+-- Include some unusual NULL logic
+SELECT 
+    DISTINCT U.DisplayName,
+    COALESCE(B.Name, 'No Badges') AS BadgeTitle,
+    COUNT(DISTINCT P.Id) AS TotalPosts,
+    CASE 
+        WHEN COALESCE(B.Class, 3) = 1 THEN 'Gold Badge Holder' 
+        WHEN COALESCE(B.Class, 3) = 2 THEN 'Silver Badge Holder' 
+        ELSE 'Bronze Badge or No Badge' 
+    END AS BadgeStatus
+FROM Users U
+LEFT JOIN Badges B ON U.Id = B.UserId
+LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+WHERE U.Reputation IS NOT NULL
+GROUP BY U.DisplayName, B.Name
+ORDER BY TotalPosts DESC
+LIMIT 10;

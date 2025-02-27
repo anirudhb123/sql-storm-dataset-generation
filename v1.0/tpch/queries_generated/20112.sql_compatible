@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SupplierSales AS (
+    SELECT s.s_suppkey, s.s_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY s.s_suppkey, s.s_name
+    UNION
+    SELECT ss.s_suppkey, ss.s_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM SupplierSales ss
+    JOIN lineitem l ON l.l_suppkey = ss.s_suppkey
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY ss.s_suppkey, ss.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent, 
+           NULLIF(SUM(o.o_totalprice), 0) AS adjusted_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 1000
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, total_sales
+    FROM SupplierSales
+    WHERE total_sales > (
+        SELECT AVG(total_sales) FROM SupplierSales
+    )
+)
+SELECT COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+       COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+       COALESCE(c.order_count, 0) AS order_count,
+       COALESCE(c.total_spent, 0.00) AS total_spent,
+       s.total_sales AS supplier_sales,
+       CASE WHEN c.adjusted_spent IS NULL THEN 'No Orders' 
+            WHEN c.total_spent IS NULL THEN 'Uncertain'
+            ELSE 'Active'
+       END AS order_status
+FROM CustomerOrders c
+FULL OUTER JOIN HighValueSuppliers s ON c.total_spent IS NOT NULL AND s.total_sales IS NOT NULL
+WHERE (c.order_count IS NOT NULL OR s.total_sales IS NOT NULL)
+  AND (c.total_spent <> 0 OR s.total_sales IS NOT NULL)
+  AND s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+ORDER BY COALESCE(c.total_spent, 0) DESC, s.total_sales DESC
+LIMIT 100;

@@ -1,0 +1,47 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT ca_address_sk, ca_street_name, ca_city, ca_state, ca_zip, 1 AS level
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+    UNION ALL
+    SELECT a.ca_address_sk, a.ca_street_name, a.ca_city, a.ca_state, a.ca_zip, h.level + 1
+    FROM customer_address a
+    JOIN AddressHierarchy h ON a.ca_address_sk > h.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws.sold_date_sk, 
+        ws.ws_item_sk, 
+        SUM(ws.ws_quantity) AS total_quantity, 
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS item_rank
+    FROM web_sales ws
+    GROUP BY ws.sold_date_sk, ws.ws_item_sk
+),
+TopItems AS (
+    SELECT ws_item_sk 
+    FROM SalesData 
+    WHERE item_rank <= 10
+),
+CustomerDemographics AS (
+    SELECT cd.cd_demo_sk, 
+           cd.cd_gender, 
+           cd.cd_marital_status, 
+           cd.cd_purchase_estimate,
+           COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer c 
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate > 500
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+)
+SELECT a.ca_city, a.ca_state, 
+       SUM(s.total_quantity) AS total_sales_quantity, 
+       SUM(s.total_profit) AS total_sales_profit,
+       COALESCE(cd.customer_count, 0) AS total_customers
+FROM AddressHierarchy a
+LEFT JOIN SalesData s ON a.ca_address_sk = s.sold_date_sk
+LEFT JOIN CustomerDemographics cd ON cd.cd_demo_sk = s.ws_item_sk
+WHERE a.level = 1
+GROUP BY a.ca_city, a.ca_state, cd.customer_count
+HAVING SUM(s.total_profit) > 10000
+ORDER BY total_sales_profit DESC;

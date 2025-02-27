@@ -1,0 +1,15 @@
+title: SQLStorm v1.0 Hyper Benchmark (24h)
+repetitions: 1
+warmup: 0
+timeout: 10
+fetch_result: false
+global_timeout: 86400
+query_seed: 42
+output: results/v1.0/hyper_without_primary
+systems:
+  - title: Hyper
+    dbms: hyper
+    settings: { }
+    parameter:
+      version: "0.0.21200"
+      index: "none"

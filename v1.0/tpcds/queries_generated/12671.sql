@@ -1,0 +1,20 @@
+
+SELECT 
+    c.c_customer_id,
+    COUNT(DISTINCT sr_ticket_number) AS total_returns,
+    SUM(sr_return_qty) AS total_returned_qty,
+    SUM(sr_return_amt_inc_tax) AS total_returned_value,
+    AVG(sr_return_tax) AS avg_return_tax
+FROM 
+    customer c
+JOIN 
+    store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+JOIN 
+    item i ON sr.sr_item_sk = i.i_item_sk
+WHERE 
+    i.i_current_price > 50
+GROUP BY 
+    c.c_customer_id
+ORDER BY 
+    total_returns DESC
+LIMIT 100;

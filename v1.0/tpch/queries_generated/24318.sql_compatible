@@ -1,0 +1,38 @@
+
+WITH RECURSIVE supplier_sales AS (
+    SELECT s.s_suppkey, s.s_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY s.s_suppkey, s.s_name
+),
+ranked_sales AS (
+    SELECT s.s_suppkey, s.s_name, s.total_sales,
+           RANK() OVER (PARTITION BY (SELECT CASE WHEN EXISTS (SELECT 1 FROM orders o WHERE o.o_orderkey = l.l_orderkey) THEN 1 ELSE 0 END) ORDER BY s.total_sales DESC) AS sales_rank
+    FROM supplier_sales s
+)
+
+SELECT r.r_name, 
+       COUNT(DISTINCT n.n_nationkey) AS unique_nations,
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS total_returns,
+       STRING_AGG(DISTINCT CONCAT(s.s_name, '-', ROUND(s.total_sales, 2)), '; ') AS supplier_info
+FROM region r
+LEFT OUTER JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN lineitem l ON l.l_partkey = ps.ps_partkey
+WHERE r.r_name IS NOT NULL
+  AND s.s_acctbal IS NOT NULL
+  AND ps.ps_availqty > (
+      SELECT AVG(ps2.ps_availqty)
+      FROM partsupp ps2
+      WHERE ps2.ps_partkey = ps.ps_partkey
+  )
+GROUP BY r.r_name
+HAVING SUM(l.l_extendedprice) > (
+    SELECT COALESCE(SUM(o.o_totalprice), 0)
+    FROM orders o
+    WHERE o.o_orderstatus = 'F'
+) OR MAX(sales_rank) IS NOT NULL
+ORDER BY unique_nations DESC, supplier_info;

@@ -1,0 +1,62 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.PostTypeId,
+        p.ParentId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.PostTypeId,
+        p2.ParentId,
+        p2.CreationDate,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN RecursivePostHierarchy rph ON p2.ParentId = rph.PostId
+)
+
+
+SELECT 
+    rp.PostId,
+    rp.PostTitle,
+    rp.Level,
+    COUNT(a.Id) AS AnswerCount,
+    COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+    COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes,
+    AVG(CASE 
+            WHEN c.UserId IS NOT NULL THEN c.Score  
+            ELSE 0 
+        END) AS AvgCommentScore,
+    p.CreationDate AS QuestionCreationDate,
+    STRING_AGG(t.TagName, ', ') AS Tags,
+    DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS QuestionRank
+FROM 
+    RecursivePostHierarchy rp
+LEFT JOIN 
+    Posts p ON rp.PostId = p.Id 
+LEFT JOIN 
+    Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2  
+LEFT JOIN 
+    Votes v ON a.Id = v.PostId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Tags t ON t.ExcerptPostId = p.Id
+GROUP BY 
+    rp.PostId,
+    rp.PostTitle,
+    rp.Level,
+    p.CreationDate
+HAVING 
+    COUNT(a.Id) > 0  
+ORDER BY 
+    QuestionRank;

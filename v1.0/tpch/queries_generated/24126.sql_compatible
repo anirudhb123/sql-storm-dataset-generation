@@ -1,0 +1,75 @@
+
+WITH ranked_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+heavy_orders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+),
+average_product_cost AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(ps.ps_supplycost) AS avg_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    s.s_name AS supplier_name,
+    COALESCE(s_rank.rank, 0) AS supplier_rank,
+    COALESCE(h.total_sales, 0) AS heavy_order_sales,
+    COALESCE(ap.avg_cost, 0) AS avg_supply_cost,
+    CASE 
+        WHEN p.p_size IS NULL THEN 'Unknown Size'
+        ELSE CAST(p.p_size AS VARCHAR(255)) || ' units' 
+    END AS formatted_size,
+    CASE 
+        WHEN h.item_count > 5 THEN 'Large Order'
+        WHEN h.item_count BETWEEN 3 AND 5 THEN 'Medium Order'
+        ELSE 'Small Order'
+    END AS order_size_category
+FROM 
+    part p
+LEFT JOIN 
+    ranked_suppliers s_rank ON p.p_partkey = (SELECT ps.ps_partkey 
+                                                FROM partsupp ps 
+                                                WHERE ps.ps_availqty > 50 
+                                                AND ps.ps_supplycost < 
+                                                    (SELECT MIN(avg_cost) 
+                                                     FROM average_product_cost) 
+                                                LIMIT 1)
+LEFT JOIN 
+    heavy_orders h ON h.o_orderkey = (SELECT o.o_orderkey 
+                                        FROM orders o 
+                                        WHERE o.o_orderstatus = 'O' 
+                                        ORDER BY o.o_orderdate 
+                                        DESC LIMIT 1)
+LEFT JOIN 
+    average_product_cost ap ON ap.ps_partkey = p.p_partkey
+WHERE 
+    p.p_retailprice IS NOT NULL 
+    AND p.p_comment LIKE '%special%' 
+    AND (p.p_container IS NULL OR p.p_container != 'BOX')
+ORDER BY 
+    p.p_partkey;

@@ -1,0 +1,42 @@
+
+WITH RECURSIVE price_ranking AS (
+    SELECT l_partkey, SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+    FROM lineitem
+    WHERE l_shipdate >= '1997-01-01' AND l_shipdate < '1997-12-31'
+    GROUP BY l_partkey
+    UNION ALL
+    SELECT l_partkey, SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+    FROM lineitem
+    WHERE l_shipdate >= '1997-01-01' AND l_shipdate < '1997-12-31'
+    GROUP BY l_partkey
+    HAVING SUM(l_extendedprice * (1 - l_discount)) > (SELECT AVG(total_revenue)
+                                                       FROM price_ranking)
+),
+supplier_details AS (
+    SELECT s.s_suppkey, a.cust_key, SUM(ps.ps_supplycost * ps.ps_availqty) AS supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN (
+        SELECT o.o_orderkey, c.c_custkey AS cust_key
+        FROM orders o
+        JOIN customer c ON o.o_custkey = c.c_custkey
+        WHERE o.o_orderstatus = 'O'
+    ) a ON ps.ps_partkey = a.o_orderkey
+    GROUP BY s.s_suppkey, a.cust_key
+),
+ranked_suppliers AS (
+    SELECT sd.s_suppkey, sd.supply_cost,
+           DENSE_RANK() OVER (ORDER BY sd.supply_cost DESC) AS rank
+    FROM supplier_details sd
+)
+SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_type,
+       COALESCE(r.total_revenue, 0) AS total_revenue,
+       COALESCE(rs.rank, 'N/A') AS supplier_rank
+FROM part p
+LEFT JOIN price_ranking r ON p.p_partkey = r.l_partkey
+LEFT JOIN ranked_suppliers rs ON p.p_partkey = rs.s_suppkey
+WHERE p.p_size > 10
+  AND p.p_retailprice > (SELECT AVG(p_retailprice) FROM part)
+  AND p.p_comment IS NOT NULL
+ORDER BY total_revenue DESC, supplier_rank ASC
+LIMIT 50;

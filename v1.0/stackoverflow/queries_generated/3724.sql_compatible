@@ -1,0 +1,58 @@
+
+WITH RankedVotes AS (
+    SELECT 
+        PostId, 
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY PostId ORDER BY CreationDate DESC) AS VoteRank
+    FROM Votes
+    GROUP BY PostId
+),
+FilteredPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        COALESCE(rv.UpVotes, 0) AS UpVotes,
+        COALESCE(rv.DownVotes, 0) AS DownVotes,
+        DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN RankedVotes rv ON p.Id = rv.PostId
+    WHERE p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+),
+UserReputation AS (
+    SELECT 
+        u.Id,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.Reputation
+)
+SELECT 
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.UpVotes,
+    fp.DownVotes,
+    ur.Reputation,
+    ur.BadgeCount,
+    CASE 
+        WHEN ur.Reputation > 1000 THEN 'High Reputation'
+        WHEN ur.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationCategory,
+    CASE 
+        WHEN fp.UpVotes > fp.DownVotes THEN 'Positive Sentiment'
+        WHEN fp.UpVotes < fp.DownVotes THEN 'Negative Sentiment'
+        ELSE 'Neutral Sentiment'
+    END AS VoteSentiment
+FROM FilteredPosts fp
+JOIN UserReputation ur ON fp.OwnerUserId = ur.Id
+WHERE fp.PostRank <= 50
+ORDER BY fp.CreationDate DESC, fp.Score DESC
+LIMIT 20;

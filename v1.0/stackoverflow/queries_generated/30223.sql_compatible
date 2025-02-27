@@ -1,0 +1,82 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.ViewCount,
+        p2.Score,
+        p2.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy r ON p2.ParentId = r.PostId
+    WHERE 
+        p2.PostTypeId = 2  
+),
+
+PostScores AS (
+    SELECT 
+        PostId,
+        SUM(Score) AS TotalScore,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        PostId
+),
+
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(ps.TotalScore, 0) AS TotalScore,
+        p.ViewCount,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS Status,
+        ROW_NUMBER() OVER (PARTITION BY r.Level ORDER BY COALESCE(ps.TotalScore, 0) DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostScores ps ON p.Id = ps.PostId
+    JOIN 
+        RecursivePostHierarchy r ON p.Id = r.PostId
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.TotalScore,
+    pd.ViewCount,
+    pd.Status,
+    pd.Rank,
+    COUNT(c.Id) AS CommentCount,
+    STRING_AGG(DISTINCT CONCAT(u.DisplayName, ' (', u.Reputation, ')'), '; ') AS TopCommenters
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Comments c ON pd.PostId = c.PostId
+LEFT JOIN 
+    Users u ON c.UserId = u.Id
+WHERE 
+    pd.Rank <= 5
+GROUP BY 
+    pd.PostId, pd.Title, pd.TotalScore, pd.ViewCount, pd.Status, pd.Rank
+ORDER BY 
+    pd.Rank;

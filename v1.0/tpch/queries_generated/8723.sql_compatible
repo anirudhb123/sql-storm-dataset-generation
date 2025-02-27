@@ -1,0 +1,56 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        r.r_name AS region_name,
+        ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1997-01-01'
+),
+TopOrders AS (
+    SELECT 
+        order_rank,
+        o_orderkey,
+        o_orderdate,
+        o_totalprice,
+        c_name,
+        region_name
+    FROM 
+        RankedOrders
+    WHERE 
+        order_rank <= 10
+),
+LineItemDetails AS (
+    SELECT 
+        lo.l_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue,
+        COUNT(*) AS total_items
+    FROM 
+        lineitem lo
+    GROUP BY 
+        lo.l_orderkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.c_name,
+    to.region_name,
+    COALESCE(lod.total_revenue, 0) AS total_revenue,
+    COALESCE(lod.total_items, 0) AS total_items
+FROM 
+    TopOrders to
+LEFT JOIN 
+    LineItemDetails lod ON to.o_orderkey = lod.l_orderkey
+ORDER BY 
+    to.o_orderdate DESC, total_revenue DESC;

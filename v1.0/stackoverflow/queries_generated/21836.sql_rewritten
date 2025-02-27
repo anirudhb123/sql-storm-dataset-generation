@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(upp.UserId, -1) AS UpVoteUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY v.CreationDate DESC) AS LatestVote,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Users upp ON p.OwnerUserId = upp.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, upp.UserId
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        MIN(CASE WHEN pht.Name = 'Post Closed' THEN ph.CreationDate END) AS FirstClosedDate,
+        COUNT(DISTINCT CASE WHEN pht.Name = 'Post Locked' THEN ph.Id END) AS LockCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.CommentCount,
+    COALESCE(ph.FirstClosedDate, 'No Closure') AS FirstClosedDate,
+    ph.LockCount,
+    DENSE_RANK() OVER (ORDER BY rp.Score DESC) AS RankByScore,
+    CASE 
+        WHEN rp.UpVoteUserId IS NOT NULL THEN 'Upvoted'
+        ELSE 'Not Upvoted'
+    END AS VoteStatus,
+    CASE 
+        WHEN ph.LockCount = 0 THEN 'Unlocked'
+        ELSE 'Locked'
+    END AS LockStatus,
+    CASE 
+        WHEN rp.CommentCount = 0 THEN 'No Comments'
+        ELSE CONCAT(rp.CommentCount, ' Comments')
+    END AS CommentSummary,
+    STRING_AGG(DISTINCT t.TagName, ', ') WITHIN GROUP (ORDER BY t.TagName) AS Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryData ph ON rp.PostId = ph.PostId
+LEFT JOIN 
+    UNNEST(STRING_TO_ARRAY((SELECT DISTINCT Tags FROM Posts WHERE Id = rp.PostId), ', ')) AS tags(tag) AS t
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.Score, ph.FirstClosedDate, ph.LockCount, rp.UpVoteUserId, rp.CommentCount
+ORDER BY 
+    RankByScore DESC
+FETCH FIRST 100 ROWS ONLY;

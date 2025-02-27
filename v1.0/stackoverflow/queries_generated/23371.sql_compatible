@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.ViewCount DESC) AS RankByViews,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.CreationDate DESC) AS RankByRecency,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+        AND p.Score > (SELECT AVG(Score) FROM Posts WHERE CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year') 
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.RankByViews,
+    rp.ViewCount,
+    CASE 
+        WHEN rp.RankByViews = 1 THEN 'Most Viewed'
+        WHEN rp.RankByRecency = 1 THEN 'Most Recent'
+        ELSE NULL
+    END AS RankingType,
+    COALESCE(b.UserId, rp.OwnerUserId) AS ContributorId,
+    COALESCE(u.DisplayName, 'Anonymous') AS ContributorName,
+    ph.TypeName,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    SUM(v.BountyAmount) AS TotalBounty
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Comments c ON c.PostId = rp.PostId
+LEFT JOIN 
+    Votes v ON v.PostId = rp.PostId
+LEFT JOIN 
+    Users u ON u.Id = COALESCE(c.UserId, rp.OwnerUserId)
+LEFT JOIN 
+    (SELECT DISTINCT pt.Id, pt.Name AS TypeName FROM PostHistoryTypes pt) ph ON ph.Id = 
+        (SELECT ph.PostHistoryTypeId 
+         FROM PostHistory ph 
+         WHERE ph.PostId = rp.PostId 
+         ORDER BY ph.CreationDate DESC 
+         LIMIT 1 
+        )
+LEFT JOIN 
+    (SELECT DISTINCT u.Id as UserId, 
+            COUNT(b.Id) AS BadgeCount
+     FROM Users u 
+     JOIN Badges b ON b.UserId = u.Id
+     WHERE b.Class = 1 
+     GROUP BY u.Id 
+    ) b ON b.UserId = rp.OwnerUserId
+WHERE 
+    rp.RankByViews <= 10 
+GROUP BY 
+    rp.PostId, 
+    rp.Title, 
+    rp.RankByViews, 
+    rp.ViewCount, 
+    rp.OwnerUserId,
+    u.DisplayName,
+    ph.TypeName,
+    b.UserId
+ORDER BY 
+    rp.RankByViews, 
+    rp.RankByRecency;

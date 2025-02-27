@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RankWithinType,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT 
+            UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags)-2), '><')) AS TagName, 
+            Id 
+        FROM 
+            Posts) t ON p.Id = t.Id
+    WHERE 
+        p.CreationDate > (NOW() - INTERVAL '1 year')
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.AcceptedAnswerId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.AcceptedAnswerId,
+        rp.CommentCount,
+        rp.Tags,
+        CASE 
+            WHEN rp.CommentCount > 5 THEN 'Highly Discussed'
+            WHEN rp.Score > 100 THEN 'Top Scoring'
+            ELSE 'General'
+        END AS PostCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankWithinType <= 10 -- top 10 recent posts of each type
+    ORDER BY 
+        rp.Score DESC
+),
+PostHistoryInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        ph.Text AS NewValue,
+        ph.PostHistoryTypeId,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS PostHistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    LEFT JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    GROUP BY 
+        p.Id, ph.UserDisplayName, ph.CreationDate, ph.Comment, ph.Text, ph.PostHistoryTypeId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Score,
+    fp.CommentCount,
+    fp.Tags,
+    fp.PostCategory,
+    ph.UserDisplayName,
+    ph.CreationDate AS HistoryDate,
+    ph.Comment,
+    ph.NewValue,
+    ph.PostHistoryTypes,
+    CASE 
+        WHEN fp.Score IS NULL THEN '0'
+        ELSE NULL
+    END AS ScoreNullLogic,
+    COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId IN (10, 11, 12) THEN ph.Id END) AS ClosureActions
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistoryInfo ph ON fp.PostId = ph.PostId
+GROUP BY 
+    fp.PostId, fp.Title, fp.Score, fp.CommentCount, 
+    fp.Tags, fp.PostCategory, ph.UserDisplayName, 
+    ph.CreationDate, ph.Comment, ph.NewValue, ph.PostHistoryTypes
+HAVING 
+    COUNT(ph.Id) > 0
+ORDER BY 
+    fp.PostCategory, fp.Score DESC, ph.CreationDate DESC;

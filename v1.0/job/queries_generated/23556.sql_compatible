@@ -1,0 +1,99 @@
+
+WITH RECURSIVE movie_series AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS series_depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        ms.series_depth + 1 AS series_depth
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        movie_series ms ON mt.episode_of_id = ms.movie_id
+),
+cast_with_roles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id
+),
+movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        k.keyword AS keyword,
+        r.roles AS cast_roles,
+        COALESCE(cast_count, 0) AS total_cast_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_with_roles r ON m.id = r.movie_id
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            COUNT(*) AS cast_count 
+         FROM 
+            cast_info 
+         GROUP BY 
+            movie_id) c ON m.id = c.movie_id
+),
+final_benchmark AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.keyword,
+        m.cast_roles,
+        m.total_cast_count,
+        ms.series_depth,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS title_rank,
+        SUM(m.production_year) OVER () AS cumulative_years,
+        NULLIF(NULLIF(m.title, ''), NULL) AS cleaned_title
+    FROM 
+        movie_details m
+    LEFT JOIN 
+        movie_series ms ON m.movie_id = ms.movie_id
+)
+
+SELECT 
+    fb.movie_id,
+    fb.title,
+    fb.production_year,
+    fb.total_cast_count,
+    fb.series_depth,
+    fb.title_rank,
+    fb.cumulative_years,
+    fb.cleaned_title
+FROM 
+    final_benchmark fb
+WHERE 
+    fb.series_depth IS NOT NULL 
+    AND fb.total_cast_count > (SELECT AVG(cast_count) FROM cast_with_roles)
+    AND (fb.cleaned_title IS NOT NULL AND fb.cleaned_title <> '')
+ORDER BY 
+    fb.production_year DESC, 
+    fb.title_rank;

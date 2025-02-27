@@ -1,0 +1,47 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_orderstatus
+),
+Top5RevenueOrders AS (
+    SELECT * FROM RankedOrders WHERE rank <= 5
+),
+SupplierRevenue AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_total_revenue
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    t.o_orderkey,
+    t.o_orderdate,
+    s.s_name AS supplier_name,
+    t.total_revenue AS order_total_revenue,
+    sr.supplier_total_revenue
+FROM 
+    Top5RevenueOrders t
+JOIN 
+    SupplierRevenue sr ON t.o_orderkey IN (SELECT o.o_orderkey FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey WHERE l.l_suppkey = sr.s_suppkey)
+ORDER BY 
+    t.o_orderdate DESC, 
+    t.total_revenue DESC;

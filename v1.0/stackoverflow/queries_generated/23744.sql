@@ -1,0 +1,79 @@
+WITH TagStats AS (
+    SELECT 
+        t.Id AS TagId, 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(u.Reputation) AS AvgUserReputation,
+        STRING_AGG(DISTINCT u.DisplayName, ', ') AS TopUsers
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.Id, t.TagName
+),
+PostScores AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        CASE 
+            WHEN p.Score > 10 THEN 'Highly Scored'
+            WHEN p.Score BETWEEN 1 AND 10 THEN 'Moderately Scored'
+            ELSE 'Low Scored'
+        END AS ScoreCategory
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ts.TagId,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AvgUserReputation,
+    ts.TopUsers,
+    ps.Title,
+    ps.Score,
+    ps.Rank,
+    ps.CommentCount,
+    ps.ScoreCategory,
+    ub.UserId,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+FROM 
+    TagStats ts
+LEFT JOIN 
+    PostScores ps ON ts.PostCount > 0
+LEFT JOIN 
+    UserBadges ub ON ps.Id IN (SELECT PostId FROM Posts WHERE OwnerUserId = ub.UserId)
+WHERE 
+    ts.AvgUserReputation > (SELECT AVG(Reputation) FROM Users) 
+    AND ps.Score IS NOT NULL
+ORDER BY 
+    ts.TotalViews DESC, ps.Score DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

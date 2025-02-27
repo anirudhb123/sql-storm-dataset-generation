@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS RankByScore,
+        DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS RankByDate,
+        U.Reputation AS OwnerReputation
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.CreationDate >= (CURRENT_TIMESTAMP - INTERVAL '1 year') 
+        AND p.Score >= 0
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.AnswerCount,
+        rp.ViewCount,
+        rp.RankByScore,
+        rp.RankByDate
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByScore <= 5
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.AnswerCount,
+    COALESCE(pc.CommentCount, 0) AS CommentCount,
+    COALESCE(pvs.Upvotes, 0) AS Upvotes,
+    COALESCE(pvs.Downvotes, 0) AS Downvotes,
+    CASE 
+        WHEN tp.RankByScore = 1 THEN 'Best Post'
+        WHEN tp.RankByScore <= 3 THEN 'Top Posts'
+        ELSE 'Other Posts'
+    END AS PostCategory,
+    A.OwnerReputation AS AnswerOwnerReputation
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostComments pc ON tp.PostId = pc.PostId
+LEFT JOIN 
+    PostVoteSummary pvs ON tp.PostId = pvs.PostId
+LEFT JOIN 
+    Posts A ON A.AcceptedAnswerId = tp.PostId
+ORDER BY 
+    tp.RankByScore, tp.CreationDate DESC;

@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(c.Score, 0)) AS CommentScore,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        ps.PostCount,
+        ps.TotalScore,
+        ps.CommentScore,
+        ps.TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY ps.TotalScore DESC) AS Rank
+    FROM 
+        UserPostStats ps
+    JOIN 
+        Users u ON ps.UserId = u.Id
+    WHERE 
+        u.Reputation > 1000
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.PostCount,
+    u.TotalScore,
+    u.CommentScore,
+    u.TotalBounty,
+    CASE 
+        WHEN u.Rank <= 10 THEN 'Top Contributor'
+        ELSE 'Contributor'
+    END AS UserStatus,
+    ARRAY_AGG(DISTINCT t.TagName) AS AssociatedTags,
+    PH.PostCount AS RelatedPostsCount
+FROM 
+    TopUsers u
+LEFT JOIN 
+    Posts p ON u.UserId = p.OwnerUserId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            COUNT(*) AS PostCount
+        FROM 
+            Posts ph
+        WHERE 
+            ph.Tags LIKE '%' || t.TagName || '%'
+    ) AS PH ON true
+LEFT JOIN 
+    Tags t ON t.Id IN (
+        SELECT 
+            unnest(string_to_array(p.Tags, ','))::int
+    )
+GROUP BY 
+    u.DisplayName, u.Reputation, u.PostCount, u.TotalScore, u.CommentScore, u.TotalBounty, u.Rank
+ORDER BY 
+    u.TotalScore DESC;

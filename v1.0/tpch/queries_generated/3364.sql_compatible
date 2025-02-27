@@ -1,0 +1,49 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        COUNT(DISTINCT ps.ps_partkey) AS PartCount
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), 
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_custkey
+), 
+HighValueOrders AS (
+    SELECT 
+        od.o_orderkey,
+        od.TotalRevenue,
+        od.o_orderdate,
+        c.c_name,
+        COALESCE(AVG(ss.TotalSupplyCost) OVER (PARTITION BY c.c_nationkey), 0) AS AvgSupplierCost
+    FROM OrderDetails od
+    JOIN customer c ON c.c_custkey = od.o_custkey
+    LEFT JOIN SupplierStats ss ON ss.s_suppkey = c.c_suppkey -- Assuming a relationship here
+    WHERE od.TotalRevenue > 10000
+)
+
+SELECT 
+    hvo.o_orderkey,
+    hvo.TotalRevenue,
+    hvo.o_orderdate,
+    hvo.c_name,
+    hvo.AvgSupplierCost,
+    CASE 
+        WHEN hvo.AvgSupplierCost = 0 THEN 'No Suppliers'
+        WHEN hvo.AvgSupplierCost > 5000 THEN 'High Supplier Cost'
+        ELSE 'Normal Supplier Cost'
+    END AS SupplierCostCategory
+FROM HighValueOrders hvo
+WHERE hvo.o_orderdate >= '1997-01-01'
+ORDER BY hvo.TotalRevenue DESC, hvo.o_orderdate ASC
+LIMIT 100 OFFSET 0;

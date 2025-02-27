@@ -1,0 +1,51 @@
+
+WITH AddressAggregation AS (
+    SELECT 
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_id) AS unique_customers,
+        COUNT(DISTINCT ca.ca_address_id) AS unique_addresses,
+        SUM(CASE WHEN cd.cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+        SUM(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY ca.ca_city, ca.ca_state
+),
+SalesStatistics AS (
+    SELECT 
+        d.d_year,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        SUM(ss.ss_net_profit) AS total_profit,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_year
+),
+FinalBenchmark AS (
+    SELECT 
+        aa.ca_city,
+        aa.ca_state,
+        aa.unique_customers,
+        aa.unique_addresses,
+        aa.male_count,
+        aa.female_count,
+        ss.total_sales,
+        ss.total_profit,
+        ss.total_transactions
+    FROM AddressAggregation aa
+    JOIN SalesStatistics ss ON aa.ca_state = 'CA' 
+)
+SELECT 
+    ca_city AS "City",
+    ca_state AS "State",
+    unique_customers AS "Unique Customers",
+    unique_addresses AS "Unique Addresses",
+    male_count AS "Male Customers",
+    female_count AS "Female Customers",
+    total_sales AS "Total Sales (USD)",
+    total_profit AS "Total Profit (USD)",
+    total_transactions AS "Total Transactions"
+FROM FinalBenchmark
+ORDER BY total_sales DESC
+LIMIT 10;

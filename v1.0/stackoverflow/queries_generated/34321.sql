@@ -1,0 +1,105 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        OwnerUserId,
+        0 AS Level
+    FROM
+        Posts
+    WHERE
+        ParentId IS NULL
+  
+    UNION ALL
+  
+    SELECT
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.OwnerUserId,
+        Level + 1
+    FROM
+        Posts p
+        INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT
+        Id AS UserId,
+        Reputation,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Ranking
+    FROM
+        Users
+),
+TopUsers AS (
+    SELECT
+        UserId,
+        Reputation
+    FROM
+        UserReputation
+    WHERE
+        Ranking <= 10
+),
+UserBadges AS (
+    SELECT
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM
+        Badges b
+    GROUP BY
+        b.UserId
+),
+PostVoteCounts AS (
+    SELECT
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM
+        Votes
+    GROUP BY
+        PostId
+),
+PostDetails AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        p.OwnerUserId,
+        r.Level
+    FROM
+        Posts p
+        LEFT JOIN PostVoteCounts v ON p.Id = v.PostId
+        LEFT JOIN Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+        JOIN RecursivePostHierarchy r ON p.Id = r.Id
+    GROUP BY
+        p.Id, v.UpVotes, v.DownVotes, r.Level
+)
+SELECT
+    d.PostId,
+    d.Title,
+    d.ViewCount,
+    d.Score,
+    d.UpVotes,
+    d.DownVotes,
+    d.Tags,
+    u.DisplayName AS OwnerDisplayName,
+    b.BadgeCount,
+    b.BadgeNames,
+    d.Level
+FROM
+    PostDetails d
+    JOIN Users u ON d.OwnerUserId = u.Id
+    LEFT JOIN UserBadges b ON u.Id = b.UserId
+WHERE
+    (d.Score > 10 OR d.UpVotes > 5)
+    AND d.Level <= 2
+ORDER BY
+    d.Score DESC, d.ViewCount DESC;
+
+This query retrieves detailed information about posts, including their hierarchical structure, ownership, voting behavior, and associated user badges. It combines recursive common table expressions (CTEs) for hierarchical post relationships, aggregates user badges, calculates vote counts, and applies filtering and ordering on multiple criteria, providing a comprehensive view of high-performing content and their contributors.

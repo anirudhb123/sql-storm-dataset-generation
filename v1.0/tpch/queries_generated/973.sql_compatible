@@ -1,0 +1,74 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COUNT(ps.ps_supplycost) AS PartsSupplied,
+        SUM(ps.ps_availqty) AS TotalAvailableQuantity,
+        AVG(ps.ps_supplycost) AS AvgSupplyCost
+    FROM
+        supplier s
+    LEFT JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS TotalSpent,
+        COUNT(o.o_orderkey) AS OrdersCount
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderstatus = 'O' 
+    GROUP BY
+        c.c_custkey,
+        c.c_name
+),
+PartSupplierComparison AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(ss.PartsSupplied, 0) AS SupplierCount,
+        COALESCE(cs.CustomerOrderCount, 0) AS CustomerOrderCount
+    FROM 
+        part p
+    LEFT JOIN 
+        (SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS PartsSupplied
+         FROM partsupp ps
+         GROUP BY ps.ps_partkey) ss ON p.p_partkey = ss.ps_partkey
+    LEFT JOIN 
+        (SELECT l.l_partkey, COUNT(DISTINCT o.o_orderkey) AS CustomerOrderCount
+         FROM lineitem l
+         JOIN orders o ON l.l_orderkey = o.o_orderkey
+         GROUP BY l.l_partkey) cs ON p.p_partkey = cs.l_partkey
+)
+SELECT 
+    psc.p_partkey,
+    psc.p_name,
+    psc.p_retailprice,
+    psc.SupplierCount,
+    psc.CustomerOrderCount,
+    s.s_name AS SupplierName,
+    cs.c_name AS CustomerName,
+    (CASE WHEN cs.TotalSpent IS NULL THEN 'No Orders' ELSE 'Has Orders' END) AS CustomerOrderStatus,
+    RANK() OVER (ORDER BY psc.CustomerOrderCount DESC, psc.SupplierCount DESC) AS Rank
+FROM 
+    PartSupplierComparison psc
+LEFT JOIN 
+    SupplierStats s ON psc.SupplierCount > 0 AND s.PartsSupplied > 0
+LEFT JOIN 
+    CustomerOrders cs ON psc.CustomerOrderCount > 0
+WHERE 
+    psc.SupplierCount > 5 OR cs.OrdersCount > 3
+ORDER BY 
+    psc.p_retailprice DESC, 
+    psc.CustomerOrderCount ASC;

@@ -1,0 +1,72 @@
+
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost,
+        COUNT(DISTINCT ps.ps_partkey) AS TotalParts,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.* 
+    FROM 
+        SupplierDetails s 
+    WHERE 
+        s.TotalCost > 100000
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS NetRevenue,
+        COUNT(l.l_orderkey) AS TotalItems
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+NationSummary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT c.c_custkey) AS CustomerCount,
+        SUM(o.o_totalprice) AS TotalOrderValue
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        customer c ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        orders o ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name AS Region,
+    ns.n_name AS NationName,
+    COALESCE(hvs.s_name, 'No Supplier') AS SupplierName,
+    ns.CustomerCount,
+    ns.TotalOrderValue,
+    SUM(os.NetRevenue) AS TotalNetRevenue
+FROM 
+    region r
+LEFT JOIN 
+    nation ns ON ns.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    HighValueSuppliers hvs ON hvs.s_suppkey = (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = ns.n_nationkey ORDER BY s.s_acctbal DESC LIMIT 1)
+LEFT JOIN 
+    OrderSummary os ON EXISTS (SELECT 1 FROM customer c WHERE c.c_nationkey = ns.n_nationkey AND c.c_custkey = os.o_orderkey)
+GROUP BY 
+    r.r_name, ns.n_name, hvs.s_name
+ORDER BY 
+    TotalNetRevenue DESC, Region, NationName;

@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+), 
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+), 
+SupplierSales AS (
+    SELECT s.s_suppkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS supply_revenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+    GROUP BY s.s_suppkey
+), 
+RevenueComparison AS (
+    SELECT sh.s_suppkey, sh.s_name, ss.supply_revenue, os.total_revenue,
+           CASE 
+               WHEN os.total_revenue > ss.supply_revenue THEN 'Supplier is less profitable'
+               WHEN os.total_revenue < ss.supply_revenue THEN 'Supplier is more profitable'
+               ELSE 'Equal profits'
+           END AS profitability_status
+    FROM SupplierHierarchy sh
+    LEFT JOIN SupplierSales ss ON sh.s_suppkey = ss.s_suppkey
+    LEFT JOIN OrderSummary os ON os.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = sh.s_nationkey LIMIT 1)
+)
+
+SELECT r.r_name, rc.s_suppkey, rc.s_name, rc.supply_revenue, rc.total_revenue, rc.profitability_status
+FROM RevenueComparison rc
+JOIN nation n ON rc.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE rc.supply_revenue IS NOT NULL
+ORDER BY rc.supply_revenue DESC, rc.total_revenue ASC;

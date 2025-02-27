@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+RankedLineItems AS (
+    SELECT l.*, 
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS price_rank,
+           DENSE_RANK() OVER (ORDER BY l.l_tax) AS tax_rank
+    FROM lineitem l
+    WHERE l.l_discount > 0.05
+),
+CustomerOrderDetails AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate,
+           CASE WHEN o.o_orderstatus = 'F' THEN 'Finished' ELSE 'Pending' END AS order_status_desc
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate > DATE'1998-10-01' - INTERVAL '1 year'
+)
+SELECT p.p_name, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+       COUNT(DISTINCT co.o_orderkey) AS order_count,
+       COUNT(DISTINCT sh.s_suppkey) AS unique_suppliers,
+       MAX(rl.price_rank) AS highest_price_rank,
+       AVG(c.c_acctbal) AS avg_customer_balance
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN CustomerOrderDetails co ON l.l_orderkey = co.o_orderkey
+LEFT JOIN SupplierHierarchy sh ON l.l_suppkey = sh.s_suppkey
+JOIN RankedLineItems rl ON l.l_orderkey = rl.l_orderkey
+WHERE p.p_size BETWEEN 10 AND 30
+GROUP BY p.p_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY revenue DESC, unique_suppliers ASC;

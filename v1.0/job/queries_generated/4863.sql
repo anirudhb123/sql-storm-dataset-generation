@@ -1,0 +1,45 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 5
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    COALESCE(STRING_AGG(DISTINCT ak.name, ', ' ORDER BY ak.name), 'No Cast') AS cast_names,
+    COALESCE(SUM(mi.info LIKE '%Oscar%'), 0) AS has_oscar_info,
+    (SELECT COUNT(DISTINCT mc.company_id) 
+     FROM movie_companies mc 
+     WHERE mc.movie_id = fm.movie_id) AS company_count
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    cast_info c ON fm.movie_id = c.movie_id
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON fm.movie_id = mi.movie_id
+GROUP BY 
+    fm.movie_id, fm.title, fm.production_year
+ORDER BY 
+    fm.production_year DESC, fm.cast_count DESC;

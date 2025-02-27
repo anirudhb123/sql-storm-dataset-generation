@@ -1,0 +1,72 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword LIKE '%drama%'
+),
+TopDirectors AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT ca.movie_id) AS directed_movies
+    FROM 
+        cast_info ca
+    JOIN 
+        role_type rt ON ca.role_id = rt.id
+    WHERE 
+        rt.role = 'director'
+    GROUP BY 
+        c.person_id
+    HAVING 
+        COUNT(DISTINCT ca.movie_id) >= 5
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        c.name AS director_name,
+        t.kind_id,
+        INFO.info
+    FROM 
+        title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ca ON cc.subject_id = ca.person_id
+    LEFT JOIN 
+        aka_name c ON ca.person_id = c.person_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        info_type INFO ON mi.info_type_id = INFO.id
+)
+SELECT 
+    md.title,
+    COALESCE(md.production_year, 'Unknown') AS prod_year,
+    COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+    COUNT(DISTINCT rd.person_id) AS director_count,
+    COUNT(DISTINCT cc.subject_id) AS cast_count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    movie_keyword mk ON md.id = mk.movie_id
+LEFT JOIN 
+    TopDirectors rd ON md.director_name = rd.person_id
+LEFT JOIN 
+    complete_cast cc ON md.id = cc.movie_id
+WHERE 
+    md.kind_id IN (SELECT id FROM kind_type WHERE kind = 'Feature Film')
+GROUP BY 
+    md.title, md.production_year
+HAVING 
+    COUNT(DISTINCT mk.keyword_id) > 1
+ORDER BY 
+    prod_year DESC, keyword_count DESC
+LIMIT 20;

@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+
+TotalSales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+
+NationAggregates AS (
+    SELECT n.n_nationkey, n.n_name, SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+
+PartSales AS (
+    SELECT p.p_partkey, p.p_name, AVG(l.l_extendedprice) AS avg_price
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+
+RankedSales AS (
+    SELECT ts.o_orderkey, ts.total_sales,
+           RANK() OVER (ORDER BY ts.total_sales DESC) AS sales_rank
+    FROM TotalSales ts
+)
+
+SELECT
+    nh.n_nationkey,
+    nh.n_name,
+    COALESCE(sa.total_acctbal, 0) AS total_account_balance,
+    ps.avg_price,
+    ss.level AS supplier_level
+FROM NationAggregates sa
+FULL OUTER JOIN PartSales ps ON sa.n_nationkey = ps.p_partkey
+LEFT JOIN SupplierHierarchy ss ON sa.n_nationkey = ss.s_nationkey
+JOIN RankedSales rs ON rs.total_sales > 10000
+WHERE rs.sales_rank <= 10
+ORDER BY nh.n_nationkey, ps.avg_price DESC;

@@ -1,0 +1,43 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal > 1000 -- Base case for recursion, customers with account balance over 1000
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey  -- Self-join to find customers from the same nation
+    WHERE ch.level < 5  -- Limit to 5 levels of recursion
+), 
+SupplierStats AS (
+    SELECT s.s_suppkey, 
+           SUM(ps.ps_availqty) AS total_avail_qty, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+MaxOrderPrice AS (
+    SELECT c.c_custkey, 
+           MAX(o.o_totalprice) AS max_order_price
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY c.c_custkey
+)
+SELECT ch.c_custkey,
+       ch.c_name,
+       ch.level,
+       ss.total_avail_qty,
+       ss.avg_supply_cost,
+       ss.part_count,
+       mop.max_order_price
+FROM CustomerHierarchy ch
+LEFT JOIN SupplierStats ss ON ch.c_nationkey = ss.s_suppkey % 5  -- Simulated relationship using modulo for demonstration
+LEFT JOIN MaxOrderPrice mop ON ch.c_custkey = mop.c_custkey
+WHERE ss.total_avail_qty IS NOT NULL
+   OR mop.max_order_price IS NOT NULL
+ORDER BY ch.level ASC, ch.c_name DESC
+FETCH FIRST 100 ROWS ONLY;

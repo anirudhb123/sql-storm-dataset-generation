@@ -1,0 +1,58 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        SUM(ss_quantity) AS total_quantity,
+        SUM(ss_sales_price) AS total_sales,
+        current_date AS as_of_date,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_sales_price) DESC) AS rank
+    FROM store_sales
+    GROUP BY ss_store_sk, ss_item_sk
+),
+item_sales AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_product_name,
+        COALESCE(sd.total_quantity, 0) AS total_quantity_sold,
+        COALESCE(sd.total_sales, 0) AS total_sales
+    FROM item i
+    LEFT JOIN sales_data sd ON i.i_item_sk = sd.ss_item_sk
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(ws.ws_order_number) AS web_order_count,
+        SUM(ws.ws_net_paid) AS total_web_sales
+    FROM customer c 
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY c.c_customer_sk
+)
+SELECT 
+    ia.i_product_name,
+    ia.total_quantity_sold,
+    ia.total_sales,
+    cs.web_order_count,
+    cs.total_web_sales,
+    CASE 
+        WHEN cs.total_web_sales IS NULL THEN 'No Sales'
+        WHEN cs.total_web_sales > 1000 THEN 'High Sales'
+        ELSE 'Low Sales'
+    END AS sales_category
+FROM item_sales ia
+LEFT JOIN customer_sales cs ON ia.total_quantity_sold > 0
+ORDER BY ia.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;
+
+SELECT 
+    i.i_item_sk,
+    COUNT(*) AS return_count,
+    SUM(cr.cr_return_amount) AS total_return_value
+FROM catalog_returns cr
+JOIN item i ON cr.cr_item_sk = i.i_item_sk
+WHERE cr.cr_return_date_sk > (
+    SELECT d.d_date_sk FROM date_dim d WHERE d.d_date = CURRENT_DATE - INTERVAL '1 YEAR'
+)
+GROUP BY i.i_item_sk
+HAVING COUNT(*) > 0
+ORDER BY total_return_value DESC;

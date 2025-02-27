@@ -1,0 +1,70 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        s.store_id,
+        SUM(ss.net_profit) AS total_store_profit,
+        COUNT(ss.ticket_number) AS total_sales_count,
+        ROW_NUMBER() OVER (PARTITION BY s.store_id ORDER BY SUM(ss.net_profit) DESC) AS profit_rank
+    FROM 
+        store s 
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.store_id
+),
+top_stores AS (
+    SELECT 
+        store_id,
+        total_store_profit,
+        total_sales_count
+    FROM 
+        sales_summary
+    WHERE 
+        profit_rank <= 10
+),
+customer_ranking AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY COUNT(ws.ws_order_number) DESC) AS customer_rank
+    FROM 
+        customer c 
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+sales_growth AS (
+    SELECT
+        d.d_year,
+        SUM(ws.ws_net_paid) AS total_revenue,
+        LAG(SUM(ws.ws_net_paid), 1) OVER (ORDER BY d.d_year) as previous_year_revenue,
+        (SUM(ws.ws_net_paid) - LAG(SUM(ws.ws_net_paid), 1) OVER (ORDER BY d.d_year)) / NULLIF(LAG(SUM(ws.ws_net_paid), 1) OVER (ORDER BY d.d_year), 0) * 100 AS revenue_growth_rate
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_year
+)
+SELECT 
+    t.store_id,
+    t.total_store_profit,
+    r.c_first_name,
+    r.c_last_name,
+    SUM(g.total_revenue) AS yearly_revenue,
+    MAX(g.revenue_growth_rate) AS max_growth_rate
+FROM 
+    top_stores t
+JOIN 
+    customer_ranking r ON t.total_sales_count > 0
+JOIN 
+    sales_growth g ON g.total_revenue IS NOT NULL
+GROUP BY 
+    t.store_id, r.c_first_name, r.c_last_name
+ORDER BY 
+    t.total_store_profit DESC, yearly_revenue DESC;

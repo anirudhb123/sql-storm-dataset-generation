@@ -1,0 +1,64 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.rank <= 5
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        s.s_name,
+        s.s_acctbal,
+        s.s_comment
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+LineItemSummary AS (
+    SELECT 
+        li.l_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM 
+        lineitem li
+    GROUP BY 
+        li.l_orderkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.o_totalprice,
+    sp.p_name,
+    sp.s_name,
+    sp.s_acctbal,
+    lis.total_revenue
+FROM 
+    TopOrders to
+JOIN 
+    LineItemSummary lis ON to.o_orderkey = lis.l_orderkey
+JOIN 
+    SupplierParts sp ON sp.ps_partkey = (SELECT ps_partkey FROM partsupp ORDER BY ps_supplycost LIMIT 1)
+ORDER BY 
+    to.o_orderdate DESC, 
+    total_revenue DESC;

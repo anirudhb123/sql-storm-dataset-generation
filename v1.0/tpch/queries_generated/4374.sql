@@ -1,0 +1,72 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TotalRevenue AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '2021-01-01' AND l.l_shipdate < DATE '2022-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+SuppliersWithOrders AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        SUM(COALESCE(ps.ps_availqty, 0)) AS total_available_qty
+    FROM 
+        partsupp ps
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, p.p_name
+)
+SELECT 
+    r.r_name,
+    s.s_name,
+    COALESCE(t.total_revenue, 0) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(COALESCE(sw.total_available_qty, 0)) AS total_available_quantity,
+    MAX(CASE WHEN su.rn = 1 THEN s.s_acctbal END) AS max_acctbal
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    TotalRevenue t ON t.o_orderkey IN (
+        SELECT o.o_orderkey
+        FROM orders o
+        WHERE o.o_custkey IN (
+            SELECT c.c_custkey
+            FROM customer c
+            WHERE c.c_acctbal IS NOT NULL
+        )
+    )
+LEFT JOIN 
+    SuppliersWithOrders sw ON sw.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    RankedSuppliers su ON s.s_suppkey = su.s_suppkey
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name, s.s_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_revenue DESC;

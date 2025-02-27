@@ -1,0 +1,54 @@
+
+WITH processed_addresses AS (
+    SELECT 
+        ca_city, 
+        ca_state,
+        CONCAT(LOWER(ca_street_name), ' ', UPPER(ca_street_type)) AS formatted_address,
+        TRIM(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS full_address
+    FROM 
+        customer_address
+), 
+demographics AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        COUNT(*) AS demographic_count
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender, cd_marital_status
+), 
+sales_data AS (
+    SELECT 
+        ws.web_site_id, 
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.web_site_id
+)
+SELECT 
+    pa.ca_city, 
+    pa.ca_state,
+    pa.formatted_address,
+    pa.full_address,
+    d.cd_gender, 
+    d.cd_marital_status, 
+    d.demographic_count,
+    s.web_site_id,
+    s.total_sales
+FROM 
+    processed_addresses pa
+JOIN 
+    demographics d ON pa.ca_city = d.cd_gender  -- Simulated join for benchmarking
+JOIN 
+    sales_data s ON pa.ca_state = s.web_site_id  -- Simulated join for benchmarking
+WHERE 
+    d.demographic_count > 10
+ORDER BY 
+    pa.ca_city, d.cd_gender, s.total_sales DESC
+LIMIT 100;

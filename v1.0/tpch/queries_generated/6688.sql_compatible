@@ -1,0 +1,60 @@
+
+WITH SupplierCost AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        sc.s_suppkey,
+        sc.total_supply_cost
+    FROM 
+        SupplierCost sc
+    WHERE 
+        sc.total_supply_cost > 10000
+    ORDER BY 
+        sc.total_supply_cost DESC
+    LIMIT 10
+),
+OrderInfo AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        c.c_custkey,
+        c.c_mktsegment,
+        l.l_quantity,
+        l.l_extendedprice
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        c.c_mktsegment = 'BUILDING' 
+        AND l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+)
+SELECT 
+    oi.o_orderkey,
+    SUM(oi.l_extendedprice) AS total_order_value,
+    COUNT(DISTINCT oi.c_custkey) AS customer_count,
+    ts.total_supply_cost
+FROM 
+    OrderInfo oi
+JOIN 
+    TopSuppliers ts ON oi.o_orderkey IN (
+        SELECT DISTINCT l.l_linenumber
+        FROM lineitem l 
+        WHERE l.l_suppkey IN (SELECT s.s_suppkey FROM supplier)
+    )
+GROUP BY 
+    oi.o_orderkey, 
+    ts.s_suppkey
+ORDER BY 
+    total_order_value DESC;

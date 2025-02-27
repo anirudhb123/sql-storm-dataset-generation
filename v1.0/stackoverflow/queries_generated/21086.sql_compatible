@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.PostTypeId
+),
+
+PopularBadges AS (
+    SELECT 
+        b.UserId,
+        b.Name,
+        b.Class,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 
+    GROUP BY 
+        b.UserId, b.Name, b.Class
+),
+
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(ph.Id) AS ChangeCount,
+        ARRAY_AGG(DISTINCT ph.UserDisplayName) AS Editors
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+
+PostWithMostEdits AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN ph.ChangeCount ELSE 0 END) AS EditCount
+    FROM 
+        Posts p
+    JOIN 
+        PostHistorySummary ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title
+    ORDER BY 
+        EditCount DESC
+    LIMIT 5
+)
+
+SELECT 
+    p.Title AS PostTitle,
+    p.ViewCount,
+    rp.CommentCount,
+    COALESCE(pb.BadgeCount, 0) AS GoldBadgeCount,
+    COALESCE(phs.ChangeCount, 0) AS TotalChanges,
+    phs.Editors AS EditorsList,
+    CASE 
+        WHEN p.LastEditDate IS NULL THEN 'Never modified'
+        ELSE 'Last modified on ' || TO_CHAR(p.LastEditDate, 'YYYY-MM-DD HH24:MI:SS')
+    END AS LastEditInfo
+FROM 
+    Posts p
+JOIN 
+    RankedPosts rp ON p.Id = rp.PostId
+LEFT JOIN 
+    PopularBadges pb ON p.OwnerUserId = pb.UserId
+LEFT JOIN 
+    PostHistorySummary phs ON p.Id = phs.PostId
+WHERE 
+    rp.rn <= 10
+ORDER BY 
+    p.ViewCount DESC, TotalChanges DESC;

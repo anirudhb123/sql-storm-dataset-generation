@@ -1,0 +1,74 @@
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_order_number) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > 0
+    UNION ALL
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price * 0.9 AS ws_sales_price, 
+        ws.ws_quantity,
+        (sd.rn + 1)
+    FROM 
+        web_sales ws
+    JOIN 
+        SalesData sd ON ws.ws_order_number = sd.ws_order_number AND ws.web_site_sk = sd.web_site_sk
+    WHERE 
+        sd.rn < 5
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(sd.ws_sales_price * sd.ws_quantity) AS total_sales,
+        COUNT(DISTINCT sd.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        SalesData sd ON ws.ws_order_number = sd.ws_order_number
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+),
+FinalResult AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.cd_gender,
+        cs.cd_marital_status,
+        cs.total_sales,
+        cs.order_count,
+        RANK() OVER (PARTITION BY cs.cd_gender ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerStats cs
+)
+SELECT 
+    f.cd_gender,
+    f.cd_marital_status,
+    COUNT(*) AS customer_count,
+    SUM(f.total_sales) AS total_sales,
+    AVG(f.total_sales) AS average_sales,
+    MAX(f.total_sales) AS max_sales,
+    MIN(f.total_sales) AS min_sales
+FROM 
+    FinalResult f
+WHERE 
+    f.sales_rank <= 10
+GROUP BY 
+    f.cd_gender, 
+    f.cd_marital_status
+ORDER BY 
+    f.cd_gender, 
+    f.cd_marital_status;

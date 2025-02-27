@@ -1,0 +1,77 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        RANK() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_totalprice DESC) AS rank_totalprice
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01' AND 
+        o.o_orderdate < '1997-01-01' 
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+),
+HighValueLines AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_extendedprice * (1 - l.l_discount) AS effective_price,
+        l.l_discount,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY effective_price DESC) AS line_rank
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_discount > 0.1
+),
+FullOuterJoinData AS (
+    SELECT 
+        p.p_name,
+        COALESCE(SUM(l.l_quantity), 0) AS total_quantity,
+        COALESCE(SUM(hl.effective_price), 0) AS total_effective_price
+    FROM 
+        part p
+    LEFT OUTER JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    FULL OUTER JOIN 
+        HighValueLines hl ON l.l_orderkey = hl.l_orderkey
+    GROUP BY 
+        p.p_name
+)
+SELECT 
+    r.r_name,
+    p.p_name,
+    f.total_quantity,
+    f.total_effective_price,
+    CASE 
+        WHEN f.total_effective_price IS NULL THEN 'No sales'
+        WHEN f.total_effective_price > 1000 THEN 'High Value'
+        ELSE 'Low Value'
+    END AS sales_category
+FROM 
+    FullOuterJoinData f
+JOIN 
+    nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_name = 'CustomerName')
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    part p ON f.p_name = p.p_name
+WHERE 
+    p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 50)
+ORDER BY 
+    f.total_effective_price DESC, r.r_name ASC;

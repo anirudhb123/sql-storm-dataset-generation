@@ -1,0 +1,66 @@
+
+WITH demographic_summary AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        COUNT(DISTINCT c_customer_id) AS customer_count,
+        SUM(cd_purchase_estimate) AS total_purchase_estimate,
+        AVG(cd_dep_count) AS avg_dependents,
+        AVG(cd_credit_rating) AS avg_credit_rating
+    FROM 
+        customer_demographics
+    JOIN 
+        customer ON cd_demo_sk = c_current_cdemo_sk
+    GROUP BY 
+        cd_gender, cd_marital_status
+),
+sales_summary AS (
+    SELECT 
+        d.d_year,
+        SUM(ws_ext_sales_price) AS total_web_sales,
+        SUM(cs_ext_sales_price) AS total_catalog_sales,
+        SUM(ss_ext_sales_price) AS total_store_sales
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN 
+        catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    LEFT JOIN 
+        store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    GROUP BY 
+        d.d_year
+),
+warehouse_inventory AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(inv_quantity_on_hand) AS total_inventory
+    FROM 
+        warehouse w
+    JOIN 
+        inventory i ON w.w_warehouse_sk = i.inv_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    ds.d_year,
+    ds.total_web_sales,
+    ds.total_catalog_sales,
+    ds.total_store_sales,
+    ds.total_web_sales + ds.total_catalog_sales + ds.total_store_sales AS total_sales,
+    dem.cd_gender,
+    dem.cd_marital_status,
+    dem.customer_count,
+    dem.total_purchase_estimate,
+    dem.avg_dependents,
+    wr.w_warehouse_id,
+    wr.total_inventory
+FROM 
+    sales_summary ds
+JOIN 
+    demographic_summary dem ON dem.customer_count > 0
+JOIN 
+    warehouse_inventory wr ON wr.total_inventory > 0
+ORDER BY 
+    ds.d_year DESC, 
+    dem.total_purchase_estimate DESC;

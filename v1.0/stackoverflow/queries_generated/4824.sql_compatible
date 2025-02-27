@@ -1,0 +1,72 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Views,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Views, p.Score, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        r.OwnerUserId,
+        SUM(r.Score) AS TotalScore,
+        COUNT(DISTINCT r.PostId) AS PostCount
+    FROM 
+        RankedPosts r
+    WHERE 
+        r.UserRank <= 5
+    GROUP BY 
+        r.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(t.TotalScore, 0) AS UserTotalScore,
+        COALESCE(t.PostCount, 0) AS UserPostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        TopUsers t ON u.Id = t.OwnerUserId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.UserTotalScore,
+    u.UserPostCount,
+    CASE 
+        WHEN u.UserTotalScore > 100 THEN 'Top Contributor'
+        WHEN u.UserTotalScore BETWEEN 50 AND 100 THEN 'Moderate Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorRank,
+    STRING_AGG(DISTINCT p.Title, ', ') AS TopPostTitles,
+    COALESCE(SUM(p.Views), 0) AS TotalPostViews
+FROM 
+    UserReputation u
+LEFT JOIN 
+    Posts p ON u.UserId = p.OwnerUserId
+WHERE 
+    p.CreationDate >= DATEADD(MONTH, -6, CURRENT_TIMESTAMP)
+GROUP BY 
+    u.UserId, u.DisplayName, u.Reputation, u.UserTotalScore, u.UserPostCount
+ORDER BY 
+    u.UserTotalScore DESC, u.Reputation DESC
+FETCH FIRST 10 ROWS ONLY;

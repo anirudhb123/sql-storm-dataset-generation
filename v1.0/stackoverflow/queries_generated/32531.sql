@@ -1,0 +1,84 @@
+WITH RECURSIVE UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        TotalPosts,
+        TotalAnswers,
+        TotalQuestions,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS Rank
+    FROM 
+        UserPostCounts
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+),
+TopClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(cp.UserId) AS CloseActionCount,
+        MAX(cp.CreationDate) AS LastCloseDate
+    FROM 
+        Posts p
+    JOIN 
+        ClosedPostHistory cp ON p.Id = cp.PostId
+    GROUP BY 
+        p.Id
+    HAVING 
+        COUNT(cp.UserId) > 0
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    t.TotalPosts,
+    t.TotalAnswers,
+    t.TotalQuestions,
+    COALESCE(tb.BadgeCount, 0) AS BadgeCount,
+    COALESCE(tb.LastBadgeDate, 'No badges') AS LastBadgeDate,
+    cp.CloseActionCount,
+    cp.LastCloseDate
+FROM 
+    Users u
+JOIN 
+    TopUsers t ON u.Id = t.UserId
+LEFT JOIN 
+    UserBadges tb ON u.Id = tb.UserId
+LEFT JOIN 
+    TopClosedPosts cp ON u.Id = cp.PostId
+WHERE 
+    t.Rank <= 10
+ORDER BY 
+    t.Rank;

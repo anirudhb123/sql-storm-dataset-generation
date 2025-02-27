@@ -1,0 +1,64 @@
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate <= '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+NationSuppliers AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name AS region_name,
+    ns.n_name AS nation_name,
+    ss.s_name AS supplier_name,
+    ss.total_cost,
+    od.revenue,
+    od.line_count,
+    (CASE 
+        WHEN od.revenue IS NULL THEN 0 
+        ELSE od.revenue / NULLIF(ss.total_cost, 0) 
+    END) AS revenue_to_cost_ratio
+FROM 
+    region r
+LEFT JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    SupplierSummary ss ON ns.n_nationkey = ss.s_nationkey
+LEFT JOIN 
+    OrderDetails od ON ss.s_suppkey = od.o_orderkey 
+WHERE 
+    ss.part_count > 5 AND 
+    (ss.total_cost IS NOT NULL OR od.revenue IS NOT NULL)
+ORDER BY 
+    region_name, nation_name, supplier_name;

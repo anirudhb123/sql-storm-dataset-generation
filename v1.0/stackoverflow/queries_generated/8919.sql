@@ -1,0 +1,56 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS QuestionCount,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        QuestionCount,
+        AnswerCount,
+        UpVotes,
+        DownVotes,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserStats
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        p.ViewCount,
+        COALESCE(MAX(ph.CreationDate), p.CreationDate) AS LastActivityDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY p.Id
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.TotalPosts,
+    tu.QuestionCount,
+    tu.AnswerCount,
+    pa.PostId,
+    pa.Title,
+    pa.CommentCount,
+    pa.ViewCount,
+    pa.LastActivityDate
+FROM TopUsers tu
+JOIN PostActivity pa ON tu.UserId = pa.PostId
+WHERE tu.ReputationRank <= 10
+ORDER BY tu.Reputation DESC, pa.ViewCount DESC;

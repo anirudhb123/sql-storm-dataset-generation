@@ -1,0 +1,59 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    ml.movie_id AS linked_movie_id,
+    mh.title AS movie_title,
+    mh.production_year AS year,
+    COUNT(DISTINCT cm.company_id) AS company_count,
+    SUM(CASE 
+           WHEN pi.info LIKE 'Award%' THEN 1 
+           ELSE 0 
+       END) AS award_count,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY mh.production_year DESC) AS actor_rank
+FROM 
+    cast_info AS ci
+JOIN 
+    aka_name AS ak ON ci.person_id = ak.person_id
+JOIN 
+    movie_companies AS mc ON ci.movie_id = mc.movie_id
+JOIN 
+    movie_hierarchy AS mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_info AS pi ON mh.movie_id = pi.movie_id AND pi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Awards')
+LEFT JOIN 
+    movie_link AS ml ON mh.movie_id = ml.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND mh.production_year IS NOT NULL
+    AND ci.nr_order IS NOT NULL
+    AND (mc.note IS NULL OR mc.note <> 'N/A')
+GROUP BY 
+    ak.name, ml.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT cm.company_id) > 1
+ORDER BY 
+    actor_rank, year DESC;

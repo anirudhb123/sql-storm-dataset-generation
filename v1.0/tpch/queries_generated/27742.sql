@@ -1,0 +1,33 @@
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.s_suppkey) AS num_suppliers,
+    SUM(line.l_quantity) AS total_quantity,
+    AVG(line.l_extendedprice) AS avg_extended_price,
+    MIN(line.l_discount) AS min_discount,
+    MAX(line.l_tax) AS max_tax,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, '(', s.s_nationkey, ')'), ', ') AS supplier_names,
+    COUNT(DISTINCT c.c_custkey) FILTER (WHERE o.o_orderstatus = 'O') AS active_customers,
+    CONCAT(LEFT(r.r_name, 12), '...') AS region_short_name
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem line ON line.l_partkey = p.p_partkey
+JOIN 
+    orders o ON line.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_name LIKE '%widget%' 
+    AND line.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    p.p_name, r.r_name
+ORDER BY 
+    total_quantity DESC, p.p_name;

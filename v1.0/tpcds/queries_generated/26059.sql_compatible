@@ -1,0 +1,60 @@
+
+WITH AddressSummary AS (
+    SELECT 
+        ca_state,
+        COUNT(ca_address_sk) AS address_count,
+        AVG(ca_gmt_offset) AS avg_gmt_offset,
+        STRING_AGG(ca_city, ', ') AS cities
+    FROM customer_address
+    GROUP BY ca_state
+),
+DemographicsSummary AS (
+    SELECT 
+        cd_gender,
+        COUNT(cd_demo_sk) AS demographic_count,
+        STRING_AGG(cd_marital_status, ', ') AS marital_statuses,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics
+    GROUP BY cd_gender
+),
+SalesAnalysis AS (
+    SELECT 
+        ws_bill_addr_sk,
+        SUM(ws_net_paid) AS total_sales,
+        SUM(ws_quantity) AS total_items_sold,
+        STRING_AGG(DISTINCT CAST(ws_order_number AS VARCHAR), ', ') AS order_numbers
+    FROM web_sales
+    GROUP BY ws_bill_addr_sk
+),
+CombinedResults AS (
+    SELECT 
+        A.ca_state,
+        A.address_count,
+        A.avg_gmt_offset,
+        A.cities,
+        D.cd_gender,
+        D.demographic_count,
+        D.marital_statuses,
+        D.avg_purchase_estimate,
+        S.total_sales,
+        S.total_items_sold,
+        S.order_numbers
+    FROM AddressSummary A
+    FULL OUTER JOIN DemographicsSummary D ON 1=1
+    FULL OUTER JOIN SalesAnalysis S ON A.address_count IS NOT NULL OR D.demographic_count IS NOT NULL
+)
+SELECT 
+    ca_state,
+    address_count,
+    avg_gmt_offset,
+    cities,
+    cd_gender,
+    demographic_count,
+    marital_statuses,
+    avg_purchase_estimate,
+    total_sales,
+    total_items_sold,
+    order_numbers
+FROM CombinedResults
+WHERE total_sales > 1000
+ORDER BY ca_state, cd_gender;

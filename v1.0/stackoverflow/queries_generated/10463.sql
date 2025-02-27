@@ -1,0 +1,49 @@
+-- Performance benchmarking query to analyze post statistics and user activity
+
+WITH PostStats AS (
+    SELECT 
+        p.PostTypeId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS TotalQuestionsWithVotes,
+        AVG(p.Score) AS AvgScore,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT p.OwnerUserId) AS UniqueUsers
+    FROM 
+        Posts p
+    GROUP BY 
+        p.PostTypeId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(c.Views, 0)) AS TotalViews,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT PostId, SUM(ViewCount) AS Views FROM Posts GROUP BY PostId) c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    pst.PostTypeId,
+    pst.TotalPosts,
+    pst.TotalQuestionsWithVotes,
+    pst.AvgScore,
+    pst.TotalViews,
+    pst.UniqueUsers,
+    ua.UserId,
+    ua.TotalPosts AS UserTotalPosts,
+    ua.TotalViews AS UserTotalViews,
+    ua.TotalBounties
+FROM 
+    PostStats pst
+JOIN 
+    UserActivity ua ON ua.TotalPosts > 0
+ORDER BY 
+    pst.PostTypeId, ua.UserTotalPosts DESC;

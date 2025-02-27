@@ -1,0 +1,85 @@
+WITH RECURSIVE PriceComparison AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2) 
+    GROUP BY 
+        c.c_custkey
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        COALESCE(NULLIF(s.s_comment, ''), 'No comment') AS supplier_comment 
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (
+            SELECT 
+                AVG(s2.s_acctbal) 
+            FROM 
+                supplier s2 
+            WHERE 
+                s2.s_acctbal IS NOT NULL
+        ) OR s.s_comment IS NULL
+),
+DemandAnalysis AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_quantity) AS total_quantity,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY 
+        l.l_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    pc.total_supply_cost,
+    cos.total_spent,
+    fs.supplier_comment,
+    da.total_quantity,
+    da.net_sales
+FROM 
+    part p 
+LEFT JOIN 
+    PriceComparison pc ON p.p_partkey = pc.p_partkey AND pc.rank = 1
+JOIN 
+    DemandAnalysis da ON p.p_partkey = da.l_partkey
+LEFT JOIN 
+    CustomerOrderSummary cos ON cos.order_count > 10
+LEFT JOIN 
+    FilteredSuppliers fs ON fs.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = p.p_partkey
+    )
+WHERE 
+    (p.p_size IS NULL OR p.p_size > 10)
+    AND (p.p_container NOT LIKE 'SMALL%' OR p.p_retailprice < 100)
+    AND (fs.s_supplier_comment IS NOT NULL OR da.net_sales > 10000)
+ORDER BY 
+    da.net_sales DESC, p.p_name COLLATE Latin1_General_BIN;

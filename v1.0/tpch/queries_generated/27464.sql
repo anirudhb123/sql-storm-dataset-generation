@@ -1,0 +1,54 @@
+WITH RankedParts AS (
+    SELECT 
+        p_name,
+        p_mfgr,
+        p_brand,
+        p_type,
+        p_size,
+        p_container,
+        p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p_brand ORDER BY p_retailprice DESC) AS rn
+    FROM 
+        part
+    WHERE 
+        p_retailprice BETWEEN 10.00 AND 100.00
+),
+SupplierDetails AS (
+    SELECT 
+        s_name,
+        s_address,
+        n_name AS nation,
+        r_name AS region,
+        s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n_name ORDER BY s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    rp.p_name,
+    rp.p_mfgr,
+    rp.p_brand,
+    rp.p_type,
+    rp.p_size,
+    rp.p_container,
+    rp.p_retailprice,
+    sd.s_name AS supplier_name,
+    sd.s_address AS supplier_address,
+    sd.nation AS supplier_nation,
+    sd.region AS supplier_region,
+    sd.s_acctbal AS supplier_account_balance
+FROM 
+    RankedParts rp
+JOIN 
+    partsupp ps ON rp.p_partkey = ps.ps_partkey
+JOIN 
+    SupplierDetails sd ON ps.ps_suppkey = sd.s_suppkey
+WHERE 
+    rp.rn <= 3 AND 
+    sd.supplier_rank <= 5
+ORDER BY 
+    rp.p_brand, rp.p_retailprice DESC, sd.s_acctbal DESC;

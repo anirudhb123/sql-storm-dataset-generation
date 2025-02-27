@@ -1,0 +1,83 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.ParentId,
+        0 AS Depth
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.ParentId,
+        RP.Depth + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy RP ON P.ParentId = RP.PostId
+),
+PostStats AS (
+    SELECT 
+        RP.OwnerUserId,
+        COUNT(DISTINCT RP.PostId) AS TotalPosts,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        RecursivePostHierarchy RP
+    INNER JOIN 
+        Posts P ON RP.PostId = P.Id
+    GROUP BY 
+        RP.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+VoteCounts AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(V.Id) AS VoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.OwnerUserId
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    COALESCE(PS.TotalPosts, 0) AS TotalPosts,
+    COALESCE(PS.TotalViews, 0) AS TotalViews,
+    COALESCE(PS.TotalScore, 0) AS TotalScore,
+    COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+    COALESCE(VC.VoteCount, 0) AS VoteCount,
+    CASE 
+        WHEN COALESCE(PS.TotalPosts, 0) > 10 THEN 'High Contributor'
+        WHEN COALESCE(PS.TotalPosts, 0) BETWEEN 5 AND 10 THEN 'Medium Contributor'
+        ELSE 'Low Contributor'
+    END AS ContributionLevel
+FROM 
+    Users U
+LEFT JOIN 
+    PostStats PS ON U.Id = PS.OwnerUserId
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN 
+    VoteCounts VC ON U.Id = VC.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, ContributionLevel DESC;

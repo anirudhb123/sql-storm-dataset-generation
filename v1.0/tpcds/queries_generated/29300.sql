@@ -1,0 +1,52 @@
+
+WITH CTE_Addresses AS (
+    SELECT
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        REPLACE(ca_zip, '-', '') AS sanitized_zip
+    FROM
+        customer_address
+),
+CTE_Customers AS (
+    SELECT
+        c_customer_id,
+        c_first_name,
+        c_last_name,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status
+    FROM
+        customer AS c
+    JOIN
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+CTE_Results AS (
+    SELECT
+        ca.ca_address_id,
+        ca.full_address,
+        ca.ca_city,
+        ca.ca_state,
+        cu.c_customer_id,
+        cu.full_name,
+        cu.cd_gender,
+        cu.cd_marital_status
+    FROM
+        CTE_Addresses AS ca
+    JOIN
+        CTE_Customers AS cu ON ca.ca_city = 'Los Angeles' AND cu.cd_gender = 'M'
+)
+SELECT
+    COUNT(*) AS total_customers,
+    AVG(LENGTH(full_address)) AS avg_address_length,
+    MIN(sanitized_zip) AS min_zip,
+    MAX(sanitized_zip) AS max_zip
+FROM
+    CTE_Results
+WHERE
+    ca_state = 'CA'
+GROUP BY
+    ca_city
+ORDER BY
+    total_customers DESC;

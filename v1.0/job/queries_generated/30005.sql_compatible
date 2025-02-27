@@ -1,0 +1,61 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        COALESCE(cn.name, 'Unknown Company') AS company_name,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        movie_keyword AS mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        movie_companies AS mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    WHERE 
+        m.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        COALESCE(cn.name, 'Unknown Company') AS company_name,
+        m.production_year,
+        mh.level + 1 AS level
+    FROM 
+        aka_title AS m
+    JOIN 
+        movie_link AS ml ON m.id = ml.movie_id
+    JOIN 
+        movie_hierarchy AS mh ON ml.linked_movie_id = mh.movie_id
+    LEFT JOIN 
+        movie_keyword AS mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        movie_companies AS mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+)
+SELECT 
+    mh.movie_id, 
+    mh.title,
+    mh.keyword,
+    mh.company_name,
+    mh.production_year,
+    mh.level,
+    COUNT(*) OVER (PARTITION BY mh.keyword ORDER BY mh.level DESC) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY mh.keyword ORDER BY mh.production_year) AS rn,
+    CASE 
+        WHEN mh.keyword = 'Action' THEN 'Blockbuster'
+        WHEN mh.keyword = 'No Keyword' THEN 'Unknown Genre'
+        ELSE 'Other Genre'
+    END AS genre_classification
+FROM 
+    movie_hierarchy AS mh
+WHERE 
+    mh.production_year >= 2000
+    AND (mh.level <= 5 OR mh.company_name IS NOT NULL)
+ORDER BY 
+    mh.production_year DESC, mh.keyword;

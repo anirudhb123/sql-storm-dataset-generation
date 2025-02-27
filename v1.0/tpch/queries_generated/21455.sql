@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate > (CURRENT_DATE - INTERVAL '1 year')
+),
+SupplierPerformance AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        AVG(l.l_extendedprice / NULLIF(l.l_discount, 0)) AS avg_price_discounted
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        ps.ps_suppkey
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS finished_order_total,
+        (SELECT AVG(o_totalprice) FROM orders WHERE o_custkey = c.c_custkey) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.custkey
+),
+RegionAnalysis AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        STRING_AGG(DISTINCT n.n_name, ', ') AS nations
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+)
+SELECT 
+    c.c_name,
+    c_order_stats.order_count,
+    c_order_stats.finished_order_total,
+    c_order_stats.avg_order_value,
+    COALESCE(sp.total_cost, 0) AS supplier_total_cost,
+    COALESCE(sp.avg_price_discounted, 0.0) AS avg_discounted_price,
+    ra.r_name,
+    ra.nation_count,
+    ra.nations
+FROM 
+    CustomerStats c_order_stats
+LEFT JOIN 
+    SupplierPerformance sp ON c_order_stats.c_custkey = sp.ps_suppkey
+JOIN 
+    region ra ON ra.r_regionkey IN (
+        SELECT r_regionkey FROM nation n WHERE n.n_nationkey = c_order_stats.c_custkey
+    )
+WHERE 
+    c_order_stats.order_count > 5 AND
+    (COALESCE(c_order_stats.avg_order_value, 0) > (SELECT AVG(o_totalprice) FROM orders) OR c_order_stats.finished_order_total > 1000)
+ORDER BY 
+    c_order_stats.finished_order_total DESC,
+    ra.nation_count ASC
+LIMIT 10 OFFSET 2;

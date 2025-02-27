@@ -1,0 +1,93 @@
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        0 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+
+    UNION ALL
+
+    
+    SELECT 
+        m.movie_id,
+        m.movie_title,
+        m.production_year,
+        h.level + 1 AS level
+    FROM 
+        MovieHierarchy h
+    JOIN 
+        complete_cast c ON h.movie_id = c.movie_id
+    JOIN 
+        aka_title m ON c.movie_id = m.id
+    WHERE 
+        h.level < 5  
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+CastInfo AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS unique_cast_count,
+        SUM(CASE WHEN cr.role IS NULL THEN 1 ELSE 0 END) AS unassigned_roles_count
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        role_type cr ON c.role_id = cr.id
+    GROUP BY 
+        c.movie_id
+),
+FullMovieInfo AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        coalesce(mk.keywords, 'No Keywords') AS keywords,
+        ci.unique_cast_count,
+        ci.unassigned_roles_count,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.movie_title) AS movie_rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        MovieKeywords mk ON mh.movie_id = mk.movie_id
+    LEFT JOIN 
+        CastInfo ci ON mh.movie_id = ci.movie_id
+)
+SELECT 
+    fmi.movie_id,
+    fmi.movie_title,
+    fmi.production_year,
+    fmi.keywords,
+    fmi.unique_cast_count,
+    fmi.unassigned_roles_count,
+    CASE 
+        WHEN fmi.production_year < 2000 THEN 'Classic' 
+        WHEN fmi.production_year BETWEEN 2000 AND 2020 THEN 'Modern' 
+        ELSE 'Recent' 
+    END AS movie_category,
+    CASE 
+        WHEN fmi.unique_cast_count > 10 THEN 'Ensemble Cast' 
+        ELSE 'Small Cast' 
+    END AS cast_size_category,
+    fmi.movie_rank
+FROM 
+    FullMovieInfo fmi
+WHERE 
+    fmi.unassigned_roles_count = 0  
+ORDER BY 
+    fmi.production_year DESC,
+    fmi.unique_cast_count DESC, 
+    fmi.movie_title;

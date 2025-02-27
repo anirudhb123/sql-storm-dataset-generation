@@ -1,0 +1,64 @@
+
+WITH RECURSIVE customer_returns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returned_quantity,
+        SUM(cr.return_amt_inc_tax) AS total_returned_amount,
+        COUNT(DISTINCT cr.order_number) AS total_order_count,
+        ROW_NUMBER() OVER (PARTITION BY cr.returning_customer_sk ORDER BY SUM(cr.return_amt_inc_tax) DESC) AS rn
+    FROM catalog_returns cr
+    GROUP BY cr.returning_customer_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ws_quantity) AS total_sold_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales_amount,
+        MAX(d.d_date) AS last_sale_date
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY ws.bill_customer_sk
+),
+high_value_customers AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(COALESCE(s.total_returned_amount, 0)) AS return_amt,
+        s.total_sold_quantity,
+        s.total_sales_amount,
+        s.last_sale_date
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN sales_summary s ON c.c_customer_sk = s.bill_customer_sk
+    LEFT JOIN customer_returns r ON c.c_customer_sk = r.returning_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status, s.total_sold_quantity, s.total_sales_amount, s.last_sale_date
+    HAVING SUM(COALESCE(r.return_amt, 0)) > 0 AND s.total_sales_amount IS NOT NULL
+),
+best_customers AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS net_profit,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(ws.ws_net_profit), 0) DESC) AS rank
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_birth_year IS NULL OR (c.c_birth_year BETWEEN 1980 AND 1990)
+    GROUP BY c.c_customer_id
+)
+SELECT 
+    hvc.c_customer_id,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    hvc.return_amt,
+    hvc.total_sales_amount,
+    b.net_profit,
+    CASE 
+        WHEN hvc.total_sales_amount IS NOT NULL THEN 'Active'
+        WHEN hvc.total_sales_amount IS NULL THEN 'Inactive'
+        ELSE 'Undefined'
+    END AS customer_status
+FROM high_value_customers hvc
+JOIN best_customers b ON hvc.c_customer_id = b.c_customer_id
+WHERE hvc.return_amt > (SELECT AVG(return_amt) FROM high_value_customers) 
+  AND b.rank <= 10
+ORDER BY hvc.return_amt DESC, b.net_profit ASC;

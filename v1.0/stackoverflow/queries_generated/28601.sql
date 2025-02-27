@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1
+),
+AggregatedData AS (
+    SELECT 
+        p.OwnerUserId AS UserId,
+        COUNT(p.Id) AS TotalQuestions,
+        SUM(CASE WHEN p.Score > 0 THEN p.Score ELSE 0 END) AS PositiveScore,
+        AVG(p.ViewCount) AS AvgViewCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS RelevantTags
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.WikiPostId = p.Id
+    GROUP BY 
+        p.OwnerUserId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.UserId,
+        COUNT(DISTINCT ph.PostId) AS EditsMade,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 ELSE 0 END) AS TitleBodyTagEdits,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS PostsClosed
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.UserId
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    ad.TotalQuestions,
+    ad.PositiveScore,
+    ad.AvgViewCount,
+    phs.EditsMade,
+    phs.TitleBodyTagEdits,
+    phs.PostsClosed,
+    rp.PostId,
+    rp.Title AS LatestPostTitle,
+    rp.CreationDate AS LatestPostDate,
+    rp.ViewCount AS LatestPostViewCount,
+    rp.Score AS LatestPostScore,
+    ad.RelevantTags
+FROM 
+    Users u
+LEFT JOIN 
+    AggregatedData ad ON u.Id = ad.UserId
+LEFT JOIN 
+    PostHistorySummary phs ON u.Id = phs.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.UserId AND rp.UserPostRank = 1
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    ad.TotalQuestions DESC, 
+    phs.EditsMade DESC;

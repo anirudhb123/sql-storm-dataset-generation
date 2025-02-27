@@ -1,0 +1,61 @@
+WITH SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_name AS nation, 
+        r.r_name AS region,
+        LENGTH(s.s_name) AS name_length,
+        LENGTH(s.s_comment) AS comment_length,
+        REPLACE(s.s_comment, 'good', 'excellent') AS modified_comment
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PartInfo AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_type, 
+        CONCAT(UPPER(p.p_name), ' - ', p.p_type) AS full_description,
+        LOCATE('part', p.p_name) AS part_position
+    FROM 
+        part p
+),
+CombinedInfo AS (
+    SELECT 
+        si.s_suppkey, 
+        si.s_name, 
+        pi.p_partkey, 
+        pi.full_description,
+        si.modified_comment,
+        CHAR_LENGTH(si.modified_comment) AS modified_comment_length
+    FROM 
+        SupplierInfo si
+    JOIN 
+        partsupp ps ON si.s_suppkey = ps.ps_suppkey
+    JOIN 
+        PartInfo pi ON ps.ps_partkey = pi.p_partkey
+)
+SELECT 
+    s.s_name AS supplier_name,
+    COUNT(DISTINCT p.p_partkey) AS total_parts,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    MAX(pi.part_position) AS max_part_position,
+    AVG(modified_comment_length) AS avg_modified_comment_length
+FROM 
+    CombinedInfo ci
+JOIN 
+    supplier s ON ci.s_suppkey = s.s_suppkey
+JOIN 
+    partsupp ps ON ci.p_partkey = ps.ps_partkey
+JOIN 
+    part p ON ci.p_partkey = p.p_partkey
+GROUP BY 
+    s.s_name
+HAVING 
+    total_parts > 5
+ORDER BY 
+    avg_modified_comment_length DESC;

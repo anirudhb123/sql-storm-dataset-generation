@@ -1,0 +1,41 @@
+
+WITH RECURSIVE top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 50000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) + ts.total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN top_suppliers ts ON s.s_suppkey = ts.s_suppkey
+    GROUP BY s.s_suppkey, s.s_name, ts.total_supplycost
+),
+nations_with_orders AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(o.o_orderkey) AS order_count
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+purchasing_summary AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           SUM(l.l_quantity) AS total_ordered,
+           AVG(l.l_discount) AS avg_discount,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT ns.n_name, 
+       ps.p_name,
+       ps.total_ordered, 
+       ps.total_revenue,
+       ts.total_supplycost
+FROM nations_with_orders ns
+JOIN purchasing_summary ps ON ns.order_count > 5
+LEFT JOIN top_suppliers ts ON ps.total_ordered > 100
+WHERE ts.total_supplycost IS NOT NULL
+ORDER BY ns.n_name, ps.total_revenue DESC
+LIMIT 20;

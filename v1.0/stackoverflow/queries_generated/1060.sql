@@ -1,0 +1,81 @@
+WITH UserPostStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownVotes
+    FROM
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    GROUP BY
+        u.Id, u.DisplayName
+),
+UserBadges AS (
+    SELECT
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM
+        Badges b
+    GROUP BY
+        b.UserId
+),
+PostDetail AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(ph.CloseReasonId, 0) AS ClosedReasonId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM
+        Posts p
+    LEFT JOIN (
+        SELECT
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM
+            Comments
+        GROUP BY
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT
+            PostId,
+            JSON_AGG(DISTINCT closeReasonType.Id) AS CloseReasonId
+        FROM
+            PostHistory ph
+        JOIN CloseReasonTypes closeReasonType ON ph.Comment::int = closeReasonType.Id
+        WHERE
+            ph.PostHistoryTypeId IN (10, 11)
+        GROUP BY
+            PostId
+    ) ph ON p.Id = ph.PostId
+)
+SELECT
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    SUM(CASE WHEN pd.RecentPostRank <= 3 THEN pd.Score END) AS RecentPostScore,
+    AVG(pd.CommentCount) AS AvgCommentsPerPost,
+    MAX(pd.CreationDate) AS MostRecentPostDate
+FROM
+    UserPostStats ups
+LEFT JOIN UserBadges ub ON ups.UserId = ub.UserId
+LEFT JOIN PostDetail pd ON ups.UserId = pd.OwnerUserId
+GROUP BY
+    ups.UserId, ups.DisplayName, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+ORDER BY
+    RecentPostScore DESC, ups.TotalPosts DESC
+LIMIT 10;

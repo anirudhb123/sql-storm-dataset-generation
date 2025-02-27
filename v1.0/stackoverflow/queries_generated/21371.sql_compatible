@@ -1,0 +1,68 @@
+
+WITH UserPostStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS Questions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS Answers,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        DENSE_RANK() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentActivity AS (
+    SELECT 
+        ph.UserId,
+        CONCAT('User: ', u.DisplayName, ' performed an action: ', pht.Name) AS ActionDescription,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.UserId ORDER BY ph.CreationDate DESC) AS ActionRow
+    FROM 
+        PostHistory ph 
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    JOIN 
+        Users u ON ph.UserId = u.Id
+    WHERE 
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+TopUsersWithRecentActivity AS (
+    SELECT 
+        ps.UserId,
+        ps.DisplayName,
+        ps.TotalPosts,
+        ps.Questions,
+        ps.Answers,
+        ps.TotalBounties,
+        ra.ActionDescription,
+        ra.CreationDate AS LastActionDate,
+        ra.ActionRow
+    FROM 
+        UserPostStatistics ps
+    LEFT JOIN 
+        RecentActivity ra ON ps.UserId = ra.UserId
+    WHERE 
+        ps.UserRank <= 10
+)
+SELECT 
+    u.DisplayName,
+    ps.TotalPosts,
+    ps.Questions,
+    ps.Answers,
+    ps.TotalBounties,
+    COALESCE(ra.ActionDescription, 'No recent activity') AS LastAction,
+    COALESCE(ra.LastActionDate, 'N/A') AS LastActionDate
+FROM 
+    UserPostStatistics ps
+LEFT JOIN 
+    RecentActivity ra ON ps.UserId = ra.UserId AND ra.ActionRow = 1 
+JOIN 
+    Users u ON ps.UserId = u.Id
+ORDER BY 
+    ps.UserRank;

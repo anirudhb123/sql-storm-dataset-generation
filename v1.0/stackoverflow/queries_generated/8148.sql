@@ -1,0 +1,61 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+UserPostCounts AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        R.UserId,
+        R.DisplayName,
+        U.PostCount
+    FROM 
+        RankedUsers R
+    JOIN 
+        UserPostCounts U ON R.UserId = U.OwnerUserId
+    WHERE 
+        R.ReputationRank <= 10
+),
+TopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= DATEADD(year, -1, GETDATE())
+        AND P.Score >= 0
+    ORDER BY 
+        P.Score DESC
+    LIMIT 10
+)
+SELECT 
+    TU.DisplayName AS TopUserName,
+    TP.Title AS TopPostTitle,
+    TP.ViewCount,
+    TP.Score,
+    TP.CreationDate
+FROM 
+    TopUsers TU
+JOIN 
+    TopPosts TP ON TU.UserId = TP.OwnerUserId
+ORDER BY 
+    TU.Reputation DESC, TP.Score DESC;

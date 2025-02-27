@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN SupplyChain sc ON sc.ps_partkey = ps.ps_partkey
+    WHERE sc.ps_availqty < 100
+),
+AggregatedSales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(a.total_sales) AS total_spent
+    FROM customer c
+    JOIN AggregatedSales a ON c.c_custkey = a.o_orderkey
+    GROUP BY c.c_custkey, c.c_name
+    ORDER BY total_spent DESC
+    LIMIT 10
+),
+SupplierInfo AS (
+    SELECT DISTINCT s.s_name, s.s_acctbal, r.r_name AS region_name
+    FROM supplier s
+    LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier
+    )
+)
+SELECT ti.c_custkey, ti.c_name, si.s_name, si.region_name, sc.ps_availqty, sc.ps_supplycost
+FROM TopCustomers ti
+JOIN SupplierInfo si ON si.s_acctbal > 1000
+FULL OUTER JOIN SupplyChain sc ON si.s_suppkey = sc.s_suppkey
+WHERE ci.c_name LIKE '%Corp%' OR sc.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+ORDER BY ti.total_spent DESC, si.s_name ASC;

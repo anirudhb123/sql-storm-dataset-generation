@@ -1,0 +1,59 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT
+        c.person_id,
+        a.name AS actor_name,
+        CAST(a.id AS VARCHAR) AS level
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    WHERE
+        c.nr_order = 1
+
+    UNION ALL
+
+    SELECT
+        c.person_id,
+        a.name AS actor_name,
+        CONCAT(ah.level, ' > ', a.id)
+    FROM
+        ActorHierarchy ah
+    JOIN
+        cast_info c ON ah.person_id = c.movie_id
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+)
+SELECT
+    t.title,
+    t.production_year,
+    COUNT(DISTINCT c.person_id) AS actor_count,
+    STRING_AGG(DISTINCT a.actor_name, ', ') AS actor_names,
+    AVG(m.info::NUMERIC) AS average_runtime,
+    SUM(CASE WHEN ak.keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_count,
+    DENSE_RANK() OVER (PARTITION BY t.production_year ORDER BY AVG(m.info::NUMERIC) DESC) AS year_rank
+FROM 
+    title t
+LEFT JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON c.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name a ON a.person_id = c.person_id
+LEFT JOIN 
+    movie_info m ON m.movie_id = t.id AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'Runtime')
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN 
+    keyword ak ON ak.id = mk.keyword_id
+WHERE 
+    t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    AND t.production_year BETWEEN 2000 AND 2023
+    AND c.person_role_id IN (SELECT id FROM role_type WHERE role IN ('Director', 'Producer'))
+GROUP BY 
+    t.id, t.title, t.production_year
+HAVING 
+    COUNT(DISTINCT c.person_id) > 1
+ORDER BY 
+    t.production_year DESC, actor_count DESC;
+
+This query seeks to analyze and benchmark various aspects of movies produced between 2000 and 2023, focusing on the count of actors, the average runtime, and keyword presence, while showcasing a variety of SQL constructs such as common table expressions (CTEs), outer joins, window functions, and complex filtering criteria.

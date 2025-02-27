@@ -1,0 +1,58 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(SUM(V.VoteTypeId IN (2)), 0) AS UpVoteCount,
+        COALESCE(SUM(V.VoteTypeId IN (3)), 0) AS DownVoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.Score
+)
+
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.PostCount,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.BadgeCount,
+    P.PostId,
+    P.Title,
+    P.ViewCount,
+    P.Score,
+    P.CommentCount,
+    P.UpVoteCount,
+    P.DownVoteCount
+FROM 
+    UserStats U
+JOIN 
+    PostStats P ON U.UserId IN (SELECT OwnerUserId FROM Posts WHERE Id = P.PostId)
+ORDER BY 
+    U.Reputation DESC, 
+    P.Score DESC
+LIMIT 100;

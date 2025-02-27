@@ -1,0 +1,78 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        COALESCE(a.name, 'Unknown Actor') AS actor_name,
+        COALESCE(cn.name, 'Internal Company') AS company_name
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        mt.production_year IS NOT NULL
+    AND 
+        mt.title LIKE '%Adventure%'
+    UNION ALL
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        COALESCE(a.name, 'Unknown Actor') AS actor_name,
+        COALESCE(cn.name, 'Internal Company') AS company_name
+    FROM 
+        title
+    LEFT JOIN 
+        movie_keyword mk ON title.id = mk.movie_id
+    LEFT JOIN 
+        complete_cast cc ON title.id = cc.movie_id
+    LEFT JOIN 
+        aka_name a ON cc.subject_id = a.person_id
+    LEFT JOIN 
+        movie_companies mc ON title.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        title.production_year IS NOT NULL
+    AND 
+        title.title LIKE '%Sci-Fi%'
+),
+ranked_movies AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY production_year DESC) AS rank_by_year
+    FROM 
+        movie_hierarchy
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    mh.keyword,
+    mh.actor_name,
+    mh.company_name,
+    CASE 
+        WHEN mh.production_year IS NULL THEN 'Year Unknown'
+        WHEN mh.production_year < 2000 THEN 'Before 2000'
+        WHEN mh.production_year BETWEEN 2000 AND 2010 THEN '2000s Era'
+        ELSE 'Post 2010'
+    END AS era,
+    COALESCE(mh.actor_name, 'No Actor Information Available') AS actor_info,
+    STRING_AGG(DISTINCT mh.keyword, ', ') FILTER (WHERE mh.keyword IS NOT NULL) AS all_keywords,
+    COUNT(mh.movie_id) OVER (PARTITION BY mh.production_year) AS total_movies_year
+FROM 
+    ranked_movies mh
+WHERE 
+    mh.rank_by_year <= 3
+ORDER BY 
+    mh.production_year DESC,
+    mh.title ASC;

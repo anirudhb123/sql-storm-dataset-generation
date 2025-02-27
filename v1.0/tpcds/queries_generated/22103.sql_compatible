@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sold_date_sk DESC) AS rank,
+        ws.ws_order_number,
+        COALESCE(NULLIF(ws.ws_coupon_amt, 0), ws.ws_ext_discount_amt) AS discount_amt,
+        CASE 
+            WHEN ws.ws_sales_price < 20 THEN 'Low'
+            WHEN ws.ws_sales_price BETWEEN 20 AND 100 THEN 'Medium'
+            ELSE 'High'
+        END AS price_category
+    FROM web_sales ws
+    WHERE ws.ws_sales_price > 0
+),
+NullHandling AS (
+    SELECT 
+        r.web_site_sk,
+        r.ws_sales_price,
+        r.rank,
+        r.ws_order_number,
+        r.discount_amt,
+        r.price_category,
+        COALESCE((SELECT SUM(sr_return_quantity) 
+                   FROM store_returns sr 
+                   WHERE sr.sr_item_sk IN (SELECT DISTINCT w.ws_item_sk 
+                                           FROM web_sales w 
+                                           WHERE w.ws_order_number = r.ws_order_number)
+                   AND sr.sr_customer_sk IS NOT NULL), 0) AS total_returns
+    FROM RankedSales r
+    WHERE r.rank = 1
+)
+SELECT 
+    nh.web_site_sk,
+    nh.price_category,
+    SUM(nh.ws_sales_price) AS total_sales,
+    AVG(nh.discount_amt) AS avg_discount,
+    COUNT(DISTINCT nh.ws_order_number) AS unique_orders,
+    SUM(nh.total_returns) FILTER (WHERE nh.total_returns > 0) AS total_positive_returns
+FROM NullHandling nh
+GROUP BY 
+    nh.web_site_sk, 
+    nh.price_category
+HAVING SUM(nh.ws_sales_price) > 1000 
+   OR AVG(nh.discount_amt) IS NULL
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

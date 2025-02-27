@@ -1,0 +1,68 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity,
+        DENSE_RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice) DESC) AS sales_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '1996-01-01' 
+        AND l.l_shipdate < DATE '1997-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+), RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+), OrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value,
+        MAX(o.o_orderdate) AS latest_order_date
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_name, 
+    SUM(COALESCE(RecursiveCTE.total_quantity, 0)) AS total_quantity,
+    SUM(COALESCE(sps.ps_supplycost, 0) * COALESCE(sp.supplier_rank, 1)) AS adjusted_supply_cost,
+    COUNT(DISTINCT os.c_custkey) AS unique_customers_count,
+    CASE 
+        WHEN COUNT(DISTINCT os.c_custkey) > 10 THEN 'High Volume' 
+        ELSE 'Low Volume' 
+    END AS order_volume_category
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey 
+LEFT JOIN 
+    partsupp sps ON s.s_suppkey = sps.ps_suppkey
+LEFT JOIN 
+    RecursiveCTE ON sps.ps_partkey = RecursiveCTE.p_partkey
+LEFT JOIN 
+    OrderStats os ON s.s_nationkey = os.c_custkey
+WHERE 
+    r.r_comment NOT LIKE '%obsolete%'
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(COALESCE(RecursiveCTE.total_quantity, 0)) > 1000
+ORDER BY 
+    adjusted_supply_cost DESC;

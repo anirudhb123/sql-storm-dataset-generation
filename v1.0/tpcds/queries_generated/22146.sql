@@ -1,0 +1,72 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        ws_quantity, 
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rank_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_dow = 5) -- Select only sales from Fridays in 2023
+),
+sales_summary AS (
+    SELECT 
+        i_item_id, 
+        SUM(ws_quantity) AS total_quantity_sold, 
+        SUM(ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales AS ws
+    INNER JOIN 
+        item AS i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        i_item_id
+),
+highest_selling_items AS (
+    SELECT 
+        item_id,
+        total_quantity_sold,
+        total_net_profit
+    FROM 
+        sales_summary
+    WHERE 
+        total_net_profit > (SELECT AVG(total_net_profit) FROM sales_summary) -- Only include items above average net profit
+    ORDER BY 
+        total_net_profit DESC
+    LIMIT 5
+)
+SELECT 
+    ca_city, 
+    COUNT(DISTINCT c_customer_id) AS customer_count,
+    COALESCE(SUM(rt.total_net_profit), 0) AS total_returns,
+    COALESCE(SUM(su.total_quantity_sold), 0) AS total_sales,
+    AVG(CASE WHEN cd_gender IS NOT NULL THEN 
+              CASE cd_gender 
+                  WHEN 'M' THEN 1 
+                  WHEN 'F' THEN 2 
+                  ELSE 0 END 
+            ELSE 0 END) AS gender_ratio
+FROM 
+    customer AS c
+LEFT JOIN 
+    customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    web_returns AS wr ON wr.wr_returning_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    web_sales AS ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    ranked_sales AS rt ON rt.ws_item_sk = ws.ws_item_sk
+FULL OUTER JOIN 
+    highest_selling_items AS su ON su.item_id = ws.ws_item_sk
+WHERE 
+    (ca.ca_state = 'NY' OR ca.ca_state IS NULL) -- Include returns from outside NY as well
+    AND cd.cd_marital_status IN ('M', 'S')
+GROUP BY 
+    ca_city
+HAVING 
+    total_returns > 1000 OR total_sales < 50 -- Corner case: emphasis on high returns or low sales
+ORDER BY 
+    customer_count DESC, total_returns ASC
+```

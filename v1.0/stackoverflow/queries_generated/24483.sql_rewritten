@@ -1,0 +1,82 @@
+WITH UserScoreRankings AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER(ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+), 
+
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.CreationDate,
+        P.Title,
+        COALESCE(DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), P.CreationDate), 0) AS DaysAgo,
+        P.Score,
+        P.ViewCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '365' DAY
+    GROUP BY P.Id, P.OwnerUserId, P.PostTypeId, P.CreationDate, P.Title, P.Score, P.ViewCount
+),
+
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS CloseDate,
+        P.Title,
+        U.DisplayName,
+        PH.Comment
+    FROM PostHistory PH
+    JOIN Posts P ON PH.PostId = P.Id
+    JOIN Users U ON PH.UserId = U.Id
+    WHERE PH.PostHistoryTypeId = 10
+), 
+
+TopTags AS (
+    SELECT 
+        T.TagName,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN P.ViewCount ELSE 0 END) AS TagQuestionViews
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30' DAY
+    GROUP BY T.TagName
+    ORDER BY TagQuestionViews DESC
+    LIMIT 5
+)
+
+SELECT 
+    U.DisplayName,
+    P.Title AS PostTitle,
+    P.CreationDate,
+    R.ReputationRank,
+    COALESCE(C.CommentCount, 0) AS CommentCount,
+    CASE 
+        WHEN R.ReputationRank BETWEEN 1 AND 10 THEN 'Top User'
+        WHEN R.ReputationRank BETWEEN 11 AND 100 THEN 'Moderate User'
+        ELSE 'Novice User'
+    END AS UserCategory,
+    (SELECT COUNT(*) FROM ClosedPosts C WHERE C.PostId = P.Id) AS IsClosed,
+    (SELECT STRING_AGG(T.TagName, ', ') 
+     FROM Tags T 
+     WHERE P.Tags LIKE '%' || T.TagName || '%' 
+     GROUP BY T.TagName) AS AssociatedTags,
+    CASE 
+        WHEN (SELECT COUNT(*) 
+              FROM PostHistory PH 
+              WHERE PH.PostId = P.Id AND PH.PostHistoryTypeId = 12) > 0 THEN 'Deleted'
+        ELSE 'Active' 
+    END AS PostStatus
+FROM RecentPosts P
+JOIN UserScoreRankings R ON P.OwnerUserId = R.UserId
+LEFT JOIN ClosedPosts C ON P.Id = C.PostId
+WHERE P.Score > 0 
+AND R.ReputationRank <= 100
+AND P.ViewCount > (SELECT AVG(ViewCount) FROM RecentPosts) 
+AND P.Id NOT IN (SELECT PH.PostId FROM PostHistory PH WHERE PH.PostHistoryTypeId IN (12, 10)) 
+ORDER BY P.ViewCount DESC
+LIMIT 50;

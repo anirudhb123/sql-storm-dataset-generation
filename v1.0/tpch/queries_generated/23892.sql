@@ -1,0 +1,53 @@
+WITH recursive SizeCategory AS (
+    SELECT p_sizesize AS size, 
+           CASE 
+               WHEN p_size < 10 THEN 'Small'
+               WHEN p_size BETWEEN 10 AND 20 THEN 'Medium'
+               ELSE 'Large'
+           END AS category
+    FROM part
+    GROUP BY p_size
+), 
+SupplierStats AS (
+    SELECT s_name, 
+           SUM(ps_supplycost * ps_availqty) AS total_cost,
+           RANK() OVER (ORDER BY SUM(ps_supplycost * ps_availqty) DESC) AS cost_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s_name
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, 
+           COUNT(DISTINCT o.o_orderkey) AS num_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+), 
+ProductRevenue AS (
+    SELECT p.p_partkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY p.p_partkey
+)
+SELECT s.s_name, 
+       ss.total_cost, 
+       cs.num_orders, 
+       cs.total_spent, 
+       pr.revenue, 
+       sc.category
+FROM SupplierStats ss
+FULL OUTER JOIN CustomerOrders cs ON cs.num_orders > 0
+FULL OUTER JOIN ProductRevenue pr ON pr.revenue IS NOT NULL
+JOIN part p ON 'Large' = (
+    SELECT category FROM SizeCategory 
+    WHERE size = p.p_size
+) OR (p.p_retailprice IS NOT NULL AND p.p_retailprice < 100)
+JOIN nation n ON p.p_partkey = n.n_nationkey
+WHERE (ss.total_cost IS NOT NULL 
+       OR cs.total_spent IS NULL) 
+  AND (pr.revenue IS NULL OR pr.revenue > 1000)
+ORDER BY ss.cost_rank DESC, cs.total_spent ASC
+LIMIT 50 OFFSET 10;

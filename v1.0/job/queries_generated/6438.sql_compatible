@@ -1,0 +1,35 @@
+
+SELECT 
+    t.title AS Movie_Title,
+    ak.name AS Actor_Name,
+    c.kind AS Cast_Type,
+    COALESCE(mi.info, 'N/A') AS Movie_Info,
+    GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword SEPARATOR ', ') AS Keywords
+FROM 
+    title t
+JOIN 
+    aka_title at ON t.id = at.movie_id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id AND ci.person_role_id = 1
+JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+JOIN 
+    role_type r ON r.id = ci.role_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+JOIN 
+    company_name co ON co.id = mc.company_id
+WHERE 
+    t.production_year > 2000
+GROUP BY 
+    t.title, ak.name, c.kind, mi.info, t.production_year
+ORDER BY 
+    t.production_year DESC, t.title;

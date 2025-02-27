@@ -1,0 +1,72 @@
+WITH RECURSIVE TitleHierarchy AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        CAST(NULL AS INTEGER) AS parent_id
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        th.title_id
+    FROM title t
+    JOIN TitleHierarchy th ON t.episode_of_id = th.title_id
+),
+RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT mi.info_type_id) AS info_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT mi.info_type_id) DESC) AS rank,
+        CASE 
+            WHEN COUNT(DISTINCT mi.info_type_id) > 5 THEN 'Rich Info'
+            ELSE 'Basic Info'
+        END AS info_quality
+    FROM title t
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id
+    WHERE t.production_year > 2000
+    GROUP BY t.id
+),
+ActiveActors AS (
+    SELECT DISTINCT 
+        c.person_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY c.person_id, ak.name
+    HAVING COUNT(DISTINCT ci.movie_id) > 5
+),
+CompanyTypes AS (
+    SELECT 
+        cm.movie_id,
+        GROUP_CONCAT(DISTINCT ct.kind) AS company_kinds
+    FROM movie_companies cm
+    JOIN company_type ct ON cm.company_type_id = ct.id
+    GROUP BY cm.movie_id
+)
+SELECT 
+    th.title,
+    th.production_year,
+    rm.info_count,
+    rm.info_quality,
+    aa.actor_name,
+    aa.movie_count AS total_acts,
+    ct.company_kinds,
+    COALESCE(a.title, 'No Episode') AS episode_details,
+    CASE 
+        WHEN aa.movie_count IS NULL THEN 'Newcomer'
+        ELSE 'Established'
+    END AS actor_status
+FROM TitleHierarchy th
+JOIN RankedMovies rm ON th.title_id = rm.movie_id
+LEFT JOIN ActiveActors aa ON aa.movie_count > 5
+LEFT JOIN CompanyTypes ct ON th.title_id = ct.movie_id
+LEFT JOIN title a ON th.episode_of_id = a.id
+WHERE rm.rank <= 10
+ORDER BY th.production_year DESC, rm.rank;

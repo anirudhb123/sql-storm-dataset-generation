@@ -1,0 +1,63 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId, 
+        Reputation, 
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT CASE WHEN b.Id IS NOT NULL THEN b.Id END) AS BadgeCount,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        ps.*, 
+        ur.ReputationRank
+    FROM PostSummary ps
+    JOIN UserReputation ur ON ps.PostId = ur.UserId
+    WHERE ur.ReputationRank <= 10
+)
+SELECT 
+    tp.PostId, 
+    tp.Title, 
+    tp.CreationDate, 
+    tp.UpVotes, 
+    tp.DownVotes, 
+    tp.CommentCount, 
+    tp.BadgeCount,
+    tp.RelatedPostCount,
+    CASE 
+        WHEN tp.CommentCount > 0 THEN 'Has Comments'
+        ELSE 'No Comments'
+    END AS CommentStatus,
+    CONCAT('Reputation: ', ur.Reputation) AS ReputationInfo
+FROM TopPosts tp
+JOIN UserReputation ur ON tp.PostId = ur.UserId
+WHERE tp.UpVotes - tp.DownVotes > 10
+ORDER BY tp.CreationDate DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY
+UNION ALL
+SELECT 
+    -1 AS PostId, 
+    'Summary Statistics' AS Title, 
+    '2024-10-01 12:34:56' AS CreationDate, 
+    SUM(UpVotes) AS UpVotes, 
+    SUM(DownVotes) AS DownVotes, 
+    SUM(CommentCount) AS CommentCount, 
+    SUM(BadgeCount) AS BadgeCount,
+    SUM(RelatedPostCount) AS RelatedPostCount
+FROM TopPosts;

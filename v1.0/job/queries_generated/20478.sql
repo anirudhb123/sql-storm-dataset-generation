@@ -1,0 +1,80 @@
+WITH ranked_movies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        mci.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS rank_by_year
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_type mci ON mc.company_type_id = mci.id
+    WHERE 
+        mt.production_year IS NOT NULL
+        AND mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+company_aggregates AS (
+    SELECT 
+        mc.company_id,
+        COUNT(DISTINCT mt.id) AS movie_count,
+        COUNT(DISTINCT CASE WHEN mt.production_year < 2000 THEN mt.id END) AS pre_2000_movie_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        aka_title mt ON mc.movie_id = mt.id
+    GROUP BY 
+        mc.company_id
+),
+all_titles AS (
+    SELECT
+        at.id AS title_id,
+        at.title AS title_name,
+        at.production_year,
+        COALESCE(CHAR_LENGTH(at.title) - CHAR_LENGTH(REPLACE(at.title, 'a', '')), 0) AS a_count,
+        COALESCE(CHAR_LENGTH(at.title) - CHAR_LENGTH(REPLACE(at.title, 'e', '')), 0) AS e_count,
+        CASE 
+            WHEN mt.production_year >= 2010 THEN 'modern'
+            WHEN mt.production_year >= 2000 THEN 'recent'
+            ELSE 'classic'
+        END AS era
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_companies mc ON at.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_info mi ON at.id = mi.movie_id
+    WHERE 
+        mi.info_type_id IS NOT NULL
+    ORDER BY 
+        a_count + e_count DESC
+)
+
+SELECT 
+    r.movie_title,
+    r.production_year,
+    ca.movie_count,
+    ca.pre_2000_movie_count,
+    a.title_name,
+    a.a_count,
+    a.e_count,
+    a.era
+FROM 
+    ranked_movies r
+JOIN 
+    company_aggregates ca ON r.movie_id = ca.company_id
+FULL OUTER JOIN 
+    all_titles a ON r.movie_id = a.title_id
+WHERE 
+    (r.rank_by_year <= 5 OR (ca.movie_count > 1 AND ca.pre_2000_movie_count = 0))
+    AND (r.production_year > 1990 OR a.era = 'modern')
+ORDER BY 
+    r.production_year DESC, 
+    a.a_count DESC, 
+    a.e_count DESC
+LIMIT 50;
+
+This elaborate SQL query combines various advanced constructs and showcases complex relations among the tables according to the Join Order Benchmark schema. The query utilizes Common Table Expressions (CTEs) to rank movies, aggregate counts from company associations, and derive calculations on titles. It incorporates outer joins, window functions, and filters on various criteria, involving string calculations and conditional logic.

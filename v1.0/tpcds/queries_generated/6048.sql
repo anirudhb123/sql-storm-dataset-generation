@@ -1,0 +1,48 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MAX(ws.ws_sold_date_sk) AS last_order_date
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_sales,
+        cs.order_count,
+        cs.last_order_date,
+        COALESCE(cd.cd_gender, 'N/A') AS gender,
+        COALESCE(cd.cd_marital_status, 'N/A') AS marital_status,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band
+    FROM 
+        CustomerSales cs
+    LEFT JOIN 
+        customer_demographics cd ON cs.c_customer_id = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE 
+        cs.total_sales > 1000
+)
+SELECT 
+    hvc.c_customer_id,
+    hvc.total_sales,
+    hvc.order_count,
+    hvc.last_order_date,
+    hvc.gender,
+    hvc.marital_status,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    income_band ib ON hvc.income_band = ib.ib_income_band_sk
+ORDER BY 
+    hvc.total_sales DESC
+LIMIT 100;

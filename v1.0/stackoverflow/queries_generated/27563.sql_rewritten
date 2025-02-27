@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Body, 
+        p.CreationDate, 
+        p.ViewCount, 
+        p.Score, 
+        ARRAY_LENGTH(string_to_array(p.Tags, '><'), 1) AS TagCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS TotalUpvotedQuestions,
+        SUM(CASE WHEN p.ViewCount > 1000 THEN 1 ELSE 0 END) AS PopularQuestions
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    GROUP BY 
+        u.Id
+),
+MaxTagPost AS (
+    SELECT 
+        rp.OwnerUserId, 
+        COUNT(*) AS MaxTagCount,
+        COUNT(*) FILTER (WHERE rp.TagCount = 0) AS ZeroTagPosts
+    FROM 
+        RankedPosts rp
+    GROUP BY 
+        rp.OwnerUserId
+),
+CombinedStats AS (
+    SELECT 
+        ue.UserId, 
+        ue.DisplayName,
+        ue.TotalQuestions, 
+        ue.TotalUpvotedQuestions, 
+        ue.PopularQuestions,
+        mt.MaxTagCount,
+        mt.ZeroTagPosts
+    FROM 
+        UserEngagement ue
+    JOIN 
+        MaxTagPost mt ON ue.UserId = mt.OwnerUserId
+)
+SELECT 
+    cs.DisplayName,
+    cs.TotalQuestions,
+    cs.TotalUpvotedQuestions,
+    cs.PopularQuestions,
+    cs.MaxTagCount,
+    cs.ZeroTagPosts,
+    CASE 
+        WHEN cs.ZeroTagPosts > 0 THEN 'Potential area for improvement in tagging'
+        ELSE 'Tagging is sufficient'
+    END AS TaggingComments
+FROM 
+    CombinedStats cs
+ORDER BY 
+    cs.TotalQuestions DESC, 
+    cs.TotalUpvotedQuestions DESC;

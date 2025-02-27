@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS ScoreRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= current_date - interval '1 year'
+), CommentStatistics AS (
+    SELECT 
+        PostId, 
+        COUNT(*) AS CommentCount,
+        AVG(Score) AS AverageCommentScore
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+), ClosureDetails AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        PostId
+), FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        cs.CommentCount,
+        cs.AverageCommentScore,
+        cd.CloseCount,
+        cd.ReopenCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        CommentStatistics cs ON rp.PostId = cs.PostId
+    LEFT JOIN 
+        ClosureDetails cd ON rp.PostId = cd.PostId
+)
+SELECT 
+    PostId,
+    Title,
+    Score,
+    ViewCount,
+    CreationDate,
+    OwnerDisplayName,
+    COALESCE(CommentCount, 0) AS CommentCount,
+    COALESCE(AverageCommentScore, 0) AS AverageCommentScore,
+    COALESCE(CloseCount, 0) AS CloseCount,
+    COALESCE(ReopenCount, 0) AS ReopenCount
+FROM 
+    FinalResults
+WHERE 
+    ScoreRank <= 10
+ORDER BY 
+    Score DESC, CreationDate DESC;

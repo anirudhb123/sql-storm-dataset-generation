@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY a.name) AS rank_order,
+        COALESCE(mci.note, 'No Company Info') AS company_note,
+        STRING_AGG(DISTINCT ak.name, ', ') AS akas
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_companies mc ON at.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_info mi ON at.movie_id = mi.movie_id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = at.movie_id LIMIT 1)
+    LEFT JOIN 
+        movie_info_idx mii ON mii.movie_id = at.movie_id AND mii.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre' LIMIT 1)
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = at.movie_id
+    LEFT JOIN 
+        comp_cast_type cct ON cc.subject_id = cct.id
+    LEFT JOIN 
+        title t ON t.id = at.id
+    LEFT JOIN 
+        keyword k ON movie_keyword.movie_id = at.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+    GROUP BY 
+        at.id, at.title, at.production_year, mci.note
+),
+FilteredMovies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN rank_order <= 5 THEN 'Top Rank' 
+            ELSE 'Others' 
+        END AS rank_category,
+        (SELECT COUNT(*) FROM cast_info ci WHERE ci.movie_id = movie_id) AS cast_count
+    FROM 
+        RankedMovies
+    WHERE
+        company_note NOT LIKE '%No Company Info%'
+),
+FinalResults AS (
+    SELECT 
+        f.*,
+        ROW_NUMBER() OVER (PARTITION BY f.production_year ORDER BY f.cast_count DESC) AS cast_rank
+    FROM 
+        FilteredMovies f
+    WHERE 
+        NOT EXISTS (
+            SELECT 1 
+            FROM movie_keyword mk 
+            WHERE mk.movie_id = f.movie_id AND mk.keyword_id IN (SELECT id FROM keyword WHERE keyword LIKE '%Action%')
+        )
+)
+SELECT 
+    title, 
+    production_year, 
+    cast_count, 
+    akas, 
+    rank_category,
+    cast_rank
+FROM 
+    FinalResults
+WHERE 
+    production_year >= 2000
+ORDER BY 
+    production_year DESC, 
+    cast_rank;

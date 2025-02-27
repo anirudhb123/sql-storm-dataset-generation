@@ -1,0 +1,50 @@
+WITH RevenueBySupplier AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name, 
+        n.n_name, 
+        s.s_suppkey, 
+        s.s_name, 
+        rb.total_revenue
+    FROM 
+        RevenueBySupplier rb
+    JOIN 
+        supplier s ON rb.s_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    ORDER BY 
+        rb.total_revenue DESC
+)
+SELECT 
+    r.r_name, 
+    n.n_name, 
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count, 
+    SUM(rb.total_revenue) AS total_region_revenue
+FROM 
+    TopSuppliers ts
+JOIN 
+    region r ON ts.r_name = r.r_name
+JOIN 
+    nation n ON ts.n_name = n.n_name
+JOIN 
+    RevenueBySupplier rb ON ts.s_suppkey = rb.s_suppkey
+GROUP BY 
+    r.r_name, n.n_name
+ORDER BY 
+    total_region_revenue DESC
+LIMIT 10;

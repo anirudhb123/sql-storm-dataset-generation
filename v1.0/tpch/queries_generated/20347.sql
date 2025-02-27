@@ -1,0 +1,50 @@
+WITH RecursivePart AS (
+    SELECT p_partkey, p_name, p_brand, p_retailprice
+    FROM part
+    WHERE p_size > 1
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice * 0.9
+    FROM part p
+    JOIN RecursivePart rp ON p.p_partkey = rp.p_partkey + 1
+    WHERE p.p_size IS NOT NULL
+), 
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 100 OR c.c_acctbal IS NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM orders o
+)
+SELECT 
+    rp.p_partkey, 
+    rp.p_name, 
+    sd.s_name AS supplier_name, 
+    COALESCE(co.c_name, 'Unknown') AS customer_name,
+    COALESCE(co.order_count, 0) AS customer_order_count,
+    COUNT(DISTINCT ro.o_orderkey) AS order_count_by_part,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    CASE 
+        WHEN rp.p_retailprice > AVG(rp.p_retailprice) OVER () THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS pricing_status
+FROM RecursivePart rp
+LEFT JOIN partsupp ps ON rp.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierDetails sd ON ps.ps_suppkey = sd.s_suppkey
+LEFT JOIN lineitem l ON l.l_partkey = rp.p_partkey
+LEFT JOIN RankedOrders ro ON l.l_orderkey = ro.o_orderkey AND ro.rank_order <= 10
+LEFT JOIN CustomerOrders co ON co.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ro.o_orderkey LIMIT 1)
+WHERE rp.p_retailprice IS NOT NULL
+GROUP BY rp.p_partkey, rp.p_name, sd.s_name, co.c_name, co.order_count
+ORDER BY total_revenue DESC
+FETCH FIRST 100 ROWS ONLY;

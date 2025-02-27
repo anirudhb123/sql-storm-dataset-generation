@@ -1,0 +1,75 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    UNION ALL
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        p2.CreationDate,
+        p2.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        Posts p ON p.Id = p2.ParentId
+    INNER JOIN 
+        RecursivePosts r ON r.PostId = p.Id
+)
+, PostStatistics AS (
+    SELECT 
+        r.PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY r.OwnerUserId ORDER BY r.CreationDate DESC) AS UserPostRank
+    FROM 
+        RecursivePosts r
+    LEFT JOIN 
+        Comments c ON r.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON r.PostId = v.PostId
+    GROUP BY 
+        r.PostId, r.OwnerUserId
+),
+BadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000  -- Only users with a reputation above 1000
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.PostId,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    bs.BadgeCount,
+    bs.GoldBadges,
+    bs.SilverBadges,
+    bs.BronzeBadges,
+    ps.UserPostRank
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    BadgeStats bs ON ps.OwnerUserId = bs.UserId
+WHERE 
+    ps.UserPostRank <= 5  -- Only the top 5 posts per user
+ORDER BY 
+    ps.UpVotes DESC, ps.CommentCount DESC;

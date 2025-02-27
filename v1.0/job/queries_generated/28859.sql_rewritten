@@ -1,0 +1,37 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title,
+        m.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY c.nr_order) AS role_rank,
+        ARRAY_AGG(DISTINCT a.name) AS actors
+    FROM title m
+    JOIN movie_keyword mk ON m.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN cast_info c ON m.id = c.movie_id
+    JOIN aka_name a ON c.person_id = a.person_id
+    GROUP BY m.id, m.title, m.production_year, k.keyword
+),
+HighlightedMovies AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        r.keyword,
+        r.actors,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_list
+    FROM RankedMovies r
+    JOIN cast_info c ON r.movie_id = c.movie_id
+    JOIN aka_name a ON c.person_id = a.person_id
+    WHERE r.role_rank <= 3  
+    GROUP BY r.movie_id, r.title, r.production_year, r.keyword, r.actors
+)
+SELECT 
+    hm.movie_id,
+    hm.title,
+    hm.production_year,
+    hm.keyword,
+    hm.actor_list
+FROM HighlightedMovies hm
+ORDER BY hm.production_year DESC, hm.title;

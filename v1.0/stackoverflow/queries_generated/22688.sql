@@ -1,0 +1,80 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS UpvotedPostCount,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS DownvotedPostCount,
+        MAX(b.Date) AS LastBadgeDate,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        CASE 
+            WHEN p.PostTypeId = 1 THEN 'Question'
+            WHEN p.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostType,
+        COALESCE(MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11) 
+                         THEN ph.CreationDate END), p.CreationDate) AS LastModifiedDate,
+        COUNT(c.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+RankedPosts AS (
+    SELECT 
+        pd.*, 
+        RANK() OVER (PARTITION BY pd.PostType ORDER BY pd.UpvoteCount DESC) AS Rank
+    FROM 
+        PostDetails pd
+)
+
+SELECT 
+    ua.UserId, 
+    ua.DisplayName, 
+    ua.Reputation,
+    rp.Title,
+    rp.PostType,
+    rp.LastModifiedDate,
+    rp.CommentCount,
+    rp.UpvoteCount, 
+    CASE 
+        WHEN ua.LastBadgeDate IS NULL THEN 'No badges yet'
+        ELSE CONCAT('Last badge received on: ', TO_CHAR(ua.LastBadgeDate, 'YYYY-MM-DD HH24:MI:SS'))
+    END AS BadgeInfo,
+    CASE 
+        WHEN rp.Rank <= 10 THEN 'Top 10 Post'
+        ELSE 'Out of Top 10'
+    END AS PostRanking
+FROM 
+    UserActivity ua
+JOIN 
+    RankedPosts rp ON ua.UserId = rp.UserId
+WHERE 
+    ua.Reputation > 1000
+    AND rp.LastModifiedDate BETWEEN NOW() - INTERVAL '1 year' AND NOW()
+ORDER BY 
+    ua.Reputation DESC,
+    rp.UpvoteCount DESC;
+
+-- This query aggregates user activity and post details 
+-- and ranks the posts while considering various performance metrics 
+-- and returning a comprehensive list of active contributors.

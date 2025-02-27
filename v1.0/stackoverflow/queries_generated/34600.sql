@@ -1,0 +1,63 @@
+WITH RECURSIVE UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.Score) AS TotalScore,
+        ROW_NUMBER() OVER (ORDER BY SUM(p.Score) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+RecentVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        v.UserId
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.QuestionCount,
+    ups.AnswerCount,
+    ups.TotalScore,
+    rv.VoteCount,
+    COALESCE(pvs.EditCount, 0) AS EditCount,
+    COALESCE(pvs.LastEditDate, 'No edits') AS LastEditDate
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    RecentVotes rv ON ups.UserId = rv.UserId
+LEFT JOIN 
+    PostHistoryStats pvs ON ups.UserId IN (
+        SELECT OwnerUserId
+        FROM Posts
+        WHERE Id = pvs.PostId
+    )
+WHERE 
+    ups.Rank <= 50
+ORDER BY 
+    ups.TotalScore DESC;

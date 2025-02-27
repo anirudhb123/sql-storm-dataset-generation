@@ -1,0 +1,67 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS FullAddress,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS FullName,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+AggregatedInfo AS (
+    SELECT 
+        ci.FullName,
+        ci.c_customer_id,
+        ai.FullAddress,
+        ai.ca_city,
+        ai.ca_state,
+        ai.ca_zip,
+        ai.ca_country,
+        COUNT(ws.ws_order_number) AS TotalOrders,
+        SUM(ws.ws_net_paid) AS TotalSpent
+    FROM 
+        CustomerDetails ci
+    JOIN 
+        addressinfo ai ON ci.c_customer_id = (SELECT c.c_customer_id 
+                                             FROM customer c 
+                                             WHERE c.c_current_addr_sk = ai.ca_address_sk LIMIT 1)
+    LEFT JOIN 
+        web_sales ws ON ci.c_customer_id = ws.ws_bill_customer_sk
+    GROUP BY 
+        ci.FullName, ci.c_customer_id, ai.FullAddress, ai.ca_city, ai.ca_state, ai.ca_zip, ai.ca_country
+)
+SELECT 
+    FullName, 
+    c_customer_id, 
+    FullAddress, 
+    ca_city, 
+    ca_state, 
+    ca_zip, 
+    ca_country, 
+    TotalOrders, 
+    TotalSpent,
+    CASE 
+        WHEN TotalSpent > 1000 THEN 'High Value Customer'
+        WHEN TotalSpent > 500 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS CustomerValue
+FROM 
+    AggregatedInfo
+ORDER BY 
+    TotalSpent DESC;

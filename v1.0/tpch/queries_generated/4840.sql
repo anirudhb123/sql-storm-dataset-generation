@@ -1,0 +1,52 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+), RankedSales AS (
+    SELECT 
+        ss.s_suppkey,
+        ss.s_name,
+        ss.total_sales,
+        ss.sales_rank,
+        n.n_name AS nation_name
+    FROM 
+        SupplierSales ss
+    JOIN 
+        nation n ON ss.s_nationkey = n.n_nationkey
+    WHERE 
+        ss.total_sales > (SELECT AVG(total_sales) FROM SupplierSales) 
+)
+
+SELECT 
+    r.r_name AS region_name,
+    rs.nation_name,
+    COUNT(rs.s_suppkey) AS supplier_count,
+    COALESCE(SUM(rs.total_sales), 0) AS total_sales_above_average,
+    CASE 
+        WHEN COUNT(rs.s_suppkey) = 0 THEN 'No Suppliers'
+        ELSE 'Providers Found'
+    END AS status
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    RankedSales rs ON n.n_nationkey = rs.s_nationkey
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name, rs.nation_name
+ORDER BY 
+    r.r_name, total_sales_above_average DESC;

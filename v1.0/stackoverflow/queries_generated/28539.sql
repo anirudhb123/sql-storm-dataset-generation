@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Views,
+        p.Score,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Views DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2)  -- Only Questions and Answers
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'  -- Within the last year
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Views,
+        rp.Rank,
+        rp.Score,
+        rp.OwnerDisplayName,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UNNEST(string_to_array(rp.Body, ' ')) AS keywords ON keywords IS NOT NULL
+    LEFT JOIN 
+        Posts p ON rp.PostId = p.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[]) 
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Views, rp.Rank, rp.Score, rp.OwnerDisplayName
+    HAVING 
+        COUNT(t.Id) > 0  -- Ensuring there are associated tags
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Views,
+    fp.Score,
+    fp.OwnerDisplayName,
+    fp.Rank,
+    STRING_AGG(tag.TagName, ', ') AS AssociatedTags
+FROM 
+    FilteredPosts fp
+JOIN 
+    Tags tag ON tag.TagName = ANY(fp.Tags)
+WHERE 
+    fp.Rank <= 5  -- Get the top 5 posts by views per user
+GROUP BY 
+    fp.PostId, fp.Title, fp.Views, fp.Score, fp.OwnerDisplayName, fp.Rank
+ORDER BY 
+    fp.Views DESC;

@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        mt.production_year,
+        CAST(NULL AS text) AS parent_title,
+        CAST(0 AS integer) AS hierarchy_level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL 
+        AND mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id, 
+        at.title AS movie_title, 
+        at.production_year,
+        mh.movie_title AS parent_title,
+        mh.hierarchy_level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id 
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    mh.parent_title,
+    mh.hierarchy_level,
+    COALESCE(ca.name, 'Unknown') AS actor_name,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    CASE 
+        WHEN COUNT(DISTINCT mc.company_id) > 3 THEN 'Major Production'
+        ELSE 'Indie or Unknown'
+    END AS production_type
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ca ON ci.person_id = ca.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id 
+WHERE 
+    mh.production_year IS NOT NULL
+GROUP BY 
+    mh.movie_id, 
+    mh.movie_title, 
+    mh.production_year, 
+    mh.parent_title, 
+    mh.hierarchy_level, 
+    ca.name
+HAVING 
+    COUNT(ci.person_id) > 0
+ORDER BY 
+    mh.hierarchy_level, 
+    mh.production_year DESC
+LIMIT 100
+OFFSET 0;
+
+This SQL query builds a recursive common table expression (CTE) to create a movie hierarchy based on linked movies. It joins various tables to gather information about the movies, including titles, actors, keywords, and production companies. Additionally, it incorporates complex predicates, aggregation with `STRING_AGG`, conditional logic (`CASE`), and various join types to present a comprehensive dataset. It also demonstrates corner cases like handling NULL values and counting distinct elements to classify productions.

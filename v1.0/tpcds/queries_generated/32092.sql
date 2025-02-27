@@ -1,0 +1,83 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales,
+        COUNT(*) AS transaction_count,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        total_sales > 100
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        SUM(cs_quantity) AS total_sales,
+        COUNT(*) AS transaction_count,
+        SUM(cs_net_profit) AS total_profit
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_item_sk
+    HAVING 
+        total_sales > 100
+),
+item_inventory AS (
+    SELECT 
+        inv_date_sk,
+        inv_item_sk,
+        inv_quantity_on_hand
+    FROM 
+        inventory
+    WHERE 
+        inv_quantity_on_hand IS NOT NULL
+),
+combined_sales AS (
+    SELECT 
+        s.ws_item_sk,
+        COALESCE(s.total_sales, 0) AS total_sales_web,
+        COALESCE(c.total_sales, 0) AS total_sales_catalog,
+        s.transaction_count AS transaction_count_web,
+        c.transaction_count AS transaction_count_catalog,
+        s.total_profit AS total_profit_web,
+        c.total_profit AS total_profit_catalog
+    FROM 
+        (SELECT * FROM sales_data) s
+    FULL OUTER JOIN 
+        (SELECT * FROM sales_data) c ON s.ws_item_sk = c.cs_item_sk
+),
+final_summary AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        COALESCE(cs.total_sales_web, 0) AS web_sales,
+        COALESCE(cs.total_sales_catalog, 0) AS catalog_sales,
+        COALESCE(i.inv_quantity_on_hand, 0) AS stock_on_hand,
+        (COALESCE(cs.total_profit_web, 0) + COALESCE(cs.total_profit_catalog, 0)) AS total_profit,
+        CASE 
+            WHEN COALESCE(i.inv_quantity_on_hand, 0) = 0 THEN 'Out of Stock'
+            WHEN COALESCE(cs.total_sales_web, 0) + COALESCE(cs.total_sales_catalog, 0) > 200 THEN 'High Demand'
+            ELSE 'Normal'
+        END AS stock_status
+    FROM 
+        item i
+    LEFT JOIN 
+        combined_sales cs ON i.i_item_sk = cs.ws_item_sk
+    LEFT JOIN 
+        item_inventory inv ON i.i_item_sk = inv.inv_item_sk
+)
+SELECT 
+    f.i_item_id,
+    f.web_sales,
+    f.catalog_sales,
+    f.stock_on_hand,
+    f.total_profit,
+    f.stock_status
+FROM 
+    final_summary f
+WHERE 
+    f.total_profit > 1000
+ORDER BY 
+    f.total_profit DESC;

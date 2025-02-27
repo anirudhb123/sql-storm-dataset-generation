@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        t.episode_of_id,
+        1 AS level
+    FROM title t
+    WHERE t.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        ep.id AS title_id,
+        ep.title,
+        ep.production_year,
+        ep.kind_id,
+        ep.episode_of_id,
+        mh.level + 1
+    FROM title ep
+    JOIN MovieHierarchy mh ON ep.episode_of_id = mh.title_id
+),
+TitleKeywords AS (
+    
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        ARRAY_AGG(k.keyword) AS keywords
+    FROM title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY t.id
+),
+CastProfiles AS (
+    
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    WHERE ci.person_role_id IS NOT NULL
+)
+SELECT 
+    mh.title_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    tk.keywords,
+    cp.actor_name,
+    cp.actor_rank
+FROM MovieHierarchy mh
+LEFT JOIN TitleKeywords tk ON mh.title_id = tk.title_id
+LEFT JOIN CastProfiles cp ON mh.title_id = cp.movie_id
+WHERE 
+    mh.production_year >= 2000 
+    AND mh.level < 3 
+    AND (tk.keywords IS NULL OR tk.keywords @> ARRAY['Action', 'Drama'])
+ORDER BY 
+    mh.production_year DESC,
+    mh.title;

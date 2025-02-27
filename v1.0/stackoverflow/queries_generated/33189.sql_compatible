@@ -1,0 +1,63 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursiveCTE r ON p.ParentId = r.PostId
+)
+
+SELECT 
+    u.DisplayName AS Author,
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(DISTINCT b.Id) AS BadgeCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    RANK() OVER (ORDER BY r.Score DESC) AS Rank
+FROM 
+    RecursiveCTE r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON r.PostId = v.PostId AND v.VoteTypeId IN (8, 9) 
+LEFT JOIN 
+    Comments c ON r.PostId = c.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Posts p ON r.PostId = p.Id
+LEFT JOIN 
+    Tags t ON POSITION(t.TagName IN p.Tags) > 0 
+WHERE 
+    r.Level <= 3 
+GROUP BY 
+    u.DisplayName, r.PostId, r.Title, r.CreationDate, r.Score, r.ViewCount
+HAVING 
+    COUNT(c.Id) > 0 AND COUNT(DISTINCT b.Id) >= 2 
+ORDER BY 
+    TotalBounty DESC, Rank ASC;

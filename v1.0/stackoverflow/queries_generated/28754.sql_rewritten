@@ -1,0 +1,77 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Tags) AS TagUsage
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagUsage DESC
+    LIMIT 10
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+UserActivity AS (
+    SELECT 
+        u.DisplayName,
+        ub.BadgeCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        au.PostCount,
+        au.Questions,
+        au.Answers
+    FROM 
+        UserBadges ub
+    JOIN 
+        ActiveUsers au ON ub.UserId = au.Id
+)
+SELECT 
+    ua.DisplayName,
+    ua.BadgeCount,
+    ua.GoldBadges,
+    ua.SilverBadges,
+    ua.BronzeBadges,
+    ua.PostCount,
+    ua.Questions,
+    ua.Answers,
+    pt.TagName,
+    pt.TagUsage
+FROM 
+    UserActivity ua
+CROSS JOIN 
+    PopularTags pt
+ORDER BY 
+    ua.BadgeCount DESC, ua.PostCount DESC, pt.TagUsage DESC;

@@ -1,0 +1,31 @@
+SELECT 
+    t.title, 
+    c.name AS character_name, 
+    ak.name AS actor_name, 
+    co.name AS company_name, 
+    rt.role AS role, 
+    k.keyword AS keyword
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    role_type rt ON ci.role_id = rt.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name co ON mc.company_id = co.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND co.country_code = 'USA'
+    AND k.keyword LIKE '%action%'
+ORDER BY 
+    t.production_year DESC, ak.name;

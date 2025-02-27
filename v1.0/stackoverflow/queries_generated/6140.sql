@@ -1,0 +1,63 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostTypeStatistics AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM 
+        PostTypes pt
+    LEFT JOIN 
+        Posts p ON pt.Id = p.PostTypeId
+    GROUP BY 
+        pt.Name
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        RANK() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM 
+        UserStatistics
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    pts.PostType,
+    pts.TotalPosts,
+    pts.TotalScore,
+    pts.AvgViewCount,
+    tu.UserRank
+FROM 
+    UserStatistics us
+JOIN 
+    PostTypeStatistics pts ON us.TotalPosts > 0
+JOIN 
+    TopUsers tu ON us.UserId = tu.UserId
+WHERE 
+    tu.UserRank <= 10
+ORDER BY 
+    us.Reputation DESC, pts.TotalScore DESC;

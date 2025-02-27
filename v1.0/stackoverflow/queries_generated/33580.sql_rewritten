@@ -1,0 +1,64 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.OwnerUserId,
+        P.AcceptedAnswerId,
+        1 AS Level,
+        CAST(NULL AS VARCHAR(1000)) AS Path
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.OwnerUserId,
+        P.AcceptedAnswerId,
+        Level + 1,
+        CONCAT(R.Path, ' > ', P.Title)
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursiveCTE R ON P.ParentId = R.PostId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COUNT(DISTINCT C.Id) AS CommentCount,
+    COUNT(DISTINCT A.Id) AS AnswerCount,
+    AVG(P.Score) AS AverageScore,
+    SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    MAX(B.Date) AS LastBadgeDate,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags,
+    R.Path
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1  
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Posts A ON P.Id = A.ParentId  
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+LEFT JOIN 
+    Badges B ON U.Id = B.UserId
+LEFT JOIN 
+    Tags T ON T.Id = ANY(STRING_TO_ARRAY(P.Tags, ',')::integer[])  
+LEFT JOIN 
+    RecursiveCTE R ON P.Id = R.PostId
+WHERE 
+    U.Reputation > 1000
+GROUP BY 
+    U.DisplayName, U.Reputation, R.Path
+ORDER BY 
+    AverageScore DESC, CommentCount DESC;

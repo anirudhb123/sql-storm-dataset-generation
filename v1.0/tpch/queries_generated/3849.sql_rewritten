@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+RecentOrders AS (
+    SELECT 
+        o.o_custkey,
+        SUM(o.o_totalprice) AS TotalOrderValue,
+        COUNT(o.o_orderkey) AS NumOrders,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate > cast('1998-10-01' as date) - INTERVAL '1' YEAR
+    GROUP BY 
+        o.o_custkey
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        r.r_name,
+        COALESCE(SUM(lo.l_extendedprice * (1 - lo.l_discount)), 0) AS TotalSpent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem lo ON o.o_orderkey = lo.l_orderkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        c.c_custkey, c.c_name, r.r_name
+)
+SELECT 
+    cr.c_name,
+    cr.r_name,
+    CASE 
+        WHEN rs.TotalSupplyCost IS NULL THEN 'No Suppliers'
+        ELSE rs.TotalSupplyCost::text
+    END AS TotalSupplyCost,
+    COALESCE(ro.TotalOrderValue, 0) AS TotalOrderValue,
+    cr.TotalSpent AS CustomerTotalSpent,
+    cr.NumOrders AS CustomerNumOrders
+FROM 
+    CustomerRegion cr
+LEFT JOIN 
+    RecentOrders ro ON cr.c_custkey = ro.o_custkey
+LEFT JOIN 
+    RankedSuppliers rs ON cr.r_name = rs.r_name
+WHERE 
+    cr.TotalSpent > 1000
+ORDER BY 
+    cr.CustomerTotalSpent DESC, cr.c_name ASC;

@@ -1,0 +1,83 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(DISTINCT V.PostId) AS TotalVotes,
+        RANK() OVER (ORDER BY COUNT(V.VoteTypeId) DESC) AS VoteRank
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+ClosedPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.UserId,
+        PH.Comment,
+        PH.Text,
+        lead(PH.CreationDate) OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate) AS NextCloseDate,
+        CASE 
+            WHEN PH.PostHistoryTypeId = 10 THEN 'Closed' 
+            ELSE 'Other' 
+        END AS CloseType
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (10, 11) -- considering both closed and reopened
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(Closed.CreationDate, 'No Closure') AS ClosureDate,
+        COUNT(C) AS CommentCount,
+        AVG(UPV.UpVoteCount) AS AvgUpVotes,
+        SUM(LINK.LinkTypeId = 1) AS LinkedPosts,
+        SUM(LINK.LinkTypeId = 3) AS DuplicatePosts
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostLinks LINK ON P.Id = LINK.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS UpVoteCount
+        FROM Votes
+        WHERE VoteTypeId = 2
+        GROUP BY PostId
+    ) AS UPV ON P.Id = UPV.PostId
+    LEFT JOIN ClosedPostHistory Closed ON P.Id = Closed.PostId
+    GROUP BY P.Id, P.Title, P.CreationDate, P.Score, Closed.CreationDate
+),
+FinalReport AS (
+    SELECT 
+        P.PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.CommentCount,
+        P.AvgUpVotes,
+        P.ClosureDate,
+        CASE 
+            WHEN P.ClosureDate != 'No Closure' AND P.Score < 0 THEN 'Negative Score on Closed Post'
+            ELSE 'Active or Positive Post'
+        END AS PostStatus,
+        COALESCE(U.UserId, 0) AS TopVoter
+    FROM PostDetails P
+    LEFT JOIN UserVoteSummary U ON U.VoteRank = 1
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    CommentCount,
+    AvgUpVotes,
+    ClosureDate,
+    PostStatus,
+    (SELECT COUNT(*) FROM Badges WHERE UserId = FinalReport.TopVoter) AS TopVoterBadgeCount,
+    (SELECT STRING_AGG(Name, ', ') FROM PostHistoryTypes WHERE Id IN (SELECT DISTINCT PostHistoryTypeId FROM PostHistory WHERE PostId = FinalReport.PostId)) AS HistoryTypes
+FROM FinalReport
+ORDER BY Score DESC, CommentCount DESC;

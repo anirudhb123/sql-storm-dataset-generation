@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+RegionAggregation AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM 
+        region r 
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS item_count,
+        MAX(l.l_tax) AS max_tax,
+        o.o_orderstatus,
+        o.o_orderdate
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'O') 
+        AND l.l_shipdate > (CURRENT_DATE - INTERVAL '1 year')
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus, o.o_orderdate
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    ra.r_name AS region_name,
+    COALESCE(SUM(os.total_revenue), 0) AS total_revenue,
+    SUM(CASE WHEN os.max_tax > 0.15 THEN 1 ELSE 0 END) AS high_tax_orders,
+    STRING_AGG(DISTINCT s.s_name) AS supplier_names,
+    CASE 
+        WHEN COUNT(DISTINCT ps.ps_suppkey) > 1 THEN 'Multiple Suppliers'
+        ELSE 'Single Supplier'
+    END AS supplier_status,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY COUNT(DISTINCT os.o_orderkey) DESC) AS part_rank
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey AND rs.rn = 1
+LEFT JOIN 
+    RegionAggregation ra ON rs.r_regionkey = ra.r_regionkey
+LEFT JOIN 
+    OrderStats os ON os.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = rs.n_nationkey) LIMIT 1)
+GROUP BY 
+    p.p_partkey, p.p_name, ra.r_name
+HAVING 
+    SUM(ps.ps_availqty) > 1000
+    AND CASE WHEN SUM(os.total_revenue) IS NULL THEN 0 ELSE SUM(os.total_revenue) END > 50000
+ORDER BY 
+    part_rank DESC, total_revenue DESC;

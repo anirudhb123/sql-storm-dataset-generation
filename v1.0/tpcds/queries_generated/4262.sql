@@ -1,0 +1,56 @@
+
+WITH recent_wb_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price * ws_quantity) AS total_sales
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (
+            SELECT MAX(d_date_sk) 
+            FROM date_dim 
+            WHERE d_year = 2023 
+              AND d_moy IN (5, 6)
+        )
+    GROUP BY 
+        ws_item_sk
+),
+ranked_sales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        recent_wb_sales.total_quantity,
+        recent_wb_sales.total_sales,
+        RANK() OVER (ORDER BY recent_wb_sales.total_sales DESC) AS sales_rank
+    FROM 
+        recent_wb_sales
+    JOIN 
+        item ON recent_wb_sales.ws_item_sk = item.i_item_sk
+)
+SELECT 
+    r.sales_rank,
+    r.i_item_id,
+    r.i_product_name,
+    COALESCE(i_count.merchant_count, 0) AS merchant_count
+FROM 
+    ranked_sales r
+LEFT JOIN (
+    SELECT 
+        i_item_sk, 
+        COUNT(DISTINCT s_store_sk) AS merchant_count
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (
+            SELECT MIN(d_date_sk) 
+            FROM date_dim 
+            WHERE d_year = 2023
+        )
+    GROUP BY 
+        i_item_sk
+) AS i_count ON r.ws_item_sk = i_count.i_item_sk
+WHERE 
+    r.total_sales > 10000
+ORDER BY 
+    r.sales_rank;

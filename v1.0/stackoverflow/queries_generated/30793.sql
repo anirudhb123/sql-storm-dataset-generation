@@ -1,0 +1,78 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        PostTypeId,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL -- Start with the top-level posts (questions)
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.LastActivityDate >= NOW() - INTERVAL '30 DAYS' THEN 1 ELSE 0 END) AS RecentActivity
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(CAST(NULLIF(SUM(v.BountyAmount), 0) AS INT), -1) AS TotalBounty,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        AVG(v.BountyAmount) AS AverageBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName AS UserName,
+    up.TotalPosts,
+    up.TotalAnswers,
+    up.RecentActivity,
+    p.Title AS PostTitle,
+    p.TotalBounty,
+    p.CommentCount,
+    p.VoteCount,
+    p.AverageBounty,
+    r.Level AS PostLevel
+FROM 
+    UserEngagement up
+JOIN 
+    PostStatistics p ON p.TotalBounty > 0 -- Filter for posts with bounties
+JOIN 
+    RecursivePostHierarchy r ON r.PostId = p.PostId
+JOIN 
+    Posts post ON post.Id = p.PostId
+WHERE 
+    up.RecentActivity > 0
+ORDER BY 
+    up.RecentActivity DESC, p.TotalBounty DESC, r.Level ASC;

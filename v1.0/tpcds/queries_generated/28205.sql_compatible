@@ -1,0 +1,74 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        COUNT(*) AS address_count
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city, ca_state, ca_street_number, ca_street_name, ca_street_type
+),
+CustomerDetails AS (
+    SELECT 
+        cd_gender,
+        COUNT(cd_demo_sk) AS gender_count
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+DemographicsByEducation AS (
+    SELECT 
+        cd_education_status,
+        COUNT(*) AS education_count
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_education_status
+),
+SalesStatistics AS (
+    SELECT 
+        ws_bill_addr_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_addr_sk
+),
+OptimizedOutput AS (
+    SELECT 
+        a.ca_city,
+        a.ca_state,
+        a.full_address,
+        a.address_count,
+        c.cd_gender,
+        c.gender_count,
+        d.cd_education_status,
+        d.education_count,
+        s.total_sales,
+        s.total_orders
+    FROM 
+        AddressDetails a
+    LEFT JOIN 
+        CustomerDetails c ON c.gender_count > 0
+    LEFT JOIN 
+        DemographicsByEducation d ON d.education_count > 0
+    LEFT JOIN 
+        SalesStatistics s ON s.ws_bill_addr_sk = a.ca_address_sk
+)
+SELECT 
+    ca_city AS city,
+    ca_state AS state,
+    full_address,
+    address_count,
+    SUM(gender_count) AS total_gender_count,
+    SUM(education_count) AS total_education_count,
+    SUM(total_sales) AS overall_sales,
+    SUM(total_orders) AS overall_orders
+FROM 
+    OptimizedOutput
+GROUP BY 
+    ca_city, ca_state, full_address, address_count;

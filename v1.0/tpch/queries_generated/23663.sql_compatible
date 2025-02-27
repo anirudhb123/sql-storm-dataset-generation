@@ -1,0 +1,73 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_availability,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name AS nation_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, n.n_name
+),
+SelectedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice > 100 THEN 'High'
+            ELSE 'Low'
+        END AS price_category
+    FROM part p
+    WHERE p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice < 20)
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(l.l_orderkey) AS line_count
+    FROM supplier s
+    JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+SELECT 
+    c.c_custkey,
+    cn.nation_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(lo.total_sales) AS total_sales_by_supplier,
+    MAX(r.price_rank) AS highest_order_price_rank,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names,
+    p.price_category
+FROM CustomerNation cn
+JOIN RankedOrders r ON cn.order_count > 1
+LEFT JOIN TopSuppliers lo ON cn.c_custkey = lo.s_suppkey
+LEFT JOIN SelectedParts p ON p.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = r.o_orderkey)
+JOIN orders o ON o.o_custkey = cn.c_custkey
+WHERE lo.total_sales IS NOT NULL
+GROUP BY c.c_custkey, cn.nation_name, p.price_category
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_orders DESC, total_sales_by_supplier DESC
+LIMIT 10;

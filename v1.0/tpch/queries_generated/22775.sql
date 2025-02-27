@@ -1,0 +1,77 @@
+WITH RankedSales AS (
+    SELECT 
+        l_orderkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY l_orderkey ORDER BY SUM(l_extendedprice * (1 - l_discount)) DESC) AS sales_rank
+    FROM 
+        lineitem
+    GROUP BY 
+        l_orderkey
+),
+CustomerSummary AS (
+    SELECT 
+        c_custkey,
+        COUNT(DISTINCT o_orderkey) AS order_count,
+        SUM(o_totalprice) AS total_spent
+    FROM 
+        customer
+    JOIN
+        orders ON customer.c_custkey = orders.o_custkey
+    GROUP BY 
+        c_custkey
+),
+SupplierPerformance AS (
+    SELECT 
+        ps_partkey,
+        ps_suppkey,
+        COUNT(*) AS supply_count,
+        AVG(ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp
+    GROUP BY 
+        ps_partkey, ps_suppkey
+),
+ZeroQtyParts AS (
+    SELECT 
+        p_partkey, 
+        p_name, 
+        p_size 
+    FROM 
+        part
+    WHERE 
+        NOT EXISTS (
+            SELECT 1 
+            FROM partsupp 
+            WHERE partsupp.ps_partkey = part.p_partkey AND ps_availqty > 0
+        )
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    c.c_name AS customer_name,
+    SUM(COALESCE(rs.total_sales, 0)) AS total_sales,
+    cs.order_count,
+    cs.total_spent,
+    COUNT(DISTINCT zw.p_partkey) AS zero_qty_parts_count,
+    AVG(sp.avg_supply_cost) AS avg_supply_cost_per_part
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RankedSales rs ON s.s_suppkey = rs.l_orderkey
+LEFT JOIN 
+    CustomerSummary cs ON s.s_suppkey = cs.c_custkey
+LEFT JOIN 
+    ZeroQtyParts zw ON zw.p_partkey = rs.l_orderkey
+LEFT JOIN 
+    SupplierPerformance sp ON sp.ps_suppkey = s.s_suppkey
+WHERE 
+    r.r_name LIKE '%East%' AND 
+    cs.total_spent IS NOT NULL 
+GROUP BY 
+    r.r_name, n.n_name, c.c_name
+ORDER BY 
+    total_sales DESC, avg_supply_cost_per_part ASC;

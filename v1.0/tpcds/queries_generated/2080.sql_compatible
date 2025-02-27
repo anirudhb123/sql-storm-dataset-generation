@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(cr_return_amt) AS total_return_amount
+    FROM 
+        catalog_returns
+    WHERE 
+        cr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        cr_returning_customer_sk
+),
+HighestReturningCustomers AS (
+    SELECT 
+        cr.returning_customer_sk,
+        cr.total_returns,
+        cr.total_return_amount
+    FROM 
+        CustomerReturns cr
+    WHERE 
+        cr.total_return_amount > (
+            SELECT AVG(total_return_amount) 
+            FROM CustomerReturns
+        )
+),
+SalesWithReturns AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.total_quantity,
+        rs.total_profit,
+        COALESCE(hc.total_returns, 0) AS total_return_count,
+        COALESCE(hc.total_return_amount, 0) AS total_return_amount
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        HighestReturningCustomers hc ON rs.ws_item_sk = hc.returning_customer_sk
+)
+SELECT 
+    item.i_item_id,
+    item.i_item_desc,
+    sales.total_quantity,
+    sales.total_profit,
+    sales.total_return_count,
+    sales.total_return_amount
+FROM 
+    SalesWithReturns sales
+JOIN 
+    item ON sales.ws_item_sk = item.i_item_sk
+WHERE 
+    sales.rank = 1
+    AND (sales.total_profit IS NOT NULL OR sales.total_return_count > 0)
+ORDER BY 
+    sales.total_profit DESC
+LIMIT 10;

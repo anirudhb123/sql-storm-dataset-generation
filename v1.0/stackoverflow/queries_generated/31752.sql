@@ -1,0 +1,60 @@
+WITH RecursiveTagPaths AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        CAST('-' + T.TagName + '-' AS VARCHAR(1000)) AS Path,
+        1 AS Level
+    FROM Tags T
+    WHERE T.IsModeratorOnly = 0  -- Start with non-moderator only tags
+
+    UNION ALL
+
+    SELECT 
+        PL.RelatedPostId AS TagId,
+        NULL,
+        CAST(R.Path + T.TagName + '-' AS VARCHAR(1000)),
+        R.Level + 1
+    FROM PostLinks PL
+    JOIN RecursiveTagPaths R ON PL.PostId = R.TagId
+    JOIN Tags T ON PL.RelatedPostId = T.Id
+    WHERE T.IsModeratorOnly = 0
+),
+RankedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    WHERE P.Score > 0  -- Filter only positive scored posts
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    T.Path AS TagHierarchy,
+    COUNT(DISTINCT R.Id) AS PostCount,
+    SUM(R.Score) AS TotalScore,
+    B.BadgeCount,
+    B.GoldBadges,
+    B.SilverBadges,
+    B.BronzeBadges
+FROM Users U
+LEFT JOIN RankedPosts R ON U.Id = R.OwnerUserId AND R.PostRank <= 5  -- Top 5 recent posts
+LEFT JOIN RecursiveTagPaths T ON R.Id IN (SELECT PostId FROM PostLinks WHERE RelatedPostId = T.TagId)
+LEFT JOIN UserBadges B ON U.Id = B.UserId
+WHERE U.Reputation > 1000  -- Users with reputation higher than 1000
+GROUP BY U.Id, U.DisplayName, U.Reputation, T.Path, B.BadgeCount, B.GoldBadges, B.SilverBadges, B.BronzeBadges
+ORDER BY TotalScore DESC, PostCount DESC;

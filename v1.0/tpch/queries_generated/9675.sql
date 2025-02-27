@@ -1,0 +1,55 @@
+WITH OrderSummary AS (
+    SELECT 
+        c.c_nationkey,
+        n.n_name AS nation_name,
+        SUM(o.o_totalprice) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        o.o_orderstatus = 'F' 
+    GROUP BY 
+        c.c_nationkey, n.n_name
+), 
+SupplierSummary AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+), 
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        SupplierSummary ss ON p.p_partkey = ss.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+
+SELECT 
+    os.nation_name,
+    pd.p_name,
+    os.total_revenue,
+    pd.total_supply_cost,
+    (os.total_revenue - pd.total_supply_cost) AS profit
+FROM 
+    OrderSummary os
+JOIN 
+    PartDetails pd ON os.nation_name = (SELECT r_name FROM region r JOIN nation n ON r.r_regionkey = n.n_regionkey WHERE n.n_nationkey = os.n_nationkey)
+ORDER BY 
+    profit DESC
+LIMIT 10;

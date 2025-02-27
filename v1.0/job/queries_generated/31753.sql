@@ -1,0 +1,65 @@
+WITH RECURSIVE movies_cte AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+
+    UNION ALL
+
+    SELECT
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        cte.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movies_cte cte ON ml.movie_id = cte.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+
+SELECT 
+    p.person_id,
+    ak.name AS aka_name,
+    STRING_AGG(DISTINCT t.title, ', ') AS titles,
+    COUNT(DISTINCT t.id) AS total_movies,
+    MAX(t.production_year) AS latest_movie_year,
+    AVG(COALESCE(mk.score, 0)) AS avg_keyword_score
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    movies_cte t ON c.movie_id = t.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info pi ON ak.person_id = pi.person_id
+WHERE 
+    (pi.info IS NULL OR pi.info NOT LIKE '%director%')
+    AND t.production_year IS NOT NULL
+GROUP BY 
+    p.person_id, ak.name
+HAVING 
+    COUNT(DISTINCT t.id) > 5 
+    AND AVG(t.production_year) < 2015
+ORDER BY 
+    total_movies DESC, avg_keyword_score DESC
+LIMIT 100;
+
+-- Explanation:
+-- This complex query utilizes a recursive CTE to retrieve movie titles and their production years from the years 2000 to 2023.
+-- The query aggregates data for individuals (from the aka_name table) who have appeared in more than 5 movies,
+-- filtering out those tagged as directors in their person_info.
+-- It computes the total number of movies and the average keyword score for each actor,
+-- ordering the results to show the most prolific actors first.

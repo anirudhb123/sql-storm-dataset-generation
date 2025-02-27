@@ -1,0 +1,91 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank_by_balance,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Unaccounted Supplier'
+            ELSE 'Regular Supplier'
+        END AS supplier_status
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_discount BETWEEN 0.05 AND 0.25 
+        AND o.o_orderdate > '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate
+),
+SupplierPartCounts AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CriticalParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(sp.supplier_count, 0) AS supplier_count,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 'Price Missing'
+            WHEN p.p_retailprice < 100 THEN 'Low Price Part'
+            WHEN p.p_retailprice BETWEEN 100 AND 500 THEN 'Mid Price Part'
+            ELSE 'High Price Part'
+        END AS price_category
+    FROM 
+        part p
+    LEFT JOIN 
+        SupplierPartCounts sp ON p.p_partkey = sp.ps_partkey
+),
+AggregatedData AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(f.total_lineitem_value) AS total_value,
+        AVG(f.o_totalprice) AS average_order_price
+    FROM 
+        FilteredOrders f
+    JOIN 
+        customer c ON f.o_orderkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    cp.p_name,
+    cp.price_category,
+    rs.supplier_status,
+    ad.region_name,
+    ad.total_value,
+    ad.average_order_price
+FROM 
+    CriticalParts cp
+LEFT JOIN 
+    RankedSuppliers rs ON cp.supplier_count > 0 AND rs.rank_by_balance = 1
+JOIN 
+    AggregatedData ad ON ad.total_value > 1000
+WHERE 
+    (cp.price_category = 'High Price Part' OR cp.price_category = 'Mid Price Part')
+    AND rs.s_supplier_status IS NOT NULL
+ORDER BY 
+    ad.total_value DESC, cp.p_name ASC;

@@ -1,0 +1,80 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_sales_price, 
+        ws_ext_sales_price, 
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number) AS rn
+    FROM 
+        web_sales
+    UNION ALL
+    SELECT 
+        cs_item_sk, 
+        cs_order_number, 
+        cs_sales_price, 
+        cs_ext_sales_price, 
+        cs_quantity,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY cs_order_number)
+    FROM 
+        catalog_sales 
+    WHERE 
+        cs_item_sk IS NOT NULL
+),
+total_sales AS (
+    SELECT 
+        item.i_item_id, 
+        item.i_item_desc, 
+        SUM(sales_data.ws_ext_sales_price + COALESCE(sales_data.cs_ext_sales_price, 0)) AS total_revenue,
+        COUNT(DISTINCT sales_data.ws_order_number) AS total_orders
+    FROM 
+        item
+    LEFT JOIN 
+        sales_data ON item.i_item_sk = sales_data.ws_item_sk OR item.i_item_sk = sales_data.cs_item_sk
+    GROUP BY 
+        item.i_item_id, item.i_item_desc
+),
+top_items AS (
+    SELECT 
+        i_item_id, 
+        total_revenue,
+        RANK() OVER (ORDER BY total_revenue DESC) AS revenue_rank
+    FROM 
+        total_sales
+)
+SELECT 
+    customer.c_customer_id,
+    customer.c_first_name,
+    customer.c_last_name,
+    address.ca_city,
+    address.ca_state,
+    COALESCE(SUM(sales_data.ws_quantity + sales_data.cs_quantity), 0) AS total_quantity_sold,
+    CASE 
+        WHEN total_revenue > 10000 THEN 'High' 
+        WHEN total_revenue BETWEEN 5000 AND 10000 THEN 'Medium'
+        ELSE 'Low' 
+    END AS revenue_category
+FROM 
+    customer
+INNER JOIN 
+    customer_address address ON customer.c_current_addr_sk = address.ca_address_sk
+LEFT JOIN 
+    sales_data ON customer.c_customer_sk = sales_data.ws_bill_customer_sk OR customer.c_customer_sk = sales_data.cs_bill_customer_sk
+LEFT JOIN 
+    total_sales ON sales_data.ws_item_sk = total_sales.i_item_id
+WHERE 
+    address.ca_state IN ('NY', 'CA') 
+    AND (customer.c_birth_year BETWEEN 1980 AND 2000 OR customer.c_preferred_cust_flag = 'Y')
+GROUP BY 
+    customer.c_customer_id, 
+    customer.c_first_name, 
+    customer.c_last_name, 
+    address.ca_city, 
+    address.ca_state,
+    total_sales.total_revenue
+HAVING 
+    SUM(sales_data.ws_quantity + sales_data.cs_quantity) > 0
+ORDER BY 
+    revenue_category DESC, 
+    total_quantity_sold DESC;

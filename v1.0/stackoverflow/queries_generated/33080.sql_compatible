@@ -1,0 +1,94 @@
+
+WITH RecursivePosts AS (
+    SELECT 
+        Id, 
+        Title, 
+        Score, 
+        OwnerUserId, 
+        CreationDate,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.Score, 
+        p.OwnerUserId, 
+        p.CreationDate,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.Id
+),
+CTE_UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate,
+        RANK() OVER (PARTITION BY u.Id ORDER BY SUM(COALESCE(c.Score, 0)) DESC) AS CommentRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+CTE_PostHistory AS (
+    SELECT 
+        ph.UserId,
+        ph.PostId,
+        ph.CreationDate,
+        p.Title,
+        p.Score,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate > DATEADD(DAY, -30, CAST('2024-10-01' AS DATE))
+    GROUP BY 
+        ph.UserId, ph.PostId, p.Title, p.Score
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName AS Username,
+    ua.QuestionCount,
+    ua.TotalCommentScore,
+    ua.BadgeCount,
+    ua.LastBadgeDate,
+    ph.PostId,
+    ph.Title AS EditedPostTitle,
+    ph.LastEditDate,
+    ph.HistoryTypes,
+    rp.Level AS QuestionLevel
+FROM 
+    Users u
+JOIN 
+    CTE_UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN 
+    CTE_PostHistory ph ON u.Id = ph.UserId
+LEFT JOIN 
+    RecursivePosts rp ON ph.PostId = rp.Id
+WHERE 
+    ua.Reputation > 1000 
+    AND ua.CommentRank = 1
+ORDER BY 
+    ua.TotalCommentScore DESC, 
+    ua.QuestionCount DESC, 
+    u.Reputation DESC;

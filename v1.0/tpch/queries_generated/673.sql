@@ -1,0 +1,70 @@
+WITH CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+),
+TopCustomers AS (
+    SELECT 
+        cus.c_custkey,
+        cus.c_name,
+        ROW_NUMBER() OVER (ORDER BY cus.total_spent DESC) AS rank
+    FROM 
+        CustomerOrderSummary cus
+    WHERE 
+        cus.order_count > 5
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT cu.c_custkey) AS customer_count,
+    SUM(p.ps_supplycost) AS total_buying_cost,
+    MAX(ro.o_orderdate) AS last_order_date
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp p ON s.s_suppkey = p.ps_suppkey
+LEFT JOIN 
+    order_line ol ON p.ps_partkey = ol.l_partkey -- Assuming there's an order_line table for illustration
+LEFT JOIN 
+    CustomerOrderSummary cus ON ol.l_orderkey = cus.custkey
+LEFT JOIN 
+    TopCustomers cu ON cus.c_custkey = cu.c_custkey
+LEFT JOIN 
+    RankedOrders ro ON ol.l_orderkey = ro.o_orderkey 
+WHERE 
+    n.n_name IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT cu.c_custkey) > 10 OR SUM(p.ps_supplycost) > 100000
+ORDER BY 
+    total_buying_cost DESC;

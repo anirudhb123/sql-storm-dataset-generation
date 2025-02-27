@@ -1,0 +1,56 @@
+WITH RecursiveSupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, r.hierarchy_level + 1
+    FROM supplier s
+    JOIN RecursiveSupplierCTE r ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = r.s_suppkey LIMIT 1)
+    WHERE r.hierarchy_level < 5
+),
+DistinctRegions AS (
+    SELECT DISTINCT r.r_regionkey, r.r_name
+    FROM region r
+    WHERE r.r_comment LIKE '%' || (SELECT MAX(c.c_name) FROM customer c WHERE c.c_acctbal < 0) || '%'
+),
+EffectiveLineItem AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) OVER (PARTITION BY l.l_orderkey) AS total_lines,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sale
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1995-01-01' AND cast('1998-10-01' as date)
+    AND l.l_discount IS NOT NULL
+),
+OrderCustomerSummary AS (
+    SELECT o.o_orderkey, o.o_totalprice, c.c_mktsegment, COUNT(DISTINCT l.l_orderkey) AS line_count
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F') 
+    GROUP BY o.o_orderkey, o.o_totalprice, c.c_mktsegment
+),
+ComplexOuterJoin AS (
+    SELECT 
+        o.os_orderkey, 
+        o.o_totalprice,
+        r.r_name,
+        CASE 
+            WHEN o.o_totalprice IS NULL THEN 'Missing Price'
+            ELSE 'Price Available'
+        END AS price_status
+    FROM OrderCustomerSummary o
+    FULL OUTER JOIN DistinctRegions r ON o.line_count = (SELECT COUNT(*) FROM EffectiveLineItem) 
+    WHERE o.o_totalprice > 1000 OR r.r_name IS NULL
+)
+SELECT 
+    cs.c_name,
+    cs.c_acctbal,
+    COALESCE(cos.price_status, 'No Status') AS order_status,
+    ROW_NUMBER() OVER (PARTITION BY cs.c_mktsegment ORDER BY cs.c_acctbal DESC) AS segment_ranking
+FROM customer cs
+LEFT JOIN ComplexOuterJoin cos ON cs.c_custkey = cos.o_orderkey
+WHERE cs.c_acctbal BETWEEN 500.00 AND 10000.00
+  AND cs.c_name IS NOT NULL
+  AND (cs.c_comment IS NULL OR LENGTH(cs.c_comment) > 5)
+ORDER BY segment_ranking, cs.c_acctbal DESC;

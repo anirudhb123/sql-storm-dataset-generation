@@ -1,0 +1,35 @@
+WITH RECURSIVE SupplyCostCTE AS (
+    SELECT ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, 1 AS lvl
+    FROM partsupp
+    WHERE ps_availqty > 0
+    
+    UNION ALL
+    
+    SELECT p.ps_partkey, p.ps_suppkey, p.ps_availqty, p.ps_supplycost, sc.lvl + 1
+    FROM partsupp p
+    JOIN SupplyCostCTE sc ON p.ps_suppkey = sc.ps_suppkey
+    WHERE p.ps_availqty > 0 AND sc.lvl < 5
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey, c.c_name
+),
+NationSupplier AS (
+    SELECT n.n_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN SupplyCostCTE ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_name
+)
+SELECT n.n_name, 
+       COALESCE(n.total_cost, 0) AS total_supply_cost,
+       COALESCE(c.total_spent, 0) AS total_customer_spending,
+       (COALESCE(n.total_cost, 0) - COALESCE(c.total_spent, 0)) AS cost_spending_diff
+FROM NationSupplier n
+FULL OUTER JOIN CustomerOrders c ON n.n_name = c.c_custkey
+WHERE (n.total_cost IS NOT NULL OR c.total_spent IS NOT NULL)
+  AND (n.total_cost > 10000 OR c.total_spent < 5000)
+ORDER BY 1, 4 DESC;

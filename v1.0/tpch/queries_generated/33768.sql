@@ -1,0 +1,51 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sp.s_acctbal, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN supplier sp ON sp.s_nationkey = sh.s_nationkey
+    WHERE sp.s_acctbal < sh.s_acctbal
+),
+part_stats AS (
+    SELECT p.p_partkey, p.p_name, 
+           SUM(COALESCE(ps.ps_availqty, 0)) AS total_availqty, 
+           AVG(COALESCE(ps.ps_supplycost, 0)) AS avg_supplycost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+ranked_customers AS (
+    SELECT c.*, 
+           RANK() OVER (ORDER BY c.total_spent DESC) AS rank
+    FROM customer_orders c
+)
+SELECT r.r_name, 
+       ph.p_name,
+       SUM(l.l_quantity) AS total_quantity,
+       AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_after_discount,
+       CASE 
+           WHEN SUM(l.l_tax) IS NULL THEN 'No Tax'
+           ELSE 'Tax Applied'
+       END AS tax_status,
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+JOIN part_stats ph ON l.l_partkey = ph.p_partkey
+LEFT JOIN ranked_customers rc ON s.s_nationkey = rc.c_nationkey
+WHERE r.r_name LIKE '%East%'
+  AND l.l_shipdate BETWEEN '2023-01-01' AND CURRENT_DATE
+GROUP BY r.r_name, ph.p_name
+HAVING AVG(l.l_discount) < 0.05
+ORDER BY total_quantity DESC, r.r_name;

@@ -1,0 +1,69 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as order_rank
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+),
+SupplierParts AS (
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        COUNT(*) AS supplier_count
+    FROM
+        partsupp ps
+    INNER JOIN
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY
+        ps.ps_partkey
+),
+PartDetails AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        COALESCE(sp.total_supply_cost, 0) AS total_supply_cost,
+        COALESCE(sp.supplier_count, 0) AS supplier_count
+    FROM
+        part p
+    LEFT JOIN
+        SupplierParts sp ON p.p_partkey = sp.ps_partkey
+)
+SELECT
+    o.o_orderkey,
+    pd.p_name,
+    pd.p_brand,
+    pd.p_retailprice,
+    ROUND(SUM(l.l_extendedprice - l.l_discount) OVER (PARTITION BY o.o_orderkey) / NULLIF(SUM(l.l_quantity), 0), 2) AS avg_price_per_quantity,
+    CASE 
+        WHEN o.o_orderstatus = 'O' THEN 'Open'
+        ELSE 'Closed'
+    END AS order_status,
+    COUNT(DISTINCT n.n_nationkey) AS distinct_nations
+FROM
+    RankedOrders o
+JOIN
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN
+    PartDetails pd ON l.l_partkey = pd.p_partkey
+JOIN
+    customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN
+    nation n ON c.c_nationkey = n.n_nationkey
+GROUP BY
+    o.o_orderkey,
+    pd.p_name,
+    pd.p_brand,
+    pd.p_retailprice,
+    o.o_orderstatus
+HAVING
+    AVG(pd.total_supply_cost) > 100 OR COUNT(n.n_nationkey) IS NULL
+ORDER BY
+    o.o_orderkey DESC,
+    pd.p_retialprice DESC;

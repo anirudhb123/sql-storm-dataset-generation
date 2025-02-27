@@ -1,0 +1,67 @@
+WITH regional_sales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        r.r_name
+), top_customers AS (
+    SELECT 
+        c.c_name,
+        SUM(o.o_totalprice) AS customer_spending
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+), ranked_sales AS (
+    SELECT 
+        region_name,
+        total_sales,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        regional_sales
+)
+SELECT 
+    r.region_name,
+    COALESCE(tc.c_name, 'No Purchases') AS top_customer,
+    r.total_sales
+FROM 
+    ranked_sales r
+LEFT JOIN 
+    top_customers tc ON r.region_name = (
+        SELECT 
+            n.r_name 
+        FROM 
+            nation n
+        JOIN 
+            supplier s ON n.n_nationkey = s.s_nationkey
+        WHERE 
+            s.s_suppkey IN (
+                SELECT ps.s_suppkey 
+                FROM partsupp ps 
+                JOIN part p ON ps.ps_partkey = p.p_partkey 
+                WHERE p.p_brand = 'BrandX'
+            )
+        LIMIT 1
+    )
+WHERE 
+    r.sales_rank <= 10;

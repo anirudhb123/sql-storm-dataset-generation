@@ -1,0 +1,85 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        AVG(sr_return_quantity) AS avg_return_quantity
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+HighReturnProducts AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+    HAVING 
+        SUM(sr_return_quantity) > (SELECT AVG(sr_return_quantity) FROM store_returns)
+),
+DetailedSales AS (
+    SELECT
+        ws.ws_customer_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+    GROUP BY 
+        ws.ws_customer_sk
+),
+ReturnToSalesRatio AS (
+    SELECT 
+        dr.ws_customer_sk,
+        (COALESCE(CAST(cr.return_count AS FLOAT) / NULLIF(ds.order_count, 0), 0)) AS return_ratio,
+        ds.total_sales,
+        ds.total_discount
+    FROM 
+        DetailedSales ds
+    LEFT JOIN 
+        CustomerReturns cr ON ds.ws_customer_sk = cr.sr_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        rtr.ws_customer_sk,
+        rtr.return_ratio,
+        rtr.total_sales,
+        rtr.total_discount,
+        CASE 
+            WHEN rtr.return_ratio = 0 THEN 'No Returns'
+            WHEN rtr.return_ratio < 0.1 THEN 'Low Return Rate'
+            WHEN rtr.return_ratio < 0.25 THEN 'Medium Return Rate'
+            ELSE 'High Return Rate'
+        END AS return_category,
+        hp.total_returned AS high_returned_count
+    FROM 
+        ReturnToSalesRatio rtr
+    LEFT JOIN 
+        HighReturnProducts hp ON hp.sr_item_sk IN (
+            SELECT 
+                ws_item_sk 
+            FROM 
+                web_sales 
+            WHERE 
+                ws_customer_sk = rtr.ws_customer_sk
+        )
+)
+SELECT 
+    f.ws_customer_sk,
+    f.return_ratio,
+    f.total_sales,
+    f.total_discount,
+    f.return_category,
+    COALESCE(f.high_returned_count, 0) AS high_returned_count
+FROM 
+    FinalReport f
+ORDER BY 
+    f.return_ratio DESC, 
+    f.total_sales DESC
+LIMIT 50;

@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, 1 AS level 
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+),
+RankedParts AS (
+    SELECT p.p_partkey, p.p_name, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rnk,
+           SUM(ps.ps_availqty) OVER (PARTITION BY p.p_partkey) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, 
+           COUNT(o.o_orderkey) AS num_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+FilteredSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, 
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    rh.level,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(c.num_orders, 0) AS customer_orders,
+    COALESCE(s.avg_supplycost, 0) AS avg_supply_cost,
+    CASE 
+        WHEN p.p_retailprice > 100 THEN 'Expensive'
+        ELSE 'Affordable'
+    END AS price_category
+FROM RankedParts p
+LEFT JOIN CustomerOrders c ON p.p_partkey = c.c_custkey
+LEFT JOIN FilteredSuppliers s ON p.p_partkey = s.s_suppkey
+JOIN SupplierHierarchy rh ON s.s_suppkey = rh.s_suppkey
+WHERE p.total_available > 50
+  AND p.rnk <= 5
+ORDER BY rh.level, p.p_retailprice DESC;

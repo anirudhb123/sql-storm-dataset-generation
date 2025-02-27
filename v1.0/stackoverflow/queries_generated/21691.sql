@@ -1,0 +1,112 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        pt.Name AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY pt.Id ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(p.Tags, '>')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+    GROUP BY 
+        Tag
+),
+UsersWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        MIN(ph.CreationDate) AS FirstChangeDate,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 10, 11) 
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+FinalAnalytics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        pt.Name AS PostType,
+        u.UserId,
+        ub.BadgeCount,
+        pha.ChangeCount,
+        pe.TotalComments,
+        pe.TotalUpvotes,
+        pe.TotalDownvotes,
+        ptg.Tag,
+        ptg.TagCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UsersWithBadges ub ON rp.PostId = ub.UserId
+    LEFT JOIN 
+        PostHistoryAnalysis pha ON rp.PostId = pha.PostId
+    LEFT JOIN 
+        PostEngagement pe ON rp.PostId = pe.PostId
+    LEFT JOIN 
+        PopularTags ptg ON ptg.Tag IN (SELECT UNNEST(string_to_array(rp.Tags, '>')))
+    WHERE 
+        rp.Rank <= 5
+)
+SELECT 
+    fa.*,
+    CASE 
+        WHEN fa.BadgeCount IS NULL THEN 'No Badges'
+        ELSE CONCAT(fa.BadgeCount, ' Badges')
+    END AS BadgeInfo,
+    CASE 
+        WHEN fa.TotalComments > 10 THEN 'Highly Engaged'
+        ELSE 'Moderately Engaged'
+    END AS EngagementLevel
+FROM 
+    FinalAnalytics fa
+WHERE 
+    (fa.TotalUpvotes - fa.TotalDownvotes) > 0
+ORDER BY 
+    fa.ViewCount DESC, fa.Title;

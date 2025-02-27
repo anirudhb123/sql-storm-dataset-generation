@@ -1,0 +1,83 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        AVG(ws_quantity) AS avg_quantity_per_order
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_sold_date_sk
+),
+CustomerData AS (
+    SELECT 
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        cd_credit_rating,
+        SUM(COALESCE(ws_net_profit, 0)) AS customer_total_net_profit
+    FROM 
+        customer AS c 
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c_first_name, c_last_name, cd_gender, cd_marital_status, cd_credit_rating
+),
+WarehouseData AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(inv_quantity_on_hand) AS total_inventory,
+        COUNT(DISTINCT ws_item_sk) AS unique_items
+    FROM 
+        warehouse AS w
+    JOIN 
+        inventory AS inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    LEFT JOIN 
+        web_sales AS ws ON inv.inv_item_sk = ws.ws_item_sk
+    GROUP BY 
+        w.w_warehouse_id
+),
+FinalReport AS (
+    SELECT 
+        sd.ws_sold_date_sk,
+        sd.total_net_profit,
+        sd.total_orders,
+        sd.avg_quantity_per_order,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        wd.w_warehouse_id,
+        wd.total_inventory,
+        wd.unique_items
+    FROM 
+        SalesData AS sd
+    JOIN 
+        CustomerData AS cd ON TRUE -- Cross join for demonstration purposes
+    JOIN 
+        WarehouseData AS wd ON TRUE -- Cross join for demonstration purposes
+)
+SELECT 
+    fr.ws_sold_date_sk,
+    fr.total_net_profit,
+    fr.total_orders,
+    fr.avg_quantity_per_order,
+    fr.c_first_name,
+    fr.c_last_name,
+    fr.cd_gender,
+    fr.cd_marital_status,
+    fr.cd_credit_rating,
+    fr.w_warehouse_id,
+    fr.total_inventory,
+    fr.unique_items
+FROM 
+    FinalReport AS fr
+ORDER BY 
+    fr.ws_sold_date_sk DESC, fr.total_net_profit DESC;

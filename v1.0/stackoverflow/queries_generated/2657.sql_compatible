@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS DownvoteCount,
+        COALESCE(SUM(v.BountyAmount) OVER (PARTITION BY p.Id), 0) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.AnswerCount,
+        ur.UserId,
+        ur.Reputation,
+        ur.BadgeCount,
+        ur.GoldBadges,
+        ur.SilverBadges,
+        ur.BronzeBadges,
+        rp.UpvoteCount,
+        rp.DownvoteCount,
+        rp.TotalBounty
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON u.Id = rp.OwnerUserId
+    JOIN 
+        UserReputation ur ON ur.UserId = rp.OwnerUserId
+    WHERE 
+        rp.UserRank <= 5
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    AnswerCount,
+    Reputation,
+    BadgeCount,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    UpvoteCount,
+    DownvoteCount,
+    TotalBounty
+FROM 
+    FinalResults
+WHERE 
+    TotalBounty > 0
+ORDER BY 
+    Score DESC, CreationDate ASC
+LIMIT 100;

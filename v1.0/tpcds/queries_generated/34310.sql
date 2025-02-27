@@ -1,0 +1,74 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs.bill_customer_sk AS customer_sk,
+        SUM(cs.net_profit) AS total_profit,
+        1 AS level
+    FROM 
+        catalog_sales cs
+    GROUP BY 
+        cs.bill_customer_sk
+    UNION ALL
+    SELECT 
+        cs.bill_customer_sk,
+        sh.total_profit + SUM(cs.net_profit),
+        sh.level + 1
+    FROM 
+        catalog_sales cs
+    JOIN 
+        sales_hierarchy sh ON cs.bill_customer_sk = sh.customer_sk
+    GROUP BY 
+        cs.bill_customer_sk, sh.total_profit, sh.level
+), customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        d.d_year,
+        cd.cd_gender,
+        hd.hd_buy_potential,
+        COALESCE(ih.income_band, 'Unknown') AS income_band
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        (SELECT 
+            DISTINCT ib_income_band_sk AS income_band
+        FROM 
+            (SELECT 
+                hd_income_band_sk
+            FROM 
+                household_demographics
+            WHERE 
+                hd_buy_potential LIKE 'Very High%') AS hd_incomes
+        ) ih ON hd.hd_income_band_sk = ih.income_band 
+    JOIN 
+        date_dim d ON d.d_year = 2023
+), sales_summary AS (
+    SELECT 
+        sh.customer_sk,
+        SUM(sh.total_profit) AS total_profit,
+        COUNT(DISTINCT sh.customer_sk) AS num_customers
+    FROM 
+        sales_hierarchy sh
+    GROUP BY 
+        sh.customer_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.income_band,
+    ss.total_profit,
+    ROW_NUMBER() OVER (PARTITION BY ci.income_band ORDER BY ss.total_profit DESC) AS profit_rank
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_summary ss ON ci.c_customer_sk = ss.customer_sk
+WHERE 
+    ci.cd_gender IS NOT NULL
+ORDER BY 
+    ci.income_band, profit_rank;

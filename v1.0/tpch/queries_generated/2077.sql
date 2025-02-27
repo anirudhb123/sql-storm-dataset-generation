@@ -1,0 +1,69 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.order_rank <= 5
+),
+SupplierInformation AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+QualifiedSuppliers AS (
+    SELECT 
+        si.s_suppkey,
+        si.s_name
+    FROM 
+        SupplierInformation si
+    WHERE 
+        si.total_available > 1000 AND si.avg_supply_cost < 50.00
+)
+SELECT 
+    c.c_name,
+    coalesce(TO_CHAR(SUM(lo.l_extendedprice * (1 - lo.l_discount)), '999,999,999.99'), '0.00') AS total_spent,
+    CASE WHEN COUNT(DISTINCT o.o_orderkey) > 0 THEN 'Yes' ELSE 'No' END AS has_orders,
+    rs.r_name
+FROM 
+    customer c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem lo ON o.o_orderkey = lo.l_orderkey
+LEFT JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    region rs ON n.n_regionkey = rs.r_regionkey
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM TopOrders to
+        JOIN lineitem l ON to.o_orderkey = l.l_orderkey
+        WHERE l.l_discount > 0.05
+    )
+GROUP BY 
+    c.c_name, rs.r_name
+HAVING 
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) > 10000
+ORDER BY 
+    total_spent DESC;

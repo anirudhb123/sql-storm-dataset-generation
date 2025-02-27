@@ -1,0 +1,69 @@
+WITH RECURSIVE price_history AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) as rn
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_supplycost IS NOT NULL
+),
+aggregated_orders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(DISTINCT l.l_linenumber) AS item_count,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') 
+    GROUP BY 
+        o.o_orderkey
+),
+customer_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_name AS region_name,
+    ns.n_name AS nation_name,
+    cs.c_name,
+    cs.order_count,
+    cs.total_spent,
+    cs.avg_order_value,
+    ph.p_name,
+    ph.ps_supplycost,
+    RANK() OVER (PARTITION BY ns.n_nationkey ORDER BY cs.total_spent DESC) AS rank_within_nation
+FROM 
+    region r
+JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+JOIN 
+    customer_summary cs ON ns.n_nationkey = cs.c_nationkey
+LEFT JOIN 
+    price_history ph ON ph.p_partkey = (SELECT ps.ps_partkey 
+                                         FROM partsupp ps 
+                                         WHERE ps.ps_supplycost = (SELECT MIN(ps_supplycost) 
+                                                                   FROM partsupp 
+                                                                   WHERE ps_partkey = ph.p_partkey))
+WHERE 
+    cs.last_order_date >= '2023-01-01' OR cs.last_order_date IS NULL
+ORDER BY 
+    region_name, nation_name, rank_within_nation;

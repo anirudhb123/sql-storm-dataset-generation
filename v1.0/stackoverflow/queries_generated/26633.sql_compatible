@@ -1,0 +1,69 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        COUNT(DISTINCT A.Id) AS AnswerCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1  
+    LEFT JOIN 
+        Posts A ON A.ParentId = P.Id  
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id AND V.VoteTypeId = 8  
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        QuestionCount, 
+        AnswerCount, 
+        TotalBounties,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserReputation
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.TotalBounties,
+    TCT.TagName AS MostUsedTag,
+    COALESCE(PH.LastEditDate, 'Never Edited') AS LastActivity
+FROM 
+    TopUsers U
+LEFT JOIN 
+    (SELECT 
+         P.OwnerUserId,
+         T.TagName,
+         COUNT(*) AS TagUsageCount,
+         RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY COUNT(*) DESC) AS TagRank
+     FROM 
+         Posts P
+     JOIN 
+         (SELECT UNNEST(string_to_array(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '><')) AS TagName) AS T
+     GROUP BY 
+         P.OwnerUserId, T.TagName) TCT ON U.UserId = TCT.OwnerUserId AND TCT.TagRank = 1
+LEFT JOIN 
+    (SELECT UserId, MAX(LastEditDate) AS LastEditDate
+     FROM 
+         Posts
+     WHERE 
+         LastEditDate IS NOT NULL
+     GROUP BY 
+         UserId) PH ON U.UserId = PH.UserId
+WHERE 
+    U.Reputation > 5000  
+ORDER BY 
+    U.Reputation DESC
+LIMIT 10;

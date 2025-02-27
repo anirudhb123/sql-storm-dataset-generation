@@ -1,0 +1,81 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_regionkey = 1  -- let's assume we're starting with region key 1
+
+    UNION ALL
+
+    SELECT n.n_regionkey, r.r_name, h.level + 1
+    FROM RegionHierarchy h
+    JOIN nation n ON n.n_regionkey = h.r_regionkey
+    JOIN region r ON r.r_regionkey = n.n_regionkey
+),
+OrderStats AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    JOIN orders o ON o.o_custkey = c.c_custkey
+    GROUP BY c.c_custkey
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        ss.total_supply_cost,
+        DENSE_RANK() OVER (ORDER BY ss.total_supply_cost DESC) AS supplier_rank
+    FROM supplier s
+    JOIN SupplierStats ss ON ss.ps_suppkey = s.s_suppkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'
+)
+SELECT 
+    rh.r_name AS region,
+    COALESCE(os.total_spent, 0) AS total_spent_last_year,
+    COUNT(DISTINCT fo.o_orderkey) AS total_orders_placed,
+    COUNT(DISTINCT rs.s_suppkey) AS high_spending_suppliers,
+    SUM(fo.o_totalprice) AS total_order_value
+FROM RegionHierarchy rh
+LEFT JOIN OrderStats os ON os.c_custkey IN (
+    SELECT c.c_custkey 
+    FROM customer c 
+    WHERE c.c_nationkey = rh.r_regionkey
+)
+LEFT JOIN FilteredOrders fo ON fo.o_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE c.c_nationkey IN (
+        SELECT n.n_nationkey 
+        FROM nation n 
+        WHERE n.n_regionkey = rh.r_regionkey
+    )
+)
+LEFT JOIN RankedSuppliers rs ON rs.s_suppkey = (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_availqty > 100
+    ORDER BY ps.ps_supplycost 
+    LIMIT 1
+)
+WHERE rh.level < 2
+GROUP BY rh.r_name, os.total_spent
+ORDER BY total_order_value DESC;

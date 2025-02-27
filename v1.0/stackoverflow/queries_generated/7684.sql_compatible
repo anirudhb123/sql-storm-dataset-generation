@@ -1,0 +1,42 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.UpVotes > p.DownVotes THEN 1 ELSE 0 END) AS PositiveVotes,
+        SUM(CASE WHEN p.DownVotes > p.UpVotes THEN 1 ELSE 0 END) AS NegativeVotes,
+        AVG(p.Score) AS AvgScore,
+        MAX(b.Date) AS LastBadgeDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE u.Reputation > 100
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+), RankedUsers AS (
+    SELECT 
+        us.*,
+        RANK() OVER (ORDER BY us.Reputation DESC) AS ReputationRank,
+        ROW_NUMBER() OVER (PARTITION BY us.QuestionCount ORDER BY us.AvgScore DESC) AS AvgScoreRank
+    FROM UserStats us
+)
+SELECT 
+    ru.UserId,
+    ru.DisplayName,
+    ru.Reputation,
+    ru.PostCount,
+    ru.QuestionCount,
+    ru.AnswerCount,
+    ru.PositiveVotes,
+    ru.NegativeVotes,
+    ru.AvgScore,
+    ru.ReputationRank,
+    ru.AvgScoreRank,
+    ru.LastBadgeDate
+FROM RankedUsers ru
+WHERE ru.ReputationRank <= 10 
+AND ru.AvgScoreRank <= 5
+ORDER BY ru.Reputation DESC, ru.AvgScore DESC;

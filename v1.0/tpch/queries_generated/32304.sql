@@ -1,0 +1,64 @@
+WITH RECURSIVE TotalSales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey
+    UNION ALL
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) + ts.total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        TotalSales ts ON c.c_custkey = ts.c_custkey
+    WHERE 
+        ts.total_sales IS NOT NULL
+),
+RankedSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        ts.total_sales,
+        RANK() OVER (ORDER BY ts.total_sales DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        TotalSales ts ON c.c_custkey = ts.c_custkey
+),
+TopCustomers AS (
+    SELECT 
+        r.n_name AS region_name,
+        rs.c_name,
+        rs.total_sales
+    FROM 
+        RankedSales rs
+    JOIN 
+        supplier s ON rs.c_custkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.sales_rank <= 10
+)
+SELECT 
+    tc.region_name,
+    COUNT(tc.c_name) AS customer_count,
+    AVG(tc.total_sales) AS avg_sales
+FROM 
+    TopCustomers tc
+GROUP BY 
+    tc.region_name
+ORDER BY 
+    customer_count DESC, avg_sales DESC;

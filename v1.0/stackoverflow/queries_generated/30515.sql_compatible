@@ -1,0 +1,79 @@
+
+WITH RECURSIVE UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COALESCE(v.VoteCount, 0) AS VoteCount,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) AS PopularityRank
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            ParentId, 
+            COUNT(*) AS AnswerCount 
+        FROM Posts 
+        WHERE PostTypeId = 2 
+        GROUP BY ParentId
+    ) a ON p.Id = a.ParentId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount 
+        FROM Votes 
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        ph.UserDisplayName AS ClosedBy
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10  
+),
+PopularTags AS (
+    SELECT 
+        SUBSTRING(tags.TagName, 1, 10) AS ShortTag,
+        COUNT(*) AS TagUsage
+    FROM Tags tags
+    JOIN Posts p ON tags.Id IN (SELECT UNNEST(string_to_array(p.Tags, '>'))::integer)
+    GROUP BY ShortTag
+    ORDER BY TagUsage DESC
+    LIMIT 10
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    ubc.BadgeCount,
+    ps.PostId,
+    ps.Title AS PostTitle,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.VoteCount,
+    ps.PopularityRank,
+    cp.ClosedPostId,
+    cp.ClosedBy,
+    cp.ClosedDate,
+    pt.ShortTag,
+    pt.TagUsage
+FROM Users u
+JOIN UserBadgeCounts ubc ON u.Id = ubc.UserId
+JOIN PostStats ps ON u.Id IN (SELECT OwnerUserId FROM Posts WHERE OwnerUserId IS NOT NULL)
+LEFT JOIN ClosedPosts cp ON ps.PostId = cp.ClosedPostId
+LEFT JOIN PopularTags pt ON ps.ViewCount > 1000
+WHERE u.Location IS NOT NULL
+  AND u.Reputation > 1000
+  AND ubc.BadgeCount > 0
+ORDER BY u.Reputation DESC, ps.ViewCount DESC;

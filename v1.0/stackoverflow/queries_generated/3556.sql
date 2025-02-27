@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score > 0
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.OwnerDisplayName,
+        COALESCE(cp.LastClosedDate, 'No Closure') AS LastClosedDate,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.Rank <= 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.OwnerDisplayName,
+    tp.LastClosedDate,
+    CASE 
+        WHEN tp.CommentCount IS NULL THEN 'No Comments'
+        ELSE CONVERT(VARCHAR, tp.CommentCount)
+    END AS CommentStatus
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.PostId ASC
+UNION ALL
+SELECT 
+    NULL AS PostId,
+    'Total Posts Processed' AS Title,
+    COUNT(*) AS Score,
+    NULL AS OwnerDisplayName,
+    NULL AS LastClosedDate,
+    NULL AS CommentStatus
+FROM 
+    Posts
+WHERE 
+    CreationDate >= NOW() - INTERVAL '1 year';

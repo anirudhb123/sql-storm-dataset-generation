@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS TagArray
+    ON 
+        TRUE
+    LEFT JOIN 
+        Tags t
+    ON 
+        t.TagName = TagArray
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title, p.ViewCount, p.Score, p.CreationDate
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViewCount,
+        SUM(CASE WHEN p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' THEN 1 ELSE 0 END) AS RecentPostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p
+    ON 
+        u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+EnhancedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        p.Title,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text,
+        RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RevisionRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p
+    ON 
+        ph.PostId = p.Id
+)
+SELECT 
+    ru.DisplayName AS UserName,
+    ep.Title AS PostTitle,
+    ep.Comment AS EditComment,
+    ep.Text AS NewText,
+    rp.TagsList,
+    au.PostCount,
+    au.TotalScore,
+    au.AvgViewCount,
+    au.RecentPostCount
+FROM 
+    EnhancedPostHistory ep
+JOIN 
+    RankedPosts rp ON ep.PostId = rp.PostId
+JOIN 
+    ActiveUsers au ON rp.PostRank = 1 AND rp.PostId IN (
+        SELECT PostId FROM Posts WHERE OwnerUserId = au.UserId
+    )
+JOIN 
+    Users ru ON ep.UserId = ru.Id
+WHERE 
+    ep.RevisionRank = 1
+ORDER BY 
+    au.TotalScore DESC, au.PostCount DESC, rp.ViewCount DESC
+LIMIT 50;

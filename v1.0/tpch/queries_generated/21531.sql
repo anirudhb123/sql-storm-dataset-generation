@@ -1,0 +1,88 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_size < 10 THEN 'Small'
+            WHEN p.p_size BETWEEN 10 AND 20 THEN 'Medium'
+            ELSE 'Large'
+        END AS size_category
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (
+            SELECT AVG(p2.p_retailprice) 
+            FROM part p2 
+            WHERE p2.p_size IS NOT NULL
+        )
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(DAY, -30, CURRENT_DATE)
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        CASE 
+            WHEN SUM(l.l_quantity) > 100 THEN 'High Volume'
+            ELSE 'Low Volume'
+        END AS volume_category
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+SupplierLineItems AS (
+    SELECT 
+        l.l_partkey,
+        l.l_suppkey,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM 
+        lineitem l
+    JOIN 
+        RankedSuppliers rs ON l.l_suppkey = rs.s_suppkey
+    WHERE 
+        rs.rn <= 5
+    GROUP BY 
+        l.l_partkey, l.l_suppkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    SUM(pli.order_count) AS supplier_order_count,
+    COALESCE(lis.total_sales, 0) AS total_sales,
+    RANK() OVER (ORDER BY SUM(pli.order_count) DESC) AS supplier_rank,
+    size_category
+FROM 
+    FilteredParts p
+LEFT JOIN 
+    SupplierLineItems pli ON p.p_partkey = pli.l_partkey
+LEFT JOIN 
+    LineItemSummary lis ON pli.l_partkey = lis.l_orderkey
+GROUP BY 
+    p.p_partkey, p.p_name, size_category
+HAVING 
+    SUM(COALESCE(pli.order_count, 0)) > 0 OR COUNT(DISTINCT lis.l_orderkey) > 0
+ORDER BY 
+    supplier_rank, p.p_name;

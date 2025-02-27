@@ -1,0 +1,57 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDates AS (
+    SELECT 
+        o.o_orderkey,
+        EXTRACT(YEAR FROM o.o_orderdate) AS order_year,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_avail_qty,
+        ss.avg_supply_cost,
+        ss.part_count
+    FROM 
+        SupplierStats ss
+    WHERE 
+        ss.total_avail_qty > (SELECT AVG(total_avail_qty) FROM SupplierStats) 
+        AND ss.part_count IS NOT NULL
+)
+SELECT 
+    d.order_year,
+    COUNT(DISTINCT d.o_orderkey) AS total_orders,
+    SUM(d.o_totalprice) AS total_revenue,
+    COALESCE(ROUND(AVG(st.avg_supply_cost), 2), 0) AS avg_supply_cost_per_order,
+    STRING_AGG(CONCAT('Supplier: ', ts.s_name, ', Parts: ', ts.part_count), '; ') AS supplier_details
+FROM 
+    OrderDates d
+LEFT JOIN 
+    TopSuppliers ts ON EXISTS (SELECT 1 FROM lineitem l WHERE l.l_orderkey = d.o_orderkey AND l.l_returnflag = 'N')
+GROUP BY 
+    d.order_year
+HAVING 
+    total_orders > 10
+ORDER BY 
+    d.order_year DESC
+LIMIT 5;

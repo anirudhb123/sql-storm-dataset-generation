@@ -1,0 +1,58 @@
+
+WITH RankedReturns AS (
+    SELECT
+        sr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        SUM(sr_refunded_cash) AS total_refunded_cash,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_amt_inc_tax) DESC) AS rn
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+ItemSales AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold_quantity,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+ReturnAnalysis AS (
+    SELECT
+        ir.*,
+        is.total_sold_quantity,
+        is.total_net_profit,
+        CASE 
+            WHEN is.total_sold_quantity IS NULL THEN 'No Sales'
+            WHEN ir.total_returned_quantity IS NULL THEN 'No Returns'
+            ELSE CAST(ir.total_returned_quantity AS DECIMAL) / NULLIF(is.total_sold_quantity, 0) * 100
+        END AS return_percentage,
+        COALESCE(is.total_net_profit, 0) - COALESCE(ir.total_return_amount, 0) AS net_profit_after_returns
+    FROM RankedReturns ir
+    LEFT JOIN ItemSales is ON ir.sr_item_sk = is.ws_item_sk
+)
+SELECT 
+    ia.sr_item_sk,
+    ia.total_returns,
+    ia.total_returned_quantity,
+    ia.total_return_amount,
+    ia.total_refunded_cash,
+    ia.return_percentage,
+    ia.net_profit_after_returns,
+    CASE 
+        WHEN ia.return_percentage > 50 THEN 'High Return Rate'
+        WHEN ia.return_percentage IS NULL THEN 'No Data'
+        ELSE 'Normal Return Rate'
+    END AS return_rate_category
+FROM ReturnAnalysis ia
+WHERE 
+    ia.return_percentage IS NOT NULL AND
+    ia.return_percentage > 0 AND
+    EXISTS (SELECT 1 
+            FROM item i 
+            WHERE i.i_item_sk = ia.sr_item_sk AND 
+                  i.i_current_price > 20.00 AND 
+                  i.i_category = 'Clothing')
+ORDER BY ia.return_percentage DESC
+LIMIT 100;

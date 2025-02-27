@@ -1,0 +1,82 @@
+WITH RECURSIVE PostHierarchy AS (
+    -- CTE to gather all posts and their direct answers
+    SELECT 
+        P.Id AS PostId, 
+        P.ParentId,
+        P.OwnerUserId,
+        1 AS Level
+    FROM Posts P
+    WHERE P.PostTypeId = 1  -- Questions only
+    UNION ALL
+    SELECT 
+        A.Id AS PostId, 
+        A.ParentId,
+        A.OwnerUserId,
+        H.Level + 1
+    FROM Posts A
+    INNER JOIN PostHierarchy H ON A.ParentId = H.PostId 
+),
+UserBadges AS (
+    -- CTE to aggregate badges earned by users
+    SELECT 
+        U.Id AS UserId,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostVotes AS (
+    -- CTE to calculate total votes and their types
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+),
+PostStats AS (
+    -- CTE to compile stats of posts along with user badges and votes
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        U.DisplayName,
+        B.GoldBadges,
+        B.SilverBadges,
+        B.BronzeBadges,
+        V.UpVotes,
+        V.DownVotes,
+        COALESCE(PH.Level, 0) AS AnswerLevel
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN UserBadges B ON U.Id = B.UserId
+    LEFT JOIN PostVotes V ON P.Id = V.PostId
+    LEFT JOIN PostHierarchy PH ON P.Id = PH.PostId
+)
+-- Final selection with complex conditions and ranking
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.DisplayName,
+    PS.GoldBadges,
+    PS.SilverBadges,
+    PS.BronzeBadges,
+    PS.UpVotes,
+    PS.DownVotes,
+    RANK() OVER (PARTITION BY PS.OwnerUserId ORDER BY PS.CreationDate DESC) AS RankByUser,
+    CASE 
+        WHEN PS.UpVotes > PS.DownVotes THEN 'Positive'
+        WHEN PS.UpVotes < PS.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+FROM PostStats PS
+LEFT JOIN Tags T ON POSITION(T.TagName IN PS.Title) > 0
+GROUP BY PS.PostId, PS.Title, PS.CreationDate, PS.DisplayName, PS.GoldBadges, PS.SilverBadges, PS.BronzeBadges, PS.UpVotes, PS.DownVotes
+HAVING COUNT(T.TagName) > 0
+ORDER BY PS.CreationDate DESC;

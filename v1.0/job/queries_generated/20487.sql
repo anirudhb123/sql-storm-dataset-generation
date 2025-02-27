@@ -1,0 +1,62 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, 
+           m.title, 
+           0 AS level
+    FROM aka_title m
+    WHERE m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT m.id AS movie_id,
+           m.title, 
+           mh.level + 1
+    FROM movie_hierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+    WHERE mh.level < 5
+),
+cast_details AS (
+    SELECT ca.movie_id,
+           a.name AS actor_name,
+           ct.kind AS role
+    FROM cast_info ca
+    JOIN aka_name a ON ca.person_id = a.person_id
+    JOIN comp_cast_type ct ON ca.person_role_id = ct.id
+),
+ranked_cast AS (
+    SELECT movie_id,
+           actor_name,
+           role,
+           ROW_NUMBER() OVER (PARTITION BY movie_id ORDER BY a.name) AS actor_rank
+    FROM cast_details a
+),
+keyword_summary AS (
+    SELECT m.id AS movie_id,
+           STRING_AGG(k.keyword, ', ') AS keyword_list
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY m.id
+)
+SELECT mh.movie_id,
+       mh.title,
+       COALESCE(SUM(CASE WHEN rc.actor_rank <= 3 THEN 1 ELSE 0 END), 0) AS top_actors_count,
+       COALESCE(ks.keyword_list, 'No keywords') AS keywords,
+       COUNT(DISTINCT ci.person_id) AS total_cast_count,
+       MAX(m.production_year) AS latest_production_year
+FROM movie_hierarchy mh
+LEFT JOIN ranked_cast rc ON mh.movie_id = rc.movie_id
+LEFT JOIN keyword_summary ks ON mh.movie_id = ks.movie_id
+LEFT JOIN cast_info ci ON mh.movie_id = ci.movie_id
+WHERE mh.level = 0
+GROUP BY mh.movie_id, mh.title, ks.keyword_list
+HAVING COUNT(DISTINCT ci.person_id) > 5
+ORDER BY latest_production_year DESC, top_actors_count DESC;
+
+### Explanation:
+1. **CTEs** are used to build a recursive query structure with `movie_hierarchy` to explore movies from the year 2000 and onwards.
+2. Another CTE, `cast_details`, fetches actor names and their roles, joined through relevant tables.
+3. `ranked_cast` applies a window function to rank actors within each movie.
+4. `keyword_summary` aggregates keywords for each movie, handling NULL scenarios with `COALESCE`.
+5. The final `SELECT` statement combines everything, counting top actors, keywords, and ensuring only movies with more than five cast members are retained through a `HAVING` clause.
+6. The results are ordered by the year of production and actor count, showcasing a complex combination of joins, aggregates, and window functions.

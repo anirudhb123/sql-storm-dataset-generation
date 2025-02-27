@@ -1,0 +1,61 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+),
+aggregate_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS total_orders,
+        AVG(ws_net_paid_inc_tax) AS avg_order_value
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+high_value_customers AS (
+    SELECT 
+        rc.c_customer_sk, 
+        rc.c_first_name, 
+        rc.c_last_name, 
+        as.total_profit, 
+        as.total_orders, 
+        as.avg_order_value
+    FROM ranked_customers rc
+    JOIN aggregate_sales as ON rc.c_customer_sk = as.ws_bill_customer_sk
+    WHERE rc.rank <= 5
+    AND as.total_profit > (SELECT AVG(total_profit) FROM aggregate_sales)
+),
+return_summary AS (
+    SELECT
+        wr.returning_customer_sk,
+        SUM(wr.return_amount) AS total_returned,
+        COUNT(wr.return_order_number) AS total_returns
+    FROM web_returns wr
+    GROUP BY wr.returning_customer_sk
+)
+SELECT 
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.total_profit,
+    hvc.total_orders,
+    hvc.avg_order_value,
+    COALESCE(rs.total_returned, 0) AS total_returned,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    CASE 
+        WHEN hvc.total_profit IS NULL THEN 'Unknown'
+        WHEN hvc.total_profit <= 1000 THEN 'Low'
+        WHEN hvc.total_profit BETWEEN 1001 AND 5000 THEN 'Medium'
+        ELSE 'High'
+    END AS customer_value_band
+FROM high_value_customers hvc
+LEFT JOIN return_summary rs ON hvc.c_customer_sk = rs.returning_customer_sk
+ORDER BY hvc.total_profit DESC, hvc.avg_order_value DESC
+LIMIT 10;

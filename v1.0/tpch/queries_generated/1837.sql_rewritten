@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_supplycost,
+        SUM(s.s_acctbal) AS total_supplier_balance
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_supplycost
+),
+PartSummary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        COALESCE(SUM(li.l_quantity), 0) AS total_quantity,
+        AVG(psc.total_supplier_balance) AS avg_supplier_balance
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem li ON p.p_partkey = li.l_partkey
+    LEFT JOIN 
+        SupplierCosts psc ON p.p_partkey = psc.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+),
+TopParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.total_quantity,
+        p.avg_supplier_balance,
+        RANK() OVER (ORDER BY p.total_quantity DESC) AS part_rank
+    FROM 
+        PartSummary p
+    WHERE 
+        p.total_quantity > 100
+)
+SELECT 
+    t.part_rank,
+    t.p_partkey,
+    t.p_name,
+    t.p_brand,
+    t.total_quantity,
+    t.avg_supplier_balance,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(o.o_totalprice) AS total_sales
+FROM 
+    TopParts t
+LEFT JOIN 
+    RankedOrders o ON t.part_rank <= 10 AND o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = t.p_partkey)
+GROUP BY 
+    t.part_rank, t.p_partkey, t.p_name, t.p_brand, t.total_quantity, t.avg_supplier_balance
+ORDER BY 
+    t.part_rank;

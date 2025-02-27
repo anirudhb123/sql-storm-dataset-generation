@@ -1,0 +1,48 @@
+WITH CustomerPurchases AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_spent,
+        COUNT(ws.ws_order_number) AS number_of_orders,
+        MAX(d.d_date) AS last_purchase_date
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_date >= DATE_SUB(cast('2002-10-01' as date), INTERVAL 1 YEAR)
+    GROUP BY 
+        c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cp.total_spent,
+        cp.number_of_orders,
+        cp.last_purchase_date
+    FROM 
+        CustomerPurchases cp
+    JOIN 
+        customer_demographics cd ON cp.c_customer_id = cd.cd_demo_sk
+    WHERE 
+        cp.total_spent > 1000 AND cd.cd_gender = 'M'
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    hvc.total_spent,
+    hvc.number_of_orders,
+    hvc.last_purchase_date,
+    a.ca_city, 
+    a.ca_state
+FROM 
+    HighValueCustomers hvc
+JOIN 
+    customer c ON c.c_customer_id = hvc.c_customer_id
+JOIN 
+    customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+ORDER BY 
+    hvc.total_spent DESC
+LIMIT 10;

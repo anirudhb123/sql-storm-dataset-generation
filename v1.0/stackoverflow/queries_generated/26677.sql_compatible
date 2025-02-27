@@ -1,0 +1,86 @@
+
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.TagName) AS TagCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS t(TagName) ON TRUE
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(ph.CreationDate, p.LastActivityDate) AS LastActivity,
+        COALESCE(SUM(c.Score), 0) AS CommentScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.LastActivityDate
+),
+FinalMetrics AS (
+    SELECT 
+        ua.UserId,
+        ua.TotalBadges,
+        ua.GoldBadges,
+        ua.SilverBadges,
+        ua.BronzeBadges,
+        ptc.TagCount,
+        pa.PostId,
+        pa.Title,
+        pa.CreationDate,
+        pa.Score AS PostScore,
+        pa.LastActivity,
+        pa.CommentScore
+    FROM 
+        UserReputation ua
+    JOIN 
+        PostTagCounts ptc ON ua.UserId = ptc.UserId  -- Fixed join condition
+    JOIN 
+        PostActivity pa ON ptc.PostId = pa.PostId
+    WHERE 
+        ua.TotalBadges > 0
+)
+
+SELECT 
+    UserId,
+    TotalBadges,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    TagCount,
+    PostId,
+    Title,
+    CreationDate,
+    PostScore,
+    LastActivity,
+    CommentScore
+FROM 
+    FinalMetrics
+ORDER BY 
+    UserId, TagCount DESC, PostScore DESC;

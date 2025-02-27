@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 month'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        CASE 
+            WHEN u.Views IS NULL THEN 'View count not available'
+            ELSE CAST(u.Views AS VARCHAR)
+        END AS ViewCountString
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation >= 1000
+),
+PostVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(CAST(ph.PostHistoryTypeId AS VARCHAR), ', ') AS HistoryTypeIds,
+        COUNT(DISTINCT ph.UserId) AS EditorCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    up.UserId,
+    up.Reputation,
+    COALESCE(rp.ViewCount, 0) AS PostViewCount,
+    COALESCE(pv.UpVotes, 0) AS UpVotes,
+    COALESCE(pv.DownVotes, 0) AS DownVotes,
+    p.Score AS PostScore,
+    CASE 
+        WHEN hp.HistoryTypeIds IS NOT NULL THEN
+            CONCAT('Edited by ', hp.EditorCount, ' unique editors. History Types: ', hp.HistoryTypeIds)
+        ELSE 
+            'No history available'
+    END AS PostEditHistory,
+    ROW_NUMBER() OVER (PARTITION BY up.UserId ORDER BY p.Score DESC) AS UserPostRank
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+LEFT JOIN 
+    PostVotes pv ON rp.PostId = pv.PostId
+LEFT JOIN 
+    PostHistorySummary hp ON rp.PostId = hp.PostId
+WHERE 
+    rp.PostRank <= 5
+ORDER BY 
+    up.Reputation DESC, 
+    rp.Score DESC;

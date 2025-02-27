@@ -1,0 +1,77 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rank_in_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT
+        title_id,
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_in_year <= 10  
+),
+ActorsWithRoles AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        ci.movie_id,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN 
+        role_type r ON ci.role_id = r.id 
+),
+MoviesWithActors AS (
+    SELECT 
+        tm.title_id,
+        tm.title,
+        tm.production_year,
+        a.name AS actor_name,
+        a.role,
+        COALESCE(a.role_rank, 0) AS role_rank
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        ActorsWithRoles a ON a.movie_id = tm.title_id
+),
+MoviesInfo AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COALESCE(SUM(mi.info IS NOT NULL), 0) AS info_count,
+        MAX(CASE WHEN it.info = 'box office' THEN mi.info END) AS box_office_info
+    FROM 
+        MoviesWithActors m
+    LEFT JOIN 
+        movie_info mi ON m.title_id = mi.movie_id
+    LEFT JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        m.title, m.production_year
+)
+
+SELECT 
+    m.title,
+    m.production_year,
+    'Highest Box Office Info: ' || COALESCE(m.box_office_info, 'Not Available') AS box_office_info,
+    m.info_count || ' (number of info entries)' AS additional_info
+FROM 
+    MoviesInfo m
+WHERE 
+    m.info_count > 0 OR 
+    m.box_office_info IS NOT NULL
+ORDER BY 
+    m.production_year DESC, 
+    m.title;

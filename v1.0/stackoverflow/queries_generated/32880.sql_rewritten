@@ -1,0 +1,114 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        P.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        PA.Id,
+        PA.Title,
+        PA.ParentId,
+        PA.OwnerUserId,
+        Level + 1 AS Level
+    FROM 
+        Posts PA
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON PA.ParentId = RPH.PostId
+),
+PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        COALESCE(PV.VotesCount, 0) AS VotesCount,
+        COALESCE(C.CommentCount, 0) AS CommentCount,
+        P.Score,
+        P.ViewCount,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Yes' 
+            ELSE 'No' 
+        END AS HasAcceptedAnswer,
+        COUNT(Ph.PostId) AS EditCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) as VotesCount 
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) PV ON P.Id = PV.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory Ph ON P.Id = Ph.PostId
+    WHERE 
+        P.PostTypeId IN (1, 2)  
+    GROUP BY 
+        P.Id, U.DisplayName, P.CreationDate, PV.VotesCount, C.CommentCount, P.Score, P.ViewCount
+),
+FinalResults AS (
+    SELECT 
+        PH.PostId,
+        PH.Title,
+        PH.OwnerDisplayName,
+        PH.CreationDate,
+        PH.VotesCount,
+        PH.CommentCount,
+        PH.Score,
+        PH.ViewCount,
+        PH.HasAcceptedAnswer,
+        R.Level,
+        ROW_NUMBER() OVER (PARTITION BY PH.OwnerDisplayName ORDER BY PH.CreationDate DESC) AS RowNum
+    FROM 
+        PostMetrics PH
+    INNER JOIN 
+        RecursivePostHierarchy R ON PH.PostId = R.PostId
+)
+
+SELECT 
+    FR.OwnerDisplayName,
+    COUNT(*) AS TotalPosts,
+    SUM(FR.VotesCount) AS TotalVotes,
+    SUM(FR.CommentCount) AS TotalComments,
+    SUM(FR.ViewCount) AS TotalViews,
+    (SELECT COUNT(*) FROM Badges B WHERE B.UserId = U.Id) AS TotalBadges,
+    (SELECT 
+        STRING_AGG(T.TagName, ', ') 
+     FROM 
+        Tags T 
+     JOIN 
+        STRING_SPLIT((SELECT Tags FROM Posts P WHERE P.Id = FR.PostId), ',') AS PostTags
+     ON 
+        T.TagName = PostTags.value
+     WHERE 
+        FR.PostId = P.Id) AS TagNames
+FROM 
+    FinalResults FR
+JOIN 
+    Users U ON FR.OwnerDisplayName = U.DisplayName
+WHERE 
+    FR.RowNum <= 5  
+GROUP BY 
+    FR.OwnerDisplayName
+ORDER BY 
+    TotalPosts DESC;

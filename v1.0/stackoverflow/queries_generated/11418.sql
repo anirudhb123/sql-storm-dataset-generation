@@ -1,0 +1,41 @@
+-- Performance Benchmark Query: Analyzing User Activity and Engagement
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(vs.UpVotes) AS TotalUpVotes,
+        SUM(vs.DownVotes) AS TotalDownVotes,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        (SELECT UserId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+                            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM Votes GROUP BY UserId) vs ON u.Id = vs.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalComments,
+    ua.TotalBadges,
+    ua.TotalUpVotes,
+    ua.TotalDownVotes,
+    ua.LastPostDate
+FROM 
+    UserActivity ua
+ORDER BY 
+    ua.TotalPosts DESC, ua.TotalUpVotes DESC
+LIMIT 100;

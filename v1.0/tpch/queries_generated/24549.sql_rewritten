@@ -1,0 +1,91 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01' 
+        AND o.o_orderdate < DATE '1996-01-01'
+    ),
+CustomerWithOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 0
+    ),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        RANK() OVER (ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+DistinctParts AS (
+    SELECT DISTINCT 
+        p.p_partkey, 
+        p.p_brand, 
+        p.p_retailprice
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(l.l_linenumber) AS line_items
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '1996-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    co.c_name, 
+    co.total_spent, 
+    ro.o_orderkey, 
+    ro.o_orderdate, 
+    ro.o_totalprice,
+    ps.s_name,
+    ps.s_acctbal,
+    ps.supplier_rank,
+    d.p_brand,
+    ds.net_revenue,
+    ds.line_items
+FROM 
+    CustomerWithOrders co 
+JOIN 
+    RankedOrders ro ON co.order_count > ro.rn
+LEFT JOIN 
+    SupplierDetails ps ON ps.s_suppkey IN (SELECT DISTINCT ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_retailprice > 20.00))
+LEFT JOIN 
+    DistinctParts d ON d.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = ro.o_orderkey)
+LEFT JOIN 
+    LineItemSummary ds ON ds.l_orderkey = ro.o_orderkey
+WHERE 
+    (co.total_spent IS NOT NULL AND co.total_spent > 500) 
+    OR (ro.o_orderdate IS NULL)
+ORDER BY 
+    co.total_spent DESC, 
+    ps.s_acctbal ASC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 -- Only considering questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, u.DisplayName
+),
+
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.Text
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Title, Body, Tags edited
+),
+
+PostSummary AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.AnswerCount,
+        rp.TagList,
+        COALESCE(re.CreationDate, 'No Edits'::timestamp) AS LastEditDate,
+        COALESCE(re.Comment, 'N/A') AS EditComment,
+        COALESCE(re.Text, 'N/A') AS EditText
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentEdits re ON rp.PostId = re.PostId
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Body,
+    ps.OwnerDisplayName,
+    ps.CommentCount,
+    ps.AnswerCount,
+    ps.TagList,
+    ps.LastEditDate,
+    ps.EditComment,
+    ps.EditText
+FROM 
+    PostSummary ps
+WHERE 
+    ps.CommentCount > 5
+ORDER BY 
+    ps.LastEditDate DESC;

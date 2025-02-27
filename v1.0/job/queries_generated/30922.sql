@@ -1,0 +1,50 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level
+    FROM
+        title m
+    WHERE
+        m.production_year >= 2000  -- Consider movies from the year 2000 onwards
+    
+    UNION ALL
+    
+    SELECT 
+        linked_movie.linked_movie_id AS movie_id,
+        l.title,
+        h.level + 1 AS level
+    FROM
+        movie_link linked_movie
+    JOIN title l ON linked_movie.linked_movie_id = l.id
+    JOIN MovieHierarchy h ON linked_movie.movie_id = h.movie_id
+)
+SELECT 
+    m.id AS movie_id,
+    m.title AS movie_title,
+    m.production_year,
+    c.name AS company_name,
+    COUNT(DISTINCT ci.person_id) AS cast_count,
+    ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+    SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS roles_count,
+    ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY c.name) AS company_rank
+FROM 
+    title m
+LEFT JOIN 
+    movie_companies mc ON m.id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+LEFT JOIN 
+    cast_info ci ON m.id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+WHERE 
+    m.production_year <= 2023 AND
+    (c.country_code IS NOT NULL OR ak.name IS NOT NULL)
+GROUP BY 
+    m.id, m.title, m.production_year, c.name
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 5
+ORDER BY 
+    m.production_year DESC, movie_title ASC
+LIMIT 50;

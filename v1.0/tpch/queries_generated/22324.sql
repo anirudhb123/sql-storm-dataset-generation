@@ -1,0 +1,73 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+SuppliersWithPartInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'No Account Balance'
+            ELSE FORMAT(s.s_acctbal, 2)
+        END AS account_balance,
+        ROW_NUMBER() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS supplier_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+    HAVING COUNT(ps.ps_partkey) > 5
+),
+OrderDetails AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(DISTINCT l.l_linenumber) AS items_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_item_price
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    COALESCE(t.s_name, 'Unknown Supplier') AS supplier_name,
+    o.items_count,
+    o.total_item_price,
+    CASE 
+        WHEN o.total_item_price > 100000 THEN 'High Value Order'
+        WHEN o.total_item_price BETWEEN 50000 AND 100000 THEN 'Medium Value Order'
+        ELSE 'Low Value Order'
+    END AS order_value_category,
+    CASE 
+        WHEN r.order_rank = 1 THEN 'Most Recent'
+        ELSE 'Older Order'
+    END AS order_recency
+FROM RankedOrders r
+LEFT JOIN SuppliersWithPartInfo s ON s.ps_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_supplycost < 50)
+LEFT JOIN TopSuppliers t ON t.s_suppkey = (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey = s.ps_partkey 
+    ORDER BY ps.ps_supplycost DESC 
+    LIMIT 1
+)
+JOIN OrderDetails o ON o.l_orderkey = r.o_orderkey
+WHERE r.o_orderdate >= DATE '2022-01-01'
+  AND r.o_orderdate < DATE '2022-12-31'
+  AND (r.o_totalprice > 10000 OR r.o_orderkey IS NULL)
+ORDER BY r.o_orderdate DESC, o.total_item_price DESC
+LIMIT 50;

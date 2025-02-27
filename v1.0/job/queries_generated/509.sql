@@ -1,0 +1,58 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY a.id) AS cast_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year BETWEEN 2000 AND 2020
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        co.name AS company_name,
+        co.country_code,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY co.name) AS company_rank
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+MovieInfoExt AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(mi.info, ', ') AS movie_info
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    cd.company_name,
+    cd.country_code,
+    cd.company_type,
+    mie.movie_info
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CompanyDetails cd ON rm.movie_id = cd.movie_id AND cd.company_rank = 1
+LEFT JOIN 
+    MovieInfoExt mie ON rm.movie_id = mie.movie_id
+WHERE 
+    rm.year_rank <= 5 
+    AND (rm.cast_count IS NULL OR rm.cast_count > 0)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.cast_count DESC;

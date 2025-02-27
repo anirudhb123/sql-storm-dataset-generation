@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+PopularUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(rp.Score, 0)) AS TotalScore,
+        COUNT(rp.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(rp.Id) > 5
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    pu.UserId,
+    pu.DisplayName,
+    pu.TotalScore,
+    pu.PostCount,
+    rp.Id AS PostId,
+    rp.Title,
+    rp.Score,
+    rp.CommentCount,
+    pha.EditCount,
+    pha.LastEditDate,
+    COALESCE(rp.Upvotes - rp.Downvotes, 0) AS NetVotes
+FROM 
+    PopularUsers pu
+JOIN 
+    RankedPosts rp ON pu.UserId = rp.OwnerUserId
+JOIN 
+    PostHistoryAggregates pha ON rp.Id = pha.PostId
+WHERE 
+    rp.PostRank = 1
+ORDER BY 
+    pu.TotalScore DESC, 
+    rp.Score DESC;

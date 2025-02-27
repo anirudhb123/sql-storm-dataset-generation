@@ -1,0 +1,75 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT
+        cs.bill_customer_sk AS customer_sk,
+        cs.wholesale_cost AS total_wholesale_cost,
+        cs.sales_price AS total_sales_price,
+        1 AS level
+    FROM
+        catalog_sales cs
+    WHERE
+        cs.sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    UNION ALL
+    SELECT
+        sr.customer_sk,
+        sr.wholesale_cost + sh.total_wholesale_cost,
+        sr.sales_price + sh.total_sales_price,
+        sh.level + 1
+    FROM
+        store_returns sr
+    JOIN
+        SalesHierarchy sh ON sr.customer_sk = sh.customer_sk
+    WHERE
+        sr.returned_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND sh.level < 3
+),
+CustomerStats AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(sh.total_sales_price), 0) AS total_sales,
+        COUNT(DISTINCT sh.customer_sk) AS return_count
+    FROM
+        customer c
+    LEFT JOIN
+        SalesHierarchy sh ON c.c_customer_sk = sh.customer_sk
+    GROUP BY
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name
+),
+RankedCustomers AS (
+    SELECT
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_sales,
+        cs.return_count,
+        NTILE(4) OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM
+        CustomerStats cs
+)
+SELECT
+    rc.c_customer_sk,
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.total_sales,
+    rc.return_count,
+    CASE
+        WHEN rc.return_count > 5 THEN 'High Return'
+        WHEN rc.return_count BETWEEN 3 AND 5 THEN 'Medium Return'
+        ELSE 'Low Return'
+    END AS return_category,
+    w.w_warehouse_name
+FROM
+    RankedCustomers rc
+JOIN
+    web_sales ws ON rc.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN
+    warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+WHERE
+    rc.sales_rank = 1
+    OR rc.return_category = 'High Return'
+ORDER BY
+    rc.total_sales DESC;

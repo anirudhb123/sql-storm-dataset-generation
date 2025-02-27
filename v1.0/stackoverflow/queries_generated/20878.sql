@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.ClosedDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    WHERE 
+        p.Score IS NOT NULL AND p.ViewCount > 0
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        COALESCE(b.Id, -1) AS BadgeId,
+        CASE 
+            WHEN rp.ClosedDate IS NULL THEN 'Open'
+            ELSE 'Closed'
+        END AS PostStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Badges b ON rp.PostId = b.UserId AND b.Class = 1
+    WHERE 
+        rp.OwnerPostRank <= 5 AND rp.PostStatus = 'Open'
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(CASE 
+                        WHEN pht.Name IS NOT NULL THEN pht.Name 
+                        ELSE 'Unknown' 
+                    END, ', ') AS HistoryTypes,
+        MIN(ph.CreationDate) AS FirstEditedDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 10, 11) -- Edit and close actions
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.AnswerCount,
+    fp.CommentCount,
+    fp.BadgeId,
+    COALESCE(p.AverageScore, 0) AS AverageScoreOfComments,
+    CASE 
+        WHEN p.HistoryTypes IS NOT NULL THEN 'Edited/Closed'
+        ELSE 'Never Edited'
+    END AS EditStatus
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistoryDetails p ON fp.PostId = p.PostId
+LEFT JOIN 
+    (SELECT 
+         PostId, 
+         AVG(Score) AS AverageScore 
+     FROM 
+         Comments 
+     GROUP BY 
+         PostId) AS CommentScores ON fp.PostId = CommentScores.PostId
+WHERE 
+    fp.ViewCount > (SELECT AVG(ViewCount) FROM Posts)
+ORDER BY 
+    fp.Score DESC, fp.ViewCount DESC;

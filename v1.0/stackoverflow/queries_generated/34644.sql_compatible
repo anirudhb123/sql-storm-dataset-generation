@@ -1,0 +1,86 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn <= 5 
+),
+PostVoteStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostTagStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.Id) AS TagCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL string_to_array(p.Tags, '>') AS tag ON true
+    LEFT JOIN 
+        Tags t ON t.TagName = tag
+    GROUP BY 
+        p.Id
+),
+FinalResults AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.Score,
+        tp.CreationDate,
+        tp.OwnerDisplayName,
+        COALESCE(pvs.UpVotes, 0) AS UpVotes,
+        COALESCE(pvs.DownVotes, 0) AS DownVotes,
+        COALESCE(pvs.TotalVotes, 0) AS TotalVotes,
+        COALESCE(ts.TagCount, 0) AS TagCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostVoteStatistics pvs ON tp.PostId = pvs.PostId
+    LEFT JOIN 
+        PostTagStatistics ts ON tp.PostId = ts.PostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN TotalVotes = 0 THEN 'No Votes'
+        ELSE ROUND((UpVotes * 1.0 / TotalVotes) * 100, 2) || '%' 
+    END AS VotePercentage,
+    CASE 
+        WHEN TagCount > 0 THEN 'Has Tags'
+        ELSE 'No Tags' 
+    END AS TagStatus
+FROM 
+    FinalResults
+ORDER BY 
+    Score DESC, CreationDate DESC;

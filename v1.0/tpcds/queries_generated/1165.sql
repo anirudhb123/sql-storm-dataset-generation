@@ -1,0 +1,59 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        i.i_brand,
+        i.i_category,
+        d.d_year,
+        d.d_month_seq
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year >= 2021
+),
+YearlySales AS (
+    SELECT 
+        d_year,
+        i_category,
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY d_year ORDER BY SUM(ws_sales_price * ws_quantity) DESC) AS rank
+    FROM 
+        SalesData
+    GROUP BY 
+        d_year, i_category
+),
+TopCategories AS (
+    SELECT 
+        d_year,
+        i_category
+    FROM 
+        YearlySales
+    WHERE 
+        rank <= 5
+)
+SELECT 
+    t.d_year,
+    t.i_category,
+    COALESCE(SD.total_sales, 0) AS total_sales,
+    COUNT(DISTINCT wd.ws_order_number) AS total_orders,
+    SUM(ws_quantity) AS total_units_sold
+FROM 
+    TopCategories t
+LEFT JOIN 
+    SalesData wd ON t.d_year = wd.d_year AND t.i_category = wd.i_category
+FULL OUTER JOIN 
+    (SELECT DISTINCT d_year, i_category FROM YearlySales) AS SD 
+    ON t.d_year = SD.d_year AND t.i_category = SD.i_category
+WHERE 
+    (sd.total_sales IS NULL OR wd.ws_item_sk IS NOT NULL)
+GROUP BY 
+    t.d_year, t.i_category
+ORDER BY 
+    t.d_year, total_sales DESC;

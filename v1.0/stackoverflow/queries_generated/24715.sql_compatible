@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM Posts p
+    WHERE p.PostTypeId IN (1, 2) 
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+    HAVING COUNT(DISTINCT p.Id) > 0 AND AVG(u.Reputation) > 1000
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title AS RankedTitle,
+        rp.Score AS RankedScore,
+        u.DisplayName AS OwnerDisplayName,
+        pt.Name AS PostTypeName,
+        COALESCE(h.Comment, 'No History') AS PostHistoryComment,
+        COALESCE(MAX(v.BountyAmount), 0) AS MaxBounty,
+        COUNT(c.Id) AS CommentCount
+    FROM RankedPosts rp
+    JOIN Users u ON rp.OwnerUserId = u.Id
+    JOIN PostTypes pt ON rp.PostTypeId = pt.Id
+    LEFT JOIN PostHistory h ON rp.PostId = h.PostId AND h.PostHistoryTypeId IN (10, 11) 
+    LEFT JOIN Votes v ON rp.PostId = v.PostId AND v.VoteTypeId IN (8, 9) 
+    LEFT JOIN Comments c ON rp.PostId = c.PostId
+    GROUP BY rp.PostId, rp.Title, rp.Score, u.DisplayName, pt.Name
+),
+FinalReport AS (
+    SELECT 
+        pd.PostId,
+        pd.RankedTitle,
+        pd.RankedScore,
+        pd.OwnerDisplayName,
+        pd.PostTypeName,
+        pd.PostHistoryComment,
+        pd.MaxBounty,
+        pd.CommentCount,
+        tu.Reputation AS UserReputation
+    FROM PostDetails pd
+    JOIN TopUsers tu ON pd.OwnerDisplayName = tu.DisplayName
+)
+SELECT 
+    FR.*,
+    CASE 
+        WHEN FR.RankedScore IS NULL THEN 'No Score Available'
+        WHEN FR.RankedScore > 100 THEN 'High Score'
+        WHEN FR.RankedScore BETWEEN 51 AND 100 THEN 'Moderate Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    CONCAT('Post ID: ', FR.PostId, ' | Title: ', FR.RankedTitle) AS PostInfo,
+    CASE 
+        WHEN FR.MaxBounty > 0 THEN 'Bounty available'
+        ELSE 'No Bounty Available'
+    END AS BountyStatus
+FROM FinalReport FR
+ORDER BY FR.RankedScore DESC NULLS LAST, FR.CommentCount DESC;

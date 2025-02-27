@@ -1,0 +1,78 @@
+WITH UserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        COALESCE(WebsiteUrl, 'No URL') AS Website,
+        CASE 
+            WHEN Reputation > 1000 THEN 'High Reputation'
+            WHEN Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+            ELSE 'Low Reputation'
+        END AS ReputationCategory
+    FROM Users
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS TotalComments,
+        COUNT(DISTINCT V.Id) AS TotalVotes,
+        P.CreationDate, 
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.PostTypeId IN (1, 2)  -- Limit to Questions and Answers
+    GROUP BY P.Id, P.Title, P.Score, P.ViewCount, P.CreationDate
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS HistoryCount,
+        STRING_AGG(PHT.Name, ', ') AS HistoryTypes,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM PostHistory PH
+    JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    GROUP BY PH.PostId
+),
+PostLinkDetails AS (
+    SELECT 
+        PL.PostId,
+        COUNT(*) AS TotalLinks,
+        SUM(CASE WHEN L.Name = 'Duplicate' THEN 1 ELSE 0 END) AS DuplicateLinks
+    FROM PostLinks PL
+    JOIN LinkTypes L ON PL.LinkTypeId = L.Id
+    GROUP BY PL.PostId
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.Website,
+    PS.PostId,
+    PS.Title,
+    PS.Score,
+    PS.ViewCount,
+    PS.TotalComments,
+    PS.TotalVotes,
+    PHD.HistoryCount,
+    PHD.HistoryTypes,
+    PLD.TotalLinks,
+    PLD.DuplicateLinks,
+    CASE 
+        WHEN PS.UserPostRank = 1 THEN 'Most Recent Post'
+        ELSE CAST(PS.UserPostRank AS VARCHAR) + ' Older Post'
+    END AS PostRanking,
+    EXTRACT(YEAR FROM AGE(NOW(), U.CreationDate)) AS AccountAgeYears,
+    CASE 
+        WHEN EXTRACT(YEAR FROM AGE(NOW(), U.CreationDate)) > 5 THEN 'Veteran User'
+        ELSE 'New User'
+    END AS UserStatus
+FROM UserReputation U
+JOIN PostStatistics PS ON U.Id = PS.OwnerUserId
+LEFT JOIN PostHistoryDetails PHD ON PS.PostId = PHD.PostId
+LEFT JOIN PostLinkDetails PLD ON PS.PostId = PLD.PostId
+WHERE PS.TotalVotes > 0
+ORDER BY U.Reputation DESC, PS.Score DESC, PS.TotalComments DESC
+LIMIT 100;

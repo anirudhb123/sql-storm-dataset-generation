@@ -1,0 +1,37 @@
+WITH UserReputation AS (
+    SELECT Id, Reputation, DisplayName
+    FROM Users
+    WHERE Reputation > 100
+),
+HighVotePosts AS (
+    SELECT p.Id, p.Title, p.Score, COUNT(v.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId IN (1, 2) 
+    GROUP BY p.Id, p.Title, p.Score
+    HAVING COUNT(v.Id) > 10
+),
+TopRecentPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+    FROM Posts p
+    WHERE p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    ORDER BY p.CreationDate DESC
+    LIMIT 5
+),
+PostDetails AS (
+    SELECT p.Id AS PostId, p.Title, u.DisplayName AS Owner, p.Score, p.ViewCount
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1
+)
+SELECT 
+    ud.DisplayName AS UserName,
+    COUNT(DISTINCT hp.PostId) AS HighVotePostsCount,
+    COUNT(DISTINCT trp.Id) AS TopRecentPostsCount,
+    AVG(pd.Score) AS AverageScore
+FROM UserReputation ud
+LEFT JOIN HighVotePosts hp ON ud.Id = hp.OwnerUserId
+LEFT JOIN TopRecentPosts trp ON ud.Id = trp.OwnerUserId
+LEFT JOIN PostDetails pd ON ud.Id = pd.OwnerUserId
+GROUP BY ud.DisplayName
+ORDER BY AverageScore DESC;

@@ -1,0 +1,69 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        PH.UserId,
+        COUNT(*) AS EditsCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        PH.UserId
+),
+PopularPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        RANK() OVER (ORDER BY P.Score DESC) AS PopularityRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    AND 
+        P.Score > 10
+)
+SELECT 
+    US.DisplayName,
+    US.Reputation,
+    US.Views,
+    US.PostsCount,
+    US.QuestionsCount,
+    US.AnswersCount,
+    COALESCE(PHS.EditsCount, 0) AS EditsCount,
+    COALESCE(PHS.LastEditDate, 'Never') AS LastEdit,
+    PP.Title,
+    PP.Score,
+    PP.ViewCount,
+    PP.PopularityRank
+FROM 
+    UserStats US
+LEFT JOIN 
+    PostHistoryStats PHS ON US.UserId = PHS.UserId
+LEFT JOIN 
+    PopularPosts PP ON US.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = PP.Id LIMIT 1)
+ORDER BY 
+    US.Reputation DESC,
+    PP.PopularityRank
+LIMIT 10;

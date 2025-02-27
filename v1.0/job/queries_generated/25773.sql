@@ -1,0 +1,45 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT m.id) AS company_count,
+        STRING_AGG(DISTINCT c.kind, ', ') AS company_kinds,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT m.id) DESC) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type c ON mc.company_type_id = c.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        info_type it ON mi.info_type_id = it.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND mi.note IS NULL 
+        AND (k.keyword ILIKE '%action%' OR k.keyword ILIKE '%drama%') 
+    GROUP BY 
+        t.id, t.title, t.production_year
+)
+SELECT 
+    rt.title_id,
+    rt.title,
+    rt.production_year,
+    rt.company_count,
+    rt.company_kinds
+FROM 
+    ranked_titles rt
+WHERE 
+    rt.rank <= 5
+ORDER BY 
+    rt.production_year DESC, rt.company_count DESC;

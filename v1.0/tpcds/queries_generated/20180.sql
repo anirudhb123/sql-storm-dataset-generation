@@ -1,0 +1,72 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_paid DESC) AS Rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023) - 30
+),
+TopSales AS (
+    SELECT 
+        r.ws_item_sk, 
+        SUM(r.ws_net_paid) AS total_net_paid,
+        COUNT(*) AS sale_count
+    FROM 
+        RankedSales r
+    WHERE 
+        r.Rank = 1
+    GROUP BY 
+        r.ws_item_sk
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_id, 
+        i.i_item_desc, 
+        ib.ib_lower_bound, 
+        ib.ib_upper_bound,
+        COALESCE(sm.sm_type, 'Unknown') AS ship_type,
+        MAX(CASE WHEN ws.ws_sale_price < 100 THEN 'Low Price' 
+                 WHEN ws.ws_sale_price BETWEEN 100 AND 500 THEN 'Medium Price' 
+                 ELSE 'High Price' END) AS price_category
+    FROM 
+        item i
+    LEFT JOIN 
+        inventory inv ON i.i_item_sk = inv.inv_item_sk
+    LEFT JOIN 
+        (SELECT ws_item_sk, ws_ship_mode_sk FROM web_sales GROUP BY ws_item_sk, ws_ship_mode_sk) ws 
+    ON 
+        i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        income_band ib ON ib.ib_income_band_sk = (SELECT MIN(hd.hd_income_band_sk) FROM household_demographics hd WHERE hd.hd_dep_count IS NOT NULL)
+    LEFT JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY 
+        i.i_item_id, i.i_item_desc, ib.ib_lower_bound, ib.ib_upper_bound, sm.sm_type
+)
+SELECT 
+    id.i_item_id,
+    id.i_item_desc,
+    id.ib_lower_bound,
+    id.ib_upper_bound,
+    ts.total_net_paid,
+    ts.sale_count,
+    CASE 
+        WHEN id.ib_upper_bound IS NULL THEN 'No Range'
+        WHEN id.ib_lower_bound IS NULL THEN 'Lower Bound Missing'
+        ELSE 'In Range'
+    END AS range_status
+FROM 
+    ItemDetails id
+JOIN 
+    TopSales ts ON id.i_item_id = (SELECT i.i_item_id FROM item i WHERE i.i_item_sk = ts.ws_item_sk)
+WHERE 
+    ts.total_net_paid IS NOT NULL 
+ORDER BY 
+    ts.total_net_paid DESC, id.i_item_id
+FETCH FIRST 10 ROWS ONLY;
+

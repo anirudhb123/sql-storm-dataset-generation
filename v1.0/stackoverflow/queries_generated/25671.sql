@@ -1,0 +1,74 @@
+WITH TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        AVG(COALESCE(P.ViewCount, 0)) AS AverageViewsPerPost
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionsAnswered,
+        SUM(COALESCE(P.AnswerCount, 0)) AS TotalAnswers,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 2  -- Answers only
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        TotalViews
+    FROM 
+        TagStats
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 5
+),
+CurrentUserActivities AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    U.DisplayName,
+    U.QuestionsAnswered,
+    U.TotalAnswers,
+    U.TotalScore,
+    T.TagName,
+    T.TotalViews,
+    C.TotalComments,
+    C.TotalBadges,
+    C.TotalBounty
+FROM 
+    UserStats U
+JOIN 
+    CurrentUserActivities C ON U.UserId = C.Id
+JOIN 
+    TopTags T ON U.QuestionsAnswered > 0
+ORDER BY 
+    T.TotalViews DESC, U.TotalScore DESC;

@@ -1,0 +1,62 @@
+WITH RECURSIVE supplier_ranking AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.n_nationkey = n.n_nationkey
+), high_value_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND
+        o.o_orderstatus IN ('O', 'P')
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate
+    HAVING 
+        net_value > 10000
+), top_part AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice,
+        ROW_NUMBER() OVER (ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_availqty IS NOT NULL)
+    HAVING
+        COUNT(*) FILTER (WHERE p.p_comment LIKE '%fragile%') >= 2
+)
+SELECT 
+    sr.s_name, 
+    sr.s_acctbal, 
+    h.o_orderkey, 
+    h.o_orderdate, 
+    h.o_totalprice, 
+    tp.p_name,
+    CASE 
+        WHEN h.net_value > 50000 THEN 'High Value'
+        ELSE 'Regular'
+    END AS order_classification
+FROM 
+    high_value_orders h
+FULL OUTER JOIN supplier_ranking sr ON (sr.rank = 1 AND sr.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM top_part tp WHERE tp.price_rank <= 5)))
+LEFT JOIN 
+    top_part tp ON (tp.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = h.o_orderkey))
+WHERE 
+    sr.s_acctbal IS NOT NULL
+ORDER BY 
+    COALESCE(h.o_totalprice, 0) DESC, 
+    sr.s_name ASC, 
+    tp.p_name ASC;

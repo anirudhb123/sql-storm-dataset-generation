@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) AS rn,
+        COALESCE(u.DisplayName, 'Deleted User') AS OwnerDisplayName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagPostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags ILIKE '%' || t.TagName || '%'
+    WHERE 
+        pt.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 5
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.Id,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    ut.Badges AS UserBadges,
+    COALESCE(ptc.TagPostCount, 0) AS PostsWithTagCount,
+    cp.LastCloseDate
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ut ON rp.OwnerUserId = ut.UserId
+LEFT JOIN 
+    PopularTags ptc ON ptc.TagPostCount > 0
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.PostId
+WHERE 
+    rp.rn = 1 -- Top post per user
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 20;

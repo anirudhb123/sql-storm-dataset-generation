@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        SUM(u.UpVotes) - SUM(u.DownVotes) AS ReputationScore
+    FROM 
+        Users u
+        JOIN Posts p ON u.Id = p.OwnerUserId
+        LEFT JOIN Votes v ON v.PostId = p.Id AND v.VoteTypeId = 8  
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+UserRankings AS (
+    SELECT 
+        tu.UserId,
+        tu.DisplayName,
+        tu.PostCount,
+        tu.TotalBounty,
+        RANK() OVER (ORDER BY tu.ReputationScore DESC) AS UserRank
+    FROM 
+        TopUsers tu
+),
+FilteredPostHistory AS (
+    SELECT 
+        ph.PostId, 
+        ph.UserId AS EditorId, 
+        ph.CreationDate AS EditDate, 
+        p.OwnerDisplayName,
+        ph.Comment
+    FROM 
+        PostHistory ph
+        JOIN Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.PostCount,
+    up.TotalBounty,
+    COALESCE(fp.EditCount, 0) AS EditCount,
+    COUNT(DISTINCT rp.PostId) AS PostActivity,
+    SUM(rp.ViewCount) AS TotalViews,
+    CASE 
+        WHEN up.UserRank <= 10 THEN 'Top Contributor'
+        ELSE 'Contributor'
+    END AS ContributorStatus
+FROM 
+    UserRankings up
+    LEFT JOIN FilteredPostHistory fp ON up.UserId = fp.EditorId
+    LEFT JOIN RankedPosts rp ON up.UserId = rp.OwnerUserId AND rp.RankByScore <= 5
+GROUP BY 
+    up.UserId, up.DisplayName, up.PostCount, up.TotalBounty, up.UserRank
+ORDER BY 
+    up.UserRank;

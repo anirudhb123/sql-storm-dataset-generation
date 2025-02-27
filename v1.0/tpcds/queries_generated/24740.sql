@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        COUNT(DISTINCT cr_order_number) AS total_returns,
+        AVG(COALESCE(cd.cd_purchase_estimate, 0)) AS avg_purchase_estimate,
+        DENSE_RANK() OVER (ORDER BY COUNT(cr_order_number) DESC) AS return_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender
+),
+WarehouseReturns AS (
+    SELECT 
+        w.w_warehouse_id,
+        COALESCE(SUM(CASE WHEN sr.returned_date_sk IS NOT NULL THEN 1 ELSE 0 END), 0) AS return_count
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        store s ON w.w_warehouse_sk = s.s_store_sk
+    LEFT JOIN 
+        store_returns sr ON s.s_store_sk = sr.s_store_sk
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.cd_gender,
+    rs.total_quantity,
+    rs.total_net_profit,
+    wr.return_count,
+    CASE 
+        WHEN cs.return_rank = 1 THEN 'Top Returning Customer'
+        WHEN cs.return_rank <= 10 THEN 'Frequent Returner'
+        ELSE 'Occasional Returner'
+    END AS return_category
+FROM 
+    CustomerStats cs
+JOIN 
+    RankedSales rs ON cs.c_customer_sk = 
+        (SELECT TOP 1 ws_bill_customer_sk 
+         FROM web_sales 
+         WHERE ws_item_sk = rs.ws_item_sk AND ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_date = CURRENT_DATE)
+         ORDER BY ws_net_profit DESC)
+LEFT JOIN 
+    WarehouseReturns wr ON cs.c_customer_sk = wr.w_returning_customer_sk
+WHERE 
+    cs.avg_purchase_estimate > 100
+    AND (SELECT COUNT(*) FROM catalog_returns cr WHERE cr.cr_returning_customer_sk = cs.c_customer_sk) > 0
+ORDER BY 
+    rs.total_net_profit DESC,
+    cs.total_returns DESC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

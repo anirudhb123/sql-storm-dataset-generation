@@ -1,0 +1,84 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY t.TagName ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON POSITION(t.TagName IN p.Tags) > 0
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.Score
+),
+MostCommentedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn <= 10  
+),
+UserReputations AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        ur.TotalBounty,
+        ur.BadgeCount,
+        RANK() OVER (ORDER BY ur.Reputation DESC) AS UserRank
+    FROM 
+        UserReputations ur
+)
+SELECT 
+    p.Title,
+    p.Body,
+    p.Tags,
+    p.CreationDate,
+    p.Score,
+    p.CommentCount,
+    u.DisplayName,
+    u.Reputation,
+    u.TotalBounty,
+    u.BadgeCount,
+    tu.UserRank
+FROM 
+    MostCommentedPosts p
+JOIN 
+    Users u ON u.Id = p.OwnerUserId
+JOIN 
+    TopUsers tu ON tu.UserId = u.Id
+WHERE 
+    p.CommentCount > 10  
+ORDER BY 
+    p.Score DESC, 
+    p.CreationDate DESC;

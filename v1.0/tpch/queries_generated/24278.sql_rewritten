@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT sh.s_suppkey, sh.s_name, sh.s_nationkey, sh.level + 1
+    FROM supplier sh
+    JOIN SupplierHierarchy shier ON sh.s_nationkey = shier.s_nationkey
+    WHERE shier.level < 5 AND sh.s_suppkey <> shier.s_suppkey
+),
+PartStats AS (
+    SELECT p.p_partkey, p.p_name, 
+           COUNT(DISTINCT ps.s_suppkey) AS supplier_count, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost, 
+           SUM(CASE WHEN ps.ps_availqty IS NULL THEN 0 ELSE ps.ps_availqty END) AS total_available_qty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CustomerStats AS (
+    SELECT c.c_custkey, c.c_name,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           AVG(o.o_totalprice) OVER (PARTITION BY c.c_nationkey) AS avg_spent_by_nation
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT COUNT(DISTINCT l.l_orderkey) AS total_orders,
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_returned_sales,
+       AVG(total_available_qty) AS avg_available_qty,
+       ns.n_name, 
+       p.p_name,
+       ct.c_name,
+       sh.s_name
+FROM lineitem l
+JOIN PartStats p ON p.p_partkey = l.l_partkey
+JOIN CustomerStats ct ON ct.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'FRANCE') LIMIT 1)
+LEFT JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_name = 'MEXICO')
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = r.r_name)
+LEFT JOIN nation ns ON ns.n_nationkey = sh.s_nationkey
+WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY ns.n_name, p.p_name, ct.c_name, sh.s_name
+HAVING SUM(l.l_quantity) > 100
+ORDER BY total_orders DESC, avg_available_qty DESC;

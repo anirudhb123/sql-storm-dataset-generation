@@ -1,0 +1,42 @@
+WITH RecursivePartSuppliers AS (
+    SELECT ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, 1 AS level
+    FROM partsupp
+    WHERE ps_availqty > 100
+    UNION ALL
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost, rp.level + 1
+    FROM partsupp ps
+    JOIN RecursivePartSuppliers rp ON ps.ps_partkey = rp.ps_partkey
+    WHERE ps.ps_supplycost < rp.ps_supplycost
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+LineItemsWithDiscount AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, l.l_extendedprice,
+           l.l_discount, (l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+),
+AverageOrderValue AS (
+    SELECT o.o_orderkey, AVG(li.total_price) AS avg_order_value
+    FROM orders o
+    JOIN LineItemsWithDiscount li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    SUM(rps.ps_availqty) AS total_avail_qty,
+    COALESCE(MAX(c.total_spent), 0) AS max_spent_by_customer,
+    AVG(a.avg_order_value) AS average_order_value,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers
+FROM part p
+LEFT JOIN RecursivePartSuppliers rps ON p.p_partkey = rps.ps_partkey
+LEFT JOIN CustomerOrders c ON c.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')))
+LEFT JOIN AverageOrderValue a ON a.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_totalprice > 1000)
+GROUP BY p.p_partkey, p.p_name
+HAVING SUM(rps.ps_availqty) > (SELECT AVG(ps_availqty) FROM partsupp WHERE ps_supplycost < 500)
+ORDER BY total_avail_qty DESC, max_spent_by_customer DESC;

@@ -1,0 +1,76 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS title_rank,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    WHERE 
+        a.production_year BETWEEN 1990 AND 2020
+        AND ak.name IS NOT NULL
+    GROUP BY 
+        a.title, a.production_year
+),
+high_cast_movies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        title_rank,
+        cast_count
+    FROM 
+        ranked_movies
+    WHERE 
+        cast_count > (
+            SELECT 
+                AVG(cast_count) 
+            FROM 
+                ranked_movies
+        )
+),
+movies_with_keywords AS (
+    SELECT 
+        h.movie_title,
+        h.production_year,
+        mw.keyword AS movie_keyword
+    FROM 
+        high_cast_movies h
+    LEFT JOIN 
+        movie_keyword mk ON h.movie_title = (
+            SELECT title FROM aka_title mt WHERE mt.id = h.movie_title ORDER BY mt.production_year DESC LIMIT 1
+        )
+    LEFT JOIN 
+        keyword mw ON mk.keyword_id = mw.id
+),
+final_movies AS (
+    SELECT 
+        m.movie_title,
+        m.production_year,
+        m.movie_keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.movie_title) AS final_rank
+    FROM 
+        movies_with_keywords m
+    WHERE 
+        m.movie_keyword IS NOT NULL
+)
+SELECT 
+    f.movie_title,
+    f.production_year,
+    COALESCE(f.movie_keyword, 'N/A') AS keywords_available,
+    'Title ' || f.movie_title || ' from year ' || f.production_year || 
+        ' has rank ' || f.final_rank AS movie_details,
+    CASE 
+        WHEN f.final_rank <= 5 THEN 'Top 5 Movie'
+        ELSE 'Not in Top 5 Movie'
+    END AS rank_category
+FROM 
+    final_movies f
+WHERE 
+    f.production_year IS NOT NULL
+ORDER BY 
+    f.production_year DESC, f.final_rank;

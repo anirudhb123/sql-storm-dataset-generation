@@ -1,0 +1,74 @@
+WITH RECURSIVE UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostDetail AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,  -- Upvotes
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes, -- Downvotes
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.PostId) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    u.BadgeCount,
+    u.GoldBadgeCount,
+    u.SilverBadgeCount,
+    u.BronzeBadgeCount,
+    up.TotalPosts,
+    up.TotalAnswers,
+    up.TotalQuestions,
+    up.TotalViews,
+    up.AvgScore,
+    MAX(pd.Title) AS LatestPostTitle,
+    MIN(pd.CreationDate) AS FirstPostDate,
+    MAX(pd.ViewCount) AS MaxViewCount,
+    MAX(pd.Score) AS MaxScore
+FROM 
+    UserBadgeCounts u
+JOIN 
+    UserPostStats up ON u.UserId = up.UserId
+LEFT JOIN 
+    PostDetail pd ON up.UserId = pd.OwnerUserId AND pd.RN = 1
+GROUP BY 
+    u.DisplayName, u.BadgeCount, u.GoldBadgeCount, u.SilverBadgeCount, u.BronzeBadgeCount,
+    up.TotalPosts, up.TotalAnswers, up.TotalQuestions, up.TotalViews, up.AvgScore
+ORDER BY 
+    up.TotalPosts DESC, up.TotalViews DESC
+LIMIT 50;

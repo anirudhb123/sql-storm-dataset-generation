@@ -1,0 +1,77 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+
+PostActivity AS (
+    SELECT 
+        p.Id,
+        p.Score,
+        p.ViewCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(v.UpvoteCount, 0) AS UpvoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount
+         FROM Comments
+         GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT UserId, COUNT(*) AS BadgeCount
+         FROM Badges 
+         GROUP BY UserId) b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS UpvoteCount
+         FROM Votes 
+         WHERE VoteTypeId = 2  -- UpMod votes
+         GROUP BY PostId) v ON p.Id = v.PostId
+)
+
+SELECT 
+    pp.PostId,
+    pp.Title,
+    ph.PostId AS ParentPostId,
+    pa.Score,
+    pa.ViewCount,
+    pa.CommentCount,
+    pa.BadgeCount,
+    pa.UpvoteCount,
+    CASE 
+        WHEN pa.Score >= 10 THEN 'High Score'
+        WHEN pa.Score BETWEEN 5 AND 9 THEN 'Medium Score'
+        ELSE 'Low Score' 
+    END AS ScoreCategory
+FROM 
+    PostActivity pa
+JOIN 
+    RecursivePostHierarchy pp ON pa.Id = pp.PostId
+LEFT JOIN 
+    (SELECT PostId, Title FROM Posts) ph ON pp.ParentId = ph.PostId
+WHERE 
+    pa.Rn = 1
+AND 
+    pa.ViewCount > 0
+ORDER BY 
+    ScoreCategory DESC, 
+    pa.ViewCount DESC;

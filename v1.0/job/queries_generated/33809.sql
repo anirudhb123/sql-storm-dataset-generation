@@ -1,0 +1,70 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        ct.kind AS role,
+        1 AS level
+    FROM cast_info ci
+    JOIN comp_cast_type ct ON ci.person_role_id = ct.id
+    WHERE ct.kind IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ci.person_id,
+        ct.kind AS role,
+        ah.level + 1
+    FROM cast_info ci
+    JOIN comp_cast_type ct ON ci.person_role_id = ct.id
+    JOIN ActorHierarchy ah ON ci.movie_id = ah.movie_id
+    WHERE ah.level < 5
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_actors,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM aka_title m
+    JOIN cast_info ci ON m.id = ci.movie_id
+    JOIN aka_name a ON ci.person_id = a.person_id
+    WHERE m.production_year IS NOT NULL
+    GROUP BY m.id
+),
+KeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.total_actors,
+    COALESCE(kc.keyword_count, 0) AS keyword_count,
+    ah.role,
+    ah.level,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = md.movie_id AND mi.info_type_id = 1) AS info_count,
+    CASE 
+        WHEN md.production_year < 2000 THEN 'Classic'
+        WHEN md.production_year >= 2000 AND md.production_year < 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era
+FROM MovieDetails md
+LEFT JOIN KeywordCounts kc ON md.movie_id = kc.movie_id
+LEFT JOIN ActorHierarchy ah ON md.movie_id = ah.movie_id
+WHERE md.total_actors > 5
+ORDER BY md.production_year DESC, md.title
+LIMIT 100;
+
+In this SQL query:
+
+- A recursive common table expression (CTE) named `ActorHierarchy` is used to derive a hierarchy of actors from the `cast_info` table.
+- A second CTE named `MovieDetails` aggregates details about movies, including a count of distinct actors and a concatenated string of actor names.
+- A third CTE named `KeywordCounts` counts distinct keywords associated with each movie.
+- In the main query, we pull data from the `MovieDetails` CTE and join it with the `KeywordCounts` and `ActorHierarchy` while filtering for movies with more than five actors.
+- A correlated subquery calculates the number of information records for each movie specifically for `info_type_id = 1`.
+- A `CASE` statement categorizes the movies based on their production year.
+- The results are ordered by production year descending and limited to the first 100 results.

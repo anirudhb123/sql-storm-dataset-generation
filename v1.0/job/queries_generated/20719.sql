@@ -1,0 +1,84 @@
+WITH movie_cast AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        a.name AS actor_name,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year >= 2000
+),
+filtered_movies AS (
+    SELECT 
+        movie_id,
+        COUNT(person_id) AS actor_count,
+        STRING_AGG(DISTINCT actor_name, ', ') AS actors_list
+    FROM 
+        movie_cast
+    GROUP BY 
+        movie_id
+    HAVING 
+        COUNT(person_id) > 3
+),
+movie_info_details AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        fi.info AS release_info
+    FROM 
+        filtered_movies m
+    LEFT JOIN 
+        movie_info fi ON m.movie_id = fi.movie_id 
+                      AND fi.info_type_id IN (SELECT id FROM info_type WHERE info = 'release_date')
+),
+production_companies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code IS NOT NULL
+    GROUP BY 
+        mc.movie_id
+),
+final_report AS (
+    SELECT 
+        mid.title,
+        mid.release_info,
+        pc.companies,
+        mc.actor_count,
+        mc.actors_list
+    FROM 
+        movie_info_details mid
+    LEFT JOIN 
+        production_companies pc ON mid.movie_id = pc.movie_id
+    JOIN 
+        filtered_movies mc ON mid.movie_id = mc.movie_id
+)
+SELECT 
+    *,
+    CASE 
+        WHEN release_info IS NULL THEN 'Release date unknown'
+        ELSE release_info
+    END AS display_release_info,
+    CASE 
+        WHEN actor_count > 0 THEN 'Has a substantial cast'
+        ELSE 'No cast information'
+    END AS cast_status,
+    COUNT(*) OVER () AS total_movies
+FROM 
+    final_report
+WHERE 
+    companies IS NOT NULL
+ORDER BY 
+    production_year DESC, actor_count DESC NULLS LAST;

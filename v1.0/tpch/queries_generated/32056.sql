@@ -1,0 +1,45 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 500.00 AND sh.level < 10
+),
+
+part_supplier_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000.00
+),
+
+nation_region AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+
+SELECT 
+    p.p_name,
+    ps.total_supply_cost,
+    ns.r_name AS region,
+    tc.c_name AS top_customer,
+    ROW_NUMBER() OVER (PARTITION BY ns.r_name ORDER BY ps.total_supply_cost DESC) AS cost_rank
+FROM part_supplier_summary ps
+JOIN nation_region ns ON ps.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey IN (SELECT s_suppkey FROM supplier_hierarchy))
+LEFT JOIN top_customers tc ON tc.total_spent > 5000
+WHERE ps.total_supply_cost IS NOT NULL
+ORDER BY ns.r_name, ps.total_supply_cost DESC;

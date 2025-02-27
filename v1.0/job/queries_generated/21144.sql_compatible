@@ -1,0 +1,49 @@
+
+WITH RecursiveMovieRoles AS (
+    SELECT ci.movie_id,
+           COUNT(DISTINCT ci.person_id) AS actor_count,
+           STRING_AGG(DISTINCT an.name, ', ') AS actor_names
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    WHERE an.name IS NOT NULL
+    GROUP BY ci.movie_id
+), 
+RatedMovies AS (
+    SELECT mt.title,
+           mt.production_year,
+           COALESCE(mi.info, 'No Rating') AS rating_info,
+           COALESCE(mk.keyword, 'No Keywords') AS keywords,
+           ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS year_rank
+    FROM aka_title mt
+    LEFT JOIN movie_info mi ON mt.id = mi.movie_id AND mi.info_type_id = (SELECT it.id FROM info_type it WHERE it.info = 'rating')
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+    WHERE mt.production_year IS NOT NULL
+), 
+FilteredMovies AS (
+    SELECT mv.title,
+           mv.production_year,
+           mv.rating_info,
+           COALESCE(mr.actor_count, 0) AS total_actors,
+           mr.actor_names
+    FROM RatedMovies mv
+    LEFT JOIN RecursiveMovieRoles mr ON mv.title = mr.movie_id
+    WHERE mv.rating_info != 'No Rating'
+    AND mv.production_year BETWEEN 2000 AND 2023
+)
+SELECT DISTINCT fm.title,
+                fm.production_year,
+                fm.rating_info,
+                fm.total_actors,
+                fm.actor_names
+FROM FilteredMovies fm
+WHERE fm.total_actors > 5
+UNION ALL
+SELECT NULL AS title,
+       NULL AS production_year,
+       'Total Films with More than 5 Actors' AS rating_info,
+       COUNT(*) AS total_actors,
+       NULL AS actor_names
+FROM FilteredMovies fm
+WHERE fm.total_actors > 5
+HAVING COUNT(*) > 0
+ORDER BY production_year DESC NULLS LAST;

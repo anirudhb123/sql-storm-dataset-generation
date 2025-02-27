@@ -1,0 +1,94 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        u.DisplayName AS Owner,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Owner,
+        rp.CreationDate,
+        rp.Score
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+PostComments AS (
+    SELECT 
+        pc.Id,
+        pc.PostId,
+        pc.Text AS CommentText,
+        pc.CreationDate AS CommentDate,
+        u.DisplayName AS CommentOwner
+    FROM 
+        Comments pc
+    JOIN 
+        Users u ON pc.UserId = u.Id
+),
+PostVoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 1 THEN 1 END) AS AcceptedVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+CombinedResults AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.Body,
+        tp.Owner,
+        tp.CreationDate,
+        tp.Score,
+        COALESCE(pc.CommentText, 'No comments') AS CommentText,
+        COALESCE(pc.CommentDate, 'No comments') AS CommentDate,
+        COALESCE(pc.CommentOwner, 'N/A') AS CommentOwner,
+        pvc.Upvotes,
+        pvc.Downvotes,
+        pvc.AcceptedVotes
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostComments pc ON tp.PostId = pc.PostId
+    JOIN 
+        PostVoteCounts pvc ON tp.PostId = pvc.PostId
+)
+SELECT 
+    PostId,
+    Title,
+    Body,
+    Owner,
+    CreationDate,
+    Score,
+    CommentText,
+    CommentDate,
+    CommentOwner,
+    Upvotes,
+    Downvotes,
+    AcceptedVotes
+FROM 
+    CombinedResults
+ORDER BY 
+    CreationDate DESC;

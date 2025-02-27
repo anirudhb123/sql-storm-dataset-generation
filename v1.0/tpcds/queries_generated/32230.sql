@@ -1,0 +1,46 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        cs_item_sk, 
+        SUM(cs_quantity) AS total_sales,
+        SUM(cs_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY SUM(cs_net_profit) DESC) AS rn
+    FROM catalog_sales
+    GROUP BY cs_item_sk
+    HAVING SUM(cs_quantity) > 10
+), 
+customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_ext_sales_price) AS total_sales,
+        MAX(ws_sold_date_sk) AS last_order_date
+    FROM web_sales ws
+    INNER JOIN customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_year > (EXTRACT(YEAR FROM CURRENT_DATE) - 30) -- customers born in the last 30 years
+    GROUP BY c.c_customer_id
+), 
+popular_items AS (
+    SELECT 
+        i.i_item_id,
+        SUM(ws_quantity) AS total_quantity,
+        AVG(ws_net_profit) AS avg_profit
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY i.i_item_id
+    HAVING SUM(ws_quantity) > 100
+)
+SELECT 
+    ca.ca_city,
+    COUNT(DISTINCT cs.c_customer_id) AS customer_count,
+    SUM(cs.total_sales) AS total_customer_sales,
+    MAX(cs.last_order_date) AS most_recent_order,
+    SUM(si.total_profit) AS top_sales_profit
+FROM customer_sales cs
+FULL OUTER JOIN sales_cte si ON cs.order_count > 5
+JOIN customer_address ca ON ca.ca_address_sk = cs.c_customer_id  -- Assuming mapping of customer to address is applied through c_customer_id.
+LEFT JOIN popular_items pi ON pi.total_quantity > 500
+WHERE ca.ca_state = 'CA' AND cs.order_count IS NOT NULL OR si.rn = 1
+GROUP BY ca.ca_city
+ORDER BY total_customer_sales DESC
+LIMIT 10;

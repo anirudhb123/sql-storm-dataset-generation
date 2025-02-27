@@ -1,0 +1,76 @@
+WITH RECURSIVE customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+supplier_parts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+part_supplier_info AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        MAX(s.total_available) AS max_available,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier_parts s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    co.c_custkey,
+    co.c_name,
+    co.total_spent,
+    p.p_partkey,
+    p.p_name,
+    p.max_available,
+    p.supplier_count,
+    CASE 
+        WHEN co.total_spent > 10000 THEN 'High value'
+        WHEN co.total_spent BETWEEN 5000 AND 10000 THEN 'Medium value'
+        ELSE 'Low value' 
+    END AS customer_value,
+    CASE 
+        WHEN p.max_available IS NULL THEN 'No Supplier'
+        WHEN p.supplier_count > 5 THEN 'Highly Supplied'
+        ELSE 'Limited Supply' 
+    END AS supply_status
+FROM 
+    customer_orders co
+JOIN 
+    part_supplier_info p ON p.p_partkey = (
+        SELECT ps.p_partkey 
+        FROM partsupp ps 
+        JOIN supplier s ON ps.ps_suppkey = s.s_suppkey 
+        WHERE s.s_nationkey IN (
+              SELECT n.n_nationkey 
+              FROM nation n 
+              WHERE n.n_name = 'USA'
+        )
+        ORDER BY ps.ps_availqty DESC 
+        LIMIT 1
+    )
+ORDER BY 
+    co.total_spent DESC, p.max_available DESC;

@@ -1,0 +1,74 @@
+
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore,
+        STRING_AGG(DISTINCT u.DisplayName, ', ') AS Contributors
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        AverageScore,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagStats
+),
+FilteredTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        AverageScore
+    FROM 
+        TopTags
+    WHERE 
+        Rank <= 10 AND 
+        AverageScore >= 5
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT c.Id) AS CommentsCount,
+        COUNT(DISTINCT b.Id) AS BadgesCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    f.TagName,
+    f.PostCount,
+    f.TotalViews,
+    f.AverageScore,
+    u.UserId,
+    u.DisplayName,
+    u.PostsCount,
+    u.CommentsCount,
+    u.BadgesCount
+FROM 
+    FilteredTags f
+JOIN 
+    UserActivity u ON f.PostCount > u.PostsCount
+ORDER BY 
+    f.AverageScore DESC, 
+    f.TotalViews DESC;

@@ -1,0 +1,80 @@
+
+WITH RankedSales AS (
+    SELECT 
+        COUNT(ss_ticket_number) AS total_sales,
+        ss_item_sk,
+        RANK() OVER (PARTITION BY ss_item_sk ORDER BY SUM(ss_net_profit) DESC) AS rank_sales,
+        SUM(ss_net_profit) AS total_profit,
+        MAX(ss_sold_date_sk) AS last_sold_date
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_item_sk
+),
+FrequentCustomers AS (
+    SELECT 
+        ss_customer_sk,
+        COUNT(DISTINCT ss_ticket_number) AS purchase_count,
+        DENSE_RANK() OVER (ORDER BY COUNT(DISTINCT ss_ticket_number) DESC) AS customer_rank
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_customer_sk
+    HAVING 
+        COUNT(DISTINCT ss_ticket_number) >= 5
+),
+TopItems AS (
+    SELECT 
+        rss.total_sales,
+        rss.total_profit,
+        rss.ss_item_sk
+    FROM 
+        RankedSales rss
+    WHERE 
+        rss.rank_sales <= 10 AND rss.total_profit > 10000
+),
+SalesDetails AS (
+    SELECT 
+        ti.ss_item_sk,
+        ti.total_sales,
+        ti.total_profit,
+        fc.purchase_count,
+        CASE 
+            WHEN fc.purchase_count IS NOT NULL THEN
+                ROUND(ti.total_profit / fc.purchase_count, 2)
+            ELSE 
+                NULL
+        END AS average_profit_per_customer
+    FROM 
+        TopItems ti
+    LEFT JOIN 
+        FrequentCustomers fc ON ti.ss_item_sk = fc.ss_customer_sk
+)
+SELECT 
+    sd.ss_item_sk,
+    sd.total_sales,
+    sd.total_profit,
+    COALESCE(sd.average_profit_per_customer, 'N/A') AS average_profit_per_customer,
+    COALESCE((
+        SELECT 
+            COUNT(DISTINCT sr_customer_sk) 
+        FROM 
+            store_returns 
+        WHERE 
+            sr_item_sk = sd.ss_item_sk 
+            AND sr_return_quantity > 0
+    ), 0) AS return_count,
+    (SELECT 
+        COUNT(*) 
+    FROM 
+        warehouse w 
+    WHERE 
+        w.w_warehouse_sq_ft > 10000
+    ) AS large_warehouses
+FROM 
+    SalesDetails sd
+WHERE 
+    sd.total_sales BETWEEN 5 AND (SELECT MAX(total_sales) FROM RankedSales) 
+    AND sd.ss_item_sk IS NOT NULL
+ORDER BY 
+    sd.total_profit DESC;

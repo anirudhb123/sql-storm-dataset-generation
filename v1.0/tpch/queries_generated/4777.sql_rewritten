@@ -1,0 +1,62 @@
+WITH RankedSales AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * l.l_quantity) AS total_cost,
+        RANK() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(ps.ps_supplycost * l.l_quantity) DESC) AS rank
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name
+    FROM
+        RankedSales s
+    WHERE
+        s.rank <= 5
+)
+SELECT
+    n.n_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(total_spending) AS avg_spending,
+    STRING_AGG(s.s_name, ', ') AS supplier_names
+FROM
+    customer c
+LEFT JOIN
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN
+    lineitem l ON o.o_orderkey = l.l_orderkey AND l.l_discount > 0.05
+LEFT JOIN
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spending
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        o.o_orderkey
+) AS Spending ON o.o_orderkey = Spending.o_orderkey
+WHERE
+    o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY
+    n.n_name
+HAVING
+    total_orders > 10 AND AVG(total_spending) IS NOT NULL
+ORDER BY
+    total_orders DESC;

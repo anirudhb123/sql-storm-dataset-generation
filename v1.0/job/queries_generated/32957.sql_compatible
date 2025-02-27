@@ -1,0 +1,91 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year = (SELECT MAX(production_year) FROM aka_title)
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+),
+actor_movie AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        c.movie_id,
+        t.title,
+        t.production_year
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    WHERE 
+        c.person_role_id IN (SELECT id FROM role_type WHERE role = 'actor')
+),
+actor_summary AS (
+    SELECT 
+        am.actor_id,
+        am.actor_name,
+        COUNT(DISTINCT am.movie_id) AS movie_count,
+        SUM(CASE WHEN am.production_year > 2000 THEN 1 ELSE 0 END) AS movies_after_2000,
+        AVG(2023 - am.production_year) AS avg_movie_age
+    FROM 
+        actor_movie am
+    GROUP BY 
+        am.actor_id, am.actor_name
+),
+companies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mc.company_id) AS total_companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+)
+SELECT 
+    ah.actor_id,
+    ah.actor_name,
+    ah.movie_count,
+    ah.movies_after_2000,
+    ah.avg_movie_age,
+    STRING_AGG(DISTINCT comp.company_name || ' (' || comp.company_type || ')') AS companies,
+    COALESCE(SUM(oo.total_companies), 0) AS total_companies_in_movies,
+    RANK() OVER (ORDER BY ah.movie_count DESC) AS actor_rank
+FROM 
+    actor_summary ah
+LEFT JOIN 
+    companies comp ON comp.movie_id IN (SELECT movie_id FROM actor_movie WHERE actor_id = ah.actor_id)
+LEFT JOIN 
+    companies oo ON oo.movie_id IN (SELECT movie_id FROM actor_movie WHERE actor_id = ah.actor_id)
+WHERE 
+    ah.movie_count > 5 
+    AND ah.avg_movie_age < 10
+GROUP BY 
+    ah.actor_id, ah.actor_name, ah.movie_count, ah.movies_after_2000, ah.avg_movie_age
+ORDER BY 
+    ah.avg_movie_age DESC;

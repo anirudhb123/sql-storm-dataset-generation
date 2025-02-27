@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (
+        SELECT d_date_sk
+        FROM date_dim
+        WHERE d_year = 2023 AND d_moy BETWEEN 1 AND 6
+    )
+    GROUP BY ws_sold_date_sk, ws_item_sk
+
+    UNION ALL
+
+    SELECT
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) + ss.total_quantity,
+        SUM(ws_ext_sales_price) + ss.total_sales
+    FROM web_sales ws
+    JOIN sales_summary ss ON ws.ws_item_sk = ss.ws_item_sk
+    WHERE ws.ws_sold_date_sk > ss.ws_sold_date_sk
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+
+warehouse_sales AS (
+    SELECT
+        w.w_warehouse_name,
+        SUM(ws.net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM warehouse w
+    LEFT JOIN web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY w.w_warehouse_name
+),
+
+customer_stats AS (
+    SELECT
+        cu.c_customer_id,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_quantity) AS total_items_ordered,
+        ROW_NUMBER() OVER (PARTITION BY cu.c_customer_id ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS order_rank
+    FROM customer cu
+    LEFT JOIN web_sales ws ON cu.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY cu.c_customer_id
+)
+
+SELECT
+    ws.total_quantity,
+    ws.total_sales,
+    warehouse_sales.total_profit,
+    warehouse_sales.total_orders,
+    cs.c_customer_id,
+    cs.order_count,
+    cs.total_items_ordered
+FROM sales_summary ws
+CROSS JOIN warehouse_sales
+JOIN customer_stats cs ON cs.order_count > 0
+WHERE ws.total_sales > (SELECT AVG(total_sales) FROM sales_summary)
+ORDER BY ws.total_sales DESC
+LIMIT 100;

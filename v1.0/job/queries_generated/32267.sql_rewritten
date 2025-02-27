@@ -1,0 +1,82 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        0 AS level
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        ci.movie_id = (SELECT MIN(movie_id) FROM cast_info)  
+
+    UNION ALL
+
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        ah.level + 1
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        ActorHierarchy ah ON ci.movie_id = (SELECT movie_id FROM cast_info WHERE person_id = ah.person_id)
+    WHERE 
+        ci.movie_id != (SELECT MIN(movie_id) FROM cast_info)  
+),
+
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ci ON m.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        m.id
+),
+
+ExtendedInfo AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.total_cast,
+        md.actor_names,
+        CASE 
+            WHEN ci.note IS NOT NULL THEN ci.note 
+            ELSE 'N/A' 
+        END AS notes
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        movie_info mi ON md.movie_id = mi.movie_id
+    LEFT JOIN 
+        movie_link ml ON md.movie_id = ml.movie_id
+    LEFT JOIN 
+        link_type lt ON ml.link_type_id = lt.id
+)
+
+SELECT 
+    ei.movie_id,
+    ei.title,
+    ei.production_year,
+    ei.total_cast,
+    ei.actor_names,
+    ei.notes,
+    ah.actor_name,
+    ah.level
+FROM 
+    ExtendedInfo ei
+LEFT JOIN 
+    ActorHierarchy ah ON ei.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = ah.person_id)
+ORDER BY 
+    ei.production_year DESC, 
+    ei.movie_id;

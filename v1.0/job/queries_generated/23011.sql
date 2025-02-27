@@ -1,0 +1,70 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY LENGTH(t.title) DESC) AS rank_title_length
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+PopularActors AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        c.person_id
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mk.keyword_count, 0) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        MovieKeywords mk ON m.id = mk.movie_id
+)
+SELECT 
+    mwk.movie_id,
+    mwk.title,
+    mwk.keyword_count,
+    COALESCE(pa.actor_names, 'Unknown Actors') AS top_actors,
+    rm.rank_title_length
+FROM 
+    MoviesWithKeywords mwk
+LEFT JOIN 
+    PopularActors pa ON mwk.movie_id IN (
+        SELECT 
+            ci.movie_id
+        FROM 
+            cast_info ci
+        WHERE 
+            ci.movie_id = mwk.movie_id
+    )
+LEFT JOIN 
+    RankedMovies rm ON mwk.movie_id = rm.movie_id
+WHERE 
+    mwk.keyword_count > 2
+    AND rm.rank_title_length IS NOT NULL
+ORDER BY 
+    mwk.keyword_count DESC, 
+    rm.rank_title_length ASC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

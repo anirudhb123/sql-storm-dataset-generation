@@ -1,0 +1,75 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_profit,
+        1 AS sales_level
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+    UNION ALL
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        cte.sales_level + 1
+    FROM 
+        web_sales ws
+    JOIN 
+        SalesCTE cte ON ws.ws_order_number = cte.ws_order_number
+    WHERE 
+        ws.ws_sold_date_sk < cte.ws_sold_date_sk
+), 
+AggregateSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(*) AS total_orders 
+    FROM 
+        SalesCTE
+    GROUP BY 
+        ws_item_sk
+), 
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE 
+            WHEN hd.hd_income_band_sk IS NULL THEN 'Unknown'
+            ELSE ib.ib_income_band_sk 
+        END AS income_band
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    LEFT JOIN 
+        income_band ib ON ib.ib_income_band_sk = hd.hd_income_band_sk
+)
+SELECT 
+    sd.sales_level,
+    cd.cd_gender,
+    cd.income_band,
+    ag.total_quantity,
+    ag.total_net_profit
+FROM 
+    AggregateSales ag
+LEFT JOIN 
+    CustomerDemographics cd ON ag.ws_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_order_number IN (SELECT DISTINCT ws_order_number FROM web_sales ORDER BY ws_order_number DESC LIMIT 10))
+JOIN 
+    SalesCTE sd ON ag.ws_item_sk = sd.ws_item_sk
+WHERE 
+    (cd.cd_gender = 'M' OR cd.cd_gender IS NULL)
+    AND ag.total_quantity > 100
+ORDER BY 
+    ag.total_net_profit DESC
+LIMIT 50;

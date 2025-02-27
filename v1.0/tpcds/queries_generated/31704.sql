@@ -1,0 +1,40 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT cs_bill_customer_sk, 
+           SUM(cs_net_profit) AS total_profit,
+           CAST(NULL AS INTEGER) AS parent_id
+    FROM catalog_sales
+    GROUP BY cs_bill_customer_sk
+
+    UNION ALL
+
+    SELECT w.ws_bill_customer_sk, 
+           w.ws_net_profit + COALESCE(sh.total_profit, 0),
+           sh.cs_bill_customer_sk
+    FROM web_sales w
+    LEFT JOIN SalesHierarchy sh ON w.ws_bill_customer_sk = sh.cs_bill_customer_sk
+),
+
+AggregatedSales AS (
+    SELECT c.c_customer_id, 
+           SUM(COALESCE(s.total_profit, 0)) AS overall_profit,
+           COUNT(DISTINCT CASE WHEN s.cs_bill_customer_sk IS NOT NULL THEN s.cs_bill_customer_sk END) AS unique_customers
+    FROM customer c
+    LEFT JOIN SalesHierarchy s ON c.c_customer_sk = s.cs_bill_customer_sk
+    GROUP BY c.c_customer_id
+),
+
+ProfitRanked AS (
+    SELECT a.*, 
+           RANK() OVER (ORDER BY overall_profit DESC) AS profit_rank
+    FROM AggregatedSales a
+)
+
+SELECT p.c_customer_id,
+       p.overall_profit AS total_profit,
+       NULLIF(p.unique_customers, 0) AS unique_customers_count,
+       CASE WHEN p.profit_rank <= 10 THEN 'Top 10' ELSE 'Other' END AS category
+FROM ProfitRanked p
+WHERE p.profit_rank <= 50
+   OR (p.profit_rank > 50 AND p.unique_customers_count IS NOT NULL)
+ORDER BY p.profit_rank, p.unique_customers_count DESC;

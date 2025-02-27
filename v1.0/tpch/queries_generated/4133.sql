@@ -1,0 +1,58 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) as rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O' AND
+        o.o_totalprice > 100.00
+),
+supplier_parts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_type,
+    p.p_retailprice,
+    COALESCE(sp.total_cost, 0) AS total_supply_cost,
+    COALESCE(sp.supplier_count, 0) AS unique_suppliers,
+    r.r_name AS region_name,
+    ro.o_orderdate AS latest_order_date,
+    ro.o_totalprice AS latest_order_total_price
+FROM 
+    part p
+LEFT JOIN 
+    supplier_parts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders ro ON l.l_orderkey = ro.o_orderkey
+LEFT JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    r.r_name IN ('Europe', 'Asia') AND 
+    (p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size < 20) OR 
+    p.p_comment IS NOT NULL)
+ORDER BY 
+    p.p_brand ASC, 
+    latest_order_date DESC
+LIMIT 50;

@@ -1,0 +1,94 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(C.CommentCount, 0)) AS TotalComments,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        RANK() OVER (ORDER BY SUM(COALESCE(P.ViewCount, 0)) DESC) AS ActivityRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+            PostId, COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId) C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostScoreCalculation AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(V.UpVotes, 0) - COALESCE(V.DownVotes, 0) AS NetScore,
+        CASE 
+            WHEN P.PostTypeId = 1 THEN 'Question'
+            WHEN P.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS RowNum
+    FROM 
+        Posts P
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId) V ON P.Id = V.PostId
+),
+TopActiveUsers AS (
+    SELECT 
+        *,
+        NTILE(10) OVER (ORDER BY TotalScore DESC) AS ScoreDecile
+    FROM 
+        UserActivity
+    WHERE 
+        TotalViews > 0 
+        AND TotalComments > 0
+),
+PostCommentsAndScores AS (
+    SELECT 
+        A.UserId,
+        A.DisplayName,
+        COUNT(C.Id) AS CommentCount,
+        SUM(PC.NetScore) AS TotalPostScore
+    FROM 
+        TopActiveUsers A
+    LEFT JOIN 
+        Posts P ON A.UserId = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostScoreCalculation PC ON P.Id = PC.PostId
+    GROUP BY 
+        A.UserId, A.DisplayName
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.ScoreDecile,
+    GREATEST(U.TotalViews, 1) AS AdjustedViews,  
+    U.TotalComments,
+    PC.Title,
+    PC.CreationDate,
+    PC.NetScore
+FROM 
+    PostCommentsAndScores U
+JOIN 
+    PostScoreCalculation PC ON U.UserId = P.OwnerUserId
+WHERE 
+    U.TotalPostScore > (SELECT AVG(TotalPostScore) FROM PostCommentsAndScores)
+ORDER BY 
+    U.ScoreDecile DESC,
+    PC.NetScore DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

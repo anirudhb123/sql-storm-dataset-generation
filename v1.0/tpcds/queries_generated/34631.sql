@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(*) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+IncomeStats AS (
+    SELECT 
+        cd_demo_sk,
+        ib_income_band_sk,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(DISTINCT c_customer_sk) AS customer_count
+    FROM 
+        customer_demographics
+    JOIN 
+        household_demographics ON cd_demo_sk = hd_demo_sk
+    LEFT JOIN 
+        income_band ON hd_income_band_sk = ib_income_band_sk
+    GROUP BY 
+        cd_demo_sk, ib_income_band_sk
+),
+TopCustomers AS (
+    SELECT 
+        c_customer_sk, 
+        c_first_name, 
+        c_last_name, 
+        total_sales,
+        total_orders,
+        ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS customer_rank
+    FROM 
+        SalesCTE
+    JOIN 
+        customer ON ws_bill_customer_sk = c_customer_sk
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_sales,
+    tc.total_orders,
+    is.ib_income_band_sk,
+    is.avg_purchase_estimate,
+    is.customer_count
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    IncomeStats is ON tc.c_customer_sk = is.cd_demo_sk
+WHERE 
+    tc.customer_rank <= 10 AND
+    is.customer_count > 0
+ORDER BY 
+    total_sales DESC, c_last_name ASC;

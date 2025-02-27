@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS Author,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+),
+TagPopularity AS (
+    SELECT 
+        Tag, 
+        COUNT(*) AS TagCount
+    FROM 
+        PopularTags
+    GROUP BY 
+        Tag
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+PostSummaries AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Author,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.AnswerCount,
+        tp.TagCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TagPopularity tp ON rp.Tags ILIKE '%' || tp.Tag || '%'
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Body,
+    ps.Author,
+    ps.CreationDate,
+    ps.CommentCount,
+    ps.AnswerCount,
+    STRING_AGG(tp.Tag, ', ') AS PopularTags
+FROM 
+    PostSummaries ps
+JOIN 
+    PopularTags tp ON ps.Tags ILIKE '%' || tp.Tag || '%'
+GROUP BY 
+    ps.PostId, ps.Title, ps.Body, ps.Author, ps.CreationDate, ps.CommentCount, ps.AnswerCount
+ORDER BY 
+    ps.CommentCount DESC, ps.CreationDate DESC;

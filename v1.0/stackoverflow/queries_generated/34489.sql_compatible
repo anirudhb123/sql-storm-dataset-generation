@@ -1,0 +1,66 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN Posts a ON p.ParentId = a.Id
+    INNER JOIN RecursivePostHierarchy r ON a.Id = r.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostScores AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankPerUser
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+    GROUP BY p.Id, p.Title, p.Score
+)
+SELECT 
+    u.DisplayName,
+    u.PostCount,
+    u.TotalBounty,
+    u.BadgeCount,
+    p.Title AS PostTitle,
+    p.Score,
+    p.CommentCount,
+    ph.Level AS PostLevel
+FROM UserActivity u
+INNER JOIN PostScores p ON u.UserId = p.OwnerUserId
+LEFT JOIN RecursivePostHierarchy ph ON p.Id = ph.PostId
+WHERE 
+    u.UserRank <= 10 
+    AND (u.TotalBounty > 0 OR p.Score > 10)
+ORDER BY 
+    u.PostCount DESC, u.TotalBounty DESC;

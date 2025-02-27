@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY t.TagName ORDER BY p.CreationDate DESC) AS PostRank,
+        t.TagName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, t.TagName
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Score,
+        rp.AnswerCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        rp.TagName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 5 
+),
+PostDetails AS (
+    SELECT 
+        fp.*,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        Comments c ON c.PostId = fp.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId IN (SELECT OwnerUserId FROM Posts WHERE Id = fp.PostId)
+    GROUP BY 
+        fp.PostId, fp.Title, fp.Body, fp.CreationDate, fp.Score, fp.AnswerCount, fp.UpVoteCount, fp.DownVoteCount, fp.TagName
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Body,
+    pd.CreationDate,
+    pd.Score,
+    pd.AnswerCount,
+    pd.UpVoteCount,
+    pd.DownVoteCount,
+    pd.CommentCount,
+    pd.BadgeCount,
+    pd.TagName
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.TagName, pd.CreationDate DESC;

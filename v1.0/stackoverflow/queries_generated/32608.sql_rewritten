@@ -1,0 +1,102 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE 
+            WHEN v.VoteTypeId = 2 THEN 1
+            WHEN v.VoteTypeId = 3 THEN -1
+            ELSE 0 
+        END) AS ReputationScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        p.Title,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount,
+        ARRAY_AGG(ph.CreationDate ORDER BY ph.CreationDate DESC) AS RecentChangeDates
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        ph.PostId, p.Title
+),
+TopUsersWithPosts AS (
+    SELECT 
+        up.UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE 
+            WHEN p.Score > 0 THEN 1 ELSE 0 
+        END) AS PositivePostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    JOIN 
+        UserReputation up ON up.UserId = u.Id
+    GROUP BY 
+        up.UserId, u.DisplayName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+
+SELECT 
+    rp.Title AS PostTitle,
+    u.DisplayName AS OwnerName,
+    ur.ReputationScore,
+    rp.Level AS PostLevel,
+    rph.CloseReopenCount,
+    rph.RecentChangeDates,
+    tu.PostCount,
+    tu.PositivePostCount
+FROM 
+    RecursivePostHierarchy rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+JOIN 
+    UserReputation ur ON ur.UserId = u.Id
+JOIN 
+    RecentPostHistory rph ON rph.PostId = rp.Id
+JOIN 
+    TopUsersWithPosts tu ON tu.UserId = u.Id
+WHERE 
+    ur.ReputationScore > 1000 
+    AND rp.Level <= 2 
+ORDER BY 
+    ur.ReputationScore DESC, 
+    rph.CloseReopenCount DESC;

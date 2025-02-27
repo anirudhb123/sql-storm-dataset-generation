@@ -1,0 +1,55 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales_amount,
+        AVG(ws.ws_net_paid) AS average_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS rank
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.web_site_sk
+), 
+TopSales AS (
+    SELECT 
+        web_site_sk, 
+        total_quantity_sold, 
+        total_sales_amount, 
+        average_net_paid
+    FROM SalesSummary
+    WHERE rank <= 5
+), 
+CustomerReturnInfo AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returns,
+        SUM(wr_return_amt_inc_tax) AS total_return_amount
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+), 
+ReturnImpact AS (
+    SELECT 
+        t.web_site_sk,
+        COALESCE(c.total_returns, 0) AS total_returns,
+        COALESCE(c.total_return_amount, 0) AS total_return_amount,
+        t.total_quantity_sold,
+        t.total_sales_amount,
+        (COALESCE(c.total_return_amount, 0) / t.total_sales_amount) * 100 AS return_percentage
+    FROM TopSales t
+    LEFT JOIN CustomerReturnInfo c ON c.wr_returning_customer_sk = t.web_site_sk
+)
+SELECT 
+    r.web_site_sk,
+    r.total_quantity_sold,
+    r.total_sales_amount,
+    r.average_net_paid,
+    r.total_returns,
+    r.total_return_amount,
+    CASE 
+        WHEN r.return_percentage IS NULL THEN 'No Data'
+        WHEN r.return_percentage > 10 THEN 'High Return Rate'
+        ELSE 'Normal Return Rate'
+    END AS return_rate_category
+FROM ReturnImpact r
+ORDER BY r.total_sales_amount DESC;

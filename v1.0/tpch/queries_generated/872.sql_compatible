@@ -1,0 +1,64 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerTotalPurchases AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_purchase
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+    COALESCE(s.p_name, 'Unknown Part') AS part_name,
+    s.total_avail_qty,
+    c.total_purchase,
+    CONCAT('Order Status: ', r.o_orderstatus) AS order_status,
+    CASE 
+        WHEN r.o_totalprice > 1000 THEN 'High Value'
+        WHEN r.o_totalprice BETWEEN 501 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS order_value_category
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    CustomerTotalPurchases c ON r.o_orderkey = c.c_custkey
+LEFT JOIN 
+    SupplierPartDetails s ON r.o_orderkey = s.ps_partkey
+WHERE 
+    r.rn <= 5 AND 
+    (s.total_avail_qty IS NOT NULL OR c.total_purchase IS NOT NULL)
+ORDER BY 
+    r.o_totalprice DESC, r.o_orderdate ASC;

@@ -1,0 +1,76 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank_by_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        CASE 
+            WHEN o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders) THEN 'High'
+            ELSE 'Low'
+        END AS price_category
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+LineItemAnalysis AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(l.l_linenumber) AS line_count,
+        SUM(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS discount_value,
+        AVG(l.l_tax) AS avg_tax
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name,
+    SUM(l.l_quantity) AS total_quantity,
+    MAX(s.s_acctbal) AS max_account_balance,
+    COALESCE(MAX(CASE WHEN la.line_count > 2 THEN la.discount_value END), 0) AS discounts_on_multiple_lines,
+    CASE 
+        WHEN COUNT(DISTINCT hs.o_orderkey) > 5 THEN 'Frequent Orders'
+        ELSE 'Infrequent Orders'
+    END AS order_frequency,
+    r.r_name,
+    CASE 
+        WHEN MAX(s.max_account_balance) IS NULL THEN 'No suppliers found'
+        ELSE 'Suppliers available'
+    END AS supplier_status
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    LineItemAnalysis la ON la.l_orderkey = ps.ps_partkey
+JOIN 
+    HighValueOrders hs ON hs.o_orderkey = ps.ps_partkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size BETWEEN 1 AND 20
+    AND (p.p_retailprice IS NOT NULL OR p.p_comment LIKE '%special%')
+GROUP BY 
+    ps.ps_partkey, p.p_name, r.r_name
+ORDER BY 
+    total_quantity DESC, 
+    order_frequency DESC
+LIMIT 10;

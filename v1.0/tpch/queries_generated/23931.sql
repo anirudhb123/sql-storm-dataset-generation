@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT s_suppkey, s_name, s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rn
+    FROM supplier
+), OrdersWithStatus AS (
+    SELECT o_orderkey, o_totalprice, o_orderdate,
+           CASE 
+               WHEN o_orderstatus = 'O' THEN 'OPEN'
+               WHEN o_orderstatus = 'F' THEN 'FINISHED'
+               ELSE 'UNKNOWN'
+           END AS order_status
+    FROM orders
+), PartSuppliers AS (
+    SELECT ps_partkey, SUM(ps_supplycost * ps_availqty) AS total_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+), LineItems AS (
+    SELECT l_orderkey, l_partkey, l_discount,
+           CASE 
+               WHEN l_discount <= 0.05 THEN 'LOW'
+               WHEN l_discount <= 0.10 THEN 'MEDIUM'
+               ELSE 'HIGH'
+           END AS discount_level
+    FROM lineitem
+    WHERE l_returnflag = 'N'
+)
+SELECT ns.n_name, 
+       COUNT(DISTINCT os.o_orderkey) AS total_orders,
+       AVG(ps.total_cost) AS avg_supplycost,
+       SUM(CASE 
+               WHEN ls.discount_level = 'HIGH' THEN li.l_extendedprice * (1 - li.l_discount) 
+               ELSE 0 
+           END) AS high_discount_revenue,
+       STRING_AGG(DISTINCT p.p_name, ', ') AS product_names
+FROM nation ns
+LEFT JOIN RankedSuppliers rs ON ns.n_nationkey = rs.s_nationkey AND rs.rn <= 3
+LEFT JOIN OrdersWithStatus os ON rs.s_suppkey = os.o_custkey
+LEFT JOIN PartSuppliers ps ON ps.ps_partkey IN (SELECT l_partkey FROM LineItems li WHERE li.l_orderkey = os.o_orderkey)
+LEFT JOIN lineitem li ON os.o_orderkey = li.l_orderkey
+LEFT JOIN part p ON li.l_partkey = p.p_partkey
+WHERE ns.r_name IS NOT NULL
+GROUP BY ns.n_name
+HAVING COUNT(DISTINCT os.o_orderkey) > 5 
+   AND AVG(ps.total_cost) < (SELECT AVG(total_cost) FROM PartSuppliers)
+ORDER BY ns.n_name DESC 
+FETCH FIRST 10 ROWS ONLY
+UNION ALL
+SELECT 'TOTAL', COUNT(*), SUM(avg_supplycost), SUM(high_discount_revenue), NULL
+FROM (
+    SELECT AVG(ps.total_cost) AS avg_supplycost,
+           SUM(CASE 
+                   WHEN ls.discount_level = 'HIGH' THEN li.l_extendedprice * (1 - li.l_discount) 
+                   ELSE 0 
+               END) AS high_discount_revenue
+    FROM PartSuppliers ps
+    JOIN LineItems li ON ps.ps_partkey = li.l_partkey
+    GROUP BY li.l_orderkey
+) AS consolidated;

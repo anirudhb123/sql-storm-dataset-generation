@@ -1,0 +1,77 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS UpvotedPosts,
+        SUM(CASE WHEN p.Score <= 0 THEN 1 ELSE 0 END) AS DownvotedPosts,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    u.DisplayName AS OwnerName,
+    ps.PostCount,
+    ps.UpvotedPosts,
+    ps.DownvotedPosts,
+    ps.AvgViewCount,
+    pvs.VoteCount,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    r.Level
+FROM 
+    RecursivePostHierarchy r
+JOIN 
+    UserPostStats ps ON ps.UserId = r.PostId 
+LEFT JOIN 
+    PostVoteStats pvs ON pvs.PostId = r.PostId
+JOIN 
+    Users u ON u.Id = r.PostId 
+WHERE 
+    r.Level <= 2 
+ORDER BY 
+    r.Level, pvs.VoteCount DESC;

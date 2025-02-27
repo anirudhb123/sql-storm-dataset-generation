@@ -1,0 +1,54 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+),
+TotalSales AS (
+    SELECT l.l_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY l.l_suppkey
+),
+SalesGrowth AS (
+    SELECT ts.l_suppkey, 
+           CASE 
+               WHEN LAG(ts.total_sales) OVER (ORDER BY ts.l_suppkey) IS NULL THEN NULL 
+               ELSE (ts.total_sales - LAG(ts.total_sales) OVER (ORDER BY ts.l_suppkey)) / NULLIF(LAG(ts.total_sales) OVER (ORDER BY ts.l_suppkey), 0)
+           END AS growth_rate
+    FROM TotalSales ts
+),
+NationedRegions AS (
+    SELECT n.n_nationkey, 
+           r.r_name AS region_name,
+           COUNT(DISTINCT s.s_suppkey) AS unique_suppliers
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, r.r_name
+)
+SELECT DISTINCT ps.ps_partkey,
+       p.p_name,
+       COALESCE(s.s_name, 'No Supplier') AS best_supplier,
+       s_rank.rnk,
+       COALESCE(g.growth_rate, 0) AS supplier_growth_rate,
+       n.reg_name,
+       nr.unique_suppliers,
+       CASE 
+           WHEN p.p_retailprice > subquery.high_price THEN 'Above Average' 
+           ELSE 'Below Average'
+       END AS price_comment,
+       (SELECT COUNT(*) FROM partsupp WHERE ps_partkey = p.p_partkey) AS total_part_suppliers
+FROM part p
+LEFT JOIN RankedSuppliers s_rnk ON s_rnk.s_suppkey = (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_partkey = p.p_partkey
+    ORDER BY ps.ps_supplycost ASC
+    LIMIT 1
+)
+LEFT JOIN SalesGrowth g ON g.l_suppkey = s_rnk.s_suppkey
+JOIN nationedRegions n ON s_rnk.s_nationkey = n.n_nationkey
+CROSS JOIN (SELECT AVG(p_retailprice) AS high_price FROM part) subquery
+LEFT JOIN nationedRegions nr ON n.n_nationkey = nr.n_nationkey
+WHERE p.p_size > 10 AND p.p_comment IS NOT NULL
+ORDER BY p.p_partkey;

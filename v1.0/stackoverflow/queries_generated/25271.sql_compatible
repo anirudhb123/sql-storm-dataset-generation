@@ -1,0 +1,61 @@
+
+WITH UserTagStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        AVG(COALESCE(p.ViewCount, 0)) AS AverageViewCount,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS tagName ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tagName
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentActivity AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(p.LastActivityDate) AS LastActivityDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+    GROUP BY 
+        u.DisplayName
+)
+SELECT 
+    uts.UserId,
+    uts.DisplayName,
+    uts.PostCount,
+    uts.QuestionCount,
+    uts.AnswerCount,
+    uts.Tags,
+    uts.AverageViewCount,
+    uts.AverageScore,
+    ra.CommentCount,
+    ra.BadgeCount,
+    ra.LastActivityDate
+FROM 
+    UserTagStats uts
+LEFT JOIN 
+    RecentActivity ra ON uts.DisplayName = ra.DisplayName
+WHERE 
+    uts.PostCount > 10
+ORDER BY 
+    uts.AverageScore DESC, ra.LastActivityDate DESC;

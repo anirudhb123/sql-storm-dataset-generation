@@ -1,0 +1,25 @@
+SELECT 
+    REGEXP_REPLACE(SUBSTRING_INDEX(p_name, ' ', 1), '[^A-Za-z0-9]', '') AS cleaned_first_word,
+    LENGTH(REGEXP_REPLACE(p_name, '[^A-Za-z0-9]', '')) AS clean_name_length,
+    UPPER(p_brand) AS uppercase_brand,
+    CONCAT(LEFT(p_comment, 10), '...') AS short_comment,
+    COUNT(DISTINCT s_name) AS unique_suppliers
+FROM 
+    part
+JOIN 
+    partsupp ON p_partkey = ps_partkey
+JOIN 
+    supplier ON ps_suppkey = s_suppkey
+JOIN 
+    nation ON s_nationkey = n_nationkey
+JOIN 
+    region ON n_regionkey = r_regionkey
+WHERE 
+    r_name LIKE 'N%'
+GROUP BY 
+    cleaned_first_word, clean_name_length, uppercase_brand, short_comment
+HAVING 
+    clean_name_length > 5
+ORDER BY 
+    unique_suppliers DESC, uppercase_brand ASC
+LIMIT 100;

@@ -1,0 +1,37 @@
+
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    ca.ca_state,
+    CAST(d.d_date AS DATE) AS sales_date,
+    SUM(ws.ws_quantity) AS total_quantity,
+    SUM(ws.ws_ext_sales_price) AS total_sales,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+    LENGTH(c.c_email_address) AS email_length,
+    UPPER(CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ', ', ca.ca_city, ', ', ca.ca_state)) AS full_address
+FROM 
+    web_sales ws
+JOIN 
+    customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    d.d_year = 2022
+GROUP BY 
+    c.c_first_name, 
+    c.c_last_name, 
+    ca.ca_city, 
+    ca.ca_state, 
+    d.d_date, 
+    c.c_email_address, 
+    ca.ca_street_number, 
+    ca.ca_street_name
+HAVING 
+    total_quantity > 0
+ORDER BY 
+    total_sales DESC, 
+    total_quantity DESC;

@@ -1,0 +1,31 @@
+
+SELECT 
+    ak.name AS aka_name,
+    t.title AS movie_title,
+    c.nr_order,
+    p.gender,
+    COUNT(mk.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS all_keywords,
+    AVG(ct.id) AS average_cast_type_id
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    person_info p ON ak.person_id = p.person_id
+JOIN 
+    role_type rt ON c.role_id = rt.id
+JOIN 
+    comp_cast_type ct ON c.person_role_id = ct.id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND ak.name IS NOT NULL
+    AND c.nr_order IS NOT NULL
+GROUP BY 
+    ak.name, t.title, c.nr_order, p.gender, ct.id
+ORDER BY 
+    keyword_count DESC, ak.name ASC, t.title DESC;

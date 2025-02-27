@@ -1,0 +1,54 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000 
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    AVG(pi.info::int) AS average_rating,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY a.name ORDER BY AVG(pi.info::int) DESC) AS actor_rank
+FROM 
+    actor a
+JOIN 
+    cast_info ci ON a.id = ci.person_id
+JOIN 
+    aka_title t ON t.id = ci.movie_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = t.id
+LEFT JOIN 
+    info_type it ON it.id = mi.info_type_id AND it.info = 'rating'
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN 
+    person_info pi ON pi.person_id = a.id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+WHERE 
+    t.production_year >= 2010
+    AND (a.name IS NOT NULL AND t.title IS NOT NULL)
+GROUP BY 
+    a.name, t.title
+HAVING 
+    AVG(pi.info::int) IS NOT NULL
+ORDER BY 
+    actor_rank, average_rating DESC;

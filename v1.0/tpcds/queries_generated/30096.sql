@@ -1,0 +1,58 @@
+
+WITH RECURSIVE customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(ws.ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank_profit
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_customer_id
+), 
+top_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_customer_id,
+        cs.total_profit,
+        cs.order_count
+    FROM customer_sales cs
+    WHERE cs.rank_profit <= 10
+), 
+sales_by_date AS (
+    SELECT 
+        dd.d_date,
+        SUM(ws.ws_net_profit) AS daily_profit
+    FROM date_dim dd
+    JOIN web_sales ws ON dd.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY dd.d_date
+), 
+customer_details AS (
+    SELECT 
+        tc.c_customer_id,
+        tc.total_profit,
+        tc.order_count,
+        STRING_AGG(DISTINCT CONCAT(to_char(ad.ca_street_number), ' ', ad.ca_street_name, ', ', ad.ca_city, ', ', ad.ca_state, ' ', ad.ca_zip) ORDER BY ad.ca_address_sk) AS addresses
+    FROM top_customers tc
+    LEFT JOIN customer_address ad ON tc.c_customer_sk = ad.ca_address_sk
+    GROUP BY tc.c_customer_id, tc.total_profit, tc.order_count
+)
+
+SELECT 
+    c.c_customer_id,
+    c.total_profit,
+    c.order_count,
+    COALESCE(sd.daily_profit, 0) AS last_year_avg_daily_profit,
+    CASE 
+        WHEN c.order_count > 5 THEN 'Frequent Buyer'
+        ELSE 'Casual Buyer'
+    END AS buyer_category,
+    c.addresses
+FROM customer_details c
+LEFT JOIN (
+    SELECT 
+        AVG(s.daily_profit) AS daily_profit
+    FROM sales_by_date s 
+    WHERE s.d_date >= CURRENT_DATE - INTERVAL '365 days'
+) sd ON TRUE
+ORDER BY c.total_profit DESC;

@@ -1,0 +1,47 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_cast_count,
+        COALESCE(MAX(c.role_id) FILTER (WHERE r.role != 'Uncredited'), 0) AS highest_role_id
+    FROM aka_title t
+    JOIN complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN cast_info c ON cc.subject_id = c.id
+    LEFT JOIN role_type r ON c.role_id = r.id
+    WHERE t.production_year >= 2000
+    GROUP BY a.id, t.title, t.production_year
+),
+
+TopMovies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN total_cast > 15 THEN 'Large Cast'
+            WHEN total_cast BETWEEN 10 AND 15 THEN 'Moderate Cast'
+            ELSE 'Small Cast'
+        END AS cast_size_category
+    FROM RankedMovies
+    WHERE rank_by_cast_count <= 10
+)
+
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    tm.total_cast,
+    tm.cast_size_category,
+    ARRAY_AGG(DISTINCT string_agg(DISTINCT ak.name, ', ' ORDER BY ak.name)) AS actor_names,
+    COALESCE(AVG(mk.keyword::text), 'No Keywords') AS average_keyword
+FROM TopMovies tm
+LEFT JOIN cast_info c ON tm.movie_id = c.movie_id
+LEFT JOIN aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN movie_keyword mk ON tm.movie_id = mk.movie_id
+GROUP BY tm.movie_id
+ORDER BY tm.production_year DESC, tm.total_cast DESC
+LIMIT 10;
+
+-- This query benchmarks movie performance by showcasing top movies with their cast statistics
+-- It employs CTEs, window functions, complex predicates, and aggregate functions including filtering logic 
+-- and NULL handling in a comprehensive manner.

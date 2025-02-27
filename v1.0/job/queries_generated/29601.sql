@@ -1,0 +1,55 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword AS movie_keyword,
+        GROUP_CONCAT(DISTINCT a.name) AS aka_names,
+        GROUP_CONCAT(DISTINCT c.name) AS company_names,
+        GROUP_CONCAT(DISTINCT p.info) AS person_info
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        person_info p ON ci.person_id = p.person_id
+    GROUP BY 
+        t.title, t.production_year, k.keyword
+),
+FilteredMovies AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.movie_keyword,
+        md.aka_names,
+        md.company_names,
+        md.person_info
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.production_year >= 2000 
+        AND md.movie_keyword IS NOT NULL
+)
+
+SELECT 
+    f.movie_title,
+    f.production_year,
+    f.movie_keyword,
+    f.aka_names,
+    f.company_names,
+    f.person_info
+FROM 
+    FilteredMovies f
+ORDER BY 
+    f.production_year DESC, 
+    f.movie_title
+LIMIT 50;

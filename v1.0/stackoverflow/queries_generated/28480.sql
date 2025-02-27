@@ -1,0 +1,67 @@
+WITH TagStatistics AS (
+    SELECT 
+        Tags.Id AS TagId, 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN Posts.ViewCount > 1000 THEN 1 ELSE 0 END) AS PopularityCount
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(substring(Tags, 2, length(Tags)-2)::varchar[])
+    GROUP BY 
+        Tags.Id
+),
+UserReputation AS (
+    SELECT 
+        Users.Id AS UserId, 
+        Users.DisplayName,
+        SUM(CASE WHEN Badges.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Badges.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Badges.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        AVG(Users.Reputation) AS AvgReputation
+    FROM 
+        Users
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.Id
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        PostId,
+        COUNT(DISTINCT UserId) AS UniqueEditors,
+        COUNT(*) FILTER (WHERE PostHistoryTypeId IN (4, 6, 10, 11)) AS EditsCount,
+        MAX(CreationDate) AS LastEditDate
+    FROM 
+        PostHistory
+    GROUP BY 
+        PostId
+)
+SELECT 
+    ts.TagId,
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.PopularityCount,
+    ur.UserId,
+    ur.DisplayName,
+    ur.GoldBadges,
+    ur.SilverBadges,
+    ur.BronzeBadges,
+    ur.AvgReputation,
+    pha.UniqueEditors,
+    pha.EditsCount,
+    pha.LastEditDate
+FROM 
+    TagStatistics ts
+JOIN 
+    UserReputation ur ON ur.UserId IN (SELECT DISTINCT OwnerUserId FROM Posts WHERE Tags LIKE '%' || ts.TagName || '%')
+LEFT JOIN 
+    PostHistoryAnalysis pha ON pha.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE '%' || ts.TagName || '%')
+WHERE 
+    ts.PostCount > 5 AND ur.AvgReputation > 200
+ORDER BY 
+    ts.PopularityCount DESC, ur.AvgReputation DESC;

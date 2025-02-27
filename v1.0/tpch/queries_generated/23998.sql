@@ -1,0 +1,95 @@
+WITH RecursiveSupplier AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        0 AS level,
+        CAST(s.s_name AS VARCHAR(100)) AS path
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 1000
+    UNION ALL
+    SELECT 
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        rs.level + 1,
+        CAST(rs.path || ' -> ' || s.s_name AS VARCHAR(200)) AS path
+    FROM 
+        RecursiveSupplier rs
+    JOIN 
+        partsupp ps ON rs.s_suppkey = ps.ps_suppkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        rs.level < 10
+),
+TotalOrders AS (
+    SELECT 
+        o.o_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_custkey
+),
+CustomerStatus AS (
+    SELECT 
+        c.c_custkey,
+        CASE 
+            WHEN t.total_spent IS NULL THEN 'NEW' 
+            WHEN t.total_spent < 500 THEN 'BRONZE' 
+            WHEN t.total_spent >= 500 AND t.total_spent < 1500 THEN 'SILVER' 
+            ELSE 'GOLD' 
+        END AS customer_tier
+    FROM 
+        customer c
+    LEFT JOIN 
+        TotalOrders t ON c.c_custkey = t.o_custkey
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_discount,
+        l.l_returnflag,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rn
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_discount BETWEEN 0.05 AND 0.20
+        AND l.l_returnflag = 'R'
+),
+RankedSuppliers AS (
+    SELECT 
+        r.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT ps.ps_partkey) DESC) AS rk
+    FROM 
+        supplier r
+    JOIN 
+        partsupp ps ON r.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.s_suppkey
+)
+SELECT 
+    cs.customer_tier,
+    COUNT(DISTINCT cs.c_custkey) AS customer_count,
+    SUM(CASE WHEN rs.rk <= 5 THEN 1 ELSE 0 END) AS top_supplier_count,
+    COUNT(DISTINCT li.l_orderkey) AS orders_from_discounted_items,
+    STRING_AGG(DISTINCT rs.s_name, ', ') AS top_suppliers
+FROM 
+    CustomerStatus cs
+LEFT JOIN 
+    RankedSuppliers rs ON cs.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'O')
+LEFT JOIN 
+    FilteredLineItems li ON cs.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_phone IS NOT NULL)
+WHERE 
+    cs.customer_tier IS NOT NULL
+GROUP BY 
+    cs.customer_tier
+HAVING 
+    COUNT(DISTINCT cs.c_custkey) > 0
+ORDER BY 
+    MAX(cs.customer_tier);

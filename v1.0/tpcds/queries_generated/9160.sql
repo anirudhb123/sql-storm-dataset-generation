@@ -1,0 +1,64 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ss.ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS purchase_count,
+        MAX(d.d_date) AS last_purchase_date
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    JOIN 
+        date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_id
+),
+TopCustomers AS (
+    SELECT 
+        c.customer_id, 
+        c.total_sales, 
+        c.purchase_count, 
+        c.last_purchase_date,
+        ROW_NUMBER() OVER (ORDER BY c.total_sales DESC) AS rank
+    FROM 
+        CustomerSales c
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        CASE 
+            WHEN cd.cd_purchase_estimate > 1000 THEN 'High'
+            WHEN cd.cd_purchase_estimate BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low' 
+        END AS purchase_potential,
+        tc.total_sales
+    FROM 
+        customer_demographics cd
+    JOIN 
+        (SELECT c.c_current_cdemo_sk, cs.total_sales 
+         FROM CustomerSales cs 
+         JOIN customer c ON cs.c_customer_id = c.c_customer_id) AS tc 
+    ON cd.cd_demo_sk = tc.c_current_cdemo_sk
+)
+SELECT 
+    tc.customer_id,
+    tc.total_sales,
+    tc.purchase_count,
+    tc.last_purchase_date,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cd.purchase_potential
+FROM 
+    TopCustomers tc
+JOIN 
+    CustomerDemographics cd ON tc.customer_id = cd.customer_id
+WHERE 
+    tc.rank <= 10
+ORDER BY 
+    tc.total_sales DESC;

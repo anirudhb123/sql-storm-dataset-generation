@@ -1,0 +1,45 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ss.ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN 2451545 AND 2451545 + 30 -- Sales in a 30-day window
+    GROUP BY 
+        c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_sales,
+        cs.total_transactions
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer_demographics cd ON cs.c_customer_id = cd.cd_demo_sk
+    WHERE 
+        cs.total_sales > (
+            SELECT AVG(total_sales) FROM CustomerSales
+        )
+)
+SELECT 
+    hvc.c_customer_id,
+    hvc.total_sales,
+    hvc.total_transactions,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status
+FROM 
+    HighValueCustomers hvc
+JOIN 
+    customer_demographics cd ON hvc.c_customer_id = cd.cd_demo_sk
+WHERE 
+    cd.cd_gender = 'F' AND cd.cd_marital_status = 'M' -- Filtering for married females
+ORDER BY 
+    hvc.total_sales DESC
+LIMIT 100;

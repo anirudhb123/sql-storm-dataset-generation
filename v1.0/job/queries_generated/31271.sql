@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        title.kind_id,
+        CAST(NULL AS integer) AS parent_id,
+        0 AS level
+    FROM 
+        title
+    WHERE 
+        title.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.movie_id AS parent_id,
+        mh.level + 1
+    FROM 
+        title m
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id 
+    JOIN 
+        MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+), MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mt.kind AS movie_kind,
+        COALESCE(STRING_AGG(DISTINCT ak.name, ', '), 'No Cast') AS cast_names,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN 
+        kind_type mt ON mh.kind_id = mt.id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mt.kind
+), RankedMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.movie_kind,
+        md.cast_names,
+        md.company_count,
+        RANK() OVER (PARTITION BY md.movie_kind ORDER BY md.production_year DESC) AS rank_per_kind
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.movie_kind,
+    rm.cast_names,
+    rm.company_count,
+    rm.rank_per_kind
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rank_per_kind <= 5
+ORDER BY 
+    rm.movie_kind, rm.production_year DESC;

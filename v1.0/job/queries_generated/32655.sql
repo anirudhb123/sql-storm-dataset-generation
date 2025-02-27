@@ -1,0 +1,54 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    INNER JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    INNER JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    tt.title AS title,
+    tt.production_year,
+    COUNT(DISTINCT cc.person_id) AS co_actor_count,
+    AVG(CASE WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END) AS has_info_percentage,
+    ARRAY_AGG(DISTINCT kw.keyword) AS keywords,
+    STRING_AGG(DISTINCT mk.info ORDER BY mk.note) AS movie_notes
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_title tt ON mh.movie_id = tt.id
+LEFT JOIN 
+    movie_keyword mk ON tt.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mi ON tt.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+GROUP BY 
+    ak.name, tt.title, tt.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 1
+ORDER BY 
+    has_info_percentage DESC, co_actor_count DESC;

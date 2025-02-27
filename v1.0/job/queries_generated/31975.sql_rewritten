@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND m.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        mh.level + 1 
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title linked ON linked.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON linked.id = mh.movie_id
+    WHERE 
+        mh.level < 3  
+)
+
+SELECT 
+    h.movie_title,
+    COUNT(DISTINCT c.id) AS cast_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+    AVG(mi.info) FILTER (WHERE it.info = 'rating') AS average_rating,
+    MAX(mi.info) FILTER (WHERE it.info = 'budget') AS max_budget,
+    CASE 
+        WHEN AVG(mi.info) FILTER (WHERE it.info = 'rating') IS NULL 
+             THEN 'No Rating Available' 
+        ELSE 'Rating Available' 
+    END AS rating_availability
+FROM 
+    MovieHierarchy h
+LEFT JOIN 
+    complete_cast cc ON h.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    movie_info mi ON h.movie_id = mi.movie_id
+LEFT JOIN 
+    info_type it ON mi.info_type_id = it.id
+LEFT JOIN 
+    aka_name a ON c.person_id = a.person_id
+GROUP BY 
+    h.movie_title
+ORDER BY 
+    cast_count DESC, h.movie_title;

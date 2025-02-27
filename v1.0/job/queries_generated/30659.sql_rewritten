@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year, 
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        m.linked_movie_id AS movie_id, 
+        mt.title, 
+        mt.production_year,
+        cte.level + 1
+    FROM 
+        movie_link m
+    JOIN 
+        MovieCTE cte ON m.movie_id = cte.movie_id
+    JOIN 
+        aka_title mt ON m.linked_movie_id = mt.id
+    WHERE 
+        cte.level < 3  
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(mo.id) AS num_movies,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    AVG(wm.avg_role_order) AS avg_role_order,
+    MAX(IFNULL(ci.note, 'No Note')) AS cast_note
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    MovieCTE mt ON ci.movie_id = mt.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mt.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+JOIN (
+    SELECT 
+        movie_id, 
+        AVG(nr_order) AS avg_role_order
+    FROM 
+        cast_info
+    GROUP BY 
+        movie_id
+) wm ON mt.movie_id = wm.movie_id
+WHERE 
+    mt.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    ak.name, mt.title, mt.production_year
+HAVING 
+    COUNT(mo.id) > 1
+ORDER BY 
+    mt.production_year DESC,
+    ak.name ASC;

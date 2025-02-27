@@ -1,0 +1,63 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- considering only questions
+),
+TagStatistics AS (
+    SELECT 
+        tag.TagName,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS UpvotedCount,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS DownvotedCount
+    FROM 
+        PostDetails pd
+    CROSS JOIN 
+        UNNEST(string_to_array(pd.Tags, ',')) AS tag
+    JOIN 
+        Posts p ON pd.PostId = p.Id
+    GROUP BY 
+        tag.TagName
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS PostsMade,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY
+        u.Id
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.UpvotedCount,
+    ts.DownvotedCount,
+    ua.UserId,
+    ua.DisplayName AS UserName,
+    ua.BadgeCount,
+    ua.PostsMade,
+    ua.TotalScore
+FROM 
+    TagStatistics ts
+JOIN 
+    UserActivity ua ON ua.PostsMade > 0  -- only include users who made posts
+ORDER BY 
+    ts.PostCount DESC, ts.UpvotedCount DESC;

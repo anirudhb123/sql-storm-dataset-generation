@@ -1,0 +1,79 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        0 AS level,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        et.id AS movie_id,
+        et.title,
+        mh.level + 1,
+        mh.movie_id AS parent_movie_id
+    FROM 
+        aka_title et
+    INNER JOIN 
+        movie_hierarchy mh ON et.episode_of_id = mh.movie_id
+),
+cast_as_roles AS (
+    SELECT 
+        ci.movie_id,
+        ci.role_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id, ci.role_id
+),
+title_with_actor_counts AS (
+    SELECT 
+        a.id AS title_id,
+        a.title,
+        ca.actor_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_as_roles ca ON a.id = ca.movie_id
+),
+ranked_titles AS (
+    SELECT 
+        twac.title_id,
+        twac.title,
+        twac.actor_count,
+        RANK() OVER (PARTITION BY mh.level ORDER BY COALESCE(twac.actor_count, 0) DESC) AS rank
+    FROM 
+        title_with_actor_counts twac
+    JOIN 
+        movie_hierarchy mh ON twac.title_id = mh.movie_id
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.level,
+    rt.title,
+    rt.actor_count,
+    rt.rank,
+    COALESCE(nt.name, 'Unknown') AS actor_name,
+    CASE 
+        WHEN rt.actor_count IS NULL THEN 'No Actors'
+        WHEN rt.actor_count = 0 THEN 'No Cast Info'
+        ELSE 'Has Actors'
+    END AS actor_status
+FROM 
+    ranked_titles rt
+INNER JOIN 
+    movie_hierarchy mh ON rt.title_id = mh.movie_id
+LEFT JOIN 
+    cast_info ci ON rt.title_id = ci.movie_id
+LEFT JOIN 
+    aka_name nt ON ci.person_id = nt.person_id
+WHERE 
+    mh.level <= 2
+ORDER BY 
+    mh.level, rt.rank, mh.title;

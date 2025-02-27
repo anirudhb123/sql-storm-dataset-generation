@@ -1,0 +1,34 @@
+
+WITH Suppliers_Cost AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+Customer_Orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY c.c_custkey, c.c_name
+),
+Popular_Parts AS (
+    SELECT p.p_partkey, p.p_name, COUNT(l.l_orderkey) AS order_count
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING COUNT(l.l_orderkey) > 100
+),
+Nation_Suppliers AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+SELECT n.n_name, ns.supplier_count, pc.p_name, pc.order_count, cc.c_name, cc.total_spent, sc.total_supply_cost
+FROM Nation_Suppliers ns
+JOIN Popular_Parts pc ON ns.n_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = (SELECT DISTINCT s.n_nationkey FROM supplier s JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey WHERE ps.ps_partkey = pc.p_partkey))
+JOIN Customer_Orders cc ON cc.total_spent > 10000
+JOIN Suppliers_Cost sc ON sc.total_supply_cost > 50000
+ORDER BY ns.supplier_count DESC, cc.total_spent DESC
+FETCH FIRST 10 ROWS ONLY;

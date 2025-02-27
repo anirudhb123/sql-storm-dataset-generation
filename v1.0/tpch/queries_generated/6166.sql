@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, 1 AS level
+    FROM partsupp
+    WHERE ps_availqty > 0
+    UNION ALL
+    SELECT p.ps_partkey, p.ps_suppkey, p.ps_availqty, p.ps_supplycost, sc.level + 1
+    FROM partsupp p
+    JOIN SupplyChain sc ON p.ps_suppkey = sc.ps_suppkey
+    WHERE p.ps_availqty > 0 AND sc.level < 5
+),
+TopSuppliers AS (
+    SELECT s.s_name, SUM(sc.ps_supplycost * sc.ps_availqty) AS total_supply_cost
+    FROM SupplyChain sc
+    JOIN supplier s ON sc.ps_suppkey = s.s_suppkey
+    GROUP BY s.s_name
+    ORDER BY total_supply_cost DESC
+    LIMIT 10
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+    HAVING order_value > 10000
+)
+SELECT r.r_name, COUNT(DISTINCT n.n_nationkey) AS nations_count, 
+       AVG(o.order_value) AS avg_order_value,
+       SUM(ts.total_supply_cost) AS total_top_supply_cost
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN HighValueOrders o ON n.n_nationkey = (SELECT c.c_nationkey
+                                                   FROM customer c
+                                                   WHERE c.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o))
+LEFT JOIN TopSuppliers ts ON ts.s_name IN (SELECT DISTINCT s.s_name 
+                                              FROM supplier s 
+                                              JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+                                              WHERE ps.ps_partkey IN (SELECT p.p_partkey 
+                                                                      FROM part p 
+                                                                      WHERE p.p_mfgr = 'Manufacturer1'))
+GROUP BY r.r_name
+ORDER BY nations_count DESC, avg_order_value DESC;

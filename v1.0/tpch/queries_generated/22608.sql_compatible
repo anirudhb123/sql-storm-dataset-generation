@@ -1,0 +1,62 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+    UNION ALL
+    SELECT sh.s_suppkey, sh.s_name, sh.s_acctbal
+    FROM supplier_hierarchy sh
+    JOIN supplier s ON sh.s_suppkey = s.s_suppkey
+    WHERE sh.rank < 5
+),
+parts_supplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, 
+           SUM(ps.ps_availqty) AS total_availqty,
+           COUNT(s.s_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE p.p_retailprice IS NOT NULL
+    GROUP BY p.p_partkey, p.p_name, ps.ps_supplycost 
+),
+price_analysis AS (
+    SELECT p.p_partkey, p.p_name, ps.total_availqty,
+           ps.ps_supplycost,
+           AVG(ps.ps_supplycost) OVER (PARTITION BY ps.p_partkey) as avg_supplycost,
+           CASE 
+               WHEN ps.total_availqty IS NULL THEN 'NO DATA'
+               WHEN ps.total_availqty < 10 THEN 'LOW STOCK'
+               ELSE 'IN STOCK'
+           END as stock_status
+    FROM parts_supplier ps
+    JOIN part p ON p.p_partkey = ps.p_partkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey,
+           SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE o.o_orderstatus = 'O' 
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT ps.p_partkey, ps.p_name, 
+       COALESCE(ps.stock_status, 'UNKNOWN') AS stock_status,
+       CA.c_name AS cust_name, CA.total_spent
+FROM price_analysis ps
+LEFT JOIN customer_orders CA ON ps.total_availqty < 10 AND ps.total_availqty IS NOT NULL
+WHERE EXISTS (
+    SELECT 1 
+    FROM supplier s 
+    WHERE s.s_acctbal < 100
+    AND CA.total_spent > (
+        SELECT average_spent FROM (
+            SELECT AVG(total_spent) AS average_spent 
+            FROM customer_orders
+        ) AS avg_subquery
+    )
+)
+ORDER BY ps.p_partkey
+FETCH FIRST 50 ROWS ONLY;

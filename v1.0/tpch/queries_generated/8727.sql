@@ -1,0 +1,47 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rnk
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        o.o_orderkey, c.c_mktsegment
+),
+TopSegments AS (
+    SELECT 
+        c.c_mktsegment, 
+        AVG(revenue) AS avg_revenue
+    FROM 
+        RankedOrders r
+    JOIN 
+        customer c ON r.o_orderkey = o.o_orderkey
+    WHERE 
+        rnk <= 5
+    GROUP BY 
+        c.c_mktsegment
+)
+SELECT 
+    r.c_mktsegment,
+    r.avg_revenue,
+    p.p_name,
+    pp.ps_supplycost,
+    s.s_name
+FROM 
+    TopSegments r
+JOIN 
+    partsupp pp ON pp.ps_supplycost <= r.avg_revenue
+JOIN 
+    part p ON pp.ps_partkey = p.p_partkey
+JOIN 
+    supplier s ON pp.ps_suppkey = s.s_suppkey
+WHERE 
+    p.p_retailprice > 100
+ORDER BY 
+    r.c_mktsegment, r.avg_revenue DESC;

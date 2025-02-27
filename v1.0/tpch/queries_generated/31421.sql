@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level 
+    FROM supplier s 
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+    UNION ALL 
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1 
+    FROM supplier s 
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey 
+    WHERE sh.level < 3
+), 
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, COUNT(ps.ps_suppkey) AS supplier_count, SUM(ps.ps_availqty) AS total_avail_qty 
+    FROM part p 
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey 
+    GROUP BY p.p_partkey, p.p_name
+), 
+TotalSales AS (
+    SELECT 
+        l.l_partkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales 
+    FROM lineitem l 
+    JOIN orders o ON l.l_orderkey = o.o_orderkey 
+    WHERE o.o_orderdate >= DATE '2022-01-01' 
+    GROUP BY l.l_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    psi.supplier_count,
+    psi.total_avail_qty,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    COUNT(DISTINCT sh.s_suppkey) AS national_supplier_count,
+    RANK() OVER (PARTITION BY p.p_partkey ORDER BY COALESCE(ts.total_sales, 0) DESC) AS sales_rank
+FROM PartSupplierInfo psi 
+JOIN part p ON psi.p_partkey = p.p_partkey 
+LEFT JOIN TotalSales ts ON p.p_partkey = ts.l_partkey 
+LEFT JOIN SupplierHierarchy sh ON p.p_partkey IN (
+    SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = sh.s_nationkey)
+) 
+WHERE (psi.total_avail_qty > 100 OR ts.total_sales IS NOT NULL)
+AND p.p_retailprice BETWEEN 10 AND 100
+GROUP BY p.p_partkey, p.p_name, psi.supplier_count, psi.total_avail_qty, ts.total_sales
+HAVING sales_rank <= 5
+ORDER BY total_sales DESC;

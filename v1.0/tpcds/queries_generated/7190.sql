@@ -1,0 +1,59 @@
+
+WITH SalesByCustomer AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent,
+        AVG(ws.ws_net_paid) AS avg_order_value
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_id
+),
+HighSpenders AS (
+    SELECT 
+        c.c_customer_id,
+        s.total_orders,
+        s.total_spent,
+        s.avg_order_value,
+        d.d_year
+    FROM 
+        SalesByCustomer s
+    JOIN 
+        customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    JOIN 
+        date_dim d ON d.d_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+    WHERE 
+        s.total_spent > 1000
+),
+WarehouseStats AS (
+    SELECT 
+        w.w_warehouse_id,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_fulfilled,
+        SUM(ws.ws_net_paid) AS total_sales
+    FROM 
+        warehouse w
+    JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    hs.c_customer_id,
+    hs.total_orders,
+    hs.total_spent,
+    hs.avg_order_value,
+    ws.w_warehouse_id,
+    ws.orders_fulfilled,
+    ws.total_sales
+FROM 
+    HighSpenders hs
+JOIN 
+    WarehouseStats ws ON hs.total_spent = ws.total_sales
+ORDER BY 
+    hs.total_spent DESC, ws.total_sales DESC
+LIMIT 100;

@@ -1,0 +1,88 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_mfgr,
+        SUM(ps.ps_supplycost * ps.ps_availqty) OVER (PARTITION BY p.p_partkey) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY SUM(ps.ps_availqty) DESC) AS rank_mfgr
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_mfgr
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(s.s_acctbal) > 10000
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        COUNT(l.l_orderkey) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (ORDER BY c.c_acctbal DESC) AS acctbal_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 5000
+)
+SELECT 
+    r.r_name,
+    np.total_parts,
+    COUNT(DISTINCT f.c_custkey) AS high_value_customers,
+    SUM(os.total_revenue) / NULLIF(COUNT(os.o_orderkey), 0) AS avg_revenue_per_order
+FROM 
+    region r
+LEFT JOIN (
+    SELECT 
+        n.n_regionkey,
+        COUNT(DISTINCT p.p_partkey) AS total_parts
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        n.n_regionkey
+) np ON r.r_regionkey = np.n_regionkey
+LEFT JOIN 
+    OrderStats os ON os.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+LEFT JOIN 
+    FilteredCustomers f ON f.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'O')
+GROUP BY 
+    r.r_name, np.total_parts
+ORDER BY 
+    AVG(np.total_parts) DESC, r.r_name
+HAVING 
+    COUNT(DISTINCT f.c_custkey) > 10 AND SUM(os.total_revenue) > 10000.00
+WITH ROLLUP;

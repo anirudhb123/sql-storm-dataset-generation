@@ -1,0 +1,63 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_sales_price) DESC) AS rank_sales
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender = 'F' OR cd.cd_gender IS NULL
+    GROUP BY ws.web_site_id
+),
+SalesByMonth AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_sales_price) AS monthly_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS monthly_orders
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_year, d.d_month_seq
+),
+CustomerReturns AS (
+    SELECT 
+        cr.cr_returning_customer_sk,
+        SUM(cr.cr_return_quantity) AS total_returns
+    FROM catalog_returns cr
+    GROUP BY cr.cr_returning_customer_sk
+),
+CombinedResults AS (
+    SELECT 
+        r.web_site_id,
+        COALESCE(s.total_sales, 0) AS total_sales,
+        COALESCE(o.total_orders, 0) AS total_orders,
+        COALESCE(c.total_returns, 0) AS total_returns
+    FROM (SELECT DISTINCT web_site_id FROM web_site) r
+    LEFT JOIN RecursiveSales s ON r.web_site_id = s.web_site_id
+    LEFT JOIN LATERAL (
+        SELECT total_orders 
+        FROM RecursiveSales 
+        WHERE rank_sales = 1 AND web_site_id = r.web_site_id
+    ) o ON true
+    LEFT JOIN CustomerReturns c ON c.cr_returning_customer_sk = s.web_site_id
+)
+SELECT 
+    w.w_warehouse_id,
+    cr.web_site_id,
+    cr.total_sales,
+    cr.total_orders,
+    cr.total_returns,
+    (cr.total_sales - cr.total_returns) AS net_profit,
+    CASE 
+        WHEN cr.total_returns > cr.total_sales THEN 'Loss'
+        WHEN cr.total_returns = 0 THEN 'Profit'
+        ELSE 'Break Even'
+    END AS profitability_status
+FROM warehouse w
+JOIN CombinedResults cr ON cr.web_site_id = w.w_warehouse_id
+WHERE cr.total_sales > 1000
+AND (cr.total_orders IS NOT NULL OR cr.total_returns IS NOT NULL)
+ORDER BY net_profit DESC
+FETCH FIRST 10 ROWS ONLY;

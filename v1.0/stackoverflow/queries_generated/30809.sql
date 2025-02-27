@@ -1,0 +1,60 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        0 AS Depth
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        r.Depth + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+ClosedPosts AS (
+    SELECT 
+        PostId,
+        MAX(CreationDate) AS LastClosedDate
+    FROM PostHistory
+    WHERE PostHistoryTypeId = 10
+    GROUP BY PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    COALESCE(v.UpVotes, 0) AS UpVoteCount,
+    COALESCE(v.DownVotes, 0) AS DownVoteCount,
+    ph.Depth AS HierarchyDepth,
+    cp.LastClosedDate,
+    CASE 
+        WHEN cp.LastClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    CASE 
+        WHEN v.UpVotes IS NULL OR v.UpVotes = 0 THEN 'No Votes'
+        WHEN v.DownVotes IS NULL OR v.DownVotes = 0 THEN 'Only Upvotes'
+        ELSE 'Mixed Votes'
+    END AS VoteType
+FROM Posts p
+LEFT JOIN PostVoteCounts v ON p.Id = v.PostId
+LEFT JOIN ClosedPosts cp ON p.Id = cp.PostId
+LEFT JOIN RecursivePostHierarchy ph ON p.Id = ph.Id  -- Join to get hierarchy depth
+WHERE p.CreationDate > CURRENT_DATE - INTERVAL '1 year'  -- Filtering for posts created within the last year
+ORDER BY VoteCount DESC NULLS LAST, p.CreationDate DESC;

@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+),
+PartSales AS (
+    SELECT 
+        p.p_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        p.p_partkey
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        COALESCE(SUM(l.l_quantity), 0) AS total_quantity_sold
+    FROM 
+        partsupp ps
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey AND ps.ps_suppkey = l.l_suppkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost
+)
+SELECT 
+    r.s_suppkey,
+    r.s_name,
+    p.p_name,
+    sp.ps_availqty,
+    COALESCE(ps.total_sales, 0) AS total_sales,
+    ps.order_count,
+    (CASE 
+        WHEN sp.ps_availqty > 0 THEN sp.ps_supplycost * 1.2
+        ELSE NULL
+    END) AS updated_supplycost
+FROM 
+    RankedSuppliers r
+CROSS JOIN 
+    PartSales ps
+JOIN 
+    SupplierParts sp ON r.s_suppkey = sp.ps_suppkey
+WHERE 
+    r.rank = 1 
+    AND (sp.ps_availqty <= 200 OR sp.total_quantity_sold > 100)
+    AND p.p_type IN (SELECT DISTINCT p2.p_type FROM part p2 WHERE p2.p_size > 20)
+ORDER BY 
+    updated_supplycost DESC NULLS LAST;

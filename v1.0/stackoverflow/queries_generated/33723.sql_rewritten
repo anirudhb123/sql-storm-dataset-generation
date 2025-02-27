@@ -1,0 +1,88 @@
+WITH RecursivePostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount 
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount 
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    r.Title,
+    r.CreationDate,
+    r.CommentCount,
+    r.UpVotes,
+    r.DownVotes,
+    r.Score,
+    ub.BadgeCount,
+    cp.CloseCount,
+    CASE 
+        WHEN r.CommentCount > 10 THEN 'High Interaction' 
+        ELSE 'Low Interaction' 
+    END AS InteractionLevel,
+    CASE 
+        WHEN r.Score > 50 THEN 'Highly Voted' 
+        ELSE 'Less Voted' 
+    END AS VoteLevel,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Posts p
+     JOIN Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+     WHERE p.Id = r.PostId) AS TagNames
+FROM 
+    RecursivePostStats r
+LEFT JOIN 
+    UserBadgeCounts ub ON r.OwnerUserId = ub.UserId
+LEFT JOIN 
+    ClosedPosts cp ON r.PostId = cp.PostId
+WHERE 
+    r.PostRank = 1 
+    AND r.Score >= 0
+ORDER BY 
+    r.CreationDate DESC
+LIMIT 100;

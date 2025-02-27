@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.LastActivityDate DESC) AS Rank,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.LastActivityDate, p.OwnerUserId
+)
+
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT rp.PostId) AS TotalPosts,
+    SUM(rp.UpVoteCount) AS TotalUpVotes,
+    SUM(rp.DownVoteCount) AS TotalDownVotes,
+    AVG(rp.CommentCount) AS AvgCommentsPerPost,
+    CASE 
+        WHEN SUM(rp.UpVoteCount) IS NULL THEN 'No Upvotes'
+        WHEN SUM(rp.UpVoteCount) > SUM(rp.DownVoteCount) THEN 'Positive Contributor'
+        WHEN SUM(rp.UpVoteCount) < SUM(rp.DownVoteCount) THEN 'Negative Contributor'
+        ELSE 'Neutral'
+    END AS ContributorType,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = u.Id AND b.Class = 1) AS GoldBadges,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = u.Id AND b.Class = 2) AS SilverBadges,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = u.Id AND b.Class = 3) AS BronzeBadges
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON u.Id = rp.OwnerUserId
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(DISTINCT rp.PostId) >= 5
+ORDER BY 
+    TotalUpVotes DESC, TotalPosts DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Total' AS DisplayName,
+    COUNT(*) AS TotalPosts,
+    SUM(TotalUpVotes) AS TotalUpVotes,
+    SUM(TotalDownVotes) AS TotalDownVotes,
+    AVG(AvgCommentsPerPost) AS AvgCommentsPerPost,
+    NULL AS ContributorType,
+    NULL AS GoldBadges,
+    NULL AS SilverBadges,
+    NULL AS BronzeBadges
+FROM 
+    (
+        SELECT 
+            COUNT(DISTINCT rp.PostId) AS TotalPosts,
+            SUM(rp.UpVoteCount) AS TotalUpVotes,
+            SUM(rp.DownVoteCount) AS TotalDownVotes,
+            AVG(rp.CommentCount) AS AvgCommentsPerPost
+        FROM 
+            RankedPosts rp
+        GROUP BY 
+            rp.OwnerUserId
+    ) AS Summary
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM Users u 
+        WHERE u.Reputation IS NOT NULL AND u.Reputation > 0
+    );

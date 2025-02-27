@@ -1,0 +1,59 @@
+
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerRanked AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > 0
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total,
+        COUNT(l.l_orderkey) AS line_item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    cs.s_name,
+    co.c_name,
+    od.order_total,
+    od.line_item_count,
+    CASE 
+        WHEN od.order_total IS NULL THEN 'No orders'
+        WHEN od.line_item_count = 0 THEN 'No items'
+        ELSE 'Order successful'
+    END AS order_status
+FROM 
+    SupplierSummary cs
+LEFT JOIN 
+    OrderDetails od ON cs.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT DISTINCT p.p_partkey FROM part p WHERE p.p_brand = 'Brand#54'))
+INNER JOIN 
+    CustomerRanked co ON od.o_custkey = co.c_custkey AND co.cust_rank <= 10
+WHERE 
+    cs.total_supplycost > 10000
+ORDER BY 
+    cs.s_name, co.c_name;

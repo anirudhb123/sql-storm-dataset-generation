@@ -1,0 +1,74 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS num_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        total_profit + SUM(ws_net_profit) AS total_profit,
+        num_orders + COUNT(ws_order_number) AS num_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY total_profit DESC) AS rank
+    FROM 
+        SalesCTE
+    JOIN 
+        web_sales ON SalesCTE.ws_item_sk = web_sales.ws_item_sk
+    WHERE 
+        web_sales.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+AggregateSales AS (
+    SELECT 
+        item.i_item_id, 
+        SUM(s.total_profit) AS total_profit,
+        SUM(s.num_orders) AS total_orders,
+        ROW_NUMBER() OVER (ORDER BY SUM(s.total_profit) DESC) AS rank
+    FROM 
+        SalesCTE s
+    JOIN 
+        item item ON item.i_item_sk = s.ws_item_sk
+    GROUP BY 
+        item.i_item_id
+),
+MostProfitableItems AS (
+    SELECT 
+        i.i_item_id, 
+        i.i_product_name, 
+        a.total_profit, 
+        a.total_orders
+    FROM 
+        AggregateSales a
+    JOIN 
+        item i ON a.i_item_id = i.i_item_id
+    WHERE 
+        a.rank <= 10
+)
+SELECT 
+    m.i_item_id, 
+    m.i_product_name, 
+    m.total_profit, 
+    m.total_orders,
+    (CASE 
+         WHEN m.total_profit IS NOT NULL THEN 'Profitable' 
+         ELSE 'Not Profitable' 
+     END) AS profitability_status,
+    COALESCE(CAST(d.d_date AS VARCHAR), 'Unknown Date') AS sales_period
+FROM 
+    MostProfitableItems m
+LEFT JOIN 
+    date_dim d ON d.d_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+ORDER BY 
+    m.total_profit DESC;

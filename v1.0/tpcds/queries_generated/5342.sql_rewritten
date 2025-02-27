@@ -1,0 +1,54 @@
+WITH CustomerPurchases AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid) AS avg_order_value,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_income_band_sk
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2450000 AND 2450600 
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status, ib.ib_income_band_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.customer_id,
+        c.total_spent,
+        c.total_orders,
+        c.avg_order_value,
+        RANK() OVER (ORDER BY c.total_spent DESC) AS spending_rank
+    FROM 
+        CustomerPurchases c
+)
+SELECT 
+    tc.customer_id,
+    tc.total_spent,
+    tc.total_orders,
+    tc.avg_order_value,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ib.ib_income_band_sk
+FROM 
+    TopCustomers tc
+JOIN 
+    customer_demographics cd ON tc.customer_id = cd.cd_demo_sk
+JOIN 
+    household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+JOIN 
+    income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+WHERE 
+    tc.spending_rank <= 10
+ORDER BY 
+    tc.total_spent DESC;

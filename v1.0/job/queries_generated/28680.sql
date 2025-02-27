@@ -1,0 +1,50 @@
+WITH ranked_movies AS (
+    SELECT
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT a2.title, ', ') AS related_movies,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM
+        aka_title a
+    LEFT JOIN
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN
+        movie_link ml ON a.id = ml.movie_id
+    LEFT JOIN
+        aka_title a2 ON ml.linked_movie_id = a2.id
+    GROUP BY
+        a.id, a.title, a.production_year
+),
+top_movies AS (
+    SELECT
+        movie_id,
+        title,
+        production_year,
+        cast_count,
+        related_movies
+    FROM
+        ranked_movies
+    WHERE
+        rank <= 5
+)
+SELECT
+    m.movie_id,
+    m.title,
+    m.production_year,
+    m.cast_count,
+    m.related_movies,
+    STRING_AGG(DISTINCT p.info, '; ') AS additional_info
+FROM
+    top_movies m
+LEFT JOIN
+    movie_info mi ON m.movie_id = mi.movie_id
+LEFT JOIN
+    info_type i ON mi.info_type_id = i.id
+LEFT JOIN
+    person_info p ON p.person_id IN (SELECT person_id FROM cast_info WHERE movie_id = m.movie_id)
+GROUP BY
+    m.movie_id, m.title, m.production_year, m.cast_count, m.related_movies
+ORDER BY
+    m.production_year DESC, m.cast_count DESC;

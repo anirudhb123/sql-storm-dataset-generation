@@ -1,0 +1,52 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopOrders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_orderdate,
+        r.total_revenue
+    FROM 
+        RankedOrders r
+    WHERE 
+        r.rn = 1
+),
+RegionSupplier AS (
+    SELECT 
+        n.n_name AS nation,
+        r.r_name AS region,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        n.n_name, r.r_name
+)
+SELECT 
+    to.n_orderdate,
+    to.total_revenue,
+    rs.nation,
+    rs.region,
+    rs.supplier_count
+FROM 
+    TopOrders to
+JOIN 
+    RegionSupplier rs ON rs.region = 'ASIA'
+ORDER BY 
+    to.total_revenue DESC
+LIMIT 10;

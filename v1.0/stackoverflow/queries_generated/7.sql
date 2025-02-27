@@ -1,0 +1,44 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.CreationDate,
+    u.DisplayName,
+    u.Reputation,
+    rp.CommentCount,
+    rp.TotalBounty,
+    COALESCE(MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END), NULL) AS ClosedDate
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    PostHistory ph ON rp.PostId = ph.PostId
+GROUP BY 
+    rp.PostId, rp.Title, rp.Score, rp.ViewCount, rp.CreationDate, u.DisplayName, u.Reputation, rp.CommentCount, rp.TotalBounty
+HAVING 
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) > 10
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 100;

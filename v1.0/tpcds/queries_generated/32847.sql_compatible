@@ -1,0 +1,61 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+                              AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk
+), 
+TopSales AS (
+    SELECT 
+        sd.ws_item_sk, 
+        sd.total_sales, 
+        sd.total_orders, 
+        ROW_NUMBER() OVER (ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM SalesData sd
+    WHERE sd.rank <= 10
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status,
+        COALESCE(cd.cd_purchase_estimate, 0) AS purchase_estimate
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesWithCustomers AS (
+    SELECT 
+        ts.ws_item_sk, 
+        ts.total_sales, 
+        ts.total_orders, 
+        cd.c_customer_id, 
+        cd.purchase_estimate
+    FROM TopSales ts
+    JOIN web_sales ws ON ts.ws_item_sk = ws.ws_item_sk
+    JOIN CustomerDetails cd ON ws.ws_bill_customer_sk = cd.c_customer_id
+)
+SELECT 
+    swc.ws_item_sk,
+    swc.total_sales,
+    swc.total_orders,
+    cd_total.total_estimate,
+    (CASE 
+        WHEN cd_total.total_estimate IS NOT NULL AND cd_total.total_estimate > 0 
+        THEN swc.total_sales / cd_total.total_estimate 
+        ELSE 0 
+    END) AS sales_to_estimate_ratio
+FROM SalesWithCustomers swc
+LEFT JOIN (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(COALESCE(purchase_estimate, 0)) AS total_estimate
+    FROM CustomerDetails
+    GROUP BY ws_bill_customer_sk
+) cd_total ON swc.c_customer_id = cd_total.ws_bill_customer_sk
+ORDER BY swc.total_sales DESC;

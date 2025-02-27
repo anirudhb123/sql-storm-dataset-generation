@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM MovieHierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+),
+RankedMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COUNT(mh.movie_id) AS related_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(mh.movie_id) DESC) AS rank
+    FROM aka_title m
+    LEFT JOIN MovieHierarchy mh ON m.id = mh.movie_id
+    GROUP BY m.title, m.production_year
+),
+TopRelatedMovies AS (
+    SELECT 
+        title,
+        production_year,
+        related_count
+    FROM RankedMovies
+    WHERE rank <= 5
+)
+SELECT 
+    tm.title,
+    CASE 
+        WHEN tm.production_year IS NULL THEN 'Unknown Year'
+        ELSE CAST(tm.production_year AS TEXT)
+    END AS production_year,
+    COALESCE(tm.related_count, 0) AS related_movies,
+    COALESCE((SELECT COUNT(*) 
+              FROM movie_keyword mk 
+              JOIN keyword k ON mk.keyword_id = k.id 
+              WHERE mk.movie_id = tm.title), 0) AS keyword_count,
+    (SELECT STRING_AGG(DISTINCT c.name, ', ')
+     FROM cast_info ci
+     JOIN name c ON ci.person_id = c.imdb_id
+     WHERE ci.movie_id = (SELECT id FROM aka_title WHERE title = tm.title LIMIT 1)) AS cast_names
+FROM TopRelatedMovies tm
+LEFT JOIN aka_title a ON a.title = tm.title
+ORDER BY tm.related_count DESC, tm.production_year ASC;

@@ -1,0 +1,54 @@
+
+WITH sales_summary AS (
+    SELECT 
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_ext_sales_price) AS total_sales,
+        AVG(cs_ext_sales_price) AS average_sales_price,
+        DENSE_RANK() OVER (ORDER BY SUM(cs_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) - 30 AND 
+                               (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        cs_item_sk
+),
+high_performance_items AS (
+    SELECT 
+        ss_item_sk,
+        total_quantity,
+        total_sales,
+        average_sales_price,
+        CASE 
+            WHEN total_sales >= 10000 THEN 'High'
+            WHEN total_sales BETWEEN 5000 AND 9999 THEN 'Medium'
+            ELSE 'Low'
+        END AS performance_category
+    FROM 
+        sales_summary
+    WHERE 
+        sales_rank <= 100
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    h.total_quantity,
+    h.total_sales,
+    h.average_sales_price,
+    h.performance_category,
+    COALESCE(wp.wp_type, 'No Type') AS web_page_type,
+    COALESCE(sp.sm_type, 'No Shipping Mode') AS shipping_mode
+FROM 
+    item i
+LEFT JOIN 
+    high_performance_items h ON i.i_item_sk = h.ss_item_sk
+LEFT JOIN 
+    web_page wp ON wp.wp_customer_sk = i.i_item_sk 
+LEFT JOIN 
+    ship_mode sp ON sp.sm_ship_mode_sk = (SELECT sm_ship_mode_sk FROM web_sales WHERE ws_item_sk = i.i_item_sk ORDER BY ws_sold_date_sk DESC LIMIT 1)
+WHERE 
+    i.i_current_price > 20.00 AND (h.total_sales IS NOT NULL)
+ORDER BY 
+    h.total_sales DESC
+LIMIT 50;

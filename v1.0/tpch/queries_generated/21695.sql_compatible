@@ -1,0 +1,42 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_comment, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL AND s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_acctbal < sh.s_acctbal
+    WHERE sh.level < 5
+),
+part_supplier_cte AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > 100.00 AND ps.ps_availqty > 0
+),
+aggregated_data AS (
+    SELECT n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count, 
+           SUM(o.o_totalprice) AS total_revenue, MD5(n.n_comment) AS n_comment_hash
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' 
+      AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY n.n_name
+)
+SELECT n.n_name, ad.customer_count, ad.total_revenue, 
+       sh.s_name AS top_supplier,
+       COUNT(DISTINCT ps.p_partkey) AS part_count
+FROM aggregated_data ad
+JOIN nation n ON ad.n_name = n.n_name
+JOIN supplier_hierarchy sh ON sh.level = 1 
+LEFT JOIN part_supplier_cte ps ON ps.rn = 1 
+GROUP BY n.n_name, ad.customer_count, ad.total_revenue, sh.s_name
+HAVING SUM(ad.total_revenue) > (SELECT AVG(total_revenue) FROM aggregated_data) 
+   OR COUNT(DISTINCT sh.s_suppkey) > 2
+ORDER BY ad.total_revenue DESC, n.n_name ASC
+LIMIT 10 OFFSET 5;

@@ -1,0 +1,50 @@
+
+WITH CustomerAddressDetails AS (
+    SELECT 
+        ca.ca_address_id,
+        ca.ca_street_number,
+        ca.ca_street_name,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+StringProcessedDetails AS (
+    SELECT 
+        CONCAT(
+            ca.ca_street_number, ' ', 
+            ca.ca_street_name, ', ', 
+            ca.ca_city, ', ', 
+            ca.ca_state, ' ', 
+            ca.ca_zip
+        ) AS full_address,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        REPLACE(cd.cd_gender, 'M', 'Male') AS gender,
+        REPLACE(cd.cd_gender, 'F', 'Female') AS gender,
+        cd.cd_marital_status
+    FROM 
+        CustomerAddressDetails ca
+)
+SELECT 
+    full_address,
+    full_name,
+    gender,
+    cd_marital_status,
+    LENGTH(full_address) AS address_length,
+    CHAR_LENGTH(full_name) AS name_length
+FROM 
+    StringProcessedDetails
+WHERE 
+    LENGTH(full_address) > 0
+ORDER BY 
+    address_length DESC
+LIMIT 100;

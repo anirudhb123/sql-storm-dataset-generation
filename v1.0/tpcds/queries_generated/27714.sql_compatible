@@ -1,0 +1,59 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_customer_sk) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+city_inv AS (
+    SELECT 
+        ca.ca_city,
+        SUM(i.inv_quantity_on_hand) AS total_quantity
+    FROM 
+        customer_address ca
+    JOIN 
+        inventory i ON ca.ca_address_sk = i.inv_warehouse_sk
+    GROUP BY 
+        ca.ca_city
+),
+promotion_analysis AS (
+    SELECT 
+        p.p_promo_name,
+        COUNT(DISTINCT ws.ws_order_number) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    GROUP BY 
+        p.p_promo_name
+)
+SELECT 
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.cd_gender,
+    rc.cd_marital_status,
+    ci.ca_city,
+    ci.total_quantity,
+    pa.p_promo_name,
+    pa.total_sales,
+    pa.total_profit
+FROM 
+    ranked_customers rc
+LEFT JOIN 
+    city_inv ci ON rc.c_customer_sk = ci.ca_city
+LEFT JOIN 
+    promotion_analysis pa ON rc.gender_rank = 1 
+WHERE 
+    rc.gender_rank <= 10 
+ORDER BY 
+    ci.total_quantity DESC, 
+    pa.total_profit DESC;

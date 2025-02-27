@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS rank_sales,
+        SUM(ws_sales_price) OVER (PARTITION BY ws_item_sk) AS total_sales
+    FROM web_sales
+    WHERE ws_sales_price IS NOT NULL
+),
+ItemSummary AS (
+    SELECT
+        item.i_item_id,
+        item.i_item_desc,
+        COALESCE(inventory.inv_quantity_on_hand, 0) AS quantity_available,
+        RANK() OVER (ORDER BY COALESCE(inventory.inv_quantity_on_hand, 0) DESC) AS rank_inventory
+    FROM item
+    LEFT JOIN inventory ON inventory.inv_item_sk = item.i_item_sk
+),
+FilteredReturns AS (
+    SELECT 
+        cr_reason_sk,
+        COUNT(DISTINCT cr_returning_customer_sk) AS returning_customers,
+        SUM(cr_return_amount) AS total_return_amount
+    FROM catalog_returns
+    GROUP BY cr_reason_sk
+    HAVING SUM(cr_return_amount) < 0
+),
+SalesWithReturnImpact AS (
+    SELECT 
+        r.rank_sales,
+        i.i_item_id,
+        i.i_item_desc,
+        i.quantity_available,
+        f.returning_customers,
+        f.total_return_amount,
+        CASE 
+            WHEN f.returning_customers IS NULL THEN 'No Returns'
+            ELSE 'Returns Impacted'
+        END AS return_status
+    FROM RankedSales r
+    JOIN ItemSummary i ON r.ws_item_sk = i.i_item_id
+    LEFT JOIN FilteredReturns f ON r.ws_order_number = f.cr_reason_sk
+)
+SELECT 
+    s.i_item_id,
+    s.i_item_desc,
+    s.quantity_available,
+    s.rank_sales,
+    COALESCE(s.returning_customers, 0) AS returning_customers,
+    s.return_status,
+    CASE 
+        WHEN s.quantity_available > 0 THEN ROUND(COALESCE(s.total_return_amount, 0) / NULLIF(s.quantity_available, 0), 2)
+        ELSE NULL
+    END AS return_ratio
+FROM SalesWithReturnImpact s
+WHERE s.rank_sales <= 10
+ORDER BY s.rank_sales, s.i_item_id;

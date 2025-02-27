@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rnk
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2458356 AND 2458358 
+    GROUP BY 
+        ws.ws_item_sk
+),
+TopSales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        sales.total_quantity,
+        sales.total_net_paid,
+        ROW_NUMBER() OVER (ORDER BY sales.total_net_paid DESC) AS row_num
+    FROM 
+        SalesCTE sales
+    JOIN 
+        item ON sales.ws_item_sk = item.i_item_sk
+    WHERE
+        sales.rnk <= 10
+)
+SELECT 
+    ta.i_item_id, 
+    ta.i_item_desc, 
+    ta.total_quantity,
+    ta.total_net_paid,
+    ca.ca_city,
+    CASE 
+        WHEN ca.ca_state IS NULL THEN 'Unknown State' 
+        ELSE ca.ca_state 
+    END AS state_info
+FROM 
+    TopSales ta
+LEFT JOIN 
+    customer c ON c.c_customer_sk = (SELECT MAX(c.c_customer_sk) FROM customer c WHERE c.c_current_addr_sk IS NOT NULL)
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+WHERE 
+    ta.total_net_paid > 1000 
+ORDER BY 
+    ta.total_net_paid DESC
+LIMIT 5
+UNION ALL
+SELECT 
+    'No Item' AS i_item_id, 
+    'No Description' AS i_item_desc, 
+    0 AS total_quantity,
+    0 AS total_net_paid,
+    'No City' AS ca_city,
+    'No State' AS state_info
+WHERE NOT EXISTS (SELECT 1 FROM TopSales);

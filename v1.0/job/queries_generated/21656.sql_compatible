@@ -1,0 +1,54 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        0 AS depth
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.name LIKE '%Studio%'  
+    
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        complete_cast m
+    JOIN 
+        MovieHierarchy mh ON m.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.title,
+    AVG(mh.depth) AS avg_depth,
+    COUNT(DISTINCT ci.person_id) AS actor_count, 
+    COUNT(DISTINCT mh.movie_id) AS unique_movies,
+    STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+    SUM(COALESCE(mk.count, 0)) AS total_keywords
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id 
+LEFT JOIN 
+    aka_name an ON ci.person_id = an.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    company_name cn ON ci.movie_id = cn.id  
+GROUP BY 
+    mh.title, mh.production_year
+HAVING 
+    AVG(mh.depth) > 1 AND
+    COUNT(DISTINCT ci.person_id) > 5
+ORDER BY 
+    avg_depth DESC, unique_movies DESC
+LIMIT 10;

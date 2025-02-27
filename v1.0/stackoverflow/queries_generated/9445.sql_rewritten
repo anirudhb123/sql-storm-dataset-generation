@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        Row_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(b.Class = 1)::int, 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2)::int, 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3)::int, 0) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges,
+        us.TotalPosts,
+        RANK() OVER (ORDER BY us.TotalPosts DESC) AS UserRank
+    FROM 
+        UserStats us
+    WHERE 
+        us.TotalPosts > 0
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    tu.DisplayName AS OwnerDisplayName,
+    tu.UserRank,
+    tu.GoldBadges,
+    tu.SilverBadges,
+    tu.BronzeBadges
+FROM 
+    RankedPosts rp
+JOIN 
+    TopUsers tu ON rp.OwnerUserId = tu.UserId
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 10;

@@ -1,0 +1,64 @@
+WITH ranked_titles AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rank
+    FROM
+        aka_name a
+    JOIN
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE
+        t.production_year IS NOT NULL
+),
+keyword_count AS (
+    SELECT 
+        m.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title m ON mk.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id
+),
+movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COALESCE(kc.keyword_count, 0) AS keyword_count,
+        COALESCE(c.type_count, 0) AS company_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        keyword_count kc ON t.movie_id = kc.movie_id
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            COUNT(DISTINCT company_type_id) AS type_count
+        FROM 
+            movie_companies
+        GROUP BY 
+            movie_id
+    ) c ON t.movie_id = c.movie_id
+)
+SELECT 
+    d.movie_title,
+    d.production_year,
+    d.keyword_count,
+    COALESCE(ak.actor_name, 'Unknown Actor') AS leading_actor,
+    RANK() OVER (ORDER BY d.production_year DESC) AS production_rank
+FROM 
+    movie_details d
+LEFT JOIN 
+    ranked_titles ak ON d.movie_id = ak.movie_id AND ak.rank = 1
+WHERE 
+    d.keyword_count > 2
+    AND d.production_year BETWEEN 1990 AND EXTRACT(YEAR FROM CURRENT_DATE)
+ORDER BY 
+    d.production_year DESC,
+    d.keyword_count DESC
+LIMIT 10;
+

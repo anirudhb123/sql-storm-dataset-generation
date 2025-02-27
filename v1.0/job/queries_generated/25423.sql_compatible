@@ -1,0 +1,60 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title, 
+        m.production_year, 
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        ARRAY_AGG(DISTINCT ak.name) AS alias_names
+    FROM 
+        aka_title ak
+    JOIN 
+        title m ON ak.movie_id = m.id
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id, 
+        COUNT(mk.keyword_id) AS keyword_count,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+FinalBenchmark AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        rm.total_cast,
+        COALESCE(mk.keyword_count, 0) AS keyword_count,
+        mk.keywords,
+        CARDINALITY(rm.alias_names) AS alias_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON rm.movie_id = mk.movie_id
+    ORDER BY 
+        rm.production_year DESC, 
+        rm.total_cast DESC
+)
+SELECT 
+    fb.movie_id, 
+    fb.movie_title,
+    fb.production_year,
+    fb.total_cast,
+    fb.keyword_count,
+    fb.keywords,
+    fb.alias_count
+FROM 
+    FinalBenchmark fb
+WHERE 
+    fb.total_cast > 5 AND
+    fb.production_year >= 2000
+LIMIT 50;

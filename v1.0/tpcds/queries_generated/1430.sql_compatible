@@ -1,0 +1,43 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE i.i_current_price > 0
+    GROUP BY ws.ws_item_sk
+),
+TopProfitableItems AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity_sold,
+        sd.total_net_profit
+    FROM SalesData sd
+    WHERE sd.profit_rank <= 10
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        CASE 
+            WHEN cd.cd_buy_potential = 'High' THEN 'Premium Customers'
+            WHEN cd.cd_buy_potential = 'Medium' THEN 'Regular Customers'
+            ELSE 'Budget Customers'
+        END AS customer_segment
+    FROM household_demographics hd
+    JOIN customer c ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    c.customer_segment,
+    COUNT(DISTINCT sd.ws_item_sk) AS unique_items_bought,
+    SUM(sd.total_quantity_sold) AS total_quantity,
+    SUM(sd.total_net_profit) AS total_profit
+FROM TopProfitableItems sd
+JOIN CustomerDemographics c ON c.cd_demo_sk IN 
+    (SELECT DISTINCT ws.ws_bill_cdemo_sk FROM web_sales ws WHERE ws.ws_item_sk = sd.ws_item_sk)
+GROUP BY c.customer_segment
+ORDER BY total_profit DESC
+LIMIT 5;

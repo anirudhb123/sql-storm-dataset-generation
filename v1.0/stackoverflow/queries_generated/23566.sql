@@ -1,0 +1,98 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate < NOW() - INTERVAL '2 years'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Location,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS EditTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+),
+FinalStats AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.PostCount,
+        u.Reputation,
+        COALESCE(p.EditCount, 0) AS TotalEdits,
+        COALESCE(c.CloseCount, 0) AS TotalClosedPosts,
+        u.GoldBadges,
+        u.SilverBadges,
+        u.BronzeBadges
+    FROM 
+        UserStats u
+    LEFT JOIN 
+        PostHistorySummary p ON u.PostCount > 0 AND p.PostId IN (SELECT Id FROM RankedPosts WHERE PostRank <= 5)
+    LEFT JOIN 
+        ClosedPosts c ON u.PostCount > 0 AND c.PostId IN (SELECT Id FROM RankedPosts WHERE PostRank <= 5)
+)
+SELECT 
+    f.DisplayName,
+    f.Reputation,
+    f.PostCount,
+    f.TotalEdits,
+    f.TotalClosedPosts,
+    f.GoldBadges,
+    f.SilverBadges,
+    f.BronzeBadges,
+    CASE 
+        WHEN f.Reputation IS NULL THEN 'Unknown Reputation'
+        WHEN f.Reputation < 100 THEN 'Novice'
+        WHEN f.Reputation BETWEEN 100 AND 500 THEN 'Intermediate'
+        ELSE 'Expert'
+    END AS ReputationCategory,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM FinalStats fs WHERE fs.UserId = f.UserId AND fs.TotalClosedPosts > 0) 
+        THEN 'Has Closed Posts'
+        ELSE 'No Closed Posts'
+    END AS ClosureStatus
+FROM 
+    FinalStats f
+ORDER BY 
+    f.Reputation DESC, f.PostCount DESC;

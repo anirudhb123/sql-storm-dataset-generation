@@ -1,0 +1,53 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        1 AS depth
+    FROM
+        aka_title t
+    WHERE
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT
+        m.linked_movie_id AS movie_id,
+        lt.title,
+        mh.depth + 1
+    FROM
+        movie_link m
+    JOIN
+        title lt ON m.linked_movie_id = lt.id
+    JOIN
+        MovieHierarchy mh ON m.movie_id = mh.movie_id
+)
+
+SELECT
+    p.name AS person_name,
+    t.title AS movie_title,
+    COUNT(DISTINCT c.movie_id) AS total_movies,
+    AVG(mh.depth) AS average_depth,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM
+    aka_name p
+JOIN
+    cast_info c ON p.person_id = c.person_id
+JOIN 
+    aka_title t ON c.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    MovieHierarchy mh ON t.id = mh.movie_id
+WHERE
+    p.md5sum IS NOT NULL 
+    AND c.nr_order IS NOT NULL 
+GROUP BY
+    p.name, t.title
+HAVING
+    COUNT(DISTINCT c.movie_id) > 5 
+ORDER BY
+    total_movies DESC,
+    average_depth ASC
+LIMIT 100;

@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.LastActivityDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.Id
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        CreationDate,
+        CommentCount,
+        AnswerCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10 
+),
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.CommentCount,
+    tp.AnswerCount,
+    pv.UpVotes,
+    pv.DownVotes,
+    (pv.UpVotes - pv.DownVotes) AS NetScore,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostVotes pv ON tp.PostId = pv.PostId
+LEFT JOIN 
+    Tags t ON t.Id IN (
+        SELECT unnest(string_to_array(substring(tp.Tags, 2, length(tp.Tags)-2), '><'))::int)
+    )
+GROUP BY 
+    tp.PostId, tp.Title, tp.OwnerDisplayName, tp.CreationDate, tp.CommentCount, tp.AnswerCount, pv.UpVotes, pv.DownVotes
+ORDER BY 
+    NetScore DESC, tp.CreationDate DESC;

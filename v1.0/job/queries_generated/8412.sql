@@ -1,0 +1,31 @@
+SELECT 
+    a.id AS aka_id,
+    a.name AS aka_name,
+    t.title AS movie_title,
+    p.info AS person_info,
+    c.kind AS cast_type,
+    m.info AS movie_information,
+    k.keyword AS movie_keyword,
+    ci.note AS cast_note
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    person_info p ON a.person_id = p.person_id
+JOIN 
+    comp_cast_type c ON ci.person_role_id = c.id
+JOIN 
+    movie_info m ON ci.movie_id = m.movie_id
+JOIN 
+    movie_keyword mk ON ci.movie_id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+    AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'Summary')
+ORDER BY 
+    t.production_year DESC, a.name;

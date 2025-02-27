@@ -1,0 +1,58 @@
+WITH UserBadges AS (
+    SELECT UserId, 
+           COUNT(*) AS BadgeCount, 
+           SUM(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS GoldBadges, 
+           SUM(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS SilverBadges, 
+           SUM(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges
+    GROUP BY UserId
+),
+TopUsers AS (
+    SELECT u.Id, 
+           u.DisplayName, 
+           u.Reputation, 
+           ub.BadgeCount,
+           ub.GoldBadges,
+           ub.SilverBadges,
+           ub.BronzeBadges,
+           ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+    WHERE u.Reputation > 1000
+),
+RecentPosts AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.OwnerUserId, 
+           p.CreationDate,
+           p.ViewCount,
+           p.Score,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PostDetails AS (
+    SELECT rp.*, 
+           u.DisplayName AS OwnerDisplayName, 
+           pb.BadgeCount AS OwnerBadgeCount
+    FROM RecentPosts rp
+    JOIN Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN UserBadges pb ON u.Id = pb.UserId
+)
+SELECT t.DisplayName AS TopUserName,
+       pd.Title AS RecentPostTitle, 
+       pd.CreationDate AS PostCreationDate, 
+       pd.ViewCount, 
+       pd.Score,
+       CASE 
+           WHEN pd.ViewCount IS NULL THEN 'No Views Yet' 
+           ELSE FORMAT(pd.ViewCount, 'N0') 
+       END AS FormattedViewCount,
+       COALESCE(pd.OwnerBadgeCount, 0) AS OwnerBadgeCount
+FROM TopUsers t
+LEFT JOIN PostDetails pd ON t.Id = pd.OwnerUserId
+WHERE t.UserRank <= 10 
+  AND (pd.RecentPostRank = 1 OR pd.RecentPostRank IS NULL) 
+ORDER BY t.UserRank, pd.PostCreationDate DESC;
+
+This query benchmarks performance by using Common Table Expressions (CTEs) for breaking down complex calculations related to users and their posts, leveraging window functions for ranking, along with outer joins to combine data flexibly. It counts badges for users, retrieves recent posts filtered by specific conditions, checks for NULL values, and formats outputs accordingly while ensuring complexity suitable for performance analysis.

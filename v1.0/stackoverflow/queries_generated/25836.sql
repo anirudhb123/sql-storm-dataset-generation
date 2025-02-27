@@ -1,0 +1,69 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostID, 
+        p.Title, 
+        p.Body, 
+        p.CreationDate, 
+        u.DisplayName AS OwnerDisplayName, 
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Considering only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+),
+RecentActivity AS (
+    SELECT 
+        PostID, 
+        COUNT(*) AS EditCount,
+        SUM(CASE WHEN pht.PostHistoryTypeId IN (4, 5, 6) THEN 1 ELSE 0 END) AS TitleOrBodyEdits,
+        MAX(pht.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory pht
+    WHERE 
+        pht.PostId IN (SELECT PostID FROM PostDetails) 
+    GROUP BY 
+        PostID
+),
+TagsDetails AS (
+    SELECT 
+        p.Id AS PostID,
+        string_agg(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 -- Considering only Questions
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    pd.PostID,
+    pd.Title,
+    pd.Body,
+    pd.CreationDate,
+    pd.OwnerDisplayName,
+    pd.CommentCount,
+    pd.VoteCount,
+    ra.EditCount,
+    ra.TitleOrBodyEdits,
+    ra.LastEditDate,
+    td.TagsList
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    RecentActivity ra ON pd.PostID = ra.PostID
+LEFT JOIN 
+    TagsDetails td ON pd.PostID = td.PostID
+ORDER BY 
+    pd.CreationDate DESC
+LIMIT 100;

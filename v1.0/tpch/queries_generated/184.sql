@@ -1,0 +1,64 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        DENSE_RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_shipdate DESC) AS ship_rank
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    s.s_name,
+    COALESCE(c.total_spent, 0) AS total_customer_spent,
+    COALESCE(s.part_count, 0) AS supplier_part_count,
+    s.avg_supplycost,
+    COALESCE(SUM(ls.total_value), 0) AS total_order_value,
+    CASE 
+        WHEN COALESCE(s.part_count, 0) > 0 THEN 'Available'
+        ELSE 'Unavailable'
+    END AS availability_status
+FROM 
+    CustomerOrders c
+FULL OUTER JOIN 
+    SupplierDetails s ON c.c_custkey % 10 = s.s_suppkey % 10
+LEFT JOIN 
+    LineItemStats ls ON ls.l_orderkey = c.c_custkey
+WHERE 
+    (s.avg_supplycost IS NOT NULL OR c.total_spent > 1000)
+AND 
+    (c.order_count IS NULL OR c.order_count > 5)
+GROUP BY 
+    c.c_name, s.s_name, s.avg_supplycost
+ORDER BY 
+    total_customer_spent DESC, supplier_part_count DESC;

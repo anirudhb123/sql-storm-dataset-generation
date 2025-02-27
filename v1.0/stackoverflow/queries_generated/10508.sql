@@ -1,0 +1,68 @@
+-- Performance Benchmarking Query
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBountyAmount,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COALESCE(SUM(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(ph.Id), 0) AS HistoryCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+)
+
+SELECT 
+    u.UserId,
+    u.Reputation,
+    u.BadgeCount,
+    u.TotalBountyAmount,
+    u.PostCount,
+    u.CommentCount,
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.UpVotes,
+    p.DownVotes,
+    p.CommentCount AS PostCommentCount,
+    p.HistoryCount
+FROM 
+    UserStats u
+JOIN 
+    PostStats p ON u.UserId = p.PostId
+ORDER BY 
+    u.Reputation DESC, p.Score DESC
+LIMIT 100;

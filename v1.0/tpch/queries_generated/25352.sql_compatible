@@ -1,0 +1,25 @@
+
+WITH region_suppliers AS (
+    SELECT r.r_name, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+),
+top_suppliers AS (
+    SELECT r_name, s_name, s_acctbal
+    FROM region_suppliers
+    WHERE rn <= 3
+),
+product_info AS (
+    SELECT p.p_name, p.p_type, p.p_retailprice, 
+           SUBSTRING(p.p_comment FROM '([^-]*)') AS comment_excerpt
+    FROM part p
+    WHERE p.p_retailprice > (SELECT AVG(p_retailprice) FROM part)
+)
+SELECT ts.r_name, ts.s_name, pi.p_name, pi.p_type, pi.p_retailprice, pi.comment_excerpt
+FROM top_suppliers ts
+JOIN partsupp ps ON ps.ps_suppkey = (SELECT s.s_suppkey FROM supplier s WHERE s.s_name = ts.s_name)
+JOIN product_info pi ON pi.p_partkey = ps.ps_partkey
+WHERE ts.s_acctbal > 50000
+ORDER BY ts.r_name, ts.s_name, pi.p_retailprice DESC;

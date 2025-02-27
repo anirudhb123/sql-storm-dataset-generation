@@ -1,0 +1,74 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+    WHERE U.Reputation IS NOT NULL
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS QuestionsCount,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS AnswersCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        SUM(P.ViewCount) AS TotalViews,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM Posts P
+    LEFT JOIN Tags T ON P.Tags LIKE '%' || T.TagName || '%'
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.OwnerUserId
+),
+ModerationActions AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteUndeleteCount
+    FROM PostHistory PH
+    INNER JOIN Posts P ON P.Id = PH.PostId
+    GROUP BY P.OwnerUserId
+),
+CombinedStats AS (
+    SELECT 
+        UR.UserId,
+        UR.DisplayName,
+        COALESCE(PS.QuestionsCount, 0) AS QuestionsCount,
+        COALESCE(PS.AnswersCount, 0) AS AnswersCount,
+        COALESCE(PS.TotalScore, 0) AS TotalScore,
+        COALESCE(PS.TotalViews, 0) AS TotalViews,
+        COALESCE(PS.TotalComments, 0) AS TotalComments,
+        COALESCE(MA.CloseReopenCount, 0) AS CloseReopenCount,
+        COALESCE(MA.DeleteUndeleteCount, 0) AS DeleteUndeleteCount,
+        CASE 
+            WHEN COALESCE(PS.QuestionsCount, 0) > 0 THEN 'Active'
+            ELSE 'Inactive'
+        END AS UserActivityStatus
+    FROM UserReputation UR
+    LEFT JOIN PostStats PS ON UR.UserId = PS.OwnerUserId
+    LEFT JOIN ModerationActions MA ON UR.UserId = MA.OwnerUserId
+)
+SELECT 
+    *
+
+
+FROM CombinedStats
+WHERE 
+    UserActivityStatus = 'Active'
+    AND (TotalScore > 50 OR TotalViews > 200)
+ORDER BY 
+    Reputation DESC, 
+    TotalScore DESC,
+    QuestionsCount DESC;
+
+-- Bonus: Generate a report of users who have never had their posts moderated.
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName 
+FROM Users U
+LEFT JOIN PostHistory PH ON U.Id = PH.UserId
+WHERE PH.Id IS NULL
+ORDER BY U.Reputation DESC;

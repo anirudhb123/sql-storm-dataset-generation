@@ -1,0 +1,51 @@
+WITH RECURSIVE item_hierarchy AS (
+    SELECT i_item_sk, i_item_id, i_product_name, i_brand, i_category, 0 AS level
+    FROM item
+    WHERE i_rec_start_date <= cast('2002-10-01' as date) AND (i_rec_end_date IS NULL OR i_rec_end_date >= cast('2002-10-01' as date))
+    
+    UNION ALL
+    
+    SELECT i.i_item_sk, i.i_item_id, i.i_product_name, i.i_brand, i.i_category, ih.level + 1
+    FROM item_hierarchy ih
+    JOIN item i ON ih.i_item_sk = i.i_item_sk
+    WHERE i.i_rec_start_date <= cast('2002-10-01' as date) AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date >= cast('2002-10-01' as date)) AND ih.level < 10
+), 
+sales_data AS (
+    SELECT 
+        ws.ws_ship_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_date BETWEEN DATEADD(MONTH, -1, cast('2002-10-01' as date)) AND cast('2002-10-01' as date)
+    GROUP BY ws.ws_ship_date_sk, ws.ws_item_sk
+),
+profit_by_item AS (
+    SELECT 
+        ih.i_item_sk, 
+        ih.i_product_name, 
+        ih.i_brand, 
+        sd.total_quantity,
+        sd.total_profit,
+        COALESCE(CASE 
+            WHEN sd.total_profit IS NULL THEN 'No Sales'
+            ELSE 'Sales Made'
+        END, 'Unspecified') AS sales_status
+    FROM item_hierarchy ih
+    LEFT JOIN sales_data sd ON ih.i_item_sk = sd.ws_item_sk
+)
+SELECT 
+    p.i_product_name,
+    p.i_brand,
+    p.total_quantity,
+    p.total_profit,
+    p.sales_status,
+    COUNT(DISTINCT ca.ca_city) OVER(PARTITION BY p.i_item_sk) AS city_count,
+    STRING_AGG(DISTINCT ca.ca_country) FILTER (WHERE ca.ca_country IS NOT NULL) OVER(PARTITION BY p.i_item_sk) AS countries, 
+    NULLIF(SUM(sd.total_quantity * p.total_profit) OVER(PARTITION BY p.i_item_sk), 0) AS calculated_value
+FROM profit_by_item p
+LEFT JOIN customer_address ca ON ca.ca_address_sk = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_current_cdemo_sk = p.i_item_sk LIMIT 1)
+WHERE calculated_value IS NOT NULL
+ORDER BY p.total_profit DESC
+LIMIT 100;

@@ -1,0 +1,73 @@
+
+WITH TagCounts AS (
+    SELECT 
+        unnest(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><')) AS Tag, 
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    GROUP BY 
+        Tag
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostsWithTagCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        TC.PostCount AS TagUsage,
+        U.Reputation
+    FROM 
+        Posts P
+    JOIN 
+        TagCounts TC ON TC.Tag = ANY(string_to_array(SUBSTRING(P.Tags FROM 2 FOR LENGTH(P.Tags) - 2), '><'))
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1  
+),
+PostVotes AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVoteCount,
+        COUNT(CASE WHEN VoteTypeId = 6 THEN 1 END) AS CloseVoteCount
+    FROM 
+        Votes 
+    GROUP BY 
+        PostId
+)
+SELECT 
+    P.Title,
+    U.DisplayName AS OwnerName,
+    U.Reputation,
+    PV.UpVoteCount,
+    PV.DownVoteCount,
+    PV.CloseVoteCount,
+    P.TagUsage,
+    UB.GoldBadges,
+    UB.SilverBadges,
+    UB.BronzeBadges
+FROM 
+    PostsWithTagCounts P
+JOIN 
+    UserBadges UB ON P.OwnerUserId = UB.UserId
+JOIN 
+    PostVotes PV ON P.PostId = PV.PostId
+ORDER BY 
+    P.TagUsage DESC,
+    PV.UpVoteCount DESC
+LIMIT 10;

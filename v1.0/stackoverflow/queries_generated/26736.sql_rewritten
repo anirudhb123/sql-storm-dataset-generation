@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2  
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId                         
+    WHERE 
+        p.PostTypeId = 1                                      
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TagStatistics AS (
+    SELECT 
+        TRIM(unnest(string_to_array(substr(Tags, 2, length(Tags) - 2), '>'))) ) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1                                      
+    GROUP BY 
+        TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        TagCount,
+        RANK() OVER (ORDER BY TagCount DESC) AS TagRank
+    FROM 
+        TagStatistics 
+    WHERE 
+        TagCount > 50
+),
+PostHistoryAnalyze AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        MAX(ph.CreationDate) AS LastEditedDate,
+        COUNT(ph.Id) AS EditCount,
+        STRING_AGG(DISTINCT ph.UserDisplayName, ', ') AS Editors
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    rp.PostID,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.AnswerCount,
+    rp.CommentCount,
+    pt.TagName,
+    pt.TagCount,
+    pha.LastEditedDate,
+    pha.EditCount,
+    pha.Editors
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TopTags pt ON rp.Tags LIKE '%' || pt.TagName || '%'
+LEFT JOIN 
+    PostHistoryAnalyze pha ON rp.PostID = pha.PostID
+WHERE 
+    rp.AnswerCount > 5
+ORDER BY 
+    rp.CreationDate DESC;

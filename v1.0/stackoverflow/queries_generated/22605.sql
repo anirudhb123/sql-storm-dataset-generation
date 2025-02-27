@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        COUNT(b.Id) AS TotalBadges,
+        AVG(DATEDIFF(NOW(), u.CreationDate)) AS AverageAgeInDays
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, '; ') AS Comments
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT CONCAT(ph.Comment, ': ', ph.Text), '; ') AS EditHistory
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '6 months'
+        AND ph.PostHistoryTypeId IN (4, 5, 6, 10)
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    COALESCE(p.CommentCount, 0) AS CommentCount,
+    COALESCE(u.TotalUpVotes, 0) AS UserUpVotes,
+    COALESCE(u.TotalDownVotes, 0) AS UserDownVotes,
+    COALESCE(b.TotalBadges, 0) AS UserBadges,
+    COALESCE(ph.EditHistory, 'No edits') AS EditHistory,
+    CASE 
+        WHEN p.RankScore <= 5 THEN 'Top Post'
+        WHEN p.Score >= 50 THEN 'Popular Post'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    PostComments pc ON p.PostId = pc.PostId
+LEFT JOIN 
+    UserStats u ON u.UserId = p.OwnerUserId
+LEFT JOIN 
+    PostHistoryDetails ph ON p.PostId = ph.PostId
+WHERE 
+    (p.Score IS NOT NULL AND p.Score > 0)
+    AND (p.ViewCount IS NULL OR p.ViewCount > 10) 
+ORDER BY 
+    p.Score DESC 
+LIMIT 100;

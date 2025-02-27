@@ -1,0 +1,63 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.ViewCount > 100 THEN 1 ELSE 0 END) AS PopularPostCount,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Tags t
+        LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%' 
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        STRING_AGG(DISTINCT ctr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+        JOIN CloseReasonTypes ctr ON CAST(ph.Comment AS int) = ctr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+),
+
+PostMetrics AS (
+    SELECT
+        p.Title,
+        p.Id AS PostId,
+        p.CreationDate,
+        ps.PostCount,
+        ps.PopularPostCount,
+        ps.AverageReputation,
+        cp.CloseDate,
+        cp.CloseReasons
+    FROM 
+        Posts p
+        JOIN TagStatistics ps ON p.Tags LIKE '%' || ps.TagName || '%'
+        LEFT JOIN ClosedPosts cp ON p.Id = cp.PostId
+    WHERE 
+        p.PostTypeId = 1 
+)
+
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    PostCount,
+    PopularPostCount,
+    AverageReputation,
+    CloseDate,
+    CloseReasons
+FROM 
+    PostMetrics
+ORDER BY 
+    PostCount DESC, 
+    AverageReputation DESC, 
+    CreationDate DESC
+LIMIT 10;

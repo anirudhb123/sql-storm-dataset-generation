@@ -1,0 +1,65 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        COUNT(DISTINCT c.movie_id) AS total_movies
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN role_type r ON c.role_id = r.id
+    GROUP BY c.person_id, a.name, r.role
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        RK.total_movies
+    FROM RankedMovies rm
+    LEFT JOIN movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN ActorRoles RK ON rm.movie_id IN (
+        SELECT movie_id
+        FROM cast_info
+        WHERE person_id IN (
+            SELECT DISTINCT person_id 
+            FROM aka_name 
+            WHERE name ILIKE '%Smith%'
+        )
+    )
+),
+FinalReport AS (
+    SELECT 
+        f.title,
+        f.production_year,
+        f.keyword,
+        f.total_movies,
+        CASE 
+            WHEN f.total_movies IS NULL THEN 'No Cast'
+            WHEN f.total_movies > 5 THEN 'Star Power'
+            ELSE 'Minor Role'
+        END AS role_status
+    FROM FilteredMovies f
+    WHERE f.production_year > 2000
+    AND (f.keyword IS NOT NULL OR f.keyword = 'No Keywords')
+)
+SELECT 
+    f.title AS "Movie Title",
+    f.production_year AS "Year",
+    f.keyword AS "Keyword",
+    f.total_movies AS "Number of Unique Movies with Cast",
+    f.role_status AS "Role Status"
+FROM FinalReport f
+WHERE f.role_status IS NOT NULL
+ORDER BY f.production_year DESC, f.total_movies DESC
+OFFSET 5 ROWS
+LIMIT 10;

@@ -1,0 +1,74 @@
+WITH UserScoreHistory AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.Location,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY U.CreationDate DESC) AS ScoreRank
+    FROM Users U
+    WHERE U.Reputation IS NOT NULL
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        COUNT(C) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY P.Id, P.PostTypeId, P.Score, P.ViewCount, P.OwnerUserId, P.Title, P.CreationDate
+)
+SELECT 
+    U.DisplayName AS Author,
+    U.Location,
+    U.Reputation,
+    R.PostId,
+    R.Title,
+    R.PostTypeId,
+    R.Score,
+    R.CommentCount,
+    R.UpVoteCount,
+    R.DownVoteCount,
+    COALESCE(R.Score + SUM(CASE WHEN U2.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS TotalScore,
+    CASE 
+        WHEN R.Score > 0 THEN 'Popular'
+        WHEN R.Score = 0 THEN 'Neutral'
+        ELSE 'Unpopular'
+    END AS Popularity
+FROM UserScoreHistory U
+JOIN RecentPosts R ON U.Id = R.OwnerUserId
+LEFT JOIN Votes V2 ON R.PostId = V2.PostId AND V2.VoteTypeId = 2
+LEFT JOIN Users U2 ON U2.Id = V2.UserId AND U2.Reputation > 1000 -- Filtered to include high-reputation users only
+WHERE R.PostRank <= 5
+GROUP BY U.Id, U.DisplayName, U.Location, U.Reputation, R.PostId, R.Title, R.PostTypeId, R.Score, R.CommentCount, R.UpVoteCount, R.DownVoteCount
+ORDER BY TotalScore DESC, U.Reputation DESC
+LIMIT 10;
+
+-- Including corner cases with NULL and bizarre logic
+SELECT 
+    COALESCE(NULLIF(UserRating, 0), 'Not Rated') AS UserRating,
+    CASE 
+        WHEN U.Reputation IS NULL AND U.Views IS NULL THEN 'No Data'
+        ELSE CONCAT('User ', U.DisplayName, (CASE WHEN U.Reputation > 500 THEN ' (High Rep)' ELSE ' (Low Rep)' END))
+    END AS UserStatus,
+    DATEDIFF(NOW(), U.CreationDate) AS AccountAgeDays
+FROM Users U
+WHERE U.Id NOT IN (
+    SELECT UserId 
+    FROM Badges 
+    WHERE Class = 1
+) 
+AND (U.Location IS NOT NULL OR U.Views IS NOT NULL);

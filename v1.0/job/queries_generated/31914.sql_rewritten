@@ -1,0 +1,85 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 5
+),
+
+KeywordStats AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        TopMovies mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mt.movie_id
+),
+
+PopularMovies AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        COALESCE(ks.keywords, 'No keywords available') AS keywords,
+        ROW_NUMBER() OVER (ORDER BY tm.cast_count DESC) AS rank
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        KeywordStats ks ON tm.movie_id = ks.movie_id
+)
+
+SELECT 
+    pm.title,
+    pm.production_year,
+    pm.keywords,
+    pm.rank,
+    CASE 
+        WHEN pm.rank <= 10 THEN 'Top 10 Movies'
+        ELSE 'Other Movies'
+    END AS movie_category
+FROM 
+    PopularMovies pm
+WHERE 
+    pm.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    pm.rank;

@@ -1,0 +1,73 @@
+WITH TagCounts AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM
+        Tags t
+    LEFT JOIN
+        Posts p ON p.Tags LIKE '%<%>'
+    GROUP BY
+        t.TagName
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.UpVotes) - SUM(u.DownVotes) AS Reputation
+    FROM
+        Users u
+    JOIN
+        Posts p ON p.OwnerUserId = u.Id
+    WHERE
+        p.PostTypeId = 1
+    GROUP BY
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate,
+        p.Title,
+        COUNT(ph.Id) AS EditCount
+    FROM
+        PostHistory ph
+    JOIN
+        Posts p ON ph.PostId = p.Id
+    WHERE
+        ph.PostHistoryTypeId IN (4, 5, 6, 24) -- Editing Title, Body, Tags, or Suggested Edits
+    GROUP BY
+        ph.PostId, ph.CreationDate, p.Title
+)
+SELECT
+    tc.TagName,
+    tc.PostCount,
+    tc.QuestionCount,
+    tc.AnswerCount,
+    ur.UserId,
+    ur.DisplayName,
+    ur.Reputation,
+    rph.Title,
+    rph.CreationDate,
+    rph.EditCount
+FROM
+    TagCounts tc
+JOIN
+    UserReputation ur ON ur.Reputation > 0
+LEFT JOIN
+    RecentPostHistory rph ON rph.PostId IN (
+        SELECT
+            p.Id
+        FROM
+            Posts p
+        WHERE
+            p.Tags LIKE '%' || tc.TagName || '%'
+        ORDER BY
+            p.CreationDate DESC
+        LIMIT 5
+    )
+WHERE
+    tc.PostCount > 10
+ORDER BY
+    tc.PostCount DESC, ur.Reputation DESC;

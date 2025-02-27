@@ -1,0 +1,65 @@
+
+WITH RecursiveTagStats AS (
+    SELECT
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.OwnerUserId IS NOT NULL THEN 1 ELSE 0 END) AS UserCreatedCount
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.Id, t.TagName
+
+    UNION ALL
+
+    SELECT
+        ts.TagId,
+        ts.TagName,
+        ts.PostCount + COUNT(p.Id),
+        ts.UserCreatedCount + SUM(CASE WHEN p.OwnerUserId IS NOT NULL THEN 1 ELSE 0 END)
+    FROM RecursiveTagStats ts
+    JOIN Posts p ON p.Tags LIKE '%' || ts.TagName || '%' 
+    WHERE ts.PostCount < 100
+    GROUP BY ts.TagId, ts.TagName, ts.PostCount, ts.UserCreatedCount
+),
+UserReputationStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+FinalStats AS (
+    SELECT
+        u.UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.PostsCount,
+        ROUND(u.Reputation / NULLIF(u.PostsCount, 0), 2) AS ReputationPerPost,
+        u.UpVotesReceived,
+        u.DownVotesReceived,
+        t.TagName,
+        COALESCE(ts.PostCount, 0) AS TagPostCount,
+        COALESCE(ts.UserCreatedCount, 0) AS UserCreatedTagCount
+    FROM UserReputationStats u
+    LEFT JOIN RecursiveTagStats ts ON ts.UserCreatedCount > 0
+    LEFT JOIN Tags t ON u.PostsCount >= 10
+)
+SELECT
+    f.DisplayName,
+    f.Reputation,
+    f.PostsCount,
+    f.ReputationPerPost,
+    f.UpVotesReceived,
+    f.DownVotesReceived,
+    STRING_AGG(DISTINCT f.TagName, ', ') AS TagNames,
+    SUM(f.TagPostCount) AS TotalTagPosts,
+    AVG(f.UserCreatedTagCount) AS AverageUserCreatedTags
+FROM FinalStats f
+GROUP BY f.DisplayName, f.Reputation, f.PostsCount, f.ReputationPerPost, f.UpVotesReceived, f.DownVotesReceived
+ORDER BY f.Reputation DESC, f.PostsCount DESC;

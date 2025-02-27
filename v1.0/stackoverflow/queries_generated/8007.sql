@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) AND p.Score > 0
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CreationDate
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MIN(ph.CreationDate) AS FirstEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.AnswerCount,
+    u.DisplayName AS Author,
+    us.TotalPosts,
+    us.Questions,
+    us.Answers,
+    us.AvgScore,
+    phs.EditCount,
+    phs.FirstEditDate
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON tp.CreatedById = u.Id
+JOIN 
+    UserStatistics us ON u.Id = us.UserId
+LEFT JOIN 
+    PostHistoryStats phs ON tp.PostId = phs.PostId
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

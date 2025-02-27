@@ -1,0 +1,61 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        MD5(m.title) AS title_md5,
+        0 AS level
+    FROM aka_title m
+    WHERE m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        mk.title,
+        mk.production_year,
+        MD5(mk.title) AS title_md5,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN aka_title mk ON ml.linked_movie_id = mk.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+top_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        mh.title_md5,
+        COUNT(c.id) AS cast_count
+    FROM movie_hierarchy mh
+    LEFT JOIN cast_info c ON mh.movie_id = c.movie_id
+    GROUP BY mh.movie_id, mh.movie_title, mh.production_year, mh.title_md5
+    HAVING COUNT(c.id) > 5
+)
+SELECT 
+    tm.movie_id,
+    tm.movie_title,
+    tm.production_year,
+    CASE 
+        WHEN tm.cast_count IS NULL THEN 'No Cast'
+        ELSE CAST(tm.cast_count AS VARCHAR)
+    END AS cast_count,
+    ARRAY_AGG(DISTINCT ak.name ORDER BY ak.name) AS actors,
+    NULLIF(mk.keyword, '') AS movie_keyword,
+    CUBE(tm.production_year) AS year_cube
+FROM top_movies tm
+LEFT JOIN aka_name ak ON ak.person_id IN (
+    SELECT c.person_id FROM cast_info c WHERE c.movie_id = tm.movie_id
+)
+LEFT JOIN movie_keyword mk ON mk.movie_id = tm.movie_id
+LEFT JOIN kind_type kt ON mc.kind_id = kt.id
+LEFT JOIN movie_companies mc ON mc.movie_id = tm.movie_id
+LEFT JOIN info_type it ON it.id = mc.company_type_id
+WHERE 
+    (tm.production_year >= 2000 AND tm.production_year < 2023)
+    OR (tm.production_year IS NULL AND it.info IS NOT NULL)
+GROUP BY tm.movie_id, tm.movie_title, tm.production_year, mk.keyword, tm.title_md5, kt.kind
+HAVING 
+    ARRAY_LENGTH(ARRAY_AGG(DISTINCT ak.name), 1) > 3
+ORDER BY tm.cast_count DESC NULLS LAST, tm.production_year DESC;

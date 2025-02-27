@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(CAST(sub.title AS text), '[None]') AS related_movie_title,
+        COALESCE(CAST(p.name AS text), '[Unknown]') AS person_name,
+        1 AS level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_link ml ON ml.movie_id = m.id
+    LEFT JOIN 
+        aka_title sub ON sub.id = ml.linked_movie_id
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = m.id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = cc.movie_id AND ci.id = cc.subject_id
+    LEFT JOIN 
+        aka_name p ON p.id = ci.person_id
+    WHERE 
+        m.production_year IS NOT NULL 
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(CAST(sub.title AS text), '[None]'),
+        COALESCE(CAST(p.name AS text), '[Unknown]'),
+        h.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        MovieHierarchy h ON m.id = h.movie_id 
+    LEFT JOIN 
+        movie_link ml ON ml.movie_id = m.id
+    LEFT JOIN 
+        aka_title sub ON sub.id = ml.linked_movie_id
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = m.id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = cc.movie_id AND ci.id = cc.subject_id
+    LEFT JOIN 
+        aka_name p ON p.id = ci.person_id
+    WHERE 
+        m.production_year IS NOT NULL
+        AND h.level < 3  -- to limit the recursive depth
+)
+
+SELECT 
+    mh.title AS movie_title,
+    mh.related_movie_title,
+    mh.person_name,
+    COUNT(*) OVER (PARTITION BY mh.movie_id ORDER BY mh.level DESC) AS num_related,
+    MAX(mh.level) OVER () AS max_levels, 
+    (SELECT COUNT(DISTINCT m.id) 
+     FROM aka_title m
+     WHERE m.production_year = (SELECT MAX(production_year) FROM aka_title)) AS latest_year_movie_count,
+    STRING_AGG(DISTINCT k.keyword, ', ' ORDER BY k.keyword) AS keywords
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id 
+GROUP BY 
+    mh.movie_id, mh.title, mh.related_movie_title, mh.person_name
+HAVING 
+    COUNT(DISTINCT mk.keyword_id) > 0
+ORDER BY 
+    num_related DESC,
+    mh.title;
+

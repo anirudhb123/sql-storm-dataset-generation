@@ -1,0 +1,60 @@
+WITH RecursiveRoles AS (
+    SELECT ci.person_id,
+           ci.movie_id,
+           rt.role,
+           ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order,
+           COUNT(*) OVER (PARTITION BY ci.movie_id) AS total_roles
+    FROM cast_info ci
+    JOIN role_type rt ON ci.role_id = rt.id
+),
+DistinctKeywords AS (
+    SELECT 
+        mk.movie_id,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+MovieDetails AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mk.keywords, '{}') AS keywords,
+        COALESCE(SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) FILTER (WHERE ci.note LIKE '%credited%'), 0) AS credited_count,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        CASE
+            WHEN mt.production_year IS NULL OR mt.production_year < 1900 THEN 'Early Cinema'
+            WHEN mt.production_year BETWEEN 1900 AND 1950 THEN 'Classic Era'
+            WHEN mt.production_year BETWEEN 1951 AND 2000 THEN 'Modern Era'
+            ELSE 'Contemporary'
+        END AS production_era
+    FROM aka_title mt
+    LEFT JOIN cast_info ci ON mt.movie_id = ci.movie_id
+    LEFT JOIN DistinctKeywords mk ON mt.id = mk.movie_id
+    GROUP BY mt.id, mt.title, mt.production_year
+),
+TopMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.keywords,
+        md.credited_count,
+        md.cast_count,
+        md.production_era,
+        ROW_NUMBER() OVER (PARTITION BY md.production_era ORDER BY md.credited_count DESC) AS rank_within_era
+    FROM MovieDetails md
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.keywords,
+    tm.credited_count,
+    tm.cast_count,
+    tm.production_era
+FROM TopMovies tm
+WHERE tm.rank_within_era <= 3
+ORDER BY tm.production_era, tm.credited_count DESC;
+
+This SQL query explores the Join Order Benchmark schema through a series of Common Table Expressions (CTEs) to extract detailed movie data filtered and prioritized across several dimensions. It includes nested aggregates, conditional logic for categorization, and window functions for ranking, all while maintaining the complexity and depth requested.

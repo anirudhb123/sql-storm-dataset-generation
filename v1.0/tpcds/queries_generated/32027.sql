@@ -1,0 +1,49 @@
+
+WITH RECURSIVE customer_rank AS (
+    SELECT c.c_customer_sk,
+           c.c_customer_id,
+           cd.cd_gender,
+           cd.cd_marital_status,
+           cd.cd_purchase_estimate,
+           RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+high_value_customers AS (
+    SELECT cr.c_customer_sk,
+           cr.c_customer_id,
+           cr.cd_gender,
+           cr.purchase_rank
+    FROM customer_rank cr
+    WHERE cr.purchase_rank <= 10
+),
+sales_summary AS (
+    SELECT ws.ws_bill_customer_sk,
+           SUM(ws.ws_net_paid) AS total_spent,
+           COUNT(ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    GROUP BY ws.ws_bill_customer_sk
+),
+customer_performance AS (
+    SELECT c.c_customer_sk,
+           COALESCE(hv.total_spent, 0) AS total_spent,
+           COALESCE(hv.total_orders, 0) AS total_orders,
+           cd.cd_marital_status
+    FROM high_value_customers hvc
+    LEFT JOIN sales_summary hv ON hvc.c_customer_sk = hv.ws_bill_customer_sk
+    JOIN customer c ON hvc.c_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT c.c_customer_id,
+       cp.total_spent,
+       cp.total_orders,
+       cp.cd_marital_status,
+       da.ca_city,
+       da.ca_state,
+       da.ca_country,
+       CASE WHEN cp.total_spent > 1000 THEN 'High Value'
+            WHEN cp.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value' END AS customer_value_segment
+FROM customer_performance cp
+JOIN customer_address da ON cp.c_customer_sk = da.ca_address_sk
+ORDER BY cp.total_spent DESC, cp.c_customer_id;

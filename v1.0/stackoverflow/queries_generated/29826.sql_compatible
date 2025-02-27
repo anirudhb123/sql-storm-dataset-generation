@@ -1,0 +1,56 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.Tags,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(A.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts A ON A.ParentId = P.Id
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.Tags, P.CreationDate, U.DisplayName
+),
+SelectedPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Body,
+        RP.Tags,
+        RP.CreationDate,
+        RP.OwnerDisplayName,
+        RP.AnswerCount
+    FROM 
+        RankedPosts RP
+    WHERE 
+        RP.Rank <= 5 
+)
+SELECT 
+    SP.Title,
+    SP.Body,
+    SP.OwnerDisplayName,
+    SP.CreationDate,
+    SP.AnswerCount,
+    STRING_AGG(TRIM(BOTH '<>' FROM UNNEST(STRING_TO_ARRAY(SP.Tags, '><'))), ', ') AS FormattedTags,
+    (SELECT 
+        STRING_AGG(DISTINCT C.Text, '; ') 
+     FROM 
+        Comments C 
+     WHERE 
+        C.PostId = SP.PostId) AS CommentsSummary
+FROM 
+    SelectedPosts SP
+GROUP BY 
+    SP.PostId, SP.Title, SP.Body, SP.OwnerDisplayName, SP.CreationDate, SP.AnswerCount
+ORDER BY 
+    SP.CreationDate DESC
+LIMIT 10;

@@ -1,0 +1,92 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        m.company_id,
+        1 AS depth
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies m ON t.id = m.movie_id
+    WHERE 
+        t.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        mv.id AS movie_id,
+        mv.title,
+        mv.production_year,
+        mc.company_id,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mv ON ml.linked_movie_id = mv.id
+    LEFT JOIN 
+        movie_companies mc ON mv.id = mc.movie_id
+    WHERE 
+        mh.depth < 5
+),
+CastInfoWithRank AS (
+    SELECT 
+        ci.id AS cast_id,
+        ci.movie_id,
+        ci.person_id,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS rank,
+        pk.keyword
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        movie_keyword mk ON ci.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword pk ON mk.keyword_id = pk.id
+),
+PopularMovies AS (
+    SELECT 
+        mh.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS top_cast
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CastInfoWithRank ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        mh.movie_id
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 5
+)
+SELECT 
+    pm.movie_id,
+    at.title,
+    pm.total_cast,
+    pm.top_cast,
+    at.production_year,
+    COALESCE(director_count.director_count, 0) AS director_count
+FROM 
+    PopularMovies pm
+JOIN 
+    aka_title at ON pm.movie_id = at.id
+LEFT JOIN (
+    SELECT 
+        movie_id, 
+        COUNT(DISTINCT person_id) AS director_count
+    FROM 
+        complete_cast cc
+    JOIN 
+        role_type rt ON cc.role_id = rt.id
+    WHERE 
+        rt.role = 'Director'
+    GROUP BY 
+        movie_id
+) director_count ON pm.movie_id = director_count.movie_id
+ORDER BY 
+    pm.total_cast DESC,
+    at.production_year DESC
+LIMIT 20;

@@ -1,0 +1,76 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON (p.Id = v.PostId OR c.PostId = v.PostId)
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS HistoryCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+Ranking AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.Score,
+        ps.CommentCount AS PostCommentCount,
+        ps.HistoryCount,
+        ROW_NUMBER() OVER (PARTITION BY us.UserId ORDER BY ps.Score DESC) AS Rank
+    FROM 
+        UserStats us
+    JOIN 
+        PostStats ps ON us.UserId = p.OwnerUserId
+    WHERE 
+        us.Reputation > 1000
+)
+SELECT 
+    r.DisplayName,
+    r.PostId,
+    r.Title,
+    r.ViewCount,
+    r.Score,
+    r.PostCommentCount,
+    r.HistoryCount
+FROM 
+    Ranking r
+WHERE 
+    r.Rank <= 3
+ORDER BY 
+    r.DisplayName, r.Score DESC;

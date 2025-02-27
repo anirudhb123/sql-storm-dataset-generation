@@ -1,0 +1,97 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredTitles AS (
+    SELECT 
+        actor_name,
+        movie_title,
+        production_year
+    FROM 
+        RankedTitles
+    WHERE 
+        rn <= 5
+),
+CoStarCounts AS (
+    SELECT 
+        ft.actor_name,
+        COUNT(DISTINCT ci2.person_id) AS co_star_count
+    FROM 
+        FilteredTitles ft
+    JOIN 
+        cast_info ci1 ON ft.movie_title = (
+            SELECT title 
+            FROM aka_title 
+            WHERE movie_id = ci1.movie_id
+            LIMIT 1
+        )
+    JOIN 
+        cast_info ci2 ON ci1.movie_id = ci2.movie_id AND ci2.person_id <> (
+            SELECT person_id 
+            FROM aka_name 
+            WHERE name = ft.actor_name 
+            LIMIT 1
+        )
+    GROUP BY 
+        ft.actor_name
+),
+MovieKeywords AS (
+    SELECT 
+        mt.movie_id,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.movie_id
+    WHERE 
+        k.keyword IS NOT NULL
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    ft.actor_name,
+    STRING_AGG(DISTINCT ft.movie_title || ' (' || ft.production_year || ')', ', ') AS movies,
+    cc.co_star_count,
+    COALESCE(mk.keywords, '{}') AS keywords
+FROM 
+    FilteredTitles ft
+JOIN 
+    CoStarCounts cc ON ft.actor_name = cc.actor_name
+LEFT JOIN 
+    MovieKeywords mk ON ft.movie_title = (
+        SELECT title 
+        FROM aka_title 
+        WHERE movie_id = (
+            SELECT movie_id 
+            FROM movie_keyword 
+            WHERE movie_id IN (
+                SELECT movie_id 
+                FROM aka_title 
+                WHERE title = ft.movie_title
+            )
+            LIMIT 1
+        )
+    )
+GROUP BY 
+    ft.actor_name, cc.co_star_count
+HAVING 
+    cc.co_star_count > 3 OR EXISTS (
+        SELECT 1 
+        FROM FilteredTitles ft2 
+        WHERE ft2.actor_name = ft.actor_name AND ft2.production_year < 2000
+    )
+ORDER BY 
+    cc.co_star_count DESC, ft.actor_name;

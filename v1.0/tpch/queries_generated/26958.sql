@@ -1,0 +1,37 @@
+WITH StringBenchmark AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(CAST(l.l_extendedprice AS DECIMAL(14,2))) AS avg_extended_price,
+        STRING_AGG(DISTINCT s.s_name, '; ') AS supplier_names,
+        LISTAGG(CAST(DISTINCT l.l_comment AS VARCHAR(200)), ', ') WITHIN GROUP (ORDER BY l.l_comment) AS comments
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        p.p_size > 10
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    p_partkey,
+    p_name,
+    supplier_count,
+    total_quantity,
+    avg_extended_price,
+    LENGTH(supplier_names) AS supplier_names_length,
+    LENGTH(comments) AS comments_length
+FROM 
+    StringBenchmark
+WHERE 
+    supplier_count > 2
+ORDER BY 
+    avg_extended_price DESC
+LIMIT 50;

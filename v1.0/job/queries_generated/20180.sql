@@ -1,0 +1,87 @@
+WITH ranked_titles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+cast_with_roles AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        rt.role,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    WHERE 
+        m.production_year BETWEEN 1990 AND 2000
+    GROUP BY 
+        m.id, m.title, mk.keyword
+),
+detailed_info AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.keyword,
+        md.cast_count,
+        CASE 
+            WHEN md.cast_count > 10 THEN 'Large Cast'
+            WHEN md.cast_count BETWEEN 5 AND 10 THEN 'Medium Cast'
+            ELSE 'Small Cast' 
+        END AS cast_size
+    FROM 
+        movie_details md
+),
+final_selection AS (
+    SELECT 
+        dt.movie_id,
+        dt.title,
+        dt.keyword,
+        dt.cast_count,
+        dt.cast_size,
+        rt.role AS leading_role,
+        ROW_NUMBER() OVER (PARTITION BY dt.cast_size ORDER BY dt.cast_count DESC) AS size_rank
+    FROM 
+        detailed_info dt
+    LEFT JOIN 
+        cast_with_roles rt ON dt.movie_id = rt.movie_id AND rt.role_order = 1
+    WHERE 
+        rt.role IS NOT NULL OR dt.cast_count = 0
+)
+SELECT 
+    fs.movie_id,
+    fs.title,
+    fs.keyword,
+    fs.cast_count,
+    fs.cast_size,
+    fs.leading_role,
+    COALESCE(rt.title, 'No Similar Titles') AS suggest_title
+FROM 
+    final_selection fs
+LEFT JOIN 
+    ranked_titles rt ON fs.cast_count = rt.title_rank
+WHERE 
+    fs.size_rank <= 5
+ORDER BY 
+    fs.cast_count DESC, fs.title ASC;

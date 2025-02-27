@@ -1,0 +1,28 @@
+
+SELECT 
+    P.Title,
+    U.DisplayName AS OwnerDisplayName,
+    P.Score,
+    P.ViewCount,
+    C.CommentCount,
+    P.CreationDate
+FROM 
+    Posts P
+JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS CommentCount 
+     FROM Comments 
+     GROUP BY PostId) C ON P.Id = C.PostId
+WHERE 
+    P.PostTypeId = 1 
+GROUP BY 
+    P.Title,
+    U.DisplayName,
+    P.Score,
+    P.ViewCount,
+    C.CommentCount,
+    P.CreationDate
+ORDER BY 
+    P.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

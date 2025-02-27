@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerName,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        OwnerName
+    FROM 
+        RankedPosts
+    WHERE 
+        ScoreRank <= 10
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment,
+        ph.CreationDate AS HistoryDate,
+        p.Title AS PostTitle,
+        p.Score AS PostScore
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+),
+CombinedData AS (
+    SELECT 
+        t.PostId,
+        t.Title,
+        t.CreationDate,
+        t.Score,
+        t.OwnerName,
+        ph.Comment AS HistoryComment,
+        ph.HistoryDate,
+        PH.PostScore
+    FROM 
+        TopPosts t
+    LEFT JOIN 
+        PostHistoryDetails ph ON t.PostId = ph.PostId
+)
+SELECT 
+    c.OwnerName AS UserName,
+    c.PostId,
+    COALESCE(pt.Title, 'No Title') AS PostTitle,
+    COALESCE(pt.Score, 0) AS Score,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    json_agg(DISTINCT c.Text) AS CommentTexts,
+    SUM(CASE WHEN ph.HistoryDate IS NOT NULL THEN 1 ELSE 0 END) AS HistoryChangeCount
+FROM 
+    CombinedData c
+FULL OUTER JOIN 
+    Comments cmt ON c.PostId = cmt.PostId
+LEFT JOIN 
+    Posts pt ON c.PostId = pt.Id
+GROUP BY 
+    c.OwnerName, c.PostId, pt.Title, pt.Score
+ORDER BY 
+    TotalComments DESC, Score DESC
+LIMIT 100;

@@ -1,0 +1,78 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.sales_price,
+        ws.item_sk,
+        ws.bill_customer_sk,
+        ws_sold_date_sk,
+        ws.ship_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws_net_profit DESC) as rn
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_month IN (SELECT DISTINCT d.d_moy 
+                            FROM date_dim d 
+                            WHERE d.d_year = 2023 AND d.d_holiday = 'Y')
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd.education_status,
+        CASE 
+            WHEN cd.cd_dep_count IS NULL THEN 'Unknown'
+            ELSE cd.cd_dep_count::text
+        END as dep_count,
+        cd_credit_rating,
+        CASE 
+            WHEN cd.cd_credit_rating = 'High' THEN 'Top Tier'
+            ELSE 'Lower Tier' 
+        END as credit_tier
+    FROM 
+        customer_demographics cd
+),
+SalesSummary AS (
+    SELECT 
+        s.item_sk,
+        SUM(s.sales_price) AS total_sales_price,
+        SUM(s.sales_price) / NULLIF(COUNT(s.item_sk), 0) AS avg_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY s.bill_customer_sk ORDER BY SUM(s.sales_price) DESC) AS sales_rank
+    FROM 
+        SalesCTE s
+    GROUP BY 
+        s.item_sk, s.bill_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    c.c_email_address,
+    cd.dep_count,
+    SUM(ss.total_sales_price) AS total_customer_spent,
+    MAX(ss.avg_sales_price) AS highest_avg_spent,
+    (SELECT 
+         COUNT(DISTINCT cr_returning_customer_sk)
+     FROM 
+         catalog_returns cr 
+     WHERE 
+         cr.refunded_customer_sk = c.c_customer_sk AND cr_return_quantity > 0) AS total_returns,
+    COALESCE(ROUND(AVG(CASE 
+                          WHEN ss.sales_rank <= 5 THEN ss.total_sales_price 
+                          ELSE 0 
+                          END), 2), 0) AS avg_top_sales
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    SalesSummary ss ON c.c_customer_sk = ss.bill_customer_sk
+GROUP BY 
+    c.c_customer_id, c.c_first_name, c.c_last_name, c.c_email_address, cd.dep_count
+HAVING 
+    total_customer_spent > (SELECT AVG(total_sales_price) FROM SalesSummary)
+ORDER BY 
+    total_customer_spent DESC
+LIMIT 10;

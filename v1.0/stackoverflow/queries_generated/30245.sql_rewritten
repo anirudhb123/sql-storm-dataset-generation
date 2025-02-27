@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS Owner,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS RankScore
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE()) 
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+TopPosts AS (
+    SELECT 
+        rp.Title,
+        rp.Owner,
+        rp.Score,
+        rp.ViewCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserBadges ub ON rp.Owner = ub.UserId
+    WHERE 
+        rp.RankScore = 1
+)
+SELECT 
+    p.Title,
+    p.Owner,
+    p.Score,
+    p.ViewCount,
+    ISNULL(ub.GoldBadges, 0) AS GoldBadges,
+    ISNULL(ub.SilverBadges, 0) AS SilverBadges,
+    ISNULL(ub.BronzeBadges, 0) AS BronzeBadges,
+    CASE 
+        WHEN u.Reputation > 1000 THEN 'High Reputation'
+        WHEN u.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationLevel
+FROM 
+    TopPosts p
+JOIN 
+    Users u ON p.Owner = u.DisplayName
+WHERE 
+    u.LastAccessDate IS NOT NULL
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC;

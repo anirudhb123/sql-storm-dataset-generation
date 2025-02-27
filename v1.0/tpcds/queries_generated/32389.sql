@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        (ws_quantity * ws_sales_price) AS total_sales
+    FROM web_sales
+    WHERE ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    
+    UNION ALL
+    
+    SELECT 
+        cs_order_number,
+        cs_item_sk,
+        cs_quantity,
+        cs_sales_price,
+        (cs_quantity * cs_sales_price) AS total_sales
+    FROM catalog_sales
+    WHERE cs_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+AggregateSales AS (
+    SELECT 
+        item.i_item_id,
+        COALESCE(SUM(sd.total_sales), 0) AS total_sales,
+        COUNT(sd.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (ORDER BY COALESCE(SUM(sd.total_sales), 0) DESC) AS sales_rank
+    FROM item 
+    LEFT JOIN SalesData sd ON item.i_item_sk = sd.ws_item_sk OR item.i_item_sk = sd.cs_item_sk
+    GROUP BY item.i_item_id
+),
+TopSellingItems AS (
+    SELECT * FROM AggregateSales WHERE sales_rank <= 10
+)
+SELECT 
+    tsi.i_item_id,
+    tsi.total_sales,
+    tsi.total_orders,
+    ia.ib_lower_bound,
+    ia.ib_upper_bound,
+    CASE 
+        WHEN tsi.total_sales IS NULL THEN 'No Sales'
+        WHEN tsi.total_sales < ia.ib_lower_bound THEN 'Low Sales'
+        WHEN tsi.total_sales BETWEEN ia.ib_lower_bound AND ia.ib_upper_bound THEN 'Moderate Sales'
+        ELSE 'High Sales'
+    END AS sales_category
+FROM TopSellingItems tsi
+LEFT JOIN income_band ia ON (tsi.total_sales >= ia.ib_lower_bound AND tsi.total_sales <= ia.ib_upper_bound)
+ORDER BY tsi.total_sales DESC;

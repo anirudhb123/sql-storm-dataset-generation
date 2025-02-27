@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        u.Id
+),
+PostComments AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.TotalPosts,
+        us.PositivePosts,
+        us.NegativePosts,
+        us.TotalViews,
+        RANK() OVER (ORDER BY us.TotalPosts DESC, us.TotalViews DESC) AS UserRank
+    FROM 
+        UserStats us
+    WHERE 
+        us.TotalPosts > 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    pc.CommentCount,
+    tu.DisplayName AS TopUser,
+    tu.UserRank
+FROM 
+    RankedPosts rp
+JOIN 
+    PostComments pc ON rp.PostId = pc.PostId
+JOIN 
+    TopUsers tu ON rp.PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = tu.UserId)
+WHERE 
+    rp.Rank <= 5
+AND 
+    tu.UserRank <= 10
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

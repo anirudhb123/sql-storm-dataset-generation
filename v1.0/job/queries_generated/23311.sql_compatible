@@ -1,0 +1,54 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        ARRAY[mt.title] AS path,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        at.production_year,
+        mh.path || at.title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    ti.title AS original_movie_title,
+    COUNT(DISTINCT c.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT ti.title, '; ') AS linked_movies,
+    SUM(CASE WHEN c.note IS NULL THEN 1 ELSE 0 END) AS null_notes_count,
+    MAX(mh.path[array_length(mh.path, 1)]) AS last_movie_linked,
+    AVG(mt.production_year) AS avg_production_year,
+    COUNT(DISTINCT mk.keyword) FILTER (WHERE mk.keyword ILIKE '%action%') AS action_movie_count
+FROM 
+    cast_info c
+JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+JOIN 
+    aka_title ti ON c.movie_id = ti.movie_id
+LEFT JOIN 
+    movie_keyword mk ON ti.id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON ti.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info ILIKE '%runtime%' LIMIT 1)
+LEFT JOIN 
+    movie_hierarchy mh ON ti.id = mh.movie_id
+GROUP BY 
+    ak.name, ti.title, mt.production_year, mh.path
+HAVING 
+    COUNT(DISTINCT ti.id) > 1
+ORDER BY 
+    action_movie_count DESC, avg_production_year DESC
+LIMIT 100 OFFSET 10;

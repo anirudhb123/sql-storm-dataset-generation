@@ -1,0 +1,77 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 year'
+),
+UserScore AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        COUNT(p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS TotalClosed,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 14 THEN 1 END) AS TotalLocked,
+        MAX(ph.CreationDate) AS LastPostAction
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        us.TotalScore,
+        us.TotalPosts,
+        RANK() OVER (ORDER BY us.TotalScore DESC) AS UserRank
+    FROM 
+        Users u
+    JOIN 
+        UserScore us ON u.Id = us.UserId
+    WHERE 
+        us.TotalPosts > 10
+)
+SELECT 
+    p.Title,
+    p.ViewCount,
+    p.Score,
+    us.DisplayName AS Owner,
+    t.UserRank,
+    ph.TotalClosed,
+    ph.TotalLocked,
+    ph.LastPostAction,
+    r.PostRank
+FROM 
+    RankedPosts r
+JOIN 
+    Posts p ON r.PostId = p.Id
+JOIN 
+    TopUsers t ON p.OwnerUserId = t.UserId
+LEFT JOIN 
+    PostHistorySummary ph ON p.Id = ph.PostId
+WHERE 
+    p.ViewCount > 100
+ORDER BY 
+    t.UserRank, r.Score DESC;

@@ -1,0 +1,39 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+NationSales AS (
+    SELECT n.n_name, SUM(o.o_totalprice) AS total_sales
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_name
+), 
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+)
+SELECT n.n_name, 
+       COALESCE(ns.total_sales, 0) AS total_sales,
+       SUM(ps.ps_availqty) AS total_available_quantity,
+       MAX(ps.ps_supplycost) AS max_supply_cost,
+       MIN(CASE WHEN ps.ps_supplycost IS NOT NULL THEN ps.ps_supplycost ELSE 0 END) AS min_supply_cost,
+       COUNT(DISTINCT sh.s_suppkey) AS total_suppliers,
+       STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM nation n
+LEFT JOIN NationSales ns ON n.n_name = ns.n_name
+LEFT JOIN PartSupplierInfo ps ON ps.p_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_type LIKE '%eco%')
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+GROUP BY n.n_name
+HAVING SUM(ps.ps_availqty) > 0
+   OR COUNT(DISTINCT sh.s_suppkey) > 1
+ORDER BY total_sales DESC, total_available_quantity DESC;

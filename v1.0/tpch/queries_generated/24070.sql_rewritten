@@ -1,0 +1,62 @@
+WITH RankedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        l.l_linenumber,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        l.l_returnflag,
+        l.l_linestatus,
+        l.l_shipdate,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rn
+    FROM lineitem l
+    WHERE l.l_shipdate < (SELECT MAX(l_shipdate) FROM lineitem) 
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        COUNT(li.l_orderkey) AS item_count
+    FROM orders o
+    LEFT JOIN RankedLineItems li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus
+    HAVING COUNT(li.l_orderkey) > 5
+    OR o.o_orderstatus IN ('F', 'O') 
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_name
+    HAVING total_supply_cost > (SELECT AVG(ps.ps_supplycost * ps.ps_availqty) FROM partsupp ps)
+),
+FinalResult AS (
+    SELECT 
+        fo.o_orderkey,
+        fo.o_totalprice,
+        fo.o_orderdate,
+        CASE 
+            WHEN fo.item_count IS NULL THEN 'No Items'
+            ELSE 'Items Present'
+        END AS item_status,
+        hs.s_name AS high_value_supplier
+    FROM FilteredOrders fo
+    LEFT JOIN HighValueSuppliers hs ON fo.o_orderkey % 10 = hashtext(hs.s_name) % 10 
+)
+SELECT 
+    fr.o_orderkey,
+    fr.o_totalprice,
+    fr.o_orderdate,
+    fr.item_status,
+    COALESCE(fr.high_value_supplier, 'Unknown') AS supplier_status 
+FROM FinalResult fr
+ORDER BY fr.o_orderdate DESC, fr.o_totalprice DESC
+LIMIT 50;

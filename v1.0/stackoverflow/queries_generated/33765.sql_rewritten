@@ -1,0 +1,73 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT Id, TagName, Count, IsModeratorOnly, IsRequired, 1 AS Level
+    FROM Tags
+    WHERE IsRequired = 1
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count, t.IsModeratorOnly, t.IsRequired, th.Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy th ON t.ExcerptPostId = th.Id
+),
+UserBadges AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           COUNT(b.Id) AS BadgeCount, 
+           SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges, 
+           SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges, 
+           SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.OwnerUserId, 
+           p.CreationDate, 
+           p.ViewCount, 
+           COALESCE(ah.AnswerCount, 0) AS AnswerCount, 
+           COALESCE(c.CommentCount, 0) AS CommentCount,
+           t.TagName
+    FROM Posts p
+    LEFT JOIN (
+        SELECT ParentId, COUNT(Id) AS AnswerCount 
+        FROM Posts 
+        WHERE PostTypeId = 2 
+        GROUP BY ParentId
+    ) ah ON p.Id = ah.ParentId
+    LEFT JOIN (
+        SELECT PostId, COUNT(Id) AS CommentCount 
+        FROM Comments 
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN RecursiveTagHierarchy th ON p.Tags LIKE CONCAT('%', th.TagName, '%')
+    LEFT JOIN Tags t ON t.TagName = th.TagName
+    WHERE p.PostTypeId = 1 
+),
+AggregatePostScores AS (
+    SELECT pd.Title, 
+           pd.OwnerUserId, 
+           pd.ViewCount, 
+           pd.AnswerCount, 
+           pd.CommentCount, 
+           SUM(v.BountyAmount) AS TotalBounty,
+           ROW_NUMBER() OVER (PARTITION BY pd.OwnerUserId ORDER BY pd.ViewCount DESC) AS Rank
+    FROM PostDetails pd
+    LEFT JOIN Votes v ON pd.PostId = v.PostId 
+    GROUP BY pd.Title, pd.OwnerUserId, pd.ViewCount, pd.AnswerCount, pd.CommentCount
+)
+SELECT u.Id AS UserId,
+       u.DisplayName,
+       ub.BadgeCount,
+       ub.GoldBadges,
+       ub.SilverBadges,
+       ub.BronzeBadges,
+       aps.Title,
+       aps.ViewCount,
+       aps.AnswerCount,
+       aps.CommentCount,
+       aps.TotalBounty
+FROM Users u
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN AggregatePostScores aps ON u.Id = aps.OwnerUserId
+WHERE ub.BadgeCount > 0
+ORDER BY ub.BadgeCount DESC, aps.ViewCount DESC;

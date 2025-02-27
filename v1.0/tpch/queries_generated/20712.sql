@@ -1,0 +1,89 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+HighlyRatedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice < 50 THEN 'Low Price'
+            WHEN p.p_retailprice BETWEEN 50 AND 100 THEN 'Medium Price'
+            ELSE 'High Price'
+        END AS price_category
+    FROM 
+        part p
+    WHERE 
+        p.p_size = (SELECT MAX(p_size) FROM part)
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        DENSE_RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        CASE 
+            WHEN l.l_returnflag = 'R' THEN l.l_discount * 0.9 
+            ELSE l.l_discount 
+        END AS adjusted_discount
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= CURRENT_DATE - INTERVAL '1 year'
+),
+OrderPartStats AS (
+    SELECT 
+        li.l_orderkey,
+        COUNT(DISTINCT li.l_partkey) AS unique_parts,
+        SUM(li.l_extendedprice * (1 - li.adjusted_discount)) AS total_value
+    FROM 
+        FilteredLineItems li
+    GROUP BY 
+        li.l_orderkey
+)
+SELECT 
+    c.c_name,
+    R.s_name AS supplier_name,
+    pp.p_name,
+    pp.price_category,
+    o.order_count,
+    os.total_value,
+    COALESCE(r.s_name, 'No Supplier') AS supplier_status
+FROM 
+    CustomerOrderStats os
+JOIN 
+    HighlyRatedParts pp ON os.order_count > 0
+LEFT JOIN 
+    RankedSuppliers r ON os.rank = r.supplier_rank
+LEFT JOIN 
+    OrderPartStats o ON o.l_orderkey = os.c_custkey
+WHERE 
+    (pp.p_retailprice IS NOT NULL OR r.s_name IS NULL)
+ORDER BY 
+    os.total_spent DESC NULLS LAST
+LIMIT 100;

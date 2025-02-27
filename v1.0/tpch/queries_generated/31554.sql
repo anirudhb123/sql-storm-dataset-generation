@@ -1,0 +1,32 @@
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, p.p_partkey, p.p_mfgr, p.p_brand, 
+           p.p_retailprice, ps.ps_availqty, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) as rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal > 1000
+), 
+FilteredSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM SupplierCTE s
+    JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+), 
+TopSuppliers AS (
+    SELECT *, 
+           DENSE_RANK() OVER (ORDER BY total_revenue DESC) AS revenue_rank
+    FROM FilteredSuppliers
+)
+SELECT r.r_name, 
+       n.n_name, 
+       COUNT(DISTINCT ts.s_suppkey) AS num_suppliers, 
+       AVG(ts.total_revenue) AS avg_revenue
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN TopSuppliers ts ON n.n_nationkey = (SELECT s.nationkey FROM supplier s WHERE s.s_suppkey = ts.s_suppkey)
+WHERE ts.revenue_rank <= 10
+GROUP BY r.r_name, n.n_name
+HAVING AVG(ts.total_revenue) IS NOT NULL
+ORDER BY r.r_name, n.n_name;

@@ -1,0 +1,59 @@
+WITH UserReputation AS (
+    SELECT Id, DisplayName, Reputation,
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+TopUsers AS (
+    SELECT u.Id, u.DisplayName, u.Reputation, u.LastAccessDate,
+           CASE 
+               WHEN b.Class = 1 THEN 'Gold'
+               WHEN b.Class = 2 THEN 'Silver'
+               WHEN b.Class = 3 THEN 'Bronze'
+               ELSE 'None'
+           END AS BadgeClass
+    FROM UserReputation u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE u.Reputation > 1000
+),
+PostStats AS (
+    SELECT p.OwnerUserId,
+           COUNT(p.Id) AS TotalPosts,
+           SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+           SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+           AVG(p.Score) AS AvgScore
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+CombinedStats AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName,
+           us.TotalPosts,
+           us.QuestionCount,
+           us.AnswerCount,
+           us.AvgScore,
+           u.Reputation AS UserReputation,
+           COALESCE(b.BadgeClass, 'None') AS BadgeClass
+    FROM TopUsers u
+    LEFT JOIN PostStats us ON u.Id = us.OwnerUserId
+),
+FinalStats AS (
+    SELECT cs.*, 
+           CASE
+               WHEN cs.UserReputation >= 5000 THEN 'High Reputation'
+               WHEN cs.UserReputation BETWEEN 1000 AND 5000 THEN 'Medium Reputation'
+               ELSE 'Low Reputation'
+           END AS ReputationCategory
+    FROM CombinedStats cs
+)
+SELECT f.UserId, f.DisplayName, f.TotalPosts, f.QuestionCount, f.AnswerCount, f.AvgScore,
+       f.UserReputation, f.BadgeClass, f.ReputationCategory,
+       (SELECT COUNT(1) 
+        FROM Comments c 
+        WHERE c.UserId = f.UserId) AS TotalComments,
+       (SELECT STRING_AGG(tag.TagName, ', ')
+        FROM Tags tag
+        JOIN Posts p ON p.Tags LIKE '%' || tag.TagName || '%'
+        WHERE p.OwnerUserId = f.UserId) AS UserTags
+FROM FinalStats f
+ORDER BY f.UserReputation DESC, f.TotalPosts DESC
+FETCH FIRST 10 ROWS ONLY;

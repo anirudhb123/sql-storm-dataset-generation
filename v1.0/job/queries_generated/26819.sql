@@ -1,0 +1,55 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT c.role_id) AS role_ids,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        ARRAY_AGG(DISTINCT co.name) AS companies
+    FROM 
+        title t
+    JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+        AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'plot')
+    GROUP BY 
+        t.id
+),
+PersonRoles AS (
+    SELECT 
+        ci.movie_id,
+        ARRAY_AGG(DISTINCT ak.name) AS actor_names,
+        ARRAY_AGG(DISTINCT rt.role) AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.person_role_id = rt.id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    pr.actor_names,
+    pr.roles,
+    md.keywords,
+    md.companies
+FROM 
+    MovieDetails md
+JOIN 
+    PersonRoles pr ON md.movie_id = pr.movie_id
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

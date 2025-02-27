@@ -1,0 +1,57 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        MAX(b.Date) AS LastBadgeDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank,
+        COUNT(DISTINCT CASE WHEN bh.PostHistoryTypeId = 12 THEN bh.Id END) AS DeleteCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN PostHistory bh ON p.Id = bh.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+UserImpact AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        MAX(ps.Score) AS MaxPostScore,
+        SUM(ps.ViewCount) AS TotalViewCount,
+        SUM(CASE WHEN ps.CommentCount > 5 THEN 1 ELSE 0 END) AS HighlyCommentedPosts,
+        STRING_AGG(DISTINCT p.Tags, ', ') AS AssociatedTags
+    FROM UserActivity ua
+    JOIN PostStatistics ps ON ua.TotalPosts > 0
+    LEFT JOIN Posts p ON p.OwnerUserId = ua.UserId
+    WHERE ua.TotalPosts > 10
+    GROUP BY ua.UserId, ua.DisplayName
+)
+SELECT 
+    ui.UserId,
+    ui.DisplayName,
+    ui.MaxPostScore,
+    ui.TotalViewCount,
+    ui.HighlyCommentedPosts,
+    COALESCE(NULLIF(ui.AssociatedTags, ''), 'No tags found') AS TagsSummary,
+    (SELECT COUNT(*) FROM Votes v WHERE v.UserId = ui.UserId AND v.CreationDate >= NOW() - INTERVAL '30 days') AS RecentVotesCount,
+    (SELECT AVG(Score) FROM Posts WHERE OwnerUserId = ui.UserId) AS AveragePostScore
+FROM UserImpact ui
+ORDER BY ui.TotalViewCount DESC, ui.MaxPostScore DESC;

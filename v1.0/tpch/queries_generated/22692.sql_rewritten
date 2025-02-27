@@ -1,0 +1,48 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, SUM(s.s_acctbal) AS total_acctbal, COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+order_details AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '1996-01-01'
+    GROUP BY o.o_orderkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COALESCE(SUM(od.total_price), 0) AS total_orders
+    FROM customer c
+    LEFT JOIN order_details od ON c.c_custkey = od.o_orderkey
+    GROUP BY c.c_custkey
+),
+ranked_suppliers AS (
+    SELECT s.*, 
+           ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY total_acctbal DESC) AS rank
+    FROM supplier_summary s
+    JOIN nation n ON s.nation_key = n.n_nationkey
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT ro.o_orderkey) AS total_orders,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ' - ', s.total_acctbal) ORDER BY s.total_acctbal DESC) AS supplier_details
+FROM nation n
+LEFT JOIN customer_orders co ON co.c_custkey = ANY(ARRAY(SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey))
+LEFT JOIN orders ro ON co.total_orders > 0 AND ro.o_custkey = co.c_custkey
+LEFT JOIN ranked_suppliers s ON n.n_nationkey = s.n_nationkey AND s.rank <= 3
+WHERE n.r_name IS NOT NULL
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT ro.o_orderkey) > 5 OR n.n_name LIKE 'A%'
+ORDER BY total_orders DESC NULLS LAST;

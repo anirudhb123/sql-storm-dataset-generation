@@ -1,0 +1,43 @@
+WITH RegionalSales AS (
+    SELECT
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN
+        supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY
+        n.n_name
+), TopRegions AS (
+    SELECT
+        r.r_name AS region_name,
+        SUM(rs.total_sales) AS region_sales
+    FROM
+        region r
+    LEFT JOIN
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN
+        RegionalSales rs ON n.n_nationkey = rs.nation_name
+    GROUP BY
+        r.r_name
+)
+
+SELECT
+    tr.region_name,
+    COALESCE(tr.region_sales, 0) AS total_sales,
+    CASE 
+        WHEN tr.region_sales IS NULL THEN 'No Sales'
+        WHEN tr.region_sales > (SELECT AVG(region_sales) FROM TopRegions) THEN 'Above Average'
+        ELSE 'Below Average' 
+    END AS sales_category
+FROM
+    TopRegions tr
+ORDER BY
+    total_sales DESC;

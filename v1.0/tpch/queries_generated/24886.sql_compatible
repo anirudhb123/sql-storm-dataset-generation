@@ -1,0 +1,46 @@
+
+WITH RecursiveSupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, r.Level + 1
+    FROM supplier s
+    JOIN RecursiveSupplierCTE r ON s.s_nationkey = r.s_nationkey
+    WHERE r.Level < 3
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_mktsegment = 'BUILDING' 
+    GROUP BY c.custkey
+),
+HighValueParts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_availqty) > 100
+    ORDER BY total_cost DESC
+    LIMIT 5
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(co.total_spent) AS average_spent,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS returns_count
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN CustomerOrderSummary co ON o.o_custkey = co.c_custkey
+JOIN HighValueParts p ON l.l_partkey = p.ps_partkey
+WHERE r.r_name IS NOT NULL
+AND (s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2) OR s.s_nationkey IS NULL)
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 10 
+ORDER BY average_spent DESC
+LIMIT 20;

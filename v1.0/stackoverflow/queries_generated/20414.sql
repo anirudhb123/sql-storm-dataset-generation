@@ -1,0 +1,63 @@
+WITH RankedUserReputation AS (
+    SELECT 
+        Id AS UserId, 
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        COALESCE(NULLIF(p.AcceptedAnswerId, -1), 0) AS AcceptedAnswerId,
+        Count(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(DISTINCT ph.Id) AS PostHistoryCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id, p.Title, p.Tags, p.AcceptedAnswerId
+),
+MostCommentedPosts AS (
+    SELECT 
+        pa.PostId,
+        pa.Title,
+        pa.CommentCount,
+        RANK() OVER (ORDER BY pa.CommentCount DESC) AS CommentRank
+    FROM PostAnalytics pa
+    WHERE pa.CommentCount > 0
+),
+UserPosts AS (
+    SELECT 
+        p.OwnerUserId,
+        p.Id AS PostId,
+        p.Title,
+        pu.ReputationRank,
+        CASE 
+            WHEN NOT EXISTS (SELECT 1 FROM RankedUserReputation ru WHERE ru.UserId = p.OwnerUserId) THEN 'Unknown User'
+            ELSE u.DisplayName
+        END AS UserDisplayName,
+        COALESCE(pa.CommentCount, 0) AS TotalComments
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN PostAnalytics pa ON p.Id = pa.PostId
+)
+
+SELECT 
+    up.UserDisplayName,
+    COUNT(DISTINCT up.PostId) AS TotalPosts,
+    AVG(pa.UpVotes) AS AvgUpVotes,
+    AVG(pa.DownVotes) AS AvgDownVotes,
+    SUM(CASE WHEN u.ReputationRank <= 10 THEN 1 ELSE 0 END) AS TopRankedUserCount,
+    SUM(CASE WHEN up.TotalComments > 0 THEN 1 ELSE 0 END) AS PostsWithComments,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS RelatedTags
+FROM UserPosts up
+LEFT JOIN PostAnalytics pa ON up.PostId = pa.PostId
+LEFT JOIN Tags t ON t.Id = ANY(string_to_array(up.Tags, ',')::int[])
+LEFT JOIN RankedUserReputation u ON up.OwnerUserId = u.UserId
+GROUP BY up.UserDisplayName
+ORDER BY TotalPosts DESC;

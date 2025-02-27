@@ -1,0 +1,51 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_city,
+        COUNT(*) AS address_count,
+        STRING_AGG(DISTINCT ca_street_name || ' ' || ca_street_number || ' ' || ca_street_type, ', ') AS street_details
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city
+),
+DemographicStats AS (
+    SELECT 
+        cd_gender,
+        SUM(cd_dep_count) AS total_dependents,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+SalesData AS (
+    SELECT 
+        DATE_TRUNC('month', d_date) AS month,
+        SUM(ss_net_profit) AS total_profit,
+        COUNT(DISTINCT ss_ticket_number) AS total_sales
+    FROM 
+        store_sales
+    JOIN 
+        date_dim ON ss_sold_date_sk = d_date_sk
+    GROUP BY 
+        DATE_TRUNC('month', d_date)
+)
+SELECT 
+    AS.ca_city,
+    AS.address_count,
+    AS.street_details,
+    DS.cd_gender,
+    DS.total_dependents,
+    DS.avg_purchase_estimate,
+    SD.month,
+    SD.total_profit,
+    SD.total_sales
+FROM 
+    AddressStats AS AS
+JOIN 
+    DemographicStats DS ON AS.address_count > 100
+JOIN 
+    SalesData SD ON EXTRACT(MONTH FROM SD.month) = 12
+ORDER BY 
+    AS.address_count DESC, DS.total_dependents DESC;

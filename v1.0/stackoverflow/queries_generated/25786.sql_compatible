@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+
+KeywordFilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.ViewCount,
+        rp.AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(SUBSTRING(c.Text, 1, 100), ', ') AS SampleComments
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    WHERE 
+        rp.Body ILIKE '%SQL%'
+    GROUP BY 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.ViewCount,
+        rp.AnswerCount
+),
+
+DetailedPostInfo AS (
+    SELECT
+        kfp.PostId,
+        kfp.Title,
+        kfp.OwnerDisplayName,
+        kfp.ViewCount,
+        kfp.AnswerCount,
+        kfp.CommentCount,
+        kfp.CreationDate,
+        kfp.SampleComments,
+        COALESCE(b.Name, 'No Badge') AS BadgeName,
+        COALESCE(b.Class, 3) AS BadgeClass
+    FROM 
+        KeywordFilteredPosts kfp
+    LEFT JOIN 
+        Badges b ON kfp.OwnerDisplayName = b.UserId
+    WHERE 
+        kfp.TagRank <= 5 
+)
+
+SELECT 
+    dpi.PostId,
+    dpi.Title,
+    dpi.OwnerDisplayName,
+    dpi.ViewCount,
+    dpi.AnswerCount,
+    dpi.CommentCount,
+    dpi.CreationDate,
+    dpi.SampleComments,
+    dpi.BadgeName,
+    dpi.BadgeClass
+FROM 
+    DetailedPostInfo dpi
+ORDER BY 
+    dpi.ViewCount DESC;

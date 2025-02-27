@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        ARRAY_LENGTH(string_to_array(Tags, '>'), 1) AS TagCount,
+        COALESCE(SUM(v.VoteTypeId = 2)::int, 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3)::int, 0) AS DownVoteCount,
+        COUNT(c.Id) AS CommentCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Considering only Questions and Answers
+    GROUP BY 
+        p.Id
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.VoteTypeId = 2, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.VoteTypeId = 3, 0)) AS TotalDownVotes,
+        SUM(COALESCE(c.Id, 0)) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id
+),
+TopEngagedUsers AS (
+    SELECT 
+        ue.UserId,
+        ue.DisplayName,
+        ue.PostCount,
+        ue.TotalUpVotes,
+        ue.TotalDownVotes,
+        ue.TotalComments,
+        RANK() OVER (ORDER BY ue.TotalUpVotes DESC) AS UserRank
+    FROM 
+        UserEngagement ue
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.TagCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    rp.CommentCount,
+    u.DisplayName AS TopEngagedUser,
+    tu.PostCount AS UserPostCount,
+    tu.TotalUpVotes AS UserTotalUpVotes
+FROM 
+    RankedPosts rp
+JOIN 
+    TopEngagedUsers tu ON rp.UpVoteCount > 0 
+ORDER BY 
+    rp.TagCount DESC, 
+    rp.UpVoteCount DESC;

@@ -1,0 +1,75 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_return_quantity) AS total_returned,
+        SUM(ws_return_amt) AS total_return_amt,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_return_amt) DESC) AS rank
+    FROM 
+        web_returns
+    WHERE 
+        wr_return_quantity > 0
+    GROUP BY 
+        ws_item_sk
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        MAX(cd_purchase_estimate) AS max_purchase_estimate
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_gender IN ('M', 'F') 
+        AND cd_purchase_estimate IS NOT NULL
+    GROUP BY 
+        cd_demo_sk, cd_gender, cd_marital_status
+),
+CohortPurchase AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        SUM(CASE WHEN ws_net_profit IS NULL THEN 0 ELSE ws_net_profit END) AS total_spent,
+        DENSE_RANK() OVER (ORDER BY SUM(ws_net_profit) DESC) AS spending_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+        AND ws.ws_order_number IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_current_cdemo_sk
+),
+AggregateStats AS (
+    SELECT 
+        p.p_item_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+        AVG(COALESCE(c.total_spent, 0)) AS avg_spent,
+        COUNT(DISTINCT r.total_returned) AS total_returns
+    FROM 
+        catalog_sales p
+    LEFT JOIN 
+        CohortPurchase c ON p.p_item_sk = c.c_current_cdemo_sk
+    LEFT JOIN 
+        RankedReturns r ON p.p_item_sk = r.ws_item_sk
+    GROUP BY 
+        p.p_item_sk
+)
+SELECT 
+    a.p_item_sk,
+    i.i_item_desc,
+    a.unique_customers,
+    a.avg_spent,
+    a.total_returns
+FROM 
+    AggregateStats a
+JOIN 
+    item i ON a.p_item_sk = i.i_item_sk
+WHERE 
+    a.avg_spent > COALESCE((SELECT MAX(max_purchase_estimate) 
+                             FROM CustomerDemographics 
+                             WHERE rank = 1), 0)
+ORDER BY 
+    a.total_returns DESC, a.avg_spent ASC;

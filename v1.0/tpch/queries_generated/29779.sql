@@ -1,0 +1,26 @@
+SELECT 
+    p.p_name AS part_name,
+    s.s_name AS supplier_name,
+    CONCAT('Supplier ', s.s_name, ' provides ', p.p_name, ' at a price of $', FORMAT(ps.ps_supplycost, 2)) AS supply_info,
+    SUBSTRING(p.p_comment, 1, 15) AS short_comment,
+    REPLACE(UPPER(p.p_type), ' ', '_') AS type_modified,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    p.p_size BETWEEN 10 AND 30
+    AND l.l_shipdate >= '2023-01-01'
+GROUP BY 
+    p.p_name, s.s_name, ps.ps_supplycost, p.p_comment, p.p_type
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    COUNT(DISTINCT o.o_orderkey) DESC;

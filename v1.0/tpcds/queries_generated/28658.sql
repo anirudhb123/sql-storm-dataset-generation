@@ -1,0 +1,49 @@
+
+WITH CustomerAddressDetails AS (
+    SELECT 
+        ca.ca_address_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name,
+        ca.ca_street_number || ' ' || ca.ca_street_name || ' ' || ca.ca_street_type AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country,
+        c.cd_gender,
+        c.cd_marital_status,
+        c.cd_education_status,
+        c.cd_purchase_estimate
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+), 
+
+AddressCityCount AS (
+    SELECT 
+        ca_city,
+        COUNT(*) AS customer_count,
+        STRING_AGG(CONCAT(customer_name, ' (', full_address, ')'), ', ') AS customer_list
+    FROM 
+        CustomerAddressDetails
+    GROUP BY 
+        ca_city
+), 
+
+AddressWithMaxCustomers AS (
+    SELECT 
+        ca_city,
+        customer_count,
+        customer_list
+    FROM 
+        AddressCityCount
+    WHERE 
+        customer_count = (SELECT MAX(customer_count) FROM AddressCityCount)
+)
+
+SELECT 
+    ca_city,
+    customer_count,
+    customer_list,
+    REGEXP_REPLACE(customer_list, ', ', '; ') AS formatted_customer_list
+FROM 
+    AddressWithMaxCustomers;

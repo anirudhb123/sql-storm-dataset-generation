@@ -1,0 +1,67 @@
+WITH RECURSIVE RegionalSales AS (
+    SELECT 
+        r.r_name AS region,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        region r
+    JOIN
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        r.r_name
+
+    UNION ALL
+
+    SELECT 
+        'All Regions' AS region,
+        SUM(total_sales) OVER ()  
+    FROM
+        RegionalSales
+),
+CustomerActivity AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+BestCustomers AS (
+    SELECT 
+        ca.c_custkey,
+        ca.c_name,
+        ca.order_count,
+        RANK() OVER (ORDER BY ca.order_count DESC) AS rank  
+    FROM 
+        CustomerActivity ca
+    WHERE 
+        ca.order_count > 0
+)
+SELECT 
+    rs.region,
+    bc.c_name,
+    bc.order_count,
+    rs.total_sales
+FROM 
+    RegionalSales rs
+LEFT JOIN 
+    BestCustomers bc ON rs.region = 'All Regions'   
+WHERE 
+    rs.total_sales > 10000  
+ORDER BY 
+    rs.total_sales DESC, 
+    bc.order_count DESC;

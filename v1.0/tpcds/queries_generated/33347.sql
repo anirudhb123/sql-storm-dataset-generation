@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        CAST(1 AS INTEGER) AS level,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM
+        customer c
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_email_address
+  
+    UNION ALL
+
+    SELECT
+        sh.c_customer_sk,
+        sh.c_first_name,
+        sh.c_last_name,
+        sh.c_email_address,
+        sh.level + 1,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM
+        sales_hierarchy sh
+    JOIN
+        web_sales ws ON sh.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE
+        sh.total_profit < (SELECT AVG(ws_net_profit) FROM web_sales)
+    GROUP BY
+        sh.c_customer_sk, sh.c_first_name, sh.c_last_name, sh.c_email_address, sh.level
+),
+ranked_sales AS (
+    SELECT
+        sh.c_customer_sk,
+        sh.c_first_name,
+        sh.c_last_name,
+        sh.c_email_address,
+        sh.level,
+        sh.total_profit,
+        ROW_NUMBER() OVER (PARTITION BY sh.level ORDER BY sh.total_profit DESC) AS profit_rank
+    FROM
+        sales_hierarchy sh
+)
+
+SELECT
+    r.c_customer_sk,
+    r.c_first_name,
+    r.c_last_name,
+    r.c_email_address,
+    r.level,
+    r.total_profit,
+    r.profit_rank,
+    CASE
+        WHEN r.total_profit IS NULL THEN 'No Sales'
+        WHEN r.profit_rank <= 10 THEN 'Top Performer'
+        ELSE 'Regular Performer'
+    END AS performance_category
+FROM
+    ranked_sales r
+WHERE
+    r.total_profit IS NOT NULL
+ORDER BY
+    r.level,
+    r.profit_rank;

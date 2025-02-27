@@ -1,0 +1,41 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_address, s_nationkey, s_acctbal, 
+           1 AS depth, NULL AS parent_suppkey
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, 
+           sh.depth + 1, sh.s_suppkey
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey <> sh.s_suppkey
+)
+
+SELECT 
+    c.c_custkey, 
+    c.c_name, 
+    c.c_acctbal, 
+    SUM(l.l_discount) AS total_discount, 
+    MAX(o.o_orderdate) AS last_order_date,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN l.l_orderkey END) AS returns_count,
+    ARRAY_AGG(DISTINCT p.p_type) FILTER (WHERE p.p_size BETWEEN 1 AND 30) AS part_types,
+    RANK() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice) DESC) AS cust_rank
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN supplier_hierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN supplier s ON s.s_suppkey = sh.parent_suppkey
+WHERE o.o_orderstatus IN ('O', 'P', 'F')
+    AND (c.c_acctbal IS NOT NULL OR c.c_nationkey IS NOT NULL)
+    AND (l.l_tax < 0.2 OR l.l_discount IS NOT NULL)
+GROUP BY c.c_custkey, c.c_name, c.c_acctbal, s.s_name
+HAVING SUM(l.l_discount) > 100
+ORDER BY total_discount DESC, last_order_date DESC
+LIMIT 10
+OFFSET (SELECT COUNT(*) FROM customer WHERE c_acctbal < 1000);

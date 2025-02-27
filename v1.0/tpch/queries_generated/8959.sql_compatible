@@ -1,0 +1,58 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_availqty) AS total_availability,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+TopSuppliers AS (
+    SELECT 
+        *
+    FROM 
+        RankedSuppliers
+    WHERE 
+        supplier_rank <= 5
+),
+OrdersSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        SUM(l.l_quantity) AS total_quantity
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    ts.nation_name,
+    ts.s_name,
+    os.o_orderkey,
+    os.o_orderdate,
+    os.total_revenue,
+    os.customer_count,
+    os.total_quantity
+FROM 
+    TopSuppliers ts
+JOIN 
+    OrdersSummary os ON ts.s_suppkey = ANY(SELECT ps.ps_suppkey FROM partsupp ps JOIN lineitem l ON ps.ps_partkey = l.l_partkey)
+WHERE 
+    os.o_orderdate >= DATE '1997-01-01'
+ORDER BY 
+    ts.nation_name, os.total_revenue DESC;

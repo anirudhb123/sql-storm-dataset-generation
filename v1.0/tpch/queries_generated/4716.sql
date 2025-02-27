@@ -1,0 +1,69 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+TopSuppliers AS (
+    SELECT 
+        s_name 
+    FROM 
+        SupplierSales 
+    WHERE 
+        sales_rank <= 10
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        COUNT(l.l_orderkey) AS item_count,
+        SUM(l.l_extendedprice) AS total_price
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_name
+    HAVING 
+        total_orders > 5
+)
+SELECT 
+    c.c_name,
+    COALESCE(os.item_count, 0) AS num_items_ordered,
+    COALESCE(os.total_price, 0) AS total_order_value,
+    CASE 
+        WHEN ts.s_name IS NOT NULL THEN 'Top Supplier Used'
+        ELSE 'No Top Supplier'
+    END AS supplier_usage
+FROM 
+    CustomerOrders c
+LEFT JOIN 
+    OrderSummary os ON c.total_orders = os.item_count
+LEFT JOIN 
+    TopSuppliers ts ON ts.s_name = (SELECT MAX(s_name) FROM SupplierSales WHERE s_name LIKE '%' || LEFT(c.c_name, 3) || '%')
+WHERE 
+    c.total_spent > 2000
+ORDER BY 
+    c.total_spent DESC;

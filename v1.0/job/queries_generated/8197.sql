@@ -1,0 +1,28 @@
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    pc.kind AS production_company,
+    ci.role AS role,
+    COUNT(DISTINCT mw.keyword_id) AS keyword_count
+FROM 
+    aka_title AS t
+JOIN 
+    complete_cast AS cc ON t.id = cc.movie_id
+JOIN 
+    cast_info AS ci ON cc.subject_id = ci.id
+JOIN 
+    aka_name AS a ON ci.person_id = a.person_id
+JOIN 
+    movie_companies AS mc ON t.id = mc.movie_id
+JOIN 
+    company_name AS pc ON mc.company_id = pc.id
+LEFT JOIN 
+    movie_keyword AS mw ON t.id = mw.movie_id
+WHERE 
+    t.production_year >= 2000
+AND 
+    pc.country_code = 'USA'
+GROUP BY 
+    t.title, a.name, pc.kind, ci.role
+ORDER BY 
+    keyword_count DESC, movie_title ASC;

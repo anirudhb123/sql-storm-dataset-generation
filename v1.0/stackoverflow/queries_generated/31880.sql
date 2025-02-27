@@ -1,0 +1,92 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVoteStats AS (
+    SELECT
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopPostsWithComments AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        p.LastActivityDate,
+        ROW_NUMBER() OVER (ORDER BY p.LastActivityDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.LastActivityDate
+    HAVING 
+        COUNT(c.Id) > 10 -- Posts with more than 10 comments
+)
+SELECT 
+    ph.PostId,
+    ph.PostTitle,
+    pv.UpVotes,
+    pv.DownVotes,
+    MAX(au.TotalViews) AS MaxViews,
+    tp.CommentCount,
+    tp.LastActivityDate,
+    RANK() OVER (ORDER BY tp.CommentCount DESC) AS PopularityRank,
+    COALESCE(pv.TotalVotes, 0) AS TotalVotes,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM 
+    RecursivePostHierarchy ph
+LEFT JOIN 
+    PostVoteStats pv ON ph.PostId = pv.PostId
+LEFT JOIN 
+    MostActiveUsers au ON au.UserId = ph.PostId
+LEFT JOIN 
+    Tags t ON t.ExcerptPostId = ph.PostId
+LEFT JOIN 
+    TopPostsWithComments tp ON tp.Id = ph.PostId
+GROUP BY 
+    ph.PostId, ph.PostTitle, pv.UpVotes, pv.DownVotes, tp.CommentCount, tp.LastActivityDate
+ORDER BY 
+    MaxViews DESC, PopularityRank
+LIMIT 50;

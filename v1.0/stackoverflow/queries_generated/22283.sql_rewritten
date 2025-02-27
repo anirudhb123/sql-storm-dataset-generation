@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS PostRank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount, P.OwnerUserId, U.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(DISTINCT C.Name, ', ') AS CloseReasons,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes C ON PH.Comment::INT = C.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        PH.PostId
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Date) AS LastBadgeDate
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+PostsWithBadges AS (
+    SELECT 
+        RP.PostId,
+        RP.OwnerUserId,
+        RP.Title,
+        RP.Score,
+        RP.ViewCount,
+        RP.OwnerDisplayName,
+        UBadge.BadgeCount,
+        UBadge.LastBadgeDate,
+        CP.CloseCount,
+        CP.CloseReasons,
+        CP.LastClosedDate,
+        CASE 
+            WHEN CP.CloseCount IS NOT NULL THEN 'Closed'
+            ELSE 'Active'
+        END AS PostStatus
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        UserBadges UBadge ON RP.OwnerUserId = UBadge.UserId
+    LEFT JOIN 
+        ClosedPosts CP ON RP.PostId = CP.PostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN BadgeCount IS NULL THEN 'No Badges'
+        ELSE CONCAT(BadgeCount, ' Badge(s) awarded, last on ', TO_CHAR(LastBadgeDate, 'YYYY-MM-DD HH24:MI'))
+    END AS BadgeInfo,
+    COALESCE(CloseCount, 0) AS ActualCloseCount,
+    COALESCE(CloseReasons, 'N/A') AS CloseReasonDetails,
+    CASE 
+        WHEN (ViewCount < 100 AND Score >= 5) THEN 'Low Views, High Score'
+        WHEN (ViewCount >= 100 AND Score < 5) THEN 'High Views, Low Score'
+        ELSE 'Normal'
+    END AS ViewScoreProfile
+FROM 
+    PostsWithBadges
+WHERE 
+    PostRank = 1
+    AND (BadgeCount > 0 OR CloseCount IS NOT NULL)
+ORDER BY 
+    PostStatus DESC, 
+    ViewCount DESC, 
+    Score DESC;

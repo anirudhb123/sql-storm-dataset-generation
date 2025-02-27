@@ -1,0 +1,48 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000 -- Consider movies from 2000 onwards
+    UNION ALL
+    SELECT 
+        mb.id AS movie_id,
+        mb.title,
+        mb.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mb ON ml.linked_movie_id = mb.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+    COUNT(DISTINCT k.keyword) AS total_keywords,
+    SUM(CASE WHEN i.note IS NOT NULL THEN 1 ELSE 0 END) AS info_count,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT a.id) DESC) AS cast_rank
+FROM 
+    movie_hierarchy m
+LEFT JOIN 
+    cast_info a ON m.movie_id = a.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info i ON m.movie_id = i.movie_id
+WHERE 
+    m.level <= 2
+GROUP BY 
+    m.movie_id, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT a.id) > 1 AND SUM(CASE WHEN i.info LIKE '%award%' THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    m.production_year DESC, cast_rank;

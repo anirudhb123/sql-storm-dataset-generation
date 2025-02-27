@@ -1,0 +1,62 @@
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.TagName) AS TagCount,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON POSITION('>' || t.TagName || '<' IN '<' || p.Tags || '>') > 0
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    LEFT JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id
+),
+PostVoteDetails AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS Downvotes
+    FROM 
+        Votes v
+    INNER JOIN 
+        VoteTypes vt ON vt.Id = v.VoteTypeId
+    GROUP BY 
+        PostId
+),
+PostStats AS (
+    SELECT 
+        pt.PostId,
+        pt.TagCount,
+        pt.BadgeCount,
+        pt.AvgReputation,
+        COALESCE(vd.Upvotes, 0) AS Upvotes,
+        COALESCE(vd.Downvotes, 0) AS Downvotes
+    FROM 
+        PostTagCounts pt
+    LEFT JOIN 
+        PostVoteDetails vd ON vd.PostId = pt.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.TagCount,
+    ps.BadgeCount,
+    ps.AvgReputation,
+    ps.Upvotes,
+    ps.Downvotes,
+    CASE 
+        WHEN ps.Upvotes > ps.Downvotes THEN 'Positive' 
+        WHEN ps.Upvotes < ps.Downvotes THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS Sentiment,
+    ROW_NUMBER() OVER (ORDER BY ps.AvgReputation DESC, ps.TagCount DESC) AS Ranking
+FROM 
+    PostStats ps
+ORDER BY 
+    ps.Ranking
+LIMIT 10;

@@ -1,0 +1,45 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT mc.company_id) AS num_companies,
+        AVG(pi.info::float) AS avg_info_length,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rnk
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_companies mc ON at.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = at.movie_id
+    LEFT JOIN 
+        info_type it ON it.id = mi.info_type_id
+    LEFT JOIN 
+        person_info pi ON pi.person_id IN (SELECT person_id FROM cast_info WHERE movie_id = at.movie_id)
+    GROUP BY 
+        at.title, at.production_year
+),
+HighProfileMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.num_companies,
+        rm.avg_info_length
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.num_companies > 5 AND rm.avg_info_length IS NOT NULL
+)
+SELECT 
+    hpm.title,
+    hpm.production_year,
+    hpm.num_companies,
+    hpm.avg_info_length,
+    CASE 
+        WHEN hpm.num_companies > 10 THEN 'High'
+        WHEN hpm.num_companies BETWEEN 6 AND 10 THEN 'Medium'
+        ELSE 'Low'
+    END AS company_rating
+FROM 
+    HighProfileMovies hpm
+ORDER BY 
+    hpm.production_year DESC, hpm.title;

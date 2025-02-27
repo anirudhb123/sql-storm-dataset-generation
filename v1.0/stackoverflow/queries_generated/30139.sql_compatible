@@ -1,0 +1,107 @@
+
+WITH RecursivePosts AS (
+    SELECT 
+        Id, 
+        Title, 
+        ViewCount, 
+        OwnerUserId, 
+        ParentId, 
+        CreationDate,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ViewCount, 
+        p.OwnerUserId, 
+        p.ParentId, 
+        p.CreationDate,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.Id
+),
+PopularUsers AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS NetUpvotes,
+        RANK() OVER (ORDER BY COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) DESC) AS PopularityRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostHistoryChanges AS (
+    SELECT 
+        PH.PostId, 
+        PH.PostHistoryTypeId, 
+        P.Title, 
+        P.CreationDate, 
+        PH.CreationDate AS ChangeDate, 
+        U.DisplayName AS ChangedBy
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    JOIN 
+        Users U ON PH.UserId = U.Id
+    WHERE
+        PH.PostHistoryTypeId IN (10, 11, 12, 13) 
+),
+ClosedPosts AS (
+    SELECT 
+        PHC.PostId, 
+        PHC.ChangeDate, 
+        RANK() OVER (PARTITION BY PHC.PostId ORDER BY PHC.ChangeDate DESC) AS ChangeRank,
+        P.Title,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        PostHistoryChanges PHC
+    JOIN 
+        Posts P ON PHC.PostId = P.Id
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+),
+PostCommentCounts AS (
+    SELECT 
+        PostId, 
+        COUNT(*) AS CommentCount
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+)
+
+SELECT 
+    RP.Title AS PostTitle,
+    RP.ViewCount,
+    PU.DisplayName AS PopularUser,
+    PU.NetUpvotes,
+    CH.OwnerDisplayName AS LastOwner,
+    C.CommentCount AS TotalComments,
+    CH.ChangeDate AS LastChangeDate,
+    RP.Level
+FROM 
+    RecursivePosts RP
+LEFT JOIN 
+    PopularUsers PU ON RP.OwnerUserId = PU.UserId
+LEFT JOIN 
+    ClosedPosts CH ON RP.Id = CH.PostId AND CH.ChangeRank = 1
+LEFT JOIN 
+    PostCommentCounts C ON RP.Id = C.PostId
+WHERE 
+    RP.ViewCount > 100 
+ORDER BY 
+    PU.NetUpvotes DESC, 
+    RP.CreationDate DESC
+LIMIT 20 OFFSET 0;

@@ -1,0 +1,27 @@
+SELECT 
+    a.name AS actor_name, 
+    t.title AS movie_title, 
+    c.kind AS cast_type, 
+    cc.subject_id, 
+    m.info AS movie_info, 
+    k.keyword AS movie_keyword
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+LEFT JOIN 
+    movie_info m ON m.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023 
+    AND c.nr_order < 5 
+    AND m.info_type_id IN (SELECT id FROM info_type WHERE info = 'Box Office')
+ORDER BY 
+    t.production_year DESC, a.name ASC;

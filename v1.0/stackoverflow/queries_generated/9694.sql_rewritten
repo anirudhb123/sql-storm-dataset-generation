@@ -1,0 +1,48 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        p.LastActivityDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.ViewCount DESC) AS RankByViews,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+AggregatedData AS (
+    SELECT 
+        pt.Name AS PostTypeName,
+        COUNT(*) AS TotalPosts,
+        AVG(ViewCount) AS AvgViewCount,
+        AVG(Score) AS AvgScore
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostTypes pt ON rp.PostId = rp.PostId
+    GROUP BY 
+        pt.Name
+)
+SELECT 
+    ad.PostTypeName,
+    ad.TotalPosts,
+    ad.AvgViewCount,
+    ad.AvgScore,
+    ARRAY_AGG(rp.Title ORDER BY rp.RankByViews) AS TopViewedPosts,
+    ARRAY_AGG(rp.Title ORDER BY rp.RankByScore) AS TopScoredPosts
+FROM 
+    AggregatedData ad
+LEFT JOIN 
+    RankedPosts rp ON ad.PostTypeName = rp.PostTypeName
+GROUP BY 
+    ad.PostTypeName, ad.TotalPosts, ad.AvgViewCount, ad.AvgScore
+ORDER BY 
+    ad.TotalPosts DESC;

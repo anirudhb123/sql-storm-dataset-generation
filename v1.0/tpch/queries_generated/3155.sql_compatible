@@ -1,0 +1,74 @@
+
+WITH TotalSales AS (
+    SELECT 
+        l_partkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales,
+        COUNT(DISTINCT o_orderkey) AS order_count
+    FROM 
+        lineitem 
+    JOIN 
+        orders ON lineitem.l_orderkey = orders.o_orderkey
+    WHERE 
+        orders.o_orderdate >= DATE '1996-01-01' 
+        AND orders.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        l_partkey
+),
+TopSuppliers AS (
+    SELECT 
+        ps.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.s_suppkey
+    ORDER BY 
+        total_supply_cost DESC
+    LIMIT 10
+),
+CustomerSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS customer_total_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) > 10000
+)
+SELECT 
+    p.p_name,
+    r.r_name,
+    ts.total_supply_cost,
+    cs.customer_total_sales,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY cs.customer_total_sales DESC) AS sales_rank
+FROM 
+    part p
+LEFT JOIN 
+    region r ON p.p_partkey % 5 = r.r_regionkey 
+LEFT JOIN 
+    TotalSales ts ON p.p_partkey = ts.l_partkey
+LEFT JOIN 
+    CustomerSales cs ON cs.customer_total_sales > 0
+WHERE 
+    p.p_retailprice BETWEEN 50 AND 200
+    AND (ts.order_count > 5 OR ts.total_sales IS NULL)
+UNION ALL
+SELECT 
+    'Total Sales' AS p_name,
+    'All Regions' AS r_name,
+    SUM(ts.total_supply_cost),
+    NULL,
+    NULL
+FROM 
+    TopSuppliers ts
+GROUP BY 
+    'Total Sales', 'All Regions';

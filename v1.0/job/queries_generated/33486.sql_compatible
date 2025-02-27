@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.movie_id,
+        t.title,
+        1 AS depth
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.movie_id
+    LEFT JOIN 
+        company_name cn ON cn.id = mc.company_id
+    WHERE 
+        cn.country_code = 'USA'
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        t.title,
+        mh.depth + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title t ON t.movie_id = ml.linked_movie_id
+)
+SELECT 
+    ak.person_id,
+    ak.name AS aka_name,
+    ar.role,
+    COUNT(mh.movie_id) AS movie_count,
+    MAX(mh.depth) AS max_depth,
+    STRING_AGG(DISTINCT mh.title, ', ') AS related_movies,
+    CASE 
+        WHEN COUNT(mh.movie_id) > 5 THEN 'Highly Active'
+        WHEN COUNT(mh.movie_id) BETWEEN 1 AND 5 THEN 'Moderately Active'
+        ELSE 'Not Active'
+    END AS activity_level
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ci.person_id = ak.person_id
+JOIN 
+    role_type ar ON ar.id = ci.role_id
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = ci.movie_id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.person_id, ak.name, ar.role
+HAVING 
+    MAX(mh.depth) IS NOT NULL
+ORDER BY 
+    movie_count DESC
+LIMIT 100;

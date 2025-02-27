@@ -1,0 +1,78 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_within_gender
+    FROM 
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+recent_sales AS (
+    SELECT 
+        ws.ws_ship_customer_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_date > DATE '2002-10-01' - INTERVAL '30 days'
+    GROUP BY 
+        ws.ws_ship_customer_sk
+),
+complete_data AS (
+    SELECT 
+        rc.c_customer_id,
+        rc.c_first_name,
+        rc.c_last_name,
+        rc.cd_gender,
+        rc.cd_marital_status,
+        COALESCE(r.total_net_profit, 0) AS recent_net_profit,
+        rc.rank_within_gender,
+        CASE 
+            WHEN rc.cd_marital_status = 'M' AND rc.cd_gender = 'F' THEN 'Married Female'
+            WHEN rc.cd_marital_status = 'M' AND rc.cd_gender = 'M' THEN 'Married Male'
+            ELSE 'Other'
+        END AS marital_identity
+    FROM 
+        ranked_customers rc
+    LEFT JOIN 
+        recent_sales r ON r.ws_ship_customer_sk = rc.c_customer_id
+)
+SELECT 
+    cd.c_customer_id,
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender AS gender,
+    cd.marital_identity,
+    cd.recent_net_profit,
+    CASE 
+        WHEN cd.recent_net_profit = 0 THEN 'No recent sales'
+        WHEN cd.recent_net_profit < 100 THEN 'Low spender'
+        ELSE 'High spender'
+    END AS customer_spending_type,
+    ARRAY_AGG(DISTINCT ws.ws_web_page_sk) AS visited_pages,
+    COUNT(DISTINCT ws.ws_order_number) AS orders_count,
+    STRING_AGG(DISTINCT wp.wp_url, '; ') AS visited_urls
+FROM 
+    complete_data cd
+LEFT JOIN 
+    web_sales ws ON ws.ws_ship_customer_sk = cd.c_customer_id
+LEFT JOIN 
+    web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+WHERE 
+    cd.rank_within_gender < 5 AND 
+    (cd.recent_net_profit IS NOT NULL OR cd.recent_net_profit > 0) 
+GROUP BY 
+    cd.c_customer_id, cd.c_first_name, cd.c_last_name, cd.cd_gender, cd.marital_identity, cd.recent_net_profit
+HAVING 
+    COUNT(DISTINCT ws.ws_order_number) > 2
+ORDER BY 
+    cd.recent_net_profit DESC, cd.c_last_name ASC
+LIMIT 10;

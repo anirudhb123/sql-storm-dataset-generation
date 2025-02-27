@@ -1,0 +1,87 @@
+WITH RecursivePostTree AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        CreationDate, 
+        OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        p.CreationDate, 
+        p.OwnerUserId,
+        pt.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostTree pt ON p.ParentId = pt.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 0
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    pt.Title,
+    pt.CreationDate,
+    u.DisplayName AS Owner,
+    ur.Reputation AS OwnerReputation,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    COALESCE(vs.TotalVotes, 0) AS TotalVotes,
+    COUNT(DISTINCT ch.Id) AS CommentCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    pt.Level AS PostLevel
+FROM 
+    RecursivePostTree pt
+JOIN 
+    Users u ON pt.OwnerUserId = u.Id
+JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN 
+    PostVoteSummary vs ON pt.Id = vs.PostId
+LEFT JOIN 
+    Comments ch ON pt.Id = ch.PostId
+LEFT JOIN 
+    LATERAL (SELECT unnest(string_to_array(pt.Tags, '><')) AS TagName) AS TagList 
+ON 
+    TRUE
+LEFT JOIN 
+    Tags t ON t.TagName = TagList.TagName
+WHERE 
+    pt.Level < 3
+GROUP BY 
+    pt.Id, pt.Title, pt.CreationDate, u.DisplayName, ur.Reputation, vs.UpVotes, vs.DownVotes, vs.TotalVotes, pt.Level
+ORDER BY 
+    pt.CreationDate DESC
+LIMIT 100;

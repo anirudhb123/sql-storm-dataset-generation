@@ -1,0 +1,40 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL AND s_acctbal > 0
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE s.s_suppkey <> sh.s_suppkey
+), 
+part_supplier AS (
+    SELECT ps.partkey, ps.suppkey, SUM(ps.ps_availqty) AS total_avail, SUM(ps.ps_supplycost) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.partkey, ps.suppkey
+),
+critical_orders AS (
+    SELECT o.o_orderkey, SUM(oi.l_extendedprice * (1 - oi.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem oi ON o.o_orderkey = oi.l_orderkey
+    WHERE o.o_orderdate >= CURRENT_DATE - INTERVAL '90 days'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    p.p_name,
+    COALESCE(STRING_AGG(DISTINCT CONCAT(s.s_name, ' (', s.s_phone, ')'), '; '), 'No suppliers') AS supplier_list,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    AVG(ROUND(ps.total_cost, 2)) AS avg_supply_cost,
+    SUM(COALESCE(lo.total_revenue, 0)) AS total_order_revenue,
+    ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+FROM part p
+LEFT JOIN part_supplier ps ON p.p_partkey = ps.partkey
+LEFT JOIN supplier s ON ps.suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN critical_orders lo ON lo.o_orderkey = ps.suppkey
+WHERE p.p_size BETWEEN 10 AND 50
+  AND (s.s_acctbal > 10000 OR (s.s_comment LIKE '%urgent%' AND s.s_acctbal < 1000))
+GROUP BY p.p_name, p.p_type
+HAVING COUNT(DISTINCT ps.suppkey) > 2
+ORDER BY price_rank DESC, nation_count ASC;

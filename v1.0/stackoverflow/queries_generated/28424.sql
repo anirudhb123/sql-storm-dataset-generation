@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        RANK() OVER (ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, '><')) AS tag ON TRUE
+    LEFT JOIN 
+        Tags t ON TRIM(both '<>' FROM tag) = t.TagName
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS EditedDate,
+        ph.UserDisplayName AS EditedBy,
+        ph.Comment,
+        php.Name AS HistoryTypeName
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes php ON ph.PostHistoryTypeId = php.Id
+    WHERE 
+        ph.Comment IS NOT NULL
+),
+TopPostsWithEdits AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.Tags,
+        phd.EditedDate,
+        phd.EditedBy,
+        phd.Comment,
+        phd.HistoryTypeName
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryDetails phd ON rp.PostId = phd.PostId
+    WHERE 
+        rp.RankByScore <= 10
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    OwnerDisplayName,
+    CommentCount,
+    Tags,
+    EditedDate,
+    EditedBy,
+    Comment,
+    HistoryTypeName
+FROM 
+    TopPostsWithEdits
+ORDER BY 
+    RankByScore, ModifiedDate DESC NULLS LAST;

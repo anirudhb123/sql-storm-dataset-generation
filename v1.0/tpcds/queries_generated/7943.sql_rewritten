@@ -1,0 +1,55 @@
+WITH sales_summary AS (
+    SELECT 
+        cs_item_sk,
+        SUM(cs_sales_price) AS total_sales_price,
+        SUM(cs_quantity) AS total_quantity,
+        COUNT(DISTINCT cs_order_number) AS total_orders
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk BETWEEN 2459476 AND 2459486 
+    GROUP BY 
+        cs_item_sk
+), 
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_income_band_sk
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+high_value_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_orders,
+        cs.total_quantity,
+        cs.total_sales_price,
+        cd.cd_gender,
+        cd.cd_income_band_sk
+    FROM 
+        sales_summary cs
+    JOIN 
+        customer_summary cd ON cd.c_customer_sk = cs.cs_customer_sk
+    WHERE 
+        cs.total_sales_price > 1000 
+)
+SELECT 
+    hvc.c_customer_sk,
+    hvc.total_sales_price,
+    hvc.total_quantity,
+    hvc.total_orders,
+    hvc.cd_gender,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound
+FROM 
+    high_value_customers hvc
+JOIN 
+    income_band ib ON hvc.cd_income_band_sk = ib.ib_income_band_sk
+ORDER BY 
+    hvc.total_sales_price DESC
+LIMIT 10;

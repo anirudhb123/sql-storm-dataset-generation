@@ -1,0 +1,43 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 
+           s_comment, 0 AS level 
+    FROM supplier 
+    WHERE s_acctbal IS NOT NULL AND s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           s.s_comment, sh.level + 1 
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+),
+nation_part AS (
+    SELECT n.n_name, p.p_name, p.p_retailprice, 
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY p.p_retailprice DESC) AS price_rank 
+    FROM nation n
+    JOIN supplier su ON n.n_nationkey = su.s_nationkey
+    JOIN partsupp ps ON su.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+)
+SELECT n.n_name, COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       SUM(np.p_retailprice) AS total_retail_value,
+       STRING_AGG(DISTINCT np.p_name || ' - ' || CAST(np.price_rank AS TEXT), ', ') AS part_details,
+       AVG(CASE WHEN sl.c_custkey IS NULL THEN NULL ELSE sl.l_discount END) AS avg_discounted_price,
+       MIN(COALESCE(sh.level, -1)) AS min_supplier_level
+FROM nation n
+LEFT JOIN supplier_hierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN nation_part np ON n.n_name = np.n_name
+LEFT JOIN lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O')
+LEFT JOIN customer c ON l.l_orderkey = c.c_custkey
+LEFT JOIN (
+    SELECT s.s_suppkey, c.c_custkey, l.l_discount 
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON l.l_partkey = ps.ps_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE c.c_acctbal > 100.00
+) AS sl ON sl.s_suppkey = sh.s_suppkey
+WHERE n.n_name IS NOT NULL AND (np.price_rank IS NULL OR np.price_rank < 5)
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT sh.s_suppkey) > 5
+ORDER BY total_retail_value DESC;

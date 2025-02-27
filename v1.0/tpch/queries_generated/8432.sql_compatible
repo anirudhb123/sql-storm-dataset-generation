@@ -1,0 +1,33 @@
+
+WITH RankedParts AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size > 10
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    GROUP BY o.o_orderkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+)
+SELECT r.r_name, 
+       SUM(os.total_revenue) AS total_revenue, 
+       COUNT(DISTINCT rp.p_partkey) AS unique_parts_count, 
+       SUM(ts.total_cost) AS total_supplier_cost
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN TopSuppliers ts ON s.s_suppkey = ts.s_suppkey
+JOIN RankedParts rp ON s.s_suppkey = rp.ps_suppkey
+JOIN OrderSummary os ON os.total_revenue > 10000 
+GROUP BY r.r_name
+ORDER BY total_revenue DESC, unique_parts_count DESC;

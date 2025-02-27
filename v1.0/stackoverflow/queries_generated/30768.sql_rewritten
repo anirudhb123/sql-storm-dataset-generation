@@ -1,0 +1,89 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text,
+        1 AS recursion_level
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)  
+    UNION ALL
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text,
+        rp.recursion_level + 1
+    FROM 
+        PostHistory ph
+    JOIN 
+        RecursivePostHistory rp ON ph.PostId = rp.PostId
+    WHERE 
+        ph.CreationDate < rp.CreationDate
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        RecursivePostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        PositivePosts,
+        NegativePosts,
+        ClosedPosts,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS UserRank
+    FROM 
+        UserPostStats
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.PositivePosts,
+    tu.NegativePosts,
+    tu.ClosedPosts,
+    CASE
+        WHEN tu.ClosedPosts > 0 THEN 'Active with Closed Posts'
+        ELSE 'Active'
+    END AS UserStatus,
+    COALESCE(NULLIF(v.vote_count, 0), 'No Votes') AS VoteInfo
+FROM 
+    TopUsers tu
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(*) AS vote_count 
+    FROM 
+        Votes 
+    GROUP BY 
+        UserId
+) v ON tu.UserId = v.UserId
+WHERE 
+    tu.UserRank <= 10 
+ORDER BY 
+    tu.UserRank;

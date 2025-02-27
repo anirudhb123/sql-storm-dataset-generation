@@ -1,0 +1,63 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.AcceptedAnswerId,
+        P.OwnerUserId,
+        0 AS Level,
+        CAST(P.Title AS VARCHAR(255)) AS Hierarchy
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.ViewCount,
+        P2.AcceptedAnswerId,
+        P2.OwnerUserId,
+        RPH.Level + 1,
+        CAST(RPH.Hierarchy || ' -> ' || P2.Title AS VARCHAR(255))
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON P2.ParentId = RPH.PostId
+)
+
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation,
+    SUM(P.ViewCount) AS TotalViews,
+    COUNT(DISTINCT P.Id) AS TotalPosts,
+    MAX(P.CreationDate) AS LastActive,
+    STRING_AGG(T.TagName, ', ') AS Tags,
+    CASE 
+        WHEN COUNT(DISTINCT PH.PostId) > 0 THEN 'Active Contributor'
+        ELSE 'Inactive'
+    END AS ActivityStatus
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (10, 11)  
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            T.TagName
+        FROM 
+            UNNEST(STRING_TO_ARRAY(P.Tags, ',')) AS T(TagName)
+    ) AS T ON TRUE
+WHERE 
+    U.Reputation > 1000  
+GROUP BY 
+    U.Id, U.DisplayName, U.Reputation
+HAVING 
+    SUM(P.ViewCount) > 5000 
+ORDER BY 
+    TotalViews DESC;

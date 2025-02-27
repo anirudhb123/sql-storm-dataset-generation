@@ -1,0 +1,72 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT 
+        i.i_item_sk, 
+        i.i_item_id, 
+        i.i_item_desc, 
+        i.i_current_price, 
+        1 AS level
+    FROM item i
+    WHERE i.i_item_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        i.i_item_sk, 
+        i.i_item_id, 
+        CONCAT(ih.i_item_desc, ' -> ', i.i_item_desc), 
+        i.i_current_price, 
+        ih.level + 1
+    FROM item i
+    JOIN item_hierarchy ih ON ih.i_item_sk = i.i_item_sk 
+    WHERE i.i_current_price IS NOT NULL AND ih.level < 5
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(DISTINCT sr.ticket_number) AS total_returns
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+sales_summary AS (
+    SELECT 
+        ds.d_year, 
+        SUM(ss.ss_net_profit) AS total_store_profit,
+        SUM(ws.ws_net_profit) AS total_web_profit,
+        SUM(cs.cs_net_profit) AS total_catalog_profit
+    FROM date_dim ds
+    LEFT JOIN store_sales ss ON ds.d_date_sk = ss.ss_sold_date_sk
+    LEFT JOIN web_sales ws ON ds.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN catalog_sales cs ON ds.d_date_sk = cs.cs_sold_date_sk
+    GROUP BY ds.d_year
+)
+SELECT 
+    ch.c_first_name || ' ' || ch.c_last_name AS customer_name,
+    ch.total_orders,
+    ch.total_spent,
+    ch.cd_gender,
+    ih.i_item_desc AS item_desc,
+    sh.total_store_profit,
+    wh.total_web_profit,
+    ch.total_returns
+FROM customer_stats ch
+JOIN item_hierarchy ih ON ih.i_item_sk IN (
+    SELECT i_item_sk 
+    FROM inventory 
+    WHERE inv_quantity_on_hand > 0
+)
+LEFT JOIN sales_summary sh ON sh.total_store_profit > 0
+LEFT JOIN sales_summary wh ON wh.total_web_profit > 0
+WHERE ch.total_spent > (
+    SELECT AVG(total_spent) FROM customer_stats
+) AND ch.cd_gender = 'F'
+ORDER BY ch.total_spent DESC
+LIMIT 100;

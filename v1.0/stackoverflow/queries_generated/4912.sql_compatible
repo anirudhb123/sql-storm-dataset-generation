@@ -1,0 +1,62 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CreationDate,
+        P.ClosedDate,
+        COALESCE(PH.Comment, 'No closure reason') AS ClosureReason,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (10, 11) 
+    WHERE 
+        P.CreationDate >= DATEADD(year, -1, '2024-10-01 12:34:56')
+)
+SELECT 
+    UB.UserId,
+    UB.DisplayName,
+    UB.BadgeCount,
+    UB.GoldBadges,
+    UB.SilverBadges,
+    UB.BronzeBadges,
+    PD.PostId,
+    PD.Title,
+    PD.Score,
+    PD.ViewCount,
+    PD.AnswerCount,
+    PD.CreationDate,
+    PD.ClosedDate,
+    PD.ClosureReason,
+    (SELECT COUNT(*) FROM Comments C WHERE C.PostId = PD.PostId) AS CommentCount
+FROM 
+    UserBadges UB
+JOIN 
+    PostDetails PD ON UB.UserId = PD.OwnerUserId
+WHERE 
+    UB.BadgeCount > 0
+    AND PD.ClosedDate IS NOT NULL
+    AND PD.PostRank = 1
+ORDER BY 
+    UB.BadgeCount DESC,
+    PD.Score DESC
+LIMIT 10;

@@ -1,0 +1,102 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        Id, 
+        Reputation,
+        CreationDate,
+        1 AS Level
+    FROM 
+        Users
+    WHERE 
+        Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        u.Id, 
+        u.Reputation,
+        u.CreationDate,
+        ur.Level + 1
+    FROM 
+        Users u
+    JOIN 
+        UserReputation ur ON u.Reputation > ur.Reputation
+    WHERE 
+        ur.Level < 5
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COALESCE(p.ViewCount, 0) AS ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')))
+    WHERE 
+        p.ViewCount > 100
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.AcceptedAnswerId
+),
+ClosedPosts AS (
+    SELECT 
+        p.*,
+        pht.CreationDate AS CloseDate,
+        h.UserId AS ClosedBy
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory h ON p.Id = h.PostId
+    JOIN 
+        PostHistoryTypes pht ON h.PostHistoryTypeId = pht.Id
+    WHERE 
+        pht.Name LIKE '%Close%'
+),
+UserWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    COUNT(ps.PostId) AS TotalPosts,
+    COUNT(DISTINCT ps.PostId) FILTER (WHERE ps.PostRank = 1) AS MostRecentPost,
+    SUM(ps.ViewCount) AS TotalViews,
+    AVG(ps.CommentCount) AS AvgComments,
+    COALESCE(SUM(ub.BadgeCount), 0) AS TotalBadges,
+    COALESCE(SUM(cp.CloseDate IS NOT NULL)::int, 0) AS ClosedPostsCount,
+    STRING_AGG(DISTINCT ps.Tags, '; ') AS AllTags
+FROM 
+    Users us
+LEFT JOIN 
+    PostStats ps ON us.Id = ps.OwnerUserId
+LEFT JOIN 
+    UserWithBadges ub ON us.Id = ub.UserId
+LEFT JOIN 
+    ClosedPosts cp ON us.Id = cp.OwnerUserId
+WHERE 
+    us.Reputation IS NOT NULL
+GROUP BY 
+    us.Id, us.DisplayName
+HAVING 
+    COUNT(ps.PostId) > 5
+ORDER BY 
+    us.Reputation DESC;

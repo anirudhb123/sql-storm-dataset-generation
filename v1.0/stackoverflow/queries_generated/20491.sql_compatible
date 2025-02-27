@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank,
+        ARRAY_AGG(t.TagName) AS TagsArray
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::integer[])
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, p.CreationDate, p.PostTypeId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.Reputation
+),
+ClosedPostReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment AS CloseReason,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId, ph.Comment
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    COALESCE(u.Reputation, 0) AS UserReputation,
+    COALESCE(us.BadgeCount, 0) AS UserBadgeCount,
+    p.CreationDate,
+    COALESCE(cr.CloseReason, 'Not Closed') AS CloseReason,
+    COALESCE(cr.CloseCount, 0) AS CloseCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    Users u ON p.Id = u.Id
+LEFT JOIN 
+    UserStats us ON u.Id = us.UserId
+LEFT JOIN 
+    ClosedPostReasons cr ON p.PostId = cr.PostId
+LEFT JOIN 
+    Tags t ON t.TagName = ANY(p.TagsArray)
+WHERE 
+    p.Rank <= 10
+    AND (u.Reputation > 100 OR u.Id IS NULL)  
+GROUP BY 
+    p.PostId, p.Title, p.Score, p.ViewCount, p.CreationDate, u.Reputation, us.BadgeCount, cr.CloseReason, cr.CloseCount
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC;

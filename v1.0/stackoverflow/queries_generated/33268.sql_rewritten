@@ -1,0 +1,104 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ParentId, 
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId 
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(ph.Id) AS EditCount,
+        MAX(p.LastActivityDate) AS LastActivity,
+        COUNT(DISTINCT u.Id) AS UniqueUsersEngaged
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    GROUP BY 
+        p.Id, 
+        p.Title
+),
+ClosedPosts AS (
+    SELECT 
+        postId, 
+        COUNT(*) AS ClosureCount
+    FROM 
+        PostHistory 
+    WHERE 
+        PostHistoryTypeId = 10  
+    GROUP BY 
+        postId
+),
+PostMetrics AS (
+    SELECT 
+        pa.PostId,
+        pa.Title,
+        pa.UpVotes,
+        pa.DownVotes,
+        pa.CommentCount,
+        pa.EditCount,
+        pa.LastActivity,
+        COALESCE(cp.ClosureCount, 0) AS ClosureCount
+    FROM 
+        PostAnalytics pa
+    LEFT JOIN 
+        ClosedPosts cp ON pa.PostId = cp.postId
+),
+AggregatedMetrics AS (
+    SELECT 
+        *,
+        (UpVotes - DownVotes) AS NetVotes,
+        CASE 
+            WHEN ClosureCount > 0 THEN 'Closed'
+            ELSE 'Active'
+        END AS PostStatus
+    FROM 
+        PostMetrics
+)
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.UpVotes,
+    pm.DownVotes,
+    pm.NetVotes,
+    pm.CommentCount,
+    pm.EditCount,
+    pm.LastActivity,
+    pm.ClosureCount,
+    pm.PostStatus,
+    CASE 
+        WHEN pm.ClosureCount = 0 THEN 'This post is open for more engagement.'
+        ELSE 'This post is closed and cannot receive further engagement.'
+    END AS EngagementStatus
+FROM 
+    AggregatedMetrics pm
+ORDER BY 
+    pm.NetVotes DESC,
+    pm.LastActivity DESC;

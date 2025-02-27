@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS t(TagName)
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName, p.OwnerUserId, p.CreationDate, p.ViewCount, p.Score
+),
+
+TopContributors AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(DISTINCT PostId) AS PostCount,
+        SUM(CommentCount) AS TotalComments,
+        SUM(ViewCount) AS TotalViews,
+        SUM(Score) AS TotalScore
+    FROM 
+        RankedPosts
+    GROUP BY 
+        OwnerUserId
+    HAVING 
+        COUNT(DISTINCT PostId) > 5 
+),
+
+RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.UserDisplayName,
+        ph.CreationDate AS ActivityDate,
+        p.ViewCount,
+        ph.Comment
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 24) 
+    ORDER BY 
+        ph.CreationDate DESC
+    LIMIT 10
+)
+
+SELECT 
+    rc.OwnerDisplayName,
+    rc.PostCount,
+    rc.TotalComments,
+    rc.TotalViews,
+    rc.TotalScore,
+    ra.PostId,
+    ra.Title,
+    ra.UserDisplayName AS EditorName,
+    ra.ActivityDate,
+    ra.Comment
+FROM 
+    TopContributors rc
+LEFT JOIN 
+    RecentActivity ra ON rc.OwnerUserId = ra.UserDisplayName
+ORDER BY 
+    rc.TotalScore DESC, ra.ActivityDate DESC;

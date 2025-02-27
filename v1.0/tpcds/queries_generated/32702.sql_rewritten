@@ -1,0 +1,75 @@
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        ws_order_number,
+        WS_ext_sales_price,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+    UNION ALL
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        ws_order_number,
+        WS_ext_sales_price * 0.9 AS WS_ext_sales_price,
+        level + 1
+    FROM 
+        web_sales ws
+    JOIN 
+        SalesHierarchy sh ON ws.ws_item_sk = sh.ws_item_sk
+    WHERE 
+        level < 5 
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        SUM(sh.WS_ext_sales_price) as total_sales
+    FROM 
+        SalesHierarchy sh
+    JOIN 
+        customer c ON c.c_customer_sk = sh.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_current_cdemo_sk
+),
+DemographicSales AS (
+    SELECT 
+        cd.cd_gender,
+        COALESCE(SUM(cs.total_sales), 0) AS gender_sales
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        CustomerSales cs ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd.cd_gender
+),
+SalesRanked AS (
+    SELECT 
+        ds.cd_gender,
+        ds.gender_sales,
+        RANK() OVER (ORDER BY ds.gender_sales DESC) AS sales_rank
+    FROM 
+        DemographicSales ds
+)
+SELECT 
+    dr.cd_gender,
+    dr.gender_sales,
+    COALESCE(cs.customer_count, 0) AS customer_count,
+    CASE 
+        WHEN dr.gender_sales IS NULL THEN 'No sales'
+        ELSE 'Sales present'
+    END AS sales_status
+FROM 
+    SalesRanked dr
+LEFT JOIN 
+    (SELECT cd.cd_gender, COUNT(c.c_customer_sk) as customer_count
+     FROM customer c
+     JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+     GROUP BY cd.cd_gender) cs ON dr.cd_gender = cs.cd_gender
+WHERE 
+    dr.sales_rank <= 10
+ORDER BY 
+    dr.sales_rank;

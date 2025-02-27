@@ -1,0 +1,25 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.role AS role,
+    t.production_year,
+    GROUP_CONCAT(DISTINCT p.info) AS person_info,
+    GROUP_CONCAT(DISTINCT k.keyword) AS keywords
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    role_type c ON ci.role_id = c.id
+LEFT JOIN 
+    person_info p ON a.person_id = p.person_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+GROUP BY 
+    a.name, t.title, c.role, t.production_year
+ORDER BY 
+    t.production_year DESC, a.name;

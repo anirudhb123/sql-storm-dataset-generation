@@ -1,0 +1,71 @@
+WITH TagUsage AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(u.Reputation) AS AvgUserReputation
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        AvgUserReputation,
+        RANK() OVER (ORDER BY PostCount DESC) as PopularityRank
+    FROM 
+        TagUsage
+    WHERE 
+        PostCount > 0
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) as LatestEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        ph.PostId
+),
+TagEditAnalysis AS (
+    SELECT 
+        pt.TagName,
+        COUNT(DISTINCT re.PostId) AS PostsEdited,
+        SUM(ra.EditCount) AS TotalEditsPerTag
+    FROM 
+        PopularTags pt
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', pt.TagName, '>%')
+    LEFT JOIN 
+        RecentEdits re ON re.PostId = p.Id
+    GROUP BY 
+        pt.TagName
+)
+SELECT 
+    te.TagName,
+    te.PostsEdited,
+    te.TotalEditsPerTag,
+    pt.PostCount,
+    pt.QuestionCount,
+    pt.AnswerCount,
+    pt.AvgUserReputation
+FROM 
+    TagEditAnalysis te
+JOIN 
+    PopularTags pt ON te.TagName = pt.TagName
+ORDER BY 
+    te.TotalEditsPerTag DESC,
+    pt.PopularityRank
+LIMIT 10;

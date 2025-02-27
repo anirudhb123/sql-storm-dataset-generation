@@ -1,0 +1,62 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        AVG(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY t.id) AS average_role_assigned,
+        ROW_NUMBER() OVER (ORDER BY t.production_year DESC, t.title) AS rank
+    FROM title t
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id 
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    LEFT JOIN cast_info ci ON t.id = ci.movie_id
+    WHERE 
+        cn.country_code IS NOT NULL AND 
+        cn.country_code != '' AND 
+        t.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        title_id,
+        title,
+        production_year,
+        average_role_assigned
+    FROM RankedMovies
+    WHERE rank <= 10 AND average_role_assigned > 0
+),
+
+ActorDetails AS (
+    SELECT 
+        ak.name,
+        ci.movie_id,
+        t.title,
+        ci.id AS cast_info_id,
+        CASE 
+            WHEN ci.note IS NULL THEN 'No Note'
+            ELSE ci.note 
+        END AS note
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    JOIN title t ON ci.movie_id = t.id
+),
+FilteredActors AS (
+    SELECT 
+        a.*,
+        ROW_NUMBER() OVER (PARTITION BY a.movie_id ORDER BY a.name) AS actor_rank
+    FROM ActorDetails a
+    WHERE a.movie_id IN (SELECT title_id FROM TopMovies)
+)
+
+SELECT 
+    tm.title AS Top_Movie_Title,
+    tm.production_year AS Production_Year,
+    fa.name AS Actor_Name,
+    fa.note AS Actor_Note,
+    fa.actor_rank AS Actor_Rank
+FROM TopMovies tm
+JOIN FilteredActors fa ON tm.title_id = fa.movie_id
+WHERE 
+    fa.actor_rank <= 5
+ORDER BY 
+    tm.production_year DESC, 
+    Top_Movie_Title, 
+    fa.Actor_Name;

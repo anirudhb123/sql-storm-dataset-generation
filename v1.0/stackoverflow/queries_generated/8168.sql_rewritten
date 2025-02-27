@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    WHERE 
+        u.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '2 years'
+    GROUP BY 
+        u.Id
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+CombinedData AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.TotalScore,
+        u.TotalViews,
+        u.PostCount,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY u.TotalScore DESC, u.TotalViews DESC) AS UserRank
+    FROM 
+        TopUsers u
+    LEFT JOIN 
+        UserBadges ub ON u.UserId = ub.UserId
+)
+SELECT 
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    r.CommentCount,
+    r.AnswerCount,
+    c.DisplayName AS Owner,
+    cd.UserRank,
+    cd.TotalScore,
+    cd.TotalViews,
+    cd.PostCount,
+    cd.BadgeCount
+FROM 
+    RankedPosts r
+JOIN 
+    CombinedData cd ON r.PostId = cd.UserId
+JOIN 
+    Users c ON r.OwnerUserId = c.Id
+WHERE 
+    cd.UserRank <= 10
+ORDER BY 
+    r.Score DESC, r.ViewCount DESC;

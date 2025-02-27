@@ -1,0 +1,62 @@
+
+WITH TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+PostRecommendations AS (
+    SELECT 
+        tp1.PostId AS SourcePostId,
+        tp2.PostId AS RelatedPostId,
+        COUNT(*) AS CommonTags
+    FROM 
+        TaggedPosts tp1
+    JOIN 
+        TaggedPosts tp2 ON tp1.Tag = tp2.Tag AND tp1.PostId <> tp2.PostId
+    GROUP BY 
+        tp1.PostId, tp2.PostId
+    HAVING 
+        COUNT(*) > 1 
+),
+MostCommonTags AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        TaggedPosts
+    GROUP BY 
+        Tag
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    p.Id,
+    p.Title,
+    p.ViewCount,
+    p.AnswerCount,
+    p.CommentCount,
+    ARRAY_AGG(DISTINCT tp.Tag) AS PostTags,
+    COALESCE(r.RelatedPostIds, ARRAY[]::integer[]) AS RelatedPostIds,
+    mt.TagCount
+FROM 
+    Posts p
+LEFT JOIN 
+    PostRecommendations r ON r.SourcePostId = p.Id
+LEFT JOIN 
+    TaggedPosts tp ON tp.PostId = p.Id
+LEFT JOIN 
+    MostCommonTags mt ON mt.Tag = ANY(tp.Tag)
+WHERE 
+    p.PostTypeId = 1 
+GROUP BY 
+    p.Id, p.Title, p.ViewCount, p.AnswerCount, p.CommentCount
+ORDER BY 
+    p.ViewCount DESC
+LIMIT 50;

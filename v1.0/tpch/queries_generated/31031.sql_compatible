@@ -1,0 +1,76 @@
+
+WITH RECURSIVE SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+), RankedSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.total_sales,
+        s.sales_rank,
+        n.n_name AS nation_name
+    FROM 
+        SupplierSales s
+    JOIN 
+        supplier su ON s.s_suppkey = su.s_suppkey
+    JOIN 
+        nation n ON su.s_nationkey = n.n_nationkey
+    WHERE 
+        s.sales_rank <= 5
+), CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL AND COUNT(o.o_orderkey) > 0
+), Summary AS (
+    SELECT 
+        r.nation_name,
+        SUM(rs.total_sales) AS total_sales_by_nation,
+        SUM(co.total_order_value) AS total_orders_by_nation
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        CustomerOrders co ON rs.s_suppkey = co.c_custkey
+    JOIN 
+        nation n ON rs.nation_name = n.n_name
+    GROUP BY 
+        r.nation_name
+)
+SELECT 
+    s.nation_name,
+    COALESCE(s.total_sales_by_nation, 0) AS total_sales,
+    COALESCE(s.total_orders_by_nation, 0) AS total_orders,
+    CASE 
+        WHEN s.total_sales_by_nation IS NULL THEN 'No sales data'
+        ELSE 'Sales data available'
+    END AS sales_status
+FROM 
+    Summary s
+FULL OUTER JOIN 
+    region r ON s.nation_name = r.r_name
+WHERE 
+    r.r_comment IS NOT NULL 
+ORDER BY 
+    total_sales DESC NULLS LAST;

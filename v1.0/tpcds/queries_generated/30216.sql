@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ss_day AS sales_day, 
+           SUM(ss_net_profit) AS total_profit,
+           RANK() OVER (PARTITION BY ss_day ORDER BY SUM(ss_net_profit) DESC) AS profit_rank
+    FROM (
+        SELECT d.d_date AS ss_day, ss_net_profit
+        FROM store_sales
+        JOIN date_dim d ON ss_sold_date_sk = d.d_date_sk
+    ) AS DailyProfit
+    GROUP BY ss_day
+    UNION ALL
+    SELECT s.sales_day, 
+           s.total_profit + COALESCE(SUM(ss_net_profit), 0),
+           RANK() OVER (PARTITION BY s.sales_day ORDER BY s.total_profit + COALESCE(SUM(ss_net_profit), 0) DESC) AS profit_rank
+    FROM SalesCTE s
+    LEFT JOIN store_sales ss ON ss.sold_date_sk = (SELECT d.d_date_sk FROM date_dim d WHERE d.d_date = s.sales_day + INTERVAL '1 day')
+    GROUP BY s.sales_day
+),
+CustomerPurchases AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           SUM(ws.ws_sales_price) AS total_spent
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE ws.ws_net_paid > 0
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+CustomerDemographics AS (
+    SELECT cd.cd_demo_sk, 
+           cd.cd_gender,
+           cd.cd_marital_status, 
+           cd.cd_purchase_estimate, 
+           COUNT(c.c_customer_sk) AS customer_count
+    FROM customer_demographics cd
+    LEFT JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+)
+SELECT c.customer_count,
+       cd.cd_gender,
+       cd.cd_marital_status,
+       SUM(cp.total_spent) AS total_spending,
+       MAX(sp.total_profit) AS max_profit
+FROM CustomerDemographics cd
+JOIN CustomerPurchases cp ON cd.customer_count > 0
+LEFT JOIN SalesCTE sp ON sp.profit_rank = 1
+GROUP BY cd.cd_gender, cd.cd_marital_status
+HAVING SUM(cp.total_spent) > 1000
+ORDER BY total_spending DESC;

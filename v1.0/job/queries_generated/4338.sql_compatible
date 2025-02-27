@@ -1,0 +1,62 @@
+
+WITH ActorMovieCounts AS (
+    SELECT 
+        ca.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ca ON ci.person_id = ca.person_id
+    GROUP BY 
+        ca.person_id
+),
+PopularMovies AS (
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        title m
+    JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id, m.title, m.production_year
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 10
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    a.person_id AS actor_id,
+    a.name AS actor_name,
+    COALESCE(am.movie_count, 0) AS total_movies,
+    pm.title AS popular_movie_title,
+    pm.production_year AS popular_movie_year,
+    ci.company_name,
+    ci.company_type
+FROM 
+    aka_name a
+LEFT JOIN 
+    ActorMovieCounts am ON a.person_id = am.person_id
+LEFT JOIN 
+    PopularMovies pm ON pm.actor_count > 0 
+    AND EXISTS (SELECT 1 FROM cast_info ci WHERE ci.movie_id = pm.id AND ci.person_id = a.person_id)
+LEFT JOIN 
+    CompanyInfo ci ON ci.movie_id IN (SELECT DISTINCT ci_inner.movie_id FROM cast_info ci_inner WHERE ci_inner.person_id = a.person_id)
+WHERE 
+    a.name IS NOT NULL
+ORDER BY 
+    total_movies DESC, popular_movie_year DESC;

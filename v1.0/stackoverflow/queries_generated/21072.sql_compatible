@@ -1,0 +1,75 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 1) AS TotalQuestions,
+        COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 2) AS TotalAnswers
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+), TagInfo AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS RelatedPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts
+    FROM Tags t
+    LEFT JOIN Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::text[])
+    GROUP BY t.TagName
+), PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS Count 
+    FROM PostHistory ph
+    WHERE ph.CreationDate > CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 year'
+    GROUP BY ph.PostId, ph.PostHistoryTypeId
+), AwardedBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS Awards
+    FROM Badges
+    WHERE Class = 1 
+    GROUP BY UserId
+),
+FinalResults AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.UpVotes,
+        us.DownVotes,
+        us.TotalBadges,
+        us.TotalQuestions,
+        us.TotalAnswers,
+        ti.TagName,
+        ti.RelatedPosts,
+        ti.PositiveScorePosts,
+        COALESCE(phs.Count, 0) AS PostHistoryActions,
+        COALESCE(ab.Awards, 0) AS GoldBadges
+    FROM UserStats us
+    LEFT JOIN TagInfo ti ON (us.TotalAnswers > 0 OR us.TotalQuestions > 0)
+    LEFT JOIN PostHistoryStats phs ON us.UserId = phs.PostId
+    LEFT JOIN AwardedBadges ab ON us.UserId = ab.UserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    UpVotes - DownVotes AS NetVotes,
+    TotalBadges,
+    TotalQuestions,
+    TotalAnswers,
+    TagName,
+    RelatedPosts,
+    PositiveScorePosts,
+    PostHistoryActions,
+    GoldBadges
+FROM FinalResults
+WHERE (UpVotes - DownVotes) > 0
+ORDER BY NetVotes DESC, TotalBadges DESC, TotalQuestions DESC
+LIMIT 10
+OFFSET 0;

@@ -1,0 +1,92 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        COALESCE(NULLIF(p.Score, 0), NULL) AS EffectiveScore,
+        COUNT(c.Id) FILTER (WHERE c.UserId IS NOT NULL) AS CommentCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= '2023-01-01' 
+    GROUP BY 
+        p.Id
+), 
+
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgePoints,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(ps.EffectiveScore, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id AND p.PostTypeId = 1 
+    LEFT JOIN 
+        PostStats ps ON ps.PostId = p.Id
+    GROUP BY 
+        u.Id
+), 
+
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalBadgePoints,
+        QuestionCount,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS UserRank
+    FROM 
+        UserEngagement
+    WHERE 
+        TotalScore IS NOT NULL AND TotalBadgePoints > 0
+), 
+
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId, 
+        ph.UserId,
+        p.Title,
+        CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN 'Closed/Reopened'
+            WHEN ph.PostHistoryTypeId IN (12, 13) THEN 'Deleted/Restored'
+            ELSE 'Edited'
+        END AS HistoryType,
+        ph.CreationDate AS HistoryDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRowNumber
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON p.Id = ph.PostId
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    t.UserRank,
+    COALESCE(p.PostId, 0) AS RecentlyAffectedPostId,
+    COALESCE(p.Title, 'No Recent Activity') AS RecentlyAffectedPostTitle,
+    r.HistoryType,
+    r.HistoryDate
+FROM 
+    TopUsers t
+LEFT JOIN 
+    RecentPostHistory r ON r.UserId = t.UserId AND r.HistoryRowNumber = 1
+LEFT JOIN 
+    Posts p ON p.Id = r.PostId
+WHERE 
+    t.UserRank <= 10
+ORDER BY 
+    t.UserRank;

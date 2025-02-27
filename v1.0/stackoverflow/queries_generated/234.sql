@@ -1,0 +1,58 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id, 
+        u.DisplayName, 
+        u.Reputation, 
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM Users u
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY p.Id
+),
+TopPosts AS (
+    SELECT 
+        pm.PostId, 
+        pm.Title,
+        pm.ViewCount,
+        pm.CommentCount,
+        pm.UpVotes,
+        pm.DownVotes,
+        pm.LastVoteDate,
+        CASE 
+            WHEN pm.LastVoteDate IS NULL THEN 'No Votes Yet'
+            ELSE 'Voted'
+        END AS VoteStatus,
+        RANK() OVER (ORDER BY pm.ViewCount DESC) AS PopularityRank
+    FROM PostMetrics pm
+)
+SELECT 
+    ru.Rank, 
+    ru.DisplayName, 
+    tp.Title, 
+    tp.ViewCount, 
+    tp.CommentCount, 
+    tp.UpVotes, 
+    tp.DownVotes, 
+    tp.VoteStatus,
+    CASE 
+        WHEN tp.CommentCount > 10 THEN 'Highly Discussed'
+        WHEN tp.UpVotes > tp.DownVotes THEN 'Positive Engagement'
+        ELSE 'Needs More Attention'
+    END AS EngagementStatus
+FROM RankedUsers ru
+JOIN TopPosts tp ON ru.Id = (SELECT TOP 1 OwnerUserId FROM Posts WHERE Id = tp.PostId)
+WHERE ru.Rank <= 50
+ORDER BY ru.Rank, tp.ViewCount DESC;

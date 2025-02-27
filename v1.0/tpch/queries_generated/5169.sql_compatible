@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, SUM(o.o_totalprice) AS total_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+    HAVING SUM(o.o_totalprice) > 5000.00
+),
+ProductSuppliers AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * l.l_quantity) AS total_supply_cost
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_partkey
+),
+FinalBenchmark AS (
+    SELECT 
+        ph.s_suppkey,
+        ph.s_name,
+        tc.c_custkey,
+        tc.c_name,
+        ps.ps_partkey,
+        SUM(ps.total_supply_cost) AS total_supply_cost,
+        MAX(tc.total_order_value) AS max_order_value,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM SupplierHierarchy ph
+    JOIN TopCustomers tc ON ph.s_nationkey = tc.c_nationkey
+    JOIN ProductSuppliers ps ON ph.s_suppkey = ps.ps_partkey
+    JOIN orders o ON o.o_custkey = tc.c_custkey 
+    GROUP BY ph.s_suppkey, ph.s_name, tc.c_custkey, tc.c_name, ps.ps_partkey
+)
+SELECT * FROM FinalBenchmark
+ORDER BY total_supply_cost DESC, max_order_value DESC, order_count DESC
+LIMIT 100;

@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerRank,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><') AS tag_name ON TRUE
+    JOIN 
+        Tags t ON t.TagName = tag_name
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.OwnerRank,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.OwnerRank <= 3  -- Top 3 posts per user
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.OwnerDisplayName,
+    fp.Tags,
+    COALESCE(c.CommentCount, 0) AS TotalComments,
+    COALESCE(v.TotalVotes, 0) AS TotalVotes
+FROM 
+    FilteredPosts fp
+LEFT JOIN (
+    SELECT 
+        PostId,
+        COUNT(*) AS CommentCount
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+) c ON c.PostId = fp.PostId
+LEFT JOIN (
+    SELECT 
+        PostId,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes 
+    GROUP BY 
+        PostId
+) v ON v.PostId = fp.PostId
+ORDER BY 
+    fp.CreationDate DESC;

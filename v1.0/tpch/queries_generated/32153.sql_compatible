@@ -1,0 +1,56 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_nationkey = 1  
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+avg_supplier_cost AS (
+    SELECT ps_partkey, AVG(ps_supplycost) AS avg_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+high_value_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY o.o_orderkey, o.o_custkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000
+),
+customer_order_counts AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+supplier_info AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_available
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    nh.n_name AS nation_name,
+    c.c_name AS customer_name,
+    o.o_orderkey AS order_id,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total,
+    COALESCE(s.total_available, 0) AS total_available_parts,
+    CASE 
+        WHEN AVG(supp.avg_cost) > 1000 THEN 'High Cost Supplier'
+        ELSE 'Standard Supplier'
+    END AS supplier_category
+FROM lineitem l
+JOIN high_value_orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN nation_hierarchy nh ON c.c_nationkey = nh.n_nationkey
+LEFT JOIN avg_supplier_cost supp ON l.l_partkey = supp.ps_partkey
+LEFT JOIN supplier_info s ON l.l_suppkey = s.s_suppkey
+WHERE l.l_returnflag = 'N'
+GROUP BY nh.n_name, c.c_name, o.o_orderkey, s.total_available, supp.avg_cost
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY nh.n_name, order_total DESC;

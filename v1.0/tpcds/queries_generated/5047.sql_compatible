@@ -1,0 +1,48 @@
+
+WITH SalesSummary AS (
+    SELECT
+        ws.web_site_id,
+        SUM(ws.net_paid) AS total_sales,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        COUNT(DISTINCT ws.bill_customer_sk) AS unique_customers,
+        AVG(ws.net_paid) AS avg_order_value,
+        CAST(d.d_date AS DATE) AS sale_date
+    FROM
+        web_sales ws
+    JOIN
+        date_dim d ON ws.sold_date_sk = d.d_date_sk
+    WHERE
+        d.d_year = 2023
+    GROUP BY
+        ws.web_site_id, d.d_date
+),
+CustomerDemographics AS (
+    SELECT
+        cd.gender,
+        cd.education_status,
+        cd.marital_status,
+        SUM(ss.total_sales) AS total_sales_for_group,
+        SUM(ss.total_orders) AS total_orders_for_group
+    FROM
+        SalesSummary ss
+    JOIN
+        customer c ON c.c_customer_sk = ss.unique_customers
+    JOIN
+        customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY
+        cd.gender, cd.education_status, cd.marital_status
+)
+SELECT
+    cd.gender,
+    cd.education_status,
+    cd.marital_status,
+    cd.total_sales_for_group,
+    cd.total_orders_for_group,
+    ROUND(cd.total_sales_for_group / NULLIF(cd.total_orders_for_group, 0), 2) AS avg_order_value
+FROM
+    CustomerDemographics cd
+WHERE
+    cd.total_orders_for_group > 10
+ORDER BY
+    cd.total_sales_for_group DESC
+LIMIT 10;

@@ -1,0 +1,73 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.id AS movie_id,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.movie_id
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.year_rank <= 10
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        ci.company_name,
+        ci.company_type,
+        COUNT(DISTINCT ci.company_name) OVER (PARTITION BY tm.movie_id) AS company_count,
+        (SELECT COUNT(*) 
+         FROM movie_keyword mk 
+         WHERE mk.movie_id = tm.movie_id) AS keywords_count
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        CompanyInfo ci ON tm.movie_id = ci.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(md.company_name, 'Independent') AS production_company,
+    md.company_count,
+    md.keywords_count,
+    (SELECT STRING_AGG(k.keyword, ', ') 
+     FROM movie_keyword mk 
+     JOIN keyword k ON mk.keyword_id = k.id 
+     WHERE mk.movie_id = md.movie_id) AS keywords
+FROM 
+    MovieDetails md
+WHERE 
+    (md.production_year >= 2000 AND md.production_year <= 2023)
+    OR (md.company_name IS NULL)
+GROUP BY 
+    md.title,
+    md.production_year,
+    md.company_name,
+    md.company_count,
+    md.keywords_count
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

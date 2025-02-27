@@ -1,0 +1,84 @@
+WITH UserVotes AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostsWithTags AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.CreatedDate,
+        Tags.TagName,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY T.Count DESC) AS TagRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Tags T ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE 
+        P.ViewCount > 1000
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId, 
+        COUNT(*) AS ClosureCount,
+        STRING_AGG(DISTINCT CASE WHEN PH.Comment IS NOT NULL THEN PH.Comment ELSE 'No Comment' END, '; ') AS CloseReasons
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    GROUP BY 
+        PH.PostId
+),
+JoinedData AS (
+    SELECT 
+        U.DisplayName,
+        PWT.PostId,
+        PWT.Title,
+        PWT.ViewCount,
+        PWT.Score,
+        COALESCE(CP.ClosureCount, 0) AS ClosureEvents,
+        CP.CloseReasons,
+        UV.UpVotesCount,
+        UV.DownVotesCount,
+        (UV.UpVotesCount - UV.DownVotesCount) AS VoteBalance
+    FROM 
+        PostsWithTags PWT
+    JOIN 
+        Users U ON PWT.PostId = U.Id
+    LEFT JOIN 
+        ClosedPosts CP ON PWT.PostId = CP.PostId
+    LEFT JOIN 
+        UserVotes UV ON U.Id = UV.UserId
+)
+SELECT 
+    J.DisplayName,
+    J.Title,
+    J.ViewCount,
+    J.Score,
+    J.ClosureEvents,
+    J.CloseReasons,
+    J.UpVotesCount,
+    J.DownVotesCount,
+    J.VoteBalance,
+    CASE 
+        WHEN J.ClosureEvents > 0 THEN 'Post has been closed'
+        WHEN J.ViewCount > 5000 THEN 'High engagement'
+        ELSE 'Regular post'
+    END AS PostType,
+    DENSE_RANK() OVER (ORDER BY J.Score DESC) AS RankByScore
+FROM 
+    JoinedData J
+ORDER BY 
+    RankByScore, J.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY;

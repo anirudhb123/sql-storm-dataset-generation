@@ -1,0 +1,79 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(P.Score) AS TotalScore,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS TagPostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 5
+),
+PostHistories AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS rn
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11, 12, 13) -- Close, Reopen, Delete, Undelete
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalPosts,
+    UA.QuestionsAsked,
+    UA.AnswersGiven,
+    UA.TotalScore,
+    UA.LastPostDate,
+    TT.TagName,
+    TT.TagPostCount,
+    PH.PostHistoryTypeId,
+    PH.CreationDate
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    TopTags TT ON UA.UserId IN (SELECT DISTINCT U.Id FROM Users U JOIN Posts P ON U.Id = P.OwnerUserId WHERE P.Tags LIKE CONCAT('%', TT.TagName, '%'))
+LEFT JOIN 
+    PostHistories PH ON PH.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = UA.UserId)
+WHERE 
+    UA.TotalScore > (
+        SELECT AVG(TotalScore) FROM UserActivity
+    )
+    AND (
+        PH.PostHistoryTypeId IS NULL OR 
+        PH.PostHistoryTypeId IN (10, 11) -- Only if there are closing or reopening events
+    )
+ORDER BY 
+    UA.TotalScore DESC,
+    UA.LastPostDate DESC;
+
+This SQL query serves as a performance benchmark and is structured with several advanced constructs. It includes common table expressions (CTEs) for organizing user activity, tag statistics, and post history filtering. 
+
+Key elements:
+- `UserActivity` CTE gathers users' posts, differentiating between questions and answers.
+- `TopTags` CTE identifies tags with a certain volume of posts.
+- `PostHistories` CTE captures historical post events, focusing on posts that have been closed or reopened.
+- The main SELECT query combines these datasets, filtering users based on their total score compared to the average, and sorts results for detailed performance measurements.
+
+The query illustrates complexity with outer joins, correlated subqueries, conditional aggregates, and interacts with various semantics of the schema related to users and their posts while considering actions over time.

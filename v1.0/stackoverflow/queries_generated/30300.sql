@@ -1,0 +1,127 @@
+WITH RecursivePostHistory AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        1 AS Level
+    FROM
+        PostHistory ph
+    WHERE
+        ph.PostHistoryTypeId IN (1, 2, 3) -- Initial Title, Body, Tags
+
+    UNION ALL
+
+    SELECT
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        Level + 1
+    FROM
+        PostHistory ph
+    INNER JOIN RecursivePostHistory rph ON ph.PostId = rph.PostId
+    WHERE
+        ph.CreationDate > rph.CreationDate -- Only consider more recent changes
+),
+
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+),
+
+PostStatistics AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounties,
+        (
+            SELECT 
+                COUNT(*) 
+            FROM 
+                Votes v 
+            WHERE 
+                v.PostId = p.Id AND v.VoteTypeId = 2 -- Only Upvotes
+        ) AS UpvoteCount,
+        (
+            SELECT 
+                COUNT(*) 
+            FROM 
+                Votes v 
+            WHERE 
+                v.PostId = p.Id AND v.VoteTypeId = 3 -- Only Downvotes
+        ) AS DownvoteCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    GROUP BY
+        p.Id
+),
+
+FinalResults AS (
+    SELECT
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.Score,
+        ps.ViewCount,
+        ps.CommentCount,
+        ps.TotalBounties,
+        ps.UpvoteCount,
+        ps.DownvoteCount,
+        ub.BadgeCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        COUNT(rph.UserId) AS HistoryChangeCount
+    FROM
+        PostStatistics ps
+    LEFT JOIN
+        UserBadges ub ON ps.PostId = ub.UserId
+    LEFT JOIN
+        RecursivePostHistory rph ON ps.PostId = rph.PostId
+    GROUP BY
+        ps.PostId, ub.BadgeCount, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+)
+
+SELECT
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    CommentCount,
+    TotalBounties,
+    UpvoteCount,
+    DownvoteCount,
+    BadgeCount,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    HistoryChangeCount
+FROM
+    FinalResults
+WHERE
+    HistoryChangeCount > 0
+ORDER BY
+    Score DESC,
+    ViewCount DESC,
+    CreationDate ASC
+LIMIT 100;

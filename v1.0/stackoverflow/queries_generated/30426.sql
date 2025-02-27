@@ -1,0 +1,75 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, CreationDate, LastAccessDate
+    FROM Users
+    WHERE Reputation > 1000
+    UNION ALL
+    SELECT u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.LastAccessDate
+    FROM Users u
+    INNER JOIN UserHierarchy uh ON uh.Id = u.Id
+),
+RecentPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+),
+PostVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS Downvotes
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY v.PostId
+),
+TopPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        COALESCE(pv.Upvotes, 0) AS Upvotes,
+        COALESCE(pv.Downvotes, 0) AS Downvotes,
+        rp.CommentCount,
+        ROW_NUMBER() OVER (ORDER BY rp.Score DESC, COALESCE(pv.Upvotes, 0) DESC) AS Rank
+    FROM RecentPosts rp
+    LEFT JOIN PostVotes pv ON rp.PostId = pv.PostId
+)
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    tp.Title AS PostTitle,
+    tp.CreationDate AS PostCreationDate,
+    tp.Score AS PostScore,
+    tp.Upvotes AS TotalUpvotes,
+    tp.Downvotes AS TotalDownvotes,
+    tp.CommentCount AS NumberOfComments,
+    CASE 
+        WHEN tp.Rank <= 10 THEN 'Top 10 Posts'
+        ELSE 'Other Posts'
+    END AS PostCategory
+FROM TopPosts tp
+INNER JOIN Users u ON tp.OwnerUserId = u.Id
+WHERE tp.Rank <= 20
+ORDER BY tp.Score DESC, tp.CreationDate DESC;
+
+-- Additional metrics to benchmark performance
+SELECT 
+    COUNT(*) AS TotalUsers,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    SUM(b.Class = 1) AS GoldBadges,
+    SUM(b.Class = 2) AS SilverBadges,
+    SUM(b.Class = 3) AS BronzeBadges,
+    AVG(u.Reputation) AS AverageReputation
+FROM Users u
+LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN Comments c ON p.Id = c.PostId
+LEFT JOIN Badges b ON u.Id = b.UserId
+WHERE u.CreationDate < NOW() - INTERVAL '1 year'; 

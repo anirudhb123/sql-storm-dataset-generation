@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        c.c_mktsegment
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_mktsegment = c.c_mktsegment)
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(DISTINCT l.l_linenumber) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '1997-01-01' AND l.l_shipdate < '1998-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name AS Region,
+    nv.n_name AS Nation,
+    hs.s_name AS Supplier,
+    SUM(os.total_revenue) AS Total_Revenue,
+    AVG(c.c_acctbal) AS Average_Customer_Balance
+FROM 
+    RankedSuppliers hs
+LEFT JOIN 
+    nation nv ON hs.s_suppkey = nv.n_nationkey
+LEFT JOIN 
+    OrderStats os ON os.o_orderkey IN (
+        SELECT o_orderkey 
+        FROM orders 
+        WHERE o_custkey IN (SELECT c.c_custkey FROM HighValueCustomers c)
+    )
+JOIN 
+    region r ON nv.n_regionkey = r.r_regionkey
+WHERE 
+    hs.SupplierRank <= 3
+GROUP BY 
+    r.r_name, nv.n_name, hs.s_name
+HAVING 
+    SUM(os.total_revenue) > 1000000
+ORDER BY 
+    Region, Nation, Total_Revenue DESC;

@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > DATEADD(DAY, -30, '2024-10-01')
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS DeleteCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    p.PostId,
+    p.Title,
+    u.DisplayName AS Owner,
+    us.Reputation,
+    us.BadgeCount,
+    phc.EditCount,
+    phc.CloseCount,
+    phc.DeleteCount,
+    RANK() OVER (ORDER BY (us.Reputation + 10 * us.BadgeCount) DESC) AS UserRank
+FROM 
+    RankedPosts p
+JOIN 
+    UserStats us ON p.OwnerUserId = us.UserId
+JOIN 
+    PostHistoryCounts phc ON p.PostId = phc.PostId
+WHERE 
+    phc.CloseCount = 0  
+    AND (p.UpVotes - p.DownVotes) > 10  
+ORDER BY 
+    UserRank,
+    p.CreationDate DESC
+LIMIT 50;

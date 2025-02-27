@@ -1,0 +1,61 @@
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM web_sales 
+    WHERE ws_sold_date_sk BETWEEN 2459886 AND 2459890 
+    GROUP BY ws_item_sk
+),
+high_value_customers AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws_ext_sales_price) AS total_spent
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_net_paid > 100
+    GROUP BY c.c_customer_id
+),
+customer_info AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        h.hd_income_band_sk,
+        h.hd_buy_potential
+    FROM customer_demographics cd
+    JOIN household_demographics h ON cd.cd_demo_sk = h.hd_demo_sk
+    WHERE h.hd_buy_potential IN ('High', 'Medium')
+),
+promotions_active AS (
+    SELECT p.p_promo_name, p.p_start_date_sk, p.p_end_date_sk
+    FROM promotion p
+    WHERE p.p_discount_active = 'Y'
+),
+inventory_alerts AS (
+    SELECT 
+        inv.inv_item_sk, 
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM inventory inv
+    JOIN item i ON inv.inv_item_sk = i.i_item_sk
+    WHERE inv.inv_date_sk = 2459895 
+    GROUP BY inv.inv_item_sk
+    HAVING SUM(inv.inv_quantity_on_hand) < 10
+)
+SELECT 
+    s.ws_item_sk,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(hvc.total_spent, 0) AS customer_spending,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_education_status,
+    pa.p_promo_name,
+    ia.total_quantity
+FROM sales_summary ss
+FULL OUTER JOIN high_value_customers hvc ON ss.ws_item_sk = hvc.ws_item_sk
+JOIN customer_info ci ON hvc.customer_id = ci.c_customer_id
+LEFT JOIN promotions_active pa ON ss.ws_item_sk = pa.p_promo_name
+LEFT JOIN inventory_alerts ia ON ia.inv_item_sk = ss.ws_item_sk
+WHERE COALESCE(ss.total_sales, 0) > 1000 OR COALESCE(hvc.total_spent, 0) > 500
+ORDER BY total_sales DESC, customer_spending DESC;

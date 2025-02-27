@@ -1,0 +1,88 @@
+WITH UserReputationCTE AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation IS NOT NULL
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScores,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativeScores,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COALESCE(ps.PostCount, 0) AS PostCount,
+        COALESCE(ps.PositiveScores, 0) AS PositiveScores,
+        COALESCE(ps.NegativeScores, 0) AS NegativeScores,
+        COALESCE(ps.AvgScore, 0) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        PostStats ps ON u.Id = ps.OwnerUserId
+    WHERE 
+        u.LastAccessDate >= CURRENT_TIMESTAMP - INTERVAL '30 days' 
+        AND u.Reputation > 10
+),
+ClosedPostInfo AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.UserDisplayName AS ClosedBy,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS CloseHistoryRank
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+        AND p.LastActivityDate < CURRENT_TIMESTAMP - INTERVAL '90 days'
+),
+UserBadgeSummary AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    au.DisplayName,
+    au.Reputation,
+    au.PostCount,
+    au.PositiveScores,
+    au.NegativeScores,
+    au.AvgScore,
+    COALESCE(cpi.ClosedBy, 'N/A') AS ClosedBy,
+    COALESCE(cpi.ClosedDate, 'No closed posts') AS ClosedDate,
+    COALESCE(ubs.BadgeCount, 0) AS TotalBadges,
+    COALESCE(ubs.Badges, 'No badges') AS BadgeList
+FROM 
+    ActiveUsers au
+LEFT JOIN 
+    ClosedPostInfo cpi ON au.Id = (SELECT OwnerUserId FROM Posts WHERE Id = cpi.PostId LIMIT 1)
+LEFT JOIN 
+    UserBadgeSummary ubs ON au.Id = ubs.UserId
+WHERE 
+    (cpi.CloseHistoryRank IS NULL OR cpi.CloseHistoryRank <= 3)
+ORDER BY 
+    au.Reputation DESC,
+    au.PostCount DESC;

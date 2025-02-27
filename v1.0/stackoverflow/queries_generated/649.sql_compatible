@@ -1,0 +1,91 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank,
+        COALESCE(UPPER(SUBSTRING(p.Title, 1, 10)), 'NO TITLE') AS ShortTitle
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATE '2024-10-01' - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.ShortTitle
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.TotalPosts,
+        us.TotalUpVotes,
+        us.TotalDownVotes,
+        RANK() OVER (ORDER BY us.Reputation DESC) AS UserRank
+    FROM 
+        UserStats us
+    WHERE 
+        us.TotalPosts > 0
+)
+SELECT 
+    t.Title,
+    t.ViewCount,
+    t.CreationDate,
+    u.DisplayName AS TopUser,
+    u.Reputation,
+    u.TotalUpVotes,
+    u.TotalDownVotes
+FROM 
+    TopPosts t
+JOIN 
+    TopUsers u ON t.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.UserId)
+ORDER BY 
+    t.Score DESC, u.Reputation DESC
+LIMIT 10
+OFFSET 0
+UNION 
+SELECT 
+    'No Posts' AS Title,
+    0 AS ViewCount,
+    TIMESTAMP '2024-10-01 12:34:56' AS CreationDate,
+    u.DisplayName AS TopUser,
+    u.Reputation,
+    0 AS TotalUpVotes,
+    0 AS TotalDownVotes
+FROM 
+    Users u
+WHERE 
+    u.Id NOT IN (SELECT DISTINCT OwnerUserId FROM Posts)
+ORDER BY 
+    u.Reputation DESC
+LIMIT 5;

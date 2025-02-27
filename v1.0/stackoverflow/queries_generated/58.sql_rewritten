@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+BatchedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(rp.Id) AS PostCount,
+        SUM(rp.UpVotes) AS TotalUpVotes,
+        SUM(rp.DownVotes) AS TotalDownVotes,
+        ROW_NUMBER() OVER (ORDER BY SUM(rp.UpVotes) DESC) AS UserRank
+    FROM 
+        Users u
+    INNER JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    bu.UserId,
+    bu.DisplayName,
+    bu.PostCount,
+    bu.TotalUpVotes,
+    bu.TotalDownVotes,
+    CASE 
+        WHEN bu.TotalUpVotes - bu.TotalDownVotes > 0 THEN 'Positive'
+        WHEN bu.TotalUpVotes - bu.TotalDownVotes < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM 
+    BatchedUsers bu
+WHERE 
+    bu.PostCount > 5 OR (bu.PostCount <= 5 AND bu.UserRank <= 20)
+ORDER BY 
+    bu.UserRank
+LIMIT 50;

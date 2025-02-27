@@ -1,0 +1,90 @@
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        COUNT(Comments.Id) AS CommentCount,
+        SUM(Votes.VoteTypeId = 2) AS UpVotes,
+        SUM(Votes.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, ',')::int[]) 
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        CommentCount,
+        UpVotes,
+        DownVotes,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStats
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        CommentCount,
+        UpVotes,
+        DownVotes
+    FROM 
+        TopTags
+    WHERE 
+        TagRank <= 10
+),
+UserEngagement AS (
+    SELECT 
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS TotalPosts,
+        SUM(Comments.Score) AS TotalCommentScore,
+        SUM(Votes.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(Votes.VoteTypeId = 3) AS TotalDownVotes
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN 
+        Votes ON Users.Id = Votes.UserId
+    GROUP BY 
+        Users.DisplayName
+),
+UserStats AS (
+    SELECT 
+        Users.DisplayName,
+        COUNT(DISTINCT Badges.Id) AS BadgeCount,
+        UserEngagement.TotalPosts,
+        UserEngagement.TotalCommentScore,
+        UserEngagement.TotalUpVotes,
+        UserEngagement.TotalDownVotes
+    FROM 
+        Users
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    LEFT JOIN 
+        UserEngagement ON Users.Id = UserEngagement.DisplayName
+    GROUP BY 
+        Users.DisplayName, UserEngagement.TotalPosts, UserEngagement.TotalCommentScore, UserEngagement.TotalUpVotes, UserEngagement.TotalDownVotes
+)
+SELECT 
+    PopularTags.TagName,
+    UserStats.DisplayName,
+    UserStats.BadgeCount,
+    UserStats.TotalPosts,
+    UserStats.TotalCommentScore,
+    UserStats.TotalUpVotes,
+    UserStats.TotalDownVotes
+FROM 
+    PopularTags
+JOIN 
+    UserStats ON UserStats.TotalPosts > 0
+ORDER BY 
+    PopularTags.UpVotes DESC, UserStats.TotalUpVotes DESC;

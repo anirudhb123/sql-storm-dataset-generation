@@ -1,0 +1,64 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT ci.person_id AS actor_id,
+           t.title,
+           t.production_year,
+           ROW_NUMBER() OVER (PARTITION BY ci.person_id ORDER BY t.production_year DESC) AS year_rank
+    FROM cast_info ci
+    JOIN aka_title t ON ci.movie_id = t.id
+    WHERE ci.nr_order = 1
+    
+    UNION ALL
+    
+    SELECT ah.actor_id,
+           at.title,
+           at.production_year,
+           ROW_NUMBER() OVER (PARTITION BY ah.actor_id ORDER BY at.production_year DESC) AS year_rank
+    FROM ActorHierarchy ah
+    JOIN cast_info ci ON ah.actor_id = ci.person_id
+    JOIN aka_title at ON ci.movie_id = at.id
+    WHERE ci.nr_order = 1 AND ah.year_rank < 5
+),
+
+RecentTitles AS (
+    SELECT actor_id,
+           title,
+           production_year
+    FROM ActorHierarchy
+    WHERE year_rank <= 5
+),
+
+CompanyDetails AS (
+    SELECT mc.movie_id,
+           c.name AS company_name,
+           ct.kind AS company_type,
+           m.title AS movie_title
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    JOIN aka_title m ON mc.movie_id = m.id
+),
+
+ActorMovieDetails AS (
+    SELECT ak.name AS actor_name,
+           rt.title,
+           rt.production_year,
+           ct.company_name,
+           ct.company_type,
+           (SELECT COUNT(DISTINCT mc.company_id)
+            FROM movie_companies mc 
+            WHERE mc.movie_id = rt.movie_id) AS company_count
+    FROM RecentTitles rt
+    JOIN aka_name ak ON rt.actor_id = ak.person_id
+    LEFT JOIN CompanyDetails ct ON rt.title = ct.movie_title
+)
+
+SELECT am.actor_name,
+       am.title,
+       am.production_year,
+       am.company_name,
+       am.company_type,
+       COALESCE(am.company_count, 0) AS company_count
+FROM ActorMovieDetails am
+WHERE am.production_year >= 2000
+AND am.company_name IS NOT NULL
+ORDER BY am.production_year DESC, am.actor_name;

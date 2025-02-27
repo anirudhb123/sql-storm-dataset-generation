@@ -1,0 +1,65 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        sr_return_quantity,
+        sr_reason_sk,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS rn
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+), 
+TopReturns AS (
+    SELECT 
+        r.*,
+        COALESCE(ws.ws_net_profit, 0) AS web_net_profit,
+        COALESCE(cs.cs_net_profit, 0) AS catalog_net_profit
+    FROM 
+        RankedReturns r
+    LEFT JOIN 
+        web_sales ws ON r.sr_item_sk = ws.ws_item_sk
+        AND r.sr_returned_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN 
+        catalog_sales cs ON r.sr_item_sk = cs.cs_item_sk
+        AND r.sr_returned_date_sk = cs.cs_sold_date_sk
+    WHERE 
+        r.rn = 1
+), 
+AggregatedReturns AS (
+    SELECT 
+        COUNT(*) AS total_returns,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(web_net_profit) AS total_web_profit,
+        SUM(catalog_net_profit) AS total_catalog_profit
+    FROM 
+        TopReturns
+    WHERE 
+        sr_reason_sk IN (SELECT r_reason_sk FROM reason WHERE r_reason_desc LIKE '%defective%')
+)
+SELECT 
+    a.total_returns,
+    a.total_return_quantity,
+    a.total_web_profit,
+    a.total_catalog_profit,
+    CASE 
+        WHEN a.total_web_profit > a.total_catalog_profit THEN 'Web sales more profitable'
+        ELSE 'Catalog sales more profitable or equal' 
+    END AS profitability_comparison,
+    (SELECT d.d_year 
+     FROM date_dim d 
+     WHERE EXISTS (
+         SELECT 1 
+         FROM store s 
+         WHERE s.s_store_sk IN (
+             SELECT sr_store_sk 
+             FROM store_returns 
+             WHERE sr_returned_date_sk = d.d_date_sk
+         )
+     ) 
+     AND d.d_date_sk = CURRENT_DATE - INTERVAL '1 DAY' ) AS last_transaction_year
+FROM 
+    AggregatedReturns a
+WHERE 
+    total_returns > 0;

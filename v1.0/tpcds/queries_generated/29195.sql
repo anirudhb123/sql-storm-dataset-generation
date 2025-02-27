@@ -1,0 +1,34 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_county,
+        COUNT(DISTINCT ca_address_sk) AS address_count,
+        STRING_AGG(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type), ', ') AS full_address
+    FROM customer_address
+    GROUP BY ca_county
+),
+SalesSummary AS (
+    SELECT 
+        COALESCE(ss.sold_date_sk, ws.sold_date_sk) AS sold_date_sk,
+        COALESCE(ss.sold_time_sk, ws.sold_time_sk) AS sold_time_sk,
+        SUM(ss.ss_sales_price) AS total_store_sales,
+        SUM(ws.ws_sales_price) AS total_web_sales
+    FROM store_sales ss
+    FULL OUTER JOIN web_sales ws ON ss.ss_sold_date_sk = ws.ws_sold_date_sk AND ss.ss_sold_time_sk = ws.ws_sold_time_sk
+    GROUP BY COALESCE(ss.sold_date_sk, ws.sold_date_sk), COALESCE(ss.sold_time_sk, ws.sold_time_sk)
+),
+FinalBenchmark AS (
+    SELECT 
+        a.ca_county,
+        a.address_count,
+        a.full_address,
+        COALESCE(s.total_store_sales, 0) AS total_store_sales,
+        COALESCE(s.total_web_sales, 0) AS total_web_sales,
+        (COALESCE(s.total_store_sales, 0) + COALESCE(s.total_web_sales, 0)) AS total_sales
+    FROM AddressDetails a
+    LEFT JOIN SalesSummary s ON a.address_count > 0
+ORDER BY total_sales DESC
+)
+SELECT * FROM FinalBenchmark
+WHERE total_sales > 1000
+LIMIT 10;

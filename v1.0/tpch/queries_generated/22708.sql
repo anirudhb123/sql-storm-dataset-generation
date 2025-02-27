@@ -1,0 +1,68 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM supplier s
+),
+ActiveOrders AS (
+    SELECT o.o_orderkey,
+           o.o_totalprice,
+           SUM(l.l_quantity) AS total_quantity,
+           MAX(l.l_shipdate) AS last_shipdate
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_totalprice
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           c.c_acctbal
+    FROM customer c
+    WHERE c.c_acctbal > (
+        SELECT AVG(c2.c_acctbal) * 1.5
+        FROM customer c2
+        WHERE c2.c_nationkey IS NOT NULL
+    )
+),
+SupplierPartInfo AS (
+    SELECT ps.ps_partkey,
+           p.p_name,
+           s.s_suppkey,
+           s.s_name,
+           ps.ps_supplycost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > 0
+)
+SELECT r.r_name,
+       SUM(COALESCE(l.l_extendedprice * (1 - l.l_discount), 0)) AS total_revenue,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       COUNT(DISTINCT CASE WHEN o.o_orderkey IS NULL THEN 1 END) AS null_order_count,
+       MAX(l.last_shipdate) AS last_shipping_date
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN ActiveOrders o ON o.o_orderkey IN (
+    SELECT o_orderkey
+    FROM ActiveOrders ao
+    WHERE ao.total_quantity > (
+        SELECT AVG(total_quantity) * 0.5
+        FROM ActiveOrders
+    )
+) 
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN SupplierPartInfo spi ON spi.ps_partkey = l.l_partkey
+LEFT JOIN RankedSuppliers rs ON spi.s_suppkey = rs.s_suppkey AND rs.supplier_rank = 1
+WHERE rs.supplier_rank IS NULL OR (rs.supplier_rank IS NOT NULL AND rs.s_acctbal < (
+    SELECT AVG(s_acctbal)
+    FROM RankedSuppliers
+))
+GROUP BY r.r_name
+HAVING SUM(l.l_extendedprice) > (
+    SELECT AVG(l_extendedprice)
+    FROM lineitem
+    WHERE l_returnflag = 'R'
+) * 10
+ORDER BY total_revenue DESC;

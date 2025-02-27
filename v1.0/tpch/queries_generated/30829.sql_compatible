@@ -1,0 +1,42 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey, 1 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+)
+SELECT 
+    n.n_name AS nation,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(CASE WHEN l.l_discount > 0.05 THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS discounted_revenue,
+    AVG(l.l_quantity) OVER (PARTITION BY n.n_nationkey) AS avg_line_item_quantity,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS products_in_orders,
+    MAX(o.o_totalprice) AS max_order_value,
+    COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN l.l_orderkey END) AS returns_count
+FROM 
+    customer c
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'EUROPE')
+    AND (l.l_shipdate IS NULL OR l.l_shipdate > '1997-07-01')
+GROUP BY 
+    n.n_name, n.n_nationkey
+HAVING 
+    SUM(l.l_extendedprice) IS NOT NULL
+ORDER BY 
+    discounted_revenue DESC;

@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.OwnerUserId,
+           p.PostTypeId,
+           COALESCE(v.UpVoteCount, 0) AS UpVoteCount,
+           COALESCE(c.CommentCount, 0) AS CommentCount,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COALESCE(v.UpVoteCount, 0) DESC) AS UserRank
+    FROM Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS UpVoteCount
+        FROM Votes
+        WHERE VoteTypeId = 2 
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    WHERE p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+),
+PostDetails AS (
+    SELECT rp.PostId,
+           rp.Title,
+           rp.OwnerUserId,
+           u.DisplayName AS OwnerDisplayName,
+           rp.UpVoteCount,
+           rp.CommentCount,
+           (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+            FROM Tags t 
+            WHERE t.Id IN (SELECT UNNEST(string_to_array(p.Tags, '>'))::int)) AS Tags
+    FROM RankedPosts rp
+    JOIN Users u ON rp.OwnerUserId = u.Id
+),
+CloseReason AS (
+    SELECT ph.PostId,
+           STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes cr ON CAST(ph.Comment AS int) = cr.Id
+    WHERE ph.PostHistoryTypeId = 10 
+    GROUP BY ph.PostId
+),
+CombinedPostData AS (
+    SELECT pd.PostId,
+           pd.Title,
+           pd.OwnerDisplayName,
+           pd.UpVoteCount,
+           pd.CommentCount,
+           COALESCE(cr.CloseReasons, 'Open') AS CloseReason
+    FROM PostDetails pd
+    LEFT JOIN CloseReason cr ON pd.PostId = cr.PostId
+),
+FilteredPosts AS (
+    SELECT pd.*,
+           CASE 
+               WHEN pd.UpVoteCount > 5 THEN 'Active'
+               WHEN pd.CloseReason != 'Open' THEN 'Closed'
+               ELSE 'Inactive'
+           END AS Status
+    FROM CombinedPostData pd
+)
+
+SELECT fp.PostId,
+       fp.Title,
+       fp.OwnerDisplayName,
+       fp.UpVoteCount,
+       fp.CommentCount,
+       fp.CloseReason,
+       fp.Status,
+       CASE 
+           WHEN fp.CloseReason != 'Open' AND fp.Status = 'Inactive' THEN 'Needs Attention'
+           ELSE 'On Track'
+       END AS AttentionStatus
+FROM FilteredPosts fp
+WHERE fp.Status != 'Inactive' OR fp.CloseReason != 'Open'
+ORDER BY fp.UpVoteCount DESC, fp.CommentCount DESC
+LIMIT 50;

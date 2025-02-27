@@ -1,0 +1,58 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_preferred_cust_flag, 1 AS level
+    FROM customer
+    WHERE c_preferred_cust_flag = 'Y'
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_preferred_cust_flag, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS total_sales,
+        AVG(ws_sales_price) AS avg_sales_price
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+ReturnsData AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+CombinedData AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(sd.total_profit, 0) AS total_profit,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        COALESCE(rd.total_returns, 0) AS total_returns,
+        COALESCE(rd.total_return_amount, 0) AS total_return_amount
+    FROM customer c
+    LEFT JOIN SalesData sd ON c.c_customer_sk = sd.ws_bill_customer_sk
+    LEFT JOIN ReturnsData rd ON c.c_customer_sk = rd.sr_customer_sk 
+)
+SELECT 
+    ch.c_customer_sk,
+    ch.c_first_name,
+    ch.c_last_name,
+    cd.total_profit,
+    cd.total_sales,
+    cd.total_returns,
+    cd.total_return_amount,
+    CASE 
+        WHEN cd.total_sales = 0 THEN 'No Sales'
+        ELSE CAST((cd.total_profit / NULLIF(cd.total_sales, 0)) AS DECIMAL(10,2)) 
+    END AS profit_per_sale,
+    ROW_NUMBER() OVER (PARTITION BY ch.level ORDER BY cd.total_profit DESC) AS rank_within_level
+FROM CustomerHierarchy ch
+JOIN CombinedData cd ON ch.c_customer_sk = cd.c_customer_sk
+ORDER BY ch.level, cd.total_profit DESC;

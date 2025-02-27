@@ -1,0 +1,64 @@
+
+WITH RECURSIVE customer_metrics AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        d.d_day_name,
+        COUNT(sr.ticket_number) AS store_return_count,
+        SUM(sr_return_amt) AS total_store_return_amt,
+        SUM(sr_return_quantity) AS total_store_return_quantity
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    JOIN 
+        date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_current_cdemo_sk, d.d_day_name
+),
+overall_metrics AS (
+    SELECT 
+        cm.c_customer_sk,
+        COUNT(DISTINCT cm.d_day_name) AS active_days,
+        SUM(cm.store_return_count) OVER (PARTITION BY cm.c_customer_sk) AS total_store_returns,
+        SUM(cm.total_store_return_amt) AS total_amt_returns,
+        SUM(cm.total_store_return_quantity) AS total_quantity_returns
+    FROM 
+        customer_metrics cm
+    GROUP BY 
+        cm.c_customer_sk
+),
+gender_distribution AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(c.c_customer_sk) AS customer_count,
+        SUM(om.total_store_returns) AS total_returns,
+        SUM(om.total_amt_returns) AS total_return_amt
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        overall_metrics om ON om.c_customer_sk = c.c_customer_sk
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    gd.cd_gender,
+    gd.customer_count,
+    COALESCE(SUM(gd.total_returns), 0) AS total_returns,
+    COALESCE(SUM(gd.total_return_amt), 0) AS total_return_amt,
+    CASE 
+        WHEN SUM(gd.total_returns) IS NULL THEN 'No Returns'
+        ELSE 'Returns Present'
+    END AS return_status
+FROM 
+    gender_distribution gd
+JOIN 
+    (SELECT DISTINCT cd_gender FROM customer_demographics) cd ON gd.cd_gender = cd.cd_gender
+GROUP BY 
+    gd.cd_gender, gd.customer_count
+HAVING 
+    COUNT(gd.customer_count) > 5
+ORDER BY 
+    gd.cd_gender DESC;

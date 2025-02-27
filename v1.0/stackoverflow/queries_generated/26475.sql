@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only considering Questions
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        p.PostTypeId = 1  -- Only considering Questions
+    GROUP BY 
+        t.TagName
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS EditDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Title, Body and Tags edits
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate AS QuestionDate,
+    rp.Score AS QuestionScore,
+    rp.ViewCount AS QuestionViewCount,
+    rp.OwnerDisplayName,
+    ts.TagName,
+    ts.PostCount,
+    ts.PositiveScoreCount,
+    re.EditDate,
+    re.UserDisplayName AS Editor,
+    re.Comment AS EditComment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagStats ts ON rp.Title LIKE '%' || ts.TagName || '%'
+LEFT JOIN 
+    RecentEdits re ON rp.PostId = re.PostId AND re.EditRank = 1
+WHERE 
+    rp.Rank <= 5  -- Get top 5 recent posts per user
+ORDER BY 
+    rp.CreationDate DESC, 
+    ts.PostCount DESC;

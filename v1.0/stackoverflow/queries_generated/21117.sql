@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -2, CURRENT_TIMESTAMP)
+        AND p.Score >= (SELECT AVG(Score) FROM Posts)
+),
+
+PostDetails AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.ViewCount,
+        r.Score,
+        r.CreationDate,
+        r.PostTypeId,
+        (SELECT STRING_AGG(t.TagName, ', ') 
+         FROM Tags t 
+         WHERE t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])) 
+                        FROM Posts p 
+                        WHERE p.Id = r.PostId)) AS Tags,
+        (SELECT COUNT(*) 
+         FROM Comments c 
+         WHERE c.PostId = r.PostId) AS CommentCount,
+        (SELECT COUNT(*) 
+         FROM Votes v 
+         WHERE v.PostId = r.PostId AND v.VoteTypeId IN (2, 3)
+        ) AS VoteCount,
+        COALESCE((
+            SELECT COUNT(*) 
+            FROM PostHistory ph 
+            WHERE ph.PostId = r.PostId AND ph.PostHistoryTypeId = 10 -- Post Closed
+        ), 0) AS TimesClosed
+    FROM 
+        RankedPosts r 
+    WHERE 
+        r.PostRank <= 10
+),
+
+AggregatedData AS (
+    SELECT 
+        pd.*,
+        CASE 
+            WHEN pd.VoteCount > 100 THEN 'Highly Voted'
+            WHEN pd.VoteCount BETWEEN 50 AND 100 THEN 'Moderately Voted'
+            ELSE 'Lowly Voted'
+        END AS VoteCategory,
+        CASE 
+            WHEN pd.TimesClosed > 0 THEN 'Yes'
+            ELSE 'No'
+        END AS IsClosedPost
+    FROM 
+        PostDetails pd
+)
+
+SELECT 
+    ad.*,
+    ut.DisplayName AS OwnerDisplayName,
+    u.Reputation,
+    COALESCE(u.Location, 'Not Specified') AS UserLocation,
+    CASE 
+        WHEN ad.PostTypeId = 1 THEN 'Question'
+        ELSE 'Other'
+    END AS PostType,
+    CASE 
+        WHEN ad.Score IS NULL THEN 'No Score'
+        ELSE ad.Score::TEXT
+    END AS ScoreRepresentation
+FROM 
+    AggregatedData ad
+LEFT JOIN 
+    Users u ON u.Id IN (SELECT OwnerUserId FROM Posts WHERE Id = ad.PostId)
+LEFT JOIN 
+    Users ut ON ut.Id IN (SELECT LastEditorUserId FROM Posts WHERE Id = ad.PostId)
+WHERE 
+    (ad.CommentCount = 0 AND ad.ViewCount > 100) OR
+    (ad.CommentCount > 0 AND ad.ViewCount > 50)
+ORDER BY 
+    ad.Score DESC, ad.ViewCount DESC;

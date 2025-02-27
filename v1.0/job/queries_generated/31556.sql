@@ -1,0 +1,52 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT c.movie_id, a.person_id, a.name, 1 AS level
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    WHERE c.nr_order = 1  -- Get primary actors for movies
+    UNION ALL
+    SELECT c.movie_id, a.person_id, a.name, ah.level + 1
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN actor_hierarchy ah ON c.movie_id = ah.movie_id
+    WHERE c.nr_order > ah.level  -- Continue finding secondary actors
+),
+movie_actor_count AS (
+    SELECT ah.movie_id, COUNT(DISTINCT ah.person_id) AS total_actors
+    FROM actor_hierarchy ah
+    GROUP BY ah.movie_id
+),
+movie_details AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        ma.total_actors,
+        COALESCE(mk.keyword_count, 0) AS keyword_count
+    FROM title m
+    JOIN movie_actor_count ma ON m.id = ma.movie_id
+    LEFT JOIN (
+        SELECT 
+            mk.movie_id,
+            COUNT(DISTINCT mk.keyword_id) AS keyword_count
+        FROM movie_keyword mk
+        GROUP BY mk.movie_id
+    ) mk ON m.id = mk.movie_id
+),
+filtered_movies AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.total_actors,
+        md.keyword_count,
+        RANK() OVER (ORDER BY md.production_year DESC, md.total_actors DESC) AS rank
+    FROM movie_details md
+    WHERE md.production_year >= 2000 AND md.keyword_count > 0
+)
+
+SELECT 
+    f.title,
+    f.production_year,
+    f.total_actors,
+    f.keyword_count
+FROM filtered_movies f
+WHERE f.rank <= 10  -- Fetch top 10 movies based on criteria
+ORDER BY f.total_actors DESC, f.production_year DESC;

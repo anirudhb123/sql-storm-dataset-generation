@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(u.DisplayName, 'Anonymous') AS OwnerName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+        AND p.Score > 0
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= CURRENT_DATE - INTERVAL '6 months'
+    GROUP BY 
+        b.UserId
+),
+UserVisibility AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(rb.BadgeCount, 0) AS BadgeCount,
+        COALESCE(rb.BadgeNames, 'No badges') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        RecentBadges rb ON u.Id = rb.UserId
+    WHERE 
+        u.Reputation > 100
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    uv.DisplayName AS PostOwner,
+    uv.BadgeCount,
+    uv.BadgeNames,
+    CASE 
+        WHEN rp.Rank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    UserVisibility uv ON rp.OwnerUserId = uv.UserId
+WHERE 
+    rp.Rank <= 3
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC;

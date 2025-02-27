@@ -1,0 +1,62 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM
+        web_sales
+    GROUP BY
+        ws_bill_customer_sk
+),
+CustomerOrders AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name || ' ' || c.c_last_name AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(d.month_name, 'Not Specified') AS purchase_month,
+        COALESCE(SUM(ws.wholesale_cost), 0) AS total_wholesale_cost,
+        COALESCE(SUM(ws.sales_price), 0) AS total_sales_price
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN
+        (SELECT d_month_seq, d_month_name FROM date_dim GROUP BY d_month_seq, d_month_name) AS d ON EXTRACT(MONTH FROM CURRENT_DATE) = d.d_month_seq
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate, d.month_name
+),
+TopCustomers AS (
+    SELECT
+        COALESCE(SalesCTE.ws_bill_customer_sk, cus.c_customer_sk) AS customer_sk,
+        cus.full_name,
+        cus.cd_gender,
+        cus.cd_marital_status,
+        cus.total_sales,
+        cus.order_count
+    FROM
+        SalesCTE
+    FULL OUTER JOIN CustomerOrders cus ON SalesCTE.ws_bill_customer_sk = cus.c_customer_sk
+    WHERE
+        (cus.total_sales > 1000 OR SalesCTE.total_sales IS NULL)
+)
+SELECT
+    tc.customer_sk,
+    tc.full_name,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    CASE 
+        WHEN tc.order_count IS NULL THEN 'No Orders'
+        ELSE 'Orders Count: ' || tc.order_count
+    END AS order_info,
+    COALESCE(tc.total_sales, 0) AS total_sales
+FROM
+    TopCustomers tc
+ORDER BY
+    total_sales DESC
+LIMIT 50;

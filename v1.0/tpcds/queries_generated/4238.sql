@@ -1,0 +1,67 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ws.ws_net_paid_inc_tax,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND ws.ws_sold_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT sd.ws_order_number) AS order_count,
+        SUM(sd.ws_net_profit) AS total_profit,
+        SUM(sd.ws_net_paid_inc_tax) AS total_paid
+    FROM 
+        customer c
+    LEFT JOIN 
+        sales_data sd ON c.c_customer_sk = sd.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+high_value_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.order_count,
+        cs.total_profit,
+        cs.total_paid,
+        cb.ib_lower_bound,
+        cb.ib_upper_bound
+    FROM 
+        customer c
+    JOIN 
+        customer_sales cs ON c.c_customer_sk = cs.c_customer_sk
+    LEFT JOIN 
+        household_demographics h ON c.c_current_hdemo_sk = h.hd_demo_sk
+    LEFT JOIN 
+        income_band cb ON h.hd_income_band_sk = cb.ib_income_band_sk
+    WHERE 
+        cs.total_profit > 5000 
+        AND cs.order_count > 10 
+        AND (cb.ib_lower_bound IS NULL OR cb.ib_upper_bound IS NOT NULL)
+)
+SELECT 
+    hc.c_first_name,
+    hc.c_last_name,
+    hc.order_count,
+    hc.total_profit,
+    hc.total_paid,
+    CASE 
+        WHEN hc.total_profit > 10000 THEN 'Gold'
+        WHEN hc.total_profit BETWEEN 5000 AND 10000 THEN 'Silver'
+        ELSE 'Bronze'
+    END AS customer_tier
+FROM 
+    high_value_customers hc
+ORDER BY 
+    hc.total_profit DESC
+LIMIT 20;

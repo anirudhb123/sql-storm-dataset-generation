@@ -1,0 +1,86 @@
+WITH RecursiveUserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        1 AS ActivityLevel
+    FROM 
+        Users U 
+    WHERE 
+        U.Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        VBA.UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        RA.ActivityLevel + 1
+    FROM 
+        Votes VBA
+    INNER JOIN 
+        Users U ON VBA.UserId = U.Id
+    INNER JOIN 
+        RecursiveUserActivity RA ON RA.UserId = VBA.UserId
+    WHERE 
+        RA.ActivityLevel < 3
+)
+
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    COALESCE(B.BadgeCount, 0) AS BadgeCount,
+    COALESCE(P.PostCount, 0) AS PostCount,
+    COALESCE(C.CommentCount, 0) AS CommentCount,
+    U.Reputation,
+    U.CreationDate,
+    RUA.ActivityLevel
+FROM 
+    Users U
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount 
+    FROM 
+        Badges 
+    GROUP BY 
+        UserId
+) B ON U.Id = B.UserId
+LEFT JOIN (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount 
+    FROM 
+        Posts 
+    GROUP BY 
+        OwnerUserId
+) P ON U.Id = P.OwnerUserId
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(*) AS CommentCount 
+    FROM 
+        Comments 
+    GROUP BY 
+        UserId
+) C ON U.Id = C.UserId
+LEFT JOIN RecursiveUserActivity RUA ON U.Id = RUA.UserId
+WHERE 
+    U.CreationDate >= '2020-01-01'
+    AND U.Views > 500
+    AND RUA.ActivityLevel IS NOT NULL
+ORDER BY 
+    U.Reputation DESC,
+    BadgeCount DESC,
+    PostCount DESC,
+    CommentCount DESC;

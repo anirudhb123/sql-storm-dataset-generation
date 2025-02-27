@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01' 
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.ViewCount, p.AnswerCount, p.PostTypeId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        p.Title,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+),
+PostsWithBadges AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.TotalVotes,
+    COALESCE(cp.CreationDate, 'Not Closed') AS ClosureDate,
+    COALESCE(cp.OwnerDisplayName, 'N/A') AS OwnerDisplayName,
+    COALESCE(pb.BadgeCount, 0) AS BadgeCount,
+    CASE 
+        WHEN rp.RankByScore <= 5 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    PostsWithBadges pb ON rp.PostId = pb.PostId
+WHERE 
+    rp.Score > 0 
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

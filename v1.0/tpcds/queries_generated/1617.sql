@@ -1,0 +1,80 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rnk
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        ris.ws_item_sk,
+        ris.total_quantity,
+        ris.total_sales,
+        i.i_item_desc,
+        i.i_current_price
+    FROM 
+        RankedSales ris
+    JOIN 
+        item i ON ris.ws_item_sk = i.i_item_sk
+    WHERE 
+        ris.rnk <= 10
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_buying_power
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+CustomerSales AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.c_first_name,
+        ci.c_last_name,
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM 
+        web_sales ws
+    JOIN 
+        CustomerInfo ci ON ws.ws_bill_customer_sk = ci.c_customer_sk
+    GROUP BY 
+        ci.c_customer_id, ci.c_first_name, ci.c_last_name
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    COALESCE(cs.total_spent, 0) AS total_spent,
+    ti.total_quantity,
+    ti.total_sales,
+    i.i_current_price
+FROM 
+    CustomerInfo ci
+LEFT JOIN 
+    CustomerSales cs ON ci.c_customer_id = cs.c_customer_id
+LEFT JOIN 
+    TopItems ti ON ti.ws_item_sk = 
+    (SELECT TOP 1 ws_item_sk 
+     FROM web_sales 
+     WHERE ws_bill_customer_sk = ci.c_customer_sk 
+     ORDER BY ws_sales_price DESC)
+JOIN 
+    item i ON ti.ws_item_sk = i.i_item_sk
+WHERE 
+    ci.cd_gender IS NOT NULL
+ORDER BY 
+    total_spent DESC, total_sales DESC;

@@ -1,0 +1,73 @@
+
+WITH RECURSIVE cast_hierarchy AS (
+    SELECT
+        c.id,
+        c.person_id,
+        c.movie_id,
+        c.nr_order,
+        ROW_NUMBER() OVER(PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+    FROM
+        cast_info c
+    WHERE
+        c.nr_order IS NOT NULL
+),
+partial_movies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword AS genre_keyword
+    FROM
+        aka_title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE
+        t.production_year >= 2000
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Movie%')
+),
+company_details AS (
+    SELECT
+        mc.movie_id,
+        STRING_AGG(cn.name, ', ') AS companies,
+        ct.kind AS company_kind
+    FROM
+        movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY
+        mc.movie_id, ct.kind
+),
+title_info AS (
+    SELECT
+        p.movie_id,
+        COUNT(DISTINCT ca.id) AS cast_count,
+        STRING_AGG(DISTINCT nk.name, ', ') AS lead_actors,
+        COALESCE(MAX(m.production_year), 'N/A') AS latest_year
+    FROM
+        partial_movies p
+    LEFT JOIN cast_info ca ON p.movie_id = ca.movie_id
+    LEFT JOIN aka_name nk ON ca.person_id = nk.person_id
+    GROUP BY
+        p.movie_id
+)
+SELECT
+    tm.title,
+    tm.production_year,
+    cd.companies,
+    cd.company_kind,
+    ti.cast_count,
+    ti.lead_actors,
+    ti.latest_year,
+    CASE
+        WHEN ti.cast_count > 5 THEN 'Ensemble Cast'
+        WHEN ti.cast_count > 0 THEN 'Limited Cast'
+        ELSE 'No Cast Information'
+    END AS cast_type
+FROM
+    partial_movies tm
+LEFT JOIN company_details cd ON tm.movie_id = cd.movie_id
+LEFT JOIN title_info ti ON tm.movie_id = ti.movie_id
+ORDER BY
+    tm.production_year DESC,
+    ti.cast_count DESC
+LIMIT 50;

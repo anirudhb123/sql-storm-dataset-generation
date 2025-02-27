@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank,
+        CASE 
+            WHEN ws.ws_sales_price IS NULL THEN 'Unavailable'
+            WHEN ws.ws_sales_price < 20 THEN 'Low'
+            WHEN ws.ws_sales_price BETWEEN 20 AND 100 THEN 'Medium'
+            ELSE 'High'
+        END AS price_category
+    FROM 
+        web_sales AS ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+TotalSales AS (
+    SELECT 
+        web_site_sk,
+        SUM(ws_sales_price * ws_quantity) AS total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 10
+    GROUP BY 
+        web_site_sk
+),
+SalesSummary AS (
+    SELECT 
+        t.web_site_sk,
+        t.total_sales,
+        r.price_category,
+        RANK() OVER (ORDER BY t.total_sales DESC) AS total_rank
+    FROM 
+        TotalSales AS t
+    LEFT JOIN RankedSales AS r ON t.web_site_sk = r.web_site_sk
+)
+SELECT 
+    s.web_site_sk,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    st.w_warehouse_name,
+    RANK() OVER (PARTITION BY CASE WHEN s.total_sales IS NULL THEN '0' ELSE '1' END ORDER BY s.total_sales DESC) AS null_handling_rank,
+    NULLIF(s.price_category, 'Unavailable') AS adjusted_price_category
+FROM 
+    SalesSummary AS s
+LEFT JOIN warehouse AS st ON st.w_warehouse_sk = (SELECT w_warehouse_sk FROM inventory WHERE inv_quantity_on_hand > 0 LIMIT 1)
+WHERE 
+    s.total_rank <= 5
+ORDER BY 
+    adjusted_price_category DESC NULLS LAST, 
+    total_sales DESC;

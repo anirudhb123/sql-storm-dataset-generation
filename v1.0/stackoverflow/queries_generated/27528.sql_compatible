@@ -1,0 +1,89 @@
+
+WITH TagsCTE AS (
+    SELECT 
+        Id AS TagId,
+        TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Tags
+    GROUP BY 
+        Id, TagName
+),
+TopTags AS (
+    SELECT 
+        TagId,
+        TagName,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagsCTE
+    WHERE 
+        PostCount > 0
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersProvided,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentsPosted,
+        SUM(CASE WHEN BA.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgesEarned
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    LEFT JOIN 
+        Badges BA ON U.Id = BA.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionsAsked,
+        AnswersProvided,
+        CommentsPosted,
+        BadgesEarned,
+        ROW_NUMBER() OVER (ORDER BY QuestionsAsked DESC, AnswersProvided DESC) AS UserRank
+    FROM 
+        UserActivity
+),
+UserTagActivity AS (
+    SELECT 
+        U.UserId,
+        T.TagId,
+        T.TagName,
+        COUNT(*) AS PostsCount
+    FROM 
+        Posts P
+    JOIN 
+        TopTags T ON POSITION(T.TagName IN P.Tags) > 0
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId IN (1, 2) 
+    GROUP BY 
+        U.UserId, T.TagId, T.TagName
+)
+SELECT 
+    U.DisplayName AS UserName,
+    T.TagName AS PopularTag,
+    U.QuestionsAsked,
+    U.AnswersProvided,
+    U.CommentsPosted,
+    U.BadgesEarned,
+    COUNT(UTA.PostsCount) AS RelatedPostsCount,
+    COALESCE(AVG(UTA.PostsCount), 0) AS AveragePostsPerTag
+FROM 
+    TopUsers U
+JOIN 
+    UserTagActivity UTA ON U.UserId = UTA.UserId
+JOIN 
+    TopTags T ON UTA.TagId = T.TagId
+GROUP BY 
+    U.UserId, U.DisplayName, T.TagName, U.QuestionsAsked, U.AnswersProvided, U.CommentsPosted, U.BadgesEarned
+ORDER BY 
+    U.BadgesEarned DESC, U.QuestionsAsked DESC;

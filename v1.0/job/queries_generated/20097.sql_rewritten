@@ -1,0 +1,83 @@
+WITH RECURSIVE FilmHierarchy AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(CAST(SUM(m.rating) AS DECIMAL(10,2)), 0) AS average_rating,
+        0 AS depth
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info m ON t.id = m.movie_id AND m.info_type_id = (SELECT id FROM info_type WHERE info='Rating')
+    GROUP BY 
+        t.id
+    UNION ALL
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(CAST(SUM(m.rating) AS DECIMAL(10,2)), 0) AS average_rating,
+        depth + 1
+    FROM 
+        title t
+    JOIN 
+        FilmHierarchy h ON t.episode_of_id = h.title_id
+    LEFT JOIN 
+        movie_info m ON t.id = m.movie_id AND m.info_type_id = (SELECT id FROM info_type WHERE info='Rating')
+    GROUP BY 
+        t.id, depth
+),
+FilteredTitles AS (
+    SELECT 
+        title_id,
+        title,
+        production_year,
+        average_rating,
+        depth
+    FROM 
+        FilmHierarchy
+    WHERE 
+        average_rating > (SELECT AVG(average_rating) FROM FilmHierarchy)
+),
+ActorInfo AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS num_movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.name
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 5
+),
+SelectedActors AS (
+    SELECT 
+        actor_name,
+        ROW_NUMBER() OVER (ORDER BY num_movies DESC) AS rank
+    FROM 
+        ActorInfo
+)
+SELECT 
+    ft.title,
+    ft.production_year,
+    ft.average_rating,
+    sa.actor_name
+FROM 
+    FilteredTitles ft
+LEFT JOIN 
+    SelectedActors sa ON ft.title_id IN (
+        SELECT 
+            mc.movie_id 
+        FROM 
+            movie_companies mc
+        JOIN 
+            company_name co ON mc.company_id = co.id
+        WHERE 
+            co.name IS NOT NULL AND co.country_code IS NOT NULL
+    )
+ORDER BY 
+    ft.average_rating DESC, 
+    ft.production_year ASC
+LIMIT 10;

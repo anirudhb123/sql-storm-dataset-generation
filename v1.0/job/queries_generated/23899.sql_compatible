@@ -1,0 +1,87 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        kt.id AS title_id,
+        kt.title,
+        kt.production_year,
+        1 AS depth
+    FROM 
+        aka_title kt
+    WHERE 
+        kt.production_year = (SELECT MAX(production_year) FROM aka_title)
+
+    UNION ALL
+
+    SELECT 
+        kt.id,
+        kt.title,
+        kt.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title kt
+    JOIN movie_link ml ON ml.movie_id = mh.title_id
+    JOIN aka_title kt2 ON kt2.id = ml.linked_movie_id
+    JOIN movie_keyword mk ON mk.movie_id = kt.id
+    JOIN keyword k ON k.id = mk.keyword_id
+    WHERE 
+        mh.depth < 5 
+        AND k.keyword IS NOT NULL
+),
+
+movie_aggregate AS (
+    SELECT 
+        title_id,
+        COUNT(DISTINCT person_id) AS actor_count, 
+        COUNT(DISTINCT company_id) AS production_company_count
+    FROM 
+        movie_companies mc
+    JOIN cast_info ci ON ci.movie_id = mc.movie_id
+    GROUP BY title_id
+),
+
+nested_actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS appearance_count,
+        AVG(ct.kind) AS avg_role_type
+    FROM 
+        aka_name ak
+    LEFT JOIN cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY ak.name
+),
+
+movie_details AS (
+    SELECT 
+        mh.title_id,
+        mh.title,
+        mh.production_year,
+        ma.actor_count,
+        ma.production_company_count,
+        n.actor_name,
+        n.appearance_count,
+        n.avg_role_type 
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN movie_aggregate ma ON mh.title_id = ma.title_id
+    LEFT JOIN nested_actor_info n ON ma.actor_count IS NOT NULL
+)
+
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(md.actor_count, 0) AS total_actors,
+    COALESCE(md.production_company_count, 0) AS total_companies,
+    NULLIF(md.avg_role_type, 0) AS average_role,
+    CASE
+        WHEN md.appearance_count IS NULL THEN 'No actors'
+        ELSE CONCAT(md.actor_name, ' has appeared ', md.appearance_count, ' times.')
+    END AS actor_report
+FROM 
+    movie_details md
+WHERE 
+    (md.production_year IS NOT NULL AND md.production_year > 2000) 
+    OR (md.title IS NOT NULL AND md.title LIKE '%fantasy%')
+ORDER BY 
+    md.production_year DESC,
+    md.actor_count DESC;

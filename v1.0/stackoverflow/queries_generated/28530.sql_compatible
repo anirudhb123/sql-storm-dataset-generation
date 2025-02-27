@@ -1,0 +1,104 @@
+
+WITH TagUsage AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><')) AS Tag,
+        PostId
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+),
+TagStats AS (
+    SELECT 
+        Tag, 
+        COUNT(PostId) AS UsageCount
+    FROM 
+        TagUsage
+    GROUP BY 
+        Tag
+),
+PopularTags AS (
+    SELECT 
+        Tag
+    FROM 
+        TagStats
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 10
+),
+UserActivism AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS QuestionCount,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1 
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+UserEngagement AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.QuestionCount,
+        UA.CommentCount,
+        UA.UpVotes,
+        UA.DownVotes,
+        (UA.UpVotes - UA.DownVotes) AS NetVotes,
+        RANK() OVER (ORDER BY (UA.UpVotes - UA.DownVotes) DESC) AS EngagementRank
+    FROM 
+        UserActivism UA
+),
+PostsWithTagCount AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        ARRAY_AGG(DISTINCT U.DisplayName) AS Contributors,
+        COUNT(DISTINCT T.Tag) AS TagCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        TagUsage T ON P.Id = T.PostId
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount
+),
+FinalReport AS (
+    SELECT 
+        E.DisplayName AS UserName,
+        E.QuestionCount,
+        E.CommentCount,
+        E.NetVotes,
+        P.Title AS PostTitle,
+        P.ViewCount,
+        P.TagCount,
+        STRING_AGG(DISTINCT T.Tag, ', ') AS Tags
+    FROM 
+        UserEngagement E
+    JOIN 
+        PostsWithTagCount P ON E.QuestionCount > 0
+    LEFT JOIN 
+        TagUsage T ON P.PostId = T.PostId
+    WHERE 
+        T.Tag IN (SELECT Tag FROM PopularTags)
+    GROUP BY 
+        E.DisplayName, E.QuestionCount, E.CommentCount, E.NetVotes, P.Title, P.ViewCount, P.TagCount
+    ORDER BY 
+        E.NetVotes DESC, P.ViewCount DESC
+)
+SELECT 
+    *
+FROM 
+    FinalReport
+LIMIT 50;

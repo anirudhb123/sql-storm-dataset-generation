@@ -1,0 +1,53 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositivePostCount,
+        AVG(V.BountyAmount) AS AverageBounty 
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8 
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+RankedUsers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserStats
+),
+TopPostTags AS (
+    SELECT 
+        unnest(string_to_array(T.Tags, '>')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    GROUP BY Tag
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        PH.CreationDate AS ClosedDate,
+        PH.Comment AS Reason
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE PH.PostHistoryTypeId = 10 
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.PositivePostCount,
+    U.AverageBounty,
+    COALESCE(T.TagCount, 0) AS PopularTagCount,
+    C.ClosedDate,
+    C.Reason,
+    R.ReputationRank
+FROM RankedUsers U
+LEFT JOIN TopPostTags T ON U.PostCount > 5 AND T.Tag = 'SQL' 
+LEFT JOIN ClosedPosts C ON U.PostCount > 3 AND C.ClosedDate IS NOT NULL
+WHERE U.ReputationRank <= 10
+ORDER BY U.Reputation DESC, U.PostCount DESC;

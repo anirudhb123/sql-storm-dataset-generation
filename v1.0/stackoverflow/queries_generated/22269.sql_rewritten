@@ -1,0 +1,106 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(u.Reputation) OVER() AS AverageReputation,
+        STRING_AGG(DISTINCT CONCAT(t.TagName, ' (', p.Tags, ')'), ', ') AS UserTags
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COALESCE(MAX(ph.CreationDate), '1970-01-01') AS LastEditDate,
+        COUNT(DISTINCT ph.Id) FILTER (WHERE ph.PostHistoryTypeId = 10) AS TotalCloseVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount
+),
+
+TopContributors AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation IS NOT NULL
+    ORDER BY 
+        u.Reputation DESC
+    LIMIT 10
+),
+
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT ph.PostHistoryTypeId) AS EditCount,
+        COUNT(cr.Id) FILTER (WHERE cr.PostId IS NOT NULL) AS ClosedPostCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5, 6)
+    LEFT JOIN 
+        PostHistory cr ON p.Id = cr.PostId AND cr.PostHistoryTypeId = 10
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    uvs.UserId,
+    uvs.TotalUpVotes,
+    uvs.TotalDownVotes,
+    uvs.TotalPosts,
+    p.Title,
+    p.ViewCount,
+    p.LastEditDate,
+    p.TotalComments,
+    p.TotalCloseVotes,
+    CONCAT(tc.DisplayName, ' (Rank: ', tc.Rank, ')') AS TopContributor,
+    pstats.EditCount,
+    pstats.ClosedPostCount
+FROM 
+    UserVoteSummary uvs
+LEFT JOIN 
+    PostActivity p ON p.PostId = (
+        SELECT 
+            p.Id
+        FROM 
+            Posts p
+        WHERE 
+            p.OwnerUserId = uvs.UserId
+        ORDER BY 
+            p.ViewCount DESC
+        LIMIT 1
+    )
+LEFT JOIN 
+    TopContributors tc ON tc.Rank = 1
+LEFT JOIN 
+    PostStatistics pstats ON pstats.PostId = p.PostId
+WHERE 
+    uvs.TotalUpVotes > uvs.TotalDownVotes
+    AND uvs.TotalPosts >= 5
+    AND p.TotalComments > 10
+    AND p.ViewCount IS NOT NULL
+ORDER BY 
+    uvs.TotalUpVotes DESC, p.ViewCount DESC;

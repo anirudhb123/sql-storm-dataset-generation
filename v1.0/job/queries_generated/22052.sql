@@ -1,0 +1,69 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(mk.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+SubqueryActors AS (
+    SELECT 
+        ai.person_id,
+        COUNT(DISTINCT ai.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT c.name, ', ') AS actor_names
+    FROM 
+        cast_info ai
+    JOIN 
+        aka_name c ON ai.person_id = c.person_id
+    GROUP BY 
+        ai.person_id
+),
+CharNameStats AS (
+    SELECT 
+        ch.name,
+        SUM(CASE WHEN ch.name ILIKE '%Smith%' THEN 1 ELSE 0 END) AS smith_count
+    FROM 
+        char_name ch
+    GROUP BY 
+        ch.name
+)
+SELECT 
+    R.movie_id,
+    R.title,
+    R.production_year,
+    R.title_rank,
+    COALESCE(SA.total_movies, 0) AS total_movies_by_actor,
+    COALESCE(SA.actor_names, 'No Actors') AS actor_names,
+    COALESCE(CS.smith_count, 0) AS total_smiths,
+    R.keyword_count AS keyword_count
+FROM 
+    RankedMovies R
+LEFT JOIN 
+    SubqueryActors SA ON R.movie_id IN (
+        SELECT 
+            movie_id
+        FROM 
+            cast_info
+        WHERE 
+            person_id IN (
+                SELECT 
+                    person_id
+                FROM 
+                    aka_name
+                WHERE 
+                    name ILIKE '%Smith%'
+            )
+    )
+LEFT JOIN 
+    CharNameStats CS ON R.title ILIKE '%' || CS.name || '%'
+WHERE 
+    (R.production_year >= 2000 AND R.keyword_count > 3) OR
+    (R.production_year < 2000 AND R.title_rank <= 5)
+ORDER BY 
+    R.production_year DESC, R.title_rank;

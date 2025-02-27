@@ -1,0 +1,58 @@
+WITH MovieRatings AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        AVG(COALESCE(ri.rating, 0)) AS avg_rating
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            MAX(info) AS rating 
+         FROM 
+            movie_info 
+         WHERE 
+            info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+         GROUP BY 
+            movie_id) ri ON t.id = ri.movie_id
+    GROUP BY 
+        t.title, t.production_year
+),
+ActorCount AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+TopMovies AS (
+    SELECT 
+        mr.title,
+        mr.production_year,
+        ac.actor_count,
+        mr.avg_rating,
+        ROW_NUMBER() OVER (ORDER BY mr.avg_rating DESC, ac.actor_count DESC) AS rank
+    FROM 
+        MovieRatings mr
+    JOIN 
+        ActorCount ac ON mr.title = (SELECT title FROM title WHERE id = ac.movie_id)
+    WHERE 
+        mr.avg_rating IS NOT NULL
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    tm.avg_rating
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.avg_rating DESC, 
+    tm.actor_count DESC;

@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.AnswerCount,
+        P.ViewCount,
+        P.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 AND 
+        P.CreationDate >= NOW() - INTERVAL '2 years'
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        AnswerCount,
+        ViewCount,
+        OwnerUserId,
+        OwnerDisplayName
+    FROM 
+        RankedPosts 
+    WHERE 
+        rn = 1
+),
+PostDetails AS (
+    SELECT 
+        TP.*,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT H.Id) AS HistoryCount,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM 
+        TopPosts TP
+    LEFT JOIN 
+        Votes V ON TP.PostId = V.PostId AND V.VoteTypeId = 8  -- Counts Bounty starts
+    LEFT JOIN 
+        Comments C ON TP.PostId = C.PostId
+    LEFT JOIN 
+        PostHistory H ON TP.PostId = H.PostId
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                UNNEST(string_to_array(TP.Tags, '<>')) AS TagName
+        ) T ON TRUE  -- Transforming Tags string into a rows of TagNames
+    GROUP BY 
+        TP.PostId
+),
+FinalResults AS (
+    SELECT 
+        PD.*,
+        CASE 
+            WHEN TotalBounty > 0 THEN 'Has Bounty'
+            ELSE 'No Bounty'
+        END AS BountyStatus,
+        CASE 
+            WHEN CommentCount > 0 THEN 'Engaged'
+            ELSE 'Not Engaged'
+        END AS EngagementStatus
+    FROM 
+        PostDetails PD
+    WHERE 
+        ViewCount > 100 AND 
+        Score >= (
+            SELECT 
+                AVG(Score) FROM Posts WHERE PostTypeId = 1
+        )
+)
+SELECT 
+    FR.*, 
+    PH.Comment AS PostHistoryComment,
+    PHT.Name AS HistoryTypeName,
+    (SELECT COUNT(*) FROM Votes WHERE PostId = FR.PostId AND VoteTypeId IN (2, 3)) AS VoteCount
+FROM 
+    FinalResults FR
+LEFT JOIN 
+    PostHistory PH ON FR.PostId = PH.PostId AND PH.PostHistoryTypeId IN (10, 11)  -- Closed or Reopened posts
+LEFT JOIN 
+    PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+WHERE 
+    FR.OwnerUserId IS NOT NULL
+ORDER BY 
+    FR.ViewCount DESC, FR.Score DESC;

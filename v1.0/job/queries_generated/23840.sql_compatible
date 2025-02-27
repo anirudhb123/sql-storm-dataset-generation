@@ -1,0 +1,71 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS level
+    FROM 
+        aka_title m
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COALESCE(cn.name, 'Unknown Company') AS company_name,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END) AS trivia_count,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY mt.production_year DESC) AS movie_rank,
+    (CASE 
+        WHEN mt.production_year IS NULL THEN 'Release Year Unknown'
+        WHEN mt.production_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END) AS era,
+    EXISTS (
+        SELECT 1 
+        FROM cast_info ci 
+        WHERE ci.movie_id = mt.id AND ci.person_id = ak.person_id
+    ) AS is_in_cast
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    movie_companies mc ON mt.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN 
+    movie_info mi ON mt.id = mi.movie_id
+WHERE 
+    ak.name IS NOT NULL 
+    AND (ci.note IS NULL OR ci.note NOT LIKE '%extra%')
+    AND mt.production_year > 1995
+    AND COALESCE(cn.country_code, 'Unknown') NOT LIKE 'XYZ%'
+GROUP BY 
+    ak.name, mt.title, mt.production_year, cn.name, ak.person_id
+ORDER BY 
+    keyword_count DESC, movie_rank, era
+LIMIT 100;

@@ -1,0 +1,50 @@
+
+WITH RecursiveCTE AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        1 AS Level,
+        CAST(p.Title AS VARCHAR(255)) AS FullHierarchy
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT
+        a.Id,
+        a.Title,
+        a.OwnerUserId,
+        a.CreationDate,
+        r.Level + 1,
+        CAST(CONCAT(r.FullHierarchy, ' -> ', a.Title) AS VARCHAR(255))
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts q ON a.ParentId = q.Id
+    INNER JOIN 
+        RecursiveCTE r ON q.Id = r.Id
+)
+SELECT
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS TotalQuestions,
+    SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswersCount,
+    AVG(COALESCE(EXTRACT(EPOCH FROM (p.LastActivityDate - p.CreationDate)) / 60, 0)) AS AvgTimeToFirstAnswer,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    RANK() OVER (ORDER BY SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) DESC) AS RankByAcceptedAnswers
+FROM
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    LATERAL STRING_TO_ARRAY(p.Tags, ',') AS t ON TRUE
+WHERE 
+    u.Reputation > 1000 AND 
+    p.CreationDate >= DATEADD(YEAR, -1, CURRENT_DATE)
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 5
+ORDER BY 
+    RankByAcceptedAnswers, TotalQuestions DESC;

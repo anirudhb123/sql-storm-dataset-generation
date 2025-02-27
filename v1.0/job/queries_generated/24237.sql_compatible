@@ -1,0 +1,76 @@
+
+WITH movie_actors AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+),
+movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.comment) AS total_comments
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        comments c ON t.id = c.movie_id 
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        COALESCE(cn.name, 'Unknown Company') AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+
+actor_role_stats AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.role_id) AS role_count,
+        AVG(CASE 
+            WHEN c.role_id IS NULL THEN 0 
+            WHEN c.role_id = 1 THEN 5 
+            ELSE 10 
+        END) AS avg_role_score
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.person_id
+)
+
+SELECT 
+    md.title,
+    md.production_year,
+    ma.actor_name,
+    ci.company_name,
+    ci.company_type,
+    ars.role_count AS total_roles,
+    ars.avg_role_score
+FROM 
+    movie_details md
+LEFT JOIN 
+    movie_actors ma ON md.movie_id = ma.movie_id
+LEFT JOIN 
+    company_info ci ON md.movie_id = ci.movie_id
+LEFT JOIN 
+    actor_role_stats ars ON ma.actor_name = ars.person_id
+WHERE 
+    md.production_year > COALESCE(NULLIF(2020, 2021), 2000) 
+ORDER BY 
+    md.production_year DESC, 
+    ma.actor_name ASC
+LIMIT 100;

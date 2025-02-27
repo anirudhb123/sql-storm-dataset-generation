@@ -1,0 +1,38 @@
+
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    r.role AS actor_role,
+    c.company_name AS production_company,
+    k.keyword AS movie_keyword,
+    pi.info AS movie_info
+FROM 
+    title t
+JOIN 
+    complete_cast cc ON cc.movie_id = t.id
+JOIN 
+    cast_info ci ON ci.id = cc.subject_id
+JOIN 
+    aka_name a ON a.person_id = ci.person_id
+JOIN 
+    role_type r ON r.id = ci.role_id
+JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+JOIN 
+    company_name c ON c.id = mc.company_id
+JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+JOIN 
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = t.id
+LEFT JOIN 
+    info_type it ON it.id = mi.info_type_id
+LEFT JOIN 
+    person_info pi ON pi.person_id = a.person_id
+WHERE 
+    t.production_year > 2000
+    AND c.country_code = 'USA'
+    AND r.id IN (SELECT id FROM role_type WHERE role LIKE '%actor%')
+ORDER BY 
+    t.title, a.name;

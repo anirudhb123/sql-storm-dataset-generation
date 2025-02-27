@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '1 year' 
+        AND p.PostTypeId = 1
+),
+TopPosts AS (
+    SELECT 
+        RP.* 
+    FROM 
+        RankedPosts RP
+    WHERE 
+        RP.PostRank <= 3
+),
+PostComments AS (
+    SELECT 
+        pc.PostId,
+        COUNT(pc.Id) AS CommentCount
+    FROM 
+        Comments pc
+    GROUP BY 
+        pc.PostId
+),
+PostBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    TP.PostId,
+    TP.Title,
+    TP.CreationDate,
+    TP.Score,
+    TP.ViewCount,
+    TP.AnswerCount,
+    TP.OwnerDisplayName,
+    TP.OwnerReputation,
+    COALESCE(pc.CommentCount, 0) AS CommentCount,
+    COALESCE(pb.BadgeCount, 0) AS BadgeCount
+FROM 
+    TopPosts TP
+LEFT JOIN 
+    PostComments pc ON TP.PostId = pc.PostId
+LEFT JOIN 
+    PostBadges pb ON TP.OwnerUserId = pb.UserId
+ORDER BY 
+    TP.Score DESC, TP.ViewCount DESC;

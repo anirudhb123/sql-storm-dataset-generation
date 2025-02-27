@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC, p.ViewCount DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        MAX(u.Reputation) AS MaxReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    tp.Title,
+    tp.Tags,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    us.DisplayName AS TopUser,
+    us.QuestionCount,
+    us.TotalScore,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    us.MaxReputation
+FROM 
+    TopPosts tp
+JOIN 
+    UserScores us ON tp.PostId IN (SELECT DISTINCT p.Id FROM Posts p WHERE p.OwnerUserId = us.UserId)
+ORDER BY 
+    tp.CreationDate DESC
+LIMIT 10;

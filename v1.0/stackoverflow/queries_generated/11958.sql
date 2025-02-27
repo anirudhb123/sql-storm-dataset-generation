@@ -1,0 +1,33 @@
+-- Performance benchmarking query to retrieve various post statistics along with user information
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    p.CommentCount,
+    p.FavoriteCount,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation AS OwnerReputation,
+    COUNT(CASE WHEN c.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+    COUNT(DISTINCT v.UserId) AS VoteCount,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::int[]) -- Assuming Tags are comma-separated IDs in Tags column
+WHERE 
+    p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+GROUP BY 
+    p.Id, u.DisplayName, u.Reputation
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

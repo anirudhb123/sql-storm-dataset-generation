@@ -1,0 +1,32 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, 
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+),
+TopNations AS (
+    SELECT n.n_nationkey, n.n_name, SUM(o.o_totalprice) AS TotalRevenue
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING SUM(o.o_totalprice) > (
+        SELECT AVG(order_total) 
+        FROM (SELECT SUM(o2.o_totalprice) AS order_total 
+              FROM orders o2 
+              GROUP BY o2.o_orderkey) AS RevenueTable
+    )
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT r.r_name, n.n_name, s.s_name, r_avg.TotalRevenue, s_summary.TotalSupplyCost, ro.o_orderkey, ro.o_orderdate
+FROM RankedOrders ro
+JOIN TopNations tn ON tn.n_nationkey = ro.o_orderkey
+JOIN region r ON tn.n_regionkey = r.r_regionkey
+JOIN SupplierDetails s_summary ON s_summary.TotalSupplyCost > 10000
+WHERE ro.OrderRank <= 5
+ORDER BY r.r_name, tn.TotalRevenue DESC, s_summary.TotalSupplyCost DESC;

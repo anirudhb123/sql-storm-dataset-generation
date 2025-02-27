@@ -1,0 +1,67 @@
+
+WITH PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 YEAR)
+),
+
+UserBadgeCount AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+
+PostSummary AS (
+    SELECT 
+        pa.UserPostRank,
+        pa.PostId,
+        pa.Title,
+        pa.ViewCount,
+        pa.CommentCount,
+        pa.UpVotes,
+        pa.DownVotes,
+        ub.BadgeCount,
+        ub.GoldCount,
+        ub.SilverCount,
+        ub.BronzeCount
+    FROM 
+        PostAnalytics pa
+    LEFT JOIN 
+        UserBadgeCount ub ON pa.OwnerUserId = ub.UserId
+    WHERE 
+        pa.UserPostRank <= 3
+)
+
+SELECT 
+    ps.*,
+    CASE 
+        WHEN ps.CommentCount > 10 THEN 'Highly Discussed'
+        WHEN ps.UpVotes > ps.DownVotes THEN 'Popular'
+        ELSE 'Needs Attention'
+    END AS PostStatus
+FROM 
+    PostSummary ps
+ORDER BY 
+    ps.ViewCount DESC, 
+    ps.CommentCount DESC
+LIMIT 100;

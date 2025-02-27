@@ -1,0 +1,82 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        m.episode_of_id
+    FROM
+        title m
+    WHERE
+        m.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        m.episode_of_id
+    FROM
+        title m
+    JOIN
+        movie_hierarchy mh ON m.episode_of_id = mh.movie_id
+),
+movie_with_keywords AS (
+    SELECT
+        mv.movie_id,
+        mv.title,
+        mv.production_year,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_hierarchy mv
+    LEFT JOIN 
+        movie_keyword mk ON mv.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mv.movie_id, mv.title, mv.production_year
+),
+cast_info_with_names AS (
+    SELECT
+        ci.movie_id,
+        ci.note,
+        a.name AS actor_name,
+        ci.nr_order
+    FROM
+        cast_info ci
+    INNER JOIN
+        aka_name a ON ci.person_id = a.person_id
+),
+movie_details AS (
+    SELECT
+        mwk.movie_id,
+        mwk.title,
+        mwk.production_year,
+        mwk.keywords,
+        ci.actor_name,
+        ci.note AS actor_note,
+        ROW_NUMBER() OVER (PARTITION BY mwk.movie_id ORDER BY ci.nr_order) AS actor_order
+    FROM
+        movie_with_keywords mwk
+    LEFT JOIN 
+        cast_info_with_names ci ON mwk.movie_id = ci.movie_id
+)
+SELECT
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.keywords,
+    ARRAY_AGG(DISTINCT md.actor_name ORDER BY md.actor_order) AS actors,
+    COUNT(DISTINCT ci.role_id) AS distinct_roles
+FROM
+    movie_details md
+LEFT JOIN 
+    cast_info ci ON md.movie_id = ci.movie_id
+WHERE
+    md.production_year >= 2000
+GROUP BY
+    md.movie_id, md.title, md.production_year, md.keywords
+ORDER BY
+    md.production_year DESC, md.title;

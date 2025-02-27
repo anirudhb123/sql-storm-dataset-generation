@@ -1,0 +1,33 @@
+WITH SupplierPart AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, p.p_name, p.p_brand, p.p_type, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+), CustomerOrder AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+), OrderLine AS (
+    SELECT lo.l_orderkey, SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue
+    FROM lineitem lo
+    GROUP BY lo.l_orderkey
+), RegionNation AS (
+    SELECT r.r_regionkey, r.r_name, n.n_nationkey, n.n_name
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+)
+SELECT r.r_name AS region_name,
+       n.n_name AS nation_name,
+       s.s_name AS supplier_name,
+       SUM(cp.supply_cost * ol.total_revenue) AS weighted_revenue,
+       COUNT(DISTINCT co.c_custkey) AS number_of_customers,
+       COUNT(DISTINCT o.o_orderkey) AS number_of_orders
+FROM SupplierPart sp
+JOIN CustomerOrder co ON sp.s_suppkey = co.c_custkey
+JOIN OrderLine ol ON co.o_orderkey = ol.l_orderkey
+JOIN RegionNation rn ON rn.n_nationkey = co.c_custkey
+JOIN supplier s ON sp.s_suppkey = s.s_suppkey
+WHERE co.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+AND sp.ps_availqty > 0
+GROUP BY r.r_name, n.n_name, s.s_name
+ORDER BY weighted_revenue DESC, number_of_orders DESC;

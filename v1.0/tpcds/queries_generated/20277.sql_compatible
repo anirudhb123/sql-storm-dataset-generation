@@ -1,0 +1,96 @@
+
+WITH RECURSIVE CustomerReturnData AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_quantity) DESC) AS rn
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+TopReturnedItems AS (
+    SELECT 
+        crd.sr_item_sk,
+        crd.total_return_quantity,
+        crd.total_returns,
+        i.i_item_desc,
+        COALESCE(NULLIF(i.i_color, ''), 'Unknown') AS item_color,
+        COALESCE(NULLIF(i.i_brand, ''), 'No Brand') AS item_brand
+    FROM 
+        CustomerReturnData crd
+    JOIN 
+        item i ON crd.sr_item_sk = i.i_item_sk
+    WHERE 
+        crd.rn = 1 
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        hd.hd_buy_potential,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity_sold,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) - 365 FROM date_dim WHERE d_current_year = 'Y')
+        AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_item_sk
+),
+FinalReport AS (
+    SELECT 
+        tri.sr_item_sk,
+        tri.total_return_quantity,
+        tri.item_color,
+        tri.item_brand,
+        cd.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.hd_buy_potential,
+        sd.total_quantity_sold,
+        sd.total_net_profit
+    FROM 
+        TopReturnedItems tri
+    LEFT JOIN 
+        CustomerDemographics cd ON cd.c_customer_id IS NOT NULL
+    LEFT JOIN 
+        SalesData sd ON tri.sr_item_sk = sd.ws_item_sk
+)
+
+SELECT 
+    fr.sr_item_sk,
+    fr.item_color,
+    fr.item_brand,
+    COUNT(fr.c_customer_id) AS number_of_customers,
+    AVG(fr.total_quantity_sold) AS average_quantity_sold,
+    SUM(fr.total_net_profit) AS total_net_profit_by_customers
+FROM 
+    FinalReport fr
+WHERE 
+    fr.total_net_profit IS NOT NULL
+    OR number_of_customers > 0
+    OR fr.total_quantity_sold BETWEEN 10 AND 500
+GROUP BY 
+    fr.sr_item_sk, fr.item_color, fr.item_brand
+ORDER BY 
+    number_of_customers DESC, total_net_profit_by_customers DESC
+LIMIT 1000;

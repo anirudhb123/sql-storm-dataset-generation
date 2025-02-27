@@ -1,0 +1,90 @@
+
+WITH RECURSIVE Sales_Rank AS (
+    SELECT 
+        c.c_custkey AS custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+Suppliers_Summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+Recent_Orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_custkey,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_seq
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, '1998-10-01')
+),
+Analyzed_LineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(DISTINCT l.l_suppkey) AS supplier_count,
+        np.n_name
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation np ON s.s_nationkey = np.n_nationkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        l.l_orderkey, np.n_name
+)
+SELECT 
+    sr.custkey, 
+    sr.c_name, 
+    sr.total_spent,
+    ss.s_name,
+    ss.total_supply_cost,
+    ol.o_orderkey,
+    al.revenue,
+    al.total_quantity,
+    al.supplier_count,
+    al.n_name,
+    CASE
+        WHEN al.revenue IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Generated'
+    END AS revenue_status
+FROM 
+    Sales_Rank sr
+LEFT JOIN 
+    Recent_Orders ol ON sr.custkey = ol.o_custkey
+LEFT JOIN 
+    Suppliers_Summary ss ON ol.o_orderkey = ss.s_suppkey
+LEFT JOIN 
+    Analyzed_LineItems al ON ol.o_orderkey = al.l_orderkey
+WHERE 
+    sr.rank <= 10
+AND 
+    (ss.total_supply_cost > 1000 OR al.total_quantity > 100)
+ORDER BY 
+    sr.total_spent DESC, ss.total_supply_cost DESC
+OFFSET 0 ROW FETCH NEXT 100 ROWS ONLY;

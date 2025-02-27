@@ -1,0 +1,79 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_web_orders,
+        SUM(ws.ws_net_paid) AS total_web_spent,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ws.ws_net_paid) DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        ws.ws_sold_date_sk >= 2458536  -- Filtering on a specific date range (e.g., 2022-01-01)
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+), WarehouseInventory AS (
+    SELECT 
+        inv.inv_warehouse_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_warehouse_sk
+), CustomerReturns AS (
+    SELECT 
+        sr.sr_customer_sk,
+        SUM(sr.sr_return_amt_inc_tax) AS total_returned,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_customer_sk
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.total_web_orders,
+    cs.total_web_spent,
+    COALESCE(cr.total_returned, 0) AS total_returned_amount,
+    CASE 
+        WHEN cs.gender_rank = 1 THEN 'Top Spender'
+        ELSE 'Regular Spender'
+    END AS spender_category,
+    wi.total_quantity,
+    CASE 
+        WHEN wi.total_quantity IS NULL THEN 'Inventory Not Available'
+        ELSE 'Inventory Available'
+    END AS inventory_status
+FROM 
+    CustomerSales cs
+LEFT JOIN 
+    CustomerReturns cr ON cs.c_customer_sk = cr.sr_customer_sk
+LEFT JOIN 
+    WarehouseInventory wi ON cs.total_web_orders > 10  -- Example, condition could be adjusted
+ORDER BY 
+    cs.total_web_spent DESC
+LIMIT 50
+OFFSET 0
+UNION
+SELECT 
+    cd.cd_demo_sk,
+    0 AS total_web_orders,
+    0 AS total_web_spent,
+    COALESCE(cr.total_returned, 0) AS total_returned_amount,
+    'Non-Web Customer' AS spender_category,
+    NULL AS total_quantity,
+    'Inventory Unknown' AS inventory_status
+FROM 
+    customer_demographics cd
+LEFT JOIN 
+    CustomerReturns cr ON cd.cd_demo_sk = cr.sr_customer_sk
+WHERE 
+    cd.cd_purchase_estimate IS NULL OR cd.cd_credit_rating IS NULL
+ORDER BY 
+    total_returned_amount DESC
+LIMIT 50;

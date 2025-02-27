@@ -1,0 +1,38 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING total_cost > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, ts.total_cost + SUM(ps.ps_supplycost * ps.ps_availqty)
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN top_suppliers ts ON ts.s_suppkey != s.s_suppkey
+    GROUP BY s.s_suppkey, s.s_name, ts.total_cost
+),
+nation_summary AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+order_summary AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_revenue
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY o.o_custkey
+    HAVING total_orders > 10
+),
+customer_order_info AS (
+    SELECT c.c_custkey, c.c_name, os.total_orders, os.total_revenue, ns.supplier_count
+    FROM customer c
+    JOIN order_summary os ON c.c_custkey = os.o_custkey
+    LEFT JOIN nation_summary ns ON c.c_nationkey = ns.n_nationkey
+)
+SELECT coi.c_custkey, coi.c_name, coi.total_orders, coi.total_revenue, ns.r_comment 
+FROM customer_order_info coi
+LEFT JOIN nation_summary ns ON coi.supplier_count = ns.supplier_count
+WHERE (coi.total_revenue > 5000 OR coi.total_orders > 20)
+  AND ns.supplier_count IS NOT NULL
+ORDER BY coi.total_revenue DESC, coi.c_name ASC;

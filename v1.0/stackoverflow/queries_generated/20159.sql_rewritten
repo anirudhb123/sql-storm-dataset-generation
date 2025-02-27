@@ -1,0 +1,77 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.ViewCount IS NOT NULL THEN P.ViewCount ELSE 0 END) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+RecentUserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        MAX(P.CreationDate) AS LastPostDate,
+        DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), MAX(P.CreationDate)) AS DaysSinceLastPost
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+HighScorePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS ScoreRank
+    FROM 
+        Posts P
+    WHERE 
+        P.Score IS NOT NULL
+),
+TopUsers AS (
+    SELECT 
+        U.Id, 
+        U.DisplayName, 
+        U.Reputation,
+        HAVING COUNT(H.Score) INTO FilteredPosts
+        FROM 
+            Users U
+        JOIN 
+            HighScorePosts H ON U.Id = H.OwnerUserId
+        GROUP BY 
+            U.Id, U.DisplayName, U.Reputation
+        ORDER BY 
+            U.Reputation DESC
+    LIMIT 10
+)
+SELECT 
+    U.DisplayName AS [User],
+    U.Reputation,
+    U.PostCount,
+    R.DaysSinceLastPost,
+    H.PostId,
+    H.Title,
+    H.Score
+FROM 
+    UserPostStats U
+LEFT JOIN 
+    RecentUserActivity R ON U.UserId = R.UserId
+LEFT JOIN 
+    HighScorePosts H ON U.UserId = H.OwnerUserId 
+WHERE 
+    (R.DaysSinceLastPost IS NULL OR R.DaysSinceLastPost < 30)
+    AND U.PostCount > 5
+    AND H.ScoreRank = 1
+    AND H.Score IS NOT NULL
+ORDER BY 
+    U.Reputation DESC,
+    H.Score DESC;

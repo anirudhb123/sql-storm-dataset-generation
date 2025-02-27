@@ -1,0 +1,31 @@
+SELECT 
+    u.DisplayName AS UserName,
+    p.Title AS PostTitle,
+    p.Score AS PostScore,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+    MAX(ph.CreationDate) AS LastEditDate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Users u
+JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    STRING_TO_ARRAY(p.Tags, ',') AS tag_ids ON TRUE
+LEFT JOIN 
+    Tags t ON t.Id = tag_ids
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '1 YEAR' 
+    AND p.PostTypeId = 1
+GROUP BY 
+    u.DisplayName, p.Title, p.Score
+ORDER BY 
+    PostScore DESC, CommentCount DESC
+LIMIT 50;

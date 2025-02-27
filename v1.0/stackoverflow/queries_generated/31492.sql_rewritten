@@ -1,0 +1,83 @@
+WITH RECURSIVE UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        B.Name AS BadgeName,
+        B.Class,
+        B.Date,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY B.Date DESC) AS BadgeRank
+    FROM 
+        Users U
+        INNER JOIN Badges B ON U.Id = B.UserId
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        SUM(B.Reputation) AS TotalReputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM 
+        Users U
+        LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+        LEFT JOIN Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id
+    HAVING 
+        SUM(B.Reputation) > 1000
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(C.Id) AS TotalComments,
+        COUNT(DISTINCT V.Id) AS TotalVotes,
+        AVG(V.BountyAmount) AS AvgBounty
+    FROM 
+        Posts P
+        LEFT JOIN Comments C ON C.PostId = P.Id
+        LEFT JOIN Votes V ON V.PostId = P.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id
+),
+OuterJoinStats AS (
+    SELECT 
+        U.DisplayName,
+        COALESCE(SUM(PV.TotalVotes), 0) AS TotalPostVotes,
+        COALESCE(SUM(PA.TotalComments), 0) AS TotalPostComments
+    FROM 
+        TopUsers U
+    LEFT JOIN PostStats PV ON U.Id = PV.PostId
+    LEFT JOIN Comments PA ON U.Id = PA.UserId
+    GROUP BY 
+        U.DisplayName
+),
+FinalStats AS (
+    SELECT 
+        U.DisplayName,
+        U.TotalReputation,
+        U.TotalPosts,
+        COALESCE(J.TotalPostVotes, 0) AS TotalPostVotes,
+        COALESCE(J.TotalPostComments, 0) AS TotalPostComments
+    FROM 
+        TopUsers U
+    LEFT JOIN OuterJoinStats J ON U.DisplayName = J.DisplayName
+)
+SELECT 
+    F.DisplayName,
+    F.TotalReputation,
+    F.TotalPosts,
+    F.TotalPostVotes,
+    F.TotalPostComments,
+    CASE 
+        WHEN F.TotalReputation > 5000 THEN 'Expert'
+        WHEN F.TotalReputation BETWEEN 1000 AND 5000 THEN 'Contributor'
+        ELSE 'New User' 
+    END AS UserCategory
+FROM 
+    FinalStats F
+ORDER BY 
+    F.TotalReputation DESC
+LIMIT 10;

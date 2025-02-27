@@ -1,0 +1,52 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(c.person_id) DESC) AS rank
+    FROM 
+        aka_title m
+    JOIN 
+        complete_cast cc ON cc.movie_id = m.id
+    JOIN 
+        cast_info c ON c.movie_id = m.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+PopularMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COUNT(DISTINCT c.person_id) AS num_actors,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS noted_roles
+    FROM 
+        RankedMovies rm
+    JOIN 
+        complete_cast cc ON cc.movie_id = rm.movie_id
+    JOIN 
+        cast_info c ON c.movie_id = rm.movie_id
+    LEFT JOIN 
+        comp_cast_type ci ON ci.id = c.person_role_id
+    WHERE 
+        rm.rank <= 5
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+)
+SELECT 
+    pm.title AS Movie_Title,
+    pm.production_year AS Year,
+    pm.num_actors AS Actor_Count,
+    COALESCE(pm.noted_roles, 0) AS Noted_Roles,
+    ak.name AS Actor_Name,
+    ak.surname_pcode AS Surname_PCode
+FROM 
+    PopularMovies pm
+LEFT JOIN 
+    cast_info c ON c.movie_id = pm.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = c.person_id
+WHERE 
+    pm.num_actors > 0
+ORDER BY 
+    pm.production_year DESC, pm.num_actors DESC;

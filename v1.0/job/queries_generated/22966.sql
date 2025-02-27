@@ -1,0 +1,74 @@
+WITH RecursiveActorRoles AS (
+    SELECT 
+        ca.person_id, 
+        t.title, 
+        ca.note,
+        ROW_NUMBER() OVER (PARTITION BY ca.person_id ORDER BY ca.nr_order) AS role_rank
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name an ON ca.person_id = an.person_id
+    JOIN 
+        aka_title at ON ca.movie_id = at.movie_id
+    JOIN 
+        title t ON t.id = at.movie_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+        AND an.name IS NOT NULL
+), 
+MultiKeywordMovies AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords,
+        COUNT(DISTINCT k.id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title at ON mk.movie_id = at.movie_id
+    JOIN 
+        title t ON t.id = at.movie_id
+    WHERE 
+        t.production_year < 2000
+    GROUP BY 
+        m.movie_id
+    HAVING 
+        COUNT(DISTINCT k.id) > 3
+), 
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id, 
+        string_agg(DISTINCT cn.name, ', ') AS companies,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, ct.kind
+)
+SELECT 
+    ra.person_id,
+    a.name AS actor_name,
+    ra.title AS movie_title,
+    COALESCE(mkm.keywords, 'None') AS associated_keywords,
+    COALESCE(cd.companies, 'N/A') AS production_companies,
+    MIN(ra.role_rank) AS first_role_rank
+FROM 
+    RecursiveActorRoles ra
+JOIN 
+    aka_name a ON ra.person_id = a.person_id
+LEFT JOIN 
+    MultiKeywordMovies mkm ON ra.movie_title = mkm.movie_id
+LEFT JOIN 
+    CompanyDetails cd ON ra.movie_title = cd.movie_id
+WHERE 
+    ra.role_rank < 10 
+    OR ra.role_rank IS NULL
+GROUP BY 
+    ra.person_id, a.name, ra.title, mkm.keywords, cd.companies
+ORDER BY 
+    first_role_rank, actor_name;

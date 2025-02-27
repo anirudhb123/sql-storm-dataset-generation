@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) AS RankByOwner,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, u.DisplayName, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(rp.Tags, '>'))::int[]) 
+    WHERE 
+        rp.RankByOwner <= 5  
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.Tags, rp.OwnerDisplayName, rp.CreationDate, rp.ViewCount, rp.Score, rp.CommentCount, rp.BadgeCount
+),
+FinalResults AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.Body,
+        fp.TagList,
+        fp.OwnerDisplayName,
+        fp.CreationDate,
+        fp.ViewCount,
+        fp.Score,
+        fp.CommentCount,
+        fp.BadgeCount
+    FROM 
+        FilteredPosts fp
+    ORDER BY 
+        fp.Score DESC, fp.ViewCount DESC
+)
+SELECT 
+    *
+FROM 
+    FinalResults
+WHERE 
+    PostId IN (
+        SELECT RelatedPostId 
+        FROM PostLinks 
+        WHERE LinkTypeId = 1 
+    );

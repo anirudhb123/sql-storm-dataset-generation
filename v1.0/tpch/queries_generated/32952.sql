@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 100.00
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+    WHERE sh.level < 5
+),
+PartSupplierAvailability AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price, COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2024-01-01'
+    GROUP BY o.o_orderkey
+)
+SELECT p.p_name, p.p_mfgr, rh.r_name, COALESCE(pa.total_available, 0) AS total_avail, 
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       AVG(o.total_price) AS avg_order_price, 
+       MAX(s.s_acctbal) AS max_supplier_balance
+FROM part p
+LEFT JOIN PartSupplierAvailability pa ON p.p_partkey = pa.ps_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN region rh ON EXISTS (
+    SELECT 1 
+    FROM nation n 
+    WHERE n.n_nationkey = (SELECT DISTINCT s.s_nationkey FROM supplier s WHERE s.s_suppkey IN (SELECT s.s_suppkey FROM SupplierHierarchy))
+      AND n.n_regionkey = rh.r_regionkey
+)
+LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+WHERE p.p_retailprice > 50.00
+GROUP BY p.p_partkey, p.p_name, p.p_mfgr, rh.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5 OR MAX(s.s_acctbal) IS NULL
+ORDER BY avg_order_price DESC
+LIMIT 10;

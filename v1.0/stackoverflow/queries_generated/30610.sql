@@ -1,0 +1,93 @@
+WITH RecursivePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title AS PostTitle,
+        P.OwnerUserId,
+        P.ParentId,
+        P.CreationDate,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Get all questions
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.Title AS PostTitle,
+        P.OwnerUserId,
+        P.ParentId,
+        P.CreationDate,
+        RP.Level + 1
+    FROM 
+        Posts P
+    JOIN 
+        RecursivePosts RP ON P.ParentId = RP.PostId
+    WHERE 
+        P.PostTypeId = 2 -- Get all answers
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END, 0)) AS UpVotes,
+        SUM(COALESCE(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END, 0)) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+CloseReasons AS (
+    SELECT 
+        PH.PostId,
+        CR.Name AS CloseReason,
+        PH.CreationDate AS CloseDate
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CR ON PH.Comment::int = CR.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10 -- Only closed posts
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.DisplayName,
+    UA.QuestionCount,
+    UA.TotalViews,
+    UA.UpVotes,
+    UA.DownVotes,
+    COALESCE(B.BadgeCount, 0) AS BadgeCount,
+    COALESCE(CR.CloseReason, 'Not Closed') AS CloseReason,
+    CR.CloseDate,
+    RP.Level
+FROM 
+    UserActivity UA
+JOIN 
+    Users U ON UA.UserId = U.Id
+LEFT JOIN 
+    UserBadges B ON U.Id = B.UserId
+LEFT JOIN 
+    CloseReasons CR ON U.Id = CR.PostId
+LEFT JOIN 
+    RecursivePosts RP ON U.Id = RP.OwnerUserId
+WHERE 
+    UA.QuestionCount > 0
+ORDER BY 
+    UA.TotalViews DESC, UA.UpVotes DESC;

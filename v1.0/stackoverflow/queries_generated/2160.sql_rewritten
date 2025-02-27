@@ -1,0 +1,40 @@
+WITH UserReputation AS (
+    SELECT U.Id, U.Reputation, 
+           RANK() OVER (ORDER BY U.Reputation DESC) AS RankReputation
+    FROM Users U
+), 
+RecentPosts AS (
+    SELECT P.Id AS PostId, P.OwnerUserId, P.Title, 
+           COUNT(C.*) AS CommentCount, 
+           SUM(V.VoteTypeId = 2) AS UpVotes,
+           SUM(V.VoteTypeId = 3) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY P.Id
+), 
+PostDetails AS (
+    SELECT RP.PostId, RP.Title, RP.CommentCount, RP.UpVotes, RP.DownVotes, 
+           U.DisplayName, UR.RankReputation
+    FROM RecentPosts RP
+    JOIN Users U ON RP.OwnerUserId = U.Id
+    JOIN UserReputation UR ON U.Id = UR.Id
+    WHERE UR.RankReputation <= 100
+)
+SELECT PD.PostId, PD.Title, PD.CommentCount, PD.UpVotes, PD.DownVotes, 
+       COALESCE(NULLIF(PD.UpVotes - PD.DownVotes, 0), 'Neutral') AS VoteStatus,
+       CASE 
+           WHEN PD.CommentCount > 10 THEN 'Highly Discussed'
+           WHEN PD.CommentCount BETWEEN 1 AND 10 THEN 'Moderately Discussed'
+           ELSE 'Not Discussed'
+       END AS DiscussionLevel,
+       ARRAY_AGG(DISTINCT T.TagName) AS Tags
+FROM PostDetails PD
+LEFT JOIN Posts P ON PD.PostId = P.Id
+LEFT JOIN LATERAL (
+    SELECT unnest(string_to_array(P.Tags, ',')) AS TagName
+) T ON TRUE
+GROUP BY PD.PostId, PD.Title, PD.CommentCount, PD.UpVotes, PD.DownVotes
+ORDER BY PD.UpVotes DESC, PD.CommentCount DESC
+LIMIT 50;

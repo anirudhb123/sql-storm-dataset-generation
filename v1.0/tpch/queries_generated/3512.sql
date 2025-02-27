@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        DENSE_RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+), CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name
+), OrderInfo AS (
+    SELECT 
+        co.o_orderkey,
+        co.total_amount,
+        s.s_name,
+        s.rank
+    FROM 
+        CustomerOrders co
+    LEFT JOIN 
+        RankedSuppliers s ON co.total_amount > 1000 AND s.rank = 1
+)
+SELECT 
+    oi.o_orderkey,
+    oi.total_amount,
+    COALESCE(oi.s_name, 'No Supplier') AS supplier_name,
+    CASE 
+        WHEN oi.total_amount IS NULL THEN 'No Order'
+        WHEN oi.total_amount > 5000 THEN 'High Value Order'
+        ELSE 'Regular Order'
+    END AS order_category
+FROM 
+    OrderInfo oi
+WHERE 
+    oi.total_amount IS NOT NULL
+ORDER BY 
+    oi.total_amount DESC;
+

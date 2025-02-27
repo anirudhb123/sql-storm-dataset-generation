@@ -1,0 +1,57 @@
+WITH RankedMovies AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.id DESC) AS rank
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+),
+ActorMovies AS (
+    SELECT
+        ak.id AS actor_id,
+        ak.name AS actor_name,
+        cm.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY cm.movie_id) AS movie_rank
+    FROM
+        aka_name ak
+    JOIN
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN
+        RankedMovies rm ON ci.movie_id = rm.movie_id
+    WHERE
+        ak.name IS NOT NULL AND rm.rank <= 10
+),
+ActorDetails AS (
+    SELECT
+        am.actor_id,
+        am.actor_name,
+        COUNT(DISTINCT am.movie_id) AS movies_count
+    FROM
+        ActorMovies am
+    GROUP BY
+        am.actor_id,
+        am.actor_name
+)
+SELECT
+    ad.actor_id,
+    ad.actor_name,
+    ad.movies_count,
+    COALESCE(SUM(mi.info LIKE '%Award%'), 0) AS awards_count,
+    COALESCE(STRING_AGG(DISTINCT mk.keyword, ', ' ORDER BY mk.keyword), 'No Keywords') AS keywords
+FROM
+    ActorDetails ad
+LEFT JOIN
+    movie_info mi ON ad.actor_id = mi.movie_id
+LEFT JOIN
+    movie_keyword mk ON ad.actor_id = mk.movie_id
+GROUP BY
+    ad.actor_id,
+    ad.actor_name
+HAVING
+    ad.movies_count > 5
+ORDER BY
+    ad.movies_count DESC
+LIMIT 20;

@@ -1,0 +1,80 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        c.person_id AS cast_person_id,
+        a.name AS actor_name,
+        a.id AS actor_id,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS role_order
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND a.name IS NOT NULL
+),
+ActorAwards AS (
+    SELECT 
+        person_id, 
+        COUNT(DISTINCT movie_id) AS movie_count
+    FROM 
+        cast_info
+    GROUP BY 
+        person_id
+    HAVING 
+        COUNT(DISTINCT movie_id) > 1
+),
+MovieInfoSummary AS (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT keyword_id) AS keyword_count,
+        MAX(info) AS longest_info
+    FROM 
+        movie_info
+    INNER JOIN 
+        movie_keyword ON movie_info.movie_id = movie_keyword.movie_id
+    GROUP BY 
+        movie_id
+)
+SELECT 
+    md.movie_title,
+    md.actor_name,
+    md.production_year,
+    COALESCE(aaw.movie_count, 0) AS actor_movie_count,
+    mis.keyword_count,
+    LENGTH(mis.longest_info) AS longest_info_length,
+    CASE
+        WHEN md.kind_id IS NULL THEN 'Unknown'
+        ELSE k.kind AS kind_description
+    END AS kind_description
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    ActorAwards aaw ON md.cast_person_id = aaw.person_id
+LEFT JOIN 
+    MovieInfoSummary mis ON md.actor_id = mis.movie_id
+LEFT JOIN 
+    kind_type k ON md.kind_id = k.id
+WHERE 
+    md.role_order = 1
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_title ASC
+UNION 
+SELECT 
+    'Special Movie Title' AS movie_title,
+    'Unknown Actor' AS actor_name,
+    NULL AS production_year,
+    NULL AS actor_movie_count,
+    NULL AS keyword_count,
+    NULL AS longest_info_length,
+    NULL AS kind_description
+WHERE 
+    NOT EXISTS (SELECT 1 FROM MovieDetails)
+ORDER BY 
+    production_year DESC NULLS LAST, 
+    movie_title;

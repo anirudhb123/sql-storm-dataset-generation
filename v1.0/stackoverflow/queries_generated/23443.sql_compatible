@@ -1,0 +1,62 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        CASE 
+            WHEN Reputation IS NULL THEN 'Unknown'
+            WHEN Reputation > 1000 THEN 'High'
+            WHEN Reputation BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationCategory
+    FROM Users
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        p.Score AS PostScore,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostOrder
+    FROM Posts p
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    GROUP BY p.Id, p.Score, p.ViewCount, p.CreationDate, p.OwnerUserId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS ClosureCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeletionCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (24, 52) THEN 1 END) AS EditSuggestionCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    u.Location,
+    ur.ReputationCategory,
+    pa.PostId,
+    pa.CommentCount,
+    pa.UpvoteCount,
+    pa.DownvoteCount,
+    COALESCE(ps.ClosureCount, 0) AS ClosureCount,
+    COALESCE(ps.DeletionCount, 0) AS DeletionCount,
+    COALESCE(ps.EditSuggestionCount, 0) AS EditSuggestionCount,
+    pa.PostScore,
+    pa.ViewCount
+FROM UserReputation ur
+JOIN Users u ON u.Id = ur.Id
+LEFT JOIN PostActivity pa ON pa.PostId IN (
+    SELECT PostId 
+    FROM Posts 
+    WHERE OwnerUserId = u.Id AND PostTypeId IN (1, 2) 
+)
+LEFT JOIN PostHistorySummary ps ON pa.PostId = ps.PostId
+WHERE u.Reputation IS NOT NULL
+AND ur.ReputationCategory = 'High'
+AND pa.RecentPostOrder <= 5
+ORDER BY pa.PostScore DESC, pa.ViewCount DESC;

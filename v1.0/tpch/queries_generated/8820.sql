@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 100000
+),
+RegionWiseEntityCounts AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    r.r_name,
+    rc.nation_count,
+    rc.supplier_count,
+    rc.customer_count,
+    COUNT(DISTINCT hvc.c_custkey) AS high_value_customer_count,
+    STRING_AGG(DISTINCT CONCAT('Supplier: ', rs.s_name, ', Total Supply Cost: ', rs.total_supply_cost), '; ') AS top_suppliers
+FROM 
+    RegionWiseEntityCounts rc
+JOIN 
+    RankedSuppliers rs ON rc.nation_count > 0
+LEFT JOIN 
+    HighValueCustomers hvc ON hvc.c_name LIKE '%' || substring(rs.s_name from 1 for 3) || '%'
+JOIN 
+    region r ON rc.r_name = r.r_name
+GROUP BY 
+    r.r_name, rc.nation_count, rc.supplier_count
+ORDER BY 
+    rc.customer_count DESC, rc.supplier_count ASC;

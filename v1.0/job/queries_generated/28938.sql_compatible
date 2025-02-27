@@ -1,0 +1,69 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY a.title) AS ranking
+    FROM 
+        aka_title a
+    JOIN 
+        title m ON a.movie_id = m.id
+    WHERE 
+        m.production_year IS NOT NULL
+),
+FrequentKeywords AS (
+    SELECT
+        k.keyword,
+        COUNT(mk.movie_id) AS keyword_count
+    FROM
+        keyword k
+    JOIN 
+        movie_keyword mk ON k.id = mk.keyword_id
+    GROUP BY
+        k.keyword
+    HAVING
+        COUNT(mk.movie_id) > 1
+),
+ActorInMultipleMovies AS (
+    SELECT 
+        ca.person_id,
+        COUNT(DISTINCT ca.movie_id) AS movie_count
+    FROM 
+        cast_info ca
+    GROUP BY 
+        ca.person_id
+    HAVING 
+        COUNT(DISTINCT ca.movie_id) > 3
+),
+CompanyCategories AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    fk.keyword,
+    fk.keyword_count,
+    ac.movie_count AS actor_movie_count,
+    cc.company_types
+FROM 
+    RankedMovies rm
+JOIN 
+    FrequentKeywords fk ON rm.movie_title LIKE '%' || fk.keyword || '%'
+JOIN 
+    cast_info ca ON ca.movie_id IN (SELECT movie_id FROM movie_info WHERE movie_id = (SELECT id FROM title WHERE title = rm.movie_title LIMIT 1))
+JOIN
+    ActorInMultipleMovies ac ON ac.person_id = ca.person_id
+LEFT JOIN 
+    CompanyCategories cc ON cc.movie_id = (SELECT id FROM title WHERE title = rm.movie_title LIMIT 1)
+WHERE 
+    rm.ranking <= 5
+ORDER BY 
+    rm.production_year DESC, ac.movie_count DESC;

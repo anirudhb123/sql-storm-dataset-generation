@@ -1,0 +1,51 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.ps_availqty, 
+           (ps.ps_supplycost + p.p_retailprice * 0.1) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > 100.00
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+),
+SupplierOrders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate,
+           COALESCE(ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC), 0) AS status_rank
+    FROM orders o
+    LEFT JOIN FilteredLineItems li ON o.o_orderkey = li.l_orderkey
+    WHERE li.total_revenue IS NOT NULL
+      AND o.o_orderdate > (DATE '1998-10-01' - INTERVAL '1 year')
+),
+NationRegions AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT sr.r_name, COUNT(DISTINCT so.o_orderkey) AS order_count,
+       AVG(so.o_totalprice) AS avg_order_value,
+       (SELECT COUNT(*) FROM RankedSuppliers WHERE rn <= 5) AS top_supplier_count
+FROM SupplierOrders so
+JOIN NationRegions nr ON so.o_orderkey = (SELECT MAX(l.l_orderkey) 
+                                           FROM lineitem l 
+                                           WHERE l.l_orderkey = so.o_orderkey)
+LEFT JOIN RankedSuppliers sr ON sr.s_suppkey = (SELECT ps.ps_suppkey 
+                                                 FROM partsupp ps 
+                                                 WHERE ps.ps_partkey IN (
+                                                     SELECT hp.p_partkey FROM HighValueParts hp
+                                                 )
+                                                 LIMIT 1)
+WHERE so.status_rank > 0
+GROUP BY sr.r_name
+HAVING AVG(so.o_totalprice) > 500
+ORDER BY order_count DESC, avg_order_value DESC
+LIMIT 10;

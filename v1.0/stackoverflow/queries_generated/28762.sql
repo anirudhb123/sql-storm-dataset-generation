@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS PostRank
+    FROM 
+        Posts p
+        JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+        LEFT JOIN LATERAL (
+            SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName
+        ) t ON true
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        unnest(Tags) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        RankedPosts
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(*) > 1
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount
+    FROM 
+        Users u
+        JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        u.Id, u.Reputation
+)
+SELECT 
+    rp.OwnerDisplayName,
+    rp.Title,
+    rp.CreationDate,
+    rp.CommentCount,
+    rp.VoteCount,
+    pt.Tag,
+    ur.Reputation,
+    ur.QuestionCount
+FROM 
+    RankedPosts rp
+JOIN 
+    PopularTags pt ON pt.Tag = ANY(rp.Tags)
+JOIN 
+    UserReputation ur ON ur.UserId = rp.OwnerUserId
+WHERE 
+    rp.PostRank <= 3  -- Get top 3 posts per user based on view count
+ORDER BY 
+    ur.Reputation DESC, 
+    rp.CommentCount DESC;

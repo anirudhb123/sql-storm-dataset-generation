@@ -1,0 +1,75 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 END) AS TotalVotes,
+        COUNT(DISTINCT P.Id) AS AnswerCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 2
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName
+), 
+RecentActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(DISTINCT PH.Id) AS PostHistoryCount,
+        MAX(PH.CreationDate) AS LastActivity
+    FROM Users U
+    LEFT JOIN PostHistory PH ON U.Id = PH.UserId 
+    WHERE PH.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY U.Id
+),
+BadgedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(DISTINCT B.Name, ', ') AS BadgeNames
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    COALESCE(B.BadgeCount, 0) AS BadgeCount,
+    COALESCE(B.BadgeNames, 'No Badges') AS BadgeNames,
+    COALESCE(UV.UpVotes, 0) AS UpVotes,
+    COALESCE(UV.DownVotes, 0) AS DownVotes,
+    COALESCE(UV.TotalVotes, 0) AS TotalVotes,
+    COALESCE(UV.AnswerCount, 0) AS AnswerCount,
+    COALESCE(RA.PostHistoryCount, 0) AS RecentPostHistory,
+    COALESCE(RA.LastActivity, 'Never') AS LastActivity
+FROM Users U
+LEFT JOIN UserVoteSummary UV ON U.Id = UV.UserId
+LEFT JOIN RecentActivity RA ON U.Id = RA.UserId
+LEFT JOIN BadgedUsers B ON U.Id = B.UserId
+WHERE 
+    (COALESCE(UV.UpVotes, 0) - COALESCE(UV.DownVotes, 0) > 5 OR RA.LastActivity > CURRENT_DATE - INTERVAL '15 days')
+ORDER BY 
+    UpVotes DESC,
+    DownVotes ASC,
+    BadgeCount DESC
+FETCH FIRST 50 ROWS ONLY;
+
+-- Additional insights
+WITH InvalidPostCounts AS (
+    SELECT 
+        PH.UserId,
+        COUNT(*) AS InvalidPosts,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 12) THEN 1 ELSE 0 END) AS ClosureOrDeletionCount,
+        STRING_AGG(DISTINCT PH.Comment, ', ') AS Reasons
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (10, 12)
+    GROUP BY PH.UserId
+)
+SELECT 
+    U.DisplayName,
+    COALESCE(IPC.InvalidPosts, 0) AS InvalidPostCount,
+    COALESCE(IPC.ClosureOrDeletionCount, 0) AS ClosureOrDeletionCount,
+    COALESCE(IPC.Reasons, 'No reasons provided') AS ClosureOrDeletionReasons
+FROM Users U
+LEFT JOIN InvalidPostCounts IPC ON U.Id = IPC.UserId
+WHERE IPC.InvalidPosts > 0
+ORDER BY IPC.InvalidPosts DESC;

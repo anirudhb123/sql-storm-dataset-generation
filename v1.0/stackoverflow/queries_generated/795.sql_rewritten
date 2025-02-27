@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+),
+UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS TotalCloseActions,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS TotalReopenActions
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+FinalResults AS (
+    SELECT 
+        u.DisplayName AS User,
+        up.TotalQuestions,
+        up.TotalBadges,
+        up.TotalUpVotes,
+        up.TotalDownVotes,
+        rp.PostId AS LatestQuestionId,
+        rp.Title AS LatestQuestionTitle,
+        rp.ViewCount AS LatestQuestionViews,
+        rp.Score AS LatestQuestionScore,
+        phs.TotalCloseActions,
+        phs.TotalReopenActions
+    FROM UserStats up
+    LEFT JOIN RankedPosts rp ON up.UserId = rp.PostId
+    LEFT JOIN PostHistorySummary phs ON rp.PostId = phs.PostId
+    WHERE rp.rn = 1
+)
+SELECT 
+    User,
+    TotalQuestions,
+    TotalBadges,
+    TotalUpVotes,
+    TotalDownVotes,
+    LatestQuestionTitle,
+    LatestQuestionViews,
+    LatestQuestionScore,
+    TotalCloseActions,
+    TotalReopenActions
+FROM FinalResults
+WHERE TotalQuestions > 0
+ORDER BY TotalUpVotes DESC, TotalQuestions DESC
+LIMIT 100;

@@ -1,0 +1,44 @@
+WITH RECURSIVE CustomerSales AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) + cs.total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN CustomerSales cs ON cs.c_custkey = c.c_custkey
+    WHERE o.o_orderdate < CURRENT_DATE
+    GROUP BY c.c_custkey, c.c_name, cs.total_spent
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, cs.total_spent
+    FROM customer c
+    JOIN CustomerSales cs ON c.c_custkey = cs.c_custkey
+    WHERE cs.total_spent > (SELECT AVG(total_spent) FROM CustomerSales)
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(SUM(l.l_quantity), 0) AS total_sold,
+    COALESCE(ps.total_available, 0) AS total_available,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS product_rank
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN PartSupplier ps ON p.p_partkey = ps.ps_partkey
+WHERE EXISTS (
+    SELECT 1 
+    FROM HighValueCustomers hvc 
+    WHERE hvc.c_custkey = o.o_custkey
+)
+GROUP BY p.p_partkey, p.p_name, p.p_retailprice, ps.total_available
+ORDER BY product_rank, total_sold DESC
+LIMIT 100;

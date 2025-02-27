@@ -1,0 +1,64 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt) AS total_returned_amount,
+        AVG(sr_return_tax) AS average_return_tax,
+        COUNT(DISTINCT sr_ticket_number) AS unique_return_orders
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+IncomeDemographics AS (
+    SELECT 
+        hd_demo_sk,
+        ib_income_band_sk,
+        CASE 
+            WHEN hd_buy_potential IS NULL THEN 'Unknown'
+            ELSE hd_buy_potential
+        END AS potential_category
+    FROM 
+        household_demographics hd
+    LEFT JOIN 
+        income_band ib ON hd_income_band_sk = ib_income_band_sk
+),
+TopStores AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_ext_sales_price) AS total_sales,
+        RANK() OVER (ORDER BY SUM(ss_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        store_sales ss
+    GROUP BY 
+        s_store_sk
+    HAVING 
+        SUM(ss_ext_sales_price) > 1000
+)
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    COUNT(DISTINCT sr.ticket_number) AS total_returns,
+    COALESCE(CDR.total_returned_quantity, 0) AS total_returned_quantity,
+    COALESCE(CDR.total_returned_amount, 0) AS total_returned_amount,
+    ID.ib_income_band_sk,
+    ID.potential_category,
+    TS.total_sales,
+    TS.sales_rank
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    CustomerReturns CDR ON c.c_customer_sk = CDR.sr_customer_sk
+LEFT JOIN 
+    IncomeDemographics ID ON c.c_current_cdemo_sk = ID.hd_demo_sk
+LEFT JOIN 
+    TopStores TS ON c.c_current_hdemo_sk = TS.s_store_sk
+WHERE 
+    c.c_birth_year > 1980
+    AND (CDR.total_returned_amount IS NULL OR CDR.total_returned_amount > 0)
+    AND (TS.total_sales IS NOT NULL)
+ORDER BY 
+    TS.sales_rank, total_returns DESC;

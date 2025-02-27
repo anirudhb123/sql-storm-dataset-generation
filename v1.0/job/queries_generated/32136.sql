@@ -1,0 +1,72 @@
+WITH RECURSIVE movie_chain AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        m.production_year,
+        1 AS chain_level
+    FROM 
+        aka_title m
+    JOIN 
+        title t ON m.movie_id = t.id
+    WHERE 
+        t.production_year > 2000
+        
+    UNION ALL
+    
+    SELECT 
+        mc.movie_id,
+        t.title,
+        t.production_year,
+        chain_level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_chain mc ON ml.movie_id = mc.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.movie_id
+    JOIN 
+        title t ON m.movie_id = t.id
+    WHERE 
+        t.production_year >= mc.production_year AND mc.chain_level < 5
+)
+SELECT 
+    ao.name AS actor_name,
+    m.title AS linked_movie_title,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END) AS trivia_count,
+    SUM(CASE 
+            WHEN ci.nr_order IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS cast_count,
+    AVG(COALESCE(t.rating, 0)) AS average_rating
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ao ON ci.person_id = ao.person_id
+JOIN 
+    movie_companies mc ON ci.movie_id = mc.movie_id
+JOIN 
+    keyword mk ON mk.id = mc.movie_id
+JOIN 
+    movie_info mi ON ci.movie_id = mi.movie_id
+LEFT JOIN 
+    title m ON ci.movie_id = m.id
+LEFT JOIN 
+    (SELECT 
+         title.id, 
+         AVG(r.rating) AS rating
+     FROM 
+         title
+     LEFT JOIN 
+         rating r ON title.id = r.movie_id
+     GROUP BY 
+         title.id) AS t ON m.id = t.id
+WHERE 
+    ao.name IS NOT NULL
+GROUP BY 
+    ao.name, m.title
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 5
+ORDER BY 
+    average_rating DESC
+LIMIT 10;

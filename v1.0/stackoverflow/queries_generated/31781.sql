@@ -1,0 +1,86 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        SUM(VoteTypeId = 2) AS UpVotesCount,
+        SUM(VoteTypeId = 3) AS DownVotesCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        COALESCE(PH.CommentCount, 0) AS CommentsCount,
+        COALESCE(PH.AnswerCount, 0) AS AnswersCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount, SUM(AnswerCount) AS AnswerCount
+         FROM Comments
+         GROUP BY PostId) PH ON P.Id = PH.PostId
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.DisplayName,
+    UPS.PostsCount,
+    UPS.TotalViews,
+    UPS.AverageScore,
+    P.Title AS MostViewedPostTitle,
+    P.ViewCount AS MostViewedPost
+FROM 
+    UserPostStats UPS
+INNER JOIN 
+    Posts P ON UPS.UserId = P.OwnerUserId
+INNER JOIN 
+    (SELECT UserId, MAX(ViewCount) AS MaxViews
+     FROM Posts
+     GROUP BY UserId) MP ON P.ViewCount = MP.MaxViews
+INNER JOIN 
+    Users U ON U.Id = UPS.UserId
+WHERE 
+    UPS.PostsCount > 0
+ORDER BY 
+    UPS.TotalViews DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;
+
+-- The above query provides insights into user participation, post engagement metrics, 
+-- and helps identify top performing users based on their highest viewed posts.

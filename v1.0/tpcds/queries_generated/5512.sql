@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+    GROUP BY
+        ws.ws_item_sk
+),
+TopSellingItems AS (
+    SELECT
+        ri.item_id,
+        ri.item_desc,
+        rs.total_quantity,
+        rs.total_sales
+    FROM
+        RankedSales rs
+    JOIN
+        item ri ON rs.ws_item_sk = ri.i_item_sk
+    WHERE
+        rs.sales_rank <= 10
+),
+CustomerData AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM
+        customer_demographics cd
+    JOIN
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+),
+SalesByDemographics AS (
+    SELECT
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ts.total_sales) AS total_sales
+    FROM
+        TopSellingItems ts
+    JOIN
+        CustomerData cd ON ts.item_id IN (SELECT ws_item_sk FROM web_sales WHERE ws_quantity > 0)
+    GROUP BY
+        cd.cd_gender, cd.cd_marital_status
+)
+SELECT
+    gender,
+    marital_status,
+    total_sales,
+    RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+FROM
+    SalesByDemographics
+ORDER BY
+    total_sales DESC;

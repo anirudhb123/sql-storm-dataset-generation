@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) THEN 'Above Average'
+            ELSE 'Below Average'
+        END AS price_category
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_supplycost > 100)
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(RS.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(CO.total_spent, 0) AS total_spent_by_customer
+FROM 
+    HighValueParts p
+LEFT JOIN 
+    RankedSuppliers RS ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = RS.s_suppkey AND RS.rn = 1)
+LEFT JOIN 
+    CustomerOrders CO ON p.p_partkey IN (SELECT l.l_partkey FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = (SELECT MIN(r_regionkey) FROM region)))))
+WHERE 
+    p.p_retailprice IS NOT NULL
+ORDER BY 
+    p.p_retailprice DESC, 
+    supplier_name,
+    total_spent_by_customer
+LIMIT 25 OFFSET 100;

@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_sold_date_sk DESC) as rn
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1970 AND 1990
+        AND c.c_preferred_cust_flag = 'Y'
+),
+TotalReturns AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returned
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        rs.web_site_sk,
+        rs.ws_item_sk,
+        SUM(rs.ws_quantity) AS total_sales,
+        COALESCE(tr.total_returned, 0) AS total_returns
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        TotalReturns tr ON rs.ws_item_sk = tr.wr_item_sk
+    GROUP BY 
+        rs.web_site_sk, rs.ws_item_sk
+)
+SELECT 
+    s.web_site_sk,
+    s.ws_item_sk,
+    s.total_sales,
+    s.total_returns,
+    CASE 
+        WHEN s.total_returns > 0 THEN 
+            (CAST(s.total_sales AS DECIMAL) / NULLIF(s.total_returns, 0)) * 100
+        ELSE 
+            0 
+    END AS return_ratio
+FROM 
+    SalesAndReturns s
+WHERE 
+    (s.total_sales - s.total_returns) > 10
+ORDER BY 
+    return_ratio DESC
+LIMIT 10;

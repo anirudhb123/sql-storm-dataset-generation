@@ -1,0 +1,88 @@
+
+WITH RECURSIVE demographic_analysis AS (
+    SELECT
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        SUM(cd_dep_count) AS total_dependent_count,
+        COUNT(DISTINCT c_customer_sk) AS total_customers
+    FROM
+        customer_demographics
+    JOIN
+        customer ON cd_demo_sk = c_current_cdemo_sk
+    GROUP BY
+        cd_demo_sk, cd_gender, cd_marital_status, cd_education_status
+),
+ranked_customers AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        d.total_customers,
+        d.total_dependent_count,
+        RANK() OVER (PARTITION BY d.cd_gender ORDER BY d.total_dependent_count DESC) AS gender_rank
+    FROM
+        customer c
+    JOIN
+        demographic_analysis d ON c.c_current_cdemo_sk = d.cd_demo_sk
+),
+inventory_status AS (
+    SELECT
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity,
+        i.i_item_desc
+    FROM
+        inventory inv
+    JOIN
+        item i ON inv.inv_item_sk = i.i_item_sk
+    WHERE
+        inv.inv_quantity_on_hand IS NOT NULL
+    GROUP BY
+        inv.inv_item_sk, i.i_item_desc
+),
+promotional_analysis AS (
+    SELECT
+        p.p_promo_id,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_count,
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM
+        promotion p
+    JOIN
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    WHERE
+        p.p_discount_active = 'Y'
+    GROUP BY
+        p.p_promo_id
+)
+SELECT
+    rc.c_customer_id,
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.c_email_address,
+    ra.total_customers,
+    rc.gender_rank,
+    is.total_quantity,
+    ps.promotional_sales
+FROM
+    ranked_customers rc
+LEFT JOIN
+    demographic_analysis ra ON ra.cd_demo_sk = rc.cd_demo_sk
+LEFT JOIN (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS promotional_sales
+    FROM
+        web_sales
+    WHERE
+        ws_net_profit > 0
+    GROUP BY
+        ws_bill_customer_sk
+) ps ON ps.ws_bill_customer_sk = rc.c_customer_id
+LEFT JOIN inventory_status is ON is.inv_item_sk = rc.c_customer_id
+WHERE
+    (ra.total_customers IS NOT NULL AND rc.gender_rank <= 3) OR
+    (is.total_quantity > 1000 OR is.total_quantity IS NULL)
+ORDER BY
+    rc.gender_rank DESC, rc.c_last_name ASC;

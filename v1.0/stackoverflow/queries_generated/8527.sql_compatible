@@ -1,0 +1,68 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        RANK() OVER (ORDER BY COUNT(P.Id) DESC) AS TagRank
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = P.TagId
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 10
+),
+ActivePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COUNT(C.Id) AS CommentCount,
+        A.UserId AS AcceptedAnswerUserId
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Posts A ON P.AcceptedAnswerId = A.Id
+    WHERE 
+        P.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, A.UserId
+)
+SELECT 
+    R.DisplayName AS TopUser,
+    R.Reputation AS UserReputation,
+    R.Views AS UserViews,
+    R.UpVotes AS UserUpVotes,
+    R.DownVotes AS UserDownVotes,
+    T.TagName AS PopularTag,
+    T.PostCount AS TagPostCount,
+    P.Title AS ActivePostTitle,
+    P.ViewCount AS PostViewCount,
+    P.CommentCount AS PostCommentCount,
+    (SELECT U.DisplayName FROM Users U WHERE U.Id = P.AcceptedAnswerUserId) AS AcceptedBy
+FROM 
+    RankedUsers R
+JOIN 
+    PopularTags T ON R.ReputationRank <= 5
+JOIN 
+    ActivePosts P ON R.UserId = P.AcceptedAnswerUserId
+ORDER BY 
+    R.Reputation DESC, T.PostCount DESC, P.ViewCount DESC;

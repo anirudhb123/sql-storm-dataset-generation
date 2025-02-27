@@ -1,0 +1,72 @@
+
+WITH RECURSIVE item_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), rank_income AS (
+    SELECT 
+        hd_income_band_sk,
+        COUNT(*) AS customer_count
+    FROM 
+        household_demographics
+    GROUP BY 
+        hd_income_band_sk
+), address_info AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS address_count
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+), sales_summary AS (
+    SELECT 
+        ais.ca_state,
+        ais.address_count,
+        ris.customer_count,
+        is.total_quantity,
+        is.total_net_profit
+    FROM 
+        address_info ais
+    LEFT JOIN 
+        rank_income ris ON ais.ca_state = 
+            (SELECT 
+                cd_marital_status 
+            FROM 
+                customer 
+            INNER JOIN 
+                customer_demographics ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk 
+            WHERE 
+                customer.c_current_addr_sk IN 
+                    (SELECT ca_address_sk FROM customer_address WHERE ca_city = 'San Francisco')
+            LIMIT 1)
+    JOIN 
+        item_sales is ON is.rn = 1
+)
+SELECT 
+    ss.ca_state,
+    ss.address_count,
+    ss.customer_count,
+    ss.total_quantity,
+    ss.total_net_profit
+FROM 
+    sales_summary ss
+WHERE 
+    ss.total_net_profit > 1000
+UNION ALL
+SELECT 
+    'Total' AS ca_state,
+    SUM(ss.address_count) AS total_addresses,
+    SUM(ss.customer_count) AS total_customers,
+    SUM(ss.total_quantity) AS total_quantity_sold,
+    SUM(ss.total_net_profit) AS total_net_profit
+FROM 
+    sales_summary ss
+HAVING 
+    SUM(ss.total_net_profit) > 0;

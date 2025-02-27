@@ -1,0 +1,95 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        pht.Name AS PostHistoryType,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate <= NOW() - INTERVAL '90 days'
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        v.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        v.PostId
+),
+FinalPostData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        COALESCE(rv.TotalVotes, 0) AS TotalVotes,
+        COALESCE(rv.UpVotes, 0) AS UpVotes,
+        COALESCE(rv.DownVotes, 0) AS DownVotes,
+        phd.PostHistoryType,
+        phd.UserDisplayName AS HistoryUser,
+        phd.Comment AS HistoryComment,
+        phd.Text AS HistoryText
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentVotes rv ON rp.PostId = rv.PostId
+    LEFT JOIN 
+        PostHistoryDetails phd ON rp.PostId = phd.PostId AND phd.HistoryRank = 1
+)
+SELECT 
+    PostId,
+    Title,
+    OwnerDisplayName,
+    Score,
+    ViewCount,
+    CommentCount,
+    TotalVotes,
+    UpVotes,
+    DownVotes,
+    HistoryType,
+    HistoryUser,
+    HistoryComment,
+    HistoryText
+FROM 
+    FinalPostData
+WHERE 
+    (TotalVotes > 5 OR CommentCount > 10)
+    AND (HistoryType IS NOT NULL OR UpVotes > DownVotes)
+ORDER BY 
+    Score DESC, ViewCount DESC;

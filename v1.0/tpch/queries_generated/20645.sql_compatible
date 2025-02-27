@@ -1,0 +1,82 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate > (CAST('1998-10-01' AS DATE) - INTERVAL '1 YEAR')
+),
+supply_data AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS supply_rank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND
+        s.s_comment NOT LIKE '%discount%'
+),
+extensive_part_data AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_comment,
+        COALESCE(sub.part_usage, 0) AS part_usage
+    FROM 
+        part p
+    LEFT JOIN (
+        SELECT 
+            l.l_partkey,
+            SUM(l.l_quantity) AS part_usage
+        FROM 
+            lineitem l
+        GROUP BY 
+            l.l_partkey
+    ) sub ON p.p_partkey = sub.l_partkey
+)
+
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(pd.part_usage * pd.p_retailprice) AS total_value,
+    AVG(CASE 
+            WHEN s.s_acctbal < 5000 THEN NULL
+            ELSE s.s_acctbal 
+        END) AS average_supplier_balance,
+    STRING_AGG(DISTINCT p.p_name || ' (usage: ' || COALESCE(CAST(pd.part_usage AS TEXT), '0') || ')', ', ') AS part_names
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    supply_data sd ON s.s_suppkey = sd.ps_suppkey
+JOIN 
+    extensive_part_data pd ON sd.ps_partkey = pd.p_partkey
+JOIN 
+    ranked_orders o ON o.o_orderkey IN (
+        SELECT o_orderkey
+        FROM orders
+        WHERE o_custkey IN (
+            SELECT c.c_custkey 
+            FROM customer c 
+            WHERE c.c_nationkey = n.n_nationkey
+        )
+    )
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_value DESC NULLS LAST;

@@ -1,0 +1,81 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        CASE 
+            WHEN U.Reputation < 100 THEN 'Newbie'
+            WHEN U.Reputation BETWEEN 100 AND 1000 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS UserLevel
+    FROM Users U
+), 
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeList
+    FROM Badges B
+    GROUP BY B.UserId
+), 
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        PT.Name AS PostType,
+        COUNT(A.Id) AS AnswerCount,
+        SUM(CASE WHEN V.CreationDate IS NOT NULL THEN 1 ELSE 0 END) AS VoteCount,
+        AVG(U.Reputation) AS AvgUserReputation,
+        P.OwnerUserId
+    FROM Posts P
+    LEFT JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN Posts A ON P.Id = A.ParentId AND A.PostTypeId = 2
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    GROUP BY P.Id, PT.Name, P.OwnerUserId
+), 
+ClosedPosts AS (
+    SELECT 
+        PH.PostId, 
+        PH.CreationDate AS ClosedDate,
+        CR.Name AS CloseReason
+    FROM PostHistory PH
+    JOIN CloseReasonTypes CR ON CAST(PH.Comment AS INT) = CR.Id
+    WHERE PH.PostHistoryTypeId = 10
+), 
+FinalOutput AS (
+    SELECT 
+        U.DisplayName,
+        U.UserLevel,
+        U.Reputation,
+        UB.BadgeCount,
+        UB.BadgeList,
+        PS.PostId,
+        PS.PostType,
+        PS.AnswerCount,
+        PS.VoteCount,
+        COALESCE(CP.ClosedDate, 'Not Closed') AS PostClosedStatus,
+        CP.CloseReason
+    FROM UserReputation U
+    LEFT JOIN UserBadges UB ON U.UserId = UB.UserId
+    LEFT JOIN PostSummary PS ON U.UserId = PS.OwnerUserId
+    LEFT JOIN ClosedPosts CP ON PS.PostId = CP.PostId
+)
+SELECT 
+    DisplayName,
+    UserLevel,
+    Reputation,
+    BadgeCount,
+    BadgeList,
+    PostId,
+    PostType,
+    AnswerCount,
+    VoteCount,
+    PostClosedStatus,
+    CloseReason
+FROM FinalOutput
+WHERE 
+    (PostType IS NOT NULL OR BadgeCount > 0) 
+    AND (Reputation IS NOT NULL AND Reputation > 0)
+ORDER BY UserLevel DESC, Reputation DESC, PostId ASC 
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_store_id,
+        s_sales AS total_sales,
+        1 AS level
+    FROM (
+        SELECT 
+            ss_store_sk,
+            SUM(ss_net_paid_inc_tax) AS s_sales,
+            s_store_name
+        FROM store_sales 
+        JOIN store ON store_sk = s_store_sk
+        GROUP BY ss_store_sk, s_store_name
+    ) AS initial_sales
+    WHERE total_sales IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        sh.s_store_sk,
+        sh.s_store_name,
+        sh.s_store_id,
+        sh.total_sales * COALESCE((1 + (SELECT AVG(ws_ext_discount_amt) FROM web_sales WHERE ws_item_sk = sh.ss_item_sk)), 0.1) AS total_sales,
+        level + 1
+    FROM sales_hierarchy sh
+    JOIN store_sales ss ON sh.s_store_sk = ss.ss_store_sk
+    WHERE level < 5
+),
+customer_stats AS (
+    SELECT 
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS average_purchase_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_marital_status
+),
+date_range AS (
+    SELECT 
+        d.d_year AS year,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM date_dim d
+    JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE d.d_date BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY d.d_year
+),
+combined_stats AS (
+    SELECT 
+        dh.year,
+        cs.customer_count,
+        cs.average_purchase_estimate,
+        COALESCE(dr.total_orders, 0) AS total_orders,
+        COALESCE(dr.total_sales, 0) AS total_sales
+    FROM customer_stats cs
+    FULL OUTER JOIN date_range dr ON cs.customer_count IS NOT NULL
+    CROSS JOIN (SELECT DISTINCT d_year AS year FROM date_dim WHERE d_date BETWEEN '2022-01-01' AND '2022-12-31') dh
+)
+SELECT 
+    s.*,
+    COALESCE(sh.s_sales, 0) AS adjusted_sales
+FROM combined_stats s
+LEFT JOIN sales_hierarchy sh ON s.customer_count IS NOT NULL
+ORDER BY s.year DESC, adjusted_sales DESC;

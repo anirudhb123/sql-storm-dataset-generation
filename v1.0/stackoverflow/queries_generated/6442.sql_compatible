@@ -1,0 +1,48 @@
+
+WITH UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.Views,
+        P.AnswerCount,
+        P.CommentCount,
+        COALESCE(UV.TotalVotes, 0) AS UserVoteCount,
+        COALESCE(UV.UpVotes, 0) AS UpVoteCount,
+        COALESCE(UV.DownVotes, 0) AS DownVoteCount
+    FROM Posts P
+    LEFT JOIN UserVoteCounts UV ON P.OwnerUserId = UV.UserId
+    WHERE P.CreationDate > '2023-01-01' 
+),
+TopPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.Score,
+        PS.Views,
+        PS.AnswerCount,
+        PS.CommentCount,
+        PS.UserVoteCount,
+        RANK() OVER (ORDER BY PS.Score DESC, PS.Views DESC) AS Rank
+    FROM PostStatistics PS
+)
+SELECT 
+    TP.Title,
+    TP.Score,
+    TP.Views,
+    TP.AnswerCount,
+    TP.CommentCount,
+    TP.UserVoteCount,
+    (SELECT COUNT(*) FROM Comments C WHERE C.PostId = TP.PostId) AS TotalComments
+FROM TopPosts TP
+WHERE Rank <= 10;

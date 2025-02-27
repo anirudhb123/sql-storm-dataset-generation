@@ -1,0 +1,43 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 1 AS level
+    FROM nation n
+    WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'AMERICA')
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+)
+SELECT
+    s.s_name AS supplier_name,
+    SUM(ps.ps_availqty) AS total_available_qty,
+    AVG(l.l_extendedprice) AS avg_price,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount))) AS price_rank,
+    CASE 
+        WHEN SUM(ps.ps_supplycost) IS NULL THEN 'No Supply Cost'
+        ELSE CAST(SUM(ps.ps_supplycost) AS VARCHAR)
+    END AS total_supply_cost
+FROM
+    partsupp ps
+LEFT JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN
+    lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE
+    s.s_acctbal > 1000 OR (s.s_acctbal IS NULL AND l.l_shipdate >= cast('1998-10-01' as date) - INTERVAL '30 days')
+GROUP BY
+    s.s_name
+HAVING
+    COUNT(DISTINCT o.o_orderkey) > 5
+    AND SUM(ps.ps_availqty) BETWEEN 10 AND 1000
+    AND EXISTS (
+        SELECT 1
+        FROM NationHierarchy nh
+        WHERE nh.n_nationkey = s.s_nationkey AND nh.level <= 2
+    )
+ORDER BY
+    total_available_qty DESC, avg_price ASC;

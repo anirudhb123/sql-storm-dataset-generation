@@ -1,0 +1,72 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(v.Score, 0) AS VoteScore,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COALESCE(v.Score, 0) DESC, p.CreationDate ASC) AS Ranking
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 WHEN VoteTypeId = 3 THEN -1 ELSE 0 END) AS Score
+         FROM Votes
+         GROUP BY PostId) v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 YEAR)
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldCount,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverCount,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+TopActiveUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT v.PostId) > 5
+)
+SELECT 
+    up.UserId, 
+    up.DisplayName,
+    ub.GoldCount, 
+    ub.SilverCount, 
+    ub.BronzeCount, 
+    SUM(rp.VoteScore) AS TotalScore,
+    SUM(rp.CommentCount) AS TotalComments,
+    COALESCE(tau.TotalBounty, 0) AS TotalBountyAmount,
+    STRING_AGG(DISTINCT rp.Title, '; ') AS UserPosts
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.PostId = ANY(ARRAY(SELECT PostId FROM Posts WHERE OwnerUserId = up.Id))
+JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+LEFT JOIN 
+    TopActiveUsers tau ON up.Id = tau.UserId
+GROUP BY 
+    up.UserId, up.DisplayName, ub.GoldCount, ub.SilverCount, ub.BronzeCount, tau.TotalBounty
+HAVING 
+    COUNT(rp.PostId) > 3 AND SUM(rp.VoteScore) > 50
+ORDER BY 
+    TotalScore DESC, up.DisplayName ASC;

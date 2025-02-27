@@ -1,0 +1,95 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRanking
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        ViewCount,
+        CreationDate,
+        OwnerDisplayName
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRanking <= 10
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes V
+    WHERE 
+        V.PostId IN (SELECT PostId FROM TopPosts)
+    GROUP BY 
+        PostId
+),
+PostComments AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS TotalComments
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+PostHistoryStats AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS HistoryCount,
+        MAX(PH.CreationDate) AS LastEdited
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+),
+FinalResults AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.Score,
+        tp.ViewCount,
+        tp.CreationDate,
+        tp.OwnerDisplayName,
+        COALESCE(pvs.TotalUpvotes, 0) AS TotalUpvotes,
+        COALESCE(pvs.TotalDownvotes, 0) AS TotalDownvotes,
+        COALESCE(pc.TotalComments, 0) AS TotalComments,
+        COALESCE(phs.HistoryCount, 0) AS HistoryCount,
+        COALESCE(phs.LastEdited, 'N/A') AS LastEdited
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostVoteSummary pvs ON tp.PostId = pvs.PostId
+    LEFT JOIN 
+        PostComments pc ON tp.PostId = pc.PostId
+    LEFT JOIN 
+        PostHistoryStats phs ON tp.PostId = phs.PostId
+)
+SELECT 
+    *,
+    (TotalUpvotes - TotalDownvotes) AS NetVotes,
+    CASE 
+        WHEN TotalUpvotes > TotalDownvotes THEN 'Positive'
+        WHEN TotalUpvotes < TotalDownvotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM 
+    FinalResults
+ORDER BY 
+    Score DESC, ViewCount DESC;

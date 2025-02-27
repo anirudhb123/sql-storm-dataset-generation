@@ -1,0 +1,41 @@
+
+WITH AddressParts AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(TRIM(ca_street_number), ' ', TRIM(ca_street_name), ' ', TRIM(ca_street_type), 
+               COALESCE(CONCAT(' Suite ', TRIM(ca_suite_number)), ''), 
+               ', ', TRIM(ca_city), ', ', TRIM(ca_state), ' ', TRIM(ca_zip)) AS full_address
+    FROM 
+        customer_address
+),
+UniqueDemographics AS (
+    SELECT 
+        DISTINCT CONCAT(TRIM(cd_gender), '-', TRIM(cd_marital_status), '-', TRIM(cd_education_status)) AS demo_group
+    FROM 
+        customer_demographics
+),
+JoinedData AS (
+    SELECT 
+        a.full_address,
+        d.demo_group,
+        COUNT(c.c_customer_sk) AS customer_count
+    FROM 
+        AddressParts a
+    JOIN 
+        customer c ON c.c_current_addr_sk = a.ca_address_sk
+    JOIN 
+        UniqueDemographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    GROUP BY 
+        a.full_address, d.demo_group
+)
+SELECT 
+    full_address, 
+    demo_group, 
+    customer_count,
+    ROW_NUMBER() OVER (PARTITION BY full_address ORDER BY customer_count DESC) AS rank
+FROM 
+    JoinedData
+WHERE 
+    customer_count > 0
+ORDER BY 
+    full_address, rank;

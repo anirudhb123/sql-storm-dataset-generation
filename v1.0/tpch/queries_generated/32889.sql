@@ -1,0 +1,67 @@
+WITH RECURSIVE OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount,
+        RANK() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost, 
+        COUNT(ps.ps_partkey) AS parts_supplied
+    FROM 
+        partsupp ps 
+    GROUP BY 
+        ps.ps_suppkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name, 
+        p.p_retailprice, 
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p 
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT 
+    rs.r_name,
+    ps.p_name,
+    SUM(os.total_amount) AS total_order_value,
+    COUNT(os.o_orderkey) AS total_orders,
+    MAX(ss.total_supply_cost) AS max_supply_cost,
+    MIN(ss.parts_supplied) AS min_parts_supplied,
+    AVG(pd.p_retailprice) AS avg_retail_price,
+    STRING_AGG(DISTINCT ss.ps_suppkey::text, ', ') AS supplier_keys
+FROM 
+    region rs
+JOIN 
+    nation n ON rs.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    OrderSummary os ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE ps.ps_partkey = p.p_partkey)
+JOIN 
+    SupplierStats ss ON s.s_suppkey = ss.ps_suppkey
+JOIN 
+    PartDetails pd ON ps.ps_partkey = pd.p_partkey
+WHERE 
+    os.total_amount > 1000
+GROUP BY 
+    rs.r_name, ps.p_name
+HAVING 
+    COUNT(os.o_orderkey) >= 5
+ORDER BY 
+    total_order_value DESC, rs.r_name ASC;

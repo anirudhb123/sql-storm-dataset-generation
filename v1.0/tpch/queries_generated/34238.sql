@@ -1,0 +1,39 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS order_level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT oh.o_orderkey, o.o_orderdate, o.o_totalprice, oh.order_level + 1
+    FROM OrderHierarchy oh
+    JOIN orders o ON o.o_orderkey = oh.o_orderkey + 1
+),
+SupplierStats AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail_qty, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerRanked AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent,
+           RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS spend_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT o.order_level, c.c_name, ps.p_name,
+       COALESCE(ps.total_avail_qty, 0) AS available_quantity,
+       COALESCE(css.total_spent, 0) AS customer_spending
+FROM OrderHierarchy o
+JOIN CustomerRanked css ON css.spend_rank <= 10
+JOIN PartSupplier ps ON ps.supplier_count > 5
+LEFT JOIN SupplierStats s ON ps.p_partkey = s.ps_partkey
+WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+ORDER BY o.order_level, css.total_spent DESC
+LIMIT 100;

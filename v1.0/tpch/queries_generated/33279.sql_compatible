@@ -1,0 +1,65 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        1 AS level
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+
+    UNION ALL
+
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) + s.total_spent AS total_spent,
+        level + 1
+    FROM 
+        SalesCTE s
+    JOIN 
+        customer c ON s.c_custkey = c.c_custkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.o_orderkey
+    WHERE 
+        level < 5  
+    GROUP BY 
+        c.c_custkey, c.c_name, s.total_spent, level
+),
+RankedSales AS (
+    SELECT 
+        c.c_name,
+        s.total_spent,
+        RANK() OVER (ORDER BY s.total_spent DESC) AS rnk,
+        n.n_regionkey
+    FROM 
+        SalesCTE s
+    JOIN 
+        customer c ON s.c_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT rs.c_name) AS customer_count,
+    AVG(rs.total_spent) AS avg_total_spent,
+    MAX(rs.total_spent) AS max_total_spent,
+    MIN(rs.total_spent) AS min_total_spent
+FROM 
+    RankedSales rs
+JOIN 
+    region r ON rs.n_regionkey = r.r_regionkey
+WHERE 
+    rs.rnk <= 10 
+GROUP BY 
+    r.r_name
+ORDER BY 
+    r.r_name DESC;

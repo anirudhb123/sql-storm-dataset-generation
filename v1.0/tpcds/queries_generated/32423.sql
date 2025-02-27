@@ -1,0 +1,67 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        s_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY ss_sold_date_sk DESC) AS rn
+    FROM 
+        store_sales
+    GROUP BY 
+        s_store_sk,
+        ss_sold_date_sk
+),
+Customer_Performance AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        (SELECT COUNT(*)
+         FROM store_sales ss
+         WHERE ss.ss_customer_sk = c.c_customer_sk) AS sales_count,
+        (SELECT SUM(ws_net_paid)
+         FROM web_sales ws
+         WHERE ws.ws_bill_customer_sk = c.c_customer_sk) AS web_sales_total
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+Top_Sales_Stores AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        SUM(ss_ext_sales_price) AS total_store_sales
+    FROM 
+        store_sales
+    INNER JOIN 
+        store s ON ss_store_sk = s.s_store_sk
+    GROUP BY 
+        s.s_store_sk, s.s_store_name
+    HAVING 
+        total_store_sales > (SELECT AVG(total) FROM (SELECT SUM(ss_ext_sales_price) AS total FROM store_sales GROUP BY ss_store_sk) AS avg_sales)
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    tp.s_store_name,
+    tp.total_store_sales,
+    SC.total_sales,
+    cs.web_sales_total
+FROM 
+    Customer_Performance cs
+LEFT JOIN 
+    Top_Sales_Stores tp ON tp.s_store_sk = cs.c_customer_sk
+JOIN 
+    Sales_CTE SC ON SC.rn = 1 AND SC.s_store_sk = tp.s_store_sk
+WHERE 
+    cs.cd_marital_status = 'M'
+ORDER BY 
+    cs.cd_purchase_estimate DESC,
+    tp.total_store_sales DESC
+LIMIT 100;

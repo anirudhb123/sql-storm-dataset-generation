@@ -1,0 +1,53 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        c.c_name, 
+        c.c_acctbal,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS rank_price
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    ORDER BY 
+        total_supplycost DESC
+    LIMIT 10
+)
+SELECT 
+    r.r_name, 
+    COUNT(DISTINCT no.o_orderkey) AS order_count, 
+    SUM(no.o_totalprice) AS total_revenue,
+    AVG(c.c_acctbal) AS avg_account_balance,
+    ts.total_supplycost
+FROM 
+    RankedOrders no
+JOIN 
+    nation n ON no.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    TopSuppliers ts ON ts.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM lineitem l 
+        JOIN partsupp ps ON l.l_partkey = ps.ps_partkey 
+        WHERE l.l_orderkey = no.o_orderkey
+    )
+GROUP BY 
+    r.r_name, ts.total_supplycost
+ORDER BY 
+    total_revenue DESC, order_count DESC;

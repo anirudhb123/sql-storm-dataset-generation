@@ -1,0 +1,66 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostsWithTagCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+VoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.PostCount,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    us.QuestionsCount,
+    us.AnswersCount,
+    ts.TagName,
+    ts.PostsWithTagCount,
+    ts.TotalViews,
+    vs.TotalVotes,
+    vs.UpVotes,
+    vs.DownVotes
+FROM 
+    UserStats us
+LEFT JOIN 
+    TagStats ts ON ts.PostsWithTagCount > 0
+LEFT JOIN 
+    VoteStats vs ON us.UserId = vs.PostId
+ORDER BY 
+    us.PostCount DESC, us.TotalUpVotes DESC;

@@ -1,0 +1,60 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        1 AS Level
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  -- Closed or Reopened
+
+    UNION ALL
+
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        Level + 1
+    FROM 
+        PostHistory ph
+    JOIN 
+        RecursivePostHistory rph ON ph.PostId = rph.PostId
+    WHERE 
+        ph.PostHistoryTypeId NOT IN (10, 11)  -- Exclude Closed or Reopened
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    COUNT(DISTINCT ph.PostId) AS ClosedPosts,
+    AVG(EXTRACT(EPOCH FROM (NOW() - rph.HistoryDate)) / 3600) AS AvgClosedTimeInHours,
+    STRING_AGG(DISTINCT p.Title, ', ') AS ClosedPostTitles,
+    SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS TotalCloseVotes,
+    SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS TotalReopenVotes,
+    COUNT(COMMENT.Id) FILTER (WHERE COMMENT.Text IS NOT NULL) AS TotalComments
+FROM 
+    Users u
+JOIN 
+    PostHistory ph ON u.Id = ph.UserId
+LEFT JOIN 
+    Posts p ON ph.PostId = p.Id
+LEFT JOIN 
+    Comments COMMENT ON COMMENT.PostId = p.Id
+LEFT JOIN 
+    RecursivePostHistory rph ON p.Id = rph.PostId
+WHERE 
+    ph.PostHistoryTypeId IN (10, 11)  -- Focus on Closed or Reopened posts
+    AND u.Reputation > 100  -- Only consider users with more than 100 reputation
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT ph.PostId) > 1  -- Only include users who have closed more than one post
+ORDER BY 
+    ClosedPosts DESC,
+    AvgClosedTimeInHours ASC;

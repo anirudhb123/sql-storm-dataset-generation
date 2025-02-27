@@ -1,0 +1,77 @@
+WITH RankedOrders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_orderdate,
+        o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_totalprice DESC) AS rn
+    FROM 
+        orders
+    WHERE 
+        o_orderdate > current_date - interval '1' year
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        p.p_partkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, p.p_partkey
+),
+CustomerOrderStats AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+NullHandledCountries AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COALESCE(SUM(CASE WHEN o.o_orderstatus = 'O' THEN 1 ELSE 0 END), 0) AS open_orders
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name,
+    COALESCE(o.total_orders, 0) AS total_orders,
+    COALESCE(s.total_supply_cost, 0) AS total_supply_cost,
+    n.open_orders
+FROM 
+    region r
+LEFT JOIN 
+    NullHandledCountries n ON r.r_regionkey = n.n_nationkey
+LEFT JOIN 
+    CustomerOrderStats o ON o.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey ORDER BY c.c_acctbal DESC LIMIT 1)
+LEFT JOIN 
+    (SELECT 
+        s.s_suppkey,
+        SUM(sp.total_supply_cost) AS total_supply_cost 
+    FROM 
+        SupplierParts sp 
+    GROUP BY 
+        s.s_suppkey) s ON s.s_suppkey = (SELECT MIN(ps.ps_suppkey) FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_type LIKE '%Fragile%'))
+WHERE 
+    r.r_regionkey IS NOT NULL
+ORDER BY 
+    r.r_name, total_orders DESC NULLS LAST;

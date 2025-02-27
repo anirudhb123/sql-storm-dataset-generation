@@ -1,0 +1,38 @@
+SELECT
+    t.title AS movie_title,
+    a.name AS actor_name,
+    c.kind AS character_role,
+    GROUP_CONCAT(DISTINCT kw.keyword ORDER BY kw.keyword SEPARATOR ', ') AS keywords,
+    MIN(m.production_year) AS earliest_year,
+    COUNT(DISTINCT cn.id) AS total_companies,
+    s.name AS studio_name
+FROM
+    aka_title t
+JOIN
+    cast_info ci ON t.id = ci.movie_id
+JOIN
+    aka_name a ON ci.person_id = a.person_id
+JOIN
+    role_type c ON ci.role_id = c.id
+LEFT JOIN
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN
+    company_name s ON (s.id = mi.info_type_id AND ct.kind LIKE '%studio%')
+WHERE
+    t.production_year >= 2000 
+    AND a.name IS NOT NULL 
+    AND c.kind IS NOT NULL
+GROUP BY
+    t.id, a.name, c.kind, s.name
+ORDER BY
+    earliest_year ASC, movie_title ASC;

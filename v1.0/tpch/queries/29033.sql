@@ -1,0 +1,32 @@
+
+SELECT 
+    CONCAT(SUBSTRING(p.p_name, 1, 20), '...', SUBSTRING(p.p_name, LENGTH(p.p_name) - 10, 10)) AS short_name,
+    s.s_name AS supplier_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(l.l_extendedprice) AS average_price,
+    CASE 
+        WHEN COUNT(DISTINCT o.o_orderkey) > 5 THEN 'Frequent Supplier'
+        ELSE 'Occasional Supplier'
+    END AS supplier_frequent_status
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN 
+    orders o ON o.o_orderkey = l.l_orderkey
+WHERE 
+    LENGTH(p.p_comment) > 10 
+    AND s.s_acctbal > 2000 
+    AND l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+GROUP BY 
+    p.p_partkey, s.s_suppkey, p.p_name
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    average_price DESC
+LIMIT 10;

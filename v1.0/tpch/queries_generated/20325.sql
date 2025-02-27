@@ -1,0 +1,55 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 1 as level
+    FROM nation n
+    WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE '%land%')
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+), 
+
+customer_total AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+
+part_supplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, (ps.ps_supplycost * ps.ps_availqty) as total_cost
+    FROM partsupp ps
+    WHERE ps.ps_availqty IS NOT NULL AND ps.ps_supplycost > 0
+),
+
+top_part AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) as rank
+    FROM part p 
+    WHERE p.p_size IN (SELECT DISTINCT p2.p_size FROM part p2 WHERE p2.p_retailprice IS NOT NULL)
+)
+
+SELECT DISTINCT
+    c.c_name,
+    c.c_acctbal,
+    n.n_name,
+    p.p_name,
+    ps.total_cost,
+    ct.total_spent,
+    CASE 
+        WHEN LAG(ct.total_spent) OVER (PARTITION BY c.c_custkey ORDER BY ct.total_spent) IS NULL THEN 'New Customer'
+        WHEN ct.total_spent > 1000 THEN 'Valued Customer'
+        ELSE 'Occasional Customer'
+    END AS customer_segment,
+    COALESCE(ps.total_cost, 0) as supplier_cost
+FROM customer c
+JOIN customer_total ct ON c.c_custkey = ct.c_custkey
+JOIN nation_hierarchy nh ON c.c_nationkey = nh.n_nationkey
+LEFT JOIN part_supplier ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM top_part p WHERE p.rank <= 10)
+LEFT JOIN part p ON p.p_partkey = ps.ps_partkey
+WHERE
+    (c.c_acctbal > 0 OR c.c_name IS NOT NULL) 
+    AND nh.level < 3 
+    AND p.p_retailprice IS NOT NULL
+ORDER BY ct.total_spent DESC, n.n_name ASC;

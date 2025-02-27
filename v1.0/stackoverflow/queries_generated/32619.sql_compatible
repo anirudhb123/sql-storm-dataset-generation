@@ -1,0 +1,86 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        MAX(ph.UserDisplayName) AS ClosedBy
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        p.Id, p.Title, ph.CreationDate
+),
+LinkCounts AS (
+    SELECT 
+        pl.PostId,
+        COUNT(pl.RelatedPostId) AS TotalLinks
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    us.BadgeCount,
+    us.Upvotes,
+    us.Downvotes,
+    us.TotalViews,
+    rp.Title,
+    rp.CreationDate AS PostCreationDate,
+    rp.Score,
+    COALESCE(lc.TotalLinks, 0) AS TotalLinks,
+    cp.ClosedDate,
+    cp.ClosedBy
+FROM 
+    Users u
+LEFT JOIN 
+    UserStats us ON u.Id = us.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.PostRank = 1 
+LEFT JOIN 
+    LinkCounts lc ON rp.Id = lc.PostId
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.Id
+WHERE 
+    u.Reputation > 1000 
+ORDER BY 
+    u.Reputation DESC, rp.Score DESC;

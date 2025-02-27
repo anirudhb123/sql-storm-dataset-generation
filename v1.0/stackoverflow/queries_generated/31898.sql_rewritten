@@ -1,0 +1,70 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        Id,
+        ParentId,
+        Title,
+        CAST(Title AS VARCHAR(MAX)) AS FullHierarchy,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL 
+
+    UNION ALL
+
+    SELECT
+        p.Id,
+        p.ParentId,
+        p.Title,
+        CAST(CONCAT(r.FullHierarchy, ' > ', p.Title) AS VARCHAR(MAX)) AS FullHierarchy,
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostStatistics AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ViewCount,
+        p.Score,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.LastActivityDate DESC) AS RecentActivityRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.PostTypeId, p.ViewCount, p.Score
+),
+BenchmarkData AS (
+    SELECT
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.Score,
+        ps.CommentCount,
+        ps.UpVotes - ps.DownVotes AS NetVote,
+        r.FullHierarchy,
+        DENSE_RANK() OVER (ORDER BY ps.Score DESC) AS ScoreRank,
+        DENSE_RANK() OVER (ORDER BY ps.ViewCount DESC) AS ViewCountRank
+    FROM PostStatistics ps
+    LEFT JOIN RecursivePostHierarchy r ON ps.PostId = r.Id
+)
+SELECT
+    bd.PostId,
+    bd.Title,
+    bd.ViewCount,
+    bd.Score,
+    bd.CommentCount,
+    bd.NetVote,
+    bd.FullHierarchy,
+    CASE
+        WHEN bd.ScoreRank = 1 THEN 'Top Scorer'
+        ELSE 'Regular Post'
+    END AS PostCategory,
+    CASE
+        WHEN bd.ViewCountRank <= 10 THEN 'Top Viewed'
+        ELSE 'Regular View'
+    END AS ViewCategory
+FROM BenchmarkData bd
+WHERE bd.NetVote > 0 OR bd.CommentCount > 5
+ORDER BY bd.NetVote DESC, bd.ViewCount DESC;

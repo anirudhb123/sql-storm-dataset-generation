@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts p
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score IS NOT NULL 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+),
+TopTags AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '><')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+),
+TagUsage AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+        JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 5
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Rank,
+    rp.CommentCount,
+    COALESCE(c.LastClosedDate, 'Never Closed') AS LastClosedDate,
+    (rp.UpVoteCount - rp.DownVoteCount) AS NetVotes,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = rp.OwnerUserId) AS BadgeCount,
+    (SELECT STRING_AGG(Tag, ', ') FROM TopTags tt WHERE tt.Tag IN (SELECT TagName FROM TagUsage)) AS PopularTags
+FROM 
+    RankedPosts rp
+    LEFT JOIN ClosedPostHistory c ON rp.PostId = c.PostId
+WHERE 
+    rp.Rank = 1  -- Select the latest post for each user
+ORDER BY 
+    NetVotes DESC,
+    rp.CommentCount DESC
+LIMIT 100;

@@ -1,0 +1,122 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(b.Class = 1)::int, 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2)::int, 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3)::int, 0) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        AVG(p.ViewCount) AS AvgPostViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+FrequentTags AS (
+    SELECT
+        p.OwnerUserId,
+        unnest(string_to_array(p.Tags, ',')) AS TagName
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+), 
+TagCount AS (
+    SELECT
+        ft.OwnerUserId,
+        ft.TagName,
+        COUNT(*) AS TagFrequency
+    FROM 
+        FrequentTags ft
+    GROUP BY 
+        ft.OwnerUserId, ft.TagName
+),
+TopTags AS (
+    SELECT 
+        tc.OwnerUserId,
+        tc.TagName,
+        tc.TagFrequency,
+        RANK() OVER (PARTITION BY tc.OwnerUserId ORDER BY tc.TagFrequency DESC) AS TagRank
+    FROM 
+        TagCount tc
+), 
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.Reputation,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges,
+        us.PostCount,
+        us.AvgPostViews,
+        tt.TagName
+    FROM 
+        UserStats us
+    JOIN 
+        TopTags tt ON us.UserId = tt.OwnerUserId
+    WHERE 
+        tt.TagRank <= 5
+),
+UserRankings AS (
+    SELECT 
+        UserId,
+        Reputation,
+        GoldBadges,
+        SilverBadges,
+        BronzeBadges,
+        PostCount,
+        AvgPostViews,
+        TagName,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, PostCount DESC, AvgPostViews DESC) AS UserRank
+    FROM 
+        TopUsers
+    WHERE 
+        Reputation IS NOT NULL
+),
+DeletedPosts AS (
+    SELECT 
+        p.Id,
+        p.OwnerUserId,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 12 -- Deleted
+    AND 
+        p.CreatedAt < NOW() - INTERVAL '1 year'
+),
+UserPostHistory AS (
+    SELECT 
+        up.UserId,
+        COUNT(dp.Id) AS DeletedPostsCount
+    FROM 
+        Users up
+    LEFT JOIN 
+        DeletedPosts dp ON up.Id = dp.OwnerUserId
+    GROUP BY 
+        up.UserId
+)
+SELECT 
+    ur.UserId,
+    ur.Reputation,
+    ur.GoldBadges,
+    ur.SilverBadges,
+    ur.BronzeBadges,
+    ur.PostCount,
+    ur.AvgPostViews,
+    ur.TagName,
+    ur.UserRank,
+    COALESCE(uph.DeletedPostsCount, 0) AS DeletedPostsCount
+FROM 
+    UserRankings ur
+LEFT JOIN 
+    UserPostHistory uph ON ur.UserId = uph.UserId
+ORDER BY 
+    ur.UserRank ASC,
+    ur.Reputation DESC;

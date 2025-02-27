@@ -1,0 +1,60 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, NULL::integer AS parent_suppkey
+    FROM supplier s
+    WHERE s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.s_suppkey AS parent_suppkey
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > 100
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerStats AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name,
+           ROW_NUMBER() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT DISTINCT
+    part.p_name,
+    supplier.s_name,
+    SUM(lineitem.l_extendedprice * (1 - lineitem.l_discount)) AS total_revenue,
+    (SELECT COUNT(*) FROM CustomerStats cs WHERE cs.total_spent > 1000) AS high_spending_customers,
+    COALESCE(NULLIF(TotalOrders.order_count, 0), 0) AS total_orders
+FROM lineitem
+JOIN partsupp ON lineitem.l_partkey = partsupp.ps_partkey
+JOIN part ON partsupp.ps_partkey = part.p_partkey
+JOIN supplier ON partsupp.ps_suppkey = supplier.s_suppkey
+LEFT JOIN (
+    SELECT o.o_orderkey, COUNT(*) AS order_count
+    FROM orders o
+    GROUP BY o.o_orderkey
+) AS TotalOrders ON lineitem.l_orderkey = TotalOrders.o_orderkey
+WHERE lineitem.l_shipdate >= CURRENT_DATE - INTERVAL '1 year'
+GROUP BY part.p_name, supplier.s_name
+HAVING total_revenue > (
+    SELECT AVG(total_revenue) FROM (
+        SELECT SUM(lineitem.l_extendedprice * (1 - lineitem.l_discount)) AS total_revenue
+        FROM lineitem
+        WHERE lineitem.l_shipdate >= CURRENT_DATE - INTERVAL '1 year'
+        GROUP BY lineitem.l_orderkey
+    ) AS yearly_revenue
+)
+ORDER BY total_revenue DESC
+LIMIT 10;

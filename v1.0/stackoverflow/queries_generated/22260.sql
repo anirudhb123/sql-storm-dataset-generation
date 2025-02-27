@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score,
+        p.ViewCount, 
+        p.AnswerCount, 
+        p.ClosedDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rnk,
+        DENSE_RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND (p.ClosedDate IS NULL OR p.ClosedDate > NOW() - INTERVAL '6 months')
+),
+UserSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+UserPostRankings AS (
+    SELECT 
+        us.*,
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate AS PostCreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount
+    FROM 
+        UserSummary us
+    LEFT JOIN 
+        RankedPosts rp ON us.UserId = rp.OwnerUserId AND rp.Rnk <= 3
+)
+SELECT 
+    up.*,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Posts p 
+     JOIN Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+     WHERE p.OwnerUserId = up.UserId) AS TagList,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     JOIN Posts p2 ON v.PostId = p2.Id 
+     WHERE v.UserId = up.UserId 
+       AND v.CreationDate > NOW() - INTERVAL '1 month') AS RecentVotes,
+    CASE 
+        WHEN MAX(up.Reputation) IS NOT NULL THEN MAX(up.Reputation)
+        ELSE 0
+    END AS EffectiveReputation
+FROM 
+    UserPostRankings up
+GROUP BY 
+    up.UserId, up.DisplayName, up.PostId, up.Title, up.CreationDate, up.Score, up.ViewCount, up.AnswerCount
+ORDER BY 
+    EffectiveReputation DESC, AvgScore DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

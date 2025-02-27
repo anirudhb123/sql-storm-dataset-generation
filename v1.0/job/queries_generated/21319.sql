@@ -1,0 +1,70 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        mt.title AS movie_title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY mt.production_year DESC) AS rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+FilteredActors AS (
+    SELECT 
+        actor_id, 
+        actor_name, 
+        movie_title, 
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5
+        AND actor_name NOT LIKE '%unknown%'
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+CompCast AS (
+    SELECT 
+        ci.movie_id,
+        STRING_AGG(ct.kind, ', ') AS comp_type
+    FROM 
+        cast_info ci
+    JOIN 
+        movie_companies mc ON ci.movie_id = mc.movie_id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    fa.actor_name,
+    fa.movie_title,
+    fa.production_year,
+    COALESCE(mk.keywords, 'No keywords') AS movie_keywords,
+    COALESCE(cc.comp_type, 'No company types') AS company_types
+FROM 
+    FilteredActors fa
+LEFT JOIN 
+    MovieKeywords mk ON fa.movie_title = mk.movie_id
+LEFT JOIN 
+    CompCast cc ON fa.movie_title = cc.movie_id
+WHERE 
+    fa.production_year BETWEEN 2000 AND 2023
+    AND (fa.actor_name IS NOT NULL OR fa.actor_name != '')
+ORDER BY 
+    fa.production_year DESC,
+    fa.actor_name;

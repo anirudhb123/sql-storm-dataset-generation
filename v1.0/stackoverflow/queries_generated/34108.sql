@@ -1,0 +1,136 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        1 AS PostLevel
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Start with top-level questions only
+    UNION ALL
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.Score,
+        p2.AcceptedAnswerId,
+        p2.CreationDate,
+        r.PostLevel + 1 AS PostLevel
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostCTE r ON p2.ParentId = r.PostId
+),
+MaxScoreCTE AS (
+    SELECT 
+        OwnerUserId,
+        MAX(Score) AS MaxScore
+    FROM 
+        Posts
+    GROUP BY 
+        OwnerUserId
+),
+UserReputationCTE AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        COALESCE(bg.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ps.PostCount, 0) AS PostCount,
+        COALESCE(MAX(m.MaxScore), 0) AS TopPostScore
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) bg ON u.Id = bg.UserId
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId,
+            COUNT(*) AS PostCount
+        FROM 
+            Posts
+        GROUP BY 
+            OwnerUserId
+    ) ps ON u.Id = ps.OwnerUserId
+    LEFT JOIN 
+        MaxScoreCTE m ON u.Id = m.OwnerUserId
+    WHERE 
+        u.Reputation > 1000 -- Filter users with reputation above a threshold
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.Views, u.UpVotes, u.DownVotes
+),
+PostAggregates AS (
+    SELECT 
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' -- Recent posts
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.AnswerCount
+),
+FinalResults AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        u.BadgeCount,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        r.PostLevel,
+        CASE 
+            WHEN p.Score IS NULL THEN 'Not Rated'
+            WHEN p.Score > 50 THEN 'Highly Rated'
+            ELSE 'Moderately Rated'
+        END AS ScoreCategory
+    FROM 
+        UserReputationCTE u
+    JOIN 
+        PostAggregates p ON u.Id = p.OwnerUserId
+    JOIN 
+        RecursivePostCTE r ON p.PostId = r.PostId
+)
+SELECT 
+    DisplayName,
+    Reputation,
+    Views,
+    UpVotes,
+    DownVotes,
+    BadgeCount,
+    Title,
+    CreationDate,
+    Score,
+    AnswerCount,
+    CommentCount,
+    PostLevel,
+    ScoreCategory
+FROM 
+    FinalResults
+ORDER BY 
+    Reputation DESC, Score DESC
+LIMIT 50; -- Performance Benchmarking

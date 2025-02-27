@@ -1,0 +1,51 @@
+
+WITH SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > 1000.00
+),
+HighValueSupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ps.ps_supplycost,
+        ps.ps_availqty
+    FROM 
+        SupplierPartDetails s
+    WHERE 
+        s.rank = 1
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT h.s_suppkey) AS unique_suppliers_count,
+    SUM(h.ps_availqty) AS total_available_quantity,
+    AVG(h.ps_supplycost) AS average_supply_cost
+FROM 
+    HighValueSupplierParts h
+JOIN 
+    supplier s ON h.s_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+GROUP BY 
+    n.n_name
+ORDER BY 
+    total_available_quantity DESC;

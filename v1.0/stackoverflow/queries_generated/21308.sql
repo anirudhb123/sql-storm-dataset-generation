@@ -1,0 +1,82 @@
+WITH RecursivePostCounts AS (
+    SELECT 
+        p.Id,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TagAggregates AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(PC.CommentCount) AS TotalComments,
+        SUM(PC.UpVoteCount) AS TotalUpVotes,
+        SUM(PC.DownVoteCount) AS TotalDownVotes
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.ExcerptPostId = p.Id OR t.WikiPostId = p.Id
+    LEFT JOIN 
+        RecursivePostCounts PC ON p.Id = PC.Id
+    GROUP BY 
+        t.Id, t.TagName
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+FinalResults AS (
+    SELECT 
+        t.TagName,
+        ta.PostCount,
+        ta.TotalComments,
+        ta.TotalUpVotes,
+        ta.TotalDownVotes,
+        ub.BadgeCount,
+        (COALESCE(ta.TotalUpVotes, 0) - COALESCE(ta.TotalDownVotes, 0)) AS NetVoteScore,
+        CASE 
+            WHEN ub.BadgeCount > 5 THEN 'High Badge Holder'
+            WHEN ub.BadgeCount BETWEEN 3 AND 5 THEN 'Moderate Badge Holder'
+            ELSE 'Novice Badge Holder'
+        END AS UserBadgeStatus
+    FROM 
+        TagAggregates ta
+    JOIN 
+        Users u ON u.Id IN (SELECT DISTINCT OwnerUserId FROM Posts WHERE Id IN (SELECT DISTINCT ExcerptPostId FROM Tags))
+    LEFT JOIN 
+        UserBadgeCounts ub ON u.Id = ub.UserId
+)
+SELECT 
+    TagName,
+    PostCount,
+    TotalComments,
+    TotalUpVotes,
+    TotalDownVotes,
+    BadgeCount,
+    NetVoteScore,
+    UserBadgeStatus
+FROM 
+    FinalResults
+WHERE 
+    NetVoteScore > 10 OR (TotalComments > 5 AND UserBadgeStatus = 'High Badge Holder')
+ORDER BY 
+    TotalUpVotes DESC, PostCount DESC
+LIMIT 20;

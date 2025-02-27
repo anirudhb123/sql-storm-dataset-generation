@@ -1,0 +1,48 @@
+
+WITH aggregated_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders,
+        STRING_AGG(DISTINCT i_item_desc, ', ') AS unique_items
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_ship_date_sk BETWEEN 2500 AND 3500 
+    GROUP BY 
+        ws_bill_customer_sk
+), customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name || ' ' || c.c_last_name AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city || ', ' || ca.ca_state AS full_address
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    ci.full_name,
+    ci.full_address,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_purchase_estimate,
+    AS.total_sales,
+    AS.total_orders,
+    AS.unique_items
+FROM 
+    customer_info ci
+JOIN 
+    aggregated_sales AS ON ci.c_customer_sk = AS.ws_bill_customer_sk
+WHERE 
+    AS.total_sales > 1000 AND ci.cd_gender = 'M'
+ORDER BY 
+    AS.total_sales DESC
+LIMIT 100;

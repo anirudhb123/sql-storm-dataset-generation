@@ -1,0 +1,31 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    GROUP_CONCAT(DISTINCT kw.keyword ORDER BY kw.keyword) AS keywords,
+    GROUP_CONCAT(DISTINCT pi.info ORDER BY pi.info) AS personal_info
+FROM 
+    aka_name AS a
+JOIN 
+    cast_info AS ci ON a.person_id = ci.person_id
+JOIN 
+    title AS t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_companies AS mc ON t.id = mc.movie_id
+LEFT JOIN 
+    movie_keyword AS mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword AS kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    person_info AS pi ON a.person_id = pi.person_id
+WHERE 
+    a.name ILIKE 'John%'
+    AND t.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    a.id, t.id
+ORDER BY 
+    t.production_year DESC, actor_name ASC
+LIMIT 100;
+
+This SQL query benchmarks string processing by retrieving a list of actors named "John" along with the movies they were in, produced between the years 2000 and 2023. It aggregates data on production companies and keywords associated with these movies, as well as any personal information related to the actors, and orders the results by production year and actor name. The use of `ILIKE` allows for case-insensitive matching, demonstrating string processing capabilities.

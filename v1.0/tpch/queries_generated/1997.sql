@@ -1,0 +1,79 @@
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RankedSuppliers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY total_supply_cost DESC) AS supply_rank
+    FROM 
+        SupplierSummary
+),
+RankedCustomers AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY c_nationkey ORDER BY total_order_value DESC) AS customer_rank
+    FROM 
+        CustomerOrderSummary
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name 
+    FROM 
+        RankedSuppliers s 
+    WHERE 
+        s.supply_rank <= 5
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name 
+    FROM 
+        RankedCustomers c 
+    WHERE 
+        customer_rank <= 10
+)
+SELECT 
+    t.s_name AS supplier_name,
+    t.c_name AS customer_name,
+    COALESCE(s.total_supply_cost, 0) AS total_supply_cost,
+    COALESCE(c.total_order_value, 0) AS total_order_value
+FROM 
+    TopSuppliers t
+FULL OUTER JOIN 
+    TopCustomers c ON t.s_suppkey = c.c_custkey
+LEFT JOIN 
+    SupplierSummary s ON t.s_suppkey = s.s_suppkey
+LEFT JOIN 
+    CustomerOrderSummary c ON c.c_custkey = c.c_custkey
+WHERE 
+    (s.total_supply_cost IS NOT NULL OR c.total_order_value IS NOT NULL)
+ORDER BY 
+    total_supply_cost DESC, 
+    total_order_value DESC
+LIMIT 50;

@@ -1,0 +1,93 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+PopularUsers AS (
+    SELECT
+        u.Id AS UserID,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG((p.UpVotes - p.DownVotes) * 1.0) AS AvgScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.ViewCount > 0
+    GROUP BY
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId AS CloserUserId,
+        ph.CreationDate AS CloseDate,
+        C.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes C ON CAST(ph.Comment AS INTEGER) = C.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserID,
+        b.Name AS BadgeName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, b.Name
+),
+FinalReport AS (
+    SELECT 
+        pu.UserID,
+        pu.DisplayName,
+        pu.PostCount,
+        pu.TotalViews,
+        pu.AvgScore,
+        COALESCE(SUM(CASE WHEN c.CloserUserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS ClosedPostCount,
+        MAX(ub.BadgeName) AS MostCommonBadge,
+        STRING_AGG(DISTINCT ut.ErrorType) AS UniqueErrorTypes
+    FROM 
+        PopularUsers pu
+    LEFT JOIN 
+        ClosedPosts c ON pu.UserID = c.CloserUserId
+    LEFT JOIN 
+        (SELECT UserId, 'Possible Duplicate' AS ErrorType FROM Posts WHERE Id IN (SELECT RelatedPostId FROM PostLinks WHERE LinkTypeId = 3)) ut ON pu.UserID = ut.UserId
+    LEFT JOIN 
+        UserBadges ub ON pu.UserID = ub.UserID
+    GROUP BY 
+        pu.UserID, pu.DisplayName
+)
+SELECT 
+    fr.UserID,
+    fr.DisplayName,
+    fr.PostCount,
+    fr.TotalViews,
+    fr.AvgScore,
+    fr.ClosedPostCount,
+    fr.MostCommonBadge,
+    COALESCE(NULLIF(fr.UniqueErrorTypes, ''), 'No links found') AS ErrorTypes
+FROM 
+    FinalReport fr
+WHERE 
+    fr.TotalViews > 1000
+ORDER BY 
+    fr.TotalViews DESC;

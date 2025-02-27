@@ -1,0 +1,90 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS total_orders, 
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+), 
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_availqty) AS total_available, 
+        AVG(ps.ps_supplycost) AS avg_supply_cost 
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), 
+NationalStats AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(c.total_spent) AS total_spent_by_nation
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        customer c ON s.s_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_mfgr, 
+    ps.total_available,
+    ns.supplier_count,
+    ROUND(ns.total_spent_by_nation, 2) AS national_spending,
+    CASE 
+        WHEN rs.rank = 1 THEN 'Top Supplier'
+        ELSE 'Other Supplier'
+    END AS supplier_rank,
+    COALESCE(c.total_orders, 0) AS customer_orders,
+    COALESCE(c.avg_order_value, 0) AS average_order_value,
+    CASE 
+        WHEN p.p_retailprice < 20 THEN 'Cheap' 
+        WHEN p.p_retailprice BETWEEN 20 AND 100 THEN 'Moderate' 
+        ELSE 'Expensive' 
+    END AS price_category
+FROM 
+    part p
+LEFT JOIN 
+    PartSupplierDetails ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    NationalStats ns ON ns.supplier_count > 1 
+LEFT JOIN 
+    RankedSuppliers rs ON rs.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    CustomerOrders c ON c.c_custkey IN (
+        SELECT DISTINCT c2.c_custkey 
+        FROM customer c2 
+        WHERE c2.c_nationkey = ns.n_nationkey OR c2.c_nationkey IS NULL
+    )
+WHERE 
+    (p.p_size IS NULL OR p.p_size > 10) 
+    AND (p.p_brand IS NULL OR p.p_brand != 'unknown') 
+    AND (ns.total_spent_by_nation > 1000 OR ns.n_nationkey IS NULL)
+ORDER BY 
+    national_spending DESC, 
+    supplier_rank, 
+    p.p_partkey;

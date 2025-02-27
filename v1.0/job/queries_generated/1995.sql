@@ -1,0 +1,79 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY k.keyword) AS keyword_rank
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+ActorMovieInfo AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        c.movie_id,
+        COUNT(DISTINCT c.role_id) AS role_count,
+        COUNT(DISTINCT cc.id) AS complete_cast_count
+    FROM 
+        aka_name a
+    INNER JOIN 
+        cast_info c ON a.person_id = c.person_id
+    LEFT JOIN 
+        complete_cast cc ON c.movie_id = cc.movie_id AND c.person_id = cc.subject_id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.person_id, a.name
+),
+TopActors AS (
+    SELECT 
+        ami.person_id,
+        ami.name,
+        ami.role_count,
+        RANK() OVER (ORDER BY ami.role_count DESC) AS actor_rank
+    FROM 
+        ActorMovieInfo ami
+    WHERE 
+        ami.role_count > 1
+),
+MovieProductionInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    ta.name AS top_actor,
+    ta.role_count,
+    mpi.company_names,
+    mpi.company_types,
+    COALESCE(md.keyword, 'No Keywords') AS keywords,
+    CASE 
+        WHEN ta.role_count > 5 THEN 'Veteran Actor'
+        ELSE 'Emerging Actor'
+    END AS actor_status
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    TopActors ta ON md.title_id = (SELECT movie_id FROM cast_info WHERE person_id = ta.person_id LIMIT 1)
+LEFT JOIN 
+    MovieProductionInfo mpi ON md.title_id = mpi.movie_id
+WHERE 
+    md.keyword_rank <= 3 OR md.keyword IS NULL
+ORDER BY 
+    md.production_year DESC, ta.role_count DESC NULLS LAST;

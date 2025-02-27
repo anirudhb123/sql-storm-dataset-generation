@@ -1,0 +1,62 @@
+WITH RecursivePostCTE AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        0 AS Depth
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        c.Depth + 1
+    FROM Posts p
+    INNER JOIN RecursivePostCTE c ON p.ParentId = c.PostId
+),
+UserVoteSummary AS (
+    SELECT
+        v.UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM Votes v
+    JOIN Posts p ON v.PostId = p.Id
+    GROUP BY v.UserId
+),
+PostHistoryAnalysis AS (
+    SELECT
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 12 THEN ph.CreationDate END) AS LastDeletedDate,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.UserId END) AS CloseVoteCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    ups.UpVotes,
+    ups.DownVotes,
+    ups.TotalPosts,
+    p.Title,
+    p.CreationDate,
+    COALESCE(ph.LastClosedDate, 'Never Closed') AS LastClosed,
+    COALESCE(ph.LastDeletedDate, 'Never Deleted') AS LastDeleted,
+    ph.CloseVoteCount,
+    rp.Depth
+FROM Users u
+LEFT JOIN UserVoteSummary ups ON u.Id = ups.UserId
+LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN PostHistoryAnalysis ph ON ph.PostId = p.Id
+LEFT JOIN RecursivePostCTE rp ON rp.PostId = p.Id
+WHERE 
+    (ups.UpVotes > 5 OR ups.DownVotes > 2) 
+    AND p.CreationDate > '2023-01-01'
+ORDER BY 
+    u.Reputation DESC, 
+    p.CreationDate DESC;

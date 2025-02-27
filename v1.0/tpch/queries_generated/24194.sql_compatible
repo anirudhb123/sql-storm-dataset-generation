@@ -1,0 +1,45 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank_per_nation
+    FROM supplier s
+    JOIN nation n ON s.n_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey, o.o_custkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+),
+ZeroCountParts AS (
+    SELECT p.p_partkey, p.p_name, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING COUNT(DISTINCT ps.ps_suppkey) = 0
+),
+NotShippedOrders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, COUNT(DISTINCT l.l_linenumber) AS not_shipped_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey AND l.l_shipdate IS NULL
+    WHERE o.o_orderstatus IN ('O', 'P')
+    GROUP BY o.o_orderkey, o.o_orderstatus
+    HAVING COUNT(DISTINCT l.l_linenumber) > 0
+)
+SELECT r.r_name, 
+       COALESCE(SUM(CASE WHEN hs.total_value IS NOT NULL THEN hs.total_value ELSE 0 END), 0) AS total_high_value_order,
+       COUNT(DISTINCT z.p_partkey) AS zero_count_parts,
+       SUM(CASE WHEN nso.not_shipped_count IS NOT NULL THEN nso.not_shipped_count ELSE 0 END) AS total_not_shipped_orders,
+       COUNT(DISTINCT rs.s_suppkey) AS total_suppliers 
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN RankedSuppliers rs ON n.n_nationkey = rs.n_nationkey AND rs.rank_per_nation = 1
+LEFT JOIN HighValueOrders hs ON n.n_nationkey = (SELECT n2.n_nationkey FROM customer c JOIN nation n2 ON c.c_nationkey = n2.n_nationkey WHERE c.c_custkey = hs.o_custkey)
+LEFT JOIN ZeroCountParts z ON TRUE
+LEFT JOIN NotShippedOrders nso ON nso.o_orderkey = hs.o_orderkey
+WHERE r.r_name LIKE 'A%' OR r.r_name IS NULL
+GROUP BY r.r_name
+ORDER BY r.r_name DESC;

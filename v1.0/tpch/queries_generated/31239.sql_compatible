@@ -1,0 +1,37 @@
+
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s_nationkey, s_suppkey, s_name, s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rn
+    FROM supplier
+),
+RecentOrders AS (
+    SELECT o_custkey, COUNT(o_orderkey) AS order_count, 
+           SUM(o_totalprice) AS total_spent
+    FROM orders
+    WHERE o_orderdate >= DATEADD(month, -6, CAST('1998-10-01' AS DATE))
+    GROUP BY o_custkey
+),
+OutstandingPayments AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_due
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(ps.ps_supplycost) AS avg_supply_cost,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    MAX(rp.order_count) AS max_recent_orders,
+    MAX(rp.total_spent) AS max_total_spent,
+    COUNT(DISTINCT os.o_orderkey) AS total_outstanding_orders
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN RecentOrders rp ON rp.o_custkey = c.c_custkey
+LEFT JOIN OutstandingPayments os ON os.o_orderkey = rp.o_custkey
+WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 5000
+GROUP BY n.n_name
+HAVING SUM(ps.ps_availqty) > 1000 OR COUNT(DISTINCT c.c_custkey) > 50
+ORDER BY nation_name;

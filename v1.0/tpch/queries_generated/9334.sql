@@ -1,0 +1,49 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY YEAR(o.o_orderdate) ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopRegions AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS region_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        n.n_name
+    ORDER BY 
+        region_revenue DESC
+    LIMIT 5
+)
+SELECT 
+    r.nation_name,
+    r.region_revenue,
+    o.o_orderkey,
+    o.o_orderdate,
+    o.total_revenue
+FROM 
+    TopRegions r
+JOIN 
+    RankedOrders o ON r.nation_name = o.o_orderkey
+WHERE 
+    o.revenue_rank <= 10
+ORDER BY 
+    r.region_revenue DESC, o.total_revenue DESC;

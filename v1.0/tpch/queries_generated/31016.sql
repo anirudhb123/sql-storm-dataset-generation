@@ -1,0 +1,54 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_nationkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+),
+SuppliersWithNull AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(NULLIF(SUM(ps.ps_supplycost), 0), 0) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+RegionSales AS (
+    SELECT 
+        r.r_name,
+        SUM(s.total_sales) AS sales_by_region
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        SalesCTE s ON n.n_nationkey = s.order_rank
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    r.r_name,
+    rs.sales_by_region,
+    COALESCE(s.total_supply_cost, 0) AS supplier_cost
+FROM 
+    RegionSales rs
+FULL OUTER JOIN 
+    SuppliersWithNull s ON rs.r_name = s.s_name
+WHERE 
+    (rs.sales_by_region IS NOT NULL OR s.total_supply_cost IS NOT NULL)
+ORDER BY 
+    rs.sales_by_region DESC, s.total_supply_cost ASC;

@@ -1,0 +1,58 @@
+
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSummary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        AVG(l.l_extendedprice) AS avg_price,
+        SUM(l.l_quantity) AS total_quantity_sold
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    ps.s_name AS supplier_name,
+    os.c_name AS customer_name,
+    ps.total_available_quantity,
+    ps.total_supply_value,
+    os.total_orders,
+    os.total_order_value,
+    p.avg_price,
+    p.total_quantity_sold
+FROM 
+    SupplierSummary ps
+JOIN 
+    OrderSummary os ON ps.total_supply_value > 100000
+JOIN 
+    PartSummary p ON p.total_quantity_sold > 50
+ORDER BY 
+    ps.total_supply_value DESC, os.total_order_value DESC
+LIMIT 10;

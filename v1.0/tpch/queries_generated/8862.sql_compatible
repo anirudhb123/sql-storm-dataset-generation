@@ -1,0 +1,61 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_custkey,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, DATE '1998-10-01')
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice
+    FROM 
+        customer c
+    JOIN 
+        RecentOrders ro ON c.c_custkey = ro.o_custkey
+    WHERE 
+        ro.order_rank = 1
+)
+SELECT 
+    co.c_name,
+    co.c_acctbal,
+    rs.total_available,
+    rs.total_supply_value,
+    co.o_orderkey,
+    co.o_orderdate,
+    co.o_totalprice
+FROM 
+    CustomerOrders co
+JOIN 
+    RankedSuppliers rs ON co.o_orderkey = (SELECT l.l_orderkey 
+                                             FROM lineitem l 
+                                             WHERE l.l_orderkey = co.o_orderkey 
+                                             ORDER BY l.l_extendedprice DESC 
+                                             LIMIT 1)
+ORDER BY 
+    rs.total_supply_value DESC, 
+    co.o_orderdate ASC;

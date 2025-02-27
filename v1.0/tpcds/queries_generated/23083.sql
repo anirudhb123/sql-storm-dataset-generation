@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        w.w_warehouse_id,
+        w.w_warehouse_name,
+        ws.ws_item_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY w.w_warehouse_id ORDER BY SUM(ws.ws_net_profit) DESC) AS rn
+    FROM 
+        warehouse w
+    JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    WHERE 
+        EXISTS (
+            SELECT 1
+            FROM web_page wp
+            WHERE wp.wp_web_page_sk = ws.ws_web_page_sk 
+            AND wp.wp_creation_date_sk > 0
+        )
+    GROUP BY 
+        w.warehouse_id, w.warehouse_name, ws.ws_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(cr.cr_order_number) AS return_count,
+        AVG(cr.cr_return_amt_inc_tax) AS avg_return_amt
+    FROM 
+        customer c
+    JOIN 
+        catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    WHERE 
+        c.c_country = 'USA'
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    cs.c_customer_id,
+    cs.return_count,
+    cs.avg_return_amt,
+    (CASE 
+         WHEN cs.return_count IS NULL THEN 'No Returns'
+         ELSE CONCAT('Returns: ', cs.return_count)
+     END) AS return_info,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+        RankedSales rs 
+     WHERE 
+         rs.rn <= 5) AS top_sales_count,
+    (SELECT 
+         SUM(total_net_profit) 
+     FROM 
+         RankedSales rs 
+     WHERE 
+         rs.total_net_profit > 1000 
+         AND rs.total_net_profit < 5000) AS high_profit_sales
+FROM 
+    CustomerReturns cs
+LEFT JOIN 
+    customer c ON cs.c_customer_id = c.c_customer_id
+WHERE 
+    c.c_birth_month BETWEEN 1 AND 6
+    AND c.c_birth_year IS NOT NULL
+    AND (c.c_preferred_cust_flag = 'Y' OR c.c_first_name LIKE 'A%')
+ORDER BY 
+    cs.avg_return_amt DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY

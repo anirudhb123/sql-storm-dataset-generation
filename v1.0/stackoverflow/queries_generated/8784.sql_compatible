@@ -1,0 +1,53 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS RankScore
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.TagId) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        PostTags p ON p.TagId = t.Id
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.TagId) > 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.CommentCount,
+    rp.OwnerDisplayName,
+    pt.TagName,
+    pt.PostCount
+FROM 
+    RankedPosts rp
+JOIN 
+    PopularTags pt ON rp.RankScore <= 10
+WHERE 
+    rp.RankScore <= 5
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC, 
+    pt.PostCount DESC;

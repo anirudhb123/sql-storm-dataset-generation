@@ -1,0 +1,76 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_paid DESC) AS rank_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price ASC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_returned_date_sk,
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returned,
+        COUNT(DISTINCT wr.wr_order_number) AS distinct_orders
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.wr_return_quantity > 0
+    GROUP BY 
+        wr.wr_returned_date_sk, 
+        wr.wr_item_sk
+),
+WarehouseInventory AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory,
+        CASE 
+            WHEN SUM(inv.inv_quantity_on_hand) > 100 THEN 'High'
+            WHEN SUM(inv.inv_quantity_on_hand) BETWEEN 50 AND 100 THEN 'Medium'
+            ELSE 'Low'
+        END AS inventory_status
+    FROM 
+        inventory inv
+    WHERE 
+        inv.inv_quantity_on_hand IS NOT NULL
+    GROUP BY 
+        inv.inv_item_sk
+)
+SELECT 
+    ca.ca_address_id,
+    ca.ca_city,
+    ca.ca_state,
+    cs.total_returned,
+    COALESCE(RS.rank_sales, 0) AS sales_rank,
+    WI.total_inventory,
+    WI.inventory_status
+FROM 
+    customer_address ca
+LEFT JOIN 
+    CustomerReturns cs ON ca.ca_address_sk = cs.wr_returned_date_sk
+LEFT JOIN 
+    RankedSales RS ON cs.wr_item_sk = RS.ws_item_sk AND RS.rn = 1
+JOIN 
+    WarehouseInventory WI ON cs.wr_item_sk = WI.inv_item_sk
+WHERE 
+    ca.ca_state IN ('CA', 'NY') 
+    AND (cs.total_returned IS NULL OR cs.total_returned > 10)
+    AND NOT EXISTS (
+        SELECT 
+            1 
+        FROM 
+            store_sales ss 
+        WHERE 
+            ss.ss_item_sk = cs.wr_item_sk 
+            AND ss.ss_sales_price < 10.00
+    )
+ORDER BY 
+    ca.ca_city, 
+    sales_rank DESC, 
+    cs.total_returned DESC;

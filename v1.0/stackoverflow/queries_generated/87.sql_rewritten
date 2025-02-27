@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS ClosedDate
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+)
+SELECT 
+    up.DisplayName,
+    rp.Title,
+    rp.CreationDate,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    COALESCE(cp.ClosedDate, 'Not Closed') AS LastClosedDate
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.PostId
+WHERE 
+    rp.rn = 1 
+ORDER BY 
+    rp.Score DESC,
+    up.Reputation DESC
+LIMIT 10;

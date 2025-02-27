@@ -1,0 +1,73 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.OwnerUserId, 
+        p.Title, 
+        p.ViewCount, 
+        p.Score, 
+        p.AcceptedAnswerId, 
+        p.CreationDate,
+        COALESCE(p.ParentId, -1) AS ParentId
+    FROM Posts p
+    WHERE p.PostTypeId = 1 -- Questions only
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id, 
+        p.OwnerUserId, 
+        p.Title, 
+        p.ViewCount, 
+        p.Score, 
+        p.AcceptedAnswerId, 
+        p.CreationDate,
+        p.ParentId
+    FROM Posts p
+    INNER JOIN RecursivePosts rp ON rp.PostId = p.ParentId
+)
+, ScoreAggregate AS (
+    SELECT 
+        rp.OwnerUserId,
+        COUNT(rp.PostId) AS QuestionCount,
+        SUM(rp.ViewCount) AS TotalViews,
+        SUM(rp.Score) AS TotalScore,
+        MAX(rp.CreationDate) AS MostRecentPost
+    FROM RecursivePosts rp
+    GROUP BY rp.OwnerUserId
+)
+, UserWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(b.Class, 0) AS BadgeClass,
+        COALESCE(b.Name, 'No Badge') AS BadgeName
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+)
+, CommentsAnalysis AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, '; ') AS CommentsText
+    FROM Comments c
+    GROUP BY c.PostId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    uwd.QuestionCount,
+    uwd.TotalViews,
+    uwd.TotalScore,
+    uwd.MostRecentPost,
+    uwi.BadgeClass,
+    uwi.BadgeName,
+    ca.CommentCount,
+    COALESCE(ca.CommentsText, 'No Comments') AS CommentsText
+FROM UserWithBadges uwi
+JOIN ScoreAggregate uwd ON uwi.UserId = uwd.OwnerUserId
+LEFT JOIN CommentsAnalysis ca ON ca.PostId = uwd.OwnerUserId
+WHERE uwd.QuestionCount > 0
+ORDER BY uwd.TotalScore DESC, uwd.TotalViews DESC
+LIMIT 100;
+
+This query generates a comprehensive overview of users who have posted questions, along with a tally of their overall performance, badge ownership, and any comments related to their posts. The use of Common Table Expressions (CTEs) enables organization of the logic, incorporating recursive querying for parent-child post relationships, aggregating scores, and analyzing comments, while including NULL logic in badge retrieval and joining to ensure all users are represented.

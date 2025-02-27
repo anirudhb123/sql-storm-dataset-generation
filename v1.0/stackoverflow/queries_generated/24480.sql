@@ -1,0 +1,90 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.Reputation
+), 
+TopUsers AS (
+    SELECT 
+        UR.UserId,
+        UR.Reputation,
+        UR.PostCount,
+        RANK() OVER (ORDER BY UR.Reputation DESC) AS ReputationRank,
+        RANK() OVER (ORDER BY UR.PostCount DESC) AS PostCountRank
+    FROM 
+        UserReputation UR
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        PH.UserId AS CloserUserId,
+        PH.CreationDate AS ClosureDate,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId 
+    WHERE 
+        PH.PostHistoryTypeId = 10
+),
+PostClosureAnalysis AS (
+    SELECT 
+        CU.UserId,
+        CU.Reputation,
+        COALESCE(CP.PostId, -1) AS ClosedPostId,
+        COALESCE(CP.Title, 'No Closed Post') AS ClosedPostTitle,
+        COALESCE(CP.ClosureDate, '1900-01-01') AS ClosureDate,
+        CU.ReputationRanking
+    FROM 
+        TopUsers CU
+    LEFT JOIN 
+        ClosedPosts CP ON CU.UserId = CP.CloserUserId
+)
+SELECT 
+    P.Title AS PostTitle,
+    U.DisplayName AS UserName,
+    PA.ClosedPostTitle,
+    PA.ClosureDate,
+    P.Tags,
+    COALESCE(PC.CommentCount, 0) AS CommentsOnClosedPost,
+    U.Reputation AS UserReputation,
+    RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank,
+    COUNT(DISTINCT PV.PostId) FILTER (WHERE PV.VoteTypeId = 2) AS TotalUpvotes,
+    COUNT(DISTINCT PV.PostId) FILTER (WHERE PV.VoteTypeId = 3) AS TotalDownvotes
+FROM 
+    Posts P
+JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    PostLinks PL ON P.Id = PL.PostId
+LEFT JOIN 
+    PostClosureAnalysis PA ON U.Id = PA.UserId
+LEFT JOIN 
+    Votes PV ON P.Id = PV.PostId
+WHERE 
+    P.CreationDate > '2021-01-01' 
+    AND (P.Title LIKE '%SQL%' OR P.Body LIKE '%SQL%') 
+    AND (P.Tags IS NOT NULL AND P.Tags <> '')
+    AND EXTRACT(DOW FROM P.CreationDate) NOT IN (0, 6)  -- Exclude weekends
+GROUP BY 
+    P.Title,
+    U.DisplayName,
+    PA.ClosedPostTitle,
+    PA.ClosureDate,
+    P.Tags,
+    U.Reputation
+ORDER BY 
+    UserReputation DESC, 
+    TotalUpvotes DESC, 
+    TotalDownvotes ASC
+LIMIT 100 OFFSET 0;

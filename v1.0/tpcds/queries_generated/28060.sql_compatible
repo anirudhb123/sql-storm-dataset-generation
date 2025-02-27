@@ -1,0 +1,86 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country,
+        ca_address_sk
+    FROM 
+        customer_address
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate,
+        addr.full_address,
+        addr.ca_city,
+        addr.ca_state,
+        addr.ca_zip,
+        addr.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        AddressDetails addr ON c.c_current_addr_sk = addr.ca_address_sk
+),
+SalesInfo AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS number_of_orders
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_id
+),
+FinalBenchmark AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_credit_rating,
+        ci.cd_purchase_estimate,
+        a.full_address,
+        s.web_site_id,
+        s.total_sales,
+        s.number_of_orders
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        AddressDetails a ON ci.full_address = a.full_address
+    LEFT JOIN 
+        SalesInfo s ON ci.c_customer_id = s.web_site_id
+)
+SELECT 
+    fb.c_customer_id,
+    fb.c_first_name,
+    fb.c_last_name,
+    fb.cd_gender,
+    fb.cd_marital_status,
+    fb.cd_credit_rating,
+    fb.cd_purchase_estimate,
+    fb.full_address,
+    fb.total_sales,
+    fb.number_of_orders,
+    CASE 
+        WHEN fb.total_sales IS NOT NULL AND fb.total_sales > 10000 THEN 'High Value'
+        WHEN fb.total_sales IS NOT NULL AND fb.total_sales <= 10000 AND fb.total_sales > 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    FinalBenchmark fb
+WHERE 
+    fb.cd_gender = 'F'
+ORDER BY 
+    fb.total_sales DESC;

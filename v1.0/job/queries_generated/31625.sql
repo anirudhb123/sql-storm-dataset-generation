@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.episode_of_id IS NULL  -- Starting from root movies
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        aka_title m
+    JOIN
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+ActorRoles AS (
+    SELECT
+        ai.person_id,
+        a.name AS actor_name,
+        c.role_id,
+        r.role AS role_name,
+        COUNT(DISTINCT mc.movie_id) AS movie_count
+    FROM
+        cast_info ai
+    JOIN
+        aka_name a ON ai.person_id = a.person_id
+    JOIN
+        role_type r ON ai.role_id = r.id
+    LEFT JOIN
+        complete_cast mc ON ai.movie_id = mc.movie_id
+    GROUP BY
+        ai.person_id, a.name, c.role_id, r.role
+),
+ActorMovieDetails AS (
+    SELECT
+        ar.actor_name,
+        ar.role_name,
+        mh.title AS movie_title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ar.actor_name ORDER BY mh.production_year DESC) AS rn
+    FROM
+        ActorRoles ar
+    JOIN
+        complete_cast cc ON ar.person_id = cc.subject_id 
+    JOIN 
+        MovieHierarchy mh ON cc.movie_id = mh.movie_id
+)
+SELECT
+    amd.actor_name,
+    STRING_AGG(amd.movie_title, ', ') AS movies,
+    COUNT(DISTINCT amd.movie_title) AS number_of_movies,
+    CASE 
+        WHEN MAX(amd.production_year) IS NULL THEN 'No Movies'
+        ELSE MAX(amd.production_year)::text 
+    END AS last_movie_year
+FROM
+    ActorMovieDetails amd
+WHERE
+    amd.rn <= 3  -- Limiting to the 3 most recent movies for each actor
+GROUP BY
+    amd.actor_name
+ORDER BY
+    number_of_movies DESC
+LIMIT 10;

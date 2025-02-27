@@ -1,0 +1,72 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+actor_movies AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        r.title,
+        r.production_year,
+        COUNT(c.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        ranked_movies r ON c.movie_id = r.title_id
+    GROUP BY 
+        a.person_id, a.name, r.title, r.production_year
+),
+award_counts AS (
+    SELECT 
+        c.movie_id,
+        COUNT(*) AS award_count
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        it.info LIKE '%Award%'
+    GROUP BY 
+        c.movie_id
+),
+joined_data AS (
+    SELECT 
+        am.person_id,
+        am.name,
+        am.title,
+        am.movie_count,
+        ac.award_count
+    FROM 
+        actor_movies am
+    LEFT JOIN 
+        award_counts ac ON am.title = ac.movie_id
+)
+SELECT 
+    DISTINCT jd.name,
+    jd.title,
+    CASE
+        WHEN jd.movie_count > 5 THEN 'Veteran Actor'
+        WHEN jd.movie_count BETWEEN 3 AND 5 THEN 'Established Actor'
+        ELSE 'Rising Star'
+    END AS actor_status,
+    COALESCE(jd.award_count, 0) AS award_count,
+    CASE 
+        WHEN jd.award_count IS NULL THEN 'No Awards'
+        WHEN jd.award_count = 0 THEN 'Nominated but No Wins'
+        ELSE 'Won Awards'
+    END AS award_status
+FROM 
+    joined_data jd
+WHERE 
+    jd.movie_count > (SELECT AVG(movie_count) FROM actor_movies)
+ORDER BY 
+    jd.name ASC, jd.title DESC;

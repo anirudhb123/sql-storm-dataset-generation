@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.PostTypeId,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.Tags,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATE('2024-10-01') - INTERVAL '1 year' AND
+        p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.PostTypeId, p.OwnerUserId, u.DisplayName, p.Tags, p.ViewCount
+), 
+TagStats AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))) ) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        TRIM(UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')))
+), 
+TopTags AS (
+    SELECT 
+        TagName,
+        TagCount,
+        ROW_NUMBER() OVER (ORDER BY TagCount DESC) AS Rank
+    FROM 
+        TagStats
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.Tags,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.VoteCount,
+    tt.TagName AS TopTag
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TopTags tt ON tt.Rank = 1 
+WHERE 
+    rp.Rank <= 10 
+ORDER BY 
+    rp.PostTypeId,
+    rp.ViewCount DESC;

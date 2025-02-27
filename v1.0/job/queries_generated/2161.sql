@@ -1,0 +1,69 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS recent_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+HighActorMovies AS (
+    SELECT 
+        movie_id
+    FROM 
+        ActorCounts
+    WHERE 
+        actor_count > 5
+),
+MovieDetails AS (
+    SELECT 
+        ht.title,
+        ht.production_year,
+        COALESCE(mk.keyword, 'Unknown') AS keyword,
+        COALESCE(cn.name, 'Independent') AS company_name,
+        CASE 
+            WHEN ht.production_year < 2000 THEN 'Classic' 
+            WHEN ht.production_year BETWEEN 2000 AND 2010 THEN 'Modern' 
+            ELSE 'Recent' 
+        END AS movie_category
+    FROM 
+        RankedTitles ht
+    LEFT JOIN 
+        movie_keyword mk ON ht.title_id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON ht.title_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        ht.title_rank = 1
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.keyword,
+    md.company_name,
+    md.movie_category,
+    COUNT(DISTINCT ca.person_id) AS relevant_actor_count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    cast_info ca ON ca.movie_id = md.title_id
+WHERE 
+    md.title_id IN (SELECT movie_id FROM HighActorMovies)
+GROUP BY 
+    md.title, md.production_year, md.keyword, md.company_name, md.movie_category
+ORDER BY 
+    md.production_year DESC, relevant_actor_count DESC
+LIMIT 20;

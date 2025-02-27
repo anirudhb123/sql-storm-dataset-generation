@@ -1,0 +1,48 @@
+WITH PostStatistics AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.Score) AS AverageScore,
+        SUM(CASE WHEN vt.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS TotalVotes
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Votes vt ON p.Id = vt.PostId
+    GROUP BY 
+        pt.Name
+),
+UserStatistics AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.UpVotes) AS TotalUpVotes,
+        SUM(p.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.DisplayName
+)
+
+SELECT 
+    ps.PostType,
+    ps.PostCount,
+    ps.AverageScore,
+    ps.TotalVotes,
+    us.DisplayName,
+    us.BadgeCount,
+    us.TotalViews,
+    us.TotalUpVotes,
+    us.TotalDownVotes
+FROM 
+    PostStatistics ps
+CROSS JOIN 
+    UserStatistics us
+ORDER BY 
+    ps.PostType, us.DisplayName;

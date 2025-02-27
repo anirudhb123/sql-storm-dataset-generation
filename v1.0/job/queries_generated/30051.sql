@@ -1,0 +1,66 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        1 AS level
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.role_id IN (SELECT id FROM role_type WHERE role = 'Actor')
+
+    UNION ALL
+
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        ah.level + 1
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        ActorHierarchy ah ON ci.movie_id = ah.movie_id
+    WHERE 
+        ci.person_id <> ah.person_id
+)
+
+SELECT 
+    a.name,
+    ARRAY_AGG(DISTINCT ak.title) AS titles,
+    COUNT(DISTINCT ah.movie_id) AS movie_count,
+    AVG(m.production_year) AS avg_production_year,
+    MAX(m.production_year) AS latest_movie_year,
+    MIN(CASE WHEN m.production_year IS NULL THEN 9999 ELSE m.production_year END) AS earliest_movie_year,
+    STRING_AGG(DISTINCT c.name, ', ') AS company_names,
+    SUM(m.keyword_count) AS total_keywords,
+    COUNT(DISTINCT ci.person_role_id) AS distinct_roles
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title ak ON ci.movie_id = ak.movie_id
+JOIN 
+    (
+        SELECT 
+            movie_id,
+            COUNT(keyword_id) AS keyword_count
+        FROM 
+            movie_keyword
+        GROUP BY 
+            movie_id
+    ) m ON ci.movie_id = m.movie_id
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+LEFT JOIN 
+    ActorHierarchy ah ON ci.person_id = ah.person_id
+WHERE 
+    a.name IS NOT NULL AND 
+    a.name <> '' 
+GROUP BY 
+    a.name
+HAVING 
+    COUNT(DISTINCT ah.movie_id) > 1
+ORDER BY 
+    avg_production_year DESC, 
+    movie_count DESC;

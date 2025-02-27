@@ -1,0 +1,75 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_customer_sk AS customer_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_customer_sk 
+    UNION ALL
+    SELECT 
+        ws_customer_sk AS customer_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM web_sales
+    WHERE ws_customer_sk IS NOT NULL
+    GROUP BY ws_customer_sk
+),
+DiscountedSales AS (
+    SELECT 
+        cs_customer_sk,
+        SUM(cs_ext_sales_price) AS discounted_sales
+    FROM catalog_sales
+    WHERE cs_ext_discount_amt > 0
+    GROUP BY cs_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk, 
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_credit_rating,
+        cd_dep_count
+    FROM customer_demographics 
+    WHERE cd_credit_rating IS NOT NULL 
+),
+TopCustomers AS (
+    SELECT 
+        customer_id,
+        total_sales,
+        order_count,
+        ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM (
+        SELECT 
+            customer_id,
+            total_sales,
+            order_count 
+        FROM SalesCTE
+        UNION
+        SELECT 
+            cs_customer_sk AS customer_id,
+            discounted_sales,
+            COUNT(cs_order_number) 
+        FROM DiscountedSales
+        JOIN catalog_sales ON DiscountedSales.cs_customer_sk = catalog_sales.cs_customer_sk
+        GROUP BY cs_customer_sk, discounted_sales
+    ) AS CombinedSales
+)
+SELECT 
+    c.c_first_name, 
+    c.c_last_name,
+    CA.ca_city,
+    CA.ca_state,
+    CD.cd_gender,
+    CD.cd_marital_status,
+    TC.total_sales,
+    TC.order_count
+FROM customer c
+JOIN customer_address CA ON c.c_current_addr_sk = CA.ca_address_sk
+JOIN CustomerDemographics CD ON c.c_current_cdemo_sk = CD.cd_demo_sk
+JOIN TopCustomers TC ON c.c_customer_sk = TC.customer_id
+WHERE TC.sales_rank <= 100 
+AND CD.cd_gender = 'M'
+AND CA.ca_city LIKE 'New%'
+ORDER BY TC.total_sales DESC;

@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id, 
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        d.d_year = 2022
+    GROUP BY 
+        ws.web_site_id
+),
+TopWebsites AS (
+    SELECT 
+        web_site_id, 
+        total_sales, 
+        total_orders 
+    FROM 
+        RankedSales 
+    WHERE 
+        rank_sales <= 5
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        SUM(ws.ws_ext_sales_price) AS total_customer_spent,
+        COUNT(ws.ws_order_number) AS orders_made
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        TopWebsites tw ON ws.ws_web_site_sk = (SELECT web_site_sk FROM web_site WHERE web_site_id = tw.web_site_id)
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender
+)
+SELECT 
+    cs.cd_gender,
+    COUNT(cs.c_customer_id) AS customer_count,
+    SUM(cs.total_customer_spent) AS total_spent,
+    AVG(cs.total_customer_spent) AS avg_spent,
+    MAX(cs.total_customer_spent) AS max_spent
+FROM 
+    CustomerStats cs
+GROUP BY 
+    cs.cd_gender
+ORDER BY 
+    total_spent DESC;

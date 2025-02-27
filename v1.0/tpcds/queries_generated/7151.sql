@@ -1,0 +1,42 @@
+
+WITH sales_summary AS (
+    SELECT 
+        DATE(DATEADD(day, ds.d_day, '2023-01-01')) AS sales_date,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS ds ON ws.ws_sold_date_sk = ds.d_date_sk
+    WHERE 
+        ds.d_year = 2023
+    GROUP BY 
+        ds.d_day
+),
+customer_demographics AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(ss.total_sales) AS total_sales
+    FROM 
+        customer AS c
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        sales_summary AS ss ON ss.unique_customers = c.c_customer_sk
+    GROUP BY 
+        cd_gender, cd_marital_status
+)
+SELECT 
+    cd_gender,
+    cd_marital_status,
+    customer_count,
+    total_sales,
+    ROUND(total_sales / customer_count, 2) AS avg_sales_per_customer
+FROM 
+    customer_demographics
+ORDER BY 
+    total_sales DESC;

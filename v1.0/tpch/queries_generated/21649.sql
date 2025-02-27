@@ -1,0 +1,67 @@
+WITH CTE_Nation_Suppliers AS (
+    SELECT
+        n.n_name AS nation_name,
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM
+        nation n
+    JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        n.n_name, s.s_suppkey
+),
+CTE_LineItem AS (
+    SELECT
+        l.l_orderkey,
+        l.l_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM
+        lineitem l
+    WHERE
+        l.l_shipdate >= '1995-01-01'
+        AND l.l_shipdate < '1996-01-01'
+    GROUP BY
+        l.l_orderkey, l.l_suppkey
+),
+CTE_Orders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderstatus,
+        COALESCE(SUM(li.net_revenue), 0) AS total_net_revenue
+    FROM
+        orders o
+    LEFT JOIN
+        CTE_LineItem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY
+        o.o_orderkey, o.o_orderstatus
+)
+SELECT
+    r.r_name AS region_name,
+    nt.nation_name,
+    cs.s_suppkey,
+    COALESCE(ROUND(MAX(cs.total_supply_cost), 2), 0) AS max_supply_cost,
+    d.total_net_revenue,
+    CASE 
+        WHEN d.o_orderstatus = 'O' THEN 'Open'
+        WHEN d.o_orderstatus = 'F' THEN 'Finished'
+        ELSE 'Unknown' 
+    END AS order_status,
+    (SELECT COUNT(*) 
+     FROM orders o2 
+     WHERE o2.o_orderkey = d.o_orderkey 
+       AND o2.o_orderstatus = d.o_orderstatus
+       AND (SELECT COUNT(*) FROM lineitem l2 WHERE l2.l_orderkey = o2.o_orderkey) > 0) AS order_count
+FROM
+    region r
+JOIN
+    nation nt ON r.r_regionkey = nt.n_regionkey
+LEFT JOIN
+    CTE_Nation_Suppliers cs ON nt.n_name = cs.nation_name
+JOIN
+    CTE_Orders d ON d.o_orderkey = cs.s_suppkey
+GROUP BY
+    r.r_name, nt.nation_name, cs.s_suppkey, d.total_net_revenue, d.o_orderstatus;

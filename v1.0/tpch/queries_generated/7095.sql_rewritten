@@ -1,0 +1,45 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+        AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_orderstatus
+),
+TopRevenueByStatus AS (
+    SELECT 
+        o_orderstatus, 
+        o_orderkey, 
+        revenue 
+    FROM 
+        RankedOrders 
+    WHERE 
+        order_rank <= 10
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    c.c_mktsegment,
+    SUM(tr.revenue) AS total_revenue
+FROM 
+    TopRevenueByStatus tr
+JOIN 
+    customer c ON c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = tr.o_orderkey)
+JOIN 
+    supplier s ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = tr.o_orderkey))
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+GROUP BY 
+    r.r_name, n.n_name, c.c_mktsegment
+ORDER BY 
+    total_revenue DESC;

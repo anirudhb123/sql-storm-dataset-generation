@@ -1,0 +1,63 @@
+WITH Ranked_Actors AS (
+    SELECT 
+        ak.name AS actor_name,
+        ct.kind AS role_kind,
+        COUNT(DISTINCT cc.movie_id) AS movie_count,
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY COUNT(DISTINCT cc.movie_id) DESC) AS rank
+    FROM aka_name ak
+    JOIN cast_info cc ON ak.person_id = cc.person_id
+    JOIN comp_cast_type ct ON cc.person_role_id = ct.id
+    GROUP BY ak.name, ct.kind, ak.person_id
+),
+Recent_Movies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        mc.company_id,
+        CASE 
+            WHEN mc.note IS NULL THEN 'Unknown'
+            ELSE mc.note
+        END AS company_note
+    FROM aka_title mt
+    LEFT JOIN movie_companies mc ON mt.id = mc.movie_id
+    WHERE mt.production_year = (SELECT MAX(production_year) FROM aka_title)
+),
+Keyword_Movies AS (
+    SELECT 
+        mt.title,
+        mk.keyword
+    FROM aka_title mt
+    JOIN movie_keyword mk ON mt.id = mk.movie_id
+    WHERE mk.keyword IS NOT NULL
+    UNION ALL
+    SELECT 
+        mt.title,
+        'Unspecified' AS keyword
+    FROM aka_title mt
+    WHERE NOT EXISTS (SELECT 1 FROM movie_keyword WHERE movie_id = mt.id)
+),
+Company_Info AS (
+    SELECT DISTINCT 
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    WHERE cn.country_code IS NOT NULL
+)
+SELECT 
+    ra.actor_name,
+    ra.role_kind,
+    ra.movie_count,
+    rm.title AS recent_movie_title,
+    rm.production_year AS recent_movie_year,
+    km.keyword AS keyword_associated,
+    ci.company_name,
+    ci.company_type
+FROM Ranked_Actors ra
+LEFT JOIN Recent_Movies rm ON ra.rank = 1
+CROSS JOIN Keyword_Movies km
+JOIN Company_Info ci ON ci.company_type NOT IN ('Distributor', 'Executive Producer')
+WHERE ra.movie_count > 0 AND UPPER(ra.role_kind) NOT LIKE '%EXTRA%'
+ORDER BY ra.movie_count DESC, ra.actor_name;
+

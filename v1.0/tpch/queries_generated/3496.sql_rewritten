@@ -1,0 +1,78 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_custkey,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+),
+TopCustomerOrders AS (
+    SELECT
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        n.n_name AS nation_name
+    FROM
+        RankedOrders ro
+    JOIN
+        customer c ON ro.o_custkey = c.c_custkey
+    JOIN
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE
+        ro.order_rank <= 5
+),
+PartSupplierInfo AS (
+    SELECT
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM
+        partsupp ps
+    GROUP BY
+        ps.ps_partkey
+),
+AggregatedLineItems AS (
+    SELECT
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM
+        lineitem l
+    WHERE
+        l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1997-10-01'
+    GROUP BY
+        l.l_orderkey
+)
+SELECT
+    c.c_name,
+    c.c_acctbal,
+    COUNT(to.o_orderkey) AS total_orders,
+    COALESCE(SUM(ali.total_revenue), 0) AS total_revenue,
+    COALESCE(SUM(ps.total_supply_value), 0) AS total_supply
+FROM
+    TopCustomerOrders to
+JOIN
+    customer c ON to.o_custkey = c.c_custkey
+LEFT JOIN
+    AggregatedLineItems ali ON to.o_orderkey = ali.l_orderkey
+LEFT JOIN
+    PartSupplierInfo ps ON ps.ps_partkey IN (
+        SELECT
+            l.l_partkey
+        FROM
+            lineitem l
+        WHERE
+            l.l_orderkey = to.o_orderkey
+    )
+GROUP BY
+    c.c_name, c.c_acctbal
+HAVING
+    total_orders > 0 
+    AND total_revenue > 1000
+ORDER BY
+    total_acctbal DESC,
+    c.c_name ASC;

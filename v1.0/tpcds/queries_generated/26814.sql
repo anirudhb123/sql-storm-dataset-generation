@@ -1,0 +1,56 @@
+
+WITH AddressInfo AS (
+    SELECT
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_country
+    FROM
+        customer_address
+    WHERE
+        ca_city IS NOT NULL AND ca_state IS NOT NULL
+),
+DemographicInfo AS (
+    SELECT
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate
+    FROM
+        customer_demographics
+),
+AggregateInfo AS (
+    SELECT
+        ai.full_address,
+        ai.ca_city,
+        ai.ca_state,
+        ai.ca_country,
+        di.cd_gender,
+        di.cd_marital_status,
+        di.cd_purchase_estimate,
+        COUNT(*) AS address_count
+    FROM
+        AddressInfo ai
+    JOIN
+        DemographicInfo di ON di.cd_purchase_estimate > 1000
+    GROUP BY
+        ai.full_address, ai.ca_city, ai.ca_state, ai.ca_country,
+        di.cd_gender, di.cd_marital_status, di.cd_purchase_estimate
+)
+SELECT
+    full_address,
+    ca_city,
+    ca_state,
+    ca_country,
+    cd_gender,
+    cd_marital_status,
+    cd_purchase_estimate,
+    address_count,
+    FULL_ADDRESS || ' - ' || cd_gender || ' - ' || cd_marital_status AS concatenated_info
+FROM
+    AggregateInfo
+WHERE
+    address_count > 1
+ORDER BY
+    ca_country, ca_state, address_count DESC
+FETCH FIRST 50 ROWS ONLY;

@@ -1,0 +1,70 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.id,
+        ci.person_id,
+        t.title,
+        t.production_year,
+        ci.nr_order,
+        1 AS level
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        a.name LIKE '%Robert%' -- searching for actors with 'Robert' in their names
+        AND t.production_year IS NOT NULL -- ensuring we only consider movies with a valid production year
+
+    UNION ALL
+
+    SELECT 
+        ah.id,
+        ci.person_id,
+        t.title,
+        t.production_year,
+        ci.nr_order,
+        ah.level + 1
+    FROM 
+        ActorHierarchy ah
+    JOIN 
+        cast_info ci ON ah.id = ci.movie_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        ah.level < 5 -- limit to a hierarchy of depth 5
+        AND ci.person_role_id IS NOT NULL -- ensure role exists
+)
+
+SELECT 
+    ah.person_id,
+    a.name,
+    ah.title,
+    ah.production_year,
+    ah.nr_order,
+    ROW_NUMBER() OVER (PARTITION BY ah.person_id ORDER BY ah.production_year DESC) AS rank,
+    COALESCE(COUNT(DISTINCT mc.company_id) FILTER (WHERE mc.note IS NOT NULL), 0) AS company_count,
+    MAX(t.kind_id) AS max_kind_id,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS note_count
+FROM 
+    ActorHierarchy ah
+JOIN 
+    aka_name a ON ah.person_id = a.person_id
+LEFT JOIN 
+    movie_companies mc ON ah.movie_id = mc.movie_id
+LEFT JOIN 
+    kind_type t ON mc.company_type_id = t.id
+LEFT JOIN 
+    movie_info mi ON ah.movie_id = mi.movie_id
+LEFT JOIN 
+    title ti ON ah.movie_id = ti.id
+JOIN 
+    (SELECT DISTINCT movie_id FROM movie_keyword) AS mk ON ah.movie_id = mk.movie_id
+WHERE 
+    a.surname_pcode IS NOT NULL
+GROUP BY 
+    ah.person_id, a.name, ah.title, ah.production_year, ah.nr_order
+HAVING 
+    COUNT(DISTINCT t.kind) > 2 -- actors associated with more than 2 kinds of companies
+ORDER BY 
+    rank DESC, ah.production_year ASC;

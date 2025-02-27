@@ -1,0 +1,71 @@
+
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(movie_ratings.avg_rating, 0) AS average_rating
+    FROM 
+        title t
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            AVG(COALESCE(r.rating, 0)) AS avg_rating
+        FROM 
+            ratings r
+        GROUP BY 
+            movie_id
+    ) AS movie_ratings ON t.id = movie_ratings.movie_id
+    WHERE 
+        t.production_year >= 2000
+    UNION ALL
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(m.average_rating, 0) AS average_rating
+    FROM 
+        title t
+    JOIN MovieCTE m ON t.id = m.movie_id
+),
+ActorMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.id, a.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) >= 5
+),
+RankedMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.average_rating,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.average_rating DESC) AS rank
+    FROM 
+        MovieCTE m
+)
+SELECT 
+    rm.production_year,
+    rm.title,
+    rm.average_rating,
+    am.name AS actor_name,
+    am.movie_count
+FROM 
+    RankedMovies rm
+JOIN 
+    cast_info ci ON rm.movie_id = ci.movie_id
+JOIN 
+    aka_name am ON ci.person_id = am.person_id
+WHERE 
+    rm.rank <= 5
+    AND rm.average_rating > 7.0
+ORDER BY 
+    rm.production_year DESC, rm.average_rating DESC;

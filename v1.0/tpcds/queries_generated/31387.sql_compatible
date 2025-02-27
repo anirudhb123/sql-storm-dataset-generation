@@ -1,0 +1,44 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws.sold_date_sk, 
+        ws.item_sk, 
+        SUM(ws.quantity) AS total_sales,
+        SUM(ws.net_profit) AS total_profit
+    FROM web_sales ws
+    GROUP BY ws.sold_date_sk, ws.item_sk
+    UNION ALL
+    SELECT 
+        cs.sold_date_sk,
+        cs.item_sk,
+        SUM(cs.quantity) AS total_sales,
+        SUM(cs.net_profit) AS total_profit
+    FROM catalog_sales cs
+    GROUP BY cs.sold_date_sk, cs.item_sk
+),
+item_details AS (
+    SELECT 
+        ii.item_sk,
+        ii.item_id,
+        ii.item_desc,
+        ia.total_sales,
+        ia.total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ii.item_sk ORDER BY ia.total_profit DESC) AS rank
+    FROM item ii
+    LEFT JOIN sales_summary ia ON ii.item_sk = ia.item_sk
+    WHERE ii.current_price > 10.00
+)
+SELECT 
+    i.item_id,
+    i.item_desc,
+    COALESCE(s.total_sales, 0) AS sales_quantity,
+    COALESCE(s.total_profit, 0) AS profit,
+    CASE 
+        WHEN s.total_profit > 500 THEN 'High Profit'
+        WHEN s.total_profit BETWEEN 200 AND 500 THEN 'Medium Profit'
+        ELSE 'Low Profit'
+    END AS profit_category
+FROM item_details s
+JOIN item i ON s.item_sk = i.item_sk
+WHERE s.rank = 1
+ORDER BY profit DESC;

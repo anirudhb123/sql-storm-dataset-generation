@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        ct.kind AS company_type,
+        rn.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY mp.name) AS actor_rank
+    FROM aka_title mt
+    JOIN movie_companies mc ON mt.id = mc.movie_id
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN aka_name mp ON ci.person_id = mp.person_id
+    LEFT JOIN role_type rn ON ci.role_id = rn.id
+    WHERE mt.production_year >= 2000
+    AND (ct.kind IS NOT NULL OR cn.country_code IS NOT NULL)
+
+    UNION ALL
+
+    SELECT 
+        mp.movie_id,
+        mt.title,
+        mt.production_year,
+        ct.kind AS company_type,
+        rn.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY mp.name) AS actor_rank
+    FROM MovieCTE mp
+    JOIN movie_companies mc ON mp.movie_id = mc.movie_id
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN complete_cast cc ON mp.movie_id = cc.movie_id
+    LEFT JOIN cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN aka_name mp ON ci.person_id = mp.person_id
+    LEFT JOIN role_type rn ON ci.role_id = rn.id
+    WHERE ct.kind IS NOT NULL
+)
+
+SELECT 
+    movie_id,
+    movie_title,
+    production_year,
+    MAX(company_type) AS company_type,
+    STRING_AGG(DISTINCT role_name, ', ') AS roles,
+    COUNT(DISTINCT actor_rank) AS total_actors
+FROM MovieCTE
+GROUP BY movie_id, movie_title, production_year
+HAVING COUNT(DISTINCT role_name) > 2
+ORDER BY production_year DESC, total_actors DESC;
+
+-- Additional performance benchmarking logic can be added through EXPLAIN ANALYZE or other profiling methods.

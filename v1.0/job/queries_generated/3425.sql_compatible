@@ -1,0 +1,45 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS rn,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY mt.id) AS cast_count
+    FROM 
+        aka_title mt
+    JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+ActorCount AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(ci.movie_id) AS movies_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.id, a.name
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.rn,
+    COALESCE(ac.actor_name, 'Unknown Actor') AS actor_name,
+    CASE 
+        WHEN rm.cast_count > 5 THEN 'Ensemble'
+        WHEN rm.cast_count > 0 THEN 'Standard'
+        ELSE 'No Actors'
+    END AS cast_type
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorCount ac ON rm.rn = ac.movies_count
+WHERE 
+    rm.cast_count > 0
+ORDER BY 
+    rm.production_year DESC, rm.movie_title ASC
+LIMIT 50 OFFSET 10;

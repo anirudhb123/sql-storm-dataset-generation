@@ -1,0 +1,48 @@
+WITH UserBadgeCounts AS (
+    SELECT UserId, 
+           COUNT(*) FILTER (WHERE Class = 1) AS GoldBadges, 
+           COUNT(*) FILTER (WHERE Class = 2) AS SilverBadges, 
+           COUNT(*) FILTER (WHERE Class = 3) AS BronzeBadges
+    FROM Badges
+    GROUP BY UserId
+),
+PostDetails AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.CreationDate, 
+           u.DisplayName AS OwnerName, 
+           COALESCE(v.UpVoteCount, 0) AS UpVotes,
+           COALESCE(v.DownVoteCount, 0) AS DownVotes,
+           p.Score, 
+           p.ViewCount,
+           p.AnswerCount,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT PostId, 
+               SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+               SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+        FROM Votes 
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+)
+SELECT ud.UserId, 
+       ud.DisplayName, 
+       ubc.GoldBadges, 
+       ubc.SilverBadges, 
+       ubc.BronzeBadges, 
+       COALESCE(pd.RecentPostTitle, 'No Posts Yet') AS RecentPostTitle, 
+       COALESCE(pd.RecentPostCreationDate, NULL) AS RecentPostDate,
+       COALESCE(pd.UpVotes, 0) AS RecentPostUpVotes,
+       COALESCE(pd.DownVotes, 0) AS RecentPostDownVotes
+FROM Users ud
+LEFT JOIN UserBadgeCounts ubc ON ud.Id = ubc.UserId
+LEFT JOIN (
+    SELECT PostId, Title AS RecentPostTitle, CreationDate AS RecentPostCreationDate, UpVotes, DownVotes 
+    FROM PostDetails
+    WHERE RecentPostRank = 1
+) pd ON ud.Id = pd.OwnerUserId
+WHERE ud.Reputation > 1000
+ORDER BY ud.DisplayName
+OFFSET 100 ROWS FETCH NEXT 50 ROWS ONLY;

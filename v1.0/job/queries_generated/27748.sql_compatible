@@ -1,0 +1,62 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COUNT(DISTINCT mc.company_id) AS production_companies,
+        STRING_AGG(DISTINCT c.name, ', ') AS cast_names
+    FROM title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN name n ON a.person_id = n.imdb_id
+    GROUP BY t.id, t.title, t.production_year, t.kind_id
+),
+industry_info AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS companies_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY mc.movie_id
+),
+final_benchmark AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.keywords,
+        md.production_companies,
+        ii.companies_count,
+        ii.companies,
+        CASE 
+            WHEN md.production_year < 2000 THEN 'Classic'
+            WHEN md.production_year >= 2000 AND md.production_year < 2010 THEN 'Modern'
+            ELSE 'Recent'
+        END AS era
+    FROM movie_details md
+    LEFT JOIN industry_info ii ON md.movie_id = ii.movie_id
+)
+SELECT 
+    fb.movie_id,
+    fb.title,
+    fb.production_year,
+    fb.keywords,
+    fb.production_companies,
+    fb.companies_count,
+    fb.companies,
+    fb.era,
+    COUNT(DISTINCT ci.id) AS cast_count,
+    STRING_AGG(DISTINCT CONCAT(n.name, ' (', n.gender, ')'), ', ') AS full_cast_info
+FROM final_benchmark fb
+LEFT JOIN cast_info ci ON fb.movie_id = ci.movie_id
+LEFT JOIN aka_name an ON ci.person_id = an.person_id
+LEFT JOIN name n ON an.person_id = n.imdb_id
+GROUP BY fb.movie_id, fb.title, fb.production_year, fb.keywords, fb.production_companies, fb.companies_count, fb.companies, fb.era
+ORDER BY fb.production_year DESC;

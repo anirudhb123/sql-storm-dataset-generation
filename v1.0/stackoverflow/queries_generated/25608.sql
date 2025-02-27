@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank
+    FROM Posts p
+    LEFT JOIN LATERAL (
+        SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName
+    ) AS t ON TRUE
+    WHERE p.PostTypeId = 1 -- Considering only Questions
+    GROUP BY p.Id
+),
+TopPosts AS (
+    SELECT 
+        rp.*, 
+        u.DisplayName AS OwnerName,
+        u.Reputation AS OwnerReputation
+    FROM RankedPosts rp
+    JOIN Users u ON rp.OwnerUserId = u.Id
+    WHERE rp.Rank <= 3 -- Top 3 posts per user
+),
+PostWithVoteInfo AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.Tags,
+        tp.CreationDate,
+        tp.OwnerName,
+        tp.OwnerReputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 10 THEN 1 ELSE 0 END), 0) AS Deletions
+    FROM TopPosts tp
+    LEFT JOIN Votes v ON tp.PostId = v.PostId
+    GROUP BY tp.PostId, tp.Title, tp.Tags, tp.CreationDate, tp.OwnerName, tp.OwnerReputation
+)
+SELECT 
+    pw.PostId,
+    pw.Title,
+    pw.Tags,
+    pw.CreationDate,
+    pw.OwnerName,
+    pw.OwnerReputation,
+    pw.UpVotes,
+    pw.DownVotes,
+    pw.Deletions,
+    (CASE 
+        WHEN pw.UpVotes > pw.DownVotes THEN 'Positive Sentiment'
+        WHEN pw.UpVotes < pw.DownVotes THEN 'Negative Sentiment'
+        ELSE 'Neutral Sentiment'
+     END) AS SentimentAnalysis
+FROM PostWithVoteInfo pw
+ORDER BY pw.OwnerReputation DESC, pw.UpVotes DESC;

@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+),
+
+TopQuestions AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        Author,
+        CommentCount,
+        AnswerCount,
+        UpVotes,
+        DownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+)
+
+SELECT 
+    q.Title,
+    q.Author,
+    q.CreationDate,
+    q.CommentCount,
+    q.AnswerCount,
+    q.UpVotes,
+    q.DownVotes,
+    CASE 
+        WHEN q.UpVotes - q.DownVotes >= 0 THEN 'Positive' 
+        ELSE 'Negative'
+    END AS VoteSentiment,
+    COALESCE(STRING_AGG(t.TagName, ', '), 'No Tags') AS Tags
+FROM 
+    TopQuestions q
+LEFT JOIN 
+    Posts p ON p.Id = q.PostId
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')))
+GROUP BY 
+    q.PostId, q.Title, q.Author, q.CreationDate, q.CommentCount, q.AnswerCount, q.UpVotes, q.DownVotes
+ORDER BY 
+    q.CreationDate DESC;

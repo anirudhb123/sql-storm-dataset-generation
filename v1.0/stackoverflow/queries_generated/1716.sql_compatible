@@ -1,0 +1,49 @@
+
+WITH UserReputation AS (
+    SELECT Id, DisplayName, Reputation,
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+TopUsers AS (
+    SELECT Id, DisplayName, Reputation 
+    FROM UserReputation
+    WHERE ReputationRank <= 10
+),
+PostStatistics AS (
+    SELECT p.Id AS PostId, p.Title, p.Score, p.ViewCount, p.AnswerCount,
+           ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+           COUNT(c.Id) AS CommentCount,
+           MAX(v.CreationDate) AS LastVoteDate,
+           COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+           COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount
+    FROM Posts p
+    LEFT JOIN Tags t ON t.Id IN (
+        SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>'))::int
+        )
+    WHERE EXISTS (SELECT 1 FROM Tags WHERE TagName IS NOT NULL)
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    WHERE p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 30 DAY)
+    GROUP BY p.Id, p.Title, p.Score, p.ViewCount, p.AnswerCount
+),
+PostDetails AS (
+    SELECT ps.PostId, ps.Title, ps.Score, ps.ViewCount, ps.AnswerCount, ps.Tags, ps.CommentCount,
+           COALESCE(ps.UpVoteCount, 0) - COALESCE(ps.DownVoteCount, 0) AS NetVotes,
+           CASE 
+               WHEN ps.CommentCount > 0 THEN 'Active'
+               ELSE 'Inactive'
+           END AS ActivityStatus
+    FROM PostStatistics ps
+)
+SELECT u.DisplayName, pd.Title, pd.Score, pd.ViewCount, pd.AnswerCount, pd.Tags, pd.CommentCount,
+       pd.NetVotes, pd.ActivityStatus, 
+       CASE 
+           WHEN pd.Score >= 100 THEN 'Hot'
+           WHEN pd.Score BETWEEN 50 AND 99 THEN 'Trending'
+           ELSE 'New'
+       END AS PostStatus
+FROM TopUsers u
+JOIN PostDetails pd ON u.Id = pd.PostId
+WHERE u.Reputation >= 1000
+ORDER BY u.Reputation DESC, pd.Score DESC
+LIMIT 10;

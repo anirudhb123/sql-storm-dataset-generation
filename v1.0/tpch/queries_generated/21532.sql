@@ -1,0 +1,55 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name, r.r_name AS region_name,
+           ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank_within_region
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+PartSupplierStatistics AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_avail_qty,
+           COUNT(ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('F', 'O')
+    GROUP BY o.o_orderkey
+),
+RegionFilter AS (
+    SELECT r.r_regionkey, COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_regionkey
+    HAVING COUNT(DISTINCT n.n_nationkey) > 2
+),
+FinalResult AS (
+    SELECT DISTINCT sd.nation_name, sd.region_name, SUM(ps.total_avail_qty) AS total_avail_qty,
+           SUM(os.total_sales) AS total_sales,
+           MAX(sd.rank_within_region) AS max_supplier_rank
+    FROM SupplierDetails sd
+    LEFT JOIN PartSupplierStatistics ps ON ps.ps_suppkey = sd.s_suppkey
+    LEFT JOIN OrderSummary os ON os.o_orderkey = (SELECT TOP 1 o.o_orderkey 
+                                                   FROM orders o 
+                                                   WHERE o.o_custkey IN (SELECT c.c_custkey 
+                                                                         FROM customer c 
+                                                                         WHERE c.c_nationkey = sd.s_nationkey))
+    WHERE sd.s_acctbal < (SELECT AVG(s2.s_acctbal) 
+                           FROM supplier s2 
+                           WHERE s2.s_nationkey = sd.s_nationkey)
+    AND sd.rank_within_region <= 3
+    GROUP BY sd.nation_name, sd.region_name
+    ORDER BY total_sales DESC, total_avail_qty DESC
+)
+SELECT nation_name, region_name, total_avail_qty, total_sales, max_supplier_rank
+FROM FinalResult
+WHERE total_sales IS NOT NULL 
+  AND total_avail_qty IS NOT NULL 
+  AND (total_sales - total_avail_qty) < 1000
+UNION ALL
+SELECT 'Total', 'Aggregated', SUM(total_avail_qty), SUM(total_sales), AVG(max_supplier_rank)
+FROM FinalResult
+WHERE max_supplier_rank IS NOT NULL;

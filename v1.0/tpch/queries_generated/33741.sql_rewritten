@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS Level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'FRANCE')
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+),
+HighValueOrders AS (
+    SELECT o_orderkey, o_custkey, SUM(l_extendedprice * (1 - l_discount)) AS NetPrice
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o_orderdate >= '1997-01-01'
+    GROUP BY o_orderkey, o_custkey
+    HAVING SUM(l_extendedprice * (1 - l_discount)) > 10000
+),
+PartStatistics AS (
+    SELECT p.p_partkey, AVG(ps.ps_supplycost) AS AvgSupplyCost, COUNT(DISTINCT ps.ps_suppkey) AS SupplierCount
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+FinalResults AS (
+    SELECT
+        nh.n_name,
+        COUNT(DISTINCT ho.o_orderkey) AS HighValueOrderCount,
+        SUM(hv.NetPrice) AS TotalNetValue,
+        ps.AvgSupplyCost,
+        ps.SupplierCount,
+        ROW_NUMBER() OVER (PARTITION BY nh.n_nationkey ORDER BY SUM(hv.NetPrice) DESC) AS OrderRank
+    FROM nation nh
+    LEFT JOIN HighValueOrders hv ON nh.n_nationkey = (SELECT c_nationkey FROM customer WHERE c_custkey = hv.o_custkey)
+    LEFT JOIN PartStatistics ps ON ps.p_partkey = (
+        SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = hv.o_orderkey LIMIT 1
+    )
+    GROUP BY nh.n_nationkey, nh.n_name, ps.AvgSupplyCost, ps.SupplierCount
+)
+SELECT * 
+FROM FinalResults
+WHERE TotalNetValue IS NOT NULL
+ORDER BY OrderRank, TotalNetValue DESC;

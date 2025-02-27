@@ -1,0 +1,69 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        COALESCE(mt.production_year, 0) AS production_year,
+        pt.person_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY ak.name) AS actor_order
+    FROM
+        aka_title mt
+    JOIN
+        complete_cast cc ON mt.id = cc.movie_id
+    JOIN
+        aka_name ak ON ak.person_id = cc.subject_id
+    LEFT JOIN
+        cast_info ci ON ci.movie_id = mt.id AND ci.person_id = ak.person_id
+    WHERE
+        mt.production_year IS NOT NULL
+        AND ak.name IS NOT NULL
+),
+season_episodes AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.ep_season,
+        t.ep_episode,
+        COUNT(*) OVER (PARTITION BY t.episode_of_id) AS episode_count
+    FROM
+        (SELECT 
+            title.id,
+            title.title,
+            title.season_nr AS ep_season,
+            title.episode_nr AS ep_episode,
+            title.episode_of_id
+        FROM 
+            title
+        WHERE
+            title.episode_of_id IS NOT NULL) t
+)
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.actor_name,
+    mh.actor_order,
+    COALESCE(se.episode_count, 0) AS total_episodes,
+    CASE 
+        WHEN se.episode_count IS NOT NULL THEN 'Contains Episodes'
+        ELSE 'Standalone Movie'
+    END AS movie_type
+FROM
+    movie_hierarchy mh
+LEFT JOIN
+    season_episodes se ON mh.movie_id = se.title_id
+WHERE
+    (mh.production_year BETWEEN 1980 AND 2023 OR mh.actor_order < 5)
+    AND (mh.actor_name IS NOT NULL)
+GROUP BY
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.actor_name,
+    mh.actor_order,
+    se.episode_count
+ORDER BY 
+    mh.production_year DESC,
+    mh.movie_id ASC
+LIMIT 50 OFFSET 10;

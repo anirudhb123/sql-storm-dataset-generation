@@ -1,0 +1,78 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn,
+        o.o_orderdate,
+        o.o_clerk
+    FROM 
+        orders o
+), 
+SupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), 
+CustomerInfo AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'Unknown Balance'
+            WHEN c.c_acctbal < 0 THEN 'Negative Balance'
+            ELSE 'Positive Balance'
+        END AS balance_status
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL OR c.c_acctbal < 0
+), 
+LineitemAggregates AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_price,
+        COUNT(CASE WHEN l.l_returnflag = 'Y' THEN 1 END) AS return_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        l.l_orderkey
+) 
+SELECT 
+    co.c_name,
+    ro.o_orderkey,
+    ro.o_totalprice,
+    la.net_price,
+    la.return_count,
+    CASE 
+        WHEN ro.o_orderstatus = 'F' THEN 'Finished'
+        WHEN ro.o_orderstatus = 'P' THEN 'Pending'
+        ELSE 'Other Status'
+    END AS order_status,
+    sc.total_supply_cost
+FROM 
+    RankedOrders ro 
+LEFT JOIN 
+    CustomerInfo co ON ro.o_orderkey = co.c_custkey 
+LEFT JOIN 
+    LineitemAggregates la ON ro.o_orderkey = la.l_orderkey 
+LEFT JOIN 
+    SupplierCost sc ON sc.ps_partkey = (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+        WHERE l.l_orderkey = ro.o_orderkey 
+        FETCH FIRST 1 ROWS ONLY
+    )
+WHERE 
+    ro.rn = 1
+    AND (ro.o_orderdate > CURRENT_DATE - INTERVAL '90 days' OR ro.o_totalprice > 1000)
+ORDER BY 
+    co.c_name ASC, ro.o_orderkey DESC;

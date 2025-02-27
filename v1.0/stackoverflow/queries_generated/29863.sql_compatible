@@ -1,0 +1,56 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        COALESCE(NULLIF(p.OwnerDisplayName, ''), 'Community User') AS Author,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS Rank
+    FROM Posts p
+    WHERE p.PostTypeId = 1
+),
+TagDetails AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        t.Count,
+        ARRAY_AGG(DISTINCT tp.Name ORDER BY tp.Name) AS PostTypeNames
+    FROM Tags t
+    JOIN PostTypes tp ON t.Count > 0  
+    GROUP BY t.Id, t.TagName, t.Count
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN v1.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvotesGiven,
+        SUM(CASE WHEN v1.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvotesGiven
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v1 ON u.Id = v1.UserId
+    GROUP BY u.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Tags,
+    rp.Author,
+    rp.Score,
+    rp.CreationDate,
+    td.TagName AS AssociatedTag,
+    ua.DisplayName AS UserName,
+    ua.TotalPosts,
+    ua.UpvotesGiven,
+    ua.DownvotesGiven,
+    COUNT(DISTINCT c.Id) AS CommentCount
+FROM RankedPosts rp
+LEFT JOIN TagDetails td ON POSITION(td.TagName IN rp.Tags) > 0
+LEFT JOIN Users ua ON ua.DisplayName = rp.Author
+LEFT JOIN Comments c ON c.PostId = rp.PostId
+WHERE rp.Rank <= 5
+GROUP BY rp.PostId, rp.Title, rp.Tags, rp.Author, rp.Score, rp.CreationDate, td.TagName, ua.DisplayName, ua.TotalPosts, ua.UpvotesGiven, ua.DownvotesGiven
+ORDER BY rp.CreationDate DESC
+LIMIT 50;

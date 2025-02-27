@@ -1,0 +1,75 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rnk
+    FROM 
+        customer c
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'No Account Balance'
+            ELSE 'Balance Available'
+        END AS balance_status
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_acctbal IS NOT NULL)
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(*) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+),
+RegionSuppliers AS (
+    SELECT 
+        r.r_name,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS parts_supplied
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name, s.s_name
+)
+SELECT 
+    c.c_name,
+    COALESCE(ho.total_order_value, 0) AS total_order_value,
+    rs.r_name AS supplier_region,
+    hs.balance_status,
+    CASE 
+        WHEN rc.rnk <= 5 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_classification
+FROM 
+    RankedCustomers rc
+LEFT JOIN 
+    CustomerOrders ho ON rc.c_custkey = ho.o_custkey
+LEFT JOIN 
+    HighValueSuppliers hs ON hs.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = rc.c_custkey)))
+LEFT JOIN 
+    RegionSuppliers rs ON rs.s_name = hs.s_name
+WHERE 
+    (ho.item_count IS NULL OR ho.item_count > 3)
+AND 
+    (hs.balance_status = 'Balance Available' OR hs.balance_status IS NULL)
+ORDER BY 
+    total_order_value DESC, c.c_name;

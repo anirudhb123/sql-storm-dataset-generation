@@ -1,0 +1,77 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= DATEADD(year, -1, '2024-10-01')
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        r.Id AS PostId,
+        r.Title,
+        r.Score,
+        r.ViewCount,
+        r.CreationDate,
+        ur.Reputation,
+        ur.TotalBounty,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        r.UserPostRank
+    FROM 
+        RankedPosts r
+    JOIN 
+        UserReputation ur ON r.OwnerUserId = ur.UserId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) c ON r.Id = c.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.CreationDate,
+    ps.Reputation,
+    ps.TotalBounty,
+    ps.CommentCount,
+    CASE 
+        WHEN ps.TotalBounty > 100 THEN 'High Bounty'
+        WHEN ps.TotalBounty > 50 THEN 'Medium Bounty'
+        ELSE 'Low Bounty'
+    END AS BountyCategory,
+    CASE 
+        WHEN ps.CommentCount IS NULL THEN 'No Comments'
+        ELSE 'Comments Exist'
+    END AS CommentsStatus
+FROM 
+    PostStatistics ps
+WHERE 
+    ps.UserPostRank <= 5 
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

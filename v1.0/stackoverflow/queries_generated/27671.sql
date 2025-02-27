@@ -1,0 +1,67 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Body, 
+        p.Tags, 
+        p.CreationDate, 
+        p.ViewCount, 
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END), '1970-01-01') AS CloseDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.Id END) AS UpvoteCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id 
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE 
+        p.PostTypeId = 1 -- Consider only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        pd.PostId, 
+        pd.Title, 
+        pd.OwnerDisplayName, 
+        pd.Score, 
+        pd.ViewCount, 
+        pd.CommentCount,
+        pd.CloseDate,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        Badges b ON pd.OwnerDisplayName = b.UserId 
+    WHERE 
+        pd.ViewCount > 1000 
+    GROUP BY 
+        pd.PostId, pd.Title, pd.OwnerDisplayName, pd.Score, pd.ViewCount, pd.CommentCount, pd.CloseDate
+)
+SELECT 
+    tp.PostId,
+    tp.Title, 
+    tp.OwnerDisplayName, 
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.CloseDate,
+    tp.BadgeCount, 
+    CASE 
+        WHEN tp.CloseDate IS NOT NULL THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, 
+    tp.ViewCount DESC, 
+    tp.CommentCount DESC;

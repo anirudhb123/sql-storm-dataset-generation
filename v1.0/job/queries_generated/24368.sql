@@ -1,0 +1,61 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+highest_ranking AS (
+    SELECT 
+        title_id,
+        title
+    FROM 
+        ranked_titles
+    WHERE 
+        title_rank = 1
+),
+cast_with_info AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        c.role_id,
+        COALESCE(p.info, 'No Info') AS person_info
+    FROM 
+        cast_info c
+    LEFT JOIN person_info p ON c.person_id = p.person_id
+    WHERE 
+        c.nr_order BETWEEN 1 AND 5
+)
+SELECT 
+    t.production_year,
+    COUNT(DISTINCT ct.person_id) AS cast_count,
+    STRING_AGG(DISTINCT CONCAT(a.name, ' (', ct.person_info, ')'), '; ') AS cast_details,
+    COALESCE(m.keyword_list, 'No Keywords') AS keywords
+FROM 
+    highest_ranking t
+LEFT JOIN 
+    cast_with_info ct ON t.title_id = ct.movie_id
+LEFT JOIN 
+    (
+        SELECT 
+            mk.movie_id,
+            STRING_AGG(k.keyword, ', ') AS keyword_list
+        FROM 
+            movie_keyword mk
+        JOIN 
+            keyword k ON mk.keyword_id = k.id
+        GROUP BY 
+            mk.movie_id
+    ) m ON t.title_id = m.movie_id
+GROUP BY 
+    t.production_year
+HAVING 
+    COUNT(DISTINCT ct.person_id) > 3
+ORDER BY 
+    t.production_year DESC;
+
+This SQL query combines multiple concepts including Common Table Expressions (CTEs), window functions, string aggregation, outer joins, and handling of NULL values. It ranks titles by production year, collects cast information, and counts distinct cast members while filtering by thresholds to ensure an interesting dataset is presented. Additionally, it extracts keywords related to each movie and conditionally handles the absence of data to create a comprehensive and rich output.

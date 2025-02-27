@@ -1,0 +1,86 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+DemographicDetails AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate
+    FROM 
+        customer_demographics
+),
+CustomerDetails AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        c_email_address,
+        c_birth_country,
+        ca.ca_address_sk,
+        ad.full_address,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_zip,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer c
+    JOIN 
+        AddressDetails ad ON c.c_current_addr_sk = ad.ca_address_sk
+    JOIN 
+        DemographicDetails cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesDetails AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ws_sales_price) AS total_sales_price,
+        COUNT(ws.ws_order_number) AS number_of_orders
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.bill_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.c_email_address,
+        cd.c_birth_country,
+        cd.ca_city,
+        cd.ca_state,
+        cd.ca_zip,
+        sd.total_sales_price,
+        sd.number_of_orders
+    FROM 
+        CustomerDetails cd
+    LEFT JOIN 
+        SalesDetails sd ON cd.c_customer_sk = sd.bill_customer_sk
+)
+SELECT 
+    c_customer_sk,
+    c_first_name,
+    c_last_name,
+    c_email_address,
+    c_birth_country,
+    ca_city,
+    ca_state,
+    ca_zip,
+    COALESCE(total_sales_price, 0) AS total_sales_price,
+    COALESCE(number_of_orders, 0) AS number_of_orders
+FROM 
+    FinalReport
+ORDER BY 
+    total_sales_price DESC
+LIMIT 100;

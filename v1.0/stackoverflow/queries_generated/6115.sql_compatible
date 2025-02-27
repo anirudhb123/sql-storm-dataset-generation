@@ -1,0 +1,53 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp 
+    WHERE 
+        rp.UserPostRank = 1
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.CreationDate,
+    tp.OwnerDisplayName,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.VoteCount,
+    COALESCE((SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId = tp.PostId AND ph.PostHistoryTypeId = 10), 0) AS CloseVoteCount,
+    COALESCE((SELECT COUNT(*) FROM Badges b WHERE b.UserId = tp.OwnerUserId), 0) AS BadgeCount
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, 
+    tp.CreationDate DESC
+LIMIT 100;

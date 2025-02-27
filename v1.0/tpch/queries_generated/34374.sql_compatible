@@ -1,0 +1,45 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation 
+    WHERE n_regionkey = (SELECT r_regionkey FROM region WHERE r_name = 'ASIA')
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+total_sales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey
+),
+avg_sales AS (
+    SELECT AVG(total_spent) AS avg_spent
+    FROM total_sales
+),
+supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    nh.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    COALESCE(AVG(ts.total_spent), 0) AS average_customer_spending,
+    si.s_name AS supplier_name,
+    MAX(si.total_supplied) AS max_total_supplied,
+    COUNT(DISTINCT CASE WHEN ts.total_spent > (SELECT avg_spent FROM avg_sales) THEN c.c_custkey END) AS above_average_customers
+FROM nation_hierarchy nh
+LEFT JOIN customer c ON c.c_nationkey = nh.n_nationkey
+LEFT JOIN total_sales ts ON c.c_custkey = ts.c_custkey
+LEFT JOIN supplier_info si ON nh.n_nationkey = (SELECT n.n_nationkey FROM supplier s JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey JOIN part p ON p.p_partkey = ps.ps_partkey WHERE p.p_mfgr = 'Manufacturer#1' AND s.s_nationkey = nh.n_nationkey LIMIT 1)
+GROUP BY nh.n_name, si.s_name
+ORDER BY nation_name, average_customer_spending DESC;

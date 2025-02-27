@@ -1,0 +1,77 @@
+WITH RECURSIVE ranked_movies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY YEAR(at.production_year) ORDER BY at.production_year DESC) AS year_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+movie_summary AS (
+    SELECT 
+        mv.id AS movie_id,
+        mv.title,
+        COALESCE(SUM(ci.nm_order), 0) AS total_cast,
+        MAX(mv.production_year) AS latest_year,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        ranked_movies rm 
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = rm.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = cc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = rm.movie_id
+    LEFT JOIN 
+        aka_title mv ON mv.id = rm.movie_id
+    GROUP BY 
+        mv.id
+),
+high_cast_movies AS (
+    SELECT 
+        ms.movie_id,
+        ms.title,
+        ms.total_cast
+    FROM 
+        movie_summary ms
+    WHERE 
+        ms.total_cast > (SELECT AVG(total_cast) FROM movie_summary)
+),
+co_movies AS (
+    SELECT 
+        m1.title AS movie_title,
+        m2.title AS co_movie_title,
+        ml.link_type_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m1 ON m1.id = ml.movie_id
+    JOIN 
+        aka_title m2 ON m2.id = ml.linked_movie_id 
+    WHERE 
+        ml.link_type_id IN (SELECT id FROM link_type WHERE link LIKE '%remake%')
+)
+SELECT 
+    hcm.movie_id,
+    hcm.title AS high_cast_movie,
+    COUNT(DISTINCT c.name) AS actor_count,
+    STRING_AGG(DISTINCT km.keyword, ', ') AS keywords,
+    ARRAY_AGG(DISTINCT cm.co_movie_title) FILTER (WHERE cm.co_movie_title IS NOT NULL) AS related_movies
+FROM 
+    high_cast_movies hcm
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = hcm.movie_id
+LEFT JOIN 
+    aka_name c ON c.person_id = ci.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = hcm.movie_id
+LEFT JOIN 
+    co_movies cm ON cm.movie_title = hcm.title
+GROUP BY 
+    hcm.movie_id, hcm.title
+HAVING 
+    COUNT(DISTINCT c.name) > 5
+ORDER BY 
+    hcm.title;

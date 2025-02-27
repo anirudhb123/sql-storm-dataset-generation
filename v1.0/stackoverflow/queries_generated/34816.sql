@@ -1,0 +1,74 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        P.CreationDate,
+        1 AS Level,
+        CAST(P.Title AS VARCHAR(MAX)) AS Path
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Questions only
+    UNION ALL
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.ParentId,
+        P2.CreationDate,
+        PH.Level + 1 AS Level,
+        CAST(PH.Path + ' > ' + P2.Title AS VARCHAR(MAX))
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostHierarchy PH ON P2.ParentId = PH.PostId
+    WHERE 
+        P2.PostTypeId = 2 -- Answers only
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostMetrics AS (
+    SELECT 
+        PH.PostId,
+        PH.Title,
+        PH.CreationDate,
+        COALESCE(PVS.UpVotes, 0) AS UpVotes,
+        COALESCE(PVS.DownVotes, 0) AS DownVotes,
+        PH.Level,
+        PH.Path,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = PH.PostId) AS CommentCount,
+        RANK() OVER (PARTITION BY PH.Level ORDER BY PH.CreationDate DESC) AS Rank
+    FROM 
+        RecursivePostHierarchy PH
+    LEFT JOIN 
+        PostVoteSummary PVS ON PH.PostId = PVS.PostId
+)
+SELECT 
+    PM.*,
+    TA.TagName,
+    U.DisplayName AS OwnerDisplayName,
+    NULLIF(U.Location, '') AS Location
+FROM 
+    PostMetrics PM
+LEFT JOIN 
+    Posts P ON PM.PostId = P.Id
+LEFT JOIN 
+    Tags TA ON TA.ExcerptPostId = P.Id
+LEFT JOIN 
+    Users U ON U.Id = P.OwnerUserId
+WHERE 
+    PM.Level = 1 AND 
+    PM.UpVotes > 2 AND 
+    (U.Reputation > 1000 OR U.Location IS NOT NULL)
+ORDER BY 
+    PM.Level, PM.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY; 

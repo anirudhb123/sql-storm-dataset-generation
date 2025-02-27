@@ -1,0 +1,47 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        COUNT(DISTINCT ca_address_id) AS address_count,
+        COUNT(DISTINCT ca_zip) AS zip_count,
+        STRING_AGG(DISTINCT ca_street_name, ', ') AS unique_streets,
+        STRING_AGG(DISTINCT ca_suite_number, ', ') AS unique_suites
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city, 
+        ca_state
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(cd.cd_dep_count) AS total_dependents,
+        SUM(cd.cd_dep_employed_count) AS employed_dependents,
+        SUM(cd.cd_dep_college_count) AS college_dependents,
+        STRING_AGG(DISTINCT cd.cd_education_status, ', ') AS educations
+    FROM 
+        customer_demographics cd
+    GROUP BY 
+        cd.cd_gender, 
+        cd.cd_marital_status
+)
+SELECT 
+    AS.address_count,
+    AS.zip_count,
+    AS.unique_streets,
+    AS.unique_suites,
+    CD.cd_gender,
+    CD.cd_marital_status,
+    CD.total_dependents,
+    CD.employed_dependents,
+    CD.college_dependents,
+    CD.educations
+FROM 
+    AddressStats AS
+JOIN 
+    CustomerDemographics CD ON AS.ca_state = CD.cd_marital_status
+ORDER BY 
+    AS.city, 
+    AS.state;

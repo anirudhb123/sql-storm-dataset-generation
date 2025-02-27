@@ -1,0 +1,76 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS YearRank,
+        COUNT(*) OVER () AS TotalTitles
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieWithDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        COALESCE(c.company_name, 'Independent') AS company_name,
+        COALESCE(a.name, 'Unknown') AS actor_name,
+        ct.kind AS company_type
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.movie_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = m.movie_id
+    LEFT JOIN 
+        company_name c ON c.id = mc.company_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.movie_id
+    LEFT JOIN 
+        aka_name a ON a.person_id = ci.person_id
+    LEFT JOIN 
+        company_type ct ON ct.id = mc.company_type_id
+),
+FilteredMovies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN production_year < 1990 THEN 'Classic'
+            WHEN production_year BETWEEN 1990 AND 2000 THEN 'Modern'
+            ELSE 'Recent'
+        END AS Era
+    FROM 
+        MovieWithDetails
+    WHERE 
+        title IS NOT NULL AND keyword IS NOT NULL
+),
+FinalResults AS (
+    SELECT 
+        f.movie_id,
+        f.title,
+        f.production_year,
+        f.keyword,
+        f.company_name,
+        f.actor_name,
+        f.company_type,
+        f.Era,
+        COALESCE((SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = f.movie_id), 0) AS complete_cast_count
+    FROM 
+        FilteredMovies f
+)
+SELECT 
+    fr.*,
+    ROW_NUMBER() OVER (PARTITION BY fr.Era ORDER BY fr.production_year DESC) AS EraRank,
+    CASE 
+        WHEN fr.complete_cast_count > 0 THEN 'Has Complete Cast'
+        ELSE 'No Complete Cast'
+    END AS CastStatus
+FROM 
+    FinalResults fr
+WHERE 
+    fr.production_year >= 2000
+ORDER BY 
+    fr.Era, fr.production_year;

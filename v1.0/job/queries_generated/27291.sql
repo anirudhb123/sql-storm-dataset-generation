@@ -1,0 +1,36 @@
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    c.role_id AS role,
+    GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords,
+    GROUP_CONCAT(DISTINCT cp.kind ORDER BY cp.kind) AS company_types,
+    p.info AS personal_info,
+    COUNT(DISTINCT ml.linked_movie_id) AS linked_movie_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title m ON c.movie_id = m.id
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_companies mc ON mc.movie_id = m.id
+JOIN 
+    company_type cp ON mc.company_type_id = cp.id
+LEFT JOIN 
+    person_info p ON a.person_id = p.person_id
+LEFT JOIN 
+    movie_link ml ON m.id = ml.movie_id
+WHERE 
+    m.production_year >= 2000
+    AND k.keyword IS NOT NULL
+GROUP BY 
+    a.name, m.title, m.production_year, c.role_id, p.info
+ORDER BY 
+    actor_name, production_year DESC;
+
+This SQL query benchmarks string processing by returning several interesting pieces of information across joined tables, including actor names, movie titles, production years, roles, keywords, company types, personal info, and counts of linked movies, specifically for movies produced from the year 2000 onwards. The output is organized and group-concatenated for better readability and insights.

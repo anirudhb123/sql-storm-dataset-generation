@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY t.TagName ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')))
+    WHERE 
+        p.PostTypeId = 1 /* Questions only */
+),
+BestQuestions AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(distinct v.PostId) AS VotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM 
+        Users u
+    JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    bq.Title AS BestQuestion,
+    bq.CreationDate,
+    bq.ViewCount,
+    bq.Score,
+    bq.Tags,
+    ue.DisplayName AS UserWhoAsked,
+    ue.VotesReceived,
+    ue.UpVotesReceived,
+    ue.DownVotesReceived
+FROM 
+    BestQuestions bq
+JOIN 
+    Users u ON u.Id = bq.OwnerUserId
+JOIN 
+    UserEngagement ue ON ue.UserId = bq.OwnerUserId
+ORDER BY 
+    bq.Score DESC, bq.ViewCount DESC
+LIMIT 10;

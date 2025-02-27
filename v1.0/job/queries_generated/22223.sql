@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS rank_by_cast_count
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title, 
+        rm.production_year,
+        COALESCE(ki.keyword, 'Unknown') AS keyword,
+        CASE 
+            WHEN rm.rank_by_cast_count <= 3 THEN 'Top Movie'
+            ELSE 'Other Movie'
+        END AS category
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.title_id = mk.movie_id
+    LEFT JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    WHERE 
+        rm.production_year BETWEEN 2000 AND 2023
+),
+CompanyCount AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.keyword,
+    fm.category,
+    COALESCE(cc.company_count, 0) AS company_count,
+    CASE 
+        WHEN cc.company_count IS NULL THEN 'No companies involved'
+        WHEN cc.company_count > 10 THEN 'Multiple companies'
+        ELSE 'Single company'
+    END AS company_status
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    CompanyCount cc ON fm.title_id = cc.movie_id
+ORDER BY 
+    fm.production_year DESC,
+    fm.rank_by_cast_count ASC NULLS LAST
+LIMIT 50;

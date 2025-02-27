@@ -1,0 +1,83 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+       ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        cn.name AS person_name,
+        rt.role,
+        ci.nr_order
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        char_name cn ON ci.person_id = cn.imdb_id
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+movie_companies_info AS (
+    SELECT 
+        mc.movie_id,
+        ARRAY_AGG(DISTINCT co.name) AS company_names,
+        ARRAY_AGG(DISTINCT ct.kind) AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+aggregate_info AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        COALESCE(ci.company_names, ARRAY[]::text[]) AS companies,
+        COALESCE(ci.company_types, ARRAY[]::text[]) AS types
+    FROM 
+        ranked_movies t
+    LEFT JOIN 
+        movie_companies_info ci ON t.movie_id = ci.movie_id
+    LEFT JOIN 
+        cast_details c ON t.movie_id = c.movie_id
+    GROUP BY 
+        t.id
+)
+SELECT 
+    a.title,
+    a.production_year,
+    a.total_cast,
+    a.companies,
+    a.types,
+    (SELECT COUNT(*) 
+     FROM movie_info mi
+     WHERE mi.movie_id = a.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%Award%')) AS award_count,
+    (SELECT MAX(CAST(c.nr_order AS INTEGER))
+     FROM cast_details c
+     WHERE c.movie_id = a.movie_id) AS max_cast_order,
+    (CASE 
+        WHEN a.total_cast > 5 THEN 'Blockbuster' 
+        WHEN a.total_cast BETWEEN 3 AND 5 THEN 'Moderate' 
+        WHEN a.total_cast = 2 THEN 'Indie' 
+        ELSE 'Unknown' 
+     END) AS classification
+FROM 
+    aggregate_info a
+WHERE 
+    a.total_cast IS NOT NULL
+    AND (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = a.movie_id) > 0
+ORDER BY 
+    a.production_year DESC,
+    a.total_cast DESC,
+    MAX(a.types) DESC; 

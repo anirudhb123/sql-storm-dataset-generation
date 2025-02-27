@@ -1,0 +1,53 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_acctbal, 0 AS level
+    FROM customer
+    WHERE c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_acctbal < ch.c_acctbal
+    WHERE ch.level < 5
+), TotalSales AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_custkey
+), HighSpenders AS (
+    SELECT c.c_custkey, c.c_name, 
+           COALESCE(ts.total_sales, 0) AS sales_total,
+           ROW_NUMBER() OVER (ORDER BY COALESCE(ts.total_sales, 0) DESC) AS sales_rank
+    FROM customer c
+    LEFT JOIN TotalSales ts ON c.c_custkey = ts.o_custkey
+    WHERE c.c_acctbal > 2000
+), SupplierAvgPrices AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey,
+           (SELECT COUNT(*) 
+            FROM partsupp ps2 
+            WHERE ps2.ps_suppkey = s.s_suppkey) AS supply_count,
+           CASE WHEN s.s_acctbal IS NULL THEN 'Unknown' 
+                ELSE (CASE WHEN s.s_acctbal < 5000 THEN 'Low' 
+                          WHEN s.s_acctbal < 10000 THEN 'Medium' 
+                          ELSE 'High' END) 
+           END AS account_category
+    FROM supplier s
+), NationsWithComments AS (
+    SELECT n.n_nationkey, n.n_name, 
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           STRING_AGG(DISTINCT n.n_comment, '; ') AS comments
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT ch.c_name, ch.c_acctbal, ts.total_sales, 
+       sv.account_category, n.n_name, n.supplier_count, n.comments
+FROM CustomerHierarchy ch
+JOIN HighSpenders ts ON ch.c_custkey = ts.c_custkey
+JOIN SupplierDetails sv ON ts.o_custkey = sv.s_suppkey
+JOIN NationsWithComments n ON sv.s_nationkey = n.n_nationkey
+WHERE ts.sales_rank <= 10
+ORDER BY ch.c_acctbal DESC, ts.total_sales DESC;

@@ -1,0 +1,62 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.Views,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM Users U
+    WHERE U.Reputation > 1000
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        COALESCE(PH.CloseReasonId, 0) AS CloseReasonId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId = 10
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.ViewCount > 100
+    GROUP BY P.Id, PH.CloseReasonId, P.Title, P.Score, P.CreationDate
+),
+UserPostCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(P.Id) AS PostCount
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+),
+FinalReport AS (
+    SELECT 
+        R.DisplayName,
+        R.UserRank,
+        PS.Title,
+        PS.Score,
+        PS.CloseReasonId,
+        UPC.PostCount,
+        CASE 
+            WHEN PS.CloseReasonId = 0 THEN 'Open'
+            ELSE 'Closed'
+        END AS PostStatus,
+        R.Id AS UserId  -- Added UserId to select list for badge aggregation
+    FROM RankedUsers R
+    JOIN PostStatistics PS ON R.Id = PS.OwnerUserId
+    JOIN UserPostCounts UPC ON R.Id = UPC.UserId
+)
+SELECT 
+    FR.*,
+    STUFF((
+        SELECT ',' + B.Name
+        FROM Badges B
+        WHERE B.UserId = FR.UserId
+        FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, '') AS Badges
+FROM FinalReport FR
+WHERE FR.UserRank <= 10
+ORDER BY FR.Score DESC, FR.UserRank;

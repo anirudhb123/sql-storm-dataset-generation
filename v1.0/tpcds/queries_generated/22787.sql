@@ -1,0 +1,59 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS revenue_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_quantity,
+        cs.total_revenue,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        RANK() OVER (ORDER BY cs.total_revenue DESC) AS revenue_rank
+    FROM 
+        sales_summary cs
+    JOIN 
+        customer c ON cs.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' 
+        AND cs.total_quantity > (SELECT AVG(total_quantity) FROM sales_summary)
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_quantity,
+    tc.total_revenue,
+    CASE 
+        WHEN tc.cd_marital_status IS NULL THEN 'Unknown' 
+        ELSE tc.cd_marital_status END AS marital_status,
+    COALESCE((SELECT MAX(s.ws_net_profit) 
+              FROM store_sales s 
+              WHERE s.ss_customer_sk = tc.ws_bill_customer_sk 
+              AND s.ss_sold_date_sk >= (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = EXTRACT(YEAR FROM CURRENT_DATE))),
+            0) AS max_store_profit
+FROM 
+    top_customers tc
+WHERE 
+    tc.revenue_rank <= 10
+ORDER BY 
+    tc.total_revenue DESC
+UNION ALL
+SELECT 
+    'Total Revenue' AS c_customer_id,
+    SUM(tc.total_quantity) AS total_quantity,
+    SUM(tc.total_revenue) AS total_revenue,
+    NULL AS marital_status,
+    NULL AS max_store_profit
+FROM 
+    top_customers tc
+HAVING 
+    SUM(tc.total_revenue) > 10000; 

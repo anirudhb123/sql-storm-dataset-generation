@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > 500
+),
+AggregateTotals AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+SuppliersWithRevenue AS (
+    SELECT 
+        sh.s_suppkey,
+        sh.s_name,
+        SUM(at.total_revenue) AS total_supplied_revenue
+    FROM SupplierHierarchy sh
+    LEFT JOIN AggregateTotals at ON sh.s_suppkey = at.o_orderkey
+    GROUP BY sh.s_suppkey, sh.s_name
+),
+SegmentedRevenue AS (
+    SELECT 
+        s.s_name,
+        SUM(CASE 
+            WHEN total_supplied_revenue IS NULL THEN 0 
+            ELSE total_supplied_revenue END) AS segmented_revenue
+    FROM SuppliersWithRevenue s
+    GROUP BY s.s_name
+)
+SELECT 
+    p.p_name,
+    r.r_name,
+    sr.segmented_revenue,
+    CASE 
+        WHEN sr.segmented_revenue > 10000 THEN 'High Revenue'
+        WHEN sr.segmented_revenue BETWEEN 5000 AND 10000 THEN 'Medium Revenue'
+        ELSE 'Low Revenue' 
+    END AS revenue_category
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN nation n ON s.n_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN SegmentedRevenue sr ON sr.s_name = s.s_name
+WHERE p.p_size BETWEEN 10 AND 20
+AND (sr.segmented_revenue IS NOT NULL OR s.s_acctbal < 2000)
+ORDER BY r.r_name, p.p_name;

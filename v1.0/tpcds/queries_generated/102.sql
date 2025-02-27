@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2458825 AND 2459190
+    GROUP BY 
+        ws.web_site_sk
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_sales_price) AS avg_order_value
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+),
+SalesDetails AS (
+    SELECT 
+        s.ss_store_sk,
+        SUM(s.ss_net_paid_inc_tax) AS total_store_sales,
+        AVG(s.ss_sales_price) AS avg_sales_price,
+        COUNT(s.ss_ticket_number) AS total_transactions
+    FROM 
+        store_sales s
+    WHERE 
+        s.ss_sold_date_sk > 2458825
+    GROUP BY 
+        s.ss_store_sk
+)
+SELECT 
+    w.w_warehouse_name,
+    COALESCE(cs.order_count, 0) AS orders_placed,
+    COALESCE(cs.avg_order_value, 0) AS avg_order_value,
+    ss.total_transactions,
+    ss.total_store_sales,
+    rs.total_sales
+FROM 
+    warehouse w
+LEFT JOIN 
+    CustomerStats cs ON cs.c_customer_sk = (SELECT c.c_customer_sk FROM customer c WHERE c.c_current_addr_sk IN (SELECT ca.ca_address_sk FROM customer_address ca WHERE ca.ca_city = w.w_city) LIMIT 1)
+LEFT JOIN 
+    SalesDetails ss ON ss.ss_store_sk = (SELECT s.s_store_sk FROM store s WHERE s.s_city = w.w_city LIMIT 1)
+LEFT JOIN 
+    RankedSales rs ON rs.web_site_sk = w.w_warehouse_sk
+ORDER BY 
+    total_store_sales DESC NULLS LAST;

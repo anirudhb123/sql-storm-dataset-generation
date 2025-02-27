@@ -1,0 +1,52 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+StringBenchmarks AS (
+    SELECT 
+        p.p_name, 
+        LENGTH(p.p_name) AS name_length,
+        LEFT(p.p_name, 10) AS name_prefix,
+        REPLACE(p.p_comment, 'bad', 'good') AS modified_comment,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > 50.00
+    GROUP BY 
+        p.p_name, p.p_comment
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT cs.c_custkey) AS customer_count,
+    SUM(b.total_supply_cost) AS total_cost,
+    AVG(sb.name_length) AS avg_part_name_length,
+    STRING_AGG(DISTINCT sb.name_prefix, ', ') AS unique_name_prefixes
+FROM 
+    Region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+JOIN 
+    RankedSuppliers b ON n.n_nationkey = b.s_nationkey
+JOIN 
+    StringBenchmarks sb ON r.r_regionkey = n.n_regionkey
+WHERE 
+    b.rank <= 5
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_cost DESC;

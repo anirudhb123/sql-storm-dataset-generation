@@ -1,0 +1,93 @@
+WITH RECURSIVE supply_chain AS (
+    SELECT
+        ps.ps_partkey,
+        s.s_nationkey,
+        s.s_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        1 AS level
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > 0
+
+    UNION ALL
+
+    SELECT
+        ps.ps_partkey,
+        s.s_nationkey,
+        s.s_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        sc.level + 1
+    FROM supply_chain sc
+    JOIN partsupp ps ON sc.ps_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE sc.level < 5 AND ps.ps_availqty > 0
+),
+customer_orders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal >= (
+        SELECT AVG(c2.c_acctbal)
+        FROM customer c2
+        WHERE c2.c_nationkey = c.c_nationkey
+    )
+),
+top_customers AS (
+    SELECT
+        cu.c_custkey,
+        cu.c_name,
+        co.o_orderkey,
+        co.o_totalprice,
+        co.o_orderdate
+    FROM customer_orders co
+    JOIN customer cu ON co.c_custkey = cu.c_custkey
+    WHERE co.order_rank <= 3
+),
+aggregated_supplier AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    r.r_name AS region_name,
+    ns.n_name AS nation_name,
+    COALESCE(tc.o_orderkey, 0) AS order_key,
+    MAX(asc.avg_supplycost) AS avg_supply_cost,
+    SUM(COALESCE(sc.ps_availqty, 0)) AS total_avail_quantity
+FROM part p
+LEFT JOIN region r ON r.r_regionkey = (
+    SELECT n.n_regionkey
+    FROM nation n
+    WHERE n.n_nationkey IN (SELECT DISTINCT s.s_nationkey 
+                             FROM supplier s 
+                             JOIN supply_chain sc ON s.s_suppkey = sc.s_suppkey)
+)
+LEFT JOIN nation ns ON ns.n_nationkey = (
+    SELECT s.s_nationkey
+    FROM supplier s
+    WHERE s.s_suppkey IN (SELECT sc.s_suppkey FROM supply_chain sc)
+)
+LEFT JOIN top_customers tc ON tc.o_orderkey = (
+    SELECT MAX(co2.o_orderkey)
+    FROM top_customers co2
+    WHERE co2.c_custkey = tc.c_custkey
+)
+LEFT JOIN aggregated_supplier asc ON p.p_partkey = asc.ps_partkey
+LEFT JOIN supply_chain sc ON p.p_partkey = sc.ps_partkey
+GROUP BY p.p_partkey, p.p_name, p.p_mfgr, r.r_name, ns.n_name, tc.o_orderkey
+HAVING SUM(COALESCE(sc.ps_availqty, 0)) > 100
+ORDER BY p.p_partkey, total_avail_quantity DESC;

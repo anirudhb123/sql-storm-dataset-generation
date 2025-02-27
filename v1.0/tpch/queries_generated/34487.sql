@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 0 AS lvl
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    UNION ALL
+    SELECT ps.s_suppkey, s.s_name, s.s_acctbal, sh.lvl + 1
+    FROM partsupp ps
+    JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+    GROUP BY p.p_partkey, p.p_name
+    HAVING total_value > 10000
+),
+RankedCustomers AS (
+    SELECT c.c_custkey, c.c_name, ROW_NUMBER() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT DISTINCT
+    r.r_name,
+    c.c_name AS customer_name,
+    p.p_name AS part_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    sh.lvl AS supplier_level,
+    COALESCE(rc.rank, 0) AS customer_rank
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN CustomerOrders co ON co.c_custkey = s.s_suppkey
+LEFT JOIN RankedCustomers rc ON rc.c_custkey = co.c_custkey
+JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+WHERE l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+  AND (s.s_acctbal IS NOT NULL OR co.order_count > 0)
+GROUP BY r.r_name, c.c_name, p.p_name, sh.lvl, rc.rank
+ORDER BY revenue DESC, customer_name;

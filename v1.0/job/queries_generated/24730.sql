@@ -1,0 +1,71 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL
+),
+MovieAggregates AS (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT actor_order) AS actor_count,
+        STRING_AGG(actor_name, ', ') AS actors_list
+    FROM 
+        RecursiveCTE
+    GROUP BY 
+        movie_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(k.keyword, 'No Keywords') AS keyword
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+FinalReport AS (
+    SELECT 
+        ma.movie_id,
+        mwk.title,
+        ma.actor_count,
+        ma.actors_list,
+        mwk.keyword
+    FROM 
+        MovieAggregates ma
+    JOIN 
+        MoviesWithKeywords mwk ON ma.movie_id = mwk.movie_id
+)
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.actor_count,
+    fr.actors_list,
+    COUNT(m.id) FILTER (WHERE m.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget')) AS budget_count, 
+    MAX(m.info) FILTER (WHERE m.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget')) AS max_budget,
+    COALESCE(NULLIF(fr.keyword, 'No Keywords'), 'Keyword not available') AS keyword_info
+FROM 
+    FinalReport fr
+LEFT JOIN 
+    movie_info m ON fr.movie_id = m.movie_id
+GROUP BY 
+    fr.movie_id, fr.title, fr.actor_count, fr.actors_list, fr.keyword
+HAVING 
+    fr.actor_count > 0 AND
+    ( MAX(m.info) IS NULL OR 
+    MAX(m.info)::INTEGER > 1000000 )  -- Budget greater than 1,000,000 or NULL
+ORDER BY 
+    fr.actor_count DESC, 
+    COUNT(m.id) DESC;
+

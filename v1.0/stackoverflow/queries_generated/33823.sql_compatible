@@ -1,0 +1,39 @@
+
+WITH RECURSIVE UserReputation AS (
+    SELECT Id, Reputation, CreationDate,
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+), PostSummary AS (
+    SELECT P.Id AS PostId, P.Title, P.CreationDate, 
+           U.DisplayName AS OwnerDisplayName, 
+           COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+           COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+           COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+           SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+           MAX(P.LastActivityDate) AS LastActivity
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE P.PostTypeId = 1  
+    GROUP BY P.Id, P.Title, P.CreationDate, U.DisplayName
+), RankedPosts AS (
+    SELECT PS.PostId, PS.Title, PS.OwnerDisplayName, 
+           PS.UpVotes, PS.DownVotes, PS.CommentCount, PS.CloseCount,
+           UR.Reputation,
+           ROW_NUMBER() OVER (PARTITION BY PS.CloseCount ORDER BY PS.LastActivity DESC) AS ActivityRank
+    FROM PostSummary PS
+    JOIN UserReputation UR ON PS.OwnerDisplayName = UR.Id
+)
+SELECT RP.PostId, RP.Title, RP.OwnerDisplayName, 
+       RP.UpVotes, RP.DownVotes, RP.CommentCount,
+       RP.CloseCount, RP.Reputation,
+       CASE 
+           WHEN RP.ActivityRank <= 5 THEN 'Very Active'
+           WHEN RP.ActivityRank BETWEEN 6 AND 15 THEN 'Moderately Active'
+           ELSE 'Less Active' 
+       END AS ActivityLevel
+FROM RankedPosts RP
+WHERE RP.Reputation > 100  
+ORDER BY RP.CloseCount DESC, RP.UpVotes DESC;

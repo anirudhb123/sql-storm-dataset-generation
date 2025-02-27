@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (
+        SELECT AVG(s_acctbal)
+        FROM supplier
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+)
+SELECT 
+    n.n_name AS Nation, 
+    COUNT(DISTINCT sh.s_suppkey) AS SupplierCount, 
+    SUM(sh.s_acctbal) AS TotalAcctBal,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS AverageRevenue,
+    MAX(l.l_shipdate) AS LatestShipDate
+FROM 
+    SupplierHierarchy sh
+JOIN 
+    nation n ON sh.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+WHERE 
+    l.l_shipdate IS NOT NULL
+    AND n.n_name IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT sh.s_suppkey) > 5
+ORDER BY 
+    TotalAcctBal DESC
+LIMIT 10
+
+UNION ALL
+
+SELECT 
+    'Total' AS Nation, 
+    COUNT(DISTINCT s.s_suppkey) AS SupplierCount, 
+    SUM(s.s_acctbal) AS TotalAcctBal,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS AverageRevenue,
+    MAX(l.l_shipdate) AS LatestShipDate
+FROM 
+    supplier s
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+WHERE 
+    l.l_shipdate IS NOT NULL
+GROUP BY 
+    'Total'
+ORDER BY 
+    TotalAcctBal DESC;

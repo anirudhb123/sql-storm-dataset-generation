@@ -1,0 +1,38 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 
+           CAST(s_name AS varchar(255)) AS path 
+    FROM supplier 
+    WHERE s_acctbal > 1000 
+    UNION ALL 
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 
+           CAST(CONCAT(sh.path, ' > ', s.s_name) AS varchar(255)) 
+    FROM supplier s 
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey 
+    WHERE s.s_acctbal > sh.s_acctbal
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn 
+    FROM orders o 
+    JOIN customer c ON o.o_custkey = c.c_custkey 
+    WHERE c.c_acctbal IS NOT NULL AND c.c_mktsegment = 'TECHNOLOGY'
+), SupplierParts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, 
+           COALESCE(SUM(l.l_quantity), 0) AS total_sold 
+    FROM partsupp ps 
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+    WHERE ps.ps_availqty > 0 
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+)
+SELECT p.p_partkey, p.p_name, p.p_brand, p.p_type, 
+       s.s_name AS supplier_name, 
+       COALESCE(sh.path, 'No supplier hierarchy') AS supplier_hierarchy,
+       COALESCE(SUM(sp.total_sold), 0) AS total_quantity_sold, 
+       MAX(ro.o_totalprice) AS max_order_price 
+FROM part p 
+LEFT JOIN SupplierParts sp ON p.p_partkey = sp.ps_partkey 
+LEFT JOIN supplier s ON sp.ps_suppkey = s.s_suppkey 
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey 
+LEFT JOIN RankedOrders ro ON s.s_suppkey = ro.o_custkey 
+GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_type, s.s_name, sh.path 
+ORDER BY p.p_partkey, max_order_price DESC 
+LIMIT 100;

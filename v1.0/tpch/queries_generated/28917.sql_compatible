@@ -1,0 +1,71 @@
+
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        TRIM(s.s_name) AS supplier_name,
+        CAST(s.s_acctbal AS VARCHAR(255)) AS account_balance,
+        s.s_phone,
+        n.n_name AS nation_name,
+        SUBSTRING(s.s_comment, 1, 50) AS short_comment
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        UPPER(p.p_name) AS part_name_upper,
+        CONCAT(p.p_mfgr, ' - ', p.p_brand) AS manufacturer_brand,
+        p.p_size,
+        FORMAT(p.p_retailprice, 'C', 'en-US') AS formatted_price
+    FROM 
+        part p
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name AS customer_name,
+        c.c_mktsegment,
+        CAST(o.o_orderstatus AS VARCHAR(10)) AS order_status
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS lineitem_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        SUM(l.l_quantity) AS total_quantity
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    sd.supplier_name,
+    pd.part_name_upper,
+    od.customer_name,
+    od.o_orderdate,
+    ls.total_revenue,
+    ls.lineitem_count,
+    pd.formatted_price,
+    sd.short_comment,
+    od.order_status
+FROM 
+    SupplierDetails sd
+JOIN 
+    PartDetails pd ON sd.s_suppkey = pd.p_partkey
+JOIN 
+    LineItemSummary ls ON pd.p_partkey = ls.l_orderkey
+JOIN 
+    OrderDetails od ON ls.l_orderkey = od.o_orderkey
+WHERE 
+    sd.nation_name LIKE '%United%'
+    AND od.o_totalprice > 1000
+ORDER BY 
+    sd.supplier_name, od.o_orderdate DESC;

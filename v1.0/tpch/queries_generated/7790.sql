@@ -1,0 +1,48 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_custkey
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, CURRENT_DATE)
+),
+OrderDetails AS (
+    SELECT 
+        lo.l_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS revenue,
+        COUNT(DISTINCT lo.l_orderkey) AS order_count
+    FROM 
+        lineitem lo
+    JOIN 
+        RecentOrders ro ON lo.l_orderkey = ro.o_orderkey
+    GROUP BY 
+        lo.l_orderkey
+)
+SELECT 
+    rp.p_name,
+    rp.total_cost,
+    od.revenue,
+    od.order_count
+FROM 
+    RankedParts rp
+JOIN 
+    OrderDetails od ON rp.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps ORDER BY ps.ps_supplycost DESC LIMIT 1)
+WHERE 
+    rp.rank <= 10
+ORDER BY 
+    rp.total_cost DESC;

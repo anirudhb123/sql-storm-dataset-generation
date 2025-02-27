@@ -1,0 +1,88 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate
+    FROM 
+        customer c
+    INNER JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate
+    FROM 
+        CustomerOrders co
+    JOIN 
+        orders o ON co.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate > co.o_orderdate
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+PartStatistics AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(li.l_linenumber) AS order_count,
+        AVG(li.l_extendedprice) AS avg_price,
+        MAX(li.l_discount) AS max_discount
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem li ON p.p_partkey = li.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name,
+    ps.p_name,
+    co.c_name,
+    co.o_orderkey,
+    co.o_totalprice,
+    ps.total_supply_cost,
+    CASE 
+        WHEN ps.total_supply_cost IS NULL THEN 'No Suppliers'
+        ELSE 'Suppliers Available'
+    END AS supplier_status,
+    FIRST_VALUE(co.o_orderdate) OVER (PARTITION BY r.r_name ORDER BY co.o_orderdate DESC) AS recent_order_date
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierParts ps ON s.s_suppkey = ps.s_suppkey
+LEFT JOIN 
+    CustomerOrders co ON n.n_nationkey = co.c_nationkey
+JOIN 
+    PartStatistics ppt ON ps.p_partkey = ppt.p_partkey
+WHERE 
+    r.r_name LIKE '%East%'
+    AND (co.o_orderstatus = 'O' OR co.o_orderstatus IS NULL)
+    AND COALESCE(ppt.order_count, 0) > 5
+ORDER BY 
+    r.r_name, co.o_orderdate DESC;

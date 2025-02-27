@@ -1,0 +1,63 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_accountbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_accountbal IS NOT NULL AND s.s_accountbal > (
+        SELECT AVG(s2.s_accountbal)
+        FROM supplier s2
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_accountbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        WHERE ps.ps_partkey IN (
+            SELECT p.p_partkey
+            FROM part p
+            WHERE p.p_brand LIKE 'Brand%'
+        )
+        LIMIT 1
+    )
+    WHERE sh.level < 5
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, SUM(l.l_extendedprice) AS total_lineitem_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_totalprice > (
+        SELECT AVG(o2.o_totalprice)
+        FROM orders o2
+    )
+    GROUP BY o.o_orderkey, o.o_totalprice
+),
+OrderSupplier AS (
+    SELECT o.o_orderkey, s.s_suppkey, SUM(l.l_extendedprice) AS supplier_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN partsupp ps ON ps.ps_partkey = l.l_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY o.o_orderkey, s.s_suppkey
+)
+SELECT COALESCE(n.n_name, 'Unknown Region') AS nation_name,
+       COUNT(DISTINCT ohe.o_orderkey) AS total_orders,
+       SUM(ohe.total_lineitem_price) AS total_lineitem_value,
+       SUM(os.supplier_total) AS total_supplier_value,
+       sh.level AS supplier_level
+FROM HighValueOrders ohe
+FULL OUTER JOIN OrderSupplier os ON ohe.o_orderkey = os.o_orderkey
+LEFT JOIN nation n ON n.n_nationkey = (
+    SELECT c.c_nationkey
+    FROM customer c
+    WHERE c.c_custkey = (
+        SELECT o.o_custkey
+        FROM orders o
+        WHERE o.o_orderkey = ohe.o_orderkey
+    )
+)
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey = os.s_suppkey
+WHERE (sh.level IS NULL OR sh.level >= 1) AND (os.supplier_total IS NOT NULL OR os.supplier_total = 0)
+GROUP BY n.n_name, sh.level
+HAVING SUM(os.supplier_total) IS NOT NULL
+   AND SUM(ohe.total_lineitem_price) > 0
+ORDER BY total_orders DESC, total_lineitem_value DESC;

@@ -1,0 +1,59 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(DISTINCT p.Id) AS PostCount, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        u.CreationDate >= '2020-01-01'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        SUBSTRING_INDEX(SUBSTRING_INDEX(Tags, ',', numbers.n), ',', -1) AS TagName, 
+        COUNT(*) AS TagUsageCount
+    FROM 
+        Posts
+    JOIN 
+        (SELECT 1 n UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 
+         UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9 UNION ALL SELECT 10) numbers
+    ON 
+        CHAR_LENGTH(Tags) - CHAR_LENGTH(REPLACE(Tags, ',', '')) >= numbers.n - 1
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        TagName
+)
+SELECT 
+    ua.UserId, 
+    ua.DisplayName, 
+    ua.PostCount, 
+    ua.UpvoteCount, 
+    ua.DownvoteCount, 
+    ua.BadgeCount, 
+    ua.CommentCount,
+    pt.TagName,
+    pt.TagUsageCount
+FROM 
+    UserActivity ua
+CROSS JOIN 
+    PopularTags pt
+ORDER BY 
+    ua.PostCount DESC, 
+    pt.TagUsageCount DESC
+LIMIT 100;

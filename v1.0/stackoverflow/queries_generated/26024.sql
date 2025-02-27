@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        CreationDate,
+        ViewCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5 -- Top 5 posts for each user
+),
+TagStatistics AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.ViewCount) AS AvgViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        t.TagName
+),
+PostActivity AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate,
+        p.Title,
+        CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN 'Closed/Reopened'
+            WHEN ph.PostHistoryTypeId IN (12, 13) THEN 'Deleted/Undeleted'
+            ELSE 'Edited'
+        END AS ActivityType,
+        COUNT(*) AS ActivityCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        ph.PostId, ph.CreationDate, p.Title, ph.PostHistoryTypeId
+),
+FinalMetrics AS (
+    SELECT 
+        tp.Title,
+        tp.OwnerDisplayName,
+        tp.CreationDate,
+        ts.TotalViews,
+        ts.AvgViews,
+        pa.ActivityType,
+        pa.ActivityCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        TagStatistics ts ON ts.PostCount > 0 -- Join to get tag statistics
+    LEFT JOIN 
+        PostActivity pa ON pa.PostId = tp.PostId
+)
+SELECT 
+    Title,
+    OwnerDisplayName,
+    CreationDate,
+    TotalViews,
+    AvgViews,
+    ActivityType,
+    ActivityCount
+FROM 
+    FinalMetrics
+ORDER BY 
+    TotalViews DESC;

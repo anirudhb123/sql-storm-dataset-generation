@@ -1,0 +1,43 @@
+WITH Supplier_Costs AS (
+    SELECT 
+        ps_partkey,
+        s_nationkey,
+        SUM(ps_supplycost * ps_availqty) AS total_supply_cost
+    FROM partsupp
+    JOIN supplier ON partsupp.ps_suppkey = supplier.s_suppkey
+    GROUP BY ps_partkey, s_nationkey
+),
+High_Cost_Parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        sc.total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY sc.total_supply_cost DESC) AS rank
+    FROM part p
+    JOIN Supplier_Costs sc ON p.p_partkey = sc.ps_partkey
+    WHERE sc.total_supply_cost IS NOT NULL
+),
+Recent_Orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATEADD(month, -6, GETDATE())
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    r.r_name,
+    hh.p_name,
+    hh.p_brand,
+    hh.total_supply_cost,
+    ro.total_sales
+FROM High_Cost_Parts hh
+LEFT JOIN nation n ON hh.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN Recent_Orders ro ON hh.p_partkey = ro.o_orderkey
+WHERE hh.rank <= 5
+  AND (ro.total_sales IS NULL OR ro.total_sales > 1000)
+ORDER BY r.r_name, hh.p_brand, hh.total_supply_cost DESC;

@@ -1,0 +1,68 @@
+-- Performance Benchmarking Query for StackOverflow Schema
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(COALESCE(v.VoteCount, 0)) AS TotalVotes,
+        SUM(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+TagPostCounts AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TotalPostsWithTag
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags ILIKE '%' || t.TagName || '%'  -- Using ILIKE for case-insensitive match
+    GROUP BY 
+        t.TagName
+),
+PostTypeCounts AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(p.Id) AS TotalPosts
+    FROM 
+        PostTypes pt
+    LEFT JOIN 
+        Posts p ON p.PostTypeId = pt.Id
+    GROUP BY 
+        pt.Name
+)
+SELECT 
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalComments,
+    ua.TotalVotes,
+    ua.TotalScore,
+    t.TagName,
+    t.TotalPostsWithTag,
+    pt.PostType,
+    pt.TotalPosts
+FROM 
+    UserActivity ua
+JOIN 
+    TagPostCounts t ON TRUE  -- Cross join to get all combinations for demonstration
+JOIN 
+    PostTypeCounts pt ON TRUE  -- Cross join for post type counts
+ORDER BY 
+    ua.TotalScore DESC, 
+    ua.TotalPosts DESC;

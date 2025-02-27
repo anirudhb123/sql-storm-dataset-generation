@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        w.w_warehouse_id, 
+        i.i_item_id, 
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY w.w_warehouse_id ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1 AND 100 -- Assuming date_sk ranges from 1 to 100
+    GROUP BY 
+        w.w_warehouse_id, i.i_item_id
+),
+CustomerReturns AS (
+    SELECT 
+        wr.refunded_customer_sk, 
+        SUM(wr.wr_return_quantity) AS total_returns
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.refunded_customer_sk
+),
+FinalResults AS (
+    SELECT 
+        r.w_warehouse_id, 
+        r.i_item_id, 
+        r.total_sales, 
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        (r.total_sales - COALESCE(cr.total_returns, 0)) AS net_sales
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        CustomerReturns cr ON r.warehouse_id = cr.refunded_customer_sk
+    WHERE 
+        r.sales_rank <= 10
+)
+SELECT 
+    warehouse_id, 
+    item_id, 
+    total_sales, 
+    total_returns, 
+    net_sales,
+    CASE 
+        WHEN net_sales < 0 THEN 'Loss'
+        WHEN net_sales > 0 AND net_sales < 1000 THEN 'Low Profit'
+        ELSE 'High Profit'
+    END AS profit_category
+FROM 
+    FinalResults
+ORDER BY 
+    net_sales DESC;

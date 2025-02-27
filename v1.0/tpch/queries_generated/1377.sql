@@ -1,0 +1,36 @@
+WITH SupplierAgg AS (
+    SELECT s_nationkey, COUNT(*) AS total_suppliers, SUM(s_acctbal) AS total_acctbal
+    FROM supplier
+    GROUP BY s_nationkey
+),
+PartSupply AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > 50.00
+    GROUP BY ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, co.total_orders, co.total_spent
+    FROM customer c
+    JOIN CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE co.total_spent > 1000.00
+),
+CombinedResults AS (
+    SELECT n.n_name, sa.total_suppliers, sa.total_acctbal, hv.total_orders
+    FROM nation n
+    LEFT JOIN SupplierAgg sa ON n.n_nationkey = sa.s_nationkey
+    LEFT JOIN HighValueCustomers hv ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = hv.c_custkey)
+)
+SELECT r.r_name, COALESCE(cr.total_suppliers, 0) AS suppliers, COALESCE(cr.total_acctbal, 0) AS account_balance, 
+       COALESCE(cr.total_orders, 0) AS high_value_orders
+FROM region r
+LEFT JOIN CombinedResults cr ON r.r_regionkey = cr.n_nationkey
+WHERE (cr.total_orders IS NULL OR cr.total_orders > 5)
+ORDER BY r.r_name, suppliers DESC;

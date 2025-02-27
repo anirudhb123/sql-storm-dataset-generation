@@ -1,0 +1,52 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+customer_category AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE 
+            WHEN hd.hd_income_band_sk IS NOT NULL THEN 'High Income'
+            ELSE 'Low Income'
+        END AS income_category,
+        COUNT(DISTINCT c.c_customer_id) OVER (PARTITION BY CASE 
+            WHEN hd.hd_income_band_sk IS NOT NULL THEN 'High Income'
+            ELSE 'Low Income'
+        END) AS customer_count
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+sales_details AS (
+    SELECT 
+        s.ss_item_sk,
+        s.ss_quantity,
+        s.ss_sales_price,
+        s.ss_ext_sales_price,
+        ca.income_category,
+        ROW_NUMBER() OVER (PARTITION BY ca.income_category ORDER BY s.ss_ext_sales_price DESC) AS rank
+    FROM store_sales s
+    JOIN customer_category ca ON s.ss_customer_sk = ca.c_customer_sk
+)
+SELECT 
+    ss.ws_item_sk,
+    ss.total_quantity,
+    ss.total_sales,
+    sd.ss_quantity,
+    sd.ss_sales_price,
+    sd.income_category,
+    sd.rank AS sales_rank
+FROM sales_summary ss
+JOIN sales_details sd ON ss.ws_item_sk = sd.ss_item_sk
+WHERE ss.rank = 1
+  AND sd.rank <= 10
+ORDER BY ss.total_sales DESC
+LIMIT 20;

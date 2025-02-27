@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty) DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.total_spent,
+        RANK() OVER (ORDER BY c.total_spent DESC) AS rank
+    FROM 
+        CustomerOrders c
+    WHERE 
+        c.total_spent > 10000
+),
+FinalReport AS (
+    SELECT 
+        hs.c_custkey,
+        hs.c_name,
+        hs.total_spent,
+        rs.s_name AS top_supplier,
+        rs.total_supply_value,
+        rs.total_available_quantity
+    FROM 
+        HighValueCustomers hs
+    JOIN 
+        RankedSuppliers rs ON hs.c_custkey = rs.s_suppkey
+    WHERE 
+        rs.rnk = 1
+)
+SELECT 
+    f.c_custkey,
+    f.c_name,
+    f.total_spent,
+    f.top_supplier,
+    f.total_supply_value,
+    f.total_available_quantity
+FROM 
+    FinalReport f
+ORDER BY 
+    f.total_spent DESC;

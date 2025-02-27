@@ -1,0 +1,60 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(ws.ws_net_paid), 0) AS total_web_sales,
+        COALESCE(SUM(cs.cs_net_paid), 0) AS total_catalog_sales,
+        COALESCE(SUM(ss.ss_net_paid), 0) AS total_store_sales
+    FROM 
+        customer c
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN
+        catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    LEFT JOIN
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name
+),
+SalesData AS (
+    SELECT 
+        c.c_first_name,
+        c.c_last_name,
+        SUM(total_web_sales) AS total_web_sales,
+        SUM(total_catalog_sales) AS total_catalog_sales,
+        SUM(total_store_sales) AS total_store_sales
+    FROM 
+        CustomerSales c
+    GROUP BY 
+        c.c_first_name,
+        c.c_last_name
+),
+Demographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(sd.total_web_sales) AS web_sales_by_gender,
+        SUM(sd.total_catalog_sales) AS catalog_sales_by_gender,
+        SUM(sd.total_store_sales) AS store_sales_by_gender
+    FROM 
+        SalesData sd
+    JOIN 
+        customer_demographics cd ON sd.c_customer_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender,
+        cd.cd_marital_status
+)
+SELECT 
+    d.cd_gender,
+    d.cd_marital_status,
+    d.web_sales_by_gender,
+    d.catalog_sales_by_gender,
+    d.store_sales_by_gender
+FROM 
+    Demographics d
+ORDER BY 
+    d.cd_gender, d.cd_marital_status;

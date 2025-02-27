@@ -1,0 +1,75 @@
+WITH Recursive_Cast AS (
+    SELECT
+        c.movie_id,
+        c.person_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON a.person_id = c.person_id
+    WHERE
+        a.name IS NOT NULL
+),
+Movie_Keywords AS (
+    SELECT
+        mk.movie_id,
+        k.keyword
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+),
+Movie_Companies AS (
+    SELECT
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COALESCE(mi.info, 'No Info') AS additional_info
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN
+        movie_info mi ON mc.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Production')
+),
+Actor_Movie_Details AS (
+    SELECT
+        rc.movie_id,
+        STRING_AGG(DISTINCT rc.actor_name, ', ') AS actors,
+        COALESCE(mk.keyword, 'No Keywords') AS keywords,
+        COUNT(DISTINCT mc.company_name) AS company_count,
+        MAX(mc.additional_info) AS additional_info,
+        COUNT(DISTINCT rc.actor_order) AS actor_count
+    FROM
+        Recursive_Cast rc
+    LEFT JOIN
+        Movie_Keywords mk ON rc.movie_id = mk.movie_id
+    LEFT JOIN
+        Movie_Companies mc ON rc.movie_id = mc.movie_id
+    GROUP BY
+        rc.movie_id, mk.keyword
+)
+SELECT
+    am.movie_id,
+    am.actors,
+    am.keywords,
+    am.company_count,
+    am.additional_info,
+    CASE
+        WHEN am.actor_count > 5 THEN 'Ensemble Cast'
+        WHEN am.actor_count BETWEEN 3 AND 5 THEN 'Moderate Cast'
+        ELSE 'Minimal Cast'
+    END AS cast_size
+FROM
+    Actor_Movie_Details am
+WHERE
+    am.company_count > 0
+ORDER BY
+    am.movie_id DESC
+FETCH FIRST 15 ROWS ONLY;
+
+-- Additional complexity: A further correlated subquery can be added if needed
+-- to filter based on a dynamic condition of separate attributes across the tables.

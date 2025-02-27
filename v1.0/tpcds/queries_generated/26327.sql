@@ -1,0 +1,76 @@
+
+WITH AddressData AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        cd_dep_count,
+        cd_dep_employed_count,
+        cd_dep_college_count
+    FROM 
+        customer_demographics
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        a.full_address,
+        a.ca_city,
+        a.ca_state,
+        a.ca_zip,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_education_status,
+        d.cd_purchase_estimate
+    FROM 
+        customer c
+        JOIN AddressData a ON c.c_current_addr_sk = a.ca_address_sk
+        JOIN CustomerDemographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+),
+AggregatedSales AS (
+    SELECT 
+        c.customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+        JOIN CustomerInfo c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.customer_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.full_address,
+    ci.ca_city,
+    ci.ca_state,
+    ci.ca_zip,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_education_status,
+    ci.cd_purchase_estimate,
+    COALESCE(as.total_sales, 0) AS total_sales,
+    COALESCE(as.order_count, 0) AS order_count
+FROM 
+    CustomerInfo ci
+    LEFT JOIN AggregatedSales as ON ci.c_customer_sk = as.customer_sk
+WHERE 
+    ci.ca_state = 'NY' 
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

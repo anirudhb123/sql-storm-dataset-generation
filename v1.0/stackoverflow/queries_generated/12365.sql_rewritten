@@ -1,0 +1,24 @@
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName AS UserName,
+    COUNT(DISTINCT P.Id) AS TotalPosts,
+    COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS TotalQuestions,
+    COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS TotalAnswers,
+    SUM(COALESCE(P.Score, 0)) AS TotalScore,
+    SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+    SUM(COALESCE(C.CommentCount, 0)) AS TotalComments,
+    COUNT(DISTINCT B.Id) AS TotalBadges,
+    AVG(U.Reputation) AS AverageReputation
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Badges B ON U.Id = B.UserId
+GROUP BY 
+    U.Id, U.DisplayName
+ORDER BY 
+    TotalPosts DESC
+LIMIT 100;

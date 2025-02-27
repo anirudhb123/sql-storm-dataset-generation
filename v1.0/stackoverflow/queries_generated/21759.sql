@@ -1,0 +1,91 @@
+WITH UserVotes AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 9 THEN v.BountyAmount ELSE 0 END) AS TotalBountyUsed,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(v.Id) DESC) AS VoteRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS BadgeCount,
+        COALESCE(MAX(ph.CreationDate), p.CreationDate) AS LastHistoryDate,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostLinks
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score
+),
+UserPostActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersPosted,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReopenCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        u.CreationDate > NOW() - INTERVAL '5 years'
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.VotesCount AS TotalVotes,
+    u.PostsCreated,
+    u.QuestionsAsked,
+    u.AnswersPosted,
+    ps.PostId,
+    ps.Title AS PostTitle,
+    ps.ViewCount,
+    ps.Score,
+    ps.CommentCount,
+    ps.BadgeCount,
+    psa.RelatedPostLinks,
+    uva.UpVotesCount,
+    uva.DownVotesCount,
+    uva.TotalBountyUsed
+FROM 
+    UserPostActivity u
+JOIN 
+    PostStatistics ps ON u.UserId = ps.OwnerUserId
+JOIN 
+    UserVotes uva ON u.UserId = uva.UserId
+WHERE 
+    (uva.UpVotesCount - uva.DownVotesCount) > 10
+    AND ps.Score > 5
+ORDER BY 
+    ps.ViewCount DESC, 
+    ps.Score DESC, 
+    ps.LastHistoryDate DESC
+LIMIT 100 OFFSET 0;
+In this elaborate SQL query, multiple advanced features are utilized such as CTEs for organizing user and post data, case statements for conditional aggregation, and window functions for ranking. We are also using outer joins to gather information related to users, posts, votes, and badges, while applying complex filtering conditions. The final selection pulls data across multiple tables and aggregates it meaningfully for performance benchmarking.

@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+), 
+PartStats AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS available_suppliers,
+        AVG(ps.ps_supplycost) AS avg_supplycost,
+        SUM(ps.ps_availqty) AS total_available_qty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+),
+TopOrderPrices AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        DENSE_RANK() OVER (ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'F'
+)
+
+SELECT 
+    n.n_name,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    ps.available_suppliers,
+    ps.avg_supplycost,
+    ps.total_available_qty,
+    'Total revenue from this part: ' || CAST(SUM(l.l_extendedprice * (1 - l.l_discount)) AS VARCHAR) AS revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS total_returns
+FROM 
+    nation n
+LEFT JOIN 
+    RankedSuppliers s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    PartStats ps ON ps.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    lineitem l ON l.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    TopOrderPrices o ON o.o_orderkey = l.l_orderkey
+WHERE 
+    (ps.available_suppliers > 5 AND ps.avg_supplycost < (SELECT AVG(ps1.ps_supplycost) FROM partsupp ps1 WHERE ps1.ps_availqty > 0))
+    OR s.s_acctbal IS NULL
+GROUP BY 
+    n.n_name, s.s_name, ps.available_suppliers, ps.avg_supplycost, ps.total_available_qty
+HAVING 
+    SUM(l.l_extendedprice) IS NOT NULL
+ORDER BY 
+    total_orders DESC, revenue DESC;

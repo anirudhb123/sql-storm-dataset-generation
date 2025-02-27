@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS depth
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        mk.linked_movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.depth + 1 AS depth
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+)
+SELECT 
+    ak.name AS actor_name, 
+    ak.md5sum AS actor_md5,
+    mt.title AS movie_title,
+    mt.production_year,
+    COALESCE(ci.note, 'No role assigned') AS role_note,
+    COUNT(DISTINCT mh.movie_id) AS related_movies_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    RANK() OVER (PARTITION BY ak.person_id ORDER BY COUNT(DISTINCT mh.movie_id) DESC) AS actor_rank,
+    SUM(CASE WHEN mt.production_year < 2000 THEN 1 ELSE 0 END) AS pre_2000_count
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    MovieHierarchy mh ON mt.id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL 
+    AND ak.name != ''
+    AND ak.id % 2 = 0 -- bizarre filter: only even ids
+GROUP BY 
+    ak.person_id, ak.name, ak.md5sum, 
+    mt.title, mt.production_year, 
+    ci.note
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 3 -- actor must be related to more than 3 movies
+ORDER BY 
+    actor_rank, 
+    related_movies_count DESC,
+    ak.name
+FETCH FIRST 10 ROWS ONLY;

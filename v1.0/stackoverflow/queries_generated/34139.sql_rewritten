@@ -1,0 +1,74 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        1 AS Level
+    FROM Users
+    WHERE Reputation >= 1000  
+    UNION ALL
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.CreationDate,
+        ur.Level + 1
+    FROM Users u
+    INNER JOIN UserReputationCTE ur ON u.Reputation < ur.Reputation
+    WHERE ur.Level < 5  
+),
+RecentPosts AS (
+    SELECT 
+        Id,
+        Title,
+        Score,
+        CreationDate,
+        OwnerUserId,
+        Tags,
+        ROW_NUMBER() OVER (PARTITION BY OwnerUserId ORDER BY CreationDate DESC) AS RN
+    FROM Posts
+    WHERE CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+),
+AnsweredQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(a.Id) AS AnswerCount,
+        MAX(a.CreationDate) AS LastAnswerDate
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(Name) AS BadgeCount
+    FROM Badges
+    GROUP BY UserId
+)
+SELECT 
+    u.DisplayName,
+    ur.Reputation,
+    COALESCE(b.BadgeCount, 0) AS BadgeCount,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate,
+    aq.AnswerCount,
+    aq.LastAnswerDate,
+    STRING_AGG(t.TagName, ', ') AS TagsList
+FROM Users u
+INNER JOIN UserReputationCTE ur ON u.Id = ur.UserId
+LEFT JOIN UserBadges b ON u.Id = b.UserId
+LEFT JOIN RecentPosts rp ON u.Id = rp.OwnerUserId AND rp.RN = 1
+LEFT JOIN AnsweredQuestions aq ON rp.Id = aq.PostId
+LEFT JOIN Tags t ON t.ExcerptPostId = rp.Id
+GROUP BY 
+    u.DisplayName, 
+    ur.Reputation, 
+    b.BadgeCount, 
+    rp.Title, 
+    rp.CreationDate, 
+    aq.AnswerCount, 
+    aq.LastAnswerDate
+ORDER BY 
+    ur.Reputation DESC, 
+    aq.AnswerCount DESC
+FETCH FIRST 100 ROWS ONLY;

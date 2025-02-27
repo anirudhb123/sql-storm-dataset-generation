@@ -1,0 +1,81 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY U.Reputation DESC) AS RN
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        RANK() OVER (ORDER BY P.Score DESC, P.ViewCount DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1
+        AND P.Score > 0
+),
+RecentEdits AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.UserDisplayName,
+        HT.Name AS EditType
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes HT ON PH.PostHistoryTypeId = HT.Id
+    WHERE 
+        HT.Name IN ('Edit Title', 'Edit Body')
+        AND PH.CreationDate > NOW() - INTERVAL '30 days'
+),
+PostLinksSummary AS (
+    SELECT 
+        PL.PostId,
+        COUNT(*) AS LinkCount,
+        MAX(PL.CreationDate) AS LastLinkedDate
+    FROM 
+        PostLinks PL
+    GROUP BY 
+        PL.PostId
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    PS.PostId,
+    PS.Title,
+    PS.Score,
+    PS.ViewCount,
+    RE.CreationDate AS RecentEditDate,
+    RE.EditType,
+    PLS.LinkCount,
+    PLS.LastLinkedDate
+FROM 
+    UserStatistics US
+JOIN 
+    PopularPosts PS ON US.PostCount > 0
+LEFT JOIN 
+    RecentEdits RE ON PS.PostId = RE.PostId
+LEFT JOIN 
+    PostLinksSummary PLS ON PS.PostId = PLS.PostId
+WHERE 
+    US.RN <= 10 
+ORDER BY 
+    US.Reputation DESC, PS.Score DESC
+LIMIT 50;

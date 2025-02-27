@@ -1,0 +1,52 @@
+WITH ranked_movies AS (
+    SELECT
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS num_actors,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info c ON t.id = c.movie_id
+    GROUP BY
+        t.id
+),
+actor_info AS (
+    SELECT
+        a.name,
+        c.movie_id,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY c.nr_order) AS role_order
+    FROM
+        aka_name a
+    JOIN
+        cast_info c ON a.person_id = c.person_id
+    LEFT JOIN
+        role_type r ON c.role_id = r.id
+),
+top_movies AS (
+    SELECT
+        rm.title,
+        rm.production_year,
+        rm.num_actors
+    FROM
+        ranked_movies rm
+    WHERE
+        rm.rank <= 10 -- Getting top 10 movies by actor count
+)
+SELECT
+    tm.title,
+    tm.production_year,
+    CASE 
+        WHEN tm.num_actors IS NULL THEN 'No Actors'
+        ELSE CONCAT('Number of Actors: ', tm.num_actors)
+    END AS actors_summary,
+    STRING_AGG(DISTINCT CONCAT(ai.name, ' (Role: ', ai.role, ')'), ', ' ORDER BY ai.role_order) AS featured_actors
+FROM
+    top_movies tm
+LEFT JOIN
+    actor_info ai ON tm.title = ai.title AND tm.production_year = ai.production_year
+GROUP BY
+    tm.title, tm.production_year
+ORDER BY
+    tm.production_year DESC, tm.title;

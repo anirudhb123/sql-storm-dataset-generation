@@ -1,0 +1,77 @@
+
+WITH AddressData AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+DemographicData AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate
+    FROM 
+        customer_demographics
+),
+CustomerData AS (
+    SELECT 
+        c_customer_sk,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        c_email_address,
+        c_birth_year,
+        ca.ca_address_sk,
+        ad.full_address
+    FROM 
+        customer c
+    JOIN 
+        AddressData ad ON c.c_current_addr_sk = ad.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(*) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+FinalData AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cs.full_name,
+        cs.c_email_address,
+        cs.c_birth_year,
+        sa.total_net_profit,
+        sa.total_sales
+    FROM 
+        DemographicData cd
+    JOIN 
+        CustomerData cs ON cd.cd_demo_sk = cs.c_customer_sk
+    LEFT JOIN 
+        SalesData sa ON cs.c_customer_sk = sa.ws_bill_customer_sk
+)
+SELECT 
+    full_name,
+    c_email_address,
+    c_birth_year,
+    COUNT(DISTINCT cd_demo_sk) AS demographic_count,
+    SUM(total_net_profit) AS aggregate_profit,
+    AVG(cd_purchase_estimate) AS average_purchase_estimate
+FROM 
+    FinalData
+GROUP BY 
+    full_name, c_email_address, c_birth_year
+ORDER BY 
+    aggregate_profit DESC, demographic_count DESC
+LIMIT 100;

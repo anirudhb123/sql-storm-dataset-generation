@@ -1,0 +1,98 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,  
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TagPostStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        STRING_AGG(\''||ph.comment||'\', \', \') AS Comments,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 YEAR'
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId, ph.CreationDate
+),
+ActivePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastHistoryDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        (p.LastActivityDate > cast('2024-10-01' as date) - INTERVAL '1 MONTH' OR p.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 YEAR')
+    GROUP BY 
+        p.Id, p.Title, p.Tags
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    uv.UpVotes,
+    uv.DownVotes,
+    uv.TotalBounty,
+    t.TagId,
+    t.TagName,
+    t.PostCount,
+    t.TotalViews,
+    t.AvgScore,
+    p.Id AS PostId,
+    p.Title AS PostTitle,
+    p.CommentCount AS # of Comments,
+    p.HistoryCount AS # of Changes,
+    CASE 
+        WHEN p.LastHistoryDate IS NULL THEN 'No History Available' 
+        ELSE 'History Exists' 
+    END AS HistoryStatus
+FROM 
+    UserVoteStats uv
+JOIN 
+    Users u ON u.Id = uv.UserId
+CROSS JOIN 
+    TagPostStats t 
+JOIN 
+    ActivePosts p ON p.Tags LIKE '%' || t.TagName || '%'
+WHERE 
+    u.Reputation > 0
+    AND (uv.UpVotes - uv.DownVotes) > (SELECT AVG(UpVotes - DownVotes) FROM UserVoteStats)
+    AND COALESCE(t.PostCount, 0) > 5
+ORDER BY 
+    u.Reputation DESC, 
+    t.AvgScore DESC, 
+    p.CommentCount DESC;

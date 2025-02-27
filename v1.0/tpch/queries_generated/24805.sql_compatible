@@ -1,0 +1,79 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+),
+TopSuppliers AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'No Balance' 
+            WHEN s.s_acctbal < 0 THEN 'Negative Balance' 
+            ELSE 'Positive Balance' 
+        END AS balance_status
+    FROM 
+        supplier s
+)
+SELECT 
+    rp.p_name,
+    rp.p_retailprice,
+    si.s_name,
+    si.balance_status,
+    COALESCE(ts.total_avail_qty, 0) AS total_availability,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    RankedParts rp
+LEFT JOIN 
+    TopSuppliers ts ON rp.p_partkey = ts.ps_partkey
+JOIN 
+    SupplierInfo si ON ts.ps_suppkey = si.s_suppkey
+LEFT JOIN 
+    lineitem l ON l.l_partkey = rp.p_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey AND o.o_orderstatus = 'O'
+WHERE 
+    rp.rn <= 5 
+    AND (si.s_acctbal IS NOT NULL OR rp.p_retailprice > 100.00)
+GROUP BY 
+    rp.p_name, rp.p_retailprice, si.s_name, si.balance_status
+ORDER BY 
+    rp.p_retailprice DESC, order_count ASC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Total Count' AS p_name,
+    NULL AS p_retailprice,
+    NULL AS s_name,
+    NULL AS balance_status,
+    COUNT(DISTINCT ts.ps_partkey) AS total_availability,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    partsupp ts
+JOIN 
+    lineitem l ON ts.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    o.o_orderstatus = 'O'
+GROUP BY 
+    p_name, p_retailprice, s_name, balance_status
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 1
+ORDER BY 1;

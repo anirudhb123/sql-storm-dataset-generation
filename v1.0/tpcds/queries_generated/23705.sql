@@ -1,0 +1,50 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > 0
+    GROUP BY 
+        ws_bill_customer_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    cd.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    cs.total_net_profit,
+    cs.order_count,
+    cs.profit_rank
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    RankedSales cs ON cd.c_customer_id = cs.ws_bill_customer_sk
+WHERE 
+    (cd_cd_marital_status = 'S' AND cs.profit_rank <= 10)
+    OR (cd.cd_marital_status = 'M' AND cs.profit_rank <= 5)
+    OR (cd.cd_purchase_estimate IS NULL OR cs.total_net_profit IS NULL)
+ORDER BY 
+    COALESCE(cs.total_net_profit, 0) DESC,
+    cd.gender_rank
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

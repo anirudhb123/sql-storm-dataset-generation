@@ -1,0 +1,46 @@
+
+WITH RecursiveOrders AS (
+    SELECT o_orderkey, o_custkey, o_totalprice, o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS rn
+    FROM orders
+    WHERE o_orderstatus IN ('O', 'F')
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN RecursiveOrders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+),
+HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+RankedLineItems AS (
+    SELECT l.*, 
+           RANK() OVER (PARTITION BY l_orderkey ORDER BY l_extendedprice DESC) AS price_rank
+    FROM lineitem l
+    WHERE l_shipdate > '1997-01-01' AND l_shipdate < '1997-12-31'
+)
+SELECT COALESCE(tc.c_name, 'Unknown Customer') AS customer_name,
+       hs.s_name AS supplier_name,
+       SUM(CASE WHEN rli.price_rank = 1 THEN rli.l_discount * rli.l_extendedprice END) AS highest_discount_value,
+       AVG(ps.ps_supplycost) AS avg_supplier_cost,
+       COUNT(DISTINCT rli.l_orderkey) AS orders_count,
+       COUNT(rli.l_quantity) FILTER (WHERE rli.l_quantity > 0) AS positive_quantity_count
+FROM TopCustomers tc
+FULL OUTER JOIN HighValueSuppliers hs ON tc.c_custkey = hs.s_suppkey
+LEFT JOIN RankedLineItems rli ON rli.l_orderkey IN (
+    SELECT o_orderkey FROM orders WHERE o_custkey = tc.c_custkey
+) OR rli.l_suppkey IN (
+    SELECT ps_suppkey FROM partsupp WHERE ps_partkey IN (
+        SELECT p_partkey FROM part 
+        WHERE p_retailprice > 20.00
+    )
+)
+GROUP BY tc.c_name, hs.s_name
+HAVING SUM(rli.l_discount) IS NOT NULL OR COUNT(rli.l_orderkey) > 0
+ORDER BY highest_discount_value DESC NULLS LAST;

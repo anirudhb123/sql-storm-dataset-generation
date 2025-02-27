@@ -1,0 +1,60 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.title IS NOT NULL
+),
+CastWithRoles AS (
+    SELECT 
+        c.movie_id,
+        r.role AS role_name,
+        COUNT(c.id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.person_role_id = r.id
+    GROUP BY 
+        c.movie_id, r.role
+),
+FilmDetails AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        cc.role_name,
+        COALESCE(cc.role_count, 0) AS role_count,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        RankedTitles mt
+    LEFT JOIN 
+        complete_cast cc ON mt.title_id = cc.movie_id
+    LEFT JOIN 
+        movie_companies mc ON mt.title_id = mc.movie_id
+    GROUP BY 
+        mt.title, mt.production_year, cc.role_name
+)
+SELECT 
+    fd.title,
+    fd.production_year,
+    fd.role_name,
+    fd.role_count,
+    fd.company_count,
+    CASE 
+        WHEN fd.company_count > 5 THEN 'Many Companies'
+        WHEN fd.company_count = 0 THEN 'No Companies'
+        ELSE 'Few Companies'
+    END AS company_description
+FROM 
+    FilmDetails fd
+WHERE 
+    fd.role_count > 1 
+    AND fd.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    fd.production_year DESC, 
+    fd.title ASC
+LIMIT 100;

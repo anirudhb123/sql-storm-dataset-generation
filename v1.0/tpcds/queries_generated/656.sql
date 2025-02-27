@@ -1,0 +1,57 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender
+),
+TopCustomers AS (
+    SELECT 
+        c.customer_id,
+        c.gender,
+        cs.total_sales,
+        cs.order_count
+    FROM 
+        CustomerSales cs
+    JOIN (
+        SELECT 
+            DISTINCT cd_gender,
+            MIN(total_sales) AS min_sales
+        FROM 
+            CustomerSales
+        GROUP BY 
+            cd_gender
+    ) gender_min ON cs.total_sales > gender_min.min_sales
+)
+SELECT 
+    t1.customer_id,
+    t1.gender,
+    t1.total_sales,
+    ISNULL(t2.total_discount, 0) AS total_discount,
+    (t1.total_sales - ISNULL(t2.total_discount, 0)) AS net_profit
+FROM 
+    TopCustomers t1
+LEFT JOIN (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_discount_amt) AS total_discount
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+) t2 ON t1.customer_id = t2.ws_bill_customer_sk
+WHERE 
+    t1.total_sales > 1000
+ORDER BY 
+    net_profit DESC
+FETCH FIRST 10 ROWS ONLY;

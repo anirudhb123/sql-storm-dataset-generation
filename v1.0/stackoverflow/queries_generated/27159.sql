@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1 -- Only Questions
+),
+
+TagDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS Tag
+    FROM Posts p
+    WHERE p.Tags IS NOT NULL
+),
+
+TagStats AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS TagCount,
+        AVG(Score) AS AvgScore,
+        SUM(ViewCount) AS TotalViews
+    FROM TagDetails td
+    JOIN RankedPosts rp ON td.PostId = rp.PostId
+    GROUP BY Tag
+),
+
+TopTags AS (
+    SELECT 
+        Tag,
+        Rank() OVER (ORDER BY TagCount DESC) AS TagRank
+    FROM TagStats
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.ViewCount,
+    rp.Score,
+    rp.OwnerDisplayName,
+    rp.Reputation,
+    tt.Tag,
+    ts.TagCount,
+    ts.AvgScore,
+    ts.TotalViews
+FROM RankedPosts rp
+JOIN TopTags tt ON tt.Tag IN (SELECT UNNEST(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><')))
+                               )
+JOIN TagStats ts ON tt.Tag = ts.Tag
+WHERE rp.RankByScore = 1 AND tt.TagRank <= 5 -- Top ranked questions and top 5 tags
+ORDER BY ts.TagCount DESC, rp.Score DESC;

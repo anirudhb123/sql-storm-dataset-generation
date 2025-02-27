@@ -1,0 +1,49 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_sales_price, 
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS rn
+    FROM web_sales
+), total_sales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_sales_price) AS total_sales 
+    FROM web_sales 
+    GROUP BY ws_item_sk
+), customer_info AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        ci.total_income
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN (
+        SELECT 
+            hd_demo_sk, 
+            SUM(income_band.ib_upper_bound) AS total_income
+        FROM household_demographics hd
+        JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+        GROUP BY hd_demo_sk
+    ) ci ON c.c_current_hdemo_sk = ci.hd_demo_sk
+)
+SELECT 
+    ci.c_first_name, 
+    ci.c_last_name, 
+    ci.cd_gender, 
+    ci.cd_marital_status, 
+    ts.total_sales, 
+    rs.ws_sales_price
+FROM customer_info ci
+JOIN total_sales ts ON ci.c_customer_sk = ts.ws_item_sk 
+LEFT JOIN ranked_sales rs ON ts.ws_item_sk = rs.ws_item_sk AND rs.rn = 1
+WHERE 
+    ci.cd_gender IS NOT NULL 
+    AND ci.cd_marital_status = 'M' 
+    AND ts.total_sales > (SELECT AVG(ts2.total_sales) FROM total_sales ts2)
+ORDER BY ts.total_sales DESC
+LIMIT 10;

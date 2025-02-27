@@ -1,0 +1,59 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca.ca_address_sk,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        CONCAT(ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip) AS city_state_zip,
+        ca.ca_country
+    FROM 
+        customer_address ca
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        ad.full_address,
+        ad.city_state_zip,
+        ad.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        AddressDetails ad ON c.c_current_addr_sk = ad.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_sold_date_sk
+)
+SELECT 
+    dd.d_date AS sales_date,
+    COUNT(DISTINCT cd.c_customer_sk) AS unique_customers,
+    SUM(sd.total_orders) AS total_orders,
+    SUM(sd.total_sales) AS total_sales,
+    SUM(sd.total_profit) AS total_profit,
+    COUNT(CASE WHEN cd.cd_gender = 'M' THEN 1 END) AS male_customers,
+    COUNT(CASE WHEN cd.cd_gender = 'F' THEN 1 END) AS female_customers,
+    AVG(cd.cd_income_band_sk) AS average_income_band
+FROM 
+    date_dim dd
+LEFT JOIN 
+    SalesData sd ON dd.d_date_sk = sd.ws_sold_date_sk
+LEFT JOIN 
+    CustomerDetails cd ON dd.d_date_sk BETWEEN cd.c_birth_day AND dd.d_date_sk + INTERVAL '365' DAY
+GROUP BY 
+    dd.d_date
+ORDER BY 
+    dd.d_date DESC
+LIMIT 100;

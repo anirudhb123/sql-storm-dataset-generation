@@ -1,0 +1,99 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only considering Questions
+), 
+
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstEditDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 END) AS EditCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS PostHistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+), 
+
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        SUM(VoteTypeId = 2) AS UpVotesCount,
+        SUM(VoteTypeId = 3) AS DownVotesCount,
+        SUM(VoteTypeId = 2) - SUM(VoteTypeId = 3) AS NetVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId 
+    GROUP BY 
+        U.Id, U.DisplayName
+), 
+
+RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.AcceptedAnswerId IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        r.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursiveCTE r ON p.ParentId = r.PostId
+)
+SELECT 
+    rp.Title AS QuestionTitle,
+    rp.CreationDate AS QuestionCreationDate,
+    rp.Score AS QuestionScore,
+    rp.ViewCount AS QuestionViewCount,
+    phd.FirstEditDate,
+    phd.EditCount,
+    phd.PostHistoryTypes,
+    tu.DisplayName AS TopUserName,
+    tu.UpVotesCount,
+    tu.DownVotesCount,
+    tu.NetVotes,
+    r.PostId AS AnswerPostId,
+    r.Title AS AnswerTitle,
+    r.Score AS AnswerScore,
+    r.Level AS AnswerLevel
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.Id = phd.PostId
+LEFT JOIN 
+    TopUsers tu ON rp.OwnerUserId = tu.Id
+LEFT JOIN 
+    RecursiveCTE r ON r.PostId = rp.AcceptedAnswerId
+WHERE 
+    rp.rn = 1 -- Get the highest score question per user
+    AND rp.Score > 10 -- Only considered high scoring questions
+ORDER BY 
+    rp.CreationDate DESC;

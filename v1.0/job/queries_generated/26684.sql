@@ -1,0 +1,51 @@
+WITH movie_details AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        a.imdb_id,
+        b.name AS company_name,
+        GROUP_CONCAT(c.name ORDER BY c.name SEPARATOR ', ') AS actors,
+        d.info AS additional_info
+    FROM 
+        aka_title a
+    JOIN 
+        movie_companies e ON a.id = e.movie_id
+    JOIN 
+        company_name b ON e.company_id = b.id
+    LEFT JOIN 
+        cast_info f ON a.id = f.movie_id
+    LEFT JOIN 
+        aka_name c ON f.person_id = c.person_id
+    LEFT JOIN 
+        movie_info d ON a.id = d.movie_id AND d.info_type_id = 1
+    WHERE 
+        a.production_year >= 2000
+    GROUP BY 
+        a.id, b.name, d.info
+),
+keyword_details AS (
+    SELECT 
+        m.id AS movie_id,
+        GROUP_CONCAT(k.keyword ORDER BY k.keyword SEPARATOR ', ') AS keywords
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.company_name,
+    md.actors,
+    kd.keywords,
+    md.additional_info
+FROM 
+    movie_details md
+LEFT JOIN 
+    keyword_details kd ON md.imdb_id = kd.movie_id
+ORDER BY 
+    md.production_year DESC, md.movie_title;

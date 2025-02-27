@@ -1,0 +1,62 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS rank_per_year
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_per_year <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+CompleteMovieInfo AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COALESCE(CAST(ck.name AS TEXT), 'Unknown Character') AS main_character,
+        COALESCE(mk.keywords, 'No keywords') AS movie_keywords,
+        CASE 
+            WHEN t.production_year < 1990 THEN 'Classic'
+            WHEN t.production_year BETWEEN 1990 AND 2000 THEN 'Nineties'
+            ELSE 'Modern'
+        END AS era
+    FROM 
+        TopMovies t
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.movie_id
+    LEFT JOIN 
+        char_name ck ON c.person_id = ck.imdb_id AND c.nr_order = 1
+    LEFT JOIN 
+        MovieKeywords mk ON t.movie_id = mk.movie_id
+)
+SELECT 
+    *,
+    COUNT(*) OVER (PARTITION BY era) AS era_count,
+    SUM(CASE WHEN era = 'Modern' THEN 1 ELSE 0 END) OVER () AS total_modern_movies
+FROM 
+    CompleteMovieInfo
+WHERE 
+    era_count > 2
+ORDER BY 
+    production_year DESC, title ASC;

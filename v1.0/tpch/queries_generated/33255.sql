@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT ps.ps_suppkey, s.s_name, s.s_nationkey, h.level + 1
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN SupplierHierarchy h ON ps.ps_partkey = h.s_suppkey
+    WHERE s.s_acctbal > 5000 AND h.level < 5
+),
+OrderedCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey AND o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 1000
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_availability
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_availqty) > 100
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    COALESCE(SUM(p.total_spent), 0) AS total_cust_spending,
+    SQRT(COALESCE(AVG(p.total_availability), 0)) AS avg_part_availability,
+    ARRAY_AGG(DISTINCT sh.s_name) AS supplier_names
+FROM nation n
+LEFT JOIN OrderedCustomers p ON n.n_nationkey = p.c_custkey
+LEFT JOIN PartSupplierDetails ps ON ps.p_partkey = ANY(SELECT ps_partkey FROM partsupp WHERE ps_suppkey IN (SELECT s_suppkey FROM SupplierHierarchy))
+LEFT JOIN RankedOrders o ON p.c_custkey = o.o_orderkey
+LEFT JOIN supplier sh ON n.n_nationkey = sh.s_nationkey
+GROUP BY n.n_nationkey, n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5 OR SUM(p.total_spent) > 5000
+ORDER BY total_cust_spending DESC, customer_count ASC;

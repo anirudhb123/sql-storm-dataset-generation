@@ -1,0 +1,67 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ak.name AS aka_name,
+        c.role_id,
+        c.nr_order,
+        k.keyword
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000 
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        mc.note
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+combined_details AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.aka_name,
+        cd.company_name,
+        cd.company_type,
+        cd.note,
+        ARRAY_AGG(DISTINCT md.keyword) AS keywords
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        company_details cd ON md.movie_id = cd.movie_id
+    GROUP BY 
+        md.movie_id, md.title, md.production_year, md.aka_name, cd.company_name, cd.company_type, cd.note
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    aka_name,
+    STRING_AGG(DISTINCT company_name || ' (' || company_type || ')', ', ') AS company_details,
+    STRING_AGG(DISTINCT keyword, ', ') AS all_keywords
+FROM 
+    combined_details
+GROUP BY 
+    movie_id, title, production_year, aka_name
+ORDER BY 
+    production_year DESC, title;

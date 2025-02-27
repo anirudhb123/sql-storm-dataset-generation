@@ -1,0 +1,37 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk, 
+           cd_gender, cd_marital_status, cd_education_status, c_pref_cust_flag,
+           1 AS level
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c.c_pref_cust_flag = 'Y'
+    
+    UNION ALL
+    
+    SELECT c.customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk,
+           cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, c.c_pref_cust_flag,
+           ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON ch.c_customer_sk = c.c_current_cdemo_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+
+SELECT ca.ca_city, 
+       COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+       AVG(cd.cd_purchase_estimate) AS avg_purchase,
+       SUM(ws.ws_net_profit) AS total_profit,
+       SUM(ws.ws_net_paid_inc_tax) AS total_paid,
+       STRING_AGG(DISTINCT CONCAT(c.c_first_name, ' ', c.c_last_name), ', ') AS customer_names
+FROM customer_address ca
+LEFT JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+WHERE cd.cd_marital_status = 'M'
+  AND (cd.cd_gender = 'F' OR cd.cd_gender IS NULL)
+  AND ws.ws_sold_date_sk > (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2022)
+  AND ca.ca_city IS NOT NULL
+GROUP BY ca.ca_city
+HAVING SUM(ws.ws_net_profit) > 10000
+ORDER BY total_profit DESC
+LIMIT 10;

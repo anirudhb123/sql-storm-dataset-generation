@@ -1,0 +1,73 @@
+WITH UserMetrics AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        LastAccessDate,
+        (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = Users.Id) AS PostCount,
+        (SELECT COUNT(*) FROM Badges WHERE UserId = Users.Id) AS BadgeCount
+    FROM Users
+    ORDER BY Reputation DESC
+    LIMIT 10
+),
+
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE((SELECT COUNT(*) FROM Comments WHERE PostId = p.Id), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) FROM Votes WHERE PostId = p.Id), 0) AS VoteCount,
+        COALESCE((SELECT COUNT(*) FROM Votes WHERE PostId = p.Id AND VoteTypeId = 2), 0) AS UpvoteCount
+    FROM Posts p
+    ORDER BY p.CreationDate DESC
+    LIMIT 10
+),
+
+TagMetrics AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        t.Count AS UsageCount,
+        (SELECT COUNT(*) FROM Posts WHERE Tags LIKE '%' || t.TagName || '%') AS PostCount
+    FROM Tags t
+    ORDER BY t.Count DESC
+    LIMIT 10
+)
+
+SELECT 
+    'UserMetrics' AS MetricType,
+    UserId AS MetricId,
+    Reputation,
+    CreationDate,
+    LastAccessDate,
+    PostCount,
+    BadgeCount
+FROM UserMetrics
+
+UNION ALL
+
+SELECT 
+    'PostMetrics',
+    PostId,
+    NULL,
+    CreationDate,
+    NULL,
+    ViewCount,
+    Score,
+    CommentCount,
+    VoteCount,
+    UpvoteCount
+FROM PostMetrics
+
+UNION ALL
+
+SELECT 
+    'TagMetrics',
+    TagId,
+    TagName,
+    UsageCount,
+    PostCount
+FROM TagMetrics;

@@ -1,0 +1,58 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount, 
+        p.Score, 
+        p.AcceptedAnswerId, 
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    
+    UNION ALL
+    
+    SELECT 
+        p2.Id, 
+        p2.Title, 
+        p2.CreationDate, 
+        p2.ViewCount, 
+        p2.Score, 
+        p2.AcceptedAnswerId, 
+        r.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursiveCTE r ON p2.ParentId = r.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(COALESCE(bg.Class, 0)) AS TotalBadges,
+    AVG(pk.Score) AS AveragePostScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+    (SELECT COUNT(*) FROM Comments c WHERE c.UserId = u.Id) AS TotalComments,
+    ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(DISTINCT p.Id) DESC) AS PostRank
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId IN (1, 2) 
+LEFT JOIN 
+    Badges bg ON u.Id = bg.UserId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (9, 12) 
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT UNNEST(string_to_array(p.Tags, '><'))) 
+LEFT JOIN 
+    RecursiveCTE r ON r.PostId = p.Id
+GROUP BY 
+    u.Id 
+HAVING 
+    COUNT(DISTINCT p.Id) > 0
+ORDER BY 
+    TotalPosts DESC, TotalBadges DESC
+LIMIT 100;

@@ -1,0 +1,79 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+AggregateCast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ac.total_cast,
+        ROW_NUMBER() OVER (ORDER BY ac.total_cast DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        AggregateCast ac ON mh.movie_id = ac.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    COALESCE(ac.total_cast, 0) AS total_cast,
+    rm.rank,
+    CASE 
+        WHEN rm.total_cast IS NULL OR rm.total_cast = 0 THEN 'No Cast'
+        WHEN rm.total_cast < 5 THEN 'Small Cast'
+        ELSE 'Large Cast'
+    END AS cast_size,
+    STRING_AGG(DISTINCT CASE WHEN ac.cast_names IS NOT NULL THEN ac.cast_names END, '; ') AS cast_list
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    AggregateCast ac ON rm.movie_id = ac.movie_id
+WHERE 
+    rm.rank <= 50
+GROUP BY 
+    rm.title, rm.production_year, rm.total_cast, rm.rank
+ORDER BY 
+    rm.rank;
+
+This SQL query features:
+
+1. **Recursive CTE** (`MovieHierarchy`): To build a hierarchy of movies linked together, originating from movies released after 2000.
+2. **Aggregate CTE** (`AggregateCast`): Counts distinct cast members and aggregates their names for each movie.
+3. **Ranked movies**: Assigns a rank based on the total number of cast members.
+4. **Final SELECT**: Combines results using `LEFT JOIN`, handles NULL values with `COALESCE`, and categorizes cast size with a `CASE` statement.
+5. **String Aggregation**: Uses `STRING_AGG` to build a list of cast names, handling NULLs inside the aggregation.
+6. **Ordering and Filtering**: Limits results to the top 50 ranked movies based on cast size.

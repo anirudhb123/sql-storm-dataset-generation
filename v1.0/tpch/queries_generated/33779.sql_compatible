@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, CAST(s_name AS CHAR(100)) AS hierarchy
+    FROM supplier
+    WHERE s_acctbal > (
+        SELECT AVG(s_acctbal) 
+        FROM supplier 
+        WHERE s_acctbal IS NOT NULL
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, CONCAT(sh.hierarchy, ' -> ', s.s_name)
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey <> sh.s_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name,
+           COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_discount < 0.05
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+)
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    nh.total_orders,
+    nh.total_spent,
+    sh.hierarchy AS supplier_hierarchy
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN CustomerOrderSummary nh ON nh.total_orders > 10
+LEFT JOIN HighValueSuppliers hv ON hv.ps_partkey = p.p_partkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey = hv.ps_suppkey
+WHERE l.l_shipdate >= DATE '1997-01-01' 
+  AND (l.l_returnflag = 'N' OR l.l_tax IS NOT NULL)
+GROUP BY p.p_partkey, p.p_name, nh.total_orders, nh.total_spent, sh.hierarchy
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY revenue DESC
+LIMIT 100;

@@ -1,0 +1,89 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT
+        ss.sold_date_sk,
+        ss.item_sk,
+        SUM(ss.quantity) AS total_quantity,
+        SUM(ss.net_profit) AS total_profit
+    FROM
+        store_sales ss
+    WHERE
+        ss.sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY
+        ss.sold_date_sk, ss.item_sk
+
+    UNION ALL
+
+    SELECT
+        cr.returned_date_sk,
+        cr.item_sk,
+        -SUM(cr.return_quantity) AS total_quantity,
+        -SUM(cr.net_loss) AS total_profit
+    FROM
+        catalog_returns cr
+    JOIN
+        sales_data sd ON cr.item_sk = sd.item_sk AND cr.returned_date_sk = sd.sold_date_sk
+    GROUP BY
+        cr.returned_date_sk, cr.item_sk
+),
+total_sales AS (
+    SELECT
+        sd.item_sk,
+        SUM(sd.total_quantity) AS net_quantity,
+        SUM(sd.total_profit) AS net_profit
+    FROM
+        sales_data sd
+    GROUP BY
+        sd.item_sk
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(cd.cd_dep_count, 0) AS dependents,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+monthly_performance AS (
+    SELECT
+        d.d_month_seq,
+        d.d_year,
+        ts.item_sk,
+        SUM(ts.net_quantity) AS total_sales_quantity,
+        SUM(ts.net_profit) AS total_profit,
+        COUNT(DISTINCT ci.c_customer_sk) AS unique_customers
+    FROM
+        total_sales ts
+    JOIN
+        date_dim d ON d.d_date_sk = ts.item_sk
+    JOIN
+        customer_info ci ON ci.income_band = (SELECT ib.ib_income_band_sk FROM income_band ib WHERE ib.ib_lower_bound <= ts.net_profit AND ib.ib_upper_bound >= ts.net_profit)
+    GROUP BY
+        d.d_month_seq, d.d_year, ts.item_sk
+)
+SELECT
+    mp.d_year,
+    mp.d_month_seq,
+    mp.item_sk,
+    mp.total_sales_quantity,
+    mp.total_profit,
+    CASE
+        WHEN mp.total_profit > 10000 THEN 'High Profit'
+        WHEN mp.total_profit BETWEEN 5000 AND 10000 THEN 'Medium Profit'
+        ELSE 'Low Profit'
+    END AS profit_category,
+    ROW_NUMBER() OVER (PARTITION BY mp.d_year, mp.d_month_seq ORDER BY mp.total_profit DESC) AS sales_rank
+FROM
+    monthly_performance mp
+WHERE
+    mp.unique_customers > 10
+ORDER BY
+    mp.d_year, mp.d_month_seq, sales_rank;

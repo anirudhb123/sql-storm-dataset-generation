@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.ship_date_sk,
+        ws.item_sk,
+        ws.quantity,
+        SUM(ws.ext_sales_price) OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws.ship_date_sk ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws.ship_date_sk DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ship_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.cd_demo_sk
+),
+SalesSummary AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        COUNT(rs.item_sk) AS total_items_sold,
+        COALESCE(SUM(rs.quantity), 0) AS total_quantity,
+        COALESCE(MAX(rs.cumulative_sales), 0) AS max_cumulative_sales
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        RankedSales rs ON ci.c_customer_sk = rs.bill_customer_sk
+    WHERE 
+        ci.cd_gender = 'F'
+    GROUP BY 
+        ci.c_customer_sk, ci.c_first_name, ci.c_last_name, ci.cd_gender, ci.cd_marital_status
+)
+SELECT 
+    s.*,
+    CASE 
+        WHEN s.total_items_sold > 10 THEN 'High Volume'
+        WHEN s.total_items_sold BETWEEN 5 AND 10 THEN 'Medium Volume'
+        ELSE 'Low Volume'
+    END AS sale_category
+FROM 
+    SalesSummary s
+WHERE 
+    s.max_cumulative_sales > 1000
+ORDER BY 
+    s.total_quantity DESC
+LIMIT 50;

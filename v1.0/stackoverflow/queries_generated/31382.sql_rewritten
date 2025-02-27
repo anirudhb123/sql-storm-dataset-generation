@@ -1,0 +1,78 @@
+WITH RECURSIVE TagHierarchy AS (
+    SELECT Id, TagName, Count, 1 AS Level
+    FROM Tags
+    WHERE Count > 0
+    
+    UNION ALL
+    
+    SELECT t.Id, t.TagName, t.Count, th.Level + 1
+    FROM Tags t
+    JOIN PostLinks pl ON pl.RelatedPostId = t.Id
+    JOIN TagHierarchy th ON th.Id = pl.PostId
+    WHERE th.Level < 5
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(vote_id), 0) AS TotalVotes,
+        COUNT(c.Id) AS TotalComments,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    LEFT JOIN Comments c ON c.UserId = u.Id
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    GROUP BY u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        AVG(COALESCE(v.BountyAmount, 0)) AS AvgBounty,
+        COUNT(DISTINCT v.UserId) AS UniqueVoters
+    FROM 
+        Posts p
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount
+),
+MergedPostStats AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.ViewCount,
+        ps.TotalComments,
+        ps.AvgBounty,
+        ps.UniqueVoters,
+        th.TagName
+    FROM 
+        PostStats ps
+    LEFT JOIN TagHierarchy th ON th.Id = (SELECT MIN(Id) FROM TagHierarchy WHERE Id IN (SELECT unnest(string_to_array(p.Tags, ', '))::int))
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    SUM(mps.ViewCount) AS TotalViews,
+    SUM(mps.UniqueVoters) AS TotalUniqueVoters,
+    COUNT(DISTINCT mps.PostId) AS PostsCount,
+    MAX(mps.TotalComments) AS MaxComments
+FROM 
+    UserActivity ua
+LEFT JOIN MergedPostStats mps ON ua.UserId = mps.PostId 
+WHERE 
+    ua.TotalVotes > 0
+    AND (ua.TotalPosts > 5 OR ua.TotalComments = 0) 
+GROUP BY 
+    ua.UserId, ua.DisplayName
+ORDER BY 
+    TotalViews DESC
+LIMIT 10;

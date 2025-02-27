@@ -1,0 +1,47 @@
+WITH regional_orders AS (
+    SELECT
+        n.n_name AS nation_name,
+        SUM(o.o_totalprice) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM
+        orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY
+        n.n_name
+),
+top_regions AS (
+    SELECT
+        nation_name,
+        total_revenue,
+        RANK() OVER (ORDER BY total_revenue DESC) AS revenue_rank
+    FROM
+        regional_orders
+    WHERE
+        total_revenue IS NOT NULL
+),
+supplier_shares AS (
+    SELECT
+        s.s_name AS supplier_name,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM
+        supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_name
+)
+SELECT
+    tr.nation_name,
+    tr.total_revenue,
+    tr.revenue_rank,
+    ss.supplier_name,
+    ss.total_supplycost
+FROM
+    top_regions tr
+LEFT JOIN supplier_shares ss ON tr.nation_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = (SELECT DISTINCT c.c_nationkey FROM customer c JOIN orders o ON c.c_custkey = o.o_custkey WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_returnflag = 'N')))
+WHERE
+    tr.revenue_rank <= 5
+ORDER BY
+    tr.revenue_rank ASC, ss.total_supplycost DESC;

@@ -1,0 +1,38 @@
+
+WITH ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus,
+           RANK() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+top_orders AS (
+    SELECT ro.o_orderkey, ro.o_orderdate, ro.o_totalprice, ro.o_orderstatus
+    FROM ranked_orders ro
+    WHERE ro.rank <= 10
+),
+supplier_parts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_brand, p.p_retailprice,
+           SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_brand, p.p_retailprice
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+detailed_report AS (
+    SELECT co.c_custkey, co.c_name, co.order_count, co.total_spent, 
+           sp.p_name, sp.p_brand, sp.p_retailprice, to.o_orderkey, to.o_orderdate
+    FROM customer_orders co
+    JOIN top_orders to ON co.order_count > 0
+    JOIN lineitem l ON to.o_orderkey = l.l_orderkey
+    JOIN supplier_parts sp ON l.l_partkey = sp.ps_partkey
+)
+SELECT dr.c_custkey, dr.c_name, dr.order_count, dr.total_spent, 
+       dr.p_name, dr.p_brand, dr.p_retailprice, dr.o_orderkey, dr.o_orderdate
+FROM detailed_report dr
+WHERE dr.total_spent > 1000
+ORDER BY dr.total_spent DESC, dr.order_count DESC;

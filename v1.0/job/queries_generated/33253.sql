@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE 
+        mh.depth < 5  -- limit recursion depth
+)
+
+SELECT 
+    ak.person_id,
+    ak.name AS actor_name,
+    COUNT(DISTINCT mh.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT ak2.name, ', ') AS co_actors,
+    SUM(CASE WHEN c.nr_order IS NOT NULL THEN 1 ELSE 0 END) AS roles_count,
+    AVG(CASE WHEN mi.info_type_id IS NOT NULL THEN length(mi.info) ELSE NULL END) AS avg_movie_info_length
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info c ON ak.person_id = c.person_id
+LEFT JOIN 
+    movie_hierarchy mh ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    cast_info c2 ON c2.movie_id = mh.movie_id AND c2.person_id <> ak.person_id
+LEFT JOIN 
+    aka_name ak2 ON ak2.person_id = c2.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+WHERE 
+    mh.title IS NOT NULL 
+    AND ak.name IS NOT NULL 
+    AND ak.name <> 'UNKNOWN' 
+GROUP BY 
+    ak.person_id, ak.name
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 1
+ORDER BY 
+    total_movies DESC; 
+

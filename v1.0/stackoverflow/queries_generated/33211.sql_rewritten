@@ -1,0 +1,46 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, CreationDate, Location, WebsiteUrl, EmailHash,
+           1 AS Level
+    FROM Users
+    WHERE Reputation > (SELECT AVG(Reputation) FROM Users)
+    
+    UNION ALL
+    
+    SELECT u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.Location, u.WebsiteUrl, u.EmailHash,
+           uh.Level + 1
+    FROM Users u
+    JOIN UserHierarchy uh ON u.Reputation > (SELECT AVG(Reputation) FROM Users) AND
+                            u.CreationDate < uh.CreationDate
+),
+
+RecentPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM Posts p
+    WHERE p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+
+PostVoteCounts AS (
+    SELECT PostId, 
+           SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+)
+
+SELECT uh.DisplayName, 
+       uh.Reputation, 
+       COUNT(DISTINCT rp.Id) AS RecentPostCount,
+       COALESCE(SUM(pvc.UpVotes - pvc.DownVotes), 0) AS NetVotes,
+       MAX(rp.CreationDate) AS LatestPostDate,
+       STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM UserHierarchy uh
+LEFT JOIN RecentPosts rp ON rp.OwnerUserId = uh.Id AND rp.RN <= 3
+LEFT JOIN PostVoteCounts pvc ON pvc.PostId = rp.Id
+LEFT JOIN Posts p ON p.Id = rp.Id
+LEFT JOIN STRING_TO_ARRAY(p.Tags, '><') AS t(TagName) ON p.Tags IS NOT NULL
+WHERE uh.Location IS NOT NULL
+GROUP BY uh.Id, uh.DisplayName, uh.Reputation
+HAVING COUNT(DISTINCT rp.Id) > 0
+ORDER BY uh.Reputation DESC, RecentPostCount DESC
+LIMIT 100;

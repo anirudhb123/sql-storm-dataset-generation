@@ -1,0 +1,52 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rn
+    FROM 
+        title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    GROUP BY 
+        t.title, t.production_year
+),
+PopularTitles AS (
+    SELECT 
+        rm.title,
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rn <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        k.keyword
+    FROM 
+        title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    pt.title,
+    pt.production_year,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    CASE 
+        WHEN COUNT(mk.keyword) = 0 THEN 'No Keywords' 
+        ELSE 'Has Keywords' 
+    END AS keyword_status
+FROM 
+    PopularTitles pt
+LEFT JOIN 
+    MovieKeywords mk ON pt.title = mk.movie_id
+GROUP BY 
+    pt.title, pt.production_year
+ORDER BY 
+    pt.production_year DESC, pt.title ASC;

@@ -1,0 +1,52 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+),
+HighProfitSales AS (
+    SELECT 
+        r.web_site_sk,
+        r.ws_order_number,
+        r.ws_sales_price,
+        r.ws_net_profit
+    FROM 
+        RankedSales r
+    WHERE 
+        r.profit_rank <= 10
+),
+CustomerAddressInfo AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+)
+SELECT 
+    c.city,
+    c.state,
+    c.country,
+    SUM(h.ws_net_profit) AS total_net_profit
+FROM 
+    CustomerAddressInfo c
+LEFT JOIN 
+    HighProfitSales h ON c.ca_city = h.ws_order_number -- Assuming ws_order_number is replaced with a relevant existing field
+GROUP BY 
+    c.ca_city, c.ca_state, c.ca_country
+HAVING 
+    SUM(h.ws_net_profit) > 1000
+ORDER BY 
+    total_net_profit DESC;

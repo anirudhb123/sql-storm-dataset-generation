@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT V.Id) FILTER (WHERE V.VoteTypeId = 2) AS UpvoteCount,
+        COUNT(DISTINCT V.Id) FILTER (WHERE V.VoteTypeId = 3) AS DownvoteCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.OwnerUserId
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS HistoryDate,
+        PHT.Name AS HistoryType,
+        COUNT(PH.Id) AS HistoryCount
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE 
+        PH.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY 
+        PH.PostId, PH.CreationDate, PHT.Name
+),
+LinkCounts AS (
+    SELECT 
+        PL.PostId,
+        COUNT(PL.RelatedPostId) AS RelatedPostCount
+    FROM 
+        PostLinks PL
+    GROUP BY 
+        PL.PostId
+)
+SELECT 
+    U.DisplayName,
+    RP.Title,
+    RP.CommentCount,
+    RP.UpvoteCount,
+    RP.DownvoteCount,
+    COALESCE(PHD.HistoryCount, 0) AS UpdateHistoryCount,
+    COALESCE(LC.RelatedPostCount, 0) AS RelatedPostCount,
+    CASE 
+        WHEN RP.PostRank = 1 THEN 'Latest Post'
+        ELSE 'Earlier Post'
+    END AS PostCategory
+FROM 
+    RankedPosts RP
+JOIN 
+    Users U ON RP.OwnerUserId = U.Id
+LEFT JOIN 
+    PostHistoryDetails PHD ON RP.Id = PHD.PostId
+LEFT JOIN 
+    LinkCounts LC ON RP.Id = LC.PostId
+WHERE 
+    RP.CommentCount > 5
+    AND (RP.UpvoteCount - RP.DownvoteCount) > 10
+ORDER BY 
+    RP.CreationDate DESC
+LIMIT 10;

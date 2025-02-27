@@ -1,0 +1,45 @@
+
+WITH processed_items AS (
+    SELECT 
+        i.i_item_sk,
+        LCASE(REPLACE(i.i_item_desc, ' ', '_')) AS processed_description,
+        i.i_brand,
+        i.i_category
+    FROM 
+        item i
+    WHERE 
+        i.i_rec_start_date <= CURRENT_DATE 
+        AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > CURRENT_DATE)
+),
+customer_addresses AS (
+    SELECT 
+        ca.ca_address_sk,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, ', ', ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip) AS full_address
+    FROM 
+        customer_address ca
+)
+SELECT 
+    pi.processed_description,
+    ca.full_address,
+    COUNT(*) AS occurrences,
+    pi.i_brand,
+    pi.i_category
+FROM 
+    processed_items pi
+JOIN 
+    customer_addresses ca ON pi.i_item_sk IN (
+        SELECT 
+            cr.cr_item_sk
+        FROM 
+            catalog_returns cr
+        WHERE 
+            cr.cr_return_quantity > 0
+    )
+GROUP BY 
+    pi.processed_description, 
+    ca.full_address,
+    pi.i_brand,
+    pi.i_category
+ORDER BY 
+    occurrences DESC, 
+    pi.i_brand ASC;

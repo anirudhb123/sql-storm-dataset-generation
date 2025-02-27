@@ -1,0 +1,79 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cc.cc_call_center_sk,
+        cc.cc_manager,
+        cc.cc_name,
+        1 AS hierarchy_level
+    FROM call_center cc
+    WHERE cc.cc_manager IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        c.cc_call_center_sk,
+        c.cc_manager,
+        cc.cc_name,
+        sh.hierarchy_level + 1
+    FROM call_center c
+    JOIN sales_hierarchy sh ON c.cc_manager = sh.cc_call_center_sk
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT CASE WHEN cd.cd_gender = 'M' THEN c.c_customer_id END) AS male_customers,
+        COUNT(DISTINCT CASE WHEN cd.cd_gender = 'F' THEN c.c_customer_id END) AS female_customers,
+        COUNT(DISTINCT cm.c_customer_id) AS unique_customers_in_demo,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_net_profit
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN (
+        SELECT DISTINCT 
+            cdemo.cd_demo_sk, 
+            cdemo.rd_reason_id
+        FROM customer_demographics cdemo
+        JOIN reason r ON cdemo.cd_demo_sk = r.r_reason_sk
+    ) AS cm ON c.c_current_cdemo_sk = cm.cdemo.cd_demo_sk
+    GROUP BY c.c_customer_sk
+),
+monthly_sales AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_ship_customer_sk) AS unique_customers
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_year, d.d_month_seq
+),
+combined AS (
+    SELECT
+        sh.cc_call_center_sk,
+        sh.cc_manager,
+        cs.male_customers,
+        cs.female_customers,
+        cs.unique_customers_in_demo,
+        cs.total_net_profit,
+        ms.total_sales,
+        ms.total_orders,
+        ms.unique_customers
+    FROM sales_hierarchy sh
+    JOIN customer_summary cs ON cs.c_customer_sk = sh.cc_call_center_sk
+    LEFT JOIN monthly_sales ms ON ms.d_year BETWEEN 2020 AND 2022
+)
+SELECT 
+    cc.cc_call_center_sk,
+    cc.cc_name,
+    cc.cc_manager,
+    cc.male_customers,
+    cc.female_customers,
+    cc.unique_customers_in_demo,
+    cc.total_net_profit,
+    COALESCE(cc.total_sales, 0) AS total_sales,
+    COALESCE(cc.total_orders, 0) AS total_orders,
+    COALESCE(cc.unique_customers, 0) AS unique_customers
+FROM combined cc
+ORDER BY cc.cc_call_center_sk;

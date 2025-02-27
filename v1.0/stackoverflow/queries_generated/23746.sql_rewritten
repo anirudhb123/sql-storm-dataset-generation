@@ -1,0 +1,98 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(u.DisplayName, 'Anonymous') AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        COALESCE(MAX(b.Class), 0) AS HighestBadgeClass,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Badges b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.OwnerDisplayName, rp.CreationDate, rp.ViewCount, rp.Score
+),
+
+FilteredPosts AS (
+    SELECT 
+        ps.*,
+        CASE 
+            WHEN Score >= 10 THEN '[High Score]'
+            WHEN Score >= 5 THEN '[Moderate Score]'
+            ELSE '[Low Score]'
+        END AS ScoreCategory
+    FROM 
+        PostStatistics ps
+    WHERE 
+        UpvoteCount > DownvoteCount
+        AND HighestBadgeClass IN (1, 2)  
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.OwnerDisplayName,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.ScoreCategory,
+    CASE 
+        WHEN fp.CommentCount > 0 THEN 'Engaged'
+        ELSE 'Not Engaged'
+    END AS EngagementStatus,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM 
+    FilteredPosts fp 
+LEFT JOIN 
+    (SELECT 
+         postId, 
+         unnest(string_to_array(Tags, '><')) AS TagName
+     FROM 
+         Posts) t ON fp.PostId = t.postId
+GROUP BY 
+    fp.PostId, fp.Title, fp.OwnerDisplayName, fp.CreationDate, fp.ViewCount, fp.Score, fp.ScoreCategory, fp.CommentCount
+ORDER BY 
+    fp.CreationDate DESC
+
+UNION ALL
+
+SELECT 
+    0 AS PostId,
+    'Total Posts Processed' AS Title,
+    NULL AS OwnerDisplayName,
+    NULL AS CreationDate,
+    COUNT(*) AS ViewCount,
+    NULL AS Score,
+    NULL AS ScoreCategory,
+    NULL AS EngagementStatus,
+    NULL AS AssociatedTags
+FROM 
+    FilteredPosts
+ORDER BY 
+    PostId;

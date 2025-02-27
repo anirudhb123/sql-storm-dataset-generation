@@ -1,0 +1,54 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           o.o_totalprice, 
+           c.c_mktsegment, 
+           RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+),
+TopOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_totalprice, 
+           c.c_mktsegment 
+    FROM RankedOrders o
+    WHERE o.price_rank <= 5
+),
+SupplierProductCost AS (
+    SELECT ps.ps_partkey, 
+           ps.ps_suppkey, 
+           p.p_mfgr, 
+           SUM(ps.ps_supplycost) AS total_supply_cost 
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, p.p_mfgr
+),
+CustomerTotalSpend AS (
+    SELECT c.c_nationkey, 
+           SUM(o.o_totalprice) AS total_spend 
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_nationkey
+)
+SELECT r.r_name AS region_name, 
+       n.n_name AS nation_name, 
+       COUNT(DISTINCT t.o_orderkey) AS total_orders, 
+       SUM(s.total_supply_cost) AS total_supplier_cost, 
+       c.total_spend
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN TopOrders t ON n.n_nationkey = t.c_mktsegment
+JOIN SupplierProductCost s ON s.ps_partkey IN (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_suppkey IN (
+        SELECT s.s_suppkey 
+        FROM supplier s 
+        WHERE s.s_nationkey = n.n_nationkey
+    )
+)
+JOIN CustomerTotalSpend c ON n.n_nationkey = c.c_nationkey
+GROUP BY r.r_name, n.n_name, c.total_spend
+ORDER BY total_orders DESC, total_supplier_cost DESC;

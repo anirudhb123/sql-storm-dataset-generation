@@ -1,0 +1,49 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000  -- starting point for movies from the year 2000 onwards
+    
+    UNION ALL
+    
+    SELECT 
+        mc.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN
+        aka_title mt ON mt.id = ml.linked_movie_id
+)
+SELECT 
+    a.id AS actor_id,
+    a.name AS actor_name,
+    COUNT(DISTINCT ch.movie_id) AS total_movies_appeared,
+    AVG(COALESCE(mi.info::int, 0)) AS average_movie_rating,
+    MAX(mh.level) AS max_linked_level
+FROM 
+    aka_name a
+LEFT JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN 
+    MovieHierarchy mh ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_info mi ON ci.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+GROUP BY 
+    a.id, a.name
+HAVING 
+    COUNT(DISTINCT ch.movie_id) > 5 AND  -- filtering actors who appeared in more than 5 movies
+    AVG(COALESCE(mi.info::int, 0)) > 7  -- considering only actors with average rating above 7
+ORDER BY 
+    total_movies_appeared DESC, average_movie_rating DESC
+LIMIT 10;  -- limit to top 10 actors based on criteria
+
+This SQL query creates a recursive CTE to build a hierarchy of movies linked to each other. It then aggregates actor data, including the total number of movies they appeared in, the average movie rating, and the maximum level of linked movies. A `HAVING` clause filters the results to show only actors who appeared in more than five movies and have an average rating above seven. The results are ordered and limited to present the top ten actors based on these criteria.

@@ -1,0 +1,61 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS rn
+    FROM
+        aka_name a
+    JOIN
+        cast_info c ON a.person_id = c.person_id
+    JOIN
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year >= 2000
+),
+CompanyDetails AS (
+    SELECT 
+        m.movie_id,
+        COALESCE(c.name, 'Unknown Company') AS company_name,
+        ct.kind AS company_type
+    FROM
+        movie_companies m
+    LEFT JOIN
+        company_name c ON m.company_id = c.id
+    LEFT JOIN
+        company_type ct ON m.company_type_id = ct.id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT
+    r.actor_name,
+    r.movie_title,
+    r.production_year,
+    cd.company_name,
+    cd.company_type,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    CASE 
+        WHEN r.production_year IS NULL THEN 'Year not available' 
+        ELSE 'Year available' 
+    END AS production_year_status
+FROM 
+    RankedMovies r
+LEFT JOIN 
+    CompanyDetails cd ON r.movie_title = cd.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON r.movie_title = mk.movie_id
+WHERE 
+    r.rn = 1
+ORDER BY 
+    r.production_year DESC, r.actor_name;

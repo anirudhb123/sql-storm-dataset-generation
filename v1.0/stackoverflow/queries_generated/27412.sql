@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        U.DisplayName AS Author,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankByUser
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+TopUserPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Author,
+        Score,
+        ViewCount
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByUser <= 3 -- Get top 3 posts per user
+),
+TagInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+TaggedUserPosts AS (
+    SELECT 
+        tup.PostId,
+        tup.Title,
+        tup.CreationDate,
+        tup.Author,
+        tup.Score,
+        tup.ViewCount,
+        ti.Tag
+    FROM 
+        TopUserPosts tup
+    LEFT JOIN 
+        TagInfo ti ON tup.PostId = ti.PostId
+),
+AggregateTags AS (
+    SELECT 
+        Tag,
+        COUNT(PostId) AS PostCount,
+        SUM(ViewCount) AS TotalViews,
+        SUM(Score) AS TotalScore
+    FROM 
+        TaggedUserPosts
+    GROUP BY 
+        Tag
+),
+FinalOutput AS (
+    SELECT 
+        Tag,
+        PostCount,
+        TotalViews,
+        TotalScore,
+        AVG(TotalScore::decimal / NULLIF(PostCount, 0)) AS AverageScorePerPost
+    FROM 
+        AggregateTags
+    WHERE 
+        PostCount > 5 -- Only consider tags with more than 5 posts
+)
+SELECT 
+    Tag,
+    PostCount,
+    TotalViews,
+    TotalScore,
+    AverageScorePerPost
+FROM 
+    FinalOutput
+ORDER BY 
+    TotalViews DESC, AverageScorePerPost DESC
+LIMIT 10;

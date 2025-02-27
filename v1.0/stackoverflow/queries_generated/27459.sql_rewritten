@@ -1,0 +1,49 @@
+WITH PostTagStats AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        ARRAY_AGG(DISTINCT TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')))) ORDER BY TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')))) AS TagsArray,
+        COUNT(CASE WHEN c.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    WHERE
+        p.PostTypeId = 1 
+    GROUP BY
+        p.Id, p.Title
+),
+AggregateStats AS (
+    SELECT
+        TagsArray,
+        COUNT(PostId) AS PostCount,
+        SUM(CommentCount) AS TotalComments,
+        SUM(BadgeCount) AS TotalBadges,
+        SUM(UpVoteCount) AS TotalUpVotes,
+        SUM(DownVoteCount) AS TotalDownVotes
+    FROM
+        PostTagStats
+    GROUP BY
+        TagsArray
+)
+SELECT
+    TagsArray,
+    PostCount,
+    TotalComments,
+    TotalBadges,
+    TotalUpVotes,
+    TotalDownVotes,
+    (TotalUpVotes - TotalDownVotes) AS NetVoteScore
+FROM
+    AggregateStats
+ORDER BY
+    NetVoteScore DESC,
+    TotalComments DESC
+LIMIT 10;

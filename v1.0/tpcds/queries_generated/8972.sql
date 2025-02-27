@@ -1,0 +1,57 @@
+
+WITH customer_data AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        hd.hd_buy_potential,
+        SUM(ss.ss_sales_price) AS total_spent,
+        COUNT(ss.ss_ticket_number) AS purchase_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_income_band_sk, hd.hd_buy_potential
+),
+income_analysis AS (
+    SELECT
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT cd.cd_demo_sk) AS demographic_count,
+        AVG(total_spent) AS avg_total_spent,
+        AVG(purchase_count) AS avg_purchase_count
+    FROM 
+        customer_data cd
+    GROUP BY 
+        cd.cd_income_band_sk
+),
+popular_items AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+    ORDER BY 
+        total_sold DESC
+    LIMIT 10
+)
+SELECT
+    ia.cd_income_band_sk,
+    ia.demographic_count,
+    ia.avg_total_spent,
+    ia.avg_purchase_count,
+    pi.total_sold,
+    pi.total_profit
+FROM 
+    income_analysis ia
+JOIN 
+    popular_items pi ON ia.cd_income_band_sk = (SELECT h.hd_income_band_sk FROM household_demographics h WHERE h.hd_demo_sk = ia.cd_income_band_sk LIMIT 1)
+ORDER BY 
+    ia.avg_total_spent DESC;

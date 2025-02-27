@@ -1,0 +1,49 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(c.Id) DESC, SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY 
+        p.Id, p.Title, u.DisplayName, p.OwnerUserId
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rb.BadgeCount,
+    rp.CommentCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount
+FROM 
+    RankedPosts rp
+JOIN 
+    UserBadges rb ON rp.OwnerUserId = rb.UserId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.CommentCount DESC, rp.UpVoteCount DESC;

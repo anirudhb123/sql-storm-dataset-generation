@@ -1,0 +1,63 @@
+WITH ActorTitles AS (
+    SELECT 
+        a.person_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        t.id AS title_id,
+        t.kind_id
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL
+), 
+
+TitleKeywords AS (
+    SELECT 
+        mt.movie_id,
+        GROUP_CONCAT(k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        mt.movie_id
+), 
+
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        GROUP_CONCAT(mi.info) AS additional_info
+    FROM 
+        movie_info m
+    JOIN 
+        movie_info_idx mi ON m.movie_id = mi.movie_id
+    GROUP BY 
+        m.id
+) 
+
+SELECT 
+    at.actor_name,
+    at.movie_title,
+    at.production_year,
+    tk.keywords,
+    mi.additional_info,
+    COUNT(c.id) AS number_of_roles
+FROM 
+    ActorTitles at
+LEFT JOIN 
+    TitleKeywords tk ON at.title_id = tk.movie_id
+LEFT JOIN 
+    MovieInfo mi ON at.title_id = mi.movie_id
+LEFT JOIN 
+    cast_info c ON at.title_id = c.movie_id AND at.person_id = c.person_id
+GROUP BY 
+    at.actor_name, at.movie_title, at.production_year, tk.keywords, mi.additional_info
+ORDER BY 
+    at.production_year DESC, at.actor_name;

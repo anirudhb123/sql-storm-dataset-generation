@@ -1,0 +1,97 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        T.Id AS TagId, 
+        T.TagName, 
+        T.Count, 
+        1 AS Level
+    FROM 
+        Tags T
+    WHERE 
+        T.IsModeratorOnly = 0 
+    UNION ALL
+    SELECT 
+        PT.Id AS TagId, 
+        PT.TagName,
+        PT.Count,
+        R.Level + 1
+    FROM 
+        Tags PT
+    INNER JOIN 
+        PostLinks PL ON PL.RelatedPostId = PT.WikiPostId
+    INNER JOIN 
+        RecursiveTagHierarchy R ON PL.PostId = R.TagId
+),
+
+UserActivitySummary AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        AVG(U.Reputation) OVER (PARTITION BY U.Id) AS AvgReputation
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+
+PostEditHistory AS (
+    SELECT 
+        PH.PostId, 
+        PH.UserId, 
+        PH.CreationDate,
+        PH.PostHistoryTypeId,
+        COUNT(PH.Id) AS EditCount,
+        STRING_AGG(CASE 
+            WHEN PH.PostHistoryTypeId IN (4, 5, 6) THEN 'Modified'
+            WHEN PH.PostHistoryTypeId IN (10, 11) THEN 'Closed'
+            ELSE 'Other' END, ', ') AS History
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId, PH.UserId, PH.CreationDate, PH.PostHistoryTypeId
+),
+
+TopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(NULLIF(P.AcceptedAnswerId, -1), P.Id) AS AnswerSource,
+        P.Score,
+        RANK() OVER (ORDER BY P.Score DESC) AS ScoreRank
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+)
+
+SELECT 
+    UAS.DisplayName,
+    UAS.PostCount,
+    UAS.Upvotes,
+    UAS.Downvotes,
+    TH.TagName,
+    TH.Count AS TagUsage,
+    (SELECT COUNT(DISTINCT C.Id) 
+        FROM Comments C 
+        WHERE C.PostId IN (SELECT PostId FROM TopPosts T WHERE T.ScoreRank <= 10)
+    ) AS TotalComments,
+    (SELECT SUM(PE.EditCount) 
+        FROM PostEditHistory PE 
+        WHERE PE.UserId = UAS.UserId
+    ) AS TotalEdits
+FROM 
+    UserActivitySummary UAS
+LEFT JOIN 
+    RecursiveTagHierarchy TH ON UAS.UserId = TH.TagId
+WHERE 
+    UAS.PostCount > 5
+    AND UAS.AvgReputation > 50
+ORDER BY 
+    UAS.Upvotes DESC,
+    UAS.Downvotes ASC;

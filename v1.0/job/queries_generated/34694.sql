@@ -1,0 +1,45 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM title m
+    WHERE m.id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        lm.linked_movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM movie_link lm
+    JOIN title t ON lm.linked_movie_id = t.id
+    JOIN MovieHierarchy mh ON lm.movie_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        RANK() OVER (PARTITION BY mh.level ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_by_cast
+    FROM MovieHierarchy mh
+    JOIN cast_info ci ON mh.movie_id = ci.movie_id
+    JOIN title t ON mh.movie_id = t.id
+    GROUP BY mh.movie_id, t.title
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.total_cast,
+    COALESCE(ka.name, 'Unknown') AS actor_name,
+    rm.rank_by_cast
+FROM RankedMovies rm
+LEFT JOIN aka_name ka ON ka.person_id IN (
+    SELECT DISTINCT ci.person_id
+    FROM cast_info ci
+    WHERE ci.movie_id = rm.movie_id
+)
+WHERE rm.rank_by_cast <= 10
+ORDER BY rm.rank_by_cast, rm.total_cast DESC;

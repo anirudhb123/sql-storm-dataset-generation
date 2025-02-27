@@ -1,0 +1,66 @@
+
+WITH TagStatistics AS (
+    SELECT
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+),
+
+UserEngagement AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(COALESCE(C.CommentCount, 0)) AS TotalComments,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY U.Id, U.DisplayName
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        P.Title,
+        P.Body,
+        PH.CreationDate,
+        P.AcceptedAnswerId
+    FROM PostHistory PH
+    JOIN Posts P ON PH.PostId = P.Id
+    WHERE PH.PostHistoryTypeId IN (4, 5, 6, 10, 11)
+)
+
+SELECT
+    TS.TagName,
+    TS.PostCount,
+    TS.QuestionCount,
+    TS.AnswerCount,
+    TS.TotalViews,
+    TS.AverageScore,
+    UG.DisplayName AS UserName,
+    UG.TotalPosts,
+    UG.TotalQuestions,
+    UG.TotalAnswers,
+    UG.TotalComments,
+    UG.TotalViews,
+    PH.PostId,
+    PH.UserId AS EditorUserId,
+    PH.CreationDate AS EditDate,
+    PH.PostHistoryTypeId,
+    PH.Title AS EditedTitle,
+    PH.Body AS EditedBody
+FROM TagStatistics TS
+JOIN UserEngagement UG ON TS.PostCount > 50
+LEFT JOIN PostHistoryDetails PH ON UG.TotalPosts > 1000
+ORDER BY TS.TotalViews DESC, UG.TotalPosts DESC;

@@ -1,0 +1,45 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_totalprice, 
+           o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1996-01-01'
+), 
+SupplierDetails AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal > 1000 AND (s.s_comment LIKE '%best supplier%' OR s.s_comment IS NULL)
+    GROUP BY s.s_suppkey, s.s_name
+), 
+CustomerPurchases AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE c.c_acctbal IS NOT NULL AND l.l_returnflag = 'N'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000
+)
+SELECT rd.o_orderkey, 
+       rd.o_totalprice, 
+       sd.s_name AS supplier_name, 
+       cp.c_name AS customer_name, 
+       CASE 
+           WHEN rd.o_orderstatus = 'F' THEN 'Finished'
+           WHEN rd.o_orderstatus = 'P' THEN 'Pending'
+           ELSE 'Unknown'
+       END AS order_status,
+       COALESCE(cp.total_spent, 0) AS customer_spending,
+       sd.total_supply_cost
+FROM RankedOrders rd
+FULL OUTER JOIN CustomerPurchases cp ON rd.o_orderkey = cp.c_custkey
+JOIN SupplierDetails sd ON sd.part_count > 5 AND sd.total_supply_cost IS NOT NULL
+WHERE rd.rn = 1 OR sd.total_supply_cost > 10000
+ORDER BY rd.o_orderkey NULLS LAST, cust_spending DESC;

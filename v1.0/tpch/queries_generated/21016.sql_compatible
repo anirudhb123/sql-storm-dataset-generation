@@ -1,0 +1,58 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 10000
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE WHEN p.p_size IS NULL THEN 'UNKNOWN' ELSE CAST(p.p_size AS VARCHAR(255)) END AS part_size
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+),
+DiscountedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_discounted_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_discount BETWEEN 0.05 AND 0.15
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    hvp.p_name,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    do.total_discounted_price,
+    RANK() OVER (ORDER BY do.total_discounted_price DESC) AS price_rank
+FROM 
+    HighValueParts hvp
+LEFT JOIN 
+    partsupp ps ON hvp.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey AND s.rnk = 1
+LEFT JOIN 
+    DiscountedOrders do ON do.o_orderkey = ps.ps_partkey
+WHERE 
+    (s.s_acctbal IS NULL OR s.s_acctbal < 50000) 
+    AND (ps.ps_availqty > 0 OR ps.ps_supplycost IS NULL)
+GROUP BY 
+    hvp.p_name, supplier_name, do.total_discounted_price, price_rank
+ORDER BY 
+    price_rank, supplier_name;

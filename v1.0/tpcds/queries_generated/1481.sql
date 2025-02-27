@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rank_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), 
+CustomerWithReturns AS (
+    SELECT 
+        wr_returning_customer_sk, 
+        COUNT(DISTINCT wr_order_number) AS returned_orders
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+), 
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+    HAVING 
+        COUNT(ws.ws_order_number) > 5
+), 
+LostProfits AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_on_hand,
+        SUM(CASE WHEN ws.ws_net_profit < 0 THEN ws.ws_net_profit ELSE 0 END) AS total_losses
+    FROM 
+        inventory inv
+    LEFT JOIN 
+        web_sales ws ON inv.inv_item_sk = ws.ws_item_sk
+    GROUP BY 
+        inv.inv_item_sk
+)
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    rs.total_quantity,
+    cr.returned_orders,
+    lp.total_on_hand,
+    lp.total_losses
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    RankedSales rs ON tc.total_orders > 10
+LEFT JOIN 
+    CustomerWithReturns cr ON tc.c_customer_id = cr.wr_returned_customer_sk
+LEFT JOIN 
+    LostProfits lp ON rs.ws_item_sk = lp.inv_item_sk
+WHERE 
+    lp.total_losses IS NOT NULL
+ORDER BY 
+    rs.total_quantity DESC, cr.returned_orders DESC;

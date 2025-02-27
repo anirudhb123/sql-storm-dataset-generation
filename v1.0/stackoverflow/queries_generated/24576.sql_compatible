@@ -1,0 +1,91 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+        AND p.ViewCount > 0
+        AND p.Score IS NOT NULL
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = u.Id) AS PostCount
+    FROM 
+        Users u
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(SPLIT_PART(p.Tags, '><', generate_series(1, ARRAY_LENGTH(string_to_array(LEFT(p.Tags, LENGTH(p.Tags) - 1), '><'), 1)))) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(*) > 5
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+ClosedPostReasons AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        ARRAY_AGG(CASE WHEN ph.PostHistoryTypeId = 10 THEN cr.Name END) AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment = cr.Id
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    upr.Reputation,
+    COALESCE(ub.BadgeNames, 'No Badges') AS Badges,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    cp.LastClosedDate,
+    cp.CloseReasons
+FROM 
+    UserReputation upr
+JOIN 
+    Users up ON upr.UserId = up.Id
+LEFT JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+JOIN 
+    RankedPosts rp ON up.Id = rp.OwnerUserId
+LEFT JOIN 
+    ClosedPostReasons cp ON rp.PostId = cp.PostId
+WHERE 
+    upr.PostCount > 10
+    AND rp.OwnerPostRank = 1 
+    AND (cp.LastClosedDate IS NULL OR cp.LastClosedDate < rp.CreationDate)
+ORDER BY 
+    upr.Reputation DESC,
+    rp.Score DESC
+LIMIT 50;

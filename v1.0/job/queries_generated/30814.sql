@@ -1,0 +1,97 @@
+WITH RECURSIVE movie_series AS (
+    SELECT 
+        id,
+        title,
+        production_year,
+        episode_of_id,
+        season_nr,
+        episode_nr
+    FROM 
+        aka_title
+    WHERE 
+        episode_of_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        a.id,
+        a.title,
+        a.production_year,
+        a.episode_of_id,
+        a.season_nr,
+        a.episode_nr
+    FROM 
+        aka_title a
+    JOIN 
+        movie_series ms ON a.id = ms.episode_of_id
+),
+company_movie_counts AS (
+    SELECT 
+        mc.company_id,
+        COUNT(DISTINCT m.id) AS movie_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        aka_title m ON mc.movie_id = m.id
+    GROUP BY 
+        mc.company_id
+),
+cast_role_counts AS (
+    SELECT 
+        ci.role_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.role_id
+),
+titles_with_keywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mt
+    JOIN 
+        keyword k ON mt.keyword_id = k.id
+    GROUP BY 
+        mt.movie_id
+),
+top_production_years AS (
+    SELECT 
+        production_year,
+        COUNT(id) AS total_titles
+    FROM 
+        aka_title
+    GROUP BY 
+        production_year
+    HAVING 
+        COUNT(id) > 5
+)
+SELECT 
+    a.title,
+    a.production_year,
+    COALESCE(k.keywords, 'No keywords') AS keywords,
+    COALESCE(cc.movie_count, 0) AS production_company_count,
+    COALESCE(rc.cast_count, 0) AS cast_count,
+    CASE 
+        WHEN jsonb_array_length(NULLIF(rt.role_type, '[]')) > 0 
+        THEN 'Roles available' 
+        ELSE 'No roles' 
+    END AS role_availability
+FROM 
+    aka_title a
+LEFT JOIN 
+    titles_with_keywords k ON a.id = k.movie_id
+LEFT JOIN 
+    company_movie_counts cc ON cc.company_id IN (SELECT company_id FROM movie_companies WHERE movie_id = a.id)
+LEFT JOIN 
+    cast_role_counts rc ON rc.role_id IN (SELECT role_id FROM cast_info WHERE movie_id = a.id)
+LEFT JOIN 
+    (SELECT jsonb_agg(role) AS role_type FROM role_type) rt ON true
+WHERE 
+    a.production_year IN (SELECT production_year FROM top_production_years)
+ORDER BY 
+    a.production_year DESC,
+    a.title;

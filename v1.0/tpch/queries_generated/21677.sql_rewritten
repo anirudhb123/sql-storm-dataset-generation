@@ -1,0 +1,58 @@
+WITH ranked_orders AS (
+    SELECT o_orderkey, o_totalprice, o_orderdate, 
+           ROW_NUMBER() OVER (PARTITION BY o_orderstatus ORDER BY o_totalprice DESC) AS rank
+    FROM orders
+    WHERE o_orderdate >= DATE '1997-01-01'
+),
+part_supplier_details AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.ps_supplycost, 
+           (p.p_retailprice - ps.ps_supplycost) AS price_difference
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 10
+),
+nations AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name AS region_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE r.r_name LIKE 'A%'
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderstatus
+    FROM customer c 
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey 
+    WHERE c.c_acctbal IS NOT NULL OR c.c_comment IS NOT NULL
+),
+supply_summary AS (
+    SELECT s.s_suppkey, SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+    HAVING SUM(ps.ps_availqty) >= 5
+)
+SELECT co.c_name, po.p_name,
+       po.price_difference, os.o_totalprice,
+       CASE 
+           WHEN os.rank <= 5 THEN 'Top Order'
+           ELSE 'Other Order' 
+       END AS order_category,
+       s.total_supply_value,
+       n.region_name
+FROM customer_orders co
+JOIN ranked_orders os ON co.o_orderkey = os.o_orderkey
+JOIN part_supplier_details po ON po.p_partkey IN (
+    SELECT ps.ps_partkey FROM partsupp ps
+    WHERE ps.ps_supplycost < (
+        SELECT AVG(ps2.ps_supplycost) FROM partsupp ps2
+    )
+)
+LEFT JOIN supply_summary s ON co.o_orderkey IN (
+    SELECT l.l_orderkey FROM lineitem l 
+    WHERE l.l_quantity > (
+        SELECT AVG(l2.l_quantity) FROM lineitem l2
+    )
+)
+JOIN nations n ON co.o_orderkey IS NOT NULL
+WHERE co.o_orderstatus IN ('O', 'F')
+ORDER BY po.price_difference DESC, os.o_totalprice ASC
+LIMIT 100;

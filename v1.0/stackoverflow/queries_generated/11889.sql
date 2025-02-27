@@ -1,0 +1,29 @@
+-- Performance benchmarking query for StackOverflow schema
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.Score,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    SUM(v.VoteTypeId = 2) AS UpVotes,
+    SUM(v.VoteTypeId = 3) AS DownVotes,
+    COUNT(DISTINCT b.Id) AS BadgeCount
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+WHERE 
+    p.PostTypeId = 1  -- only questions
+GROUP BY 
+    p.Id, u.DisplayName
+ORDER BY 
+    p.ViewCount DESC
+LIMIT 100;

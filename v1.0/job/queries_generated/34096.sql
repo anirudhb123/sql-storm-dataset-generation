@@ -1,0 +1,84 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(t.season_nr, 0) AS season_number,
+        COALESCE(t.episode_nr, 0) AS episode_number,
+        0 AS level
+    FROM 
+        title m
+    LEFT JOIN 
+        aka_title t ON m.id = t.movie_id
+    WHERE 
+        m.production_year >= 2000
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        COALESCE(t2.season_nr, mh.season_number) AS season_number,
+        COALESCE(t2.episode_nr, mh.episode_number) AS episode_number,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        title t2 ON ml.linked_movie_id = t2.id
+    WHERE 
+        t2.production_year >= 2000
+),
+RankedTitles AS (
+    SELECT 
+        m.movie_id,
+        m.movie_title,
+        m.season_number,
+        m.episode_number,
+        ROW_NUMBER() OVER (PARTITION BY m.season_number ORDER BY m.episode_number) AS rank
+    FROM 
+        MovieHierarchy m
+),
+KeywordCount AS (
+    SELECT 
+        m.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        title m ON mk.movie_id = m.id
+    GROUP BY 
+        m.movie_id
+),
+CompleteCast AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast
+    FROM 
+        complete_cast mc
+    JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rt.movie_id,
+    rt.movie_title,
+    rt.season_number,
+    rt.episode_number,
+    rt.rank,
+    kc.keyword_count,
+    cc.total_cast,
+    CASE 
+        WHEN cc.total_cast IS NULL THEN 'No Cast'
+        WHEN cc.total_cast > 10 THEN 'Large Cast'
+        ELSE 'Small Cast'
+    END AS cast_category
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    KeywordCount kc ON rt.movie_id = kc.movie_id
+LEFT JOIN 
+    CompleteCast cc ON rt.movie_id = cc.movie_id
+WHERE 
+    rt.rank <= 5
+ORDER BY 
+    rt.season_number, rt.episode_number;

@@ -1,0 +1,100 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+TopPostTopics AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.ParentId) AS TopicCount
+    FROM 
+        RecursivePostHierarchy ph
+    GROUP BY 
+        ph.PostId
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges,
+        COALESCE(SUM(u.Reputation), 0) AS TotalReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostVoteSummary AS (
+    SELECT
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 4 THEN 1 ELSE 0 END), 0) AS OffensiveVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 10 THEN 1 ELSE 0 END), 0) AS DeletionVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostActivity AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        u.DisplayName AS Owner,
+        COALESCE(s.UpVotes, 0) - COALESCE(s.DownVotes, 0) AS NetScore,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank,
+        COUNT(DISTINCT ph.PostId) AS RelatedPostsCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UserReputation u ON p.OwnerUserId = u.UserId
+    LEFT JOIN 
+        PostVoteSummary s ON p.Id = s.PostId
+    LEFT JOIN 
+        TopPostTopics ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, u.DisplayName, s.UpVotes, s.DownVotes, p.OwnerUserId
+)
+SELECT 
+    pa.Title,
+    pa.Owner,
+    pa.NetScore,
+    u.TotalBadges,
+    pa.RelatedPostsCount,
+    CASE 
+        WHEN pa.RecentPostRank < 10 THEN 'Top Contributor'
+        WHEN pa.NetScore > 5 THEN 'High Scorer'
+        ELSE 'Regular Contributor'
+    END AS ContributorStatus
+FROM 
+    PostActivity pa
+LEFT JOIN 
+    UserReputation u ON pa.Owner = u.DisplayName
+WHERE 
+    pa.NetScore >= 0
+ORDER BY 
+    pa.NetScore DESC, pa.RelatedPostsCount DESC;

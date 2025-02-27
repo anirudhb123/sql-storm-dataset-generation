@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rn
+    FROM 
+        web_sales
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    WHERE 
+        d_year = 2022
+    GROUP BY 
+        ws_item_sk
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        i.i_brand,
+        i.i_category,
+        r.r_reason_desc,
+        ROW_NUMBER() OVER (PARTITION BY i.i_item_id ORDER BY total_sales DESC) AS item_rank
+    FROM 
+        item i
+    LEFT JOIN 
+        store_returns sr ON i.i_item_sk = sr.sr_item_sk
+    LEFT JOIN 
+        reason r ON sr.sr_reason_sk = r.r_reason_sk
+)
+SELECT 
+    ds.i_item_id,
+    ds.i_item_desc,
+    ds.i_current_price,
+    rs.total_quantity,
+    rs.total_sales,
+    rs.total_profit,
+    ds.i_brand,
+    ds.i_category,
+    COUNT(DISTINCT sr.sr_ticket_number) AS total_returns,
+    AVG(sr.sr_return_amt) AS avg_return_amt
+FROM 
+    RankedSales rs
+JOIN 
+    ItemDetails ds ON rs.ws_item_sk = ds.i_item_id
+LEFT JOIN 
+    store_returns sr ON rs.ws_item_sk = sr.sr_item_sk
+WHERE 
+    rs.rn = 1
+GROUP BY 
+    ds.i_item_id, ds.i_item_desc, ds.i_current_price, ds.i_brand, ds.i_category, rs.total_quantity, rs.total_sales, rs.total_profit
+ORDER BY 
+    rs.total_profit DESC
+LIMIT 100;

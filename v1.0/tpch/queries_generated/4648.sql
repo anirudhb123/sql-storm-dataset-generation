@@ -1,0 +1,50 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY ps.ps_supplycost ASC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_nationkey
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2023-12-31'
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT fo.o_orderkey) AS total_orders,
+    SUM(fo.o_totalprice) AS total_revenue,
+    MAX(l.l_shipdate) AS last_ship_date,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM 
+    FilteredOrders fo
+JOIN 
+    nation n ON fo.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    lineitem l ON fo.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    (SELECT p.p_partkey, p.p_name
+     FROM part p
+     JOIN RankedSuppliers rs ON p.p_partkey = rs.s_suppkey
+     WHERE rs.rank = 1) AS RankedParts ON l.l_partkey = RankedParts.p_partkey
+WHERE 
+    n.n_name IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT fo.o_orderkey) > 0
+ORDER BY 
+    total_revenue DESC;

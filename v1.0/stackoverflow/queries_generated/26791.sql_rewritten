@@ -1,0 +1,55 @@
+WITH TagCounts AS (
+    SELECT
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags)-2), '><')))::varchar) AS TagName,
+        COUNT(*) AS PostCount
+    FROM Posts
+    WHERE PostTypeId = 1 
+    GROUP BY TagName
+), 
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM TagCounts
+    WHERE PostCount > 5 
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1 
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+UserTagStats AS (
+    SELECT 
+        U.Id AS UserId,
+        T.TagName,
+        COUNT(P.Id) AS TagPostCount
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    JOIN UNNEST(string_to_array(SUBSTRING(P.Tags, 2, LENGTH(P.Tags)-2), '><'))::varchar) AS T(TagName) ON TRUE
+    WHERE P.PostTypeId = 1 
+    GROUP BY U.Id, T.TagName
+)
+SELECT 
+    U.DisplayName,
+    UA.QuestionCount,
+    UA.CommentCount,
+    UA.BadgeCount,
+    UA.TotalScore,
+    STRING_AGG(DISTINCT UT.TagName, ', ') AS Tags,
+    COUNT(DISTINCT UT.TagPostCount) AS TotalTags
+FROM UserActivity UA
+JOIN Users U ON UA.UserId = U.Id
+LEFT JOIN UserTagStats UT ON U.Id = UT.UserId
+GROUP BY U.Id, UA.QuestionCount, UA.CommentCount, UA.BadgeCount, UA.TotalScore
+ORDER BY UA.TotalScore DESC
+LIMIT 10;

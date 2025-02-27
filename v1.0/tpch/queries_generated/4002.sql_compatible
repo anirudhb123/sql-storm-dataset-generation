@@ -1,0 +1,62 @@
+
+WITH RegionalSales AS (
+    SELECT 
+        n.n_name AS nation,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        lineitem l
+        JOIN orders o ON l.l_orderkey = o.o_orderkey
+        JOIN customer c ON o.o_custkey = c.c_custkey
+        JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        n.n_name
+),
+TopNations AS (
+    SELECT 
+        nation,
+        total_sales
+    FROM 
+        RegionalSales
+    WHERE 
+        sales_rank <= 5
+),
+PartSuppliers AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_availqty
+    FROM 
+        part p
+        JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+        JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    p.p_name,
+    ts.nation,
+    ts.total_sales,
+    ps.ps_availqty,
+    COALESCE(ps.ps_availqty, 0) AS adjusted_availqty,
+    CASE 
+        WHEN ts.total_sales > 10000 THEN 'High'
+        WHEN ts.total_sales BETWEEN 5000 AND 10000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM 
+    TopNations ts
+    LEFT JOIN PartSuppliers ps ON ts.nation = (
+        SELECT n.n_name 
+        FROM nation n 
+        WHERE n.n_nationkey = (
+            SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = ps.s_suppkey
+        )
+    )
+WHERE 
+    ps.ps_availqty IS NOT NULL
+ORDER BY 
+    ts.total_sales DESC, 
+    ps.ps_availqty ASC;

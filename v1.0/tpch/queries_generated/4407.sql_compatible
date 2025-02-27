@@ -1,0 +1,71 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        cu.c_custkey,
+        cu.c_name,
+        cu.total_spent,
+        ROW_NUMBER() OVER (ORDER BY cu.total_spent DESC) AS cust_rank
+    FROM 
+        CustomerOrders cu
+    WHERE 
+        cu.total_spent > 1000
+)
+SELECT 
+    p.p_name,
+    r.r_name,
+    ts.c_name AS top_customer,
+    ss.s_name AS top_supplier,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    RankedSuppliers ss ON ss.s_suppkey = l.l_suppkey AND ss.supplier_rank = 1
+LEFT JOIN 
+    nation n ON n.n_nationkey IN (SELECT DISTINCT c.c_nationkey FROM customer c WHERE c.c_custkey IN (SELECT c.custkey FROM TopCustomers c))
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    TopCustomers ts ON ts.cust_rank <= 10
+WHERE 
+    p.p_retailprice IS NOT NULL
+GROUP BY 
+    p.p_name, r.r_name, ts.c_name, ss.s_name
+HAVING 
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) > 0
+ORDER BY 
+    total_revenue DESC, p.p_name;

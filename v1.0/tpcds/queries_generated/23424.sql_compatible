@@ -1,0 +1,81 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        ss_sales_price,
+        ss_quantity,
+        DENSE_RANK() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_sales_price) DESC) AS sales_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN 
+        (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') AND 
+        (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    GROUP BY 
+        ss_store_sk, ss_item_sk
+),
+TopSellingItems AS (
+    SELECT 
+        s_store_id,
+        item.i_item_id,
+        item.i_item_desc,
+        SUM(r.ss_sales_price * r.ss_quantity) AS total_sales
+    FROM 
+        RecursiveSales r
+    JOIN 
+        store s ON r.ss_store_sk = s.s_store_sk
+    JOIN 
+        item ON r.ss_item_sk = item.i_item_sk
+    WHERE 
+        r.sales_rank <= 5
+    GROUP BY 
+        s_store_id, item.i_item_id, item.i_item_desc
+),
+CombinedSales AS (
+    SELECT
+        w.web_site_id,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS web_profit,
+        COALESCE(SUM(cs.cs_net_profit), 0) AS catalog_profit,
+        COALESCE(SUM(ss.ss_net_profit), 0) AS store_profit
+    FROM 
+        web_sales ws
+    FULL OUTER JOIN 
+        catalog_sales cs ON ws.ws_order_number = cs.cs_order_number
+    FULL OUTER JOIN 
+        store_sales ss ON ws.ws_web_site_sk = ss.ss_store_sk
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    GROUP BY 
+        w.web_site_id
+),
+FinalResults AS (
+    SELECT 
+        s.store_name,
+        SUM(CASE 
+            WHEN c.web_profit IS NOT NULL AND c.catalog_profit IS NOT NULL AND c.store_profit IS NOT NULL 
+            THEN c.web_profit + c.catalog_profit + c.store_profit 
+            ELSE 0 
+        END) AS total_profit
+    FROM 
+        CombinedSales AS c
+    FULL OUTER JOIN store s ON s.s_store_sk = c.store_sk
+    GROUP BY 
+        s.store_name
+)
+SELECT 
+    fr.store_name,
+    fr.total_profit,
+    CASE 
+        WHEN fr.total_profit IS NULL THEN 'Data not available'
+        WHEN fr.total_profit > 1000 THEN 'High Profit'
+        WHEN fr.total_profit BETWEEN 500 AND 1000 THEN 'Medium Profit'
+        ELSE 'Low Profit'
+    END AS profit_category
+FROM 
+    FinalResults fr
+WHERE 
+    fr.total_profit IS NOT NULL
+ORDER BY 
+    fr.total_profit DESC
+LIMIT 10;

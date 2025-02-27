@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE -1 END), 0) AS NetVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+ClosedPostReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment AS CloseReason,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    GROUP BY 
+        ph.PostId, ph.Comment
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.NetVotes,
+        COALESCE(cpr.CloseReason, 'No Close Reasons') AS CloseReason,
+        COALESCE(cpr.CloseCount, 0) AS CloseCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPostReasons cpr ON rp.PostId = cpr.PostId
+    WHERE 
+        rp.rn <= 10
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.NetVotes,
+    pd.CloseReason,
+    pd.CloseCount,
+    CASE 
+        WHEN pd.CloseCount > 0 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

@@ -1,0 +1,76 @@
+WITH UserPostMetrics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        COALESCE(SUM(VoteValue), 0) AS TotalVotes,
+        AVG(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptanceRate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 
+                     WHEN VoteTypeId = 3 THEN -1 
+                END) AS VoteValue
+        FROM 
+            Votes 
+        GROUP BY PostId
+    ) V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS TagPostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::int[])
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 5
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        TotalVotes,
+        DENSE_RANK() OVER (ORDER BY TotalVotes DESC) AS VoteRank
+    FROM 
+        UserPostMetrics
+),
+RankedTags AS (
+    SELECT 
+        TagName,
+        DENSE_RANK() OVER (ORDER BY TagPostCount DESC) AS TagRank
+    FROM 
+        PopularTags
+)
+SELECT 
+    U.DisplayName,
+    U.PostCount,
+    U.TotalVotes,
+    U.AcceptanceRate,
+    PT.TagName,
+    RT.TagRank
+FROM 
+    UserPostMetrics U
+LEFT JOIN 
+    RankedTags RT ON U.UserId = RT.TagRank
+LEFT JOIN 
+    (SELECT 
+        DISTINCT ON (TagName) TagName
+     FROM 
+        PopularTags 
+     ORDER BY TagPostCount DESC) PT ON TRUE
+WHERE 
+    U.PostCount > 10 
+    AND U.AcceptanceRate > 0.5 
+ORDER BY 
+    U.TotalVotes DESC, 
+    U.DisplayName
+LIMIT 10;

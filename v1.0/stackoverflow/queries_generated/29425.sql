@@ -1,0 +1,56 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(p.ViewCount) AS AverageViews,
+        AVG(p.Score) AS AverageScore
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS ContributionCount,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id, u.DisplayName
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        p.Title,
+        COUNT(ph.Id) AS EditCount,
+        STRING_AGG(DISTINCT ph.Comment, ', ') AS EditComments,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM PostHistory ph
+    JOIN Posts p ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6, 24)
+    GROUP BY ph.PostId, p.Title
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.AverageViews,
+    ts.AverageScore,
+    ur.UserId,
+    ur.DisplayName,
+    ur.ContributionCount,
+    ur.TotalBadges,
+    ur.TotalBounty,
+    pha.EditCount,
+    pha.EditComments,
+    pha.LastEdited
+FROM TagStatistics ts
+JOIN UserReputation ur ON ts.QuestionCount > 10  -- Users with significant question contributions
+JOIN PostHistoryAnalysis pha ON ts.PostCount > 50  -- Tags with a decent number of posts
+ORDER BY ts.AverageScore DESC, ts.AverageViews DESC, ur.TotalBadges DESC;

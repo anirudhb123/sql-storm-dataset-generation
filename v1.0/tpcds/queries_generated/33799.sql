@@ -1,0 +1,51 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_sales_price) AS total_sales_price,
+        COUNT(*) AS total_sales,
+        ROW_NUMBER() OVER(PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+RecentReturns AS (
+    SELECT 
+        sr_item_sk, 
+        SUM(sr_return_quantity) AS total_return_quantity, 
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM store_returns
+    WHERE sr_returned_date_sk > (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY sr_item_sk
+),
+CustomerInsights AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        d.d_year,
+        cd.marital_status,
+        cd.education_status,
+        COALESCE(cd.dep_count, 0) AS dependent_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN date_dim d ON c.c_first_sales_date_sk = d.d_date_sk
+)
+SELECT 
+    s.sales_item AS item_sk,
+    COALESCE(s.total_sales_price, 0) AS total_sales_price,
+    COALESCE(r.total_return_quantity, 0) AS total_return_quantity,
+    COALESCE(r.total_return_amount, 0) AS total_return_amount,
+    ci.c_first_name || ' ' || ci.c_last_name AS customer_name,
+    ci.dependent_count,
+    (CASE 
+        WHEN COALESCE(r.total_return_quantity, 0) > 0 THEN 'Returned'
+        ELSE 'Sold'
+     END) AS sales_status
+FROM SalesCTE s
+LEFT JOIN RecentReturns r ON s.ws_item_sk = r.sr_item_sk
+LEFT JOIN CustomerInsights ci ON ci.c_customer_sk = s.ws_bill_customer_sk
+WHERE s.sales_rank = 1
+AND s.total_sales_price > 500
+ORDER BY total_sales_price DESC
+LIMIT 100;

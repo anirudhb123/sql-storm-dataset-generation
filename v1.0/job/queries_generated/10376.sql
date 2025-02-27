@@ -1,0 +1,27 @@
+-- Performance Benchmarking Query
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.role_id,
+    t.production_year,
+    t.kind_id,
+    GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+    GROUP_CONCAT(DISTINCT cn.name) AS companies
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+GROUP BY 
+    a.name, t.title, ci.role_id, t.production_year, t.kind_id
+ORDER BY 
+    t.production_year DESC, a.name;

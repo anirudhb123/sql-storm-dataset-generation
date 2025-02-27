@@ -1,0 +1,36 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1995-01-01' 
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_name, c.c_nationkey
+),
+SupplierStats AS (
+    SELECT 
+        s.s_nationkey,
+        COUNT(DISTINCT ps.ps_partkey) AS num_parts,
+        AVG(ps.ps_supplycost) AS avg_supplycost,
+        SUM(ps.ps_availqty) AS total_available_quantity
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_nationkey
+)
+SELECT 
+    r.r_name AS region_name,
+    ns.total_revenue,
+    ss.num_parts,
+    ss.avg_supplycost,
+    ss.total_available_quantity
+FROM RankedOrders ns
+JOIN nation n ON ns.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN SupplierStats ss ON n.n_nationkey = ss.s_nationkey
+WHERE ns.revenue_rank <= 10
+ORDER BY r.r_name, ns.total_revenue DESC;

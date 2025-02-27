@@ -1,0 +1,66 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostedQuestions,
+        COUNT(DISTINCT a.Id) AS PostedAnswers,
+        SUM(COALESCE(v.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.DownVotes, 0)) AS TotalDownVotes,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS UserTags,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViewCount,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1  -- Questions
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id  -- Answers
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id AND v.PostId IN (p.Id, a.Id)
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS t ON t.TagName IS NOT NULL
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostsWithTag,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.ViewCount) AS AvgViewsPerPost,
+        COUNT(DISTINCT u.Id) AS UsersActiveWithTag
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    GROUP BY 
+        t.TagName
+)
+
+SELECT 
+    ua.DisplayName,
+    ua.PostedQuestions,
+    ua.PostedAnswers,
+    ua.TotalUpVotes,
+    ua.TotalDownVotes,
+    ua.UserTags,
+    ua.AvgViewCount,
+    ua.TotalComments,
+    ts.TagName AS PopularTag,
+    ts.PostsWithTag,
+    ts.TotalViews,
+    ts.AvgViewsPerPost,
+    ts.UsersActiveWithTag
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    TagStatistics ts ON ua.UserTags LIKE '%' || ts.TagName || '%'
+ORDER BY 
+    ua.TotalUpVotes DESC, 
+    ua.PostedQuestions DESC 
+LIMIT 100;

@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS Downvotes,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(MONTH, -6, CURRENT_TIMESTAMP)
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN b.Class = 1 THEN 3 WHEN b.Class = 2 THEN 2 WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BadgeScore,
+        COUNT(CASE WHEN (p.Score > 0 OR p.ViewCount > 100) THEN 1 END) AS HighImpactPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostClosureReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN cr.Name 
+            ELSE NULL 
+        END, ', ') AS ClosureReasons
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes cr ON CAST(ph.Comment AS INT) = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.Upvotes,
+    rp.Downvotes,
+    rp.CommentCount,
+    us.DisplayName AS UserDisplayName,
+    us.BadgeScore,
+    us.HighImpactPosts,
+    COALESCE(pcr.ClosureReasons, 'No Reasons') AS ClosureReasons
+FROM 
+    RankedPosts rp
+JOIN 
+    Posts p ON p.Id = rp.PostId
+JOIN 
+    Users u ON u.Id = p.OwnerUserId
+JOIN 
+    UserScores us ON us.UserId = u.Id
+LEFT JOIN 
+    PostClosureReasons pcr ON pcr.PostId = rp.PostId
+WHERE 
+    rp.Rank <= 5
+    AND rp.CommentCount > 0
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;

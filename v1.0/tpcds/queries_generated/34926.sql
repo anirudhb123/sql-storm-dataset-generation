@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (ORDER BY SUM(ws_net_paid) DESC) AS rank
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        ca.ca_city,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, ca.ca_city, cd.cd_gender, cd.cd_marital_status
+),
+popular_items AS (
+    SELECT 
+        ss.ss_item_sk,
+        SUM(ss.ss_quantity) AS quantity_sold
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.ss_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ss.ss_item_sk
+)
+SELECT 
+    c.c_customer_id,
+    ci.ca_city,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    SUM(ss.total_sales) AS total_sales,
+    pi.quantity_sold AS popular_item_quantity
+FROM 
+    customer_info ci
+JOIN 
+    sales_summary ss ON ci.c_customer_sk = ss.ws_item_sk
+LEFT JOIN 
+    popular_items pi ON ss.ws_item_sk = pi.ss_item_sk
+WHERE 
+    ci.cd_gender = 'F'
+GROUP BY 
+    c.c_customer_id, ci.ca_city, ci.cd_gender, ci.cd_marital_status, pi.quantity_sold
+HAVING 
+    total_sales > 1000 OR popular_item_quantity IS NULL
+ORDER BY 
+    total_sales DESC, ci.ca_city;

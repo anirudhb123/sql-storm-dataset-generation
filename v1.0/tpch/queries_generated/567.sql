@@ -1,0 +1,67 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty) DESC) AS supply_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_nationkey,
+        COUNT(*) AS supplier_count
+    FROM 
+        SupplierStats s
+    WHERE 
+        s.total_avail_qty > 1000
+    GROUP BY 
+        s.s_nationkey
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        ROUND(SUM(l.l_extendedprice * (1 - l.l_discount)), 2) AS net_order_value,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+),
+FinalStats AS (
+    SELECT 
+        n.n_name,
+        COALESCE(hvs.supplier_count, 0) AS high_value_suppliers,
+        COUNT(DISTINCT os.o_orderkey) AS orders_count,
+        SUM(os.net_order_value) AS total_net_value
+    FROM 
+        nation n
+    LEFT JOIN 
+        HighValueSuppliers hvs ON n.n_nationkey = hvs.s_nationkey
+    LEFT JOIN 
+        OrderStats os ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = os.o_orderkey)  -- Example of correlated subquery
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    f.n_name,
+    f.high_value_suppliers,
+    f.orders_count,
+    f.total_net_value,
+    CASE 
+        WHEN f.total_net_value IS NULL THEN 'No Sales'
+        WHEN f.high_value_suppliers > 0 THEN 'Active Supplier Region'
+        ELSE 'Low Engagement'
+    END AS engagement_status
+FROM 
+    FinalStats f
+ORDER BY 
+    f.total_net_value DESC NULLS LAST;

@@ -1,0 +1,54 @@
+WITH RECURSIVE SupplierRanking AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+), 
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+), 
+CumulativeRevenue AS (
+    SELECT 
+        o.o_orderdate,
+        SUM(total_revenue) OVER (ORDER BY o.o_orderdate ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_revenue
+    FROM 
+        HighValueOrders o
+)
+
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(CASE WHEN c.c_acctbal IS NULL THEN 1 ELSE 0 END) AS null_balance_count,
+    AVG(c.c_acctbal) AS avg_account_balance,
+    MAX(cr.cumulative_revenue) AS max_cumulative_revenue
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+LEFT JOIN 
+    CumulativeRevenue cr ON cr.o_orderdate = DATE '2023-01-01' -- filtering for specific date
+WHERE 
+    (s.s_acctbal > 1000 OR c.c_acctbal IS NULL)
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT s.s_suppkey) > 5
+ORDER BY 
+    avg_account_balance DESC;

@@ -1,0 +1,46 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws_bill_customer_sk,
+           SUM(ws_net_profit) AS total_profit,
+           COUNT(*) AS sales_count,
+           ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk > (SELECT MAX(d_date_sk) - 30 FROM date_dim WHERE d_current_month = '1') 
+    GROUP BY ws_bill_customer_sk
+),
+CustomerDemographics AS (
+    SELECT cd_demo_sk, cd_gender, cd_marital_status, cd_education_status
+    FROM customer_demographics
+    WHERE cd_credit_rating IS NOT NULL
+),
+TopCustomers AS (
+    SELECT sc.ws_bill_customer_sk,
+           CASE WHEN c.cd_gender = 'F' THEN 'Female' ELSE 'Male' END AS gender,
+           c.cd_marital_status,
+           c.cd_education_status,
+           sc.total_profit,
+           sc.sales_count
+    FROM SalesCTE sc
+    JOIN CustomerDemographics c ON sc.ws_bill_customer_sk = c.cd_demo_sk
+    WHERE sc.rn <= 10
+),
+WarehouseSales AS (
+    SELECT w.w_warehouse_id,
+           SUM(ss_ext_sales_price) AS warehouse_sales
+    FROM store_sales ss
+    JOIN warehouse w ON ss.ss_store_sk = w.w_warehouse_sk
+    WHERE ss.ss_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_current_month = '1')
+    GROUP BY w.w_warehouse_id
+)
+SELECT tc.ws_bill_customer_sk,
+       tc.gender,
+       tc.cd_marital_status,
+       tc.cd_education_status,
+       COALESCE(ws.warehouse_sales, 0) AS warehouse_sales,
+       tc.total_profit,
+       tc.sales_count
+FROM TopCustomers tc
+LEFT JOIN WarehouseSales ws ON tc.ws_bill_customer_sk = ws.w_warehouse_id
+WHERE tc.total_profit > (SELECT AVG(total_profit) FROM SalesCTE)
+ORDER BY tc.total_profit DESC
+FETCH FIRST 100 ROWS ONLY;

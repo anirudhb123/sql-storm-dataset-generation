@@ -1,0 +1,55 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 
+           CAST(s_name AS VARCHAR(255)) AS full_name,
+           0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL AND s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           CONCAT(sh.full_name, ' -> ', s.s_name),
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+RankedLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, 
+           l.l_extendedprice, l.l_discount,
+           RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS price_rank
+    FROM lineitem l
+),
+OrderStats AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           COUNT(DISTINCT l.l_linenumber) AS item_count
+    FROM orders o
+    JOIN RankedLineItems l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+CustomerNation AS (
+    SELECT c.c_custkey, c.c_name, n.n_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+),
+ExplodedData AS (
+    SELECT s.s_name, p.p_name, ps.ps_supplycost, 
+           ps.ps_availqty, o.total_price,
+           CASE 
+               WHEN o.total_price IS NULL THEN 'NO ORDER'
+               ELSE 'ORDER PLACED'
+           END AS order_status
+    FROM SupplierHierarchy sh
+    LEFT JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    INNER JOIN OrderStats o ON sh.s_suppkey = o.o_orderkey
+    WHERE ps.ps_availqty > 0
+)
+SELECT e.s_name, e.p_name, e.ps_supplycost, e.ps_availqty, 
+       e.total_price, e.order_status,
+       COALESCE(SUM(CASE WHEN e.order_status = 'ORDER PLACED' THEN e.total_price ELSE 0 END), 0) AS total_ordered,
+       AVG(e.ps_supplycost) OVER (PARTITION BY e.s_name) AS avg_supply_cost,
+       COUNT(*) OVER (PARTITION BY e.s_name) AS part_count
+FROM ExplodedData e
+GROUP BY e.s_name, e.p_name, e.ps_supplycost, e.ps_availqty, e.total_price, e.order_status
+HAVING AVG(e.ps_supplycost) > 50 AND COUNT(e.s_name) > 2
+ORDER BY total_ordered DESC, e.p_name;

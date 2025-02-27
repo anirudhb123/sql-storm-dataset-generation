@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 2
+)
+
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    COALESCE(MAX(cp.company_name), 'Unknown') AS production_company,
+    COUNT(DISTINCT c.id) AS cast_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+    SUM(CASE WHEN c.nr_order IS NOT NULL THEN 1 ELSE 0 END) AS cast_with_order,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS rank_within_year
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    company_name cp ON cp.id IN (
+        SELECT movie_comp.company_id
+        FROM movie_companies movie_comp
+        WHERE movie_comp.movie_id = mh.movie_id
+    )
+LEFT JOIN 
+    aka_name a ON c.person_id = a.person_id
+WHERE 
+    mh.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tv show'))
+    AND mh.production_year IS NOT NULL 
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT c.id) > 0 
+    AND MIN(mh.production_year) IS NOT NULL
+ORDER BY 
+    mh.production_year DESC,
+    rank_within_year;

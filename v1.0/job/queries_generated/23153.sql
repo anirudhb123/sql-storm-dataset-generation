@@ -1,0 +1,79 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS title_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+MovieInfoWithKeywords AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        k.keyword,
+        COALESCE(mn.note, 'No additional info') AS note
+    FROM 
+        RankedTitles m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mni ON m.id = mni.movie_id AND mni.info_type_id IN (SELECT id FROM info_type WHERE info = 'summary')
+    LEFT JOIN 
+        movie_info_idx mn ON m.id = mn.movie_id
+),
+ActorRoles AS (
+    SELECT 
+        c.person_id,
+        c.role_id,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_rank,
+        COALESCE(k.keyword, 'Unknown role') AS role_keyword
+    FROM 
+        cast_info c 
+    LEFT JOIN 
+        movie_keyword mk ON c.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+FilteredActors AS (
+    SELECT 
+        a.person_id,
+        a.role_id,
+        COUNT(*) AS total_roles,
+        STRING_AGG(DISTINCT a.role_keyword, ', ') AS all_roles
+    FROM 
+        ActorRoles a
+    GROUP BY 
+        a.person_id, a.role_id
+    HAVING 
+        COUNT(a.role_id) > 1 -- Only include actors with more than one role
+)
+SELECT 
+    m.title,
+    m.production_year,
+    COALESCE(a.person_id, 'No actor') AS main_actor,
+    f.all_roles,
+    m.note,
+    (SELECT COUNT(*) FROM aka_name an WHERE an.person_id = COALESCE(a.person_id, NULL)) AS related_names,
+    CASE 
+        WHEN m.production_year IS NULL THEN 'Unknown Year' 
+        ELSE CAST(m.production_year AS TEXT) 
+    END AS year_info
+FROM 
+    MovieInfoWithKeywords m
+FULL OUTER JOIN 
+    FilteredActors f ON m.title = f.all_roles
+LEFT JOIN 
+    cast_info c ON c.role_id = f.role_id AND c.movie_id = f.movie_id
+LEFT JOIN 
+    aka_name a ON a.person_id = COALESCE(c.person_id, NULL)
+WHERE 
+    (m.production_year IS NOT NULL OR m.production_year IS NULL) -- Odd condition that includes all rows
+ORDER BY 
+    m.production_year DESC NULLS LAST, 
+    f.total_roles DESC, 
+    m.title;
+

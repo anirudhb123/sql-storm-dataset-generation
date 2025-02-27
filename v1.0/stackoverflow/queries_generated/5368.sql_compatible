@@ -1,0 +1,49 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.Reputation > 100
+    GROUP BY u.Id
+),
+ActiveUserBadges AS (
+    SELECT 
+        ub.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM UserActivity ub
+    LEFT JOIN Badges b ON ub.UserId = b.UserId
+    GROUP BY ub.UserId
+),
+PopularTags AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(pt.PostId) AS TagUsage
+    FROM Tags t
+    LEFT JOIN Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.Id, t.TagName
+    ORDER BY TagUsage DESC
+    LIMIT 10
+)
+SELECT 
+    ua.UserId,
+    ua.QuestionsAsked,
+    ua.AnswersGiven,
+    ua.TotalViews,
+    ua.TotalScore,
+    ua.TotalPosts,
+    ab.BadgeCount,
+    ab.BadgeNames,
+    ARRAY_AGG(pt.TagName ORDER BY pt.TagUsage DESC) AS TopTags
+FROM UserActivity ua
+LEFT JOIN ActiveUserBadges ab ON ua.UserId = ab.UserId
+LEFT JOIN PopularTags pt ON TRUE
+GROUP BY ua.UserId, ua.QuestionsAsked, ua.AnswersGiven, ua.TotalViews, ua.TotalScore, ua.TotalPosts, ab.BadgeCount, ab.BadgeNames
+ORDER BY ua.TotalScore DESC;

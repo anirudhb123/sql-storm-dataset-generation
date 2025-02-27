@@ -1,0 +1,51 @@
+
+WITH Ranked_Sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.web_site_sk, ws.ws_order_number
+),
+Sales_Analysis AS (
+    SELECT 
+        r.web_site_sk,
+        r.total_quantity,
+        r.total_revenue,
+        COALESCE(ws_days.total_sales_days, 0) AS total_sales_days,
+        (CASE
+            WHEN COALESCE(ws_days.total_sales_days, 0) = 0 THEN NULL
+            ELSE r.total_revenue / COALESCE(ws_days.total_sales_days, 1)
+        END) AS avg_daily_revenue
+    FROM 
+        Ranked_Sales r
+    LEFT JOIN (
+        SELECT 
+            web_site_sk,
+            COUNT(DISTINCT ws_sold_date_sk) AS total_sales_days
+        FROM 
+            web_sales
+        WHERE 
+            ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        GROUP BY 
+            web_site_sk
+    ) ws_days ON r.web_site_sk = ws_days.web_site_sk
+)
+SELECT 
+    sa.web_site_sk,
+    sa.total_quantity,
+    sa.total_revenue,
+    sa.avg_daily_revenue,
+    (SELECT AVG(total_revenue) FROM Sales_Analysis) AS average_revenue_across_all_websites
+FROM 
+    Sales_Analysis sa
+WHERE 
+    sa.rank <= 5
+ORDER BY 
+    sa.total_revenue DESC;

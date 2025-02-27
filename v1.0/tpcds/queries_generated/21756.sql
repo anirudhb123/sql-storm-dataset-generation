@@ -1,0 +1,37 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS profit_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = CURRENT_DATE)
+),
+TopProfitableItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_profit,
+        COUNT(*) AS sales_count
+    FROM item
+    LEFT JOIN web_sales ws ON item.i_item_sk = ws.ws_item_sk
+    GROUP BY item.i_item_id, item.i_item_desc
+)
+SELECT
+    tpi.i_item_id,
+    tpi.i_item_desc,
+    tpi.total_profit, 
+    ROUND(tpi.total_profit / NULLIF(sales_count, 0), 2) AS average_profit_per_sale,
+    (SELECT ca_city 
+     FROM customer_address ca 
+     WHERE ca.ca_address_sk = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_customer_sk = ws.ws_bill_customer_sk)
+     LIMIT 1) AS customer_city,
+    COUNT(DISTINCT CASE WHEN tpi.total_profit > 100 THEN ws.ws_order_number END) AS high_profit_orders
+FROM TopProfitableItems tpi
+JOIN web_sales ws ON tpi.i_item_sk = ws.ws_item_sk
+LEFT JOIN RankedSales rs ON ws.ws_item_sk = rs.ws_item_sk AND rs.profit_rank = 1
+GROUP BY tpi.i_item_id, tpi.i_item_desc, tpi.total_profit
+HAVING ROUND(tpi.total_profit / NULLIF(sales_count, 0), 2) > 10
+ORDER BY tpi.total_profit DESC
+LIMIT 50;

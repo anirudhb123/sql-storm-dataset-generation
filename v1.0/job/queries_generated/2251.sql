@@ -1,0 +1,49 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank_within_year
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        a.title, t.production_year
+),
+filtered_movies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN cast_count > 10 THEN 'Large Cast'
+            WHEN cast_count BETWEEN 5 AND 10 THEN 'Medium Cast'
+            ELSE 'Small Cast'
+        END AS cast_size
+    FROM 
+        ranked_movies
+)
+
+SELECT 
+    f.title,
+    f.production_year,
+    f.cast_size,
+    ARRAY_AGG(DISTINCT co.name) AS companies,
+    COALESCE(SUM(mk.keyword != '') FILTER (WHERE mk.keyword IS NOT NULL), 0) AS keyword_count
+FROM 
+    filtered_movies f
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = (SELECT id FROM aka_title WHERE title = f.title AND production_year = f.production_year LIMIT 1)
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = (SELECT id FROM aka_title WHERE title = f.title AND production_year = f.production_year LIMIT 1)
+WHERE 
+    f.rank_within_year <= 10
+GROUP BY 
+    f.title, f.production_year, f.cast_size
+ORDER BY 
+    f.production_year DESC, f.cast_count DESC;

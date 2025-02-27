@@ -1,0 +1,64 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ss.ticket_number) AS store_sales_count,
+        SUM(ss.ext_sales_price) AS total_store_sales,
+        SUM(ss.ext_tax) AS total_store_tax,
+        SUM(ws.ext_sales_price) AS total_web_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        cs.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cs.store_sales_count,
+        cs.total_store_sales,
+        cs.total_store_tax,
+        cs.total_web_sales,
+        (cs.total_store_sales + COALESCE(cs.total_web_sales, 0)) AS total_sales
+    FROM 
+        customer_sales cs
+    JOIN 
+        customer_demographics cd ON cs.c_customer_sk = cd.cd_demo_sk_sk
+)
+SELECT 
+    ss.c_customer_sk,
+    ss.cd_gender,
+    ss.cd_marital_status,
+    ss.store_sales_count,
+    ss.total_store_sales,
+    ss.total_web_sales,
+    ss.total_sales,
+    CASE 
+        WHEN ss.total_sales > 10000 THEN 'High Value'
+        WHEN ss.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS customer_value
+FROM 
+    sales_summary ss
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

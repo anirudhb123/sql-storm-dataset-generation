@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2459538 AND 2459570 -- Filtering by date
+    GROUP BY ws_bill_customer_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        SUM(rw.total_sales) AS customer_total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN RankedSales rw ON c.c_customer_sk = rw.ws_bill_customer_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+),
+ProminentCustomers AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_income_band_sk,
+        ci.customer_total_sales,
+        ci.order_count,
+        RANK() OVER (ORDER BY ci.customer_total_sales DESC) AS customer_rank
+    FROM CustomerInfo ci
+)
+SELECT 
+    pc.c_customer_sk, 
+    pc.c_first_name, 
+    pc.c_last_name, 
+    pc.cd_gender, 
+    pc.cd_marital_status, 
+    pc.cd_income_band_sk, 
+    pc.customer_total_sales,
+    pc.order_count
+FROM ProminentCustomers pc
+WHERE pc.customer_rank <= 10
+ORDER BY pc.customer_total_sales DESC;

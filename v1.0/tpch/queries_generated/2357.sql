@@ -1,0 +1,78 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        o.o_orderdate,
+        o.o_totalprice
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+),
+AggregatedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(l.l_linenumber) AS item_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+TopRegions AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        SUM(ol.revenue) AS total_revenue
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        RecentOrders o ON o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+    JOIN 
+        AggregatedLineItems ol ON ol.l_orderkey = o.o_orderkey
+    GROUP BY 
+        n.n_regionkey, r.r_name
+    HAVING 
+        total_revenue > (SELECT AVG(total_revenue) FROM (
+            SELECT 
+                SUM(ol.revenue) AS total_revenue
+            FROM 
+                lineitem l
+            JOIN 
+                orders o ON l.l_orderkey = o.o_orderkey
+            GROUP BY 
+                o.o_orderkey) AS subquery)
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+    SUM(rs.total_supply_cost) AS total_cost,
+    CTE.item_count,
+    COALESCE(r.revenue, 0) AS region_revenue
+FROM 
+    TopRegions r
+LEFT JOIN 
+    RankedSuppliers rs ON rs.rank <= 5
+LEFT JOIN 
+    AggregatedLineItems CTE ON CTE.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l))
+GROUP BY 
+    r.r_name, CTE.item_count
+ORDER BY 
+    region_revenue DESC, supplier_count ASC;

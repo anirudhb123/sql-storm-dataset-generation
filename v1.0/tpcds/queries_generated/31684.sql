@@ -1,0 +1,70 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(COALESCE(ss.ss_net_profit, 0)) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    JOIN 
+        date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    
+    UNION ALL 
+
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(COALESCE(ws.ws_net_profit, 0)) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+FilteredSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        total_net_profit,
+        order_count
+    FROM 
+        SalesCTE c
+    WHERE 
+        total_net_profit > (SELECT AVG(total_net_profit) FROM SalesCTE)
+)
+
+SELECT 
+    c.c_customer_sk,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(fs.total_net_profit, 0) AS total_profit,
+    COALESCE(fs.order_count, 0) AS orders,
+    CASE 
+        WHEN fs.order_count IS NULL THEN 'No Orders' 
+        ELSE 'Active Customer' 
+    END AS customer_status 
+FROM 
+    customer c
+LEFT JOIN 
+    FilteredSales fs ON c.c_customer_sk = fs.c_customer_sk
+WHERE 
+    c.c_birth_year BETWEEN 1980 AND 1990
+ORDER BY 
+    total_profit DESC
+LIMIT 10;

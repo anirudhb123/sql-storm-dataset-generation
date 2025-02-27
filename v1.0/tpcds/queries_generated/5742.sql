@@ -1,0 +1,60 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned,
+        SUM(cr_return_amount) AS total_return_amount,
+        RANK() OVER (PARTITION BY cr_returning_customer_sk ORDER BY SUM(cr_return_amount) DESC) AS rank
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        rd.total_returned,
+        rd.total_return_amount
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        RankedReturns rd ON c.c_customer_sk = rd.cr_returning_customer_sk
+    WHERE 
+        rd.rank <= 10 -- Top 10 returning customers
+),
+SalesData AS (
+    SELECT 
+        ws.bill_customer_sk,
+        COUNT(ws.order_number) AS total_orders,
+        SUM(ws.net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk BETWEEN 20210101 AND 20211231 -- Year 2021
+    GROUP BY 
+        ws.bill_customer_sk
+)
+SELECT 
+    cd.c_customer_id,
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    COALESCE(sd.total_orders, 0) AS total_orders,
+    COALESCE(sd.total_profit, 0) AS total_profit,
+    cd.total_returned,
+    cd.total_return_amount
+FROM 
+    CustomerData cd
+LEFT JOIN 
+    SalesData sd ON cd.c_customer_id = sd.bill_customer_sk
+ORDER BY 
+    cd.total_return_amount DESC, cd.total_profit DESC;

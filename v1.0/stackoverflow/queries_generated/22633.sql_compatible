@@ -1,0 +1,89 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Votes v
+            WHERE v.PostId = p.Id AND v.VoteTypeId = 2
+        ), 0) AS UpvoteCount,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Votes v
+            WHERE v.PostId = p.Id AND v.VoteTypeId = 3
+        ), 0) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id 
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 YEAR' 
+        AND p.Score IS NOT NULL
+),
+RecentActivity AS (
+    SELECT 
+        PostId,
+        MAX(CreationDate) AS LastActive
+    FROM 
+        PostHistory
+    WHERE 
+        PostHistoryTypeId IN (10, 11, 12, 13)
+    GROUP BY 
+        PostId
+),
+FeaturedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.OwnerUserId,
+        rp.PostTypeId,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.UpvoteCount,
+        rp.DownvoteCount,
+        ra.LastActive,
+        CASE 
+            WHEN rp.UpvoteCount = 0 AND rp.DownvoteCount = 0 THEN 'No votes yet'
+            WHEN rp.UpvoteCount > rp.DownvoteCount THEN 'More popular'
+            ELSE 'Needs attention'
+        END AS PopularityStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentActivity ra ON ra.PostId = rp.PostId
+    WHERE 
+        rp.PostRank <= 3
+)
+SELECT 
+    u.DisplayName,
+    fp.Score,
+    fp.ViewCount,
+    fp.CommentCount,
+    fp.PopularityStatus,
+    CASE 
+        WHEN fp.PostTypeId = 1 THEN 'Question'
+        WHEN fp.PostTypeId = 2 THEN 'Answer'
+        ELSE 'Other'
+    END AS PostType,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    FeaturedPosts fp
+JOIN 
+    Users u ON u.Id = fp.OwnerUserId
+LEFT JOIN 
+    (SELECT DISTINCT unnest(string_to_array(fp.Tags, ',')) AS TagName, fp.PostId 
+     FROM FeaturedPosts fp) AS tags ON tags.PostId = fp.PostId
+JOIN 
+    Tags t ON t.TagName = tags.TagName 
+GROUP BY 
+    u.DisplayName, fp.Score, fp.ViewCount, fp.CommentCount, fp.PopularityStatus, fp.PostTypeId
+ORDER BY 
+    fp.Score DESC, u.DisplayName
+LIMIT 
+    50;

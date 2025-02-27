@@ -1,0 +1,81 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        ws_order_number,
+        ws_ext_sales_price,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+    
+    UNION ALL
+    
+    SELECT 
+        sr_customer_sk,
+        sr_ticket_number,
+        sr_return_amt AS ws_ext_sales_price,
+        sh.level + 1
+    FROM 
+        store_returns sr
+    JOIN 
+        sales_hierarchy sh ON sr_ticket_number = sh.ws_order_number
+    WHERE 
+        sr_returned_date_sk = (SELECT MAX(sr_returned_date_sk) FROM store_returns)
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    SUM(COALESCE(ws_ext_sales_price, 0)) AS total_sales,
+    COUNT(DISTINCT customer_sk) AS total_customers,
+    AVG(ws_ext_sales_price) AS average_sale,
+    MAX(ws_ext_sales_price) AS max_sale,
+    MIN(ws_ext_sales_price) AS min_sale
+FROM 
+    sales_hierarchy sh
+JOIN 
+    customer_demographics cd ON sh.customer_sk = cd.cd_demo_sk
+LEFT JOIN 
+    web_sales ws ON ws.ws_order_number = sh.ws_order_number
+LEFT JOIN 
+    item i ON i.i_item_sk = ws.ws_item_sk
+WHERE 
+    cd.cd_marital_status IN ('M', 'S') 
+    AND (cd.cd_gender = 'F' OR cd.cd_gender IS NULL)
+GROUP BY 
+    cd.cd_gender, cd.cd_marital_status
+HAVING 
+    SUM(COALESCE(ws_ext_sales_price, 0)) > 100000 
+ORDER BY 
+    total_sales DESC
+FETCH FIRST 10 ROWS ONLY;
+
+WITH date_filter AS (
+    SELECT 
+        d_date AS sale_date,
+        d_year,
+        d_month_seq
+    FROM 
+        date_dim
+    WHERE 
+        d_date BETWEEN '2021-01-01' AND '2021-12-31'
+)
+SELECT 
+    sale_date,
+    COUNT(DISTINCT c_customer_id) AS unique_customers,
+    COUNT(ss_ticket_number) AS total_transactions,
+    SUM(ss_net_profit) AS total_net_profit,
+    SUM(ss_ext_sales_price) AS total_sales
+FROM 
+    store_sales 
+JOIN 
+    date_filter df ON ss_sold_date_sk = df.d_date_sk
+JOIN 
+    customer c ON c.c_customer_sk = ss_customer_sk
+GROUP BY 
+    sale_date
+HAVING 
+    total_sales > (SELECT AVG(total_sales) FROM store_sales)
+ORDER BY 
+    sale_date DESC;

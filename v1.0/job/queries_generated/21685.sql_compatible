@@ -1,0 +1,72 @@
+
+WITH RecursiveActorMovies AS (
+    SELECT 
+        c.person_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        cast_info c
+    JOIN 
+        title t ON c.movie_id = t.id
+    WHERE 
+        c.nr_order IS NOT NULL
+),
+FilteredActors AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COUNT(DISTINCT ram.movie_id) AS movie_count,
+        MAX(ram.production_year) AS last_movie_year
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        RecursiveActorMovies ram ON a.person_id = ram.person_id
+    GROUP BY 
+        a.id, a.name
+    HAVING 
+        COUNT(DISTINCT ram.movie_id) > 10 AND MAX(ram.production_year) >= 2020
+),
+DistinctRoles AS (
+    SELECT 
+        c.role_id, 
+        COUNT(DISTINCT c.movie_id) AS role_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.role_id
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 5
+),
+DetailedActorRoles AS (
+    SELECT 
+        f.actor_id,
+        r.role_id,
+        r.role_count,
+        f.movie_count
+    FROM 
+        FilteredActors f
+    JOIN 
+        cast_info c ON f.actor_id = c.person_id
+    JOIN 
+        DistinctRoles r ON c.role_id = r.role_id
+)
+SELECT 
+    d.actor_id,
+    f.name,
+    d.role_id,
+    d.role_count,
+    d.movie_count,
+    COALESCE(m_comp.name, 'Independent') AS company_name,
+    COALESCE(m_info.info, 'No additional info') AS movie_notes,
+    RANK() OVER (PARTITION BY d.actor_id ORDER BY d.role_count DESC) AS role_rank
+FROM 
+    DetailedActorRoles d
+LEFT JOIN 
+    movie_companies m_comp ON d.movie_id = m_comp.movie_id
+LEFT JOIN 
+    movie_info m_info ON d.movie_id = m_info.movie_id AND m_info.info_type_id = (SELECT id FROM info_type WHERE info = 'Trivia')
+WHERE 
+    NOT EXISTS (SELECT 1 FROM movie_keyword mk WHERE mk.movie_id = d.movie_count AND mk.keyword_id IS NULL)
+ORDER BY 
+    d.actor_id, role_rank;

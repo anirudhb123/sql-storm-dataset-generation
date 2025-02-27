@@ -1,0 +1,86 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.person_id) DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.movie_id = c.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+high_cast_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_count
+    FROM 
+        ranked_movies
+    WHERE 
+        rank <= 5 
+),
+movie_keyword_info AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+company_movie_info AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name) AS companies,
+        GROUP_CONCAT(DISTINCT ct.kind) AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+final_results AS (
+    SELECT 
+        h.movie_id,
+        h.title,
+        h.production_year,
+        h.cast_count,
+        COALESCE(mki.keywords, 'No keywords') AS keywords,
+        COALESCE(cmi.companies, 'No companies') AS companies,
+        COALESCE(cmi.company_types, 'No company types') AS company_types
+    FROM 
+        high_cast_movies h
+    LEFT JOIN 
+        movie_keyword_info mki ON h.movie_id = mki.movie_id
+    LEFT JOIN 
+        company_movie_info cmi ON h.movie_id = cmi.movie_id
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.cast_count,
+    f.keywords,
+    f.companies,
+    f.company_types
+FROM 
+    final_results f
+WHERE 
+    f.cast_count > (
+        SELECT 
+            AVG(cast_count) 
+        FROM 
+            high_cast_movies
+    )
+ORDER BY 
+    f.production_year DESC, 
+    f.cast_count DESC;

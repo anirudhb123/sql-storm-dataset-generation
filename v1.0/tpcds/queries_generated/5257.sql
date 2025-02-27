@@ -1,0 +1,30 @@
+
+SELECT 
+    ca.city AS customer_city,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    SUM(ws.ws_quantity) AS total_quantity_sold,
+    SUM(ws.ws_net_profit) AS total_profit,
+    AVG(i.i_current_price) AS avg_item_price,
+    d.d_year AS sales_year,
+    sm.sm_type AS shipping_mode
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+JOIN 
+    item i ON ws.ws_item_sk = i.i_item_sk
+JOIN 
+    ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+WHERE 
+    d.d_year BETWEEN 2020 AND 2023
+    AND ca.ca_state = 'CA'
+    AND ws.ws_net_paid > 0
+GROUP BY 
+    ca.city, d.d_year, sm.sm_type
+ORDER BY 
+    total_profit DESC, total_quantity_sold DESC
+LIMIT 100;

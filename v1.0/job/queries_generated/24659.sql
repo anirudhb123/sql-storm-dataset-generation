@@ -1,0 +1,77 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ak.person_id, 
+        ak.name AS actor_name, 
+        1 AS level
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    WHERE 
+        ak.name IS NOT NULL AND ak.name <> ''
+    
+    UNION ALL
+    
+    SELECT 
+        ak.person_id, 
+        ak.name AS actor_name, 
+        level + 1
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        actor_hierarchy ah ON ci.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = ah.person_id)
+    WHERE 
+        ak.name IS NOT NULL AND ak.name <> ''
+),
+movie_details AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title, 
+        mt.production_year,
+        ko.keyword,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword ko ON mk.keyword_id = ko.id
+    LEFT JOIN 
+        cast_info c ON mt.id = c.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.id, mt.title, mt.production_year, ko.keyword
+),
+ranked_movies AS (
+    SELECT 
+        md.*, 
+        DENSE_RANK() OVER (PARTITION BY md.production_year ORDER BY actor_count DESC) AS rank_in_year
+    FROM 
+        movie_details md
+    WHERE 
+        actor_count > 0
+)
+SELECT 
+    ah.actor_name,
+    rm.title,
+    rm.production_year,
+    rm.actor_count,
+    CASE 
+        WHEN rm.rank_in_year <= 10 THEN 'Top 10'
+        WHEN rm.rank_in_year <= 50 THEN 'Top 50'
+        ELSE 'Below Top 50'
+    END AS ranking_category,
+    COALESCE(NULLIF(rm.keyword, ''), 'No Keywords') AS effective_keyword -- handle NULL or empty keywords
+FROM 
+    actor_hierarchy ah
+LEFT JOIN 
+    ranked_movies rm ON ah.person_id IN (SELECT person_id FROM cast_info WHERE movie_id = rm.movie_id)
+WHERE 
+    ah.level = 1  -- Limiting to the first level of actors
+ORDER BY 
+    rm.production_year DESC, 
+    rm.actor_count DESC, 
+    ah.actor_name;

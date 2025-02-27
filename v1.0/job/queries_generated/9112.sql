@@ -1,0 +1,34 @@
+SELECT 
+    t.id AS title_id,
+    t.title AS movie_title,
+    ak.name AS aka_name,
+    p.gender AS person_gender,
+    c.nm AS company_name,
+    k.keyword AS movie_keyword
+FROM 
+    title t
+JOIN 
+    aka_title ak ON t.id = ak.movie_id
+JOIN 
+    cast_info ci ON t.id = ci.movie_id
+JOIN 
+    aka_name an ON ci.person_id = an.person_id
+JOIN 
+    person_info pi ON an.person_id = pi.person_id
+JOIN 
+    company_name cn ON pi.info LIKE CONCAT('%', cn.name, '%')
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    keyword k ON t.id = k.id
+WHERE 
+    t.production_year >= 2000 
+AND 
+    ct.kind = 'Distributor'
+AND 
+    pi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Awards')
+ORDER BY 
+    t.production_year DESC, 
+    t.title;

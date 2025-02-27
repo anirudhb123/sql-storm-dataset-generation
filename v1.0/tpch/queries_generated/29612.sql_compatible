@@ -1,0 +1,19 @@
+
+WITH RECURSIVE Combinations AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, 
+           CONCAT('Part: ', p.p_name, ', Supplier Cost: ', CAST(ps.ps_supplycost AS VARCHAR)) AS Details
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    UNION ALL
+    SELECT c.p_partkey, c.p_name, ps.ps_supplycost,
+           CONCAT(c.Details, ', Customer: ', cust.c_name) AS Details
+    FROM Combinations c
+    JOIN customer cust ON c.p_partkey % (cust.c_custkey + 1) = 0
+    JOIN partsupp ps ON ps.ps_partkey = c.p_partkey
+    WHERE LENGTH(c.Details) < 200
+)
+SELECT Details
+FROM Combinations
+WHERE Details LIKE '%Supplier%'
+ORDER BY LENGTH(Details) DESC
+FETCH FIRST 10 ROWS ONLY;

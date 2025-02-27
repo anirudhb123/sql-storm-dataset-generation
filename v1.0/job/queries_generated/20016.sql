@@ -1,0 +1,80 @@
+WITH RankedMovies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC, m.title) AS rank_in_year
+    FROM
+        aka_title m
+    WHERE
+        m.production_year BETWEEN 1980 AND 2020
+),
+DetailedCast AS (
+    SELECT
+        ci.movie_id,
+        a.name AS actor_name,
+        ci.nr_order,
+        ci.role_id,
+        CASE 
+            WHEN rc.kind IS NULL THEN 'Not Specified' 
+            ELSE rc.kind 
+        END AS role_type
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        role_type rc ON ci.role_id = rc.id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+),
+MovieCompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COALESCE(mci.info, 'N/A') AS additional_info
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_info mci ON mc.movie_id = mci.movie_id AND mci.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+)
+SELECT 
+    r.title,
+    r.production_year,
+    d.actor_name,
+    d.nr_order,
+    d.role_type,
+    mk.keywords,
+    mcd.company_name,
+    mcd.company_type,
+    mcd.additional_info
+FROM 
+    RankedMovies r
+LEFT JOIN 
+    DetailedCast d ON r.movie_id = d.movie_id
+LEFT JOIN 
+    MoviesWithKeywords mk ON r.movie_id = mk.movie_id
+LEFT JOIN 
+    MovieCompanyDetails mcd ON r.movie_id = mcd.movie_id
+WHERE 
+    r.rank_in_year <= 5 AND 
+    (r.production_year IS NOT NULL OR mcd.company_type IN ('Distributor', 'Producer'))
+ORDER BY 
+    r.production_year DESC, 
+    r.title;

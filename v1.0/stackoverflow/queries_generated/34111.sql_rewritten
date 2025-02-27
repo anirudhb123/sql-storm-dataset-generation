@@ -1,0 +1,58 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT Id, TagName, Count, ExcerptPostId, WikiPostId, IsModeratorOnly, IsRequired, 1 AS Level
+    FROM Tags
+    WHERE IsRequired = 1
+
+    UNION ALL
+
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, t.IsModeratorOnly, t.IsRequired, Level + 1
+    FROM Tags t
+    JOIN RecursiveTagHierarchy th ON th.WikiPostId = t.Id
+), TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(p.Score) AS AveragePostScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+), PopularTags AS (
+    SELECT 
+        t.TagName,
+        SUM(th.Count) AS TotalCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    JOIN RecursiveTagHierarchy th ON th.Id = t.Id
+    GROUP BY t.TagName
+    HAVING SUM(th.Count) > 10
+), RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11, 12)  
+)
+SELECT 
+    u.DisplayName AS UserName,
+    p.Title,
+    p.CreationDate,
+    t.TagName,
+    th.TotalCount AS TagPopularity,
+    ph.Comment AS PostHistoryComment,
+    ph.CreationDate AS HistoryDate,
+    ph.UserDisplayName AS HistoryUserName
+FROM Posts p
+INNER JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN RecentPostHistory ph ON ph.PostId = p.Id AND ph.HistoryRank = 1
+LEFT JOIN PopularTags t ON p.Tags LIKE '%' || t.TagName || '%'
+JOIN TopUsers tu ON u.Id = tu.UserId
+WHERE u.Reputation > 100
+  AND p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+  AND (ph.Comment IS NOT NULL OR t.TotalCount > 0)
+ORDER BY p.CreationDate DESC, TagPopularity DESC;

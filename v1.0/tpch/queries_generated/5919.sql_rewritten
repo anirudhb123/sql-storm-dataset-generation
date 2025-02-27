@@ -1,0 +1,67 @@
+WITH TotalSales AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS sales_amount
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1997-12-31'
+    GROUP BY 
+        ps.ps_partkey
+), RankedSales AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        COALESCE(ts.sales_amount, 0) AS total_sales,
+        RANK() OVER (ORDER BY COALESCE(ts.sales_amount, 0) DESC) AS sales_rank
+    FROM 
+        part p
+    LEFT JOIN 
+        TotalSales ts ON p.p_partkey = ts.ps_partkey
+), CustomerSummary AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(DISTINCT o.o_orderkey) AS total_orders, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), SupplierAnalysis AS (
+    SELECT 
+        n.n_name AS nation, 
+        COUNT(DISTINCT s.s_suppkey) AS total_suppliers, 
+        AVG(s.s_acctbal) AS avg_account_balance
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    rs.sales_rank, 
+    rs.p_name, 
+    rs.p_brand, 
+    cs.c_name, 
+    cs.total_orders, 
+    cs.total_spent, 
+    sa.nation, 
+    sa.total_suppliers, 
+    sa.avg_account_balance
+FROM 
+    RankedSales rs
+JOIN 
+    CustomerSummary cs ON cs.total_orders > 0
+JOIN 
+    SupplierAnalysis sa ON sa.total_suppliers > 0
+WHERE 
+    rs.total_sales > 0
+ORDER BY 
+    rs.sales_rank, cs.total_spent DESC;

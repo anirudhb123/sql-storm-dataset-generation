@@ -1,0 +1,50 @@
+
+WITH UserActivity AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           COUNT(DISTINCT p.Id) AS PostCount, 
+           SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount, 
+           SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE u.Reputation > 0
+    GROUP BY u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT t.Id AS TagId,
+           t.TagName,
+           COUNT(p.Id) AS PostsCount
+    FROM Tags t
+    JOIN Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))
+    GROUP BY t.Id, t.TagName
+    HAVING COUNT(p.Id) > 10
+),
+UserBadgeCounts AS (
+    SELECT b.UserId,
+           COUNT(b.Id) AS BadgeCount,
+           SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+           SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+           SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT ua.UserId,
+       ua.DisplayName,
+       ua.PostCount,
+       ua.QuestionsCount,
+       ua.AnswersCount,
+       ua.UpVotesCount,
+       ua.DownVotesCount,
+       pt.PostsCount AS PopularTagPosts,
+       ubc.BadgeCount,
+       ubc.GoldBadges,
+       ubc.SilverBadges,
+       ubc.BronzeBadges
+FROM UserActivity ua
+LEFT JOIN PopularTags pt ON ua.PostCount > 0
+LEFT JOIN UserBadgeCounts ubc ON ua.UserId = ubc.UserId
+ORDER BY ua.PostCount DESC
+LIMIT 100;

@@ -1,0 +1,84 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name, 
+        NULL::integer AS parent_actor_id,
+        1 AS level
+    FROM aka_name a
+    WHERE a.name IS NOT NULL
+    UNION ALL
+    SELECT 
+        a2.id AS actor_id,
+        a2.name AS actor_name,
+        ah.actor_id AS parent_actor_id,
+        ah.level + 1
+    FROM aka_name a2
+    JOIN cast_info c ON a2.person_id = c.person_id
+    JOIN actor_hierarchy ah ON c.movie_id = ah.actor_id
+    WHERE a2.name IS NOT NULL
+),
+movie_details AS (
+    SELECT
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        COALESCE(mci.company_type_id, -1) AS company_type_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM aka_title at
+    LEFT JOIN movie_companies mci ON at.id = mci.movie_id
+    LEFT JOIN cast_info c ON at.id = c.movie_id
+    LEFT JOIN movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY at.id, at.title, at.production_year, mci.company_type_id
+),
+ranked_movies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.company_type_id,
+        md.total_cast,
+        md.keywords,
+        RANK() OVER (PARTITION BY md.company_type_id ORDER BY md.total_cast DESC) AS cast_rank,
+        ROW_NUMBER() OVER (ORDER BY md.production_year DESC, md.total_cast DESC) AS overall_rank
+    FROM movie_details md
+    WHERE md.total_cast > 0
+),
+actor_movies AS (
+    SELECT 
+        ah.actor_id,
+        ah.actor_name,
+        COUNT(DISTINCT c.movie_id) AS movies_count,
+        ARRAY_AGG(DISTINCT at.title) AS movies
+    FROM actor_hierarchy ah
+    JOIN cast_info c ON ah.actor_id = c.person_id
+    JOIN aka_title at ON c.movie_id = at.id
+    WHERE ah.level <= 2
+    GROUP BY ah.actor_id, ah.actor_name
+),
+final_output AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ARRAY_LENGTH(rm.keywords, 1) AS keyword_count,
+        COALESCE(am.movies_count, 0) AS actor_count,
+        am.movies AS actors_in_movies
+    FROM ranked_movies rm
+    LEFT JOIN actor_movies am ON rm.movie_id = am.movies_count
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    keyword_count,
+    actor_count,
+    CASE 
+        WHEN actor_count > 0 THEN 'Actors Present'
+        ELSE 'No Actors Registered'
+    END AS actor_status
+FROM final_output
+WHERE production_year >= 2000
+ORDER BY production_year DESC, actor_count DESC
+FETCH FIRST 100 ROWS ONLY;

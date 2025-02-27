@@ -1,0 +1,38 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > 100.00 AND sh.level < 5
+)
+
+SELECT c.c_name, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+       COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank,
+       CASE 
+           WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) IS NULL THEN 'No Orders'
+           ELSE 'Has Orders'
+       END AS order_status
+FROM customer c
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+WHERE c.c_mktsegment = 'BUILDING' 
+  AND EXISTS (SELECT 1 FROM supplier_hierarchy sh WHERE sh.s_nationkey = c.c_nationkey)
+GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(total_spent) FROM (
+    SELECT SUM(l1.l_extendedprice * (1 - l1.l_discount)) AS total_spent
+    FROM customer c1
+    JOIN orders o1 ON c1.c_custkey = o1.o_custkey
+    JOIN lineitem l1 ON o1.o_orderkey = l1.l_orderkey
+    GROUP BY c1.c_custkey
+) AS subquery)
+ORDER BY total_spent DESC
+LIMIT 10;

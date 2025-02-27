@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+), StringProcessed AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CommentCount,
+        r.ViewCount,
+        r.Score,
+        u.DisplayName,
+        u.Reputation,
+        u.BadgeCount,
+        SPLIT_PART(r.Title, ' ', 1) AS FirstWord,
+        LENGTH(r.Title) AS TitleLength,
+        REPLACE(r.Title, ' ', '') AS TitleWithoutSpaces
+    FROM 
+        RankedPosts r
+    JOIN 
+        UserReputation u ON r.UserPostRank = 1 AND r.OwnerUserId = u.UserId
+)
+SELECT 
+    PostId,
+    Title,
+    CommentCount,
+    ViewCount,
+    Score,
+    DisplayName,
+    Reputation,
+    BadgeCount,
+    FirstWord,
+    TitleLength,
+    TitleWithoutSpaces,
+    CASE 
+        WHEN TitleLength > 100 THEN 'Long Title'
+        WHEN TitleLength BETWEEN 50 AND 100 THEN 'Medium Title'
+        ELSE 'Short Title'
+    END AS TitleLengthCategory
+FROM 
+    StringProcessed
+WHERE 
+    CommentCount > 5
+ORDER BY 
+    Score DESC, ViewCount DESC;

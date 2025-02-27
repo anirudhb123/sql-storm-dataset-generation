@@ -1,0 +1,78 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(CASE WHEN cs.cs_sales_price IS NOT NULL THEN cs.cs_sales_price ELSE 0 END) AS total_sales,
+        COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+        COUNT(DISTINCT cs.cs_item_sk) AS unique_items
+    FROM customer c
+    LEFT JOIN store_sales cs ON c.c_customer_sk = cs.ss_customer_sk
+    WHERE 
+        c.c_birth_year IS NOT NULL AND 
+        (c.c_birth_month BETWEEN 1 AND 12) 
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING COUNT(cs.cs_order_number) > 0
+    UNION ALL
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        total_sales + COALESCE((
+            SELECT SUM(ws.ws_sales_price)
+            FROM web_sales ws
+            WHERE ws.ws_ship_customer_sk = c.c_customer_sk
+        ), 0),
+        total_orders + COALESCE((
+            SELECT COUNT(ws.ws_order_number)
+            FROM web_sales ws
+            WHERE ws.ws_ship_customer_sk = c.c_customer_sk
+        ), 0),
+        unique_items + COALESCE((
+            SELECT COUNT(DISTINCT ws.ws_item_sk)
+            FROM web_sales ws
+            WHERE ws.ws_ship_customer_sk = c.c_customer_sk
+        ), 0)
+    FROM sales_summary
+    WHERE total_sales < 10000
+),
+address_summary AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY ca.ca_address_sk, ca.ca_city, ca.ca_state
+    HAVING COUNT(DISTINCT c.c_customer_sk) > 2
+)
+SELECT 
+    s.c_first_name,
+    s.c_last_name,
+    s.total_sales,
+    s.total_orders,
+    a.ca_city,
+    a.ca_state,
+    CASE 
+        WHEN s.total_sales > 1000 THEN 'High'
+        WHEN s.total_sales > 500 THEN 'Medium'
+        ELSE 'Low' 
+    END AS sales_category,
+    ROW_NUMBER() OVER (PARTITION BY a.ca_state ORDER BY s.total_sales DESC) AS state_ranking
+FROM sales_summary s
+JOIN address_summary a ON s.c_customer_sk IN (
+    SELECT c.c_customer_sk
+    FROM customer c
+    WHERE c.c_current_addr_sk = a.ca_address_sk
+)
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM customer_demographics cd 
+        WHERE cd.cd_demo_sk = s.c_customer_sk
+        AND cd.cd_marital_status IS NULL
+    )
+ORDER BY a.ca_state, s.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

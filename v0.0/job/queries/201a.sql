@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id
+AND mi.info IN ('$256,673,273 (USA) (30 August 2009)', 'FAKE: While fleeing the Foot Clan in the junk shop, the same brief scene of Donatello turning and punching out one of the Foot is used twice.', 'Hong Kong:August 1992', 'In an instant, their world changed forever.', 'Liverpool Street, Broadgate, London, England, UK', 'MET:1474.32 m', 'The apartments used in the scene where Steinberg is beaten up by his landlord (Jackie Clarke) are located directly across the street from the Upright Citizens Brigade Theatre, where cast members Jake Fogelnest, Jackie Clarke, Julie Klausner and Brett Davis have all performed live.') AND t.phonetic_code > 'M3253';

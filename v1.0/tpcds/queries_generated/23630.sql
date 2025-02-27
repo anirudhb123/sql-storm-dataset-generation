@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank,
+        SUM(ws_quantity) OVER (PARTITION BY ws_item_sk) AS total_quantity,
+        CASE 
+            WHEN SUM(ws_quantity) OVER (PARTITION BY ws_item_sk) IS NULL THEN 0 
+            ELSE SUM(ws_quantity) OVER (PARTITION BY ws_item_sk) 
+        END AS safe_total_quantity
+    FROM web_sales
+    WHERE ws_sales_price IS NOT NULL
+),
+TopSales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_sales_price, 
+        total_quantity,
+        price_rank
+    FROM RankedSales
+    WHERE price_rank = 1
+),
+AggregatedReturns AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_return_quantity,
+        AVG(cr_return_amt) AS avg_return_amount
+    FROM catalog_returns
+    GROUP BY cr_item_sk
+),
+FinalReport AS (
+    SELECT 
+        ts.ws_item_sk,
+        ts.ws_sales_price,
+        ts.total_quantity,
+        ar.total_return_quantity,
+        ar.avg_return_amount,
+        COALESCE(ar.total_return_quantity, 0) AS total_return_quantity_coalesced
+    FROM TopSales ts
+    LEFT JOIN AggregatedReturns ar ON ts.ws_item_sk = ar.cr_item_sk
+)
+SELECT 
+    x.ws_item_sk,
+    x.ws_sales_price,
+    x.total_quantity,
+    CASE 
+        WHEN x.total_return_quantity > x.total_quantity THEN 'OVER RETURNED'
+        WHEN x.total_return_quantity = 0 THEN 'NO RETURNS'
+        ELSE 'NORMAL'
+    END AS return_status,
+    x.avg_return_amount,
+    CASE 
+        WHEN x.total_return_quantity IS NULL THEN 'UNKNOWN'
+        ELSE x.total_return_quantity::VARCHAR
+    END AS return_quantity_as_string,
+    x.ws_sales_price - COALESCE(x.avg_return_amount, 0) AS corrected_price
+FROM FinalReport x
+WHERE x.ws_sales_price > 100
+ORDER BY return_status, corrected_price DESC;

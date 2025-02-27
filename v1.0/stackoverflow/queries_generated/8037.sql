@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, u.DisplayName
+), 
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 5
+)
+SELECT 
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+    SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+    SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Badges b ON tp.OwnerDisplayName = b.UserId
+GROUP BY 
+    tp.Title, tp.OwnerDisplayName, tp.CommentCount, tp.UpVoteCount, tp.DownVoteCount
+ORDER BY 
+    tp.UpVoteCount DESC, tp.CommentCount DESC;

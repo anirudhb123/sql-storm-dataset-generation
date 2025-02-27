@@ -1,0 +1,114 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.ParentId, 
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.ParentId, 
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+
+UserPostAgg AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    INNER JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 100
+),
+
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+
+FinalStats AS (
+    SELECT 
+        up.UserId,
+        up.DisplayName,
+        pp.PostCount,
+        pp.TotalViews,
+        pp.AverageScore,
+        COUNT(DISTINCT rph.PostId) AS AnswersCount,
+        pt.TagName,
+        phs.HistoryCount,
+        phs.LastEditDate
+    FROM 
+        UserPostAgg up
+    JOIN 
+        Posts p ON up.UserId = p.OwnerUserId
+    JOIN 
+        RecursivePostHierarchy rph ON p.Id = rph.PostId
+    JOIN 
+        PostHistoryStats phs ON p.Id = phs.PostId
+    LEFT JOIN 
+        PopularTags pt ON p.Tags LIKE '%' || pt.TagName || '%'
+    GROUP BY 
+        up.UserId, up.DisplayName, pp.PostCount, pp.TotalViews, pp.AverageScore, pt.TagName, phs.HistoryCount, phs.LastEditDate
+)
+
+SELECT 
+    fs.UserId,
+    fs.DisplayName,
+    fs.PostCount,
+    fs.TotalViews,
+    fs.AverageScore,
+    fs.AnswersCount,
+    fs.TagName,
+    fs.HistoryCount,
+    fs.LastEditDate,
+    CASE 
+        WHEN fs.AverageScore >= 10 THEN 'Top Contributor'
+        WHEN fs.AverageScore BETWEEN 5 AND 10 THEN 'Regular Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorLevel
+FROM 
+    FinalStats fs
+WHERE 
+    fs.TotalViews > 1000
+ORDER BY 
+    fs.TotalViews DESC, fs.PostCount DESC
+LIMIT 100;

@@ -1,0 +1,55 @@
+WITH RECURSIVE TotalSalesPerSupplier AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY s.s_suppkey, s.s_name
+
+    UNION ALL
+
+    SELECT s.s_suppkey,
+           s.s_name,
+           ts.total_sales + SUM(l.l_extendedprice * (1 - l.l_discount))
+    FROM TotalSalesPerSupplier ts
+    JOIN partsupp ps ON ts.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate < DATE '2023-01-01'
+    GROUP BY s.s_suppkey, s.s_name
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           ts.total_sales,
+           RANK() OVER (ORDER BY ts.total_sales DESC) as sales_rank
+    FROM supplier s
+    JOIN TotalSalesPerSupplier ts ON s.s_suppkey = ts.s_suppkey
+)
+SELECT r.s_suppkey,
+       r.s_name,
+       r.total_sales,
+       COALESCE(NULLIF(r.sales_rank, 1), 0) AS rank_non_top
+FROM RankedSuppliers r
+WHERE r.sales_rank <= 10
+  AND r.total_sales > (
+      SELECT AVG(total_sales)
+      FROM RankedSuppliers
+  )
+  OR r.s_name LIKE '%Inc%'
+ORDER BY r.total_sales DESC;
+
+-- Include a check for NULL logic with a complicated predicate
+SELECT s.s_name, 
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+FROM supplier s
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+WHERE (s.s_name IS NOT NULL AND o.o_orderstatus = 'O') 
+   OR (s.s_name IS NULL AND o.o_orderstatus IS NULL)
+GROUP BY s.s_name 
+HAVING total_spent > 1000
+ORDER BY total_spent DESC;

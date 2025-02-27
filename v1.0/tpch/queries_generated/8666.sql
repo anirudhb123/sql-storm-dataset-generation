@@ -1,0 +1,37 @@
+WITH SupplierSales AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * l.l_quantity) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY c.c_custkey, c.c_name
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderstatus, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    ss.s_name AS supplier_name,
+    cs.c_name AS customer_name,
+    SUM(ods.revenue) AS total_revenue,
+    SUM(ss.total_cost) AS total_supplier_cost,
+    AVG(cs.total_spent) AS avg_customer_spent
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier ss ON n.n_nationkey = ss.s_nationkey
+JOIN SupplierSales ss ON ss.s_suppkey = ss.s_suppkey
+JOIN CustomerOrders cs ON cs.c_custkey = cs.c_custkey
+JOIN OrderDetails ods ON ods.o_orderkey = ods.o_orderkey
+GROUP BY r.r_name, n.n_name, ss.s_name, cs.c_name
+HAVING SUM(ods.revenue) > 1000000
+ORDER BY total_revenue DESC;

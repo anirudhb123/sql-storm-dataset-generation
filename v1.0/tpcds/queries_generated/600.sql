@@ -1,0 +1,51 @@
+
+WITH RecentReturns AS (
+    SELECT
+        sr.store_sk,
+        sr.returned_date_sk,
+        SUM(sr.return_quantity) AS total_returned_quantity,
+        SUM(sr.return_amt) AS total_returned_amt
+    FROM store_returns sr
+    WHERE sr.returned_date_sk > (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY sr.store_sk, sr.returned_date_sk
+),
+InventoryStatus AS (
+    SELECT
+        inv.inv_warehouse_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM inventory inv
+    WHERE inv.inv_date_sk = (SELECT MAX(inv_date_sk) FROM inventory)
+    GROUP BY inv.inv_warehouse_sk
+),
+StoreDetails AS (
+    SELECT
+        s.store_sk,
+        s.store_name,
+        s.city,
+        s.state,
+        COALESCE(rr.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(rr.total_returned_amt, 0) AS total_returned_amt,
+        COALESCE(is.total_quantity_on_hand, 0) AS total_quantity_on_hand
+    FROM store s
+    LEFT JOIN RecentReturns rr ON s.store_sk = rr.store_sk
+    LEFT JOIN InventoryStatus is ON s.store_sk = is.inv_warehouse_sk
+)
+SELECT 
+    sd.store_name, 
+    sd.city, 
+    sd.state,
+    sd.total_returned_quantity,
+    sd.total_returned_amt,
+    sd.total_quantity_on_hand,
+    CASE 
+        WHEN sd.total_returned_quantity > 0 THEN ROUND((sd.total_returned_amt / sd.total_returned_quantity), 2)
+        ELSE NULL
+    END AS average_returned_amt_per_unit,
+    COUNT(DISTINCT CASE WHEN wd.warehouse_sk IS NOT NULL THEN wd.warehouse_sk END) OVER (PARTITION BY sd.store_sk) AS warehouse_count
+FROM StoreDetails sd
+LEFT JOIN warehouse wd ON sd.store_sk = wd.warehouse_sk
+WHERE (
+    (sd.total_returned_quantity > 0 AND sd.total_quantity_on_hand < 50) OR 
+    (sd.total_quantity_on_hand >= 50 AND sd.total_returned_quantity = 0)
+)
+ORDER BY sd.total_returned_amt DESC, sd.store_name;

@@ -1,0 +1,66 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+product_info AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_brand,
+        i.i_category,
+        i.i_color,
+        i.i_size,
+        i.i_current_price
+    FROM 
+        item i
+),
+sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_ext_sales_price,
+        ws.ws_net_paid,
+        ws.ws_net_profit,
+        ci.full_name,
+        ci.ca_city,
+        ci.ca_state,
+        pi.i_item_desc
+    FROM 
+        web_sales ws
+    JOIN 
+        customer_info ci ON ws.ws_bill_customer_sk = ci.c_customer_id
+    JOIN 
+        product_info pi ON ws.ws_item_sk = pi.i_item_id
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1 AND 365  -- Assuming a year of sales
+)
+SELECT 
+    full_name,
+    ca_city,
+    ca_state,
+    COUNT(DISTINCT ws_order_number) AS total_orders,
+    SUM(ws_quantity) AS total_products_bought,
+    SUM(ws_net_paid) AS total_revenue,
+    AVG(ws_net_profit) AS avg_profit_per_order
+FROM 
+    sales_data
+GROUP BY 
+    full_name, ca_city, ca_state
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

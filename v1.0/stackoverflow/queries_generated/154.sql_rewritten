@@ -1,0 +1,72 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS Owner,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpvoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownvoteCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = rp.OwnerUserId
+    GROUP BY 
+        rp.PostId
+),
+PostHistoryStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS PostHistoryTypes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    ps.CommentCount,
+    ps.UpvoteCount,
+    ps.DownvoteCount,
+    phs.EditCount,
+    phs.LastEditDate,
+    phs.PostHistoryTypes
+FROM 
+    RecentPosts rp
+JOIN 
+    PostStats ps ON rp.PostId = ps.PostId
+JOIN 
+    PostHistoryStats phs ON rp.PostId = phs.PostId
+WHERE 
+    NULLIF(rp.Score, 0) IS NOT NULL
+    AND ps.UpvoteCount > 5
+    AND ps.CommentCount >= 2
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC;

@@ -1,0 +1,89 @@
+WITH ranked_titles AS (
+    SELECT 
+        a.id AS aka_id, 
+        a.name AS aka_name, 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+movies_with_keywords AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        GROUP_CONCAT(k.keyword) AS keywords
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title
+),
+person_roles AS (
+    SELECT 
+        c.person_id, 
+        r.role, 
+        COUNT(c.movie_id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        c.note IS NULL
+    GROUP BY 
+        c.person_id, r.role
+),
+companies AS (
+    SELECT 
+        mc.movie_id, 
+        GROUP_CONCAT(DISTINCT cn.name) AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code IS NOT NULL
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    pt.person_id,
+    pt.aka_name AS actor_name,
+    rt.title AS latest_title,
+    rt.production_year AS latest_year,
+    kw.keywords AS all_keywords,
+    pc.role, 
+    pc.role_count,
+    COALESCE(cn.company_names, 'Unknown Companies') AS companies_in_movie
+FROM 
+    ranked_titles rt
+JOIN 
+    person_roles pc ON rt.aka_id = pc.person_id
+LEFT JOIN 
+    companies cn ON rt.aka_id = cn.movie_id
+WHERE 
+    rt.rank = 1
+ORDER BY 
+    rt.production_year DESC
+LIMIT 50;
+
+-- Note: COALESCE is used to avoid NULL results for company names, and GROUP_CONCAT assumes a MySQL SQL dialect. Adjust typing for your SQL dialect if needed.
+
+In this query, we employ multiple CTEs to build the necessary data structures. Each CTE serves a specific purpose and collaborates with the main query to yield a comprehensive result:
+
+1. **ranked_titles**: Ranks titles per person to find the latest title for each actor.
+2. **movies_with_keywords**: Collects all keywords associated with each movie to stack them into a single string.
+3. **person_roles**: Counts up the number of films each person played in, grouped by their role and excluding any roles with notes.
+4. **companies**: Gathers company names tied to each movie, ensuring they're filtered by valid country codes.
+
+Finally, the selection lists these components while applying a COALESCE function to handle potential NULL values, particularly regarding movie companies, ensuring the output remains user-friendly.

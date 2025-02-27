@@ -1,0 +1,50 @@
+
+WITH CustomerData AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        h.hd_income_band_sk,
+        COUNT(DISTINCT cr.cr_order_number) AS total_returns,
+        SUM(cr.cr_return_amount) AS total_return_amount,
+        AVG(cr.cr_return_quantity) AS avg_return_quantity
+    FROM 
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics h ON c.c_current_hdemo_sk = h.hd_demo_sk
+    LEFT JOIN catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, h.hd_income_band_sk
+), SalesData AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_sales_orders
+    FROM 
+        web_sales ws
+    GROUP BY
+        ws.ws_bill_customer_sk
+)
+SELECT 
+    cd.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    h.ib_lower_bound,
+    h.ib_upper_bound,
+    COALESCE(sd.total_sales, 0) AS total_sales,
+    COALESCE(cd.total_returns, 0) AS total_returns,
+    COALESCE(cd.total_return_amount, 0) AS total_return_amount,
+    COALESCE(cd.avg_return_quantity, 0) AS avg_return_quantity
+FROM 
+    CustomerData cd
+LEFT JOIN 
+    income_band h ON cd.hd_income_band_sk = h.ib_income_band_sk
+LEFT JOIN 
+    SalesData sd ON cd.c_customer_id = sd.ws_bill_customer_sk
+WHERE 
+    COALESCE(cd.total_returns, 0) > 5 OR COALESCE(sd.total_sales, 0) > 1000
+ORDER BY 
+    total_sales DESC, total_return_amount DESC
+LIMIT 100;

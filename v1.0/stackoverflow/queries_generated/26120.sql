@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankOrder
+    FROM Posts p
+    WHERE p.PostTypeId = 1  -- Only questions
+      AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'  -- Questions created in the last year
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostVotes AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3)  -- Only UpVotes and DownVotes
+    GROUP BY p.Id
+),
+PostTags AS (
+    SELECT
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM Posts p
+    JOIN Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>'), 'integer')::int[]
+    GROUP BY p.Id
+)
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rt.BadgeCount,
+    rt.BadgeNames,
+    pv.VoteCount,
+    pt.TagsList,
+    rp.CreationDate,
+    rp.ViewCount,
+    CASE 
+        WHEN rp.AcceptedAnswerId IS NOT NULL THEN 'Accepted Answer Exists'
+        ELSE 'No Accepted Answer'
+    END AS AnswerStatus
+FROM RankedPosts rp
+JOIN Users rt ON rp.OwnerUserId = rt.Id
+JOIN UserBadges ub ON rt.Id = ub.UserId
+JOIN PostVotes pv ON rp.PostId = pv.PostId
+JOIN PostTags pt ON rp.PostId = pt.PostId
+WHERE rp.RankOrder <= 5  -- Get top 5 most recent questions per user
+ORDER BY rp.CreationDate DESC;

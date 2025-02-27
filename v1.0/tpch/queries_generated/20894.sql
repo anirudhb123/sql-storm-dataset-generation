@@ -1,0 +1,82 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > 1000.00
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'No Balance'
+            WHEN c.c_acctbal <= 5000.00 THEN 'Low Balance'
+            ELSE 'High Balance'
+        END AS balance_status
+    FROM 
+        customer c
+    WHERE 
+        c.c_mktsegment = 'BUILDING'
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        DENSE_RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS recent_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+),
+FilteredLineItems AS (
+    SELECT
+        li.l_orderkey,
+        SUM(CASE 
+                WHEN li.l_discount > 0.05 THEN li.l_extendedprice * (1 - li.l_discount)
+                ELSE li.l_extendedprice
+            END) AS net_revenue,
+        COUNT(*) AS item_count
+    FROM 
+        lineitem li
+    WHERE 
+        li.l_shipdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        li.l_orderkey
+)
+SELECT 
+    cust.c_custkey,
+    cust.c_name,
+    COALESCE(SUM(li.net_revenue), 0) AS total_revenue,
+    ns.rank AS supplier_rank,
+    hc.balance_status
+FROM 
+    HighValueCustomers hc
+LEFT JOIN 
+    RecentOrders o ON hc.c_custkey = o.o_custkey
+LEFT JOIN 
+    FilteredLineItems li ON o.o_orderkey = li.l_orderkey
+LEFT JOIN 
+    RankedSuppliers ns ON ns.s_suppkey = (SELECT ps.ps_suppkey
+                                            FROM partsupp ps
+                                            JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+                                            WHERE l.l_orderkey = o.o_orderkey
+                                            ORDER BY ps.ps_supplycost DESC
+                                            LIMIT 1)
+GROUP BY 
+    cust.c_custkey, cust.c_name, ns.rank, hc.balance_status
+HAVING 
+    SUM(li.net_revenue) IS NOT NULL OR ns.rank IS NOT NULL
+ORDER BY 
+    total_revenue DESC, cust.c_name ASC;

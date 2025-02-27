@@ -1,0 +1,80 @@
+WITH PostTagCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(DISTINCT T.TagName) AS TagCount
+    FROM 
+        Posts P
+    JOIN 
+        UNNEST(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')) AS TagName 
+    ON 
+        T.TagName IS NOT NULL
+    GROUP BY 
+        P.Id
+),
+UserVoteStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT V.PostId) AS TotalVotedPosts
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        MAX(PH.CreationDate) AS LastActivityDate,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReopenCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id
+),
+Summary AS (
+    SELECT 
+        U.DisplayName AS UserDisplayName,
+        P.Title AS PostTitle,
+        PTC.TagCount,
+        UVS.UpVotes,
+        UVS.DownVotes,
+        UA.CommentCount,
+        UA.LastActivityDate,
+        UA.CloseReopenCount
+    FROM 
+        Users U
+    JOIN 
+        PostActivity UA ON U.Id = UA.PostId
+    JOIN 
+        PostTagCounts PTC ON PTC.PostId = UA.PostId
+    JOIN 
+        UserVoteStatistics UVS ON U.Id = UVS.UserId
+    ORDER BY 
+        UVS.UpVotes DESC,
+        UA.CommentCount DESC
+)
+SELECT 
+    UserDisplayName,
+    PostTitle,
+    TagCount,
+    UpVotes,
+    DownVotes,
+    CommentCount,
+    LastActivityDate,
+    CloseReopenCount
+FROM 
+    Summary
+WHERE 
+    UpVotes > DownVotes
+    AND TagCount > 2
+    AND LastActivityDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+LIMIT 100;

@@ -1,0 +1,65 @@
+WITH UserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 6 THEN 1 ELSE 0 END), 0) AS CloseVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 7 THEN 1 ELSE 0 END), 0) AS ReopenVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id
+),
+TopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.OwnerUserId,
+        P.CreationDate,
+        DENSE_RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank
+    FROM Posts P
+    WHERE P.Score > 0
+    ORDER BY P.Score DESC
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        P.Title,
+        P.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName
+    FROM PostHistory PH
+    JOIN Posts P ON PH.PostId = P.Id
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE PH.PostHistoryTypeId = 10
+),
+UserBenchmarks AS (
+    SELECT 
+        U.UserId,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        AVG(EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - U.CreationDate))) / 3600 AS AvgPostAgeInHours,
+        SUM(US.UpVotes - US.DownVotes) AS NetVotes
+    FROM UserScores US
+    JOIN Posts P ON US.UserId = P.OwnerUserId
+    JOIN Users U ON P.OwnerUserId = U.Id
+    GROUP BY U.UserId
+)
+SELECT 
+    U.DisplayName AS UserName,
+    UB.TotalPosts,
+    UB.AvgPostAgeInHours,
+    UB.NetVotes,
+    TP.Title AS TopPostTitle,
+    TP.Score AS TopPostScore,
+    CP.CreationDate AS ClosedPostDate,
+    CP.OwnerDisplayName AS ClosedPostOwner
+FROM UserBenchmarks UB
+JOIN Users U ON UB.UserId = U.Id
+LEFT JOIN TopPosts TP ON UB.TotalPosts = (SELECT MAX(TotalPosts) FROM UserBenchmarks)
+LEFT JOIN ClosedPosts CP ON CP.OwnerUserId = UB.UserId
+WHERE U.Reputation > 500
+ORDER BY UB.NetVotes DESC, UB.TotalPosts DESC
+LIMIT 10;

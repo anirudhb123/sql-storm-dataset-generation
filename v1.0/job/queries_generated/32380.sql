@@ -1,0 +1,46 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 1 AS level
+    FROM aka_title m
+    WHERE m.production_year IS NOT NULL AND m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT m.id AS movie_id, m.title, m.production_year, mh.level + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+    JOIN aka_title m ON ml.movie_id = m.id
+)
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    mh.level AS movie_level,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    STRING_AGG(DISTINCT kt.keyword, ', ') AS keywords,
+    COALESCE(COUNT(DISTINCT ci.id) FILTER (WHERE ci.person_role_id = (SELECT id FROM role_type WHERE role = 'actor')), 0) AS actor_count,
+    MAX(CASE WHEN pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Birth Date') THEN pi.info END) AS birth_date,
+    SUM(CASE WHEN co.country_code IS NOT NULL THEN 1 ELSE 0 END) AS valid_country_count
+FROM 
+    aka_name a 
+LEFT JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id
+WHERE 
+    mh.production_year >= 2000
+GROUP BY 
+    a.name, m.title, mh.level
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY 
+    movie_count DESC, actor_name;
+

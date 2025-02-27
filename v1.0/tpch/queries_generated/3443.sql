@@ -1,0 +1,57 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerRegions AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name,
+        r.r_name AS region_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    cr.region_name,
+    cr.nation_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    CASE 
+        WHEN SUM(su.total_avail_qty) IS NULL THEN 'N/A'
+        ELSE ROUND(SUM(l.l_extendedprice * (1 - l.l_discount)) / NULLIF(SUM(su.total_avail_qty), 0), 2) 
+    END AS revenue_per_avail_qty
+FROM 
+    lineitem l
+JOIN 
+    RankedOrders ro ON l.l_orderkey = ro.o_orderkey
+JOIN 
+    SupplierAvailability su ON l.l_partkey = su.ps_partkey
+JOIN 
+    CustomerRegions cr ON ro.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = cr.c_custkey)
+WHERE 
+    ro.order_rank = 1
+    AND ro.o_orderdate >= DATEADD(month, -3, GETDATE())
+GROUP BY 
+    cr.region_name, cr.nation_name
+ORDER BY 
+    total_orders DESC, revenue DESC;

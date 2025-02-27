@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        pt.Name AS PostType,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(c.Id) DESC) AS RN,
+        COALESCE(SUBSTRING_INDEX(p.Tags, '>', -1), 'No Tags') AS LastTag
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        p.Id, p.Title, pt.Name, p.OwnerUserId, p.Tags
+),
+UserPostDetails AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        rp.PostId,
+        rp.Title,
+        rp.PostType,
+        rp.CommentCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        rp.RN = 1
+)
+SELECT 
+    upd.UserId,
+    upd.DisplayName,
+    upd.Reputation,
+    upd.Title,
+    upd.PostType,
+    upd.CommentCount,
+    upd.UpVoteCount,
+    upd.DownVoteCount,
+    CASE 
+        WHEN upd.UpVoteCount IS NULL THEN 0 
+        ELSE upd.UpVoteCount 
+    END AS AdjustedUpVoteCount,
+    CASE 
+        WHEN upd.DownVoteCount IS NULL THEN 0 
+        ELSE upd.DownVoteCount 
+    END AS AdjustedDownVoteCount,
+    NULLIF(upd.CommentCount, 0) AS NullSafeCommentCount,
+    CASE 
+        WHEN upd.CommentCount > 10 THEN 'Popular'
+        WHEN upd.CommentCount BETWEEN 5 AND 10 THEN 'Moderate Activity'
+        ELSE 'Less Active'
+    END AS ActivityStatus,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t
+     JOIN STRING_TO_ARRAY(upd.Title, ' ') AS words ON t.TagName ILIKE '%' || words || '%') AS RelatedTags
+FROM 
+    UserPostDetails upd
+WHERE 
+    upd.Reputation BETWEEN 100 AND 1000
+ORDER BY 
+    upd.Reputation DESC 
+FETCH FIRST 100 ROWS ONLY;

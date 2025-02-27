@@ -1,0 +1,50 @@
+
+WITH sales_summary AS (
+    SELECT
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        EXTRACT(YEAR FROM dd.d_date) AS sales_year,
+        EXTRACT(MONTH FROM dd.d_date) AS sales_month
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY
+        ws.web_site_id, sales_year, sales_month
+),
+top_sites AS (
+    SELECT
+        web_site_id,
+        total_net_profit,
+        total_orders,
+        unique_customers,
+        total_quantity,
+        avg_sales_price,
+        RANK() OVER (ORDER BY total_net_profit DESC) AS rank_profit
+    FROM
+        sales_summary
+)
+SELECT
+    ts.web_site_id,
+    ts.total_net_profit,
+    ts.total_orders,
+    ts.unique_customers,
+    ts.total_quantity,
+    ts.avg_sales_price,
+    ca.ca_city,
+    ca.ca_state
+FROM
+    top_sites ts
+JOIN
+    web_site ws ON ts.web_site_id = ws.web_site_id
+JOIN
+    customer_address ca ON ws.web_site_sk = ca.ca_address_sk
+WHERE
+    ts.rank_profit <= 10
+ORDER BY
+    ts.total_net_profit DESC
+LIMIT 10;

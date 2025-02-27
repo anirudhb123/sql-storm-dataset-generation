@@ -1,0 +1,27 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.nr_order AS role_order,
+    ct.kind AS company_type,
+    COALESCE(MIN(mk.keyword), 'No Keywords') AS keywords,
+    i.info AS additional_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    movie_info i ON t.id = i.movie_id AND i.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+WHERE 
+    t.production_year >= 2000
+GROUP BY 
+    a.name, t.title, c.nr_order, ct.kind, i.info
+ORDER BY 
+    a.name, t.production_year DESC, c.nr_order;

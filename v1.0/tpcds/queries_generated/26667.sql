@@ -1,0 +1,62 @@
+
+WITH customer_data AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, ', ', ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip) AS full_address,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws_bill_customer_sk
+    FROM 
+        web_sales ws
+),
+aggregate_sales AS (
+    SELECT 
+        cd.c_customer_id,
+        COUNT(sd.ws_order_number) AS total_orders,
+        SUM(sd.ws_sales_price * sd.ws_quantity) AS total_sales
+    FROM 
+        customer_data cd
+    LEFT JOIN 
+        sales_data sd ON cd.c_customer_id = sd.ws_bill_customer_sk
+    GROUP BY 
+        cd.c_customer_id
+),
+final_benchmark AS (
+    SELECT 
+        cd.full_name,
+        cd.full_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        as.total_orders,
+        as.total_sales
+    FROM 
+        customer_data cd
+    LEFT JOIN 
+        aggregate_sales as ON cd.c_customer_id = as.c_customer_id
+)
+SELECT 
+    CONCAT('Customer: ', full_name, ', Gender: ', cd_gender, ', Marital Status: ', cd_marital_status, 
+           ', Address: ', full_address, ', Total Orders: ', COALESCE(total_orders, 0), 
+           ', Total Sales: $', COALESCE(total_sales, 0)) AS benchmark_output
+FROM 
+    final_benchmark
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

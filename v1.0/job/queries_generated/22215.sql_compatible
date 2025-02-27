@@ -1,0 +1,64 @@
+
+WITH movie_rankings AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ca.person_id) DESC) AS actor_count_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ca ON t.id = ca.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+actor_info AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS titles
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    LEFT JOIN 
+        aka_title t ON c.movie_id = t.id
+    WHERE 
+        ak.id IS NOT NULL
+    GROUP BY 
+        ak.person_id, ak.name
+),
+highly_active_actors AS (
+    SELECT 
+        ai.person_id,
+        ai.name,
+        ai.movie_count
+    FROM 
+        actor_info ai
+    WHERE 
+        ai.movie_count > 5
+)
+SELECT 
+    h.title_id,
+    h.title,
+    h.production_year,
+    COALESCE(h.actor_count_rank, 'N/A') AS actor_rank,
+    STRING_AGG(DISTINCT aa.name, ', ') AS active_actors
+FROM 
+    movie_rankings h
+LEFT JOIN 
+    highly_active_actors aa ON h.title_id IN (
+        SELECT 
+            c.movie_id 
+        FROM 
+            cast_info c 
+        WHERE 
+            c.person_id = aa.person_id
+    )
+WHERE 
+    h.actor_count_rank IS NOT NULL
+GROUP BY 
+    h.title_id, h.title, h.production_year, h.actor_count_rank
+ORDER BY 
+    h.production_year DESC, actor_rank DESC;

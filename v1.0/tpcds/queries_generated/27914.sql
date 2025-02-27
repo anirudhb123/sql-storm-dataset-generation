@@ -1,0 +1,60 @@
+
+WITH reordered_customers AS (
+    SELECT 
+        c.c_customer_sk, 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name, 
+        ca.ca_city, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status,
+        ca.ca_street_name || ' ' || ca.ca_street_number || ' ' || ca.ca_street_type AS full_address
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        customer_sk, 
+        COUNT(*) AS total_purchases,
+        SUM(ws_ext_sales_price) AS total_spent
+    FROM 
+        web_sales
+    GROUP BY 
+        customer_sk
+),
+customer_benchmark AS (
+    SELECT 
+        rc.full_name,
+        rc.ca_city,
+        rc.cd_gender,
+        rc.cd_marital_status,
+        rc.cd_education_status,
+        rc.full_address,
+        ss.total_purchases,
+        ss.total_spent
+    FROM 
+        reordered_customers rc
+    LEFT JOIN 
+        sales_summary ss ON rc.c_customer_sk = ss.customer_sk
+)
+SELECT 
+    full_name,
+    ca_city,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    full_address,
+    COALESCE(total_purchases, 0) AS total_purchases,
+    COALESCE(total_spent, 0) AS total_spent,
+    CASE 
+        WHEN total_spent > 1000 THEN 'High Value'
+        WHEN total_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    customer_benchmark
+ORDER BY 
+    total_spent DESC;

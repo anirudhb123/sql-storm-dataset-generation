@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_totalprice,
+        o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS rn
+    FROM 
+        orders
+    WHERE 
+        o_orderstatus = 'O'
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        n.n_regionkey,
+        r.r_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    cr.r_name AS region,
+    c.c_custkey,
+    COUNT(DISTINCT ro.o_orderkey) AS order_count,
+    COALESCE(SUM(od.total_revenue), 0) AS total_revenue,
+    COALESCE(SUM(spd.total_available), 0) AS total_parts_available,
+    AVG(spd.avg_supply_cost) AS avg_cost_per_part,
+    CASE 
+        WHEN SUM(od.total_revenue) IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Exists'
+    END AS revenue_status
+FROM 
+    CustomerRegion cr
+JOIN 
+    customer c ON cr.c_custkey = c.c_custkey
+LEFT JOIN 
+    RankedOrders ro ON c.c_custkey = ro.o_custkey
+LEFT JOIN 
+    OrderDetails od ON ro.o_orderkey = od.o_orderkey
+LEFT JOIN 
+    SupplierPartDetails spd ON spd.ps_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey IN (SELECT s_suppkey FROM supplier WHERE s_nationkey = c.c_nationkey))
+GROUP BY 
+    cr.r_name, c.c_custkey
+HAVING 
+    COUNT(DISTINCT ro.o_orderkey) > 0 OR COALESCE(SUM(od.total_revenue), 0) > 0
+ORDER BY 
+    region, c.c_custkey;

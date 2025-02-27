@@ -1,0 +1,54 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        r.s_suppkey,
+        r.s_name,
+        r.nation_name,
+        r.total_supply_cost
+    FROM 
+        RankedSuppliers r
+    WHERE 
+        r.rnk <= 5
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+)
+SELECT 
+    c.c_name AS customer_name,
+    c.total_spent,
+    s.s_name AS supplier_name,
+    s.total_supply_cost
+FROM 
+    CustomerOrders c
+JOIN 
+    HighValueSuppliers s ON c.c_custkey = (SELECT o.o_custkey FROM orders o ORDER BY o.o_orderdate DESC LIMIT 1)
+ORDER BY 
+    total_spent DESC, supplier_name ASC;

@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+SupplierPartSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    c.c_name AS customer_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COALESCE(SUM(supply.total_supply_cost), 0) AS total_suppliers_cost,
+    RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+FROM 
+    RankedOrders ro
+JOIN 
+    lineitem l ON ro.o_orderkey = l.l_orderkey
+JOIN 
+    HighValueCustomers c ON ro.o_custkey = c.c_custkey
+LEFT JOIN 
+    SupplierPartSummary supply ON l.l_suppkey = supply.s_suppkey
+WHERE 
+    ro.order_rank = 1 AND
+    l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+GROUP BY 
+    c.c_name
+ORDER BY 
+    revenue_rank;

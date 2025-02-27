@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        IFNULL(NULLIF(p.p_comment, ''), 'No Comment') AS comment
+    FROM part p
+    WHERE 
+        p.p_size BETWEEN 10 AND 20 
+        AND p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size < 10)
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name
+    FROM RankedSuppliers rs
+    WHERE rs.rank <= 5
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -12, cast('1998-10-01' as date)) 
+        AND o.o_orderstatus IN ('O', 'P')
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    DISTINCT p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(info.total_price, 0) AS total_order_value,
+    COALESCE(info.part_count, 0) AS order_part_count,
+    r.n_name AS nation_name,
+    CASE 
+        WHEN s.s_name IS NULL THEN 'Supplier Not Found' 
+        ELSE s.s_name 
+    END AS supplier_name
+FROM 
+    FilteredParts p
+LEFT JOIN 
+    OrderDetails info ON p.p_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey WHERE o.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderdate >= DATEADD(month, -12, cast('1998-10-01' as date))))
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    TopSuppliers s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation r ON s.s_nationkey = r.n_nationkey 
+WHERE 
+    (p.p_retailprice < 50 OR (p.p_retailprice >= 50 AND r.r_name <> 'EUROPE')) 
+    AND NOT EXISTS (SELECT 1 FROM supplier s2 WHERE s2.s_nationkey = r.n_nationkey AND s2.s_acctbal < 100)
+ORDER BY 
+    p.p_partkey DESC
+FETCH FIRST 100 ROWS ONLY;

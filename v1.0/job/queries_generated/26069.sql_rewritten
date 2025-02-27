@@ -1,0 +1,53 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        c.role_id,
+        a.name AS actor_name,
+        a.person_id,
+        k.keyword AS movie_keyword
+    FROM 
+        title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000 
+), ActorMovieCount AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT movie_title) AS movie_count,
+        STRING_AGG(DISTINCT movie_title, ', ') AS movies_played
+    FROM 
+        MovieDetails
+    GROUP BY 
+        actor_name
+), PositiveKeywords AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT movie_keyword) AS keyword_count,
+        STRING_AGG(DISTINCT movie_keyword, ', ') AS keywords_used
+    FROM 
+        MovieDetails
+    WHERE 
+        movie_keyword IS NOT NULL
+    GROUP BY 
+        actor_name
+)
+SELECT 
+    amc.actor_name,
+    amc.movie_count,
+    amc.movies_played,
+    pk.keyword_count,
+    pk.keywords_used
+FROM 
+    ActorMovieCount amc
+LEFT JOIN 
+    PositiveKeywords pk ON amc.actor_name = pk.actor_name
+ORDER BY 
+    amc.movie_count DESC, pk.keyword_count DESC;

@@ -1,0 +1,91 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+movie_cast AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        SUM(CASE WHEN c.note IS NULL THEN 1 ELSE 0 END) AS null_notes,
+        AVG(COALESCE(p.info::float, 0)) AS avg_person_info_score
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        person_info p ON c.person_id = p.person_id
+    GROUP BY 
+        c.movie_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+movie_company_info AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+combined_data AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        mk.keywords,
+        mc.company_names,
+        mc.company_count,
+        mc.cast_count,
+        mc.null_notes,
+        mc.avg_person_info_score,
+        CASE 
+            WHEN mc.null_notes >= 3 THEN 'Many null notes'
+            ELSE 'Standard'
+        END AS note_status
+    FROM 
+        ranked_movies m
+    LEFT JOIN 
+        movie_cast mc ON m.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_keywords mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_company_info c ON m.movie_id = c.movie_id
+    WHERE 
+        m.year_rank <= 10 
+        AND (m.production_year IS NOT NULL OR EXISTS (SELECT 1 FROM movie_companies WHERE movie_id = m.movie_id))
+)
+SELECT 
+    title,
+    production_year,
+    keywords,
+    company_names,
+    company_count,
+    cast_count,
+    null_notes,
+    avg_person_info_score,
+    note_status
+FROM 
+    combined_data
+WHERE 
+    (avg_person_info_score IS NULL OR avg_person_info_score < 2)
+ORDER BY 
+    production_year DESC, 
+    title;

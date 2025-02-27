@@ -1,0 +1,58 @@
+
+WITH RECURSIVE income_ranges AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound, 
+           (ib_lower_bound + ib_upper_bound) / 2 AS ib_avg_income
+    FROM income_band
+),
+demographics AS (
+    SELECT cd_demo_sk, cd_gender, cd_marital_status, 
+           cd_purchase_estimate, cd_credit_rating, cd_dep_count,
+           cd_dep_employed_count, cd_dep_college_count
+    FROM customer_demographics
+    WHERE cd_purchase_estimate IS NOT NULL
+),
+sales_data AS (
+    SELECT ws_item_sk, SUM(ws_quantity) AS total_sold, SUM(ws_net_paid) AS total_revenue
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+customer_data AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           ca.ca_city, ca.ca_state,
+           MAX(cd.cd_purchase_estimate) OVER (PARTITION BY c.c_customer_sk) AS max_purchase_estimate,
+           ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY cd.cd_purchase_estimate DESC) AS rank_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+averages AS (
+    SELECT d.d_month_seq, AVG(cd.max_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_data cd
+    JOIN date_dim d ON d.d_date_sk = cd.c_birth_day -- Assuming a correlation for edge-case evaluation
+    WHERE cd.rank_estimate = 1
+    GROUP BY d.d_month_seq
+),
+returns_summary AS (
+    SELECT sr_item_sk, COUNT(*) AS total_returns, SUM(sr_return_quantity) AS return_quantity_sum,
+           SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+final_report AS (
+    SELECT ci.c_first_name, ci.c_last_name, ci.ca_city, ci.ca_state,
+           ir.ib_income_band_sk, ir.ib_avg_income, 
+           sd.total_sold, sd.total_revenue, 
+           ar.avg_purchase_estimate,
+           COALESCE(rs.total_returns, 0) AS total_returns,
+           COALESCE(rs.return_quantity_sum, 0) AS return_quantity_sum
+    FROM customer_data ci
+    LEFT JOIN income_ranges ir ON ci.max_purchase_estimate BETWEEN ir.ib_lower_bound AND ir.ib_upper_bound
+    LEFT JOIN sales_data sd ON ci.c_customer_sk = sd.ws_item_sk -- Matching across potential product sales
+    LEFT JOIN averages ar ON ci.rank_estimate = ar.d_month_seq
+    LEFT JOIN returns_summary rs ON sd.ws_item_sk = rs.sr_item_sk
+    WHERE (ci.ca_state IS NOT NULL OR ci.ca_city IS NOT NULL)
+    ORDER BY ci.c_last_name ASC, ci.c_first_name ASC
+)
+SELECT * FROM final_report
+WHERE total_revenue IS NOT NULL
+OR (total_returns > 0 AND return_quantity_sum > 0); 

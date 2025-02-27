@@ -1,0 +1,63 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.title IS NOT NULL
+),
+top_keywords AS (
+    SELECT 
+        production_year,
+        keyword,
+        COUNT(*) AS keyword_count
+    FROM 
+        ranked_titles
+    WHERE 
+        year_rank <= 5 -- Top 5 titles by year
+    GROUP BY 
+        production_year, keyword
+    ORDER BY 
+        production_year DESC, keyword_count DESC
+),
+top_companies AS (
+    SELECT  
+        mc.movie_id, 
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(*) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, cn.name, ct.kind
+    ORDER BY 
+        company_count DESC
+)
+SELECT 
+    tt.production_year,
+    tt.keyword,
+    tc.company_name,
+    tc.company_type,
+    tc.company_count
+FROM 
+    top_keywords tt
+JOIN 
+    top_companies tc ON tt.production_year = (SELECT DISTINCT production_year FROM aka_title WHERE id IN (SELECT DISTINCT movie_id FROM movie_companies))
+WHERE 
+    tt.keyword_count > 0
+ORDER BY 
+    tt.production_year DESC, 
+    tt.keyword_count DESC, 
+    tc.company_count DESC;

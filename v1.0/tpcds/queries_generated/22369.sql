@@ -1,0 +1,75 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    UNION ALL
+    SELECT 
+        cs.cs_order_number,
+        cs.cs_item_sk,
+        cs.cs_quantity,
+        cs.cs_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY cs.cs_order_number ORDER BY cs.cs_sales_price DESC)
+    FROM 
+        catalog_sales cs
+    JOIN 
+        sales_data sd ON cs.cs_order_number = sd.ws_order_number AND cs.cs_item_sk = sd.ws_item_sk
+),
+agg_sales AS (
+    SELECT 
+        sd.ws_order_number, 
+        SUM(sd.ws_quantity * sd.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT sd.ws_item_sk) AS unique_items
+    FROM 
+        sales_data sd
+    GROUP BY 
+        sd.ws_order_number
+),
+item_analysis AS (
+    SELECT 
+        i.i_item_id,
+        COUNT(DISTINCT wd.ws_order_number) AS order_count,
+        AVG(wd.ws_sales_price) AS avg_price,
+        SUM(wd.ws_quantity) AS total_quantity
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales wd ON i.i_item_sk = wd.ws_item_sk
+    WHERE 
+        i.i_current_price > 0 
+    GROUP BY 
+        i.i_item_id
+)
+SELECT 
+    ca.ca_city, 
+    ca.ca_state,
+    a.total_sales, 
+    i.order_count, 
+    i.avg_price, 
+    i.total_quantity, 
+    CASE 
+        WHEN a.unique_items > 5 THEN 'Diverse Items' 
+        ELSE 'Limited Items'
+    END AS item_variety
+FROM 
+    customer_address ca
+INNER JOIN 
+    agg_sales a ON ca.ca_address_sk = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_customer_sk IN (SELECT wd.ws_bill_customer_sk FROM web_sales wd))
+LEFT JOIN 
+    item_analysis i ON a.ws_order_number IN (SELECT wd.ws_order_number FROM web_sales wd WHERE wd.ws_ship_addr_sk = ca.ca_address_sk)
+WHERE 
+    ca.ca_state IN ('CA', 'NY') 
+    AND a.total_sales IS NOT NULL 
+    AND (i.order_count IS NULL OR i.order_count > 10)
+ORDER BY 
+    a.total_sales DESC, 
+    i.avg_price ASC
+LIMIT 50;

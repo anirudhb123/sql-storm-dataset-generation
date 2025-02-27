@@ -1,0 +1,90 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+        
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title m ON ml.movie_id = m.id
+    JOIN
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+), 
+ranked_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY mh.level) AS total_count
+    FROM 
+        movie_hierarchy mh
+),
+top_movies AS (
+    SELECT 
+        rm.*
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.rn <= 5
+),
+actor_movie_roles AS (
+    SELECT 
+        pa.id AS person_id,
+        an.name AS actor_name,
+        mt.title AS movie_title,
+        COALESCE(cr.role, 'Unknown') AS role_description
+    FROM 
+        aka_name an
+    JOIN 
+        cast_info ci ON an.person_id = ci.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.id
+    LEFT JOIN 
+        role_type cr ON ci.role_id = cr.id
+),
+movie_keyword_counts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    amr.actor_name,
+    amr.role_description,
+    COALESCE(mkc.keyword_count, 0) AS keyword_count,
+    tm.level,
+    tm.total_count
+FROM 
+    top_movies tm
+LEFT JOIN 
+    actor_movie_roles amr ON tm.movie_id = amr.movie_title
+LEFT JOIN 
+    movie_keyword_counts mkc ON tm.movie_id = mkc.movie_id
+WHERE 
+    tm.production_year >= 2000
+ORDER BY 
+    tm.level, 
+    tm.production_year DESC, 
+    amr.actor_name;

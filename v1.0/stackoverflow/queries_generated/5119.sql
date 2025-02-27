@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        COUNT(c.Id) AS CommentCount, 
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) AS UpvoteCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 3) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id
+), 
+PostStatistics AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        Score, 
+        CommentCount, 
+        UpvoteCount, 
+        DownvoteCount,
+        RANK() OVER (ORDER BY Score DESC, CreationDate ASC) AS Rank
+    FROM 
+        RankedPosts
+), 
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT bp.PostId) AS TotalBadgePosts,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts bp ON u.Id = bp.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.Rank,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.CommentCount,
+    ps.UpvoteCount,
+    ps.DownvoteCount,
+    us.DisplayName AS Author,
+    us.TotalBadgePosts,
+    us.BadgeCount
+FROM 
+    PostStatistics ps
+JOIN 
+    Users u ON ps.PostId = u.Id
+JOIN 
+    UserStatistics us ON us.UserId = u.Id
+WHERE 
+    ps.Rank <= 10 -- Top 10 posts by score
+ORDER BY 
+    ps.Rank;

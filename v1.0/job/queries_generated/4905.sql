@@ -1,0 +1,57 @@
+WITH MovieDetails AS (
+    SELECT
+        a.title,
+        a.production_year,
+        c.kind AS company_kind,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM
+        aka_title a
+    LEFT JOIN
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN
+        cast_info ci ON ci.movie_id = a.id
+    LEFT JOIN
+        movie_companies mc ON mc.movie_id = a.id
+    LEFT JOIN
+        company_type c ON mc.company_type_id = c.id
+    WHERE
+        a.production_year >= 2000
+        AND a.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Drama%')
+    GROUP BY
+        a.id, a.title, a.production_year, c.kind
+),
+KeywordInfo AS (
+    SELECT
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword m
+    JOIN
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+FinalResults AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.company_kind,
+        md.cast_count,
+        ki.keywords
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        KeywordInfo ki ON md.id = ki.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    company_kind,
+    cast_count,
+    COALESCE(keywords, 'No keywords') AS keywords
+FROM 
+    FinalResults
+WHERE 
+    cast_count > 1
+ORDER BY 
+    production_year DESC, title ASC;

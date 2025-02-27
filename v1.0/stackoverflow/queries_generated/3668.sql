@@ -1,0 +1,48 @@
+WITH UserReputation AS (
+    SELECT Id, DisplayName, Reputation, 
+           RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+           COUNT(DISTINCT CASE WHEN b.Id IS NOT NULL THEN b.Id END) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostDetails AS (
+    SELECT p.Id AS PostId, 
+           p.OwnerUserId, 
+           p.Title, 
+           p.CreationDate, 
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+           p.AnswerCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id
+),
+RankedPosts AS (
+    SELECT pd.PostId, pd.Title, pd.CreationDate, 
+           pd.UpVotes - pd.DownVotes AS NetVotes,
+           ROW_NUMBER() OVER (PARTITION BY pd.OwnerUserId ORDER BY pd.UpVotes DESC) AS PostRank
+    FROM PostDetails pd
+),
+TopUsers AS (
+    SELECT ur.Id, ur.DisplayName, ur.ReputationRank, 
+           COUNT(DISTINCT rp.PostId) AS PostCount, 
+           SUM(CASE WHEN rp.NetVotes > 0 THEN 1 ELSE 0 END) AS PositiveVotesCount
+    FROM UserReputation ur
+    JOIN RankedPosts rp ON ur.Id = rp.OwnerUserId
+    WHERE ur.ReputationRank <= 10
+    GROUP BY ur.Id, ur.DisplayName, ur.ReputationRank
+)
+SELECT tu.DisplayName, 
+       tu.ReputationRank,
+       tu.PostCount, 
+       tu.PositiveVotesCount,
+       COALESCE((SELECT STRING_AGG(pt.Name, ', ') 
+                 FROM PostHistory ph 
+                 JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id 
+                 WHERE ph.UserId = tu.Id 
+                 AND ph.CreationDate >= NOW() - INTERVAL '6 months')
+                 , 'No Recent Activity') AS RecentActivities
+FROM TopUsers tu
+ORDER BY tu.ReputationRank;

@@ -1,0 +1,37 @@
+
+SELECT 
+    s.s_name AS supplier_name,
+    p.p_name AS part_name,
+    SUBSTRING_INDEX(SUBSTRING_INDEX(pi.p_comment, ' ', 5), ' ', -5) AS comment_snippet,
+    SUM(l.l_quantity) AS total_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    ROUND(AVG(l.l_extendedprice * (1 - l.l_discount)), 2) AS avg_extended_price,
+    r.r_name AS region_name
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    partinfo pi ON p.p_partkey = pi.p_partkey -- correcting potential missing join
+WHERE 
+    p.p_brand LIKE 'Brand#%'
+    AND c.c_mktsegment = 'BUILDING'
+    AND l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-10-31'
+GROUP BY 
+    s.s_name, p.p_name, r.r_name, pi.p_comment
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    avg_extended_price DESC, total_quantity DESC;

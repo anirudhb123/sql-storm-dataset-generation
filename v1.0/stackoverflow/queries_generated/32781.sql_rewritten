@@ -1,0 +1,76 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.Tags,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.Tags,
+        p.ParentId,
+        c.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE c ON p.ParentId = c.PostId
+),
+PostVoteStats AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    rp.Tags,
+    IFNULL(pvs.UpVotes, 0) AS UpVotes,
+    IFNULL(pvs.DownVotes, 0) AS DownVotes,
+    IFNULL(phs.EditCount, 0) AS EditCount,
+    phs.LastEditDate,
+    COUNT(c.Id) AS CommentCount
+FROM 
+    RecursivePostCTE rp
+LEFT JOIN 
+    PostVoteStats pvs ON rp.PostId = pvs.PostId
+LEFT JOIN 
+    PostHistoryStats phs ON rp.PostId = phs.PostId
+LEFT JOIN 
+    Comments c ON rp.PostId = c.PostId
+WHERE 
+    rp.Level = 1  
+GROUP BY 
+    rp.PostId, rp.Title, rp.Score, rp.CreationDate, rp.Tags, pvs.UpVotes, pvs.DownVotes, phs.EditCount, phs.LastEditDate
+ORDER BY 
+    rp.Score DESC, 
+    CommentCount DESC
+LIMIT 10;

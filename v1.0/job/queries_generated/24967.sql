@@ -1,0 +1,64 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn,
+        COUNT(k.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.name IS NOT NULL AND 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%movie%')
+),
+PopularTitles AS (
+    SELECT 
+        actor_name,
+        title,
+        production_year,
+        keyword_count,
+        RANK() OVER (ORDER BY keyword_count DESC, production_year DESC) AS popular_rank
+    FROM 
+        RankedTitles
+    WHERE 
+        rn = 1 -- Take the latest title per actor
+),
+FilteredTitles AS (
+    SELECT 
+        actor_name,
+        title,
+        production_year,
+        popular_rank,
+        CASE 
+            WHEN production_year IS NULL THEN 'Unknown Year'
+            WHEN production_year < 2000 THEN 'Before 2000'
+            ELSE '2000 and After'
+        END AS year_category
+    FROM 
+        PopularTitles
+    WHERE 
+        popular_rank <= 10
+)
+SELECT 
+    ft.actor_name,
+    ft.title,
+    ft.production_year,
+    ft.year_category,
+    COALESCE(NULLIF(ft.keyword_count, 0), 'No Keywords') AS keyword_status
+FROM 
+    FilteredTitles ft
+LEFT JOIN 
+    (SELECT DISTINCT actor_name, COUNT(DISTINCT title) AS title_count
+     FROM FilteredTitles
+     GROUP BY actor_name) ft_count ON ft.actor_name = ft_count.actor_name
+ORDER BY 
+    ft.keyword_count DESC, ft.production_year ASC;
+This SQL query incorporates a variety of advanced SQL features such as common table expressions (CTEs), window functions, filtering conditions, a correlated subquery, and complex predicate logic. It provides an elaborate performance benchmarking scenario by using joins across multiple tables, particularly focusing on the relationship between actors, their roles, the titles of movies, and relevant keywords. It includes null handling and string expressions to categorize years, catering to peculiar cases like "Unknown Year".

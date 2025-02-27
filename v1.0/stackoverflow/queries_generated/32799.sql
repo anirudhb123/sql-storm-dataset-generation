@@ -1,0 +1,65 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpvotesCount,  -- Upvotes
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownvotesCount  -- Downvotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName 
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostsCount,
+        QuestionsCount,
+        AnswersCount,
+        UpvotesCount,
+        DownvotesCount,
+        RANK() OVER (ORDER BY PostsCount DESC, UpvotesCount DESC) AS Rank
+    FROM UserActivity
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '>,<')) AS TagName,
+        COUNT(*) AS TagUsage
+    FROM Posts
+    GROUP BY TagName
+),
+TagPostCount AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostsWithTag
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+),
+TagRanking AS (
+    SELECT 
+        TagName,
+        PostsWithTag,
+        RANK() OVER (ORDER BY PostsWithTag DESC) AS TagRank
+    FROM TagPostCount
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.PostsCount,
+    tu.QuestionsCount,
+    tu.AnswersCount,
+    tu.UpvotesCount,
+    tu.DownvotesCount,
+    tr.TagName,
+    tr.PostsWithTag,
+    tr.TagRank
+FROM TopUsers tu
+FULL OUTER JOIN TagRanking tr ON tu.Rank = tr.TagRank
+WHERE tu.PostsCount > 5 OR tr.PostsWithTag > 3
+ORDER BY COALESCE(tu.Rank, 9999), COALESCE(tr.TagRank, 9999);
+

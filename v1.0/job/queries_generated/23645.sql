@@ -1,0 +1,72 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(app.id) DESC) AS rank_per_year
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        cast_info AS ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name AS a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        role_type AS r ON ci.role_id = r.id
+    LEFT JOIN 
+        movie_keyword AS mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id
+),
+DirectorsAndProducers AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        STRING_AGG(DISTINCT ci.person_id, ', ') AS directors
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    JOIN 
+        cast_info AS ci ON mc.movie_id = ci.movie_id AND ci.role_id IN (SELECT id FROM role_type WHERE role IN ('Director', 'Producer'))
+    GROUP BY 
+        mc.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ca.companies,
+        da.directors,
+        COALESCE(mk.keyword, 'No keywords') AS keyword
+    FROM 
+        RankedMovies AS rm
+    LEFT JOIN 
+        DirectorsAndProducers AS da ON rm.movie_id = da.movie_id
+    LEFT JOIN 
+        movie_keyword AS mk ON rm.movie_id = mk.movie_id
+    WHERE 
+        rm.rank_per_year <= 5
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.companies,
+    md.directors,
+    SUM(CASE WHEN md.keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_count,
+    COUNT(*) FILTER (WHERE md.directors IS NOT NULL) AS director_count,
+    STRING_AGG(DISTINCT md.keyword, ', ') AS all_keywords
+FROM 
+    MovieDetails AS md
+GROUP BY 
+    md.title,
+    md.production_year,
+    md.companies,
+    md.directors
+HAVING 
+    COUNT(md.movie_id) > 0
+ORDER BY 
+    md.production_year DESC, 
+    keyword_count DESC;
+
+This SQL query performs a multi-step analysis leveraging Common Table Expressions (CTEs) to rank movies by their production year, gather associated companies, and specify the directors/actors related to each movie. It also counts the number of keywords per movie and aggregates that along with company names and director details, producing a comprehensive overview of top movies with the most associations. Additionally, it applies filtering, grouping, and some complex aggregation functions.

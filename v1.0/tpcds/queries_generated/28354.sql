@@ -1,0 +1,48 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+CustomerAddress AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        c.c_customer_sk,
+        c.full_name,
+        RANK() OVER (PARTITION BY ca.ca_state ORDER BY ca.ca_city) AS city_rank
+    FROM customer_address ca
+    JOIN RankedCustomers c ON ca.ca_address_sk = c.c_customer_sk
+),
+VisitDates AS (
+    SELECT 
+        d.d_date_sk,
+        d.d_date,
+        COUNT(w.ws_order_number) AS total_orders
+    FROM date_dim d
+    LEFT JOIN web_sales w ON d.d_date_sk = w.ws_sold_date_sk
+    WHERE d.d_date BETWEEN '2022-01-01' AND '2023-12-31'
+    GROUP BY d.d_date_sk, d.d_date
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT ca.c_customer_sk) AS customer_count,
+    SUM(v.total_orders) AS total_orders,
+    AVG(cd.cd_purchase_estimate) AS average_purchase_estimate
+FROM CustomerAddress ca
+LEFT JOIN VisitDates v ON ca.c_customer_sk = v.d_date_sk
+JOIN customer_demographics cd ON cd.cd_demo_sk = ca.c_customer_sk
+WHERE ca.city_rank <= 10 AND ca.gender_rank <= 5
+GROUP BY ca.ca_city, ca.ca_state
+ORDER BY ca.ca_state, customer_count DESC;

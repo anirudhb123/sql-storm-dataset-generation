@@ -1,0 +1,49 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_custkey,
+        c.c_name,
+        1 AS depth
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+    UNION ALL
+    SELECT 
+        li.l_orderkey,
+        li.l_shipdate AS o_orderdate,
+        li.l_extendedprice * (1 - li.l_discount) AS o_totalprice,
+        c.c_custkey,
+        c.c_name,
+        depth + 1
+    FROM 
+        lineitem li
+    JOIN 
+        customer c ON li.l_suppkey = c.c_custkey
+    JOIN 
+        OrderHierarchy oh ON li.l_orderkey = oh.o_orderkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT oh.o_orderkey) AS total_orders,
+    SUM(oh.o_totalprice) AS total_revenue,
+    AVG(oh.o_totalprice) AS avg_order_value,
+    SUM(CASE WHEN oh.o_orderdate IS NULL THEN 1 ELSE 0 END) AS null_dates,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY oh.o_totalprice) AS median_order_value
+FROM 
+    OrderHierarchy oh
+LEFT JOIN 
+    nation n ON oh.c_custkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+GROUP BY 
+    r.r_name
+HAVING 
+    AVG(oh.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

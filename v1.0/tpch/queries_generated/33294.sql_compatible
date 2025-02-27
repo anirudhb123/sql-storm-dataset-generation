@@ -1,0 +1,50 @@
+
+WITH RECURSIVE RecentOrders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice
+    FROM orders
+    WHERE o_orderdate >= DATE_SUB(CAST('1998-10-01' AS DATE), INTERVAL 1 YEAR)
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice
+    FROM orders o
+    JOIN RecentOrders ro ON o.o_orderkey < ro.o_orderkey
+    WHERE o.o_orderdate >= DATE_SUB(CAST('1998-10-01' AS DATE), INTERVAL 1 YEAR)
+),
+AggregateSuppliers AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 1000
+    GROUP BY c.c_custkey, c.c_name
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, COUNT(l.l_linenumber) AS line_item_count, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_price
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    cs.c_name,
+    cs.total_spent,
+    cs.order_count,
+    l.line_item_count,
+    l.total_line_price,
+    rs.o_orderdate,
+    rs.o_totalprice,
+    ps.total_supply_cost,
+    CASE 
+        WHEN l.line_item_count IS NULL THEN 'No Line Items'
+        ELSE 'Exists Line Items'
+    END AS line_item_status
+FROM CustomerSummary cs
+JOIN LineItemSummary l ON cs.total_spent > l.total_line_price
+JOIN RecentOrders rs ON cs.c_custkey = rs.o_custkey
+LEFT JOIN AggregateSuppliers ps ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+WHERE l.total_line_price > 500
+ORDER BY cs.total_spent DESC, l.line_item_count DESC
+LIMIT 10;

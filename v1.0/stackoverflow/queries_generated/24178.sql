@@ -1,0 +1,104 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId IN (2, 3)) AS VoteCount,  -- Count only UpMods (2) and DownMods (3)
+        DENSE_RANK() OVER (ORDER BY COALESCE(SUM(p.ViewCount), 0) DESC) AS ViewRank
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+UserEngagement AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalViews,
+        ua.BadgeCount,
+        ua.VoteCount,
+        CASE WHEN ua.BadgeCount > 5 THEN 'Active' ELSE 'Inactive' END AS UserStatus,
+        ROW_NUMBER() OVER (PARTITION BY ua.UserStatus ORDER BY ua.TotalViews DESC) AS StatusRank
+    FROM 
+        UserActivity ua
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(v.VoteCount, 0) AS TotalVotes,
+        p.Body,
+        p.AcceptedAnswerId,
+        u.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments WHERE PostId = p.Id) AS TotalComments,
+        COALESCE(NULLIF(p.FavoriteCount, 0), 1) AS FavoriteCount -- Replace 0 FavoriteCount with 1 for calculations
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount 
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId) v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+),
+FinalSummary AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.Score,
+        ps.CommentCount,
+        ps.TotalVotes,
+        ps.FavoriteCount,
+        (us.TotalViews * 1.0 / NULLIF(ps.FavoriteCount, 0)) AS EngagementRatio,
+        ROW_NUMBER() OVER (PARTITION BY us.UserId ORDER BY ps.Score DESC) AS PostRank
+    FROM 
+        UserEngagement us
+    JOIN 
+        PostSummary ps ON us.UserId = ps.Id
+)
+SELECT 
+    fs.DisplayName,
+    fs.Title,
+    fs.CreationDate,
+    fs.Score,
+    fs.CommentCount,
+    fs.TotalVotes,
+    fs.FavoriteCount,
+    fs.EngagementRatio,
+    CASE 
+        WHEN fs.EngagementRatio IS NULL THEN 'No Engagement'
+        WHEN fs.EngagementRatio > 10 THEN 'High'
+        WHEN fs.EngagementRatio BETWEEN 5 AND 10 THEN 'Medium'
+        ELSE 'Low' 
+    END AS EngagementLevel
+FROM 
+    FinalSummary fs
+WHERE 
+    fs.PostRank = 1   -- Only top post per user
+ORDER BY 
+    fs.EngagementRatio DESC NULLS LAST;

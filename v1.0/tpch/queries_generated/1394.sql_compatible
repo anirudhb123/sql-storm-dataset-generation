@@ -1,0 +1,75 @@
+
+WITH SupplierCost AS (
+    SELECT 
+        ps.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.s_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, s.s_name, sc.total_supply_cost, 
+        RANK() OVER (ORDER BY sc.total_supply_cost DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        SupplierCost sc ON s.s_suppkey = sc.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+NationalInfo AS (
+    SELECT 
+        n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '1996-01-01' AND l.l_shipdate < DATE '1997-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    t.s_suppkey, t.s_name, oi.order_count, 
+    ni.n_name, l.net_revenue
+FROM 
+    TopSuppliers t
+JOIN 
+    CustomerOrders oi ON oi.order_count > 10
+JOIN 
+    NationalInfo ni ON ni.supplier_count > 5
+LEFT JOIN 
+    LineItemSummary l ON l.l_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey IN (
+            SELECT c.c_custkey 
+            FROM customer c 
+            WHERE c.c_acctbal IS NOT NULL
+        )
+    )
+WHERE 
+    t.rank <= 10
+ORDER BY 
+    l.net_revenue DESC NULLS LAST;

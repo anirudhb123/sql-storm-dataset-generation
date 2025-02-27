@@ -1,0 +1,62 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.net_profit) AS total_profit,
+        COUNT(ws.order_number) AS total_orders,
+        1 AS level
+    FROM web_sales ws
+    JOIN customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_year >= 1990
+    GROUP BY ws.bill_customer_sk
+
+    UNION ALL
+
+    SELECT 
+        zh.bill_customer_sk,
+        SUM(ws.net_profit) AS total_profit,
+        COUNT(ws.order_number) AS total_orders,
+        zh.level + 1 AS level
+    FROM web_sales ws
+    JOIN customer c ON ws.bill_customer_sk = c.c_customer_sk
+    JOIN sales_hierarchy zh ON c.c_current_hdemo_sk = zh.bill_customer_sk
+    WHERE zh.level < 5
+    GROUP BY zh.bill_customer_sk
+),
+customer_with_returns AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT sr.ticket_number) AS total_returns
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_sk
+),
+final_customer_data AS (
+    SELECT 
+        s.bill_customer_sk,
+        sh.total_profit,
+        sh.total_orders,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        CASE 
+            WHEN sh.total_profit > 1000 THEN 'High Profit'
+            WHEN sh.total_profit BETWEEN 500 AND 1000 THEN 'Moderate Profit'
+            ELSE 'Low Profit'
+        END AS profit_category
+    FROM sales_hierarchy sh
+    LEFT JOIN customer_with_returns cr ON sh.bill_customer_sk = cr.c_customer_sk
+),
+ranked_profit AS (
+    SELECT 
+        f.*,
+        RANK() OVER (PARTITION BY f.profit_category ORDER BY f.total_profit DESC) AS rank
+    FROM final_customer_data f
+)
+SELECT 
+    r.bill_customer_sk,
+    r.total_profit,
+    r.total_orders,
+    r.total_returns,
+    r.profit_category
+FROM ranked_profit r
+WHERE r.rank <= 10
+ORDER BY r.profit_category, r.total_profit DESC;

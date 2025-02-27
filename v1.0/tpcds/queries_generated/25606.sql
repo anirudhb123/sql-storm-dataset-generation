@@ -1,0 +1,70 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        COUNT(*) AS address_count,
+        STRING_AGG(ca_street_name || ' ' || ca_street_number || ', ' || ca_street_type, '; ') AS full_address
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city, 
+        ca_state
+),
+CustomerDetails AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS total_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+SalesMetrics AS (
+    SELECT 
+        d.d_year,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year
+),
+CombinedMetrics AS (
+    SELECT 
+        ad.ca_city,
+        ad.ca_state,
+        ad.address_count,
+        ad.full_address,
+        cd.cd_gender,
+        cd.total_customers,
+        cd.avg_purchase_estimate,
+        sm.d_year,
+        sm.total_sales,
+        sm.total_orders
+    FROM 
+        AddressDetails ad
+    JOIN 
+        CustomerDetails cd ON ad.ca_state = 'CA'  -- Considering a specific state for join purpose
+    JOIN 
+        SalesMetrics sm ON sm.d_year >= 2020  -- Sales metrics for the last few years
+)
+SELECT 
+    city,
+    state,
+    address_count,
+    full_address,
+    cd_gender,
+    total_customers,
+    avg_purchase_estimate,
+    d_year,
+    total_sales,
+    total_orders
+FROM 
+    CombinedMetrics
+ORDER BY 
+    total_sales DESC, 
+    city ASC;

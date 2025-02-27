@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        ARRAY_AGG(DISTINCT SUBSTRING(tag FROM 2 FOR LENGTH(tag) - 2)) AS Tags,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id
+),
+PostHistoryAggregated AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        COUNT(ph.Id) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastHistoryDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Tags,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    pha.HistoryTypes,
+    pha.HistoryCount,
+    pha.LastHistoryDate,
+    ub.BadgeCount,
+    ub.BadgeNames
+FROM 
+    Users u
+JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    PostHistoryAggregated pha ON rp.PostId = pha.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    rp.UserPostRank <= 5 -- Only top 5 posts per user
+ORDER BY 
+    u.Reputation DESC, rp.ViewCount DESC;

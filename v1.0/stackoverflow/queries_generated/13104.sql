@@ -1,0 +1,54 @@
+-- Performance Benchmarking Query
+WITH UserVotes AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN V.VoteTypeId = 10 THEN 1 ELSE 0 END) AS Deletions
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN P.ViewCount IS NOT NULL THEN P.ViewCount ELSE 0 END) AS TotalViews,
+        SUM(CASE WHEN P.FavoriteCount IS NOT NULL THEN P.FavoriteCount ELSE 0 END) AS FavoriteCount,
+        SUM(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.VoteCount,
+    U.Upvotes,
+    U.Downvotes,
+    U.Deletions,
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.CommentCount,
+    P.TotalViews,
+    P.FavoriteCount,
+    P.AcceptedCount
+FROM 
+    UserVotes U
+JOIN 
+    Posts P ON P.OwnerUserId = U.UserId
+ORDER BY 
+    U.Reputation DESC, P.Score DESC;

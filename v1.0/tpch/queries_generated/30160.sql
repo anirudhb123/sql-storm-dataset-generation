@@ -1,0 +1,43 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+),
+supplier_part_stats AS (
+    SELECT s.s_suppkey, COUNT(DISTINCT ps.ps_partkey) AS part_count, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+sales_summary AS (
+    SELECT c.c_nationkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_nationkey
+)
+SELECT 
+    r.r_name AS region_name,
+    nh.n_name AS nation_name,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(sps.part_count, 0) AS supplier_part_count,
+    COALESCE(sps.avg_supply_cost, 0) AS avg_supply_cost,
+    SUM(CASE WHEN oo.order_rank = 1 THEN oo.o_totalprice ELSE 0 END) AS first_order_total
+FROM region r
+LEFT JOIN nation_hierarchy nh ON nh.n_regionkey = r.r_regionkey
+LEFT JOIN sales_summary ss ON nh.n_nationkey = ss.c_nationkey
+LEFT JOIN supplier_part_stats sps ON nh.n_nationkey = sps.s_suppkey
+LEFT JOIN ranked_orders oo ON oo.o_orderkey = (
+    SELECT o_orderkey FROM ranked_orders ro WHERE ro.order_rank = 1 LIMIT 1
+)
+GROUP BY r.r_name, nh.n_name
+HAVING SUM(CASE WHEN ss.total_sales IS NULL THEN 1 ELSE 0 END) < 3
+ORDER BY total_sales DESC, region_name, nation_name;

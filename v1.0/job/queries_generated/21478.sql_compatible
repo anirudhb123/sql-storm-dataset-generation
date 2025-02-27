@@ -1,0 +1,91 @@
+
+WITH MovieRoles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        rt.role AS actor_role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type rt ON c.role_id = rt.id
+), 
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        COUNT(DISTINCT CASE WHEN ct.kind = 'Distributor' THEN mc.company_id END) AS distributor_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+KeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+HighProfileMovies AS (
+    SELECT 
+        t.title,
+        COALESCE(mrs.total_companies, 0) AS total_companies,
+        COALESCE(mks.keyword_count, 0) AS keyword_count,
+        STRING_AGG(DISTINCT mr.actor_name || ' (' || mr.actor_role || ')', ', ') AS cast_list
+    FROM 
+        title t
+    LEFT JOIN 
+        CompanyStats mrs ON t.id = mrs.movie_id
+    LEFT JOIN 
+        KeywordCounts mks ON t.id = mks.movie_id
+    LEFT JOIN 
+        MovieRoles mr ON t.id = mr.movie_id
+    WHERE 
+        t.production_year >= 2000
+        AND (mrs.total_companies IS NULL OR mrs.total_companies >= 2)
+    GROUP BY 
+        t.id, mrs.total_companies, mks.keyword_count
+    HAVING 
+        COUNT(mr.actor_name) > 1
+    ORDER BY 
+        total_companies DESC, keyword_count DESC
+    LIMIT 10
+)
+
+SELECT 
+    h.title,
+    h.total_companies,
+    h.keyword_count,
+    h.cast_list
+FROM 
+    HighProfileMovies h
+WHERE 
+    (SELECT COUNT(*) FROM title WHERE production_year < 2000) > 50
+AND 
+    EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = h.movie_id 
+        AND mi.info LIKE '%Award%'
+    )
+AND 
+    NOT EXISTS (
+        SELECT 1 
+        FROM movie_link ml
+        WHERE ml.movie_id = h.movie_id
+        AND ml.linked_movie_id IN (
+            SELECT linked_movie_id 
+            FROM movie_link 
+            WHERE link_type_id = (SELECT id FROM link_type WHERE link = 'Sequel')
+        )
+    )
+ORDER BY 
+    h.total_companies ASC, 
+    LENGTH(h.cast_list) DESC;

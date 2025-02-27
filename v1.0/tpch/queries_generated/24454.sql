@@ -1,0 +1,52 @@
+WITH RankedSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 50000
+),
+CustomerRecentOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey 
+       AND o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY c.c_custkey, c.c_name
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, l.l_partkey, l.l_quantity, l.l_discount,
+           (l.l_extendedprice - (l.l_extendedprice * l.l_discount)) AS net_price
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'F'
+),
+FilteredParts AS (
+    SELECT p.*, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice) AS price_rank
+    FROM part p
+    WHERE p.p_size BETWEEN 1 AND 20 AND p.p_retailprice IS NOT NULL
+)
+SELECT DISTINCT
+    c.c_name, 
+    rs.s_name AS top_supplier,
+    hp.p_name, 
+    hp.total_cost, 
+    (cd.order_count COALESCE(0)) AS recent_orders,
+    fp.p_brand,
+    COUNT(DISTINCT od.o_orderkey) AS total_orders
+FROM CustomerRecentOrders cd
+LEFT JOIN RankedSupplier rs ON cd.c_custkey = rs.s_suppkey 
+JOIN OrderDetails od ON cd.c_custkey = od.o_orderkey
+JOIN HighValueParts hp ON od.l_partkey = hp.p_partkey
+JOIN FilteredParts fp ON hp.p_partkey = fp.p_partkey
+WHERE rs.rn = 1 
+    AND fp.price_rank <= 5
+GROUP BY c.c_name, rs.s_name, hp.p_name, hp.total_cost, cd.order_count, fp.p_brand
+HAVING SUM(od.net_price) > 1000 OR COUNT(DISTINCT od.o_orderkey) > 10
+ORDER BY recent_orders DESC, total_orders ASC NULLS LAST;

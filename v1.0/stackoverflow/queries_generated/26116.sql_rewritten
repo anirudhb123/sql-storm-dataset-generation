@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS RankByViews
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+TopPosts AS (
+    SELECT 
+        Id,
+        Title,
+        Body,
+        CreationDate,
+        ViewCount,
+        AnswerCount,
+        OwnerDisplayName
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByViews <= 5 
+),
+TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(P.ViewCount) AS TotalViewCount,
+        AVG(P.AnswerCount) AS AvgAnswers
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%' 
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        T.TagName
+),
+CombinedResults AS (
+    SELECT 
+        T.TagName,
+        TS.QuestionCount,
+        TS.TotalViewCount,
+        TS.AvgAnswers,
+        TP.Title AS TopQuestionTitle,
+        TP.ViewCount AS TopQuestionViews,
+        TP.AnswerCount AS TopQuestionAnswers,
+        TP.OwnerDisplayName AS TopQuestionOwner
+    FROM 
+        TagStatistics TS
+    LEFT JOIN 
+        TopPosts TP ON TS.TagName = SPLIT_PART(TP.Body, '<tag>', 2) 
+)
+SELECT 
+    TagName,
+    QuestionCount,
+    TotalViewCount,
+    AvgAnswers,
+    TopQuestionTitle,
+    TopQuestionViews,
+    TopQuestionAnswers,
+    TopQuestionOwner
+FROM 
+    CombinedResults
+ORDER BY 
+    TotalViewCount DESC;

@@ -1,0 +1,75 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        string_agg(DISTINCT o.o_orderstatus, ', ') AS order_statuses
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.custkey
+),
+HighSpendingCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COALESCE(o.total_orders, 0) AS total_orders, 
+        o.total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerOrders o ON c.c_custkey = o.c_custkey
+    WHERE 
+        o.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        rg.r_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY rg.r_regionkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region rg ON n.n_regionkey = rg.r_regionkey
+)
+SELECT 
+    COALESCE(c.c_name, 'No Orders') AS customer_name,
+    s.s_name AS supplier_name,
+    s.s_acctbal AS supplier_balance,
+    COALESCE(o.total_orders, 0) AS total_orders,
+    RANK() OVER (ORDER BY o.total_spent DESC) AS order_rank,
+    (SELECT COUNT(DISTINCT l.l_orderkey) 
+     FROM lineitem l 
+     WHERE l.l_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10)) AS large_part_orders,
+    CASE 
+        WHEN s.s_acctbal IS NULL THEN 'Unknown'
+        ELSE 'Known'
+    END AS balance_status
+FROM 
+    HighSpendingCustomers c
+FULL OUTER JOIN 
+    SupplierInfo s ON c.c_custkey = s.s_suppkey
+LEFT JOIN 
+    CustomerOrders o ON c.c_custkey = o.c_custkey
+WHERE 
+    s.supplier_rank <= 10 OR o.total_orders IS NULL
+ORDER BY 
+    customer_name, supplier_balance DESC;

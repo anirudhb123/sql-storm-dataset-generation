@@ -1,0 +1,76 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, 
+        ws_item_sk
+    UNION ALL
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_quantity) + C.total_quantity, 
+        SUM(ws_net_profit) + C.total_profit
+    FROM 
+        web_sales
+    JOIN 
+        SalesCTE C ON ws_sold_date_sk = C.ws_sold_date_sk AND ws_item_sk = C.ws_item_sk
+    WHERE 
+        C.total_quantity < 100
+    GROUP BY 
+        ws_sold_date_sk, 
+        ws_item_sk
+), RankSales AS (
+    SELECT 
+        ws_item_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY total_profit DESC) AS rank,
+        total_quantity,
+        total_profit
+    FROM 
+        SalesCTE
+), MaxProfit AS (
+    SELECT 
+        ws_item_sk, 
+        MAX(total_profit) AS max_profit
+    FROM 
+        RankSales 
+    GROUP BY 
+        ws_item_sk
+)
+SELECT 
+    C.c_customer_id, 
+    C.c_first_name, 
+    C.c_last_name, 
+    R.ws_item_sk, 
+    R.total_quantity, 
+    R.total_profit,
+    COALESCE(RP.max_profit, 0) AS max_profit,
+    D.d_date,
+    CASE 
+        WHEN RP.max_profit IS NULL THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END AS sales_status
+FROM 
+    customer C 
+LEFT JOIN 
+    web_sales R ON C.c_customer_sk = R.ws_bill_customer_sk
+LEFT JOIN 
+    MaxProfit RP ON R.ws_item_sk = RP.ws_item_sk
+JOIN 
+    date_dim D ON R.ws_sold_date_sk = D.d_date_sk
+WHERE 
+    C.c_birth_month = 12 
+    AND (
+        (C.c_current_cdemo_sk IN (SELECT cd_demo_sk FROM customer_demographics WHERE cd_gender = 'F')) 
+        OR 
+        (R.total_profit > 1000)
+    )
+ORDER BY 
+    C.c_last_name, 
+    R.total_profit DESC
+FETCH FIRST 100 ROWS ONLY;

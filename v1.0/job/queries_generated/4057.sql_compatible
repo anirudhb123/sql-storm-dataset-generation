@@ -1,0 +1,49 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_title,
+        AVG(mr.budget) OVER (PARTITION BY t.production_year) AS avg_budget
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        (SELECT movie_id, SUM(CASE WHEN info_type_id = 1 THEN CAST(info AS float) ELSE 0 END) AS budget
+         FROM movie_info
+         GROUP BY movie_id) mr ON t.id = mr.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+ActorCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+)
+
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    r.rank_title,
+    COALESCE(ac.actor_count, 0) AS actor_count,
+    r.avg_budget,
+    CASE 
+        WHEN r.avg_budget > 0 THEN (COALESCE(ac.actor_count, 0) / r.avg_budget) 
+        ELSE 0 
+    END AS actor_budget_ratio
+FROM 
+    RankedMovies r
+LEFT JOIN 
+    ActorCounts ac ON r.movie_id = ac.movie_id
+WHERE 
+    r.rank_title <= 5
+ORDER BY 
+    r.production_year DESC, actor_budget_ratio DESC;

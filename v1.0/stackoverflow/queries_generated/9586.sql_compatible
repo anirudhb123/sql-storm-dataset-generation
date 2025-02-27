@@ -1,0 +1,54 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, u.DisplayName
+    ORDER BY 
+        p.CreationDate DESC
+    LIMIT 100
+),
+PostDetails AS (
+    SELECT 
+        rp.*,
+        COALESCE((
+            SELECT STRING_AGG(t.TagName, ', ') 
+            FROM Tags t 
+            WHERE t.Id IN (SELECT UNNEST(string_to_array(p.Tags, ',')::text[]::int[])) 
+        ), 'No Tags') AS Tags
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.OwnerDisplayName,
+    pd.CommentCount,
+    pd.VoteCount,
+    pd.Tags
+FROM 
+    PostDetails pd
+JOIN 
+    PostHistory ph ON pd.PostId = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) 
+WHERE 
+    ph.CreationDate > CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 month'
+ORDER BY 
+    pd.Score DESC, pd.CommentCount DESC;

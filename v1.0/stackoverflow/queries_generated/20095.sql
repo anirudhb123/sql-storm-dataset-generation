@@ -1,0 +1,110 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RN,
+        COALESCE(NULLIF(p.Body, ''), 'No content provided') AS BodyText
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(u.CreationDate) AS UserCreationDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS CloseVoteCount,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(pc.CloseVoteCount, 0) AS CloseCount,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COALESCE(pc.CloseReasons, 'No close reasons') AS CloseReasons
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+            PostId,
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+            COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+        FROM Votes
+        GROUP BY PostId) v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostCloseReasons pc ON p.Id = pc.PostId
+),
+FinalReport AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        us.UserId,
+        us.Reputation,
+        us.BadgeCount,
+        ps.CloseCount,
+        ps.CloseReasons,
+        ps.UpVotes,
+        ps.DownVotes,
+        CASE
+            WHEN ps.CloseCount > 0 THEN 'Closed'
+            ELSE 'Open'
+        END AS Status,
+        DENSE_RANK() OVER (PARTITION BY us.UserId ORDER BY rp.CreationDate DESC) AS UserRank
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostStats ps ON rp.PostId = ps.PostId
+    JOIN 
+        Users us ON rp.OwnerUserId = us.Id
+    WHERE 
+        us.Reputation > 1000
+)
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.CreationDate,
+    fr.Score,
+    fr.UserId,
+    fr.Reputation,
+    fr.BadgeCount,
+    fr.CloseCount,
+    fr.CloseReasons,
+    fr.UpVotes,
+    fr.DownVotes,
+    fr.Status,
+    fr.UserRank,
+    JSONB_BUILD_OBJECT('PostId', fr.PostId, 'Title', fr.Title, 'Status', fr.Status) AS PostInfo
+FROM 
+    FinalReport fr
+WHERE 
+    fr.UserRank <= 5
+ORDER BY 
+    fr.Reputation DESC, fr.CreationDate DESC
+LIMIT 100;
+

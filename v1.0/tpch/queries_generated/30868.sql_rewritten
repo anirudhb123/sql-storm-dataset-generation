@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT sup.s_suppkey, sup.s_name, sup.s_nationkey, sh.Level + 1
+    FROM supplier sup
+    JOIN SupplierHierarchy sh ON sup.s_nationkey = sh.s_nationkey
+    WHERE sh.Level < 5
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalPrice
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATEADD(month, -6, cast('1998-10-01' as date))
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+MaxOrder AS (
+    SELECT o.o_custkey, MAX(o.TotalPrice) AS MaxTotalPrice
+    FROM RecentOrders o
+    GROUP BY o.o_custkey
+),
+CustomerRanked AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS Rnk
+    FROM customer c
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT sh.s_suppkey) AS NumberOfSuppliers,
+       AVG(c.c_acctbal) AS AvgAccountBalance,
+       COALESCE(SUM(o.MaxTotalPrice), 0) AS TotalMaxOrderPrice,
+       STRING_AGG(DISTINCT c.c_name, ', ') FILTER (WHERE c.Rnk <= 5) AS TopCustomers
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN MaxOrder o ON o.o_custkey = c.c_custkey
+LEFT JOIN CustomerRanked c ON s.s_nationkey = c.c_nationkey
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT sh.s_suppkey) > 1
+ORDER BY r.r_name;

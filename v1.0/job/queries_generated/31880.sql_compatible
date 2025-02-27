@@ -1,0 +1,85 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level 
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year = 2020
+
+    UNION ALL 
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        mh.level + 1 
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5  
+),
+
+MovieCast AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(CASE WHEN r.role IS NOT NULL THEN 1 ELSE 0 END) AS avg_roles
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+),
+
+PopularMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mc.total_cast,
+        mc.avg_roles,
+        ROW_NUMBER() OVER (PARTITION BY mc.total_cast ORDER BY mc.avg_roles DESC) AS popular_rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        MovieCast mc ON mh.movie_id = mc.movie_id
+),
+
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(CAST(mk.keyword_id AS text), ', ') AS keyword_ids
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    pm.title,
+    pm.total_cast,
+    pm.avg_roles,
+    COALESCE(mk.keyword_ids, 'No keywords') AS keywords,
+    k.kind AS movie_type,
+    COALESCE(cn.name, 'Unknown Company') AS production_company
+FROM 
+    PopularMovies pm
+LEFT JOIN 
+    movie_info mi ON pm.movie_id = mi.movie_id 
+                  AND mi.info_type_id = (SELECT id FROM info_type WHERE info='production company' LIMIT 1)
+LEFT JOIN 
+    company_name cn ON mi.info = cn.name
+LEFT JOIN 
+    kind_type k ON pm.movie_id IN (SELECT mt.id FROM aka_title mt WHERE mt.kind_id = k.id)
+LEFT JOIN 
+    MovieKeywords mk ON pm.movie_id = mk.movie_id
+WHERE 
+    pm.popular_rank <= 5
+ORDER BY 
+    pm.total_cast DESC, pm.avg_roles DESC;

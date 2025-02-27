@@ -1,0 +1,54 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s1.s_suppkey, s1.s_name, s1.s_acctbal, 1 AS level
+    FROM supplier s1
+    WHERE s1.s_acctbal > 1000
+    UNION ALL
+    SELECT s2.s_suppkey, s2.s_name, s2.s_acctbal, sh.level + 1
+    FROM supplier s2
+    JOIN SupplierHierarchy sh ON s2.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 5
+),
+CustomerSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, ps.ps_availqty
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderstatus, 
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+),
+CustomerSupplierRelations AS (
+    SELECT c.c_name, s.s_name, s.s_acctbal
+    FROM customer c
+    JOIN supplier s ON c.c_nationkey = s.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+FinalOutput AS (
+    SELECT ch.c_custkey, ch.c_name, ps.p_name, ps.total_supply_cost,
+           CASE 
+               WHEN ch.total_spent IS NULL THEN 'No Orders'
+               ELSE 'Has Orders'
+           END AS order_status,
+           ROW_NUMBER() OVER (PARTITION BY ch.c_name ORDER BY ps.total_supply_cost DESC) AS supply_rank
+    FROM CustomerSummary ch
+    CROSS JOIN PartSupplierDetails ps
+    WHERE ch.order_count > 0
+)
+SELECT FO.c_custkey, FO.c_name, FO.p_name, FO.total_supply_cost, FO.order_status, FO.supply_rank
+FROM FinalOutput FO
+LEFT JOIN SupplierHierarchy SH ON FO.p_name LIKE '%' || SH.s_name || '%'
+WHERE FO.supply_rank = 1
+UNION ALL
+SELECT DISTINCT FO.c_custkey, FO.c_name, NULL AS p_name, NULL AS total_supply_cost, 'UNKNOWN' AS order_status, NULL AS supply_rank
+FROM FinalOutput FO
+WHERE FO.supply_rank IS NULL
+ORDER BY c_custkey, p_name;

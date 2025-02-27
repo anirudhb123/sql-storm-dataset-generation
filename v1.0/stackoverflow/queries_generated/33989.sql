@@ -1,0 +1,81 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(voteCount) AS AverageVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId, COUNT(*) AS voteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '30 days'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS TotalBadges,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS CloseActions
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Post Closed
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    COALESCE(p.TotalPosts, 0) AS TotalPosts,
+    COALESCE(p.TotalQuestions, 0) AS TotalQuestions,
+    COALESCE(p.TotalAnswers, 0) AS TotalAnswers,
+    COALESCE(b.TotalBadges, 0) AS TotalBadges,
+    COALESCE(b.BadgeNames, 'None') AS BadgeNames,
+    COALESCE(cp.CloseActions, 0) AS TotalCloseActions,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate
+FROM 
+    UserPostStats p
+LEFT JOIN 
+    UserBadges b ON p.UserId = b.UserId
+LEFT JOIN 
+    ClosedPosts cp ON p.UserId = cp.PostId
+LEFT JOIN 
+    RecentPosts rp ON p.UserId = rp.OwnerUserId AND rp.rn = 1
+WHERE 
+    TotalPosts > 0 OR TotalBadges > 0
+ORDER BY 
+    p.AverageVotes DESC, TotalPosts DESC;

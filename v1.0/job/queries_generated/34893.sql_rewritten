@@ -1,0 +1,69 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m2.id AS movie_id,
+        m2.title,
+        m2.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN aka_title m2 ON ml.linked_movie_id = m2.id
+    WHERE 
+        mh.level < 5  
+)
+
+SELECT 
+    a.id AS aka_id,
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(DISTINCT mc.company_id) AS num_producing_companies,
+    AVG(mi.info_length) AS avg_info_length,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS actor_rank,
+    CASE 
+        WHEN t.production_year < 2000 THEN 'Classic'
+        WHEN t.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era,
+    COALESCE(NULLIF(a.name, ''), 'Unknown') AS final_name
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    (SELECT 
+         movie_id,
+         LENGTH(info) AS info_length
+     FROM 
+         movie_info
+     WHERE 
+         info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')) AS mi
+ON 
+    t.id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    t.production_year IS NOT NULL
+GROUP BY 
+    a.id, a.name, t.title, t.production_year
+ORDER BY 
+    actor_rank, t.production_year DESC;

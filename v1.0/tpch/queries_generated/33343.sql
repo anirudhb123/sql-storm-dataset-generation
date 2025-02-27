@@ -1,0 +1,46 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 0 AS level
+    FROM nation n
+    WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_nationkey = nh.n_nationkey
+),
+SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, l.l_quantity, l.l_extendedprice, l.l_discount,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS line_num
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01' AND l.l_returnflag = 'N'
+),
+CustomerSummary AS (
+    SELECT c.c_custkey, c.c_name, 
+           SUM(d.o_totalprice) AS total_spent,
+           AVG(d.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN OrderDetails d ON c.c_custkey = d.o_orderkey
+    GROUP BY c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT cs.c_custkey, cs.c_name, cs.total_spent, 
+           RANK() OVER (ORDER BY cs.total_spent DESC) AS rank
+    FROM CustomerSummary cs
+)
+SELECT n.n_name, sp.p_name, SUM(sp.ps_availqty) AS total_available_qty,
+       COALESCE(SUM(od.l_quantity), 0) AS total_quantity_ordered
+FROM NationHierarchy n
+LEFT JOIN SupplierParts sp ON n.n_nationkey = sp.s_suppkey
+LEFT JOIN OrderDetails od ON sp.s_suppkey = od.o_orderkey
+WHERE n.level < 3
+GROUP BY n.n_name, sp.p_name
+HAVING total_available_qty > 100
+ORDER BY n.n_name, total_quantity_ordered DESC
+LIMIT 10;

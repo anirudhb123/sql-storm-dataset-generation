@@ -1,0 +1,61 @@
+WITH ranked_parts AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           RANK() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS price_rank,
+           p.p_retailprice,
+           COALESCE(NULLIF(p.p_comment, ''), 'No comment') AS safe_comment
+    FROM part p
+),
+top_suppliers AS (
+    SELECT s.s_suppkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 
+           (SELECT AVG(ps_supplycost) 
+            FROM partsupp)
+),
+orders_with_line_items AS (
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_adjusted,
+           COUNT(l.l_orderkey) AS line_item_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATEADD(DAY, -30, cast('1998-10-01' as date))
+    GROUP BY o.o_orderkey
+),
+customer_summary AS (
+    SELECT c.c_custkey,
+           SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS finished_orders,
+           COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           AVG(c.c_acctbal) AS avg_acctbal
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+
+SELECT p.p_name,
+       p.p_retailprice,
+       ps.s_suppkey,
+       ss.total_supply_cost,
+       c.c_custkey,
+       cs.finished_orders,
+       cs.total_orders,
+       ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice) AS mfgr_rank,
+       (SELECT COUNT(*) FROM lineitem l WHERE l.l_partkey = p.p_partkey AND l.l_returnflag = 'R') AS returns_count
+FROM ranked_parts p
+JOIN top_suppliers ps ON p.p_partkey IN (
+      SELECT ps_partkey 
+      FROM partsupp 
+      WHERE ps_supplycost < (
+          SELECT AVG(ps_supplycost) 
+          FROM partsupp
+      )
+)
+JOIN customer_summary cs ON cs.total_orders > 0
+LEFT JOIN nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = cs.c_custkey)
+WHERE p.price_rank <= 5
+  AND ps.total_supply_cost IS NOT NULL
+  AND (cs.avg_acctbal > 0 OR cs.finished_orders IS NULL)
+ORDER BY p.p_retailprice DESC, total_supply_cost ASC;

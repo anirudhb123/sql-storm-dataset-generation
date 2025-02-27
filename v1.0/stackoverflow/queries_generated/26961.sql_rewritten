@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        u.DisplayName AS Author,
+        COUNT(a.Id) AS AnswerCount,
+        COALESCE(ph.LastEditDate, p.CreationDate) AS LastEditDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY COALESCE(ph.CreationDate, p.CreationDate) DESC) AS EditRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5) 
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.Score, p.ViewCount, p.Tags, u.DisplayName, ph.LastEditDate
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%') 
+    GROUP BY 
+        t.TagName
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    rp.Title AS PostTitle,
+    rp.CreationDate AS PostDate,
+    rp.Score AS PostScore,
+    rp.ViewCount AS PostViews,
+    rp.AnswerCount,
+    rp.Author AS PostAuthor,
+    rp.LastEditDate,
+    ts.PostCount AS TagPostCount,
+    ts.TotalViews AS TagTotalViews,
+    ts.TotalScore AS TagTotalScore,
+    ub.BadgeCount AS AuthorBadgeCount,
+    ub.BadgeNames AS AuthorBadgeNames
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagStats ts ON rp.Tags LIKE CONCAT('%<', ts.TagName, '>%') 
+LEFT JOIN 
+    UserBadges ub ON rp.Author = ub.UserId
+WHERE 
+    rp.EditRank = 1 
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 50;

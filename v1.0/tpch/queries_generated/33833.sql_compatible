@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 5
+),
+OrderTotals AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+),
+NationSummary AS (
+    SELECT n.n_name, COUNT(DISTINCT c.c_custkey) AS cust_count, SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+),
+RankedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_size, p.p_retailprice,
+           RANK() OVER (PARTITION BY p.p_size ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL
+)
+SELECT ns.n_name, ns.cust_count, ns.total_acctbal, 
+       COUNT(DISTINCT ot.o_orderkey) AS orders_count,
+       AVG(rp.p_retailprice) AS avg_price,
+       MAX(rp.p_retailprice) AS max_price,
+       MIN(rp.p_retailprice) AS min_price
+FROM NationSummary ns
+JOIN RankedParts rp ON ns.total_acctbal > 10000
+LEFT JOIN OrderTotals ot ON ns.cust_count > 10
+GROUP BY ns.n_name, ns.cust_count, ns.total_acctbal
+HAVING AVG(rp.p_retailprice) > 50
+ORDER BY ns.total_acctbal DESC, ns.n_name;

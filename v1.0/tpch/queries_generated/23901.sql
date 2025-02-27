@@ -1,0 +1,60 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate,
+           o.o_totalprice, 
+           o.o_customerkey, 
+           1 AS order_level
+    FROM orders o 
+    WHERE o.o_orderstatus = 'O' AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+    
+    UNION ALL
+
+    SELECT oh.o_orderkey, 
+           oh.o_orderdate,
+           oh.o_totalprice, 
+           oh.o_customerkey,
+           oh.order_level + 1
+    FROM OrderHierarchy oh
+    JOIN orders o ON o.o_orderkey = oh.o_orderkey + oh.order_level
+    WHERE oh.order_level < 5
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, 
+           p.p_name,
+           ps.ps_supplycost, 
+           ps.ps_availqty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COALESCE(SUM(o.o_totalprice), 0) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY c.c_custkey
+)
+SELECT ch.o_orderkey,
+       ch.o_orderdate,
+       CASE
+           WHEN ch.o_totalprice > 1000 THEN 'High Value'
+           ELSE 'Standard Value'
+       END AS order_value_category,
+       ps.p_name,
+       CASE 
+           WHEN ps.ps_availqty < 50 THEN 'Low Stock'
+           ELSE 'Adequate Stock'
+       END AS stock_status,
+       cu.c_name,
+       CASE 
+           WHEN cu.total_spent IS NULL THEN 'Never Purchased'
+           WHEN cu.total_spent < 500 THEN 'New Customer'
+           ELSE 'Loyal Customer'
+       END AS customer_status
+FROM OrderHierarchy ch
+LEFT JOIN PartSupplierDetails ps ON ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = ch.o_orderkey)
+LEFT JOIN CustomerOrders cu ON cu.c_custkey = ch.o_customerkey
+WHERE ch.o_orderdate BETWEEN DATEADD(month, -12, CURRENT_DATE) AND CURRENT_DATE
+ORDER BY ch.o_orderdate DESC, order_value_category DESC, cu.total_spent DESC;

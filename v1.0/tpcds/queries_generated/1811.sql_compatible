@@ -1,0 +1,83 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year >= 1960
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+HighValueCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_sales,
+        cs.order_count
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.total_sales > 1000
+),
+CustomerAddress AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer_address ca
+    WHERE 
+        ca.ca_state IN ('CA', 'NY')
+),
+FinalSales AS (
+    SELECT 
+        hvc.c_customer_sk,
+        hvc.c_first_name,
+        hvc.c_last_name,
+        hvc.total_sales,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY hvc.c_customer_sk ORDER BY hvc.total_sales DESC) AS address_rank
+    FROM 
+        HighValueCustomers hvc
+    LEFT JOIN 
+        CustomerAddress ca ON hvc.c_customer_sk = ca.ca_address_sk
+)
+SELECT 
+    f.c_first_name,
+    f.c_last_name,
+    f.total_sales,
+    f.ca_city,
+    f.ca_state
+FROM 
+    FinalSales f
+WHERE 
+    f.address_rank = 1
+ORDER BY 
+    f.total_sales DESC
+LIMIT 50
+
+UNION ALL
+
+SELECT 
+    'N/A' AS c_first_name,
+    'N/A' AS c_last_name,
+    SUM(ss.ss_net_profit) AS total_sales,
+    NULL AS ca_city,
+    NULL AS ca_state
+FROM 
+    store_sales ss
+WHERE 
+    ss.ss_sales_price < 50
+GROUP BY 
+    ss.ss_store_sk;

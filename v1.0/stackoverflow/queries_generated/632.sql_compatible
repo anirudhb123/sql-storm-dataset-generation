@@ -1,0 +1,35 @@
+
+WITH RankedPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 YEAR'
+),
+UserScores AS (
+    SELECT u.Id AS UserId, 
+           COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+           COUNT(DISTINCT p.Id) AS TotalPosts,
+           SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id
+),
+FilteredPosts AS (
+    SELECT rp.Id, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, us.TotalBounty, us.TotalPosts, us.TotalScore
+    FROM RankedPosts rp
+    JOIN UserScores us ON us.UserId = rp.OwnerUserId
+    WHERE rp.PostRank <= 5 AND (us.TotalScore > 100 OR us.TotalPosts > 10)
+),
+PostComments AS (
+    SELECT c.PostId, COUNT(c.Id) AS CommentCount
+    FROM Comments c
+    GROUP BY c.PostId
+)
+SELECT fp.Title, fp.CreationDate, fp.Score, fp.ViewCount, fp.TotalBounty, 
+       COALESCE(pc.CommentCount, 0) AS CommentCount,
+       CASE WHEN fp.TotalScore IS NULL THEN 'N/A' ELSE fp.TotalScore END AS UserScoreStatus
+FROM FilteredPosts fp
+LEFT JOIN PostComments pc ON pc.PostId = fp.Id
+ORDER BY fp.Score DESC, fp.ViewCount ASC
+LIMIT 50;

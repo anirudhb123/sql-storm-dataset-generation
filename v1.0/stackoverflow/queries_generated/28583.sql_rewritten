@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        U.DisplayName AS OwnerName,
+        COUNT(CASE WHEN c.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        STRING_AGG(DISTINCT tg.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM
+        Posts p
+    LEFT JOIN Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            UNNEST(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><')) AS TagName
+        FROM Posts
+        WHERE PostTypeId = 1
+    ) tg ON p.Id = tg.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        p.Id, U.DisplayName
+),
+ProminentUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN Posts p ON U.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE 
+        U.Reputation > 1000 
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5 
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerName,
+        rp.Tags,
+        pu.DisplayName AS TopUserName,
+        pu.Reputation AS UserReputation
+    FROM 
+        RankedPosts rp
+    JOIN ProminentUsers pu ON rp.OwnerName = pu.DisplayName
+    WHERE 
+        rp.PostRank <= 5 
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.ViewCount,
+    tp.Score,
+    tp.TopUserName,
+    tp.UserReputation,
+    tp.Tags
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.UserReputation DESC, tp.Score DESC;

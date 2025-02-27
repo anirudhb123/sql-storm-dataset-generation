@@ -1,0 +1,32 @@
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    U.DisplayName AS OwnerDisplayName,
+    C.CommentCount,
+    A.AnswerCount,
+    COUNT(V.Id) AS VoteCount,
+    p.LastEditDate
+FROM 
+    Posts p
+LEFT JOIN 
+    Users U ON p.OwnerUserId = U.Id
+LEFT JOIN 
+    Comments C ON p.Id = C.PostId
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS AnswerCount 
+     FROM Posts 
+     WHERE PostTypeId = 2 
+     GROUP BY PostId) A ON p.Id = A.PostId
+LEFT JOIN 
+    Votes V ON p.Id = V.PostId
+WHERE 
+    p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, 
+    U.DisplayName, C.CommentCount, A.AnswerCount, p.LastEditDate
+ORDER BY 
+    p.CreationDate DESC;

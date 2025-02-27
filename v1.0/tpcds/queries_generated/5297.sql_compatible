@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_sold_date_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_order_number, ws.ws_sold_date_sk
+),
+TopSales AS (
+    SELECT 
+        rs.ws_sold_date_sk,
+        rs.ws_order_number,
+        rs.total_quantity,
+        rs.total_profit
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.profit_rank <= 10
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesWithCustomer AS (
+    SELECT 
+        ts.ws_order_number,
+        ts.total_quantity,
+        ts.total_profit,
+        cd.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        TopSales ts
+    JOIN 
+        web_sales ws ON ts.ws_order_number = ws.ws_order_number
+    JOIN 
+        CustomerData cd ON ws.ws_bill_customer_sk = cd.c_customer_id
+)
+SELECT 
+    swc.c_customer_id,
+    swc.cd_gender,
+    swc.cd_marital_status,
+    COUNT(swc.ws_order_number) AS number_of_orders,
+    SUM(swc.total_quantity) AS total_quantity,
+    SUM(swc.total_profit) AS total_profit
+FROM 
+    SalesWithCustomer swc
+GROUP BY 
+    swc.c_customer_id, swc.cd_gender, swc.cd_marital_status
+ORDER BY 
+    total_profit DESC
+FETCH FIRST 5 ROWS ONLY;

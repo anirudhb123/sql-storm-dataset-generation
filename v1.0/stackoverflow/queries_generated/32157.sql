@@ -1,0 +1,87 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        CreationDate,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT 
+        Id, 
+        Reputation, 
+        CASE 
+            WHEN Reputation < 100 THEN 'Newbie'
+            WHEN Reputation BETWEEN 100 AND 1000 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS UserLevel
+    FROM 
+        Users
+),
+PostVoteStats AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        ph.CreationDate AS ClosedDate,
+        r.Level,
+        u.UserLevel,
+        pvs.UpVotes,
+        pvs.DownVotes,
+        pvs.TotalVotes
+    FROM 
+        Posts p 
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 -- where type is represent closure
+    JOIN 
+        RecursivePostHierarchy r ON p.Id = r.Id
+    JOIN 
+        UserReputation u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostVoteStats pvs ON p.Id = pvs.PostId
+    WHERE 
+        ph.CreationDate BETWEEN NOW() - INTERVAL '1 year' AND NOW()
+)
+
+SELECT 
+    cp.Id AS PostId,
+    cp.Title,
+    cp.ClosedDate,
+    cp.Level,
+    cp.UserLevel,
+    COALESCE(cp.UpVotes, 0) AS UpVotes,
+    COALESCE(cp.DownVotes, 0) AS DownVotes,
+    COALESCE(cp.TotalVotes, 0) AS TotalVotes
+FROM 
+    ClosedPosts cp
+ORDER BY 
+    cp.ClosedDate DESC,
+    cp.UpVotes DESC;

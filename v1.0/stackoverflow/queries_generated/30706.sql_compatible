@@ -1,0 +1,70 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        0 AS Level,
+        CAST(p.Title AS CHAR(300)) AS Path 
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        a.AcceptedAnswerId,
+        rp.Level + 1,
+        CONCAT(rp.Path, ' -> ', a.Title) AS Path 
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy rp ON a.ParentId = rp.PostId
+),
+UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Path,
+    u.DisplayName AS OwnerName,
+    u.Reputation AS OwnerReputation,
+    COALESCE(us.Upvotes, 0) AS UserUpvotes,
+    COALESCE(us.Downvotes, 0) AS UserDownvotes,
+    us.PostCount AS UsersPosts,
+    COUNT(c.Id) AS CommentCount,
+    AVG(p.ViewCount) OVER (PARTITION BY rp.OwnerUserId) AS AverageViews,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RecursivePostHierarchy rp
+INNER JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON c.PostId = rp.PostId
+LEFT JOIN 
+    Tags t ON t.WikiPostId = rp.PostId
+LEFT JOIN 
+    UserVoteStats us ON us.UserId = rp.OwnerUserId
+GROUP BY 
+    rp.PostId, rp.Title, rp.Path, u.DisplayName, u.Reputation, us.Upvotes, us.Downvotes, us.PostCount
+ORDER BY 
+    rp.PostId DESC;

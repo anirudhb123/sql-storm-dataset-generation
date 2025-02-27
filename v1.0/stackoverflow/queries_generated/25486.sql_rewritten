@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(vote_counts.UpVotes, 0) AS UpVotes,
+        COALESCE(vote_counts.DownVotes, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) AS vote_counts ON p.Id = vote_counts.PostId
+    WHERE 
+        p.Title IS NOT NULL AND
+        p.Body NOT LIKE '%[deleted]%' 
+),
+PostTags AS (
+    SELECT 
+        PostId,
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><')))::TEXT) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+),
+PopularTags AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        PostTags
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(*) > 5  
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Body,
+    r.CreationDate,
+    r.ViewCount,
+    r.UpVotes,
+    r.DownVotes,
+    pt.Tag
+FROM 
+    RankedPosts r
+JOIN 
+    PopularTags pt ON EXISTS (
+        SELECT 1 
+        FROM PostTags pt2 
+        WHERE pt2.PostId = r.PostId AND pt2.Tag = pt.Tag
+    )
+WHERE 
+    r.Rank <= 10  
+ORDER BY 
+    r.PostTypeId, r.CreationDate DESC;

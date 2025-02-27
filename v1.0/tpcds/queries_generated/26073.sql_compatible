@@ -1,0 +1,48 @@
+
+WITH AddressInfo AS (
+    SELECT ca_address_id, 
+           CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+           ca_city,
+           ca_state,
+           ca_zip,
+           ca_country
+    FROM customer_address
+),
+CustomerInfo AS (
+    SELECT c_customer_id,
+           CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+           cd_gender,
+           cd_marital_status
+    FROM customer 
+    JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+),
+SalesInfo AS (
+    SELECT ws_order_number,
+           ws_item_sk,
+           SUM(ws_quantity) AS total_quantity,
+           SUM(ws_net_paid) AS total_revenue
+    FROM web_sales 
+    GROUP BY ws_order_number, ws_item_sk
+),
+RankedSales AS (
+    SELECT ws_order_number,
+           ws_item_sk,
+           total_quantity,
+           total_revenue,
+           RANK() OVER (PARTITION BY ws_item_sk ORDER BY total_revenue DESC) AS revenue_rank
+    FROM SalesInfo
+),
+FinalReport AS (
+    SELECT c.c_customer_id,
+           c.full_name,
+           a.full_address,
+           s.total_quantity,
+           s.total_revenue
+    FROM CustomerInfo c
+    JOIN AddressInfo a ON c.c_customer_id = CAST(c.c_current_addr_sk AS VARCHAR) 
+    JOIN RankedSales s ON s.ws_order_number = c.c_customer_id
+    WHERE s.revenue_rank <= 5
+)
+SELECT *
+FROM FinalReport
+ORDER BY total_revenue DESC;

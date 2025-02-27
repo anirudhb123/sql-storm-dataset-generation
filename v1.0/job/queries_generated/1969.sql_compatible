@@ -1,0 +1,74 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY k.keyword) AS keyword_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+cast_and_roles AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        rt.role,
+        COUNT(ci.person_id) AS total_actors
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id, a.name, rt.role
+),
+company_and_movies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(mc.company_id) AS total_companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    STRING_AGG(DISTINCT keyword, ', ') AS keywords,
+    car.actor_name,
+    car.role,
+    cmd.company_name,
+    cmd.company_type,
+    cmd.total_companies,
+    NULLIF(car.total_actors, 0) AS number_of_actors
+FROM 
+    movie_details md
+FULL OUTER JOIN 
+    cast_and_roles car ON md.movie_id = car.movie_id
+FULL OUTER JOIN 
+    company_and_movies cmd ON md.movie_id = cmd.movie_id
+WHERE 
+    md.production_year BETWEEN 2000 AND 2023
+    OR car.role IS NOT NULL
+    OR cmd.company_type IS NOT NULL
+GROUP BY 
+    md.movie_id, md.title, md.production_year, 
+    car.actor_name, car.role, 
+    cmd.company_name, cmd.company_type, cmd.total_companies
+ORDER BY 
+    md.production_year DESC, md.title ASC;

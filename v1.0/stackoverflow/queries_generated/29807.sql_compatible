@@ -1,0 +1,64 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC, p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+AggregatedTags AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(p.Tags, '>')) AS Tag,
+        COUNT(*) AS QuestionCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        UNNEST(STRING_TO_ARRAY(p.Tags, '>'))
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        QuestionCount,
+        TotalScore,
+        AvgViewCount,
+        ROW_NUMBER() OVER (ORDER BY QuestionCount DESC) AS TagRank
+    FROM 
+        AggregatedTags
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    tt.Tag,
+    tt.QuestionCount,
+    tt.TotalScore,
+    tt.AvgViewCount,
+    CASE
+        WHEN rp.TagRank = 1 THEN 'Top Post in Tag'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    RankedPosts rp
+JOIN 
+    TopTags tt ON tt.Tag = ANY(STRING_TO_ARRAY(rp.Tags, '>'))
+WHERE 
+    rp.TagRank <= 5 
+ORDER BY 
+    tt.QuestionCount DESC, rp.Score DESC;

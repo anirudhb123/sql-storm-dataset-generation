@@ -1,0 +1,60 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_regionkey = (SELECT r_regionkey FROM region WHERE r_name = 'ASIA')
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+),
+high_value_orders AS (
+    SELECT c.custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer_orders o
+    GROUP BY o.custkey
+    HAVING SUM(o.o_totalprice) > (
+        SELECT AVG(o_totalprice)
+        FROM orders
+    )
+),
+part_supplier_info AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_brand,
+           SUM(ps.ps_availqty) AS total_avail,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_brand
+),
+ranking AS (
+    SELECT p.p_name,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY SUM(l.l_extendedprice) DESC) AS rank_within_brand
+    FROM lineitem l
+    JOIN part p ON l.l_partkey = p.p_partkey
+    GROUP BY p.p_name, p.p_brand
+    HAVING SUM(l.l_extendedprice) > 1000.00
+)
+
+SELECT n.n_name, c.c_name, COUNT(DISTINCT o.o_orderkey) AS order_count,
+       AVG(oi.total_spent) AS avg_spending, 
+       pi.p_name, pi.total_avail, pi.total_supply_cost
+FROM nation_hierarchy n
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN customer_orders o ON c.c_custkey = o.c_custkey
+LEFT JOIN high_value_orders oi ON oi.custkey = c.c_custkey
+LEFT JOIN part_supplier_info pi ON pi.ps_partkey IN (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_availqty > (
+        SELECT AVG(ps_availqty) FROM partsupp
+    )
+)
+WHERE c.c_acctbal IS NOT NULL
+GROUP BY n.n_name, c.c_name, pi.p_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY n.n_name, avg_spending DESC;

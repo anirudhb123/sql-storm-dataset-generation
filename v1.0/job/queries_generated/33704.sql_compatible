@@ -1,0 +1,87 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'feature')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    INNER JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    INNER JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5 
+),
+
+actor_details AS (
+    SELECT 
+        ak.name AS actor_name,
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(ci.id) OVER (PARTITION BY ak.id ORDER BY mt.production_year) AS total_movies,
+        ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY mt.production_year DESC) AS rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.id
+    WHERE 
+        mt.production_year IS NOT NULL 
+        AND ak.name IS NOT NULL
+),
+
+movie_keywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mt.id
+)
+
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    ad.actor_name,
+    ad.total_movies,
+    ad.rank,
+    mk.keywords,
+    CASE 
+        WHEN mh.level > 1 THEN 'Sequels/Related'
+        ELSE 'Stand-alone'
+    END AS movie_relationship,
+    CASE 
+        WHEN mk.keywords IS NOT NULL THEN 'Keywords found'
+        ELSE 'No keywords'
+    END AS keyword_status
+FROM 
+    movie_hierarchy mh
+JOIN 
+    actor_details ad ON mh.movie_id = ad.movie_title
+LEFT JOIN 
+    movie_keywords mk ON mh.movie_id = mk.movie_id
+WHERE 
+    ad.total_movies > 3
+ORDER BY 
+    mh.production_year DESC, 
+    ad.total_movies DESC;

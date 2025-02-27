@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        u.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, u.Reputation
+),
+AnswerScore AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(a.Score), 0) AS TotalAnswerScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+HighRepUsers AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation
+    FROM 
+        Users
+    WHERE 
+        Reputation > 1000
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.OwnerReputation,
+    rp.RankScore,
+    COALESCE(as.TotalAnswerScore, 0) AS AnswerScore,
+    hu.DisplayName AS HighRepOwner,
+    hu.Reputation AS HighRepOwnerReputation
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    AnswerScore as ON rp.PostId = as.PostId
+LEFT JOIN 
+    HighRepUsers hu ON hu.Id = (SELECT TOP 1 OwnerUserId FROM Posts WHERE Id = rp.PostId)
+WHERE 
+    rp.RankScore <= 5 
+    AND rp.ViewCount > 100
+ORDER BY 
+    rp.Score DESC;

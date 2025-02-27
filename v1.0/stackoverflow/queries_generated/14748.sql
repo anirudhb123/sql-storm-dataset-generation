@@ -1,0 +1,22 @@
+-- Query to benchmark performance: Retrieve the 10 most recent questions along with their related data
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    P.CreationDate AS QuestionDate,
+    U.DisplayName AS OwnerName,
+    P.ViewCount,
+    P.AnswerCount,
+    P.CommentCount,
+    P.Score,
+    T.TagName
+FROM 
+    Posts P
+JOIN 
+    Users U ON P.OwnerUserId = U.Id
+JOIN 
+    UNNEST(string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><')) AS T(TagName)
+WHERE 
+    P.PostTypeId = 1 -- Only Questions
+ORDER BY 
+    P.CreationDate DESC
+LIMIT 10;

@@ -1,0 +1,73 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS original_title,
+        COALESCE(SUBSTRING(mt.title FROM 1 FOR 15), 'Unknown') AS short_title,
+        CASE 
+            WHEN mt.production_year IS NOT NULL THEN mt.production_year 
+            ELSE 1900 
+        END AS production_year,
+        0 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id, 
+        mt.title,
+        COALESCE(SUBSTRING(mt.title FROM 1 FOR 15), 'Unknown'),
+        CASE 
+            WHEN mt.production_year IS NOT NULL THEN mt.production_year 
+            ELSE 1900 
+        END,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title AS mt ON ml.linked_movie_id = mt.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.original_title,
+    STRING_AGG(kw.keyword, ', ') AS keywords,
+    COUNT(DISTINCT mc.company_id) AS total_companies,
+    AVG(CASE 
+            WHEN mt.production_year >= 2000 THEN 1 
+            ELSE NULL 
+        END) AS avg_movies_after_2000,
+    MAX(PERFORM 'SELECT MAX(f.watched_count) FROM (SELECT COUNT(*) AS watched_count FROM complete_cast WHERE movie_id = mt.movie_id GROUP BY subject_id) f') AS max_watched_count
+FROM 
+    aka_name AS ak
+JOIN 
+    cast_info AS ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title AS mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword AS mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    keyword AS kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_companies AS mc ON mt.id = mc.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND (mt.production_year IS NOT NULL OR mt.production_year IS NULL)
+    AND ak.id IN (
+        SELECT DISTINCT person_id 
+        FROM person_info 
+        WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'birth date') 
+        AND LENGTH(info) > 0
+    )
+GROUP BY 
+    ak.name, mt.original_title
+HAVING 
+    COUNT(DISTINCT ci.role_id) > 2
+ORDER BY 
+    total_companies DESC, 
+    avg_movies_after_2000 ASC
+LIMIT 20;

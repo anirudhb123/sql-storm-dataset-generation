@@ -1,0 +1,59 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+ItemSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+SalesWithCustomerInfo AS (
+    SELECT 
+        ci.full_name,
+        ci.ca_city,
+        ci.ca_state,
+        ci.ca_country,
+        is.total_quantity,
+        is.total_sales
+    FROM 
+        CustomerInfo ci
+    JOIN 
+        web_sales ws ON ci.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        ItemSales is ON ws.ws_item_sk = is.ws_item_sk
+)
+SELECT 
+    ci.full_name,
+    ci.ca_city,
+    ci.ca_state,
+    ci.ca_country,
+    is.total_quantity,
+    is.total_sales,
+    CASE
+        WHEN is.total_sales BETWEEN 0 AND 100 THEN 'Low'
+        WHEN is.total_sales BETWEEN 101 AND 500 THEN 'Medium'
+        ELSE 'High'
+    END AS sales_category
+FROM 
+    SalesWithCustomerInfo ci
+ORDER BY 
+    is.total_sales DESC;

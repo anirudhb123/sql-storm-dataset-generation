@@ -1,0 +1,76 @@
+
+WITH RECURSIVE RecursiveMovieCTE AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        m.company_id,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS cast_order,
+        1 AS level
+    FROM 
+        title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    JOIN 
+        movie_companies m ON t.id = m.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        m.company_id,
+        c.nr_order,
+        r.level + 1
+    FROM 
+        RecursiveMovieCTE r
+    JOIN 
+        movie_link ml ON r.title_id = ml.movie_id
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+    JOIN 
+        movie_companies m ON t.id = m.movie_id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+)
+SELECT 
+    t.title AS Movie_Title,
+    t.production_year AS Production_Year,
+    COUNT(DISTINCT c.person_id) AS Number_of_Actors,
+    STRING_AGG(DISTINCT ak.name, ', ') AS Actors,
+    STRING_AGG(DISTINCT co.name, ', ') AS Companies,
+    AVG(t2.production_year) AS Avg_Linked_Production_Year,
+    MIN(t.production_year) OVER (PARTITION BY c.role_id) AS Min_Production_Year_by_Role
+FROM 
+    RecursiveMovieCTE rm
+JOIN 
+    aka_title at ON rm.title_id = at.movie_id
+JOIN 
+    cast_info c ON rm.title_id = c.movie_id
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies m ON rm.title_id = m.movie_id
+LEFT JOIN 
+    company_name co ON m.company_id = co.id
+LEFT JOIN 
+    title t2 ON rm.title_id = t2.id
+LEFT JOIN 
+    title t ON rm.title_id = t.id
+WHERE 
+    (t2.production_year IS NOT NULL OR t2.production_year IS NULL) 
+    AND rm.level <= 2
+GROUP BY 
+    t.title, t.production_year
+HAVING 
+    COUNT(DISTINCT ak.name) > 0
+ORDER BY 
+    Number_of_Actors DESC,
+    Movie_Title;

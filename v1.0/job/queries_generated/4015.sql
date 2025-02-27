@@ -1,0 +1,56 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS cast_count,
+        MAX(ci.kind) AS company_type
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type ci ON mc.company_type_id = ci.id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+movies_with_info AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.year_rank,
+        rm.cast_count,
+        COALESCE(m_info.info, 'No additional info') AS additional_info
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_info m_info ON rm.movie_id = m_info.movie_id AND m_info.info_type_id = (SELECT id FROM info_type WHERE info = 'genre' LIMIT 1)
+)
+SELECT 
+    mw.movie_id,
+    mw.title,
+    mw.production_year,
+    mw.year_rank,
+    mw.cast_count,
+    mw.additional_info,
+    ARRAY_AGG(DISTINCT k.keyword) AS keywords
+FROM 
+    movies_with_info mw
+LEFT JOIN 
+    movie_keyword mk ON mw.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    mw.cast_count > 5
+GROUP BY 
+    mw.movie_id, mw.title, mw.production_year, mw.year_rank, mw.cast_count, mw.additional_info
+ORDER BY 
+    mw.production_year DESC, mw.cast_count DESC;

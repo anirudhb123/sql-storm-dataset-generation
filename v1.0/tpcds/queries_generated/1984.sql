@@ -1,0 +1,57 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_cdemo_sk AS customer_demo_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt) AS total_return_amount,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_cdemo_sk
+),
+PopularItems AS (
+    SELECT 
+        ws_item_sk,
+        COUNT(ws_order_number) AS order_count,
+        SUM(ws_sales_price) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        COUNT(ws_order_number) > 10
+),
+ItemPopularityRanked AS (
+    SELECT 
+        ws_item_sk,
+        total_sales,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        PopularItems
+)
+SELECT 
+    cd.cd_demo_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(cr.total_returned, 0) AS total_returned,
+    COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+    COALESCE(imp.item_sk, 0) AS popular_item,
+    ir.sales_rank
+FROM 
+    customer_demographics cd
+LEFT JOIN 
+    CustomerReturns cr ON cd.cd_demo_sk = cr.customer_demo_sk
+LEFT JOIN 
+    (SELECT 
+         ir.ws_item_sk, ir.sales_rank 
+     FROM 
+         ItemPopularityRanked ir 
+     WHERE 
+         ir.sales_rank = 1) imp ON cr.customer_demo_sk = imp.popular_item
+WHERE 
+    cd.cd_purchase_estimate IS NOT NULL
+ORDER BY 
+    total_return_amount DESC, 
+    total_returned DESC
+LIMIT 50;

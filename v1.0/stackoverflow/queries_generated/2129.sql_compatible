@@ -1,0 +1,86 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalPosts,
+        ua.UpVotes,
+        ua.DownVotes,
+        ua.Questions,
+        ua.Answers,
+        ua.AcceptedAnswers,
+        RANK() OVER (ORDER BY ua.UpVotes - ua.DownVotes DESC) AS VoteRank
+    FROM 
+        UserActivity ua
+),
+Top5Users AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        UpVotes,
+        DownVotes,
+        Questions,
+        Answers,
+        AcceptedAnswers
+    FROM 
+        RankedUsers
+    WHERE 
+        VoteRank <= 5
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE((SELECT SUM(C.Score) FROM Comments C WHERE C.PostId = P.Id), 0) AS TotalCommentScore,
+        STRING_AGG(T.TagName, ', ') AS TagNames
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Tags T ON T.WikiPostId = P.Id
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.UpVotes,
+    u.DownVotes,
+    u.Questions,
+    u.Answers,
+    u.AcceptedAnswers,
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.TotalCommentScore,
+    p.TagNames
+FROM 
+    Top5Users u
+JOIN 
+    Posts p ON u.UserId = p.OwnerUserId
+WHERE 
+    p.LastActivityDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+ORDER BY 
+    u.UpVotes - u.DownVotes DESC, p.CreationDate DESC;

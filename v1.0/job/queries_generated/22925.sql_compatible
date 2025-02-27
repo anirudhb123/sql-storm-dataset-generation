@@ -1,0 +1,89 @@
+
+WITH RecursiveRoleCount AS (
+    SELECT 
+        ci.person_id,
+        COUNT(ci.role_id) AS role_count,
+        ROW_NUMBER() OVER (PARTITION BY ci.person_id ORDER BY COUNT(ci.role_id) DESC) AS rn
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+),
+TitleDetails AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        at.kind_id,
+        at.id AS title_id,
+        COALESCE(SUM(CASE WHEN ki.keyword LIKE '%action%' THEN 1 ELSE 0 END), 0) AS action_keywords,
+        COALESCE(SUM(CASE WHEN ki.keyword LIKE '%drama%' THEN 1 ELSE 0 END), 0) AS drama_keywords,
+        COUNT(DISTINCT c.person_id) AS total_cast
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = at.movie_id
+    LEFT JOIN 
+        keyword ki ON ki.id = mk.keyword_id
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = at.movie_id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = at.movie_id
+    GROUP BY 
+        at.title, at.production_year, at.kind_id, at.id
+),
+FinalResults AS (
+    SELECT 
+        td.title,
+        td.production_year,
+        td.kind_id,
+        rd.role_count,
+        td.action_keywords,
+        td.drama_keywords,
+        td.total_cast,
+        CASE 
+            WHEN td.total_cast > 10 THEN 'Blockbuster'
+            WHEN td.total_cast BETWEEN 5 AND 10 THEN 'Moderate'
+            ELSE 'Indie'
+        END AS box_office_category
+    FROM 
+        TitleDetails td
+    LEFT JOIN 
+        RecursiveRoleCount rd ON rd.person_id IN (
+            SELECT 
+                c.person_id 
+            FROM 
+                cast_info c 
+            WHERE 
+                c.movie_id IN (SELECT movie_id FROM aka_title WHERE id = td.title_id)
+        )
+    WHERE 
+        td.production_year IS NOT NULL
+        AND (td.action_keywords > 2 OR td.drama_keywords > 2)
+        OR (td.total_cast IS NULL AND td.kind_id IS NOT NULL)
+)
+
+SELECT 
+    fr.title,
+    fr.production_year,
+    fr.kind_id,
+    fr.role_count,
+    fr.action_keywords,
+    fr.drama_keywords,
+    fr.total_cast,
+    fr.box_office_category
+FROM 
+    FinalResults fr
+WHERE 
+    NOT EXISTS (
+        SELECT 1 
+        FROM role_type rt 
+        WHERE rt.id IN (
+            SELECT DISTINCT ci.role_id
+            FROM cast_info ci 
+            WHERE ci.movie_id IN (SELECT movie_id FROM aka_title WHERE id = fr.kind_id)
+        ) 
+        AND rt.role LIKE '%extra%'
+    )
+ORDER BY 
+    fr.production_year DESC, 
+    fr.title ASC;

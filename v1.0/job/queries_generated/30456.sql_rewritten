@@ -1,0 +1,82 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+),
+
+CastRoles AS (
+    SELECT
+        ci.movie_id,
+        ci.role_id,
+        COUNT(ci.person_role_id) AS role_count
+    FROM
+        cast_info ci
+    GROUP BY
+        ci.movie_id, ci.role_id
+),
+
+TitleWithCompany AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM
+        aka_title mt
+    LEFT JOIN
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN
+        company_name cn ON mc.company_id = cn.id
+    WHERE
+        mc.company_type_id IS NOT NULL
+    GROUP BY
+        mt.id
+),
+
+FinalMovieInfo AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(tr.role_count, 0) AS total_roles,
+        COALESCE(tc.companies, 'No Companies') AS production_companies
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CastRoles tr ON mh.movie_id = tr.movie_id
+    LEFT JOIN 
+        TitleWithCompany tc ON mh.movie_id = tc.movie_id
+)
+
+SELECT
+    fmi.title,
+    fmi.production_year,
+    fmi.total_roles,
+    fmi.production_companies,
+    RANK() OVER (ORDER BY fmi.production_year DESC, fmi.total_roles DESC) AS rank
+FROM
+    FinalMovieInfo fmi
+WHERE
+    fmi.production_year >= 2000
+    AND fmi.title IS NOT NULL
+ORDER BY
+    fmi.production_year DESC, rank;

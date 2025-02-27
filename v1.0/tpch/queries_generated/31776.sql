@@ -1,0 +1,55 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 5000 AND sh.level < 5
+),
+PartStats AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS average_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+TotalOrders AS (
+    SELECT o.o_custkey,
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+FilteredOrders AS (
+    SELECT co.c_custkey, 
+           co.c_name, 
+           COALESCE(to.total_spent, 0) AS last_year_spent,
+           ROW_NUMBER() OVER (PARTITION BY co.c_custkey ORDER BY len(co.c_name) DESC) AS rn
+    FROM customer co
+    LEFT JOIN TotalOrders to ON co.c_custkey = to.o_custkey
+),
+TopSuppliers AS (
+    SELECT sh.s_name, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    INNER JOIN SupplierHierarchy sh ON l.l_suppkey = sh.s_suppkey
+    GROUP BY sh.s_name
+)
+SELECT DISTINCT fo.c_name,
+                fs.p_name,
+                CASE WHEN fs.total_available < 100 THEN 'Low Stock' ELSE 'In Stock' END AS stock_status,
+                ts.total_revenue,
+                results.rn
+FROM FilteredOrders fo
+JOIN PartStats fs ON fo.c_custkey = fs.p_partkey
+LEFT JOIN TopSuppliers ts ON fo.c_name = ts.s_name
+WHERE fo.last_year_spent > 0
+  AND (ts.total_revenue IS NULL OR ts.total_revenue > 100000)
+  AND fs.average_cost < 30.00
+ORDER BY fo.c_name, fs.p_name;

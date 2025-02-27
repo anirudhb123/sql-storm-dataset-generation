@@ -1,0 +1,79 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        1 AS depth
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        c.country_code = 'USA'
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.depth + 1
+    FROM 
+        complete_cast cc
+    JOIN 
+        movie_hierarchy mh ON cc.movie_id = mh.movie_id
+    WHERE 
+        cc.note IS NOT NULL OR mh.depth < 5  
+    
+), ranked_cast AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS rn,
+        COUNT(*) OVER (PARTITION BY c.movie_id) AS total_cast
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+), movie_info_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        k.keyword AS associated_keyword,
+        COALESCE(mi.info, 'No additional info') AS additional_info
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    rc.actor_name,
+    rc.total_cast,
+    r_fun_generation(mh.depth) AS depth_multiplier,
+    CASE 
+        WHEN rc.total_cast > 5 THEN 'Ensemble Cast'
+        ELSE 'Limited Cast'
+    END AS cast_size_category,
+    mikw.associated_keyword,
+    mikw.additional_info
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    ranked_cast rc ON mh.movie_id = rc.movie_id AND rc.rn = 1 
+LEFT JOIN 
+    movie_info_with_keywords mikw ON mh.movie_id = mikw.movie_id
+WHERE 
+    (rc.actor_name IS NOT NULL AND rc.actor_name != '') 
+    OR (mikw.additional_info LIKE '%Academy Award%' AND mikw.associated_keyword IS NOT NULL) 
+    OR (mh.depth >= 3 AND mh.movie_title IS NOT NULL)
+ORDER BY 
+    mh.movie_id, rc.total_cast DESC;

@@ -1,0 +1,41 @@
+
+WITH RecursiveMovies AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 1 AS depth
+    FROM aka_title m
+    WHERE m.production_year >= 2000
+    UNION ALL
+    SELECT m.id AS movie_id, m.title, m.production_year, rm.depth + 1
+    FROM aka_title m
+    JOIN RecursiveMovies rm ON m.id = rm.movie_id
+    WHERE rm.depth < 5
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        c.person_id,
+        p.gender,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM 
+        RecursiveMovies rm
+    LEFT JOIN cast_info c ON rm.movie_id = c.movie_id
+    LEFT JOIN aka_name p ON c.person_id = p.person_id
+    LEFT JOIN movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN movie_companies mc ON rm.movie_id = mc.movie_id
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    LEFT JOIN role_type r ON c.role_id = r.id
+    GROUP BY rm.movie_id, rm.title, rm.production_year, c.person_id, p.gender
+)
+SELECT 
+    title,
+    production_year,
+    COUNT(DISTINCT person_id) AS actor_count,
+    COUNT(DISTINCT company_names) AS company_count,
+    AVG(depth) AS avg_depth
+FROM MovieDetails
+GROUP BY title, production_year
+ORDER BY production_year DESC, actor_count DESC;

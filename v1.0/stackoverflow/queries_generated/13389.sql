@@ -1,0 +1,59 @@
+-- Performance Benchmarking Query
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        (SELECT COUNT(*)
+         FROM Posts AS a 
+         WHERE a.ParentId = p.Id) AS AnswerCount
+    FROM 
+        Posts AS p
+    LEFT JOIN 
+        Comments AS c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes AS v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(COALESCE(u.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(u.DownVotes, 0)) AS TotalDownVotes
+    FROM 
+        Users AS u
+    LEFT JOIN 
+        Badges AS b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.AnswerCount,
+    us.DisplayName AS OwnerDisplayName,
+    us.BadgeCount,
+    us.TotalUpVotes,
+    us.TotalDownVotes
+FROM 
+    PostStats AS ps
+JOIN 
+    Users AS u ON ps.OwnerUserId = u.Id
+JOIN 
+    UserStats AS us ON u.Id = us.UserId
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC
+LIMIT 100;

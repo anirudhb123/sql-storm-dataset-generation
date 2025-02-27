@@ -1,0 +1,53 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level
+    FROM aka_title mt
+    WHERE mt.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        mk.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.level + 1
+    FROM MovieHierarchy mh
+    JOIN movie_link mk ON mh.movie_id = mk.movie_id
+    JOIN aka_title mt ON mk.linked_movie_id = mt.id
+)
+, RankedMovies AS (
+    SELECT 
+        mh.*,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY mh.production_year) AS total_links
+    FROM MovieHierarchy mh
+)
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    r.kind_id,
+    r.level,
+    r.rn,
+    r.total_links,
+    COALESCE(mk.keyword, 'No keyword') AS keyword,
+    COUNT(c.id) FILTER (WHERE c.role_id IS NOT NULL) AS total_roles,
+    STRING_AGG(DISTINCT a.name, ', ') AS actors_list
+FROM RankedMovies r
+LEFT JOIN movie_keyword mk ON r.movie_id = mk.movie_id
+LEFT JOIN cast_info c ON r.movie_id = c.movie_id
+LEFT JOIN aka_name a ON c.person_id = a.person_id
+WHERE r.production_year IS NOT NULL AND r.title IS NOT NULL
+GROUP BY 
+    r.movie_id, r.title, r.production_year, r.kind_id, r.level, r.rn, 
+    r.total_links, mk.keyword
+HAVING 
+    SUM(CASE WHEN r.level > 1 THEN 1 ELSE 0 END) > 0 
+    OR MAX(r.level) IS NULL
+ORDER BY 
+    r.production_year DESC, r.rn;

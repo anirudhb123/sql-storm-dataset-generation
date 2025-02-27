@@ -1,0 +1,50 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        s.s_acctbal,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name, s.s_acctbal
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        COUNT(DISTINCT l.l_linenumber) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate
+)
+SELECT 
+    sd.s_suppkey,
+    sd.s_name,
+    sd.nation_name,
+    sd.s_acctbal,
+    sd.part_count,
+    od.o_orderkey,
+    od.o_orderstatus,
+    od.o_totalprice,
+    od.o_orderdate,
+    od.line_count
+FROM 
+    SupplierDetails sd
+LEFT JOIN 
+    OrderDetails od ON sd.part_count > 5 AND od.line_count > 2
+ORDER BY 
+    sd.s_acctbal DESC, od.o_orderdate ASC;

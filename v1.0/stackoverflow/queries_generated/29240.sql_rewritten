@@ -1,0 +1,80 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(v.UpVoteCount, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.DownVoteCount, 0)) AS TotalDownVotes,
+        AVG(COALESCE(v.Score, 0)) AS AverageScore,
+        STRING_AGG(DISTINCT u.DisplayName, ', ') AS TopContributors
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+            AVG(Score) AS Score
+        FROM 
+            Votes v
+        GROUP BY 
+            PostId
+    ) v ON v.PostId = p.Id
+    LEFT JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    WHERE 
+        t.IsModeratorOnly = 0 
+    GROUP BY 
+        t.TagName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        p.Title,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (1, 4, 10, 12) 
+),
+RecentPostChanges AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate AS PostCreationDate,
+        php.UserDisplayName,
+        php.Comment,
+        php.CreationDate AS ChangeDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistoryDetails php ON php.PostId = p.Id
+    WHERE 
+        php.rn = 1 
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalUpVotes,
+    ts.TotalDownVotes,
+    ts.AverageScore,
+    ts.TopContributors,
+    rpc.PostId,
+    rpc.Title AS PostTitle,
+    rpc.PostCreationDate,
+    rpc.UserDisplayName AS ChangeMadeBy,
+    rpc.Comment AS ChangeComment,
+    rpc.ChangeDate
+FROM 
+    TagStatistics ts
+LEFT JOIN 
+    RecentPostChanges rpc ON ts.TagName = ANY(string_to_array(rpc.PostTitle, ' ')) 
+ORDER BY 
+    ts.PostCount DESC, ts.TotalUpVotes DESC, ts.TagName;

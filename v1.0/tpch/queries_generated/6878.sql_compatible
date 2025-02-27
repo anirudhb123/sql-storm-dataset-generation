@@ -1,0 +1,35 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, r.r_name, r.r_name AS region_name
+    FROM RankedSuppliers r
+    JOIN supplier s ON r.s_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE r.r_name LIKE 'Asia%'
+    ORDER BY r.total_supply_cost DESC
+    LIMIT 10
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 10000
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    ts.s_name AS supplier_name,
+    ts.s_acctbal AS supplier_acctbal,
+    co.c_name AS customer_name,
+    co.total_spent AS customer_total_spent,
+    co.order_count AS customer_order_count,
+    ROW_NUMBER() OVER (PARTITION BY ts.s_suppkey ORDER BY co.total_spent DESC) AS rank
+FROM TopSuppliers ts
+JOIN CustomerOrders co ON ts.s_suppkey = co.c_custkey
+WHERE ts.total_supply_cost > 50000
+ORDER BY ts.s_name, co.total_spent DESC;

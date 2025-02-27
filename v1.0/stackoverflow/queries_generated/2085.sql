@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= current_date - interval '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+MostCommentedPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CommentCount,
+        rp.Score,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        (SELECT 
+             PostId, 
+             COUNT(*) AS Comments
+         FROM 
+             Comments
+         GROUP BY 
+             PostId
+         HAVING COUNT(*) > 5) c ON rp.Id = c.PostId
+)
+SELECT 
+    mcp.Title,
+    mcp.CommentCount,
+    mcp.Score,
+    COALESCE(cp.ClosedDate, 'Not Closed') AS PostStatus,
+    mcp.OwnerDisplayName
+FROM 
+    MostCommentedPosts mcp
+LEFT JOIN 
+    ClosedPosts cp ON mcp.Id = cp.PostId
+WHERE 
+    mcp.CommentCount > 10 
+    AND mcp.Score > (SELECT AVG(Score) FROM Posts)
+ORDER BY 
+    mcp.Score DESC
+LIMIT 10;
+

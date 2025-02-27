@@ -1,0 +1,82 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate, U.LastAccessDate
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        ReputationRank
+    FROM 
+        UserStats
+    WHERE 
+        ReputationRank <= 10
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(PH.RevisionCount, 0) AS RevisionCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS RevisionCount
+        FROM 
+            PostHistory
+        GROUP BY 
+            PostId
+    ) PH ON P.Id = PH.PostId
+)
+SELECT 
+    TU.DisplayName AS TopUser,
+    PU.Title AS TopPost,
+    PU.CreationDate AS PostDate,
+    PU.Score AS PostScore,
+    PU.ViewCount AS PostViews,
+    PU.RevisionCount AS PostRevisions,
+    CASE 
+        WHEN PU.Score > 10 THEN 'High Score'
+        WHEN PU.Score BETWEEN 5 AND 10 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+    COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+FROM 
+    TopUsers TU
+JOIN 
+    PostDetails PU ON TU.UserId = PU.OwnerUserId
+LEFT JOIN 
+    Votes V ON PU.PostId = V.PostId
+GROUP BY 
+    TU.DisplayName, PU.Title, PU.CreationDate, PU.Score, PU.ViewCount, PU.RevisionCount
+ORDER BY 
+    PU.Score DESC, TU.Reputation DESC;

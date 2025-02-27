@@ -1,0 +1,37 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM title t
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    LEFT JOIN aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+    GROUP BY t.id, t.title, t.production_year
+),
+FilteredTitles AS (
+    SELECT 
+        title_id,
+        title,
+        production_year,
+        cast_count,
+        aka_names,
+        keywords,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY cast_count DESC) AS rn
+    FROM RankedTitles
+    WHERE production_year >= 2000
+)
+SELECT 
+    ft.title_id,
+    ft.title,
+    ft.production_year,
+    ft.cast_count,
+    ft.aka_names,
+    ft.keywords
+FROM FilteredTitles ft
+WHERE ft.rn <= 5
+ORDER BY ft.production_year DESC, ft.cast_count DESC;

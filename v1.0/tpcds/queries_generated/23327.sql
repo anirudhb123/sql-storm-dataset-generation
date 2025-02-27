@@ -1,0 +1,52 @@
+
+WITH sales_summary AS (
+    SELECT ws_item_sk,
+           SUM(ws_quantity) AS total_sold,
+           SUM(ws_net_profit) AS total_profit,
+           COUNT(DISTINCT ws_order_number) AS total_orders,
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+high_profit_items AS (
+    SELECT item.i_item_id,
+           item.i_product_name,
+           sales.total_profit,
+           sales.total_orders,
+           COALESCE(inventory.inv_quantity_on_hand, 0) AS stock_count
+    FROM sales_summary sales
+    JOIN item ON sales.ws_item_sk = item.i_item_sk
+    LEFT JOIN inventory ON item.i_item_sk = inventory.inv_item_sk
+    WHERE sales.total_profit > (SELECT AVG(total_profit) FROM sales_summary)
+    AND item.i_rec_start_date <= CURRENT_DATE 
+    AND (item.i_rec_end_date IS NULL OR item.i_rec_end_date > CURRENT_DATE)
+),
+customer_activity AS (
+    SELECT c.c_customer_id,
+           COUNT(DISTINCT ws.order_number) AS web_orders_count,
+           COUNT(DISTINCT ss.ticket_number) AS store_orders_count,
+           COUNT(DISTINCT wr.order_number) AS web_returns_count,
+           CASE WHEN c.c_birth_year IS NOT NULL THEN 
+                EXTRACT(YEAR FROM CURRENT_DATE) - c.c_birth_year 
+                ELSE NULL END AS age
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY c.c_customer_id, c.c_birth_year
+)
+SELECT hpi.i_item_id,
+       hpi.i_product_name,
+       hpi.total_profit,
+       hpi.total_orders,
+       ca.c_customer_id,
+       ca.web_orders_count,
+       ca.store_orders_count,
+       ca.web_returns_count,
+       ca.age
+FROM high_profit_items hpi
+JOIN customer_activity ca ON (ca.web_orders_count > 0 OR ca.store_orders_count > 0)
+WHERE hpi.stock_count > 10
+  AND (ca.age IS NULL OR ca.age BETWEEN 18 AND 65)
+ORDER BY hpi.total_profit DESC, ca.web_orders_count DESC
+LIMIT 50;

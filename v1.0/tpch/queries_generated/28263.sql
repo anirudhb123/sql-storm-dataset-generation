@@ -1,0 +1,44 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type
+),
+HighestSupplierCount AS (
+    SELECT 
+        rp.p_partkey,
+        rp.p_name,
+        rp.supplier_count,
+        rp.total_available_qty,
+        rp.total_supply_cost
+    FROM 
+        RankedParts rp
+    WHERE 
+        rp.rank = 1
+)
+SELECT 
+    hsc.p_partkey,
+    hsc.p_name,
+    hsc.supplier_count,
+    hsc.total_available_qty,
+    hsc.total_supply_cost,
+    (SELECT COUNT(*) FROM supplier s WHERE s.s_nationkey BETWEEN 1 AND 5) AS active_suppliers,
+    (SELECT MAX(r.r_name) FROM nation r JOIN supplier s ON r.n_nationkey = s.s_nationkey WHERE s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = hsc.p_partkey)) AS top_region
+FROM 
+    HighestSupplierCount hsc
+WHERE 
+    hsc.total_available_qty > 50
+ORDER BY 
+    hsc.total_supply_cost DESC;

@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        (SELECT AVG(p2.p_retailprice) * 0.9 FROM part p2) AS avg_price_threshold
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p3.p_retailprice) FROM part p3)
+),
+CompletedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        pp.p_name,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS lowest_cost_rank
+    FROM 
+        partsupp ps
+    JOIN 
+        part pp ON ps.ps_partkey = pp.p_partkey
+)
+SELECT 
+    COALESCE(spd.p_name, 'Unknown Part') AS part_name,
+    COALESCE(rc.s_name, 'Unknown Supplier') AS supplier_name,
+    SUM(CASE WHEN ho.o_orderkey IS NOT NULL THEN ho.total_value ELSE 0 END) AS total_order_value,
+    COUNT(DISTINCT CASE WHEN rc.rank = 1 THEN rc.s_suppkey END) AS top_supplier_count,
+    DENSE_RANK() OVER (ORDER BY SUM(COALESCE(ho.total_value, 0)) DESC) AS sales_rank
+FROM 
+    HighValueParts hvp
+LEFT JOIN 
+    SupplierPartDetails spd ON hvp.p_partkey = spd.ps_partkey AND spd.lowest_cost_rank = 1
+LEFT JOIN 
+    RankedSuppliers rc ON spd.ps_suppkey = rc.s_suppkey
+LEFT JOIN 
+    CompletedOrders ho ON ho.o_orderkey = spd.ps_partkey
+GROUP BY 
+    hvp.p_name, rc.s_name
+HAVING 
+    COUNT(DISTINCT rc.s_suppkey) > 0 
+    OR SUM(ho.total_value) IS NULL
+ORDER BY 
+    sales_rank;

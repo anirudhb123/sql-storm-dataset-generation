@@ -1,0 +1,82 @@
+WITH RecursiveYearStats AS (
+    SELECT 
+        CT.production_year,
+        COUNT(DISTINCT CI.person_id) AS total_cast,
+        COUNT(DISTINCT M.id) AS total_movies,
+        AVG(CASE WHEN CI.nr_order IS NOT NULL THEN CI.nr_order ELSE 0 END) AS avg_cast_order
+    FROM 
+        aka_title AT
+    JOIN 
+        cast_info CI ON AT.movie_id = CI.movie_id
+    JOIN 
+        title T ON AT.id = T.id
+    JOIN 
+        movie_companies MC ON M.id = MC.movie_id
+    JOIN 
+        (SELECT DISTINCT production_year FROM aka_title) CT 
+    ON 
+        T.production_year = CT.production_year
+    GROUP BY 
+        CT.production_year
+),
+RankedMovies AS (
+    SELECT 
+        T.title,
+        T.production_year,
+        ROW_NUMBER() OVER (PARTITION BY T.production_year ORDER BY COUNT(MC.company_id) DESC) AS rank_by_company_count
+    FROM 
+        title T
+    LEFT JOIN 
+        movie_companies MC ON T.id = MC.movie_id
+    GROUP BY 
+        T.title, T.production_year
+),
+TopMovies AS (
+    SELECT 
+        R.title,
+        R.production_year,
+        RS.total_cast,
+        R.rank_by_company_count
+    FROM 
+        RankedMovies R
+    JOIN 
+        RecursiveYearStats RS ON R.production_year = RS.production_year
+    WHERE 
+        R.rank_by_company_count <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        MT.movie_id,
+        STRING_AGG(K.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword MT
+    JOIN 
+        keyword K ON MT.keyword_id = K.id
+    GROUP BY 
+        MT.movie_id
+),
+FinalOutput AS (
+    SELECT 
+        TM.title,
+        TM.production_year,
+        TM.total_cast,
+        MK.keywords,
+        COALESCE(NULLIF(TM.total_movies, 0), "No movies listed") AS movie_count
+    FROM 
+        TopMovies TM
+    LEFT JOIN 
+        MovieKeywords MK ON TM.movie_id = MK.movie_id
+)
+SELECT 
+    FO.*,
+    CASE 
+        WHEN FO.total_cast > 10 THEN 'Large Cast'
+        WHEN FO.total_cast BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM 
+    FinalOutput FO
+WHERE 
+    FO.movie_count IS NOT NULL OR FO.keywords IS NOT NULL
+ORDER BY 
+    FO.production_year DESC, FO.title ASC;

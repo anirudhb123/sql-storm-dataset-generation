@@ -1,0 +1,34 @@
+SELECT 
+    p.p_name,
+    s.s_name,
+    c.c_name,
+    o.o_orderkey,
+    COUNT(l.l_orderkey) AS total_lineitems,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    STRING_AGG(DISTINCT r.r_name, ', ') AS regions_supplied,
+    STRING_AGG(DISTINCT n.n_name, ', ') AS nations_served
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON c.c_nationkey = s.s_nationkey
+JOIN 
+    orders o ON o.o_custkey = c.c_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size > 10 
+    AND o.o_orderdate BETWEEN '2021-01-01' AND '2023-12-31'
+GROUP BY 
+    p.p_name, s.s_name, c.c_name, o.o_orderkey
+HAVING 
+    COUNT(l.l_orderkey) > 5
+ORDER BY 
+    total_revenue DESC;

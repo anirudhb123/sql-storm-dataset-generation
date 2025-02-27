@@ -1,0 +1,43 @@
+WITH RECURSIVE customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '1996-01-01'
+    
+    UNION ALL
+    
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer_orders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderdate > co.o_orderdate AND o.o_orderstatus = 'O'
+),
+part_supplier AS (
+    SELECT p.p_partkey, p.p_name, AVG(ps.ps_supplycost) AS avg_supplycost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p.p_partkey, p.p_name
+),
+order_summary AS (
+    SELECT c.c_custkey,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATEADD(year, -1, cast('1998-10-01' as date))
+    GROUP BY c.c_custkey
+)
+SELECT co.c_custkey, co.c_name, po.p_name, po.avg_supplycost, po.supplier_count,
+       os.total_spent, os.order_count,
+       CASE 
+           WHEN os.total_spent IS NULL THEN 'No Orders'
+           ELSE 'Has Orders'
+       END AS order_status
+FROM customer_orders co
+LEFT JOIN part_supplier po ON po.avg_supplycost > (
+    SELECT AVG(avg_supplycost) FROM part_supplier
+)
+LEFT JOIN order_summary os ON co.c_custkey = os.c_custkey
+ORDER BY co.total_spent DESC NULLS LAST, co.c_custkey;

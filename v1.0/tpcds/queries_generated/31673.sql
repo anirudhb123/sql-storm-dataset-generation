@@ -1,0 +1,75 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) as sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    HAVING 
+        SUM(ws_net_paid) IS NOT NULL
+),
+MaxSales AS (
+    SELECT 
+        ws_item_sk, 
+        MAX(total_sales) AS highest_sales
+    FROM 
+        SalesCTE
+    GROUP BY 
+        ws_item_sk
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid) AS avg_order_value
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        c.c_birth_year IS NOT NULL AND 
+        SUBSTR(c.c_email_address, 1, 1) NOT IN ('a', 'e', 'i', 'o', 'u') 
+    GROUP BY 
+        c.c_customer_sk
+),
+SalesComparison AS (
+    SELECT 
+        cs.c_customer_sk, 
+        cs.total_spent - COALESCE(ms.highest_sales, 0) AS difference_from_max_sales
+    FROM 
+        CustomerSales cs
+    LEFT JOIN 
+        MaxSales ms ON cs.total_spent > ms.highest_sales
+)
+SELECT 
+    c.customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_credit_rating,
+    c.c_first_name,
+    c.c_last_name,
+    cs.total_orders,
+    cs.avg_order_value,
+    sc.difference_from_max_sales
+FROM 
+    customer AS c
+INNER JOIN 
+    customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+INNER JOIN 
+    CustomerSales AS cs ON c.c_customer_sk = cs.c_customer_sk
+LEFT JOIN 
+    SalesComparison AS sc ON c.c_customer_sk = sc.c_customer_sk
+WHERE 
+    cs.total_spent > 100 AND 
+    (cd.cd_marital_status IS NOT NULL OR cd.cd_gender IS NOT NULL)
+ORDER BY 
+    cs.total_spent DESC
+LIMIT 100;

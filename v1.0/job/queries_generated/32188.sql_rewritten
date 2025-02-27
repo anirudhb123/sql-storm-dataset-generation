@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        NULL::integer AS parent_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.movie_id AS parent_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+
+SELECT 
+    mh.title AS linked_movie_title,
+    mh.production_year AS linked_production_year,
+    array_agg(DISTINCT a.name ORDER BY a.name) AS actor_names,
+    COUNT(DISTINCT c.id) AS total_cast_members,
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = mh.movie_id AND mi.info_type_id = 1) AS award_count,
+    RANK() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT c.id) DESC) AS actor_rank,
+    MAX(CASE WHEN c.role_id IS NULL THEN 'Unknown Role' ELSE r.role END) AS main_role
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info c ON mh.movie_id = c.movie_id
+LEFT JOIN 
+    aka_name a ON c.person_id = a.person_id
+LEFT JOIN 
+    role_type r ON c.role_id = r.id
+WHERE 
+    mh.level = 0
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+ORDER BY 
+    mh.production_year DESC, 
+    actor_rank, 
+    total_cast_members DESC
+LIMIT 10;

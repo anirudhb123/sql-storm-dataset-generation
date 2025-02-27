@@ -1,0 +1,74 @@
+WITH ranked_movies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COUNT(c.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY m.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_per_year
+    FROM 
+        aka_title m
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+high_cast_movies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        m.cast_count
+    FROM 
+        ranked_movies m
+    WHERE 
+        m.rank_per_year <= 5
+),
+movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(info.info, 'N/A') AS additional_info,
+        k.keyword AS movie_keyword
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info idx ON m.id = idx.movie_id
+),
+complete_cast_info AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS unique_roles,
+        STRING_AGG(DISTINCT p.name, ', ') AS all_actors
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    GROUP BY 
+        c.movie_id
+)
+SELECT 
+    hcm.title,
+    hcm.production_year,
+    m.additional_info,
+    m.movie_keyword,
+    c.unique_roles,
+    c.all_actors,
+    COALESCE(m.additional_info, 'No info available') AS info_with_fallback,
+    (SELECT COUNT(*) FROM movie_info WHERE note IS NOT NULL) AS total_notes_count,
+    (SELECT COUNT(*) FROM company_name WHERE country_code IS NULL) AS null_country_count
+FROM 
+    high_cast_movies hcm
+LEFT JOIN 
+    movie_details m ON hcm.title = m.title
+LEFT JOIN 
+    complete_cast_info c ON hcm.movie_id = c.movie_id
+WHERE 
+    (EXISTS (SELECT 1 FROM movie_info WHERE movie_id = hcm.id AND info_type_id IN (SELECT id FROM info_type WHERE info = 'Awards')) 
+    OR hcm.production_year < 2000)
+ORDER BY 
+    hcm.production_year DESC, c.unique_roles DESC
+LIMIT 10;

@@ -1,0 +1,99 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UsersWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+FilteredPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation,
+        COALESCE(pvs.UpVotes, 0) AS UpVotes,
+        COALESCE(pvs.DownVotes, 0) AS DownVotes,
+        COALESCE(pvs.TotalVotes, 0) AS TotalVotes,
+        u.BadgeCount,
+        CASE 
+            WHEN p.AnswerCount = 0 THEN 'No Answers'
+            ELSE CAST(p.AnswerCount AS VARCHAR) || ' Answers'
+        END AS AnswerStatus,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RowNum
+    FROM 
+        RecursivePostHierarchy ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        UsersWithBadges u ON p.OwnerUserId = u.UserId
+    LEFT JOIN 
+        PostVoteStats pvs ON p.Id = pvs.PostId
+    WHERE 
+        u.Reputation > 100 AND
+        ph.Level <= 2
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.OwnerDisplayName,
+    fp.Reputation,
+    fp.UpVotes,
+    fp.DownVotes,
+    fp.TotalVotes,
+    fp.BadgeCount,
+    fp.AnswerStatus
+FROM 
+    FilteredPosts fp
+WHERE 
+    fp.RowNum = 1
+ORDER BY 
+    fp.Reputation DESC,
+    fp.TotalVotes DESC
+LIMIT 50;

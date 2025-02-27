@@ -1,0 +1,64 @@
+WITH TagSplit AS (
+    SELECT 
+        Id,
+        UNNEST(string_to_array(substring(Tags, 2, LENGTH(Tags)-2), '><')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Only considering questions
+),
+AggregatedTagStats AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS QuestionCount,
+        SUM(ViewCount) AS TotalViews,
+        SUM(Score) AS TotalScore
+    FROM 
+        TagSplit
+    JOIN 
+        Posts ON TagSplit.Id = Posts.Id
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        QuestionCount,
+        TotalViews,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM 
+        AggregatedTagStats
+    WHERE 
+        QuestionCount > 10  -- Only consider tags with more than 10 questions
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS CloseVoteCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Id END) AS ClosedCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only considering questions
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    tt.Tag,
+    tt.QuestionCount,
+    tt.TotalViews,
+    tt.TotalScore,
+    cp.CloseVoteCount,
+    cp.ClosedCount
+FROM 
+    TopTags tt
+JOIN 
+    ClosedPosts cp ON tt.Tag IN (
+        SELECT UNNEST(string_to_array(substring(Posts.Tags, 2, LENGTH(Posts.Tags)-2), '><')) 
+        FROM Posts WHERE PostTypeId = 1
+    )
+ORDER BY 
+    tt.ScoreRank;

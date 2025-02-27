@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(p.Tags, '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    us.TotalBounties,
+    us.BadgeCount,
+    us.TotalUpvotes,
+    us.TotalDownvotes,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate,
+    rp.Score AS RecentPostScore,
+    pt.TagName AS PopularTag
+FROM 
+    UserStats us
+JOIN 
+    Users up ON us.UserId = up.Id
+LEFT JOIN 
+    RankedPosts rp ON up.Id = rp.OwnerUserId AND rp.PostRank = 1
+LEFT JOIN 
+    PopularTags pt ON pt.TagName = ANY(string_to_array(rp.Tags, '><'))
+WHERE 
+    us.TotalUpvotes > 10 OR us.TotalDownvotes > 5
+ORDER BY 
+    us.TotalBounties DESC, us.BadgeCount DESC, up.Reputation DESC;

@@ -1,0 +1,84 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs_item_sk,
+        cs_order_number,
+        cs_quantity,
+        cs_net_profit,
+        1 AS level
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_net_profit > 0
+
+    UNION ALL
+    
+    SELECT 
+        cs.cs_item_sk,
+        cs.cs_order_number,
+        cs.cs_quantity,
+        cs.cs_net_profit,
+        sh.level + 1
+    FROM 
+        catalog_sales cs
+    JOIN 
+        sales_hierarchy sh ON cs.cs_item_sk = sh.cs_item_sk AND cs.cs_order_number <> sh.cs_order_number
+    WHERE 
+        sh.level < 5
+),
+item_summary AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        SUM(ws.ws_quantity) AS total_sold,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        MAX(ws.ws_net_profit) AS max_profit
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    WHERE 
+        i.i_rec_start_date <= cast('2002-10-01' as date)
+        AND i.i_rec_end_date >= cast('2002-10-01' as date)
+    GROUP BY 
+        i.i_item_id, i.i_item_desc
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    d.d_date,
+    ia.i_item_desc,
+    cs.total_sold,
+    cs.avg_sales_price,
+    cs.max_profit,
+    cd.c_customer_id,
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(sh.cs_quantity, 0) AS associated_sales_quantity
+FROM 
+    date_dim d
+LEFT JOIN 
+    item_summary cs ON cs.total_sold > 1000 
+LEFT JOIN 
+    customer_details cd ON cd.rank <= 10 
+LEFT JOIN 
+    sales_hierarchy sh ON cs.cs_item_sk = sh.cs_item_sk
+WHERE 
+    d.d_date BETWEEN '2001-01-01' AND '2001-12-31' 
+    AND d.d_dow IN (1, 5) 
+ORDER BY 
+    d.d_date, 
+    cs.total_sold DESC;

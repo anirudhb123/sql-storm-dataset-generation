@@ -1,0 +1,39 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        m.company_id,
+        c.name AS company_name,
+        1 AS level
+    FROM aka_title t
+    JOIN movie_companies m ON t.id = m.movie_id
+    JOIN company_name c ON m.company_id = c.id
+    WHERE t.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_title,
+        mh.production_year,
+        m.company_id,
+        c.name AS company_name,
+        mh.level + 1
+    FROM movie_hierarchy mh
+    JOIN movie_companies m ON mh.company_id = m.company_id
+    JOIN company_name c ON m.company_id = c.id
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    mh.company_name,
+    COUNT(DISTINCT c.id) AS cast_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS alias_names,
+    AVG(EXTRACT(YEAR FROM CURRENT_DATE) - mh.production_year) AS avg_year_difference
+FROM movie_hierarchy mh
+LEFT JOIN complete_cast cc ON mh.company_id = cc.movie_id
+LEFT JOIN cast_info c ON cc.movie_id = c.movie_id
+LEFT JOIN aka_name ak ON ak.person_id = c.person_id
+WHERE mh.level <= 2
+GROUP BY mh.movie_title, mh.production_year, mh.company_name
+HAVING COUNT(DISTINCT c.id) > 1 
+ORDER BY avg_year_difference DESC;

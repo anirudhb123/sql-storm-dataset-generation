@@ -1,0 +1,75 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COALESCE(mt.season_nr, 0) AS season_number,
+        COALESCE(mt.episode_nr, 0) AS episode_number,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        NULLIF(m.season_nr, 0),
+        NULLIF(m.episode_nr, 0),
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title m ON ml.linked_movie_id = m.id 
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+CastDetails AS (
+    SELECT
+        ci.movie_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+MovieInfoWithKeywords AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title
+)
+SELECT
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    mh.season_number,
+    mh.episode_number,
+    cd.actor_name,
+    cd.actor_order,
+    mwk.keywords
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastDetails cd ON mh.movie_id = cd.movie_id
+LEFT JOIN 
+    MovieInfoWithKeywords mwk ON mh.movie_id = mwk.movie_id
+WHERE 
+    mwk.keywords IS NOT NULL
+ORDER BY 
+    mh.production_year DESC, 
+    mh.movie_title,
+    cd.actor_order;

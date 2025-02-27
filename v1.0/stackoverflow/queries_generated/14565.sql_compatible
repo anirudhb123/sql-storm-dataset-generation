@@ -1,0 +1,58 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.PostTypeId, p.Score, p.ViewCount
+)
+
+SELECT 
+    u.UserId,
+    u.Reputation,
+    u.PostCount,
+    u.CommentCount AS UserCommentCount,
+    u.UpVotes,
+    u.DownVotes,
+    p.PostId,
+    p.PostTypeId,
+    p.Score,
+    p.ViewCount,
+    p.CommentCount AS PostCommentCount,
+    p.VoteCount AS PostVoteCount
+FROM 
+    UserStats u
+JOIN 
+    PostStats p ON u.UserId = p.OwnerUserId
+ORDER BY 
+    u.Reputation DESC, p.Score DESC
+FETCH FIRST 100 ROWS ONLY;

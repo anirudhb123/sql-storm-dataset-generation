@@ -1,0 +1,73 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s_store_sk,
+        ws_sold_date_sk,
+        SUM(ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY s_store_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    JOIN 
+        store ON ws_store_sk = s_store_sk
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        s_store_sk, ws_sold_date_sk
+),
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS return_count,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        sr_customer_sk
+),
+ReturnStats AS (
+    SELECT 
+        rs.s_store_sk,
+        COALESCE(SUM(cr.total_return_amt), 0) AS total_return,
+        COALESCE(SUM(cr.return_count), 0) AS return_frequency
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        CustomerReturns cr ON rs.s_store_sk = cr.s_store_sk
+    GROUP BY 
+        rs.s_store_sk
+),
+FinalStats AS (
+    SELECT
+        r.s_store_sk,
+        r.total_sales,
+        rs.total_return,
+        rs.return_frequency,
+        (r.total_sales - rs.total_return) AS net_sales,
+        CASE 
+            WHEN r.total_sales = 0 THEN 0 
+            ELSE (rs.total_return / r.total_sales) * 100 
+        END AS return_rate
+    FROM 
+        RankedSales r
+    JOIN 
+        ReturnStats rs ON r.s_store_sk = rs.s_store_sk
+)
+SELECT 
+    s.s_store_id,
+    s.s_store_name,
+    f.total_sales,
+    f.total_return,
+    f.return_frequency,
+    f.net_sales,
+    f.return_rate
+FROM 
+    FinalStats f
+JOIN 
+    store s ON f.s_store_sk = s.s_store_sk
+WHERE 
+    f.return_rate > 10
+ORDER BY 
+    f.return_rate DESC
+FETCH FIRST 10 ROWS ONLY;

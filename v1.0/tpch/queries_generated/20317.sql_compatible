@@ -1,0 +1,103 @@
+
+WITH RECURSIVE PriceCTE AS (
+    SELECT 
+        ps_partkey,
+        ps_suppkey,
+        ps_supplycost,
+        1 AS recursion_level
+    FROM 
+        partsupp
+    WHERE 
+        ps_supplycost IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ps.partkey,
+        ps.suppkey,
+        ps.ps_supplycost * (1 + 0.05 * recursion_level) AS ps_supplycost,
+        recursion_level + 1
+    FROM 
+        partsupp ps
+    INNER JOIN 
+        PriceCTE p ON ps.partkey = p.ps_partkey
+    WHERE 
+        recursion_level < 3
+),
+
+RegionSuppliers AS (
+    SELECT 
+        n.n_name AS nation,
+        r.r_name AS region,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        n.n_name, r.r_name
+),
+
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS returning_items,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' 
+        AND l.l_shipdate BETWEEN '1995-01-01' AND '1998-10-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice IS NOT NULL
+),
+
+FinalOutput AS (
+    SELECT 
+        rs.nation,
+        rs.region,
+        ps.ps_partkey,
+        SUM(os.total_revenue) AS total_order_rev,
+        MAX(CASE WHEN f.rank <= 5 THEN f.o_totalprice ELSE NULL END) AS high_price_threshold
+    FROM 
+        RegionSuppliers rs
+    LEFT JOIN 
+        PriceCTE ps ON ps.ps_partkey IN (SELECT sr.ps_partkey FROM supplier sr WHERE sr.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = rs.nation))
+    LEFT JOIN 
+        OrderStats os ON os.o_orderkey IN (SELECT o.o_orderkey FROM FilteredOrders f WHERE f.rank <= 10)
+    GROUP BY 
+        rs.nation, rs.region, ps.ps_partkey
+    HAVING 
+        (SUM(os.total_order_rev) > 1000 OR MAX(high_price_threshold) IS NULL)
+
+)
+
+SELECT 
+    f.nation,
+    f.region,
+    f.ps_partkey,
+    COALESCE(f.total_order_rev, 0) AS total_order_rev,
+    TRIM(CONCAT('High price: ', COALESCE(CAST(f.high_price_threshold AS VARCHAR), 'None'))) AS high_price_info
+FROM 
+    FinalOutput f
+ORDER BY 
+    f.region, f.nation, f.ps_partkey;

@@ -1,0 +1,106 @@
+WITH RECURSIVE UserBadges AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        B.Name AS BadgeName, 
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY B.Date DESC) AS BadgeRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 100
+    GROUP BY 
+        U.Id
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS Count
+    FROM 
+        Tags T
+    INNER JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        Count DESC
+    LIMIT 5
+),
+PostEngagement AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        COALESCE(V.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(V.DownVoteCount, 0) AS DownVoteCount,
+        (COALESCE(V.UpVoteCount, 0) - COALESCE(V.DownVoteCount, 0)) AS NetScore,
+        P.CreationDate
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.UserDisplayName,
+        PH.CreationDate,
+        STRING_AGG(PH.Comment, ', ') AS HistoryComments
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId, PH.UserDisplayName, PH.CreationDate
+)
+
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    UB.BadgeName,
+    P.Title AS PostTitle,
+    PE.UpVoteCount,
+    PE.DownVoteCount,
+    PE.NetScore,
+    TH.TagName AS PopularTag
+FROM 
+    TopUsers U
+LEFT JOIN 
+    UserBadges UB ON U.UserId = UB.UserId AND UB.BadgeRank = 1
+LEFT JOIN 
+    PostEngagement PE ON U.UserId = PE.OwnerUserId
+LEFT JOIN 
+    RecentPostHistory RPH ON PE.Id = RPH.PostId
+LEFT JOIN 
+    (
+        SELECT 
+            TagName
+        FROM 
+            PopularTags
+    ) TH ON PE.Id = TH.TagName
+ORDER BY 
+    U.Reputation DESC,
+    PE.NetScore DESC;

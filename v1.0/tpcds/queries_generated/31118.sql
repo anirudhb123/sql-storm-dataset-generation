@@ -1,0 +1,42 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, 0 AS level
+    FROM customer
+    WHERE c_customer_sk IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, ch.level + 1
+    FROM customer c
+    JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    JOIN customer_hierarchy ch ON c.c_customer_sk = ch.c_customer_sk
+    WHERE ch.level < 3
+),
+sales_data AS (
+    SELECT 
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        d.d_date,
+        ROW_NUMBER() OVER (PARTITION BY d.d_date ORDER BY ws.ws_net_paid DESC) AS rn
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2023 AND ws.ws_net_paid > 100
+)
+SELECT 
+    ca.ca_city,
+    SUM(sd.ws_sales_price * sd.ws_quantity) AS total_sales,
+    COUNT(DISTINCT ch.c_customer_sk) AS unique_customers
+FROM customer_address ca
+LEFT OUTER JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN sales_data sd ON sd.rn <= 10
+JOIN customer_hierarchy ch ON c.c_customer_sk = ch.c_customer_sk
+WHERE ca.ca_state = 'CA'
+AND CASE 
+        WHEN ch.level = 0 THEN sd.ws_net_paid IS NOT NULL
+        ELSE sd.ws_net_paid IS NULL
+    END
+GROUP BY ca.ca_city
+HAVING SUM(sd.ws_sales_price * sd.ws_quantity) > 10000
+ORDER BY total_sales DESC
+FETCH FIRST 20 ROWS ONLY;

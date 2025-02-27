@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CAST('2024-10-01' AS DATE)) 
+        AND p.Score > 0
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS Questions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS Answers,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(u.Reputation) AS MaxReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.DisplayName,
+    us.MaxReputation,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(cp.FirstClosedDate, 'No Closure') AS ClosureDate,
+    us.Questions,
+    us.Answers,
+    us.UpVotes,
+    us.DownVotes
+FROM 
+    UserStatistics us
+JOIN 
+    Users up ON us.UserId = up.Id
+LEFT JOIN 
+    RankedPosts rp ON up.Id = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    us.Questions > 5 
+    AND us.MaxReputation > 1000
+ORDER BY 
+    us.MaxReputation DESC, 
+    rp.Score DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

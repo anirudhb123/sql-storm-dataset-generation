@@ -1,0 +1,49 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1996-01-01'
+),
+SupplierTotal AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_suppkey
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        r.r_name AS region_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 500 AND r.r_name IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name, r.r_name
+)
+SELECT 
+    fc.c_name,
+    fc.region_name,
+    fc.total_spent,
+    st.total_supply_cost,
+    st.part_count,
+    CASE 
+        WHEN fc.total_spent > 10000 THEN 'High Value Customer'
+        WHEN fc.total_spent BETWEEN 5000 AND 10000 THEN 'Moderate Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_value,
+    (SELECT COUNT(*) FROM RankedOrders ro WHERE ro.o_orderstatus = 'F') AS finished_orders_count
+FROM FilteredCustomers fc
+JOIN SupplierTotal st ON st.part_count > 5
+LEFT JOIN RankedOrders ro ON fc.total_spent > 1000 AND ro.o_orderdate = DATE '1998-10-01'
+WHERE fc.total_spent IS NOT NULL AND st.total_supply_cost IS NOT NULL
+ORDER BY fc.total_spent DESC, customer_value;

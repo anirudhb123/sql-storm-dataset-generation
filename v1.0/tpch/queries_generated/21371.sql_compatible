@@ -1,0 +1,58 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        DENSE_RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank,
+        (SELECT COUNT(*) FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey) AS part_count
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+AvailableParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        ps.ps_availqty,
+        COALESCE(SUM(li.l_quantity), 0) AS total_quantity_sold,
+        CASE WHEN ps.ps_availqty - COALESCE(SUM(li.l_quantity), 0) < 0 THEN 'Out of Stock' ELSE 'In Stock' END AS stock_status
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice, ps.ps_availqty
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_mktsegment = 'BUILDING'
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    rp.s_suppkey,
+    rp.s_name,
+    ap.p_name,
+    ap.p_retailprice,
+    ap.stock_status,
+    co.c_name,
+    co.order_count,
+    co.avg_order_value
+FROM RankedSuppliers rp
+FULL OUTER JOIN AvailableParts ap ON rp.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey IN (
+        SELECT p.p_partkey 
+        FROM part p 
+        WHERE p.p_size > 30
+    )
+)
+LEFT JOIN CustomerOrders co ON co.order_count >= 3
+WHERE (rp.rank <= 3 OR ap.stock_status = 'In Stock')
+ORDER BY rp.s_suppkey, ap.p_retailprice DESC
+LIMIT 100 OFFSET 20;

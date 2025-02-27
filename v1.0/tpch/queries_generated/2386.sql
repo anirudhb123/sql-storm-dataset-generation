@@ -1,0 +1,67 @@
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        r.r_regionkey,
+        r.r_name,
+        n.n_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    ns.n_name, 
+    nr.r_name,
+    AVG(cs.total_order_value) AS avg_customer_order_value,
+    SUM(ss.total_cost) AS total_supplier_cost,
+    CASE 
+        WHEN COUNT(DISTINCT ss.s_suppkey) > 5 THEN 'Major Supplier Base'
+        ELSE 'Limited Supplier Base'
+    END AS supplier_base_category
+FROM 
+    CustomerOrderSummary cs
+JOIN 
+    customer c ON cs.c_custkey = c.c_custkey
+JOIN 
+    NationRegion nr ON c.c_nationkey = nr.n_nationkey
+LEFT JOIN 
+    SupplierSummary ss ON substantial_cost(AVG(cs.total_order_value), MAX(cs.total_order_value))
+GROUP BY 
+    ns.n_name, nr.r_name
+HAVING 
+    avg_customer_order_value > (
+        SELECT AVG(total_order_value) 
+        FROM CustomerOrderSummary 
+        WHERE total_order_value IS NOT NULL
+    )
+ORDER BY 
+    total_supplier_cost DESC;

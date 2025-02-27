@@ -1,0 +1,47 @@
+WITH PostStats AS (
+    SELECT 
+        P.PostTypeId,
+        COUNT(*) AS TotalPosts,
+        AVG(V.Score) AS AverageScore,
+        SUM(CASE WHEN P.ViewCount IS NOT NULL THEN P.ViewCount ELSE 0 END) AS TotalViewCount,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalComments,
+        SUM(CASE WHEN A.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalAnswers
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Posts A ON P.Id = A.ParentId
+    GROUP BY 
+        P.PostTypeId
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        AVG(U.Reputation) AS AverageReputation
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    P.PostTypeId,
+    PS.TotalPosts,
+    PS.AverageScore,
+    PS.TotalViewCount,
+    PS.TotalComments,
+    PS.TotalAnswers,
+    US.UserId,
+    US.TotalBadges,
+    US.AverageReputation
+FROM 
+    PostStats PS
+JOIN 
+    UserStats US ON US.UserId = PS.PostTypeId
+ORDER BY 
+    PS.TotalPosts DESC;

@@ -1,0 +1,69 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000.00
+), 
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        DENSE_RANK() OVER (ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        EXISTS (
+            SELECT 1 
+            FROM lineitem l 
+            WHERE l.l_orderkey = o.o_orderkey AND l.l_returnflag = 'R'
+        )
+), 
+PartSupplierSum AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COALESCE(MAX(s.s_name), 'No Supplier') AS Supplier_Name,
+    COALESCE(SUM( CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity END), 0) AS Returned_Quantity,
+    COALESCE(SUM( CASE WHEN l.l_linestatus = 'O' THEN l.l_extendedprice * (1 - l.l_discount) END), 0) AS Total_Sales,
+    ps.total_cost,
+    r.r_name,
+    n.n_name
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers s ON s.s_suppkey = ps.ps_suppkey AND s.rn = 1
+LEFT JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice < 50.00) 
+    AND (p.p_comment LIKE '%bizarre%' OR p.p_comment IS NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, ps.total_cost, r.r_name, n.n_name
+HAVING 
+    COUNT(DISTINCT l.l_orderkey) > 10 
+    AND SUM(l.l_quantity) / NULLIF(SUM(l.l_extendedprice), 0) < 0.5
+ORDER BY 
+    Total_Sales DESC, Returned_Quantity ASC
+FETCH FIRST 50 ROWS ONLY;

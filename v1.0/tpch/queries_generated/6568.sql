@@ -1,0 +1,29 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+),
+recent_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_mktsegment
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATEADD(month, -1, CURRENT_DATE)
+),
+part_supplier_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           AVG(ps.ps_supplycost) AS avg_cost, COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT sh.s_suppkey, sh.s_name, sh.level,
+       ro.o_orderkey, ro.o_totalprice, ro.o_orderdate, ro.c_mktsegment,
+       ps.p_partkey, ps.p_name, ps.total_cost, ps.avg_cost, ps.unique_suppliers
+FROM supplier_hierarchy sh
+JOIN recent_orders ro ON ro.c_mktsegment = (SELECT c.c_mktsegment FROM customer c WHERE c.c_nationkey = sh.s_nationkey LIMIT 1)
+JOIN part_supplier_summary ps ON ps.total_cost > (SELECT AVG(total_cost) FROM part_supplier_summary)
+ORDER BY sh.level, ro.o_orderdate DESC, ps.total_cost DESC
+LIMIT 100;

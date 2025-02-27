@@ -1,0 +1,101 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankPerUser
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        p.Id
+),
+PostMetrics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        ur.Reputation,
+        ur.BadgeCount,
+        COALESCE(cp.LastClosedDate, 'No Closures') AS LastClosedDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+),
+PostAnalytics AS (
+    SELECT 
+        PM.*,
+        CASE 
+            WHEN PM.Score IS NULL THEN 'Unscored'
+            WHEN PM.Score > 10 THEN 'Highly Scored'
+            ELSE 'Moderately Scored'
+        END AS ScoreCategory,
+        CASE
+            WHEN PM.CommentCount < 5 THEN 'Low Engagement'
+            WHEN PM.CommentCount BETWEEN 5 AND 15 THEN 'Moderate Engagement'
+            ELSE 'High Engagement'
+        END AS EngagementCategory,
+        CASE 
+            WHEN PM.Reputation > 2000 THEN 'Veteran User' 
+            WHEN PM.Reputation IS NOT NULL THEN 'Emerging User'
+            ELSE 'Unknown User'
+        END AS UserType
+    FROM 
+        PostMetrics PM
+)
+SELECT 
+    PA.*,
+    STRING_AGG(CASE WHEN PA.RankPerUser = 1 THEN PA.Title END, ', ') AS RecentTopPosts,
+    CASE 
+        WHEN PA.LastClosedDate = 'No Closures' THEN 'Active'
+        ELSE 'Closed'
+    END AS PostStatus,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = PA.PostId AND v.VoteTypeId = 2) AS UpvoteCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = PA.PostId AND v.VoteTypeId = 3) AS DownvoteCount
+FROM 
+    PostAnalytics PA
+GROUP BY 
+    PA.PostId, PA.Title, PA.CreationDate, PA.Score, PA.ViewCount, PA.CommentCount,
+    PA.Reputation, PA.BadgeCount, PA.LastClosedDate, PA.ScoreCategory, 
+    PA.EngagementCategory, PA.UserType
+ORDER BY 
+    PA.CreationDate DESC
+LIMIT 100;

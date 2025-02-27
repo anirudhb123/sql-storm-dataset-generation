@@ -1,0 +1,56 @@
+
+WITH RankedMovies AS (
+    SELECT
+        t.title,
+        t.production_year,
+        k.keyword,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM
+        title t
+    JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    JOIN
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE
+        t.production_year >= 2000
+        AND k.keyword LIKE '%action%'
+),
+TopMovies AS (
+    SELECT
+        title,
+        production_year,
+        keyword,
+        company_type
+    FROM
+        RankedMovies
+    WHERE
+        year_rank <= 5
+)
+SELECT
+    tm.title,
+    tm.production_year,
+    tm.keyword,
+    tm.company_type,
+    COUNT(CASE WHEN co.employee_count IS NOT NULL THEN 1 END) AS affiliated_companies
+FROM
+    TopMovies tm
+LEFT JOIN (
+    SELECT
+        mc.movie_id,
+        COUNT(cn.id) AS employee_count
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY
+        mc.movie_id
+) co ON tm.title = co.movie_id
+GROUP BY
+    tm.title, tm.production_year, tm.keyword, tm.company_type
+ORDER BY
+    tm.production_year DESC, tm.title;

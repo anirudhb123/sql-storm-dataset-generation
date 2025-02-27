@@ -1,0 +1,100 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        OwnerUserId, 
+        AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts 
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+TopAnswers AS (
+    SELECT 
+        p.Id AS AnswerId,
+        p.ParentId AS QuestionId,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.ParentId ORDER BY p.Score DESC) AS AnswerRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        MIN(ph.CreationDate) OVER(PARTITION BY ph.PostId) AS FirstClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+RecentPostLinks AS (
+    SELECT 
+        pl.PostId,
+        COUNT(*) AS RelatedPostCount
+    FROM 
+        PostLinks pl
+    WHERE 
+        pl.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 DAY'
+    GROUP BY 
+        pl.PostId
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COALESCE(ua.DisplayName, 'Community User') AS OwnerDisplayName,
+    COALESCE(ua.Reputation, 0) AS OwnerReputation,
+    r.Level AS PostHierarchyLevel,
+    ta.AnswerId AS BestAnswerId,
+    ta.Score AS BestAnswerScore,
+    cp.FirstClosedDate,
+    rph.Title AS RelatedPostTitle,
+    p.CreatedDate,
+    COALESCE(rp.RelatedPostCount, 0) AS RelatedPostCount
+FROM 
+    Posts p
+LEFT JOIN 
+    UserReputation ua ON p.OwnerUserId = ua.UserId
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.Id
+LEFT JOIN 
+    TopAnswers ta ON p.Id = ta.QuestionId AND ta.AnswerRank = 1
+LEFT JOIN 
+    ClosedPosts cp ON p.Id = cp.PostId
+LEFT JOIN 
+    RecentPostLinks rp ON p.Id = rp.PostId
+LEFT JOIN 
+    Posts rph ON p.Id = rph.ParentId
+WHERE 
+    p.PostTypeId = 1 
+    AND (p.ViewCount > 100 OR ta.Score IS NOT NULL) 
+ORDER BY 
+    p.CreatedDate DESC
+LIMIT 100;

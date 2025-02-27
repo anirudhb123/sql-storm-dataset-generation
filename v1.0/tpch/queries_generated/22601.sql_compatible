@@ -1,0 +1,40 @@
+
+WITH CTE_Supplier AS (
+    SELECT s_nationkey, SUM(s_acctbal) AS total_acctbal
+    FROM supplier
+    GROUP BY s_nationkey
+),
+CTE_LineItem AS (
+    SELECT l_orderkey, SUM(l_extendedprice * (1 - l_discount)) AS total_price
+    FROM lineitem
+    WHERE l_shipdate <= CAST('1998-10-01' AS DATE)
+    GROUP BY l_orderkey
+),
+CTE_OrderStatus AS (
+    SELECT o_orderkey, o_orderstatus, ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_totalprice DESC) AS rn
+    FROM orders
+    WHERE o_orderdate > DATEADD(YEAR, -1, CAST('1998-10-01' AS DATE))
+)
+SELECT
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    COALESCE(SUM(ps.total_acctbal), 0) AS total_available_quantity,
+    AVG(CASE WHEN l.l_shipmode = 'AIR' THEN l.l_extendedprice END) AS avg_air_price,
+    COUNT(DISTINCT CASE WHEN o.rn = 1 THEN o.o_orderkey END) AS top_orders_count,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS popular_parts,
+    CASE
+        WHEN SUM(l.l_quantity) IS NULL THEN 'No sales'
+        ELSE 'Sales data available'
+    END AS sales_status
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+FULL OUTER JOIN CTE_Supplier ps ON n.n_nationkey = ps.s_nationkey
+LEFT JOIN CTE_LineItem l ON c.c_custkey = l.l_orderkey
+LEFT JOIN CTE_OrderStatus o ON o.o_orderkey = l.l_orderkey
+LEFT JOIN part p ON l.l_partkey = p.p_partkey
+WHERE n.n_name IS NOT NULL
+  AND (c.c_acctbal > 500.00 OR ps.total_acctbal IS NULL)
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+  AND (SUM(l.l_extendedprice) IS NOT NULL OR SUM(ps.total_acctbal) < 1000.00)
+ORDER BY n.n_name DESC;

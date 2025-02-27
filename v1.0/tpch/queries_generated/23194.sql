@@ -1,0 +1,51 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank_by_acctbal,
+        COUNT(*) OVER (PARTITION BY s.n_nationkey) AS total_suppliers
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'No Balance'
+            WHEN c.c_acctbal <= (SELECT AVG(c2.c_acctbal) FROM customer c2) THEN 'Below Average'
+            ELSE 'Above Average'
+        END AS balance_status
+    FROM customer c 
+    WHERE c.c_acctbal IS NOT NULL
+),
+PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        (ps.ps_availqty * ps.ps_supplycost) AS total_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 100)
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(CASE WHEN h.balance_status = 'Above Average' THEN 1 ELSE 0 END) AS above_average_count,
+    SUM(CASE WHEN h.balance_status = 'Below Average' THEN 1 ELSE 0 END) AS below_average_count,
+    SUM(COALESCE(pi.total_cost, 0)) AS total_part_cost,
+    AVG(COALESCE(ss.s_acctbal, 0)) AS avg_supplier_balance
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN HighValueCustomers h ON n.n_nationkey = h.c_nationkey
+LEFT JOIN RankedSuppliers ss ON n.n_nationkey = ss.s_suppkey
+LEFT JOIN PartSupplierInfo pi ON pi.p_partkey = ss.s_suppkey
+WHERE r.r_name IS NOT NULL
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > (SELECT COUNT(*) FROM customer) / 10
+ORDER BY total_customers DESC
+LIMIT 5;

@@ -1,0 +1,82 @@
+WITH RecursivePostTree AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        a.CreationDate,
+        rpt.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostTree rpt ON a.ParentId = rpt.PostId
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 4 THEN 1 ELSE 0 END), 0) AS OffensiveVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rpt.PostId,
+    rpt.Title,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation AS OwnerReputation,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    pvs.OffensiveVotes,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    CASE 
+        WHEN pvs.UpVotes - pvs.DownVotes > 0 THEN 'Positive' 
+        WHEN pvs.UpVotes - pvs.DownVotes < 0 THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS VoteSentiment,
+    COUNT(c.Id) AS CommentCount
+FROM 
+    RecursivePostTree rpt
+JOIN 
+    Users u ON rpt.OwnerUserId = u.Id
+JOIN 
+    PostVoteStats pvs ON rpt.PostId = pvs.PostId
+LEFT JOIN 
+    Comments c ON rpt.PostId = c.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+GROUP BY 
+    rpt.PostId, rpt.Title, u.DisplayName, u.Reputation, pvs.UpVotes, pvs.DownVotes, pvs.OffensiveVotes, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+ORDER BY 
+    VoteSentiment DESC, rpt.CreationDate DESC;

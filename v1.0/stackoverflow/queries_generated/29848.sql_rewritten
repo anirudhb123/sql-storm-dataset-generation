@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        p.CreationDate,
+        p.AnswerCount,
+        p.ViewCount,
+        pt.Name AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS RankByViews
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months' 
+      AND 
+        p.PostTypeId = 1  
+),
+FrequentTags AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(p.Tags, '> <'))) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(*) > 5  
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.OwnerDisplayName,
+        rp.OwnerReputation,
+        rp.CreationDate,
+        rp.AnswerCount,
+        rp.ViewCount,
+        rp.PostType
+    FROM 
+        RankedPosts rp
+    JOIN 
+        FrequentTags ft ON rp.Tags ILIKE '%' || ft.Tag || '%' 
+    WHERE 
+        rp.RankByViews <= 10  
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.OwnerDisplayName,
+    fp.OwnerReputation,
+    fp.CreationDate,
+    fp.AnswerCount,
+    fp.ViewCount,
+    fp.PostType
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.ViewCount DESC;

@@ -1,0 +1,55 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COALESCE(MAX(CASE WHEN v.VoteTypeId = 2 THEN v.CreationDate END), DATE '1970-01-01') AS LastUpvoteDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalBounties,
+    COUNT(ch.Comment) AS CommentCount,
+    MAX(ch.CreationDate) AS LastCommentDate,
+    (SELECT COUNT(1) FROM RankedPosts rp WHERE rp.OwnerUserId = ua.UserId AND rp.PostRank <= 3) AS RecentTopQuestions,
+    CASE 
+        WHEN ua.TotalBounties > 0 THEN 'Has Bounties'
+        ELSE 'No Bounties'
+    END AS BountyStatus,
+    CASE 
+        WHEN DATEDIFF(TIMESTAMP '2024-10-01 12:34:56', ua.LastUpvoteDate) < 30 THEN 'Active User'
+        ELSE 'Inactive User'
+    END AS UserActivityStatus
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    Comments ch ON ch.UserId = ua.UserId
+GROUP BY 
+    ua.DisplayName, ua.TotalPosts, ua.TotalBounties, ua.LastUpvoteDate
+HAVING 
+    COUNT(DISTINCT ch.Id) > 5 
+ORDER BY 
+    ua.TotalPosts DESC, ua.TotalBounties DESC;

@@ -1,0 +1,51 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY 
+        cd.cd_demo_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status
+),
+IncomeStats AS (
+    SELECT 
+        hd.hd_income_band_sk,
+        COUNT(DISTINCT cs.ss_ticket_number) AS total_store_sales,
+        SUM(cs.ss_net_paid) AS total_store_sales_value
+    FROM household_demographics hd
+    JOIN store_sales cs ON hd.hd_demo_sk = cs.ss_customer_sk
+    GROUP BY hd.hd_income_band_sk
+),
+WarehouseSales AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws.ws_quantity) AS total_web_sales,
+        SUM(ws.ws_net_paid) AS total_web_sales_value
+    FROM warehouse w
+    JOIN web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY w.w_warehouse_id
+)
+SELECT 
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.cd_education_status,
+    is.total_store_sales,
+    is.total_store_sales_value,
+    ws.total_web_sales,
+    ws.total_web_sales_value
+FROM CustomerStats cs
+LEFT JOIN IncomeStats is ON cs.cd_demo_sk = is.hd_income_band_sk
+LEFT JOIN WarehouseSales ws ON cs.cd_demo_sk = ws.w_warehouse_id
+WHERE cs.total_spent > 1000
+ORDER BY cs.cd_gender, cs.cd_marital_status;

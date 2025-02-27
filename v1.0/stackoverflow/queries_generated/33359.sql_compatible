@@ -1,0 +1,97 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) 
+), UserScore AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        COALESCE(p1.UserDisplayName, 'N/A') AS AcceptedAnswerer,
+        COALESCE(uc.UserCount, 0) AS UserContributionCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(DISTINCT ph.UserDisplayName) AS EditCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts p1 ON p.AcceptedAnswerId = p1.Id
+    LEFT JOIN 
+        (SELECT 
+             PostId, COUNT(*) AS UserCount
+         FROM 
+             Votes
+         GROUP BY 
+             PostId) uc ON p.Id = uc.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CAST('2024-10-01' AS DATE))
+    GROUP BY 
+        p.Id, p1.UserDisplayName, uc.UserCount
+), FinalMetrics AS (
+    SELECT 
+        pm.PostId,
+        pm.Title,
+        pm.Score,
+        pm.ViewCount,
+        pm.AcceptedAnswerer,
+        pm.UserContributionCount,
+        pm.CommentCount,
+        pm.TotalBounty,
+        pm.EditCount,
+        us.TotalUpVotes,
+        us.TotalDownVotes,
+        us.BadgeCount
+    FROM 
+        PostMetrics pm
+    LEFT JOIN 
+        UserScore us ON pm.UserContributionCount = us.UserId
+)
+SELECT 
+    fm.PostId,
+    fm.Title, 
+    fm.Score,
+    fm.ViewCount,
+    fm.AcceptedAnswerer,
+    fm.UserContributionCount,
+    fm.CommentCount,
+    COALESCE(fm.TotalBounty, 0) AS TotalBounty,
+    fm.EditCount,
+    fm.TotalUpVotes,
+    fm.TotalDownVotes,
+    CASE WHEN fm.BadgeCount IS NULL THEN 'No Badges' ELSE CAST(fm.BadgeCount AS VARCHAR) END AS BadgeStatus
+FROM 
+    FinalMetrics fm
+LEFT JOIN 
+    Users u ON fm.UserContributionCount = u.Id
+WHERE 
+    (fm.Score > 10 OR fm.UserContributionCount > 0)
+ORDER BY 
+    fm.Score DESC, fm.ViewCount DESC;

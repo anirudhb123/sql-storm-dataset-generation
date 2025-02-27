@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM title m
+    WHERE m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM title m
+    INNER JOIN movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+ActorPerformance AS (
+    SELECT
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        COUNT(ci.movie_id) AS total_movies,
+        AVG(m.production_year) AS avg_movie_year,
+        STRING_AGG(DISTINCT mt.title, ', ') AS featured_movies
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    JOIN title mt ON ci.movie_id = mt.id
+    JOIN aka_title at ON mt.id = at.movie_id
+    LEFT JOIN movie_info mi ON mt.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'box office')
+    LEFT JOIN MovieHierarchy mh ON mh.movie_id = mt.id
+    WHERE ak.name IS NOT NULL
+    GROUP BY a.id, ak.name
+),
+TopActors AS (
+    SELECT
+        actor_id,
+        actor_name,
+        total_movies,
+        avg_movie_year,
+        featured_movies,
+        ROW_NUMBER() OVER (ORDER BY total_movies DESC) AS rn
+    FROM ActorPerformance
+)
+SELECT 
+    ta.actor_name,
+    ta.total_movies,
+    ta.avg_movie_year,
+    ta.featured_movies,
+    mv.title AS linked_movie,
+    mv.production_year AS linked_production_year,
+    CASE 
+        WHEN mi.info IS NULL THEN 'N/A'
+        ELSE mi.info
+    END AS box_office_info
+FROM TopActors ta
+LEFT JOIN movie_info mi ON ta.actor_id = mi.movie_id
+LEFT JOIN MovieHierarchy mv ON mv.movie_id = ta.actor_id
+WHERE ta.rn <= 10
+ORDER BY ta.total_movies DESC;
+
+This SQL query includes:
+
+- Recursive Common Table Expression (CTE) `MovieHierarchy` that builds a hierarchy of movies and their linked movies.
+- A second CTE `ActorPerformance` that aggregates actor performance data by counting movies and calculating average production year.
+- A `ROW_NUMBER()` window function to rank actors based on the total number of movies they are associated with.
+- The main query SELECTs data from the two CTEs and uses left joins to pull in additional information such as box office data.
+- A conditional expression that handles NULL box office information.
+- The final result limits to the top 10 actors based on their movie counts and orders by the total number of movies descending.

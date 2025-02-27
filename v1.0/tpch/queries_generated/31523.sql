@@ -1,0 +1,42 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) as order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+), 
+PartSuppliers AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), 
+RegionSales AS (
+    SELECT n.n_name AS region_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2024-01-01'
+    GROUP BY n.n_name
+), 
+SupplierPerformance AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+           RANK() OVER (ORDER BY COUNT(DISTINCT ps.ps_partkey) DESC) as supplier_rank
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+
+SELECT DISTINCT c.c_name, coalesce(r.region_name, 'Unknown') AS region, 
+                SUM(r.total_sales) AS regional_sales, 
+                sp.total_parts AS unique_parts_supplied,
+                CASE WHEN cp.order_rank <= 5 THEN 'Top Customer' 
+                     ELSE 'Regular Customer' END AS customer_type
+FROM customer c
+LEFT JOIN CustomerOrders cp ON c.c_custkey = cp.c_custkey
+LEFT JOIN RegionSales r ON c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)
+LEFT JOIN SupplierPerformance sp ON sp.total_parts > 3 
+WHERE c.c_acctbal IS NOT NULL
+GROUP BY c.c_name, r.region_name, sp.total_parts, cp.order_rank
+HAVING SUM(r.total_sales) > 10000
+ORDER BY regional_sales DESC NULLS LAST;

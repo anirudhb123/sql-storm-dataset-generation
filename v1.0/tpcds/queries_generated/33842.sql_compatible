@@ -1,0 +1,57 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_net_profit,
+        1 AS level
+    FROM
+        web_sales
+    WHERE
+        ws_sales_price IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        cs_item_sk,
+        cs_order_number,
+        cs_sales_price,
+        cs_net_profit,
+        level + 1
+    FROM
+        catalog_sales cs
+    JOIN SalesCTE s ON cs.cs_item_sk = s.ws_item_sk
+    WHERE
+        cs.cs_sales_price IS NOT NULL
+)
+SELECT
+    it.i_item_id,
+    SUM(COALESCE(ws.ws_net_profit, 0) + COALESCE(cs.cs_net_profit, 0)) AS total_profit,
+    RANK() OVER (ORDER BY SUM(COALESCE(ws.ws_net_profit, 0) + COALESCE(cs.cs_net_profit, 0)) DESC) AS profit_rank,
+    COUNT(DISTINCT ws.ws_order_number) AS web_orders,
+    COUNT(DISTINCT cs.cs_order_number) AS catalog_orders
+FROM
+    item it
+LEFT JOIN web_sales ws ON it.i_item_sk = ws.ws_item_sk
+LEFT JOIN catalog_sales cs ON it.i_item_sk = cs.cs_item_sk
+LEFT JOIN SalesCTE s ON it.i_item_sk = s.ws_item_sk
+WHERE
+    (ws.ws_sales_price > 20 OR cs.cs_sales_price > 20)
+    AND it.i_current_price < (SELECT AVG(i_current_price) FROM item)
+    AND EXISTS (
+        SELECT 1 FROM store_sales ss
+        WHERE
+            ss.ss_item_sk = it.i_item_sk
+            AND ss.ss_sold_date_sk = (
+                SELECT MAX(ws_sold_date_sk) FROM web_sales
+                WHERE ws_item_sk = it.i_item_sk
+            )
+    )
+GROUP BY
+    it.i_item_id
+HAVING
+    SUM(COALESCE(ws.ws_net_profit, 0) + COALESCE(cs.cs_net_profit, 0)) > 1000
+ORDER BY
+    total_profit DESC
+LIMIT 10;

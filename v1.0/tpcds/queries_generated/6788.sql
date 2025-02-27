@@ -1,0 +1,54 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        c.c_customer_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_sold_date_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        ws.ws_order_number, ws.ws_sold_date_sk, c.c_customer_id
+), OrderDetails AS (
+    SELECT 
+        ro.ws_order_number,
+        ro.total_quantity,
+        ro.total_sales,
+        d.d_date AS order_date,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        RankedOrders ro
+    JOIN 
+        date_dim d ON ro.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    LEFT JOIN 
+        household_demographics hd ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT 
+    order_date,
+    COUNT(DISTINCT ws_order_number) AS order_count,
+    SUM(total_quantity) AS total_items_sold,
+    SUM(total_sales) AS total_sales_value,
+    SUM(CASE WHEN cd_gender = 'M' THEN total_quantity ELSE 0 END) AS male_items_sold,
+    SUM(CASE WHEN cd_gender = 'F' THEN total_quantity ELSE 0 END) AS female_items_sold,
+    AVG(total_sales) AS average_order_value,
+    MIN(total_sales) AS min_order_value,
+    MAX(total_sales) AS max_order_value
+FROM 
+    OrderDetails
+WHERE 
+    rank <= 10
+GROUP BY 
+    order_date
+ORDER BY 
+    order_date DESC;

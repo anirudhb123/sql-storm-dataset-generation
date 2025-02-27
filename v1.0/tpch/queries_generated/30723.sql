@@ -1,0 +1,55 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey,
+           s.s_comment, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey,
+           s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.n_nationkey = sh.n_nationkey
+    WHERE s.s_acctbal > 0 AND sh.level < 5
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 20000
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, RANK() OVER (ORDER BY ts.total_supplycost DESC) AS rank
+    FROM TopSuppliers ts
+    JOIN supplier s ON ts.s_suppkey = s.s_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS num_orders,
+           SUM(o.o_totalprice) AS total_spent,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS customer_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           CASE
+               WHEN o.o_orderstatus = 'F' THEN 'Finished'
+               ELSE 'Pending'
+           END AS order_status,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_sequence
+    FROM orders o
+)
+SELECT 
+    s.s_name AS supplier_name,
+    s.s_acctbal AS account_balance,
+    co.num_orders AS customer_order_count,
+    co.total_spent AS total_customer_spent,
+    fo.order_sequence AS latest_order_sequence
+FROM supplier s
+LEFT JOIN RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+LEFT JOIN CustomerOrderSummary co ON rs.s_suppkey = co.c_custkey
+LEFT JOIN FilteredOrders fo ON co.num_orders > 0 AND fo.o_totalprice > 1000
+WHERE rs.rank <= 10
+ORDER BY s.s_acctbal DESC, co.total_spent DESC;

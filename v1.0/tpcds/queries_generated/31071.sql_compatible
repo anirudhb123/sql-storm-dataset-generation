@@ -1,0 +1,85 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+inventory_summary AS (
+    SELECT 
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory
+    GROUP BY 
+        inv_item_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE 
+            WHEN hd.hd_income_band_sk IS NULL THEN 'UNKNOWN'
+            ELSE CAST(hd.hd_income_band_sk AS VARCHAR(255))
+        END AS income_band,
+        COUNT(DISTINCT CASE WHEN cr.cr_item_sk IS NOT NULL THEN cr.cr_order_number END) AS total_catalog_returns
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, hd.hd_income_band_sk
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.income_band,
+    COALESCE(ss.total_quantity, 0) AS total_quantity,
+    COALESCE(ss.total_sales, 0.00) AS total_sales,
+    COALESCE(is.total_inventory, 0) AS total_inventory,
+    ci.total_catalog_returns
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_summary ss ON ci.c_customer_sk = ss.ws_item_sk
+LEFT JOIN 
+    inventory_summary is ON ss.ws_item_sk = is.inv_item_sk
+WHERE 
+    ci.cd_marital_status = 'M'
+ORDER BY 
+    total_sales DESC
+LIMIT 100
+UNION ALL
+SELECT 
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.income_band,
+    COALESCE(ss.total_quantity, 0) AS total_quantity,
+    COALESCE(ss.total_sales, 0.00) AS total_sales,
+    COALESCE(is.total_inventory, 0) AS total_inventory,
+    ci.total_catalog_returns
+FROM 
+    customer_info ci
+INNER JOIN 
+    sales_summary ss ON ci.c_customer_sk = ss.ws_item_sk
+CROSS JOIN 
+    (SELECT COUNT(*) AS total_customers FROM customer) total_count
+WHERE 
+    total_count.total_customers > 1000
+AND 
+    ci.cd_gender = 'F'
+ORDER BY 
+    total_quantity DESC
+LIMIT 50;

@@ -1,0 +1,64 @@
+
+WITH customer_with_details AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+), 
+top_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c_cd_gender,
+        c.ca_state
+    FROM 
+        customer_with_details c
+    WHERE 
+        c.purchase_rank <= 5
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2450322 AND 2450721 -- Example date range
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.ca_state,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(ss.total_orders, 0) AS total_orders,
+    CASE 
+        WHEN ss.total_sales IS NULL THEN 'No Sales'
+        WHEN ss.total_sales < 1000 THEN 'Low Value'
+        ELSE 'Valuable Customer'
+    END AS customer_value,
+    (SELECT COUNT(*) 
+     FROM store_sales ss 
+     WHERE ss.ss_customer_sk = tc.c_customer_sk 
+       AND ss.ss_net_paid > (SELECT AVG(ss2.ss_net_paid) FROM store_sales ss2)) AS above_average_purchases
+FROM 
+    top_customers tc
+LEFT JOIN 
+    sales_summary ss ON tc.c_customer_sk = ss.customer_sk
+ORDER BY 
+    tc.ca_state, total_sales DESC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

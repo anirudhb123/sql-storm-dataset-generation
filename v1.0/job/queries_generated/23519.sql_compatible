@@ -1,0 +1,73 @@
+
+WITH RECURSIVE MovieCTE AS (
+    
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM movie_link ml
+    WHERE ml.movie_id IN (SELECT DISTINCT movie_id FROM movie_info WHERE info LIKE '%Oscar%')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        m.depth + 1
+    FROM movie_link ml
+    JOIN MovieCTE m ON ml.movie_id = m.linked_movie_id
+),
+RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mc.id) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT mc.id) DESC) AS rank
+    FROM title t
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year
+),
+HighestRatedMovies AS (
+    SELECT
+        m.title,
+        AVG(COALESCE(mr.rating, 0)) AS avg_rating
+    FROM title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    LEFT JOIN movie_info_idx mr ON mi.id = mr.movie_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.title
+    HAVING 
+        AVG(COALESCE(mr.rating, 0)) > 7.5
+),
+FinalResults AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.company_count,
+        hr.avg_rating
+    FROM RankedMovies rm
+    JOIN HighestRatedMovies hr ON rm.title = hr.title
+    WHERE rm.rank <= 5
+)
+SELECT 
+    fr.title,
+    fr.production_year,
+    fr.company_count,
+    fr.avg_rating,
+    CASE 
+        WHEN fr.avg_rating IS NULL THEN 'Unrated'
+        WHEN fr.avg_rating >= 9 THEN 'Critically Acclaimed'
+        ELSE 'Worth Watching'
+    END AS rating_category,
+    CASE 
+        WHEN fr.company_count > 5 THEN 'High Production'
+        WHEN fr.company_count BETWEEN 3 AND 5 THEN 'Medium Production'
+        ELSE 'Low Production'
+    END AS production_category
+FROM FinalResults fr
+ORDER BY fr.production_year DESC, fr.avg_rating DESC;

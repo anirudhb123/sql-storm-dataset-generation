@@ -1,0 +1,58 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS DownVoteCount,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) OVER (PARTITION BY p.Id) AS EditHistoryCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.OwnerUserId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(rp.Score) AS TotalScore,
+        SUM(rp.UpVoteCount) AS TotalUpVotes,
+        SUM(rp.CommentCount) AS TotalComments,
+        SUM(rp.EditHistoryCount) AS TotalEdits,
+        COUNT(rp.PostId) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalScore,
+    us.TotalUpVotes,
+    us.TotalComments,
+    us.TotalEdits,
+    us.TotalPosts,
+    RANK() OVER (ORDER BY us.TotalScore DESC) AS Rank
+FROM 
+    UserStats us
+WHERE 
+    us.TotalPosts > 0
+ORDER BY 
+    us.TotalScore DESC
+LIMIT 10;

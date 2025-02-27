@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(ci.person_id) OVER (PARTITION BY mt.id) AS cast_count,
+        AVG(CASE WHEN mt.production_year IS NOT NULL THEN mt.production_year ELSE 0 END) OVER (PARTITION BY mt.kind_id) AS avg_year_by_kind
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code IS NULL OR cn.country_code != 'NULL'
+),
+FilteredMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_count,
+        avg_year_by_kind
+    FROM 
+        RankedMovies
+    WHERE 
+        (production_year IS NOT NULL AND production_year > 1999) 
+        OR (cast_count IS NOT NULL AND cast_count > 10)
+),
+ActorsWithMoreThanOneRole AS (
+    SELECT 
+        person_id,
+        COUNT(DISTINCT role_id) AS role_count
+    FROM 
+        cast_info
+    GROUP BY 
+        person_id
+    HAVING 
+        COUNT(DISTINCT role_id) > 1
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.cast_count,
+    f.avg_year_by_kind,
+    ak.name AS actor_name,
+    r.role AS role_type
+FROM 
+    FilteredMovies f
+INNER JOIN 
+    cast_info ci ON f.movie_id = ci.movie_id
+INNER JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    role_type r ON ci.role_id = r.id
+WHERE 
+    ak.name IS NOT NULL 
+    AND ak.name NOT LIKE '%unknown%'
+    AND r.role IS NOT NULL 
+    AND EXISTS (SELECT 1 
+                FROM ActorsWithMoreThanOneRole ar
+                WHERE ar.person_id = ci.person_id)
+ORDER BY 
+    f.production_year DESC,
+    f.cast_count DESC,
+    ak.name;

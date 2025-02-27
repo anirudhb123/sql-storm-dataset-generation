@@ -1,0 +1,93 @@
+WITH BasePostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        U.Reputation AS OwnerReputation,
+        COALESCE(COUNT(CM.Id), 0) AS CommentCount,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS DownVoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments CM ON P.Id = CM.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= DATEADD(MONTH, -12, GETDATE())
+    GROUP BY 
+        P.Id, U.Reputation
+),
+RankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        CreationDate,
+        OwnerReputation,
+        CommentCount,
+        UpVoteCount,
+        DownVoteCount,
+        RANK() OVER (PARTITION BY OwnerReputation ORDER BY Score DESC) AS ScoreRank,
+        DENSE_RANK() OVER (ORDER BY OwnerReputation DESC) AS ReputationRank
+    FROM 
+        BasePostStats
+),
+
+AcceptedAnswers AS (
+    SELECT 
+        P.Id AS QuestionId,
+        A.Id AS AcceptedAnswerId,
+        A.Title AS AcceptedAnswerTitle
+    FROM 
+        Posts P
+    JOIN 
+        Posts A ON P.AcceptedAnswerId = A.Id
+    WHERE 
+        P.PostTypeId = 1
+),
+
+CommentsStatistics AS (
+    SELECT 
+        PostId, 
+        COUNT(*) AS TotalComments,
+        STRING_AGG(Text, '; ') AS AllComments
+    FROM 
+        Comments
+    WHERE 
+        CreationDate >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY 
+        PostId
+)
+
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.Score,
+    RP.CreationDate,
+    RP.OwnerReputation,
+    RP.CommentCount,
+    RP.UpVoteCount,
+    RP.DownVoteCount,
+    COALESCE(AA.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+    COALESCE(AA.AcceptedAnswerTitle, 'No accepted answer') AS AcceptedAnswerTitle,
+    COALESCE(CS.TotalComments, 0) AS TotalComments,
+    COALESCE(CS.AllComments, 'No comments') AS AllComments,
+    CASE 
+        WHEN RP.ScoreRank = 1 THEN 'Top Post'
+        ELSE 'Not Top Post'
+    END AS PostStatus
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    AcceptedAnswers AA ON RP.PostId = AA.QuestionId
+LEFT JOIN 
+    CommentsStatistics CS ON RP.PostId = CS.PostId
+WHERE 
+    RP.ReputationRank < 5
+ORDER BY 
+    RP.OwnerReputation DESC,
+    RP.Score DESC;

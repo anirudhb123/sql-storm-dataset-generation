@@ -1,0 +1,58 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        pt.Id AS PostTypeId,
+        pt.Name AS PostTypeName,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.ViewCount) AS AvgViewCount,
+        SUM(p.Score) AS TotalScore
+    FROM PostTypes pt
+    LEFT JOIN Posts p ON pt.Id = p.PostTypeId
+    GROUP BY pt.Id, pt.Name
+),
+ClosedPostStats AS (
+    SELECT 
+        cr.Id AS CloseReasonTypeId,
+        cr.Name AS CloseReasonName,
+        COUNT(p.Id) AS ClosedPostCount
+    FROM CloseReasonTypes cr
+    LEFT JOIN PostHistory ph ON cr.Id = CAST(ph.Comment AS INT) 
+    LEFT JOIN Posts p ON ph.PostId = p.Id AND ph.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    GROUP BY cr.Id, cr.Name
+)
+
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.BadgeCount,
+    us.UpVotes,
+    us.DownVotes,
+    us.TotalScore,
+    us.AvgViewCount AS UserAvgViewCount,
+    ps.PostTypeId,
+    ps.PostTypeName,
+    ps.PostCount,
+    ps.AvgViewCount AS PostAvgViewCount,
+    ps.TotalScore AS PostTotalScore,
+    cps.CloseReasonTypeId,
+    cps.CloseReasonName,
+    cps.ClosedPostCount
+FROM UserStats us
+JOIN PostStats ps ON us.UpVotes > 0 -- Example filter condition, can be adjusted
+JOIN ClosedPostStats cps ON cps.ClosedPostCount > 0 -- Example filter condition, can be adjusted
+ORDER BY us.UserId, ps.PostTypeId;

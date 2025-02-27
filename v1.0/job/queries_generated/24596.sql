@@ -1,0 +1,88 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rnk
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+HighCastMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.total_cast
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rnk <= 10
+),
+ActorInfo AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        a.surname_pcode,
+        ci.note AS role_note,
+        COUNT(DISTINCT c.movie_id) AS movies_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.person_id, a.name, a.surname_pcode, ci.note
+)
+SELECT 
+    hcm.title,
+    hcm.production_year,
+    ai.name,
+    ai.surname_pcode,
+    ai.role_note,
+    COALESCE(ai.movies_count, 0) AS movies_count,
+    CASE 
+        WHEN ai.movies_count IS NULL THEN 'No Movies'
+        WHEN ai.movies_count > 5 THEN 'Veteran Actor'
+        ELSE 'Emerging Actor'
+    END AS actor_status
+FROM 
+    HighCastMovies hcm
+LEFT JOIN 
+    ActorInfo ai ON ai.person_id IN (
+         SELECT DISTINCT c.person_id 
+         FROM cast_info c 
+         WHERE c.movie_id = hcm.movie_id
+    )
+ORDER BY 
+    hcm.production_year DESC, 
+    hcm.title ASC;
+
+-- Additional complex example with string manipulation and NULL logic
+SELECT 
+    mt.title AS movie_title,
+    COALESCE(NULLIF(mt.note, ''), 'No notes available') AS notes,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT kc.keyword, ', ') AS keyword_list,
+    CASE 
+        WHEN COUNT(DISTINCT kc.keyword) > 0 THEN 'Keywords Present'
+        ELSE 'No Keywords Found'
+    END AS keyword_status,
+    RANK() OVER (ORDER BY COUNT(DISTINCT kc.keyword) DESC) AS keyword_rank
+FROM 
+    aka_title mt
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mt.id
+LEFT JOIN 
+    keyword kc ON kc.id = mk.keyword_id
+GROUP BY 
+    mt.id, mt.title, mt.note
+HAVING 
+    mt.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    keyword_count DESC;

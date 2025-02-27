@@ -1,0 +1,58 @@
+
+WITH aggregated_sales AS (
+    SELECT 
+        w.warehouse_id,
+        SUM(ws.sales_price * ws.quantity) AS total_sales,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        AVG(ws.sales_price) AS avg_sales_price
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.warehouse_sk = w.warehouse_sk
+    JOIN 
+        date_dim d ON ws.sold_date_sk = d.date_sk
+    WHERE 
+        d.year = 2023 AND d.month_seq BETWEEN 1 AND 12
+    GROUP BY 
+        w.warehouse_id
+),
+demographics AS (
+    SELECT 
+        cd.gender,
+        SUM(a.total_sales) AS gender_sales,
+        SUM(a.total_orders) AS gender_orders
+    FROM 
+        aggregated_sales a
+    JOIN 
+        customer c ON c.current_addr_sk = a.warehouse_id
+    JOIN 
+        customer_demographics cd ON cd.demo_sk = c.current_cdemo_sk
+    GROUP BY 
+        cd.gender
+),
+income_bands AS (
+    SELECT 
+        ib.income_band_sk,
+        ib.lower_bound,
+        ib.upper_bound,
+        SUM(d.gender_sales) AS band_sales
+    FROM 
+        demographics d
+    JOIN 
+        household_demographics hd ON d.gender_orders = hd.dep_count
+    JOIN 
+        income_band ib ON hd.income_band_sk = ib.income_band_sk
+    GROUP BY 
+        ib.income_band_sk, ib.lower_bound, ib.upper_bound
+)
+SELECT 
+    ib.income_band_sk,
+    ib.lower_bound,
+    ib.upper_bound,
+    COALESCE(ibs.band_sales, 0) AS total_sales_by_income_band
+FROM 
+    income_band ib
+LEFT JOIN 
+    income_bands ibs ON ib.income_band_sk = ibs.income_band_sk
+ORDER BY 
+    ib.lower_bound;

@@ -1,0 +1,70 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.CreationDate,
+        1 AS Level,
+        CAST(U.DisplayName AS VARCHAR(1000)) AS DisplayNamePath
+    FROM Users U
+    WHERE U.Reputation > 1000 -- start from users with a good reputation
+
+    UNION ALL
+
+    SELECT 
+        U2.Id AS UserId,
+        U2.Reputation,
+        U2.CreationDate,
+        UR.Level + 1,
+        CAST(UR.DisplayNamePath || ' -> ' || U2.DisplayName AS VARCHAR(1000))
+    FROM Users U2
+    JOIN UserReputationCTE UR ON U2.Id = UR.UserId
+    WHERE U2.Reputation > 1000 AND U2.CreationDate < UR.CreationDate
+    LIMIT 10 -- limit to avoid infinite recursion
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(P.Score, 0) AS Score,
+        P.CreationDate AS PostCreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        PT.Name AS PostType,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    WHERE P.CreationDate >= '2021-01-01 00:00:00' -- filter by recent posts
+),
+RankedPosts AS (
+    SELECT 
+        PD.*,
+        RANK() OVER (PARTITION BY PD.PostType ORDER BY PD.Score DESC, PD.ViewCount DESC) AS Rank
+    FROM PostDetails PD
+    WHERE PD.Score IS NOT NULL
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName AS UserName,
+    SUM(P.ViewCount) AS TotalViews,
+    AVG(P.Score) AS AvgScore,
+    MAX(P.PostCreationDate) AS LastActivityDate,
+    STRING_AGG(DISTINCT PT.Name, ', ') AS PostTypeNames,
+    COUNT(CASE WHEN PT.Name IS NOT NULL THEN 1 END) AS PostsCount,
+    COUNT(CASE WHEN U.Reputation IS NULL THEN 0 END) AS NULLReputationCount
+FROM Users U
+LEFT JOIN RankedPosts P ON U.Id = P.OwnerDisplayName
+LEFT JOIN PostTypes PT ON P.PostType = PT.Name
+WHERE P.Rank = 1 -- only take the top-ranked posts for each type
+GROUP BY U.Id, U.DisplayName
+HAVING AVG(P.Score) > 10 OR MAX(P.ViewCount) > 1000 -- applies some aggregation filter
+ORDER BY TotalViews DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY; -- for pagination
+
+In this query:
+
+- A recursive CTE retrieves users based on their reputation.
+- A second CTE gathers the details of posts, including the owner's display name and type.
+- A third CTE ranks the posts based on their score and view count.
+- The final SELECT compiles user data, including their total views and average scores of their posts, and filters based on ranking and score criteria.
+- Common string operations and NULL handling are incorporated throughout to provide a comprehensive view of the data.

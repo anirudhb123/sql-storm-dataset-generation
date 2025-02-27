@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+), HighValueItems AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_current_price,
+        s.total_quantity,
+        s.total_sales
+    FROM item i
+    JOIN SalesCTE s ON i.i_item_sk = s.ws_item_sk
+    WHERE s.rank <= 10
+), CustomerReturns AS (
+    SELECT 
+        s.store_sk, 
+        SUM(rs.sr_return_quantity) AS total_returns
+    FROM store_returns rs
+    JOIN store s ON rs.sr_store_sk = s.s_store_sk
+    GROUP BY s.store_sk
+), StoreStatistics AS (
+    SELECT 
+        st.s_store_id,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        SUM(ws.ws_net_profit) AS net_profit
+    FROM store st
+    LEFT JOIN CustomerReturns cr ON st.s_store_sk = cr.store_sk
+    JOIN web_sales ws ON st.s_store_sk = ws.ws_store_sk
+    GROUP BY st.s_store_id, cr.total_returns
+)
+SELECT 
+    hi.i_item_id,
+    hi.total_quantity,
+    hi.total_sales,
+    ss.s_store_id,
+    ss.total_returns,
+    ss.net_profit
+FROM HighValueItems hi
+CROSS JOIN StoreStatistics ss
+WHERE hi.total_sales > (SELECT AVG(total_sales) FROM HighValueItems)
+AND ss.net_profit > (
+    SELECT AVG(net_profit) FROM StoreStatistics
+)
+ORDER BY hi.total_sales DESC, ss.net_profit DESC;

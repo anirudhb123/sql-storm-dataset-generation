@@ -1,0 +1,47 @@
+
+WITH SupplierAvgCost AS (
+    SELECT ps.s_suppkey, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.s_suppkey
+),
+CustomerOrderCount AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    GROUP BY o.o_custkey
+),
+ProductSelection AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+    HAVING COUNT(DISTINCT ps.ps_suppkey) > 5
+),
+ProductSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY l.l_partkey
+),
+CombinedData AS (
+    SELECT ps.p_partkey, ps.p_name, ps.p_brand, ps.p_retailprice,
+           COALESCE(os.total_sales, 0) AS total_sales,
+           COALESCE(sa.avg_supply_cost, 0) AS avg_supply_cost,
+           COALESCE(oc.order_count, 0) AS order_count,
+           (COALESCE(os.total_sales, 0) - COALESCE(sa.avg_supply_cost, 0)) AS profit_margin
+    FROM ProductSelection ps
+    LEFT JOIN ProductSales os ON ps.p_partkey = os.l_partkey
+    LEFT JOIN SupplierAvgCost sa ON ps.p_partkey = sa.s_suppkey
+    LEFT JOIN CustomerOrderCount oc ON oc.o_custkey = ps.p_partkey
+)
+SELECT c.r_name, COUNT(DISTINCT cd.p_partkey) AS total_products,
+       AVG(cd.profit_margin) AS avg_profit_margin
+FROM CombinedData cd
+JOIN part p ON cd.p_partkey = p.p_partkey
+JOIN nation n ON p.p_partkey = n.n_nationkey
+JOIN region c ON n.n_regionkey = c.r_regionkey
+GROUP BY c.r_name
+HAVING AVG(cd.profit_margin) > 1000
+ORDER BY avg_profit_margin DESC;

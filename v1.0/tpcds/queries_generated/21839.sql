@@ -1,0 +1,83 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_order_number, 
+        ws_item_sk, 
+        ws_quantity, 
+        ws_net_paid_inc_tax,
+        ROW_NUMBER() OVER(PARTITION BY ws_order_number ORDER BY ws_net_paid_inc_tax DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+CustomerRank AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_credit_rating,
+        COUNT(DISTINCT cs.cs_order_number) AS order_count,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY cs.cs_ext_sales_price) AS median_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id, cd.cd_gender, cd.cd_credit_rating
+),
+AggregateReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amount) AS total_returned_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returned_date_sk
+),
+ReturnDetails AS (
+    SELECT 
+        d.d_date,
+        COALESCE(a.total_returns, 0) AS returns_count,
+        COALESCE(a.total_returned_amount, 0) AS returned_amount,
+        SUM(CASE WHEN s.ws_item_sk IS NOT NULL THEN 1 ELSE 0 END) AS sold_items,
+        SUM(CASE WHEN sr.sr_return_quantity IS NOT NULL THEN sr.sr_return_quantity ELSE 0 END) AS total_return_qty
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        AggregateReturns a ON d.d_date_sk = a.sr_returned_date_sk 
+    LEFT JOIN 
+        web_sales s ON d.d_date_sk = s.ws_sold_date_sk 
+    LEFT JOIN 
+        store_returns sr ON s.ws_item_sk = sr.sr_item_sk
+    GROUP BY 
+        d.d_date
+)
+SELECT 
+    cr.c_customer_id,
+    cr.cd_gender,
+    cr.cd_credit_rating,
+    COALESCE(rr.returns_count, 0) AS returns_count,
+    rr.returned_amount,
+    rr.sold_items,
+    rr.total_return_qty,
+    SUM(sct.ws_net_paid_inc_tax) AS total_spent,
+    AVG(sct.ws_net_paid_inc_tax) AS avg_spent
+FROM 
+    CustomerRank cr
+JOIN 
+    SalesCTE sct ON cr.c_customer_sk = sct.ws_item_sk
+LEFT JOIN 
+    ReturnDetails rr ON rr.returns_count > 0
+WHERE 
+    cr.order_count > 5
+GROUP BY 
+    cr.c_customer_id, cr.cd_gender, cr.cd_credit_rating, rr.returns_count, rr.returned_amount, rr.sold_items, rr.total_return_qty
+HAVING 
+    AVG(sct.ws_net_paid_inc_tax) > (SELECT AVG(ws_net_paid_inc_tax) FROM web_sales)
+ORDER BY 
+    total_spent DESC
+LIMIT 50;

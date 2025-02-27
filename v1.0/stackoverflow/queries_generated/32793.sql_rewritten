@@ -1,0 +1,54 @@
+WITH RecursiveUserPosts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        1 AS Level
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 500
+    UNION ALL
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        PP.Id,
+        PP.Title,
+        PP.CreationDate,
+        PP.Score,
+        PP.ViewCount,
+        RP.Level + 1
+    FROM 
+        RecursiveUserPosts RP
+    JOIN 
+        Posts PP ON RP.PostId = PP.ParentId
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    COUNT(P.Id) AS TotalPosts,
+    SUM(P.ViewCount) AS TotalViews,
+    SUM(CASE WHEN P.Score > 0 THEN P.Score ELSE 0 END) AS PositiveScores,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+FROM 
+    RecursiveUserPosts U
+JOIN 
+    Posts P ON U.PostId = P.Id
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            UNNEST(string_to_array(P.Tags, ',')) AS TagName
+    ) T ON TRUE
+GROUP BY 
+    U.UserId, U.DisplayName
+HAVING 
+    COUNT(P.Id) > 10
+ORDER BY 
+    TotalPosts DESC, TotalViews DESC
+FETCH FIRST 10 ROWS ONLY;

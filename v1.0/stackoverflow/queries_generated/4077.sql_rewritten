@@ -1,0 +1,69 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation IS NOT NULL
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        Reputation
+    FROM UserReputation
+    WHERE ReputationRank <= 10
+),
+PostScores AS (
+    SELECT 
+        P.OwnerUserId,
+        SUM(P.Score) AS TotalScore,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Posts P
+    WHERE 
+        P.Score IS NOT NULL AND 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.OwnerUserId
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(PH.Comment, 'No Comments') AS LastEditComment,
+        P.CreationDate,
+        P.OwnerUserId,
+        U.DisplayName,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5, 6)
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+)
+SELECT 
+    U.DisplayName AS TopUser,
+    U.Reputation AS UserReputation,
+    PD.Title AS RecentPostTitle,
+    PD.CreationDate AS PostCreationDate,
+    PD.LastEditComment,
+    PD.Score AS PostScore,
+    PS.TotalScore AS UserTotalScore,
+    U.EmailHash
+FROM 
+    TopUsers U
+LEFT JOIN 
+    PostScores PS ON U.UserId = PS.OwnerUserId
+LEFT JOIN 
+    PostDetails PD ON U.UserId = PD.OwnerUserId AND PD.RecentPostRank = 1
+WHERE 
+    (U.Reputation > 500 OR U.Reputation IS NULL)
+ORDER BY 
+    U.Reputation DESC, PD.CreationDate DESC
+LIMIT 10;

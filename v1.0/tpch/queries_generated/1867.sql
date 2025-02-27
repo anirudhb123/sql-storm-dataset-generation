@@ -1,0 +1,54 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_sales,
+        ss.total_orders,
+        RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM 
+        supplier s
+    JOIN 
+        SupplierSales ss ON s.s_suppkey = ss.s_suppkey
+)
+SELECT 
+    r.r_name, 
+    rs.s_name, 
+    rs.total_sales, 
+    rs.total_orders,
+    CASE 
+        WHEN rs.total_orders = 0 THEN NULL 
+        ELSE rs.total_sales / rs.total_orders 
+    END AS avg_sales_per_order,
+    COUNT(DISTINCT CASE 
+        WHEN rs.total_sales > 50000 THEN rs.s_suppkey 
+        END) OVER (PARTITION BY r.r_name) AS high_sales_supplier_count
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    RankedSuppliers rs ON n.n_nationkey = (SELECT MAX(n_nationkey) FROM nation)
+WHERE 
+    rs.sales_rank <= 10 OR rs.sales_rank IS NULL
+ORDER BY 
+    r.r_name, rs.total_sales DESC;

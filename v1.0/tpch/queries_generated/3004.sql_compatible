@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+), 
+SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_availqty) AS total_available_qty
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    COALESCE(R.total_sales, 0) AS total_sales_by_part,
+    COALESCE(S.part_count, 0) AS supplier_part_count,
+    SUM(CASE WHEN R.sales_rank = 1 THEN R.total_sales ELSE 0 END) OVER (PARTITION BY n.n_nationkey) AS highest_sales_in_nation
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    RankedSales R ON R.p_partkey = (SELECT ps.ps_partkey 
+                                      FROM partsupp ps 
+                                      WHERE ps.ps_supplycost = (SELECT MAX(ps2.ps_supplycost) 
+                                                                 FROM partsupp ps2 
+                                                                 WHERE ps2.ps_partkey = R.p_partkey) 
+                                      LIMIT 1)
+LEFT JOIN 
+    SupplierSales S ON S.s_suppkey IN (SELECT ps.ps_suppkey 
+                                         FROM partsupp ps 
+                                         WHERE ps.ps_partkey IN (SELECT p.p_partkey 
+                                                                 FROM part p 
+                                                                 WHERE p.p_retailprice > 100.00))
+WHERE 
+    r.r_name LIKE '%East%'
+GROUP BY 
+    n.n_name, r.r_name, R.total_sales, S.part_count, R.sales_rank
+ORDER BY 
+    highest_sales_in_nation DESC, total_sales_by_part DESC;

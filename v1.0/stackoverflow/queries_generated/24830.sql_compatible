@@ -1,0 +1,65 @@
+
+WITH UserReputation AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostSummary AS (
+    SELECT
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(P.ViewCount) AS TotalViewCount
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+PostsWithComments AS (
+    SELECT
+        P.Id AS PostId,
+        P.OwnerUserId,
+        C.Score AS CommentScore,
+        P.Title,
+        COUNT(C.Id) OVER (PARTITION BY P.Id) AS CommentCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+),
+RankedPosts AS (
+    SELECT
+        PWC.*,
+        RANK() OVER (PARTITION BY PWC.OwnerUserId ORDER BY PWC.CommentCount DESC, PWC.TotalViewCount DESC) AS RankByComments
+    FROM PostsWithComments PWC
+)
+SELECT 
+    UR.UserId,
+    UR.DisplayName,
+    UR.Reputation,
+    UP.TotalPosts,
+    UP.Questions,
+    UP.Answers,
+    RP.PostId,
+    RP.Title,
+    RP.CommentScore,
+    RP.CommentCount,
+    COALESCE(PH.PrevTitle, 'No Previous Title') AS PreviousTitle,
+    COALESCE(PH.PrevBody, 'No Previous Body') AS PreviousBody,
+    CASE WHEN RP.RankByComments <= 3 THEN 'Top Comments' ELSE 'Regular Posts' END AS PostCategory
+FROM UserReputation UR
+JOIN PostSummary UP ON UR.UserId = UP.OwnerUserId
+JOIN RankedPosts RP ON UR.UserId = RP.OwnerUserId
+LEFT JOIN (
+    SELECT 
+        PH.PostId,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 4 THEN PH.Text END) AS PrevTitle,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 5 THEN PH.Text END) AS PrevBody
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+) PH ON RP.PostId = PH.PostId
+WHERE UR.Reputation > (SELECT AVG(Reputation) FROM Users WHERE Reputation IS NOT NULL)
+  AND RP.CommentCount > 0
+ORDER BY UR.Reputation DESC, RP.CommentCount DESC;

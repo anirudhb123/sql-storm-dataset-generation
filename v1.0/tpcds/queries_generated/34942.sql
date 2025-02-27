@@ -1,0 +1,80 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        SUM(ss.ss_net_profit) AS total_store_profit,
+        ROW_NUMBER() OVER (PARTITION BY s.s_store_sk ORDER BY SUM(ss.ss_net_profit) DESC) AS rank_profit
+    FROM 
+        store s
+    LEFT JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.s_store_sk, s.s_store_name
+),
+Customer_Income AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        hd.hd_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer c
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+Top_Customers AS (
+    SELECT 
+        ci.c_customer_sk, 
+        ci.c_first_name, 
+        ci.c_last_name, 
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        Customer_Income ci
+    JOIN 
+        web_sales ws ON ci.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sales_price > 100
+    GROUP BY 
+        ci.c_customer_sk, ci.c_first_name, ci.c_last_name
+    HAVING 
+        total_profit > (SELECT AVG(total_profit) FROM (
+            SELECT 
+                SUM(ws_ext_sales_price) AS total_profit 
+            FROM 
+                web_sales 
+            GROUP BY 
+                ws_bill_customer_sk) AS avg_profit)
+),
+Sales_Summary AS (
+    SELECT 
+        st.s_store_name, 
+        SUM(ss.ss_net_profit) AS total_net_profit
+    FROM 
+        store_sales ss
+    JOIN 
+        store st ON ss.ss_store_sk = st.s_store_sk
+    GROUP BY 
+        st.s_store_name
+)
+SELECT 
+    s.store_name,
+    COALESCE(tc.total_orders, 0) AS customer_orders,
+    COALESCE(tc.total_profit, 0) AS customer_profit,
+    ss.total_net_profit,
+    CASE WHEN ss.total_net_profit > 10000 THEN 'High Profit' ELSE 'Low Profit' END AS profit_category
+FROM 
+    Sales_Summary ss
+LEFT JOIN 
+    Top_Customers tc ON ss.s_store_name = tc.c_first_name
+FULL OUTER JOIN 
+    Sales_CTE sc ON ss.s_store_name = sc.s_store_name
+WHERE 
+    (sc.total_store_profit > 5000 OR tc.total_profit IS NOT NULL)
+ORDER BY 
+    ss.total_net_profit DESC;

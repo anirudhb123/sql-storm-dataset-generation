@@ -1,0 +1,25 @@
+
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    CONCAT('Supplier: ', s.s_name, ', Price: $', FORMAT(ps.ps_supplycost, 2)) AS supplier_details,
+    CASE 
+        WHEN LENGTH(p.p_name) > 20 THEN SUBSTR(p.p_name, 1, 20) || '...' 
+        ELSE p.p_name 
+    END AS short_name,
+    STRING_AGG(DISTINCT CONCAT('Nation: ', n.n_name), '; ' ORDER BY n.n_name) AS supplier_nations
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    p.p_retailprice > 100.00 
+    AND n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE '%East%')
+GROUP BY 
+    p.p_partkey, p.p_name, ps.ps_supplycost, s.s_name
+ORDER BY 
+    p.p_partkey;

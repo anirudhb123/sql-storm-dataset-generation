@@ -1,0 +1,50 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(p.DownVotes, 0)) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+MostActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        TotalScore,
+        TotalViews,
+        TotalUpVotes,
+        TotalDownVotes,
+        RANK() OVER (ORDER BY PostCount DESC) AS UserRank
+    FROM 
+        UserPostStats
+)
+SELECT 
+    UserId,
+    DisplayName,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    TotalScore,
+    TotalViews,
+    TotalUpVotes,
+    TotalDownVotes,
+    UserRank
+FROM 
+    MostActiveUsers
+WHERE 
+    UserRank <= 10
+ORDER BY 
+    UserRank;

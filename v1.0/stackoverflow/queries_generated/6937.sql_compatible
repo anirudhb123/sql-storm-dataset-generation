@@ -1,0 +1,26 @@
+
+WITH RankedPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, u.DisplayName AS OwnerDisplayName,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1 AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT Id, Title, CreationDate, Score, ViewCount, AnswerCount, OwnerDisplayName
+    FROM RankedPosts
+    WHERE Rank <= 5
+),
+TopTags AS (
+    SELECT TRIM(value) AS TagName, COUNT(*) AS PostCount
+    FROM Posts p
+    CROSS JOIN UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS value
+    WHERE p.PostTypeId = 1
+    GROUP BY TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+)
+SELECT tp.Title, tp.CreationDate, tp.Score, tp.ViewCount, tp.AnswerCount, tp.OwnerDisplayName, tt.TagName
+FROM TopPosts tp
+JOIN TopTags tt ON tt.TagName IN (SELECT TRIM(value) FROM UNNEST(STRING_TO_ARRAY(tp.Tags, ',')) AS value)
+ORDER BY tp.Score DESC, tp.ViewCount DESC;

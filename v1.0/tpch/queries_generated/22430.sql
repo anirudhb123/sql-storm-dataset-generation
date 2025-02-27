@@ -1,0 +1,80 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rnk,
+        COUNT(*) OVER (PARTITION BY p.p_brand) AS total_parts
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_container = 'BOX')
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        AVG(ps.ps_supplycost) as avg_supplycost,
+        SUM(ps.ps_availqty) as total_availqty
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighVolumeOrders AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) as total_items,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        COUNT(l.l_orderkey) > 10
+),
+FilteredNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name
+    FROM 
+        nation n
+    WHERE 
+        n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE 'A%')
+),
+ComplexJoin AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+        rp.rnk,
+        HVO.total_revenue
+    FROM 
+        partsupp ps
+    LEFT JOIN 
+        SupplierStats s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        RankedParts rp ON rp.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        HighVolumeOrders HVO ON HVO.o_orderkey = (SELECT o_orderkey FROM orders ORDER BY o_orderkey LIMIT 1 OFFSET 0) 
+)
+SELECT 
+    DISTINCT cp.p_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(CASE WHEN cp.total_revenue IS NOT NULL THEN cp.total_revenue ELSE 0 END) AS total_revenue
+FROM 
+    ComplexJoin cp
+JOIN 
+    customer c ON cp.supplier_name = c.c_name
+WHERE 
+    cp.rnk <= 5 AND
+    cp.total_revenue > (SELECT AVG(total_revenue) FROM HighVolumeOrders) 
+GROUP BY 
+    cp.p_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

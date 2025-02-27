@@ -1,0 +1,63 @@
+-- Performance Benchmarking Query
+WITH PostSummary AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM
+        Posts p
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        Tags t ON t.Id = ANY(string_to_array(p.Tags, '><')::int[])
+    GROUP BY
+        p.Id, u.DisplayName
+),
+UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id, u.DisplayName
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.OwnerDisplayName,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.Tags,
+    us.UserId,
+    us.DisplayName AS UserName,
+    us.BadgeCount,
+    us.TotalUpVotes,
+    us.TotalDownVotes
+FROM
+    PostSummary ps
+JOIN
+    Users u ON ps.OwnerDisplayName = u.DisplayName
+JOIN
+    UserStats us ON u.Id = us.UserId
+ORDER BY
+    ps.CreationDate DESC
+LIMIT 100;  -- Adjust limit for performance testing

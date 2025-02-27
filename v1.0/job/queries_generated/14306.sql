@@ -1,0 +1,25 @@
+-- Performance Benchmark Query for Join Order Benchmark Schema
+
+SELECT 
+    a.name AS aka_name,
+    t.title AS movie_title,
+    c.nr_order AS role_order,
+    r.role AS person_role,
+    p.info AS person_info,
+    m.info AS movie_info
+FROM 
+    aka_name AS a
+JOIN 
+    cast_info AS c ON a.person_id = c.person_id
+JOIN 
+    title AS t ON c.movie_id = t.id
+JOIN 
+    role_type AS r ON c.role_id = r.id
+LEFT JOIN 
+    person_info AS p ON a.person_id = p.person_id
+LEFT JOIN 
+    movie_info AS m ON t.id = m.movie_id
+WHERE 
+    t.production_year >= 2000
+ORDER BY 
+    t.production_year DESC, c.nr_order;

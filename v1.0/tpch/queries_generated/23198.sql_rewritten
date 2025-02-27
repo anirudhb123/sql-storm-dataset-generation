@@ -1,0 +1,86 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS bal_rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 5000.00
+),
+ProductAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        COUNT(*) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+),
+OrderLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    o_status.s_status,
+    pa.ps_partkey,
+    COALESCE(pd.total_avail_qty, 0) AS total_avail_qty,
+    oi.total_revenue,
+    CASE 
+        WHEN oi.total_revenue IS NULL THEN 'No revenue generated'
+        ELSE 'Revenue generated'
+    END AS revenue_status
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    (SELECT DISTINCT o_orderkey, 
+            CASE 
+                WHEN o_orderstatus = 'O' THEN 'Open'
+                WHEN o_orderstatus = 'F' THEN 'Finished'
+                ELSE 'Unknown'
+            END AS s_status 
+     FROM 
+            orders) o_status 
+ON 
+    o.o_orderkey = o_status.o_orderkey
+LEFT JOIN 
+    OrderLineItems oi 
+ON 
+    o.o_orderkey = oi.l_orderkey
+RIGHT JOIN 
+    ProductAvailability pa 
+ON 
+    pa.ps_partkey = oi.l_orderkey
+WHERE 
+    (o.o_orderstatus IS NULL OR o.o_totalprice IS NOT NULL)
+    AND (pa.total_avail_qty IS NOT NULL OR pa.total_avail_qty BETWEEN 1 AND 500)
+ORDER BY 
+    o.o_orderdate DESC, 
+    o.o_totalprice DESC;

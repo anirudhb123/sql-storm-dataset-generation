@@ -1,0 +1,87 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id = 1  -- Assuming '1' refers to movie titles
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        mh.level + 1
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title lt ON ml.linked_movie_id = lt.id
+    WHERE
+        mh.level < 5  -- Limit to a maximum depth of 5
+),
+ActorRoles AS (
+    SELECT
+        a.id AS actor_id,
+        a.name,
+        c.movie_id,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY c.nr_order) AS role_rank
+    FROM
+        aka_name a
+    JOIN
+        cast_info c ON a.person_id = c.person_id
+    JOIN
+        role_type r ON c.role_id = r.id
+),
+CompanyStats AS (
+    SELECT
+        mc.movie_id,
+        COUNT(DISTINCT co.id) AS total_companies,
+        COUNT(DISTINCT cct.kind) AS total_company_types
+    FROM
+        movie_companies mc
+    JOIN
+        company_name co ON mc.company_id = co.id
+    JOIN
+        company_type cct ON mc.company_type_id = cct.id
+    GROUP BY
+        mc.movie_id
+)
+SELECT
+    mh.title AS Movie_Title,
+    mh.production_year AS Production_Year,
+    actor.name AS Actor_Name,
+    actor.role AS Actor_Role,
+    cs.total_companies AS Total_Companies,
+    cs.total_company_types AS Total_Company_Types,
+    COALESCE(awards.award_count, 0) AS Awards_Count
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    ActorRoles actor ON mh.movie_id = actor.movie_id AND actor.role_rank = 1  -- Only the first role
+LEFT JOIN
+    CompanyStats cs ON mh.movie_id = cs.movie_id
+LEFT JOIN (
+    SELECT
+        m.movie_id,
+        COUNT(DISTINCT mii.info) AS award_count
+    FROM
+        movie_info mii
+    JOIN
+        info_type it ON mii.info_type_id = it.id
+    WHERE
+        it.info = 'Award'
+    GROUP BY
+        m.movie_id
+) awards ON mh.movie_id = awards.movie_id
+WHERE
+    mh.production_year BETWEEN 2000 AND 2023
+ORDER BY
+    mh.production_year DESC, mh.title;
+

@@ -1,0 +1,62 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.OwnerUserId, 
+        p.Score, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 0
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+), RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    s.TotalPosts,
+    s.PositivePosts,
+    s.TotalBadges,
+    COALESCE(c.CommentCount, 0) AS CommentCount,
+    COALESCE(c.LastCommentDate, 'No Comments Yet') AS LastCommentDate
+FROM 
+    RankedPosts r
+JOIN 
+    UserStats s ON r.OwnerUserId = s.UserId
+LEFT JOIN 
+    RecentComments c ON r.Id = c.PostId
+WHERE 
+    r.PostRank = 1
+ORDER BY 
+    s.Reputation DESC, r.Score DESC
+FETCH FIRST 10 ROWS ONLY;

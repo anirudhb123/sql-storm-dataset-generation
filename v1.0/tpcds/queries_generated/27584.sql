@@ -1,0 +1,63 @@
+
+WITH Customer_Info AS (
+    SELECT 
+        c.c_customer_id, 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+Address_Info AS (
+    SELECT 
+        ca.ca_address_id,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, ', ', 
+               ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip) AS full_address
+    FROM 
+        customer_address ca
+),
+Sales_Data AS (
+    SELECT 
+        ws.ws_order_number,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_order_number
+),
+Final_Report AS (
+    SELECT 
+        ci.full_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        ai.full_address,
+        sd.total_sales,
+        sd.order_count
+    FROM 
+        Customer_Info ci
+    LEFT JOIN 
+        Address_Info ai ON ai.ca_address_id = (SELECT ca.ca_address_id FROM customer_address ca WHERE ca.ca_address_sk = c.c_current_addr_sk)
+    LEFT JOIN 
+        Sales_Data sd ON sd.ws_bill_customer_sk = c.c_customer_sk
+)
+SELECT 
+    full_name,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    full_address,
+    total_sales,
+    order_count
+FROM 
+    Final_Report
+WHERE 
+    cd_gender = 'M' AND 
+    order_count > 5
+ORDER BY 
+    total_sales DESC
+LIMIT 20;

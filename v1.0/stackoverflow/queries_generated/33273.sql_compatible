@@ -1,0 +1,53 @@
+
+WITH RecursivePostHistory AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           ph.CreationDate,
+           ph.PostHistoryTypeId,
+           ph.UserDisplayName,
+           ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId IN (1, 2, 4, 6)  
+),
+TopPosts AS (
+    SELECT p.Id,
+           p.Title,
+           p.OwnerUserId,
+           p.Score,
+           p.ViewCount,
+           COALESCE(c.CommentCount, 0) AS CommentCount,
+           COALESCE(a.AcceptedAnswerCount, 0) AS AcceptedAnswerCount,
+           RANK() OVER (ORDER BY p.Score DESC) AS RankByScore
+    FROM Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT ParentId, COUNT(*) AS AcceptedAnswerCount
+        FROM Posts
+        WHERE PostTypeId = 2 AND AcceptedAnswerId IS NOT NULL
+        GROUP BY ParentId
+    ) a ON p.Id = a.ParentId
+    WHERE p.PostTypeId = 1  
+    AND p.CreationDate >= DATEADD(year, -1, CAST('2024-10-01' AS DATE))  
+)
+SELECT 
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    rp.UserDisplayName AS LastEditor,
+    rp.CreationDate AS LastEditDate,
+    rp.PostHistoryTypeId,
+    CASE 
+        WHEN rp.PostHistoryTypeId IS NOT NULL THEN 'Edited'
+        ELSE 'No Edits'
+    END AS EditStatus
+FROM TopPosts tp
+LEFT JOIN RecursivePostHistory rp ON tp.Id = rp.PostId AND rp.HistoryRank = 1  
+WHERE tp.RankByScore <= 10
+ORDER BY tp.Score DESC
+LIMIT 10;

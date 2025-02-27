@@ -1,0 +1,61 @@
+
+WITH customer_returns AS (
+    SELECT
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned_quantity,
+        SUM(cr_return_amount) AS total_returned_amount
+    FROM
+        catalog_returns
+    GROUP BY
+        cr_returning_customer_sk
+),
+web_sales_summary AS (
+    SELECT
+        ws_bill_customer_sk,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_net_profit,
+        AVG(ws_net_paid_inc_tax) AS average_net_paid
+    FROM
+        web_sales
+    GROUP BY
+        ws_bill_customer_sk
+),
+high_return_customers AS (
+    SELECT
+        cr.returning_customer_sk,
+        cr.total_returned_quantity,
+        cr.total_returned_amount,
+        w.total_orders,
+        w.total_net_profit,
+        w.average_net_paid
+    FROM
+        customer_returns cr
+    JOIN
+        web_sales_summary w ON cr.returning_customer_sk = w.ws_bill_customer_sk
+    WHERE
+        cr.total_returned_quantity > (SELECT AVG(total_returned_quantity) FROM customer_returns)
+)
+
+SELECT
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    a.ca_city,
+    a.ca_state,
+    COALESCE(h.total_returned_quantity, 0) AS total_returned_quantity,
+    COALESCE(h.total_net_profit, 0) AS total_net_profit,
+    COALESCE(h.average_net_paid, 0) AS average_net_paid,
+    RANK() OVER (PARTITION BY a.ca_city ORDER BY COALESCE(h.total_returned_quantity, 0) DESC) AS rank_by_returns
+FROM
+    customer c
+JOIN
+    customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+LEFT JOIN
+    high_return_customers h ON c.c_customer_sk = h.returning_customer_sk
+WHERE
+    a.ca_state = 'CA'
+    AND (h.total_returned_quantity IS NULL OR h.total_returned_quantity > 10)
+ORDER BY
+    rank_by_returns, c.c_last_name
+LIMIT 50;
+

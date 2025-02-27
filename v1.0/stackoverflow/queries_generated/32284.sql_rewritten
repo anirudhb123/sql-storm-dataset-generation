@@ -1,0 +1,87 @@
+WITH RecursivePostLinks AS (
+    SELECT 
+        PL.PostId,
+        PL.RelatedPostId,
+        1 AS LinkDepth
+    FROM 
+        PostLinks PL
+    UNION ALL
+    SELECT 
+        PL.PostId,
+        PL.RelatedPostId,
+        RPL.LinkDepth + 1
+    FROM 
+        PostLinks PL
+    JOIN 
+        RecursivePostLinks RPL ON PL.PostId = RPL.RelatedPostId
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) - 
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS ReputationScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) AS VoteCount,
+        MAX(PH.CreationDate) AS LastActivityDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id
+),
+PostSummary AS (
+    SELECT 
+        PA.PostId,
+        PA.Title,
+        PA.ViewCount,
+        PA.Score,
+        PA.CommentCount,
+        PA.VoteCount,
+        PA.LastActivityDate,
+        RPL.LinkDepth,
+        COALESCE(UR.ReputationScore, 0) AS UserReputation
+    FROM 
+        PostActivity PA
+    LEFT JOIN 
+        RecursivePostLinks RPL ON PA.PostId = RPL.PostId
+    LEFT JOIN 
+        Users U ON PA.PostId <> -1 
+    LEFT JOIN 
+        UserReputation UR ON U.Id = PA.PostId
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.ViewCount,
+    PS.Score,
+    PS.CommentCount,
+    PS.VoteCount,
+    PS.LastActivityDate,
+    PS.LinkDepth,
+    PS.UserReputation
+FROM 
+    PostSummary PS
+WHERE 
+    PS.UserReputation > 100 
+ORDER BY 
+    PS.LinkDepth DESC, 
+    PS.Score DESC
+LIMIT 50;

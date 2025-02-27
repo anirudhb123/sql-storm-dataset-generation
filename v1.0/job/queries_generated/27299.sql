@@ -1,0 +1,46 @@
+WITH MovieStats AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT c.name, ', ') AS companies
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+)
+SELECT 
+    ms.movie_id,
+    ms.movie_title,
+    ms.production_year,
+    ms.actor_count,
+    ms.actors,
+    ms.keywords,
+    COALESCE(STRING_AGG(DISTINCT ckt.kind ORDER BY ckt.kind), 'No types') AS company_types
+FROM 
+    MovieStats ms
+LEFT JOIN 
+    movie_companies mc ON ms.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type ckt ON mc.company_type_id = ckt.id
+GROUP BY 
+    ms.movie_id, ms.movie_title, ms.production_year, ms.actor_count, ms.actors, ms.keywords
+ORDER BY 
+    ms.production_year DESC, ms.actor_count DESC;

@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerDisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerDisplayName, p.OwnerUserId
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        OwnerDisplayName,
+        Upvotes,
+        Downvotes,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        RN <= 5
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+)
+SELECT 
+    t.PostId,
+    t.Title,
+    t.CreationDate,
+    t.OwnerDisplayName,
+    t.Upvotes,
+    t.Downvotes,
+    t.CommentCount,
+    COALESCE(u.Rank, 'Non-ranked') AS UserRank
+FROM 
+    TopPosts t
+LEFT JOIN 
+    (SELECT UserId, 
+            ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+     FROM UserReputation) u 
+ON t.OwnerDisplayName = u.DisplayName
+ORDER BY 
+    t.CreationDate DESC;

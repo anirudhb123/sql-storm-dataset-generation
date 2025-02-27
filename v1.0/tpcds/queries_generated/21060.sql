@@ -1,0 +1,78 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, 1 AS level
+    FROM customer_address
+    WHERE ca_country IS NOT NULL
+    
+    UNION ALL
+
+    SELECT ca.address_sk, ca_city, ca_state, ca_country, level + 1
+    FROM customer_address ca
+    JOIN AddressHierarchy ah ON ca.ca_address_sk = ah.ca_address_sk
+    WHERE ca_state IS NOT NULL AND ah.level < 5
+),
+CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount,
+        SUM(sr_return_tax) AS total_return_tax
+    FROM store_returns
+    GROUP BY sr_returned_date_sk, sr_item_sk
+),
+ItemSales AS (
+    SELECT 
+        ws_item_sk AS item_sk,
+        SUM(ws_net_paid) AS total_sales,
+        AVG(ws_ext_sales_price) AS avg_price,
+        COUNT(ws_order_number) AS number_of_sales
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) 
+                          AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY ws_item_sk
+),
+CombinedData AS (
+    SELECT
+        is.item_sk,
+        is.total_sales,
+        is.avg_price,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+        COALESCE(cr.total_return_tax, 0) AS total_return_tax,
+        ah.ca_city,
+        ah.ca_state,
+        ah.ca_country
+    FROM ItemSales is
+    LEFT JOIN CustomerReturns cr ON is.item_sk = cr.sr_item_sk
+    LEFT JOIN AddressHierarchy ah ON ah.level = (SELECT MAX(level) FROM AddressHierarchy)
+)
+
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    SUM(cd.cd_dep_count) AS total_dependents,
+    AVG(cd.cd_dep_employed_count) AS avg_employed_dependents,
+    CASE 
+        WHEN COUNT(DISTINCT cd.cd_demo_sk) = 0 THEN 'No Customers'
+        ELSE 'Customers Found'
+    END AS customer_status,
+    COUNT(DISTINCT cd.cd_demo_sk) OVER (PARTITION BY cd.cd_gender) AS gender_count,
+    SUM(CASE 
+        WHEN (total_sales - total_return_amount) > 0 THEN total_sales - total_return_amount
+        ELSE 0 
+    END) AS net_sales
+FROM customer_demographics cd
+JOIN income_band ib ON cd.cd_purchase_estimate BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound
+JOIN CombinedData cd2 ON cd2.ca_country = 'USA'
+WHERE (cd.cd_gender IS NOT NULL OR cd.cd_marital_status IS NOT NULL)
+AND EXISTS (
+    SELECT 1
+    FROM store s 
+    WHERE s.s_state = cd2.ca_state
+)
+GROUP BY cd.cd_gender, cd.cd_marital_status, ib.ib_lower_bound, ib.ib_upper_bound
+ORDER BY net_sales DESC;

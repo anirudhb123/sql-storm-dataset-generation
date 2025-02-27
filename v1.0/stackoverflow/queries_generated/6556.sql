@@ -1,0 +1,48 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, '><')) AS tag_name ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_name
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.OwnerDisplayName,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.Tags
+FROM 
+    PostStats ps
+WHERE 
+    ps.rn <= 10
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

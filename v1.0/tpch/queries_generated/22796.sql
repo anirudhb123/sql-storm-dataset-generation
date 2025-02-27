@@ -1,0 +1,91 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+), 
+SupplierRegion AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_nationkey,
+        r.r_regionkey,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    LEFT JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_nationkey, r.r_regionkey
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+CostlySuppliers AS (
+    SELECT 
+        sr.r_regionkey,
+        COUNT(DISTINCT sr.s_suppkey) AS distinct_suppliers,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        SupplierRegion sr
+    LEFT JOIN 
+        partsupp ps ON sr.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        sr.r_regionkey
+)
+SELECT 
+    co.c_custkey,
+    co.total_spent,
+    rp.p_name,
+    sr.distinct_suppliers,
+    cs.total_supply_cost,
+    CASE 
+        WHEN co.order_count > 5 AND sr.distinct_suppliers IS NOT NULL THEN 'Frequent Buyer'
+        ELSE 'Occasional Buyer'
+    END AS customer_type,
+    CASE 
+        WHEN rp.rn <= 5 THEN 'Top 5 Parts'
+        ELSE 'Other Parts'
+    END AS part_category
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    RankedParts rp ON EXISTS (
+        SELECT 1
+        FROM lineitem li
+        WHERE li.l_orderkey IN (
+            SELECT o.o_orderkey
+            FROM orders o
+            WHERE o.o_custkey = co.c_custkey
+        ) AND li.l_partkey = rp.p_partkey
+    )
+LEFT JOIN 
+    SupplierRegion sr ON sr.s_nationkey IN (
+        SELECT c.c_nationkey
+        FROM customer c
+        WHERE c.c_custkey = co.c_custkey
+    )
+LEFT JOIN 
+    CostlySuppliers cs ON cs.r_regionkey = sr.r_regionkey
+WHERE 
+    sr.part_count > 10 OR co.total_spent IS NULL
+ORDER BY 
+    co.total_spent DESC NULLS LAST,
+    rp.p_name ASC;

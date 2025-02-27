@@ -1,0 +1,80 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+), 
+SupplierPartInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_suppkey
+),
+TotalRevenue AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01' AND l.l_shipdate <= DATE '2023-12-31'
+    GROUP BY 
+        l.l_partkey
+),
+NationAvgBal AS (
+    SELECT 
+        n.n_nationkey,
+        AVG(c.c_acctbal) AS avg_acct_balance
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    n.n_name,
+    p.p_name,
+    COUNT(DISTINCT so.o_orderkey) AS order_count,
+    COALESCE(SUM(tr.revenue), 0) AS total_revenue,
+    COALESCE(SUM(sp.total_supply_cost), 0) AS supplier_cost,
+    ab.avg_acct_balance
+FROM 
+    nation n
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    RankedOrders so ON c.c_custkey = so.o_custkey
+LEFT JOIN 
+    lineitem l ON so.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    part p ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    TotalRevenue tr ON p.p_partkey = tr.l_partkey
+LEFT JOIN 
+    SupplierPartInfo sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    NationAvgBal ab ON n.n_nationkey = ab.n_nationkey
+WHERE 
+    n.n_name IS NOT NULL
+GROUP BY 
+    n.n_name, p.p_name, ab.avg_acct_balance
+HAVING 
+    COUNT(DISTINCT so.o_orderkey) > 5
+ORDER BY 
+    total_revenue DESC, supplier_cost DESC;

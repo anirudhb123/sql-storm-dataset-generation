@@ -1,0 +1,63 @@
+WITH ActorMovies AS (
+    SELECT 
+        a.name AS actor_name,
+        mt.title AS movie_title,
+        mt.production_year,
+        GROUP_CONCAT(DISTINCT g.keyword) AS genres,
+        COUNT(DISTINCT m.id) AS total_movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title mt ON ci.movie_id = mt.id
+    JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    JOIN 
+        keyword g ON mk.keyword_id = g.id
+    GROUP BY 
+        a.name, mt.title, mt.production_year
+), ActorStats AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT movie_title) AS movie_count,
+        MIN(production_year) AS first_appearance,
+        MAX(production_year) AS last_appearance,
+        MAX(total_movies) AS max_movies_in_a_year
+    FROM 
+        ActorMovies
+    GROUP BY 
+        actor_name
+), GenreDistribution AS (
+    SELECT 
+        actor_name,
+        genres,
+        COUNT(*) AS genre_count
+    FROM 
+        ActorMovies
+    GROUP BY 
+        actor_name, genres
+), GenreStats AS (
+    SELECT 
+        actor_name,
+        SUM(genre_count) AS total_genres
+    FROM 
+        GenreDistribution
+    GROUP BY 
+        actor_name
+)
+SELECT 
+    AS.actor_name,
+    AS.movie_count,
+    AS.first_appearance,
+    AS.last_appearance,
+    GS.total_genres,
+    AS.max_movies_in_a_year
+FROM 
+    ActorStats AS
+JOIN 
+    GenreStats GS ON AS.actor_name = GS.actor_name
+ORDER BY 
+    AS.movie_count DESC,
+    AS.last_appearance DESC
+LIMIT 10;

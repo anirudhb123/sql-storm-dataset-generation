@@ -1,0 +1,47 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.PostTypeId IN (4, 5) THEN 1 ELSE 0 END) AS TagWikis,
+        SUM(p.UpVotes) AS TotalUpVotes,
+        SUM(p.DownVotes) AS TotalDownVotes
+    FROM Users AS u
+    LEFT JOIN Posts AS p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotes, 
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVotes  
+    FROM Posts AS p
+),
+FinalResult AS (
+    SELECT 
+        us.UserId,
+        us.Reputation,
+        us.TotalPosts,
+        us.Questions,
+        us.Answers,
+        us.TagWikis,
+        SUM(ps.ViewCount) AS TotalViews,
+        SUM(ps.CommentCount) AS TotalComments,
+        SUM(ps.UpVotes) AS TotalPostUpVotes,
+        SUM(ps.DownVotes) AS TotalPostDownVotes,
+        COUNT(DISTINCT ps.PostId) AS PostCount
+    FROM UserStats AS us
+    JOIN PostStats AS ps ON us.UserId = ps.OwnerUserId
+    GROUP BY us.UserId, us.Reputation, us.TotalPosts, us.Questions, us.Answers, us.TagWikis
+)
+SELECT * 
+FROM FinalResult
+ORDER BY Reputation DESC, TotalPosts DESC;

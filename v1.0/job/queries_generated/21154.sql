@@ -1,0 +1,41 @@
+WITH relevant_movies AS (
+    SELECT m.id AS movie_id, m.title, m.production_year
+    FROM aka_title m
+    WHERE m.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'feature'))
+    AND m.production_year IS NOT NULL
+    AND m.title IS NOT NULL
+),
+actor_roles AS (
+    SELECT c.movie_id, COUNT(*) AS role_count, STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM cast_info c
+    JOIN role_type r ON c.role_id = r.id
+    GROUP BY c.movie_id
+),
+movie_cast AS (
+    SELECT rm.movie_id, rm.title, rm.production_year, ar.role_count, ar.roles,
+           ROW_NUMBER() OVER(PARTITION BY rm.movie_id ORDER BY ar.role_count DESC) AS rank
+    FROM relevant_movies rm
+    LEFT JOIN actor_roles ar ON rm.movie_id = ar.movie_id
+),
+actor_biographies AS (
+    SELECT p.id AS person_id, ak.name, pi.info
+    FROM aka_name ak
+    JOIN person_info pi ON ak.person_id = pi.person_id
+    WHERE pi.info_type_id = (SELECT id FROM info_type WHERE info = 'biography')
+),
+detailed_cast AS (
+    SELECT mc.movie_id, mc.title, mc.production_year, mc.role_count, mc.roles,
+           ab.name AS actor_name, ab.info AS actor_bio,
+           COALESCE(mc.rank, 0) AS rank
+    FROM movie_cast mc
+    LEFT JOIN actor_biographies ab ON mc.movie_id = (SELECT movie_id FROM cast_info WHERE person_id = ab.person_id LIMIT 1)
+)
+SELECT dt.movie_id, dt.title, dt.production_year, dt.actor_name, dt.actor_bio,
+       dt.role_count, dt.roles, dt.rank, CASE WHEN dt.rank = 1 THEN 'Lead actor' ELSE 'Supporting actor' END AS role_level
+FROM detailed_cast dt
+WHERE COALESCE(dt.actor_bio, '') <> ''
+AND dt.production_year >= 2000
+ORDER BY dt.production_year DESC, dt.role_count DESC
+LIMIT 10;
+
+This SQL query performs a series of transformations and aggregations to produce a detailed list of actors, their roles, and the associated movies they appeared in, filtered for those with available biographies and produced since 2000. It incorporates Common Table Expressions (CTEs), outer joins, window functions, string aggregations, null checks, and a complicated predicate structure.

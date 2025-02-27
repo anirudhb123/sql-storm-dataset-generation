@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id as PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) as UserPostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) as CommentCount,
+        COALESCE(MAX(v.VoteTypeId), 0) as LatestVoteType
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+
+HighScoredPosts AS (
+    SELECT 
+        rp.*, 
+        COALESCE(b.Name, 'No Badge') as UserBadge,
+        CASE 
+            WHEN rp.Score >= 100 THEN 'High Score'
+            WHEN rp.Score >= 50 THEN 'Medium Score'
+            ELSE 'Low Score'
+        END as ScoreCategory
+    FROM RankedPosts rp
+    LEFT JOIN Badges b ON rp.OwnerUserId = b.UserId AND b.Class = 1  -- Only Gold Badges
+),
+
+FilteredPosts AS (
+    SELECT 
+        hsp.PostId,
+        hsp.Title,
+        hsp.CreationDate,
+        hsp.Score,
+        hsp.ViewCount,
+        hsp.UserBadge,
+        hsp.ScoreCategory,
+        CASE 
+            WHEN hsp.LatestVoteType IN (2, 1) THEN 'Positive'
+            WHEN hsp.LatestVoteType IN (3, 10) THEN 'Negative'
+            ELSE 'No recent votes'
+        END as RecentVoteStatus
+    FROM HighScoredPosts hsp
+    WHERE hsp.UserPostRank = 1 AND 
+          (hsp.ViewCount > 50 OR hsp.CommentCount > 5)
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.UserBadge,
+    fp.ScoreCategory,
+    fp.RecentVoteStatus,
+    CASE 
+        WHEN fp.Score > 100 THEN 'Excellent'
+        WHEN fp.Score BETWEEN 50 AND 100 THEN 'Good Enough'
+        ELSE 'Needs Improvement'
+    END as Advice,
+    CASE 
+        WHEN fp.UserBadge IS NULL AND fp.RecentVoteStatus = 'No recent votes' THEN 'Active User'
+        WHEN fp.UserBadge IS NOT NULL THEN 'Badge Holder'
+        ELSE 'Regular User'
+    END as UserStatus
+FROM FilteredPosts fp
+ORDER BY fp.Score DESC, fp.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY;

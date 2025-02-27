@@ -1,0 +1,17 @@
+SELECT 
+    u.DisplayName AS UserName, 
+    p.Title AS PostTitle, 
+    p.CreationDate AS PostDate, 
+    pc.Comment AS CommentText, 
+    pc.CreationDate AS CommentDate
+FROM 
+    Posts p
+JOIN 
+    Comments pc ON p.Id = pc.PostId
+JOIN 
+    Users u ON pc.UserId = u.Id
+WHERE 
+    p.PostTypeId = 1 -- Only questions
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 10;

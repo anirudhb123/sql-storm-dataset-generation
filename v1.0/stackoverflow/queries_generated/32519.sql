@@ -1,0 +1,90 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        Score,
+        CreationDate,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS PostRank,
+        p.CreationDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        ps.Id,
+        ps.Title,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        ps.CommentCount,
+        ps.CreationDate,
+        RANK() OVER (ORDER BY ps.UpVoteCount - ps.DownVoteCount DESC) AS OverallRank
+    FROM 
+        PostStatistics ps
+),
+ClosedPostStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(DISTINCT concat(c.CloseReasonId, ': ', cr.Name), '; ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Close or Reopen
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    tp.Id AS PostId,
+    tp.Title AS PostTitle,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    tp.CommentCount,
+    tp.CreationDate,
+    tp.OverallRank,
+    COALESCE(cps.CloseCount, 0) AS CloseCount,
+    COALESCE(cps.CloseReasons, 'No close reasons') AS CloseReasons,
+    COALESCE(rph.Level, 0) AS HierarchyLevel
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    ClosedPostStats cps ON tp.Id = cps.PostId
+LEFT JOIN 
+    RecursivePostHierarchy rph ON tp.Id = rph.Id
+WHERE 
+    tp.OverallRank <= 10 -- Top 10 posts
+ORDER BY 
+    tp.OverallRank;

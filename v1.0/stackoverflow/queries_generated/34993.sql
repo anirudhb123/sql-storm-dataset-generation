@@ -1,0 +1,76 @@
+WITH RecursiveTagCTE AS (
+    SELECT
+        T.Id AS TagId,
+        T.TagName,
+        T.Count,
+        1 AS Level
+    FROM
+        Tags T
+    WHERE
+        T.IsModeratorOnly = 0 -- Select only public tags
+    UNION ALL
+    SELECT
+        T.Id,
+        T.TagName,
+        T.Count,
+        Level + 1
+    FROM
+        Tags T
+    JOIN
+        RecursiveTagCTE RT ON T.WikiPostId = RT.TagId
+),
+UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id,
+        U.DisplayName
+),
+PostActivity AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        COALESCE(UP.TotalVotes, 0) AS UserTotalVotes,
+        P.CreationDate,
+        CURRENT_TIMESTAMP - P.CreationDate AS Age,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPost
+    FROM
+        Posts P
+    LEFT JOIN
+        UserVoteSummary UP ON P.OwnerUserId = UP.UserId
+    WHERE
+        P.CreationDate >= NOW() - INTERVAL '1 year' -- Posts created in the last year
+)
+SELECT 
+    P.Title,
+    P.Score,
+    P.UserTotalVotes,
+    P.Age,
+    RT.TagName AS AssociatedTag,
+    U.DisplayName AS OwnerDisplayName
+FROM 
+    PostActivity P
+LEFT JOIN 
+    PostLinks PL ON P.PostId = PL.PostId
+LEFT JOIN 
+    Tags T ON PL.RelatedPostId = T.Id
+LEFT JOIN 
+    RecursiveTagCTE RT ON T.Id = RT.TagId
+LEFT JOIN 
+    Users U ON P.OwnerUserId = U.Id
+WHERE 
+    P.RecentPost = 1 AND 
+    (P.UserTotalVotes > 10 OR P.Score > 100) -- Filter based on performance criteria
+ORDER BY 
+    P.Score DESC,
+    P.UserTotalVotes DESC
+FETCH FIRST 50 ROWS ONLY; -- Limit to top 50 results

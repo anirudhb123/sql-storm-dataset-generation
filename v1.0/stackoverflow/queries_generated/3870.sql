@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.AnswerCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(p.Id) > 5
+),
+userBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 -- Only Gold Badges
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    COALESCE(mau.PostCount, 0) AS NumberOfPosts,
+    COALESCE(mau.TotalBounties, 0) AS TotalBounties,
+    COALESCE(ub.BadgeCount, 0) AS GoldBadges,
+    rp.Title AS MostUpvotedPost,
+    rp.Score AS PostScore
+FROM 
+    Users u
+LEFT JOIN 
+    MostActiveUsers mau ON u.Id = mau.UserId
+LEFT JOIN 
+    userBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.PostRank = 1
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    NumberOfPosts DESC, TotalBounties DESC;

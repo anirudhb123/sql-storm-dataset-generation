@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk BETWEEN 2451681 AND 2451683  -- Example date range
+    GROUP BY 
+        ws_bill_customer_sk
+    HAVING 
+        COUNT(ws_order_number) > 1
+    UNION ALL
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ws_sales_price) + SUM(sr.sr_return_amt) AS total_sales_adjusted,
+        COUNT(ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.ws_sales_price) + SUM(sr.sr_return_amt) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        store_returns sr ON ws.ws_bill_customer_sk = sr.sr_customer_sk
+    WHERE 
+        sr.sr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        ws.bill_customer_sk
+)
+SELECT 
+    ca.ca_address_id,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    COALESCE(s.order_count, 0) AS order_count,
+    r.r_reason_desc,
+    COUNT(ws.ws_order_number) AS total_web_orders
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    SalesCTE s ON c.c_customer_sk = s.ws_bill_customer_sk
+LEFT JOIN 
+    web_returns wr ON wr.wr_returning_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    reason r ON wr.wr_reason_sk = r.r_reason_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+WHERE 
+    (s.total_sales > 500 OR s.order_count > 5) AND
+    (ca.ca_city IS NOT NULL OR ca.ca_state IS NOT NULL)
+GROUP BY 
+    ca.ca_address_id, c.c_first_name, c.c_last_name, s.total_sales, s.order_count, r.r_reason_desc
+ORDER BY 
+    total_sales DESC, c.c_first_name, c.c_last_name
+LIMIT 100;

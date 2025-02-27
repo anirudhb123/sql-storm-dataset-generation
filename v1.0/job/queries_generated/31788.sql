@@ -1,0 +1,71 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+        
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+), 
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        an.name AS actor_name,
+        COUNT(*) OVER (PARTITION BY ci.movie_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY an.name) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+), 
+info_summary AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT it.info || ': ' || mi.info, '; ') AS info_aggregate
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    cd.actor_count,
+    cd.actor_name,
+    is.info_aggregate,
+    COALESCE(cmp.kind, 'Unknown') AS company_type
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_details cd ON mh.movie_id = cd.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type cmp ON mc.company_type_id = cmp.id
+LEFT JOIN 
+    info_summary is ON mh.movie_id = is.movie_id
+WHERE 
+    mh.production_year >= 2000
+    AND (cd.actor_rank IS NULL OR cd.actor_rank <= 3)
+ORDER BY 
+    mh.movie_id, cd.actor_name;

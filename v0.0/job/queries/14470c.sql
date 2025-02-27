@@ -1,0 +1,4 @@
+SELECT min(an.name) AS cool_actor_pseudonym, min(t.title) AS series_named_after_char
+FROM aka_name AS an, cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE an.person_id = n.id AND n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND an.person_id = ci.person_id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND n.name_pcode_nf IN ('B1516', 'E4234', 'K1562', 'X5262') AND t.md5sum > '68db98afd0b580501a661df0e9a3cd6f' AND cn.id > 43742 AND ci.note < '(producer) (as Shubir S. Mukerji)' AND t.production_year IS NOT NULL;

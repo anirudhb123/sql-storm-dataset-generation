@@ -1,0 +1,35 @@
+WITH RatedMovies AS (
+    SELECT mt.id AS movie_id, mt.title, AVG(r.rating) AS average_rating
+    FROM aka_title mt
+    LEFT JOIN movie_info mi ON mt.id = mi.movie_id
+    LEFT JOIN (SELECT movie_id, rating FROM movie_rating) r ON mt.id = r.movie_id
+    WHERE mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY mt.id, mt.title
+),
+TopActors AS (
+    SELECT ka.name, COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM aka_name ka
+    JOIN cast_info ci ON ka.person_id = ci.person_id
+    WHERE ci.nr_order = 1
+    GROUP BY ka.name
+    HAVING COUNT(DISTINCT ci.movie_id) > 10
+),
+MovieGenres AS (
+    SELECT mt.id AS movie_id, kt.kind AS genre
+    FROM aka_title mt
+    JOIN movie_keyword mk ON mt.id = mk.movie_id
+    JOIN keyword kt ON mk.keyword_id = kt.id
+)
+SELECT r.movie_id, r.title, r.average_rating, ta.name AS top_actor, 
+       STRING_AGG(DISTINCT mg.genre, ', ') AS genres
+FROM RatedMovies r
+LEFT JOIN TopActors ta ON r.movie_id IN (
+    SELECT ci.movie_id FROM cast_info ci WHERE ci.person_id IN (
+        SELECT ka.person_id FROM aka_name ka WHERE ka.name = ta.name
+    )
+)
+LEFT JOIN MovieGenres mg ON r.movie_id = mg.movie_id
+WHERE r.average_rating IS NOT NULL
+GROUP BY r.movie_id, r.title, ta.name
+ORDER BY r.average_rating DESC NULLS LAST, movie_id
+LIMIT 25;

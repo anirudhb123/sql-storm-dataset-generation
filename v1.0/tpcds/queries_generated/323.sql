@@ -1,0 +1,62 @@
+
+WITH customer_sales AS (
+    SELECT
+        c.c_customer_sk,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+sales_statistics AS (
+    SELECT
+        cs.c_customer_sk,
+        cs.total_orders,
+        cs.total_sales,
+        cs.avg_sales_price,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE
+            WHEN cs.total_sales > 1000 THEN 'High Value'
+            WHEN cs.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value_category
+    FROM
+        customer_sales cs
+    LEFT JOIN customer_demographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+),
+weekly_sales AS (
+    SELECT
+        d.d_week_seq,
+        SUM(ws.ws_ext_sales_price) AS weekly_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM
+        date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_week_seq
+),
+ranked_sales AS (
+    SELECT
+        s.*,
+        RANK() OVER (ORDER BY s.weekly_sales DESC) AS sales_rank
+    FROM
+        weekly_sales s
+)
+SELECT
+    ss.c_customer_sk,
+    ss.total_orders,
+    ss.total_sales,
+    ss.avg_sales_price,
+    ss.cd_gender,
+    ss.customer_value_category,
+    COALESCE(ws.weekly_sales, 0) AS last_week_sales,
+    COALESCE(ws.order_count, 0) AS last_week_order_count,
+    r.sales_rank
+FROM
+    sales_statistics ss
+FULL OUTER JOIN ranked_sales r ON r.sales_rank = 1 AND ss.total_orders > 0
+LEFT JOIN weekly_sales ws ON ws.d_week_seq = (SELECT d.d_week_seq FROM date_dim d WHERE d.d_date = CURRENT_DATE - INTERVAL '7 days')
+ORDER BY ss.total_sales DESC
+LIMIT 100;

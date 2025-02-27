@@ -1,0 +1,80 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT 
+        sp.s_suppkey,
+        sp.s_name,
+        sp.s_nationkey,
+        sp.s_acctbal,
+        sh.level + 1
+    FROM 
+        supplier_hierarchy sh
+    JOIN 
+        supplier sp ON sh.s_nationkey = sp.s_nationkey
+    WHERE 
+        sp.s_acctbal > sh.s_acctbal
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS customer_count,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+high_value_orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderstatus, 
+        os.total_revenue,
+        os.customer_count,
+        RANK() OVER (ORDER BY os.total_revenue DESC) AS revenue_rank
+    FROM 
+        order_summary os
+    JOIN 
+        orders o ON os.o_orderkey = o.o_orderkey 
+    WHERE 
+        os.total_revenue > 10000
+)
+SELECT 
+    n.n_name AS nation,
+    r.r_name AS region,
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+    SUM(COALESCE(hvo.total_revenue, 0)) AS total_order_revenue
+FROM 
+    supplier_hierarchy sh
+JOIN 
+    nation n ON sh.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    high_value_orders hvo ON sh.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT p.p_partkey 
+            FROM part p 
+            WHERE p.p_brand = 'Brand#222'
+        )
+    ) 
+GROUP BY 
+    n.n_name, r.r_name
+HAVING 
+    COUNT(DISTINCT sh.s_suppkey) > 0 AND SUM(COALESCE(hvo.total_revenue, 0)) > 50000
+ORDER BY 
+    total_order_revenue DESC;

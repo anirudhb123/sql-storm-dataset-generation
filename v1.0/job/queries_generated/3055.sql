@@ -1,0 +1,58 @@
+WITH ActorMovies AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movie_titles
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    GROUP BY 
+        c.person_id
+),
+HighlyRatedMovies AS (
+    SELECT 
+        m.movie_id,
+        AVG(mi.info::FLOAT) AS avg_rating
+    FROM 
+        movie_info mi
+    JOIN 
+        title m ON mi.movie_id = m.id
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        m.movie_id
+    HAVING 
+        AVG(mi.info::FLOAT) >= 8.0
+),
+TopActors AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        am.movie_count,
+        am.movie_titles
+    FROM 
+        aka_name a
+    JOIN 
+        ActorMovies am ON a.person_id = am.person_id
+    WHERE 
+        am.movie_count > 5
+)
+SELECT 
+    ta.name AS actor_name,
+    tam.movie_count,
+    tam.movie_titles,
+    r.role AS role_type
+FROM 
+    TopActors ta
+LEFT JOIN 
+    cast_info c ON ta.person_id = c.person_id
+LEFT JOIN 
+    role_type r ON c.role_id = r.id
+WHERE 
+    c.movie_id IN (SELECT movie_id FROM HighlyRatedMovies)
+ORDER BY 
+    tam.movie_count DESC, 
+    ta.name ASC;

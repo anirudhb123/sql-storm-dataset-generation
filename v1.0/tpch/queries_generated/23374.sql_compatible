@@ -1,0 +1,56 @@
+
+WITH RECURSIVE supplier_sales AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey, s.s_name
+), ranked_sales AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.total_sales,
+           ROW_NUMBER() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM supplier_sales s
+    WHERE s.total_sales > (
+        SELECT AVG(total_sales) FROM supplier_sales
+    )
+), high_sales AS (
+    SELECT r.s_suppkey, 
+           r.s_name, 
+           r.total_sales, 
+           r.sales_rank
+    FROM ranked_sales r
+    WHERE r.sales_rank <= 5
+    UNION ALL
+    SELECT NULL, 
+           'ACME' AS s_name, 
+           NULL AS total_sales, 
+           NULL AS sales_rank
+    FROM region
+)
+SELECT hs.s_suppkey, 
+       COALESCE(hs.s_name, 'Unknown Supplier') AS supplier_name, 
+       CASE 
+           WHEN hs.total_sales IS NULL THEN 'No sales'
+           ELSE TO_CHAR(hs.total_sales, 'FM$999,999,999.00')
+       END AS sales_amount,
+       COALESCE(EXTRACT(YEAR FROM o.o_orderdate), 'N/A') AS order_year,
+       RANK() OVER (PARTITION BY hs.s_name ORDER BY hs.total_sales DESC NULLS LAST) AS rank_order
+FROM high_sales hs
+LEFT JOIN orders o ON hs.s_suppkey = o.o_custkey 
+                    AND o.o_orderstatus IN ('F', 'O')
+WHERE NOT EXISTS (
+    SELECT 1 
+    FROM customer c 
+    WHERE c.c_custkey = o.o_custkey
+    AND c.c_acctbal IS NULL
+) OR EXISTS (
+    SELECT 1 
+    FROM lineitem l 
+    WHERE l.l_discount > 0.10 
+    AND l.l_returnflag = 'R'
+)
+GROUP BY hs.s_suppkey, hs.s_name, hs.total_sales, hs.sales_rank, o.o_orderdate;

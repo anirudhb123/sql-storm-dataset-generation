@@ -1,0 +1,73 @@
+
+WITH Customer_Info AS (
+    SELECT 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        LOWER(c.c_email_address) AS email,
+        cd.cd_gender,
+        hd.hd_income_band_sk
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+Sales_Data AS (
+    SELECT 
+        'Web' AS source,
+        ws.web_site_id,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_sold_date_sk
+    FROM 
+        web_sales ws
+    UNION ALL
+    SELECT 
+        'Store' AS source,
+        s.s_store_id,
+        ss.ss_ticket_number AS ws_order_number,
+        ss.ss_sales_price,
+        ss.ss_sold_date_sk
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.ss_store_sk = s.s_store_sk
+),
+Aggregated_Sales AS (
+    SELECT 
+        ci.full_name,
+        ci.ca_city,
+        ci.email,
+        ci.cd_gender,
+        ci.hd_income_band_sk,
+        sd.source,
+        COUNT(sd.ws_order_number) AS total_orders,
+        SUM(sd.ws_sales_price) AS total_revenue
+    FROM 
+        Customer_Info ci
+    JOIN 
+        Sales_Data sd ON sd.ws_order_number IS NOT NULL
+    GROUP BY 
+        ci.full_name, ci.ca_city, ci.email, ci.cd_gender, ci.hd_income_band_sk, sd.source
+)
+SELECT 
+    full_name,
+    ca_city,
+    email,
+    cd_gender,
+    hd_income_band_sk,
+    source,
+    total_orders,
+    total_revenue,
+    CASE 
+        WHEN total_revenue > 1000 THEN 'High Value'
+        WHEN total_revenue BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM 
+    Aggregated_Sales
+ORDER BY 
+    total_revenue DESC;

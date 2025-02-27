@@ -1,0 +1,82 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(DAY, -30, CURRENT_DATE)
+        AND p.Score IS NOT NULL
+),
+PostHistoryWithVotes AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.Comment,
+        CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN
+                COALESCE((SELECT c.Name FROM CloseReasonTypes c WHERE c.Id = CAST(ph.Comment AS INTEGER)), 'Unknown Reason')
+            ELSE
+                'Non-closure action'
+        END AS CloseReason,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Votes v ON v.PostId = ph.PostId
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId, ph.CreationDate, ph.Comment
+),
+AggregatedData AS (
+    SELECT 
+        rp.Title,
+        rp.PostId,
+        SUM(COALESCE(v.UpVoteCount, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.DownVoteCount, 0)) AS TotalDownVotes,
+        COUNT(ph.PostHistoryTypeId) AS HistoryCount,
+        STRING_AGG(ph.CloseReason, ', ') AS CloseReasons
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryWithVotes ph ON ph.PostId = rp.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    WHERE 
+        rp.PostRank = 1
+    GROUP BY 
+        rp.PostId, rp.Title
+),
+FinalResults AS (
+    SELECT 
+        ad.Title,
+        ad.TotalUpVotes,
+        ad.TotalDownVotes,
+        ad.HistoryCount,
+        CASE 
+            WHEN ad.TotalUpVotes > ad.TotalDownVotes THEN 'Positive'
+            WHEN ad.TotalUpVotes < ad.TotalDownVotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS Sentiment,
+        CASE 
+            WHEN ad.TotalUpVotes IS NULL THEN 'No Votes'
+            ELSE CAST(ad.TotalUpVotes - COALESCE(ad.TotalDownVotes, 0) AS VARCHAR)
+        END AS VoteDifference,
+        ad.CloseReasons
+    FROM 
+        AggregatedData ad
+)
+SELECT *
+FROM FinalResults
+WHERE 
+    CloseReasons IS NOT NULL
+    AND (TotalUpVotes > 10 OR HistoryCount > 5)
+ORDER BY 
+    TotalUpVotes DESC, HistoryCount DESC;

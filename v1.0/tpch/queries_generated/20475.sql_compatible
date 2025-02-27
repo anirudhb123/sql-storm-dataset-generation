@@ -1,0 +1,68 @@
+
+WITH RecursiveSupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS recursion_level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, r.recursion_level + 1
+    FROM supplier s
+    JOIN RecursiveSupplierCTE r ON s.s_suppkey = r.s_suppkey
+    WHERE r.recursion_level < 5
+),
+PriceCalculations AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        COUNT(ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_quantity) OVER (PARTITION BY o.o_orderkey) AS total_quantity,
+        CASE 
+            WHEN o.o_orderstatus = 'F' THEN 'Finalized' 
+            ELSE 'Pending' 
+        END AS order_status_description
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+),
+NationRegion AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        r.r_name AS region_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(nr.region_name, 'Unknown Region') AS region,
+    ps.total_supply_cost,
+    fo.order_status_description,
+    CASE 
+        WHEN fo.total_quantity IS NULL THEN 'No Orders'
+        ELSE CONCAT('Quantity: ', CAST(fo.total_quantity AS VARCHAR))
+    END AS quantity_status,
+    (SELECT AVG(c.c_acctbal) FROM customer c WHERE c.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderkey = fo.o_orderkey)) AS avg_customer_balance
+FROM part p
+LEFT JOIN PriceCalculations ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN FilteredOrders fo ON ps.supplier_count > 10  
+LEFT JOIN NationRegion nr ON nr.n_nationkey IN (SELECT s_nationkey FROM supplier WHERE s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_partkey = p.p_partkey))
+LEFT JOIN RecursiveSupplierCTE r ON r.s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_partkey = p.p_partkey AND ps.ps_availqty > 0)
+WHERE p.p_retailprice BETWEEN 10.00 AND 100.00
+  AND (fo.o_orderstatus IS NULL OR fo.o_orderstatus <> 'C')  
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    nr.region_name, 
+    ps.total_supply_cost, 
+    fo.order_status_description, 
+    fo.total_quantity
+ORDER BY p.p_partkey, ps.total_supply_cost DESC
+FETCH FIRST 100 ROWS ONLY;

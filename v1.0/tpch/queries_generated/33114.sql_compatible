@@ -1,0 +1,45 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 1 AS level
+    FROM nation n
+    WHERE n.n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+supplier_performance AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS parts_supplied,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    nh.n_name AS nation_name,
+    os.c_name AS customer_name,
+    os.total_spent,
+    os.total_orders,
+    sp.s_name AS supplier_name,
+    sp.parts_supplied,
+    sp.total_supply_value
+FROM order_summary os
+LEFT JOIN nation_hierarchy nh ON os.c_custkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = os.c_custkey)
+LEFT JOIN supplier_performance sp ON os.total_spent > 1000 AND sp.total_supply_value > 5000
+WHERE sp.total_supply_value IS NOT NULL
+ORDER BY nh.level, os.total_spent DESC
+LIMIT 10;

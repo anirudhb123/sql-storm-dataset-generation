@@ -1,0 +1,58 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ss.sold_date_sk,
+        ss.item_sk,
+        SUM(ss.quantity) AS total_quantity,
+        SUM(ss.net_paid) AS total_net_paid,
+        AVG(ss.net_profit) AS avg_net_profit,
+        ss.customer_sk
+    FROM 
+        store_sales ss
+    JOIN 
+        date_dim dd ON ss.sold_date_sk = dd.date_sk
+    WHERE 
+        dd.year = 2023
+    GROUP BY 
+        ss.sold_date_sk, ss.item_sk, ss.customer_sk
+),
+customer_summary AS (
+    SELECT 
+        c.customer_sk,
+        cd.gender,
+        cd.marital_status,
+        SUM(ss.total_net_paid) AS total_spent,
+        COUNT(DISTINCT ss.ticket_number) AS total_purchases
+    FROM 
+        sales_summary ss
+    JOIN 
+        customer c ON ss.customer_sk = c.customer_sk
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.demo_sk
+    GROUP BY 
+        c.customer_sk, cd.gender, cd.marital_status
+),
+demographics_summary AS (
+    SELECT 
+        h.income_band_sk,
+        AVG(cs.total_spent) AS avg_spent_per_income_band,
+        COUNT(DISTINCT cs.customer_sk) AS customer_count
+    FROM 
+        customer_summary cs
+    JOIN 
+        household_demographics h ON cs.customer_sk = h.demo_sk
+    GROUP BY 
+        h.income_band_sk
+)
+SELECT 
+    ib.income_band_sk,
+    ib.lower_bound,
+    ib.upper_bound,
+    ds.avg_spent_per_income_band,
+    ds.customer_count
+FROM 
+    income_band ib
+LEFT JOIN 
+    demographics_summary ds ON ib.income_band_sk = ds.income_band_sk
+ORDER BY 
+    ib.income_band_sk;

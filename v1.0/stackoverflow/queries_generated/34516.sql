@@ -1,0 +1,57 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT Id, DisplayName, Reputation, CreationDate, LastAccessDate, 
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM Users
+    WHERE Reputation > 0
+),
+PostStatistics AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.Score,
+           COALESCE(p.AnswerCount, 0) AS AnswerCount,
+           COALESCE(p.CommentCount, 0) AS CommentCount,
+           COALESCE(p.ViewCount, 0) AS ViewCount,
+           COUNT(c.Id) AS TotalComments,
+           AVG(v.BountyAmount) AS AverageBounty,
+           MAX(pp.CreationDate) AS LastActivity
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  -- BountyStart
+    LEFT JOIN LATERAL (SELECT * FROM Posts WHERE ParentId = p.Id) AS pp ON true
+    WHERE p.PostTypeId = 1  -- Questions only
+    GROUP BY p.Id, p.Title, p.Score, p.AnswerCount, p.CommentCount, p.ViewCount
+),
+TopPosts AS (
+    SELECT PostId, Title, Score, AnswerCount, TotalComments, 
+           ViewCount, AverageBounty, LastActivity,
+           ROW_NUMBER() OVER (ORDER BY Score DESC) as Rank
+    FROM PostStatistics
+    WHERE ViewCount > 100
+),
+UserBadges AS (
+    SELECT u.Id AS UserId, 
+           COUNT(b.Id) AS BadgeCount,
+           MAX(b.Date) AS MostRecentBadgeDate
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+)
+SELECT ur.Id AS UserId, 
+       ur.DisplayName, 
+       ur.Reputation, 
+       ub.BadgeCount,
+       tp.Title AS TopPostTitle,
+       tp.Score AS TopPostScore,
+       tp.LastActivity AS TopPostLastActivity,
+       CASE 
+           WHEN tp.AnswerCount > 5 THEN 'Active Contributor'
+           WHEN ub.BadgeCount > 3 THEN 'Badge Holder'
+           ELSE 'Regular User'
+       END AS UserCategory
+FROM UserReputationCTE ur
+LEFT JOIN UserBadges ub ON ur.Id = ub.UserId
+LEFT JOIN TopPosts tp ON ur.Id IN (
+    SELECT OwnerUserId FROM Posts WHERE PostTypeId = 1
+)
+WHERE ur.UserRank <= 100
+ORDER BY ur.Reputation DESC, ub.BadgeCount DESC;

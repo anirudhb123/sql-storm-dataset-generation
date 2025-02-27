@@ -1,0 +1,70 @@
+
+WITH AddressStats AS (
+    SELECT
+        ca_city,
+        COUNT(*) AS address_count,
+        STRING_AGG(ca_street_name, ', ') AS street_names,
+        STRING_AGG(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type), '; ') AS full_address
+    FROM
+        customer_address
+    WHERE
+        ca_state = 'CA'
+    GROUP BY
+        ca_city
+),
+Demographics AS (
+    SELECT
+        cd_gender,
+        COUNT(*) AS demographic_count,
+        STRING_AGG(DISTINCT cd_marital_status) AS marital_statuses
+    FROM
+        customer_demographics
+    GROUP BY
+        cd_gender
+),
+DateSales AS (
+    SELECT
+        d.d_year,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM
+        web_sales ws
+    JOIN
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY
+        d.d_year
+),
+SummarizedData AS (
+    SELECT
+        a.ca_city,
+        a.address_count,
+        a.street_names,
+        a.full_address,
+        d.cd_gender,
+        d.demographic_count,
+        d.marital_statuses,
+        s.d_year,
+        s.total_sales,
+        s.order_count
+    FROM
+        AddressStats a
+    JOIN
+        Demographics d ON d.demographic_count > 0
+    JOIN
+        DateSales s ON a.address_count > 0
+)
+SELECT
+    ca_city AS city,
+    address_count,
+    street_names,
+    full_address,
+    cd_gender,
+    demographic_count,
+    marital_statuses,
+    d_year,
+    total_sales,
+    order_count
+FROM
+    SummarizedData
+ORDER BY
+    total_sales DESC, address_count DESC;

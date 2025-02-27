@@ -1,0 +1,66 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        c.person_id,
+        p.name AS actor_name,
+        1 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    WHERE 
+        c.movie_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        c.person_id,
+        p.name,
+        ah.level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        actor_hierarchy ah ON c.movie_id = (SELECT movie_id FROM cast_info WHERE person_id = ah.person_id)
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    WHERE 
+        c.movie_id IS NOT NULL AND ah.level < 3 
+)
+SELECT 
+    movie.title,
+    ARRAY_AGG(DISTINCT ak.name) AS actors,
+    STRING_AGG(DISTINCT km.keyword, ', ') AS keywords,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    MAX(mi.info) AS most_recent_info
+FROM 
+    title movie
+LEFT JOIN 
+    movie_keyword mk ON movie.id = mk.movie_id
+LEFT JOIN 
+    keyword km ON mk.keyword_id = km.id
+LEFT JOIN 
+    complete_cast cc ON movie.id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = movie.id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    movie_companies mc ON movie.id = mc.movie_id
+LEFT JOIN 
+    movie_info mi ON movie.id = mi.movie_id
+WHERE 
+    movie.production_year IS NOT NULL
+    AND movie.production_year BETWEEN 2000 AND 2020
+    AND NOT EXISTS (
+        SELECT 1
+        FROM movie_info mi2
+        WHERE mi2.movie_id = movie.id AND mi2.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+    )
+GROUP BY 
+    movie.title, movie.id
+HAVING 
+    COUNT(DISTINCT ak.person_id) > 5
+ORDER BY 
+    movie.production_year DESC, 
+    movie.title ASC;

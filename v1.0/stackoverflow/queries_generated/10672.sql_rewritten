@@ -1,0 +1,14 @@
+SELECT 
+    COUNT(p.Id) AS TotalPostsLastYear,
+    AVG(p.Score) AS AveragePostScore,
+    SUM(v.Id IS NOT NULL) AS TotalVotesReceived
+FROM 
+    Posts p
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+WHERE 
+    p.CreationDate >= DATEADD(year, -1, GETDATE())
+GROUP BY 
+    YEAR(p.CreationDate)
+ORDER BY 
+    YEAR(p.CreationDate) DESC;

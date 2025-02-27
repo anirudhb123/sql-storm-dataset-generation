@@ -1,0 +1,57 @@
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        MIN(Posts.CreationDate) AS FirstPostDate,
+        MAX(Posts.CreationDate) AS LastPostDate
+    FROM Tags
+    JOIN Posts ON Posts.Tags LIKE '%' || Tags.TagName || '%'
+    GROUP BY Tags.TagName
+),
+
+UserActivity AS (
+    SELECT 
+        Users.DisplayName,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN Comments.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount
+    FROM Users
+    LEFT JOIN Posts ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN Comments ON Comments.UserId = Users.Id
+    GROUP BY Users.DisplayName
+),
+
+RecentTopUsers AS (
+    SELECT 
+        ua.DisplayName,
+        ua.PostCount,
+        REGEXP_COUNT(ua.TagContexts, '[^,]+') AS TagCount
+    FROM UserActivity ua
+    JOIN (
+        SELECT 
+            OwnerUserId,
+            STRING_AGG(DISTINCT Tags.TagName, ',') AS TagContexts
+        FROM Posts 
+        JOIN Tags ON Posts.Tags LIKE '%' || Tags.TagName || '%'
+        WHERE Posts.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        GROUP BY OwnerUserId
+    ) AS ut ON ut.OwnerUserId = Users.Id
+    WHERE PostCount > 0
+    ORDER BY PostCount DESC
+    LIMIT 10
+)
+
+SELECT 
+    tc.TagName,
+    tc.PostCount,
+    ua.DisplayName AS TopUser,
+    ua.PostCount AS UserPostCount,
+    ua.QuestionCount,
+    ua.AnswerCount,
+    ua.CommentCount,
+    tc.FirstPostDate,
+    tc.LastPostDate
+FROM TagCounts tc
+JOIN RecentTopUsers ua ON ua.TagContexts LIKE '%' || tc.TagName || '%'
+ORDER BY tc.PostCount DESC, ua.PostCount DESC;

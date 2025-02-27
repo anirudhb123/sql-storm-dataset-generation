@@ -1,0 +1,54 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus, 1 AS level
+    FROM orders AS o
+    WHERE o.o_orderstatus = 'O'  
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus, oh.level + 1
+    FROM orders AS o
+    JOIN OrderHierarchy AS oh ON o.o_custkey = oh.o_orderkey
+    WHERE oh.level < 5
+),
+AggregateParts AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp AS ps
+    GROUP BY ps.ps_partkey
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           ROW_NUMBER() OVER (ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM supplier AS s
+    WHERE s.s_acctbal IS NOT NULL
+),
+FilteredRegions AS (
+    SELECT r.r_regionkey, r.r_name
+    FROM region AS r
+    WHERE r.r_comment IS NOT NULL 
+      AND r.r_name LIKE 'N%'
+),
+MaxOrderDetails AS (
+    SELECT ol.o_orderkey,
+           SUM(ol.l_extendedprice * (1 - ol.l_discount)) AS net_revenue,
+           COUNT(DISTINCT ol.l_partkey) AS parts_count
+    FROM lineitem AS ol
+    JOIN orders AS o ON ol.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' 
+      AND o.o_orderdate < '1997-10-31' 
+      AND ol.l_returnflag = 'N'
+    GROUP BY ol.o_orderkey
+)
+SELECT r.r_name,
+       SUM(MOD(ap.total_cost, 100)) AS adjusted_total_cost,
+       COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       MAX(m.net_revenue) AS max_net_revenue,
+       AVG(s.s_acctbal) AS average_supplier_balance
+FROM FilteredRegions AS r
+LEFT JOIN AggregateParts AS ap ON r.r_regionkey = ap.ps_partkey
+LEFT JOIN MaxOrderDetails AS m ON m.o_orderkey = ap.ps_partkey
+LEFT JOIN RankedSuppliers AS s ON s.supplier_rank <= 10
+LEFT JOIN OrderHierarchy AS o ON o.o_orderkey = m.o_orderkey
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY adjusted_total_cost DESC;

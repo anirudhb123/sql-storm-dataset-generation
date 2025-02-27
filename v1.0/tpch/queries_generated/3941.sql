@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.depth + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > 5000 AND sh.depth < 10
+), 
+TotalLineItem AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2022-01-01' AND l.l_shipdate < '2022-12-31'
+    GROUP BY l.l_orderkey
+), 
+SupplierStats AS (
+    SELECT ps.ps_partkey, s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost, AVG(ps.ps_availqty) AS avg_avail_qty
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_name
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_type,
+    COALESCE(ss.total_supply_cost, 0) AS total_supply_cost,
+    COALESCE(ss.avg_avail_qty, 0) AS avg_avail_qty,
+    SUM(CASE WHEN o.o_orderstatus = 'F' THEN tl.total_revenue ELSE 0 END) AS finished_order_revenue,
+    SUM(CASE WHEN o.o_orderstatus = 'P' THEN tl.total_revenue ELSE 0 END) AS pending_order_revenue,
+    ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank_within_type,
+    RANK() OVER (PARTITION BY p.p_brand ORDER BY SUM(tl.total_revenue) DESC) AS revenue_rank_by_brand
+FROM part p
+LEFT JOIN SupplierStats ss ON p.p_partkey = ss.ps_partkey
+LEFT JOIN TotalLineItem tl ON tl.l_orderkey IN (
+    SELECT o.o_orderkey FROM orders o 
+    WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = p.p_partkey)
+)
+LEFT JOIN orders o ON o.o_orderkey = tl.l_orderkey
+GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_type
+HAVING SUM(CASE WHEN o.o_orderstatus = 'F' THEN tl.total_revenue ELSE 0 END) > 100000
+ORDER BY total_supply_cost DESC, rank_within_type ASC;

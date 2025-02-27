@@ -1,0 +1,77 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rnk
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+TopCustomers AS (
+    SELECT 
+        n.n_nationkey,
+        r.r_name,
+        rc.c_custkey,
+        rc.c_name,
+        rc.total_spent
+    FROM 
+        RankedCustomers rc
+    JOIN 
+        nation n ON rc.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rc.rnk <= 5
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(SUM(ps.ps_availqty), 0) AS total_available,
+    COALESCE(k.total_spent, 0) AS customer_spent,
+    CASE 
+        WHEN COALESCE(k.total_spent, 0) > p.p_retailprice * 10 THEN 'High Value'
+        WHEN COALESCE(k.total_spent, 0) BETWEEN p.p_retailprice * 5 AND p.p_retailprice * 10 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS value_category
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    (
+        SELECT 
+            tc.n_nationkey,
+            SUM(rc.total_spent) AS total_spent
+        FROM 
+            TopCustomers tc
+        JOIN 
+            RankedCustomers rc ON tc.c_custkey = rc.c_custkey
+        GROUP BY 
+            tc.n_nationkey
+    ) k ON k.n_nationkey = (
+        SELECT 
+            n.n_nationkey
+        FROM 
+            supplier s
+        JOIN 
+            nation n ON s.s_nationkey = n.n_nationkey
+        WHERE 
+            s.s_suppkey IN (
+                SELECT 
+                    DISTINCT ps_inner.ps_suppkey
+                FROM 
+                    partsupp ps_inner
+                WHERE 
+                    ps_inner.ps_partkey = p.p_partkey
+            )
+    )
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_retailprice, k.total_spent
+ORDER BY 
+    total_available DESC, customer_spent DESC;

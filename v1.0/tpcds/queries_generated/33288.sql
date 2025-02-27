@@ -1,0 +1,46 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ss_store_sk, ss_item_sk, SUM(ss_quantity) AS total_sales
+    FROM store_sales
+    GROUP BY ss_store_sk, ss_item_sk
+    HAVING SUM(ss_quantity) > 0
+    UNION ALL
+    SELECT s.ss_store_sk, s.ss_item_sk, SUM(s.ss_quantity) + c.total_sales
+    FROM store_sales s
+    JOIN SalesCTE c ON s.ss_store_sk = c.ss_store_sk AND s.ss_item_sk = c.ss_item_sk
+    WHERE c.total_sales < 100
+    GROUP BY s.ss_store_sk, s.ss_item_sk
+),
+CustomerStats AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           d.d_year, 
+           SUM(ws.ws_sales_price) AS total_spent
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year > 2020
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, d.d_year
+),
+IncomeStats AS (
+    SELECT h.hd_income_band_sk,
+           COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+           AVG(h.hd_dep_count) AS avg_dependents
+    FROM household_demographics h
+    JOIN customer c ON h.hd_demo_sk = c.c_current_hdemo_sk
+    GROUP BY h.hd_income_band_sk
+)
+SELECT ca.ca_city,
+       SUM(cs.total_spent) AS total_income,
+       MAX(s.sales) AS max_sales,
+       COALESCE(i.customer_count, 0) AS customer_count,
+       ROUND(SUM(cs.total_spent) / NULLIF(MAX(s.sales), 0), 2) AS avg_spend_per_sale
+FROM CustomerStats cs
+JOIN SalesCTE s ON cs.c_customer_sk = s.ss_store_sk
+LEFT JOIN IncomeStats i ON cs.c_customer_sk = i.hd_income_band_sk
+JOIN customer_address ca ON ca.ca_address_sk = cs.c_customer_sk 
+GROUP BY ca.ca_city
+HAVING SUM(cs.total_spent) > 1000
+ORDER BY total_income DESC
+LIMIT 10;

@@ -1,0 +1,79 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+),
+top_orders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_orderdate,
+        r.o_totalprice,
+        c.c_name,
+        c.c_address,
+        s.s_name AS supplier_name,
+        s.s_acctbal,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax
+    FROM 
+        ranked_orders r
+    JOIN 
+        lineitem l ON r.o_orderkey = l.l_orderkey
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        customer c ON r.o_orderkey = c.c_custkey
+    WHERE 
+        r.order_rank <= 5
+),
+final_results AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(o.o_totalprice) AS total_price,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        AVG(l.l_discount) AS average_discount,
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(DISTINCT s.s_suppkey) AS unique_suppliers
+    FROM 
+        top_orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        supplier s ON l.l_suppkey = s.s_suppkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.total_price,
+    r.total_orders,
+    r.average_discount,
+    r.total_quantity,
+    r.unique_suppliers,
+    n.n_name AS nation_name,
+    MAX(r.supplier_name) AS supplier_name -- Adjusted to use an aggregate function
+FROM 
+    final_results r
+JOIN 
+    customer c ON r.o_orderkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+WHERE 
+    r.total_price > 10000
+GROUP BY 
+    r.o_orderkey, r.total_price, r.total_orders, r.average_discount, r.total_quantity, r.unique_suppliers, n.n_name
+ORDER BY 
+    r.total_price DESC
+LIMIT 10;

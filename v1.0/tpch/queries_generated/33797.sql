@@ -1,0 +1,56 @@
+WITH RECURSIVE supply_chain AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        s.s_acctbal AS supplier_balance, 
+        1 AS level
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > 5000
+    
+    UNION ALL
+    
+    SELECT 
+        sc.ps_partkey, 
+        p.ps_suppkey, 
+        s.s_acctbal AS supplier_balance,
+        sc.level + 1
+    FROM 
+        supply_chain sc
+    JOIN 
+        partsupp p ON sc.ps_partkey = p.ps_partkey
+    JOIN 
+        supplier s ON p.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal < 5000
+)
+
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(s.s_acctbal) AS average_supplier_balance,
+    ARRAY_AGG(DISTINCT n.n_name) AS nations_involved,
+    COUNT(DISTINCT CASE WHEN l.l_shipdate > CURRENT_DATE THEN l.l_orderkey END) AS future_orders
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    supply_chain sc ON p.p_partkey = sc.ps_partkey
+GROUP BY 
+    p.p_partkey, p.p_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        COUNT(c.Id) AS CommentCount, 
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 DAYS' AND 
+        p.Score IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+), TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        CommentCount
+    FROM 
+        RankedPosts 
+    WHERE 
+        ScoreRank = 1
+), PostVoteStatistics AS (
+    SELECT 
+        p.Id AS PostId, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes, 
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+), FinalResults AS (
+    SELECT 
+        tp.PostId, 
+        tp.Title, 
+        tp.CreationDate, 
+        tp.CommentCount, 
+        COALESCE(pvs.Upvotes, 0) AS Upvotes, 
+        COALESCE(pvs.Downvotes, 0) AS Downvotes,
+        (COALESCE(pvs.Upvotes, 0) - COALESCE(pvs.Downvotes, 0)) AS NetVotes
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostVoteStatistics pvs ON tp.PostId = pvs.PostId
+)
+SELECT 
+    fr.PostId, 
+    fr.Title, 
+    fr.CreationDate, 
+    fr.CommentCount, 
+    fr.Upvotes, 
+    fr.Downvotes, 
+    fr.NetVotes
+FROM 
+    FinalResults fr
+WHERE 
+    fr.CommentCount > 5
+ORDER BY 
+    fr.NetVotes DESC, 
+    fr.CommentCount DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    NULL, 
+    'Total Posts Evaluated', 
+    NULL, 
+    COUNT(*) FILTER (WHERE fr.CommentCount > 5), 
+    NULL, 
+    NULL, 
+    NULL
+FROM 
+    FinalResults fr

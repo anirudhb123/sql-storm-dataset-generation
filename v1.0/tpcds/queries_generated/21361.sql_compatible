@@ -1,0 +1,81 @@
+
+WITH RECURSIVE DemographicAnalysis AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        cd_dep_count,
+        cd_dep_employed_count,
+        cd_dep_college_count,
+        1 AS RecursionLevel
+    FROM customer_demographics
+    WHERE cd_purchase_estimate > 1000
+
+    UNION ALL
+
+    SELECT 
+        da.cd_demo_sk,
+        da.cd_gender,
+        da.cd_marital_status,
+        da.cd_education_status,
+        da.cd_purchase_estimate * 1.1 AS cd_purchase_estimate,
+        da.cd_credit_rating,
+        da.cd_dep_count + 1,
+        da.cd_dep_employed_count,
+        da.cd_dep_college_count,
+        da.RecursionLevel + 1
+    FROM DemographicAnalysis da
+    WHERE da.RecursionLevel < 5
+),
+
+AggregatedReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS TotalReturns,
+        COUNT(DISTINCT sr_ticket_number) AS UniqueReturnCount,
+        COALESCE(SUM(sr_return_amt), 0) AS TotalReturnAmount
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+
+ItemSales AS (
+    SELECT 
+        ws_item_sk,
+        COUNT(ws_order_number) AS TotalSold,
+        SUM(ws_net_paid_inc_tax) AS TotalSales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS SalesRank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+
+FinalMetrics AS (
+    SELECT 
+        da.cd_demo_sk,
+        da.cd_gender,
+        da.cd_marital_status,
+        ar.TotalReturns,
+        ar.UniqueReturnCount,
+        is.TotalSold,
+        is.TotalSales
+    FROM DemographicAnalysis da
+    LEFT JOIN AggregatedReturns ar ON da.cd_demo_sk = ar.sr_customer_sk
+    LEFT JOIN ItemSales is ON da.cd_demo_sk = is.ws_item_sk
+)
+
+SELECT 
+    fm.*, 
+    CASE 
+        WHEN TotalSales IS NULL THEN 'No Sales'
+        ELSE CASE 
+            WHEN TotalSales > 0 THEN 'Active Customer'
+            ELSE 'Inactive Customer'
+        END 
+    END AS CustomerActivityStatus,
+    COALESCE(NULLIF(cd_gender, 'M'), 'Not Specified') AS GenderInContext,
+    DENSE_RANK() OVER (ORDER BY TotalSales DESC) AS SalesDensityRank
+FROM FinalMetrics fm
+WHERE TotalReturns > 5 OR TotalSales > 1000
+ORDER BY TotalSales DESC;

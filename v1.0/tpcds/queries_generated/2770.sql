@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+),
+SalesSummary AS (
+    SELECT 
+        rs.ws_order_number,
+        SUM(rs.ws_quantity) AS total_quantity,
+        SUM(rs.ws_net_profit) AS total_net_profit
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rank <= 5
+    GROUP BY 
+        rs.ws_order_number
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    cs.ws_order_number,
+    SUM(cs.total_quantity) AS total_quantity,
+    AVG(cs.total_net_profit) AS avg_net_profit,
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.ca_city,
+    cd.ca_state
+FROM 
+    SalesSummary cs
+JOIN 
+    CustomerDetails cd ON cs.ws_order_number IN (SELECT ws.ws_order_number FROM web_sales ws WHERE ws.ws_ship_customer_sk = cd.c_customer_id)
+GROUP BY 
+    cs.ws_order_number, cd.c_first_name, cd.c_last_name, cd.ca_city, cd.ca_state
+HAVING 
+    SUM(cs.total_quantity) > 100
+ORDER BY 
+    avg_net_profit DESC
+LIMIT 10;

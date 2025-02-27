@@ -1,0 +1,49 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, 0 AS level
+    FROM customer_address
+    WHERE ca_country = 'USA'
+    UNION ALL
+    SELECT ca.ca_address_sk, CONCAT(ah.ca_city, ' -> ', ca.ca_city) AS ca_city,
+           ca.ca_state, ca.ca_country, ah.level + 1
+    FROM customer_address ca
+    JOIN address_hierarchy ah ON ca.ca_address_sk != ah.ca_address_sk AND ca.ca_state = ah.ca_state
+    WHERE ah.level < 5
+),
+sales_data AS (
+    SELECT ws.ws_bill_customer_sk AS customer_sk,
+           SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+           COUNT(ws.ws_order_number) AS order_count,
+           ROW_NUMBER() OVER(PARTITION BY ws.ws_bill_customer_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS rank
+    FROM web_sales ws
+    LEFT JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY ws.ws_bill_customer_sk
+),
+income_stats AS (
+    SELECT h.hd_income_band_sk, COUNT(hd_demo_sk) AS demo_count,
+           AVG(hd_vehicle_count) AS avg_vehicles, 
+           MAX(hd_dep_count) AS max_dependents
+    FROM household_demographics h 
+    LEFT JOIN customer_demographics cd ON h.hd_demo_sk = cd.cd_demo_sk
+    GROUP BY h.hd_income_band_sk
+),
+promotion_summary AS (
+    SELECT p.p_promo_id, SUM(ws.ws_ext_sales_price) AS total_discounted_sales
+    FROM promotion p
+    LEFT JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    WHERE p.p_start_date_sk < 2500 AND p.p_end_date_sk > 2000
+    GROUP BY p.p_promo_id
+),
+final_output AS (
+    SELECT ah.ca_city, ah.ca_state,
+           sd.total_spent, sd.order_count,
+           is.demo_count, is.avg_vehicles, is.max_dependents,
+           ps.total_discounted_sales
+    FROM address_hierarchy ah
+    JOIN sales_data sd ON sd.customer_sk = (SELECT c.c_customer_sk FROM customer c WHERE c.c_current_addr_sk = ah.ca_address_sk LIMIT 1)
+    JOIN income_stats is ON is.hd_income_band_sk = (SELECT h.hd_income_band_sk FROM household_demographics h WHERE h.hd_demo_sk = c.c_current_hdemo_sk LIMIT 1)
+    LEFT JOIN promotion_summary ps ON ps.total_discounted_sales IS NOT NULL
+    WHERE ah.level > 0 AND ah.ca_state IN ('CA', 'TX') AND sd.rank = 1
+)
+SELECT * FROM final_output
+WHERE final_output.total_spent > (SELECT AVG(total_spent) FROM sales_data);

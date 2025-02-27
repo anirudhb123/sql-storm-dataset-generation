@@ -1,0 +1,90 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1 -- Only questions
+
+    UNION ALL
+
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM
+        Posts p
+    INNER JOIN
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVoteStats AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostHistoryAggregates AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+        AND ph.PostHistoryTypeId IN (4, 5) -- Include title and body edits
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    p.Id AS PostId,
+    rh.Level,
+    p.Title,
+    p.AcceptedAnswerId,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    ph.EditCount,
+    ph.LastEditDate,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+FROM 
+    Posts p
+LEFT JOIN 
+    PostVoteStats vs ON p.Id = vs.PostId
+LEFT JOIN 
+    RecursivePostHierarchy rh ON p.Id = rh.PostId
+LEFT JOIN 
+    PostHistoryAggregates ph ON p.Id = ph.PostId
+LEFT JOIN 
+    UserBadgeCounts ub ON p.OwnerUserId = ub.UserId
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '1 year' -- Filter for posts created in the last year
+  AND 
+    p.Score > 5 -- Filter for posts with a positive score
+  AND 
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) > 0 -- Ensure the post has comments
+ORDER BY 
+    p.CreationDate DESC;

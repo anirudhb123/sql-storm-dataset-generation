@@ -1,0 +1,79 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank,
+        kt.keyword AS movie_keyword,
+        kw.id AS keyword_id
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kt ON mk.keyword_id = kt.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role_name,
+        COUNT(ci.id) OVER (PARTITION BY ci.movie_id) AS cast_count
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        cn.country_code IS NOT NULL
+),
+FinalResult AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        cd.actor_name,
+        cd.role_name,
+        mc.company_name,
+        mc.company_type,
+        CASE 
+            WHEN cd.cast_count > 10 THEN 'Large Cast'
+            ELSE 'Small Cast'
+        END AS cast_size
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CastDetails cd ON rm.movie_keyword = cd.actor_name
+    LEFT JOIN 
+        MovieCompanies mc ON rm.movie_keyword IS NOT NULL
+
+)
+SELECT 
+    movie_title,
+    production_year,
+    actor_name,
+    role_name,
+    company_name,
+    company_type,
+    cast_size
+FROM 
+    FinalResult
+WHERE 
+    (production_year BETWEEN 2000 AND 2020 OR company_type IS NOT NULL)
+    AND (movie_title LIKE '%The%' OR actor_name IS NULL)
+ORDER BY 
+    production_year DESC, 
+    movie_title ASC;

@@ -1,0 +1,87 @@
+WITH RecursivePostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.Score,
+        P.CreationDate,
+        0 AS Level,
+        CAST(P.Title AS VARCHAR(MAX)) AS PostTitle,
+        CAST(NULL AS VARCHAR(4000)) AS Tags
+    FROM
+        Posts P
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.Score,
+        P.CreationDate,
+        R.Level + 1 AS Level,
+        CAST(P.Title AS VARCHAR(MAX)) AS PostTitle,
+        R.Tags
+    FROM
+        Posts P
+    INNER JOIN RecursivePostStats R ON P.ParentId = R.PostId
+    WHERE P.PostTypeId = 2 
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.Score >= 0 THEN 1 ELSE 0 END) AS UpvotedPosts,
+        SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END) AS DownvotedPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostHistoryAggregates AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastModified,
+        COUNT(PH.Id) AS EditCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        PH.PostId
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UPS.TotalPosts,
+    UPS.UpvotedPosts,
+    UPS.DownvotedPosts,
+    UPS.QuestionCount,
+    UPS.AnswerCount,
+    COALESCE(PHA.LastModified, 'Never') AS LastEditDate,
+    COALESCE(PHA.EditCount, 0) AS EditCount,
+    (SELECT COUNT(*) 
+     FROM Votes V 
+     WHERE V.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id) 
+     AND V.VoteTypeId = 2) AS TotalUpvotes,
+    (SELECT COUNT(*) 
+     FROM Votes V 
+     WHERE V.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id) 
+     AND V.VoteTypeId = 3) AS TotalDownvotes
+FROM 
+    Users U
+LEFT JOIN 
+    UserPostStats UPS ON U.Id = UPS.UserId
+LEFT JOIN 
+    PostHistoryAggregates PHA ON U.Id = (SELECT OwnerUserId FROM Posts WHERE Id = PHA.PostId)
+WHERE 
+    U.Reputation > 100
+    AND UPS.QuestionCount > 5
+ORDER BY 
+    U.Reputation DESC, UPS.TotalPosts DESC;

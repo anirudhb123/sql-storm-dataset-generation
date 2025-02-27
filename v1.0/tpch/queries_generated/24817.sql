@@ -1,0 +1,53 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_custkey,
+           c_name,
+           c_nationkey,
+           c_acctbal,
+           NULL AS parent_custkey,
+           0 AS level
+    FROM customer
+    WHERE c_acctbal > (SELECT AVG(c_acctbal) FROM customer WHERE c_mktsegment <> 'AUTOMOBILE')
+    UNION ALL
+    SELECT c.c_custkey,
+           c.c_name,
+           c.c_nationkey,
+           c.c_acctbal,
+           ch.c_custkey AS parent_custkey,
+           ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON ch.c_nationkey = c.c_nationkey
+    WHERE c.c_acctbal < (SELECT AVG(c_acctbal) FROM customer WHERE c_mktsegment = 'AUTOMOBILE')
+),
+valid_lines AS (
+    SELECT l_orderkey,
+           l_partkey,
+           l_suppkey,
+           l_quantity * (1 - l_discount) AS effective_price,
+           l_returnflag,
+           l_linestatus,
+           RANK() OVER (PARTITION BY l_orderkey ORDER BY l_extendedprice DESC) AS price_rank
+    FROM lineitem
+    WHERE l_shipdate BETWEEN CURRENT_DATE - INTERVAL '30 days' AND CURRENT_DATE
+),
+supply_summary AS (
+    SELECT ps_partkey,
+           COUNT(DISTINCT ps_suppkey) AS supplier_count,
+           SUM(ps_availqty) AS total_availability
+    FROM partsupp
+    GROUP BY ps_partkey
+)
+SELECT ch.c_name,
+       ch.parent_custkey,
+       SUM(CASE WHEN vl.l_returnflag = 'R' THEN vl.effective_price END) AS total_returned,
+       SUM(CASE WHEN vl.l_linestatus = 'O' THEN vl.effective_price END) AS total_open,
+       AVG(su.total_availability) AS avg_supplier_availability,
+       STRING_AGG(DISTINCT p.p_name, '; ') AS part_names
+FROM customer_hierarchy ch
+LEFT JOIN valid_lines vl ON vl.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = ch.c_custkey)
+LEFT JOIN supply_summary su ON su.ps_partkey IN (SELECT DISTINCT l_partkey FROM valid_lines)
+JOIN part p ON p.p_partkey IN (SELECT l_partkey FROM valid_lines WHERE price_rank = 1)
+WHERE ch.level < 3
+GROUP BY ch.c_name, ch.parent_custkey
+HAVING SUM(COALESCE(vl.effective_price, 0)) > (SELECT AVG(c_acctbal) FROM customer)
+ORDER BY total_open DESC, total_returned ASC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

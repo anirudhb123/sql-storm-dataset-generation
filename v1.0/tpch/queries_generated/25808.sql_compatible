@@ -1,0 +1,45 @@
+
+WITH SplitParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        REGEXP_SUBSTR(p.p_name, '[^ ]+', 1, idx) AS part_word
+    FROM 
+        part p
+    JOIN 
+        (SELECT LEVEL AS idx FROM dual CONNECT BY LEVEL <= 10) word_index 
+    ON 
+        REGEXP_SUBSTR(p.p_name, '[^ ]+', 1, idx) IS NOT NULL
+),
+PartStats AS (
+    SELECT 
+        part_word, 
+        COUNT(*) AS word_count, 
+        AVG(LENGTH(part_word)) AS avg_length
+    FROM 
+        SplitParts
+    GROUP BY 
+        part_word
+),
+SupplierCount AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    ps.part_word,
+    ps.word_count,
+    ps.avg_length,
+    sc.supplier_count
+FROM 
+    PartStats ps
+JOIN 
+    SupplierCount sc ON sc.p_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_name LIKE '%' || ps.part_word || '%')
+ORDER BY 
+    ps.word_count DESC, ps.avg_length DESC;

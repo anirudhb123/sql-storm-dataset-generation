@@ -1,0 +1,77 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS PartRank
+    FROM 
+        part p
+),
+CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        n.n_nationkey,
+        n.n_name AS nation_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey,
+        CASE 
+            WHEN o.o_orderstatus = 'O' THEN 'Open'
+            ELSE 'Closed' 
+        END AS order_status,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_extended_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderstatus
+),
+OrderCustomerNation AS (
+    SELECT 
+        fo.o_orderkey,
+        cn.nation_name,
+        fo.total_extended_price
+    FROM 
+        FilteredOrders fo
+    JOIN 
+        CustomerNation cn ON fo.o_custkey = cn.c_custkey
+)
+SELECT 
+    r.nation_name,
+    COUNT(DISTINCT oc.o_orderkey) AS order_count,
+    AVG(oc.total_extended_price) AS avg_order_value,
+    SUM(sp.total_cost) AS total_supplier_cost
+FROM 
+    OrderCustomerNation oc
+FULL OUTER JOIN 
+    SupplierSummary sp ON oc.nation_name = (
+        SELECT DISTINCT n.n_name 
+        FROM nation n 
+        WHERE n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = sp.s_suppkey)
+    )
+GROUP BY 
+    r.nation_name
+ORDER BY 
+    order_count DESC NULLS LAST;

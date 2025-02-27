@@ -1,0 +1,85 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        Id, 
+        TagName, 
+        Count,
+        1 AS Level
+    FROM 
+        Tags
+    WHERE 
+        IsModeratorOnly = 0
+    UNION ALL
+    SELECT 
+        t.Id, 
+        t.TagName, 
+        t.Count,
+        rh.Level + 1
+    FROM 
+        Tags t
+    JOIN 
+        RecursiveTagHierarchy rh ON t.WikiPostId = rh.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 
+            ELSE 0 
+        END AS HasAcceptedAnswer,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+                    SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM Votes 
+         GROUP BY PostId) v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, v.UpVotes, v.DownVotes
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    ts.TagName,
+    ps.PostId,
+    ps.Title AS PostTitle,
+    ps.ViewCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    rb.BadgeCount,
+    rb.BadgeNames,
+    ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY ps.ViewCount DESC) AS Rank
+FROM 
+    Users u
+LEFT JOIN 
+    PostStatistics ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    RecursiveTagHierarchy ts ON ps.Title LIKE CONCAT('%', ts.TagName, '%')
+LEFT JOIN 
+    RecentBadges rb ON u.Id = rb.UserId
+WHERE 
+    u.Reputation > 1000
+    AND ps.Title IS NOT NULL
+ORDER BY 
+    u.Reputation DESC, 
+    ps.ViewCount DESC;

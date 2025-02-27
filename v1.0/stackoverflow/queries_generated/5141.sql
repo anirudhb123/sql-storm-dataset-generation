@@ -1,0 +1,29 @@
+WITH UserReputation AS (
+    SELECT Id AS UserId, Reputation, CreationDate, LastAccessDate, Views, UpVotes, DownVotes
+    FROM Users
+    WHERE Reputation > 1000
+),
+HighActivityPosts AS (
+    SELECT P.Id AS PostId, P.Title, P.CreationDate, P.LastActivityDate, P.Score, 
+           P.ViewCount, U.DisplayName AS CreatorName
+    FROM Posts P
+    JOIN UserReputation U ON P.OwnerUserId = U.UserId
+    WHERE P.CreationDate > NOW() - INTERVAL '1 year' AND P.ViewCount > 500
+),
+ClosedPostHistories AS (
+    SELECT PH.PostId, PH.CreationDate, PH.Comment, P.Title, P.OwnerDisplayName
+    FROM PostHistory PH
+    JOIN Posts P ON PH.PostId = P.Id
+    WHERE PH.PostHistoryTypeId IN (10, 11) AND PH.CreationDate > NOW() - INTERVAL '6 months'
+),
+PostStatistics AS (
+    SELECT H.PostId, COUNT(*) AS CloseCount, AVG(EXTRACT(EPOCH FROM H.CreationDate - P.CreationDate)) AS AvgTimeToClose
+    FROM ClosedPostHistories H
+    JOIN HighActivityPosts P ON H.PostId = P.PostId
+    GROUP BY H.PostId
+)
+SELECT P.Title, P.CreatorName, S.CloseCount, S.AvgTimeToClose
+FROM PostStatistics S
+JOIN HighActivityPosts P ON S.PostId = P.PostId
+ORDER BY S.CloseCount DESC, S.AvgTimeToClose ASC
+LIMIT 10;

@@ -1,0 +1,60 @@
+
+WITH SalesData AS (
+    SELECT 
+        w.warehouse_id, 
+        w.warehouse_name,
+        ws.ws_sold_date_sk, 
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_sales_price) AS total_sales_revenue,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        w.warehouse_id, w.warehouse_name, ws.ws_sold_date_sk
+), CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        c.c_birth_year,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, c.c_birth_year
+), AggregateResults AS (
+    SELECT 
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        SUM(sd.total_quantity_sold) AS warehouse_total_quantity,
+        SUM(sd.total_sales_revenue) AS warehouse_total_revenue,
+        SUM(ci.total_orders) AS total_orders_by_customer
+    FROM 
+        SalesData sd
+    JOIN 
+        CustomerInfo ci ON ci.total_orders > 0
+    GROUP BY 
+        ci.cd_gender, ci.cd_marital_status, ci.cd_education_status
+)
+SELECT 
+    ar.cd_gender, 
+    ar.cd_marital_status, 
+    ar.cd_education_status, 
+    ar.warehouse_total_quantity, 
+    ar.warehouse_total_revenue, 
+    ar.total_orders_by_customer
+FROM 
+    AggregateResults ar
+ORDER BY 
+    ar.warehouse_total_revenue DESC, 
+    ar.total_orders_by_customer DESC;

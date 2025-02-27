@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        0 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.episode_of_id IS NULL  -- Start with root movies
+    UNION ALL
+    SELECT
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM
+        aka_title mt
+    JOIN
+        movie_link ml ON ml.linked_movie_id = mt.id
+    JOIN
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+ActorRoles AS (
+    SELECT
+        ca.person_id,
+        a.name AS actor_name,
+        ca.movie_id,
+        rt.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY ca.person_id ORDER BY ca.nr_order) AS role_order
+    FROM
+        cast_info ca
+    JOIN
+        aka_name a ON ca.person_id = a.person_id
+    JOIN
+        role_type rt ON ca.role_id = rt.id
+),
+FilteredMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        ARRAY_AGG(DISTINCT ar.actor_name) AS actors,
+        COUNT(ar.role_name) AS total_roles
+    FROM
+        MovieHierarchy mh
+    LEFT JOIN
+        ActorRoles ar ON mh.movie_id = ar.movie_id
+    GROUP BY
+        mh.movie_id, mh.movie_title, mh.production_year
+),
+PopularMovies AS (
+    SELECT
+        fm.movie_id,
+        fm.movie_title,
+        fm.production_year,
+        fm.actors,
+        fm.total_roles,
+        RANK() OVER (ORDER BY fm.total_roles DESC) AS rank
+    FROM
+        FilteredMovies fm
+    WHERE
+        fm.production_year >= 2000  -- Filtering movies from the year 2000 onwards
+)
+SELECT
+    pm.movie_id,
+    pm.movie_title,
+    pm.production_year,
+    pm.actors,
+    pm.total_roles
+FROM
+    PopularMovies pm
+WHERE
+    pm.rank <= 10  -- Get top 10 movies based on actor roles
+ORDER BY
+    pm.total_roles DESC;

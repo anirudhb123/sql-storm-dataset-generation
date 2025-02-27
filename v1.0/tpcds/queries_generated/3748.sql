@@ -1,0 +1,62 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_id, ws.ws_item_sk
+),
+max_sales_per_site AS (
+    SELECT 
+        web_site_id,
+        total_sales 
+    FROM 
+        ranked_sales 
+    WHERE 
+        rank = 1
+)
+SELECT 
+    ca.ca_state,
+    COUNT(DISTINCT c.c_customer_id) AS num_customers,
+    MAX(m.total_sales) AS max_sales,
+    MIN(m.total_sales) AS min_sales,
+    AVG(m.total_sales) AS avg_sales,
+    CASE 
+        WHEN SUM(m.total_sales) IS NULL THEN 'No Sales'
+        WHEN SUM(m.total_sales) > 10000 THEN 'High Sales'
+        ELSE 'Moderate Sales'
+    END AS sales_category
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    max_sales_per_site m ON m.web_site_id = (
+        SELECT 
+            ws.web_site_id 
+        FROM 
+            web_sales ws 
+        WHERE 
+            ws.ws_item_sk IN (
+                SELECT 
+                    ws_item_sk 
+                FROM 
+                    ranked_sales 
+                WHERE 
+                    web_site_id = m.web_site_id
+            )
+        LIMIT 1
+    )
+GROUP BY 
+    ca.ca_state
+ORDER BY 
+    ca.ca_state;

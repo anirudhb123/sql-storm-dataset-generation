@@ -1,0 +1,65 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn,
+        CASE 
+            WHEN o.o_orderstatus = 'F' THEN 'Finished'
+            WHEN o.o_orderstatus = 'P' THEN 'Pending'
+            ELSE 'Other'
+        END AS status_description
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+), 
+CountrySuppliers AS (
+    SELECT 
+        n.n_name AS nation_name, 
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_name
+), 
+TopProducts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        DENSE_RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+SELECT 
+    r.r_name,
+    COALESCE(cs.supplier_count, 0) AS supplier_count,
+    COUNT(DISTINCT ro.o_orderkey) AS total_orders,
+    AVG(ro.o_totalprice) AS avg_order_value,
+    STRING_AGG(DISTINCT CONCAT(tp.p_name, ' (', tp.total_revenue, ')') 
+               ORDER BY tp.total_revenue DESC) AS top_products
+FROM 
+    region r
+LEFT JOIN 
+    CountrySuppliers cs ON r.r_name = cs.nation_name
+LEFT JOIN 
+    RankedOrders ro ON (ro.o_orderdate IS NOT NULL AND ro.o_orderkey IS NOT NULL AND ro.o_orderdate < CURRENT_DATE)
+LEFT JOIN 
+    TopProducts tp ON (ro.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F'))
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT ro.o_orderkey) > 5
+ORDER BY 
+    r.r_name, avg_order_value DESC;

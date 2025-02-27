@@ -1,0 +1,58 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        Id AS PostId, 
+        Title, 
+        ParentId, 
+        CreationDate, 
+        Score, 
+        OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts 
+    WHERE 
+        PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.ParentId, 
+        p.CreationDate, 
+        p.Score, 
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+)
+
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+    COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+    AVG(p.Score) AS AverageScore,
+    SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+    MAX(p.CreationDate) AS LastActive,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    COUNT(DISTINCT ph.PostId) AS TotalPostHistoryChanges
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Tags t ON t.ExcerptPostId IN (SELECT DISTINCT PostId FROM RecursivePostHierarchy)
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+WHERE 
+    u.Reputation > 500  
+    AND (p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' OR p.CreationDate IS NULL)
+GROUP BY 
+    u.Id
+HAVING 
+    COUNT(DISTINCT p.Id) > 10  
+ORDER BY 
+    TotalPosts DESC, AverageScore DESC;

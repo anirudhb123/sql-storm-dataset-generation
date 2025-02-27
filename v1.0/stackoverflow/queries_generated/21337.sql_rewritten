@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '365 days'
+    GROUP BY 
+        p.Id
+),
+PostsWithBadges AS (
+    SELECT 
+        up.UserId, 
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(b.Class) AS TotalBadgeClass 
+    FROM Users up
+    LEFT JOIN Badges b ON up.Id = b.UserId
+    WHERE 
+        up.Reputation > 1000
+    GROUP BY 
+        up.UserId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name || ' on ' || TO_CHAR(ph.CreationDate, 'YYYY-MM-DD HH24:MI:SS'), '; ') AS HistoryDetails
+    FROM 
+        PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId
+),
+CombinedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.UpVotes,
+        rp.DownVotes,
+        COALESCE(pbd.BadgeCount, 0) AS BadgeCount,
+        COALESCE(pbd.TotalBadgeClass, 0) AS TotalBadgeClass,
+        COALESCE(phd.HistoryDetails, 'No history') AS HistoryDetails
+    FROM 
+        RankedPosts rp
+    LEFT JOIN PostsWithBadges pbd ON rp.PostId = (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = pbd.UserId LIMIT 1)
+    LEFT JOIN PostHistoryDetails phd ON rp.PostId = phd.PostId
+    WHERE 
+        rp.Score > (SELECT AVG(Score) FROM Posts) AND 
+        rp.ViewCount < (SELECT MAX(ViewCount) FROM Posts) * 0.5
+)
+SELECT 
+    PostId,
+    Title,
+    ViewCount,
+    Score,
+    UpVotes,
+    DownVotes,
+    BadgeCount,
+    TotalBadgeClass,
+    HistoryDetails
+FROM 
+    CombinedData
+WHERE 
+    (BadgeCount > 0 OR HistoryDetails != 'No history')
+ORDER BY 
+    Score DESC, 
+    ViewCount ASC;

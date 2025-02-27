@@ -1,0 +1,65 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_orderstatus
+),
+TopNations AS (
+    SELECT 
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        n.n_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000000
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(o.o_totalprice) AS average_order_value,
+    COALESCE(SUM(to.total_revenue), 0) AS total_nation_revenue,
+    COUNT(DISTINCT ro.o_orderkey) AS total_orders
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.s_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    TopNations to ON n.n_name = to.n_name
+LEFT JOIN 
+    RankedOrders ro ON o.o_orderkey = ro.o_orderkey
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_nation_revenue DESC, customer_count DESC;

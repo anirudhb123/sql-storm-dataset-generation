@@ -1,0 +1,44 @@
+WITH movie_ratings AS (
+    SELECT 
+        t.id AS movie_id,
+        AVG(CASE WHEN r.rating IS NOT NULL THEN r.rating ELSE 0 END) AS average_rating
+    FROM title t
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id 
+    LEFT JOIN (
+        SELECT movie_id, 
+            MAX(CASE WHEN info_type_id = (SELECT id FROM info_type WHERE info = 'Rating') THEN info END) AS rating
+        FROM movie_info 
+        GROUP BY movie_id
+    ) r ON t.id = r.movie_id
+    GROUP BY t.id
+),
+top_actors AS (
+    SELECT 
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    GROUP BY a.name
+    HAVING COUNT(DISTINCT c.movie_id) >= 3
+),
+high_rating_movies AS (
+    SELECT 
+        t.title,
+        mr.average_rating,
+        ROW_NUMBER() OVER (ORDER BY mr.average_rating DESC) as rank
+    FROM movie_ratings mr
+    JOIN title t ON mr.movie_id = t.id 
+    WHERE mr.average_rating > 8.0
+)
+SELECT 
+    th.title,
+    th.average_rating,
+    ta.name AS top_actor,
+    COUNT(DISTINCT mc.company_id) AS production_companies
+FROM high_rating_movies th
+INNER JOIN movie_companies mc ON th.movie_id = mc.movie_id
+INNER JOIN cast_info ci ON th.movie_id = ci.movie_id
+INNER JOIN top_actors ta ON ci.person_id = (SELECT person_id FROM aka_name WHERE name = ta.name LIMIT 1)
+GROUP BY th.title, th.average_rating, ta.name
+ORDER BY th.average_rating DESC, production_companies DESC
+LIMIT 10;

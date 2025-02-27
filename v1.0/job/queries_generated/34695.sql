@@ -1,0 +1,68 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+DirectorInfo AS (
+    SELECT 
+        pi.person_id,
+        a.name AS director_name,
+        pi.info AS director_bio
+    FROM 
+        person_info pi
+    JOIN 
+        aka_name a ON pi.person_id = a.person_id
+    WHERE 
+        pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+),
+MovieCast AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT ca.person_id) AS cast_count,
+        STRING_AGG(DISTINCT an.name, ', ') AS cast_members,
+        MAX(c.nr_order) AS highest_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name an ON c.person_id = an.person_id
+    GROUP BY 
+        c.movie_id
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    COALESCE(dc.director_name, 'Unknown Director') AS director_name,
+    COALESCE(dc.director_bio, 'No biography available') AS director_bio,
+    COALESCE(mc.cast_count, 0) AS total_cast,
+    COALESCE(mc.cast_members, 'No cast listed') AS cast_members,
+    mh.level AS hierarchy_level
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    DirectorInfo dc ON mh.movie_id = (SELECT movie_id FROM complete_cast cc WHERE cc.subject_id IN (SELECT person_id FROM aka_name WHERE name = dc.director_name) LIMIT 1)
+LEFT JOIN 
+    MovieCast mc ON mh.movie_id = mc.movie_id
+WHERE 
+    mh.production_year >= 2000
+ORDER BY 
+    mh.production_year DESC, mh.movie_title;

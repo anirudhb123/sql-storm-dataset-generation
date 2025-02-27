@@ -1,0 +1,70 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT 
+        ca_address_sk,
+        ca_address_id,
+        ca_city,
+        ca_state,
+        ca_country,
+        1 AS level
+    FROM 
+        customer_address
+    WHERE 
+        ca_city IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ca_address_sk,
+        ca_address_id,
+        ca_city,
+        ca_state,
+        ca_country,
+        level + 1
+    FROM 
+        customer_address AS sub
+    JOIN 
+        address_hierarchy AS parent ON parent.ca_address_sk = sub.ca_address_sk
+    WHERE 
+        parent.ca_city != sub.ca_city
+        AND sub.ca_state IS NOT NULL
+)
+
+SELECT 
+    CONCAT_WS(', ', ca_street_number, ca_street_name, ca_street_type) AS full_address,
+    (SELECT COUNT(*) 
+     FROM store s 
+     WHERE s.s_city = ca.city AND s.s_state = ca.state) AS store_count,
+    DATEDIFF(CURRENT_DATE, MIN(d_date)) AS days_since_first_purchase,
+    MAX(cd_purchase_estimate) AS max_estimate,
+    COUNT(DISTINCT c.c_current_cdemo_sk) AS unique_demographics,
+    AVG(NULLIF(ws_net_profit, 0)) AS avg_net_profit
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+LEFT JOIN 
+    web_sales ws ON ws.ws_bill_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    date_dim d ON d.d_date_sk = ws.ws_sold_date_sk
+GROUP BY 
+    full_address
+HAVING 
+    COUNT(*) > 2
+    AND (MAX(cd_purchase_estimate) IS NOT NULL OR MAX(cd_purchase_estimate) > 100)
+ORDER BY 
+    days_since_first_purchase DESC;
+
+SELECT 
+    a.ca_country,
+    AVG(d.d_fy_year)
+FROM 
+    customer_address a
+RIGHT JOIN 
+    date_dim d ON YEAR(d.d_date) >= 2020
+WHERE 
+    a.ca_country IS NOT NULL
+GROUP BY 
+    a.ca_country;

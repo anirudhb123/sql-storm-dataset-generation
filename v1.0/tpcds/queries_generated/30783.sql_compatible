@@ -1,0 +1,61 @@
+
+WITH RecursiveCte AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ss_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions,
+        ROW_NUMBER() OVER (PARTITION BY w.w_warehouse_id ORDER BY SUM(ss_ext_sales_price) DESC) AS rank
+    FROM 
+        store_sales
+    JOIN
+        warehouse w ON ss_store_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+), 
+CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(ws_ext_sales_price, 0)) AS total_web_sales,
+        SUM(COALESCE(cs_ext_sales_price, 0)) AS total_catalog_sales,
+        SUM(COALESCE(ss_ext_sales_price, 0)) AS total_store_sales,
+        RANK() OVER (ORDER BY SUM(COALESCE(ws_ext_sales_price, 0) + COALESCE(cs_ext_sales_price, 0) + COALESCE(ss_ext_sales_price, 0)) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id
+), 
+TotalSales AS (
+    SELECT 
+        total_web_sales + total_catalog_sales + total_store_sales AS grand_total_sales
+    FROM 
+        CustomerSales
+)
+SELECT 
+    r.w_warehouse_id,
+    c.c_customer_id,
+    cs.total_web_sales,
+    cs.total_catalog_sales,
+    cs.total_store_sales,
+    cs.sales_rank,
+    t.grand_total_sales,
+    SUM(r.total_transactions) OVER () AS total_transactions_across_warehouses
+FROM 
+    RecursiveCte r
+JOIN 
+    CustomerSales cs ON r.w_warehouse_id = 
+      (SELECT w_id FROM warehouse WHERE w_warehouse_sk = (SELECT MAX(w_warehouse_sk) FROM warehouse))
+JOIN 
+    TotalSales t ON 1 = 1
+WHERE 
+    cs.total_web_sales > (SELECT AVG(total_web_sales) FROM CustomerSales)
+AND 
+    EXISTS (SELECT 1 FROM store s WHERE s.s_zip = '12345' AND s.s_store_sk = r.w_warehouse_id)
+ORDER BY 
+    t.grand_total_sales DESC
+LIMIT 10;

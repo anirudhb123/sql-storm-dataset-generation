@@ -1,0 +1,33 @@
+WITH RecursiveCTE AS (
+    
+    SELECT P.Id AS AnswerId, P.Score, 
+           P.CreationDate,
+           P.OwnerUserId,
+           1 AS Level
+    FROM Posts P
+    WHERE P.PostTypeId = 2 
+    
+    UNION ALL
+    
+    SELECT A.Id, A.Score, A.CreationDate, A.OwnerUserId,
+           R.Level + 1
+    FROM Posts A
+    INNER JOIN Posts Q ON A.ParentId = Q.Id
+    INNER JOIN RecursiveCTE R ON Q.AcceptedAnswerId = R.AnswerId
+)
+SELECT U.DisplayName AS UserName, 
+       COUNT(DISTINCT P.Id) AS AnswerCount, 
+       COALESCE(SUM(P.Score), 0) AS TotalScore,
+       AVG(P.ViewCount) AS AvgViewCount,
+       MAX(P.CreationDate) AS LatestAnswerDate,
+       MIN(P.CreationDate) AS EarliestAnswerDate,
+       STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+FROM Users U
+LEFT JOIN Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 2
+LEFT JOIN Posts Q ON P.ParentId = Q.Id
+LEFT JOIN Tags T ON T.ExcerptPostId = Q.Id
+GROUP BY U.Id
+HAVING COUNT(DISTINCT P.Id) > 5 
+   AND COALESCE(SUM(P.Score), 0) > 100 
+ORDER BY TotalScore DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

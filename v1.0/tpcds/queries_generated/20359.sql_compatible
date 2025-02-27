@@ -1,0 +1,73 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_profit IS NOT NULL
+),
+FilteredReturns AS (
+    SELECT 
+        sr.sr_item_sk,
+        SUM(sr.sr_return_quantity) AS total_returns,
+        AVG(sr.sr_return_amt_inc_tax) AS avg_return_amt
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.sr_return_quantity > 0
+        AND EXISTS (
+            SELECT 1
+            FROM customer c
+            WHERE c.c_customer_sk = sr.sr_customer_sk
+              AND c.c_birth_month BETWEEN 1 AND 6
+              AND (c.c_preferred_cust_flag IS NULL OR c.c_preferred_cust_flag = 'Y')
+        )
+    GROUP BY 
+        sr.sr_item_sk
+),
+DeepInsights AS (
+    SELECT 
+        i.i_item_id,
+        COALESCE(rs.ws_order_number, 'No Sales') AS order_number,
+        COALESCE(rs.ws_net_profit, 0) AS net_profit,
+        COALESCE(fr.total_returns, 0) AS total_returns,
+        COALESCE(fr.avg_return_amt, 0) AS avg_return_amount
+    FROM 
+        item i
+    LEFT JOIN 
+        RankedSales rs ON i.i_item_sk = rs.ws_item_sk AND rs.profit_rank = 1
+    LEFT JOIN 
+        FilteredReturns fr ON i.i_item_sk = fr.sr_item_sk
+    WHERE 
+        (i.i_current_price IS NOT NULL OR i.i_wholesale_cost < 100) 
+        AND (i.i_rec_start_date <= '2002-10-01' OR i.i_rec_end_date IS NULL)
+)
+SELECT 
+    d.i_item_id,
+    d.order_number,
+    d.net_profit,
+    d.total_returns,
+    CASE 
+        WHEN d.total_returns > 10 THEN 'High'
+        WHEN d.total_returns BETWEEN 5 AND 10 THEN 'Moderate'
+        ELSE 'Low' 
+    END AS return_category,
+    CASE 
+        WHEN d.net_profit > 500 THEN 'Profitable'
+        WHEN d.net_profit BETWEEN 100 AND 500 THEN 'Marginally Profitable'
+        ELSE 'Unprofitable' 
+    END AS profitability_category,
+    (SELECT COUNT(*) 
+     FROM inventory inv
+     WHERE inv.inv_item_sk = d.i_item_id 
+       AND inv.inv_quantity_on_hand IS NOT NULL) AS inventory_count
+FROM 
+    DeepInsights d
+ORDER BY 
+    d.net_profit DESC, 
+    d.total_returns ASC
+LIMIT 100;

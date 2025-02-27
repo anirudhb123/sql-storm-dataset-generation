@@ -1,0 +1,70 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        COALESCE(pa.OwnerDisplayName, 'No accepted answer') AS AcceptedAnswerOwner,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Posts pa ON p.AcceptedAnswerId = pa.Id
+    WHERE p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+),
+
+PostUpdates AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS DeleteCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostCount,
+    ua.QuestionCount,
+    ua.AnswerCount,
+    ua.LastPostDate,
+    pd.PostId,
+    pd.Title,
+    pd.ViewCount,
+    pd.AcceptedAnswerOwner,
+    pu.LastClosedDate,
+    pu.DeleteCount,
+    pu.ReopenCount,
+    CASE 
+        WHEN pu.DeleteCount > 0 AND pu.ReopenCount = 0 THEN 'Deleted without reopening'
+        WHEN pu.ReopenCount > 0 THEN 'Reopened'
+        ELSE 'Active'
+    END AS PostStatus
+FROM UserActivity ua
+INNER JOIN PostDetails pd ON ua.UserId = pd.OwnerUserId
+LEFT JOIN PostUpdates pu ON pd.PostId = pu.PostId
+WHERE ua.PostCount > 5
+  AND (pu.DeleteCount IS NULL OR pu.DeleteCount = 0)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM Votes v
+      WHERE v.PostId = pd.PostId
+      AND v.VoteTypeId = 2
+      GROUP BY v.PostId
+      HAVING COUNT(*) > 10
+  )
+ORDER BY ua.PostCount DESC, pd.ViewCount DESC;

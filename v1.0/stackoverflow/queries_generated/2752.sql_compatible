@@ -1,0 +1,61 @@
+
+WITH UserVoteSummary AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (ORDER BY P.Score DESC, P.ViewCount DESC) AS PopularityRank
+    FROM Posts P
+    WHERE P.PostTypeId = 1 
+      AND P.Score >= 0
+      AND P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '6 months'
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (4, 5) 
+    GROUP BY PH.PostId
+)
+SELECT 
+    U.DisplayName,
+    U.TotalVotes,
+    U.UpVotes,
+    U.DownVotes,
+    PP.PostId,
+    PP.Title,
+    PP.CreationDate,
+    PP.Score,
+    PP.ViewCount,
+    COALESCE(PHS.EditCount, 0) AS EditCount,
+    PHS.LastEditDate
+FROM UserVoteSummary U
+JOIN Posts PP ON U.UserId = PP.OwnerUserId
+LEFT JOIN PostHistorySummary PHS ON PP.Id = PHS.PostId
+WHERE PP.Id IN (
+    SELECT PostId
+    FROM PostLinks
+    WHERE LinkTypeId = 3 
+)
+OR PP.Id IN (
+    SELECT DISTINCT RelatedPostId
+    FROM PostLinks
+    WHERE LinkTypeId = 1 
+)
+ORDER BY U.TotalVotes DESC, PP.Score DESC
+LIMIT 100;

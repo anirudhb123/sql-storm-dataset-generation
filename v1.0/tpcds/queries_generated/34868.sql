@@ -1,0 +1,67 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ws.web_site_sk,
+        ws_sold_date_sk AS sold_date_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    JOIN
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    GROUP BY
+        ws.web_site_sk, ws_sold_date_sk
+    HAVING
+        SUM(ws_ext_sales_price) > 1000
+),
+CustomerSummary AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        cd.cd_gender,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_sk, c.c_current_cdemo_sk, cd.cd_gender
+),
+AddressSummary AS (
+    SELECT
+        ca_state,
+        COUNT(DISTINCT ca_address_sk) AS address_count
+    FROM
+        customer_address
+    GROUP BY
+        ca_state
+)
+SELECT 
+    w.web_site_id,
+    ss.sold_date_sk,
+    ss.total_sales,
+    cs.c_customer_sk,
+    cs.total_spent,
+    cs.order_count,
+    asu.ca_state,
+    asu.address_count,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No Purchases'
+        WHEN cs.order_count > 10 THEN 'Frequent Customer'
+        ELSE 'Infrequent Buyer'
+    END AS customer_type
+FROM 
+    SalesCTE ss
+JOIN 
+    web_site w ON ss.web_site_sk = w.web_site_sk
+JOIN 
+    CustomerSummary cs ON ss.web_site_sk = cs.c_current_cdemo_sk
+LEFT JOIN 
+    AddressSummary asu ON asu.ca_state = 'CA'
+WHERE 
+    ss.sales_rank <= 10
+ORDER BY 
+    total_sales DESC, total_spent DESC;

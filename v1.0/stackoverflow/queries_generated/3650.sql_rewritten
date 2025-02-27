@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+TopUserPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        u.DisplayName AS OwnerDisplayName,
+        rp.Score,
+        rp.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY rp.Score DESC) AS PostRank
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.Score > 10
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    tup.PostId,
+    tup.Title,
+    tup.OwnerDisplayName,
+    CASE 
+        WHEN ub.BadgeCount IS NULL THEN 'No Badges'
+        ELSE CONCAT(ub.BadgeCount, ' Badges')
+    END AS BadgeInfo,
+    tup.Score AS PostScore,
+    COALESCE(
+        (SELECT COUNT(c.Id) 
+         FROM Comments c 
+         WHERE c.PostId = tup.PostId), 
+        0) AS CommentCount
+FROM 
+    TopUserPosts tup
+LEFT JOIN 
+    UserBadges ub ON tup.OwnerUserId = ub.UserId
+WHERE 
+    tup.PostRank <= 5
+ORDER BY 
+    tup.Score DESC, 
+    tup.CreationDate DESC;

@@ -1,0 +1,66 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_amt) AS total_return_amt,
+        COUNT(sr_item_sk) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk, 
+        SUM(ws_net_paid) AS total_sales,
+        COALESCE(cr.return_count, 0) AS return_count,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt 
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        CustomerReturns cr ON ws_bill_customer_sk = cr.sr_customer_sk
+    GROUP BY 
+        ws_bill_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status
+    FROM 
+        customer_demographics cd
+),
+FinalReport AS (
+    SELECT 
+        sd.customer_sk, 
+        SUM(sd.total_sales) AS total_sales, 
+        SUM(sd.return_count) AS total_returns,
+        SUM(sd.total_return_amt) AS total_return_amt,
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status
+    FROM 
+        SalesAndReturns sd
+    JOIN 
+        CustomerDemographics cd ON sd.customer_sk = cd.cd_demo_sk
+    GROUP BY 
+        sd.customer_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status
+)
+SELECT 
+    customer_sk, 
+    total_sales, 
+    total_returns, 
+    total_return_amt, 
+    cd_gender, 
+    cd_marital_status, 
+    cd_education_status,
+    total_sales - total_return_amt AS net_sales
+FROM 
+    FinalReport
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

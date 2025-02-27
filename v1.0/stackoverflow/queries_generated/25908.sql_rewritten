@@ -1,0 +1,76 @@
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id
+),
+PostWithVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RankedPosts AS (
+    SELECT 
+        pv.Title,
+        pv.CreationDate,
+        ptc.TagCount,
+        uv.BadgeCount,
+        pv.UpVotes,
+        pv.DownVotes,
+        ROW_NUMBER() OVER (ORDER BY pv.UpVotes DESC, pv.DownVotes ASC) AS PostRank
+    FROM 
+        PostWithVotes pv
+    JOIN 
+        PostTagCounts ptc ON pv.PostId = ptc.PostId
+    JOIN 
+        Users u ON u.Id = pv.OwnerUserId
+    JOIN 
+        UserBadgeCounts uv ON u.Id = uv.UserId
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.TagCount,
+    rp.BadgeCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.PostRank
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.PostRank <= 10  
+ORDER BY 
+    rp.UpVotes DESC;

@@ -1,0 +1,80 @@
+
+WITH RECURSIVE part_supplier AS (
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_name,
+        p.p_brand,
+        p.p_container,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM
+        partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+top_suppliers AS (
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ps.p_name,
+        ps.p_brand
+    FROM
+        part_supplier ps
+    WHERE
+        ps.rn = 1
+    UNION ALL
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ps.p_name,
+        ps.p_brand
+    FROM
+        part_supplier ps
+    JOIN top_suppliers ts ON ps.ps_partkey = ts.ps_partkey
+    WHERE
+        ps.ps_supplycost < ts.ps_supplycost
+),
+customer_order_summary AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM
+        customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderstatus = 'O'
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+nation_supplier AS (
+    SELECT
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM
+        supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY
+        n.n_name
+)
+SELECT
+    ps.p_name,
+    ps.p_brand,
+    ps.ps_availqty,
+    cs.c_name,
+    cs.total_spent,
+    ns.n_name,
+    ns.supplier_count
+FROM
+    top_suppliers ps
+LEFT JOIN customer_order_summary cs ON ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = cs.c_nationkey)
+LEFT JOIN nation_supplier ns ON ns.supplier_count > 0
+ORDER BY
+    ps.ps_supplycost DESC
+LIMIT 10;

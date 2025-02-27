@@ -1,0 +1,72 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        COALESCE(SUM(c.Score), 0) AS TotalCommentScore,
+        RANK() OVER (ORDER BY COUNT(p.Id) DESC) AS PostRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        Questions,
+        Answers,
+        TotalCommentScore,
+        PostRank
+    FROM 
+        UserActivity
+    WHERE 
+        Reputation > 1000 AND TotalPosts > 5
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        PostsTags pt ON p.Id = pt.PostId
+    JOIN 
+        Tags t ON pt.TagId = t.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Tags,
+    CASE 
+        WHEN tp.ViewCount > 100 THEN 'Popular'
+        ELSE 'Moderate' 
+    END AS Popularity,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.Id AND v.VoteTypeId = 2) AS UpVotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.Id AND v.VoteTypeId = 3) AS DownVotes
+FROM 
+    TopUsers tu
+JOIN 
+    RecentPosts tp ON tu.UserId = tp.OwnerUserId
+ORDER BY 
+    tu.Reputation DESC, tp.ViewCount DESC
+LIMIT 10;

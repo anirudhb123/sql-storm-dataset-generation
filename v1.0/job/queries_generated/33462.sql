@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- Base case: Select all titles
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    -- Recursive case: Find linked movies
+    SELECT 
+        l.linked_movie_id AS movie_id,
+        t.title,
+        mh.level + 1
+    FROM 
+        movie_link l
+    JOIN 
+        movie_hierarchy mh ON l.movie_id = mh.movie_id
+    JOIN 
+        aka_title t ON l.linked_movie_id = t.id
+)
+
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    m.level,
+    STRING_AGG(DISTINCT c.name, ', ' ORDER BY c.name) AS cast_names,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    MIN(mi.info) AS first_info,
+    MAX(CASE WHEN mi.info_type_id = 1 THEN mi.info END) AS 'Director'
+FROM 
+    movie_hierarchy m
+LEFT JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name n ON cc.subject_id = n.person_id
+LEFT JOIN 
+    cast_info ci ON n.person_id = ci.person_id AND ci.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON m.movie_id = mi.movie_id
+WHERE 
+    m.level <= 2
+GROUP BY 
+    m.movie_id, m.title, m.production_year, m.level
+ORDER BY 
+    m.production_year DESC, m.level, m.title;
+
+This query constructs a recursive common table expression (CTE) to build a hierarchy of movies, including linked titles. It computes a list of cast names, counts the number of associated keywords, and retrieves information that matches specific criteria while effectively handling outer joins and grouping to generate a comprehensive benchmarking view.

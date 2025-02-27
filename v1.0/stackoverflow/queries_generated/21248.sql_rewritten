@@ -1,0 +1,80 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY CASE 
+                                            WHEN u.Reputation > 1000 THEN 'High'
+                                            WHEN u.Reputation BETWEEN 500 AND 1000 THEN 'Medium'
+                                            ELSE 'Low'
+                                        END 
+                            ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+),
+RecentBadges AS (
+    SELECT
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Badges b
+    WHERE b.Date >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY b.UserId
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+UserPostSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        r.DisplayName,
+        COALESCE(bs.BadgeCount, 0) AS BadgeCount,
+        COALESCE(bs.BadgeNames, 'None') AS BadgeNames,
+        COALESCE(ps.QuestionCount, 0) AS QuestionCount,
+        COALESCE(ps.AnswerCount, 0) AS AnswerCount,
+        COALESCE(ps.TotalScore, 0) AS TotalScore,
+        COALESCE(ps.TotalViews, 0) AS TotalViews,
+        r.ReputationRank
+    FROM RankedUsers r
+    LEFT JOIN RecentBadges bs ON r.Id = bs.UserId
+    LEFT JOIN PostStats ps ON r.Id = ps.OwnerUserId
+),
+FinalReport AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.BadgeCount,
+        u.BadgeNames,
+        u.QuestionCount,
+        u.AnswerCount,
+        u.TotalScore,
+        u.TotalViews,
+        u.ReputationRank
+    FROM UserPostSummary u
+    WHERE u.QuestionCount > 5 AND u.TotalViews > 1000
+)
+SELECT 
+    f.UserId,
+    f.DisplayName,
+    f.BadgeCount,
+    f.BadgeNames,
+    f.QuestionCount,
+    f.AnswerCount,
+    f.TotalScore,
+    f.TotalViews,
+    f.ReputationRank,
+    CASE 
+        WHEN f.ReputationRank = 1 THEN 'Top Contributor'
+        WHEN f.ReputationRank = 2 THEN 'Emerging Contributor'
+        ELSE 'Novice Contributor'
+    END AS ContributorStatus
+FROM FinalReport f
+ORDER BY f.TotalScore DESC, f.BadgeCount DESC;

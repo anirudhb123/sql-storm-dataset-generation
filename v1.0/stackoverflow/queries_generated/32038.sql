@@ -1,0 +1,62 @@
+WITH RecursivePostHierarchy AS (
+    SELECT p.Id, p.Title, p.ParentId, 
+           1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  -- Only questions
+
+    UNION ALL
+
+    SELECT p.Id, p.Title, p.ParentId,
+           rh.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rh ON p.ParentId = rh.Id
+),
+
+TopQuestions AS (
+    SELECT p.Id, p.Title, COUNT(a.Id) AS AnswerCount
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId 
+    WHERE p.PostTypeId = 1  -- Only questions
+    GROUP BY p.Id, p.Title
+    HAVING COUNT(a.Id) > 0
+),
+
+UserReputation AS (
+    SELECT u.Id AS UserId, 
+           u.Reputation, 
+           ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+),
+
+PostHistoryAggregated AS (
+    SELECT ph.PostId, 
+           COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+           COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+
+SELECT q.Title AS QuestionTitle, 
+       u.DisplayName AS UserName,
+       u.Reputation,
+       COALESCE(PHA.CloseCount, 0) AS CloseCount,
+       COALESCE(PHA.ReopenCount, 0) AS ReopenCount,
+       CASE 
+           WHEN PHA.CloseCount > 0 THEN 'Closed'
+           WHEN PHA.ReopenCount > 0 THEN 'Reopened'
+           ELSE 'Active'
+       END AS Status,
+       STRING_AGG(t.TagName, ', ') AS Tags,
+       ROW_NUMBER() OVER (PARTITION BY q.Id ORDER BY q.AnswerCount DESC) AS DisplayOrder 
+FROM TopQuestions q
+JOIN Posts p ON q.Id = p.Id
+JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN PostHistoryAggregated PHA ON p.Id = PHA.PostId
+LEFT JOIN LATERAL (
+    SELECT t.TagName
+    FROM Tags t
+    WHERE t.Id IN (SELECT UNNEST(string_to_array(p.Tags, '<>'))::int)
+) t ON true
+WHERE q.AnswerCount > 3 
+GROUP BY q.Id, u.Id
+ORDER BY q.AnswerCount DESC, u.Reputation DESC;

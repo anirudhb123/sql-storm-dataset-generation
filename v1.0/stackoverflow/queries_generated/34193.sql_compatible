@@ -1,0 +1,59 @@
+
+WITH RecursiveUserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.Score > 0 THEN P.Score ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN P.Score < 0 THEN ABS(P.Score) ELSE 0 END) AS TotalDownVotes,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+), 
+RecentPostHistories AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        P.Title,
+        PH.CreationDate,
+        PH.UserDisplayName,
+        RANK() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS Rank
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+)
+SELECT 
+    UPS.DisplayName,
+    UPS.PostCount,
+    UPS.TotalUpVotes,
+    UPS.TotalDownVotes,
+    COALESCE(Ranking.Rank, 0) AS HistoryChangeRank,
+    AVG(PH.CreationDate) AS AvgPostCreationTimeChange,
+    STRING_AGG(PH.Title, ', ') AS RecentChanges
+FROM 
+    RecursiveUserPostStats UPS
+LEFT JOIN 
+    RecentPostHistories PH ON UPS.UserId = PH.UserId
+FULL OUTER JOIN 
+    (SELECT 
+         PostId, COUNT(*) AS Rank
+     FROM 
+         RecentPostHistories
+     WHERE 
+         Rank = 1
+     GROUP BY 
+         PostId) AS Ranking ON PH.PostId = Ranking.PostId
+GROUP BY 
+    UPS.DisplayName, UPS.PostCount, UPS.TotalUpVotes, UPS.TotalDownVotes
+ORDER BY 
+    UPS.TotalUpVotes DESC, AvgPostCreationTimeChange DESC
+LIMIT 100;

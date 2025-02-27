@@ -1,0 +1,42 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        COALESCE(m.season_nr::text, 'N/A') AS season,
+        COALESCE(m.episode_nr::text, 'N/A') AS episode,
+        1 AS level
+    FROM title m
+    WHERE m.episode_of_id IS NULL -- start with top-level movies
+
+    UNION ALL
+
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        COALESCE(t.season_nr::text, 'N/A') AS season,
+        COALESCE(t.episode_nr::text, 'N/A') AS episode,
+        mh.level + 1
+    FROM title t
+    JOIN movie_hierarchy mh ON t.episode_of_id = mh.movie_id
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.season,
+    mh.episode,
+    COUNT(DISTINCT ci.person_id) AS cast_count,
+    ARRAY_AGG(DISTINCT ak.name) AS cast_names,
+    AVG(COALESCE(mci.info::float, 0)) AS avg_company_rating,
+    STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+    ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.title) AS row_num
+FROM movie_hierarchy mh
+LEFT JOIN complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN company_name cn ON mc.company_id = cn.id
+LEFT JOIN movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = 1 -- Assuming this is the rating type
+LEFT JOIN aka_name ak ON ci.person_id = ak.person_id
+GROUP BY mh.movie_id, mh.title, mh.season, mh.episode
+HAVING COUNT(DISTINCT ci.person_id) > 0
+ORDER BY mh.title;

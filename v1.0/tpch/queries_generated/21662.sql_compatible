@@ -1,0 +1,47 @@
+
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN TopSuppliers ts ON ts.total_supply_cost < 2000
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey, s.s_name
+),
+EligibleCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal
+    FROM customer c
+    WHERE c.c_acctbal > (
+        SELECT AVG(c2.c_acctbal)
+        FROM customer c2
+        WHERE c2.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name LIKE 'A%')
+    )
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM orders o
+    JOIN EligibleCustomers ec ON o.o_custkey = ec.c_custkey
+    WHERE o.o_totalprice > (
+        SELECT AVG(o2.o_totalprice)
+        FROM orders o2
+        WHERE o2.o_orderstatus = 'O'
+    )
+),
+LineItemInfos AS (
+    SELECT li.l_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS net_revenue
+    FROM lineitem li
+    GROUP BY li.l_orderkey
+)
+SELECT ts.s_name, ec.c_name, ho.o_orderkey, li.net_revenue
+FROM TopSuppliers ts
+FULL OUTER JOIN EligibleCustomers ec ON ts.s_suppkey = ec.c_custkey
+JOIN HighValueOrders ho ON ho.o_orderkey = li.l_orderkey
+JOIN LineItemInfos li ON ho.o_orderkey = li.l_orderkey
+WHERE ts.total_supply_cost IS NOT NULL AND ec.c_acctbal > 100
+ORDER BY ts.total_supply_cost DESC, ec.c_name ASC, li.net_revenue DESC
+LIMIT 10;

@@ -1,0 +1,50 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS Rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        ns.s_name,
+        ns.TotalSupplyCost
+    FROM RankedSuppliers ns
+    JOIN nation n ON ns.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE ns.Rank = 1
+),
+CustOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS TotalOrders,
+        SUM(o.o_totalprice) AS TotalSpent,
+        MAX(o.o_orderdate) AS LastOrderDate
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    t.r_name AS RegionName,
+    t.s_name AS SupplierName,
+    c.c_name AS CustomerName,
+    c.TotalOrders,
+    c.TotalSpent,
+    COALESCE(NULLIF(DATEDIFF(CURDATE(), c.LastOrderDate), 0), -1) AS DaysSinceLastOrder,
+    CASE 
+        WHEN c.TotalSpent > t.TotalSupplyCost THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS CustomerType
+FROM TopSuppliers t
+JOIN CustOrderSummary c ON t.TotalSupplyCost > c.TotalSpent
+LEFT JOIN lineitem l ON l.l_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey ORDER BY o.o_orderdate DESC LIMIT 1)
+WHERE l.l_returnflag IS NULL
+AND l.l_discount BETWEEN 0 AND 0.2
+ORDER BY t.r_name, c.TotalSpent DESC
+LIMIT 100;

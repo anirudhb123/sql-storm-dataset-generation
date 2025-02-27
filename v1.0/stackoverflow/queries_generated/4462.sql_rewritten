@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(SUM(c.Score), 0) AS TotalCommentScore,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.TaggedUsers @> ARRAY(SELECT u.Id FROM Users u WHERE u.Reputation >= 10000)
+    GROUP BY 
+        p.Id, p.Title, p.Score
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalBounties,
+    ups.BadgeCount,
+    ups.CommentCount,
+    rp.Title AS TopPostTitle,
+    rp.Score AS TopPostScore,
+    pd.TotalCommentScore,
+    pd.CloseCount
+FROM 
+    UserStats ups
+LEFT JOIN 
+    RankedPosts rp ON ups.UserId = rp.OwnerUserId AND rp.Rank = 1
+LEFT JOIN 
+    PostDetails pd ON rp.Id = pd.PostId
+WHERE 
+    ups.BadgeCount > 0
+ORDER BY 
+    ups.CommentCount DESC, ups.TotalBounties DESC;

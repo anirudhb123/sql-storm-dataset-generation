@@ -1,0 +1,55 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rnk
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(year, -3, '1998-10-01'::date)
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopSales AS (
+    SELECT 
+        o_year,
+        SUM(total_sales) AS total_sales_year
+    FROM (
+        SELECT 
+            EXTRACT(YEAR FROM o_orderdate) AS o_year,
+            total_sales
+        FROM 
+            RankedOrders
+        WHERE 
+            rnk <= 10
+    ) AS top_sales_per_year
+    GROUP BY 
+        o_year
+)
+SELECT 
+    r.r_name,
+    SUM(ts.total_sales_year) AS regional_sales
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    RankedOrders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    TopSales ts ON EXTRACT(YEAR FROM o.o_orderdate) = ts.o_year
+GROUP BY 
+    r.r_name
+ORDER BY 
+    regional_sales DESC;

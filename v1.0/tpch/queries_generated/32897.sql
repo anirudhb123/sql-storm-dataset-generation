@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sp.s_acctbal, sh.level + 1
+    FROM supplier sp
+    JOIN SupplierHierarchy sh ON sp.s_nationkey = sh.s_nationkey
+    WHERE sp.s_acctbal >= sh.s_acctbal
+),
+PartSupplierCounts AS (
+    SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type, p.p_size, p.p_retailprice, 
+           pd.supplier_count, 
+           CASE 
+               WHEN pd.supplier_count > 5 THEN 'High'
+               WHEN pd.supplier_count BETWEEN 3 AND 5 THEN 'Medium'
+               ELSE 'Low' 
+           END AS supply_risk
+    FROM part p
+    LEFT JOIN PartSupplierCounts pd ON p.p_partkey = pd.ps_partkey
+),
+CustomerSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT r.r_name, 
+       SUM(CASE WHEN l.l_returnflag = 'Y' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_returned,
+       AVG(cs.total_spent) AS avg_spent,
+       COUNT(DISTINCT pd.p_partkey) AS num_parts,
+       COUNT(DISTINCT s.s_suppkey) AS num_suppliers,
+       MAX(sh.level) AS max_supplier_level
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+LEFT JOIN PartDetails pd ON l.l_partkey = pd.p_partkey
+LEFT JOIN CustomerSummary cs ON s.s_nationkey = cs.c_custkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+GROUP BY r.r_name
+HAVING SUM(CASE WHEN l.l_returnflag = 'Y' THEN 1 ELSE 0 END) > 10
+ORDER BY total_returned DESC, avg_spent ASC;

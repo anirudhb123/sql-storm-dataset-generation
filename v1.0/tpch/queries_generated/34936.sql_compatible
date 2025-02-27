@@ -1,0 +1,75 @@
+
+WITH RECURSIVE CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierPartSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_quantity DESC) AS rank_quantity
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_discount > 0.05
+),
+RegionStatistics AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+)
+SELECT 
+    cus.c_name AS cust_name,
+    cus.order_count,
+    cus.total_spent,
+    sup.s_name AS supplier_name,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_line_item_value,
+    CASE 
+        WHEN reg.nation_count IS NULL THEN 'No Nations'
+        ELSE CAST(reg.nation_count AS CHAR)
+    END AS nation_count_info
+FROM 
+    CustomerOrderSummary cus
+LEFT JOIN 
+    LineItemDetails li ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cus.c_custkey)
+LEFT JOIN 
+    SupplierPartSummary sup ON li.l_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sup.s_suppkey)
+LEFT JOIN 
+    RegionStatistics reg ON reg.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = cus.c_custkey))
+GROUP BY 
+    cus.c_name, cus.order_count, cus.total_spent, sup.s_name, reg.nation_count
+HAVING 
+    SUM(li.l_extendedprice * (1 - li.l_discount)) > 1000
+ORDER BY 
+    total_line_item_value DESC;

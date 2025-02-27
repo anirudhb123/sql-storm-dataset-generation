@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.Score,
+        rp.OwnerName,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank = 1
+)
+SELECT 
+    tp.Title,
+    tp.ViewCount,
+    tp.Score,
+    tp.OwnerName,
+    tp.CommentCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = tp.OwnerId) AS BadgeCount
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC
+LIMIT 10;

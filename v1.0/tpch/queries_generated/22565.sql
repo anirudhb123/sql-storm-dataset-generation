@@ -1,0 +1,54 @@
+WITH RECURSIVE HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rnk
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+), TotalOrderPrices AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+), NationalOrders AS (
+    SELECT c.c_nationkey, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_nationkey
+), SupplierOrderInfo AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, 
+           (ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM partsupp ps 
+    WHERE ps.ps_availqty > 0
+), CombinedMetrics AS (
+    SELECT n.n_nationkey, n.n_name, 
+           COALESCE(NationalOrders.order_count, 0) AS order_count,
+           COALESCE(SUM(TotalOrderPrices.total_price), 0) AS total_order_value,
+           SUM(HighValueSuppliers.s_acctbal) AS total_supplier_value
+    FROM nation n
+    LEFT JOIN NationalOrders ON n.n_nationkey = NationalOrders.c_nationkey
+    LEFT JOIN TotalOrderPrices ON TotalOrderPrices.o_orderkey IS NOT NULL
+    LEFT JOIN HighValueSuppliers ON HighValueSuppliers.s_suppkey IN (
+        SELECT ps.ps_suppkey
+        FROM SupplierOrderInfo ps
+        WHERE ps.total_supply_value > 1000
+    )
+    GROUP BY n.n_nationkey, n.n_name
+), ExtremeCases AS (
+    SELECT cm.n_name AS nation_name,
+           cm.order_count,
+           cm.total_order_value,
+           CASE WHEN cm.total_order_value IS NULL THEN 'No Orders'
+                WHEN cm.order_count = 0 THEN 'Zero Orders'
+                ELSE 'Orders Present' END AS order_status
+    FROM CombinedMetrics cm
+    WHERE cm.total_order_value IS NOT NULL OR cm.order_count != 0
+)
+SELECT ec.nation_name, ec.order_count, ec.total_order_value, ec.order_status,
+       ROUND(AVG(COALESCE(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice END, 0)), 2) AS avg_returned_value
+FROM ExtremeCases ec
+LEFT JOIN lineitem l ON l.l_orderkey IN (
+    SELECT DISTINCT o_orderkey FROM orders WHERE o_orderstatus = 'O'
+)
+GROUP BY ec.nation_name, ec.order_count, ec.total_order_value, ec.order_status
+HAVING ec.order_status = 'Orders Present' 
+   OR SUM(l.l_discount) IS NOT NULL
+ORDER BY ec.total_order_value DESC NULLS LAST;

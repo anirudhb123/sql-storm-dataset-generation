@@ -1,0 +1,49 @@
+
+WITH Customer_Sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+    WHERE c.c_birth_year > 1980
+    GROUP BY c.c_customer_id
+),
+Top_Customers AS (
+    SELECT 
+        c_customer_id,
+        total_net_paid,
+        total_orders,
+        RANK() OVER (ORDER BY total_net_paid DESC) AS rank
+    FROM Customer_Sales
+    WHERE total_net_paid IS NOT NULL
+),
+Store_Returns_Summary AS (
+    SELECT 
+        sr_store_sk,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        COUNT(sr_ticket_number) AS total_returns
+    FROM store_returns
+    GROUP BY sr_store_sk
+)
+SELECT 
+    t.c_customer_id,
+    t.total_net_paid,
+    t.total_orders,
+    srs.total_return_amount,
+    srs.total_returns
+FROM Top_Customers t
+LEFT JOIN Store_Returns_Summary srs ON t.rank <= 10
+WHERE srs.total_return_amount IS NULL OR srs.total_returns > 5
+UNION 
+SELECT 
+    s.s_store_id, 
+    NULL AS total_net_paid, 
+    NULL AS total_orders, 
+    SUM(sr.return_amt) AS total_return_amount,
+    COUNT(sr.ticket_number) AS total_returns
+FROM store s
+LEFT JOIN store_returns sr ON s.s_store_sk = sr.s_store_sk
+GROUP BY s.s_store_id
+HAVING SUM(sr.return_amt) IS NOT NULL
+ORDER BY total_net_paid DESC NULLS LAST;

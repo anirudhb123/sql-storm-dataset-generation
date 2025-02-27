@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS RankScore,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::text[])
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AnswerCount, p.PostTypeId
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '6 months'
+    GROUP BY 
+        v.PostId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastCloseDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopenDate,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN ph.Id END) AS DeleteCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.Score,
+    COALESCE(rv.UpVotes, 0) AS UpVotes,
+    COALESCE(rv.DownVotes, 0) AS DownVotes,
+    COALESCE(phs.LastCloseDate, 'Never Closed') AS LastCloseDate,
+    COALESCE(phs.LastReopenDate, 'Never Reopened') AS LastReopenDate,
+    COALESCE(phs.DeleteCount, 0) AS DeleteCount,
+    rp.Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentVotes rv ON rp.PostId = rv.PostId
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+WHERE 
+    rp.RankScore <= 5 
+ORDER BY 
+    rp.PostTypeId, rp.Score DESC, rp.CreationDate DESC;

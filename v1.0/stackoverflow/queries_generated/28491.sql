@@ -1,0 +1,67 @@
+WITH PostTags AS (
+    SELECT 
+        P.Id AS PostId,
+        unnest(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')) AS Tag
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Focus on questions
+),
+RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation >= 1000 -- Only include users with a reputation of 1000 or more
+),
+UserPostStats AS (
+    SELECT 
+        U.UserId,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS TotalUpvotes,
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS TotalDownvotes
+    FROM 
+        RankedUsers U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.UserId
+    LEFT JOIN 
+        Comments C ON C.UserId = U.UserId
+    LEFT JOIN 
+        Votes V ON V.UserId = U.UserId
+    GROUP BY 
+        U.UserId
+),
+TagStats AS (
+    SELECT 
+        T.Tag,
+        COUNT(DISTINCT PT.PostId) AS PostCount,
+        AVG(COALESCE(UP.TotalUpvotes, 0)) AS AvgUpvotes,
+        AVG(COALESCE(UP.TotalDownvotes, 0)) AS AvgDownvotes
+    FROM 
+        PostTags PT
+    JOIN 
+        Tags T ON PT.Tag = T.TagName
+    LEFT JOIN 
+        UserPostStats UP ON PT.PostId = UP.UserId
+    GROUP BY 
+        T.Tag
+)
+SELECT 
+    TS.Tag,
+    TS.PostCount,
+    TS.AvgUpvotes,
+    TS.AvgDownvotes,
+    CASE 
+        WHEN TS.PostCount > 100 THEN 'Highly Popular'
+        WHEN TS.PostCount BETWEEN 50 AND 100 THEN 'Moderately Popular'
+        ELSE 'Less Popular'
+    END AS PopularityCategory
+FROM 
+    TagStats TS
+ORDER BY 
+    TS.PostCount DESC;

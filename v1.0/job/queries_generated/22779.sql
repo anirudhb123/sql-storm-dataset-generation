@@ -1,0 +1,75 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS depth,
+        CAST(m.title AS VARCHAR(255)) AS path,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) as row_number
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.depth + 1,
+        CAST(mh.path || ' -> ' || c.title AS VARCHAR(255)),
+        ROW_NUMBER() OVER (PARTITION BY c.production_year ORDER BY c.title)
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title c ON ml.linked_movie_id = c.id 
+    WHERE 
+        c.production_year IS NOT NULL
+),
+distinct_movies AS (
+    SELECT DISTINCT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.depth,
+        mh.row_number
+    FROM 
+        movie_hierarchy mh
+    WHERE 
+        mh.row_number = 1
+)
+SELECT 
+    m.title AS main_movie,
+    m.production_year,
+    (SELECT STRING_AGG(c.name, ', ' ORDER BY c.name)
+     FROM cast_info ci
+     JOIN aka_name c ON ci.person_id = c.person_id
+     WHERE ci.movie_id = m.movie_id 
+     AND ci.nr_order IS NOT NULL) AS cast,
+    (SELECT COUNT(DISTINCT mc.company_id)
+     FROM movie_companies mc
+     WHERE mc.movie_id = m.movie_id) AS company_count,
+    (SELECT COUNT(DISTINCT mk.keyword) 
+     FROM movie_keyword mk
+     WHERE mk.movie_id = m.movie_id) AS keyword_count,
+    CASE 
+        WHEN (m.production_year % 2 = 0) THEN 'Even Year' 
+        ELSE 'Odd Year' 
+    END AS year_type,
+    COALESCE((SELECT AVG(m2.production_year)
+              FROM distinct_movies m2
+              WHERE m2.production_year > m.production_year), 0) AS avg_future_year
+FROM 
+    distinct_movies m
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = m.movie_id
+WHERE 
+    mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Synopsis')
+    AND mi.info IS NOT NULL
+ORDER BY 
+    CAST(m.production_year AS INTEGER),
+    m.title DESC
+LIMIT 100 OFFSET 50;

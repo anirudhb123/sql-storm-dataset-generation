@@ -1,0 +1,75 @@
+
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN p.Score ELSE 0 END) AS PositiveScores,
+        SUM(CASE WHEN p.Score < 0 THEN p.Score ELSE 0 END) AS NegativeScores,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.CreationDate DESC) AS RowNum
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(c.UserDisplayName, 'Anonymous') AS LastCommenter,
+        ROW_NUMBER() OVER (ORDER BY p.LastActivityDate DESC) AS RecentPostRowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(MONTH, -6, CURRENT_TIMESTAMP)
+),
+PostHistoryDetail AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS RevisionCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.Reputation,
+    ua.PostCount,
+    ua.PositiveScores,
+    ua.NegativeScores,
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.LastCommenter,
+    pHd.RevisionCount,
+    pHd.HistoryTypes,
+    CASE 
+        WHEN ua.PostCount > 10 THEN 'Active User'
+        ELSE 'Less Active'
+    END AS UserActivityStatus
+FROM 
+    UserActivity ua
+JOIN 
+    RecentPosts rp ON ua.UserId IN (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+LEFT JOIN 
+    PostHistoryDetail pHd ON rp.PostId = pHd.PostId
+WHERE 
+    ua.Reputation > 100
+ORDER BY 
+    ua.Reputation DESC, rp.ViewCount DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

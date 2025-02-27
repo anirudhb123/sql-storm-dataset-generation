@@ -1,0 +1,54 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        CONCAT('Supplier: ', s.s_name, ', Phone: ', s.s_phone, ', Comment: ', s.s_comment) AS supplier_info,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value,
+        STRING_AGG(DISTINCT CONCAT('Supplier: ', s.s_name) ORDER BY s.s_name) AS suppliers_list
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_mfgr, 
+        p.p_brand, 
+        p.p_type, 
+        p.p_size, 
+        hp.total_value,
+        hp.suppliers_list,
+        RANK() OVER (ORDER BY hp.total_value DESC) AS part_rank
+    FROM 
+        part p
+    LEFT JOIN 
+        HighValueParts hp ON p.p_partkey = hp.ps_partkey
+)
+SELECT 
+    rd.s_suppkey, 
+    rd.supplier_info, 
+    pd.p_partkey, 
+    pd.p_name, 
+    pd.total_value,
+    pd.suppliers_list
+FROM 
+    RankedSuppliers rd
+JOIN 
+    PartDetails pd ON rd.rank <= 5 AND pd.part_rank <= 10
+ORDER BY 
+    pd.total_value DESC, rd.s_suppkey;

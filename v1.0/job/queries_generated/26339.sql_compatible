@@ -1,0 +1,59 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title AS movie_title,
+        aka_title.title AS aka_title,
+        title.production_year,
+        STRING_AGG(DISTINCT name.name, ', ') AS actors,
+        STRING_AGG(DISTINCT company_name.name, ', ') AS production_companies
+    FROM 
+        title
+    JOIN
+        aka_title ON title.id = aka_title.movie_id
+    JOIN 
+        complete_cast ON title.id = complete_cast.movie_id
+    JOIN 
+        cast_info ON complete_cast.subject_id = cast_info.id
+    JOIN 
+        aka_name ON cast_info.person_id = aka_name.person_id
+    JOIN 
+        movie_companies ON title.id = movie_companies.movie_id
+    JOIN 
+        company_name ON movie_companies.company_id = company_name.id
+    WHERE 
+        title.production_year BETWEEN 1990 AND 2020
+    AND 
+        title.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY 
+        title.id, aka_title.title, title.production_year
+    ORDER BY 
+        title.production_year DESC
+),
+KeywordStats AS (
+    SELECT 
+        movie_id,
+        COUNT(keyword.id) AS keyword_count
+    FROM 
+        movie_keyword
+    JOIN 
+        keyword ON movie_keyword.keyword_id = keyword.id
+    GROUP BY 
+        movie_id
+)
+SELECT 
+    md.movie_id,
+    md.movie_title,
+    md.aka_title,
+    md.production_year,
+    md.actors,
+    md.production_companies,
+    ks.keyword_count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    KeywordStats ks ON md.movie_id = ks.movie_id
+WHERE 
+    ks.keyword_count IS NULL OR ks.keyword_count >= 5
+ORDER BY 
+    md.production_year DESC;

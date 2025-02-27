@@ -1,0 +1,40 @@
+
+WITH RECURSIVE CustomerSalesCTE AS (
+    SELECT c.c_customer_sk,
+           c.c_customer_id,
+           SUM(ws.ws_ext_sales_price) AS total_sales,
+           COUNT(DISTINCT ws.ws_order_number) AS order_count,
+           DENSE_RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_customer_id
+),
+IncomeBandCTE AS (
+    SELECT cd.cd_demo_sk,
+           SUM(CASE 
+               WHEN c.c_birth_year IS NOT NULL THEN 1
+               ELSE 0
+           END) AS non_null_birth_years,
+           AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics cd
+    LEFT JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_demo_sk
+)
+SELECT 
+    c.c_customer_id,
+    cs.total_sales,
+    cs.order_count,
+    ib.ib_lower_bound || ' - ' || ib.ib_upper_bound AS income_range,
+    CASE 
+        WHEN cs.sales_rank <= 5 THEN 'Top 5 Customers'
+        ELSE 'Others'
+    END AS customer_category,
+    COALESCE(ib.ib_income_band_sk, -1) AS income_band_sk,
+    COALESCE(inb.avg_purchase_estimate, 0) AS average_purchase
+FROM CustomerSalesCTE cs
+JOIN IncomeBandCTE inb ON cs.c_customer_sk = inb.cd_demo_sk
+FULL OUTER JOIN income_band ib ON inb.avg_purchase_estimate BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound
+WHERE (cs.total_sales > 1000 OR inb.non_null_birth_years > 0)
+AND (ib.ib_income_band_sk IS NOT NULL OR cs.order_count > 1)
+ORDER BY cs.total_sales DESC NULLS LAST
+LIMIT 50;

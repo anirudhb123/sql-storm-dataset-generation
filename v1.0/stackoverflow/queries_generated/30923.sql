@@ -1,0 +1,80 @@
+WITH RECURSIVE UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS TotalBadges,
+        RANK() OVER (ORDER BY COUNT(b.Id) DESC) AS BadgeRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+UserPostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS Questions,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS Answers,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AverageViews
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(bp.TotalBadges, 0) AS TotalBadges,
+        COALESCE(ps.Questions, 0) AS QuestionsPosted,
+        COALESCE(ps.Answers, 0) AS AnswersPosted,
+        COALESCE(ps.TotalScore, 0) AS TotalScore,
+        COALESCE(ps.AverageViews, 0) AS AverageViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges bp ON u.Id = bp.UserId
+    LEFT JOIN 
+        UserPostStats ps ON u.Id = ps.OwnerUserId
+),
+ActiveUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalBadges,
+        ua.QuestionsPosted,
+        ua.AnswersPosted,
+        ua.TotalScore,
+        ua.AverageViewCount,
+        ROW_NUMBER() OVER (ORDER BY ua.TotalScore DESC) AS RankByScore,
+        ROW_NUMBER() OVER (ORDER BY ua.QuestionsPosted DESC) AS RankByQuestions
+    FROM 
+        UserActivity ua
+    WHERE 
+        ua.TotalBadges > 0 
+        AND ua.TotalScore > 100
+)
+SELECT 
+    au.DisplayName,
+    au.TotalBadges,
+    au.QuestionsPosted,
+    au.AnswersPosted,
+    au.TotalScore,
+    au.AverageViewCount,
+    CASE 
+        WHEN au.RankByScore <= 10 THEN 'Top Active User'
+        WHEN au.RankByQuestions <= 10 THEN 'Top Contributor'
+        ELSE 'Regular User'
+    END AS UserCategory
+FROM 
+    ActiveUsers au
+WHERE 
+    NOT EXISTS (
+        SELECT 1 FROM Badges b 
+        WHERE b.UserId = au.UserId 
+        AND b.Class = 1
+    )
+ORDER BY 
+    au.TotalScore DESC, 
+    au.QuestionsPosted DESC;

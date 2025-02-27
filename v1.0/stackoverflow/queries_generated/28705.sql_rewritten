@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= '2022-01-01' 
+),
+
+TopQuestions AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Body, 
+        CreationDate, 
+        LastActivityDate, 
+        OwnerDisplayName, 
+        OwnerReputation
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10 
+),
+
+TagAnalytics AS (
+    SELECT 
+        t.TagName,
+        COUNT(tp.PostId) AS QuestionCount,
+        AVG(u.Reputation) AS AvgUserReputation,
+        MAX(p.ViewCount) AS MaxViewCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        TopQuestions tp ON p.Id = tp.PostId
+    GROUP BY 
+        t.TagName
+)
+
+SELECT 
+    ta.TagName,
+    ta.QuestionCount,
+    ta.AvgUserReputation,
+    ta.MaxViewCount,
+    ARRAY_AGG(DISTINCT tq.Title) AS TopQuestions
+FROM 
+    TagAnalytics ta
+LEFT JOIN 
+    TopQuestions tq ON ta.TagName = ANY(STRING_TO_ARRAY(tq.Body, ' ')) 
+GROUP BY 
+    ta.TagName
+ORDER BY 
+    ta.QuestionCount DESC, 
+    ta.AvgUserReputation DESC
+LIMIT 5;

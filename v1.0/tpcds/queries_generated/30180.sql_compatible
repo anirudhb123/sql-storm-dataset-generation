@@ -1,0 +1,73 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_ext_sales_price,
+        ws.ws_sold_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sold_date_sk) AS sale_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+        AND ws.ws_sold_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+),
+AggregateSales AS (
+    SELECT 
+        w.web_site_id,
+        COUNT(DISTINCT s.ws_order_number) AS total_orders,
+        SUM(s.ws_ext_sales_price) AS total_revenue,
+        AVG(s.ws_ext_sales_price) AS avg_order_value
+    FROM 
+        SalesCTE s
+    JOIN 
+        web_site w ON s.web_site_sk = w.web_site_sk
+    GROUP BY 
+        w.web_site_id
+),
+CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(sr.sr_return_quantity) AS total_returned,
+        SUM(sr.sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns sr
+    JOIN 
+        customer c ON sr.sr_customer_sk = c.c_customer_sk
+    WHERE 
+        sr.sr_returned_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        c.c_customer_id
+),
+RevenueReturns AS (
+    SELECT 
+        a.web_site_id,
+        a.total_orders,
+        a.total_revenue,
+        COALESCE(cr.total_returned, 0) AS total_returned,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+        CASE 
+            WHEN a.total_revenue > 0 THEN (COALESCE(cr.total_return_amount, 0) / a.total_revenue) * 100
+            ELSE 0
+        END AS return_percentage
+    FROM 
+        AggregateSales a
+    LEFT JOIN 
+        CustomerReturns cr ON a.web_site_id = cr.c_customer_id
+)
+SELECT 
+    web_site_id,
+    total_orders,
+    total_revenue,
+    total_returned,
+    total_return_amount,
+    return_percentage,
+    CASE 
+        WHEN return_percentage > 5 THEN 'High Return'
+        WHEN return_percentage BETWEEN 1 AND 5 THEN 'Moderate Return'
+        ELSE 'Low Return' 
+    END AS return_category
+FROM 
+    RevenueReturns
+ORDER BY 
+    total_revenue DESC;

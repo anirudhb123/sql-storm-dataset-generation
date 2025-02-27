@@ -1,0 +1,58 @@
+
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CONCAT(s.s_name, ' ', s.s_address) AS Supplier_Info,
+        SUBSTRING(s.s_comment, 1, 20) AS Short_Comment
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 500.00
+), 
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        LENGTH(p.p_comment) AS Comment_Length,
+        SUBSTRING(p.p_name, 1, 10) AS Short_Name
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice < 100.00
+),
+RegionDetails AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        LENGTH(r.r_comment) AS Comment_Length
+    FROM 
+        region r
+)
+SELECT 
+    sd.Supplier_Info,
+    pd.Short_Name,
+    pd.Comment_Length,
+    rd.r_name AS Region_Name,
+    SUM(ps.ps_availqty) AS Total_Available_Qty,
+    AVG(o.o_totalprice) AS Avg_Order_Value
+FROM 
+    SupplierDetails sd
+JOIN 
+    partsupp ps ON sd.s_suppkey = ps.ps_suppkey
+JOIN 
+    PartDetails pd ON ps.ps_partkey = pd.p_partkey
+JOIN 
+    nation n ON sd.s_nationkey = n.n_nationkey
+JOIN 
+    RegionDetails rd ON n.n_regionkey = rd.r_regionkey
+JOIN 
+    orders o ON sd.s_suppkey = o.o_custkey
+GROUP BY 
+    sd.Supplier_Info, pd.Short_Name, pd.Comment_Length, rd.r_name
+HAVING 
+    SUM(ps.ps_availqty) > 1000
+ORDER BY 
+    Avg_Order_Value DESC, rd.r_name ASC;

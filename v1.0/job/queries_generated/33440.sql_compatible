@@ -1,0 +1,51 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        at.production_year >= 2000
+)
+
+SELECT 
+    mk.keyword,
+    COUNT(DISTINCT mh.movie_id) AS movie_count,
+    AVG(CASE WHEN at.production_year IS NOT NULL THEN 2023 - at.production_year ELSE NULL END) AS avg_years_since_release,
+    SUM(CASE 
+        WHEN EXISTS (
+            SELECT 1 
+            FROM cast_info ci
+            WHERE ci.movie_id = mh.movie_id 
+              AND ci.person_role_id IS NOT NULL 
+        ) THEN 1 ELSE 0 END) AS movies_with_cast
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    aka_title at ON mh.movie_id = at.id
+GROUP BY 
+    mk.keyword
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 5
+ORDER BY 
+    movie_count DESC
+LIMIT 10;

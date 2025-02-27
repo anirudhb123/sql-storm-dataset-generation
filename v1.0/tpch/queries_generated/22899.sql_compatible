@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_nationkey IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+AggregatedSales AS (
+    SELECT
+        l.l_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipmode IN ('TRUCK', 'SHIP')
+    GROUP BY l.l_suppkey
+),
+FilteredSuppliers AS (
+    SELECT sh.s_suppkey, 
+           sh.s_name, 
+           sh.s_nationkey, 
+           sh.level, 
+           COALESCE(s.s_name, 'Unknown') AS supplier_name,
+           COUNT(DISTINCT ps.ps_partkey) AS supplied_parts
+    FROM SupplierHierarchy sh
+    LEFT JOIN supplier s ON sh.s_suppkey = s.s_suppkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY sh.s_suppkey, sh.s_name, sh.s_nationkey, sh.level
+)
+SELECT 
+    ns.n_name AS nation_name, 
+    SUM(COALESCE(as.total_sales, 0)) AS total_sales_by_nation,
+    AVG(fs.supplied_parts) AS avg_supplied_parts,
+    MAX(fs.level) AS max_supplier_level
+FROM nation ns
+LEFT JOIN AggregatedSales as ON ns.n_nationkey = as.l_suppkey
+LEFT JOIN FilteredSuppliers fs ON ns.n_nationkey = fs.s_nationkey
+WHERE ns.n_name IS NOT NULL
+GROUP BY ns.n_nationkey, ns.n_name
+HAVING MAX(fs.level) > 2 OR COUNT(DISTINCT fs.s_suppkey) > 1
+ORDER BY total_sales_by_nation DESC, avg_supplied_parts ASC;

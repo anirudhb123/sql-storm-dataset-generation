@@ -1,0 +1,55 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS depth
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mh.depth + 1 AS depth
+    FROM
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON m.id = ml.linked_movie_id
+    WHERE
+        mh.depth < 3  
+)
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    COUNT(c.id) AS role_count,
+    STRING_AGG(DISTINCT co.name, ', ') AS company_names,
+    SUM(COALESCE(mo.rating, 0)) AS total_rating,
+    MAX(CASE WHEN mo.production_year IS NULL THEN 'No Year' ELSE 'Year Exists' END) AS year_status
+FROM
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    movie_hierarchy mh ON c.movie_id = mh.movie_id
+JOIN 
+    aka_title at ON c.movie_id = at.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = at.id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+LEFT JOIN 
+    movie_info mo ON at.id = mo.movie_id AND mo.info_type_id = 1  
+GROUP BY 
+    ak.name, at.title
+HAVING 
+    COUNT(c.id) > 2 
+ORDER BY 
+    total_rating DESC, 
+    role_count DESC
+LIMIT 10;

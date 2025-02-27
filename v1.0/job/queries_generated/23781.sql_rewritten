@@ -1,0 +1,72 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year, 
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM title t
+),
+
+AkaNamesWithRole AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        ci.role_id,
+        RANK() OVER (PARTITION BY ak.person_id ORDER BY ci.nr_order) AS role_rank
+    FROM aka_name ak
+    INNER JOIN cast_info ci ON ak.person_id = ci.person_id
+),
+
+MoviesWithKeywords AS (
+    SELECT 
+        at.id AS title_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM aka_title at
+    LEFT JOIN movie_keyword mk ON at.movie_id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY at.id
+),
+
+CompanyRoles AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mc.company_id) OVER (PARTITION BY mc.movie_id) AS unique_company_count
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+),
+
+CombinedData AS (
+    SELECT 
+        t.title, 
+        rt.production_year,
+        ak.name AS actor_name,
+        ak.role_id,
+        mwk.keywords,
+        cr.company_name,
+        cr.company_type,
+        cr.unique_company_count
+    FROM RankedTitles rt
+    LEFT JOIN MoviesWithKeywords mwk ON rt.title_id = mwk.title_id
+    LEFT JOIN AkaNamesWithRole ak ON ak.role_rank = 1
+    LEFT JOIN CompanyRoles cr ON cr.movie_id = rt.title_id
+)
+
+SELECT 
+    cd.title, 
+    cd.production_year,
+    COALESCE(cd.actor_name, 'Unknown Actor') AS actor_name,
+    COALESCE(cd.keywords, 'No Keywords') AS keywords,
+    cd.company_name,
+    cd.company_type,
+    cd.unique_company_count,
+    CASE 
+        WHEN cd.unique_company_count > 1 THEN 'Multiple Companies'
+        ELSE 'Single or No Companies'
+    END AS company_summary
+FROM CombinedData cd
+WHERE cd.production_year BETWEEN 2000 AND 2023
+AND cd.keywords ILIKE '%action%' 
+ORDER BY cd.production_year DESC, cd.title ASC;

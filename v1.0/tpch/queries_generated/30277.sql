@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+PartSupplierStats AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_availqty, 
+           SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT s.s_name, SUM(ps.total_availqty * ps.total_supplycost) AS supplier_value
+    FROM SupplierHierarchy sh
+    JOIN PartSupplierStats ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON sh.s_suppkey = s.s_suppkey
+    GROUP BY s.s_name
+    ORDER BY supplier_value DESC
+    LIMIT 10
+),
+CurrentOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value,
+           RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+      AND o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey
+)
+SELECT p.p_name, t.supplier_value, c.o_orderkey, c.net_value,
+       COALESCE(e.discounted_value, 0) AS discounted_value
+FROM PartSupplierStats ps
+JOIN TopSuppliers t ON ps.ps_suppkey = t.s_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN CurrentOrders c ON c.o_orderkey = ps.ps_partkey
+LEFT JOIN (
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * l.l_discount) AS discounted_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'R'
+    GROUP BY o.o_orderkey
+) e ON c.o_orderkey = e.o_orderkey
+WHERE p.p_size BETWEEN 1 AND 20
+  AND (t.supplier_value IS NOT NULL OR c.net_value IS NOT NULL)
+ORDER BY t.supplier_value DESC, c.net_value DESC;

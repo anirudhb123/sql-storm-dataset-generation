@@ -1,0 +1,52 @@
+
+WITH item_sales AS (
+    SELECT 
+        i.i_item_id,
+        COALESCE(SUM(ws.ws_quantity), 0) AS total_web_sales,
+        COALESCE(SUM(cs.cs_quantity), 0) AS total_catalog_sales,
+        COALESCE(SUM(ss.ss_quantity), 0) AS total_store_sales
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+    LEFT JOIN 
+        store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    GROUP BY 
+        i.i_item_id
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT o.ws_order_number) AS order_count,
+        SUM(o.ws_net_profit) AS total_net_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales o ON c.c_customer_sk = o.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    is.i_item_id,
+    cs.c_customer_id,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    is.total_web_sales + is.total_catalog_sales + is.total_store_sales AS total_sales,
+    ROW_NUMBER() OVER (PARTITION BY cs.c_customer_id ORDER BY total_sales DESC) AS sales_rank
+FROM 
+    item_sales is
+JOIN 
+    customer_stats cs ON cs.order_count > 0
+WHERE 
+    (cs.cd_gender = 'F' AND cs.cd_marital_status IN ('M', 'S'))
+    OR (cs.cd_gender = 'M' AND cs.cd_marital_status = 'M')
+ORDER BY 
+    total_sales DESC
+LIMIT 100;
+

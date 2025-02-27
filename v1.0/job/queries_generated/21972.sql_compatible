@@ -1,0 +1,63 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS num_cast_members,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS year_rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.title, 
+        a.production_year
+),
+RecentAwards AS (
+    SELECT 
+        m.movie_id,
+        COUNT(aw.id) AS award_count
+    FROM 
+        movie_info m
+    LEFT JOIN 
+        movie_info_idx iw ON m.movie_id = iw.movie_id AND iw.info_type_id = (SELECT id FROM info_type WHERE info = 'award')
+    LEFT JOIN 
+        (SELECT 
+            DISTINCT movie_id, 
+            ROW_NUMBER() OVER (PARTITION BY movie_id ORDER BY info) AS row_num
+        FROM 
+            movie_info) aw ON aw.movie_id = iw.movie_id
+    WHERE 
+        aw.row_num < 5 
+    GROUP BY 
+        m.movie_id
+),
+DistinctKeyWords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.num_cast_members,
+    COALESCE(ra.award_count, 0) AS award_count,
+    COALESCE(dk.keywords, 'No keywords') AS keywords
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    RecentAwards ra ON rm.id = ra.movie_id
+LEFT JOIN 
+    DistinctKeyWords dk ON rm.id = dk.movie_id
+WHERE 
+    rm.year_rank <= 5
+    AND (rm.num_cast_members > 2 OR ra.award_count > 0)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.num_cast_members DESC;

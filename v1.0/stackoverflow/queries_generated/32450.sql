@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        MAX(ph.CreationDate) OVER(PARTITION BY ph.PostId) AS LatestCloseDate,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+),
+PostWithBADGES AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.OwnerReputation,
+        (CASE 
+            WHEN b.Class = 1 THEN 'Gold'
+            WHEN b.Class = 2 THEN 'Silver'
+            WHEN b.Class = 3 THEN 'Bronze'
+            ELSE 'No Badge'
+        END) AS BadgeLevel,
+        b.Name AS BadgeName
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Badges b ON rp.OwnerUserId = b.UserId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    COALESCE(c.CloseDate, 'Never Closed') AS CloseDate,
+    p.OwnerDisplayName,
+    p.OwnerReputation,
+    COUNT(DISTINCT c.PostId) AS TotalClosedPosts,
+    p.BadgeLevel,
+    p.BadgeName
+FROM 
+    PostWithBADGES p
+LEFT JOIN 
+    ClosedPosts c ON p.PostId = c.PostId
+WHERE 
+    p.PostRank <= 5 -- Top 5 posts per user
+GROUP BY 
+    p.PostId, 
+    p.Title, 
+    p.OwnerDisplayName, 
+    p.OwnerReputation, 
+    CloseDate,
+    p.BadgeLevel,
+    p.BadgeName
+HAVING 
+    (p.BadgeLevel IS NOT NULL OR p.OwnerReputation > 100) -- Users either have a badge or a reputation higher than 100
+ORDER BY 
+    p.OwnerReputation DESC,
+    p.CloseDate DESC;

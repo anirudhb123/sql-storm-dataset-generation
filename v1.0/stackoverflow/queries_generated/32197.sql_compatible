@@ -1,0 +1,75 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, OwnerUserId, Score, CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY Id ORDER BY CreationDate DESC) AS rn
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.Title, p.ParentId, p.OwnerUserId, p.Score, p.CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserScores AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           SUM(p.Score) AS TotalScore,
+           COUNT(DISTINCT p.Id) AS PostCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT UserId, 
+           DisplayName, 
+           TotalScore,
+           RANK() OVER (ORDER BY TotalScore DESC) AS UserRank
+    FROM UserScores
+),
+RecentPostHistory AS (
+    SELECT p.Id AS PostId,
+           ph.CreationDate AS HistoryDate,
+           p.Title AS PostTitle,
+           ph.Comment,
+           ph.PostHistoryTypeId,
+           CASE 
+               WHEN ph.PostHistoryTypeId = 10 THEN 'Closed'
+               WHEN ph.PostHistoryTypeId = 11 THEN 'Reopened'
+               ELSE 'Other'
+           END AS ChangeType
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '30 days'
+),
+PostEngagement AS (
+    SELECT ph.PostId,
+           COUNT(c.Id) AS CommentCount,
+           COUNT(v.Id) AS VoteCount,
+           MAX(ph.HistoryDate) AS LastActivityDate
+    FROM RecentPostHistory ph
+    LEFT JOIN Comments c ON ph.PostId = c.PostId
+    LEFT JOIN Votes v ON ph.PostId = v.PostId
+    GROUP BY ph.PostId
+)
+SELECT up.DisplayName,
+       up.UserRank,
+       pp.PostTitle,
+       pe.CommentCount,
+       pe.VoteCount,
+       CASE 
+           WHEN pe.LastActivityDate IS NULL THEN 'No Activity'
+           ELSE 'Active'
+       END AS ActivityStatus,
+       rph.Score AS PostScore,
+       (SELECT COUNT(*) FROM RecursivePostHierarchy WHERE OwnerUserId = up.UserId) AS ChildPostsCount
+FROM TopUsers up
+JOIN PostEngagement pe ON pe.PostId = (
+    SELECT p.Id
+    FROM Posts p
+    WHERE p.OwnerUserId = up.UserId
+    ORDER BY p.CreationDate DESC
+    LIMIT 1
+)
+JOIN RecursivePostHierarchy rph ON rph.OwnerUserId = up.UserId
+WHERE up.UserRank <= 10
+ORDER BY up.UserRank, pp.PostTitle;

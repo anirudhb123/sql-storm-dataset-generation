@@ -1,0 +1,53 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name AS customer_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+    GROUP BY 
+        o.o_orderkey, c.c_name, c.c_nationkey
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+SalesAnalysis AS (
+    SELECT 
+        ro.customer_name,
+        ro.total_sales,
+        HVS.s_name AS top_supplier
+    FROM 
+        RankedOrders ro
+    LEFT JOIN 
+        lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_name = ro.customer_name))
+    LEFT JOIN 
+        HighValueSuppliers HVS ON HVS.s_suppkey = l.l_suppkey
+    WHERE 
+        ro.sales_rank <= 10
+)
+SELECT 
+    sa.customer_name,
+    sa.total_sales,
+    COALESCE(sa.top_supplier, 'No supplier') AS top_supplier_name
+FROM 
+    SalesAnalysis sa
+ORDER BY 
+    sa.total_sales DESC;

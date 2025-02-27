@@ -1,0 +1,67 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS total_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1997-01-01'
+),
+SupplierAvgCost AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE
+            WHEN p.p_size IS NULL THEN 'Unknown Size'
+            WHEN p.p_size < 10 THEN 'Small'
+            WHEN p.p_size BETWEEN 10 AND 20 THEN 'Medium'
+            WHEN p.p_size > 20 THEN 'Large'
+        END AS size_category,
+        COALESCE(s.avg_supplycost, 0) AS avg_supplycost
+    FROM 
+        part p
+    LEFT JOIN 
+        SupplierAvgCost s ON p.p_partkey = s.ps_partkey
+)
+SELECT 
+    r.r_name,
+    ps.size_category,
+    COUNT(DISTINCT ro.o_orderkey) AS order_count,
+    SUM(ro.o_totalprice) AS total_revenue,
+    STRING_AGG(DISTINCT ps.p_name, ', ') AS part_names
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    PartStats ps ON ps.p_partkey = ps.p_partkey
+LEFT JOIN 
+    RankedOrders ro ON ps.p_partkey = ro.o_orderkey
+WHERE 
+    (ro.total_rank <= 5 OR ro.total_rank IS NULL)
+    AND (ps.avg_supplycost < (SELECT AVG(ps_avg.avg_supplycost) FROM SupplierAvgCost ps_avg) OR ps.avg_supplycost IS NULL)
+GROUP BY 
+    r.r_name, ps.size_category
+HAVING 
+    COUNT(DISTINCT ro.o_orderkey) > 0
+ORDER BY 
+    r.r_name, ps.size_category DESC;

@@ -1,0 +1,62 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        c.kind AS company_type,
+        a.name AS actor_name,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    JOIN 
+        aka_title at ON t.id = at.movie_id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name a ON a.person_id = ci.person_id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_type c ON mc.company_type_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.title, t.production_year, c.kind, a.name
+),
+ActorRecognition AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(DISTINCT md.movie_title) AS movie_count,
+        STRING_AGG(DISTINCT md.movie_title, '; ') AS movie_list
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        complete_cast cc ON ci.movie_id = cc.movie_id
+    JOIN 
+        MovieDetails md ON ci.movie_id = md.movie_title
+    GROUP BY 
+        a.name
+    HAVING 
+        COUNT(DISTINCT md.movie_title) > 1 
+)
+SELECT 
+    ad.actor_name,
+    ad.movie_count,
+    ad.movie_list,
+    md.production_year,
+    md.company_type,
+    md.company_count,
+    md.keywords
+FROM 
+    ActorRecognition ad
+JOIN 
+    MovieDetails md ON ad.actor_name = md.actor_name
+ORDER BY 
+    ad.movie_count DESC, md.production_year DESC;

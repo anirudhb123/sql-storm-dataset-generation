@@ -1,0 +1,52 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, 1 AS Level
+    FROM Tags t
+    WHERE t.IsModeratorOnly = 0
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, rh.Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy rh ON t.Id = rh.ExcerptPostId
+),
+PostAnalytics AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COALESCE(p.ViewCount, 0) AS TotalViews,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY p.Id
+),
+TopPosts AS (
+    SELECT PostId, Title, Score, TotalViews, CommentCount, UpVotes, DownVotes, Rank
+    FROM PostAnalytics
+    WHERE Rank <= 5
+),
+HighScoringUsers AS (
+    SELECT u.Id, u.DisplayName, SUM(pa.Score) AS TotalScore
+    FROM Users u
+    INNER JOIN Posts p ON u.Id = p.OwnerUserId
+    INNER JOIN PostAnalytics pa ON p.Id = pa.PostId
+    GROUP BY u.Id, u.DisplayName
+    HAVING SUM(pa.Score) > 1000
+)
+SELECT
+    thp.Title AS TopPostTitle,
+    thp.Score AS PostScore,
+    thp.TotalViews AS PostViews,
+    thp.CommentCount AS PostComments,
+    thp.UpVotes AS PostUpVotes,
+    thp.DownVotes AS PostDownVotes,
+    hu.DisplayName AS HighScorer
+FROM TopPosts thp
+FULL OUTER JOIN HighScoringUsers hu ON thp.PostId = hu.Id
+WHERE thp.PostId IS NOT NULL OR hu.Id IS NOT NULL
+ORDER BY thp.Score DESC NULLS LAST;

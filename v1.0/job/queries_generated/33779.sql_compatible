@@ -1,0 +1,58 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        'Root' AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level || ' -> ' || at.title
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS actors,
+    SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS roles_assigned,
+    MAX(pi.info) FILTER (WHERE it.info LIKE 'age%') AS age_info,
+    (SELECT COUNT(DISTINCT mc.company_id) 
+     FROM movie_companies mc 
+     WHERE mc.movie_id = m.movie_id) AS company_count,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_within_year
+FROM 
+    movie_hierarchy m
+LEFT JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id
+LEFT JOIN 
+    info_type it ON pi.info_type_id = it.id
+WHERE 
+    m.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    m.movie_id, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY 
+    m.production_year, actor_count DESC;

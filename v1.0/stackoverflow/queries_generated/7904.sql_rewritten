@@ -1,0 +1,76 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.Body,
+        U.DisplayName AS Author,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score, P.Body, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        BadgeCount,
+        QuestionCount,
+        AnswerCount,
+        CommentCount,
+        TotalBounty,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserStats
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.BadgeCount,
+    PD.Title AS RecentPostTitle,
+    PD.ViewCount AS RecentPostViews,
+    PD.Score AS RecentPostScore,
+    PD.CommentCount AS RecentPostComments
+FROM 
+    TopUsers TU
+JOIN 
+    PostDetails PD ON TU.UserId = PD.Author
+WHERE 
+    TU.ReputationRank <= 10
+ORDER BY 
+    TU.Reputation DESC, PD.ViewCount DESC;

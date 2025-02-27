@@ -1,0 +1,75 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mt.production_year >= 2000
+),
+MovieInfo AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT mc.company_id) AS num_companies,
+        COALESCE(AVG(mi.info_id), 0) AS avg_info_type,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_info mi ON mh.movie_id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mw ON mh.movie_id = mw.movie_id
+    LEFT JOIN 
+        keyword kw ON mw.keyword_id = kw.id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+),
+RankedMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        num_companies,
+        avg_info_type,
+        keywords,
+        RANK() OVER (ORDER BY num_companies DESC, production_year DESC) AS rank
+    FROM 
+        MovieInfo
+)
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    r.num_companies,
+    r.avg_info_type,
+    r.keywords
+FROM 
+    RankedMovies r
+WHERE 
+    r.rank <= 10
+ORDER BY 
+    r.rank;

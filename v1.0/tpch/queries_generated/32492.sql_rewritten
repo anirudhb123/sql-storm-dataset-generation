@@ -1,0 +1,45 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_balance, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE s.s_acctbal > 500.00
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+supplier_orders AS (
+    SELECT s.s_name, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY s.s_name
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice) OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate) AS running_total,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT r.r_name, COALESCE(SUM(o.total_revenue), 0) AS total_revenue,
+       COALESCE(SUM(DISTINCT so.order_count), 0) AS supplier_order_count,
+       COUNT(DISTINCT rh.s_suppkey) AS hierarchical_suppliers
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN order_summary o ON s.s_suppkey = o.o_orderkey
+LEFT JOIN supplier_orders so ON s.s_name = so.s_name
+LEFT JOIN supplier_hierarchy rh ON s.s_suppkey = rh.s_suppkey
+WHERE r.r_comment IS NOT NULL AND o.total_revenue > 10000
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_revenue DESC, hierarchical_suppliers;

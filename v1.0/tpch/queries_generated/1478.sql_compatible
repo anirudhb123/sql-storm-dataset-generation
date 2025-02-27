@@ -1,0 +1,83 @@
+
+WITH SupplierTotals AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS num_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighCostSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name
+    FROM 
+        SupplierTotals st
+    JOIN 
+        supplier s ON st.s_suppkey = s.s_suppkey
+    WHERE 
+        st.total_supply_cost > (
+            SELECT AVG(total_supply_cost) 
+            FROM SupplierTotals
+        )
+),
+CustomerOrderCounts AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS num_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        SUM(l.l_quantity) AS total_quantity
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+),
+RankingBySales AS (
+    SELECT 
+        pd.p_partkey,
+        pd.p_name,
+        pd.p_brand,
+        pd.total_quantity,
+        RANK() OVER (PARTITION BY pd.p_brand ORDER BY pd.total_quantity DESC) AS rank_within_brand
+    FROM 
+        PartDetails pd
+)
+SELECT 
+    hs.s_name AS SupplierName,
+    COALESCE(coc.num_orders, 0) AS CustomerOrderCount,
+    rbs.p_name AS PartName,
+    rbs.rank_within_brand
+FROM 
+    HighCostSuppliers hs
+LEFT JOIN 
+    CustomerOrderCounts coc ON hs.s_suppkey = (SELECT ps.ps_suppkey 
+                                                 FROM partsupp ps 
+                                                 WHERE ps.ps_partkey IN (SELECT p.p_partkey 
+                                                                         FROM part p 
+                                                                         WHERE p.p_brand IN (SELECT DISTINCT p_brand FROM part)))
+LEFT JOIN 
+    RankingBySales rbs ON rbs.p_partkey IN (SELECT ps.ps_partkey 
+                                               FROM partsupp ps 
+                                               WHERE ps.ps_suppkey = hs.s_suppkey)
+WHERE 
+    hs.s_name IS NOT NULL
+ORDER BY 
+    hs.s_name, rbs.rank_within_brand;

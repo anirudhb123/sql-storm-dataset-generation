@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+    GROUP BY 
+        c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        COALESCE(co.total_spent, 0) AS total_spent,
+        co.order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE 
+        c.c_acctbal > 5000
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    MAX(l.l_extendedprice * (1 - l.l_discount)) AS max_price,
+    AVG(ps.ps_supplycost) AS avg_supply_cost,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS returned_quantity,
+    COUNT(DISTINCT hvc.c_custkey) AS high_value_customers
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey AND rs.rnk = 1
+LEFT JOIN 
+    HighValueCustomers hvc ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = hvc.c_custkey)
+WHERE 
+    p.p_retailprice > 100.00
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand
+HAVING 
+    AVG(ps.ps_supplycost) IS NOT NULL
+ORDER BY 
+    max_price DESC;

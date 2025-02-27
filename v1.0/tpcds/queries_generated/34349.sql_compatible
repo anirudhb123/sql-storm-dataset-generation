@@ -1,0 +1,57 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk AS sold_date,
+        ws_item_sk AS item_id,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        inv_date_sk AS sold_date,
+        inv_item_sk AS item_id,
+        SUM(inv_quantity_on_hand) AS total_quantity,
+        0 AS total_sales
+    FROM inventory
+    WHERE inv_date_sk < (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY inv_date_sk, inv_item_sk
+),
+ItemSales AS (
+    SELECT
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(SUM(s.total_quantity), 0) AS total_quantity,
+        COALESCE(SUM(s.total_sales), 0) AS total_sales
+    FROM item i
+    LEFT JOIN SalesCTE s ON i.i_item_sk = s.item_id
+    GROUP BY i.i_item_id, i.i_item_desc
+),
+SalesSummary AS (
+    SELECT 
+        is.i_item_id,
+        is.i_item_desc,
+        is.total_quantity,
+        is.total_sales,
+        CASE 
+            WHEN is.total_sales > 0 THEN ROUND((is.total_sales / NULLIF(is.total_quantity, 0)), 2)
+            ELSE 0 
+        END AS avg_price_per_unit
+    FROM ItemSales is
+)
+SELECT 
+    ss.i_item_id,
+    ss.i_item_desc,
+    ss.total_quantity,
+    ss.total_sales,
+    ss.avg_price_per_unit,
+    d.d_day_name AS sales_day
+FROM SalesSummary ss
+JOIN date_dim d ON d.d_date_sk = (
+    SELECT MAX(d2.d_date_sk)
+    FROM web_sales w
+)
+WHERE d.d_year = EXTRACT(YEAR FROM DATE '2002-10-01') 
+ORDER BY ss.total_sales DESC
+LIMIT 10;

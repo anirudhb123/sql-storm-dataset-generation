@@ -1,0 +1,48 @@
+
+WITH AddressCounts AS (
+    SELECT 
+        ca_city,
+        COUNT(*) AS addr_count,
+        COUNT(DISTINCT ca_zip) AS unique_zip_count,
+        STRING_AGG(DISTINCT (ca_street_name || ' ' || ca_street_type), ', ') AS street_names
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city
+), CustomerDemographics AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS demo_count,
+        AVG(cd_dep_count) AS avg_dependencies,
+        STRING_AGG(DISTINCT cd_marital_status, ', ') AS marital_statuses
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+), CombinedData AS (
+    SELECT 
+        ac.ca_city,
+        ac.addr_count,
+        ac.unique_zip_count,
+        cd.cd_gender,
+        cd.demo_count,
+        cd.avg_dependencies,
+        ac.street_names
+    FROM 
+        AddressCounts ac
+    JOIN 
+        CustomerDemographics cd ON ac.addr_count > 10 
+)
+SELECT 
+    ca.ca_city,
+    ca.addr_count,
+    ca.unique_zip_count,
+    ca.cd_gender,
+    ca.demo_count,
+    ca.avg_dependencies,
+    ca.street_names
+FROM 
+    CombinedData ca
+ORDER BY 
+    ca.addr_count DESC, ca.demo_count DESC
+LIMIT 50;

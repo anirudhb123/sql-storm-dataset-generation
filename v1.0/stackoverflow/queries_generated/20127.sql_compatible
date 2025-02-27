@@ -1,0 +1,91 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.LastActivityDate,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COUNT(PO.Id) FILTER (WHERE P.Id = PO.ParentId) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.LastActivityDate DESC) AS UserPostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts PO ON P.Id = PO.ParentId
+    WHERE 
+        P.CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 YEAR)
+    GROUP BY 
+        P.Id, P.Title, P.OwnerUserId, P.LastActivityDate, P.AcceptedAnswerId
+    UNION ALL
+    SELECT 
+        PH.PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.LastActivityDate,
+        PH.PostId AS AcceptedAnswerId,
+        COUNT(PO.Id) FILTER (WHERE PH.PostId = PO.ParentId) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.LastActivityDate DESC) AS UserPostRank
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    LEFT JOIN 
+        Posts PO ON P.Id = PO.ParentId
+    WHERE 
+        PH.CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 YEAR)
+    GROUP BY 
+        PH.PostId, P.Title, P.OwnerUserId, P.LastActivityDate
+),
+PostVoteSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 2) AS UpVotes,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+),
+UserBadgeSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    R.PostId,
+    R.Title,
+    PVS.UpVotes,
+    PVS.DownVotes,
+    R.AnswerCount,
+    UBS.BadgeCount,
+    UBS.BadgeNames,
+    COALESCE(R.AcceptedAnswerId, 0) AS AnswerId,
+    CASE 
+        WHEN R.UserPostRank = 1 THEN 'Top Post'
+        WHEN R.UserPostRank BETWEEN 2 AND 5 THEN 'Recent Posts'
+        ELSE 'Older Contributions'
+    END AS ContributionType
+FROM 
+    RecursivePostCTE R
+JOIN 
+    Users U ON R.OwnerUserId = U.Id
+LEFT JOIN 
+    PostVoteSummary PVS ON R.PostId = PVS.PostId
+LEFT JOIN 
+    UserBadgeSummary UBS ON U.Id = UBS.UserId
+WHERE 
+    (R.AnswerCount > 0 OR R.AcceptedAnswerId > 0)
+    AND U.LastAccessDate > DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 6 MONTH)
+ORDER BY 
+    U.Reputation DESC, R.LastActivityDate DESC;

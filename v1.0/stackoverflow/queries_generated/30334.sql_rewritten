@@ -1,0 +1,77 @@
+WITH RecursivePostThreads AS (
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        0 AS ThreadLevel
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+  
+    UNION ALL
+  
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        R.ThreadLevel + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostThreads R ON P.ParentId = R.PostId
+), PostStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END), 0) AS PositivePosts,
+        COALESCE(SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END), 0) AS NegativePosts,
+        COALESCE(SUM(CASE WHEN PH.PostId IS NOT NULL THEN 1 ELSE 0 END), 0) AS PostsEdited,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBountyAmount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5) 
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) 
+    GROUP BY 
+        U.Id, U.DisplayName
+), TagUsage AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostsWithTag
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+), TopTags AS (
+    SELECT 
+        TagName,
+        PostsWithTag,
+        ROW_NUMBER() OVER (ORDER BY PostsWithTag DESC) AS Rank
+    FROM 
+        TagUsage
+    WHERE 
+        PostsWithTag > 1
+)
+SELECT 
+    PS.DisplayName AS UserDisplayName,
+    PS.TotalPosts,
+    PS.PositivePosts,
+    PS.NegativePosts,
+    PS.PostsEdited,
+    PS.TotalBountyAmount,
+    TT.TagName AS MostUsedTag,
+    TT.PostsWithTag AS TagUsageCount
+FROM 
+    PostStatistics PS
+LEFT JOIN 
+    TopTags TT ON TT.Rank = 1
+WHERE 
+    PS.TotalPosts > 0
+ORDER BY 
+    PS.TotalPosts DESC;

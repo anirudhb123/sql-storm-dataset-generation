@@ -1,0 +1,70 @@
+
+WITH RegionalSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, r.r_name,
+           SUM(ps.ps_availqty) AS total_availqty,
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey, r.r_name
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rnk
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+OrdersData AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_value_rank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+LineItemsAggregate AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+           COUNT(*) AS part_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+SupplierOrderSummary AS (
+    SELECT r.r_name, 
+           COALESCE(SUM(l.revenue), 0) AS total_revenue,
+           COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM RegionalSupplier r
+    LEFT JOIN OrdersData o ON r.s_nationkey = o.o_custkey
+    LEFT JOIN LineItemsAggregate l ON o.o_orderkey = l.l_orderkey
+    WHERE r.total_availqty > 1000
+    GROUP BY r.r_name
+),
+Conclusion AS (
+    SELECT r.r_name, 
+           s.s_name,
+           CASE 
+               WHEN so.total_revenue > 0 THEN so.total_revenue
+               ELSE NULL
+           END AS revenue,
+           CASE 
+               WHEN hc.rnk <= 5 THEN 'High Value'
+               ELSE 'Regular'
+           END AS cust_category
+    FROM RegionalSupplier r 
+    LEFT JOIN SupplierOrderSummary so ON r.r_name = so.r_name
+    LEFT JOIN HighValueCustomers hc ON r.s_nationkey = hc.c_nationkey
+)
+SELECT *
+FROM Conclusion
+WHERE revenue IS NOT NULL
+UNION ALL
+SELECT r.r_name AS region_name, 
+       CONCAT('UNASSOCIATED SUPPLIER IN ', r.r_name) AS s_name, 
+       NULL AS revenue,
+       'Uncategorized' AS cust_category
+FROM region r
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM RegionalSupplier rs
+    WHERE rs.r_name = r.r_name
+)
+ORDER BY region_name, s_name;

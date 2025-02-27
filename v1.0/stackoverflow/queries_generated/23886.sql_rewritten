@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN PH.Id END) AS CloseCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC, P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    LEFT JOIN 
+        PostHistory PH ON PH.PostId = P.Id
+    WHERE 
+        P.CreationDate > '2021-01-01' AND
+        P.Score >= 0
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, U.DisplayName
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        STRING_AGG(B.Name, ', ') AS BadgeNames,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+RecentActivity AS (
+    SELECT 
+        Id,
+        UserId,
+        CASE 
+            WHEN LastAccessDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 'Active'
+            ELSE 'Inactive'
+        END AS ActivityStatus
+    FROM 
+        Users
+),
+FinalResults AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.OwnerDisplayName,
+        RP.CommentCount,
+        UB.BadgeNames,
+        UB.BadgeCount,
+        RA.ActivityStatus,
+        RP.Rank
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        UserBadges UB ON RP.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = UB.UserId)
+    LEFT JOIN 
+        RecentActivity RA ON RP.OwnerUserId = RA.UserId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN BadgeCount > 0 THEN 'Has Badges'
+        ELSE 'No Badges'
+    END AS BadgeInfo,
+    COALESCE(Tagged.Title, 'No Tags') AS RelatedTags
+FROM 
+    FinalResults FR
+LEFT JOIN 
+    (SELECT 
+         PostId,
+         STRING_AGG(T.TagName, ', ') AS Title
+     FROM 
+         Tags T
+     INNER JOIN 
+         Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+     GROUP BY 
+         PostId) AS Tagged ON FR.PostId = Tagged.PostId
+WHERE 
+    FR.Rank <= 10
+ORDER BY 
+    FR.Score DESC, 
+    FR.CreationDate DESC;

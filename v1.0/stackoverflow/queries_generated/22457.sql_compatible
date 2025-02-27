@@ -1,0 +1,68 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(b.Class, 0) AS BadgeClass,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId AND b.Class = 1
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    GROUP BY u.Id, u.Reputation, b.Class
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        COALESCE(ph.EditCount, 0) AS EditCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) pc ON p.Id = pc.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS EditCount
+        FROM PostHistory ph
+        WHERE ph.PostHistoryTypeId IN (4, 5, 6) 
+        GROUP BY PostId
+    ) ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY p.Id, p.Title, p.CreationDate
+)
+SELECT 
+    u.DisplayName,
+    ur.Reputation,
+    ur.BadgeClass,
+    COALESCE(pm.PostCount, 0) AS TotalPosts,
+    COALESCE(pm.CommentCount, 0) AS TotalComments,
+    COALESCE(pm.TotalViews, 0) AS TotalViews,
+    COALESCE(pm.TotalScore, 0) AS TotalScore,
+    pm.Title,
+    pm.CreationDate,
+    pm.EditCount,
+    pm.Upvotes,
+    pm.Downvotes,
+    CASE 
+        WHEN pm.PostRank = 1 THEN 'Latest Post'
+        ELSE 'Older Post'
+    END AS PostStatus,
+    CASE 
+        WHEN ur.Reputation > 1000 THEN 'High Reputation User'
+        ELSE NULL
+    END AS UserStatus
+FROM UserReputation ur
+JOIN Users u ON ur.UserId = u.Id
+LEFT JOIN PostMetrics pm ON u.Id = pm.OwnerUserId
+ORDER BY ur.Reputation DESC, pm.CreationDate DESC
+LIMIT 50;

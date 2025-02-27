@@ -1,0 +1,52 @@
+WITH RECURSIVE UserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        (U.UpVotes - U.DownVotes) AS NetVotes
+    FROM Users U
+
+    UNION ALL
+
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation + 10,  
+        U.CreationDate,
+        U.LastAccessDate,
+        U.NetVotes + 2  
+    FROM UserScores US
+    JOIN Users U ON US.UserId = U.Id
+)
+, PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 3) AS DownVotes
+    FROM Posts P
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.NetVotes,
+    COUNT(PD.PostId) AS TotalPosts,
+    SUM(PD.Score) AS TotalPostScore,
+    AVG(PD.CommentCount) AS AvgCommentsPerPost,
+    SUM(CASE WHEN PD.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+    SUM(CASE WHEN PD.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+FROM UserScores U
+LEFT JOIN Posts P ON P.OwnerUserId = U.UserId
+LEFT JOIN PostDetails PD ON PD.PostId = P.Id
+WHERE U.Reputation > 100 AND U.CreationDate < (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+GROUP BY U.UserId, U.DisplayName, U.Reputation, U.NetVotes
+HAVING COUNT(PD.PostId) > 5
+ORDER BY U.Reputation DESC, U.DisplayName ASC
+LIMIT 50;

@@ -1,0 +1,88 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        PostTypeId,
+        AcceptedAnswerId,
+        ParentId,
+        Score,
+        CreationDate,
+        OwnerUserId,
+        Title,
+        0 AS Level,
+        CAST(Title AS VARCHAR(MAX)) AS Path
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Title,
+        Level + 1,
+        CAST(r.Path + ' -> ' + p.Title AS VARCHAR(MAX))
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+    WHERE 
+        p.PostTypeId = 2 
+),
+PostStatistics AS (
+    SELECT 
+        ph.OwnerUserId,
+        COUNT(DISTINCT ph.Id) AS QuestionCount,
+        SUM(ph.Score) AS TotalScore,
+        AVG(ph.Score) AS AvgScore,
+        MAX(ph.CreationDate) AS LastQuestionDate,
+        STRING_AGG(ph.Path, ', ') AS PostTitles
+    FROM 
+        RecursivePostHierarchy ph
+    GROUP BY 
+        ph.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(ps.QuestionCount, 0) AS QuestionCount,
+    COALESCE(ps.TotalScore, 0) AS TotalScore,
+    COALESCE(ps.AvgScore, 0) AS AvgScore,
+    COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(ps.LastQuestionDate, 'No Questions') AS LastQuestionDate
+FROM 
+    Users u
+LEFT JOIN 
+    PostStatistics ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    u.Reputation > 1000 
+ORDER BY 
+    ps.TotalScore DESC, 
+    ps.QuestionCount DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

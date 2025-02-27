@@ -1,0 +1,70 @@
+WITH RankedSales AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_partkey, l.l_suppkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' -- Only open orders
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus
+    HAVING 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2) -- Above average total price
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS supplied_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        COUNT(ps.ps_partkey) > 5 -- More than 5 supplied parts
+)
+SELECT 
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(HS.o_totalprice) AS total_high_value_sales,
+    AVG(SS.total_supply_cost) AS avg_supply_cost,
+    SUM(RS.net_sales) AS total_net_sales 
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    HighValueOrders HS ON HS.o_orderkey IN (SELECT l_orderkey FROM lineitem)
+LEFT JOIN 
+    SupplierStats SS ON SS.s_suppkey IN (SELECT l_suppkey FROM lineitem WHERE l_orderkey IN (SELECT o_orderkey FROM HighValueOrders))
+LEFT JOIN 
+    RankedSales RS ON RS.l_orderkey IN (SELECT o_orderkey FROM HighValueOrders)
+GROUP BY 
+    n.n_name, r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 10 -- More than 10 customers in each nation
+ORDER BY 
+    total_high_value_sales DESC, avg_supply_cost ASC;

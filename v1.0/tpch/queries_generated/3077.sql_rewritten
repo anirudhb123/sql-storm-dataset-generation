@@ -1,0 +1,72 @@
+WITH TotalSales AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierSales AS (
+    SELECT 
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_sales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY 
+        s.s_name
+),
+CustomerSegmentSales AS (
+    SELECT 
+        c.c_mktsegment,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS segment_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_mktsegment
+),
+RankedSales AS (
+    SELECT 
+        ts.o_orderkey,
+        ts.total_sales,
+        ROW_NUMBER() OVER (ORDER BY ts.total_sales DESC) AS sales_rank
+    FROM 
+        TotalSales ts
+)
+SELECT 
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    COALESCE(c.c_mktsegment, 'Unknown Segment') AS market_segment,
+    ss.supplier_sales,
+    cs.segment_sales,
+    RANK() OVER (ORDER BY ss.supplier_sales DESC) AS supplier_rank,
+    RANK() OVER (ORDER BY cs.segment_sales DESC) AS segment_rank
+FROM 
+    SupplierSales ss
+FULL OUTER JOIN 
+    CustomerSegmentSales cs ON ss.supplier_sales > 0 OR cs.segment_sales > 0
+LEFT JOIN 
+    supplier s ON ss.supplier_sales IS NOT NULL
+LEFT JOIN 
+    customer c ON cs.segment_sales IS NOT NULL
+WHERE 
+    (ss.supplier_sales IS NOT NULL AND ss.supplier_sales > 10000) 
+    OR (cs.segment_sales IS NOT NULL AND cs.segment_sales > 20000)
+ORDER BY 
+    supplier_rank, segment_rank;

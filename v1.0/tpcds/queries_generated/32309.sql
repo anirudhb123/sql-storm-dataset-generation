@@ -1,0 +1,81 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_sales_price) AS total_sales,
+        1 AS level
+    FROM 
+        store_sales 
+    GROUP BY 
+        s_store_sk, ss_sold_date_sk 
+    
+    UNION ALL
+    
+    SELECT 
+        sh.s_store_sk,
+        sh.ss_sold_date_sk,
+        SUM(ss_sales_price) AS total_sales,
+        sh.level + 1
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store_sales ss ON sh.s_store_sk = ss.s_store_sk
+    WHERE 
+        sh.ss_sold_date_sk < ss.ss_sold_date_sk
+    GROUP BY 
+        sh.s_store_sk, sh.ss_sold_date_sk
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_income_band_sk
+),
+sales_summary AS (
+    SELECT 
+        cd.cd_income_band_sk,
+        cd.cd_gender,
+        SUM(cd.total_spent) AS income,
+        COUNT(cd.c_customer_sk) AS num_customers
+    FROM 
+        customer_data cd
+    GROUP BY 
+        cd.cd_income_band_sk, cd.cd_gender
+)
+SELECT 
+    sh.s_store_sk,
+    sh.ss_sold_date_sk,
+    sh.total_sales,
+    ss.income,
+    ss.num_customers,
+    CASE 
+        WHEN ss.income IS NULL THEN 'Unknown'
+        ELSE ss.cd_gender
+    END AS gender_category
+FROM 
+    sales_hierarchy sh
+LEFT JOIN 
+    sales_summary ss ON sh.s_store_sk IN (
+        SELECT DISTINCT c.c_current_addr_sk
+        FROM customer c
+        WHERE c.c_customer_sk IN (
+            SELECT c_customer_sk
+            FROM customer_data
+            WHERE total_orders > 10
+        )
+    )
+WHERE 
+    sh.total_sales > (SELECT AVG(total_sales) FROM sales_hierarchy)
+ORDER BY 
+    sh.s_store_sk, sh.ss_sold_date_sk;

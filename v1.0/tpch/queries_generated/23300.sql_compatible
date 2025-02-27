@@ -1,0 +1,67 @@
+
+WITH RECURSIVE OrderPath AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus, 0 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o2.o_orderkey, o2.o_orderdate, o2.o_totalprice, o2.o_orderstatus, op.level + 1
+    FROM orders o2
+    JOIN OrderPath op ON o2.o_orderkey = op.o_orderkey
+    WHERE op.level < 5
+),
+SupplierAnalysis AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_availqty, 
+           AVG(ps.ps_supplycost) AS avg_supplycost,
+           COUNT(DISTINCT s.s_nationkey) AS unique_nations
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+LineItemDetails AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, 
+           CASE 
+               WHEN l.l_returnflag = 'R' THEN 'Returned'
+               ELSE 'Not Returned'
+           END AS return_status,
+           ROUND(SUM(l.l_extendedprice * (1 - l.l_discount)), 2) AS net_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey, l.l_partkey, l.l_suppkey, l.l_returnflag
+),
+CombinedData AS (
+    SELECT DISTINCT
+        p.p_partkey, 
+        p.p_name,
+        s.s_name,
+        na.n_name AS supplier_nation,
+        COALESCE(la.return_status, 'No Orders') AS return_status,
+        COALESCE(la.net_revenue, 0) AS net_revenue,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Unknown'
+            WHEN s.s_acctbal < 0 THEN 'Negative Balance'
+            ELSE 'Positive Balance'
+        END AS acct_balance_status
+    FROM part p
+    LEFT JOIN SupplierAnalysis sa ON p.p_partkey = sa.ps_partkey
+    LEFT JOIN supplier s ON sa.ps_suppkey = s.s_suppkey
+    LEFT JOIN nation na ON s.s_nationkey = na.n_nationkey
+    LEFT JOIN LineItemDetails la ON la.l_partkey = p.p_partkey
+    WHERE (
+            sa.avg_supplycost > 100 
+            OR sa.unique_nations > 10
+            )
+    AND p.p_size IN (SELECT DISTINCT p2.p_size FROM part p2 WHERE p2.p_retailprice < 20)
+)
+SELECT c.c_name, COUNT(DISTINCT cd.p_partkey) AS part_count,
+       SUM(cd.net_revenue) AS total_revenue,
+       RANK() OVER (PARTITION BY cd.acct_balance_status ORDER BY SUM(cd.net_revenue) DESC) AS revenue_rank
+FROM customer c
+JOIN CombinedData cd ON c.c_custkey = (
+    SELECT o.o_custkey FROM orders o 
+    WHERE o.o_orderkey IN (SELECT DISTINCT lp.o_orderkey FROM LineItemDetails lp)
+    LIMIT 1
+)
+GROUP BY c.c_name, cd.acct_balance_status
+HAVING SUM(cd.net_revenue) > 500
+ORDER BY revenue_rank, c.c_name;

@@ -1,0 +1,62 @@
+
+WITH RECURSIVE ProfitMargin AS (
+    SELECT 
+        ws_item_sk, 
+        ws_sales_price - ws_wholesale_cost AS profit_margin,
+        1 AS level
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    UNION ALL
+    SELECT 
+        ws_item_sk,
+        profit_margin - (ws_ext_discount_amt / NULLIF(ws_quantity, 0)) AS profit_margin,
+        level + 1
+    FROM web_sales 
+    INNER JOIN ProfitMargin ON ws_item_sk = ProfitMargin.ws_item_sk 
+    WHERE level < 5
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    GROUP BY c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_id, 
+        cs.total_sales, 
+        cs.order_count,
+        CASE 
+            WHEN cs.total_sales > 10000 THEN 'Gold'
+            WHEN cs.total_sales BETWEEN 5000 AND 10000 THEN 'Silver'
+            ELSE 'Bronze'
+        END AS customer_tier
+    FROM CustomerSales cs
+    JOIN customer c ON cs.c_customer_id = c.c_customer_id
+),
+SalesSummary AS (
+    SELECT
+        H.customer_tier,
+        COUNT(DISTINCT H.c_customer_id) AS customer_count,
+        SUM(H.total_sales) AS total_sales,
+        AVG(P.profit_margin) AS avg_profit_margin
+    FROM HighValueCustomers H
+    LEFT JOIN ProfitMargin P ON H.c_customer_id = CAST(P.ws_item_sk AS VARCHAR)
+    GROUP BY H.customer_tier
+)
+SELECT 
+    S.customer_tier,
+    S.customer_count,
+    S.total_sales,
+    S.avg_profit_margin,
+    CASE 
+        WHEN MAX(S.total_sales) > 20000 THEN 'High Performer'
+        ELSE 'Standard'
+    END AS performance_category
+FROM SalesSummary S
+GROUP BY S.customer_tier, S.customer_count, S.total_sales, S.avg_profit_margin
+ORDER BY S.total_sales DESC
+LIMIT 10;

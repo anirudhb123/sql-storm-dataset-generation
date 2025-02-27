@@ -1,0 +1,71 @@
+
+WITH UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+UserPerformance AS (
+    SELECT 
+        u.DisplayName,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ps.PostCount, 0) AS PostCount,
+        COALESCE(ps.QuestionCount, 0) AS QuestionCount,
+        COALESCE(ps.AnswerCount, 0) AS AnswerCount,
+        COALESCE(ps.PositiveScoreCount, 0) AS PositiveScoreCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadgeCounts ub ON u.Id = ub.UserId
+    LEFT JOIN 
+        PostStats ps ON u.Id = ps.OwnerUserId
+)
+SELECT 
+    u.DisplayName,
+    u.BadgeCount,
+    u.PostCount,
+    u.QuestionCount,
+    u.AnswerCount,
+    u.PositiveScoreCount,
+    RANK() OVER (ORDER BY u.PostCount DESC, u.PositiveScoreCount DESC) AS PerformanceRank
+FROM 
+    UserPerformance u
+WHERE 
+    u.BadgeCount > 0
+    OR u.PostCount > 0
+ORDER BY 
+    PerformanceRank
+LIMIT 10
+
+UNION ALL
+
+SELECT 
+    'Aggregate' AS DisplayName,
+    SUM(BadgeCount) AS TotalBadgeCount,
+    SUM(PostCount) AS TotalPostCount,
+    SUM(QuestionCount) AS TotalQuestionCount,
+    SUM(AnswerCount) AS TotalAnswerCount,
+    SUM(PositiveScoreCount) AS TotalPositiveScoreCount,
+    NULL AS PerformanceRank
+FROM 
+    UserPerformance;

@@ -1,0 +1,82 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        COALESCE(ph.UserDisplayName, u.DisplayName) AS UserDisplayName,
+        COALESCE(ph.CreationDate, p.CreationDate) AS EditDate,
+        0 AS Level
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5) 
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        r.PostId, 
+        r.Title, 
+        r.OwnerUserId, 
+        r.CreationDate, 
+        r.Score,
+        COALESCE(ph.UserDisplayName, u.DisplayName) AS UserDisplayName,
+        COALESCE(ph.CreationDate, r.CreationDate) AS EditDate,
+        Level + 1
+    FROM 
+        Posts r
+    INNER JOIN 
+        RecursivePostCTE rp ON r.ParentId = rp.PostId
+    LEFT JOIN 
+        PostHistory ph ON r.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5) 
+    LEFT JOIN 
+        Users u ON r.OwnerUserId = u.Id
+),
+AggregatedScores AS (
+    SELECT 
+        PostId,
+        SUM(Score) AS TotalScore,
+        COUNT(*) AS TotalComments
+    FROM 
+        Comments c
+    GROUP BY 
+        PostId
+),
+FinalResults AS (
+    SELECT 
+        cte.PostId,
+        cte.Title,
+        cte.UserDisplayName,
+        cte.EditDate,
+        cte.Level,
+        COALESCE(ascores.TotalScore, 0) AS TotalScore,
+        COALESCE(ascores.TotalComments, 0) AS TotalComments
+    FROM 
+        RecursivePostCTE cte
+    LEFT JOIN 
+        AggregatedScores ascores ON cte.PostId = ascores.PostId
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.UserDisplayName,
+    f.EditDate,
+    f.Level,
+    f.TotalScore,
+    f.TotalComments,
+    CASE 
+        WHEN f.TotalScore > 100 THEN 'High Score'
+        WHEN f.TotalScore BETWEEN 50 AND 100 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    FinalResults f
+WHERE 
+    f.TotalComments > 0
+ORDER BY 
+    f.TotalScore DESC, f.EditDate DESC;

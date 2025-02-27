@@ -1,0 +1,66 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PopularPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.Score,
+        ps.ViewCount,
+        ps.OwnerDisplayName,
+        ps.Rank
+    FROM PostSummary ps
+    WHERE ps.Rank <= 3
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.Id) AS ChangeCount,
+        string_agg(DISTINCT pht.Name, ', ') AS ChangeTypes
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+)
+SELECT 
+    us.DisplayName,
+    us.TotalBounties,
+    us.TotalUpvotes,
+    us.TotalDownvotes,
+    us.TotalPosts,
+    us.TotalComments,
+    pp.Title AS PopularPostTitle,
+    pp.Score AS PopularPostScore,
+    pp.ViewCount AS PopularPostViews,
+    phs.ChangeCount AS HistoryChangeCount,
+    phs.ChangeTypes AS ChangeTypes
+FROM UserStats us
+LEFT JOIN PopularPosts pp ON us.UserId = pp.OwnerDisplayName
+LEFT JOIN PostHistorySummary phs ON pp.PostId = phs.PostId
+ORDER BY us.TotalPosts DESC, us.TotalBounties DESC;

@@ -1,0 +1,48 @@
+WITH RECURSIVE regional_summary AS (
+    SELECT 
+        r.r_regionkey, 
+        r.r_name, 
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(CASE WHEN n.n_name IS NULL THEN 0 ELSE 1 END) AS non_null_nations,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        region r 
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+)
+SELECT 
+    rs.r_name AS region_name,
+    rs.nation_count,
+    COALESCE(SUM(CASE WHEN c.c_mktsegment = 'BUILDING' THEN o.o_totalprice END), 0) AS building_segment_revenue,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ' (', s.s_acctbal, ')'), '; ') AS supplier_details,
+    ROW_NUMBER() OVER (PARTITION BY rs.r_regionkey ORDER BY rs.total_supply_cost DESC) AS rank_order
+FROM 
+    regional_summary rs 
+LEFT JOIN 
+    customer c ON c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = rs.r_regionkey)
+LEFT JOIN 
+    orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    supplier s ON s.s_nationkey = c.c_nationkey
+GROUP BY 
+    rs.r_regionkey, rs.r_name, rs.nation_count 
+HAVING 
+    rs.nation_count > 3 OR (rs.nation_count = 3 AND SUM(o.o_totalprice) > 10000)
+ORDER BY 
+    region_name DESC, rank_order
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY
+UNION ALL
+SELECT 
+    'Not Available' AS region_name,
+    0 AS nation_count,
+    0 AS building_segment_revenue,
+    NULL AS supplier_details,
+    NULL AS rank_order
+WHERE 
+    NOT EXISTS (SELECT 1 FROM region);

@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT 
+            ParentId, 
+            COUNT(*) AS AnswerCount 
+         FROM 
+            Posts 
+         WHERE 
+            PostTypeId = 2 
+         GROUP BY 
+            ParentId) a ON a.ParentId = p.Id
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount 
+         FROM 
+            Comments 
+         GROUP BY 
+            PostId) c ON c.PostId = p.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (ORDER BY ScoreRank) AS RowNum
+    FROM 
+        RankedPosts
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.OwnerDisplayName,
+    tp.AnswerCount,
+    tp.CommentCount,
+    pt.Name AS PostTypeName,
+    bt.Name AS BadgeName,
+    SUM(CASE WHEN b.UserId IS NOT NULL THEN 1 ELSE 0 END) AS UserBadgesCount
+FROM 
+    TopPosts tp
+JOIN 
+    PostTypes pt ON tp.PostTypeId = pt.Id
+LEFT JOIN 
+    Badges b ON b.UserId = tp.PostId
+LEFT JOIN 
+    (SELECT 
+        UserId, 
+        Name 
+     FROM 
+        Badges 
+     WHERE 
+        Class = 1) bt ON b.UserId = bt.UserId
+WHERE 
+    tp.RowNum <= 10
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, tp.Score, tp.ViewCount, tp.OwnerDisplayName, tp.AnswerCount, tp.CommentCount, pt.Name, bt.Name
+ORDER BY 
+    tp.Score DESC;

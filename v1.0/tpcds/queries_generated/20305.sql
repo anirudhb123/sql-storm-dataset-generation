@@ -1,0 +1,77 @@
+
+WITH RankedReturns AS (
+    SELECT
+        sr_cdemo_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt) AS total_return_amt,
+        DENSE_RANK() OVER (PARTITION BY sr_cdemo_sk ORDER BY COUNT(*) DESC) AS rank
+    FROM
+        store_returns
+    GROUP BY
+        sr_cdemo_sk
+),
+HighReturnCustomers AS (
+    SELECT
+        r.cdemo_sk,
+        r.return_count,
+        r.total_return_amt,
+        c.c_first_name,
+        c.c_last_name,
+        CASE 
+            WHEN r.total_return_amt > 500 THEN 'High Roller'
+            WHEN r.total_return_amt > 100 THEN 'Moderate Spender'
+            ELSE 'Occasional Shopper' 
+        END AS shopper_category
+    FROM 
+        RankedReturns r
+    INNER JOIN
+        customer c ON r.cdemo_sk = c.c_current_cdemo_sk
+    WHERE
+        r.rank = 1
+),
+DistinctAddresses AS (
+    SELECT 
+        ca.ca_country,
+        COUNT(DISTINCT ca.ca_address_id) AS distinct_addresses
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_country
+),
+SalesAggregate AS (
+    SELECT
+        ws_bill_cdemo_sk,
+        SUM(ws_net_profit) AS total_profit,
+        SUM(ws_quantity) AS total_quantity
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk = (
+            SELECT MAX(d_date_sk) 
+            FROM date_dim 
+            WHERE d_date = CURRENT_DATE
+        )
+    GROUP BY 
+        ws_bill_cdemo_sk
+)
+SELECT 
+    h.c_first_name,
+    h.c_last_name,
+    h.shopper_category,
+    d.distinct_addresses,
+    COALESCE(s.total_profit, 0) AS total_profit_today,
+    COALESCE(s.total_quantity, 0) AS total_quantity_today
+FROM 
+    HighReturnCustomers h
+LEFT JOIN 
+    DistinctAddresses d ON h.cdemo_sk = d.ca_country
+LEFT JOIN 
+    SalesAggregate s ON h.cdemo_sk = s.ws_bill_cdemo_sk
+WHERE 
+    h.shopper_category IN ('High Roller', 'Moderate Spender')
+    AND d.distinct_addresses IS NOT NULL
+ORDER BY 
+    s.total_profit DESC, h.c_last_name ASC
+LIMIT 10;

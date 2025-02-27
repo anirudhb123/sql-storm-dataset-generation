@@ -1,0 +1,63 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM Users U
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.CreationDate,
+        P.Score,
+        COALESCE(CAST(P.AcceptedAnswerId AS varchar), 'None') AS AcceptedAnswer,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT PH.Id) AS EditCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY P.Id
+),
+BestAnswer AS (
+    SELECT 
+        P.Id AS QuestionId,
+        PA.Id AS BestAnswerId,
+        PA.Score AS BestAnswerScore
+    FROM Posts P
+    LEFT JOIN Posts PA ON P.AcceptedAnswerId = PA.Id
+    WHERE P.PostTypeId = 1
+),
+RankedPosts AS (
+    SELECT 
+        PD.*,
+        CASE 
+            WHEN PD.PostTypeId = 1 THEN 'Question'
+            WHEN PD.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Others'
+        END AS PostCategory
+    FROM PostDetails PD
+),
+FinalResults AS (
+    SELECT 
+        UR.DisplayName,
+        RP.Title,
+        RP.CreationDate,
+        RP.CommentCount,
+        RP.EditCount,
+        COALESCE(BA.BestAnswerId, 'No Best Answer') AS BestAnswerId,
+        COALESCE(BA.BestAnswerScore, 0) AS BestAnswerScore,
+        RP.PostCategory,
+        ROW_NUMBER() OVER (PARTITION BY RP.PostCategory ORDER BY RP.Score DESC) AS ScoreRank
+    FROM RankedPosts RP
+    LEFT JOIN UserReputation UR ON RP.PostId = UR.UserId 
+    LEFT JOIN BestAnswer BA ON RP.PostId = BA.QuestionId
+)
+SELECT 
+    *
+FROM FinalResults
+WHERE ScoreRank <= 10
+ORDER BY PostCategory, CommentCount DESC, BestAnswerScore DESC;

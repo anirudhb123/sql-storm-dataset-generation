@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rnk
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS total_lines,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.s_suppkey,
+    r.s_name,
+    r.s_acctbal,
+    h.c_custkey,
+    h.c_name,
+    h.c_acctbal,
+    o.o_orderkey,
+    o.total_lines,
+    o.total_revenue,
+    COALESCE(r.s_acctbal, 0) AS supplier_balance,
+    CASE 
+        WHEN h.c_acctbal IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS cust_order_status
+FROM 
+    RankedSuppliers r
+FULL OUTER JOIN 
+    HighValueCustomers h ON r.rnk = 1
+LEFT JOIN 
+    OrderStats o ON h.c_custkey = o.o_orderkey
+ORDER BY 
+    r.s_acctbal DESC, h.c_acctbal DESC;

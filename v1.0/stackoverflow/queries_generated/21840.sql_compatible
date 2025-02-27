@@ -1,0 +1,54 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        AVG(u.Reputation) OVER (PARTITION BY CASE WHEN u.Reputation IS NULL THEN 'Unknown' ELSE 'Known' END) AS AvgReputation
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(MAX(ph.Comment), 'No History') AS LastEditComment,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.CreationDate = (SELECT MAX(CreationDate) FROM PostHistory WHERE PostId = p.Id)
+    WHERE p.Deleted IS NULL OR p.Deleted = 0
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.UpVotes,
+    us.DownVotes,
+    us.PostCount,
+    us.AvgReputation,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.CommentCount,
+    ps.LastEditComment,
+    CASE 
+        WHEN ps.PostRank = 1 THEN 'Most Recent'
+        WHEN ps.PostRank > 1 AND ps.PostRank <= 5 THEN 'Among Recent Posts'
+        ELSE 'Older Posts'
+    END AS PostCategory
+FROM UserStats us
+JOIN Posts p ON us.UserId = p.OwnerUserId
+JOIN PostStats ps ON p.Id = ps.PostId
+WHERE us.PostCount > 0
+AND (ps.Score > 10 OR (us.AvgReputation IS NULL AND ps.CommentCount > 5))
+ORDER BY us.UpVotes DESC, ps.Score DESC
+LIMIT 50;

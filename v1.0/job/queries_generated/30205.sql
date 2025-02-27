@@ -1,0 +1,85 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.linked_movie_id
+),
+MovieCast AS (
+    SELECT 
+        c.movie_id,
+        ak.name AS actor_name,
+        ct.kind AS cast_type,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        comp_cast_type ct ON c.person_role_id = ct.id
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        COUNT(*) AS info_count,
+        STRING_AGG(DISTINCT mi.info ORDER BY mi.info) AS infos
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    COALESCE(mc.actor_list, 'No Cast') AS actor_list,
+    mi.info_count,
+    mh.level
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    (SELECT 
+         mk.movie_id,
+         STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+     FROM 
+         movie_keyword mk
+     JOIN 
+         keyword k ON mk.keyword_id = k.id
+     GROUP BY 
+         mk.movie_id
+    ) mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    (SELECT 
+         mc.movie_id,
+         STRING_AGG(mc.actor_name || ' (' || mc.cast_type || ')', ', ') AS actor_list
+     FROM 
+         MovieCast mc
+     GROUP BY 
+         mc.movie_id
+    ) mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    MovieInfo mi ON mh.movie_id = mi.movie_id
+WHERE 
+    mh.production_year >= 2000
+ORDER BY 
+    mh.production_year DESC, mh.title ASC
+LIMIT 100;

@@ -1,0 +1,71 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS rank,
+        ws_sales_price,
+        ws_net_profit
+    FROM 
+        web_sales
+), 
+total_returns AS (
+    SELECT 
+        wr_item_sk, 
+        SUM(wr_return_quantity) AS total_returned_quantity,
+        SUM(wr_return_amt_inc_tax) AS total_returned_amount
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_item_sk
+), 
+active_promotions AS (
+    SELECT 
+        p_item_sk,
+        COUNT(DISTINCT CASE WHEN p_discount_active = 'Y' THEN p_promo_sk END) AS active_promo_count
+    FROM 
+        promotion
+    GROUP BY 
+        p_item_sk
+), 
+sales_summary AS (
+    SELECT 
+        r.ws_item_sk,
+        COALESCE(SUM(r.ws_sales_price), 0) AS total_sales,
+        COALESCE(t.total_returned_quantity, 0) AS total_returns,
+        COALESCE(t.total_returned_amount, 0) AS total_returned_amount,
+        COALESCE(a.active_promo_count, 0) AS active_promotions,
+        SUM(r.ws_net_profit) AS total_net_profit
+    FROM 
+        ranked_sales r
+    LEFT JOIN 
+        total_returns t ON r.ws_item_sk = t.wr_item_sk
+    LEFT JOIN 
+        active_promotions a ON r.ws_item_sk = a.p_item_sk
+    WHERE 
+        r.rank = 1 AND 
+        r.ws_sales_price IS NOT NULL AND 
+        r.ws_net_profit IS NOT NULL
+    GROUP BY 
+        r.ws_item_sk
+)
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY ss.total_sales DESC) AS rank,
+    ss.ws_item_sk,
+    ss.total_sales,
+    ss.total_returns,
+    ss.total_returned_amount,
+    ss.active_promotions,
+    ss.total_net_profit,
+    CASE 
+        WHEN ss.total_sales > 1000 THEN 'High Seller'
+        WHEN ss.total_sales BETWEEN 500 AND 1000 THEN 'Medium Seller'
+        ELSE 'Low Seller' 
+    END AS seller_category
+FROM 
+    sales_summary ss
+WHERE 
+    ss.total_net_profit IS NOT NULL 
+    AND ss.active_promotions > 0
+ORDER BY 
+    ss.total_sales DESC;

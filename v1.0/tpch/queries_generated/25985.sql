@@ -1,0 +1,71 @@
+WITH part_details AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice,
+        p.p_comment,
+        ps.ps_supplycost,
+        s.s_name AS supplier_name,
+        n.n_name AS nation_name,
+        CONCAT(p.p_name, ' - ', s.s_name, '(', CAST(ps.ps_supplycost AS CHAR), ')') AS part_supplier_info
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+customer_info AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_address,
+        c.c_mktsegment,
+        CONCAT(c.c_name, '(', c.c_mktsegment, ')') AS customer_details
+    FROM 
+        customer c
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(DISTINCT l.l_orderkey) AS total_lineitems,
+        STRING_AGG(l.l_comment, '; ') AS lineitem_comments
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus
+)
+SELECT 
+    d.p_partkey,
+    d.p_name,
+    d.p_brand,
+    d.nation_name,
+    d.supplier_name,
+    d.p_retailprice,
+    c.customer_details,
+    o.o_orderkey,
+    o.o_totalprice,
+    o.total_quantity,
+    o.lineitem_comments
+FROM 
+    part_details d
+LEFT JOIN 
+    customer_info c ON d.p_partkey = (SELECT MAX(p_partkey) FROM part) -- Arbitrary join to customer
+LEFT JOIN 
+    order_summary o ON o.o_orderkey = (SELECT MAX(o_orderkey) FROM orders) -- Arbitrary join to order
+WHERE 
+    d.p_retailprice > 50.00 -- Filter for parts over 50 
+ORDER BY 
+    d.p_retailprice DESC, 
+    c.c_name ASC;

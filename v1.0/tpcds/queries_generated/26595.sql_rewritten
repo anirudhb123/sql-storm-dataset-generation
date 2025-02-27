@@ -1,0 +1,68 @@
+WITH AddressDetails AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_first_name || ' ' || c.c_last_name AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+IncomeDetails AS (
+    SELECT 
+        cd.full_name,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        hd.hd_buy_potential,
+        hd.hd_dep_count
+    FROM 
+        CustomerDetails cd
+    JOIN 
+        household_demographics hd ON cd.cd_purchase_estimate BETWEEN 0 AND 100000
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+FinalDetails AS (
+    SELECT 
+        ad.full_address,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_zip,
+        ad.ca_country,
+        id.full_name,
+        id.ib_lower_bound,
+        id.ib_upper_bound,
+        id.hd_buy_potential,
+        id.hd_dep_count
+    FROM 
+        AddressDetails ad
+    JOIN 
+        IncomeDetails id ON ad.ca_zip LIKE '9%' 
+)
+SELECT 
+    full_address,
+    ca_city,
+    ca_state,
+    ca_zip,
+    ca_country,
+    full_name,
+    CONCAT('Income Band: $', ib_lower_bound, ' - $', ib_upper_bound) AS income_range,
+    hd_buy_potential,
+    hd_dep_count
+FROM 
+    FinalDetails
+ORDER BY 
+    ca_city, full_name;

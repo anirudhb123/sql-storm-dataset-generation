@@ -1,0 +1,54 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        s.ss_store_sk,
+        SUM(ss.ss_net_paid_inc_tax) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        ss.ss_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, s.ss_store_sk
+
+    UNION ALL
+
+    SELECT 
+        ch.c_customer_sk,
+        ch.c_first_name,
+        ch.c_last_name,
+        sh.ss_store_sk,
+        SUM(sh.ss_net_paid_inc_tax) AS total_sales
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        customer ch ON ch.c_customer_sk = sh.c_customer_sk
+    GROUP BY 
+        ch.c_customer_sk, ch.c_first_name, ch.c_last_name, sh.ss_store_sk
+)
+
+SELECT 
+    ca.ca_city,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    AVG(sd.total_sales) AS avg_sales_per_customer,
+    SUM(sd.total_sales) AS total_sales_in_city,
+    CASE 
+        WHEN AVG(sd.total_sales) > 5000 THEN 'High'
+        WHEN AVG(sd.total_sales) BETWEEN 1000 AND 5000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM 
+    sales_hierarchy sd
+JOIN 
+    customer_address ca ON ca.ca_address_sk IN (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_current_cdemo_sk IN (SELECT cd.cd_demo_sk FROM customer_demographics cd WHERE cd.cd_marital_status = 'M'))
+GROUP BY 
+    ca.ca_city
+HAVING 
+    total_customers > 10
+ORDER BY 
+    total_sales_in_city DESC;
+

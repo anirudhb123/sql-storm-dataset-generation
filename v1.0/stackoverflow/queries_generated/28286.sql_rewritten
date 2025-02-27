@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        p.CommentCount,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2)  
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(p.CommentCount) AS TotalComments,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalPosts,
+    u.QuestionsCount,
+    u.AnswersCount,
+    u.TotalComments,
+    u.TotalViews,
+    u.AverageScore,
+    p.PostId,
+    p.Title AS RecentPostTitle,
+    p.CreationDate AS RecentPostDate,
+    p.Score AS RecentPostScore,
+    tt.TagName AS TopTag
+FROM 
+    UserStats u
+LEFT JOIN 
+    RankedPosts p ON u.UserId = p.OwnerUserId AND p.PostRank = 1
+LEFT JOIN 
+    TopTags tt ON tt.TagName = ANY(string_to_array(u.DisplayName, ' '))  
+WHERE 
+    u.TotalPosts > 0
+ORDER BY 
+    u.TotalPosts DESC, u.AverageScore DESC
+LIMIT 20;

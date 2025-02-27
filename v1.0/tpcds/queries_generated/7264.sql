@@ -1,0 +1,58 @@
+
+WITH Item_Sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(ws.ws_ext_discount_amt) AS total_discount
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.ws_item_sk
+), 
+Store_Sales AS (
+    SELECT 
+        ss.ss_item_sk,
+        SUM(ss.ss_quantity) AS total_quantity,
+        SUM(ss.ss_sales_price) AS total_sales,
+        SUM(ss.ss_ext_discount_amt) AS total_discount
+    FROM 
+        store_sales ss
+    JOIN 
+        date_dim dd ON ss.ss_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ss.ss_item_sk
+), 
+Combined_Sales AS (
+    SELECT 
+        is.ws_item_sk,
+        (COALESCE(is.total_quantity, 0) + COALESCE(ss.total_quantity, 0)) AS total_quantity,
+        (COALESCE(is.total_sales, 0) + COALESCE(ss.total_sales, 0)) AS total_sales,
+        (COALESCE(is.total_discount, 0) + COALESCE(ss.total_discount, 0)) AS total_discount
+    FROM 
+        Item_Sales is
+    FULL OUTER JOIN 
+        Store_Sales ss ON is.ws_item_sk = ss.ss_item_sk
+)
+
+SELECT 
+    i.i_item_id,
+    cs.total_quantity,
+    cs.total_sales,
+    cs.total_discount,
+    (cs.total_sales - cs.total_discount) AS net_sales
+FROM 
+    Combined_Sales cs
+JOIN 
+    item i ON cs.ws_item_sk = i.i_item_sk
+WHERE 
+    cs.total_quantity > 0
+ORDER BY 
+    net_sales DESC
+LIMIT 10;

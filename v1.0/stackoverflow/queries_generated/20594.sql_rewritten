@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        u.Reputation > 1000
+), 
+FrequentTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, '|')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        unnest(string_to_array(Tags, '|'))
+    HAVING 
+        COUNT(*) > 5
+), 
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        CASE
+            WHEN ph.Comment IS NULL THEN 'No comment provided'
+            ELSE ph.Comment 
+        END AS EditComment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    AND 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+)
+SELECT 
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    ft.TagName,
+    ph.UserDisplayName,
+    ph.EditComment,
+    ph.PostHistoryTypeId,
+    ph.CreationDate AS EditDate,
+    COALESCE(NULLIF(rp.PostId, ph.PostId), -1) AS LinkedPostId 
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    (SELECT DISTINCT TagName FROM FrequentTags) ft ON rp.Title ILIKE '%' || ft.TagName || '%'
+LEFT JOIN 
+    PostHistoryData ph ON rp.PostId = ph.PostId AND ph.CreationDate = (SELECT MAX(CreationDate) FROM PostHistory WHERE PostId = rp.PostId)
+WHERE 
+    rp.UserPostRank = 1
+ORDER BY 
+    rp.Score DESC, ft.TagCount DESC
+LIMIT 100;

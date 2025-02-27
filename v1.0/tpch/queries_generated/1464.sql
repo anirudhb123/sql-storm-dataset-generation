@@ -1,0 +1,65 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerTotals AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.custkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(ct.total_spent) AS avg_spent,
+    SUM(sp.total_cost) AS total_supplier_cost,
+    MAX(ro.o_totalprice) AS max_order_value
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    SupplierParts sp ON ps.ps_partkey = sp.ps_partkey
+LEFT JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    CustomerTotals ct ON c.c_custkey = ct.c_custkey
+LEFT JOIN 
+    RankedOrders ro ON o.o_orderkey = ro.o_orderkey
+WHERE 
+    n.n_name IS NOT NULL 
+    AND (s.s_acctbal > 1000 OR ct.total_spent IS NOT NULL)
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY 
+    avg_spent DESC;

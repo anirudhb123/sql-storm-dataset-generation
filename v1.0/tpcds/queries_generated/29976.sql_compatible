@@ -1,0 +1,68 @@
+
+WITH AddressSummary AS (
+    SELECT 
+        ca_city,
+        COUNT(*) AS address_count,
+        STRING_AGG(DISTINCT CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type), ', ') AS full_address_list
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city
+),
+CustomerDemographic AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        SUM(cd_dep_count) AS total_dependents,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender, cd_marital_status
+),
+DateSummary AS (
+    SELECT 
+        d_year,
+        COUNT(d_date) AS total_days,
+        MAX(d_date) AS last_date,
+        MIN(d_date) AS first_date
+    FROM 
+        date_dim
+    GROUP BY 
+        d_year
+),
+WarehouseInformation AS (
+    SELECT 
+        w_city,
+        w_state,
+        SUM(w_warehouse_sq_ft) AS total_square_feet
+    FROM 
+        warehouse
+    GROUP BY 
+        w_city, w_state
+)
+SELECT 
+    AS.ca_city AS AddressCity, 
+    AS.address_count AS TotalAddresses,
+    AS.full_address_list AS AddressList,
+    CD.cd_gender AS Gender, 
+    CD.cd_marital_status AS MaritalStatus, 
+    CD.total_dependents AS TotalDependents, 
+    CD.avg_purchase_estimate AS AvgPurchaseEstimate, 
+    DS.d_year AS Year, 
+    DS.total_days AS TotalDays,
+    DS.last_date AS LastDate, 
+    DS.first_date AS FirstDate,
+    WI.w_city AS WarehouseCity,
+    WI.w_state AS WarehouseState,
+    WI.total_square_feet AS TotalSquareFeet
+FROM 
+    AddressSummary AS AS
+JOIN 
+    CustomerDemographic AS CD ON AS.address_count > 50
+JOIN 
+    DateSummary AS DS ON DS.total_days > 365
+JOIN 
+    WarehouseInformation AS WI ON WI.total_square_feet > 10000
+ORDER BY 
+    AS.ca_city, CD.cd_gender, DS.d_year;

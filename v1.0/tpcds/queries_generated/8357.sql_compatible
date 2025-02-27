@@ -1,0 +1,26 @@
+
+SELECT 
+    ca.city AS customer_city,
+    cd.gender AS customer_gender,
+    COUNT(DISTINCT c.c_customer_id) AS total_customers,
+    SUM(w.ws_ext_sales_price) AS total_sales,
+    AVG(w.ws_net_profit) AS average_profit,
+    MAX(w.ws_sold_date_sk) AS last_sale_date
+FROM 
+    customer c
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    web_sales w ON c.c_customer_sk = w.ws_ship_customer_sk
+JOIN 
+    date_dim d ON w.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    d.d_year = 2023 
+    AND ca.ca_state = 'CA'
+GROUP BY 
+    ca.city, cd.gender
+ORDER BY 
+    total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,57 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        SUBSTRING(ca_zip, 1, 5) AS zip_prefix
+    FROM 
+        customer_address
+),
+CustomerStats AS (
+    SELECT 
+        cd_gender,
+        COUNT(DISTINCT c_customer_sk) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        MIN(cd_dep_count) AS min_dependencies,
+        MAX(cd_dep_count) AS max_dependencies
+    FROM 
+        customer_demographics
+    JOIN 
+        customer ON c_customer_sk = c_current_cdemo_sk
+    GROUP BY 
+        cd_gender
+),
+ZipAnalysis AS (
+    SELECT 
+        a.zip_prefix,
+        COUNT(*) AS address_count,
+        STRING_AGG(DISTINCT CONCAT(a.full_address, ', ', a.ca_city, ', ', a.ca_state) ORDER BY a.full_address) AS address_list
+    FROM 
+        AddressDetails a
+    GROUP BY 
+        a.zip_prefix
+),
+Benchmark AS (
+    SELECT 
+        cs.cd_gender,
+        cs.customer_count,
+        cs.avg_purchase_estimate,
+        cs.min_dependencies,
+        cs.max_dependencies,
+        za.address_count,
+        za.address_list
+    FROM 
+        CustomerStats cs
+    LEFT JOIN 
+        ZipAnalysis za ON za.zip_prefix = LEFT(cs.cd_gender, 5) -- Just for demonstration linking using gender prefixes, in reality this might not make sense
+)
+SELECT 
+    * 
+FROM 
+    Benchmark
+WHERE 
+    customer_count > 10
+ORDER BY 
+    avg_purchase_estimate DESC, address_count DESC;

@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        COUNT(l.l_orderkey) AS order_line_count,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+QualifiedSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rnk = 1
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name,
+    COALESCE(qs.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(hvc.total_spent, 0) AS total_spent_by_customer,
+    ro.order_line_count,
+    ro.last_ship_date
+FROM 
+    part p
+LEFT JOIN 
+    QualifiedSuppliers qs ON EXISTS (SELECT 1 FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey AND ps.ps_suppkey = qs.s_suppkey)
+LEFT JOIN 
+    HighValueCustomers hvc ON hvc.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey))
+LEFT JOIN 
+    RecentOrders ro ON ro.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_name LIKE '%premium%')
+ORDER BY 
+    p.p_partkey, supplier_name;

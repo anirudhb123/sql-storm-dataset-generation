@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mh.level AS hierarchy_level,
+    COUNT(DISTINCT ci.person_id) OVER (PARTITION BY ak.id) AS total_actors,
+    STRING_AGG(DISTINCT k.keyword) FILTER (WHERE k.keyword IS NOT NULL) AS keywords,
+    COALESCE(cn.name, 'Unknown Company') AS company_name,
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = mh.movie_id 
+       AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')) AS plot_info_count
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    aka_title at ON mh.movie_id = at.id
+WHERE 
+    ak.name IS NOT NULL
+    AND mh.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    ak.id, at.id, mh.level, cn.name
+ORDER BY 
+    mh.level, total_actors DESC, movie_title;
+
+This SQL query utilizes various constructs including a recursive Common Table Expression (CTE) to traverse a hierarchy of movies based on links between them. It also employs window functions for counting total actors participating in each movie, incorporates aggregation functions, handles NULL logic with COALESCE, and applies various joins to gather relevant data across multiple tables in the schema.

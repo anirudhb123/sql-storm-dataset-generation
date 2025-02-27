@@ -1,0 +1,72 @@
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM
+        supplier s
+    WHERE
+        s.s_acctbal IS NOT NULL
+),
+HighValueParts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM
+        part p
+    JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE
+        p.p_retailprice > 100.00
+    GROUP BY
+        p.p_partkey, p.p_name
+    HAVING
+        SUM(ps.ps_supplycost) > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey
+    HAVING
+        total_order_value > (SELECT AVG(o_totalprice) FROM orders)
+),
+PartSupplierCounts AS (
+    SELECT
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM
+        partsupp ps
+    GROUP BY
+        ps.ps_partkey
+)
+SELECT
+    ra.s_suppkey,
+    ra.s_name,
+    ra.s_acctbal,
+    hp.p_partkey,
+    hp.p_name,
+    ho.order_count,
+    ho.total_order_value,
+    psc.supplier_count
+FROM
+    RankedSuppliers ra
+JOIN
+    HighValueParts hp ON ra.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = hp.p_partkey)
+LEFT JOIN
+    CustomerOrders ho ON ho.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = hp.p_partkey))
+LEFT JOIN
+    PartSupplierCounts psc ON hp.p_partkey = psc.ps_partkey
+WHERE
+    hp.total_supplycost > (SELECT SUM(ps_supplycost) FROM partsupp WHERE ps_availqty < 10)
+ORDER BY
+    ra.s_acctbal DESC, ho.total_order_value DESC
+LIMIT 100;

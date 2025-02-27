@@ -1,0 +1,67 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank,
+        CASE 
+            WHEN u.Reputation > 1000 THEN 'Experienced'
+            WHEN u.Reputation BETWEEN 500 AND 1000 THEN 'Moderate'
+            ELSE 'Novice'
+        END AS UserType
+    FROM 
+        Users u
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.UserId) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount
+    FROM 
+        Posts p
+        LEFT JOIN Votes v ON p.Id = v.PostId
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+HotQuestions AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.Score,
+        ps.CommentCount,
+        ur.UserType,
+        ROW_NUMBER() OVER (ORDER BY ps.Score DESC) AS HotRank
+    FROM 
+        PostStatistics ps
+        JOIN Users u ON ps.PostId IN (
+            SELECT DISTINCT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id
+        )
+        JOIN UserReputation ur ON u.Id = ur.UserId
+    WHERE 
+        ps.Score > 0
+)
+SELECT 
+    hq.Title,
+    hq.CreationDate,
+    hq.Score,
+    hq.CommentCount,
+    hq.UserType,
+    CASE 
+        WHEN hq.HotRank <= 5 THEN 'Hot'
+        ELSE 'Moderate'
+    END AS HotStatus,
+    STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypes
+FROM 
+    HotQuestions hq
+    LEFT JOIN Posts p ON hq.PostId = p.Id
+    LEFT JOIN PostTypes pt ON p.PostTypeId = pt.Id
+GROUP BY 
+    hq.Title, hq.CreationDate, hq.Score, hq.CommentCount, hq.UserType, hq.HotRank
+ORDER BY 
+    hq.Score DESC, hq.CreationDate DESC;

@@ -1,0 +1,108 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Views,
+        p.Tags,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.OwnerUserId,
+        COALESCE(rp.AnswerCount, 0) AS TotalAnswers,
+        COALESCE(rp.CommentCount, 0) AS TotalComments,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COALESCE(v.VoteCount, 0) AS VoteCount,
+        up.DisplayName AS OwnerName
+    FROM 
+        RecentPosts rp
+    LEFT JOIN Users up ON rp.OwnerUserId = up.Id
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON rp.PostId = v.PostId
+)
+
+SELECT 
+    ps.Title,
+    ps.CreationDate,
+    ps.TotalAnswers,
+    ps.TotalComments,
+    ps.UpVotes,
+    ps.DownVotes,
+    u.DisplayName AS PostOwner,
+    ur.Reputation AS OwnerReputation,
+    ur.ReputationRank,
+    CASE
+        WHEN ps.Views > 1000 THEN 'Popular'
+        WHEN ps.Views <= 1000 AND ps.Views >= 500 THEN 'Moderate'
+        ELSE 'Less Viewed'
+    END AS ViewCategory
+FROM 
+    PostStatistics ps
+JOIN 
+    UserReputation ur ON ps.OwnerUserId = ur.UserId
+WHERE 
+    ur.Reputation > 100
+ORDER BY 
+    ps.Score DESC, 
+    ps.CreationDate DESC;
+
+-- Finding the most frequently used tags among the top 10 posts
+WITH TopPostsTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, ',')) AS TagName
+    FROM 
+        Posts
+    WHERE 
+        Id IN (SELECT PostId FROM PostStatistics ORDER BY Score DESC LIMIT 10)
+),
+TagCount AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS TagUsage
+    FROM 
+        TopPostsTags
+    GROUP BY 
+        TagName
+)
+SELECT 
+    TagName, 
+    TagUsage
+FROM 
+    TagCount
+ORDER BY 
+    TagUsage DESC;

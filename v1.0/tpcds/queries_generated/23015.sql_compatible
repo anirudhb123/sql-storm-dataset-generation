@@ -1,0 +1,64 @@
+
+WITH RECURSIVE sales_analysis AS (
+    SELECT 
+        ws.web_site_sk, 
+        SUM(ws.ws_quantity) AS total_quantity, 
+        SUM(ws.ws_net_paid) AS total_net_paid, 
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) as rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.web_site_sk
+),
+customer_returns AS (
+    SELECT 
+        wr_returning_customer_sk, 
+        COUNT(DISTINCT wr_order_number) AS total_returns, 
+        SUM(wr_net_loss) AS total_net_loss
+    FROM 
+        web_returns
+    WHERE 
+        wr_returned_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        wr_returning_customer_sk
+),
+combined_data AS (
+    SELECT 
+        ca.ca_address_sk,
+        cd.cd_demo_sk,
+        ca.ca_city,
+        ca.ca_state,
+        sa.total_quantity,
+        sa.total_net_paid,
+        cr.total_returns,
+        cr.total_net_loss
+    FROM 
+        customer_address ca
+        INNER JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+        LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN sales_analysis sa ON c.c_customer_sk = sa.web_site_sk
+        LEFT JOIN customer_returns cr ON c.c_customer_sk = cr.wr_returning_customer_sk
+)
+SELECT 
+    ca_state,
+    COUNT(DISTINCT cd_demo_sk) AS unique_demographics,
+    COALESCE(SUM(total_quantity), 0) AS total_sales_quantity,
+    COALESCE(SUM(total_net_paid), 0) AS total_sales_value,
+    COALESCE(SUM(total_returns), 0) AS total_returns_count,
+    COALESCE(SUM(total_net_loss), 0) AS total_net_loss_value,
+    COUNT(*) FILTER (WHERE total_net_paid IS NULL) AS null_paid_count,
+    CASE 
+        WHEN AVG(total_net_paid) IS NULL THEN 'No Sales' 
+        ELSE 'Sales Recorded' 
+    END AS sales_status
+FROM 
+    combined_data
+GROUP BY 
+    ca_state
+HAVING 
+    COUNT(DISTINCT cd_demo_sk) > 10
+ORDER BY 
+    total_sales_value DESC 
+LIMIT 10;

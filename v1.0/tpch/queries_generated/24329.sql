@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND l.l_returnflag = 'N' 
+        AND l.l_discount BETWEEN 0.01 AND 0.07
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SuppliersWithHighSupplyCost AS (
+    SELECT 
+        ps.ps_suppkey,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    INNER JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_retailprice > (
+            SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size < 20
+        )
+    GROUP BY 
+        ps.ps_suppkey
+),
+CustomersWithComments AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(c.c_comment) AS comment_count
+    FROM 
+        customer c
+    WHERE 
+        LENGTH(c.c_comment) > 0
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    ROUND(SUM(COALESCE(o.total_revenue, 0)), 2) AS total_revenue_per_region,
+    SUM(CASE WHEN s.avg_supply_cost IS NOT NULL THEN s.avg_supply_cost ELSE 0 END) AS total_avg_supply_cost,
+    COUNT(DISTINCT cc.c_custkey) AS customer_count
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    RankedOrders o ON r.r_regionkey = (SELECT n2.n_regionkey FROM nation n2 WHERE n2.n_nationkey = (SELECT DISTINCT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey))
+LEFT JOIN 
+    SuppliersWithHighSupplyCost s ON s.ps_suppkey = (SELECT ps2.ps_suppkey FROM partsupp ps2 WHERE ps2.ps_partkey IN (SELECT DISTINCT p.p_partkey FROM part p WHERE p.p_comment IS NOT NULL))
+LEFT JOIN 
+    CustomersWithComments cc ON cc.c_custkey = (SELECT o_custkey FROM orders WHERE o_orderkey = o.o_orderkey)
+GROUP BY 
+    r.r_name
+HAVING 
+    nation_count > 0
+    AND total_revenue_per_region > 10000
+ORDER BY 
+    total_revenue_per_region DESC;

@@ -1,0 +1,60 @@
+
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        n.n_name,
+        ss.s_name,
+        ss.total_sales,
+        ss.order_count
+    FROM 
+        SupplierSales ss
+    JOIN 
+        nation n ON ss.s_nationkey = n.n_nationkey
+    WHERE 
+        ss.sales_rank <= 5
+),
+RegionSupplierSales AS (
+    SELECT 
+        r.r_name,
+        COALESCE(SUM(ts.total_sales), 0) AS region_sales
+    FROM 
+        region r
+    LEFT JOIN 
+        TopSuppliers ts ON r.r_regionkey = ts.s_nationkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    r.r_name,
+    r.region_sales,
+    CASE 
+        WHEN r.region_sales > 100000 THEN 'High Sales'
+        WHEN r.region_sales BETWEEN 50000 AND 100000 THEN 'Medium Sales'
+        ELSE 'Low Sales'
+    END AS sales_category,
+    COUNT(DISTINCT ts.s_name) AS supplier_count
+FROM 
+    RegionSupplierSales r
+LEFT JOIN 
+    TopSuppliers ts ON r.r_name = ts.n_name
+GROUP BY 
+    r.r_name, r.region_sales
+ORDER BY 
+    r.region_sales DESC;

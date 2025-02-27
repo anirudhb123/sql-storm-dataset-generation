@@ -1,0 +1,48 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level 
+    FROM supplier s 
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_nationkey IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1 
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_container LIKE '%BOX%'
+)
+
+SELECT 
+    c.c_name AS customer_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    RANK() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank,
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    CASE 
+        WHEN SUM(l.l_quantity) IS NULL THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END AS sales_status,
+    (SELECT COUNT(DISTINCT l.l_orderkey) 
+     FROM lineitem l 
+     WHERE l.l_suppkey IN (SELECT s.s_suppkey FROM supplier_hierarchy)) AS order_count
+FROM 
+    customer c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    AND n.n_name IS NOT NULL
+GROUP BY 
+    c.c_custkey, c.c_name, n.n_name, r.r_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000
+ORDER BY 
+    revenue_rank, total_revenue DESC;

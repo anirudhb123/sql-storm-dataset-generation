@@ -1,0 +1,101 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        p.AcceptedAnswerId
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+RecentPostVotes AS (
+    SELECT 
+        v.PostId,
+        v.VoteTypeId,
+        COUNT(*) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY 
+        v.PostId
+),
+CommentStats AS (
+    SELECT 
+        c.PostId,
+        COUNT(*) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostHistoryChanges AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT ph.Comment, ', ') AS Comments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId
+),
+EngagedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS ActivePosts,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(up.VoteCount, 0) AS TotalVotes,
+    COALESCE(cs.CommentCount, 0) AS TotalComments,
+    COALESCE(ph.LastEditDate, NULL) AS LastEdit,
+    COALESCE(ph.EditCount, 0) AS EditCount,
+    CASE 
+        WHEN rp.AcceptedAnswerId IS NOT NULL THEN 'Accepted' 
+        ELSE 'Not Accepted' 
+    END AS AcceptanceStatus,
+    CASE 
+        WHEN u.ActivePosts > 5 AND u.GoldBadges > 0 THEN 'Top Contributor' 
+        ELSE 'Standard Contributor' 
+    END AS ContributorLevel,
+    (SELECT COUNT(*) 
+     FROM Posts 
+     WHERE OwnerUserId = u.UserId AND PostTypeId = 1) AS TotalQuestions
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentPostVotes up ON rp.PostId = up.PostId
+LEFT JOIN 
+    CommentStats cs ON rp.PostId = cs.PostId
+LEFT JOIN 
+    PostHistoryChanges ph ON rp.PostId = ph.PostId
+LEFT JOIN 
+    EngagedUsers u ON rp.OwnerUserId = u.UserId
+WHERE 
+    rp.Rank = 1 
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 100;

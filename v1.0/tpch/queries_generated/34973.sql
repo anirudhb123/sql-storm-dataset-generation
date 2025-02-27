@@ -1,0 +1,52 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        s.s_nationkey, 
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT 
+        p.s_suppkey, 
+        p.s_name, 
+        p.s_acctbal, 
+        p.s_nationkey, 
+        sh.level + 1
+    FROM 
+        supplier_hierarchy sh
+    JOIN 
+        partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN 
+        supplier p ON ps.ps_partkey = p.ps_partkey
+    WHERE 
+        p.s_acctbal IS NOT NULL
+)
+
+SELECT 
+    n.n_name, 
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(o.o_totalprice) AS total_order_value,
+    STRING_AGG(DISTINCT CONCAT(DISTINCT s.s_name, ' (', s.s_acctbal, ')'), '; ') AS suppliers
+FROM 
+    nation n
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    supplier_hierarchy sh ON sh.s_nationkey = n.n_nationkey
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(o.o_totalprice) > 100000
+ORDER BY 
+    total_order_value DESC
+LIMIT 10;

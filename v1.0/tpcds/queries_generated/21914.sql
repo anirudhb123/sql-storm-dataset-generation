@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws_item_sk,
+        ws_order_number,
+        ws_qty,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_paid DESC) AS rank,
+        SUM(ws_net_paid) OVER (PARTITION BY ws_item_sk) AS total_sales,
+        CASE 
+            WHEN SUM(ws_net_paid) OVER (PARTITION BY ws_item_sk) > 10000 THEN 'High Performer'
+            ELSE 'Low Performer'
+        END AS performance_category
+    FROM web_sales
+),
+CustomerReturns AS (
+    SELECT
+        cr.returning_customer_sk,
+        COUNT(cr.returning_customer_sk) AS returns_count,
+        SUM(cr.return_quantity) AS total_returned_items
+    FROM catalog_returns cr
+    GROUP BY cr.returning_customer_sk
+),
+SalesAndReturns AS (
+    SELECT
+        cs.ws_item_sk,
+        cs.ws_order_number,
+        cs.ws_net_paid,
+        COALESCE(cr.returns_count, 0) AS returns_count,
+        COALESCE(cr.total_returned_items, 0) AS total_returned_items,
+        (cs.ws_net_paid - COALESCE(cr.total_returned_items, 0) * i.i_current_price) AS net_revenue
+    FROM RankedSales cs
+    LEFT JOIN CustomerReturns cr ON cs.ws_item_sk = cr.returning_customer_sk
+    JOIN item i ON cs.ws_item_sk = i.i_item_sk
+)
+SELECT
+    sr.ws_item_sk,
+    COUNT(sr.ws_order_number) AS total_orders,
+    AVG(sr.net_revenue) AS average_net_revenue,
+    MAX(sr.net_revenue) AS max_net_revenue,
+    MIN(sr.net_revenue) AS min_net_revenue,
+    SUM(CASE WHEN sr.returns_count > 0 THEN 1 ELSE 0 END) AS return_orders,
+    SUM(sr.total_returned_items) AS total_returned_items
+FROM SalesAndReturns sr
+GROUP BY sr.ws_item_sk
+HAVING AVG(sr.net_revenue) > 50
+   AND exists (SELECT 1 FROM customer c WHERE c.c_customer_sk = sr.ws_item_sk)
+ORDER BY average_net_revenue DESC
+LIMIT 10 OFFSET 5;

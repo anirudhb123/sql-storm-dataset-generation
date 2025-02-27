@@ -1,0 +1,87 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with Questions
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.JoinedDate,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,  -- Count UpVotes
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes  -- Count DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, 
+        p.Title
+)
+
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    up.TotalPosts,
+    up.TotalBadges,
+    ps.PostId,
+    ps.Title,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    rph.Level AS PostHierarchyLevel
+FROM 
+    UserReputation up
+JOIN 
+    Posts p ON up.UserId = p.OwnerUserId
+JOIN 
+    PostStats ps ON p.Id = ps.PostId
+LEFT JOIN 
+    RecursivePostHierarchy rph ON p.AcceptedAnswerId = rph.PostId
+WHERE 
+    up.Reputation > 100  -- Filter for users with reputation greater than 100
+ORDER BY 
+    up.Reputation DESC, 
+    ps.CommentCount DESC
+LIMIT 100;  -- Limit results to top 100

@@ -1,0 +1,83 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_within_nation,
+        SUM(ps.ps_supplycost) OVER (PARTITION BY ps.ps_partkey) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) OVER (PARTITION BY s.s_suppkey) AS unique_parts_supplied,
+        CASE 
+            WHEN SUM(ps.ps_availqty) OVER (PARTITION BY s.s_suppkey) IS NULL THEN 'No Quantity Available'
+            ELSE 'Quantity Available'
+        END AS availability_status
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+), HighValueSuppliers AS (
+    SELECT 
+        r.r_name AS region_name,
+        ns.n_name AS nation_name,
+        COUNT(DISTINCT rs.s_suppkey) AS total_suppliers,
+        AVG(rs.total_supply_cost) AS avg_supply_cost,
+        SUM(rs.unique_parts_supplied) AS total_unique_parts
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation ns ON ns.n_nationkey = rs.s_suppkey % (SELECT COUNT(*) FROM nation)
+    JOIN 
+        region r ON ns.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rank_within_nation <= 3 AND 
+        rs.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) -- average of all suppliers
+    GROUP BY 
+        r.r_name, ns.n_name
+), RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        YEAR(o.o_orderdate) AS order_year,
+        EXTRACT(MONTH FROM o.o_orderdate) AS order_month
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+), OrderLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        COUNT(DISTINCT l.l_partkey) AS distinct_parts_count
+    FROM 
+        lineitem l
+    JOIN 
+        RecentOrders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    h.region_name,
+    h.nation_name,
+    h.total_suppliers,
+    h.avg_supply_cost,
+    h.total_unique_parts,
+    SUM(oli.total_value) AS aggregated_order_value,
+    CASE 
+        WHEN SUM(oli.distinct_parts_count) > 0 THEN 
+            SUM(oli.total_value) / SUM(oli.distinct_parts_count)
+        ELSE 
+            NULL
+    END AS avg_order_value_per_part
+FROM 
+    HighValueSuppliers h
+LEFT JOIN 
+    OrderLineItems oli ON h.total_suppliers > 0 -- To force an outer join scenario
+WHERE 
+    h.avg_supply_cost IS NOT NULL OR h.total_unique_parts > 10
+GROUP BY 
+    h.region_name, h.nation_name, h.total_suppliers, h.avg_supply_cost, h.total_unique_parts
+ORDER BY 
+    h.region_name, h.total_suppliers DESC
+HAVING 
+    AVG(h.total_unique_parts) > 5
+   AND (h.total_suppliers > 1 OR h.avg_supply_cost IS NULL);

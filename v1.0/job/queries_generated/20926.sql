@@ -1,0 +1,75 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ka.name) AS aka_names,
+        COUNT(DISTINCT ci.person_id) AS num_actors,
+        AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order END) AS avg_order,
+        SUM(mk.keyword IS NOT NULL) AS keyword_count
+    FROM aka_title t
+    LEFT JOIN movie_keyword mk ON mk.movie_id = t.movie_id
+    LEFT JOIN cast_info ci ON ci.movie_id = t.movie_id
+    LEFT JOIN aka_name ka ON ka.person_id = ci.person_id
+    WHERE t.production_year IS NOT NULL
+    GROUP BY t.id
+), relevant_movies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.aka_names,
+        md.num_actors,
+        md.avg_order,
+        md.keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.num_actors DESC) AS rnk
+    FROM movie_details md
+    WHERE md.num_actors > 0 
+    AND md.keyword_count > 2 
+    AND md.production_year >= 2000
+), top_movies AS (
+    SELECT * FROM relevant_movies
+    WHERE rnk <= 5
+), cast_roles AS (
+    SELECT DISTINCT
+        ci.movie_id,
+        rt.role,
+        COUNT(*) OVER (PARTITION BY ci.movie_id, rt.role) AS role_count
+    FROM cast_info ci
+    JOIN role_type rt ON rt.id = ci.role_id
+    WHERE ci.role_id IS NOT NULL
+), formatted_movies AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.production_year,
+        tm.aka_names,
+        CASE 
+            WHEN role_count > 5 THEN 'Ensemble'
+            ELSE 'Featured'
+        END AS cast_type,
+        COALESCE(tm.num_actors, 0) AS actor_count,
+        tm.avg_order AS average_order
+    FROM top_movies tm
+    LEFT JOIN cast_roles cr ON cr.movie_id = tm.movie_id
+)
+
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.aka_names,
+    fm.cast_type,
+    fm.actor_count,
+    fm.average_order,
+    CASE 
+        WHEN fm.average_order IS NULL THEN 'No Order'
+        WHEN ROUND(fm.average_order) % 2 = 0 THEN 'Even Order'
+        ELSE 'Odd Order'
+    END AS order_descriptor,
+    (SELECT STRING_AGG(cp.name, ', ') 
+     FROM company_name cp 
+     JOIN movie_companies mc ON mc.movie_id = fm.movie_id AND mc.company_id = cp.imdb_id
+     WHERE cp.country_code ILIKE 'us%') AS producing_companies
+FROM formatted_movies fm
+WHERE fm.actor_count >= 2
+ORDER BY fm.production_year DESC, fm.actor_count DESC;

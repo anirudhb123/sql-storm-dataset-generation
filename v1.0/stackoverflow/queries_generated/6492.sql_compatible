@@ -1,0 +1,51 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankScore
+    FROM Posts p
+    WHERE p.PostTypeId = 1 AND p.CreationDate >= '2023-01-01'
+),
+UserDetails AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        b.Name AS BadgeName,
+        b.Class AS BadgeClass
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId AND b.Date >= '2023-01-01'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        ud.DisplayName,
+        ud.Reputation,
+        ud.Views,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId IN (2, 3)) AS VoteCount
+    FROM RankedPosts rp
+    JOIN UserDetails ud ON rp.OwnerUserId = ud.UserId
+    WHERE rp.RankScore <= 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.DisplayName,
+    tp.Reputation,
+    tp.Views,
+    tp.CommentCount,
+    tp.VoteCount,
+    (SELECT STRING_AGG(t.TagName, ', ')
+     FROM Tags t
+     JOIN Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))
+     WHERE p.Id = tp.PostId) AS Tags
+FROM TopPosts tp
+ORDER BY tp.VoteCount DESC, tp.CommentCount DESC;

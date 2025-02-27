@@ -1,0 +1,44 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal)
+        FROM supplier s2
+        WHERE s2.s_nationkey = s.s_nationkey
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+lineitem_totals AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY l.l_orderkey
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_totalprice, lt.total_price
+    FROM orders o
+    LEFT JOIN lineitem_totals lt ON o.o_orderkey = lt.l_orderkey
+),
+ranked_orders AS (
+    SELECT os.o_orderkey, os.o_totalprice, os.total_price, 
+           RANK() OVER (ORDER BY os.total_price DESC NULLS LAST) AS order_rank
+    FROM order_summary os
+)
+SELECT p.p_partkey, p.p_name, p.p_brand, COUNT(DISTINCT lo.o_orderkey) AS order_count,
+       SUM(COALESCE(lo.total_price, 0)) AS total_revenue,
+       SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+       MAX(CASE WHEN sh.level IS NOT NULL THEN 1 ELSE 0 END) AS has_high_account_balance
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders lo ON l.l_orderkey = lo.o_orderkey
+LEFT JOIN ranked_orders ro ON lo.o_orderkey = ro.o_orderkey
+LEFT JOIN supplier_hierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+WHERE p.p_size > 10 AND p.p_retailprice < 100.00
+GROUP BY p.p_partkey, p.p_name, p.p_brand
+HAVING COUNT(DISTINCT lo.o_orderkey) > 5
+ORDER BY total_revenue DESC, p.p_name;

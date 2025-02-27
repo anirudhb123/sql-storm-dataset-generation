@@ -1,0 +1,61 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1997-10-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+), SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        MAX(ps.ps_availqty) AS max_avail_qty
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+), NationalRevenue AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COALESCE(SUM(ro.total_revenue), 0) AS nation_revenue
+    FROM 
+        nation n
+    LEFT JOIN 
+        RankedOrders ro ON n.n_nationkey = (SELECT DISTINCT c.c_nationkey 
+                                               FROM customer c 
+                                               JOIN orders o ON c.c_custkey = o.o_custkey 
+                                               WHERE o.o_orderkey IN (SELECT o_orderkey FROM RankedOrders))
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    ns.n_nationkey,
+    ns.n_name,
+    ns.nation_revenue,
+    ss.avg_supply_cost,
+    ss.max_avail_qty,
+    CASE 
+        WHEN ns.nation_revenue > (SELECT AVG(nation_revenue) FROM NationalRevenue) THEN 'Above Average'
+        WHEN ns.nation_revenue < (SELECT AVG(nation_revenue) FROM NationalRevenue) THEN 'Below Average'
+        ELSE 'Average'
+    END AS revenue_category
+FROM 
+    NationalRevenue ns
+LEFT JOIN 
+    SupplierStats ss ON ss.s_suppkey = (SELECT ps.ps_suppkey 
+                                          FROM partsupp ps 
+                                          WHERE ps.ps_availqty > 50 
+                                          ORDER BY ps.ps_supplycost DESC
+                                          LIMIT 1);

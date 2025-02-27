@@ -1,0 +1,75 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+ClosedPostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(*) AS ClosedPostCount,
+        AVG(COALESCE(P.Score, 0)) AS AvgScore 
+    FROM 
+        Posts P
+    INNER JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        P.OwnerUserId
+),
+UserBadgeCounts AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges B
+    WHERE 
+        B.Class = 1 
+    GROUP BY 
+        B.UserId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(US.TotalUpvotes, 0) AS TotalUpvotes,
+    COALESCE(US.TotalDownvotes, 0) AS TotalDownvotes,
+    COALESCE(US.TotalPosts, 0) AS TotalPosts,
+    COALESCE(US.TotalComments, 0) AS TotalComments,
+    COALESCE(CPS.ClosedPostCount, 0) AS ClosedPostCount,
+    COALESCE(CPS.AvgScore, 0) AS AvgScore,
+    COALESCE(UBC.BadgeCount, 0) AS GoldBadgeCount,
+    CASE WHEN U.Id IS NULL THEN 'No Data' 
+         ELSE 'Data Present' 
+    END AS DataStatus
+FROM 
+    Users U
+LEFT JOIN 
+    UserStatistics US ON U.Id = US.UserId
+LEFT JOIN 
+    ClosedPostStatistics CPS ON U.Id = CPS.OwnerUserId
+LEFT JOIN 
+    UserBadgeCounts UBC ON U.Id = UBC.UserId
+WHERE 
+    (U.Reputation > 1000 OR U.Location IS NOT NULL)
+    AND (U.LastAccessDate >= DATEADD(MONTH, -6, '2024-10-01 12:34:56') OR U.EmailHash IS NULL)
+ORDER BY 
+    US.Rank, 
+    U.Reputation DESC
+LIMIT 100;

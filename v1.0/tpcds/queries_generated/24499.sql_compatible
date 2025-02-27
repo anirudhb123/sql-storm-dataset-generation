@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rank
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        (cd.cd_gender = 'F' OR cd.cd_gender IS NULL) 
+        AND c.c_birth_year >= 1980
+    GROUP BY ws.web_site_sk, ws.web_site_id
+),
+MaxReturns AS (
+    SELECT 
+        cr.refunded_customer_sk,
+        COUNT(cr.cr_order_number) AS total_returns,
+        SUM(cr.cr_return_amount) AS total_return_amount
+    FROM catalog_returns cr
+    GROUP BY cr.refunded_customer_sk
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(COALESCE(return_summary.total_returns, 0)) AS num_returns,
+        SUM(COALESCE(return_summary.total_return_amount, 0)) AS total_returned_amount,
+        COALESCE(cd.cd_marital_status, 'Unknown') AS marital_status,
+        CASE 
+            WHEN cd.cd_dep_count IS NULL THEN 'No Dependents'
+            WHEN cd.cd_dep_count > 0 THEN 'Has Dependents'
+            ELSE 'No Dependents'
+        END AS dependency_status
+    FROM customer c
+    LEFT JOIN MaxReturns return_summary ON c.c_customer_sk = return_summary.refunded_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c.c_customer_sk, cd.cd_marital_status, cd.cd_dep_count
+)
+SELECT 
+    s.web_site_id,
+    cs.c_customer_sk,
+    cs.marital_status,
+    cs.dependency_status,
+    rs.total_quantity,
+    rs.total_revenue,
+    cs.num_returns,
+    cs.total_returned_amount,
+    CASE 
+        WHEN cs.total_returned_amount > 0 THEN 'Active Returning Customer'
+        ELSE 'New or Non-Returning Customer'
+    END AS customer_type
+FROM CustomerStats cs
+JOIN RankedSales rs ON cs.c_customer_sk = rs.web_site_sk 
+JOIN web_site s ON s.web_site_sk = rs.web_site_sk
+WHERE s.web_class NOT LIKE '%Discount%' 
+ORDER BY rs.total_revenue DESC, cs.num_returns ASC
+LIMIT 100;

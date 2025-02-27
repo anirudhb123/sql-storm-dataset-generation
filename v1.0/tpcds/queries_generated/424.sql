@@ -1,0 +1,46 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        AVG(sr_return_qty) AS avg_return_qty
+    FROM store_returns
+    GROUP BY sr_customer_sk
+), 
+HighReturnCustomers AS (
+    SELECT 
+        cr.sr_customer_sk,
+        cr.total_returns,
+        cr.total_return_amount,
+        (SELECT cd_gender FROM customer_demographics WHERE cd_demo_sk = c.c_current_cdemo_sk) AS gender,
+        (SELECT ca_city FROM customer_address WHERE ca_address_sk = c.c_current_addr_sk) AS city
+    FROM CustomerReturns cr
+    JOIN customer c ON cr.sr_customer_sk = c.c_customer_sk
+    WHERE cr.total_returns > 5
+), 
+ItemSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM web_sales ws
+    JOIN time_dim td ON ws.ws_sold_date_sk = td.d_date_sk
+    WHERE td.d_year = 2023
+    GROUP BY ws.ws_item_sk
+)
+SELECT 
+    hrc.sr_customer_sk,
+    hrc.total_returns,
+    hrc.total_return_amount,
+    hrc.gender,
+    hrc.city,
+    is.total_sold,
+    is.avg_sales_price,
+    is.total_net_profit
+FROM HighReturnCustomers hrc
+LEFT JOIN ItemSales is ON hrc.sr_customer_sk = is.ws_item_sk
+WHERE is.total_net_profit IS NOT NULL
+ORDER BY hrc.total_return_amount DESC
+LIMIT 100;

@@ -1,0 +1,80 @@
+WITH RecursivePostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01' as date) - INTERVAL '1 year')
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryLast AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        MAX(ph.CreationDate) OVER (PARTITION BY ph.PostId) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+),
+FinalStats AS (
+    SELECT 
+        p.Title,
+        ps.PostId,
+        ps.Score,
+        ps.AnswerCount,
+        ps.ViewCount,
+        ub.UserId,
+        ub.TotalBadges,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        ph.LastEditDate,
+        DENSE_RANK() OVER (ORDER BY ps.Score DESC) AS ScoreRank
+    FROM 
+        RecursivePostStats ps
+    JOIN 
+        Users u ON ps.OwnerUserId = u.Id
+    JOIN 
+        UserBadges ub ON ub.UserId = ps.OwnerUserId
+    LEFT JOIN 
+        PostHistoryLast ph ON ps.PostId = ph.PostId
+    WHERE 
+        ps.rn = 1   
+)
+SELECT 
+    fs.Title,
+    fs.Score,
+    fs.AnswerCount,
+    fs.ViewCount,
+    fs.TotalBadges,
+    fs.GoldBadges,
+    fs.SilverBadges,
+    fs.BronzeBadges,
+    fs.LastEditDate
+FROM 
+    FinalStats fs
+WHERE 
+    fs.TotalBadges > 0 OR fs.Score > 50  
+ORDER BY 
+    fs.ScoreRank ASC, fs.Score DESC;

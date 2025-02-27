@@ -1,0 +1,90 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        t.title, 
+        COALESCE(m1.title, 'No Link') AS linked_title,
+        0 AS level
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_link ml ON t.id = ml.movie_id
+    LEFT JOIN 
+        aka_title m1 ON ml.linked_movie_id = m1.id
+    WHERE 
+        t.production_year IS NOT NULL AND t.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        t.title,
+        COALESCE(m1.title, 'No Link') AS linked_title,
+        level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title t ON ml.movie_id = t.id
+    JOIN 
+        movie_hierarchy mh ON mh.linked_title = t.title
+    LEFT JOIN 
+        aka_title m1 ON ml.linked_movie_id = m1.id
+),
+actor_performance AS (
+    SELECT 
+        p.id AS person_id,
+        ak.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count,
+        MAX(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_notes
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ci.movie_id
+    JOIN 
+        title t ON mh.movie_id = t.id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        p.id, ak.name
+),
+detailed_stats AS (
+    SELECT 
+        movie_id,
+        title,
+        ROW_NUMBER() OVER (PARTITION BY movie_id ORDER BY movie_count DESC) AS actor_rank,
+        AVG(movie_count) OVER (PARTITION BY movie_id) AS avg_actor_count,
+        MAX(has_notes) AS has_notes
+    FROM 
+        actor_performance
+    JOIN 
+        movie_hierarchy mh ON actor_performance.movie_id = mh.movie_id
+    WHERE 
+        actor_count >= 1
+)
+
+SELECT 
+    m.id AS movie_id,
+    m.title,
+    mh.linked_title,
+    ds.actor_rank,
+    ds.avg_actor_count,
+    CASE 
+        WHEN ds.has_notes = 1 THEN 'Has Notes' 
+        ELSE 'No Notes' 
+    END AS notes_status,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors
+FROM 
+    movie_hierarchy mh
+JOIN 
+    title m ON mh.movie_id = m.id
+LEFT JOIN 
+    actor_performance ak ON ak.movie_id = mh.movie_id
+LEFT JOIN 
+    detailed_stats ds ON ds.movie_id = mh.movie_id
+GROUP BY 
+    m.id, m.title, mh.linked_title, ds.actor_rank, ds.avg_actor_count, ds.has_notes
+HAVING 
+    COUNT(ak.person_id) > 3
+ORDER BY 
+    m.production_year DESC, ds.avg_actor_count DESC;

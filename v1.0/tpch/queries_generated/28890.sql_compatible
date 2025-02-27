@@ -1,0 +1,55 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_name ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        LENGTH(p.p_comment) > 10 AND
+        p.p_size BETWEEN 1 AND 20
+),
+PopularNations AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name
+    HAVING 
+        COUNT(DISTINCT s.s_suppkey) > 5
+),
+TopOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    ORDER BY 
+        total_revenue DESC
+    LIMIT 10
+)
+SELECT 
+    rp.p_name,
+    rp.p_retailprice,
+    pn.n_name AS popular_nation,
+    to.o_orderkey,
+    to.total_revenue
+FROM 
+    RankedParts rp
+JOIN 
+    PopularNations pn ON rp.price_rank = 1
+JOIN 
+    TopOrders to ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost < 50)
+ORDER BY 
+    rp.p_retailprice DESC, pn.supplier_count ASC;

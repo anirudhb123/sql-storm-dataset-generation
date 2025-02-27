@@ -1,0 +1,40 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+AggregatedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, c.c_nationkey
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+),
+PartSales AS (
+    SELECT li.l_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS net_sales
+    FROM lineitem li
+    JOIN AggregatedOrders ao ON li.l_orderkey = ao.o_orderkey
+    GROUP BY li.l_orderkey
+),
+SupplierRanks AS (
+    SELECT rs.s_suppkey, rs.s_name, rs.total_cost, 
+           RANK() OVER (PARTITION BY ao.c_nationkey ORDER BY rs.total_cost DESC) AS supplier_rank
+    FROM RankedSuppliers rs
+    JOIN AggregatedOrders ao ON rs.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+        WHERE li.l_orderkey IN (SELECT o_orderkey FROM AggregatedOrders)
+    )
+)
+SELECT sr.s_name, sr.total_cost, ps.net_sales, sr.supplier_rank
+FROM SupplierRanks sr
+JOIN PartSales ps ON sr.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+    JOIN AggregatedOrders ao ON li.l_orderkey = ao.o_orderkey
+    WHERE ao.c_nationkey IS NOT NULL
+)
+WHERE sr.supplier_rank <= 5
+ORDER BY sr.supplier_rank ASC, ps.net_sales DESC;

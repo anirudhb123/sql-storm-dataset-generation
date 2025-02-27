@@ -1,0 +1,73 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        c.c_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2023-10-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name
+),
+TopCustomerRevenue AS (
+    SELECT 
+        r.r_name,
+        SUM(r.total_revenue) AS regional_revenue
+    FROM 
+        RankedOrders r
+    JOIN 
+        nation n ON r.c_nationkey = n.n_nationkey
+    JOIN 
+        region rg ON n.n_regionkey = rg.r_regionkey
+    WHERE 
+        r.rank <= 3
+    GROUP BY 
+        r.r_name
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+ProductPerformance AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(sp.total_supply_cost, 0) AS total_supply_cost,
+        COUNT(DISTINCT l.l_orderkey) AS order_count,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_order_value
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN 
+        SupplierStats sp ON p.p_partkey = sp.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, sp.total_supply_cost
+)
+SELECT 
+    pp.p_partkey,
+    pp.p_name,
+    pp.total_supply_cost,
+    pp.order_count,
+    pp.avg_order_value,
+    tr.regional_revenue
+FROM 
+    ProductPerformance pp
+LEFT JOIN 
+    TopCustomerRevenue tr ON pp.order_count > 5
+ORDER BY 
+    pp.avg_order_value DESC, pp.p_partkey;

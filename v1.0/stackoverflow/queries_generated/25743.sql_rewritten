@@ -1,0 +1,47 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS EditCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName)
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title
+),
+RankedResults AS (
+    SELECT 
+        rp.*,
+        (Upvotes - Downvotes) AS Score,
+        RANK() OVER (ORDER BY (Upvotes - Downvotes) DESC, CommentCount DESC) AS PostRank
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    PostId,
+    Title,
+    Tags,
+    Upvotes,
+    Downvotes,
+    Score,
+    PostRank,
+    EditCount
+FROM 
+    RankedResults
+WHERE 
+    PostRank <= 10
+ORDER BY 
+    Score DESC, Upvotes DESC;

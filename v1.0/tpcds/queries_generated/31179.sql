@@ -1,0 +1,100 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT 
+        i_item_sk,
+        i_item_id,
+        i_item_desc,
+        i_brand,
+        i_current_price,
+        i_class,
+        i_category,
+        1 AS level
+    FROM 
+        item
+    WHERE 
+        i_current_price > 0
+    
+    UNION ALL
+    
+    SELECT 
+        ih.i_item_sk,
+        ih.i_item_id,
+        ih.i_item_desc,
+        ih.i_brand,
+        ih.i_current_price,
+        ih.i_class,
+        ih.i_category,
+        ih.level + 1
+    FROM 
+        item_hierarchy ih
+    JOIN 
+        item i ON i.i_item_sk = ih.i_item_sk - 1
+    WHERE 
+        ih.level < 5
+),
+customer_return_info AS (
+    SELECT 
+        sr.customer_sk,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt,
+        COUNT(sr_ticket_number) AS total_returns
+    FROM 
+        store_returns sr
+    JOIN 
+        customer c ON sr.sr_customer_sk = c.c_customer_sk
+    WHERE 
+        sr_return_quantity > 0
+    GROUP BY 
+        sr.customer_sk
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_net_paid_inc_tax) AS total_sales_amt,
+        COUNT(ws_order_number) AS total_sales_count
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk IS NOT NULL
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(cs.total_sales_amt, 0) AS total_sales_amt,
+    COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+    COALESCE(cs.total_sales_count, 0) AS total_sales_count,
+    COALESCE(cr.total_returns, 0) AS total_returns,
+    ih.i_item_desc,
+    ih.i_brand,
+    ih.i_current_price
+FROM 
+    customer c
+LEFT JOIN 
+    sales_summary cs ON c.c_customer_sk = cs.customer_sk
+LEFT JOIN 
+    customer_return_info cr ON c.c_customer_sk = cr.customer_sk
+JOIN 
+    item_hierarchy ih ON ih.i_item_sk = (
+        SELECT 
+            i_item_sk 
+        FROM 
+            item 
+        WHERE 
+            i_current_price = (
+                SELECT 
+                    MAX(i_current_price) 
+                FROM 
+                    item 
+                WHERE 
+                    i_category = 'Electronics' AND 
+                    i_class = 'Gadgets'
+            ) 
+        LIMIT 1
+    )
+WHERE 
+    c.c_birth_year BETWEEN 1970 AND 1990
+ORDER BY 
+    total_sales_amt DESC, total_return_amt ASC
+LIMIT 100;

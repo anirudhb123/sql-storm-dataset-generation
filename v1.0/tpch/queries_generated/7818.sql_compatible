@@ -1,0 +1,35 @@
+
+WITH SupplierPartDetails AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_supplycost, ps.ps_availqty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+NationRegionDetails AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT nr.r_name AS region, nr.n_name AS nation, spd.s_name AS supplier, 
+       COUNT(DISTINCT c.c_custkey) AS total_customers, 
+       SUM(spd.ps_availqty) AS total_available_quantity, 
+       SUM(spd.ps_supplycost * spd.ps_availqty) AS total_supply_cost,
+       cs.total_spent AS average_spent_per_customer
+FROM SupplierPartDetails spd
+JOIN NationRegionDetails nr ON spd.s_suppkey IN (
+    SELECT DISTINCT s.s_suppkey 
+    FROM supplier s 
+    JOIN nation n ON s.s_nationkey = n.n_nationkey 
+    WHERE n.n_name = nr.n_name
+)
+JOIN CustomerOrderSummary cs ON cs.total_spent > 1000
+JOIN customer c ON c.c_custkey = cs.c_custkey
+GROUP BY nr.r_name, nr.n_name, spd.s_name, cs.total_spent
+HAVING SUM(spd.ps_availqty) > 100
+ORDER BY nr.r_name, nr.n_name, spd.s_name;

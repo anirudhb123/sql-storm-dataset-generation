@@ -1,0 +1,51 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_type,
+        p.p_brand,
+        p.p_mfgr,
+        p.p_size,
+        p.p_container,
+        PERCENT_RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+), 
+NationSupplier AS (
+    SELECT 
+        n.n_name,
+        s.s_name,
+        s.s_acctbal,
+        STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > 5000
+    GROUP BY 
+        n.n_name, s.s_name, s.s_acctbal
+    HAVING 
+        COUNT(DISTINCT p.p_partkey) > 5
+)
+SELECT 
+    rp.p_partkey,
+    rp.p_name,
+    rp.p_type,
+    ns.n_name,
+    ns.s_name,
+    ns.part_names,
+    rp.price_rank
+FROM 
+    RankedParts rp
+JOIN 
+    NationSupplier ns ON LENGTH(rp.p_name) - LENGTH(REPLACE(rp.p_name, 'a', '')) > 2
+ORDER BY 
+    rp.price_rank DESC, ns.n_name, ns.s_name;

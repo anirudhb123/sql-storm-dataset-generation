@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Body, 
+        p.Tags, 
+        p.CreationDate, 
+        p.ViewCount, 
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) FILTER (WHERE a.PostTypeId = 2) AS AnswerCount,
+        RANK() OVER (PARTITION BY ARRAY_AGG(t.TagName ORDER BY t.TagName) ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        (SELECT PostId, unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS TagName FROM Posts) t ON p.Id = t.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation
+),
+
+PopularTags AS (
+    SELECT 
+        TagName, 
+        COUNT(*) AS TagCount 
+    FROM 
+        (SELECT unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS TagName FROM Posts) t
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+
+FinalBenchmark AS (
+    SELECT 
+        rp.Title, 
+        rp.Body, 
+        rp.OwnerDisplayName, 
+        rp.OwnerReputation,
+        rp.ViewCount, 
+        rp.CommentCount, 
+        rp.AnswerCount, 
+        pt.TagName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PopularTags pt ON pt.TagName = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags) - 2), '><'))
+    WHERE 
+        rp.ViewRank <= 5
+)
+
+SELECT 
+    Title, 
+    Body, 
+    OwnerDisplayName, 
+    OwnerReputation, 
+    ViewCount, 
+    CommentCount, 
+    AnswerCount 
+FROM 
+    FinalBenchmark
+ORDER BY 
+    ViewCount DESC;

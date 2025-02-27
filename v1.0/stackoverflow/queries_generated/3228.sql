@@ -1,0 +1,57 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON c.UserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        Upvotes,
+        Downvotes,
+        PostCount,
+        CommentCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM UserActivity
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.Upvotes - u.Downvotes AS NetVotes,
+    ARRAY_AGG(DISTINCT p.Title) AS TopPosts,
+    ARRAY_AGG(DISTINCT p.CreationDate) AS PostDates,
+    COALESCE(SUM(CASE WHEN p.Score > 100 THEN 1 ELSE 0 END), 0) AS HighScoredPosts,
+    CASE 
+        WHEN u.Reputation >= 1000 THEN 'Gold' 
+        WHEN u.Reputation >= 500 THEN 'Silver' 
+        ELSE 'Bronze' 
+    END AS Badge
+FROM TopUsers u
+LEFT JOIN PopularPosts p ON u.UserId = p.OwnerUserId
+WHERE u.Rank <= 10
+GROUP BY u.UserId, u.DisplayName, u.Reputation
+ORDER BY u.Reputation DESC;

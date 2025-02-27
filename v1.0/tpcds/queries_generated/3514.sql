@@ -1,0 +1,46 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2022
+    GROUP BY 
+        ws.ws_item_sk
+),
+TopSellingItems AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_revenue,
+        i.i_item_desc
+    FROM 
+        SalesData sd
+    JOIN 
+        item i ON sd.ws_item_sk = i.i_item_sk
+    WHERE 
+        sd.rank <= 10
+)
+SELECT 
+    tsi.i_item_desc,
+    tsi.total_quantity,
+    tsi.total_revenue,
+    ca.ca_city,
+    ca.ca_state
+FROM 
+    TopSellingItems tsi
+LEFT JOIN 
+    customer c ON (tsi.total_quantity > (SELECT AVG(total_quantity) FROM TopSellingItems))
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+WHERE 
+    ca.ca_state IS NOT NULL
+ORDER BY 
+    tsi.total_revenue DESC
+FETCH FIRST 20 ROWS ONLY;

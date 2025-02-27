@@ -1,0 +1,73 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_paid_inc_ship) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid_inc_ship) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk 
+                                FROM date_dim 
+                                WHERE d_year = 2023 AND d_month_seq IN (4, 5, 6))
+    GROUP BY 
+        ws.web_site_sk
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE 
+            WHEN cd.cd_purchase_estimate > 500 THEN 'High'
+            WHEN cd.cd_purchase_estimate BETWEEN 100 AND 500 THEN 'Medium'
+            ELSE 'Low'
+        END AS purchase_category
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_gender IS NOT NULL AND cd.cd_marital_status IS NOT NULL
+), 
+StoreSalesAggregated AS (
+    SELECT 
+        ss.ss_store_sk, 
+        SUM(ss.ss_net_paid) AS total_store_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.ss_sold_date_sk IN (SELECT d_date_sk 
+                                FROM date_dim 
+                                WHERE d_current_month = 'Y' OR d_current_year = 'Y')
+    GROUP BY 
+        ss.ss_store_sk
+)
+
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COALESCE(cs.total_sales, 0) AS online_sales,
+    COALESCE(ss.total_store_sales, 0) AS in_store_sales,
+    cd.purchase_category,
+    CASE 
+        WHEN cs.total_sales IS NULL AND ss.total_store_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END AS sales_status
+FROM 
+    customer_address ca
+LEFT JOIN 
+    RankedSales cs ON ca.ca_address_sk = cs.web_site_sk
+LEFT JOIN 
+    StoreSalesAggregated ss ON ca.ca_address_sk = ss.ss_store_sk
+LEFT JOIN 
+    CustomerDemographics cd ON cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk 
+                                                 FROM customer c 
+                                                 WHERE c.c_current_addr_sk = ca.ca_address_sk
+                                                 LIMIT 1)
+WHERE 
+    ca.ca_city IS NOT NULL AND 
+    (cs.total_sales IS NOT NULL OR ss.total_store_sales IS NOT NULL)
+ORDER BY 
+    online_sales DESC, in_store_sales ASC
+LIMIT 100
+OFFSET 50;

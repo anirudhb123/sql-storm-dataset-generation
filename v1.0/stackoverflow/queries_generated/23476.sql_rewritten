@@ -1,0 +1,71 @@
+WITH AnswerStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS TotalAnswers,
+        AVG(p.Score) AS AvgAnswerScore,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2 
+    GROUP BY 
+        p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RankedUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        us.TotalAnswers,
+        us.AvgAnswerScore,
+        us.AcceptedAnswers,
+        us.TotalViews,
+        ub.BadgeNames,
+        RANK() OVER (ORDER BY us.TotalAnswers DESC, us.AvgAnswerScore DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        AnswerStats us ON u.Id = us.OwnerUserId
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    WHERE 
+        u.Reputation > 1000 
+)
+
+SELECT 
+    r.UserId,
+    r.DisplayName,
+    r.TotalAnswers,
+    r.AcceptedAnswers,
+    r.AvgAnswerScore,
+    r.TotalViews,
+    COALESCE(r.BadgeNames, 'No badges') AS BadgeNames,
+    CASE 
+        WHEN r.UserRank <= 10 THEN 'Top Contributor'
+        WHEN r.UserRank BETWEEN 11 AND 50 THEN 'Promising Contributor'
+        ELSE 'Regular Contributor'
+    END AS ContributorLevel,
+    COUNT(c.Id) AS TotalComments
+FROM 
+    RankedUsers r
+LEFT JOIN 
+    Comments c ON c.UserId = r.UserId
+GROUP BY 
+    r.UserId, r.DisplayName, r.TotalAnswers, r.AcceptedAnswers, r.AvgAnswerScore, r.TotalViews, r.BadgeNames, r.UserRank
+ORDER BY 
+    r.UserRank
+FETCH FIRST 20 ROWS ONLY;

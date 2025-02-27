@@ -1,0 +1,55 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id       
+)
+
+SELECT 
+    mk.keyword,
+    COUNT(DISTINCT ch.id) AS char_count,
+    STRING_AGG(DISTINCT ka.name, '; ') AS aka_names,
+    AVG(CASE WHEN ci.person_role_id IS NULL THEN 0 ELSE 1 END) AS avg_roles,
+    SUM(mh.level) AS total_link_levels,
+    MAX(CASE 
+        WHEN mt.production_year = 2023 THEN 'New Release' 
+        WHEN mt.production_year < 2000 THEN 'Classic' 
+        ELSE 'Modern' 
+    END) AS movie_category
+FROM 
+    movie_keyword mk
+LEFT JOIN 
+    aka_title at ON mk.movie_id = at.id
+LEFT JOIN 
+    cast_info ci ON at.id = ci.movie_id
+LEFT JOIN 
+    char_name ch ON ci.person_id = ch.imdb_id
+LEFT JOIN 
+    MovieHierarchy mh ON at.id = mh.movie_id
+GROUP BY 
+    mk.keyword
+HAVING 
+    COUNT(DISTINCT ci.id) > 5
+ORDER BY 
+    char_count DESC, 
+    total_link_levels DESC;

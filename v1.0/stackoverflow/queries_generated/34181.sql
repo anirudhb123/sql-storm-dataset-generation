@@ -1,0 +1,110 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+),
+TagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        MAX(p.Score) AS MaxPostScore,
+        MIN(p.Score) AS MinPostScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' + t.TagName + '%'
+    GROUP BY 
+        t.Id, t.TagName
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+RecursiveTagDetail AS (
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.ExcerptPostId,
+        t.WikiPostId,
+        1 AS Level
+    FROM 
+        Tags t 
+    WHERE 
+        t.IsRequired = 1
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.ExcerptPostId,
+        t.WikiPostId,
+        Level + 1
+    FROM 
+        Tags t 
+    INNER JOIN 
+        RecursiveTagDetail r ON t.Id = r.Id
+    WHERE 
+        r.Level < 5
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    pvs.VoteCount,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    ts.TagName,
+    ts.PostCount,
+    ts.MaxPostScore,
+    ts.MinPostScore,
+    COALESCE(cp.Comment, 'No Comments') AS CloseComment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteSummary pvs ON rp.PostId = pvs.PostId
+LEFT JOIN 
+    TagStats ts ON ts.TagId = (
+        SELECT TOP 1 TagId 
+        FROM Tags 
+        WHERE Tags.TagName IN (SELECT value FROM STRING_SPLIT(rp.Tags, ','))
+    )
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC;

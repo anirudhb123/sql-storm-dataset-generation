@@ -1,0 +1,80 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.kind_id ORDER BY a.production_year DESC) AS rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        c.country_code IS NOT NULL
+),
+CompleteCast AS (
+    SELECT 
+        cc.movie_id,
+        COUNT(cc.subject_id) AS total_cast
+    FROM 
+        complete_cast cc
+    GROUP BY 
+        cc.movie_id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ' ORDER BY k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    p.name AS leading_actor,
+    mc.company_name,
+    mc.company_type,
+    mk.keywords,
+    cc.total_cast,
+    CASE 
+        WHEN cc.total_cast > 10 THEN 'Large Cast'
+        WHEN cc.total_cast BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = rm.id
+LEFT JOIN 
+    aka_name p ON ci.person_id = p.person_id AND p.md5sum IS NOT NULL
+LEFT JOIN 
+    MovieCompanies mc ON rm.id = mc.movie_id
+LEFT JOIN 
+    CompleteCast cc ON rm.id = cc.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON rm.id = mk.movie_id
+WHERE 
+    rm.rank = 1 AND
+    (rm.kind_id IS NOT NULL OR rm.production_year > 2000) AND
+    (p.name IS NOT NULL OR EXISTS (
+        SELECT 1 FROM aka_name
+        WHERE person_id = ci.person_id AND name IS NOT NULL
+    ))
+ORDER BY 
+    rm.production_year DESC,
+    mc.company_name NULLS LAST;

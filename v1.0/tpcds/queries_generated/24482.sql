@@ -1,0 +1,76 @@
+
+WITH RankedWebSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_ext_sales_price DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+TopWebSales AS (
+    SELECT 
+        rws.web_site_sk,
+        rws.ws_order_number,
+        rws.ws_ext_sales_price
+    FROM 
+        RankedWebSales rws
+    WHERE 
+        rws.rank <= 10
+),
+StoreSalesSummary AS (
+    SELECT 
+        ss.ss_store_sk,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        COUNT(ss.ss_order_number) AS total_orders,
+        AVG(ss.ss_ext_sales_price) AS avg_sales_price
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.ss_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_dow IN (1, 7))  
+    GROUP BY 
+        ss.ss_store_sk
+),
+CombinedSales AS (
+    SELECT 
+        'Web' AS sale_type,
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_ext_sales_price
+    FROM 
+        TopWebSales ws
+    UNION ALL
+    SELECT 
+        'Store' AS sale_type,
+        ss.ss_store_sk,
+        ss.ss_ticket_number,
+        ss.total_sales AS ws_ext_sales_price
+    FROM 
+        StoreSalesSummary ss
+)
+SELECT 
+    sale_type,
+    site_or_store_id,
+    SUM(ws_ext_sales_price) AS total_sales_amount,
+    CASE 
+        WHEN COUNT(*) = 0 THEN 0
+        ELSE AVG(ws_ext_sales_price)
+    END AS avg_sales_amount,
+    MAX(ws_ext_sales_price) AS max_sales_amount,
+    MIN(ws_ext_sales_price) AS min_sales_amount
+FROM (
+    SELECT 
+        sale_type,
+        web_site_sk AS site_or_store_id,
+        ws_ext_sales_price
+    FROM 
+        CombinedSales
+) AS combined
+GROUP BY 
+    sale_type, site_or_store_id
+HAVING 
+    MAX(ws_ext_sales_price) IS NOT NULL OR MIN(ws_ext_sales_price) IS NOT NULL
+ORDER BY 
+    sale_type, total_sales_amount DESC;

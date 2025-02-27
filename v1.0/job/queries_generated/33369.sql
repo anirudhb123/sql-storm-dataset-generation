@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_id
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    mc.company_type_id,
+    ct.kind AS company_type,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY at.production_year DESC) AS row_num,
+    SUM(CASE WHEN pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birthdate') THEN 1 ELSE 0 END) 
+        OVER (PARTITION BY ak.person_id) AS has_birthdate,
+    COUNT(DISTINCT mk.keyword) OVER (PARTITION BY ak.name) AS keyword_count,
+    COUNT(DISTINCT mh.movie_id) AS related_movies_count
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.movie_id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    person_info pi ON ak.person_id = pi.person_id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    MovieHierarchy mh ON mh.movie_id = at.id
+WHERE 
+    ak.name IS NOT NULL
+    AND (at.production_year >= 2000 OR at.production_year IS NULL)
+    AND (ci.note IS NULL OR ci.note NOT LIKE '%cameo%')
+ORDER BY 
+    ak.name, at.production_year DESC;

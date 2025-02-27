@@ -1,0 +1,60 @@
+WITH UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(VB.BountyAmount) AS TotalBounties,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Votes VB ON U.Id = VB.UserId AND VB.VoteTypeId = 8  
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        P.LastActivityDate,
+        CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END AS HasAcceptedAnswer,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankByScore
+    FROM 
+        Posts P
+)
+SELECT 
+    UE.DisplayName,
+    UE.Reputation,
+    UE.TotalPosts,
+    UE.TotalComments,
+    UE.TotalBounties,
+    UE.TotalUpVotes,
+    UE.TotalDownVotes,
+    PA.Title,
+    PA.Score,
+    PA.ViewCount,
+    PA.CreationDate,
+    PA.LastActivityDate,
+    PA.HasAcceptedAnswer
+FROM 
+    UserEngagement UE
+LEFT JOIN 
+    PostAnalytics PA ON UE.UserId = PA.OwnerUserId
+WHERE 
+    (UE.TotalPosts > 0 OR UE.TotalComments > 0) 
+    AND PA.RankByScore <= 5
+ORDER BY 
+    UE.Reputation DESC, PA.Score DESC
+LIMIT 50;

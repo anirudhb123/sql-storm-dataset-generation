@@ -1,0 +1,72 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+SalesByRegion AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(coalesce(c.total_sales, 0)) AS total_sales_region
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        customerorders co ON co.c_custkey = c.c_custkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    ss.s_name AS top_supplier,
+    r.nation_name,
+    r.total_sales_region
+FROM 
+    part p
+LEFT JOIN 
+    RankedSuppliers ss ON ss.s_suppkey = (
+        SELECT s.s_suppkey
+        FROM RankedSuppliers
+        WHERE ps_partkey = p.p_partkey AND SupplierRank = 1
+    )
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    SalesByRegion r ON r.nation_name = (
+        SELECT n.n_name
+        FROM nation n
+        JOIN supplier s ON s.s_nationkey = n.n_nationkey
+        WHERE s.s_suppkey = ss.s_suppkey
+        LIMIT 1
+    )
+WHERE 
+    p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice) 
+        FROM part p2
+    )
+ORDER BY 
+    total_sales_region DESC NULLS LAST;

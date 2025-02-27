@@ -1,0 +1,52 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_sold_date_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_item_sk, ws_sold_date_sk
+),
+TopItems AS (
+    SELECT 
+        ws_item_sk,
+        total_net_profit,
+        RANK() OVER (ORDER BY total_net_profit DESC) AS profit_rank
+    FROM RankedSales
+    WHERE rank = 1
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_id, 
+        cd.cd_gender, 
+        COUNT(ws_order_number) AS order_count, 
+        SUM(ws_net_paid) AS total_spent
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c.c_customer_id, cd.cd_gender
+),
+HighValueCustomers AS (
+    SELECT 
+        c.customer_id, 
+        cs.order_count, 
+        cs.total_spent,
+        DENSE_RANK() OVER (ORDER BY total_spent DESC) AS customer_rank
+    FROM CustomerStats cs
+    JOIN customer c ON cs.c_customer_id = c.c_customer_id
+    WHERE cs.total_spent > 1000
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    ti.profit_rank,
+    hvc.customer_id,
+    hvc.order_count,
+    hvc.total_spent
+FROM item i
+JOIN TopItems ti ON i.i_item_sk = ti.ws_item_sk
+FULL OUTER JOIN HighValueCustomers hvc ON hvc.order_count > 0
+WHERE (ti.profit_rank <= 10 OR hvc.total_spent IS NOT NULL)
+ORDER BY ti.profit_rank ASC, hvc.total_spent DESC;

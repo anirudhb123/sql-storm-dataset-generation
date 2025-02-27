@@ -1,0 +1,75 @@
+WITH RankedMovies AS (
+    SELECT
+        t.title,
+        t.production_year,
+        COUNT(c.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS rank
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info c ON t.id = c.movie_id
+    GROUP BY
+        t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT
+        *
+    FROM
+        RankedMovies
+    WHERE
+        cast_count > 5
+),
+MovieKeywords AS (
+    SELECT
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword m
+    JOIN
+        keyword k ON m.keyword_id = k.id
+    GROUP BY
+        m.movie_id
+),
+CompanyInfo AS (
+    SELECT
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ' | ') AS companies,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY
+        mc.movie_id
+)
+SELECT
+    f.title,
+    f.production_year,
+    f.cast_count,
+    k.keywords,
+    c.companies,
+    c.company_types
+FROM
+    FilteredMovies f
+LEFT JOIN
+    MovieKeywords k ON f.title = (SELECT title FROM aka_title WHERE id = f.movie_id)
+LEFT JOIN
+    CompanyInfo c ON f.title = (SELECT title FROM aka_title WHERE id = c.movie_id)
+WHERE
+    (LOWER(f.title) LIKE '%the%' OR f.production_year > 2000)
+    AND (f.cast_count IS NOT NULL OR f.production_year IS NULL)
+ORDER BY
+    f.production_year DESC,
+    f.cast_count DESC;
+
+In this complex SQL query:
+
+- We utilize Common Table Expressions (CTEs) to segment data effectively.
+- The `RankedMovies` CTE calculates the number of cast members for movies grouped by production year and ranks them.
+- The `FilteredMovies` CTE filters the ranked movies to only include those with more than five cast members.
+- The `MovieKeywords` CTE aggregates keywords associated with films into a comma-separated string.
+- The `CompanyInfo` CTE gathers company names and types related to each film.
+- We include complex WHERE clauses that demonstrate different conditions, including utilization of both string searches and NULL considerations.
+- The final SELECT statement retrieves data from the previous CTEs while applying additional filters and ordering conditions.

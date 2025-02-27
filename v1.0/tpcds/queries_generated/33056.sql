@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), 
+AggregateSales AS (
+    SELECT 
+        i.i_item_id,
+        COALESCE(SUM(ws.total_quantity), 0) AS total_web_quantity,
+        COALESCE(SUM(cs.cs_quantity), 0) AS total_catalog_quantity,
+        COALESCE(SUM(ss.ss_quantity), 0) AS total_store_quantity,
+        COALESCE(SUM(ws.total_net_paid), 0) AS total_web_net_paid,
+        COALESCE(SUM(cs.cs_net_paid), 0) AS total_catalog_net_paid,
+        COALESCE(SUM(ss.ss_net_paid), 0) AS total_store_net_paid,
+        i.i_product_name
+    FROM 
+        item i
+    LEFT JOIN 
+        (SELECT ws_item_sk, total_quantity, total_net_paid FROM SalesCTE WHERE rank = 1) ws ON i.i_item_sk = ws.ws_item_sk
+    FULL OUTER JOIN 
+        catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+    FULL OUTER JOIN 
+        store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    GROUP BY 
+        i.i_item_id, i.i_product_name
+), 
+DateSales AS (
+    SELECT 
+        d.d_date,
+        a.total_web_quantity,
+        a.total_catalog_quantity,
+        a.total_store_quantity,
+        a.total_web_net_paid,
+        a.total_catalog_net_paid,
+        a.total_store_net_paid,
+        DENSE_RANK() OVER (ORDER BY d.d_date DESC) AS date_rank
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        AggregateSales a ON d.d_date_sk = CURRENT_DATE()
+    WHERE 
+        d.d_year = 2023
+)
+SELECT 
+    ds.d_date,
+    ds.total_web_quantity,
+    ds.total_catalog_quantity,
+    ds.total_store_quantity,
+    ds.total_web_net_paid,
+    ds.total_catalog_net_paid,
+    ds.total_store_net_paid
+FROM 
+    DateSales ds 
+WHERE 
+    ds.date_rank <= 10
+ORDER BY 
+    ds.d_date DESC;

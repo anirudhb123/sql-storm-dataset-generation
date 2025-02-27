@@ -1,0 +1,75 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY at.production_year) AS total_titles
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+
+ActorRoles AS (
+    SELECT 
+        ak.name AS actor_name,
+        ct.kind AS role_name,
+        COUNT(ci.id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    WHERE 
+        ci.nr_order = 1
+    GROUP BY 
+        ak.name, ct.kind
+    HAVING 
+        COUNT(ci.id) > 5
+),
+
+MoviesWithKeywords AS (
+    SELECT 
+        at.title,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title at
+    JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        at.title
+)
+
+SELECT 
+    rt.production_year,
+    rt.title AS title,
+    rt.title_rank,
+    ar.actor_name,
+    ar.role_name,
+    COALESCE(mkw.keywords, 'No keywords') AS keywords,
+    CASE 
+        WHEN rt.total_titles > 0 THEN 
+            ROUND(AVG(LENGTH(rt.title)), 2) OVER (PARTITION BY rt.production_year)
+        ELSE 
+            NULL 
+    END AS avg_title_length,
+    (SELECT COUNT(DISTINCT company_id) 
+     FROM movie_companies mc 
+     WHERE mc.movie_id IN (SELECT movie_id FROM cast_info ci WHERE ci.person_id IN 
+          (SELECT person_id FROM aka_name WHERE name IS NOT NULL))) AS unique_companies_count
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    ActorRoles ar ON rt.title = ar.actor_name 
+LEFT JOIN 
+    MoviesWithKeywords mkw ON rt.title = mkw.title 
+WHERE 
+    rt.production_year BETWEEN 2000 AND 2023
+    AND rt.title_rank <= 10
+ORDER BY 
+    rt.production_year DESC, 
+    rt.title_rank ASC
+LIMIT 50;

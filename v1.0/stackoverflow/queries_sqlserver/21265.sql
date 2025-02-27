@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, '2024-10-01 12:34:56')
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        AVG(ISNULL(v.BountyAmount, 0)) AS AvgBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id AND v.VoteTypeId = 9 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        pl.Name AS PostHistoryType,
+        COUNT(*) AS ChangeCount,
+        MIN(ph.CreationDate) AS FirstChangeDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pl ON ph.PostHistoryTypeId = pl.Id
+    WHERE 
+        ph.CreationDate >= DATEADD(day, -30, '2024-10-01 12:34:56')
+    GROUP BY 
+        ph.PostId, pl.Name
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.PostCount,
+    u.PositivePosts,
+    u.AvgBounty,
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    ph.PostHistoryType,
+    ph.ChangeCount,
+    ph.FirstChangeDate
+FROM 
+    UserEngagement u
+LEFT JOIN 
+    RankedPosts rp ON u.UserId = rp.OwnerUserId 
+LEFT JOIN 
+    RecentPostHistory ph ON rp.PostId = ph.PostId
+WHERE 
+    u.PostCount > 5 
+    AND u.AvgBounty IS NOT NULL 
+ORDER BY 
+    u.PostCount DESC,
+    rp.CreationDate DESC,
+    ph.FirstChangeDate DESC
+OFFSET 0 ROWS FETCH NEXT 20 ROWS ONLY;

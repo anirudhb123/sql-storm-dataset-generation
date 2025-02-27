@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.*
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn <= 5
+),
+PostDetails AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.ViewCount,
+        tp.Score,
+        tp.AnswerCount,
+        tp.CommentCount,
+        tp.FavoriteCount,
+        tp.OwnerDisplayName,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Comments c ON tp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON tp.PostId = v.PostId
+    GROUP BY 
+        tp.PostId, tp.Title, tp.CreationDate, tp.ViewCount, tp.Score, 
+        tp.AnswerCount, tp.CommentCount, tp.FavoriteCount, tp.OwnerDisplayName
+)
+SELECT 
+    pd.*,
+    pt.Name AS PostType,
+    ut.Name AS UserType,
+    b.Class AS BadgeClass,
+    b.Name AS BadgeName
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    PostTypes pt ON pd.PostTypeId = pt.Id 
+LEFT JOIN 
+    Users u ON pd.OwnerDisplayName = u.DisplayName
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId AND b.Date >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+ORDER BY 
+    pd.ViewCount DESC;

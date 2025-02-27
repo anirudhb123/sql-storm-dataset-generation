@@ -1,0 +1,61 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        sum(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer_demographics cd ON cs.c_customer_id = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' AND 
+        cd.cd_marital_status = 'M'
+    ORDER BY 
+        cs.total_sales DESC
+    LIMIT 10
+),
+SalesDetails AS (
+    SELECT 
+        t.c_customer_id,
+        t.c_first_name,
+        t.c_last_name,
+        ws.ws_order_number,
+        ws.ws_ext_sales_price,
+        ws.ws_sold_date_sk
+    FROM 
+        TopCustomers t
+    JOIN 
+        web_sales ws ON t.c_customer_id = ws.ws_bill_customer_sk
+)
+SELECT 
+    sd.c_customer_id,
+    sd.c_first_name,
+    sd.c_last_name,
+    COUNT(sd.ws_order_number) AS total_orders,
+    SUM(sd.ws_ext_sales_price) AS total_revenue,
+    DATEDIFF((SELECT d_date FROM date_dim WHERE d_date_sk = MAX(sd.ws_sold_date_sk)), 
+             (SELECT d_date FROM date_dim WHERE d_date_sk = MIN(sd.ws_sold_date_sk))) AS days_between_sales
+FROM 
+    SalesDetails sd
+GROUP BY 
+    sd.c_customer_id, sd.c_first_name, sd.c_last_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

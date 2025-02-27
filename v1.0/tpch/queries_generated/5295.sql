@@ -1,0 +1,70 @@
+WITH SuppCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+OrderStats AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY 
+        l.l_partkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        r.r_name AS region_name,
+        ns.n_name AS supplier_nation,
+        cs.c_mktsegment,
+        sc.total_cost,
+        os.revenue,
+        os.order_count
+    FROM 
+        part p
+    JOIN 
+        partdetails ps ON p.p_partkey = ps.p_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation ns ON s.s_nationkey = ns.n_nationkey
+    JOIN 
+        region r ON ns.n_regionkey = r.r_regionkey
+    JOIN 
+        customer c ON s.s_suppkey = c.c_nationkey
+    JOIN 
+        SuppCost sc ON sc.ps_partkey = p.p_partkey
+    JOIN 
+        OrderStats os ON os.l_partkey = p.p_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_type,
+    pd.region_name,
+    pd.supplier_nation,
+    pd.c_mktsegment,
+    pd.total_cost,
+    pd.revenue,
+    pd.order_count
+FROM 
+    PartDetails pd
+WHERE 
+    pd.total_cost > (SELECT AVG(total_cost) FROM SuppCost)
+ORDER BY 
+    pd.revenue DESC
+LIMIT 100;

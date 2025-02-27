@@ -1,0 +1,53 @@
+-- Performance benchmarking query to evaluate the average response time and count of posts, users, and votes
+
+WITH PostStats AS (
+    SELECT
+        p.Id AS PostId,
+        p.CreationDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY
+        p.Id, p.CreationDate
+),
+
+UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY
+        u.Id
+),
+
+Benchmark AS (
+    SELECT
+        COUNT(DISTINCT ps.PostId) AS TotalPosts,
+        COUNT(DISTINCT us.UserId) AS TotalUsers,
+        SUM(ps.CommentCount) AS TotalComments,
+        SUM(ps.VoteCount) AS TotalVotes,
+        SUM(us.PostCount) AS TotalUserPosts,
+        AVG(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - ps.CreationDate))) AS AvgResponseTimeInSeconds
+    FROM
+        PostStats ps
+    JOIN
+        UserStats us ON ps.PostId IS NOT NULL
+)
+
+SELECT
+    *
+FROM
+    Benchmark;

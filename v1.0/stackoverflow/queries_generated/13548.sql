@@ -1,0 +1,61 @@
+-- Performance Benchmarking Query for the StackOverflow Schema
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.PostTypeId = 4 OR p.PostTypeId = 5 THEN 1 ELSE 0 END) AS TagWikis,
+        AVG(p.Score) AS AvgScore,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    ORDER BY 
+        p.ViewCount DESC
+    LIMIT 10
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.Questions,
+    ups.Answers,
+    ups.TagWikis,
+    ups.AvgScore,
+    ups.LastPostDate,
+    tp.PostId,
+    tp.Title,
+    tp.ViewCount,
+    tp.Score,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.OwnerDisplayName
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    TopPosts tp ON ups.UserId = tp.OwnerDisplayName
+ORDER BY 
+    ups.TotalPosts DESC
+LIMIT 20;

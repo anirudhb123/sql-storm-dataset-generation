@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.Views,
+        COALESCE(NULLIF(u.Reputation, 0), 1) AS UserReputation,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank,
+        CASE 
+            WHEN COALESCE(p.ClosedDate, '') = '' THEN 'Open' 
+            ELSE 'Closed' 
+        END AS PostStatus
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+), 
+PostVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 6) THEN 1 ELSE -1 END) AS VoteScore
+    FROM Votes v
+    GROUP BY v.PostId
+), 
+PostRankedWithVotes AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.Views,
+        rp.UserReputation,
+        rp.PostRank,
+        pv.VoteScore,
+        rp.PostStatus
+    FROM RankedPosts rp
+    LEFT JOIN PostVotes pv ON rp.PostId = pv.PostId
+), 
+ClosedPostReasons AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(DISTINCT ctr.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes ctr ON ph.Comment::int = ctr.Id
+    WHERE ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY p.Id
+)
+SELECT 
+    prwv.PostId,
+    prwv.Title,
+    prwv.Score + COALESCE(prwv.VoteScore, 0) AS FinalScore,
+    prwv.Views,
+    prwv.UserReputation,
+    prwv.PostStatus,
+    cpr.CloseReasons,
+    RANK() OVER (ORDER BY prwv.FinalScore DESC) AS FinalRanking
+FROM PostRankedWithVotes prwv
+LEFT JOIN ClosedPostReasons cpr ON prwv.PostId = cpr.PostId
+WHERE prwv.PostRank = 1 -- only top ranked posts
+  AND prwv.UserReputation > 10 -- Filter to users with reputation > 10
+ORDER BY FinalScore DESC NULLS LAST
+LIMIT 100;
+
+-- This query retrieves the top posts from the past year, considering their score, user reputation,
+-- and post status. Closed posts include their closing reasons, and all results are ranked accordingly.

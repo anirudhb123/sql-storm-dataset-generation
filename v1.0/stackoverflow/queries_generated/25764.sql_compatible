@@ -1,0 +1,51 @@
+
+WITH PostTagCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts P
+    CROSS APPLY 
+        STRING_SPLIT(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '><') AS T
+    WHERE 
+        P.PostTypeId = 1  
+    GROUP BY 
+        P.Id
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName AS UserDisplayName,
+        COUNT(DISTINCT Q.Id) AS TotalQuestions,
+        COUNT(DISTINCT A.Id) AS TotalAnswers,
+        SUM(CASE WHEN A.OwnerUserId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(COALESCE(Q.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(Q.Score, 0)) AS AvgQuestionScore,
+        AVG(COALESCE(A.Score, 0)) AS AvgAnswerScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts Q ON U.Id = Q.OwnerUserId AND Q.PostTypeId = 1  
+    LEFT JOIN 
+        Posts A ON Q.Id = A.ParentId  
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    U.UserId,
+    U.UserDisplayName,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    U.AcceptedAnswers,
+    U.TotalViews,
+    U.AvgQuestionScore,
+    U.AvgAnswerScore,
+    PT.TagCount
+FROM 
+    UserPostStats U
+JOIN 
+    PostTagCounts PT ON U.TotalQuestions > 0  
+ORDER BY 
+    U.TotalQuestions DESC,
+    U.TotalViews DESC
+LIMIT 10 OFFSET 0;

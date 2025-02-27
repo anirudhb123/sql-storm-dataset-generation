@@ -1,0 +1,75 @@
+WITH RECURSIVE ActorHierachy AS (
+    SELECT 
+        ci.person_id,
+        t.title,
+        COUNT(ci.movie_id) AS movies_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    GROUP BY 
+        ci.person_id, t.title
+),
+RankedMovies AS (
+    SELECT 
+        a.person_id,
+        a.title,
+        a.movies_count,
+        RANK() OVER (PARTITION BY a.person_id ORDER BY a.movies_count DESC) AS rank
+    FROM 
+        ActorHierachy a
+),
+TopActors AS (
+    SELECT 
+        r.person_id,
+        r.title
+    FROM 
+        RankedMovies r
+    WHERE 
+        r.rank <= 5
+),
+MoviesWithCompanies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+ActorsWithMovies AS (
+    SELECT 
+        ta.person_id,
+        mw.movie_id,
+        mw.title,
+        mw.company_name,
+        mw.company_type
+    FROM 
+        TopActors ta
+    JOIN 
+        cast_info ci ON ta.person_id = ci.person_id
+    JOIN 
+        MoviesWithCompanies mw ON ci.movie_id = mw.movie_id
+)
+SELECT 
+    a.person_id, 
+    a.title,
+    COALESCE(a.company_name, 'Independent') AS company_name,
+    COALESCE(a.company_type, 'Independent') AS company_type,
+    COUNT(DISTINCT mw.movie_id) OVER (PARTITION BY a.person_id) AS distinct_movies_count,
+    AVG(NULLIF(m.production_year, 0)) OVER (PARTITION BY a.person_id) AS average_production_year
+FROM 
+    ActorsWithMovies a
+LEFT JOIN 
+    aka_title mw ON a.movie_id = mw.id
+WHERE 
+    mw.production_year >= (SELECT AVG(production_year) FROM aka_title)
+ORDER BY 
+    a.person_id, a.title;
+This SQL query performs a series of complex operations to benchmark performance by leveraging recursive CTEs, window functions, subqueries, outer joins, NULL handling, and various aggregations. It identifies top actors based on their movie counts, joins relevant company data, calculates distinct movie counts, and averages production years while incorporating NULL logic for company fields.

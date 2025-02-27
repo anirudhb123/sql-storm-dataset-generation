@@ -1,0 +1,114 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+item_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_paid) AS average_net_paid
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+high_sales_items AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        is.total_sales,
+        is.order_count,
+        CASE 
+            WHEN is.average_net_paid > 100 THEN 'High Value'
+            WHEN is.average_net_paid IS NULL THEN 'Unknown Value'
+            ELSE 'Regular Value'
+        END AS item_value_category
+    FROM 
+        item i
+    JOIN 
+        item_sales is ON i.i_item_sk = is.ws_item_sk
+    WHERE 
+        is.total_sales > 50
+),
+valid_returns AS (
+    SELECT 
+        sr.sr_item_sk,
+        SUM(sr.sr_return_quantity) AS total_returns,
+        COUNT(*) AS return_count
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.sr_return_quantity IS NOT NULL
+    GROUP BY 
+        sr.sr_item_sk
+),
+combined AS (
+    SELECT 
+        h.i_item_sk,
+        h.i_item_desc,
+        h.total_sales,
+        h.order_count,
+        h.item_value_category,
+        COALESCE(v.total_returns, 0) AS total_returns,
+        COALESCE(v.return_count, 0) AS return_count,
+        RANK() OVER (ORDER BY h.total_sales DESC) AS sales_rank
+    FROM 
+        high_sales_items h
+    LEFT JOIN 
+        valid_returns v ON h.i_item_sk = v.sr_item_sk
+),
+final_output AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cu.gender_rank,
+        cb.i_item_sk,
+        cb.i_item_desc,
+        cb.total_sales,
+        cb.order_count,
+        cb.item_value_category,
+        cb.total_returns,
+        cb.return_count,
+        (cb.total_sales - cb.total_returns) AS net_value
+    FROM 
+        combined cb
+    JOIN 
+        ranked_customers cu ON (cu.gender_rank = 1 AND cb.item_value_category = 'High Value')
+    JOIN 
+        customer c ON c.c_customer_sk = cb.i_item_sk
+    WHERE 
+        (cb.total_sales - cb.total_returns) IS NOT NULL
+)
+SELECT 
+    f.c_customer_sk,
+    f.c_first_name,
+    f.c_last_name,
+    f.i_item_sk,
+    f.i_item_desc,
+    f.total_sales,
+    f.order_count,
+    f.item_value_category,
+    f.total_returns,
+    f.return_count,
+    CASE 
+        WHEN f.net_value < 0 THEN 'Loss'
+        WHEN f.net_value = 0 THEN 'No Gain'
+        ELSE 'Profit'
+    END AS financial_status
+FROM 
+    final_output f
+ORDER BY 
+    f.financial_status DESC, f.total_sales DESC;

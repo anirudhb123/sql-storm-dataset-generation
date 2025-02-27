@@ -1,0 +1,76 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        ARRAY_AGG(DISTINCT t.TagName) AS PostTags,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS Score
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+        AND p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        p.Id
+),
+UserParticipation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAnswered,
+        COUNT(DISTINCT c.Id) AS CommentsPosted,
+        COUNT(DISTINCT b.Id) AS BadgesEarned
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id AND p.PostTypeId = 2  -- Only Answers
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  -- Title, Body, Tags Edited
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.PostTags,
+    rp.CommentCount,
+    rp.Score,
+    up.UserId,
+    up.DisplayName AS UserName,
+    up.QuestionsAnswered,
+    up.CommentsPosted,
+    up.BadgesEarned,
+    ph.UserId AS LastEditorId,
+    ph.EditRank
+FROM 
+    RecentPosts rp
+JOIN 
+    UserParticipation up ON up.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostHistories ph ON ph.PostId = rp.PostId AND ph.EditRank = 1  -- Most recent edit
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 100;

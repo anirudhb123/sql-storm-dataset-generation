@@ -1,0 +1,67 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS AnsweredQuestions,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvotesReceived,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvotesReceived,
+        AVG(COALESCE(P.Score, 0)) AS AvgPostScore,
+        RANK() OVER (ORDER BY COUNT(DISTINCT P.Id) DESC) AS UserRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 2
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        P.Title,
+        PH.CreationDate AS CloseDate,
+        C.Name AS CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS rn
+    FROM PostHistory PH
+    JOIN CloseReasonTypes C ON PH.Comment::int = C.Id
+    JOIN Posts P ON P.Id = PH.PostId
+    WHERE PH.PostHistoryTypeId = 10 
+),
+TopClosedPosts AS (
+    SELECT 
+        CP.* 
+    FROM ClosedPosts CP
+    WHERE CP.rn = 1
+),
+UserReputation AS (
+    SELECT 
+        UserId,
+        SUM(Reputation) AS TotalReputation
+    FROM Users
+    GROUP BY UserId
+)
+SELECT 
+    UA.UserId, 
+    UA.DisplayName,
+    UA.Reputation,
+    UA.AnsweredQuestions, 
+    UA.UpvotesReceived,
+    UA.DownvotesReceived,
+    COALESCE(SUM(CASE WHEN TCP.CloseReason IS NOT NULL THEN 1 ELSE 0 END), 0) AS ClosedPostCount,
+    COALESCE(SUM(CASE WHEN UA.AvgPostScore > 0 THEN 1 ELSE 0 END), 0) AS PositiveScoreCount,
+    COALESCE(CAST((UA.UpvotesReceived - UA.DownvotesReceived) AS FLOAT) / NULLIF(UA.AnsweredQuestions, 0), 0) AS VoteRatio,
+    CASE
+        WHEN UA.Reputation > 1000 THEN 'High Reputation'
+        WHEN UA.Reputation BETWEEN 500 AND 1000 THEN 'Moderate Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationCategory
+FROM UserActivity UA
+LEFT JOIN TopClosedPosts TCP ON UA.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = TCP.PostId)
+LEFT JOIN UserReputation UR ON UA.UserId = UR.UserId
+GROUP BY 
+    UA.UserId, 
+    UA.DisplayName,
+    UA.Reputation,
+    UA.AnsweredQuestions, 
+    UA.UpvotesReceived,
+    UA.DownvotesReceived
+ORDER BY UA.UserRank, UA.Reputation DESC
+FETCH FIRST 50 ROWS ONLY;

@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= DATEADD(year, -1, GETDATE())
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        AVG(COALESCE(p.ViewCount, 0)) AS AverageViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+CloseReasonDetails AS (
+    SELECT 
+        h.PostId,
+        MIN(CASE WHEN h.PostHistoryTypeId = 10 THEN r.Name END) AS CloseReason,
+        MIN(CASE WHEN h.PostHistoryTypeId = 10 THEN h.CreationDate END) AS CloseDate
+    FROM 
+        PostHistory h
+    JOIN 
+        CloseReasonTypes r ON h.Comment = CAST(r.Id AS VARCHAR)
+    WHERE 
+        h.PostHistoryTypeId = 10
+    GROUP BY 
+        h.PostId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    COALESCE(ps.PostCount, 0) AS TotalPosts,
+    COALESCE(ps.PositivePosts, 0) AS TotalPositivePosts,
+    COALESCE(ps.NegativePosts, 0) AS TotalNegativePosts,
+    COALESCE(ps.AverageViewCount, 0) AS AveragePostViews,
+    COUNT(DISTINCT rp.Id) AS RecentPostsCount,
+    STRING_AGG(DISTINCT cr.CloseReason, '; ') AS CloseReasons,
+    STRING_AGG(DISTINCT CAST(cr.CloseDate AS VARCHAR), '; ') AS CloseDates
+FROM 
+    UserStatistics ps 
+RIGHT JOIN 
+    Users u ON ps.UserId = u.Id
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.PostRank <= 3
+LEFT JOIN 
+    CloseReasonDetails cr ON cr.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+WHERE 
+    u.Reputation > 100 
+GROUP BY 
+    u.UserId, u.DisplayName
+HAVING 
+    COUNT(DISTINCT cr.CloseReason) > 0 OR COUNT(DISTINCT rp.Id) >= 3
+ORDER BY 
+    TotalPosts DESC, AveragePostViews DESC;

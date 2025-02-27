@@ -1,0 +1,97 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL 
+
+    UNION ALL 
+
+    SELECT 
+        mk.linked_movie_id AS movie_id,
+        ak.title,
+        ak.production_year,
+        ak.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link mk
+    JOIN 
+        aka_title ak ON mk.linked_movie_id = ak.id 
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = mk.movie_id 
+    WHERE 
+        mh.level < 5
+),
+
+movie_stamp AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(v.production_year, 0) AS production_year
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        (SELECT DISTINCT movie_id, MAX(production_year) AS production_year 
+        FROM aka_title 
+        WHERE production_year > 2000
+        GROUP BY movie_id) v ON m.id = v.movie_id
+),
+
+actor_profile AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT ci.movie_id) DESC) AS rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.id, ak.name
+),
+
+ranked_movies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS row_num
+    FROM 
+        movie_stamp m
+    WHERE 
+        m.production_year IS NOT NULL 
+        AND m.title NOT LIKE '%Untitled%'
+)
+
+SELECT 
+    res.movie_id,
+    res.title,
+    res.production_year,
+    DISTINCT(COALESCE(ap.actor_name, 'Unknown')) AS actor_name,
+    mh.level AS hierarchy_level,
+    CASE 
+        WHEN mh.level IS NULL THEN 'Not Linked'
+        WHEN mh.level = 1 THEN 'Single Direct Link'
+        ELSE 'Multi-level Link'
+    END AS link_type
+FROM 
+    ranked_movies res
+LEFT JOIN 
+    movie_hierarchy mh ON res.movie_id = mh.movie_id 
+LEFT JOIN 
+    actor_profile ap ON res.movie_id IN (
+        SELECT ci.movie_id 
+        FROM cast_info ci 
+        WHERE ci.person_role_id = ap.actor_id
+    )
+WHERE 
+    res.row_num BETWEEN 1 AND 10 
+ORDER BY 
+    res.production_year DESC,
+    res.title ASC;

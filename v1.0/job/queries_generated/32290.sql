@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COUNT(DISTINCT cc.id) AS complete_cast_count,
+    AVG(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY mi.info)) AS avg_info_length,
+    ROW_NUMBER() OVER (PARTITION BY a.name ORDER BY t.production_year DESC) AS rank
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    aka_title t ON c.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+LEFT JOIN 
+    (SELECT 
+         movie_id, 
+         LENGTH(info) AS info_length 
+     FROM 
+         movie_info 
+     WHERE 
+         info_type_id = (SELECT id FROM info_type WHERE info = 'summary') 
+    ) mi ON t.id = mi.movie_id
+WHERE 
+    t.production_year >= 2000
+    AND COALESCE(k.keyword, 'N/A') != 'N/A'
+GROUP BY 
+    a.name, t.id, t.title, t.production_year
+HAVING 
+    COUNT(DISTINCT cc.id) > 1
+ORDER BY 
+    rank;
+
+This SQL query demonstrates complex usage of recursive Common Table Expressions (CTE) to create a hierarchical view of movies, along with various joins, aggregations, and window functions for detailed performance benchmarking. It filters actors linked to movies produced since 2000, calculates keyword aggregations, and ranks results based on production year while handling NULL values appropriately.

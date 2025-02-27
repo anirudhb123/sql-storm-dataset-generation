@@ -1,0 +1,46 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(k.keyword) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(k.keyword) DESC) AS rank
+    FROM title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY t.id, t.title, t.production_year
+),
+PopularTitles AS (
+    SELECT 
+        title_id,
+        title,
+        production_year
+    FROM RankedTitles
+    WHERE rank <= 5
+),
+CastCount AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_member_count
+    FROM cast_info ci
+    JOIN complete_cast c ON ci.movie_id = c.movie_id
+    GROUP BY c.movie_id
+)
+SELECT 
+    pt.title,
+    pt.production_year,
+    cc.cast_member_count,
+    ak.name AS main_actor,
+    co.name AS production_company,
+    i.info AS movie_info
+FROM PopularTitles pt
+LEFT JOIN CastCount cc ON pt.title_id = cc.movie_id
+LEFT JOIN complete_cast cast ON pt.title_id = cast.movie_id
+LEFT JOIN cast_info ci ON cast.subject_id = ci.person_id
+LEFT JOIN aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN movie_companies mc ON pt.title_id = mc.movie_id
+LEFT JOIN company_name co ON mc.company_id = co.id
+LEFT JOIN movie_info i ON pt.title_id = i.movie_id
+WHERE ak.id IS NOT NULL 
+    AND mc.company_type_id IN (SELECT id FROM company_type WHERE kind = 'Distributor')
+ORDER BY pt.production_year DESC, cc.cast_member_count DESC;

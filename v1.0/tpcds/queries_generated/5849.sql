@@ -1,0 +1,63 @@
+
+WITH CustomerWiseSales AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(SUM(ws.ws_net_paid), 0) AS total_web_sales,
+        COALESCE(SUM(cs.cs_net_paid), 0) AS total_catalog_sales,
+        COALESCE(SUM(ss.ss_net_paid), 0) AS total_store_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS web_order_count,
+        COUNT(DISTINCT cs.cs_order_number) AS catalog_order_count,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_order_count
+    FROM 
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_id
+),
+SalesByDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(cws.total_web_sales) AS total_web_sales,
+        SUM(cws.total_catalog_sales) AS total_catalog_sales,
+        SUM(cws.total_store_sales) AS total_store_sales
+    FROM 
+        customer_demographics cd
+    JOIN CustomerWiseSales cws ON cd.cd_demo_sk = cws.c_customer_id
+    GROUP BY cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+WeeklySales AS (
+    SELECT 
+        dd.d_year,
+        dd.d_week_seq,
+        SUM(ws.ws_net_paid) AS total_web_sales,
+        SUM(cs.cs_net_paid) AS total_catalog_sales,
+        SUM(ss.ss_net_paid) AS total_store_sales
+    FROM 
+        date_dim dd
+    LEFT JOIN web_sales ws ON dd.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN catalog_sales cs ON dd.d_date_sk = cs.cs_sold_date_sk
+    LEFT JOIN store_sales ss ON dd.d_date_sk = ss.ss_sold_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        dd.d_year, dd.d_week_seq
+)
+SELECT 
+    sb.cd_gender,
+    sb.cd_marital_status,
+    sb.cd_education_status,
+    ws.d_year,
+    ws.d_week_seq,
+    sb.total_web_sales,
+    sb.total_catalog_sales,
+    sb.total_store_sales,
+    (sb.total_web_sales + sb.total_catalog_sales + sb.total_store_sales) AS total_sales
+FROM 
+    SalesByDemographics sb
+JOIN WeeklySales ws ON ws.total_web_sales > 10000 OR ws.total_catalog_sales > 10000 OR ws.total_store_sales > 10000
+ORDER BY 
+    sb.cd_gender, sb.cd_marital_status, sb.cd_education_status, ws.d_year, ws.d_week_seq;

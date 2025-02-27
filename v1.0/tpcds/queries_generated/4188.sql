@@ -1,0 +1,88 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY c.c_gender ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank,
+        COUNT(wp.wp_web_page_sk) AS page_views
+    FROM 
+        customer AS c
+    JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        web_page AS wp ON ws.ws_web_page_sk = wp.wp_web_page_sk 
+    WHERE 
+        ws.ws_ship_date_sk >= (
+            SELECT MAX(d.d_date_sk) 
+            FROM date_dim AS d 
+            WHERE d.d_year = 2023 AND d.d_month_seq IN (6, 7, 8)
+        )
+    GROUP BY 
+        c.c_customer_id, c.c_gender
+),
+SalesByState AS (
+    SELECT 
+        ca.ca_state,
+        AVG(total_sales) AS avg_sales,
+        COUNT(c.c_customer_id) AS customer_count
+    FROM 
+        customer_address AS ca
+    JOIN 
+        RankedSales AS rs ON ca.ca_address_sk = (
+            SELECT c.c_current_addr_sk 
+            FROM customer AS c 
+            WHERE c.c_customer_id = rs.c_customer_id
+        )
+    GROUP BY 
+        ca.ca_state
+),
+TopStates AS (
+    SELECT 
+        ca.ca_state,
+        CS.avg_sales,
+        CS.customer_count
+    FROM 
+        SalesByState AS CS
+    JOIN 
+        customer AS c ON c.c_customer_id IN (
+            SELECT c.customer_id 
+            FROM customer AS c 
+            WHERE c.c_current_addr_sk IS NOT NULL
+        )
+    ORDER BY 
+        CS.avg_sales DESC
+    LIMIT 5
+)
+SELECT 
+    TS.ca_state, 
+    TS.avg_sales, 
+    TS.customer_count,
+    COALESCE(ROUND(SUM(ss.ss_net_profit), 2), 0) AS total_store_profit
+FROM 
+    TopStates AS TS
+LEFT JOIN 
+    store_sales AS ss ON ss.ss_sold_date_sk IN (
+        SELECT DISTINCT ws.ws_sold_date_sk 
+        FROM web_sales AS ws 
+        WHERE ws.ws_ship_date_sk = (
+            SELECT MAX(ws_ship_date_sk)
+            FROM web_sales
+            WHERE ws_ship_date_sk <= (
+                SELECT MAX(d.d_date_sk) 
+                FROM date_dim AS d 
+                WHERE d.d_year = 2023
+            )
+        )
+    )
+AND 
+    ss.ss_store_sk IN (
+        SELECT s.s_store_sk 
+        FROM store AS s 
+        WHERE s.s_city = 'Los Angeles'
+    )
+GROUP BY 
+    TS.ca_state, 
+    TS.avg_sales, 
+    TS.customer_count
+ORDER BY 
+    TS.avg_sales DESC;

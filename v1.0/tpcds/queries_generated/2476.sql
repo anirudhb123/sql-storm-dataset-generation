@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk, ws_item_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        cd_dep_count,
+        cd_dep_employed_count,
+        hd.buy_potential AS buy_potential
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+SalesSummary AS (
+    SELECT 
+        r.ws_item_sk, 
+        SUM(r.total_quantity) AS quantity_sold,
+        SUM(r.total_net_profit) AS net_profit
+    FROM 
+        RankedSales r
+    JOIN 
+        CustomerDemographics cd ON r.ws_bill_customer_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' 
+        AND cd.cd_marital_status = 'M' 
+        AND cd.cd_purchase_estimate > 10000
+    GROUP BY 
+        r.ws_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(ss.quantity_sold, 0) AS total_quantity_sold,
+    COALESCE(ss.net_profit, 0) AS total_net_profit,
+    (SELECT COUNT(DISTINCT c.c_customer_sk) 
+     FROM customer c 
+     WHERE c.c_current_cdemo_sk = (SELECT cd_demo_sk FROM CustomerDemographics WHERE buy_potential = 'High')) AS high_potential_customer_count
+FROM 
+    item i
+LEFT JOIN 
+    SalesSummary ss ON i.i_item_sk = ss.ws_item_sk
+WHERE 
+    (i.i_current_price > 50 OR i.i_current_price IS NULL)
+    AND i.i_rec_start_date <= CURRENT_DATE
+    AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date >= CURRENT_DATE)
+ORDER BY 
+    total_net_profit DESC
+LIMIT 10;

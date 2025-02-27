@@ -1,0 +1,42 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rank
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+movie_details AS (
+    SELECT 
+        t.title,
+        a.name AS actor_name,
+        GROUP_CONCAT(DISTINCT m.name) AS production_companies
+    FROM ranked_movies rm
+    JOIN complete_cast cc ON cc.movie_id = rm.title_id
+    JOIN aka_name a ON a.person_id = cc.subject_id
+    LEFT JOIN movie_companies mc ON mc.movie_id = rm.title_id
+    LEFT JOIN company_name m ON m.id = mc.company_id
+    WHERE cc.status_id IS NULL OR cc.status_id = 1
+    GROUP BY rm.title_id, t.title, a.name
+),
+keywords_count AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM movie_keyword mk
+    JOIN keyword k ON k.id = mk.keyword_id
+    GROUP BY mk.movie_id
+)
+SELECT 
+    md.title,
+    md.actor_name,
+    kc.keyword_count,
+    CASE 
+        WHEN kc.keyword_count IS NULL THEN 'No Keywords'
+        ELSE CAST(kc.keyword_count AS TEXT)
+    END AS keyword_display,
+    md.production_companies
+FROM movie_details md
+LEFT JOIN keywords_count kc ON kc.movie_id = md.title_id
+ORDER BY md.title ASC;

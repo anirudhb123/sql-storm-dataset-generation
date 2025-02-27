@@ -1,0 +1,91 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND 
+        n.n_comment IS NOT NULL
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey AND o.o_orderstatus <> 'F'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (
+            SELECT 
+                AVG(o_totalprice) 
+            FROM 
+                orders 
+            WHERE 
+                o_orderdate >= DATE '1998-10-01' - INTERVAL '1 year'
+        )
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_comment,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 'Unknown Price'
+            WHEN p.p_retailprice < 10 THEN 'Cheap'
+            WHEN p.p_retailprice BETWEEN 10 AND 100 THEN 'Moderate'
+            ELSE 'Expensive'
+        END AS price_category
+    FROM 
+        part p
+    WHERE 
+        p.p_container IS NOT NULL
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(DISTINCT l.l_partkey) AS num_parts,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '1998-10-01' - INTERVAL '30 days'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.s_name AS r_name,
+    p.price_category,
+    COUNT(DISTINCT h.c_custkey) AS num_customers,
+    SUM(l.total_value) AS total_order_value,
+    MAX(h.total_spent) AS max_customer_spending
+FROM 
+    RankedSuppliers r
+LEFT JOIN 
+    FilteredParts p ON p.p_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+    )
+LEFT JOIN 
+    HighValueCustomers h ON r.s_suppkey = h.c_custkey
+JOIN 
+    LineItemStats l ON l.l_orderkey = r.s_suppkey
+WHERE 
+    r.s_name LIKE 'N%' OR (r.s_name IS NULL AND h.total_spent > 10000)
+GROUP BY 
+    r.s_name, p.price_category
+HAVING 
+    COUNT(DISTINCT h.c_custkey) > (SELECT COUNT(*) FROM customer) / 10
+ORDER BY 
+    r.s_name, total_order_value DESC;

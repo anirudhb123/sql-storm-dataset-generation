@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 0
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        (u.UpVotes - u.DownVotes) AS NetVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        us.DisplayName,
+        us.Reputation
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users us ON us.Id = (
+            SELECT 
+                OwnerUserId 
+            FROM 
+                Posts 
+            WHERE 
+                Id = rp.PostId
+        )
+    WHERE 
+        rp.Rank <= 3
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.DisplayName,
+    tp.Reputation,
+    CASE 
+        WHEN tp.Score > 100 THEN 'High Score'
+        WHEN tp.Score BETWEEN 50 AND 100 THEN 'Moderate Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Badges b ON tp.DisplayName = b.UserId AND b.Class = 1
+WHERE 
+    b.Id IS NULL
+ORDER BY 
+    tp.CreationDate DESC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

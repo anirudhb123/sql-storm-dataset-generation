@@ -1,0 +1,74 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+)
+
+, UserVoteSummary AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN vt.Name = 'Favorite' THEN 1 END) AS Favorites
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    u.CreationDate AS UserCreationDate,
+    COALESCE(uvs.UpVotes, 0) AS UpVotes,
+    COALESCE(uvs.DownVotes, 0) AS DownVotes,
+    COALESCE(uvs.Favorites, 0) AS FavoritePosts,
+    rph.PostId,
+    rph.Title,
+    rph.CreationDate AS PostCreationDate,
+    rph.Level AS Depth,
+    (SELECT COUNT(c.Id) 
+     FROM Comments c 
+     WHERE c.PostId = rph.PostId) AS CommentCount,
+    (SELECT AVG(p.ViewCount) 
+     FROM Posts p 
+     WHERE p.OwnerUserId = u.Id) AS AvgViewsByUser,
+    CASE 
+        WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Answered' 
+        ELSE 'Unanswered' 
+    END AS QuestionStatus
+FROM 
+    Users u
+LEFT JOIN 
+    UserVoteSummary uvs ON u.Id = uvs.UserId
+JOIN 
+    Posts p ON p.OwnerUserId = u.Id AND p.PostTypeId = 1 
+LEFT JOIN 
+    RecursivePostHierarchy rph ON p.Id = rph.PostId
+ORDER BY 
+    u.Reputation DESC,
+    rph.Level ASC,
+    rph.CreationDate DESC
+LIMIT 100;

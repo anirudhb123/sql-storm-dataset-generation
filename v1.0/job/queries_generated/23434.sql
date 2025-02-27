@@ -1,0 +1,72 @@
+WITH RECURSIVE title_hierarchy AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        0 AS depth, 
+        t.imdb_index
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 1990
+    
+    UNION ALL
+    
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        th.depth + 1,
+        th.imdb_index
+    FROM 
+        aka_title t
+    JOIN 
+        title_hierarchy th ON t.episode_of_id = th.title_id
+)
+SELECT 
+    th.title_id,
+    th.title,
+    th.production_year,
+    c.name AS cast_member,
+    ct.kind AS character_role,
+    m.name AS company_name,
+    ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+    SUM(CASE WHEN pr.info IS NOT NULL THEN 1 ELSE 0 END) AS null_role_count,
+    GREATEST(COALESCE(e.season_nr, 0), 1) AS max_season_number 
+FROM 
+    title_hierarchy th
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = th.title_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    name c ON c.id = ci.person_id
+LEFT JOIN 
+    role_type rt ON rt.id = ci.role_id
+LEFT JOIN 
+    company_name m ON m.id = (SELECT movie_companies.company_id 
+                               FROM movie_companies 
+                               WHERE movie_companies.movie_id = th.title_id
+                               LIMIT 1)
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = th.title_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN 
+    (SELECT 
+        person_id, 
+        info 
+     FROM 
+        person_info 
+     WHERE 
+        info_type_id = (SELECT id FROM info_type WHERE info = 'Role')) pr ON pr.person_id = c.id
+LEFT JOIN 
+    aka_title e ON e.id = th.episode_of_id
+WHERE 
+    th.depth < 3
+GROUP BY 
+    th.title_id, th.title, th.production_year, c.name, ct.kind, m.name, e.season_nr
+ORDER BY 
+    th.production_year DESC, COUNT(k.keyword) ASC, th.title;

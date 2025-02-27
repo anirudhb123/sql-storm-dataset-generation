@@ -1,0 +1,92 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        1 AS Level
+    FROM 
+        Posts 
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+CombinedStats AS (
+    SELECT 
+        p.Title,
+        u.UserId,
+        u.DisplayName,
+        u.Upvotes,
+        u.Downvotes,
+        phs.EditCount,
+        phs.LastClosedDate
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostHistorySummary phs ON p.Id = phs.PostId
+),
+RankedPosts AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY UserId ORDER BY EditCount DESC, Upvotes - Downvotes DESC) AS PostRank
+    FROM 
+        CombinedStats
+)
+SELECT 
+    p.Title,
+    p.DisplayName AS Owner,
+    p.EditCount,
+    p.LastClosedDate,
+    p.Upvotes,
+    p.Downvotes,
+    rh.ParentId,
+    rh.Level
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    RecursivePostHierarchy rh ON p.PostId = rh.Id
+WHERE 
+    p.PostRank = 1
+    AND p.LastClosedDate IS NULL
+ORDER BY 
+    p.Upvotes DESC, 
+    p.EditCount DESC;

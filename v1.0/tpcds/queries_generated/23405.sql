@@ -1,0 +1,73 @@
+
+WITH ReturnStats AS (
+    SELECT
+        sr.sr_item_sk,
+        COUNT(DISTINCT sr.sr_ticket_number) AS total_returns,
+        SUM(sr.sr_return_amt_inc_tax) AS total_return_value,
+        AVG(sr.sr_return_quantity) AS avg_return_quantity
+    FROM
+        store_returns sr
+    GROUP BY
+        sr.sr_item_sk
+),
+SalesStats AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        ROW_NUMBER() OVER(PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    GROUP BY
+        ws.ws_item_sk
+    HAVING
+        SUM(ws.ws_net_profit) IS NOT NULL
+),
+InventoryStats AS (
+    SELECT
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM
+        inventory inv
+    GROUP BY
+        inv.inv_item_sk
+),
+CombinedStats AS (
+    SELECT
+        COALESCE(rs.sr_item_sk, ss.ws_item_sk, is.inv_item_sk) AS item_sk,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        COALESCE(rs.total_return_value, 0) AS total_return_value,
+        COALESCE(ss.avg_sales_price, 0) AS avg_sales_price,
+        COALESCE(is.total_quantity_on_hand, 0) AS total_quantity_on_hand
+    FROM
+        ReturnStats rs
+    FULL OUTER JOIN SalesStats ss ON rs.sr_item_sk = ss.ws_item_sk
+    FULL OUTER JOIN InventoryStats is ON COALESCE(rs.sr_item_sk, ss.ws_item_sk) = is.inv_item_sk
+)
+SELECT
+    cs.item_sk,
+    cs.total_returns,
+    cs.total_sales,
+    cs.total_return_value,
+    cs.avg_sales_price,
+    cs.total_quantity_on_hand,
+    CASE
+        WHEN cs.total_returns > cs.total_sales THEN 'High Return Rate'
+        WHEN cs.total_sales = 0 THEN 'No Sales'
+        WHEN cs.total_returns = 0 THEN 'No Returns'
+        ELSE 'Normal'
+    END AS return_status,
+    CASE
+        WHEN cs.total_quantity_on_hand < 10 THEN 'Low Stock'
+        WHEN cs.total_quantity_on_hand < 50 THEN 'Moderate Stock'
+        ELSE 'Sufficient Stock'
+    END AS stock_status
+FROM
+    CombinedStats cs
+WHERE
+    cs.total_sales > 0
+ORDER BY
+    total_return_value DESC, total_sales DESC
+LIMIT 10;

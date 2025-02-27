@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserVotes AS (
+    SELECT 
+        v.UserId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON vt.Id = v.VoteTypeId
+    GROUP BY 
+        v.UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(b.BadgeCount, 0) AS BadgeCount,
+    COALESCE(b.BadgeNames, 'No Badges') AS BadgeNames,
+    COALESCE(up.UpVotes, 0) - COALESCE(down.DownVotes, 0) AS NetVotes,
+    COUNT(DISTINCT rp.PostId) AS TotalPosts,
+    MAX(rp.ViewCount) AS MaxViewCount,
+    MAX(CASE WHEN rp.PostRank = 1 THEN rp.Score ELSE NULL END) AS TopScore
+FROM 
+    Users u
+LEFT JOIN 
+    UserBadges b ON u.Id = b.UserId
+LEFT JOIN 
+    UserVotes up ON u.Id = up.UserId
+LEFT JOIN 
+    UserVotes down ON u.Id = down.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+WHERE 
+    u.Reputation > 100
+GROUP BY 
+    u.Id, u.DisplayName, b.BadgeCount, b.BadgeNames
+HAVING 
+    COUNT(DISTINCT rp.PostId) > 5
+ORDER BY 
+    NetVotes DESC,
+    MaxViewCount DESC
+FETCH FIRST 10 ROWS ONLY;

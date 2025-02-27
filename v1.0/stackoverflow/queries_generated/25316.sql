@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.Score, p.ViewCount, u.DisplayName
+),
+FilteredTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, '> <')) AS Tag
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByScore <= 10
+),
+TagCounts AS (
+    SELECT 
+        Tag, COUNT(*) AS TagCount
+    FROM 
+        FilteredTags
+    GROUP BY 
+        Tag
+    ORDER BY 
+        TagCount DESC
+),
+TopTags AS (
+    SELECT 
+        Tag, TagCount
+    FROM 
+        TagCounts
+    WHERE 
+        TagCount > 5  -- Only include tags that appear more than 5 times
+)
+SELECT 
+    rt.PostId,
+    rt.Title,
+    rt.Score,
+    rt.ViewCount,
+    rt.OwnerDisplayName,
+    tt.Tag,
+    tt.TagCount
+FROM 
+    RankedPosts rt
+JOIN 
+    TopTags tt ON rt.Tags LIKE '%' || tt.Tag || '%'
+ORDER BY 
+    rt.Score DESC, tt.TagCount DESC;

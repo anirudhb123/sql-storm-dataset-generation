@@ -1,0 +1,65 @@
+
+WITH movie_ratings AS (
+    SELECT 
+        mt.id AS movie_id, 
+        COUNT(ci.id) AS total_cast, 
+        AVG(COALESCE(r.rating, 0)) AS avg_rating
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_info mi ON mt.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            AVG(rating) AS rating 
+         FROM 
+            ratings 
+         GROUP BY movie_id) r ON r.movie_id = mt.id
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    WHERE 
+        mt.production_year >= 2000
+    GROUP BY 
+        mt.id
+), 
+top_movies AS (
+    SELECT 
+        movie_id, 
+        avg_rating, 
+        total_cast,
+        RANK() OVER (ORDER BY avg_rating DESC, total_cast ASC) AS rank
+    FROM 
+        movie_ratings
+)
+SELECT 
+    t.title, 
+    c.name AS actor_name, 
+    m.company_name AS production_company, 
+    tr.role AS character_role, 
+    tm.avg_rating
+FROM 
+    top_movies tm
+JOIN 
+    title t ON tm.movie_id = t.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id AND ci.nr_order = cc.id
+JOIN 
+    aka_name c ON ci.person_id = c.person_id
+JOIN 
+    (SELECT 
+        mc.movie_id, 
+        cn.name AS company_name 
+     FROM 
+        movie_companies mc
+     JOIN 
+        company_name cn ON mc.company_id = cn.id
+     WHERE 
+        mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Production')) m ON m.movie_id = t.id
+JOIN 
+    role_type tr ON ci.role_id = tr.id
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.avg_rating DESC;

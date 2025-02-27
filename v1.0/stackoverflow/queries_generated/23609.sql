@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasonNames
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON cr.Id::text = ph.Comment
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+UserPostData AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.TotalPosts,
+        us.UpVotes,
+        us.DownVotes,
+        us.BadgeCount,
+        rp.PostRank,
+        COALESCE(cr.CloseReasonNames, 'None') AS CloseReasons
+    FROM 
+        UserStats us
+    LEFT JOIN 
+        RankedPosts rp ON us.UserId = rp.OwnerUserId
+    LEFT JOIN 
+        CloseReasons cr ON cr.PostId = rp.PostId
+    WHERE 
+        us.Reputation > 1000
+)
+
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    TotalPosts,
+    UpVotes,
+    DownVotes,
+    BadgeCount,
+    CloseReasons,
+    PostRank,
+    CASE 
+        WHEN UpVotes - DownVotes > 0 THEN 'Positive'
+        WHEN UpVotes - DownVotes < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM 
+    UserPostData
+WHERE 
+    PostRank = 1
+ORDER BY 
+    Reputation DESC NULLS LAST, 
+    UpVotes - DownVotes DESC, 
+    CloseReasons;

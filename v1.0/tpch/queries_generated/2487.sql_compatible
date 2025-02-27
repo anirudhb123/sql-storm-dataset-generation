@@ -1,0 +1,72 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total,
+        COUNT(*) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N' 
+        AND o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        ARRAY_AGG(DISTINCT s.s_name) AS supplier_names
+    FROM 
+        partsupp ps
+    JOIN 
+        RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+    WHERE 
+        rs.rank = 1
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(si.supplier_names, ARRAY[]::VARCHAR[]) AS top_suppliers,
+    os.order_total,
+    os.item_count,
+    CASE 
+        WHEN os.order_total IS NULL THEN 'No Orders'
+        WHEN os.order_total > 1000 THEN 'High Value Order'
+        ELSE 'Standard Order'
+    END AS order_category
+FROM 
+    part p
+LEFT JOIN 
+    SupplierInfo si ON p.p_partkey = si.ps_partkey
+LEFT JOIN 
+    OrderStats os ON os.o_orderkey IN (
+        SELECT 
+            o.o_orderkey 
+        FROM 
+            orders o 
+        JOIN 
+            lineitem l ON o.o_orderkey = l.l_orderkey 
+        WHERE 
+            l.l_partkey = p.p_partkey
+    )
+WHERE 
+    p.p_retailprice > 50.00
+ORDER BY 
+    p.p_partkey;

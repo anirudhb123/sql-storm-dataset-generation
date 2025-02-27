@@ -1,0 +1,77 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate >= '2023-01-01'
+    UNION ALL
+    SELECT
+        oh.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC)
+    FROM
+        OrderHierarchy oh
+    JOIN
+        orders o ON oh.o_orderkey = o.o_orderkey
+    WHERE
+        o.o_orderdate < '2023-12-31'
+),
+PartSupplier AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_availqty
+    FROM
+        part p
+    JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY
+        p.p_partkey, p.p_name
+),
+SupplierDetails AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        n.n_name,
+        SUM(ps.ps_supplycost) AS total_cost
+    FROM
+        supplier s
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name, n.n_name
+)
+SELECT
+    oh.o_orderkey,
+    oh.o_orderdate,
+    oh.o_totalprice,
+    ps.p_name,
+    ps.total_availqty,
+    sd.s_name,
+    sd.total_cost,
+    CASE 
+        WHEN oh.o_orderstatus = 'F' THEN 'Completed'
+        ELSE 'Pending'
+    END AS order_status_analysis
+FROM
+    OrderHierarchy oh
+LEFT JOIN 
+    lineitem l ON oh.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    PartSupplier ps ON l.l_partkey = ps.p_partkey
+LEFT JOIN 
+    SupplierDetails sd ON l.l_suppkey = sd.s_suppkey
+WHERE
+    ps.total_availqty IS NOT NULL
+    AND sd.total_cost IS NOT NULL
+ORDER BY
+    oh.o_orderdate DESC, oh.o_orderkey;

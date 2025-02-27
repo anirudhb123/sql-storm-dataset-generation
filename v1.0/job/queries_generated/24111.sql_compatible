@@ -1,0 +1,67 @@
+
+WITH RecursiveMovies AS (
+    SELECT 
+        mt.title, 
+        mt.production_year, 
+        mk.keyword, 
+        mk.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY mt.production_year) AS total_count
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        ak.name AS actor_name, 
+        ct.kind AS role_kind, 
+        c.order AS role_order, 
+        COUNT(*) OVER (PARTITION BY ak.person_id ORDER BY c.nr_order ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS total_roles,
+        c.movie_id
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    JOIN 
+        comp_cast_type ct ON c.role_id = ct.id
+    WHERE 
+        ak.name IS NOT NULL
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id, 
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc 
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    r.title AS movie_title,
+    r.production_year,
+    r.keyword,
+    a.actor_name,
+    a.role_kind,
+    a.role_order,
+    COALESCE(m.company_count, 0) AS company_count,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = r.movie_id) AS info_count,
+    CASE
+        WHEN r.total_count = 1 THEN 'Solo Release'
+        WHEN r.total_count > 1 THEN 'Part of Series'
+        ELSE 'Unknown'
+    END AS release_type
+FROM 
+    RecursiveMovies r
+LEFT JOIN 
+    ActorRoles a ON r.movie_id = a.movie_id
+LEFT JOIN 
+    MovieCompanies m ON r.movie_id = m.movie_id
+WHERE 
+    r.rn <= 5 AND r.production_year >= 2000
+ORDER BY 
+    r.production_year DESC, 
+    r.title
+LIMIT 100;

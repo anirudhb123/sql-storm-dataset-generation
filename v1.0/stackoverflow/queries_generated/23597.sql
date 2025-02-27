@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS RankByScore,
+        RANK() OVER (ORDER BY p.CreationDate DESC) AS RankByDate
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate > (CURRENT_DATE - INTERVAL '1 year')
+    AND 
+        p.Score IS NOT NULL
+),
+AggregatedStats AS (
+    SELECT 
+        p.Id,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.UserId IS NOT NULL AND vt.Id = 2) AS UpVoteCount,
+        SUM(v.UserId IS NOT NULL AND vt.Id = 3) AS DownVoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        b.Date >= CURRENT_DATE - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        MAX(ph.CreationDate) AS LastClosed
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    GROUP BY 
+        ph.PostId
+),
+FinalOutput AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        as.CommentCount,
+        as.UpVoteCount,
+        as.DownVoteCount,
+        cp.LastClosed,
+        CASE 
+            WHEN cp.LastClosed IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus
+    FROM 
+        RankedPosts rp
+    JOIN 
+        AggregatedStats as ON rp.PostId = as.Id
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.RankByScore <= 5 -- Top 5 ranked by score for each type
+    ORDER BY 
+        rp.CreationDate DESC
+)
+SELECT 
+    Title,
+    CreationDate,
+    Score,
+    CommentCount,
+    UpVoteCount,
+    DownVoteCount,
+    PostStatus,
+    CASE 
+        WHEN Score < 0 THEN 'Negative Feedback'
+        WHEN Score BETWEEN 0 AND 5 THEN 'Moderate Engagement'
+        ELSE 'Highly Engaging'
+    END AS EngagementLevel
+FROM 
+    FinalOutput;

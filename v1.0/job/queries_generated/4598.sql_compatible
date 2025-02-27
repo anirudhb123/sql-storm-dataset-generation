@@ -1,0 +1,46 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        RANK() OVER (PARTITION BY m.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_by_cast_size
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.movie_id ORDER BY k.keyword) AS keyword_rank
+    FROM 
+        RankedMovies m
+    JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    COALESCE(m.title, 'Unknown Title') AS movie_title,
+    COALESCE(y.year, 'Year Not Specified') AS production_year,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    MoviesWithKeywords m
+LEFT JOIN 
+    movie_info mi ON m.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre')
+LEFT JOIN 
+    cast_info c ON m.movie_id = c.movie_id
+LEFT JOIN 
+    (SELECT DISTINCT production_year AS year FROM aka_title) y ON y.year = m.production_year
+GROUP BY 
+    m.movie_id, m.title
+HAVING 
+    COUNT(DISTINCT c.person_id) > 3
+ORDER BY 
+    total_cast DESC, movie_title;

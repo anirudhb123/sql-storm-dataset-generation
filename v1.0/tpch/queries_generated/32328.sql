@@ -1,0 +1,57 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    INNER JOIN nation_hierarchy nh ON n.n_nationkey = nh.n_regionkey
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS unique_customers,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_by_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_orderstatus
+),
+supplier_part_data AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+region_summary AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(sp.total_available) AS total_parts_available,
+        AVG(sp.average_supply_cost) AS avg_supply_cost
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier_part_data sp ON n.n_nationkey = sp.s_suppkey
+    GROUP BY r.r_regionkey, r.r_name
+)
+SELECT 
+    r.r_name AS region,
+    os.o_orderdate AS order_date,
+    os.total_revenue AS revenue,
+    os.unique_customers AS unique_customer_count,
+    COALESCE(os.rank_by_revenue, 0) AS revenue_rank,
+    rs.total_parts_available AS total_available_parts,
+    rs.avg_supply_cost AS average_supply_cost,
+    nh.level AS nation_hierarchy_level
+FROM order_summary os
+JOIN region_summary rs ON rs.nation_count > 0
+LEFT JOIN nation_hierarchy nh ON nh.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = rs.r_regionkey LIMIT 1)
+WHERE os.total_revenue > (SELECT AVG(total_revenue) FROM order_summary) 
+AND rs.avg_supply_cost IS NOT NULL
+ORDER BY revenue DESC, unique_customer_count DESC;

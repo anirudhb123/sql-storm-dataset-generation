@@ -1,0 +1,51 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT ws.web_site_sk, 
+           CAST(dd.d_date AS DATE) AS sales_date, 
+           SUM(ws.ws_quantity) AS total_quantity,
+           SUM(ws.ws_net_profit) AS total_net_profit,
+           ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY dd.d_date) AS sales_rank
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY ws.web_site_sk, dd.d_date
+),
+customer_counts AS (
+    SELECT c.c_customer_sk,
+           COUNT(DISTINCT ws.ws_order_number) AS order_count,
+           MAX(dd.d_date) AS last_purchase_date
+    FROM customer c 
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY c.c_customer_sk
+),
+max_return AS (
+    SELECT sr_customer_sk,
+           SUM(sr_return_quantity) AS total_returns
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+final_summary AS (
+    SELECT c.c_customer_sk,
+           COALESCE(cc.order_count, 0) AS order_count,
+           COALESCE(mr.total_returns, 0) AS total_returns,
+           SUM(ss.total_net_profit) AS net_profit
+    FROM customer c
+    LEFT JOIN customer_counts cc ON c.c_customer_sk = cc.c_customer_sk
+    LEFT JOIN max_return mr ON c.c_customer_sk = mr.sr_customer_sk
+    LEFT JOIN sales_summary ss ON ss.web_site_sk = c.c_current_addr_sk
+    GROUP BY c.c_customer_sk, cc.order_count, mr.total_returns
+)
+SELECT fs.c_customer_sk,
+       fs.order_count,
+       fs.total_returns,
+       fs.net_profit,
+       CASE 
+           WHEN fs.net_profit > 1000 THEN 'High Value'
+           WHEN fs.net_profit BETWEEN 500 AND 1000 THEN 'Medium Value'
+           ELSE 'Low Value'
+       END AS customer_value
+FROM final_summary fs
+WHERE fs.order_count > 0
+ORDER BY fs.net_profit DESC
+FETCH FIRST 100 ROWS ONLY;

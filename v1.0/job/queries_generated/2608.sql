@@ -1,0 +1,61 @@
+WITH MovieWithKeywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        string_agg(mk.keyword, ', ') AS keywords,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    WHERE 
+        mt.production_year >= 2000
+    GROUP BY 
+        mt.id, mt.title
+),
+CastInfoRanked AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    WHERE 
+        an.name IS NOT NULL
+),
+TopKMovies AS (
+    SELECT 
+        mwk.movie_id,
+        mwk.title,
+        mwk.keywords,
+        mwk.company_count,
+        COUNT(DISTINCT cri.person_id) AS actor_count
+    FROM 
+        MovieWithKeywords mwk
+    LEFT JOIN 
+        CastInfoRanked cri ON mwk.movie_id = cri.movie_id
+    GROUP BY 
+        mwk.movie_id, mwk.title, mwk.keywords, mwk.company_count
+)
+SELECT 
+    t.movie_id,
+    t.title,
+    t.keywords,
+    t.company_count,
+    COALESCE(t.actor_count, 0) AS actor_count,
+    CASE 
+        WHEN t.company_count > 5 THEN 'High Production Company'
+        WHEN t.company_count BETWEEN 3 AND 5 THEN 'Medium Production Company'
+        ELSE 'Low Production Company'
+    END AS production_scale
+FROM 
+    TopKMovies t
+WHERE 
+    t.actor_count > 0
+ORDER BY 
+    t.company_count DESC, 
+    t.actor_count DESC;

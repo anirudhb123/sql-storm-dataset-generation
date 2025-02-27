@@ -1,0 +1,92 @@
+
+WITH demographic_info AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        DENSE_RANK() OVER (PARTITION BY cd_gender, cd_marital_status ORDER BY cd_purchase_estimate DESC) AS rank
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_purchase_estimate IS NOT NULL
+),
+inventory_summary AS (
+    SELECT 
+        inv_warehouse_sk,
+        SUM(inv_quantity_on_hand) AS total_quantity,
+        COUNT(DISTINCT inv_item_sk) AS distinct_items
+    FROM 
+        inventory
+    GROUP BY 
+        inv_warehouse_sk
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk, 
+        COALESCE(c.c_first_name, 'Unknown') AS first_name,
+        COALESCE(c.c_last_name, c.c_email_address, 'Anonymous') AS last_name,
+        cd.cd_gender,
+        (CASE 
+            WHEN cd.cd_purchase_estimate > 1000 THEN 'High Value'
+            WHEN cd.cd_purchase_estimate BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value' 
+        END) AS value_category,
+        ROW_NUMBER() OVER (PARTITION BY COALESCE(cd.cd_gender, 'U') ORDER BY cd.cd_purchase_estimate DESC) AS customer_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+return_analysis AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        COUNT(DISTINCT sr_ticket_number) AS return_count,
+        EXTRACT(YEAR FROM d_date) AS return_year
+    FROM 
+        store_returns sr
+    JOIN 
+        date_dim dd ON sr.sr_returned_date_sk = dd.d_date_sk
+    GROUP BY 
+        sr_item_sk, return_year
+),
+sales_and_returns AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COALESCE(r.total_returned, 0) AS total_returned,
+        (SUM(ws.ws_ext_sales_price) - COALESCE(r.total_returned, 0)) AS net_sales
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        return_analysis r ON ws.ws_item_sk = r.sr_item_sk
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    cu.first_name,
+    cu.last_name,
+    cu.value_category,
+    di.rank,
+    inv.total_quantity,
+    s.total_sales,
+    s.total_returned,
+    CASE 
+        WHEN s.total_sales > 0 THEN (s.total_returned::DECIMAL / s.total_sales) ELSE NULL 
+    END AS return_rate
+FROM 
+    customer_summary cu
+JOIN 
+    demographic_info di ON cu.cd_gender = di.cd_gender AND cu.customer_rank = di.rank
+JOIN 
+    inventory_summary inv ON inv.inv_warehouse_sk = (SELECT w.w_warehouse_sk FROM warehouse w ORDER BY RANDOM() LIMIT 1)
+JOIN 
+    sales_and_returns s ON cu.c_customer_sk = s.ws_item_sk
+WHERE 
+    cu.value_category != 'Low Value' 
+    AND (cu.cd_gender = 'M' OR cu.cd_gender IS NULL)
+    AND inv.total_quantity > 20
+ORDER BY 
+    return_rate DESC NULLS LAST
+LIMIT 100 OFFSET 0;

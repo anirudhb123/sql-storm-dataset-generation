@@ -1,0 +1,49 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.orderkey, o.custkey, o.orderdate, o.totalprice, o.orderstatus
+    FROM orders o
+    WHERE o.orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.orderkey, o.custkey, o.orderdate, o.totalprice, o.orderstatus
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.custkey = oh.custkey
+    WHERE o.orderdate > oh.orderdate
+),
+SupplierCost AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_supplycost) as total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, ROW_NUMBER() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) as supplier_rank
+    FROM supplier s
+    JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(TopSuppliers.s_name, 'Not Available') as supplier_name,
+    OrderHierarchy.orderdate,
+    OrderHierarchy.totalprice,
+    CASE 
+        WHEN s.s_acctbal IS NULL THEN 'No Balance'
+        ELSE CAST(s.s_acctbal AS VARCHAR)
+    END AS supplier_balance,
+    COUNT(DISTINCT oh.custkey) AS number_of_customers
+FROM part p
+LEFT JOIN SupplierCost sc ON p.p_partkey = sc.ps_partkey
+LEFT JOIN TopSuppliers ON sc.ps_suppkey = TopSuppliers.s_suppkey
+LEFT JOIN supplier s ON TopSuppliers.s_suppkey = s.s_suppkey
+LEFT JOIN OrderHierarchy oh ON oh.custkey = s.s_nationkey
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    TopSuppliers.s_name, 
+    OrderHierarchy.orderdate, 
+    s.s_acctbal
+ORDER BY 
+    p.p_partkey ASC, 
+    OrderHierarchy.totalprice DESC;

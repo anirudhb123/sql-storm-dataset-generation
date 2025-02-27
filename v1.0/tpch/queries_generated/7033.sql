@@ -1,0 +1,52 @@
+WITH RegionStats AS (
+    SELECT 
+        r.r_name AS RegionName,
+        COUNT(DISTINCT n.n_nationkey) AS NationCount,
+        SUM(s.s_acctbal) AS TotalSupplierBalance
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_nationkey,
+        COUNT(DISTINCT o.o_orderkey) AS TotalOrders,
+        SUM(o.o_totalprice) AS TotalOrderValue
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_nationkey
+),
+PartStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS TotalAvailableQty,
+        AVG(ps.ps_supplycost) AS AvgSupplyCost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    rs.RegionName,
+    rs.NationCount,
+    rs.TotalSupplierBalance,
+    cos.TotalOrders,
+    cos.TotalOrderValue,
+    ps.TotalAvailableQty,
+    ps.AvgSupplyCost
+FROM 
+    RegionStats rs
+LEFT JOIN 
+    CustomerOrderStats cos ON cos.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = rs.RegionName))
+LEFT JOIN 
+    PartStats ps ON EXISTS (SELECT 1 FROM lineitem l WHERE l.l_partkey = ps.ps_partkey AND l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = cos.c_nationkey)))
+ORDER BY 
+    rs.TotalSupplierBalance DESC, cos.TotalOrderValue DESC;

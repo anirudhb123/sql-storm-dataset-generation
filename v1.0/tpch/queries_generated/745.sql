@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rnk,
+        p.p_partkey,
+        p.p_retailprice
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerTotalOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+)
+SELECT
+    ns.n_name AS nation,
+    cs.c_name AS customer_name,
+    cs.total_orders,
+    cs.total_spent,
+    COALESCE(rs.s_name, 'No Supplier') AS best_supplier,
+    COALESCE(rs.p_retailprice, 0) AS supplier_price,
+    CASE 
+        WHEN cs.total_spent > 10000 THEN 'High Value'
+        WHEN cs.total_spent BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM
+    nation ns
+LEFT JOIN
+    customer_total_orders cs ON cs.total_orders > 0
+LEFT JOIN
+    supplier s ON cs.c_custkey = s.s_nationkey
+LEFT JOIN
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+LEFT JOIN
+    lineitem l ON l.l_suppkey = s.s_suppkey
+WHERE
+    l.l_returnflag = 'N' AND
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY
+    ns.n_name, cs.c_name, cs.total_orders, cs.total_spent, rs.s_name, rs.p_retailprice
+ORDER BY
+    cs.total_spent DESC;

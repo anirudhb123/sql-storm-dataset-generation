@@ -1,0 +1,66 @@
+WITH RECURSIVE order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND 
+        o.o_orderdate < DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+top_orders AS (
+    SELECT 
+        orderkey, 
+        total_sales 
+    FROM 
+        order_summary
+    WHERE 
+        order_rank = 1
+),
+supplier_summary AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(s.s_acctbal) AS avg_account_balance
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        ps.ps_suppkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    COALESCE(SUM(ts.total_sales), 0) AS total_sales,
+    COALESCE(SUM(ss.total_quantity), 0) AS total_quantity_sold,
+    CASE 
+        WHEN AVG(ss.avg_account_balance) IS NULL 
+        THEN 'No Account Balance Data' 
+        ELSE CONCAT('Average: ', CAST(AVG(ss.avg_account_balance) AS VARCHAR))
+    END AS account_balance_info
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    top_orders ts ON c.c_custkey = ts.orderkey
+LEFT JOIN 
+    supplier_summary ss ON ss.ps_suppkey = ts.orderkey
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_sales DESC NULLS LAST;

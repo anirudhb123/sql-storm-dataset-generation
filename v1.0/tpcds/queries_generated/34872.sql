@@ -1,0 +1,71 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        ss_sold_date_sk,
+        SUM(ss_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_net_profit) DESC) AS rank
+    FROM 
+        store_sales
+    JOIN 
+        store ON store_sales.ss_store_sk = store.s_store_sk
+    WHERE 
+        ss_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        s_store_sk, s_store_name, ss_sold_date_sk
+),
+top_stores AS (
+    SELECT 
+        s_store_sk, 
+        s_store_name, 
+        total_net_profit
+    FROM 
+        sales_hierarchy 
+    WHERE 
+        rank <= 10
+),
+customer_metrics AS (
+    SELECT 
+        c_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_paid_inc_tax) AS total_spent,
+        cd_gender,
+        COALESCE(hd_buy_potential, 'UNKNOWN') AS buying_potential
+    FROM 
+        web_sales 
+    JOIN 
+        customer ON web_sales.ws_bill_customer_sk = customer.c_customer_sk
+    LEFT JOIN 
+        household_demographics ON customer.c_current_hdemo_sk = household_demographics.hd_demo_sk
+    JOIN 
+        customer_demographics ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    GROUP BY 
+        c_customer_sk, cd_gender, hd_buy_potential
+)
+SELECT 
+    c.customer_sk,
+    COUNT(c_metrics.total_orders) AS order_count,
+    SUM(c_metrics.total_spent) AS total_spent,
+    MAX(c_metrics.buying_potential) AS potential,
+    ts.total_net_profit AS top_store_profit
+FROM 
+    customer c
+LEFT JOIN 
+    customer_metrics c_metrics ON c.c_customer_sk = c_metrics.c_customer_sk
+LEFT JOIN 
+    (SELECT 
+        s_store_sk, 
+        SUM(total_net_profit) AS total_net_profit 
+     FROM 
+        top_stores 
+     GROUP BY 
+        s_store_sk) ts ON ts.s_store_sk IN (SELECT s_store_sk FROM top_stores)
+WHERE 
+    c.c_birth_year < 1980 
+    AND (c.c_preferred_cust_flag = 'Y' OR c.c_email_address IS NOT NULL)
+GROUP BY 
+    c.customer_sk, ts.total_net_profit
+ORDER BY 
+    total_spent DESC;

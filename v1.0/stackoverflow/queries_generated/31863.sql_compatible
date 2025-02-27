@@ -1,0 +1,70 @@
+
+WITH RecursiveTopTags AS (
+    SELECT 
+        Id, 
+        TagName, 
+        COUNT(PostId) AS PostCount
+    FROM Tags
+    LEFT JOIN Posts ON Tags.Id = ANY (string_to_array(Tags, '>', 'int[]')) 
+    GROUP BY Id, TagName
+    HAVING COUNT(PostId) > 0
+),
+RankedTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM RecursiveTopTags
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        p.CreationDate,
+        pt.Name AS PostType,
+        rt.TagName
+    FROM Posts p
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    JOIN PostsTags ptg ON p.Id = ptg.PostId 
+    JOIN RankedTags rt ON ptg.TagId = rt.TagId
+    GROUP BY p.Id, p.Title, p.ViewCount, p.Score, p.CreationDate, pt.Name, rt.TagName
+    HAVING COUNT(c.Id) >= 5 AND p.ViewCount > 100
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        MIN(ph.CreationDate) AS FirstEditDate,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+FinalBenchmark AS (
+    SELECT 
+        pp.PostId,
+        pp.Title,
+        pp.ViewCount,
+        pp.CommentCount,
+        ph.LastEditDate,
+        ph.FirstEditDate,
+        ph.CloseCount,
+        pp.TagName
+    FROM PopularPosts pp
+    JOIN PostHistoryData ph ON pp.PostId = ph.PostId
+    WHERE pp.ViewCount > 500 AND ph.CloseCount = 0
+)
+SELECT 
+    fb.*,
+    CASE
+        WHEN fb.LastEditDate IS NOT NULL THEN EXTRACT(EPOCH FROM (CAST('2024-10-01 12:34:56' AS timestamp) - fb.LastEditDate)) / 60
+        ELSE NULL
+    END AS MinutesSinceLastEdit,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+FROM FinalBenchmark fb
+LEFT JOIN Votes v ON fb.PostId = v.PostId
+GROUP BY fb.PostId, fb.Title, fb.ViewCount, fb.CommentCount, fb.LastEditDate, fb.FirstEditDate, fb.CloseCount, fb.TagName
+ORDER BY fb.ViewCount DESC, MinutesSinceLastEdit ASC;

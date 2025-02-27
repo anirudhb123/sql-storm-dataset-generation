@@ -1,0 +1,59 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        d.d_year AS sales_year
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2021 AND 2023
+    GROUP BY 
+        ws.web_site_id, d.d_year
+),
+customer_summary AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(cd.cd_purchase_estimate) AS total_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status = 'M'
+    GROUP BY 
+        cd.cd_gender
+),
+returns_summary AS (
+    SELECT 
+        sr_returned_date_sk,
+        COUNT(sr_item_sk) AS total_returns,
+        SUM(sr_return_amt) AS total_returned_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returned_date_sk
+)
+SELECT 
+    sd.web_site_id,
+    sd.total_sales,
+    sd.avg_net_profit,
+    cs.cd_gender,
+    cs.customer_count,
+    cs.total_estimate,
+    rs.total_returns,
+    rs.total_returned_amount
+FROM 
+    sales_data sd
+JOIN 
+    customer_summary cs ON sd.sales_year = YEAR(CURDATE())
+LEFT JOIN 
+    returns_summary rs ON sd.sales_year = YEAR(CURDATE())
+ORDER BY 
+    sd.total_sales DESC, cs.customer_count DESC
+LIMIT 10;

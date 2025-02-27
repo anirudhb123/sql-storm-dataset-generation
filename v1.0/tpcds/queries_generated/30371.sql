@@ -1,0 +1,62 @@
+
+WITH RECURSIVE sales_totals AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_moy = 10)
+    GROUP BY 
+        ws_item_sk
+),
+customer_aggregates AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_ext_sales_price) AS total_amount_spent
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+top_items AS (
+    SELECT 
+        st.ws_item_sk,
+        st.total_sales,
+        DENSE_RANK() OVER (ORDER BY st.total_sales DESC) AS sales_rank
+    FROM 
+        sales_totals st
+    WHERE 
+        st.rn = 1
+),
+item_rank_and_price AS (
+    SELECT 
+        ti.ws_item_sk,
+        ti.total_sales,
+        i.i_current_price,
+        ti.total_sales / i.i_current_price AS sales_to_price_ratio
+    FROM 
+        top_items ti
+    JOIN 
+        item i ON ti.ws_item_sk = i.i_item_sk
+    WHERE 
+        ti.sales_rank <= 10
+)
+SELECT 
+    ca.c_customer_sk,
+    ca.total_orders,
+    ca.total_amount_spent,
+    irp.sales_to_price_ratio
+FROM 
+    customer_aggregates ca
+FULL OUTER JOIN 
+    item_rank_and_price irp ON ca.total_amount_spent IS NOT NULL
+WHERE 
+    (ca.total_orders > 1 OR irp.sales_to_price_ratio IS NOT NULL)
+ORDER BY 
+    ca.total_amount_spent DESC NULLS LAST, 
+    irp.sales_to_price_ratio DESC;

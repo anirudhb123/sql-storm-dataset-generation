@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    UNION ALL
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        sh.total_profit + SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        SalesHierarchy sh
+    JOIN 
+        customer c ON sh.c_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        sh.total_profit > 1000
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, sh.total_profit
+)
+SELECT 
+    c.c_customer_id,
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+    COALESCE(SUM(ws.ws_net_profit), 0) AS web_sales_profit,
+    COALESCE(SUM(cs.cs_net_profit), 0) AS catalog_sales_profit,
+    COALESCE(SUM(ss.ss_net_profit), 0) AS store_sales_profit,
+    STDEVP(ws.ws_net_profit) OVER (PARTITION BY c.c_customer_sk) AS profit_std_dev,
+    NULLIF((SELECT COUNT(DISTINCT ws_ship_date_sk)
+            FROM web_sales
+            WHERE ws_bill_customer_sk = c.c_customer_sk), 0) AS unique_shipped_days
+FROM 
+    customer c
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+LEFT JOIN 
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+WHERE 
+    c.c_birth_year IS NOT NULL
+    AND EXISTS (SELECT 1 FROM store_returns sr WHERE sr.sr_customer_sk = c.c_customer_sk)
+GROUP BY 
+    c.c_customer_id, c.c_first_name, c.c_last_name
+HAVING 
+    SUM(ws.ws_net_profit) + SUM(cs.cs_net_profit) + SUM(ss.ss_net_profit) > 5000
+ORDER BY 
+    total_profit DESC
+LIMIT 100;

@@ -1,0 +1,25 @@
+SELECT 
+    p.p_name AS Part_Name, 
+    s.s_name AS Supplier_Name, 
+    c.c_name AS Customer_Name,
+    o.o_orderkey AS Order_ID,
+    l.l_quantity AS Quantity_Ordered,
+    CONCAT('Supplier: ', s.s_name, ' - Part: ', p.p_name, ' - Customer: ', c.c_name) AS Benchmark_String
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    LENGTH(p.p_name) > 10 
+    AND CHARINDEX('Part', CONCAT('Supplier: ', s.s_name, ' - Part: ', p.p_name, ' - Customer: ', c.c_name)) > 0
+    AND o.o_orderstatus = 'O'
+ORDER BY 
+    p.p_name, s.s_name;

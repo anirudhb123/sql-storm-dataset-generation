@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Owner,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank,
+        RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+        AND p.PostTypeId = 1  -- Only Questions
+),
+TopUsers AS (
+    SELECT 
+        Owner,
+        COUNT(PostId) AS PostCount,
+        SUM(Score) AS TotalScore,
+        SUM(ViewCount) AS TotalViews
+    FROM 
+        RankedPosts
+    WHERE 
+        ViewRank <= 5
+    GROUP BY 
+        Owner
+)
+SELECT 
+    u.DisplayName AS User,
+    u.Reputation,
+    tu.PostCount,
+    tu.TotalScore,
+    tu.TotalViews,
+    COUNT(DISTINCT b.Id) AS BadgeCount,
+    STRING_AGG(DISTINCT bt.Name, ', ') AS BadgeNames
+FROM 
+    TopUsers tu
+JOIN 
+    Users u ON tu.Owner = u.DisplayName
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    BadgeTypes bt ON b.Id = bt.BadgeId
+GROUP BY 
+    u.DisplayName, u.Reputation
+ORDER BY 
+    tu.TotalScore DESC, 
+    tu.TotalViews DESC;

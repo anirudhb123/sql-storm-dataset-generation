@@ -1,0 +1,77 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        0 AS depth
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        sh.depth + 1
+    FROM 
+        supplier s
+    JOIN 
+        SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE 
+        s.s_acctbal + sh.s_acctbal > 1500
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    r.r_name AS region,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(s.s_acctbal) AS avg_acct_balance,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+FROM 
+    part p 
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    AND (p.p_size BETWEEN 10 AND 20 OR p.p_mfgr = 'Manufacturer1')
+    AND s.s_comment IS NOT NULL
+GROUP BY 
+    p.p_partkey, p.p_name, r.r_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY 
+    r.r_name, total_revenue DESC
+UNION
+SELECT 
+    NULL AS p_partkey,
+    'Total' AS p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    NULL AS region,
+    NULL AS total_orders,
+    AVG(s.s_acctbal) AS avg_acct_balance,
+    NULL AS revenue_rank
+FROM 
+    part p 
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+WHERE 
+    l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    AND s.s_acctbal IS NOT NULL;

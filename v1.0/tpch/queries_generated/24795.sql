@@ -1,0 +1,52 @@
+WITH RECURSIVE customer_benchmark AS (
+    SELECT c_custkey, c_name, c_acctbal, c_nationkey, 1 AS level
+    FROM customer
+    WHERE c_acctbal > (SELECT AVG(c_acctbal) FROM customer) 
+      AND c_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name LIKE '%United%')
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, cb.level + 1
+    FROM customer_benchmark cb
+    JOIN customer c ON c.c_nationkey = cb.c_nationkey
+    WHERE c.c_acctbal < cb.c_acctbal
+      AND cb.level < 5
+),
+supplier_details AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    INNER JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           COUNT(l.l_linenumber) AS total_lines,
+           MAX(l.l_shipdate) AS latest_shipdate
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '2023-01-01' 
+      AND l.l_shipdate < DATE '2023-10-01'
+    GROUP BY l.l_orderkey
+),
+order_details AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_clerk, 
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(ls.total_price) DESC) AS rank_order
+    FROM orders o
+    LEFT JOIN lineitem_summary ls ON o.o_orderkey = ls.l_orderkey
+    WHERE o.o_orderstatus IN ('F', 'P')
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_clerk
+)
+SELECT DISTINCT cb.c_name AS customer_name, 
+                sd.s_name AS supplier_name, 
+                od.o_orderkey, 
+                od.o_orderdate, 
+                od.rank_order,
+                CASE 
+                    WHEN cb.level > 3 THEN 'High Value'
+                    ELSE 'Moderate Value'
+                END AS customer_value_category
+FROM customer_benchmark cb
+LEFT JOIN order_details od ON cb.c_custkey = od.o_orderkey 
+LEFT JOIN supplier_details sd ON cb.c_nationkey = sd.total_supply_cost 
+WHERE od.rank_order < 5
+  AND sd.total_supply_cost IS NOT NULL
+  AND cb.c_name IS NOT NULL
+ORDER BY customer_value_category, sd.total_supply_cost DESC, cb.c_name;

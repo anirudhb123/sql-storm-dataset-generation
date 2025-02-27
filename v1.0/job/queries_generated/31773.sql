@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.movie_id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        c.country_code = 'USA'
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.movie_id
+    WHERE 
+        mh.level < 5 -- Limiting to 5 levels deep for performance
+)
+
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    COUNT(ci.person_id) AS cast_count,
+    AVG(CASE WHEN pi.info_type_id = 1 THEN 1 ELSE NULL END) AS avg_age, -- Assuming 1 represents age info
+    STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+    CASE 
+        WHEN h.production_year IS NULL THEN 'Unknown Year'
+        ELSE CAST(h.production_year AS text)
+    END AS production_year_text
+FROM 
+    movie_hierarchy h
+LEFT JOIN 
+    complete_cast cc ON h.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id
+WHERE 
+    h.production_year IS NOT NULL
+GROUP BY 
+    h.movie_id, h.title, h.production_year
+HAVING 
+    COUNT(ci.person_id) > 1
+ORDER BY 
+    h.production_year DESC, cast_count DESC
+LIMIT 100;
+
+-- This query benchmarks performance by:
+-- - Utilizing CTE for recursive relationships
+-- - Performing outer joins for aggregating data
+-- - Including window functions and string expressions
+-- - Complicated predicates and conditions in WHERE and HAVING clauses
+-- - NULL handling with CASE expressions

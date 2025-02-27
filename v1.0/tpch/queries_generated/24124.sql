@@ -1,0 +1,53 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, 1 AS hierarchy_level
+    FROM orders o
+    WHERE o.o_orderstatus <> 'F'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, oh.hierarchy_level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderkey <> oh.o_orderkey AND o.o_orderstatus <> 'F'
+),
+PartAvailability AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS nation_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2023-12-31'
+    GROUP BY l.l_orderkey
+),
+FilteredOrders AS (
+    SELECT oh.o_orderkey, os.total_revenue, l.unique_suppliers
+    FROM OrderHierarchy oh
+    LEFT JOIN LineItemSummary l ON oh.o_orderkey = l.l_orderkey
+    LEFT JOIN orders os ON oh.o_orderkey = os.o_orderkey
+    WHERE os.o_orderpriority IN ('HIGH', 'MEDIUM') AND os.o_totalprice IS NOT NULL
+),
+FinalReport AS (
+    SELECT p.p_partkey, SUM(pa.total_avail) AS total_avail, fo.total_revenue,
+           COUNT(DISTINCT si.s_suppkey) FILTER (WHERE si.rank <= 3) AS top_suppliers
+    FROM part p
+    LEFT JOIN PartAvailability pa ON p.p_partkey = pa.ps_partkey
+    LEFT JOIN FilteredOrders fo ON p.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = fo.o_orderkey)
+    LEFT JOIN SupplierInfo si ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = si.s_suppkey)
+    GROUP BY p.p_partkey, fo.total_revenue
+)
+SELECT p.p_partkey, p.p_name, f.total_avail, f.total_revenue, f.top_suppliers,
+       CASE WHEN f.total_revenue IS NULL THEN 'NO SALES' ELSE 'SALES MADE' END AS sales_status
+FROM part p
+JOIN FinalReport f ON p.p_partkey = f.p_partkey
+WHERE (f.total_revenue IS NOT NULL OR f.top_suppliers > 0) 
+  AND (f.total_avail IS NOT NULL AND f.total_avail > 0)
+ORDER BY p.p_partkey, f.total_revenue DESC NULLS LAST;

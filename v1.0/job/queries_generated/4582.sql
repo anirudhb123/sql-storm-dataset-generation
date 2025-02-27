@@ -1,0 +1,60 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) as movie_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+cast_summary AS (
+    SELECT 
+        c.movie_id, 
+        COUNT(c.person_id) AS total_cast,
+        STRING_AGG(a.name, ', ') AS cast_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+), 
+movie_info_with_keywords AS (
+    SELECT 
+        m.movie_id, 
+        m.info, 
+        k.keyword
+    FROM 
+        movie_info m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        m.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%plot%')
+)
+SELECT 
+    rm.title, 
+    rm.production_year, 
+    cs.total_cast, 
+    cs.cast_names, 
+    mi.info AS plot_info,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    cast_summary cs ON rm.title = cs.movie_id
+LEFT JOIN 
+    movie_info_with_keywords mi ON rm.title = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON rm.title = mk.movie_id
+WHERE 
+    rm.movie_rank <= 10
+GROUP BY 
+    rm.title, rm.production_year, cs.total_cast, cs.cast_names, mi.info
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 5
+ORDER BY 
+    rm.production_year DESC, 
+    keyword_count DESC;

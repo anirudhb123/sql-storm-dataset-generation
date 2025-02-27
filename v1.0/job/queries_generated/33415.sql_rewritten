@@ -1,0 +1,66 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        CONCAT(p.title, ' (Sequel of: ', m.title, ')') AS title,
+        m.production_year,
+        m.kind_id,
+        depth + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy p ON ml.movie_id = p.movie_id
+)
+
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    COUNT(DISTINCT c.person_id) AS cast_count,
+    MIN(p.info) AS info_note,
+    MAX(w.rank) AS max_rank,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+FROM 
+    movie_hierarchy h
+LEFT JOIN 
+    complete_cast cc ON h.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    movie_info mi ON h.movie_id = mi.movie_id AND mi.info_type_id IN (
+        SELECT id FROM info_type WHERE info IN ('Budget', 'Revenue')
+    )
+LEFT JOIN 
+    (SELECT 
+        movie_id, RANK() OVER (PARTITION BY movie_id ORDER BY info) AS rank
+     FROM 
+        movie_info
+     WHERE 
+        info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    ) w ON h.movie_id = w.movie_id
+LEFT JOIN 
+    movie_keyword mk ON h.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+WHERE 
+    h.production_year >= 2000
+GROUP BY 
+    h.movie_id, h.title, h.production_year
+HAVING 
+    COUNT(DISTINCT c.person_id) > 5
+ORDER BY 
+    max_rank DESC, h.production_year ASC;

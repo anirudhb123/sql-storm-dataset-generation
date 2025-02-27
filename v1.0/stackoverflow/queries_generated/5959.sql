@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    tgt.TagName
+FROM 
+    RankedPosts rp
+JOIN 
+    LATERAL (
+        SELECT 
+            t.TagName
+        FROM 
+            PopularTags tgt
+        WHERE 
+            tgt.TagCount > 5
+        LIMIT 3
+    ) tgt ON true
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

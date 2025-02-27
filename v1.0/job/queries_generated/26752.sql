@@ -1,0 +1,62 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        ak.name AS actor_name,
+        k.keyword AS movie_keyword,
+        STRING_AGG(DISTINCT cct.kind, ', ') AS company_types
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_type cct ON mc.company_type_id = cct.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.title, t.production_year, ak.name
+),
+ActorMovieCount AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT movie_title) AS movie_count
+    FROM 
+        MovieDetails
+    GROUP BY 
+        actor_name
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        movie_count
+    FROM 
+        ActorMovieCount
+    ORDER BY 
+        movie_count DESC
+    LIMIT 10
+)
+
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.actor_name,
+    md.movie_keyword,
+    ta.movie_count,
+    ta.actor_name AS top_actor_name
+FROM 
+    MovieDetails md
+JOIN 
+    TopActors ta ON md.actor_name = ta.actor_name
+ORDER BY 
+    md.production_year DESC, 
+    ta.movie_count DESC;
+
+This query constructs a comprehensive benchmarking of string processing by retrieving the titles of movies and their respective details (actor names, production years, and keywords) while also identifying the top ten actors based on the number of distinct movies they've appeared in. The results are ordered by production year and actor count to facilitate string processing tests on larger result sets.

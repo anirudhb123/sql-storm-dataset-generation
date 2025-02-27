@@ -1,0 +1,50 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > DATEADD(YEAR, -1, GETDATE()) 
+        AND p.PostTypeId IN (1, 2) -- Questions and Answers
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, u.DisplayName
+),
+TopPosts AS (
+    SELECT * FROM RankedPosts WHERE PostRank = 1
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    pt.Name AS PostTypeName,
+    ph.Type AS PostHistoryType,
+    COUNT(DISTINCT v.Id) AS VoteCount
+FROM 
+    TopPosts tp
+JOIN 
+    PostTypes pt ON (tp.Score > 0 AND pt.Id = 2) OR (tp.Score <= 0 AND pt.Id = 1) -- Determining Post Type based on Score
+LEFT JOIN 
+    PostHistory ph ON tp.PostId = ph.PostId AND ph.CreationDate < GETDATE()
+LEFT JOIN 
+    Votes v ON tp.PostId = v.PostId
+WHERE 
+    tp.ViewCount > 100
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, tp.ViewCount, tp.Score, tp.OwnerDisplayName, pt.Name, ph.Type
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

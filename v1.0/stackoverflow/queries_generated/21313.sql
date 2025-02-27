@@ -1,0 +1,84 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation,
+        COALESCE(ah.AverageScore, 0) AS AverageAnswerScore,
+        p.AnswerCount,
+        p.ViewCount,
+        p.Body
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            ParentId, 
+            AVG(Score) AS AverageScore
+        FROM 
+            Posts
+        WHERE
+            PostTypeId = 2
+        GROUP BY 
+            ParentId
+    ) ah ON p.Id = ah.ParentId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedOn,
+        c.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes c ON ph.Comment::int = c.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+ScoredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.Reputation,
+        rp.AverageAnswerScore,
+        rp.ViewCount,
+        rp.Body,
+        CP.ClosedOn,
+        CP.CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY rp.OwnerDisplayName ORDER BY rp.AverageAnswerScore DESC) AS Rank
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        ClosedPosts CP ON rp.PostId = CP.PostId
+)
+SELECT 
+    sp.Title,
+    sp.OwnerDisplayName,
+    sp.Reputation,
+    sp.AverageAnswerScore,
+    sp.ViewCount,
+    COALESCE(sp.CloseReason, 'Not Closed') AS CloseStatus,
+    CASE 
+        WHEN sp.Rank <= 3 THEN 'Top Performer'
+        ELSE 'Regular Contributor'
+    END AS PerformanceCategory,
+   STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    ScoredPosts sp
+LEFT JOIN 
+    (SELECT 
+         unnest(string_to_array(Tags, '>')) AS TagName, 
+         PostId 
+     FROM 
+         Posts) t ON sp.PostId = t.PostId
+WHERE 
+    sp.Reputation > (SELECT AVG(Reputation) FROM Users WHERE Reputation > 0)
+GROUP BY 
+    sp.PostId, sp.Title, sp.OwnerDisplayName, sp.Reputation, sp.AverageAnswerScore, sp.ViewCount, sp.CloseReason, sp.Rank
+ORDER BY 
+    COUNT(sp.CLOSEDON) DESC, sp.AverageAnswerScore DESC;

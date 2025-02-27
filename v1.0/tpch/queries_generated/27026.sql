@@ -1,0 +1,36 @@
+SELECT 
+    CONCAT(s.s_name, ' (', s.s_suppkey, ')') AS supplier_info,
+    p.p_name,
+    SUM(l.l_quantity) AS total_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    r.r_name AS region_name,
+    SUBSTRING(p.p_comment, 1, 20) AS short_comment,
+    CASE 
+        WHEN SUM(l.l_extendedprice) > 1000 THEN 'High Value'
+        ELSE 'Low Value' 
+    END AS value_category
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    r.r_name LIKE '%NORTH%'
+    AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    supplier_info, p.p_name, r.r_name
+HAVING 
+    total_quantity > 50
+ORDER BY 
+    total_quantity DESC, supplier_info;

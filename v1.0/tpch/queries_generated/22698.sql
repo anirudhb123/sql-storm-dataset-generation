@@ -1,0 +1,66 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank_within_region
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+), HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(CASE 
+                WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) 
+                ELSE 0 
+            END) AS refund_amount,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000 AND
+        COUNT(DISTINCT l.l_supkey) > 2
+), SupplierDetails AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal,
+        COALESCE(
+            (SELECT MAX(ps.ps_supplycost) 
+             FROM partsupp ps 
+             WHERE ps.ps_suppkey = rs.s_suppkey), 
+             0) AS max_supply_cost,
+        CASE 
+            WHEN rs.rank_within_region = 1 THEN 'Top Supplier'
+            ELSE 'Regular Supplier'
+        END AS supplier_rank
+    FROM 
+        RankedSuppliers rs
+)
+SELECT 
+    sd.s_name,
+    sd.s_acctbal,
+    sd.max_supply_cost,
+    ho.o_orderkey,
+    ho.total_price,
+    CASE 
+        WHEN ho.refund_amount > 0 THEN ho.refund_amount ELSE NULL 
+    END AS potential_refund
+FROM 
+    SupplierDetails sd
+LEFT JOIN 
+    HighValueOrders ho ON sd.s_suppkey IN (
+        SELECT DISTINCT l.l_suppkey
+        FROM lineitem l
+        WHERE l.l_orderkey = ho.o_orderkey
+    )
+WHERE 
+    sd.s_acctbal IS NOT NULL OR ho.total_price IS NULL
+ORDER BY 
+    sd.s_acctbal DESC NULLS LAST, ho.o_orderkey;

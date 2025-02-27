@@ -1,0 +1,70 @@
+
+WITH RECURSIVE address_tree AS (
+    SELECT ca_address_sk, ca_city, ca_state
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+    UNION ALL
+    SELECT ca_address_sk, ca_city, ca_state
+    FROM customer_address ca
+    JOIN address_tree at ON ca.ca_address_sk = at.ca_address_sk + 1
+    WHERE ca_state IS NOT NULL
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_gender
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+web_sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_profit,
+        MAX(ws_ship_date_sk) AS last_ship_date
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+combined_returns AS (
+    SELECT 
+        sr_customer_sk AS customer_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        'store' AS return_type
+    FROM store_returns
+    GROUP BY sr_customer_sk
+    UNION ALL
+    SELECT 
+        wr_returning_customer_sk AS customer_sk,
+        SUM(wr_return_quantity) AS total_returns,
+        'web' AS return_type
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+),
+final_summary AS (
+    SELECT 
+        cd.c_customer_id,
+        cs.total_orders,
+        cs.total_profit,
+        COALESCE(cr.total_returns, 0) AS returns
+    FROM customer_details cd
+    LEFT JOIN web_sales_summary cs ON cd.c_customer_id = cs.ws_bill_customer_sk
+    LEFT JOIN combined_returns cr ON cd.c_customer_id = cr.customer_sk
+    WHERE cd.rank_gender <= 10
+)
+
+SELECT 
+    f.c_customer_id,
+    f.total_orders,
+    f.total_profit,
+    f.returns,
+    a.ca_city,
+    a.ca_state
+FROM final_summary f
+LEFT JOIN address_tree a ON f.c_customer_id = (CASE 
+    WHEN f.total_orders > 5 THEN 1 
+    ELSE 0 END)
+ORDER BY f.total_profit DESC, f.returns ASC
+LIMIT 100;

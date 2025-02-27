@@ -1,0 +1,88 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+ActiveUsers AS (
+    SELECT 
+        UserId,
+        Reputation,
+        PostCount,
+        AnswerCount,
+        QuestionCount,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM 
+        UserReputation
+    WHERE 
+        PostCount > 0
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 2 THEN ph.CreationDate END) AS FirstBodyEditDate,
+        COUNT(ph.Id) AS TotalHistoryChanges
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.Score,
+    COALESCE(php.LastClosedDate, 'Never Closed') AS LastClosedDate,
+    php.TotalHistoryChanges,
+    u.DisplayName AS AuthorDisplayName,
+    r.Level AS PostLevel,
+    u.Reputation,
+    u.PostCount,
+    u.AnswerCount,
+    u.QuestionCount
+FROM 
+    Posts p
+LEFT JOIN 
+    PostHistoryInfo php ON p.Id = php.PostId
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.AcceptedAnswerId = r.Id
+INNER JOIN 
+    Users u ON p.OwnerUserId = u.Id
+WHERE 
+    p.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 year'
+    AND (u.Reputation >= 1000 OR u.EmailHash IS NOT NULL)
+ORDER BY 
+    p.Score DESC, 
+    u.Reputation DESC
+FETCH FIRST 100 ROWS ONLY;

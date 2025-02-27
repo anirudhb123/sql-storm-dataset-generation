@@ -1,0 +1,60 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) -- 1 = Questions, 2 = Answers
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS TotalPosts
+    FROM 
+        Posts
+    WHERE 
+        CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        OwnerUserId
+    HAVING 
+        COUNT(*) > 5
+)
+SELECT 
+    u.DisplayName,
+    ps.PostId,
+    ps.Title,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CreationDate,
+    CASE 
+        WHEN ps.UserRank = 1 THEN 'Newest'
+        WHEN ps.UserRank <= 3 THEN 'Top' 
+        ELSE 'Regular' 
+    END AS UserCategory
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.OwnerUserId = u.Id
+LEFT JOIN 
+    TopUsers tu ON u.Id = tu.OwnerUserId
+WHERE 
+    tu.TotalPosts IS NOT NULL
+ORDER BY 
+    ps.CreationDate DESC,
+    ps.VoteCount DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,72 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 -- Consider movies from the year 2000 and onwards
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id 
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+MovieCastInfo AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        role_type r ON ci.role_id = r.id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mci.actor_name,
+    mci.role_name,
+    mki.keywords,
+    mh.depth,
+    CASE 
+        WHEN mh.production_year > 2020 THEN 'Recent' 
+        ELSE 'Classic' 
+    END AS movie_category
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    MovieCastInfo mci ON mh.movie_id = mci.movie_id
+LEFT JOIN 
+    MovieKeywords mki ON mh.movie_id = mki.movie_id
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title, 
+    mci.actor_order
+LIMIT 50;

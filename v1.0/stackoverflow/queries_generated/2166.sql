@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        PostId, Title, ViewCount, Score, Rank, OwnerName
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+),
+PostStats AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.ViewCount,
+        tp.Score,
+        tp.OwnerName,
+        COUNT(c.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.PostId AND v.VoteTypeId = 2) AS UpvoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.PostId AND v.VoteTypeId = 3) AS DownvoteCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Comments c ON tp.PostId = c.PostId
+    GROUP BY 
+        tp.PostId, tp.Title, tp.ViewCount, tp.Score, tp.OwnerName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        pt.Name AS PostHistoryType
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '6 months'
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.ViewCount,
+    ps.Score,
+    ps.OwnerName,
+    ps.CommentCount,
+    ps.UpvoteCount,
+    ps.DownvoteCount,
+    ARRAY_AGG( DISTINCT phd.UserDisplayName || ' on ' || to_char(phd.CreationDate, 'YYYY-MM-DD HH24:MI:SS') || ' (' || phd.PostHistoryType || ')') AS RecentChanges
+FROM 
+    PostStats ps
+LEFT JOIN 
+    PostHistoryDetails phd ON ps.PostId = phd.PostId
+GROUP BY 
+    ps.PostId, ps.Title, ps.ViewCount, ps.Score, ps.OwnerName
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

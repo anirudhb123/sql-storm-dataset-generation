@@ -1,0 +1,78 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        DENSE_RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND
+        l.l_shipmode IN ('AIR', 'FOB')
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+SupplierStats AS (
+    SELECT 
+        r.r_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    co.c_name AS customer_name,
+    co.o_orderkey,
+    co.total_spent,
+    ss.r_name AS supplier_region,
+    (SELECT STRING_AGG(DISTINCT s.s_name, ', ') 
+     FROM RankedSuppliers rs 
+     JOIN partsupp ps ON rs.s_suppkey = ps.ps_suppkey 
+     JOIN part p ON p.p_partkey = ps.ps_partkey 
+     WHERE rs.rank = 1 AND p.p_brand = 'Brand#42') AS top_suppliers,
+    CASE 
+        WHEN s.s_nationkey IS NULL THEN 'Unknown'
+        ELSE n.n_name
+    END AS nation_name,
+    COALESCE(ss.total_supply_cost, 0) AS total_supply_cost
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    supplier s ON s.s_suppkey = (SELECT s_suppkey 
+                                   FROM RankedSuppliers 
+                                   WHERE rank = 1 AND s_acctbal > 5000 LIMIT 1)
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    SupplierStats ss ON ss.r_name = n.n_name
+WHERE 
+    co.total_spent > 1000
+ORDER BY 
+    co.total_spent DESC;

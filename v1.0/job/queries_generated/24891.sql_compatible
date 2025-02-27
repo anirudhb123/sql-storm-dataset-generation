@@ -1,0 +1,88 @@
+
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY t.id) AS actor_count
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info ci ON ci.movie_id = t.movie_id
+    WHERE
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'feature%')
+        AND t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.actor_count
+    FROM
+        RankedMovies rm
+    WHERE
+        rm.year_rank <= 5
+        AND rm.actor_count > 5
+),
+MovieDetails AS (
+    SELECT
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        STRING_AGG(DISTINCT an.name, ', ') AS actors,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types,
+        fm.actor_count
+    FROM
+        FilteredMovies fm
+    LEFT JOIN
+        cast_info ci ON ci.movie_id = fm.movie_id
+    LEFT JOIN
+        aka_name an ON an.person_id = ci.person_id
+    LEFT JOIN
+        movie_companies mc ON mc.movie_id = fm.movie_id
+    LEFT JOIN
+        company_type ct ON ct.id = mc.company_type_id
+    GROUP BY
+        fm.movie_id, fm.title, fm.production_year, fm.actor_count
+),
+FinalSelection AS (
+    SELECT
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.actors,
+        md.company_types,
+        CASE 
+            WHEN md.actor_count > 10 THEN 'Many Actors' 
+            WHEN md.actor_count BETWEEN 6 AND 10 THEN 'Moderate Actors'
+            ELSE 'Few Actors'
+        END AS actor_classification
+    FROM
+        MovieDetails md
+    ORDER BY
+        md.production_year DESC, md.title
+)
+SELECT
+    fs.movie_id,
+    fs.title,
+    fs.production_year,
+    fs.actors,
+    fs.company_types,
+    fs.actor_classification,
+    COALESCE(info.info, 'No additional info') AS additional_info
+FROM
+    FinalSelection fs
+LEFT JOIN
+    movie_info info ON info.movie_id = fs.movie_id AND info.info_type_id = (
+        SELECT id 
+        FROM info_type 
+        WHERE info = 'summary'
+        LIMIT 1
+    )
+WHERE
+    fs.production_year > 2000
+    OR fs.actors LIKE '%Brad Pitt%'
+ORDER BY
+    fs.actor_classification, fs.production_year, fs.title;

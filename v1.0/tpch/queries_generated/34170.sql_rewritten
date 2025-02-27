@@ -1,0 +1,46 @@
+WITH RECURSIVE region_hierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_regionkey = 1 
+    UNION ALL
+    SELECT n.n_regionkey, r.r_name, rh.level + 1
+    FROM region_hierarchy rh
+    JOIN nation n ON rh.r_regionkey = n.n_regionkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+), ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+), high_value_orders AS (
+    SELECT *
+    FROM ranked_orders
+    WHERE order_rank <= 5
+), supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_sales,
+    COALESCE(ss.total_supply_cost, 0) AS total_supplier_cost,
+    COUNT(DISTINCT ho.o_orderkey) AS high_value_order_count,
+    MAX(l.l_shipdate) AS last_shipping_date,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ' ', s.s_acctbal), '; ') AS suppliers_info
+FROM region_hierarchy r
+LEFT JOIN lineitem l ON l.l_shipdate BETWEEN cast('1998-10-01' as date) - INTERVAL '30 days' AND cast('1998-10-01' as date)
+LEFT JOIN high_value_orders ho ON ho.o_orderkey = l.l_orderkey
+LEFT JOIN supplier_summary ss ON ss.part_count > 10
+LEFT JOIN supplier s ON s.s_suppkey = l.l_suppkey
+WHERE r.r_name IS NOT NULL
+GROUP BY r.r_name
+HAVING total_sales > 10000
+ORDER BY total_sales DESC;

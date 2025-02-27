@@ -1,0 +1,86 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN RecursivePosts rp ON p.ParentId = rp.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostsWithVoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    WHERE 
+        u.Reputation > 1000  
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerUserId,
+    pb.VoteCount,
+    pb.UpVotes, 
+    pb.DownVotes,
+    ti.DisplayName AS TopUser,
+    ti.Rank
+FROM 
+    RecursivePosts rp
+LEFT JOIN 
+    PostsWithVoteCounts pb ON rp.PostId = pb.PostId
+LEFT JOIN 
+    TopUsers ti ON ti.BadgeCount = (
+        SELECT MAX(BadgeCount) 
+        FROM TopUsers 
+        WHERE Rank <= 10
+    )
+WHERE 
+    rp.AcceptedAnswerId IS NOT NULL  
+ORDER BY 
+    rp.CreationDate DESC;

@@ -1,0 +1,74 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(COUNT(DISTINCT P.Id), 0) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        Upvotes,
+        Downvotes,
+        PostCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS RankByReputation
+    FROM 
+        UserStatistics
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+            ELSE 'Not Accepted'
+        END AS AnswerStatus,
+        COALESCE(T.TagName, 'No Tags') AS PostTag,
+        U.DisplayName AS OwnerName,
+        PH.Comment AS PostComment
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Tags T ON T.ExcerptPostId = P.Id
+    LEFT JOIN 
+        Comments PH ON PH.PostId = P.Id
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation AS UserReputation,
+    U.Upvotes AS UserUpvotes,
+    U.Downvotes AS UserDownvotes,
+    P.PostId,
+    P.Title,
+    P.ViewCount,
+    P.CreationDate,
+    P.AnswerStatus,
+    P.PostTag,
+    P.OwnerName,
+    P.PostComment
+FROM 
+    TopUsers U
+FULL OUTER JOIN 
+    PostDetails P ON U.UserId = P.OwnerName
+WHERE 
+    U.RankByReputation <= 10 OR P.ViewCount > 1000
+ORDER BY 
+    COALESCE(U.Reputation, 0) DESC, 
+    P.ViewCount DESC;

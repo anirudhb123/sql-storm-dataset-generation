@@ -1,0 +1,71 @@
+
+WITH UserBadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY SUM(COALESCE(p.ViewCount, 0)) DESC) AS ViewRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY 
+        p.OwnerUserId
+),
+BadBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        CASE 
+            WHEN SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) >= 5 THEN 'Super Gold'
+            WHEN SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) >= 10 THEN 'Silver Star'
+            ELSE NULL
+        END AS BadgeCategory
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Rank,
+    COALESCE(ubs.BadgeCount, 0) AS BadgeCount,
+    COALESCE(ps.PostCount, 0) AS PostCount,
+    COALESCE(ps.TotalViews, 0) AS TotalViews,
+    COALESCE(ps.AverageScore, 0) AS AverageScore,
+    CASE 
+        WHEN ps.ViewRank IS NOT NULL AND ps.ViewRank <= 3 THEN 'Top Viewer'
+        ELSE 'Regular Viewer'
+    END AS ViewerStatus,
+    bb.BadgeCategory
+FROM 
+    Users u
+LEFT JOIN 
+    UserBadgeStats ubs ON u.Id = ubs.UserId
+LEFT JOIN 
+    PostStats ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    BadBadges bb ON u.Id = bb.UserId
+WHERE 
+    COALESCE(ubs.BadgeCount, 0) > 0
+OR 
+    COALESCE(ps.PostCount, 0) > 1
+ORDER BY 
+    u.DisplayName ASC;

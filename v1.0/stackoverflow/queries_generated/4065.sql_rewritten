@@ -1,0 +1,60 @@
+WITH UserStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id
+),
+RecentPostActivities AS (
+    SELECT
+        P.OwnerUserId,
+        COUNT(P.Id) AS RecentPostCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS ActivityRank
+    FROM Posts P
+    WHERE P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY P.OwnerUserId
+),
+TopUsers AS (
+    SELECT
+        U.UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        US.QuestionCount,
+        US.AnswerCount,
+        US.TotalBounty,
+        R.RecentPostCount
+    FROM UserStats US
+    JOIN RecentPostActivities R ON US.UserId = R.OwnerUserId
+    WHERE R.ActivityRank = 1
+    ORDER BY US.Reputation DESC, US.Views DESC
+)
+SELECT
+    T.UserId,
+    T.DisplayName,
+    T.Reputation,
+    T.Views,
+    T.UpVotes,
+    T.DownVotes,
+    T.QuestionCount,
+    T.AnswerCount,
+    T.TotalBounty,
+    COALESCE(AVG(P.Score), 0) AS AveragePostScore
+FROM TopUsers T
+LEFT JOIN Posts P ON T.UserId = P.OwnerUserId
+WHERE P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+GROUP BY T.UserId, T.DisplayName, T.Reputation, T.Views, T.UpVotes, T.DownVotes, T.QuestionCount, T.AnswerCount, T.TotalBounty
+HAVING COUNT(P.Id) > 5
+ORDER BY T.Reputation DESC
+LIMIT 10;

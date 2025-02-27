@@ -1,0 +1,47 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate, 
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.CreationDate DESC) AS Rank,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN LATERAL (
+        SELECT split_part_tags.tag FROM unnest(string_to_array(p.Tags, '><')) AS split_part_tags(tag)
+    ) AS t ON TRUE
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 YEAR'  
+    GROUP BY p.Id, p.Title, p.Score, p.CreationDate, u.DisplayName, pt.Name
+),
+TopPosts AS (
+    SELECT 
+        Rank, 
+        PostId, 
+        Title, 
+        Score, 
+        CreationDate, 
+        Author, 
+        CommentCount, 
+        VoteCount, 
+        Tags
+    FROM RankedPosts 
+    WHERE Rank <= 5
+)
+SELECT 
+    tp.PostId, 
+    tp.Title,
+    tp.Score,
+    tp.CreationDate, 
+    tp.Author,
+    tp.CommentCount,
+    tp.VoteCount,
+    tp.Tags
+FROM TopPosts tp
+ORDER BY tp.Score DESC, tp.CreationDate DESC;

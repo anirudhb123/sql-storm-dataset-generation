@@ -1,0 +1,75 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+AvailableParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+    HAVING 
+        SUM(ps.ps_availqty) > 0
+),
+FrequentCustomers AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+),
+Summary AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(p.p_retailprice * l.l_quantity) AS total_revenue
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        lineitem l ON s.s_suppkey = l.l_suppkey
+    LEFT JOIN 
+        AvailableParts p ON l.l_partkey = p.p_partkey
+    WHERE 
+        l.l_returnflag = 'N' AND
+        (l.l_shipdate IS NOT NULL OR l.l_commitdate IS NOT NULL)
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    s.s_name,
+    s.s_acctbal,
+    a.p_name,
+    COALESCE(fc.order_count, 0) AS order_count,
+    s.rn
+FROM 
+    RankedSuppliers s
+JOIN 
+    AvailableParts a ON a.total_available > 0
+FULL OUTER JOIN 
+    FrequentCustomers fc ON fc.c_custkey = (SELECT c.c_custkey FROM customer c ORDER BY RANDOM() LIMIT 1)
+WHERE 
+    (a.p_retailprice BETWEEN 100.00 AND 500.00 OR s.s_acctbal IS NULL)
+ORDER BY 
+    s.rn, a.p_name;

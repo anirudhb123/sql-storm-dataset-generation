@@ -1,0 +1,95 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss.store_sk,
+        ss.sold_date_sk,
+        ss.item_sk,
+        ss.customer_sk,
+        ss.quantity,
+        ss.net_profit,
+        1 AS level
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01')
+    
+    UNION ALL
+    
+    SELECT 
+        ss.store_sk,
+        ss.sold_date_sk,
+        ss.item_sk,
+        ss.customer_sk,
+        ss.quantity + sh.quantity,
+        ss.net_profit + sh.net_profit,
+        level + 1
+    FROM 
+        store_sales ss
+    JOIN 
+        sales_hierarchy sh ON ss.store_sk = sh.store_sk AND ss.sold_date_sk = sh.sold_date_sk
+    WHERE 
+        sh.level < 5
+),
+sales_summary AS (
+    SELECT
+        sh.store_sk,
+        SUM(sh.quantity) AS total_quantity,
+        SUM(sh.net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY sh.store_sk ORDER BY SUM(sh.net_profit) DESC) AS rank
+    FROM 
+        sales_hierarchy sh
+    GROUP BY 
+        sh.store_sk
+),
+customer_info AS (
+    SELECT 
+        c.customer_sk,
+        c.first_name,
+        c.last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+address_info AS (
+    SELECT 
+        ca.ca_address_sk,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ', ', ca.ca_city, ', ', ca.ca_state) AS full_address
+    FROM 
+        customer_address ca
+),
+final_summary AS (
+    SELECT 
+        si.store_sk,
+        si.total_quantity,
+        si.total_profit,
+        ci.customer_sk,
+        ci.first_name,
+        ci.last_name,
+        ai.full_address
+    FROM 
+        sales_summary si
+    LEFT JOIN 
+        customer_info ci ON si.store_sk = ci.customer_sk
+    LEFT JOIN 
+        address_info ai ON ci.customer_sk = ai.ca_address_sk
+)
+SELECT 
+    fs.store_sk,
+    fs.total_quantity,
+    fs.total_profit,
+    COUNT(distinct fs.customer_sk) AS unique_customers,
+    ARRAY_AGG(DISTINCT fs.full_address) AS addresses
+FROM 
+    final_summary fs
+GROUP BY 
+    fs.store_sk, fs.total_quantity, fs.total_profit
+HAVING 
+    fs.total_profit > 1000
+ORDER BY 
+    fs.total_profit DESC
+LIMIT 10;

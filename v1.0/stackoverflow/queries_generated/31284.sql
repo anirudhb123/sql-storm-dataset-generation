@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(*) OVER (PARTITION BY p.PostTypeId) AS TotalPosts,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())
+),
+PostWithBadges AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.ViewCount,
+        r.Score,
+        r.AcceptedAnswerId,
+        b.Name AS BadgeName,
+        b.Class,
+        r.UpVoteCount,
+        r.DownVoteCount
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        Badges b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = r.PostId)
+    WHERE
+        r.ScoreRank <= 5
+),
+PostHistoryFiltered AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ph.Text,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) AND 
+        ph.CreationDate >= DATEADD(month, -6, GETDATE())
+)
+SELECT 
+    p.Title,
+    p.ViewCount,
+    p.Score,
+    p.BadgeName,
+    p.Class,
+    ph.CreationDate AS LastHistoryDate,
+    ph.Comment AS LastHistoryComment,
+    COALESCE(NULLIF(p.UpVoteCount, 0), 0) AS UpVotes,
+    COALESCE(NULLIF(p.DownVoteCount, 0), 0) AS DownVotes
+FROM 
+    PostWithBadges p
+LEFT JOIN 
+    PostHistoryFiltered ph ON p.PostId = ph.PostId AND ph.HistoryRank = 1
+ORDER BY 
+    p.Score DESC,
+    p.Title;

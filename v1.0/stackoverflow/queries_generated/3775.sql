@@ -1,0 +1,68 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(v.BountyAmount) AS TotalBounty,
+        AVG(u.Reputation) OVER () AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- Only counting bounty start and close votes
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        Questions,
+        Answers,
+        TotalBounty,
+        RANK() OVER (ORDER BY PostCount DESC, TotalBounty DESC) AS UserRank
+    FROM 
+        UserActivity
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate,
+        c.Name AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        CloseReasonTypes c ON ph.Comment::int = c.Id 
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    ORDER BY 
+        ph.CreationDate DESC
+)
+SELECT 
+    tu.DisplayName,
+    tu.PostCount,
+    tu.Questions,
+    tu.Answers,
+    COALESCE(SUM(CASE WHEN cp.PostId IS NOT NULL THEN 1 ELSE 0 END), 0) AS ClosedPostsCount,
+    SUM(DISTINCT CASE WHEN cp.CloseReason IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY tu.UserId) AS UniqueClosedReasons,
+    tu.TotalBounty,
+    AVG(tu.TotalBounty) OVER () AS AvgUserBounty,
+    CASE 
+        WHEN tu.TotalBounty > 0 THEN 'Active Bounty User'
+        ELSE 'Regular User'
+    END AS UserType
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    ClosedPosts cp ON tu.UserId = cp.PostId
+GROUP BY 
+    tu.UserId, tu.DisplayName, tu.PostCount, tu.Questions, tu.Answers, tu.TotalBounty
+ORDER BY 
+    tu.UserRank;

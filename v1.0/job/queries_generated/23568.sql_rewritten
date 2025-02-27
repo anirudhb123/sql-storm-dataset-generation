@@ -1,0 +1,57 @@
+WITH RecursiveCTE AS (
+    SELECT a.id as aka_id,
+           a.person_id,
+           a.name,
+           a.imdb_index,
+           ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY a.name) as rn
+    FROM aka_name a
+    WHERE a.name IS NOT NULL
+),
+
+MovieInfoCTE AS (
+    SELECT m.id as movie_id,
+           m.title,
+           COALESCE(mk.keyword, 'No Keywords') as keyword,
+           CASE 
+               WHEN mc.company_id IS NULL THEN 'Independent'
+               ELSE cn.name
+           END as company_name,
+           m.production_year,
+           COUNT(DISTINCT ci.person_id) as total_cast
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN movie_companies mc ON mc.movie_id = m.id
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    LEFT JOIN cast_info ci ON ci.movie_id = m.id
+    GROUP BY m.id, m.title, mk.keyword, mc.company_id, cn.name, m.production_year
+),
+
+TitleStats AS (
+    SELECT movie_id,
+           COUNT(DISTINCT a.person_id) as cast_count,
+           STRING_AGG(DISTINCT a.name, ', ') as actor_names,
+           AVG(CASE WHEN ci.nr_order IS NULL THEN 0 ELSE ci.nr_order END) as avg_order
+    FROM cast_info ci
+    JOIN aka_name a ON a.person_id = ci.person_id
+    GROUP BY movie_id
+)
+
+SELECT m.movie_id, 
+       m.title, 
+       m.keyword, 
+       m.company_name, 
+       m.production_year,
+       COALESCE(ts.cast_count, 0) as total_cast_count,
+       ts.actor_names,
+       ts.avg_order,
+       ROW_NUMBER() OVER (ORDER BY m.production_year DESC) as movie_rank
+FROM MovieInfoCTE m
+LEFT JOIN TitleStats ts ON ts.movie_id = m.movie_id
+WHERE m.production_year > 2000
+  AND (m.keyword IS NOT NULL OR m.company_name LIKE 'A%')
+  AND NOT EXISTS (
+      SELECT 1
+      FROM title t
+      WHERE t.id = m.movie_id AND t.season_nr IS NOT NULL
+  )
+ORDER BY m.production_year DESC, m.title ASC;

@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) /* Questions and Answers */
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.VoteCount,
+        ut.DisplayName AS OwnerDisplayName,
+        ut.Reputation
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users ut ON rp.OwnerUserId = ut.Id
+    WHERE 
+        rp.Rank <= 5 /* Top 5 posts per user */
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.VoteCount,
+    tp.OwnerDisplayName,
+    tp.Reputation
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

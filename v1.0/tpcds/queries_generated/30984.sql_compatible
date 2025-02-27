@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        address.ca_city,
+        address.ca_state,
+        demographics.hd_income_band_sk,
+        hd.buy_potential
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address address ON c.c_current_addr_sk = address.ca_address_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+DateOverview AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        COUNT(ws_order_number) AS order_count,
+        SUM(ws_net_profit) AS total_profit
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_year, d.d_month_seq
+)
+SELECT 
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.ca_city,
+    ci.ca_state,
+    ci.hd_income_band_sk,
+    ci.buy_potential,
+    s.total_sales,
+    s.sales_rank,
+    d.order_count,
+    d.total_profit,
+    COALESCE(d.total_profit / NULLIF(d.order_count, 0), 0) AS avg_profit_per_order
+FROM CustomerInfo ci
+JOIN SalesCTE s ON ci.c_customer_id = s.ws_bill_customer_sk
+LEFT JOIN DateOverview d ON ci.hd_income_band_sk = d.d_year 
+WHERE ci.cd_marital_status = 'M' 
+AND ci.hd_income_band_sk IS NOT NULL
+ORDER BY s.total_sales DESC, ci.ca_city;

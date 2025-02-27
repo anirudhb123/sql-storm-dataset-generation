@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') -- only movies
+    UNION ALL
+    SELECT
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT
+    a.name AS actor_name,
+    m.title AS movie_title,
+    mh.level AS hierarchy_level,
+    COUNT(pc.id) AS num_of_movies_with_keywords,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COALESCE(c.name, 'Unknown Company') AS production_company,
+    AVG(CASE WHEN mp.info IS NOT NULL THEN LENGTH(mp.info) ELSE 0 END) AS avg_info_length,
+    SUM(CASE WHEN pr.info IS NULL THEN 1 ELSE 0 END) AS null_info_count
+FROM
+    cast_info ci
+JOIN
+    aka_name a ON ci.person_id = a.person_id
+JOIN
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN
+    company_name c ON mc.company_id = c.id
+LEFT JOIN
+    movie_info idx ON mh.movie_id = idx.movie_id
+LEFT JOIN
+    person_info pr ON ci.person_id = pr.person_id AND pr.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+LEFT JOIN 
+    movie_info mp ON mh.movie_id = mp.movie_id AND mp.info_type_id = (SELECT id FROM info_type WHERE info = 'Storyline')
+WHERE
+    mh.production_year >= 2000
+GROUP BY
+    a.name, m.title, mh.level, c.name
+ORDER BY
+    num_of_movies_with_keywords DESC, actor_name ASC;

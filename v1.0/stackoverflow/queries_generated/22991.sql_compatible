@@ -1,0 +1,104 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY p.Id) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY p.Id) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(month, -1, '2024-10-01')
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.UpVotes,
+        rp.DownVotes,
+        CASE 
+            WHEN rp.RankScore = 1 THEN 'Top Post'
+            ELSE 'Regular Post'
+        END AS PostCategory,
+        CASE 
+            WHEN rp.UpVotes - rp.DownVotes >= 5 THEN 'Highly Upvoted'
+            WHEN rp.UpVotes - rp.DownVotes < 0 THEN 'Negative Votes'
+            ELSE 'Moderate Engagement'
+        END AS EngagementLevel 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankScore <= 5
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        COUNT(DISTINCT c.Id) AS CommentsMade
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+FinalReport AS (
+    SELECT 
+        pe.PostId,
+        pe.Title,
+        pe.CreationDate,
+        pe.ViewCount,
+        pe.Score,
+        pe.PostCategory,
+        pe.EngagementLevel,
+        ue.UserId,
+        ue.DisplayName,
+        ue.GoldBadges,
+        ue.SilverBadges,
+        ue.BronzeBadges,
+        ue.PostsCreated,
+        ue.CommentsMade
+    FROM 
+        PostStatistics pe
+    JOIN 
+        Users u ON pe.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+    LEFT JOIN 
+        UserEngagement ue ON u.Id = ue.UserId
+)
+SELECT 
+    f.Title,
+    f.CreationDate,
+    f.ViewCount,
+    f.Score,
+    f.PostCategory,
+    f.EngagementLevel,
+    f.DisplayName,
+    f.GoldBadges,
+    f.SilverBadges,
+    f.BronzeBadges,
+    f.PostsCreated,
+    f.CommentsMade
+FROM 
+    FinalReport f
+WHERE 
+    f.EngagementLevel != 'Negative Votes'
+ORDER BY 
+    f.ViewCount DESC, f.Score DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

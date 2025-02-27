@@ -1,0 +1,27 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    g.kind AS genre,
+    GROUP_CONCAT(DISTINCT k.keyword SEPARATOR ', ') AS keywords,
+    c.kind AS company_type,
+    COUNT(DISTINCT m.id) AS total_movies_count,
+    (SELECT COUNT(DISTINCT mc.company_id) 
+     FROM movie_companies mc 
+     JOIN company_name cn ON mc.company_id = cn.id 
+     WHERE mc.movie_id = t.id AND cn.country_code = 'USA') AS usa_company_count
+FROM aka_name a
+JOIN cast_info ci ON a.person_id = ci.person_id
+JOIN title t ON ci.movie_id = t.id
+JOIN kind_type g ON t.kind_id = g.id
+JOIN movie_keyword mk ON t.id = mk.movie_id
+JOIN keyword k ON mk.keyword_id = k.id
+JOIN movie_companies mc ON t.id = mc.movie_id
+JOIN company_type c ON mc.company_type_id = c.id
+WHERE a.name IS NOT NULL
+AND t.production_year >= 2000
+AND t.production_year <= 2023
+AND g.kind IN ('Drama', 'Comedy', 'Action')
+GROUP BY a.name, t.title, t.production_year, g.kind, c.kind
+HAVING total_movies_count > 5
+ORDER BY total_movies_count DESC, a.name;

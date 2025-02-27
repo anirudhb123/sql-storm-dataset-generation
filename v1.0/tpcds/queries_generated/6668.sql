@@ -1,0 +1,64 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned_units,
+        SUM(cr_return_amount) AS total_return_amount
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_gender = 'F' AND 
+        cd_marital_status = 'M'
+),
+IncomeBand AS (
+    SELECT 
+        ib_income_band_sk,
+        ib_lower_bound,
+        ib_upper_bound
+    FROM 
+        income_band
+),
+ReturnSummary AS (
+    SELECT 
+        c.c_customer_id,
+        (CASE 
+            WHEN cb.ib_upper_bound IS NOT NULL THEN cb.ib_upper_bound 
+            ELSE 0 
+        END) AS upper_income_limit,
+        (CASE 
+            WHEN cb.ib_lower_bound IS NOT NULL THEN cb.ib_lower_bound 
+            ELSE 0 
+        END) AS lower_income_limit,
+        COALESCE(cr.total_returned_units, 0) AS returned_units,
+        COALESCE(cr.total_return_amount, 0) AS returned_amount
+    FROM 
+        customer c
+    JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    JOIN 
+        CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        IncomeBand cb ON cd.cd_income_band_sk = cb.ib_income_band_sk
+)
+SELECT 
+    upper_income_limit,
+    lower_income_limit,
+    AVG(returned_units) AS average_returned_units,
+    AVG(returned_amount) AS average_returned_amount
+FROM 
+    ReturnSummary
+GROUP BY 
+    upper_income_limit, lower_income_limit
+ORDER BY 
+    upper_income_limit DESC;

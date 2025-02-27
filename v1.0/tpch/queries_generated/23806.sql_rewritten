@@ -1,0 +1,71 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS rn
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') 
+        AND c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierStock AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        supplier s
+    INNER JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > 0 
+    GROUP BY 
+        s.s_suppkey
+),
+AggregatedData AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        AVG(l.l_extendedprice * (1 - l.l_discount)) > 
+        (SELECT AVG(l_extendedprice) FROM lineitem WHERE l_returnflag = 'R')
+)
+SELECT 
+    COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+    COALESCE(a.p_name, 'Unknown Part') AS part_name,
+    total_spent,
+    total_available,
+    order_count,
+    CASE 
+        WHEN total_spent IS NULL THEN 'Customer has no orders'
+        WHEN order_count > 10 THEN 'Frequent Buyer'
+        ELSE 'Occasional Buyer'
+    END AS buyer_category,
+    CASE 
+        WHEN total_available IS NOT NULL AND total_available < 100 THEN 'Low Stock'
+        ELSE 'Sufficient Stock'
+    END AS stock_status
+FROM 
+    CustomerOrders c
+FULL OUTER JOIN 
+    AggregatedData a ON c.rn = 1 
+LEFT JOIN 
+    SupplierStock s ON s.total_available = (
+        SELECT MIN(total_available) FROM SupplierStock WHERE total_available > 0
+    )
+ORDER BY 
+    customer_name, part_name
+LIMIT 50 OFFSET 0;

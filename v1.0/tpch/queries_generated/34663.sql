@@ -1,0 +1,41 @@
+WITH RECURSIVE CustomerCTE AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rn
+    FROM customer c
+),
+SupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+PartSupplement AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           AVG(l.l_quantity) AS avg_quantity
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '2022-01-01' 
+      AND l.l_shipdate < DATE '2023-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT n.n_name, SUM(ls.total_revenue) AS total_revenue, 
+       AVG(cs.c_acctbal) AS avg_customer_balance,
+       COUNT(DISTINCT ls.l_orderkey) AS order_count,
+       CASE 
+           WHEN SUM(ls.total_revenue) IS NULL THEN 'No Revenue'
+           ELSE 'Revenue Exists'
+       END AS revenue_status
+FROM LineItemSummary ls
+JOIN orders o ON ls.l_orderkey = o.o_orderkey
+JOIN CustomerCTE cs ON o.o_custkey = cs.c_custkey
+JOIN nation n ON cs.rn <= 10 AND n.n_nationkey = cs.c_nationkey
+LEFT JOIN SupplierCTE ss ON ss.rn <= 5 AND ss.s_suppkey IN (SELECT ps.ps_suppkey FROM PartSupplement ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size BETWEEN 10 AND 20))
+WHERE o.o_orderstatus IN ('O', 'F')
+GROUP BY n.n_name
+ORDER BY total_revenue DESC
+LIMIT 10;

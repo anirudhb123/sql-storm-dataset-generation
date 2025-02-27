@@ -1,0 +1,40 @@
+
+WITH processed_data AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        UPPER(c.c_email_address) AS upper_email,
+        SUBSTRING(c.c_birth_country, 1, 3) AS country_abbr,
+        d.d_date AS birth_date,
+        TO_CHAR(d.d_date, 'YYYY-MM') AS birth_month_year,
+        REPLACE(REPLACE(ca.ca_street_name, 'St', 'Street'), 'Ave', 'Avenue') AS standardized_address
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        date_dim d ON (c.c_birth_day = EXTRACT(DAY FROM d.d_date) AND c.c_birth_month = EXTRACT(MONTH FROM d.d_date) AND c.c_birth_year = EXTRACT(YEAR FROM d.d_date))
+    WHERE 
+        c.c_birth_year IS NOT NULL
+),
+string_benchmark AS (
+    SELECT 
+        full_name,
+        upper_email,
+        country_abbr,
+        birth_date,
+        birth_month_year,
+        standardized_address,
+        LENGTH(full_name) AS name_length,
+        LENGTH(upper_email) AS email_length,
+        LENGTH(standardized_address) AS address_length
+    FROM 
+        processed_data
+)
+SELECT 
+    AVG(name_length) AS avg_name_length,
+    AVG(email_length) AS avg_email_length,
+    AVG(address_length) AS avg_address_length,
+    COUNT(*) AS total_records
+FROM 
+    string_benchmark;

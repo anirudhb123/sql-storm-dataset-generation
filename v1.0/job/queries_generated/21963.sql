@@ -1,0 +1,82 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS title_rank,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id
+),
+CastAndCrew AS (
+    SELECT 
+        ca.movie_id,
+        a.name AS actor_name,
+        a.id AS actor_id,
+        MAX(ct.kind) AS role_type,
+        SUM(CASE WHEN ca.note IS NOT NULL THEN 1 ELSE 0 END) AS has_notes
+    FROM 
+        cast_info ca 
+    JOIN 
+        aka_name a ON ca.person_id = a.person_id
+    JOIN 
+        comp_cast_type ct ON ca.person_role_id = ct.id
+    GROUP BY 
+        ca.movie_id, a.id
+),
+TopMovies AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        COUNT(c.actor_id) AS actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CastAndCrew c ON rm.title_id = c.movie_id
+    WHERE 
+        rm.title_rank <= 3
+    GROUP BY 
+        rm.title_id, rm.title, rm.production_year
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        tm.actor_count,
+        COALESCE(SUM(mi.info::integer), 0) AS total_info,
+        CASE WHEN COUNT(DISTINCT cc.movie_id) = 0 THEN 'None' ELSE 'Has Link' END AS link_status
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        movie_info mi ON tm.title_id = mi.movie_id
+    LEFT JOIN 
+        movie_link ml ON tm.title_id = ml.movie_id
+    LEFT JOIN 
+        complete_cast cc ON tm.title_id = cc.movie_id
+    GROUP BY 
+        tm.title, tm.production_year, tm.actor_count
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_count,
+    md.total_info,
+    md.link_status,
+    CASE 
+        WHEN md.actor_count > 5 AND md.total_info > 10 THEN 'High Engagement'
+        WHEN md.actor_count <= 5 AND md.total_info = 0 THEN 'Low Engagement'
+        ELSE 'Moderate Engagement'
+    END AS engagement_level
+FROM 
+    MovieDetails md
+WHERE 
+    md.production_year IS NOT NULL
+ORDER BY 
+    md.production_year DESC, md.actor_count DESC;

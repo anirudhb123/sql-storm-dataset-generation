@@ -1,0 +1,71 @@
+
+WITH 
+    UsersRanked AS (
+        SELECT 
+            U.Id AS UserId, 
+            U.DisplayName, 
+            U.Reputation, 
+            DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+        FROM 
+            Users U
+    ),
+    PostStats AS (
+        SELECT 
+            P.Id AS PostId, 
+            P.Title, 
+            P.Score, 
+            P.ViewCount, 
+            P.AnswerCount, 
+            P.CommentCount, 
+            P.CreationDate,
+            (SELECT COUNT(*) FROM unnest(string_to_array(P.Tags, '><'))) AS TagCount
+        FROM 
+            Posts P
+        WHERE 
+            P.PostTypeId = 1  
+    ),
+    JoinPostUser AS (
+        SELECT 
+            PS.PostId, 
+            PS.Title, 
+            PS.Score, 
+            PS.ViewCount, 
+            PS.AnswerCount, 
+            PS.CommentCount, 
+            PS.CreationDate, 
+            PS.TagCount, 
+            UR.UserId, 
+            UR.DisplayName AS UserDisplayName
+        FROM 
+            PostStats PS
+        JOIN 
+            UsersRanked UR ON PS.UserId = UR.UserId
+    )
+SELECT 
+    JPU.PostId,
+    JPU.Title,
+    JPU.Score,
+    JPU.ViewCount,
+    JPU.AnswerCount,
+    JPU.CommentCount,
+    JPU.CreationDate,
+    JPU.TagCount,
+    JPU.UserDisplayName,
+    UR.Reputation AS UserReputation,
+    (SELECT COUNT(*) FROM Votes V WHERE V.PostId = JPU.PostId AND V.VoteTypeId = 2) AS TotalUpvotes,
+    (SELECT COUNT(*) FROM Votes V WHERE V.PostId = JPU.PostId AND V.VoteTypeId = 3) AS TotalDownvotes,
+    CONCAT(
+        'Tags count: ', JPU.TagCount,
+        ', Post score: ', JPU.Score,
+        ', User rank: ', UR.UserRank
+    ) AS Summary
+FROM 
+    JoinPostUser JPU
+JOIN 
+    UsersRanked UR ON JPU.UserId = UR.UserId
+WHERE 
+    JPU.TagCount > 0
+ORDER BY 
+    JPU.Score DESC, 
+    JPU.ViewCount DESC
+LIMIT 10;

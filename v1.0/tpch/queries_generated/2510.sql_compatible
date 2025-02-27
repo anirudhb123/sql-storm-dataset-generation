@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, 
+        o.o_custkey
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    c.c_name,
+    c.c_acctbal,
+    COALESCE(r.total_spent, 0) AS total_spent,
+    COALESCE(r.order_count, 0) AS order_count,
+    s.s_name AS supplier_name,
+    s.s_acctbal AS supplier_acctbal,
+    p.p_name,
+    p.p_retailprice,
+    CASE 
+        WHEN r.total_spent IS NULL THEN 'No orders'
+        ELSE 'Active customer'
+    END AS customer_status
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerOrders r ON c.c_custkey = r.o_custkey
+INNER JOIN 
+    RankedSuppliers s ON c.c_nationkey = s.s_nationkey AND s.rank = 1
+INNER JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+INNER JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    p.p_size > 10 AND 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+ORDER BY 
+    c.c_acctbal DESC, 
+    COALESCE(r.total_spent, 0) DESC

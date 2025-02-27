@@ -1,0 +1,21 @@
+
+WITH PostCounts AS (
+    SELECT OwnerUserId, COUNT(*) AS TotalPosts,
+           SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+           SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers
+    FROM Posts
+    GROUP BY OwnerUserId
+),
+UserReputation AS (
+    SELECT Id, Reputation, CreationDate, LastAccessDate, 
+           (SELECT COUNT(*) FROM Badges WHERE UserId = Users.Id) AS BadgeCount
+    FROM Users
+)
+SELECT U.Id AS UserId, U.DisplayName, U.Reputation, U.CreationDate, 
+       U.LastAccessDate, U.BadgeCount, 
+       COALESCE(PC.TotalPosts, 0) AS TotalPosts,
+       COALESCE(PC.Questions, 0) AS TotalQuestions,
+       COALESCE(PC.Answers, 0) AS TotalAnswers
+FROM UserReputation U
+LEFT JOIN PostCounts PC ON U.Id = PC.OwnerUserId
+ORDER BY U.Reputation DESC, TotalPosts DESC;

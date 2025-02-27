@@ -1,0 +1,80 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id, 
+        ci.movie_id, 
+        1 AS depth
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.nr_order IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ci.person_id, 
+        ci.movie_id, 
+        ah.depth + 1 
+    FROM 
+        cast_info ci
+    JOIN 
+        ActorHierarchy ah ON ci.movie_id = ah.movie_id
+    WHERE 
+        ci.person_id != ah.person_id
+),
+MovieKeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+DetailedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        m.name AS company_name,
+        mkc.keyword_count,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN 
+        company_name m ON mc.company_id = m.id
+    LEFT JOIN 
+        MovieKeywordCounts mkc ON mkc.movie_id = t.id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    GROUP BY 
+        t.id, m.name, mkc.keyword_count
+),
+RankedMovies AS (
+    SELECT 
+        dm.*, 
+        RANK() OVER (PARTITION BY dm.production_year ORDER BY dm.actor_count DESC, dm.keyword_count DESC) AS rank
+    FROM 
+        DetailedMovies dm
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.company_name,
+    rm.actor_count,
+    rm.keyword_count,
+    CASE 
+        WHEN rm.actor_count IS NULL THEN 'No Actors'
+        ELSE 'Has Actors ' || rm.actor_count || ' actors'
+    END AS actor_details,
+    COALESCE(ah.depth, 0) AS max_actor_depth
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorHierarchy ah ON rm.movie_id = ah.movie_id
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    rm.production_year, rm.rank;

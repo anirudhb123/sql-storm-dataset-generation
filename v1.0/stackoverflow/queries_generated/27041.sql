@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        t.TagName,
+        ROW_NUMBER() OVER (PARTITION BY t.TagName ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::integer[])
+    WHERE 
+        p.PostTypeId = 1 -- Questions
+),
+TopTagPosts AS (
+    SELECT 
+        rp.TagName,
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank <= 5 -- Get top 5 questions per tag
+),
+TagActivity AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::integer[])
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Questions
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    t.TagName,
+    t.QuestionCount,
+    t.TotalViews,
+    t.TotalComments,
+    COALESCE(tp.PostId, 0) AS TopPostId,
+    COALESCE(tp.Title, 'No Posts') AS TopPostTitle,
+    COALESCE(tp.ViewCount, 0) AS TopPostViews,
+    COALESCE(tp.OwnerDisplayName, 'N/A') AS TopPostOwner
+FROM 
+    TagActivity t
+LEFT JOIN 
+    TopTagPosts tp ON t.TagName = tp.TagName
+ORDER BY 
+    t.TotalViews DESC;

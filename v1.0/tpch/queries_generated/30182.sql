@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.acctbal
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartMetrics AS (
+    SELECT p.p_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+RankedParts AS (
+    SELECT p.p_partkey, p.p_name, pm.total_cost,
+           RANK() OVER (ORDER BY pm.total_cost DESC) AS part_rank
+    FROM part p
+    JOIN PartMetrics pm ON p.p_partkey = pm.p_partkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    SUM(o.o_totalprice) AS total_spent,
+    COALESCE(AVG(SH.level), 0) AS avg_supplier_level,
+    STRING_AGG(DISTINCT rp.p_name, ', ') AS part_names
+FROM CustomerOrders co
+JOIN customer c ON co.c_custkey = c.c_custkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN SupplierHierarchy SH ON c.c_nationkey = SH.s_nationkey
+LEFT JOIN RankedParts rp ON rp.part_rank <= 3 AND EXISTS (
+    SELECT 1
+    FROM lineitem l 
+    WHERE l.l_orderkey = o.o_orderkey AND l.l_partkey = rp.p_partkey
+)
+GROUP BY c.c_name
+HAVING SUM(o.o_totalprice) > 10000.00
+ORDER BY total_spent DESC;

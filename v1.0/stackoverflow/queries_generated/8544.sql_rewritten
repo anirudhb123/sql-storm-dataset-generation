@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.Tags,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5 
+),
+PostDetails AS (
+    SELECT 
+        tp.*,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Comments c ON tp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON tp.PostId = v.PostId
+    GROUP BY 
+        tp.PostId, tp.Title, tp.Score, tp.ViewCount, tp.CreationDate, tp.Tags, tp.OwnerDisplayName
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.OwnerDisplayName,
+    pd.Score,
+    pd.ViewCount,
+    pd.CommentCount,
+    pd.VoteCount,
+    pd.CreationDate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Posts p ON pd.PostId = p.Id
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT UNNEST(string_to_array(pd.Tags, ','))::int) 
+GROUP BY 
+    pd.PostId, pd.Title, pd.OwnerDisplayName, pd.Score, pd.ViewCount, pd.CommentCount, pd.VoteCount, pd.CreationDate
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC
+LIMIT 100;

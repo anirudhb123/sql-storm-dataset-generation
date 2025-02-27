@@ -1,0 +1,87 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COALESCE(NULLIF(p.Body, ''), 'No Content') AS SafeBody,
+        (SELECT COUNT(*) FROM unnest(string_to_array(p.Tags, '<>'))) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+    AND 
+        p.PostTypeId IN (1, 2) 
+), 
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges,
+        SUM(COALESCE(b.Date, TIMESTAMP '2024-10-01 12:34:56') - b.Date) AS TotalBadgeAge
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS CloseActions,
+        MAX(ph.CreationDate) FILTER (WHERE ph.PostHistoryTypeId = 10) AS LastCloseDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+ActiveUserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(rp.PostId) AS ActivePostCount,
+        SUM(rp.Score) AS TotalPostScore,
+        AVG(rp.TagCount) AS AverageTagsPerPost
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        rp.PostRank <= 5 
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    up.ActivePostCount,
+    up.TotalPostScore,
+    up.AverageTagsPerPost,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    ph.CloseActions,
+    ph.LastCloseDate,
+    rp.Title,
+    rp.SafeBody
+FROM 
+    ActiveUserPostStats up
+JOIN 
+    Users u ON up.UserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostHistoryCounts ph ON ph.PostId IN (SELECT PostId FROM RankedPosts WHERE OwnerUserId = u.Id)
+JOIN 
+    RankedPosts rp ON rp.OwnerUserId = u.Id
+WHERE 
+    up.ActivePostCount > 0
+AND 
+    (rp.Score > 0 OR ph.CloseActions IS NOT NULL) 
+ORDER BY 
+    up.TotalPostScore DESC, up.ActivePostCount DESC, u.Reputation DESC
+LIMIT 50;

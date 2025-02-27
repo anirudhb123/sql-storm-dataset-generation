@@ -1,0 +1,60 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title, 
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+MovieKeywordCounts AS (
+    SELECT 
+        mk.movie_id, 
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+PersonRoleCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.person_role_id IN (SELECT id FROM role_type WHERE role = 'actor')
+    GROUP BY 
+        ci.movie_id
+),
+CompanyCounts AS (
+    SELECT 
+        mc.movie_id, 
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rt.title, 
+    rt.production_year, 
+    COALESCE(p.rc.actor_count, 0) AS actor_count, 
+    COALESCE(kc.keyword_count, 0) AS keyword_count,
+    COALESCE(cc.company_count, 0) AS company_count
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    PersonRoleCounts p ON rt.id = p.movie_id
+LEFT JOIN 
+    MovieKeywordCounts kc ON rt.id = kc.movie_id
+LEFT JOIN 
+    CompanyCounts cc ON rt.id = cc.movie_id
+WHERE 
+    rt.title_rank = 1
+AND 
+    (cc.company_count IS NULL OR cc.company_count > 2)
+ORDER BY 
+    rt.production_year DESC, 
+    rt.title ASC;

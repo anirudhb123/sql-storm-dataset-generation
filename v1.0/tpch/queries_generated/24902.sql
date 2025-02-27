@@ -1,0 +1,62 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r.r_regionkey, r.r_name, r.r_comment, 0 AS level
+    FROM region r
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, r.r_comment, rh.level + 1
+    FROM region r
+    JOIN RegionHierarchy rh ON r.r_regionkey <> rh.r_regionkey
+),
+CustomerStats AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           COUNT(DISTINCT o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent,
+           CASE 
+               WHEN MAX(o.o_orderdate) < CURRENT_DATE - INTERVAL '1 year' THEN 'Inactive'
+               ELSE 'Active'
+           END AS customer_status
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartAvg AS (
+    SELECT p.p_partkey,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+SuspiciousOrders AS (
+    SELECT DISTINCT o.o_orderkey, 
+           o.o_orderdate,
+           CASE 
+               WHEN (o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2) * 1.5) THEN 'Suspicious'
+               ELSE 'Regular'
+           END AS order_type
+    FROM orders o
+    WHERE o.o_orderstatus IN ('F', 'O')
+),
+CombinedStats AS (
+    SELECT c.c_name, 
+           cs.order_count, 
+           cs.total_spent, 
+           cs.customer_status,
+           pa.avg_supply_cost,
+           pa.total_available,
+           so.order_type
+    FROM CustomerStats cs
+    JOIN PartAvg pa ON cs.order_count > 5
+    LEFT JOIN SuspiciousOrders so ON cs.order_count < 3
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT cs.c_custkey) AS active_customers,
+       SUM(cs.total_spent) AS total_spent_by_region,
+       AVG(cs.avg_supply_cost) AS avg_supply_cost_per_part,
+       COUNT(DISTINCT CASE WHEN cs.order_type = 'Suspicious' THEN cs.c_name END) AS suspicious_orders_count
+FROM RegionHierarchy r
+LEFT JOIN CombinedStats cs ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n JOIN customer cu ON n.n_nationkey = cu.c_nationkey WHERE cu.c_custkey = cs.c_custkey)
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT cs.c_custkey) > 10
+ORDER BY total_spent_by_region DESC
+FETCH FIRST 10 ROWS ONLY;

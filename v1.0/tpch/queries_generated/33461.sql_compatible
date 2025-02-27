@@ -1,0 +1,41 @@
+
+WITH RECURSIVE PriceHistory AS (
+    SELECT ps_partkey, ps_supplycost, 1 AS level
+    FROM partsupp
+    WHERE ps_availqty > 0
+    UNION ALL
+    SELECT ph.ps_partkey, ph.ps_supplycost * 1.05 AS ps_supplycost, ph.level + 1
+    FROM PriceHistory ph
+    JOIN partsupp ps ON ph.ps_partkey = ps.ps_partkey
+    WHERE ph.level < 5
+),
+CustomerOrderCounts AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartSuppliers AS (
+    SELECT p.p_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT r.r_name, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       AVG(COALESCE(c.order_count, 0)) AS avg_orders_per_customer,
+       MAX(ph.ps_supplycost) AS max_supply_cost,
+       COUNT(DISTINCT CASE WHEN c.c_custkey IS NOT NULL THEN c.c_custkey END) AS unique_customers
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN CustomerOrderCounts c ON c.c_custkey = l.l_orderkey
+LEFT JOIN PriceHistory ph ON p.p_partkey = ph.ps_partkey
+WHERE l.l_shipdate BETWEEN DATE('1996-01-01') AND DATE('1996-12-31')
+  AND ph.ps_supplycost IS NOT NULL
+GROUP BY r.r_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000000
+ORDER BY total_revenue DESC;

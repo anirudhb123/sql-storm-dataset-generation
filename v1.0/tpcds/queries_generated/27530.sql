@@ -1,0 +1,54 @@
+
+WITH AddressDetails AS (
+    SELECT
+        ca_city,
+        ca_state,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address
+    FROM
+        customer_address
+),
+CustomerDetails AS (
+    SELECT
+        c_customer_id,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        SUBSTRING(cd_email_address FROM POSITION('@' IN cd_email_address) + 1) AS email_domain
+    FROM
+        customer
+    JOIN
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+),
+SalesData AS (
+    SELECT
+        ws_order_number,
+        ws_ship_date_sk,
+        ws_sales_price,
+        ws_quantity
+    FROM
+        web_sales
+    WHERE
+        ws_sales_price > 50.00
+)
+SELECT
+    ad.ca_city,
+    ad.ca_state,
+    ad.full_address,
+    cd.full_name,
+    cd.cd_gender,
+    COUNT(sd.ws_order_number) AS total_orders,
+    SUM(sd.ws_sales_price) AS total_sales,
+    AVG(sd.ws_sales_price) AS avg_sales_per_order
+FROM
+    AddressDetails ad
+JOIN
+    CustomerDetails cd ON cd.c_customer_id = ad.ca_city -- Assumed join condition for demonstration
+JOIN
+    SalesData sd ON sd.ws_bill_customer_sk = cd.c_customer_sk
+GROUP BY
+    ad.ca_city, ad.ca_state, ad.full_address, cd.full_name, cd.cd_gender
+HAVING
+    COUNT(sd.ws_order_number) > 5
+ORDER BY
+    total_sales DESC;

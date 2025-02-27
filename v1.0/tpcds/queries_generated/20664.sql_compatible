@@ -1,0 +1,70 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_return_time_sk,
+        sr_item_sk,
+        sr_customer_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        sr_return_tax,
+        sr_return_amt_inc_tax,
+        sr_reason_sk,
+        DENSE_RANK() OVER (PARTITION BY sr_customer_sk ORDER BY sr_returned_date_sk DESC) AS return_rank
+    FROM store_returns
+    WHERE sr_return_quantity > 0
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE cd.cd_marital_status = 'M'
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+    HAVING SUM(ws.ws_net_paid_inc_tax) > (
+        SELECT AVG(total_spent) 
+        FROM (
+            SELECT SUM(ws_net_paid_inc_tax) AS total_spent
+            FROM web_sales
+            GROUP BY ws_ship_customer_sk
+        ) AS avg_spent
+    )
+),
+RecentReturns AS (
+    SELECT 
+        cr.sr_customer_sk,
+        COUNT(cr.sr_item_sk) AS return_count,
+        SUM(cr.sr_return_amt_inc_tax) AS total_returned_amt,
+        SUM(cr.sr_return_quantity) AS total_returned_qty
+    FROM CustomerReturns cr
+    WHERE cr.return_rank = 1
+    GROUP BY cr.sr_customer_sk
+)
+SELECT 
+    hvc.c_customer_sk,
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.cd_gender,
+    hvc.total_spent,
+    COALESCE(rr.return_count, 0) AS return_count,
+    COALESCE(rr.total_returned_amt, 0) AS total_returned_amt,
+    COALESCE(rr.total_returned_qty, 0) AS total_returned_qty
+FROM HighValueCustomers hvc
+LEFT JOIN RecentReturns rr ON hvc.c_customer_sk = rr.sr_customer_sk
+WHERE EXISTS (
+    SELECT 1
+    FROM store s
+    WHERE s.s_store_sk IN (
+        SELECT ss.s_store_sk 
+        FROM store_sales ss 
+        WHERE ss.ss_customer_sk = hvc.c_customer_sk 
+        GROUP BY ss.s_store_sk
+    )
+)
+ORDER BY hvc.total_spent DESC, hvc.c_last_name ASC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,61 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(v.Id) AS VoteCount,
+        COUNT(c.Id) AS CommentCount,
+        MAX(po.CreationDate) AS LastCommentDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Comments po ON p.Id = po.PostId
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN u.Views > 1000 THEN 1 ELSE 0 END) AS HighViewCountPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.OwnerDisplayName,
+    ps.VoteCount,
+    ps.LastCommentDate,
+    ue.DisplayName AS EngagedUser,
+    ue.BadgeCount,
+    ue.HighViewCountPosts
+FROM 
+    PostStats ps
+JOIN 
+    UserEngagement ue ON ps.OwnerDisplayName = ue.DisplayName
+ORDER BY 
+    ps.ViewCount DESC, ps.Score DESC;

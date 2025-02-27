@@ -1,0 +1,57 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey <> sh.s_suppkey
+),
+part_country_totals AS (
+    SELECT p.p_partkey, p.p_name, 
+           COALESCE(SUM(CASE WHEN c.c_mktsegment = 'BUILDING' THEN l.l_extendedprice ELSE NULL END), 0) AS building_total,
+           COALESCE(SUM(l.l_extendedprice), 0) AS total_extended_price
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE p.p_partkey IN (SELECT DISTINCT ps.ps_partkey
+                           FROM partsupp ps
+                           WHERE ps.ps_availqty > 100)
+    GROUP BY p.p_partkey, p.p_name
+),
+nation_avg_order_value AS (
+    SELECT n.n_nationkey, COUNT(DISTINCT o.o_orderkey) AS order_count, 
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    pct.building_total,
+    pct.total_extended_price,
+    CASE 
+        WHEN pct.building_total > 10000 THEN 'High'
+        WHEN pct.building_total BETWEEN 5000 AND 10000 THEN 'Medium'
+        ELSE 'Low'
+    END AS building_total_category,
+    na.n_nationkey,
+    na.order_count,
+    na.avg_order_value
+FROM part_country_totals pct
+JOIN nation_avg_order_value na ON pct.total_extended_price / NULLIF(na.order_count, 0) > 1.5
+LEFT JOIN supplier_hierarchy sh ON sh.s_nationkey = na.n_nationkey
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM lineitem l
+    WHERE l.l_shipdate > DATE '1998-10-01'
+      AND l.l_discount > (SELECT AVG(l2.l_discount) FROM lineitem l2 WHERE l2.l_returnflag = 'N')
+)
+ORDER BY pct.total_extended_price DESC,
+         na.avg_order_value ASC
+OFFSET 10 ROWS FETCH NEXT 50 ROWS ONLY;

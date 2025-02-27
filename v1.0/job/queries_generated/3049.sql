@@ -1,0 +1,54 @@
+WITH ActorMovies AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS movie_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL
+    AND 
+        t.production_year IS NOT NULL
+), 
+SalaryInfo AS (
+    SELECT 
+        p.person_id,
+        SUM(CASE WHEN p.info_type_id = (SELECT id FROM info_type WHERE info = 'salary') THEN CAST(p.info AS numeric) ELSE 0 END) AS total_salary
+    FROM 
+        person_info p
+    GROUP BY 
+        p.person_id
+), 
+TopActors AS (
+    SELECT 
+        am.actor_name,
+        am.production_year,
+        si.total_salary,
+        ROW_NUMBER() OVER (ORDER BY si.total_salary DESC) AS salary_rank
+    FROM 
+        ActorMovies am
+    LEFT JOIN 
+        SalaryInfo si ON am.actor_name = (SELECT n.name FROM name n WHERE n.imdb_id = am.actor_name)
+    WHERE 
+        am.movie_rank <= 3
+)
+
+SELECT 
+    ta.actor_name,
+    ARRAY_AGG(ta.production_year) AS movies,
+    COALESCE(SUM(ta.total_salary), 0) AS aggregate_salary
+FROM 
+    TopActors ta 
+WHERE 
+    ta.salary_rank <= 10
+GROUP BY 
+    ta.actor_name
+HAVING 
+    COALESCE(SUM(ta.total_salary), 0) > 100000
+ORDER BY 
+    aggregate_salary DESC;

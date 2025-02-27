@@ -1,0 +1,76 @@
+WITH Recursive_Actor_Movies AS (
+    SELECT 
+        c.person_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        cast_info c
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+Movie_Companies AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name cn ON m.company_id = cn.id
+    GROUP BY 
+        m.movie_id
+), 
+Top_Actors AS (
+    SELECT 
+        person_id,
+        COUNT(*) AS movie_count
+    FROM 
+        Recursive_Actor_Movies
+    WHERE 
+        rn <= 3
+    GROUP BY 
+        person_id
+    ORDER BY 
+        movie_count DESC
+    LIMIT 10
+), 
+Relevant_Movie_Info AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COALESCE(m.companies, 'No companies listed') AS producing_companies,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        Movie_Companies m ON t.id = m.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, producing_companies
+)
+
+SELECT 
+    a.name AS actor_name,
+    ra.title AS recent_movie,
+    ra.production_year,
+    rmi.producing_companies,
+    rmi.keyword_count
+FROM 
+    aka_name a
+JOIN 
+    Recursive_Actor_Movies ra ON a.person_id = ra.person_id
+JOIN 
+    Relevant_Movie_Info rmi ON ra.movie_id = rmi.movie_id
+JOIN 
+    Top_Actors ta ON a.person_id = ta.person_id
+WHERE 
+    ra.rn = 1
+ORDER BY 
+    rmi.keyword_count DESC, a.name;

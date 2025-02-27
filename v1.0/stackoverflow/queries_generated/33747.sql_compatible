@@ -1,0 +1,80 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level 
+    FROM 
+        Posts p 
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Level + 1 AS Level
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(DATEDIFF('2024-10-01 12:34:56', p.CreationDate) / 7, 0) AS WeeksOld,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId IN (6, 7) THEN 1 ELSE 0 END) AS CloseReopenCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.WeeksOld,
+        ps.CommentCount,
+        ps.VoteCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        r.Level
+    FROM 
+        PostStats ps
+    LEFT JOIN 
+        RecursivePostHierarchy r ON ps.PostId = r.PostId
+    WHERE 
+        ps.CommentCount > 0 AND ps.VoteCount > 0
+)
+SELECT 
+    tp.Title,
+    tp.WeeksOld,
+    CASE 
+        WHEN tp.Level > 0 THEN 'Answer'
+        ELSE 'Question' 
+    END AS PostType,
+    tp.CommentCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    CONCAT(COALESCE(NULLIF(u.DisplayName, ''), 'Anonymous'), ' - ', 
+        COALESCE(NULLIF(u.Reputation, 0), 'No Reputation')) AS UserInfo
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Users u ON EXISTS (SELECT 1 FROM Posts p WHERE p.OwnerUserId = u.Id AND p.Id = tp.PostId)
+ORDER BY 
+    tp.WeeksOld DESC,
+    tp.UpVotes DESC
+LIMIT 10;

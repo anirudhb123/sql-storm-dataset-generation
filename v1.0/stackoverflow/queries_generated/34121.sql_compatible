@@ -1,0 +1,65 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostClosureComments AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(c.Text, '; ') AS ClosureComments
+    FROM 
+        PostHistory ph
+    JOIN 
+        Comments c ON ph.PostId = c.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    COALESCE(pcc.ClosureComments, 'No comments') AS ClosureComments
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerDisplayName = ub.UserId
+LEFT JOIN 
+    PostClosureComments pcc ON rp.PostId = pcc.PostId
+WHERE 
+    rp.Rank <= 5 
+ORDER BY 
+    rp.PostId DESC;

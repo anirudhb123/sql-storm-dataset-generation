@@ -1,0 +1,52 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.LastActivityDate,
+        p.OwnerUserId,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        a.Id,
+        a.Title,
+        a.LastActivityDate,
+        a.OwnerUserId,
+        COALESCE(a.AcceptedAnswerId, 0),
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursiveCTE r ON a.ParentId = r.Id
+)
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT r.Id) AS QuestionCount,
+    COUNT(DISTINCT a.Id) AS AnswerCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+    AVG(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS AverageViews,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+FROM 
+    RecursiveCTE r
+LEFT JOIN 
+    Posts a ON r.AcceptedAnswerId = a.Id
+LEFT JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON v.PostId = r.Id
+LEFT JOIN 
+    LATERAL (SELECT unnest(string_to_array(r.Tags, '<>')) AS TagName) AS t ON TRUE
+WHERE 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users)
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT r.Id) > 5
+ORDER BY 
+    QuestionCount DESC, Upvotes DESC
+LIMIT 10;

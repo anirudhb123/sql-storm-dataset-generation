@@ -1,0 +1,87 @@
+WITH RecursivePosts AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        SUM(Score) AS TotalVotes,
+        DENSE_RANK() OVER (ORDER BY SUM(Score) DESC) AS UserRank
+    FROM 
+        Votes
+    GROUP BY 
+        UserId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.UserId AS ClosedBy,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS ClosureHistory
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 -- Post Closed
+)
+SELECT 
+    rp.Title AS QuestionTitle,
+    rp.Level,
+    u.DisplayName AS AuthorName,
+    ub.BadgeCount AS UserBadgeCount,
+    ub.Badges AS UserBadges,
+    tp.TotalVotes AS UserTotalVotes,
+    cp.ClosedBy AS ClosedByName,
+    cp.ClosedDate,
+    cp.CloseReason,
+    CASE 
+        WHEN cp.ClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    RecursivePosts rp
+LEFT JOIN 
+    Users u ON rp.ParentId IS NULL AND rp.Id = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    TopUsers tp ON u.Id = tp.UserId
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.Id
+WHERE 
+    rp.Level <= 2 -- Limit to top 2 levels of parent-child posts
+ORDER BY 
+    rp.Level, QuestionTitle;

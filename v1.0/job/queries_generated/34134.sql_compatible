@@ -1,0 +1,88 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1 AS depth
+    FROM
+        movie_link ml
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN
+        aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+popular_actors AS (
+    SELECT
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM
+        cast_info ci
+    JOIN
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY
+        ci.person_id
+    HAVING
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+movie_details AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(STRING_AGG(DISTINCT ak.name, ', '), 'No Cast') AS actors,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM
+        movie_hierarchy mh
+    LEFT JOIN
+        cast_info ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    GROUP BY
+        mh.movie_id, mh.title, mh.production_year
+),
+final_selection AS (
+    SELECT
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.actors,
+        md.keyword_count,
+        ROW_NUMBER() OVER (ORDER BY md.keyword_count DESC, md.production_year DESC) AS rank
+    FROM
+        movie_details md
+    WHERE
+        md.keyword_count > 0
+)
+SELECT
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.actors,
+    f.keyword_count,
+    f.rank,
+    p.person_id
+FROM
+    final_selection f
+LEFT JOIN
+    popular_actors p ON f.movie_id IN (SELECT ci.movie_id FROM cast_info ci WHERE ci.person_id = p.person_id)
+WHERE
+    f.rank <= 10
+ORDER BY
+    f.rank;

@@ -1,0 +1,52 @@
+
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        COUNT(DISTINCT Comments.Id) AS CommentCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Users.Reputation) AS AvgUserReputation
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::text[])
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    WHERE 
+        Tags.Count > 0
+    GROUP BY 
+        Tags.TagName
+), 
+ClosedPosts AS (
+    SELECT 
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        ph.UserDisplayName AS ClosedBy
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+)
+SELECT 
+    t.TagName,
+    t.PostCount,
+    t.QuestionCount,
+    t.AnswerCount,
+    t.CommentCount,
+    t.TotalViews,
+    t.AvgUserReputation,
+    cp.Title AS ClosedPostTitle,
+    cp.ClosedDate,
+    cp.ClosedBy
+FROM 
+    TagStats t
+LEFT JOIN 
+    ClosedPosts cp ON t.TagName = ANY(string_to_array(substring(cp.Title, 2, length(cp.Title) - 2), '><'))
+ORDER BY 
+    t.PostCount DESC;

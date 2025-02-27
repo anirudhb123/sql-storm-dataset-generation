@@ -1,0 +1,67 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_gender,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_marital_status ORDER BY cd.cd_purchase_estimate DESC) AS rank_marital
+    FROM 
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        rc.c_customer_id,
+        rc.c_first_name,
+        rc.c_last_name,
+        rc.cd_gender,
+        rc.cd_marital_status
+    FROM 
+        RankedCustomers rc
+    WHERE 
+        rc.rank_gender <= 5 OR rc.rank_marital <= 5
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_returning_customer_sk,
+        COUNT(wr.wr_order_number) AS total_returns,
+        SUM(wr.wr_return_amt) AS total_return_amount,
+        SUM(COALESCE(wr.wr_return_tax, 0)) AS total_return_tax
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_returning_customer_sk
+),
+ReturnsWithCustomers AS (
+    SELECT 
+        hvc.c_customer_id,
+        hvc.c_first_name,
+        hvc.c_last_name,
+        cr.total_returns,
+        cr.total_return_amount,
+        cr.total_return_tax
+    FROM 
+        HighValueCustomers hvc
+    LEFT JOIN CustomerReturns cr ON hvc.c_customer_id = cr.wr_returning_customer_sk
+)
+SELECT 
+    r.c_customer_id AS customer_id, 
+    r.c_first_name AS first_name, 
+    r.c_last_name AS last_name,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    COALESCE(r.total_return_amount, 0.00) AS total_return_amount,
+    COALESCE(r.total_return_tax, 0.00) AS total_return_tax,
+    CASE 
+        WHEN r.total_return_amount > 500 THEN 'High Value Returner'
+        WHEN r.total_return_amount > 100 THEN 'Moderate Returner'
+        ELSE 'Low Value Returner' 
+    END AS return_category
+FROM 
+    ReturnsWithCustomers r
+ORDER BY 
+    return_category DESC,
+    r.total_return_amount DESC
+FETCH FIRST 20 ROWS ONLY;

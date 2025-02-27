@@ -1,0 +1,53 @@
+
+WITH RECURSIVE demographics AS (
+    SELECT cd_demo_sk, cd_gender, cd_marital_status, cd_education_status,
+           cd_purchase_estimate, cd_credit_rating, cd_dep_count,
+           ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) as rank
+    FROM customer_demographics
+    WHERE cd_purchase_estimate > 10000
+),
+item_sales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(ws_order_number) AS total_orders
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+sales_with_address AS (
+    SELECT 
+        c.c_customer_id, 
+        a.ca_city,
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(ISNULL(s.total_net_profit, 0), 0) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY a.ca_city ORDER BY COALESCE(s.total_net_profit, 0) DESC) AS city_rank
+    FROM customer c
+    LEFT JOIN customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+    LEFT JOIN item i ON i.i_item_sk IN (SELECT ws_item_sk FROM item_sales)
+    LEFT JOIN item_sales s ON i.i_item_sk = s.ws_item_sk
+    WHERE c.c_birth_year IS NULL OR c.c_birth_year > 1975
+)
+SELECT 
+    d.cd_gender,
+    COUNT(*) AS count_customers,
+    AVG(ws.total_net_profit) AS avg_profit,
+    d.cd_marital_status,
+    MAX(ws.total_orders) AS max_orders
+FROM demographics d
+JOIN sales_with_address ws ON d.cd_demo_sk = ws.c_customer_id
+WHERE (d.cd_marital_status IS NOT NULL OR d.cd_marital_status <> 'S')
+GROUP BY d.cd_gender, d.cd_marital_status
+HAVING COUNT(*) > 10
+UNION ALL
+SELECT 
+    'UNKNOWN' AS cd_gender,
+    COUNT(*) AS count_customers,
+    AVG(COALESCE(ws.total_net_profit, 0)) AS avg_profit,
+    'UNKNOWN' AS cd_marital_status,
+    MAX(COALESCE(ws.total_orders, 0)) AS max_orders
+FROM sales_with_address ws
+WHERE ws.ca_city IS NULL
+ORDER BY avg_profit DESC
+LIMIT 10;

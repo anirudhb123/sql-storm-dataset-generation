@@ -1,0 +1,67 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON V.PostId = P.Id
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.AcceptedAnswerId,
+        P.CreationDate,
+        COALESCE(PA.Upvotes, 0) AS PostUpvotes,
+        COALESCE(PA.Downvotes, 0) AS PostDownvotes,
+        DENSE_RANK() OVER (PARTITION BY P.Id ORDER BY P.LastActivityDate DESC) AS ActivityRank
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS Upvotes,
+            COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS Downvotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) PA ON P.Id = PA.PostId
+    WHERE 
+        P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    U.DisplayName,
+    UPS.UpVotes,
+    UPS.DownVotes,
+    PA.Title,
+    PA.CreationDate,
+    PA.PostUpvotes,
+    PA.PostDownvotes,
+    CASE 
+        WHEN PA.ActivityRank = 1 THEN 'Most Recent Activity'
+        WHEN PA.ActivityRank <= 5 THEN 'Recent Activity'
+        ELSE 'Older Activity'
+    END AS ActivityLevel
+FROM 
+    UserVoteStats UPS
+JOIN 
+    PostActivity PA ON UPS.UserId = P.OwnerUserId
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+WHERE 
+    UPS.PostsCount > 5
+    AND PA.PostUpvotes - PA.PostDownvotes > 0
+ORDER BY 
+    UPS.UpVotes DESC, PA.CreationDate DESC
+LIMIT 100;

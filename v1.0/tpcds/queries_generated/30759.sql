@@ -1,0 +1,70 @@
+
+WITH RECURSIVE Sales_Rank AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_ext_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+Top_Customers AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_ext_sales_price) AS total_spent
+    FROM 
+        customer AS c
+    JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_order_number IN (SELECT ws_order_number FROM Sales_Rank WHERE sales_rank <= 5)
+    GROUP BY 
+        c_customer_sk, c_first_name, c_last_name
+),
+Customer_Demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer_demographics AS cd
+    LEFT JOIN
+        household_demographics AS hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band AS ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT 
+    tc.c_first_name,
+    tc.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(CAST(SUM(tc.total_spent) AS DECIMAL(10,2)), 0) AS total_customer_spent,
+    COUNT(DISTINCT tc.total_orders) AS unique_order_count,
+    CASE 
+        WHEN COUNT(DISTINCT tc.total_orders) = 0 THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        store_returns 
+     WHERE 
+        sr_customer_sk = tc.c_customer_sk AND sr_returned_date_sk IS NOT NULL
+    ) AS return_count
+FROM 
+    Top_Customers AS tc
+JOIN 
+    Customer_Demographics AS cd ON tc.c_customer_sk = cd.cd_demo_sk
+GROUP BY 
+    tc.c_first_name, tc.c_last_name, cd.cd_gender, cd.cd_marital_status
+ORDER BY 
+    total_customer_spent DESC
+LIMIT 10;

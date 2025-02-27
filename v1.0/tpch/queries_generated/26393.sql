@@ -1,0 +1,28 @@
+SELECT
+    CONCAT('Supplier ', s_name, ' from ', n_name, ' provides ', p_name) AS description,
+    COUNT(DISTINCT o_orderkey) AS order_count,
+    SUM(l_extendedprice) AS total_revenue,
+    AVG(CASE WHEN l_discount > 0 THEN l_extendedprice * (1 - l_discount) ELSE l_extendedprice END) AS avg_net_price,
+    SUBSTRING_INDEX(p_comment, ' ', 3) AS short_comment
+FROM
+    supplier s
+JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE
+    s_comment LIKE '%discount%'
+    AND o_o_orderdate >= '2023-01-01'
+    AND o_orderstatus = 'O'
+GROUP BY
+    s_name, n_name, p_name, p_comment
+HAVING
+    COUNT(DISTINCT o_orderkey) > 5
+ORDER BY
+    total_revenue DESC;

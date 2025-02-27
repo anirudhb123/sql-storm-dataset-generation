@@ -1,0 +1,87 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, CreationDate, 1 AS Level
+    FROM Users
+    WHERE Reputation > 1000  
+    
+    UNION ALL
+    
+    SELECT u.Id, u.DisplayName, u.Reputation, u.CreationDate, uh.Level + 1
+    FROM Users u
+    INNER JOIN UserHierarchy uh ON uh.Id = u.AccountId
+    WHERE u.Reputation > 500  
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        (SELECT COUNT(*) 
+         FROM Comments c 
+         WHERE c.PostId = p.Id) AS TotalComments,
+        (SELECT COUNT(*) 
+         FROM Votes v 
+         WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*)
+         FROM Votes v 
+         WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVotes
+    FROM Posts p
+    WHERE p.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days')  
+),
+TopPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.Score,
+        pd.ViewCount,
+        pd.TotalComments,
+        pd.UpVotes,
+        pd.DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY pd.OwnerUserId ORDER BY pd.Score DESC, pd.ViewCount DESC) AS rn
+    FROM PostDetails pd
+),
+BadgesSummary AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges b
+    GROUP BY b.UserId
+),
+FinalResult AS (
+    SELECT 
+        uh.DisplayName,
+        uh.Reputation,
+        uh.CreationDate AS AccountCreationDate,
+        tp.Title AS PostTitle,
+        tp.Score,
+        tp.ViewCount,
+        tp.TotalComments,
+        COALESCE(bs.GoldBadges, 0) AS GoldBadges,
+        COALESCE(bs.SilverBadges, 0) AS SilverBadges,
+        COALESCE(bs.BronzeBadges, 0) AS BronzeBadges
+    FROM UserHierarchy uh
+    LEFT JOIN TopPosts tp ON uh.Id = tp.OwnerUserId AND tp.rn = 1  
+    LEFT JOIN BadgesSummary bs ON uh.Id = bs.UserId
+)
+SELECT 
+    DisplayName,
+    Reputation,
+    AccountCreationDate,
+    PostTitle,
+    Score,
+    ViewCount,
+    TotalComments,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    CASE 
+        WHEN Reputation >= 10000 THEN 'Elite'
+        WHEN Reputation >= 5000 THEN 'Expert'
+        ELSE 'Novice'
+    END AS ReputationLevel
+FROM FinalResult
+ORDER BY Reputation DESC, Score DESC;

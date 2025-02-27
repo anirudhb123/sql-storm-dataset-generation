@@ -1,0 +1,88 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        0 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        r.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2 
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END), 0) AS VoteCount,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        RANK() OVER (ORDER BY SUM(v.BountyAmount) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        SUM(v.BountyAmount) > 0
+),
+CombinedResults AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.Depth,
+        ps.VoteCount,
+        ps.TotalVotes,
+        tu.UserRank
+    FROM 
+        RecursivePostHierarchy ph
+    JOIN 
+        PostVoteSummary ps ON ph.PostId = ps.PostId
+    LEFT JOIN 
+        TopUsers tu ON ph.PostId = (
+            SELECT MIN(PostId)
+            FROM Posts
+            WHERE OwnerUserId IS NOT NULL
+            GROUP BY OwnerUserId
+            ORDER BY SUM(UpVotes) DESC
+            LIMIT 1
+        )
+)
+SELECT 
+    cr.PostId,
+    cr.Depth,
+    cr.VoteCount,
+    cr.TotalVotes,
+    COALESCE(cr.UserRank, 'Not Applicable') AS UserRankStatus,
+    CONCAT('Post ID: ', cr.PostId, ' - Votes: ', cr.VoteCount, ' - Total: ', cr.TotalVotes) AS PostSummary
+FROM 
+    CombinedResults cr
+WHERE 
+    cr.VoteCount > 0
+ORDER BY 
+    cr.Depth, cr.VoteCount DESC;

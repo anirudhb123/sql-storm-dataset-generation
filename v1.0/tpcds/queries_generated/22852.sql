@@ -1,0 +1,46 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_return_qty,
+        SUM(cr.return_amt) AS total_return_amt,
+        MIN(cr.returned_date_sk) AS first_return_date,
+        MAX(cr.returned_date_sk) AS last_return_date
+    FROM store_returns cr
+    GROUP BY cr.returning_customer_sk
+),
+RecentSales AS (
+    SELECT 
+        ws.ship_customer_sk,
+        SUM(ws.ws_quantity) AS total_sales_qty,
+        SUM(ws.ws_sales_price) AS total_sales_amt,
+        DATE_PART('day', MAX(ws.ws_sold_date_sk::date)) AS last_sale_day
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws.ship_customer_sk
+),
+CustomerMetrics AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(cr.total_return_qty, 0) AS total_return_qty,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amount,
+        COALESCE(rs.total_sales_qty, 0) AS total_sales_qty,
+        COALESCE(rs.total_sales_amt, 0) AS total_sales_amt,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY COALESCE(rs.total_sales_amt, 0) DESC) AS sales_rank
+    FROM customer c
+    LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.returning_customer_sk
+    LEFT JOIN RecentSales rs ON c.c_customer_sk = rs.ship_customer_sk
+)
+SELECT 
+    cm.c_customer_sk,
+    SUM(cm.total_return_qty) AS cumulative_return_qty,
+    MAX(cm.total_sales_amt) AS max_sales_amt,
+    (CASE 
+        WHEN MAX(cm.total_sales_amt) IS NULL THEN 'No Sales'
+        ELSE 'Has Sales'
+    END) AS sales_status,
+    COUNT(*) FILTER (WHERE cm.sales_rank <= 10) AS top_sales_rank_count
+FROM CustomerMetrics cm
+GROUP BY cm.c_customer_sk
+HAVING SUM(cm.total_return_qty) > 0 OR MAX(cm.total_sales_amt) IS NOT NULL
+ORDER BY cumulative_return_qty DESC, max_sales_amt DESC;

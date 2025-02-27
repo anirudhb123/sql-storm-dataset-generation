@@ -1,0 +1,84 @@
+WITH RecursiveMovieRank AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.id) AS rank_within_year
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+),
+
+MovieCompanyInfo AS (
+    SELECT
+        m.id AS movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mc.company_id) AS total_companies
+    FROM
+        movie_companies mc
+        JOIN company_name c ON mc.company_id = c.id
+        JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY
+        m.id, c.name, ct.kind
+),
+
+CastAndRoles AS (
+    SELECT
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role_name
+    FROM
+        cast_info ci
+        JOIN aka_name ak ON ci.person_id = ak.person_id
+        JOIN role_type rt ON ci.role_id = rt.id
+),
+
+MoviesWithMoreThanTwoActors AS (
+    SELECT
+        movie_id
+    FROM
+        CastAndRoles
+    GROUP BY
+        movie_id
+    HAVING
+        COUNT(DISTINCT actor_name) > 2
+),
+
+FinalBenchmarkResults AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        r.rank_within_year,
+        COALESCE(mc.total_companies, 0) AS total_companies,
+        ARRAY_AGG(DISTINCT car.actor_name) AS actor_names
+    FROM
+        aka_title m
+        LEFT JOIN RecursiveMovieRank r ON m.id = r.movie_id
+        LEFT JOIN MovieCompanyInfo mc ON m.id = mc.movie_id
+        LEFT JOIN CastAndRoles car ON m.id = car.movie_id
+    WHERE
+        m.production_year >= 1990
+        AND m.production_year < 2023
+        AND m.id IN (SELECT movie_id FROM MoviesWithMoreThanTwoActors)
+    GROUP BY
+        m.id, r.rank_within_year, mc.total_companies
+    ORDER BY
+        r.rank_within_year ASC, total_companies DESC
+)
+
+SELECT
+    f.movie_id,
+    f.movie_title,
+    f.rank_within_year,
+    f.total_companies,
+    f.actor_names
+FROM
+    FinalBenchmarkResults f
+WHERE
+    f.total_companies IS NOT NULL
+    AND (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = f.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating') AND mi.info::FLOAT > 7.0) > 0
+ORDER BY
+    f.rank_within_year,
+    f.total_companies DESC
+LIMIT 100;

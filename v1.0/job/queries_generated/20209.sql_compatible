@@ -1,0 +1,65 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        0 AS depth 
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.id IN (SELECT linked_movie_id FROM movie_link)
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id, 
+        mt.title, 
+        mt.production_year, 
+        mh.depth + 1 
+    FROM 
+        MovieHierarchy mh 
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id 
+        JOIN aka_title mt ON ml.linked_movie_id = mt.id
+)
+
+SELECT 
+    ak.name, 
+    ARRAY_AGG(DISTINCT mk.keyword) AS associated_keywords,
+    COUNT(DISTINCT mc.movie_id) AS movie_count,
+    AVG(COALESCE(CAST(ki.info AS INTEGER), 0)) AS avg_info_id,
+    COUNT(DISTINCT mh.movie_id) FILTER (WHERE mh.depth = 1) AS directly_linked_movies,
+    MAX(mh.depth) AS max_depth,
+    STRING_AGG(DISTINCT CASE 
+        WHEN ak.surname_pcode IS NULL THEN 'N/A' 
+        ELSE ak.surname_pcode END, ', ') AS surname_codes
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+LEFT JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    (SELECT 
+        mt.movie_id, 
+        mi.info 
+     FROM 
+        movie_info mi 
+     JOIN 
+        kind_type kt ON mi.info_type_id = kt.id 
+     WHERE 
+        kt.kind LIKE '%rating%'
+    ) ki ON at.id = ki.movie_id
+LEFT JOIN 
+    MovieHierarchy mh ON at.id = mh.movie_id
+WHERE 
+    ak.id IS NOT NULL 
+    AND ak.name IS NOT NULL
+GROUP BY 
+    ak.name, ak.surname_pcode 
+ORDER BY 
+    avg_info_id DESC NULLS LAST
+LIMIT 50;

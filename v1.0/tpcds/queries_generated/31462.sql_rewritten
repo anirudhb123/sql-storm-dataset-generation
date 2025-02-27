@@ -1,0 +1,69 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_ext_sales_price,
+        ws.ws_discount_amt,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_item_sk) as row_num
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2001)
+),
+ItemDiscounts AS (
+    SELECT 
+        i.i_item_id,
+        SUM(CASE WHEN ws.ws_ext_discount_amt IS NOT NULL THEN ws.ws_ext_discount_amt ELSE 0 END) AS total_discount
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_id
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_ext_sales_price) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_birth_month = 5 
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+),
+TopSpendingCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.total_spent,
+        RANK() OVER (ORDER BY c.total_spent DESC) AS rank
+    FROM 
+        CustomerData c
+    WHERE 
+        c.total_spent > (SELECT AVG(total_spent) FROM CustomerData)
+)
+SELECT 
+    tsc.c_customer_id,
+    i.i_item_id,
+    ROUND(SUM(i.total_discount), 2) AS total_discount_sum,
+    COUNT(sc.row_num) AS purchase_count
+FROM 
+    TopSpendingCustomers tsc
+LEFT JOIN 
+    ItemDiscounts i ON tsc.c_customer_id = i.i_item_id
+LEFT JOIN 
+    SalesCTE sc ON tsc.c_customer_id = sc.ws_order_number
+WHERE 
+    tsc.rank <= 10
+GROUP BY 
+    tsc.c_customer_id, i.i_item_id
+ORDER BY 
+    tsc.total_spent DESC, total_discount_sum DESC;

@@ -1,0 +1,35 @@
+WITH RECURSIVE OrderCTE AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_nationkey, c.c_mktsegment,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rnk
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= '2020-01-01'
+),
+SupplierCTE AS (
+    SELECT s.s_suppkey, s.s_nationkey, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_nationkey
+),
+TopOrders AS (
+    SELECT o.*
+    FROM OrderCTE o
+    WHERE o.rnk <= 5
+),
+DiscountedLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS discounted_price
+    FROM lineitem l
+    WHERE l.l_discount > 0.1
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    COALESCE(dl.discounted_price, 0) AS discounted_price,
+    COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+    AVG(s.total_supplycost) AS avg_supplycost
+FROM TopOrders o
+LEFT JOIN DiscountedLineItems dl ON o.o_orderkey = dl.l_orderkey
+LEFT JOIN SupplierCTE s ON o.c_nationkey = s.s_nationkey
+GROUP BY o.o_orderkey, o.o_orderdate
+ORDER BY o.o_orderdate DESC, discounted_price DESC;

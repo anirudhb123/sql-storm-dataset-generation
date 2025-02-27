@@ -1,0 +1,80 @@
+
+WITH RankedTitles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_titles
+    FROM
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT
+        c.person_id,
+        c.movie_id,
+        r.role,
+        COUNT(*) OVER (PARTITION BY c.person_id ORDER BY c.nr_order) AS role_count
+    FROM
+        cast_info c
+    JOIN
+        role_type r ON c.role_id = r.id
+),
+CompaniesWithRecentMovies AS (
+    SELECT DISTINCT
+        mc.company_id,
+        cn.name AS company_name,
+        COUNT(DISTINCT m.id) AS num_movies
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN
+        aka_title m ON mc.movie_id = m.id AND m.production_year = (SELECT MAX(production_year) FROM aka_title)
+    GROUP BY
+        mc.company_id,
+        cn.name
+)
+SELECT
+    a.name AS actor_name,
+    tt.title,
+    tt.production_year,
+    ar.role,
+    cwm.company_name,
+    cwm.num_movies,
+    COALESCE(NULLIF(tt.total_titles, 0), 'No Titles') AS total_titles,
+    CASE
+        WHEN ar.role_count > 5 THEN 'Veteran Actor'
+        WHEN ar.role_count BETWEEN 1 AND 5 THEN 'Newcomer'
+        ELSE 'No Roles'
+    END AS actor_experience,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+FROM
+    aka_name a
+JOIN
+    ActorRoles ar ON a.person_id = ar.person_id
+JOIN
+    RankedTitles tt ON tt.title_id = ar.movie_id
+LEFT JOIN
+    CompaniesWithRecentMovies cwm ON cwm.company_id IS NOT NULL
+LEFT JOIN
+    movie_keyword mk ON mk.movie_id = tt.title_id
+LEFT JOIN
+    keyword kw ON mk.keyword_id = kw.id
+WHERE
+    tt.rn = 1
+    AND (tt.production_year >= 2000 OR tt.title LIKE '%Saga%')
+GROUP BY
+    a.name,
+    tt.title,
+    tt.production_year,
+    ar.role,
+    cwm.company_name,
+    cwm.num_movies,
+    tt.total_titles,
+    ar.role_count
+ORDER BY
+    tt.production_year DESC,
+    a.name;

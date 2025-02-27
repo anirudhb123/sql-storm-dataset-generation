@@ -1,0 +1,51 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_link ml ON m.id = ml.movie_id
+    WHERE 
+        m.production_year >= 2000  -- Filtering movies released in or after 2000
+    UNION ALL
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        ml.linked_movie_id,
+        mh.depth + 1
+    FROM 
+        title t
+    JOIN 
+        MovieHierarchy mh ON t.id = mh.linked_movie_id
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS cast_count,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS noted_cast_members,
+    STRING_AGG(DISTINCT ak.name, ', ') AS known_as_names
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id 
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+WHERE 
+    mh.depth <= 2 -- Limiting the depth of movie hierarchy
+GROUP BY 
+    mh.movie_title, mh.production_year
+ORDER BY 
+    CAST(mh.production_year AS INTEGER) DESC, 
+    cast_count DESC;

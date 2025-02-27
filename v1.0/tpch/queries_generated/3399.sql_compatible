@@ -1,0 +1,95 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND 
+        o.o_orderdate < '1998-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerTotalSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS customer_rank
+    FROM 
+        customer c
+    INNER JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+),
+ProductSummary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity_sold,
+        AVG(l.l_extendedprice) AS average_price,
+        COUNT(DISTINCT l.l_orderkey) AS total_sales_orders
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+
+SELECT 
+    r.r_name,
+    AVG(sd.average_supply_cost) AS avg_supplier_cost,
+    SUM(ps.total_quantity_sold) AS total_quantity_sold,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    MAX(oh.order_rank) AS max_order_rank
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SupplierDetails sd ON n.n_nationkey = sd.s_suppkey
+LEFT JOIN 
+    ProductSummary ps ON sd.s_suppkey = ps.p_partkey
+LEFT JOIN 
+    customer c ON sd.s_suppkey = c.c_custkey
+LEFT JOIN 
+    RankedOrders oh ON c.c_custkey = oh.o_custkey
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(c.c_custkey) > 10
+ORDER BY 
+    avg_supplier_cost DESC;

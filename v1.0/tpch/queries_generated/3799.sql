@@ -1,0 +1,37 @@
+WITH supplier_parts AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, 
+           ps.ps_availqty, ps.ps_supplycost, 
+           (ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+), order_details AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) END) AS return_value,
+           COUNT(l.l_orderkey) AS line_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_totalprice
+), supplier_summary AS (
+    SELECT sp.s_suppkey, sp.s_name, SUM(sp.total_cost) AS total_supply_value,
+           ROW_NUMBER() OVER (PARTITION BY sp.s_suppkey ORDER BY SUM(sp.total_cost) DESC) AS rank
+    FROM supplier_parts sp
+    GROUP BY sp.s_suppkey, sp.s_name
+), customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT co.c_custkey, co.c_name, co.order_count, co.avg_order_value, 
+       ss.s_name AS top_supplier, ss.total_supply_value
+FROM customer_orders co
+LEFT JOIN (
+    SELECT s.s_suppkey, s.s_name
+    FROM supplier_summary ss
+    WHERE ss.rank = 1
+) ss ON co.c_custkey = ss.s_suppkey
+WHERE co.avg_order_value IS NOT NULL
+ORDER BY co.avg_order_value DESC
+LIMIT 10;

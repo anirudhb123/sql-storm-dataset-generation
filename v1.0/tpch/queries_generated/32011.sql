@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_nationkey, s_name, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 50000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_nationkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank_price
+    FROM part p
+    WHERE p.p_size BETWEEN 10 AND 20
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           CASE WHEN o.o_orderstatus = 'O' THEN 'Open'
+                WHEN o.o_orderstatus = 'F' THEN 'Finished'
+                ELSE 'Canceled' END AS status
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+),
+HighValueLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+SELECT 
+    c.c_name,
+    COUNT(DISTINCT o.o_orderkey) AS num_orders,
+    COALESCE(SUM(o.o_totalprice), 0) AS total_order_value,
+    MAX(pd.rank_price) AS max_rank_price,
+    MAX(l.total_value) AS high_lineitem_value,
+    STRING_AGG(CONCAT_WS(' - ', s.s_name, s.s_acctbal, sh.level), '; ') AS suppliers
+FROM customer c
+LEFT JOIN FilteredOrders o ON c.c_custkey = o.o_orderkey
+LEFT JOIN PartDetails pd ON pd.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ANY (SELECT s_suppkey FROM SupplierHierarchy sh WHERE sh.s_nationkey = c.c_nationkey))
+LEFT JOIN HighValueLineItems l ON l.l_orderkey = o.o_orderkey
+LEFT JOIN supplier s ON s.s_nationkey = c.c_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE c.c_acctbal IS NOT NULL
+GROUP BY c.c_name
+ORDER BY total_order_value DESC, num_orders DESC
+LIMIT 10;

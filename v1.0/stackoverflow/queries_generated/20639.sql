@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId = 1 -- Questions only
+        AND P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(PT.PostId) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%<', T.TagName, '>%')
+    LEFT JOIN 
+        PostLinks PL ON P.Id = PL.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '2 years'
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(PT.PostId) > 5
+),
+HighScoringUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id
+    HAVING 
+        SUM(P.Score) > 50
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score AS PostScore,
+    RP.OwnerDisplayName,
+    RP.UpVotes,
+    RP.DownVotes,
+    HT.TotalScore AS UserScore,
+    (SELECT 
+        ARRAY_AGG(T.TagName) 
+     FROM 
+        Tags T 
+     WHERE 
+        P.Tags LIKE CONCAT('%<', T.TagName, '>%') 
+        GROUP BY 
+        T.TagName
+    ) AS AssociatedTags
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    HighScoringUsers HT ON RP.OwnerDisplayName = HT.DisplayName
+LEFT JOIN 
+    (SELECT * FROM PopularTags ORDER BY PostCount DESC LIMIT 10) PT ON PT.PostCount IS NOT NULL
+WHERE 
+    RP.Rank <= 5
+ORDER BY 
+    RP.Score DESC;

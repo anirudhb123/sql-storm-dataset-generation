@@ -1,0 +1,42 @@
+WITH RECURSIVE RecentOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey
+    FROM orders o
+    WHERE o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey
+    FROM orders o
+    JOIN RecentOrders ro ON o.o_custkey = ro.o_custkey AND o.o_orderdate < ro.o_orderdate
+)
+SELECT 
+    n.n_name AS Nation, 
+    r.r_name AS Region,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+    COUNT(DISTINCT o.o_orderkey) AS OrderCount,
+    AVG(o.o_totalprice) AS AvgOrderValue,
+    COUNT(DISTINCT c.c_custkey) FILTER (WHERE c.c_acctbal IS NOT NULL) AS ActiveCustomers
+FROM 
+    RecentOrders ro
+JOIN 
+    customer c ON ro.o_custkey = c.c_custkey
+JOIN 
+    supplier s ON c.c_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey AND ro.o_orderkey = l.l_orderkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate >= ro.o_orderdate
+    AND (l.l_returnflag = 'R' OR l.l_linestatus = 'O')
+GROUP BY 
+    n.n_name, r.r_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY 
+    TotalRevenue DESC, AvgOrderValue DESC
+LIMIT 10;

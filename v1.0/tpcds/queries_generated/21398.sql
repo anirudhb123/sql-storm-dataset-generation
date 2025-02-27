@@ -1,0 +1,57 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT ca_address_sk, ca_address_id, ca_city, 
+           ROW_NUMBER() OVER (PARTITION BY ca_city ORDER BY ca_address_sk) AS rank
+    FROM customer_address
+    WHERE ca_state = 'CA'
+),
+income_ranges AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound,
+           CASE 
+               WHEN ib_lower_bound IS NULL THEN 'Unknown'
+               ELSE CONCAT('$', ib_lower_bound, ' - $', COALESCE(ib_upper_bound, 'Infinity'))
+           END AS income_range
+    FROM income_band
+),
+sales_summary AS (
+    SELECT ws_bill_customer_sk, 
+           SUM(ws_ext_sales_price) AS total_sales,
+           COUNT(DISTINCT ws_order_number) AS total_orders,
+           DENSE_RANK() OVER (ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+demographic_analysis AS (
+    SELECT cd_gender, cd_marital_status, 
+           AVG(cd_purchase_estimate) AS average_purchase,
+           COUNT(cd_demo_sk) AS demographic_count
+    FROM customer_demographics
+    GROUP BY cd_gender, cd_marital_status
+),
+joined_data AS (
+    SELECT ca.ca_address_id, ca.ca_city, da.avg_purchase, ir.income_range, ss.total_orders
+    FROM address_hierarchy ca
+    LEFT JOIN demographic_analysis da ON da.demographic_count > 0
+    LEFT JOIN income_ranges ir ON ir.ib_income_band_sk = (
+        SELECT hd_income_band_sk 
+        FROM household_demographics 
+        WHERE hd_demo_sk = (
+            SELECT c_current_hdemo_sk 
+            FROM customer 
+            WHERE c_customer_sk = ca.ca_address_sk
+        ) LIMIT 1
+    )
+    LEFT JOIN sales_summary ss ON ss.ws_bill_customer_sk = ca.ca_address_sk
+)
+SELECT j.ca_address_id,
+       j.ca_city,
+       COALESCE(j.avg_purchase, 0) AS average_purchase_exp,
+       j.income_range,
+       COALESCE(j.total_orders, 0) AS total_orders
+FROM joined_data j
+WHERE j.total_orders > (
+    SELECT AVG(total_orders) FROM sales_summary
+    WHERE total_orders IS NOT NULL
+) OR (j.income_range IS NULL AND j.ca_city IS NOT NULL)
+ORDER BY j.ca_city, j.avg_purchase DESC
+FETCH FIRST 100 ROWS ONLY;

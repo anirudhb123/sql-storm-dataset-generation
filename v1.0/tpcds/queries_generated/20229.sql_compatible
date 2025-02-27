@@ -1,0 +1,89 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_age,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+ExtremeReturns AS (
+    SELECT 
+        cr_returning_customer_sk, 
+        SUM(cr_return_quantity) AS total_returned,
+        COUNT(DISTINCT cr_order_number) AS return_count
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+    HAVING 
+        SUM(cr_return_quantity) > 10 OR COUNT(DISTINCT cr_order_number) > 5
+),
+SalesSummary AS (
+    SELECT 
+        w.w_warehouse_name, 
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_name 
+    HAVING 
+        SUM(ws.ws_ext_sales_price) > 1000
+),
+CustomerShippingInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        MAX(CASE WHEN sm.sm_type = 'Express' THEN 1 ELSE 0 END) AS express_shipping_flag
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+FinalOutput AS (
+    SELECT 
+        rc.c_first_name,
+        rc.c_last_name,
+        s.w_warehouse_name,
+        ss.total_sales,
+        ss.avg_net_profit,
+        CASE 
+            WHEN ci.total_orders > 0 THEN 'Active'
+            ELSE 'Inactive' 
+        END AS customer_status,
+        ci.express_shipping_flag
+    FROM 
+        RankedCustomers rc
+    LEFT JOIN 
+        SalesSummary ss ON ss.total_sales IS NOT NULL
+    LEFT JOIN 
+        CustomerShippingInfo ci ON ci.c_customer_sk = rc.c_customer_sk
+    WHERE 
+        rc.purchase_rank <= 10
+)
+SELECT 
+    f.*,
+    CASE 
+        WHEN f.express_shipping_flag = 1 AND f.total_sales IS NOT NULL THEN 'High Priority' 
+        ELSE 'Regular' 
+    END AS shipping_priority,
+    f.total_sales / NULLIF(f.avg_net_profit, 0) AS sales_to_profit_ratio
+FROM 
+    FinalOutput f
+WHERE 
+    f.customer_status = 'Active' 
+ORDER BY 
+    sales_to_profit_ratio DESC;

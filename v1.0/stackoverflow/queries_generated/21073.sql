@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        b.Name AS BadgeName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, b.Name
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.CreationDate,
+    ps.CommentCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    CASE 
+        WHEN ub.BadgeCount > 0 THEN 'Has Badges'
+        ELSE 'No Badges'
+    END AS BadgeStatus,
+    CASE 
+        WHEN rp.Score IS NULL THEN 'No Score'
+        WHEN rp.ViewCount > 100 AND rp.Score > 10 THEN 'High Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel,
+    NULLIF(UPPER(rp.Title), '') AS UpperCaseTitle,
+    pg_catalog.to_char(rp.CreationDate, 'MM/DD/YYYY') AS FormattedDate
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostStatistics ps ON rp.PostId = ps.PostId
+LEFT JOIN 
+    UserBadges ub ON rp.PostId = (SELECT a.AcceptedAnswerId FROM Posts a WHERE a.Id = rp.PostId AND a.PostTypeId = 1 LIMIT 1)
+WHERE 
+    rp.PostRank <= 3
+ORDER BY 
+    rp.ViewCount DESC, 
+    rp.CreationDate ASC
+LIMIT 50;

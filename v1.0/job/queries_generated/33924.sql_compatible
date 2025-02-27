@@ -1,0 +1,72 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        e.id,
+        e.title,
+        e.production_year,
+        h.movie_id
+    FROM 
+        aka_title e
+    JOIN 
+        MovieHierarchy h ON e.episode_of_id = h.movie_id
+),
+CastDetails AS (
+    SELECT 
+        c.id AS cast_id,
+        p.id AS person_id,
+        p.name AS actor_name,
+        m.title AS movie_title,
+        m.production_year,
+        c.nm_order,
+        r.role AS role_type,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY c.nr_order) AS row_num
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    JOIN 
+        aka_title m ON c.movie_id = m.movie_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+MovieInfoSummary AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        AVG(mh.production_year) AS avg_production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CastDetails c ON mh.movie_id = c.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(mis.avg_production_year, 0) AS average_year,
+    COALESCE(mis.total_cast_count, 0) AS cast_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    MovieInfoSummary mis ON mh.movie_id = mis.movie_id
+WHERE 
+    mh.production_year > 2000
+ORDER BY 
+    mh.production_year DESC,
+    cast_count DESC
+LIMIT 50;

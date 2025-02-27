@@ -1,0 +1,48 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+        JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > 1000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c 
+        LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_size,
+    COALESCE(r.rank, 0) AS supplier_rank,
+    co.order_count,
+    co.total_spent,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) OVER (PARTITION BY p.p_partkey) AS revenue,
+    CASE 
+        WHEN co.total_spent IS NULL THEN 'No Orders'
+        WHEN co.total_spent > 5000 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_category
+FROM 
+    part p 
+    LEFT JOIN lineitem li ON p.p_partkey = li.l_partkey
+    LEFT JOIN RankedSuppliers r ON li.l_suppkey = r.s_suppkey AND r.rank = 1
+    LEFT JOIN CustomerOrders co ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+    AND (li.l_returnflag = 'N' OR li.l_returnflag IS NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_size, co.order_count, co.total_spent, r.rank
+ORDER BY 
+    revenue DESC, customer_category;

@@ -1,0 +1,69 @@
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '><')::int[])
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName, 
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagCounts
+),
+UserEngagement AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS QuestionCount,
+        COUNT(DISTINCT Comments.Id) AS CommentCount,
+        SUM(Votes.VoteTypeId = 2) AS UpVoteCount,
+        SUM(Votes.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId AND Posts.PostTypeId = 1
+    LEFT JOIN 
+        Comments ON Users.Id = Comments.UserId
+    LEFT JOIN 
+        Votes ON Users.Id = Votes.UserId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+BenchedUsers AS (
+    SELECT 
+        e.UserId,
+        e.DisplayName,
+        e.QuestionCount,
+        e.CommentCount,
+        e.UpVoteCount,
+        e.DownVoteCount,
+        ROW_NUMBER() OVER (ORDER BY (e.UpVoteCount - e.DownVoteCount) DESC) AS EngagedRank
+    FROM 
+        UserEngagement e
+)
+SELECT 
+    t.TagName,
+    t.PostCount,
+    bu.DisplayName AS TopEngagedUser,
+    bu.QuestionCount,
+    bu.CommentCount,
+    bu.UpVoteCount,
+    bu.DownVoteCount,
+    bu.EngagedRank
+FROM 
+    TopTags t
+JOIN 
+    BenchedUsers bu ON bu.QuestionCount > 0 
+WHERE 
+    t.TagRank <= 10 
+ORDER BY 
+    t.PostCount DESC, 
+    bu.EngagedRank
+LIMIT 10;

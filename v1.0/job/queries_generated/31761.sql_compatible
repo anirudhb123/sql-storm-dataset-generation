@@ -1,0 +1,64 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ARRAY[m.title] AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        p.path || m.title
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_hierarchy p ON m.episode_of_id = p.movie_id
+), ranked_cast AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+), movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(rc.actor_name, 'Unknown') AS leading_actor,
+    mk.keywords,
+    COUNT(DISTINCT c.id) AS total_cast_members
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    ranked_cast rc ON mh.movie_id = rc.movie_id AND rc.actor_rank = 1
+LEFT JOIN 
+    cast_info c ON mh.movie_id = c.movie_id
+LEFT JOIN 
+    movie_keywords mk ON mh.movie_id = mk.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, rc.actor_name, mk.keywords
+HAVING 
+    COUNT(DISTINCT c.id) > 5
+ORDER BY 
+    mh.production_year DESC, mh.title;

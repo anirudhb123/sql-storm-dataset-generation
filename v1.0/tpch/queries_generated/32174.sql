@@ -1,0 +1,36 @@
+WITH RECURSIVE RevenueCTE AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    INNER JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY o.o_orderkey
+    UNION ALL
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) + r.total_revenue
+    FROM orders o
+    JOIN RevenueCTE r ON o.o_orderkey = r.o_orderkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey, r.total_revenue
+),
+SupplierRevenue AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_revenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+RankedSuppliers AS (
+    SELECT sr.*, RANK() OVER (ORDER BY sr.supplier_revenue DESC) AS revenue_rank
+    FROM SupplierRevenue sr
+),
+NationalRevenue AS (
+    SELECT n.n_name, SUM(r.total_revenue) AS national_revenue
+    FROM nation n
+    LEFT JOIN orders o ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey)
+    LEFT JOIN RevenueCTE r ON o.o_orderkey = r.o_orderkey
+    GROUP BY n.n_name
+)
+SELECT nr.n_name, nr.national_revenue, rs.s_name AS top_supplier, rs.supplier_revenue
+FROM NationalRevenue nr
+JOIN RankedSuppliers rs ON nr.national_revenue > rs.supplier_revenue
+WHERE rs.revenue_rank = 1
+ORDER BY nr.national_revenue DESC, rs.supplier_revenue ASC;

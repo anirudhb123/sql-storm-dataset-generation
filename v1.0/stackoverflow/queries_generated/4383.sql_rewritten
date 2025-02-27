@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT AVG(v1.BountyAmount) FROM Votes v1 WHERE v1.PostId = p.Id AND v1.VoteTypeId = 8) AS AvgBounty
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+PostStats AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.AvgBounty,
+        CASE 
+            WHEN rp.Score > 100 THEN 'High'
+            WHEN rp.Score BETWEEN 50 AND 100 THEN 'Medium'
+            ELSE 'Low'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    ps.ScoreCategory,
+    COUNT(*) AS PostCount,
+    AVG(ps.ViewCount) AS AvgViewCount,
+    SUM(ps.CommentCount) AS TotalComments,
+    COALESCE(ROUND(SUM(ps.AvgBounty), 2), 0) AS TotalAvgBounty
+FROM 
+    PostStats ps
+WHERE 
+    ps.Rank <= 5 
+GROUP BY 
+    ps.ScoreCategory
+ORDER BY 
+    ps.ScoreCategory DESC
+UNION ALL
+SELECT 
+    'Total' AS ScoreCategory,
+    COUNT(*) AS PostCount,
+    AVG(ViewCount) AS AvgViewCount,
+    SUM(CommentCount) AS TotalComments,
+    COALESCE(ROUND(SUM(AvgBounty), 2), 0) AS TotalAvgBounty
+FROM 
+    PostStats;

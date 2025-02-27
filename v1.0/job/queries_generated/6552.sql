@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS rank
+    FROM 
+        title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        GROUP_CONCAT(DISTINCT CONCAT(a.name, ' (', c.kind, ')') ORDER BY a.name) AS actors,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = rm.movie_id
+    LEFT JOIN 
+        aka_name a ON a.person_id = ci.person_id
+    LEFT JOIN 
+        role_type c ON c.id = ci.role_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = rm.movie_id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+),
+FinalResults AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.actors,
+        md.keywords,
+        CASE
+            WHEN md.production_year < 2000 THEN 'Classic'
+            WHEN md.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+            ELSE 'Recent'
+        END AS movie_category
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    fr.actors,
+    fr.keywords,
+    fr.movie_category
+FROM 
+    FinalResults fr
+WHERE 
+    fr.movie_category = 'Modern'
+ORDER BY 
+    fr.production_year DESC, 
+    fr.title ASC
+LIMIT 50;

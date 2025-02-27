@@ -1,0 +1,63 @@
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, ',')) AS tagname ON TRUE 
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(BOTH '<>' FROM tagname)
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+VoteDetails AS (
+    SELECT 
+        UserId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS TotalUpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS TotalDownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        UserId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.CommentCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    json_agg(DISTINCT json_build_object('Tag', tg)) AS Tags,
+    json_agg(DISTINCT json_build_object(
+        'UserId', vd.UserId,
+        'TotalUpVotes', vd.TotalUpVotes,
+        'TotalDownVotes', vd.TotalDownVotes
+    )) AS UserVoteDetails
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    VoteDetails vd ON vd.UserId IN (
+        SELECT DISTINCT UserId 
+        FROM Votes 
+        WHERE PostId = ps.PostId
+    )
+GROUP BY 
+    ps.PostId, ps.Title, ps.CreationDate, ps.Score, ps.CommentCount, ps.UpVoteCount, ps.DownVoteCount
+ORDER BY 
+    ps.Score DESC,
+    ps.CommentCount DESC
+LIMIT 10;

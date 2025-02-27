@@ -1,0 +1,35 @@
+
+WITH RECURSIVE CTE_Customer_Orders AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, COUNT(ws.ws_order_number) AS total_orders
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, COUNT(cs.cs_order_number) AS total_orders
+    FROM customer c
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+Aggregated_Orders AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, SUM(total_orders) AS total_orders
+    FROM CTE_Customer_Orders
+    GROUP BY c_customer_sk, c_first_name, c_last_name
+),
+Aggregated_Income AS (
+    SELECT h.hd_demo_sk, SUM(h.hd_income_band_sk) AS total_income
+    FROM household_demographics h
+    GROUP BY h.hd_demo_sk
+),
+Filtered_Customers AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, ao.total_orders, ai.total_income
+    FROM customer c
+    LEFT JOIN Aggregated_Orders ao ON c.c_customer_sk = ao.c_customer_sk
+    LEFT JOIN Aggregated_Income ai ON ai.hd_demo_sk = c.c_current_hdemo_sk
+    WHERE ao.total_orders > 5 AND (ai.total_income IS NULL OR ai.total_income > 1000)
+)
+SELECT f.c_first_name, f.c_last_name, COALESCE(f.total_orders, 0) AS total_orders,
+       CASE WHEN f.total_income IS NOT NULL THEN f.total_income ELSE 'Undefined' END AS total_income,
+       ROW_NUMBER() OVER (ORDER BY f.total_orders DESC) as order_rank
+FROM Filtered_Customers f
+ORDER BY f.total_orders DESC, f.c_last_name ASC
+LIMIT 100;

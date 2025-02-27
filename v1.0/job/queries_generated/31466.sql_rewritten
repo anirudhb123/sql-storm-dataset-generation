@@ -1,0 +1,60 @@
+WITH RECURSIVE ActorHierarchy AS (
+    
+    SELECT c.person_id, a.name AS actor_name, 
+           COUNT(DISTINCT c.movie_id) AS total_movies,
+           1 AS level
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    WHERE c.person_role_id IS NOT NULL
+    GROUP BY c.person_id, a.name
+    
+    UNION ALL
+    
+    
+    SELECT c.person_id, a.name AS actor_name,
+           COUNT(DISTINCT c.movie_id) AS total_movies,
+           ah.level + 1
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN ActorHierarchy ah ON c.movie_id = ah.movie_id
+    WHERE c.person_role_id IS NOT NULL
+    GROUP BY c.person_id, a.name, ah.level
+),
+
+MovieDetails AS (
+    SELECT m.id AS movie_id, tm.title, 
+           STRING_AGG(k.keyword, ', ') AS keywords,
+           MAX(mi.info) AS rating
+    FROM aka_title tm
+    JOIN movie_keyword mk ON tm.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN movie_info mi ON tm.id = mi.movie_id
+    WHERE mi.info_type_id = (
+        SELECT id FROM info_type WHERE info = 'Rating'
+    )
+    GROUP BY m.id, tm.title
+),
+
+MovieCompanies AS (
+    SELECT mc.movie_id, 
+           GROUP_CONCAT(cn.name) AS company_names,
+           GROUP_CONCAT(ct.kind) AS company_types
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id
+)
+
+SELECT ah.actor_name, 
+       COUNT(DISTINCT md.movie_id) AS movies_count,
+       STRING_AGG(DISTINCT md.title, '; ') AS movie_titles,
+       STRING_AGG(DISTINCT md.keywords, '; ') AS associated_keywords,
+       mc.company_names,
+       mc.company_types,
+       AVG(md.rating) AS average_rating
+FROM ActorHierarchy ah
+LEFT JOIN MovieDetails md ON ah.movie_id = md.movie_id
+LEFT JOIN MovieCompanies mc ON md.movie_id = mc.movie_id
+GROUP BY ah.actor_name, mc.company_names, mc.company_types
+HAVING COUNT(DISTINCT md.movie_id) > 2
+ORDER BY movies_count DESC, average_rating DESC;

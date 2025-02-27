@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey, 
+        rs.s_name, 
+        rs.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rn <= 3
+),
+TotalPriceByCustomer AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(o.o_totalprice) AS total_price
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, GETDATE())
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_name, 
+    p.p_brand, 
+    p.p_retailprice, 
+    ts.s_name AS supplier_name, 
+    tc.cust_key AS customer_id, 
+    tc.total_price,
+    COUNT(l.l_orderkey) AS order_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    AVG(l.l_quantity) AS average_quantity
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    TopSuppliers ts ON ps.ps_suppkey = ts.s_suppkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    TotalPriceByCustomer tc ON l.l_orderkey IN 
+        (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = tc.c_custkey)
+GROUP BY 
+    p.p_name, ts.s_name, tc.c_custkey, p.p_brand, p.p_retailprice
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+ORDER BY 
+    total_sales DESC, p.p_retailprice ASC;

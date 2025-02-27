@@ -1,0 +1,78 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+MaxLineItems AS (
+    SELECT 
+        l.l_partkey,
+        COUNT(*) AS lineitem_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_partkey
+    HAVING 
+        COUNT(*) > 3
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate > cast('1998-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        o.o_orderkey
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        COALESCE(MAX(ps.ps_supplycost), 0) AS max_supplycost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+    HAVING 
+        MAX(ps.ps_availqty) IS NOT NULL OR SUM(CASE WHEN ps.ps_supplycost IS NULL THEN 1 ELSE 0 END) > 0
+)
+SELECT 
+    fp.p_partkey,
+    fp.p_name,
+    fp.p_brand,
+    COALESCE(MAX(rs.s_acctbal), 0) AS top_supplier_acctbal,
+    MAX(r.lineitem_count) AS total_line_items,
+    SUM(ro.total_revenue) AS recent_order_revenue,
+    CASE 
+        WHEN MAX(fp.max_supplycost) > 100.00 THEN 'High Cost'
+        ELSE 'Low Cost'
+    END AS cost_category
+FROM 
+    FilteredParts fp
+LEFT JOIN 
+    RankedSuppliers rs ON fp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = rs.s_suppkey)
+LEFT JOIN 
+    MaxLineItems r ON fp.p_partkey = r.l_partkey
+LEFT JOIN 
+    RecentOrders ro ON fp.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = ro.o_orderkey)
+GROUP BY 
+    fp.p_partkey, fp.p_name, fp.p_brand
+HAVING 
+    COUNT(rs.s_suppkey) > 0
+ORDER BY 
+    total_line_items DESC, top_supplier_acctbal DESC;

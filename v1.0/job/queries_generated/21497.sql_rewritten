@@ -1,0 +1,47 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT t.id, t.title, t.production_year, t.episode_of_id, t.season_nr, 
+           CAST(t.title AS VARCHAR(255)) AS full_title,
+           1 AS level
+    FROM aka_title t
+    WHERE t.season_nr IS NOT NULL
+
+    UNION ALL
+
+    SELECT t.id, t.title, t.production_year, t.episode_of_id, t.season_nr, 
+           CONCAT(mh.full_title, ' - Episode ', t.episode_nr) AS full_title,
+           mh.level + 1
+    FROM aka_title t
+    JOIN movie_hierarchy mh ON t.episode_of_id = mh.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    COALESCE(k.keyword, 'N/A') AS movie_keyword,
+    mh.full_title AS full_series_title,
+    COUNT(DISTINCT mi.info) AS additional_info_count,
+    COUNT(mk.movie_id) AS keyword_count,
+    SUM(CASE WHEN mk.movie_id IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY ak.person_id) AS total_movies_with_keywords,
+    AVG(CASE WHEN ak.surname_pcode IS NULL THEN LENGTH(ak.name) ELSE NULL END) AS avg_length_without_surname_pcode,
+    STRING_AGG(DISTINCT COALESCE(cn.name, 'No Company'), ', ') AS companies_involved,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY COUNT(DISTINCT mi.info) DESC) AS info_rank
+FROM aka_name ak
+JOIN cast_info ci ON ak.person_id = ci.person_id
+JOIN aka_title at ON ci.movie_id = at.id
+LEFT JOIN movie_keyword mk ON mk.movie_id = at.id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+LEFT JOIN movie_info mi ON mi.movie_id = at.id
+LEFT JOIN movie_hierarchy mh ON mh.id = at.id
+LEFT JOIN movie_companies mc ON mc.movie_id = at.id
+LEFT JOIN company_name cn ON mc.company_id = cn.id
+WHERE ak.name IS NOT NULL 
+  AND (ak.name_pcode_cf IS NOT NULL OR ak.name_pcode_nf IS NOT NULL)
+  AND (YEAR(cast('2024-10-01' as date)) - at.production_year) < 20
+  AND NOT EXISTS (
+      SELECT 1
+      FROM movie_info_index mii
+      WHERE mii.movie_id = at.id AND mii.info_type_id = 
+            (SELECT id FROM info_type WHERE info = 'Censored')
+  )
+GROUP BY ak.name, at.title, mh.full_title, ak.person_id
+ORDER BY info_rank, total_movies_with_keywords DESC;

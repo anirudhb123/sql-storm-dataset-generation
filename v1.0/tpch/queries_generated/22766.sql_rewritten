@@ -1,0 +1,58 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+PartStatistics AS (
+    SELECT p.p_partkey, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count, 
+           SUM(l.l_quantity) AS total_quantity,
+           AVG(l.l_discount) AS average_discount
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey
+),
+EnhancedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_totalprice,
+           CASE 
+               WHEN o.o_orderstatus = 'O' THEN 'Open'
+               WHEN o.o_orderstatus = 'F' THEN 'Filled'
+               ELSE 'Unknown'
+           END AS order_status,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+),
+CustomerRanking AS (
+    SELECT c.c_custkey,
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS segment_rank
+    FROM customer c
+)
+SELECT DISTINCT 
+       r.r_name AS region_name,
+       ns.n_name AS nation_name,
+       COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers,
+       SUM(ps.ps_availqty) AS total_available_quantity,
+       SUM(COALESCE(os.o_totalprice, 0)) AS total_order_value,
+       ARRAY_AGG(DISTINCT c.c_name) AS customer_names,
+       MAX(p.total_quantity) AS max_part_quantity,
+       AVG(p.average_discount) AS avg_part_discount
+FROM region r
+JOIN nation ns ON ns.n_regionkey = r.r_regionkey
+LEFT JOIN SupplierHierarchy sh ON ns.n_nationkey = sh.s_nationkey
+LEFT JOIN partsupp ps ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN PartStatistics p ON p.p_partkey = ps.ps_partkey
+LEFT JOIN EnhancedOrders os ON os.o_orderkey = ps.ps_partkey
+LEFT JOIN customer c ON c.c_nationkey = ns.n_nationkey 
+WHERE r.r_name IS NOT NULL 
+  AND (sh.level IS NULL OR sh.level < 3)
+GROUP BY r.r_name, ns.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5 OR SUM(ps.ps_availqty) > 100
+ORDER BY region_name, nation_name;

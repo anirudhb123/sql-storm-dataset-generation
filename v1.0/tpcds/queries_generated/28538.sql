@@ -1,0 +1,65 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+DemographicInfo AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status
+    FROM 
+        customer_demographics
+),
+CustomerInfo AS (
+    SELECT 
+        c_customer_sk,
+        CONCAT(c_salutation, ' ', c_first_name, ' ', c_last_name) AS full_name,
+        c_email_address,
+        c_birth_month || '/' || c_birth_day || '/' || c_birth_year AS birth_date
+    FROM 
+        customer
+),
+AggregatedSales AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    c.full_name,
+    c.email_address,
+    a.full_address,
+    a.ca_city,
+    a.ca_state,
+    a.ca_zip,
+    d.cd_gender,
+    d.cd_marital_status,
+    d.cd_education_status,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    COALESCE(s.order_count, 0) AS order_count
+FROM 
+    CustomerInfo c
+JOIN 
+    AddressInfo a ON c.c_customer_sk = a.ca_address_sk
+JOIN 
+    DemographicInfo d ON c.c_current_cdemo_sk = d.cd_demo_sk
+LEFT JOIN 
+    AggregatedSales s ON c.c_customer_sk = s.customer_id
+WHERE 
+    a.ca_state IN ('NY', 'CA')
+ORDER BY 
+    total_sales DESC, 
+    c.full_name ASC
+LIMIT 100;

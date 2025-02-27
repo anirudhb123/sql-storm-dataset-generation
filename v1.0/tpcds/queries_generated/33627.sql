@@ -1,0 +1,75 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs_bill_customer_sk,
+        SUM(cs_ext_sales_price) AS total_sales,
+        1 AS level,
+        NULL AS parent_customer
+    FROM 
+        catalog_sales 
+    GROUP BY 
+        cs_bill_customer_sk
+    
+    UNION ALL
+    
+    SELECT 
+        ws_ship_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        level + 1,
+        cs_bill_customer_sk
+    FROM 
+        web_sales ws
+    JOIN 
+        sales_hierarchy sh ON ws_bill_customer_sk = sh.cs_bill_customer_sk
+    GROUP BY 
+        ws_ship_customer_sk, cs_bill_customer_sk, level
+)
+SELECT 
+    s.cs_bill_customer_sk, 
+    COALESCE(d.cd_gender, 'Unknown') AS gender,
+    SUM(s.total_sales) AS cumulative_sales,
+    COUNT(DISTINCT s.cs_bill_customer_sk) OVER (PARTITION BY d.cd_gender) AS gender_count,
+    CASE 
+        WHEN SUM(s.total_sales) > 50000 THEN 'High Value'
+        WHEN SUM(s.total_sales) BETWEEN 20000 AND 50000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM 
+    sales_hierarchy s
+JOIN 
+    customer c ON s.cs_bill_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+WHERE 
+    c.c_birth_year IS NOT NULL AND (d.cd_marital_status = 'S' OR d.cd_marital_status IS NULL)
+GROUP BY 
+    s.cs_bill_customer_sk, d.cd_gender
+HAVING 
+    SUM(s.total_sales) > 1000
+ORDER BY 
+    cumulative_sales DESC;
+
+WITH date_filter AS (
+    SELECT 
+        d_date_sk
+    FROM 
+        date_dim 
+    WHERE 
+        d_year = 2023 AND d_moy IN (1, 2, 3)  -- First three months
+)
+SELECT 
+    ca.city, 
+    SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+    COUNT(ws.ws_order_number) AS total_orders
+FROM
+    web_sales ws
+JOIN 
+    date_filter df ON ws.ws_sold_date_sk = df.d_date_sk
+JOIN 
+    customer_address ca ON ws.ws_bill_addr_sk = ca.ca_address_sk
+GROUP BY 
+    ca.city
+HAVING 
+    total_sales > 50000
+ORDER BY 
+    total_sales DESC;

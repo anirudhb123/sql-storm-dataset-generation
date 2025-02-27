@@ -1,0 +1,69 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ki.keyword) DESC) AS rank_by_keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+filtered_actors AS (
+    SELECT 
+        ak.person_id,
+        ak.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.person_id, ak.name
+    HAVING 
+        COUNT(ci.movie_id) > 5
+), 
+company_summary AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.movie_title,
+    rm.production_year,
+    fa.actor_name,
+    fa.movie_count,
+    cs.companies,
+    cs.company_count,
+    COALESCE(NULLIF(rm.production_year, 2023), 'Year is not specific') AS production_year_desc,
+    CASE 
+        WHEN cs.company_count > 3 THEN 'Many companies'
+        WHEN cs.company_count IS NULL THEN 'No companies listed'
+        ELSE 'Few companies'
+    END AS company_analysis
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    filtered_actors fa ON rm.movie_id = fa.person_id
+LEFT JOIN 
+    company_summary cs ON rm.movie_id = cs.movie_id
+WHERE 
+    rm.rank_by_keyword_count <= 3
+ORDER BY 
+    rm.production_year DESC,
+    fa.movie_count DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

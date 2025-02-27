@@ -1,0 +1,58 @@
+
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate >= DATE '1994-01-01'
+),
+SupplierPartCost AS (
+    SELECT
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM
+        partsupp ps
+    GROUP BY
+        ps.ps_partkey
+),
+FilteredLineItems AS (
+    SELECT
+        l.l_orderkey,
+        l.l_partkey,
+        COUNT(*) AS item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM
+        lineitem l
+    WHERE
+        l.l_shipdate BETWEEN DATE '1994-01-01' AND DATE '1995-01-01'
+    GROUP BY
+        l.l_orderkey, l.l_partkey
+)
+SELECT
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(COALESCE(s.total_cost, 0)) AS total_suppliers_cost,
+    SUM(l.total_value) AS total_lineitem_value,
+    AVG(o.o_totalprice) AS avg_order_value
+FROM
+    region r
+LEFT JOIN
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN
+    customer c ON s.s_suppkey = c.c_nationkey
+LEFT JOIN
+    RankedOrders o ON c.c_custkey = o.o_orderkey
+LEFT JOIN
+    FilteredLineItems l ON o.o_orderkey = l.l_orderkey
+WHERE
+    r.r_name LIKE 'N%' OR (s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000)
+GROUP BY
+    r.r_name
+ORDER BY
+    total_lineitem_value DESC;

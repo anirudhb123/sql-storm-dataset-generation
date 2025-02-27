@@ -1,0 +1,54 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        DENSE_RANK() OVER (PARTITION BY p.p_brand ORDER BY ps.ps_supplycost ASC) AS SupplyRank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_size > 10 AND p.p_retailprice < 100.00
+),
+RegionStats AS (
+    SELECT 
+        r.r_name AS region_name,
+        COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+        SUM(s.s_acctbal) AS total_account_balance
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    rp.p_partkey,
+    rp.p_name,
+    rp.p_brand,
+    rp.p_type,
+    rp.ps_availqty,
+    rs.region_name,
+    rs.total_suppliers,
+    rs.total_account_balance
+FROM 
+    RankedParts rp
+JOIN 
+    partsupp ps ON rp.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region rs ON n.n_regionkey = rs.r_regionkey
+WHERE 
+    rp.SupplyRank = 1
+ORDER BY 
+    rp.p_brand, rp.p_partkey;

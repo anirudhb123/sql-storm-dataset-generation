@@ -1,0 +1,84 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+
+    UNION ALL
+
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        sc.p_partkey,
+        sc.p_name,
+        sc.ps_availqty,
+        sc.ps_supplycost 
+    FROM 
+        SupplyChain sc
+    JOIN 
+        partsupp ps ON sc.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty > 0 AND
+        s.s_suppkey <> sc.s_suppkey
+),
+RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND 
+        o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierMetrics AS (
+    SELECT 
+        s_name,
+        SUM(ps_supplycost * ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p_partkey) AS parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s_name
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.total_revenue,
+    sm.s_name AS supplier_name,
+    sm.total_supply_cost,
+    sm.parts_supplied
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    SupplyChain sc ON r.o_orderkey = sc.p_partkey
+LEFT JOIN 
+    SupplierMetrics sm ON sc.suppkey = sm.s_suppkey
+WHERE 
+    r.rank <= 10
+    AND (sm.total_supply_cost IS NULL OR sm.total_supply_cost > 10000)
+ORDER BY 
+    r.total_revenue DESC;

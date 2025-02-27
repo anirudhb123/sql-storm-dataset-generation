@@ -1,0 +1,63 @@
+WITH SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_comment
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        l.l_quantity,
+        l.l_discount,
+        l.l_extendedprice,
+        l.l_shipmode,
+        l.l_comment
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+),
+ProcessedData AS (
+    SELECT 
+        sp.s_name AS SupplierName,
+        sp.p_name AS PartName,
+        co.o_orderkey AS OrderKey,
+        co.o_totalprice AS TotalPrice,
+        co.l_quantity AS Quantity,
+        COALESCE(NULLIF(co.l_comment, ''), 'No Comment') AS OrderComment,
+        CONCAT('Supplier ', sp.s_name, ' provides ', sp.p_name, ' for order ', co.o_orderkey) AS AdditionalInfo
+    FROM 
+        SupplierParts sp
+    JOIN 
+        CustomerOrders co ON sp.p_partkey = co.l_orderkey
+)
+SELECT 
+    SupplierName,
+    PartName,
+    OrderKey,
+    TotalPrice,
+    Quantity,
+    OrderComment,
+    LENGTH(AdditionalInfo) AS InfoLength,
+    UPPER(OrderComment) AS UpperCaseComment
+FROM 
+    ProcessedData
+WHERE 
+    LENGTH(AdditionalInfo) > 50
+ORDER BY 
+    TotalPrice DESC, Quantity ASC;

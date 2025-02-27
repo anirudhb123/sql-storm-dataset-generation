@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rn,
+        cd.cd_gender,
+        ca.ca_state
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 20230101 AND 20231231
+        AND ws.ws_quantity > 0
+),
+SalesSummary AS (
+    SELECT 
+        ca.ca_state,
+        cd.cd_gender,
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS total_sales,
+        COUNT(DISTINCT rs.ws_order_number) AS total_orders,
+        AVG(rs.ws_sales_price) AS average_sales_price
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rn = 1
+    GROUP BY 
+        ca.ca_state, cd.cd_gender
+)
+SELECT 
+    ss.ca_state,
+    ss.cd_gender,
+    ss.total_sales,
+    ss.total_orders,
+    ss.average_sales_price
+FROM 
+    SalesSummary ss
+ORDER BY 
+    ss.total_sales DESC, 
+    ss.ca_state, 
+    ss.cd_gender
+LIMIT 100;

@@ -1,0 +1,52 @@
+
+WITH RECURSIVE OrderHier AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS order_level
+    FROM orders o
+    WHERE o.o_orderstatus = 'F'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.order_level + 1
+    FROM orders o
+    JOIN OrderHier oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderstatus = 'F' AND oh.order_level < 5
+),
+RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+HighValueOrders AS (
+    SELECT
+        oh.o_orderkey,
+        oh.o_orderdate,
+        oh.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM oh.o_orderdate) ORDER BY oh.o_totalprice DESC) AS order_rank
+    FROM OrderHier oh
+    WHERE oh.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+)
+SELECT
+    p.p_name,
+    p.p_brand,
+    rg.r_name AS region_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    COUNT(DISTINCT ho.o_orderkey) AS order_count,
+    AVG(s.s_acctbal) AS average_account_balance,
+    MAX(s.s_acctbal) AS max_account_balance,
+    MIN(s.s_acctbal) AS min_account_balance
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+JOIN region rg ON c.c_nationkey = rg.r_nationkey
+LEFT JOIN HighValueOrders ho ON o.o_orderkey = ho.o_orderkey
+WHERE l.l_shipdate > DATE '1995-01-01'
+GROUP BY p.p_partkey, p.p_name, p.p_brand, rg.r_name, s.s_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY revenue DESC, region_name ASC
+LIMIT 100;

@@ -1,0 +1,72 @@
+
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.DownVotes, 0)) AS TotalDownVotes,
+        SUM(COALESCE(c.CommentCount, 0)) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS UpVotes FROM Votes WHERE VoteTypeId = 2 GROUP BY PostId) v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        TotalUpVotes,
+        TotalDownVotes,
+        TotalComments,
+        DENSE_RANK() OVER (ORDER BY PostCount DESC) AS UserRank
+    FROM 
+        UserEngagement
+    WHERE 
+        PostCount > 0
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    WHERE 
+        Class = 1 
+    GROUP BY 
+        UserId
+),
+FinalResults AS (
+    SELECT 
+        tu.UserId,
+        tu.DisplayName,
+        tu.PostCount,
+        tu.TotalUpVotes,
+        tu.TotalDownVotes,
+        tu.TotalComments,
+        ub.BadgeCount
+    FROM 
+        TopUsers tu 
+    LEFT JOIN 
+        UserBadges ub ON tu.UserId = ub.UserId
+)
+SELECT 
+    fr.*,
+    ROUND((fr.TotalUpVotes * 1.0 / NULLIF(fr.TotalComments, 0)), 2) AS UpvoteToCommentRatio,
+    CASE 
+        WHEN fr.BadgeCount IS NULL THEN 'No Gold Badges'
+        ELSE 'Has Gold Badges'
+    END AS BadgeStatus
+FROM 
+    FinalResults fr
+WHERE 
+    fr.UserRank <= 10
+ORDER BY 
+    fr.UserRank;

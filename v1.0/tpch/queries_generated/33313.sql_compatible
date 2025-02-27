@@ -1,0 +1,59 @@
+
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderstatus, o_orderdate, o_orderpriority, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderstatus, o.o_orderdate, o.o_orderpriority, oh.level + 1
+    FROM orders o
+    JOIN order_hierarchy oh ON o.o_custkey = oh.o_custkey AND o.o_orderdate > oh.o_orderdate
+    WHERE o.o_orderstatus = 'O'
+),
+supplier_stats AS (
+    SELECT s.s_suppkey, SUM(ps.ps_availqty) AS total_available_quantity, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+line_item_summary AS (
+    SELECT l.l_orderkey,
+           COUNT(*) AS line_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           c.c_acctbal,
+           COALESCE(SUM(lis.total_revenue), 0) AS total_spent,
+           COUNT(DISTINCT ol.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders ol ON c.c_custkey = ol.o_custkey
+    LEFT JOIN line_item_summary lis ON ol.o_orderkey = lis.l_orderkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+region_nation AS (
+    SELECT r.r_regionkey, 
+           r.r_name AS region_name, 
+           n.n_nationkey, 
+           n.n_name AS nation_name
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+)
+SELECT 
+    rn.region_name,
+    rn.nation_name,
+    c.c_name,
+    c.total_orders,
+    c.total_spent,
+    ss.total_available_quantity,
+    ss.avg_supply_cost,
+    COUNT(DISTINCT oh.o_orderkey) AS active_orders
+FROM customer_orders c
+JOIN region_nation rn ON c.c_custkey = rn.n_nationkey
+LEFT JOIN supplier_stats ss ON ss.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps JOIN part p ON ps.ps_partkey = p.p_partkey WHERE p.p_brand = 'BrandX')
+LEFT JOIN order_hierarchy oh ON oh.o_custkey = c.c_custkey
+WHERE c.total_spent > 1000
+GROUP BY rn.region_name, rn.nation_name, c.c_name, c.total_orders, c.total_spent, ss.total_available_quantity, ss.avg_supply_cost
+ORDER BY rn.region_name, c.total_spent DESC;

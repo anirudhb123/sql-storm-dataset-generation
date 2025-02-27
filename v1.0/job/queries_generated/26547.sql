@@ -1,0 +1,68 @@
+WITH movie_cast AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        c.person_id,
+        ak.name AS actor_name,
+        r.role AS role
+    FROM 
+        aka_title m
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        m.production_year >= 2000
+),
+
+complete_movie_info AS (
+    SELECT 
+        mc.movie_id,
+        mc.movie_title,
+        GROUP_CONCAT(DISTINCT mc.actor_name) AS actor_names,
+        GROUP_CONCAT(DISTINCT mi.info ORDER BY mi.info_type_id) AS movie_info,
+        COUNT(DISTINCT kc.keyword) AS total_keywords
+    FROM 
+        movie_cast mc
+    LEFT JOIN 
+        movie_info mi ON mc.movie_id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mc.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    GROUP BY 
+        mc.movie_id, mc.movie_title
+),
+
+final_benchmark AS (
+    SELECT 
+        cmi.movie_id,
+        cmi.movie_title,
+        cmi.actor_names,
+        cmi.movie_info,
+        cmi.total_keywords,
+        CASE 
+            WHEN cmi.total_keywords > 5 THEN 'Rich in Keywords'
+            ELSE 'Few Keywords'
+        END AS keyword_richness
+    FROM 
+        complete_movie_info cmi
+    WHERE 
+        LENGTH(cmi.movie_title) - LENGTH(REPLACE(cmi.movie_title, ' ', '')) > 2
+        AND cmi.total_keywords > 0
+)
+
+SELECT 
+    fb.movie_id,
+    fb.movie_title,
+    fb.actor_names,
+    fb.movie_info,
+    fb.total_keywords,
+    fb.keyword_richness
+FROM 
+    final_benchmark fb
+ORDER BY 
+    fb.total_keywords DESC,
+    fb.movie_title;

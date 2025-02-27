@@ -1,0 +1,69 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS supplier_rank,
+        COUNT(ps.ps_partkey) AS part_count,
+        n.n_regionkey
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_regionkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        CASE 
+            WHEN o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders) THEN 'High Value'
+            ELSE 'Standard Value'
+        END AS order_value_category
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value,
+        l.l_returnflag,
+        l.l_linestatus
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_returnflag, l.l_linestatus
+)
+SELECT 
+    r.r_name,
+    s.s_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(COALESCE(lod.total_line_value, 0)) AS total_value,
+    COUNT(DISTINCT CASE WHEN lv.order_value_category = 'High Value' THEN o.o_orderkey END) AS high_value_order_count,
+    s.part_count,
+    (SELECT SUM(ps.ps_supplycost * ps.ps_availqty) FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10)) AS total_supply_cost
+FROM 
+    RankedSuppliers s
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    HighValueOrders o ON s.s_suppkey = o.o_orderkey
+LEFT JOIN 
+    LineItemDetails lod ON o.o_orderkey = lod.l_orderkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    s.s_acctbal IS NOT NULL
+    AND lod.l_linestatus IN ('O', 'F')
+GROUP BY 
+    r.r_name, s.s_name, s.part_count
+HAVING 
+    SUM(lod.total_line_value) > 0 AND COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_value DESC, total_orders DESC;

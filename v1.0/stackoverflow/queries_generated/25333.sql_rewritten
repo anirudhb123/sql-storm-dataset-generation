@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS UniqueVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, u.DisplayName, p.CreationDate
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.Rank,
+        rp.CommentCount,
+        rp.UniqueVoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5 
+)
+SELECT 
+    fp.OwnerDisplayName,
+    fp.Title,
+    fp.CreationDate,
+    fp.CommentCount,
+    fp.UniqueVoteCount,
+    ARRAY_AGG(DISTINCT SUBSTRING(tag.TagName FROM 2 FOR LENGTH(tag.TagName) - 2)) AS CleanedTags
+FROM 
+    FilteredPosts fp
+JOIN 
+    LATERAL STRING_TO_ARRAY(fp.Tags, ',') AS tag TagName ON TRUE
+GROUP BY 
+    fp.OwnerDisplayName,
+    fp.Title,
+    fp.CreationDate,
+    fp.CommentCount,
+    fp.UniqueVoteCount
+ORDER BY 
+    fp.UniqueVoteCount DESC,
+    fp.CreationDate ASC;

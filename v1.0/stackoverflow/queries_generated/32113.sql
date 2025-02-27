@@ -1,0 +1,72 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 2 -- Start with Answers
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostCTE r ON p.Id = r.ParentId
+),
+UserScoreSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN p.Score ELSE 0 END) AS TotalScore,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(badge_summary.TotalBadges, 0) AS UserBadges,
+        COALESCE(user_summary.TotalPosts, 0) AS UserPosts,
+        COALESCE(user_summary.TotalScore, 0) AS UserScore,
+        COUNT(c.Id) AS CommentCount,
+        FIRST_VALUE(p.CreationDate) OVER (PARTITION BY p.Id ORDER BY p.CreationDate ASC) AS FirstCommentDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN UserScoreSummary user_summary ON p.OwnerUserId = user_summary.UserId
+    LEFT JOIN Badges badge_summary ON p.OwnerUserId = badge_summary.UserId
+    GROUP BY p.Id, p.Title, p.ViewCount, badge_summary.TotalBadges, user_summary.TotalPosts, user_summary.TotalScore
+),
+AnswerDetails AS (
+    SELECT 
+        a.Id AS AnswerId,
+        a.Title,
+        r.PostId AS QuestionId,
+        a.CreationDate AS AnswerDate,
+        r.Level
+    FROM Posts a
+    JOIN RecursivePostCTE r ON a.Id = r.PostId
+    WHERE r.Level = 1
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.ViewCount,
+    ps.UserBadges,
+    ps.UserPosts,
+    ps.UserScore,
+    ps.CommentCount,
+    ad.AnswerId AS LinkedAnswer,
+    ad.AnswerDate,
+    ps.FirstCommentDate
+FROM PostStatistics ps
+LEFT JOIN AnswerDetails ad ON ps.PostId = ad.QuestionId
+ORDER BY ps.ViewCount DESC, ps.Title;

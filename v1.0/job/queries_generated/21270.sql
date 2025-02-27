@@ -1,0 +1,81 @@
+WITH RecursiveActorRoles AS (
+    SELECT 
+        ca.person_id,
+        ct.kind AS role_type,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info ca
+    JOIN 
+        comp_cast_type ct ON ca.person_role_id = ct.id
+    GROUP BY 
+        ca.person_id, ct.kind
+),
+MovieDetails AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mk.keyword AS movie_keyword,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(1.0 * rk.role_count) AS avg_roles
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        RecursiveActorRoles rk ON c.person_id = rk.person_id
+    GROUP BY 
+        m.id, m.title, m.production_year, mk.keyword
+),
+CompanyStatistics AS (
+    SELECT
+        mc.movie_id,
+        COUNT(DISTINCT c.name) AS unique_companies,
+        ARRAY_AGG(DISTINCT c.name ORDER BY c.name) AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+),
+FinalBenchmark AS (
+    SELECT 
+        md.movie_id,
+        md.movie_title,
+        md.production_year,
+        md.movie_keyword,
+        md.total_cast,
+        md.avg_roles,
+        COALESCE(cs.unique_companies, 0) AS unique_companies,
+        CASE 
+            WHEN cs.unique_companies IS NOT NULL THEN 'Has Companies'
+            ELSE 'No Companies'
+        END AS company_presence,
+        CASE 
+            WHEN AVG(md.avg_roles) OVER() = 0 THEN 'No Roles Available'
+            ELSE CAST(AVG(md.avg_roles) OVER() AS text)
+        END AS avg_roles_over_all
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        CompanyStatistics cs ON md.movie_id = cs.movie_id
+)
+SELECT 
+    movie_id,
+    movie_title,
+    production_year,
+    movie_keyword,
+    total_cast,
+    unique_companies,
+    company_presence,
+    avg_roles_over_all
+FROM 
+    FinalBenchmark
+WHERE 
+    (production_year BETWEEN 2000 AND 2023) 
+    AND (unique_companies IS NULL OR unique_companies > 0)
+ORDER BY 
+    total_cast DESC, unique_companies DESC, production_year DESC;

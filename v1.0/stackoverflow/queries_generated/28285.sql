@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.Tags,
+        P.CreationDate,
+        U.DisplayName AS Author,
+        RANK() OVER (PARTITION BY substring(P.Tags FROM 2 FOR length(P.Tags)-2) ORDER BY P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P 
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+),
+TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS TotalQuestions,
+        COUNT(DISTINCT U.Id) AS UniqueAuthors,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%<', T.TagName, '>%')
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        T.TagName
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        P.Title AS PostTitle,
+        PH.CreationDate,
+        PHT.Name AS ChangeType,
+        PH.UserDisplayName AS Editor,
+        PH.Comment
+    FROM 
+        PostHistory PH 
+    JOIN 
+        Posts P ON PH.PostId = P.Id 
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE 
+        PH.CreationDate > NOW() - INTERVAL '30 days' -- Only changes in the last 30 days
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.Body,
+    RP.Tags,
+    RP.CreationDate,
+    RP.Author,
+    R.TagName,
+    R.TotalQuestions,
+    R.UniqueAuthors,
+    R.TotalViews,
+    PH.ChangeType,
+    PH.Editor,
+    PH.Comment AS Reason
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    TagStatistics R ON RP.Tags LIKE CONCAT('%<', R.TagName, '>%')
+LEFT JOIN 
+    RecentPostHistory PH ON RP.PostId = PH.PostId
+WHERE 
+    RP.Rank = 1 -- Only the most recent post for each tag
+ORDER BY 
+    R.TotalViews DESC, RP.CreationDate DESC
+LIMIT 50;

@@ -1,0 +1,75 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        COALESCE(cn.name, 'Unknown Company') AS company_name,
+        COALESCE(a.name, 'Unknown Actor') AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY a.name) AS actor_order
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'tt%')
+),
+actor_movies AS (
+    SELECT 
+        actor_name,
+        STRING_AGG(movie_title, ', ') AS movies_list,
+        COUNT(movie_title) AS movie_count
+    FROM 
+        movie_hierarchy
+    GROUP BY 
+        actor_name
+),
+ranked_actors AS (
+    SELECT 
+        actor_name,
+        movies_list,
+        movie_count,
+        RANK() OVER (ORDER BY movie_count DESC) AS rank
+    FROM 
+        actor_movies
+)
+
+SELECT 
+    rah.rank,
+    rah.actor_name,
+    rah.movies_list,
+    rah.movie_count,
+    CASE 
+        WHEN rah.movie_count > 5 THEN 'Prolific Actor'
+        WHEN rah.movie_count BETWEEN 3 AND 5 THEN 'Regular Actor'
+        ELSE 'Newcomer'
+    END AS actor_status,
+    LA.movie_count AS linked_movies_count,
+    COALESCE(LA.linked_movie_list, 'No Links') AS linked_movie_list
+FROM 
+    ranked_actors rah
+LEFT JOIN (
+    SELECT 
+        ci.person_id,
+        STRING_AGG(DISTINCT CONCAT(mt.title, ' (', mt.production_year, ')'), '; ') AS linked_movie_list,
+        COUNT(mt.title) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.id
+    JOIN 
+        movie_link ml ON mt.id = ml.movie_id 
+    WHERE 
+        ml.link_type_id IN (SELECT id FROM link_type WHERE link LIKE '%remake%')
+    GROUP BY 
+        ci.person_id
+) AS LA ON rah.actor_name = LA.person_id
+WHERE 
+    rah.rank <= 10
+ORDER BY 
+    rah.rank;

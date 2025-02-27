@@ -1,0 +1,85 @@
+WITH ranked_cast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank,
+        COUNT(*) OVER (PARTITION BY ci.movie_id) AS total_cast
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+),
+movies_with_keywords AS (
+    SELECT
+        mt.movie_id,
+        STRING_AGG(mk.keyword, ', ') FILTER (WHERE mk.keyword IS NOT NULL) AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY 
+        mt.movie_id
+),
+movies_info AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(k.keywords, 'No Keywords') AS keywords,
+        COALESCE(rc.actor_name, 'No Cast') AS actor_name
+    FROM
+        aka_title mt
+    LEFT JOIN
+        movies_with_keywords k ON mt.movie_id = k.movie_id
+    LEFT JOIN
+        ranked_cast rc ON mt.id = rc.movie_id AND rc.actor_rank = 1
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+filtered_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        keywords,
+        actor_name,
+        (SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = m.movie_id AND cc.status_id = 1) AS complete_cast_count,
+        (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = m.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Budget')) AS budget_info_exists
+    FROM
+        movies_info m
+    WHERE 
+        m.production_year >= 2000 AND
+        UPPER(m.keywords) LIKE '%ACTION%'
+        AND m.actor_name IS NOT NULL
+),
+final_results AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        fm.keywords,
+        fm.actor_name,
+        fm.complete_cast_count,
+        fm.budget_info_exists,
+        CASE 
+            WHEN fm.budget_info_exists > 0 THEN 'Budget Info Available'
+            ELSE 'No Budget Info'
+        END AS budget_status
+    FROM 
+        filtered_movies fm
+)
+SELECT 
+    *,
+    CASE 
+        WHEN complete_cast_count > 10 THEN 'Large Cast Movie'
+        WHEN complete_cast_count BETWEEN 5 AND 10 THEN 'Medium Cast Movie'
+        ELSE 'Small Cast Movie'
+    END AS cast_size,
+    CASE 
+        WHEN actor_name IS NULL THEN 'Missing Lead Actor'
+        ELSE 'Found Lead Actor'
+    END AS lead_actor_status
+FROM 
+    final_results
+ORDER BY 
+    production_year DESC, title;

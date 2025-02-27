@@ -1,0 +1,87 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END), 0) AS CloseVotes,
+        COALESCE(COUNT(DISTINCT P.Id), 0) AS PostsCount,
+        COALESCE(SUM(COALESCE(P.ViewCount, 0)), 0) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id
+    LEFT JOIN 
+        PostHistory PH ON PH.UserId = U.Id
+    WHERE 
+        U.Reputation IS NOT NULL
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        UpVotes, 
+        DownVotes, 
+        CloseVotes, 
+        PostsCount, 
+        TotalViews,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserActivity
+    WHERE 
+        PostsCount > 0
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COALESCE(MAX(CASE WHEN PH.PostHistoryTypeId = 2 THEN PH.CreationDate END), GREATEST(P.CreationDate, P.LastEditDate)) AS LastEdited,
+        COALESCE(MAX(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN PH.CreationDate END), P.CreationDate) AS LastClosed 
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    LEFT JOIN 
+        PostHistory PH ON PH.PostId = P.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount, P.AnswerCount
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    COUNT(DISTINCT PS.PostId) AS ActivePostsCount,
+    SUM(CASE WHEN PS.LastClosed IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPosts,
+    MAX(PS.Score) AS HighestScore,
+    AVG(PS.ViewCount) AS AvgViews,
+    U.ReputationRank
+FROM 
+    TopUsers U
+JOIN 
+    PostStats PS ON PS.PostId IN (
+        SELECT 
+            P.Id
+        FROM 
+            Posts P
+        WHERE 
+            P.OwnerUserId = U.UserId
+        AND 
+            P.Score IS NOT NULL
+    )
+GROUP BY 
+    U.UserId, U.DisplayName, U.ReputationRank
+ORDER BY 
+    U.ReputationRank,
+    ActivePostsCount DESC
+LIMIT 10;

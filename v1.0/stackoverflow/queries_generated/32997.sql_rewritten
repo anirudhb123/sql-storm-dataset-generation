@@ -1,0 +1,68 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        Posts a ON a.AcceptedAnswerId = p.Id
+    WHERE 
+        p.PostTypeId = 1 AND Level < 3 
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id AND v.PostId IN (SELECT Id FROM Posts WHERE PostTypeId = 1)
+    GROUP BY 
+        u.Id, u.DisplayName
+), VoteSummary AS (
+    SELECT
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    u.DisplayName AS Owner,
+    u.QuestionCount,
+    u.TotalBounty,
+    v.UpVotes,
+    v.DownVotes,
+    COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = r.PostId), 0) AS CommentCount
+FROM 
+    RecursiveCTE r
+JOIN 
+    UserStats u ON r.OwnerUserId = u.UserId
+JOIN 
+    VoteSummary v ON r.PostId = v.PostId
+WHERE 
+    u.QuestionCount > 0
+ORDER BY 
+    TotalBounty DESC, CommentCount DESC
+LIMIT 10;

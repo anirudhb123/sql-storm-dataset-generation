@@ -1,0 +1,73 @@
+WITH RecursiveBadges AS (
+    SELECT UserId, COUNT(Id) AS BadgeCount
+    FROM Badges
+    GROUP BY UserId
+),
+PostEngagement AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(v.VoteCount, 0) AS VoteCount,
+        row_number() OVER (ORDER BY p.CreationDate DESC) AS Rn
+    FROM Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS VoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+),
+UserPerformance AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(ra.BadgeCount, 0) AS BadgeCount,
+        SUM(pe.VoteCount + pe.CommentCount) AS TotalEngagement
+    FROM Users u
+    LEFT JOIN RecursiveBadges ra ON u.Id = ra.UserId
+    LEFT JOIN PostEngagement pe ON u.Id = pe.OwnerUserId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id
+),
+HighScoringPosts AS (
+    SELECT 
+        Id, 
+        Title, 
+        ViewCount, 
+        Score, 
+        OwnerDisplayName 
+    FROM Posts 
+    WHERE Score > 10
+    UNION ALL
+    SELECT 
+        p.Id, 
+        CAST(CONCAT('Duplicate of ', p.Title) AS varchar(300)), 
+        p.ViewCount, 
+        p.Score, 
+        'N/A'
+    FROM Posts p
+    INNER JOIN PostLinks pl ON p.Id = pl.RelatedPostId
+    WHERE pl.LinkTypeId = 3
+)
+SELECT 
+    up.DisplayName,
+    up.BadgeCount,
+    COUNT(DISTINCT hp.Id) AS HighScorePostCount,
+    SUM(hp.ViewCount) AS TotalViews,
+    AVG(hp.Score) AS AvgPostScore,
+    CASE 
+        WHEN AVG(hp.Score) IS NULL THEN 'No Posts Found'
+        WHEN AVG(hp.Score) > 20 THEN 'High Engagement'
+        ELSE 'Moderate Engagement'
+    END AS EngagementStatus
+FROM UserPerformance up
+LEFT JOIN HighScoringPosts hp ON up.UserId = hp.OwnerUserId
+GROUP BY up.UserId, up.DisplayName, up.BadgeCount
+HAVING SUM(hp.ViewCount) > 100
+ORDER BY EngagementStatus DESC, TotalViews DESC;

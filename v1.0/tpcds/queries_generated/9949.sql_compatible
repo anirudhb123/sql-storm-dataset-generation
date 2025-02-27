@@ -1,0 +1,62 @@
+
+WITH CustomerActivity AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        COUNT(DISTINCT ws.ws_order_number) AS web_orders,
+        SUM(ws.ws_net_paid) AS total_web_spent,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_orders,
+        SUM(ss.ss_net_paid) AS total_store_spent,
+        COUNT(DISTINCT sr.sr_ticket_number) AS store_returns,
+        SUM(sr.sr_return_amt) AS total_store_returned,
+        COUNT(DISTINCT cr.cr_order_number) AS catalog_returns,
+        SUM(cr.cr_return_amount) AS total_catalog_returned
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_dep_count
+    FROM 
+        customer_demographics cd
+)
+SELECT 
+    ca.c_customer_id,
+    ca.c_first_name,
+    ca.c_last_name,
+    ca.web_orders,
+    ca.total_web_spent,
+    ca.store_orders,
+    ca.total_store_spent,
+    ca.store_returns,
+    ca.total_store_returned,
+    ca.catalog_returns,
+    ca.total_catalog_returned,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cd.cd_dep_count
+FROM 
+    CustomerActivity ca
+JOIN 
+    CustomerDemographics cd ON cd.cd_demo_sk = ca.c_customer_id
+WHERE 
+    ca.total_web_spent > 1000 OR ca.total_store_spent > 1000
+ORDER BY 
+    ca.total_web_spent DESC, ca.total_store_spent DESC
+FETCH FIRST 100 ROWS ONLY;

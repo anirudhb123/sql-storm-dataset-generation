@@ -1,0 +1,69 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 5 THEN 1 ELSE 0 END), 0) AS TotalFavorites
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS TotalComments,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+RankedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.TotalComments,
+        ps.TotalUpvotes,
+        ps.TotalDownvotes,
+        RANK() OVER (ORDER BY (ps.TotalUpvotes - ps.TotalDownvotes) DESC) AS PostRank
+    FROM 
+        PostStats ps
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.CreationDate,
+    u.LastAccessDate,
+    ups.TotalUpvotes,
+    ups.TotalDownvotes,
+    ups.TotalFavorites,
+    rp.PostId,
+    rp.TotalComments,
+    rp.PostRank
+FROM 
+    Users u
+JOIN 
+    UserVoteStats ups ON u.Id = ups.UserId
+LEFT JOIN 
+    RankedPosts rp ON rp.PostId IN (
+        SELECT 
+            p.Id 
+        FROM 
+            Posts p 
+        WHERE 
+            p.OwnerUserId = u.Id
+    )
+WHERE 
+    u.Reputation > 100
+ORDER BY 
+    u.Reputation DESC, 
+    rp.PostRank ASC NULLS LAST
+LIMIT 10;

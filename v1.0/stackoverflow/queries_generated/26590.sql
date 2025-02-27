@@ -1,0 +1,62 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        STRING_TO_ARRAY(substring(p.Tags, 2, length(p.Tags) - 2), '>') AS tag_array ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_array
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName, u.Reputation
+),
+
+CloseDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Closed posts
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Body,
+    pd.CreationDate,
+    pd.OwnerDisplayName,
+    pd.OwnerReputation,
+    pd.CommentCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.Tags,
+    COALESCE(cd.CloseCount, 0) AS CloseCount,
+    cd.LastClosedDate
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    CloseDetails cd ON pd.PostId = cd.PostId
+ORDER BY 
+    pd.CreationDate DESC;

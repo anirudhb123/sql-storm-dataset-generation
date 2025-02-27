@@ -1,0 +1,94 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= '2020-01-01' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.PostTypeId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 5 
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN pht.Name = 'Post Closed' THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN pht.Name = 'Post Reopened' THEN ph.CreationDate END) AS LastReopenedDate,
+        COUNT(CASE WHEN pht.Name IN ('Post Closed', 'Post Reopened') THEN 1 END) AS ClosureCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+FinalResults AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.Score,
+        tp.ViewCount,
+        tp.UpVotes,
+        tp.DownVotes,
+        tp.CommentCount,
+        COALESCE(ph.LastClosedDate, 'No Closure') AS LastClosedDate,
+        COALESCE(ph.LastReopenedDate, 'No Reopen') AS LastReopenedDate,
+        ph.ClosureCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostHistoryDetails ph ON tp.PostId = ph.PostId
+)
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.CreationDate,
+    fr.Score,
+    fr.ViewCount,
+    fr.UpVotes,
+    fr.DownVotes,
+    fr.CommentCount,
+    fr.LastClosedDate,
+    fr.LastReopenedDate,
+    fr.ClosureCount,
+    CASE 
+        WHEN fr.Score >= 10 THEN 'High Score' 
+        WHEN fr.Score BETWEEN 5 AND 9 THEN 'Moderate Score' 
+        ELSE 'Low Score' 
+    END AS ScoreCategory,
+    SUBSTRING(fr.Title FROM POSITION(' ' IN fr.Title) + 1 FOR 10) AS SampleTag
+FROM 
+    FinalResults fr
+WHERE 
+    fr.UpVotes - fr.DownVotes > 0 
+ORDER BY 
+    fr.Score DESC, fr.CreationDate DESC
+LIMIT 100;

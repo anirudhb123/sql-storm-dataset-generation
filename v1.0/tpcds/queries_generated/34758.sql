@@ -1,0 +1,75 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM web_sales
+    WHERE ws_quantity > 0
+),
+AggregateSales AS (
+    SELECT 
+        s.ws_item_sk,
+        SUM(s.ws_quantity) as total_quantity,
+        SUM(s.ws_ext_sales_price) as total_sales,
+        COUNT(DISTINCT s.ws_order_number) as total_orders
+    FROM SalesData s
+    WHERE s.rn <= 10
+    GROUP BY s.ws_item_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_income_band_sk
+    HAVING SUM(ws.ws_net_paid) > 1000
+),
+CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_refunded
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_sk
+),
+FinalSelection AS (
+    SELECT 
+        h.c_customer_sk,
+        h.c_first_name,
+        h.c_last_name,
+        h.total_spent,
+        r.total_returns,
+        r.total_refunded,
+        COALESCE(a.total_sales, 0) AS total_sales_last_10_days
+    FROM HighValueCustomers h
+    LEFT JOIN CustomerReturns r ON h.c_customer_sk = r.c_customer_sk
+    LEFT JOIN AggregateSales a ON h.c_customer_sk = a.ws_item_sk
+)
+SELECT 
+    f.c_customer_sk,
+    f.c_first_name,
+    f.c_last_name,
+    f.total_spent,
+    f.total_returns,
+    f.total_refunded,
+    f.total_sales_last_10_days,
+    CASE 
+        WHEN f.total_spent > 2000 THEN 'VIP'
+        WHEN f.total_spent BETWEEN 1000 AND 2000 THEN 'Regular'
+        ELSE 'New'
+    END AS customer_status
+FROM FinalSelection f
+ORDER BY f.total_spent DESC
+LIMIT 100;

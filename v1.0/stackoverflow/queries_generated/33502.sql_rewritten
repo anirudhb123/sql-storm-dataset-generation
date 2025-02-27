@@ -1,0 +1,97 @@
+WITH RecursiveUserRankings AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        1 AS RankLevel
+    FROM 
+        Users
+    WHERE 
+        Reputation > 0
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.CreationDate,
+        ur.RankLevel + 1
+    FROM 
+        Users u
+    JOIN 
+        RecursiveUserRankings ur ON ur.UserId <> u.Id 
+    WHERE 
+        u.Reputation > ur.Reputation
+),
+RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS Owner,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(*) AS CommentCount,
+        STRING_AGG(c.Text, '; ') AS CommentTexts
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        c.PostId
+),
+FilteredPosts AS (
+    SELECT 
+        p.*,
+        COALESCE(rc.CommentCount, 0) AS RecentCommentsCount,
+        rc.CommentTexts
+    FROM 
+        RankedPosts p
+    LEFT JOIN 
+        RecentComments rc ON p.PostId = rc.PostId
+    WHERE 
+        p.PostRank <= 5
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastUpdated
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT
+    fp.Title,
+    fp.ViewCount,
+    fp.RecentCommentsCount,
+    fp.CommentTexts,
+    CASE 
+        WHEN phd.HistoryCount > 10 THEN 'Highly Edited'
+        WHEN phd.HistoryCount BETWEEN 5 AND 10 THEN 'Moderately Edited'
+        ELSE 'Less Edited'
+    END AS EditStatus,
+    ur.UserId AS UserRanked,
+    ur.RankLevel
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistoryDetails phd ON fp.Id = phd.PostId
+LEFT JOIN 
+    Users u ON fp.OwnerUserId = u.Id 
+LEFT JOIN 
+    RecursiveUserRankings ur ON u.Id = ur.UserId
+ORDER BY 
+    fp.ViewCount DESC, 
+    fp.RecentCommentsCount DESC;

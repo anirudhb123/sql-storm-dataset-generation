@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        RANK() OVER (ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.Reputation,
+        rp.ScoreRank,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ScoreRank <= 5 AND rp.ViewRank <= 10
+),
+PostDetails AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.ViewCount,
+        tp.Score,
+        tp.Reputation,
+        ISNULL(b.Name, 'No Badge') AS BestBadge,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostsCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Badges b ON tp.Reputation > 1000 AND b.UserId = (SELECT TOP 1 UserId FROM Users WHERE Reputation = (SELECT MAX(Reputation) FROM Users WHERE Reputation <= tp.Reputation))
+    LEFT JOIN 
+        PostLinks pl ON tp.PostId = pl.PostId
+    GROUP BY 
+        tp.PostId, tp.Title, tp.ViewCount, tp.Score, tp.Reputation, b.Name
+)
+SELECT 
+    pd.Title,
+    pd.ViewCount,
+    pd.Score,
+    pd.Reputation,
+    COALESCE(pd.BestBadge, 'No Badge') AS BestBadge,
+    CASE 
+        WHEN pd.ViewCount > 1000 THEN 'Hot Topic'
+        ELSE 'Regular Topic'
+    END AS TopicType,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = pd.PostId AND v.VoteTypeId IN (2, 3)) AS UpvoteDownvoteCount,
+    STRING_AGG(DISTINCT tp.TagName, ', ') AS Tags
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Posts p ON pd.PostId = p.Id
+LEFT JOIN 
+    UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS tp(TagName) ON true
+GROUP BY 
+    pd.Title, pd.ViewCount, pd.Score, pd.Reputation, pd.BestBadge
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC
+LIMIT 10;

@@ -1,0 +1,72 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        t.kind AS title_kind,
+        1 AS level
+    FROM 
+        aka_title m
+    JOIN 
+        kind_type t ON m.kind_id = t.id
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        t.title,
+        t.production_year,
+        kt.kind AS title_kind,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        kind_type kt ON t.kind_id = kt.id
+    WHERE 
+        mh.level < 3 
+),
+AggregatedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.title_kind,
+        COUNT(d.actor_id) AS total_actors,
+        COUNT(DISTINCT mw.keyword_id) AS total_keywords
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info d ON cc.subject_id = d.person_id
+    LEFT JOIN 
+        movie_keyword mw ON mh.movie_id = mw.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.title_kind
+),
+FinalMovies AS (
+    SELECT 
+        am.movie_id,
+        am.title,
+        am.production_year,
+        am.title_kind,
+        am.total_actors,
+        am.total_keywords,
+        ROW_NUMBER() OVER (PARTITION BY am.title_kind ORDER BY am.total_actors DESC) AS rank
+    FROM 
+        AggregatedMovies am
+)
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.title_kind,
+    fm.total_actors,
+    fm.total_keywords,
+    COALESCE(fm.rank, 0) AS rank_with_null;

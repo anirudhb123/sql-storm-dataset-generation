@@ -1,0 +1,82 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS SalesRank
+    FROM
+        web_sales ws
+    JOIN
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE
+        c.c_birth_year IS NOT NULL
+        AND (c.c_birth_month BETWEEN 1 AND 6 OR c.c_birth_day IS NULL)
+),
+SalesSummary AS (
+    SELECT 
+        item.i_item_id,
+        COALESCE(SUM(ws.ws_sales_price), 0) AS TotalSales,
+        COUNT(DISTINCT ws.ws_order_number) AS OrderCount
+    FROM 
+        item
+    LEFT JOIN 
+        web_sales ws ON item.i_item_sk = ws.ws_item_sk
+    WHERE 
+        item.i_rec_start_date <= CURRENT_DATE AND 
+        (item.i_rec_end_date IS NULL OR item.i_rec_end_date > CURRENT_DATE)
+    GROUP BY 
+        item.i_item_id
+),
+FilteredStores AS (
+    SELECT 
+        s.s_store_id,
+        s.s_store_name,
+        s.s_number_employees,
+        SUM(cs.cs_net_profit) AS TotalNetProfit
+    FROM 
+        store s
+    LEFT JOIN 
+        catalog_sales cs ON s.s_store_sk = cs.cs_ship_mode_sk
+    GROUP BY 
+        s.s_store_id, s.s_store_name, s.s_number_employees
+    HAVING 
+        TotalNetProfit > (SELECT AVG(TotalNetProfit) FROM 
+            (SELECT SUM(cs.cs_net_profit) AS TotalNetProfit 
+             FROM store s2 
+             JOIN catalog_sales cs ON s2.s_store_sk = cs.cs_ship_mode_sk 
+             GROUP BY s2.s_store_id) AS AvgProfit)
+),
+HighValueReturns AS (
+    SELECT 
+        sr_item_sk, 
+        COUNT(*) AS HighValueReturnsCount
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_amt_inc_tax > 100.00
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    item.i_item_id,
+    ss.TotalSales,
+    fs.s_store_name,
+    fs.TotalNetProfit,
+    COALESCE(hvr.HighValueReturnsCount, 0) AS HighValueReturnsCount,
+    CASE 
+        WHEN hvr.HighValueReturnsCount > 5 THEN 'High'
+        WHEN hvr.HighValueReturnsCount BETWEEN 1 AND 5 THEN 'Medium'
+        ELSE 'Low'
+    END AS ReturnRiskLevel
+FROM 
+    SalesSummary ss
+JOIN 
+    FilteredStores fs ON ss.TotalSales > 1000
+LEFT JOIN 
+    HighValueReturns hvr ON ss.i_item_id = hvr.sr_item_sk
+WHERE 
+    ss.TotalSales IS NOT NULL
+    AND fs.s_number_employees IS NOT NULL
+ORDER BY 
+    ss.TotalSales DESC, fs.TotalNetProfit DESC;

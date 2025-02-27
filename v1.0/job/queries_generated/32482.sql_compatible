@@ -1,0 +1,53 @@
+
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        a.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level,
+        CONCAT(t.title) AS path
+    FROM 
+        aka_title t
+    INNER JOIN 
+        movie_companies mc ON t.movie_id = mc.movie_id
+    INNER JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        c.country_code IS NOT NULL
+        AND t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        m.level + 1,
+        CONCAT(m.path, ' -> ', t.title)
+    FROM 
+        MovieCTE m
+    INNER JOIN 
+        movie_link ml ON m.movie_id = ml.linked_movie_id
+    INNER JOIN 
+        aka_title t ON ml.movie_id = t.movie_id
+    WHERE 
+        t.production_year <= m.production_year
+)
+SELECT 
+    ct.kind AS company_type,
+    COUNT(DISTINCT m.movie_id) AS movie_count,
+    STRING_AGG(m.path, '; ') AS movie_paths,
+    AVG(CASE WHEN m.production_year > 2000 THEN m.production_year END) AS avg_recent_year
+FROM 
+    MovieCTE m
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    ct.kind IS NOT NULL
+GROUP BY 
+    ct.kind
+ORDER BY 
+    movie_count DESC
+LIMIT 10;

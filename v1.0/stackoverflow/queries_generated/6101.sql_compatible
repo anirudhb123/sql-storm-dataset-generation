@@ -1,0 +1,73 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 9 THEN v.BountyAmount ELSE 0 END) AS TotalBountySpent
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentsCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS PostUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS PostDownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostsCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 10
+),
+FinalReport AS (
+    SELECT 
+        u.DisplayName AS UserName,
+        us.UpVotesCount,
+        us.DownVotesCount,
+        us.TotalBountySpent,
+        ps.Title AS PostTitle,
+        ps.CreationDate AS PostCreationDate,
+        ps.CommentsCount,
+        ps.PostUpVotes,
+        ps.PostDownVotes,
+        pt.TagName AS PopularTag,
+        pt.PostsCount,
+        pt.TotalViews
+    FROM 
+        UserVoteStats us
+    JOIN 
+        Posts ps ON us.UserId = ps.OwnerUserId
+    JOIN 
+        PopularTags pt ON pt.PostsCount > 0
+    ORDER BY 
+        us.UpVotesCount DESC, ps.ViewCount DESC
+)
+SELECT *
+FROM FinalReport
+LIMIT 100;

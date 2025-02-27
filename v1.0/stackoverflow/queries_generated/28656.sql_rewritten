@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>'), 1) AS TagCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+TopQuestions AS (
+    SELECT 
+        rp.*,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVoteCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON rp.PostID = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostID = v.PostId
+    WHERE 
+        rp.RN = 1 
+    GROUP BY 
+        rp.PostID, rp.Title, rp.CreationDate, rp.Body, rp.Score, rp.ViewCount, rp.Tags, rp.TagCount, u.DisplayName, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        TQ.*,
+        COALESCE(SUM(b.Class = 1), 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2), 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3), 0) AS BronzeBadges
+    FROM 
+        TopQuestions TQ
+    LEFT JOIN 
+        Badges b ON TQ.OwnerUserId = b.UserId
+    GROUP BY 
+        TQ.PostID, TQ.Title, TQ.CreationDate, TQ.Body, TQ.Score, TQ.ViewCount, TQ.Tags, TQ.TagCount, TQ.OwnerDisplayName, TQ.OwnerReputation
+)
+
+SELECT 
+    p.PostID,
+    p.Title,
+    p.CreationDate,
+    p.Body,
+    p.Score,
+    p.ViewCount,
+    p.TagCount,
+    p.OwnerDisplayName,
+    p.OwnerReputation,
+    p.CommentCount,
+    p.UpVoteCount,
+    p.DownVoteCount,
+    p.GoldBadges,
+    p.SilverBadges,
+    p.BronzeBadges
+FROM 
+    PostStats p
+WHERE 
+    p.Score > 5 
+ORDER BY 
+    p.Score DESC, 
+    p.ViewCount DESC
+LIMIT 20;

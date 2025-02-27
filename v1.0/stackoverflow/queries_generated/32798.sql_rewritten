@@ -1,0 +1,112 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.Score,
+        p2.ViewCount,
+        p2.CreationDate,
+        p2.AcceptedAnswerId,
+        p2.ParentId,
+        rp.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePosts rp ON p2.ParentId = rp.Id
+    WHERE 
+        p2.PostTypeId = 2  
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.Reputation) AS TotalReputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(b.Class, 0)) AS BadgeCount 
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+),
+UserScores AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        ROW_NUMBER() OVER (ORDER BY SUM(v.BountyAmount) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+FinalResults AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        u.DisplayName AS Owner,
+        tu.TotalReputation,
+        tu.PostCount AS UserPostCount,
+        COALESCE(pt.PostCount, 0) AS RelatedTagsCount,
+        us.UserRank
+    FROM 
+        RecursivePosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    JOIN 
+        TopUsers tu ON u.Id = tu.UserId
+    LEFT JOIN 
+        PopularTags pt ON pt.PostCount > 0
+    LEFT JOIN 
+        UserScores us ON u.Id = us.Id
+    WHERE 
+        rp.Score > 10  
+    ORDER BY 
+        rp.CreationDate DESC
+)
+SELECT 
+    *,
+    RANK() OVER (ORDER BY TotalReputation DESC) AS ReputationRank
+FROM 
+    FinalResults
+WHERE 
+    UserPostCount > 0
+    AND UserRank < 10  
+ORDER BY 
+    ReputationRank
+LIMIT 100;

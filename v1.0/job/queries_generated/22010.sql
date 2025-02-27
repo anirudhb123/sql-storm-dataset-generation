@@ -1,0 +1,93 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+        AND t.production_year IS NOT NULL
+),
+
+FilteredRoles AS (
+    SELECT 
+        c.movie_id,
+        ci.person_id,
+        r.role AS person_role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        c.note IS NULL OR c.note NOT LIKE '%uncredited%'
+),
+
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count,
+        STRING_AGG(DISTINCT c.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+),
+
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+FinalReport AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(fr.person_id, 0) AS first_person_id,
+        COALESCE(fr.person_role, 'Unspecified') AS first_person_role,
+        COALESCE(mc.company_count, 0) AS company_count,
+        COALESCE(mk.keywords, 'None') AS keywords,
+        CASE 
+            WHEN rm.year_rank = 1 THEN 'Latest Movie'
+            ELSE 'Older Movie'
+        END AS movie_type
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        FilteredRoles fr ON rm.movie_id = fr.movie_id AND fr.role_order = 1
+    LEFT JOIN 
+        MovieCompanies mc ON rm.movie_id = mc.movie_id
+    LEFT JOIN 
+        MovieKeywords mk ON rm.movie_id = mk.movie_id
+)
+
+SELECT 
+    f.title,
+    f.production_year,
+    f.first_person_role,
+    f.company_count,
+    f.keywords,
+    f.movie_type,
+    CASE 
+        WHEN f.first_person_id IS NULL THEN 'No Actor Found'
+        ELSE (SELECT COUNT(*) FROM cast_info AS ci WHERE ci.movie_id = f.movie_id)
+    END AS total_cast_count
+FROM 
+    FinalReport f
+WHERE 
+    f.company_count > 1
+    AND f.keywords LIKE '%action%'
+ORDER BY 
+    f.production_year DESC;

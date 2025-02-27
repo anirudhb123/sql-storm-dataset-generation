@@ -1,0 +1,69 @@
+
+WITH movie_ratings AS (
+    SELECT
+        a.title,
+        COALESCE(AVG(mk.rating), 0) AS average_rating,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        a.movie_id
+    FROM
+        aka_title a
+    LEFT JOIN movie_keyword mk ON a.movie_id = mk.movie_id
+    LEFT JOIN cast_info ci ON a.movie_id = ci.movie_id
+    GROUP BY
+        a.title,
+        a.movie_id
+),
+company_summary AS (
+    SELECT
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count,
+        STRING_AGG(DISTINCT c.kind, ', ') AS company_types
+    FROM
+        movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type c ON mc.company_type_id = c.id
+    GROUP BY
+        mc.movie_id
+),
+title_info AS (
+    SELECT
+        a.production_year,
+        a.title,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY a.production_year DESC) AS role_rank
+    FROM
+        aka_title a
+    JOIN role_type r ON r.id = a.kind_id
+    WHERE
+        a.production_year IS NOT NULL
+),
+final_summary AS (
+    SELECT
+        mt.title,
+        mt.average_rating,
+        cs.company_count,
+        cs.company_types,
+        ti.production_year,
+        ti.role,
+        ti.role_rank
+    FROM
+        movie_ratings mt
+    LEFT JOIN company_summary cs ON mt.movie_id = cs.movie_id
+    JOIN title_info ti ON mt.title = ti.title
+    WHERE
+        mt.average_rating > 0
+        AND ti.role_rank = 1
+)
+SELECT
+    fs.title,
+    fs.average_rating,
+    fs.company_count,
+    fs.company_types,
+    fs.production_year,
+    fs.role
+FROM
+    final_summary fs
+ORDER BY
+    fs.average_rating DESC,
+    fs.production_year DESC
+LIMIT 100;

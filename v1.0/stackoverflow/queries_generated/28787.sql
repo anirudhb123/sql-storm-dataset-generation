@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 -- Only interested in Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.Score, p.ViewCount
+),
+PostDetail AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation,
+        (SELECT string_agg(b.Name, ', ') 
+         FROM Badges b 
+         WHERE b.UserId = p.OwnerUserId) AS UserBadges,
+        JSON_AGG(v.VoteTypeId) AS VoteTypes
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON u.Id = (
+            SELECT OwnerUserId 
+            FROM Posts 
+            WHERE Id = rp.PostId
+        )
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    WHERE 
+        rp.rn = 1
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.Tags, rp.CreationDate, rp.Score, rp.ViewCount, u.DisplayName, u.Reputation
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Body,
+    pd.Tags,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.AnswerCount,
+    pd.OwnerDisplayName,
+    pd.Reputation,
+    pd.UserBadges,
+    pd.VoteTypes
+FROM 
+    PostDetail pd
+WHERE 
+    pd.Score > 0
+ORDER BY 
+    pd.ViewCount DESC, 
+    pd.Score DESC 
+LIMIT 20;

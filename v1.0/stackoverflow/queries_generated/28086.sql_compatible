@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(A.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY P.Tags ORDER BY P.CreationDate DESC) AS TagRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Posts A ON P.Id = A.ParentId
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id, U.DisplayName, P.Title, P.Body, P.CreationDate, P.Tags
+),
+TagStatistics AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(SUBSTRING(P.Tags, 2, LENGTH(P.Tags)-2), '><'))) ) AS Tag,
+        COUNT(*) AS PostCount,
+        AVG(EXTRACT(EPOCH FROM (TIMESTAMP '2024-10-01 12:34:56' - P.CreationDate)) / 3600) AS AvgHoursSinceCreation
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        TRIM(UNNEST(string_to_array(SUBSTRING(P.Tags, 2, LENGTH(P.Tags)-2), '><')))
+),
+FinalResults AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.OwnerDisplayName,
+        RP.CommentCount,
+        RP.AnswerCount,
+        TS.Tag, 
+        TS.PostCount,
+        TS.AvgHoursSinceCreation
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        TagStatistics TS ON TS.Tag = ANY(string_to_array(SUBSTRING(RP.Body, 2, LENGTH(RP.Body)-2), '><'))
+    WHERE 
+        RP.TagRank = 1 
+)
+SELECT 
+    FR.PostId,
+    FR.Title,
+    FR.OwnerDisplayName,
+    FR.CommentCount,
+    FR.AnswerCount,
+    FR.Tag,
+    FR.PostCount,
+    FR.AvgHoursSinceCreation
+FROM 
+    FinalResults FR
+ORDER BY 
+    FR.PostCount DESC, 
+    FR.CommentCount DESC;

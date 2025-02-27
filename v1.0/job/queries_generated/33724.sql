@@ -1,0 +1,70 @@
+WITH recursive ActorMovies AS (
+    SELECT 
+        c.person_id,
+        t.title,
+        t.production_year
+    FROM 
+        cast_info c
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    WHERE 
+        c.person_role_id IS NOT NULL
+    UNION ALL
+    SELECT 
+        c.person_id,
+        t.title,
+        t.production_year
+    FROM 
+        cast_info c
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    JOIN 
+        ActorMovies am ON c.person_id = am.person_id
+),
+
+RecentMovies AS (
+    SELECT 
+        person_id,
+        COUNT(*) AS movie_count,
+        STRING_AGG(title, ', ') AS titles
+    FROM 
+        ActorMovies
+    WHERE 
+        production_year >= (SELECT EXTRACT(YEAR FROM CURRENT_DATE) - 5)
+    GROUP BY 
+        person_id
+),
+
+TopActors AS (
+    SELECT 
+        RANK() OVER (ORDER BY movie_count DESC) AS rank,
+        a.id AS actor_id,
+        a.name AS actor_name,
+        rm.movie_count,
+        rm.titles
+    FROM 
+        aka_name a
+    JOIN 
+        RecentMovies rm ON a.person_id = rm.person_id
+    WHERE 
+        a.name IS NOT NULL
+)
+
+SELECT 
+    ta.rank,
+    ta.actor_name,
+    ta.movie_count,
+    COALESCE(ta.titles, 'No movies found') AS movie_titles,
+    CASE 
+        WHEN ta.movie_count >= 10 THEN 'Prolific Actor'
+        WHEN ta.movie_count BETWEEN 5 AND 9 THEN 'Emerging Actor'
+        ELSE 'Newcomer'
+    END AS actor_type
+FROM 
+    TopActors ta
+WHERE 
+    ta.rank <= 10
+ORDER BY 
+    ta.rank;
+
+This SQL query performs an elaborated performance benchmarking by utilizing recursive Common Table Expressions (CTEs) to retrieve actors and their movie history, focusing on recent productions. It further ranks actors based on their output in recent years, categorizing them for better insight into their careers while applying string aggregation, window functions, and incorporating NULL logic for titles.

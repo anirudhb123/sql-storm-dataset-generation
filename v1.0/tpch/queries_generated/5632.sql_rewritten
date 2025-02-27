@@ -1,0 +1,33 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY total_supply_cost DESC
+    LIMIT 5
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+CustomerType AS (
+    SELECT c.c_custkey, c.c_name, c.c_mktsegment, SUM(ro.order_total) AS total_spent
+    FROM customer c
+    JOIN RecentOrders ro ON c.c_custkey = ro.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_mktsegment
+)
+SELECT 
+    r.n_name AS nation_name, 
+    ct.c_mktsegment AS market_segment, 
+    SUM(ct.total_spent) AS total_sales,
+    COUNT(DISTINCT ct.c_custkey) AS unique_customers,
+    STRING_AGG(DISTINCT rs.s_name) AS top_suppliers
+FROM CustomerType ct
+JOIN nation n ON ct.c_custkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN RankedSuppliers rs ON rs.total_supply_cost > 10000
+GROUP BY r.n_name, ct.c_mktsegment
+ORDER BY total_sales DESC;

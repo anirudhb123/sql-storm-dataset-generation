@@ -1,0 +1,62 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey,
+        o.o_orderdate,
+        1 AS level
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+    
+    UNION ALL
+
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey,
+        o.o_orderdate,
+        oh.level + 1
+    FROM 
+        orders o
+    INNER JOIN 
+        OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE 
+        o.o_orderdate < oh.o_orderdate
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(l.l_quantity) AS avg_quantity,
+    MAX(s.s_acctbal) AS max_supplier_acctbal,
+    STRING_AGG(DISTINCT p.p_name) AS product_names,
+    SUM(CASE 
+        WHEN l.l_returnflag = 'R' THEN 1 
+        ELSE 0 
+    END) AS return_count,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey AND s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+WHERE 
+    o.o_orderstatus = 'O' 
+    AND l.l_shipdate >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

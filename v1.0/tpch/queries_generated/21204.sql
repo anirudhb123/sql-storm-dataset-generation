@@ -1,0 +1,46 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_order_value, COUNT(o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, AVG(l.l_discount) AS avg_discount, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size BETWEEN 5 AND 10
+      AND l.l_shipdate IS NOT NULL
+    GROUP BY p.p_partkey, p.p_name
+),
+HighValueSuppliers AS (
+    SELECT sd.s_suppkey, sd.s_name
+    FROM SupplierDetails sd
+    WHERE sd.total_supply_cost > (
+        SELECT AVG(total_supply_cost)
+        FROM SupplierDetails
+    )
+)
+SELECT COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+       COALESCE(fp.p_name, 'No Part') AS part_name,
+       MAX(co.total_order_value) AS max_order_value,
+       AVG(fp.avg_discount) AS average_discount,
+       COUNT(DISTINCT hs.s_suppkey) AS high_value_supplier_count
+FROM CustomerOrders co
+FULL OUTER JOIN FilteredParts fp ON co.total_orders > 0
+LEFT JOIN HighValueSuppliers hs ON hs.s_suppkey IN (
+    SELECT DISTINCT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_partkey = fp.p_partkey
+)
+GROUP BY 1, 2
+HAVING COUNT(DISTINCT hs.s_suppkey) > 2
+ORDER BY max_order_value DESC NULLS LAST
+LIMIT 50;

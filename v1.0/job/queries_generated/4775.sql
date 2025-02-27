@@ -1,0 +1,65 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS rank_year
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+), 
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+), 
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role_name
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+), 
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    COALESCE(ki.keywords, 'No Keywords') AS keywords,
+    COALESCE(ci.company_name, 'Independent') AS production_company,
+    COALESCE(ar.actor_name, 'Unknown Actor') AS lead_actor,
+    ar.role_name AS lead_role
+FROM 
+    RankedMovies rm 
+LEFT JOIN 
+    MovieKeywords ki ON rm.title = ki.movie_id
+LEFT JOIN 
+    CompanyInfo ci ON rm.title = ci.movie_id
+LEFT JOIN 
+    ActorRoles ar ON rm.title = ar.movie_id AND ar.rank_year = 1
+WHERE 
+    rm.rank_year <= 3
+ORDER BY 
+    rm.production_year DESC, rm.title ASC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

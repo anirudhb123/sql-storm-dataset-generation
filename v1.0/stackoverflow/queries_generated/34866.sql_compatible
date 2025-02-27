@@ -1,0 +1,85 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) - 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS NetVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.QuestionCount,
+    u.AnswerCount,
+    u.TotalScore,
+    u.NetVotes,
+    ph.PostTitle,
+    ph.Level AS PostLevel,
+    STRING_AGG(pt.TagName, ', ') AS AssociatedTags
+FROM 
+    UserPostStats u
+JOIN 
+    RecursivePostHierarchy ph ON u.UserId = ph.PostId 
+LEFT JOIN 
+    Posts p ON p.Id = ph.PostId
+LEFT JOIN 
+    Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+LEFT JOIN 
+    PopularTags pt ON t.TagName = pt.TagName
+WHERE 
+    u.NetVotes > 0 
+    AND EXISTS (SELECT 1 FROM Badges b WHERE b.UserId = u.UserId AND b.Class = 1)
+GROUP BY 
+    u.DisplayName, u.TotalPosts, u.QuestionCount, u.AnswerCount, u.TotalScore, u.NetVotes, ph.PostTitle, ph.Level
+ORDER BY 
+    u.TotalScore DESC, u.TotalPosts DESC
+LIMIT 100;

@@ -1,0 +1,75 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(*) OVER (PARTITION BY mc.movie_id) AS company_count
+    FROM
+        movie_companies mc
+    JOIN
+        company_name c ON mc.company_id = c.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+),
+ActorTitles AS (
+    SELECT 
+        a.name AS actor_name,
+        at.title,
+        at.production_year,
+        COUNT(*) AS title_count
+    FROM
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    GROUP BY 
+        a.name, at.title, at.production_year
+),
+MovieKeywordStats AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords -- Concatenate unique keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    at.actor_name,
+    at.title,
+    at.production_year,
+    COALESCE(cd.company_count, 0) AS company_count,
+    r.rank,
+    mks.keywords,
+    mks.keyword_count
+FROM 
+    ActorTitles at
+LEFT JOIN 
+    RankedTitles r ON at.title = r.title AND at.production_year = r.production_year
+LEFT JOIN 
+    CompanyDetails cd ON at.title = cd.movie_id
+LEFT JOIN 
+    MovieKeywordStats mks ON at.title = mks.movie_id
+WHERE 
+    (mks.keyword_count > 0 OR r.rank IS NULL)
+    AND (cd.company_name IS NULL OR cd.company_type = 'Distributor')
+ORDER BY 
+    at.production_year DESC, 
+    at.title;
+This query includes several advanced SQL constructs such as Common Table Expressions (CTEs), window functions, outer joins, and complex predicates. It generates a comprehensive overview of movies linked with actors, their companies, and associated keywords, incorporating various filtering and aggregation strategies. The query is designed for performance benchmarking by exploring different join strategies and conditions.

@@ -1,0 +1,30 @@
+-- Performance Benchmarking Query
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    SUM(v.VoteTypeId = 2) AS UpVotes,
+    SUM(v.VoteTypeId = 3) AS DownVotes,
+    p.CreationDate,
+    p.LastActivityDate,
+    pt.Name AS PostType,
+    COUNT(DISTINCT b.Id) AS BadgeCount
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+WHERE 
+    p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) -- Only posts from the last year
+GROUP BY 
+    p.Id, p.Title, u.DisplayName, p.CreationDate, p.LastActivityDate, pt.Name
+ORDER BY 
+    p.LastActivityDate DESC;

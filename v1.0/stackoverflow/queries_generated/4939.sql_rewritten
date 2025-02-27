@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS rn,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY P.Id) AS UpVoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY P.Id) AS DownVoteCount,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Tags T
+    INNER JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, '::'))
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 5
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        PH.CreationDate,
+        PHT.Name AS HistoryType,
+        PH.Comment,
+        CASE 
+            WHEN PH.Comment IS NOT NULL THEN TRUE 
+            ELSE FALSE 
+        END AS HasComment
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE 
+        PH.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.ViewCount,
+    RP.Score,
+    RP.UpVoteCount,
+    RP.DownVoteCount,
+    RP.CommentCount,
+    PT.TagName,
+    PHD.UserId AS EditorUserId,
+    PHD.CreationDate AS EditDate,
+    PHD.HistoryType,
+    PHD.Comment AS EditComment,
+    PHD.HasComment
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    PopularTags PT ON PT.TagName = ANY(STRING_TO_ARRAY(RP.Title, ' '))
+LEFT JOIN 
+    PostHistoryDetails PHD ON RP.PostId = PHD.PostId
+WHERE 
+    RP.rn <= 5
+ORDER BY 
+    RP.Score DESC, RP.ViewCount DESC
+LIMIT 50;

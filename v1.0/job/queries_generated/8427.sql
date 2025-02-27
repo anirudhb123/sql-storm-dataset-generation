@@ -1,0 +1,24 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS cast_type,
+    ci.status_id AS complete_cast_status,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.movie_id
+JOIN 
+    comp_cast_type c ON ci.person_role_id = c.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id AND ci.person_id = cc.subject_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+GROUP BY 
+    a.name, t.title, c.kind, ci.status_id
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 5
+ORDER BY 
+    actor_name, movie_title;

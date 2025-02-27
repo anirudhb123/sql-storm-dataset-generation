@@ -1,0 +1,56 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS DownVotes,
+        COALESCE(COUNT(c.Id) OVER (PARTITION BY p.Id), 0) AS CommentCount,
+        COALESCE(SUM(b.Class) OVER (PARTITION BY p.OwnerUserId), 0) AS TotalBadges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, '2024-10-01')
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+PostRank AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        Score, 
+        ViewCount, 
+        UpVotes, 
+        DownVotes, 
+        CommentCount, 
+        TotalBadges,
+        RANK() OVER (ORDER BY Score DESC, ViewCount DESC, UpVotes DESC) AS PostRank
+    FROM 
+        RankedPosts
+)
+SELECT 
+    pr.PostId, 
+    pr.Title, 
+    pr.CreationDate, 
+    pr.Score, 
+    pr.ViewCount, 
+    pr.UpVotes, 
+    pr.DownVotes, 
+    pr.CommentCount, 
+    pr.TotalBadges
+FROM 
+    PostRank pr
+WHERE 
+    pr.PostRank <= 50
+ORDER BY 
+    pr.PostRank;

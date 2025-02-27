@@ -1,0 +1,76 @@
+WITH RankedProducts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT ps.ps_availqty 
+                     FROM partsupp ps 
+                     WHERE ps.ps_availqty BETWEEN 1 AND 100
+                     HAVING COUNT(*) > 5)
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spending
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(co.order_count, 0) AS order_count,
+        COALESCE(co.total_spending, 0) AS total_spending,
+        CASE WHEN COALESCE(co.total_spending, 0) > 10000 THEN 'High Value' ELSE 'Normal' END AS customer_status
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerOrders co ON c.c_custkey = co.c_custkey
+),
+SupplierProductAvailability AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS available_parts,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+    HAVING 
+        COUNT(DISTINCT ps.ps_partkey) >= 5 AND SUM(ps.ps_supplycost) IS NOT NULL
+)
+SELECT 
+    r.n_name AS nation_name,
+    SUM(CASE WHEN hvc.customer_status = 'High Value' THEN hvc.total_spending ELSE 0 END) AS high_value_spending,
+    AVG(sp.total_supply_cost) AS average_supply_cost,
+    STRING_AGG(DISTINCT p.p_name) AS popular_products
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    HighValueCustomers hvc ON n.n_nationkey = hvc.c_custkey
+LEFT JOIN 
+    SupplierProductAvailability sp ON hvc.c_custkey = sp.s_suppkey
+LEFT JOIN 
+    RankedProducts p ON p.price_rank = 1 
+GROUP BY 
+    r.n_name
+HAVING 
+    SUM(hvc.total_spending) IS NOT NULL AND COUNT(DISTINCT hvc.c_custkey) > 10
+ORDER BY 
+    high_value_spending DESC, average_supply_cost ASC;

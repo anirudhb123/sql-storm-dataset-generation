@@ -1,0 +1,72 @@
+WITH RECURSIVE UserPostCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName
+),
+
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS Rank
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+),
+
+FilteredRecentPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Score,
+        RP.CreationDate,
+        RP.OwnerDisplayName,
+        UPC.PostCount
+    FROM RecentPosts RP
+    JOIN UserPostCounts UPC ON RP.OwnerDisplayName = UPC.DisplayName
+    WHERE RP.Rank = 1 AND UPC.PostCount > 5
+),
+
+PostHistoryStats AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        MIN(PH.CreationDate) AS FirstEditDate,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+),
+
+FinalStats AS (
+    SELECT 
+        FRP.Title,
+        FRP.OwnerDisplayName,
+        FRP.Score,
+        FRP.CreationDate,
+        PHS.EditCount,
+        PHS.FirstEditDate,
+        PHS.LastEditDate
+    FROM FilteredRecentPosts FRP
+    LEFT JOIN PostHistoryStats PHS ON FRP.PostId = PHS.PostId
+)
+
+SELECT 
+    FS.Title,
+    FS.OwnerDisplayName,
+    FS.Score,
+    FS.CreationDate,
+    FS.EditCount,
+    COALESCE(DATEDIFF(FS.LastEditDate, FS.FirstEditDate), 0) AS EditDurationInDays,
+    CASE 
+        WHEN FS.EditCount > 0 THEN CONCAT(FS.EditCount, ' edits made')
+        ELSE 'No edits made'
+    END AS EditSummary
+FROM FinalStats FS
+ORDER BY FS.Score DESC, FS.CreationDate DESC;

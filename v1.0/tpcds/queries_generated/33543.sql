@@ -1,0 +1,41 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ss_sold_date_sk, ss_item_sk, ss_quantity, ss_net_paid, 
+           ROW_NUMBER() OVER (PARTITION BY ss_item_sk ORDER BY ss_sold_date_sk) AS rn
+    FROM store_sales
+    WHERE ss_net_paid > 20.00
+),
+CustomerReturns AS (
+    SELECT sr_customer_sk, COUNT(sr_ticket_number) AS total_returns,
+           SUM(sr_return_amt) AS total_return_amount
+    FROM store_returns
+    WHERE sr_return_quantity > 0
+    GROUP BY sr_customer_sk
+),
+DateInfo AS (
+    SELECT d_year, COUNT(DISTINCT ws_order_number) AS total_orders,
+           SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    JOIN date_dim ON ws_sold_date_sk = d_date_sk
+    GROUP BY d_year
+)
+SELECT 
+    ca.city AS customer_city,
+    cd.cd_gender AS customer_gender,
+    SUM(CASE WHEN sr.return_quantity IS NOT NULL THEN 1 ELSE 0 END) AS returns_count,
+    SUM(SALE_TOTAL) AS total_sales,
+    AVG(CASE WHEN wr.net_loss IS NOT NULL THEN wr.net_loss ELSE 0 END) AS avg_web_return_loss,
+    MAX(CASE WHEN cd.cd_marital_status = 'M' THEN cd.cd_purchase_estimate ELSE NULL END) AS max_male_purchase_estimate,
+    STRING_AGG(DISTINCT CONCAT(p.p_promo_name, ': ', p.p_discount_active), '; ') AS active_promotions
+FROM customer_address ca
+LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+LEFT JOIN web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+LEFT JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+LEFT JOIN DateInfo di ON EXTRACT(YEAR FROM ss.sold_date) = di.d_year
+WHERE ss_quantity > 0
+GROUP BY ca.city, cd.cd_gender
+HAVING SUM(ss.ss_net_paid) > 10000
+ORDER BY total_sales DESC;

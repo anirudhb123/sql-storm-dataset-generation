@@ -1,0 +1,78 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(c.Id) AS CommentCount,
+        MAX(b.UserDisplayName) AS LastEditor,
+        MAX(p.LastEditDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Users b ON p.LastEditorUserId = b.Id
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    ph.Level AS HierarchyLevel,
+    COALESCE(ub.BadgeCount, 0) AS UserBadgeCount,
+    ub.BadgeNames AS UserBadgeNames,
+    pm.TotalBounties,
+    pm.CommentCount,
+    pm.LastEditor,
+    pm.LastEditDate
+FROM 
+    PostHierarchy ph
+JOIN 
+    Posts p ON p.Id = ph.PostId
+LEFT JOIN 
+    UserBadges ub ON p.OwnerUserId = ub.UserId
+JOIN 
+    PostMetrics pm ON pm.PostId = p.Id
+WHERE 
+    pm.CommentCount > 0 
+    AND (pm.TotalBounties > 0 OR pm.LastEditor IS NOT NULL)
+ORDER BY 
+    ph.Level, pm.CommentCount DESC;

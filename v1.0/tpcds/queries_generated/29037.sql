@@ -1,0 +1,53 @@
+
+WITH address_parts AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(TRIM(ca_street_number), ' ', TRIM(ca_street_name), ' ', TRIM(ca_street_type)) AS full_address,
+        TRIM(ca_city) AS city,
+        TRIM(ca_state) AS state
+    FROM customer_address
+),
+demographics AS (
+    SELECT 
+        cd_demo_sk,
+        CASE 
+            WHEN cd_gender = 'M' THEN 'Male'
+            WHEN cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender,
+        cd_marital_status,
+        cd_income_band_sk,
+        cd_purchase_estimate
+    FROM customer_demographics
+),
+sales_data AS (
+    SELECT 
+        ws_ship_date_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM web_sales
+    GROUP BY ws_ship_date_sk
+),
+enriched_data AS (
+    SELECT 
+        ap.full_address,
+        ap.city,
+        ap.state,
+        d.gender,
+        d.cd_marital_status,
+        d.cd_income_band_sk,
+        sd.total_sales,
+        sd.total_orders
+    FROM address_parts ap
+    JOIN demographics d ON d.cd_demo_sk = ap.ca_address_sk  -- Assume mapping based on address SK
+    LEFT JOIN sales_data sd ON sd.ws_ship_date_sk = ap.ca_address_sk  -- Cross join for demo purpose
+)
+SELECT 
+    CONCAT(city, ', ', state) AS location,
+    COUNT(DISTINCT full_address) AS unique_addresses,
+    AVG(total_sales) AS avg_sales_per_address,
+    SUM(total_orders) AS total_orders
+FROM enriched_data
+GROUP BY city, state
+ORDER BY avg_sales_per_address DESC
+LIMIT 10;

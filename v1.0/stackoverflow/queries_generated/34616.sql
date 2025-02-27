@@ -1,0 +1,98 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        U.Id,
+        U.Reputation,
+        U.DisplayName,
+        U.CreationDate,
+        1 AS Level
+    FROM 
+        Users U
+    WHERE
+        U.Reputation >= 1000  -- starting point for "active" users
+    
+    UNION ALL
+    
+    SELECT 
+        U.Id,
+        U.Reputation,
+        U.DisplayName,
+        U.CreationDate,
+        UR.Level + 1
+    FROM 
+        Users U
+    JOIN 
+        UserReputationCTE UR ON U.Reputation > UR.Reputation
+    WHERE 
+        UR.Level < 5  -- limit the level of recursion
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        SUM(P.ViewCount) AS TotalViews,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(DISTINCT P.Id) > 10  -- only consider tags with more than 10 posts
+),
+PostVoteStats AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 2) AS UpVotes,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 3) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId = 6 THEN 1 ELSE 0 END) AS CloseVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+),
+TopUsersPosts AS (
+    SELECT 
+        U.DisplayName,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.AnswerCount,
+        RANK() OVER (PARTITION BY U.Id ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 5000
+)
+SELECT 
+    UR.DisplayName AS ActiveUser,
+    UR.Reputation,
+    T.TagName,
+    T.TotalViews,
+    T.PostCount,
+    PVS.UpVotes,
+    PVS.DownVotes,
+    PVS.CloseVotes,
+    TOP.Title AS TopPostTitle,
+    TOP.CreationDate AS TopPostDate,
+    TOP.Score AS TopPostScore,
+    CASE 
+        WHEN TOP.Rank < 4 THEN 'Top'
+        ELSE 'Other'
+    END AS PostRank
+FROM 
+    UserReputationCTE UR
+LEFT JOIN 
+    PopularTags T ON UR.Reputation BETWEEN 1000 AND 5000
+LEFT JOIN 
+    PostVoteStats PVS ON PVS.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = UR.Id)
+LEFT JOIN 
+    TopUsersPosts TOP ON TOP.DisplayName = UR.DisplayName
+WHERE 
+    T.TotalViews IS NOT NULL
+ORDER BY 
+    UR.Reputation DESC, 
+    T.TotalViews DESC;

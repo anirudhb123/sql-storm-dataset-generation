@@ -1,0 +1,54 @@
+
+WITH RECURSIVE sales_totals AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        SUM(ws_quantity) AS total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+top_customers AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(ct.total_profit, 0) AS total_profit,
+        COALESCE(ct.total_quantity, 0) AS total_quantity
+    FROM 
+        customer c
+    LEFT JOIN sales_totals ct ON c.c_customer_sk = ct.ws_bill_customer_sk
+    WHERE 
+        ct.rn <= 10 OR ct.rn IS NULL
+),
+daily_sales AS (
+    SELECT 
+        d.d_date,
+        SUM(ws_net_paid_inc_tax) AS daily_gross_sales,
+        AVG(ws_net_paid_inc_tax) OVER (PARTITION BY d.d_date ORDER BY d.d_date) AS avg_daily_sales,
+        ROW_NUMBER() OVER (ORDER BY d.d_date) AS row_num
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_date
+)
+SELECT 
+    t.c_first_name,
+    t.c_last_name,
+    t.total_profit,
+    ds.daily_gross_sales,
+    ds.avg_daily_sales,
+    (CASE 
+        WHEN t.total_profit > ds.avg_daily_sales THEN 'Above Average'
+        ELSE 'Below Average'
+    END) AS performance
+FROM 
+    top_customers t
+LEFT JOIN 
+    daily_sales ds ON ds.row_num = (SELECT MAX(row_num) FROM daily_sales WHERE daily_gross_sales < t.total_profit)
+ORDER BY 
+    t.total_profit DESC;

@@ -1,0 +1,68 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        w.w_warehouse_sk,
+        SUM(ss.net_paid) AS total_net_sales,
+        COUNT(ss.ticket_number) AS total_sales_count
+    FROM 
+        store_sales ss
+    JOIN 
+        warehouse w ON ss.ss_store_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_sk
+
+    UNION ALL
+
+    SELECT 
+        w.w_warehouse_sk,
+        SUM(ws.net_paid) AS total_net_sales,
+        COUNT(ws.order_number) AS total_sales_count
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_sk
+),
+customer_returns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt,
+        COUNT(sr_ticket_number) AS total_return_count
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+    GROUP BY 
+        sr_returning_customer_sk
+),
+return_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(s.total_net_sales, 0) as total_net_sales,
+        COALESCE(r.total_return_amt, 0) as total_return_amt,
+        COALESCE(s.total_sales_count, 0) as total_sales_count,
+        COALESCE(r.total_return_count, 0) as total_return_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        sales_summary s ON c.c_customer_sk = s.w_warehouse_sk
+    LEFT JOIN 
+        customer_returns r ON c.c_customer_sk = r.sr_returning_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    CASE 
+        WHEN total_net_sales > total_return_amt THEN 'Profitable Customer' 
+        ELSE 'Unprofitable Customer' 
+    END AS customer_status,
+    ROW_NUMBER() OVER (ORDER BY total_net_sales DESC) AS rank
+FROM 
+    return_summary c
+WHERE 
+    c.total_net_sales IS NOT NULL
+ORDER BY 
+    total_return_count DESC, total_sales_count ASC
+LIMIT 100;

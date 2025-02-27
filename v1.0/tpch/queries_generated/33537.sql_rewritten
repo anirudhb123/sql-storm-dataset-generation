@@ -1,0 +1,77 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        0 AS hierarchy_level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 1000.00
+    UNION ALL
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        sh.hierarchy_level + 1
+    FROM 
+        supplier s
+    JOIN 
+        SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_availqty) DESC) AS rank_from_qty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+OrderAnalytics AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales,
+        COUNT(DISTINCT l.l_orderkey) AS total_line_items,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'P')
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    ph.p_partkey,
+    ph.p_name,
+    ph.total_available_qty,
+    ph.avg_supply_cost,
+    oa.net_sales,
+    ra.last_ship_date,
+    CASE 
+        WHEN ra.last_ship_date < cast('1998-10-01' as date) - INTERVAL '30 days' 
+        THEN 'Overdue'
+        ELSE 'Current'
+    END AS shipping_status,
+    COUNT(DISTINCT c.c_custkey) AS total_customers
+FROM 
+    PartStats ph
+LEFT JOIN 
+    OrderAnalytics oa ON ph.p_partkey = oa.o_orderkey
+FULL OUTER JOIN 
+    customer c ON oa.total_line_items = c.c_custkey
+WHERE 
+    ph.rank_from_qty = 1
+GROUP BY 
+    ph.p_partkey, ph.p_name, ph.total_available_qty, ph.avg_supply_cost, oa.net_sales, ra.last_ship_date
+HAVING 
+    SUM(c.c_acctbal) IS NOT NULL
+ORDER BY 
+    oa.net_sales DESC NULLS LAST, ph.total_available_qty ASC;

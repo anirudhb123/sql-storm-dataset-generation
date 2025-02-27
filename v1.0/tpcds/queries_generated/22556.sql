@@ -1,0 +1,78 @@
+
+WITH RecursiveCTE AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(i.i_category, 'Unknown') AS item_category,
+        SUM(ss.ss_sales_price) AS total_spent,
+        COUNT(DISTINCT ss.ss_ticket_number) AS transaction_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ss.ss_sales_price) DESC) AS rank
+    FROM
+        customer c
+    JOIN
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    JOIN
+        item i ON ss.ss_item_sk = i.i_item_sk
+    WHERE
+        c.c_birth_year BETWEEN 1970 AND 1990
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name, i.i_category
+),
+FilteredCTE AS (
+    SELECT
+        r.c_customer_sk,
+        r.c_first_name,
+        r.c_last_name,
+        r.item_category,
+        r.total_spent,
+        r.transaction_count
+    FROM
+        RecursiveCTE r
+    WHERE
+        r.rank = 1 AND r.total_spent > (
+            SELECT 
+                AVG(total_spent) 
+            FROM (
+                SELECT 
+                    SUM(ss.ss_sales_price) AS total_spent 
+                FROM 
+                    customer c
+                JOIN 
+                    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+                GROUP BY 
+                    c.c_customer_sk
+            ) AS avg_spending
+        )
+)
+SELECT 
+    f.c_first_name || ' ' || f.c_last_name AS full_name,
+    f.item_category,
+    f.total_spent,
+    f.transaction_count,
+    COALESCE((SELECT COUNT(DISTINCT wr_returning_customer_sk) 
+               FROM web_returns wr 
+               WHERE wr_returning_customer_sk = f.c_customer_sk), 0) AS web_returns_count,
+    CASE 
+        WHEN f.transaction_count IS NULL THEN 'No Transactions' 
+        ELSE 'Transactions Found' 
+    END AS transaction_status
+FROM 
+    FilteredCTE f
+LEFT JOIN 
+    customer_demographics cd ON f.c_customer_sk = cd.cd_demo_sk
+WHERE 
+    cd.cd_gender = 'F' AND cd.cd_marital_status IS NOT NULL
+ORDER BY 
+    f.total_spent DESC
+FETCH FIRST 10 ROWS ONLY
+UNION ALL
+SELECT 
+    'Total Customers: ' || COUNT(*) AS full_name,
+    NULL AS item_category,
+    SUM(total_spent) AS total_spent,
+    NULL AS transaction_count,
+    NULL AS web_returns_count,
+    NULL AS transaction_status
+FROM 
+    FilteredCTE;

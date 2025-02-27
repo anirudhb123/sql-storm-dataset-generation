@@ -1,0 +1,47 @@
+
+WITH RECURSIVE customer_return_data AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_ticket_number) AS return_count,
+        SUM(sr_return_amt) AS total_return_amt,
+        SUM(CASE WHEN sr_return_quantity IS NULL THEN 0 ELSE sr_return_quantity END) AS total_return_quantity
+    FROM store_returns
+    GROUP BY sr_customer_sk
+
+    UNION ALL
+
+    SELECT 
+        cr_returning_customer_sk,
+        COUNT(cr_order_number) AS return_count,
+        SUM(cr_return_amount) AS total_return_amt,
+        SUM(COALESCE(cr_return_quantity, 0)) AS total_return_quantity
+    FROM catalog_returns
+    GROUP BY cr_returning_customer_sk
+),
+filtered_customer_data AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(CASE WHEN cd.cd_purchase_estimate IS NOT NULL THEN cd.cd_purchase_estimate ELSE 0 END) AS total_purchase_estimate,
+        ROW_NUMBER() OVER(PARTITION BY cd.cd_gender ORDER BY SUM(sr_return_amt) DESC) AS row_num,
+        COALESCE(r.r_reason_desc, 'Unknown') AS return_reason
+    FROM customer AS c
+    INNER JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_return_data AS cr ON c.c_customer_sk = cr.sr_customer_sk
+    LEFT JOIN reason AS r ON cr.return_count > 0
+    WHERE cd.cd_marital_status IS NOT NULL AND cd.cd_purchase_estimate > 1000
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status, r.r_reason_desc
+)
+SELECT 
+    f.c_customer_id,
+    f.cd_gender,
+    f.cd_marital_status,
+    f.total_purchase_estimate,
+    COUNT(CASE WHEN f.row_num <= 5 THEN 1 END) AS active_customers,
+    SUM(CASE WHEN f.total_purchase_estimate > 1500 THEN f.total_purchase_estimate END) AS high_value_customers,
+    DENSE_RANK() OVER(ORDER BY f.total_purchase_estimate DESC) AS purchase_rank
+FROM filtered_customer_data AS f
+GROUP BY f.c_customer_id, f.cd_gender, f.cd_marital_status, f.return_reason
+HAVING SUM(f.total_purchase_estimate) IS NOT NULL AND COUNT(f.c_customer_id) > 1
+ORDER BY f.total_purchase_estimate DESC NULLS LAST;

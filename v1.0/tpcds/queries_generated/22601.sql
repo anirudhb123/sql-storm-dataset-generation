@@ -1,0 +1,56 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT cr_returning_customer_sk, SUM(cr_return_quantity) AS total_returned
+    FROM catalog_returns
+    WHERE cr_returned_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY cr_returning_customer_sk
+    HAVING SUM(cr_return_quantity) > 1
+),
+HighValueCustomers AS (
+    SELECT c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, 
+           cd.cd_marital_status, cd.cd_purchase_estimate,
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate BETWEEN 10000 AND 100000
+),
+TopReturns AS (
+    SELECT cr_returning_customer_sk, total_returned
+    FROM CustomerReturns
+    WHERE total_returned > (SELECT AVG(total_returned) FROM CustomerReturns)
+),
+ItemSales AS (
+    SELECT ws_item_sk, SUM(ws_quantity) AS total_sold
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk
+),
+ItemNegReturns AS (
+    SELECT cr_item_sk, SUM(cr_return_quantity) AS total_returns
+    FROM catalog_returns
+    GROUP BY cr_item_sk
+    HAVING SUM(cr_return_quantity) > 0
+)
+SELECT 
+    c.c_customer_id, c.c_first_name, c.c_last_name, 
+    COALESCE(HighValueCustomers.rank, 0) AS customer_rank,
+    ISnull(profitability.total_profit, 0) AS total_profit,
+    COALESCE(returns.total_returned, 0) AS total_returned,
+    i.total_sold AS total_item_sold,
+    (CASE 
+        WHEN h.rank BETWEEN 1 AND 10 THEN 'Top 10'
+        WHEN h.rank BETWEEN 11 AND 50 THEN 'Top 50'
+        ELSE 'Others'
+     END) AS category
+FROM customer c
+LEFT JOIN HighValueCustomers h ON c.c_customer_id = h.c_customer_id
+LEFT JOIN (
+    SELECT cr_returning_customer_sk, SUM(cr_return_amt_inc_tax) AS total_profit
+    FROM catalog_returns
+    GROUP BY cr_returning_customer_sk
+) profitability ON profitability.cr_returning_customer_sk = c.c_customer_sk
+LEFT JOIN TopReturns returns ON returns.cr_returning_customer_sk = c.c_customer_sk
+LEFT JOIN ItemSales i ON i.ws_item_sk IN (SELECT DISTINCT cr_item_sk FROM ItemNegReturns)
+ORDER BY c.c_last_name, c.c_first_name;
+
+```

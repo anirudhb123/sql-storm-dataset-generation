@@ -1,0 +1,87 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+SELECT 
+    m.title AS Movie_Title,
+    m.production_year AS Production_Year,
+    a.name AS Actor_Name,
+    COALESCE(k.keyword, 'No Keywords') AS Movie_Keyword,
+    ct.kind AS Company_Type,
+    COUNT(DISTINCT c.person_id) OVER (PARTITION BY m.id) AS Actor_Count,
+    AVG(CASE WHEN p.info_type_id = 1 THEN length(p.info) END) AS Avg_Info_Length,
+    ROW_NUMBER() OVER (PARTITION BY m.kind_id ORDER BY m.production_year DESC) AS Movie_Rank,
+    mh.depth AS Hierarchy_Depth
+FROM 
+    movie_hierarchy mh
+JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+JOIN 
+    cast_info c ON cc.id = c.id
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    person_info p ON c.person_id = p.person_id AND p.info_type_id = 2
+WHERE 
+    a.name IS NOT NULL
+    AND mh.production_year > 2000
+    AND (c.nr_order IS NOT NULL OR c.note IS NOT NULL)
+ORDER BY 
+    Production_Year DESC, Movie_Title;
+
+### Explanation:
+1. **Common Table Expression (CTE)**:
+   - **Recursive CTE (`movie_hierarchy`)** builds a hierarchy of movies, allowing for depth tracking.
+
+2. **SELECT Statement**:
+   - Gathers movie titles, production years, actor names, keywords, company types, counts of actors, average lengths of specific types of person info, and ranks movies.
+
+3. **Joins**:
+   - Multiple joins bring together data from various tables, such as `complete_cast`, `cast_info`, and `aka_name` to fetch actors.
+
+4. **LEFT JOIN**:
+   - Used for optional information like keywords and company types to ensure that rows with missing data are still included.
+
+5. **Window Functions**:
+   - `COUNT(DISTINCT ...)` is used for calculating the number of distinct actors per movie.
+   - `AVG(...)` calculates the average length of the info related to actors.
+   - `ROW_NUMBER()` gives a rank to movies based on their production year.
+
+6. **Filter Conditions**:
+   - Filters ensure only movies produced after 2000 are considered and includes logic to handle potential NULLs in order and notes.
+
+7. **Sorting**:
+   - Finally, the results are sorted by production year and movie title. 
+
+This query is designed to provide an intricate overview of movie data while benchmarking the performance of various SQL constructs.

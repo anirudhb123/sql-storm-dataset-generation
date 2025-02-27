@@ -1,0 +1,62 @@
+
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(C.Comment) AS CommentCount,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= '2022-01-01' 
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.OwnerUserId, U.DisplayName
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(P.ViewCount) AS TotalPostViews,
+        AVG(P.Score) AS AveragePostScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.OwnerDisplayName,
+    PS.CommentCount,
+    PS.VoteCount,
+    PS.UpVoteCount,
+    PS.DownVoteCount,
+    US.UserId,
+    US.DisplayName AS UserDisplayName,
+    US.BadgeCount,
+    US.TotalPostViews,
+    US.AveragePostScore
+FROM 
+    PostStats PS
+JOIN 
+    UserStats US ON PS.OwnerUserId = US.UserId
+ORDER BY 
+    PS.VoteCount DESC, PS.CommentCount DESC;

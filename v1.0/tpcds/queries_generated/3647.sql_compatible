@@ -1,0 +1,64 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1 AND 1000
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+), 
+RankedSales AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_sales,
+        cs.total_orders,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+), 
+TopCustomers AS (
+    SELECT 
+        r.c_customer_sk,
+        r.c_first_name,
+        r.c_last_name,
+        r.total_sales,
+        r.total_orders
+    FROM 
+        RankedSales r
+    WHERE 
+        r.sales_rank <= 10
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    COALESCE(NULLIF(tc.total_sales, 0), 'No Sales') AS total_sales,
+    COALESCE(NULLIF(tc.total_orders, 0), 'No Orders') AS total_orders,
+    wm.wm_total_orders,
+    wm.wm_returned_orders
+FROM 
+    TopCustomers tc
+LEFT JOIN (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        COUNT(ws.ws_order_number) AS wm_total_orders,
+        SUM(CASE WHEN wr.wr_returned_quantity IS NOT NULL THEN 1 ELSE 0 END) AS wm_returned_orders
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        web_returns wr ON ws.ws_order_number = wr.wr_order_number
+    GROUP BY 
+        ws.ws_bill_customer_sk
+) wm ON tc.c_customer_sk = wm.ws_bill_customer_sk
+ORDER BY 
+    tc.total_sales DESC;

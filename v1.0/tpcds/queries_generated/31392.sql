@@ -1,0 +1,52 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_addr_sk,
+           1 AS hierarchy_level
+    FROM customer
+    WHERE c_current_addr_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT c.customer_sk, c.c_first_name, c.c_last_name, c.c_current_addr_sk,
+           ch.hierarchy_level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_addr_sk = ch.c_current_addr_sk
+    WHERE ch.hierarchy_level < 5
+),
+TotalReturns AS (
+    SELECT 
+        COALESCE(cr_item_sk, wr_item_sk) AS item_sk,
+        SUM(COALESCE(cr_return_quantity, 0) + COALESCE(wr_return_quantity, 0)) AS total_returns,
+        COUNT(DISTINCT cr_order_number) + COUNT(DISTINCT wr_order_number) AS return_orders_count
+    FROM catalog_returns cr
+    FULL OUTER JOIN web_returns wr ON cr_item_sk = wr_item_sk
+    GROUP BY COALESCE(cr_item_sk, wr_item_sk)
+),
+SalesAndReturns AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        TRUNC(SUM(ws.ws_sales_price), 2) AS total_sales_amount,
+        COALESCE(tr.total_returns, 0) AS total_returns,
+        COALESCE(tr.return_orders_count, 0) AS return_orders_count,
+        CASE 
+            WHEN SUM(ws.ws_quantity) > 0 THEN SUM(ws.ws_quantity) * 100.0 / NULLIF(TRUNC(SUM(ws.ws_quantity) + COALESCE(tr.total_returns, 0)), 0)
+            ELSE 0
+        END AS return_rate
+    FROM web_sales ws
+    LEFT JOIN TotalReturns tr ON ws.ws_item_sk = tr.item_sk
+    GROUP BY ws.ws_item_sk
+)
+SELECT 
+    ih.c_first_name,
+    ih.c_last_name,
+    sa.total_sales,
+    sa.total_sales_amount,
+    sa.total_returns,
+    sa.return_orders_count,
+    sa.return_rate
+FROM SalesAndReturns sa
+JOIN CustomerHierarchy ih ON sa.ws_item_sk = ih.c_current_addr_sk
+WHERE sa.return_rate > 10
+ORDER BY return_rate DESC
+LIMIT 50;

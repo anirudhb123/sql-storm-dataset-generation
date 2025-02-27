@@ -1,0 +1,89 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount, 
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.OwnerUserId IS NOT NULL
+        AND p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId, 
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 
+    GROUP BY 
+        b.UserId 
+),
+VoteStats AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId, 
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+UserPerformance AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(MAX(rp.Score), 0) AS MaxPostScore,
+        COALESCE(SUM(rb.LastBadgeDate IS NOT NULL), 0) AS GoldBadges,
+        COALESCE(SUM(vs.UpVotes), 0) AS TotalUpvotes,
+        COALESCE(SUM(vs.DownVotes), 0) AS TotalDownvotes,
+        COALESCE(MAX(phd.CloseCount), 0) AS TotalClosedPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    LEFT JOIN 
+        RecentBadges rb ON u.Id = rb.UserId
+    LEFT JOIN 
+        VoteStats vs ON u.Id IN (SELECT OwnerUserId FROM Posts WHERE Id = vs.PostId)
+    LEFT JOIN 
+        PostHistoryDetails phd ON u.Id IN (SELECT OwnerUserId FROM Posts WHERE Id = phd.PostId)
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.UserId, 
+    up.MaxPostScore,
+    up.GoldBadges,
+    up.TotalUpvotes,
+    up.TotalDownvotes,
+    up.TotalClosedPosts,
+    CASE 
+        WHEN up.MaxPostScore = 0 THEN 'Newcomer'
+        WHEN up.MaxPostScore BETWEEN 1 AND 10 THEN 'Novice'
+        WHEN up.MaxPostScore BETWEEN 11 AND 50 THEN 'Experienced'
+        WHEN up.MaxPostScore > 50 THEN 'Expert'
+        ELSE 'Unknown'
+    END AS PerformanceLevel
+FROM 
+    UserPerformance up
+WHERE 
+    up.MaxPostScore > 0
+ORDER BY 
+    up.MaxPostScore DESC, 
+    up.GoldBadges DESC;

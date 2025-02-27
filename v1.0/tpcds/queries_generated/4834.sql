@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS SalesRank
+    FROM 
+        web_sales
+),
+TotalReturns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS TotalReturned
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_item_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_purchase_estimate,
+        DENSE_RANK() OVER (ORDER BY cd_purchase_estimate DESC) AS ValueRank
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    WHERE 
+        cd_purchase_estimate > 10000
+)
+SELECT 
+    i.i_item_id,
+    i.i_product_name,
+    COALESCE(SUM(ws.ws_quantity), 0) AS TotalSold,
+    COALESCE(TR.TotalReturned, 0) AS TotalReturned,
+    HVC.c_first_name,
+    HVC.c_last_name,
+    HVC.ValueRank
+FROM 
+    item AS i
+LEFT JOIN 
+    RankedSales AS ws ON i.i_item_sk = ws.ws_item_sk AND ws.SalesRank = 1
+LEFT JOIN 
+    TotalReturns AS TR ON i.i_item_sk = TR.wr_item_sk
+JOIN 
+    HighValueCustomers AS HVC ON ws.ws_order_number = HVC.c_customer_sk
+GROUP BY 
+    i.i_item_id, i.i_product_name, HVC.c_first_name, HVC.c_last_name, HVC.ValueRank
+HAVING 
+    SUM(ws.ws_quantity) > 5
+ORDER BY 
+    TotalSold DESC, HVC.ValueRank
+LIMIT 10;

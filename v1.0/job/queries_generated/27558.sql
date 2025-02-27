@@ -1,0 +1,52 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(c.id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        total_cast,
+        aka_names
+    FROM 
+        RankedMovies
+    WHERE 
+        production_year > 2000
+        AND total_cast >= 5
+),
+MostPopularActors AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(ci.id) AS movies_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.name
+    ORDER BY 
+        movies_count DESC
+    LIMIT 10
+)
+SELECT 
+    fm.movie_title,
+    fm.production_year,
+    fm.total_cast,
+    fm.aka_names,
+    mp.actor_name,
+    mp.movies_count
+FROM 
+    FilteredMovies fm
+JOIN 
+    MostPopularActors mp ON mp.movies_count >= 1;

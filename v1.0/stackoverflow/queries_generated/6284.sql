@@ -1,0 +1,54 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN p.ViewCount ELSE 0 END) AS QuestionViewCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.Reputation > 500
+    GROUP BY u.Id, u.Reputation
+),
+PopularTags AS (
+    SELECT 
+        TagName, 
+        COUNT(pt.Id) AS TagUsageCount
+    FROM Tags t
+    JOIN Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    GROUP BY TagName
+    ORDER BY TagUsageCount DESC
+    LIMIT 10
+),
+UserBenchmark AS (
+    SELECT 
+        ur.UserId, 
+        ur.Reputation, 
+        ur.BadgeCount, 
+        ur.PostCount, 
+        ur.AnswerCount, 
+        ur.QuestionViewCount, 
+        pt.TagName
+    FROM UserReputation ur
+    JOIN PopularTags pt ON ur.AnswerCount > 10
+)
+SELECT 
+    ub.UserId,
+    ub.Reputation,
+    ub.BadgeCount,
+    ub.PostCount,
+    ub.AnswerCount,
+    ub.QuestionViewCount,
+    STRING_AGG(ub.TagName, ', ') AS PopularTags
+FROM UserBenchmark ub
+GROUP BY 
+    ub.UserId, 
+    ub.Reputation, 
+    ub.BadgeCount, 
+    ub.PostCount, 
+    ub.AnswerCount, 
+    ub.QuestionViewCount
+ORDER BY ub.Reputation DESC
+LIMIT 20;

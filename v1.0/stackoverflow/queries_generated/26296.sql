@@ -1,0 +1,57 @@
+WITH PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ExecptionPostId,
+        t.TagName,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY t.Count DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+                           WHERE t.TagName IS NOT NULL)
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN p.Score ELSE 0 END) AS AnswerScore,
+        COUNT(DISTINCT p.Id) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN
+        Posts p ON p.OwnerUserId = u.Id AND p.PostTypeId IN (2, 1) -- Answers and Questions
+    GROUP BY 
+        u.Id
+),
+PopularPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount, 
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) AS PopularityRank
+    FROM 
+        Posts p
+    WHERE 
+        p.ViewCount > 100 
+        AND p.PostTypeId = 1 -- Questions
+)
+SELECT 
+    p.Title AS QuestionTitle,
+    pt.TagName AS QuestionTag,
+    ur.DisplayName AS TopAnswerer,
+    ur.AnswerCount AS TotalAnswers,
+    pp.ViewCount AS Popularity,
+    pp.CreationDate AS QuestionDate
+FROM 
+    PopularPosts pp
+JOIN 
+    PostTags pt ON pp.Id = pt.PostId AND pt.TagRank = 1
+JOIN 
+    UserReputation ur ON ur.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = (SELECT AcceptedAnswerId FROM Posts WHERE Id = pp.Id))
+WHERE 
+    pp.PopularityRank <= 10 
+ORDER BY 
+    pp.ViewCount DESC, 
+    ur.AnswerScore DESC;

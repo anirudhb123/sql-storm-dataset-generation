@@ -1,0 +1,66 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.Id  
+)
+SELECT 
+    p.Title AS QuestionTitle,
+    u.DisplayName AS OwnerName,
+    u.Reputation AS OwnerReputation,
+    COALESCE(qa.Title, 'No Accepted Answer') AS AcceptedAnswerTitle,
+    MAX(v.CreationDate) AS LastVoteDate,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    CASE 
+        WHEN SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) > SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) 
+            THEN 'Positive' 
+        WHEN SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) < SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) 
+            THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS VoteSentiment,
+    STRING_AGG(t.TagName, ',') AS TagsList
+FROM 
+    RecursivePostCTE p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Posts qa ON p.AcceptedAnswerId = qa.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    LATERAL (SELECT TagName FROM Tags t WHERE t.Id IN (SELECT CAST(value AS INTEGER) 
+                                                          FROM UNNEST(STRING_TO_ARRAY(p.Tags, '<>')) AS value)) AS t ON true
+WHERE 
+    p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+GROUP BY 
+    p.Title, u.DisplayName, u.Reputation, qa.Title
+ORDER BY 
+    COUNT(DISTINCT c.Id) DESC,
+    COALESCE(MAX(v.CreationDate), DATE '1900-01-01') DESC
+LIMIT 20;

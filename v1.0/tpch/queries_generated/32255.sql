@@ -1,0 +1,54 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, 1 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey AND o.o_orderkey > oh.o_orderkey
+),
+SupplierStats AS (
+    SELECT 
+        ps.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS average_cost
+    FROM partsupp ps
+    GROUP BY ps.s_suppkey
+),
+RegionNations AS (
+    SELECT 
+        r.r_name AS region_name,
+        COUNT(n.n_nationkey) AS nation_count,
+        STRING_AGG(n.n_name, ', ') AS nation_list
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_name
+)
+SELECT 
+    p.p_name,
+    s.s_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    rn.region_name,
+    rn.nation_count,
+    ss.total_available,
+    ss.average_cost,
+    (CASE 
+        WHEN COUNT(DISTINCT o.o_orderkey) > 10 THEN 'High Frequency' 
+        WHEN COUNT(DISTINCT o.o_orderkey) BETWEEN 5 AND 10 THEN 'Medium Frequency'
+        ELSE 'Low Frequency'
+    END) AS frequency_category
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN RegionNations rn ON s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = rn.nation_count)
+LEFT JOIN SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+WHERE p.p_size IN (SELECT DISTINCT ps.p_size FROM part ps WHERE ps.p_retailprice > 50) 
+      AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+      AND (o.o_orderstatus IS NULL OR o.o_orderstatus IN ('O', 'P'))
+GROUP BY p.p_name, s.s_name, rn.region_name, rn.nation_count, ss.total_available, ss.average_cost
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+ORDER BY total_revenue DESC;

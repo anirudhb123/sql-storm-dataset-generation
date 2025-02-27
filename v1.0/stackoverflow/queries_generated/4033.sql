@@ -1,0 +1,57 @@
+WITH UserReputation AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.Score,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryDate,
+        CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN (SELECT Name FROM CloseReasonTypes WHERE Id = CAST(ph.Comment AS INT))
+            ELSE NULL 
+        END AS CloseReason
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= '2022-01-01'
+),
+AnswerStats AS (
+    SELECT 
+        ParentId,
+        COUNT(*) AS TotalAnswers,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM Posts p
+    WHERE p.PostTypeId = 2
+    GROUP BY ParentId
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation AS UserReputation,
+    ud.ReputationRank,
+    COALESCE(pd.PostId, 0) AS PostId,
+    pd.Title,
+    pd.ViewCount,
+    pd.Score,
+    pd.HistoryDate,
+    pd.CloseReason,
+    as.TotalAnswers,
+    as.AcceptedAnswers,
+    CASE 
+        WHEN pd.PostId IS NOT NULL THEN 'Post Exists'
+        ELSE 'No Post'
+    END AS PostStatus
+FROM UserReputation u
+LEFT JOIN PostDetails pd ON u.Id = pd.OwnerUserId
+LEFT JOIN AnswerStats as ON pd.PostId = as.ParentId
+WHERE (pd.CreationDate IS NOT NULL OR (pd.CreationDate IS NULL AND u.Reputation < 100))
+ORDER BY u.Reputation DESC, pd.HistoryDate DESC
+LIMIT 100;

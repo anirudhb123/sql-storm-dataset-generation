@@ -1,0 +1,61 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        DENSE_RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighCostSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(total_cost) FROM RankedSuppliers)
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS recent_order
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, CURRENT_DATE) 
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_sales,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+FROM 
+    nation n
+LEFT JOIN 
+    RecentOrders o ON n.n_nationkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    HighCostSuppliers s ON l.l_suppkey = s.s_suppkey
+GROUP BY 
+    n.n_name
+HAVING 
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) > 10000
+ORDER BY 
+    total_sales DESC;

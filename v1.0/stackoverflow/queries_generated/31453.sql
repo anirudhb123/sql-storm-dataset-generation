@@ -1,0 +1,74 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        U.Views,
+        0 AS TotalBadges,
+        0 AS TotalPosts,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM Users U
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM Badges B
+    GROUP BY B.UserId
+),
+UserPosts AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+PostComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount
+    FROM Comments C
+    GROUP BY C.PostId
+),
+PostScore AS (
+    SELECT 
+        P.Id AS PostId,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS TotalDownVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+)
+
+SELECT 
+    UR.UserId,
+    UR.DisplayName,
+    UR.Reputation,
+    UR.Views,
+    UR.UserRank,
+    COALESCE(UB.BadgeCount, 0) AS TotalBadges,
+    COALESCE(UP.PostCount, 0) AS TotalPosts,
+    SUM(PC.CommentCount) AS TotalComments,
+    SUM(PS.TotalUpVotes) AS TotalUpVotes,
+    SUM(PS.TotalDownVotes) AS TotalDownVotes,
+    CASE 
+        WHEN UR.Reputation >= 1000 THEN 'Elite'
+        WHEN UR.Reputation >= 500 THEN 'Established'
+        ELSE 'Novice'
+    END AS UserLevel
+FROM UserReputation UR
+LEFT JOIN UserBadges UB ON UR.UserId = UB.UserId
+LEFT JOIN UserPosts UP ON UR.UserId = UP.OwnerUserId
+LEFT JOIN Comments C ON C.UserId = UR.UserId
+LEFT JOIN PostComments PC ON C.PostId = PC.PostId
+LEFT JOIN PostScore PS ON PS.PostId IN (
+    SELECT Id FROM Posts WHERE OwnerUserId = UR.UserId
+)
+GROUP BY UR.UserId, UR.DisplayName, UR.Reputation, UR.Views, UR.UserRank, UB.BadgeCount, UP.PostCount
+ORDER BY UR.Reputation DESC;
+
+-- The benchmarking aspects of this query lie in the use of multiple CTEs,
+-- aggregates, outer joins, and the correlated subqueries within the context of summarizing user data
+-- while leveraging window functions to generate user ranks based on reputation.

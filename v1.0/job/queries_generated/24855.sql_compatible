@@ -1,0 +1,81 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS rn,
+        COUNT(*) OVER (PARTITION BY a.production_year) AS total_movies
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+filtered_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.kind_id,
+        rm.rn,
+        rm.total_movies,
+        COALESCE(SUM(mk.id) FILTER (WHERE mk.keyword IS NOT NULL), 0) AS keyword_count,
+        COALESCE(SUM(ci.nr_order) FILTER (WHERE ci.person_role_id_id IS NOT NULL), 0) AS cast_count
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        cast_info ci ON rm.movie_id = ci.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year, rm.kind_id, rm.rn, rm.total_movies
+),
+movie_statistics AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        fm.kind_id,
+        fm.rn,
+        fm.total_movies,
+        fm.keyword_count,
+        fm.cast_count,
+        CASE 
+            WHEN fm.keyword_count > 5 THEN 'Highly Tagged'
+            WHEN fm.cast_count > 10 THEN 'Star-Studded'
+            WHEN fm.total_movies > 15 THEN 'Blockbuster Year'
+            ELSE 'Indie Flare'
+        END AS movie_category
+    FROM 
+        filtered_movies fm
+)
+SELECT 
+    ms.movie_id,
+    ms.title,
+    ms.production_year,
+    ms.kind_id,
+    ms.movie_category,
+    MAX(mk.keyword) AS top_keyword,
+    COUNT(DISTINCT ci.person_id) AS unique_actors,
+    STRING_AGG(DISTINCT cn.name, ', ' ORDER BY cn.name) AS company_names
+FROM 
+    movie_statistics ms
+LEFT JOIN 
+    movie_companies mc ON ms.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    cast_info ci ON ms.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_keyword mk ON ms.movie_id = mk.movie_id
+WHERE 
+    ms.kind_id IN (SELECT kind_id FROM kind_type WHERE kind LIKE 'F%')
+    AND ms.production_year BETWEEN 2000 AND 2023
+    AND (ms.keyword_count > 0 OR ms.cast_count IS NOT NULL)
+GROUP BY 
+    ms.movie_id, ms.title, ms.production_year, ms.kind_id, ms.movie_category
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 3 OR MAX(mk.id) IS NULL
+ORDER BY 
+    ms.production_year DESC, ms.title;

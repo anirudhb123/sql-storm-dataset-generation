@@ -1,0 +1,59 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostHistoryStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        Row_Number() OVER (PARTITION BY u.Id ORDER BY ph.CreationDate DESC) AS HistoryRank,
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS RecentEdits
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        ph.CreationDate > (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days') 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.Id
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalComments,
+    us.TotalQuestions,
+    us.TotalAnswers,
+    us.TotalBadges,
+    phs.PostId,
+    phs.Title,
+    phs.CreationDate,
+    phs.RecentEdits
+FROM 
+    UserStats us
+LEFT JOIN 
+    PostHistoryStats phs ON us.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = phs.PostId)
+WHERE 
+    us.TotalPosts > 0
+ORDER BY 
+    us.Reputation DESC, us.TotalPosts DESC;

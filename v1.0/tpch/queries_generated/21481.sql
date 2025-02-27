@@ -1,0 +1,82 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate > '2022-01-01' AND o.o_orderstatus IN ('F', 'P')
+),
+SupplierDetails AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+PartInfo AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_size IS NOT NULL THEN p.p_size 
+            ELSE 0 
+        END AS adjusted_size,
+        p.p_brand
+    FROM
+        part p
+    WHERE
+        p.p_comment NOT LIKE '%obsolete%'
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+)
+SELECT
+    COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(CASE WHEN l.l_returnflag = 'Y' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS returned_amount,
+    MAX(d.total_supply_cost) AS max_supply_cost,
+    AVG(p.adjusted_size) AS avg_part_size,
+    (SELECT COUNT(DISTINCT s.s_suppkey)
+     FROM supplier s
+     WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.r_regionkey = 1) 
+       AND s.s_acctbal IS NOT NULL) AS active_suppliers
+FROM
+    CustomerOrders c
+LEFT JOIN
+    RankedOrders o ON c.order_count > 1 AND c.spending_rank < 10
+LEFT JOIN
+    lineitem l ON l.l_orderkey = o.o_orderkey
+LEFT JOIN
+    SupplierDetails d ON d.s_nationkey = c.c_nationkey
+LEFT JOIN
+    PartInfo p ON p.p_partkey = l.l_partkey
+WHERE
+    (c.order_count IS NOT NULL OR c.order_count > 0)
+GROUP BY
+    c.c_custkey
+HAVING
+    SUM(l.l_discount) BETWEEN 0.05 AND 0.25
+ORDER BY
+    total_orders DESC
+LIMIT 50;

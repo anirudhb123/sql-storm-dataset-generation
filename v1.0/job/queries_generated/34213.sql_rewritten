@@ -1,0 +1,72 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ARRAY[m.id] AS hierarchy
+    FROM aka_title m
+    WHERE m.production_year >= 2000 
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.hierarchy || m.id
+    FROM aka_title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+ranked_cast AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+),
+movie_reviews AS (
+    SELECT 
+        mv.id AS movie_id,
+        STRING_AGG(mvi.info, ', ') AS reviews
+    FROM movie_info mv
+    JOIN movie_info mvi ON mv.movie_id = mvi.movie_id
+    WHERE mvi.info_type_id IN (
+        SELECT id FROM info_type WHERE info = 'review'
+    )
+    GROUP BY mv.id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+combined_info AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(rv.reviews, 'No Reviews') AS reviews,
+        COALESCE(kw.keywords, 'No Keywords') AS keywords,
+        CAST(NULLIF(rc.actor_name, '') AS VARCHAR) AS lead_actor
+    FROM movie_hierarchy mh
+    LEFT JOIN movie_reviews rv ON mh.movie_id = rv.movie_id
+    LEFT JOIN movie_keywords kw ON mh.movie_id = kw.movie_id
+    LEFT JOIN ranked_cast rc ON mh.movie_id = rc.movie_id AND rc.actor_rank = 1 
+)
+SELECT 
+    c.title,
+    c.production_year,
+    c.reviews,
+    c.keywords,
+    CASE 
+        WHEN c.lead_actor IS NOT NULL THEN c.lead_actor 
+        ELSE 'Unknown Lead Actor' 
+    END AS lead_actor
+FROM combined_info c
+WHERE c.production_year BETWEEN 2000 AND 2023
+ORDER BY c.production_year DESC, c.title;

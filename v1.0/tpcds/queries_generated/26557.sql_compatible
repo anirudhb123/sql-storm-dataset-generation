@@ -1,0 +1,78 @@
+
+WITH AddressAnalysis AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        LENGTH(ca_street_name) AS street_name_length,
+        COUNT(DISTINCT ca_address_sk) AS address_count
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city, 
+        ca_state
+),
+CustomerAnalysis AS (
+    SELECT
+        cd_gender,
+        cd_marital_status,
+        COUNT(DISTINCT c_customer_sk) AS customer_count,
+        SUM(cd_dep_count) AS total_dependents,
+        SUM(cd_dep_college_count) AS college_dependents
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd_gender, 
+        cd_marital_status
+),
+DateAnalysis AS (
+    SELECT 
+        EXTRACT(YEAR FROM d_date) AS year,
+        COUNT(DISTINCT d_date_sk) AS total_days_with_sales
+    FROM 
+        date_dim dd
+    WHERE 
+        d_date BETWEEN '2022-01-01' AND '2023-12-31'
+    GROUP BY 
+        EXTRACT(YEAR FROM d_date)
+),
+SalesAnalysis AS (
+    SELECT 
+        SUM(ws_ext_sales_price) AS total_web_sales,
+        SUM(cs_ext_sales_price) AS total_catalog_sales,
+        SUM(ss_ext_sales_price) AS total_store_sales
+    FROM 
+        web_sales ws
+    FULL OUTER JOIN 
+        catalog_sales cs ON ws.ws_order_number = cs.cs_order_number
+    FULL OUTER JOIN 
+        store_sales ss ON ws.ws_order_number = ss.ss_ticket_number
+)
+SELECT 
+    aa.ca_city,
+    aa.ca_state,
+    aa.street_name_length,
+    aa.address_count,
+    ca.cd_gender,
+    ca.cd_marital_status,
+    ca.customer_count,
+    ca.total_dependents,
+    ca.college_dependents,
+    da.year,
+    da.total_days_with_sales,
+    sa.total_web_sales,
+    sa.total_catalog_sales,
+    sa.total_store_sales
+FROM 
+    AddressAnalysis aa
+JOIN 
+    CustomerAnalysis ca ON aa.address_count > 0
+JOIN 
+    DateAnalysis da ON da.total_days_with_sales > 0
+CROSS JOIN 
+    SalesAnalysis sa
+ORDER BY 
+    aa.ca_city, 
+    aa.ca_state, 
+    ca.cd_gender;

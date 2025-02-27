@@ -1,0 +1,61 @@
+WITH UserVoteCounts AS (
+    SELECT 
+        UserId, 
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS Downvotes
+    FROM Votes
+    GROUP BY UserId
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(uv.Upvotes, 0) AS UserUpvotes,
+        COALESCE(uv.Downvotes, 0) AS UserDownvotes,
+        SUM(CASE WHEN c.PostId IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(CASE WHEN bh.PostId IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS HistoryCount,
+        p.CreationDate,
+        LAG(p.CreationDate) OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate) AS LastPostDate
+    FROM Posts p
+    LEFT JOIN UserVoteCounts uv ON p.OwnerUserId = uv.UserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory bh ON p.Id = bh.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostInsights AS (
+    SELECT 
+        pa.PostId,
+        pa.OwnerUserId,
+        pa.Title,
+        pa.ViewCount,
+        pa.CommentCount,
+        pa.HistoryCount,
+        pa.UserUpvotes - pa.UserDownvotes AS NetVotes,
+        CASE 
+            WHEN pa.LastPostDate IS NULL THEN 'No Previous Posts'
+            WHEN pa.LastPostDate < (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days') THEN 'Inactive'
+            ELSE 'Active'
+        END AS ActivityStatus
+    FROM PostAnalytics pa
+)
+SELECT 
+    DISTINCT insights.OwnerUserId,
+    insights.Title,
+    insights.NetVotes,
+    insights.ActivityStatus,
+    CASE 
+        WHEN insights.CommentCount > 5 THEN 'High engagement'
+        WHEN insights.CommentCount BETWEEN 3 AND 5 THEN 'Moderate engagement'
+        ELSE 'Low engagement'
+    END AS EngagementLevel,
+    pt.Name AS PostType,
+    st.Name AS StatusType
+FROM PostInsights insights
+LEFT JOIN PostTypes pt ON pt.Id = (SELECT PostTypeId FROM Posts WHERE Id = insights.PostId)
+LEFT JOIN PostHistoryTypes st ON st.Id = (SELECT MAX(PostHistoryTypeId) FROM PostHistory WHERE PostId = insights.PostId)
+WHERE insights.NetVotes > 0
+  AND (insights.ActivityStatus = 'Active' OR insights.ActivityStatus = 'Inactive')
+  AND insights.CommentCount IS NOT NULL
+ORDER BY insights.NetVotes DESC, insights.ViewCount DESC;

@@ -1,0 +1,71 @@
+WITH MovieRankings AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(c.id) AS total_cast,
+        COUNT(mk.keyword_id) AS total_keywords,
+        AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_cast_order
+    FROM 
+        title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id AND c.movie_id = t.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        person_info pi ON c.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birth_year')
+    LEFT JOIN 
+        aka_title at ON t.id = at.movie_id
+    LEFT JOIN 
+        aka_name an ON at.id = an.id
+    LEFT JOIN 
+        role_type rt ON c.role_id = rt.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+KeywordRankings AS (
+    SELECT 
+        k.id AS keyword_id,
+        k.keyword,
+        COUNT(mk.movie_id) AS movie_count
+    FROM 
+        keyword k
+    LEFT JOIN 
+        movie_keyword mk ON k.id = mk.keyword_id
+    GROUP BY 
+        k.id, k.keyword
+),
+FinalRankings AS (
+    SELECT 
+        m.title_id,
+        m.title,
+        m.production_year,
+        m.total_cast,
+        m.total_keywords,
+        m.avg_cast_order,
+        COALESCE(kr.movie_count, 0) AS keyword_influence
+    FROM 
+        MovieRankings m
+    LEFT JOIN 
+        KeywordRankings kr ON m.total_keywords = kr.movie_count
+)
+SELECT 
+    title_id,
+    title,
+    production_year,
+    total_cast,
+    total_keywords,
+    avg_cast_order,
+    keyword_influence,
+    RANK() OVER (ORDER BY total_cast DESC, total_keywords DESC, avg_cast_order ASC) AS ranking
+FROM 
+    FinalRankings
+WHERE 
+    production_year >= 2000
+ORDER BY 
+    ranking
+LIMIT 50;

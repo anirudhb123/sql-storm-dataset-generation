@@ -1,0 +1,60 @@
+WITH RankedQuestions AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ARRAY_AGG(t.TagName) AS Tags,
+        COUNT(a.Id) AS AnswerCount,
+        COALESCE(MAX(b.Date), '1970-01-01') AS LastBadgeDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY b.Date DESC) AS BadgeRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName) ON t.TagName IS NOT NULL
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+FilteredQuestions AS (
+    SELECT 
+        Q.QuestionId,
+        Q.Title,
+        Q.CreationDate,
+        Q.Score,
+        Q.ViewCount,
+        Q.Tags,
+        Q.AnswerCount,
+        Q.OwnerDisplayName,
+        Q.LastBadgeDate,
+        Q.BadgeRank
+    FROM 
+        RankedQuestions Q
+    WHERE 
+        Q.AnswerCount > 5
+        AND Q.Score > 10
+        AND Q.LastBadgeDate > (cast('2024-10-01' as date) - INTERVAL '30 days') 
+    ORDER BY 
+        Q.Score DESC, Q.ViewCount DESC
+)
+SELECT 
+    FQ.QuestionId,
+    FQ.Title,
+    FQ.CreationDate,
+    FQ.Score,
+    FQ.ViewCount,
+    FQ.AnswerCount,
+    FQ.OwnerDisplayName,
+    FQ.Tags
+FROM 
+    FilteredQuestions FQ
+LIMIT 10;

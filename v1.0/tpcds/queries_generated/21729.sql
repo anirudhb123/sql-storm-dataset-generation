@@ -1,0 +1,60 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_return_quantity,
+        DENSE_RANK() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS return_rank,
+        SUM(sr_return_amt) OVER (PARTITION BY sr_item_sk) AS total_return_amt
+    FROM 
+        store_returns
+),
+TopReturns AS (
+    SELECT 
+        rr.sr_item_sk,
+        rr.sr_return_quantity,
+        rr.return_rank,
+        rr.total_return_amt
+    FROM 
+        RankedReturns rr
+    WHERE 
+        rr.return_rank <= 3
+),
+CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT sr.sr_ticket_number) AS return_count,
+        COALESCE(SUM(sr.sr_return_amt_inc_tax), 0) AS total_return_amt,
+        MAX(sr.sr_return_quantity) AS max_returned_quantity
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    cr.c_customer_id,
+    cr.return_count,
+    cr.total_return_amt,
+    cr.max_returned_quantity,
+    COALESCE(
+        (SELECT 
+            SUM(pr.p_discount_active::int) 
+         FROM 
+            promotion pr 
+         WHERE 
+            pr.p_item_sk IN (SELECT tr.sr_item_sk FROM TopReturns tr WHERE tr.return_quantity > 1)
+        ), 0) AS total_active_promotions,
+    CASE 
+        WHEN cr.return_count = 0 THEN 'No Returns'
+        WHEN cr.total_return_amt > (SELECT AVG(total_return_amt) FROM CustomerReturns) THEN 'Above Average Return'
+        ELSE 'Below Average Return'
+    END AS return_status
+FROM 
+    CustomerReturns cr
+WHERE 
+    cr.total_return_amt IS NOT NULL
+ORDER BY 
+    cr.return_count DESC, 
+    cr.total_return_amt DESC
+FETCH FIRST 10 ROWS ONLY;

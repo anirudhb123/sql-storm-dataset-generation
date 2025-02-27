@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+        AND p.PostTypeId = 1 -- Questions
+),
+TopQuestions AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerDisplayName
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+),
+TagCounts AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        COUNT(*) AS Count
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+)
+SELECT 
+    tq.PostId,
+    tq.Title,
+    tq.CreationDate,
+    tq.Score,
+    tq.ViewCount,
+    tq.OwnerDisplayName,
+    tc.TagName,
+    tc.Count AS TagUsage
+FROM 
+    TopQuestions tq
+LEFT JOIN 
+    TagCounts tc ON tc.TagName IN (SELECT UNNEST(string_to_array(substring(tq.Tags, 2, length(tq.Tags)-2), '><')))
+                                    FROM Posts WHERE Id = tq.PostId)
+ORDER BY 
+    tq.Score DESC, tq.ViewCount DESC;

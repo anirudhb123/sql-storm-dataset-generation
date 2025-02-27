@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= DATEADD(month, -6, GETDATE())
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 10
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    ru.DisplayName,
+    rb.RankByScore,
+    rb.Score,
+    rb.ViewCount,
+    tu.PositivePosts,
+    tu.NegativePosts,
+    tu.TotalViews,
+    tu.TotalPosts,
+    ub.TotalBadges,
+    ub.HighestBadgeClass
+FROM 
+    RankedPosts rb
+JOIN 
+    Users ru ON rb.OwnerUserId = ru.Id
+JOIN 
+    TopUsers tu ON ru.Id = tu.UserId
+LEFT JOIN 
+    UserBadges ub ON ru.Id = ub.UserId
+WHERE 
+    rb.RankByScore <= 5
+ORDER BY 
+    rb.Score DESC, tu.TotalPosts DESC;

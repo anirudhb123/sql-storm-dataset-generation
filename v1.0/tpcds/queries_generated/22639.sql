@@ -1,0 +1,78 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        (ws.ws_net_profit > 0 OR ws.ws_net_paid_inc_tax IS NULL)
+        AND i.i_current_price IS NOT NULL
+),
+CustomerProfitability AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(rs.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT rs.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        RankedSales rs ON c.c_customer_sk = rs.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+    HAVING 
+        SUM(rs.ws_net_profit) IS NOT NULL
+),
+CityDemographics AS (
+    SELECT 
+        ca.ca_city,
+        AVG(hd.hd_income_band_sk) AS average_income_band,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    GROUP BY 
+        ca.ca_city
+),
+ReturnStatistics AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr.ticket_number) AS return_count,
+        SUM(sr.return_amount) AS total_returned
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    cd.c_customer_id,
+    cd.total_profit,
+    cd.order_count,
+    cd.total_profit - COALESCE(rs.total_returned, 0) AS net_profit,
+    cd.city,
+    cd.average_income_band,
+    (SELECT COUNT(*) FROM ReturnStatistics rs WHERE rs.return_count > 5) AS frequent_returns,
+    CASE 
+        WHEN cd.total_profit IS NULL THEN 'No Sales'
+        WHEN cd.total_profit > 1000 THEN 'High Profit Customer'
+        ELSE 'Regular Customer'
+    END AS profitability_category
+FROM 
+    CustomerProfitability cd
+LEFT JOIN 
+    CityDemographics cdm ON cdm.customer_count > 0
+LEFT JOIN 
+    ReturnStatistics rs ON cd.c_customer_id = CAST(rs.sr_item_sk AS CHAR)
+WHERE 
+    cd.total_profit > 0 
+    OR (cd.order_count = 0 AND cd.total_profit IS NULL)
+ORDER BY 
+    cd.total_profit DESC NULLS LAST
+LIMIT 100;

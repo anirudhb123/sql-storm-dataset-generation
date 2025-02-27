@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.CreationDate, p.Score, u.DisplayName, u.Reputation
+),
+
+ClosedQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate AS ClosedDate,
+        ph.UserDisplayName AS ClosedBy,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON ph.PostId = p.Id 
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    AND 
+        p.PostTypeId = 1 -- Only Questions
+),
+
+FinalRanking AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title,
+        rp.Tags,
+        rp.ViewCount,
+        rp.Rank,
+        rp.OwnerDisplayName,
+        rp.OwnerReputation,
+        cq.ClosedDate,
+        cq.ClosedBy,
+        cq.CloseReason
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedQuestions cq ON rp.PostId = cq.PostId
+)
+
+SELECT 
+    PostId,
+    Title,
+    Tags,
+    ViewCount,
+    Rank,
+    OwnerDisplayName,
+    OwnerReputation,
+    ClosedDate,
+    ClosedBy,
+    CloseReason
+FROM 
+    FinalRanking
+WHERE 
+    Rank <= 5 -- Get top 5 ranked questions per user
+ORDER BY 
+    OwnerReputation DESC, -- order by user reputation
+    ViewCount DESC; -- then by view count

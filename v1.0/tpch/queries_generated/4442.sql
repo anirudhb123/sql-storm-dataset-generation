@@ -1,0 +1,46 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           o.o_orderstatus,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+),
+SupplierAggregates AS (
+    SELECT ps.ps_suppkey,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           sa.total_supply_cost,
+           sa.unique_parts
+    FROM supplier s
+    JOIN SupplierAggregates sa ON s.s_suppkey = sa.ps_suppkey
+    WHERE sa.total_supply_cost > 10000
+),
+CustomerOrders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COUNT(DISTINCT o.o_orderkey) > 5
+)
+SELECT COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+       to_char(o.o_orderdate, 'YYYY-MM-DD') AS order_date,
+       o.o_totalprice,
+       ts.s_name AS supplier_name,
+       ts.total_supply_cost,
+       ts.unique_parts
+FROM RankedOrders o
+LEFT JOIN TopSuppliers ts ON o.o_orderkey IN (SELECT DISTINCT l.l_orderkey from lineitem l WHERE l.l_quantity > (SELECT AVG(l2.l_quantity) FROM lineitem l2 WHERE l2.l_orderkey = l.l_orderkey))
+LEFT JOIN CustomerOrders c ON o.o_orderkey IN (SELECT o2.o_orderkey FROM orders o2 WHERE o2.o_custkey = c.c_custkey)
+WHERE o.o_orderstatus = 'O'
+AND ts.total_supply_cost IS NOT NULL
+ORDER BY o.o_orderdate DESC, o.o_totalprice DESC;

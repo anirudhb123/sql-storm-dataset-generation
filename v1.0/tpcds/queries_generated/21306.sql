@@ -1,0 +1,92 @@
+
+WITH RankedReturns AS (
+    SELECT
+        sr_item_sk,
+        COUNT(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_returned_value,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_amt_inc_tax) DESC) AS rank
+    FROM
+        store_returns
+    GROUP BY
+        sr_item_sk
+    HAVING
+        SUM(sr_return_quantity) > 5 -- Only considering items returned multiple times
+),
+HighValueReturns AS (
+    SELECT
+        rr.*,
+        i.i_item_desc,
+        i.i_current_price,
+        i.i_class,
+        i.brand_id,
+        CASE 
+            WHEN rr.total_returned_value > 1000 THEN 'High Value'
+            WHEN rr.total_returned_value BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS return_category
+    FROM
+        RankedReturns rr
+    JOIN
+        item i ON rr.sr_item_sk = i.i_item_sk
+),
+CustomerProfile AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cd.cd_gender, 'Unknown') AS gender,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band,
+        DENSE_RANK() OVER (PARTITION BY COALESCE(cd.cd_marital_status, 'N') ORDER BY c.c_birth_year DESC) AS marital_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+FinalAggregate AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COUNT(DISTINCT sr.sr_ticket_number) AS return_count,
+        SUM(sr.sr_return_amt_inc_tax) AS total_return_amount,
+        MAX(hvr.return_category) AS category,
+        MAX(hvr.i_item_desc) AS most_returned_item
+    FROM
+        CustomerProfile c
+    LEFT JOIN
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN
+        HighValueReturns hvr ON sr.sr_item_sk = hvr.sr_item_sk
+    GROUP BY
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name
+    HAVING
+        return_count > 0 AND SUM(sr.sr_return_amt_inc_tax) IS NOT NULL
+)
+SELECT
+    CONCAT(first_name, ' ', last_name) AS full_name,
+    return_count,
+    total_return_amount,
+    category,
+    most_returned_item
+FROM
+    FinalAggregate
+WHERE
+    total_return_amount IS NOT NULL
+ORDER BY
+    total_return_amount DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'TOTAL RETURNS' AS full_name,
+    COUNT(*) AS return_count,
+    SUM(total_return_amount) AS total_return_amount,
+    'Aggregate' AS category,
+    NULL AS most_returned_item
+FROM 
+    FinalAggregate
+WHERE 
+    total_return_amount > 0;

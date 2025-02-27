@@ -1,0 +1,58 @@
+WITH supplier_part_counts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS part_count,
+        STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+region_supplier AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        STRING_AGG(DISTINCT s.s_name, ', ') AS suppliers
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    rsc.r_name AS region,
+    rsc.supplier_count,
+    rsc.suppliers,
+    s.pc.part_count AS total_parts,
+    s.pc.part_names,
+    co.order_count AS total_orders,
+    co.total_spent
+FROM 
+    region_supplier rsc
+LEFT JOIN 
+    supplier_part_counts s ON rsc.suppliers LIKE '%' || s.s_name || '%'
+LEFT JOIN 
+    customer_orders co ON co.order_count > 10
+ORDER BY 
+    rsc.r_name, s.pc.part_count DESC, co.total_spent DESC;

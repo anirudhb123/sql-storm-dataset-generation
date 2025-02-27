@@ -1,0 +1,48 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CASE 
+            WHEN cd_gender = 'M' THEN 'Mr. ' || c.c_last_name 
+            ELSE 'Ms. ' || c.c_last_name 
+        END AS formal_name,
+        ca.ca_city,
+        ca.ca_state,
+        CONCAT('ZIP: ', ca.ca_zip) AS zip_info,
+        cd_purchase_estimate,
+        cd_credit_rating
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cd_purchase_estimate > 5000
+),
+item_sales AS (
+    SELECT 
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_ext_sales_price) AS total_sales_amount
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_id
+),
+city_sales AS (
+    SELECT 
+        ci.ca_city,
+        COUNT(DISTINCT ci.c_customer_id) AS unique_customers,
+        SUM(is.total_sales_amount) AS total_sales
+    FROM customer_info ci
+    JOIN item_sales is ON ci.c_customer_id = is.i_item_id
+    GROUP BY ci.ca_city
+)
+SELECT 
+    cs.ca_city,
+    cs.unique_customers,
+    cs.total_sales,
+    CASE 
+        WHEN cs.total_sales > 100000 THEN 'High Volume'
+        WHEN cs.total_sales BETWEEN 50000 AND 100000 THEN 'Medium Volume'
+        ELSE 'Low Volume'
+    END AS sales_category
+FROM city_sales cs
+ORDER BY cs.total_sales DESC;

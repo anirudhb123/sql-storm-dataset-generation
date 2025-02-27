@@ -1,0 +1,43 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        w.w_warehouse_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        web_site we ON ws.ws_web_site_sk = we.web_site_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2451545 AND 2451555 -- date range filter
+    GROUP BY 
+        ws.web_site_id, w.w_warehouse_id
+),
+TopWebsites AS (
+    SELECT 
+        web_site_id,
+        total_sales,
+        order_count
+    FROM 
+        RankedSales
+    WHERE 
+        rank = 1
+)
+SELECT 
+    w.w_warehouse_name,
+    t.web_site_id,
+    t.total_sales,
+    t.order_count,
+    (SELECT COUNT(DISTINCT c.c_customer_sk) 
+     FROM customer c 
+     WHERE c.c_current_addr_sk IN (SELECT ws.ws_bill_addr_sk FROM web_sales ws WHERE ws.ws_web_site_sk = t.web_site_id)) AS unique_customers
+FROM 
+    TopWebsites t
+JOIN 
+    warehouse w ON t.web_site_id = w.w_warehouse_id
+ORDER BY 
+    total_sales DESC;

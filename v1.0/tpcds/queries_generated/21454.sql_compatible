@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM
+        web_sales ws
+    WHERE
+        (ws.ws_sales_price IS NOT NULL AND ws.ws_quantity > 0)
+        OR (ws.ws_order_number IS NOT NULL AND ws.ws_item_sk IS NOT NULL)
+), 
+CustomerReturns AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returns,
+        AVG(cr.cr_return_amount) AS avg_return_amt
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.cr_item_sk
+), 
+FilteredAddresses AS (
+    SELECT 
+        a.ca_address_sk,
+        a.ca_city,
+        a.ca_state,
+        COALESCE(w.w_city, 'Unknown') AS warehouse_city
+    FROM 
+        customer_address a
+    LEFT JOIN 
+        warehouse w ON a.ca_address_sk = w.w_warehouse_sk
+    WHERE 
+        a.ca_state IN ('CA', 'NY')
+), 
+SalesSummary AS (
+    SELECT 
+        rs.ws_item_sk,
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS total_sales,
+        COUNT(DISTINCT rs.ws_order_number) AS order_count,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.avg_return_amt, 0) AS avg_return_amt
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        CustomerReturns cr ON rs.ws_item_sk = cr.cr_item_sk
+    GROUP BY 
+        rs.ws_item_sk
+)
+SELECT 
+    s.ws_item_sk,
+    s.total_sales,
+    s.total_returns,
+    s.avg_return_amt,
+    s.order_count,
+    CASE 
+        WHEN s.total_sales > 1000 THEN 'High Value'
+        WHEN s.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS sales_category
+FROM 
+    SalesSummary s
+WHERE 
+    s.total_sales IS NOT NULL
+ORDER BY 
+    s.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

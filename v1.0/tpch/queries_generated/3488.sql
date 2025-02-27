@@ -1,0 +1,63 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-10-01' AND DATE '2023-10-31'
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+EnhancedLineItem AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        LAG(l.l_extendedprice - (l.l_extendedprice * l.l_discount)) OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS previous_net_price,
+        CASE 
+            WHEN l.l_discount > 0.1 THEN 'High Discount'
+            ELSE 'Regular Discount'
+        END AS discount_category
+    FROM 
+        lineitem l
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    s.supplier_count,
+    es.discount_category,
+    es.l_quantity,
+    es.l_extendedprice,
+    es.l_discount,
+    es.l_tax,
+    COALESCE(es.previous_net_price, 0) AS previous_net_price
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    SupplierStats s ON s.ps_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = (SELECT l.l_suppkey FROM lineitem l WHERE l.l_orderkey = r.o_orderkey LIMIT 1))
+LEFT JOIN 
+    EnhancedLineItem es ON es.l_orderkey = r.o_orderkey
+WHERE 
+    r.order_rank <= 5
+ORDER BY 
+    r.o_orderdate DESC, 
+    r.o_totalprice DESC;

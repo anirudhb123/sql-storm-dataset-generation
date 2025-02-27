@@ -1,0 +1,80 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk, 
+        SUM(sr_return_quantity) AS total_returns, 
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM store_returns
+    WHERE sr_returned_date_sk IS NOT NULL
+    GROUP BY sr_customer_sk
+),
+WebReturns AS (
+    SELECT 
+        wr_returning_customer_sk AS customer_sk,
+        SUM(wr_return_quantity) AS total_web_returns,
+        COUNT(wr_order_number) AS web_return_count
+    FROM web_returns
+    WHERE wr_returned_date_sk IS NOT NULL
+    GROUP BY wr_returning_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk, 
+        cd_gender, 
+        cd_marital_status, 
+        cd_purchase_estimate,
+        CASE 
+            WHEN cd_gender = 'M' THEN 'Male'
+            WHEN cd_gender = 'F' THEN 'Female'
+            ELSE 'Other' 
+        END AS gender_description
+    FROM customer_demographics
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS net_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2450000 AND 2459999 -- arbitrary date range for performance testing
+    GROUP BY ws_bill_customer_sk
+),
+TotalReturns AS (
+    SELECT 
+        COALESCE(cr.customer_sk, wr.customer_sk) AS customer_sk,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(wr.total_web_returns, 0) AS total_web_returns
+    FROM CustomerReturns cr
+    FULL OUTER JOIN WebReturns wr ON cr.sr_customer_sk = wr.customer_sk
+),
+FinalData AS (
+    SELECT 
+        cd.gender_description,
+        cd.cd_marital_status,
+        sd.net_sales,
+        tr.total_returns,
+        tr.total_web_returns,
+        sd.total_orders,
+        CASE 
+            WHEN tr.total_returns > 0 THEN 'Has Returns'
+            ELSE 'No Returns' 
+        END AS return_status
+    FROM TotalReturns tr
+    LEFT JOIN SalesData sd ON tr.customer_sk = sd.ws_bill_customer_sk
+    LEFT JOIN CustomerDemographics cd ON tr.customer_sk = cd.cd_demo_sk
+)
+SELECT 
+    gender_description,
+    cd_marital_status,
+    SUM(net_sales) AS total_net_sales,
+    SUM(total_returns) AS overall_returns,
+    SUM(total_web_returns) AS overall_web_returns,
+    COUNT(DISTINCT customer_sk) AS unique_customers,
+    AVG(net_sales) * (CASE WHEN gender_description = 'Male' THEN 1.1 ELSE 1 END) AS average_sales_adjusted,
+    (SELECT AVG(total_orders) FROM SalesData) AS avg_orders_overall
+FROM FinalData
+WHERE COALESCE(overall_returns, 0) < 10
+GROUP BY gender_description, cd_marital_status
+HAVING SUM(net_sales) > 1000
+ORDER BY total_net_sales DESC
+FETCH FIRST 10 ROWS ONLY;

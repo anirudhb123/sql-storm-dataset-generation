@@ -1,0 +1,55 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        COALESCE(y.year, 0) AS production_year, 
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            MAX(production_year) AS year 
+         FROM 
+            aka_title 
+         WHERE 
+            production_year IS NOT NULL 
+         GROUP BY 
+            movie_id) y ON t.id = y.movie_id
+    WHERE 
+        t.production_year > 2000
+),
+top_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_count
+    FROM 
+        ranked_movies
+    WHERE 
+        rank <= 5
+)
+SELECT 
+    tm.title, 
+    tm.production_year, 
+    tm.cast_count, 
+    COALESCE(ARRAY_AGG(DISTINCT ka.name) FILTER (WHERE ka.name IS NOT NULL), '{}') AS aka_names,
+    string_agg(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    top_movies tm
+LEFT JOIN 
+    movie_keyword mk ON tm.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    aka_name ka ON tm.movie_id = ka.movie_id
+GROUP BY 
+    tm.movie_id, tm.title, tm.production_year, tm.cast_count
+ORDER BY 
+    tm.cast_count DESC;

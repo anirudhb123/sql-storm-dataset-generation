@@ -1,0 +1,56 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title, 
+        t.production_year,
+        at.name AS alternate_name,
+        ROW_NUMBER() OVER (PARTITION BY t.title ORDER BY t.production_year DESC) AS rank
+    FROM title t
+    LEFT JOIN aka_title at ON t.id = at.movie_id
+    WHERE t.production_year IS NOT NULL
+),
+top_titles AS (
+    SELECT 
+        rt.title_id, 
+        rt.title, 
+        rt.production_year,
+        rt.alternate_name
+    FROM ranked_titles rt
+    WHERE rt.rank = 1
+),
+cast_details AS (
+    SELECT 
+        c.id AS cast_id,
+        c.movie_id,
+        p.name AS actor_name,
+        rt.title,
+        rt.production_year,
+        c.nr_order,
+        r.role
+    FROM cast_info c
+    JOIN person_info pi ON c.person_id = pi.person_id
+    JOIN name p ON pi.person_id = p.imdb_id
+    JOIN role_type r ON c.role_id = r.id
+    JOIN top_titles rt ON c.movie_id = rt.title_id
+),
+final_output AS (
+    SELECT 
+        cd.cast_id,
+        cd.actor_name,
+        cd.title,
+        cd.production_year,
+        cd.nr_order,
+        cd.role,
+        COUNT(DISTINCT mc.company_id) AS companies_count
+    FROM cast_details cd
+    LEFT JOIN movie_companies mc ON cd.movie_id = mc.movie_id
+    GROUP BY cd.cast_id, cd.actor_name, cd.title, cd.production_year, cd.nr_order, cd.role
+)
+SELECT 
+    fo.actor_name,
+    fo.title,
+    fo.production_year,
+    fo.role,
+    fo.companies_count
+FROM final_output fo
+ORDER BY fo.production_year DESC, fo.actor_name ASC;

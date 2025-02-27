@@ -1,0 +1,64 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        COALESCE(k.keyword, 'N/A') AS keyword,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM aka_title a
+    LEFT JOIN movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN cast_info c ON a.id = c.movie_id
+    GROUP BY a.id, a.title, a.production_year, k.keyword
+),
+top_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.keyword,
+        rm.cast_count
+    FROM ranked_movies rm
+    WHERE rm.rank <= 5
+),
+movie_details AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.production_year,
+        tm.keyword,
+        mt.kind AS movie_type,
+        COUNT(mc.company_id) AS company_count
+    FROM top_movies tm
+    LEFT JOIN movie_info mi ON tm.movie_id = mi.movie_id
+    LEFT JOIN kind_type kt ON mi.info_type_id = kt.id
+    LEFT JOIN movie_companies mc ON tm.movie_id = mc.movie_id
+    GROUP BY tm.movie_id, tm.title, tm.production_year, tm.keyword, mt.kind
+),
+final_output AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.keyword,
+        md.movie_type,
+        md.company_count,
+        CASE 
+            WHEN md.company_count > 3 THEN 'Highly-Produced'
+            WHEN md.company_count BETWEEN 1 AND 3 THEN 'Moderately-Produced'
+            ELSE 'Low Production'
+        END AS production_category
+    FROM movie_details md
+)
+
+SELECT 
+    fo.movie_id,
+    fo.title,
+    fo.production_year,
+    fo.keyword,
+    fo.movie_type,
+    fo.company_count,
+    fo.production_category
+FROM final_output fo
+ORDER BY fo.production_year DESC, fo.cast_count DESC;

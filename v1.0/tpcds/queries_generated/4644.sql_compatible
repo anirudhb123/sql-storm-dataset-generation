@@ -1,0 +1,72 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_paid DESC) AS sales_rank,
+        COALESCE(si.i_category, 'UNKNOWN') AS item_category
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        item si ON ws.ws_item_sk = si.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2450867 AND 2450931  
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returns,
+        SUM(wr.wr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        rs.ws_quantity,
+        rs.ws_sales_price,
+        rs.ws_net_paid,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        CustomerReturns cr ON rs.ws_item_sk = cr.wr_item_sk
+),
+FinalReport AS (
+    SELECT 
+        s.item_category,
+        COUNT(DISTINCT s.ws_order_number) AS total_orders,
+        SUM(s.ws_net_paid) AS total_sales,
+        SUM(s.total_returns) AS total_returns,
+        AVG(s.ws_sales_price) AS average_sales_price,
+        MAX(s.ws_net_paid) AS max_net_paid
+    FROM 
+        SalesWithReturns s
+    GROUP BY 
+        s.item_category
+)
+SELECT 
+    fr.item_category,
+    fr.total_orders,
+    fr.total_sales,
+    fr.total_returns,
+    fr.average_sales_price,
+    fr.max_net_paid,
+    CASE 
+        WHEN fr.total_sales IS NULL THEN 'NO SALES'
+        WHEN fr.total_returns > 0 THEN 'RETURNED ITEMS'
+        ELSE 'ACTIVE ITEMS'
+    END AS item_status
+FROM 
+    FinalReport fr
+WHERE 
+    fr.total_orders > 10
+ORDER BY 
+    fr.total_sales DESC;

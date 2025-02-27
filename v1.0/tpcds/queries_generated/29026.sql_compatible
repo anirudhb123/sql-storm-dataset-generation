@@ -1,0 +1,51 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_quantity) AS total_items,
+        DENSE_RANK() OVER (PARTITION BY cd.c_customer_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        CustomerDetails cd ON ws.ws_bill_customer_sk = cd.c_customer_id
+    GROUP BY 
+        ws.ws_order_number, cd.c_customer_id
+),
+FilteredSales AS (
+    SELECT 
+        cd.full_name,
+        sd.total_sales,
+        sd.total_items,
+        sd.sales_rank
+    FROM 
+        CustomerDetails cd
+    JOIN 
+        SalesData sd ON cd.c_customer_id = sd.ws_order_number
+    WHERE 
+        sd.sales_rank <= 3
+)
+SELECT 
+    CONCAT(full_name, ' from ', (SELECT ca.ca_city FROM customer_address ca JOIN CustomerDetails cd ON cd.c_customer_id = ca.ca_address_sk LIMIT 1)) AS customer_info,
+    total_sales,
+    total_items
+FROM 
+    FilteredSales
+ORDER BY 
+    total_sales DESC;

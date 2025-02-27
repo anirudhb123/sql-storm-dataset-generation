@@ -1,0 +1,54 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01' 
+    AND o.o_orderstatus IN ('O', 'F', 'P')
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerDemand AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N' 
+    GROUP BY c.c_custkey
+)
+SELECT 
+    p.p_name,
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS distinct_customers,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    sr.total_available_qty,
+    cs.order_count,
+    cs.last_ship_date
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN region r ON s.s_nationkey = r.r_regionkey
+LEFT JOIN CustomerDemand cs ON s.s_suppkey = cs.c_custkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN RankedOrders o ON l.l_orderkey = o.o_orderkey AND o.rn = 1
+LEFT JOIN SupplierStats sr ON s.s_suppkey = sr.s_suppkey
+WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+AND l.l_shipdate BETWEEN DATE '1997-01-01' AND cast('1998-10-01' as date)
+GROUP BY p.p_name, r.r_name, sr.total_available_qty, cs.order_count, cs.last_ship_date
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY total_revenue DESC;

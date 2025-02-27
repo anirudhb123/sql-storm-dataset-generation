@@ -1,0 +1,38 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal,
+           RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS SuppRank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+), 
+
+HighValueCustomers AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           c.c_acctbal,
+           SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+    HAVING SUM(o.o_totalprice) > 10000
+)
+
+SELECT r.r_name AS RegionName,
+       SUM(CASE WHEN li.l_returnflag = 'R' THEN li.l_extendedprice * (1 - li.l_discount) ELSE 0 END) AS ReturnedSales,
+       COUNT(DISTINCT CASE WHEN hs.SuppRank = 1 THEN hs.s_suppkey END) AS TopSuppliers,
+       COUNT(DISTINCT hc.c_custkey) AS HighValueCustomerCount,
+       MIN(li.l_shipdate) AS FirstShipDate,
+       MAX(li.l_shipdate) AS LastShipDate,
+       COALESCE(NULLIF(MAX(li.l_tax), 0), AVG(li.l_tax)) AS AvgTaxNonZero
+FROM lineitem li
+LEFT JOIN RankedSuppliers hs ON li.l_suppkey = hs.s_suppkey
+JOIN nation n ON li.l_orderkey % (SELECT COUNT(*) FROM nation) = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN HighValueCustomers hc ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = hc.c_custkey)
+WHERE li.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY r.r_name
+HAVING COUNT(li.l_orderkey) > 50
+ORDER BY ReturnedSales DESC, r.r_name ASC;

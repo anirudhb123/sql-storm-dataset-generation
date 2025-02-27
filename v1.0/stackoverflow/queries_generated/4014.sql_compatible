@@ -1,0 +1,73 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS UpvotedPosts,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AvgScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (ORDER BY P.Score DESC) AS RankScore
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.PostTypeId = 1
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE B.Class = 3) AS BronzeBadges
+    FROM Badges B
+    GROUP BY B.UserId
+),
+PostsSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+        COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+        COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+        UPS.PostCount,
+        UPS.UpvotedPosts,
+        UPS.TotalViews,
+        UPS.AvgScore,
+        COUNT(C.Id) AS CommentCount
+    FROM Users U
+    LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+    LEFT JOIN UserPostStats UPS ON U.Id = UPS.UserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    GROUP BY U.Id, U.DisplayName, UB.GoldBadges, UB.SilverBadges, UB.BronzeBadges, UPS.PostCount, UPS.UpvotedPosts, UPS.TotalViews, UPS.AvgScore
+)
+
+SELECT 
+    PS.UserId,
+    PS.DisplayName,
+    PS.GoldBadges,
+    PS.SilverBadges,
+    PS.BronzeBadges,
+    PS.PostCount,
+    PS.UpvotedPosts,
+    PS.TotalViews,
+    PS.AvgScore,
+    TP.PostId,
+    TP.Title,
+    TP.CreationDate,
+    TP.Score,
+    TP.RankScore
+FROM PostsSummary PS
+LEFT JOIN TopPosts TP ON PS.UserId = TP.OwnerDisplayName
+WHERE (PS.TotalViews > 1000 OR PS.CommentCount > 5)
+AND PS.AvgScore IS NOT NULL
+ORDER BY PS.AvgScore DESC, PS.PostCount DESC;

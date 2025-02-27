@@ -1,0 +1,64 @@
+
+WITH MovieRoles AS (
+    SELECT 
+        c.movie_id,
+        r.role AS role,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.person_role_id = r.id
+    GROUP BY 
+        c.movie_id, r.role
+),
+TitleInfo AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ak.name AS aka_name,
+        k.keyword AS movie_keyword
+    FROM 
+        title t
+    LEFT JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    ti.title,
+    ti.production_year,
+    ti.aka_name,
+    mr.role,
+    mr.actor_count,
+    ci.companies,
+    ci.company_types
+FROM 
+    TitleInfo ti
+JOIN 
+    MovieRoles mr ON ti.title_id = mr.movie_id
+JOIN 
+    CompanyInfo ci ON ti.title_id = ci.movie_id
+WHERE 
+    ti.production_year >= 2000
+ORDER BY 
+    ti.production_year DESC, 
+    mr.actor_count DESC, 
+    ti.title;

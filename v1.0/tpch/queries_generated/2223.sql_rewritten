@@ -1,0 +1,80 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+),
+TopCustomers AS (
+    SELECT 
+        r.r_name AS region,
+        n.n_name AS nation,
+        c.c_name AS customer_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        RankedOrders ro
+    JOIN 
+        customer c ON ro.o_orderkey = o.o_orderkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        ro.order_rank <= 5
+    GROUP BY 
+        r.r_name, n.n_name, c.c_name
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name AS supplier_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+),
+PartSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(l.l_orderkey) AS order_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1997-10-01'
+    GROUP BY 
+        l.l_partkey
+)
+SELECT 
+    tc.region,
+    tc.nation,
+    tc.customer_name,
+    tc.total_spent,
+    ps.total_sales,
+    ps.order_count AS sales_order_count,
+    COALESCE(sd.supplier_name, 'No Supplier') AS supplier_name,
+    sd.total_available,
+    sd.avg_cost
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    PartSales ps ON ps.l_partkey = tc.c_custkey 
+LEFT JOIN 
+    SupplierDetails sd ON sd.ps_partkey = ps.l_partkey
+WHERE 
+    tc.total_spent > 1000
+ORDER BY 
+    tc.total_spent DESC, ps.total_sales DESC;

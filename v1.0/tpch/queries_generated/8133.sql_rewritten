@@ -1,0 +1,63 @@
+WITH sales_data AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        o.o_orderdate,
+        c.c_discounted_stat * SUM(l.l_extendedprice * (1 - l.l_discount)) AS adjusted_sales
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01' 
+        AND o.o_orderdate < DATE '1996-01-01'
+    GROUP BY 
+        l.l_orderkey, o.o_orderdate, c.c_discounted_stat
+),
+avg_sales AS (
+    SELECT 
+        AVG(total_sales) AS avg_total_sales,
+        AVG(adjusted_sales) AS avg_adjusted_sales
+    FROM 
+        sales_data
+),
+top_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity_sold
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    ORDER BY 
+        total_quantity_sold DESC
+    LIMIT 10
+)
+SELECT 
+    r.r_name,
+    SUM(sd.total_sales) AS total_sales_in_region,
+    avg.avg_total_sales,
+    avg.avg_adjusted_sales,
+    tp.p_name,
+    tp.total_quantity_sold
+FROM 
+    sales_data sd
+JOIN 
+    nation n ON sd.o_orderkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    avg_sales avg ON 1=1
+JOIN 
+    top_parts tp ON 1=1
+GROUP BY 
+    r.r_name, avg.avg_total_sales, avg.avg_adjusted_sales, tp.p_name, tp.total_quantity_sold
+ORDER BY 
+    total_sales_in_region DESC;

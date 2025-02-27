@@ -1,0 +1,59 @@
+WITH SupplierData AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_total
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '1997-01-01' AND l.l_shipdate < '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name AS nation_name,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    sd.s_name,
+    sd.part_count,
+    sd.total_supply_cost,
+    os.net_total,
+    nr.region_name,
+    CASE 
+        WHEN sd.total_supply_cost > 10000 THEN 'High Cost'
+        ELSE 'Low Cost'
+    END AS cost_category
+FROM 
+    SupplierData sd
+LEFT JOIN 
+    OrderSummary os ON sd.s_suppkey IN (SELECT DISTINCT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey WHERE o.o_orderdate = os.o_orderdate))
+JOIN 
+    NationRegion nr ON sd.s_nationkey = nr.n_nationkey
+WHERE 
+    sd.s_acctbal IS NOT NULL
+ORDER BY 
+    sd.total_supply_cost DESC, os.net_total DESC
+LIMIT 100;

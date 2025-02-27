@@ -1,0 +1,92 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT 
+        ca_address_sk,
+        ca_city,
+        ca_state,
+        ca_country,
+        ca_street_name,
+        ca_street_number,
+        1 AS level
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+    
+    UNION ALL
+
+    SELECT 
+        ca_address_sk,
+        ca.city AS ca_city,
+        ca.state AS ca_state,
+        ca.country AS ca_country,
+        ca.street_name AS ca_street_name,
+        ca.street_number AS ca_street_number,
+        ah.level + 1
+    FROM customer_address ca
+    JOIN address_hierarchy ah ON ca.city = ah.ca_city 
+    WHERE ca_state IS NOT NULL AND ah.level < 5
+),
+
+demographic_summary AS (
+    SELECT
+        cd_gender,
+        cd_marital_status,
+        AVG(cd_credit_rating) AS avg_credit_rating,
+        COUNT(DISTINCT cd_demo_sk) AS demographic_count
+    FROM customer_demographics
+    WHERE cd_dep_count IS NOT NULL
+    GROUP BY cd_gender, cd_marital_status
+),
+
+date_partition AS (
+    SELECT 
+        d_year,
+        d_quarter_seq,
+        SUM(CASE WHEN d_current_month = 'Y' THEN 1 ELSE 0 END) AS current_month_sales,
+        SUM(CASE WHEN d_current_year = 'Y' THEN 1 ELSE 0 END) AS current_year_sales
+    FROM date_dim
+    WHERE d_date BETWEEN '2023-01-01' AND CURRENT_DATE
+    GROUP BY d_year, d_quarter_seq
+),
+
+store_sales_summary AS (
+    SELECT 
+        s_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_net_profit) AS total_net_profit,
+        SUM(ss_quantity) AS total_quantity
+    FROM store_sales
+    GROUP BY s_store_sk, ss_sold_date_sk
+),
+
+combined_sales AS (
+    SELECT 
+        s.s_store_id,
+        ss.total_net_profit,
+        ss.total_quantity,
+        ds.current_month_sales,
+        ds.current_year_sales
+    FROM store_sales_summary ss
+    JOIN store s ON ss.s_store_sk = s.s_store_sk
+    JOIN date_partition ds ON ds.d_year = EXTRACT(YEAR FROM CURRENT_DATE) AND ds.d_quarter_seq = EXTRACT(QUARTER FROM CURRENT_DATE)
+)
+
+SELECT 
+    a.ca_city,
+    a.ca_state,
+    a.ca_country,
+    ds.avg_credit_rating,
+    cs.s_store_id,
+    coalesce(cs.total_net_profit, 0) AS total_net_profit,
+    coalesce(cs.total_quantity, 0) AS total_quantity,
+    CASE 
+        WHEN ds.demographic_count > 100 THEN 'High'
+        WHEN ds.demographic_count BETWEEN 50 AND 100 THEN 'Medium'
+        ELSE 'Low'
+    END AS demographic_level,
+    ROW_NUMBER() OVER (PARTITION BY a.ca_city ORDER BY cs.total_net_profit DESC) AS city_rank
+FROM address_hierarchy a
+LEFT JOIN demographic_summary ds ON a.ca_state = ds.cd_marital_status
+LEFT JOIN combined_sales cs ON a.ca_city = cs.s_store_id
+WHERE a.level = 1
+ORDER BY a.ca_city, cs.total_net_profit DESC
+LIMIT 100;

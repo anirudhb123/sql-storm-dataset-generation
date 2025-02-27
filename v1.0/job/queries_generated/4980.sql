@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS year_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+), MovieCast AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        complete_cast mc
+    LEFT JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        mc.movie_id
+), MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        aka_title m ON mk.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id
+), MoviesWithExtras AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        COALESCE(mc.cast_count, 0) AS cast_count,
+        COALESCE(mk.keyword_count, 0) AS keyword_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieCast mc ON rm.movie_id = mc.movie_id
+    LEFT JOIN 
+        MovieKeywords mk ON rm.movie_id = mk.movie_id
+)
+SELECT 
+    m.title,
+    m.production_year,
+    m.cast_count,
+    m.keyword_count,
+    CASE 
+        WHEN m.cast_count = 0 THEN 'No Cast'
+        ELSE 'Has Cast'
+    END AS cast_status
+FROM 
+    MoviesWithExtras m
+WHERE 
+    (m.keyword_count > 5 OR m.cast_count > 3)
+    AND m.production_year BETWEEN 2000 AND 2020
+    OR (m.cast_count = 0 AND m.keyword_count = 0)
+ORDER BY 
+    m.production_year DESC, m.cast_count DESC;

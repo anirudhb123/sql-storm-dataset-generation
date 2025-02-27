@@ -1,0 +1,78 @@
+
+WITH RECURSIVE SalesAnalysis AS (
+    SELECT 
+        w.w_warehouse_id AS warehouse_id,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY w.w_warehouse_id ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS rank
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+), 
+CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT sr.ticket_number) AS return_count,
+        SUM(sr.return_amt) AS total_returned_amt
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_id
+), 
+HighValueCustomers AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(c.c_customer_sk) AS customer_count,
+        SUM(COALESCE(cd.cd_purchase_estimate, 0)) AS total_purchase_estimate
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    WHERE 
+        cd.cd_purchase_estimate > (SELECT AVG(cd_purchase_estimate) FROM customer_demographics)
+    GROUP BY 
+        cd.cd_gender
+), 
+AdjustedReturns AS (
+    SELECT 
+        customerReturns.c_customer_id,
+        customerReturns.return_count - COALESCE(HighValuePurchases.cust_return_contribution, 0) AS adjusted_return_count
+    FROM 
+        CustomerReturns customerReturns
+    LEFT JOIN (
+        SELECT 
+            c.c_customer_id,
+            COUNT(DISTINCT sr.ticket_number) AS cust_return_contribution
+        FROM 
+            customer c
+        JOIN 
+            store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+        WHERE 
+            EXISTS (
+                SELECT 1 
+                FROM HighValueCustomers hvc 
+                WHERE hvc.customer_count > 10 AND c.c_current_cdemo_sk = hvc.cd_gender
+            )
+        GROUP BY 
+            c.c_customer_id
+    ) HighValuePurchases ON customerReturns.c_customer_id = HighValuePurchases.c_customer_id
+)
+SELECT 
+    sa.warehouse_id,
+    sa.total_sales,
+    ar.c_customer_id,
+    ar.adjusted_return_count
+FROM 
+    SalesAnalysis sa
+JOIN 
+    AdjustedReturns ar ON sa.warehouse_id = ar.c_customer_id
+WHERE 
+    sa.total_sales > (SELECT AVG(total_sales) FROM SalesAnalysis)
+ORDER BY 
+    sa.total_sales DESC, 
+    ar.adjusted_return_count ASC
+LIMIT 100;

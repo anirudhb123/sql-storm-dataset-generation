@@ -1,0 +1,66 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        SUM(ss_quantity) AS total_quantity
+    FROM store_sales
+    GROUP BY ss_store_sk, ss_item_sk
+    
+    UNION ALL
+    
+    SELECT 
+        sh.ss_store_sk,
+        sh.ss_item_sk,
+        sh.total_quantity + sh2.total_quantity
+    FROM sales_hierarchy sh
+    JOIN store_sales sh2 ON sh.ss_store_sk = sh2.ss_store_sk AND sh.ss_item_sk = sh2.ss_item_sk
+    WHERE sh.total_quantity < (SELECT AVG(ss_quantity) FROM store_sales)
+),
+ranked_sales AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        total_quantity,
+        RANK() OVER (PARTITION BY ss_store_sk ORDER BY total_quantity DESC) AS rank
+    FROM sales_hierarchy
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cu.cd_income_band_sk,
+        COALESCE(CAST(SUM(ws_ext_sales_price) AS DECIMAL(10, 2)), 0) AS total_sales,
+        CASE 
+            WHEN cd.cd_credit_rating IS NULL THEN 'Unknown'
+            ELSE cd.cd_credit_rating
+        END AS credit_rating
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN household_demographics cu ON c.c_current_hdemo_sk = cu.hd_demo_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cu.cd_income_band_sk, cd.cd_credit_rating
+)
+SELECT 
+    cu.c_first_name,
+    cu.c_last_name,
+    cu.total_sales,
+    r.ss_item_sk,
+    r.total_quantity,
+    r.rank
+FROM customer_data cu
+JOIN ranked_sales r ON r.ss_store_sk = (
+    SELECT 
+        s_store_sk 
+    FROM store 
+    WHERE s_country = 'USA' 
+      AND s_number_employees > (
+          SELECT AVG(s_number_employees) FROM store
+      )
+)
+WHERE cu.total_sales > (
+    SELECT AVG(total_sales) FROM customer_data
+)
+ORDER BY cu.total_sales DESC, r.rank ASC
+LIMIT 100;

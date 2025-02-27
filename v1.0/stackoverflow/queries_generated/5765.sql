@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+), 
+
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10 -- Top 10 per post type
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    u.DisplayName AS OwnerDisplayName,
+    t.TagName,
+    b.Name AS BadgeName
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON tp.PostId = u.Id
+LEFT JOIN 
+    PostTags pt ON tp.PostId = pt.PostId
+LEFT JOIN 
+    Tags t ON pt.TagId = t.Id
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+WHERE 
+    b.Class = 1 -- Only Gold badges
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

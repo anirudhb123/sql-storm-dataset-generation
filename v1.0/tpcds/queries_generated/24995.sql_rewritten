@@ -1,0 +1,58 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_list_price,
+        ws.ws_quantity,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_net_profit DESC) AS profit_rank,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_quantity DESC) AS quantity_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2001-01-01') 
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2001-12-31')
+),
+SalesSummary AS (
+    SELECT 
+        rs.web_site_id,
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS total_sales,
+        COUNT(rs.ws_order_number) AS order_count,
+        AVG(rs.ws_sales_price) AS average_price
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.profit_rank <= 5 OR rs.quantity_rank <= 5
+    GROUP BY 
+        rs.web_site_id
+),
+Returns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS total_returns,
+        COUNT(wr_order_number) AS return_count
+    FROM 
+        web_returns
+    WHERE 
+        wr_returned_date_sk > 0 
+    GROUP BY 
+        wr_returning_customer_sk
+)
+SELECT 
+    ss.web_site_id,
+    ss.total_sales,
+    rs.order_count,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    (ss.total_sales - COALESCE(r.total_returns, 0)) AS net_sales
+FROM 
+    SalesSummary ss
+LEFT JOIN 
+    RankedSales rs ON ss.web_site_id = rs.web_site_id
+LEFT JOIN 
+    Returns r ON r.wr_returning_customer_sk = rs.ws_bill_customer_sk
+WHERE 
+    ss.total_sales IS NOT NULL
+    AND (ss.order_count > 10 OR r.return_count IS NULL)
+ORDER BY 
+    net_sales DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

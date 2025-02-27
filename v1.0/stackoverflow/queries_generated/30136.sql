@@ -1,0 +1,43 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        1 AS Depth
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (1, 2, 4) -- Initial Title, Body, and Edit Title
+    UNION ALL
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        r.Depth + 1
+    FROM PostHistory ph
+    INNER JOIN RecursivePostHistory r ON ph.PostId = r.PostId 
+        AND ph.CreationDate > r.CreationDate
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpvoteCount,
+    COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownvoteCount,
+    ROUND(COALESCE(SUM(b.Class), 0) / NULLIF(SUM(CASE WHEN b.Class IS NOT NULL THEN 1 END), 0), 2) AS AvgBadgeClass,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MAX(r.Depth) AS MaxHistoryDepth
+FROM Posts p
+LEFT JOIN Comments c ON p.Id = c.PostId
+LEFT JOIN Votes v ON p.Id = v.PostId
+LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+LEFT JOIN Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+LEFT JOIN RecursivePostHistory r ON p.Id = r.PostId
+WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+GROUP BY p.Id, p.Title
+HAVING COUNT(DISTINCT c.Id) > 5 
+   OR COUNT(DISTINCT v.Id) > 10
+ORDER BY UpvoteCount DESC, MaxHistoryDepth DESC;

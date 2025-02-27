@@ -1,0 +1,86 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        Posts a ON p.ParentId = a.Id
+    WHERE 
+        a.PostTypeId = 1  
+),
+UserReputationStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,  
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,  
+        COUNT(DISTINCT p.Id) AS PostCount  
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TaggedPostStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(
+            CASE 
+                WHEN COALESCE(p.AnswerCount, 0) > 0 THEN CAST(p.Score AS DECIMAL) / p.AnswerCount 
+                ELSE NULL 
+            END
+        ) AS AverageScorePerAnswer
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON POSITION(t.TagName IN p.Tags) > 0  
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    u.DisplayName,
+    u.PostCount,
+    u.UpVotes,
+    u.DownVotes,
+    CASE 
+        WHEN u.UpVotes + u.DownVotes > 0 
+        THEN CAST(u.UpVotes AS DECIMAL) / (u.UpVotes + u.DownVotes) 
+        ELSE NULL 
+    END AS VoteRatio,
+    tp.TagName,
+    tp.PostCount AS TaggedPostCount,
+    tp.TotalViews AS TaggedPostTotalViews,
+    tp.AverageScorePerAnswer
+FROM 
+    UserReputationStats u
+LEFT JOIN 
+    TaggedPostStats tp ON u.PostCount > 0
+WHERE 
+    u.Reputation > 100  
+ORDER BY 
+    u.Reputation DESC, 
+    tp.PostCount DESC
+LIMIT 100;

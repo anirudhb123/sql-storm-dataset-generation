@@ -1,0 +1,57 @@
+WITH SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        AVG(ws_net_paid_inc_tax) AS avg_order_value,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2459580 AND 2459900  
+    GROUP BY 
+        ws_item_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        COUNT(DISTINCT c_customer_sk) AS customer_count,
+        SUM(total_sales) AS total_revenue
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        SalesData sd ON sd.ws_item_sk = c.c_current_addr_sk
+    GROUP BY 
+        cd_demo_sk, cd_gender, cd_marital_status
+),
+Promotions AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT ws.order_number) AS promo_orders,
+        SUM(ws.ws_net_paid) AS promo_revenue
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON ws.ws_promo_sk = p.p_promo_sk
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.customer_count,
+    cd.total_revenue,
+    p.promo_orders,
+    p.promo_revenue
+FROM 
+    CustomerDemographics cd
+LEFT JOIN 
+    Promotions p ON cd.customer_count = p.promo_orders
+ORDER BY 
+    cd.total_revenue DESC,
+    cd.customer_count DESC
+LIMIT 100;

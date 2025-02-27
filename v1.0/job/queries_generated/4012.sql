@@ -1,0 +1,57 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT pa.name) AS producers,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CASE WHEN i.info_type_id = 1 THEN LENGTH(i.info) END) AS avg_description_length
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id AND mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'producer')
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        movie_info i ON t.id = i.movie_id
+    WHERE 
+        t.production_year > 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+), ranked_movies AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (ORDER BY cast_count DESC, production_year DESC) AS rank
+    FROM 
+        movie_details
+)
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    r.producers,
+    r.cast_count,
+    r.avg_description_length,
+    COALESCE(r.rank, 0) AS movie_rank
+FROM 
+    ranked_movies r
+WHERE 
+    r.cast_count > 0
+ORDER BY 
+    r.rank
+LIMIT 10
+UNION ALL
+SELECT 
+    NULL AS movie_id,
+    'Total Movies Above Threshold' AS title,
+    NULL AS production_year,
+    NULL AS producers,
+    COUNT(*) AS cast_count,
+    NULL AS avg_description_length,
+    NULL AS movie_rank
+FROM 
+    ranked_movies
+WHERE 
+    cast_count > 0;

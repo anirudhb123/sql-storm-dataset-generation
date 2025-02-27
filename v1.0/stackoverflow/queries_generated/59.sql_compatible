@@ -1,0 +1,69 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 0
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN V.Id IS NOT NULL THEN 1 END) AS VoteCount,
+        AVG(P.Score) OVER (PARTITION BY P.OwnerUserId) AS AvgScore
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId 
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+    GROUP BY 
+        P.Id, P.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        R.DisplayName,
+        R.Reputation,
+        COALESCE(SUM(PA.CommentCount), 0) AS TotalComments,
+        COALESCE(SUM(PA.VoteCount), 0) AS TotalVotes,
+        COALESCE(AVG(PA.AvgScore), 0) AS AvgPostScore
+    FROM 
+        UserReputation R
+    LEFT JOIN 
+        PostActivity PA ON R.UserId = PA.OwnerUserId
+    GROUP BY 
+        R.DisplayName, R.Reputation
+    HAVING 
+        COUNT(PA.PostId) > 5
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.TotalComments,
+    U.TotalVotes,
+    U.AvgPostScore,
+    P.Title,
+    P.CreationDate,
+    'Rank: ' || U.ReputationRank AS UserRank,
+    CASE 
+        WHEN P.ClosedDate IS NULL THEN 'Open'
+        ELSE 'Closed'
+    END AS PostStatus
+FROM 
+    TopUsers U
+LEFT JOIN 
+    Posts P ON U.DisplayName = P.OwnerDisplayName
+WHERE 
+    P.CreationDate < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+ORDER BY 
+    U.Reputation DESC, 
+    P.CreationDate DESC
+LIMIT 10;

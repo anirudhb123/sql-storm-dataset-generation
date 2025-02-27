@@ -1,0 +1,61 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AvgScore,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.DisplayName,
+        ub.BadgeCount,
+        ps.PostCount,
+        ps.TotalViews,
+        ps.AvgScore,
+        ps.LastPostDate,
+        RANK() OVER (ORDER BY ps.TotalViews DESC) AS RankByViews,
+        RANK() OVER (ORDER BY ps.PostCount DESC) AS RankByPosts
+    FROM Users u
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN PostStats ps ON u.Id = ps.OwnerUserId
+    WHERE u.Reputation > 500
+)
+SELECT 
+    tu.DisplayName,
+    COALESCE(tu.BadgeCount, 0) AS BadgeCount,
+    COALESCE(tu.PostCount, 0) AS PostCount,
+    COALESCE(tu.TotalViews, 0) AS TotalViews,
+    COALESCE(tu.AvgScore, 0) AS AvgScore,
+    tu.LastPostDate,
+    CASE 
+        WHEN tu.RankByViews IS NULL THEN 'No Posts'
+        ELSE CAST(tu.RankByViews AS VARCHAR)
+    END AS ViewsRank,
+    CASE 
+        WHEN tu.RankByPosts IS NULL THEN 'No Posts'
+        ELSE CAST(tu.RankByPosts AS VARCHAR)
+    END AS PostsRank
+FROM TopUsers tu
+FULL OUTER JOIN (
+    SELECT DISTINCT 
+        UserId, 
+        LastAccessDate 
+    FROM Users 
+    WHERE LastAccessDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+) inactive_users ON tu.DisplayName = inactive_users.UserId
+WHERE (tu.RankByViews <= 10 OR tu.RankByPosts <= 10)
+ORDER BY tu.LastPostDate DESC NULLS LAST;

@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(*) AS BadgeCount,
+        MAX(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadge, 
+        MAX(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadge,
+        MAX(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadge
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+QuestionsWithLinks AS (
+    SELECT 
+        p.Id AS QuestionID,
+        COUNT(pl.RelatedPostId) AS LinkCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostID,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CommentCount,
+    ub.BadgeCount,
+    CASE 
+        WHEN ub.GoldBadge = 1 THEN 'Gold'
+        WHEN ub.SilverBadge = 1 THEN 'Silver'
+        WHEN ub.BronzeBadge = 1 THEN 'Bronze'
+        ELSE 'No Badge'
+    END AS MostPrestigiousBadge,
+    qwl.LinkCount,
+    CASE 
+        WHEN rp.ViewCount IS NULL THEN 'No Views'
+        WHEN rp.ViewCount < 10 THEN 'Few Views'
+        ELSE 'Popular'
+    END AS PopularityStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN 
+    QuestionsWithLinks qwl ON rp.PostID = qwl.QuestionID
+WHERE 
+    rp.rn = 1 
+    AND (ub.BadgeCount > 0 OR qwl.LinkCount > 5) 
+ORDER BY 
+    rp.Score DESC,
+    rp.ViewCount DESC;

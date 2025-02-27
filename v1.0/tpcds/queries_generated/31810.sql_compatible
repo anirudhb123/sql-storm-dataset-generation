@@ -1,0 +1,60 @@
+
+WITH RECURSIVE MonthlySales AS (
+    SELECT 
+        d.d_year AS Year,
+        d.d_month_seq AS Month,
+        SUM(ss.ss_net_paid) AS TotalSales
+    FROM 
+        date_dim d
+    JOIN 
+        store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq
+    UNION ALL
+    SELECT 
+        Year,
+        Month + 1,
+        SUM(ss.ss_net_paid)
+    FROM 
+        date_dim d
+    JOIN 
+        store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    WHERE 
+        Month < 12
+    GROUP BY 
+        Year, Month
+)
+SELECT 
+    ca.city AS City, 
+    SUM(ws.ws_net_paid) AS TotalWebSales,
+    COALESCE(SUM(ss.ss_net_paid_inc_tax), 0) AS TotalStoreSales,
+    AVG(cd.cd_purchase_estimate) AS AvgPurchaseEstimate,
+    MAX(ib.ib_upper_bound) AS MaxIncomeBand,
+    STRING_AGG(DISTINCT CONCAT(c.c_first_name, ' ', c.c_last_name), '; ') AS Customers
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+LEFT JOIN 
+    income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+LEFT JOIN 
+    MonthlySales ms ON ms.Year = 2023 AND ms.Month = 9
+WHERE 
+    ca.ca_state = 'CA' 
+    AND (cd.cd_marital_status = 'M' OR cd.cd_gender = 'F')
+GROUP BY 
+    ca.city,
+    cd.cd_purchase_estimate,
+    ib.ib_upper_bound
+HAVING 
+    SUM(ws.ws_net_paid) + COALESCE(SUM(ss.ss_net_paid_inc_tax), 0) > 1000
+ORDER BY 
+    TotalWebSales DESC, TotalStoreSales DESC;

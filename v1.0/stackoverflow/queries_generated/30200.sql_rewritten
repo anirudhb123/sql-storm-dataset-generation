@@ -1,0 +1,75 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        1 AS Level
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation >= 1000  
+    
+    UNION ALL
+    
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        UR.Level + 1
+    FROM 
+        Users U
+    INNER JOIN 
+        UserReputationCTE UR ON U.Reputation >= UR.Reputation
+    WHERE 
+        U.Id != UR.UserId  
+),
+TaggedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        T.TagName,
+        P.CreationDate
+    FROM 
+        Posts P
+    JOIN 
+        Tags T ON POSITION(T.TagName IN P.Tags) > 0 
+    WHERE 
+        P.PostTypeId = 1 
+),
+PostVoteSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(SUM(PVS.UpVotes - PVS.DownVotes), 0) AS NetVotes,
+    COUNT(DISTINCT TP.PostId) AS TaggedPostCount,
+    AVG(COALESCE(PVS.UpVotes - PVS.DownVotes, 0)) AS AveragePostScore,
+    COUNT(DISTINCT U2.Id) AS HigherReputationCount
+FROM 
+    Users U
+LEFT JOIN 
+    TaggedPosts TP ON U.Id = TP.PostId
+LEFT JOIN 
+    PostVoteSummary PVS ON TP.PostId = PVS.PostId
+LEFT JOIN 
+    Users U2 ON U2.Reputation > U.Reputation 
+WHERE 
+    U.Reputation > (SELECT AVG(Reputation) FROM Users) 
+GROUP BY 
+    U.Id
+HAVING 
+    SUM(PVS.UpVotes - PVS.DownVotes) > 0 
+ORDER BY 
+    NetVotes DESC, U.DisplayName
+LIMIT 10;

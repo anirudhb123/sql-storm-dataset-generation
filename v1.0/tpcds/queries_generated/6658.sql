@@ -1,0 +1,57 @@
+
+WITH sales_summary AS (
+    SELECT 
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_net_profit) AS total_net_profit,
+        COUNT(DISTINCT cs_order_number) AS order_count
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk BETWEEN 20220101 AND 20221231
+    GROUP BY 
+        cs_item_sk
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        MAX(cd_demo_sk) AS max_demo_sk,
+        SUM(CASE WHEN cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+        SUM(CASE WHEN cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count,
+        COUNT(DISTINCT c.c_customer_id) AS unique_customers
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+date_summary AS (
+    SELECT 
+        d.d_year AS year,
+        COUNT(ws_order_number) AS total_web_sales,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year
+)
+SELECT 
+    ds.year,
+    ds.total_web_sales,
+    ds.total_net_profit,
+    ss.total_quantity,
+    ss.total_net_profit,
+    cs.male_count,
+    cs.female_count,
+    cs.unique_customers
+FROM 
+    date_summary ds
+LEFT JOIN 
+    sales_summary ss ON ss.cs_item_sk IN (SELECT cs_item_sk FROM catalog_sales WHERE cs_order_number IN (SELECT ws_order_number FROM web_sales WHERE ws_ship_date_sk = ds.year))
+LEFT JOIN 
+    customer_summary cs ON cs.c_customer_sk IN (SELECT DISTINCT ws_bill_customer_sk FROM web_sales WHERE ws_ship_date_sk = ds.year)
+ORDER BY 
+    ds.year DESC;

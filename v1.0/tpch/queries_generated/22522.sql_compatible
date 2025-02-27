@@ -1,0 +1,65 @@
+
+WITH Ranked_Suppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+Recent_Orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        c.c_nationkey
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '6 months'
+),
+Top_Parts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON l.l_partkey = p.p_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+SELECT 
+    r.reg_name,
+    tp.p_name,
+    CASE 
+        WHEN rp.rnk IS NULL THEN 'No Suppliers'
+        ELSE rp.s_name 
+    END AS Top_Supplier,
+    COALESCE(tp.revenue, 0) AS Part_Revenue,
+    COUNT(ro.o_orderkey) AS Recent_Orders_Count
+FROM 
+    (SELECT DISTINCT n.n_regionkey, r.r_name AS reg_name 
+     FROM region r 
+     LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey) AS r
+LEFT JOIN 
+    Ranked_Suppliers rp ON rp.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps) 
+LEFT JOIN 
+    Top_Parts tp ON tp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = rp.s_suppkey)
+LEFT JOIN 
+    Recent_Orders ro ON ro.c_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = rp.s_suppkey) 
+WHERE 
+    r.reg_name LIKE 'Eu%' OR (tp.revenue IS NULL AND rp.rnk IS NOT NULL)
+GROUP BY 
+    r.reg_name, tp.p_name, rp.s_name, rp.rnk
+ORDER BY 
+    r.reg_name, Part_Revenue DESC
+LIMIT 150;

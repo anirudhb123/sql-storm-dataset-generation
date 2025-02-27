@@ -1,0 +1,63 @@
+WITH ranked_movies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS all_aka_names,
+        STRING_AGG(DISTINCT keyword.keyword, ', ') AS all_keywords
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = mt.movie_id
+    LEFT JOIN 
+        keyword ON keyword.id = mk.keyword_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+filtered_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.total_cast,
+        rm.all_aka_names,
+        rm.all_keywords,
+        RANK() OVER (ORDER BY rm.total_cast DESC) AS rank_total_cast
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.production_year >= 2000 AND 
+        rm.total_cast > 5
+),
+final_output AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        fm.total_cast,
+        fm.all_aka_names,
+        fm.all_keywords,
+        ct.kind AS company_type,
+        cn.name AS company_name
+    FROM 
+        filtered_movies fm
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = fm.movie_id
+    LEFT JOIN 
+        company_name cn ON cn.id = mc.company_id
+    LEFT JOIN 
+        company_type ct ON ct.id = mc.company_type_id
+    WHERE 
+        cn.country_code = 'USA'
+)
+SELECT 
+    *
+FROM 
+    final_output
+ORDER BY 
+    rank_total_cast, production_year DESC;

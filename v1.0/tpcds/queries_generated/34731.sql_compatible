@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.warehouse_sk, 
+        ws_orders.ws_item_sk, 
+        SUM(ws.ws_quantity) AS total_sales, 
+        DENSE_RANK() OVER (PARTITION BY ws.warehouse_sk ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales ws 
+    JOIN 
+        warehouse ws_orders ON ws.ws_warehouse_sk = ws_orders.warehouse_sk
+    GROUP BY 
+        ws.warehouse_sk, ws_orders.ws_item_sk
+), 
+CustomerReturns AS (
+    SELECT 
+        sr.return_ticket_number,
+        COUNT(sr.return_quantity) AS total_returns,
+        SUM(sr.return_amt) AS return_amount
+    FROM 
+        store_returns sr 
+    GROUP BY 
+        sr.return_ticket_number
+), 
+SalesWithReturns AS (
+    SELECT 
+        s.warehouse_sk, 
+        s.ws_item_sk, 
+        s.total_sales,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.return_amount, 0) AS return_amount,
+        (s.total_sales - COALESCE(cr.return_amount, 0)) AS net_sales
+    FROM 
+        SalesCTE s 
+    LEFT JOIN 
+        CustomerReturns cr ON s.ws_item_sk = cr.return_ticket_number
+)
+SELECT 
+    w.warehouse_name,
+    MIN(sw.net_sales) AS min_net_sales,
+    MAX(sw.net_sales) AS max_net_sales,
+    AVG(sw.net_sales) AS avg_net_sales,
+    COUNT(DISTINCT sw.ws_item_sk) AS total_unique_items,
+    STRING_AGG(DISTINCT p.promo_name, ', ') AS promotions_used
+FROM 
+    SalesWithReturns sw
+JOIN 
+    warehouse w ON sw.warehouse_sk = w.warehouse_sk
+LEFT JOIN 
+    promotion p ON sw.ws_item_sk = p.p_item_sk
+WHERE 
+    sw.net_sales > 0
+GROUP BY 
+    w.warehouse_name
+HAVING 
+    AVG(sw.net_sales) > (SELECT AVG(sw2.net_sales) FROM SalesWithReturns sw2)
+ORDER BY 
+    w.warehouse_name;

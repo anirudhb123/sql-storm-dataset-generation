@@ -1,0 +1,46 @@
+
+WITH sales_summary AS (
+    SELECT 
+        w.w_warehouse_name, 
+        i.i_item_desc, 
+        SUM(ss.ss_quantity) AS total_quantity_sold, 
+        SUM(ss.ss_sales_price) AS total_sales,
+        AVG(ss.ss_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions
+    FROM 
+        store_sales ss
+    JOIN 
+        warehouse w ON ss.ss_store_sk = w.w_warehouse_sk
+    JOIN 
+        item i ON ss.ss_item_sk = i.i_item_sk
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2022) - 30 AND
+                                    (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2022)
+    GROUP BY 
+        w.w_warehouse_name, i.i_item_desc
+),
+ranked_sales AS (
+    SELECT 
+        warehouse_name,
+        item_desc,
+        total_quantity_sold,
+        total_sales,
+        avg_net_profit,
+        total_transactions,
+        RANK() OVER (PARTITION BY warehouse_name ORDER BY total_sales DESC) AS rank
+    FROM 
+        sales_summary
+)
+SELECT 
+    warehouse_name, 
+    item_desc, 
+    total_quantity_sold, 
+    total_sales, 
+    avg_net_profit, 
+    total_transactions
+FROM 
+    ranked_sales
+WHERE 
+    rank <= 5
+ORDER BY 
+    warehouse_name, total_sales DESC;

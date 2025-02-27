@@ -1,0 +1,59 @@
+WITH RECURSIVE PopularParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(l.l_quantity) AS total_quantity
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey
+    HAVING 
+        SUM(l.l_quantity) > 1000
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        COUNT(ps.ps_availqty) AS available_parts
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+NationSummary AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    p.p_name,
+    s.s_name AS supplier_name,
+    ns.n_name AS nation_name,
+    ps.available_parts,
+    p.total_quantity,
+    ROUND(COALESCE(ps.available_parts * p.p_retailprice, 0), 2) AS total_value,
+    ROW_NUMBER() OVER (PARTITION BY ns.n_name ORDER BY total_sales DESC) AS rank_within_nation
+FROM 
+    PopularParts p
+JOIN 
+    SupplierInfo ps ON p.p_partkey = ps.s_suppkey
+JOIN 
+    NationSummary ns ON ns.total_sales > 5000
+ORDER BY 
+    total_value DESC
+LIMIT 10;

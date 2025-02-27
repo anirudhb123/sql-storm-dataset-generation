@@ -1,0 +1,49 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(co.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments co ON p.Id = co.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId, Title, CreationDate, ViewCount, OwnerDisplayName, CommentCount, UpVotes, DownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    COALESCE((
+        SELECT STRING_AGG(t.TagName, ', ')
+        FROM Tags t
+        JOIN Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+        WHERE p.Id = tp.PostId
+    ), 'No Tags') AS Tags
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.ViewCount DESC;

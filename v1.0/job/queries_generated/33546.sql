@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(e.title, 'Original') AS episode_of,
+        1 AS level
+    FROM 
+        title m
+    LEFT JOIN 
+        title e ON m.episode_of_id = e.id
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(e.title, 'Original') AS episode_of,
+        mh.level + 1 AS level
+    FROM 
+        title m
+    JOIN 
+        movie_hierarchy mh ON m.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mk.keyword AS movie_keyword,
+    th.title AS title,
+    th.production_year,
+    th.episode_of,
+    COUNT(DISTINCT cc.movie_id) AS total_movies,
+    AVG((EXTRACT(YEAR FROM CURRENT_DATE) - th.production_year)) AS average_year_diff
+FROM 
+    aka_name ak
+INNER JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+INNER JOIN 
+    complete_cast cc ON ci.movie_id = cc.movie_id
+INNER JOIN 
+    movie_keyword mk ON cc.movie_id = mk.movie_id
+INNER JOIN 
+    movie_hierarchy th ON cc.movie_id = th.movie_id
+WHERE 
+    ak.name IS NOT NULL 
+    AND ak.name != ''
+    AND mk.keyword IS NOT NULL 
+    AND mk.keyword != ''
+    AND th.production_year > 1990
+GROUP BY 
+    ak.name, mk.keyword, th.title, th.production_year, th.episode_of
+ORDER BY 
+    COUNT(DISTINCT cc.movie_id) DESC,
+    average_year_diff ASC
+FETCH FIRST 10 ROWS ONLY;

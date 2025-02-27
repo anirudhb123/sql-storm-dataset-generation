@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate, 
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.PostTypeId IN (1, 2)  -- Only include Questions and Answers
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.ViewCount
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.Score, 
+        rp.CreationDate, 
+        rp.ViewCount, 
+        rp.CommentCount, 
+        rp.UpVotes, 
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10  -- Top 10 posts for each PostType
+),
+UsersWithBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+FinalResults AS (
+    SELECT 
+        tp.Title, 
+        tp.Score, 
+        tp.CreationDate, 
+        tp.ViewCount, 
+        tp.CommentCount, 
+        uwb.UserId, 
+        uwb.BadgeCount
+    FROM 
+        TopPosts tp
+    JOIN 
+        Users u ON u.Id = tp.OwnerUserId
+    JOIN 
+        UsersWithBadges uwb ON u.Id = uwb.UserId
+)
+SELECT 
+    Title, 
+    Score, 
+    CreationDate, 
+    ViewCount, 
+    CommentCount, 
+    BadgeCount
+FROM 
+    FinalResults
+ORDER BY 
+    Score DESC, CreationDate DESC;

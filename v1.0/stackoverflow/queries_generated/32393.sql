@@ -1,0 +1,88 @@
+WITH RecursivePostAnswer AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(a.Id, -1) AS AcceptedAnswerId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        1 AS Level
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        Level + 1
+    FROM 
+        Posts p 
+    JOIN 
+        RecursivePostAnswer r ON p.ParentId = r.PostId -- Recursive join to find answers
+),
+UserVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVoteCount, -- Count of upvotes
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVoteCount -- Count of downvotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostRanked AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.AcceptedAnswerId,
+        r.OwnerUserId,
+        r.CreationDate,
+        r.Score,
+        r.ViewCount,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY r.OwnerUserId ORDER BY r.Score DESC, r.ViewCount DESC) AS Rank
+    FROM 
+        RecursivePostAnswer r
+    LEFT JOIN 
+        PostComments pc ON r.PostId = pc.PostId
+)
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    COUNT(DISTINCT pr.PostId) AS TotalPosts,
+    SUM(pr.Score) AS TotalScore,
+    SUM(pr.CommentCount) AS TotalComments,
+    COALESCE(SUM(uv.UpVoteCount), 0) AS TotalUpVotes,
+    COALESCE(SUM(uv.DownVoteCount), 0) AS TotalDownVotes,
+    MAX(pr.Rank) AS MaxRank
+FROM 
+    Users u
+LEFT JOIN 
+    PostRanked pr ON u.Id = pr.OwnerUserId
+LEFT JOIN 
+    UserVotes uv ON u.Id = uv.UserId
+WHERE 
+    u.Reputation > 1000 -- Only include users with a reputation greater than 1000
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT pr.PostId) > 5 -- Select users with more than 5 posts
+ORDER BY 
+    TotalScore DESC, TotalComments DESC;

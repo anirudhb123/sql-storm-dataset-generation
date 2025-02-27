@@ -1,0 +1,71 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+),
+top_items AS (
+    SELECT
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(rs.total_quantity, 0) AS total_quantity,
+        COALESCE(rs.total_sales, 0) AS total_sales
+    FROM
+        item i
+    LEFT JOIN ranked_sales rs ON i.i_item_sk = rs.ws_item_sk
+    WHERE
+        rs.sales_rank <= 10
+),
+customer_info AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT
+        ci.c_customer_id,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        SUM(ws.ws_net_paid) AS total_net_paid
+    FROM
+        web_sales ws
+    JOIN customer_info ci ON ws.ws_bill_customer_sk = ci.c_customer_sk
+    GROUP BY
+        ci.c_customer_id,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status
+)
+SELECT
+    t.i_item_id,
+    t.i_item_desc,
+    t.total_quantity,
+    t.total_sales,
+    s.total_net_paid,
+    CASE 
+        WHEN s.total_net_paid IS NULL THEN 'No Sales'
+        ELSE 'Sales Present'
+    END AS sales_status
+FROM
+    top_items t
+FULL OUTER JOIN sales_summary s ON t.total_quantity > 0 AND s.total_net_paid > 1000
+WHERE
+    (t.total_sales BETWEEN 100 AND 1000 OR t.total_quantity < 10)
+ORDER BY
+    t.total_sales DESC,
+    s.total_net_paid ASC;

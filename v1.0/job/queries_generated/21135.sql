@@ -1,0 +1,78 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER(PARTITION BY t.production_year ORDER BY t.title) AS rn,
+        COUNT(*) OVER(PARTITION BY t.production_year) AS total_titles
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopTitles AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        CASE 
+            WHEN rt.rn = 1 THEN 'First Title'
+            ELSE 'Other Title'
+        END AS title_category
+    FROM 
+        RankedTitles rt
+    WHERE 
+        rt.rn <= (SELECT MAX(total_titles) FROM RankedTitles) / 2
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(cn.name) AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+CastInfo AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS unique_actors,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS actors_with_notes
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+TitleKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    tt.title,
+    tt.production_year,
+    COALESCE(ca.unique_actors, 0) AS unique_actors,
+    COALESCE(ca.actors_with_notes, 0) AS actors_with_notes,
+    COALESCE(mc.company_names, 'No Companies') AS company_names,
+    COALESCE(tk.keywords, 'No Keywords') AS keywords
+FROM 
+    TopTitles tt
+LEFT JOIN 
+    CastInfo ca ON tt.title_id = ca.movie_id
+LEFT JOIN 
+    MovieCompanies mc ON tt.title_id = mc.movie_id
+LEFT JOIN 
+    TitleKeywords tk ON tt.title_id = tk.movie_id
+WHERE 
+    tt.title LIKE '%Action%' -- Filtering on titles containing the string 'Action'
+    OR tt.production_year IN (SELECT DISTINCT production_year FROM RankedTitles WHERE production_year >= 2000)
+ORDER BY 
+    tt.production_year DESC, tt.title;

@@ -1,0 +1,60 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        1 AS RecursionLevel
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)  -- Only interested in closed, reopened, or deleted posts
+
+    UNION ALL
+
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        r.RecursionLevel + 1
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        RecursivePostHistory r ON ph.PostId = r.PostId
+    WHERE 
+        ph.CreationDate < r.CreationDate  -- Get older history
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    CONCAT('https://example.com/users/', u.Id) AS UserProfileLink,
+    p.Title AS PostTitle,
+    pt.Name AS PostType,
+    COUNT(DISTINCT ph.UserId) AS DistinctEditors,
+    SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+    SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenCount,
+    MAX(ph.CreationDate) AS LastEdited,
+    ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS EditRank
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3)  -- Only upvotes and downvotes
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '1 year'  -- Posts created in the last year
+GROUP BY 
+    u.DisplayName, p.Title, pt.Name
+HAVING 
+    COUNT(DISTINCT ph.UserId) > 1  -- Only posts edited by more than one user
+ORDER BY 
+    DistinctEditors DESC, LastEdited DESC;

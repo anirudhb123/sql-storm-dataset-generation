@@ -1,0 +1,84 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' 
+        AND o.o_totalprice > (
+            SELECT AVG(o2.o_totalprice) 
+            FROM orders o2 
+            WHERE o2.o_orderstatus = o.o_orderstatus
+        )
+), 
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS parts_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        r.r_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'Unknown Balance' 
+            ELSE 'Known Balance' 
+        END AS balance_status
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    cr.c_name,
+    cr.r_name,
+    COALESCE(so.total_cost, 0) AS supplier_total_cost,
+    o.o_orderkey,
+    o.o_totalprice,
+    o.o_orderstatus,
+    CASE 
+        WHEN o.o_orderstatus = 'F' THEN 'Completed'
+        WHEN o.o_orderstatus IS NULL THEN 'Status Indeterminate'
+        ELSE 'Pending'
+    END AS interpreted_status
+FROM 
+    CustomerRegion cr
+LEFT JOIN 
+    RankedOrders o ON cr.c_custkey = (
+        SELECT o2.o_custkey 
+        FROM orders o2 
+        WHERE o2.o_orderkey = 
+            (SELECT o3.o_orderkey 
+             FROM RankedOrders o3 
+             WHERE o3.rn = 1 LIMIT 1)
+    )
+LEFT JOIN 
+    SupplierInfo so ON so.parts_count > (
+        SELECT COUNT(ps.ps_partkey) 
+        FROM partsupp ps 
+        WHERE ps.ps_suppkey = so.s_suppkey AND ps.ps_availqty >= (
+            SELECT AVG(ps2.ps_availqty) 
+            FROM partsupp ps2 
+            WHERE ps2.ps_partkey = ps.ps_partkey
+        )
+    )
+WHERE 
+    cr.balance_status = 'Known Balance'
+ORDER BY 
+    cr.c_name, o.o_orderdate DESC;

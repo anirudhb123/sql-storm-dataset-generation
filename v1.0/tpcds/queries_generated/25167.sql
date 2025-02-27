@@ -1,0 +1,57 @@
+
+WITH CustomerAddress AS (
+    SELECT 
+        ca_city, 
+        ca_state,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        LENGTH(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS address_length
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        cd.cd_dep_employed_count,
+        cd.cd_dep_college_count,
+        CONCAT(TRIM(c.c_first_name), ' ', TRIM(c.c_last_name)) AS full_name,
+        LENGTH(CONCAT(TRIM(c.c_first_name), ' ', TRIM(c.c_last_name))) AS name_length
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+CityStats AS (
+    SELECT 
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        AVG(address_length) AS average_address_length
+    FROM 
+        CustomerAddress ca
+    JOIN 
+        CustomerDetails c ON c.c_customer_id IS NOT NULL
+    GROUP BY 
+        ca.ca_city, ca.ca_state
+)
+SELECT 
+    c.ca_city,
+    c.ca_state,
+    c.customer_count,
+    ROUND(c.avg_purchase_estimate, 2) AS avg_purchase_estimate,
+    ROUND(c.average_address_length, 2) AS avg_address_length,
+    RANK() OVER (ORDER BY c.customer_count DESC) AS city_rank
+FROM 
+    CityStats c
+WHERE 
+    c.customer_count > 10
+ORDER BY 
+    c.customer_count DESC, c.ca_city;

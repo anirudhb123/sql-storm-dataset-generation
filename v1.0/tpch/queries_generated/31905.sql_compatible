@@ -1,0 +1,43 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderstatus = 'O' AND oh.level < 5
+),
+SupplierSummary AS (
+    SELECT ps.ps_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_suppkey
+),
+CustomerRanked AS (
+    SELECT c.c_custkey, c.c_name, RANK() OVER (ORDER BY c.c_acctbal DESC) AS rnk
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+)
+SELECT 
+    oh.o_orderkey,
+    oh.o_orderdate,
+    oh.o_totalprice,
+    COALESCE(ss.total_cost, 0) AS supplier_total_cost,
+    cr.c_name,
+    cr.rnk
+FROM OrderHierarchy oh
+LEFT JOIN SupplierSummary ss ON ss.ps_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+        WHERE l.l_orderkey = oh.o_orderkey 
+        LIMIT 1
+    )
+LEFT JOIN CustomerRanked cr ON cr.c_custkey = oh.o_custkey
+WHERE oh.o_totalprice > (SELECT AVG(oh2.o_totalprice) FROM OrderHierarchy oh2)
+AND cr.rnk <= 10
+ORDER BY oh.o_orderdate DESC, ss.total_cost DESC;

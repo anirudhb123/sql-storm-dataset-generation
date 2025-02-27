@@ -1,0 +1,56 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(P.Score) AS TotalPostScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PopularTags AS (
+    SELECT 
+        TRIM(T.TagName) AS TagName,
+        COUNT(P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE CONCAT('%<', T.TagName, '>%')
+    GROUP BY T.TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+),
+TopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        P.LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Ranking
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.PostTypeId IN (1, 2) -- Question and Answer
+)
+SELECT 
+    US.DisplayName AS UserName,
+    US.Reputation,
+    US.PostCount,
+    US.TotalPostScore,
+    PT.TagName,
+    TP.Title AS TopPostTitle,
+    TP.Score AS TopPostScore,
+    TP.CreationDate AS PostCreationDate,
+    TP.LastActivityDate AS PostLastActivityDate
+FROM UserStats US
+CROSS JOIN PopularTags PT
+LEFT JOIN TopPosts TP ON TP.Ranking <= 5
+WHERE US.Reputation > 1000
+ORDER BY US.Reputation DESC, PT.PostCount DESC, TP.Score DESC;

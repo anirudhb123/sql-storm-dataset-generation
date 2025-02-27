@@ -1,0 +1,83 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        NULL::INTEGER AS parent_movie_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id,
+        mt.title,
+        mh.movie_id,
+        mh.level + 1
+    FROM 
+        aka_title mt
+        JOIN MovieHierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        COALESCE(kw.keyword, 'No Keyword') AS keyword,
+        COUNT(c.id) AS cast_count,
+        AVG(CASE WHEN p.gender = 'F' THEN 1.0 ELSE 0.0 END) AS female_ratio,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aliases
+    FROM 
+        aka_title m
+        LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+        LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+        LEFT JOIN cast_info c ON m.id = c.movie_id
+        LEFT JOIN aka_name ak ON c.person_id = ak.person_id
+        LEFT JOIN name p ON c.person_id = p.imdb_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+TopMovies AS (
+    SELECT 
+        md.movie_id,
+        md.movie_title,
+        md.production_year,
+        md.keyword,
+        md.cast_count,
+        md.female_ratio,
+        ROW_NUMBER() OVER (PARTITION BY md.keyword ORDER BY md.cast_count DESC) AS ranking
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.production_year >= 2000
+),
+FilteredMovies AS (
+    SELECT 
+        t.movie_title,
+        t.production_year,
+        t.keyword,
+        t.cast_count,
+        t.female_ratio
+    FROM 
+        TopMovies t
+    WHERE 
+        t.ranking <= 5
+)
+SELECT 
+    mh.movie_title AS parent_movie,
+    f.movie_title AS child_movie,
+    f.production_year,
+    f.keyword, 
+    f.cast_count,
+    f.female_ratio
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    MovieHierarchy mh ON f.movie_id = mh.movie_id
+WHERE 
+    mh.level = 1
+ORDER BY 
+    mh.movie_title, f.cast_count DESC;

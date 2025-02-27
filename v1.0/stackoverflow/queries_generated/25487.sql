@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(C.Id) AS CommentCount,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount
+),
+RecentPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CommentCount,
+        Score,
+        ViewCount 
+    FROM 
+        RankedPosts 
+    WHERE 
+        Rank <= 5 -- Get the top 5 posts per user
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10 -- Top 10 tags by post count
+)
+SELECT 
+    RP.Title,
+    RP.CommentCount,
+    RP.Score,
+    RP.ViewCount,
+    B.BadgeCount,
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews
+FROM 
+    RecentPosts RP
+JOIN 
+    Users U ON RP.OwnerUserId = U.Id
+JOIN 
+    UserBadges B ON U.Id = B.UserId
+JOIN 
+    TagStats TS ON RP.Title ILIKE '%' || TS.TagName || '%' -- Assuming title contains the tag name
+ORDER BY 
+    RP.Score DESC, RP.ViewCount DESC;

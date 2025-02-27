@@ -1,0 +1,75 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        MIN(s.s_acctbal) AS min_supplier_balance
+    FROM 
+        partsupp ps
+    INNER JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > (
+            SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_acctbal IS NOT NULL
+        )
+),
+OrderValues AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT co.c_custkey) AS active_customers,
+    SUM(co.total_spent) AS total_revenue,
+    AVG(ov.order_value) AS avg_order_value,
+    SUM(ps.total_available_quantity) AS aggregate_available_quantity,
+    MIN(ps.min_supplier_balance) AS lowest_supplier_balance
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = s.s_suppkey
+LEFT JOIN 
+    OrderValues ov ON ov.o_orderkey = co.total_orders
+WHERE 
+    ps.ps_availqty IS NOT NULL
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT co.c_custkey) > 0
+ORDER BY 
+    total_revenue DESC;

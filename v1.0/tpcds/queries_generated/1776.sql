@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id, 
+        ws.ws_order_number, 
+        SUM(ws.ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2022
+    GROUP BY 
+        ws.web_site_id, ws.ws_order_number
+), 
+CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.return_amt) AS total_return_amount,
+        COUNT(wr.return_order_number) AS total_returns
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        ws.web_site_id,
+        (ws.total_sales - COALESCE(cr.total_return_amount, 0)) AS net_sales,
+        cr.total_returns
+    FROM 
+        RankedSales ws
+    LEFT JOIN 
+        CustomerReturns cr ON ws.ws_order_number = cr.returning_customer_sk
+)
+SELECT 
+    s.warehouse_name,
+    SUM(s.net_sales) AS total_net_sales,
+    COUNT(DISTINCT s.ws_order_number) AS unique_orders,
+    MAX(s.total_returns) AS maximum_returns
+FROM 
+    SalesWithReturns s
+JOIN 
+    warehouse w ON s.web_site_id = w.w_warehouse_id
+GROUP BY 
+    w.warehouse_name
+HAVING 
+    total_net_sales > 10000
+ORDER BY 
+    total_net_sales DESC;

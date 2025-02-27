@@ -1,0 +1,45 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.Level < 3
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM orders o
+),
+RecentLineItems AS (
+    SELECT li.l_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS TotalValue
+    FROM lineitem li
+    WHERE li.l_shipdate >= DATEADD(MONTH, -1, '1998-10-01')
+    GROUP BY li.l_orderkey
+)
+SELECT
+    p.p_partkey,
+    p.p_name,
+    rh.r_name,
+    COUNT(DISTINCT so.o_orderkey) AS OrderCount,
+    COALESCE(SUM(rl.TotalValue), 0) AS RecentTotalValue,
+    CASE
+        WHEN COUNT(DISTINCT so.o_orderkey) > 5 THEN 'High'
+        WHEN COUNT(DISTINCT so.o_orderkey) BETWEEN 3 AND 5 THEN 'Medium'
+        ELSE 'Low'
+    END AS OrderFrequency,
+    RANK() OVER (ORDER BY p.p_retailprice DESC) AS PriceRank
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region rh ON n.n_regionkey = rh.r_regionkey
+LEFT JOIN orders so ON so.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+FULL OUTER JOIN RecentLineItems rl ON so.o_orderkey = rl.l_orderkey
+WHERE p.p_retailprice IS NOT NULL
+GROUP BY p.p_partkey, p.p_name, rh.r_name
+HAVING AVG(ps.ps_supplycost) < (SELECT MIN(ps_supplycost) FROM partsupp)
+   AND COUNT(DISTINCT so.o_orderkey) > 0
+ORDER BY PriceRank, RecentTotalValue DESC;

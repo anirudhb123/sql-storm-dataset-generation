@@ -1,0 +1,65 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount
+    FROM 
+        Tags 
+    JOIN 
+        Posts ON Tags.Id = ANY (string_to_array(Posts.Tags, '>')::int[])
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        RecursiveTagCounts
+),
+UserActivity AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS PostsCreated,
+        COUNT(DISTINCT Comments.Id) AS CommentsMade,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Comments ON Users.Id = Comments.UserId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId AND Votes.UserId <> Users.Id
+    GROUP BY 
+        Users.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostsCreated,
+        CommentsMade,
+        UpVotesReceived - DownVotesReceived AS NetVotes,
+        RANK() OVER (ORDER BY PostsCreated DESC) AS Rank
+    FROM 
+        UserActivity
+)
+SELECT 
+    tu.DisplayName,
+    tu.PostsCreated,
+    tu.CommentsMade,
+    tu.NetVotes,
+    tt.TagName,
+    tt.PostCount
+FROM 
+    TopUsers tu
+JOIN 
+    TopTags tt ON tu.PostsCreated > 0  -- Only include users who created posts
+WHERE 
+    tt.Rank <= 5  -- Get data for top 5 tags
+ORDER BY 
+    tu.NetVotes DESC, 
+    tu.PostsCreated DESC;

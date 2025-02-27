@@ -1,0 +1,81 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AvgPostScore,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(DISTINCT ph.UserId) AS EditCount,
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS Comments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+RankedPosts AS (
+    SELECT 
+        p.Title,
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank,
+        phd.Comments,
+        phd.EditCount,
+        u.DisplayName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistoryDetails phd ON p.Id = phd.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+)
+SELECT 
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.QuestionCount,
+    ups.AnswerCount,
+    ups.TotalViews,
+    ups.AvgPostScore,
+    ups.GoldBadges,
+    ups.SilverBadges,
+    ups.BronzeBadges,
+    rp.Title,
+    rp.PostId,
+    rp.CreationDate,
+    rp.EditCount,
+    rp.Comments,
+    CASE 
+        WHEN rp.RecentPostRank = 1 THEN 'Most Recent Post'
+        WHEN rp.RecentPostRank <= 3 THEN 'Recently Active'
+        ELSE 'Older Post'
+    END AS PostActivityStatus
+FROM 
+    UserPostStats ups
+JOIN 
+    RankedPosts rp ON ups.UserId = rp.OwnerUserId
+WHERE 
+    ups.TotalPosts > 0 AND
+    (ups.TotalViews / NULLIF(ups.TotalPosts, 0)) > 100 
+ORDER BY 
+    ups.TotalPosts DESC, 
+    ups.AvgPostScore DESC;

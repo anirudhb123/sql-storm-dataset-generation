@@ -1,0 +1,78 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN P.ClosedDate IS NOT NULL THEN 1 ELSE 0 END) AS TotalClosed,
+        COALESCE(AVG(P.Score), 0) AS AverageScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS TotalHistoryEntries,
+        MAX(PH.CreationDate) AS LastEdited,
+        ARRAY_AGG(DISTINCT PH.UserDisplayName) AS Editors
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+),
+HighlyActiveUsers AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        UPS.TotalPosts,
+        UPS.TotalQuestions,
+        UPS.TotalAnswers,
+        UPS.TotalClosed,
+        UPS.AverageScore
+    FROM 
+        (SELECT UserId, COUNT(UserId) AS PostCount 
+         FROM Posts 
+         GROUP BY UserId 
+         HAVING COUNT(UserId) > 100) AS U
+    JOIN UserPostStats UPS ON U.UserId = UPS.UserId
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    UPS.TotalPosts,
+    UPS.TotalQuestions,
+    UPS.TotalAnswers,
+    UPS.TotalClosed,
+    UPS.AverageScore,
+    PHS.TotalHistoryEntries,
+    PHS.LastEdited,
+    PHS.Editors,
+    CASE 
+        WHEN UPS.TotalQuestions > 50 THEN 'Frequent Questioner'
+        WHEN UPS.TotalAnswers > 50 THEN 'Frequent Answerer'
+        ELSE 'Occasional Contributor'
+    END AS ContributionType,
+    CASE 
+        WHEN UPS.TotalClosed > 10 THEN 'Contributed to Closed Posts'
+        ELSE 'Active Contributor'
+    END AS ActivityLevel
+FROM 
+    HighlyActiveUsers U
+JOIN 
+    UserPostStats UPS ON U.UserId = UPS.UserId
+LEFT JOIN 
+    PostHistoryStats PHS ON PHS.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.UserId)
+ORDER BY 
+    UPS.TotalPosts DESC, 
+    UPS.AverageScore DESC;
+
+-- Edge cases with NULL handling: 
+-- Count of closed posts for users who have never closed a post will be NULL handled to give a meaningful count.
+-- Detecting frequent contributors versus occasional contributors based on predefined thresholds.
+

@@ -1,0 +1,40 @@
+WITH RECURSIVE RankedSuppliers AS (
+    SELECT s_suppkey, s_name, s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rank
+    FROM supplier
+),
+HighVolumeOrders AS (
+    SELECT o_orderkey, SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+    FROM lineitem
+    WHERE l_shipdate >= '2023-01-01' AND l_shipdate < '2024-01-01'
+    GROUP BY o_orderkey
+    HAVING SUM(l_extendedprice * (1 - l_discount)) > 10000
+),
+FrequentCustomers AS (
+    SELECT c_custkey, COUNT(DISTINCT o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c_custkey
+    HAVING COUNT(DISTINCT o_orderkey) > 5
+),
+SupplierPartDetails AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost, p.p_retailprice,
+           (p.p_retailprice - ps.ps_supplycost) AS profit_margin
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+)
+SELECT rs.s_name AS supplier_name, 
+       p.p_name AS part_name, 
+       spd.profit_margin,
+       COALESCE(f.order_count, 0) AS frequent_customer_count,
+       COALESCE(hv.total_revenue, 0) AS high_volume_revenue
+FROM RankedSuppliers rs
+LEFT JOIN SupplierPartDetails spd ON rs.s_suppkey = spd.ps_suppkey
+LEFT JOIN FrequentCustomers f ON rs.s_nationkey = f.c_custkey
+LEFT JOIN HighVolumeOrders hv ON hv.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+)
+WHERE rs.rank <= 10
+ORDER BY rs.s_acctbal DESC, profit_margin DESC;

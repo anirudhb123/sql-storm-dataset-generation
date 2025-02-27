@@ -1,0 +1,48 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT kc.keyword_id) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT kc.keyword_id) DESC) AS year_rank
+    FROM
+        aka_title AS t
+    LEFT JOIN
+        movie_keyword AS mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword AS kc ON mk.keyword_id = kc.id
+    WHERE
+        t.production_year IS NOT NULL
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+top_titles AS (
+    SELECT
+        title_id,
+        title,
+        production_year,
+        keyword_count
+    FROM
+        ranked_titles
+    WHERE
+        year_rank <= 5
+)
+SELECT 
+    t.title AS Title,
+    t.production_year AS Year,
+    co.name AS Company,
+    c.role AS Cast_Role
+FROM 
+    top_titles AS t
+JOIN 
+    complete_cast AS cc ON t.title_id = cc.movie_id
+JOIN 
+    cast_info AS ci ON cc.subject_id = ci.id
+JOIN 
+    company_name AS co ON ci.movie_id = co.id
+JOIN 
+    role_type AS c ON ci.role_id = c.id
+WHERE 
+    co.country_code = 'USA'
+ORDER BY 
+    t.production_year DESC, keyword_count DESC;

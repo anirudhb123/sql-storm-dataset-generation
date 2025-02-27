@@ -1,0 +1,26 @@
+-- Performance benchmarking SQL query
+EXPLAIN ANALYZE
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) AS VoteCount,
+    MAX(ph.CreationDate) AS LastEditDate
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+WHERE 
+    p.CreationDate >= '2023-01-01' AND p.PostTypeId = 1 -- Questions from 2023
+GROUP BY 
+    p.Id, u.DisplayName
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

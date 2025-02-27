@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        COUNT(v.Id) AS VoteCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, '><')) AS t(TagName) ON TRUE
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Location,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1 AND p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        u.Id
+),
+TopQuestions AS (
+    SELECT 
+        rp.*,
+        au.DisplayName AS OwnerDisplayName,
+        au.Reputation AS OwnerReputation,
+        au.Location AS OwnerLocation,
+        au.QuestionCount,
+        au.TotalViews
+    FROM 
+        RankedPosts rp
+    JOIN 
+        ActiveUsers au ON rp.UserRank <= 5 AND rp.Id = au.UserId 
+)
+
+SELECT 
+    tq.PostId,
+    tq.Title,
+    tq.Body,
+    tq.CreationDate,
+    tq.ViewCount,
+    tq.Score,
+    tq.VoteCount,
+    tq.Tags,
+    tq.OwnerDisplayName,
+    tq.OwnerReputation,
+    tq.OwnerLocation,
+    tq.QuestionCount,
+    tq.TotalViews
+FROM 
+    TopQuestions tq
+ORDER BY 
+    tq.Score DESC, tq.ViewCount DESC
+LIMIT 20;

@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(c.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rn <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        COALESCE(SUM(mo.note IS NOT NULL AND (mo.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%awards%'))), 0) AS award_count
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        complete_cast cc ON tm.title = cc.movie_id
+    LEFT JOIN 
+        aka_name ak ON cc.subject_id = ak.person_id
+    LEFT JOIN 
+        movie_info mo ON tm.title = mo.movie_id
+    GROUP BY 
+        tm.title, tm.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actors,
+    md.award_count,
+    CASE 
+        WHEN md.award_count > 0 THEN 'Award Winning'
+        ELSE 'Not Award Winning' 
+    END AS award_status
+FROM 
+    MovieDetails md
+ORDER BY 
+    md.production_year DESC, md.award_count DESC
+LIMIT 10;

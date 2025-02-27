@@ -1,0 +1,82 @@
+
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        1 AS Level
+    FROM 
+        Tags
+    WHERE 
+        IsModeratorOnly = 0
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        r.Level + 1
+    FROM 
+        Tags t
+    JOIN 
+        RecursiveTagHierarchy r ON t.WikiPostId = r.Id
+), 
+
+PostScore AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId IN (2) THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId IN (3) THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId IN (10) THEN 1 ELSE 0 END) AS DeletedVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY SUM(COALESCE(v.BountyAmount, 0)) DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY 
+        p.Id
+), 
+
+UserRep AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        AVG(ps.TotalBounty) AS AverageBounty,
+        COUNT(ps.PostId) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        PostScore ps ON u.Id = ps.PostId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(rth.TagName, 'No Tags') AS TagName,
+    ROUND(ur.AverageBounty, 2) AS AverageBounty,
+    ur.TotalPosts,
+    CASE 
+        WHEN ur.Reputation > 10000 THEN 'Elite'
+        WHEN ur.Reputation BETWEEN 5000 AND 10000 THEN 'Experienced'
+        ELSE 'Novice'
+    END AS UserLevel
+FROM 
+    Users u
+LEFT JOIN 
+    UserRep ur ON u.Id = ur.UserId
+LEFT JOIN 
+    RecursiveTagHierarchy rth ON u.Id = rth.Id
+WHERE 
+    ur.TotalPosts > 0
+GROUP BY 
+    u.DisplayName, u.Reputation, rth.TagName, ur.AverageBounty, ur.TotalPosts
+ORDER BY 
+    ur.TotalPosts DESC, ur.AverageBounty DESC
+FETCH FIRST 10 ROWS ONLY;

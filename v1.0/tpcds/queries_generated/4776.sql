@@ -1,0 +1,65 @@
+
+WITH CustomerSales AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS spend_rank
+    FROM
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT * FROM CustomerSales WHERE spend_rank <= 10
+),
+SalesDetails AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        i.i_item_desc,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_paid DESC) AS item_rank
+    FROM
+        web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+),
+AggregatedSales AS (
+    SELECT
+        t.c_first_name,
+        t.c_last_name,
+        ts.order_count,
+        SUM(sd.ws_net_paid) AS total_item_sales,
+        COUNT(CASE WHEN sd.item_rank = 1 THEN 1 END) AS highest_item_count
+    FROM
+        TopCustomers t
+    LEFT JOIN (
+        SELECT cs.c_customer_sk, COUNT(DISTINCT ws.ws_order_number) AS order_count
+        FROM web_sales ws
+        JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+        GROUP BY cs.c_customer_sk
+    ) ts ON t.c_customer_sk = ts.c_customer_sk
+    LEFT JOIN SalesDetails sd ON t.c_customer_sk = sd.ws.bill_customer_sk
+    GROUP BY
+        t.c_first_name, t.c_last_name, ts.order_count
+)
+SELECT
+    a.c_first_name,
+    a.c_last_name,
+    a.order_count,
+    COALESCE(a.total_item_sales, 0) AS total_item_sales,
+    CASE
+        WHEN a.order_count = 0 THEN 'No Orders'
+        ELSE 'Active Customer'
+    END AS customer_status
+FROM
+    AggregatedSales a
+LEFT JOIN customer_demographics cd ON a.c_customer_sk = cd.cd_demo_sk
+WHERE
+    cd.cd_marital_status = 'M' AND cd.cd_gender = 'F'
+ORDER BY
+    a.total_item_sales DESC, a.c_last_name;

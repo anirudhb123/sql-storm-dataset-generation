@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.Score,
+        COUNT(a.Id) AS AnswerCount,
+        RANK() OVER (ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        tag.TagName,
+        COUNT(pt.PostId) AS TagCount
+    FROM 
+        Tags tag
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', tag.TagName, '>%') 
+    JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    GROUP BY 
+        tag.TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 5 
+),
+RecentCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment AS CloseReasonComment,
+        ph.UserDisplayName AS CloserDisplayName
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    ORDER BY 
+        ph.CreationDate DESC
+    LIMIT 10 
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.Tags,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    pt.TagName AS PopularTag,
+    cr.CloseReasonComment,
+    cr.CloserDisplayName,
+    cr.CreationDate AS CloseDate
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PopularTags pt ON rp.Tags LIKE '%' || pt.TagName || '%'
+LEFT JOIN 
+    RecentCloseReasons cr ON rp.PostId = cr.PostId
+WHERE 
+    rp.PostRank <= 100 
+ORDER BY 
+    rp.CreationDate DESC, pt.TagCount DESC;

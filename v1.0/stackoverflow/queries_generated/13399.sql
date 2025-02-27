@@ -1,0 +1,45 @@
+-- Performance Benchmarking Query
+WITH UserPostCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::int[])  -- Assuming Tags are stored as comma-separated IDs in Posts
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UPC.PostCount,
+    UPC.QuestionCount,
+    UPC.AnswerCount,
+    PT.TagName,
+    PT.PostCount AS TagPostCount
+FROM 
+    Users U
+JOIN 
+    UserPostCounts UPC ON U.Id = UPC.UserId
+JOIN 
+    PopularTags PT ON PT.TagName = ANY(string_to_array((SELECT STRING_AGG(T.TagName, ',') FROM Tags T WHERE T.Id = ANY(string_to_array((SELECT STRING_AGG(P.Tags, ',') FROM Posts P WHERE P.OwnerUserId = U.Id), ','::int[]))), ','))
+ORDER BY 
+    U.Reputation DESC, 
+    UPC.PostCount DESC;

@@ -1,0 +1,70 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+FrequentCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(DISTINCT o.o_orderkey) > 5
+),
+LineItemAnalysis AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        AVG(l.l_tax) AS average_tax
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1997-01-01' AND l.l_shipdate < '1998-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COALESCE(RS.s_name, 'No supplier') AS supplier_name,
+    COALESCE(FC.c_name, 'No frequent customer') AS frequent_customer,
+    LA.total_price,
+    LA.average_tax
+FROM 
+    part p
+LEFT JOIN 
+    RankedSuppliers RS ON p.p_partkey = RS.ps_partkey AND RS.rank = 1
+LEFT JOIN 
+    FrequentCustomers FC ON FC.c_custkey = (
+        SELECT o.o_custkey 
+        FROM orders o 
+        WHERE o.o_orderkey = (
+            SELECT l.l_orderkey 
+            FROM lineitem l 
+            WHERE l.l_partkey = p.p_partkey 
+            LIMIT 1)
+    )
+LEFT JOIN 
+    LineItemAnalysis LA ON LA.l_orderkey = (
+        SELECT l.l_orderkey 
+        FROM lineitem l 
+        WHERE l.l_partkey = p.p_partkey 
+        LIMIT 1)
+WHERE 
+    p.p_size BETWEEN 10 AND 20
+ORDER BY 
+    p.p_retailprice DESC, LA.total_price ASC;

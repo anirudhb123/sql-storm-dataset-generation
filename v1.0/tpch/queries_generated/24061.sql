@@ -1,0 +1,66 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        SUM(ps.ps_supplycost * ps.ps_availqty) OVER (PARTITION BY p.p_partkey) AS total_cost,
+        DENSE_RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_size BETWEEN 10 AND 20
+        AND p.p_retailprice IS NOT NULL
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+), SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        r.r_name AS region_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+), LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(*) AS item_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '2022-01-01' AND '2023-01-01'
+        AND l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COALESCE(SUM(li.total_price) FILTER (WHERE li.item_count > 5), 0) AS high_value_orders,
+    COALESCE(MIN(rp.p_brand), 'UNKNOWN') AS preferred_brand,
+    SUM(si.s_acctbal) AS total_supplier_balance
+FROM 
+    customer c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    LineItemSummary li ON o.o_orderkey = li.l_orderkey
+LEFT JOIN 
+    SupplierInfo si ON si.region_name IS NULL OR si.region_name IN ('AMERICA', 'EUROPE')
+LEFT JOIN 
+    RankedParts rp ON rp.rank_cost <= 5
+GROUP BY 
+    c.c_custkey, c.c_name
+HAVING 
+    SUM(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+ORDER BY 
+    total_orders DESC, high_value_orders DESC;

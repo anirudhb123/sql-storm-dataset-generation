@@ -1,0 +1,49 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON ps.ps_partkey = s.s_suppkey
+    WHERE s.s_acctbal > 1000 AND sh.level < 5
+),
+customer_order_summary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+top_customers AS (
+    SELECT c.*, ns.n_name
+    FROM customer_order_summary c
+    JOIN nation ns ON c.c_custkey = ns.n_nationkey
+    WHERE c.rank <= 5
+)
+SELECT p.p_name, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+       COALESCE(sh.level, -1) AS supplier_level,
+       CASE 
+           WHEN c.total_spent > 5000 THEN 'High Value'
+           WHEN c.total_spent IS NULL THEN 'No Orders'
+           ELSE 'Regular'
+       END AS customer_value_segment
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN top_customers c ON o.o_custkey = c.c_custkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE p.p_retailprice > 10.00
+GROUP BY p.p_name, s.s_name, sh.level, c.total_spent
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+ORDER BY revenue DESC, p.p_name;

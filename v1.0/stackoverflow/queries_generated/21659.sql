@@ -1,0 +1,74 @@
+WITH UserVotes AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN V.VoteTypeId IN (6, 7) THEN 1 END) AS VoteCounts,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+), 
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        COALESCE(PH.Comment, 'No comments yet') AS LastAction,
+        PH.CreationDate AS LastActionDate,
+        DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE PH.CreationDate IS NOT NULL
+), 
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        PH.Comment AS ClosingReason,
+        PH.CreationDate AS ClosedDate
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE PH.PostHistoryTypeId IN (10, 11)  -- Post Closed, Post Reopened
+), 
+UserAvgStats AS (
+    SELECT 
+        U.Id AS UserId,
+        AVG(P.Score) AS AvgPostScore,
+        AVG(P.ViewCount) AS AvgPostViews
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+), 
+RankedPosts AS (
+    SELECT 
+        PD.*,
+        U.DisplayName AS OwnerName,
+        UAvg.AvgPostScore,
+        UAvg.AvgPostViews,
+        ROW_NUMBER() OVER (ORDER BY PD.Score DESC, PD.ViewCount DESC) AS PostRank
+    FROM PostDetails PD
+    JOIN Users U ON PD.OwnerUserId = U.Id
+    JOIN UserAvgStats UAvg ON U.Id = UAvg.UserId
+)
+
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.Score,
+    RP.ViewCount,
+    RP.OwnerName,
+    RP.LastAction,
+    RP.LastActionDate,
+    RP.AvgPostScore,
+    RP.AvgPostViews,
+    C.ClosingReason,
+    C.ClosedDate,
+    CASE WHEN RP.UserPostRank = 1 THEN 'Top Post' ELSE 'Regular Post' END AS PostCategory
+FROM RankedPosts RP
+LEFT JOIN ClosedPosts C ON RP.PostId = C.PostId
+WHERE RP.PostRank <= 1000  -- Limit to top 1000 posts for performance
+AND (RP.Score > 10 OR C.ClosedReason IS NOT NULL)  -- Filter condition complexity
+ORDER BY RP.Score DESC, RP.ViewCount DESC, RP.PostId ASC;

@@ -1,0 +1,31 @@
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) AS VoteCount,
+    (SELECT COUNT(*) FROM Posts AS a WHERE a.AcceptedAnswerId = p.Id) AS AcceptedAnswerCount,
+    (SELECT GROUP_CONCAT(ut.Name ORDER BY ut.Name) 
+     FROM Users AS u 
+     JOIN Votes AS v2 ON v2.PostId = p.Id 
+     JOIN VoteTypes AS vt ON vt.Id = v2.VoteTypeId 
+     WHERE u.Id = v2.UserId) AS Voters,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags AS t 
+     WHERE t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>'))::int)) 
+    ) AS Tags
+FROM 
+    Posts AS p 
+LEFT JOIN 
+    Comments AS c ON c.PostId = p.Id 
+LEFT JOIN 
+    Votes AS v ON v.PostId = p.Id 
+WHERE 
+    p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+GROUP BY 
+    p.Id 
+ORDER BY 
+    p.Score DESC 
+LIMIT 100;

@@ -1,0 +1,71 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        AVG(s.s_acctbal) OVER (PARTITION BY n.n_regionkey) AS avg_account_balance,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_regionkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        DENSE_RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSales AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(l.l_orderkey) AS total_sales,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    ss.s_name,
+    co.c_name,
+    ps.p_name,
+    ps.total_sales,
+    ps.total_revenue,
+    ss.total_supply_cost,
+    ss.avg_account_balance,
+    CASE 
+        WHEN ss.rank <= 5 THEN 'Top Supplier'
+        ELSE 'Regular Supplier'
+    END AS supplier_status,
+    CASE 
+        WHEN co.order_count IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status
+FROM 
+    SupplierStats ss
+FULL OUTER JOIN 
+    CustomerOrders co ON ss.s_suppkey = co.c_custkey
+FULL OUTER JOIN 
+    PartSales ps ON ps.total_sales > 1000
+WHERE 
+    (ss.avg_account_balance IS NULL OR ss.total_supply_cost IS NOT NULL)
+    AND (co.total_spent IS NOT NULL OR ps.total_revenue IS NOT NULL)
+ORDER BY 
+    COALESCE(ss.s_name, co.c_name, 'Unknown'), 
+    COALESCE(ps.total_revenue, -1) DESC
+LIMIT 100 OFFSET 10;

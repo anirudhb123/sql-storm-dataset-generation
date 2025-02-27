@@ -1,0 +1,85 @@
+
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.TagName) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '> <') AS tag_split ON TRUE
+    JOIN 
+        Tags t ON t.TagName = tag_split
+    GROUP BY 
+        p.Id
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = p.Tags::int 
+    JOIN 
+        PostTagCounts pt ON p.Id = pt.PostId
+    WHERE 
+        t.IsModeratorOnly = 0
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+ActiveUserPosts AS (
+    SELECT 
+        u.DisplayName,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        pt.TagCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    JOIN 
+        PostTagCounts pt ON p.Id = pt.PostId
+    WHERE 
+        p.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 month'
+)
+SELECT 
+    ut.UserId,
+    ut.DisplayName AS UserName,
+    ut.Reputation,
+    ut.PostsCount,
+    ut.TotalBadges,
+    aup.Title,
+    aup.CreationDate,
+    aup.ViewCount,
+    aup.TagCount,
+    pt.TagName AS PopularTag
+FROM 
+    UserReputation ut
+JOIN 
+    ActiveUserPosts aup ON ut.DisplayName = aup.DisplayName
+LEFT JOIN 
+    PopularTags pt ON aup.TagCount > 0
+WHERE 
+    ut.Reputation > 100
+ORDER BY 
+    ut.Reputation DESC, aup.ViewCount DESC;

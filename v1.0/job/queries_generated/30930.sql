@@ -1,0 +1,74 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year = 2023
+    
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id,
+        ak.title,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title ak ON ml.linked_movie_id = ak.id
+    JOIN
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE
+        mh.level < 3
+),
+ranked_actors AS (
+    SELECT
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT ci.movie_id) DESC) AS actor_rank
+    FROM
+        cast_info ci
+    JOIN
+        movie_hierarchy mh ON ci.movie_id = mh.movie_id
+    GROUP BY
+        ci.person_id
+    HAVING
+        COUNT(DISTINCT ci.movie_id) > 1
+),
+actor_names AS (
+    SELECT
+        an.person_id,
+        STRING_AGG(an.name, ', ') AS full_name
+    FROM
+        aka_name an
+    JOIN
+        ranked_actors ra ON an.person_id = ra.person_id
+    GROUP BY
+        an.person_id
+)
+SELECT
+    mh.movie_id,
+    mh.title,
+    (SELECT STRING_AGG(DISTINCT company.name, ', ')
+     FROM movie_companies mc
+     JOIN company_name company ON mc.company_id = company.id
+     WHERE mc.movie_id = mh.movie_id) AS production_companies,
+    an.full_name AS top_actors
+FROM
+    movie_hierarchy mh
+LEFT JOIN
+    actor_names an ON mh.movie_id IN (
+        SELECT ci.movie_id
+        FROM cast_info ci
+        WHERE ci.person_id IN (
+            SELECT person_id
+            FROM ranked_actors
+            WHERE actor_rank <= 5
+        )
+    )
+WHERE
+    mh.level = 1 OR mh.level = 2
+ORDER BY
+    mh.production_year DESC, mh.title;

@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id, 
+        a.title, 
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rn,
+        COUNT(co.id) AS company_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        aka_title a 
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+ActorsInfo AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        COUNT(DISTINCT ci.id) AS roles_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id, ak.name, ak.id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.company_count,
+        rm.keyword_count,
+        ai.actor_name,
+        ai.roles_count,
+        CASE 
+            WHEN rm.company_count > 5 THEN 'Blockbuster' 
+            ELSE 'Indie' 
+        END AS movie_type
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorsInfo ai ON rm.movie_id = ai.movie_id
+    WHERE 
+        rm.rn <= 10 AND 
+        (rm.production_year IS NOT NULL AND rm.production_year > 2000)
+)
+
+SELECT 
+    fm.movie_id, 
+    fm.title, 
+    fm.production_year, 
+    fm.movie_type,
+    COALESCE(STRING_AGG(DISTINCT fm.actor_name, ', '), 'No Actors') AS actors,
+    SUM(fm.roles_count) AS total_roles,
+    COUNT(DISTINCT fk.keyword) AS total_keywords
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_keyword fk ON fm.movie_id = fk.movie_id
+GROUP BY 
+    fm.movie_id, fm.title, fm.production_year, fm.movie_type
+HAVING 
+    COUNT(DISTINCT fk.keyword) > 1 OR COUNT(DISTINCT fm.actor_name) > 3
+ORDER BY 
+    fm.production_year DESC, 
+    fm.title ASC;

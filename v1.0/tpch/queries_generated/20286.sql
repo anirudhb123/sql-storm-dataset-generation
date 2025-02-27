@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rnk
+    FROM supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        SUBSTRING(p.p_comment, 1, 15) as short_comment
+    FROM part p
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierPartAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(hvp.total_available, 0) AS available_qty,
+    cp.c_name AS top_customer,
+    r.s_name AS highest_supplier,
+    cs.total_spent,
+    LEAD(cs.total_spent) OVER (ORDER BY cs.total_spent DESC) AS next_customer_spent,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No orders'
+        WHEN cs.total_spent > 1000 THEN 'Spender'
+        ELSE 'Casual'
+    END AS spending_category
+FROM HighValueParts p
+LEFT JOIN SupplierPartAvailability hvp ON p.p_partkey = hvp.ps_partkey
+LEFT JOIN CustomerOrderSummary cs ON cs.total_spent = (
+        SELECT MAX(total_spent) FROM CustomerOrderSummary
+    )
+RIGHT JOIN RankedSuppliers r ON r.rnk = 1 AND r.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+WHERE p.p_retailprice IS NOT NULL
+AND r.s_acctbal > 5000
+OR (p.p_size BETWEEN 1 AND 10)
+AND (r.s_name LIKE '%Inc%' OR r.s_name IS NULL)
+ORDER BY p.p_partkey;

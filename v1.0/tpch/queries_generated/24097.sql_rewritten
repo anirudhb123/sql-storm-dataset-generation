@@ -1,0 +1,76 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS total_filled_orders,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+SupplierPartInfo AS (
+    SELECT 
+        s.s_suppkey,
+        p.p_partkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_size BETWEEN 1 AND 100
+    GROUP BY 
+        s.s_suppkey, p.p_partkey
+),
+ExpiredShipments AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(l.l_returnflag) AS return_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate < cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        l.l_orderkey
+)
+
+SELECT 
+    cs.c_custkey,
+    cs.total_orders,
+    cs.total_filled_orders,
+    coalesce(avg(si.supply_value), 0) AS avg_supply_value,
+    ro.o_orderkey,
+    ro.o_totalprice,
+    es.total_quantity,
+    es.return_count
+FROM 
+    CustomerSummary cs
+LEFT JOIN 
+    SupplierPartInfo si ON si.s_suppkey IN (SELECT s_suppkey FROM supplier WHERE s_name IS NOT NULL)
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderstatus = 'F')
+LEFT JOIN 
+    ExpiredShipments es ON es.l_orderkey = ro.o_orderkey
+WHERE 
+    cs.last_order_date IS NOT NULL
+    AND (cs.total_orders > 10 OR cs.total_filled_orders IS NULL)
+ORDER BY 
+    cs.total_orders DESC, cs.total_filled_orders ASC
+LIMIT 100 OFFSET 50

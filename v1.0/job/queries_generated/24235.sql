@@ -1,0 +1,59 @@
+WITH ranked_titles AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rank_year
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL
+        AND t.production_year IS NOT NULL
+),
+co_actors AS (
+    SELECT 
+        c1.person_id AS actor_id,
+        c2.person_id AS co_actor_id,
+        t.title AS movie_title
+    FROM 
+        cast_info c1
+    JOIN 
+        cast_info c2 ON c1.movie_id = c2.movie_id AND c1.person_id != c2.person_id
+    JOIN 
+        aka_title t ON c1.movie_id = t.movie_id
+),
+distinct_keywords AS (
+    SELECT DISTINCT 
+        mk.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword mk 
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    rt.actor_name,
+    rt.movie_title,
+    rt.production_year,
+    COALESCE(ca.co_actor_id, 'No co-actors') AS co_actor_id,
+    COUNT(DISTINCT dk.keyword) AS keyword_count
+FROM 
+    ranked_titles rt
+LEFT JOIN 
+    co_actors ca ON rt.movie_title = ca.movie_title AND rt.actor_name != (SELECT name FROM aka_name WHERE person_id = ca.actor_id)
+LEFT JOIN 
+    distinct_keywords dk ON rt.production_year = (SELECT DISTINCT production_year FROM aka_title WHERE title = rt.movie_title)
+WHERE 
+    rt.rank_year <= 5
+GROUP BY 
+    rt.actor_name, rt.movie_title, rt.production_year, ca.co_actor_id
+HAVING 
+    COUNT(DISTINCT ca.co_actor_id) > 0
+ORDER BY 
+    rt.production_year DESC, 
+    keyword_count DESC
+LIMIT 50;

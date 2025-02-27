@@ -1,0 +1,45 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 1 AS HierarchyLevel
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.HierarchyLevel + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.HierarchyLevel < 5
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS CustomerRank
+    FROM customer c
+    WHERE c.c_acctbal > 1000
+),
+SupplierOrderStats AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(o.o_orderkey) AS TotalOrders,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+RegionWithCustomerCount AS (
+    SELECT n.n_regionkey, r.r_name, COUNT(DISTINCT c.c_custkey) AS CustomerCount
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_regionkey, r.r_name
+)
+SELECT sh.s_suppkey, sh.s_name, sh.s_acctbal,
+       r.r_name, COUNT(DISTINCT c.c_custkey) AS HighValueCustomerCount,
+       COALESCE(sos.TotalOrders, 0) AS TotalOrders,
+       COALESCE(sos.TotalRevenue, 0.00) AS TotalRevenue
+FROM SupplierHierarchy sh
+JOIN RegionWithCustomerCount r ON sh.s_nationkey = r.n_regionkey
+LEFT JOIN HighValueCustomers c ON sh.s_nationkey = c.c_nationkey
+LEFT JOIN SupplierOrderStats sos ON sh.s_suppkey = sos.s_suppkey
+GROUP BY sh.s_suppkey, sh.s_name, sh.s_acctbal, r.r_name
+ORDER BY sh.s_acctbal DESC, HighValueCustomerCount DESC;

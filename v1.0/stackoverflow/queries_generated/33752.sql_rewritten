@@ -1,0 +1,54 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        0 AS Depth,
+        CAST(p.Title AS VARCHAR(MAX)) AS Path
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.CreationDate,
+        Depth + 1,
+        CAST(CONCAT(c.Path, ' > ', p2.Title) AS VARCHAR(MAX)) AS Path
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostCTE c ON p2.ParentId = c.PostId
+)
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT b.Id) AS TotalBadges,
+    MAX(v.CreationDate) AS LastVoteDate,
+    MAX(ph.CreationDate) AS LastEditDate,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY p.ViewCount) AS MedianViews,
+    SUM(v.BountyAmount) AS TotalBountyAmount
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+WHERE 
+    u.Reputation > 1000 
+GROUP BY 
+    u.DisplayName, u.Reputation
+HAVING 
+    COUNT(DISTINCT p.Id) > 10
+ORDER BY 
+    TotalPosts DESC, UserDisplayName ASC;

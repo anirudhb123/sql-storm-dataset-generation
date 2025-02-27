@@ -1,0 +1,84 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.CreationDate AS PostCreationDate,
+        p.ViewCount,
+        COALESCE(answers.AnswerCount, 0) AS AnswerCount,
+        COALESCE(votes.VoteCount, 0) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(Id) AS AnswerCount
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 2
+        GROUP BY 
+            ParentId
+    ) AS answers ON p.Id = answers.ParentId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) AS votes ON p.Id = votes.PostId
+    WHERE 
+        p.PostTypeId = 1
+    UNION ALL
+    SELECT 
+        ph.PostId,
+        NULL AS PostTitle,
+        ph.CreationDate AS PostCreationDate,
+        NULL AS ViewCount,
+        NULL AS AnswerCount,
+        NULL AS VoteCount,
+        rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Close and Reopen events
+),
+FilteredPosts AS (
+    SELECT 
+        r.PostId,
+        r.PostTitle,
+        r.PostCreationDate,
+        r.ViewCount,
+        r.AnswerCount,
+        r.VoteCount
+    FROM 
+        RecursiveCTE r
+    WHERE 
+        r.rn = 1
+)
+SELECT 
+    fp.PostId,
+    fp.PostTitle,
+    fp.PostCreationDate,
+    fp.ViewCount,
+    fp.AnswerCount,
+    fp.VoteCount,
+    CASE 
+        WHEN fp.AnswerCount > 0 THEN 'Has Answers'
+        WHEN fp.AnswerCount = 0 AND fp.VoteCount > 0 THEN 'Votes Only'
+        ELSE 'No Responses Yet'
+    END AS ResponseStatus
+FROM 
+    FilteredPosts fp
+WHERE 
+    fp.VoteCount >= (
+        SELECT 
+            AVG(VoteCount) 
+        FROM 
+            FilteredPosts
+    )
+ORDER BY 
+    fp.ViewCount DESC, 
+    fp.PostCreationDate;

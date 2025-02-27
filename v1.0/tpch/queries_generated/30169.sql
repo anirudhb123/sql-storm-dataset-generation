@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+),
+OrderTotals AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2024-01-01'
+    GROUP BY o.o_orderkey
+),
+TopKProducts AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_quantity) AS total_quantity
+    FROM lineitem l
+    JOIN part p ON l.l_partkey = p.p_partkey
+    GROUP BY p.p_partkey
+    ORDER BY total_quantity DESC
+    LIMIT 10
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(ot.total_price) AS total_revenue,
+    MAX(s.s_acctbal) AS max_supplier_balance
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN OrderTotals ot ON ot.o_orderkey IN (
+    SELECT o.o_orderkey FROM orders o
+    WHERE o.o_orderstatus = 'O'
+)
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+LEFT JOIN TopKProducts tk ON tk.p_partkey IN (
+    SELECT l.l_partkey FROM lineitem l
+    WHERE l.l_orderkey IN (
+        SELECT o.o_orderkey FROM orders o
+        WHERE o.o_custkey = c.c_custkey
+    )
+)
+WHERE s.s_acctbal IS NOT NULL
+AND n.n_name IS NOT NULL
+GROUP BY r.r_name, n.n_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_revenue DESC;

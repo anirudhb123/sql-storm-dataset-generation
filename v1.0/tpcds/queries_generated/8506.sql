@@ -1,0 +1,51 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_web_sales,
+        SUM(cs.cs_net_paid) AS total_catalog_sales,
+        SUM(ss.ss_net_paid) AS total_store_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        c_customer_id,
+        total_web_sales,
+        total_catalog_sales,
+        total_store_sales,
+        RANK() OVER (ORDER BY (total_web_sales + total_catalog_sales + total_store_sales) DESC) as sales_rank
+    FROM 
+        customer_sales
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_web_sales,
+    tc.total_catalog_sales,
+    tc.total_store_sales,
+    SUM(COALESCE(count(sr.sr_item_sk), 0)) AS total_returns
+FROM 
+    top_customers tc
+LEFT JOIN 
+    store_returns sr ON sr.sr_customer_sk = (
+        SELECT c.c_customer_sk 
+        FROM customer c 
+        WHERE c.c_customer_id = tc.c_customer_id
+    )
+WHERE 
+    tc.sales_rank <= 10
+GROUP BY 
+    tc.c_customer_id, 
+    tc.total_web_sales, 
+    tc.total_catalog_sales, 
+    tc.total_store_sales
+ORDER BY 
+    tc.sales_rank;

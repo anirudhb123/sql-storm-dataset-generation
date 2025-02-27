@@ -1,0 +1,52 @@
+
+WITH MovieYears AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword
+    FROM
+        aka_title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE
+        t.production_year BETWEEN 1990 AND 2000
+),
+TopMovies AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        COUNT(ci.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM
+        MovieYears m
+    LEFT JOIN cast_info ci ON m.movie_id = ci.movie_id
+    GROUP BY
+        m.movie_id, m.title, m.production_year
+    HAVING
+        COUNT(ci.person_id) > 10
+),
+CompanyDetails AS (
+    SELECT
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM
+        movie_companies mc
+    INNER JOIN company_name c ON mc.company_id = c.id
+    INNER JOIN company_type ct ON mc.company_type_id = ct.id
+)
+SELECT
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    cd.company_name,
+    cd.company_type
+FROM
+    TopMovies tm
+LEFT JOIN CompanyDetails cd ON tm.movie_id = cd.movie_id
+WHERE
+    cd.company_type IS NOT NULL
+ORDER BY
+    tm.production_year DESC, tm.actor_count DESC
+LIMIT 10;

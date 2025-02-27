@@ -1,0 +1,58 @@
+WITH RankedSales AS (
+    SELECT 
+        ps.ps_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY p.p_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey, p.p_name
+),
+TopProducts AS (
+    SELECT 
+        p_name, 
+        total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 10
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(s.s_acctbal) OVER (PARTITION BY s.s_nationkey) AS avg_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+)
+SELECT 
+    tp.p_name, 
+    tp.total_sales, 
+    sd.s_name, 
+    sd.total_quantity,
+    sd.s_acctbal, 
+    sd.avg_acctbal,
+    CASE 
+        WHEN sd.s_acctbal IS NULL THEN 'Account balance not available'
+        WHEN sd.s_acctbal < 1000 THEN 'Low balance'
+        ELSE 'Sufficient balance'
+    END AS balance_status
+FROM 
+    TopProducts tp
+LEFT JOIN 
+    SupplierDetails sd ON tp.p_name LIKE '%' || sd.s_name || '%' 
+ORDER BY 
+    tp.total_sales DESC, sd.s_name ASC;

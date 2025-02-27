@@ -1,0 +1,54 @@
+
+WITH RECURSIVE Supplier_Hierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 0 AS Level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL AND s_acctbal > 1000.00
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.Level + 1
+    FROM supplier s
+    JOIN Supplier_Hierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.Level < 5
+),
+
+Order_Summary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+           RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS RevenueRank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+
+High_Value_Customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate > '1997-01-01'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 5000.00
+),
+
+Ranked_Customers AS (
+    SELECT c.c_custkey, c.c_name, TotalSpent,
+           ROW_NUMBER() OVER (ORDER BY TotalSpent DESC) AS CustomerRank
+    FROM High_Value_Customers c
+)
+
+SELECT DISTINCT r.r_name, 
+       COUNT(DISTINCT p.p_partkey) AS UniqueParts,
+       AVG(l.l_extendedprice) AS AvgPrice,
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS ReturnedItems,
+       ARRAY_AGG(DISTINCT CONCAT(c.c_name, ': ', c.c_acctbal)) AS CustomerDetails
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN Ranked_Customers c ON c.c_custkey = l.l_orderkey
+WHERE l.l_shipdate BETWEEN '1997-02-01' AND '1997-12-31'
+GROUP BY r.r_name
+ORDER BY UniqueParts DESC, AvgPrice ASC
+LIMIT 10;

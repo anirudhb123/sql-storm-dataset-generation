@@ -1,0 +1,48 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS movie_rank
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN aka_title t ON ci.movie_id = t.id
+    WHERE t.production_year IS NOT NULL
+),
+ActorMovieCount AS (
+    SELECT 
+        actor_id,
+        COUNT(movie_title) AS total_movies
+    FROM RankedMovies
+    GROUP BY actor_id
+),
+TopActors AS (
+    SELECT 
+        r.actor_id,
+        r.actor_name,
+        ac.total_movies,
+        r.movie_title,
+        r.production_year
+    FROM RankedMovies r
+    JOIN ActorMovieCount ac ON r.actor_id = ac.actor_id
+    WHERE ac.total_movies > 5
+)
+
+SELECT 
+    ta.actor_name,
+    ta.movie_title,
+    ta.production_year,
+    COALESCE(cn.name, 'Unknown Company') AS company_name,
+    CASE
+        WHEN ta.production_year >= 2000 THEN 'Modern'
+        WHEN ta.production_year < 2000 AND ta.production_year >= 1980 THEN 'Classic'
+        ELSE 'Vintage'
+    END AS movie_era
+FROM TopActors ta
+LEFT JOIN movie_companies mc ON ta.movie_title = (SELECT title FROM aka_title WHERE id = mc.movie_id LIMIT 1)
+LEFT JOIN company_name cn ON mc.company_id = cn.id
+WHERE 
+    ta.movie_rank <= 3
+ORDER BY ta.actor_name, ta.production_year DESC;

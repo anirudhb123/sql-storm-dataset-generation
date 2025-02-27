@@ -1,0 +1,86 @@
+
+WITH UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyAmount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+UserRanked AS (
+    SELECT
+        UserId,
+        DisplayName,
+        TotalBountyAmount,
+        UpVoteCount,
+        DownVoteCount,
+        GoldBadges,
+        SilverBadges,
+        BronzeBadges,
+        PostCount,
+        RANK() OVER (ORDER BY TotalBountyAmount DESC, UpVoteCount DESC) AS UserRank
+    FROM 
+        UserScores
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days') 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount
+),
+PopularPosts AS (
+    SELECT 
+        pd.*,
+        RANK() OVER (ORDER BY pd.ViewCount DESC) AS PopularityRank
+    FROM 
+        PostDetails pd
+)
+SELECT 
+    ur.UserId,
+    ur.DisplayName,
+    ur.TotalBountyAmount,
+    ur.UpVoteCount,
+    ur.DownVoteCount,
+    ur.GoldBadges,
+    ur.SilverBadges,
+    ur.BronzeBadges,
+    ur.PostCount,
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.ViewCount,
+    pp.CommentCount,
+    pp.PopularityRank
+FROM 
+    UserRanked ur
+LEFT JOIN 
+    PopularPosts pp ON ur.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = (SELECT MIN(PostId) FROM Posts WHERE CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')))
+WHERE 
+    ur.UserRank <= 10
+ORDER BY 
+    ur.UserRank, pp.PopularityRank 
+LIMIT 50;

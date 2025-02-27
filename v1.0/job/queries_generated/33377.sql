@@ -1,0 +1,77 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        ARRAY[m.id] AS path
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.episode_of_id IS NULL
+        
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        path || m.id
+    FROM 
+        aka_title AS m
+    JOIN 
+        movie_hierarchy AS mh ON m.episode_of_id = mh.movie_id
+    WHERE 
+        NOT m.id = ANY(path)
+),
+cast_ranked AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank,
+        p.gender
+    FROM 
+        cast_info AS ci
+    JOIN 
+        aka_name AS p ON ci.person_id = p.person_id
+),
+movie_company_info AS (
+    SELECT 
+        m.id AS movie_id,
+        ARRAY_AGG(DISTINCT cn.name) AS companies,
+        COUNT(mc.company_id) AS company_count
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        movie_companies AS mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    crm.person_id,
+    COUNT(DISTINCT crm.movie_id) AS movies_count,
+    COALESCE(mci.company_count, 0) AS company_count,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+    MAX(crm.role_rank) AS max_role_rank
+FROM 
+    movie_hierarchy AS mh
+LEFT JOIN 
+    cast_ranked AS crm ON mh.movie_id = crm.movie_id
+LEFT JOIN 
+    movie_company_info AS mci ON mh.movie_id = mci.movie_id
+LEFT JOIN 
+    movie_companies AS mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name AS cn ON mc.company_id = cn.id
+WHERE 
+    mh.production_year >= 2000
+GROUP BY 
+    mh.movie_title, mh.production_year, crm.person_id
+HAVING 
+    COUNT(DISTINCT crm.movie_id) > 1
+ORDER BY 
+    mh.production_year DESC, 
+    movies_count DESC;

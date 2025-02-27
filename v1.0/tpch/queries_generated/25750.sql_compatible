@@ -1,0 +1,32 @@
+
+WITH StringProcessing AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_name,
+        CONCAT(p.p_name, ' - ', s.s_name) AS combined_string,
+        LENGTH(CONCAT(p.p_name, ' - ', s.s_name)) AS string_length,
+        UPPER(s.s_name) AS upper_supplier_name,
+        LOWER(p.p_name) AS lower_part_name,
+        REPLACE(p.p_comment, 'obsolete', 'up-to-date') AS updated_comment,
+        CHAR_LENGTH(p.p_comment) AS comment_length,
+        SUBSTRING_INDEX(p.p_name, ' ', 1) AS first_word_part_name
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp) 
+        AND LENGTH(p.p_name) > 10
+)
+SELECT 
+    STRING_AGG(combined_string || ': ' || string_length, '; ') AS benchmark_result,
+    COUNT(*) AS total_entries,
+    SUM(comment_length) AS total_comment_length,
+    COUNT(DISTINCT first_word_part_name) AS unique_first_words
+FROM 
+    StringProcessing
+GROUP BY 
+    string_length, combined_string;

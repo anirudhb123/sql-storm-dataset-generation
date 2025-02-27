@@ -1,0 +1,32 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, 
+           COUNT(li.l_orderkey) AS lineitem_count
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+TopRegions AS (
+    SELECT r.r_regionkey, r.r_name,
+           SUM(o.o_totalprice) AS total_sales
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY r.r_regionkey, r.r_name
+    ORDER BY total_sales DESC
+    LIMIT 5
+)
+SELECT t.r_name AS Region, SUM(hvo.o_totalprice) AS Region_Sales,
+       AVG(s.s_acctbal) AS Avg_Supplier_Account_Balance
+FROM HighValueOrders hvo
+JOIN TopRegions t ON hvo.o_orderdate >= DATE '1997-01-01' AND hvo.o_orderdate < DATE '1998-01-01'
+JOIN RankedSuppliers s ON hvo.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = s.s_nationkey AND s.rn = 1)
+GROUP BY t.r_name
+ORDER BY Region_Sales DESC;

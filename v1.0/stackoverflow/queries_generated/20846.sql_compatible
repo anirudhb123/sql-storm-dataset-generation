@@ -1,0 +1,93 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.Tags,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CAST('2024-10-01' AS DATE))
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserId AS EditorUserId,
+        ph.CreationDate AS EditDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditSequence
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+),
+CommentStatistics AS (
+    SELECT 
+        PostId,
+        COUNT(*) FILTER (WHERE LENGTH(Text) > 300) AS LongComments,
+        COUNT(*) AS TotalComments
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+FinalStats AS (
+    SELECT 
+        up.UserId,
+        up.DisplayName,
+        SUM(COALESCE(ps.PostCount, 0)) AS UserPostCount,
+        SUM(COALESCE(ps.CommentCount, 0)) AS UserCommentCount,
+        SUM(COALESCE(cs.LongComments, 0)) AS LongCommentCount
+    FROM 
+        UserStatistics ps
+    LEFT JOIN 
+        Users up ON ps.UserId = up.Id
+    LEFT JOIN 
+        CommentStatistics cs ON cs.PostId IN (SELECT PostId FROM RankedPosts WHERE PostRank = 1)
+    GROUP BY 
+        up.Id, up.DisplayName
+)
+SELECT 
+    fs.UserId,
+    fs.DisplayName,
+    fs.UserPostCount,
+    fs.UserCommentCount,
+    fs.LongCommentCount,
+    CASE 
+        WHEN fs.UserPostCount > 0 THEN ROUND(fs.UserCommentCount * 1.0 / fs.UserPostCount, 2)
+        ELSE 0 
+    END AS CommentsPerPostRatio,
+    COALESCE(rp.Title, 'No Recent Posts') AS RecentPostTitle
+FROM 
+    FinalStats fs
+LEFT JOIN 
+    RankedPosts rp ON fs.UserId = rp.OwnerUserId AND rp.PostRank = 1
+WHERE 
+    fs.UserPostCount > 0
+ORDER BY 
+    fs.UserCommentCount DESC, fs.UserPostCount DESC;

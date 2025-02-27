@@ -1,0 +1,68 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBountyAmount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (9, 10) 
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserReputation
+    WHERE Reputation > 0
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        PT.Name AS PostType
+    FROM Posts P
+    JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        C.Name AS CloseReason,
+        COUNT(*) AS CloseCount
+    FROM PostHistory PH
+    JOIN CloseReasonTypes C ON PH.Comment::int = C.Id
+    WHERE PH.PostHistoryTypeId = 10 
+    GROUP BY PH.PostId, PH.CreationDate, C.Name
+),
+FinalSummary AS (
+    SELECT 
+        U.DisplayName,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        SUM(COALESCE(CP.CloseCount, 0)) AS TotalClosedPosts
+    FROM TopUsers U
+    LEFT JOIN PostSummary P ON U.UserId = P.OwnerUserId
+    LEFT JOIN ClosedPosts CP ON P.PostId = CP.PostId
+    GROUP BY U.DisplayName
+)
+SELECT 
+    F.DisplayName,
+    F.TotalViews,
+    F.TotalScore,
+    F.TotalClosedPosts,
+    T.ReputationRank
+FROM FinalSummary F
+JOIN TopUsers T ON F.DisplayName = T.DisplayName
+WHERE F.TotalScore > 10
+ORDER BY T.ReputationRank
+LIMIT 10;

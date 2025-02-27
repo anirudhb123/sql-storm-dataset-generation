@@ -1,0 +1,46 @@
+
+WITH SupplierAgg AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+HighCostSuppliers AS (
+    SELECT sa.s_suppkey, sa.s_name
+    FROM SupplierAgg sa
+    WHERE sa.total_cost > (SELECT AVG(total_cost) FROM SupplierAgg)
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+LineItemStatistics AS (
+    SELECT l.l_partkey, 
+           SUM(l.l_quantity) AS total_quantity,
+           MAX(l.l_extendedprice) AS max_price,
+           MIN(l.l_discount) AS min_discount
+    FROM lineitem l
+    GROUP BY l.l_partkey
+)
+SELECT c.c_name, 
+       COALESCE(sum_cost.total_cost, 0) AS supplier_cost,
+       co.order_count,
+       co.total_spent, 
+       lis.total_quantity,
+       lis.max_price,
+       lis.min_discount
+FROM CustomerOrders co
+LEFT JOIN (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s 
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_suppkey IN (SELECT s_suppkey FROM HighCostSuppliers)
+    GROUP BY s.s_suppkey
+) sum_cost ON co.order_count > 5
+LEFT JOIN LineItemStatistics lis ON co.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name = 'ABC Corp')
+WHERE co.total_spent > (
+    SELECT AVG(total_spent) FROM CustomerOrders
+)
+ORDER BY co.total_spent DESC, supplier_cost DESC;

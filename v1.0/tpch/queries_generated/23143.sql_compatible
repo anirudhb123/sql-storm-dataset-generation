@@ -1,0 +1,74 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+CurrencyConversion AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        ps.ps_supplycost * CASE 
+                            WHEN nr.n_name IS NOT NULL THEN 1.1 
+                            ELSE 1 END AS converted_cost,
+        ps.ps_availqty
+    FROM 
+        partsupp ps
+    LEFT JOIN nation nr ON ps.ps_suppkey = nr.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        COALESCE(ranked.s_acctbal, 0) AS available_balance, 
+        SUM(c.converted_cost * l.l_quantity) AS total_cost
+    FROM 
+        RankedSuppliers ranked
+    FULL OUTER JOIN CurrencyConversion c ON ranked.s_suppkey = c.ps_suppkey
+    FULL OUTER JOIN lineitem l ON c.ps_partkey = l.l_partkey
+    LEFT JOIN customer cu ON l.l_orderkey = cu.c_custkey
+    WHERE 
+        ranked.rank = 1 
+        OR (c.ps_availqty < 100 AND ranked.rank IS NULL)
+    GROUP BY 
+        s.s_suppkey, s.s_name, ranked.s_acctbal
+    HAVING 
+        SUM(c.converted_cost * l.l_quantity) IS NOT NULL AND
+        (available_balance > 1000 OR SUM(c.converted_cost * l.l_quantity) > 500) 
+),
+NationComment AS (
+    SELECT 
+        n.n_name, 
+        n.n_comment, 
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name, n.n_comment
+    HAVING 
+        COUNT(DISTINCT s.s_suppkey) > 0
+)
+SELECT 
+    n.n_name, 
+    n.n_comment,
+    t.available_balance, 
+    COALESCE(t.total_cost, 0) AS total_cost,
+    CASE 
+        WHEN t.total_cost > 1000 THEN 'High Spender'
+        WHEN t.total_cost IS NULL THEN 'No Spending Recorded'
+        ELSE 'Regular Customer' 
+    END AS spending_category
+FROM 
+    NationComment n
+LEFT JOIN TopSuppliers t ON n.n_name = 
+    (SELECT DISTINCT n_name 
+     FROM nation 
+     WHERE n.n_nationkey = nation.n_nationkey LIMIT 1)
+ORDER BY 
+    spending_category DESC, 
+    n.n_name;

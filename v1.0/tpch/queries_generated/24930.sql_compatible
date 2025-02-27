@@ -1,0 +1,85 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+),
+SupplierAggregates AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+SelectedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'No Account Balance' 
+            WHEN s.s_acctbal > 5000 THEN 'High Balance' 
+            ELSE 'Standard Balance' 
+        END AS balance_category
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+        OR s.s_comment NOT LIKE '%dummy%'
+),
+LineItemStatistics AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        SUM(l.l_tax) AS total_tax,
+        ARRAY_AGG(DISTINCT l.l_shipmode) AS ship_modes
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'Y'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderstatus,
+    ro.o_totalprice,
+    sa.total_avail_qty,
+    sa.avg_supply_cost,
+    ls.line_count,
+    ls.total_revenue,
+    ls.total_tax,
+    ls.ship_modes,
+    ss.s_name,
+    ss.balance_category
+FROM 
+    RankedOrders ro
+FULL OUTER JOIN 
+    SupplierAggregates sa ON sa.ps_partkey = (
+        SELECT MAX(ps_partkey) FROM partsupp WHERE ps_supplycost < 20
+    )
+LEFT JOIN 
+    LineItemStatistics ls ON ls.l_orderkey = ro.o_orderkey
+LEFT JOIN 
+    SelectedSuppliers ss ON ss.s_suppkey = (
+        SELECT MIN(s_suppkey) FROM supplier WHERE s_acctbal > 1000
+    )
+WHERE 
+    (ro.o_totalprice IS NOT NULL AND ro.o_totalprice > 0) 
+    OR (sa.total_avail_qty IS NULL AND ss.balance_category = 'High Balance')
+ORDER BY 
+    CONCAT(ro.o_orderstatus, ' - ', ro.o_orderkey) DESC,
+    ss.s_name ASC
+LIMIT 100;

@@ -1,0 +1,70 @@
+
+WITH SupplierAggregates AS (
+    SELECT
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderstatus = 'F'
+    GROUP BY
+        c.c_custkey
+),
+TopRegions AS (
+    SELECT
+        n.n_regionkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM
+        nation n
+    JOIN
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        n.n_regionkey
+    ORDER BY
+        order_count DESC
+    LIMIT 10
+)
+SELECT
+    r.r_name,
+    SUM(SA.total_supplycost) AS region_total_supplycost,
+    AVG(COALESCE(CO.total_spent, 0)) AS avg_customer_spent,
+    COUNT(DISTINCT CO.order_count) AS distinct_order_count
+FROM
+    region r
+JOIN
+    TopRegions TR ON r.r_regionkey = TR.n_regionkey
+LEFT JOIN
+    SupplierAggregates SA ON SA.s_suppkey IN (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        JOIN part p ON ps.ps_partkey = p.p_partkey
+        WHERE p.p_size BETWEEN 10 AND 20
+    )
+LEFT JOIN
+    CustomerOrders CO ON CO.c_custkey IN (
+        SELECT o.o_custkey
+        FROM orders o
+        WHERE o.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31'
+    )
+GROUP BY
+    r.r_name
+ORDER BY
+    region_total_supplycost DESC
+LIMIT 5;

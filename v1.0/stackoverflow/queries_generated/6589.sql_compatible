@@ -1,0 +1,48 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        RANK() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS PostRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+), ActiveUsers AS (
+    SELECT UserId, DisplayName, TotalPosts, TotalComments, TotalUpVotes, TotalDownVotes
+    FROM UserActivity
+    WHERE PostRank <= 10
+), PostQuality AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(MAX(ph.CreationDate), p.CreationDate) AS LastModifiedDate
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id, p.Title, p.Score, p.ViewCount, p.AnswerCount, p.CommentCount
+    HAVING COUNT(ph.Id) > 5 AND AVG(p.Score) > 2
+)
+SELECT 
+    a.UserId,
+    a.DisplayName,
+    a.TotalPosts,
+    a.TotalComments,
+    pq.PostId,
+    pq.Title AS PostTitle,
+    pq.Score AS PostScore,
+    pq.ViewCount AS PostViewCount,
+    pq.AnswerCount AS PostAnswerCount,
+    pq.CommentCount AS PostCommentCount,
+    pq.LastModifiedDate
+FROM ActiveUsers a
+JOIN PostQuality pq ON a.UserId = pq.OwnerUserId
+ORDER BY a.TotalPosts DESC, pq.Score DESC;

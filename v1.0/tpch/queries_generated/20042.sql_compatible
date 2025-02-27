@@ -1,0 +1,51 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s2.s_suppkey, s2.s_name, s2.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier s2 ON ps.ps_suppkey = s2.s_suppkey
+    WHERE sh.level < 5
+)
+
+SELECT 
+    c.c_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity END) AS avg_return_qty,
+    (SELECT COUNT(*)
+     FROM lineitem li
+     WHERE li.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31' 
+     AND li.l_partkey IN (
+         SELECT p.p_partkey
+         FROM part p
+         WHERE p.p_size > (SELECT AVG(p_size) FROM part)
+     )) AS total_shipments,
+    STRING_AGG(DISTINCT CASE 
+                        WHEN l.l_shipmode = 'S' THEN l.l_comment 
+                        END, '; ') AS special_ship_comments
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN supplier_hierarchy sh ON l.l_suppkey = sh.s_suppkey
+WHERE c.c_acctbal IS NOT NULL 
+  AND o.o_orderstatus <> 'F'
+  AND EXISTS (SELECT 1 
+              FROM partsupp ps 
+              WHERE ps.ps_partkey = l.l_partkey 
+              AND ps.ps_availqty > 0)
+GROUP BY c.c_name
+HAVING SUM(l.l_extendedprice) > (SELECT AVG(total) 
+                                   FROM (
+                                       SELECT SUM(l2.l_extendedprice) AS total
+                                       FROM lineitem l2 
+                                       GROUP BY l2.l_orderkey 
+                                       HAVING COUNT(DISTINCT l2.l_suppkey) > 1
+                                   ) AS subquery)
+ORDER BY total_revenue DESC
+LIMIT 10;

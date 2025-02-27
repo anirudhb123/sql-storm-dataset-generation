@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        COUNT(c.Id) AS CommentsCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(DAY, -30, CAST('2024-10-01' AS DATE))
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.CreationDate, p.PostTypeId
+), 
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS ClosedDate,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON CAST(ph.Comment AS INT) = cr.Id 
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+), 
+PostSummary AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerName,
+        rp.CommentsCount,
+        rp.UpVotesCount,
+        rp.DownVotesCount,
+        COALESCE(cp.ClosedDate, 'Not Closed') AS ClosedDate,
+        COALESCE(cp.CloseReasons, 'No reasons') AS CloseReasons,
+        CASE 
+            WHEN rp.UpVotesCount > rp.DownVotesCount THEN 'Popular'
+            WHEN rp.UpVotesCount < rp.DownVotesCount THEN 'Unpopular'
+            ELSE 'Neutral'
+        END AS PostPopularity,
+        CASE 
+            WHEN rp.CreationDate < DATEADD(DAY, -7, CAST('2024-10-01 12:34:56' AS TIMESTAMP)) THEN 'Old'
+            ELSE 'Recent'
+        END AS PostAge
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.CommentsCount > 0 AND
+        (rp.UpVotesCount IS NOT NULL OR rp.DownVotesCount IS NOT NULL)
+)
+SELECT 
+    ps.Title,
+    ps.OwnerName,
+    ps.CommentsCount,
+    ps.UpVotesCount,
+    ps.DownVotesCount,
+    ps.ClosedDate,
+    ps.CloseReasons,
+    ps.PostPopularity,
+    ps.PostAge
+FROM 
+    PostSummary ps
+WHERE 
+    ps.PostRank <= 5
+ORDER BY 
+    ps.UpVotesCount DESC, ps.CommentsCount DESC;

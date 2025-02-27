@@ -1,0 +1,64 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ak.name AS actor_name,
+        ak.imdb_index AS actor_imdb_index
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        t.production_year >= 2000
+        AND c.country_code = 'USA'
+),
+KeywordStats AS (
+    SELECT 
+        md.movie_title,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        MovieDetails md
+    JOIN 
+        movie_keyword mk ON md.movie_title = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        md.movie_title
+),
+ActorCount AS (
+    SELECT 
+        movie_title,
+        COUNT(DISTINCT actor_name) AS actor_count
+    FROM 
+        MovieDetails
+    GROUP BY 
+        movie_title
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.company_name,
+    md.company_type,
+    kc.keyword_count,
+    kc.keywords,
+    ac.actor_count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    KeywordStats kc ON md.movie_title = kc.movie_title
+LEFT JOIN 
+    ActorCount ac ON md.movie_title = ac.movie_title
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_title;

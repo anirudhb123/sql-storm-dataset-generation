@@ -1,0 +1,42 @@
+WITH RECURSIVE region_hierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_regionkey = 1
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, rh.level + 1
+    FROM region_hierarchy rh
+    JOIN nation n ON rh.r_regionkey = n.n_regionkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(ps.ps_supplycost) AS average_supply_cost,
+    MAX(l.l_extendedprice) AS max_line_price,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS returned_quantity,
+    r.hierarchy_level
+FROM 
+    customer c 
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey AND l.l_suppkey = ps.ps_suppkey
+JOIN 
+    (SELECT n.n_nationkey, rh.r_name, rh.level AS hierarchy_level 
+    FROM nation n 
+    JOIN region_hierarchy rh ON n.n_regionkey = rh.r_regionkey
+    WHERE n.n_nationkey IS NOT NULL) r ON c.c_nationkey = r.n_nationkey
+WHERE 
+    o.o_orderstatus = 'F' 
+    AND l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+GROUP BY 
+    c.c_custkey, c.c_name, r.hierarchy_level
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

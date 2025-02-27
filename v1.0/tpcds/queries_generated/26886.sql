@@ -1,0 +1,59 @@
+
+WITH CustomerAddressCounts AS (
+    SELECT 
+        ca_city,
+        COUNT(*) AS address_count,
+        COUNT(DISTINCT ca_zip) AS unique_zip_count
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city
+),
+UpdatedCustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        CASE 
+            WHEN cd.cd_dep_count > 0 THEN 'Has Dependents'
+            ELSE 'No Dependents'
+        END AS dependent_status,
+        cc.address_count,
+        cc.unique_zip_count
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        CustomerAddressCounts cc ON cd.cd_demo_sk = (SELECT TOP 1 c_customer_sk FROM customer WHERE c_customer_sk IS NOT NULL ORDER BY NEWID())
+),
+SalesSummary AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_items_sold,
+        SUM(ws.ws_net_paid_inc_tax) AS total_revenue,
+        COUNT(DISTINCT ws.ws_order_number) AS unique_orders
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_id
+)
+SELECT 
+    u.cd_demo_sk,
+    u.cd_gender,
+    u.cd_marital_status,
+    u.cd_education_status,
+    u.cd_purchase_estimate,
+    u.dependent_status,
+    s.total_items_sold,
+    s.total_revenue,
+    s.unique_orders
+FROM 
+    UpdatedCustomerDemographics u
+JOIN 
+    SalesSummary s ON u.address_count IS NOT NULL
+WHERE 
+    u.cd_purchase_estimate > 1000
+ORDER BY 
+    s.total_revenue DESC
+LIMIT 100;

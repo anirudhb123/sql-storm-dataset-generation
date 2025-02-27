@@ -1,0 +1,43 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           CAST(s.s_name AS VARCHAR(255)) AS full_supplier_name,
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           CONCAT(sh.full_supplier_name, ' -> ', s.s_name),
+           sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_suppkey
+    WHERE sh.level < 3
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1996-01-01'
+    GROUP BY o.o_orderkey
+),
+ranked_orders AS (
+    SELECT os.o_orderkey, os.total_revenue,
+           RANK() OVER (ORDER BY os.total_revenue DESC) AS revenue_rank
+    FROM order_summary os
+)
+SELECT r.n_name, r.r_comment, 
+       COALESCE(SUM(os.total_revenue), 0) AS total_revenue_generated,
+       COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END), 0) AS total_returned_items,
+       s.full_supplier_name
+FROM ranked_orders ro
+LEFT JOIN customer c ON c.c_custkey = (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderkey = ro.o_orderkey)
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN lineitem l ON l.l_orderkey = ro.o_orderkey
+LEFT JOIN supplier_hierarchy s ON s.s_suppkey = l.l_suppkey
+GROUP BY r.n_name, r.r_comment, s.full_supplier_name
+HAVING COALESCE(SUM(os.total_revenue), 0) > (SELECT AVG(total_revenue) FROM ranked_orders)
+ORDER BY total_revenue_generated DESC, total_returned_items ASC
+FETCH FIRST 10 ROWS ONLY;

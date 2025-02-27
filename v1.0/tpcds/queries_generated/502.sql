@@ -1,0 +1,52 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        sr.item_sk,
+        sr.return_quantity,
+        sr.return_amt,
+        RANK() OVER (PARTITION BY sr.item_sk ORDER BY sr.returned_date_sk DESC) as rn
+    FROM 
+        store_returns sr
+),
+StoreSalesData AS (
+    SELECT 
+        ss.store_sk,
+        ss.item_sk,
+        SUM(ss.ext_sales_price) AS total_sales,
+        COUNT(ss.ticket_number) AS number_of_sales
+    FROM 
+        store_sales ss
+    GROUP BY 
+        ss.store_sk, ss.item_sk
+),
+WebSalesData AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.item_sk,
+        SUM(ws.ext_sales_price) AS total_web_sales,
+        COUNT(ws.order_number) AS number_of_web_sales
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk, ws.item_sk
+)
+SELECT 
+    coalesce(s.store_sales, 0) AS store_sales,
+    coalesce(w.web_sales, 0) AS web_sales,
+    r.return_quantity,
+    r.return_amt,
+    (s.number_of_sales + w.number_of_web_sales) AS total_sales_count,
+    (s.total_sales + w.total_web_sales) AS total_revenue
+FROM 
+    RankedReturns r
+LEFT JOIN 
+    StoreSalesData s ON r.item_sk = s.item_sk 
+LEFT JOIN 
+    WebSalesData w ON r.item_sk = w.item_sk
+WHERE 
+    r.rn = 1 
+    AND (r.return_quantity < 5 OR r.return_amt > 100.00)
+ORDER BY 
+    total_revenue DESC;

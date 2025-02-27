@@ -1,0 +1,60 @@
+WITH Customer_Sales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_quantity) AS Total_Quantity_Sold,
+        SUM(ws.ws_net_paid) AS Total_Net_Paid,
+        AVG(ws.ws_net_profit) AS Average_Net_Profit
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+
+Demographic_Analysis AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(cs.c_customer_sk) AS Customer_Count,
+        AVG(cs.Total_Net_Paid) AS Avg_Sales_Value,
+        SUM(cs.Total_Quantity_Sold) AS Total_Sold_Quantity
+    FROM 
+        customer_demographics cd
+    JOIN 
+        Customer_Sales cs ON cs.c_customer_sk = c.c_customer_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+
+Sales_By_Day AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.ws_ext_sales_price) AS Daily_Sales,
+        COUNT(DISTINCT ws.ws_order_number) AS Order_Count
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_date
+)
+
+SELECT 
+    da.cd_gender,
+    da.cd_marital_status,
+    da.Customer_Count,
+    da.Avg_Sales_Value,
+    da.Total_Sold_Quantity,
+    sbd.d_date,
+    sbd.Daily_Sales,
+    sbd.Order_Count
+FROM 
+    Demographic_Analysis da
+JOIN 
+    Sales_By_Day sbd ON sbd.d_date >= cast('2002-10-01' as date) - INTERVAL '30 days'
+WHERE 
+    da.Customer_Count > 1000
+ORDER BY 
+    da.Total_Sold_Quantity DESC, sbd.Daily_Sales DESC;

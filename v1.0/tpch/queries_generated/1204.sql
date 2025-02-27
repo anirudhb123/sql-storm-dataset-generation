@@ -1,0 +1,54 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2023-12-31'
+),
+AggregatedLineitems AS (
+    SELECT 
+        li.l_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+        COUNT(DISTINCT li.l_linenumber) AS item_count
+    FROM 
+        lineitem li
+    WHERE 
+        li.l_shipdate >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY 
+        li.l_orderkey
+)
+SELECT 
+    c.c_name,
+    COALESCE(SUM(a.total_revenue), 0) AS total_revenue,
+    MAX(o.order_rank) AS highest_order_rank,
+    COUNT(DISTINCT COALESCE(a.l_orderkey, 0)) AS total_orders,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ' (', p.p_type, ')'), ', ') AS products_sold
+FROM 
+    customer c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    AggregatedLineitems a ON o.o_orderkey = a.l_orderkey
+LEFT JOIN 
+    lineitem li ON o.o_orderkey = li.l_orderkey
+LEFT JOIN 
+    partsupp ps ON li.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    c.c_acctbal > (
+        SELECT AVG(c1.c_acctbal)
+        FROM customer c1
+        WHERE c1.c_nationkey = c.c_nationkey
+    )
+    AND o.o_orderstatus IN ('O', 'F')
+GROUP BY 
+    c.c_name
+HAVING 
+    SUM(a.total_revenue) IS NOT NULL
+ORDER BY 
+    total_revenue DESC;

@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(DISTINCT pl.RelatedPostId) FROM PostLinks pl WHERE pl.PostId = p.Id) AS RelatedLinksCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year') AND
+        p.PostTypeId = 1
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    up.UserId,
+    COALESCE(SUM(rp.ViewCount), 0) AS TotalViewCount,
+    COALESCE(MAX(rp.CommentCount), 0) AS MaxCommentCount,
+    ub.TotalBadges,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    CASE 
+        WHEN COUNT(rp.PostId) > 0 THEN 'Active' 
+        ELSE 'Inactive' 
+    END AS UserStatus
+FROM 
+    Users up
+LEFT JOIN 
+    RankedPosts rp ON up.Id = rp.OwnerUserId
+LEFT JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+GROUP BY 
+    up.UserId
+HAVING 
+    COALESCE(SUM(rp.ViewCount), 0) > 1000 
+
+UNION ALL
+
+SELECT 
+    -1 AS UserId, 
+    0 AS TotalViewCount, 
+    0 AS MaxCommentCount, 
+    0 AS TotalBadges, 
+    0 AS GoldBadges, 
+    0 AS SilverBadges, 
+    0 AS BronzeBadges,
+    'Not Applicable' AS UserStatus
+WHERE 
+    NOT EXISTS (SELECT 1 FROM Users);

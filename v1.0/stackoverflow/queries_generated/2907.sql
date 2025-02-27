@@ -1,0 +1,72 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 0
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END), 0) AS PositiveScores,
+        COALESCE(SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END), 0) AS NegativeScores,
+        AVG(p.ViewCount) AS AvgViews
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        p.TotalPosts,
+        p.PositiveScores,
+        p.NegativeScores,
+        p.AvgViews,
+        R.UserRank
+    FROM 
+        PostStats p 
+    INNER JOIN 
+        RankedUsers R ON p.OwnerUserId = R.UserId
+    INNER JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    WHERE 
+        p.TotalPosts > 10
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.CreationDate,
+        ph.Comment AS CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS ReasonRank
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.PositiveScores,
+    tu.NegativeScores,
+    tu.AvgViews,
+    COALESCE(cp.Title, 'No Closed Posts') AS ClosedPostTitle,
+    COALESCE(cp.CloseReason, 'N/A') AS LastCloseReason,
+    tu.UserRank
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    ClosedPosts cp ON tu.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = cp.Id)
+ORDER BY 
+    tu.UserRank
+LIMIT 20;
+

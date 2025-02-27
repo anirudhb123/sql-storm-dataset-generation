@@ -1,0 +1,41 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_name, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_name ORDER BY o.o_orderdate) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= '1997-01-01'
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+PopularParts AS (
+    SELECT p.p_partkey, p.p_name, COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING COUNT(DISTINCT l.l_orderkey) > 5
+),
+RegionStats AS (
+    SELECT r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_name
+)
+SELECT oh.o_orderkey, oh.o_orderdate, oh.c_name, tp.p_name, ts.s_name, 
+       rp.r_name, oh.order_rank, 
+       CASE 
+           WHEN oh.order_rank = 1 THEN 'First Order'
+           WHEN oh.order_rank BETWEEN 2 AND 5 THEN 'Repeat Order'
+           ELSE 'Established Customer' 
+       END AS customer_category
+FROM OrderHierarchy oh
+JOIN PopularParts tp ON tp.order_count > 5
+LEFT JOIN TopSuppliers ts ON ts.total_supply_cost > 10000
+JOIN RegionStats rp ON rp.nation_count >= 2
+WHERE tp.p_name NOT LIKE '%generic%'
+AND ts.s_name IS NOT NULL
+ORDER BY oh.o_orderdate DESC, customer_category;

@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND mc.note IN ('(1946) (France) (theatrical) (16mm)', '(1959) (UK) (TV)', '(1981) (Netherlands) (all media)', '(1996) (Australia) (all media) (Sega Gold Collection)', '(2008) (USA) (all media) (XBox 360)', '(New Zealand) (video)', '(developer: GBA version)', '(presents) (as Cinerenta)', '(segment "Flesh for Kung Fu")') AND t.md5sum IS NOT NULL;

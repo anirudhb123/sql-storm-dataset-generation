@@ -1,0 +1,74 @@
+WITH RECURSIVE customer_orders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderdate >= DATE '1997-01-01'
+),
+supplier_parts AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name, ps.ps_partkey
+),
+ranked_lineitems AS (
+    SELECT
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_returnflag,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS line_item_number
+    FROM
+        lineitem l
+)
+SELECT
+    COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    p.p_name,
+    SUM(COALESCE(li.l_extendedprice * (1 - li.l_discount), 0)) AS total_revenue,
+    SUM(CASE
+            WHEN li.l_returnflag = 'R' THEN li.l_quantity * -1
+            ELSE li.l_quantity
+        END) AS total_quantity,
+    rp.total_avail_qty,
+    rp.avg_supply_cost,
+    COUNT(DISTINCT co.o_orderkey) AS order_count,
+    MAX(co.o_totalprice) AS max_order_value
+FROM
+    customer_orders co
+LEFT JOIN
+    ranked_lineitems li ON co.o_orderkey = li.l_orderkey
+LEFT JOIN
+    parts p ON li.l_partkey = p.p_partkey
+LEFT JOIN
+    supplier_parts rp ON li.l_suppkey = rp.s_suppkey AND li.l_partkey = rp.ps_partkey
+LEFT JOIN
+    supplier s ON li.l_suppkey = s.s_suppkey
+GROUP BY
+    c.c_custkey, p.p_name, s.s_name, co.c_name, rp.total_avail_qty, rp.avg_supply_cost
+HAVING
+    SUM(li.l_extendedprice * (1 - li.l_discount)) > 1000
+ORDER BY
+    total_revenue DESC, customer_name
+LIMIT 100;

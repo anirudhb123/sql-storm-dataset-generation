@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT a.Id) AS TotalAcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostViews AS (
+    SELECT 
+        PostId,
+        SUM(ViewCount) AS TotalViews
+    FROM 
+        Posts
+    GROUP BY 
+        PostId
+)
+
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalBadges,
+    ua.TotalPosts,
+    ua.TotalAcceptedAnswers,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    pv.TotalViews,
+    CASE WHEN rp.rn = 1 THEN 'Latest Post'
+         ELSE 'Older Post' END AS PostStatus
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    RankedPosts rp ON ua.UserId = rp.PostId
+LEFT JOIN 
+    PostViews pv ON rp.PostId = pv.PostId
+WHERE 
+    ua.TotalPosts > 0
+ORDER BY 
+    ua.TotalBadges DESC, 
+    ua.TotalPosts DESC, 
+    rp.CreationDate DESC
+LIMIT 50;

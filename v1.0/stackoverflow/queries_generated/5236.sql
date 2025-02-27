@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2 -- Answers
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        MAX(ph.CreationDate) AS LastActivity
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.AnswerCount,
+    ur.DisplayName AS OwnerName,
+    ur.Reputation,
+    ur.BadgeCount,
+    pa.VoteCount,
+    pa.LastActivity
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+JOIN 
+    PostActivity pa ON rp.PostId = pa.PostId
+WHERE 
+    rp.Rank <= 5 -- Top 5 questions per user
+ORDER BY 
+    rp.ViewCount DESC, 
+    rp.Score DESC;

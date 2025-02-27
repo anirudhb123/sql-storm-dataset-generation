@@ -1,0 +1,81 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title ASC) AS title_rank,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY t.id) AS cast_count,
+        COUNT(DISTINCT mk.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        r.title_rank,
+        r.cast_count,
+        r.keyword_count,
+        CASE 
+            WHEN r.cast_count > 10 THEN 'Large Cast'
+            WHEN r.cast_count BETWEEN 5 AND 10 THEN 'Medium Cast'
+            ELSE 'Small Cast'
+        END AS cast_size
+    FROM 
+        RankedMovies r
+    WHERE 
+        r.cast_count > 0
+),
+DirectorInfo AS (
+    SELECT 
+        c.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS directors
+    FROM 
+        movie_companies c
+    JOIN 
+        company_name cn ON c.company_id = cn.id
+    JOIN 
+        company_type ct ON c.company_type_id = ct.id
+    WHERE 
+        ct.kind ILIKE '%Director%'
+    GROUP BY 
+        c.movie_id
+),
+FinalResults AS (
+    SELECT 
+        f.title,
+        f.production_year,
+        f.cast_size,
+        COALESCE(d.directors, 'Unknown') AS directors,
+        f.keyword_count
+    FROM 
+        FilteredMovies f
+    LEFT JOIN 
+        DirectorInfo d ON f.movie_id = d.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    cast_size,
+    directors,
+    keyword_count,
+    CASE 
+        WHEN keyword_count > 5 THEN 'Rich in Keywords'
+        ELSE 'Limited Keywords'
+    END AS keyword_analysis,
+    (SELECT AVG(cast_count) FROM FilteredMovies) AS average_cast_count,
+    (SELECT COUNT(DISTINCT production_year) FROM FilteredMovies) AS unique_years
+FROM 
+    FinalResults
+WHERE 
+    cast_size IN ('Large Cast', 'Medium Cast')
+ORDER BY 
+    production_year DESC, 
+    keyword_count DESC;

@@ -1,0 +1,70 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sold_date_sk DESC) AS cumulative_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sold_date_sk DESC) AS row_num
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+),
+CustomerHierarchy AS (
+    SELECT 
+        ca.ca_address_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk,
+        RANK() OVER (PARTITION BY hd.hd_income_band_sk ORDER BY cd.cd_purchase_estimate DESC) AS rank_within_band
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON hd.hd_demo_sk = c.c_current_hdemo_sk
+),
+WebSalesReturns AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returned,
+        SUM(wr.wr_return_amt_inc_tax) AS total_return_amt
+    FROM web_returns wr
+    GROUP BY wr.wr_item_sk
+),
+DailyReturns AS (
+    SELECT 
+        dd.d_date_id,
+        COUNT(*) AS total_returns,
+        SUM(COALESCE(sr.sr_return_qty, 0)) AS total_return_volume
+    FROM date_dim dd
+    LEFT JOIN store_returns sr ON dd.d_date_sk = sr.sr_returned_date_sk
+    GROUP BY dd.d_date_id
+),
+FinalReport AS (
+    SELECT 
+        ch.ca_address_id,
+        rs.web_site_sk,
+        SUM(rs.cumulative_quantity * ch.rank_within_band) AS weighted_sales,
+        COALESCE(SUM(wr.total_returned), 0) AS total_returns,
+        COALESCE(SUM(dr.total_returns), 0) AS daily_returns
+    FROM RankedSales rs
+    FULL OUTER JOIN CustomerHierarchy ch ON ch.rank_within_band < 10
+    LEFT JOIN WebSalesReturns wr ON rs.ws_item_sk = wr.wr_item_sk
+    LEFT JOIN DailyReturns dr ON rs.ws_sold_date_sk = dr.d_date_id
+    WHERE ch.cd_gender = 'F' OR ch.cd_marital_status IS NULL
+    GROUP BY ch.ca_address_id, rs.web_site_sk
+    HAVING SUM(rs.cumulative_quantity * ch.rank_within_band) > 100 AND COALESCE(SUM(wr.total_returned), 0) < 50
+)
+SELECT 
+    F.ca_address_id,
+    F.web_site_sk,
+    F.weighted_sales,
+    F.total_returns,
+    F.daily_returns,
+    CASE 
+        WHEN F.weighted_sales IS NULL THEN 'No Sales'
+        WHEN F.weighted_sales < 200 THEN 'Low Sales'
+        ELSE 'High Sales'
+    END AS sales_category
+FROM FinalReport F
+ORDER BY F.weighted_sales DESC NULLS LAST;

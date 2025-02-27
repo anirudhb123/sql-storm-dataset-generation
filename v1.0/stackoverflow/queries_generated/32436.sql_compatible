@@ -1,0 +1,42 @@
+
+WITH RecursivePostDetails AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.OwnerUserId, 
+        P.ParentId, 
+        P.CreationDate,
+        1 AS Level,
+        CAST(P.Title AS VARCHAR(400)) AS Path
+    FROM Posts P
+    WHERE P.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        P2.Id AS PostId, 
+        P2.Title, 
+        P2.OwnerUserId, 
+        P2.ParentId, 
+        P2.CreationDate,
+        Level + 1,
+        CAST(RPD.Path || ' -> ' || P2.Title AS VARCHAR(400)) AS Path
+    FROM Posts P2
+    INNER JOIN RecursivePostDetails RPD ON P2.ParentId = RPD.PostId
+)
+SELECT 
+    U.DisplayName AS UserName, 
+    COUNT(P.Id) AS AnswerCount,
+    SUM(CASE WHEN V.CreationDate IS NOT NULL AND V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN V.CreationDate IS NOT NULL AND V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    MAX(CASE WHEN (P.ClosedDate IS NOT NULL AND PH.PostHistoryTypeId = 10) THEN 1 ELSE 0 END) AS ClosedQuestion,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags,
+    RD.Path AS AnswerPath
+FROM RecursivePostDetails RD
+JOIN Posts P ON RD.PostId = P.AcceptedAnswerId 
+JOIN Users U ON U.Id = P.OwnerUserId
+LEFT JOIN Votes V ON V.PostId = P.Id
+LEFT JOIN PostHistory PH ON PH.PostId = P.Id AND PH.CreationDate = (SELECT MAX(CreationDate) FROM PostHistory WHERE PostId = P.Id)
+LEFT JOIN Tags T ON T.Id IN (SELECT CAST(UNNEST(STRING_TO_ARRAY(P.Tags, '<>')) AS INT))
+WHERE RD.Level = 1  
+GROUP BY U.DisplayName, RD.Path
+HAVING COUNT(P.Id) > 10
+ORDER BY UserName;

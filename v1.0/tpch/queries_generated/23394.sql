@@ -1,0 +1,69 @@
+WITH RegionalStats AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(s.s_acctbal) AS total_supplier_balance,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_after_discount
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        r.r_name
+),
+OrderStats AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(*) FILTER (WHERE l.l_returnflag = 'R') AS returns_count
+    FROM
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND o.o_totalprice IS NOT NULL
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+CombinedStats AS (
+    SELECT 
+        rs.r_name,
+        rs.nation_count,
+        rs.total_supplier_balance,
+        os.total_order_value,
+        os.returns_count,
+        ROW_NUMBER() OVER (PARTITION BY rs.r_name ORDER BY os.total_order_value DESC) AS rank
+    FROM 
+        RegionalStats rs
+    LEFT JOIN 
+        OrderStats os ON rs.nation_count > 0
+)
+SELECT 
+    DISTINCT c.c_name,
+    c.c_acctbal,
+    cs.r_name,
+    cs.total_supplier_balance,
+    cs.total_order_value,
+    cs.returns_count
+FROM 
+    customer c
+LEFT JOIN 
+    CombinedStats cs ON c.c_nationkey IN (
+        SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = (
+            SELECT r.r_regionkey FROM region r WHERE r.r_name = cs.r_name
+        )
+    )
+WHERE 
+    c.c_acctbal IS NOT NULL 
+    AND (c.c_mktsegment = 'BUILDING' OR cs.total_order_value IS NOT NULL)
+ORDER BY 
+    cs.total_supplier_balance DESC NULLS LAST, 
+    cs.returns_count ASC NULLS FIRST
+LIMIT 100;

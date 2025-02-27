@@ -1,0 +1,52 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(V.VoteTypeId = 2) AS UpVotes,
+        SUM(V.VoteTypeId = 3) AS DownVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Votes V ON V.UserId = U.Id
+    GROUP BY U.Id
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        U.DisplayName AS OwnerDisplayName
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.CommentCount,
+    U.BadgeCount,
+    U.UpVotes,
+    U.DownVotes,
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.ViewCount,
+    P.AnswerCount,
+    P.CommentCount,
+    P.FavoriteCount
+FROM UserStats U
+JOIN PostStats P ON U.UserId = P.OwnerUserId
+ORDER BY U.Reputation DESC, P.CreationDate DESC
+LIMIT 100;

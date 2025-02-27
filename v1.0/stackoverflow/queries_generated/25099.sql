@@ -1,0 +1,61 @@
+WITH TagUsage AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN pt.Name = 'Question' THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN pt.Name = 'Answer' THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(coalesce(CHAR_LENGTH(p.Body) - CHAR_LENGTH(REPLACE(p.Body, ' ', '')), 0) + 1) AS WordCount
+    FROM
+        Tags t
+    JOIN
+        Posts p ON t.Id = ANY (string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    JOIN
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY
+        t.TagName
+),
+TagMetrics AS (
+    SELECT
+        TagName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        WordCount,
+        CASE
+            WHEN PostCount > 0 THEN (WordCount::float / PostCount) ELSE 0 END AS AvgWordPerPost,
+        CASE
+            WHEN QuestionCount > 0 THEN (WordCount::float / QuestionCount) ELSE 0 END AS AvgWordPerQuestion,
+        CASE
+            WHEN AnswerCount > 0 THEN (WordCount::float / AnswerCount) ELSE 0 END AS AvgWordPerAnswer
+    FROM
+        TagUsage
+),
+TopTags AS (
+    SELECT
+        TagName,
+        PostCount,
+        AvgWordPerPost,
+        AvgWordPerQuestion,
+        AvgWordPerAnswer
+    FROM
+        TagMetrics
+    ORDER BY
+        PostCount DESC
+    LIMIT 10
+)
+SELECT
+    t.TagName,
+    t.PostCount,
+    t.AvgWordPerPost,
+    t.AvgWordPerQuestion,
+    t.AvgWordPerAnswer
+FROM
+    TopTags t
+JOIN 
+    (SELECT TagName, COUNT(DISTINCT PostId) AS LinkCount 
+     FROM PostLinks 
+     GROUP BY TagName) pl ON t.TagName = pl.TagName
+ORDER BY
+    pl.LinkCount DESC;

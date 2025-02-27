@@ -1,0 +1,71 @@
+WITH RECURSIVE price_summary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ps.ps_availqty * ps.ps_supplycost AS total_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_size > 10
+    UNION ALL
+    SELECT 
+        p_partkey,
+        p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ps.ps_availqty * ps.ps_supplycost * 1.1 AS total_cost
+    FROM 
+        price_summary 
+    JOIN 
+        partsupp ps ON price_summary.p_partkey = ps.ps_partkey
+    WHERE 
+        price_summary.total_cost < 1000
+), customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), order_line_summary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    ns.n_name, 
+    COUNT(DISTINCT co.c_custkey) AS customer_count,
+    SUM(ol.total_order_value) AS total_order_value,
+    AVG(ps.total_cost) AS avg_supply_cost,
+    MAX(co.total_spent) AS max_customer_spending
+FROM 
+    nation ns
+LEFT JOIN 
+    supplier s ON s.s_nationkey = ns.n_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    customer_orders co ON co.c_custkey = s.s_suppkey
+JOIN 
+    order_line_summary ol ON ol.o_orderkey = ps.ps_partkey
+GROUP BY 
+    ns.n_nationkey
+HAVING 
+    COALESCE(MAX(co.total_spent), 0) > 1000
+ORDER BY 
+    total_order_value DESC;

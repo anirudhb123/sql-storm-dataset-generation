@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),  
+AggregateOrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+), 
+CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name AS nation_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name,
+    COALESCE(RS.s_name, 'Unknown Supplier') AS supplier_name,
+    COALESCE(AGS.total_revenue, 0) AS total_revenue,
+    CASE 
+        WHEN RS.rank = 1 THEN 'Top Supplier' 
+        ELSE 'Other Supplier' 
+    END AS supplier_status,
+    cn.nation_name,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(l.l_discount) OVER (PARTITION BY l.l_partkey) AS avg_discount,
+    COUNT(DISTINCT o.o_orderkey) AS unique_order_count
+FROM 
+    part p
+LEFT JOIN 
+    RankedSuppliers RS ON p.p_partkey = RS.ps_partkey
+LEFT JOIN 
+    AggregateOrderStats AGS ON RS.ps_partkey = AGS.o_orderkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    CustomerNation cn ON cn.c_custkey = (SELECT MAX(c.c_custkey) FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'FRANCE'))
+GROUP BY 
+    ps.ps_partkey, p.p_name, RS.s_name, AGS.total_revenue, RS.rank, cn.nation_name
+HAVING 
+    SUM(l.l_quantity) > 100 
+    OR COUNT(DISTINCT o.o_orderkey) = 0 
+    OR COUNT(DISTINCT AGS.o_orderkey) IS NULL
+ORDER BY 
+    total_revenue DESC, p.p_name ASC;

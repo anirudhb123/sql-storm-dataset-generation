@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- CTE to recursively find all linked movies
+    SELECT ml.movie_id, ml.linked_movie_id, 1 as depth
+    FROM movie_link ml
+    WHERE ml.movie_id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT ml.movie_id, ml.linked_movie_id, mh.depth + 1
+    FROM movie_link ml
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.linked_movie_id
+),
+
+MovieRatings AS (
+    -- CTE to rank movies by their production year and title
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        RANK() OVER (PARTITION BY m.production_year ORDER BY m.title) AS rank_in_year
+    FROM title m
+    WHERE m.production_year IS NOT NULL
+),
+
+CastInfoWithRole AS (
+    -- CTE to get cast info along with roles
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        c.nr_order,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN role_type r ON c.role_id = r.id
+    JOIN title m ON c.movie_id = m.id
+),
+
+CompanyProduction AS (
+    -- CTE to gather companies involved in production
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM movie_companies mc
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    LEFT JOIN company_type ct ON mc.company_type_id = ct.id
+)
+
+-- Final Query
+SELECT
+    t.title,
+    t.production_year,
+    mh.linked_movie_id,
+    ci.actor_name,
+    ci.role_name,
+    cp.company_name,
+    cp.company_type,
+    CASE 
+        WHEN cp.company_type IS NULL THEN 'No Company Info'
+        ELSE cp.company_type 
+    END AS company_info,
+    COUNT(DISTINCT ci.actor_name) OVER (PARTITION BY t.id) AS total_actors,
+    SUM(CASE WHEN ci.role_name IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY t.id) AS roles_count
+FROM title t
+LEFT JOIN MovieHierarchy mh ON t.id = mh.movie_id
+LEFT JOIN CastInfoWithRole ci ON t.id = ci.movie_id
+LEFT JOIN CompanyProduction cp ON t.id = cp.movie_id
+WHERE 
+    t.production_year > 2000 
+    AND (ci.actor_name IS NOT NULL OR cp.company_name IS NOT NULL)
+ORDER BY 
+    t.production_year DESC, 
+    mh.depth ASC, 
+    t.title;

@@ -1,0 +1,35 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_net_paid) AS total_sales, 
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        it.i_item_id, 
+        it.i_item_desc, 
+        rs.total_quantity, 
+        rs.total_sales
+    FROM RankedSales rs
+    JOIN item it ON rs.ws_item_sk = it.i_item_sk
+    WHERE rs.rank <= 10
+),
+SalesByCategory AS (
+    SELECT 
+        it.i_category, 
+        SUM(ti.total_sales) AS total_sales_by_category
+    FROM TopItems ti
+    JOIN item it ON ti.ws_item_sk = it.i_item_sk
+    GROUP BY it.i_category
+)
+SELECT 
+    tc.i_category, 
+    tc.total_sales_by_category,
+    SUM(tc.total_sales_by_category) OVER () AS grand_total_sales,
+    ROUND((tc.total_sales_by_category / NULLIF(SUM(tc.total_sales_by_category) OVER (), 0)) * 100, 2) AS percentage_of_grand_total
+FROM SalesByCategory tc
+ORDER BY tc.total_sales_by_category DESC;

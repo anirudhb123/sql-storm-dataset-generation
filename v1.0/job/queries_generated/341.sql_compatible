@@ -1,0 +1,64 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(mc.movie_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+),
+MovieStats AS (
+    SELECT 
+        cm.movie_id,
+        COUNT(DISTINCT ca.person_id) AS actor_count,
+        SUM(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS female_count
+    FROM 
+        complete_cast cm
+    JOIN 
+        cast_info ca ON cm.subject_id = ca.id
+    JOIN 
+        aka_name an ON ca.person_id = an.person_id
+    JOIN 
+        name p ON an.person_id = p.imdb_id
+    GROUP BY 
+        cm.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    ci.company_name,
+    ci.company_type,
+    ms.actor_count,
+    ms.female_count
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CompanyInfo ci ON rm.production_year = ci.movie_id
+LEFT JOIN 
+    MovieStats ms ON rm.title = ms.movie_id
+WHERE 
+    rm.rn <= 5
+ORDER BY 
+    rm.production_year DESC, rm.title ASC;

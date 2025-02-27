@@ -1,0 +1,57 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_size > 10
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000
+)
+SELECT 
+    r.r_name,
+    hvo.o_orderkey,
+    hvo.c_name,
+    hvo.total_line_value,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(s.s_acctbal, 0) AS supplier_account_balance
+FROM 
+    HighValueOrders hvo
+LEFT JOIN 
+    RankedSuppliers s ON hvo.o_orderkey = s.s_suppkey
+JOIN 
+    nation n ON n.n_nationkey = s.s_nationkey
+JOIN 
+    region r ON r.r_regionkey = n.n_regionkey
+WHERE 
+    r.r_name LIKE '%Europe%'
+    AND hvo.total_line_value BETWEEN 5000 AND 10000
+ORDER BY 
+    hvo.total_line_value DESC, 
+    r.r_name, 
+    hvo.o_orderkey;

@@ -1,0 +1,64 @@
+WITH RecursiveTagStats AS (
+    SELECT T.Id, T.TagName, T.Count, 0 AS Level
+    FROM Tags T
+    WHERE T.IsModeratorOnly = 0 
+    
+    UNION ALL
+    
+    SELECT T.Id, T.TagName, T.Count, Level + 1
+    FROM Tags T
+    INNER JOIN RecursiveTagStats RTS ON T.ExcerptPostId = RTS.Id
+    WHERE T.Count > 0 
+), 
+
+UserReputationStats AS (
+    SELECT U.Id AS UserId, U.DisplayName, SUM(V.BountyAmount) AS TotalBounties, 
+           COUNT(DISTINCT P.Id) AS TotalPosts,
+           COUNT(DISTINCT COALESCE(C.Id, 0)) AS TotalComments,
+           AVG(E.Reputation) OVER (PARTITION BY U.Id) AS AvgUserReputation,
+           RANK() OVER (ORDER BY SUM(V.BountyAmount) DESC) AS ReputationRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId 
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN (SELECT U.Id, U.Reputation
+               FROM Users U
+               WHERE U.Reputation IS NOT NULL) AS E ON TRUE
+    GROUP BY U.Id
+), 
+
+ClosedPosts AS (
+    SELECT P.Id AS PostId, P.Title,
+           COUNT(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+           COUNT(V.Id) AS VoteCount
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 6 
+    GROUP BY P.Id
+), 
+
+JoinedStats AS (
+    SELECT URS.UserId, URS.DisplayName, URS.TotalBounties, URS.TotalPosts, URS.TotalComments, 
+           URS.AvgUserReputation, URS.ReputationRank,
+           CTS.PostId, CTS.Title, CTS.CloseCount, CTS.VoteCount,
+           RST.TagName
+    FROM UserReputationStats URS
+    LEFT JOIN ClosedPosts CTS ON URS.TotalPosts > 0 
+    LEFT JOIN RecursiveTagStats RST ON RST.Count >= 100 
+)
+
+SELECT J.UserId, J.DisplayName, 
+       COALESCE(J.TotalBounties, 0) AS TotalBounties,
+       COALESCE(J.TotalPosts, 0) AS TotalPosts,
+       COALESCE(J.TotalComments, 0) AS TotalComments,
+       COALESCE(J.AvgUserReputation, 0) AS AvgUserReputation,
+       J.ReputationRank, 
+       J.Title, J.CloseCount,
+       CASE WHEN J.VoteCount IS NOT NULL THEN 'Closed' ELSE 'Open' END AS PostStatus,
+       STRING_AGG(DISTINCT J.TagName, ', ') AS Tags
+FROM JoinedStats J
+GROUP BY J.UserId, J.DisplayName, J.TotalBounties, 
+         J.TotalPosts, J.TotalComments, J.AvgUserReputation,
+         J.ReputationRank, J.Title, J.CloseCount
+ORDER BY J.ReputationRank
+LIMIT 50;

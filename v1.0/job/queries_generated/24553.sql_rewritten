@@ -1,0 +1,86 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_within_year
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.title, mt.production_year
+),
+
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank_within_year <= 5
+),
+
+MovieKeywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mt.id
+),
+
+MovieInfo AS (
+    SELECT 
+        mt.title,
+        mk.keywords,
+        COALESCE(mvi.info, 'No info available') AS info,
+        mvi.note AS movie_note
+    FROM 
+        TopMovies tm
+    JOIN 
+        aka_title mt ON tm.title = mt.title AND tm.production_year = mt.production_year
+    LEFT JOIN 
+        MovieKeywords mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        movie_info mvi ON mt.id = mvi.movie_id AND mvi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+)
+
+SELECT 
+    mi.title,
+    mi.production_year,
+    mi.keywords,
+    mi.info,
+    COALESCE(CHAR_LENGTH(mi.info) - CHAR_LENGTH(REPLACE(mi.info, ' ', '')), 0) + 1 AS word_count,
+    CASE 
+        WHEN mi.experimental_field IS NULL THEN 'No experiment conducted' 
+        ELSE mi.experimental_field 
+    END AS experimental_status
+FROM 
+    MovieInfo mi
+LEFT JOIN 
+    (SELECT 
+        mt.id,
+        'Some experimental data' AS experimental_field
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+    AND 
+        (SELECT COUNT(*) FROM movie_info WHERE movie_id = mt.id) > 2  
+    HAVING 
+        COUNT(DISTINCT (SELECT id FROM movie_info WHERE movie_id = mt.id)) 
+    ) AS exp ON mi.title = exp.title 
+ORDER BY 
+    mi.production_year DESC,
+    mi.title ASC;

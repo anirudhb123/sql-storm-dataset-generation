@@ -1,0 +1,68 @@
+WITH QuestionTags AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title AS QuestionTitle,
+        p.CreationDate AS QuestionCreationDate,
+        STRING_AGG(DISTINCT TRIM(UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))), ', ') AS Tags
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+UserVoteCounts AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+),
+CombinedData AS (
+    SELECT 
+        qt.QuestionId,
+        qt.QuestionTitle,
+        qt.QuestionCreationDate,
+        qt.Tags,
+        u.DisplayName AS UserDisplayName,
+        u.Reputation,
+        uv.VoteCount AS UserVoteCount,
+        uv.UpVotes,
+        uv.DownVotes
+    FROM 
+        QuestionTags qt
+    JOIN 
+        Posts p ON p.Id = qt.QuestionId
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserVoteCounts uv ON u.Id = uv.UserId
+)
+SELECT 
+    cd.QuestionId,
+    cd.QuestionTitle,
+    cd.QuestionCreationDate,
+    cd.Tags,
+    cd.UserDisplayName,
+    cd.Reputation,
+    cd.UserVoteCount,
+    cd.UpVotes,
+    cd.DownVotes,
+    CASE 
+        WHEN cd.VoteCount > 10 THEN 'Highly Active User'
+        WHEN cd.VoteCount BETWEEN 5 AND 10 THEN 'Moderately Active User'
+        ELSE 'Less Active User' 
+    END AS UserActivityLevel
+FROM 
+    CombinedData cd
+WHERE 
+    cd.Tags LIKE '%SQL%'
+ORDER BY 
+    cd.QuestionCreationDate DESC
+LIMIT 100;

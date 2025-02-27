@@ -1,0 +1,76 @@
+WITH RECURSIVE RegionalSales AS (
+    SELECT 
+        n.n_nationkey,
+        r.r_name AS region_name,
+        SUM(oi.total_sales) AS total_sales
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN (
+        SELECT 
+            c.c_nationkey,
+            o.o_orderkey,
+            SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+        FROM 
+            customer c
+        JOIN 
+            orders o ON c.c_custkey = o.o_custkey
+        JOIN 
+            lineitem l ON o.o_orderkey = l.l_orderkey
+        WHERE 
+            o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01'
+        GROUP BY 
+            c.c_nationkey, o.o_orderkey
+    ) AS oi ON n.n_nationkey = oi.c_nationkey 
+    GROUP BY 
+        n.n_nationkey, r.r_name
+    UNION ALL
+    SELECT 
+        n.n_nationkey,
+        r.r_name,
+        SUM(oi.total_sales) AS total_sales
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        RegionalSales rs ON n.n_nationkey = rs.n_nationkey
+    JOIN (
+        SELECT 
+            c.c_nationkey,
+            o.o_orderkey,
+            SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+        FROM 
+            customer c
+        JOIN 
+            orders o ON c.c_custkey = o.o_custkey
+        JOIN 
+            lineitem l ON o.o_orderkey = l.l_orderkey
+        WHERE 
+            l.l_shipdate < '2022-01-01' AND l.l_shipdate >= '2021-01-01'
+        GROUP BY 
+            c.c_nationkey, o.o_orderkey
+    ) AS oi ON n.n_nationkey = oi.c_nationkey 
+    GROUP BY 
+        n.n_nationkey, r.r_name
+),
+DistinctRegions AS (
+    SELECT 
+        DISTINCT r_name 
+    FROM 
+        region
+)
+SELECT 
+    r.region_name, 
+    COALESCE(rs.total_sales, 0) AS total_sales,
+    CASE 
+        WHEN COALESCE(rs.total_sales, 0) = 0 THEN 'No Sales' 
+        ELSE 'Sales Recorded' 
+    END AS sales_status
+FROM 
+    DistinctRegions r
+LEFT JOIN 
+    RegionalSales rs ON r.r_name = rs.region_name
+ORDER BY 
+    r.region_name;

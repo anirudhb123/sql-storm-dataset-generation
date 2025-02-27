@@ -1,0 +1,70 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        c.id AS cast_id,
+        c.movie_id,
+        c.person_id,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_rank,
+        NULLIF(a.name, '') AS actor_name
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL OR c.note IS NOT NULL -- Exclude actors without names or notes
+),
+MoviesWithActorCount AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year >= 2000 -- Only consider movies from 2000 onwards
+    GROUP BY 
+        t.id, t.title
+),
+ComplexJoin AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        COALESCE(NULLIF(m.actor_count, 0), 1) AS adjusted_actor_count,
+        ROW_NUMBER() OVER (ORDER BY m.actor_count DESC) AS movie_rank,
+        STRING_AGG(DISTINCT c.actor_name, ', ' ORDER BY c.role_rank) AS cast_list
+    FROM 
+        MoviesWithActorCount m
+    LEFT JOIN 
+        RecursiveCTE c ON m.movie_id = c.movie_id
+    GROUP BY 
+        m.movie_id, m.title, m.actor_count
+    HAVING 
+        COALESCE(m.actor_count, 0) > 2 -- Only include movies with more than 2 actors
+),
+FinalResults AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN movie_rank <= 10 THEN 'Top Movies'
+            WHEN movie_rank <= 50 THEN 'Medium Movies'
+            ELSE 'Lesser-known Movies'
+        END AS movie_category,
+        NULLIF(SUBSTRING(title FROM '(\d{4})$'), '') AS year_extracted
+    FROM 
+        ComplexJoin
+)
+SELECT 
+    title,
+    movie_category,
+    actor_count,
+    CAST(NULLIF(year_extracted, '') AS INTEGER) AS production_year,
+    cast_list,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = movie_id AND mi.info_type_id IN (1, 2)) AS info_count -- Assuming 1 and 2 are some specific info types
+FROM 
+    FinalResults
+WHERE 
+    movie_category = 'Top Movies'
+ORDER BY 
+    actor_count DESC, 
+    title ASC;

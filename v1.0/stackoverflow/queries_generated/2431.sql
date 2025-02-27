@@ -1,0 +1,54 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswerCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+),
+RecentPostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(COALESCE(CAST(V.BountyAmount AS INT), 0)) AS TotalBounties,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9)
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY P.OwnerUserId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(UR.QuestionCount, 0) AS TotalQuestions,
+    COALESCE(UR.AnswerCount, 0) AS TotalAnswers,
+    COALESCE(RP.TotalPosts, 0) AS TotalPosts,
+    COALESCE(RP.TotalBounties, 0) AS TotalBounties,
+    COALESCE(RP.TotalScore, 0) AS TotalScore,
+    COALESCE(RP.TotalComments, 0) AS TotalComments
+FROM Users U
+LEFT JOIN UserReputation UR ON U.Id = UR.UserId
+LEFT JOIN RecentPostStats RP ON U.Id = RP.OwnerUserId
+WHERE U.Reputation > 1000
+ORDER BY U.Reputation DESC
+FETCH FIRST 10 ROWS ONLY
+UNION ALL
+SELECT 
+    'Total' AS DisplayName,
+    SUM(U.Reputation) AS Reputation,
+    SUM(COALESCE(UR.QuestionCount, 0)) AS TotalQuestions,
+    SUM(COALESCE(UR.AnswerCount, 0)) AS TotalAnswers,
+    SUM(COALESCE(RP.TotalPosts, 0)) AS TotalPosts,
+    SUM(COALESCE(RP.TotalBounties, 0)) AS TotalBounties,
+    SUM(COALESCE(RP.TotalScore, 0)) AS TotalScore,
+    SUM(COALESCE(RP.TotalComments, 0)) AS TotalComments
+FROM Users U
+LEFT JOIN UserReputation UR ON U.Id = UR.UserId
+LEFT JOIN RecentPostStats RP ON U.Id = RP.OwnerUserId
+WHERE U.Reputation > 1000;

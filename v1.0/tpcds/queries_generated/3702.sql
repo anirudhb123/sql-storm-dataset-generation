@@ -1,0 +1,67 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        ws.ws_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returned_quantity,
+        SUM(wr.wr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+),
+ItemSalesReturns AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity_sold,
+        COALESCE(cr.total_returned_quantity, 0) AS total_returned_quantity,
+        sd.total_sales,
+        CASE 
+            WHEN COALESCE(cr.total_returned_quantity, 0) > 0 THEN 
+                (sd.total_sales - cr.total_return_amount) / NULLIF(sd.total_quantity_sold, 0)
+            ELSE 
+                sd.total_sales / NULLIF(sd.total_quantity_sold, 0)
+        END AS net_per_item
+    FROM 
+        SalesData sd
+    LEFT JOIN 
+        CustomerReturns cr ON sd.ws_item_sk = cr.wr_item_sk
+),
+RankedItems AS (
+    SELECT 
+        item_sk,
+        total_quantity_sold,
+        total_returned_quantity,
+        net_per_item,
+        RANK() OVER (ORDER BY net_per_item DESC) AS item_rank
+    FROM 
+        ItemSalesReturns
+)
+
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    r.total_quantity_sold,
+    r.total_returned_quantity,
+    r.net_per_item,
+    r.item_rank
+FROM 
+    RankedItems r
+JOIN 
+    item i ON r.item_sk = i.i_item_sk
+WHERE 
+    r.item_rank <= 10
+ORDER BY 
+    r.item_rank;

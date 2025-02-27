@@ -1,0 +1,66 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_state,
+        COUNT(DISTINCT ca_address_id) AS unique_addresses,
+        AVG(ca_gmt_offset) AS avg_gmt_offset
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+),
+DemographicStats AS (
+    SELECT 
+        cd_gender,
+        SUM(cd_purchase_estimate) AS total_purchase_estimate,
+        COUNT(cd_demo_sk) AS customer_count,
+        RANK() OVER (ORDER BY SUM(cd_purchase_estimate) DESC) AS purchase_rank
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+WeeklySales AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_quantity) AS total_items_sold,
+        ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY SUM(ws.net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq
+)
+SELECT 
+    a.ca_state,
+    a.unique_addresses,
+    a.avg_gmt_offset,
+    d.cd_gender,
+    d.total_purchase_estimate,
+    d.customer_count,
+    w.d_year,
+    w.d_month_seq,
+    w.total_sales,
+    w.total_orders,
+    w.total_items_sold
+FROM 
+    AddressStats a
+FULL OUTER JOIN 
+    DemographicStats d ON a.ca_state = CASE 
+                                            WHEN d.cd_gender = 'F' THEN 'CA'
+                                            ELSE NULL 
+                                         END
+FULL OUTER JOIN 
+    WeeklySales w ON a.unique_addresses > 50 OR d.customer_count IS NOT NULL
+WHERE 
+    (d.customer_count > 5 AND w.total_sales IS NOT NULL) 
+    OR (a.unique_addresses IS NULL AND d.customer_count < 3)
+ORDER BY 
+    w.d_year DESC, 
+    w.total_sales DESC, 
+    d.purchase_rank ASC
+LIMIT 100;

@@ -1,0 +1,63 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        c.country_code = 'USA'
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+    WHERE 
+        mh.level < 5 
+)
+
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mc.company_id) AS total_companies,
+    COUNT(DISTINCT ki.keyword) AS total_keywords,
+    STRING_AGG(DISTINCT ai.name, ', ') AS actor_names,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT ai.name) DESC) AS rank,
+    CASE 
+        WHEN COUNT(DISTINCT ai.name) > 5 THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS popularity_category
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword ki ON mk.keyword_id = ki.id
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ai ON ci.person_id = ai.person_id
+GROUP BY 
+    mh.movie_title,
+    mh.production_year
+HAVING 
+    COUNT(DISTINCT ai.name) > 0
+ORDER BY 
+    mh.production_year DESC, total_companies DESC;

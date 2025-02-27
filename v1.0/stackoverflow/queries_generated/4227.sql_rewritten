@@ -1,0 +1,59 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY SUM(v.BountyAmount) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(ps.ExcerptPostId, 0) AS ExcerptPostId,
+        COUNT(c.Id) AS TotalComments,
+        SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownVotes,
+        SUM(v.VoteTypeId = 1) AS AcceptedCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Posts ps ON p.Id = ps.ParentId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, ps.ExcerptPostId
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.TotalComments,
+        ps.TotalUpVotes - ps.TotalDownVotes AS NetVotes,
+        RANK() OVER (ORDER BY ps.TotalUpVotes DESC) AS VoteRank
+    FROM 
+        PostStats ps
+    WHERE 
+        ps.TotalComments > 0
+)
+SELECT 
+    ur.DisplayName,
+    tp.Title,
+    tp.TotalComments,
+    tp.NetVotes,
+    tp.VoteRank
+FROM 
+    UserReputation ur
+JOIN 
+    (SELECT * FROM TopPosts WHERE VoteRank <= 10) tp ON ur.Rank <= 10
+ORDER BY 
+    tp.NetVotes DESC, ur.TotalBounty DESC;

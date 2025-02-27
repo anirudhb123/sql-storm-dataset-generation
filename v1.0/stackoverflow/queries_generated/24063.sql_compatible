@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY COUNT(v.Id) DESC) AS RN
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.PostTypeId
+),
+UsersWithRecentActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.LastAccessDate,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Location IS NOT NULL OR u.WebsiteUrl IS NOT NULL
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.LastAccessDate
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '6 months'
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(rb.GoldBadges, 0) AS GoldBadges,
+    COALESCE(rb.SilverBadges, 0) AS SilverBadges,
+    COALESCE(rb.BronzeBadges, 0) AS BronzeBadges,
+    JSON_AGG(
+        JSON_OBJECT(
+            'PostId', rp.PostId,
+            'Title', rp.Title,
+            'VoteCount', rp.VoteCount,
+            'UpVotes', rp.UpVotes,
+            'DownVotes', rp.DownVotes
+        )
+    ) AS PostsSummary
+FROM 
+    Users u
+LEFT JOIN 
+    UsersWithRecentActivity uwa ON u.Id = uwa.UserId
+LEFT JOIN 
+    RecentBadges rb ON u.Id = rb.UserId
+LEFT JOIN 
+    RankedPosts rp ON uwa.PostCount > 5 AND rp.RN <= 5
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.DisplayName, u.Reputation, rb.GoldBadges, rb.SilverBadges, rb.BronzeBadges
+ORDER BY 
+    u.Reputation DESC, u.DisplayName ASC
+LIMIT 10;

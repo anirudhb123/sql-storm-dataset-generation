@@ -1,0 +1,68 @@
+
+WITH RECURSIVE ActorMovieCTE AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        c.movie_id,
+        t.title,
+        1 AS level
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    JOIN aka_title t ON c.movie_id = t.movie_id
+    WHERE t.production_year >= 2010
+    
+    UNION ALL
+    
+    SELECT 
+        a.id,
+        a.name,
+        c.movie_id,
+        t.title,
+        am.level + 1
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    JOIN aka_title t ON c.movie_id = t.movie_id
+    JOIN ActorMovieCTE am ON am.movie_id = c.movie_id
+    WHERE am.level < 3 
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT c.name, ', ') AS companies
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    GROUP BY mc.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(c.id) DESC) AS rank,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        COALESCE(mc.companies, 'No Companies') AS companies
+    FROM aka_title m
+    LEFT JOIN cast_info c ON m.id = c.movie_id
+    LEFT JOIN MovieKeywords mk ON m.id = mk.movie_id
+    LEFT JOIN MovieCompanies mc ON m.id = mc.movie_id
+    GROUP BY m.id, m.title, m.production_year
+)
+SELECT 
+    am.actor_name,
+    rm.title,
+    rm.production_year,
+    rm.rank,
+    rm.keywords,
+    rm.companies
+FROM ActorMovieCTE am
+JOIN RankedMovies rm ON am.movie_id = rm.movie_id
+WHERE rm.rank <= 5 
+ORDER BY am.actor_name, rm.production_year DESC;

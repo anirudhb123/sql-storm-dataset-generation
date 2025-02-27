@@ -1,0 +1,98 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        COALESCE(pa.AnswerCount, 0) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(Id) AS AnswerCount
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 2  
+        GROUP BY 
+            ParentId
+    ) pa ON p.Id = pa.ParentId
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        COALESCE(pa.AnswerCount, 0) AS AnswerCount
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(Id) AS AnswerCount
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 2  
+        GROUP BY 
+            ParentId
+    ) pa ON p.Id = pa.ParentId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+SELECT 
+    rph.PostId,
+    rph.Title,
+    rph.OwnerUserId,
+    u.DisplayName,
+    u.Reputation,
+    u.BadgeCount,
+    rph.AcceptedAnswerId,
+    rph.AnswerCount,
+    COALESCE(pvs.Upvotes, 0) AS TotalUpvotes,
+    COALESCE(pvs.Downvotes, 0) AS TotalDownvotes,
+    COALESCE(p.ClosedDate, 'No Closure') AS ClosedStatus,
+    CASE 
+        WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Accepted Answer Present'
+        ELSE 'No Accepted Answer' 
+    END AS AcceptanceStatus
+FROM 
+    RecursivePostHierarchy rph
+JOIN 
+    Users u ON rph.OwnerUserId = u.Id
+LEFT JOIN 
+    PostVoteSummary pvs ON rph.PostId = pvs.PostId
+LEFT JOIN 
+    Posts p ON rph.PostId = p.Id
+WHERE 
+    u.Reputation > 1000  
+ORDER BY 
+    rph.AnswerCount DESC, 
+    u.Reputation DESC
+LIMIT 50;

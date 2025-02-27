@@ -1,0 +1,64 @@
+WITH movie_years AS (
+    SELECT 
+        mt.title,
+        CAST(mt.production_year AS TEXT) AS production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.movie_id = mc.movie_id 
+    GROUP BY 
+        mt.title, mt.production_year
+),
+actor_roles AS (
+    SELECT 
+        ka.name,
+        COUNT(DISTINCT ci.movie_id) AS movies_acted,
+        STRING_AGG(DISTINCT rt.role, ', ') AS roles
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ka.name
+),
+keyword_summary AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+movies_with_keywords AS (
+    SELECT 
+        mt.title,
+        my.production_year,
+        ak.movies_acted,
+        ak.roles,
+        k.keywords
+    FROM 
+        movie_years my
+    JOIN 
+        actor_roles ak ON ak.movies_acted > 0
+    LEFT JOIN 
+        keyword_summary k ON my.title = k.keywords
+)
+SELECT 
+    *,
+    CASE 
+        WHEN company_count IS NULL THEN 'No Companies'
+        ELSE company_count::TEXT || ' Companies Participated'
+    END AS company_info,
+    COALESCE(roles, 'No Roles Assigned') AS role_summary
+FROM 
+    movies_with_keywords
+ORDER BY 
+    production_year DESC, movies_acted DESC
+LIMIT 10;
+

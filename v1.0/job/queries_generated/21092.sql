@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id as movie_id,
+        mt.title,
+        COALESCE(mt.production_year, 0) as production_year,
+        NULL::text as parent_title,
+        1 as level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        COALESCE(at.production_year, 0),
+        mh.title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT mh.movie_id) AS movie_count,
+    MAX(mh.production_year) AS latest_year,
+    STRING_AGG(DISTINCT mh.title, ', ') AS titles,
+    SUM(CASE WHEN (k.keyword IS NOT NULL) THEN 1 ELSE 0 END) AS keyword_presence_count,
+    ROUND(AVG(CASE WHEN (ci.nr_order IS NOT NULL) THEN ci.nr_order ELSE 0 END), 2) AS average_order,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY COUNT(DISTINCT mh.movie_id) DESC) AS rank
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id 
+LEFT JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    ak.name IS NOT NULL 
+    AND ak.name != ''
+    AND mh.production_year IS NOT NULL
+GROUP BY 
+    ak.name, ak.person_id
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 0 
+    AND MAX(mh.production_year) < EXTRACT(YEAR FROM CURRENT_DATE) - 5
+ORDER BY 
+    rank, movie_count DESC
+LIMIT 100;

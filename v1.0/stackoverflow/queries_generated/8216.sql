@@ -1,0 +1,50 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Ranking
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName, p.Score, p.CreationDate, p.Title, p.PostTypeId
+),
+FrequentTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, '<>')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.Author,
+    rp.CommentCount,
+    ft.TagName
+FROM 
+    RankedPosts rp
+JOIN 
+    FrequentTags ft ON ft.TagName = ANY(string_to_array(rp.Tags, '<>'))
+WHERE 
+    rp.Ranking <= 5
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

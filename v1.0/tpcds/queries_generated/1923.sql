@@ -1,0 +1,59 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        wr_refunded_customer_sk,
+        wr_returned_date_sk,
+        SUM(wr_return_quantity) AS total_returned,
+        SUM(wr_return_amt_inc_tax) AS total_return_value,
+        ROW_NUMBER() OVER (PARTITION BY wr_refunded_customer_sk ORDER BY wr_returned_date_sk DESC) AS rn
+    FROM
+        web_returns
+    GROUP BY 
+        wr_refunded_customer_sk, 
+        wr_returned_date_sk
+),
+TopCustomers AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_star_rating AS star_rating,
+        COALESCE(SUM(cr.total_returned), 0) AS total_items_returned,
+        COALESCE(SUM(cr.total_return_value), 0) AS total_return_value,
+        CASE
+            WHEN SUM(cr.total_return_value) IS NULL THEN 'No Returns'
+            WHEN SUM(cr.total_return_value) < 100 THEN 'Low Value'
+            WHEN SUM(cr.total_return_value) BETWEEN 100 AND 500 THEN 'Medium Value'
+            ELSE 'High Value'
+        END AS return_value_category
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        CustomerReturns cr ON c.c_customer_sk = cr.wr_refunded_customer_sk AND cr.rn = 1
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_star_rating
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.cd_gender,
+    tc.star_rating,
+    tc.total_items_returned,
+    tc.total_return_value,
+    tc.return_value_category,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    AVG(ws.ws_net_profit) AS avg_net_profit
+FROM
+    TopCustomers tc
+LEFT JOIN
+    web_sales ws ON tc.c_customer_sk = ws.ws_bill_customer_sk
+GROUP BY
+    tc.c_customer_sk, tc.c_first_name, tc.c_last_name, tc.cd_gender, tc.star_rating, 
+    tc.total_items_returned, tc.total_return_value, tc.return_value_category
+ORDER BY 
+    tc.total_return_value DESC
+LIMIT 100;

@@ -1,0 +1,97 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_ship_date_sk,
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rank_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_sales_price > 0
+    UNION ALL
+    SELECT 
+        cs.call_center_sk,
+        cs_ship_date_sk,
+        cs_item_sk,
+        cs_order_number,
+        cs_quantity,
+        cs_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY cs_net_profit DESC)
+    FROM 
+        catalog_sales cs
+    WHERE 
+        cs_sales_price IS NOT NULL AND cs_quantity IS NOT NULL
+    AND cs_order_number NOT IN (
+        SELECT 
+            ws_order_number 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_ship_date_sk < CURRENT_DATE
+    )
+),
+RankedSales AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN rank_profit IS NULL THEN 'Catalog Sales'
+            ELSE 'Web Sales'
+        END AS sales_channel
+    FROM 
+        SalesData
+    WHERE 
+        ws_item_sk IN (SELECT i_item_sk FROM item WHERE i_current_price > 100)
+    OR 
+        cs_item_sk IN (SELECT i_item_sk FROM item WHERE i_current_price BETWEEN 50 AND 100)
+),
+Profits AS (
+    SELECT 
+        sales_channel,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(*) AS sales_count,
+        COUNT(DISTINCT ws_item_sk) AS distinct_items
+    FROM 
+        RankedSales
+    GROUP BY 
+        sales_channel
+),
+HighProfit AS (
+    SELECT 
+        sales_channel,
+        total_profit,
+        sales_count,
+        distinct_items,
+        RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
+    FROM 
+        Profits
+),
+FinalAnalysis AS (
+    SELECT 
+        hp.sales_channel,
+        hp.total_profit,
+        hp.sales_count,
+        hp.distinct_items,
+        CASE 
+            WHEN hp.profit_rank = 1 THEN 'Highest Profit Channel'
+            WHEN hp.distinct_items > 50 THEN 'Broad Market Reach'
+            ELSE NULL
+        END AS insight
+    FROM 
+        HighProfit hp
+)
+SELECT 
+    fa.sales_channel,
+    fa.total_profit,
+    fa.sales_count,
+    fa.distinct_items,
+    fa.insight
+FROM 
+    FinalAnalysis fa
+WHERE 
+    fa.insight IS NOT NULL
+ORDER BY 
+    fa.total_profit DESC;

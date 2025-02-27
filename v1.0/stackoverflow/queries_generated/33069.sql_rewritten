@@ -1,0 +1,59 @@
+WITH RECURSIVE UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN P.PostTypeId = 3 THEN 1 ELSE 0 END) AS Wikis,
+        SUM(P.Score) AS TotalScore,
+        ROW_NUMBER() OVER(ORDER BY SUM(P.Score) DESC) AS Rank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+),
+RecentUserActivities AS (
+    SELECT 
+        U.DisplayName,
+        PH.CreationDate,
+        PH.Comment,
+        P.Title,
+        P.PostTypeId,
+        ROW_NUMBER() OVER(PARTITION BY U.Id ORDER BY PH.CreationDate DESC) AS RecentActivityRank
+    FROM PostHistory PH
+    JOIN Users U ON PH.UserId = U.Id
+    JOIN Posts P ON PH.PostId = P.Id
+    WHERE PH.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days')
+),
+TopUsers AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.TotalPosts,
+        U.Questions,
+        U.Answers,
+        U.Wikis,
+        U.TotalScore,
+        RANK() OVER(ORDER BY U.TotalScore DESC) AS ScoreRank
+    FROM UserPostStats U
+    JOIN (
+        SELECT UserId, DisplayName
+        FROM Users
+        WHERE Reputation > 1000
+    ) AS EligibleUsers ON U.UserId = EligibleUsers.UserId
+)
+
+SELECT 
+    TU.DisplayName,
+    TU.TotalPosts,
+    TU.Questions,
+    TU.Answers,
+    TU.Wikis,
+    TU.TotalScore,
+    RUA.CreationDate AS RecentActivityDate,
+    RUA.Comment AS RecentComment,
+    RUA.Title AS RecentPostTitle
+FROM TopUsers TU
+LEFT JOIN RecentUserActivities RUA ON TU.DisplayName = RUA.DisplayName AND RUA.RecentActivityRank = 1
+WHERE TU.ScoreRank <= 10
+ORDER BY TU.TotalScore DESC;

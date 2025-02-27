@@ -1,0 +1,73 @@
+
+WITH CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierPartStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopCustSpent AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        ROW_NUMBER() OVER (ORDER BY total_spent DESC) AS rank
+    FROM 
+        CustomerOrderStats c
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        DENSE_RANK() OVER (ORDER BY total_available_quantity DESC) AS supplier_rank
+    FROM 
+        SupplierPartStats s
+)
+SELECT 
+    tc.c_name AS customer_name,
+    ts.s_name AS supplier_name,
+    cos.total_orders,
+    cos.total_spent,
+    ps.avg_supply_cost,
+    NULLIF(cos.avg_order_value, 0) AS avg_order_value_non_null,
+    CASE 
+        WHEN ts.supplier_rank <= 5 THEN 'Top Supplier'
+        ELSE 'Regular Supplier' 
+    END AS supplier_category
+FROM 
+    TopCustSpent tc
+JOIN 
+    CustomerOrderStats cos ON tc.c_custkey = cos.c_custkey
+LEFT JOIN 
+    TopSuppliers ts ON ts.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT p.p_partkey 
+            FROM part p 
+            WHERE p.p_size > 20
+        )
+    )
+WHERE 
+    cos.total_orders > 1
+ORDER BY 
+    cos.total_spent DESC, ts.s_name;

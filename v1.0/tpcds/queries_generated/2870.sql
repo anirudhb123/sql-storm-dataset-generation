@@ -1,0 +1,56 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk, 
+        SUM(wr.return_quantity) AS total_returned_quantity, 
+        SUM(wr.return_amt) AS total_returned_amt,
+        COUNT(wr.order_number) AS return_count
+    FROM web_returns wr
+    GROUP BY wr.returning_customer_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+RankedReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        cr.total_returned_quantity,
+        cr.total_returned_amt,
+        RANK() OVER (ORDER BY cr.total_returned_quantity DESC) AS return_rank
+    FROM CustomerReturns cr
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ss.total_orders,
+    ss.total_net_profit,
+    rr.total_returned_quantity,
+    rr.total_returned_amt,
+    CASE 
+        WHEN rr.return_rank IS NULL THEN 'No Returns'
+        ELSE 'Returned'
+    END AS return_status
+FROM CustomerDetails cd
+LEFT JOIN SalesSummary ss ON cd.c_customer_sk = ss.ws_bill_customer_sk
+LEFT JOIN RankedReturns rr ON cd.c_customer_sk = rr.returning_customer_sk
+WHERE (cd.cd_gender = 'M' AND cd.cd_marital_status = 'M') 
+   OR (cd.cd_gender = 'F' AND cd.cd_marital_status = 'S')
+ORDER BY total_returned_quantity DESC NULLS LAST, cd.c_last_name;

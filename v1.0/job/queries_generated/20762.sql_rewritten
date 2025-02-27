@@ -1,0 +1,55 @@
+WITH RECURSIVE movie_chain AS (
+    SELECT
+        m.id AS movie_id,
+        1 AS depth,
+        t.title AS title,
+        CASE
+            WHEN t.production_year IS NULL THEN 'Unknown Year'
+            ELSE CAST(t.production_year AS text)
+        END AS production_year,
+        NULL AS parent_movie_id
+    FROM
+        aka_title t
+    JOIN
+        title m ON m.id = t.movie_id
+    WHERE
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT
+        mc.linked_movie_id,
+        mc.depth + 1,
+        t.title,
+        CASE
+            WHEN t.production_year IS NULL THEN 'Unknown Year'
+            ELSE CAST(t.production_year AS text)
+        END AS production_year,
+        mc.movie_id
+    FROM
+        movie_link mc
+    JOIN
+        title t ON mc.linked_movie_id = t.id
+    JOIN
+        movie_chain mc2 ON mc2.movie_id = mc.movie_id
+)
+
+SELECT
+    CASE
+        WHEN depth % 2 = 0 THEN 'Even depth: ' || title
+        ELSE 'Odd depth: ' || title
+    END AS movie_info,
+    COUNT(DISTINCT mc.movie_id) AS related_movies_count,
+    MAX(production_year) AS latest_year
+FROM
+    movie_chain mc
+LEFT JOIN
+    aka_name an ON mc.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id IN (SELECT person_id FROM name WHERE name ILIKE '%Smith%'))
+GROUP BY
+    movie_info,
+    depth
+HAVING
+    COUNT(DISTINCT mc.movie_id) > 2
+ORDER BY
+    latest_year DESC, 
+    related_movies_count DESC;

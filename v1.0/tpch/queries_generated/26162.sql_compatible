@@ -1,0 +1,79 @@
+
+WITH ranked_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_size,
+        p.p_container,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS mfgr_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 100.00
+),
+supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS orders_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+order_line_items AS (
+    SELECT 
+        l.o_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+)
+SELECT 
+    rp.p_name,
+    rp.p_mfgr,
+    rp.p_size,
+    ss.s_name AS supplier_name,
+    cs.c_name AS customer_name,
+    cs.orders_count,
+    cs.total_spent,
+    SUM(oli.l_extendedprice * (1 - oli.l_discount)) AS total_revenue
+FROM 
+    ranked_parts rp
+JOIN 
+    partsupp ps ON rp.p_partkey = ps.ps_partkey
+JOIN 
+    supplier_summary ss ON ps.ps_suppkey = ss.s_suppkey
+JOIN 
+    order_line_items oli ON ps.ps_partkey = oli.l_partkey
+JOIN 
+    customer_orders cs ON oli.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+WHERE 
+    rp.mfgr_rank <= 5
+GROUP BY 
+    rp.p_name, rp.p_mfgr, rp.p_size, ss.s_name, cs.c_name, cs.orders_count, cs.total_spent
+ORDER BY 
+    total_revenue DESC;

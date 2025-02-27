@@ -1,0 +1,54 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerOverview AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        c.c_acctbal,
+        COALESCE(ro.total_revenue, 0) AS last_order_revenue
+    FROM 
+        customer c
+    LEFT JOIN 
+        RankedOrders ro ON c.c_custkey = ro.o_custkey AND ro.order_rank = 1
+)
+SELECT 
+    co.c_name,
+    co.last_order_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    MAX(ps.total_avail_qty) AS max_avail_qty,
+    SUM(ps.avg_supply_cost) AS total_supply_cost
+FROM 
+    CustomerOverview co
+LEFT JOIN 
+    orders o ON co.c_custkey = o.o_custkey
+LEFT JOIN 
+    SupplierStats ps ON EXISTS (SELECT 1 FROM partsupp WHERE ps.ps_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey))
+GROUP BY 
+    co.c_name, co.last_order_revenue
+HAVING 
+    SUM(ps.avg_supply_cost) > 1000
+ORDER BY 
+    co.last_order_revenue DESC;

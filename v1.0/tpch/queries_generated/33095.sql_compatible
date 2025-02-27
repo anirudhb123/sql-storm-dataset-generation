@@ -1,0 +1,38 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+)
+
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    STRING_AGG(DISTINCT c.c_name, ', ') AS customer_names,
+    COUNT(DISTINCT l.l_orderkey) AS order_count,
+    CASE 
+        WHEN p.p_size IS NULL THEN 'NOT SPECIFIED' 
+        ELSE CAST(p.p_size AS VARCHAR(255))
+    END AS size_description,
+    RANK() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN supplier_hierarchy sh ON l.l_suppkey = sh.s_suppkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+
+WHERE o.o_orderstatus = 'F' 
+AND l.l_shipdate BETWEEN DATE('1997-01-01') AND DATE('1997-12-31')
+AND n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_comment LIKE '%Western%')
+AND (p.p_comment IS NULL OR p.p_comment != '')
+GROUP BY p.p_name, n.n_name, p.p_size
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY total_revenue DESC;

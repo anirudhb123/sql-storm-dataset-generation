@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM web_sales
+    WHERE ws_sales_price > 0
+),
+CustomerAddress AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address
+    FROM customer_address
+),
+AvgIncome AS (
+    SELECT 
+        hd_income_band_sk,
+        AVG(hd_dep_count) AS avg_dep_count
+    FROM household_demographics
+    GROUP BY hd_income_band_sk
+),
+SalesAnalysis AS (
+    SELECT 
+        c.c_customer_id,
+        ca.full_address,
+        SUM(s.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT s.ws_order_number) AS order_count,
+        AVG(s.ws_quantity) AS avg_quantity,
+        MAX(s.ws_net_profit) AS max_profit
+    FROM SalesCTE s
+    JOIN customer c ON s.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN CustomerAddress ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN AvgIncome ai ON c.c_current_hdemo_sk = ai.hd_income_band_sk
+    WHERE (ai.avg_dep_count IS NULL OR ai.avg_dep_count > 2)
+    GROUP BY c.c_customer_id, ca.full_address
+),
+FinalResult AS (
+    SELECT 
+        c.c_customer_id AS customer_id,
+        c.total_sales,
+        c.order_count,
+        c.avg_quantity,
+        c.max_profit,
+        RANK() OVER (ORDER BY c.total_sales DESC) AS sales_rank
+    FROM SalesAnalysis c
+)
+SELECT *
+FROM FinalResult
+WHERE sales_rank <= 10
+ORDER BY sales_rank;

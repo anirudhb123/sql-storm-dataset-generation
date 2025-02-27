@@ -1,0 +1,48 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY ws_sales_price DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_year BETWEEN 1970 AND 1990
+), 
+ReturnData AS (
+    SELECT 
+        wr_order_number,
+        SUM(wr_return_quantity) AS total_returned,
+        SUM(wr_return_amt_inc_tax) AS total_return_amt
+    FROM web_returns wr
+    GROUP BY wr_order_number
+),
+InventoryData AS (
+    SELECT 
+        i.i_item_id,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM inventory inv
+    JOIN item i ON inv.inv_item_sk = i.i_item_sk
+    GROUP BY i.i_item_id
+)
+
+SELECT 
+    sd.web_site_id,
+    sd.ws_order_number,
+    sd.ws_quantity,
+    sd.ws_sales_price,
+    rd.total_returned,
+    rd.total_return_amt,
+    id.total_quantity_on_hand,
+    CASE 
+        WHEN rd.total_returned IS NOT NULL THEN 'Returned'
+        ELSE 'Sold'
+    END AS sale_status
+FROM SalesData sd
+LEFT JOIN ReturnData rd ON sd.ws_order_number = rd.wr_order_number
+LEFT JOIN InventoryData id ON sd.ws_order_number = id.i_item_id
+WHERE sd.sales_rank <= 5
+AND (id.total_quantity_on_hand IS NULL OR id.total_quantity_on_hand > 0)
+ORDER BY sd.web_site_id, sd.ws_order_number;

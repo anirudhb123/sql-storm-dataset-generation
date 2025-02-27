@@ -1,0 +1,129 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        OwnerUserId,
+        Score,
+        CreationDate,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.OwnerUserId,
+        p.Score,
+        p.CreationDate,
+        rh.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rh ON p.ParentId = rh.Id
+),
+TopUsers AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount,
+        SUM(Score) AS TotalScore,
+        MAX(CreationDate) AS LastPostDate
+    FROM 
+        Posts
+    GROUP BY 
+        OwnerUserId
+    HAVING 
+        COUNT(*) > 10  
+),
+JoinedData AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate AS UserCreationDate,
+        u.Location,
+        COALESCE(ph.PostCount, 0) AS PostCount,
+        COALESCE(ph.TotalScore, 0) AS TotalScore,
+        ph.LastPostDate,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        TopUsers ph ON u.Id = ph.OwnerUserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.Location, ph.PostCount, ph.TotalScore, ph.LastPostDate
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId
+),
+FinalResult AS (
+    SELECT 
+        ud.UserId,
+        ud.DisplayName,
+        ud.Reputation,
+        ud.UserCreationDate,
+        ud.Location,
+        ud.PostCount,
+        ud.TotalScore,
+        ud.LastPostDate,
+        ps.Title AS PostTitle,
+        ps.CreationDate AS PostCreationDate,
+        ps.ViewCount,
+        ps.Score AS PostScore,
+        ps.CommentCount AS PostCommentCount,
+        ud.TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY ud.UserId ORDER BY ps.CreationDate DESC) AS PostRank
+    FROM 
+        JoinedData ud
+    JOIN 
+        PostStats ps ON ud.UserId = ps.OwnerUserId
+)
+SELECT 
+    fr.UserId,
+    fr.DisplayName,
+    fr.Reputation,
+    fr.UserCreationDate,
+    fr.Location,
+    fr.PostCount,
+    fr.TotalScore,
+    fr.LastPostDate,
+    fr.PostTitle,
+    fr.PostCreationDate,
+    fr.ViewCount,
+    fr.PostScore,
+    fr.PostCommentCount,
+    fr.TotalBounty
+FROM 
+    FinalResult fr
+WHERE 
+    fr.PostRank = 1  
+ORDER BY 
+    fr.TotalScore DESC, fr.UserId;

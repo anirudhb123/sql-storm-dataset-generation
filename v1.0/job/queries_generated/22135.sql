@@ -1,0 +1,66 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 1 AS depth
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT ml.linked_movie_id, at.title, at.production_year, mh.depth + 1
+    FROM movie_link ml
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year AS release_year,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY mh.depth) AS movie_depth,
+    COALESCE(p.info::text, 'No Info Available') AS personal_info,
+    CASE 
+        WHEN ak.name ILIKE '%John%' THEN 'Has John in name'
+        ELSE 'Regular Name' END AS name_category,
+    CASE 
+        WHEN EXISTS (SELECT 1 
+                      FROM movie_keyword mk 
+                      WHERE mk.movie_id = at.id AND mk.keyword_id IN (SELECT id FROM keyword WHERE keyword = 'Award')) 
+        THEN 'Awarded'
+        ELSE 'Not Awarded'
+    END AS award_status,
+    COUNT(DISTINCT cc.movie_id) AS total_colaborations
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    complete_cast cc ON at.id = cc.movie_id
+LEFT JOIN 
+    person_info p ON ak.person_id = p.person_id
+LEFT JOIN 
+    MovieHierarchy mh ON at.id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL 
+    AND ak.name <> ''
+    AND (mh.depth IS NULL OR mh.depth <= 3)
+    AND p.info_type_id IN (SELECT id FROM info_type WHERE info = 'Biography' OR info = 'Trivia')
+GROUP BY 
+    ak.id, 
+    ak.name, 
+    at.title, 
+    at.production_year, 
+    p.info
+ORDER BY 
+    total_colaborations DESC, 
+    release_year ASC;
+
+This query incorporates:
+
+- A recursive common table expression (CTE) to build a movie hierarchy based on links between movies.
+- Complex joins with outer joins.
+- String expressions with case logic for categorizing names.
+- Correlated subqueries determining award status based on keywords.
+- Functions like `ROW_NUMBER()` to assign ranks within partitions.
+- Use of `COALESCE` to handle NULL values elegantly.
+- Various predicates to impose filters in intricate ways.

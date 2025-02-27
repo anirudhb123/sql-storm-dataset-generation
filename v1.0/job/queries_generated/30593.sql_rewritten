@@ -1,0 +1,34 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title AS movie_title, 0 AS level
+    FROM aka_title m
+    WHERE m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT m.id AS movie_id, m.title AS movie_title, mh.level + 1
+    FROM aka_title m
+    INNER JOIN movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT
+    a.name AS actor_name,
+    t.title AS movie_title,
+    COUNT(DISTINCT c.id) AS total_cast,
+    AVG(CASE WHEN c.nr_order IS NOT NULL THEN c.nr_order ELSE 0 END) AS avg_order,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    mh.movie_title AS linked_movies
+FROM aka_name a
+JOIN cast_info c ON a.person_id = c.person_id
+JOIN aka_title t ON c.movie_id = t.id
+LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+LEFT JOIN movie_hierarchy mh ON t.id = mh.movie_id
+WHERE 
+    a.name IS NOT NULL 
+    AND t.production_year >= 2000 
+    AND (c.note IS NULL OR c.note NOT LIKE '%cameo%')
+GROUP BY
+    a.name, t.title, mh.movie_title
+ORDER BY
+    total_cast DESC,
+    avg_order ASC;

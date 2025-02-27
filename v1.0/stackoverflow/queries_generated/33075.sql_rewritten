@@ -1,0 +1,97 @@
+WITH RecursivePostHistory AS (
+    
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ph.Text,
+        1 AS RecursionLevel
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (1, 2, 4, 5, 10)  
+
+    UNION ALL
+
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ph.Text,
+        rp.RecursionLevel + 1
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        RecursivePostHistory rp ON ph.PostId = rp.PostId
+    WHERE 
+        ph.CreationDate > rp.CreationDate
+)
+
+, UserEngagement AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+, TagStatistics AS (
+    
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT ph.Id) AS HistoryEntries
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        t.TagName
+)
+
+SELECT 
+    ue.UserId,
+    ue.DisplayName,
+    ue.VoteCount,
+    ue.CommentCount,
+    ue.TotalViews,
+    ue.TotalScore,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews AS TagTotalViews,
+    ts.HistoryEntries
+FROM 
+    UserEngagement ue
+LEFT JOIN 
+    TagStatistics ts ON ue.UserId IN (
+        SELECT 
+            DISTINCT p.OwnerUserId 
+        FROM 
+            Posts p 
+        WHERE 
+            p.Tags LIKE '%' || ts.TagName || '%'
+    )
+ORDER BY 
+    ue.TotalScore DESC, ue.VoteCount DESC, ue.CommentCount DESC;

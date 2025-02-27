@@ -1,0 +1,71 @@
+
+WITH RECURSIVE OrderTotal AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+CustomerSpend AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(ot.total_price), 0) AS spend,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        OrderTotal ot ON o.o_orderkey = ot.o_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+NationSupplier AS (
+    SELECT 
+        n.n_name,
+        SUM(s.s_acctbal) AS total_balance
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name
+),
+RankedCustomers AS (
+    SELECT 
+        cs.c_custkey,
+        cs.c_name,
+        cs.spend,
+        cs.order_count,
+        RANK() OVER (ORDER BY cs.spend DESC) AS spend_rank
+    FROM 
+        CustomerSpend cs
+)
+SELECT 
+    RANK() OVER (ORDER BY AVG(rc.spend) DESC) AS region_rank,
+    r.r_name,
+    COALESCE(ns.total_balance, 0) AS supplier_balance,
+    SUM(rc.spend) AS total_spend,
+    AVG(rc.order_count) AS avg_orders
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.n_nationkey
+LEFT JOIN 
+    RankedCustomers rc ON s.s_suppkey = rc.c_custkey
+LEFT JOIN 
+    NationSupplier ns ON n.n_name = ns.n_name
+GROUP BY 
+    r.r_name, ns.total_balance
+HAVING 
+    SUM(rc.spend) > (SELECT AVG(spend) FROM CustomerSpend)
+ORDER BY 
+    region_rank;

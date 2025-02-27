@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal + sh.s_acctbal,
+        sh.level + 1
+    FROM 
+        SupplierHierarchy sh
+    JOIN 
+        supplier s ON s.s_nationkey = sh.s_nationkey
+    WHERE 
+        s.s_acctbal > 500
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    AVG(s.sh_level) AS avg_supplier_balance,
+    MAX(l.l_shipdate) AS last_ship_date,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names,
+    ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(l.l_extendedprice) DESC) AS nation_rank
+FROM 
+    nation n
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    lineitem l ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey = l.l_partkey
+LEFT JOIN 
+    part p ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+WHERE 
+    o.o_orderstatus = 'O' 
+    AND l.l_shipdate >= DATE '1997-01-01'
+    AND (l.l_returnflag IS NULL OR l.l_returnflag = 'N')
+    AND sh.s_acctbal > 2000
+GROUP BY 
+    n.n_nationkey, r.r_name, r.r_regionkey
+ORDER BY 
+    total_sales DESC, avg_supplier_balance ASC
+LIMIT 100;

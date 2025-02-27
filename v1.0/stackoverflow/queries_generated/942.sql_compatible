@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+        AND p.PostTypeId = 1
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '2 years'
+    GROUP BY 
+        b.UserId
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS ClosedCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        COALESCE(pc.CommentCount, 0) AS TotalComments,
+        COALESCE(cp.ClosedCount, 0) AS TotalClosed,
+        SUM(rp.Score) AS TotalScore
+    FROM 
+        Users u
+        LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+        LEFT JOIN PostComments pc ON u.Id = ANY (SELECT OwnerUserId FROM Posts WHERE PostTypeId = 1)
+        LEFT JOIN ClosedPosts cp ON u.Id = ANY (SELECT OwnerUserId FROM Posts WHERE PostTypeId = 1 AND p.Id = cp.PostId)
+        LEFT JOIN RankedPosts rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, ub.BadgeCount, pc.CommentCount, cp.ClosedCount
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.BadgeCount,
+    u.TotalComments,
+    u.TotalClosed,
+    COALESCE(u.TotalScore, 0) AS TotalScore
+FROM 
+    TopUsers u
+WHERE 
+    u.BadgeCount > 0
+    OR u.TotalComments > 5
+ORDER BY 
+    u.TotalScore DESC
+LIMIT 10;

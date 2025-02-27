@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        coalesce(d.d_year, 0) AS purchase_year,
+        SUM(COALESCE(ws.ws_ext_sales_price, 0)) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        SalesCTE s ON c.c_customer_sk = s.ws_bill_customer_sk
+    LEFT JOIN 
+        date_dim d ON d.d_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales WHERE ws_bill_customer_sk = c.c_customer_sk)
+    LEFT JOIN 
+        web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, d.d_year
+    ORDER BY 
+        total_spent DESC
+    LIMIT 10
+)
+SELECT 
+    t.c_customer_sk,
+    t.c_first_name,
+    t.c_last_name,
+    t.purchase_year,
+    t.total_spent,
+    CASE 
+        WHEN t.total_spent >= 1000 THEN 'High Value'
+        WHEN t.total_spent >= 500 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS customer_value,
+    (SELECT COUNT(DISTINCT ss_ticket_number) 
+     FROM store_sales ss 
+     WHERE ss.ss_customer_sk = t.c_customer_sk) AS store_sales_count
+FROM 
+    TopCustomers t
+LEFT JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+WHERE 
+    cd.cd_marital_status = 'M' AND cd.cd_gender = 'F'
+ORDER BY 
+    t.total_spent DESC;

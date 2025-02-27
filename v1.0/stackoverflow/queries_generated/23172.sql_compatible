@@ -1,0 +1,100 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 0 AND 
+        u.LastAccessDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.Views, u.UpVotes, u.DownVotes
+), PostInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.OwnerUserId
+), ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(h.Id) AS CloseVoteCount,
+        MAX(h.CreationDate) AS LastClosedDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory h ON p.Id = h.PostId
+    WHERE 
+        h.PostHistoryTypeId = 10 
+    GROUP BY 
+        p.Id
+), UserPostStats AS (
+    SELECT 
+        us.UserId,
+        up.PostId,
+        us.Reputation AS UserReputation,
+        up.Score AS PostScore,
+        up.CommentCount,
+        cp.CloseVoteCount,
+        cp.LastClosedDate,
+        CASE 
+            WHEN cp.CloseVoteCount IS NOT NULL THEN 'Closed' 
+            ELSE 'Active' 
+        END AS PostStatus
+    FROM 
+        UserStats us
+    JOIN 
+        PostInfo up ON us.UserId = up.OwnerUserId
+    LEFT JOIN 
+        ClosedPosts cp ON up.PostId = cp.PostId
+)
+SELECT 
+    ups.UserId,
+    ups.UserReputation,
+    ups.PostId,
+    ups.PostScore,
+    ups.CommentCount,
+    ups.CloseVoteCount,
+    ups.LastClosedDate,
+    ups.PostStatus,
+    CASE 
+        WHEN ups.LastClosedDate IS NULL AND ups.CloseVoteCount = 0 THEN 'No Close Votes'
+        WHEN ups.LastClosedDate IS NOT NULL AND ups.CloseVoteCount > 0 THEN 'Has Close Votes'
+        ELSE 'Uncertain'
+    END AS CloseVoteDetails
+FROM 
+    UserPostStats ups
+WHERE 
+    ups.PostScore > (SELECT AVG(PostScore) FROM PostInfo)
+    AND ups.UserReputation >= (SELECT AVG(Reputation) FROM UserStats)
+ORDER BY 
+    ups.UserReputation DESC, ups.PostScore DESC
+LIMIT 10;

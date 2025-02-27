@@ -1,0 +1,74 @@
+WITH RecursiveRoleHierarchy AS (
+    SELECT
+        c.role_id,
+        c.person_id,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY c.nr_order) AS role_order
+    FROM
+        cast_info c
+    WHERE
+        c.person_role_id IS NOT NULL
+),
+TitleInfo AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT kt.keyword) AS associated_keywords,
+        COALESCE(MIN(mi.info), 'No Info') AS first_info
+    FROM
+        aka_title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword kt ON mk.keyword_id = kt.id
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+PersonRating AS (
+    SELECT
+        p.id AS person_id,
+        COALESCE(AVG(CASE WHEN CAST(r.rating AS FLOAT) IS NOT NULL THEN r.rating END), 0) AS avg_rating
+    FROM
+        aka_name p
+    LEFT JOIN movie_info r ON p.id = r.movie_id
+    WHERE
+        r.info_type_id IN (SELECT id FROM info_type WHERE info = 'Rating')
+    GROUP BY
+        p.id
+),
+BizarreTitleStats AS (
+    SELECT
+        tt.title_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        COUNT(DISTINCT ci.role_id) FILTER (WHERE ci.role_id IS NOT NULL) AS roles_count,
+        MAX(CASE WHEN tt.production_year IS NULL THEN 'Unknown Year' ELSE tt.production_year END) AS year_info
+    FROM
+        TitleInfo tt
+    LEFT JOIN cast_info ci ON tt.title_id = ci.movie_id
+    GROUP BY
+        tt.title_id
+)
+
+SELECT
+    t.title,
+    t.production_year,
+    t.associated_keywords,
+    COALESCE(b.total_cast, 0) AS total_cast,
+    COALESCE(b.roles_count, 0) AS roles_count,
+    p.avg_rating,
+    COALESCE(t.first_info, 'No Info') AS additional_info,
+    (SELECT COUNT(*) FROM movie_companies mc WHERE mc.movie_id = t.title_id AND mc.company_type_id IN (SELECT id FROM company_type WHERE kind = 'Distributor')) AS distributor_count
+FROM
+    TitleInfo t
+LEFT JOIN BizarreTitleStats b ON t.title_id = b.title_id
+LEFT JOIN PersonRating p ON b.total_cast > 0 AND p.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = t.title_id)
+WHERE
+    (t.production_year BETWEEN 2000 AND 2020 OR t.associated_keywords @> ARRAY['action']) 
+    AND t.first_info != 'No Info'
+ORDER BY
+    COALESCE(p.avg_rating, 0) DESC,
+    t.production_year ASC
+LIMIT 100 OFFSET 10;
+
+-- Further complexities can include handling of NULL values in JOIN conditions,
+-- as well as adding additional conditions to exclude certain types of role_ids
+-- or even dealing with edge cases of unrepresented data. 

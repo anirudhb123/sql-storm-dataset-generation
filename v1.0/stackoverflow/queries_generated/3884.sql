@@ -1,0 +1,73 @@
+WITH UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViews
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+        COALESCE(ps.PostCount, 0) AS PostCount,
+        COALESCE(ps.TotalScore, 0) AS TotalScore,
+        COALESCE(ps.AvgViews, 0) AS AvgViews,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(ps.TotalScore, 0) DESC, u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN 
+        PostStats ps ON u.Id = ps.OwnerUserId
+    WHERE 
+        u.Reputation > 0
+)
+SELECT 
+    UserId,
+    DisplayName,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    PostCount,
+    TotalScore,
+    AvgViews,
+    Rank
+FROM 
+    TopUsers
+WHERE 
+    Rank <= 10 
+ORDER BY 
+    Rank
+UNION ALL
+SELECT 
+    NULL AS UserId,
+    'Average' AS DisplayName,
+    AVG(GoldBadges) AS GoldBadges,
+    AVG(SilverBadges) AS SilverBadges,
+    AVG(BronzeBadges) AS BronzeBadges,
+    AVG(PostCount) AS PostCount,
+    AVG(TotalScore) AS TotalScore,
+    AVG(AvgViews) AS AvgViews,
+    NULL AS Rank
+FROM 
+    TopUsers
+WHERE 
+    PostCount > 0;

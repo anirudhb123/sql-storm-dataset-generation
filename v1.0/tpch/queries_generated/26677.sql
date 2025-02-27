@@ -1,0 +1,66 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_mfgr, 
+        p.p_brand, 
+        p.p_type,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 1 AND 20
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_name AS supplier_nation, 
+        s.s_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+CustomerCounts AS (
+    SELECT 
+        c.c_nationkey,
+        COUNT(DISTINCT c.c_custkey) AS total_customers
+    FROM 
+        customer c
+    GROUP BY 
+        c.c_nationkey
+),
+CombinedResults AS (
+    SELECT 
+        rp.p_name AS part_name,
+        rp.p_brand AS part_brand,
+        rp.p_retailprice,
+        si.s_name AS supplier_name,
+        cc.total_customers
+    FROM 
+        RankedParts rp
+    JOIN 
+        partsupp ps ON rp.p_partkey = ps.ps_partkey
+    JOIN 
+        SupplierInfo si ON ps.ps_suppkey = si.s_suppkey
+    JOIN 
+        CustomerCounts cc ON si.s_nationkey = cc.c_nationkey
+    WHERE 
+        rp.rank <= 3
+)
+SELECT 
+    part_name, 
+    part_brand, 
+    p_retailprice, 
+    supplier_name, 
+    total_customers
+FROM 
+    CombinedResults
+ORDER BY 
+    part_name, part_brand;

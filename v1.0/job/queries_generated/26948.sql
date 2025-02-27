@@ -1,0 +1,39 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        a.id AS title_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT nk.name, ', ') AS notable_actors,
+        t.kind AS title_kind,
+        auc.country_code AS production_country
+    FROM aka_title a
+    JOIN title t ON a.title_id = t.id
+    LEFT JOIN cast_info c ON a.movie_id = c.movie_id
+    LEFT JOIN aka_name nk ON c.person_id = nk.person_id
+    LEFT JOIN movie_companies mc ON a.id = mc.movie_id
+    LEFT JOIN company_name auc ON mc.company_id = auc.id
+    WHERE a.production_year >= 2000
+    GROUP BY a.title, a.production_year, a.id, t.kind, auc.country_code
+),
+RankedCountryProduction AS (
+    SELECT 
+        production_country,
+        AVG(total_cast) AS avg_cast_per_movie,
+        COUNT(DISTINCT title_id) AS movies_count
+    FROM RankedTitles
+    GROUP BY production_country
+)
+
+SELECT 
+    r.production_country,
+    r.avg_cast_per_movie,
+    r.movies_count,
+    rt.movie_title,
+    rt.production_year,
+    rt.total_cast,
+    rt.notable_actors
+FROM RankedCountryProduction r
+JOIN RankedTitles rt ON r.production_country = rt.production_country
+ORDER BY r.avg_cast_per_movie DESC, r.movies_count DESC, rt.production_year DESC
+LIMIT 20;

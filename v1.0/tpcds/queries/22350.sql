@@ -1,0 +1,58 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rnk
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim WHERE d_current_month = 'Y')
+    GROUP BY ws_item_sk
+),
+item_details AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_brand,
+        COALESCE(ss.total_sold, 0) AS total_sold,
+        COALESCE(ss.total_profit, 0) AS total_profit
+    FROM item i
+    LEFT JOIN sales_cte ss ON i.i_item_sk = ss.ws_item_sk
+),
+top_items AS (
+    SELECT *
+    FROM item_details
+    WHERE total_profit > 0
+)
+SELECT 
+    ti.i_item_desc,
+    ti.total_sold,
+    ti.total_profit,
+    CASE 
+        WHEN ti.total_sold > 100 THEN 'High Seller'
+        WHEN ti.total_sold BETWEEN 50 AND 100 THEN 'Moderate Seller'
+        ELSE 'Low Seller'
+    END AS sales_category,
+    (SELECT COUNT(DISTINCT c.c_customer_sk) 
+     FROM customer c 
+     WHERE c.c_current_cdemo_sk IN (
+         SELECT DISTINCT cd_demo_sk 
+         FROM customer_demographics 
+         WHERE cd_marital_status = 'M' 
+           AND cd_gender = 'M')) AS married_male_count,
+    (SELECT COUNT(*) 
+     FROM item 
+     WHERE i_rec_start_date < DATE '2002-10-01' 
+       AND (i_rec_end_date IS NULL OR i_rec_end_date > DATE '2002-10-01')) AS active_items,
+    (SELECT 
+        MAX(d_year)
+     FROM date_dim 
+     WHERE d_date_sk IN (
+         SELECT d_date_sk 
+         FROM web_sales 
+         WHERE ws_item_sk = ti.i_item_sk) 
+       AND d_year IS NOT NULL) AS last_year_sold_in
+FROM top_items ti
+WHERE ti.total_profit = (SELECT MAX(total_profit) FROM top_items)
+ORDER BY ti.total_profit DESC
+LIMIT 10;

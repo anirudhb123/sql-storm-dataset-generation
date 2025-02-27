@@ -1,0 +1,65 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        id AS movie_id,
+        title
+    FROM 
+        aka_title
+    WHERE 
+        production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mt.id,
+        mt.title
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        MovieHierarchy mh ON mh.movie_id = mt.episode_of_id
+)
+SELECT 
+    ak.person_id,
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    r.role AS role_type,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    COUNT(DISTINCT ki.info-type_id) AS info_type_count,
+    ROW_NUMBER() OVER(PARTITION BY ak.person_id ORDER BY mt.production_year DESC) AS movie_rank
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info c ON ak.person_id = c.person_id
+LEFT JOIN 
+    MovieHierarchy mt ON c.movie_id = mt.movie_id
+LEFT JOIN 
+    role_type r ON c.role_id = r.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mt.movie_id
+LEFT JOIN 
+    movie_keyword mw ON mw.movie_id = mt.movie_id
+LEFT JOIN 
+    keyword kw ON mw.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mt.movie_id
+LEFT JOIN 
+    info_type ki ON mi.info_type_id = ki.id
+WHERE 
+    ak.name IS NOT NULL
+    AND (mt.production_year IS NOT NULL AND mt.production_year > 2010)
+GROUP BY 
+    ak.person_id, ak.name, mt.title, mt.production_year, r.role
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY 
+    ak.person_id, movie_rank;
+
+### Explanation:
+- **CTE**: A recursive CTE `MovieHierarchy` is used to build a hierarchy of movies starting from those released in 2000 and later, allowing for the inclusion of episodes and series relationships.
+- **Joins**: The query involves a variety of outer joins to link actors to their respective movies and roles, incorporating productions and keywords associated with those movies.
+- **Aggregations**: `COUNT` is used to determine the number of production companies and types of information for the movies.
+- **String Aggregation**: `STRING_AGG` collects all related keywords into a single string for easier reading.
+- **Window Function**: `ROW_NUMBER` is applied to rank movies for each actor based on the production year.
+- **NULL Logic**: Handling of potential NULL values to ensure that only valid records are returned, particularly for names and production years. 
+- **Having Clause**: Ensures that only actors with at least one associated production company are returned.

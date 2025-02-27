@@ -1,0 +1,51 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(cc.movie_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(cc.movie_id) DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info cc ON at.id = cc.movie_id
+    GROUP BY 
+        at.title, at.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank <= 10
+),
+DirectorInfo AS (
+    SELECT 
+        p.id AS person_id,
+        p.name,
+        STRING_AGG(DISTINCT at.title, ', ') AS directed_movies
+    FROM 
+        aka_name p
+    JOIN 
+        movie_companies mc ON p.person_id = mc.company_id
+    JOIN 
+        aka_title at ON mc.movie_id = at.id
+    WHERE 
+        mc.company_type_id = (SELECT id FROM company_type WHERE LOWER(kind) LIKE '%director%')
+    GROUP BY 
+        p.id, p.name
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    di.name AS director_name,
+    di.directed_movies,
+    tm.cast_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    DirectorInfo di ON di.directed_movies LIKE '%' || tm.title || '%'
+ORDER BY 
+    tm.production_year DESC, tm.cast_count DESC;

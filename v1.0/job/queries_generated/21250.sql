@@ -1,0 +1,70 @@
+WITH RankedTitles AS (
+    SELECT
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS title_rank
+    FROM title AS t
+),
+ActorMovies AS (
+    SELECT
+        ca.person_id,
+        at.title,
+        at.production_year,
+        COUNT(*) AS movie_count
+    FROM cast_info AS ca
+    JOIN aka_name AS ak ON ca.person_id = ak.person_id
+    JOIN aka_title AS at ON ca.movie_id = at.movie_id
+    GROUP BY ca.person_id, at.title, at.production_year
+),
+TopMovies AS (
+    SELECT
+        am.person_id,
+        STRING_AGG(am.title, ', ') AS movies,
+        MAX(am.production_year) AS last_release_year,
+        SUM(am.movie_count) AS total_movies
+    FROM ActorMovies AS am
+    WHERE am.production_year = (SELECT MAX(production_year) FROM aka_title)
+    GROUP BY am.person_id
+),
+HighProfileActors AS (
+    SELECT
+        ak.name,
+        tm.movies,
+        tm.last_release_year,
+        tm.total_movies,
+        COALESCE(CAST(dense_rank() OVER (ORDER BY tm.total_movies DESC) AS INTEGER), 0) AS rank
+    FROM aka_name AS ak
+    JOIN TopMovies AS tm ON ak.person_id = tm.person_id
+    WHERE tm.total_movies IS NOT NULL
+),
+MovieCompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COALESCE(SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END), 0) AS previous_movies_count
+    FROM movie_companies AS mc
+    JOIN company_name AS c ON mc.company_id = c.id
+    JOIN company_type AS ct ON mc.company_type_id = ct.id
+    JOIN movie_info AS mi ON mc.movie_id = mi.movie_id AND mi.info_type_id = 1
+    GROUP BY mc.movie_id, c.name, ct.kind
+)
+SELECT 
+    hpa.name AS actor_name,
+    hpa.movies,
+    hpa.last_release_year,
+    hpa.total_movies,
+    md.movie_id,
+    md.company_name,
+    md.company_type,
+    md.previous_movies_count
+FROM HighProfileActors AS hpa
+LEFT JOIN MovieCompanyDetails AS md ON md.movie_id IN (
+    SELECT 
+        ca.movie_id 
+    FROM cast_info AS ca
+    WHERE ca.person_id = (SELECT person_id FROM aka_name WHERE name = hpa.name)
+) 
+WHERE hpa.rank <= 10 
+ORDER BY hpa.total_movies DESC, hpa.last_release_year DESC, COALESCE(md.previous_movies_count, 0) DESC;

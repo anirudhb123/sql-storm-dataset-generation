@@ -1,0 +1,91 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.*,
+        ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS SupplierRank
+    FROM 
+        supplier s
+    WHERE 
+        s_acctbal IS NOT NULL
+),
+AggregatedParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS TotalAvailable, 
+        AVG(ps.ps_supplycost) AS AvgSupplyCost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+QualifiedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        EXTRACT(YEAR FROM o.o_orderdate) AS OrderYear
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') AND
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+ShippingDetails AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_shipmode,
+        COUNT(l.l_linenumber) AS LineItemCount
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_shipmode
+    HAVING 
+        COUNT(l.l_linenumber) > 2
+),
+FinalSelection AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        r.r_name AS RegionName,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS Revenue,
+        COALESCE(SUM(NULLIF(l.l_tax, 0)), 0) AS TotalTax,
+        COUNT(DISTINCT o.o_orderkey) AS OrderCount
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON l.l_partkey = p.p_partkey
+    LEFT JOIN 
+        orders o ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN 
+        supplier s ON s.s_suppkey = l.l_suppkey
+    LEFT JOIN 
+        nation n ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        region r ON r.r_regionkey = n.n_regionkey
+    WHERE 
+        l.l_shipdate >= DATE '1996-01-01'
+        AND l.l_shipdate < DATE '1997-01-01'
+        AND EXISTS (SELECT 1 FROM RankedSuppliers rs WHERE rs.s_suppkey = s.s_suppkey AND rs.SupplierRank <= 3)
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, r.r_name
+    ORDER BY 
+        Revenue DESC
+)
+SELECT 
+    f.*,
+    CASE 
+        WHEN f.Revenue > 100000 THEN 'High Revenue'
+        WHEN f.Revenue BETWEEN 50000 AND 100000 THEN 'Medium Revenue'
+        ELSE 'Low Revenue'
+    END AS RevenueCategory,
+    COUNT(DISTINCT q.o_orderkey) AS CustomerOrderCount
+FROM 
+    FinalSelection f
+LEFT JOIN 
+    QualifiedOrders q ON q.o_orderkey IN (SELECT DISTINCT l_orderkey FROM lineitem l WHERE l.l_partkey = f.p_partkey)
+GROUP BY 
+    f.p_partkey, f.p_name, f.p_brand, f.RegionName, f.Revenue
+ORDER BY 
+    f.Revenue DESC, 
+    CustomerOrderCount ASC;

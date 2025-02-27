@@ -1,0 +1,84 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        1 AS level
+    FROM 
+        title
+    WHERE 
+        title.season_nr IS NULL
+
+    UNION ALL
+
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        title t
+    JOIN 
+        movie_link ml ON t.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+ActorDetails AS (
+    SELECT 
+        a.name AS actor_name,
+        a.id AS actor_id,
+        COALESCE(SUM(c.nr_order), 0) AS total_roles,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.name, a.id
+),
+MovieRatings AS (
+    SELECT 
+        mi.movie_id,
+        AVG(CASE WHEN it.info = 'rating' THEN CAST(mi.info AS FLOAT) END) AS avg_rating,
+        COUNT(DISTINCT mi.id) AS info_count
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+),
+FinalOutput AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ad.actor_name,
+        ad.total_roles,
+        ad.movie_count,
+        COALESCE(mr.avg_rating, 0) AS avg_rating,
+        mr.info_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN 
+        ActorDetails ad ON mc.company_id = ad.actor_id
+    LEFT JOIN 
+        MovieRatings mr ON mh.movie_id = mr.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    actor_name,
+    total_roles,
+    movie_count,
+    avg_rating,
+    info_count
+FROM 
+    FinalOutput
+WHERE 
+    (avg_rating >= 7.0 OR movie_count > 5)
+ORDER BY 
+    production_year DESC, avg_rating DESC
+LIMIT 50;

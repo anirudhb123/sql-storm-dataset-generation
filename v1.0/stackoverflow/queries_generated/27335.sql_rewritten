@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(trim(BOTH '<>' FROM p.Tags), '><')) AS Tag,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        Tag
+),
+
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id AND p.PostTypeId = 1 
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 0
+),
+
+ComparisonResults AS (
+    SELECT 
+        au.UserId,
+        au.DisplayName,
+        au.QuestionCount,
+        au.TotalBadges,
+        COALESCE(tp.PostCount, 0) AS TagPostCount,
+        COALESCE(rp.UserPostRank, 0) AS HighestRankedPost
+    FROM 
+        ActiveUsers au
+    LEFT JOIN 
+        TagStatistics tp ON tp.Tag IN (SELECT unnest(string_to_array(trim(BOTH '<>' FROM p.Tags), '><')) FROM Posts p WHERE p.OwnerUserId = au.UserId)
+    LEFT JOIN 
+        RankedPosts rp ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = au.UserId)
+)
+
+SELECT 
+    UserId,
+    DisplayName,
+    QuestionCount,
+    TotalBadges,
+    TagPostCount,
+    HighestRankedPost
+FROM 
+    ComparisonResults
+ORDER BY 
+    QuestionCount DESC, TotalBadges DESC, TagPostCount DESC;

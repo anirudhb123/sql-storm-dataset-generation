@@ -1,0 +1,75 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code = 'USA'
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        t.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code IS NOT NULL
+),
+ActorCount AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ac.actor_count,
+        COALESCE(mi.info, 'N/A') AS movie_info
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        ActorCount ac ON mh.movie_id = ac.movie_id
+    LEFT JOIN 
+        movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'summary')
+),
+RankedMovies AS (
+    SELECT 
+        mi.*,
+        RANK() OVER (PARTITION BY production_year ORDER BY actor_count DESC, title) AS rank
+    FROM 
+        MovieInfo mi
+)
+SELECT 
+    rm.rank,
+    rm.title,
+    rm.production_year,
+    rm.actor_count,
+    rm.movie_info
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    rm.production_year DESC, rm.rank;

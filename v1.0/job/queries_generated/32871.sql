@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+
+SELECT 
+    m.title AS Movie_Title,
+    COALESCE(p.name, 'Unknown') AS Person_Name,
+    COUNT(DISTINCT c.movie_id) AS Total_Movies,
+    AVG(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating') THEN CAST(mi.info AS FLOAT) END) AS Avg_Rating,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS Keywords,
+    ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY m.production_year DESC) AS rn,
+    COUNT(DISTINCT c.id) OVER (PARTITION BY m.id) AS Total_Cast,
+    mh.depth AS Link_Depth
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    aka_title m ON mh.movie_id = m.id
+LEFT JOIN 
+    cast_info c ON m.id = c.movie_id
+LEFT JOIN 
+    aka_name p ON c.person_id = p.person_id
+LEFT JOIN 
+    movie_info mi ON m.id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+WHERE 
+    m.production_year >= 2000
+    AND p.name IS NOT NULL
+    AND (mh.depth < 3 OR mh.depth IS NULL)
+GROUP BY 
+    m.id, p.name, mh.depth
+ORDER BY 
+    Total_Movies DESC,
+    Avg_Rating DESC
+LIMIT 100;

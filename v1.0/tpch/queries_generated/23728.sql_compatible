@@ -1,0 +1,52 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+PartStatistics AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_custkey
+    FROM orders o
+    WHERE o.o_totalprice > (
+        SELECT AVG(o2.o_totalprice) 
+        FROM orders o2
+        WHERE o2.o_orderdate < CURRENT_DATE - INTERVAL '3 MONTH'
+    )
+)
+SELECT 
+    r.r_name AS region_name,
+    p.p_name AS part_name,
+    ps.s_name AS supplier_name,
+    ps.total_avail_qty,
+    ps.avg_supply_cost,
+    SUM(CASE WHEN li.l_discount > 0 THEN 1 ELSE 0 END) AS discount_count,
+    COUNT(DISTINCT ho.o_orderkey) AS high_value_order_count
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier ps ON n.n_nationkey = ps.s_nationkey
+LEFT JOIN partsupp p_s ON ps.s_suppkey = p_s.ps_suppkey
+LEFT JOIN part p ON p_s.ps_partkey = p.p_partkey
+LEFT JOIN lineitem li ON li.l_partkey = p.p_partkey
+LEFT JOIN HighValueOrders ho ON ho.o_custkey = ps.s_suppkey
+WHERE r.r_name IS NOT NULL
+AND (p.p_size = 20 OR p.p_size IS NULL)
+GROUP BY r.r_name, p.p_name, ps.s_name, ps.total_avail_qty, ps.avg_supply_cost
+HAVING COUNT(DISTINCT li.l_orderkey) > 5
+ORDER BY r.r_name, p.p_name;

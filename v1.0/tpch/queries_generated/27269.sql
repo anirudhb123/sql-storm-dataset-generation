@@ -1,0 +1,27 @@
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    CONCAT(s.s_name, ' - ', s.s_address) AS supplier_info, 
+    SUM(l.l_quantity) AS total_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUBSTRING_INDEX(p.p_comment, ' ', 5) AS short_comment
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    p.p_size > 10 AND 
+    s.s_acctbal > 1000.00 AND 
+    o.o_orderdate BETWEEN DATE_SUB(CURDATE(), INTERVAL 1 YEAR) AND CURDATE()
+GROUP BY 
+    p.p_partkey, p.p_name, supplier_info
+HAVING 
+    total_quantity > 50
+ORDER BY 
+    total_quantity DESC, order_count ASC;

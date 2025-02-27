@@ -1,0 +1,49 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate) AS order_rank
+    FROM orders
+    WHERE o_orderdate >= DATE '1997-01-01'
+),
+SupplierCosts AS (
+    SELECT ps_partkey, AVG(ps_supplycost) AS avg_supply_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+CustomerPurchases AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, 
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+QualifiedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) END), 0) AS returns_value
+    FROM supplier s
+    LEFT JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+)
+SELECT 
+    ch.custkey,
+    cp.c_name,
+    ch.order_rank,
+    SUM(ch.o_totalprice) AS order_total,
+    sc.avg_supply_cost,
+    q.s_name,
+    q.s_acctbal,
+    q.returns_value
+FROM OrderHierarchy ch
+JOIN CustomerPurchases cp ON ch.o_custkey = cp.c_custkey
+LEFT JOIN SupplierCosts sc ON ch.o_orderkey IN (
+    SELECT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_partkey IN (
+        SELECT p.p_partkey
+        FROM part p
+        WHERE p.p_brand LIKE 'Brand%')
+)
+LEFT JOIN QualifiedSuppliers q ON q.returns_value > 1000
+WHERE ch.order_rank <= 10
+GROUP BY ch.custkey, cp.c_name, ch.order_rank, sc.avg_supply_cost, q.s_name, q.s_acctbal, q.returns_value
+HAVING SUM(ch.o_totalprice) > 5000
+ORDER BY order_total DESC, ch.custkey;

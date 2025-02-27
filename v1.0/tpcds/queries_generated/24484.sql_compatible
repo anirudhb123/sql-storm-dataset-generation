@@ -1,0 +1,73 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_paid DESC) AS price_rank,
+        CUME_DIST() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_paid) AS cumulative_price_dist
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 2451490 AND 2451520
+),
+ReturnData AS (
+    SELECT 
+        cr.cr_item_sk,
+        cr.cr_return_amount,
+        RANK() OVER (PARTITION BY cr.cr_item_sk ORDER BY cr.cr_return_amount DESC) AS return_rank
+    FROM catalog_returns cr
+    WHERE cr.cr_returned_date_sk BETWEEN 2451490 AND 2451520
+),
+PurchaseStats AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS orders_count,
+        MIN(ws.ws_sales_price) AS min_price,
+        MAX(ws.ws_sales_price) AS max_price
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id
+),
+IncomeBandDistribution AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        COUNT(*) AS customer_count,
+        SUM(ps.total_spent) AS total_income
+    FROM income_band ib
+    LEFT JOIN household_demographics hd ON ib.ib_income_band_sk = hd.hd_income_band_sk
+    LEFT JOIN PurchaseStats ps ON hd.hd_demo_sk = ps.c_customer_id
+    GROUP BY ib.ib_income_band_sk
+),
+FinalResults AS (
+    SELECT 
+        sd.ws_item_sk,
+        COALESCE(rb.return_rank, 0) AS return_rank,
+        sd.price_rank,
+        CAST(sd.ws_sales_price AS DECIMAL) AS sales_price,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(rb.return_rank, 0), sd.price_rank) AS sales_order
+    FROM SalesData sd
+    LEFT JOIN ReturnData rb ON sd.ws_item_sk = rb.cr_item_sk
+)
+SELECT 
+    fr.sales_order,
+    ibd.customer_count,
+    ibd.total_income,
+    fr.sales_price,
+    CASE 
+        WHEN fr.return_rank > 10 THEN 'High Return'
+        WHEN fr.return_rank = 0 THEN 'No Returns'
+        ELSE 'Normal Return'
+    END AS return_category
+FROM FinalResults fr
+JOIN IncomeBandDistribution ibd ON fr.ws_item_sk IN (
+    SELECT i.i_item_sk
+    FROM item i 
+    WHERE i.i_current_price IS NOT NULL
+    GROUP BY i.i_item_sk
+    HAVING AVG(i.i_current_price) > (
+        SELECT AVG(ps.total_spent) FROM PurchaseStats ps 
+        GROUP BY ps.orders_count
+    )
+)
+WHERE fr.price_rank <= 10;

@@ -1,0 +1,55 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_nationkey = (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS total_items,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_orderkey, c.c_custkey, c.c_nationkey
+),
+FilteredOrders AS (
+    SELECT o.*, os.total_revenue, os.total_items
+    FROM orders o
+    LEFT JOIN OrderSummary os ON o.o_orderkey = os.o_orderkey
+    WHERE os.total_revenue IS NOT NULL
+),
+NationStats AS (
+    SELECT 
+        n.n_name,
+        COUNT(s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+SELECT 
+    ph.p_partkey,
+    ph.p_name,
+    ph.p_retailprice,
+    COALESCE(ord.total_revenue, 0) AS last_year_revenue,
+    COALESCE(ns.supplier_count, 0) AS supplier_count,
+    pn.n_name AS nation,
+    ROW_NUMBER() OVER (ORDER BY COALESCE(ord.total_revenue, 0) DESC) AS rank
+FROM part ph
+LEFT JOIN FilteredOrders ord ON ph.p_partkey = ord.o_orderkey
+LEFT JOIN NationStats ns ON ns.supplier_count > 0 
+LEFT JOIN nation pn ON ns.supplier_count = pn.n_nationkey
+WHERE ph.p_retailprice > (SELECT AVG(p_retailprice) FROM part)
+AND ord.total_items > (
+    SELECT AVG(total_items) FROM OrderSummary
+)
+ORDER BY COALESCE(ord.total_revenue, 0) DESC, ph.p_name;

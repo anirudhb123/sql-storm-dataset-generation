@@ -1,0 +1,67 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        ct.id AS company_id,
+        ct.kind AS company_type,
+        mc.movie_id,
+        COUNT(DISTINCT ca.person_id) AS cast_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        cast_info ca ON mc.movie_id = ca.movie_id
+    GROUP BY 
+        ct.id, mc.movie_id
+    HAVING 
+        COUNT(DISTINCT ca.person_id) > 1
+),
+RankedTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY RANDOM()) AS rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+KeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    tt.title AS movie_title,
+    tt.production_year,
+    cp.company_type,
+    kc.keyword_count,
+    COALESCE(ROUND(AVG(CASE WHEN rc.cast_count IS NULL THEN 0 ELSE rc.cast_count END)::numeric, 2), 0) AS avg_cast_count,
+    CASE 
+        WHEN tt.production_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END AS era,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.info_type_id = 1 AND mi.info LIKE '%Oscar%') AS oscar_count
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    title tt ON ci.movie_id = tt.id
+LEFT JOIN 
+    RecursiveCTE rc ON mc.movie_id = tt.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = tt.id
+LEFT JOIN 
+    KeywordCounts kc ON kc.movie_id = tt.id
+GROUP BY 
+    ak.name, tt.title, tt.production_year, cp.company_type, kc.keyword_count
+HAVING 
+    (COUNT(DISTINCT ci.person_id) > 1 OR COUNT(DISTINCT tt.id) > 3)
+ORDER BY 
+    tt.production_year DESC, ak.name ASC
+LIMIT 100;

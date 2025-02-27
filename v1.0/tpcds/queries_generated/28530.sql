@@ -1,0 +1,48 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        a.ca_city,
+        a.ca_state,
+        d.d_date AS last_purchase_date,
+        CASE
+            WHEN d.d_dow IN (1, 7) THEN 'Weekend'
+            ELSE 'Weekday'
+        END AS purchase_day_type,
+        STRING_AGG(DISTINCT CONCAT('Item: ', i.i_item_desc, ', Price: ', i.i_current_price) ORDER BY i.i_item_sk) AS purchased_items
+    FROM 
+        customer AS c
+    JOIN 
+        customer_address AS a ON c.c_current_addr_sk = a.ca_address_sk
+    JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        item AS i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        d.d_year = 2022
+    GROUP BY 
+        c.c_customer_sk, full_name, a.ca_city, a.ca_state, d.d_date
+),
+BenchmarkResults AS (
+    SELECT 
+        purchase_day_type, 
+        COUNT(*) AS customer_count, 
+        AVG(LENGTH(full_name)) AS avg_name_length, 
+        AVG(CHAR_LENGTH(purchased_items)) AS avg_purchased_items_length
+    FROM 
+        CustomerDetails
+    GROUP BY 
+        purchase_day_type
+)
+SELECT 
+    purchase_day_type,
+    customer_count,
+    avg_name_length,
+    avg_purchased_items_length
+FROM 
+    BenchmarkResults
+ORDER BY 
+    customer_count DESC;

@@ -1,0 +1,62 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 0
+),
+PostVoteCounts AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT rp.Id) AS QuestionCount,
+    SUM(pvc.UpVotes) AS TotalUpVotes,
+    SUM(pvc.DownVotes) AS TotalDownVotes,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    MAX(rp.CreationDate) AS LatestPostDate
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    PostVoteCounts pvc ON rp.Id = pvc.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.DisplayName, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+HAVING 
+    COUNT(DISTINCT rp.Id) > 5
+ORDER BY 
+    TotalUpVotes DESC, QuestionCount DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

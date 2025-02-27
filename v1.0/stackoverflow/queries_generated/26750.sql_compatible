@@ -1,0 +1,79 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+        LEFT JOIN Comments c ON u.Id = c.UserId
+        LEFT JOIN Votes v ON u.Id = v.UserId
+        LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalComments,
+        TotalUpVotes,
+        TotalDownVotes,
+        TotalBadges,
+        RANK() OVER (ORDER BY TotalUpVotes - TotalDownVotes DESC) AS UserRank
+    FROM 
+        UserActivity
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(DISTINCT TRIM(SUBSTRING(t.TagName, 2, LENGTH(t.TagName) - 2)), ', ') AS Tags
+    FROM 
+        Posts p
+        LEFT JOIN Tags t ON POSITION(t.TagName IN p.Tags) > 0
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id
+),
+PopularQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        pt.Tags,
+        p.Score,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS PopularityRank
+    FROM 
+        Posts p
+        JOIN PostTags pt ON p.Id = pt.PostId
+    WHERE 
+        p.PostTypeId = 1  
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.TotalComments,
+    tu.TotalUpVotes,
+    tu.TotalDownVotes,
+    tu.TotalBadges,
+    pq.PostId,
+    pq.Title AS PopularQuestionTitle,
+    pq.Score AS QuestionScore,
+    pq.CreationDate AS QuestionCreationDate,
+    pq.Tags AS QuestionTags,
+    tu.UserRank
+FROM 
+    TopUsers tu
+    JOIN PopularQuestions pq ON tu.TotalPosts > 0  
+WHERE 
+    tu.UserRank <= 10  
+ORDER BY 
+    tu.UserRank;

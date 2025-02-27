@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        ph.CreationDate AS CloseDate,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+RecentUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.CreationDate >= NOW() - INTERVAL '3 months'
+    GROUP BY 
+        u.Id
+),
+AggregatedStats AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        COALESCE(SUM(p.Score), 0) AS TotalScore, 
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        MAX(rp.ViewCount) AS HighestViewCount
+    FROM 
+        RecentUsers u
+    LEFT JOIN 
+        Posts p ON u.UserId = p.OwnerUserId
+    LEFT JOIN 
+        RankedPosts rp ON p.Id = rp.Id
+    GROUP BY 
+        u.UserId, u.DisplayName
+)
+SELECT 
+    a.UserId,
+    a.DisplayName,
+    a.TotalScore,
+    a.TotalViews,
+    a.PostCount,
+    a.HighestViewCount,
+    COALESCE(cp.CloseDate, 'No Close') AS ClosedDate,
+    COALESCE(cp.CloseReason, 'N/A') AS CloseReason
+FROM 
+    AggregatedStats a
+LEFT JOIN 
+    ClosedPosts cp ON cp.PostId = (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = a.UserId AND p.Score = a.HighestViewCount LIMIT 1)
+WHERE 
+    a.TotalPosts > 5 
+ORDER BY 
+    a.TotalScore DESC;

@@ -1,0 +1,67 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title, 
+        m.production_year,
+        COALESCE(t.title, 'Unknown') AS original_title,
+        1 AS level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        aka_title t ON m.id = t.id AND m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id, 
+        m.title,
+        m.production_year,
+        COALESCE(t.title, 'Unknown') AS original_title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    LEFT JOIN 
+        aka_title t ON m.id = t.id AND m.production_year IS NOT NULL
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    mh.original_title,
+    COALESCE(mk.keyword, 'No Keywords') AS movie_keyword,
+    COUNT(DISTINCT ci.person_id) AS cast_count,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    STRING_AGG(DISTINCT c.name, ', ') AS cast_names,
+    AVG(aimi.info_length) AS avg_info_length
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    (SELECT 
+        movie_id,
+        LENGTH(info) AS info_length 
+     FROM 
+        movie_info 
+     WHERE 
+        info IS NOT NULL) aimi ON mh.movie_id = aimi.movie_id
+LEFT JOIN 
+    aka_name c ON ci.person_id = c.person_id
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year, mh.original_title
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0 AND 
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY 
+    mh.production_year DESC,
+    mh.level,
+    mh.movie_title;

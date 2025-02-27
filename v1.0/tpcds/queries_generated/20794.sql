@@ -1,0 +1,69 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk, 
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt,
+        ROW_NUMBER() OVER(PARTITION BY sr_item_sk ORDER BY SUM(sr_return_amt_inc_tax) DESC) AS rn
+    FROM store_returns 
+    WHERE sr_return_quantity > 0
+    GROUP BY sr_item_sk
+), HighReturns AS (
+    SELECT 
+        rr.sr_item_sk,
+        rr.return_count,
+        rr.total_return_amt,
+        i.i_item_desc,
+        i.i_current_price,
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        CASE 
+            WHEN cd.cd_credit_rating IS NULL THEN 'Unknown'
+            ELSE cd.cd_credit_rating 
+        END AS customer_credit_rating,
+        DENSE_RANK() OVER(ORDER BY rr.total_return_amt DESC) AS return_rank
+    FROM RankedReturns rr
+    JOIN item i ON rr.sr_item_sk = i.i_item_sk
+    JOIN customer c ON rr.sr_item_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE rr.return_count > 10
+), Summary AS (
+    SELECT 
+        hr.return_count,
+        hr.total_return_amt,
+        AVG(hr.i_current_price) AS avg_current_price,
+        COUNT(DISTINCT hr.c_customer_sk) AS unique_customers,
+        MAX(hr.total_return_amt) AS max_return_amt,
+        MIN(hr.total_return_amt) AS min_return_amt
+    FROM HighReturns hr
+    GROUP BY hr.return_count, hr.total_return_amt
+)
+SELECT 
+    s.store_sales,
+    s.ss_sold_date_sk,
+    COALESCE(t.t_total_sales, 0) AS total_store_sales,
+    SUM(CASE 
+        WHEN hr.return_rank <= 5 THEN hr.total_return_amt 
+        ELSE 0 
+    END) AS top_returned_amt
+FROM store_sales s
+LEFT JOIN HighReturns hr ON hr.sr_item_sk = s.ss_item_sk
+FULL OUTER JOIN (
+    SELECT 
+        ws.sold_date_sk,
+        SUM(ws.net_profit) AS t_total_sales
+    FROM web_sales ws
+    GROUP BY ws.sold_date_sk
+) t ON t.sold_date_sk = s.ss_sold_date_sk
+WHERE s.ss_sold_date_sk BETWEEN 20230101 AND 20231231
+GROUP BY s.store_sales, s.ss_sold_date_sk, t.t_total_sales
+HAVING SUM(s.ss_quantity) IS NOT NULL 
+   AND SUM(s.ss_net_paid) > 100.00
+ORDER BY total_store_sales DESC;

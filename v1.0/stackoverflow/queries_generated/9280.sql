@@ -1,0 +1,49 @@
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN bh.UserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS BadgesEarned
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges bh ON u.Id = bh.UserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Upvotes - Downvotes AS NetVotes,
+        CommentCount,
+        BadgesEarned,
+        RANK() OVER (ORDER BY Upvotes DESC) AS UpvoteRank,
+        RANK() OVER (ORDER BY NetVotes DESC) AS NetVoteRank,
+        RANK() OVER (ORDER BY CommentCount DESC) AS CommentRank
+    FROM 
+        UserEngagement
+)
+SELECT 
+    UserId,
+    DisplayName,
+    NetVotes,
+    CommentCount,
+    BadgesEarned,
+    UpvoteRank,
+    NetVoteRank,
+    CommentRank
+FROM 
+    TopUsers
+WHERE 
+    UpvoteRank <= 10 OR NetVoteRank <= 10 OR CommentRank <= 10
+ORDER BY 
+    UpvoteRank, NetVoteRank, CommentRank;

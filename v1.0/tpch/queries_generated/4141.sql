@@ -1,0 +1,60 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderStats AS (
+    SELECT 
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01'
+    GROUP BY 
+        o.o_custkey
+),
+NationSummary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(order_stats.total_revenue) AS total_nation_revenue
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN 
+        OrderStats order_stats ON c.c_custkey = order_stats.o_custkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name,
+    ns.n_name,
+    ns.total_nation_revenue,
+    ss.s_name,
+    ss.part_count,
+    ss.total_supply_cost
+FROM 
+    region r
+JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    SupplierStats ss ON ns.n_nationkey = ss.s_suppkey
+WHERE 
+    ns.total_nation_revenue IS NOT NULL 
+    AND (ss.total_supply_cost IS NULL OR ss.total_supply_cost > 10000)
+ORDER BY 
+    ns.total_nation_revenue DESC, 
+    ss.part_count DESC;

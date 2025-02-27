@@ -1,0 +1,55 @@
+WITH RECURSIVE order_dates AS (
+    SELECT o_orderdate, o_orderkey
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT o_orderdate + INTERVAL '1 day', o_orderkey
+    FROM orders
+    JOIN order_dates ON orders.o_orderkey = order_dates.o_orderkey
+    WHERE o_orderdate < CURRENT_DATE
+),
+supply_chain AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        s.s_acctbal,
+        COUNT(p.ps_partkey) AS num_parts
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN partsupp p ON s.s_suppkey = p.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name, s.s_acctbal
+    HAVING s.s_acctbal > 0
+),
+ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate < CURRENT_DATE
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    r.nation_name,
+    AVG(s.avg_supplycost) AS avg_cost,
+    MAX(s.total_availqty) AS max_availqty,
+    COUNT(DISTINCT ro.o_orderkey) AS total_orders,
+    SUM(ro.revenue) AS total_revenue
+FROM supplier_info s
+JOIN region r ON r.r_regionkey = (SELECT DISTINCT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+LEFT JOIN ranked_orders ro ON ro.o_orderdate IN (SELECT o_orderdate FROM order_dates WHERE o_orderkey = ro.o_orderkey)
+GROUP BY r.nation_name
+HAVING AVG(s.avg_supplycost) IS NOT NULL AND MAX(s.total_availqty) > 0
+ORDER BY total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    mcmt.production_year,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS cast_notes_count,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY mcmt.production_year DESC) AS latest_movie_rank
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+JOIN 
+    MovieHierarchy mh ON mt.id = mh.movie_id
+JOIN 
+    aka_title m ON mh.movie_id = m.id
+JOIN 
+    movie_info mi ON m.id = mi.movie_id
+JOIN 
+    movie_info_idx mii ON m.id = mii.movie_id
+LEFT JOIN 
+    movie_companies mc ON m.id = mc.movie_id
+LEFT JOIN 
+    (SELECT 
+        movie_id,
+        MAX(production_year) AS production_year
+     FROM 
+        aka_title
+     GROUP BY 
+        movie_id) mcmt ON m.id = mcmt.movie_id
+WHERE 
+    a.name IS NOT NULL
+    AND (mii.info_type_id IS NULL OR mii.info_type_id NOT IN 
+        (SELECT id FROM info_type WHERE info LIKE '%unreleased%'))
+    AND (ci.nr_order IS NOT NULL OR ci.nr_order = 0)
+GROUP BY 
+    a.name, m.title, mcmt.production_year
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 3
+ORDER BY 
+    latest_movie_rank, mcmt.production_year DESC;

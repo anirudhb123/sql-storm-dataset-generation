@@ -1,0 +1,59 @@
+WITH TagCounts AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        COUNT(*) AS Count
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only questions
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag, 
+        Count,
+        ROW_NUMBER() OVER (ORDER BY Count DESC) AS Rank
+    FROM 
+        TagCounts
+    WHERE 
+        Count > 5 -- Consider only tags with more than 5 occurrences
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgesCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    ut.Tag,
+    ut.Count,
+    ur.UserId,
+    ur.DisplayName,
+    ur.Reputation,
+    ur.PostCount,
+    ur.BadgesCount
+FROM 
+    TopTags ut
+JOIN 
+    UserReputation ur ON EXISTS (
+        SELECT 1 
+        FROM Posts p 
+        WHERE p.Tags LIKE '%' || ut.Tag || '%' 
+        AND p.PostTypeId = 1
+        AND p.OwnerUserId = ur.UserId
+    )
+ORDER BY 
+    ut.Count DESC, 
+    ur.Reputation DESC
+LIMIT 10;

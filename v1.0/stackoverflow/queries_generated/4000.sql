@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS TotalScore,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(rp.PostId) > 10
+),
+PostVoteCounts AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+EnhancedPosts AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        COALESCE(v.VoteCount, 0) AS TotalVotes,
+        COALESCE(v.UpVotes, 0) AS UpVoteCount,
+        COALESCE(v.DownVotes, 0) AS DownVoteCount
+    FROM 
+        RankedPosts p
+    LEFT JOIN 
+        PostVoteCounts v ON p.PostId = v.PostId
+)
+SELECT 
+    tu.DisplayName,
+    ep.Title,
+    ep.CreationDate,
+    ep.Score,
+    ep.ViewCount,
+    ep.TotalVotes,
+    ep.UpVoteCount,
+    ep.DownVoteCount,
+    RANK() OVER (ORDER BY ep.Score DESC) AS ScoreRank
+FROM 
+    EnhancedPosts ep
+JOIN 
+    TopUsers tu ON ep.OwnerUserId = tu.UserId
+WHERE 
+    ep.Score > 0
+ORDER BY 
+    ep.Score DESC
+LIMIT 20
+UNION ALL
+SELECT 
+    'Total' AS DisplayName,
+    NULL AS Title,
+    NULL AS CreationDate,
+    SUM(ep.Score) AS TotalScore,
+    SUM(ep.ViewCount) AS TotalViews,
+    SUM(ep.TotalVotes) AS TotalVotes,
+    SUM(ep.UpVoteCount) AS TotalUpVotes,
+    SUM(ep.DownVoteCount) AS TotalDownVotes
+FROM 
+    EnhancedPosts ep
+HAVING 
+    SUM(ep.Score) > 100
+ORDER BY 
+    TotalScore DESC;

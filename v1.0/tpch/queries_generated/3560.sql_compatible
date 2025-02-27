@@ -1,0 +1,63 @@
+
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM
+        supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        SUM(CASE WHEN o.o_orderstatus = 'O' THEN o.o_totalprice ELSE 0 END) AS total_open_orders,
+        COUNT(o.o_orderkey) AS order_count
+    FROM
+        customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+
+TopRegions AS (
+    SELECT 
+        n.n_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+    ORDER BY revenue DESC
+    LIMIT 5
+)
+
+SELECT 
+    ss.s_name AS supplier_name,
+    cs.c_name AS customer_name,
+    cs.total_open_orders,
+    rs.region_name,
+    ss.part_count,
+    ss.total_supply_value,
+    CASE 
+        WHEN cs.c_acctbal IS NULL THEN 'No Balance'
+        WHEN cs.c_acctbal < 1000 THEN 'Low Balance'
+        ELSE 'Sufficient Balance' 
+    END AS balance_status
+FROM 
+    SupplierSummary ss
+FULL OUTER JOIN CustomerStats cs ON ss.part_count > 0 
+FULL OUTER JOIN TopRegions rs ON cs.c_custkey % (SELECT COUNT(*) FROM TopRegions) = (ROW_NUMBER() OVER (ORDER BY cs.total_open_orders DESC) - 1)
+WHERE 
+    (ss.total_supply_value IS NOT NULL OR cs.total_open_orders > 500)
+    AND (ss.part_count IS NOT NULL AND ss.part_count > 2)
+ORDER BY 
+    ss.total_supply_value DESC, 
+    cs.order_count DESC;

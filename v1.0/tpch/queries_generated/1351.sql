@@ -1,0 +1,43 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+), PartInfo AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.ps_supplycost, ps.ps_availqty,
+           (p.p_retailprice - ps.ps_supplycost) AS profit_margin
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+), OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total,
+           o.o_orderstatus
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_orderstatus
+), NationSummary AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+
+SELECT ns.n_name, ns.supplier_count, pi.p_name, pi.profit_margin, 
+       os.order_total, ROW_NUMBER() OVER (PARTITION BY ns.n_nationkey ORDER BY os.order_total DESC) AS order_rank
+FROM NationSummary ns
+JOIN RankedSuppliers rs ON ns.n_nationkey = rs.s_nationkey AND rs.rank <= 5
+JOIN PartInfo pi ON pi.p_partkey = (
+    SELECT ps.p_partkey
+    FROM partsupp ps
+    WHERE ps.ps_suppkey = rs.s_suppkey
+    ORDER BY ps.ps_supplycost ASC
+    LIMIT 1
+)
+JOIN OrderDetails os ON os.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    AND l.l_discount > 0.1
+)
+WHERE pi.profit_margin > 0
+ORDER BY ns.n_name, order_total DESC;

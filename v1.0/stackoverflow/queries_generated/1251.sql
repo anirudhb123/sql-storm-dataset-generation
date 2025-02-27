@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank,
+        u.Reputation AS UserReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+PostsWithComments AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.ViewCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        r.UserReputation
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount 
+         FROM Comments 
+         GROUP BY PostId) c ON r.PostId = c.PostId
+    WHERE 
+        r.Rank <= 10
+),
+TopPosts AS (
+    SELECT 
+        p.*,
+        CASE 
+            WHEN p.UserReputation >= 1000 THEN 'Expert'
+            WHEN p.UserReputation >= 100 THEN 'Contributor'
+            ELSE 'Novice'
+        END AS UserLevel
+    FROM 
+        PostsWithComments p
+    WHERE 
+        p.CommentCount > 5
+)
+SELECT 
+    t.Title,
+    t.CreationDate,
+    t.ViewCount,
+    t.CommentCount,
+    t.UserLevel,
+    CASE 
+        WHEN t.UserLevel = 'Expert' THEN 'Highly recommended'
+        WHEN t.UserLevel = 'Contributor' THEN 'Moderate recommendation'
+        ELSE 'Not recommended'
+    END AS Recommendation
+FROM 
+    TopPosts t
+ORDER BY 
+    t.ViewCount DESC;
+
+-- Subquery to generate a recap of the engagement metrics for the selected top posts
+SELECT 
+    COUNT(*) AS TotalPosts,
+    AVG(ViewCount) AS AverageViews,
+    AVG(CommentCount) AS AverageComments,
+    SUM(CASE WHEN UserLevel = 'Expert' THEN 1 ELSE 0 END) AS ExpertCount
+FROM 
+    TopPosts;

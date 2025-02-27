@@ -1,0 +1,78 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS recent_sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL 
+        AND ws.ws_sales_price > 0
+),
+BestSellingItems AS (
+    SELECT 
+        rs.ws_item_sk,
+        COUNT(*) AS order_count,
+        AVG(rs.ws_sales_price) AS avg_price
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.price_rank = 1
+    GROUP BY 
+        rs.ws_item_sk
+    HAVING 
+        COUNT(*) >= 10
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_current_cdemo_sk, 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_buy_potential,
+        CASE 
+            WHEN cd.cd_credit_rating IS NULL THEN 'UNKNOWN'
+            ELSE cd.cd_credit_rating 
+        END AS effective_credit_rating
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_preferred_cust_flag = 'Y'
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.effective_credit_rating,
+    COUNT(DISTINCT bs.ws_item_sk) AS distinct_items_bought,
+    SUM(bs.avg_price) AS total_spent
+FROM 
+    CustomerDetails cd
+JOIN 
+    BestSellingItems bs ON bs.ws_item_sk IN (
+        SELECT 
+            SUM(ws_quantity)
+        FROM 
+            web_sales ws
+        WHERE 
+            ws.ws_bill_customer_sk = cd.c_customer_sk
+            AND ws.ws_sales_price > (SELECT AVG(ws_sales_price) FROM web_sales WHERE ws_item_sk = bs.ws_item_sk)
+    )
+GROUP BY 
+    cd.c_customer_sk, cd.effective_credit_rating
+HAVING 
+    COUNT(DISTINCT bs.ws_item_sk) >= (
+        SELECT 
+            MAX(DISTINCT COUNT(DISTINCT i.i_item_sk))
+        FROM 
+            BestSellingItems i
+        GROUP BY 
+            i.ws_item_sk
+    )
+ORDER BY 
+    total_spent DESC;

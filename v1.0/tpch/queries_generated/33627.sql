@@ -1,0 +1,38 @@
+WITH RECURSIVE customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+    
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    INNER JOIN customer_orders co ON co.o_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < CURRENT_DATE
+),
+part_supplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, s.s_name, p.p_name, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+aggregated_data AS (
+    SELECT co.c_custkey, co.c_name, COUNT(co.o_orderkey) AS total_orders,
+           SUM(co.o_totalprice) AS total_spent,
+           COUNT(DISTINCT ps.ps_partkey) AS unique_parts_ordered
+    FROM customer_orders co
+    LEFT JOIN lineitem l ON co.o_orderkey = l.l_orderkey
+    LEFT JOIN part_supplier ps ON l.l_partkey = ps.ps_partkey
+    GROUP BY co.c_custkey, co.c_name
+)
+SELECT ad.c_custkey, ad.c_name, ad.total_orders, ad.total_spent, ad.unique_parts_ordered,
+       COALESCE(MAX(ps.s_name), 'No Supplier') AS best_supplier
+FROM aggregated_data ad
+LEFT JOIN part_supplier ps ON ad.unique_parts_ordered = ps.ps_partkey AND ps.rn = 1
+WHERE ad.total_spent > 1000.00
+GROUP BY ad.c_custkey, ad.c_name, ad.total_orders, ad.total_spent, ad.unique_parts_ordered
+ORDER BY ad.total_spent DESC
+LIMIT 10;

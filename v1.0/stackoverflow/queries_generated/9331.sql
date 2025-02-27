@@ -1,0 +1,63 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(P.QuestionCount, 0) AS QuestionCount,
+        COALESCE(P.AnswerCount, 0) AS AnswerCount,
+        COALESCE(B.BadgeCount, 0) AS BadgeCount
+    FROM Users U
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId,
+            COUNT(CASE WHEN PostTypeId = 1 THEN 1 END) AS QuestionCount,
+            COUNT(CASE WHEN PostTypeId = 2 THEN 1 END) AS AnswerCount
+        FROM Posts
+        GROUP BY OwnerUserId
+    ) P ON U.Id = P.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS BadgeCount 
+        FROM Badges 
+        GROUP BY UserId
+    ) B ON U.Id = B.UserId
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        QuestionCount, 
+        AnswerCount, 
+        BadgeCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserStatistics
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.BadgeCount,
+    U.ReputationRank,
+    COUNT(C.OwnedComments) AS TotalComments,
+    SUM(V.VoteValue) AS TotalVotes
+FROM TopUsers U
+LEFT JOIN (
+    SELECT PostId, COUNT(*) AS OwnedComments
+    FROM Comments
+    WHERE UserId IS NOT NULL
+    GROUP BY PostId
+) C ON U.UserId = C.UserId
+LEFT JOIN (
+    SELECT 
+        V.PostId, 
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 WHEN V.VoteTypeId = 3 THEN -1 ELSE 0 END) AS VoteValue
+    FROM Votes V
+    GROUP BY V.PostId
+) V ON U.UserId = V.UserId
+WHERE U.ReputationRank <= 10
+GROUP BY U.UserId, U.DisplayName, U.Reputation, U.QuestionCount, U.AnswerCount, U.BadgeCount, U.ReputationRank
+ORDER BY U.ReputationRank;

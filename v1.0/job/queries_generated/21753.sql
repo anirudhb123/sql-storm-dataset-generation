@@ -1,0 +1,68 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        m.production_year,
+        1 AS level
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    WHERE m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id,
+        mt.title,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        mt.production_year,
+        mh.level + 1
+    FROM movie_link mc
+    JOIN title mt ON mc.linked_movie_id = mt.id
+    JOIN movie_hierarchy mh ON mc.movie_id = mh.movie_id
+),
+
+title_aggregates AS (
+    SELECT 
+        th.title AS title,
+        th.production_year,
+        COUNT(ct.id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM movie_hierarchy th
+    LEFT JOIN cast_info ct ON th.movie_id = ct.movie_id
+    LEFT JOIN aka_name ak ON ct.person_id = ak.person_id
+    GROUP BY th.title, th.production_year
+),
+
+high_cast_movies AS (
+    SELECT 
+        ta.title,
+        ta.production_year,
+        ta.cast_count,
+        ta.actor_names,
+        RANK() OVER (ORDER BY ta.cast_count DESC) AS rank
+    FROM title_aggregates ta
+    WHERE ta.cast_count > (
+        SELECT AVG(cast_count) FROM title_aggregates
+    )
+)
+
+SELECT 
+    hcm.title,
+    hcm.production_year,
+    hcm.cast_count,
+    hcm.actor_names,
+    COALESCE(ct.kind, 'Unknown') AS company_type,
+    COALESCE(ki.keyword, 'No Info') AS movie_keyword,
+    CASE 
+        WHEN hcm.production_year > 2000 THEN 'Modern Era'
+        WHEN hcm.production_year BETWEEN 1980 AND 2000 THEN 'Classic Era'
+        ELSE 'Golden Age'
+    END AS era_category
+FROM high_cast_movies hcm
+LEFT JOIN movie_companies mc ON hcm.title = (SELECT title FROM aka_title WHERE id = mc.movie_id)
+LEFT JOIN company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN movie_keyword ki ON hcm.title = (SELECT title FROM aka_title WHERE id = ki.movie_id)
+WHERE hcm.rank <= 10
+ORDER BY hcm.cast_count DESC, hcm.production_year ASC
+LIMIT 20;

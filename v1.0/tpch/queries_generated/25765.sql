@@ -1,0 +1,36 @@
+WITH StringAgg AS (
+    SELECT 
+        p.p_name,
+        CONCAT(n.n_name, ' | ', s.s_name, ' | ', c.c_name) AS supplier_info,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(l.l_extendedprice) AS avg_price,
+        LISTAGG(l.l_comment, '; ') WITHIN GROUP (ORDER BY l.l_comment) AS aggregated_comments
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        customer c ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        p.p_name LIKE '%wood%'
+    GROUP BY 
+        p.p_name, n.n_name, s.s_name, c.c_name
+)
+SELECT 
+    p_name,
+    supplier_info,
+    total_quantity,
+    avg_price,
+    LENGTH(aggregated_comments) AS comments_length
+FROM 
+    StringAgg
+WHERE 
+    total_quantity > 100
+ORDER BY 
+    comments_length DESC;

@@ -1,0 +1,81 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL  -- Start with root movies (not episodes)
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1
+    FROM 
+        aka_title e 
+    JOIN 
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+),
+cast_details AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+movie_info_summary AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT it.info || ': ' || mi.info, '; ') AS info_details
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    md.keywords,
+    md.info_details,
+    ARRAY_AGG(DISTINCT cd.actor_name) AS actors,
+    MAX(cd.actor_rank) AS total_actors
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_keywords md ON mh.movie_id = md.movie_id
+LEFT JOIN 
+    cast_details cd ON mh.movie_id = cd.movie_id
+LEFT JOIN 
+    movie_info_summary mis ON mh.movie_id = mis.movie_id
+WHERE 
+    mh.production_year >= 2000  -- Filter for more recent movies
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, md.keywords, md.info_details
+ORDER BY 
+    mh.production_year DESC, mh.title
+LIMIT 50;  -- Limit results for benchmarking

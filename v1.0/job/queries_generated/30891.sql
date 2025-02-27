@@ -1,0 +1,74 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1 
+    FROM 
+        movie_link mc
+    JOIN 
+        aka_title m ON mc.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON mc.movie_id = mh.movie_id
+    WHERE 
+        m.production_year >= 2000
+),
+movie_cast AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        c.movie_id
+),
+movie_info_summary AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords,
+        STRING_AGG(mt.info, '; ') AS info_details
+    FROM 
+        movie_info mi
+    LEFT JOIN 
+        movie_keyword mk ON mi.movie_id = mk.movie_id
+    LEFT JOIN 
+        info_type mt ON mi.info_type_id = mt.id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(mc.total_cast, 0) AS total_cast,
+    COALESCE(mc.cast_names, 'No cast') AS cast_names,
+    COALESCE(mis.keywords, 'No keywords') AS keywords,
+    COALESCE(mis.info_details, 'No details') AS info_details,
+    mh.depth
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_cast mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_info_summary mis ON mh.movie_id = mis.movie_id
+WHERE 
+    mh.depth <= 2
+ORDER BY 
+    mh.production_year DESC, mh.title
+LIMIT 50;
+

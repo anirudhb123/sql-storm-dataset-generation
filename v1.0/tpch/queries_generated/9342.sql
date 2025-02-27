@@ -1,0 +1,52 @@
+WITH supplier_aggregate AS (
+    SELECT 
+        ps.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.s_suppkey
+),
+nation_supplier AS (
+    SELECT 
+        n.n_name AS nation_name,
+        sa.s_suppkey,
+        sa.total_supply_cost,
+        sa.unique_parts_supplied
+    FROM 
+        supplier_aggregate sa
+    JOIN 
+        supplier s ON sa.s_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    ns.nation_name,
+    COUNT(DISTINCT cs.c_custkey) AS total_customers,
+    SUM(cs.total_spent) AS total_spent_by_customers,
+    SUM(ns.total_supply_cost) AS total_supply_cost_by_nation,
+    SUM(ns.unique_parts_supplied) AS total_unique_parts_supplied
+FROM 
+    nation_supplier ns
+JOIN 
+    customer_order_summary cs ON ns.s_suppkey = cs.c_custkey
+GROUP BY 
+    ns.nation_name
+ORDER BY 
+    total_spent_by_customers DESC
+LIMIT 10;

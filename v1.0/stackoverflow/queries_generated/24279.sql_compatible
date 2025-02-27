@@ -1,0 +1,74 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p1.Id AS PostId,
+        p1.Title,
+        p1.OwnerUserId,
+        p1.PostTypeId,
+        0 AS Depth
+    FROM 
+        Posts p1
+    WHERE 
+        p1.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p2.Id, 
+        p2.Title,
+        p2.OwnerUserId,
+        p2.PostTypeId,
+        ph.Depth + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p2.ParentId = ph.PostId
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(B.BadgeCount, 0) AS TotalBadges,
+    COALESCE(B.GoldCount, 0) AS GoldBadges,
+    COALESCE(B.SilverCount, 0) AS SilverBadges,
+    COALESCE(B.BronzeCount, 0) AS BronzeBadges,
+    COALESCE(PH.Depth, -1) AS PostDepth,
+    CASE 
+        WHEN PH.Depth IS NULL THEN 'No Posts'
+        WHEN PH.Depth >= 3 THEN 'Highly Nested'
+        ELSE 'Shallow'
+    END AS NestingLevel,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed
+FROM 
+    Users U
+LEFT JOIN 
+    UserBadges B ON U.Id = B.UserId
+LEFT JOIN 
+    RecursivePostHierarchy PH ON U.Id = PH.OwnerUserId
+LEFT JOIN 
+    Posts P ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    Tags T ON T.Id IN (SELECT CAST(unnest(string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><')) AS INTEGER))
+WHERE 
+    U.Reputation > 1000
+GROUP BY 
+    U.Id, U.DisplayName, U.Reputation, B.BadgeCount, B.GoldCount, B.SilverCount, B.BronzeCount, PH.Depth
+HAVING 
+    COUNT(DISTINCT P.Id) > 0 OR COUNT(DISTINCT T.Id) > 0
+ORDER BY 
+    U.Reputation DESC, TotalBadges DESC;

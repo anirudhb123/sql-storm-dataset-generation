@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal * 0.9, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3 AND s.s_acctbal IS NOT NULL
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN (
+        SELECT DISTINCT ps_partkey
+        FROM partsupp
+        WHERE ps_availqty > 50
+    ) AS p ON ps.ps_partkey = p.ps_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+HighOrderRates AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS OrderCount
+    FROM orders o
+    WHERE o.o_totalprice > 1000
+    GROUP BY o.o_custkey
+    HAVING COUNT(o.o_orderkey) > 10
+),
+CustomerSupplierData AS (
+    SELECT c.c_custkey, c.c_name, sh.level AS SupplierLevel, ts.TotalSupplyCost
+    FROM customer c
+    LEFT JOIN HighOrderRates hor ON c.c_custkey = hor.o_custkey
+    LEFT JOIN SupplierHierarchy sh ON c.c_nationkey = sh.s_nationkey
+    LEFT JOIN TopSuppliers ts ON sh.s_suppkey = ts.s_suppkey
+)
+SELECT
+    cs.c_custkey,
+    cs.c_name,
+    COALESCE(sh.SupplierLevel, 'No Suppliers') AS SupplierLevel,
+    COALESCE(ts.TotalSupplyCost, 0) AS TotalSupplyCost,
+    CASE
+        WHEN hor.OrderCount IS NOT NULL THEN 'High Order Rate'
+        ELSE 'Regular Customer'
+    END AS CustomerType,
+    SUM(l.l_quantity * l.l_extendedprice) AS TotalLineItemValue
+FROM CustomerSupplierData cs
+LEFT JOIN lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+LEFT JOIN HighOrderRates hor ON cs.c_custkey = hor.o_custkey
+GROUP BY cs.c_custkey, cs.c_name, hor.OrderCount, sh.SupplierLevel, ts.TotalSupplyCost
+ORDER BY TotalLineItemValue DESC, cs.c_name
+LIMIT 100 OFFSET 10;

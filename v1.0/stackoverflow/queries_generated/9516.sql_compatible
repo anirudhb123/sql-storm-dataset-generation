@@ -1,0 +1,51 @@
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.IsModerated = TRUE THEN 1 ELSE 0 END) AS ModeratedCount
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+Statistics AS (
+    SELECT 
+        u.DisplayName,
+        ub.BadgeCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        ps.PostCount,
+        ps.QuestionCount,
+        ps.AnswerCount,
+        ps.ModeratedCount
+    FROM Users u
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN PostStatistics ps ON u.Id = ps.OwnerUserId
+)
+SELECT 
+    s.DisplayName,
+    COALESCE(s.BadgeCount, 0) AS BadgeCount,
+    COALESCE(s.GoldBadges, 0) AS GoldBadgeCount,
+    COALESCE(s.SilverBadges, 0) AS SilverBadgeCount,
+    COALESCE(s.BronzeBadges, 0) AS BronzeBadgeCount,
+    COALESCE(s.PostCount, 0) AS TotalPosts,
+    COALESCE(s.QuestionCount, 0) AS TotalQuestions,
+    COALESCE(s.AnswerCount, 0) AS TotalAnswers,
+    COALESCE(s.ModeratedCount, 0) AS TotalModeratedPosts
+FROM Statistics s
+ORDER BY s.BadgeCount DESC, s.PostCount DESC
+LIMIT 100;

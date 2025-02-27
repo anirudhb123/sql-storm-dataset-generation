@@ -1,0 +1,67 @@
+WITH RecursivePostChains AS (
+    SELECT p.Id, p.Title, p.ParentId, 1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 2  -- Select Answers
+
+    UNION ALL
+
+    SELECT p.Id, p.Title, p.ParentId, rpc.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostChains rpc ON p.Id = rpc.ParentId
+)
+
+, UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(b.Id) AS TotalBadges,
+        ROW_NUMBER() OVER (ORDER BY SUM(u.Reputation) DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+)
+
+, PostActivity AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        (SELECT AVG(DATEDIFF(SECOND, CreationDate, LastActivityDate)) 
+         FROM Posts WHERE OwnerUserId = p.OwnerUserId) AS AvgResponseTime
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate
+)
+
+SELECT 
+    p.Title AS PostTitle,
+    u.DisplayName AS OwnerDisplayName,
+    uReputation.Upvotes,
+    uReputation.Downvotes,
+    uReputation.TotalBadges AS UserBadges,
+    pa.CommentCount,
+    pa.VoteCount,
+    pa.AvgResponseTime,
+    COUNT(rp.Id) AS AnswerCount,
+    (CASE 
+        WHEN pa.VoteCount = 0 THEN 'No Votes'
+        WHEN pa.VoteCount > 10 THEN 'Highly Voted'
+        ELSE 'Moderately Voted' 
+    END) AS VoteStatus
+FROM Posts p
+JOIN Users u ON p.OwnerUserId = u.Id
+JOIN UserReputation uReputation ON u.Id = uReputation.UserId
+JOIN PostActivity pa ON p.Id = pa.Id
+LEFT JOIN RecursivePostChains rp ON p.Id = rp.ParentId
+WHERE p.PostTypeId = 1  -- Only Questions
+GROUP BY p.Title, u.DisplayName, uReputation.Upvotes, 
+         uReputation.Downvotes, uReputation.TotalBadges,
+         pa.CommentCount, pa.VoteCount, pa.AvgResponseTime
+ORDER BY AnswerCount DESC, p.CreationDate DESC
+LIMIT 10;

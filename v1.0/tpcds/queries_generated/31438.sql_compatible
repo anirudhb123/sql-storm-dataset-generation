@@ -1,0 +1,63 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_quantity,
+        ws_net_profit,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+    UNION ALL
+    SELECT 
+        ws.ws_order_number, 
+        ws.ws_item_sk, 
+        ws.ws_quantity, 
+        ws.ws_net_profit * 1.1 AS ws_net_profit, 
+        s.level + 1
+    FROM 
+        web_sales ws
+    JOIN 
+        Sales_CTE s ON ws.ws_order_number = s.ws_order_number
+    WHERE 
+        s.level < 3
+),
+Profit_Summary AS (
+    SELECT 
+        s.ws_item_sk,
+        SUM(s.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT s.ws_order_number) AS order_count,
+        MAX(i.i_current_price) AS max_price
+    FROM 
+        Sales_CTE s 
+    JOIN 
+        item i ON s.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        s.ws_item_sk
+)
+SELECT 
+    p.ws_item_sk,
+    p.total_profit,
+    p.order_count,
+    p.max_price,
+    CASE 
+        WHEN p.order_count > 100 THEN 'High Volume'
+        WHEN p.order_count BETWEEN 50 AND 100 THEN 'Moderate Volume'
+        ELSE 'Low Volume'
+    END AS order_volume,
+    COALESCE((SELECT AVG(ss_ext_sales_price) FROM store_sales WHERE ss_item_sk = p.ws_item_sk), 0) AS avg_store_price,
+    CASE 
+        WHEN p.total_profit > (SELECT AVG(total_profit) FROM Profit_Summary) THEN 'Above Average Profit'
+        ELSE 'Below Average Profit'
+    END AS profit_comparison
+FROM 
+    Profit_Summary p
+LEFT JOIN 
+    customer c ON c.c_current_cdemo_sk = (SELECT cd_demo_sk FROM customer_demographics WHERE cd_purchase_estimate > 5000)
+WHERE 
+    c.c_customer_sk IS NOT NULL
+ORDER BY 
+    p.total_profit DESC
+FETCH FIRST 50 ROWS ONLY;

@@ -1,0 +1,62 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returned_quantity,
+        SUM(wr_return_amt_inc_tax) AS total_returned_amount
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_quantity) AS total_sold_quantity,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 
+        (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 AND 
+        (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_bill_customer_sk
+),
+CombinedData AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(s.total_sold_quantity, 0) AS total_sold_quantity,
+        COALESCE(c.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(s.total_net_profit, 0) AS total_net_profit,
+        CASE 
+            WHEN COALESCE(s.total_sold_quantity, 0) > 0 
+            THEN COALESCE(c.total_returned_quantity, 0) * 100.0 / COALESCE(s.total_sold_quantity, 0)
+            ELSE NULL 
+        END AS return_ratio
+    FROM 
+        (SELECT DISTINCT c_customer_sk FROM customer) AS c
+    LEFT JOIN 
+        CustomerReturns c 
+        ON c.c_customer_sk = c.wr_returning_customer_sk
+    LEFT JOIN 
+        SalesSummary s 
+        ON c.c_customer_sk = s.ws_bill_customer_sk
+)
+SELECT 
+    c.c_customer_sk,
+    c.total_sold_quantity,
+    c.total_returned_quantity,
+    c.total_net_profit,
+    c.return_ratio,
+    CASE 
+        WHEN c.total_returned_quantity IS NULL THEN 'No Returns'
+        WHEN c.return_ratio IS NULL THEN 'No Sales'
+        WHEN c.return_ratio < 10 THEN 'Low Returns'
+        WHEN c.return_ratio BETWEEN 10 AND 20 THEN 'Moderate Returns'
+        ELSE 'High Returns' 
+    END AS return_category
+FROM 
+    CombinedData c
+ORDER BY 
+    c.return_ratio DESC NULLS LAST;

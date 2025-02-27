@@ -1,0 +1,77 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE 
+        mt.production_year > 2000
+)
+
+, CastStats AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS total_cast,
+        LISTAGG(DISTINCT a.name, ', ') WITHIN GROUP (ORDER BY a.name) AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+)
+
+, CompanyTypes AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.company_id) AS total_companies,
+        STRING_AGG(DISTINCT c.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(cs.total_cast, 0) AS total_cast,
+    COALESCE(cs.cast_names, 'N/A') AS cast_names,
+    COALESCE(ct.total_companies, 0) AS total_companies,
+    COALESCE(ct.company_names, 'N/A') AS company_names,
+    mh.level,
+    CASE 
+        WHEN mh.level > 1 THEN 'Sequel/Related'
+        ELSE 'Original'
+    END AS movie_type
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastStats cs ON mh.movie_id = cs.movie_id
+LEFT JOIN 
+    CompanyTypes ct ON mh.movie_id = ct.movie_id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    mh.production_year DESC, mh.title;

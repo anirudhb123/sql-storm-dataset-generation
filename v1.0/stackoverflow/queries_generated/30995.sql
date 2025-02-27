@@ -1,0 +1,62 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, CreationDate,
+           CAST(DisplayName AS VARCHAR(1000)) AS HierarchyPath
+    FROM Users
+    WHERE Reputation > 1000  -- Only consider sufficiently reputed users
+
+    UNION ALL
+
+    SELECT u.Id, u.DisplayName, u.Reputation, u.CreationDate,
+           CONCAT(uh.HierarchyPath, ' > ', u.DisplayName)
+    FROM Users u
+    JOIN UserHierarchy uh ON u.Id = uh.Id
+    WHERE u.Reputation > 1000  -- Recurse on users with sufficient reputation
+),
+
+RankedPosts AS (
+    SELECT p.Id, p.Title, p.Score, p.CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+           COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id
+),
+
+PostChaining AS (
+    SELECT pl.PostId, pl.RelatedPostId, pl.LinkTypeId,
+           ph.PostHistoryTypeId, ph.CreationDate
+    FROM PostLinks pl
+    LEFT JOIN PostHistory ph ON pl.RelatedPostId = ph.PostId
+    WHERE pl.LinkTypeId = 3  -- Only consider duplicates
+      AND ph.CreationDate >= NOW() - INTERVAL '1 year'
+),
+
+EnhancedUserStats AS (
+    SELECT u.Id, u.DisplayName, u.Reputation,
+           COUNT(DISTINCT b.Id) AS GoldBadges,
+           COUNT(DISTINCT p.Id) AS TotalPosts,
+           SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId AND b.Class = 1  -- Only gold badges
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  -- Only Bounty votes
+    GROUP BY u.Id
+)
+
+SELECT uh.DisplayName AS User, 
+       e.Reputation AS Reputation,
+       e.GoldBadges AS GoldBadges,
+       e.TotalPosts AS TotalPosts,
+       COALESCE(SUM(rp.Score), 0) AS TotalScore,
+       COALESCE(SUM(pch.PostHistoryTypeId), 0) AS TotalPostHistories,
+       SUM(CASE WHEN rp.PostRank = 1 THEN 1 ELSE 0 END) AS TopPosts,
+       STRING_AGG(DISTINCT CONCAT(p.Title, ' (', p.Score, ')'), '; ') AS UserTopPosts
+FROM EnhancedUserStats e
+JOIN UserHierarchy uh ON e.Id = uh.Id
+LEFT JOIN RankedPosts rp ON uh.Id = rp.OwnerUserId
+LEFT JOIN PostChaining pch ON rp.Id = pch.PostId 
+WHERE e.Reputation > 1000
+GROUP BY uh.DisplayName, e.Reputation, e.GoldBadges, e.TotalPosts
+ORDER BY e.Reputation DESC
+LIMIT 10;

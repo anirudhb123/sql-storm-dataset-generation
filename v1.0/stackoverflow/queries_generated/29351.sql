@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        COALESCE(c.CommentCount, 0) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON c.PostId = p.Id
+    LEFT JOIN 
+        (SELECT p.Id, pt.TagName FROM Posts p 
+         JOIN LATERAL STRING_TO_ARRAY(substring(p.Tags, 2, length(Tags)-2), '><') AS t(tag) ON true 
+         JOIN Tags pt ON pt.TagName = t.tag) tags ON tags.Id = p.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.Tags,
+        rp.CommentCount,
+        COUNT(*) OVER (PARTITION BY LEFT(rp.Title, 1) ORDER BY rp.CreationDate) AS TitleCharacterCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank = 1
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.OwnerDisplayName,
+    fp.UpVotes,
+    fp.DownVotes,
+    fp.Tags,
+    fp.CommentCount,
+    fp.TitleCharacterCount,
+    CASE 
+        WHEN fp.Score >= 10 THEN 'Hot'
+        WHEN fp.ViewCount >= 100 THEN 'Popular'
+        ELSE 'Normal'
+    END AS PostCategory
+FROM 
+    FilteredPosts fp
+WHERE 
+    fp.CommentCount > 5
+ORDER BY 
+    fp.Score DESC, fp.ViewCount DESC;

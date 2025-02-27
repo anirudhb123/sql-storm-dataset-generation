@@ -1,0 +1,81 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        STRING_AGG(DISTINCT Posts.Title, ', ') AS SampleTitles
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::text[])
+    GROUP BY 
+        Tags.TagName
+), UserReputation AS (
+    SELECT 
+        Users.Id AS UserId, 
+        Users.DisplayName, 
+        Users.Reputation,
+        COUNT(DISTINCT Posts.Id) AS PostsCreated,
+        SUM(COALESCE(Posts.Score, 0)) AS TotalScore
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY 
+        Users.Id, Users.DisplayName, Users.Reputation
+), TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        PostsCreated, 
+        TotalScore,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM 
+        UserReputation
+    WHERE 
+        PostsCreated > 0
+), PostSummary AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.CreationDate,
+        Posts.ViewCount,
+        COUNT(Comments.Id) AS CommentCount,
+        COUNT(Votes.Id) FILTER (WHERE Votes.VoteTypeId = 2) AS UpVotes,
+        COUNT(Votes.Id) FILTER (WHERE Votes.VoteTypeId = 3) AS DownVotes,
+        COALESCE(Posts.AcceptedAnswerId, 0) AS HasAcceptedAnswer
+    FROM 
+        Posts
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Posts.Id, Posts.Title, Posts.CreationDate, Posts.ViewCount
+)
+SELECT 
+    Tags.TagName,
+    TagCounts.PostCount,
+    TagCounts.SampleTitles,
+    TopUsers.DisplayName AS TopUser,
+    TopUsers.Reputation,
+    PostSummary.Title AS SamplePostTitle,
+    PostSummary.ViewCount,
+    PostSummary.CommentCount,
+    PostSummary.UpVotes,
+    PostSummary.DownVotes,
+    PostSummary.HasAcceptedAnswer
+FROM 
+    TagCounts
+JOIN 
+    PostLinks ON TagCounts.TagName = 
+        (SELECT TagName FROM Tags WHERE Id = PostLinks.RelatedPostId LIMIT 1)
+JOIN 
+    PostSummary ON PostLinks.PostId = PostSummary.PostId
+JOIN 
+    TopUsers ON PostSummary.ViewCount > 100
+ORDER BY 
+    TagCounts.PostCount DESC, TopUsers.Reputation DESC
+LIMIT 10;

@@ -1,0 +1,59 @@
+
+WITH RankedCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+TopCustomers AS (
+    SELECT
+        r.r_name,
+        rc.c_name,
+        rc.total_spent
+    FROM
+        RankedCustomers rc
+    JOIN
+        nation n ON rc.c_nationkey = n.n_nationkey
+    JOIN
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE
+        rc.rank <= 5
+),
+PartSupplierDetails AS (
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM
+        partsupp ps
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY
+        ps.ps_partkey, ps.ps_suppkey
+)
+SELECT 
+    tc.r_name AS region,
+    tc.c_name AS top_customer,
+    p.p_name AS part_name,
+    p.p_brand AS part_brand,
+    ps.total_availqty,
+    ps.avg_supplycost,
+    tc.total_spent
+FROM 
+    TopCustomers tc
+JOIN 
+    lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o JOIN customer c ON o.o_custkey = c.c_custkey WHERE c.c_name = tc.top_customer)
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+ORDER BY 
+    tc.total_spent DESC, tc.r_name, tc.c_name;

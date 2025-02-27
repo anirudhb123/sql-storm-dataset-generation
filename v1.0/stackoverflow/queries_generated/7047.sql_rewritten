@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COALESCE(SUM(v.VoteTypeId = 2), 0) DESC) AS VoteRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(b.Class, 0) = 1) AS GoldBadges,
+        SUM(COALESCE(b.Class, 0) = 2) AS SilverBadges,
+        SUM(COALESCE(b.Class, 0) = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    us.DisplayName,
+    us.TotalPosts,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    COUNT(rp.PostId) AS ActivePostCount,
+    AVG(rp.UpVotes - rp.DownVotes) AS AverageVoteDifference
+FROM 
+    UserStats us
+LEFT JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId
+WHERE 
+    rp.VoteRank <= 5
+GROUP BY 
+    us.DisplayName, us.TotalPosts, us.GoldBadges, us.SilverBadges, us.BronzeBadges
+ORDER BY 
+    AverageVoteDifference DESC, TotalPosts ASC;

@@ -1,0 +1,37 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATEADD(month, -6, cast('1998-10-01' as date)) 
+    GROUP BY c.c_custkey, c.c_name
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           AVG(l.l_tax) AS avg_tax,
+           COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+HighValueOrders AS (
+    SELECT lo.l_orderkey, lo.total_revenue, lo.avg_tax, cd.c_name
+    FROM LineItemSummary lo
+    JOIN CustomerOrders cd ON lo.l_orderkey = cd.order_count
+    WHERE lo.total_revenue > (SELECT AVG(total_revenue) FROM LineItemSummary)
+)
+SELECT hd.c_name, sd.s_name, sd.total_supply_cost, hv.total_revenue, hv.avg_tax
+FROM HighValueOrders hv
+JOIN SupplierDetails sd ON hv.unique_suppliers = sd.s_suppkey
+JOIN CustomerOrders hd ON hv.l_orderkey = hd.order_count
+FULL OUTER JOIN part p ON sd.s_suppkey = p.p_partkey
+WHERE sd.total_supply_cost > (
+    SELECT AVG(total_supply_cost) FROM SupplierDetails
+) AND hd.order_count >= 5
+ORDER BY hd.c_name, sd.total_supply_cost DESC;

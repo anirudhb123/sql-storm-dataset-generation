@@ -1,0 +1,51 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_custkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(ro.revenue) AS total_revenue
+    FROM 
+        customer c
+    JOIN 
+        RankedOrders ro ON c.c_custkey = ro.o_custkey
+    WHERE 
+        ro.rn = 1
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name,
+    COALESCE(tc.c_name, 'No purchases') AS Top_Customer,
+    COALESCE(tc.total_revenue, 0) AS Total_Revenue
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    TopCustomers tc ON tc.total_revenue > 0
+WHERE 
+    p.p_type LIKE '%metal%'
+    AND ps.ps_availqty > 50
+ORDER BY 
+    r.r_name, Total_Revenue DESC;

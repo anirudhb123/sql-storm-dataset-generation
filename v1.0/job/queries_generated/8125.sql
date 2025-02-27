@@ -1,0 +1,32 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.role_id AS role_id,
+    cc.kind AS comp_cast_type,
+    m.name AS company_name,
+    mt.kind AS company_type,
+    ti.info AS movie_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    aka_title t ON c.movie_id = t.movie_id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name m ON mc.company_id = m.id
+JOIN 
+    company_type mt ON mc.company_type_id = mt.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+JOIN 
+    info_type ti ON mi.info_type_id = ti.id
+WHERE 
+    t.production_year > 2000
+AND 
+    ti.info LIKE '%Award%'
+ORDER BY 
+    actor_name, movie_title;

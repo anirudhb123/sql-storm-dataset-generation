@@ -1,0 +1,78 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1996-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+),
+UniqueParts AS (
+    SELECT DISTINCT
+        p.p_partkey,
+        p.p_name,
+        COALESCE(ps.ps_availqty, 0) AS available_quantity
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+RegionOuter AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+)
+SELECT 
+    ro.r_name,
+    SUM(fo.total_revenue) AS total_order_revenue,
+    COUNT(DISTINCT us.p_partkey) AS unique_parts_count,
+    MAX(rc.rank) AS top_supplier_rank
+FROM 
+    RegionOuter ro
+LEFT JOIN 
+    (SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+     FROM lineitem l
+     JOIN orders o ON l.l_orderkey = o.o_orderkey
+     WHERE o.o_orderstatus = 'F'
+     GROUP BY l.l_orderkey) AS fo ON EXISTS (
+         SELECT 1 
+         FROM orders o 
+         WHERE o.o_orderkey = fo.l_orderkey 
+         AND o.o_totalprice > 100000
+     )
+LEFT JOIN 
+    RankedSuppliers rc ON ro.r_regionkey = rc.s_nationkey
+LEFT JOIN 
+    UniqueParts us ON rc.s_nationkey = us.available_quantity
+WHERE 
+    ro.nation_count > 1
+GROUP BY 
+    ro.r_name
+HAVING 
+    SUM(fo.total_revenue) IS NOT NULL AND 
+    MAX(rc.rank) IS NOT NULL
+ORDER BY 
+    total_order_revenue DESC, 
+    ro.r_name ASC;

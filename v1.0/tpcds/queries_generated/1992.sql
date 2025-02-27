@@ -1,0 +1,85 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rnk
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+top_customers AS (
+    SELECT 
+        rc.c_customer_sk,
+        rc.c_first_name,
+        rc.c_last_name,
+        rc.cd_gender,
+        rc.cd_marital_status,
+        rc.cd_purchase_estimate
+    FROM 
+        ranked_customers rc
+    WHERE 
+        rc.rnk <= 10
+),
+sales_data AS (
+    SELECT 
+        ws.sold_date_sk, 
+        ws.item_sk, 
+        SUM(ws.net_profit) AS total_net_profit,
+        COUNT(ws.order_number) AS total_orders
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.sold_date_sk, ws.item_sk
+),
+customer_sales AS (
+    SELECT 
+        tc.c_customer_sk,
+        sd.total_net_profit,
+        sd.total_orders,
+        DENSE_RANK() OVER (PARTITION BY tc.c_customer_sk ORDER BY sd.total_net_profit DESC) AS income_rank
+    FROM 
+        top_customers tc
+    JOIN 
+        sales_data sd ON sd.item_sk IN (
+            SELECT 
+                ws.item_sk 
+            FROM 
+                web_sales ws 
+            WHERE 
+                ws.bill_customer_sk = tc.c_customer_sk
+        )
+),
+final_sales AS (
+    SELECT 
+        ca.ca_city,
+        SUM(cs.total_net_profit) AS total_customer_profit,
+        AVG(cs.total_orders) AS average_orders
+    FROM 
+        customer_sales cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_city
+)
+SELECT 
+    f.ca_city,
+    COALESCE(f.total_customer_profit, 0) AS total_customer_profit,
+    COALESCE(f.average_orders, 0) AS average_orders,
+    CASE 
+        WHEN f.total_customer_profit > 5000 THEN 'High Profit'
+        WHEN f.total_customer_profit BETWEEN 2000 AND 5000 THEN 'Medium Profit'
+        ELSE 'Low Profit'
+    END AS profit_category
+FROM 
+    final_sales f
+ORDER BY 
+    f.total_customer_profit DESC
+LIMIT 10;

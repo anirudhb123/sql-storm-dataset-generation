@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(AcceptedAnswers.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankByUser
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            AcceptedAnswerId
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 1 
+            AND AcceptedAnswerId IS NOT NULL
+    ) AcceptedAnswers ON p.Id = AcceptedAnswers.PostId
+    WHERE 
+        p.PostTypeId = 1 
+)
+
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT p.PostId) AS TotalQuestions,
+    AVG(p.Score) AS AvgQuestionScore,
+    SUM(CASE WHEN p.AcceptedAnswerId != -1 THEN 1 ELSE 0 END) AS AcceptedAnswersCount,
+    STRING_AGG(pt.Name, ', ') AS PostTypes,
+    MAX(rank.RankByUser) AS HighestRank,
+    MIN(pt.Name) FILTER (WHERE pt.Class = 1) AS GoldBadgeName, 
+    MAX(pt.Name) FILTER (WHERE pt.Class = 3) AS BronzeBadgeName,
+    SUM(b.Date IS NOT NULL AND b.TagBased = 1)::int AS TagBasedBadges
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId AND b.Class IN (1, 3) 
+LEFT JOIN 
+    PostTypes pt ON pt.Id = p.PostTypeId  
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.PostId) > 5 
+ORDER BY 
+    AvgQuestionScore DESC, 
+    TotalQuestions DESC
+LIMIT 
+    10;

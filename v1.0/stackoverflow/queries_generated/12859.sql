@@ -1,0 +1,61 @@
+-- Performance Benchmarking Query
+WITH PostCounts AS (
+    SELECT 
+        p.PostTypeId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Posts p
+    GROUP BY 
+        p.PostTypeId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(u.Views) AS TotalViews,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+VoteSummary AS (
+    SELECT 
+        v.PostId,
+        vt.Name AS VoteType,
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId, vt.Name
+)
+SELECT 
+    pt.Name AS PostType,
+    pc.TotalPosts,
+    pc.AcceptedAnswers,
+    COUNT(DISTINCT us.UserId) AS UniqueUsers,
+    SUM(us.TotalBadges) AS TotalBadges,
+    SUM(us.TotalViews) AS TotalViews,
+    SUM(us.TotalUpVotes) AS TotalUpVotes,
+    SUM(us.TotalDownVotes) AS TotalDownVotes,
+    COUNT(DISTINCT vs.PostId) AS PostsWithVotes,
+    SUM(CASE WHEN vs.VoteType = 'UpMod' THEN vs.VoteCount ELSE 0 END) AS TotalUpVotesCount,
+    SUM(CASE WHEN vs.VoteType = 'DownMod' THEN vs.VoteCount ELSE 0 END) AS TotalDownVotesCount
+FROM 
+    PostCounts pc
+JOIN 
+    PostTypes pt ON pc.PostTypeId = pt.Id
+LEFT JOIN 
+    UserStats us ON us.UserId IS NOT NULL
+LEFT JOIN 
+    VoteSummary vs ON vs.PostId IS NOT NULL
+GROUP BY 
+    pt.Name, pc.TotalPosts, pc.AcceptedAnswers
+ORDER BY 
+    pc.TotalPosts DESC;

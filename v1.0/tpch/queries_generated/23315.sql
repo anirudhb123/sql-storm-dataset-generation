@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank_within_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_nationkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1995-01-01' AND 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_nationkey
+),
+AggregateResults AS (
+    SELECT 
+        f.o_orderkey,
+        f.o_totalprice,
+        f.o_orderdate,
+        COALESCE(r.rank_within_nation, 0) AS supplier_rank,
+        f.total_revenue
+    FROM 
+        FilteredOrders f
+    LEFT JOIN 
+        RankedSuppliers r ON f.c_nationkey = r.s_nationkey AND r.rank_within_nation <= 5
+)
+SELECT 
+    COUNT(*) AS order_count,
+    AVG(total_revenue) AS avg_revenue_per_order,
+    SUM(CASE WHEN supplier_rank > 0 THEN total_revenue ELSE 0 END) AS revenue_with_top_suppliers,
+    SUM(total_revenue) FILTER (WHERE total_revenue IS NOT NULL) AS total_non_null_revenue,
+    MAX(total_revenue) AS max_revenue,
+    MIN(total_revenue) AS min_revenue
+FROM 
+    AggregateResults
+WHERE 
+    total_revenue IS NOT NULL
+  AND 
+    o_orderdate BETWEEN 
+        DATEADD(MONTH, -12, CURRENT_DATE) AND CURRENT_DATE
+UNION ALL
+SELECT
+    0,
+    NULL,
+    SUM(CASE WHEN supplier_rank = 0 THEN total_revenue ELSE 0 END),
+    NULL,
+    NULL,
+    NULL
+FROM 
+    AggregateResults
+WHERE 
+    total_revenue IS NULL;

@@ -1,0 +1,66 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        AcceptedAnswerId,
+        ParentId,
+        CreationDate,
+        COALESCE(AnswerCount, 0) AS AnswerCount,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Only questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.CreationDate,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+)
+SELECT 
+    p.Id AS QuestionId,
+    p.Title AS QuestionTitle,
+    COALESCE(a.Content, 'No accepted answer') AS AcceptedAnswerContent,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation AS OwnerReputation,
+    COUNT(c.Id) AS CommentCount,
+    SUM(v.BountyAmount) AS TotalBountyAmount,
+    ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS PostRank,
+    CASE
+        WHEN p.CreationDate < NOW() - INTERVAL '365 days' THEN 'Archived'
+        ELSE 'Active'
+    END AS PostStatus,
+    t.TagName
+FROM 
+    Posts p
+LEFT JOIN 
+    Posts a ON p.AcceptedAnswerId = a.Id
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+WHERE 
+    p.PostTypeId = 1 
+    AND u.Reputation >= 1000 
+    AND (v.VoteTypeId = 2 OR v.VoteTypeId IS NULL)  -- Upvoted or no votes
+GROUP BY 
+    p.Id, a.Content, u.DisplayName, u.Reputation, t.TagName
+HAVING 
+    COUNT(c.Id) > 0
+ORDER BY 
+    TotalBountyAmount DESC, PostRank
+LIMIT 10;

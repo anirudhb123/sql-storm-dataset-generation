@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'GERMANY')
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 2
+),
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size > 10
+),
+SalesSummary AS (
+    SELECT o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY o.o_orderdate
+),
+RegionSales AS (
+    SELECT r.r_name, SUM(ss.total_sales) AS region_total
+    FROM region r
+    LEFT JOIN (
+        SELECT n.n_regionkey, ss.o_orderdate, ss.total_sales
+        FROM SalesSummary ss
+        JOIN customer c ON ss.o_orderdate = (SELECT o.o_orderdate FROM orders o WHERE o.o_custkey = c.c_custkey)
+        JOIN nation n ON c.c_nationkey = n.n_nationkey
+    ) ss ON r.r_regionkey = ss.n_regionkey
+    GROUP BY r.r_name
+)
+SELECT sh.s_name, pi.p_name, rs.region_total, pi.ps_availqty
+FROM SupplierHierarchy sh
+JOIN PartSupplierInfo pi ON sh.s_suppkey = pi.ps_suppkey
+JOIN RegionSales rs ON rs.region_total IS NOT NULL
+WHERE rs.region_total > 100000
+ORDER BY rs.region_total DESC, sh.s_name ASC;

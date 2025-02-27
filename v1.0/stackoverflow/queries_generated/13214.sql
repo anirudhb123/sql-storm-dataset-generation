@@ -1,0 +1,59 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes
+    FROM Users 
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY Users.Id, Reputation
+),
+PostStats AS (
+    SELECT 
+        Id AS PostId,
+        PostTypeId,
+        Title,
+        CreationDate,
+        ViewCount,
+        Score,
+        COALESCE(Comments.Count, 0) AS CommentCount
+    FROM Posts 
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS Count 
+        FROM Comments 
+        GROUP BY PostId
+    ) AS Comments ON Posts.Id = Comments.PostId
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        ViewCount,
+        CommentCount,
+        RANK() OVER (ORDER BY Score DESC) AS RankScore,
+        RANK() OVER (ORDER BY ViewCount DESC) AS RankViewCount
+    FROM PostStats
+)
+SELECT 
+    Users.UserId,
+    Users.Reputation,
+    UserStats.PostCount,
+    UserStats.QuestionsCount,
+    UserStats.AnswersCount,
+    UserStats.TotalUpVotes,
+    UserStats.TotalDownVotes,
+    TopPosts.Title,
+    TopPosts.Score,
+    TopPosts.ViewCount,
+    TopPosts.CommentCount,
+    TopPosts.RankScore,
+    TopPosts.RankViewCount
+FROM UserStats
+JOIN Users ON UserStats.UserId = Users.Id
+JOIN TopPosts ON UserStats.PostCount > 0
+ORDER BY UserStats.Reputation DESC, TopPosts.RankScore;

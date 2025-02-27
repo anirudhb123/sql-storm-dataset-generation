@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(c.id) AS cast_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+), 
+DirectorMovies AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT d.person_id) AS director_count
+    FROM 
+        movie_companies m
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+    JOIN 
+        company_name cn ON m.company_id = cn.id
+    JOIN 
+        role_type r ON r.id = m.role_id
+    JOIN 
+        char_name d ON r.role LIKE '%' || d.name || '%'  
+    WHERE 
+        ct.kind = 'director'
+    GROUP BY 
+        m.movie_id
+),
+KeywordMovies AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    COALESCE(rm.cast_count, 0) AS total_cast,
+    COALESCE(dm.director_count, 0) AS total_directors,
+    COALESCE(km.keywords, 'No Keywords') AS movie_keywords
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    DirectorMovies dm ON rm.id = dm.movie_id
+LEFT JOIN 
+    KeywordMovies km ON rm.id = km.movie_id
+WHERE 
+    (rm.production_year IS NOT NULL AND rm.production_year > 2000) 
+    OR (rm.cast_count > 5)
+ORDER BY 
+    rm.production_year DESC,
+    total_cast DESC;

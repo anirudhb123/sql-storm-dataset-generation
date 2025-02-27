@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY s.s_nationkey) AS total_nation_suppliers
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_size,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) THEN 'High Value'
+            ELSE 'Low Value'
+        END AS price_category
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 1 AND 50
+),
+SupplierSales AS (
+    SELECT 
+        ps.s_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_supply_value
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        ps.s_suppkey
+),
+Summary AS (
+    SELECT 
+        rs.s_name,
+        rs.total_nation_suppliers,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts,
+        COALESCE(SUM(ss.total_supply_value), 0) AS total_supply_value,
+        SUM(CASE WHEN hp.price_category = 'High Value' THEN 1 ELSE 0 END) AS high_value_part_count
+    FROM 
+        RankedSuppliers rs
+    LEFT JOIN 
+        partsupp ps ON rs.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        HighValueParts hp ON ps.ps_partkey = hp.p_partkey
+    LEFT JOIN 
+        SupplierSales ss ON rs.s_suppkey = ss.s_suppkey
+    WHERE 
+        rs.rn <= 3
+    GROUP BY 
+        rs.s_name, rs.total_nation_suppliers
+)
+SELECT 
+    s_name,
+    total_nation_suppliers,
+    supplied_parts,
+    total_supply_value,
+    high_value_part_count
+FROM 
+    Summary
+WHERE 
+    total_supply_value IS NOT NULL AND total_supply_value > 10000
+ORDER BY 
+    supplied_parts DESC, high_value_part_count DESC;

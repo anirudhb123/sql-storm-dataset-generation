@@ -1,0 +1,82 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        CONCAT(ca_city, ', ', ca_state, ' ', ca_zip) AS address_location,
+        ca_address_sk
+    FROM 
+        customer_address
+),
+Demographics AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        cd_demo_sk
+    FROM 
+        customer_demographics
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_bill_customer_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_sold_date_sk,
+        ws.ws_order_number,
+        wd.full_address,
+        wd.address_location
+    FROM 
+        web_sales ws
+    JOIN 
+        AddressDetails wd ON ws.ws_bill_addr_sk = wd.ca_address_sk
+),
+SalesSummary AS (
+    SELECT 
+        sd.ws_bill_customer_sk,
+        SUM(sd.ws_sales_price * sd.ws_quantity) AS total_sales,
+        COUNT(DISTINCT sd.ws_order_number) AS total_orders
+    FROM 
+        SalesData sd
+    GROUP BY 
+        sd.ws_bill_customer_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_purchase_estimate,
+        s.total_sales,
+        s.total_orders,
+        CASE
+            WHEN s.total_sales >= 1000 THEN 'High Value'
+            WHEN s.total_sales BETWEEN 500 AND 999 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value_category
+    FROM 
+        customer c
+    JOIN 
+        SalesSummary s ON c.c_customer_sk = s.ws_bill_customer_sk
+    JOIN 
+        Demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    d.cd_gender,
+    d.cd_marital_status,
+    c.total_sales,
+    c.total_orders,
+    c.customer_value_category,
+    STRING_AGG(DISTINCT d.full_address, '; ') AS addresses_used
+FROM 
+    CustomerDetails c
+JOIN 
+    AddressDetails d ON c.c_customer_sk = d.ca_address_sk
+GROUP BY 
+    c.c_first_name, c.c_last_name, d.cd_gender, d.cd_marital_status, c.total_sales, c.total_orders, c.customer_value_category
+ORDER BY 
+    c.total_sales DESC;

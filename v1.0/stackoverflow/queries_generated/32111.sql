@@ -1,0 +1,71 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        1 AS Level,
+        CAST(P.Title AS NVARCHAR(MAX)) AS FullTitle
+    FROM Posts P
+    WHERE P.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        C.Id AS PostId,
+        C.Title,
+        C.OwnerUserId,
+        C.CreationDate,
+        R.Level + 1 AS Level,
+        CAST(R.FullTitle + ' => ' + C.Title AS NVARCHAR(MAX)) AS FullTitle
+    FROM Posts C
+    INNER JOIN RecursivePostHierarchy R ON C.ParentId = R.PostId
+),
+UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(NULLIF(COUNT(DISTINCT P.Id), 0), 0) AS PostCount,
+        COALESCE(NULLIF(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0), 0) AS UpVotes,
+        COALESCE(NULLIF(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0), 0) AS DownVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+RecentActivity AS (
+    SELECT 
+        UserId,
+        COUNT(CASE WHEN CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days' THEN 1 END) AS RecentPosts,
+        COUNT(CASE WHEN CreationDate < CURRENT_TIMESTAMP - INTERVAL '30 days' AND CreationDate >= CURRENT_TIMESTAMP - INTERVAL '60 days' THEN 1 END) AS OlderPosts
+    FROM Posts 
+    GROUP BY UserId
+),
+FinalStatistics AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        US.PostCount,
+        US.UpVotes,
+        US.DownVotes,
+        RA.RecentPosts,
+        RA.OlderPosts
+    FROM UserStatistics US
+    JOIN RecentActivity RA ON US.UserId = RA.UserId
+    JOIN Users U ON US.UserId = U.Id
+    WHERE U.Reputation >= 100
+)
+SELECT 
+    F.DisplayName,
+    F.Reputation,
+    F.PostCount,
+    F.UpVotes,
+    F.DownVotes,
+    F.RecentPosts,
+    F.OlderPosts,
+    R.FullTitle AS RelatedPosts
+FROM FinalStatistics F
+LEFT JOIN RecursivePostHierarchy R ON F.PostCount > 0
+ORDER BY F.Reputation DESC, F.RecentPosts DESC, F.PostCount DESC
+LIMIT 10;

@@ -1,0 +1,89 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        CAST(SUBSTRING(t.title, '[0-9]+') AS INTEGER) AS year_number,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_per_year
+    FROM 
+        title t 
+    WHERE 
+        (t.production_year IS NOT NULL AND t.production_year <> 0) AND
+        t.production_year > 1990
+),
+FilteredCast AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        r.role,
+        COUNT(c.nr_order) AS total_cast
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id, c.person_id, r.role
+    HAVING 
+        COUNT(c.nr_order) > 1
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, '; ') AS companies,
+        STRING_AGG(DISTINCT ct.kind, '; ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+ComplexJoin AS (
+    SELECT 
+        f.movie_id,
+        f.total_cast,
+        mk.keywords,
+        ci.companies,
+        ci.company_types
+    FROM 
+        FilteredCast f
+    LEFT JOIN 
+        MovieKeywords mk ON f.movie_id = mk.movie_id
+    LEFT JOIN 
+        CompanyInfo ci ON f.movie_id = ci.movie_id
+)
+SELECT 
+    rm.title_id,
+    rm.title,
+    rm.production_year,
+    COALESCE(c.total_cast, 0) AS total_cast,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    COALESCE(ci.companies, 'No Companies') AS companies,
+    COALESCE(ci.company_types, 'No Types') AS company_types,
+    CASE 
+        WHEN rm.production_year < 2000 THEN 'Classic'
+        WHEN rm.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS movie_era
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ComplexJoin c ON rm.title_id = c.movie_id
+ORDER BY 
+    rm.production_year DESC, 
+    rm.rank_per_year ASC
+LIMIT 100;

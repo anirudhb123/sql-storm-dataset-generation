@@ -1,0 +1,63 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><'))
+    GROUP BY 
+        Tags.TagName
+),
+UserReputation AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        SUM(COALESCE(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END, 0)) AS UpvotesReceived,
+        SUM(COALESCE(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END, 0)) AS DownvotesReceived,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(Posts.AnswerCount, 0)) AS TotalAnswers
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        UpvotesReceived,
+        DownvotesReceived,
+        TotalViews,
+        TotalAnswers,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserReputation
+)
+SELECT 
+    TopUsers.DisplayName,
+    TopUsers.Reputation,
+    TopUsers.UpvotesReceived,
+    TopUsers.DownvotesReceived,
+    TopUsers.TotalViews,
+    TopUsers.TotalAnswers,
+    TagCounts.TagName,
+    TagCounts.PostCount
+FROM 
+    TopUsers
+JOIN 
+    TagCounts ON TopUsers.UserId IN (
+        SELECT DISTINCT OwnerUserId
+        FROM Posts
+        WHERE Posts.Tags LIKE '%' || TagCounts.TagName || '%'
+    )
+WHERE 
+    TopUsers.ReputationRank <= 10
+ORDER BY 
+    TopUsers.Reputation DESC, TagCounts.PostCount DESC;

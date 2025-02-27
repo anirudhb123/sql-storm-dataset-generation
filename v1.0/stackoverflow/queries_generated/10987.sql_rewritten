@@ -1,0 +1,56 @@
+WITH PostStats AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.CreationDate,
+        Posts.ViewCount,
+        Posts.Score,
+        COUNT(Comments.Id) AS CommentCount,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Posts.Id
+),
+UserStats AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(Badges.Id) AS BadgeCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(Posts.Score) AS TotalScore
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.Id
+)
+SELECT 
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    P.ViewCount,
+    P.Score,
+    P.CommentCount,
+    P.UpVoteCount,
+    P.DownVoteCount,
+    U.UserId,
+    U.DisplayName,
+    U.BadgeCount,
+    U.TotalViews,
+    U.TotalScore
+FROM 
+    PostStats P
+JOIN 
+    Users U ON P.PostId IN (SELECT Posts.Id FROM Posts WHERE Posts.OwnerUserId = U.UserId)
+ORDER BY 
+    P.CreationDate DESC
+LIMIT 100;

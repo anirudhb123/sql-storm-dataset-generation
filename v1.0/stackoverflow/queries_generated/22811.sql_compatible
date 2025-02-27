@@ -1,0 +1,87 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        COALESCE(NULLIF(p.AcceptedAnswerId, -1), 0) AS AcceptedAnswerId,
+        p.OwnerUserId,
+        1 AS HierarchyLevel
+    FROM Posts p 
+    WHERE p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.Body,
+        p2.CreationDate,
+        p2.AcceptedAnswerId,
+        p2.OwnerUserId,
+        r.HierarchyLevel + 1
+    FROM Posts p2
+    INNER JOIN RecursiveCTE r ON p2.ParentId = r.PostId
+), 
+PostWithCommentStats AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Body,
+        r.CreationDate,
+        r.AcceptedAnswerId,
+        r.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore,
+        ROW_NUMBER() OVER (PARTITION BY r.OwnerUserId ORDER BY r.CreationDate DESC) AS rn
+    FROM RecursiveCTE r
+    LEFT JOIN Comments c ON r.PostId = c.PostId
+    GROUP BY r.PostId, r.Title, r.Body, r.CreationDate, r.AcceptedAnswerId, r.OwnerUserId
+),
+LatestUserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        DENSE_RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+    WHERE u.Reputation IS NOT NULL
+),
+PostHistoryDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS HistoryDate,
+        p.Body,
+        ph.UserDisplayName,
+        ph.Comment,
+        p.OwnerUserId
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId IN (10, 11, 12)  
+), 
+AggregatedPostHistory AS (
+    SELECT
+        PostId,
+        MAX(HistoryDate) AS LastActionDate,
+        STRING_AGG(UserDisplayName, ', ') AS UsersInvolved,
+        COUNT(DISTINCT Comment) AS UniqueComments
+    FROM PostHistoryDetails
+    GROUP BY PostId
+)
+SELECT 
+    pwcs.PostId,
+    pwcs.Title,
+    pwcs.Body,
+    pwcs.CreationDate,
+    pwcs.CommentCount,
+    pwcs.TotalCommentScore,
+    COALESCE(apd.LastActionDate, 'No Actions') AS LastActionDate,
+    COALESCE(apd.UsersInvolved, 'N/A') AS UsersInvolved,
+    COALESCE(apd.UniqueComments, 0) AS UniqueComments,
+    u.DisplayName AS OwnerName,
+    u.Reputation AS OwnerReputation,
+    u.UserRank
+FROM PostWithCommentStats pwcs
+LEFT JOIN LatestUserStats u ON pwcs.OwnerUserId = u.UserId
+LEFT JOIN AggregatedPostHistory apd ON pwcs.PostId = apd.PostId
+ORDER BY pwcs.CommentCount DESC, pwcs.TotalCommentScore DESC;

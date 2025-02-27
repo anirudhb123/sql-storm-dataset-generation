@@ -1,0 +1,37 @@
+WITH RECURSIVE recent_orders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, o_orderstatus
+    FROM orders
+    WHERE o_orderdate > cast('1998-10-01' as date) - INTERVAL '1 year'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus
+    FROM orders o
+    JOIN recent_orders ro ON o.o_custkey = ro.o_custkey
+    WHERE o.o_orderdate < ro.o_orderdate
+),
+supplier_info AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+aggregated_sales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN recent_orders ro ON l.l_orderkey = ro.o_orderkey
+    GROUP BY l.l_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    s_info.nation_name,
+    RANK() OVER (PARTITION BY s_info.nation_name ORDER BY COALESCE(s.total_sales, 0) DESC) AS sales_rank
+FROM part p
+LEFT JOIN aggregated_sales s ON p.p_partkey = s.l_partkey
+LEFT JOIN supplier_info s_info ON p.p_partkey IN (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_acctbal > 1000))
+WHERE s_info.nation_name IS NOT NULL
+ORDER BY profits DESC NULLS LAST, p.p_partkey;

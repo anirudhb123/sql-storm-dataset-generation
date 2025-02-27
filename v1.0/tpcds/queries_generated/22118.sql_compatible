@@ -1,0 +1,67 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_city, 
+        c.c_birth_year,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY c.c_city ORDER BY cd.cd_purchase_estimate DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY c.c_city) AS total_customers,
+        COALESCE(cd.cd_dep_count, 0) AS dep_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        rc.c_customer_id, 
+        rc.c_city,
+        rc.c_birth_year,
+        rc.cd_marital_status,
+        rc.rn,
+        (SELECT SUM(ws.ws_net_profit) 
+         FROM web_sales ws 
+         WHERE ws.ws_bill_customer_sk = c.c_customer_sk) AS total_web_sales
+    FROM 
+        RankedCustomers rc
+    WHERE 
+        rc.rn <= 5 AND 
+        rc.dep_count > (
+            SELECT AVG(dep_count) 
+            FROM RankedCustomers 
+            WHERE total_customers > 10
+        )
+)
+SELECT 
+    hvc.c_customer_id, 
+    hvc.c_city, 
+    STRING_AGG(DISTINCT CONCAT(hvc.c_birth_year, ' - ', hvc.cd_marital_status), ', ') AS demographics,
+    COALESCE(SUM(ws.ws_net_profit), 0) AS total_web_sales,
+    COUNT(DISTINCT ws.ws_order_number) FILTER (WHERE ws.ws_ship_date_sk BETWEEN 20230101 AND 20231231) AS orders_in_2023
+FROM 
+    HighValueCustomers hvc 
+LEFT JOIN 
+    web_sales ws ON ws.ws_bill_customer_sk = (SELECT c.c_customer_sk FROM customer c WHERE c.c_customer_id = hvc.c_customer_id)
+GROUP BY 
+    hvc.c_customer_id, hvc.c_city, hvc.c_birth_year, hvc.cd_marital_status
+ORDER BY 
+    total_web_sales DESC 
+LIMIT 10
+
+UNION 
+
+SELECT 
+    'UNKNOWN' AS c_customer_id,
+    NULL AS c_city, 
+    NULL AS demographics, 
+    COUNT(*) AS total_web_sales,
+    NULL AS orders_in_2023 
+FROM 
+    web_sales ws_2 
+WHERE 
+    NOT EXISTS (SELECT 1 FROM customer c_2 WHERE c_2.c_customer_sk = ws_2.ws_bill_customer_sk)
+GROUP BY 
+    total_web_sales
+ORDER BY 
+    total_web_sales DESC;

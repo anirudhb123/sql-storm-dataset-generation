@@ -1,0 +1,54 @@
+WITH ranked_titles AS (
+    SELECT 
+        tt.title AS title, 
+        tt.production_year AS year, 
+        rk.rnk AS title_rank,
+        rn.rank AS person_rank,
+        ROW_NUMBER() OVER (PARTITION BY tt.production_year ORDER BY tt.production_year DESC) AS year_order
+    FROM aka_title tt
+    JOIN (
+        SELECT 
+            movie_id, 
+            COUNT(*) AS rnk
+        FROM cast_info
+        GROUP BY movie_id
+    ) rk ON tt.id = rk.movie_id
+    LEFT JOIN (
+        SELECT 
+            ci.movie_id,
+            ci.person_id,
+            RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order ASC) AS rank
+        FROM cast_info ci
+    ) rn ON tt.id = rn.movie_id
+),
+distinct_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+cast_summary AS (
+    SELECT 
+        ca.movie_id,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        COUNT(DISTINCT ca.person_id) AS actor_count
+    FROM cast_info ca
+    JOIN aka_name ak ON ca.person_id = ak.person_id
+    GROUP BY ca.movie_id
+)
+SELECT 
+    rt.title AS Movie_Title, 
+    rt.year AS Production_Year,
+    rt.title_rank AS Title_Rank,
+    k.keywords AS Keywords,
+    cs.actors AS Cast,
+    cs.actor_count AS Number_of_Actors,
+    COALESCE(kf.keywords, 'No Keywords') AS Final_Keywords
+FROM ranked_titles rt
+LEFT JOIN distinct_keywords kf ON rt.title_rank = kf.movie_id
+LEFT JOIN cast_summary cs ON rt.title_rank = cs.movie_id
+WHERE rt.title_rank > 0
+  AND (COALESCE(cs.actor_count, 0) > 3 OR rt.year ORDER BY rt.year DESC LIMIT 10)
+ORDER BY rt.year DESC, rt.title;

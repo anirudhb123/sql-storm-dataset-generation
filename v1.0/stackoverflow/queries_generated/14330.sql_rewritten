@@ -1,0 +1,19 @@
+SELECT 
+    pt.Name AS PostType, 
+    COUNT(p.Id) AS TotalPosts, 
+    AVG(v.Score) AS AverageVoteScore, 
+    COUNT(c.Id) AS TotalComments
+FROM 
+    PostTypes pt
+LEFT JOIN 
+    Posts p ON pt.Id = p.PostTypeId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+WHERE 
+    p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR' 
+GROUP BY 
+    pt.Name
+ORDER BY 
+    TotalPosts DESC;

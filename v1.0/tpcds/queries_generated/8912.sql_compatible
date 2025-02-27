@@ -1,0 +1,58 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.bill_customer_sk,
+        cd.gender AS customer_gender,
+        cd.marital_status AS customer_marital_status,
+        SUM(ws.net_paid) AS total_sales,
+        COUNT(ws.order_number) AS order_count,
+        COUNT(DISTINCT ws.item_sk) AS unique_items_sold
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim d ON ws.sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.bill_customer_sk, cd.gender, cd.marital_status
+),
+ranked_sales AS (
+    SELECT 
+        bill_customer_sk,
+        customer_gender,
+        customer_marital_status,
+        total_sales,
+        order_count,
+        unique_items_sold,
+        RANK() OVER (PARTITION BY customer_gender, customer_marital_status ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        sales_data
+),
+top_sales AS (
+    SELECT 
+        customer_gender,
+        customer_marital_status,
+        AVG(total_sales) AS avg_sales,
+        AVG(order_count) AS avg_orders,
+        AVG(unique_items_sold) AS avg_unique_items
+    FROM 
+        ranked_sales
+    WHERE 
+        sales_rank <= 10
+    GROUP BY 
+        customer_gender, customer_marital_status
+)
+SELECT 
+    customer_gender,
+    customer_marital_status,
+    avg_sales,
+    avg_orders,
+    avg_unique_items
+FROM 
+    top_sales
+ORDER BY 
+    customer_gender, customer_marital_status;

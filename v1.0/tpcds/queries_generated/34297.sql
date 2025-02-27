@@ -1,0 +1,65 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws_order_number, 
+           ws_item_sk, 
+           ws_quantity, 
+           ws_sales_price, 
+           ws_net_paid,
+           1 AS level
+    FROM web_sales
+    WHERE ws_sold_date_sk = (SELECT max(d_date_sk) FROM date_dim)
+    
+    UNION ALL
+
+    SELECT ws.ws_order_number, 
+           ws.ws_item_sk, 
+           ws.ws_quantity, 
+           ws.ws_sales_price, 
+           ws.ws_net_paid,
+           level + 1
+    FROM web_sales ws
+    INNER JOIN SalesCTE s ON ws.ws_order_number = s.ws_order_number AND ws.ws_item_sk = s.ws_item_sk
+    WHERE level < 5
+), 
+AvgSales AS (
+    SELECT ws_item_sk, 
+           AVG(ws_net_paid) AS avg_net_paid
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+TotalReturns AS (
+    SELECT wr_item_sk, 
+           SUM(wr_return_amt) AS total_return_amt
+    FROM web_returns
+    GROUP BY wr_item_sk
+),
+FinalSales AS (
+    SELECT s.ws_item_sk, 
+           SUM(s.ws_net_paid) AS total_net_paid, 
+           COALESCE(tr.total_return_amt, 0) AS total_return_amt,
+           COALESCE(tr.total_return_amt, 0) / SUM(s.ws_net_paid) AS return_ratio
+    FROM web_sales s
+    LEFT JOIN TotalReturns tr ON s.ws_item_sk = tr.wr_item_sk
+    GROUP BY s.ws_item_sk
+)
+SELECT f.ws_item_sk, 
+       f.total_net_paid, 
+       f.total_return_amt, 
+       f.return_ratio,
+       CASE
+           WHEN f.return_ratio > 0.1 THEN 'High Returns'
+           WHEN f.return_ratio BETWEEN 0.05 AND 0.1 THEN 'Medium Returns'
+           ELSE 'Low Returns'
+       END AS return_category,
+       ROW_NUMBER() OVER (PARTITION BY f.ws_item_sk ORDER BY f.total_net_paid DESC) AS rank,
+       cd.cd_gender,
+       cd.cd_marital_status
+FROM FinalSales f
+JOIN customer c ON f.ws_item_sk = c.c_customer_sk
+JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE EXISTS (
+    SELECT 1 
+    FROM SalesCTE s 
+    WHERE s.ws_item_sk = f.ws_item_sk
+) AND f.return_ratio IS NOT NULL
+ORDER BY f.total_net_paid DESC;

@@ -1,0 +1,64 @@
+WITH ranked_movies AS (
+    SELECT
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rn
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info c ON t.id = c.movie_id
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+top_movies AS (
+    SELECT
+        title,
+        production_year,
+        actor_count
+    FROM
+        ranked_movies
+    WHERE
+        rn <= 5
+),
+movie_keywords AS (
+    SELECT
+        m.movie_id,
+        k.keyword
+    FROM
+        movie_keyword m
+    JOIN
+        keyword k ON m.keyword_id = k.id
+),
+keyword_counts AS (
+    SELECT
+        mk.movie_id,
+        COUNT(mk.keyword) AS keyword_total
+    FROM
+        movie_keywords mk
+    GROUP BY
+        mk.movie_id
+)
+SELECT
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    COALESCE(kc.keyword_total, 0) AS total_keywords,
+    CASE
+        WHEN tm.actor_count > 10 THEN 'Large Cast'
+        WHEN tm.actor_count BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size,
+    STRING_AGG(m.company_name, ', ') AS production_companies
+FROM
+    top_movies tm
+LEFT JOIN
+    movie_companies mc ON mc.movie_id = (SELECT id FROM aka_title WHERE title = tm.title AND production_year = tm.production_year LIMIT 1)
+LEFT JOIN
+    company_name m ON mc.company_id = m.id
+LEFT JOIN
+    keyword_counts kc ON kc.movie_id = (SELECT id FROM aka_title WHERE title = tm.title AND production_year = tm.production_year LIMIT 1)
+GROUP BY
+    tm.title, tm.production_year, tm.actor_count, kc.keyword_total
+ORDER BY
+    tm.production_year DESC, tm.actor_count DESC;

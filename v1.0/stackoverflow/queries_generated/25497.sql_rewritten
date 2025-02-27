@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>'), 1) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 0 
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(b.Class = 1, 0)) AS GoldBadges,
+        SUM(COALESCE(b.Class = 2, 0)) AS SilverBadges,
+        SUM(COALESCE(b.Class = 3, 0)) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.TagCount,
+        us.QuestionCount,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserStats us ON rp.OwnerUserId = us.UserId
+    WHERE 
+        rp.rn = 1 
+    ORDER BY 
+        rp.Score DESC, 
+        rp.ViewCount DESC
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.ViewCount,
+    tp.Score,
+    tp.TagCount,
+    tp.QuestionCount,
+    tp.GoldBadges,
+    tp.SilverBadges,
+    tp.BronzeBadges
+FROM 
+    TopPosts tp
+WHERE 
+    tp.ViewCount > 1000 
+ORDER BY 
+    tp.Score DESC, 
+    tp.TagCount ASC
+LIMIT 10;

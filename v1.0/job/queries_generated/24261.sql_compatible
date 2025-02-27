@@ -1,0 +1,63 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.title, mt.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_by_cast <= 5
+),
+PersonDetails AS (
+    SELECT 
+        ak.id AS aka_id,
+        ak.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(pinf.age) AS avg_age_info
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        person_info pinf ON ak.person_id = pinf.person_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.id, ak.name
+)
+SELECT 
+    tm.production_year,
+    tm.title,
+    pd.name,
+    pd.movie_count,
+    COALESCE(pd.avg_age_info, 0) AS avg_age
+FROM 
+    TopMovies tm
+JOIN 
+    PersonDetails pd ON tm.cast_count > pd.movie_count
+LEFT JOIN 
+    movie_info mi ON tm.production_year = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating' LIMIT 1)
+WHERE 
+    NOT pd.name LIKE '%[Aa]ctress%'
+    AND (tm.production_year BETWEEN 2020 AND 2023 OR tm.production_year IS NULL)
+ORDER BY 
+    tm.production_year DESC, tm.title
+LIMIT 100;

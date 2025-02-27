@@ -1,0 +1,69 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank_priced
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+),
+SupplierSummary AS (
+    SELECT
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(s.s_acctbal) AS avg_account_balance
+    FROM
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderstatus,
+        COUNT(l.l_orderkey) AS total_items
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderstatus
+)
+SELECT 
+    ns.n_name AS nation_name,
+    SUM(COALESCE(ps.total_available, 0)) AS total_available_parts,
+    AVG(CASE WHEN ods.o_orderstatus = 'O' THEN ods.o_totalprice ELSE NULL END) AS average_open_order_value,
+    STRING_AGG(DISTINCT rp.p_name) AS top_parts,
+    MAX(rp.p_brand) AS most_expensive_brand
+FROM 
+    nation ns
+LEFT JOIN 
+    supplier s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierSummary ps ON s.s_suppkey = ps.s_suppkey
+LEFT JOIN 
+    OrderDetails ods ON ods.o_orderkey IN (
+        SELECT o_orderkey 
+        FROM orders 
+        WHERE o_custkey IN (
+            SELECT c_custkey 
+            FROM customer 
+            WHERE c_nationkey = ns.n_nationkey
+        )
+    )
+LEFT JOIN 
+    RankedParts rp ON TRUE
+GROUP BY 
+    ns.n_nationkey, ns.n_name
+HAVING 
+    SUM(COALESCE(ps.total_available, 0)) > 1000 
+    OR AVG(COALESCE(ods.o_totalprice, 0)) > 5000
+ORDER BY 
+    most_expensive_brand DESC, total_available_parts ASC
+FETCH FIRST 10 ROWS ONLY;

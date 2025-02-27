@@ -1,0 +1,89 @@
+WITH RecursivePostTree AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        Score,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        pt.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostTree pt ON p.ParentId = pt.Id
+),
+UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+),
+TagStatistics AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS PostCount,
+        SUM(ViewCount) AS TotalViews,
+        AVG(Score) AS AverageScore
+    FROM 
+        Posts
+    CROSS JOIN 
+        LATERAL string_to_array(substring(Tags, 2, length(Tags) - 2), '><') AS TagName
+    GROUP BY 
+        TagName
+),
+TimestampFilteredQuestions AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        pt.Level,
+        u.Reputation,
+        ts.TagName
+    FROM 
+        RecursivePostTree pt
+    INNER JOIN 
+        Users u ON pt.Id = u.Id  -- Adjust this join based on the requirement
+    INNER JOIN 
+        TimestampFilteredTags ts ON ts.Id = pt.Id
+    WHERE 
+        pt.CreationDate >= NOW() - INTERVAL '90 days'
+)
+SELECT 
+    q.Title,
+    q.CreationDate,
+    q.Level,
+    u.Reputation,
+    ts.TagName,
+    t.PostCount,
+    t.TotalViews,
+    t.AverageScore,
+    CASE 
+        WHEN u.Reputation > 1000 THEN 'High Reputation'
+        WHEN u.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationCategory
+FROM 
+    TimestampFilteredQuestions q
+LEFT JOIN 
+    UserReputation u ON q.UserId = u.UserId
+LEFT JOIN 
+    TagStatistics t ON t.TagName = q.TagName
+WHERE 
+    u.Reputation IS NOT NULL
+ORDER BY 
+    q.CreationDate DESC;

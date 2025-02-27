@@ -1,0 +1,54 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+    
+    SELECT 
+        linked_movie.linked_movie_id AS movie_id,
+        l.title AS movie_title,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link linked_movie ON mh.movie_id = linked_movie.movie_id
+    JOIN 
+        aka_title l ON linked_movie.linked_movie_id = l.id
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    COALESCE(mh.depth, 0) AS movie_depth,
+    ROW_NUMBER() OVER (PARTITION BY a.name ORDER BY t.production_year DESC) AS rn,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS note_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    MovieHierarchy mh ON t.id = mh.movie_id
+WHERE 
+    a.name IS NOT NULL
+    AND t.production_year >= 2010
+    AND (t.note IS NULL OR t.note <> 'not relevant')
+GROUP BY 
+    a.name, t.title, mh.depth
+HAVING 
+    SUM(CASE WHEN k.keyword LIKE '%comedy%' THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    keyword_count DESC, rn
+LIMIT 100;

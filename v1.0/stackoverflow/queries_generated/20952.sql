@@ -1,0 +1,98 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 0
+),
+
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        COALESCE((SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE((SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 3), 0) AS DownVoteCount,
+        MAX(CASE WHEN V.VoteTypeId = 2 THEN V.CreationDate END) AS LastUpVoteDate,
+        MAX(CASE WHEN V.VoteTypeId = 3 THEN V.CreationDate END) AS LastDownVoteDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.Score
+),
+
+UserPostInteractions AS (
+    SELECT 
+        U.Id AS UserId,
+        P.Id AS PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UserUpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS UserDownVotes,
+        COUNT(CASE WHEN C.UserId IS NOT NULL THEN 1 END) AS UserCommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.UserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId AND C.UserId = U.Id
+    GROUP BY 
+        U.Id, P.Id
+),
+
+FinalReport AS (
+    SELECT 
+        R.DisplayName AS UserName,
+        R.Reputation AS UserReputation,
+        R.ReputationRank,
+        P.Title AS PostTitle,
+        PS.ViewCount,
+        PS.Score,
+        PS.CommentCount,
+        PS.UpVoteCount,
+        PS.DownVoteCount,
+        COALESCE(UI.UserUpVotes, 0) AS UserSpecificUpVotes,
+        COALESCE(UI.UserDownVotes, 0) AS UserSpecificDownVotes,
+        COALESCE(UI.UserCommentCount, 0) AS UserSpecificComments,
+        CASE 
+            WHEN PS.UpVoteCount > PS.DownVoteCount THEN 'Positive'
+            WHEN PS.UpVoteCount < PS.DownVoteCount THEN 'Negative'
+            ELSE 'Neutral'
+        END AS PostSentiment
+    FROM 
+        RankedUsers R
+    JOIN 
+        UserPostInteractions UI ON R.UserId = UI.UserId
+    JOIN 
+        PostStatistics PS ON UI.PostId = PS.PostId
+    ORDER BY 
+        R.Reputation DESC, PS.Score DESC
+)
+
+SELECT
+    *,
+    CASE 
+        WHEN UserReputation IS NULL THEN 'No Reputation'
+        WHEN UserReputation > 1000 THEN 'Elite'
+        WHEN UserReputation BETWEEN 500 AND 1000 THEN 'Competent'
+        ELSE 'Newbie'
+    END AS UserReputationTier,
+    ROW_NUMBER() OVER (PARTITION BY PostTitle ORDER BY UserReputation DESC) AS RankWithinPost
+FROM 
+    FinalReport
+WHERE 
+    PostTitle IS NOT NULL OR PostTitle <> ''
+    AND (
+        UserSpecificUpVotes > 0 OR UserSpecificDownVotes > 0 OR UserSpecificComments > 0
+    ) 
+AND PostSentiment <> 'Neutral'
+ORDER BY 
+    UserReputation DESC, PostTitle;

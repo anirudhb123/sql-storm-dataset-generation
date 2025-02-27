@@ -1,0 +1,63 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActiveCast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+),
+FilmDetails AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        ac.cast_count,
+        ac.actor_names,
+        CASE 
+            WHEN ac.cast_count IS NULL THEN 'No Cast'
+            ELSE ac.actor_names
+        END AS cast_info,
+        COALESCE(mi.info, 'No Info') AS additional_info,
+        ROW_NUMBER() OVER (PARTITION BY rm.production_year ORDER BY rm.year_rank DESC) AS production_order
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActiveCast ac ON rm.title_id = ac.movie_id
+    LEFT JOIN 
+        movie_info mi ON rm.title_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+)
+SELECT 
+    fd.title,
+    fd.production_year,
+    fd.cast_info,
+    fd.additional_info,
+    (SELECT STRING_AGG(DISTINCT mk.keyword, ', ')
+        FROM movie_keyword mk 
+        WHERE mk.movie_id = fd.title_id) AS keywords
+FROM 
+    FilmDetails fd
+WHERE 
+    fd.production_order <= 10
+GROUP BY 
+    fd.title,
+    fd.production_year,
+    fd.cast_info,
+    fd.additional_info
+ORDER BY 
+    fd.production_year DESC, fd.title ASC;

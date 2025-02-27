@@ -1,0 +1,74 @@
+WITH PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS LatestEdit
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        MAX(u.Reputation) AS MaxReputation,
+        MIN(u.Reputation) AS MinReputation,
+        AVG(u.Reputation) AS AvgReputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopPosts AS (
+    SELECT 
+        pm.PostId,
+        pm.Title,
+        pm.Upvotes,
+        pm.Downvotes,
+        pm.CommentCount,
+        pm.EditCount,
+        us.MaxReputation
+    FROM 
+        PostMetrics pm
+    JOIN 
+        Users u ON pm.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+    JOIN 
+        UserStatistics us ON u.Id = us.UserId
+    WHERE 
+        pm.LatestEdit = 1
+    ORDER BY 
+        (pm.Upvotes - pm.Downvotes) DESC, us.MaxReputation DESC
+    LIMIT 10
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Upvotes,
+    tp.Downvotes,
+    tp.CommentCount,
+    tp.EditCount,
+    us.MaxReputation
+FROM 
+    TopPosts tp
+FULL OUTER JOIN 
+    UserStatistics us ON tp.MaxReputation = us.MaxReputation
+WHERE 
+    tp.Upvotes IS NOT NULL OR us.MaxReputation IS NOT NULL 
+ORDER BY 
+    COALESCE(tp.CommentCount, 0) DESC, COALESCE(us.BadgeCount, 0) DESC;

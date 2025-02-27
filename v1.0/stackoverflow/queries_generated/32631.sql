@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COUNT(a.Id) AS AnswerCount,
+        MAX(v.CreationDate) AS LastVoteDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY v.CreationDate DESC) AS RecentVoteRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2  -- Join with answers
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- We're only interested in questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+
+RecentBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        b.Date >= NOW() - INTERVAL '1 year'  -- Badges earned in the last year
+    GROUP BY 
+        u.Id
+),
+
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    COALESCE(rb.BadgeCount, 0) AS RecentBadges,
+    COALESCE(rb.BadgeNames, 'No Badges') AS BadgeNames,
+    phs.HistoryCount AS EditCount,
+    rp.AnswerCount,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.Id) AS CommentCount,
+    COUNT(DISTINCT v.UserId) AS UniqueVoters
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    RecentBadges rb ON rb.UserId = u.Id
+LEFT JOIN 
+    PostHistoryStats phs ON phs.PostId = rp.Id
+LEFT JOIN 
+    Votes v ON v.PostId = rp.Id
+WHERE 
+    rp.RecentVoteRank = 1  -- Only include the most recent vote
+GROUP BY 
+    rp.Id, rp.Title, rp.CreationDate, u.DisplayName, rb.BadgeCount, rb.BadgeNames, phs.HistoryCount
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 100;

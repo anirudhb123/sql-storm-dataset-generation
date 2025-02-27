@@ -1,0 +1,44 @@
+
+WITH supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+top_nations AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    ORDER BY customer_count DESC
+    LIMIT 5
+)
+SELECT 
+    ps.p_partkey AS part_key,
+    p.p_name,
+    ss.total_supply_cost,
+    os.total_revenue,
+    tn.n_name AS top_nation
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier_summary ss ON ps.ps_suppkey = ss.s_suppkey
+LEFT JOIN order_summary os ON os.o_custkey IN (
+    SELECT c.c_custkey
+    FROM customer c
+    WHERE c.c_nationkey IN (SELECT tn.n_nationkey FROM top_nations tn)
+)
+LEFT JOIN top_nations tn ON tn.n_nationkey IN (
+    SELECT n.n_nationkey
+    FROM nation n
+    WHERE n.n_nationkey IS NOT NULL
+)
+WHERE (ss.total_supply_cost IS NOT NULL OR os.total_revenue IS NOT NULL)
+AND (p.p_retailprice > 100 OR p.p_size < 10)
+ORDER BY COALESCE(ss.total_supply_cost, -1) DESC, COALESCE(os.total_revenue, -1) DESC;

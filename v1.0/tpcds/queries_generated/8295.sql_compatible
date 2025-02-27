@@ -1,0 +1,63 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_id,
+        COUNT(ws.order_number) AS total_orders,
+        SUM(ws.ext_sales_price) AS total_sales,
+        SUM(ws.ext_discount_amt) AS total_discounts,
+        SUM(ws.ext_tax) AS total_tax,
+        SUM(ws.ext_ship_cost) AS total_shipping
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.customer_sk
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.demo_sk
+    JOIN 
+        date_dim dd ON ws.sold_date_sk = dd.date_sk
+    WHERE 
+        dd.year = 2023 AND 
+        cd.education_status = 'College'
+    GROUP BY 
+        ws.web_site_id
+),
+demographics_summary AS (
+    SELECT 
+        hd.income_band_sk,
+        COUNT(hd.demo_sk) AS household_count,
+        SUM(hd.dep_count) AS total_dependencies,
+        SUM(hd.vehicle_count) AS total_vehicles
+    FROM 
+        household_demographics hd
+    GROUP BY 
+        hd.income_band_sk 
+),
+combined_summary AS (
+    SELECT 
+        ss.web_site_id,
+        ss.total_orders,
+        ss.total_sales,
+        db.household_count,
+        db.total_dependencies,
+        db.total_vehicles
+    FROM 
+        sales_summary ss
+    LEFT JOIN 
+        demographics_summary db ON ss.web_site_id = (SELECT web_site_id FROM web_site WHERE web_site_sk = some_condition)
+)
+SELECT 
+    web_site_id, 
+    total_orders, 
+    total_sales, 
+    household_count, 
+    total_dependencies, 
+    total_vehicles,
+    total_sales / NULLIF(total_orders, 0) AS average_order_value,
+    (total_sales - total_discounts) AS net_sales,
+    total_tax,
+    total_shipping
+FROM 
+    combined_summary
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

@@ -1,0 +1,63 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS title_id,
+        a.title,
+        a.production_year,
+        a.kind_id,
+        k.keyword AS movie_keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC, a.title) AS rank_year
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+PersonDetails AS (
+    SELECT 
+        p.id AS person_id,
+        ak.name AS person_name,
+        r.role AS role_type
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        ci.nr_order IS NOT NULL
+),
+MovieCompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+
+SELECT 
+    rt.title_id,
+    rt.title,
+    rt.production_year,
+    pd.person_name,
+    pd.role_type,
+    mc.company_name,
+    mc.company_type
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    PersonDetails pd ON rt.title_id = pd.movie_id
+LEFT JOIN 
+    MovieCompanyDetails mc ON rt.title_id = mc.movie_id
+WHERE 
+    rt.rank_year <= 5         
+ORDER BY 
+    rt.production_year DESC, 
+    rt.title;

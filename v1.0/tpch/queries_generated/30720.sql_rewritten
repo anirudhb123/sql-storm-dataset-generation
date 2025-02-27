@@ -1,0 +1,55 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o_orderkey, o_orderstatus, o_totalprice, o_orderdate, o_custkey, 1 AS depth
+    FROM orders
+    WHERE o_orderdate >= DATE '1996-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate, o.o_custkey, oh.depth + 1
+    FROM orders o
+    JOIN order_hierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE oh.depth < 5
+),
+
+supplier_data AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+
+customer_summary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_value,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(li.l_extendedprice * (1 - li.l_discount)) DESC) AS rank
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(cs.order_count) AS avg_orders_per_customer,
+    SUM(sd.total_supplycost) AS total_supplycost,
+    AVG(r.total_value) AS avg_order_value
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN supplier_data sd ON s.s_suppkey = sd.s_suppkey
+LEFT JOIN customer_summary cs ON s.s_suppkey = cs.c_custkey
+LEFT JOIN ranked_orders r ON r.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM order_hierarchy oh
+    JOIN orders o ON oh.o_custkey = o.o_custkey
+)
+WHERE cs.total_spent IS NOT NULL
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY customer_count DESC;

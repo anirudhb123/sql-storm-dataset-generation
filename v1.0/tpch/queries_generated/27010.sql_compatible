@@ -1,0 +1,56 @@
+
+WITH RepeatedNames AS (
+    SELECT c.c_name,
+           COUNT(*) AS occurrence_count
+    FROM customer c
+    GROUP BY c.c_name
+    HAVING COUNT(*) > 1
+),
+EnhancedParts AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           (SELECT COUNT(*) FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey) AS supplier_count,
+           LENGTH(p.p_comment) AS comment_length,
+           CONCAT(p.p_name, ' ', p.p_comment) AS name_comment_combination
+    FROM part p
+),
+CustomerOrders AS (
+    SELECT o.o_orderkey,
+           c.c_name,
+           o.o_orderdate,
+           o.o_totalprice,
+           EXTRACT(YEAR FROM o.o_orderdate) AS order_year,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+),
+FilteredSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           REPLACE(s.s_comment, 'original', 'updated') AS updated_comment,
+           LENGTH(s.s_address) AS address_length
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+),
+FinalBenchmark AS (
+    SELECT rn.c_name,
+           ep.p_name,
+           ep.supplier_count,
+           fo.s_name,
+           fo.updated_comment,
+           COALESCE(co.order_year, 'No Orders') AS last_order_year,
+           COALESCE(co.order_rank, 0) AS order_count,
+           ep.comment_length,
+           ep.name_comment_combination
+    FROM RepeatedNames rn
+    CROSS JOIN EnhancedParts ep
+    LEFT JOIN FilteredSuppliers fo ON LENGTH(fo.updated_comment) > 50
+    LEFT JOIN CustomerOrders co ON rn.c_name = co.c_name
+    ORDER BY ep.comment_length DESC, fo.address_length ASC
+)
+SELECT *
+FROM FinalBenchmark
+WHERE order_count > 0
+AND supplier_count > 1 
+AND last_order_year != 'No Orders'
+ORDER BY name_comment_combination;

@@ -1,0 +1,72 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mt.production_year >= 2000
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.title) AS rank
+    FROM 
+        MovieHierarchy mh
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.level
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 10
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        MAX(TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year') AS last_year
+    FROM 
+        cast_info c
+    JOIN 
+        TopMovies tm ON c.movie_id = tm.movie_id
+    GROUP BY 
+        c.movie_id
+)
+SELECT 
+    tm.title,
+    cd.cast_count,
+    COALESCE(cd.last_year, 'No Cast in Last Year') AS last_cast_activity,
+    (SELECT COUNT(*) 
+     FROM movie_keyword mk 
+     WHERE mk.movie_id = tm.movie_id) AS keyword_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    CastDetails cd ON tm.movie_id = cd.movie_id
+WHERE 
+    cd.cast_count IS NOT NULL OR cd.last_year IS NOT NULL
+ORDER BY 
+    tm.level, cd.cast_count DESC;

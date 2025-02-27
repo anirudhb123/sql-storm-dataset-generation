@@ -1,0 +1,49 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk, 0 AS level
+    FROM customer c
+    WHERE c.c_salutation IS NOT NULL
+
+    UNION ALL
+
+    SELECT ch.c_customer_sk, ch.c_first_name, ch.c_last_name, ch.c_current_cdemo_sk, ch.level + 1
+    FROM CustomerHierarchy ch
+    JOIN customer_address ca ON ch.c_customer_sk = ca.ca_address_sk
+    WHERE ca.ca_city IS NOT NULL
+), 
+UserIncome AS (
+    SELECT cd.cd_demo_sk, ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+    FROM customer_demographics cd
+    JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+), 
+ItemSales AS (
+    SELECT ws.ws_item_sk, SUM(ws.ws_quantity) AS total_sales, COUNT(DISTINCT ws.ws_order_number) AS sales_count
+    FROM web_sales ws
+    WHERE ws.ws_sales_price > 0
+    GROUP BY ws.ws_item_sk
+    HAVING SUM(ws.ws_quantity) > 5
+),
+TotalReturns AS (
+    SELECT sr_item_sk, SUM(sr_return_quantity) AS total_returns
+    FROM store_returns
+    GROUP BY sr_item_sk
+    HAVING SUM(sr_return_quantity) > 0
+)
+SELECT 
+    cu.c_first_name AS customer_first_name,
+    cu.c_last_name AS customer_last_name,
+    COALESCE(ui.ib_lower_bound, 0) AS income_lower_bound,
+    COALESCE(ui.ib_upper_bound, 100000) AS income_upper_bound,
+    COALESCE(is.total_sales, 0) AS total_item_sales,
+    COALESCE(tr.total_returns, 0) AS total_item_returns,
+    ROW_NUMBER() OVER (PARTITION BY cu.c_current_cdemo_sk ORDER BY total_item_sales DESC) AS sales_rank
+FROM CustomerHierarchy cu
+LEFT JOIN UserIncome ui ON cu.c_current_cdemo_sk = ui.cd_demo_sk
+LEFT JOIN ItemSales is ON is.ws_item_sk = cu.c_current_cdemo_sk
+LEFT JOIN TotalReturns tr ON tr.sr_item_sk = cu.c_current_cdemo_sk
+WHERE ui.ib_income_band_sk IS NOT NULL
+AND (total_item_sales - total_item_returns) > 2
+OR total_item_sales IS NULL
+OR (total_item_sales IS NOT NULL AND total_item_returns IS NOT NULL AND total_item_returns < total_item_sales * 0.1)
+ORDER BY customer_last_name, customer_first_name;

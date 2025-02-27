@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0
+),
+AcceptedAnswers AS (
+    SELECT 
+        p.Id AS AnswerId,
+        p.ParentId,
+        p.OwnerUserId,
+        pb.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        Posts pb ON p.Id = pb.AcceptedAnswerId
+    WHERE 
+        p.PostTypeId = 2
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    u.DisplayName AS Author,
+    a.OwnerDisplayName AS AcceptedBy,
+    us.BadgeCount,
+    us.UpVotesCount,
+    us.DownVotesCount,
+    COALESCE((
+        SELECT 
+            COUNT(c.Id)
+        FROM 
+            Comments c
+        WHERE 
+            c.PostId = rp.PostId
+    ), 0) AS CommentCount,
+    CASE 
+        WHEN rp.Score > 100 THEN 'Hot' 
+        WHEN rp.Score BETWEEN 50 AND 100 THEN 'Trending' 
+        ELSE 'Regular' 
+    END AS PostCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users u ON rp.PostId = u.Id
+LEFT JOIN 
+    AcceptedAnswers a ON rp.PostId = a.ParentId
+LEFT JOIN 
+    UserStats us ON u.Id = us.UserId
+WHERE 
+    rp.rn = 1
+GROUP BY 
+    rp.PostId, rp.Title, rp.Score, u.DisplayName, a.OwnerDisplayName, us.BadgeCount, us.UpVotesCount, us.DownVotesCount
+ORDER BY 
+    rp.Score DESC, rp.CreationDate ASC;

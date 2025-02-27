@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tagArr ON true
+    LEFT JOIN 
+        Tags t ON t.TagName = tagArr
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+),
+UserReputation AS (
+    SELECT 
+        UserId,
+        SUM(Reputation) AS TotalReputation
+    FROM 
+        Users
+    GROUP BY 
+        UserId
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 ELSE 0 END) AS TitleEdits,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseVotes,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenVotes
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        COALESCE(u.TotalReputation, 0) AS OwnerReputation,
+        COALESCE(ph.EditCount, 0) AS EditCount,
+        COALESCE(ph.TitleEdits, 0) AS TitleEdits,
+        COALESCE(ph.CloseVotes, 0) AS CloseVotes,
+        COALESCE(ph.ReopenVotes, 0) AS ReopenVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserReputation u ON rp.OwnerUserId = u.UserId
+    LEFT JOIN 
+        PostHistoryAnalysis ph ON rp.Id = ph.PostId
+)
+SELECT 
+    Id,
+    Title,
+    Body,
+    CreationDate,
+    OwnerDisplayName,
+    UpVotes,
+    DownVotes,
+    Tags,
+    OwnerReputation,
+    EditCount,
+    TitleEdits,
+    CloseVotes,
+    ReopenVotes
+FROM 
+    TopPosts
+WHERE 
+    OwnerReputation >= 1000 -- Filter for users with significant reputation
+ORDER BY 
+    UpVotes DESC, CreationDate DESC
+LIMIT 10; -- Limit to top 10 posts

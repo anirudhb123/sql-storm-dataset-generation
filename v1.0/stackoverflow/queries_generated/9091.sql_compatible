@@ -1,0 +1,58 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY COUNT(c.Id) DESC, Score DESC) AS rn
+    FROM 
+        Posts p
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName, p.PostTypeId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Author,
+        rp.CommentCount,
+        rp.Score
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn <= 10
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+        JOIN UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS tag ON tag IS NOT NULL
+        JOIN Tags t ON t.TagName = TRIM(tag)
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Author,
+    fp.CommentCount,
+    fp.Score,
+    pt.Tags
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostTags pt ON fp.PostId = pt.PostId
+ORDER BY 
+    fp.Score DESC, fp.CommentCount DESC;

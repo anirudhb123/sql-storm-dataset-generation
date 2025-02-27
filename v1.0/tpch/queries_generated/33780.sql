@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, p.p_mfgr, p.p_size, p.p_retailprice
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal > 5000 
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal * 0.9, p.p_mfgr, p.p_size, p.p_retailprice
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.s_acctbal > 1000
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY o.o_totalprice DESC) as order_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'F'
+),
+HighValueOrders AS (
+    SELECT r.o_orderkey, r.o_orderdate, r.o_totalprice
+    FROM RankedOrders r
+    WHERE r.order_rank <= 5
+),
+CompleteData AS (
+    SELECT l.l_orderkey, l.l_linenumber, l.l_extendedprice, l.l_discount,
+           n.n_name AS nation_name, c.c_name AS customer_name,
+           COALESCE(l.l_returnflag, 'N') AS return_flag
+    FROM lineitem l
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE l.l_shipdate > '2023-01-01'
+)
+SELECT DISTINCT ch.s_suppkey, ch.s_name, ch.s_acctbal, co.o_orderkey, co.nation_name, co.customer_name,
+       COALESCE(SUM(co.l_extendedprice * (1 - co.l_discount)), 0) AS total_revenue
+FROM SupplierHierarchy ch
+LEFT JOIN CompleteData co ON ch.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_partkey IN (
+        SELECT l.l_partkey
+        FROM lineitem l
+        JOIN HighValueOrders h ON l.l_orderkey = h.o_orderkey
+    )
+) 
+GROUP BY ch.s_suppkey, ch.s_name, ch.s_acctbal, co.o_orderkey, co.nation_name, co.customer_name
+HAVING total_revenue > 10000
+ORDER BY total_revenue DESC;

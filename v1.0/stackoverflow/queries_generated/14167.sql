@@ -1,0 +1,26 @@
+-- Performance benchmarking query to analyze the interactions on posts
+
+SELECT 
+    PT.Name AS PostType,
+    COUNT(P.Id) AS PostCount,
+    SUM(COALESCE(CA.AnswerCount, 0)) AS TotalAnswers,
+    SUM(COALESCE(V.UpVotes, 0)) AS TotalUpVotes,
+    SUM(COALESCE(V.DownVotes, 0)) AS TotalDownVotes,
+    AVG(P.Score) AS AverageScore,
+    AVG(P.ViewCount) AS AverageViewCount,
+    AVG(EXTRACT(EPOCH FROM (P.LastActivityDate - P.CreationDate))) AS AverageResponseTime, -- Average time from creation to last activity
+    COUNT(DISTINCT C.Id) AS TotalComments
+FROM 
+    Posts P
+JOIN 
+    PostTypes PT ON P.PostTypeId = PT.Id
+LEFT JOIN 
+    Posts CA ON P.Id = CA.ParentId -- For answer count
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId -- For vote counts
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId -- For total comments
+GROUP BY 
+    PT.Name
+ORDER BY 
+    PostCount DESC;

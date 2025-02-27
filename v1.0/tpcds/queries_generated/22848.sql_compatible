@@ -1,0 +1,81 @@
+
+WITH RankedCustomer AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_marital_status ORDER BY cd.cd_purchase_estimate DESC) AS rnk
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk, 
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+), 
+ItemSales AS (
+    SELECT 
+        i.i_item_sk, 
+        i.i_item_id, 
+        COALESCE(sd.total_quantity, 0) AS quantity_sold,
+        COALESCE(sd.total_sales, 0) AS total_sales
+    FROM 
+        item i
+    LEFT JOIN 
+        SalesData sd ON i.i_item_sk = sd.ws_item_sk
+), 
+HighValueCustomers AS (
+    SELECT 
+        rc.c_customer_sk,
+        rc.c_customer_id,
+        SUM(sd.total_sales) AS total_spent
+    FROM 
+        RankedCustomer rc
+    JOIN 
+        web_sales ws ON rc.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        SalesData sd ON ws.ws_item_sk = sd.ws_item_sk
+    WHERE 
+        rc.rnk = 1 
+    GROUP BY 
+        rc.c_customer_sk, rc.c_customer_id
+)
+SELECT 
+    ivc.c_customer_id,
+    ivc.total_spent,
+    CASE 
+        WHEN ivc.total_spent >= 1000 THEN 'Gold'
+        WHEN ivc.total_spent >= 500  THEN 'Silver'
+        ELSE 'Bronze'
+    END AS customer_tier,
+    (SELECT 
+        JSON_AGG(
+            JSON_BUILD_OBJECT(
+                'i_item_id', i.i_item_id, 
+                'i_item_sk', i.i_item_sk, 
+                'quantity_sold', is.quantity_sold, 
+                'total_sales', is.total_sales 
+            )
+        )
+     FROM 
+        ItemSales is 
+     WHERE 
+        is.quantity_sold > 10 
+     FOR JSON PATH) AS purchased_items
+FROM 
+    HighValueCustomers ivc
+WHERE 
+    ivc.total_spent > (SELECT AVG(total_spent) FROM HighValueCustomers)
+ORDER BY 
+    ivc.total_spent DESC;

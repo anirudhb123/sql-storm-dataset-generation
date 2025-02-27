@@ -1,0 +1,95 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title ASC) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+PopularActors AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT c.movie_id) DESC) AS actor_rank
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.person_id
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 5
+),
+MovieWithActors AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(a.name, 'Unknown Actor') AS actor_name,
+        mt.kind AS movie_type,
+        COALESCE(mk.keyword, 'Uncategorized') AS movie_keyword
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        kind_type mt ON m.kind_id = mt.id
+    WHERE 
+        m.title IS NOT NULL
+)
+SELECT 
+    R.production_year,
+    R.title,
+    M.actor_name,
+    M.movie_type,
+    COUNT(M.movie_id) AS total_movies,
+    AVG(MI.info) AS average_info_length
+FROM 
+    RankedTitles R 
+LEFT JOIN 
+    MovieWithActors M ON R.title_id = M.movie_id
+LEFT JOIN 
+    movie_info MI ON M.movie_id = MI.movie_id
+WHERE 
+    M.actor_name IS NOT NULL
+GROUP BY 
+    R.production_year, R.title, M.actor_name, M.movie_type
+HAVING 
+    AVG(LENGTH(MI.info)) > 10
+ORDER BY 
+    R.production_year DESC, total_movies DESC
+LIMIT 10 ;
+
+### Explanation of Query Constructs
+
+1. **Common Table Expressions (CTEs)**: 
+   - `RankedTitles`: This CTE ranks movie titles by their `production_year` using a window function.
+   - `PopularActors`: This CTE identifies actors with more than 5 movie entries and ranks them by their count.
+   - `MovieWithActors`: This CTE joins multiple tables to generate a list of movies together with their actors, types, and keywords.
+
+2. **Outer Joins**: 
+   - `LEFT JOIN` is used to include all titles and movies even if no corresponding records exist in the actors or keywords tables.
+
+3. **Window Functions**: 
+   - The query uses `ROW_NUMBER()` and `RANK()` to generate rankings of titles and actors.
+
+4. **Correlated Subqueries**: 
+   - Although none strictly correlate, the grouping and ranking behaves closely, providing an ordered context for the results based on aggregated data.
+
+5. **Complicated Predicates**: 
+   - The query includes multiple predicates in the `WHERE` clause filtering on `NULL` checks, counts, and length comparisons.
+
+6. **NULL Logic**: 
+   - `COALESCE` is used to give default names and keywords when related records do not exist.
+
+7. **Aggregation**: 
+   - The `COUNT` and `AVG` functions aggregate data for final output, specifically the total number of movies and average info length.
+
+8. **Set Operators and Advanced Filtering**: 
+   - The final results are filtered using a `HAVING` clause to further enforce conditions on the aggregated data. 
+
+This complex query is designed to retrieve interesting insights from the provided schema in a performance benchmarking context.

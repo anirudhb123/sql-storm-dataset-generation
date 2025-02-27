@@ -1,0 +1,73 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        T.title,
+        T.production_year,
+        COUNT(DISTINCT CC.person_id) AS cast_count,
+        AVG(CASE WHEN C.role_id IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY T.id) AS avg_roles
+    FROM 
+        aka_title T
+    LEFT JOIN 
+        cast_info CC ON T.id = CC.movie_id
+    LEFT JOIN 
+        role_type C ON CC.role_id = C.id
+    GROUP BY 
+        T.title, T.production_year, T.id
+),
+PopularKeywords AS (
+    SELECT 
+        MK.movie_id,
+        K.keyword,
+        COUNT(*) AS keyword_count
+    FROM 
+        movie_keyword MK
+    JOIN 
+        keyword K ON MK.keyword_id = K.id
+    GROUP BY 
+        MK.movie_id, K.keyword
+    HAVING 
+        COUNT(*) > 1
+),
+HighRatedCompanies AS (
+    SELECT 
+        MC.movie_id,
+        CN.name AS company_name,
+        CT.kind AS company_type
+    FROM 
+        movie_companies MC
+    JOIN 
+        company_name CN ON MC.company_id = CN.id
+    JOIN 
+        company_type CT ON MC.company_type_id = CT.id
+    WHERE 
+        CN.country_code IS NOT NULL
+),
+FinalResults AS (
+    SELECT 
+        RM.title,
+        RM.production_year,
+        RM.cast_count,
+        PK.keyword,
+        COALESCE(CN.company_name, 'Independent') AS company_name,
+        COALESCE(CNT.kind, 'Unknown') AS company_type
+    FROM 
+        RankedMovies RM
+    LEFT JOIN 
+        PopularKeywords PK ON RM.id = PK.movie_id
+    LEFT JOIN 
+        HighRatedCompanies CN ON RM.id = CN.movie_id
+)
+
+SELECT 
+    title,
+    production_year,
+    cast_count,
+    STRING_AGG(DISTINCT keyword, ', ') AS keywords,
+    company_name,
+    company_type
+FROM 
+    FinalResults
+GROUP BY 
+    title, production_year, cast_count, company_name, company_type
+ORDER BY 
+    production_year DESC, cast_count DESC;

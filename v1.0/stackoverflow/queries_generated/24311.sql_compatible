@@ -1,0 +1,87 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+    WHERE U.Reputation IS NOT NULL
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Has Accepted Answer' 
+            ELSE 'No Accepted Answer' 
+        END AS AnswerStatus,
+        COALESCE(PC.CommentCount, 0) AS CommentCount
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) PC ON P.Id = PC.PostId
+    WHERE P.CreationDate > '2020-01-01'
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        STRING_AGG(PHT.Name, ', ') AS HistoryTypes,
+        DENSE_RANK() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS HistoryRank
+    FROM PostHistory PH
+    JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    GROUP BY PH.PostId
+),
+UserInteractions AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(V.Id) AS VoteCount,
+        COUNT(C.Id) AS CommentCount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    GROUP BY U.Id
+),
+CombinedData AS (
+    SELECT 
+        PU.UserId,
+        PU.DisplayName,
+        PU.Reputation,
+        PD.PostId,
+        PD.Title,
+        PD.CreationDate,
+        PD.ViewCount,
+        PD.Score,
+        PD.AnswerStatus,
+        PH.HistoryTypes,
+        UI.VoteCount,
+        UI.CommentCount
+    FROM RankedUsers PU
+    JOIN PostDetails PD ON PU.UserId = PD.OwnerDisplayName
+    LEFT JOIN PostHistoryDetails PH ON PD.PostId = PH.PostId
+    LEFT JOIN UserInteractions UI ON PU.UserId = UI.UserId
+)
+
+SELECT 
+    CD.UserId,
+    CD.DisplayName,
+    CD.Reputation,
+    COUNT(DISTINCT CD.PostId) AS TotalPosts,
+    SUM(CASE WHEN CD.AnswerStatus = 'Has Accepted Answer' THEN 1 ELSE 0 END) AS AcceptedCount,
+    MAX(CD.Score) AS MaxScore,
+    AVG(CD.ViewCount) AS AvgViewCount,
+    STRING_AGG(DISTINCT CD.HistoryTypes, '; ') AS CombinedPostHistory
+FROM CombinedData CD
+GROUP BY 
+    CD.UserId, 
+    CD.DisplayName, 
+    CD.Reputation
+HAVING 
+    COUNT(DISTINCT CD.PostId) > 5
+ORDER BY 
+    SUM(CASE WHEN CD.AnswerStatus = 'Has Accepted Answer' THEN 1 ELSE 0 END) DESC,
+    CD.Reputation DESC
+LIMIT 10;

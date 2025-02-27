@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.ViewCount > 10 AND p.Score IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryChanges AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(ph.CreationDate) AS LastChangeDate,
+        ph.PostHistoryTypeId,
+        ph.UserId AS EditorUserId,
+        u.DisplayName AS EditorDisplayName
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    LEFT JOIN 
+        Users u ON ph.UserId = u.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, ph.PostHistoryTypeId, ph.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.CommentCount,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    ph.LastChangeDate,
+    ph.EditorDisplayName,
+    CASE 
+        WHEN rp.UpVotes > rp.DownVotes THEN 'Upvoted'
+        WHEN rp.UpVotes < rp.DownVotes THEN 'Downvoted'
+        ELSE 'Neutral'
+    END AS VoteStatus,
+    CASE 
+        WHEN rp.Score > (SELECT AVG(Score) FROM Posts) THEN 'Above Average'
+        WHEN rp.Score < (SELECT AVG(Score) FROM Posts) THEN 'Below Average'
+        ELSE 'Average'
+    END AS ScorePerformance,
+    (SELECT COUNT(1) FROM Comments c WHERE c.PostId = rp.PostId AND c.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days') AS RecentComments
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN 
+    PostHistoryChanges ph ON rp.PostId = ph.PostId
+WHERE 
+    rp.rn = 1 
+    AND ub.BadgeCount > 0
+ORDER BY 
+    rp.Score DESC NULLS LAST,
+    rp.CreationDate ASC;

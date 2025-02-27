@@ -1,0 +1,70 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss_item_sk,
+        ss_sales_price,
+        ss_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ss_item_sk ORDER BY ss_sales_price DESC) AS sales_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk > 15000
+), TopSales AS (
+    SELECT 
+        ss_item_sk,
+        SUM(ss_sales_price * ss_quantity) AS total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 10
+    GROUP BY 
+        ss_item_sk
+), SalesWithReturn AS (
+    SELECT 
+        s.ss_item_sk,
+        s.total_sales,
+        COALESCE(SUM(r.sr_return_amount), 0) AS total_returns
+    FROM 
+        TopSales s
+    LEFT JOIN 
+        store_returns r ON s.ss_item_sk = r.sr_item_sk
+    GROUP BY 
+        s.ss_item_sk, s.total_sales
+), FinalResults AS (
+    SELECT 
+        s.ss_item_sk,
+        s.total_sales,
+        s.total_returns,
+        (s.total_sales - s.total_returns) AS net_sales,
+        CASE 
+            WHEN s.total_returns > 0 THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status
+    FROM 
+        SalesWithReturn s
+    WHERE 
+        s.total_sales IS NOT NULL
+)
+SELECT 
+    f.ss_item_sk,
+    f.total_sales,
+    f.total_returns,
+    f.net_sales,
+    f.return_status,
+    CASE 
+        WHEN f.net_sales > 10000 THEN 'High Value'
+        WHEN f.net_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS sales_category,
+    (SELECT 
+         AVG(ws_list_price) 
+     FROM 
+         web_sales 
+     WHERE 
+         ws_item_sk = f.ss_item_sk 
+         AND ws_net_paid_inc_tax IS NOT NULL) AS avg_web_price
+FROM 
+    FinalResults f
+ORDER BY 
+    f.net_sales DESC
+FETCH FIRST 50 ROWS ONLY;

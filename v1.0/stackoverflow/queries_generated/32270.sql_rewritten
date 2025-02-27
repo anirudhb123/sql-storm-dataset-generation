@@ -1,0 +1,79 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation IS NOT NULL
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        P.Tags,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY P.CreationDate DESC) AS RecentPostNumber,
+        CONCAT('https://stackoverflow.com/questions/', P.Id) AS Link
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 
+        AND P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+),
+PostHistories AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        P.Title,
+        PH.CreationDate,
+        CASE 
+            WHEN PH.PostHistoryTypeId = 10 THEN (SELECT CR.Name FROM CloseReasonTypes CR WHERE CR.Id = CAST(PH.Comment AS INT))
+            ELSE 'N/A'
+        END AS CloseReason,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11, 12, 13) THEN 1 END) AS CloseReopenCount
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId, P.Title, PH.CreationDate
+)
+SELECT 
+    RU.UserId, 
+    RU.DisplayName, 
+    RU.Reputation,
+    RU.UserRank,
+    RU.PostCount,
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.ViewCount,
+    RP.Link,
+    PH.CloseReason,
+    PH.CloseReopenCount
+FROM 
+    RankedUsers RU
+JOIN 
+    RecentPosts RP ON RU.UserId = RP.OwnerDisplayName
+LEFT JOIN 
+    PostHistories PH ON RP.PostId = PH.PostId
+WHERE 
+    RU.UserRank <= 10
+ORDER BY 
+    RU.Reputation DESC, RP.CreationDate DESC;

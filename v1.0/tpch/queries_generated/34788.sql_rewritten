@@ -1,0 +1,56 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 
+           o_orderstatus, o_orderpriority, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'  
+    UNION ALL
+    SELECT o.orderkey, o.custkey, o.orderdate, o.totalprice, 
+           o.orderstatus, o.orderpriority, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+CustomerBalance AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+AvgSupplyCost AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+ProductSubstitutes AS (
+    SELECT p.p_partkey, p.p_name, 
+           COALESCE(MAX(l.l_quantity) FILTER (WHERE l.l_discount = 0.05), 0) AS standalone_quantity
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    ch.c_custkey,
+    ch.c_name,
+    ch.total_spent,
+    p.p_partkey,
+    p.p_name,
+    ps.avg_cost,
+    hs.total_value,
+    ROW_NUMBER() OVER (PARTITION BY ch.c_custkey ORDER BY ch.total_spent DESC) AS rank,
+    CASE 
+        WHEN ch.total_spent IS NULL THEN 'No transactions'
+        ELSE 'Active'
+    END AS customer_status,
+    NULLIF(ps.standalone_quantity, 0) AS standalone_quantity
+FROM CustomerBalance ch
+LEFT JOIN ProductSubstitutes ps ON ch.total_spent > ps.standalone_quantity
+LEFT JOIN HighValueSuppliers hs ON hs.s_suppkey = (SELECT ps_suppkey FROM partsupp WHERE ps_partkey = ps.p_partkey LIMIT 1)
+WHERE ch.total_spent IS NOT NULL OR hs.total_value IS NOT NULL
+ORDER BY ch.c_custkey, total_spent DESC;

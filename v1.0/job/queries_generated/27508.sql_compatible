@@ -1,0 +1,65 @@
+
+WITH ActorMovieCount AS (
+    SELECT 
+        ka.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info c ON ka.person_id = c.person_id
+    GROUP BY 
+        ka.person_id
+), 
+
+KeywordCount AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title m ON mk.movie_id = m.id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.movie_id
+),
+
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT co.id) AS company_count,
+        STRING_AGG(DISTINCT co.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    a.name,
+    a.person_id,
+    ac.movie_count,
+    kc.keyword_count,
+    ci.company_count,
+    ci.company_names,
+    t.title AS movie_title,
+    t.production_year
+FROM 
+    aka_name a
+JOIN 
+    ActorMovieCount ac ON a.person_id = ac.person_id
+JOIN 
+    aka_title t ON t.id IN (SELECT movie_id FROM cast_info WHERE person_id = a.person_id)
+LEFT JOIN 
+    KeywordCount kc ON t.id = kc.movie_id
+LEFT JOIN 
+    CompanyInfo ci ON t.id = ci.movie_id
+WHERE 
+    ac.movie_count > 5
+ORDER BY 
+    ac.movie_count DESC, 
+    kc.keyword_count DESC, 
+    ci.company_count DESC;

@@ -1,0 +1,93 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id, 
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        CAST(0 AS INT) AS Level,
+        CAST(p.Title AS VARCHAR(300)) AS FullTitle
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.CreationDate,
+        Level + 1,
+        CAST(CONCAT(rp.FullTitle, ' -> ', p2.Title) AS VARCHAR(300))
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePosts rp ON p2.ParentId = rp.Id
+    WHERE 
+        p2.PostTypeId = 2 
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserPostInteractions AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionsAsked,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswersProvided,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyAwarded
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    upi.UserId,
+    upi.DisplayName,
+    upi.QuestionsAsked,
+    upi.AnswersProvided,
+    ur.Reputation,
+    ur.BadgeCount,
+    pvc.UpVotes - pvc.DownVotes AS NetVotes,
+    rp.FullTitle,
+    rp.CreationDate,
+    rp.Level
+FROM 
+    UserPostInteractions upi
+JOIN 
+    UserReputation ur ON upi.UserId = ur.UserId
+LEFT JOIN 
+    PostVoteCounts pvc ON upi.UserId IN (SELECT OwnerUserId FROM Posts WHERE OwnerUserId IS NOT NULL)
+LEFT JOIN 
+    RecursivePosts rp ON upi.UserId = rp.OwnerUserId 
+WHERE 
+    (upi.QuestionsAsked > 0 OR upi.AnswersProvided > 0)
+ORDER BY 
+    ur.Reputation DESC, 
+    upi.QuestionsAsked DESC, 
+    upi.AnswersProvided DESC;

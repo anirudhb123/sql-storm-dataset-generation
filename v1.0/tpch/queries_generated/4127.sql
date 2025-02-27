@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopNations AS (
+    SELECT 
+        n.n_name,
+        SUM(CASE WHEN ps.ps_supplycost < 100 THEN 1 ELSE 0 END) AS low_cost_suppliers_count
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        n.n_name
+    HAVING 
+        COUNT(s.s_suppkey) > 0
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_totalprice
+)
+SELECT 
+    r.rank,
+    tn.n_name,
+    od.o_orderkey,
+    od.o_orderdate,
+    od.total_lineitem_revenue,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    CASE 
+        WHEN od.total_lineitem_revenue IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Present'
+    END AS revenue_status
+FROM 
+    RankedSuppliers r
+FULL OUTER JOIN 
+    TopNations tn ON r.rank = 1
+LEFT JOIN 
+    OrderDetails od ON od.o_orderkey IN (SELECT DISTINCT l.l_orderkey FROM lineitem l WHERE l.l_suppkey = r.s_suppkey)
+LEFT JOIN 
+    supplier s ON s.s_suppkey = r.s_suppkey
+WHERE 
+    od.total_lineitem_revenue > 1000 OR tn.low_cost_suppliers_count > 5
+ORDER BY 
+    tn.n_name, od.o_orderdate DESC;

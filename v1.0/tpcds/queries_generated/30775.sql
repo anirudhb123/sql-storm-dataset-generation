@@ -1,0 +1,49 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT
+        s_store_sk,
+        s_store_name,
+        s_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY ss_sold_date_sk DESC) AS rank
+    FROM
+        store_sales ss
+    JOIN
+        store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE
+        ss.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+top_stores AS (
+    SELECT
+        sh.s_store_name,
+        SUM(sh.s_sales_price) AS total_sales
+    FROM
+        sales_hierarchy sh
+    WHERE
+        sh.rank <= 10
+    GROUP BY
+        sh.s_store_name
+),
+highest_sales AS (
+    SELECT
+        th.s_store_name,
+        th.total_sales,
+        dense_rank() OVER (ORDER BY th.total_sales DESC) AS sales_rank
+    FROM
+        top_stores th
+)
+SELECT
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.c_email_address,
+    hs.total_sales,
+    hs.sales_rank,
+    COALESCE(NULLIF(cs.c_birth_year, 0), 'Unknown') AS birth_year_adj
+FROM
+    customer cs
+LEFT JOIN
+    highest_sales hs ON cs.c_current_addr_sk = hs.s_store_sk
+WHERE
+    cs.c_preferred_cust_flag = 'Y'
+    AND (hs.total_sales IS NOT NULL OR cs.c_birth_year IS NOT NULL)
+ORDER BY
+    hs.total_sales DESC, cs.c_last_name ASC;

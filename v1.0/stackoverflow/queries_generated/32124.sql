@@ -1,0 +1,48 @@
+WITH RecursivePostLinks AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        pl.RelatedPostId,
+        1 AS Level
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        pl.RelatedPostId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostLinks pl ON p.Id = pl.RelatedPostId
+    INNER JOIN 
+        RecursivePostLinks rpl ON pl.PostId = rpl.PostId
+)
+SELECT 
+    p.Title AS OriginalPostTitle,
+    p.ViewCount AS OriginalPostViewCount,
+    rpl.RelatedPostId,
+    related.Title AS RelatedPostTitle,
+    related.ViewCount AS RelatedPostViewCount,
+    rpl.Level,
+    COALESCE(ph.Comment, 'No comment') AS PostHistoryComment,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS TotalComments
+FROM 
+    Posts p
+LEFT JOIN 
+    RecursivePostLinks rpl ON p.Id = rpl.PostId
+LEFT JOIN 
+    Posts related ON rpl.RelatedPostId = related.Id
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = p.Id AND ph.PostHistoryTypeId = 10
+WHERE 
+    p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+ORDER BY 
+    rpl.Level, OriginalPostTitle;
+
+This query retrieves posts created within the last year along with their related posts, using a recursive CTE to find all connections. It retrieves total comments, view count, and includes a left join on the PostHistory table to incorporate any relevant comments on closure. The results are ordered by the relation level and original post title.

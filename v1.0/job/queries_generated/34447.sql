@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+  
+    UNION ALL
+  
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level) AS movie_rank
+    FROM 
+        MovieHierarchy mh
+    WHERE 
+        mh.production_year BETWEEN 2000 AND 2020
+)
+SELECT 
+    DISTINCT ak.name AS actor_name,
+    ti.title AS movie_title,
+    ti.production_year,
+    COUNT(DISTINCT ak.id) OVER (PARTITION BY ti.production_year) AS actor_count,
+    (SELECT COUNT(*)
+     FROM movie_keyword mk
+     WHERE mk.movie_id = ti.id) AS keyword_count,
+    (CASE 
+        WHEN ti.production_year IS NULL THEN 'Year Unknown'
+        ELSE ti.production_year::text
+     END) AS formatted_year
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    title ti ON ci.movie_id = ti.id
+LEFT JOIN 
+    movie_info mi ON ti.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+WHERE 
+    ak.name ILIKE '%John%'
+    AND ti.production_year IN (SELECT production_year FROM FilteredMovies)
+    AND (ci.note IS NULL OR ci.note NOT LIKE '%Extra%')
+ORDER BY 
+    ti.production_year ASC, actor_name DESC
+LIMIT 100;

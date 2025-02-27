@@ -1,0 +1,108 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_customer_id, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_purchase_estimate, 
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rnk
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+
+HighValueItems AS (
+    SELECT 
+        i.i_item_sk, 
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    WHERE 
+        ws.ws_sales_price IS NOT NULL 
+    GROUP BY 
+        i.i_item_sk
+    HAVING 
+        SUM(ws.ws_net_profit) > 1000
+), 
+
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk, 
+        COUNT(sr_item_sk) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_value
+    FROM 
+        store_returns 
+    GROUP BY 
+        sr_customer_sk
+    HAVING 
+        COUNT(sr_item_sk) > 5
+), 
+
+ExtensiveReturns AS (
+    SELECT 
+        cr.returning_customer_sk, 
+        SUM(cr.cr_return_amount + COALESCE(cr.cr_return_tax, 0)) AS total_returned,
+        COUNT(DISTINCT cr.cr_order_number) AS return_orders,
+        RANK() OVER (ORDER BY SUM(cr.cr_return_amount) DESC) AS return_rank
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+), 
+
+CustomerStatistics AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS orders,
+        COUNT(DISTINCT sr.ticket_number) AS store_returns,
+        COUNT(DISTINCT wr.order_number) AS web_returns,
+        COUNT(DISTINCT ci.i_item_sk) AS high_value_items
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    LEFT JOIN 
+        HighValueItems ci ON c.c_customer_sk = ci.i_item_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    c_stats.orders,
+    c_stats.store_returns,
+    c_stats.web_returns,
+    CASE 
+        WHEN c_stats.orders >= 10 THEN 'Frequent Buyer'
+        ELSE 'Occasional Buyer' 
+    END AS purchase_frequency,
+    COALESCE(EXISTING_RETURN.return_count, 0) AS high_return_count,
+    COALESCE(EXISTING_RETURN.total_return_value, 0) AS total_return_value,
+    COUNT(DISTINCT r.return_rank) AS unique_return_dates,
+    MAX(r.return_rank) AS max_return_rank
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    CustomerStatistics c_stats ON c.c_customer_sk = c_stats.c_customer_sk
+LEFT JOIN 
+    CustomerReturns EXISTING_RETURN ON c.c_customer_sk = EXISTING_RETURN.sr_customer_sk
+LEFT JOIN 
+    ExtensiveReturns r ON c.c_customer_sk = r.returning_customer_sk
+WHERE 
+    ca.ca_state = 'CA' 
+    AND (c.c_birth_month IS NULL OR c.c_birth_month < 7)
+GROUP BY 
+    c.c_customer_id, ca.ca_city, c_stats.orders, c_stats.store_returns, c_stats.web_returns, EXISTING_RETURN.return_count, EXISTING_RETURN.total_return_value, r.return_rank
+ORDER BY 
+    total_return_value DESC, purchase_frequency ASC;

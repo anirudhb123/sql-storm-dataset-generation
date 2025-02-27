@@ -1,0 +1,31 @@
+
+WITH top_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+supplier_avg_cost AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+part_details AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_size, 
+           COALESCE(s.avg_supply_cost, 0) AS avg_supply_cost, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           RANK() OVER (ORDER BY COALESCE(s.avg_supply_cost, 0) DESC) AS cost_rank
+    FROM part p
+    LEFT JOIN supplier_avg_cost s ON p.p_partkey = s.ps_partkey
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_size
+)
+SELECT pd.p_partkey, pd.p_name, pd.p_brand, pd.avg_supply_cost, pd.supplier_count, 
+       tc.c_name AS top_customer_name, tc.total_spent
+FROM part_details pd
+LEFT JOIN top_customers tc ON pd.supplier_count > 5
+WHERE pd.cost_rank <= 10
+ORDER BY pd.avg_supply_cost DESC, pd.p_name ASC
+LIMIT 20;

@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankByViews
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        P.Title,
+        P.ViewCount,
+        P.Score
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts P ON ph.PostId = P.Id
+    WHERE 
+        ph.CreationDate >= CURRENT_DATE - INTERVAL '1 month'
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount 
+    FROM 
+        Badges 
+    GROUP BY 
+        UserId
+)
+SELECT 
+    RP.Title,
+    RP.ViewCount,
+    RP.Score,
+    RP.RankByViews,
+    RPH.PostHistoryTypeId,
+    RPH.CreationDate AS HistoryDate,
+    U.DisplayName AS EditorDisplayName,
+    UB.BadgeCount
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    RecentPostHistory RPH ON RP.Id = RPH.PostId
+LEFT JOIN 
+    Users U ON RPH.UserId = U.Id
+LEFT JOIN 
+    UserBadges UB ON RP.OwnerDisplayName = UB.UserId
+WHERE 
+    RP.RankByViews <= 10
+ORDER BY 
+    RP.RankByViews, RP.ViewCount DESC;

@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1970 AND 2000 
+        AND c.c_preferred_cust_flag = 'Y'
+    GROUP BY 
+        ws.web_site_id
+), 
+SalesAnalysis AS (
+    SELECT 
+        r.web_site_id,
+        r.total_profit,
+        r.order_count,
+        DENSE_RANK() OVER (ORDER BY r.total_profit DESC) AS dense_rank,
+        COALESCE(SUM(ws.ws_quantity) FILTER (WHERE ws.ws_ship_date_sk IS NOT NULL), 0) AS total_shipments,
+        COUNT(ws.ws_item_sk) AS item_count
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        web_sales ws ON r.web_site_id = ws.ws_web_site_sk
+    GROUP BY 
+        r.web_site_id, r.total_profit, r.order_count
+)
+SELECT 
+    w.w_warehouse_id,
+    w.w_warehouse_name,
+    sa.total_profit,
+    sa.order_count,
+    sa.dense_rank,
+    sa.total_shipments,
+    sa.item_count,
+    (CASE 
+        WHEN sa.total_profit > 10000 THEN 'High Profit'
+        WHEN sa.total_profit > 5000 THEN 'Medium Profit'
+        ELSE 'Low Profit' 
+     END) AS profit_category
+FROM 
+    SalesAnalysis sa
+JOIN 
+    warehouse w ON w.w_warehouse_sk = (SELECT inv.inv_warehouse_sk 
+                                        FROM inventory inv 
+                                        WHERE inv.inv_quantity_on_hand = 
+                                            (SELECT MAX(inv2.inv_quantity_on_hand)
+                                             FROM inventory inv2
+                                             WHERE inv2.inv_date_sk < (SELECT MAX(d.d_date_sk) FROM date_dim d)))
+WHERE 
+    w.w_county IS NOT NULL
+ORDER BY 
+    sa.total_profit DESC
+FETCH FIRST 10 ROWS ONLY;

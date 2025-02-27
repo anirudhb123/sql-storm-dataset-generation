@@ -1,0 +1,54 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        ca.ca_address_id,
+        COUNT(DISTINCT sr_ticket_number) AS store_return_count,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        c.c_customer_sk, ca.ca_address_id
+),
+WebSalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_paid_inc_ship_tax) AS total_spent
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+WindowedReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        cr.store_return_count,
+        cr.total_return_amount,
+        ws.total_orders,
+        ws.total_spent,
+        ROW_NUMBER() OVER (PARTITION BY cr.c_customer_sk ORDER BY cr.total_return_amount DESC) AS return_rank
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        WebSalesSummary ws ON cr.c_customer_sk = ws.ws_bill_customer_sk
+)
+SELECT 
+    w.c_customer_sk,
+    CASE 
+        WHEN total_spent IS NULL THEN 'No Orders'
+        WHEN total_spent > 1000 THEN 'High Roller'
+        ELSE 'Occasional Shopper'
+    END AS shopper_type,
+    COALESCE(return_rank, 0) AS return_rank,
+    COALESCE(total_return_amount / NULLIF(total_orders, 0), 0) AS avg_return_per_order
+FROM 
+    WindowedReturns w
+WHERE 
+    return_rank <= 5 OR shopper_type = 'High Roller'
+ORDER BY 
+    shopper_type, return_rank;

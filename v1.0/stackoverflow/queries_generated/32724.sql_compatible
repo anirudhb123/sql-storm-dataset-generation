@@ -1,0 +1,76 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY 
+        p.Id
+),
+RankedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.CommentCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.BadgeCount,
+        CASE 
+            WHEN ps.UserPostRank <= 5 THEN 'Top Posts'
+            ELSE 'Other Posts'
+        END AS PostCategory
+    FROM 
+        PostStats ps
+)
+SELECT 
+    p.Title,
+    p.OwnerDisplayName,
+    p.CreationDate,
+    r.CommentCount,
+    r.UpVotes,
+    r.DownVotes,
+    r.BadgeCount,
+    r.PostCategory,
+    (SELECT COUNT(*) FROM Posts p2 WHERE p2.ParentId = p.Id) AS AnswerCount,
+    (SELECT STRING_AGG(t.TagName, ', ') FROM Tags t WHERE t.Id IN (SELECT CAST(tag AS INT) FROM unnest(string_to_array(p.Tags, ',') ) AS tag)) ) AS Tags
+FROM 
+    Posts p
+LEFT JOIN 
+    RankedPosts r ON p.Id = r.PostId
+WHERE 
+    p.PostTypeId = 1 
+    AND (p.Title ILIKE '%SQL%' OR p.Body ILIKE '%SQL%') 
+ORDER BY 
+    r.UpVotes DESC, r.CommentCount DESC
+LIMIT 50;

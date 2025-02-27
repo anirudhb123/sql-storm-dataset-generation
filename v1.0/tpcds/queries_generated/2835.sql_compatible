@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        ws.ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        r.ws_item_sk,
+        r.total_quantity,
+        r.total_net_profit
+    FROM 
+        RankedSales r
+    WHERE 
+        r.rank <= 10
+),
+AggregateReturns AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_return_quantity,
+        SUM(wr.wr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+),
+ItemPerformance AS (
+    SELECT 
+        ti.ws_item_sk,
+        ti.total_quantity,
+        ti.total_net_profit,
+        COALESCE(ar.total_return_quantity, 0) AS total_return_quantity,
+        COALESCE(ar.total_return_amt, 0) AS total_return_amt,
+        (ti.total_net_profit - COALESCE(ar.total_return_amt, 0)) AS net_profit_after_returns
+    FROM 
+        TopItems ti
+    LEFT JOIN 
+        AggregateReturns ar ON ti.ws_item_sk = ar.wr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    ip.total_quantity,
+    ip.total_net_profit,
+    ip.total_return_quantity,
+    ip.total_return_amt,
+    ip.net_profit_after_returns,
+    (CASE 
+        WHEN ip.total_net_profit = 0 THEN 'No profit'
+        ELSE ROUND((ip.net_profit_after_returns * 100.0 / ip.total_net_profit), 2)
+    END) AS return_percentage
+FROM 
+    ItemPerformance ip
+JOIN 
+    item i ON ip.ws_item_sk = i.i_item_sk
+ORDER BY 
+    ip.net_profit_after_returns DESC;

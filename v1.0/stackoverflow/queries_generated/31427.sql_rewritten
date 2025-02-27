@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE vt.Name = 'UpMod') AS UpVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        OwnerName, 
+        CommentCount, 
+        UpVoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank = 1
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(*) AS EditCount,
+        COUNT(DISTINCT CASE WHEN pht.Name = 'Post Closed' THEN ph.Id END) AS ClosedCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    tp.Title,
+    tp.OwnerName,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    COALESCE(pHS.LastEditDate, 'Never') AS LastEdited,
+    COALESCE(pHS.EditCount, 0) AS TotalEdits,
+    COALESCE(pHS.ClosedCount, 0) AS TotalClosures
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistoryStats pHS ON tp.PostId = pHS.PostId
+ORDER BY 
+    tp.UpVoteCount DESC, tp.CommentCount DESC
+LIMIT 10;

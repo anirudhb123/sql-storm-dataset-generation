@@ -1,0 +1,76 @@
+
+WITH RankedReturns AS (
+    SELECT
+        cr_refunded_customer_sk,
+        COUNT(*) AS return_count,
+        SUM(cr_return_amount) AS total_return_amount,
+        RANK() OVER (PARTITION BY cr_refunded_customer_sk ORDER BY SUM(cr_return_amount) DESC) AS rank_return
+    FROM
+        catalog_returns
+    GROUP BY
+        cr_refunded_customer_sk
+),
+HighValueCustomers AS (
+    SELECT
+        r.refunded_customer,
+        DENSE_RANK() OVER (ORDER BY r.total_return_amount DESC) AS customer_rank
+    FROM (
+        SELECT
+            cr_refunded_customer_sk AS refunded_customer,
+            SUM(cr_return_amount) AS total_return_amount
+        FROM
+            catalog_returns
+        WHERE
+            cr_return_quantity > 0
+        GROUP BY
+            cr_refunded_customer_sk
+    ) r
+    WHERE
+        r.total_return_amount IS NOT NULL
+    HAVING
+        COUNT(r.refunded_customer) > 1
+),
+CustomerPurchases AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_spent,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM
+        web_sales
+    WHERE
+        ws_net_paid IS NOT NULL
+    GROUP BY
+        ws_bill_customer_sk
+),
+CustomerDemographicDetails AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT
+    c.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(cp.total_spent, 0) AS total_spent,
+    COALESCE(cp.order_count, 0) AS order_count,
+    COALESCE(hr.rank_return, 0) AS return_rank
+FROM
+    CustomerDemographicDetails cd
+LEFT JOIN
+    CustomerPurchases cp ON cd.c_customer_id = cp.ws_bill_customer_sk
+LEFT JOIN
+    RankedReturns hr ON hr.cr_refunded_customer_sk = cp.ws_bill_customer_sk
+WHERE
+    (cd.cd_marital_status = 'M' AND COALESCE(cp.total_spent, 0) > 1000) OR
+    (cd.cd_gender = 'F' AND COALESCE(cp.order_count, 0) > 5)
+ORDER BY
+    total_spent DESC, c.c_customer_id ASC
+LIMIT 100;

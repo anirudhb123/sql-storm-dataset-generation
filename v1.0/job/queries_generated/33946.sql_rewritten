@@ -1,0 +1,87 @@
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        1 AS level
+    FROM 
+        movie_link ml
+    WHERE 
+        ml.linked_movie_id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.linked_movie_id
+),
+TopMovies AS (
+    
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS member_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+    HAVING 
+        COUNT(ci.person_id) >= 5
+),
+MovieDetails AS (
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+    FROM 
+        aka_title ak
+    JOIN 
+        title m ON ak.movie_id = m.id 
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id
+),
+FilteredMovies AS (
+    
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.cast_count,
+        md.aka_names,
+        mh.level
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        MovieHierarchy mh ON md.movie_id = mh.movie_id
+    WHERE 
+        md.cast_count >= 10
+)
+
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.cast_count,
+    fm.aka_names,
+    COALESCE(mh.level, 0) AS link_level,
+    CASE 
+        WHEN fm.production_year = 2021 THEN 'New Release'
+        WHEN fm.production_year < 2010 THEN 'Older Release'
+        ELSE 'Mid-Age Release'
+    END AS release_category
+FROM 
+    FilteredMovies fm
+ORDER BY 
+    fm.cast_count DESC, 
+    fm.production_year DESC;

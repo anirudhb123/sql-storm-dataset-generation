@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankInType
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score > 0
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS ClosureDate,
+        ph.UserDisplayName AS CloserDisplayName,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+        AND ph.CreationDate >= NOW() - INTERVAL '2 years'
+),
+PostVoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostTagStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.Id) AS TagCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><') AS tag on true
+    JOIN 
+        Tags t ON t.TagName = tag
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.Score,
+    rp.ViewCount,
+    COALESCE(pc.UpVotes, 0) AS UpVotes,
+    COALESCE(pc.DownVotes, 0) AS DownVotes,
+    COALESCE(ts.TagCount, 0) AS TagCount,
+    COALESCE(ts.TagList, 'No Tags') AS TagList,
+    cp.ClosureDate,
+    cp.CloserDisplayName,
+    cp.CloseReason
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteCounts pc ON rp.PostId = pc.PostId
+LEFT JOIN 
+    PostTagStats ts ON rp.PostId = ts.PostId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId AND cp.ClosureDate IS NOT NULL
+WHERE 
+    rp.RankInType <= 5
+ORDER BY 
+    rp.RankInType;

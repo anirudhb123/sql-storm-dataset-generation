@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS PostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.ViewCount IS NOT NULL
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        MAX(u.LastAccessDate) AS LastActiveDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostsWithComments AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(c.Score, 0) AS CommentScore
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(Id) AS CommentCount, 
+            SUM(Score) AS Score 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+)
+
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    us.PostCount,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    pwc.CommentCount,
+    pwc.CommentScore,
+    CASE 
+        WHEN u.Reputation > 1000 THEN 'High Reputation User' 
+        ELSE 'Regular User' 
+    END AS UserCategory,
+    CASE 
+        WHEN pwc.CommentCount > 10 THEN 'Active Commenter' 
+        ELSE 'Lurker' 
+    END AS UserActivity
+FROM 
+    UserStats us
+JOIN 
+    Users u ON us.UserId = u.Id
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN 
+    PostsWithComments pwc ON rp.PostId = pwc.PostId
+WHERE 
+    us.BadgeCount > 0
+    AND (us.LastActiveDate IS NULL OR us.LastActiveDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days')
+ORDER BY 
+    u.Reputation DESC, rp.Score DESC
+LIMIT 100;

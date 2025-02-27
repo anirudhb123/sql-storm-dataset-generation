@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'feature')
+
+    UNION ALL
+
+    SELECT 
+        mt.linked_movie_id AS movie_id,
+        lt.title,
+        lt.production_year,
+        mh.level + 1 AS level
+    FROM 
+        movie_link mt 
+    JOIN 
+        title lt ON mt.linked_movie_id = lt.id
+    JOIN 
+        MovieHierarchy mh ON mt.movie_id = mh.movie_id
+)
+SELECT 
+    m.title AS Movie_Title,
+    m.production_year AS Production_Year,
+    COUNT(DISTINCT ci.person_id) AS Total_Cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS Cast_Names,
+    AVG(p.info) FILTER (WHERE p.info_type_id = 1) AS Average_Rating,
+    CASE 
+        WHEN COUNT(DISTINCT kc.keyword) > 0 THEN 'Has Keywords' 
+        ELSE 'No Keywords' 
+    END AS Keyword_Status
+FROM 
+    MovieHierarchy m 
+LEFT JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON m.movie_id = mi.movie_id 
+LEFT JOIN 
+    person_info p ON ci.person_id = p.person_id 
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id 
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+WHERE 
+    m.production_year >= 2000
+    AND m.production_year <= EXTRACT(YEAR FROM CURRENT_DATE)
+    AND ak.name IS NOT NULL
+GROUP BY 
+    m.movie_id, m.title, m.production_year
+ORDER BY 
+    Total_Cast DESC, m.production_year ASC;

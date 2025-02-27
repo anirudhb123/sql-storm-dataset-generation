@@ -1,0 +1,60 @@
+
+WITH RECURSIVE customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) IS NOT NULL
+),
+supplier_stats AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(ps.ps_partkey) AS parts_supplied, 
+           SUM(ps.ps_supplycost) AS total_supply_cost,
+           RANK() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS supply_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+part_price_avg AS (
+    SELECT p.p_partkey, AVG(p.p_retailprice) OVER (PARTITION BY p.p_type) AS avg_price
+    FROM part p
+),
+nation_info AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name AS region_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+high_value_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, c.c_custkey
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_totalprice > (
+        SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O'
+    )
+)
+SELECT 
+    cu.c_name AS customer_name,
+    s.s_name AS supplier_name,
+    p.p_name AS part_name,
+    ls.l_shipmode,
+    COALESCE(pt.avg_price, 0) AS part_avg_price,
+    COALESCE(s_stats.parts_supplied, 0) AS supplier_part_count,
+    COALESCE(s_stats.total_supply_cost, 0) AS supplier_total_cost,
+    CASE
+        WHEN ls.l_discount > 0.05 THEN 'Discounted'
+        ELSE 'Regular'
+    END AS pricing_type
+FROM customer_orders cu
+JOIN high_value_orders hvo ON cu.c_custkey = hvo.o_custkey
+JOIN lineitem ls ON hvo.o_orderkey = ls.l_orderkey
+JOIN partsupp ps ON ls.l_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN part_price_avg pt ON p.p_partkey = pt.p_partkey
+LEFT JOIN supplier_stats s_stats ON s.s_suppkey = s_stats.s_suppkey
+WHERE EXISTS (
+    SELECT 1 FROM nation_info ni
+    WHERE ni.n_nationkey = s.s_nationkey 
+    AND ni.region_name IS NOT NULL
+)
+ORDER BY cu.total_spent DESC, s_stats.parts_supplied ASC
+LIMIT 100;

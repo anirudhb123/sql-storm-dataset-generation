@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')))
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName, pt.Name, p.CreationDate, p.ViewCount, p.Score
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.TagsList
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.TagsList,
+    phh.UserDisplayName AS LastEditedBy,
+    ph.CreationDate AS LastEditDate,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) AS UpvoteCount
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistory ph ON tp.PostId = ph.PostId AND ph.PostHistoryTypeId IN (5, 24)
+LEFT JOIN 
+    Users phh ON ph.UserId = phh.Id
+LEFT JOIN 
+    Comments c ON tp.PostId = c.PostId
+LEFT JOIN 
+    Votes v ON tp.PostId = v.PostId AND v.VoteTypeId = 2 -- Upvotes
+GROUP BY 
+    tp.PostId, tp.Title, tp.OwnerDisplayName, tp.CreationDate, tp.ViewCount, tp.Score, 
+    tp.TagsList, phh.UserDisplayName, ph.CreationDate
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

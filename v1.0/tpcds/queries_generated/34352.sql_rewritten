@@ -1,0 +1,85 @@
+WITH RECURSIVE sales_ranking AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rnk
+    FROM 
+        web_sales
+),
+customer_balance AS (
+    SELECT 
+        c_customer_sk, 
+        SUM(COALESCE(ss_net_paid, 0)) AS total_spent,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        CASE 
+            WHEN SUM(COALESCE(ss_net_paid, 0)) OVER() > 1000 THEN 'High Value'
+            WHEN SUM(COALESCE(ss_net_paid, 0)) OVER() BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value_segment
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c_customer_sk
+),
+item_history AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_product_name,
+        SUM(ws_quantity) AS total_quantity_sold,
+        AVG(ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_product_name
+),
+daily_sales_summary AS (
+    SELECT 
+        d.d_date,
+        SUM(COALESCE(ss_net_paid, 0)) AS daily_sales,
+        COUNT(DISTINCT ss_order_number) AS total_transactions
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    GROUP BY 
+        d.d_date
+)
+SELECT 
+    ca.ca_city,
+    cd.cd_gender,
+    cb.customer_value_segment,
+    SUM(db.daily_sales) AS total_daily_sales,
+    SUM(i.total_quantity_sold) AS total_item_quantity_sold
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    customer_balance cb ON c.c_customer_sk = cb.c_customer_sk
+JOIN 
+    daily_sales_summary db ON db.d_daily_sales_date = cast('2002-10-01' as date)
+LEFT JOIN 
+    item_history i ON i.i_item_sk = (
+        SELECT 
+            ws_item_sk 
+        FROM 
+            sales_ranking sr 
+        WHERE 
+            sr.rnk = 1 
+          AND 
+            sr.ws_order_number = c.c_customer_sk
+    )
+JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+WHERE 
+    cd.cd_marital_status = 'M' 
+AND 
+    cb.order_count >= 1
+GROUP BY 
+    ca.ca_city, cd.cd_gender, cb.customer_value_segment;

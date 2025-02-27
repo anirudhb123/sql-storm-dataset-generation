@@ -1,0 +1,46 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_preferred_cust_flag, c_current_cdemo_sk, 1 AS level
+    FROM customer
+    WHERE c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT ch.c_customer_sk, c.c_first_name, c.c_last_name, c.c_preferred_cust_flag, c.c_current_cdemo_sk, ch.level + 1
+    FROM customer_hierarchy ch
+    JOIN customer c ON c.c_current_cdemo_sk = ch.c_current_cdemo_sk
+    WHERE ch.level < 5 -- limit levels for hierarchy
+),
+discounted_sales AS (
+    SELECT ws.ws_order_number, ws.ws_item_sk, (ws.ws_sales_price - COALESCE(p.p_discount_active::money, 0)) AS effective_sales_price
+    FROM web_sales ws
+    LEFT JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE ws.ws_sold_date_sk > (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2022)
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_order_number,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) / NULLIF(SUM(ws.ws_quantity), 0) AS avg_profit_per_item,
+        COUNT(DISTINCT ws.ws_item_sk) AS unique_items_sold
+    FROM web_sales ws
+    JOIN discounted_sales ds ON ws.ws_order_number = ds.ws_order_number
+    GROUP BY ws.ws_order_number
+)
+SELECT 
+    ch.c_customer_sk,
+    ch.c_first_name,
+    ch.c_last_name,
+    ch.c_preferred_cust_flag,
+    ss.total_quantity,
+    COALESCE(ss.avg_profit_per_item, 0) AS average_profit,
+    ss.unique_items_sold,
+    CASE 
+        WHEN ss.total_quantity > 100 THEN 'High Volume'
+        WHEN ss.total_quantity BETWEEN 50 AND 100 THEN 'Medium Volume'
+        ELSE 'Low Volume' 
+    END AS volume_category
+FROM customer_hierarchy ch
+LEFT JOIN sales_summary ss ON ch.c_customer_sk = ss.ws_order_number
+WHERE ch.c_preferred_cust_flag = 'Y'
+  AND (ss.total_quantity IS NULL OR ss.total_quantity > 0)
+ORDER BY ch.level, ss.total_quantity DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS Owner,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopQuestions AS (
+    SELECT 
+        PostId, Title, Owner, CreationDate, Score, ViewCount, CommentCount, UpVotes, DownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+),
+TopAnswers AS (
+    SELECT 
+        p.Id AS AnswerId,
+        p.Title AS AnswerTitle,
+        u.DisplayName AS AnswerOwner,
+        p.Score AS AnswerScore,
+        q.Title AS QuestionTitle,
+        q.PostId AS QuestionId
+    FROM 
+        Posts p
+    JOIN 
+        Posts q ON p.ParentId = q.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 2 
+    AND 
+        q.PostTypeId = 1
+)
+SELECT 
+    tq.Title AS QuestionTitle,
+    tq.Owner AS QuestionOwner,
+    tq.CreationDate AS QuestionCreationDate,
+    tq.Score AS QuestionScore,
+    ta.AnswerTitle,
+    ta.AnswerOwner,
+    ta.AnswerScore,
+    tq.UpVotes,
+    tq.DownVotes
+FROM 
+    TopQuestions tq
+LEFT JOIN 
+    TopAnswers ta ON tq.PostId = ta.QuestionId
+ORDER BY 
+    tq.CreationDate DESC;

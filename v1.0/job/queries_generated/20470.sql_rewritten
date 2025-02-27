@@ -1,0 +1,48 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mo.id AS movie_id,
+        mo.title,
+        mo.production_year,
+        1 AS depth,
+        ARRAY[mo.title] AS title_path
+    FROM title AS mo
+    WHERE mo.production_year >= 2000
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        ti.title,
+        ti.production_year,
+        mh.depth + 1,
+        mh.title_path || ti.title
+    FROM movie_link AS ml
+    JOIN title AS ti ON ml.linked_movie_id = ti.id
+    JOIN MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    m.id AS main_movie_id,
+    m.title AS main_title,
+    CASE 
+        WHEN m.production_year < 2010 THEN 'Pre-2010' 
+        ELSE 'Post-2010' 
+    END AS year_category,
+    COUNT(ch.id) AS character_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS all_actors,
+    MAX(CASE WHEN k.keyword IS NOT NULL THEN k.keyword ELSE 'No keyword' END) AS sample_keyword,
+    SUM(CASE WHEN cc.role_id IS NOT NULL THEN 1 ELSE 0 END) AS total_roles,
+    AVG(CASE WHEN k.keyword IS NOT NULL THEN 1 ELSE NULL END) OVER(PARTITION BY m.id) AS keyword_density
+FROM title AS m
+LEFT JOIN movie_info AS mi ON m.id = mi.movie_id
+LEFT JOIN movie_keyword AS mk ON m.id = mk.movie_id
+LEFT JOIN keyword AS k ON mk.keyword_id = k.id
+LEFT JOIN aka_title AS at ON m.id = at.movie_id
+JOIN cast_info AS ci ON m.id = ci.movie_id
+JOIN aka_name AS a ON ci.person_id = a.person_id
+LEFT JOIN char_name AS ch ON ch.imdb_index = a.imdb_index
+LEFT JOIN complete_cast AS cc ON cc.movie_id = m.id
+WHERE m.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Movie%')
+GROUP BY m.id
+HAVING COUNT(ch.id) > 5 AND MAX(m.production_year) IS NOT NULL
+ORDER BY main_title, year_category DESC
+LIMIT 50;

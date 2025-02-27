@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        pt.Name AS PostTypeName,
+        COALESCE(pt2.Name, 'N/A') AS RelatedPostTypeName,
+        COUNT(pl.RelatedPostId) AS RelatedPostCount
+    FROM 
+        RankedPosts rp
+        JOIN PostTypes pt ON rp.PostTypeId = pt.Id
+        LEFT JOIN PostLinks pl ON rp.PostId = pl.PostId
+        LEFT JOIN PostTypes pt2 ON pl.LinkTypeId = pt2.Id
+    WHERE 
+        rp.RN <= 5
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, 
+        rp.OwnerDisplayName, rp.CommentCount, pt.Name, pt2.Name
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.OwnerDisplayName,
+    pd.CommentCount,
+    pd.PostTypeName,
+    pd.RelatedPostTypeName,
+    pd.RelatedPostCount
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.Score DESC, 
+    pd.ViewCount DESC;

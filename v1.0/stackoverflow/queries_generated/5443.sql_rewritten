@@ -1,0 +1,56 @@
+WITH ActiveUsers AS (
+    SELECT 
+        Id, DisplayName, Reputation, CreationDate, UpVotes, DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY EmailHash ORDER BY Reputation DESC) AS UserRank
+    FROM Users
+    WHERE LastAccessDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TagStats AS (
+    SELECT 
+        T.TagName, 
+        COUNT(DISTINCT P.Id) AS PostCount, 
+        SUM(P.ViewCount) AS TotalViews, 
+        SUM(P.AnswerCount) AS TotalAnswers
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+),
+PostActivity AS (
+    SELECT 
+        PH.PostId,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(PH.Id) AS TotalHistoryCount
+    FROM PostHistory PH
+    JOIN Posts P ON PH.PostId = P.Id
+    GROUP BY PH.PostId
+),
+UserPosts AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName,
+        COUNT(P.Id) AS PostsCount,
+        AVG(P.ViewCount) AS AvgViewCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN P.AnswerCount ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN P.AnswerCount ELSE 0 END) AS Answers
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+)
+SELECT 
+    AU.DisplayName AS ActiveUser,
+    AU.Reputation, 
+    TS.TagName, 
+    TS.PostCount, 
+    TS.TotalViews, 
+    UP.PostsCount, 
+    UP.AvgViewCount, 
+    UP.Questions,
+    UP.Answers,
+    PA.CloseReopenCount,
+    PA.TotalHistoryCount
+FROM ActiveUsers AU
+JOIN UserPosts UP ON AU.Id = UP.UserId
+JOIN TagStats TS ON TS.PostCount > 10
+JOIN PostActivity PA ON PA.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = AU.Id)
+WHERE AU.UserRank = 1
+ORDER BY AU.Reputation DESC, TS.TotalViews DESC;

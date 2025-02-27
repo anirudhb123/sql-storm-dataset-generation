@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserVoteSummary AS (
+    SELECT 
+        v.UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+)
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT rp.PostId) AS TotalPosts,
+    SUM(ub.GoldBadges) AS TotalGoldBadges,
+    SUM(ub.SilverBadges) AS TotalSilverBadges,
+    SUM(ub.BronzeBadges) AS TotalBronzeBadges,
+    COALESCE(us.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(us.DownVotes, 0) AS TotalDownVotes,
+    AVG(rp.Score) AS AveragePostScore,
+    SUM(rp.ViewCount) AS TotalViewCount,
+    COUNT(DISTINCT CASE WHEN rp.UserPostRank = 1 THEN rp.PostId END) AS MostRecentPosts
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    UserVoteSummary us ON u.Id = us.UserId
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, u.DisplayName
+ORDER BY 
+    TotalPosts DESC, TotalGoldBadges DESC, TotalViewCount DESC
+LIMIT 10;

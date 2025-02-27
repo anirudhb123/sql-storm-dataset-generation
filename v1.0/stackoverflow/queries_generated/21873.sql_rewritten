@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) AS PostRank,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsArray
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = p.Id
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+PopularUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    INNER JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        SUM(p.Score) > 1000
+),
+CloseVotePostHistory AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseVotes,
+        MAX(ph.CreationDate) AS LastCloseVoteDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+),
+PostAnalysis AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.PostRank,
+        pu.DisplayName AS PopularUser,
+        cv.CloseVotes,
+        cv.LastCloseVoteDate,
+        CASE 
+            WHEN cv.CloseVotes IS NULL THEN 'No Votes'
+            ELSE 'Closed'
+        END AS VoteStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        CloseVotePostHistory cv ON rp.PostId = cv.PostId
+    LEFT JOIN 
+        PopularUsers pu ON rp.PostRank = 1 AND pu.UserId = rp.OwnerUserId
+    WHERE 
+        rp.PostRank <= 5 OR (rp.ViewCount > 100 AND VoteStatus = 'Closed')
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.Score,
+    pa.ViewCount,
+    pa.PopularUser,
+    pa.CloseVotes,
+    pa.LastCloseVoteDate,
+    COALESCE(pa.TagsArray, '{}') AS Tags,
+    (SELECT COUNT(*) 
+     FROM Comments c 
+     WHERE c.PostId = pa.PostId 
+     AND c.UserId IS NOT NULL) AS CommentCount
+FROM 
+    PostAnalysis pa
+ORDER BY 
+    pa.Score DESC, pa.ViewCount DESC;

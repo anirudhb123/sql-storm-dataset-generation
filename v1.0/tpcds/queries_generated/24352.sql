@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws_sales_price,
+        ws_net_paid,
+        ws_net_profit,
+        RANK() OVER (PARTITION BY ws_ship_mode_sk ORDER BY ws_net_profit DESC) AS rank_profit
+    FROM
+        web_sales
+    WHERE
+        ws_ship_mode_sk IS NOT NULL
+        AND ws_sales_price > 0
+),
+CustomerReturns AS (
+    SELECT
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returns,
+        COUNT(DISTINCT wr_refunded_customer_sk) AS unique_customers
+    FROM
+        web_returns
+    WHERE
+        wr_return_quantity > 0
+    GROUP BY
+        wr_item_sk
+),
+JoinDemographics AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band
+    FROM
+        customer c
+        LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+)
+
+SELECT
+    R.rank_profit,
+    J.c_customer_id,
+    J.cd_gender,
+    J.cd_marital_status,
+    J.cd_purchase_estimate,
+    J.cd_credit_rating,
+    COALESCE(R.ws_sales_price * 1.1, 0) AS adjusted_sales_price,
+    COALESCE(C.total_returns, 0) AS total_returns,
+    CASE
+        WHEN R.rank_profit IS NOT NULL AND C.unique_customers > 10 THEN 'High Engagement'
+        WHEN R.rank_profit IS NULL AND C.unique_customers IS NULL THEN 'No Data'
+        ELSE 'Moderate Engagement'
+    END AS engagement_level
+FROM
+    RankedSales R
+    FULL OUTER JOIN JoinDemographics J ON 1=1
+    LEFT JOIN CustomerReturns C ON R.ws_item_sk = C.wr_item_sk
+WHERE
+    (J.cd_marital_status IS NULL OR J.cd_marital_status = 'S')
+    AND (R.rank_profit <= 5 OR R.rank_profit IS NULL)
+ORDER BY
+    adjusted_sales_price DESC NULLS LAST;

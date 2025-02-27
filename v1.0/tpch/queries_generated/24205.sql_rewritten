@@ -1,0 +1,42 @@
+WITH RECURSIVE CTE_SupplierCosts AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+    UNION ALL
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost) + cte.total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN CTE_SupplierCosts cte ON s.s_suppkey = cte.s_suppkey
+    WHERE cte.total_supplycost < 1000
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, cte.total_supplycost
+    FROM supplier s
+    JOIN CTE_SupplierCosts cte ON s.s_suppkey = cte.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+OrderInfo AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+           o.o_orderstatus
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate < cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+),
+SupplierWithOrder AS (
+    SELECT sd.s_suppkey, sd.s_name, sd.s_acctbal, oi.order_value, oi.o_orderstatus
+    FROM SupplierDetails sd
+    LEFT JOIN OrderInfo oi ON sd.s_suppkey = oi.o_orderkey
+)
+SELECT COALESCE(swo.s_name, 'UNKNOWN SUPPLIER') AS supplier_name,
+       SUM(NVL(swo.order_value, 0)) AS total_order_value,
+       AVG(swo.s_acctbal) AS avg_account_balance,
+       COUNT(swo.o_orderstatus) FILTER (WHERE swo.o_orderstatus = 'O') AS completed_orders,
+       COUNT(swo.o_orderstatus) FILTER (WHERE swo.o_orderstatus IS NULL) AS unprocessed_orders
+FROM SupplierWithOrder swo
+GROUP BY supplier_name
+HAVING SUM(NVL(swo.order_value, 0)) > (SELECT AVG(order_value) FROM OrderInfo) 
+   OR COUNT(swo.o_orderstatus) = 0
+ORDER BY supplier_name;

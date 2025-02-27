@@ -1,0 +1,78 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.PostTypeId,
+        a.OwnerUserId,
+        a.AcceptedAnswerId,
+        rh.Level + 1
+    FROM Posts a
+    INNER JOIN RecursivePostHierarchy rh ON a.ParentId = rh.PostId
+    WHERE a.PostTypeId = 2  
+),
+PostVoteSummary AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - 
+                 SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS NetScore
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+PostTags AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        string_agg(distinct trim(tag.TagName), ', ') AS Tags,
+        COUNT(tag.Id) AS TagCount
+    FROM Posts p
+    LEFT JOIN LATERAL unnest(string_to_array(p.Tags, '><')) AS tag(TagName) ON TRUE 
+    GROUP BY p.Id
+)
+SELECT 
+    rph.PostId,
+    rph.Title,
+    rph.Level,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    pvs.TotalVotes,
+    pvs.NetScore,
+    COALESCE(pt.Tags, 'No Tags') AS Tags,
+    pt.TagCount,
+    CASE 
+        WHEN rph.PostTypeId = 1 THEN 'Question'
+        ELSE 'Answer'
+    END AS PostType,
+    u.DisplayName AS OwnerName,
+    COALESCE(u.Reputation, 0) AS OwnerReputation,
+    COUNT(c.Id) FILTER (WHERE c.Score > 0) AS PositiveCommentCount,
+    COUNT(c.Id) FILTER (WHERE c.Score < 0) AS NegativeCommentCount
+FROM RecursivePostHierarchy rph
+LEFT JOIN PostVoteSummary pvs ON rph.PostId = pvs.PostId
+LEFT JOIN PostTags pt ON rph.PostId = pt.PostId
+LEFT JOIN Users u ON rph.OwnerUserId = u.Id
+LEFT JOIN Comments c ON rph.PostId = c.PostId
+WHERE rph.Level <= 3 
+GROUP BY 
+    rph.PostId, rph.Title, rph.Level, pvs.UpVotes, pvs.DownVotes, 
+    pvs.TotalVotes, pvs.NetScore, pt.Tags, pt.TagCount, 
+    u.DisplayName, u.Reputation
+ORDER BY 
+    rph.Level, rph.PostId;

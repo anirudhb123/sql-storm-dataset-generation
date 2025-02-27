@@ -1,0 +1,65 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'P')
+),
+SupplierAggregates AS (
+    SELECT 
+        ps.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        MAX(ps.ps_availqty) AS max_avail_qty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.s_suppkey
+),
+CustomerAnalysis AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        CASE 
+            WHEN SUM(o.o_totalprice) IS NULL THEN 'No Orders'
+            WHEN SUM(o.o_totalprice) > 10000 THEN 'High Value'
+            ELSE 'Normal Value'
+        END AS customer_value_segment
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(c.total_spent, 0) AS total_spent,
+    s.s_name,
+    (SELECT MAX(avg_supply_cost) FROM SupplierAggregates WHERE part_count > 2) AS max_avg_supply_cost,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    CustomerAnalysis c ON s.s_suppkey = c.c_custkey
+LEFT JOIN 
+    RankedOrders o ON c.c_custkey = o.o_orderkey
+WHERE 
+    (c.customer_value_segment = 'High Value' OR c.customer_value_segment IS NULL)
+    AND COALESCE(s.avg_supply_cost, 0) < (SELECT AVG(ps.ps_supplycost) FROM partsupp ps)
+GROUP BY 
+    r.r_name, c.total_spent, s.s_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    r.r_name ASC, total_spent DESC;

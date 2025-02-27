@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- BountyStart, BountyClose
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        ub.UserId,
+        ub.BadgeCount,
+        ub.BadgeNames
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+    WHERE 
+        rp.PostRank <= 5 -- Top 5 posts per user
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.Score,
+    pp.ViewCount,
+    pp.BadgeCount,
+    pp.BadgeNames,
+    CASE 
+        WHEN pp.BadgeCount > 0 THEN 'Badge Holder'
+        ELSE 'No Badges'
+    END AS BadgeStatus,
+    CASE 
+        WHEN pp.Score > 100 THEN 'Hot Post'
+        ELSE 'Regular Post'
+    END AS PostStatus,
+    CAST(NULLIF(REPLACE(pp.Title, ' ', ''), '') AS VARCHAR(50)) AS TitleIdentifier -- String manipulation
+FROM 
+    PopularPosts pp
+ORDER BY 
+    pp.Score DESC, 
+    pp.CreationDate ASC;

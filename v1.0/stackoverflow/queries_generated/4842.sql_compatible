@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 YEAR)
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.Reputation
+), PostDetails AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        us.UserId,
+        us.Reputation,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        CASE 
+            WHEN rp.Score >= 20 THEN 'Hot'
+            WHEN rp.Score BETWEEN 10 AND 19 THEN 'Trending'
+            ELSE 'Regular'
+        END AS PostStatus,
+        COALESCE((SELECT COUNT(c.Id) FROM Comments c WHERE c.PostId = rp.Id), 0) AS CommentCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserStats us ON rp.OwnerUserId = us.UserId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Reputation,
+    pd.Score,
+    pd.ViewCount,
+    pd.CommentCount,
+    pd.PostStatus,
+    COALESCE(ph.UserDisplayName, 'N/A') AS LastEditor
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    PostHistory ph ON pd.PostId = ph.PostId 
+    AND ph.CreationDate = (SELECT MAX(CreationDate) FROM PostHistory WHERE PostId = pd.PostId)
+WHERE 
+    pd.PostStatus = 'Hot'
+ORDER BY 
+    pd.Score DESC, 
+    pd.CommentCount DESC
+LIMIT 50;

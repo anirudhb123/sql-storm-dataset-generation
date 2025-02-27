@@ -1,0 +1,29 @@
+WITH RECURSIVE SupplierData AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+),
+AggData AS (
+    SELECT
+        n.n_name AS nation,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        SUM(s.s_acctbal) AS total_supplier_balance
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN SupplierData s ON l.l_suppkey = s.s_suppkey
+    WHERE o.o_orderdate >= DATE '2021-01-01' AND o.o_orderdate < DATE '2022-01-01'
+    GROUP BY n.n_name
+)
+SELECT 
+    nation, 
+    customer_count, 
+    total_revenue, 
+    total_supplier_balance,
+    ROUND(total_revenue / NULLIF(customer_count, 0), 2) AS avg_revenue_per_customer
+FROM AggData
+ORDER BY total_revenue DESC
+LIMIT 10;

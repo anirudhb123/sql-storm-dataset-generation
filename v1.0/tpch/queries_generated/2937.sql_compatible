@@ -1,0 +1,54 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+RegionalSuppliers AS (
+    SELECT
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS SupplierCount,
+        n.n_nationkey
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_name, n.n_nationkey
+)
+SELECT 
+    p.p_name,
+    s.s_name AS SupplierName,
+    hs.SupplierCount AS RegionalSupplierCount,
+    COUNT(hv.o_orderkey) AS HighValueOrderCount,
+    COALESCE(ROUND(AVG(l.l_extendedprice), 2), 0) AS AverageExtendedPrice
+FROM part p
+LEFT JOIN RankedSuppliers s ON s.SupplierRank = 1 AND s.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_partkey = p.p_partkey
+)
+LEFT JOIN HighValueOrders hv ON hv.o_orderkey = (
+    SELECT o.o_orderkey
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_partkey = p.p_partkey
+    ORDER BY o.o_totalprice DESC
+    LIMIT 1
+)
+LEFT JOIN RegionalSuppliers hs ON hs.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = (SELECT DISTINCT n.n_name FROM nation n JOIN supplier s ON n.n_nationkey = s.s_nationkey WHERE s.s_suppkey = s.s_suppkey))
+GROUP BY p.p_name, s.s_name, hs.SupplierCount
+HAVING COUNT(hv.o_orderkey) > 0
+ORDER BY p.p_name;

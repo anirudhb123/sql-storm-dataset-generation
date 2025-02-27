@@ -1,0 +1,80 @@
+
+WITH RECURSIVE customer_rank AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_customer_sk) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), customer_stats AS (
+    SELECT 
+        ca.ca_state,
+        COUNT(DISTINCT cr.cr_returning_customer_sk) AS total_returns,
+        SUM(CASE WHEN cr.cr_return_quantity IS NULL THEN 0 ELSE cr.cr_return_quantity END) AS total_returned_quantity,
+        SUM(COALESCE(cr.cr_return_amount, 0)) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    JOIN 
+        customer_address ca ON cr.cr_returning_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_state
+), detailed_analysis AS (
+    SELECT 
+        cs.ca_state,
+        cs.total_returns,
+        cs.total_returned_quantity,
+        cs.total_return_amount,
+        d.d_year AS year,
+        CASE 
+            WHEN d.d_dow IN (1, 7) THEN 'Weekend'
+            ELSE 'Weekday'
+        END AS day_type,
+        LEAD(cs.total_return_amount) OVER (PARTITION BY cs.ca_state ORDER BY d.d_year) AS next_year_return_amount
+    FROM 
+        customer_stats cs
+    JOIN 
+        date_dim d ON d.d_date_sk = (
+            SELECT MAX(d_date_sk) 
+            FROM date_dim WHERE d_year = (
+                SELECT MAX(d_year) 
+                FROM date_dim
+            )
+        )
+), correlation_results AS (
+    SELECT 
+        da.ca_state,
+        da.year,
+        da.day_type,
+        da.total_returns,
+        da.total_returned_quantity,
+        da.total_return_amount,
+        CASE 
+            WHEN da.total_return_amount > COALESCE(da.next_year_return_amount, 0) THEN 'Increased'
+            WHEN da.total_return_amount < COALESCE(da.next_year_return_amount, 0) THEN 'Decreased'
+            ELSE 'Stable'
+        END AS return_trend
+    FROM 
+        detailed_analysis da
+)
+SELECT 
+    cr.c_customer_sk,
+    cr.c_first_name,
+    cr.c_last_name,
+    da.ca_state,
+    da.total_returns,
+    da.total_returned_quantity,
+    da.total_return_amount,
+    da.return_trend
+FROM 
+    customer_rank cr
+JOIN 
+    correlation_results da ON cr.c_customer_sk = (SELECT c_customer_sk FROM customer WHERE c_current_addr_sk = da.ca_state LIMIT 1)
+WHERE 
+    cr.rank <= 10
+ORDER BY 
+    da.total_return_amount DESC, 
+    cr.c_last_name ASC;

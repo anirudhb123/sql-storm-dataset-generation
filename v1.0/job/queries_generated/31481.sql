@@ -1,0 +1,70 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id,
+           mt.title,
+           mt.production_year,
+           1 AS level
+    FROM aka_title mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') -- Base case: Select top-level movies
+    
+    UNION ALL
+    
+    SELECT mt.id AS movie_id,
+           mt.title,
+           mt.production_year,
+           mh.level + 1
+    FROM aka_title mt
+    JOIN MovieHierarchy mh ON mt.episode_of_id = mh.movie_id -- Recursive join for episodes
+),
+ActorStats AS (
+    SELECT ci.person_id,
+           COUNT(DISTINCT ci.movie_id) AS total_movies,
+           AVG(COALESCE(m.production_year, 0)) AS avg_release_year
+    FROM cast_info ci
+    LEFT JOIN aka_title m ON ci.movie_id = m.id
+    GROUP BY ci.person_id
+),
+TopActors AS (
+    SELECT ak.id AS actor_id,
+           ak.name,
+           as.total_movies,
+           as.avg_release_year,
+           ROW_NUMBER() OVER (ORDER BY as.total_movies DESC) AS movie_rank
+    FROM aka_name ak
+    JOIN ActorStats as ON ak.person_id = as.person_id
+    WHERE as.total_movies > 5
+),
+KeywordStats AS (
+    SELECT mk.movie_id,
+           STRING_AGG(mk.keyword, ', ') AS keyword_list
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+MovieCompanyInfo AS (
+    SELECT mt.id AS movie_id,
+           ARRAY_AGG(DISTINCT cn.name) AS company_names
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN aka_title mt ON mc.movie_id = mt.id
+    GROUP BY mt.id
+)
+SELECT mh.movie_id,
+       mh.title,
+       mh.production_year,
+       ta.name AS top_actor,
+       ta.total_movies,
+       ta.avg_release_year,
+       ks.keyword_list,
+       mci.company_names,
+       COALESCE(SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END), 0) AS has_notes,
+       COALESCE(COUNT(DISTINCT c.id), 0) AS total_cast
+FROM MovieHierarchy mh
+LEFT JOIN complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN TopActors ta ON cc.subject_id = ta.actor_id
+LEFT JOIN KeywordStats ks ON mh.movie_id = ks.movie_id
+LEFT JOIN MovieCompanyInfo mci ON mh.movie_id = mci.movie_id
+LEFT JOIN cast_info c ON mh.movie_id = c.movie_id
+GROUP BY mh.movie_id, mh.title, mh.production_year, ta.name, ta.total_movies, ta.avg_release_year, ks.keyword_list, mci.company_names
+HAVING COUNT(DISTINCT c.id) > 1
+ORDER BY mh.production_year DESC, ta.total_movies DESC
+LIMIT 100;

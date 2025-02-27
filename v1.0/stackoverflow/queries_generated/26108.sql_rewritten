@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ARRAY_LENGTH(string_to_array(p.Tags, '><'), 1) AS TagCount,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score > 0 
+),
+PostAnalytics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.TagCount,
+        rp.OwnerDisplayName,
+        CASE 
+            WHEN rp.Rank <= 5 THEN 'Top 5'
+            ELSE 'Others'
+        END AS RankCategory
+    FROM 
+        RankedPosts rp
+),
+CommentStats AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MIN(c.CreationDate) AS FirstCommentDate,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+BadgeStats AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        AVG(b.Class) AS AvgBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+FinalMetrics AS (
+    SELECT 
+        pa.PostId,
+        pa.Title,
+        pa.CreationDate,
+        pa.Score,
+        pa.ViewCount,
+        pa.TagCount,
+        pa.OwnerDisplayName,
+        pa.RankCategory,
+        COALESCE(cs.CommentCount, 0) AS CommentCount,
+        COALESCE(cs.FirstCommentDate, 'No Comments') AS FirstCommentDate,
+        COALESCE(cs.LastCommentDate, 'No Comments') AS LastCommentDate,
+        COALESCE(bs.BadgeCount, 0) AS BadgeCount,
+        COALESCE(bs.AvgBadgeClass, 0) AS AvgBadgeClass
+    FROM 
+        PostAnalytics pa
+    LEFT JOIN 
+        CommentStats cs ON pa.PostId = cs.PostId
+    LEFT JOIN 
+        BadgeStats bs ON pa.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = bs.UserId)
+)
+SELECT 
+    *,
+    (Score * 1.0) / NULLIF(ViewCount, 0) AS EngagementRatio
+FROM 
+    FinalMetrics
+ORDER BY 
+    EngagementRatio DESC, CreationDate DESC
+LIMIT 50;

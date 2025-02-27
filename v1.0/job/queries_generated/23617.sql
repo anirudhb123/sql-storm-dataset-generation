@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_year, 
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+ActorsCount AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        SUM(CASE WHEN role_type.role = 'Lead' THEN 1 ELSE 0 END) as lead_count
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        role_type ON c.role_id = role_type.id
+    GROUP BY 
+        c.movie_id
+),
+TopMovies AS (
+    SELECT 
+        rm.*,
+        ac.actor_count,
+        ac.lead_count
+    FROM 
+        RankedMovies rm
+    JOIN 
+        ActorsCount ac ON rm.movie_id = ac.movie_id
+)
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    tm.rank_year,
+    tm.keyword_count,
+    tm.actor_count,
+    tm.lead_count,
+    CASE 
+        WHEN tm.lead_count > 0 THEN 'Featured'
+        ELSE 'Supporting'
+    END AS cast_type,
+    (SELECT 
+        AVG(SUBSTRING(m.note, '[0-9]+')::int) 
+     FROM 
+        movie_info m 
+     WHERE 
+        m.movie_id = tm.movie_id 
+        AND m.note IS NOT NULL) AS avg_note_score,
+    COALESCE((SELECT 
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) 
+     FROM 
+        movie_keyword mk 
+     JOIN 
+        keyword k ON mk.keyword_id = k.id 
+     WHERE 
+        mk.movie_id = tm.movie_id), 'No keywords') AS keywords_list
+FROM 
+    TopMovies tm
+WHERE 
+    (tm.rank_year <= 5 AND tm.keyword_count > 0)
+    OR (tm.production_year < 2000 AND tm.actor_count >= 5)
+ORDER BY 
+    tm.production_year DESC, 
+    tm.actor_count DESC;

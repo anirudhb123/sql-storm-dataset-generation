@@ -1,0 +1,79 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS Questions,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS Answers,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT CONCAT(PHT.Name, ': ', PH.Comment), '; ') AS EditComments
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6)
+    GROUP BY 
+        PH.PostId
+),
+FinalBenchmark AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        U.TotalPosts,
+        U.Questions,
+        U.Answers,
+        U.UpVotes,
+        U.DownVotes,
+        T.TagName,
+        T.PostCount,
+        T.TotalViews,
+        T.AverageScore,
+        PH.EditCount,
+        PH.LastEditDate,
+        PH.EditComments
+    FROM 
+        UserReputation U
+    LEFT JOIN 
+        TagStatistics T ON U.TotalPosts > 0
+    LEFT JOIN 
+        PostHistorySummary PH ON PH.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.UserId)
+    ORDER BY 
+        U.Reputation DESC, T.PostCount DESC
+)
+SELECT 
+    *
+FROM 
+    FinalBenchmark
+WHERE 
+    Questions > 0 AND (Answers > 0 OR UpVotes > DownVotes)
+LIMIT 100;

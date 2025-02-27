@@ -1,0 +1,61 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        1 AS Level,
+        COALESCE(NULLIF(u.DisplayName, ''), 'Anonymous') AS AuthorDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        Level + 1,
+        COALESCE(NULLIF(u.DisplayName, ''), 'Anonymous') AS AuthorDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+)
+
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Score,
+    r.ViewCount,
+    r.Level,
+    r.AuthorDisplayName,
+    r.CommentCount,
+    COALESCE(SUM(vt.VoteTypeId = 2) OVER (PARTITION BY r.PostId), 0) AS UpVotes,
+    COALESCE(SUM(vt.VoteTypeId = 3) OVER (PARTITION BY r.PostId), 0) AS DownVotes,
+    COUNT(ph.Id) AS HistoryCount,
+    STRING_AGG(pt.Name, ', ') AS PostHistoryTypes
+FROM 
+    RecursivePostCTE r
+LEFT JOIN 
+    Votes vt ON r.PostId = vt.PostId
+LEFT JOIN 
+    PostHistory ph ON r.PostId = ph.PostId
+LEFT JOIN 
+    PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+GROUP BY 
+    r.PostId, r.Title, r.Score, r.ViewCount, r.Level, r.AuthorDisplayName, r.CommentCount
+ORDER BY 
+    r.Score DESC
+LIMIT 100;
+
+This SQL query generates a recursive common table expression (CTE) to gather information on questions and their corresponding answers, including user data and vote counts, while also aggregating post history types for detailed benchmarking purposes. The results are sorted by the score of the questions and limit the output to the top 100 entries.

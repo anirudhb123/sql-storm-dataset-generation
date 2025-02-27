@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON mt.id = ml.linked_movie_id
+    WHERE 
+        mt.production_year >= 2000
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    mh.level,
+    STRING_AGG(DISTINCT p.name, ', ') AS actor_names,
+    COUNT(DISTINCT ccp.id) AS company_count,
+    AVG(mr.imdb_id) AS average_imdb_id,
+    SUM(CASE 
+        WHEN mi.info LIKE '%Oscar%' THEN 1 
+        ELSE 0 
+    END) AS oscar_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    cast_info c ON c.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name p ON p.person_id = c.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    company_name cn ON cn.id = mc.company_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id
+LEFT JOIN 
+    title mr ON mr.id = mh.movie_id
+LEFT JOIN 
+    (SELECT DISTINCT movie_id, COUNT(*) OVER (PARTITION BY movie_id) AS role_count
+     FROM cast_info) ccp ON ccp.movie_id = mh.movie_id
+WHERE 
+    mh.production_year IS NOT NULL
+AND 
+    mh.level <= 5
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year, mh.level
+ORDER BY 
+    mh.production_year DESC, mh.level;

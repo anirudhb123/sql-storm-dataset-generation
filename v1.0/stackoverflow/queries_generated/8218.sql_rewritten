@@ -1,0 +1,32 @@
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS TotalComments,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+    MAX(b.Date) AS LastBadgeDate,
+    MAX(p.LastActivityDate) AS LastActivityDate
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    PostLinks pl ON p.Id = pl.PostId
+LEFT JOIN 
+    Tags t ON t.Id = ANY(STRING_TO_ARRAY(p.Tags, ',')::int[])
+WHERE 
+    p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+GROUP BY 
+    p.Id, u.DisplayName
+ORDER BY 
+    TotalComments DESC, TotalUpVotes DESC, p.CreationDate DESC
+LIMIT 100;

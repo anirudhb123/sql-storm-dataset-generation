@@ -1,0 +1,48 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, l.l_quantity, l.l_extendedprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS line_num
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01'
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost, 
+           COUNT(ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+HighValueOrders AS (
+    SELECT oh.o_orderkey, SUM(oh.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM OrderHierarchy oh
+    JOIN lineitem l ON oh.o_orderkey = l.l_orderkey
+    GROUP BY oh.o_orderkey
+    HAVING SUM(oh.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+FinalResults AS (
+    SELECT 
+        hs.s_name,
+        COUNT(DISTINCT hvo.o_orderkey) AS high_value_order_count,
+        SUM(hvo.total_value) AS total_revenue,
+        RANK() OVER (ORDER BY SUM(hvo.total_value) DESC) AS revenue_rank
+    FROM SupplierStats ss
+    LEFT JOIN HighValueOrders hvo ON ss.part_count > 5
+    JOIN lineitem l ON hvo.o_orderkey = l.l_orderkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN supplier s ON l.l_suppkey = s.s_suppkey
+    GROUP BY hs.s_name
+)
+SELECT 
+    fr.s_name,
+    fr.high_value_order_count,
+    fr.total_revenue,
+    COALESCE(fr.revenue_rank, 0) AS revenue_rank,
+    CASE 
+        WHEN fr.total_revenue > 50000 THEN 'High Performer' 
+        WHEN fr.total_revenue IS NULL THEN 'No Sales' 
+        ELSE 'Regular Performer' 
+    END AS performance_category
+FROM FinalResults fr
+ORDER BY fr.total_revenue DESC
+LIMIT 10;

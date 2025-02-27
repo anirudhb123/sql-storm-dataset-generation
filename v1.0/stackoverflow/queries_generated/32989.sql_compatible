@@ -1,0 +1,59 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.OwnerUserId,
+        a.Score,
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts q ON a.ParentId = q.Id
+    WHERE 
+        q.PostTypeId = 1  
+)
+
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    COUNT(DISTINCT r.PostId) AS TotalPosts,
+    SUM(r.Score) AS TotalScore,
+    COALESCE(MAX(b.Date), DATE '1900-01-01') AS LastBadgeDate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,  
+    COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes   
+FROM 
+    Users u
+LEFT JOIN 
+    RecursiveCTE r ON u.Id = r.OwnerUserId
+LEFT JOIN 
+    Tags t ON r.Tags LIKE '%' || t.TagName || '%'
+LEFT JOIN 
+    Comments c ON r.PostId = c.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Votes v ON r.PostId = v.PostId
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(DISTINCT r.PostId) > 10  
+ORDER BY 
+    TotalScore DESC,
+    TotalPosts DESC;

@@ -1,0 +1,59 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= '1995-01-01'
+),
+HighValueLines AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+),
+SupplierParts AS (
+    SELECT ps.ps_partkey,
+           ps.ps_suppkey,
+           SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    WHERE ps.ps_supplycost > 500
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           p.p_retailprice,
+           s.s_name AS supplier_name,
+           COALESCE(sp.total_avail_qty, 0) AS total_avail_qty
+    FROM part p
+    LEFT JOIN SupplierParts sp ON p.p_partkey = sp.ps_partkey
+    JOIN supplier s ON sp.ps_suppkey = s.s_suppkey
+),
+FinalMetrics AS (
+    SELECT h.o_orderkey,
+           COUNT(DISTINCT h.o_orderkey) OVER () AS order_count,
+           AVG(p.p_retailprice) OVER () AS avg_part_price,
+           MAX(p.total_avail_qty) OVER () AS max_avail_qty,
+           SUM(hv.net_value) AS total_value
+    FROM RankedOrders h
+    LEFT JOIN HighValueLines hv ON h.o_orderkey = hv.l_orderkey
+    LEFT JOIN PartSupplierDetails p ON h.o_orderkey = p.p_partkey
+    GROUP BY h.o_orderkey
+)
+SELECT f.o_orderkey,
+       f.order_count,
+       f.avg_part_price,
+       f.max_avail_qty,
+       f.total_value
+FROM FinalMetrics f
+WHERE f.o_orderkey IS NOT NULL AND f.o_orderkey IN (
+    SELECT h.o_orderkey
+    FROM RankedOrders h
+    WHERE h.rn = 1
+) 
+ORDER BY f.total_value DESC
+LIMIT 10;

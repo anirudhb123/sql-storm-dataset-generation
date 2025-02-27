@@ -1,0 +1,62 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(v.BountyAmount), 0) DESC) AS Ranking
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 100 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        RANK() OVER (ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP) 
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalBounty,
+    p.Title AS PostTitle,
+    p.Score,
+    p.ViewCount,
+    p.CommentCount,
+    p.PostRank
+FROM 
+    UserActivity u
+LEFT JOIN 
+    PostStats p ON u.UserId = (
+        SELECT 
+            OwnerUserId 
+        FROM 
+            Posts 
+        WHERE 
+            ClosedDate IS NULL 
+        ORDER BY 
+            CreationDate DESC 
+        LIMIT 1
+    )
+WHERE 
+    u.Ranking <= 10 
+ORDER BY 
+    u.TotalBounty DESC;

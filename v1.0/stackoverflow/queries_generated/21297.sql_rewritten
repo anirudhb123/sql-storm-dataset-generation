@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        pp.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY pp.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+             PostId,
+             SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 WHEN vt.Name = 'DownMod' THEN -1 ELSE 0 END) AS Score
+         FROM 
+             Votes v
+         JOIN 
+             VoteTypes vt ON v.VoteTypeId = vt.Id
+         GROUP BY 
+             PostId) pp ON p.Id = pp.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COUNT(DISTINCT rp.PostId) AS PostCount,
+    SUM(COALESCE(rp.Score, 0)) AS TotalScore,
+    MAX(rp.PostRank) AS MaxPostRank,
+    STRING_AGG(DISTINCT CASE WHEN rp.PostRank <= 3 THEN rp.Title END, '; ') AS TopPosts,
+    ARRAY_AGG(DISTINCT (CASE 
+                            WHEN b.Class = 1 THEN 'Gold: ' || b.Name
+                            WHEN b.Class = 2 THEN 'Silver: ' || b.Name
+                            ELSE 'Bronze: ' || b.Name 
+                         END) ORDER BY b.Class) AS Badges
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    Badges b ON b.UserId = u.Id
+WHERE 
+    u.Reputation > 500
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(DISTINCT rp.PostId) > 2 AND MaxPostRank = 1
+ORDER BY 
+    TotalScore DESC
+OFFSET 0 ROWS
+FETCH NEXT 10 ROWS ONLY;

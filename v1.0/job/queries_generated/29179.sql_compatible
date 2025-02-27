@@ -1,0 +1,71 @@
+
+WITH movie_actors AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        r.role AS role_name
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        a.name IS NOT NULL
+        AND t.production_year BETWEEN 2000 AND 2020
+),
+movie_keywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+actor_movie_count AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT movie_title) AS movie_count
+    FROM 
+        movie_actors
+    GROUP BY 
+        actor_name
+),
+top_actors AS (
+    SELECT 
+        actor_name
+    FROM 
+        actor_movie_count
+    WHERE 
+        movie_count > 5
+),
+detailed_movies AS (
+    SELECT 
+        ma.actor_name,
+        ma.movie_title,
+        ma.production_year,
+        ma.role_name,
+        mk.keywords
+    FROM 
+        movie_actors ma
+    JOIN 
+        movie_keywords mk ON ma.movie_title = mk.movie_id
+    WHERE 
+        ma.actor_name IN (SELECT actor_name FROM top_actors)
+)
+SELECT 
+    actor_name,
+    movie_title,
+    production_year,
+    role_name,
+    keywords
+FROM 
+    detailed_movies
+ORDER BY 
+    production_year DESC, actor_name;

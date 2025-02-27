@@ -1,0 +1,43 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_custkey, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierAggregates AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supplycost,
+           COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerSpend AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent,
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_price,
+           COUNT(*) AS lineitem_count
+    FROM lineitem l
+    WHERE l.l_shipdate < DATE '1998-10-01'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    r.r_name AS region_name,
+    COUNT(DISTINCT oh.o_orderkey) AS order_count,
+    COALESCE(SUM(fli.total_lineitem_price), 0) AS total_order_value,
+    COALESCE(SUM(su.total_supplycost), 0) AS total_supply_cost,
+    AVG(cs.avg_order_value) AS avg_customer_order_value
+FROM customer c
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN OrderHierarchy oh ON c.c_custkey = oh.o_custkey
+LEFT JOIN FilteredLineItems fli ON oh.o_orderkey = fli.l_orderkey
+LEFT JOIN SupplierAggregates su ON fli.l_orderkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_partkey = fli.l_orderkey)
+GROUP BY c.c_custkey, c.c_name, r.r_name
+HAVING COALESCE(SUM(fli.total_lineitem_price), 0) > 1000 AND COUNT(DISTINCT oh.o_orderkey) > 5
+ORDER BY total_order_value DESC, c.c_name ASC;

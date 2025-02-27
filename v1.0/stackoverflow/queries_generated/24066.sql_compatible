@@ -1,0 +1,58 @@
+
+WITH RankedPosts AS (
+    SELECT p.*, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+           COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '5 years' AND p.Title IS NOT NULL
+),
+UserStats AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+           SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+           SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+           AVG(u.Reputation) AS AvgReputation
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+ClosedPostDetails AS (
+    SELECT ph.PostId,
+           STRING_AGG(DISTINCT crt.Name) AS CloseReasons,
+           COUNT(*) AS CloseActionCount
+    FROM PostHistory ph
+    JOIN CloseReasonTypes crt ON ph.Comment = crt.Id
+    WHERE ph.PostHistoryTypeId = 10 
+    GROUP BY ph.PostId
+),
+PostAggregates AS (
+    SELECT rp.Id AS PostId,
+           rp.Title,
+           u.DisplayName AS OwnerName,
+           rp.CreationDate,
+           rp.CommentCount,
+           rp.UpVotes,
+           rp.DownVotes,
+           cs.CloseActionCount,
+           cs.CloseReasons,
+           us.AvgReputation
+    FROM RankedPosts rp
+    JOIN Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN ClosedPostDetails cs ON rp.Id = cs.PostId
+    LEFT JOIN UserStats us ON u.Id = us.UserId
+)
+SELECT pa.*, 
+       COALESCE(pa.UpVotes, 0) AS EffectiveUpVotes,
+       CASE 
+           WHEN pa.CloseActionCount > 0 THEN 'Closed' 
+           ELSE 'Open' 
+       END AS PostStatus,
+       COALESCE(pa.CloseReasons, 'No Closure Reasons') AS DetailedClosureInfo
+FROM PostAggregates pa
+WHERE pa.CommentCount > 0
+ORDER BY pa.UpVotes DESC, pa.CreationDate DESC;

@@ -1,0 +1,126 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        mt.title,
+        m.production_year,
+        0 AS level
+    FROM
+        aka_title mt
+    JOIN
+        title m ON mt.movie_id = m.id
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        mk.linked_movie_id,
+        sub.title,
+        sub.production_year,
+        h.level + 1
+    FROM
+        MovieHierarchy h
+    JOIN
+        movie_link mk ON h.movie_id = mk.movie_id
+    JOIN
+        title sub ON mk.linked_movie_id = sub.id
+),
+CompanyInfo AS (
+    SELECT
+        c.id AS company_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(mc.movie_id) AS total_movies
+    FROM 
+        company_name c
+    JOIN 
+        movie_companies mc ON c.id = mc.company_id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY
+        c.id,
+        c.name,
+        ct.kind
+),
+CastRoles AS (
+    SELECT
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(distinct c.movie_id) AS number_of_movies
+    FROM
+        aka_name a
+    JOIN
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY
+        a.id, a.name
+    HAVING
+        COUNT(DISTINCT c.movie_id) >= 5
+),
+TitleKeyword AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM
+        title t
+    JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        t.id, t.title
+),
+TopMovies AS (
+    SELECT
+        movie_id,
+        title,
+        production_year,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY COUNT(DISTINCT mk.keyword_id) DESC) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        movie_id, title, production_year
+),
+FinalResults AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ci.company_name,
+        ci.company_type,
+        cr.actor_name,
+        cr.number_of_movies,
+        tk.keywords,
+        mh.level
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CompanyInfo ci ON ci.total_movies = (SELECT MAX(total_movies) FROM CompanyInfo)
+    LEFT JOIN 
+        CastRoles cr ON cr.number_of_movies = (SELECT MAX(number_of_movies) FROM CastRoles)
+    LEFT JOIN 
+        TitleKeyword tk ON tk.title = mh.title
+    WHERE
+        mh.level <= 2
+)
+
+SELECT 
+    FR.movie_id,
+    FR.title,
+    COALESCE(FR.production_year, 'Unknown Year') AS production_year,
+    FR.company_name || ' (' || FR.company_type || ')' AS company_details,
+    FR.actor_name AS leading_actor,
+    FR.number_of_movies AS actor_movies,
+    STRING_AGG(DISTINCT FR.keywords, ', ') AS movie_keywords,
+    CASE 
+        WHEN FR.level IS NOT NULL THEN 'Linked Level: ' || FR.level 
+        ELSE 'Standalone Movie'
+    END AS movie_hierarchy_level
+FROM 
+    FinalResults FR
+GROUP BY 
+    FR.movie_id, FR.title, FR.production_year, FR.company_name, FR.company_type, FR.actor_name, FR.number_of_movies, FR.level
+ORDER BY 
+    FR.production_year DESC, FR.title;

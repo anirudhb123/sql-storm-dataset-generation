@@ -1,0 +1,63 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        sr_customer_sk,
+        sr_return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY sr_customer_sk ORDER BY sr_returned_date_sk DESC) AS return_rank
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+), AggReturns AS (
+    SELECT 
+        rr.sr_customer_sk,
+        SUM(rr.sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT rr.sr_item_sk) AS unique_items_returned
+    FROM 
+        RankedReturns rr
+    WHERE 
+        rr.return_rank <= 5
+    GROUP BY 
+        rr.sr_customer_sk
+), GenderIncome AS (
+    SELECT 
+        cd.cd_gender,
+        ib.ib_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        (SELECT AVG(total_returns) FROM AggReturns ar WHERE ar.sr_customer_sk = c.c_customer_sk) AS avg_returns
+    FROM 
+        customer c
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+        LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        cd.cd_gender, ib.ib_income_band_sk
+), FinalResults AS (
+    SELECT 
+        g.gender,
+        g.income_band,
+        g.customer_count,
+        g.avg_returns,
+        CASE 
+            WHEN g.customer_count > 100 THEN 'High Customer Base'
+            WHEN g.customer_count BETWEEN 50 AND 100 THEN 'Moderate Customer Base'
+            ELSE 'Low Customer Base'
+        END AS customer_base_category
+    FROM 
+        GenderIncome g
+)
+SELECT 
+    fr.gender,
+    fr.income_band,
+    fr.customer_count,
+    fr.avg_returns,
+    fr.customer_base_category
+FROM 
+    FinalResults fr
+WHERE 
+    fr.avg_returns IS NOT NULL
+ORDER BY 
+    fr.customer_count DESC, fr.avg_returns DESC
+LIMIT 10;

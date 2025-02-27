@@ -1,0 +1,23 @@
+WITH MovieDetails AS (
+    SELECT t.title, t.production_year, a.name AS actor_name, k.keyword AS movie_keyword
+    FROM title t
+    JOIN aka_title at ON t.id = at.movie_id
+    JOIN cast_info ci ON at.id = ci.movie_id
+    JOIN aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+), CompanyInfo AS (
+    SELECT mc.movie_id, cn.name AS company_name, ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+), CompleteInfo AS (
+    SELECT md.title, md.production_year, md.actor_name, md.movie_keyword, ci.company_name, ci.company_type
+    FROM MovieDetails md
+    LEFT JOIN CompanyInfo ci ON md.title = ci.movie_id
+)
+SELECT title, production_year, actor_name, movie_keyword, company_name, company_type
+FROM CompleteInfo
+WHERE production_year >= 2000
+ORDER BY production_year DESC, title ASC
+LIMIT 100;

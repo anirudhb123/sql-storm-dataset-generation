@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000  -- latest movies from year 2000 onwards
+
+    UNION ALL
+
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, mh.level + 1
+    FROM aka_title mt
+    JOIN movie_link ml ON mt.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+PersonRanked AS (
+    SELECT
+        c.person_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_rank
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+),
+CompanyStats AS (
+    SELECT
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        COUNT(DISTINCT ct.kind) AS unique_company_types
+    FROM movie_companies mc
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id
+),
+MovieInfo AS (
+    SELECT
+        mi.movie_id,
+        STRING_AGG(DISTINCT mi.info, ', ') AS movie_infos,
+        MAX(mi.note) AS latest_note
+    FROM movie_info mi
+    GROUP BY mi.movie_id
+)
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    pr.actor_name,
+    pr.actor_rank,
+    cs.total_companies,
+    cs.unique_company_types,
+    mi.movie_infos,
+    mi.latest_note
+FROM MovieHierarchy mh
+LEFT JOIN PersonRanked pr ON mh.movie_id = pr.movie_id
+LEFT JOIN CompanyStats cs ON mh.movie_id = cs.movie_id
+LEFT JOIN MovieInfo mi ON mh.movie_id = mi.movie_id
+WHERE mh.level = 1  -- Get only top-level movies
+ORDER BY mh.production_year DESC, mh.title, pr.actor_rank
+LIMIT 50;  -- Limit to the top 50 results based on criteria
+

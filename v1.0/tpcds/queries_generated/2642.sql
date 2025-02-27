@@ -1,0 +1,73 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+DemographicStats AS (
+    SELECT 
+        cd_gender,
+        COUNT(DISTINCT c_customer_sk) AS total_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        SUM(cd_dep_count) AS total_dependents
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd_gender
+),
+ItemSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        AVG(ws_sales_price) AS avg_sales_price
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+HighReturnItems AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+    HAVING 
+        SUM(sr_return_quantity) > 100
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    cs.total_sold,
+    is.total_sold,
+    ds.return_count,
+    ds.total_returned_amount,
+    ds.total_dependents,
+    ds.total_customers,
+    ds.avg_purchase_estimate
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    CustomerReturns ds ON c.c_customer_sk = ds.sr_customer_sk
+JOIN 
+    ItemSales is ON is.ws_item_sk IN (SELECT hri.sr_item_sk FROM HighReturnItems hri)
+JOIN 
+    DemographicStats ds ON c.c_current_cdemo_sk = ds.cd_demo_sk
+WHERE 
+    ca.ca_country = 'USA'
+    AND (ds.return_count > 5 OR ds.total_dependents > 3)
+ORDER BY 
+    total_returned_amount DESC
+LIMIT 100;

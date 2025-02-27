@@ -1,0 +1,69 @@
+
+WITH RECURSIVE HighValueSuppliers AS (
+    SELECT s_suppkey, s_name, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, h.level + 1
+    FROM supplier s
+    JOIN HighValueSuppliers h ON s.s_acctbal > h.s_acctbal
+),
+SalesData AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_quantity DESC) AS rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY o.o_orderkey
+),
+RecentOrders AS (
+    SELECT 
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        CASE 
+            WHEN l.l_returnflag = 'R' THEN 'Returned'
+            ELSE 'Completed'
+        END AS order_status,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate > DATE '1998-10-01' - INTERVAL '30 DAY'
+    GROUP BY c.c_name, o.o_orderkey, o.o_orderdate, l.l_returnflag
+),
+SupplierPartData AS (
+    SELECT 
+        p.p_name, 
+        s.s_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS cost_rank 
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(sd.total_sales) AS total_sales,
+    AVG(sd.total_sales) AS average_sales,
+    COALESCE(MAX(sacd.total_amount), 0) AS max_recent_order_amount,
+    COUNT(DISTINCT p.p_partkey) AS part_count,
+    AVG(su.ps_supplycost) AS avg_supply_cost
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN RecentOrders sacd ON s.s_suppkey = sacd.o_orderkey
+LEFT JOIN SalesData sd ON s.s_suppkey = sd.o_orderkey
+LEFT JOIN SupplierPartData su ON s.s_suppkey = su.s_name 
+LEFT JOIN customer c ON r.r_regionkey = c.c_nationkey
+WHERE s.s_acctbal IS NOT NULL
+GROUP BY r.r_name
+ORDER BY total_sales DESC
+LIMIT 10;

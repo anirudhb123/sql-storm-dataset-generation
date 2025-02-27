@@ -1,0 +1,69 @@
+WITH RecursiveMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        p.gender,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON c.movie_id = t.id
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    JOIN 
+        name p ON p.id = a.person_id
+    WHERE 
+        t.production_year >= 2000
+        AND p.gender = 'F'
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        RecursiveMovies m
+    JOIN 
+        movie_keyword mk ON mk.movie_id = m.movie_id
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        m.movie_id
+),
+MovieInfoAgg AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.actor_name,
+        m.actor_order,
+        mk.keyword_count,
+        mk.keywords,
+        STRING_AGG(DISTINCT mi.info, '; ') AS info_details
+    FROM 
+        RecursiveMovies m
+    LEFT JOIN 
+        MovieKeywords mk ON mk.movie_id = m.movie_id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id, m.title, m.production_year, m.actor_name, m.actor_order
+)
+SELECT 
+    m.title,
+    m.production_year,
+    m.actor_name,
+    m.actor_order,
+    m.keyword_count,
+    m.keywords,
+    m.info_details
+FROM 
+    MovieInfoAgg m
+WHERE 
+    m.keyword_count > 0
+ORDER BY 
+    m.production_year DESC, 
+    m.keyword_count DESC, 
+    m.actor_order;

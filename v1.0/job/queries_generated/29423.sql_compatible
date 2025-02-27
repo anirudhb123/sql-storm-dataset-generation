@@ -1,0 +1,57 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        tt.title AS MovieTitle,
+        tt.production_year AS ProductionYear,
+        STRING_AGG(DISTINCT an.name ORDER BY an.name) AS Actors,
+        STRING_AGG(DISTINCT co.name ORDER BY co.name) AS Companies,
+        STRING_AGG(DISTINCT kw.keyword ORDER BY kw.keyword) AS Keywords,
+        ti.info AS MovieInfo
+    FROM 
+        title tt
+        JOIN cast_info ci ON ci.movie_id = tt.id
+        JOIN aka_name an ON an.person_id = ci.person_id
+        JOIN movie_companies mc ON mc.movie_id = tt.id
+        JOIN company_name co ON co.id = mc.company_id
+        LEFT JOIN movie_info ti ON ti.movie_id = tt.id
+        LEFT JOIN movie_keyword mk ON mk.movie_id = tt.id
+        LEFT JOIN keyword kw ON kw.id = mk.keyword_id
+    WHERE 
+        tt.production_year >= 2000
+        AND tt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY 
+        tt.title, tt.production_year, ti.info
+),
+ActorCount AS (
+    SELECT 
+        MovieTitle,
+        COUNT(DISTINCT Actors) AS ActorCount
+    FROM 
+        MovieDetails
+    GROUP BY 
+        MovieTitle
+),
+KeywordCount AS (
+    SELECT 
+        MovieTitle,
+        COUNT(DISTINCT Keywords) AS KeywordCount
+    FROM 
+        MovieDetails
+    GROUP BY 
+        MovieTitle
+)
+SELECT 
+    md.MovieTitle,
+    md.ProductionYear,
+    ac.ActorCount,
+    kc.KeywordCount,
+    md.Companies,
+    md.MovieInfo
+FROM 
+    MovieDetails md
+    JOIN ActorCount ac ON md.MovieTitle = ac.MovieTitle
+    JOIN KeywordCount kc ON md.MovieTitle = kc.MovieTitle
+ORDER BY 
+    md.ProductionYear DESC, 
+    ac.ActorCount DESC, 
+    md.MovieTitle;

@@ -1,0 +1,41 @@
+
+SELECT 
+    ak.name AS aka_name,
+    t.title AS movie_title,
+    p.name AS actor_name,
+    p.gender AS actor_gender,
+    COALESCE(mk.keyword, 'No Keywords') AS movie_keyword,
+    ai.info AS actor_info,
+    (SELECT COUNT(*) 
+     FROM complete_cast cc 
+     WHERE cc.movie_id = t.id) AS total_cast,
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = t.id) AS total_info
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    name p ON ak.person_id = p.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    person_info ai ON ak.person_id = ai.person_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND p.gender = 'F'
+    AND ak.name IS NOT NULL
+GROUP BY 
+    ak.name,
+    t.title,
+    p.name,
+    p.gender,
+    mk.keyword,
+    ai.info,
+    t.id
+ORDER BY 
+    t.production_year DESC, 
+    ak.name;

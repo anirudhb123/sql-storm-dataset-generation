@@ -1,0 +1,44 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws.order_number,
+        ws.item_sk,
+        SUM(ws.quantity) AS total_quantity,
+        SUM(ws.sales_price * ws.quantity) AS total_sales,
+        0 AS level
+    FROM web_sales ws
+    GROUP BY ws.order_number, ws.item_sk
+
+    UNION ALL
+
+    SELECT 
+        cs.order_number,
+        cs.item_sk,
+        SUM(cs.quantity) AS total_quantity,
+        SUM(cs.sales_price * cs.quantity) AS total_sales,
+        s.level + 1
+    FROM catalog_sales cs
+    JOIN sales_summary s ON cs.order_number = s.order_number AND cs.item_sk = s.item_sk
+    GROUP BY cs.order_number, cs.item_sk, s.level
+)
+
+SELECT 
+    c.customer_id,
+    ca.city,
+    SUM(s.total_quantity) AS total_items_sold,
+    SUM(s.total_sales) AS total_sales_amount,
+    MAX(CASE WHEN cd.marital_status = 'M' THEN cd.dep_count ELSE 0 END) AS max_marital_dependents,
+    MIN(CASE WHEN cd.education_status IS NULL THEN 1 ELSE 0 END) AS null_education_count,
+    COUNT(DISTINCT CASE WHEN s.level = 0 THEN s.order_number END) AS web_orders,
+    COUNT(DISTINCT CASE WHEN s.level = 1 THEN s.order_number END) AS catalog_orders
+FROM customer c
+JOIN customer_address ca ON c.current_addr_sk = ca.ca_address_sk
+JOIN customer_demographics cd ON c.current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN sales_summary s ON c.customer_sk = s.customer_sk
+WHERE 
+    (cd.purchase_estimate > 20000 OR cd.dep_count IS NULL) AND
+    (ca.state = 'NY' OR ca.state = 'CA')
+GROUP BY c.customer_id, ca.city
+HAVING SUM(s.total_sales) > 50000
+ORDER BY total_sales_amount DESC
+LIMIT 100;

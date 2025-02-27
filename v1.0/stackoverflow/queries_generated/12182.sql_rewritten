@@ -1,0 +1,20 @@
+SELECT 
+    pt.Name AS PostType,
+    COUNT(p.Id) AS PostCount,
+    AVG(p.Score) AS AverageScore,
+    AVG(p.ViewCount) AS AverageViewCount,
+    (SELECT 
+         u.DisplayName 
+     FROM 
+         Users u 
+     ORDER BY 
+         u.Reputation DESC 
+     LIMIT 5) AS TopUsersByReputation
+FROM 
+    Posts p 
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+GROUP BY 
+    pt.Name
+ORDER BY 
+    PostCount DESC;

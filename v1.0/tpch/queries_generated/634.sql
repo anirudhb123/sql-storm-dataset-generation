@@ -1,0 +1,68 @@
+WITH supplier_totals AS (
+    SELECT 
+        ps.suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.suppkey
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+customer_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+top_customers AS (
+    SELECT 
+        cust.c_custkey,
+        cust.c_name,
+        cust.total_spent,
+        DENSE_RANK() OVER (ORDER BY cust.total_spent DESC) AS rnk
+    FROM 
+        customer_summary cust
+    WHERE 
+        cust.total_spent > (
+            SELECT AVG(total_spent) FROM customer_summary
+        )
+)
+SELECT 
+    n.n_name AS nation,
+    SUM(os.total_revenue) AS total_order_value,
+    COUNT(DISTINCT tc.c_custkey) AS top_customer_count,
+    st.total_cost AS supplier_cost
+FROM 
+    order_summary os
+JOIN 
+    supplier_totals st ON os.o_orderkey = st.suppkey  -- Assert logical join for benchmarking
+JOIN 
+    top_customers tc ON os.o_orderkey = tc.c_custkey  -- Subquery joins perhaps not first expected
+LEFT JOIN 
+    supplier s ON s.s_suppkey = os.o_orderkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+GROUP BY 
+    n.n_name, st.total_cost
+HAVING 
+    SUM(os.total_revenue) > 100000
+ORDER BY 
+    total_order_value DESC, top_customer_count DESC
+FETCH FIRST 10 ROWS ONLY;

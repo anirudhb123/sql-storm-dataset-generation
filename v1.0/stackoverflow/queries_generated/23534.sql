@@ -1,0 +1,100 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        AVG(u.Reputation) OVER (PARTITION BY u.Location) AS AverageReputationByLocation,
+        MAX(b.Date) AS LastBadgeDate,
+        CASE WHEN EXISTS (
+            SELECT 1 
+            FROM Badges b 
+            WHERE u.Id = b.UserId AND b.Class = 1
+        ) THEN 'Gold'
+        WHEN EXISTS (
+            SELECT 1 
+            FROM Badges b 
+            WHERE u.Id = b.UserId AND b.Class = 2
+        ) THEN 'Silver'
+        ELSE 'Bronze' END AS BadgeLevel
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE 
+        u.CreationDate > (CURRENT_TIMESTAMP - INTERVAL '1 year') 
+        AND u.Reputation IS NOT NULL
+    GROUP BY u.Id
+),
+InterestingPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount,
+        (SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId = p.Id AND ph.PostHistoryTypeId = 10) AS CloseHistoryCount,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed' 
+            ELSE 'Open' 
+        END AS Status
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+        AND p.ViewCount > (
+            SELECT AVG(ViewCount) FROM Posts WHERE CreationDate >= '2023-01-01'
+        )
+    GROUP BY p.Id
+),
+UserStats AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.QuestionCount,
+        ua.AnswerCount,
+        ua.CommentCount,
+        ua.UpVotes,
+        ua.DownVotes,
+        up.Title AS MostUpvotedPost,
+        up.UpVoteCount
+    FROM UserActivity ua
+    LEFT JOIN LATERAL (
+        SELECT 
+            p.Title, 
+            SUM(v.VoteTypeId = 2) AS UpVoteCount
+        FROM Posts p
+        LEFT JOIN Votes v ON p.Id = v.PostId
+        WHERE p.OwnerUserId = ua.UserId
+        GROUP BY p.Title
+        ORDER BY UpVoteCount DESC
+        LIMIT 1
+    ) up ON true
+)
+SELECT 
+    us.UserId, 
+    us.DisplayName, 
+    us.QuestionCount, 
+    us.AnswerCount, 
+    us.CommentCount, 
+    us.UpVotes, 
+    us.DownVotes, 
+    ip.PostId, 
+    ip.Title AS PostTitle, 
+    ip.Status,
+    us.MostUpvotedPost,
+    us.UpVoteCount,
+    COALESCE(us.AverageReputationByLocation, 0) AS AvgReputationByLocation,
+    COALESCE(ip.CommentCount, 0) AS PostCommentsCount
+FROM UserStats us
+FULL OUTER JOIN InterestingPosts ip ON us.UserId = (
+    SELECT OwnerUserId FROM Posts WHERE Id = ip.PostId
+)
+WHERE us.QuestionCount + us.AnswerCount > 5
+ORDER BY us.QuestionCount DESC, ip.ViewCount DESC NULLS LAST;

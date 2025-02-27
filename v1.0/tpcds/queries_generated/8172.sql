@@ -1,0 +1,64 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        d.d_year,
+        d.d_month_seq,
+        c.cd_gender,
+        c.cd_marital_status,
+        c.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        i.i_category
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        d.d_year = 2023
+),
+aggregated_sales AS (
+    SELECT 
+        d_year,
+        d_month_seq,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        ca_city,
+        ca_state,
+        i_category,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        sales_data
+    GROUP BY 
+        d_year, d_month_seq, cd_gender, cd_marital_status, cd_education_status, ca_city, ca_state, i_category
+)
+SELECT 
+    d_year,
+    d_month_seq,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    ca_city,
+    ca_state,
+    i_category,
+    total_quantity,
+    total_profit,
+    RANK() OVER (PARTITION BY d_year, d_month_seq ORDER BY total_profit DESC) AS profit_rank
+FROM 
+    aggregated_sales
+ORDER BY 
+    d_year, d_month_seq, profit_rank
+LIMIT 100;

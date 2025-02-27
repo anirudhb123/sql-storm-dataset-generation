@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName
+    FROM 
+        RankedPosts
+),
+TagCounts AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS TotalPosts
+    FROM 
+        PopularTags
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(*) >= 10  -- Only tags with at least 10 questions
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Body,
+        rp.Tags,
+        rp.ViewCount,
+        rp.Score,
+        tt.TagName
+    FROM 
+        RankedPosts rp
+    INNER JOIN 
+        TagCounts tt
+    ON 
+        tt.TagName = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><'))
+    WHERE 
+        rp.TagRank <= 3  -- Select top 3 ranked posts for each tag
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT v.PostId) AS TotalVotes,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Body,
+    tp.Tags,
+    tp.ViewCount,
+    tp.Score,
+    ua.TotalVotes,
+    ua.TotalBadges,
+    ua.TotalComments
+FROM 
+    TopPosts tp
+JOIN 
+    UserActivity ua ON tp.PostId IN (
+        SELECT 
+            p.Id 
+        FROM 
+            Posts p 
+        WHERE 
+            p.OwnerUserId IS NOT NULL
+    )
+ORDER BY 
+    tp.Score DESC, ua.TotalVotes DESC;

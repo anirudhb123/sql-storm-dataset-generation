@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank,
+        COUNT(DISTINCT kc.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        rm.rank,
+        rm.keyword_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 5
+),
+PersonRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(CONCAT(an.name, ' as ', rt.role), ', ') AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    pr.total_cast,
+    COALESCE(pr.roles, 'No roles') AS roles,
+    tm.keyword_count,
+    CASE 
+        WHEN tm.keyword_count > 10 THEN 'Highly tagged'
+        WHEN tm.keyword_count BETWEEN 5 AND 10 THEN 'Moderately tagged'
+        ELSE 'Poorly tagged'
+    END AS tagging_level
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    PersonRoles pr ON tm.title_id = pr.movie_id
+ORDER BY 
+    tm.production_year DESC, 
+    tm.keyword_count DESC;

@@ -1,0 +1,50 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COUNT(ps.ps_supplycost) AS supply_count,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT ns.n_nationkey) AS nation_count,
+    SUM(co.total_order_value) AS total_revenue,
+    MAX(rs.s_acctbal) AS richest_supplier_balance,
+    MAX(rs.s_name) AS richest_supplier_name
+FROM 
+    region r
+JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+JOIN 
+    RankedSuppliers rs ON ns.n_nationkey = rs.s_nationkey AND rs.rank = 1
+JOIN 
+    CustomerOrders co ON co.c_custkey = (
+        SELECT TOP 1 c.c_custkey
+        FROM customer c
+        WHERE c.c_nationkey = ns.n_nationkey
+        ORDER BY c.c_acctbal DESC
+    )
+GROUP BY 
+    r.r_regionkey, r.r_name
+ORDER BY 
+    total_revenue DESC;

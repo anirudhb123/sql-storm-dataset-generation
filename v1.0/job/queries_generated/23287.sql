@@ -1,0 +1,85 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        COALESCE(mt.title, 'Unknown Title') AS title,
+        mt.production_year,
+        0 AS level,
+        mt.id AS original_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        COALESCE(at.title, 'Unknown Linked Title') AS title,
+        at.production_year,
+        mh.level + 1 AS level,
+        mh.original_movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+movie_cast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast_members
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+movie_info AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT it.info, ', ') AS movie_infos
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+),
+final_selection AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(mc.total_cast_members, 0) AS total_cast_members,
+        COALESCE(mi.movie_infos, 'No additional info') AS movie_infos,
+        ROW_NUMBER() OVER (PARTITION BY mh.original_movie_id ORDER BY mh.level) AS row_num
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_cast mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_info mi ON mh.movie_id = mi.movie_id
+)
+SELECT 
+    fs.movie_id,
+    fs.title,
+    fs.production_year,
+    fs.total_cast_members,
+    fs.movie_infos
+FROM 
+    final_selection fs
+WHERE 
+    fs.row_num = 1 
+    AND fs.total_cast_members > (SELECT AVG(total_cast_members) FROM movie_cast) 
+    AND fs.production_year > (
+        SELECT 
+            MAX(mh2.production_year) 
+        FROM 
+            movie_hierarchy mh2 
+        WHERE 
+            mh2.level = 1 
+            AND mh2.original_movie_id = fs.original_movie_id
+    )
+ORDER BY 
+    fs.production_year DESC 
+LIMIT 10;

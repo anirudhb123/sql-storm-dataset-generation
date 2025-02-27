@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Ranking,
+        COUNT(v.Id) AS VoteCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) 
+    WHERE
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY
+        p.Id, p.Title, p.Score, p.CreationDate, p.AnswerCount, p.PostTypeId
+),
+PopularPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.AnswerCount,
+        rp.VoteCount
+    FROM
+        RankedPosts rp
+    WHERE
+        rp.Ranking <= 5
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT c.Id) AS CommentsCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        MAX(u.LastAccessDate) AS LastActivity
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostsCount,
+        ua.CommentsCount,
+        ua.GoldBadges,
+        ua.SilverBadges,
+        ua.BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY (ua.PostsCount + ua.CommentsCount) DESC) AS UserRanking
+    FROM
+        UserActivity ua
+    WHERE
+        ua.PostsCount > 0
+)
+SELECT
+    pp.Title AS PopularPostTitle,
+    pp.Score AS PopularPostScore,
+    ua.DisplayName AS TopUserName,
+    ua.PostsCount AS NumberOfPosts,
+    ua.CommentsCount AS NumberOfComments,
+    ua.GoldBadges,
+    ua.SilverBadges,
+    ua.BronzeBadges
+FROM
+    PopularPosts pp
+JOIN
+    TopUsers ua ON ua.UserRanking <= 10 
+ORDER BY
+    pp.Score DESC, ua.PostsCount DESC;

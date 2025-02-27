@@ -1,0 +1,74 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        0 AS Level
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        u.Id,
+        u.Reputation,
+        Level + 1
+    FROM 
+        Users u
+    INNER JOIN 
+        UserReputationCTE ur ON ur.Reputation < u.Reputation AND ur.Level < 5
+)
+
+, RecentPostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.CreationDate AS HistoryDate,
+        ph.PostHistoryTypeId,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    COUNT(p.Id) AS PostCount,
+    SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+    AVG(p.ViewCount) AS AvgViews,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed,
+    MAX(ph.HistoryDate) AS LastHistoryDate,
+    SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReopenCount,
+    MIN(ph.HistoryDate) AS FirstEditDate,
+    CASE 
+        WHEN COUNT(DISTINCT t.Id) > 0 THEN 'Engaged'
+        ELSE 'Inactive'
+    END AS EngagementStatus,
+    COALESCE(SUM(b.Class), 0) AS TotalBadges
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+LEFT JOIN 
+    RecentPostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+WHERE 
+    u.LastAccessDate > CURRENT_TIMESTAMP - INTERVAL '1 year'
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+HAVING 
+    COUNT(p.Id) > 5 AND AVG(p.ViewCount) > 50
+ORDER BY 
+    u.Reputation DESC
+LIMIT 10;

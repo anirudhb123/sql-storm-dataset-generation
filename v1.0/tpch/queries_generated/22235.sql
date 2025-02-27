@@ -1,0 +1,80 @@
+WITH RankedSales AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+), 
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COUNT(ps.ps_partkey) AS part_count,
+        MAX(s.s_acctbal) OVER () AS max_acctbal
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name,
+        ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY n.n_name) AS n_rank
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_price
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    SUM(l.l_quantity) AS total_quantity,
+    MAX(l.l_extendedprice) AS highest_price,
+    COALESCE(si.part_count, 0) AS supplier_parts_count,
+    CASE 
+        WHEN COUNT(DISTINCT co.order_count) > 5 THEN 'Frequent Customer'
+        ELSE 'Occasional Customer'
+    END AS customer_type,
+    NULLIF(r.total_sales, 0) AS sales_total_or_null
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    SupplierInfo si ON p.p_partkey = si.part_count
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = (SELECT c.c_custkey FROM customer c ORDER BY RANDOM() LIMIT 1)
+LEFT JOIN 
+    RankedSales r ON l.l_orderkey = r.l_orderkey
+WHERE 
+    (p.p_size BETWEEN 1 AND 20 OR p.p_mfgr = 'Manufacturer#1') AND
+    l.l_shipdate >= '1995-01-01' AND 
+    l.l_shipinstruct IS NOT NULL
+GROUP BY 
+    p.p_partkey, p.p_name, si.part_count, r.total_sales
+HAVING 
+    (SUM(l.l_quantity) > 100 OR MAX(l.l_extendedprice) > 500) AND
+    (COALESCE(si.part_count, 0) < (SELECT COUNT(*) FROM supplier) / 50 OR si.max_acctbal IS NOT NULL)
+ORDER BY 
+    total_quantity DESC, highest_price ASC
+LIMIT 10 OFFSET 5;

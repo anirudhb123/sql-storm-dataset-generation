@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number,
+        ws_sales_price,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_paid DESC) AS rn
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sales_price IS NOT NULL 
+        AND ws_net_paid IS NOT NULL
+), 
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_buy_potential, 'UNKNOWN') AS buying_potential,
+        CASE 
+            WHEN cd.cd_dep_count IS NULL THEN 'NO DEPENDENTS' 
+            ELSE CONCAT(cd.cd_dep_count, ' DEPENDENTS') 
+        END AS dependents_info
+    FROM 
+        customer c 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk 
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+), 
+TopReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_amount) AS total_returned,
+        COUNT(*) AS return_count
+    FROM 
+        catalog_returns 
+    WHERE 
+        cr_return_quantity > 0
+    GROUP BY 
+        cr_returning_customer_sk
+)
+SELECT 
+    cd.c_customer_id,
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    ts.total_returned,
+    ts.return_count,
+    COALESCE(rs.ws_sales_price, 0) AS last_web_sales_price,
+    COALESCE(rs.ws_net_paid, 0) AS last_web_net_paid,
+    CASE 
+        WHEN cd.cd_marital_status = 'M' THEN 'Married'
+        ELSE 'Single'
+    END AS marital_status,
+    COUNT(DISTINCT ws_item_sk) AS distinct_items_purchased
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    TopReturns ts ON cd.c_customer_id = ts.cr_returning_customer_sk
+LEFT JOIN 
+    RankedSales rs ON cd.c_customer_id = rs.ws_order_number AND rs.rn = 1
+GROUP BY 
+    cd.c_customer_id, 
+    cd.c_first_name, 
+    cd.c_last_name, 
+    cd.cd_gender, 
+    ts.total_returned, 
+    ts.return_count, 
+    rs.ws_sales_price, 
+    rs.ws_net_paid, 
+    cd.cd_marital_status;

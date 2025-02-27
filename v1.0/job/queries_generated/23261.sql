@@ -1,0 +1,95 @@
+WITH RecursiveTitleCTE AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM t.production_year) ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        STRING_AGG(rt.role, ', ') AS roles,
+        COUNT(DISTINCT rt.role) AS role_count
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        role_type rt ON ci.person_role_id = rt.id
+    GROUP BY 
+        ci.person_id, ci.movie_id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id, 
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+NestedQuery AS (
+    SELECT 
+        ci.person_id,
+        COUNT(*) AS total_movies,
+        SUM(CASE WHEN (c.id IS NOT NULL OR c.note IS NOT NULL) AND ci.nr_order IS NOT NULL THEN 1 ELSE 0 END) AS successful_roles
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        complete_cast c ON ci.movie_id = c.movie_id
+    LEFT JOIN 
+        ActorRoles ar ON ci.person_id = ar.person_id AND ci.movie_id = ar.movie_id
+    GROUP BY 
+        ci.person_id
+)
+SELECT 
+    ak.name AS actor_name,
+    tt.title AS movie_title,
+    tt.production_year,
+    ar.roles,
+    mk.keywords,
+    cs.total_companies,
+    cs.company_names,
+    nq.total_movies,
+    nq.successful_roles,
+    ROUND((nq.successful_roles::FLOAT / nullif(nq.total_movies, 0)) * 100, 2) AS success_rate
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    RecursiveTitleCTE tt ON ci.movie_id = tt.title_id
+LEFT JOIN 
+    ActorRoles ar ON ci.person_id = ar.person_id AND ci.movie_id = ar.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON ci.movie_id = mk.movie_id
+LEFT JOIN 
+    CompanyStats cs ON ci.movie_id = cs.movie_id
+LEFT JOIN 
+    NestedQuery nq ON ak.person_id = nq.person_id
+WHERE 
+    ak.name IS NOT NULL AND
+    tt.title_rank = 1 AND
+    (ar.role_count IS NULL OR ar.role_count > 1 OR ar.roles LIKE '%Director%') AND
+    cs.total_companies IS NOT NULL
+ORDER BY 
+    success_rate DESC NULLS LAST, 
+    tt.production_year DESC, 
+    ak.name;

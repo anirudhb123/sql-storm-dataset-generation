@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY a.title) AS rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS cast_count
+    FROM 
+        aka_title t
+    JOIN 
+        title a ON t.id = a.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        rank,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        cast_count > 5
+)
+SELECT 
+    fm.movie_title,
+    fm.production_year,
+    fm.rank,
+    COALESCE(ca.name, 'Unknown') AS actor_name,
+    COALESCE(ct.kind, 'N/A') AS company_type,
+    COUNT(DISTINCT mc.company_id) AS company_count
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    complete_cast cc ON fm.movie_title = (SELECT title FROM aka_title WHERE id = cc.movie_id)
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    aka_name ca ON ci.person_id = ca.person_id
+LEFT JOIN 
+    movie_companies mc ON cc.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    fm.rank <= 10
+GROUP BY 
+    fm.movie_title, fm.production_year, fm.rank, ca.name, ct.kind
+ORDER BY 
+    fm.production_year DESC, fm.rank;

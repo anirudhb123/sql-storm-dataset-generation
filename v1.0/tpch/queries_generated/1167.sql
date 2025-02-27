@@ -1,0 +1,61 @@
+WITH SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_item_value
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' 
+        AND o.o_orderdate <= DATE '2022-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate
+)
+SELECT 
+    n.n_name AS nation_name,
+    r.region_name,
+    si.s_name AS supplier_name,
+    si.total_supply_cost,
+    os.total_line_item_value,
+    CASE 
+        WHEN os.total_line_item_value IS NULL THEN 'No Orders'
+        WHEN si.total_supply_cost > os.total_line_item_value THEN 'Higher Supply Cost'
+        ELSE 'Balanced'
+    END AS cost_comparison
+FROM 
+    SupplierInfo si
+INNER JOIN 
+    partsupp ps ON si.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    NationRegion n ON ps.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_size = (SELECT MAX(p2.p_size) FROM part p2))
+LEFT JOIN 
+    OrderSummary os ON si.s_suppkey = (SELECT l.l_suppkey FROM lineitem l WHERE l.l_orderkey = os.o_orderkey LIMIT 1)
+ORDER BY 
+    r.region_name, n.n_name, si.total_supply_cost DESC
+LIMIT 100;

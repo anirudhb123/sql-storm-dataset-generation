@@ -1,0 +1,69 @@
+WITH Movie_Details AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword AS movie_keyword,
+        COALESCE(ci.role_id, 'Unknown') AS role_id
+    FROM
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    WHERE
+        t.production_year IS NOT NULL
+),
+Aggregated_Stats AS (
+    SELECT 
+        md.title_id,
+        md.title,
+        COUNT(DISTINCT ci.id) AS actor_count,
+        STRING_AGG(DISTINCT md.movie_keyword, ', ') AS keywords,
+        FIRST_VALUE(md.production_year) OVER (PARTITION BY md.title_id ORDER BY md.production_year DESC) AS most_recent_year,
+        SUM(CASE 
+                WHEN ci.role_id IS NOT NULL THEN 1 
+                ELSE 0 
+            END) AS role_count
+    FROM 
+        Movie_Details md
+    LEFT JOIN 
+        cast_info ci ON md.title_id = ci.movie_id
+    GROUP BY 
+        md.title_id, md.title
+),
+Filtered_Results AS (
+    SELECT 
+        a.title AS movie_title,
+        a.actor_count,
+        a.keywords,
+        a.most_recent_year,
+        CASE 
+            WHEN a.actor_count < 3 THEN 'Less than 3 actors'
+            WHEN a.actor_count BETWEEN 3 AND 10 THEN 'Average cast'
+            WHEN a.actor_count > 10 THEN 'Star-studded cast'
+            ELSE 'Unknown cast size'
+        END AS cast_description,
+        COALESCE(a.role_count, 0) AS non_null_roles
+    FROM 
+        Aggregated_Stats a
+    WHERE 
+        a.most_recent_year > 2000 OR a.keywords IS NOT NULL
+)
+SELECT 
+    fr.movie_title,
+    fr.actor_count,
+    fr.keywords,
+    fr.most_recent_year,
+    fr.cast_description,
+    fr.non_null_roles
+FROM 
+    Filtered_Results fr
+ORDER BY 
+    fr.actor_count DESC,
+    fr.most_recent_year DESC
+LIMIT 50;

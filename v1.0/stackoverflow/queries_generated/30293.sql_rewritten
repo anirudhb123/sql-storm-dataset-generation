@@ -1,0 +1,62 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.ParentId, 
+        p.Score, 
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.ParentId, 
+        p.Score, 
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+)
+
+SELECT 
+    r.Id AS QuestionId, 
+    r.Title AS QuestionTitle,
+    COALESCE(uc.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(uc.DownVotes, 0) AS TotalDownVotes,
+    COUNT(DISTINCT ans.Id) AS TotalAnswers,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MAX(h.CreationDate) AS LastActivity,
+    SUM(CASE WHEN h.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS TotalCloseVotes,
+    COUNT(c.Id) AS TotalComments
+FROM 
+    RecursivePostHierarchy r
+LEFT JOIN 
+    Posts ans ON r.Id = ans.ParentId AND ans.PostTypeId = 2 
+LEFT JOIN 
+    Votes v ON r.Id = v.PostId AND v.VoteTypeId = 2 
+LEFT JOIN 
+    Votes dv ON r.Id = dv.PostId AND dv.VoteTypeId = 3 
+LEFT JOIN 
+    Users uc ON uc.Id = r.OwnerUserId
+LEFT JOIN 
+    PostHistory h ON r.Id = h.PostId
+LEFT JOIN 
+    PostLinks pl ON r.Id = pl.PostId 
+LEFT JOIN 
+    Tags t ON t.Id = pl.RelatedPostId 
+LEFT JOIN 
+    Comments c ON c.PostId = r.Id
+WHERE 
+    r.CreationDate >= '2022-01-01' 
+GROUP BY 
+    r.Id, r.Title, uc.UpVotes, uc.DownVotes
+ORDER BY 
+    TotalAnswers DESC, r.Score DESC;

@@ -1,0 +1,60 @@
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND 
+        ps.ps_availqty > 0
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    n.n_name AS nation_name,
+    ss.s_name AS supplier_name,
+    COALESCE(co.total_spent, 0) AS total_customer_spent,
+    ss.total_supply_cost,
+    (ss.total_supply_cost - COALESCE(co.total_spent, 0)) AS profitability
+FROM 
+    nation n
+LEFT JOIN 
+    SupplierSummary ss ON n.n_nationkey = ss.s_suppkey 
+LEFT JOIN 
+    CustomerOrders co ON ss.s_suppkey = co.c_custkey 
+WHERE 
+    ss.rn = 1
+ORDER BY 
+    profitability DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Total' AS nation_name,
+    'All Suppliers' AS supplier_name,
+    SUM(co.total_spent) AS total_customer_spent,
+    SUM(ss.total_supply_cost) AS total_supply_cost,
+    SUM(ss.total_supply_cost) - SUM(co.total_spent) AS profitability
+FROM 
+    SupplierSummary ss
+FULL OUTER JOIN 
+    CustomerOrders co ON ss.s_suppkey = co.c_custkey;

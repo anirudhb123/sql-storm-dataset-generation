@@ -1,0 +1,53 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws.sold_date_sk, 
+        ws.ship_date_sk, 
+        ws.item_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.ship_date_sk ORDER BY SUM(ws.ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.sold_date_sk, ws.ship_date_sk, ws.item_sk
+),
+top_sales AS (
+    SELECT 
+        sd.sold_date_sk, 
+        sd.item_sk, 
+        sd.total_sales
+    FROM 
+        sales_data sd
+    WHERE 
+        sd.sales_rank <= 10
+),
+customer_return_data AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.item_sk,
+        SUM(sr.return_amount) AS total_return_amount
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.returned_date_sk, sr.item_sk
+)
+SELECT 
+    d.d_date AS sales_date,
+    ISNULL(ts.item_sk, cr.item_sk) AS item_sk,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+    COALESCE(ts.total_sales, 0) - COALESCE(cr.total_return_amount, 0) AS net_sales
+FROM 
+    date_dim d
+LEFT JOIN 
+    top_sales ts ON d.d_date_sk = ts.sold_date_sk
+FULL OUTER JOIN 
+    customer_return_data cr ON d.d_date_sk = cr.returned_date_sk
+WHERE 
+    d.d_year = 2023
+ORDER BY 
+    sales_date DESC, 
+    net_sales DESC
+LIMIT 50;

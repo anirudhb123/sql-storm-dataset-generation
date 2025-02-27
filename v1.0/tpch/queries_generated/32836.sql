@@ -1,0 +1,49 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS depth
+    FROM nation
+    WHERE n_regionkey = (SELECT r_regionkey FROM region WHERE r_name = 'ASIA')
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.depth + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+total_sales AS (
+    SELECT 
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY n.n_name
+),
+ranked_sales AS (
+    SELECT 
+        n.n_name,
+        ts.total_revenue,
+        RANK() OVER (ORDER BY ts.total_revenue DESC) AS revenue_rank
+    FROM nation_hierarchy nh
+    JOIN total_sales ts ON nh.n_name = ts.n_name
+)
+SELECT 
+    nh.n_name,
+    COALESCE(rs.total_revenue, 0) AS total_revenue,
+    CASE 
+        WHEN rs.revenue_rank IS NULL THEN 'No Sales'
+        ELSE CAST(rs.revenue_rank AS VARCHAR)
+    END AS revenue_rank,
+    p.p_name,
+    p.p_retailprice,
+    CASE 
+        WHEN p.p_retailprice < 50 THEN 'Low' 
+        WHEN p.p_retailprice BETWEEN 50 AND 150 THEN 'Medium' 
+        ELSE 'High' 
+    END AS price_category
+FROM nation_hierarchy nh
+LEFT JOIN ranked_sales rs ON nh.n_name = rs.n_name
+LEFT JOIN partsupp ps ON nh.n_nationkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+WHERE p.p_size IS NOT NULL AND p.p_container LIKE '%BOX%'
+ORDER BY total_revenue DESC, nh.n_name;

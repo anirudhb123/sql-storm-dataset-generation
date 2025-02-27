@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC, p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+        AND p.Score > 0   -- Only posts with a score greater than zero
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Tags,
+        Score,
+        ViewCount,
+        CreationDate,
+        OwnerDisplayName
+    FROM 
+        RankedPosts
+    WHERE 
+        TagRank <= 5  -- Select top 5 posts per tag
+),
+PopularTags AS (
+    SELECT 
+        TRIM(BOTH '<>' FROM UNNEST(string_to_array(Tags, '> <'))) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        TopPosts
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(*) > 3  -- Popular tags with more than 3 posts
+),
+TagDetails AS (
+    SELECT 
+        t.TagName,
+        t.PostCount,
+        hd.Id AS ExcerptPostId,
+        hd.Count AS Count
+    FROM 
+        PopularTags t
+    JOIN 
+        Tags hd ON t.TagName = hd.TagName
+),
+FinalOutput AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.ViewCount,
+        tp.Score,
+        tt.TagName,
+        tt.PostCount,
+        tt.ExcerptPostId
+    FROM 
+        TopPosts tp
+    JOIN 
+        TagDetails tt ON tt.TagName = TRIM(BOTH '<>' FROM UNNEST(string_to_array(tp.Tags, '> <')))
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.ViewCount,
+    f.Score,
+    f.TagName,
+    f.PostCount,
+    t.Title AS ExcerptTitle
+FROM 
+    FinalOutput f
+JOIN 
+    Posts t ON f.ExcerptPostId = t.Id
+ORDER BY 
+    f.TagName, f.Score DESC;

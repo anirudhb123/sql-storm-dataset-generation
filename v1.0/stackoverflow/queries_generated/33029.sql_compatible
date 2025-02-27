@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > DATEADD(year, -1, '2024-10-01')
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+RecentPostActivities AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastActivityDate,
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS Comments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.OwnerName,
+        ts.TagName,
+        ts.PostCount,
+        ts.AverageScore,
+        rpa.HistoryCount,
+        rpa.LastActivityDate,
+        rpa.Comments
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        TagStatistics ts ON ts.PostCount > 10 
+    LEFT JOIN 
+        RecentPostActivities rpa ON rpa.PostId = rp.PostId
+    WHERE 
+        rp.Rank <= 5 
+        AND (rpa.LastActivityDate IS NULL OR rpa.LastActivityDate > DATEADD(day, -30, '2024-10-01'))
+)
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.Score,
+    fr.CreationDate,
+    fr.ViewCount,
+    fr.OwnerName,
+    COALESCE(fr.TagName, 'No Tags') AS TagName,
+    COALESCE(fr.PostCount, 0) AS PostCount,
+    COALESCE(fr.AverageScore, 0) AS AverageScore,
+    COALESCE(fr.HistoryCount, 0) AS HistoryCount,
+    COALESCE(fr.LastActivityDate, 'Never') AS LastActivityDate,
+    COALESCE(fr.Comments, 'No Comments') AS Comments
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.Score DESC, fr.CreationDate DESC;

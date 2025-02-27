@@ -1,0 +1,40 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+SupplierParts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_retailprice,
+           s.s_name AS supplier_name,
+           COALESCE(SUM(l.l_quantity), 0) AS total_quantity
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey AND l.l_shipdate >= '1997-01-01'
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_retailprice, s.s_name
+)
+SELECT
+    sh.level,
+    sh.s_name AS supplier_name,
+    SUM(sp.total_quantity) AS total_supplied_quantity,
+    AVG(sp.p_retailprice) AS avg_price_retail,
+    COUNT(DISTINCT ho.o_orderkey) AS high_value_order_count,
+    MAX(sp.p_retailprice) - MIN(sp.p_retailprice) AS price_variance
+FROM SupplierHierarchy sh
+LEFT JOIN SupplierParts sp ON sh.s_suppkey = sp.ps_suppkey
+LEFT JOIN HighValueOrders ho ON sp.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = ho.o_orderkey)
+GROUP BY sh.level, sh.s_name
+HAVING SUM(sp.total_quantity) > 0
+ORDER BY sh.level, total_supplied_quantity DESC;

@@ -1,0 +1,69 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM 
+        customer c
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_linenumber) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND l.l_shipdate > CURRENT_DATE - INTERVAL '1 YEAR'
+    GROUP BY 
+        o.o_orderkey
+),
+NationalMetrics AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(os.total_price) AS total_revenue,
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        OrderSummary os ON o.o_orderkey = os.o_orderkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    nm.n_name,
+    nm.order_count,
+    nm.total_revenue,
+    COUNT(DISTINCT rc.c_custkey) AS elite_customer_count,
+    SUM(CASE WHEN rc.rank <= 5 THEN rc.c_acctbal ELSE 0 END) AS top_account_balance
+FROM 
+    NationalMetrics nm
+LEFT JOIN 
+    RankedCustomers rc ON nm.n_nationkey = rc.c_nationkey
+GROUP BY 
+    nm.n_name, nm.order_count, nm.total_revenue
+HAVING 
+    SUM(CASE WHEN rc.rank <= 5 THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    total_revenue DESC, order_count DESC;

@@ -1,0 +1,58 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS average_supply_cost,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerRanking AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        RANK() OVER (ORDER BY c.c_acctbal DESC) AS rank_based_on_balance
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL
+),
+OrderAggregate AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT
+    cr.c_name,
+    ss.s_name,
+    avg_total_price.total_revenue,
+    COALESCE(ss.total_available_qty, 0) AS available_qty,
+    ss.average_supply_cost,
+    cr.rank_based_on_balance
+FROM 
+    CustomerRanking cr
+JOIN 
+    OrderAggregate avg_total_price ON cr.c_custkey = avg_total_price.o_custkey
+JOIN 
+    SupplierStats ss ON ss.order_count > 0 
+LEFT JOIN 
+    region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = cr.c_custkey))
+ORDER BY 
+    avg_total_price.total_revenue DESC,
+    available_qty DESC,
+    cr.rank_based_on_balance;

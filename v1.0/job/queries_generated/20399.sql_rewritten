@@ -1,0 +1,105 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy AS mh
+    JOIN 
+        movie_link AS ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        title AS mt ON ml.linked_movie_id = mt.id
+    WHERE 
+        mh.depth < 5 
+),
+
+CTE_CompanyRole AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        cr.kind AS company_role,
+        COUNT(DISTINCT ci.person_id) AS total_cast 
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        company_name AS c ON mc.company_id = c.id
+    JOIN 
+        company_type AS ct ON mc.company_type_id = ct.id
+    JOIN 
+        cast_info AS ci ON mc.movie_id = ci.movie_id
+    JOIN 
+        comp_cast_type AS cr ON ci.person_role_id = cr.id
+    GROUP BY 
+        mc.movie_id, c.name, cr.kind
+),
+
+CTE_TitleKeyword AS (
+    SELECT 
+        mt.id AS movie_id,
+        ARRAY_AGG(mk.keyword) AS keywords 
+    FROM 
+        aka_title AS mt
+    LEFT JOIN 
+        movie_keyword AS mk ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.id
+),
+
+FinalResult AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        coalesced_keywords.keywords,
+        cr.total_cast,
+        COALESCE(AVG(CASE WHEN ci.nr_order IS NULL THEN 0 ELSE ci.nr_order END), 0) AS avg_order 
+    FROM 
+        MovieHierarchy AS mh
+    LEFT JOIN 
+        CTE_TitleKeyword AS coalesced_keywords ON mh.movie_id = coalesced_keywords.movie_id
+    LEFT JOIN 
+        CTE_CompanyRole AS cr ON mh.movie_id = cr.movie_id
+    LEFT JOIN 
+        cast_info AS ci ON mh.movie_id = ci.movie_id 
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, cr.total_cast, coalesced_keywords.keywords
+)
+
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    fr.keywords,
+    fr.total_cast,
+    fr.avg_order,
+    ROW_NUMBER() OVER (PARTITION BY fr.production_year ORDER BY fr.total_cast DESC) AS rank,
+    CASE 
+        WHEN fr.total_cast IS NULL THEN 'No Cast' 
+        WHEN fr.total_cast = 0 THEN 'No Cast Information' 
+        ELSE 'Cast Present' 
+    END AS cast_status,
+    CONCAT('Movie: ', fr.title, ', Year: ', fr.production_year, 
+           ', Total Cast: ', COALESCE(fr.total_cast::text, '0'), 
+           ', Avg Order: ', fr.avg_order::text) AS summary_info
+FROM 
+    FinalResult AS fr
+WHERE 
+    fr.production_year >= 2000 
+    AND (fr.keywords IS NULL OR fr.keywords @> ARRAY['Action', 'Adventure']) 
+ORDER BY 
+    fr.production_year DESC, 
+    fr.total_cast DESC
+LIMIT 100;

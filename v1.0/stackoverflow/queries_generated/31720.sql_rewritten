@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate,
+        p.Score,
+        p.AcceptedAnswerId,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts AS p
+    JOIN Users AS U ON p.OwnerUserId = U.Id
+    WHERE p.PostTypeId = 1 
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Users AS U
+    LEFT JOIN Badges AS B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostLinksCTE AS (
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        lt.Name AS LinkType,
+        ROW_NUMBER() OVER (PARTITION BY pl.PostId ORDER BY pl.CreationDate DESC) AS LinkRank
+    FROM PostLinks AS pl
+    JOIN LinkTypes AS lt ON pl.LinkTypeId = lt.Id
+),
+ClosePostAggregation AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM PostHistory AS ph
+    WHERE ph.PostHistoryTypeId = 10 
+    GROUP BY ph.PostId
+)
+SELECT 
+    RP.Id AS PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.OwnerDisplayName,
+    U.BadgeCount,
+    COALESCE(L.LinkCount, 0) AS LinkCount,
+    CASE 
+        WHEN CPA.CloseCount IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM RankedPosts AS RP
+JOIN UserBadges U ON RP.OwnerUserId = U.UserId
+LEFT JOIN (
+    SELECT 
+        PostId,
+        COUNT(*) AS LinkCount
+    FROM PostLinksCTE
+    WHERE LinkRank = 1 
+    GROUP BY PostId
+) AS L ON RP.Id = L.PostId
+LEFT JOIN ClosePostAggregation CPA ON RP.Id = CPA.PostId
+WHERE 
+    (RP.Score > 50 OR RP.CreationDate > '2023-10-01')
+    AND (U.GoldBadges > 0 OR U.SilverBadges > 0 OR U.BronzeBadges > 0)
+ORDER BY RP.CreationDate DESC
+LIMIT 100;

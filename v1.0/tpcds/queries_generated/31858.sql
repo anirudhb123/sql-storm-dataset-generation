@@ -1,0 +1,66 @@
+
+WITH RECURSIVE RevenueCTE AS (
+    SELECT 
+        ws.web_site_sk, 
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rn
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.web_site_sk
+),
+TopSites AS (
+    SELECT 
+        web_site_sk, 
+        total_profit, 
+        total_orders
+    FROM RevenueCTE
+    WHERE rn <= 5
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_customer_profit,
+        COUNT(ws.ws_order_number) AS total_orders_count
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY c.c_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        CASE 
+            WHEN cd.cd_income_band_sk IS NULL THEN 'Unknown Income Band'
+            ELSE CONCAT('Income Band: ', cd.cd_income_band_sk)
+        END AS income_band_desc
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+FinalReport AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_customer_profit,
+        cs.total_orders_count,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.income_band_desc,
+        ts.total_profit AS web_site_profit
+    FROM CustomerSales cs
+    LEFT JOIN CustomerDemographics cd ON cs.c_customer_sk = cd.c_customer_sk
+    LEFT JOIN TopSites ts ON cs.total_customer_profit > ts.total_profit
+)
+SELECT 
+    customer_sk,
+    total_customer_profit,
+    total_orders_count,
+    cd_gender,
+    cd_marital_status,
+    income_band_desc,
+    COALESCE(web_site_profit, 'N/A') AS web_site_profit
+FROM FinalReport
+ORDER BY total_customer_profit DESC
+LIMIT 10;

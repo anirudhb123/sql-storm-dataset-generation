@@ -1,0 +1,90 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        1 AS Level
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) -- Only considering closure actions
+
+    UNION ALL
+
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        rp.Level + 1
+    FROM 
+        PostHistory ph
+    JOIN 
+        RecursivePostHistory rp ON ph.PostId = rp.PostId
+    WHERE 
+        ph.CreationDate < rp.CreationDate
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(u.BadgeCount, 0) AS UserBadgeCount,
+        COALESCE(u.GoldBadges, 0) AS UserGoldBadgeCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.UserId IS NOT NULL AND vt.Name = 'UpMod') AS UpVotes,
+        SUM(v.UserId IS NOT NULL AND vt.Name = 'DownMod') AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    LEFT JOIN 
+        UserBadges u ON p.OwnerUserId = u.UserId
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, u.BadgeCount, u.GoldBadges
+)
+SELECT 
+    ps.Title,
+    COUNT(DISTINCT rph.UserId) AS TotalUniqueVoters,
+    ps.CommentCount,
+    ps.UserBadgeCount,
+    ps.UserGoldBadgeCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    MAX(rph.CreationDate) AS LastHistoryActionDate,
+    CASE 
+        WHEN ps.UserBadgeCount > 5 THEN 'Highly Acclaimed'
+        WHEN ps.UserBadgeCount BETWEEN 1 AND 5 THEN 'Moderately Acclaimed'
+        ELSE 'Newbie'
+    END AS UserStatus
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    RecursivePostHistory rph ON ps.PostId = rph.PostId
+GROUP BY 
+    ps.Title, ps.CommentCount, ps.UserBadgeCount, ps.UserGoldBadgeCount, ps.UpVotes, ps.DownVotes
+ORDER BY 
+    ps.UpVotes DESC, TotalUniqueVoters DESC
+LIMIT 100;

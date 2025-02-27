@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'F' AND o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+),
+PartPriceInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+)
+SELECT 
+    ns.n_name AS nation,
+    COALESCE(SUM(ss.total_sales), 0) AS total_sales,
+    COALESCE(AVG(o.o_totalprice), 0) AS avg_order_value,
+    STRING_AGG(DISTINCT p.p_name) AS part_names,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    nation ns
+LEFT JOIN 
+    supplier s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierSales ss ON s.s_suppkey = ss.s_suppkey AND ss.sales_rank <= 5
+LEFT JOIN 
+    HighValueOrders o ON s.s_suppkey IN (SELECT DISTINCT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM PartPriceInfo p WHERE p.price_rank <= 3))
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    ns.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE 'Asia%')
+GROUP BY 
+    ns.n_name
+ORDER BY 
+    total_sales DESC;

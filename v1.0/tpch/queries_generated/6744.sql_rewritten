@@ -1,0 +1,26 @@
+WITH RegionSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name, r.r_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+PartSupplierCost AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+OrderLineDetails AS (
+    SELECT o.o_orderkey, l.l_partkey, l.l_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate <= '1997-12-31'
+    GROUP BY o.o_orderkey, l.l_partkey, l.l_suppkey
+)
+SELECT r.r_name, rs.s_name, p.p_name, SUM(ol.total_price) AS total_revenue, SUM(ps.total_supply_cost) AS total_supply_cost
+FROM RegionSuppliers rs
+JOIN PartSupplierCost ps ON rs.s_suppkey = ps.ps_suppkey
+JOIN OrderLineDetails ol ON ps.ps_partkey = ol.l_partkey AND rs.s_suppkey = ol.l_suppkey
+JOIN part p ON ol.l_partkey = p.p_partkey
+GROUP BY r.r_name, rs.s_name, p.p_name
+ORDER BY total_revenue DESC, total_supply_cost ASC
+LIMIT 10;

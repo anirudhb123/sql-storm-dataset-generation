@@ -1,0 +1,90 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.Id
+),
+TotalVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostMetrics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(tv.UpVotes, 0) AS UpVotes,
+        COALESCE(tv.DownVotes, 0) AS DownVotes,
+        ph.Level AS HierarchyLevel,
+        p.Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        TotalVotes tv ON p.Id = tv.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy ph ON p.Id = ph.Id
+),
+TaggedPosts AS (
+    SELECT 
+        pm.Id,
+        pm.Title,
+        pm.CreationDate,
+        pm.ViewCount,
+        pm.UpVotes,
+        pm.DownVotes,
+        pm.HierarchyLevel,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM 
+        PostMetrics pm
+    LEFT JOIN 
+        (SELECT 
+            p.Id,
+            unnest(string_to_array(p.Tags, '><')) AS TagName
+         FROM 
+            Posts p) t ON pm.Id = t.Id
+    GROUP BY 
+        pm.Id, pm.Title, pm.CreationDate, pm.ViewCount, pm.UpVotes, pm.DownVotes, pm.HierarchyLevel
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.HierarchyLevel,
+    tp.TagList,
+    CASE 
+        WHEN tp.UpVotes IS NULL THEN 'No Votes'
+        WHEN tp.UpVotes > tp.DownVotes THEN 'Positive'
+        WHEN tp.UpVotes < tp.DownVotes THEN 'Negative'
+        ELSE 'Neutral' 
+    END AS VoteStatus
+FROM 
+    TaggedPosts tp
+WHERE 
+    tp.ViewCount > (SELECT AVG(ViewCount) FROM Posts) 
+ORDER BY 
+    tp.HierarchyLevel, tp.ViewCount DESC;
+

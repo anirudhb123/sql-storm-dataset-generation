@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) as Rank,
+        r.r_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.r_name
+    FROM 
+        RankedSuppliers s
+    WHERE 
+        s.Rank <= 5
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        COUNT(o.o_orderkey) OVER (PARTITION BY c.c_custkey) as OrderCount
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+        AND o.o_orderstatus = 'O'
+),
+AggregatedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalLinePrice,
+        COUNT(l.l_partkey) AS TotalLineItems
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    t.s_name AS TopSupplier,
+    t.s_acctbal AS SupplierBalance,
+    c.c_name AS CustomerName,
+    o.o_orderkey AS OrderKey,
+    ol.TotalLinePrice AS TotalOrderLinePrice,
+    o.o_totalprice AS OrderTotalPrice,
+    c.OrderCount AS CustomerOrderCount
+FROM 
+    TopSuppliers t
+LEFT OUTER JOIN 
+    CustomerOrders c ON t.s_suppkey = c.c_custkey
+JOIN 
+    AggregatedLineItems ol ON c.o_orderkey = ol.l_orderkey
+WHERE 
+    t.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+ORDER BY 
+    TotalOrderLinePrice DESC, SupplierBalance DESC
+LIMIT 10;

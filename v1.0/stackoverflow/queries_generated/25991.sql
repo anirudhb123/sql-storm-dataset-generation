@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Considering only Questions
+        AND p.Score > 0 -- Only questions with positive scores
+),
+TagAnalytics AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(b.Class) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 -- Questions
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ra.PostId,
+    ra.Title,
+    ra.Body,
+    ra.Tags,
+    ra.CreationDate,
+    ra.ViewCount,
+    ra.Score,
+    ta.TagCount,
+    ua.QuestionCount,
+    ua.CommentCount,
+    ua.TotalBadges
+FROM 
+    RankedPosts ra
+JOIN 
+    TagAnalytics ta ON ta.TagName = ANY(string_to_array(substring(ra.Tags, 2, length(ra.Tags)-2), '><'))
+LEFT JOIN 
+    UserActivity ua ON ra.OwnerUserId = ua.UserId
+WHERE 
+    ra.Rank <= 5 -- Get top 5 posts per user
+ORDER BY 
+    ra.Score DESC, ra.CreationDate DESC;

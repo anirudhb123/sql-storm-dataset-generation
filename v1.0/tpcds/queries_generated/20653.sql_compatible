@@ -1,0 +1,65 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales_price,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (
+            SELECT d.d_date_sk 
+            FROM date_dim d 
+            WHERE d.d_year = 2023 AND d.d_moy BETWEEN 5 AND 7
+        )
+    GROUP BY 
+        ws.ws_item_sk
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(SUM(CASE WHEN cd.cd_gender = 'M' THEN 1 ELSE 0 END), 0) AS male_count,
+        COALESCE(SUM(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE 0 END), 0) AS female_count,
+        COUNT(DISTINCT c.c_email_address) AS unique_emails
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+top_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        SUM(sd.total_sales_price) AS total_spent,
+        COUNT(DISTINCT sd.ws_item_sk) AS total_orders,
+        RANK() OVER (ORDER BY SUM(sd.total_sales_price) DESC) AS spending_rank
+    FROM 
+        sales_data sd
+    JOIN 
+        customer c ON sd.ws_item_sk = c.c_customer_sk
+    GROUP BY 
+        cs.c_customer_sk
+    HAVING 
+        COUNT(sd.ws_item_sk) > 1
+)
+
+SELECT 
+    tc.c_customer_sk,
+    tc.total_spent,
+    tc.total_orders,
+    cs.unique_emails,
+    CASE 
+        WHEN cs.male_count > cs.female_count THEN 'More Males'
+        ELSE 'More Females'
+    END AS gender_dominance
+FROM 
+    top_customers tc
+LEFT JOIN 
+    customer_summary cs ON tc.c_customer_sk = cs.c_customer_sk
+WHERE 
+    tc.spending_rank <= 10 
+ORDER BY 
+    tc.total_spent DESC;

@@ -1,0 +1,78 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Start with Questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.Id
+), 
+
+UserScores AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(SUM(p.Score), 0) AS TotalPostScore,
+        COALESCE(SUM(c.Score), 0) AS TotalCommentScore,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+),
+
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        Reputation,
+        TotalPostScore,
+        TotalCommentScore,
+        TotalPosts,
+        TotalComments,
+        RANK() OVER (ORDER BY TotalPostScore DESC, TotalCommentScore DESC) AS UserRank
+    FROM 
+        UserScores
+    WHERE 
+        TotalPosts > 0
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    tp.TotalPosts,
+    tp.TotalPostScore,
+    tp.TotalCommentScore,
+    CASE WHEN tp.TotalComments > 0 THEN ROUND(tp.TotalCommentScore::numeric / tp.TotalComments, 2) ELSE 0 END AS AvgCommentScore,
+    ph.Title AS TopParentPostTitle,
+    ph.Level AS PostHierarchyLevel
+FROM 
+    TopUsers tp
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = tp.UserId AND p.PostTypeId = 1  -- Questions
+LEFT JOIN 
+    RecursivePostHierarchy ph ON p.Id = ph.Id
+WHERE 
+    tp.UserRank <= 10 -- Limit to top 10 users
+ORDER BY 
+    tp.Reputation DESC, tp.TotalPostScore DESC;

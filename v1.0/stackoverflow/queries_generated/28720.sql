@@ -1,0 +1,46 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.Views,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank,
+        STATS.AVG_VIEWS,
+        STATS.AVG_SCORE
+    FROM 
+        Posts p
+    JOIN (
+        SELECT 
+            Tags,
+            AVG(ViewCount) AS AVG_VIEWS,
+            AVG(Score) AS AVG_SCORE
+        FROM 
+            Posts
+        GROUP BY 
+            Tags
+    ) AS STATS ON p.Tags = STATS.Tags
+)
+SELECT 
+    rp.Title,
+    rp.Body,
+    rp.Tags,
+    rp.Views,
+    rp.Score,
+    rp.AnswerCount,
+    CASE 
+        WHEN rp.Views > rp.AVG_VIEWS THEN 'Above Average Views'
+        ELSE 'Below Average Views'
+    END AS ViewComparison,
+    CASE 
+        WHEN rp.Score > rp.AVG_SCORE THEN 'Above Average Score'
+        ELSE 'Below Average Score'
+    END AS ScoreComparison
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.TagRank <= 3
+ORDER BY 
+    rp.Tags, rp.Score DESC;

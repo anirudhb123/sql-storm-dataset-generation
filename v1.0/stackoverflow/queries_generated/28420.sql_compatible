@@ -1,0 +1,53 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC, p.CreationDate DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score > 0 
+),
+PopularTags AS (
+    SELECT 
+        Tags,
+        COUNT(*) AS TotalQuestions,
+        SUM(ViewCount) AS TotalViews
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        Tags
+    HAVING 
+        COUNT(*) > 5 
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.OwnerDisplayName,
+    pt.Tags AS PopularTags
+FROM 
+    RankedPosts rp
+JOIN 
+    PopularTags pt ON rp.Tags = pt.Tags
+WHERE 
+    rp.TagRank <= 5 
+ORDER BY 
+    pt.TotalViews DESC, rp.ViewCount DESC;

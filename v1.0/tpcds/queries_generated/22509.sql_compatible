@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS SalesRank,
+        COALESCE(NULLIF(ws.ws_sales_price, 0), 1) AS AdjustedPrice
+    FROM
+        web_sales ws
+),
+FilteredSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        COUNT(*) AS TotalOrders,
+        SUM(rs.AdjustedPrice) AS TotalSales,
+        AVG(rs.AdjustedPrice) AS AverageSalesPrice
+    FROM 
+        RankedSales rs
+    WHERE
+        rs.SalesRank <= 10
+    GROUP BY 
+        rs.ws_item_sk
+)
+SELECT 
+    ia.i_item_id,
+    fs.TotalOrders,
+    fs.TotalSales,
+    fs.AverageSalesPrice,
+    CASE 
+        WHEN fs.TotalSales IS NULL THEN 'No Sales'
+        WHEN fs.TotalSales < 100 THEN 'Low Sales'
+        WHEN fs.TotalSales < 1000 THEN 'Moderate Sales'
+        ELSE 'High Sales'
+    END AS SalesCategory
+FROM 
+    item ia
+LEFT JOIN 
+    FilteredSales fs ON ia.i_item_sk = fs.ws_item_sk
+LEFT JOIN 
+    customer_demographics cd ON fs.TotalOrders > 5 AND cd.cd_dep_count IS NOT NULL
+WHERE 
+    fs.TotalSales IS NOT NULL OR fs.TotalOrders IS NULL
+ORDER BY 
+    fs.TotalSales DESC 
+FETCH FIRST 50 ROWS ONLY
+UNION ALL
+SELECT 
+    NULL AS i_item_id,
+    COUNT(*) AS TotalOrders,
+    SUM(sr.sr_returned_quantity) AS TotalReturns,
+    AVG(sr.sr_returned_quantity) AS AverageReturnQuantity,
+    'Returns Summary' AS SalesCategory
+FROM 
+    store_returns sr
+WHERE 
+    sr.returned_date_sk = (
+        SELECT MAX(d_date_sk) 
+        FROM date_dim 
+        WHERE d_date = DATE '2002-10-01'
+    )
+GROUP BY 
+    sr.return_time_sk
+HAVING 
+    COUNT(sr.return_time_sk) > 5;

@@ -1,0 +1,36 @@
+
+WITH Supplier_Price AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost) AS price_rank
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+),
+Top_Suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, np.n_name, np.n_nationkey,
+           COALESCE(SUM(CASE WHEN l.l_orderkey IS NOT NULL THEN l.l_extendedprice ELSE 0 END), 0) AS total_sales
+    FROM supplier s
+    JOIN (SELECT ps.ps_partkey, ps.ps_suppkey
+          FROM Supplier_Price sp
+          WHERE sp.price_rank = 1) AS sp ON s.s_suppkey = sp.ps_suppkey
+    LEFT JOIN lineitem l ON sp.ps_partkey = l.l_partkey
+    JOIN nation np ON s.s_nationkey = np.n_nationkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal, np.n_name, np.n_nationkey
+),
+Overall_Aggregate AS (
+    SELECT COUNT(DISTINCT c.c_custkey) AS customer_count, 
+           AVG(o.o_totalprice) AS avg_order_value,
+           SUM(o.o_totalprice) AS total_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+)
+SELECT ts.n_name AS supplier_nation, 
+       ts.s_name AS supplier_name, 
+       ts.total_sales AS total_sales, 
+       oa.customer_count, 
+       oa.avg_order_value,
+       oa.total_revenue
+FROM Top_Suppliers ts
+CROSS JOIN Overall_Aggregate oa
+WHERE ts.total_sales > 1000000
+ORDER BY ts.total_sales DESC, ts.s_name ASC;

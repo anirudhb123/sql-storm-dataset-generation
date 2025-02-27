@@ -1,0 +1,54 @@
+
+WITH RankedOrders AS (
+    SELECT o_orderkey,
+           o_custkey,
+           o_totalprice,
+           o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS rn
+    FROM orders
+), 
+CustomerSums AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           SUM(o.o_totalprice) AS total_orders
+    FROM customer c
+    LEFT JOIN RankedOrders o ON c.c_custkey = o.o_custkey
+    WHERE o.rn = 1 OR o.rn IS NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierSales AS (
+    SELECT ps.ps_partkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+      AND l.l_returnflag = 'N'
+    GROUP BY ps.ps_partkey
+), 
+SupplierDetails AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal,
+           SUM(ps.ps_availqty) AS total_available
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+)
+SELECT cs.c_name,
+       cs.total_orders,
+       p.p_name,
+       ps.total_revenue,
+       s.s_name AS supplier_name,
+       sd.total_available,
+       CASE 
+           WHEN cs.total_orders IS NULL THEN 'No Orders'
+           ELSE 'Orders Present'
+       END AS order_status
+FROM CustomerSums cs
+FULL OUTER JOIN PartSupplierSales ps ON cs.c_custkey = ps.ps_partkey
+FULL OUTER JOIN SupplierDetails sd ON ps.ps_partkey = sd.s_suppkey
+LEFT JOIN part p ON p.p_partkey = ps.ps_partkey
+WHERE (ps.total_revenue > 10000 OR sd.total_available > 50)
+  AND (cs.total_orders IS NOT NULL OR ps.total_revenue IS NOT NULL)
+ORDER BY cs.total_orders DESC NULLS LAST, ps.total_revenue DESC;

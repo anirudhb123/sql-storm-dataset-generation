@@ -1,0 +1,50 @@
+
+WITH SupplierAgg AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+LineItemDetails AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+RankedSuppliers AS (
+    SELECT s.s_name, COALESCE(sa.total_supply_cost, 0) AS total_supply_cost,
+           RANK() OVER (ORDER BY COALESCE(sa.total_supply_cost, 0) DESC) AS rank
+    FROM supplier s
+    LEFT JOIN SupplierAgg sa ON s.s_suppkey = sa.s_suppkey
+),
+CombinedData AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, COALESCE(co.total_orders, 0) AS total_orders,
+           COALESCE(co.total_spent, 0) AS total_spent, 
+           p.p_name, p.p_size, p.p_retailprice, n.n_name
+    FROM customer c
+    LEFT JOIN CustomerOrders co ON c.c_custkey = co.c_custkey
+    LEFT JOIN lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+    LEFT JOIN part p ON l.l_partkey = p.p_partkey
+    LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+FinalResult AS (
+    SELECT cd.*, rs.s_name, rs.rank
+    FROM CombinedData cd
+    LEFT JOIN RankedSuppliers rs ON cd.c_custkey = rs.s_suppkey  
+)
+SELECT *
+FROM FinalResult
+WHERE total_spent > (SELECT AVG(total_spent) FROM CombinedData) 
+  AND rank <= 10
+ORDER BY total_spent DESC, total_orders DESC;

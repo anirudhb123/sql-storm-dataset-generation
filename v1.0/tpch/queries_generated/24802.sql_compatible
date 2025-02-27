@@ -1,0 +1,63 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= CURRENT_DATE - INTERVAL '6 months'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL OR s.s_acctbal < 0 THEN 'Negative/Null' 
+            ELSE 'Valid' 
+        END AS acct_status
+    FROM supplier s
+),
+PartAvailability AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_avail
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+StatusCounts AS (
+    SELECT 
+        o.o_orderstatus,
+        COUNT(*) AS status_count
+    FROM orders o
+    GROUP BY o.o_orderstatus
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    pa.total_avail,
+    sa.acct_status,
+    os.o_orderkey,
+    os.o_orderdate,
+    os.o_totalprice,
+    CASE 
+        WHEN os.o_orderstatus = 'O' AND CURRENT_DATE - os.o_orderdate < INTERVAL '30 days' THEN 'Recent Order'
+        ELSE 'Older Order'
+    END AS order_age_category,
+    ns.status_count
+FROM part p
+LEFT JOIN PartAvailability pa ON p.p_partkey = pa.p_partkey
+JOIN SupplierDetails sa ON pa.total_avail > 0
+LEFT JOIN RankedOrders os ON os.rn = 1
+LEFT JOIN StatusCounts ns ON os.o_orderstatus = ns.o_orderstatus
+WHERE 
+    pa.total_avail IS NOT NULL 
+    AND (sa.s_acctbal IS NOT NULL AND sa.s_acctbal > 1000 OR sa.acct_status = 'Negative/Null')
+    AND (os.o_orderdate IS NULL OR os.o_orderdate >= CURRENT_DATE - INTERVAL '1 year')
+ORDER BY 
+    p.p_partkey, 
+    os.o_orderdate DESC NULLS LAST;

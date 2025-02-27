@@ -1,0 +1,31 @@
+SELECT 
+    SUBSTRING_INDEX(ps_comment, ' ', 5) AS sample_comment,
+    COUNT(DISTINCT s.s_name) AS unique_suppliers,
+    MAX(l_discount) AS max_discount,
+    AVG(l_extendedprice) AS avg_extended_price,
+    CONCAT('Total Price: $', FORMAT(SUM(o.o_totalprice), 2)) AS total_price,
+    r.r_name AS region_name
+FROM 
+    partsupp ps 
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    AND (o.o_orderstatus = 'F' OR o.o_orderstatus = 'P')
+    AND LENGTH(s.s_comment) > 10
+GROUP BY 
+    r.r_name
+HAVING 
+    unique_suppliers > 5 
+ORDER BY 
+    total_price DESC;

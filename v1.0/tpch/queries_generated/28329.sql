@@ -1,0 +1,43 @@
+WITH RankedParts AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_mfgr, 
+           p.p_brand, 
+           p.p_type, 
+           p.p_size, 
+           p.p_container, 
+           p.p_retailprice, 
+           p.p_comment,
+           RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank_order
+    FROM part p
+), 
+CustomerOrderCounts AS (
+    SELECT c.c_custkey, 
+           COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c 
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+), 
+DetailedSuppliers AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_nationkey, 
+           LENGTH(s.s_comment) AS comment_length,
+           SUBSTR(s.s_comment, 1, 30) AS short_comment
+    FROM supplier s 
+    WHERE s.s_acctbal > 1000
+)
+SELECT rp.p_name, 
+       rp.p_brand, 
+       rp.p_retailprice, 
+       coc.order_count, 
+       coc.total_spent, 
+       ds.s_name, 
+       ds.short_comment
+FROM RankedParts rp
+JOIN partsupp ps ON rp.p_partkey = ps.ps_partkey
+JOIN supplier ds ON ps.ps_suppkey = ds.s_suppkey
+JOIN CustomerOrderCounts coc ON coc.order_count > 0
+WHERE rp.rank_order <= 10 AND ds.comment_length > 50
+ORDER BY rp.p_retailprice DESC, coc.total_spent DESC;

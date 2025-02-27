@@ -1,0 +1,83 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+),
+SuppliersInNations AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_name LIKE 'A%'
+),
+PartSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        COUNT(ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+RecentOrders AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2023-01-01' AND CURRENT_DATE
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(rq.total_revenue, 0) AS total_revenue,
+    ps.total_available_quantity,
+    ns.n_name AS supplier_nation
+FROM 
+    part p
+LEFT JOIN 
+    PartSuppliers ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RecentOrders rq ON rq.l_orderkey = (
+        SELECT 
+            o.o_orderkey 
+        FROM 
+            RankedOrders ro 
+        WHERE 
+            ro.order_rank = 1 AND ro.o_orderkey = rq.l_orderkey
+    )
+LEFT JOIN 
+    SuppliersInNations ns ON ns.s_suppkey IN (
+        SELECT 
+            ps.ps_suppkey 
+        FROM 
+            partsupp ps 
+        WHERE 
+            ps.ps_partkey = p.p_partkey
+    )
+WHERE 
+    p.p_retailprice > (
+        SELECT 
+            AVG(p2.p_retailprice) 
+        FROM 
+            part p2 
+        WHERE 
+            p2.p_size IS NOT NULL
+    )
+ORDER BY 
+    total_revenue DESC, 
+    p.p_partkey;

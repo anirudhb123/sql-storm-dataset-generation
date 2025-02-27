@@ -1,0 +1,55 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS depth
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.depth + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+), 
+supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+           SUM(ps.ps_supplycost) AS total_supplycost,
+           AVG(s.s_acctbal) AS avg_acctbal
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_within_nation
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(l.l_linenumber) AS total_lines,
+           MAX(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_flag
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(o.o_totalprice) AS total_order_value,
+           STRING_AGG(DISTINCT c.c_name, ', ') AS customer_names,
+           MAX(ls.total_revenue) AS max_revenue
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN lineitem_summary ls ON o.o_orderkey = ls.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT n.n_name AS nation_name, 
+       COUNT(DISTINCT s.s_suppkey) AS supplier_count, 
+       SUM(ss.total_supplycost) AS total_supply_cost,
+       AVG(cs.total_spent) AS avg_spent_by_customer,
+       SUM(os.total_order_value) AS total_order_value
+FROM nation_hierarchy n
+LEFT JOIN supplier_summary ss ON ss.total_parts > 5
+LEFT JOIN customer_orders cs ON cs.rank_within_nation <= 3
+LEFT JOIN order_summary os ON os.total_order_value > 1000
+LEFT JOIN supplier s ON ss.s_suppkey = s.s_suppkey
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT s.s_suppkey) > 0 
+ORDER BY total_supply_cost DESC, avg_spent_by_customer DESC;

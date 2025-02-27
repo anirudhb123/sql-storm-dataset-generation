@@ -1,0 +1,55 @@
+WITH RankedSales AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+
+SupplierAvg AS (
+    SELECT 
+        ps.ps_partkey, 
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+)
+
+SELECT 
+    r.r_name,
+    ns.n_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COALESCE(SUM(rs.total_sales), 0) AS total_revenue,
+    COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+    AVG(savg.avg_acctbal) AS avg_supplier_acctbal
+FROM 
+    region r
+JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = ns.n_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey AND o.o_orderstatus = 'O'
+LEFT JOIN 
+    RankedSales rs ON o.o_orderkey = rs.p_partkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey = rs.p_partkey
+LEFT JOIN 
+    SupplierAvg savg ON savg.ps_partkey = ps.ps_partkey
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name, ns.n_name
+HAVING 
+    total_orders > 0 AND total_revenue > 1000
+ORDER BY 
+    total_revenue DESC, ns.n_name ASC;

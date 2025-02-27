@@ -1,0 +1,57 @@
+
+WITH TotalSales AS (
+    SELECT 
+        l_orderkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS sales
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate >= '1997-01-01'
+    GROUP BY 
+        l_orderkey
+),
+CustomerSales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(ts.sales) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        TotalSales ts ON o.o_orderkey = ts.l_orderkey
+    GROUP BY 
+        c.custkey
+),
+NationSales AS (
+    SELECT 
+        n.n_nationkey,
+        SUM(cs.total_sales) AS nation_sales
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        CustomerSales cs ON o.o_custkey = cs.c_custkey
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    n.r_name AS region,
+    SUM(nsales.nation_sales) AS total_sales_by_region
+FROM 
+    region n
+JOIN 
+    nation ns ON n.r_regionkey = ns.n_regionkey
+JOIN 
+    NationSales nsales ON ns.n_nationkey = nsales.n_nationkey
+GROUP BY 
+    n.r_name
+ORDER BY 
+    total_sales_by_region DESC;

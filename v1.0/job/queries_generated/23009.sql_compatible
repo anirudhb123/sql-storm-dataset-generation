@@ -1,0 +1,67 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        t.production_year,
+        COALESCE(NULLIF(SUBSTRING(t.title, '^(.*?)([ -:])'), ''), 'Unknown') AS title_segment,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY a.title) AS title_ranking,
+        SUM(CASE WHEN mci.note IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY t.id) AS company_count,
+        AVG(CASE WHEN ko.keyword IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY t.id) AS avg_keyword_presence
+    FROM 
+        aka_title a
+    JOIN 
+        title t ON a.movie_id = t.id
+    LEFT JOIN 
+        movie_companies mci ON t.id = mci.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword ko ON mk.keyword_id = ko.id
+    WHERE 
+        t.production_year > 2000
+    AND 
+        (t.kind_id IS NOT NULL OR a.title ILIKE '%Star%')
+), FilteredMovies AS (
+    SELECT *,
+        CASE 
+            WHEN title_ranking BETWEEN 1 AND 5 THEN 'Top 5'
+            WHEN title_ranking BETWEEN 6 AND 10 THEN 'Mid Tier'
+            ELSE 'Low Tier'
+        END AS ranking_category
+    FROM 
+        RankedMovies
+), FinalResults AS (
+    SELECT 
+        movie_title,
+        production_year,
+        title_segment,
+        ranking_category,
+        company_count,
+        avg_keyword_presence,
+        CASE 
+            WHEN AVG(avg_keyword_presence) > 0.5 THEN 'Rich in Keywords'
+            ELSE 'Sparse Keywords'
+        END AS keyword_richness
+    FROM 
+        FilteredMovies
+    GROUP BY 
+        movie_title, 
+        production_year, 
+        title_segment, 
+        ranking_category, 
+        company_count
+)
+SELECT 
+    movie_title,
+    production_year,
+    title_segment,
+    ranking_category,
+    company_count,
+    keyword_richness,
+    'Details: ' || COALESCE(title_segment, 'N/A') || ' (' || production_year || ')' AS detailed_notes
+FROM 
+    FinalResults
+WHERE 
+    company_count > 1
+ORDER BY 
+    production_year DESC, ranking_category ASC;

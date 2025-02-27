@@ -1,0 +1,70 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+), 
+PartPriceDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_custkey
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(COALESCE(lp.total_price, 0)) AS total_lineitem_price,
+    AVG(COALESCE(p.total_supplycost, 0)) AS avg_supplycost
+FROM 
+    nation n
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    HighValueOrders hvo ON c.c_custkey = hvo.o_custkey
+LEFT JOIN (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+) lp ON hvo.o_orderkey = lp.l_orderkey
+LEFT JOIN 
+    PartPriceDetails p ON p.p_partkey IN (
+        SELECT DISTINCT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_suppkey IN (SELECT s_suppkey FROM RankedSuppliers WHERE rnk <= 3)
+    )
+WHERE 
+    n.n_name IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 1
+ORDER BY 
+    total_lineitem_price DESC;

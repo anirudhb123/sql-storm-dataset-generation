@@ -1,0 +1,39 @@
+
+WITH RECURSIVE region_supplier AS (
+    SELECT s.s_suppkey, s.s_name, n.n_regionkey, r.r_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS region_rank,
+           SUM(ps.ps_supplycost) OVER (PARTITION BY s.s_suppkey) AS total_supply_cost
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE s.s_acctbal > 200.00
+    AND r.r_name LIKE '%America%'
+),
+top_suppliers AS (
+    SELECT s_suppkey, s_name, n_regionkey, r_name, s_acctbal, region_rank, total_supply_cost, COUNT(*) OVER () AS total_suppliers
+    FROM region_supplier
+    WHERE region_rank <= 3
+),
+part_details AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           cs.customer_spending
+    FROM part p
+    LEFT JOIN (
+        SELECT l.l_partkey, SUM(o.o_totalprice) AS customer_spending
+        FROM lineitem l
+        JOIN orders o ON l.l_orderkey = o.o_orderkey
+        JOIN customer c ON o.o_custkey = c.c_custkey
+        WHERE c.c_acctbal IS NOT NULL
+        GROUP BY l.l_partkey
+    ) cs ON p.p_partkey = cs.l_partkey
+)
+SELECT t.s_name, t.r_name, t.total_suppliers, p.p_name, p.p_retailprice, p.customer_spending
+FROM top_suppliers t
+FULL OUTER JOIN part_details p ON t.s_suppkey = p.p_partkey
+WHERE (t.r_name IS NOT NULL OR p.p_name IS NOT NULL)
+AND (p.p_retailprice IS NOT NULL AND p.p_retailprice > 0)
+UNION ALL
+SELECT 'Total Row', 'All Regions', COUNT(*), NULL, NULL, NULL 
+FROM top_suppliers
+GROUP BY 1, 2 HAVING COUNT(*) > 0
+ORDER BY t.r_name, t.s_name NULLS LAST, p.p_retailprice DESC;

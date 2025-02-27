@@ -1,0 +1,90 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.ParentId,
+        0 AS Level,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.Score,
+        CAST(p.Title AS VARCHAR(500)) AS FullTitlePath
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT
+        p.Id AS PostId,
+        p.ParentId,
+        Level + 1,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.Score,
+        CONCAT(rph.FullTitlePath, ' > ', p.Title)
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+), PostVoteSummary AS (
+    SELECT
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    GROUP BY v.PostId
+), UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+), PostDetails AS (
+    SELECT
+        ph.PostId,
+        ph.Title,
+        ph.CreationDate,
+        ph.Level,
+        ps.UpVotes,
+        ps.DownVotes,
+        ur.DisplayName AS OwnerName,
+        ur.Reputation,
+        ur.BadgeCount,
+        CASE WHEN ph.Score >= 10 THEN 'Popular' ELSE 'Normal' END AS PostType
+    FROM RecursivePostHierarchy ph
+    LEFT JOIN PostVoteSummary ps ON ph.PostId = ps.PostId
+    LEFT JOIN UserReputation ur ON ph.OwnerUserId = ur.UserId
+), ClosedPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        hp.CreationDate,
+        hp.ViewCount,
+        hp.Score,
+        COUNT(hp.Id) AS HistoryCount
+    FROM Posts p
+    INNER JOIN PostHistory hp ON p.Id = hp.PostId
+    WHERE hp.PostHistoryTypeId = 10
+    GROUP BY p.Id, p.Title, hp.CreationDate, hp.ViewCount, hp.Score
+)
+SELECT
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Level,
+    COALESCE(pd.UpVotes, 0) AS UpVotes,
+    COALESCE(pd.DownVotes, 0) AS DownVotes,
+    pd.OwnerName,
+    pd.Reputation,
+    pd.BadgeCount,
+    cp.ViewCount,
+    pd.PostType,
+    cp.HistoryCount AS ClosedHistoryCount
+FROM PostDetails pd
+LEFT JOIN ClosedPosts cp ON pd.PostId = cp.Id
+WHERE pd.Reputation > 1000 AND pd.Level = 0
+ORDER BY pd.Score DESC, pd.Title ASC
+LIMIT 100;

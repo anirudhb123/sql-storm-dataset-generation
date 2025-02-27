@@ -1,0 +1,82 @@
+WITH RecursivePostHierarchy AS (
+    -- CTE to find all parent-child relationships for posts
+    SELECT Id, ParentId, Title, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.ParentId, p.Title, r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserActivity AS (
+    -- CTE to summarize user activity with weighted scores
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           SUM(COALESCE(p.Score, 0)) AS TotalScore,
+           COUNT(p.Id) AS PostCount,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+           AVG(CASE WHEN p.CreationDate >= CURRENT_DATE - INTERVAL '30 days' THEN p.Score END) AS RecentScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+PostHistorySummary AS (
+    -- CTE to summarize post history and their types along with their counts
+    SELECT ph.PostId,
+           COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseOpenCount,
+           COUNT(CASE WHEN ph.PostHistoryTypeId = 24 THEN 1 END) AS SuggestedEditCount,
+           STRING_AGG(DISTINCT cht.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    LEFT JOIN CloseReasonTypes cht ON ph.Comment::INT = cht.Id
+    GROUP BY ph.PostId
+)
+SELECT ua.UserId,
+       ua.DisplayName,
+       ua.TotalScore,
+       ua.PostCount,
+       ua.UpVoteCount,
+       ua.DownVoteCount,
+       COALESCE(ps.CloseOpenCount, 0) AS CloseOpenCount,
+       COALESCE(ps.SuggestedEditCount, 0) AS SuggestedEditCount,
+       ps.CloseReasons,
+       RANK() OVER (ORDER BY ua.TotalScore DESC) AS UserRank
+FROM UserActivity ua
+LEFT JOIN PostHistorySummary ps ON ua.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = ps.PostId)
+WHERE ua.TotalScore > 0
+ORDER BY UserRank, ua.DisplayName;
+
+-- Additional insights for posts with more than a specified number of comments and views
+SELECT p.Id,
+       p.Title,
+       p.ViewCount,
+       p.CommentCount,
+       p.Score,
+       COALESCE(rh.Level, 0) AS HierarchyLevel,
+       rh.Title AS ParentTitle
+FROM Posts p
+LEFT JOIN RecursivePostHierarchy rh ON p.ParentId = rh.Id
+WHERE (p.CommentCount > 10 OR p.ViewCount > 1000)
+ORDER BY p.ViewCount DESC, p.CommentCount DESC;
+
+-- Unions for performance comparison between two groups (e.g., Active vs Inactive)
+SELECT 'Active Users' AS UserCategory,
+       u.DisplayName,
+       u.Reputation,
+       u.CreationDate,
+       ua.TotalScore
+FROM Users u
+INNER JOIN UserActivity ua ON u.Id = ua.UserId
+WHERE u.LastAccessDate >= CURRENT_DATE - INTERVAL '90 days'
+
+UNION ALL
+
+SELECT 'Inactive Users' AS UserCategory,
+       u.DisplayName,
+       u.Reputation,
+       u.CreationDate,
+       ua.TotalScore
+FROM Users u
+INNER JOIN UserActivity ua ON u.Id = ua.UserId
+WHERE u.LastAccessDate < CURRENT_DATE - INTERVAL '90 days';

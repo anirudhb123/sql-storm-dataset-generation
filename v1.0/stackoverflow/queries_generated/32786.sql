@@ -1,0 +1,100 @@
+WITH RecursiveTagPostCounts AS (
+    -- CTE to find the number of posts for each tag, recursively counting posts associated with tags.
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE 
+        T.Count > 0
+    GROUP BY 
+        T.Id, T.TagName
+    
+    UNION ALL
+
+    SELECT 
+        T.Id,
+        T.TagName,
+        COUNT(P.Id) + RPC.PostCount
+    FROM 
+        Tags T
+    JOIN 
+        RecursiveTagPostCounts RPC ON T.Id = RPC.TagId
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.Id, T.TagName, RPC.PostCount
+),
+
+TagGeneralStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        AVG(P.ViewCount) AS AverageViews,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    GROUP BY 
+        T.TagName
+),
+
+MostActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+    HAVING 
+        COUNT(DISTINCT P.Id) > 5  -- Users with more than 5 posts
+),
+
+ClosedPostReasons AS (
+    SELECT 
+        PH.UserId,
+        COUNT(*) AS ClosedPostCount,
+        STRING_AGG(DISTINCT CR.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CR ON PH.Comment::int = CR.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) -- Include only closed and reopened posts
+    GROUP BY 
+        PH.UserId
+)
+
+-- Final query combining results from the CTEs
+SELECT 
+    TGS.TagName,
+    TGS.TotalPosts,
+    TGS.TotalScore,
+    TGS.AverageViews,
+    TGS.TotalComments,
+    MAU.DisplayName AS ActiveUser,
+    MAU.TotalViews AS UserTotalViews,
+    MAU.PostCount AS UserPostCount,
+    CP.ClosePostCount AS ClosedPosts,
+    CP.CloseReasons
+FROM 
+    TagGeneralStats TGS
+LEFT JOIN 
+    MostActiveUsers MAU ON MAU.PostCount = (SELECT MAX(PostCount) FROM MostActiveUsers)
+LEFT JOIN 
+    ClosedPostReasons CP ON CP.UserId = (SELECT UserId FROM ClosedPostReasons ORDER BY ClosedPostCount DESC LIMIT 1)
+ORDER BY 
+    TGS.TotalScore DESC, 
+    TGS.TotalPosts DESC;

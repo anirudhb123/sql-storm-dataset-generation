@@ -1,0 +1,57 @@
+WITH RankedBadges AS (
+    SELECT 
+        b.UserId,
+        b.Name AS BadgeName,
+        b.Class,
+        ROW_NUMBER() OVER (PARTITION BY b.UserId ORDER BY b.Date DESC) AS BadgeRank
+    FROM Badges b
+),
+MostActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY COUNT(c.Id) DESC, SUM(v.BountyAmount) DESC) AS ActivityRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- BountyStart and BountyClose
+    WHERE p.PostTypeId = 1 -- Only consider Questions
+    GROUP BY p.Id, p.Title, p.ViewCount
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadgeClass,
+        AVG(r.Reputation) AS AverageReputation,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked
+    FROM Users u
+    LEFT JOIN RankedBadges b ON u.Id = b.UserId AND b.BadgeRank = 1 -- Only top badge
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes r ON r.UserId = u.Id
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.AverageReputation,
+        ur.QuestionsAsked,
+        ROW_NUMBER() OVER (ORDER BY ur.AverageReputation DESC, ur.QuestionsAsked DESC) AS UserRank
+    FROM UserReputation ur
+)
+SELECT 
+    tu.DisplayName,
+    tu.AverageReputation,
+    tu.QuestionsAsked,
+    mp.Title AS MostActivePost,
+    mp.CommentCount,
+    mp.TotalBounty,
+    rb.BadgeName
+FROM TopUsers tu
+JOIN MostActivePosts mp ON mp.ActivityRank <= 10
+LEFT JOIN RankedBadges rb ON tu.UserId = rb.UserId
+WHERE tu.UserRank <= 5
+ORDER BY tu.AverageReputation DESC, tu.QuestionsAsked DESC;

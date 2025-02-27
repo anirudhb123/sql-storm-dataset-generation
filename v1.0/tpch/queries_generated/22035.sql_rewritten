@@ -1,0 +1,48 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1995-01-01'
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        n.n_name AS nation_name,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank_acctbal
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+)
+SELECT 
+    rd.o_orderkey,
+    cd.c_name,
+    rd.o_orderdate,
+    SUM(CASE 
+            WHEN l.l_discount > 0.1 THEN l.l_extendedprice * (1 - l.l_discount)
+            ELSE l.l_extendedprice 
+        END) AS total_after_discount,
+    COUNT(DISTINCT l.l_partkey) AS unique_parts_count,
+    MAX(l.l_extendedprice) / NULLIF(MIN(l.l_extendedprice), 0) AS price_ratio,
+    cd.nation_name
+FROM RankedOrders rd
+LEFT JOIN lineitem l ON rd.o_orderkey = l.l_orderkey
+JOIN CustomerDetails cd ON rd.o_orderkey = cd.c_custkey 
+WHERE EXISTS (
+    SELECT 1 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey = l.l_partkey 
+    AND ps.ps_availqty >= 10
+) 
+AND l.l_shipdate BETWEEN DATE '1995-01-01' AND cast('1998-10-01' as date)
+GROUP BY rd.o_orderkey, cd.c_name, rd.o_orderdate, cd.nation_name
+HAVING 
+    total_after_discount > 5000 
+    AND COUNT(DISTINCT l.l_partkey) > 5
+    AND MAX(l.l_extendedprice) IS NOT NULL
+ORDER BY rd.o_orderdate DESC, total_after_discount ASC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

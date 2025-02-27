@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(
+            (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0
+        ) AS UpVoteCount,
+        COALESCE(
+            (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0
+        ) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostsRank,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT STRING_AGG(T.TagName, ', ') 
+         FROM Tags T 
+         WHERE T.Id IN (
+            SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::integer) 
+         )
+        ) AS TagsList
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CAST(DATE_SUB(CURRENT_DATE, INTERVAL '1 year') AS DATE)
+),
+UPDATES AS (
+    SELECT 
+        PostId,
+        MAX(Score * 1.5 + UpVoteCount - DownVoteCount - CommentCount) AS AdjustedScore
+    FROM 
+        RankedPosts
+    GROUP BY 
+        PostId
+),
+FilteredPosts AS (
+    SELECT 
+        RP.*,
+        COALESCE(U.AdjustedScore, 0) AS AdjustedScore
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        UPDATES U ON RP.PostId = U.PostId
+)
+SELECT 
+    FP.PostId,
+    FP.Title,
+    FP.Score,
+    FP.ViewCount,
+    FP.TagsList,
+    FP.RecentPostsRank,
+    FP.CommentCount,
+    FP.AdjustedScore,
+    CASE 
+        WHEN FP.RecentPostsRank = 1 THEN 'Most Recent Post by User'
+        WHEN FP.AdjustedScore > 30 THEN 'High Engagement'
+        ELSE 'Regular Post'
+    END AS EngagementLevel
+FROM 
+    FilteredPosts FP
+WHERE 
+    FP.AdjustedScore IS NOT NULL
+    AND FP.AdjustedScore NOT IN (SELECT NULLIF(AdjustedScore, 0) FROM FilteredPosts WHERE AdjustedScore IS NOT NULL)
+ORDER BY 
+    FP.AdjustedScore DESC, 
+    FP.ViewCount DESC
+LIMIT 50;

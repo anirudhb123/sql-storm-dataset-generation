@@ -1,0 +1,69 @@
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+),
+
+UserActivity AS (
+    SELECT 
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostsCreated,
+        COUNT(DISTINCT C.Id) AS CommentsMade,
+        SUM(V.BountyAmount) AS TotalBounties
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.DisplayName
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        COUNT(DISTINCT PH.UserId) AS EditorsCount,
+        MAX(PH.CreationDate) AS LastEdited
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5) 
+    GROUP BY 
+        PH.PostId
+)
+
+SELECT 
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews,
+    TS.AverageScore,
+    UA.DisplayName,
+    UA.PostsCreated,
+    UA.CommentsMade,
+    UA.TotalBounties,
+    PHD.EditCount,
+    PHD.EditorsCount,
+    PHD.LastEdited
+FROM 
+    TagStatistics TS
+JOIN 
+    UserActivity UA ON UA.PostsCreated > 0
+JOIN 
+    PostHistoryDetails PHD ON PHD.PostId IN (SELECT P.Id FROM Posts P WHERE P.Tags LIKE '%' || TS.TagName || '%')
+ORDER BY 
+    TS.TotalViews DESC, 
+    UA.PostsCreated DESC;

@@ -1,0 +1,53 @@
+
+WITH sales_data AS (
+    SELECT 
+        w.warehouse_id,
+        d.d_year,
+        SUM(ws_ext_sales_price) AS total_sales,
+        AVG(ws_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales w_sales
+    JOIN 
+        warehouse w ON w.warehouse_sk = w_sales.ws_warehouse_sk
+    JOIN 
+        date_dim d ON d.d_date_sk = w_sales.ws_sold_date_sk
+    WHERE 
+        d.d_year BETWEEN 2000 AND 2001
+        AND w.warehouse_id IN (
+            SELECT w_warehouse_id 
+            FROM warehouse 
+            WHERE w_country = 'USA'
+        )
+    GROUP BY 
+        w.warehouse_id, d.d_year
+),
+demographic_analysis AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_education_status,
+        SUM(sd.total_sales) AS sales_by_gender_education,
+        AVG(sd.avg_net_profit) AS avg_net_profit_by_gender_education,
+        COUNT(sd.total_orders) AS order_count
+    FROM 
+        sales_data sd
+    JOIN 
+        customer c ON c.c_customer_sk = sd.warehouse_id  
+    JOIN 
+        customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd.cd_gender, 
+        cd.cd_education_status
+)
+SELECT 
+    cd_gender,
+    cd_education_status,
+    sales_by_gender_education,
+    avg_net_profit_by_gender_education,
+    order_count
+FROM 
+    demographic_analysis
+WHERE 
+    order_count > 100
+ORDER BY 
+    sales_by_gender_education DESC;

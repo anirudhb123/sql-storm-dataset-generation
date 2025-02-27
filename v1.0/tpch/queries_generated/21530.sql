@@ -1,0 +1,72 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rnk
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 100)
+), FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NULL OR s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), OrdersWithDiscounts AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS adjusted_total
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') AND l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice) > 1000
+), CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name AS nation_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, n.n_name
+)
+SELECT 
+    FP.p_partkey,
+    FP.p_name,
+    COALESCE(FS.total_cost, 0) AS supplier_cost,
+    COALESCE(OWD.adjusted_total, 0) AS order_adjusted_total,
+    CN.nation_name,
+    CN.order_count
+FROM 
+    RankedParts FP
+LEFT JOIN 
+    FilteredSuppliers FS ON FP.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_name LIKE '%Supplier%'))
+LEFT JOIN 
+    OrdersWithDiscounts OWD ON FP.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O'))
+LEFT JOIN 
+    CustomerNation CN ON CN.order_count >= (
+        SELECT AVG(order_count) FROM CustomerNation
+    ) 
+WHERE 
+    FP.rnk <= 5 OR CN.order_count IS NULL
+ORDER BY 
+    FP.p_partkey DESC NULLS LAST;

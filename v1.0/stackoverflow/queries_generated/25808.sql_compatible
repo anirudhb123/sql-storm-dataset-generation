@@ -1,0 +1,74 @@
+
+WITH TagCounts AS (
+    SELECT 
+        tag.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(
+            CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END
+        ) AS QuestionCount,
+        SUM(
+            CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END
+        ) AS AnswerCount,
+        SUM(
+            CASE WHEN p.ClosedDate IS NOT NULL THEN 1 ELSE 0 END
+        ) AS ClosedCount
+    FROM 
+        Tags AS tag
+    LEFT JOIN 
+        Posts AS p ON p.Tags LIKE CONCAT('%', tag.TagName, '%')
+    GROUP BY 
+        tag.TagName
+),
+BadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users AS u
+    LEFT JOIN 
+        Badges AS b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.UpVotes) AS TotalUpVotes,
+        SUM(p.DownVotes) AS TotalDownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users AS u
+    LEFT JOIN 
+        Posts AS p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments AS c ON c.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    tc.TagName,
+    tc.PostCount,
+    tc.QuestionCount,
+    tc.AnswerCount,
+    tc.ClosedCount,
+    COUNT(DISTINCT ue.UserId) AS EngagedUsers,
+    SUM(bc.BadgeCount) AS TotalBadges,
+    SUM(ue.TotalViews) AS TotalUserViews,
+    SUM(ue.TotalUpVotes) AS TotalUserUpVotes,
+    SUM(ue.TotalDownVotes) AS TotalUserDownVotes,
+    SUM(ue.CommentCount) AS TotalUserComments
+FROM 
+    TagCounts AS tc
+LEFT JOIN 
+    UserEngagement AS ue ON ue.UserId IS NOT NULL 
+LEFT JOIN 
+    BadgeCounts AS bc ON bc.UserId IS NOT NULL 
+GROUP BY 
+    tc.TagName, 
+    tc.PostCount, 
+    tc.QuestionCount, 
+    tc.AnswerCount,
+    tc.ClosedCount
+ORDER BY 
+    tc.PostCount DESC;

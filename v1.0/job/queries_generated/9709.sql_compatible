@@ -1,0 +1,62 @@
+
+WITH movie_data AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        c.name AS company_name,
+        a.name AS actor_name,
+        STRING_AGG(DISTINCT CAST(ci.role_id AS VARCHAR), ', ') AS roles,
+        COUNT(DISTINCT mw.linked_movie_id) AS linked_movies_count
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info cinfo ON cc.subject_id = cinfo.id
+    JOIN 
+        aka_name a ON cinfo.person_id = a.person_id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_link mw ON t.id = mw.movie_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword, c.name, a.name
+),
+aggregated_data AS (
+    SELECT 
+        title_id, 
+        title, 
+        production_year,
+        ARRAY_AGG(DISTINCT keyword) AS keywords,
+        ARRAY_AGG(DISTINCT company_name) AS companies,
+        ARRAY_AGG(DISTINCT actor_name) AS actors,
+        STRING_AGG(DISTINCT roles, ', ') AS all_roles,
+        SUM(linked_movies_count) AS total_linked_movies
+    FROM 
+        movie_data
+    GROUP BY 
+        title_id, title, production_year
+)
+SELECT 
+    title_id,
+    title,
+    production_year,
+    keywords,
+    companies,
+    actors,
+    all_roles,
+    total_linked_movies
+FROM 
+    aggregated_data
+ORDER BY 
+    production_year DESC, title;

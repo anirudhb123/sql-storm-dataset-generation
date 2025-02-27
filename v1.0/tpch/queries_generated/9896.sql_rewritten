@@ -1,0 +1,81 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+top_orders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.revenue
+    FROM 
+        ranked_orders ro
+    WHERE 
+        ro.order_rank <= 10
+),
+supplier_parts AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_suppkey, s.s_name
+),
+order_details AS (
+    SELECT 
+        l.l_orderkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity,
+        SUM(l.l_extendedprice) AS total_price
+    FROM 
+        lineitem l
+    JOIN 
+        part p ON l.l_partkey = p.p_partkey
+    GROUP BY 
+        l.l_orderkey, p.p_name
+),
+final_result AS (
+    SELECT 
+        to.o_orderkey,
+        to.o_orderdate,
+        sp.s_name,
+        op.p_name,
+        op.total_quantity,
+        op.total_price,
+        sp.total_available
+    FROM 
+        top_orders to
+    JOIN 
+        order_details op ON to.o_orderkey = op.l_orderkey
+    JOIN 
+        supplier_parts sp ON op.p_name = sp.ps_partkey
+)
+
+SELECT 
+    fr.o_orderkey,
+    fr.o_orderdate,
+    fr.s_name,
+    fr.p_name,
+    fr.total_quantity,
+    fr.total_price,
+    fr.total_available,
+    COALESCE(NULLIF(fr.total_price / NULLIF(fr.total_quantity, 0), 0), 0) AS avg_price_per_quantity
+FROM 
+    final_result fr
+ORDER BY 
+    fr.o_orderdate DESC, fr.total_price DESC;

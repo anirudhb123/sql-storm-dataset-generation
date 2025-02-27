@@ -1,0 +1,64 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        DENSE_RANK() OVER (ORDER BY o.o_totalprice DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+),
+CustomerWithOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    s.s_name,
+    ss.part_count,
+    ss.total_cost,
+    co.c_name,
+    co.total_order_value,
+    os.total_revenue,
+    os.revenue_rank
+FROM 
+    SupplierStats ss
+JOIN 
+    CustomerWithOrders co ON ss.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps 
+                                                 WHERE ps.ps_partkey IN (SELECT p.p_partkey 
+                                                                         FROM part p 
+                                                                         WHERE p.p_size > 20))
+LEFT JOIN 
+    OrderStats os ON os.o_orderkey = (SELECT o.o_orderkey FROM orders o 
+                                        WHERE o.o_orderdate >= DATEADD(YEAR, -1, '1998-10-01') 
+                                        ORDER BY o.o_totalprice DESC LIMIT 1)
+WHERE 
+    ss.total_cost > (SELECT AVG(total_cost) FROM SupplierStats)
+ORDER BY 
+    ss.total_cost DESC, co.total_order_value DESC;

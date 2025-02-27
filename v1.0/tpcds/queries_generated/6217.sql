@@ -1,0 +1,57 @@
+
+WITH sales_summary AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        ws.ws_sold_date_sk,
+        dd.d_year,
+        dd.d_month_seq
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY
+        ws.ws_item_sk, ws.ws_sold_date_sk, dd.d_year, dd.d_month_seq
+),
+demographics_summary AS (
+    SELECT
+        cd_demo_sk,
+        COUNT(c.c_customer_sk) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY
+        cd_demo_sk
+),
+inventory_summary AS (
+    SELECT
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM
+        inventory inv
+    GROUP BY
+        inv.inv_item_sk
+)
+SELECT
+    ss.ws_item_sk,
+    ss.total_quantity,
+    ss.total_sales,
+    ss.total_discount,
+    ds.customer_count,
+    ds.avg_purchase_estimate,
+    is.total_inventory
+FROM
+    sales_summary ss
+LEFT JOIN
+    demographics_summary ds ON ss.ws_item_sk = ds.cd_demo_sk
+LEFT JOIN
+    inventory_summary is ON ss.ws_item_sk = is.inv_item_sk
+WHERE
+    ss.d_year = 2023
+ORDER BY
+    ss.total_sales DESC
+LIMIT 100;

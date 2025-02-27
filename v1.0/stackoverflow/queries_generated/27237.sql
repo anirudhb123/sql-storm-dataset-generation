@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tag_array ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_array
+    WHERE 
+        p.PostTypeId = 1 -- Consider only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+), RecentTopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        OwnerDisplayName,
+        AnswerCount,
+        Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        RecentPostRank = 1 -- Most recent post per user
+)
+
+SELECT 
+    rtt.TagName AS Popular_Tag,
+    COUNT(rp.PostId) AS Post_Count,
+    AVG(rp.AnswerCount) AS Avg_Answers_Per_Post,
+    MIN(rp.CreationDate) AS First_Creation_Date,
+    MAX(rp.CreationDate) AS Last_Creation_Date
+FROM 
+    RecentTopPosts rp
+JOIN 
+    (SELECT DISTINCT 
+         unnest(STRING_TO_ARRAY(Tags, ', ')) AS TagName
+     FROM 
+         RecentTopPosts) rtt ON rp.Tags LIKE '%' || rtt.TagName || '%'
+GROUP BY 
+    rtt.TagName
+ORDER BY 
+    Post_Count DESC, Avg_Answers_Per_Post DESC
+LIMIT 10;

@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        n.n_name AS supplier_nation,
+        s.s_phone,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_phone,
+        s_acctbal,
+        s.s_comment,
+        ns.n_name AS nation_name
+    FROM 
+        RankedSuppliers s
+    JOIN 
+        nation ns ON s.s_nationkey = ns.n_nationkey
+    WHERE 
+        s.supplier_rank <= 5
+),
+CombinedData AS (
+    SELECT 
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        STRING_AGG(DISTINCT t.s_name, ', ' ORDER BY t.s_name) AS supplier_names
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        TopSuppliers t ON ps.ps_suppkey = t.s_suppkey
+    GROUP BY 
+        p.p_name
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    cd.supplier_count,
+    cd.avg_supply_cost,
+    cd.supplier_names
+FROM 
+    part p
+JOIN 
+    CombinedData cd ON p.p_name = cd.p_name
+WHERE 
+    cd.supplier_count > 3 AND 
+    p.p_retailprice > (
+        SELECT 
+            AVG(p2.p_retailprice) 
+        FROM 
+            part p2
+    )
+ORDER BY 
+    cd.avg_supply_cost DESC;

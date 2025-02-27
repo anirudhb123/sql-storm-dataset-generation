@@ -1,0 +1,66 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    SUM(CASE WHEN co.kind IS NOT NULL THEN 1 ELSE 0 END) AS production_companies,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY mt.production_year DESC) AS rn
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    ak.name IS NOT NULL
+    AND ak.name <> ''
+    AND (mh.production_year IS NULL OR mh.production_year > 2005)
+GROUP BY 
+    ak.name, mt.title, mt.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    actor_name, production_year DESC;
+
+-- The query structure includes:
+-- * A recursive CTE (movie_hierarchy) to fetch movies and their linked relationships
+-- * Multiple JOINs to obtain relevant information about actors, movies, companies, and keywords
+-- * Conditional cases for counting production companies and handling NULLs
+-- * A GROUP BY clause along with HAVING to filter results based on counts
+-- * Window functions for ranking actors by their movie production year
+-- * String aggregation to collect a set of keywords associated with each movie

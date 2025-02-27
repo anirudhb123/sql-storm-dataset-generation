@@ -1,0 +1,83 @@
+WITH UserScore AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        (SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) 
+         - SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END)) AS NetScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(PH.UserDisplayName, 'Anonymous') AS LastEditor,
+        PH.CreationDate AS LastEditDate,
+        PT.Name AS PostType,
+        PS.NetScore AS UserNetScore,
+        (SELECT COUNT(C.Id) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount
+    FROM 
+        Posts P
+    JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN 
+        PostHistory PH ON P.LastEditorUserId = PH.UserId AND P.Id = PH.PostId
+    LEFT JOIN 
+        UserScore PS ON P.OwnerUserId = PS.UserId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND PS.NetScore IS NOT NULL
+),
+AggregatedData AS (
+    SELECT 
+        PostType,
+        COUNT(*) AS TotalPosts,
+        AVG(CommentCount::float) AS AvgComments,
+        MIN(ViewCount) AS MinViews,
+        MAX(ViewCount) AS MaxViews
+    FROM 
+        PostDetails
+    GROUP BY 
+        PostType
+),
+CommentStats AS (
+    SELECT 
+        PD.PostId,
+        COUNT(C.Id) AS TotalComments,
+        MAX(C.CreationDate) AS LastCommentDate
+    FROM 
+        PostDetails PD
+    LEFT JOIN 
+        Comments C ON PD.PostId = C.PostId
+    GROUP BY 
+        PD.PostId
+)
+SELECT 
+    AD.PostType,
+    AD.TotalPosts,
+    AD.AvgComments,
+    AD.MinViews,
+    AD.MaxViews,
+    COALESCE(SUM(CS.TotalComments), 0) AS TotalCommentsOnPosts,
+    COUNT(DISTINCT PD.PostId) FILTER (WHERE PD.LastEditDate IS NOT NULL) AS EditedPosts
+FROM 
+    AggregatedData AD
+LEFT JOIN 
+    CommentStats CS ON AD.PostType = PD.PostType
+LEFT JOIN 
+    PostDetails PD ON AD.PostType = PD.PostType
+WHERE 
+    PD.LastCommentDate IS NULL OR PD.LastCommentDate >= AD.TotalPosts / NULLIF(AD.AvgComments, 0)
+GROUP BY 
+    AD.PostType, AD.TotalPosts, AD.AvgComments, AD.MinViews, AD.MaxViews
+ORDER BY 
+    AD.TotalPosts DESC,
+    AD.AvgComments DESC;

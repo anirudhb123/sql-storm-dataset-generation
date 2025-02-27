@@ -1,0 +1,59 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        p.PostTypeId,
+        1 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        p.PostTypeId,
+        Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+    COUNT(DISTINCT p.Id) AS QuestionCount,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT b.Id) AS BadgeCount,
+    SUM(CASE 
+        WHEN p.Score > 0 THEN p.Score 
+        ELSE 0 END) AS PositiveScore,
+    STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypes,
+    STRING_AGG(DISTINCT ph.CreationDate::date::text, ', ') FILTER (WHERE ph.PostId IS NOT NULL) AS HistoryDates
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId 
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId 
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- Count only the bounty start votes
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+WHERE 
+    u.Reputation > 1000 
+GROUP BY 
+    u.Id, u.DisplayName 
+ORDER BY 
+    TotalBounty DESC, QuestionCount DESC;

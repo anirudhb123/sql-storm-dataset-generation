@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) as rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+), CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    c.c_name,
+    c.c_acctbal,
+    cs.total_orders,
+    cs.total_spent,
+    COALESCE(ods.total_lineitem_value, 0) AS total_lineitem_value,
+    COALESCE(ods.lineitem_count, 0) AS lineitem_count,
+    rs.s_name AS top_supplier
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerOrderStats cs ON c.c_custkey = cs.c_custkey
+LEFT JOIN 
+    OrderDetails ods ON cs.total_orders > 0 AND ods.o_orderkey IN (
+        SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey
+    )
+LEFT JOIN 
+    RankedSuppliers rs ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+WHERE 
+    c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000.00
+ORDER BY 
+    cs.total_spent DESC, c.c_name;

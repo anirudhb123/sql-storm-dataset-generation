@@ -1,0 +1,76 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        Posts a ON p.Id = a.ParentId  
+    WHERE 
+        a.PostTypeId = 2  
+)
+
+, UserReputation AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Posts a ON u.Id = a.OwnerUserId AND a.PostTypeId = 2
+    GROUP BY 
+        u.Id
+)
+
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    ur.TotalScore,
+    ur.PostCount,
+    ur.AnswerCount,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = u.Id) AS BadgeCount,
+    (SELECT COUNT(*) FROM Comments c WHERE c.UserId = u.Id) AS CommentCount,
+    STRING_AGG(t.TagName, ', ') AS TagsUsed
+FROM 
+    Users u
+LEFT JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            DISTINCT unnest(string_to_array(p.Tags, ',')) AS TagName
+    ) t ON true  
+WHERE 
+    u.Reputation > 1000  
+GROUP BY 
+    u.Id, ur.TotalScore, ur.PostCount, ur.AnswerCount
+ORDER BY 
+    ur.TotalScore DESC, 
+    u.Reputation DESC
+LIMIT 100;

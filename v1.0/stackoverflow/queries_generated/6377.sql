@@ -1,0 +1,61 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalBadges,
+        MAX(U.LastAccessDate) AS LastActive
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalComments,
+        TotalUpvotes,
+        TotalDownvotes,
+        TotalBadges,
+        LastActive,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM 
+        UserStatistics
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.TotalPosts,
+    U.TotalComments,
+    U.TotalUpvotes,
+    U.TotalDownvotes,
+    U.TotalBadges,
+    U.LastActive,
+    CASE 
+        WHEN U.Rank <= 10 THEN 'Top Contributor'
+        WHEN U.Rank <= 50 THEN 'Top User'
+        ELSE 'Regular User'
+    END AS ContributionLevel
+FROM 
+    TopUsers U
+WHERE 
+    U.TotalPosts > 10 AND U.TotalComments > 0
+ORDER BY 
+    U.Reputation DESC, U.LastActive DESC
+LIMIT 20;

@@ -1,0 +1,26 @@
+SELECT
+    CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name) AS supplier_part_info,
+    LENGTH(p.p_comment) AS part_comment_length,
+    SUBSTRING_INDEX(s.s_comment, ' ', 5) AS supplier_comment_excerpt,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(l.l_extendedprice) AS avg_extended_price
+FROM
+    supplier s
+JOIN
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE
+    s.s_acctbal > 10000
+    AND p.p_size BETWEEN 5 AND 10
+GROUP BY
+    supplier_part_info, part_comment_length, supplier_comment_excerpt
+HAVING
+    avg_extended_price > 2000
+ORDER BY
+    order_count DESC
+LIMIT 10;

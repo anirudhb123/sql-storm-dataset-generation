@@ -1,0 +1,44 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal - sh.s_acctbal > 500
+),
+TotalSales AS (
+    SELECT c.c_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey
+),
+SupplierSales AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+)
+SELECT p.p_name,
+       COALESCE(ts.total_spent, 0) AS total_spent,
+       COALESCE(ss.total_supply_cost, 0) AS total_supply_cost,
+       r.r_name AS supplier_region,
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count
+FROM part p
+LEFT JOIN TotalSales ts ON p.p_partkey = ts.c_custkey
+LEFT JOIN SupplierSales ss ON p.p_partkey = ss.ps_partkey
+LEFT JOIN region r ON r.r_regionkey = (
+    SELECT n.n_regionkey
+    FROM nation n
+    JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_suppkey IN (SELECT sh.s_suppkey FROM SupplierHierarchy sh)
+    LIMIT 1
+)
+GROUP BY p.p_name, ts.total_spent, ss.total_supply_cost, r.r_name
+HAVING (COALESCE(ts.total_spent, 0) > 5000 OR COALESCE(ss.total_supply_cost, 0) > 2000)
+   AND COUNT(DISTINCT sh.s_suppkey) > 1
+ORDER BY total_spent DESC, total_supply_cost ASC
+LIMIT 10;

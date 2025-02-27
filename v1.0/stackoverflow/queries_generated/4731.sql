@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId, 
+        ur.Reputation, 
+        ur.BadgeCount,
+        RANK() OVER (ORDER BY ur.Reputation DESC) AS UserRank
+    FROM 
+        UserReputation ur
+    WHERE 
+        ur.Reputation > (SELECT AVG(Reputation) FROM Users)
+)
+SELECT 
+    rp.PostId, 
+    rp.Title, 
+    rp.CreationDate, 
+    rp.Score, 
+    u.DisplayName, 
+    u.Reputation,
+    CASE 
+        WHEN u.Reputation IS NULL THEN 'No Reputation'
+        ELSE 'Known User'
+    END AS UserStatus,
+    COALESCE(tu.UserRank, 'N/A') AS UserRank,
+    p.CommentCount,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2) AS UpvoteCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    TopUsers tu ON u.Id = tu.UserId
+LEFT JOIN 
+    Posts p ON rp.PostId = p.Id
+WHERE 
+    rp.PostRank = 1 AND 
+    (p.CommentCount > 10 OR EXISTS (SELECT 1 FROM Comments c WHERE c.PostId = rp.PostId AND c.Score > 0))
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC
+LIMIT 100;

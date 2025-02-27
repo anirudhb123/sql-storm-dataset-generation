@@ -1,0 +1,46 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT ss_store_sk, 
+           SUM(ss_net_profit) AS total_net_profit,
+           1 AS level
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN 2451545 AND 2451575  
+    GROUP BY ss_store_sk
+    UNION ALL
+    SELECT s.s_store_sk, 
+           SUM(ss.net_profit) AS total_net_profit,
+           sh.level + 1
+    FROM store s
+    JOIN sales_hierarchy sh ON s.s_store_sk = sh.ss_store_sk
+    JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    WHERE ss.ss_sold_date_sk BETWEEN 2451545 AND 2451575
+    GROUP BY s.s_store_sk, sh.level
+),
+date_sales AS (
+    SELECT d.d_date, 
+           SUM(ws.ws_net_profit) AS daily_profit,
+           COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk  
+    WHERE d.d_year = 2001
+    GROUP BY d.d_date
+),
+comparison AS (
+    SELECT d.d_date,
+           d.daily_profit,
+           COALESCE(LAG(d.daily_profit) OVER (ORDER BY d.d_date), 0) AS previous_day_profit,
+           d.total_orders,
+           (d.daily_profit - COALESCE(LAG(d.daily_profit) OVER (ORDER BY d.d_date), 0)) AS profit_change
+    FROM date_sales d
+)
+SELECT d.d_date,
+       d.daily_profit,
+       d.previous_day_profit,
+       d.total_orders,
+       CASE 
+           WHEN d.profit_change > 0 THEN 'Increase'
+           WHEN d.profit_change < 0 THEN 'Decrease'
+           ELSE 'No Change'
+       END AS profit_trend
+FROM comparison d
+ORDER BY d.d_date;

@@ -1,0 +1,72 @@
+WITH ActorMovies AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ct.kind AS company_type,
+        COUNT(DISTINCT c.id) AS role_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        t.production_year >= 2000  -- Consider films produced from the year 2000 onwards
+    GROUP BY 
+        a.name, t.title, t.production_year, ct.kind
+),
+ActorsWithMostRoles AS (
+    SELECT 
+        actor_name,
+        SUM(role_count) AS total_roles
+    FROM 
+        ActorMovies
+    GROUP BY 
+        actor_name
+    HAVING 
+        SUM(role_count) > 5  -- Only include actors with more than 5 roles
+),
+MostPopularCompanies AS (
+    SELECT 
+        mc.company_id,
+        COUNT(*) AS movie_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        aka_title t ON mc.movie_id = t.id
+    GROUP BY 
+        mc.company_id
+    HAVING 
+        COUNT(*) >= 10  -- Companies with at least 10 movies
+),
+FinalReport AS (
+    SELECT 
+        a.actor_name,
+        p.imdb_id AS actor_imdb_id,
+        c.name AS company_name,
+        c.country_code,
+        am.total_roles
+    FROM 
+        ActorsWithMostRoles am
+    JOIN 
+        aka_name an ON am.actor_name = an.name
+    JOIN 
+        company_name c ON c.id IN (SELECT company_id FROM MostPopularCompanies)
+    WHERE 
+        an.person_id IN (SELECT DISTINCT person_id FROM cast_info WHERE movie_id IN (SELECT movie_id FROM movie_companies))
+)
+SELECT 
+    actor_name,
+    actor_imdb_id,
+    company_name,
+    country_code,
+    total_roles
+FROM 
+    FinalReport
+ORDER BY 
+    total_roles DESC, actor_name;

@@ -1,0 +1,56 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        coalesce(ws.ws_item_sk, cs.cs_item_sk, ss.ss_item_sk) AS item_sk,
+        COALESCE(ws.ws_ext_sales_price, 0) AS web_sales,
+        COALESCE(cs.cs_ext_sales_price, 0) AS catalog_sales,
+        COALESCE(ss.ss_ext_sales_price, 0) AS store_sales,
+        ROW_NUMBER() OVER (PARTITION BY coalesce(ws.ws_item_sk, cs.cs_item_sk, ss.ss_item_sk) ORDER BY COALESCE(ws.ws_ext_sales_price, cs.cs_ext_sales_price, ss.ss_ext_sales_price) DESC) AS rank
+    FROM 
+        web_sales ws
+    FULL OUTER JOIN 
+        catalog_sales cs ON ws.ws_item_sk = cs.cs_item_sk
+    FULL OUTER JOIN 
+        store_sales ss ON ws.ws_item_sk = ss.ss_item_sk OR cs.cs_item_sk = ss.ss_item_sk
+    WHERE 
+        ws.ws_sold_date_sk IS NOT NULL OR cs.cs_sold_date_sk IS NOT NULL OR ss.ss_sold_date_sk IS NOT NULL
+),
+total_sales AS (
+    SELECT 
+        item_sk, 
+        web_sales + catalog_sales + store_sales AS total_sales,
+        RANK() OVER (ORDER BY web_sales + catalog_sales + store_sales DESC) AS sales_rank
+    FROM 
+        ranked_sales
+    WHERE 
+        rank = 1
+)
+SELECT 
+    ts.item_sk,
+    ts.total_sales,
+    CASE 
+        WHEN ts.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Available'
+    END AS sales_status,
+    COALESCE((
+        SELECT 
+            SUM(d.d_year) 
+        FROM 
+            date_dim d 
+        WHERE 
+            d.d_current_year = 'Y' 
+            AND (
+                SELECT COUNT(*) 
+                FROM (VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9), (10)) AS v(num) 
+                WHERE v.num_type IS NULL
+            ) IS NOT NULL
+    ), 0) AS calculated_value
+FROM 
+    total_sales ts
+WHERE 
+    ts.total_sales > (
+        SELECT AVG(total_sales) FROM total_sales
+    )
+ORDER BY 
+    ts.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

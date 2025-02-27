@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+), 
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) as order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(month, -3, CURRENT_DATE)
+),
+AggregatedSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    GROUP BY l.l_partkey
+)
+SELECT p.p_name, p.p_brand, p.p_retailprice, 
+       COALESCE(SUM(ps.ps_availqty), 0) AS total_available,
+       COALESCE(agg.total_sales, 0) AS total_sales,
+       CASE 
+           WHEN SUM(ps.ps_availqty) > 100 THEN 'High Supply'
+           WHEN SUM(ps.ps_availqty) BETWEEN 50 AND 100 THEN 'Moderate Supply'
+           ELSE 'Low Supply' 
+       END AS supply_status,
+       CASE 
+           WHEN COUNT(DISTINCT so.o_orderkey) > 10 THEN 'Frequent Orders'
+           ELSE 'Infrequent Orders' 
+       END AS order_frequency,
+       sh.level AS supplier_level
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN AggregatedSales agg ON p.p_partkey = agg.l_partkey
+LEFT JOIN RecentOrders so ON s.s_suppkey = so.o_custkey
+LEFT JOIN region r ON s.s_nationkey = r.r_regionkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, sh.level
+HAVING COALESCE(SUM(ps.ps_availqty), 0) > 0 
+   OR COALESCE(agg.total_sales, 0) > 0
+ORDER BY total_sales DESC, supply_status, supplier_level;

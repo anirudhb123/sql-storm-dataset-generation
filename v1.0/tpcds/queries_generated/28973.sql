@@ -1,0 +1,67 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_quantity) AS total_quantity
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+final_benchmark AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.full_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        ci.ca_city,
+        ci.ca_state,
+        ci.ca_zip,
+        ci.ca_country,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        COALESCE(ss.order_count, 0) AS order_count,
+        COALESCE(ss.total_quantity, 0) AS total_quantity
+    FROM 
+        customer_info ci
+    LEFT JOIN 
+        sales_summary ss ON ci.c_customer_id = ss.customer_sk
+)
+SELECT 
+    fb.full_name,
+    fb.total_sales,
+    fb.order_count,
+    fb.total_quantity,
+    CASE 
+        WHEN fb.total_sales > 1000 THEN 'High Spending'
+        WHEN fb.total_sales BETWEEN 500 AND 1000 THEN 'Medium Spending'
+        ELSE 'Low Spending'
+    END AS spending_category,
+    CONCAT(fb.ca_city, ', ', fb.ca_state, ' ', fb.ca_zip) AS full_address
+FROM 
+    final_benchmark fb
+WHERE 
+    fb.cd_gender = 'F'
+ORDER BY 
+    fb.total_sales DESC, fb.order_count DESC
+LIMIT 100;

@@ -1,0 +1,76 @@
+
+WITH AddressData AS (
+    SELECT 
+        ca_address_sk, 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerData AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+CombinedData AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        ad.full_address,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_zip,
+        ad.ca_country,
+        sd.total_sales,
+        sd.order_count,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        CustomerData cd
+    JOIN 
+        AddressData ad ON cd.c_address_sk = ad.ca_address_sk
+    LEFT JOIN 
+        SalesData sd ON cd.c_customer_sk = sd.ws_bill_customer_sk
+)
+SELECT 
+    c_first_name || ' ' || c_last_name AS customer_name,
+    full_address,
+    ca_city,
+    ca_state,
+    ca_zip,
+    ca_country,
+    COALESCE(total_sales, 0) AS total_sales,
+    COALESCE(order_count, 0) AS order_count,
+    cd_gender,
+    cd_marital_status
+FROM 
+    CombinedData
+WHERE 
+    ca_country = 'USA' 
+    AND (cd_gender = 'M' OR cd_gender = 'F')
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

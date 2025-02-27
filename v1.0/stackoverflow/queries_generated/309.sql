@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostComments AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS TotalComments
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT
+    u.DisplayName,
+    rs.PostId,
+    rs.Title,
+    rs.Score,
+    rs.ViewCount,
+    rs.AnswerCount,
+    us.TotalBounties,
+    us.BadgeCount,
+    us.UpVotesCount,
+    us.DownVotesCount,
+    pc.TotalComments
+FROM 
+    RankedPosts rs
+JOIN 
+    UserStatistics us ON rs.PostId = us.UserId
+LEFT JOIN 
+    PostComments pc ON pc.PostId = rs.PostId
+WHERE 
+    rs.PostRank = 1 
+    AND (us.BadgeCount > 0 OR us.TotalBounties > 0)
+ORDER BY 
+    rs.Score DESC, us.TotalBounties DESC
+LIMIT 100;
+

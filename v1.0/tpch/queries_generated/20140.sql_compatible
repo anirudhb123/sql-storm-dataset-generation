@@ -1,0 +1,61 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        DENSE_RANK() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS cost_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderStats AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+OrderLineDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_quantity * (l.l_extendedprice - l.l_extendedprice * l.l_discount)) AS order_total_price,
+        SUM(CASE WHEN l.l_returnflag = 'Y' THEN l.l_quantity ELSE 0 END) AS returned_quantity
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    c.c_name,
+    COALESCE(o.order_total_price, 0) AS order_total_price,
+    COALESCE(c.total_orders, 0) AS total_orders,
+    s.s_name AS preferred_supplier,
+    s.cost_rank 
+FROM 
+    CustomerOrderStats c
+LEFT JOIN 
+    OrderLineDetails o ON c.c_custkey = (
+        SELECT c2.c_custkey 
+        FROM CustomerOrderStats c2 
+        WHERE c2.total_spent = (SELECT MAX(total_spent) FROM CustomerOrderStats) 
+        AND c2.c_custkey IS NOT NULL
+    )
+LEFT JOIN 
+    RankedSuppliers s ON s.cost_rank = 1
+WHERE 
+    o.order_total_price IS NOT NULL
+    OR s.s_suppkey IS NULL
+ORDER BY 
+    c.c_name ASC, s.cost_rank DESC;

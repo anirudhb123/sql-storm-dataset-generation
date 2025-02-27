@@ -1,0 +1,52 @@
+
+WITH TagDetails AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS TagPostCount,
+        STRING_AGG(DISTINCT p.Title, ', ') AS RelatedPostTitles,
+        SUM(COALESCE(v.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.DownVotes, 0)) AS TotalDownVotes
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+    WHERE 
+        t.IsModeratorOnly IS NULL AND t.IsRequired IS NULL
+    GROUP BY 
+        t.Id, t.TagName
+), 
+
+TopTags AS (
+    SELECT 
+        TagId,
+        TagName,
+        TagPostCount,
+        RelatedPostTitles,
+        TotalUpVotes,
+        TotalDownVotes,
+        RANK() OVER (ORDER BY TagPostCount DESC) AS RankByPostCount,
+        RANK() OVER (ORDER BY TotalUpVotes DESC) AS RankByUpVotes
+    FROM 
+        TagDetails
+)
+
+SELECT 
+    TagId,
+    TagName,
+    TagPostCount,
+    RelatedPostTitles,
+    TotalUpVotes,
+    TotalDownVotes,
+    RankByPostCount,
+    RankByUpVotes
+FROM 
+    TopTags
+WHERE 
+    RankByPostCount <= 10 OR RankByUpVotes <= 10
+ORDER BY 
+    RankByPostCount, RankByUpVotes;

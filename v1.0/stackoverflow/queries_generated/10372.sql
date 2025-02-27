@@ -1,0 +1,30 @@
+-- Performance Benchmarking Query
+
+-- This query retrieves user statistics, post statistics, and comment statistics across the relevant tables for benchmarking purposes
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.CreationDate,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+    SUM(v.BountyAmount) AS TotalBounties,
+    SUM(v.CreationDate IS NOT NULL) AS TotalVotes,
+    AVG(p.Score) AS AveragePostScore,
+    AVG(c.Score) AS AverageCommentScore
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation, u.CreationDate;
+
+-- Note: This query aggregates data for performance metrics, including the total number of posts, comments, and votes per user,
+-- as well as averages for post and comment scores.

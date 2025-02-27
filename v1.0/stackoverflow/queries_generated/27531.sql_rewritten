@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') tagArray ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tagArray
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, u.DisplayName
+    ORDER BY 
+        p.CreationDate DESC
+),
+PopularPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        ViewCount,
+        OwnerDisplayName,
+        AnswerCount,
+        Tags,
+        RANK() OVER (ORDER BY ViewCount DESC) AS ViewRank
+    FROM 
+        RankedPosts
+)
+SELECT 
+    PostId,
+    Title,
+    Body,
+    CreationDate,
+    ViewCount,
+    OwnerDisplayName,
+    AnswerCount,
+    Tags,
+    ViewRank
+FROM 
+    PopularPosts
+WHERE 
+    ViewRank <= 10;

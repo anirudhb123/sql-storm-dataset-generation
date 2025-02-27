@@ -1,0 +1,61 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName, 
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+),
+TopQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Score,
+        p.OwnerUserId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 1  
+    GROUP BY p.Id
+    HAVING COUNT(v.Id) > 0
+), 
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        c.Name AS CloseReason
+    FROM PostHistory ph
+    JOIN CloseReasonTypes c ON ph.Comment::int = c.Id
+    WHERE ph.PostHistoryTypeId = 10  
+),
+MostVotedQuestions AS (
+    SELECT 
+        tq.PostId,
+        tq.Title,
+        tq.ViewCount,
+        tq.AnswerCount,
+        tq.Score,
+        tq.UpVotes
+    FROM TopQuestions tq 
+    WHERE tq.Score > 0
+    ORDER BY tq.Score DESC
+    LIMIT 10
+)
+SELECT 
+    uq.UserId,
+    uq.DisplayName,
+    uq.Reputation,
+    tq.Title,
+    tq.ViewCount,
+    tq.AnswerCount,
+    tq.Score,
+    tq.UpVotes,
+    cp.ClosedDate,
+    cp.CloseReason
+FROM UserReputation uq
+JOIN MostVotedQuestions tq ON uq.UserId = tq.OwnerUserId
+LEFT JOIN ClosedPosts cp ON tq.PostId = cp.PostId
+WHERE uq.ReputationRank <= 50 
+ORDER BY uq.Reputation DESC, tq.UpVotes DESC

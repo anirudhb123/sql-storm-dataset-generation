@@ -1,0 +1,57 @@
+
+WITH RECURSIVE title_hierarchy AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        t.episode_of_id,
+        1 AS level
+    FROM 
+        title t
+    WHERE 
+        t.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        t.episode_of_id,
+        th.level + 1
+    FROM 
+        title t
+    JOIN 
+        title_hierarchy th ON t.episode_of_id = th.title_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    th.title,
+    th.production_year,
+    COUNT(mk.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    MAX(ci.nr_order) AS highest_role_order,
+    AVG(ci.nr_order) AS avg_role_order,
+    COUNT(DISTINCT cc.subject_id) FILTER (WHERE cc.status_id IS NULL) AS coactor_count
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    title_hierarchy th ON ci.movie_id = th.title_id
+LEFT JOIN 
+    movie_keyword mk ON th.title_id = mk.movie_id
+LEFT JOIN 
+    complete_cast cc ON th.title_id = cc.movie_id
+WHERE 
+    th.production_year >= 2000
+    AND (ak.name ILIKE '%Smith%' OR ak.name ILIKE 'John%')
+GROUP BY 
+    ak.name, th.title, th.production_year
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 0 
+ORDER BY 
+    avg_role_order DESC, keywords;

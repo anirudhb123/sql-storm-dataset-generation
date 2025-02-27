@@ -1,0 +1,63 @@
+
+WITH regional_stats AS (
+    SELECT
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        COUNT(DISTINCT c.c_custkey) AS total_customers
+    FROM
+        region r
+    JOIN
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY
+        r.r_name
+),
+supplier_stats AS (
+    SELECT
+        s.s_name AS supplier_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        AVG(s.s_acctbal) AS avg_account_balance
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY
+        s.s_name
+)
+SELECT
+    rs.region_name,
+    rs.total_revenue AS region_total_revenue,
+    rs.total_orders AS region_total_orders,
+    ss.supplier_name,
+    ss.total_revenue AS supplier_total_revenue,
+    ss.total_orders AS supplier_total_orders,
+    ss.avg_account_balance
+FROM
+    regional_stats rs
+JOIN
+    supplier_stats ss ON rs.region_name = (SELECT n.r_name FROM nation n JOIN supplier s ON n.n_nationkey = s.s_nationkey WHERE s.s_name = ss.supplier_name)
+ORDER BY
+    region_total_revenue DESC, supplier_total_revenue DESC;

@@ -1,0 +1,37 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT i_item_sk, i_item_id, i_item_desc, i_current_price, i_brand, 1 AS level
+    FROM item
+    WHERE i_rec_start_date <= CURRENT_DATE AND (i_rec_end_date IS NULL OR i_rec_end_date > CURRENT_DATE)
+    
+    UNION ALL
+    
+    SELECT ih.i_item_sk, ih.i_item_id, ih.i_item_desc, ih.i_current_price * 0.9 AS i_current_price, ih.i_brand, ih.level + 1
+    FROM item AS ih
+    JOIN ItemHierarchy AS ih_parent ON ih.i_item_sk = ih_parent.i_item_sk
+    WHERE ih_parent.level < 5
+)
+SELECT
+    ca_state,
+    COUNT(DISTINCT c.c_customer_sk) AS num_customers,
+    SUM(CASE WHEN cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+    SUM(CASE WHEN cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count,
+    AVG(item_price) AS avg_item_price,
+    MAX(item_price) AS max_item_price,
+    MIN(item_price) AS min_item_price
+FROM (
+    SELECT 
+        ca.ca_state,
+        ws.ws_quantity * ws.ws_sales_price AS item_price,
+        c.c_customer_sk,
+        cd.cd_gender
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN ItemHierarchy ih ON ws.ws_item_sk = ih.i_item_sk
+    WHERE ih.i_current_price > 50
+) AS aggregated_sales
+GROUP BY ca_state
+HAVING COUNT(DISTINCT c_customer_sk) > 10
+ORDER BY ca_state;

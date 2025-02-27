@@ -1,0 +1,52 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_retailprice,
+           CASE 
+               WHEN p.p_size IS NULL THEN 'Unknown Size'
+               WHEN p.p_size < 10 THEN 'Small'
+               WHEN p.p_size BETWEEN 10 AND 20 THEN 'Medium'
+               ELSE 'Large'
+           END AS SizeCategory
+    FROM part p
+    WHERE p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice)
+        FROM part p2
+        WHERE p2.p_size IS NOT NULL
+    )
+),
+CostlyItems AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS TotalSupplyCost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_supplycost) > 1000
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS NetRevenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('F', 'O')
+    GROUP BY o.o_orderkey
+)
+SELECT r.r_name AS RegionName, COUNT(DISTINCT c.c_custkey) AS CustomerCount,
+       SUM(CASE WHEN p.SizeCategory = 'Large' THEN 1 ELSE 0 END) AS LargePartCount,
+       SUM(COALESCE(ps.TotalSupplyCost, 0)) AS TotalSupplyCost,
+       AVG(od.NetRevenue) AS AverageNetRevenue
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN FilteredParts p ON p.p_partkey IN (SELECT DISTINCT ps.ps_partkey FROM CostlyItems ps)
+LEFT JOIN RankedSuppliers s ON c.c_nationkey = s.s_nationkey AND s.rn = 1
+LEFT JOIN OrderDetails od ON c.c_custkey = od.o_orderkey
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5
+   AND SUM(p.p_retailprice) IS NOT NULL
+   AND AVG(od.NetRevenue) > (
+       SELECT AVG(NetRevenue)
+       FROM OrderDetails
+   )
+ORDER BY r.r_name DESC;

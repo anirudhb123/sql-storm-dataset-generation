@@ -1,0 +1,58 @@
+
+WITH sales_summary AS (
+    SELECT 
+        d.d_year,
+        c.c_gender,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_quantity) AS avg_order_quantity,
+        COUNT(DISTINCT c.c_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2019 AND 2023
+    GROUP BY 
+        d.d_year, c.c_gender
+),
+warehouse_summary AS (
+    SELECT 
+        w.w_warehouse_id,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_paid_inc_tax) AS total_revenue
+    FROM 
+        warehouse w
+    JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+),
+final_summary AS (
+    SELECT 
+        ss.d_year,
+        ss.c_gender,
+        ss.total_net_profit,
+        ws.order_count,
+        ws.total_revenue
+    FROM 
+        sales_summary ss
+    LEFT JOIN 
+        warehouse_summary ws ON ss.d_year = EXTRACT(YEAR FROM CURRENT_DATE) -- Replace with year if needed
+)
+SELECT 
+    fs.d_year,
+    fs.c_gender,
+    fs.total_net_profit,
+    COALESCE(fs.order_count, 0) AS order_count,
+    COALESCE(fs.total_revenue, 0) AS total_revenue,
+    CASE 
+        WHEN fs.order_count > 0 THEN fs.total_net_profit / fs.order_count
+        ELSE 0 
+    END AS avg_net_profit_per_order
+FROM 
+    final_summary fs
+ORDER BY 
+    fs.d_year, fs.c_gender;

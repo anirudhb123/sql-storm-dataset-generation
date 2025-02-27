@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        NULL::integer AS parent_movie_id,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.movie_id AS parent_movie_id,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+)
+
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(c.id) AS cast_count,
+    COUNT(DISTINCT(k.keyword)) AS unique_keywords,
+    STRING_AGG(DISTINCT(k.keyword, ', ')) AS keywords_list,
+    AVG(COALESCE(pi.info::integer, 0)) AS average_rating,
+    MAX(COALESCE(pi.info, 'N/A')) AS highest_info_note,
+    mh.parent_movie_id,
+    mh.level
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id 
+LEFT JOIN 
+    person_info pi ON c.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+WHERE 
+    mh.level <= 2
+GROUP BY 
+    mh.movie_id, mh.parent_movie_id, mh.level, m.title, m.production_year
+ORDER BY 
+    mh.parent_movie_id, mh.level DESC, average_rating DESC
+LIMIT 50;

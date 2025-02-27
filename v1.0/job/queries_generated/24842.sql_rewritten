@@ -1,0 +1,92 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        at.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY at.kind_id ORDER BY at.production_year DESC) AS rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+        AND at.title IS NOT NULL
+),
+TopRankedMovies AS (
+    SELECT 
+        title,
+        production_year,
+        kind_id
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5
+),
+MoviesWithKeywords AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        kt.keyword
+    FROM 
+        TopRankedMovies tm
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = (
+            SELECT movie_id 
+            FROM aka_title WHERE title = tm.title LIMIT 1
+        )
+    LEFT JOIN 
+        keyword kt ON kt.id = mk.keyword_id
+),
+MoviesWithCompanyInfo AS (
+    SELECT 
+        mwk.title,
+        mwk.production_year,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        MoviesWithKeywords mwk
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = (
+            SELECT id FROM aka_title WHERE title = mwk.title LIMIT 1
+        )
+    LEFT JOIN 
+        company_name cn ON cn.id = mc.company_id
+    LEFT JOIN 
+        company_type ct ON ct.id = mc.company_type_id
+),
+FinalOutput AS (
+    SELECT 
+        mwci.title,
+        mwci.production_year,
+        mwci.company_name,
+        mwci.company_type,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        COUNT(DISTINCT ci.id) AS cast_count
+    FROM 
+        MoviesWithCompanyInfo mwci
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = (
+            SELECT id FROM aka_title WHERE title = mwci.title LIMIT 1
+        )
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = (
+            SELECT id FROM aka_title WHERE title = mwci.title LIMIT 1
+        )
+    GROUP BY 
+        mwci.title,
+        mwci.production_year,
+        mwci.company_name,
+        mwci.company_type
+)
+SELECT 
+    fo.title,
+    fo.production_year,
+    COALESCE(fo.company_name, 'Unknown Company') AS company_name,
+    COALESCE(fo.company_type, 'N/A') AS company_type,
+    fo.keyword_count,
+    fo.cast_count
+FROM 
+    FinalOutput fo
+WHERE 
+    fo.production_year > (SELECT MAX(production_year) FROM aka_title)
+ORDER BY 
+    fo.production_year DESC, fo.title ASC
+LIMIT 10;

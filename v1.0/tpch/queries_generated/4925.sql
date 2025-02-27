@@ -1,0 +1,48 @@
+WITH OrderTotal AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_linenumber) AS line_item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        r.r_name AS supplier_region,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, r.r_name
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderstatus,
+    o.total_price,
+    COALESCE(sd.supplier_region, 'Unknown') AS supplier_region,
+    sd.total_supply_cost,
+    ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.total_price DESC) AS order_rank
+FROM 
+    OrderTotal o
+LEFT JOIN 
+    SupplierDetails sd ON sd.total_supply_cost IS NOT NULL
+WHERE 
+    o.line_item_count > 5
+ORDER BY 
+    o.total_price DESC, o.o_orderkey
+LIMIT 10;

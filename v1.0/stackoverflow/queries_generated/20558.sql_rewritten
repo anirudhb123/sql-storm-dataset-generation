@@ -1,0 +1,75 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        RANK() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS ActivityRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        *
+    FROM 
+        UserActivity
+    WHERE 
+        ActivityRank <= 10
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseCount,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END), 0) AS ReopenCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title
+),
+MostCommentedPosts AS (
+    SELECT 
+        *
+    FROM 
+        PostStats
+    WHERE 
+        CommentCount > 0
+    ORDER BY 
+        CommentCount DESC
+    LIMIT 5
+)
+
+SELECT 
+    tu.DisplayName,
+    mp.Title AS TopPostTitle,
+    mp.CommentCount,
+    (COALESCE(mc.ClosedCount, 0) - COALESCE(mc.ReopenCount, 0)) AS NetCloseCount,
+    CASE 
+        WHEN (COALESCE(mc.ClosedCount, 0) - COALESCE(mc.ReopenCount, 0)) > 0 
+        THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus
+FROM 
+    TopUsers tu
+JOIN 
+    MostCommentedPosts mp ON tu.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = (SELECT PostId FROM MostCommentedPosts ORDER BY CommentCount DESC LIMIT 1))
+LEFT JOIN 
+    PostStats mc ON mp.PostId = mc.PostId
+ORDER BY 
+    tu.PostCount DESC, mp.CommentCount DESC;

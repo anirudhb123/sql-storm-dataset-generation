@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate >= NOW() - INTERVAL '3 months'
+    GROUP BY 
+        c.PostId
+),
+TagUsage AS (
+    SELECT 
+        unnest(string_to_array(p.Tags, ',')::text[]) AS TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(p.Id) > 5
+)
+SELECT 
+    rp.Id,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.Score,
+    COALESCE(rc.CommentCount, 0) AS RecentCommentCount,
+    tu.PostCount AS PopularTagCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentComments rc ON rp.Id = rc.PostId
+LEFT JOIN 
+    TagUsage tu ON EXISTS (SELECT 1 FROM string_to_array(rp.Tags, ',') AS tag WHERE tag = tu.TagName)
+WHERE 
+    rp.PostRank = 1
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC
+LIMIT 10;

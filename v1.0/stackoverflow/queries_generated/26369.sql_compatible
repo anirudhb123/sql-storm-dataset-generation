@@ -1,0 +1,88 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(c.CommentCount, 0)) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(Id) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+UserReputationRanked AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        AnswerCount,
+        QuestionCount,
+        TotalScore,
+        TotalComments,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM 
+        UserPostStats
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        AnswerCount,
+        QuestionCount,
+        TotalScore,
+        TotalComments,
+        ReputationRank,
+        ScoreRank
+    FROM 
+        UserReputationRanked
+    WHERE 
+        ReputationRank <= 10 OR ScoreRank <= 10
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.PostCount,
+    u.QuestionCount,
+    u.AnswerCount,
+    u.TotalScore,
+    u.TotalComments,
+    p.Title,
+    p.Body,
+    p.CreationDate AS PostCreationDate,
+    p.LastActivityDate AS PostLastActivity,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopUsers u
+JOIN 
+    Posts p ON u.UserId = p.OwnerUserId
+JOIN 
+    Tags t ON t.Id IN (SELECT UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))::int)
+                      )
+WHERE 
+    p.PostTypeId = 1
+GROUP BY 
+    u.UserId, u.DisplayName, u.Reputation, u.PostCount, u.QuestionCount, 
+    u.AnswerCount, u.TotalScore, u.TotalComments, p.Title, p.Body, 
+    p.CreationDate, p.LastActivityDate
+ORDER BY 
+    u.Reputation DESC, u.TotalScore DESC;

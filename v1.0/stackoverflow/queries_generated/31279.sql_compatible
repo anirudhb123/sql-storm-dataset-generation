@@ -1,0 +1,75 @@
+
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation, 
+        u.DisplayName, 
+        u.CreationDate, 
+        1 AS Level
+    FROM Users u
+    WHERE u.Reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        u.Id, 
+        u.Reputation, 
+        u.DisplayName, 
+        u.CreationDate, 
+        ur.Level + 1
+    FROM Users u
+    INNER JOIN UserReputation ur ON ur.UserId = u.Id
+    WHERE u.Reputation > ur.Reputation
+),
+TopPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.ViewCount, 
+        p.CreationDate, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Ranking
+    FROM Posts p 
+    INNER JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE u.Reputation > 1000
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS CloseReason,
+        CASE 
+            WHEN ph.Comment IS NOT NULL THEN 'Closed' 
+            ELSE 'Opened' 
+        END AS Status
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11)
+    WHERE p.ClosedDate IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+)
+SELECT 
+    u.DisplayName, 
+    u.Reputation AS UserReputation,
+    ur.Level AS ReputationLevel,
+    COUNT(DISTINCT tp.PostId) AS TotalTopPosts,
+    SUM(CASE WHEN cp.Status = 'Closed' THEN 1 ELSE 0 END) AS ClosedPostCount,
+    COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+    ub.BadgeNames
+FROM Users u
+JOIN UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN TopPosts tp ON u.Id = tp.OwnerUserId AND tp.Ranking <= 5
+LEFT JOIN ClosedPosts cp ON u.Id = cp.OwnerUserId
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+WHERE u.CreationDate < DATEADD(YEAR, -5, '2024-10-01')
+GROUP BY u.DisplayName, u.Reputation, ur.Level, ub.BadgeCount, ub.BadgeNames
+HAVING COUNT(DISTINCT tp.PostId) >= 5
+ORDER BY u.Reputation DESC, ClosedPostCount DESC;

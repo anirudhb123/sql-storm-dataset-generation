@@ -1,0 +1,49 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(ws.ws_sales_price, 0) + COALESCE(cs.cs_sales_price, 0) + COALESCE(ss.ss_sales_price, 0)) AS total_sales,
+        COUNT(DISTINCT COALESCE(ws.ws_order_number, cs.cs_order_number, ss.ss_ticket_number)) AS order_count,
+        MAX(COALESCE(ws.ws_net_profit, 0) + COALESCE(cs.cs_net_profit, 0) + COALESCE(ss.ss_net_profit, 0)) AS max_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        c.c_country IS NOT NULL
+    GROUP BY 
+        c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        c_customer_id,
+        total_sales,
+        order_count,
+        max_profit
+    FROM 
+        CustomerSales 
+    WHERE 
+        total_sales > 10000 
+)
+
+SELECT 
+    hvc.c_customer_id,
+    hvc.total_sales,
+    hvc.order_count,
+    ROW_NUMBER() OVER (ORDER BY hvc.total_sales DESC) AS sales_rank,
+    COALESCE(NULLIF(hvc.max_profit, 0), 'No Profit') AS max_profit_status
+FROM 
+    HighValueCustomers hvc
+ORDER BY 
+    hvc.total_sales DESC
+LIMIT 10;
+
+SELECT 
+    'Total Number of High Value Customers:' AS message,
+    COUNT(*) AS high_value_customers
+FROM 
+    HighValueCustomers;

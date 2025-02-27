@@ -1,0 +1,44 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > 500 AND sh.level < 3
+),
+total_lineitem AS (
+    SELECT l_orderkey, SUM(l_extendedprice * (1 - l_discount)) AS total_price
+    FROM lineitem
+    GROUP BY l_orderkey
+),
+high_value_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus
+    FROM orders o
+    JOIN total_lineitem tl ON o.o_orderkey = tl.l_orderkey
+    WHERE tl.total_price > 10000
+),
+customer_data AS (
+    SELECT c.c_custkey, c.c_name, r.r_name AS region_name, 
+           SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY c.c_custkey, c.c_name, r.r_name
+)
+SELECT cd.c_custkey, cd.c_name, cd.region_name, cd.total_spent,
+       sh.s_name AS supplier_name, sh.level AS supplier_level
+FROM customer_data cd
+LEFT JOIN supplier_hierarchy sh ON cd.region_name = (SELECT r.r_name 
+                                                      FROM nation n 
+                                                      JOIN region r ON n.n_regionkey = r.r_regionkey 
+                                                      WHERE n.n_nationkey = (SELECT c.c_nationkey 
+                                                                             FROM customer c WHERE c.c_custkey = cd.c_custkey))
+WHERE cd.total_spent > 5000
+ORDER BY cd.total_spent DESC, sh.level ASC
+LIMIT 10;

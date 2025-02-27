@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND 
+        ps.ps_availqty > 0
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        DENSE_RANK() OVER (ORDER BY o.o_totalprice DESC) AS total_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate > CURRENT_DATE - INTERVAL '1 year' AND 
+        o.o_orderstatus IN ('O', 'P')
+),
+AggregatedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(*) AS item_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(COALESCE(a.total_revenue, 0)) AS total_revenue,
+    AVG(CASE 
+            WHEN r.r_name IS NULL THEN 0 
+            ELSE s.s_acctbal 
+        END) AS avg_supplier_acctbal,
+    SUM( CASE WHEN fo.total_rank <= 10 THEN fo.o_totalprice ELSE 0 END ) AS top_order_value
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    FilteredOrders fo ON c.c_custkey = fo.o_custkey
+LEFT JOIN 
+    AggregatedLineItems a ON fo.o_orderkey = a.l_orderkey
+WHERE
+    s.s_acctbal BETWEEN 1000 AND 10000 OR s.s_acctbal IS NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 1 OR SUM(COALESCE(a.total_revenue, 0)) > 100000
+ORDER BY 
+    AVG(s.s_acctbal) DESC NULLS LAST;

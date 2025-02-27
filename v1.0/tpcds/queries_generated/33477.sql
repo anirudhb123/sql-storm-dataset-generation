@@ -1,0 +1,88 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        cs_item_sk,
+        cs_order_number,
+        cs_quantity,
+        cs_sales_price,
+        cs_ext_sales_price,
+        cs_ext_discount_amt,
+        CASE WHEN cs_ext_discount_amt IS NULL THEN 0 ELSE cs_ext_discount_amt END AS DiscountAmount
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    UNION ALL
+    SELECT 
+        ss_item_sk,
+        ss_ticket_number,
+        ss_quantity,
+        ss_sales_price,
+        ss_ext_sales_price,
+        ss_ext_discount_amt,
+        CASE WHEN ss_ext_discount_amt IS NULL THEN 0 ELSE ss_ext_discount_amt END AS DiscountAmount
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+TotalSales AS (
+    SELECT 
+        item.i_item_id,
+        SUM(sales.cs_quantity + sales.ss_quantity) AS TotalQuantity,
+        SUM(sales.cs_ext_sales_price + sales.ss_ext_sales_price) AS TotalSales,
+        SUM(sales.DiscountAmount) AS TotalDiscount,
+        SUM(sales.cs_ext_sales_price + sales.ss_ext_sales_price) - SUM(sales.DiscountAmount) AS NetSales
+    FROM 
+        item
+    LEFT JOIN 
+        (SELECT * FROM RecursiveSales) AS sales
+    ON 
+        item.i_item_sk = sales.cs_item_sk OR item.i_item_sk = sales.ss_item_sk
+    GROUP BY 
+        item.i_item_id
+),
+MeanSales AS (
+    SELECT 
+        AVG(TotalSales) AS MeanSalesValue,
+        AVG(NetSales) AS MeanNetSalesValue
+    FROM 
+        TotalSales
+),
+FinalReport AS (
+    SELECT 
+        t.i_item_id,
+        t.TotalQuantity,
+        t.TotalSales,
+        t.TotalDiscount,
+        t.NetSales,
+        CASE 
+            WHEN t.NetSales > m.MeanNetSalesValue THEN 'Above Average'
+            ELSE 'Below Average'
+        END AS SalesComparison
+    FROM 
+        TotalSales t
+    CROSS JOIN 
+        MeanSales m
+    WHERE 
+        t.TotalSales > 1000
+)
+SELECT 
+    f.i_item_id,
+    f.TotalQuantity,
+    f.TotalSales,
+    f.TotalDiscount,
+    f.NetSales,
+    f.SalesComparison,
+    COALESCE((
+        SELECT 
+            AVG(ws.net_paid)
+        FROM 
+            web_sales ws
+        WHERE 
+            ws.ws_item_sk = f.i_item_id
+    ), 0) AS AvgWebSales
+FROM 
+    FinalReport f
+ORDER BY 
+    f.NetSales DESC;

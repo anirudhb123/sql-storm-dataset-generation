@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_sales_price,
+        ws_ext_sales_price,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > 50
+
+    UNION ALL
+
+    SELECT 
+        cs_item_sk, 
+        cs_order_number, 
+        cs_sales_price,
+        cs_ext_sales_price,
+        sh.level + 1
+    FROM 
+        catalog_sales cs
+    JOIN 
+        sales_hierarchy sh ON cs.cs_item_sk = sh.ws_item_sk
+    WHERE 
+        cs.cs_sales_price < sh.ws_sales_price
+)
+
+SELECT 
+    ca.ca_city,
+    COUNT(DISTINCT c.c_customer_id) AS customer_count,
+    COALESCE(SUM(ws_ext_sales_price), 0) AS total_web_sales,
+    COALESCE(SUM(cs_ext_sales_price), 0) AS total_catalog_sales,
+    AVG(ws_sales_price) AS avg_web_sales_price,
+    AVG(cs_sales_price) AS avg_catalog_sales_price,
+    COUNT(DISTINCT CASE WHEN d.d_year = 2023 THEN ws_order_number END) AS orders_in_2023,
+    string_agg(DISTINCT i_brand, ', ') AS brands_sold
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+LEFT JOIN 
+    sales_hierarchy sh ON ws.ws_item_sk = sh.ws_item_sk OR cs.cs_item_sk = sh.ws_item_sk
+LEFT JOIN 
+    item i ON sh.ws_item_sk = i.i_item_sk OR sh.cs_item_sk = i.i_item_sk
+LEFT JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk OR cs.cs_sold_date_sk = d.d_date_sk
+WHERE 
+    (c.c_birth_country IS NULL OR c.c_birth_country != 'USA')
+    AND (ca.ca_state = 'CA' OR ca.ca_state IS NULL)
+GROUP BY 
+    ca.ca_city
+ORDER BY 
+    total_web_sales DESC, 
+    customer_count DESC
+LIMIT 10;

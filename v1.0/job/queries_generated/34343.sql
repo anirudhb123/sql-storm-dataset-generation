@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level,
+        mt.production_year
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 -- Starting with movies from the year 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        mh.level + 1,
+        at.production_year
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mc.company_id) AS production_company_count,
+    MAX(mk.keyword) AS top_keyword,
+    AVG(CASE 
+            WHEN ca.note IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS cast_note_present
+FROM 
+    MovieHierarchy mh
+JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+JOIN 
+    cast_info ca ON cc.subject_id = ca.person_id
+JOIN 
+    aka_name ak ON ca.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+WHERE 
+    mh.level < 3 -- Limit the depth of recursion
+GROUP BY 
+    ak.name, mt.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1 -- At least two production companies
+ORDER BY 
+    mh.production_year DESC, production_company_count DESC;
+
+### Explanation:
+1. **Recursive CTE (`MovieHierarchy`)**: This CTE builds a hierarchy of movies that are linked together. It starts from movies produced after the year 2000 and finds all linked movies. The recursion goes one level deeper at a time.
+
+2. **Main Query**:
+   - Joins the recursive CTE results with the `complete_cast`, `cast_info`, `aka_name`, `movie_companies`, and `movie_keyword` tables to fetch relevant data.
+   - Retrieves the actor's name, the movie title, and the year of production.
+   - Counts the distinct production companies (`production_company_count`) associated with each movie using a left join.
+   - Extracts the maximum keyword associated with each movie.
+   - Uses a conditional aggregate (`AVG`) to assess if notes are present for each cast member.
+
+3. **Filtering & Grouping**:
+   - Filters the results to show movies that have at least two production companies.
+   - Groups by actor name, movie title, and production year.
+
+4. **Ordering**: Finally, orders the results by production year in descending order, followed by the count of production companies.
+
+This query combines various SQL constructs like recursive CTE, outer joins, aggregates, and conditions to deliver a comprehensive output for performance benchmarking purposes.

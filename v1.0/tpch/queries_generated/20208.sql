@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE sh.level < 5 AND s.s_acctbal < (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_retailprice
+    FROM part p
+    WHERE p.p_size IN (SELECT DISTINCT ps.ps_availqty
+                       FROM partsupp ps
+                       WHERE ps.ps_supplycost > (SELECT AVG(ps_supplycost)
+                                                  FROM partsupp))
+    )
+),
+CustomerStats AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) IS NOT NULL
+)
+SELECT COALESCE(s.s_name, 'Unknown Supplier') AS Supplier_Name,
+       pd.p_name AS Part_Name,
+       cs.c_name AS Customer_Name,
+       cs.order_count AS Order_Count,
+       cs.total_spent AS Total_Spent,
+       ROW_NUMBER() OVER (PARTITION BY cs.c_custkey ORDER BY cs.total_spent DESC) AS Rank,
+       CASE 
+           WHEN cs.total_spent IS NULL THEN 'No Spending'
+           WHEN cs.total_spent > 1000 THEN 'High Roller'
+           ELSE 'Casual Buyer'
+       END AS Buyer_Category,
+       COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN l.l_orderkey END) AS Returns
+FROM SupplierHierarchy s
+FULL OUTER JOIN PartDetails pd ON s.s_nationkey = pd.p_mfgr
+JOIN CustomerStats cs ON cs.order_count > 5
+LEFT JOIN lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey
+                                           FROM orders o
+                                           WHERE o.o_orderstatus = 'F')
+GROUP BY Supplier_Name, Part_Name, Customer_Name, cs.order_count, cs.total_spent
+HAVING SUM(COALESCE(l.l_discount, 0)) > 0 OR pd.p_retailprice < 50.00
+ORDER BY cs.total_spent DESC, Rank
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

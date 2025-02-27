@@ -1,0 +1,82 @@
+WITH RECURSIVE SupplyCosts AS (
+    SELECT 
+        ps.suppkey, 
+        ps.partkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps 
+    GROUP BY ps.suppkey, ps.partkey
+
+    UNION ALL
+
+    SELECT 
+        sc.suppkey, 
+        sc.partkey, 
+        SUM(sc.total_supply_cost * 1.1) AS total_supply_cost
+    FROM SupplyCosts sc
+    JOIN partsupp ps ON sc.partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 100
+),
+
+CustomerOrders AS (
+    SELECT 
+        c.custkey, 
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c 
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 500
+    GROUP BY c.custkey
+),
+
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name 
+    FROM supplier s 
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+    ORDER BY s.s_acctbal DESC
+    LIMIT 5
+),
+
+FilteredParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice 
+    FROM part p 
+    WHERE p.p_retailprice BETWEEN 100 AND 500 
+      AND p.p_size IS NOT NULL
+),
+
+OrderDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_price,
+        COUNT(l.l_linenumber) AS item_count
+    FROM lineitem l 
+    WHERE l.l_shipdate > CURRENT_DATE - INTERVAL '1 year' 
+      AND l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+)
+
+SELECT 
+    co.custkey, 
+    co.order_count, 
+    co.total_spent, 
+    ps.p_partkey, 
+    ps.p_name, 
+    ps.p_retailprice,
+    od.net_price,
+    od.item_count,
+    CASE 
+        WHEN sc.total_supply_cost IS NULL THEN 'No Supply Cost' 
+        ELSE 'Supply Cost Exists' 
+    END AS supply_cost_status
+FROM CustomerOrders co
+JOIN FilteredParts ps ON co.order_count > 0
+LEFT JOIN OrderDetails od ON co.custkey = od.l_orderkey
+LEFT JOIN SupplyCosts sc ON ps.p_partkey = sc.partkey 
+WHERE co.total_spent > 1000 
+  AND ps.p_container IS NOT NULL 
+  AND (sc.suppkey IN (SELECT s_suppkey FROM HighValueSuppliers) OR sc.suppkey IS NULL)
+ORDER BY co.total_spent DESC, od.net_price ASC;

@@ -1,0 +1,102 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        tag.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags tag
+    JOIN 
+        Posts p ON tag.Id IN (
+            SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+        )
+    GROUP BY 
+        tag.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+PostEngagement AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount,
+        SUM(p.FavoriteCount) AS FavoriteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY 
+        p.OwnerUserId
+),
+UserEngagement AS (
+    SELECT 
+        ub.UserId,
+        ub.DisplayName,
+        ub.BadgeCount,
+        ub.GoldBadgeCount,
+        ub.SilverBadgeCount,
+        ub.BronzeBadgeCount,
+        COALESCE(pe.CommentCount, 0) AS CommentCount,
+        COALESCE(pe.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(pe.DownVoteCount, 0) AS DownVoteCount,
+        COALESCE(pe.FavoriteCount, 0) AS FavoriteCount
+    FROM 
+        UserBadgeCounts ub
+    LEFT JOIN 
+        PostEngagement pe ON ub.UserId = pe.OwnerUserId
+),
+OverallStats AS (
+    SELECT 
+        COUNT(*) AS TotalUsers,
+        SUM(BadgeCount) AS TotalBadges,
+        SUM(GoldBadgeCount) AS TotalGoldBadges,
+        SUM(SilverBadgeCount) AS TotalSilverBadges,
+        SUM(BronzeBadgeCount) AS TotalBronzeBadges,
+        SUM(CommentCount) AS TotalComments,
+        SUM(UpVoteCount) AS TotalUpVotes,
+        SUM(DownVoteCount) AS TotalDownVotes,
+        SUM(FavoriteCount) AS TotalFavorites
+    FROM 
+        UserEngagement
+)
+SELECT 
+    ue.UserId,
+    ue.DisplayName,
+    ue.BadgeCount,
+    ue.GoldBadgeCount,
+    ue.SilverBadgeCount,
+    ue.BronzeBadgeCount,
+    ue.CommentCount,
+    ue.UpVoteCount,
+    ue.DownVoteCount,
+    ue.FavoriteCount,
+    os.*
+FROM 
+    UserEngagement ue, OverallStats os
+JOIN 
+    PopularTags pt ON pt.TagName IN (
+        SELECT UNNEST(ue.Tag) 
+        FROM string_to_array(ue.Tags, ',') AS Tag
+    )
+ORDER BY 
+    ue.BadgeCount DESC, ue.UpVoteCount DESC
+LIMIT 20;

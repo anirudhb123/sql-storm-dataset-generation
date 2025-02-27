@@ -1,0 +1,69 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rn,
+        CASE 
+            WHEN p.p_size IS NULL THEN 'Unknown Size'
+            ELSE CAST(p.p_size AS varchar)
+        END AS size_desc
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (
+            SELECT AVG(p2.p_retailprice) 
+            FROM part p2 
+            WHERE p2.p_type = p.p_type
+        )
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn_supplier 
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+)
+SELECT 
+    r.r_name,
+    COALESCE(p.p_name, 'No Part') AS part_name,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    MAX(p.size_desc) AS max_size_desc
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey 
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey 
+WHERE 
+    (o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL)
+AND 
+    (p.p_type LIKE '%bizarre%' OR p.p_name LIKE '%strange%')
+AND 
+    COALESCE(s.s_acctbal, 0) > (
+        SELECT AVG(s2.s_acctbal) 
+        FROM supplier s2 
+        WHERE s2.s_nationkey = s.s_nationkey
+    )
+GROUP BY 
+    r.r_name, p.p_partkey, s.s_suppkey
+HAVING 
+    SUM(l.l_quantity) > 10
+OR 
+    COUNT(DISTINCT p.p_partkey) < 5
+ORDER BY 
+    revenue DESC, r.r_name ASC;

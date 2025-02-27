@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.DownVotes, 0)) AS TotalDownVotes,
+        SUM(COALESCE(v.Score, 0)) AS NetVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+             PostId, 
+             SUM(CASE WHEN VoteTypeId = 2 THEN 1 
+                      WHEN VoteTypeId = 3 THEN -1 
+                      ELSE 0 END) AS Score
+         FROM 
+             Votes 
+         GROUP BY 
+             PostId) v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        c.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes c ON ph.Comment::int = c.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalPosts,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    us.NetVotes,
+    rp.Title AS MostRecentPost,
+    rp.CreationDate AS MostRecentPostDate,
+    cp.ClosedDate,
+    cp.CloseReason
+FROM 
+    UserStats us
+LEFT JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId AND rp.PostRank = 1
+LEFT JOIN 
+    ClosedPosts cp ON us.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = cp.PostId)
+WHERE 
+    us.TotalPosts > 10
+ORDER BY 
+    us.NetVotes DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

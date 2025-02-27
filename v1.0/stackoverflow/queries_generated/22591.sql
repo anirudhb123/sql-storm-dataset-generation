@@ -1,0 +1,83 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(AVG(CASE WHEN V.VoteTypeId IN (2, 3) THEN V.VoteTypeId - 2 ELSE NULL END), 0) AS VoteBalance
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+), 
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS rn,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5)
+    WHERE 
+        P.CreationDate >= DATEADD(year, -1, GETDATE())
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.Score, P.AnswerCount
+),
+RankedPosts AS (
+    SELECT 
+        PS.*,
+        RANK() OVER (ORDER BY PS.Score DESC, PS.ViewCount DESC) AS PostRank
+    FROM 
+        PostStats PS
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    PS.Title,
+    PS.Score,
+    PS.ViewCount,
+    PS.CommentCount,
+    PS.PostRank,
+    (CASE 
+        WHEN PS.LastEditDate IS NOT NULL THEN 'Edited'
+        WHEN PS.LastEditDate IS NULL AND PS.Score > 0 THEN 'Active'
+        ELSE 'Inactive' 
+    END) AS PostStatus,
+    (SELECT STRING_AGG(T.TagName, ', ') 
+     FROM STRING_SPLIT(P.Tags, ',') AS T 
+     WHERE T.TagName IS NOT NULL) AS Tags,
+    COALESCE(CAST(PH.Comment AS VARCHAR(200)), 'No Comments') AS LastComment
+FROM 
+    Users U
+JOIN 
+    UserVoteStats UV ON U.Id = UV.UserId
+JOIN 
+    RankedPosts PS ON UV.UpVotes > UV.DownVotes AND UV.Reputation >= 1000
+LEFT JOIN 
+    (SELECT PostId, Comment FROM Comments
+     WHERE CreationDate = (SELECT MAX(CreationDate) 
+                           FROM Comments 
+                           WHERE PostId = Comments.PostId)) PH 
+    ON PS.PostId = PH.PostId
+WHERE 
+    PS.PostRank < 20
+ORDER BY 
+    PS.PostRank
+OPTION (RECOMPILE);
+
+This SQL query uses multiple advanced constructs:
+- Common Table Expressions (CTEs) for organizing user vote statistics and post statistics.
+- A subquery to calculate the last edit date.
+- A correlated subquery to fetch the last comment made on a post.
+- String aggregation to handle tag names in a readable format.
+- CASE statements for conditional output based on status checks.
+- Filters that ensure only active posts by users with substantial reputations are considered.
+- The `OPTION (RECOMPILE)` is employed for performance tuning by optimizing execution plans for this specific query execution only.

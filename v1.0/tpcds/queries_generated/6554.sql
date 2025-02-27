@@ -1,0 +1,53 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        COUNT(ss.ss_ticket_number) AS total_transactions,
+        MAX(d.d_date) AS last_purchase_date
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    JOIN 
+        date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_id 
+    FROM 
+        CustomerSales c
+    WHERE 
+        c.total_sales > 1000
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    cd.cd_gender,
+    cd.cd_election_id,
+    (SELECT 
+        COUNT(sr.sr_return_quantity) 
+     FROM 
+        store_returns sr 
+     WHERE 
+        sr.sr_customer_sk = c.c_customer_sk) AS total_returns,
+    (SELECT 
+        AVG(ws.ws_net_profit) 
+     FROM 
+        web_sales ws 
+     WHERE 
+        ws.ws_bill_customer_sk = c.c_customer_sk) AS avg_web_profit
+FROM 
+    customer c
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    c.c_customer_id IN (SELECT c.customer_id FROM HighValueCustomers)
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

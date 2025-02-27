@@ -1,0 +1,68 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_mktsegment,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+DetailedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        p.p_name,
+        p.p_brand
+    FROM 
+        lineitem l
+    JOIN 
+        part p ON l.l_partkey = p.p_partkey
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-10-01'
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.c_name,
+    ro.o_totalprice,
+    ro.c_mktsegment,
+    dli.l_partkey,
+    dli.l_quantity,
+    dli.l_extendedprice,
+    dli.l_discount,
+    ts.s_name AS SupplierName,
+    ts.TotalSupplyCost
+FROM 
+    RankedOrders ro
+JOIN 
+    DetailedLineItems dli ON ro.o_orderkey = dli.l_orderkey
+JOIN 
+    TopSuppliers ts ON dli.l_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ts.s_suppkey)
+WHERE 
+    ro.OrderRank <= 10
+ORDER BY 
+    ro.o_orderdate, ro.o_totalprice DESC;

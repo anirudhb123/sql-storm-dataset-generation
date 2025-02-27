@@ -1,0 +1,48 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+), TopRevenue AS (
+    SELECT 
+        order_status,
+        COUNT(*) AS order_count,
+        SUM(total_revenue) AS total_revenue
+    FROM (
+        SELECT 
+            o_orderstatus AS order_status,
+            total_revenue,
+            rank
+        FROM 
+            RankedOrders
+        WHERE 
+            rank <= 10
+    ) AS ranked
+    GROUP BY 
+        order_status
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    t.order_status,
+    t.order_count,
+    t.total_revenue
+FROM 
+    TopRevenue t
+JOIN 
+    supplier s ON s.s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_partkey = (SELECT p_partkey FROM part WHERE p_brand = 'Brand#23'))
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+ORDER BY 
+    r.r_name, n.n_name, t.order_status;

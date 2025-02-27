@@ -1,0 +1,96 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.Score,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.AcceptedAnswerId,
+        a.Score,
+        a.OwnerUserId,
+        ph.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy ph ON a.ParentId = ph.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2)  
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ph.PostId,
+    ph.Title,
+    ph.CreationDate,
+    ph.Score,
+    COALESCE(u.DisplayName, 'Anonymous') AS OwnerDisplayName,
+    ur.Reputation,
+    ur.ReputationRank,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    CASE 
+        WHEN ph.AcceptedAnswerId IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS HasAcceptedAnswer,
+    ROW_NUMBER() OVER (PARTITION BY ph.OwnerUserId ORDER BY ph.CreationDate DESC) AS PostOrder
+FROM 
+    RecursivePostHierarchy ph
+LEFT JOIN 
+    Users u ON ph.OwnerUserId = u.Id
+LEFT JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN 
+    PostStatistics ps ON ph.PostId = ps.PostId
+WHERE 
+    ur.ReputationRank <= 100  
+GROUP BY 
+    ph.PostId, 
+    ph.Title, 
+    ph.CreationDate, 
+    ph.Score, 
+    u.DisplayName, 
+    ur.Reputation, 
+    ur.ReputationRank, 
+    ps.CommentCount, 
+    ps.UpVotes, 
+    ps.DownVotes,
+    ph.AcceptedAnswerId
+ORDER BY 
+    ph.CreationDate DESC, 
+    ps.UpVotes DESC;

@@ -1,0 +1,42 @@
+WITH movie_summary AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+        ARRAY_AGG(DISTINCT co.name ORDER BY co.name) AS companies
+    FROM 
+        aka_title ak
+        JOIN title t ON ak.movie_id = t.id
+        LEFT JOIN cast_info c ON c.movie_id = t.id
+        LEFT JOIN movie_keyword mk ON mk.movie_id = t.id
+        LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+        LEFT JOIN movie_companies mc ON mc.movie_id = t.id
+        LEFT JOIN company_name co ON mc.company_id = co.id
+    WHERE 
+        t.production_year >= 2000
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'series'))
+    GROUP BY 
+        t.id
+    HAVING 
+        total_cast > 2
+)
+
+SELECT 
+    ms.title,
+    ms.production_year,
+    ms.total_cast,
+    ms.aka_names,
+    ms.keywords,
+    STRING_AGG(DISTINCT rt.role, ', ') AS roles
+FROM 
+    movie_summary ms
+    LEFT JOIN complete_cast cc ON ms.movie_id = cc.movie_id
+    LEFT JOIN role_type rt ON cc.subject_id = rt.id
+GROUP BY 
+    ms.movie_id, ms.title, ms.production_year, ms.total_cast, ms.aka_names, ms.keywords
+ORDER BY 
+    ms.production_year DESC, 
+    ms.total_cast DESC;

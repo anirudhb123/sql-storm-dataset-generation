@@ -1,0 +1,74 @@
+WITH PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        DENSE_RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS supply_rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+), RankedParts AS (
+    SELECT 
+        p.*,
+        CASE 
+            WHEN p.ps_availqty IS NULL THEN 'Unavailable'
+            WHEN p.ps_availqty < 10 THEN 'Low Stock'
+            ELSE 'In Stock'
+        END AS stock_status
+    FROM 
+        PartSupplier p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(ps_retailprice) FROM part)
+), CountrySales AS (
+    SELECT 
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    rp.p_partkey,
+    rp.p_name,
+    rp.p_retailprice,
+    rp.stock_status,
+    cs.total_sales,
+    CASE 
+        WHEN cs.sales_rank <= 5 THEN 'Top Seller'
+        ELSE 'Regular'
+    END AS sales_category
+FROM 
+    RankedParts rp
+LEFT JOIN 
+    CountrySales cs ON rp.p_partkey IN (
+        SELECT 
+            ps.ps_partkey 
+        FROM 
+            partsupp ps
+        WHERE 
+            ps.ps_supplycost < (
+                SELECT 
+                    AVG(ps_supplycost) 
+                FROM 
+                    partsupp
+            )
+    )
+WHERE 
+    rp.stock_status = 'In Stock'
+    AND (cs.total_sales IS NOT NULL OR rp.p_size BETWEEN 1 AND 100)
+ORDER BY 
+    rp.p_retailprice DESC, 
+    cs.total_sales DESC NULLS LAST;

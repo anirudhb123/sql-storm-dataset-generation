@@ -1,0 +1,74 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey
+), FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_totalprice, 
+        o.o_orderdate,
+        CASE 
+            WHEN o.o_orderstatus = 'O' THEN 'Open' 
+            ELSE 'Closed' 
+        END AS order_status
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN DATEADD(MONTH, -6, GETDATE()) AND GETDATE()
+        AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+), NullLogicTest AS (
+    SELECT 
+        c.c_custkey, 
+        COALESCE(NULLIF(c.c_name, ''), 'Unknown Customer') AS customer_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        FilteredOrders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), HighValueOrders AS (
+    SELECT 
+        fo.o_orderkey,
+        fo.o_totalprice,
+        ns.n_name AS supplier_nation
+    FROM 
+        FilteredOrders fo
+    LEFT JOIN 
+        RankedSuppliers rs ON fo.o_custkey = rs.s_suppkey
+    CROSS JOIN 
+        nation ns
+    WHERE 
+        fo.o_totalprice >= 5000 AND rs.total_cost IS NOT NULL
+)
+SELECT 
+    n.n_name AS nation_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(ho.o_totalprice) AS avg_order_price,
+    COUNT(DISTINCT ft.c_custkey) AS unique_customers,
+    MAX(CASE WHEN ft.order_status = 'Open' THEN 1 ELSE 0 END) AS has_open_orders
+FROM 
+    NullLogicTest ft
+JOIN 
+    lineitem l ON ft.order_count > 0
+LEFT JOIN 
+    HighValueOrders ho ON ho.o_orderkey = l.l_orderkey
+JOIN 
+    nation n ON ft.c_custkey = n.n_nationkey
+GROUP BY 
+    n.n_name 
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY 
+    total_revenue DESC;

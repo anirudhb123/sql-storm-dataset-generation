@@ -1,0 +1,78 @@
+WITH TagUsage AS (
+  SELECT 
+    unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag,
+    COUNT(*) AS PostCount
+  FROM 
+    Posts
+  WHERE 
+    PostTypeId = 1 -- Questions
+  GROUP BY 
+    Tag
+), 
+TopTags AS (
+  SELECT 
+    Tag, 
+    PostCount,
+    RANK() OVER (ORDER BY PostCount DESC) AS Rank
+  FROM 
+    TagUsage
+), 
+ClosedPosts AS (
+  SELECT 
+    ph.PostId,
+    ph.CreationDate,
+    p.Title,
+    p.Body,
+    STRING_AGG(DISTINCT t.Tag, ', ') AS ClosedTags
+  FROM 
+    PostHistory ph
+  JOIN 
+    Posts p ON ph.PostId = p.Id
+  JOIN 
+    Posts ph_posts ON ph_posts.Id = p.AcceptedAnswerId
+  JOIN 
+    TagUsage t ON t.Tag = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))
+  WHERE 
+    ph.PostHistoryTypeId = 10 -- Post Closed
+  GROUP BY 
+    ph.PostId, ph.CreationDate, p.Title, p.Body
+), 
+UserContribution AS (
+  SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+    COUNT(DISTINCT c.Id) AS CommentsMade
+  FROM 
+    Users u
+  LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+  LEFT JOIN 
+    Comments c ON c.UserId = u.Id
+  GROUP BY 
+    u.Id, u.DisplayName
+)
+
+SELECT 
+  u.UserId,
+  u.DisplayName,
+  u.QuestionsAsked,
+  u.AnswersGiven,
+  u.CommentsMade,
+  t.Tag,
+  t.PostCount,
+  cp.Title,
+  cp.Body,
+  cp.CreationDate
+FROM 
+  UserContribution u
+JOIN 
+  TopTags t ON u.QuestionsAsked > 0
+JOIN 
+  ClosedPosts cp ON cp.ClosedTags LIKE '%' || t.Tag || '%' 
+WHERE 
+  t.Rank <= 10 -- Focusing on top 10 tags
+ORDER BY 
+  u.CommentsMade DESC, 
+  cp.CreationDate DESC;

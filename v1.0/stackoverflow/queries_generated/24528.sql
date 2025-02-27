@@ -1,0 +1,57 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        AVG(V.BountyAmount) FILTER (WHERE V.BountyAmount IS NOT NULL) AS AvgBounty
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+TopUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.PostCount,
+        UA.Upvotes,
+        UA.Downvotes,
+        UA.BadgeCount,
+        UA.AvgBounty,
+        RANK() OVER (ORDER BY UA.PostCount DESC, UA.Upvotes DESC) AS UserRank
+    FROM UserActivity UA
+    WHERE UA.PostCount > 0
+),
+LatestPostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRow
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+)
+SELECT 
+    TU.UserId,
+    TU.DisplayName,
+    TU.PostCount,
+    COALESCE(UA.Upvotes, 0) - COALESCE(UA.Downvotes, 0) AS NetVotes,
+    TU.BadgeCount,
+    TU.AvgBounty,
+    LPD.Title AS LatestPostTitle,
+    LPD.CreationDate AS LatestPostDate,
+    LPD.ViewCount AS LatestPostViews,
+    LPD.OwnerDisplayName AS LatestPostOwner
+FROM TopUsers TU
+LEFT JOIN UserActivity UA ON TU.UserId = UA.UserId
+LEFT JOIN LatestPostDetails LPD ON TU.UserId = LPD.OwnerDisplayName AND LPD.PostRow = 1
+WHERE TU.UserRank <= 10
+ORDER BY TU.UserRank, TU.PostCount DESC
+OPTION (RECOMPILE);

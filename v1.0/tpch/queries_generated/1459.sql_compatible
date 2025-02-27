@@ -1,0 +1,40 @@
+
+WITH SupplierCost AS (
+    SELECT ps_partkey, ps_suppkey, SUM(ps_supplycost * ps_availqty) AS total_cost
+    FROM partsupp
+    GROUP BY ps_partkey, ps_suppkey
+),
+HighValueOrders AS (
+    SELECT o_orderkey, SUM(l_extendedprice * (1 - l_discount)) AS order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o_orderkey
+    HAVING SUM(l_extendedprice * (1 - l_discount)) > 10000
+),
+CustomerSupplier AS (
+    SELECT c.c_custkey, c.c_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM customer c
+    JOIN supplier s ON c.c_nationkey = s.s_nationkey
+),
+RankedSuppliers AS (
+    SELECT cs.*, 
+           RANK() OVER (PARTITION BY cs.c_custkey ORDER BY cs.s_acctbal DESC) AS rank
+    FROM CustomerSupplier cs
+),
+PartOrders AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, COUNT(o.o_orderkey) AS total_orders
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+)
+SELECT ps.ps_partkey, p.p_name, p.p_brand, ps.total_cost, po.total_orders, 
+       cs.c_name, cs.s_name, cs.s_acctbal,
+       ROW_NUMBER() OVER (PARTITION BY cs.c_custkey ORDER BY ps.total_cost DESC) AS supplier_rank
+FROM SupplierCost ps
+JOIN PartOrders po ON ps.ps_partkey = po.p_partkey
+JOIN RankedSuppliers cs ON ps.ps_suppkey = cs.s_suppkey
+WHERE (po.total_orders > 5 OR cs.s_acctbal IS NOT NULL)
+  AND (cs.rank = 1 OR po.total_orders > 10)
+ORDER BY ps.total_cost DESC, po.total_orders ASC;

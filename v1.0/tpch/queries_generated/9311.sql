@@ -1,0 +1,61 @@
+WITH RankedSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        r.r_name = 'EUROPE'
+        AND l.l_shipdate >= DATE '2023-01-01'
+        AND l.l_shipdate < DATE '2024-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+TopProducts AS (
+    SELECT 
+        p_partkey, 
+        p_name, 
+        revenue 
+    FROM 
+        RankedSales
+    WHERE 
+        rank <= 10
+)
+SELECT 
+    tp.p_partkey,
+    tp.p_name,
+    tp.revenue,
+    COALESCE(c.c_name, 'Unknown') AS customer_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(s.s_acctbal) AS average_supplier_balance
+FROM 
+    TopProducts tp
+LEFT JOIN 
+    orders o ON EXISTS (
+        SELECT 1 
+        FROM lineitem l 
+        WHERE l.l_orderkey = o.o_orderkey 
+        AND l.l_partkey = tp.p_partkey
+    )
+LEFT JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    partsupp ps ON tp.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+GROUP BY 
+    tp.p_partkey, tp.p_name
+ORDER BY 
+    tp.revenue DESC;

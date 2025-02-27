@@ -1,0 +1,59 @@
+WITH MovieRatings AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS num_actors,
+        AVG(CASE WHEN pi.info_type_id = 1 THEN pi.info::numeric ELSE NULL END) AS average_rating
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        person_info pi ON ci.person_id = pi.person_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.title, mt.production_year
+),
+TopRatedMovies AS (
+    SELECT 
+        title,
+        production_year,
+        num_actors,
+        average_rating,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY average_rating DESC) AS rank
+    FROM 
+        MovieRatings
+)
+SELECT 
+    t.title, 
+    t.production_year, 
+    t.num_actors, 
+    t.average_rating 
+FROM 
+    TopRatedMovies t
+WHERE 
+    t.rank <= 5 
+ORDER BY 
+    t.production_year, 
+    t.average_rating DESC
+UNION ALL
+SELECT 
+    'Overall Top Rated' AS title, 
+    NULL AS production_year, 
+    COUNT(DISTINCT ci.person_id) AS num_actors, 
+    AVG(CASE WHEN pi.info_type_id = 1 THEN pi.info::numeric ELSE NULL END) AS average_rating
+FROM 
+    complete_cast cc
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id
+WHERE 
+    pi.info_type_id IS NOT NULL
+GROUP BY 
+    pi.info_type_id
+ORDER BY 
+    average_rating DESC;

@@ -1,0 +1,73 @@
+WITH SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(*) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+NationCustomer AS (
+    SELECT 
+        n.n_nationkey,
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY 
+        n.n_nationkey
+),
+RankedOrders AS (
+    SELECT 
+        os.o_orderkey,
+        os.total_price,
+        NTILE(5) OVER (ORDER BY os.total_price DESC) AS price_rank
+    FROM 
+        OrderSummary os
+),
+MaxSupplierCost AS (
+    SELECT 
+        MAX(total_supply_cost) AS max_supply_cost
+    FROM 
+        SupplierPartDetails
+)
+SELECT 
+    rp.price_rank,
+    np.n_nationkey,
+    np.customer_count,
+    CONCAT(spd.s_name, ' - Cost: ', spd.total_supply_cost) AS supplier_info,
+    SUM(rs.total_price) AS total_order_value
+FROM 
+    RankedOrders rp
+JOIN 
+    OrderSummary os ON rp.o_orderkey = os.o_orderkey
+LEFT JOIN 
+    NationCustomer np ON np.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = os.o_custkey)
+JOIN 
+    SupplierPartDetails spd ON spd.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = os.o_orderkey LIMIT 1))
+WHERE 
+    spd.total_supply_cost < (SELECT max_supply_cost FROM MaxSupplierCost) OR spd.total_available_qty IS NULL
+GROUP BY 
+    rp.price_rank, np.n_nationkey, np.customer_count, spd.s_name, spd.total_supply_cost
+ORDER BY 
+    rp.price_rank, np.customer_count DESC;

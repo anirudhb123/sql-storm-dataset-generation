@@ -1,0 +1,51 @@
+
+WITH RECURSIVE title_hierarchy AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(t.season_nr, 0) AS season_nr,
+        COALESCE(t.episode_nr, 0) AS episode_nr,
+        t.episode_of_id,
+        0 AS level
+    FROM title t
+    WHERE t.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        t2.id AS title_id,
+        t2.title,
+        t2.production_year,
+        COALESCE(t2.season_nr, 0),
+        COALESCE(t2.episode_nr, 0),
+        t2.episode_of_id,
+        th.level + 1
+    FROM title_hierarchy th
+    JOIN title t2 ON th.title_id = t2.episode_of_id
+)
+
+SELECT 
+    tn.title AS parent_title,
+    th.title AS child_title,
+    th.production_year AS child_year,
+    th.season_nr AS child_season,
+    th.episode_nr AS child_episode,
+    cn.name AS company_name,
+    COUNT(DISTINCT ci.person_id) AS cast_count,
+    AVG(CASE WHEN ci.note IS NULL THEN -1 ELSE 1 END) AS note_factor,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+FROM title_hierarchy th
+LEFT JOIN title tn ON th.episode_of_id = tn.id
+LEFT JOIN movie_companies mc ON mc.movie_id = th.title_id
+LEFT JOIN company_name cn ON cn.id = mc.company_id
+LEFT JOIN complete_cast cc ON cc.movie_id = th.title_id
+LEFT JOIN cast_info ci ON ci.movie_id = th.title_id AND ci.nr_order IS NOT NULL
+LEFT JOIN aka_title ak ON ak.movie_id = th.title_id
+GROUP BY 
+    tn.title, th.title, th.production_year, th.season_nr, 
+    th.episode_nr, cn.name
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 5
+    AND AVG(CASE WHEN ci.note IS NULL THEN 0 ELSE 1 END) > 0.5
+ORDER BY th.production_year DESC, th.level, th.title;

@@ -1,0 +1,58 @@
+WITH movie_details AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(STRING_AGG(DISTINCT c.name, ', '), 'No Cast') AS cast_names,
+        COALESCE(STRING_AGG(DISTINCT k.keyword, ', '), 'No Keywords') AS keywords,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mt.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON mt.movie_id = mc.movie_id
+    WHERE 
+        mt.production_year >= 2000 
+        AND (mt.kind_id IS NOT NULL OR mt.note LIKE '%sequel%')
+        AND NOT EXISTS (
+            SELECT 1
+            FROM movie_info mi
+            WHERE mi.movie_id = mt.movie_id
+            AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Banned')
+        )
+    GROUP BY 
+        mt.id
+), ranked_movies AS (
+    SELECT 
+        md.*,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.company_count DESC) AS rank
+    FROM 
+        movie_details md
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.cast_names,
+    rm.keywords,
+    rm.company_count,
+    CASE 
+        WHEN rm.company_count > 3 THEN 'Blockbuster'
+        WHEN rm.company_count = 3 THEN 'Mid-range'
+        ELSE 'Indie'
+    END AS movie_category
+FROM 
+    ranked_movies rm
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    rm.production_year DESC, 
+    rm.company_count DESC,
+    rm.title COLLATE "C" ASC;

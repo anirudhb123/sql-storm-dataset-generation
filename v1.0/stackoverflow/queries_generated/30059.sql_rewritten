@@ -1,0 +1,92 @@
+WITH RecursivePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.PostTypeId,
+        P.OwnerUserId,
+        P.AcceptedAnswerId,
+        1 AS Depth
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        A.Id AS PostId,
+        A.Title,
+        A.CreationDate,
+        A.PostTypeId,
+        A.OwnerUserId,
+        A.AcceptedAnswerId,
+        RP.Depth + 1
+    FROM 
+        Posts A
+    INNER JOIN 
+        RecursivePosts RP ON A.ParentId = RP.PostId
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1  
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId 
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        MAX(CASE WHEN PHT.Name = 'Post Closed' THEN PH.CreationDate END) AS LastClosedDate,
+        COUNT(CASE WHEN PHT.Name = 'Post Closed' THEN 1 END) AS CloseCount
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    GROUP BY 
+        PH.PostId
+),
+ScoredPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Depth,
+        PH.LastClosedDate,
+        PH.CloseCount,
+        ROW_NUMBER() OVER (PARTITION BY RP.Depth ORDER BY COALESCE(PH.CloseCount, 0) DESC, RP.CreationDate DESC) AS Rank
+    FROM 
+        RecursivePosts RP
+    LEFT JOIN 
+        PostHistorySummary PH ON RP.PostId = PH.PostId
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.QuestionCount,
+    UA.CommentCount,
+    UA.TotalBounty,
+    SP.PostId,
+    SP.Title,
+    SP.CreationDate,
+    SP.Depth,
+    SP.LastClosedDate,
+    SP.CloseCount,
+    SP.Rank
+FROM 
+    UserActivity UA
+JOIN 
+    ScoredPosts SP ON UA.QuestionCount > 10  
+WHERE 
+    SP.Rank <= 5  
+ORDER BY 
+    UA.QuestionCount DESC, SP.Depth, SP.Rank;

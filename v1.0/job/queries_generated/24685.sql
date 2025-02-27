@@ -1,0 +1,91 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1 AS level
+    FROM 
+        movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+),
+actor_info AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        ak.person_id,
+        RANK() OVER (PARTITION BY ak.person_id ORDER BY c.nm_order) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN
+        aka_name ak ON c.person_id = ak.person_id
+    WHERE 
+        c.nr_order = 1
+),
+keyword_info AS (
+    SELECT 
+        k.keyword, 
+        COUNT(mk.movie_id) AS keyword_count
+    FROM 
+        keyword k
+    JOIN 
+        movie_keyword mk ON k.id = mk.keyword_id
+    GROUP BY 
+        k.id
+    HAVING 
+        COUNT(mk.movie_id) > 10
+),
+movie_extras AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS cast_with_note
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_companies mc ON at.id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN 
+        cast_info c ON at.id = c.movie_id
+    GROUP BY 
+        at.id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(ai.actor_name, 'Unknown Actor') AS actor_name,
+    COALESCE(ki.keyword, 'No Keyword') AS keyword,
+    me.company_count,
+    me.keyword_count,
+    me.cast_with_note
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    actor_info ai ON ai.actor_rank = 1
+LEFT JOIN 
+    keyword_info ki ON rk.keyword_count > 0
+LEFT JOIN 
+    movie_extras me ON me.title = mh.title
+WHERE 
+    mh.level = 0
+ORDER BY 
+    mh.production_year DESC, 
+    me.keyword_count DESC, 
+    mh.title ASC;
+

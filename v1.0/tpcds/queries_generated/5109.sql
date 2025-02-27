@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_paid,
+        d_year,
+        d_month_seq,
+        ROW_NUMBER() OVER (PARTITION BY d_year ORDER BY SUM(ws_net_paid) DESC) AS rnk
+    FROM 
+        web_sales
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    GROUP BY 
+        ws_order_number, ws_quantity, ws_sales_price, ws_net_paid, d_year, d_month_seq
+),
+TopSales AS (
+    SELECT 
+        d_year, 
+        d_month_seq, 
+        SUM(ws_net_paid) AS total_sales
+    FROM 
+        web_sales 
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk 
+    GROUP BY 
+        d_year, d_month_seq
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_cd.demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk,
+        cd_purchase_estimate
+    FROM 
+        customer_demographics cd
+    JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+)
+SELECT 
+    cs.year,
+    cs.month,
+    COALESCE(cs.total_sales, 0) AS total_sales,
+    COUNT(DISTINCT cd.demo_sk) AS unique_customers,
+    SUM(CASE WHEN cd.income_band_sk IS NOT NULL THEN 1 ELSE 0 END) AS customers_in_income_band
+FROM 
+    (SELECT DISTINCT d_year AS year, d_month_seq AS month FROM date_dim) AS cs
+LEFT JOIN 
+    TopSales ts ON cs.year = ts.d_year AND cs.month = ts.d_month_seq
+LEFT JOIN 
+    CustomerDemographics cd ON cd.cd_demo_sk IN (
+        SELECT DISTINCT ws_bill_cdemo_sk 
+        FROM web_sales 
+        WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = cs.year)
+    )
+GROUP BY 
+    cs.year, cs.month
+ORDER BY 
+    cs.year, cs.month;

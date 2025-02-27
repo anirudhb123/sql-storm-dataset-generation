@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.ClosedDate,
+        u.DisplayName AS OwnerDisplayName,
+        @row_number := IF(@prev_owner = p.OwnerUserId, @row_number + 1, 1) AS OwnerRank,
+        @prev_owner := p.OwnerUserId
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    CROSS JOIN 
+        (SELECT @row_number := 0, @prev_owner := NULL) AS vars
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score > 0 
+    ORDER BY 
+        p.OwnerUserId, p.Score DESC, p.CreationDate DESC
+),
+TopOwnerPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        AnswerCount,
+        CommentCount,
+        ClosedDate,
+        OwnerDisplayName
+    FROM 
+        RankedPosts
+    WHERE 
+        OwnerRank = 1
+),
+DetailedPostStats AS (
+    SELECT 
+        t.PostId,
+        t.Title,
+        t.CreationDate,
+        t.Score,
+        t.ViewCount,
+        t.AnswerCount,
+        t.CommentCount,
+        t.ClosedDate,
+        t.OwnerDisplayName,
+        COUNT(c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        TopOwnerPosts t
+    LEFT JOIN 
+        Comments c ON t.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON t.PostId = v.PostId
+    GROUP BY 
+        t.PostId, t.Title, t.CreationDate, t.Score, t.ViewCount, t.AnswerCount, t.CommentCount, t.ClosedDate, t.OwnerDisplayName
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    AnswerCount,
+    CommentCount,
+    ClosedDate,
+    OwnerDisplayName,
+    TotalComments,
+    TotalUpvotes,
+    TotalDownvotes
+FROM 
+    DetailedPostStats
+ORDER BY 
+    Score DESC, ViewCount DESC
+LIMIT 10;

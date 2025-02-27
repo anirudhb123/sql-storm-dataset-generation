@@ -1,0 +1,64 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+PostVoteDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    tp.Title,
+    tp.Score AS PostScore,
+    tp.ViewCount AS PostViews,
+    pvd.VoteCount,
+    pvd.UpVotes,
+    pvd.DownVotes
+FROM 
+    UserBadgeCounts ub
+JOIN 
+    Users u ON ub.UserId = u.Id
+JOIN 
+    TopPosts tp ON u.Id = tp.OwnerUserId AND tp.Rank = 1
+JOIN 
+    PostVoteDetails pvd ON tp.PostId = pvd.PostId
+ORDER BY 
+    ub.BadgeCount DESC, tp.Score DESC;

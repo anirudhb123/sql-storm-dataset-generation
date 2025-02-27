@@ -1,0 +1,82 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        0 AS Level
+    FROM Posts P
+    WHERE P.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        P.Id,
+        P.ParentId,
+        Level + 1
+    FROM Posts P
+    INNER JOIN RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(PH.ChangeCount, 0) AS ChangeCount,
+        COALESCE(VoteStats.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(VoteStats.DownVoteCount, 0) AS DownVoteCount,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS ChangeCount
+        FROM PostHistory
+        GROUP BY PostId
+    ) PH ON P.Id = PH.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) VoteStats ON P.Id = VoteStats.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.Id, PH.ChangeCount, VoteStats.UpVoteCount, VoteStats.DownVoteCount
+),
+TopPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CreationDate,
+        PS.ChangeCount,
+        PS.UpVoteCount,
+        PS.DownVoteCount,
+        PS.CommentCount,
+        ROW_NUMBER() OVER (ORDER BY (PS.UpVoteCount - PS.DownVoteCount) DESC) AS Rank
+    FROM PostStats PS
+    WHERE PS.CommentCount > 0
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+)
+SELECT 
+    P.Title,
+    P.CreationDate,
+    P.ChangeCount,
+    P.UpVoteCount,
+    P.DownVoteCount,
+    P.CommentCount,
+    RPH.Level,
+    UB.BadgeCount,
+    CASE 
+        WHEN P.CreationDate < NOW() - INTERVAL '1 year' THEN 'Older Post'
+        ELSE 'Recent Post'
+    END AS PostAgeCategory
+FROM TopPosts P 
+LEFT JOIN RecursivePostHierarchy RPH ON P.PostId = RPH.PostId
+LEFT JOIN UserBadges UB ON P.OwnerUserId = UB.UserId
+WHERE P.Rank <= 10
+ORDER BY P.UpVoteCount DESC;

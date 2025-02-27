@@ -1,0 +1,68 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        t.title, 
+        t.production_year, 
+        1 AS level,
+        CONCAT(t.title) AS path
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    WHERE 
+        mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Distributor') 
+        AND t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1,
+        CONCAT(mh.path, ' -> ', t.title)
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+    WHERE 
+        mh.level < 3
+)
+
+SELECT 
+    p.name AS person_name,
+    COUNT(DISTINCT ci.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT mh.path, '; ') AS movie_paths,
+    AVG(CASE 
+        WHEN m.production_year IS NULL THEN NULL 
+        ELSE EXTRACT(YEAR FROM AGE('2024-10-01 12:34:56'::timestamp, m.production_year)) 
+    END) AS avg_age_of_movies,
+    MAX(CASE WHEN c.role_id IS NOT NULL THEN c.note END) AS recent_role,
+    COUNT(DISTINCT CASE WHEN k.keyword IS NOT NULL THEN k.keyword END) AS unique_keywords,
+    SUM(COALESCE(mi.info IS NOT NULL, 0)) AS total_info_entries
+FROM 
+    aka_name p
+JOIN 
+    cast_info c ON p.person_id = c.person_id
+JOIN 
+    complete_cast cc ON c.movie_id = cc.movie_id
+LEFT JOIN 
+    movie_info mi ON cc.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON cc.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_hierarchy mh ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_title m ON m.id = c.movie_id
+GROUP BY 
+    p.name, m.production_year
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 5
+ORDER BY 
+    total_movies DESC
+LIMIT 10;

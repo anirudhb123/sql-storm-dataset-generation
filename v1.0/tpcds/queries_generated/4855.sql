@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site ws_site ON ws.ws_web_site_sk = ws_site.web_site_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2457702 AND 2457732  -- Example date range (to be adjusted based on your requirements)
+    GROUP BY 
+        ws.web_site_sk
+),
+TopWarehouses AS (
+    SELECT 
+        w.w_warehouse_sk,
+        COUNT(DISTINCT i.i_item_sk) AS item_count
+    FROM 
+        warehouse w
+    JOIN 
+        inventory inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    JOIN 
+        item i ON inv.inv_item_sk = i.i_item_sk
+    GROUP BY 
+        w.w_warehouse_sk
+),
+StoreReturnsSummary AS (
+    SELECT 
+        sr_store_sk,
+        SUM(sr_return_amt_inc_tax) AS total_returns,
+        COUNT(sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        sr_store_sk
+)
+SELECT 
+    s.s_store_name,
+    COALESCE(ret.total_returns, 0) AS total_returns,
+    COALESCE(sales.total_sales, 0) AS total_sales,
+    COALESCE(warehouse.item_count, 0) AS available_items,
+    CASE 
+        WHEN sales.sales_rank = 1 THEN 'Top Performer'
+        ELSE 'Regular Performer'
+    END AS performance_category
+FROM 
+    store s
+LEFT JOIN 
+    StoreReturnsSummary ret ON s.s_store_sk = ret.sr_store_sk
+LEFT JOIN 
+    RankedSales sales ON s.s_store_sk = sales.web_site_sk
+LEFT JOIN 
+    TopWarehouses warehouse ON s.s_store_sk = warehouse.w_warehouse_sk
+WHERE 
+    s.s_state IN ('CA', 'NY')  -- Example filter on states
+ORDER BY 
+    total_sales DESC, available_items DESC;

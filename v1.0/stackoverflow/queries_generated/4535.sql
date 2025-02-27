@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswer
+    FROM Posts p
+    WHERE p.PostTypeId = 1
+),
+RecentPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.PostRank,
+        u.DisplayName,
+        COUNT(c.Id) AS CommentCount
+    FROM RankedPosts rp
+    LEFT JOIN Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON rp.Id = c.PostId
+    WHERE rp.PostRank <= 5 
+    GROUP BY rp.Id, rp.Title, rp.CreationDate, rp.ViewCount, rp.PostRank, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM Users u
+    GROUP BY u.Id, u.DisplayName
+),
+PostsWithVoteStats AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.ViewCount,
+        COALESCE(voteStats.TotalUpVotes, 0) AS UpVotes,
+        COALESCE(voteStats.TotalDownVotes, 0) AS DownVotes
+    FROM RecentPosts rp
+    LEFT JOIN TopUsers voteStats ON rp.OwnerUserId = voteStats.UserId
+)
+SELECT 
+    pws.PostId,
+    pws.Title,
+    pws.CreationDate,
+    pws.ViewCount,
+    pws.UpVotes,
+    pws.DownVotes,
+    (pws.UpVotes - pws.DownVotes) AS NetVotes,
+    CASE 
+        WHEN pws.ViewCount > 100 THEN 'Popular'
+        WHEN pws.ViewCount BETWEEN 50 AND 100 THEN 'Moderately Popular'
+        ELSE 'Less Popular'
+    END AS Popularity,
+    CASE 
+        WHEN rp.AcceptedAnswer > 0 THEN 'Answered'
+        ELSE 'Unanswered'
+    END AS PostStatus
+FROM PostsWithVoteStats pws
+JOIN RankedPosts rp ON pws.PostId = rp.Id
+WHERE pws.ViewCount IS NOT NULL
+ORDER BY pws.ViewCount DESC, pws.Title ASC;

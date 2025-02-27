@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Tags,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN vt.Id = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes, 
+        COALESCE(SUM(CASE WHEN vt.Id = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.Tags, u.DisplayName
+),
+TagStatistics AS (
+    SELECT 
+        UNNEST(SPLIT_PART(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStatistics
+    WHERE 
+        PostCount > 10  
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.Tags,
+    rp.Author,
+    rp.CommentCount,
+    rp.TotalUpVotes,
+    rp.TotalDownVotes,
+    pt.TagName AS PopularTag,
+    pt.PostCount AS PopularTagPostCount
+FROM 
+    RankedPosts rp
+JOIN 
+    PopularTags pt ON rp.Tags LIKE '%' || pt.TagName || '%'
+ORDER BY 
+    rp.TotalUpVotes DESC, rp.CommentCount DESC
+LIMIT 50;

@@ -1,0 +1,69 @@
+WITH filtered_movies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        k.keyword
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year > 2000 
+        AND k.keyword ILIKE '%action%'
+),
+actor_aggregates AS (
+    SELECT 
+        c.movie_id, 
+        COUNT(DISTINCT ca.person_id) AS actor_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        c.nr_order < 5 
+    GROUP BY 
+        c.movie_id
+),
+movies_with_actors AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        a.actor_count,
+        a.actor_names
+    FROM 
+        filtered_movies fm
+    LEFT JOIN 
+        actor_aggregates a ON fm.movie_id = a.movie_id
+),
+movie_details AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(m.actor_count, 0) AS actor_count,
+        CASE 
+            WHEN m.actor_count > 0 THEN m.actor_names 
+            ELSE 'No actors listed' 
+        END AS actor_names,
+        i.info AS additional_info
+    FROM 
+        movies_with_actors m
+    LEFT JOIN 
+        movie_info i ON m.movie_id = i.movie_id AND i.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_count,
+    md.actor_names,
+    CONCAT('Movie Title: ', md.title, ', Year: ', md.production_year, ', Actors: ', md.actor_count, ', Info: ', COALESCE(md.additional_info, 'No additional info')) AS summary
+FROM 
+    movie_details md
+ORDER BY 
+    md.production_year DESC, 
+    md.actor_count DESC;

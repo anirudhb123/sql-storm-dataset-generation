@@ -1,0 +1,96 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        0 AS Level,
+        p.CreationDate
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        ph.Level + 1,
+        p.CreationDate
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON ph.PostId = p.ParentId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostScoreDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        SUM(p.Score) OVER (PARTITION BY p.OwnerUserId) AS TotalScoreByUser,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > DATE_SUB('2024-10-01 12:34:56', INTERVAL 1 YEAR)
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.OwnerUserId
+),
+TopUserPosts AS (
+    SELECT 
+        up.DisplayName,
+        up.TotalPosts,
+        up.TotalAnswers,
+        pp.PostId,
+        pp.Title,
+        pp.Score,
+        pp.CommentCount
+    FROM 
+        UserPostStats up
+    JOIN 
+        PostScoreDetails pp ON up.UserId = pp.OwnerUserId
+    WHERE 
+        up.TotalPosts > 5
+)
+SELECT 
+    ph.PostId,
+    ph.Title AS QuestionTitle,
+    up.DisplayName AS Owner,
+    up.TotalAnswers,
+    pp.Score AS PostScore,
+    pp.CommentCount,
+    ph.Level,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = ph.PostId AND v.VoteTypeId = 2) AS TotalUpvotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = ph.PostId AND v.VoteTypeId = 3) AS TotalDownvotes,
+    COALESCE(SUM(b.Class), 0) AS TotalBadgesEarned
+FROM 
+    RecursivePostHierarchy ph
+LEFT JOIN 
+    TopUserPosts pp ON ph.PostId = pp.PostId
+LEFT JOIN 
+    Users up ON pp.OwnerUserId = up.Id
+LEFT JOIN 
+    Badges b ON b.UserId = up.Id
+GROUP BY 
+    ph.PostId, up.DisplayName, up.TotalAnswers, pp.Score, pp.CommentCount, ph.Level
+ORDER BY 
+    TotalBadgesEarned DESC, ph.PostId;

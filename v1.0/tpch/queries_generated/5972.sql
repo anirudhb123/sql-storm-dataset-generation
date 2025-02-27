@@ -1,0 +1,48 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        c.c_name, 
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY o.o_totalprice DESC) as rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+),
+TopOrders AS (
+    SELECT 
+        to.o_orderkey,
+        to.o_totalprice,
+        to.o_orderdate,
+        to.c_name
+    FROM 
+        RankedOrders to
+    WHERE 
+        to.rank <= 10
+)
+SELECT 
+    p.p_name, 
+    SUM(l.l_quantity) AS total_quantity, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(l.l_tax) AS avg_tax_rate
+FROM 
+    lineitem l
+JOIN 
+    TopOrders to ON l.l_orderkey = to.o_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    r.r_name = 'Asia'
+GROUP BY 
+    p.p_name
+ORDER BY 
+    total_revenue DESC;

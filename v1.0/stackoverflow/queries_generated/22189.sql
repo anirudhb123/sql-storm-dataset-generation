@@ -1,0 +1,86 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+TopQuestions AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.Tags,
+        COALESCE(AC.UserDisplayName, 'No Accepted Answer') AS AcceptedBy
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts AC ON P.AcceptedAnswerId = AC.Id
+    WHERE 
+        P.PostTypeId = 1 AND P.Score > 0
+),
+CommentCounts AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS TotalComments
+    FROM 
+        Comments C
+    GROUP BY 
+        C.PostId
+),
+CombinedData AS (
+    SELECT 
+        TQ.PostId,
+        TQ.Title,
+        TQ.CreationDate,
+        TQ.Score,
+        TQ.ViewCount,
+        TQ.AnswerCount,
+        TQ.Tags,
+        TQ.AcceptedBy,
+        COALESCE(CC.TotalComments, 0) AS TotalComments,
+        UR.ReputationRank
+    FROM 
+        TopQuestions TQ
+    LEFT JOIN 
+        CommentCounts CC ON TQ.PostId = CC.PostId
+    JOIN 
+        UserReputation UR ON TQ.OwnerUserId = UR.UserId
+    WHERE 
+        TQ.Score > (SELECT AVG(Score) FROM TopQuestions) -- Only above average scoring questions
+),
+FinalResults AS (
+    SELECT 
+        CD.*,
+        CASE 
+            WHEN ReputationRank <= 10 THEN 'Top User'
+            ELSE 'Regular User'
+        END AS UserType
+    FROM 
+        CombinedData CD
+    WHERE 
+        CD.TotalComments IS NOT NULL
+    ORDER BY 
+        CD.Score DESC, CD.TotalComments DESC
+)
+SELECT 
+    FR.*,
+    STRING_AGG(T.TagName, ', ') AS TagsList
+FROM 
+    FinalResults FR
+LEFT JOIN 
+    LATERAL unnest(string_to_array(FR.Tags, ',')) AS Tag ON TRUE
+LEFT JOIN 
+    Tags T ON T.TagName = TRIM(Tag)
+GROUP BY 
+    FR.PostId, FR.Title, FR.CreationDate, FR.Score, FR.ViewCount, FR.AnswerCount, FR.Tags, FR.AcceptedBy, FR.TotalComments, FR.ReputationRank, FR.UserType
+HAVING 
+    COUNT(T.TagName) > 1  -- Returns rows with more than one tag
+ORDER BY 
+    FR.ReputationRank, FR.Score DESC;

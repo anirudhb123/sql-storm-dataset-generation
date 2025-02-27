@@ -1,0 +1,49 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, c.c_mktsegment, 1 AS level
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, c.c_mktsegment, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE oh.level < 5
+),
+MonthlySales AS (
+    SELECT 
+        DATE_TRUNC('month', o.o_orderdate) AS month,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY month
+),
+SupplierPartInfo AS (
+    SELECT 
+        s.s_suppkey,
+        p.p_partkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, p.p_partkey
+)
+SELECT 
+    r.r_name AS region,
+    COALESCE(SUM(ms.total_sales), 0) AS total_sales,
+    COUNT(DISTINCT oh.o_orderkey) AS total_orders,
+    COALESCE(NULLIF(SUM(sp.total_available), 0), 'No Parts Available') AS available_parts,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(ms.total_sales) DESC) AS rank
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierPartInfo sp ON s.s_suppkey = sp.s_suppkey
+LEFT JOIN MonthlySales ms ON DATE_TRUNC('month', CURRENT_DATE) = ms.month
+LEFT JOIN OrderHierarchy oh ON s.s_suppkey = oh.o_orderkey
+WHERE n.n_name LIKE 'N%'
+GROUP BY r.r_name
+HAVING SUM(ms.total_sales) > 1000
+ORDER BY total_sales DESC, rank;

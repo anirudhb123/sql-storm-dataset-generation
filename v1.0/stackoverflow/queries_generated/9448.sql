@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 YEAR'
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TotalPosts
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 5
+),
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.FavoriteCount,
+        pt.Name AS PostTypeName,
+        rt.Name AS HistoryTypeName,
+        STRING_AGG(DISTINCT pt.TagName, ', ') AS RelatedTags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostTypes pt ON rp.PostTypeId = pt.Id
+    LEFT JOIN 
+        PostHistory h ON h.PostId = rp.PostId
+    LEFT JOIN 
+        PostHistoryTypes rt ON h.PostHistoryTypeId = rt.Id
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.AnswerCount, rp.CommentCount, rp.FavoriteCount, pt.Name, rt.Name
+)
+SELECT 
+    ps.*,
+    pt.TagName AS PopularTag
+FROM 
+    PostStats ps
+LEFT JOIN 
+    PopularTags pt ON ps.RelatedTags LIKE '%' || pt.TagName || '%'
+WHERE 
+    ps.Rank <= 10
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC, ps.CreationDate DESC;

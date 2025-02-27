@@ -1,0 +1,37 @@
+
+WITH customer_info AS (
+    SELECT c_customer_id, CONCAT(c_first_name, ' ', c_last_name) AS full_name, ca_city, ca_state
+    FROM customer
+    JOIN customer_address ON customer.c_current_addr_sk = customer_address.ca_address_sk
+),
+sales_data AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        AVG(ws_ext_sales_price) AS average_order_value
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+ranked_sales AS (
+    SELECT 
+        s.ws_bill_customer_sk,
+        s.total_sales,
+        s.order_count,
+        s.average_order_value,
+        RANK() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM sales_data s
+)
+
+SELECT 
+    ci.full_name,
+    ci.ca_city,
+    ci.ca_state,
+    rs.total_sales,
+    rs.order_count,
+    rs.average_order_value,
+    rs.sales_rank
+FROM ranked_sales rs
+JOIN customer_info ci ON rs.ws_bill_customer_sk = ci.c_customer_id
+WHERE rs.sales_rank <= 10
+ORDER BY sales_rank;

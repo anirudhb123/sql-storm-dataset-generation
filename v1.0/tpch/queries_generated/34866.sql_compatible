@@ -1,0 +1,60 @@
+
+WITH RECURSIVE region_suppliers AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_comment,
+        1 AS level
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    UNION ALL
+    SELECT 
+        rs.r_regionkey,
+        rs.r_name,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_comment,
+        rs.level + 1
+    FROM 
+        region_suppliers rs
+    JOIN 
+        partsupp ps ON ps.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp)
+    JOIN 
+        supplier s ON rs.s_suppkey = s.s_suppkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+    AVG(s.s_acctbal) OVER (PARTITION BY p.p_partkey) AS avg_supplier_balance,
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    region_suppliers rs ON rs.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+JOIN 
+    region r ON rs.r_regionkey = r.r_regionkey
+GROUP BY 
+    p.p_partkey, p.p_name, r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 10 
+    AND COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) > 
+        (SELECT AVG(total_revenue) FROM (SELECT COALESCE(SUM(l_extendedprice * (1 - l_discount)), 0) AS total_revenue FROM lineitem GROUP BY l_orderkey) AS subquery)
+ORDER BY 
+    total_revenue DESC;

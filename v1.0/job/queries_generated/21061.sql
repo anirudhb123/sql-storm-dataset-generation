@@ -1,0 +1,77 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title,
+        mt.production_year,
+        COALESCE(linked_movie.linked_movie_id, -1) AS linked_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link linked_movie ON mt.id = linked_movie.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        COALESCE(linked_movie.linked_movie_id, -1),
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        aka_title mt ON mh.linked_id = mt.id
+    LEFT JOIN 
+        movie_link linked_movie ON mt.id = linked_movie.movie_id
+),
+
+actors_info AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        MAX(COALESCE(ki.keyword, 'No Keywords')) AS keywords,
+        STRING_AGG(DISTINCT mt.title, ', ') AS movies_list
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        movie_keyword mk ON ci.movie_id = mk.movie_id
+    JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    LEFT JOIN 
+        aka_title mt ON ci.movie_id = mt.id
+    GROUP BY 
+        ak.id, ak.name
+)
+
+SELECT 
+    DISTINCT a.actor_id,
+    a.actor_name,
+    a.total_movies,
+    COALESCE(mh.linked_movie_id, -1) AS linked_movie_id,
+    mh.title AS linked_movie_title,
+    mh.production_year AS linked_movie_year,
+    CASE 
+        WHEN a.total_movies > 10 THEN 'Frequent Actor' 
+        ELSE 'Occasional Actor' 
+    END AS actor_type,
+    ROW_NUMBER() OVER (PARTITION BY a.actor_id ORDER BY a.total_movies DESC) AS movie_rank
+FROM 
+    actors_info a
+LEFT JOIN 
+    movie_hierarchy mh ON a.actor_id = mh.movie_id
+WHERE 
+    (a.total_movies > 0 OR mh.linked_movie_id IS NOT NULL)
+AND
+    a.keywords IS NOT NULL
+AND
+    (mh.production_year IS NULL OR mh.production_year > 1990)
+ORDER BY 
+    a.total_movies DESC, a.actor_name
+LIMIT 100;
+

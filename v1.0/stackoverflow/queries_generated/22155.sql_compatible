@@ -1,0 +1,77 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.OwnerUserId IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        b.Name AS BadgeName,
+        b.Class,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldCount,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverCount,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS IsClosed,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS IsReopened,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS IsDeleted
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    up.Location,
+    up.Views,
+    rb.PostId,
+    rb.Title,
+    rb.Score,
+    rb.CreationDate,
+    ub.BadgeName,
+    ub.GoldCount,
+    ub.SilverCount,
+    ub.BronzeCount,
+    phc.EditCount,
+    CASE 
+        WHEN phc.IsClosed = 1 THEN 'Closed' 
+        WHEN phc.IsDeleted = 1 THEN 'Deleted' 
+        ELSE 'Active' 
+    END AS PostStatus,
+    CASE 
+        WHEN rb.TotalPosts > 5 THEN 'Frequent contributor' 
+        ELSE 'New contributor' 
+    END AS ContributorType
+FROM 
+    RankedPosts rb
+JOIN 
+    Users up ON rb.PostId = up.Id
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = up.Id
+LEFT JOIN 
+    PostHistoryCounts phc ON rb.PostId = phc.PostId
+WHERE 
+    rb.RN = 1
+ORDER BY 
+    rb.Score DESC NULLS LAST, 
+    rb.CreationDate DESC;

@@ -1,0 +1,51 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(ti.info, 'No Info') AS info,
+        1 AS level
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_info ti ON m.id = ti.movie_id AND ti.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+    
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(ti.info, 'No Info') AS info,
+        mh.level + 1
+    FROM 
+        movie_link mc
+    INNER JOIN 
+        title t ON mc.linked_movie_id = t.id
+    INNER JOIN 
+        movie_hierarchy mh ON mc.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.info,
+    COUNT(*) OVER (PARTITION BY mh.movie_id) AS linkage_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+WHERE 
+    mh.level = 1
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.info
+HAVING 
+    COUNT(DISTINCT a.name) > 0
+ORDER BY 
+    mh.production_year DESC, linkage_count DESC
+LIMIT 100;

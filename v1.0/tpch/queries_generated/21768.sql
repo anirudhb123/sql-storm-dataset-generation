@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_comment,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+), 
+NationParts AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT p.p_partkey) AS part_count,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN 
+        part p ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -1, GETDATE())
+    GROUP BY 
+        c.c_custkey
+)
+
+SELECT 
+    n.n_name,
+    np.part_count,
+    np.total_supply_cost,
+    cs.order_count,
+    COALESCE(rs.s_name, 'No Supplier') AS supplier_name,
+    CASE 
+        WHEN np.total_supply_cost > 10000 THEN 'High Cost'
+        WHEN np.total_supply_cost IS NULL THEN 'Unspecified Cost'
+        ELSE 'Normal Cost'
+    END AS cost_category
+FROM 
+    NationParts np
+LEFT JOIN 
+    RankedSuppliers rs ON np.n_nationkey = rs.s_suppkey
+FULL OUTER JOIN 
+    CustomerOrders cs ON np.n_nationkey = (SELECT n.n_nationkey FROM nation n JOIN customer c ON c.c_nationkey = n.n_nationkey WHERE c.c_custkey = cs.c_custkey)
+WHERE 
+    (np.part_count > 5 OR rs.rnk IS NOT NULL)
+ORDER BY 
+    np.total_supply_cost DESC NULLS LAST, cs.order_count ASC;

@@ -1,0 +1,84 @@
+
+WITH UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Title,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(ph.Comment, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+UsersWithPosts AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(rb.GoldBadges, 0) AS GoldBadges,
+        COALESCE(rb.SilverBadges, 0) AS SilverBadges,
+        COALESCE(rb.BronzeBadges, 0) AS BronzeBadges,
+        COUNT(rp.Id) AS RecentPostCount,
+        COUNT(cp.PostId) AS ClosedPostCount,
+        MAX(rp.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges rb ON u.Id = rb.UserId
+    LEFT JOIN 
+        RecentPosts rp ON u.Id = rp.OwnerUserId AND rp.PostRank <= 5
+    LEFT JOIN 
+        ClosedPosts cp ON rp.Id = cp.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+
+SELECT 
+    u.Id,
+    u.DisplayName,
+    u.Reputation,
+    u.GoldBadges,
+    u.SilverBadges,
+    u.BronzeBadges,
+    u.RecentPostCount,
+    u.ClosedPostCount,
+    CASE 
+        WHEN u.Reputation > 5000 THEN 'Expert'
+        WHEN u.Reputation BETWEEN 1000 AND 5000 THEN 'Intermediate'
+        ELSE 'Novice' 
+    END AS UserLevel,
+    CASE 
+        WHEN u.LastPostDate IS NOT NULL THEN DATE_DIFF(DAY, u.LastPostDate, TIMESTAMP '2024-10-01 12:34:56')
+        ELSE NULL 
+    END AS DaysSinceLastPost
+FROM 
+    UsersWithPosts u
+WHERE 
+    (u.Reputation > 1000 AND u.RecentPostCount > 0)
+    OR (u.ClosedPostCount > 10)
+ORDER BY 
+    u.Reputation DESC,
+    u.ClosedPostCount DESC NULLS LAST;

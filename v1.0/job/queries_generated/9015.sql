@@ -1,0 +1,35 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        c.name AS cast_name,
+        co.name AS company_name,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY m.production_year DESC) AS rn
+    FROM 
+        aka_title a
+    JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        title m ON a.id = m.imdb_id
+    WHERE 
+        m.production_year >= 2000
+)
+SELECT 
+    title,
+    cast_name,
+    company_name,
+    production_year
+FROM 
+    RankedMovies
+WHERE 
+    rn = 1
+ORDER BY 
+    production_year DESC, title ASC;

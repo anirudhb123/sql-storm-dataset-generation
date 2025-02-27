@@ -1,0 +1,65 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Body,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        MAX(v.CreationDate) AS LastVoteDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><')))
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.OwnerUserId
+),
+PostSummary AS (
+    SELECT 
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.LastVoteDate,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.OwnerPostRank = 1 
+)
+
+SELECT 
+    ps.Title, 
+    ps.OwnerDisplayName, 
+    ps.OwnerReputation,
+    ps.Tags,
+    ps.AnswerCount,
+    ps.CommentCount,
+    COALESCE(ps.LastVoteDate, 'No Votes') AS LastVoteInfo,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = u.Id) AS BadgeCount
+FROM 
+    PostSummary ps
+JOIN 
+    Users u ON ps.OwnerDisplayName = u.DisplayName
+WHERE 
+    ps.AnswerCount > 5 AND 
+    ps.CommentCount > 10
+ORDER BY 
+    ps.OwnerReputation DESC
+FETCH FIRST 10 ROWS ONLY;

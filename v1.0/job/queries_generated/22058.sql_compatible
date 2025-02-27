@@ -1,0 +1,89 @@
+
+WITH RECURSIVE movie_paths AS (
+    SELECT
+        mt.movie_id,
+        ARRAY[mt.movie_id] AS path,
+        1 AS depth
+    FROM
+        movie_link ml
+    JOIN
+        title mt ON ml.movie_id = mt.id
+    WHERE
+        mt.production_year > 2000
+    UNION ALL
+    SELECT
+        ml.linked_movie_id,
+        mp.path || ml.linked_movie_id,
+        mp.depth + 1
+    FROM
+        movie_paths mp
+    JOIN
+        movie_link ml ON mp.movie_id = ml.movie_id
+    WHERE
+        mp.depth < 5
+),
+cast_role_counts AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM
+        cast_info ci
+    GROUP BY
+        ci.movie_id
+),
+company_type_counts AS (
+    SELECT
+        mc.movie_id,
+        ct.kind,
+        COUNT(*) AS company_count
+    FROM
+        movie_companies mc
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY
+        mc.movie_id, ct.kind
+),
+dbl_criteria AS (
+    SELECT
+        ct.movie_id,
+        STRING_AGG(ct.kind, ', ') AS company_kinds
+    FROM
+        company_type_counts ct
+    GROUP BY
+        ct.movie_id
+    HAVING
+        COUNT(*) > 1
+)
+SELECT
+    t.id AS movie_id,
+    t.title,
+    mp.path,
+    COALESCE(a.actor_count, 0) AS actor_count,
+    COALESCE(d.company_kinds, 'None') AS company_kinds,
+    CASE 
+        WHEN a.actor_count IS NULL THEN 'No Actors'
+        WHEN a.actor_count BETWEEN 1 AND 5 THEN 'Few Actors'
+        WHEN a.actor_count BETWEEN 6 AND 10 THEN 'Moderate Actors'
+        ELSE 'Many Actors'
+    END AS actor_description,
+    COUNT(mk.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS row_num
+FROM
+    title t
+LEFT JOIN
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN
+    movie_paths mp ON t.id = mp.movie_id
+LEFT JOIN
+    cast_role_counts a ON t.id = a.movie_id
+LEFT JOIN
+    dbl_criteria d ON t.id = d.movie_id
+WHERE
+    t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    AND t.production_year IS NOT NULL AND t.production_year < 2023
+GROUP BY
+    t.id, t.title, mp.path, a.actor_count, d.company_kinds
+ORDER BY
+    t.production_year DESC,
+    actor_count DESC,
+    row_num;

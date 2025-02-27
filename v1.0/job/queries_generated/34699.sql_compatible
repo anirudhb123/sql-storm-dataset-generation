@@ -1,0 +1,57 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(STRING_AGG(DISTINCT cn.name, ', '), 'No Company') AS companies,
+    COUNT(DISTINCT ca.person_id) AS cast_count,
+    ROUND(AVG(mi.info_length), 2) AS avg_info_length,
+    COUNT(DISTINCT CASE 
+        WHEN mi.info LIKE '%award%' THEN mi.id 
+        END) AS awards_info_count
+FROM 
+    MovieHierarchy AS mh
+LEFT JOIN 
+    movie_companies AS mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name AS cn ON mc.company_id = cn.id
+LEFT JOIN 
+    complete_cast AS cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS ca ON cc.subject_id = ca.person_id
+LEFT JOIN 
+    movie_info AS mi ON mh.movie_id = mi.movie_id
+WHERE 
+    mh.production_year IS NOT NULL
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ca.person_id) > 5
+ORDER BY 
+    mh.production_year DESC, cast_count DESC;

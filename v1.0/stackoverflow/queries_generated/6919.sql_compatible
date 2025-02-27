@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        pt.Name AS PostType,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        RANK() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName, pt.Name
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        OwnerName, 
+        PostType, 
+        CommentCount, 
+        AnswerCount, 
+        VoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 3
+)
+SELECT 
+    t.OwnerName, 
+    t.Title, 
+    t.CreationDate, 
+    t.PostType, 
+    t.CommentCount, 
+    t.AnswerCount, 
+    t.VoteCount,
+    ph.Name AS PostHistoryType,
+    pht.CreationDate AS HistoryDate
+FROM 
+    TopPosts t
+LEFT JOIN 
+    PostHistory ph ON t.PostId = ph.PostId
+LEFT JOIN 
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+ORDER BY 
+    t.CreationDate DESC, 
+    t.VoteCount DESC;

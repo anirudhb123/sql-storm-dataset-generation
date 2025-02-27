@@ -1,0 +1,57 @@
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        ct.id AS complete_cast_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT a.name) AS actors,
+        STRING_AGG(DISTINCT c.name, ', ') AS companies,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM complete_cast ct
+    JOIN aka_title t ON ct.movie_id = t.movie_id
+    LEFT JOIN cast_info ci ON ct.subject_id = ci.person_id
+    LEFT JOIN aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN company_name c ON mc.company_id = c.id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN keyword k ON k.id = mk.keyword_id
+    WHERE t.production_year IS NOT NULL
+        AND (t.production_year < 2000 OR t.production_year IS NULL) -- obscure edge case with NULL handling
+    GROUP BY ct.id, t.title, t.production_year
+),
+ActorRoleInfo AS (
+    SELECT 
+        ci.person_id, 
+        r.role AS role, 
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM cast_info ci
+    JOIN role_type r ON ci.role_id = r.id
+    WHERE ci.nr_order IS NOT NULL
+    GROUP BY ci.person_id, r.role
+),
+ActorAvgRoles AS (
+    SELECT 
+        person_id, 
+        AVG(movie_count) AS avg_roles
+    FROM ActorRoleInfo
+    GROUP BY person_id
+)
+SELECT 
+    mc.id AS movie_id,
+    rm.title,
+    rm.production_year,
+    rm.actors,
+    rg.role,
+    COALESCE(aav.avg_roles, 0) AS avg_roles, -- null-safe average handling
+    (CASE WHEN aav.avg_roles > 3 THEN 'Highly Involved'
+          WHEN aav.avg_roles BETWEEN 2 AND 3 THEN 'Moderately Involved'
+          ELSE 'Seldom Involved' END) AS involvement_rating,
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = mc.movie_id 
+     AND mi.info_type_id IN (SELECT id FROM info_type WHERE info ILIKE '%Award%')) AS award_count
+FROM RecursiveMovieCTE rm
+JOIN movie_companies mc ON rm.complete_cast_id = mc.movie_id
+LEFT JOIN ActorAvgRoles aav ON aav.person_id = ANY(rm.actors)
+JOIN ActorRoleInfo rg ON rg.person_id = ANY(rm.actors)
+ORDER BY rm.production_year DESC, award_count DESC, avg_roles DESC
+LIMIT 100;

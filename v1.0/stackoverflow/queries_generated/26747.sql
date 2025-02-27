@@ -1,0 +1,74 @@
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        AVG(Posts.Score) AS AverageScore,
+        COUNT(DISTINCT Comments.Id) AS TotalComments,
+        COUNT(DISTINCT Votes.Id) AS TotalVotes
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Tags.TagName
+),
+UserActivity AS (
+    SELECT 
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS PostsCreated,
+        SUM(Comments.Score) AS CommentScore,
+        COUNT(DISTINCT Badges.Id) AS BadgeCount,
+        MAX(Posts.CreationDate) AS LastPostDate
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Comments ON Users.Id = Comments.UserId
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.DisplayName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStatistics
+),
+TopUsers AS (
+    SELECT 
+        DisplayName,
+        ROW_NUMBER() OVER (ORDER BY PostsCreated DESC, LastPostDate DESC) AS UserRank
+    FROM 
+        UserActivity
+)
+SELECT 
+    T.TagName,
+    T.PostCount,
+    T.TotalViews,
+    T.AverageScore,
+    T.TotalComments,
+    T.TotalVotes,
+    U.DisplayName AS TopUser,
+    U.PostsCreated,
+    U.CommentScore,
+    U.BadgeCount,
+    DENSE_RANK() OVER (ORDER BY T.PostCount DESC) AS TagPopularityRank,
+    DENSE_RANK() OVER (ORDER BY U.PostsCreated DESC, U.LastPostDate DESC) AS UserEngagementRank
+FROM 
+    TagStatistics T
+JOIN 
+    TopTags TT ON T.TagName = TT.TagName
+JOIN 
+    UserActivity U ON U.LastPostDate = (SELECT MAX(LastPostDate) FROM UserActivity)
+WHERE 
+    TT.TagRank <= 5 AND U.UserRank <= 5
+ORDER BY 
+    T.PostCount DESC, U.PostsCreated DESC;

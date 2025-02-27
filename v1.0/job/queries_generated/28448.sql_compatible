@@ -1,0 +1,57 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        c.name AS company_name, 
+        k.keyword AS movie_keyword,
+        COUNT(ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.imdb_id
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    JOIN 
+        company_name c ON mc.company_id = c.imdb_id
+    JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    GROUP BY 
+        t.title, t.production_year, c.name, k.keyword
+),
+EmployeeDetails AS (
+    SELECT 
+        p.name,
+        p.gender,
+        STRING_AGG(DISTINCT pi.info, '; ') AS personal_info
+    FROM 
+        name p 
+    JOIN 
+        person_info pi ON p.imdb_id = pi.person_id
+    GROUP BY 
+        p.name, p.gender
+)
+SELECT
+    md.title,
+    md.production_year,
+    md.company_name,
+    md.movie_keyword,
+    md.cast_count,
+    md.aka_names,
+    ed.name AS actor_name,
+    ed.gender,
+    ed.personal_info
+FROM 
+    MovieDetails md
+JOIN 
+    cast_info ci ON md.title = (SELECT t.title FROM title t WHERE t.id = ci.movie_id)
+JOIN 
+    EmployeeDetails ed ON ci.person_id = (SELECT p.imdb_id FROM name p WHERE p.id = ci.person_id)
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

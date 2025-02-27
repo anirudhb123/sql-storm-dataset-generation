@@ -1,0 +1,21 @@
+-- Performance Benchmark Query
+-- This query retrieves the count of posts per post type, average score of questions, and average view count by user reputation, 
+-- while also checking for any closed posts and the total number of comments related to each post.
+
+SELECT 
+    pt.Name AS PostType,
+    COUNT(p.Id) AS PostCount,
+    AVG(CASE WHEN p.PostTypeId = 1 THEN p.Score END) AS AvgQuestionScore,
+    AVG(p.ViewCount) AS AvgPostViewCount,
+    SUM(CASE WHEN p.ClosedDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPostCount,
+    SUM(c.Id IS NOT NULL) AS TotalComments
+FROM 
+    Posts p
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+GROUP BY 
+    pt.Name
+ORDER BY 
+    PostCount DESC;

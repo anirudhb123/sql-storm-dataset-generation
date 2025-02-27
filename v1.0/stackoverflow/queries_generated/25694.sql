@@ -1,0 +1,66 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT ph.Id) AS HistoryCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags
+),
+TagArray AS (
+    SELECT 
+        pd.PostId,
+        UNNEST(STRING_TO_ARRAY(pd.Tags, '><')) AS Tag
+    FROM 
+        PostDetails pd
+),
+TagDetails AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(pd.PostId) AS PostsWithTag
+    FROM 
+        Tags t
+    LEFT JOIN 
+        TagArray ta ON t.TagName = ta.Tag
+    LEFT JOIN 
+        PostDetails pd ON ta.PostId = pd.PostId
+    GROUP BY 
+        t.Id, t.TagName
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Body,
+    pd.CommentCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.BadgeCount,
+    pd.HistoryCount,
+    td.TagId,
+    td.TagName,
+    td.PostsWithTag
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    TagDetails td ON pd.PostId = td.PostId
+ORDER BY 
+    pd.CommentCount DESC, pd.UpVotes DESC
+LIMIT 50;

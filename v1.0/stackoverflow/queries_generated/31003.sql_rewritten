@@ -1,0 +1,88 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts AS p
+    WHERE 
+        p.ParentId IS NULL  
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts AS p
+    INNER JOIN 
+        RecursivePostHierarchy AS r ON p.ParentId = r.PostId
+),
+VoteSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        r.OwnerUserId,
+        r.Level
+    FROM 
+        Posts AS p
+    LEFT JOIN 
+        VoteSummary AS v ON p.Id = v.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy AS r ON p.Id = r.PostId
+),
+RecentChanges AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        MAX(ph.CreationDate) OVER (PARTITION BY ph.PostId) AS LastChangeDate,
+        STRING_AGG(ph.Comment, '; ') AS ChangeComments
+    FROM 
+        PostHistory AS ph
+    WHERE 
+        ph.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'  
+    GROUP BY 
+        ph.PostId, ph.UserDisplayName
+)
+
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.ViewCount,
+    pa.UpVotes,
+    pa.DownVotes,
+    COALESCE(rc.LastChangeDate, 'No recent changes') AS LastChangeDate,
+    COALESCE(rc.ChangeComments, 'No comments available') AS ChangeComments,
+    CASE 
+        WHEN pa.Level = 0 THEN 'Top-level Question'
+        WHEN pa.Level = 1 THEN 'Direct Answer'
+        ELSE 'Nested Answer'
+    END AS PostTypeDescription
+FROM 
+    PostAnalytics AS pa
+LEFT JOIN 
+    RecentChanges AS rc ON pa.PostId = rc.PostId
+ORDER BY 
+    pa.ViewCount DESC, pa.UpVotes DESC
+LIMIT 50;

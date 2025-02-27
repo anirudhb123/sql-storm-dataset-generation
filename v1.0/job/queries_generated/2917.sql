@@ -1,0 +1,68 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MoviesWithKeyStats AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        COALESCE(AVG(pi.info_length), 0) AS average_info_length
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            LENGTH(info) AS info_length 
+         FROM 
+            movie_info) pi ON rm.movie_id = pi.movie_id
+    WHERE 
+        rm.rn <= 5
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+),
+TopMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        m.keyword_count,
+        m.average_info_length,
+        nt.name AS director_name
+    FROM 
+        MoviesWithKeyStats m
+    LEFT JOIN 
+        complete_cast cc ON m.movie_id = cc.movie_id AND cc.role_id IN (SELECT id FROM role_type WHERE role = 'director')
+    LEFT JOIN 
+        aka_name nt ON cc.subject_id = nt.person_id
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.keyword_count,
+    tm.average_info_length,
+    COALESCE(tx.linked_count, 0) AS linked_movies
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    (SELECT 
+        ml.movie_id, 
+        COUNT(*) AS linked_count 
+     FROM 
+        movie_link ml 
+     GROUP BY 
+        ml.movie_id) tx ON tm.movie_id = tx.movie_id
+ORDER BY 
+    tm.production_year DESC, tm.keyword_count DESC;

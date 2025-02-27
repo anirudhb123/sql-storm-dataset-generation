@@ -1,0 +1,53 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        COALESCE(t.production_year::text, 'Unknown Year') AS production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code = 'USA' 
+        AND t.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        CONCAT(mh.movie_title, ' (Sequel)') AS movie_title,
+        mh.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT c.person_id) AS cast_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors_list,
+    MAX(CASE WHEN ci.note IS NULL THEN 'No Role Specified' ELSE ci.note END) AS role_specification
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+WHERE 
+    mh.level < 3
+GROUP BY 
+    mh.movie_title, 
+    mh.production_year
+ORDER BY 
+    mh.production_year DESC, 
+    cast_count DESC
+LIMIT 10;

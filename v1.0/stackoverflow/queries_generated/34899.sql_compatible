@@ -1,0 +1,73 @@
+
+WITH RECURSIVE UserReputation AS (
+    SELECT Id, Reputation, CreationDate
+    FROM Users
+    WHERE Reputation > 1000
+    UNION ALL
+    SELECT u.Id, u.Reputation, u.CreationDate
+    FROM Users u
+    JOIN UserReputation ur ON u.Reputation < ur.Reputation
+    WHERE u.Reputation > 500
+),
+UserBadges AS (
+    SELECT u.Id AS UserId, 
+           COUNT(b.Id) AS BadgeCount,
+           STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+TagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.Id, t.TagName
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        COALESCE(vs.VoteCount, 0) AS VoteCount,
+        COUNT(ph.Id) AS EditCount,
+        MAX(p.LastActivityDate) AS LastActivity
+    FROM Posts p
+    LEFT JOIN Comments pc ON p.Id = pc.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(Id) AS VoteCount 
+        FROM Votes 
+        GROUP BY PostId
+    ) vs ON p.Id = vs.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id, p.Title, pc.CommentCount
+),
+PopularPosts AS (
+    SELECT 
+        pa.PostId,
+        pa.Title,
+        pa.CommentCount,
+        pa.VoteCount,
+        pa.LastActivity,
+        ROW_NUMBER() OVER (ORDER BY pa.VoteCount DESC, pa.CommentCount DESC) AS Rank
+    FROM PostActivity pa
+    WHERE pa.LastActivity > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+)
+SELECT 
+    t.TagName,
+    us.Id AS UserId,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    pp.Title,
+    pp.CommentCount,
+    pp.VoteCount,
+    pp.LastActivity
+FROM TagStats t
+LEFT JOIN PopularPosts pp ON pp.PostId = ANY(STRING_TO_ARRAY(t.TagId::TEXT, ','))
+JOIN UserBadges ub ON ub.UserId = pp.OwnerUserId
+JOIN UserReputation us ON us.Id = pp.OwnerUserId
+WHERE us.Reputation > 1500
+ORDER BY t.TagName, pp.VoteCount DESC;

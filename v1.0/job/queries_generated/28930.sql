@@ -1,0 +1,60 @@
+WITH MovieCharacterCounts AS (
+    SELECT
+        a.title AS movie_title,
+        COUNT(DISTINCT ci.person_id) AS character_count
+    FROM
+        aka_title a
+    JOIN
+        cast_info ci ON ci.movie_id = a.id
+    GROUP BY
+        a.title
+),
+MovieInfoWithKeywords AS (
+    SELECT
+        at.title AS movie_title,
+        mki.info AS keyword_info,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM
+        aka_title at
+    JOIN
+        movie_keyword mk ON mk.movie_id = at.id
+    JOIN
+        movie_info mki ON mki.movie_id = at.id
+    GROUP BY
+        at.title, mki.info
+),
+TitleProductionYears AS (
+    SELECT
+        title AS movie_title,
+        production_year
+    FROM
+        aka_title
+    WHERE
+        production_year IS NOT NULL
+),
+CombinedBenchmarkData AS (
+    SELECT
+        t.movie_title,
+        t.character_count,
+        k.keyword_info,
+        k.keyword_count,
+        p.production_year
+    FROM
+        MovieCharacterCounts t
+    LEFT JOIN
+        MovieInfoWithKeywords k ON t.movie_title = k.movie_title
+    LEFT JOIN
+        TitleProductionYears p ON t.movie_title = p.movie_title
+)
+SELECT
+    movie_title,
+    character_count,
+    keyword_info,
+    keyword_count,
+    production_year
+FROM
+    CombinedBenchmarkData
+WHERE
+    character_count > 5
+ORDER BY
+    production_year DESC, character_count DESC;

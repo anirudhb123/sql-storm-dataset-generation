@@ -1,0 +1,51 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        AVG(ws_net_profit) AS avg_net_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_bill_customer_sk
+),
+Demographics AS (
+    SELECT 
+        c.c_customer_sk,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_education_status,
+        d.cd_dep_count,
+        d.cd_income_band_sk,
+        i.ib_lower_bound,
+        i.ib_upper_bound
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    LEFT JOIN 
+        household_demographics h ON d.cd_demo_sk = h.hd_demo_sk
+    LEFT JOIN 
+        income_band i ON h.hd_income_band_sk = i.ib_income_band_sk
+)
+SELECT 
+    d.cd_gender,
+    d.cd_marital_status,
+    COUNT(sd.ws_bill_customer_sk) AS num_customers,
+    SUM(sd.total_quantity) AS total_quantity,
+    SUM(sd.total_sales) AS total_sales,
+    AVG(sd.avg_net_profit) AS avg_net_profit,
+    MIN(i.ib_lower_bound) AS min_income,
+    MAX(i.ib_upper_bound) AS max_income
+FROM 
+    SalesData sd
+JOIN 
+    Demographics d ON sd.ws_bill_customer_sk = d.c_customer_sk
+GROUP BY 
+    d.cd_gender, d.cd_marital_status
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

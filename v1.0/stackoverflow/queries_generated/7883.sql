@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.LastActivityDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounty,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (ORDER BY SUM(v.BountyAmount) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL string_to_array(p.Tags, ',') AS tagArr(tag) ON true
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(BOTH '<>' FROM tagArr.tag)
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    ut.DisplayName AS TopUser,
+    pu.TotalBounty,
+    pt.Tags
+FROM 
+    RankedPosts rp
+JOIN 
+    TopUsers ut ON rp.PostId IN (
+        SELECT p.Id 
+        FROM Posts p 
+        WHERE p.OwnerUserId = ut.UserId
+    )
+JOIN 
+    PostTags pt ON rp.PostId = pt.PostId
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC, rp.CommentCount DESC
+LIMIT 100;

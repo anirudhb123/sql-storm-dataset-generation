@@ -1,0 +1,78 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id DESC) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorMovieCounts AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        RankedMovies rm ON ci.movie_id = rm.movie_id
+    GROUP BY 
+        ci.person_id
+),
+PopularActors AS (
+    SELECT 
+        ak.name,
+        amc.movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        ActorMovieCounts amc ON ak.person_id = amc.person_id
+    WHERE 
+        amc.movie_count > 5
+),
+TitleInfo AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        c.name AS company_name,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, c.name
+),
+FinalBenchmark AS (
+    SELECT 
+        pa.name AS popular_actor,
+        ti.title,
+        ti.company_name,
+        ti.keyword_count,
+        CASE 
+            WHEN ti.keyword_count IS NULL THEN 'No Keywords'
+            ELSE ti.keyword_count::text || ' Keywords'
+        END AS keyword_info
+    FROM 
+        PopularActors pa
+    JOIN 
+        cast_info ci ON pa.person_id = ci.person_id
+    JOIN 
+        TitleInfo ti ON ci.movie_id = ti.title_id
+)
+SELECT 
+    fb.popular_actor,
+    fb.title,
+    fb.company_name,
+    fb.keyword_info
+FROM 
+    FinalBenchmark fb
+WHERE 
+    fb.company_name IS NOT NULL
+ORDER BY 
+    fb.popular_actor, fb.title;

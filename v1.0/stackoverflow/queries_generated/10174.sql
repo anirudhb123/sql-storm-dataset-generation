@@ -1,0 +1,57 @@
+-- Performance Benchmarking Query
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId IN (4, 5) THEN 1 ELSE 0 END) AS TotalWikis,
+        SUM(v.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostScore AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    ORDER BY 
+        p.Score DESC, p.ViewCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalQuestions,
+    u.TotalAnswers,
+    u.TotalWikis,
+    u.TotalUpvotes,
+    u.TotalDownvotes,
+    p.PostId,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    p.CreationDate,
+    p.OwnerDisplayName
+FROM 
+    UserPostStats u
+LEFT JOIN 
+    PostScore p ON u.UserId = p.OwnerDisplayName
+ORDER BY 
+    u.TotalPosts DESC, u.TotalQuestions DESC;

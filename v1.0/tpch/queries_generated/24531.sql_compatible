@@ -1,0 +1,103 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank,
+        n.n_nationkey
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SupplierInfo AS (
+    SELECT 
+        ps.ps_supplycost,
+        p.p_name,
+        ps.ps_availqty,
+        COALESCE(NULLIF(tr.l_partkey, 0), 'No Part') AS p_partkey_null_check
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN (
+        SELECT DISTINCT 
+            l.l_partkey
+        FROM 
+            lineitem l
+        WHERE 
+            l.l_returnflag = 'R'
+    ) tr ON p.p_partkey = tr.l_partkey
+),
+FinalResult AS (
+    SELECT 
+        r.r_name AS region_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acctbal,
+        AVG(hvo.total_value) AS avg_order_value
+    FROM 
+        RankedSuppliers s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        HighValueOrders hvo ON s.s_suppkey IN (
+            SELECT DISTINCT l.l_suppkey 
+            FROM lineitem l 
+            JOIN orders o ON l.l_orderkey = o.o_orderkey 
+            WHERE o.o_orderkey = hvo.o_orderkey
+        )
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    f.region_name,
+    f.supplier_count,
+    f.total_acctbal,
+    f.avg_order_value,
+    CASE 
+        WHEN f.avg_order_value IS NULL THEN 'No Orders'
+        WHEN f.avg_order_value > 50000 THEN 'High Value'
+        ELSE 'Low Value'
+    END AS order_value_category
+FROM 
+    FinalResult f
+UNION ALL
+SELECT 
+    'Global Summary' AS region_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(s.s_acctbal) AS total_acctbal,
+    AVG(hvo.total_value) AS avg_order_value
+FROM 
+    RankedSuppliers s
+JOIN 
+    HighValueOrders hvo ON s.s_suppkey IN (
+        SELECT DISTINCT l.l_suppkey 
+        FROM lineitem l 
+        JOIN orders o ON l.l_orderkey = o.o_orderkey 
+        WHERE o.o_orderkey = hvo.o_orderkey
+    )
+WHERE 
+    (s.s_acctbal IS NOT NULL OR s.s_acctbal <> 0)
+ORDER BY 
+    region_name DESC;

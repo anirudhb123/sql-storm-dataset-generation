@@ -1,0 +1,61 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        r.r_name AS region,
+        ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY s.s_acctbal DESC) AS rank,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, r.r_regionkey
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(ro.total_price), 0) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        RecentOrders ro ON c.c_custkey = ro.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        total_spent > (SELECT AVG(total_price) FROM RecentOrders)
+)
+SELECT 
+    ts.c_custkey,
+    ts.c_name,
+    COALESCE(rs.s_name, 'N/A') AS supplier_name,
+    rs.total_supply_cost,
+    ts.total_spent
+FROM 
+    TopCustomers ts
+LEFT JOIN 
+    RankedSuppliers rs ON ts.c_custkey = rs.s_suppkey
+WHERE 
+    rs.rank <= 5
+ORDER BY 
+    ts.total_spent DESC, rs.total_supply_cost DESC;

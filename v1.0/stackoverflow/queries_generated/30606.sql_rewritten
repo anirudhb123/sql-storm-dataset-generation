@@ -1,0 +1,59 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        1 AS Depth
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    UNION ALL
+    SELECT 
+        ph2.PostId,
+        ph2.PostHistoryTypeId,
+        ph2.CreationDate,
+        ph2.UserId,
+        Depth + 1
+    FROM 
+        PostHistory ph2
+    INNER JOIN 
+        RecursivePostHistory rph ON rph.PostId = ph2.PostId
+    WHERE 
+        ph2.CreationDate < rph.CreationDate
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS OwnerName,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    COUNT(DISTINCT bp.Id) AS BadgeCount,
+    MAX(rph.Depth) AS ClosureDepth,
+    CASE 
+        WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open' 
+    END AS PostStatus
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON c.PostId = p.Id
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id
+LEFT JOIN 
+    Badges bp ON bp.UserId = u.Id
+LEFT JOIN 
+    RecursivePostHistory rph ON rph.PostId = p.Id
+GROUP BY 
+    p.Id, u.DisplayName
+HAVING 
+    SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) > 0 
+ORDER BY 
+    ClosureDepth DESC, 
+    p.CreationDate DESC;

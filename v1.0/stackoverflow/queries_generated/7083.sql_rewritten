@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(rp.PostId) AS TotalPosts,
+        SUM(rp.Score) AS TotalScore,
+        SUM(rp.UpVotes - rp.DownVotes) AS NetVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    us.TotalPosts,
+    us.TotalScore,
+    us.NetVotes,
+    RANK() OVER (ORDER BY us.TotalScore DESC) AS ScoreRank
+FROM 
+    Users u
+JOIN 
+    UserScores us ON u.Id = us.UserId
+WHERE 
+    us.TotalPosts > 0
+ORDER BY 
+    ScoreRank ASC,
+    us.TotalScore DESC
+LIMIT 10;

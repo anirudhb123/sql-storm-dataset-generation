@@ -1,0 +1,45 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.returning_customer_sk,
+        SUM(sr.return_quantity) AS total_return_quantity,
+        RANK() OVER (PARTITION BY sr.returning_customer_sk ORDER BY SUM(sr.return_quantity) DESC) AS rnk
+    FROM store_returns sr
+    GROUP BY sr.returning_customer_sk
+),
+HighReturnCustomers AS (
+    SELECT returning_customer_sk 
+    FROM RankedReturns 
+    WHERE rnk = 1
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(COALESCE(wr.wr_return_quantity, 0) + COALESCE(cr.cr_return_quantity, 0)) AS total_web_returns,
+        c.c_first_name,
+        c.c_last_name
+    FROM customer c
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.w_returning_customer_sk
+    LEFT JOIN catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    WHERE c.c_current_addr_sk IN (SELECT ca_address_sk FROM customer_address WHERE ca_state = 'NY')
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    COALESCE(cd.total_web_returns, 0) AS total_returns,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    SUM(ws.ws_net_profit) AS total_net_profit,
+    AVG(CASE WHEN ws.ws_sales_price > 0 THEN ws.ws_sales_price ELSE NULL END) AS avg_sales_price,
+    CASE 
+        WHEN SUM(ws.ws_ext_discount_amt) IS NULL THEN 'No Discounts'
+        WHEN SUM(ws.ws_ext_discount_amt) > 0 THEN 'Discounts Applied' 
+        ELSE 'No Discounts' 
+    END AS discount_status
+FROM CustomerDetails cd
+JOIN web_sales ws ON cd.c_customer_sk = ws.ws_bill_customer_sk
+WHERE cd.c_customer_sk IN (SELECT returning_customer_sk FROM HighReturnCustomers)
+GROUP BY cd.c_first_name, cd.c_last_name
+HAVING SUM(ws.ws_net_profit) > (SELECT AVG(ws2.ws_net_profit) FROM web_sales ws2 WHERE ws2.ws_ship_date_sk > 20230101)
+ORDER BY total_net_profit DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,45 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_bill_cdemo_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales WS
+    JOIN web_site W ON WS.ws_web_site_sk = W.web_site_sk
+    WHERE W.web_country = 'USA'
+    GROUP BY ws_bill_cdemo_sk
+),
+top_customers AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(c.first_name, 'Unknown') AS customer_first_name
+    FROM customer_demographics cd
+    LEFT JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    WHERE cd.cd_purchase_estimate > 5000
+),
+returns_summary AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM store_returns
+    GROUP BY sr_customer_sk
+)
+SELECT 
+    tc.cd_demo_sk,
+    tc.customer_first_name,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    tc.cd_purchase_estimate,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    COALESCE(r.total_return_amt, 0) AS total_return_amt
+FROM top_customers tc
+LEFT JOIN sales_cte s ON tc.cd_demo_sk = s.ws_bill_cdemo_sk
+LEFT JOIN returns_summary r ON tc.cd_demo_sk = r.sr_customer_sk
+WHERE (COALESCE(s.total_sales, 0) > 0 OR COALESCE(r.total_returns, 0) > 0)
+ORDER BY tc.cd_demo_sk ASC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,66 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+person_aka AS (
+    SELECT 
+        a.person_id,
+        STRING_AGG(a.name, ', ') AS all_names
+    FROM 
+        aka_name a
+    GROUP BY 
+        a.person_id
+),
+
+cast_with_roles AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+)
+
+SELECT 
+    tt.title,
+    tt.production_year,
+    pa.all_names,
+    CAST(CASE WHEN pa.all_names IS NULL THEN 'UNKNOWN' ELSE pa.all_names END AS TEXT) AS actor_names,
+    COUNT(DISTINCT km.keyword) AS keyword_count,
+    AVG(CASE WHEN cm.country_code IS NULL THEN 0 ELSE 1 END) as country_presence,
+    MAX(CASE WHEN cc.kind IS NULL THEN 'Not Defined' ELSE cc.kind END) AS company_type_defined
+FROM 
+    ranked_titles tt
+LEFT JOIN 
+    cast_with_roles cr ON tt.title_id = cr.movie_id
+LEFT JOIN 
+    person_aka pa ON cr.person_id = pa.person_id
+LEFT JOIN 
+    movie_keyword km ON tt.title_id = km.movie_id
+LEFT JOIN 
+    movie_companies mc ON tt.title_id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    company_name cm ON mc.company_id = cm.id
+LEFT JOIN 
+    complete_cast cc ON tt.title_id = cc.movie_id
+WHERE 
+    (tt.production_year BETWEEN 2000 AND 2022 OR tt.production_year IS NULL)
+    AND (cr.role_order <= 5 OR cr.role_order IS NULL)
+GROUP BY 
+    tt.title, tt.production_year, pa.all_names
+ORDER BY 
+    tt.production_year DESC, tt.title ASC
+LIMIT 100;

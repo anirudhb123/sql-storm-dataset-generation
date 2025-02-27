@@ -1,0 +1,77 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        mh.depth < 5
+),
+MovieInfo AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        COUNT(DISTINCT COALESCE(cast.person_id, -1)) AS total_cast_count,
+        AVG(
+            CASE 
+                WHEN ci.nr_order IS NOT NULL THEN ci.nr_order 
+                ELSE 0 
+            END
+        ) AS avg_order
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        mh.movie_id, mh.movie_title
+)
+SELECT 
+    mi.movie_id,
+    mi.movie_title,
+    CASE 
+        WHEN mi.total_cast_count > 0 THEN 'Has Cast'
+        ELSE 'No Cast'
+    END AS cast_status,
+    ROUND(mi.avg_order, 2) AS avg_role_order
+FROM 
+    MovieInfo mi
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM movie_keyword mk
+        JOIN keyword k ON mk.keyword_id = k.id
+        WHERE 
+            mk.movie_id = mi.movie_id AND 
+            k.keyword LIKE '%Action%' 
+    )
+    AND mi.movie_id IN (
+        SELECT movie_id
+        FROM movie_info
+        WHERE info_type_id = (SELECT id FROM info_type WHERE info LIKE 'Budget%')
+        GROUP BY movie_id
+        HAVING AVG(CASE WHEN info IS NOT NULL THEN CAST(info AS INTEGER) ELSE NULL END) < 10000000 
+    )
+ORDER BY 
+    mi.movie_title ASC,
+    mi.total_cast_count DESC
+LIMIT 50 OFFSET 0;

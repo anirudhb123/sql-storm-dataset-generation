@@ -1,0 +1,84 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rn
+    FROM 
+        supplier s
+), 
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        part p
+    INNER JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_availqty) > 1000 AND 
+        AVG(ps.ps_supplycost) < (SELECT AVG(ps_supplycost) FROM partsupp)
+), 
+EligibleCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (ORDER BY c.c_acctbal DESC) as rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL AND 
+        c.c_mktsegment IN ('BUILDING', 'FOOD')
+), 
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND
+        l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey
+) 
+SELECT 
+    c.c_name,
+    p.p_name,
+    r.r_name AS region_name,
+    COALESCE(o.total_price, 0) AS order_total_price,
+    s.s_name AS primary_supplier_name,
+    CASE 
+        WHEN h.total_availqty IS NULL THEN 'No Stock Available'
+        ELSE 'In Stock'
+    END AS stock_status
+FROM 
+    EligibleCustomers c
+LEFT JOIN 
+    HighValueParts h ON h.total_availqty > 1000
+LEFT JOIN 
+    RankedSuppliers s ON s.rn = 1 AND s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = h.p_partkey)
+LEFT JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    OrderDetails o ON o.o_orderkey = (
+        SELECT o2.o_orderkey 
+        FROM orders o2 
+        WHERE o2.o_custkey = c.c_custkey 
+        AND o2.o_orderstatus = 'O' 
+        ORDER BY o2.o_orderdate DESC 
+        LIMIT 1
+    )
+WHERE 
+    (c.c_acctbal > 500 OR s.s_acctbal IS NOT NULL)
+ORDER BY 
+    c.c_name, p.p_name;

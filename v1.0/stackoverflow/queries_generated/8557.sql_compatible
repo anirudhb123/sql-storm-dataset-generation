@@ -1,0 +1,68 @@
+
+WITH PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount AS CommentCount,
+        p.FavoriteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        JSON_AGG(DISTINCT b.Name) AS Badges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON p.Tags LIKE CONCAT('%<', t.TagName, '>')  
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'  
+        AND p.PostTypeId IN (1, 2)  
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AnswerCount, p.CommentCount, p.FavoriteCount
+    HAVING 
+        p.ViewCount > 1000  
+)
+
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.CreationDate,
+    pm.ViewCount,
+    pm.Score,
+    pm.AnswerCount,
+    pm.CommentCount,
+    pm.FavoriteCount,
+    pm.Tags,
+    COALESCE(badge_summary.BadgeCount, 0) AS UniqueBadgeCount,
+    COALESCE(vote_summary.UpvoteCount, 0) AS UpvoteCount,
+    COALESCE(vote_summary.DownvoteCount, 0) AS DownvoteCount
+FROM 
+    PostMetrics pm
+LEFT JOIN (
+    SELECT 
+        PostId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    GROUP BY 
+        PostId
+) AS badge_summary ON pm.PostId = badge_summary.PostId
+LEFT JOIN (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+) AS vote_summary ON pm.PostId = vote_summary.PostId
+ORDER BY 
+    pm.ViewCount DESC, 
+    pm.Score DESC
+LIMIT 50;

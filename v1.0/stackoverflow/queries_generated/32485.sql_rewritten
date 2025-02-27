@@ -1,0 +1,85 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        Score,
+        ParentId,
+        OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ParentId,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(v.BountyAmount, 0)) AS AvgBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    GROUP BY 
+        u.Id
+),
+
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        TotalViews,
+        TotalScore,
+        AvgBounty,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM 
+        UserActivity
+    WHERE 
+        PostCount > 0
+)
+
+SELECT 
+    up.DisplayName AS TopContributors,
+    up.PostCount,
+    up.TotalViews,
+    up.TotalScore,
+    up.AvgBounty,
+    r.Title AS TopPostTitle,
+    r.Level AS PostLevel,
+    COUNT(c.Id) AS CommentCount,
+    MAX(c.CreationDate) AS LatestCommentDate
+FROM 
+    TopUsers up
+LEFT JOIN 
+    Posts p ON up.UserId = p.OwnerUserId AND p.PostTypeId = 1  
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.Id
+WHERE 
+    up.ScoreRank <= 10
+GROUP BY 
+    up.UserId, up.DisplayName, up.PostCount, up.TotalViews, up.TotalScore, up.AvgBounty, r.Title, r.Level
+ORDER BY 
+    up.TotalScore DESC, CommentCount DESC;

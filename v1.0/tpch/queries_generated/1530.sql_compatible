@@ -1,0 +1,46 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F') 
+    GROUP BY o.o_orderkey, o.o_orderdate
+), SupplierInfo AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal,
+           r.r_name AS region_name,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal, r.r_name
+)
+SELECT ro.o_orderkey,
+       ro.o_orderdate,
+       ro.total_revenue,
+       si.s_suppkey,
+       si.s_name,
+       si.region_name,
+       si.part_count
+FROM RankedOrders ro
+LEFT JOIN SupplierInfo si ON ro.total_revenue > si.s_acctbal
+WHERE ro.revenue_rank <= 5
+ORDER BY ro.total_revenue DESC, si.part_count DESC
+UNION ALL
+SELECT NULL AS o_orderkey,
+       NULL AS o_orderdate,
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       NULL AS s_suppkey,
+       NULL AS s_name,
+       'Total' AS region_name,
+       NULL AS part_count
+FROM lineitem l
+WHERE l.l_shipdate >= CURRENT_DATE - INTERVAL '6 MONTH'
+AND l.l_returnflag = 'N'
+GROUP BY l.l_returnflag
+ORDER BY total_revenue DESC;

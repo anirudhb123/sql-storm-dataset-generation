@@ -1,0 +1,99 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        0 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        a.Id,
+        a.Title,
+        a.CreationDate,
+        a.OwnerUserId,
+        a.Score,
+        r.Depth + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursiveCTE r ON a.ParentId = r.PostId
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        ps.TotalPosts,
+        ps.TotalScore,
+        ps.QuestionCount,
+        ps.AnswerCount,
+        RANK() OVER (ORDER BY ps.TotalScore DESC) AS ScoreRank
+    FROM 
+        Users u
+    JOIN 
+        PostStats ps ON u.Id = ps.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        p.Title,
+        p.OwnerUserId
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10  
+),
+VoteStatistics AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(COALESCE(vs.UpVotes, 0)) AS TotalUpvotes,
+    SUM(COALESCE(vs.DownVotes, 0)) AS TotalDownvotes,
+    COUNT(DISTINCT cp.PostId) AS TotalClosedPosts,
+    MAX(CASE WHEN r.Depth < 2 THEN r.Title END) AS FirstLevelQuestion,
+    MAX(CASE WHEN r.Depth >= 2 THEN r.Title END) AS DiscussionQuestion
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    VoteStatistics vs ON p.Id = vs.PostId
+LEFT JOIN 
+    ClosedPosts cp ON p.Id = cp.PostId
+LEFT JOIN 
+    RecursiveCTE r ON p.Id = r.PostId
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 5  
+ORDER BY 
+    TotalUpvotes DESC, UserName;

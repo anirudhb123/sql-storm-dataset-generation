@@ -1,0 +1,55 @@
+
+WITH RECURSIVE DateCTE AS (
+    SELECT d_year, d_month_seq, d_date
+    FROM date_dim
+    WHERE d_year BETWEEN 2018 AND 2023
+    UNION ALL
+    SELECT d_year, d_month_seq, d_date
+    FROM date_dim
+    WHERE d_year = (SELECT d_year FROM DateCTE) + 1 AND d_month_seq = (SELECT d_month_seq FROM DateCTE)
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT sr.sr_ticket_number) AS total_returns,
+        SUM(ws.ws_net_profit) AS total_profit,
+        SUM(sr.sr_return_amt) AS total_return_amount
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_sk
+),
+IncomeBandStats AS (
+    SELECT 
+        h.hd_income_band_sk,
+        COUNT(CASE WHEN cs.total_orders > 0 THEN 1 END) AS active_customers,
+        SUM(cs.total_profit) AS total_profit,
+        SUM(cs.total_return_amount) AS total_return_amount
+    FROM CustomerStats cs
+    JOIN household_demographics h ON cs.c_customer_sk = h.hd_demo_sk
+    GROUP BY h.hd_income_band_sk
+),
+MonthlyStats AS (
+    SELECT 
+        d.d_month_seq,
+        SUM(ws.ws_ext_sales_price) AS monthly_sales,
+        SUM(ws.ws_ext_tax) AS monthly_tax,
+        SUM(COALESCE(hs.total_profit, 0)) AS total_profit,
+        SUM(COALESCE(hs.total_return_amount, 0)) AS total_returns
+    FROM web_sales ws
+    JOIN DateCTE d ON ws.ws_sold_date_sk = d.d_date
+    LEFT JOIN CustomerStats hs ON ws.ws_bill_customer_sk = hs.c_customer_sk
+    GROUP BY d.d_month_seq
+)
+SELECT 
+    d.d_year,
+    m.monthly_sales,
+    m.monthly_tax,
+    (m.total_profit - m.total_returns) AS net_profit
+FROM MonthlyStats m
+JOIN (
+    SELECT DISTINCT d_year
+    FROM DateCTE
+) d ON 1=1
+ORDER BY d.d_year, m.monthly_sales DESC;

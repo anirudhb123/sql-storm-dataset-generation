@@ -1,0 +1,69 @@
+WITH UserScoreSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    WHERE U.Reputation >= 1000
+    GROUP BY U.Id, U.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerName,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 
+            ELSE 0 
+        END AS HasAcceptedAnswer
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate > '2022-01-01'
+),
+PostHistorySummary AS (
+    SELECT
+        PH.PostId,
+        COUNT(*) AS EditCount,
+        COUNT(DISTINCT PH.UserId) AS EditorsCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (4, 5)  -- Filter for title and body edits
+    GROUP BY PH.PostId
+),
+FinalSummary AS (
+    SELECT 
+        U.DisplayName AS UserName,
+        U.TotalPosts,
+        U.TotalComments,
+        U.TotalBadges,
+        SUM(PS.ViewCount) AS TotalViews,
+        SUM(PS.Score) AS TotalScore,
+        SUM(PHS.EditCount) AS TotalEdits,
+        SUM(PHS.EditorsCount) AS UniqueEditors
+    FROM UserScoreSummary U
+    JOIN PostSummary PS ON U.UserId = PS.OwnerName
+    LEFT JOIN PostHistorySummary PHS ON PS.PostId = PHS.PostId
+    GROUP BY U.UserName, U.TotalPosts, U.TotalComments, U.TotalBadges
+)
+SELECT 
+    UserName,
+    TotalPosts,
+    TotalComments,
+    TotalBadges,
+    TotalViews,
+    TotalScore,
+    TotalEdits,
+    UniqueEditors
+FROM FinalSummary
+ORDER BY TotalScore DESC, TotalPosts DESC
+LIMIT 10;

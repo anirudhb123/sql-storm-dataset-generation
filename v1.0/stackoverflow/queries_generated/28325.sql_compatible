@@ -1,0 +1,62 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostAuthorStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AverageViews,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS UsedTags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(P.Tags, ',') AS TagArray ON true
+    LEFT JOIN 
+        Tags T ON TRIM(BOTH ' ' FROM TagArray) = T.TagName
+    GROUP BY 
+        P.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        UB.BadgeCount,
+        PSA.PostCount,
+        PSA.TotalScore,
+        PSA.AverageViews,
+        PSA.UsedTags
+    FROM 
+        Users U
+    JOIN 
+        UserBadges UB ON U.Id = UB.UserId
+    JOIN 
+        PostAuthorStats PSA ON U.Id = PSA.OwnerUserId
+    ORDER BY 
+        U.Reputation DESC, 
+        PSA.TotalScore DESC
+    LIMIT 10
+)
+SELECT 
+    T.DisplayName AS "User",
+    T.Reputation AS "Reputation",
+    T.BadgeCount AS "NumberOfBadges",
+    T.PostCount AS "NumberOfPosts",
+    T.TotalScore AS "TotalPostScore",
+    T.AverageViews AS "AveragePostViews",
+    T.UsedTags AS "TagsUsed"
+FROM 
+    TopUsers T
+ORDER BY 
+    T.Reputation DESC;

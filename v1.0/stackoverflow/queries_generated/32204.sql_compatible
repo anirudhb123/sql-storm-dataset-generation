@@ -1,0 +1,67 @@
+
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ParentId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.PostId
+)
+
+, UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    us.DisplayName,
+    us.PostCount,
+    us.TotalScore,
+    us.TotalViews,
+    COALESCE(SUM(rp.Score), 0) AS TotalAnsweredScores,
+    COUNT(DISTINCT rp.PostId) AS TotalAnswersCount,
+    CASE 
+        WHEN us.TotalScore > 100 THEN 'High Scorer'
+        WHEN us.TotalScore BETWEEN 50 AND 100 THEN 'Medium Scorer'
+        ELSE 'Low Scorer'
+    END AS ScoreCategory
+FROM 
+    UserStatistics us
+LEFT JOIN 
+    RecursivePosts rp ON us.UserId = rp.OwnerId
+GROUP BY 
+    us.DisplayName, us.PostCount, us.TotalScore, us.TotalViews
+ORDER BY 
+    us.TotalScore DESC, us.PostCount DESC;

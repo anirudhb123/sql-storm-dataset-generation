@@ -1,0 +1,66 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        rc.role AS role_name,
+        c.name AS company_name,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type rc ON ci.role_id = rc.id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.name IS NOT NULL 
+        AND c.name IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year, a.name, c.name, rc.role
+),
+actor_summary AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT movie_id) AS movie_count,
+        STRING_AGG(DISTINCT title, ', ') AS movies
+    FROM 
+        movie_details
+    GROUP BY 
+        actor_name
+),
+company_summary AS (
+    SELECT 
+        company_name,
+        COUNT(DISTINCT movie_id) AS movie_count,
+        STRING_AGG(DISTINCT title, ', ') AS movies
+    FROM 
+        movie_details
+    GROUP BY 
+        company_name
+)
+SELECT 
+    m.actor_name,
+    m.movie_count AS total_movies_by_actor,
+    c.company_name,
+    c.movie_count AS total_movies_by_company,
+    m.movies AS actor_movies,
+    c.movies AS company_movies
+FROM 
+    actor_summary m
+JOIN 
+    company_summary c ON m.movie_count > 0 AND c.movie_count > 0
+ORDER BY 
+    m.movie_count DESC, 
+    c.movie_count DESC;

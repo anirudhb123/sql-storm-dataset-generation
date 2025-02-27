@@ -1,0 +1,70 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM Posts p
+    INNER JOIN PostHierarchy ph ON p.ParentId = ph.Id
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount,
+        MAX(CASE WHEN pht.Name = 'Post Closed' THEN 1 ELSE 0 END) AS IsClosed
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+),
+MostActiveTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM Tags t
+    LEFT JOIN Posts p ON t.Id = ANY(string_to_array(p.Tags, '>'))
+    GROUP BY t.TagName
+    ORDER BY PostCount DESC
+    LIMIT 5
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    ps.PostCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ph.Id AS PostHierarchyId,
+    ph.Title AS PostTitle,
+    ph.Level,
+    phts.HistoryCount,
+    CASE 
+        WHEN phts.IsClosed = 1 THEN 'Yes'
+        ELSE 'No'
+    END AS IsClosedPost,
+    mt.TagName AS TopTag
+FROM UserStatistics u
+JOIN PostHierarchy ph ON u.UserId = ph.OwnerUserId
+JOIN PostHistoryStats phts ON ph.Id = phts.PostId
+LEFT JOIN MostActiveTags mt ON mt.PostCount > 0 -- This limits the displayed tags to those that have posts
+ORDER BY u.Reputation DESC, ps.UpVotes DESC, ph.Level;

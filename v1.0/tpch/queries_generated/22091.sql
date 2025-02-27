@@ -1,0 +1,79 @@
+WITH RegionalSales AS (
+    SELECT
+        r.r_name AS region,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS orders_count
+    FROM
+        region r
+    LEFT JOIN
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN
+        lineitem l ON l.l_partkey = p.p_partkey
+    LEFT JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE
+        o.o_orderstatus = 'F' AND
+        l.l_shipdate >= DATE '2022-01-01' AND
+        l.l_shipdate < DATE '2023-01-01'
+    GROUP BY
+        r.r_name
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderdate >= DATE '2022-01-01'
+    GROUP BY
+        c.c_custkey, c.c_name
+    HAVING
+        SUM(o.o_totalprice) > 10000
+),
+CustomerRank AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderdate >= DATE '2022-01-01'
+    GROUP BY
+        c.c_custkey, c.c_name
+)
+SELECT
+    r.region,
+    h.c_name AS high_value_customer,
+    h.total_spent,
+    cr.rank
+FROM
+    RegionalSales r
+JOIN
+    HighValueCustomers h ON r.total_sales > 50000
+JOIN
+    CustomerRank cr ON h.c_custkey = cr.c_custkey
+WHERE
+    cr.rank <= 10 OR h.total_spent IS NULL
+ORDER BY
+    r.region, h.total_spent DESC
+UNION ALL
+SELECT
+    'TOTAL' AS region,
+    NULL AS high_value_customer,
+    SUM(total_sales) AS total_spent,
+    NULL AS rank
+FROM
+    RegionalSales;

@@ -1,0 +1,30 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS cast_type,
+    p.info AS person_info,
+    COUNT(DISTINCT k.keyword) AS keyword_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    comp_cast_type c ON ci.person_role_id = c.id
+LEFT JOIN 
+    person_info p ON a.person_id = p.person_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+    AND c.kind IN (SELECT kind FROM comp_cast_type WHERE kind LIKE 'Actor%')
+GROUP BY 
+    a.name, t.title, c.kind, p.info
+HAVING 
+    COUNT(DISTINCT k.keyword) > 5
+ORDER BY 
+    a.name, t.title;

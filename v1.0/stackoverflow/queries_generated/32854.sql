@@ -1,0 +1,75 @@
+WITH RecursivePostHierarchy AS (
+    -- Recursive CTE to retrieve post hierarchy
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL  -- Start with root posts
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostStats AS (
+    -- CTE to calculate post statistics
+    SELECT 
+        p.Id,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.CreationDate, p.OwnerUserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    rp.Title AS RootPostTitle,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CreationDate,
+    CASE 
+        WHEN ps.UpVotes IS NULL THEN 0 
+        ELSE ps.UpVotes
+    END AS TotalUpVotes,
+    CASE 
+        WHEN ps.DownVotes IS NULL THEN 0 
+        ELSE ps.DownVotes
+    END AS TotalDownVotes,
+    CASE 
+        WHEN ps.CommentCount = 0 THEN 'No comments yet' 
+        ELSE 'Comments available'
+    END AS CommentStatus
+FROM 
+    Users u
+JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    PostStats ps ON p.Id = ps.Id
+LEFT JOIN 
+    RecursivePostHierarchy rp ON p.Id = rp.Id
+WHERE 
+    u.Reputation > 1000  -- Filter for users with high reputation
+    AND ps.PostRank = 1  -- Only the newest posts by each user
+ORDER BY 
+    u.Reputation DESC, 
+    ps.UpVotes DESC
+LIMIT 50;

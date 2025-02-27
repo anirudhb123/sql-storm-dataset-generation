@@ -1,0 +1,31 @@
+
+WITH RECURSIVE CTE_SupplierSales AS (
+    SELECT s.s_suppkey, s.s_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey, s.s_name
+    UNION ALL
+    SELECT ss.s_suppkey, ss.s_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier ss
+    JOIN partsupp ps ON ss.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN CTE_SupplierSales cte ON ss.s_suppkey = cte.s_suppkey
+    GROUP BY ss.s_suppkey, ss.s_name
+),
+FilteredSales AS (
+    SELECT s.s_suppkey, s.s_name, s.total_sales
+    FROM CTE_SupplierSales s
+    WHERE s.total_sales > (SELECT AVG(total_sales) FROM CTE_SupplierSales)
+),
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT fr.r_name, fr.n_name, fs.s_name, fs.total_sales
+FROM FilteredSales fs
+JOIN supplier s ON fs.s_suppkey = s.s_suppkey
+LEFT JOIN NationRegion fr ON s.s_nationkey = fr.n_nationkey
+WHERE fr.n_name IS NOT NULL AND fs.total_sales IS NOT NULL
+ORDER BY fr.r_name, fs.total_sales DESC;

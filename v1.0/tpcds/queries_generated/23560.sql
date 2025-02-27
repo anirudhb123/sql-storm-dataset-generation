@@ -1,0 +1,78 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk, ws_order_number
+),
+FilteredSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        rs.total_quantity,
+        rs.total_profit,
+        COALESCE(ps.previous_quantity, 0) AS previous_quantity,
+        CASE 
+            WHEN rs.total_quantity > COALESCE(ps.previous_quantity, 0) THEN 'Increased'
+            WHEN rs.total_quantity < COALESCE(ps.previous_quantity, 0) THEN 'Decreased'
+            ELSE 'Unchanged' 
+        END AS quantity_trend
+    FROM 
+        RankedSales rs
+    LEFT JOIN (
+        SELECT 
+            ws_item_sk,
+            ws_order_number,
+            SUM(ws_quantity) AS previous_quantity
+        FROM 
+            web_sales
+        WHERE 
+            ws_sold_date_sk < (
+                SELECT 
+                    MAX(ws_sold_date_sk) 
+                FROM 
+                    web_sales
+            ) - 30    -- This assumes we are comparing with data from 30 days ago
+        GROUP BY 
+            ws_item_sk, ws_order_number
+    ) ps ON rs.ws_item_sk = ps.ws_item_sk AND rs.ws_order_number = ps.ws_order_number
+),
+CustomerReturnStats AS (
+    SELECT 
+        sr_item_sk, 
+        COUNT(DISTINCT sr_ticket_number) AS return_count, 
+        SUM(sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    fs.ws_item_sk,
+    fs.total_quantity,
+    fs.total_profit,
+    fs.quantity_trend,
+    cr.return_count,
+    cr.total_return_amount,
+    CASE 
+        WHEN cr.return_count IS NULL THEN 'No Returns'
+        WHEN cr.total_return_amount > 1000 THEN 'High Returns'
+        ELSE 'Normal Returns'
+    END AS return_status
+FROM 
+    FilteredSales fs
+LEFT JOIN 
+    CustomerReturnStats cr ON fs.ws_item_sk = cr.sr_item_sk
+WHERE 
+    fs.rank = 1 AND 
+    (fs.quantity_trend = 'Increased' OR fs.total_profit > 5000)
+ORDER BY 
+    fs.total_profit DESC, 
+    fs.total_quantity ASC
+LIMIT 100;

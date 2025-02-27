@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVoteCounts AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE -1 END) AS VoteScore
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        ct.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes ct ON ph.Comment::integer = ct.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT rp.PostId) AS PostCount,
+    COALESCE(SUM(bc.BadgeCount), 0) AS TotalBadges,
+    COALESCE(spc.VoteScore, 0) AS TotalVotes,
+    COALESCE(cp.ClosedCount, 0) AS ClosedPosts,
+    STRING_AGG(DISTINCT c.CloseReason || ' on ' || TO_CHAR(c.ClosedDate, 'YYYY-MM-DD'), '; ') AS CloseReasons
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.PostRank = 1
+LEFT JOIN 
+    UserBadges bc ON u.Id = bc.UserId
+LEFT JOIN 
+    PostVoteCounts spc ON rp.PostId = spc.PostId
+LEFT JOIN 
+    (SELECT 
+         ph.UserId,
+         COUNT(*) AS ClosedCount,
+         MIN(c.ClosedDate) AS FirstClosedDate
+     FROM 
+         ClosedPostDetails ph
+     LEFT JOIN 
+         ClosedPostDetails c ON ph.PostId = c.PostId
+     GROUP BY 
+         ph.UserId) cp ON u.Id = cp.UserId
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT rp.PostId) > 0
+ORDER BY 
+    TotalVotes DESC, TotalBadges DESC;

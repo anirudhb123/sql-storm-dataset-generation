@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(c.Score, 0) AS CommentScore,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, c.Score
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        CreationDate,
+        ViewCount,
+        Rank,
+        CommentScore,
+        TotalComments
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(p.Score), 0) AS TotalPostScore,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    us.TotalPostScore,
+    us.TotalBadges,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentScore,
+    tp.TotalComments
+FROM 
+    UserStatistics us
+JOIN 
+    Users u ON us.UserId = u.Id
+FULL OUTER JOIN 
+    TopPosts tp ON u.Id = tp.OwnerUserId
+WHERE 
+    us.TotalPostScore > 0 OR tp.Score IS NOT NULL
+ORDER BY 
+    us.Reputation DESC, tp.Score DESC NULLS LAST
+LIMIT 100;

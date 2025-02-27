@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 0
+),
+TotalOrderValue AS (
+    SELECT 
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_custkey
+),
+NationCosts AS (
+    SELECT 
+        n.n_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    n.n_name,
+    COALESCE(RS.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(TO.total_value, 0) AS total_order_value,
+    COALESCE(NC.total_cost, 0) AS total_supply_cost,
+    CASE 
+        WHEN TO.total_value > NC.total_cost THEN 'Profitable' 
+        ELSE 'Not Profitable' 
+    END AS profitability_status
+FROM 
+    nation n
+LEFT JOIN 
+    RankedSuppliers RS ON n.n_nationkey = RS.s_nationkey AND RS.rank = 1
+LEFT JOIN 
+    TotalOrderValue TO ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = TO.o_custkey LIMIT 1)
+LEFT JOIN 
+    NationCosts NC ON n.n_nationkey = NC.n_nationkey
+WHERE 
+    n.n_name IS NOT NULL 
+    AND n.n_nationkey IS NOT NULL
+ORDER BY 
+    profitability_status DESC, 
+    total_order_value DESC, 
+    total_supply_cost ASC;

@@ -1,0 +1,59 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.Reputation, 
+        COUNT(DISTINCT P.Id) AS PostCount, 
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        U.Reputation > 100
+    GROUP BY 
+        U.Id, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        Reputation, 
+        PostCount, 
+        TotalScore, 
+        CommentCount,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS RN
+    FROM 
+        UserReputation
+),
+PopularTags AS (
+    SELECT 
+        T.TagName, 
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    U.DisplayName, 
+    U.Reputation, 
+    U.PostCount, 
+    U.TotalScore, 
+    U.CommentCount, 
+    T.TagName AS PopularTag
+FROM 
+    TopUsers U
+CROSS JOIN 
+    PopularTags T
+WHERE 
+    U.RN <= 10
+ORDER BY 
+    U.Reputation DESC, 
+    T.PostCount DESC;

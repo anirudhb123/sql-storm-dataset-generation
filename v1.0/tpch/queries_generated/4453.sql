@@ -1,0 +1,94 @@
+WITH RankedSupplies AS (
+    SELECT 
+        ps.partkey,
+        ps.suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY ps.ps_supplycost ASC) AS supply_rank
+    FROM 
+        partsupp ps
+), 
+SupplierCosts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(rs.ps_availqty * rs.ps_supplycost) AS total_cost
+    FROM 
+        RankedSupplies rs
+    JOIN 
+        supplier s ON rs.suppkey = s.s_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+CustomersByRegion AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_regionkey,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'No Balance'
+            ELSE CAST(c.c_acctbal AS VARCHAR)
+        END AS account_balance_text
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        n.n_regionkey IN (SELECT r_regionkey FROM region WHERE r_name LIKE '%west%')
+), 
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total,
+        COUNT(l.l_orderkey) AS line_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+
+SELECT 
+    c.c_name,
+    r.r_name,
+    sc.total_cost,
+    os.order_total,
+    os.line_items,
+    CASE 
+        WHEN os.order_total IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status,
+    ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY os.order_total DESC) AS order_rank
+FROM 
+    CustomersByRegion c
+LEFT JOIN 
+    region r ON c.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    SupplierCosts sc ON sc.suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM RankedSupplies ps 
+        WHERE ps.partkey = (
+            SELECT p.p_partkey 
+            FROM part p 
+            WHERE p.p_name LIKE '%widget%'
+            ORDER BY p.p_retailprice DESC 
+            LIMIT 1
+        )
+        AND ps.supply_rank = 1
+        LIMIT 1
+    )
+LEFT JOIN 
+    OrderStats os ON os.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey = c.c_custkey
+        ORDER BY o.o_orderdate DESC 
+        LIMIT 5
+    )
+ORDER BY 
+    sc.total_cost DESC NULLS LAST, 
+    os.order_total DESC;

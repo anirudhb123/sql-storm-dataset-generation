@@ -1,0 +1,53 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        sr_customer_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        DENSE_RANK() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS rn
+    FROM store_returns
+    WHERE sr_return_quantity > 0
+),
+HighValueReturns AS (
+    SELECT 
+        rr.sr_item_sk,
+        SUM(rr.sr_return_amt) AS total_return_amt
+    FROM RankedReturns rr
+    WHERE rr.rn = 1
+    GROUP BY rr.sr_item_sk
+    HAVING SUM(rr.sr_return_amt) > 500
+),
+ReturnReasons AS (
+    SELECT 
+        sr_reason_sk,
+        r.r_reason_desc,
+        COUNT(*) AS reasons_count
+    FROM store_returns sr
+    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    GROUP BY sr_reason_sk, r.r_reason_desc
+),
+AggregateReturns AS (
+    SELECT 
+        hvr.sr_item_sk,
+        hvr.total_return_amt,
+        COALESCE(rr.reasons_count, 0) AS reasons_count,
+        RANK() OVER (ORDER BY hvr.total_return_amt DESC) AS item_rank
+    FROM HighValueReturns hvr
+    LEFT JOIN ReturnReasons rr ON hvr.sr_item_sk = rr.sr_item_sk
+)
+SELECT 
+    ir.i_item_id,
+    COALESCE(ar.total_return_amt, 0) AS total_return_amt,
+    ar.reasons_count,
+    (SELECT COUNT(*) FROM store_sales ss WHERE ss.ss_item_sk = ar.sr_item_sk) AS sales_count,
+    CASE
+        WHEN ar.reasons_count IS NULL THEN 'No Returns'
+        WHEN ar.reasons_count = 0 THEN 'Zero Reasons'
+        ELSE 'Has Returns'
+    END AS return_description
+FROM item ir
+LEFT JOIN AggregateReturns ar ON ir.i_item_sk = ar.sr_item_sk
+WHERE (ar.item_rank <= 10 OR ar.item_rank IS NULL)
+ORDER BY total_return_amt DESC NULLS LAST;

@@ -1,0 +1,51 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_profit) AS total_web_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        (CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 0 
+            ELSE cd.cd_purchase_estimate 
+        END) AS purchase_estimate
+    FROM 
+        customer_demographics cd
+)
+
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.total_web_sales,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound
+FROM 
+    CustomerSales cs
+LEFT JOIN 
+    CustomerDemographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+LEFT JOIN 
+    income_band ib ON cd.cd_income_band_sk = ib.ib_income_band_sk
+WHERE 
+    cs.total_web_sales > 1000 
+    AND (cd.cd_marital_status = 'M' OR cd.cd_gender = 'F')
+    AND ib.ib_upper_bound IS NOT NULL
+ORDER BY 
+    total_web_sales DESC
+LIMIT 10;

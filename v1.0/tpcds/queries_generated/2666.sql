@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank,
+        COUNT(*) OVER (PARTITION BY ws_item_sk) AS sales_count
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 10000 AND 20000
+), 
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk, 
+        SUM(wr_return_amt) AS total_return_amt,
+        COUNT(*) AS return_transactions
+    FROM 
+        web_returns 
+    GROUP BY 
+        wr_returning_customer_sk
+    HAVING 
+        SUM(wr_return_amt) > 100
+),
+TopItems AS (
+    SELECT 
+        ir.item_sk, 
+        ir.brand,
+        COUNT(*) AS item_sales_count
+    FROM 
+        RankedSales rs
+    JOIN 
+        item ir ON rs.ws_item_sk = ir.i_item_sk
+    WHERE 
+        rs.price_rank = 1
+    GROUP BY 
+        ir.item_sk, ir.brand
+)
+
+SELECT 
+    ca.ca_city,
+    SUM(ws.ws_net_paid) AS total_sales,
+    AVG(ws.ws_sales_price) AS avg_sale_price,
+    COUNT(DISTINCT cr.wr_order_number) AS total_returns,
+    COALESCE(AVG(CASE WHEN cr.wr_return_amt IS NOT NULL THEN cr.wr_return_amt END), 0) AS avg_return_amt,
+    TOP_ITEMS.brand AS top_brand
+FROM 
+    customer_address ca 
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    web_sales ws ON ws.ws_ship_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_returns cr ON ws.ws_order_number = cr.wr_order_number
+JOIN 
+    TopItems ON TopItems.item_sk = ws.ws_item_sk
+GROUP BY 
+    ca.ca_city, TOP_ITEMS.brand
+HAVING 
+    SUM(ws.ws_net_paid) > 5000
+ORDER BY 
+    total_sales DESC, avg_sale_price;

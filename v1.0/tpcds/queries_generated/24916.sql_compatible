@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.order_number,
+        ws.net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ship_mode_sk ORDER BY ws.net_profit DESC) AS rank
+    FROM web_sales ws
+    JOIN ship_mode sm ON ws.ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE ws.sold_date_sk IN (
+        SELECT DISTINCT d_date_sk 
+        FROM date_dim 
+        WHERE d_year = 2001 AND d_dow IN (1, 7) 
+    )
+),
+FilteredSales AS (
+    SELECT 
+        rs.web_site_sk,
+        rs.order_number,
+        rs.net_profit
+    FROM RankedSales rs
+    WHERE rs.rank <= 10
+),
+CustomerTotal AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.net_profit) AS total_profit
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+AggregateProfit AS (
+    SELECT 
+        SUM(ct.total_profit) AS overall_profit,
+        COUNT(DISTINCT c.c_customer_sk) AS unique_customers
+    FROM CustomerTotal ct
+    JOIN customer_demographics cd ON ct.c_customer_sk = cd.cd_demo_sk
+    WHERE cd.cd_marital_status = 'M' AND cd.cd_gender = 'F'
+)
+SELECT 
+    fs.web_site_sk,
+    fs.order_number,
+    fs.net_profit,
+    ap.overall_profit,
+    ap.unique_customers
+FROM FilteredSales fs
+CROSS JOIN AggregateProfit ap
+WHERE fs.net_profit > COALESCE((SELECT AVG(net_profit) FROM web_sales), 0)
+    OR fs.web_site_sk IN (
+        SELECT ws.web_site_sk
+        FROM web_sales ws
+        GROUP BY ws.web_site_sk
+        HAVING COUNT(*) > (
+            SELECT COUNT(*) * 0.1 FROM web_sales
+        )
+    )
+ORDER BY fs.net_profit DESC, ap.unique_customers ASC;

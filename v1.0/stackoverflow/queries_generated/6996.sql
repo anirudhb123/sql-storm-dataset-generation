@@ -1,0 +1,41 @@
+WITH UserReputation AS (
+    SELECT Id AS UserId, Reputation, COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM Users
+    JOIN Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY Users.Id, Reputation
+),
+TopUsers AS (
+    SELECT UserId, Reputation, PostCount
+    FROM UserReputation
+    WHERE Reputation > 1000
+    ORDER BY Reputation DESC 
+    LIMIT 10
+),
+TopTags AS (
+    SELECT Tags.TagName, COUNT(Posts.Id) AS TagUsage
+    FROM Tags
+    JOIN Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '><')::int[])
+    GROUP BY Tags.TagName
+    ORDER BY TagUsage DESC
+    LIMIT 5
+),
+PostDetails AS (
+    SELECT Posts.Id AS PostId, Posts.Title, Posts.CreationDate, Users.DisplayName AS OwnerDisplayName,
+           Posts.ViewCount, Posts.Score, Tags.TagName
+    FROM Posts
+    JOIN Users ON Posts.OwnerUserId = Users.Id
+    JOIN Tags ON Tags.Id = ANY(string_to_array(Posts.Tags, '><')::int[])
+    WHERE Posts.PostTypeId = 1 -- Questions
+)
+SELECT u.DisplayName AS UserName, p.Title, p.CreationDate, p.ViewCount, p.Score, 
+       t.TagName, COALESCE(b.BadgeCount, 0) AS UserBadges
+FROM PostDetails p
+JOIN TopUsers u ON p.OwnerDisplayName = u.UserId
+JOIN TopTags t ON t.TagName = ANY(string_to_array(p.Tags, '><'))
+LEFT JOIN (
+    SELECT UserId, COUNT(*) AS BadgeCount
+    FROM Badges
+    WHERE Date > NOW() - INTERVAL '1 year'
+    GROUP BY UserId
+) b ON b.UserId = u.UserId
+ORDER BY u.Reputation DESC, p.Score DESC;

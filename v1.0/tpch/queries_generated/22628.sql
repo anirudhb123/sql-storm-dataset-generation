@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s2.s_suppkey, s2.s_name, s2.s_nationkey, sh.level + 1
+    FROM supplier s2
+    JOIN SupplierHierarchy sh ON s2.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank,
+           COUNT(l.l_orderkey) OVER (PARTITION BY o.o_custkey) AS order_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'
+), PriceDiscounts AS (
+    SELECT ps.ps_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_price
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_returnflag = 'N' 
+    GROUP BY ps.ps_partkey
+), CustomerSummary AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent,
+           STRING_AGG(DISTINCT r.r_name, ', ' ORDER BY r.r_name) AS regions
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey 
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    sh.s_name AS supplier_name,
+    cs.total_spent AS customer_spent,
+    cs.regions AS customer_regions,
+    COALESCE(pd.net_price, 0) AS net_price,
+    RANK() OVER (PARTITION BY cs.regions ORDER BY cs.total_spent DESC) AS rank_within_region,
+    EXISTS (SELECT 1 FROM lineitem l WHERE l.l_itemkey = ps.ps_partkey AND l.l_discount > 0.2) AS item_discounted
+FROM SupplierHierarchy sh
+LEFT JOIN CustomerSummary cs ON sh.s_nationkey = cs.c_custkey
+LEFT JOIN PriceDiscounts pd ON cs.c_custkey = pd.ps_partkey
+WHERE sh.s_suppkey IN (
+    SELECT p.ps_suppkey
+    FROM partsupp p
+    JOIN part pa ON p.ps_partkey = pa.p_partkey
+    WHERE pa.p_size >= 10 AND pa.p_container IS NOT NULL
+) 
+ORDER BY customer_spent DESC, supplier_name;

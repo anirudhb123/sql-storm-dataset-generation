@@ -1,0 +1,74 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id DESC) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        LISTAGG(a.name, ', ') WITHIN GROUP (ORDER BY a.name) AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+),
+MovieKeywords AS (
+    SELECT
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+MoviesWithInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(kw.keyword_count, 0) AS keyword_count,
+        cd.total_cast,
+        cd.cast_names
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        MovieKeywords kw ON m.id = kw.movie_id
+    LEFT JOIN 
+        CastDetails cd ON m.id = cd.movie_id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+),
+SuspiciousMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY COALESCE(m.cast_names, 'None') ORDER BY m.keyword_count DESC) AS suspicious_rank
+    FROM 
+        MoviesWithInfo m
+    WHERE 
+        REGEXP_LIKE(m.cast_names, '[^[:alnum:], ]') -- Cast names contain non-alphanumeric characters
+    AND 
+        m.keyword_count > 5
+)
+SELECT 
+    sm.title,
+    sm.production_year,
+    sm.suspicious_rank,
+    COALESCE(rt.title_rank, 'Not Ranked') AS year_rank
+FROM 
+    SuspiciousMovies sm
+LEFT JOIN 
+    RankedTitles rt ON sm.production_year = rt.production_year
+WHERE 
+    sm.suspicious_rank <= 5
+ORDER BY 
+    sm.production_year DESC, sm.suspicious_rank;

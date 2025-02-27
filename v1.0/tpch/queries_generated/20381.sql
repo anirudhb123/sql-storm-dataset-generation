@@ -1,0 +1,85 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_type,
+        COUNT(DISTINCT ps.s_suppkey) AS num_suppliers
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > (
+            SELECT 
+                AVG(p2.p_retailprice) 
+            FROM 
+                part p2
+        )
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice, p.p_type
+    HAVING 
+        COUNT(DISTINCT ps.s_suppkey) > 5
+),
+ActiveCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (ORDER BY o.o_orderdate DESC) AS RecentRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '30 DAY'
+)
+SELECT 
+    R.s_suppkey,
+    R.s_name,
+    HP.p_name,
+    HP.p_retailprice,
+    AC.c_custkey,
+    AC.c_name,
+    R.s_acctbal AS supplier_balance,
+    COALESCE(RO.o_orderkey, 0) AS last_order_key,
+    COALESCE(RO.o_totalprice, 0) AS last_order_price,
+    CASE 
+        WHEN R.s_acctbal IS NULL THEN 'No Account Balance' 
+        ELSE 'Account Balance Available' 
+    END AS account_balance_status
+FROM 
+    RankedSuppliers R
+JOIN 
+    HighValueParts HP ON R.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = HP.p_partkey)
+LEFT JOIN 
+    ActiveCustomers AC ON AC.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = (SELECT MAX(o2.o_orderkey) FROM orders o2 WHERE o2.o_custkey = AC.c_custkey))
+LEFT JOIN 
+    RecentOrders RO ON RO.o_orderkey = (SELECT MAX(o.o_orderkey) FROM orders o WHERE o.o_custkey = AC.c_custkey)
+WHERE 
+    R.SupplierRank = 1 
+ORDER BY 
+    account_balance_status DESC, HP.p_retailprice DESC;

@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankByUser,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.CreationDate >= p.CreationDate
+    LEFT JOIN 
+        STRING_SPLIT(p.Tags, '>') AS splitTags ON splitTags.value LIKE '<%'
+    LEFT JOIN 
+        Tags t ON TRIM(BOTH '<>' FROM splitTags.value) = t.TagName
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.LastActivityDate, p.Score, p.OwnerUserId
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.LastActivityDate,
+        rp.Score,
+        rp.CommentCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByUser <= 5 -- Top 5 posts for each user
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.LastActivityDate,
+    DATEDIFF(DAY, fp.CreationDate, GETDATE()) AS DaysSinceCreation,
+    fp.Score,
+    fp.CommentCount,
+    fp.UpVoteCount,
+    fp.DownVoteCount,
+    fp.Tags,
+    COUNT(ph.Id) AS EditHistoryCount, -- Count number of edits made
+    STRING_AGG(DISTINCT CONCAT(ph.UserDisplayName, ': ', ph.Comment), '; ') AS EditComments
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistory ph ON fp.PostId = ph.PostId
+GROUP BY 
+    fp.PostId, fp.Title, fp.Body, fp.CreationDate, fp.LastActivityDate, 
+    fp.Score, fp.CommentCount, fp.UpVoteCount, fp.DownVoteCount, fp.Tags
+ORDER BY 
+    fp.Score DESC, fp.CreationDate DESC;

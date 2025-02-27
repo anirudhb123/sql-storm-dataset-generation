@@ -1,0 +1,52 @@
+
+WITH RankedPosts AS (
+    SELECT p.Id, 
+           p.Title, 
+           p.Score, 
+           p.CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.PostTypeId = 1
+), 
+UserActivity AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           COUNT(DISTINCT p.Id) AS TotalQuestions,
+           SUM(p.Score) AS TotalScore,
+           MAX(p.CreationDate) AS LastQuestionDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    GROUP BY u.Id, u.DisplayName
+), 
+ClosedPosts AS (
+    SELECT ph.PostId,
+           ph.UserDisplayName,
+           ph.CreationDate AS CloseDate,
+           C.Name AS CloseReason
+    FROM PostHistory ph
+    JOIN CloseReasonTypes C ON CAST(ph.Comment AS INTEGER) = C.Id
+    WHERE ph.PostHistoryTypeId = 10
+), 
+TopTags AS (
+    SELECT T.TagName,
+           COUNT(P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY T.TagName
+    ORDER BY PostCount DESC
+    LIMIT 5
+)
+SELECT ua.DisplayName,
+       ua.TotalQuestions,
+       ua.TotalScore,
+       ua.LastQuestionDate,
+       rp.Title AS MostRecentQuestionTitle,
+       cp.UserDisplayName AS ClosedBy,
+       cp.CloseDate,
+       tt.TagName
+FROM UserActivity ua
+LEFT JOIN RankedPosts rp ON ua.UserId = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN ClosedPosts cp ON ua.UserId = cp.UserId
+CROSS JOIN TopTags tt
+WHERE ua.TotalQuestions > 0
+ORDER BY ua.TotalScore DESC, ua.LastQuestionDate DESC;

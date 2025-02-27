@@ -1,0 +1,60 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderTotals AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+NationSupplier AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    ns.n_name AS nation,
+    ss.s_name AS supplier,
+    COALESCE(st.total_available, 0) AS total_available,
+    COALESCE(st.avg_supply_cost, 0) AS avg_supply_cost,
+    ot.net_value AS order_net_value,
+    CASE 
+        WHEN ot.net_value IS NOT NULL AND ot.net_value > 10000 THEN 'High Value'
+        ELSE 'Regular Value'
+    END AS order_priority,
+    CONCAT('Supplier ', ss.s_name, ' from ', ns.n_name) AS supplier_info
+FROM 
+    SupplierStats st
+FULL OUTER JOIN 
+    OrderTotals ot ON st.s_suppkey = ot.o_custkey
+JOIN 
+    NationSupplier ns ON ns.supplier_count > 0
+LEFT JOIN 
+    supplier ss ON ss.s_suppkey = st.s_suppkey
+WHERE 
+    (st.total_available IS NOT NULL OR ot.net_value IS NOT NULL)
+    AND ns.nation IS NOT NULL
+ORDER BY 
+    ns.n_name, order_net_value DESC;

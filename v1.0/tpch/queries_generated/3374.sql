@@ -1,0 +1,60 @@
+WITH SupplierCosts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+ProductSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS sales
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    cs.c_name,
+    cs.order_count,
+    cs.total_spent,
+    COALESCE(ps.sales, 0) AS product_sales,
+    sc.total_supplycost,
+    CASE 
+        WHEN cs.total_spent IS NOT NULL AND cs.total_spent > 1000 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_segment
+FROM 
+    CustomerOrders cs
+LEFT JOIN 
+    ProductSales ps ON cs.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name LIKE '%' || ps.p_name || '%')
+LEFT JOIN 
+    SupplierCosts sc ON sc.s_suppkey = (SELECT ps1.ps_suppkey FROM partsupp ps1 WHERE ps1.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_name LIKE '%' || ps.p_name || '%'))
+WHERE 
+    cs.order_count > 0
+ORDER BY 
+    cs.total_spent DESC, sc.total_supplycost ASC
+FETCH FIRST 100 ROWS ONLY;

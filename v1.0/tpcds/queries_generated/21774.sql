@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_sales_price DESC) AS rank_sales
+    FROM web_sales
+    WHERE ws_sales_price IS NOT NULL
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_credit_rating,
+        COALESCE(cd_dep_count, 0) AS dep_count
+    FROM customer_demographics
+),
+SalesSummary AS (
+    SELECT 
+        r.ws_bill_customer_sk,
+        SUM(r.ws_quantity) AS total_quantity,
+        SUM(r.ws_sales_price * r.ws_quantity) AS total_sales
+    FROM RankedSales r
+    JOIN CustomerDemographics cd ON r.ws_bill_customer_sk = cd.cd_demo_sk
+    WHERE r.rank_sales <= 5
+    GROUP BY r.ws_bill_customer_sk
+),
+CustomerAgainstReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(DISTINCT sr_order_number) AS return_count
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+FinalAnalysis AS (
+    SELECT 
+        ss.ws_bill_customer_sk,
+        COALESCE(cs.return_count, 0) AS return_count,
+        ss.total_quantity,
+        ss.total_sales,
+        CASE 
+            WHEN ss.total_sales > 1000 AND cd.cd_marital_status = 'M' THEN 'High'
+            WHEN ss.total_sales BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS sales_category
+    FROM SalesSummary ss
+    LEFT JOIN CustomerAgainstReturns cs ON ss.ws_bill_customer_sk = cs.sr_customer_sk
+    JOIN CustomerDemographics cd ON ss.ws_bill_customer_sk = cd.cd_demo_sk
+)
+SELECT 
+    fa.ws_bill_customer_sk,
+    fa.return_count,
+    fa.total_quantity,
+    fa.total_sales,
+    fa.sales_category,
+    CASE 
+        WHEN fa.return_count > 0 THEN 'Returns Exist'
+        ELSE 'No Returns'
+    END AS return_status,
+    CONCAT('Customer ', fa.ws_bill_customer_sk) AS customer_description
+FROM FinalAnalysis fa
+WHERE fa.total_sales > (SELECT AVG(total_sales) FROM FinalAnalysis)
+ORDER BY fa.total_sales DESC;

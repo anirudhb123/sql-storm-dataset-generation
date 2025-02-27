@@ -1,0 +1,61 @@
+
+WITH RecursiveCustomerCTE AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_birth_month, c_birth_year,
+           ROW_NUMBER() OVER (PARTITION BY c_birth_month ORDER BY c_birth_year DESC) as rn
+    FROM customer
+    WHERE c_birth_month IS NOT NULL
+),
+ItemSalesCTE AS (
+    SELECT ws_item_sk, SUM(ws_quantity) AS total_quantity, 
+           SUM(ws_sales_price) AS total_sales, 
+           COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk
+),
+HighValueCustomers AS (
+    SELECT cd_demo_sk, cd_gender, cd_marital_status, cd_credit_rating
+    FROM customer_demographics
+    WHERE cd_purchase_estimate > 500
+),
+JoinSalesData AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           cs.cs_item_sk, 
+           cs.cs_sales_price, 
+           cs.cs_net_paid, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY cs.cs_net_paid DESC) AS sales_rank
+    FROM customer c
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    JOIN HighValueCustomers hvc ON hvc.cd_demo_sk = c.c_current_cdemo_sk
+)
+SELECT 
+    r.rn,
+    j.c_first_name,
+    j.c_last_name,
+    COALESCE(sum(j.cs_net_paid), 0) as total_spent,
+    COALESCE(it.total_quantity, 0) as total_quantity_sold,
+    CASE 
+        WHEN COALESCE(it.total_sales, 0) > 1000 THEN 'High Seller'
+        ELSE 'Regular Seller'
+    END as sales_category,
+    COUNT(*) OVER () as total_records
+FROM RecursiveCustomerCTE r
+JOIN JoinSalesData j ON j.c_customer_sk = r.c_customer_sk
+LEFT JOIN ItemSalesCTE it ON it.ws_item_sk = j.cs_item_sk
+WHERE j.sales_rank <= 5
+GROUP BY r.rn, j.c_first_name, j.c_last_name, it.total_quantity
+ORDER BY r.rn, total_spent DESC
+LIMIT 15
+UNION ALL
+SELECT 
+    NULL as rn,
+    'Total' as c_first_name,
+    NULL as c_last_name,
+    SUM(COALESCE(j.cs_net_paid, 0)) as total_spent,
+    SUM(COALESCE(it.total_quantity, 0)) as total_quantity_sold,
+    NULL as sales_category,
+    COUNT(*) OVER () as total_records
+FROM JoinSalesData j
+LEFT JOIN ItemSalesCTE it ON it.ws_item_sk = j.cs_item_sk;

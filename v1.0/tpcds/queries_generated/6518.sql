@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity_sold, 
+        SUM(ws_sales_price) AS total_sales_amount, 
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        rs.total_quantity_sold,
+        rs.total_sales_amount,
+        rs.total_orders
+    FROM 
+        RankedSales rs
+    JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+    WHERE 
+        rs.sales_rank <= 10
+)
+SELECT 
+    ti.i_item_id, 
+    ti.i_item_desc, 
+    ti.total_quantity_sold,
+    ti.total_sales_amount,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_income_band_sk,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers
+FROM 
+    TopItems ti
+JOIN 
+    web_sales ws ON ti.ws_item_sk = ws.ws_item_sk
+JOIN 
+    customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+JOIN 
+    income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+GROUP BY 
+    ti.i_item_id, ti.i_item_desc, ti.total_quantity_sold, 
+    ti.total_sales_amount, cd.cd_gender, cd.cd_marital_status, 
+    cd.cd_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+ORDER BY 
+    ti.total_sales_amount DESC;

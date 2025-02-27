@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate > NOW() - INTERVAL '1 year'
+        AND U.Reputation > 500
+), AnswerDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(A.Id) AS AnswerCount,
+        SUM(CASE WHEN A.Score > 0 THEN 1 ELSE 0 END) AS PositiveAnswers,
+        AVG(COALESCE(A.Score, 0)) AS AverageScore
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts A ON A.ParentId = P.Id AND A.PostTypeId = 2
+    GROUP BY 
+        P.Id
+), RecentEdits AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6)  -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        PH.PostId
+), PostsWithEdits AS (
+    SELECT 
+        RP.*,
+        AD.AnswerCount,
+        AD.PositiveAnswers,
+        AD.AverageScore,
+        RE.EditCount,
+        RE.LastEditDate
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        AnswerDetails AD ON RP.PostId = AD.PostId
+    LEFT JOIN 
+        RecentEdits RE ON RP.PostId = RE.PostId
+)
+SELECT 
+    P.Title,
+    P.OwnerDisplayName,
+    P.CreationDate,
+    COALESCE(RE.EditCount, 0) AS EditCount,
+    COALESCE(RE.LastEditDate, 'No Edits') AS LastEditDate,
+    COALESCE(AD.AnswerCount, 0) AS TotalAnswers,
+    COALESCE(AD.PositiveAnswers, 0) AS PositiveAnswers,
+    COALESCE(AD.AverageScore, 0) AS AverageScore
+FROM 
+    PostsWithEdits P
+WHERE 
+    P.Rank = 1
+ORDER BY 
+    P.CreationDate DESC
+LIMIT 10;

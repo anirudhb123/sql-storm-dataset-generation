@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND -- Only questions
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        Tag
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate AS QuestionDate,
+    COALESCE(pvs.UpVotes, 0) AS UpVotes,
+    COALESCE(pvs.DownVotes, 0) AS DownVotes,
+    rp.ViewCount,
+    rp.AnswerCount,
+    pb.OwnerDisplayName,
+    (
+        SELECT STRING_AGG(pt.Name, ', ') 
+        FROM PostHistory ph 
+        JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+        WHERE 
+            ph.PostId = rp.PostId AND 
+            ph.CreationDate >= rp.CreationDate
+        ORDER BY 
+            ph.CreationDate DESC
+        LIMIT 3
+    ) AS RecentPostHistory,
+    t.Tag AS PopularTag
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteSummary pvs ON rp.PostId = pvs.PostId
+JOIN 
+    Users pb ON rp.OwnerUserId = pb.Id
+JOIN 
+    PopularTags t ON t.Tag = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags) - 2), '><'))
+WHERE 
+    rp.Rank = 1
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC
+LIMIT 50;

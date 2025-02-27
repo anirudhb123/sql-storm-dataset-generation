@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        NULL::integer AS parent_movie_id,
+        1 AS level
+    FROM title t
+    WHERE t.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        m.parent_movie_id AS parent_movie_id,
+        m.level + 1
+    FROM movie_link m
+    JOIN title t ON m.linked_movie_id = t.id
+    JOIN MovieHierarchy mh ON mh.movie_id = m.movie_id
+)
+SELECT 
+    mv.movie_id,
+    mv.title,
+    mv.production_year,
+    COALESCE(ka.name, c.name) AS actor_name,
+    COUNT(ci.id) AS total_cast,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS noted_cast
+FROM MovieHierarchy mv
+LEFT JOIN cast_info ci ON ci.movie_id = mv.movie_id
+LEFT JOIN aka_name ka ON ka.person_id = ci.person_id
+LEFT JOIN character_name c ON c.id = ci.person_role_id
+WHERE mv.level <= 3
+GROUP BY mv.movie_id, mv.title, mv.production_year, ka.name, c.name
+ORDER BY mv.production_year DESC, total_cast DESC
+FETCH FIRST 10 ROWS ONLY;
+
+### Explanation of the SQL Query:
+1. **CTE (Common Table Expression)**:
+    - A recursive CTE named `MovieHierarchy` is created to fetch movies made after 2000 and establishes a hierarchy based on linked movies.
+
+2. **Main Select Statement**:
+    - The main query selects from the MovieHierarchy CTE.
+    - It joins the `cast_info` table to get details on cast members (actors) and uses outer joins to include actor names from `aka_name` or character names from `character_name`. 
+
+3. **Aggregation**:
+    - The query aggregates the results to get:
+        - The total cast for each movie.
+        - The count of noted cast members (where the `note` field in `cast_info` is not NULL).
+
+4. **Filters**:
+    - It filters to include only movies in the first 3 levels of the hierarchy from the CTE.
+    
+5. **Ordering & Limiting**:
+    - The results are ordered by production year (descending) and then by the total cast count (descending).
+    - The final result is limited to the top 10 rows.
+
+This query explores complex constructs like recursive CTEs, outer joins, grouping, and aggregation, making it suitable for performance benchmarking.

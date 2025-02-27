@@ -1,0 +1,73 @@
+WITH UserInteraction AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(CASE WHEN p.ViewCount > 100 THEN 1 ELSE 0 END) AS PopularPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS Author,
+        ARRAY_AGG(t.TagName) AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS t(TagName) ON TRUE
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, u.DisplayName
+),
+ActivityBenchmark AS (
+    SELECT
+        ui.UserId,
+        ui.DisplayName,
+        ui.TotalPosts,
+        ui.TotalComments,
+        ui.TotalBadges,
+        ui.PopularPosts,
+        pd.PostId,
+        pd.Title,
+        pd.ViewCount,
+        CASE 
+            WHEN pd.ViewCount > 100 THEN 'Popular'
+            ELSE 'Regular'
+        END AS PostCategory
+    FROM 
+        UserInteraction ui
+    LEFT JOIN 
+        PostDetails pd ON ui.UserId = pd.Author
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalComments,
+    TotalBadges,
+    PopularPosts,
+    COUNT(PostId) AS PostsReviewed,
+    COUNT(CASE WHEN PostCategory = 'Popular' THEN 1 END) AS PopularPostsReviewed,
+    COUNT(CASE WHEN PostCategory = 'Regular' THEN 1 END) AS RegularPostsReviewed
+FROM 
+    ActivityBenchmark
+GROUP BY 
+    UserId, DisplayName, TotalPosts, TotalComments, TotalBadges, PopularPosts
+ORDER BY 
+    TotalPosts DESC, PopularPosts DESC;

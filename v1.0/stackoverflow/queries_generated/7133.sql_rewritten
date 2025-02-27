@@ -1,0 +1,73 @@
+WITH UserMetrics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        (SELECT 
+            STRING_AGG(T.TagName, ', ') 
+         FROM 
+            Tags T 
+         WHERE 
+            P.Tags LIKE CONCAT('%', T.TagName, '%')
+        ) AS TagsList,
+        (SELECT 
+            COUNT(*) 
+         FROM 
+            Comments C 
+         WHERE 
+            C.PostId = P.Id
+        ) AS CommentCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 
+)
+SELECT 
+    UM.DisplayName,
+    UM.Reputation,
+    UM.PostCount,
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.ViewCount,
+    PD.Score,
+    PD.TagsList,
+    PD.CommentCount,
+    UM.Upvotes,
+    UM.Downvotes,
+    UM.BadgeCount
+FROM 
+    UserMetrics UM
+JOIN 
+    PostDetails PD ON UM.UserId = PD.OwnerDisplayName
+WHERE 
+    UM.Reputation > 1000
+ORDER BY 
+    UM.Reputation DESC,
+    PD.ViewCount DESC
+LIMIT 100;

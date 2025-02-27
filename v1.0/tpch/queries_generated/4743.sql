@@ -1,0 +1,68 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_name,
+        s.s_nationkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        s.s_name, s.s_nationkey
+),
+CustomerFailureRate AS (
+    SELECT 
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS returned_orders,
+        COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) * 1.0 / COUNT(o.o_orderkey), 0) AS failure_rate
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_name
+),
+RegionStatistics AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(ps.ps_availqty) AS total_available_parts
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    rs.r_name,
+    rs.nation_count,
+    rs.total_available_parts,
+    COALESCE(ss.total_sales, 0) AS total_sales_by_supplier,
+    COALESCE(ss.order_count, 0) AS total_orders_by_supplier,
+    cr.c_name,
+    cr.total_orders,
+    cr.returned_orders,
+    cr.failure_rate
+FROM 
+    RegionStatistics rs
+LEFT JOIN 
+    SupplierSales ss ON ss.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = rs.r_regionkey)
+LEFT JOIN 
+    CustomerFailureRate cr ON cr.failure_rate < 0.1
+ORDER BY 
+    rs.r_name, cr.failure_rate DESC;

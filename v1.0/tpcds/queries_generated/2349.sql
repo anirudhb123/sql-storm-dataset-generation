@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss.store_sk,
+        ss.item_sk,
+        ss.net_profit,
+        RANK() OVER (PARTITION BY ss.store_sk ORDER BY ss.net_profit DESC) AS profit_rank
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.store_sk = s.s_store_sk
+    WHERE 
+        s.s_state = 'CA' AND 
+        ss.sold_date_sk BETWEEN 2400 AND 2405
+),
+CustomerReturns AS (
+    SELECT
+        sr.store_sk,
+        sr.returned_date_sk,
+        COUNT(sr.item_sk) AS total_returns,
+        SUM(sr.return_amt_inc_tax) AS total_returned_amount
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.store_sk, sr.returned_date_sk
+),
+SalesComparison AS (
+    SELECT 
+        s.store_sk,
+        SUM(ws.net_profit) AS total_web_sales,
+        SUM(cs.net_profit) AS total_catalog_sales,
+        COALESCE(cr.total_returns, 0) AS total_returns
+    FROM 
+        web_sales ws
+    FULL OUTER JOIN 
+        catalog_sales cs ON ws.ws_item_sk = cs.cs_item_sk
+    LEFT JOIN 
+        CustomerReturns cr ON ws.bill_addr_sk = cr.store_sk OR cs.ship_mode_sk = cr.store_sk
+    JOIN 
+        store s ON ws.ws_warehouse_sk = s.s_store_sk OR cs.cs_ship_mode_sk = s.s_store_sk
+    GROUP BY 
+        s.store_sk
+)
+SELECT 
+    sc.store_sk,
+    sc.total_web_sales,
+    sc.total_catalog_sales,
+    CASE 
+        WHEN sc.total_catalog_sales = 0 THEN NULL 
+        ELSE (sc.total_web_sales / sc.total_catalog_sales) 
+    END AS web_to_catalog_ratio,
+    rs.profit_rank
+FROM 
+    SalesComparison sc
+LEFT JOIN 
+    RankedSales rs ON sc.store_sk = rs.store_sk
+WHERE 
+    rs.profit_rank <= 3 OR rs.profit_rank IS NULL
+ORDER BY 
+    sc.store_sk;

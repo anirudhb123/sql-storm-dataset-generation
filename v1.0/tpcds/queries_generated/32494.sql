@@ -1,0 +1,79 @@
+
+WITH RECURSIVE RankedSales AS (
+    SELECT
+        ws_item_sk,
+        ws_order_number,
+        ws_sold_date_sk,
+        ws_net_paid,
+        ws_ship_mode_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_paid DESC) AS rank
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+CustomerReturns AS (
+    SELECT
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS total_return_amt,
+        COUNT(DISTINCT wr_order_number) AS total_returns
+    FROM
+        web_returns
+    GROUP BY
+        wr_returning_customer_sk
+),
+SalesSummary AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(ws.ws_net_paid), 0) AS total_sales,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        MAX(ws.ws_sold_date_sk) AS last_order_date,
+        DENSE_RANK() OVER (ORDER BY COALESCE(SUM(ws.ws_net_paid), 0) DESC) AS sales_rank
+    FROM
+        customer c
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN
+        CustomerReturns cr ON c.c_customer_sk = cr.wr_returning_customer_sk
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        ss.total_sales,
+        ss.total_return_amt,
+        ss.total_orders,
+        ss.last_order_date
+    FROM
+        SalesSummary ss
+    JOIN
+        customer c ON ss.c_customer_sk = c.c_customer_sk
+    WHERE
+        ss.total_sales > (SELECT AVG(total_sales) FROM SalesSummary)
+)
+SELECT
+    hc.c_customer_sk,
+    hc.c_first_name,
+    hc.c_last_name,
+    hc.total_sales,
+    hc.total_return_amt,
+    hc.total_orders,
+    hc.last_order_date,
+    CASE
+        WHEN hc.total_return_amt IS NULL THEN 'No Returns'
+        WHEN hc.total_return_amt > 0 THEN 'Returned'
+        ELSE 'No Returns'
+    END AS return_status,
+    sm.sm_type AS shipping_mode
+FROM 
+    HighValueCustomers hc
+LEFT JOIN 
+    ship_mode sm ON hc.total_orders % 3 = sm.sm_ship_mode_sk
+ORDER BY
+    hc.total_sales DESC;

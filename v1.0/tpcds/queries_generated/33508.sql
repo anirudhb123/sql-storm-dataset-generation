@@ -1,0 +1,76 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ss_item_sk,
+        ss_quantity,
+        ss_ext_sales_price,
+        ss_sold_date_sk,
+        1 AS level
+    FROM store_sales
+    WHERE ss_sold_date_sk = (SELECT max(d_date_sk) FROM date_dim)
+    UNION ALL
+    SELECT 
+        ss.item_sk,
+        ss.quantity,
+        ss.ext_sales_price,
+        ss.sold_date_sk,
+        sd.level + 1
+    FROM store_sales ss
+    JOIN sales_data sd ON ss.ss_item_sk = sd.ss_item_sk
+    WHERE sd.level < 5
+),
+aggregated_sales AS (
+    SELECT 
+        sd.ss_item_sk,
+        SUM(sd.ss_quantity) AS total_quantity,
+        SUM(sd.ss_ext_sales_price) AS total_sales
+    FROM sales_data sd
+    GROUP BY sd.ss_item_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        SUM(ws.ws_net_paid) AS total_net_paid
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+),
+high_value_customers AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_income_band_sk,
+        ci.total_net_paid
+    FROM customer_info ci
+    WHERE ci.total_net_paid > (
+        SELECT AVG(total_net_paid) 
+        FROM customer_info
+    )
+),
+inventory_status AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM inventory inv
+    GROUP BY inv.inv_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(hvc.total_net_paid, 0) AS high_value_customers_total,
+    COALESCE(inv.total_quantity_on_hand, 0) AS inventory_quantity,
+    grouped_sales.total_sales
+FROM item i
+LEFT JOIN aggregated_sales grouped_sales ON i.i_item_sk = grouped_sales.ss_item_sk
+LEFT JOIN inventory_status inv ON i.i_item_sk = inv.inv_item_sk
+LEFT JOIN high_value_customers hvc ON hvc.cd_income_band_sk = 
+    (SELECT ib.ib_income_band_sk FROM income_band ib 
+     WHERE i.i_current_price BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound)
+WHERE (high_value_customers_total > 10000 OR inventory_quantity > 50)
+ORDER BY total_sales DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,69 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_web_orders,
+        SUM(ws.ws_net_paid_inc_tax) AS total_web_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_web_orders,
+        cs.total_web_spent,
+        RANK() OVER (ORDER BY cs.total_web_spent DESC) AS customer_rank
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.total_web_orders > 0
+),
+SalesByMonth AS (
+    SELECT 
+        DATE_TRUNC('month', d.d_date) AS sales_month,
+        SUM(ws.ws_net_paid_inc_tax) AS monthly_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        sales_month
+),
+OverdueOrders AS (
+    SELECT 
+        wr.wr_order_number,
+        wr.wr_return_quantity,
+        wr.wr_net_loss,
+        COALESCE(ws.ws_net_paid, 0) AS original_sales
+    FROM 
+        web_returns wr
+    LEFT JOIN 
+        web_sales ws ON wr.wr_order_number = ws.ws_order_number
+    WHERE 
+        wr.wr_returned_date_sk < CURRENT_DATE - INTERVAL '30 days'
+)
+SELECT 
+    tc.c_customer_id,
+    COALESCE(tc.total_web_orders, 0) AS total_orders,
+    COALESCE(tc.total_web_spent, 0) AS total_spent,
+    sm.sales_month,
+    sm.monthly_sales,
+    oo.wr_order_number,
+    oo.wr_return_quantity,
+    oo.wr_net_loss,
+    oo.original_sales
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    SalesByMonth sm ON sm.sales_month >= CURRENT_DATE - INTERVAL '6 months'
+LEFT JOIN 
+    OverdueOrders oo ON tc.total_orders > 0 AND oo.wr_order_number IS NOT NULL
+WHERE 
+    tc.customer_rank <= 10
+ORDER BY 
+    tc.customer_rank, sm.sales_month DESC;

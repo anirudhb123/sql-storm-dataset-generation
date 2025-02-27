@@ -1,0 +1,68 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        CONCAT(ca_city, ', ', ca_state, ' ', ca_zip) AS city_state_zip,
+        UPPER(ca_country) AS country_upper
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c_customer_id,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+CustomerSales AS (
+    SELECT 
+        cd.c_customer_id,
+        cd.full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ss.total_sales,
+        ss.order_count,
+        ad.full_address,
+        ad.city_state_zip,
+        ad.country_upper
+    FROM 
+        CustomerDetails cd
+    LEFT JOIN 
+        SalesSummary ss ON cd.c_customer_id = ss.ws_bill_customer_sk
+    LEFT JOIN 
+        AddressDetails ad ON cd.c_current_addr_sk = ad.ca_address_id
+)
+SELECT 
+    full_name,
+    cd_gender,
+    cd_marital_status,
+    COALESCE(total_sales, 0) AS total_sales,
+    COALESCE(order_count, 0) AS order_count,
+    full_address,
+    city_state_zip,
+    country_upper
+FROM 
+    CustomerSales
+WHERE 
+    (cd_gender = 'F' OR cd_marital_status = 'M')
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

@@ -1,0 +1,87 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -12, GETDATE())
+),
+CustomerSuppliers AS (
+    SELECT 
+        c.c_custkey,
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS available_parts
+    FROM 
+        customer c
+    LEFT JOIN 
+        supplier s ON c.c_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        c.c_custkey, s.s_suppkey
+),
+HighValuePart AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (
+            SELECT AVG(total_supply_cost)
+            FROM (
+                SELECT 
+                    SUM(ps2.ps_supplycost * ps2.ps_availqty) AS total_supply_cost
+                FROM 
+                    part p2
+                JOIN 
+                    partsupp ps2 ON p2.p_partkey = ps2.ps_partkey
+                GROUP BY 
+                    p2.p_partkey
+            ) AS avg_cost_table
+        )
+)
+
+SELECT 
+    r.r_name,
+    c.c_custkey,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names,
+    CASE 
+        WHEN SUM(l.l_discount) > 0.2 THEN 'High Discount' 
+        ELSE 'Regular Discount' 
+    END AS discount_classification
+FROM 
+    nation n 
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey AND o.o_orderstatus = 'O'
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    supplier s ON s.s_nationkey = n.n_nationkey
+JOIN 
+    HighValuePart p ON l.l_partkey = p.p_partkey
+WHERE 
+    (r.r_name LIKE '%AMERICA%' OR r.r_name IS NULL)
+    AND (o.o_orderdate IS NULL OR o.o_orderdate > '2021-01-01')
+GROUP BY 
+    r.r_name, c.c_custkey, s.s_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 0
+ORDER BY 
+    revenue DESC, r.r_name, c.c_custkey;

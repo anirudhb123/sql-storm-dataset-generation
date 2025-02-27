@@ -1,0 +1,46 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.web_site_sk, ws_sold_date_sk
+),
+
+customer_orders AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_paid) AS total_paid
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_birth_year BETWEEN 1990 AND 1995
+    GROUP BY c.c_customer_sk
+),
+
+top_customers AS (
+    SELECT 
+        co.c_customer_sk,
+        co.order_count,
+        co.total_paid,
+        ROW_NUMBER() OVER (ORDER BY co.total_paid DESC) AS customer_rank
+    FROM customer_orders co
+    WHERE co.order_count > 5
+)
+
+SELECT 
+    r.web_site_sk,
+    r.total_sales,
+    tc.c_customer_sk,
+    tc.order_count,
+    tc.total_paid
+FROM ranked_sales r
+FULL OUTER JOIN top_customers tc ON r.web_site_sk = tc.c_customer_sk
+WHERE (tc.order_count IS NOT NULL AND r.total_sales IS NOT NULL)
+   OR (tc.order_count IS NULL AND r.total_sales IS NULL)
+ORDER BY r.total_sales DESC, tc.total_paid DESC
+LIMIT 100;

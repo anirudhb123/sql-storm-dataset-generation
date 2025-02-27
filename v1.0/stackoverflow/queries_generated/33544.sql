@@ -1,0 +1,85 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        child.Id,
+        child.Title,
+        child.ParentId,
+        parent.Level + 1
+    FROM 
+        Posts child
+    INNER JOIN 
+        RecursivePostHierarchy parent ON child.ParentId = parent.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(COALESCE(v.VoteCount, 0)) AS TotalVotes,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount 
+        FROM 
+            Votes 
+        WHERE 
+            VoteTypeId IN (2, 3) -- UpVotes and DownVotes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        TotalPosts,
+        TotalVotes,
+        TotalBadges,
+        RANK() OVER (ORDER BY TotalVotes DESC) AS VoteRank
+    FROM 
+        UserPostStats
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title AS PostTitle,
+    r.PostId AS RelatedPostId,
+    r.Level AS PostLevel,
+    u.DisplayName AS UserDisplayName,
+    t.UserId AS TopUserId,
+    t.TotalPosts,
+    t.TotalVotes,
+    t.TotalBadges
+FROM 
+    Posts p
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    TopUsers t ON u.Id = t.UserId AND t.VoteRank <= 10
+WHERE 
+    p.CreationDate >= '2023-01-01' 
+    AND (p.Tags LIKE '%sql%' OR p.Tags LIKE '%database%')
+ORDER BY 
+    p.CreationDate DESC, 
+    t.TotalVotes DESC;

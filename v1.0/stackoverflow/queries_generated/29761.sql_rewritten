@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS PostOwner,
+        COALESCE(COUNT(answers.Id), 0) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts answers ON p.Id = answers.ParentId AND answers.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS TotalPosts,
+        SUM(pt.AnswerCount) AS TotalAnswers,
+        AVG(pt.Upvotes - pt.Downvotes) AS AverageVoteDifference
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE CONCAT('%', t.TagName, '%') AND pt.PostTypeId = 1
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.PostOwner,
+    rp.AnswerCount,
+    ts.TagName,
+    ts.TotalPosts,
+    ts.TotalAnswers,
+    ts.AverageVoteDifference
+FROM 
+    RankedPosts rp
+JOIN 
+    TagStatistics ts ON rp.Tags LIKE CONCAT('%', ts.TagName, '%')
+WHERE 
+    rp.rn = 1 
+ORDER BY 
+    ts.TotalAnswers DESC, 
+    ts.AverageVoteDifference DESC
+LIMIT 50;

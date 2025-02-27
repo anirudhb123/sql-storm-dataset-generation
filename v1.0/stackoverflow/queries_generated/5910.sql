@@ -1,0 +1,51 @@
+WITH UserStatistics AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE u.Reputation > 50
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+PostsEngagement AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title
+)
+SELECT
+    us.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalQuestions,
+    us.TotalAnswers,
+    us.TotalUpvotes,
+    us.TotalDownvotes,
+    pe.Title AS MostCommentedPost,
+    pe.CommentCount,
+    pe.LastCommentDate
+FROM UserStatistics us
+LEFT JOIN (
+    SELECT
+        PostId,
+        COUNT(*) AS CommentCount,
+        MAX(LastCommentDate) AS LastCommentDate
+    FROM PostsEngagement
+    GROUP BY PostId
+    ORDER BY CommentCount DESC
+    LIMIT 1
+) pe ON us.TotalPosts = (SELECT MAX(TotalPosts) FROM UserStatistics)
+ORDER BY us.Reputation DESC
+LIMIT 10;

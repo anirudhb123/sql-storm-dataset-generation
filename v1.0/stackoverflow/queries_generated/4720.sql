@@ -1,0 +1,58 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(v.Id) AS TotalVotes,
+        ROUND(AVG(CASE WHEN v.VoteTypeId IN (2, 3) THEN v.CreationDate END), 2) AS AvgVoteAge
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE((SELECT COUNT(c.Id) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.Score,
+    pa.CommentCount,
+    u.DisplayName,
+    uv.TotalUpVotes,
+    uv.TotalDownVotes,
+    CASE 
+        WHEN uv.TotalVotes > 0 THEN ROUND((uv.TotalUpVotes::decimal / uv.TotalVotes) * 100, 2) 
+        ELSE 0 
+    END AS UpVotePercentage,
+    CASE 
+        WHEN pa.PostRank = 1 THEN 'Most Recent Post'
+        ELSE 'Older Post'
+    END AS PostStatus
+FROM 
+    PostAnalytics pa
+JOIN 
+    Users u ON pa.OwnerUserId = u.Id
+LEFT JOIN 
+    UserVoteStats uv ON u.Id = uv.UserId
+WHERE 
+    pa.CommentCount > 0
+    AND EXISTS (
+        SELECT 1 
+        FROM Votes v
+        WHERE v.PostId = pa.PostId 
+        AND v.UserId IS NOT NULL
+    )
+ORDER BY 
+    pa.Score DESC, pa.CreationDate DESC
+LIMIT 100;

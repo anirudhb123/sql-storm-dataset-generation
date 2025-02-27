@@ -1,0 +1,85 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL  -- Starting with root posts
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserPostCounts AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    GROUP BY 
+        OwnerUserId
+),
+UserWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(b.Class), 0) AS TotalBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostRankings AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        rh.Level AS PostLevel
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHierarchy rh ON p.Id = rh.Id
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    p.Title AS PostTitle,
+    p.Score AS PostScore,
+    ph.Level AS PostHierarchyLevel,
+    COALESCE(pc.PostCount, 0) AS UserPostCount,
+    COALESCE(b.TotalBadgeClass, 0) AS UserTotalBadgeClass,
+    pr.Rank AS PostRank
+FROM 
+    Users u
+LEFT JOIN 
+    UserPostCounts pc ON u.Id = pc.OwnerUserId
+LEFT JOIN 
+    UserWithBadges b ON u.Id = b.UserId
+LEFT JOIN 
+    PostRankings pr ON u.Id = pr.OwnerUserId
+LEFT JOIN 
+    Posts p ON pr.Id = p.Id
+LEFT JOIN 
+    RecursivePostHierarchy ph ON p.Id = ph.Id
+WHERE 
+    u.Reputation > 1000  -- Filter for users with reputation greater than 1000
+    AND (COALESCE(p.CreationDate, '1900-01-01') BETWEEN '2020-01-01' AND CURRENT_TIMESTAMP)  -- Post creation date within a range
+ORDER BY 
+    p.Score DESC, 
+    u.Reputation DESC
+FETCH FIRST 100 ROWS ONLY;  -- Limiting to top 100 users/posts

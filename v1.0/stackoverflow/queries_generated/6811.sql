@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) -- Considering only upvotes and downvotes
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp 
+    WHERE 
+        rp.UserPostRank = 1
+),
+PostDetails AS (
+    SELECT 
+        trp.PostId,
+        trp.Title,
+        trp.CreationDate,
+        trp.Score,
+        trp.ViewCount,
+        trp.CommentCount,
+        trp.VoteCount,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(b.Class = 1), 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2), 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3), 0) AS BronzeBadges
+    FROM 
+        TopRankedPosts trp
+    JOIN 
+        Users u ON trp.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        trp.PostId, trp.Title, trp.CreationDate, trp.Score, trp.ViewCount, trp.CommentCount, trp.VoteCount, u.DisplayName
+)
+SELECT 
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.CommentCount,
+    pd.VoteCount,
+    pd.OwnerDisplayName,
+    pd.GoldBadges,
+    pd.SilverBadges,
+    pd.BronzeBadges
+FROM 
+    PostDetails pd 
+ORDER BY 
+    pd.Score DESC, pd.VoteCount DESC, pd.ViewCount DESC
+LIMIT 10;

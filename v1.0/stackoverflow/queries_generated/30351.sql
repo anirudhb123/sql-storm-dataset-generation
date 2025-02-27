@@ -1,0 +1,94 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        COUNT(v.Id) AS VoteCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    WHERE
+        p.CreationDate >= date_trunc('year', CURRENT_DATE) -- Posts created in the current year
+    GROUP BY 
+        p.Id
+),
+PostWithTags AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        string_agg(t.TagName, ', ') AS Tags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        unnest(string_to_array(rp.Tags, ',')) AS tag_id ON TRUE
+    LEFT JOIN 
+        Tags t ON t.Id = tag_id::int
+    WHERE 
+        rp.rn = 1 -- Get highest score post for each user
+    GROUP BY 
+        rp.Id
+),
+RecentUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.CreationDate >= CURRENT_DATE - INTERVAL '1 year' -- Users created in the last year
+    GROUP BY 
+        u.Id
+),
+ActiveUserPosts AS (
+    SELECT 
+        ru.UserId, 
+        ru.DisplayName, 
+        COALESCE(pwt.Title, 'No Posts') AS PostTitle,
+        COALESCE(pwt.Tags, 'No Tags') AS PostTags
+    FROM 
+        RecentUserActivity ru
+    LEFT JOIN 
+        PostWithTags pwt ON ru.UserId = pwt.OwnerUserId
+),
+FinalResults AS (
+    SELECT 
+        au.DisplayName,
+        au.PostTitle,
+        au.PostTags,
+        rua.PostsCreated,
+        rua.TotalBadges
+    FROM 
+        ActiveUserPosts au
+    JOIN 
+        RecentUserActivity rua ON au.UserId = rua.UserId
+)
+SELECT 
+    fr.DisplayName AS User,
+    fr.PostTitle,
+    fr.PostTags,
+    fr.PostsCreated,
+    fr.TotalBadges,
+    CASE 
+        WHEN fr.TotalBadges = 0 THEN 'No Badges'
+        WHEN fr.TotalBadges < 3 THEN 'Novice'
+        ELSE 'Expert'
+    END AS UserLevel
+FROM 
+    FinalResults fr
+WHERE 
+    fr.PostsCreated > 0 
+ORDER BY 
+    fr.PostsCreated DESC, fr.DisplayName;

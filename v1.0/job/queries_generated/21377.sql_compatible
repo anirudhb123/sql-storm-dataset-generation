@@ -1,0 +1,92 @@
+
+WITH ActorMovieCount AS (
+    SELECT 
+        ka.person_id,
+        COUNT(DISTINCT ka.movie_id) AS movie_count
+    FROM 
+        cast_info ka
+    GROUP BY 
+        ka.person_id
+),
+LongTitleMovies AS (
+    SELECT 
+        kt.id AS movie_id,
+        LENGTH(kt.title) AS title_length
+    FROM 
+        aka_title kt
+    WHERE 
+        kt.title IS NOT NULL 
+        AND LENGTH(kt.title) > 50
+),
+CompanyMovieDetails AS (
+    SELECT 
+        mc.movie_id,
+        COALESCE(GROUP_CONCAT(DISTINCT cn.name), 'No Company') AS company_names,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+TopActors AS (
+    SELECT 
+        amc.person_id,
+        amc.movie_count,
+        ROW_NUMBER() OVER (ORDER BY amc.movie_count DESC) AS rn
+    FROM 
+        ActorMovieCount amc
+    WHERE 
+        amc.movie_count >= 5
+),
+MovieKeywordDetails AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+FinalReport AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        kt.title_length,
+        cams.company_names,
+        CASE 
+            WHEN cams.company_count = 0 THEN 'Unknown'
+            ELSE CAST(cams.company_count AS CHAR)
+        END AS company_count,
+        CASE 
+            WHEN ta.rn IS NOT NULL THEN 'Top Actor'
+            ELSE 'Regular Actor'
+        END AS actor_category,
+        mkd.keywords
+    FROM 
+        aka_title t
+    LEFT JOIN LongTitleMovies kt ON t.id = kt.movie_id
+    LEFT JOIN CompanyMovieDetails cams ON t.id = cams.movie_id
+    LEFT JOIN TopActors ta ON t.id IN (SELECT movie_id FROM cast_info WHERE person_id = ta.person_id)
+    LEFT JOIN MovieKeywordDetails mkd ON t.id = mkd.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND (kt.title_length IS NOT NULL OR cams.company_count > 1 OR mkd.keywords IS NOT NULL)
+)
+SELECT 
+    title_id,
+    title,
+    COALESCE(title_length, 0) AS title_length,
+    COALESCE(company_names, 'No Company Associated') AS company_names,
+    company_count,
+    actor_category,
+    COALESCE(keywords, 'No Keywords Found') AS keywords
+FROM 
+    FinalReport
+WHERE 
+    actor_category = 'Top Actor' OR title_length > 30
+ORDER BY 
+    title_length DESC, title;

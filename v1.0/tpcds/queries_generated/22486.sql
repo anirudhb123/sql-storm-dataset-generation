@@ -1,0 +1,67 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+ItemInventory AS (
+    SELECT 
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM 
+        inventory
+    GROUP BY 
+        inv_item_sk
+),
+HighProfitItems AS (
+    SELECT 
+        r.ws_item_sk, 
+        r.total_net_profit, 
+        r.order_count, 
+        COALESCE(i.total_quantity_on_hand, 0) AS total_quantity,
+        CASE 
+            WHEN i.total_quantity IS NULL THEN 'No Inventory'
+            WHEN i.total_quantity < 100 THEN 'Low Stock'
+            ELSE 'In Stock'
+        END AS stock_status
+    FROM 
+        RecursiveSales r
+    LEFT JOIN 
+        ItemInventory i ON r.ws_item_sk = i.inv_item_sk
+    WHERE 
+        r.rn = 1
+)
+SELECT 
+    a.ca_city,
+    COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+    SUM(hp.total_net_profit) AS aggregate_profit,
+    STRING_AGG(DISTINCT hp.stock_status || ': ' || hp.total_quantity) AS stocks_info
+FROM 
+    customer c
+INNER JOIN 
+    customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+LEFT JOIN 
+    HighProfitItems hp ON c.c_customer_sk IN (
+        SELECT DISTINCT 
+            ws_bill_customer_sk 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_item_sk = hp.ws_item_sk
+    )
+WHERE 
+    a.ca_state IS NOT NULL
+GROUP BY 
+    a.ca_city
+HAVING 
+    SUM(hp.total_net_profit) > 1000 OR COUNT(DISTINCT c.c_customer_sk) > 10
+ORDER BY 
+    customer_count DESC, 
+    aggregate_profit DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,68 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk, 
+        SUM(cr_return_amount) AS total_return_amount,
+        COUNT(*) AS return_count
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+), WebReturns AS (
+    SELECT 
+        wr_returning_customer_sk, 
+        SUM(wr_return_amt) AS total_web_return_amt,
+        COUNT(*) AS web_return_count
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+), Summary AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(cr.total_return_amount, 0) AS total_catalog_return,
+        COALESCE(wr.total_web_return_amt, 0) AS total_web_return,
+        cr.return_count AS catalog_return_count,
+        wr.web_return_count AS web_return_count,
+        c.c_first_name,
+        c.c_last_name,
+        CASE 
+            WHEN COALESCE(cr.total_return_amount, 0) > 1000 
+                THEN 'High Return'
+            WHEN COALESCE(cr.total_return_amount, 0) > 500 
+                THEN 'Medium Return'
+            ELSE 'Low Return'
+        END AS return_category
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    LEFT JOIN 
+        WebReturns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+)
+SELECT 
+    s.s_store_name,
+    SUM(ws.ws_net_profit) AS total_net_profit,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    AVG(ws.ws_net_paid_inc_tax) AS avg_net_paid,
+    COUNT(*) FILTER (WHERE sw.catalog_return_count > 0) AS customers_with_catalog_returns,
+    COUNT(*) FILTER (WHERE sw.web_return_count > 0) AS customers_with_web_returns
+FROM 
+    web_sales ws
+INNER JOIN 
+    store s ON ws.ws_store_sk = s.s_store_sk
+INNER JOIN 
+    Summary sw ON ws.ws_ship_customer_sk = sw.c_customer_sk
+WHERE 
+    s.s_state = 'CA'
+    AND ws.ws_sold_date_sk IN (
+        SELECT d_date_sk 
+        FROM date_dim 
+        WHERE d_year = 2023 
+        AND d_moy BETWEEN 1 AND 6
+    )
+GROUP BY 
+    s.s_store_name
+ORDER BY 
+    total_net_profit DESC
+LIMIT 10;

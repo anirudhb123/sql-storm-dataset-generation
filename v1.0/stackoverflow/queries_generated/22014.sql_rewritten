@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.ViewCount IS NULL THEN 0 ELSE p.ViewCount END) AS TotalViews,
+        SUM(p.Score) AS TotalScore,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+CompositePosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        COALESCE(pha.CloseCount, 0) AS CloseCount,
+        COALESCE(pha.ReopenCount, 0) AS ReopenCount,
+        ua.TotalPosts,
+        ua.TotalViews,
+        ua.TotalScore,
+        ua.AvgScore
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserActivity ua ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ua.UserId)
+    LEFT JOIN 
+        PostHistoryAggregates pha ON rp.PostId = pha.PostId
+)
+SELECT 
+    cp.PostId,
+    cp.Title,
+    cp.CreationDate,
+    cp.ViewCount,
+    cp.Score,
+    cp.CloseCount,
+    cp.ReopenCount,
+    cp.TotalPosts,
+    cp.TotalViews,
+    cp.TotalScore,
+    cp.AvgScore,
+    CASE 
+        WHEN cp.CloseCount > cp.ReopenCount THEN 'More Closed Posts'
+        WHEN cp.ReopenCount > cp.CloseCount THEN 'More Reopened Posts'
+        ELSE 'Equal'
+    END AS ClosureStatus,
+    CASE 
+        WHEN cp.ViewCount > 1000 THEN 'High Traffic'
+        WHEN cp.ViewCount BETWEEN 500 AND 1000 THEN 'Moderate Traffic'
+        ELSE 'Low Traffic'
+    END AS TrafficCategory
+FROM 
+    CompositePosts cp
+WHERE 
+    cp.Rank = 1
+ORDER BY 
+    cp.Score DESC, cp.Title ASC
+LIMIT 100;

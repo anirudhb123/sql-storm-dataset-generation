@@ -1,0 +1,66 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+),
+RankedCast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS rank_order
+    FROM 
+        cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'director') THEN mi.info END) AS directors,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        COALESCE(MAX(mc.note), 'No Company') AS company_note
+    FROM 
+        aka_title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN movie_companies mc ON m.id = mc.movie_id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    rc.name AS actor_name,
+    rc.rank_order,
+    mi.directors,
+    mi.keyword_count,
+    mi.company_note
+FROM 
+    MovieHierarchy mh
+LEFT JOIN RankedCast rc ON mh.movie_id = rc.movie_id
+LEFT JOIN MovieInfo mi ON mh.movie_id = mi.movie_id
+WHERE 
+    mh.production_year >= 2000
+    AND (mi.keyword_count > 3 OR mi.company_note IS NOT NULL)
+ORDER BY 
+    mh.production_year DESC, 
+    rc.rank_order;
+
+This SQL query showcases a combination of recursive CTEs, window functions, outer joins, and a variety of predicates and calculations for performance benchmarking on the provided schema. It retrieves a hierarchy of movies (including episodic relationships), ranks cast members by their order in the movie, gathers information about directors, counts the number of associated keywords, and considers company notes—all grouped by movie, filtered by specific criteria, and ordered comprehensively for analysis.

@@ -1,0 +1,64 @@
+WITH UserVoteStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostsCount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Posts P ON V.PostId = P.Id
+    GROUP BY U.Id, U.DisplayName
+),
+
+PostStats AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        PT.Name AS PostType,
+        COALESCE(CommentStats.CommentCount, 0) AS CommentCount,
+        COALESCE(VoteStats.UpVotes, 0) AS UpVotes,
+        COALESCE(VoteStats.DownVotes, 0) AS DownVotes,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS RecentRank
+    FROM Posts P
+    JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) AS CommentStats ON P.Id = CommentStats.PostId
+    LEFT JOIN (
+        SELECT PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM Votes
+        GROUP BY PostId
+    ) AS VoteStats ON P.Id = VoteStats.PostId
+)
+
+SELECT 
+    U.DisplayName AS UserName,
+    P.Title,
+    P.CreationDate,
+    P.PostType,
+    P.CommentCount,
+    P.UpVotes,
+    P.DownVotes,
+    CASE 
+        WHEN P.RecentRank = 1 THEN 'Most Recent'
+        WHEN P.RecentRank <= 5 THEN 'Recent'
+        ELSE 'Old'
+    END AS PostAgeCategory,
+    CASE 
+        WHEN P.UpVotes > P.DownVotes THEN 'Positive'
+        WHEN P.UpVotes < P.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment,
+    COUNT(DISTINCT H.Id) AS HistoryChangeCount
+FROM PostStats P
+LEFT JOIN UserVoteStats U ON P.UpVotes > U.UpVotes 
+LEFT JOIN PostHistory H ON P.PostId = H.PostId
+WHERE P.CommentCount > 5 AND P.UpVotes > 0
+GROUP BY U.DisplayName, P.Title, P.CreationDate, P.PostType, P.CommentCount, P.UpVotes, P.DownVotes, P.RecentRank
+ORDER BY P.CreationDate DESC, P.UpVotes DESC;

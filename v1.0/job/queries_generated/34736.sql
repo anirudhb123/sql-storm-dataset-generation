@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        NULL::integer AS parent_movie_id
+    FROM title m
+    WHERE m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.movie_id
+    FROM title m
+    JOIN movie_link ml ON ml.linked_movie_id = m.id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+AggregatedData AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+        MAX(mk.keyword) AS main_keyword 
+    FROM MovieHierarchy mh
+    LEFT JOIN complete_cast cc ON cc.movie_id = mh.movie_id
+    LEFT JOIN cast_info ci ON ci.movie_id = mh.movie_id
+    LEFT JOIN aka_name ak ON ak.person_id = ci.person_id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = mh.movie_id
+    GROUP BY mh.movie_id, mh.title, mh.production_year
+),
+RankedMovies AS (
+    SELECT 
+        ad.movie_id,
+        ad.title,
+        ad.production_year,
+        ad.cast_count,
+        ad.actor_names,
+        ad.main_keyword,
+        RANK() OVER (ORDER BY ad.cast_count DESC, ad.production_year DESC) AS rank
+    FROM AggregatedData ad
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    rm.actor_names,
+    rm.main_keyword,
+    COALESCE(ct.kind, 'Unknown') AS company_type,
+    CASE 
+        WHEN rm.cast_count > 10 THEN 'Popular'
+        WHEN rm.cast_count BETWEEN 5 AND 10 THEN 'Moderate'
+        ELSE 'Lesser Known'
+    END AS popularity_class
+FROM RankedMovies rm
+LEFT JOIN movie_companies mc ON mc.movie_id = rm.movie_id
+LEFT JOIN company_type ct ON ct.id = mc.company_type_id
+WHERE rm.rank <= 10
+ORDER BY rm.rank;

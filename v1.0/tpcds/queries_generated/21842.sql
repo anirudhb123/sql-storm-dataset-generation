@@ -1,0 +1,80 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id
+), 
+CustomerReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+),
+MarketStats AS (
+    SELECT 
+        cc.cc_mkt_id,
+        AVG(cc.cc_tax_percentage) AS avg_tax_percentage,
+        COUNT(DISTINCT c.c_customer_sk) AS unique_customers
+    FROM 
+        call_center cc
+    LEFT JOIN 
+        customer c ON cc.cc_mkt_id = c.c_current_addr_sk
+    GROUP BY 
+        cc.cc_mkt_id
+),
+SalesComparison AS (
+    SELECT 
+        r.c_customer_id,
+        r.total_sales,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        (r.total_sales - COALESCE(cr.total_return_amt, 0)) AS net_sales
+    FROM 
+        RecursiveSales r
+    LEFT JOIN 
+        CustomerReturns cr ON r.c_customer_sk = cr.sr_returning_customer_sk
+),
+FinalDemo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        sc.net_sales,
+        m.avg_tax_percentage,
+        ROW_NUMBER() OVER (ORDER BY sc.net_sales DESC) AS overall_rank
+    FROM 
+        SalesComparison sc
+    JOIN 
+        customer c ON sc.c_customer_id = c.c_customer_id
+    JOIN 
+        MarketStats m ON c.c_current_addr_sk = m.cc_mkt_id
+    WHERE 
+        sc.net_sales > (SELECT AVG(net_sales) FROM SalesComparison) 
+        OR m.avg_tax_percentage IS NOT NULL
+)
+SELECT 
+    customer_sk,
+    c_first_name,
+    c_last_name,
+    net_sales,
+    avg_tax_percentage
+FROM 
+    FinalDemo
+WHERE 
+    CASE 
+        WHEN net_sales IS NULL THEN 1 
+        ELSE 0 
+    END = 0
+ORDER BY 
+    overall_rank
+LIMIT 100;

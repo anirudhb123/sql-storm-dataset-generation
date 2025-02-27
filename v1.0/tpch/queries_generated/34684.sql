@@ -1,0 +1,45 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o_orderkey, o_custkey, o_totalprice, 0 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.orderkey, o.custkey, o.totalprice, oh.level + 1
+    FROM orders o
+    JOIN order_hierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_totalprice < oh.o_totalprice
+),
+ranked_suppliers AS (
+    SELECT ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supplycost,
+           RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rnk
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+),
+nation_summary AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count,
+           SUM(o.o_totalprice) AS total_orders
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN customer c ON s.s_suppkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+filtered_parts AS (
+    SELECT p.p_partkey, p.p_name, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING COUNT(DISTINCT ps.ps_suppkey) > 5
+)
+SELECT ns.n_name, ns.customer_count, ns.total_orders, 
+       fp.p_name, fp.supplier_count,
+       oh.level AS order_level,
+       CASE WHEN ns.total_orders IS NULL THEN 'No orders' 
+            ELSE CAST(ns.total_orders AS VARCHAR) END AS order_status,
+       COALESCE(r.total_supplycost, 0) AS supplier_cost
+FROM nation_summary ns
+LEFT JOIN filtered_parts fp ON fp.supplier_count > 10
+LEFT JOIN ranked_suppliers r ON r.ps_suppkey = ns.n_nationkey
+LEFT JOIN order_hierarchy oh ON oh.o_custkey = ns.n_nationkey
+WHERE (ns.total_orders > 100 OR ns.customer_count >= 50)
+ORDER BY ns.total_orders DESC, fp.p_name ASC;

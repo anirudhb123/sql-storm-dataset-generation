@@ -1,0 +1,68 @@
+
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.LastAccessDate,
+        0 AS Level,
+        CAST(U.DisplayName AS VARCHAR(1000)) AS Path
+    FROM Users U
+    WHERE U.Reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.LastAccessDate,
+        UR.Level + 1,
+        CAST(CONCAT(UR.Path, ' -> ', U.DisplayName) AS VARCHAR(1000))
+    FROM Users U
+    JOIN UserReputation UR ON U.Id = UR.Id
+    WHERE U.Reputation > 1000
+),
+
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN V.CreationDate END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN V.CreationDate END), 0) AS Downvotes,
+        P.CreationDate
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.CreationDate
+),
+
+TopPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CommentCount,
+        PS.Upvotes,
+        PS.Downvotes,
+        ROW_NUMBER() OVER (ORDER BY PS.Upvotes DESC, PS.CommentCount DESC) AS Rank
+    FROM PostStatistics PS
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    T.Title,
+    T.CommentCount,
+    T.Upvotes,
+    T.Downvotes,
+    CASE 
+        WHEN T.Upvotes > 0 THEN ROUND((T.Upvotes::decimal / NULLIF(T.CommentCount, 0)) * 100, 2)
+        ELSE 0 
+    END AS UpvoteCommentRatio,
+    CONCAT('User ', U.DisplayName, ' has interacted with post titled: ', T.Title) AS InteractionMessage
+FROM UserReputation U
+JOIN TopPosts T ON U.Id = T.PostId
+WHERE U.LastAccessDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+AND T.Rank <= 10
+ORDER BY U.Reputation DESC, T.Upvotes DESC;

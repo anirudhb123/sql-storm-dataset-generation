@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS Upvotes
+    FROM 
+        Posts p
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 -- UpMod
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title, p.Body, p.Tags, p.ViewCount, p.CreationDate
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.Upvotes,
+        rp.CreationDate,
+        p.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+        JOIN Posts p ON rp.PostId = p.Id
+    WHERE 
+        rp.RankViewCount <= 5
+)
+SELECT 
+    trp.OwnerDisplayName AS Author,
+    trp.Title,
+    trp.ViewCount,
+    trp.CommentCount,
+    trp.Upvotes,
+    DATE_PART('year', trp.CreationDate) AS YearCreated,
+    ARRAY_AGG(DISTINCT SUBSTRING(t.TagName FROM 2 FOR LENGTH(t.TagName) - 2)) AS TagsUsed
+FROM 
+    TopRankedPosts trp
+    LEFT JOIN LATERAL (
+        SELECT 
+            UNNEST(STRING_TO_ARRAY(trp.Tags, '>')) AS TagName
+    ) t ON TRUE
+GROUP BY 
+    trp.OwnerDisplayName, trp.Title, trp.ViewCount, trp.CommentCount, trp.Upvotes, trp.CreationDate
+ORDER BY 
+    trp.Upvotes DESC, trp.ViewCount DESC;

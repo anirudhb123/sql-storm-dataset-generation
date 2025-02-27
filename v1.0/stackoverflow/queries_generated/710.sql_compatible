@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01' AS DATE) - INTERVAL '1 year')
+),
+UserVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(upv.VoteCount, 0) AS TotalVotes,
+    COALESCE(upv.UpVoteCount, 0) AS UpVotes,
+    COALESCE(upv.DownVoteCount, 0) AS DownVotes,
+    COALESCE(pc.CommentCount, 0) AS Comments,
+    COALESCE(cp.FirstClosedDate, 'No Closure') AS FirstClosedDate,
+    CASE 
+        WHEN cp.FirstClosedDate IS NOT NULL THEN 'Closed' 
+        ELSE 'Active' 
+    END AS PostStatus,
+    rp.Rank
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserVotes upv ON rp.OwnerUserId = upv.UserId
+LEFT JOIN 
+    PostComments pc ON rp.PostId = pc.PostId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.Rank = 1
+ORDER BY 
+    rp.CreationDate DESC;

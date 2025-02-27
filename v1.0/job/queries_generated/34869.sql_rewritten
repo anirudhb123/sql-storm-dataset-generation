@@ -1,0 +1,53 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        CONCAT(ph.title, ' -> ', m.title) AS title,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.level,
+    COUNT(cm.id) AS company_count,
+    DENSE_RANK() OVER(ORDER BY m.level DESC) AS movie_rank,
+    ARRAY_AGG(k.keyword) AS keywords
+FROM 
+    aka_name AS a
+JOIN 
+    cast_info AS c ON a.person_id = c.person_id
+JOIN 
+    aka_title AS m ON c.movie_id = m.movie_id
+LEFT JOIN 
+    movie_companies AS mc ON m.id = mc.movie_id
+LEFT JOIN 
+    company_name AS cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_keyword AS mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+WHERE 
+    m.production_year >= 2000
+    AND a.name IS NOT NULL
+GROUP BY 
+    a.name, m.title, m.level
+HAVING 
+    COUNT(mc.id) > 1
+ORDER BY 
+    movie_rank, a.name;

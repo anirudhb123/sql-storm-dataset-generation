@@ -1,0 +1,78 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth,
+        ARRAY[m.id] AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1,
+        mh.path || ml.linked_movie_id
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE 
+        NOT ml.linked_movie_id = ANY(mh.path)  
+),
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT c.person_id) AS total_actors,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+    ORDER BY 
+        total_actors DESC
+    LIMIT 10
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(tm.actor_names, 'No Actors') AS actors,
+    t.info AS type_info,
+    k.keyword AS tags,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    SUM(CASE WHEN m.production_year = 2023 THEN 1 ELSE 0 END) AS recent_releases
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_info mi ON tm.movie_id = mi.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info IN ('Plot', 'Genre'))
+LEFT JOIN 
+    movie_keyword mk ON tm.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_companies mc ON tm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    role_type rt ON c.role_id = rt.id  
+GROUP BY 
+    tm.title, tm.production_year, t.info, k.keyword
+ORDER BY 
+    production_companies DESC, tm.production_year ASC;

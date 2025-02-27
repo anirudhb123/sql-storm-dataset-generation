@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        AVG(mi.info_length) AS avg_info_length,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        movie_info mi ON a.id = mi.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+TopRanked AS (
+    SELECT *
+    FROM RankedMovies
+    WHERE rank <= 10
+),
+MovieInfoDetails AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COALESCE(SUM(CASE WHEN mt.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%budget%') THEN 1 ELSE 0 END), 0) AS budget_count,
+        COALESCE(SUM(CASE WHEN mt.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%box office%') THEN 1 ELSE 0 END), 0) AS box_office_count
+    FROM 
+        TopRanked m
+    LEFT JOIN 
+        movie_info mt ON m.title = mt.info
+    GROUP BY 
+        m.title, m.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_count,
+    md.avg_info_length,
+    COALESCE(md.budget_count, 0) AS budget_info_count,
+    COALESCE(md.box_office_count, 0) AS box_office_info_count,
+    CASE 
+        WHEN md.budget_info_count > md.box_office_info_count THEN 'More Budget Info'
+        WHEN md.budget_info_count < md.box_office_info_count THEN 'More Box Office Info'
+        ELSE 'Equal Info Count'
+    END AS info_compare
+FROM 
+    TopRanked m
+JOIN 
+    MovieInfoDetails md ON m.title = md.title
+ORDER BY 
+    md.production_year DESC, md.actor_count DESC;

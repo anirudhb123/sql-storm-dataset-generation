@@ -1,0 +1,81 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        P.Title,
+        P.CreationDate,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+    
+    UNION ALL 
+    
+    SELECT 
+        P.Id,
+        P.ParentId,
+        P.Title,
+        P.CreationDate,
+        Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 6 THEN 1 END) AS CloseVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 7 THEN 1 END) AS ReopenVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+),
+PostWithBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        B.Name AS BadgeName,
+        Pr.PostId,
+        Pr.UpVotes,
+        Pr.DownVotes,
+        Pr.CloseVotes,
+        Pr.ReopenVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId AND B.Class = 1 
+    INNER JOIN 
+        PostStats Pr ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 1000 
+)
+SELECT 
+    PWH.UserId,
+    PWH.DisplayName,
+    PWH.BadgeName,
+    RPH.Title AS PostTitle,
+    COUNT(DISTINCT RPH.PostId) AS TotalPosts,
+    SUM(PWH.UpVotes) AS TotalUpVotes,
+    SUM(PWH.DownVotes) AS TotalDownVotes,
+    SUM(PWH.CloseVotes) AS TotalCloseVotes,
+    SUM(PWH.ReopenVotes) AS TotalReopenVotes
+FROM 
+    PostWithBadges PWH
+INNER JOIN 
+    RecursivePostHierarchy RPH ON PWH.PostId = RPH.PostId
+GROUP BY 
+    PWH.UserId,
+    PWH.DisplayName,
+    PWH.BadgeName
+HAVING 
+    COUNT(DISTINCT RPH.PostId) > 5 
+ORDER BY 
+    TotalUpVotes DESC,
+    PWH.DisplayName;

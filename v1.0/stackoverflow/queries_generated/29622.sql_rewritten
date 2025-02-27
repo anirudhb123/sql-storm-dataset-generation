@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.AcceptedAnswerId,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2)::int, 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3)::int, 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+PostAggregates AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Body,
+        RP.Tags,
+        RP.AcceptedAnswerId,
+        RP.Score,
+        RP.CreationDate,
+        RP.Rank,
+        RP.CommentCount,
+        RP.UpVotes,
+        RP.DownVotes,
+        (RP.UpVotes - RP.DownVotes) AS NetVotes
+    FROM 
+        RankedPosts RP
+    WHERE 
+        RP.Rank <= 5
+),
+StringProcessedData AS (
+    SELECT 
+        PA.PostId,
+        PA.Title,
+        PA.Body,
+        PA.Tags,
+        PA.AcceptedAnswerId,
+        PA.Score,
+        PA.CreationDate,
+        PA.NetVotes,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS ProcessedTags
+    FROM 
+        PostAggregates PA
+    LEFT JOIN 
+        Tags t ON POSITION(CONCAT('<', t.TagName, '>') IN PA.Tags) > 0
+    GROUP BY 
+        PA.PostId, PA.Title, PA.Body, PA.AcceptedAnswerId, PA.Score, PA.CreationDate, PA.NetVotes
+)
+SELECT 
+    SD.PostId,
+    SD.Title,
+    SD.Body,
+    SD.ProcessedTags,
+    SD.Score,
+    SD.NetVotes,
+    CASE 
+        WHEN SD.NetVotes > 10 THEN 'High Engagement'
+        WHEN SD.NetVotes BETWEEN 1 AND 10 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM 
+    StringProcessedData SD
+ORDER BY 
+    SD.Score DESC, 
+    SD.NetVotes DESC;

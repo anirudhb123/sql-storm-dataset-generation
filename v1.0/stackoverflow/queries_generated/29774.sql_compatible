@@ -1,0 +1,70 @@
+
+WITH RecentPosts AS (
+    SELECT
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.Body,
+        Posts.CreationDate,
+        Users.DisplayName AS OwnerDisplayName,
+        Posts.Tags,
+        ARRAY_AGG(DISTINCT Tags.TagName) AS TagList,
+        COUNT(Comments.Id) AS TotalComments,
+        COALESCE(SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 WHEN Votes.VoteTypeId = 3 THEN -1 ELSE 0 END), 0) AS NetVotes
+    FROM
+        Posts
+    JOIN
+        Users ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN
+        Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN
+        Tags ON Tags.Id = ANY(string_to_array(SUBSTRING(Posts.Tags, 2, LENGTH(Posts.Tags) - 2), '><')::text[])
+    LEFT JOIN
+        Votes ON Votes.PostId = Posts.Id
+    WHERE
+        Posts.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY
+        Posts.Id, Posts.Title, Posts.Body, Posts.CreationDate, Users.DisplayName, Posts.Tags
+),
+PostHistoryAnalysis AS (
+    SELECT
+        PostHistory.PostId,
+        COUNT(*) AS EditCount,
+        COUNT(DISTINCT CASE WHEN PostHistory.PostHistoryTypeId IN (4, 5, 6, 24) THEN PostHistory.Id END) AS SignificantEdits
+    FROM
+        PostHistory
+    WHERE
+        PostHistory.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '90 days'
+    GROUP BY
+        PostHistory.PostId
+),
+PostPerformance AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.TotalComments,
+        rp.NetVotes,
+        ph.EditCount,
+        ph.SignificantEdits,
+        COALESCE(rp.NetVotes / NULLIF(rp.TotalComments, 0), 0) AS VotePerCommentRatio,
+        COALESCE(ph.SignificantEdits / NULLIF(ph.EditCount, 1), 0) AS SignificantEditRatio
+    FROM
+        RecentPosts rp
+    LEFT JOIN
+        PostHistoryAnalysis ph ON rp.PostId = ph.PostId
+)
+SELECT
+    Title,
+    OwnerDisplayName,
+    TotalComments,
+    NetVotes,
+    EditCount,
+    SignificantEdits,
+    VotePerCommentRatio,
+    SignificantEditRatio
+FROM
+    PostPerformance
+ORDER BY
+    NetVotes DESC,
+    TotalComments DESC
+LIMIT 50;

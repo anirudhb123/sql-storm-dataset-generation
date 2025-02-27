@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.id) AS rank
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 10
+),
+ActorRoles AS (
+    SELECT 
+        ai.person_id,
+        ai.movie_id,
+        array_agg(DISTINCT rt.role) AS roles,
+        COUNT(DISTINCT c.id) AS role_count
+    FROM 
+        cast_info ai
+    JOIN 
+        role_type rt ON ai.role_id = rt.id
+    JOIN 
+        complete_cast cc ON ai.movie_id = cc.movie_id
+    GROUP BY 
+        ai.person_id, ai.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        ac.roles,
+        ac.role_count,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        ActorRoles ac ON tm.movie_id = ac.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON tm.movie_id = mk.movie_id
+    GROUP BY 
+        tm.title, tm.production_year, ac.roles, ac.role_count
+)
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(md.role_count, 0) AS total_roles,
+    COALESCE(md.keyword_count, 0) AS total_keywords,
+    CASE 
+        WHEN md.role_count > 0 THEN 'Featured Actor'
+        ELSE 'No Roles Found'
+    END AS role_status
+FROM 
+    MovieDetails md
+ORDER BY 
+    md.production_year DESC,
+    md.total_keywords DESC;

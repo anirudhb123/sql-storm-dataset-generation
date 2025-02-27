@@ -1,0 +1,77 @@
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM
+        supplier s
+    WHERE
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rnk
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderstatus IN ('F', 'O')
+),
+PartDetails AS (
+    SELECT
+        p.p_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        part p
+    JOIN
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE
+        l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY
+        p.p_partkey
+),
+ComplementaryData AS (
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_supplycost,
+        (SELECT AVG(total_sales) FROM PartDetails) AS avg_sales_per_part
+    FROM
+        partsupp ps
+)
+SELECT
+    COALESCE(r.s_name, 'UNKNOWN SUPPLIER') AS supplier_name,
+    COALESCE(c.c_name, 'UNKNOWN CUSTOMER') AS customer_name,
+    p.p_name,
+    pd.total_sales,
+    CASE
+        WHEN pd.total_sales IS NULL THEN 'NO SALES'
+        WHEN pd.total_sales > avg_sales_per_part THEN 'ABOVE AVERAGE'
+        ELSE 'BELOW AVERAGE'
+    END AS sales_comparison,
+    CASE
+        WHEN COUNT(DISTINCT o.o_orderkey) > 5 THEN 'Frequent Buyer'
+        ELSE 'Occasional Buyer'
+    END AS buyer_category,
+    ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY e.rnk) AS customer_rank
+FROM
+    CustomerOrders c
+LEFT JOIN
+    RankedSuppliers r ON c.c_custkey = r.s_suppkey
+LEFT JOIN
+    PartDetails pd ON pd.p_partkey = (SELECT MIN(p.p_partkey) FROM part p)
+LEFT JOIN 
+    ComplementaryData e ON ps.ps_partkey = pd.p_partkey
+GROUP BY
+    r.s_name, c.c_name, p.p_name, pd.total_sales, avg_sales_per_part
+HAVING
+    (sales_comparison = 'ABOVE AVERAGE' AND buyer_category = 'Frequent Buyer')
+    OR (buyer_category = 'Occasional Buyer' AND pd.total_sales IS NULL)
+ORDER BY
+    customer_rank DESC;

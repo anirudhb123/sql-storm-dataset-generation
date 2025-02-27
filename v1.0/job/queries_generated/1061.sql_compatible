@@ -1,0 +1,57 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(c.person_id) AS num_cast,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.title, a.production_year
+),
+HighCastMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank_by_cast <= 5
+),
+MovieDetails AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        COALESCE(MIN(p.info), 'No info available') AS person_info
+    FROM 
+        HighCastMovies m
+    LEFT JOIN 
+        movie_keyword mk ON m.title = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON m.production_year = cc.movie_id
+    LEFT JOIN 
+        person_info p ON cc.subject_id = p.person_id
+    GROUP BY 
+        m.title, m.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.keywords,
+    CASE 
+        WHEN md.person_info IS NULL THEN 'No info found'
+        ELSE md.person_info 
+    END AS person_information
+FROM 
+    MovieDetails md
+WHERE 
+    md.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    md.production_year DESC, 
+    ARRAY_LENGTH(md.keywords) DESC;

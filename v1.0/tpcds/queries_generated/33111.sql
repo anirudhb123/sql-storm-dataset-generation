@@ -1,0 +1,61 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT i_item_sk, i_item_desc, i_current_price, 0 AS level
+    FROM item
+    WHERE i_current_price IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT ih.i_item_sk, CONCAT(ih.i_item_desc, ' -> ', ih2.i_item_desc), ih2.i_current_price, level + 1
+    FROM ItemHierarchy ih
+    JOIN item ih2 ON ih.i_item_sk = ih2.i_item_sk
+    WHERE level < 5
+), 
+SalesAggregation AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_date
+),
+DemographicsInfo AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(cd.cd_purchase_estimate) AS total_estimate,
+        AVG(cd.cd_dep_count) AS avg_dependent_count
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender
+),
+StoreSalesSummary AS (
+    SELECT 
+        ss_store_sk, 
+        SUM(ss_sales_price) AS total_store_sales,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions,
+        MAX(ss_net_profit) AS max_profit
+    FROM store_sales
+    GROUP BY ss_store_sk
+)
+SELECT 
+    d.d_date,
+    si.i_item_desc,
+    si.i_current_price,
+    sa.total_sales,
+    sa.order_count,
+    di.cd_gender,
+    di.customer_count,
+    si.level,
+    ss.total_store_sales,
+    ss.total_transactions,
+    ss.max_profit
+FROM SalesAggregation sa
+CROSS JOIN ItemHierarchy si
+JOIN DemographicsInfo di ON di.customer_count > 0
+LEFT JOIN StoreSalesSummary ss ON ss.total_store_sales > 1000
+WHERE sa.total_sales > (SELECT AVG(total_sales) FROM SalesAggregation)
+AND di.cd_gender IS NOT NULL
+ORDER BY d.d_date DESC, si.level, di.customer_count DESC;

@@ -1,0 +1,56 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+), company_movie_counts AS (
+    SELECT 
+        mc.company_id, 
+        COUNT(DISTINCT m.id) AS movie_count
+    FROM 
+        movie_companies mc
+    INNER JOIN 
+        aka_title m ON mc.movie_id = m.id
+    GROUP BY 
+        mc.company_id
+), actor_movie_details AS (
+    SELECT 
+        a.id AS actor_id, 
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS movies_count,
+        COUNT(DISTINCT c.role_id) AS unique_roles_count
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.id
+)
+SELECT 
+    at.title,
+    at.production_year,
+    a.actor_name,
+    COALESCE(cmc.movie_count, 0) AS company_movie_count,
+    ard.movies_count,
+    ard.unique_roles_count
+FROM 
+    ranked_titles at
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    company_movie_counts cmc ON mc.company_id = cmc.company_id
+LEFT JOIN 
+    cast_info ci ON at.id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    actor_movie_details ard ON a.id = ard.actor_id
+WHERE 
+    at.production_year > 2000 
+    AND (cmc.movie_count IS NULL OR cmc.movie_count > 5)
+ORDER BY 
+    at.production_year DESC, 
+    title_rank
+LIMIT 100;

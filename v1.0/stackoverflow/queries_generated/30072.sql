@@ -1,0 +1,91 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN P.PostTypeId = 1 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+RankedUsers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserReputation
+),
+RecentBadges AS (
+    SELECT 
+        B.UserId,
+        MAX(B.Date) AS MostRecentBadgeDate,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+RecentUserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        MAX(C.CreationDate) AS LastCommentDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    RU.DisplayName,
+    RU.Reputation,
+    RU.TotalPosts,
+    RU.TotalQuestions,
+    RU.TotalAnswers,
+    RU.AcceptedAnswers,
+    RB.BadgeNames,
+    COALESCE(RUA.LastCommentDate, 'No Comments') AS LastComment,
+    CASE 
+        WHEN RU.Reputation >= 1000 THEN 'Gold'
+        WHEN RU.Reputation >= 500 THEN 'Silver'
+        ELSE 'Bronze'
+    END AS ReputationTier
+FROM 
+    RankedUsers RU
+LEFT JOIN 
+    RecentBadges RB ON RU.UserId = RB.UserId
+LEFT JOIN 
+    RecentUserActivity RUA ON RU.UserId = RUA.UserId
+WHERE 
+    RU.ReputationRank <= 100
+ORDER BY 
+    RU.Reputation DESC;
+
+-- Now let's additionally look for a correlation between accepted answers and the highest ranked users
+SELECT 
+    RU.DisplayName,
+    COUNT(P.AcceptedAnswerId) AS TotalAcceptedAnswers,
+    SUM(CASE WHEN P.Score IS NOT NULL THEN P.Score ELSE 0 END) AS TotalScore
+FROM 
+    RankedUsers RU
+JOIN 
+    Posts P ON RU.UserId = P.OwnerUserId
+WHERE 
+    P.AcceptedAnswerId IS NOT NULL
+GROUP BY 
+    RU.DisplayName
+HAVING 
+    COUNT(P.AcceptedAnswerId) > 0
+ORDER BY 
+    TotalAcceptedAnswers DESC;

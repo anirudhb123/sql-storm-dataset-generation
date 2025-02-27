@@ -1,0 +1,81 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > 0
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+TopParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+),
+FinalReport AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(hv.total_value) AS total_order_value,
+        p.p_name,
+        p.p_size,
+        COALESCE(SUM(s.s_acctbal), 0) AS total_supplier_balance
+    FROM 
+        customer c
+    LEFT JOIN 
+        HighValueOrders hv ON c.c_custkey = hv.o_custkey
+    LEFT JOIN 
+        lineitem l ON hv.o_orderkey = l.l_orderkey
+    LEFT JOIN 
+        part p ON l.l_partkey = p.p_partkey
+    LEFT JOIN 
+        RankedSuppliers rs ON rs.s_suppkey = l.l_suppkey AND rs.rnk <= 3
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name, p.p_name, p.p_size
+    HAVING 
+        SUM(hv.total_value) > 1000 OR COUNT(DISTINCT rs.s_suppkey) > 2
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT fr.c_custkey) AS customer_count,
+    AVG(fr.total_order_value) AS avg_order_value,
+    SUM(fr.total_supplier_balance) AS total_supplier_balances
+FROM 
+    FinalReport fr
+JOIN 
+    nation n ON fr.c_custkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name
+ORDER BY 
+    customer_count DESC, avg_order_value DESC;

@@ -1,0 +1,69 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        (SELECT COUNT(*)
+         FROM Comments c
+         WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*)
+         FROM Votes v
+         WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpvoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+),
+
+PopularPosts AS (
+    SELECT 
+        rp.*
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1 AND rp.Score > (SELECT AVG(Score) FROM Posts)
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.Score,
+    pp.ViewCount,
+    u.Id AS UserId,
+    ub.BadgeCount,
+    ub.GoldCount,
+    ub.SilverCount,
+    ub.BronzeCount,
+    COALESCE(pp.CommentCount, 0) AS CommentCount,
+    COALESCE(pp.UpvoteCount, 0) AS UpvoteCount
+FROM 
+    PopularPosts pp
+LEFT JOIN 
+    Users u ON u.Id = pp.OwnerUserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    pp.ViewCount > 100 AND 
+    (pp.CommentCount IS NOT NULL AND pp.CommentCount > 5 OR pp.UpvoteCount > 10)
+ORDER BY 
+    pp.Score DESC, pp.ViewCount DESC;

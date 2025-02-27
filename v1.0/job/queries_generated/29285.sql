@@ -1,0 +1,61 @@
+WITH MovieDetails AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        COALESCE(STRING_AGG(DISTINCT c.name, ', '), 'No Cast') AS cast_names,
+        COALESCE(STRING_AGG(DISTINCT k.keyword, ', '), 'No Keywords') AS keywords,
+        COALESCE(STRING_AGG(DISTINCT cn.name, ', '), 'No Companies') AS companies,
+        COALESCE(STRING_AGG(DISTINCT pi.info, '; '), 'No Info') AS additional_info
+    FROM
+        aka_title m
+    LEFT JOIN
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN
+        info_type it ON mi.info_type_id = it.id
+    LEFT JOIN
+        person_info pi ON c.person_id = pi.person_id
+    GROUP BY
+        m.id
+),
+Ranking AS (
+    SELECT
+        movie_id,
+        title,
+        production_year,
+        kind_id,
+        cast_names,
+        keywords,
+        companies,
+        additional_info,
+        ROW_NUMBER() OVER (ORDER BY production_year DESC) AS rank
+    FROM
+        MovieDetails
+)
+SELECT
+    rank,
+    title,
+    production_year,
+    cast_names,
+    keywords,
+    companies,
+    additional_info
+FROM
+    Ranking
+WHERE
+    rank <= 100
+ORDER BY
+    rank;

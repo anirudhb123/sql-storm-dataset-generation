@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        (SELECT COUNT(b.Id) FROM Badges b WHERE b.UserId = u.Id) AS BadgeCount
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+), ClosedPostReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        CloseReasonTypes cr ON cr.Id = CAST(ph.Comment AS INT)
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.CommentCount,
+    COALESCE(up.Reputation, 0) AS UserReputation,
+    COALESCE(up.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(cpr.CloseReasons, 'No close reasons') AS CloseReasons
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserReputation up ON rp.OwnerUserId = up.UserId
+LEFT JOIN 
+    ClosedPostReasons cpr ON rp.PostId = cpr.PostId
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.Score DESC, rp.CommentCount DESC
+LIMIT 50;

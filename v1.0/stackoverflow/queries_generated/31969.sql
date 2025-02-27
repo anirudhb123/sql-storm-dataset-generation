@@ -1,0 +1,79 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Start with Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.PostId -- Fetch answers to previous posts
+)
+, PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        MAX(COALESCE(b.Date, '1900-01-01')) AS LastBadgeDate
+    FROM 
+        RecursivePosts rp
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = rp.OwnerUserId
+    GROUP BY 
+        rp.PostId, rp.Title
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    u.DisplayName AS OwnerName,
+    u.Reputation AS OwnerReputation,
+    COALESCE(bt.Name, 'No Badge') AS LastBadge,
+    DENSE_RANK() OVER (ORDER BY ps.VoteCount DESC, ps.CommentCount DESC) AS PostRank,
+    CASE 
+        WHEN ps.CommentCount > 5 THEN 'Highly Discussed'
+        WHEN ps.CommentCount BETWEEN 1 AND 5 THEN 'Moderately Discussed'
+        ELSE 'No Comments'
+    END AS DiscussionLevel
+FROM 
+    PostStatistics ps
+INNER JOIN 
+    Users u ON u.Id = (SELECT TOP 1 OwnerUserId FROM Posts WHERE Id = ps.PostId)
+LEFT JOIN 
+    Badges bt ON bt.UserId = u.Id AND bt.Date = ps.LastBadgeDate
+ORDER BY 
+    PostRank;
+This query tackles several complex SQL constructs:
+
+1. **Recursive CTE**: Uses recursive CTE to traverse the posts and their relationships (questions and answers).
+2. **Aggregations**: Calculates comment counts and vote counts using `LEFT JOIN` with aggregate functions.
+3. **Conditional Logic**: Implements conditional aggregation for upvotes and downvotes with `CASE`.
+4. **Window Functions**: Uses `DENSE_RANK()` to provide a ranking based on vote counts.
+5. **String and NULL Logic**: Utilizes `COALESCE` to manage potential null values in badge names and display them appropriately.
+6. **Complex Categorization**: Classifies posts based on their comment counts into discussion levels.

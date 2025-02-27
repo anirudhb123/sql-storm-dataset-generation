@@ -1,0 +1,86 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Posts a
+            WHERE a.ParentId = p.Id AND a.PostTypeId = 2
+        ), 0) AS AnswerCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Posts a
+            WHERE a.ParentId = p.Id AND a.PostTypeId = 2
+        ), 0) AS AnswerCount
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostCTE r ON p.ParentId = r.PostId
+),
+PostRankings AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.AnswerCount DESC) AS RankByAnswers,
+        RANK() OVER (ORDER BY p.CreationDate DESC) AS RankByDateCreated
+    FROM 
+        RecursivePostCTE p
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(*) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        v.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+    GROUP BY 
+        v.PostId
+)
+
+SELECT 
+    p.Title,
+    p.CreationDate,
+    COALESCE(pv.VoteCount, 0) AS VoteCount,
+    COALESCE(pv.Upvotes, 0) AS Upvotes,
+    COALESCE(pv.Downvotes, 0) AS Downvotes,
+    CASE 
+        WHEN COALESCE(pv.Upvotes, 0) > COALESCE(pv.Downvotes, 0) THEN 'Positive' 
+        WHEN COALESCE(pv.Downvotes, 0) > COALESCE(pv.Upvotes, 0) THEN 'Negative'
+        ELSE 'Neutral' 
+    END AS VoteSentiment,
+    pr.RankByAnswers,
+    pr.RankByDateCreated
+FROM 
+    PostRankings pr
+LEFT JOIN 
+    RecentVotes pv ON pr.PostId = pv.PostId
+WHERE 
+    pr.RankByAnswers <= 10
+    AND COALESCE(pv.VoteCount, 0) > 0
+ORDER BY 
+    pr.RankByAnswers,
+    pr.RankByDateCreated DESC;

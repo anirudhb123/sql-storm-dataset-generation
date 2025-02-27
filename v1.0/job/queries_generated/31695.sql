@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2020
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        CONCAT(' sequel of ', mh.title) AS title,
+        mh.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        mh.level < 2 
+        AND m.production_year BETWEEN 2000 AND 2020
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    p.name AS director,
+    COALESCE(k.keyword, 'No Keywords') AS keywords,
+    COUNT(DISTINCT c.person_id) OVER (PARTITION BY mh.movie_id) AS cast_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    aka_name p ON c.person_id = p.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    mh.level = 1 
+    AND p.name IS NOT NULL
+ORDER BY 
+    mh.production_year DESC,
+    mh.title;
+
+This query creates a recursive common table expression (CTE) to extract movies released between 2000 and 2020 and their sequels limited to two levels deep. It retrieves information like the title, production year, director's name, associated keywords, and the count of distinct cast members for each movie. The results are organized by production year and title, ensuring NULL handling and using COALESCE for missing keywords.

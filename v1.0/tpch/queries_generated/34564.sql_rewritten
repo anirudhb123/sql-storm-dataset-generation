@@ -1,0 +1,52 @@
+WITH RECURSIVE supply_chain AS (
+    SELECT 
+        ps_partkey, 
+        ps_suppkey, 
+        ps_availqty, 
+        ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS rn
+    FROM partsupp
+    WHERE ps_availqty > 0
+),
+high_value_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_net_price
+    FROM orders AS o
+    JOIN customer AS c ON o.o_custkey = c.c_custkey
+    JOIN lineitem AS l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1996-01-01'
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_name
+    HAVING total_net_price > 1000.00
+),
+supplier_data AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        r.r_name AS region_name,
+        SUM(CASE WHEN article.rn IS NOT NULL THEN 1 ELSE 0 END) AS valid_supply_count
+    FROM supplier AS s
+    LEFT JOIN region AS r ON s.s_nationkey = r.r_regionkey
+    LEFT JOIN supply_chain AS article ON s.s_suppkey = article.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal, r.r_name
+)
+SELECT 
+    o.o_orderkey,
+    o.o_totalprice,
+    o.o_orderdate,
+    c.c_name,
+    s.s_name,
+    s.region_name,
+    s.valid_supply_count
+FROM high_value_orders AS o
+JOIN supplier_data AS s ON o.o_orderkey % s.s_suppkey = 0
+WHERE EXISTS (
+    SELECT 1 
+    FROM lineitem AS l 
+    WHERE l.l_orderkey = o.o_orderkey AND l.l_quantity > 10
+)
+ORDER BY o.o_orderdate DESC, o.o_orderkey;

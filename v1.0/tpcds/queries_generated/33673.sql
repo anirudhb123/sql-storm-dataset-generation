@@ -1,0 +1,89 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_sales 
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_sold_date_sk, 
+        ws_item_sk
+    HAVING 
+        SUM(ws_quantity) > 100
+    UNION ALL
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        total_sales + 50 
+    FROM 
+        SalesCTE 
+    WHERE 
+        total_sales < 1000
+),
+Ranking AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        SUM(ws_ext_sales_price) AS total_spent,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rnk
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990 
+        AND c.c_country IS NOT NULL 
+        AND c.c_current_addr_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+SalesDetails AS (
+    SELECT 
+        ws.ws_item_sk, 
+        i.i_item_id, 
+        i.i_item_desc, 
+        COUNT(ws.ws_order_number) AS sales_count,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales_price
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        ws.ws_item_sk, i.i_item_id, i.i_item_desc
+),
+HighValueSales AS (
+    SELECT 
+        s.s_store_sk, 
+        SUM(ss_ext_sales_price) AS total_store_sales
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.s_store_sk = s.s_store_sk
+    GROUP BY 
+        s.s_store_sk
+    HAVING 
+        total_store_sales > (SELECT AVG(total_sales) FROM SalesDetails)
+)
+SELECT 
+    c.c_first_name, 
+    c.c_last_name, 
+    r.total_spent,
+    sd.i_item_id,
+    sd.i_item_desc,
+    sd.sales_count,
+    sd.total_quantity,
+    sd.total_sales_price,
+    COALESCE(hvs.total_store_sales, 0) AS high_value_store_sales
+FROM 
+    Ranking r 
+INNER JOIN 
+    SalesDetails sd ON r.rnk = 1
+LEFT JOIN 
+    HighValueSales hvs ON hvs.s_store_sk = r.c_customer_sk
+WHERE 
+    r.total_spent > 5000
+ORDER BY 
+    r.total_spent DESC;

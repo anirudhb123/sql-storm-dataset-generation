@@ -1,0 +1,63 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca.city AS address_city, 
+        UPPER(TRIM(ca.street_name)) AS address_street, 
+        CONCAT(TRIM(ca.street_number), ' ', TRIM(ca.street_type)) AS full_address,
+        REPLACE(ca.ca_zip, '-', '') AS cleaned_zip,
+        ca.ca_state 
+    FROM 
+        customer_address ca
+), 
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(TRIM(c.c_first_name), ' ', TRIM(c.c_last_name)) AS customer_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate 
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+SalesDetails AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        address.address_city,
+        address.full_address
+    FROM 
+        web_sales ws
+    JOIN 
+        AddressDetails address ON ws.ws_bill_addr_sk = address.ca_address_sk
+), 
+MonthlySales AS (
+    SELECT 
+        DATE_TRUNC('month', d.d_date) AS sales_month,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT c.c_customer_id) AS unique_customers
+    FROM 
+        date_dim d
+    JOIN 
+        SalesDetails ws ON d.d_date_sk = ws.ws_sold_date_sk
+    JOIN 
+        CustomerInfo c ON ws.ws_bill_customer_sk = c.c_customer_id
+    GROUP BY 
+        sales_month
+)
+SELECT 
+    sales_month, 
+    total_net_profit, 
+    total_orders, 
+    unique_customers,
+    ROUND(total_net_profit / NULLIF(unique_customers, 0), 2) AS avg_profit_per_customer,
+    ROUND(total_net_profit / NULLIF(total_orders, 0), 2) AS avg_profit_per_order
+FROM 
+    MonthlySales
+ORDER BY 
+    sales_month;

@@ -1,0 +1,93 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        P.CreationDate,
+        COALESCE(NULLIF(p.ViewCount, 0), 1) AS SafeViewCount,  -- Avoid division by zero
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankByUser
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+), 
+AggregatedData AS (
+    SELECT 
+        r.OwnerUserId,
+        COUNT(r.PostId) AS QuestionsCount,
+        SUM(r.SafeViewCount) AS TotalViews,
+        AVG(r.SafeViewCount) AS AvgViewsPerQuestion
+    FROM 
+        RecursiveCTE r
+    GROUP BY 
+        r.OwnerUserId
+), 
+DynamicBadgeAssignment AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        CASE 
+            WHEN a.QuestionsCount > 10 THEN 'Gold'
+            WHEN a.QuestionsCount BETWEEN 5 AND 10 THEN 'Silver'
+            ELSE 'Bronze'
+        END AS BadgeLevel,
+        COALESCE(b.Name, 'No Badge') AS AssignedBadge
+    FROM 
+        Users u
+    LEFT JOIN 
+        AggregatedData a ON u.Id = a.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId AND b.Class = 
+            CASE 
+                WHEN a.QuestionsCount > 10 THEN 1
+                WHEN a.QuestionsCount BETWEEN 5 AND 10 THEN 2
+                ELSE 3 
+            END
+), 
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastEdited,
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS Comments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) -- Only considering close/open/delete history
+    GROUP BY 
+        ph.PostId, ph.UserId, ph.PostHistoryTypeId
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(a.QuestionsCount, 0) AS QuestionsCount,
+    COALESCE(a.TotalViews, 0) AS TotalViews,
+    COALESCE(a.AvgViewsPerQuestion, 0) AS AvgViewsPerQuestion,
+    COALESCE(d.BadgeLevel, 'None') AS BadgeLevel,
+    COALESCE(d.AssignedBadge, 'No Badge') AS AssignedBadge,
+    COALESCE(p.TotalPostHistory, 0) AS TotalPostHistory,
+    COALESCE(p.LastEdited, 'Never') AS LastEdited,
+    COALESCE(p.Comments, 'No Comments') AS Comments
+FROM 
+    Users u
+LEFT JOIN 
+    AggregatedData a ON u.Id = a.OwnerUserId
+LEFT JOIN 
+    DynamicBadgeAssignment d ON u.Id = d.UserId
+LEFT JOIN 
+    (
+        SELECT 
+            ph.PostId,
+            COUNT(*) AS TotalPostHistory,
+            MAX(ph.CreationDate) AS LastEdited,
+            STRING_AGG(DISTINCT ph.Comment, '; ') AS Comments
+        FROM 
+            PostHistory ph
+        GROUP BY 
+            ph.PostId
+    ) p ON p.PostId = ANY(SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+ORDER BY 
+    u.Reputation DESC;

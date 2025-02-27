@@ -1,0 +1,69 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_suppliers
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 10000
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2) 
+        AND o.o_orderdate >= '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus
+),
+PartSupplies AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_name, 
+    COALESCE(s.s_name, 'N/A') AS supplier_name,
+    h.o_orderkey,
+    h.o_totalprice,
+    CASE 
+        WHEN h.lineitem_count IS NULL THEN 'No Line Items'
+        ELSE CONCAT('Line Items: ', h.lineitem_count)
+    END AS lineitem_info,
+    r.r_name,
+    COALESCE(p.total_available, 0) AS total_parts_available,
+    RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank_by_price
+FROM 
+    part p
+LEFT JOIN 
+    PartSupplies p ON p.p_partkey = ps.ps_partkey
+FULL OUTER JOIN 
+    RankedSuppliers s ON s.rank_suppliers = 1
+LEFT JOIN 
+    HighValueOrders h ON h.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o WHERE o.o_orderstatus = 'F'
+    ) 
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    (p.p_size BETWEEN 1 AND 20 OR p.p_type LIKE '%widget%')
+    AND (s.s_name IS NOT NULL OR h.o_orderkey IS NULL)
+ORDER BY 
+    n.n_name, p.p_retailprice DESC, h.o_totalprice;

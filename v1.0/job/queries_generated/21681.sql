@@ -1,0 +1,57 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT ca.id) AS cast_count,
+        SUM(CASE WHEN ca.note IS NOT NULL THEN 1 ELSE 0 END) AS note_count,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY COUNT(ca.id) DESC) AS rn
+    FROM cast_info ca
+    JOIN complete_cast c ON ca.movie_id = c.movie_id
+    GROUP BY c.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        co.name AS company_name,
+        k.keyword AS movie_keyword,
+        a.name AS aka_name,
+        rn
+    FROM RecursiveCTE r
+    JOIN aka_title t ON r.movie_id = t.movie_id 
+    LEFT JOIN movie_companies mc ON mc.movie_id = r.movie_id
+    LEFT JOIN company_name co ON mc.company_id = co.id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = r.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN aka_name a ON a.person_id IN (SELECT ca.person_id FROM cast_info ca WHERE ca.movie_id = r.movie_id)
+    WHERE r.cast_count > 1 AND (t.production_year > 2000 OR co.country_code IS NULL)
+),
+RankedMovies AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY production_year DESC, cast_count DESC) AS rank_order
+    FROM MovieDetails
+)
+SELECT 
+    title,
+    production_year,
+    company_name,
+    movie_keyword,
+    aka_name,
+    CASE WHEN rank_order <= 10 THEN 'Top 10 Movies' 
+         WHEN rank_order <= 20 THEN 'Next 10 Movies' 
+         ELSE 'Beyond Top 20' END AS rank_category
+FROM RankedMovies
+WHERE rank_order <= 50
+ORDER BY production_year, cast_count DESC
+LIMIT 30;
+
+### Explanation:
+1. **RecursiveCTE**: This Common Table Expression counts the number of distinct cast members (using `COUNT(DISTINCT ca.id)`) and counts how many of them have notes provided (`SUM(CASE...)`). It assigns a row number to each movie based on their cast count.
+
+2. **MovieDetails**: This CTE retrieves extended details about each movie, including title, production year, associated company name, keywords, and aka_name. It incorporates various types of joins, including LEFT JOINs for less strict associations. The filter checks for movies with more than one cast member and either released after 2000 or lacking a company country code.
+
+3. **RankedMovies**: A further CTE that ranks the movies according to production year and cast count, allowing for more nuanced display.
+
+4. **Final Select**: It retrieves titles up to the top 50 ranked movies, classifies them into categories based on rank order, and orders them by production year and cast count, limiting the result to 30 movies. 
+
+This query incorporates various SQL advanced concepts, including window functions, CTEs, conditional aggregation, and nested queries, demonstrating complexity within the schema.

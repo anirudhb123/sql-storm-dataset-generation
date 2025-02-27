@@ -1,0 +1,64 @@
+WITH RecursiveTagList AS (
+    SELECT 
+        p.Id AS PostId,
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+),
+TagAggregation AS (
+    SELECT 
+        t.TagName,
+        COUNT(*) AS QuestionCount
+    FROM 
+        RecursiveTagList t
+    GROUP BY 
+        t.TagName
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName AS UserName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TaggedUserStats AS (
+    SELECT 
+        u.UserId,
+        COUNT(DISTINCT tt.TagName) AS UniqueTags
+    FROM 
+        (SELECT DISTINCT u.Id AS UserId, p.Id AS PostId
+         FROM Users u
+         JOIN Posts p ON u.Id = p.OwnerUserId
+         JOIN RecursiveTagList r ON p.Id = r.PostId) AS u
+    JOIN RecursiveTagList tt ON u.PostId = tt.PostId
+    GROUP BY 
+        u.UserId
+)
+SELECT 
+    u.UserId,
+    u.UserName,
+    u.TotalPosts,
+    u.TotalAnswers,
+    u.TotalQuestions,
+    COALESCE(t.UniqueTags, 0) AS UniqueTagsContributed,
+    t.TagName,
+    ta.QuestionCount
+FROM 
+    UserPostStats u
+LEFT JOIN 
+    TaggedUserStats t ON u.UserId = t.UserId
+LEFT JOIN 
+    TagAggregation ta ON t.UniqueTags IS NOT NULL AND ta.TagName IN (
+        SELECT TagName FROM RecursiveTagList WHERE UserId = u.UserId
+    )
+ORDER BY 
+    u.TotalPosts DESC, u.UserName ASC;

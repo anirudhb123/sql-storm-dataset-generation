@@ -1,0 +1,37 @@
+WITH RECURSIVE supplier_summary AS (
+    SELECT s.n_nationkey, s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.n_nationkey, s.s_suppkey
+),
+ranked_suppliers AS (
+    SELECT ss.n_nationkey, ss.s_suppkey, ss.total_cost,
+           RANK() OVER (PARTITION BY ss.n_nationkey ORDER BY ss.total_cost DESC) AS cost_rank
+    FROM supplier_summary ss
+),
+order_data AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, l.l_partkey, l.l_quantity
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F' AND o.o_orderdate >= '1997-01-01'
+),
+agg_order_data AS (
+    SELECT od.o_orderkey, SUM(od.l_quantity) AS total_quantity, AVG(od.o_totalprice) AS avg_order_price
+    FROM order_data od
+    GROUP BY od.o_orderkey
+),
+nation_info AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name AS region_name, 
+           CASE WHEN n.n_nationkey IS NULL THEN 'No Nation' ELSE n.n_name END AS nation_display_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT ni.nation_display_name, ni.region_name, rs.s_suppkey,
+       COALESCE(ao.total_quantity, 0) AS total_quantity,
+       COALESCE(ao.avg_order_price, 0) AS avg_order_price,
+       rs.total_cost
+FROM ranked_suppliers rs
+FULL OUTER JOIN agg_order_data ao ON rs.s_suppkey = ao.o_orderkey
+JOIN nation_info ni ON rs.n_nationkey = ni.n_nationkey
+WHERE rs.cost_rank <= 5
+ORDER BY ni.region_name, rs.total_cost DESC, ni.nation_display_name;

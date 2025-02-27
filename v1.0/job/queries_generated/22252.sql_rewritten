@@ -1,0 +1,60 @@
+WITH ranked_movie_cast AS (
+    SELECT
+        ci.movie_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank,
+        COALESCE(ci.note, 'No Note') AS role_note
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE
+        ak.name IS NOT NULL
+),
+movie_info_with_rating AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        COALESCE(AVG(mr.rating), 0) AS average_rating
+    FROM
+        title m
+    LEFT JOIN
+        movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    LEFT JOIN
+        movie_rating mr ON mr.movie_id = m.id 
+    GROUP BY
+        m.id
+),
+missing_movies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        COALESCE(r.actor_name, 'Unknown Actor') AS lead_actor
+    FROM
+        title m
+    LEFT JOIN
+        ranked_movie_cast r ON m.id = r.movie_id AND r.actor_rank = 1
+    WHERE
+        m.production_year IS NULL OR m.production_year < 1900
+)
+SELECT
+    mm.movie_id,
+    mm.title,
+    mm.lead_actor,
+    COALESCE(mir.average_rating, 'Not Rated') AS average_rating_or_rating,
+    CASE
+        WHEN mi.info IS NULL THEN 'No Info Available'
+        ELSE mi.info
+    END AS additional_info
+FROM
+    missing_movies mm
+LEFT JOIN
+    movie_info_with_rating mir ON mm.movie_id = mir.movie_id
+LEFT JOIN
+    movie_info mi ON mm.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'summary')
+WHERE
+    (mm.lead_actor IS NOT NULL AND mm.lead_actor <> 'Unknown Actor')
+    OR mm.title LIKE '%Drama%'
+ORDER BY
+    mm.title ASC,
+    average_rating_or_rating DESC;

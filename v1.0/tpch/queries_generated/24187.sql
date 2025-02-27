@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY pt.p_brand ORDER BY s.s_acctbal DESC, s.s_name) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part pt ON ps.ps_partkey = pt.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+TopSuppliers AS (
+    SELECT 
+        r.* 
+    FROM 
+        RankedSuppliers r 
+    WHERE 
+        r.rnk <= 3
+),
+OrderSummaries AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT ps.ps_partkey) AS total_parts_supplied,
+    SUM(COALESCE(os.total_revenue, 0)) AS overall_revenue,
+    MAX(CASE WHEN os.distinct_parts IS NULL THEN 'No Parts' ELSE os.distinct_parts::varchar END) AS max_parts_summary
+FROM 
+    nation ns
+LEFT JOIN 
+    supplier s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    TopSuppliers ts ON s.s_suppkey = ts.s_suppkey
+LEFT JOIN 
+    OrderSummaries os ON s.s_suppkey = (SELECT ps.s_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT DISTINCT pt.p_partkey FROM part pt WHERE pt.p_brand = 'Brand#24'))
+GROUP BY 
+    ns.n_name
+HAVING 
+    SUM(ps.ps_availqty) IS NOT NULL
+ORDER BY 
+    overall_revenue DESC, nation_name;

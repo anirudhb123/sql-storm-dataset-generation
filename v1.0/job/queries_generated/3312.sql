@@ -1,0 +1,55 @@
+WITH MovieActors AS (
+    SELECT 
+        t.title,
+        a.name AS actor_name,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000
+),
+TopMovies AS (
+    SELECT 
+        title,
+        COUNT(actor_name) AS actor_count
+    FROM 
+        MovieActors
+    WHERE 
+        actor_rank <= 3
+    GROUP BY 
+        title
+    HAVING 
+        COUNT(actor_name) = 3
+),
+MovieKeywords AS (
+    SELECT 
+        m.title,
+        k.keyword
+    FROM 
+        TopMovies m
+    JOIN 
+        movie_keyword mk ON m.title = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    m.title,
+    COALESCE(STRING_AGG(k.keyword, ', '), 'No Keywords') AS keywords,
+    COUNT(DISTINCT a.id) AS total_actors,
+    MIN(COALESCE(a.name, 'Unknown Actor')) AS first_actor
+FROM 
+    TopMovies m
+LEFT JOIN 
+    MovieActors a ON m.title = a.title
+LEFT JOIN 
+    MovieKeywords k ON m.title = k.title
+GROUP BY 
+    m.title
+ORDER BY 
+    total_actors DESC,
+    m.title;

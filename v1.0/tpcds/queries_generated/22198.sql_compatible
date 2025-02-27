@@ -1,0 +1,73 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS rn
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2001 AND dd.d_moy IN (1, 2, 3) 
+),
+SalesSummary AS (
+    SELECT 
+        web_site_sk,
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        RankedSales
+    WHERE 
+        rn <= 5
+    GROUP BY 
+        web_site_sk
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_returning_customer_sk,
+        SUM(wr.wr_return_amt) AS total_returns,
+        COUNT(DISTINCT wr.wr_order_number) AS total_returned_orders
+    FROM 
+        web_returns wr
+    JOIN 
+        web_sales ws ON wr.wr_item_sk = ws.ws_item_sk
+    WHERE 
+        wr.wr_returned_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2001)
+    GROUP BY 
+        wr.wr_returning_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        ss.web_site_sk,
+        ss.total_sales,
+        ss.total_orders,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.total_returned_orders, 0) AS total_returned_orders,
+        (ss.total_sales - COALESCE(cr.total_returns, 0)) AS net_sales,
+        CASE 
+            WHEN ss.total_orders = 0 THEN NULL
+            ELSE (COALESCE(cr.total_returned_orders, 0) / ss.total_orders::float) * 100 
+        END AS return_rate
+    FROM 
+        SalesSummary ss
+    LEFT JOIN 
+        CustomerReturns cr ON ss.web_site_sk = cr.wr_returning_customer_sk
+)
+SELECT 
+    f.web_site_sk,
+    f.total_sales,
+    f.total_orders,
+    f.total_returns,
+    f.total_returned_orders,
+    f.net_sales,
+    f.return_rate
+FROM 
+    FinalReport f
+WHERE 
+    f.return_rate IS NOT NULL
+ORDER BY 
+    f.net_sales DESC
+FETCH FIRST 10 ROWS ONLY;

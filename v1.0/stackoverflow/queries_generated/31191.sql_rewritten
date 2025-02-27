@@ -1,0 +1,72 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.LastActivityDate,
+        a.Score,
+        a.ViewCount,
+        0 AS AnswerCount,
+        a.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts q ON a.ParentId = q.Id
+    INNER JOIN 
+        RecursivePostCTE r ON q.Id = r.PostId
+)
+
+SELECT 
+    u.DisplayName AS Author,
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    COALESCE(v.UpVoteCount, 0) AS UpVoteCount,
+    COALESCE(v.DownVoteCount, 0) AS DownVoteCount,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+    SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+    SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+FROM 
+    RecursivePostCTE r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+) v ON r.PostId = v.PostId
+LEFT JOIN Comments c ON r.PostId = c.PostId 
+LEFT JOIN Badges b ON u.Id = b.UserId
+WHERE 
+    r.Score >= 0 
+GROUP BY 
+    u.DisplayName, r.PostId, r.Title, r.CreationDate, v.UpVoteCount, v.DownVoteCount
+HAVING 
+    COUNT(DISTINCT c.Id) > 0 
+ORDER BY 
+    r.CreationDate DESC, r.Score DESC
+LIMIT 100;

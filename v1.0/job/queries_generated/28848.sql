@@ -1,0 +1,43 @@
+WITH ranked_movies AS (
+    SELECT
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS actor_rank,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords
+    FROM
+        title t
+    JOIN
+        cast_info c ON t.id = c.movie_id
+    JOIN
+        aka_name a ON a.person_id = c.person_id
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        t.production_year >= 2000
+    GROUP BY
+        t.id, t.title, t.production_year, a.name
+),
+filtered_movies AS (
+    SELECT
+        movie_title,
+        production_year,
+        actor_name,
+        actor_rank,
+        keywords
+    FROM
+        ranked_movies
+    WHERE
+        actor_rank <= 3
+)
+SELECT
+    f.movie_title,
+    f.production_year,
+    f.actor_name,
+    f.keywords
+FROM
+    filtered_movies f
+ORDER BY
+    f.production_year DESC, f.movie_title;

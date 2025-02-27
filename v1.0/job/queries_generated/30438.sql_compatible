@@ -1,0 +1,66 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code = 'USA'
+        AND t.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+)
+, cast_summary AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS distinct_cast_count,
+        STRING_AGG(a.name, ', ') AS cast_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+)
+, movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_title,
+    mh.level,
+    cs.distinct_cast_count,
+    cs.cast_names,
+    mk.keywords
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_summary cs ON mh.movie_id = cs.movie_id
+LEFT JOIN 
+    movie_keywords mk ON mh.movie_id = mk.movie_id
+WHERE 
+    (mh.level <= 2 OR cs.distinct_cast_count IS NOT NULL)
+ORDER BY 
+    mh.level, mh.movie_title;

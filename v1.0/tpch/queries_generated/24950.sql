@@ -1,0 +1,36 @@
+WITH RECURSIVE PartHierarchy AS (
+    SELECT p_partkey, p_name, p_size, p_retailprice, p_comment
+    FROM part
+    WHERE p_size > 10
+    
+    UNION ALL
+    
+    SELECT p.p_partkey, CONCAT(ph.p_name, ' -> ', p.p_name), p.p_size, 
+           (ph.p_retailprice + p.p_retailprice) AS aggregated_price, 
+           CONCAT(ph.p_comment, ' | ', p.p_comment)
+    FROM part p
+    INNER JOIN PartHierarchy ph ON p.p_size <= ph.p_size
+    WHERE p.p_partkey < ph.p_partkey
+),
+NationSales AS (
+    SELECT n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+    WHERE l.l_returnflag = 'N'
+    GROUP BY n.n_name
+),
+CustomerRank AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS rank_within_segment
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+)
+SELECT ph.p_name, ph.aggregated_price, ns.total_sales, cr.c_name, cr.rank_within_segment
+FROM PartHierarchy ph
+FULL OUTER JOIN NationSales ns ON ph.p_name LIKE '%' || ns.n_name || '%'
+JOIN CustomerRank cr ON cr.rank_within_segment <= 5 AND cr.c_acctbal > 1000
+WHERE ph.p_retailprice > 0 
+AND (ns.total_sales IS NULL OR ns.total_sales >= 10000)
+ORDER BY ph.aggregated_price DESC, ns.total_sales ASC, cr.c_acctbal DESC
+FETCH FIRST 10 ROWS ONLY;

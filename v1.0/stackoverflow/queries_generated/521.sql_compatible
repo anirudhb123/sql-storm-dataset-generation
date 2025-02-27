@@ -1,0 +1,85 @@
+
+WITH UserMetrics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9)
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Tags T 
+    JOIN 
+        Posts P ON T.Id = ANY(P.Tags)  
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 5
+),
+RecentActivities AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId,
+        PH.CreationDate,
+        PH.Comment,
+        PH.PostHistoryTypeId
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days' 
+        AND PH.PostHistoryTypeId IN (10, 11, 12, 13)
+),
+FinalMetrics AS (
+    SELECT 
+        UM.UserId,
+        UM.DisplayName,
+        UM.Reputation,
+        UM.TotalPosts,
+        UM.Questions,
+        UM.Answers,
+        UM.TotalBounties,
+        REPLACE(P.TagName, 'tag:', '') AS PopularTag,
+        RA.Comment AS RecentActivity
+    FROM 
+        UserMetrics UM
+    LEFT JOIN 
+        PopularTags P ON UM.TotalPosts > 10  
+    LEFT JOIN 
+        RecentActivities RA ON UM.UserId = RA.UserId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN Reputation > 1000 THEN 'Expert'
+        WHEN Reputation > 500 THEN 'Intermediate'
+        ELSE 'Novice'
+    END AS UserLevel,
+    CASE 
+        WHEN RecentActivity IS NOT NULL THEN 'Engaged'
+        ELSE 'Inactive'
+    END AS UserEngagement
+FROM 
+    FinalMetrics
+WHERE 
+    PopularTag IS NOT NULL
+ORDER BY 
+    Reputation DESC,
+    UserId;

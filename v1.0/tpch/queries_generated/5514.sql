@@ -1,0 +1,35 @@
+WITH CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT c.custkey, c.name
+    FROM (
+        SELECT c.custkey, c.name, RANK() OVER (ORDER BY total_spent DESC) AS rank
+        FROM CustomerOrders
+    ) AS c
+    WHERE c.rank <= 10
+),
+SupplierParts AS (
+    SELECT ps.ps_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_suppkey
+)
+SELECT 
+    t.custkey,
+    t.name,
+    s.s_suppkey,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    AVG(supplier_cost.total_cost) AS avg_supplier_cost,
+    COUNT(DISTINCT l.l_orderkey) AS order_lines_count
+FROM TopCustomers t
+JOIN lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = t.custkey)
+JOIN partsupp ps ON ps.ps_partkey = l.l_partkey
+JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+JOIN SupplierParts supplier_cost ON supplier_cost.ps_suppkey = s.s_suppkey
+WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY t.custkey, t.name, s.s_suppkey
+ORDER BY revenue DESC, avg_supplier_cost ASC;

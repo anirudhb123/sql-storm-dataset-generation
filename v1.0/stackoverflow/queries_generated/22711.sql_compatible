@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.PostTypeId
+),
+
+TopQuestions AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        (rp.UpvoteCount - rp.DownvoteCount) AS NetVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostTypeId = 1 
+        AND rp.Rank <= 10
+),
+
+QuestionStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT tq.PostId) AS QuestionCount,
+        SUM(tq.NetVotes) AS TotalNetVotes,
+        AVG(tq.Score) AS AverageScore
+    FROM 
+        TopQuestions tq
+    JOIN 
+        LATERAL (SELECT UNNEST(SPLIT_PARTS(tq.Tags, '><')) AS Tag) tag ON true
+    JOIN 
+        Tags t ON t.TagName = tag.Tag
+    GROUP BY 
+        t.TagName
+)
+
+SELECT 
+    qs.TagName,
+    qs.QuestionCount,
+    qs.TotalNetVotes,
+    CASE 
+        WHEN qs.AverageScore IS NULL THEN 'No Score'
+        WHEN qs.AverageScore > 100 THEN 'High Quality'
+        ELSE 'Moderate Quality'
+    END AS QualityRating
+FROM 
+    QuestionStats qs
+WHERE 
+    qs.QuestionCount > 0
+ORDER BY 
+    qs.TotalNetVotes DESC NULLS LAST
+LIMIT 10;

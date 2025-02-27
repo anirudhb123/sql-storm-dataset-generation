@@ -1,0 +1,64 @@
+WITH RelevantPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.LastActivityDate,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(MAX(v.VoteTypeId), 0) AS LastVoteType,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS ParsedTags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT ph.Comment || ' (Edited on: ' || TO_CHAR(ph.CreationDate, 'YYYY-MM-DD HH24:MI:SS') || ')', '; ') AS EditComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.LastActivityDate,
+    rp.OwnerDisplayName,
+    rp.OwnerReputation,
+    rp.AnswerCount,
+    rp.CommentCount,
+    rp.LastVoteType,
+    rp.ParsedTags,
+    COALESCE(re.EditComments, 'No edits made') AS RecentEditComments
+FROM 
+    RelevantPosts rp
+LEFT JOIN 
+    RecentEdits re ON rp.PostId = re.PostId
+WHERE 
+    rp.CreationDate >= NOW() - INTERVAL '30 days'  -- Posts created in the last 30 days
+ORDER BY 
+    rp.LastActivityDate DESC
+LIMIT 50;  -- Limit to the most recent 50 posts

@@ -1,0 +1,55 @@
+
+WITH PartStats AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+),
+CustomerActivity AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS orders_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    COUNT(DISTINCT c.c_custkey) AS customers_count,
+    SUM(ps.total_available_quantity) AS total_part_availability,
+    AVG(ps.average_supply_cost) AS avg_supply_cost,
+    SUM(ca.orders_count) AS total_orders,
+    SUM(ca.total_spent) AS overall_revenue
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON s.s_nationkey = n.n_nationkey
+JOIN 
+    partsupp ps ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON l.l_partkey = ps.ps_partkey
+JOIN 
+    orders o ON o.o_orderkey = l.l_orderkey
+JOIN 
+    customer c ON c.c_custkey = o.o_custkey
+JOIN 
+    CustomerActivity ca ON ca.c_custkey = c.c_custkey
+GROUP BY 
+    r.r_name
+ORDER BY 
+    region_name;

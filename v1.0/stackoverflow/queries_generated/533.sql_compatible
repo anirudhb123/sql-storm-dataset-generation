@@ -1,0 +1,58 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 10
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(TRIM(t.TagName), ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        UNNEST(STRING_TO_ARRAY(TRIM(BOTH '{}' FROM p.Tags), '><')) AS tag ON TRUE
+    JOIN 
+        Tags t ON t.TagName = tag
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    up.Reputation, 
+    up.TotalBounties, 
+    rp.PostId,
+    rp.Title, 
+    rp.CreationDate,
+    rp.Score,
+    COALESCE(pt.Tags, 'No Tags') AS Tags
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+LEFT JOIN 
+    PostTags pt ON rp.PostId = pt.PostId
+WHERE 
+    rp.RN = 1
+ORDER BY 
+    up.Reputation DESC, rp.Score DESC
+LIMIT 100;

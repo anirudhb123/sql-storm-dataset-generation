@@ -1,0 +1,74 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+customer_return_stats AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_value
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+),
+high_value_returns AS (
+    SELECT 
+        r.c_customer_id,
+        r.c_first_name,
+        r.c_last_name,
+        r.cd_gender,
+        r.cd_marital_status,
+        r.cd_purchase_estimate,
+        cr.total_returns,
+        cr.total_return_value
+    FROM 
+        ranked_customers r
+    LEFT JOIN 
+        customer_return_stats cr ON r.c_customer_id = cr.sr_returning_customer_sk
+    WHERE 
+        r.purchase_rank <= 10 
+        AND (cr.total_returns IS NULL OR cr.total_return_value > 500)
+),
+latest_web_sales AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        ws.ws_bill_customer_sk
+)
+SELECT 
+    h.c_customer_id,
+    h.c_first_name,
+    h.c_last_name,
+    h.total_returns,
+    h.total_return_value,
+    COALESCE(lws.total_net_profit, 0) AS total_web_profit,
+    CASE 
+        WHEN h.cd_gender = 'M' THEN 'Male'
+        WHEN h.cd_gender = 'F' THEN 'Female'
+        ELSE 'Other'
+    END AS gender_description
+FROM 
+    high_value_returns h
+LEFT JOIN 
+    latest_web_sales lws ON h.c_customer_id = lws.ws_bill_customer_sk
+ORDER BY 
+    h.total_return_value DESC, h.total_returns ASC;

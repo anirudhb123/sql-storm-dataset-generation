@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_paid DESC) AS rank,
+        ws_net_paid,
+        ws_net_profit,
+        ws_sold_date_sk,
+        ws_web_site_sk
+    FROM web_sales
+    WHERE ws_net_paid > 0
+),
+HighValueItems AS (
+    SELECT 
+        r.ws_item_sk,
+        r.ws_order_number,
+        r.ws_net_paid,
+        r.ws_net_profit,
+        i.i_item_desc,
+        COALESCE(NULLIF(i.i_color, ''), 'N/A') AS item_color,
+        i.i_current_price,
+        w.w_warehouse_id
+    FROM RankedSales r
+    JOIN item i ON r.ws_item_sk = i.i_item_sk
+    LEFT JOIN warehouse w ON i.i_item_sk % 3 = w.w_warehouse_sk
+    WHERE r.rank = 1
+    AND r.ws_net_profit > (SELECT AVG(ws_net_profit) FROM web_sales)
+),
+ItemReturns AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returns
+    FROM catalog_returns cr
+    GROUP BY cr.cr_item_sk
+)
+SELECT 
+    h.ws_item_sk,
+    h.i_item_desc,
+    h.item_color,
+    h.ws_net_paid,
+    h.ws_net_profit,
+    COALESCE(i.total_returns, 0) AS total_returns,
+    CASE 
+        WHEN h.ws_net_profit - COALESCE(i.total_returns, 0) < 0 THEN 'Loss'
+        WHEN h.ws_net_profit > 1000 THEN 'High Profit'
+        ELSE 'Moderate Profit' 
+    END AS profit_category,
+    CONCAT('Item ', h.i_item_desc, ' was sold for ', h.ws_net_paid, 
+           ' with a profit of ', h.ws_net_profit, 
+           ' and has ', COALESCE(i.total_returns, 0), ' return(s).') AS sales_summary
+FROM HighValueItems h
+LEFT JOIN ItemReturns i ON h.ws_item_sk = i.cr_item_sk
+WHERE h.ws_web_site_sk IN (SELECT web_site_sk FROM web_site 
+                           WHERE web_gmt_offset = (SELECT MAX(web_gmt_offset) FROM web_site))
+ORDER BY h.ws_net_paid DESC
+LIMIT 10;

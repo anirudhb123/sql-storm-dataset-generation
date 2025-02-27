@@ -1,0 +1,58 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_gender,
+        SUM(ws.ws_net_profit) AS total_web_profit,
+        SUM(ss.ss_net_profit) AS total_store_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS web_orders,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_orders
+    FROM 
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_gender
+),
+average_profit AS (
+    SELECT 
+        AVG(total_web_profit) AS avg_web_profit,
+        AVG(total_store_profit) AS avg_store_profit
+    FROM 
+        customer_sales
+),
+high_profit_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_gender,
+        cs.total_web_profit,
+        cs.total_store_profit
+    FROM 
+        customer_sales cs
+    JOIN average_profit ap ON cs.total_web_profit > ap.avg_web_profit 
+    OR cs.total_store_profit > ap.avg_store_profit
+)
+SELECT 
+    hpc.c_customer_sk,
+    hpc.c_gender,
+    hpc.total_web_profit,
+    hpc.total_store_profit,
+    CASE 
+        WHEN hpc.total_web_profit IS NOT NULL AND hpc.total_store_profit IS NOT NULL THEN 'Both'
+        WHEN hpc.total_web_profit IS NOT NULL THEN 'Web'
+        WHEN hpc.total_store_profit IS NOT NULL THEN 'Store'
+        ELSE 'None'
+    END AS source_of_profit,
+    CASE 
+        WHEN hpc.total_web_profit IS NULL THEN 0
+        ELSE hpc.total_web_profit
+    END AS web_profit_non_null,
+    CASE 
+        WHEN hpc.total_store_profit IS NULL THEN 0
+        ELSE hpc.total_store_profit
+    END AS store_profit_non_null
+FROM 
+    high_profit_customers hpc
+ORDER BY 
+    hpc.total_web_profit DESC, hpc.total_store_profit DESC
+LIMIT 100;

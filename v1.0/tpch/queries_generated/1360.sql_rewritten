@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) as rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > 10000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_quantity) OVER (PARTITION BY o.o_orderkey) AS total_quantity
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+    AND 
+        o.o_orderstatus IN ('O', 'F')
+)
+SELECT 
+    DISTINCT co.c_custkey,
+    co.c_name,
+    CASE 
+        WHEN rs.rn IS NULL THEN 'No Supplier'
+        ELSE rs.s_name 
+    END AS top_supplier,
+    co.o_orderkey,
+    co.o_totalprice,
+    COALESCE(co.total_quantity, 0) AS total_quantity,
+    COUNT(DISTINCT l.l_partkey) AS distinct_parts
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    RankedSuppliers rs ON co.o_orderkey IN (
+        SELECT 
+            l.l_orderkey 
+        FROM 
+            lineitem l 
+        WHERE 
+            l.l_discount > 0.1
+        AND 
+            l.l_returnflag IS NULL
+    )
+LEFT JOIN 
+    lineitem l ON co.o_orderkey = l.l_orderkey
+GROUP BY 
+    co.c_custkey, co.c_name, rs.s_name, co.o_orderkey, co.o_totalprice, rs.rn
+HAVING 
+    co.o_totalprice > 5000
+ORDER BY 
+    co.o_totalprice DESC, co.c_name;

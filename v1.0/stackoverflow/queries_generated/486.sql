@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate, 
+        p.ViewCount, 
+        p.AnswerCount, 
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+), UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownVotes,
+        COUNT(c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id
+), PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    ua.DisplayName,
+    ua.TotalUpVotes,
+    ua.TotalDownVotes,
+    ua.TotalComments,
+    COALESCE(pht.CloseReopenCount, 0) AS CloseReopenCount,
+    pht.LastEditDate,
+    CASE 
+        WHEN rp.ViewCount > 1000 THEN 'Popular' 
+        WHEN rp.ViewCount > 100 THEN 'Moderate' 
+        ELSE 'Less Active' 
+    END AS ActivityLevel,
+    CASE 
+        WHEN rp.AnswerCount > 0 THEN 'Answered' 
+        ELSE 'Unanswered' 
+    END AS AnswerStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    Users ua ON rp.OwnerUserId = ua.Id
+LEFT JOIN 
+    PostHistorySummary pht ON rp.PostId = pht.PostId
+WHERE 
+    rp.PostRank = 1
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

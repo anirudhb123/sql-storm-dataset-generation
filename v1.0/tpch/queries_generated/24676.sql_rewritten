@@ -1,0 +1,75 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_retailprice,
+        p.p_size,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 'UNKNOWN' 
+            ELSE CONCAT('Price: ', CAST(p.p_retailprice AS VARCHAR), ' Size: ', p.p_size)
+        END AS part_info
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 10 AND 20 
+        OR (p.p_size IS NULL AND EXISTS (SELECT 1 FROM supplier s WHERE s.s_acctbal > 1000))
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail
+    FROM 
+        partsupp ps
+    JOIN 
+        RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+    WHERE 
+        rs.rn <= 5 
+    GROUP BY 
+        ps.ps_partkey
+),
+OrdersWithLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        l.l_partkey,
+        l.l_extendedprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS line_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND l.l_shipdate IS NOT NULL
+)
+SELECT 
+    p.p_partkey,
+    p.part_info,
+    COALESCE(sa.total_avail, 0) AS available_qty,
+    SUM(oli.l_extendedprice) AS total_sales,
+    MAX(oli.o_orderdate) AS last_order_date
+FROM 
+    FilteredParts p
+LEFT JOIN 
+    SupplierAvailability sa ON p.p_partkey = sa.ps_partkey
+LEFT JOIN 
+    OrdersWithLineItems oli ON p.p_partkey = oli.l_partkey
+WHERE 
+    (p.p_size IS NOT NULL AND p.p_size % 2 = 0) 
+    OR (p.p_retailprice IS NOT NULL AND p.p_retailprice < 50.00)
+GROUP BY 
+    p.p_partkey, p.part_info, sa.total_avail
+HAVING 
+    COUNT(oli.o_orderkey) > 0 
+    AND (MAX(oli.o_orderdate) >= DATEADD(DAY, -30, cast('1998-10-01' as date)) OR (MAX(oli.o_orderdate) IS NULL AND EXISTS (SELECT 1 FROM nation n WHERE n.n_nationkey = 1)))
+ORDER BY 
+    total_sales DESC, available_qty ASC
+OPTION (RECOMPILE);

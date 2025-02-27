@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswer,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) OVER (PARTITION BY p.Id) AS UniqueVoterCount,
+        MAX(b.Class) OVER (PARTITION BY p.OwnerUserId) AS HighestBadgeClass
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+AggregatedPostData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.RecentPostRank,
+        rp.CommentCount,
+        rp.UniqueVoterCount,
+        rh.TagName,
+        CASE 
+            WHEN rp.HighestBadgeClass IS NULL THEN 'No Badge'
+            ELSE CASE 
+                WHEN rp.HighestBadgeClass = 1 THEN 'Gold'
+                WHEN rp.HighestBadgeClass = 2 THEN 'Silver'
+                ELSE 'Bronze'
+            END
+        END AS HighestBadge
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Tags t ON t.Id = (SELECT MIN(Id) FROM Tags WHERE TagName = ANY(string_to_array(rp.Title, ' ')))
+    WHERE 
+        rp.UniqueVoterCount > 0
+)
+SELECT 
+    apd.PostId,
+    apd.Title,
+    apd.CreationDate,
+    apd.ViewCount,
+    apd.Score,
+    apd.CommentCount,
+    apd.UniqueVoterCount,
+    apd.HighestBadge,
+    (SELECT STRING_AGG(DISTINCT COALESCE(ct.Name, 'Unknown'), ', ') 
+     FROM PostHistory ph 
+     LEFT JOIN PostHistoryTypes pht ON pht.Id = ph.PostHistoryTypeId 
+     LEFT JOIN CloseReasonTypes crt ON crt.Id = (CASE WHEN pht.Name = 'Post Closed' THEN ph.Comment END)
+     WHERE ph.PostId = apd.PostId) AS CloseReasons
+FROM 
+    AggregatedPostData apd
+WHERE 
+    apd.RecentPostRank <= 2
+    AND apd.ViewCount > (SELECT AVG(ViewCount) FROM RankedPosts)
+ORDER BY 
+    apd.Score DESC, apd.CommentCount DESC
+LIMIT 100;

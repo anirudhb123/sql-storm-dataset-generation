@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '2 years'
+        AND p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount
+),
+
+TopPosts AS (
+    SELECT 
+        rp.*,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.Rank <= 10
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.CommentCount,
+    tp.ViewCount,
+    tp.AnswerCount,
+    tp.OwnerDisplayName,
+    tp.OwnerReputation,
+    ph.CreateDate,
+    pht.Name AS PostHistoryType,
+    COUNT(DISTINCT ph.Id) AS HistoryCount
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistory ph ON tp.PostId = ph.PostId
+JOIN 
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, tp.Score, 
+    tp.CommentCount, tp.ViewCount, tp.AnswerCount, 
+    tp.OwnerDisplayName, tp.OwnerReputation, 
+    ph.CreateDate, pht.Name
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

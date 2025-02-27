@@ -1,0 +1,76 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        0 AS Level
+    FROM
+        Posts p
+    WHERE
+        p.ParentId IS NULL -- Start with top-level posts
+
+    UNION ALL
+
+    SELECT
+        p.Id,
+        p.ParentId,
+        p.Title,
+        ph.Level + 1
+    FROM
+        Posts p
+    INNER JOIN PostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.VoteCount, 0)) AS TotalVotes,
+        AVG(u.Reputation) AS AvgReputation
+    FROM
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT
+            PostId,
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS VoteCount -- Count only upvotes
+        FROM
+            Votes
+        GROUP BY
+            PostId
+    ) v ON p.Id = v.PostId
+    GROUP BY
+        u.Id
+),
+RecentActivity AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS rn
+    FROM
+        Posts p
+    WHERE
+        p.LastActivityDate IS NOT NULL
+)
+SELECT
+    u.UserId,
+    u.DisplayName,
+    COALESCE(up.TotalPosts, 0) AS TotalPostCount,
+    COALESCE(up.TotalVotes, 0) AS TotalVoteCount,
+    COALESCE(up.AvgReputation, 0) AS AverageReputation,
+    ph.PostId AS ChildPostId,
+    ph.Title AS ChildPostTitle,
+    ph.Level AS PostLevel,
+    ra.PostId AS RecentActivityPostId,
+    ra.Title AS RecentActivityTitle,
+    ra.LastActivityDate
+FROM
+    UserStats up
+FULL OUTER JOIN PostHierarchy ph ON up.UserId = ph.PostId -- This will connect users with post hierarchy
+LEFT JOIN RecentActivity ra ON up.UserId = ra.PostId AND ra.rn = 1 -- Get most recent activity
+WHERE
+    (up.TotalPosts > 5 OR ph.Level > 0) -- Filter for active users or posts with children
+ORDER BY
+    u.DisplayName ASC,
+    ph.Level ASC;

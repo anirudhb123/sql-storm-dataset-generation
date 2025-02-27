@@ -1,0 +1,93 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        1 AS Level,
+        CAST(p.Title AS VARCHAR) AS FullPath
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        r.Level + 1,
+        CAST(CONCAT(r.FullPath, ' -> ', p.Title) AS VARCHAR) AS FullPath
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursiveCTE r ON p.ParentId = r.PostId
+),
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN pht.Name = 'Post Closed' THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN pht.Name = 'Post Reopened' THEN ph.CreationDate END) AS LastReopenedDate
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    u.DisplayName AS Owner,
+    COALESCE(pv.VoteCount, 0) AS TotalVotes,
+    COALESCE(pv.UpVotes, 0) AS UpVotes,
+    COALESCE(pv.DownVotes, 0) AS DownVotes,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    r.FullPath AS Hierarchy,
+    COALESCE(phd.LastClosedDate, NULL) AS LastClosedDate,
+    COALESCE(phd.LastReopenedDate, NULL) AS LastReopenedDate
+FROM 
+    Posts p
+LEFT JOIN 
+    PostVotes pv ON p.Id = pv.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostHistoryDetails phd ON p.Id = phd.PostId
+LEFT JOIN 
+    RecursiveCTE r ON p.Id = r.PostId
+WHERE 
+    p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+ORDER BY 
+    pv.VoteCount DESC, 
+    p.Score DESC;

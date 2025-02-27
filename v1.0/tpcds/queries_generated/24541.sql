@@ -1,0 +1,62 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) as rank_sales,
+        SUM(ws_quantity) OVER (PARTITION BY ws_item_sk) AS total_quantity_sold
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 1000 AND 2000
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        AVG(ws_sales_price) AS avg_spent,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ws_sales_price) AS median_spent
+    FROM 
+        customer c
+    INNER JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+address_count AS (
+    SELECT 
+        ca_address_sk,
+        COUNT(c.c_customer_sk) AS customer_count 
+    FROM 
+        customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        ca_address_sk
+    HAVING 
+        COUNT(c.c_customer_sk) > 1
+)
+SELECT 
+    c.c_customer_id,
+    cs.order_count,
+    COALESCE(rs.rank_sales, 0) AS sales_rank,
+    ac.customer_count,
+    CASE 
+        WHEN cs.avg_spent IS NULL THEN 'No Purchases'
+        ELSE CASE 
+            WHEN cs.avg_spent < 20 THEN 'Low'
+            WHEN cs.avg_spent BETWEEN 20 AND 50 THEN 'Medium'
+            ELSE 'High'
+        END 
+    END AS spending_category,
+    COUNT(DISTINCT rs.ws_order_number) AS unique_orders_in_category
+FROM 
+    customer c 
+LEFT JOIN customer_stats cs ON c.c_customer_sk = cs.c_customer_sk
+LEFT JOIN ranked_sales rs ON c.c_customer_sk = rs.ws_item_sk
+LEFT JOIN address_count ac ON c.c_current_addr_sk = ac.ca_address_sk
+GROUP BY 
+    c.c_customer_id, cs.order_count, rs.rank_sales, ac.customer_count
+ORDER BY 
+    unique_orders_in_category DESC,
+    spending_category ASC
+LIMIT 100;

@@ -1,0 +1,87 @@
+WITH NationalSales AS (
+    SELECT 
+        n.n_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        n.n_name
+),
+SalesRanked AS (
+    SELECT 
+        n.n_name, 
+        total_sales,
+        order_count,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        NationalSales n
+),
+RegionalSales AS (
+    SELECT 
+        r.r_name, 
+        SUM(s.total_sales) AS regional_sales
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        SalesRanked s ON n.n_name = s.n_name
+    GROUP BY 
+        r.r_name
+),
+FinalSales AS (
+    SELECT 
+        r.r_name,
+        COALESCE(rs.regional_sales, 0) AS regional_sales, 
+        COALESCE(n.total_sales, 0) AS national_sales,
+        s.sales_rank
+    FROM 
+        region r
+    LEFT JOIN 
+        RegionalSales rs ON r.r_name = rs.r_name
+    LEFT JOIN 
+        SalesRanked s ON s.n_name = (
+            SELECT 
+                n.n_name 
+            FROM 
+                nation n 
+            WHERE 
+                n.n_regionkey = r.r_regionkey 
+            ORDER BY 
+                s.sales_rank
+            LIMIT 1
+        )
+)
+SELECT 
+    r.r_name, 
+    r.regional_sales, 
+    r.national_sales,
+    CASE 
+        WHEN r.regional_sales > r.national_sales THEN 'REGION DOMINATES'
+        WHEN r.regional_sales < r.national_sales THEN 'NATIONAL DOMINATES'
+        ELSE 'EQUAL SALES'
+    END AS dominance,
+    CASE 
+        WHEN r.sales_rank IS NULL THEN 'RANK NOT AVAILABLE'
+        ELSE CAST(r.sales_rank AS VARCHAR)
+    END AS sales_rank_text
+FROM 
+    FinalSales r
+WHERE 
+    r.regional_sales > 0
+ORDER BY 
+    r.regional_sales DESC, 
+    r.national_sales ASC
+LIMIT 10;

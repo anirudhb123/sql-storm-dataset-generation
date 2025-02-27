@@ -1,0 +1,43 @@
+
+WITH RECURSIVE ranked_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+active_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           RANK() OVER (ORDER BY o.o_orderdate DESC) AS recent_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' AND o.o_totalprice > 100.00
+),
+part_supplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_suppkey, ps.ps_availqty,
+           CASE WHEN ps.ps_availqty IS NULL THEN 0 ELSE ps.ps_availqty END AS adjusted_availqty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+customer_nation AS (
+    SELECT c.c_custkey, c.c_name, n.n_name,
+           COUNT(o.o_orderkey) AS total_orders
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, n.n_name
+)
+SELECT DISTINCT r.r_name, 
+       COUNT(DISTINCT cs.c_custkey) AS total_customers,
+       SUM(COALESCE(ps.adjusted_availqty, 0)) AS total_avail_qty,
+       SUM(CASE WHEN s.rank = 1 THEN s.s_acctbal ELSE 0 END) AS top_supplier_acctbal,
+       MAX(a.o_totalprice) AS max_order_price,
+       STRING_AGG(DISTINCT CONCAT('Order #', a.o_orderkey, ' of $', a.o_totalprice), '; ') AS order_summary
+FROM region r
+LEFT JOIN ranked_suppliers s ON r.r_regionkey = s.s_suppkey
+LEFT JOIN customer_nation cs ON r.r_regionkey = cs.c_nationkey
+LEFT JOIN active_orders a ON a.o_custkey = cs.c_custkey
+LEFT JOIN part_supplier ps ON ps.ps_suppkey = s.s_suppkey
+WHERE COALESCE(cs.total_orders, 0) > 0 AND r.r_name IS NOT NULL
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT cs.c_custkey) > 5
+ORDER BY total_customers DESC, r.r_name ASC
+LIMIT 10;

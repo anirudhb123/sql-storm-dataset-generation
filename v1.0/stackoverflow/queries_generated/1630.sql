@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(p.Id) > 5
+),
+HighScorePosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        u.DisplayName AS UserDisplayName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.Score > (SELECT AVG(Score) FROM Posts) 
+        AND rp.PostRank = 1
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    u.DisplayName AS PostOwner,
+    c.CommentCount,
+    COALESCE(ph.Reason, 'No Reason') AS CloseReason
+FROM 
+    HighScorePosts p
+LEFT JOIN 
+    (SELECT 
+         PostId, COUNT(*) AS CommentCount 
+     FROM 
+         Comments 
+     GROUP BY 
+         PostId) c ON p.Id = c.PostId
+LEFT JOIN 
+    (SELECT 
+         ph.PostId, STRING_AGG(cr.Name, ', ') AS Reason
+     FROM 
+         PostHistory ph
+     JOIN 
+         CloseReasonTypes cr ON ph.Comment::int = cr.Id
+     WHERE 
+         ph.PostHistoryTypeId IN (10,11)
+     GROUP BY 
+         ph.PostId) ph ON p.Id = ph.PostId
+WHERE 
+    EXISTS (SELECT 1 FROM MostActiveUsers mau WHERE mau.UserId = p.OwnerUserId)
+ORDER BY 
+    p.Score DESC, p.CreationDate DESC;

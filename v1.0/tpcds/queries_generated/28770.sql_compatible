@@ -1,0 +1,58 @@
+
+WITH Customer_Addresses AS (
+    SELECT 
+        ca.ca_address_id,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        REPLACE(REPLACE(ca.ca_zip, '-', ''), ' ', '') AS cleaned_zip
+    FROM 
+        customer_address ca
+),
+Customer_Demographics AS (
+    SELECT 
+        cd.cd_gender,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Other'
+        END AS marital_status,
+        cd.cd_education_status
+    FROM 
+        customer_demographics cd
+),
+Combined_Data AS (
+    SELECT 
+        ca.full_address,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.marital_status,
+        cd.cd_education_status,
+        COUNT(c.c_customer_sk) AS customer_count
+    FROM 
+        Customer_Addresses ca
+    JOIN 
+        customer c ON ca.ca_address_id = c.c_customer_id
+    JOIN 
+        Customer_Demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        ca.full_address, ca.ca_city, ca.ca_state, cd.cd_gender, cd.marital_status, cd.cd_education_status
+)
+SELECT 
+    full_address,
+    ca_city,
+    ca_state,
+    cd_gender,
+    marital_status,
+    cd_education_status,
+    customer_count,
+    LENGTH(full_address) AS address_length,
+    UPPER(SUBSTRING(full_address FROM 1 FOR 1)) AS capitalized_address_first_letter
+FROM 
+    Combined_Data
+WHERE 
+    customer_count > 5
+ORDER BY 
+    address_length DESC, customer_count ASC
+FETCH FIRST 100 ROWS ONLY;

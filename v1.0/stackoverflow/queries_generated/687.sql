@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.AnswerCount,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS Upvotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS Downvotes
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    up.PostId,
+    up.Title,
+    up.CreationDate,
+    COALESCE(pc.CommentCount, 0) AS CommentCount,
+    up.Upvotes,
+    up.Downvotes,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    CASE 
+        WHEN up.PostRank = 1 THEN 'Most recent post'
+        ELSE 'Other post'
+    END AS PostCategory
+FROM 
+    Users u
+JOIN 
+    RankedPosts up ON u.Id = up.OwnerUserId
+LEFT JOIN 
+    PostComments pc ON up.PostId = pc.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    (up.AnswerCount > 0 OR up.Upvotes > 10)
+    AND (u.Reputation >= 1000 OR ub.GoldBadges > 0)
+ORDER BY 
+    u.Reputation DESC, 
+    up.ViewCount DESC
+LIMIT 50;
+

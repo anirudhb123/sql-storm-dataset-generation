@@ -1,0 +1,54 @@
+-- Performance benchmarking query for Stack Overflow schema
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    LEFT JOIN 
+        Badges B ON B.UserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        TotalUpVotes,
+        TotalDownVotes,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS PostRank,
+        RANK() OVER (ORDER BY TotalUpVotes DESC) AS UpVoteRank
+    FROM 
+        UserActivity
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalComments,
+    TotalBadges,
+    TotalUpVotes,
+    TotalDownVotes,
+    PostRank,
+    UpVoteRank
+FROM 
+    TopUsers
+WHERE 
+    PostRank <= 10 OR UpVoteRank <= 10
+ORDER BY 
+    PostRank, UpVoteRank;

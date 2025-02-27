@@ -1,0 +1,77 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+    GROUP BY
+        ws.web_site_sk
+),
+high_profit_sites AS (
+    SELECT
+        rs.web_site_sk,
+        rs.total_net_profit
+    FROM
+        ranked_sales rs
+    WHERE
+        rs.profit_rank <= 5
+),
+customer_returns AS (
+    SELECT
+        cr.cr_returning_customer_sk,
+        COUNT(*) AS return_count,
+        SUM(cr.cr_return_amount) AS total_return_amount
+    FROM
+        catalog_returns cr
+    GROUP BY
+        cr.cr_returning_customer_sk
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        IFNULL(hd.hd_income_band_sk, 0) AS income_band
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+)
+SELECT
+    ci.c_customer_sk,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.income_band,
+    COALESCE(cr.return_count, 0) AS return_count,
+    COALESCE(cr.total_return_amount, 0.00) AS total_return_amount,
+    hp.total_net_profit
+FROM
+    customer_info ci
+LEFT JOIN
+    customer_returns cr ON ci.c_customer_sk = cr.cr_returning_customer_sk
+JOIN
+    high_profit_sites hp ON hp.web_site_sk IN (
+        SELECT
+            DISTINCT ws.ws_web_site_sk
+        FROM
+            web_sales ws
+        WHERE
+            ws.ws_net_profit > 1000
+    )
+WHERE
+    (ci.cd_gender = 'M' OR ci.cd_gender = 'F') 
+    AND (ci.cd_marital_status IS NOT NULL OR ci.income_band <> 0)
+ORDER BY
+    total_return_amount DESC, ci.c_last_name ASC;

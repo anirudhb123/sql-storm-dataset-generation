@@ -1,0 +1,46 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title, 
+        at.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY at.production_year) AS title_count
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+TopTitles AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedTitles 
+    WHERE 
+        title_rank <= 10
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id, 
+        c.person_id, 
+        p.name AS actor_name, 
+        r.role AS role_name
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+)
+SELECT 
+    tt.title, 
+    tt.production_year, 
+    COALESCE(GROUP_CONCAT(cd.actor_name ORDER BY cd.actor_name), 'No Cast') AS actors, 
+    tt.title_count
+FROM 
+    TopTitles tt
+LEFT JOIN 
+    CastDetails cd ON tt.title = cd.movie_id
+GROUP BY 
+    tt.title, tt.production_year, tt.title_count
+ORDER BY 
+    tt.production_year DESC, tt.title;

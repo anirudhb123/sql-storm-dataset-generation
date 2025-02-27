@@ -1,0 +1,80 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(a.AcceptedAnswerId, 0) AS AcceptedAnswerId
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount 
+         FROM Comments 
+         GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT PostId, MAX(AcceptedAnswerId) AS AcceptedAnswerId 
+         FROM Posts 
+         WHERE PostTypeId = 1 
+         GROUP BY PostId) a ON p.Id = a.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(Trim(Both '<>' FROM Tags), '> <')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        TagName
+),
+
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Body,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.AnswerCount,
+    pd.OwnerDisplayName,
+    pd.OwnerReputation,
+    pd.CommentCount,
+    COALESCE(tb.TagName, 'No Tags') AS TagName,
+    COALESCE(ts.TagCount, 0) AS TagCount,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    (SELECT DISTINCT TagName 
+     FROM TagStatistics) tb ON true  -- Cross join to get all tags
+LEFT JOIN 
+    TagStatistics ts ON tb.TagName = ts.TagName
+LEFT JOIN 
+    UserBadges ub ON pd.OwnerUserId = ub.UserId
+ORDER BY 
+    pd.ViewCount DESC, pd.CreationDate ASC
+LIMIT 100;

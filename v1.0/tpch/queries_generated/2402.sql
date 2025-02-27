@@ -1,0 +1,69 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+), CustomerSpend AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spend
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name
+    FROM 
+        CustomerSpend c
+    WHERE 
+        c.total_spend > (SELECT AVG(total_spend) FROM CustomerSpend) 
+), SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_supply,
+        MIN(ps.ps_supplycost) AS min_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    CASE 
+        WHEN sp.total_supply IS NULL THEN 'No Supply'
+        ELSE CONCAT('Available: ', sp.total_supply)
+    END AS availability,
+    CASE 
+        WHEN sp.min_supply_cost IS NULL THEN 'No Cost'
+        ELSE FORMAT(sp.min_supply_cost, 'C')
+    END AS min_cost,
+    COUNT(DISTINCT lo.o_orderkey) AS total_orders,
+    AVG(lo.l_discount) AS average_discount
+FROM 
+    part p
+LEFT JOIN 
+    SupplierParts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    lineitem lo ON p.p_partkey = lo.l_partkey
+LEFT JOIN 
+    RankedOrders ro ON lo.l_orderkey = ro.o_orderkey AND ro.order_rank = 1
+LEFT JOIN 
+    HighValueCustomers hvc ON lo.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = hvc.c_custkey)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, sp.total_supply, sp.min_supply_cost
+HAVING 
+    COUNT(DISTINCT lo.o_orderkey) > 0
+ORDER BY 
+    p.p_retailprice DESC, total_orders DESC;

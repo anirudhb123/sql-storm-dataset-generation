@@ -1,0 +1,55 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+), 
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    COALESCE(su.s_name, 'Unknown Supplier') AS supplier_name,
+    COALESCE(cs.order_count, 0) AS orders_placed,
+    COALESCE(cs.total_spent, 0.00) AS total_spent,
+    ro.o_orderkey,
+    ro.o_totalprice,
+    COUNT(DISTINCT li.l_orderkey) OVER (PARTITION BY li.l_returnflag) AS total_returned
+FROM 
+    RankedOrders ro
+FULL OUTER JOIN 
+    CustomerSummary cs ON ro.o_orderkey = cs.order_count
+LEFT JOIN 
+    SupplierDetails su ON ro.o_orderkey = su.s_suppkey
+LEFT JOIN 
+    lineitem li ON ro.o_orderkey = li.l_orderkey
+WHERE 
+    su.total_supplycost IS NOT NULL 
+    AND (cs.total_spent > 0 OR cs.order_count IS NULL)
+ORDER BY 
+    ro.o_totalprice DESC, supplier_name;

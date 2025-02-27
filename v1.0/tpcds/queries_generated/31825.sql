@@ -1,0 +1,75 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_net_profit,
+        1 AS level
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk
+    UNION ALL
+    SELECT 
+        s.s_store_sk,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        sh.level + 1
+    FROM 
+        store s
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    JOIN 
+        sales_hierarchy sh ON sh.ss_store_sk = s.s_store_sk
+    WHERE 
+        sh.level < 5  -- limit to 5 levels of recursion
+    GROUP BY 
+        s.s_store_sk, sh.level
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        MAX(CASE WHEN coalesce(cd.cd_gender, 'U') = 'M' THEN 1 ELSE 0 END) AS male_count,
+        MAX(CASE WHEN coalesce(cd.cd_gender, 'U') = 'F' THEN 1 ELSE 0 END) AS female_count,
+        COUNT(DISTINCT ss.ss_customer_sk) AS total_sales_customers
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+sales_analysis AS (
+    SELECT 
+        s.s_store_id,
+        SUM(ss.ss_net_profit) AS total_sales_net_profit,
+        CASE 
+            WHEN SUM(ss.ss_net_profit) > 10000 THEN 'High Profit'
+            WHEN SUM(ss.ss_net_profit) <= 10000 AND SUM(ss.ss_net_profit) > 5000 THEN 'Medium Profit'
+            ELSE 'Low Profit' 
+        END AS profit_category
+    FROM 
+        store s
+    LEFT JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.s_store_id
+)
+SELECT 
+    sh.ss_store_sk,
+    sh.total_net_profit,
+    ci.c_first_name,
+    ci.c_last_name,
+    sa.total_sales_net_profit,
+    sa.profit_category
+FROM 
+    sales_hierarchy sh
+JOIN 
+    customer_info ci ON ci.total_sales_customers > 0
+LEFT JOIN 
+    sales_analysis sa ON sa.s_store_id = sh.ss_store_sk
+ORDER BY 
+    sh.total_net_profit DESC
+LIMIT 100;

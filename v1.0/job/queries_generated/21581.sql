@@ -1,0 +1,57 @@
+WITH RECURSIVE RelatedMovies AS (
+    SELECT ml.movie_id, ml.linked_movie_id, 1 AS depth
+    FROM movie_link ml
+    WHERE ml.link_type_id = (SELECT id FROM link_type WHERE link = 'related')
+    UNION ALL
+    SELECT ml.movie_id, ml.linked_movie_id, rm.depth + 1
+    FROM movie_link ml
+    JOIN RelatedMovies rm ON ml.movie_id = rm.linked_movie_id
+    WHERE ml.link_type_id = (SELECT id FROM link_type WHERE link = 'related') AND rm.depth < 3
+),
+TopKeywords AS (
+    SELECT mk.movie_id, k.keyword, COUNT(*) AS keyword_count
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id, k.keyword
+    HAVING COUNT(*) > 2
+),
+MovieStats AS (
+    SELECT title.title, t.production_year, COUNT(ci.id) AS cast_count, ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM aka_title t
+    LEFT JOIN cast_info ci ON t.movie_id = ci.movie_id
+    LEFT JOIN TopKeywords tk ON t.movie_id = tk.movie_id
+    LEFT JOIN title ON t.movie_id = title.id
+    WHERE t.production_year IS NOT NULL
+    GROUP BY title.title, t.production_year
+)
+SELECT 
+    ms.title,
+    ms.production_year,
+    ms.cast_count,
+    COALESCE(NULLIF(array_length(ms.keywords, 1), 0), ARRAY['No Keywords']) AS keywords,
+    COUNT(DISTINCT rc.linked_movie_id) AS related_movies_count,
+    SUM(CASE 
+        WHEN ms.cast_count = 0 THEN 0 
+        ELSE (CASE 
+            WHEN k.keyword ILIKE '%thriller%' THEN 1 
+            ELSE 0 
+        END)
+    END) AS thriller_cast_count,
+    ROW_NUMBER() OVER (PARTITION BY ms.production_year ORDER BY ms.cast_count DESC) AS rank_per_year 
+FROM MovieStats ms
+LEFT JOIN RelatedMovies rc ON ms.movie_id = rc.movie_id
+LEFT JOIN movie_companies mc ON mc.movie_id = ms.movie_id
+LEFT JOIN company_name cn ON mc.company_id = cn.id
+LEFT JOIN name n ON n.id = mc.company_id
+WHERE n.gender IS NOT NULL
+GROUP BY ms.title, ms.production_year, ms.cast_count
+ORDER BY ms.production_year DESC, ms.cast_count DESC
+LIMIT 10;
+
+This query does the following:
+
+1. Creates a recursive CTE, `RelatedMovies`, to find related movies up to 2 levels deep.
+2. Another CTE, `TopKeywords`, finds movies with more than two associated keywords.
+3. The third CTE, `MovieStats`, aggregates movie data including a count of cast and collects keywords.
+4. The final `SELECT` pulls from `MovieStats`, counts how many related movies there are, and calculates counts of casts in `thriller` movies, while handling potential NULL values for keywords.
+5. It uses window functions to rank movies by cast count per production year and limits the output to the top 10 movies.

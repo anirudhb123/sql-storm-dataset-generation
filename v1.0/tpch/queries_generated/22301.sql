@@ -1,0 +1,41 @@
+WITH RECURSIVE regional_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, n.n_regionkey, s.s_acctbal
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, n.n_regionkey, s.s_acctbal
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN regional_suppliers rs ON n.n_regionkey = rs.n_regionkey
+    WHERE s.s_acctbal > 0
+),
+total_orders AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_price
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+part_value AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT cs.c_custkey) AS customer_count,
+    SUM(od.total_price) AS total_order_value,
+    MAX(l.l_discount) AS max_discount,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ' (', CAST(p.p_partkey AS VARCHAR), ')'), ', ') AS part_names,
+    COALESCE(NULLIF(MAX(l.l_returnflag), ''), 'N') AS return_flag_status
+FROM nation n
+LEFT JOIN customer cs ON cs.c_nationkey = n.n_nationkey
+LEFT JOIN total_orders od ON od.o_custkey = cs.c_custkey
+LEFT JOIN lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+LEFT JOIN part_value p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT rs.s_suppkey FROM regional_suppliers rs WHERE rs.s_acctbal > 0))
+WHERE n.n_name IS NOT NULL
+AND (od.total_price > 1000 OR p.total_value IS NOT NULL)
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT CASE WHEN cs.c_acctbal IS NULL THEN NULL ELSE cs.c_custkey END) > 5
+ORDER BY n.n_name DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

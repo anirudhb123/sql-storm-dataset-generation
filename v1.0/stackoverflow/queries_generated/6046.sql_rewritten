@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.Score, 0) AS Score,
+        p.ViewCount,
+        p.AnswerCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY COALESCE(p.Score, 0) DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON p.Id = V.PostId AND V.VoteTypeId IN (2, 3) 
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, U.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.OwnerDisplayName,
+        rp.VoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.AnswerCount,
+    tp.OwnerDisplayName,
+    COALESCE(B.BadgeCount, 0) AS UserBadgeCount
+FROM 
+    TopPosts tp
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount 
+    FROM 
+        Badges 
+    GROUP BY 
+        UserId
+) B ON tp.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = B.UserId)
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

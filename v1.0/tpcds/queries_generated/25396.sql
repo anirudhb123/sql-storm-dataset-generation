@@ -1,0 +1,59 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_city ORDER BY c.c_last_name, c.c_first_name) AS name_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        ca.ca_state = 'CA'
+),
+FrequentCustomers AS (
+    SELECT 
+        rc.full_name,
+        COUNT(ss.ss_customer_sk) AS total_purchases,
+        SUM(ss.ss_quantity) AS total_items_purchased
+    FROM 
+        RankedCustomers rc
+    JOIN 
+        store_sales ss ON rc.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        rc.full_name
+    HAVING 
+        total_purchases > 5
+),
+HighValueCustomers AS (
+    SELECT 
+        fc.full_name,
+        fc.total_purchases,
+        fc.total_items_purchased,
+        ROUND(SUM(ss.ss_sales_price) / fc.total_purchases, 2) AS avg_spent_per_purchase
+    FROM 
+        FrequentCustomers fc
+    JOIN 
+        store_sales ss ON fc.full_name = CONCAT(ss.c_first_name, ' ', ss.c_last_name)
+    GROUP BY 
+        fc.full_name, fc.total_purchases, fc.total_items_purchased
+    HAVING 
+        avg_spent_per_purchase > 100
+)
+SELECT 
+    hvc.full_name,
+    hvc.total_purchases,
+    hvc.total_items_purchased,
+    hvc.avg_spent_per_purchase,
+    LEFT(d.d_day_name, 3) AS purchase_day
+FROM 
+    HighValueCustomers hvc
+JOIN 
+    date_dim d ON hvc.total_purchases = d.d_date_sk
+WHERE 
+    d.d_year = 2022
+ORDER BY 
+    hvc.avg_spent_per_purchase DESC;

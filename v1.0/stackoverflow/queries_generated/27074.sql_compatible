@@ -1,0 +1,71 @@
+
+WITH RankedTags AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (ORDER BY COUNT(Posts.Id) DESC) AS TagRank
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY (string_to_array(Posts.Tags, ','))
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Tags.TagName
+), 
+TopTags AS (
+    SELECT * FROM RankedTags WHERE TagRank <= 10
+),
+TagPostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        t.TagName,
+        COALESCE(upVotes.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(downVotes.DownVoteCount, 0) AS DownVoteCount
+    FROM 
+        Posts p
+    JOIN 
+        TopTags tt ON tt.TagName = ANY (string_to_array(p.Tags, ','))
+    LEFT JOIN (
+        SELECT 
+            PostId, COUNT(*) AS UpVoteCount 
+        FROM 
+            Votes 
+        WHERE 
+            VoteTypeId = 2 
+        GROUP BY 
+            PostId
+    ) AS upVotes ON p.Id = upVotes.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId, COUNT(*) AS DownVoteCount 
+        FROM 
+            Votes 
+        WHERE 
+            VoteTypeId = 3 
+        GROUP BY 
+            PostId
+    ) AS downVotes ON p.Id = downVotes.PostId
+)
+SELECT 
+    tt.TagName,
+    COUNT(td.PostId) AS RelatedPostCount,
+    SUM(td.UpVoteCount) AS TotalUpVotes,
+    SUM(td.DownVoteCount) AS TotalDownVotes,
+    AVG(td.ViewCount) AS AvgViewCount,
+    ARRAY_AGG(DISTINCT td.Title ORDER BY td.ViewCount DESC) AS TopPosts
+FROM 
+    TopTags tt
+JOIN 
+    TagPostDetails td ON tt.TagName = td.TagName
+GROUP BY 
+    tt.TagName
+ORDER BY 
+    TotalUpVotes DESC;

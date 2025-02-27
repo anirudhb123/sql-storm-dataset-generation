@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt1.id AS movie_id,
+        mt1.title AS movie_title,
+        1 AS depth
+    FROM 
+        aka_title mt1
+    WHERE 
+        mt1.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mt2.id,
+        (mh.movie_title || ' -> ' || mt2.title) AS movie_title,
+        mh.depth + 1
+    FROM 
+        aka_title mt2
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = mt2.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    mh.movie_title,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    AVG(CASE WHEN ci.note IS NULL THEN 0 ELSE 1 END) AS has_note_percentage,
+    STRING_AGG(DISTINCT CONCAT(a.name, ' (', a.md5sum, ')'), ', ') AS actors_names,
+    MAX(mi.info) FILTER (WHERE it.info = 'Genre') AS primary_genre
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name a ON a.person_id = ci.person_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id
+LEFT JOIN 
+    info_type it ON it.id = mi.info_type_id
+WHERE 
+    mh.depth <= 3
+GROUP BY 
+    mh.movie_title
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY 
+    actor_count DESC, 
+    primary_genre NULLS LAST;
+
+This SQL query achieves several objectives:
+- It uses a recursive Common Table Expression (CTE) to create a hierarchy of movies that have been produced since 2000.
+- It counts the number of distinct actors associated with movies in the hierarchy.
+- It calculates the percentage of actors with notes provided (using a conditional aggregation).
+- It collects names of the actors along with their MD5 sums using string aggregation.
+- It retrieves the maximum genre information by filtering on a specific info type.
+- It filters out movies with no associated actors and orders the results first by the count of actors and then by genre.

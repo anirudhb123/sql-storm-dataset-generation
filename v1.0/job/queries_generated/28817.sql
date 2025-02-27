@@ -1,0 +1,50 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(m.production_year) AS avg_production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'summary')
+        AND cn.country_code = 'USA' 
+        AND t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, t.title
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        CAST_COUNT,
+        avg_production_year,
+        keywords,
+        ROW_NUMBER() OVER (ORDER BY cast_count DESC, avg_production_year DESC) AS rank
+    FROM 
+        RankedMovies
+)
+
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.cast_count,
+    tm.avg_production_year,
+    tm.keywords
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank <= 10;

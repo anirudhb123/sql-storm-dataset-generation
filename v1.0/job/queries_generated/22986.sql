@@ -1,0 +1,64 @@
+WITH recursive movie_actors AS (
+    SELECT
+        c.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER(PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+),
+seasonal_movies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        t.season_nr,
+        COALESCE(t.episode_nr, 0) AS episode_nr,
+        CASE 
+            WHEN t.season_nr IS NOT NULL AND t.episode_nr IS NOT NULL THEN 'Season ' || t.season_nr || ', Episode ' || t.episode_nr
+            ELSE 'Not a season or episode'
+        END AS season_episode_label
+    FROM aka_title t
+    WHERE t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'tv series')
+),
+keyword_aggregation AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS aggregated_keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+company_details AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(c.name, '; ') AS companies_involved
+    FROM movie_companies m
+    JOIN company_name c ON m.company_id = c.id
+    GROUP BY m.movie_id
+),
+rich_cast_info AS (
+    SELECT 
+        ma.movie_id,
+        ma.actor_name,
+        COALESCE(ca.actor_order, 0) AS actor_sequence,
+        COALESCE(ka.aggregated_keywords, 'No keywords') AS keywords,
+        COALESCE(company.companies_involved, 'No companies') AS companies
+    FROM movie_actors ma
+    LEFT JOIN movie_info mi ON ma.movie_id = mi.movie_id
+    LEFT JOIN keyword_aggregation ka ON ma.movie_id = ka.movie_id
+    LEFT JOIN company_details company ON ma.movie_id = company.movie_id
+    LEFT JOIN seasonal_movies sm ON ma.movie_id = sm.title
+    WHERE ma.actor_order <= 5 -- Limiting to top 5 actors per movie
+)
+SELECT 
+    DISTINCT r.movie_id,
+    r.actor_name,
+    r.actor_sequence,
+    r.keywords,
+    r.companies,
+    sm.season_episode_label
+FROM rich_cast_info r
+LEFT JOIN seasonal_movies sm ON r.movie_id = sm.title
+WHERE r.companies IS NOT NULL
+  AND (r.keywords IS NOT NULL OR r.keywords != 'No keywords')
+  AND sm.season_episode_label IS NOT NULL
+ORDER BY r.movie_id, r.actor_sequence;

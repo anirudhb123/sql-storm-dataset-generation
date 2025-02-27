@@ -1,0 +1,31 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CAST(s.s_name AS VARCHAR(255)) AS hierarchy_path
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT ps.ps_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CAST(CONCAT(sh.hierarchy_path, ' -> ', s.s_name) AS VARCHAR(255))
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+
+SELECT n.n_name AS nation_name,
+       COUNT(DISTINCT c.c_custkey) AS cust_count,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       AVG(s.s_acctbal) AS avg_supplier_acctbal,
+       STRING_AGG(DISTINCT sh.hierarchy_path, '; ') AS supplier_hierarchy_paths
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+LEFT JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE o.o_orderstatus = 'O'
+  AND o.o_orderdate >= '1997-01-01'
+  AND o.o_orderdate <= (cast('1998-10-01' as date) - INTERVAL '1' DAY)
+GROUP BY n.n_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+ORDER BY total_revenue DESC;

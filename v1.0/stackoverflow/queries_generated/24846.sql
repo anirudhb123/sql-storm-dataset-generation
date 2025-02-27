@@ -1,0 +1,103 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id as PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) as RankScore,
+        STRING_AGG(tag.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>><<'))::varchar[]) AS tag ON TRUE
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.PostTypeId
+), 
+
+PostVoteCounts AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+), 
+
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+), 
+
+UserReputationSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(b.Class, 0)) AS BadgeCount,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.Reputation
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rpc.UpVotes,
+    rpc.DownVotes,
+    CASE 
+        WHEN rpc.TotalVotes IS NULL THEN 0
+        ELSE rpc.TotalVotes 
+    END AS TotalVotes,
+    pc.CommentCount,
+    rp.TagsList,
+    ur.UserId,
+    ur.Reputation,
+    ur.PostCount,
+    ur.BadgeCount,
+    ur.AvgScore,
+    COUNT(DISTINCT ph.Id) AS PostHistoryCount,
+    MAX(ph.CreationDate) AS LastEdited
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteCounts rpc ON rpc.PostId = rp.PostId
+LEFT JOIN 
+    PostComments pc ON pc.PostId = rp.PostId
+LEFT JOIN 
+    Users u ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    UserReputationSummary ur ON ur.UserId = u.Id
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = rp.PostId AND ph.CreationDate < NOW() AND ph.Comment IS NOT NULL
+WHERE 
+    rp.RankScore <= 10 AND
+    (rp.ViewCount > 100 OR rp.Score > 5) AND
+    EXISTS (
+        SELECT 1
+        FROM Votes v
+        WHERE v.PostId = rp.PostId AND v.CreationDate > (NOW() - INTERVAL '30 days')
+        HAVING COUNT(v.Id) > 3
+    )
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.Score, rpc.UpVotes, rpc.DownVotes, 
+    pc.CommentCount, rp.TagsList, ur.UserId, ur.Reputation, 
+    ur.PostCount, ur.BadgeCount, ur.AvgScore
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

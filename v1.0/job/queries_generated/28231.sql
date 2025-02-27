@@ -1,0 +1,52 @@
+WITH MovieStats AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COALESCE(SUM(CASE WHEN ci.person_role_id = rt.id THEN 1 ELSE 0 END), 0) AS total_cast,
+        MAX(y.production_year) AS latest_year,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        role_type rt ON ci.person_role_id = rt.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    GROUP BY 
+        t.id, t.title
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name) AS companies,
+        MAX(ct.kind) AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    ms.movie_id,
+    ms.title,
+    ms.total_cast,
+    ms.latest_year,
+    ms.keywords,
+    mc.companies,
+    mc.company_type
+FROM 
+    MovieStats ms
+LEFT JOIN 
+    MovieCompanies mc ON ms.movie_id = mc.movie_id
+WHERE 
+    ms.total_cast > 5
+ORDER BY 
+    ms.latest_year DESC, ms.total_cast DESC;

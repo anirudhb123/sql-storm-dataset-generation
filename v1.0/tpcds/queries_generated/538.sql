@@ -1,0 +1,72 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023 AND
+        d.d_month_seq BETWEEN 1 AND 12
+    GROUP BY 
+        ws.web_site_id, ws.ws_sold_date_sk
+),
+TopSales AS (
+    SELECT 
+        web_site_id,
+        total_quantity,
+        total_net_profit
+    FROM 
+        RankedSales
+    WHERE 
+        profit_rank <= 3
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS customer_net_profit
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_id
+    FROM 
+        CustomerSales c
+    WHERE 
+        c.customer_net_profit > (
+            SELECT 
+                AVG(customer_net_profit) 
+            FROM 
+                CustomerSales
+        )
+),
+FinalReport AS (
+    SELECT 
+        t.web_site_id,
+        t.total_quantity,
+        t.total_net_profit,
+        COALESCE(hv.c_customer_id, 'No High Value Customer') AS high_value_customer
+    FROM 
+        TopSales t
+    LEFT JOIN 
+        HighValueCustomers hv ON 1 = 1
+)
+SELECT 
+    f.web_site_id,
+    f.total_quantity,
+    f.total_net_profit,
+    f.high_value_customer
+FROM 
+    FinalReport f
+ORDER BY 
+    f.total_net_profit DESC;

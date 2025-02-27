@@ -1,0 +1,62 @@
+
+WITH CustomerSales AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY 
+                               CASE 
+                                   WHEN cd.cd_gender = 'M' THEN 'Male' 
+                                   ELSE 'Female' 
+                               END 
+                           ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM
+        customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        sales_rank,
+        c.c_customer_sk AS customer_sk,
+        c.c_first_name AS first_name,
+        c.c_last_name AS last_name,
+        c.total_sales
+    FROM 
+        CustomerSales c
+    WHERE 
+        sales_rank <= 10
+),
+SalesAndReturns AS (
+    SELECT
+        t1.customer_sk,
+        COALESCE(t1.total_sales, 0) AS total_sales,
+        COALESCE(SUM(t2.sr_return_amt), 0) AS total_returns
+    FROM
+        TopCustomers t1
+    LEFT JOIN store_returns t2 ON t1.customer_sk = t2.sr_customer_sk
+    GROUP BY 
+        t1.customer_sk, 
+        t1.total_sales
+)
+SELECT
+    tc.first_name,
+    tc.last_name,
+    sa.total_sales,
+    sa.total_returns,
+    (sa.total_sales - sa.total_returns) AS net_sales,
+    CASE
+        WHEN sa.total_sales - sa.total_returns > 0 THEN 'Profitable'
+        ELSE 'Non-Profitable'
+    END AS profitability
+FROM
+    TopCustomers tc
+JOIN SalesAndReturns sa ON tc.customer_sk = sa.customer_sk
+ORDER BY net_sales DESC;

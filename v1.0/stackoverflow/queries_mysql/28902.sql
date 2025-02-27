@@ -1,0 +1,58 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.Id END) AS UpVoteCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS DownVoteCount,
+        @row_num := @row_num + 1 AS ViewRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    CROSS JOIN (SELECT @row_num := 0) r
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        r.*,
+        COALESCE(SUBSTRING(r.Body, 1, 300), '-') || '...' AS PreviewBody
+    FROM 
+        RankedPosts r
+    WHERE 
+        r.UpVoteCount > 10 AND r.CommentCount > 5
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.PreviewBody,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.OwnerDisplayName,
+    fp.UpVoteCount,
+    fp.DownVoteCount,
+    COUNT(DISTINCT ph.Id) AS EditHistoryCount,
+    GROUP_CONCAT(DISTINCT pt.Name SEPARATOR ', ') AS PostHistoryTypes
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistory ph ON fp.PostId = ph.PostId
+LEFT JOIN 
+    PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+GROUP BY 
+    fp.PostId, fp.Title, fp.PreviewBody, fp.CreationDate, fp.ViewCount, fp.OwnerDisplayName, fp.UpVoteCount, fp.DownVoteCount
+ORDER BY 
+    fp.ViewCount DESC
+LIMIT 50;

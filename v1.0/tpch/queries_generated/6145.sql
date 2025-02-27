@@ -1,0 +1,66 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2021-01-01' AND o.o_orderdate < DATE '2021-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+top_orders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.total_revenue
+    FROM 
+        ranked_orders ro
+    WHERE 
+        ro.revenue_rank <= 10
+),
+supplier_details AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+order_summary AS (
+    SELECT 
+        to.o_orderkey,
+        to.o_orderdate,
+        SUM(sd.ps_supplycost) AS total_supply_cost
+    FROM 
+        top_orders to
+    JOIN 
+        lineitem l ON to.o_orderkey = l.l_orderkey
+    JOIN 
+        supplier_details sd ON l.l_partkey = sd.p_partkey
+    GROUP BY 
+        to.o_orderkey, to.o_orderdate
+)
+
+SELECT 
+    ou.o_orderkey,
+    ou.o_orderdate,
+    ou.total_revenue,
+    os.total_supply_cost,
+    (ou.total_revenue - os.total_supply_cost) AS profit
+FROM 
+    top_orders ou
+JOIN 
+    order_summary os ON ou.o_orderkey = os.o_orderkey
+ORDER BY 
+    profit DESC;

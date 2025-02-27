@@ -1,0 +1,70 @@
+-- Performance benchmarking query for Stack Overflow schema
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(V.CreationDate IS NOT NULL) AS VoteCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.CommentCount,
+    U.BadgeCount,
+    U.VoteCount,
+    U.QuestionCount,
+    U.AnswerCount,
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    P.ViewCount,
+    P.Score,
+    P.CommentCount AS PostCommentCount,
+    P.UpVoteCount,
+    P.DownVoteCount
+FROM 
+    UserStats U
+JOIN 
+    PostStats P ON U.UserId = P.PostId
+ORDER BY 
+    U.Reputation DESC, P.ViewCount DESC
+LIMIT 100;

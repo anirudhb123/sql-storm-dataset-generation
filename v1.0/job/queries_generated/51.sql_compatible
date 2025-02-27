@@ -1,0 +1,59 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(r.role_id) AS avg_role_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year
+), 
+MovieDetails AS (
+    SELECT 
+        m.title,
+        COALESCE(NULLIF(GROUP_CONCAT(DISTINCT k.keyword), ''), 'No Keywords') AS keywords,
+        m.total_cast,
+        CASE 
+            WHEN m.total_cast > 10 THEN 'Large Ensemble'
+            WHEN m.total_cast BETWEEN 5 AND 10 THEN 'Medium Ensemble'
+            ELSE 'Small Ensemble' 
+        END AS cast_size
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        m.title, m.total_cast
+)
+SELECT 
+    md.title,
+    md.keywords,
+    md.cast_size,
+    p.info AS person_info,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM person_info pi WHERE pi.person_id = c.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'notable')) 
+        THEN 'Notable Cast Member' 
+        ELSE 'Regular Cast Member' 
+    END AS cast_member_type
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = md.title 
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    person_info p ON p.person_id = c.person_id
+WHERE 
+    md.cast_size = 'Large Ensemble' 
+ORDER BY 
+    md.total_cast DESC
+LIMIT 10;

@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        ru.ws_bill_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        rd.r_reason_desc
+    FROM 
+        RankedSales ru
+    JOIN 
+        customer c ON ru.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    LEFT JOIN 
+        store_returns sr ON sr.sr_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        reason rd ON sr.sr_reason_sk = rd.r_reason_sk
+    WHERE 
+        ru.sales_rank <= 10
+),
+SalesSummary AS (
+    SELECT 
+        tc.ws_bill_customer_sk,
+        SUM(coalesce(sr_return_amt, 0)) AS total_return_amt,
+        COUNT(sr_return_number) AS total_returns
+    FROM 
+        TopCustomers tc
+    LEFT JOIN 
+        web_returns wr ON tc.ws_bill_customer_sk = wr.wr_returning_customer_sk
+    LEFT JOIN 
+        store_returns sr ON tc.ws_bill_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        tc.ws_bill_customer_sk
+)
+SELECT 
+    tc.ws_bill_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    tc.cd_credit_rating,
+    ss.total_return_amt,
+    ss.total_returns
+FROM 
+    TopCustomers tc
+JOIN 
+    SalesSummary ss ON tc.ws_bill_customer_sk = ss.ws_bill_customer_sk
+ORDER BY 
+    ss.total_return_amt DESC;

@@ -1,0 +1,46 @@
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) as OrderRank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1996-01-01'
+),
+SupplierSummary AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) as TotalSupplyCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+PartSupplyRank AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) as TotalAvailable
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name
+    FROM SupplierSummary s
+    WHERE s.TotalSupplyCost > (SELECT AVG(TotalSupplyCost) FROM SupplierSummary)
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderstatus, o.o_totalprice
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey AND o.o_orderstatus = 'O'
+),
+LineItemStats AS (
+    SELECT l.l_orderkey, COUNT(*) as LineCount, SUM(l.l_extendedprice * (1 - l.l_discount)) as LineRevenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT c.c_name, o.o_orderkey, o.o_orderdate, 
+       COALESCE(ls.LineCount, 0) as LineCount,
+       COALESCE(ls.LineRevenue, 0) as LineRevenue,
+       SUM(CASE WHEN s.s_name IS NOT NULL THEN 1 ELSE 0 END) AS SupplierCount,
+       ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) as OrderRank
+FROM CustomerOrders o
+JOIN customer c ON o.c_custkey = c.c_custkey
+LEFT JOIN LineItemStats ls ON o.o_orderkey = ls.l_orderkey
+LEFT JOIN partsupp ps ON ps.ps_partkey IN (SELECT ps_partkey FROM PartSupplyRank WHERE TotalAvailable > 0)
+LEFT JOIN TopSuppliers s ON ps.ps_suppkey = s.s_suppkey
+WHERE c.c_acctbal IS NOT NULL AND o.o_totalprice IS NOT NULL
+GROUP BY c.c_name, o.o_orderkey, o.o_orderdate, ls.LineCount, ls.LineRevenue
+ORDER BY c.c_name, o.o_orderdate DESC;

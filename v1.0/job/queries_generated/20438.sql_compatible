@@ -1,0 +1,56 @@
+
+WITH RecursiveActorInfo AS (
+    SELECT c.person_id, c.movie_id, a.name AS actor_name, 
+           ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY c.nr_order) AS role_order
+    FROM cast_info c
+    JOIN aka_name a ON a.person_id = c.person_id
+    WHERE a.name IS NOT NULL
+),
+YearlyMovieStats AS (
+    SELECT 
+        t.production_year,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        COUNT(DISTINCT ai.actor_name) AS total_actors,
+        AVG(LENGTH(t.title)) AS avg_title_length
+    FROM aka_title t
+    LEFT JOIN cast_info c ON c.movie_id = t.movie_id
+    LEFT JOIN RecursiveActorInfo ai ON ai.movie_id = c.movie_id
+    GROUP BY t.production_year
+),
+FilteredKeywords AS (
+    SELECT k.id AS keyword_id, k.keyword, COUNT(mk.movie_id) AS movie_count
+    FROM keyword k
+    LEFT JOIN movie_keyword mk ON k.id = mk.keyword_id
+    GROUP BY k.id, k.keyword
+    HAVING COUNT(mk.movie_id) > 5
+),
+MovieCompaniesInfo AS (
+    SELECT mc.movie_id, c.name AS company_name, ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+),
+BizarreTitleInfo AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        CASE WHEN LENGTH(t.title) % 2 = 0 THEN 'Even' ELSE 'Odd' END AS title_length_category,
+        COALESCE(NULLIF(t.note, ''), 'No Note') AS title_note
+    FROM title t
+    WHERE t.production_year IS NOT NULL AND t.production_year >= 2000
+)
+SELECT 
+    ys.production_year,
+    ys.total_movies,
+    ys.total_actors,
+    ys.avg_title_length,
+    COUNT(DISTINCT mc.movie_id) AS company_movie_count,
+    STRING_AGG(DISTINCT b.title, '; ') AS bizarre_titles,
+    STRING_AGG(DISTINCT kw.keyword || ' (' || kw.movie_count || ')', ', ') AS popular_keywords
+FROM YearlyMovieStats ys
+LEFT JOIN MovieCompaniesInfo mc ON mc.movie_id = ys.total_movies
+LEFT JOIN BizarreTitleInfo b ON b.production_year = ys.production_year
+LEFT JOIN FilteredKeywords kw ON kw.movie_count >= 15
+GROUP BY ys.production_year, ys.total_movies, ys.total_actors, ys.avg_title_length
+ORDER BY ys.production_year DESC
+HAVING SUM(CASE WHEN ys.total_actors IS NULL THEN 0 ELSE 1 END) > 0;

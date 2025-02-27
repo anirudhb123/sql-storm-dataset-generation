@@ -1,0 +1,51 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate, 1 AS lvl
+    FROM orders o
+    WHERE o.o_orderdate < '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate, h.lvl + 1
+    FROM orders o
+    JOIN OrderHierarchy h ON o.o_custkey = h.o_custkey AND o.o_orderdate < h.o_orderdate
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_type, SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_type
+),
+CustomerExp AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, COALESCE(SUM(o.o_totalprice), 0) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, RANK() OVER (ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+),
+NationDetails AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey,
+           ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY n.n_nationkey) AS regional_rank
+    FROM nation n
+)
+SELECT ch.o_orderkey,
+       ch.o_totalprice,
+       ch.o_orderdate,
+       pd.p_name,
+       pd.total_available,
+       ce.c_name,
+       ce.total_spent,
+       COALESCE(rs.s_name, 'No Supplier') AS supplier_name,
+       nd.n_name AS nation_name
+FROM OrderHierarchy ch
+LEFT JOIN lineitem li ON ch.o_orderkey = li.l_orderkey
+LEFT JOIN PartDetails pd ON li.l_partkey = pd.p_partkey
+LEFT JOIN CustomerExp ce ON ch.o_custkey = ce.c_custkey
+LEFT JOIN RankedSuppliers rs ON li.l_suppkey = rs.s_suppkey
+LEFT JOIN nation nd ON ce.c_nationkey = nd.n_nationkey
+WHERE ch.lvl = 1 AND ce.total_spent > 5000
+ORDER BY ch.o_orderdate DESC, ch.o_orderkey;

@@ -1,0 +1,74 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk, 
+        s_store_id, 
+        s_sales_price,
+        1 AS level
+    FROM store_sales 
+    WHERE ss_sold_date_sk = (SELECT max(d_date_sk) FROM date_dim)
+    
+    UNION ALL
+    
+    SELECT 
+        sh.s_store_sk,
+        sh.s_store_id,
+        CASE 
+            WHEN s.sm_sales_price IS NOT NULL THEN s_sm_sales_price * 0.9  
+            ELSE sh.s_sales_price
+        END,
+        sh.level + 1
+    FROM sales_hierarchy sh
+    JOIN store s ON s.s_store_sk = sh.s_store_sk
+    WHERE sh.level < 5
+),
+address_info AS (
+    SELECT 
+        ca_country,
+        COUNT(DISTINCT c_customer_sk) AS customer_count,
+        SUM(sw.ws_sales_price) AS total_sales
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN web_sales sw ON c.c_customer_sk = sw.ws_bill_customer_sk
+    GROUP BY ca_country
+),
+date_filter AS (
+    SELECT 
+        d_date_sk, 
+        d_year, 
+        d_month_seq 
+    FROM date_dim 
+    WHERE d_year = 2001 AND d_month_seq BETWEEN 1 AND 12
+),
+item_sales AS (
+    SELECT 
+        i.i_item_sk, 
+        i.i_item_id, 
+        SUM(ws.ws_quantity) AS total_quantity_sold
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_item_id
+    HAVING SUM(ws.ws_quantity) > 1000
+),
+final_sales AS (
+    SELECT 
+        sh.s_store_id,
+        d.d_month_seq,
+        SUM(sh.sales_price) AS adjusted_sales_price,
+        ai.total_sales,
+        ai.customer_count
+    FROM sales_hierarchy sh
+    JOIN date_filter d ON sh.level = d.d_year
+    JOIN address_info ai ON sh.s_store_id = ai.country
+    GROUP BY sh.s_store_id, d.d_month_seq, ai.total_sales, ai.customer_count
+)
+SELECT 
+    s.s_store_name,
+    f.d_month_seq,
+    f.adjusted_sales_price,
+    f.total_sales,
+    f.customer_count,
+    RANK() OVER (PARTITION BY f.d_month_seq ORDER BY f.total_sales DESC) AS sales_rank
+FROM store s
+JOIN final_sales f ON s.s_store_sk = f.s_store_id
+WHERE f.adjusted_sales_price IS NOT NULL
+ORDER BY f.d_month_seq, sales_rank;

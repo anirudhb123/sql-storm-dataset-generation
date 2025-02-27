@@ -1,0 +1,20 @@
+-- Performance Benchmarking Query: Retrieve the top 10 most voted posts along with their related users and tags
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.Score AS VoteCount,
+    u.DisplayName AS OwnerDisplayName,
+    t.TagName,
+    p.CreationDate
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+JOIN 
+    PostsTags pt ON p.Id = pt.PostId
+JOIN 
+    Tags t ON pt.TagId = t.Id
+ORDER BY 
+    p.Score DESC
+LIMIT 10;
+

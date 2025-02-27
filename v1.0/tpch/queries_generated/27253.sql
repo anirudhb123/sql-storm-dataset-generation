@@ -1,0 +1,33 @@
+SELECT 
+    CONCAT(p.p_name, ' - ', s.s_name) AS part_supplier,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(l.l_quantity) AS total_quantity,
+    MAX(l.l_extendedprice) AS max_price,
+    GROUP_CONCAT(DISTINCT r.r_name ORDER BY r.r_name ASC SEPARATOR ', ') AS regions,
+    SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT c.c_mktsegment ORDER BY c.c_mktsegment ASC SEPARATOR '; '), '; ', 3) AS top_segments,
+    AVG(s.s_acctbal) AS average_supplier_balance,
+    LEFT(o.o_orderpriority, 2) AS short_order_priority
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    AND o.o_orderstatus = 'O'
+GROUP BY 
+    p.p_partkey, s.s_suppkey
+ORDER BY 
+    order_count DESC, total_quantity DESC
+LIMIT 100;

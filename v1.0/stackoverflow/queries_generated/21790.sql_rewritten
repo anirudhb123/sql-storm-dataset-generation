@@ -1,0 +1,89 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId IN (6, 7) THEN 1 ELSE 0 END) AS CloseReopenCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+), 
+
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        COALESCE(UPV.UpvoteCount, 0) AS UpvoteCount,
+        COALESCE(DNV.DownvoteCount, 0) AS DownvoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS RankByScore
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS UpvoteCount
+        FROM 
+            Votes 
+        WHERE 
+            VoteTypeId = 2
+        GROUP BY 
+            PostId
+    ) UPV ON P.Id = UPV.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS DownvoteCount
+        FROM 
+            Votes 
+        WHERE 
+            VoteTypeId = 3
+        GROUP BY 
+            PostId
+    ) DNV ON P.Id = DNV.PostId
+), 
+
+PostRanked AS (
+    SELECT 
+        PS.PostId,
+        PS.OwnerUserId,
+        PS.Score,
+        PS.ViewCount,
+        PS.CreationDate,
+        PS.UpvoteCount,
+        PS.DownvoteCount,
+        RANK() OVER (PARTITION BY PS.OwnerUserId ORDER BY PS.ViewCount DESC) AS ViewRank
+    FROM 
+        PostStats PS
+)
+
+SELECT 
+    UVD.UserId,
+    UVD.DisplayName,
+    UVD.TotalVotes,
+    ROUND(1.0 * UVD.UpVotes / NULLIF(UVD.TotalVotes, 0), 2) AS UpvoteRatio,
+    PR.PostId,
+    PR.Score,
+    PR.ViewCount,
+    PR.UpvoteCount,
+    PR.DownvoteCount,
+    PR.RankByScore,
+    PR.ViewRank
+FROM 
+    UserVoteStats UVD
+LEFT JOIN 
+    PostRanked PR ON UVD.UserId = PR.OwnerUserId
+WHERE 
+    UVD.TotalVotes > 0
+    AND PR.RankByScore = 1 
+ORDER BY 
+    UpvoteRatio DESC, 
+    UVD.TotalVotes DESC
+LIMIT 10;

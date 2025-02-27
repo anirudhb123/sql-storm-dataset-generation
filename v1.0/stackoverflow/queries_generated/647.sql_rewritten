@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        p.AnswerCount,
+        U.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveAnswerCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2 AND 
+        p.AcceptedAnswerId IS NOT NULL
+    GROUP BY 
+        OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+)
+SELECT 
+    U.DisplayName,
+    RP.Title AS MostRecentPost,
+    RP.ViewCount,
+    RP.Score,
+    T.PostCount,
+    T.PositiveAnswerCount,
+    UB.BadgeNames
+FROM 
+    RankedPosts RP
+JOIN 
+    TopUsers T ON RP.Id IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = T.OwnerUserId)
+JOIN 
+    Users U ON RP.OwnerUserId = U.Id
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+WHERE 
+    RP.PostRank = 1
+ORDER BY 
+    RP.ViewCount DESC
+LIMIT 10;

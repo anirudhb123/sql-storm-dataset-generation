@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+),
+SalesSummary AS (
+    SELECT 
+        rs.ws_item_sk,
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS total_sales,
+        COUNT(DISTINCT rs.rn) AS sales_days
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rn = 1
+    GROUP BY 
+        rs.ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        ss.ws_item_sk,
+        ss.total_sales,
+        DENSE_RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM 
+        SalesSummary ss
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    ti.total_sales,
+    ti.sales_rank,
+    COALESCE(a.ca_city, 'Unknown') AS store_city,
+    COUNT(DISTINCT w.web_site_id) AS web_sites
+FROM 
+    TopItems ti
+JOIN 
+    item i ON ti.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    store s ON s.s_store_sk = (
+        SELECT 
+            ss.s_store_sk 
+        FROM 
+            store_sales ss 
+        WHERE 
+            ss.ss_item_sk = ti.ws_item_sk 
+        ORDER BY 
+            ss.net_profit DESC 
+        FETCH FIRST 1 ROW ONLY
+    )
+LEFT JOIN 
+    customer_address a ON a.ca_address_sk = s.s_store_sk
+JOIN 
+    web_sales ws ON ws.ws_item_sk = ti.ws_item_sk
+JOIN 
+    web_site w ON ws.ws_web_site_sk = w.web_site_sk
+WHERE 
+    ti.sales_rank <= 10 
+    AND i.i_current_price IS NOT NULL 
+    AND (w.web_tax_percentage IS NULL OR w.web_tax_percentage < 0.1)
+GROUP BY 
+    i.i_item_id, i.i_item_desc, ti.total_sales, ti.sales_rank, a.ca_city
+ORDER BY 
+    ti.total_sales DESC
+FETCH FIRST 50 ROWS ONLY;

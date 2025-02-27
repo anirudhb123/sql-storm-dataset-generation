@@ -1,0 +1,84 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rank_per_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CompanyRoles AS (
+    SELECT 
+        mc.movie_id, 
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(c.id) AS num_roles
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+),
+ActorDetails AS (
+    SELECT 
+        ka.person_id, 
+        ka.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT kt.keyword, ', ') AS keywords
+    FROM 
+        aka_name ka
+    LEFT JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    LEFT JOIN 
+        movie_keyword mk ON ci.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kt ON mk.keyword_id = kt.id
+    GROUP BY 
+        ka.person_id, ka.name
+),
+TopActors AS (
+    SELECT 
+        ad.actor_name, 
+        ad.movie_count,
+        RANK() OVER (ORDER BY ad.movie_count DESC) AS actor_rank
+    FROM 
+        ActorDetails ad
+    WHERE 
+        ad.movie_count > 5
+),
+MoviesWithCompanies AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title, 
+        rm.production_year, 
+        COALESCE(cr.company_name, 'Unknown') AS company_name, 
+        COALESCE(cr.company_type, 'Independent') AS company_type
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyRoles cr ON rm.movie_id = cr.movie_id
+)
+SELECT 
+    mwc.title, 
+    mwc.production_year, 
+    mwc.company_name, 
+    mwc.company_type, 
+    ta.actor_name, 
+    ta.movie_count
+FROM 
+    MoviesWithCompanies mwc
+JOIN 
+    TopActors ta ON mwc.movie_id = ta.actor_id
+WHERE 
+    mwc.production_year >= 2000 
+    AND mwc.title NOT LIKE '%Sequel%' 
+    AND ta.actor_rank <= 10
+ORDER BY 
+    mwc.production_year DESC, 
+    mwc.title ASC;
+

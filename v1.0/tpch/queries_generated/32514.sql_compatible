@@ -1,0 +1,37 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    UNION ALL
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM CustomerOrders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderdate > co.o_orderdate
+),
+SupplierParts AS (
+    SELECT ps.ps_partkey, s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_availqty
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_suppkey, s.s_name
+),
+LineItemStats AS (
+    SELECT l.l_orderkey,
+           COUNT(l.l_partkey) AS total_lines,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT c.c_name, 
+       COALESCE(SUM(lo.net_sales), 0) AS total_sales, 
+       COALESCE(SUM(sp.total_availqty), 0) AS total_availqty, 
+       SUM(CASE WHEN lo.total_lines > 10 THEN 1 ELSE 0 END) AS high_line_orders
+FROM customer c
+LEFT JOIN CustomerOrders co ON c.c_custkey = co.c_custkey 
+LEFT JOIN LineItemStats lo ON co.o_orderkey = lo.l_orderkey 
+LEFT JOIN SupplierParts sp ON sp.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = co.o_orderkey)
+WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 500
+GROUP BY c.c_name
+HAVING SUM(COALESCE(lo.net_sales, 0)) > 1000
+ORDER BY total_sales DESC;

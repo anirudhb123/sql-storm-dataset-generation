@@ -1,0 +1,64 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT i_item_sk, i_item_id, NULL::integer AS parent_id, 1 AS level
+    FROM item
+    WHERE i_item_sk IS NOT NULL
+    
+    UNION ALL
+
+    SELECT i.i_item_sk, i.i_item_id, ih.i_item_sk AS parent_id, ih.level + 1
+    FROM item i
+    JOIN ItemHierarchy ih ON i.i_brand_id = ih.i_item_sk
+    WHERE ih.level < 5
+),
+SalesData AS (
+    SELECT ws.ws_item_sk,
+           SUM(ws.ws_quantity) AS total_quantity,
+           SUM(ws.ws_sales_price) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+ReturnedData AS (
+    SELECT cr.cr_item_sk,
+           SUM(cr.cr_return_quantity) AS total_returns,
+           SUM(cr.cr_return_amt_inc_tax) AS total_return_amount
+    FROM catalog_returns cr
+    GROUP BY cr.cr_item_sk
+),
+CustomerInfo AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           cd.cd_gender,
+           cd.cd_marital_status,
+           cd.cd_purchase_estimate,
+           RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+NetProfitData AS (
+    SELECT ss.ss_item_sk,
+           SUM(ss.ss_net_profit) AS total_net_profit
+    FROM store_sales ss
+    GROUP BY ss.ss_item_sk
+)
+SELECT ih.i_item_id,
+       COALESCE(sd.total_quantity, 0) AS sold_quantity,
+       COALESCE(sd.total_sales, 0.00) AS sales_amount,
+       COALESCE(rd.total_returns, 0) AS returned_quantity,
+       COALESCE(rd.total_return_amount, 0.00) AS return_amount,
+       npd.total_net_profit,
+       ci.c_first_name,
+       ci.c_last_name,
+       ci.cd_gender,
+       ci.cd_marital_status
+FROM ItemHierarchy ih
+LEFT JOIN SalesData sd ON ih.i_item_sk = sd.ws_item_sk
+LEFT JOIN ReturnedData rd ON ih.i_item_sk = rd.cr_item_sk
+LEFT JOIN NetProfitData npd ON ih.i_item_sk = npd.ss_item_sk
+LEFT JOIN CustomerInfo ci ON ci.gender_rank = 1
+WHERE (sd.total_sales > 5000 OR rd.total_return_amount > 1000)
+  AND (ci.cd_marital_status = 'M' OR ci.cd_gender = 'F')
+  AND ih.level <= 2
+ORDER BY ih.i_item_id;

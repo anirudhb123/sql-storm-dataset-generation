@@ -1,0 +1,65 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        1 AS Level,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS InitialCreateDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11)  -- Focus on posts being closed or reopened
+    
+    UNION ALL
+    
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        Level + 1,
+        ph.PostHistoryTypeId,
+        InitialCreateDate
+    FROM PostHistory ph
+    INNER JOIN RecursivePostHistory rph ON rph.PostId = ph.PostId
+    WHERE ph.CreationDate < rph.CreationDate  -- Recursively join on previous versions
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    COALESCE(vt.UpVotes, 0) AS UpVotes,
+    COALESCE(vt.DownVotes, 0) AS DownVotes,
+    rh.UserId AS LastEditor,
+    MAX(rh.CreationDate) AS LastEditDate,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT b.Id) AS BadgeCount,
+    STUFF((
+        SELECT ',' + b.Name 
+        FROM Badges b 
+        WHERE b.UserId = p.OwnerUserId 
+        FOR XML PATH('')), 1, 1, '') AS BadgeNames,
+    CASE 
+        WHEN MAX(rh.CreationDate) < p.CreationDate THEN 'Never Edited' 
+        ELSE 'Edited' 
+    END AS EditStatus,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM Posts p
+LEFT JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN Votes vt ON p.Id = vt.PostId AND vt.VoteTypeId IN (2, 3)  -- Upvotes and downvotes
+LEFT JOIN Comments c ON p.Id = c.PostId
+LEFT JOIN Badges b ON b.UserId = p.OwnerUserId
+LEFT JOIN RecursivePostHistory rh ON rh.PostId = p.Id
+LEFT JOIN Tags t ON t.Id IN (SELECT tag.Id FROM STRING_SPLIT(p.Tags, ',') AS tag)
+WHERE 
+    p.CreationDate >= '2023-01-01' AND
+    (p.Score > 0 OR p.IsModeratorOnly IS NOT NULL)  -- Filter by post score or moderation
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, u.DisplayName, rh.UserId
+HAVING 
+    COUNT(DISTINCT c.Id) > 5  -- Show only posts with more than 5 comments
+ORDER BY 
+    UpVotes DESC, LastEditDate DESC
+OPTION (MAXRECURSION 100);

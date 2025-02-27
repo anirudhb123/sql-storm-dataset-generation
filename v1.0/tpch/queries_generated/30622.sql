@@ -1,0 +1,44 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_orderdate, o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o_orderkey ORDER BY o_orderdate) AS rn
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_orderkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate > oh.o_orderdate
+),
+SupplierAggregate AS (
+    SELECT ps.ps_partkey, s.s_nationkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_nationkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, 
+           COALESCE(SUM(s.total_supply_value), 0) AS total_supply_value,
+           MAX(p.p_retailprice) AS max_retail_price
+    FROM part p
+    LEFT JOIN SupplierAggregate s ON p.p_partkey = s.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, 
+           COUNT(DISTINCT o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT p.p_partkey, p.p_name, COALESCE(po.total_spent, 0) AS total_customer_spent,
+       CASE WHEN p.total_supply_value > 0 THEN 'Available' ELSE 'Out of Stock' END AS supply_status,
+       c.c_name AS customer_name
+FROM PartDetails p
+LEFT JOIN CustomerOrders po ON p.p_partkey = po.c_custkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey AND l.l_returnflag = 'N'
+LEFT JOIN customer c ON po.c_custkey = c.c_custkey
+WHERE (p.max_retail_price > 100 AND po.order_count > 5)
+   OR (p.total_supply_value < 1000 AND po.total_spent IS NULL)
+ORDER BY p.p_name, total_customer_spent DESC;

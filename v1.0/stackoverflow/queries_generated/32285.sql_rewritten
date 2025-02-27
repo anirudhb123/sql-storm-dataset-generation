@@ -1,0 +1,55 @@
+WITH RecursivePosts AS (
+    SELECT P.Id, P.Title, P.ParentId, P.OwnerUserId, P.CreationDate,
+           0 AS Level
+    FROM Posts P
+    WHERE P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT P.Id, P.Title, P.ParentId, P.OwnerUserId, P.CreationDate,
+           RP.Level + 1
+    FROM Posts P
+    INNER JOIN RecursivePosts RP ON P.ParentId = RP.Id
+    WHERE P.PostTypeId = 2  
+),
+UserSummary AS (
+    SELECT U.Id AS UserId, U.DisplayName, 
+           COUNT(DISTINCT P.Id) AS TotalPosts,
+           SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+           SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+           SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT UserId, DisplayName, TotalPosts, Questions, Answers, TotalScore,
+           RANK() OVER (ORDER BY TotalScore DESC) AS Rank
+    FROM UserSummary
+),
+PostHistoryAnalysis AS (
+    SELECT PH.PostId, COUNT(PH.Id) AS HistoryCount,
+           MIN(PH.CreationDate) AS FirstRevision,
+           MAX(PH.CreationDate) AS LastRevision,
+           MAX(PH.UserId) AS LastUser
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+)
+SELECT 
+    U.DisplayName AS TopUser,
+    U.Questions,
+    U.Answers,
+    PH.HistoryCount,
+    PH.FirstRevision,
+    PH.LastRevision,
+    RP.Title AS RecursivePostTitle,
+    RP.Level AS AnswerLevel,
+    CASE 
+        WHEN PH.FirstRevision IS NULL THEN 'No Revisions'
+        ELSE 'Has Revisions'
+    END AS RevisionStatus
+FROM TopUsers U
+JOIN PostHistoryAnalysis PH ON U.UserId = PH.LastUser   
+LEFT JOIN RecursivePosts RP ON PH.PostId = RP.Id     
+WHERE U.Rank <= 10  
+ORDER BY U.TotalScore DESC, U.DisplayName;

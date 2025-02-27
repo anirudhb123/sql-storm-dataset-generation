@@ -1,0 +1,31 @@
+WITH SalesStats AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+),
+PartSales AS (
+    SELECT 
+        p.p_name AS part_name,
+        p.p_brand AS part_brand,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS part_sales
+    FROM lineitem l
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY p.p_name, p.p_brand
+)
+SELECT 
+    s.nation_name,
+    COUNT(DISTINCT ps.part_name) AS unique_parts_sold,
+    SUM(ss.total_sales) AS total_nation_sales,
+    AVG(p.part_sales) AS avg_part_sales_per_nation
+FROM SalesStats ss
+JOIN PartSales p ON ss.nation_name = p.part_brand
+JOIN nation s ON ss.nation_name = s.n_name
+GROUP BY s.nation_name
+ORDER BY total_nation_sales DESC, unique_parts_sold DESC;

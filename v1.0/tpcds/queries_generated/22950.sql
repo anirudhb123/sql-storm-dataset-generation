@@ -1,0 +1,70 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_ticket_number,
+        SUM(sr_return_quantity) AS total_returned,
+        COUNT(*) AS return_count,
+        RANK() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_quantity) DESC) AS return_rank
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk, sr_ticket_number
+),
+RecentSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        MAX(ws_sold_date_sk) AS last_sale_date
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+IncomeRank AS (
+    SELECT 
+        hd_demo_sk,
+        hd_income_band_sk,
+        DENSE_RANK() OVER (ORDER BY hd_vehicle_count DESC) AS income_rank
+    FROM 
+        household_demographics
+    WHERE 
+        hd_vehicle_count IS NOT NULL
+),
+AddressData AS (
+    SELECT 
+        ca_address_sk,
+        CASE 
+            WHEN ca_city IS NULL THEN 'UNKNOWN' 
+            ELSE ca_city
+        END AS city,
+        STRING_AGG(ca_street_name || ' ' || ca_street_number, ', ') AS full_address
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_address_sk
+)
+SELECT 
+    a.city,
+    a.full_address,
+    COALESCE(r.total_returned, 0) AS total_returned,
+    COALESCE(s.total_sold, 0) AS total_sold,
+    COALESCE(i.income_rank, 0) AS income_rank,
+    CASE 
+        WHEN r.total_returned IS NULL THEN 'No Returns' 
+        WHEN s.total_sold IS NULL THEN 'No Sales' 
+        ELSE 'Active'
+    END AS status
+FROM 
+    AddressData a
+LEFT JOIN 
+    RankedReturns r ON a.ca_address_sk = r.sr_item_sk
+FULL OUTER JOIN 
+    RecentSales s ON r.sr_item_sk = s.ws_item_sk
+LEFT JOIN 
+    IncomeRank i ON i.hd_demo_sk = (SELECT c_current_hdemo_sk FROM customer WHERE c_customer_sk = r.sr_customer_sk LIMIT 1)
+WHERE 
+    (a.city LIKE '%City%' OR r.total_returned > 10 OR s.total_sold IS NULL)
+    AND (r.return_rank IS NULL OR r.return_count < 5)
+ORDER BY 
+    a.city, total_returned DESC NULLS LAST;

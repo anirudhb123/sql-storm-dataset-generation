@@ -1,0 +1,77 @@
+-- Performance Benchmarking Query
+WITH PostCounts AS (
+    SELECT 
+        PostTypeId,
+        COUNT(*) AS TotalPosts,
+        COUNT(DISTINCT OwnerUserId) AS UniqueUsers,
+        SUM(ViewCount) AS TotalViews,
+        AVG(Score) AS AverageScore
+    FROM 
+        Posts
+    GROUP BY 
+        PostTypeId
+),
+UserStatistics AS (
+    SELECT 
+        Id,
+        Reputation,
+        COUNT(DISTINCT Badges.Id) AS TotalBadges,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalPostViews
+    FROM 
+        Users
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY 
+        Users.Id, Users.Reputation
+),
+VoteStatistics AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS TotalVotes,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+CombinedStats AS (
+    SELECT 
+        pc.PostTypeId,
+        pc.TotalPosts,
+        pc.UniqueUsers,
+        pc.TotalViews,
+        pc.AverageScore,
+        us.Reputation,
+        us.TotalBadges,
+        us.TotalPostViews,
+        vs.TotalVotes,
+        vs.UpVotes,
+        vs.DownVotes
+    FROM 
+        PostCounts pc
+    LEFT JOIN 
+        Users us ON us.Id IN (SELECT OwnerUserId FROM Posts WHERE PostTypeId = pc.PostTypeId)
+    LEFT JOIN 
+        VoteStatistics vs ON vs.PostId IN (SELECT Id FROM Posts WHERE PostTypeId = pc.PostTypeId)
+)
+SELECT 
+    PostTypeId,
+    SUM(TotalPosts) AS TotalPosts,
+    SUM(UniqueUsers) AS UniqueUsers,
+    SUM(TotalViews) AS TotalViews,
+    AVG(AverageScore) AS AverageScore,
+    AVG(Reputation) AS AvgUserReputation,
+    SUM(TotalBadges) AS TotalBadges,
+    SUM(TotalPostViews) AS TotalPostViews,
+    SUM(TotalVotes) AS TotalVotes,
+    SUM(UpVotes) AS TotalUpVotes,
+    SUM(DownVotes) AS TotalDownVotes
+FROM 
+    CombinedStats
+GROUP BY 
+    PostTypeId
+ORDER BY 
+    PostTypeId;

@@ -1,0 +1,65 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AnswerCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 10
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days')
+    GROUP BY 
+        v.PostId
+),
+TopContributors AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS Contributions
+    FROM 
+        Users u
+    INNER JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(rv.VoteCount, 0) AS TotalVotes,
+    COALESCE(rv.UpVotes, 0) AS UpVotes,
+    COALESCE(rv.DownVotes, 0) AS DownVotes,
+    tc.UserId,
+    tc.DisplayName AS ContributorName,
+    tc.Contributions
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentVotes rv ON rp.PostId = rv.PostId
+LEFT JOIN 
+    TopContributors tc ON rp.OwnerUserId = tc.UserId
+WHERE 
+    rp.RN = 1
+ORDER BY 
+    rp.CreationDate DESC,
+    TotalVotes DESC;

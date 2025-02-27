@@ -1,0 +1,75 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ship_date_sk,
+        ws.item_sk,
+        ws_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.item_sk ORDER BY ws_net_profit DESC) AS profit_rank
+    FROM web_sales ws
+    WHERE ws_net_profit IS NOT NULL
+      AND ws_ship_date_sk IN (
+          SELECT DISTINCT ss_sold_date_sk
+          FROM store_sales
+          WHERE ss_net_profit >= 
+              (SELECT AVG(ss_net_profit) FROM store_sales WHERE ss_item_sk = ws.item_sk)
+      )
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        COUNT(DISTINCT ws.web_page_sk) AS total_web_visits
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+),
+high_profit_items AS (
+    SELECT 
+        r.item_sk,
+        SUM(r.ws_net_profit) AS total_net_profit
+    FROM ranked_sales r
+    WHERE profit_rank = 1
+    GROUP BY r.item_sk
+),
+high_profit_customers AS (
+    SELECT 
+        cd.c_customer_id,
+        hd.hd_income_band_sk,
+        SUM(hp.total_net_profit) AS combined_net_profit
+    FROM customer_details cd
+    JOIN household_demographics hd ON cd.c_customer_id = hd.hd_demo_sk
+    JOIN high_profit_items hp ON hp.item_sk IN (
+        SELECT item_sk 
+        FROM store_sales 
+        WHERE ss_sales_price > (
+            SELECT AVG(ss_sales_price) 
+            FROM store_sales 
+            WHERE ss_item_sk = hp.item_sk
+              AND ss_sold_date_sk < EXTRACT(YEAR FROM CURRENT_DATE) * 10000 + 1231 -- before future January 1st of next year
+        )
+    )
+    GROUP BY cd.c_customer_id, hd.hd_income_band_sk
+),
+final_result AS (
+    SELECT 
+        c.customer_id,
+        c.total_web_visits,
+        h.combined_net_profit,
+        CASE
+            WHEN h.hd_income_band_sk IS NULL THEN 'Unknown Band'
+            ELSE h.hd_income_band_sk
+        END AS income_band
+    FROM customer_details c
+    FULL OUTER JOIN high_profit_customers h ON c.c_customer_id = h.c_customer_id
+)
+SELECT 
+    COALESCE(f.customer_id, 'N/A') AS Customer_ID,
+    COALESCE(f.total_web_visits, 0) AS Total_Web_Visits,
+    COALESCE(f.combined_net_profit, 0.00) AS Combined_Net_Profit,
+    f.income_band
+FROM final_result f
+WHERE f.total_web_visits > 0 OR f.combined_net_profit > 0
+ORDER BY f.combined_net_profit DESC, f.total_web_visits ASC;

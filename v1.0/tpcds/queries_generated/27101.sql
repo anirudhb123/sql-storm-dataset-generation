@@ -1,0 +1,68 @@
+
+WITH 
+  AddressDetails AS (
+    SELECT 
+      ca_address_sk, 
+      CONCAT(TRIM(ca_street_number), ' ', TRIM(ca_street_name), ' ', TRIM(ca_street_type), 
+             CASE WHEN ca_suite_number IS NOT NULL AND ca_suite_number <> '' 
+                  THEN CONCAT(', Suite ', TRIM(ca_suite_number)) END) AS full_address,
+      ca_city, 
+      ca_state, 
+      ca_zip, 
+      ca_country 
+    FROM 
+      customer_address 
+    WHERE 
+      ca_city IS NOT NULL
+  ),
+  CustomerInfo AS (
+    SELECT 
+      c.c_customer_sk, 
+      CONCAT(TRIM(c.c_salutation), ' ', TRIM(c.c_first_name), ' ', TRIM(c.c_last_name)) AS full_name,
+      cd.cd_gender, 
+      cd.cd_marital_status, 
+      cd.cd_education_status, 
+      cd.cd_purchase_estimate 
+    FROM 
+      customer c 
+    JOIN 
+      customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+  ),
+  SalesData AS (
+    SELECT 
+      ws.ws_order_number,
+      ws.ws_quantity,
+      ws.ws_net_profit,
+      ws.ws_net_paid,
+      dt.d_date AS sale_date,
+      s.s_store_name 
+    FROM 
+      web_sales ws 
+    JOIN 
+      date_dim dt ON ws.ws_sold_date_sk = dt.d_date_sk 
+    JOIN 
+      store s ON ws.ws_store_sk = s.s_store_sk
+  )
+SELECT 
+  ca.full_address,
+  ci.full_name,
+  ci.cd_gender,
+  ci.cd_marital_status,
+  sd.sale_date,
+  SUM(sd.ws_quantity) AS total_quantity,
+  SUM(sd.ws_net_profit) AS total_net_profit,
+  AVG(sd.ws_net_paid) AS average_net_paid,
+  COUNT(DISTINCT sd.ws_order_number) AS unique_orders 
+FROM 
+  AddressDetails ca 
+JOIN 
+  CustomerInfo ci ON ci.c_customer_sk = ca.ca_address_sk 
+JOIN 
+  SalesData sd ON sd.ws_order_number IN (SELECT sr_ticket_number FROM store_returns WHERE sr_customer_sk = ci.c_customer_sk) 
+WHERE 
+  ca.ca_state = 'CA' 
+GROUP BY 
+  ca.full_address, ci.full_name, ci.cd_gender, ci.cd_marital_status, sd.sale_date 
+ORDER BY 
+  total_net_profit DESC
+LIMIT 100;

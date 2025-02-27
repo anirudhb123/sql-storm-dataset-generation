@@ -1,0 +1,31 @@
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    MAX(SUBSTRING_INDEX(s.s_name, ' ', -1)) AS supplier_last_name,
+    MIN(CHAR_LENGTH(s.s_address)) AS min_supplier_address_length,
+    REGEXP_REPLACE(r.r_name, 'Region', 'Region-Modified') AS modified_region_name
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_brand LIKE 'Brand#%'
+    AND o.o_orderstatus = 'O'
+    AND l.l_shipmode IN ('TRUCK', 'SHIP')
+GROUP BY 
+    p.p_name, r.r_name
+HAVING 
+    total_revenue > 10000
+ORDER BY 
+    total_revenue DESC, p.p_name;

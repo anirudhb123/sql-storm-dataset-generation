@@ -1,0 +1,73 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieGenres AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT kt.kind ORDER BY kt.kind) AS genres
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        kind_type kt ON k.phonetic_code = kt.id
+    GROUP BY 
+        mk.movie_id
+),
+CompleteCastInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT an.name ORDER BY an.name) AS cast_names,
+        COUNT(DISTINCT an.id) AS cast_count
+    FROM 
+        complete_cast mc
+    JOIN 
+        aka_name an ON mc.subject_id = an.person_id
+    GROUP BY 
+        mc.movie_id
+),
+MovieCompanyDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+)
+
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rg.genres,
+    ci.cast_names,
+    ci.cast_count,
+    COUNT(DISTINCT cd.company_name) AS company_count,
+    STRING_AGG(DISTINCT cd.company_type, ', ') AS company_types
+FROM 
+    RankedMovies rm 
+LEFT JOIN 
+    MovieGenres rg ON rm.movie_id = rg.movie_id
+LEFT JOIN 
+    CompleteCastInfo ci ON rm.movie_id = ci.movie_id
+LEFT JOIN 
+    MovieCompanyDetails cd ON rm.movie_id = cd.movie_id
+WHERE 
+    rm.rank <= 5 
+GROUP BY 
+    rm.movie_title, rm.production_year, rg.genres, ci.cast_names, ci.cast_count
+ORDER BY 
+    rm.production_year DESC, rm.movie_title;

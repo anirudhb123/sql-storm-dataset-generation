@@ -1,0 +1,44 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM customer_address
+),
+CustomerNames AS (
+    SELECT 
+        c_customer_id,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name
+    FROM customer
+),
+SalesData AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    GROUP BY ws.bill_customer_sk
+),
+FinalMetrics AS (
+    SELECT 
+        cn.full_name,
+        ad.full_address,
+        sd.total_sales,
+        sd.total_orders
+    FROM SalesData sd
+    JOIN CustomerNames cn ON sd.bill_customer_sk = cn.c_customer_id
+    JOIN AddressDetails ad ON cn.c_customer_id = ad.ca_address_id
+)
+SELECT 
+    full_name,
+    full_address,
+    total_sales,
+    total_orders,
+    CONCAT('Sales: $', FORMAT(total_sales, 2), ' | Orders: ', total_orders) AS sales_summary
+FROM FinalMetrics
+WHERE total_sales > 1000
+ORDER BY total_sales DESC;

@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName AS Author,
+    rp.Title,
+    rp.Score,
+    COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+    COALESCE(cp.LastClosedDate, 'No Closures') AS LastClosed,
+    CASE 
+        WHEN rp.ViewCount > 1000 THEN 'Hot'
+        WHEN rp.ViewCount BETWEEN 500 AND 1000 THEN 'Trending'
+        ELSE 'New'
+    END AS Popularity
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.Rank <= 5 
+GROUP BY 
+    u.DisplayName, 
+    rp.Title, 
+    rp.Score, 
+    ub.BadgeCount, 
+    cp.LastClosedDate, 
+    rp.ViewCount
+ORDER BY 
+    rp.Score DESC, 
+    u.DisplayName;

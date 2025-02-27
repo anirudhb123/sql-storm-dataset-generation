@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.Views,
+        COALESCE(UPPER(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2)), 'NO TAGS') AS Tags,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserId,
+        ph.UserDisplayName
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 AND 
+        ph.CreationDate >= NOW() - INTERVAL '2 months'
+),
+AggData AS (
+    SELECT 
+        up.UserId,
+        COUNT(DISTINCT p.PostId) AS TotalPosts,
+        SUM(p.Views) AS TotalViews,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Posts p
+    JOIN 
+        Users up ON p.OwnerUserId = up.Id
+    GROUP BY 
+        up.UserId
+)
+SELECT 
+    u.DisplayName AS Owner,
+    ra.PostId,
+    ra.Title,
+    ra.CreationDate,
+    ra.Score,
+    ra.Views,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    CASE 
+        WHEN a.TotalPosts > 5 THEN 'Frequent Contributor' 
+        ELSE 'New Contributor' 
+    END AS ContributorStatus,
+    COALESCE(cp.Comment, 'Not Closed') AS ClosureComment,
+    cp.CreationDate AS ClosureDate,
+    CASE 
+        WHEN cp.Comment IS NOT NULL THEN 
+            (SELECT STRING_AGG(DISTINCT NAME, ', ') FROM CloseReasonTypes WHERE Id::text = ANY(string_to_array(cp.Comment::text, ', ')))
+        ELSE 'N/A' 
+    END AS ClosureReason
+FROM 
+    RankedPosts ra
+JOIN 
+    Users u ON ra.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    ClosedPosts cp ON ra.PostId = cp.PostId
+LEFT JOIN 
+    AggData a ON u.Id = a.UserId
+WHERE 
+    ra.PostRank = 1 AND 
+    ra.Score IS NOT NULL AND 
+    (ra.Views > 10 OR ub.BadgeCount > 0)
+ORDER BY 
+    ra.Views DESC, 
+    ra.Score DESC;

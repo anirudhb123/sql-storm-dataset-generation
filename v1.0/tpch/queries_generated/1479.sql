@@ -1,0 +1,58 @@
+WITH supplier_summary AS (
+    SELECT s.n_nationkey, 
+           COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+           SUM(s.s_acctbal) AS total_account_balance
+    FROM supplier s
+    INNER JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY s.n_nationkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, 
+           COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey 
+    WHERE o.o_orderstatus = 'O' 
+    GROUP BY c.c_custkey
+),
+line_items_summary AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           AVG(l.l_quantity) AS avg_quantity,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT r.r_name, 
+       COALESCE(su.total_suppliers, 0) AS total_suppliers, 
+       COALESCE(cs.total_orders, 0) AS total_orders,
+       COALESCE(ls.total_sales, 0) AS total_sales,
+       COALESCE(cs.total_spent, 0) AS total_spent,
+       CASE 
+           WHEN su.total_account_balance IS NULL THEN 'No Suppliers' 
+           ELSE 'Suppliers Present' 
+       END AS supplier_status
+FROM region r
+LEFT JOIN (
+    SELECT n.n_regionkey, 
+           SUM(ss.total_suppliers) AS total_suppliers
+    FROM supplier_summary ss
+    INNER JOIN nation n ON ss.n_nationkey = n.n_nationkey
+    GROUP BY n.n_regionkey
+) su ON r.r_regionkey = su.n_regionkey
+LEFT JOIN (
+    SELECT c.c_nationkey, 
+           COUNT(co.total_orders) AS total_orders,
+           SUM(co.total_spent) AS total_spent
+    FROM customer_orders co
+    INNER JOIN customer c ON co.c_custkey = c.c_custkey
+    GROUP BY c.c_nationkey
+) cs ON r.r_regionkey = cs.c_nationkey
+LEFT JOIN (
+    SELECT l.l_orderkey,
+           SUM(ls.total_sales) AS total_sales
+    FROM line_items_summary ls
+    GROUP BY l.l_orderkey
+) ls ON cs.total_orders = ls.l_orderkey
+WHERE r.r_name IS NOT NULL
+ORDER BY r.r_name;

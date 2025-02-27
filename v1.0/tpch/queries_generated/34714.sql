@@ -1,0 +1,69 @@
+WITH RECURSIVE TotalSales AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2024-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+
+    UNION ALL
+    
+    SELECT 
+        ts.o_orderkey,
+        ts.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) + ts.total_price
+    FROM 
+        TotalSales ts
+    JOIN 
+        lineitem l ON ts.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2024-01-01'
+    GROUP BY 
+        ts.o_orderkey, ts.o_orderdate
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_name, 
+        COUNT(DISTINCT o.o_orderkey) AS order_count, 
+        SUM(ts.total_price) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        TotalSales ts ON o.o_orderkey = ts.o_orderkey
+    GROUP BY 
+        c.c_name
+),
+SupplierStats AS (
+    SELECT 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supply_cost_total
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name
+)
+SELECT 
+    co.c_name, 
+    co.order_count, 
+    COALESCE(co.total_spent, 0) AS customer_spent,
+    ss.supply_cost_total,
+    RANK() OVER (ORDER BY COALESCE(co.total_spent, 0) DESC) AS spending_rank
+FROM 
+    CustomerOrders co
+FULL OUTER JOIN 
+    SupplierStats ss ON TRUE
+WHERE 
+    (co.order_count IS NULL OR co.order_count > 0) AND 
+    (ss.supply_cost_total IS NULL OR ss.supply_cost_total > 0)
+ORDER BY 
+    co.c_name, ss.s_name;

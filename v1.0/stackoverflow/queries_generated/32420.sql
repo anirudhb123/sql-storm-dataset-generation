@@ -1,0 +1,91 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.Id
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS TotalUpvotedPosts,
+        AVG(COALESCE(p.Score, 0)) AS AvgPostScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS ChangeTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+FlaggedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        SUM(CASE WHEN v.VoteTypeId IN (3, 12) THEN 1 ELSE 0 END) AS NegativeVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title
+    HAVING 
+        COUNT(v.Id) > 5 AND 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) < COUNT(v.Id) / 2
+)
+SELECT 
+    up.DisplayName,
+    up.TotalPosts,
+    up.TotalQuestions,
+    up.TotalAnswers,
+    up.TotalUpvotedPosts,
+    up.AvgPostScore,
+    pht.EditCount,
+    pht.LastEditDate,
+    pht.ChangeTypes,
+    fp.Title AS FlaggedPostTitle,
+    fp.NegativeVotes
+FROM 
+    UserPostStats up
+LEFT JOIN 
+    PostHistoryDetails pht ON up.UserId = pht.PostId
+LEFT JOIN 
+    FlaggedPosts fp ON pht.PostId = fp.Id
+ORDER BY 
+    up.TotalPosts DESC, 
+    up.AvgPostScore DESC
+LIMIT 50;

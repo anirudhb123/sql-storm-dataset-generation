@@ -1,0 +1,41 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey,
+           CAST(c.c_name AS varchar(255)) AS full_name
+    FROM customer c
+    WHERE c.c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey,
+           CAST(CONCAT(ch.full_name, ' -> ', c.c_name) AS varchar(255))
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal > ch.c_acctbal
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+SupplierPerformance AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(DISTINCT ps.ps_partkey) AS parts_count,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT ch.c_name AS customer_name,
+       os.total_revenue,
+       sp.s_name AS supplier_name,
+       sp.total_cost,
+       (CASE
+            WHEN sp.total_cost IS NULL THEN 'No cost data'
+            WHEN sp.total_cost < 5000 THEN 'Low Supplier Cost'
+            ELSE 'High Supplier Cost'
+        END) AS cost_category
+FROM CustomerHierarchy ch
+JOIN OrderSummary os ON ch.c_custkey = os.o_orderkey
+JOIN SupplierPerformance sp ON os.o_orderkey % 100 = sp.parts_count
+WHERE os.revenue_rank <= 5
+ORDER BY os.total_revenue DESC, sp.total_cost ASC;

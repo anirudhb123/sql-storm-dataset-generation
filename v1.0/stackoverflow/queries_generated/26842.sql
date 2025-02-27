@@ -1,0 +1,51 @@
+WITH PostAnalysis AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Body, 
+        p.CreationDate, 
+        p.ViewCount, 
+        p.AnswerCount,
+        ARRAY(SELECT DISTINCT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))) AS Tag) AS PostTags,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '30 days' 
+    GROUP BY p.Id, u.DisplayName
+),
+TagStats AS (
+    SELECT 
+        tag.TagName, 
+        COUNT(p.Id) AS PostCount, 
+        SUM(pa.ViewCount) AS TotalViews, 
+        SUM(pa.UpVoteCount) as TotalUpVotes,
+        AVG(pa.AnswerCount) AS AverageAnswers
+    FROM Tags tag
+    JOIN Posts p ON p.Tags LIKE '%' || tag.TagName || '%'
+    JOIN PostAnalysis pa ON pa.PostId = p.Id
+    GROUP BY tag.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName, 
+        PostCount, 
+        TotalViews, 
+        TotalUpVotes, 
+        AverageAnswers,
+        RANK() OVER (ORDER BY TotalViews DESC) AS TagRank
+    FROM TagStats
+)
+SELECT 
+    tt.TagName, 
+    tt.PostCount, 
+    tt.TotalViews, 
+    tt.TotalUpVotes, 
+    tt.AverageAnswers
+FROM TopTags tt
+WHERE tt.TagRank <= 10
+ORDER BY tt.TagRank;

@@ -1,0 +1,66 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        p.PostTypeId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(p.ViewCount) AS AvgViewCount,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName, p.PostTypeId
+),
+UserActivity AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        pht.PostId,
+        pht.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        STRING_AGG(DISTINCT pht.Comment, '; ') AS Comments
+    FROM 
+        PostHistory pht
+    WHERE 
+        pht.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        pht.PostId, pht.PostHistoryTypeId
+)
+SELECT 
+    tg.TagName,
+    ua.DisplayName,
+    us.TotalPosts,
+    us.TotalAnswers,
+    us.AcceptedAnswers,
+    us.TotalScore,
+    phs.ChangeCount AS TotalChanges,
+    phs.Comments
+FROM 
+    TagStats tg
+JOIN 
+    UserActivity ua ON ua.TotalPosts > 0
+JOIN 
+    PostHistoryStats phs ON phs.PostId IN (
+        SELECT Id FROM Posts WHERE Tags LIKE '%' || tg.TagName || '%'
+    )
+LEFT JOIN 
+    Users us ON us.Id = ua.TotalPosts
+WHERE 
+    tg.PostCount > 5
+ORDER BY 
+    tg.TagName, ua.DisplayName;

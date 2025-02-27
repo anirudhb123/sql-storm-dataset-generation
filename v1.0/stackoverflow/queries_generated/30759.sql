@@ -1,0 +1,93 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT
+        UserId,
+        DisplayName,
+        TotalViews,
+        PostCount,
+        RANK() OVER (ORDER BY TotalViews DESC) AS Rank
+    FROM 
+        UserActivity
+    WHERE 
+        PostCount > 0
+),
+PostHistoryWithComments AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Comments c ON ph.PostId = c.PostId
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId, ph.CreationDate, ph.UserDisplayName, ph.Comment
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        COALESCE(SUM(phc.CommentCount), 0) AS TotalComments,
+        COALESCE(MAX(ph.HistoryDate), '1900-01-01') AS LastEditedDate
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        PostHistoryWithComments phc ON rp.PostId = phc.PostId
+    LEFT JOIN 
+        PostHistory ph ON rp.PostId = ph.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.AnswerCount
+)
+SELECT 
+    pu.DisplayName,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.TotalComments,
+    ps.LastEditedDate
+FROM 
+    PostStatistics ps
+JOIN 
+    TopUsers pu ON ps.OwnerUserId = pu.UserId
+WHERE 
+    pu.Rank <= 10
+ORDER BY 
+    ps.Score DESC, 
+    ps.ViewCount DESC;

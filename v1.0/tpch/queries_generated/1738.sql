@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_customerkey,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+),
+TotalLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2022-01-01'
+    GROUP BY 
+        l.l_orderkey
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    COALESCE(t.total_sales, 0) AS total_sales,
+    s.s_name AS supplier_name,
+    s.nation_name,
+    CASE 
+        WHEN o.o_totalprice > 5000 THEN 'High Value'
+        WHEN o.o_totalprice BETWEEN 1000 AND 5000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS order_value_category
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    TotalLineItems t ON o.o_orderkey = t.l_orderkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_retailprice > 100) -- Example of using IN with a subquery
+LEFT JOIN 
+    SupplierDetails s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    o.order_rank <= 5
+ORDER BY 
+    o.o_orderdate DESC, 
+    total_sales DESC;

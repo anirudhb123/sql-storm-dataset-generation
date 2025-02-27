@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes, 
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.PostTypeId, p.Score
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        CASE 
+            WHEN rp.Rank = 1 THEN 'Best Post'
+            WHEN rp.CommentCount > 5 THEN 'Popular Post'
+            ELSE 'Regular Post'
+        END AS PostCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 3 
+),
+PostDetails AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.CommentCount,
+        tp.UpVotes,
+        tp.DownVotes,
+        tp.PostCategory,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges, 
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges, 
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges  
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Badges b ON b.UserId IN (
+            SELECT DISTINCT OwnerUserId 
+            FROM Posts 
+            WHERE Id = tp.PostId
+        )
+    GROUP BY 
+        tp.PostId, tp.Title, tp.CreationDate, tp.CommentCount, tp.UpVotes, tp.DownVotes, tp.PostCategory
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.CommentCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.PostCategory,
+    (pd.UpVotes - pd.DownVotes) AS NetVotes,
+    CASE 
+        WHEN (pd.UpVotes - pd.DownVotes) > 0 THEN 'Positive' 
+        WHEN (pd.UpVotes - pd.DownVotes) < 0 THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS VoteSentiment,
+    pd.GoldBadges + pd.SilverBadges + pd.BronzeBadges AS TotalBadges,
+    ROW_NUMBER() OVER (ORDER BY (pd.UpVotes - pd.DownVotes) DESC) AS PostRank
+FROM 
+    PostDetails pd
+WHERE 
+    pd.TotalBadges > 0 
+ORDER BY 
+    pd.NetVotes DESC, pd.CreationDate ASC
+LIMIT 10;

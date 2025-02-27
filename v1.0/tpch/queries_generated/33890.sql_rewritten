@@ -1,0 +1,41 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+total_order_cost AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_cost
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(ps.ps_partkey) AS total_parts, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost, 
+           SUM(ps.ps_availqty) AS total_available_qty
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_order_summary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           AVG(o.o_totalprice) AS avg_order_value, 
+           MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT cs.c_name, cs.order_count, cs.avg_order_value,
+       ss.total_parts, ss.avg_supply_cost,
+       th.total_cost
+FROM customer_order_summary cs
+JOIN supplier_summary ss ON cs.order_count > 0 AND ss.total_parts > 5
+LEFT JOIN total_order_cost th ON cs.order_count = (SELECT COUNT(*) FROM orders o WHERE o.o_custkey = cs.c_custkey)
+WHERE cs.last_order_date >= DATE '1997-01-01'
+ORDER BY cs.avg_order_value DESC, ss.avg_supply_cost ASC
+LIMIT 100;

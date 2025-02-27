@@ -1,0 +1,63 @@
+WITH PostAggregates AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(DISTINCT V.UserId) FILTER (WHERE V.VoteTypeId = 2) AS UpvoteCount,
+        COUNT(DISTINCT V.UserId) FILTER (WHERE V.VoteTypeId = 3) AS DownvoteCount,
+        AVG(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - P.CreationDate))) AS AvgAgeInSeconds,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM
+        Posts P
+    LEFT JOIN
+        Comments C ON C.PostId = P.Id
+    LEFT JOIN
+        Votes V ON V.PostId = P.Id
+    LEFT JOIN
+        LATERAL unnest(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')) AS TagId ON regex_replace(TagId, '[<>]', '') IS NOT NULL
+    LEFT JOIN
+        Tags T ON T.Id = CAST(TagId AS INT)
+    WHERE
+        P.PostTypeId IN (1, 2) -- Considering Questions and Answers
+    GROUP BY
+        P.Id, P.Title, P.Body
+),
+PostHistories AS (
+    SELECT
+        PH.PostId,
+        COUNT(*) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM
+        PostHistory PH
+    WHERE
+        PH.PostHistoryTypeId IN (4, 5, 6)
+    GROUP BY
+        PH.PostId
+),
+CombinedResults AS (
+    SELECT
+        PA.PostId,
+        PA.Title,
+        PA.Body,
+        PA.CommentCount,
+        PA.UpvoteCount,
+        PA.DownvoteCount,
+        PA.AvgAgeInSeconds,
+        PA.Tags,
+        COALESCE(PH.EditCount, 0) AS EditCount,
+        PH.LastEditDate
+    FROM
+        PostAggregates PA
+    LEFT JOIN
+        PostHistories PH ON PA.PostId = PH.PostId
+)
+SELECT
+    *,
+    CASE WHEN EditCount > 0 THEN 'Edited' ELSE 'Not Edited' END AS EditStatus,
+    ROUND((COALESCE(UpvoteCount, 0) - COALESCE(DownvoteCount, 0))::numeric, 2) AS NetVotes
+FROM
+    CombinedResults
+ORDER BY
+    AvgAgeInSeconds DESC, UpvoteCount DESC
+LIMIT 100;

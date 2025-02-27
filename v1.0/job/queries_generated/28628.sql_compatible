@@ -1,0 +1,48 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        a.title AS MovieTitle,
+        a.production_year AS ProductionYear,
+        k.keyword AS Keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS Rank
+    FROM 
+        aka_title AS a
+    JOIN 
+        movie_keyword AS mk ON a.id = mk.movie_id
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+ActorCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS ActorCount
+    FROM 
+        cast_info AS ci
+    GROUP BY 
+        ci.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rt.MovieTitle,
+        rt.ProductionYear,
+        rt.Keyword,
+        ac.ActorCount
+    FROM 
+        RankedTitles AS rt
+    JOIN 
+        ActorCounts AS ac ON rt.MovieTitle = ac.movie_id
+    WHERE 
+        rt.Rank <= 5 
+)
+SELECT 
+    fm.MovieTitle,
+    fm.ProductionYear,
+    fm.Keyword,
+    fm.ActorCount
+FROM 
+    FilteredMovies AS fm
+ORDER BY 
+    fm.ProductionYear DESC, 
+    fm.ActorCount DESC;

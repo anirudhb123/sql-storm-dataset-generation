@@ -1,0 +1,56 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN P.ViewCount IS NOT NULL THEN P.ViewCount ELSE 0 END) AS TotalViews,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.AnswerCount,
+        P.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalViews,
+    UA.TotalPosts,
+    UA.TotalComments,
+    UA.TotalUpVotes,
+    UA.TotalDownVotes,
+    COALESCE(PS.Title, 'No Posts') AS MostRecentPostTitle,
+    COALESCE(PS.Score, 0) AS MostRecentPostScore,
+    COALESCE(PS.CreationDate, 'N/A') AS MostRecentPostDate
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    PostStats PS ON UA.UserId = PS.OwnerUserId AND PS.PostRank = 1
+WHERE 
+    UA.TotalPosts > 5
+ORDER BY 
+    UA.TotalViews DESC, UA.TotalPosts DESC;

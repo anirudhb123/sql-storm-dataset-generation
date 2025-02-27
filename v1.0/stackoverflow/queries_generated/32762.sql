@@ -1,0 +1,55 @@
+WITH RECURSIVE UserScore AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+),
+TopQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS QuestionRank
+    FROM Posts p
+    JOIN LATERAL unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '> <')) AS t(TagName) ON true
+    WHERE p.PostTypeId = 1 -- Questions only
+    GROUP BY p.Id
+),
+AnswerDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COUNT(a.Id) AS AnswerCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyPerPost
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId -- Answers
+    LEFT JOIN Votes v ON a.Id = v.PostId AND v.VoteTypeId IN (8, 2) -- Bounty and Up votes
+    WHERE p.PostTypeId = 1 -- Only for questions
+    GROUP BY p.Id
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    us.TotalBounty,
+    tq.Title AS TopQuestionTitle,
+    tq.CreationDate AS QuestionCreatedDate,
+    tq.ViewCount AS QuestionViews,
+    tq.Score AS QuestionScore,
+    ad.AnswerCount,
+    ad.TotalBountyPerPost
+FROM UserScore us
+JOIN TopQuestions tq ON us.UserId = tq.OwnerUserId
+JOIN AnswerDetails ad ON ad.PostId = tq.PostId
+WHERE us.TotalBounty > 0
+  AND tq.QuestionRank <= 10 
+ORDER BY us.Reputation DESC, tq.Score DESC;

@@ -1,0 +1,54 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+   
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    INNER JOIN 
+        movie_hierarchy mh ON mh.linked_movie_id = mt.id
+)
+SELECT 
+    a.name AS actor_name,
+    a.imdb_index AS actor_index,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(*) OVER (PARTITION BY a.id ORDER BY m.production_year) AS total_movies,
+    COALESCE(STRING_AGG(DISTINCT kw.keyword, ', '), 'No Keywords') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY m.production_year DESC) AS rn
+FROM 
+    aka_name a
+INNER JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+INNER JOIN 
+    movie_hierarchy m ON ci.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+WHERE 
+    m.production_year >= 2000 
+    AND m.title NOT LIKE '%Unreleased%'
+GROUP BY 
+    a.id, m.title, m.production_year
+HAVING 
+    COUNT(*) > 2 
+ORDER BY 
+    total_movies DESC, actor_name ASC;

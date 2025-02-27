@@ -1,0 +1,49 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, NULL AS parent_suppkey, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+    
+    UNION ALL
+    
+    SELECT s2.s_suppkey, s2.s_name, sh.s_suppkey AS parent_suppkey, s2.s_acctbal
+    FROM supplier s2
+    JOIN SupplierHierarchy sh ON sh.s_suppkey = s2.s_suppkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT ps.ps_partkey) AS part_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(CASE 
+            WHEN l.l_returnflag = 'R' THEN l.l_quantity 
+            WHEN l.l_returnflag IS NULL THEN 0
+            ELSE l.l_quantity * 0.5 
+        END) AS avg_conditioned_quantity,
+    SUM(COALESCE(l.l_tax, 0) + (l.l_discount * 0.1) * 1000) AS bizarre_tax_calculation,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    partsupp ps ON ps.ps_partkey = l.l_partkey AND ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    part p ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+WHERE 
+    o.o_orderpriority IN ('1-URGENT', '2-HIGH')
+    AND (s.s_acctbal IS NOT NULL OR sh.s_suppkey IS NULL)
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(l.l_orderkey) > (SELECT AVG(order_count) FROM (SELECT COUNT(o2.o_orderkey) AS order_count FROM orders o2 GROUP BY o2.o_custkey) AS avg_order_counts)
+ORDER BY 
+    total_revenue DESC
+LIMIT 100;

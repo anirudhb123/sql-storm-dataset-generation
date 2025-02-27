@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        NULL::integer AS parent_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        mh.movie_id AS parent_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+ActorStats AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        AVG(CASE 
+            WHEN title.production_year >= 2015 THEN 1 
+            ELSE 0 
+        END) AS avg_recent_movies,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    JOIN 
+        aka_title title ON title.id = c.movie_id
+    GROUP BY 
+        a.person_id
+),
+TopActors AS (
+    SELECT 
+        person_id,
+        total_movies,
+        avg_recent_movies,
+        actor_names,
+        RANK() OVER (ORDER BY total_movies DESC) AS rank
+    FROM 
+        ActorStats
+)
+SELECT 
+    ma.movie_id,
+    ma.title,
+    COALESCE(ta.actor_names, 'No actors') AS actors,
+    CASE 
+        WHEN ma.production_year IS NULL THEN 'Unknown Year'
+        ELSE ma.production_year::text 
+    END AS production_year,
+    COALESCE(ta.total_movies, 0) AS total_movies,
+    COALESCE(ta.avg_recent_movies, 0) AS avg_recent_movies_rate
+FROM 
+    MovieHierarchy ma
+LEFT JOIN 
+    TopActors ta ON ma.parent_id = ta.person_id
+WHERE 
+    ma.level = 1
+ORDER BY 
+    ma.production_year DESC NULLS LAST, 
+    ta.total_movies DESC;

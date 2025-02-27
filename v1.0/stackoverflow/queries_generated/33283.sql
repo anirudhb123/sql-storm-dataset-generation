@@ -1,0 +1,82 @@
+WITH RecursiveTopUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM Users u
+    WHERE u.Reputation > 1000
+),
+
+RecentPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate > (CURRENT_TIMESTAMP - INTERVAL '30 days') 
+),
+
+UserPostStats AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+
+PopularPostTags AS (
+    SELECT
+        t.TagName,
+        COUNT(pt.PostId) AS UsageCount
+    FROM Tags t
+    JOIN Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    JOIN PostLinks pl ON p.Id = pl.PostId
+    GROUP BY t.TagName
+    HAVING COUNT(pt.PostId) > 5
+),
+
+ClosedPostReason AS (
+    SELECT
+        p.Id AS ClosedPostId,
+        MIN(ph.CreationDate) AS FirstClosedDate,
+        STRING_AGG(cr.Name) AS Reasons
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    JOIN CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11)  -- Closed or Reopened
+    GROUP BY p.Id
+)
+
+SELECT
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    p.Title AS RecentPost,
+    p.CreationDate AS PostDate,
+    ps.TotalPosts,
+    ps.TotalQuestions,
+    ps.TotalAnswers,
+    tt.TagName,
+    pp.UsageCount AS TagUsage,
+    cpr.Reasons AS ClosedReasons,
+    ROW_NUMBER() OVER (PARTITION BY u.UserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+FROM RecursiveTopUsers u
+LEFT JOIN RecentPosts p ON u.UserId = p.OwnerUserId
+LEFT JOIN UserPostStats ps ON u.UserId = ps.UserId
+LEFT JOIN PopularPostTags tt ON tt.TagName IN (
+    SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))
+)
+LEFT JOIN ClosedPostReason cpr ON cpr.ClosedPostId = p.PostId
+WHERE u.Rank <= 10 -- Top 10 Users
+ORDER BY u.Reputation DESC, p.CreationDate DESC
+LIMIT 100;

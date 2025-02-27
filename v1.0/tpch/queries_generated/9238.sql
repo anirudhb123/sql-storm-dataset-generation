@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        n.n_name AS nation_name,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    ),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_supplycost, 
+        ps.ps_availqty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > 100.00
+    ),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, GETDATE())
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000
+)
+SELECT 
+    r.nation_name, 
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+    COUNT(DISTINCT fp.p_partkey) AS part_count,
+    SUM(ro.revenue) AS total_revenue
+FROM 
+    RankedSuppliers rs
+JOIN 
+    region r ON rs.n_regionkey = r.r_regionkey
+JOIN 
+    FilteredParts fp ON rs.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = fp.p_partkey)
+JOIN 
+    RecentOrders ro ON EXISTS (SELECT 1 FROM lineitem l WHERE l.l_orderkey = ro.o_orderkey AND l.l_suppkey = rs.s_suppkey)
+GROUP BY 
+    r.nation_name
+ORDER BY 
+    total_revenue DESC;

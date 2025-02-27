@@ -1,0 +1,50 @@
+
+WITH RECURSIVE PartHierarchy AS (
+    SELECT p_partkey, p_name, p_size, p_retailprice, 1 AS depth
+    FROM part
+    WHERE p_size < 5
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_size, p.p_retailprice * 0.9, ph.depth + 1
+    FROM part p
+    JOIN PartHierarchy ph ON p.p_size = ph.p_size + 1
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey, c.c_name
+),
+LineItemAnalysis AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    ph.p_name,
+    ph.p_size,
+    COALESCE(sd.total_supply_cost, 0) AS total_supply_cost,
+    tc.c_name AS top_customer,
+    l.total_revenue AS order_revenue
+FROM 
+    PartHierarchy ph
+LEFT JOIN 
+    SupplierDetails sd ON sd.total_supply_cost < (SELECT AVG(total_supply_cost) FROM SupplierDetails)
+LEFT JOIN 
+    TopCustomers tc ON tc.rank <= 5 AND tc.c_custkey = (SELECT o.o_custkey FROM orders o ORDER BY o.o_orderdate DESC LIMIT 1)
+LEFT JOIN 
+    LineItemAnalysis l ON l.l_orderkey = (SELECT l.l_orderkey FROM lineitem l ORDER BY l.l_shipdate LIMIT 1)
+WHERE 
+    ph.depth = (SELECT MAX(depth) FROM PartHierarchy)
+    AND ph.p_retailprice IS NOT NULL
+    AND ph.p_retailprice IN (SELECT DISTINCT p_retailprice FROM part WHERE p_size > 10)
+ORDER BY 
+    ph.p_name, tc.c_name
+FETCH FIRST 50 ROWS ONLY;

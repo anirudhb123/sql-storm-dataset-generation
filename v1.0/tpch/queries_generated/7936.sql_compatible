@@ -1,0 +1,36 @@
+
+WITH SupplierAgg AS (
+    SELECT s_nationkey, SUM(s_acctbal) AS total_acctbal
+    FROM supplier
+    GROUP BY s_nationkey
+),
+PartSuppAgg AS (
+    SELECT ps_partkey, SUM(ps_supplycost * ps_availqty) AS total_supplycost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+OrderLine AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_orderdate, COUNT(l.l_orderkey) AS line_count, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY o.o_orderkey, o.o_orderstatus, o.o_orderdate
+),
+NationRevenue AS (
+    SELECT n.n_name, SUM(ola.total_revenue) AS total_revenue, n.n_nationkey
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN OrderLine ola ON o.o_orderkey = ola.o_orderkey
+    GROUP BY n.n_name, n.n_nationkey
+)
+SELECT 
+    n.n_name,
+    nr.total_revenue,
+    sa.total_acctbal,
+    p.total_supplycost
+FROM NationRevenue nr
+JOIN SupplierAgg sa ON nr.n_nationkey = sa.s_nationkey
+JOIN PartSuppAgg p ON p.ps_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey IN (SELECT s_suppkey FROM supplier WHERE s_nationkey = nr.n_nationkey))
+ORDER BY nr.total_revenue DESC, sa.total_acctbal DESC
+LIMIT 10;

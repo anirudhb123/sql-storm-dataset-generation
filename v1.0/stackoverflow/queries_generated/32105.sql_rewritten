@@ -1,0 +1,66 @@
+WITH RecursiveUserVotes AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY COUNT(V.Id) DESC) AS VoteRank
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+RecentPostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(SUM(CAST(P.Score AS INT)), 0) AS TotalScore,
+        SUM(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS HasAcceptedAnswer
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY P.Id, P.Title, P.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        P.PostId,
+        PD.Title,
+        PD.CreationDate,
+        PD.CommentCount,
+        PD.TotalScore,
+        RUV.DisplayName AS TopVoter,
+        RUV.TotalVotes,
+        ROW_NUMBER() OVER (ORDER BY PD.TotalScore DESC) AS PostRank
+    FROM RecentPostDetails PD
+    LEFT JOIN RecursiveUserVotes RUV ON RUV.UserId = (SELECT UserId FROM Votes WHERE PostId = PD.PostId AND VoteTypeId = 2 ORDER BY CreationDate DESC LIMIT 1)
+    WHERE RUV.TotalVotes > 0
+    LIMIT 10
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        PH.UserDisplayName,
+        PH.CreationDate,
+        PH.Comment,
+        PH.Text AS CloseReason
+    FROM Posts P
+    INNER JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE PH.PostHistoryTypeId = 10
+)
+SELECT 
+    T.Title AS PostTitle,
+    T.TopVoter,
+    T.TotalVotes,
+    T.CommentCount,
+    T.CreationDate AS PostCreationDate,
+    T.TotalScore AS Score,
+    COALESCE(CP.CloseReason, 'Not closed') AS CloseReason,
+    CASE 
+        WHEN T.HasAcceptedAnswer > 0 THEN 'Yes'
+        ELSE 'No'
+    END AS HasAcceptedAnswer
+FROM TopPosts T
+LEFT JOIN ClosedPosts CP ON T.PostId = CP.PostId
+ORDER BY T.PostRank;

@@ -1,0 +1,52 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS average_has_note,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        total_cast,
+        average_has_note,
+        keywords,
+        DENSE_RANK() OVER (ORDER BY total_cast DESC) AS rank
+    FROM 
+        RankedMovies
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.total_cast,
+    tm.average_has_note,
+    tm.keywords
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.total_cast DESC, 
+    tm.production_year ASC;

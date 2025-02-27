@@ -1,0 +1,49 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT cc.cc_call_center_id,
+           cc.cc_name,
+           s.s_store_id,
+           s.s_store_name,
+           SUM(ss.ss_net_profit) AS total_profit
+    FROM call_center cc
+    JOIN store s ON cc.cc_call_center_id = s.s_store_id
+    LEFT JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY cc.cc_call_center_id, cc.cc_name, s.s_store_id, s.s_store_name
+    HAVING total_profit > 0
+    UNION ALL
+    SELECT s.cc_call_center_id,
+           NULL AS cc_name,
+           s.s_store_id,
+           s.s_store_name,
+           SUM(ss.ss_net_profit) AS total_profit
+    FROM sales_hierarchy sh
+    JOIN store s ON sh.s_store_id = s.s_store_id
+    JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    WHERE sh.total_profit > 0
+    GROUP BY s.s_store_id, s.s_store_name
+), 
+top_customers AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           SUM(ws.ws_net_profit) AS total_spent
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_sold_date_sk IN (SELECT MAX(ws2.ws_sold_date_sk) FROM web_sales ws2 GROUP BY ws2.ws_bill_customer_sk)
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+    ORDER BY total_spent DESC
+    LIMIT 10
+)
+SELECT cc.cc_name,
+       s.s_store_name,
+       th.c_first_name,
+       th.c_last_name,
+       th.total_spent,
+       COALESCE(sh.total_profit, 0) AS call_center_profit
+FROM top_customers th
+JOIN sales_hierarchy sh ON th.c_customer_sk = sh.cc_call_center_id
+LEFT JOIN call_center cc ON sh.cc_call_center_id = cc.cc_call_center_id
+LEFT JOIN store s ON sh.s_store_id = s.s_store_id
+WHERE sh.total_profit IS NOT NULL
+AND (cc.cc_closed_date_sk IS NULL OR cc.cc_closed_date_sk > CURRENT_DATE)
+ORDER BY cc.cc_name, s.s_store_name, th.total_spent DESC;

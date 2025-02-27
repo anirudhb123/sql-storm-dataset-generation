@@ -1,0 +1,65 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id, 
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    an.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(cc.id) AS cast_count,
+    array_agg(DISTINCT kt.keyword) AS keywords,
+    AVG(pi.age) AS average_age,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+FROM 
+    aka_name an
+JOIN 
+    cast_info ci ON an.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mt ON ci.movie_id = mt.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mt.movie_id
+LEFT JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+LEFT JOIN 
+    info_type it ON it.id = pi.info_type_id  -- Assuming pi is defined further below
+LEFT JOIN 
+    person_info pi ON pi.person_id = an.person_id AND it.info = 'age'
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mt.movie_id
+LEFT JOIN 
+    company_name cn ON cn.id = mc.company_id
+WHERE 
+    mt.production_year IS NOT NULL
+AND 
+    mt.production_year > 2000
+AND 
+    an.name IS NOT NULL
+GROUP BY 
+    an.name, mt.title, mt.production_year
+HAVING 
+    COUNT(cc.id) > 1
+ORDER BY 
+    average_age DESC,
+    movie_title ASC;
+

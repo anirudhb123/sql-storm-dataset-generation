@@ -1,0 +1,50 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        COUNT(sr.item_sk) AS return_count,
+        SUM(sr.return_amt) AS total_return_amt,
+        SUM(sr.return_tax) AS total_return_tax,
+        SUM(sr.return_ship_cost) AS total_return_ship_cost,
+        ROW_NUMBER() OVER (PARTITION BY sr.returned_date_sk ORDER BY SUM(sr.return_amt) DESC) AS rn
+    FROM 
+        store_returns sr
+    JOIN 
+        customer c ON sr.customer_sk = c.customer_sk
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.demo_sk
+    WHERE 
+        cd.marital_status = 'M'
+        AND cd.gender = 'F'
+        AND sr.returned_date_sk >= (SELECT MAX(d_date_sk) - 365 FROM date_dim)
+    GROUP BY 
+        sr.returned_date_sk, sr.return_time_sk
+),
+TopReturns AS (
+    SELECT 
+        r.returned_date_sk,
+        r.return_time_sk,
+        r.return_count,
+        r.total_return_amt,
+        r.total_return_tax,
+        r.total_return_ship_cost
+    FROM 
+        RankedReturns r
+    WHERE 
+        r.rn <= 10
+)
+SELECT 
+    d.d_date AS return_date,
+    t.return_count,
+    t.total_return_amt,
+    t.total_return_tax,
+    t.total_return_ship_cost
+FROM 
+    date_dim d
+JOIN 
+    TopReturns t ON d.d_date_sk = t.returned_date_sk
+WHERE 
+    d.d_year = EXTRACT(YEAR FROM DATE '2002-10-01')
+ORDER BY 
+    t.total_return_amt DESC;

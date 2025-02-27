@@ -1,0 +1,59 @@
+WITH FeaturedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+    HAVING 
+        COUNT(DISTINCT c.person_id) > 5
+),
+TopActors AS (
+    SELECT 
+        p.id AS person_id,
+        p.name,
+        COUNT(DISTINCT c.movie_id) AS movies_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    GROUP BY 
+        p.id, p.name
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 3
+    ORDER BY 
+        movies_count DESC
+    LIMIT 10
+)
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.total_cast,
+    fm.aka_names,
+    ta.name AS top_actor,
+    ta.movies_count
+FROM 
+    FeaturedMovies fm
+LEFT JOIN 
+    TopActors ta ON ta.person_id IN (
+        SELECT 
+            c.person_id 
+        FROM 
+            cast_info c 
+        WHERE 
+            c.movie_id = fm.movie_id
+    )
+ORDER BY 
+    fm.production_year DESC, 
+    fm.total_cast DESC;

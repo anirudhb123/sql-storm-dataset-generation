@@ -1,0 +1,50 @@
+WITH RecursivePostHistory AS (
+    SELECT ph.Id, ph.PostId, ph.CreationDate, ph.UserId, ph.Comment, ph.PostHistoryTypeId,
+           ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+),
+UserPostStats AS (
+    SELECT u.Id AS UserId, 
+           COUNT(DISTINCT p.Id) AS PostCount,
+           SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+           SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+           AVG(u.Reputation) AS AverageReputation
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+TagStatistics AS (
+    SELECT t.Id AS TagId,
+           t.TagName,
+           COUNT(DISTINCT p.Id) AS PostCount,
+           AVG(p.ViewCount) AS AvgViewCount
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.Id
+),
+RecentPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, u.DisplayName AS OwnerName,
+           T.TagName, p.ViewCount, 
+           ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    CROSS JOIN Tags T
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+      AND p.PostTypeId = 1
+      AND p.Tags LIKE '%' || T.TagName || '%'
+)
+SELECT r.Id AS PostId,
+       r.Title,
+       r.CreationDate,
+       r.OwnerName,
+       COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseCount,
+       t.TagId,
+       AVG(ts.AvgViewCount) AS AverageTagViewCount,
+       ps.PostCount AS UserPostCount
+FROM RecentPosts r
+LEFT JOIN RecursivePostHistory ph ON r.Id = ph.PostId
+JOIN UserPostStats ps ON r.OwnerName = ps.UserId
+JOIN TagStatistics ts ON ts.TagName = r.TagName
+WHERE r.rn <= 100
+GROUP BY r.Id, r.Title, r.CreationDate, r.OwnerName, t.TagId, ps.PostCount
+ORDER BY r.CreationDate DESC, CloseCount DESC;

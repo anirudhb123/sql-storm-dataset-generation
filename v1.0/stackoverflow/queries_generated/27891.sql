@@ -1,0 +1,77 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges,
+        SUM(b.Class) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS Questions,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS Answers,
+        AVG(p.Score) AS AvgScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+RecentActivity AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS CommentCount,
+        MAX(CreationDate) AS LastCommentDate
+    FROM 
+        Comments 
+    GROUP BY 
+        PostId
+),
+CombinedStats AS (
+    SELECT 
+        ub.UserId,
+        ub.DisplayName,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        ub.TotalBadges,
+        ps.TotalPosts,
+        ps.Questions,
+        ps.Answers,
+        ps.AvgScore,
+        ps.TotalViews,
+        ra.CommentCount,
+        ra.LastCommentDate
+    FROM 
+        UserBadges ub
+    LEFT JOIN 
+        PostStats ps ON ub.UserId = ps.OwnerUserId
+    LEFT JOIN 
+        RecentActivity ra ON ra.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ub.UserId)
+)
+SELECT 
+    cs.DisplayName,
+    cs.TotalBadges,
+    cs.GoldBadges,
+    cs.SilverBadges,
+    cs.BronzeBadges,
+    cs.TotalPosts,
+    cs.Questions,
+    cs.Answers,
+    ROUND(cs.AvgScore, 2) AS AvgScore,
+    cs.TotalViews,
+    COALESCE(cs.CommentCount, 0) AS CommentCount,
+    cs.LastCommentDate
+FROM 
+    CombinedStats cs
+ORDER BY 
+    cs.TotalBadges DESC, cs.TotalPosts DESC;

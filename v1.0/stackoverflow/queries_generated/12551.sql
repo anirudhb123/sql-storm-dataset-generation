@@ -1,0 +1,66 @@
+-- Performance benchmarking query for the StackOverflow schema
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(c.Id, 0)) AS CommentCount,
+        SUM(COALESCE(b.Id, 0)) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViewCount
+    FROM Tags t
+    LEFT JOIN Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY t.TagName
+),
+PostTypeStats AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViewCount
+    FROM PostTypes pt
+    LEFT JOIN Posts p ON pt.Id = p.PostTypeId
+    GROUP BY pt.Name
+)
+
+SELECT 
+    'User Statistics' AS Metric,
+    COUNT(UserId) AS TotalCount,
+    SUM(PostCount) AS TotalPosts,
+    SUM(TotalScore) AS TotalScores,
+    SUM(CommentCount) AS TotalComments,
+    SUM(BadgeCount) AS TotalBadges
+FROM UserStats
+
+UNION ALL
+
+SELECT 
+    'Tag Statistics' AS Metric,
+    COUNT(TagName) AS TotalCount,
+    SUM(PostCount) AS TotalPosts,
+    SUM(TotalViewCount) AS TotalViews,
+    NULL AS TotalScores,
+    NULL AS TotalComments
+FROM TagStats
+
+UNION ALL
+
+SELECT 
+    'Post Type Statistics' AS Metric,
+    COUNT(PostType) AS TotalCount,
+    SUM(PostCount) AS TotalPosts,
+    SUM(TotalScore) AS TotalScores,
+    AVG(AvgViewCount) AS AvgViewCount,
+    NULL AS TotalComments
+FROM PostTypeStats;

@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN pb.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN pb.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts pb ON u.Id = pb.OwnerUserId
+    LEFT JOIN 
+        Votes v ON pb.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        GROUP_CONCAT(t.TagName SEPARATOR ', ') AS TagNames
+    FROM 
+        Posts p
+    JOIN 
+        (SELECT DISTINCT p.Id, SUBSTRING_INDEX(SUBSTRING_INDEX(p.Tags, '>', numbers.n), '>', -1) AS TagName
+         FROM Posts p 
+         INNER JOIN (SELECT 1 AS n UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5) AS numbers 
+         ON CHAR_LENGTH(p.Tags)
+            -CHAR_LENGTH(REPLACE(p.Tags, '>', '')) >= numbers.n - 1) AS t ON p.Id = t.Id
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    us.DisplayName,
+    us.TotalQuestions,
+    us.TotalAnswers,
+    us.TotalUpvotes,
+    us.TotalDownvotes,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CommentCount,
+    pt.TagNames
+FROM 
+    UserStats us
+JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId
+JOIN 
+    PostTags pt ON rp.PostId = pt.PostId
+WHERE 
+    rp.PostRank = 1 
+ORDER BY 
+    us.TotalUpvotes DESC, us.DisplayName;

@@ -1,0 +1,64 @@
+
+WITH Address_Concat AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT_WS(' ', ca_street_number, ca_street_name, ca_street_type, COALESCE(ca_suite_number, '')) AS full_address,
+        ca_city,
+        ca_state
+    FROM 
+        customer_address
+),
+Customer_Aggregate AS (
+    SELECT 
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        COUNT(DISTINCT c_email_address) AS unique_emails,
+        COUNT(DISTINCT c_customer_sk) AS customer_count
+    FROM 
+        customer 
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY 
+        full_name, cd_gender, cd_marital_status, cd_education_status
+),
+Sales_Stats AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws_quantity) AS total_sales_quantity,
+        SUM(ws_sales_price) AS total_sales_amount
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    GROUP BY 
+        ws.web_site_id
+),
+Final_Benchmark AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.full_address,
+        ca.ca_city,
+        ca.ca_state,
+        c.full_name,
+        c.cd_gender,
+        c.cd_marital_status,
+        c.total_sales_quantity,
+        c.total_sales_amount
+    FROM 
+        Address_Concat ca
+    JOIN 
+        Customer_Aggregate c ON c.customer_count > 0
+    JOIN 
+        Sales_Stats s ON s.total_sales_quantity > 100
+)
+SELECT 
+    *,
+    LENGTH(full_address) AS address_length,
+    UPPER(ca_state) AS state_uppercase
+FROM 
+    Final_Benchmark
+ORDER BY 
+    address_length DESC, total_sales_amount DESC
+LIMIT 100;

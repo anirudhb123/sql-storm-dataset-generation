@@ -1,0 +1,36 @@
+WITH NationSupplier AS (
+    SELECT n.n_name, s.s_acctbal, s.s_comment
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+), 
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, ps.ps_availqty, ps.ps_comment, ns.n_name
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN NationSupplier ns ON ns.n_name IN (
+        SELECT DISTINCT n.n_name FROM nation n
+        WHERE n.n_regionkey IN (
+            SELECT r.r_regionkey
+            FROM region r
+            WHERE r.r_name LIKE 'EUROPE%'
+        )
+    )
+), 
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, l.l_quantity, l.l_extendedprice, l.l_discount, l.l_tax
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+)
+SELECT 
+    ns.n_name AS Supplier_Nation,
+    COUNT(DISTINCT od.o_orderkey) AS Total_Orders,
+    SUM(od.l_extendedprice * (1 - od.l_discount)) AS Total_Revenue,
+    AVG(ps.ps_supplycost) AS Average_Supply_Cost,
+    MIN(ps.ps_availqty) AS Min_Available_Quantity
+FROM PartSupplierDetails ps
+JOIN OrderDetails od ON ps.p_partkey = od.l_partkey
+JOIN NationSupplier ns ON ps.n_name = ns.n_name
+GROUP BY ns.n_name
+ORDER BY Total_Revenue DESC, Total_Orders DESC
+LIMIT 10;

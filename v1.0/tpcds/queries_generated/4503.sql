@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.item_sk, 
+        ws_order_number,
+        ws.ship_customer_sk,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.item_sk ORDER BY ws_net_paid DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_net_paid > 100
+),
+TotalReturns AS (
+    SELECT 
+        cr.item_sk,
+        SUM(cr_return_quantity) AS total_returned,
+        COUNT(DISTINCT cr_order_number) AS return_count
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.item_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd_credit_rating = 'Good'
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    rs.item_sk,
+    rs.ws_order_number,
+    rs.ws_net_paid,
+    COALESCE(tr.total_returned, 0) AS total_returned,
+    tr.return_count,
+    ROUND(rs.ws_net_paid - COALESCE(tr.total_returned * 0.1, 0), 2) AS net_after_returns,
+    CASE 
+        WHEN ci.cd_marital_status = 'M' THEN 'Married'
+        ELSE 'Single'
+    END AS marital_status_desc
+FROM 
+    RankedSales rs
+LEFT JOIN 
+    TotalReturns tr ON rs.item_sk = tr.item_sk
+JOIN 
+    CustomerInfo ci ON rs.ship_customer_sk = ci.c_customer_sk
+WHERE 
+    rs.rn <= 3
+ORDER BY 
+    ci.c_customer_sk, rs.ws_net_paid DESC;

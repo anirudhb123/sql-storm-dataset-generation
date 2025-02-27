@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagPostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        pt.Name IN ('Question', 'Answer')
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagPostCount DESC
+    LIMIT 5
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    pt.TagPostCount,
+    ub.BadgeCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+JOIN 
+    PopularTags pt ON pt.TagPostCount > 10
+WHERE 
+    rp.RN = 1
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC
+LIMIT 100;

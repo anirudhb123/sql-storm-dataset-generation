@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        CONCAT('Sequel to ', mh.title),
+        mh.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON m.id = ml.linked_movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    c.role_id,
+    COUNT(cc.subject_id) AS complete_cast_count,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS movie_rank,
+    CASE 
+        WHEN mc.company_type_id IS NULL THEN 'Independent'
+        ELSE ct.kind 
+    END AS company_type,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    MAX(pi.info) FILTER (WHERE it.info = 'bio') AS bio_info
+FROM 
+    cast_info c
+JOIN 
+    aka_name a ON a.person_id = c.person_id
+JOIN 
+    aka_title t ON t.id = c.movie_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+LEFT JOIN 
+    company_type ct ON ct.id = mc.company_type_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN 
+    person_info pi ON pi.person_id = a.person_id
+LEFT JOIN 
+    info_type it ON it.id = pi.info_type_id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = t.id AND cc.subject_id = a.id
+WHERE 
+    t.production_year > 2000
+    AND a.name IS NOT NULL
+GROUP BY 
+    a.id, t.id, c.role_id, mc.company_type_id, ct.kind
+HAVING 
+    COUNT(cc.subject_id) > 1
+ORDER BY 
+    movie_rank;

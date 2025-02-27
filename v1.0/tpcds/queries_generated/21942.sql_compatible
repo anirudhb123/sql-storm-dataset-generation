@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk > (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+),
+CombinedReturns AS (
+    SELECT 
+        cr.returned_date_sk,
+        cr.return_time_sk,
+        cr.return_quantity,
+        cr.return_amount,
+        cr.returned_customer_sk,
+        (SELECT COUNT(*) 
+         FROM catalog_returns crt 
+         WHERE cr.returning_customer_sk = crt.returning_customer_sk) AS catalog_return_count
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.return_quantity IS NOT NULL
+),
+AggSales AS (
+    SELECT 
+        COALESCE(ww.w_warehouse_name, 'Unknown') AS warehouse_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        warehouse ww ON ws.ws_warehouse_sk = ww.w_warehouse_sk
+    GROUP BY 
+        COALESCE(ww.w_warehouse_name, 'Unknown')
+)
+SELECT 
+    a.warehouse_name,
+    a.total_sales,
+    a.order_count,
+    COUNT(r.returned_customer_sk) AS total_returns,
+    AVG(r.return_amount) AS average_return_amount
+FROM 
+    AggSales a
+LEFT JOIN 
+    CombinedReturns r ON r.returned_customer_sk IN (
+        SELECT DISTINCT wr.returned_customer_sk 
+        FROM web_returns wr 
+        WHERE wr.returned_date_sk IN (SELECT DISTINCT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    )
+GROUP BY 
+    a.warehouse_name, a.total_sales, a.order_count
+HAVING 
+    a.total_sales > (SELECT AVG(total_sales) FROM AggSales) OR 
+    COUNT(r.returned_customer_sk) > 10
+ORDER BY 
+    a.total_sales DESC, a.warehouse_name
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

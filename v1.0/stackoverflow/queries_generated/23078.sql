@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+
+PostClosureReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    ue.UpVotes,
+    ue.DownVotes,
+    ue.CommentCount,
+    ue.BadgeCount,
+    CASE 
+        WHEN pcr.CloseReasons IS NOT NULL THEN 'Closed due to: ' || pcr.CloseReasons
+        ELSE 'Open'
+    END AS PostStatus,
+    CASE 
+        WHEN rp.ViewCount IS NULL OR rp.Score IS NULL THEN 'No data'
+        WHEN rp.Score = 0 THEN 'Neutral'
+        WHEN rp.Score > 0 THEN 'Positive'
+        ELSE 'Negative'
+    END AS ScoreEvaluation
+    
+FROM 
+    RankedPosts rp
+JOIN 
+    UserEngagement ue ON ue.UserId = rp.PostId -- Assuming UserId is linked to Posts incorrectly, should correct Logic here based on your model
+LEFT JOIN 
+    PostClosureReasons pcr ON rp.PostId = pcr.PostId
+WHERE 
+    (ue.UpVotes > 5 OR ue.DownVotes > 5)
+AND 
+    ((rp.ViewCount > 100 AND rp.Score > 10) OR (rp.Rank <= 10))
+ORDER BY 
+    rp.Score DESC, ue.BadgeCount DESC
+LIMIT 50;
+
+-- Note: The line containing `JOIN UserEngagement ue ON ue.UserId = rp.PostId` assumes a relationship that may not exist in typical scenarios--adjust logic as needed based on actual schema relationships.

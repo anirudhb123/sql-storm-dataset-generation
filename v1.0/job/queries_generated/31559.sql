@@ -1,0 +1,82 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        NULL::integer AS parent_movie_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        level + 1,
+        h.movie_id AS parent_movie_id
+    FROM 
+        aka_title e
+    JOIN 
+        movie_hierarchy h ON e.episode_of_id = h.movie_id
+),
+cast_role_count AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS role_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+movie_info_summary AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT it.info, ', ') AS info_details
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        it.info LIKE 'Director%' OR it.info LIKE 'Producer%'
+    GROUP BY 
+        mi.movie_id
+),
+keyword_summary AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(cr.role_count, 0) AS total_cast_roles,
+    COALESCE(mi.info_details, 'N/A') AS movie_info,
+    COALESCE(ks.keywords, 'No keywords') AS movie_keywords,
+    COUNT(DISTINCT cc.subject_id) OVER (PARTITION BY mh.movie_id) AS complete_cast_count,
+    COUNT(mh.parent_movie_id) AS episode_count
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_role_count cr ON mh.movie_id = cr.movie_id
+LEFT JOIN 
+    movie_info_summary mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    keyword_summary ks ON mh.movie_id = ks.movie_id
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+ORDER BY 
+    mh.production_year DESC, mh.title ASC
+LIMIT 100;

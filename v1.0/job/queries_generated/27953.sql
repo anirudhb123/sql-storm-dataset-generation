@@ -1,0 +1,61 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER(PARTITION BY t.production_year ORDER BY LENGTH(t.title) DESC) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopActors AS (
+    SELECT 
+        a.name AS actor_name,
+        c.movie_id,
+        COUNT(ci.person_role_id) AS role_count,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS notes_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    JOIN 
+        RankedTitles rt ON t.id = rt.title_id
+    WHERE 
+        rt.title_rank <= 10
+    GROUP BY 
+        a.name, c.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        GROUP_CONCAT(DISTINCT a.actor_name ORDER BY a.actor_name) AS actors,
+        k.keyword AS keyword,
+        m.production_year,
+        COUNT(DISTINCT mci.company_id) AS company_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mci ON m.id = mci.movie_id
+    GROUP BY 
+        m.id, k.keyword, m.production_year
+)
+SELECT 
+    md.movie_id,
+    md.actors,
+    md.keyword,
+    md.production_year,
+    RANK() OVER (PARTITION BY md.production_year ORDER BY md.company_count DESC) AS company_rank
+FROM 
+    MovieDetails md
+WHERE 
+    md.production_year > 2000
+ORDER BY 
+    md.production_year, company_rank;

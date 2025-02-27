@@ -1,0 +1,103 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+RecentPostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, '; ') AS CommentsSnippet
+    FROM 
+        Comments c
+    JOIN 
+        Posts p ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        c.PostId
+),
+PostLinkStats AS (
+    SELECT 
+        pl.PostId,
+        COUNT(pl.RelatedPostId) AS TotalLinks,
+        COUNT(DISTINCT pl.LinkTypeId) FILTER (WHERE pl.LinkTypeId = 1) AS CountLinked,
+        COUNT(DISTINCT pl.LinkTypeId) FILTER (WHERE pl.LinkTypeId = 3) AS CountDuplicate
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(badge_count, 0) AS BadgeCount,
+        COALESCE(rc.TotalPosts, 0) AS PostCount,
+        COALESCE(rp.CommentCount, 0) AS RecentCommentCount,
+        COALESCE(ps.TotalLinks, 0) AS TotalPostLinks,
+        STRING_AGG(DISTINCT p.Tags, ', ') AS UserTags
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS badge_count 
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) + badge_count ON badge_count.UserId = u.Id
+    LEFT JOIN RankedPosts rp ON u.Id = rp.OwnerUserId
+    LEFT JOIN RecentPostComments rpc ON rp.PostId = rpc.PostId
+    LEFT JOIN PostLinkStats ps ON rp.PostId = ps.PostId
+    GROUP BY 
+        u.Id, u.Reputation, badge_count
+),
+FinalReport AS (
+    SELECT 
+        us.UserId,
+        us.Reputation,
+        us.BadgeCount,
+        us.PostCount,
+        us.RecentCommentCount,
+        us.TotalPostLinks,
+        us.UserTags,
+        CASE 
+            WHEN us.Reputation > 1000 THEN 'Expert'
+            WHEN us.Reputation BETWEEN 500 AND 1000 THEN 'Intermediate'
+            ELSE 'Beginner'
+        END AS UserLevel,
+        COALESCE(SUM(pl.Score), 0) AS TotalPostScore
+    FROM 
+        UserStats us
+    LEFT JOIN Posts p ON us.UserId = p.OwnerUserId
+    LEFT JOIN Votes pl ON p.Id = pl.PostId
+    GROUP BY 
+        us.UserId, us.Reputation, us.BadgeCount, us.PostCount, 
+        us.RecentCommentCount, us.TotalPostLinks, us.UserTags
+)
+SELECT 
+    UserId,
+    Reputation,
+    BadgeCount,
+    PostCount,
+    RecentCommentCount,
+    TotalPostLinks,
+    UserTags,
+    UserLevel,
+    TotalPostScore
+FROM 
+    FinalReport
+ORDER BY 
+    Reputation DESC, PostCount DESC
+FETCH FIRST 100 ROWS ONLY;
+

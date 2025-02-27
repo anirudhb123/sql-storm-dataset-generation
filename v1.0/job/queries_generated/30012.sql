@@ -1,0 +1,84 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- Base case: Select all movies with no parent (i.e., they are the top level)
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.episode_of_id IS NULL
+
+    UNION ALL
+
+    -- Recursive case: Join movies with their episodes
+    SELECT
+        e.id AS movie_id,
+        e.title,
+        mh.level + 1
+    FROM
+        aka_title e
+    JOIN
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+),
+cast_with_credits AS (
+    -- Join cast_info with aka_name to get actor names and their roles
+    SELECT
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON a.person_id = c.person_id
+    JOIN
+        role_type r ON r.id = c.role_id
+),
+movie_keywords AS (
+    -- Aggregate keywords for each movie
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY
+        mk.movie_id
+),
+movie_info_with_type AS (
+    -- Combine movie information with its types and keys
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        mi.info,
+        it.info AS type_info,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_info mi ON mi.movie_id = m.id
+    LEFT JOIN
+        info_type it ON mi.info_type_id = it.id
+    LEFT JOIN
+        movie_keywords mk ON mk.movie_id = m.id
+)
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.level,
+    COALESCE(c.actor_name, 'No Cast') AS actor_name,
+    COALESCE(c.role_name, 'No Role') AS role_name,
+    COALESCE(mit.info, 'No Info') AS movie_info,
+    COALESCE(mit.keywords, 'No Keywords') AS keywords
+FROM
+    movie_hierarchy mh
+LEFT JOIN
+    cast_with_credits c ON c.movie_id = mh.movie_id
+LEFT JOIN
+    movie_info_with_type mit ON mit.movie_id = mh.movie_id
+WHERE
+    mh.level <= 3  -- Limit to the first 3 levels of hierarchy
+ORDER BY
+    mh.level, mh.movie_id, c.actor_order;

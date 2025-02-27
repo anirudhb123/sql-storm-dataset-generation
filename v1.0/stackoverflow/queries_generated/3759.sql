@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        COALESCE(COUNT(DISTINCT p.Id), 0) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        u.DisplayName,
+        u.TotalViews,
+        u.TotalScore,
+        u.TotalPosts,
+        COALESCE(ph.CreationDate, 'N/A') AS LastActivity
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserStats u ON rp.OwnerUserId = u.UserId
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            MAX(CreationDate) AS CreationDate 
+         FROM 
+            PostHistory 
+         WHERE 
+            PostHistoryTypeId = 10 
+         GROUP BY 
+            PostId) ph ON rp.Id = ph.PostId
+    WHERE 
+        rp.rn = 1
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.ViewCount,
+    tp.Score,
+    tp.DisplayName,
+    tp.TotalViews,
+    tp.TotalScore,
+    tp.TotalPosts,
+    tp.LastActivity,
+    CASE 
+        WHEN tp.TotalScore >= 100 THEN 'High Scorer'
+        WHEN tp.TotalScore BETWEEN 50 AND 99 THEN 'Medium Scorer'
+        ELSE 'Low Scorer'
+    END AS ScoreCategory
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.TotalViews DESC, 
+    tp.LastActivity DESC;

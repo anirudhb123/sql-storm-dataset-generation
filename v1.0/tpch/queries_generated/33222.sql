@@ -1,0 +1,57 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        total_spent > 1000
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        total_supply_value > 50000
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        DATEDIFF(CURRENT_DATE, o.o_orderdate) AS days_since_order,
+        ROW_NUMBER() OVER (ORDER BY o.o_orderdate DESC) AS recent_order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+)
+SELECT 
+    co.c_name,
+    co.total_spent,
+    HVS.s_name AS supplier_name,
+    ROs.o_orderkey,
+    ROs.days_since_order
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    HighValueSuppliers HVS ON co.c_custkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost IN (SELECT MAX(ps_supplycost) FROM partsupp))
+    LEFT JOIN 
+    RecentOrders ROs ON ROs.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey AND ROs.days_since_order <= 30)
+WHERE 
+    co.order_rank <= 5
+ORDER BY 
+    co.total_spent DESC, 
+    ROs.days_since_order ASC;

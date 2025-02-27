@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.OwnerUserId) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CreationDate,
+        COALESCE(u.DisplayName, 'Anonymous') AS Author,
+        rp.Rank,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.Rank <= 5
+),
+PostEngagements AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.ViewCount,
+        tp.CreationDate,
+        tp.Author,
+        tp.CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Votes v ON tp.PostId = v.PostId
+    LEFT JOIN 
+        Badges b ON tp.OwnerUserId = b.UserId
+    GROUP BY 
+        tp.PostId, tp.Title, tp.ViewCount, tp.CreationDate, tp.Author, tp.CommentCount
+)
+SELECT 
+    pe.PostId,
+    pe.Title,
+    pe.ViewCount,
+    pe.CreationDate,
+    pe.Author,
+    pe.CommentCount,
+    pe.VoteCount,
+    pe.Upvotes,
+    pe.Downvotes,
+    (CASE 
+        WHEN pe.Upvotes > pe.Downvotes THEN 'Positive'
+        WHEN pe.Upvotes < pe.Downvotes THEN 'Negative'
+        ELSE 'Neutral'
+     END) AS Sentiment,
+    (CASE 
+        WHEN pe.HighestBadgeClass IS NULL THEN 'No Badge'
+        WHEN pe.HighestBadgeClass = 1 THEN 'Gold'
+        WHEN pe.HighestBadgeClass = 2 THEN 'Silver'
+        WHEN pe.HighestBadgeClass = 3 THEN 'Bronze'
+     END) AS BadgeStatus,
+    (SELECT COUNT(*) 
+        FROM Posts p2 
+        WHERE p2.ParentId = pe.PostId 
+        AND p2.PostTypeId = 2) AS ChildAnswerCount
+FROM 
+    PostEngagements pe
+WHERE 
+    pe.VoteCount > 0
+ORDER BY 
+    pe.ViewCount DESC, pe.CommentCount DESC
+OFFSET 0 ROWS
+FETCH NEXT 10 ROWS ONLY;

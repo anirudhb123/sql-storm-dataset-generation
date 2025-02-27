@@ -1,0 +1,111 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.CreationDate, 
+        P.OwnerUserId, 
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  -- only questions
+    UNION ALL
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.CreationDate, 
+        P.OwnerUserId, 
+        PH.Level + 1
+    FROM 
+        Posts P
+    JOIN 
+        PostHierarchy PH ON P.ParentId = PH.PostId
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(VoteTypeId) AS TotalVotes,
+        COUNT(DISTINCT UserId) AS UniqueVoters
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+TagSummary AS (
+    SELECT 
+        T.TagName, 
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    WHERE 
+        P.PostTypeId = 1  -- only questions
+    GROUP BY 
+        T.TagName
+),
+ClosedPostHistory AS (
+    SELECT 
+        P.Id AS PostId,
+        PH.CreationDate,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY PH.CreationDate DESC) AS CloseEventRank
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId = 10  -- Post Closed
+),
+LatestClosedPosts AS (
+    SELECT 
+        PostId, 
+        CreationDate AS CloseDate, 
+        Comment
+    FROM 
+        ClosedPostHistory
+    WHERE 
+        CloseEventRank = 1
+)
+SELECT 
+    PH.PostId,
+    PH.Title,
+    PH.CreationDate,
+    U.DisplayName AS OwnerDisplayName,
+    U.Reputation,
+    Tr.ReputationRank,
+    COALESCE(PVS.UpVotes, 0) AS UpVotes,
+    COALESCE(PVS.DownVotes, 0) AS DownVotes,
+    COALESCE(PVS.TotalVotes, 0) AS TotalVotes,
+    COALESCE(PVS.UniqueVoters, 0) AS UniqueVoters,
+    TS.PostCount AS TagPostCount,
+    LCP.CloseDate,
+    LCP.Comment AS CloseComment
+FROM 
+    PostHierarchy PH
+JOIN 
+    Users U ON PH.OwnerUserId = U.Id
+JOIN 
+    UserReputation Tr ON U.Id = Tr.UserId
+LEFT JOIN 
+    PostVoteSummary PVS ON PH.PostId = PVS.PostId
+LEFT JOIN 
+    TagSummary TS ON TS.PostCount > 0  -- Only showing tags that have posts associated
+LEFT JOIN 
+    LatestClosedPosts LCP ON PH.PostId = LCP.PostId
+WHERE 
+    PH.Level = 0  -- Only root questions
+    AND U.Reputation > 1000  -- Only show users with reputation over 1000
+ORDER BY 
+    PH.CreationDate DESC;

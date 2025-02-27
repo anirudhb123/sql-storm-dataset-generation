@@ -1,0 +1,73 @@
+WITH RecursiveTagCTE AS (
+    SELECT Id, TagName, Count, WikiPostId, 1 AS Level
+    FROM Tags
+    WHERE IsRequired = 1
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count, t.WikiPostId, Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTagCTE r ON t.ExcerptPostId = r.Id
+), 
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE 
+            WHEN b.Class = 1 THEN 1
+            ELSE 0 
+        END) AS GoldBadges,
+        SUM(CASE 
+            WHEN b.Class = 2 THEN 1
+            ELSE 0 
+        END) AS SilverBadges,
+        SUM(CASE 
+            WHEN b.Class = 3 THEN 1
+            ELSE 0 
+        END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+), 
+
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE 
+            WHEN v.VoteTypeId = 2 THEN 1
+            ELSE 0 
+        END) AS UpVotes,
+        SUM(CASE 
+            WHEN v.VoteTypeId = 3 THEN 1
+            ELSE 0 
+        END) AS DownVotes,
+        AVG(v.BountyAmount) AS AverageBounty
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '30 days' 
+    GROUP BY p.Id
+)
+
+SELECT 
+    u.DisplayName,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    ps.PostId,
+    ps.Title,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.AverageBounty,
+    rt.TagName
+FROM UserBadges ub
+JOIN Posts ps ON ub.UserId = ps.OwnerUserId
+LEFT JOIN RecursiveTagCTE rt ON ps.Tags LIKE CONCAT('%', rt.TagName, '%')
+WHERE ub.BadgeCount > 0
+ORDER BY ub.BadgeCount DESC, ps.UpVotes DESC;
+

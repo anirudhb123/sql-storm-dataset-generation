@@ -1,0 +1,46 @@
+
+WITH processed_customer_data AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        REPLACE(c.c_email_address, '@', '[at]') AS obfuscated_email,
+        TRIM(UPPER(c.c_country)) AS normalized_country
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT
+        case WHEN ss.ss_net_profit < 0 THEN 'Loss' ELSE 'Profit' END AS profit_status,
+        SUM(ss.ss_net_profit) AS total_profit,
+        COUNT(ss.ss_ticket_number) AS total_sales,
+        SUBSTR(c.full_name, 1, 10) AS short_name,
+        c.ca_city,
+        c.ca_state
+    FROM 
+        store_sales ss
+    JOIN 
+        processed_customer_data c ON ss.ss_customer_sk = CAST(c.c_customer_id AS INT)
+    GROUP BY 
+        profit_status, short_name, c.ca_city, c.ca_state
+)
+SELECT 
+    profit_status,
+    COUNT(*) AS num_customers,
+    AVG(total_profit) AS avg_profit,
+    SUM(total_sales) AS total_sales
+FROM 
+    sales_summary
+GROUP BY 
+    profit_status
+ORDER BY 
+    num_customers DESC;

@@ -1,0 +1,60 @@
+WITH recursive movie_roles AS (
+    SELECT 
+        c.movie_id,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info c
+    INNER JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        c.movie_id
+),
+
+ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY r.role_count DESC) AS rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_roles r ON m.id = r.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+)
+
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    COALESCE(c.name, 'No Company') AS company_name,
+    COUNT(DISTINCT kw.keyword) AS keyword_count,
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = r.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')) AS rating_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+FROM 
+    ranked_movies r
+LEFT JOIN 
+    movie_companies mc ON r.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+LEFT JOIN 
+    movie_keyword mk ON r.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    cast_info ci ON r.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+WHERE 
+    r.rank <= 5
+GROUP BY 
+    r.movie_id, r.title, r.production_year, c.name
+HAVING 
+    COUNT(DISTINCT kw.keyword) > 0
+ORDER BY 
+    r.production_year, r.rank;

@@ -1,0 +1,62 @@
+WITH RECURSIVE ActorMovies AS (
+    SELECT 
+        c.person_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY t.production_year DESC) AS movie_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    WHERE 
+        t.production_year > 2000
+), 
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id, 
+        co.name AS company_name,
+        COALESCE(SUM(CASE WHEN ct.kind = 'Production' THEN 1 ELSE 0 END), 0) AS production_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, co.name
+),
+DistinctActors AS (
+    SELECT 
+        DISTINCT a.person_id,
+        a.name
+    FROM 
+        aka_name a
+    INNER JOIN 
+        cast_info c ON a.person_id = c.person_id
+)
+SELECT 
+    ac.person_id,
+    an.name AS actor_name,
+    a.title AS movie_title,
+    a.production_year,
+    cm.company_name,
+    cm.production_count,
+    ROW_NUMBER() OVER (PARTITION BY ac.person_id ORDER BY a.production_year DESC) AS actor_movie_rank
+FROM 
+    ActorMovies a
+JOIN 
+    DistinctActors ac ON a.person_id = ac.person_id
+LEFT JOIN 
+    CompanyMovies cm ON a.movie_id = cm.movie_id
+WHERE 
+    ac.name IS NOT NULL
+    AND (a.production_year < 2020 OR cm.production_count > 1)
+ORDER BY 
+    ac.person_id, a.production_year DESC;
+
+This SQL query includes:
+- Recursive Common Table Expressions (CTEs) to derive lists of movies for actors.
+- Outer joins to include company details associated with the movies.
+- Window functions to rank movies by their production year.
+- Complex predicates that filter based on production year and company production counts.
+- Distinct actor lists to ensure unique entries per actor.

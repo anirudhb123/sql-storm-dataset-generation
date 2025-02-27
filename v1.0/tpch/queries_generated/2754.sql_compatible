@@ -1,0 +1,67 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_supply_value,
+        ss.unique_parts_supplied,
+        ROW_NUMBER() OVER (ORDER BY ss.total_supply_value DESC) AS rn
+    FROM 
+        SupplierStats ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+    WHERE 
+        ss.total_supply_value > 50000
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '6 months'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.total_price,
+        RANK() OVER (ORDER BY ro.total_price DESC) AS order_rank
+    FROM 
+        RecentOrders ro
+)
+SELECT 
+    ts.s_name AS supplier_name,
+    ts.unique_parts_supplied,
+    to.total_price AS top_order_value,
+    CASE 
+        WHEN ts.unique_parts_supplied IS NULL THEN 'No parts supplied'
+        ELSE 'Parts supplied'
+    END AS supplier_status
+FROM 
+    HighValueSuppliers ts
+LEFT JOIN 
+    TopOrders to ON ts.s_suppkey = to.o_orderkey
+WHERE 
+    ts.rn <= 10
+ORDER BY 
+    ts.total_supply_value DESC, to.total_price DESC;

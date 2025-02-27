@@ -1,0 +1,54 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, o_orderpriority, 1 AS level
+    FROM orders
+    WHERE o_orderdate >= '1996-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, o.o_orderpriority, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+HighValueOrders AS (
+    SELECT oh.o_orderkey, oh.o_custkey, oh.o_totalprice, RANK() OVER (PARTITION BY oh.o_custkey ORDER BY oh.o_totalprice DESC) AS price_rank
+    FROM OrderHierarchy oh
+    WHERE oh.o_totalprice > 1000
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_availqty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+    HAVING SUM(ps.ps_availqty) > 50
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name, r.r_name AS region_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(hv.price_rank, 0) AS highest_order_rank,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(ps.total_availqty, 0) AS available_quantity,
+    SUM(co.total_spent) AS total_customer_spent
+FROM 
+    CustomerOrderSummary co
+LEFT JOIN HighValueOrders hv ON co.c_custkey = hv.o_custkey
+LEFT JOIN PartSupplier ps ON ps.ps_suppkey IN (SELECT DISTINCT l.l_suppkey FROM lineitem l WHERE l.l_orderkey IN (
+    SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey
+))
+LEFT JOIN SupplierDetails s ON s.s_suppkey = ps.ps_suppkey
+GROUP BY 
+    c.c_custkey, c.c_name, hv.price_rank, s.s_name, ps.total_availqty
+ORDER BY 
+    total_customer_spent DESC, c.c_name;

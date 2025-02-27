@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        u.DisplayName AS Author,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        b.UserId
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosuredOn,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId IN (11, 53) THEN ph.CreationDate END) AS ReopenedCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+CombinedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Author,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rb.TotalBadges,
+        rb.BadgeNames,
+        ph.ClosuredOn,
+        ph.ReopenedCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentBadges rb ON rp.PostId IN (SELECT PostId FROM Votes v WHERE v.UserId = rb.UserId)
+    LEFT JOIN 
+        PostHistories ph ON rp.PostId = ph.PostId
+)
+SELECT 
+    cd.PostId,
+    cd.Author,
+    cd.Title,
+    cd.CreationDate,
+    cd.Score,
+    COALESCE(cd.ViewCount, 0) + COALESCE(cd.ReopenedCount * 10, 0) AS AdjustedViewCount,
+    COALESCE(cd.TotalBadges, 0) AS BadgeCount,
+    CASE 
+        WHEN cd.ClosuredOn IS NOT NULL THEN 'Closed on ' || TO_CHAR(cd.ClosuredOn, 'YYYY-MM-DD HH24:MI:SS')
+        ELSE 'Open'
+    END AS Status,
+    CASE 
+        WHEN cd.ReopenedCount > 0 THEN 'Reopened ' || cd.ReopenedCount || ' times'
+        ELSE 'Never reopened'
+    END AS ReopenedDetails
+FROM 
+    CombinedData cd
+WHERE 
+    cd.rn = 1 -- Only the latest question from each user
+ORDER BY 
+    cd.Score DESC, 
+    cd.CreationDate ASC
+LIMIT 50;

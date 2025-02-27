@@ -1,0 +1,53 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        LENGTH(p.p_name) > 10
+),
+
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_phone,
+        STRING_AGG(DISTINCT p.p_name, ', ') AS supplied_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        RankedParts p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > 1000
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_address, s.s_phone
+)
+
+SELECT 
+    sd.s_suppkey,
+    sd.s_name,
+    COUNT(DISTINCT rp.p_partkey) AS total_parts_supplied,
+    MAX(sd.supplied_parts) AS parts_list,
+    SUM(p.p_retailprice) AS total_retail_value
+FROM 
+    SupplierDetails sd
+JOIN 
+    RankedParts rp ON sd.supplied_parts LIKE '%' || rp.p_name || '%'
+GROUP BY 
+    sd.s_suppkey, sd.s_name
+HAVING 
+    COUNT(DISTINCT rp.p_partkey) > 5
+ORDER BY 
+    total_retail_value DESC;

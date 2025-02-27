@@ -1,0 +1,55 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ss.ss_customer_sk,
+        ss.ss_item_sk,
+        ss.ss_sold_date_sk,
+        ss.ss_quantity,
+        ss.ss_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ss.ss_customer_sk ORDER BY ss.ss_ext_sales_price DESC) AS sales_rank,
+        DENSE_RANK() OVER (PARTITION BY ss.ss_customer_sk ORDER BY ss.ss_quantity DESC) AS quantity_rank
+    FROM store_sales ss
+    WHERE ss.ss_sold_date_sk >= (SELECT MAX(d.d_date_sk) - 30 FROM date_dim d WHERE d.d_year = 2023)
+),
+returns AS (
+    SELECT 
+        sr.sr_customer_sk,
+        sr.sr_item_sk,
+        SUM(sr.sr_return_quantity) AS total_return_qty,
+        SUM(sr.sr_return_amt) AS total_return_amt
+    FROM store_returns sr
+    GROUP BY sr.sr_customer_sk, sr.sr_item_sk
+),
+additional_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Other'
+        END AS marital_status,
+        COALESCE(hd.hd_buy_potential, 'Unknown') AS buy_potential
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+)
+SELECT 
+    ai.c_customer_id,
+    ai.cd_gender,
+    ai.marital_status,
+    ai.buy_potential,
+    COALESCE(rs.total_return_qty, 0) AS total_returns,
+    COALESCE(rs.total_return_amt, 0.00) AS total_return_value,
+    SUM(CASE WHEN r.sales_rank = 1 THEN r.ss_ext_sales_price ELSE 0 END) AS max_sales_price,
+    COUNT(DISTINCT r.ss_item_sk) AS unique_items_sold,
+    STRING_AGG(DISTINCT CASE WHEN r.quantity_rank = 1 THEN CAST(r.ss_item_sk AS varchar) END, ', ') AS top_selling_items
+FROM additional_info ai
+LEFT JOIN ranked_sales r ON ai.c_customer_id = (SELECT c.c_customer_id FROM customer c WHERE c.c_customer_sk = r.ss_customer_sk)
+LEFT JOIN returns rs ON ai.c_customer_id = (SELECT c.c_customer_id FROM customer c WHERE c.c_customer_sk = rs.sr_customer_sk)
+WHERE ai.buy_potential IS NOT NULL
+GROUP BY ai.c_customer_id, ai.cd_gender, ai.marital_status, ai.buy_potential
+HAVING SUM(COALESCE(rs.total_return_qty, 0)) < 5
+   AND COUNT(r.ss_item_sk) > 5
+ORDER BY COALESCE(total_returns, 0) DESC, max_sales_price DESC
+FETCH FIRST 10 ROWS ONLY;

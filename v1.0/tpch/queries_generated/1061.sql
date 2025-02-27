@@ -1,0 +1,36 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderpriority, o.o_totalprice, 
+           ROW_NUMBER() OVER(PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS rng
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+), 
+SupplierPartDetails AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost, 
+           p.p_name, s.s_name, s.s_acctbal
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+), 
+CustomerRegion AS (
+    SELECT c.c_custkey, c.c_name, r.r_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT cr.r_name, COUNT(DISTINCT co.c_custkey) AS customer_count, 
+       AVG(co.o_totalprice) AS avg_order_price,
+       SUM(spd.ps_supplycost * spd.ps_availqty) AS total_supplier_value
+FROM CustomerRegion cr
+LEFT JOIN (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_custkey
+    FROM RankedOrders ro
+    JOIN orders o ON ro.o_orderkey = o.o_orderkey
+    WHERE ro.rng <= 10
+) co ON cr.c_custkey = co.o_custkey
+LEFT JOIN SupplierPartDetails spd ON spd.ps_partkey IN (
+    SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = co.o_orderkey
+)
+WHERE cr.r_name IS NOT NULL
+GROUP BY cr.r_name
+HAVING AVG(co.o_totalprice) > 5000
+ORDER BY customer_count DESC;

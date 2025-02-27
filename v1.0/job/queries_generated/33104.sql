@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        mk.title,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mk ON ml.linked_movie_id = mk.id
+    WHERE 
+        mk.production_year >= 2000
+),
+ActorStats AS (
+    SELECT 
+        ai.person_id,
+        a.name,
+        COUNT(DISTINCT ai.movie_id) AS movie_count,
+        AVG( mt.production_year ) AS avg_production_year
+    FROM 
+        cast_info ai
+    JOIN 
+        aka_name a ON ai.person_id = a.person_id
+    JOIN 
+        aka_title mt ON ai.movie_id = mt.id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        ai.person_id, a.name
+),
+TopActors AS (
+    SELECT 
+        actor.name,
+        actor.movie_count,
+        actor.avg_production_year,
+        ROW_NUMBER() OVER (ORDER BY actor.movie_count DESC) AS actor_rank
+    FROM 
+        ActorStats actor
+    WHERE 
+        actor.movie_count > 5
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.level,
+    ta.name AS top_actor_name,
+    ta.movie_count,
+    ta.avg_production_year,
+    COALESCE(mt.info, 'No info available') AS movie_info
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    TopActors ta ON cc.subject_id = ta.name
+LEFT JOIN 
+    movie_info mt ON mh.movie_id = mt.movie_id AND mt.info_type_id = (SELECT id FROM info_type WHERE info = 'summary' LIMIT 1)
+WHERE 
+    mh.level <= 3
+ORDER BY 
+    mh.level, ta.movie_count DESC
+LIMIT 10;

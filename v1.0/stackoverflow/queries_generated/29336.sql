@@ -1,0 +1,49 @@
+WITH TagAggregation AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    GROUP BY 
+        Tag
+),
+PopularTags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagAggregation
+    WHERE 
+        PostCount > 10 -- filtering tags with more than 10 posts
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ut.DisplayName,
+    ut.Reputation,
+    ut.TotalPosts,
+    ut.QuestionsCount,
+    ut.AnswersCount,
+    pt.Tag AS PopularTag,
+    pt.PostCount AS PopularTagPostCount
+FROM 
+    UserMetrics ut
+JOIN 
+    PopularTags pt ON ut.TotalPosts > 20
+ORDER BY 
+    ut.Reputation DESC, pt.PopularTagPostCount DESC
+LIMIT 10;

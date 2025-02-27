@@ -1,0 +1,10 @@
+SELECT 
+    DATE(CreationDate) AS PostCreationDate,
+    COUNT(*) AS TotalPosts,
+    AVG(Score) AS AverageScore
+FROM 
+    Posts
+GROUP BY 
+    DATE(CreationDate)
+ORDER BY 
+    PostCreationDate;

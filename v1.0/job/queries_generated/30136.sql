@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 -- Focus on movies from 2000 onwards
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title m ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    mh.title AS Movie_Title,
+    mh.production_year AS Production_Year,
+    COALESCE(string_agg(DISTINCT ak.name, '; '), 'No Cast') AS Cast_Names,
+    COUNT(DISTINCT kc.movie_id) AS Keyword_Count,
+    COUNT(DISTINCT mc.company_id) AS Production_Companies,
+    AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order END) AS Avg_Nr_Order,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS Note_Count,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level) AS Rank_By_Year
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+GROUP BY 
+    mh.movie_id,
+    mh.title,
+    mh.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY 
+    Production_Year DESC,
+    Rank_By_Year;

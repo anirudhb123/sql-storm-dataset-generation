@@ -1,0 +1,92 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER(PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS year_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+NullCoalesceActors AS (
+    SELECT 
+        ak.person_id,
+        COALESCE(ak.name, 'Unknown Actor') AS actor_name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.person_id, ak.name
+),
+TopAnimatedMovies AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mk.keyword,
+        nt.name AS company_name,
+        nt.country_code,
+        COUNT(mk.id) AS keyword_count
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_name nt ON mc.company_id = nt.id
+    WHERE 
+        mt.kind_id IS NOT NULL 
+        AND mt.production_year >= 2000
+        AND mk.keyword IS NOT NULL 
+    GROUP BY 
+        mt.id, mk.keyword, nt.name, nt.country_code
+    HAVING 
+        COUNT(mk.id) > 1
+),
+ActorMovieStatistics AS (
+    SELECT 
+        na.actor_name,
+        COALESCE(SUM(CASE WHEN t.production_year IS NOT NULL THEN 1 ELSE 0 END), 0) AS total_movies,
+        AVG(CASE WHEN t.production_year IS NOT NULL THEN EXTRACT(YEAR FROM TIMESTAMP '2024-10-01 12:34:56') - t.production_year ELSE NULL END) AS avg_years_since_release
+    FROM 
+        NullCoalesceActors na
+    LEFT JOIN 
+        cast_info ci ON na.person_id = ci.person_id
+    LEFT JOIN 
+        title t ON ci.movie_id = t.id
+    WHERE 
+        na.movie_count > 5
+    GROUP BY 
+        na.actor_name
+)
+SELECT 
+    r.title,
+    r.production_year,
+    am.actor_name,
+    am.total_movies,
+    am.avg_years_since_release,
+    COALESCE(SUM(CASE WHEN mk.keyword = 'Animation' THEN 1 ELSE 0 END), 0) AS animation_movie_count
+FROM 
+    RankedTitles r
+JOIN 
+    TopAnimatedMovies tam ON r.title_id = tam.movie_id
+LEFT JOIN 
+    ActorMovieStatistics am ON am.actor_name = (
+        SELECT ak.name
+        FROM aka_name ak
+        INNER JOIN cast_info ci ON ak.person_id = ci.person_id
+        WHERE ci.movie_id = tam.movie_id 
+        LIMIT 1
+    )
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = tam.movie_id
+WHERE 
+    r.year_rank <= 3
+GROUP BY 
+    r.title, r.production_year, am.actor_name, am.total_movies, am.avg_years_since_release
+ORDER BY 
+    r.production_year DESC, animation_movie_count DESC;

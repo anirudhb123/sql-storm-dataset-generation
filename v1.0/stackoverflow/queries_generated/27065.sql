@@ -1,0 +1,77 @@
+WITH TagStatistic AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.ViewCount IS NOT NULL THEN P.ViewCount ELSE 0 END) AS TotalViews,
+        SUM(CASE WHEN P.Score IS NOT NULL THEN P.Score ELSE 0 END) AS TotalScore,
+        AVG(P.Score) AS AvgScore,
+        AVG(P.ViewCount) AS AvgViewCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '1 year' -- Only consider posts from the last year
+    GROUP BY 
+        T.TagName
+), 
+UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionsCount,
+        SUM(P.ViewCount) AS QuestionsTotalViews,
+        SUM(P.Score) AS QuestionsTotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id AND P.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+ClosedPostsStatistics AS (
+    SELECT 
+        PH.UserId,
+        COUNT(PH.Id) AS ClosedPostCount,
+        SUM(CASE WHEN PH.Comment IS NOT NULL THEN 1 ELSE 0 END) AS WithCommentCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        PH.UserId
+)
+
+SELECT 
+    T.TagName,
+    TS.PostCount AS NumberOfPosts,
+    TS.TotalViews AS TotalPostViews,
+    TS.TotalScore AS TotalPostScore,
+    TS.AvgScore AS AveragePostScore,
+    TS.AvgViewCount AS AverageViewCount,
+    U.DisplayName AS TopUserName,
+    U.QuestionsCount AS UserQuestionsCount,
+    U.QuestionsTotalViews AS UserTotalViewCount,
+    U.QuestionsTotalScore AS UserTotalScore,
+    C.ClosedPostCount AS UserClosedPostCount,
+    C.WithCommentCount AS UserClosedPostsWithComment
+FROM 
+    TagStatistic TS
+JOIN 
+    (SELECT 
+        UserId, 
+        MAX(QuestionsCount) AS MaxQuestions,
+        MAX(QuestionsTotalViews) AS MaxViews,
+        MAX(QuestionsTotalScore) AS MaxScore
+     FROM 
+        UserStatistics 
+     GROUP BY 
+        UserId) AS MaxStats ON MaxStats.UserId = U.Id
+JOIN 
+    Users U ON U.Id = MaxStats.UserId
+LEFT JOIN 
+    ClosedPostsStatistics C ON C.UserId = U.Id
+ORDER BY 
+    TS.TotalViews DESC, 
+    TS.AvgScore DESC 
+LIMIT 10; -- Return the top 10 Tags based on total views

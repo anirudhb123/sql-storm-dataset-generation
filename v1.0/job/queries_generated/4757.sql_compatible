@@ -1,0 +1,60 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+ActorMovieCounts AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM cast_info ci
+    GROUP BY ci.person_id
+),
+MovieDetails AS (
+    SELECT 
+        mt.movie_id,
+        m.title,
+        COALESCE(mt.company_id, 0) AS company_id,
+        (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = mt.movie_id) AS keyword_count
+    FROM movie_companies mt
+    LEFT JOIN title m ON mt.movie_id = m.id
+),
+TopActors AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        ac.movie_count
+    FROM aka_name ak
+    JOIN ActorMovieCounts ac ON ak.person_id = ac.person_id
+    WHERE ac.movie_count > 5
+),
+FilteredMovieDetails AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.company_id,
+        md.keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY md.company_id ORDER BY md.keyword_count DESC) AS company_keyword_rank
+    FROM MovieDetails md
+    WHERE md.keyword_count > 2
+)
+SELECT 
+    ta.name AS actor_name,
+    tt.title AS movie_title,
+    tt.production_year,
+    fmd.keyword_count,
+    CASE 
+        WHEN fmd.company_id IS NOT NULL THEN 'Company Linked'
+        ELSE 'No Company'
+    END AS company_status
+FROM TopActors ta
+JOIN cast_info ci ON ta.person_id = ci.person_id
+JOIN FilteredMovieDetails fmd ON ci.movie_id = fmd.movie_id
+JOIN RankedTitles tt ON fmd.movie_id = tt.movie_id
+WHERE tt.title_rank <= 10
+GROUP BY ta.name, tt.title, tt.production_year, fmd.keyword_count, fmd.company_id
+ORDER BY actor_name, movie_title;

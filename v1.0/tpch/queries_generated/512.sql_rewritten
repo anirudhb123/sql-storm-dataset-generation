@@ -1,0 +1,61 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+significant_suppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+customer_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.revenue,
+    ss.s_name AS supplier_name,
+    cs.c_name AS customer_name,
+    cs.total_orders,
+    cs.total_spent,
+    COALESCE(cs.total_spent / NULLIF(cs.total_orders, 0), 0) AS avg_spent_per_order
+FROM 
+    ranked_orders ro
+LEFT JOIN 
+    significant_suppliers ss ON ro.o_orderkey % 10 = ss.s_suppkey % 10
+LEFT JOIN 
+    customer_summary cs ON cs.total_orders > 5
+WHERE 
+    ro.order_rank <= 10
+ORDER BY 
+    ro.o_orderdate DESC, ro.revenue DESC;

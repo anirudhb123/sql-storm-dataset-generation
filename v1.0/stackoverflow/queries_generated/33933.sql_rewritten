@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(NULLIF(p.Body, ''), 'No content') AS PostBody,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.UserId = u.Id), 0)) AS TotalComments,
+        SUM(COALESCE((SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = u.Id), 0)) AS TotalPosts,
+        SUM(COALESCE((SELECT COUNT(*) FROM Badges b WHERE b.UserId = u.Id), 0)) AS TotalBadges
+    FROM 
+        Users u
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    ue.TotalComments,
+    ue.TotalPosts,
+    ue.TotalBadges,
+    rp.PostBody,
+    CASE 
+        WHEN pvs.UpVotes IS NULL THEN 'No votes yet'
+        WHEN pvs.UpVotes > pvs.DownVotes THEN 'Positive engagement'
+        ELSE 'Negative engagement' 
+    END AS EngagementLevel
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteSummary pvs ON rp.PostId = pvs.PostId
+LEFT JOIN 
+    Users u ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    UserEngagement ue ON ue.UserId = u.Id
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC;

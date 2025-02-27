@@ -1,0 +1,55 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id = 1 
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        aka_title m
+    JOIN
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN
+        aka_title m_l ON ml.linked_movie_id = m_l.id
+    JOIN
+        MovieHierarchy mh ON m_l.id = mh.movie_id
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(c.person_id) AS total_cast,
+    MAX(CASE WHEN r.role = 'Lead' THEN 'True' ELSE 'False' END) AS has_lead_role,
+    STRING_AGG(DISTINCT a.name, ', ') AS actors_names,
+    AVG(CASE WHEN mi.info_type_id = 2 THEN LENGTH(mi.info) END) AS avg_movie_info_length
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    cast_info c ON mh.movie_id = c.movie_id
+LEFT JOIN
+    aka_name a ON c.person_id = a.person_id
+LEFT JOIN
+    role_type r ON c.role_id = r.id
+LEFT JOIN
+    movie_info mi ON mh.movie_id = mi.movie_id
+WHERE
+    mh.production_year >= 2000
+GROUP BY
+    mh.movie_id, mh.title, mh.production_year
+HAVING
+    COUNT(c.person_id) > 5
+ORDER BY
+    mh.production_year DESC, total_cast DESC;

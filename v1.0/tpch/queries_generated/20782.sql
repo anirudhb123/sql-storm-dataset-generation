@@ -1,0 +1,58 @@
+WITH RECURSIVE SupplyCostCTE AS (
+    SELECT ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) AS rn
+    FROM partsupp
+    WHERE ps_availqty > 0
+),
+RankedOrders AS (
+    SELECT o_orderkey, o_custkey, o_orderstatus, 
+           SUM(l_extendedprice * (1 - l_discount)) AS total_sales,
+           RANK() OVER (PARTITION BY o_orderstatus ORDER BY SUM(l_extendedprice * (1 - l_discount)) DESC) AS rank
+    FROM orders
+    JOIN lineitem ON o_orderkey = l_orderkey
+    GROUP BY o_orderkey, o_custkey, o_orderstatus
+),
+CustomerNation AS (
+    SELECT c.c_custkey, n.n_name, c.c_acctbal,
+           CASE 
+               WHEN c.c_acctbal IS NULL THEN 'Unknown'
+               WHEN c.c_acctbal = 0 THEN 'Zero Balance'
+               ELSE 'Confirmed Balance'
+           END AS balance_status
+    FROM customer c
+    LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_type, 
+           p.p_retailprice * 0.9 AS discounted_price,
+           CASE 
+               WHEN p.p_size IS NULL THEN 'Size Unknown'
+               ELSE CONCAT('Size: ', p.p_size)
+           END AS size_info
+    FROM part p
+    WHERE p.p_retailprice > 100.00
+),
+AbnormalDiscounts AS (
+    SELECT p_partkey, SUM(ps_supplycost) AS total_supply_cost
+    FROM SupplyCostCTE
+    WHERE rn = 1
+    GROUP BY ps_partkey
+    HAVING SUM(ps_supplycost) IS NOT NULL
+    UNION ALL
+    SELECT p_partkey, NULL
+    FROM part
+    WHERE LENGTH(p_name) < 5 AND p_mfgr LIKE 'A%'
+)
+SELECT DISTINCT cn.n_name, pd.p_name, 
+       coalesce(ad.total_supply_cost, 0) AS supply_cost, 
+       ro.total_sales
+FROM RankedOrders ro
+JOIN CustomerNation cn ON ro.o_custkey = cn.c_custkey
+JOIN PartDetails pd ON EXISTS (
+    SELECT 1 FROM lineitem li 
+    WHERE li.l_orderkey = ro.o_orderkey AND li.l_partkey = pd.p_partkey AND li.l_returnflag = 'N'
+)
+LEFT JOIN AbnormalDiscounts ad ON pd.p_partkey = ad.p_partkey
+WHERE ro.rank <= 10 AND
+      (ro.o_orderstatus IN ('O', 'F') OR ro.total_sales > 1000.00)
+ORDER BY cn.n_name, pd.p_name;

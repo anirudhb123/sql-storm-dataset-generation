@@ -1,0 +1,59 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk
+    FROM customer
+    WHERE c_customer_sk = (SELECT MIN(c_customer_sk) FROM customer)
+
+    UNION ALL
+
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk
+    FROM customer c
+    JOIN CustomerHierarchy ch ON ch.c_current_cdemo_sk = c.c_current_cdemo_sk
+    WHERE c.c_customer_sk <> ch.c_customer_sk
+),
+AggregateSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        AVG(ws_net_profit) AS avg_profit
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2450000 AND 2450650
+    GROUP BY ws_bill_customer_sk
+),
+MappedDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics hd ON hd.hd_demo_sk = cd.cd_demo_sk
+    LEFT JOIN income_band ib ON ib.ib_income_band_sk = hd.hd_income_band_sk
+),
+SalesAnalysis AS (
+    SELECT 
+        ch.c_first_name AS first_name,
+        ch.c_last_name AS last_name,
+        as.total_sales,
+        as.order_count,
+        md.cd_gender,
+        md.ib_lower_bound,
+        md.ib_upper_bound,
+        RANK() OVER (PARTITION BY md.cd_gender ORDER BY as.total_sales DESC) AS sales_rank
+    FROM CustomerHierarchy ch
+    JOIN AggregateSales as ON ch.c_customer_sk = as.ws_bill_customer_sk
+    JOIN MappedDemographics md ON ch.c_current_cdemo_sk = md.cd_demo_sk
+)
+SELECT 
+    first_name,
+    last_name,
+    total_sales,
+    order_count,
+    cd_gender,
+    CONCAT('Income Band: ', ib_lower_bound, ' - ', ib_upper_bound) AS income_band,
+    sales_rank
+FROM SalesAnalysis
+WHERE total_sales IS NOT NULL
+ORDER BY sales_rank, total_sales DESC;

@@ -1,0 +1,43 @@
+WITH PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_name AS supplier_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        CAST(SUBSTRING(p.p_comment, 1, 15) AS VARCHAR(15)) AS short_comment
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+NationCustomerInfo AS (
+    SELECT 
+        n.n_name AS nation_name,
+        c.c_name AS customer_name,
+        c.c_acctbal,
+        CONCAT(c.c_name, ' from ', n.n_name) AS full_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+)
+SELECT 
+    p.supplier_name,
+    p.p_name,
+    p.short_comment,
+    nc.customer_name,
+    nc.full_name,
+    SUM(p.ps_availqty) AS total_avail_qty,
+    AVG(p.ps_supplycost) AS avg_supply_cost,
+    COUNT(DISTINCT nc.customer_name) OVER (PARTITION BY p.p_partkey) AS customer_count
+FROM 
+    PartSupplierInfo p
+JOIN 
+    NationCustomerInfo nc ON nc.nation_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = (SELECT DISTINCT c.c_nationkey FROM customer c WHERE c.c_name = nc.customer_name))
+GROUP BY 
+    p.supplier_name, p.p_name, p.short_comment, nc.customer_name, nc.full_name
+ORDER BY 
+    total_avail_qty DESC, avg_supply_cost;

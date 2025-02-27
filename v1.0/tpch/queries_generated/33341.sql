@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+PartSupply AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '2022-01-01'
+),
+FilteredNations AS (
+    SELECT n.n_nationkey, n.n_name
+    FROM nation n
+    WHERE n.n_comment IS NOT NULL AND LENGTH(n.n_comment) > 100
+)
+SELECT DISTINCT
+    p.p_name,
+    part.total_available,
+    c.c_name,
+    COALESCE(o.price_rank, 0) AS highest_order_rank,
+    r.r_name AS supplier_region
+FROM PartSupply part
+LEFT JOIN CustomerOrders c ON c.order_count > 5
+LEFT JOIN RankedOrders o ON o.o_totalprice > part.total_available * 1.5
+LEFT JOIN supplier s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = part.p_partkey)
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE part.total_available < (SELECT AVG(total_available) FROM PartSupply)
+  AND p.p_size BETWEEN 10 AND 50
+ORDER BY part.total_available DESC, c.c_name;

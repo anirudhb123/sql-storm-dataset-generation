@@ -1,0 +1,100 @@
+
+WITH RecursiveMovieCTE AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(k.keyword, 'No Keyword') AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY k.keyword) AS keyword_rank
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        t.production_year IS NOT NULL
+    UNION ALL
+    SELECT
+        t.id,
+        t.title,
+        t.production_year,
+        COALESCE(k.keyword, 'No Keyword') AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY k.keyword) AS keyword_rank
+    FROM
+        RecursiveMovieCTE r
+    JOIN
+        aka_title t ON r.movie_id = t.id
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        r.keyword_rank < 3 
+),
+AggregateInfo AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS all_keywords
+    FROM
+        RecursiveMovieCTE m
+    LEFT JOIN
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        m.movie_id, m.title, m.production_year
+),
+PersonRoleCounts AS (
+    SELECT
+        ci.movie_id,
+        r.role AS person_role,
+        COUNT(DISTINCT ci.person_id) AS person_count
+    FROM
+        cast_info ci
+    JOIN
+        role_type r ON ci.person_role_id = r.id
+    GROUP BY
+        ci.movie_id, r.role
+),
+FinalBenchmark AS (
+    SELECT
+        a.movie_id,
+        a.title,
+        a.production_year,
+        a.keyword_count,
+        a.all_keywords,
+        COALESCE(pr.person_count, 0) AS total_roles,
+        CASE 
+            WHEN a.keyword_count > 5 THEN 'High Keyword'
+            WHEN a.keyword_count BETWEEN 3 AND 5 THEN 'Moderate Keyword'
+            ELSE 'Low Keyword'
+        END AS keyword_category,
+        CASE 
+            WHEN a.production_year IS NULL OR a.production_year < 1990 THEN 'Old Movie'
+            ELSE 'Recent Movie'
+        END AS movie_category 
+    FROM
+        AggregateInfo a
+    LEFT JOIN
+        PersonRoleCounts pr ON a.movie_id = pr.movie_id
+)
+SELECT
+    fb.movie_id,
+    fb.title,
+    fb.production_year,
+    fb.keyword_count,
+    fb.all_keywords,
+    fb.total_roles,
+    fb.keyword_category,
+    fb.movie_category
+FROM
+    FinalBenchmark fb
+WHERE
+    fb.total_roles > 0 OR fb.keyword_count > 0
+ORDER BY
+    fb.keyword_count DESC, 
+    fb.production_year DESC;

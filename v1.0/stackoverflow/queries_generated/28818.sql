@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsList,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        RANK() OVER (ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON p.Tags LIKE CONCAT('%<', t.TagName, '> %') OR p.Tags LIKE CONCAT('% <', t.TagName, '>') OR p.Tags LIKE CONCAT('%<', t.TagName, '>') OR p.Tags LIKE CONCAT('<', t.TagName, '> %') 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        p.Id
+),
+HighlyEngagedPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title,
+        rp.Body, 
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.TagsList,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.CommentCount > 5 AND rp.PostRank <= 100
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(CASE 
+            WHEN v.VoteTypeId = 2 THEN 1 
+            ELSE 0 
+        END) AS UpvotesReceived, 
+        SUM(CASE 
+            WHEN v.VoteTypeId = 3 THEN 1 
+            ELSE 0 
+        END) AS DownvotesReceived
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    upr.UserId,
+    upr.DisplayName,
+    upr.PostsCreated,
+    upr.UpvotesReceived,
+    upr.DownvotesReceived,
+    ehp.Title,
+    ehp.Score,
+    ehp.ViewCount,
+    ehp.TagsList
+FROM 
+    UserEngagement upr
+JOIN 
+    HighlyEngagedPosts ehp ON upr.UserId = ehp.OwnerUserId
+ORDER BY 
+    upr.UpvotesReceived DESC, ehp.Score DESC;
+

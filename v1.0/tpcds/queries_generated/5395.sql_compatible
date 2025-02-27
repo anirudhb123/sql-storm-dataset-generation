@@ -1,0 +1,49 @@
+
+WITH sales_summary AS (
+    SELECT 
+        w.warehouse_id,
+        i.item_id,
+        SUM(ss.sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ticket_number) AS total_transactions,
+        AVG(ss.discount_amt) AS avg_discount
+    FROM 
+        store_sales ss
+    JOIN 
+        warehouse w ON ss.store_sk = w.warehouse_sk
+    JOIN 
+        item i ON ss.item_sk = i.item_sk
+    WHERE 
+        ss.sold_date_sk BETWEEN 8000 AND 8050
+    GROUP BY 
+        w.warehouse_id, i.item_id
+),
+customer_category AS (
+    SELECT 
+        cd.gender,
+        cd.marital_status,
+        COUNT(DISTINCT c.customer_sk) AS customer_count,
+        AVG(c.birth_year) AS avg_birth_year
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.gender, cd.marital_status
+)
+SELECT 
+    s.warehouse_id,
+    s.item_id,
+    s.total_sales,
+    s.total_transactions,
+    s.avg_discount,
+    c.gender,
+    c.marital_status,
+    c.customer_count,
+    c.avg_birth_year
+FROM 
+    sales_summary s
+JOIN 
+    customer_category c ON s.total_sales > (SELECT AVG(total_sales) FROM sales_summary)
+ORDER BY 
+    s.total_sales DESC, c.customer_count ASC
+FETCH FIRST 100 ROWS ONLY;

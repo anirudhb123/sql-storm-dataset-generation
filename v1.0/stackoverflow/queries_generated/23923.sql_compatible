@@ -1,0 +1,91 @@
+
+WITH UserVoteCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostWithTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS TagName ON TRUE
+    LEFT JOIN
+        Tags t ON t.TagName = TagName
+    GROUP BY 
+        p.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.Id AS HistoryId,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserDisplayName,
+        ph.CreationDate AS HistoryDate,
+        ph.Comment,
+        ph.Text
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days' AND
+        ph.PostHistoryTypeId IN (10, 11, 12, 13)  
+),
+RankedPosts AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.CreationDate,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostId ORDER BY ph.HistoryDate DESC) AS PostRank
+    FROM 
+        PostWithTags p
+    LEFT JOIN 
+        PostHistoryDetails ph ON p.PostId = ph.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    uvc.Upvotes,
+    uvc.Downvotes,
+    uvc.TotalVotes,
+    rp.Title,
+    rp.CreationDate,
+    rp.Tags,
+    CASE
+        WHEN rp.PostRank = 1 THEN 'Most Recent Activity'
+        ELSE 'Older Activity'
+    END AS ActivityStatus,
+    COALESCE(ph.Comment, 'No comments available') AS HistoryComment,
+    CASE 
+        WHEN u.Location IS NULL THEN 'Location not specified'
+        ELSE u.Location
+    END AS UserLocation
+FROM 
+    Users u
+JOIN 
+    UserVoteCounts uvc ON uvc.UserId = u.Id
+JOIN 
+    RankedPosts rp ON rp.PostId IN (
+        SELECT DISTINCT PostId
+        FROM PostHistoryDetails
+    )
+LEFT JOIN 
+    PostHistoryDetails ph ON rp.PostId = ph.PostId
+WHERE 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users) 
+ORDER BY 
+    uvc.Upvotes DESC, uvc.Downvotes ASC
+LIMIT 100;

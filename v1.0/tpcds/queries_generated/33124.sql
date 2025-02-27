@@ -1,0 +1,62 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(ss.ss_net_profit, 0) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY COALESCE(ss.ss_net_profit, 0) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN (SELECT MIN(d.d_date_sk) FROM date_dim d) AND (SELECT MAX(d.d_date_sk) FROM date_dim d) 
+),
+top_sales AS (
+    SELECT 
+        customer_sk,
+        c_first_name,
+        c_last_name,
+        total_net_profit
+    FROM 
+        sales_hierarchy
+    WHERE 
+        rank <= 10
+),
+customer_info AS (
+    SELECT 
+        ca.ca_address_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        t.total_net_profit
+    FROM 
+        top_sales t
+    JOIN 
+        customer c ON t.c_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT 
+    ci.ca_address_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    CONCAT('Income Range: [', ci.ib_lower_bound, ', ', ci.ib_upper_bound, ']') AS income_band,
+    SUM(ci.total_net_profit) AS aggregate_net_profit
+FROM 
+    customer_info ci
+GROUP BY 
+    ci.ca_address_id, ci.cd_gender, ci.cd_marital_status, ci.ib_lower_bound, ci.ib_upper_bound
+HAVING 
+    SUM(ci.total_net_profit) > 1000
+ORDER BY 
+    aggregate_net_profit DESC
+LIMIT 20;

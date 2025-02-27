@@ -1,0 +1,54 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        r.reason_id,
+        COUNT(*) AS total_returns,
+        SUM(CASE
+            WHEN sr_return_quantity > 0 THEN sr_return_quantity
+            ELSE 0
+        END) AS total_returned_quantity,
+        SUM(sr_return_amt) AS total_returned_amount,
+        SUM(sr_return_tax) AS total_returned_tax
+    FROM 
+        store_returns sr
+    JOIN 
+        reason r ON sr.sr_reason_sk = r.r_reason_sk
+    JOIN 
+        customer c ON sr.sr_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim dd ON sr.sr_returned_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+        AND cd.cd_gender = 'M'
+    GROUP BY 
+        r.reason_id
+    ORDER BY 
+        total_returns DESC
+),
+TopReturns AS (
+    SELECT 
+        reason_id,
+        total_returns,
+        total_returned_quantity,
+        total_returned_amount,
+        total_returned_tax,
+        ROW_NUMBER() OVER (ORDER BY total_returns DESC) AS rn
+    FROM 
+        RankedReturns
+)
+SELECT 
+    tr.reason_id,
+    tr.total_returns,
+    tr.total_returned_quantity,
+    tr.total_returned_amount,
+    tr.total_returned_tax,
+    (SELECT COUNT(*) FROM store_returns) AS total_store_returns,
+    (SELECT COUNT(*) FROM web_returns) AS total_web_returns
+FROM 
+    TopReturns tr
+WHERE 
+    tr.rn <= 10
+ORDER BY 
+    tr.total_returns DESC;

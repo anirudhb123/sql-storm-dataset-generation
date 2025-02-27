@@ -1,0 +1,51 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_regionkey = 1  -- Starting point for recursion, adjust as necessary
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, rh.level + 1
+    FROM region r
+    JOIN RegionHierarchy rh ON r.r_regionkey = rh.r_regionkey + 1  -- Example recursive logic
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    ORDER BY total_spent DESC
+    LIMIT 10
+),
+Suppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrderCount AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+CustomerAvgOrderValue AS (
+    SELECT o.o_custkey, AVG(o.o_totalprice) AS avg_order_value
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+FinalReport AS (
+    SELECT c.c_name, cc.order_count, co.total_spent, co.avg_order_value,
+           ROW_NUMBER() OVER (PARTITION BY ch.r_regionkey ORDER BY co.total_spent DESC) AS customer_rank,
+           s.total_supply_cost
+    FROM TopCustomers co
+    JOIN CustomerOrderCount cc ON co.c_custkey = cc.o_custkey
+    LEFT JOIN CustomerAvgOrderValue ca ON co.c_custkey = ca.o_custkey
+    JOIN supplier s ON s.s_nationkey IN (
+        SELECT n.n_nationkey
+        FROM nation n
+        WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM RegionHierarchy r)
+    )
+)
+SELECT fr.c_name, fr.order_count, fr.total_spent, fr.avg_order_value, fr.customer_rank, fr.total_supply_cost
+FROM FinalReport fr
+WHERE fr.total_supply_cost IS NOT NULL
+  AND fr.total_spent > 1000
+ORDER BY fr.customer_rank, fr.total_spent DESC;

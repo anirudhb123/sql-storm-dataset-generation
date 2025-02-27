@@ -1,0 +1,53 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rn
+    FROM title t
+    JOIN aka_title at ON t.id = at.movie_id
+    WHERE at.production_year >= 2000
+),
+ActorMovies AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN title t ON ci.movie_id = t.id
+    WHERE a.name IS NOT NULL
+),
+KeywordDetails AS (
+    SELECT 
+        k.keyword,
+        m.title,
+        m.production_year
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN title m ON mk.movie_id = m.id
+    WHERE k.phonetic_code IS NOT NULL
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mi.info AS movie_info,
+        mi.note
+    FROM movie_info m
+    JOIN movie_info_idx mi ON m.id = mi.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    ac.actor_name,
+    kd.keyword,
+    mi.movie_info
+FROM RankedTitles rt
+LEFT JOIN ActorMovies ac ON rt.title = ac.movie_title AND rt.production_year = ac.production_year
+LEFT JOIN KeywordDetails kd ON rt.title = kd.title AND rt.production_year = kd.production_year
+LEFT JOIN MovieInfo mi ON rt.title = mi.title
+WHERE rt.rn <= 3
+ORDER BY rt.production_year DESC, rt.title ASC;

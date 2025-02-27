@@ -1,0 +1,80 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostScores AS (
+    SELECT
+        p.Id AS PostID,
+        p.Score,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts pt ON t.Id = ANY(string_to_array(pt.Tags, ',')::int[])
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 10
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(b.Class) AS TotalBadges,
+        SUM(b.Reputation) AS ReputationPoints
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    p.Id AS PostID,
+    p.Title,
+    p.Body,
+    ps.Score,
+    ps.VoteCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+    (SELECT COUNT(*) FROM RecursivePostHistory WHERE PostId = p.Id AND PostHistoryTypeId IN (10, 11)) AS CloseReopenCount,
+    ut.TotalBadges,
+    ut.ReputationPoints,
+    tt.TagName
+FROM 
+    Posts p
+JOIN 
+    PostScores ps ON p.Id = ps.PostID
+LEFT JOIN 
+    UserReputation ut ON p.OwnerUserId = ut.UserId
+LEFT JOIN 
+    TopTags tt ON tt.TagCount > 50
+WHERE 
+    p.CreationDate BETWEEN NOW() - INTERVAL '3 months' AND NOW()
+    AND (ps.UpVotes - ps.DownVotes) > 10
+ORDER BY 
+    ps.Score DESC, 
+    p.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,90 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- CTE to get a hierarchy of movies based on episode relationships
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL -- starting point for hierarchy (root movies)
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+),
+RankedMovies AS (
+    -- CTE to rank movies based on production year and their depths
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.depth,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS rank
+    FROM 
+        MovieHierarchy mh
+),
+CastDetails AS (
+    -- CTE to gather detailed cast information
+    SELECT 
+        c.movie_id,
+        n.name AS actor_name,
+        r.role AS role,
+        COALESCE(n.gender, 'Unknown') AS gender
+    FROM 
+        cast_info c
+    INNER JOIN 
+        name n ON c.person_id = n.id
+    INNER JOIN 
+        role_type r ON c.role_id = r.id
+),
+MovieCompaniesDetail AS (
+    -- CTE to gather companies associated with movies
+    SELECT 
+        mc.movie_id,
+        cmp.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cmp ON mc.company_id = cmp.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+-- Final Selection with Outer Joins and Complicated Conditions
+SELECT 
+    rm.title AS movie_title,
+    rm.production_year,
+    cd.actor_name,
+    cd.role,
+    cd.gender,
+    mcd.company_name,
+    mcd.company_type,
+    rm.depth,
+    CASE 
+        WHEN rm.rank IS NULL THEN 'Not Ranked' 
+        ELSE rm.rank::text 
+    END AS movie_rank,
+    CASE 
+        WHEN COUNT(cd.actor_name) > 0 THEN 'Has Cast' 
+        ELSE 'No Cast' 
+    END AS cast_presence
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastDetails cd ON rm.movie_id = cd.movie_id
+LEFT JOIN 
+    MovieCompaniesDetail mcd ON rm.movie_id = mcd.movie_id
+GROUP BY 
+    rm.title, rm.production_year, cd.actor_name, cd.role, cd.gender, mcd.company_name, mcd.company_type, rm.depth, rm.rank
+ORDER BY 
+    rm.production_year DESC, rm.depth, rm.title;

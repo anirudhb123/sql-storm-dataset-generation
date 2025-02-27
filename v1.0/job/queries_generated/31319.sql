@@ -1,0 +1,55 @@
+WITH RECURSIVE YearlyMovies AS (
+    SELECT 
+        production_year,
+        COUNT(DISTINCT movie_id) AS total_movies
+    FROM 
+        aka_title
+    GROUP BY 
+        production_year
+),
+
+PopularActors AS (
+    SELECT 
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        YearlyMovies ym ON ym.production_year = (SELECT MAX(production_year) FROM yearly_movies)
+    GROUP BY 
+        a.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+)
+
+SELECT 
+    pa.name AS actor_name,
+    pa.movie_count AS movies_last_year,
+    t.title,
+    t.production_year,
+    GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+    STRING_AGG(DISTINCT c.name) AS companies
+FROM 
+    PopularActors pa
+JOIN 
+    cast_info ci ON pa.name = (SELECT a.name FROM aka_name a WHERE a.person_id = ci.person_id)
+JOIN 
+    aka_title t ON ci.movie_id = t.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_companies mc ON t.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+WHERE 
+    t.production_year = (SELECT MAX(production_year) FROM YearlyMovies)
+GROUP BY 
+    pa.name, pa.movie_count, t.title, t.production_year
+ORDER BY 
+    pa.movie_count DESC, t.title;
+
+This query aims to benchmark performance by utilizing various SQL constructs. It calculates the number of distinct movies produced in the most recent year, identifies popular actors based on their movie counts, and gathers keywords and company names associated with those movies. The use of recursive CTEs, subqueries, window functions (in the form of aggregated counts), and outer joins showcases a complex query structure.

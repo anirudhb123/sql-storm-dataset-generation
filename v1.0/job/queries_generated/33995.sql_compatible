@@ -1,0 +1,65 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT
+        c.person_id,
+        c.movie_id,
+        1 AS level
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON a.person_id = c.person_id
+    WHERE
+        a.name LIKE 'J%' 
+
+    UNION ALL
+
+    SELECT
+        c2.person_id,
+        c2.movie_id,
+        a.level + 1
+    FROM
+        cast_info c2
+    JOIN
+        actor_hierarchy a ON a.movie_id = c2.movie_id
+    WHERE
+        c2.person_id != a.person_id 
+)
+
+SELECT
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(DISTINCT ac.person_id) FILTER (WHERE ac.level > 1) AS co_stars,
+    COUNT(DISTINCT kw.keyword) AS keyword_count,
+    MAX(CASE 
+            WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') THEN mi.info
+            ELSE NULL
+        END) AS budget,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+FROM
+    actor_hierarchy ah
+JOIN
+    aka_name a ON a.person_id = ah.person_id
+JOIN
+    aka_title t ON t.id = ah.movie_id
+LEFT JOIN
+    movie_keyword mk ON mk.movie_id = ah.movie_id
+LEFT JOIN
+    keyword kw ON kw.id = mk.keyword_id
+LEFT JOIN
+    movie_companies mc ON mc.movie_id = ah.movie_id
+LEFT JOIN
+    company_name cn ON cn.id = mc.company_id
+LEFT JOIN
+    movie_info mi ON mi.movie_id = ah.movie_id
+LEFT JOIN
+    actor_hierarchy ac ON ac.movie_id = ah.movie_id
+
+WHERE
+    t.production_year IS NOT NULL
+GROUP BY
+    a.name, t.title, t.production_year
+HAVING
+    COUNT(DISTINCT ac.person_id) > 0
+ORDER BY
+    t.production_year DESC, co_stars DESC;

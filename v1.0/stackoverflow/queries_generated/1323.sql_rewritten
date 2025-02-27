@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount, 
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId, 
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId, 
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenedDate,
+        COUNT(ph.Id) FILTER (WHERE ph.PostHistoryTypeId IN (11, 12)) AS CloseAndReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.UserId,
+    u.DisplayName,
+    us.TotalQuestions,
+    us.TotalScore,
+    COALESCE(ph.ClosedDate, 'Not Closed') AS LastClosureDate,
+    COALESCE(ph.ReopenedDate, 'Not Reopened') AS LastReopenDate,
+    COALESCE(rp.Title, 'No Recent Questions') AS RecentQuestionTitle
+FROM 
+    UserScores us
+JOIN 
+    Users u ON us.UserId = u.Id
+LEFT JOIN 
+    PostHistories ph ON ph.PostId = (SELECT PostId FROM RankedPosts rp WHERE rp.rn = 1 AND rp.OwnerUserId = u.Id)
+LEFT JOIN 
+    RankedPosts rp ON rp.OwnerUserId = u.Id
+WHERE 
+    us.TotalScore > 50
+ORDER BY 
+    us.TotalScore DESC, 
+    us.TotalQuestions DESC
+LIMIT 10;

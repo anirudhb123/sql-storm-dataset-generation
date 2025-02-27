@@ -1,0 +1,54 @@
+
+WITH CustomerDetail AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales
+    FROM web_sales ws
+    GROUP BY ws.ws_sold_date_sk
+),
+DateAnalysis AS (
+    SELECT 
+        dd.d_date_sk,
+        dd.d_date,
+        COALESCE(sd.total_quantity, 0) AS total_quantity,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        CASE 
+            WHEN COALESCE(sd.total_quantity, 0) = 0 THEN 0 
+            ELSE ROUND((COALESCE(sd.total_sales, 0) / COALESCE(sd.total_quantity, 0)), 2) 
+        END AS average_price
+    FROM date_dim dd
+    LEFT JOIN SalesData sd ON dd.d_date_sk = sd.ws_sold_date_sk
+)
+SELECT 
+    cd.full_name,
+    cd.ca_city,
+    cd.ca_state,
+    cd.ca_country,
+    da.d_date,
+    da.total_quantity,
+    da.total_sales,
+    da.average_price
+FROM CustomerDetail cd
+JOIN DateAnalysis da ON cd.c_customer_sk = (
+    SELECT TOP 1 c.c_customer_sk
+    FROM store_sales ss
+    WHERE ss.ss_sold_date_sk = da.d_date_sk
+    ORDER BY ss.ss_net_paid DESC
+)
+ORDER BY da.total_sales DESC, cd.full_name;

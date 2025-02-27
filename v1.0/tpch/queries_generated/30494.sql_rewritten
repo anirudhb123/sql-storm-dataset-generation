@@ -1,0 +1,51 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS depth
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+    
+    UNION ALL
+    
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, co.depth + 1
+    FROM CustomerOrders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' AND co.depth < 5
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available_quantity,
+           MIN(p.p_retailprice) AS min_retail_price, AVG(p.p_retailprice) AS avg_retail_price
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CombinedStats AS (
+    SELECT c.c_name, COALESCE(SUM(o.o_totalprice), 0) AS total_order_value, 
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           COUNT(DISTINCT co.o_orderkey) AS recursive_order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN CustomerOrders co ON c.c_custkey = co.c_custkey
+    GROUP BY c.c_name
+)
+SELECT DISTINCT 
+    cs.c_name,
+    cs.total_order_value,
+    cs.order_count,
+    cs.recursive_order_count,
+    ps.total_available_quantity,
+    ps.min_retail_price,
+    ps.avg_retail_price,
+    ss.total_supply_cost,
+    ss.unique_parts_supplied
+FROM CombinedStats cs
+LEFT JOIN PartDetails ps ON cs.total_order_value > 1000 
+LEFT JOIN SupplierStats ss ON ss.unique_parts_supplied > 5
+WHERE ss.total_supply_cost IS NOT NULL
+ORDER BY cs.total_order_value DESC, ps.avg_retail_price ASC;

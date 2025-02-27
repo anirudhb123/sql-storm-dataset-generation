@@ -1,0 +1,40 @@
+-- Performance Benchmarking Query
+WITH PostCounts AS (
+    SELECT 
+        PostTypeId, 
+        COUNT(*) AS TotalPosts, 
+        AVG(ViewCount) AS AvgViews, 
+        AVG(Score) AS AvgScore
+    FROM 
+        Posts
+    GROUP BY 
+        PostTypeId
+),
+UserReputation AS (
+    SELECT 
+        UserId, 
+        AVG(Reputation) AS AvgReputation, 
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+)
+SELECT 
+    p.PostTypeId,
+    pt.Name AS PostTypeName,
+    pc.TotalPosts,
+    pc.AvgViews,
+    pc.AvgScore,
+    ur.AvgReputation,
+    ur.BadgeCount
+FROM 
+    PostCounts pc
+JOIN 
+    PostTypes pt ON pc.PostTypeId = pt.Id
+LEFT JOIN 
+    Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE PostTypeId = pc.PostTypeId LIMIT 1)
+LEFT JOIN 
+    UserReputation ur ON ur.UserId = u.Id
+ORDER BY 
+    pc.TotalPosts DESC;

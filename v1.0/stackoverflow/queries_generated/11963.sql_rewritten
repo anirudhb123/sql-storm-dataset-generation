@@ -1,0 +1,9 @@
+SELECT 
+    (SELECT COUNT(*) FROM Posts) AS TotalPosts,
+    (SELECT COUNT(*) FROM Users) AS TotalUsers,
+    (SELECT AVG(Reputation) FROM Users) AS AverageReputation
+UNION ALL
+
+SELECT 
+    (SELECT SUM(Score) FROM Votes) AS TotalVotes,
+    (SELECT AVG(Score) FROM Posts) AS AveragePostScore;

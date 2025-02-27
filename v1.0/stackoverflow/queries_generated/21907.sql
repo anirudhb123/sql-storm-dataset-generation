@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        U.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM p.CreationDate) ORDER BY p.Score DESC) AS YearlyRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 -- We're focusing on Questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, U.Reputation
+), 
+TopPosts AS (
+    SELECT 
+        PostId, Title, CreationDate, Score, ViewCount, UpVotes, DownVotes, OwnerReputation, YearlyRank
+    FROM 
+        RankedPosts
+    WHERE 
+        YearlyRank <= 5
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.OwnerReputation,
+    CASE 
+        WHEN tp.UpVotes > tp.DownVotes THEN 'Positive'
+        WHEN tp.UpVotes < tp.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS Sentiment,
+    CONCAT('Score: ', tp.Score, ' | Views: ', tp.ViewCount) AS ScoreViewInfo,
+    ARRAY(SELECT DISTINCT unnest(string_to_array(p.Tags, '>')) 
+          FROM Posts p
+          WHERE p.Id = tp.PostId 
+            AND p.Tags IS NOT NULL 
+            AND p.Tags <> '') AS TagsArray,
+    (SELECT COUNT(DISTINCT c.Id) 
+     FROM Comments c 
+     WHERE c.PostId = tp.PostId) AS CommentCount
+FROM 
+    TopPosts tp
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM Posts p 
+        WHERE p.Id = tp.PostId 
+          AND p.CreationDate < NOW() - INTERVAL '1 year'
+          AND EXISTS (
+              SELECT 1
+              FROM PostHistory ph 
+              WHERE ph.PostId = p.Id 
+                AND ph.PostHistoryTypeId = 10 -- Post Closed
+                AND ph.CreationDate < NOW() - INTERVAL '1 month'
+          )
+    )
+ORDER BY 
+    tp.Score DESC, 
+    tp.ViewCount DESC;
+
+-- This query finds the top 5 ranked questions for each year based on score,
+-- calculates various statistics including sentiment, and gathers related tags,
+-- while checking for the existence of closed posts within the last year.

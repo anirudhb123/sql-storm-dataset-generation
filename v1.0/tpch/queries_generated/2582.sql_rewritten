@@ -1,0 +1,58 @@
+WITH SupplierTotals AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        COUNT(li.l_orderkey) AS total_lines,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS order_total
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND 
+        o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_name, 
+        st.total_supply_value,
+        RANK() OVER (ORDER BY st.total_supply_value DESC) AS rank
+    FROM 
+        SupplierTotals st
+    JOIN 
+        supplier s ON st.s_suppkey = s.s_suppkey
+    WHERE 
+        st.total_supply_value > 10000
+)
+SELECT 
+    o.o_orderkey,
+    COALESCE(o.total_lines, 0) AS total_lines,
+    COALESCE(o.order_total, 0.00) AS order_total,
+    ts.s_name AS top_supplier,
+    ts.total_supply_value,
+    r.r_name AS region_name
+FROM 
+    OrderSummary o
+FULL OUTER JOIN 
+    TopSuppliers ts ON o.o_orderkey = ts.rank
+LEFT JOIN 
+    nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey)
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    (ts.total_supply_value IS NOT NULL OR o.o_orderkey IS NOT NULL)
+ORDER BY 
+    total_lines DESC, order_total DESC;

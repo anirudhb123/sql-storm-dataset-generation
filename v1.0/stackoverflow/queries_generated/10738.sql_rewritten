@@ -1,0 +1,58 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostStats AS (
+    SELECT
+        PostTypeId,
+        COUNT(*) AS PostCount,
+        AVG(ViewCount) AS AvgViewCount,
+        AVG(Score) AS AvgScore
+    FROM 
+        Posts
+    GROUP BY 
+        PostTypeId
+),
+TagStats AS (
+    SELECT 
+        TagName,
+        SUM(Count) AS TotalTagCount
+    FROM 
+        Tags
+    GROUP BY 
+        TagName
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.TotalPosts,
+    U.TotalComments,
+    U.TotalBadges,
+    P.PostTypeId,
+    P.PostCount,
+    P.AvgViewCount,
+    P.AvgScore,
+    T.TagName,
+    T.TotalTagCount
+FROM 
+    UserStats U
+JOIN 
+    PostStats P ON U.TotalPosts > 0
+JOIN 
+    TagStats T ON U.TotalPosts > 0
+ORDER BY 
+    U.Reputation DESC, P.PostCount DESC, T.TotalTagCount DESC;

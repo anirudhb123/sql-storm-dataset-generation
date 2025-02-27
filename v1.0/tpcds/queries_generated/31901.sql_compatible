@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        SUM(ws_net_profit) AS total_net_profit
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2451545 AND 2451545 + 30 
+    GROUP BY ws_item_sk, ws_order_number
+    UNION ALL
+    SELECT 
+        cs_item_sk, 
+        cs_order_number, 
+        SUM(cs_net_profit) AS total_net_profit
+    FROM catalog_sales
+    WHERE cs_sold_date_sk BETWEEN 2451545 AND 2451545 + 30
+    GROUP BY cs_item_sk, cs_order_number
+),
+StoreSalesAggregated AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS store_net_profit
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN 2451545 AND 2451545 + 30
+    GROUP BY ss_store_sk
+),
+MaxSales AS (
+    SELECT 
+        si.ws_item_sk, 
+        SUM(si.total_net_profit) AS aggregated_profit
+    FROM SalesCTE si
+    GROUP BY si.ws_item_sk
+), 
+RankedSales AS (
+    SELECT 
+        item_sk, 
+        aggregated_profit,
+        RANK() OVER (ORDER BY aggregated_profit DESC) AS rank
+    FROM MaxSales
+)
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    ca.ca_state,
+    ss.store_net_profit,
+    rs.aggregated_profit,
+    rs.rank
+FROM customer c
+JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN StoreSalesAggregated ss ON c.c_customer_sk = ss.ss_store_sk
+JOIN RankedSales rs ON c.c_customer_sk = rs.item_sk
+WHERE 
+    ss.store_net_profit > 1000 
+    AND (ca.ca_state IS NOT NULL OR ca.ca_city IS NOT NULL)
+ORDER BY 
+    rs.rank, 
+    ss.store_net_profit DESC
+FETCH FIRST 10 ROWS ONLY;

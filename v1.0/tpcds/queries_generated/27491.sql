@@ -1,0 +1,67 @@
+
+WITH Address AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT_WS(' ', ca_street_number, ca_street_name, ca_street_type, ca_suite_number) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+Demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        CONCAT(cd_gender, ' ', cd_marital_status, ' ', cd_education_status) AS demographic_info
+    FROM 
+        customer_demographics
+),
+CustomerInfo AS (
+    SELECT 
+        c_customer_sk,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        c_email_address,
+        c_birth_year,
+        ci.gender
+    FROM 
+        customer c
+    JOIN 
+        Demographics ci ON c.c_current_cdemo_sk = ci.cd_demo_sk
+),
+Sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY
+        ws_bill_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        ci.full_name,
+        ai.full_address,
+        si.total_sales,
+        si.order_count
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        Sales si ON ci.c_customer_sk = si.ws_bill_customer_sk
+    LEFT JOIN 
+        Address ai ON ci.c_current_addr_sk = ai.ca_address_sk
+)
+SELECT 
+    full_name,
+    full_address,
+    COALESCE(total_sales, 0) AS total_sales,
+    COALESCE(order_count, 0) AS order_count
+FROM 
+    FinalReport
+WHERE 
+    total_sales > 1000
+ORDER BY 
+    total_sales DESC;

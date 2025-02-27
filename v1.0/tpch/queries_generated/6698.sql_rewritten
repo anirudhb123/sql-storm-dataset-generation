@@ -1,0 +1,27 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey, r.r_name, 0 as level
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE r.r_name = 'ASIA'
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, nh.r_regionkey, nh.r_name, level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.r_regionkey
+)
+SELECT 
+    s.s_suppkey,
+    s.s_name,
+    SUM(ps.ps_supplycost * l.l_quantity) AS total_supply_cost,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    nh.n_name AS nation_name,
+    nh.level AS nation_level
+FROM supplier s
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN NationHierarchy nh ON s.s_nationkey = nh.n_nationkey
+WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+GROUP BY s.s_suppkey, s.s_name, nh.n_name, nh.level
+HAVING SUM(ps.ps_supplycost * l.l_quantity) > 10000
+ORDER BY total_supply_cost DESC, total_customers DESC;

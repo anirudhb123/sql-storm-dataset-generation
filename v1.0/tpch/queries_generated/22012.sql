@@ -1,0 +1,76 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier AS s
+),
+TotalOrderValue AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders AS o
+    JOIN 
+        lineitem AS l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND l.l_shipdate BETWEEN '1995-01-01' AND '1995-12-31'
+    GROUP BY 
+        o.o_orderkey
+),
+OrderCounts AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        orders AS o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+NotableItems AS (
+    SELECT 
+        p.p_partkey,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part AS p
+    JOIN 
+        partsupp AS ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice < (SELECT AVG(p2.p_retailprice) FROM part AS p2)
+    GROUP BY 
+        p.p_partkey
+    HAVING 
+        COUNT(DISTINCT ps.ps_suppkey) > 5
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT CASE 
+        WHEN ts.total_value > 1000 THEN ts.o_orderkey 
+        END) AS high_value_orders,
+    SUM(CASE 
+        WHEN oc.order_count IS NULL THEN 0 
+        ELSE oc.order_count 
+        END) AS total_customers_with_orders,
+    STRING_AGG(DISTINCT CONCAT_WS(':', p.p_name, ni.avg_supply_cost), ', ') AS parts_with_avg_cost
+FROM 
+    nation AS n
+LEFT JOIN 
+    RankedSuppliers AS rs ON n.n_nationkey = rs.s_suppkey
+LEFT JOIN 
+    TotalOrderValue AS ts ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ts.o_orderkey) LIMIT 1)
+LEFT JOIN 
+    NotableItems AS ni ON ni.p_partkey = (SELECT MIN(p2.p_partkey) FROM part p2 WHERE p2.p_size IS NOT NULL)
+LEFT JOIN 
+    OrderCounts AS oc ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = oc.c_custkey LIMIT 1)
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT n.n_nationkey) IS NOT NULL
+ORDER BY 
+    high_value_orders DESC, total_customers_with_orders ASC;

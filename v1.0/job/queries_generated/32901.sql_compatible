@@ -1,0 +1,78 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        episode_of_id,
+        1 AS level
+    FROM 
+        aka_title
+    WHERE 
+        episode_of_id IS NULL
+        
+    UNION ALL
+    
+    SELECT 
+        a.movie_id,
+        a.title,
+        a.production_year,
+        a.episode_of_id,
+        mh.level + 1
+    FROM 
+        aka_title a
+    JOIN 
+        MovieHierarchy mh ON a.episode_of_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        RANK() OVER (PARTITION BY m.production_year ORDER BY COUNT(c.id) DESC) AS rank,
+        COALESCE(mh.level, 0) AS hierarchy_level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.movie_id = c.movie_id
+    LEFT JOIN 
+        MovieHierarchy mh ON m.movie_id = mh.movie_id
+    GROUP BY 
+        m.movie_id, m.title, m.production_year, mh.level
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.rank,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    WHERE 
+        rm.rank <= 5 AND rm.hierarchy_level < 2
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.rank,
+    f.keyword,
+    COALESCE(ci.note, 'No cast information available') AS cast_note,
+    COUNT(DISTINCT mc.company_id) AS num_companies,
+    AVG(mo.info_type_id) AS avg_info_type
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    cast_info ci ON f.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_companies mc ON f.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_info mo ON f.movie_id = mo.movie_id
+GROUP BY 
+    f.movie_id, f.title, f.production_year, f.rank, f.keyword, ci.note
+ORDER BY 
+    f.production_year DESC, f.rank
+LIMIT 100;

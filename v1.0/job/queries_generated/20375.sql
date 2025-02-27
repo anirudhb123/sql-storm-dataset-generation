@@ -1,0 +1,74 @@
+WITH RecursiveMovieData AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_ranking
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastOverview AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    GROUP BY 
+        ci.movie_id
+),
+TitleStatistics AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(co.total_cast, 0) AS total_cast,
+        rm.keyword,
+        rm.year_ranking,
+        CASE 
+            WHEN co.total_cast > 0 AND rm.keyword != 'No Keyword' THEN 'Active'
+            WHEN co.total_cast = 0 THEN 'No Cast'
+            ELSE 'Inactive'
+        END AS movie_status
+    FROM 
+        RecursiveMovieData rm
+    LEFT JOIN 
+        CastOverview co ON co.movie_id = rm.title_id
+)
+SELECT 
+    ts.title,
+    ts.production_year,
+    ts.total_cast,
+    ts.keyword,
+    ts.year_ranking,
+    ts.movie_status
+FROM 
+    TitleStatistics ts
+WHERE 
+    (ts.year_ranking BETWEEN 1 AND 3 OR ts.movie_status = 'No Cast')
+    AND (ts.production_year > 2000 OR ts.keyword LIKE '%Drama%')
+ORDER BY 
+    ts.production_year DESC, 
+    ts.title ASC;
+
+-- Additional statistics on absent companies
+SELECT 
+    mt.title,
+    COUNT(DISTINCT mc.company_id) AS absent_companies
+FROM 
+    movie_companies mc
+RIGHT JOIN 
+    aka_title mt ON mc.movie_id = mt.movie_id
+WHERE 
+    mc.company_id IS NULL
+GROUP BY 
+    mt.title
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0;

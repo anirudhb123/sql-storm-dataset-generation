@@ -1,0 +1,78 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score
+),
+FrequentTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS UsageCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 5
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalComments,
+    ua.TotalUpVotes,
+    ua.TotalDownVotes,
+    ps.PostId,
+    ps.Title AS PostTitle,
+    ps.ViewCount AS PostViewCount,
+    ps.Score AS PostScore,
+    ps.CommentCount AS PostCommentCount,
+    ft.TagName AS FrequentTag,
+    ps.LastEdited
+FROM 
+    UserActivity ua
+JOIN 
+    PostStatistics ps ON ua.UserId = ps.PostId
+JOIN 
+    FrequentTags ft ON ft.UsageCount > 10
+WHERE 
+    ua.UserRank <= 10
+ORDER BY 
+    ua.TotalPosts DESC, ps.ViewCount DESC;

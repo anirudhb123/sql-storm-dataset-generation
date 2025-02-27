@@ -1,0 +1,61 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT ps.ps_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN supplier_hierarchy sh ON ps.ps_partkey = sh.s_suppkey
+),
+lineitem_summary AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(*) AS item_count,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_shipdate DESC) AS rn
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY l.l_orderkey
+),
+nation_summary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+customer_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        CASE 
+            WHEN SUM(o.o_totalprice) > 1000 THEN 'High'
+            WHEN SUM(o.o_totalprice) BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS customer_segment
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    n.n_name,
+    ns.supplier_count,
+    ns.total_acctbal,
+    ls.total_revenue,
+    ls.item_count,
+    cs.total_spent,
+    cs.customer_segment,
+    COALESCE(sh.level, -1) AS supplier_level
+FROM nation_summary ns
+LEFT JOIN lineitem_summary ls ON ns.n_nationkey = ls.l_orderkey
+LEFT JOIN customer_summary cs ON ls.l_orderkey = cs.c_custkey
+LEFT JOIN supplier_hierarchy sh ON ns.n_nationkey = sh.s_suppkey
+WHERE ns.supplier_count > 5
+ORDER BY ns.total_acctbal DESC, ls.total_revenue DESC;

@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        u.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        PostTypeId,
+        CreationDate,
+        Score,
+        OwnerReputation,
+        CommentCount,
+        UpVotes,
+        DownVotes,
+        (UpVotes - DownVotes) AS NetVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        PostTypeId IN (1, 2) AND 
+        (CommentCount > 0 OR OwnerReputation > 100)
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        NetVotes,
+        OwnerReputation,
+        RANK() OVER (ORDER BY NetVotes DESC, Score DESC, CreationDate ASC) AS Rank
+    FROM 
+        FilteredPosts
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.NetVotes,
+    tp.OwnerReputation,
+    CASE 
+        WHEN tp.Rank <= 10 THEN 'Top 10 Posts'
+        WHEN tp.Rank <= 50 THEN 'Top 50 Posts'
+        ELSE 'Other Posts'
+    END AS PostCategory,
+    COALESCE(ph.Name, 'No History') AS PostHistoryType
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistory ph ON tp.PostId = ph.PostId 
+                     AND ph.CreationDate = (SELECT MAX(ph2.CreationDate) 
+                                             FROM PostHistory ph2 
+                                             WHERE ph2.PostId = tp.PostId)
+WHERE 
+    tp.rn = 1
+ORDER BY 
+    tp.Rank, tp.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 20 ROWS ONLY;

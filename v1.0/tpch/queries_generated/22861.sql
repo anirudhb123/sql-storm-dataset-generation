@@ -1,0 +1,100 @@
+WITH RECURSIVE Price_Range AS (
+    SELECT
+        p_partkey,
+        p_name,
+        p_retailprice,
+        p_comment,
+        0 AS recursion_level
+    FROM
+        part
+    WHERE
+        p_retailprice IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice * (1 + (0.1 * r.recursion_level)) AS p_retailprice,
+        p.p_comment,
+        r.recursion_level + 1
+    FROM
+        part p
+    JOIN
+        Price_Range r ON p.p_partkey = r.p_partkey
+    WHERE
+        r.recursion_level < 3
+        AND p.p_retailprice > r.p_retailprice
+),
+Supplier_Summary AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM
+        supplier s
+    LEFT JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey
+    HAVING
+        COUNT(DISTINCT ps.ps_partkey) > 0
+),
+Order_Statistics AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS items_ordered
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderstatus = 'F'
+    GROUP BY
+        o.o_orderkey
+),
+Customer_Rank AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank_by_total_spend
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey
+)
+SELECT
+    r.r_name,
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    COALESCE(SUM(oss.total_revenue), 0) AS total_revenue,
+    AVG(pr.p_retailprice) AS avg_part_price,
+    MAX(pr.p_retailprice) AS max_part_price,
+    MIN(pr.p_retailprice) AS min_part_price
+FROM
+    region r
+JOIN
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN
+    Order_Statistics oss ON c.c_custkey IN (
+        SELECT DISTINCT o.o_custkey
+        FROM orders o
+        WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    )
+LEFT JOIN
+    Price_Range pr ON c.c_custkey = pr.p_partkey
+GROUP BY
+    r.r_name,
+    n.n_name
+HAVING
+    COUNT(DISTINCT c.c_custkey) > 0
+ORDER BY
+    total_revenue DESC,
+    r.r_name ASC,
+    n.n_name ASC;

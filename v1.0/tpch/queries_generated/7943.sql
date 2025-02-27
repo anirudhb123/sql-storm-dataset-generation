@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS total_orders, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+NationalStats AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_revenue
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    n.n_name,
+    cs.c_name AS top_customer,
+    cs.total_orders AS customer_orders,
+    cs.total_spent AS customer_spending,
+    rs.s_name AS top_supplier,
+    rs.total_supply_cost AS supplier_cost
+FROM 
+    NationalStats n
+JOIN 
+    CustomerOrders cs ON n.total_orders = cs.total_orders
+JOIN 
+    RankedSuppliers rs ON n.n_nationkey = (
+        SELECT n.n_nationkey
+        FROM supplier s
+        WHERE s.s_suppkey = rs.s_suppkey
+    )
+WHERE 
+    rs.rnk = 1
+ORDER BY 
+    n.n_name, cs.total_spent DESC;

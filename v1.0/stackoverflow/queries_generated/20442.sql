@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score > 0
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        c.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        CloseReasonTypes c ON ph.Comment::int = c.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        AVG(COALESCE(u.Reputation, 0)) AS AvgReputation
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+Subquery AS (
+    SELECT 
+        UserId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    tp.PostCount,
+    tp.TotalBounty,
+    tp.AvgReputation,
+    COALESCE(s.UpVotes, 0) AS UpVotes,
+    COALESCE(s.DownVotes, 0) AS DownVotes,
+    rp.Title, 
+    rp.CreationDate,
+    rp.Score,
+    COALESCE(cr.CloseReason, 'Not Closed') AS CloseReason
+FROM 
+    TopUsers tp
+JOIN 
+    Users u ON u.Id = tp.Id
+LEFT JOIN 
+    RankedPosts rp ON rp.OwnerUserId = u.Id AND rp.rn = 1
+LEFT JOIN 
+    CloseReasons cr ON cr.PostId = rp.Id
+LEFT JOIN 
+    Subquery s ON s.UserId = u.Id
+WHERE 
+    tp.TotalBounty > 0 
+    AND (tp.AvgReputation IS NOT NULL OR tp.AvgReputation > 100)
+ORDER BY 
+    tp.PostCount DESC, 
+    tp.TotalBounty DESC, 
+    rp.Score DESC NULLS LAST;
+
+-- This query retrieves a comprehensive list of top users based on their posts
+-- while considering their closing reasons and vote counts.

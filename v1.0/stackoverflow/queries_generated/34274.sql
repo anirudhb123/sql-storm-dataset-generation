@@ -1,0 +1,89 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- We start with questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseCount -- Count of times closed
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS ClosedPostCount 
+    FROM 
+        PostStats ps
+    JOIN 
+        Posts p ON ps.Id = p.Id
+    GROUP BY 
+        OwnerUserId
+    HAVING 
+        COUNT(*) > 10 -- Only consider users with more than 10 posts
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    Coalesce(TU.PostCount, 0) AS PostCount,
+    Coalesce(TU.TotalUpVotes, 0) AS TotalUpVotes,
+    Coalesce(TU.TotalDownVotes, 0) AS TotalDownVotes,
+    Coalesce(TU.ClosedPostCount, 0) AS ClosedPostCount,
+    Coalesce(UB.BadgeCount, 0) AS BadgeCount
+FROM 
+    Users u
+LEFT JOIN 
+    TopUsers TU ON u.Id = TU.OwnerUserId
+LEFT JOIN 
+    UserBadges UB ON u.Id = UB.UserId
+WHERE 
+    u.CreationDate >= CURRENT_DATE - INTERVAL '1 year' -- Only consider users who joined in the last year
+ORDER BY 
+    TotalUpVotes DESC
+LIMIT 10;

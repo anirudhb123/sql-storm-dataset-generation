@@ -1,0 +1,73 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id IN (1, 2) -- Assuming 1 and 2 are for movies and TV shows
+  UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        h.level + 1
+    FROM 
+        movie_hierarchy h
+    JOIN aka_title m ON m.episode_of_id = h.movie_id
+    WHERE 
+        m.episode_of_id IS NOT NULL
+),
+cast_and_role AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        c.movie_id,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_order
+    FROM 
+        cast_info c
+    INNER JOIN aka_name a ON a.person_id = c.person_id
+    INNER JOIN role_type r ON r.id = c.role_id
+),
+movie_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(c.actor_count, 0) AS actor_count,
+    mw.keywords,
+    STRING_AGG(DISTINCT cr.role_name, ', ' ORDER BY cr.actor_order) AS roles
+FROM 
+    movie_hierarchy mh
+LEFT JOIN (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.actor_id) AS actor_count
+    FROM 
+        cast_and_role c
+    GROUP BY 
+        c.movie_id
+) c ON c.movie_id = mh.movie_id
+LEFT JOIN cast_and_role cr ON cr.movie_id = mh.movie_id
+LEFT JOIN movie_with_keywords mw ON mw.movie_id = mh.movie_id
+WHERE 
+    mh.production_year >= 2000 -- Filter for movies produced after 2000
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, c.actor_count, mw.keywords
+ORDER BY 
+    mh.production_year DESC, mh.title ASC;

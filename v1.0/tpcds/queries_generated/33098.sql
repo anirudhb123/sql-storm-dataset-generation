@@ -1,0 +1,69 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+Top_Sales AS (
+    SELECT 
+        sc.ws_item_sk,
+        sc.total_sales,
+        i.i_item_desc,
+        ROW_NUMBER() OVER (ORDER BY sc.total_sales DESC) as rank
+    FROM 
+        Sales_CTE sc
+    JOIN 
+        item i ON sc.ws_item_sk = i.i_item_sk
+    WHERE 
+        sc.sales_rank <= 10
+),
+Customer_Demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(ws.ws_ext_sales_price) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+Aggregated_Demographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(cd.customer_count) AS total_customers,
+        AVG(cd.total_spent) AS avg_spent
+    FROM 
+        Customer_Demographics cd
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    ts.ws_item_sk,
+    ts.i_item_desc,
+    ts.total_sales,
+    ad.cd_gender,
+    ad.cd_marital_status,
+    ad.total_customers,
+    ad.avg_spent
+FROM 
+    Top_Sales ts
+JOIN 
+    Aggregated_Demographics ad ON 1=1 -- Cartesian join for cross analysis
+WHERE 
+    ts.total_sales > 0
+ORDER BY 
+    ts.total_sales DESC, ad.avg_spent DESC
+LIMIT 20;

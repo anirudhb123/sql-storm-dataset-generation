@@ -1,0 +1,67 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.Reputation AS OwnerReputation,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.Reputation, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerReputation,
+        OwnerDisplayName,
+        CommentCount,
+        UpVoteCount,
+        DownVoteCount,
+        RANK() OVER (ORDER BY Score DESC, ViewCount DESC) AS Rank
+    FROM 
+        PostDetails
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.OwnerReputation,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    CASE 
+        WHEN tp.Rank <= 10 THEN 'Top 10'
+        ELSE 'Below Top 10'
+    END AS RankCategory,
+    (SELECT COUNT(*) FROM Posts p2 WHERE p2.OwnerUserId = tp.OwnerReputation) AS UserPostCount,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     JOIN Posts_tags pt ON t.Id = pt.TagId 
+     WHERE pt.PostId = tp.PostId) AS Tags,
+    (SELECT AVG(OwnerReputation) FROM Users WHERE Id IN 
+     (SELECT OwnerUserId FROM Posts WHERE AcceptedAnswerId = tp.PostId)) AS AvgAnswerOwnerReputation
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Rank;

@@ -1,0 +1,103 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.CreationDate, 
+        p.Score, 
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId, 
+        a.Title, 
+        a.OwnerUserId, 
+        a.CreationDate, 
+        a.Score, 
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostCTE q ON a.ParentId = q.PostId
+    WHERE 
+        a.PostTypeId = 2  -- Answers
+),
+
+PostVoteAggregates AS (
+    SELECT 
+        p.Id,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+
+PostHistoryRecent AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title
+)
+
+SELECT 
+    r.PostId,
+    r.Title,
+    r.OwnerUserId,
+    u.DisplayName,
+    r.CreationDate,
+    COALESCE(pa.UpVotes, 0) AS UpVotes,
+    COALESCE(pa.DownVotes, 0) AS DownVotes,
+    ub.BadgeCount,
+    CASE 
+        WHEN ub.HighestBadgeClass = 1 THEN 'Gold'
+        WHEN ub.HighestBadgeClass = 2 THEN 'Silver'
+        WHEN ub.HighestBadgeClass = 3 THEN 'Bronze'
+        ELSE 'None'
+    END AS HighestBadge,
+    r.Level,
+    phr.LastEditDate
+FROM 
+    RecursivePostCTE r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    PostVoteAggregates pa ON r.PostId = pa.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostHistoryRecent phr ON r.PostId = phr.PostId
+WHERE 
+    r.Level <= 2  -- Limit the recursive depth to 2 for benchmarking
+    AND (u.Location IS NOT NULL OR u.Location <> '')  -- Additional predicate
+ORDER BY 
+    r.Score DESC,
+    r.CreationDate DESC;
+

@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id
+AND t.phonetic_code IS NOT NULL AND mi.info IN ('"Tarzan, der Herr des Urwaldes". In: "Film-Programm der Kino-Szene" (D-88267 Vogt, Germany), Peter Kranzpiller, Iss. No. 206 (2 versions), 1992, Pg. 4', '$785 (USA) (11 March 2001) (1 screen)', '102', 'A story of American royalty, this documentary short subject details the life and work of Florenz Ziegfeld Jr, a middle class Jewish boy with little more than chutzpah who rose to show business success from sideshow barker and manager to the greatest Broadway impresario of the twentieth century - a "somebody" of the highest magnitude who achieved greatness by appealing to the lowest common denominator.', 'Belgium:7 June 1984', 'UK:6 December 1974');

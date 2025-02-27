@@ -1,0 +1,61 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(sr_return_quantity) AS total_returned_items,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        customer c
+    JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+
+StoreSales AS (
+    SELECT 
+        s.s_store_id,
+        SUM(ss_net_paid) AS total_sales_amount,
+        SUM(ss_quantity) AS total_items_sold
+    FROM 
+        store s
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.s_store_id
+),
+
+Promotions AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT ws.ws_order_number) AS promo_order_count,
+        SUM(ws.ws_net_paid) AS promo_sales_amount
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_id
+)
+
+SELECT 
+    cr.c_customer_id,
+    sr.s_store_id,
+    pr.p_promo_id,
+    cr.total_returned_items,
+    cr.total_return_amount,
+    ss.total_sales_amount AS store_total_sales,
+    ss.total_items_sold AS store_total_items,
+    pr.promo_order_count,
+    pr.promo_sales_amount
+FROM 
+    CustomerReturns cr
+JOIN 
+    StoreSales ss ON cr.c_customer_id = ss.s_store_id -- Example join condition for demo
+JOIN 
+    Promotions pr ON pr.promo_order_count > 100 -- Example condition to filter results
+ORDER BY 
+    cr.total_return_amount DESC,
+    ss.total_sales_amount DESC
+LIMIT 100;

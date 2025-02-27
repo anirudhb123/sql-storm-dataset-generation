@@ -1,0 +1,41 @@
+WITH RECURSIVE Supplier_Summary AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, COUNT(ps.ps_partkey) AS total_parts
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ss.total_parts + 1
+    FROM Supplier_Summary ss
+    JOIN partsupp ps ON ss.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ss.total_parts < 5
+),
+Order_Summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+),
+Customer_Nation AS (
+    SELECT c.c_custkey, n.n_name AS nation_name, c.c_acctbal
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE c.c_acctbal IS NOT NULL
+)
+SELECT 
+    ps.s_suppkey,
+    ss.total_parts,
+    COUNT(DISTINCT cs.c_custkey) AS customer_count,
+    SUM(os.net_revenue) AS total_revenue
+FROM Supplier_Summary ss
+LEFT JOIN partsupp ps ON ss.s_suppkey = ps.ps_suppkey
+LEFT JOIN Order_Summary os ON ps.ps_partkey = os.o_orderkey
+LEFT JOIN Customer_Nation cs ON cs.c_custkey = os.o_orderkey
+WHERE ss.total_parts > 2
+GROUP BY ps.s_suppkey, ss.total_parts
+HAVING SUM(os.net_revenue) > 10000.00
+ORDER BY total_revenue DESC
+LIMIT 10;

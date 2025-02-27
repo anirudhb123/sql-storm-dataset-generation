@@ -1,0 +1,41 @@
+WITH CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+RegionNations AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+OrderDetails AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value, 
+           DENSE_RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS line_rank
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+)
+
+SELECT 
+    COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+    COUNT(DISTINCT o.o_orderkey) AS distinct_orders,
+    AVG(co.total_spent) AS avg_spent,
+    r.n_name AS nation_name,
+    sp.s_name AS supplier_name,
+    sp.total_supply_value
+FROM CustomerOrders co
+FULL OUTER JOIN orders o ON co.c_custkey = o.o_custkey
+FULL OUTER JOIN RegionNations rn ON co.c_custkey IS NULL OR rn.n_nationkey IN (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = co.c_custkey)
+FULL OUTER JOIN SupplierParts sp ON o.o_orderkey IS NULL OR sp.total_supply_value > 10000
+LEFT JOIN OrderDetails od ON o.o_orderkey = od.l_orderkey
+LEFT JOIN nation r ON r.n_nationkey = (SELECT MAX(n.n_nationkey) FROM nation n)
+GROUP BY c.c_name, r.n_name, sp.s_name
+HAVING AVG(co.total_spent) > 5000 AND COUNT(DISTINCT o.o_orderkey) > 1
+ORDER BY total_supply_value DESC, customer_name ASC;

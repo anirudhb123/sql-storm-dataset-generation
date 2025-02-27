@@ -1,0 +1,71 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        Id, 
+        Title, 
+        CreationDate, 
+        ParentId, 
+        1 AS Level
+    FROM Posts
+    WHERE PostTypeId = 1  -- Start with Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.ParentId, 
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursiveCTE r ON p.ParentId = r.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(DISTINCT p.Id) AS PostCount, 
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON v.UserId = u.Id AND v.PostId = p.Id
+    GROUP BY u.Id
+),
+PostScore AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.Score, 
+        COALESCE(pc.PostCount, 0) AS RelatedPostsCount
+    FROM Posts p
+    LEFT JOIN UserActivity pc ON p.OwnerUserId = pc.UserId
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId, 
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11)  -- Only consider closing and reopening
+    GROUP BY ph.PostId
+)
+SELECT 
+    p.Id AS PostId, 
+    p.Title,
+    p.Score,
+    p.RelatedPostsCount,
+    COALESCE(rph.LastChangeDate, 'No changes') AS LastChange,
+    COALESCE(ua.UserId, -1) AS HighestActivityUserId,
+    COALESCE(ua.PostCount, 0) AS UserPostCount,
+    COALESCE(ua.TotalBounty, 0) AS UserTotalBounty,
+
+    (SELECT COUNT(*) 
+     FROM Comments c 
+     WHERE c.PostId = p.Id) AS CommentCount,
+
+    ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+
+FROM PostScore p
+LEFT JOIN RecentPostHistory rph ON p.Id = rph.PostId
+LEFT JOIN UserActivity ua ON p.OwnerUserId = ua.UserId
+
+WHERE p.Score > 0 
+AND (p.RelatedPostsCount > 0 OR p.Title LIKE '%SQL%')
+ORDER BY p.Score DESC, p.CreationDate DESC;

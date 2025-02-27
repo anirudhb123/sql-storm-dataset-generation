@@ -1,0 +1,4 @@
+SELECT min(lt.link) AS link_type, min(t1.title) AS first_movie, min(t2.title) AS second_movie
+FROM keyword AS k, link_type AS lt, movie_keyword AS mk, movie_link AS ml, title AS t1, title AS t2
+WHERE mk.keyword_id = k.id AND t1.id = mk.movie_id AND ml.movie_id = t1.id AND ml.linked_movie_id = t2.id AND lt.id = ml.link_type_id AND mk.movie_id = t1.id
+AND t2.series_years IN ('1646-1786', '1950-1965', '1952-1960', '1967-1969', '1969-1975', '1981-2003', '1989-1990', '1992-1993', '1997-1997');

@@ -1,0 +1,61 @@
+WITH TagStats AS (
+    SELECT 
+        TRIM(unnest(string_to_array(Tags, '><'))) AS TagName,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Posts
+    GROUP BY 
+        TRIM(unnest(string_to_array(Tags, '><')))
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+AggPostHistory AS (
+    SELECT 
+        post_id,
+        COUNT(*) AS EditCount,
+        SUM(CASE WHEN pht.Name = 'Edit Body' THEN 1 ELSE 0 END) AS BodyEditCount,
+        SUM(CASE WHEN pht.Name = 'Edit Title' THEN 1 ELSE 0 END) AS TitleEditCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        post_id
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ur.DisplayName,
+    ur.TotalViews,
+    ur.TotalScore,
+    aph.EditCount,
+    aph.BodyEditCount,
+    aph.TitleEditCount
+FROM 
+    TagStats ts
+JOIN 
+    Posts p ON p.Tags ILIKE '%' || ts.TagName || '%'
+JOIN 
+    UserReputation ur ON p.OwnerUserId = ur.UserId
+JOIN 
+    AggPostHistory aph ON p.Id = aph.post_id
+WHERE 
+    ts.PostCount > 5 AND  -- Filter tags with more than 5 posts
+    ur.TotalScore > 1000  -- Filter users with reputation score greater than 1000
+ORDER BY 
+    ts.PostCount DESC, ur.TotalViews DESC;

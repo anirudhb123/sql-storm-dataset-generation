@@ -1,0 +1,50 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_birth_month ORDER BY SUM(ws.ws_net_profit) DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_birth_month
+),
+EnhancedMetrics AS (
+    SELECT 
+        r.c_customer_id, 
+        r.total_net_profit,
+        CASE 
+            WHEN r.total_net_profit IS NULL THEN 0 
+            ELSE r.total_net_profit
+        END AS adjusted_net_profit,
+        DENSE_RANK() OVER (ORDER BY r.total_net_profit DESC) AS profit_rank
+    FROM 
+        RankedSales r
+)
+SELECT 
+    e.c_customer_id,
+    e.adjusted_net_profit,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    CASE 
+        WHEN s.total_sales > 0 THEN e.adjusted_net_profit / s.total_sales 
+        ELSE NULL 
+    END AS profit_margin,
+    DENSE_RANK() OVER (ORDER BY e.adjusted_net_profit DESC) AS margin_rank
+FROM 
+    EnhancedMetrics e
+LEFT JOIN (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_net_paid) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+) s ON e.c_customer_id = s.customer_sk
+WHERE 
+    e.profit_rank <= 10 AND 
+    e.adjusted_net_profit IS NOT NULL
+ORDER BY 
+    e.adjusted_net_profit DESC;

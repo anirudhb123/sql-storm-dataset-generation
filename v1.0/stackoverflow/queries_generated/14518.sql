@@ -1,0 +1,63 @@
+-- Performance Benchmark Query
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation, 
+        COUNT(b.Id) AS BadgeCount, 
+        SUM(v.CreationDate IS NOT NULL) AS VoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId, 
+        COUNT(p.Id) AS PostCount, 
+        SUM(p.AnswerCount) AS TotalAnswers, 
+        SUM(p.CommentCount) AS TotalComments, 
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(CASE WHEN p.LastActivityDate >= NOW() - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentActivityCount
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+CombinedStats AS (
+    SELECT 
+        u.UserId, 
+        u.Reputation, 
+        us.BadgeCount, 
+        us.VoteCount, 
+        COALESCE(ps.PostCount, 0) AS PostCount,
+        COALESCE(ps.TotalAnswers, 0) AS TotalAnswers,
+        COALESCE(ps.TotalComments, 0) AS TotalComments,
+        COALESCE(ps.TotalViews, 0) AS TotalViews,
+        COALESCE(ps.RecentActivityCount, 0) AS RecentActivityCount
+    FROM 
+        UserStats us
+    JOIN 
+        Users u ON us.UserId = u.Id
+    LEFT JOIN 
+        PostStats ps ON u.Id = ps.OwnerUserId
+)
+SELECT 
+    UserId,
+    Reputation,
+    BadgeCount,
+    VoteCount,
+    PostCount,
+    TotalAnswers,
+    TotalComments,
+    TotalViews,
+    RecentActivityCount
+FROM 
+    CombinedStats
+ORDER BY 
+    Reputation DESC, 
+    VoteCount DESC
+LIMIT 100;

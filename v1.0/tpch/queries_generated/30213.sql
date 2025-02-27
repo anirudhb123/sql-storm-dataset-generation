@@ -1,0 +1,47 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY o.o_orderkey
+),
+nation_expansion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name AS region_name, COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name, r.r_name
+),
+part_details AS (
+    SELECT p.p_partkey, p.p_name, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    nh.n_name AS nation_name,
+    ps.p_name AS part_name,
+    ps.avg_supply_cost,
+    os.o_orderkey,
+    os.net_revenue,
+    COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned_quantity,
+    ROW_NUMBER() OVER (PARTITION BY nh.n_name ORDER BY os.net_revenue DESC) AS revenue_rank
+FROM order_summary os
+JOIN part_details ps ON ps.p_partkey = os.o_orderkey
+JOIN nation_expansion nh ON nh.n_nationkey = ps.p_partkey
+LEFT JOIN supplier_hierarchy sh ON nh.supplier_count > 0
+LEFT JOIN lineitem l ON l.l_orderkey = os.o_orderkey
+GROUP BY nh.n_name, ps.p_name, ps.avg_supply_cost, os.o_orderkey, os.net_revenue
+HAVING SUM(l.l_quantity) > 0
+ORDER BY nh.n_name, revenue_rank;

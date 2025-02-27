@@ -1,0 +1,68 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_mktsegment,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name,
+        ro.c_mktsegment
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.order_rank <= 10
+),
+LineItemSummary AS (
+    SELECT 
+        lo.l_orderkey,
+        COUNT(*) AS total_items,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue
+    FROM 
+        lineitem lo
+    GROUP BY 
+        lo.l_orderkey
+),
+FinalReport AS (
+    SELECT 
+        to.o_orderkey,
+        to.o_orderdate,
+        to.o_totalprice,
+        to.c_name,
+        to.c_mktsegment,
+        lis.total_items,
+        lis.total_revenue,
+        (to.o_totalprice - lis.total_revenue) AS profit_loss
+    FROM 
+        TopOrders to
+    LEFT JOIN 
+        LineItemSummary lis ON to.o_orderkey = lis.l_orderkey
+)
+SELECT 
+    r.r_name AS region,
+    fr.c_mktsegment,
+    COUNT(fr.o_orderkey) AS number_of_orders,
+    SUM(fr.total_revenue) AS total_revenue,
+    AVG(fr.profit_loss) AS average_profit_loss
+FROM 
+    FinalReport fr
+JOIN 
+    customer c ON fr.c_name = c.c_name
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+GROUP BY 
+    r.r_name, fr.c_mktsegment
+ORDER BY 
+    r.r_name, fr.c_mktsegment;

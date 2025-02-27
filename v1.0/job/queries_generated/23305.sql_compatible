@@ -1,0 +1,75 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS title_count
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS company_rank
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+CastRoles AS (
+    SELECT
+        c.movie_id,
+        r.role AS role_name,
+        COUNT(c.person_id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id, r.role
+    HAVING 
+        COUNT(c.person_id) > 1
+),
+MovieDetails AS (
+    SELECT
+        mt.movie_id,
+        mt.title,
+        COALESCE(GROUP_CONCAT(DISTINCT cd.company_name), 'No Companies') AS companies,
+        COALESCE(GROUP_CONCAT(DISTINCT r.role_name), 'No Roles') AS roles,
+        COALESCE(MAX(r.role_count), 0) AS max_roles
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        CompanyDetails cd ON rt.title_id = cd.movie_id
+    LEFT JOIN 
+        CastRoles r ON rt.title_id = r.movie_id
+    LEFT JOIN 
+        aka_title mt ON rt.title_id = mt.id
+    WHERE 
+        rt.title_rank = 1
+    GROUP BY 
+        mt.movie_id, mt.title
+)
+SELECT 
+    md.title,
+    rt.production_year,
+    md.companies,
+    md.roles,
+    md.max_roles
+FROM 
+    MovieDetails md
+JOIN 
+    RankedTitles rt ON md.movie_id = rt.title_id
+WHERE 
+    md.max_roles > 5 OR md.companies != 'No Companies'
+ORDER BY 
+    rt.production_year DESC, 
+    md.title;

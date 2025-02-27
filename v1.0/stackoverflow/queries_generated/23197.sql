@@ -1,0 +1,83 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AvgViews,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= DATEADD(year, -1, GETDATE())  -- posts created in the last year
+    GROUP BY 
+        P.OwnerUserId
+),
+VoteStats AS (
+    SELECT 
+        V.UserId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.UserId
+)
+SELECT 
+    U.DisplayName,
+    COALESCE(US.Reputation, 0) AS Reputation,
+    COALESCE(PS.PostCount, 0) AS TotalPosts,
+    COALESCE(PS.TotalScore, 0) AS TotalPostScore,
+    COALESCE(US.BadgeCount, 0) AS TotalBadges,
+    COALESCE(US.GoldBadges, 0) AS GoldBadges,
+    COALESCE(US.SilverBadges, 0) AS SilverBadges,
+    COALESCE(US.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(VS.UpVotes, 0) AS UpVotesReceived,
+    COALESCE(VS.DownVotes, 0) AS DownVotesReceived
+FROM 
+    Users U
+LEFT JOIN 
+    UserStats US ON U.Id = US.UserId
+LEFT JOIN 
+    PostStats PS ON U.Id = PS.OwnerUserId
+LEFT JOIN 
+    VoteStats VS ON U.Id = VS.UserId
+WHERE 
+    (US.Reputation IS NOT NULL OR PS.PostCount IS NOT NULL OR VS.TotalVotes IS NOT NULL)
+ORDER BY 
+    Reputation DESC,
+    TotalPosts DESC,
+    UpVotesReceived DESC
+OPTION (MAXRECURSION 0);  -- Handle potential recursion in CTEs
+This elaborate SQL query performs the following:
+
+1. **Common Table Expressions (CTEs)**:
+   - `UserStats`: Aggregate user statistics, counting badges by class.
+   - `PostStats`: Aggregate post statistics for posts created in the last year.
+   - `VoteStats`: Collects voting statistics per user.
+   
+2. **Main Query**:
+   - Combines the data from the CTEs and the `Users` table, using various types of joins to include user information even if they have no related statistics.
+   - Uses `COALESCE` to substitute zero values where no stats exist.
+   - Applies multiple criteria in the `WHERE` clause to filter results and ensure at least some statistics exist.
+   
+3. **Ordering**:
+   - Orders the results first by reputation, then by the number of posts, and then by up votes received, providing a hierarchical view of user engagement.
+
+The use of window functions, nested queries, and CTEs creates a complex yet optimized structure suitable for performance benchmarking scenarios.

@@ -1,0 +1,50 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+ranked_customers AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+dividend_customers AS (
+    SELECT 
+        rc.c_customer_sk,
+        rc.c_first_name,
+        rc.c_last_name,
+        rc.cd_gender,
+        rc.total_profit,
+        rc.profit_rank,
+        CASE 
+            WHEN rc.profit_rank <= 10 THEN 'Top 10 Customers'
+            WHEN rc.profit_rank BETWEEN 11 AND 50 THEN 'Top 50 Customers'
+            ELSE 'Other Customers'
+        END AS customer_category
+    FROM ranked_customers rc
+)
+SELECT 
+    d.customer_category,
+    SUM(ss.total_quantity) AS total_quantity,
+    SUM(ss.total_sales) AS total_sales,
+    COUNT(DISTINCT dc.c_customer_sk) AS customer_count,
+    AVG(dc.total_profit) AS avg_profit
+FROM sales_summary ss
+LEFT JOIN dividend_customers dc ON ss.ws_item_sk = dc.c_customer_sk
+GROUP BY d.customer_category
+HAVING SUM(ss.total_sales) > 1000
+ORDER BY total_quantity DESC;
+

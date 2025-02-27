@@ -1,0 +1,28 @@
+
+SELECT 
+    ca.city AS Address_City,
+    ca.state AS Address_State,
+    cd.gender AS Customer_Gender,
+    cd.marital_status AS Customer_Marital_Status,
+    COUNT(DISTINCT c.customer_sk) AS Unique_Customers,
+    SUM(CASE WHEN c.preferred_cust_flag = 'Y' THEN 1 ELSE 0 END) AS Preferred_Customers,
+    AVG(cd.purchase_estimate) AS Avg_Purchase_Estimate,
+    STRING_AGG(DISTINCT CONCAT(c.first_name, ' ', c.last_name), '; ') AS Customer_Names,
+    MAX(cd.dep_count) AS Max_Dependents,
+    MIN(cd.credit_rating) AS Min_Credit_Rating,
+    SUBSTRING(c.email_address, POSITION('@' IN c.email_address) + 1) AS Email_Domain
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    ca.city IS NOT NULL 
+    AND ca.state IS NOT NULL 
+    AND c.first_name IS NOT NULL 
+    AND c.last_name IS NOT NULL
+GROUP BY 
+    ca.city, ca.state, cd.gender, cd.marital_status
+ORDER BY 
+    Unique_Customers DESC, Address_City;

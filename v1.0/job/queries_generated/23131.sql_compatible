@@ -1,0 +1,84 @@
+
+WITH MovieStatistics AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        COUNT(DISTINCT k.keyword) AS total_keywords,
+        SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS total_roles,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        complete_cast AS cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info AS c ON c.movie_id = t.id
+    LEFT JOIN 
+        movie_keyword AS mk ON mk.movie_id = t.id 
+    LEFT JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info AS mi ON mi.movie_id = t.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+HighCastMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        total_cast,
+        total_keywords,
+        total_roles,
+        rank_by_cast
+    FROM 
+        MovieStatistics
+    WHERE 
+        total_cast > 10 AND rank_by_cast <= 5
+),
+PersonRoles AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.role_id) AS role_count,
+        ROW_NUMBER() OVER (PARTITION BY ci.person_id ORDER BY COUNT(DISTINCT ci.role_id) DESC) AS rank_by_roles
+    FROM 
+        cast_info AS ci
+    GROUP BY 
+        ci.person_id
+),
+FilteredRoles AS (
+    SELECT 
+        p.id AS person_id,
+        p.name,
+        pr.role_count
+    FROM 
+        aka_name AS p
+    JOIN 
+        PersonRoles AS pr ON p.person_id = pr.person_id
+    WHERE 
+        pr.role_count > 2
+)
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    h.total_cast,
+    ARRAY_AGG(DISTINCT r.name) FILTER (WHERE r.name IS NOT NULL) AS top_actors,
+    ARRAY_AGG(DISTINCT k.keyword) FILTER (WHERE k.keyword IS NOT NULL) AS movie_keywords
+FROM 
+    HighCastMovies AS h
+LEFT JOIN 
+    cast_info AS ci ON h.movie_id = ci.movie_id
+LEFT JOIN 
+    FilteredRoles AS r ON ci.person_id = r.person_id
+LEFT JOIN 
+    movie_keyword AS mk ON h.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+GROUP BY 
+    h.movie_id, h.title, h.production_year, h.total_cast
+HAVING 
+    COUNT(DISTINCT r.person_id) > 5
+ORDER BY 
+    h.total_cast DESC, h.production_year ASC;

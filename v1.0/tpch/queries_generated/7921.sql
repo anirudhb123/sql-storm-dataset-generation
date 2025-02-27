@@ -1,0 +1,36 @@
+WITH ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+), top_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING total_spent > 10000
+), order_details AS (
+    SELECT lo.l_orderkey, SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_line_price
+    FROM lineitem lo
+    GROUP BY lo.l_orderkey
+), product_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available_qty, 
+           AVG(p.p_retailprice) AS avg_retail_price
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+
+SELECT r.r_name, COUNT(DISTINCT so.o_orderkey) AS num_orders, 
+       SUM(so.o_totalprice) AS total_order_value, 
+       AVG(od.total_line_price) AS avg_order_line_price
+FROM ranked_orders so
+JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey 
+                                   FROM nation n 
+                                   JOIN supplier s ON n.n_nationkey = s.s_nationkey 
+                                   WHERE s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps))
+LEFT JOIN order_details od ON so.o_orderkey = od.l_orderkey
+JOIN top_customers tc ON so.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = tc.c_custkey)
+WHERE so.order_rank <= 10
+GROUP BY r.r_name
+ORDER BY total_order_value DESC;

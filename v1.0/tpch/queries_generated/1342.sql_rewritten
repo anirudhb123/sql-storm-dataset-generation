@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+ActiveOrders AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS line_item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    cs.total_spent,
+    COALESCE(aoc.line_item_count, 0) AS active_line_items,
+    STRING_AGG(DISTINCT p.p_name) AS purchased_parts,
+    COUNT(DISTINCT rs.s_suppkey) AS distinct_suppliers
+FROM 
+    CustomerSummary cs
+JOIN 
+    customer c ON cs.c_custkey = c.c_custkey
+LEFT JOIN 
+    ActiveOrders aoc ON cs.order_count > 0 AND aoc.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN 
+    RankedSuppliers rs ON rs.rnk = 1 AND rs.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps JOIN lineitem l ON ps.ps_partkey = l.l_partkey WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey))
+WHERE 
+    cs.total_spent > 5000
+GROUP BY 
+    c.c_custkey, c.c_name, cs.total_spent, aoc.line_item_count
+ORDER BY 
+    cs.total_spent DESC;

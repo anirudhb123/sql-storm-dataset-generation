@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SalesTrend AS (
+    SELECT 
+        ss.sold_date_sk,
+        ss.item_sk,
+        SUM(ss.sales_price * ss.quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ss.item_sk ORDER BY ss.sold_date_sk DESC) AS rn
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2000) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+    GROUP BY 
+        ss.sold_date_sk, ss.item_sk
+),
+TopItems AS (
+    SELECT 
+        st.item_sk,
+        SUM(st.total_sales) AS total_sales
+    FROM 
+        SalesTrend st
+    WHERE 
+        st.rn <= 5
+    GROUP BY 
+        st.item_sk
+    ORDER BY 
+        total_sales DESC
+    LIMIT 10
+)
+SELECT 
+    ci.i_item_id,
+    ci.i_product_name,
+    COALESCE(ti.total_sales, 0) AS sales_total,
+    CASE 
+        WHEN COALESCE(ti.total_sales, 0) = 0 THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END AS sales_status
+FROM 
+    item ci
+LEFT JOIN 
+    TopItems ti ON ci.i_item_sk = ti.item_sk
+WHERE 
+    ci.i_current_price > (
+        SELECT 
+            AVG(i_current_price) 
+        FROM 
+            item 
+        WHERE 
+            i_rec_start_date <= DATE '2002-10-01' AND i_rec_end_date >= DATE '2002-10-01'
+    )
+ORDER BY 
+    sales_total DESC;

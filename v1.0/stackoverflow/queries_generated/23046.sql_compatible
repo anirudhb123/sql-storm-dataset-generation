@@ -1,0 +1,70 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+), 
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        AVG(p.Score) OVER (PARTITION BY p.OwnerUserId) AS AvgScore,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.OwnerUserId
+), 
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        ph.Comment AS CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS CloseEventNum
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId, ph.Comment
+)
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    u.Reputation,
+    up.ReputationRank,
+    p.Title,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    ps.AvgScore,
+    c.LastClosedDate,
+    CASE 
+        WHEN c.LastClosedDate IS NOT NULL THEN c.CloseReason
+        ELSE 'Not Closed'
+    END AS CloseComment
+FROM 
+    Users u
+INNER JOIN 
+    UserReputation up ON u.Id = up.UserId
+INNER JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    PostStatistics ps ON p.Id = ps.PostId
+LEFT JOIN 
+    ClosedPostHistory c ON p.Id = c.PostId AND c.CloseEventNum = 1
+WHERE 
+    ps.AvgScore > 0 
+    AND (ps.CommentCount > 5 OR ps.UpVotes > ps.DownVotes) 
+ORDER BY 
+    u.Reputation DESC, 
+    c.LastClosedDate DESC
+LIMIT 100;

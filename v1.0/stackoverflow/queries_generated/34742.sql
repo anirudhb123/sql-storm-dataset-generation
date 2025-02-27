@@ -1,0 +1,69 @@
+WITH RecursivePostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(P.AnswerCount, 0) AS AnswerCount,
+        COALESCE(P.ViewCount, 0) AS ViewCount,
+        COALESCE(V.UpVoteCount, 0) AS UpVotes,
+        COALESCE(V.DownVoteCount, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) V ON P.Id = V.PostId
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        MIN(CASE WHEN PH.PostHistoryTypeId = 4 THEN PH.CreationDate END) AS FirstEditDate,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseOpenCount,
+        COUNT(*) AS TotalHistoryEntries
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.AnswerCount,
+    PS.ViewCount,
+    PS.UpVotes,
+    PS.DownVotes,
+    COALESCE(PHS.FirstEditDate, 'No Edits') AS FirstEditDate,
+    COALESCE(PHS.CloseOpenCount, 0) AS CloseOpenCount,
+    U.DisplayName,
+    UB.GoldBadges,
+    UB.SilverBadges,
+    UB.BronzeBadges
+FROM 
+    RecursivePostStats PS
+LEFT JOIN PostHistorySummary PHS ON PS.PostId = PHS.PostId
+LEFT JOIN Users U ON PS.OwnerUserId = U.Id
+LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+WHERE 
+    PS.rn = 1 -- Only consider the most recent post for each user
+ORDER BY 
+    PS.ViewCount DESC,
+    PS.CreationDate DESC
+LIMIT 100;

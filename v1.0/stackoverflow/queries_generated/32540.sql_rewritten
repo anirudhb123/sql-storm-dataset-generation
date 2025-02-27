@@ -1,0 +1,85 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.AcceptedAnswerId,
+        rp.Level + 1
+    FROM 
+        Posts p2
+    JOIN 
+        RecursivePostCTE rp ON p2.ParentId = rp.PostId
+), 
+UserPostRankings AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        RANK() OVER (ORDER BY COUNT(p.Id) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostWithTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(p.Tags, '>,<')) AS TagName ON true
+    LEFT JOIN 
+        Tags T ON T.TagName = TagName
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    up.DisplayName AS UserName,
+    up.PostCount,
+    up.PositivePosts,
+    r.PerformingUserId,
+    r.PostId,
+    r.Title,
+    pt.Tags,
+    COALESCE(MAX(v.CreationDate), '1970-01-01'::timestamp) AS LastVoteDate,
+    COUNT(DISTINCT cm.Id) AS CommentCount,
+    CASE 
+        WHEN COUNT(DISTINCT cm.Id) > 0 THEN 'Has Comments' 
+        ELSE 'No Comments' 
+    END AS CommentStatus
+FROM 
+    UserPostRankings up
+LEFT JOIN 
+    Posts p ON up.UserId = p.OwnerUserId
+LEFT JOIN 
+    PostsWithTags pt ON p.Id = pt.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Comments cm ON p.Id = cm.PostId
+LEFT JOIN 
+    RecursivePostCTE r ON p.Id = r.PostId
+WHERE 
+    up.UserRank <= 10 
+GROUP BY 
+    up.UserName, up.PostCount, up.PositivePosts, r.PerformingUserId, r.PostId, r.Title, pt.Tags
+ORDER BY 
+    up.PostCount DESC, CommentCount DESC;

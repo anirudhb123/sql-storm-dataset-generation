@@ -1,0 +1,87 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    GROUP BY 
+        t.Id, t.TagName
+    HAVING 
+        COUNT(p.Id) > 0
+), 
+
+RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+), 
+
+ActivePostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(CAST(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS INT), 0) AS UpVotes,
+        COALESCE(CAST(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS INT), 0) AS DownVotes,
+        COALESCE(NULLIF(CAST(SUM(CASE WHEN v.VoteTypeId IN (2,3) THEN 1 ELSE NULL END) AS INT), 0), NULL), 0) AS TotalVotes  -- To avoid nulls in total votes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())  -- Posts created in the last year
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score
+),
+
+FinalReport AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.UserRank,
+        t.TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS NumberOfPosts,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore,
+        AVG(ps.UpVotes * 1.0) AS AverageUpVotes,
+        AVG(ps.DownVotes * 1.0) AS AverageDownVotes
+    FROM 
+        RankedUsers u
+    LEFT JOIN 
+        Posts p ON u.UserId = p.OwnerUserId
+    LEFT JOIN 
+        RecursiveTagCounts t ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    LEFT JOIN 
+        ActivePostStats ps ON p.Id = ps.PostId
+    WHERE 
+        u.UserRank <= 100  -- Top 100 users by reputation
+    GROUP BY 
+        u.UserId, u.DisplayName, u.UserRank, t.TagId, t.TagName
+)
+
+SELECT 
+    r.UserId,
+    r.DisplayName,
+    r.UserRank,
+    COALESCE(r.TagId, -1) AS TagId,  -- Handling NULL tags
+    COALESCE(r.TagName, 'No Tags') AS TagName,
+    SUM(r.NumberOfPosts) AS TotalPosts,
+    SUM(r.TotalViews) AS TotalViews,
+    SUM(r.TotalScore) AS TotalScore,
+    AVG(r.AverageUpVotes) AS AvgUpVotes,
+    AVG(r.AverageDownVotes) AS AvgDownVotes
+FROM 
+    FinalReport r
+GROUP BY 
+    r.UserId, r.DisplayName, r.UserRank, r.TagId, r.TagName
+ORDER BY 
+    TotalPosts DESC, UserRank ASC;
+

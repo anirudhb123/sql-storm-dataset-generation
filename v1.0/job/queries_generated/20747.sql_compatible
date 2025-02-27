@@ -1,0 +1,93 @@
+
+WITH RECURSIVE RecursiveMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(m.production_year, 1900) AS production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS rn
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        ci.movie_id,
+        r.role,
+        COALESCE(ci.note, 'No note available') AS role_note
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN 
+        role_type r ON ci.role_id = r.id
+), 
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc 
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+KeywordMovies AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mi.info, '; ') AS movie_info
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ARRAY_AGG(DISTINCT km.keyword) AS keywords,
+        mf.movie_info
+    FROM 
+        RecursiveMovies rm
+    LEFT JOIN 
+        KeywordMovies km ON rm.movie_id = km.movie_id
+    LEFT JOIN 
+        MovieInfo mf ON rm.movie_id = mf.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+    HAVING 
+        COUNT(DISTINCT km.keyword) > 2 
+)
+SELECT 
+    fm.title AS movie_title,
+    fm.production_year,
+    COALESCE(fm.keywords, ARRAY[]::TEXT[]) AS keywords,
+    COALESCE(ar.name, 'No actors listed') AS actor_name,
+    COALESCE(ar.role, 'Unknown role') AS role,
+    COALESCE(cm.company_name, 'No production company') AS production_company,
+    COALESCE(cm.company_type, 'N/A') AS company_type,
+    fm.movie_info
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    ActorRoles ar ON fm.movie_id = ar.movie_id
+LEFT JOIN 
+    CompanyMovies cm ON fm.movie_id = cm.movie_id
+WHERE 
+    fm.production_year > 2000
+ORDER BY 
+    fm.production_year DESC, fm.title;

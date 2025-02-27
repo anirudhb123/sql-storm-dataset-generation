@@ -1,0 +1,61 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        AVG(s.s_acctbal) AS avg_account_balance
+    FROM
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spending,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(ps.ps_availqty), 0) AS available_quantity,
+        COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS supply_value
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    cs.c_custkey,
+    cs.total_orders,
+    cs.total_spending,
+    coalesce(ss.total_parts, 0) AS supplier_total_parts,
+    coalesce(ss.total_supply_value, 0) AS supplier_total_supply_value,
+    ps.p_partkey,
+    ps.p_name,
+    ps.available_quantity,
+    ps.supply_value
+FROM 
+    CustomerOrders cs
+LEFT JOIN 
+    SupplierStats ss ON cs.c_custkey % 100 = ss.s_suppkey % 100  -- Simulated correlation
+JOIN 
+    PartSupplier ps ON ps.available_quantity > 0
+WHERE 
+    cs.last_order_date >= (CURRENT_DATE - INTERVAL '2 years')
+ORDER BY 
+    cs.total_spending DESC, 
+    ps.supply_value ASC
+FETCH FIRST 100 ROWS ONLY;

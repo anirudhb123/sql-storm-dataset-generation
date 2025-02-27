@@ -1,0 +1,41 @@
+WITH SupplierStats AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+           AVG(ps.ps_availqty) AS AvgAvailability
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           COUNT(o.o_orderkey) AS OrderCount,
+           SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartDetails AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_brand, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+)
+SELECT cs.c_name AS CustomerName, 
+       ss.s_name AS SupplierName, 
+       ps.p_name AS PartName, 
+       cs.TotalSpent as TotalSpentByCustomer,
+       ss.TotalSupplyCost as TotalSupplyCostBySupplier,
+       pd.TotalRevenue AS TotalRevenueFromPart,
+       RANK() OVER (PARTITION BY cs.c_custkey ORDER BY cs.TotalSpent DESC) AS CustomerRank,
+       RANK() OVER (PARTITION BY ss.s_suppkey ORDER BY ss.TotalSupplyCost DESC) AS SupplierRank
+FROM CustomerOrderStats cs
+FULL OUTER JOIN SupplierStats ss ON cs.OrderCount > 0 AND ss.AvgAvailability < 100
+LEFT JOIN PartDetails pd ON ss.TotalSupplyCost > 1000 AND pd.TotalRevenue > 5000
+WHERE cs.TotalSpent IS NOT NULL OR ss.TotalSupplyCost IS NOT NULL
+ORDER BY cs.TotalSpent DESC, ss.TotalSupplyCost DESC;

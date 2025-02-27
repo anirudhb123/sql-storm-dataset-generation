@@ -1,0 +1,62 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey
+),
+Frequent_customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS high_value_order_total
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_totalprice > 10000
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT fs.c_custkey) AS frequent_customer_count,
+    SUM(hvo.high_value_order_total) AS total_high_value_orders,
+    s.s_name AS supplier_name,
+    rs.total_supply_cost
+FROM 
+    RankedSuppliers rs
+JOIN 
+    nation n ON n.n_nationkey = rs.s_suppkey
+JOIN 
+    Frequent_customers fs ON fs.c_custkey = rs.s_suppkey
+JOIN 
+    HighValueOrders hvo ON hvo.o_orderkey = fs.c_custkey
+WHERE 
+    rs.supplier_rank = 1
+GROUP BY 
+    n.n_name, s.s_name, rs.total_supply_cost
+ORDER BY 
+    total_high_value_orders DESC, frequent_customer_count DESC;

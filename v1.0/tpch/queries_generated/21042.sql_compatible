@@ -1,0 +1,67 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank,
+        COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) OVER (PARTITION BY o.o_orderkey), 0) AS total_returned,
+        (SELECT COUNT(DISTINCT l1.l_orderkey)
+         FROM lineitem l1
+         WHERE l1.l_shipdate < o.o_orderdate) AS prior_shipments
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate <= '1998-10-01'
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supply_value,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+)
+SELECT 
+    r.r_name,
+    SUM(COALESCE(c.order_count, 0)) AS total_orders,
+    SUM(u.supply_value) AS total_supplier_value,
+    COUNT(DISTINCT o.o_orderkey) AS unique_orders,
+    (SELECT COUNT(*) FROM nation n WHERE n.n_regionkey = r.r_regionkey) AS nation_count
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    CustomerStats c ON n.n_nationkey = c.c_custkey
+LEFT JOIN 
+    SupplierStats u ON n.n_nationkey = u.ps_suppkey
+LEFT JOIN 
+    RankedOrders o ON o.o_orderkey IS NOT NULL
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT CASE WHEN COALESCE(c.order_count, 0) > 10 THEN c.c_custkey END) > 0
+ORDER BY 
+    r.r_name ASC
+LIMIT 10;

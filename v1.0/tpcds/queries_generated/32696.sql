@@ -1,0 +1,65 @@
+
+WITH RECURSIVE sales_info AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+        SUM(cs.cs_net_profit) AS total_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+product_details AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        WorldRank() OVER (ORDER BY SUM(ws.ws_net_paid) DESC) as rank
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_desc
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    SUM(s.total_quantity) AS total_quantity_sold,
+    SUM(s.total_sales) AS total_sales_amount,
+    p.i_item_desc,
+    cs.total_orders,
+    cs.total_profit
+FROM 
+    customer_address ca
+LEFT JOIN 
+    store s ON ca.ca_address_sk = s.s_addr_sk
+JOIN 
+    sales_info s ON s.ws_sold_date_sk = CURRENT_DATE - INTERVAL '1' DAY
+JOIN 
+    product_details p ON s.ws_item_sk = p.i_item_sk
+JOIN 
+    customer_stats cs ON cs.c_customer_sk = s.ws_bill_customer_sk
+WHERE 
+    ca.ca_country = 'USA' 
+    AND cs.total_orders > 0 
+    AND p.rank < 10
+GROUP BY 
+    ca.ca_city, ca.ca_state, p.i_item_desc, cs.total_orders, cs.total_profit
+HAVING 
+    SUM(s.total_sales) > 1000
+ORDER BY 
+    total_sales_amount DESC;

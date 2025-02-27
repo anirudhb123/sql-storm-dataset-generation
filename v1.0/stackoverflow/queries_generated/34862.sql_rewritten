@@ -1,0 +1,85 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        CAST(Title AS VARCHAR(300)) AS Path, 
+        1 AS Level
+    FROM 
+        Posts 
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        CAST(rph.Path || ' -> ' || p.Title AS VARCHAR(300)), 
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserWithBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+HighScorePosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.Score,
+        CASE 
+            WHEN p.Score > 100 THEN 'High'
+            WHEN p.Score > 50 THEN 'Medium'
+            ELSE 'Low'
+        END AS ScoreCategory
+    FROM 
+        Posts p
+),
+FilteredPosts AS (
+    SELECT 
+        hp.Id, 
+        hp.Title, 
+        hp.Score, 
+        hp.ScoreCategory,
+        uwd.DisplayName,
+        rph.Path,
+        ROW_NUMBER() OVER(PARTITION BY hp.ScoreCategory ORDER BY hp.Score DESC) AS Rank
+    FROM 
+        HighScorePosts hp
+    INNER JOIN 
+        UserWithBadges uwd ON hp.OwnerUserId = uwd.UserId
+    LEFT JOIN 
+        RecursivePostHierarchy rph ON hp.Id = rph.Id
+    WHERE 
+        hp.ScoreCategory = 'High'
+        AND uwd.BadgeCount > 0
+)
+SELECT 
+    fp.Title,
+    fp.Score,
+    fp.ScoreCategory,
+    fp.DisplayName,
+    fp.Path,
+    fp.Rank
+FROM 
+    FilteredPosts fp
+WHERE 
+    fp.Rank <= 5
+ORDER BY 
+    fp.Score DESC;

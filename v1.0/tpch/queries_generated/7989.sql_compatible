@@ -1,0 +1,46 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+TopCustomers AS (
+    SELECT 
+        r.r_name AS region_name, 
+        n.n_name AS nation_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        RankedOrders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.rank <= 5
+    GROUP BY 
+        r.r_name, n.n_name
+)
+SELECT 
+    rc.region_name, 
+    rc.nation_name, 
+    COUNT(*) AS number_of_customers,
+    AVG(rc.total_spent) AS average_spent
+FROM 
+    TopCustomers rc
+GROUP BY 
+    rc.region_name, rc.nation_name
+ORDER BY 
+    rc.region_name, average_spent DESC;

@@ -1,0 +1,72 @@
+
+WITH OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_shipdate DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= CURRENT_DATE - INTERVAL '6 months'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name
+),
+TopOrders AS (
+    SELECT 
+        od.o_orderkey,
+        od.o_orderdate,
+        od.c_name,
+        od.total_amount
+    FROM 
+        OrderDetails od
+    WHERE 
+        od.rn = 1
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CombinedResults AS (
+    SELECT 
+        to.o_orderkey,
+        to.o_orderdate,
+        to.c_name,
+        to.total_amount,
+        spd.total_avail_qty,
+        spd.avg_supply_cost,
+        CASE 
+            WHEN spd.total_avail_qty IS NULL THEN 'Unavailable'
+            ELSE 'Available'
+        END AS availability_status
+    FROM 
+        TopOrders to
+    LEFT JOIN 
+        SupplierPartDetails spd ON to.o_orderkey = spd.ps_partkey
+)
+SELECT 
+    cr.o_orderkey,
+    cr.o_orderdate,
+    cr.c_name,
+    cr.total_amount,
+    COALESCE(cr.total_avail_qty, 0) AS available_quantity,
+    cr.avg_supply_cost,
+    cr.availability_status
+FROM 
+    CombinedResults cr
+WHERE 
+    cr.total_amount > 1000
+ORDER BY 
+    cr.total_amount DESC
+LIMIT 10;

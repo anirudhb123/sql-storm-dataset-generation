@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(sp.TotalScore, 0) AS TotalScore,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (
+            SELECT 
+                PostId, 
+                SUM(Score) AS TotalScore
+            FROM 
+                Votes
+            WHERE 
+                VoteTypeId IN (2, 3)  
+            GROUP BY 
+                PostId
+        ) sp ON p.Id = sp.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+), 
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        REPLACE(TRIM(UNNEST(STRING_TO_ARRAY(LOWER(p.Tags), '><'))), '>', '') AS TagName,
+        COUNT(p.Id) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        REPLACE(TRIM(UNNEST(STRING_TO_ARRAY(LOWER(p.Tags), '><'))), '>', '')
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName,
+    up.Reputation,
+    up.Badges,
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.TotalScore,
+    rp.CommentCount,
+    ut.GoldBadges,
+    ut.SilverBadges,
+    ut.BronzeBadges,
+    pt.TagName
+FROM 
+    Users up
+JOIN 
+    RankedPosts rp ON rp.PostRank <= 5
+JOIN 
+    UserBadges ut ON up.Id = ut.UserId
+LEFT JOIN 
+    PopularTags pt ON pt.TagName IN (SELECT UNNEST(STRING_TO_ARRAY(rp.Title, ' ')))
+WHERE 
+    up.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+ORDER BY 
+    rp.TotalScore DESC,
+    rp.ViewCount DESC;

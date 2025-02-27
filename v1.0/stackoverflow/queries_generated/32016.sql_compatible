@@ -1,0 +1,90 @@
+
+WITH RecursiveBadges AS (
+    SELECT 
+        b.Id,
+        b.UserId,
+        b.Name,
+        b.Class,
+        b.Date,
+        1 AS BadgeLevel
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1  
+    UNION ALL
+    SELECT 
+        b.Id,
+        b.UserId,
+        b.Name,
+        b.Class,
+        b.Date,
+        rb.BadgeLevel + 1
+    FROM 
+        Badges b
+    JOIN 
+        RecursiveBadges rb ON b.UserId = rb.UserId 
+    WHERE 
+        b.Class < rb.Class 
+),
+MaxVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes v 
+    GROUP BY 
+        v.PostId
+),
+TotalPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(mp.VoteCount, 0) AS TotalVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS EditHistoryCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        MaxVotes mp ON p.Id = mp.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate > CURRENT_TIMESTAMP - INTERVAL '365 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, mp.VoteCount
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(rb.Class) AS TotalBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        RecursiveBadges rb ON u.Id = rb.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        TotalBadgeClass DESC
+    LIMIT 10
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.TotalVotes,
+    tp.CommentCount,
+    tp.EditHistoryCount,
+    tu.DisplayName AS TopUser
+FROM 
+    TotalPosts tp
+LEFT JOIN 
+    TopUsers tu ON tp.TotalVotes > 0
+WHERE 
+    tp.TotalVotes > 0
+ORDER BY 
+    tp.TotalVotes DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,67 @@
+
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT V.UserId) AS VoteCount,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(P.Tags, ',')) AS TagName ON TRUE
+    LEFT JOIN 
+        Tags T ON T.TagName = TagName
+    WHERE 
+        P.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year' 
+        AND P.PostTypeId IN (1, 2) 
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount
+),
+UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        SUM(CASE WHEN P.OwnerUserId = U.Id THEN 1 ELSE 0 END) AS PostsCreated,
+        SUM(CASE WHEN C.UserId = U.Id THEN 1 ELSE 0 END) AS CommentsMade,
+        SUM(CASE WHEN V.UserId = U.Id THEN 1 ELSE 0 END) AS VotesCasted
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    WHERE 
+        U.CreationDate < CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '6 months'
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.CommentCount,
+    PS.VoteCount,
+    U.UserId,
+    U.PostsCreated,
+    U.CommentsMade,
+    U.VotesCasted,
+    PS.Tags
+FROM 
+    PostStats PS
+JOIN 
+    UserEngagement U ON PS.ViewCount > U.PostsCreated * 10 
+ORDER BY 
+    PS.Score DESC, 
+    PS.ViewCount DESC
+LIMIT 50;

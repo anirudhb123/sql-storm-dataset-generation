@@ -1,0 +1,52 @@
+
+WITH PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        STRING_AGG(DISTINCT s.s_name, ', ') AS suppliers
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type, p.p_size, p.p_container
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        STRING_AGG(DISTINCT o.o_orderstatus, ', ') AS order_statuses
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    pd.p_name,
+    pd.total_available_qty,
+    pd.avg_supply_cost,
+    pd.supplier_count,
+    co.total_orders,
+    co.total_spent,
+    co.order_statuses
+FROM 
+    PartDetails pd
+JOIN 
+    CustomerOrders co ON pd.p_container LIKE '%' || CAST(co.total_orders AS VARCHAR) || '%'
+WHERE 
+    pd.avg_supply_cost < (SELECT AVG(ps.ps_supplycost) FROM partsupp ps)
+ORDER BY 
+    pd.total_available_qty DESC, co.total_spent DESC;

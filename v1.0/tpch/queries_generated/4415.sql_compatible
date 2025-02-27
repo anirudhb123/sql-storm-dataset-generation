@@ -1,0 +1,60 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+TopNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING SUM(s.s_acctbal) > 0
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        p.p_comment,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_brand, p.p_retailprice, p.p_comment
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(o.o_totalprice), 0) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT ps.ps_partkey) AS num_parts,
+    SUM(COALESCE(sp.order_count, 0)) AS total_orders,
+    SUM(sp.p_retailprice) AS total_retail_price,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    AVG(co.total_spent) AS avg_customer_spending
+FROM nation n
+LEFT JOIN RankedSuppliers rs ON n.n_nationkey = rs.s_nationkey AND rs.rn <= 5
+LEFT JOIN SupplierParts sp ON rs.s_suppkey = sp.ps_suppkey
+LEFT JOIN CustomerOrders co ON co.total_spent > 0
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name
+ORDER BY total_orders DESC, avg_customer_spending DESC;

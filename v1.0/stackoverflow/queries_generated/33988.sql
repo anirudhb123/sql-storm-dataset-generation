@@ -1,0 +1,105 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        0 AS Level,
+        p.CreationDate AS PostDate
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        r.Level + 1,
+        p.CreationDate
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        SUM(CASE WHEN v.CreationDate >= CURRENT_DATE - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS HistoryCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  -- Bounty start votes
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostCount,
+        ua.TotalBounty,
+        ua.UpVotes,
+        ua.DownVotes,
+        RANK() OVER (ORDER BY ua.TotalBounty DESC) AS RankBounty,
+        RANK() OVER (ORDER BY ua.PostCount DESC) AS RankPosts
+    FROM 
+        UserActivity ua
+    WHERE 
+        ua.PostCount > 0
+)
+SELECT 
+    ps.Title,
+    ps.TotalBounty,
+    ps.CommentCount,
+    u.DisplayName,
+    u.Reputation,
+    u.Location,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.ExcerptPostId = ps.Id) AS Tags,
+    CASE 
+        WHEN ps.HistoryCount > 10 THEN 'Highly Edited'
+        WHEN ps.HistoryCount BETWEEN 5 AND 10 THEN 'Moderately Edited'
+        ELSE 'Little Edited'
+    END AS EditStatus,
+    ROW_NUMBER() OVER (PARTITION BY ps.OwnerUserId ORDER BY ps.TotalBounty DESC) AS UserRankForBounty
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.OwnerUserId = u.Id
+LEFT JOIN 
+    TopUsers tu ON u.Id = tu.UserId
+WHERE 
+    u.Reputation > 100
+ORDER BY 
+    ps.TotalBounty DESC, 
+    ps.CommentCount DESC
+LIMIT 50;

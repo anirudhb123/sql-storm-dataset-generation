@@ -1,0 +1,99 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.Text,
+        1 AS Level
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+    UNION ALL
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.Text,
+        Level + 1
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        RecursivePostHistory rph ON rph.PostId = ph.PostId
+    WHERE 
+        ph.CreationDate < rph.CreationDate
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+),
+
+PostInteraction AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(c.Id) AS TotalComments,
+        AVG(COALESCE(vot.Score, 0)) AS AverageVote
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id AND v.VoteTypeId IN (2, 3)  
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes vot ON vot.PostId = p.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id
+),
+
+PopularPosts AS (
+    SELECT 
+        pi.PostId,
+        pi.Title,
+        pi.TotalBounty,
+        pi.TotalComments,
+        pi.AverageVote,
+        ROW_NUMBER() OVER (ORDER BY pi.TotalComments DESC, pi.AverageVote DESC) AS PopularityRank
+    FROM 
+        PostInteraction pi
+)
+
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    pp.Title,
+    pp.TotalBounty,
+    pp.TotalComments,
+    pp.AverageVote,
+    rph.CreationDate AS LastActionDate,
+    CASE 
+        WHEN rph.Comment IS NOT NULL THEN 'Closed'
+        WHEN rph.UserId IS NOT NULL THEN 'Reopened'
+        ELSE 'Action Not Recorded'
+    END AS ActionStatus
+FROM 
+    UserReputation up
+JOIN 
+    PopularPosts pp ON pp.PostId = (SELECT PostId FROM RecursivePostHistory 
+                                       WHERE UserId = up.Id 
+                                       ORDER BY CreationDate DESC LIMIT 1)
+LEFT JOIN 
+    RecursivePostHistory rph ON rph.PostId = pp.PostId
+WHERE 
+    up.Rank <= 10  
+ORDER BY 
+    up.Reputation DESC;

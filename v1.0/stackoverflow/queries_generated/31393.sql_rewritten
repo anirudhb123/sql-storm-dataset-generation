@@ -1,0 +1,89 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyAmount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        RANK() OVER (PARTITION BY u.Id ORDER BY COALESCE(SUM(v.BountyAmount), 0) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        p.Title,
+        pt.Name AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+)
+SELECT 
+    rph.PostId,
+    rph.Title AS PostTitle,
+    u.DisplayName AS UserName,
+    ua.TotalPosts,
+    ua.CommentCount,
+    ua.TotalBountyAmount,
+    CASE 
+        WHEN rph.ParentId IS NULL THEN 'Top Level'
+        ELSE (SELECT Title FROM Posts WHERE Id = rph.ParentId)
+    END AS ParentPostTitle,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    AVG(p.Score) AS AveragePostScore,
+    MAX(pe.CreationDate) AS LastEditDate
+FROM 
+    RecursivePostHierarchy rph
+LEFT JOIN 
+    Users u ON rph.PostId = u.Id
+LEFT JOIN 
+    UserActivity ua ON ua.UserId = u.Id
+LEFT JOIN 
+    Comments c ON rph.PostId = c.PostId
+LEFT JOIN 
+    RecentPostEdits pe ON rph.PostId = pe.PostId AND pe.EditRank = 1
+LEFT JOIN 
+    Posts p ON rph.PostId = p.Id
+GROUP BY 
+    rph.PostId, rph.Title, u.DisplayName, ua.TotalPosts, ua.CommentCount, ua.TotalBountyAmount, rph.ParentId
+ORDER BY 
+    ua.TotalBountyAmount DESC, TotalComments DESC;

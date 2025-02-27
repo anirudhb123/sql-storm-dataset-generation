@@ -1,0 +1,22 @@
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    SUM(CASE 
+        WHEN LENGTH(p.p_name) > 20 THEN 1 ELSE 0 
+    END) AS long_name_count,
+    SUBSTRING(p.p_name, 1, 10) AS short_name,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS suppliers
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    p.p_retailprice > 50.00
+GROUP BY 
+    p.p_name
+HAVING 
+    COUNT(DISTINCT ps.s_suppkey) > 5
+ORDER BY 
+    long_name_count DESC, supplier_count ASC;

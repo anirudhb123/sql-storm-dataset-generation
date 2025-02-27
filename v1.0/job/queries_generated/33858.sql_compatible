@@ -1,0 +1,79 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        0 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.episode_of_id IS NULL
+
+    UNION ALL
+
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1
+    FROM 
+        aka_title e
+    INNER JOIN 
+        MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+),
+MovieCast AS (
+    
+    SELECT 
+        c.movie_id,
+        ak.name AS actor_name
+    FROM 
+        cast_info c
+    INNER JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+),
+MovieInfo AS (
+    
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords,
+        STRING_AGG(CASE WHEN mi.info_type_id = 1 THEN mi.info END, '; ') AS synopsis,
+        STRING_AGG(CASE WHEN mi.info_type_id = 2 THEN mi.info END, '; ') AS notes
+    FROM 
+        movie_keyword m
+    LEFT JOIN 
+        keyword k ON m.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mc.actor_name,
+    mi.keywords,
+    mi.synopsis,
+    ci.kind AS company_type
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    MovieCast mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_companies mc2 ON mh.movie_id = mc2.movie_id
+LEFT JOIN 
+    company_name cn ON mc2.company_id = cn.imdb_id
+LEFT JOIN 
+    company_type ci ON mc2.company_type_id = ci.id
+LEFT JOIN 
+    MovieInfo mi ON mh.movie_id = mi.movie_id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2023
+    AND (mi.keywords IS NOT NULL OR mc.actor_name IS NOT NULL)
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title,
+    mc.actor_name;

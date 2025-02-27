@@ -1,0 +1,42 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_name, 
+        r.r_name AS region_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        s.s_name, r.r_name
+),
+TopSuppliers AS (
+    SELECT 
+        *
+    FROM 
+        RankedSuppliers
+    WHERE 
+        rank <= 3
+)
+SELECT 
+    ts.region_name,
+    STRING_AGG(ts.s_name, ', ') AS top_suppliers,
+    SUM(ts.total_supply_cost) AS aggregate_supply_cost,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ' (', p.p_container, ')'), '; ') AS parts_supplied
+FROM 
+    TopSuppliers ts
+JOIN 
+    partsupp ps ON ts.s_name = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+GROUP BY 
+    ts.region_name
+ORDER BY 
+    ts.region_name;

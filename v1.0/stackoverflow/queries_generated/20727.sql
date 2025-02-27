@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CURRENT_TIMESTAMP)
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        CASE 
+            WHEN u.Reputation > (
+                SELECT AVG(Reputation) FROM Users
+            ) THEN 'Above Average'
+            WHEN u.Reputation < (
+                SELECT AVG(Reputation) FROM Users
+            ) THEN 'Below Average'
+            ELSE 'Average'
+        END AS ReputationCategory
+    FROM 
+        Users u
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= DATEADD(month, -3, CURRENT_TIMESTAMP)
+),
+CombinedResults AS (
+    SELECT 
+        u.DisplayName,
+        up.PostId,
+        up.Title,
+        up.CreationDate,
+        up.Score,
+        up.ViewCount,
+        up.UpVotes,
+        up.DownVotes,
+        ur.Reputation,
+        ur.ReputationCategory,
+        ph.PostHistoryTypeId AS LastPostAction,
+        ph.CreationDate AS LastPostActionDate
+    FROM 
+        RankedPosts up
+    JOIN 
+        Users u ON up.OwnerUserId = u.Id
+    JOIN 
+        UserReputation ur ON u.Id = ur.UserId
+    LEFT JOIN 
+        RecentPostHistory ph ON up.PostId = ph.PostId AND ph.HistoryRank = 1
+    WHERE 
+        up.Rank = 1
+        AND (up.UpVotes > up.DownVotes OR up.Score < 0)
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN LastPostAction IS NULL THEN 'No recent actions'
+        ELSE 'Last action was ' || (SELECT Name FROM PostHistoryTypes WHERE Id = LastPostAction)
+    END AS LastActionDescription,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = CombinedResults.PostId AND v.VoteTypeId = 2) AS TotalUpVotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = CombinedResults.PostId AND v.VoteTypeId = 3) AS TotalDownVotes
+FROM 
+    CombinedResults
+ORDER BY 
+    Reputation DESC, ViewCount DESC, CreationDate DESC
+LIMIT 100;

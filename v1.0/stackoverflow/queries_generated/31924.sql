@@ -1,0 +1,78 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        CreationDate, 
+        OwnerUserId, 
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Select questions only
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        p.CreationDate,
+        p.OwnerUserId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.Id
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+PostVoteSummary AS (
+    SELECT 
+        P.Id AS PostId, 
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts P 
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    ph.Title,
+    ph.Id AS QuestionId,
+    u.DisplayName AS Owner,
+    COALESCE(vs.VoteCount, 0) AS TotalVotes,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    COUNT(ah.Id) AS AnswerCount,
+    FORMAT(ph.CreationDate, 'yyyy-MM-dd') AS FormattedCreationDate,
+    CASE 
+        WHEN ph.Level > 0 THEN 'This is a child post' 
+        ELSE 'This is a parent post' 
+    END AS PostHierarchy,
+    RANK() OVER (PARTITION BY ph.OwnerUserId ORDER BY COUNT(ah.Id) DESC) AS AnswerRank
+FROM 
+    RecursivePostHierarchy ph
+LEFT JOIN 
+    Users u ON ph.OwnerUserId = u.Id
+LEFT JOIN 
+    PostVoteSummary vs ON ph.Id = vs.PostId
+LEFT JOIN 
+    Posts ah ON ph.Id = ah.ParentId -- Answers
+WHERE 
+    ph.CreationDate >= '2023-01-01' -- Only consider posts created this year
+GROUP BY 
+    ph.Id, u.DisplayName, vs.VoteCount, vs.UpVotes, vs.DownVotes, ph.CreationDate
+ORDER BY 
+    TotalVotes DESC,  
+    AnswerCount DESC;

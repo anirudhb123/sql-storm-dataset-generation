@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank 
+    FROM 
+        Posts p 
+    WHERE 
+        p.CreationDate >= (CURRENT_TIMESTAMP - INTERVAL '30 days')
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        v.CreationDate >= (CURRENT_TIMESTAMP - INTERVAL '30 days')
+    GROUP BY 
+        v.PostId
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        LATERAL string_to_array(p.Tags, ',') AS TagArray(tag) ON TRUE
+    JOIN 
+        Tags t ON t.TagName = TRIM(BOTH '"' FROM TagArray.tag)
+    GROUP BY 
+        p.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(DISTINCT ph.UserId) AS EditorCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= (CURRENT_TIMESTAMP - INTERVAL '90 days')
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    COALESCE(rv.VoteCount, 0) AS TotalVotes,
+    COALESCE(rv.UpvoteCount, 0) AS UpVotes,
+    COALESCE(rv.DownvoteCount, 0) AS DownVotes,
+    pt.Tags,
+    COALESCE(SUM(CASE WHEN phd.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END), 0) AS CloseReopenCount,
+    COALESCE(phd.EditorCount, 0) AS TotalEditors,
+    CASE 
+        WHEN phd.LastEditDate IS NOT NULL AND phd.LastEditDate < rp.CreationDate 
+        THEN 'Edited Before Creation' 
+        ELSE 'Recently Edited' 
+    END AS EditStatus,
+    COALESCE(NULLIF(MAX(CASE WHEN vt.Name = 'Offensive' THEN 1 END), NULL), 0) AS OffensiveFlag
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentVotes rv ON rp.PostId = rv.PostId
+LEFT JOIN 
+    PostTags pt ON rp.PostId = pt.PostId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+LEFT JOIN 
+    Votes v ON v.PostId = rp.PostId
+LEFT JOIN 
+    VoteTypes vt ON v.VoteTypeId = vt.Id
+WHERE 
+    rp.Rank = 1
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.Score, rv.VoteCount, rv.UpvoteCount, rv.DownvoteCount, pt.Tags, phd.EditorCount, phd.LastEditDate
+ORDER BY 
+    rp.CreationDate DESC;

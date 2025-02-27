@@ -1,0 +1,59 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_clerk ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'
+), 
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+), 
+CustomerSpending AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+
+SELECT 
+    p.p_name,
+    s.s_name,
+    COALESCE(CS.total_spent, 0) AS total_customer_spending,
+    SUM(ps.total_available) AS total_availability,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_after_discount
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    CustomerSpending CS ON s.s_nationkey = CS.c_custkey
+WHERE 
+    p.p_retailprice > 100 
+    AND (s.s_acctbal IS NULL OR s.s_acctbal > 500.00)
+GROUP BY 
+    p.p_name, s.s_name, CS.total_spent
+HAVING 
+    AVG(l.l_discount) > 0.1
+ORDER BY 
+    total_customer_spending DESC, total_availability ASC;

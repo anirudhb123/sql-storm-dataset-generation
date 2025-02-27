@@ -1,0 +1,64 @@
+WITH RECURSIVE MoviePaths AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        1 AS depth,
+        ARRAY[m.id] AS path
+    FROM 
+        aka_title m 
+    WHERE 
+        m.production_year > 2000
+
+    UNION ALL 
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mp.depth + 1,
+        path || ml.linked_movie_id
+    FROM 
+        movie_link ml 
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id 
+    JOIN 
+        MoviePaths mp ON ml.movie_id = mp.movie_id
+    WHERE 
+        mt.production_year > 2000 
+        AND NOT ml.linked_movie_id = ANY(mp.path)  
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    CASE 
+        WHEN COUNT(DISTINCT m.id) > 0 THEN 'Related Movies: ' || STRING_AGG(DISTINCT at2.title, ', ')
+        ELSE 'No Related Movies'
+    END AS related_movies,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY m.title) AS movie_rank,
+    COUNT(DISTINCT m.id) AS related_movie_count,
+    CASE 
+        WHEN ak.name IS NULL THEN 'Unknown Actor' 
+        ELSE ak.name 
+    END AS verified_actor_name,
+    COALESCE(CAST(COUNT(DISTINCT mk.keyword) AS TEXT), '0') AS keyword_count
+FROM 
+    aka_name ak 
+LEFT JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+LEFT JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    MoviePaths mp ON at.id = mp.movie_id
+LEFT JOIN 
+    aka_title at2 ON at2.id = ANY(mp.path)
+WHERE 
+    ak.name IS NOT NULL 
+    AND at.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    ak.id, at.title
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 10
+ORDER BY 
+    movie_rank DESC, related_movie_count DESC;

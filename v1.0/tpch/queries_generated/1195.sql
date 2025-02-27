@@ -1,0 +1,62 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(year, -1, GETDATE())
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.partkey) AS unique_parts_supply
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopRegions AS (
+    SELECT 
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name, r.r_name
+    ORDER BY 
+        total_acctbal DESC
+    LIMIT 5
+)
+
+SELECT 
+    tp.nation_name,
+    tp.region_name,
+    ss.supp_name,
+    ss.unique_parts_supply,
+    ro.order_rank,
+    ro.o_totalprice
+FROM 
+    TopRegions tp
+LEFT JOIN 
+    SupplierDetails ss ON tp.nation_name = ss.s_name
+INNER JOIN 
+    RankedOrders ro ON ro.o_orderkey = ss.s_suppkey
+WHERE 
+    (ss.unique_parts_supply IS NULL OR ss.unique_parts_supply >= 5)
+    AND ro.o_orderstatus IN ('O', 'F')
+    AND ro.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+ORDER BY 
+    tp.total_acctbal DESC, 
+    ss.unique_parts_supply DESC;

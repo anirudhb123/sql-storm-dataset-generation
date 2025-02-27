@@ -1,0 +1,79 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount
+),
+TopActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        UA.PostCount,
+        UA.UpvoteCount,
+        UA.DownvoteCount,
+        UA.CommentCount,
+        UA.TotalViews,
+        RANK() OVER (ORDER BY UA.PostCount DESC) AS UserRank
+    FROM 
+        UserActivity UA
+    JOIN 
+        Users U ON U.Id = UA.UserId
+    WHERE 
+        UA.PostCount > 0
+)
+SELECT 
+    T.PostId,
+    T.Title,
+    T.CreationDate,
+    T.Score,
+    T.ViewCount,
+    T.CommentCount,
+    T.UpvoteCount,
+    T.DownvoteCount,
+    TU.DisplayName AS TopUser,
+    TU.PostCount,
+    TU.UpvoteCount AS TopUserUpvotes,
+    TU.DownvoteCount AS TopUserDownvotes
+FROM 
+    PostStatistics T
+JOIN 
+    TopActiveUsers TU ON T.ViewCount = (
+        SELECT MAX(ViewCount) FROM PostStatistics WHERE PostId IN (
+            SELECT PostId FROM Posts WHERE OwnerUserId = TU.UserId
+        )
+    )
+ORDER BY 
+    T.Score DESC, T.ViewCount DESC;

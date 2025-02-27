@@ -1,0 +1,79 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.linked_movie_id,
+        Linked.title,
+        Linked.production_year,
+        m.level + 1
+    FROM 
+        movie_link m
+    JOIN 
+        aka_title Linked ON m.linked_movie_id = Linked.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = m.movie_id
+),
+TopCompanies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id, c.name
+    HAVING 
+        COUNT(DISTINCT mc.company_id) > 1
+),
+MovieGenres AS (
+    SELECT 
+        mt.movie_id,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS genres
+    FROM 
+        movie_keyword mt
+    JOIN 
+        keyword k ON mt.keyword_id = k.id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    (SELECT COUNT(*) 
+     FROM complete_cast cc 
+     WHERE cc.movie_id = mh.movie_id) AS total_cast,
+    tc.company_name,
+    tc.company_count,
+    mg.genres,
+    CASE 
+        WHEN tc.company_count IS NOT NULL 
+        THEN 'Has Multiple Companies' 
+        ELSE 'Single or No Company'
+    END AS company_info,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS row_num,
+    COALESCE(mg.genres, 'No Genre') AS genre_info
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    TopCompanies tc ON mh.movie_id = tc.movie_id
+LEFT JOIN 
+    MovieGenres mg ON mh.movie_id = mg.movie_id
+WHERE 
+    mh.level < 3
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title;
+

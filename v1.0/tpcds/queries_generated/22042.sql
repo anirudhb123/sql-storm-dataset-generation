@@ -1,0 +1,56 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT
+        ss.customer_sk,
+        SUM(ss.ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY ss.customer_sk ORDER BY SUM(ss.ss_net_paid) DESC) AS rank
+    FROM 
+        store_sales ss
+    GROUP BY 
+        ss.customer_sk,
+        ss.ss_sold_date_sk
+),
+customer_addresses AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_city ORDER BY RANDOM()) AS random_row
+    FROM 
+        customer_address ca
+    WHERE 
+        ca.ca_country IS NOT NULL
+    AND 
+        (ca.ca_state IS NULL OR RIGHT(ca.ca_state, 1) NOT IN ('X', 'Z'))
+)
+SELECT 
+    c.c_customer_id,
+    CASE 
+        WHEN s.total_sales IS NULL THEN 'No Sales'
+        ELSE CONCAT('Total: ', TO_CHAR(s.total_sales, 'FM$999,999.00'), 
+                    ', Orders: ', s.order_count)
+    END AS sales_info,
+    ca.ca_city,
+    COUNT(*) FILTER (WHERE ca.random_row <= 5) AS random_addr_count,
+    (SELECT COUNT(*) FROM date_dim dd WHERE dd.d_year = 2023 AND dd.d_holiday = 'Y') AS holiday_count
+FROM 
+    customer c
+LEFT JOIN 
+    sales_summary s ON c.c_customer_sk = s.customer_sk
+LEFT JOIN 
+    customer_addresses ca ON c.c_current_addr_sk = ca.ca_address_sk
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM web_sales ws
+        WHERE ws.ws_bill_customer_sk = c.c_customer_sk
+        AND ws.ws_ext_sales_price > 20
+        HAVING COUNT(ws.ws_order_number) > 10
+    )
+GROUP BY 
+    c.c_customer_id, s.total_sales, s.order_count, ca.ca_city
+ORDER BY 
+    random_addr_count DESC, c.c_customer_id
+FETCH FIRST 100 ROWS ONLY;

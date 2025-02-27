@@ -1,0 +1,40 @@
+
+WITH SalesData AS (
+    SELECT 
+        s.s_store_id,
+        s.s_store_name,
+        ws.ws_web_site_id,
+        ws.ws_net_profit,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        SUM(ws.ws_ext_discount_amt) AS total_discount
+    FROM 
+        store_sales s
+    JOIN 
+        web_sales ws ON s.ss_item_sk = ws.ws_item_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY 
+        s.s_store_id, s.s_store_name, ws.ws_web_site_id, ws.ws_net_profit
+    HAVING 
+        SUM(ws.ws_quantity) > 100
+)
+
+SELECT 
+    sd.s_store_id,
+    sd.s_store_name,
+    SUM(sd.total_quantity) AS store_quantity,
+    COUNT(DISTINCT sd.ws_web_site_id) AS num_websites,
+    SUM(sd.avg_sales_price * sd.total_quantity) AS total_sales_value,
+    SUM(sd.total_discount) AS total_discount_value
+FROM 
+    SalesData sd
+JOIN 
+    customer c ON c.c_customer_sk = sd.s_store_id
+WHERE 
+    c.c_birth_year BETWEEN 1970 AND 1990
+GROUP BY 
+    sd.s_store_id, sd.s_store_name
+ORDER BY 
+    total_sales_value DESC
+FETCH FIRST 10 ROWS ONLY;

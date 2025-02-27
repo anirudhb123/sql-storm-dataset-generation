@@ -1,0 +1,32 @@
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    s.s_name AS supplier_name, 
+    c.c_name AS customer_name, 
+    o.o_orderkey, 
+    o.o_orderdate, 
+    COUNT(l.l_orderkey) AS total_lineitems,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    SUBSTRING_INDEX(p.p_comment, ' ', 3) AS truncated_comment,
+    CONCAT('Order Date: ', DATE_FORMAT(o.o_orderdate, '%Y-%m-%d'), ' | Total Price: $', FORMAT(o.o_totalprice, 2)) AS order_details
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_name LIKE 'rubber%' 
+    AND s.s_acctbal > 1000
+GROUP BY 
+    p.p_partkey, s.s_name, c.c_name, o.o_orderkey, o.o_orderdate
+HAVING 
+    total_sales > 5000
+ORDER BY 
+    total_sales DESC;

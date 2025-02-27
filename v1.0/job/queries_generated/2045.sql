@@ -1,0 +1,58 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank
+    FROM 
+        aka_title a
+        LEFT JOIN movie_companies mc ON a.movie_id = mc.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.title, a.production_year
+),
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS co_actors
+    FROM 
+        aka_name ak
+        JOIN cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+movie_details AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        ak.name AS actor_name,
+        mi.info AS movie_info
+    FROM 
+        aka_title mt
+        JOIN cast_info c ON mt.movie_id = c.movie_id
+        JOIN aka_name ak ON c.person_id = ak.person_id
+        LEFT JOIN movie_info mi ON mt.movie_id = mi.movie_id
+    WHERE 
+        mt.production_year >= 2000
+)
+
+SELECT 
+    rm.title AS ranked_movie,
+    rm.production_year,
+    rm.company_count,
+    ai.actor_name,
+    ai.movie_count,
+    md.movie_title,
+    md.movie_info
+FROM 
+    ranked_movies rm
+LEFT JOIN actor_info ai ON rm.company_count > (SELECT AVG(company_count) FROM ranked_movies)
+JOIN movie_details md ON rm.title = md.movie_title
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    rm.production_year DESC, rm.company_count DESC;

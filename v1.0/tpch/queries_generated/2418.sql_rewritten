@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_brand,
+        p.p_size,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM 
+        partsupp ps
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+BestSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        SUM(sp.ps_supplycost * sp.ps_availqty) AS total_supply_cost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        SupplierParts sp ON rs.s_suppkey = sp.ps_suppkey
+    WHERE 
+        rs.rn <= 5
+    GROUP BY 
+        rs.s_suppkey, rs.s_name
+)
+SELECT 
+    co.c_name AS customer_name,
+    co.total_spent,
+    bs.s_name AS supplier_name,
+    bs.total_supply_cost
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    BestSuppliers bs ON co.c_custkey = bs.s_suppkey
+WHERE 
+    co.total_spent > 10000
+ORDER BY 
+    co.total_spent DESC, bs.total_supply_cost ASC
+LIMIT 10
+OFFSET 0;

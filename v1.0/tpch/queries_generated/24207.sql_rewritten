@@ -1,0 +1,45 @@
+WITH RECURSIVE cust_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IS NOT NULL
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN cust_orders co ON co.o_orderkey = o.o_orderkey - 1
+)
+, ranked_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    WHERE p.p_size > 10 OR p.p_container IS NULL
+)
+SELECT 
+    c.c_name,
+    COALESCE(SUM(o.o_totalprice), 0) AS total_spent,
+    COALESCE(MAX(l.l_discount), 0) AS max_discount,
+    COUNT(DISTINCT ps.ps_partkey) AS unique_parts,
+    STRING_AGG(DISTINCT r.r_name, ', ' ORDER BY r.r_name) AS regions
+FROM customer c
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE o.o_orderdate BETWEEN '1997-01-01' AND cast('1998-10-01' as date)
+AND EXISTS (
+    SELECT 1
+    FROM ranked_parts rp
+    WHERE rp.rn = 1 AND rp.p_partkey = l.l_partkey
+)
+GROUP BY c.c_name
+HAVING total_spent > (
+    SELECT AVG(o_totalprice)
+    FROM orders
+    WHERE o_orderdate < cast('1998-10-01' as date)
+)
+ORDER BY total_spent DESC
+LIMIT 10
+OFFSET 5;

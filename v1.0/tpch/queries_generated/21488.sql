@@ -1,0 +1,89 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1995-01-01' AND 
+        o.o_orderstatus IN ('O', 'F')
+),
+TopSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+    GROUP BY 
+        ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_supplycost) > 10000
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'UNKNOWN BALANCE'
+            ELSE CAST(s.s_acctbal AS VARCHAR)
+        END AS account_balance,
+        s.s_nationkey
+    FROM 
+        supplier s
+    WHERE 
+        s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name LIKE '%land%')
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spending,
+        SUM(l.l_discount) AS total_discount
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+FinalReport AS (
+    SELECT 
+        r.r_name AS region_name,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers,
+        AVG(cos.total_spending) AS avg_spending,
+        MAX(cos.total_orders) AS max_orders,
+        SUM(CASE WHEN s.s_nationkey IS NULL THEN 0 ELSE 1 END) AS supplier_count,
+        MAX(TO_CHAR(row_number() OVER (PARTITION BY r.r_name ORDER BY cos.total_spending DESC), '99')) AS ranked_spending
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        CustomerOrderSummary cos ON cos.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+    LEFT JOIN 
+        SupplierDetails sd ON sd.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        TopSuppliers ts ON sd.s_suppkey = ts.ps_suppkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    *,
+    CASE 
+        WHEN unique_customers = 0 THEN 'No Customers'
+        ELSE CONCAT('Region ', region_name, ' has ', unique_customers, ' customers with an average spending of ', avg_spending)
+    END AS remarks
+FROM 
+    FinalReport
+ORDER BY 
+    unique_customers DESC NULLS LAST;

@@ -1,0 +1,67 @@
+
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        COUNT(ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(l.l_linenumber) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+NationSupplier AS (
+    SELECT 
+        n.n_name,
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(SUM(ps.ps_supplycost), 0) AS total_supplycost
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        n.n_name, s.s_suppkey, s.s_name
+)
+SELECT 
+    r.r_name AS region_name,
+    ns.n_name AS nation_name,
+    ns.s_name AS supplier_name,
+    ss.total_available,
+    ss.part_count,
+    ss.total_cost,
+    os.total_order_value,
+    (ns.total_supplycost / NULLIF(ss.total_cost, 0)) AS supply_cost_ratio
+FROM 
+    region r
+LEFT JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    SupplierSummary ss ON ns.s_suppkey = ss.s_suppkey
+LEFT JOIN 
+    OrderSummary os ON ns.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = os.o_custkey)
+WHERE 
+    (ss.total_available IS NOT NULL AND ss.total_available > 0)
+    OR (os.total_order_value IS NOT NULL AND os.total_order_value > 1000)
+ORDER BY 
+    supply_cost_ratio DESC, os.total_order_value DESC;

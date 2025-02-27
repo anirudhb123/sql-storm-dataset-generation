@@ -1,0 +1,54 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        T.id AS movie_id,
+        T.title AS movie_title,
+        1 AS level
+    FROM 
+        aka_title T
+    WHERE 
+        T.production_year >= 2000  
+    
+    UNION ALL
+    
+    SELECT 
+        ML.linked_movie_id,
+        T.title,
+        MH.level + 1
+    FROM 
+        MovieHierarchy MH
+    JOIN 
+        movie_link ML ON MH.movie_id = ML.movie_id
+    JOIN 
+        aka_title T ON ML.linked_movie_id = T.id
+    WHERE 
+        T.production_year >= 2000
+)
+
+SELECT 
+    K.keyword,
+    COUNT(DISTINCT MH.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT T.title, ', ') AS movie_titles,
+    AVG(CASE WHEN P.gender = 'F' THEN 1 ELSE 0 END) AS female_percentage,
+    SUM(CASE WHEN CC.kind IS NOT NULL THEN 1 ELSE 0 END) AS cast_count
+FROM 
+    MovieHierarchy MH
+LEFT JOIN 
+    movie_keyword MK ON MH.movie_id = MK.movie_id
+LEFT JOIN 
+    keyword K ON MK.keyword_id = K.id
+LEFT JOIN 
+    complete_cast CC ON MH.movie_id = CC.movie_id
+LEFT JOIN 
+    cast_info CI ON CC.subject_id = CI.person_id
+LEFT JOIN 
+    person_info P ON CI.person_id = P.person_id
+LEFT JOIN 
+    aka_title T ON MH.movie_id = T.id
+GROUP BY 
+    K.keyword
+HAVING 
+    COUNT(DISTINCT MH.movie_id) > 1  
+ORDER BY 
+    movie_count DESC
+LIMIT 10;

@@ -1,0 +1,78 @@
+
+WITH RecursiveBadges AS (
+    SELECT
+        b.Id,
+        b.UserId,
+        b.Name,
+        b.Date,
+        b.Class,
+        b.TagBased,
+        1 AS Level
+    FROM Badges b
+    WHERE b.Class = 1  
+
+    UNION ALL
+
+    SELECT
+        b.Id,
+        b.UserId,
+        b.Name,
+        b.Date,
+        b.Class,
+        b.TagBased,
+        rb.Level + 1
+    FROM Badges b
+    JOIN RecursiveBadges rb ON b.UserId = rb.UserId
+    WHERE b.Class < rb.Class  
+),
+UserPosts AS (
+    SELECT
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViewCount
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+TopUsers AS (
+    SELECT
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        ub.PostCount,
+        ub.TotalScore,
+        ub.AvgViewCount,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM Users u
+    LEFT JOIN UserPosts ub ON u.Id = ub.OwnerUserId
+    WHERE u.Reputation IS NOT NULL
+),
+BadgeSummary AS (
+    SELECT
+        rb.UserId,
+        COUNT(DISTINCT rb.Id) AS BadgeCount,
+        MAX(rb.Class) AS HighestBadgeClass
+    FROM RecursiveBadges rb
+    GROUP BY rb.UserId
+)
+SELECT
+    tu.Id AS UserId,
+    tu.DisplayName,
+    tu.Reputation,
+    tu.PostCount,
+    tu.TotalScore,
+    tu.AvgViewCount,
+    COALESCE(bs.BadgeCount, 0) AS BadgeCount,
+    COALESCE(bs.HighestBadgeClass, 0) AS HighestBadgeClass,
+    CASE
+        WHEN tu.PostCount IS NULL THEN 'No Posts'
+        WHEN tu.AvgViewCount > 100 THEN 'High Engagement'
+        ELSE 'Normal Engagement'
+    END AS EngagementLevel,
+    NULLIF(tu.TotalScore, 0) AS NonZeroScore,
+    COUNT(DISTINCT p.Id) FILTER (WHERE p.CreatedAt >= (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 YEAR')) AS RecentPosts
+FROM TopUsers tu
+LEFT JOIN BadgeSummary bs ON tu.Id = bs.UserId
+LEFT JOIN Posts p ON tu.Id = p.OwnerUserId
+GROUP BY tu.Id, tu.DisplayName, tu.Reputation, tu.PostCount, tu.TotalScore, tu.AvgViewCount, bs.BadgeCount, bs.HighestBadgeClass
+ORDER BY tu.Rank;

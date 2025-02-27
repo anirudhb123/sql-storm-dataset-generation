@@ -1,0 +1,62 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_marital_status,
+        cd.cd_gender,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band,
+        CONCAT('{', STRING_AGG(DISTINCT CONCAT('"', cp.cp_catalog_page_id, '": "', cp.cp_description, '"'), ', '), '}') AS catalog_info
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        catalog_page cp ON cp.cp_catalog_page_sk = (
+            SELECT TOP 1 cp2.cp_catalog_page_sk 
+            FROM catalog_page cp2 
+            WHERE cp2.cp_catalog_page_id LIKE '%' + c.c_customer_id + '%'
+            ORDER BY cp2.cp_catalog_page_sk DESC
+        )
+    GROUP BY 
+        c.c_customer_id, ca.ca_city, ca.ca_state, cd.cd_marital_status, cd.cd_gender, 
+        cd.cd_purchase_estimate, cd.cd_credit_rating, hd.hd_income_band_sk, c.c_first_name, c.c_last_name
+),
+date_info AS (
+    SELECT
+        d.d_date_id,
+        d.d_year,
+        d.d_month_seq,
+        d.d_day_name,
+        d.d_weekend
+    FROM
+        date_dim d
+    WHERE 
+        d.d_date = CURRENT_DATE -- consider the current date for benchmarking
+)
+SELECT 
+    ci.full_name,
+    ci.ca_city,
+    ci.ca_state,
+    ci.cd_purchase_estimate,
+    di.d_year,
+    di.d_month_seq,
+    di.d_day_name,
+    di.d_weekend,
+    ci.catalog_info
+FROM 
+    customer_info ci
+JOIN 
+    date_info di ON 1 = 1 -- Cross join with date_info to get benchmark outputs per customer
+WHERE 
+    ci.cd_purchase_estimate > 1000
+ORDER BY 
+    di.d_year DESC, ci.full_name;

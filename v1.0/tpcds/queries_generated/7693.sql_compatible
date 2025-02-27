@@ -1,0 +1,72 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01')
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    GROUP BY 
+        ws_sold_date_sk, 
+        ws_item_sk
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        c.c_birth_year
+    FROM 
+        customer AS c
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+address_data AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer_address AS ca
+),
+sales_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(sd.total_quantity) AS quantity_purchased,
+        SUM(sd.total_sales) AS sales_amount,
+        a.ca_city,
+        a.ca_state,
+        a.ca_country,
+        c.cd_gender,
+        c.cd_marital_status,
+        c.c_birth_year
+    FROM 
+        sales_data AS sd
+    JOIN 
+        customer_data AS c ON c.c_customer_sk = sd.ws_bill_customer_sk 
+    JOIN 
+        address_data AS a ON a.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        c.c_customer_sk, a.ca_city, a.ca_state, a.ca_country, c.cd_gender, c.cd_marital_status, c.c_birth_year
+)
+SELECT 
+    quantity_purchased,
+    sales_amount,
+    ca_city,
+    ca_state,
+    ca_country,
+    cd_gender,
+    cd_marital_status,
+    c_birth_year,
+    COUNT(*) OVER (PARTITION BY CASE WHEN sales_amount > 1000 THEN 1 ELSE 0 END) AS high_value_customers
+FROM 
+    sales_summary
+WHERE 
+    sales_amount > 500
+ORDER BY 
+    sales_amount DESC;

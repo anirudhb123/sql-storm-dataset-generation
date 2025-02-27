@@ -1,0 +1,62 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS EditDate,
+        pht.Name AS HistoryType,
+        ph.Comment,
+        ph.Text
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6, 10, 11, 12) 
+),
+RecentPostHistory AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.OwnerDisplayName,
+        MAX(phe.EditDate) AS LastEditDate
+    FROM PostDetails pd
+    JOIN PostHistoryDetails phe ON pd.PostId = phe.PostId
+    GROUP BY pd.PostId, pd.Title, pd.OwnerDisplayName
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Body,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.Tags,
+    pd.OwnerDisplayName,
+    pd.CommentCount,
+    pd.AnswerCount,
+    pd.VoteCount,
+    rph.LastEditDate,
+    COALESCE(pht.Name, 'No Recent Edits') AS RecentEditType
+FROM PostDetails pd
+LEFT JOIN RecentPostHistory rph ON pd.PostId = rph.PostId
+LEFT JOIN PostHistoryDetails pht ON pd.PostId = pht.PostId
+WHERE pd.ViewCount > 1000 
+ORDER BY pd.Score DESC, pd.ViewCount DESC;

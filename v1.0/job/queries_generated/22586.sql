@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS year_rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+HighCastMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        total_cast
+    FROM 
+        RankedMovies
+    WHERE 
+        total_cast > (SELECT AVG(total_cast) FROM RankedMovies)
+),
+MovieDetails AS (
+    SELECT 
+        hm.movie_id,
+        hm.title,
+        hm.production_year,
+        GROUP_CONCAT(DISTINCT an.name) AS actors,
+        SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT kc.keyword ORDER BY kc.keyword SEPARATOR ', '), ',', 3) AS top_keywords,
+        CASE 
+            WHEN hm.production_year IS NULL THEN 'Unknown Year'
+            ELSE CAST(hm.production_year AS CHAR)
+        END AS production_year_str
+    FROM 
+        HighCastMovies hm
+    LEFT JOIN 
+        cast_info ci ON hm.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN 
+        movie_keyword mk ON hm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    GROUP BY 
+        hm.movie_id, hm.title, hm.production_year
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.actors,
+    md.top_keywords,
+    COALESCE(md.production_year_str, 'Year Not Available') AS year_display,
+    CASE
+        WHEN md.total_cast > 10 THEN 'Star-Studded'
+        WHEN md.total_cast BETWEEN 5 AND 10 THEN 'Moderately Cast'
+        ELSE 'Indie Flick'
+    END AS movie_cast_category
+FROM 
+    MovieDetails md
+WHERE 
+    md.production_year >= 2000 
+    AND md.production_year < 2023
+ORDER BY 
+    md.production_year DESC,
+    md.title ASC
+LIMIT 100
+OFFSET 0;

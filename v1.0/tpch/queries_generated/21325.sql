@@ -1,0 +1,73 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_mktsegment,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) as rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+), SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty < (SELECT AVG(ps_availqty) FROM partsupp)
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), ComplexLineItem AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        CASE 
+            WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) IS NULL THEN 0 
+            ELSE SUM(l.l_extendedprice * (1 - l.l_discount)) 
+        END AS total_price
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_partkey
+), FinalQuery AS (
+    SELECT 
+        r.r_name, 
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(cl.total_price) AS total_revenue,
+        MAX(sd.max_supply_cost) AS highest_supply_cost
+    FROM 
+        RankedOrders r
+    LEFT JOIN 
+        lineitem li ON r.o_orderkey = li.l_orderkey
+    LEFT JOIN 
+        ComplexLineItem cl ON li.l_orderkey = cl.l_orderkey
+    LEFT JOIN 
+        supplier s ON li.l_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        SupplierDetails sd ON s.s_suppkey = sd.s_suppkey
+    WHERE 
+        r.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderdate > '2023-01-01')
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    r.r_name, 
+    total_orders, 
+    total_revenue, 
+    highest_supply_cost
+FROM 
+    FinalQuery r
+WHERE 
+    total_orders > 10 OR highest_supply_cost IS NOT NULL
+ORDER BY 
+    total_revenue DESC, 
+    r.r_name ASC;

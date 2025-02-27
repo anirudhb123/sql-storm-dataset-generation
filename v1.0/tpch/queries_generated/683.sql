@@ -1,0 +1,84 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost) AS total_cost
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost) > 1000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c 
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 500
+)
+SELECT 
+    o.o_orderkey, 
+    o.o_orderdate, 
+    o.o_totalprice, 
+    o.o_orderstatus, 
+    s.s_name AS supplier_name, 
+    r.region_name,
+    c.c_name AS customer_name,
+    co.order_count,
+    co.total_spent,
+    COALESCE(sup.total_supply_cost, 0) AS supplier_cost
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = o.o_custkey
+LEFT JOIN 
+    SupplierCost sup ON ps.ps_partkey = sup.ps_partkey
+WHERE 
+    o.o_totalprice IS NOT NULL
+    AND r.r_name LIKE 'N%' 
+    AND (o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL)
+ORDER BY 
+    o.o_orderdate DESC, 
+    o.o_totalprice DESC;

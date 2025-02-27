@@ -1,0 +1,61 @@
+
+WITH RECURSIVE filmography AS (
+    SELECT 
+        ka.person_id,
+        ka.name AS actor_name,
+        ti.title,
+        ti.production_year,
+        c.role_id,
+        ROW_NUMBER() OVER (PARTITION BY ka.person_id ORDER BY ti.production_year DESC) AS film_rank
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info c ON ka.person_id = c.person_id
+    JOIN 
+        aka_title ti ON c.movie_id = ti.movie_id
+    WHERE 
+        ti.production_year IS NOT NULL
+),
+co_actor_counts AS (
+    SELECT 
+        a.actor_name,
+        COUNT(DISTINCT ca.person_id) AS co_actor_count
+    FROM 
+        filmography a
+    JOIN 
+        cast_info ca ON a.title = ca.title AND ca.person_id != a.person_id
+    GROUP BY 
+        a.actor_name
+),
+bizarre_filter AS (
+    SELECT 
+        actor_name,
+        co_actor_count,
+        CASE 
+            WHEN co_actor_count = 0 THEN 'Solo Actor'
+            WHEN co_actor_count > 10 THEN 'Veteran Actor' 
+            ELSE 'Regular Actor'
+        END AS actor_status
+    FROM 
+        co_actor_counts
+)
+SELECT 
+    bf.actor_name,
+    bf.co_actor_count,
+    bf.actor_status,
+    STRING_AGG(DISTINCT t.title, ', ') AS titles,
+    AVG(ti.rating) AS average_rating
+FROM 
+    bizarre_filter bf
+LEFT JOIN 
+    filmography f ON bf.actor_name = f.actor_name
+LEFT JOIN 
+    aka_title t ON f.title = t.title AND f.production_year = t.production_year
+LEFT JOIN 
+    movie_info ti ON t.movie_id = ti.movie_id AND ti.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+GROUP BY 
+    bf.actor_name, bf.co_actor_count, bf.actor_status
+HAVING 
+    SUM(CASE WHEN bf.co_actor_count > 5 THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    average_rating DESC NULLS LAST;

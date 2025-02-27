@@ -1,0 +1,89 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopAnswerStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS AnswerCount,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2
+    GROUP BY 
+        p.OwnerUserId
+),
+PostClosureReason AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        cr.Name AS CloseReasonName
+    FROM 
+        PostHistory ph
+    INNER JOIN CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    ups.TotalVotes,
+    ups.UpVotes,
+    ups.DownVotes,
+    COUNT(DISTINCT p.Id) AS QuestionCount,
+    COALESCE(SUM(CASE WHEN pa.OwnerUserId IS NOT NULL THEN pa.AnswerCount END), 0) AS TotalAnswers,
+    COALESCE(SUM(CASE WHEN ph.CloseReasonName IS NOT NULL THEN 1 END), 0) AS TotalClosures,
+    STRING_AGG(DISTINCT ph.CloseReasonName, ', ') AS ClosureReasons,
+    ARRAY_AGG( DISTINCT p.Title ORDER BY p.LastActivityDate DESC) AS RecentPosts
+FROM 
+    Users u
+LEFT JOIN 
+    UserVoteStats ups ON u.Id = ups.UserId
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    TopAnswerStatistics pa ON u.Id = pa.OwnerUserId
+LEFT JOIN 
+    PostClosureReason ph ON p.Id = ph.PostId
+WHERE 
+    u.Reputation > 100 
+GROUP BY 
+    u.Id, ups.TotalVotes, ups.UpVotes, ups.DownVotes
+HAVING 
+    COUNT(DISTINCT p.Id) > 3
+ORDER BY 
+    u.Reputation DESC
+LIMIT 50;

@@ -1,0 +1,44 @@
+WITH movie_details AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        c.kind AS role,
+        GROUP_CONCAT(k.keyword) AS keywords
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type c ON ci.role_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.title, t.production_year, a.name, c.kind
+),
+grouped_movies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        COUNT(DISTINCT actor_name) AS actor_count,
+        COUNT(DISTINCT keywords) AS keyword_count
+    FROM 
+        movie_details
+    GROUP BY 
+        movie_title, production_year
+)
+SELECT 
+    production_year,
+    COUNT(movie_title) AS total_movies,
+    AVG(actor_count) AS avg_actors_per_movie,
+    AVG(keyword_count) AS avg_keywords_per_movie
+FROM 
+    grouped_movies
+GROUP BY 
+    production_year
+ORDER BY 
+    production_year DESC;

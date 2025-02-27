@@ -1,0 +1,69 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_mktsegment,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+),
+SupplierPartData AS (
+    SELECT 
+        ps.ps_partkey, 
+        s.s_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > 5000
+    GROUP BY 
+        ps.ps_partkey, s.s_suppkey
+),
+CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name AS nation_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, n.n_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+)
+SELECT 
+    p.p_name,
+    p.p_size,
+    COALESCE(R.order_rank, 0) AS amount_ranking,
+    COALESCE(C.nation_name, 'Unknown') AS customer_nation,
+    SUM(ld.l_extendedprice * (1 - ld.l_discount)) AS total_revenue
+FROM 
+    part p
+LEFT JOIN 
+    lineitem ld ON p.p_partkey = ld.l_partkey
+LEFT JOIN 
+    RankedOrders R ON R.o_orderkey IN (SELECT l_orderkey FROM lineitem WHERE l_partkey = p.p_partkey)
+LEFT JOIN 
+    CustomerNation C ON C.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ld.l_orderkey)
+WHERE 
+    p.p_retailprice > 100.00
+    AND (R.order_rank IS NULL OR R.order_rank < 10)
+GROUP BY 
+    p.p_name, p.p_size, R.order_rank, C.nation_name
+HAVING 
+    SUM(ld.l_extendedprice) IS NOT NULL
+    AND COUNT(ld.l_orderkey) > 5
+ORDER BY 
+    total_revenue DESC,
+    p.p_name ASC;

@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(c.Id) DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, u.DisplayName
+), PopularTags AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts 
+    WHERE 
+        PostTypeId = 1 -- Only questions
+    GROUP BY 
+        TagName
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        b.Class,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, b.Class
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.Tags,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.VoteCount,
+    pt.TagName,
+    ub.BadgeCount,
+    ub.Class
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PopularTags pt ON POSITION(pt.TagName IN rp.Tags) > 0
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE 
+    rp.PostRank <= 10
+ORDER BY 
+    rp.VoteCount DESC, rp.CommentCount DESC, pt.TagCount DESC;

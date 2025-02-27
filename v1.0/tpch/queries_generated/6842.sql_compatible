@@ -1,0 +1,39 @@
+
+WITH SupplierCost AS (
+    SELECT ps.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.s_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '1997-01-01'
+    GROUP BY c.c_custkey
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_type, p.p_retailprice
+    FROM part p
+    WHERE p.p_retailprice > 100 AND p.p_size BETWEEN 10 AND 20
+),
+OrderLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM lineitem l
+    WHERE l.l_shipdate >= '1997-01-01' AND l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    c.c_address,
+    SUM(ols.revenue) AS total_revenue,
+    sc.total_cost AS supplier_cost,
+    cos.order_count,
+    cos.total_spent
+FROM CustomerOrderSummary cos
+JOIN customer c ON cos.c_custkey = c.c_custkey
+JOIN OrderLineItems ols ON ols.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+JOIN SupplierCost sc ON sc.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT pp.p_partkey FROM FilteredParts pp))
+GROUP BY c.c_name, c.c_address, sc.total_cost, cos.order_count, cos.total_spent
+HAVING SUM(ols.revenue) > 10000
+ORDER BY total_revenue DESC, cos.total_spent ASC;

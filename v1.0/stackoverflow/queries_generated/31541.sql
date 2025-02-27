@@ -1,0 +1,74 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.ParentId, 
+        p.CreationDate, 
+        1 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.ParentId, 
+        p.CreationDate, 
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStatistics AS (
+    SELECT
+        r.Level,
+        COUNT(*) AS TotalPosts,
+        COUNT(CASE WHEN p.ViewCount > 100 THEN 1 END) AS HighViewCountPosts,
+        AVG(p.Score) AS AverageScore
+    FROM RecursivePostHierarchy r
+    JOIN Posts p ON r.PostId = p.Id
+    GROUP BY r.Level
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+UserPostActivity AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScores,
+        MAX(u.Reputation) AS Reputation
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY u.Id
+)
+
+SELECT 
+    u.DisplayName,
+    uba.GoldBadges,
+    uba.SilverBadges,
+    uba.BronzeBadges,
+    upa.TotalPosts,
+    upa.TotalViews,
+    upa.TotalCommentScores,
+    upa.Reputation,
+    ps.Level,
+    ps.TotalPosts AS PostsAtLevel,
+    ps.HighViewCountPosts,
+    ps.AverageScore
+FROM UserBadges uba
+JOIN UserPostActivity upa ON uba.UserId = upa.UserId
+JOIN PostStatistics ps ON ps.TotalPosts > 5
+ORDER BY upa.Reputation DESC, upa.TotalViews DESC, ps.Level;
+

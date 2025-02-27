@@ -1,0 +1,57 @@
+WITH RECURSIVE cust_hierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, c_acctbal, 1 AS level
+    FROM customer
+    WHERE c_acctbal > 5000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN cust_hierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal > ch.c_acctbal * 0.5
+),
+part_avail AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+avg_price AS (
+    SELECT p.p_partkey, AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_discounted_price
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate < cast('1998-10-01' as date) - INTERVAL '30 days'
+    GROUP BY p.p_partkey
+),
+supplier_performance AS (
+    SELECT s.s_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM supplier s
+    JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    WHERE l.l_returnflag = 'R'
+    GROUP BY s.s_suppkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT ch.c_custkey) AS num_customers,
+    SUM(pa.total_avail) AS total_parts_available,
+    AVG(ap.avg_discounted_price) AS average_discounted_price,
+    COALESCE(sp.total_revenue, 0) AS supplier_revenue
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN cust_hierarchy ch ON n.n_nationkey = ch.c_nationkey
+LEFT JOIN part_avail pa ON pa.ps_partkey IN (
+    SELECT p.p_partkey
+    FROM part p
+    WHERE p.p_retailprice > 100
+)
+LEFT JOIN avg_price ap ON ap.p_partkey IN (
+    SELECT p.p_partkey
+    FROM part p
+    WHERE p.p_size < 20
+)
+LEFT JOIN supplier_performance sp ON sp.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_supplycost < 100
+)
+WHERE r.r_name IS NOT NULL
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT ch.c_custkey) > 10
+ORDER BY r.r_name DESC;

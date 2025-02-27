@@ -1,0 +1,51 @@
+WITH supplier_details AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_address, 
+        s.s_acctbal, 
+        CONCAT(s.s_name, ' located at ', s.s_address, ' has a balance of ', FORMAT(s.s_acctbal, 2)) AS supplier_info
+    FROM 
+        supplier s
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS items_sold
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+augmented_orders AS (
+    SELECT 
+        os.o_orderkey,
+        os.o_orderstatus,
+        os.total_revenue,
+        os.items_sold,
+        REPLACE(REPLACE(os.o_orderstatus, 'O', 'Open'), 'F', 'Filled') AS formatted_status
+    FROM 
+        order_summary os
+)
+SELECT 
+    pd.supplier_info, 
+    ao.o_orderkey, 
+    ao.total_revenue, 
+    ao.items_sold, 
+    ao.formatted_status
+FROM 
+    augmented_orders ao
+JOIN 
+    partsupp ps ON ao.o_orderkey = ps.ps_partkey
+JOIN 
+    supplier_details pd ON ps.ps_suppkey = pd.s_suppkey
+WHERE 
+    ao.total_revenue > 1000
+ORDER BY 
+    ao.total_revenue DESC;

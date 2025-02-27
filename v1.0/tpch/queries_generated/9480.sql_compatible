@@ -1,0 +1,50 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+), 
+TotalOrderAmounts AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    r.r_name AS region_name, 
+    SUM(CASE WHEN rs.supplier_rank = 1 THEN ps.ps_supplycost END) AS lowest_supplycost, 
+    COUNT(DISTINCT toa.o_orderkey) AS total_orders,
+    AVG(toa.total_amount) AS average_order_amount
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+JOIN 
+    supplier s ON rs.s_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    TotalOrderAmounts toa ON p.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = toa.o_orderkey)
+GROUP BY 
+    p.p_partkey, p.p_name, r.r_name
+HAVING 
+    COUNT(DISTINCT toa.o_orderkey) > 5 
+ORDER BY 
+    total_orders DESC, lowest_supplycost ASC;

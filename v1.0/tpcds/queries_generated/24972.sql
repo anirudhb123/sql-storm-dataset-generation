@@ -1,0 +1,44 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws_sold_date_sk, ws_item_sk, SUM(ws_quantity) AS total_sales
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT cs_sold_date_sk, cs_item_sk, SUM(cs_quantity)
+    FROM catalog_sales
+    GROUP BY cs_sold_date_sk, cs_item_sk
+),
+RankedSales AS (
+    SELECT ws_item_sk, total_sales,
+           RANK() OVER (PARTITION BY ws_item_sk ORDER BY total_sales DESC) AS sales_rank
+    FROM SalesCTE
+),
+CustomerInfo AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name,
+           cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate,
+           ROW_NUMBER() OVER (ORDER BY c.c_customer_sk) AS rn
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+FilteredCustomer AS (
+    SELECT c.*
+    FROM CustomerInfo c
+    WHERE (c.cd_gender = 'F' AND c.cd_marital_status = 'M') OR 
+          (c.cd_gender = 'M' AND c.cd_marital_status IS NULL)
+),
+TotalReturns AS (
+    SELECT wr_item_sk, SUM(wr_return_quantity) AS total_return
+    FROM web_returns
+    GROUP BY wr_item_sk
+)
+SELECT COALESCE(ws.ws_item_sk, cs.cs_item_sk, 0) AS item_sk,
+       COALESCE(ws_sales.total_sales, 0) AS item_sales,
+       COALESCE(tr.total_return, 0) AS item_returns,
+       (COALESCE(ws_sales.total_sales, 0) - COALESCE(tr.total_return, 0)) AS net_sales,
+       COUNT(DISTINCT fc.c_customer_sk) AS customer_count
+FROM RankedSales ws_sales
+FULL OUTER JOIN TotalReturns tr ON ws_sales.ws_item_sk = tr.wr_item_sk
+FULL OUTER JOIN FilteredCustomer fc ON fc.rn % 2 = 0
+GROUP BY ws.ws_item_sk, cs.cs_item_sk, ws_sales.total_sales, tr.total_return
+HAVING net_sales > 10 AND (customer_count > 5 OR customer_count IS NULL)
+ORDER BY net_sales DESC, customer_count ASC;

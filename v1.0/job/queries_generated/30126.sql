@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 1 AS level
+    FROM aka_title AS m
+    WHERE m.production_year >= 2000
+    UNION ALL
+    SELECT m.id AS movie_id, m.title, m.production_year, mh.level + 1
+    FROM movie_link ml
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+    WHERE m.production_year >= 2000
+),
+PopularActors AS (
+    SELECT ak.name, COUNT(c.movie_id) AS movie_count
+    FROM aka_name ak
+    JOIN cast_info c ON ak.person_id = c.person_id
+    GROUP BY ak.name
+    HAVING COUNT(c.movie_id) > 10
+),
+EnhancedMovieDetails AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        COALESCE(k.keyword, 'No Keyword') AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY ak.name) AS actor_rank
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN cast_info c ON m.id = c.movie_id
+    LEFT JOIN aka_name ak ON c.person_id = ak.person_id
+    WHERE m.production_year BETWEEN 2000 AND 2020
+),
+MoviesWithNullKeywords AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        ak.name AS actor_name,
+        COALESCE(k.keyword, 'NULL Keyword') AS keyword
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN cast_info c ON m.id = c.movie_id
+    LEFT JOIN aka_name ak ON c.person_id = ak.person_id
+    WHERE k.keyword IS NULL
+)
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    pa.name AS popular_actor,
+    pod.actor_rank,
+    COUNT(DISTINCT mk.keyword_id) AS total_keywords,
+    COALESCE(mnk.keyword, 'No Keyword') AS main_keyword
+FROM MovieHierarchy h
+JOIN EnhancedMovieDetails pod ON h.movie_id = pod.movie_id
+LEFT JOIN PopularActors pa ON pa.movie_count > 5
+LEFT JOIN movie_keyword mk ON h.movie_id = mk.movie_id
+LEFT JOIN keyword mnk ON mk.keyword_id = mnk.id
+GROUP BY 
+    h.movie_id, h.title, h.production_year, pa.name, pod.actor_rank
+ORDER BY h.production_year DESC, total_keywords DESC;

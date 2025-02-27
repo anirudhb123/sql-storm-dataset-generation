@@ -1,0 +1,45 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, c_acctbal, 1 AS level
+    FROM customer
+    WHERE c_acctbal IS NOT NULL AND c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, (ch.c_acctbal + c.c_acctbal) AS c_acctbal, ch.level + 1
+    FROM customer_hierarchy ch
+    JOIN customer c ON ch.c_custkey = c.c_custkey
+    WHERE c.c_acctbal <= (SELECT AVG(c_acctbal) FROM customer WHERE c_mktsegment = 'BUILDING')
+),
+combined_parts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available, AVG(p.p_retailprice) AS avg_price
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+ranked_parts AS (
+    SELECT cp.*, RANK() OVER (ORDER BY total_available DESC) AS part_rank
+    FROM combined_parts cp
+    WHERE avg_price IS NOT NULL AND total_available IS NOT NULL
+),
+filtered_orders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY o.o_orderkey
+    HAVING total_revenue > 50000
+)
+SELECT
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT ch.c_custkey) AS num_customers,
+    COUNT(DISTINCT ro.o_orderkey) AS number_of_orders,
+    SUM(rp.total_available) AS total_parts_available,
+    AVG(rp.avg_price) AS average_price_of_parts,
+    MIN(rp.part_rank) AS highest_rank_part
+FROM nation ns
+LEFT JOIN customer_hierarchy ch ON ns.n_nationkey = ch.c_nationkey
+LEFT JOIN filtered_orders ro ON ch.c_custkey = ro.o_orderkey
+LEFT JOIN ranked_parts rp ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost > 0)
+WHERE ns.r_name NOT LIKE '%land%' OR (ch.c_acctbal IS NULL AND ch.level < 3)
+GROUP BY ns.n_name
+HAVING COUNT(DISTINCT ch.c_custkey) > 0
+ORDER BY num_customers DESC, average_price_of_parts ASC
+LIMIT 10;

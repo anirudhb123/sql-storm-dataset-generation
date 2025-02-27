@@ -1,0 +1,71 @@
+
+WITH customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        c.c_email_address,
+        c.c_birth_month,
+        c.c_birth_day,
+        c.c_birth_year
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        c.c_email_address LIKE '%@%'
+),
+formatted_dates AS (
+    SELECT 
+        c_customer_sk,
+        full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        ca_city,
+        ca_state,
+        ca_country,
+        c_email_address,
+        CONCAT(LPAD(c_birth_month, 2, '0'), '-', LPAD(c_birth_day, 2, '0'), '-', c_birth_year) AS formatted_birthdate
+    FROM 
+        customer_data
+),
+email_domains AS (
+    SELECT 
+        c_customer_sk,
+        full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        ca_city,
+        ca_state,
+        ca_country,
+        c_email_address,
+        formatted_birthdate,
+        SUBSTRING_INDEX(c_email_address, '@', -1) AS email_domain
+    FROM 
+        formatted_dates
+)
+SELECT 
+    cd.full_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cd.ca_city,
+    cd.ca_state,
+    cd.ca_country,
+    cd.c_email_address,
+    cd.formatted_birthdate,
+    cd.email_domain,
+    COUNT(*) OVER (PARTITION BY cd.email_domain) AS domain_count
+FROM 
+    email_domains cd
+ORDER BY 
+    cd.full_name;

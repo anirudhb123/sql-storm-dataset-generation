@@ -1,0 +1,56 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000
+),
+RecentReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        RIGHT(STRING_AGG(DISTINCT r.r_reason_desc, ', ') WITHIN GROUP (ORDER BY r.r_reason_desc), 100) AS reasons
+    FROM 
+        store_returns sr
+    JOIN 
+        reason r ON sr.sr_reason_sk = r.r_reason_sk
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    rt.total_returns,
+    rt.total_return_amount,
+    rt.reasons,
+    CASE 
+        WHEN c.c_birth_year % 2 = 0 THEN 'Born in an even year'
+        ELSE 'Born in an odd year'
+    END AS birth_year_parity,
+    COUNT(DISTINCT ws.ws_order_number) AS total_web_sales,
+    SUM(ws.ws_net_profit) AS total_profit
+FROM 
+    RankedCustomers c
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    RecentReturns rt ON rt.sr_item_sk = ws.ws_item_sk
+WHERE 
+    (c.rn <= 5 OR c.cd_marital_status IS NULL)
+    AND (rt.total_returns > 0 OR rt.total_return_amount IS NULL)
+GROUP BY 
+    c.c_first_name, c.c_last_name, rt.total_returns, rt.total_return_amount, rt.reasons
+HAVING 
+    SUM(ws.ws_sales_price) IS NOT DISTINCT FROM AVG(ws.ws_sales_price) 
+ORDER BY 
+    total_profit DESC NULLS LAST;

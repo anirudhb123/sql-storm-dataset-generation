@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Questions
+    AND 
+        p.Score IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        v.UserId,
+        v.CreationDate,
+        vt.Name AS VoteType
+    FROM 
+        Votes v
+    INNER JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        v.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PostAnalytics AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rb.BadgeCount,
+        rb.BadgeNames,
+        COALESCE(rv.VoteType, 'No Votes') AS RecentVoteType,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserBadges rb ON rp.OwnerUserId = rb.UserId
+    LEFT JOIN 
+        RecentVotes rv ON rp.PostId = rv.PostId
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, rb.BadgeCount, rb.BadgeNames, rv.VoteType
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.BadgeCount,
+    p.BadgeNames,
+    p.RecentVoteType,
+    COALESCE(p.CommentCount, 0) AS TotalComments
+FROM 
+    PostAnalytics p
+WHERE 
+    p.Rank <= 5
+ORDER BY 
+    p.Score DESC, p.CreationDate ASC;

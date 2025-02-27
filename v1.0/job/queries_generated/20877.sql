@@ -1,0 +1,76 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(DISTINCT kc.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.title_rank,
+        rm.keyword_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.title_rank BETWEEN 1 AND 10 AND 
+        rm.keyword_count > 2
+),
+ActorMovies AS (
+    SELECT 
+        ca.movie_id,
+        COUNT(DISTINCT a.id) AS actor_count
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name a ON ca.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        ca.movie_id
+),
+FinalSelection AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        COALESCE(am.actor_count, 0) AS actor_count
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        ActorMovies am ON fm.movie_id = am.movie_id
+)
+SELECT 
+    fs.title, 
+    fs.production_year, 
+    fs.actor_count, 
+    CASE 
+        WHEN fs.actor_count = 0 THEN 'No actors available'
+        ELSE 'Actors present'
+    END AS actor_status,
+    CAST(EXTRACT(YEAR FROM CURRENT_DATE) AS INTEGER) - fs.production_year AS age_of_movie,
+    STRING_AGG(DISTINCT ak.name, ', ') FILTER (WHERE ak.name IS NOT NULL) AS actor_names
+FROM 
+    FinalSelection fs
+LEFT JOIN 
+    cast_info ci ON fs.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+WHERE 
+    fs.production_year < (SELECT AVG(production_year) FROM aka_title)
+GROUP BY 
+    fs.movie_id, fs.title, fs.production_year, fs.actor_count
+ORDER BY 
+    fs.production_year DESC, fs.actor_count DESC
+OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY;

@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS Author,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS Ranked
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        Tags,
+        Author,
+        CreationDate,
+        CommentCount,
+        UpVotes,
+        DownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        Ranked <= 5 -- Top 5 most recent posts per tag
+),
+PostSummary AS (
+    SELECT 
+        Tags,
+        JSON_AGG(JSON_BUILD_OBJECT('PostId', PostId, 'Title', Title, 'Author', Author, 'CreationDate', CreationDate, 'CommentCount', CommentCount, 'UpVotes', UpVotes, 'DownVotes', DownVotes)) AS Posts
+    FROM 
+        FilteredPosts
+    GROUP BY 
+        Tags
+)
+SELECT 
+    Tags,
+    GREATEST(COALESCE((SELECT COUNT(*) FROM FilteredPosts fp WHERE fp.Tags = p.Tags), 0), 0) AS TotalPosts,
+    Posts
+FROM 
+    PostSummary p
+ORDER BY 
+    TotalPosts DESC;

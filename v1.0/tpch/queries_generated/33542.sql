@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT sp.ps_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, level + 1
+    FROM SupplyChain sp
+    JOIN partsupp ps ON sp.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal < sp.s_acctbal
+)
+
+SELECT
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(o.o_totalprice) AS total_revenue,
+    AVG(l.l_quantity) OVER (PARTITION BY n.n_name) AS avg_quantity,
+    STRING_AGG(DISTINCT CONCAT_WS(':', p.p_name, ROUND(p.p_retailprice, 2)), ', ') AS products
+FROM 
+    customer c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    part p ON l.l_partkey = p.p_partkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN
+    (SELECT s.n_nationkey FROM nation s
+     JOIN SupplyChain sc ON s.n_nationkey = sc.s_nationkey
+     GROUP BY s.n_nationkey) AS qualified_nations ON n.n_nationkey = qualified_nations.n_nationkey
+WHERE 
+    o.o_orderstatus = 'O' 
+    AND (l.l_discount BETWEEN 0.05 AND 0.20 OR l.l_discount IS NULL)
+GROUP BY 
+    n.n_name
+HAVING 
+    total_revenue > 10000 
+    AND COUNT(o.o_orderkey) > (SELECT COUNT(*) FROM orders) / 2
+ORDER BY 
+    total_revenue DESC;

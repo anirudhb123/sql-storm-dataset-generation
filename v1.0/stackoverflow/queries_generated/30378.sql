@@ -1,0 +1,104 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        p.AnswerCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostsRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id AND v.PostId = p.Id AND v.VoteTypeId IN (8, 9) -- Count only bounty actions
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(p.Tags, ',')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+PostHistoryAggregate AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        MIN(ph.CreationDate) AS FirstChangeDate,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+TagAttributes AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT rp.PostId) AS AssociatedPostCount,
+        AVG(u.Reputation) AS AverageUserReputation,
+        SUM(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        t.TagName
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    ur.Reputation AS OwnerReputation,
+    ur.TotalPosts,
+    ur.TotalBounties,
+    pha.ChangeCount,
+    pha.FirstChangeDate,
+    pha.LastChangeDate,
+    ta.TagName,
+    ta.AssociatedPostCount,
+    ta.AverageUserReputation,
+    ta.TotalBadges
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+LEFT JOIN 
+    PostHistoryAggregate pha ON rp.PostId = pha.PostId
+LEFT JOIN 
+    TagAttributes ta ON ta.TagName = ANY(STRING_TO_ARRAY(rp.Title, ' '))
+WHERE 
+    rp.PostRank <= 5 
+    AND (ph.PostHistoryTypeId IS NULL OR pha.ChangeCount > 2)
+ORDER BY 
+    rp.Score DESC, ur.Reputation DESC;

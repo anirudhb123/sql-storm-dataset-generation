@@ -1,0 +1,58 @@
+WITH MovieDetails AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title AS movie_title,
+        a.production_year,
+        a.kind_id,
+        a.imdb_index AS movie_imdb_index,
+        COUNT(DISTINCT c.id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN 
+        movie_keyword mk ON a.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN 
+        movie_companies mc ON a.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        a.production_year > 2000 -- Focus on movies from the year 2001 onward
+    GROUP BY 
+        a.id, a.title, a.production_year, a.kind_id, a.imdb_index
+),
+RoleSummary AS (
+    SELECT
+        c.movie_id,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.movie_title,
+    md.production_year,
+    md.kind_id,
+    md.movie_imdb_index,
+    md.cast_count,
+    md.aka_names,
+    md.keywords,
+    rs.roles,
+    COALESCE(md.company_names, 'No Companies') AS company_names
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    RoleSummary rs ON md.movie_id = rs.movie_id
+ORDER BY 
+    md.production_year DESC, md.cast_count DESC;

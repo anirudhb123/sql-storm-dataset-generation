@@ -1,0 +1,49 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COUNT(DISTINCT c.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT c.id) DESC) AS rank
+    FROM 
+        aka_title ak
+    JOIN 
+        title m ON ak.movie_id = m.id
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+TopMovies AS (
+    SELECT 
+        *
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5
+)
+
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    tm.aka_names,
+    tm.keywords,
+    tm.cast_count
+FROM 
+    TopMovies tm
+JOIN 
+    movie_companies mc ON tm.movie_id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    cn.country_code = 'USA' 
+ORDER BY 
+    tm.production_year DESC, 
+    tm.cast_count DESC;

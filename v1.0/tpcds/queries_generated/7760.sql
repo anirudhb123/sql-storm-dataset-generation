@@ -1,0 +1,43 @@
+
+WITH aggregated_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        DATE_PART('month', d.d_date) AS sales_month,
+        DATE_PART('year', d.d_date) AS sales_year
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws.web_site_sk, sales_month, sales_year
+),
+ranked_sales AS (
+    SELECT 
+        web_site_sk,
+        total_sales,
+        total_profit,
+        total_orders,
+        sales_month,
+        sales_year,
+        RANK() OVER (PARTITION BY sales_month, sales_year ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        aggregated_sales
+)
+SELECT 
+    w.web_site_id,
+    r.total_sales,
+    r.total_profit,
+    r.total_orders,
+    r.sales_month,
+    r.sales_year
+FROM 
+    ranked_sales r
+JOIN 
+    web_site w ON r.web_site_sk = w.web_site_sk
+WHERE 
+    r.sales_rank <= 5
+ORDER BY 
+    r.sales_year, r.sales_month, r.sales_rank;

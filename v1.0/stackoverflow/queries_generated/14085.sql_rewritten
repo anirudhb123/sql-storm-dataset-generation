@@ -1,0 +1,52 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        u.Reputation > 0
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstEditDate,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(*) AS TotalEdits,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 ELSE 0 END) AS TitleBodyTagEdits
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.TotalScore,
+    ups.TotalViews,
+    ups.TotalComments,
+    phs.FirstEditDate,
+    phs.LastEditDate,
+    phs.TotalEdits,
+    phs.TitleBodyTagEdits
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    PostHistoryStats phs ON ups.TotalPosts > 0 AND phs.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ups.UserId)
+ORDER BY 
+    ups.TotalPosts DESC, ups.TotalScore DESC;

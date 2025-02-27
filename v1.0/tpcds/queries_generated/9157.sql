@@ -1,0 +1,44 @@
+
+WITH sales_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS average_order_value,
+        COUNT(DISTINCT ws.ws_promo_sk) AS promotions_used
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' 
+        AND cd.cd_marital_status = 'M' 
+        AND cd.cd_buy_potential = 'High'
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+top_customers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        sales_summary
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_sales,
+    tc.total_orders,
+    tc.average_order_value,
+    tc.promotions_used
+FROM 
+    top_customers tc
+WHERE 
+    tc.sales_rank <= 10
+ORDER BY 
+    tc.total_sales DESC;

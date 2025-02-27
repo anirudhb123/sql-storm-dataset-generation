@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (CURRENT_DATE - INTERVAL '1 year')
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT rp.Id) AS PostCount,
+        SUM(rp.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+    HAVING 
+        COUNT(DISTINCT rp.Id) > 0
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.PostCount,
+    tu.TotalScore,
+    COALESCE(ub.BadgeNames, 'No badges') AS BadgeNames,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    SUM(v.UserId IS NOT NULL) AS TotalUpVotes,
+    COUNT(DISTINCT CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.Id END) AS ClosureEvents
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    UserBadges ub ON tu.Id = ub.UserId
+LEFT JOIN 
+    Comments c ON c.UserId = tu.Id
+LEFT JOIN 
+    Votes v ON v.UserId = tu.Id
+LEFT JOIN 
+    PostHistory PH ON PH.UserId = tu.Id
+GROUP BY 
+    tu.DisplayName, 
+    tu.Reputation, 
+    tu.PostCount, 
+    tu.TotalScore, 
+    ub.BadgeNames
+ORDER BY 
+    tu.TotalScore DESC, 
+    tu.Reputation DESC
+LIMIT 10;

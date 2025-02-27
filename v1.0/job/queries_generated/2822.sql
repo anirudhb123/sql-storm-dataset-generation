@@ -1,0 +1,52 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TitleKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        mt.movie_id
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.role_id) AS distinct_roles
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    COALESCE(tk.keywords, 'No Keywords') AS keywords,
+    cr.distinct_roles,
+    CASE 
+        WHEN cr.distinct_roles > 5 THEN 'Ensemble Cast'
+        WHEN cr.distinct_roles > 0 THEN 'Small Cast'
+        ELSE 'No Cast'
+    END AS cast_type
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    TitleKeywords tk ON rt.title_id = tk.movie_id
+LEFT JOIN 
+    CastRoles cr ON rt.title_id = cr.movie_id
+WHERE 
+    rt.rn = 1
+ORDER BY 
+    rt.production_year DESC, 
+    rt.title;

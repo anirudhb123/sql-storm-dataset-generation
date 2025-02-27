@@ -1,0 +1,38 @@
+WITH movie_data AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        c.name AS company_name, 
+        GROUP_CONCAT(DISTINCT a.name) AS actors,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year >= 2000 
+        AND t.production_year < 2023
+    GROUP BY 
+        t.id, t.title, t.production_year, c.name
+)
+SELECT 
+    md.title, 
+    md.production_year, 
+    md.company_name, 
+    md.actors, 
+    md.keyword_count
+FROM 
+    movie_data md
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

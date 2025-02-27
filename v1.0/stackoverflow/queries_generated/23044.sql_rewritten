@@ -1,0 +1,113 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND P.ViewCount IS NOT NULL
+        AND U.Reputation > 100
+),
+FilteredTags AS (
+    SELECT 
+        T.TagName, 
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 10
+),
+PostVoteSummary AS (
+    SELECT 
+        V.PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        C.Name AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes C ON PH.Comment::int = C.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.ViewCount,
+    RP.OwnerDisplayName,
+    COALESCE(PVS.UpVotes, 0) AS UpVotes,
+    COALESCE(PVS.DownVotes, 0) AS DownVotes,
+    FT.TagName,
+    FT.PostCount,
+    CB.CloseReason,
+    UB.BadgeCount
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    PostVoteSummary PVS ON RP.PostId = PVS.PostId
+LEFT JOIN 
+    FilteredTags FT ON FT.PostCount > 0
+LEFT JOIN 
+    ClosedPosts CB ON CB.PostId = RP.PostId
+LEFT JOIN 
+    UserBadges UB ON UB.UserId = RP.OwnerUserId
+WHERE 
+    RP.OwnerPostRank = 1 
+ORDER BY 
+    RP.ViewCount DESC, 
+    RP.CreationDate DESC
+LIMIT 100
+
+UNION ALL
+
+SELECT 
+    NULL AS PostId,
+    NULL AS Title,
+    NULL AS CreationDate,
+    NULL AS ViewCount,
+    NULL AS OwnerDisplayName,
+    NULL AS UpVotes,
+    NULL AS DownVotes,
+    NULL AS TagName,
+    NULL AS PostCount,
+    'No closed posts available' AS CloseReason,
+    COUNT(DISTINCT U.Id) AS BadgeCount
+FROM 
+    Users U
+WHERE 
+    NOT EXISTS (SELECT 1 FROM ClosedPosts CP WHERE CP.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = U.Id))
+GROUP BY 
+    U.Id;

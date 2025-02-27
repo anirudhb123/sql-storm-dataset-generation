@@ -1,0 +1,101 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+    GROUP BY 
+        u.Id
+),
+PostCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+),
+PostScoreRanked AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0
+)
+
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    us.PostCount,
+    us.TotalBounty,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    p.Title AS PostTitle,
+    p.Score AS PostScore,
+    pc.CloseReasons,
+    pr.ScoreRank
+FROM 
+    UserStats us
+JOIN 
+    Users u ON us.UserId = u.Id
+JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    PostCloseReasons pc ON p.Id = pc.PostId
+LEFT JOIN 
+    PostScoreRanked pr ON p.Id = pr.Id
+WHERE 
+    us.PostCount > 5
+    AND us.TotalBounty > 0
+    AND EXISTS (
+        SELECT 1 
+        FROM RecursivePostHierarchy rph 
+        WHERE rph.OwnerUserId = u.Id
+    )
+ORDER BY 
+    us.TotalBounty DESC, 
+    us.TotalUpVotes DESC;

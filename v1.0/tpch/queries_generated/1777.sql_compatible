@@ -1,0 +1,52 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s 
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_purchases
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_mktsegment = 'BUILDING'
+    GROUP BY c.c_custkey, c.c_name
+),
+FrequentParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(l.l_orderkey) AS order_count
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATE '1997-06-01'
+    GROUP BY p.p_partkey, p.p_name
+    HAVING COUNT(l.l_orderkey) > 5
+)
+SELECT 
+    o.order_rank,
+    c.c_name,
+    COALESCE(fp.order_count, 0) AS part_order_count,
+    sd.total_supply_cost
+FROM RankedOrders o
+LEFT JOIN CustomerPurchases c ON o.o_orderkey = c.c_custkey
+LEFT JOIN FrequentParts fp ON o.o_orderkey = fp.p_partkey
+JOIN SupplierDetails sd ON sd.total_supply_cost > 10000
+WHERE o.o_orderstatus = 'O' 
+AND (sd.total_supply_cost IS NOT NULL)
+ORDER BY o.o_orderkey, c.c_name DESC;

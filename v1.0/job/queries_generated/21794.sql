@@ -1,0 +1,63 @@
+WITH recursive MovieCTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COALESCE(ki.info, 'No info available') AS movie_info,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ki.info_type_id DESC) AS info_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_info ki ON t.id = ki.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastCTE AS (
+    SELECT 
+        c.movie_id,
+        COUNT(*) AS cast_count,
+        MAX(CASE WHEN ak.name IS NOT NULL THEN 1 ELSE 0 END) AS has_aka_name,
+        RANK() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order ASC) AS cast_rank
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        c.movie_id
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    m.movie_info,
+    c.cast_count,
+    CASE 
+        WHEN c.cast_count > 10 THEN 'Blockbuster' 
+        WHEN c.cast_count BETWEEN 5 AND 10 THEN 'Moderate' 
+        ELSE 'Indie' 
+    END AS movie_category,
+    (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = m.movie_id) AS keyword_count,
+    (SELECT STRING_AGG(k.keyword, ', ') 
+     FROM movie_keyword mk 
+     JOIN keyword k ON mk.keyword_id = k.id 
+     WHERE mk.movie_id = m.movie_id 
+     GROUP BY mk.movie_id) AS keywords,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM movie_link ml WHERE ml.movie_id = m.movie_id AND ml.linked_movie_id IS NULL) 
+        THEN 'Links with NULL' 
+        ELSE 'No NULL Links' 
+    END AS link_status,
+    ROW_NUMBER() OVER (ORDER BY m.production_year DESC) AS year_rank
+FROM 
+    MovieCTE m
+LEFT JOIN 
+    CastCTE c ON m.movie_id = c.movie_id
+WHERE 
+    c.has_aka_name = 1 
+OR c.cast_count IS NULL
+ORDER BY 
+    m.production_year DESC, 
+    c.cast_count DESC;
+
+This query performs a comprehensive analysis of movies from the `aka_title` table, combining information from related tables to derive insights about the cast and keywords associated with each movie. The use of Common Table Expressions (CTEs) builds a structured pipeline while employing complex aggregates, filtering, and window functions to produce a rich dataset for performance benchmarking. Key features include conditional logic with `CASE` statements, correlated subqueries, and string aggregation to form lists of keywords—all while considering potential NULL scenarios in joins and predicates.

@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(rp.Score) AS TotalScore
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+SELECT 
+    ur.UserId,
+    ur.Reputation,
+    ur.PostCount,
+    ur.TotalScore,
+    AVG(rp.ViewCount) AS AvgViewCount,
+    SUM(rp.CommentCount) AS TotalComments,
+    SUM(rp.VoteCount) AS TotalVotes
+FROM 
+    UserReputation ur
+JOIN 
+    RankedPosts rp ON ur.UserId = rp.OwnerUserId
+WHERE 
+    ur.Reputation > 1000
+GROUP BY 
+    ur.UserId, ur.Reputation, ur.PostCount, ur.TotalScore
+ORDER BY 
+    TotalVotes DESC, TotalComments DESC;

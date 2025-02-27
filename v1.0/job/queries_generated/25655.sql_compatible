@@ -1,0 +1,73 @@
+
+WITH MovieAwards AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ma.id) AS awards_count,
+        STRING_AGG(DISTINCT ma.award_name, ', ') AS awards_list
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_info mi ON mt.id = mi.movie_id
+    LEFT JOIN 
+        movie_info_idx mi_idx ON mt.id = mi_idx.movie_id
+    LEFT JOIN 
+        (SELECT DISTINCT movie_id, award_name FROM movie_awards) ma ON mt.id = ma.movie_id
+    WHERE 
+        mt.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        mt.title, mt.production_year
+),
+CastStatistics AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT mt.title, ', ') AS movie_titles
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.id
+    GROUP BY 
+        ak.name
+    ORDER BY 
+        movie_count DESC 
+    LIMIT 10
+),
+KeywordStats AS (
+    SELECT 
+        k.keyword,
+        COUNT(DISTINCT mk.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT mt.title, ', ') AS movie_titles
+    FROM 
+        keyword k
+    JOIN 
+        movie_keyword mk ON k.id = mk.keyword_id
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        k.keyword
+    ORDER BY 
+        movie_count DESC
+    LIMIT 5
+)
+SELECT 
+    ma.title AS Awarded_Movie,
+    ma.production_year AS Production_Year,
+    ma.awards_count AS Awards_Count,
+    ma.awards_list AS Awards,
+    cs.actor_name AS Top_Actor,
+    cs.movie_count AS Actor_Movie_Count,
+    cs.movie_titles AS Actor_Movies,
+    ks.keyword AS Top_Keyword,
+    ks.movie_count AS Keyword_Movie_Count,
+    ks.movie_titles AS Keyword_Movies
+FROM 
+    MovieAwards ma
+JOIN 
+    CastStatistics cs ON ma.awards_count > 5
+JOIN 
+    KeywordStats ks ON ma.production_year = 2021
+ORDER BY 
+    ma.awards_count DESC, cs.movie_count DESC;

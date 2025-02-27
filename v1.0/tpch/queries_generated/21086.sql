@@ -1,0 +1,87 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+), RankedSuppliers AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY CASE WHEN s_acctbal IS NULL THEN 'unknown' ELSE 'known' END 
+                     ORDER BY total_supply_cost DESC) AS cost_rank
+    FROM 
+        SupplierDetails
+), OrdersWithCustomer AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) as row_num
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '2021-01-01'
+), PartSales AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales,
+        COUNT(DISTINCT l.l_linenumber) AS line_item_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '2021-01-01' AND l.l_shipdate < '2022-01-01'
+    GROUP BY 
+        l.l_orderkey
+    HAVING 
+        COUNT(*) > 0
+), RevenueAnalysis AS (
+    SELECT 
+        n.n_name,
+        SUM(os.net_sales) AS total_net_sales,
+        COUNT(DISTINCT os.l_orderkey) AS order_count,
+        CASE 
+            WHEN AVG(s.total_supply_cost) IS NULL THEN 'Insufficient Data'
+            ELSE CONCAT('Avg Supplier Cost: ', ROUND(AVG(s.total_supply_cost), 2))
+        END AS avg_supplier_cost
+    FROM 
+        Nation n
+    LEFT JOIN 
+        OrdersWithCustomer o ON n.n_nationkey = (
+            SELECT c.c_nationkey FROM customer c WHERE c.c_name = o.c_name LIMIT 1
+        )
+    LEFT JOIN 
+        PartSales os ON os.l_orderkey = o.o_orderkey
+    LEFT JOIN 
+        RankedSuppliers s ON s.s_suppkey = (
+            SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_availqty > 0 LIMIT 1
+        )
+    GROUP BY 
+        n.n_name
+    HAVING 
+        total_net_sales IS NOT NULL AND order_count > 5
+)
+SELECT 
+    r.r_name,
+    ra.total_net_sales,
+    ra.order_count,
+    ra.avg_supplier_cost
+FROM 
+    region r
+JOIN 
+    RevenueAnalysis ra ON r.r_regionkey = (
+        SELECT n.n_regionkey FROM nation n WHERE n.n_name = ra.n_name LIMIT 1
+    )
+WHERE 
+    ra.total_net_sales > 10000 
+ORDER BY 
+    ra.total_net_sales DESC
+LIMIT 10;

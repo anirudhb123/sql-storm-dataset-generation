@@ -1,0 +1,57 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesSummary AS (
+    SELECT 
+        cs.cs_order_number,
+        SUM(cs.cs_quantity) AS total_quantity,
+        SUM(cs.cs_ext_sales_price) AS total_sales
+    FROM 
+        catalog_sales cs
+    GROUP BY 
+        cs.cs_order_number
+),
+MonthlySales AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_quantity) AS total_web_sales,
+        SUM(ws.ws_net_paid_inc_tax) AS total_net_web_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq
+)
+SELECT 
+    cd.full_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.ca_city,
+    cd.ca_state,
+    COALESCE(ss.total_quantity, 0) AS last_order_quantity,
+    COALESCE(ss.total_sales, 0.00) AS last_order_sales,
+    COALESCE(ms.total_web_sales, 0) AS monthly_web_sales,
+    COALESCE(ms.total_net_web_sales, 0.00) AS monthly_net_web_sales
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    SalesSummary ss ON cd.c_customer_id = CAST(ss.cs_order_number AS CHAR(16))  -- assuming order number can be linked
+LEFT JOIN 
+    MonthlySales ms ON 1=1  -- cross-join for aggregation
+ORDER BY 
+    cd.ca_city, cd.ca_state, cd.full_name;

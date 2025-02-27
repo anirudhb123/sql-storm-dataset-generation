@@ -1,0 +1,59 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ss_sold_date_sk,
+        ss_item_sk,
+        SUM(ss_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ss_item_sk ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY 
+        ss_sold_date_sk, ss_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt) AS total_returned_amount
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY 
+        sr_item_sk
+),
+FinalSales AS (
+    SELECT 
+        s.ss_item_sk,
+        s.total_sales,
+        COALESCE(c.total_returns, 0) AS total_returns,
+        COALESCE(c.total_returned_amount, 0) AS total_returned_amount,
+        (s.total_sales - COALESCE(c.total_returned_amount, 0)) AS net_sales
+    FROM 
+        SalesCTE s
+    LEFT JOIN 
+        CustomerReturns c ON s.ss_item_sk = c.sr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    f.total_sales,
+    f.total_returns,
+    f.total_returned_amount,
+    f.net_sales,
+    CASE 
+        WHEN f.net_sales < 0 THEN 'Loss'
+        WHEN f.net_sales = 0 THEN 'Break Even'
+        ELSE 'Profit'
+    END AS sales_status
+FROM 
+    FinalSales f
+JOIN 
+    item i ON f.ss_item_sk = i.i_item_sk
+WHERE 
+    f.sales_rank = 1 
+ORDER BY 
+    f.net_sales DESC
+LIMIT 10;

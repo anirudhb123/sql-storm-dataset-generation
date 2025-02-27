@@ -1,0 +1,78 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- CTE to create a tree structure of movies and their episodes
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.episode_of_id,
+        1 AS level
+    FROM 
+        title t
+    WHERE 
+        t.episode_of_id IS NULL  -- Start from the root movies (no episodes)
+
+    UNION ALL
+
+    SELECT 
+        t2.id,
+        t2.title,
+        t2.production_year,
+        t2.episode_of_id,
+        mh.level + 1
+    FROM 
+        title t2
+    INNER JOIN 
+        MovieHierarchy mh ON t2.episode_of_id = mh.movie_id  -- Join to get episodes
+),
+
+MovieKeywordAggregation AS (
+    -- CTE to aggregate movie counts for each keyword
+    SELECT 
+        mk.keyword_id,
+        COUNT(DISTINCT m.id) AS movie_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        title m ON mk.movie_id = m.id
+    GROUP BY 
+        mk.keyword_id
+),
+
+MovieInfo AS (
+    -- Aggregate information about movies from various sources
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COALESCE(array_agg(DISTINCT mi.info) FILTER (WHERE mi.info IS NOT NULL), '{}'::text[]) AS info_list,
+        COALESCE(mka.movie_count, 0) AS keyword_count
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        MovieKeywordAggregation mka ON mka.keyword_id IN (SELECT keyword_id FROM movie_keyword WHERE movie_id = t.id)
+    GROUP BY 
+        t.id, mka.movie_count
+)
+
+-- Final query to retrieve a detailed benchmark report of movies and their properties
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    mka.movie_count AS keyword_count,
+    CASE 
+        WHEN mh.level = 1 THEN 'Main Movie'
+        ELSE 'Episode'
+    END AS movie_type
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    MovieKeywordAggregation mka ON mh.movie_id = mka.keyword_id
+
+ORDER BY 
+    mh.production_year DESC,
+    mh.level,
+    mh.title;
+This query uses recursive CTEs to navigate a hierarchy of movies, aggregates movie keyword data to count distinct keywords tied to each movie, and compiles information from multiple tables to form a detailed report. The final selection organizes this data by film production year and provides a clear distinction between "Main Movie" and "Episode."

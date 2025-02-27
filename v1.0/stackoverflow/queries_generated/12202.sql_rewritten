@@ -1,0 +1,60 @@
+WITH UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        upc.PostCount,
+        upc.QuestionCount,
+        upc.AnswerCount,
+        RANK() OVER (ORDER BY upc.PostCount DESC) AS PostRank
+    FROM 
+        Users u
+    JOIN 
+        UserPostCounts upc ON u.Id = upc.UserId
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        pt.Name AS PostTypeName
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    tu.DisplayName AS UserName,
+    tu.PostCount,
+    tu.QuestionCount,
+    tu.AnswerCount,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerName,
+    rp.PostTypeName
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    RecentPosts rp ON tu.Id = rp.OwnerName
+WHERE 
+    tu.PostRank <= 10
+ORDER BY 
+    tu.PostRank, rp.CreationDate DESC;

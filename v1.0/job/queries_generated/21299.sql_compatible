@@ -1,0 +1,61 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        ARRAY[mt.id] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mm.id AS movie_id,
+        mm.title,
+        mm.production_year,
+        mm.kind_id,
+        mh.path || mm.id 
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mm ON ml.linked_movie_id = mm.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS akas,
+    SUM(CASE 
+        WHEN ci.nr_order IS NOT NULL THEN 1 ELSE 0 
+    END) AS named_cast_members,
+    MAX(CASE 
+        WHEN mt.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') 
+        THEN mt.info END) AS budget
+FROM 
+    movie_hierarchy h
+LEFT JOIN 
+    complete_cast cc ON h.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    movie_info mt ON h.movie_id = mt.movie_id
+WHERE 
+    h.production_year > 2000
+GROUP BY 
+    h.movie_id, h.title, h.production_year
+HAVING 
+    COUNT(DISTINCT ak.name) > 1 
+    OR MAX(CASE WHEN ak.id IS NULL THEN 1 ELSE 0 END) = 1
+ORDER BY 
+    h.production_year DESC,
+    total_cast DESC;

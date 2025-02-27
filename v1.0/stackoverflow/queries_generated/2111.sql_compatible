@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation,
+        (SELECT COUNT(b.Id) FROM Badges b WHERE b.UserId = u.Id) AS BadgeCount
+    FROM 
+        Users u
+), ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    ur.DisplayName,
+    ur.Reputation,
+    ur.BadgeCount,
+    cp.LastClosedDate
+FROM 
+    RankedPosts rp
+JOIN 
+    Users ur ON rp.PostId = ur.Id
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.PostRank = 1 
+    AND rp.Score > 5
+    AND (cp.LastClosedDate IS NULL OR cp.LastClosedDate < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days')
+ORDER BY 
+    rp.ViewCount DESC
+LIMIT 50
+UNION ALL
+SELECT 
+    'Aggregate Stats' AS Title,
+    NULL AS CreationDate,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(p.Score) AS TotalScore,
+    NULL AS DisplayName,
+    NULL AS Reputation,
+    NULL AS BadgeCount,
+    NULL AS LastClosedDate
+FROM 
+    Posts p
+WHERE 
+    p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+HAVING 
+    COUNT(DISTINCT p.Id) > 0;

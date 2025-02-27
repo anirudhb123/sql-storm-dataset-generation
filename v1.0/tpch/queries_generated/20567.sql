@@ -1,0 +1,41 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank,
+           NULLIF(s.s_acctbal, 0) as non_zero_acctbal
+    FROM supplier s
+),
+FilteredRegions AS (
+    SELECT r.r_regionkey, r.r_name
+    FROM region r
+    WHERE r.r_regionkey IN (SELECT DISTINCT n.n_regionkey
+                             FROM nation n
+                             WHERE n.n_comment LIKE '%.%' AND LENGTH(n.n_name) > 4)
+),
+AggregateData AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_availqty, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    JOIN RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+    WHERE rs.rank <= 5
+    GROUP BY ps.ps_partkey
+)
+SELECT n.n_name, r.r_name, COUNT(o.o_orderkey) AS order_count,
+       MAX(ld.value) AS max_price,
+       CASE 
+           WHEN COUNT(DISTINCT c.c_custkey) = 0 THEN 'No Customers'
+           ELSE 'Customers Exist'
+       END AS customer_status,
+       STRING_AGG(DISTINCT CONCAT(p.p_name, ' ', p.p_type), ', ') AS part_info
+FROM nation n
+LEFT JOIN FilteredRegions r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN AggregateData ad ON ad.ps_partkey = l.l_partkey
+LEFT JOIN (SELECT p_partkey, 
+                  (p_retailprice - p_retailprice * ps_supplycost / NULLIF(ps_supplycost, 0)) AS value 
+           FROM part p 
+           JOIN partsupp ps ON p.p_partkey = ps.ps_partkey) ld ON ld.p_partkey = l.l_partkey
+GROUP BY n.n_name, r.r_name
+HAVING SUM(COALESCE(ad.total_availqty, 0)) > 1000
+ORDER BY order_count DESC, max_price DESC
+FETCH FIRST 10 ROWS ONLY;

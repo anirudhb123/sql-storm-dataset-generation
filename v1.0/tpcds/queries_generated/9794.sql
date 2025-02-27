@@ -1,0 +1,62 @@
+
+WITH SalesSummary AS (
+    SELECT
+        ws.web_site_id,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_profit) AS avg_profit,
+        SUM(ws.ws_quantity) AS total_quantity
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+        AND dd.d_month_seq BETWEEN 1 AND 6
+    GROUP BY
+        ws.web_site_id
+),
+DemographicSummary AS (
+    SELECT
+        cd.cd_marital_status,
+        SUM(ws.ws_net_paid_inc_tax) AS demographic_sales
+    FROM
+        web_sales ws
+    JOIN
+        customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE
+        cd.cd_education_status = 'Bachelor'
+    GROUP BY
+        cd.cd_marital_status
+),
+ReturnSummary AS (
+    SELECT
+        sr_item_sk,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns
+    FROM
+        store_returns
+    GROUP BY
+        sr_item_sk
+)
+SELECT
+    ss.web_site_id,
+    ss.total_sales,
+    ss.total_orders,
+    ss.avg_profit,
+    ss.total_quantity,
+    ds.cd_marital_status,
+    ds.demographic_sales,
+    rs.total_return_amount,
+    rs.total_returns
+FROM
+    SalesSummary ss
+JOIN
+    DemographicSummary ds ON ss.total_sales > 1000
+LEFT JOIN
+    ReturnSummary rs ON rs.sr_item_sk = ss.total_quantity
+ORDER BY
+    ss.total_sales DESC
+LIMIT 100;

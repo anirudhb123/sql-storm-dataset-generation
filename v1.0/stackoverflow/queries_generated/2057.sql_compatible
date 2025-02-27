@@ -1,0 +1,64 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(up.VoteCount, 0)) AS TotalUpvotes,
+        SUM(COALESCE(dp.VoteCount, 0)) AS TotalDownvotes,
+        RANK() OVER (ORDER BY SUM(COALESCE(up.VoteCount, 0)) - SUM(COALESCE(dp.VoteCount, 0)) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS VoteCount FROM Votes WHERE VoteTypeId = 2 GROUP BY PostId) up ON p.Id = up.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS VoteCount FROM Votes WHERE VoteTypeId = 3 GROUP BY PostId) dp ON p.Id = dp.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.PostCount,
+        us.TotalUpvotes,
+        us.TotalDownvotes,
+        pt.TagName,
+        RANK() OVER (PARTITION BY pt.TagName ORDER BY us.TotalUpvotes DESC) AS TagUserRank
+    FROM 
+        UserStats us
+    JOIN 
+        (SELECT us.UserId, pt.TagName FROM UserStats us JOIN PopularTags pt ON us.UserId = pt.UserId) pt ON us.UserId = pt.UserId
+)
+SELECT 
+    tu.DisplayName,
+    tu.PostCount,
+    tu.TotalUpvotes,
+    tu.TotalDownvotes,
+    pt.TagName,
+    CASE 
+        WHEN tu.TagUserRank = 1 THEN 'Top Contributor'
+        ELSE 'Contributor'
+    END AS ContributionStatus
+FROM 
+    TopUsers tu
+JOIN 
+    PopularTags pt ON tu.TagName = pt.TagName
+WHERE 
+    pt.TagCount > 10
+ORDER BY 
+    pt.TagCount DESC, tu.TotalUpvotes DESC
+LIMIT 100;

@@ -1,0 +1,54 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_buy_potential,
+        CA.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        D.d_year,
+        SUM(WS.ws_quantity) AS total_purchases,
+        SUM(WS.ws_net_paid_inc_tax) AS total_spent
+    FROM 
+        customer c
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        JOIN customer_address CA ON c.c_current_addr_sk = CA.ca_address_sk
+        LEFT JOIN web_sales WS ON c.c_customer_sk = WS.ws_bill_customer_sk
+        JOIN date_dim D ON WS.ws_sold_date_sk = D.d_date_sk
+    WHERE 
+        D.d_year BETWEEN 2020 AND 2023
+    GROUP BY 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        cd.cd_buy_potential,
+        CA.ca_city,
+        CA.ca_state,
+        CA.ca_country,
+        D.d_year
+),
+RankedCustomer AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY d_year ORDER BY total_spent DESC) AS spending_rank
+    FROM 
+        CustomerStats
+)
+SELECT 
+    d_year,
+    COUNT(*) AS customer_count,
+    AVG(total_spent) AS avg_spent,
+    SUM(total_purchases) AS total_units_sold
+FROM 
+    RankedCustomer
+WHERE 
+    spending_rank <= 10
+GROUP BY 
+    d_year
+ORDER BY 
+    d_year DESC;

@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+SupplierAggregates AS (
+    SELECT 
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_nationkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(l.l_quantity) AS total_quantity_sold
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(o.o_totalprice) AS total_order_value,
+    pa.total_quantity_sold AS total_quantity_sold,
+    sa.total_supply_cost AS total_supply_cost,
+    sa.unique_parts AS number_of_unique_parts
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    PartDetails pa ON ps.ps_partkey = pa.p_partkey
+LEFT JOIN 
+    SupplierAggregates sa ON s.s_nationkey = sa.s_nationkey
+WHERE 
+    o.o_orderstatus = 'O'
+GROUP BY 
+    r.r_name, pa.total_quantity_sold, sa.total_supply_cost, sa.unique_parts
+ORDER BY 
+    total_order_value DESC, total_quantity_sold DESC;

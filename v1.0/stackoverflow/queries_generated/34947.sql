@@ -1,0 +1,105 @@
+WITH RecursivePostCTE AS (
+    -- Get all posts with their parent hierarchy
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        c.Level + 1
+    FROM 
+        Posts p 
+    INNER JOIN RecursivePostCTE c ON p.ParentId = c.Id
+),
+PostVoteStats AS (
+    -- Calculate vote statistics for each post
+    SELECT
+        p.Id,
+        p.Title,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title
+),
+UserBadgeStats AS (
+    -- Get user badge stats
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryAnalysis AS (
+    -- Analyze post history for edits and close reasons
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (4, 5) THEN 1 END) AS EditCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        MAX(ph.CreationDate) AS LastActivity
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title AS PostTitle,
+    COUNT(c.Id) AS CommentCount,
+    ps.TotalVotes,
+    ps.Upvotes,
+    ps.Downvotes,
+    ph.EditCount,
+    ph.CloseCount,
+    ph.LastActivity,
+    r.Level AS PostLevel,
+    u.DisplayName AS OwnerDisplayName,
+    ubs.BadgeCount,
+    ubs.HighestBadgeClass,
+    COALESCE(u.Location, 'N/A') AS UserLocation,
+    COALESCE(u.AboutMe, 'No Info') AS UserAboutMe
+FROM 
+    Posts p
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    PostVoteStats ps ON p.Id = ps.Id
+LEFT JOIN 
+    RecursivePostCTE r ON p.Id = r.Id
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadgeStats ubs ON u.Id = ubs.UserId
+LEFT JOIN 
+    PostHistoryAnalysis ph ON p.Id = ph.PostId
+WHERE 
+    p.PostTypeId = 1 -- Filtering for questions only
+GROUP BY 
+    p.Id, p.Title, ps.TotalVotes, ps.Upvotes, ps.Downvotes, 
+    ph.EditCount, ph.CloseCount, ph.LastActivity, r.Level, 
+    u.DisplayName, u.Location, u.AboutMe, ubs.BadgeCount, ubs.HighestBadgeClass
+ORDER BY 
+    TotalVotes DESC,
+    p.CreationDate DESC;

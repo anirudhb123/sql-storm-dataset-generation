@@ -1,0 +1,46 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+supplier_stats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_orderstatus, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus
+),
+region_customer AS (
+    SELECT r.r_name, COUNT(DISTINCT c.c_custkey) AS total_customers
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY r.r_name
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice) DESC) AS rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus
+)
+SELECT rh.n_name, rs.r_name, COUNT(DISTINCT cs.s_suppkey) AS supplier_count, SUM(os.order_total) AS total_order_value
+FROM nation_hierarchy rh
+JOIN supplier_stats cs ON rh.n_nationkey = cs.s_suppkey
+JOIN region_customer rs ON rh.n_regionkey = rs.r_name
+JOIN order_summary os ON os.o_orderstatus = CASE 
+                                            WHEN rh.level = 1 THEN 'O' 
+                                            ELSE 'F' 
+                                          END
+WHERE cs.total_cost IS NOT NULL
+GROUP BY rh.n_name, rs.r_name
+HAVING SUM(os.order_total) > 10000
+ORDER BY supplier_count DESC, total_order_value ASC;

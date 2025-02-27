@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COALESCE(mk.count, 0) DESC) AS rank,
+        COALESCE(mk.count, 0) AS keyword_count
+    FROM 
+        title m
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            COUNT(keyword_id) AS count
+        FROM 
+            movie_keyword
+        GROUP BY 
+            movie_id
+    ) AS mk ON m.id = mk.movie_id
+),
+PopularActors AS (
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.person_id, a.name
+    HAVING 
+        COUNT(ci.movie_id) > 5
+),
+TopRatedMovies AS (
+    SELECT 
+        movie_id,
+        AVG(rating) AS avg_rating
+    FROM 
+        movie_info
+    WHERE 
+        info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.keyword_count,
+    COALESCE(trm.avg_rating, 0) AS average_rating,
+    pa.actor_name,
+    pa.movie_count
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    PopularActors pa ON rm.movie_id IN (
+        SELECT movie_id 
+        FROM cast_info 
+        WHERE person_id = pa.person_id
+    )
+LEFT JOIN 
+    TopRatedMovies trm ON rm.movie_id = trm.movie_id
+WHERE 
+    rm.rank <= 10
+ORDER BY 
+    rm.keyword_count DESC, trm.avg_rating DESC, rm.production_year DESC;

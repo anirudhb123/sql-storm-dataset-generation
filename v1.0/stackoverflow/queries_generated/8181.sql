@@ -1,0 +1,66 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 2 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswerCount,
+        SUM(CASE WHEN B.UserId IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.CommentId) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentId FROM Comments GROUP BY PostId) C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        AcceptedAnswerCount,
+        BadgeCount
+    FROM 
+        UserStats
+    ORDER BY 
+        Reputation DESC
+    LIMIT 10
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    P.Title,
+    P.CreationDate,
+    P.ViewCount,
+    P.Score,
+    P.CommentCount
+FROM 
+    TopUsers U
+JOIN 
+    PostActivity P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, P.Score DESC
+LIMIT 5;

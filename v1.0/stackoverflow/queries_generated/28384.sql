@@ -1,0 +1,52 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Tags,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN c.PostId IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END), 0) AS CloseActions
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Tags, p.ViewCount
+),
+
+TagStatistics AS (
+    SELECT 
+        tag.TagName,
+        COUNT(DISTINCT ps.PostId) AS PostCount,
+        SUM(ps.ViewCount) AS TotalViews,
+        SUM(ps.UpVotes) AS TotalUpVotes,
+        SUM(ps.DownVotes) AS TotalDownVotes,
+        SUM(ps.CommentCount) AS TotalComments,
+        SUM(ps.CloseActions) AS TotalCloseActions
+    FROM 
+        PostStats ps
+    JOIN 
+        LATERAL string_to_array(substring(ps.Tags, 2, length(ps.Tags) - 2), '><') AS tag(TagName)
+    GROUP BY 
+        tag.TagName
+)
+
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ROUND(ts.TotalUpVotes::numeric / NULLIF(ts.PostCount, 0), 2) AS AvgUpVotes,
+    ROUND(ts.TotalDownVotes::numeric / NULLIF(ts.PostCount, 0), 2) AS AvgDownVotes,
+    ROUND(ts.TotalComments::numeric / NULLIF(ts.PostCount, 0), 2) AS AvgComments,
+    ROUND(ts.TotalCloseActions::numeric / NULLIF(ts.PostCount, 0), 2) AS AvgCloseActions
+FROM 
+    TagStatistics ts
+ORDER BY 
+    ts.TotalUpVotes DESC, ts.TotalViews DESC;

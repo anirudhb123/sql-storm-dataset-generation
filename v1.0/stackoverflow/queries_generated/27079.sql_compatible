@@ -1,0 +1,72 @@
+
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 10 THEN 1 ELSE 0 END) AS ClosedPostCount,
+        SUM(CASE WHEN p.PostTypeId = 12 THEN 1 ELSE 0 END) AS DeletedPostCount
+    FROM 
+        Tags 
+    JOIN 
+        Posts p ON Tags.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))
+    GROUP BY 
+        Tags.TagName
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 10 THEN 1 ELSE 0 END) AS ClosedPostCount,
+        SUM(CASE WHEN p.PostTypeId = 12 THEN 1 ELSE 0 END) AS DeletedPostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id,
+        u.Reputation
+),
+PopularTags AS (
+    SELECT 
+        ts.TagName,
+        ts.PostCount,
+        ts.QuestionCount,
+        ts.AnswerCount,
+        ts.ClosedPostCount,
+        ts.DeletedPostCount,
+        UR.Reputation
+    FROM 
+        TagStats ts 
+    JOIN 
+        UserReputation UR ON ts.PostCount > (SELECT AVG(PostCount) FROM TagStats) AND ts.QuestionCount > (SELECT AVG(QuestionCount) FROM TagStats)
+    ORDER BY 
+        ts.PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    pt.Name AS PostType,
+    t.TagName,
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS UserDisplayName,
+    u.Reputation,
+    t.QuestionCount,
+    t.AnswerCount
+FROM 
+    PopularTags t
+JOIN 
+    Posts p ON t.TagName = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+WHERE 
+    t.AnswerCount > 5 AND t.ClosedPostCount = 0
+ORDER BY 
+    t.Reputation DESC, 
+    p.CreationDate DESC;

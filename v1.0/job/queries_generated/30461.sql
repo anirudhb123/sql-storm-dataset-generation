@@ -1,0 +1,62 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- CTE to find all movies and their related movies (sequel/prequel relationships)
+    SELECT
+        ml.movie_id AS base_movie_id,
+        ml.linked_movie_id AS related_movie_id,
+        1 AS level
+    FROM
+        movie_link ml
+    WHERE
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+
+    UNION ALL
+
+    SELECT
+        mh.base_movie_id,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM
+        movie_hierarchy mh
+    INNER JOIN
+        movie_link ml ON mh.related_movie_id = ml.movie_id
+    WHERE
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+)
+
+SELECT
+    t.title AS movie_title,
+    a.name AS actor_name,
+    COUNT(DISTINCT mh.related_movie_id) AS sequels_count,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    AVG(CASE 
+        WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+        THEN CAST(mi.info AS FLOAT) 
+        END) AS average_rating
+FROM
+    title t
+INNER JOIN
+    movie_companies mc ON t.id = mc.movie_id
+INNER JOIN
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN
+    cast_info ci ON t.id = ci.movie_id
+LEFT JOIN
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN
+    movie_hierarchy mh ON t.id = mh.base_movie_id
+WHERE
+    t.production_year >= 2000
+    AND (cn.country_code IS NOT NULL AND cn.country_code <> '')
+GROUP BY
+    t.id, a.name
+HAVING
+    COUNT(DISTINCT mh.related_movie_id) > 0
+ORDER BY
+    sequels_count DESC, average_rating DESC
+LIMIT 10;

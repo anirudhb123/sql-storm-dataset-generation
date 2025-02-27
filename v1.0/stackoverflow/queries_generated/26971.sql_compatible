@@ -1,0 +1,77 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Score,
+        p.ViewCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '> <')) AS t(TagName) 
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Body, p.Score, p.ViewCount, p.OwnerUserId
+),
+
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS EditDate,
+        ph.Comment,
+        ph.Text AS NewBody,
+        p.Title AS OriginalTitle
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5) 
+),
+
+RecentActivity AS (
+    SELECT 
+        p.Id,
+        COALESCE(MAX(ph.EditDate), p.CreationDate) AS LastActivityDate,
+        COUNT(ph.Id) AS EditCount,
+        COUNT(c.Id) AS TotalComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistoryInfo ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Body,
+    rp.Score,
+    rp.ViewCount,
+    rp.Tags,
+    rp.CommentCount,
+    ra.LastActivityDate,
+    ra.EditCount,
+    ra.TotalComments
+FROM 
+    RankedPosts rp
+JOIN 
+    RecentActivity ra ON rp.PostId = ra.Id
+WHERE 
+    rp.RankByScore <= 10 
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC;

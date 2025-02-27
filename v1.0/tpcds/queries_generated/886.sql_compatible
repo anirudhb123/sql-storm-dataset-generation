@@ -1,0 +1,85 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_store_sk,
+        SUM(ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_store_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk BETWEEN 1 AND 365
+    GROUP BY 
+        ws_store_sk
+),
+AverageSales AS (
+    SELECT 
+        AVG(total_sales) AS avg_sales 
+    FROM 
+        RankedSales
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_buy_potential, 'Unknown') AS buy_potential
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+ReturnStatistics AS (
+    SELECT
+        sr_store_sk,
+        COUNT(sr_ticket_number) AS returns_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_store_sk
+),
+SalesAndReturns AS (
+    SELECT
+        r.ws_store_sk,
+        r.total_sales,
+        COALESCE(ret.returns_count, 0) AS returns_count,
+        COALESCE(ret.total_return_amount, 0) AS total_return_amount,
+        r.total_sales - COALESCE(ret.total_return_amount, 0) AS net_sales
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        ReturnStatistics ret ON r.ws_store_sk = ret.sr_store_sk
+    WHERE 
+        r.sales_rank = 1
+)
+SELECT 
+    s.ws_store_sk,
+    COUNT(DISTINCT c.c_customer_id) AS customer_count,
+    SUM(s.net_sales) AS net_sales,
+    a.avg_sales,
+    CASE 
+        WHEN SUM(s.net_sales) > a.avg_sales THEN 'Above Average' 
+        ELSE 'Below Average' 
+    END AS sales_performance,
+    STRING_AGG(DISTINCT ci.buy_potential, ', ') AS unique_buy_potentials
+FROM 
+    SalesAndReturns s
+JOIN 
+    CustomerInfo ci ON ci.c_customer_id IN (
+        SELECT 
+            ws_bill_customer_sk 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_sold_date_sk BETWEEN 1 AND 365
+    )
+CROSS JOIN 
+    AverageSales a
+GROUP BY 
+    s.ws_store_sk, a.avg_sales
+HAVING 
+    SUM(s.net_sales) IS NOT NULL
+ORDER BY 
+    net_sales DESC;

@@ -1,0 +1,60 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT p.Id, p.Title, p.ParentId, 1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+    UNION ALL
+    SELECT p2.Id, p2.Title, p2.ParentId, r.Level + 1
+    FROM Posts p2
+    INNER JOIN RecursivePostHierarchy r ON p2.ParentId = r.Id
+),
+RecentPostHistory AS (
+    SELECT ph.PostId, 
+           ph.UserId, 
+           ph.CreationDate, 
+           p.Title, 
+           ph.PostHistoryTypeId,
+           ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days'
+),
+UserVotes AS (
+    SELECT v.UserId, 
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+           COUNT(*) AS TotalVotes
+    FROM Votes v
+    GROUP BY v.UserId
+),
+TagStatistics AS (
+    SELECT 
+       t.TagName,
+       COUNT(DISTINCT p.Id) AS PostCount,
+       SUM(p.ViewCount) AS TotalViews,
+       AVG(p.Score) AS AverageScore
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY t.TagName
+)
+SELECT u.DisplayName AS UserName,
+       COALESCE(rp.Title, 'No title') AS PostTitle,
+       COUNT(DISTINCT ph.Id) AS TotalEditHistory,
+       COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS TotalClosedPosts,
+       ug.Upvotes,
+       ug.Downvotes,
+       (CASE WHEN ug.TotalVotes > 0 
+             THEN ROUND((ug.Upvotes::DECIMAL / ug.TotalVotes) * 100, 2) 
+             ELSE 0 END) AS VotePercentage,
+       ts.TagName,
+       ts.TotalViews,
+       ts.AverageScore
+FROM Users u
+LEFT JOIN RecentPostHistory ph ON u.Id = ph.UserId AND ph.rn = 1
+LEFT JOIN RecursivePostHierarchy rp ON rp.Id = ph.PostId
+LEFT JOIN UserVotes ug ON ug.UserId = u.Id
+LEFT JOIN TagStatistics ts ON ts.TagName IN (SELECT UNNEST(string_to_array(p.Tags, '>')) FROM Posts p WHERE p.OwnerUserId = u.Id)
+WHERE u.Reputation > 100
+GROUP BY u.Id, u.DisplayName, rp.Title, ug.Upvotes, ug.Downvotes, ts.TagName, ts.TotalViews, ts.AverageScore
+ORDER BY u.Reputation DESC, TotalEditHistory DESC, TotalClosedPosts DESC
+LIMIT 100;

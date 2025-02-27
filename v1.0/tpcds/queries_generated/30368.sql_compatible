@@ -1,0 +1,68 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT 
+        i.i_item_sk, 
+        i.i_item_id, 
+        i.i_item_desc, 
+        i.i_current_price, 
+        0 AS level 
+    FROM item i
+    WHERE i.i_rec_start_date <= '2002-10-01' AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > '2002-10-01')
+
+    UNION ALL 
+
+    SELECT 
+        ih.i_item_sk, 
+        ih.i_item_id, 
+        ih.i_item_desc, 
+        ih.i_current_price, 
+        ih.level + 1 
+    FROM item ih
+    JOIN ItemHierarchy ihier ON ih.i_item_sk = ihier.i_item_sk + 1   
+),
+CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk, 
+        sr_item_sk, 
+        SUM(sr_return_quantity) AS total_returned
+    FROM store_returns
+    GROUP BY sr_returned_date_sk, sr_item_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk, 
+        ws.ws_item_sk, 
+        SUM(ws.ws_quantity) AS total_sold, 
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    GROUP BY ws.ws_sold_date_sk, ws.ws_item_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        sd.ws_sold_date_sk, 
+        sd.ws_item_sk, 
+        sd.total_sold, 
+        COALESCE(cr.total_returned, 0) AS total_returned,
+        (sd.total_sold - COALESCE(cr.total_returned, 0)) AS net_sales,
+        sd.total_profit
+    FROM SalesData sd
+    LEFT JOIN CustomerReturns cr ON sd.ws_item_sk = cr.sr_item_sk
+),
+RankedSales AS (
+    SELECT 
+        swr.ws_item_sk, 
+        swr.net_sales, 
+        swr.total_profit,
+        RANK() OVER (ORDER BY swr.net_sales DESC) AS sales_rank
+    FROM SalesWithReturns swr
+)
+SELECT 
+    ih.i_item_id, 
+    ih.i_item_desc, 
+    rh.net_sales, 
+    rh.total_profit,
+    rh.sales_rank
+FROM ItemHierarchy ih
+JOIN RankedSales rh ON ih.i_item_sk = rh.ws_item_sk
+WHERE rh.sales_rank <= 10
+ORDER BY rh.net_sales DESC

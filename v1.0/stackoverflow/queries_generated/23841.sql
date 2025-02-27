@@ -1,0 +1,87 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.ViewCount IS NOT NULL THEN P.ViewCount ELSE 0 END) AS TotalViews,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        TotalViews,
+        ReputationRank
+    FROM UserReputation
+    WHERE ReputationRank <= 10
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COALESCE(P.AnswerCount, 0) AS AnswerCount,
+        COALESCE(P.CommentCount, 0) AS CommentCount,
+        COALESCE(P.FavoriteCount, 0) AS FavoriteCount,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM Posts P
+    LEFT JOIN Tags T ON P.Id = T.ExcerptPostId
+    GROUP BY P.Id, P.Title, P.CreationDate, P.AcceptedAnswerId, P.AnswerCount, P.CommentCount, P.FavoriteCount
+),
+UserPosts AS (
+    SELECT 
+        U.DisplayName AS UserName,
+        P.Title AS PostTitle,
+        P.CreationDate,
+        P.TotalViews,
+        PH.Comment AS LastEditComment,
+        ROW_NUMBER() OVER (PARTITION BY U.DisplayName ORDER BY P.CreationDate DESC) AS PostRow
+    FROM Users U
+    INNER JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5)  -- Edit Title or Body
+),
+PostStatistics AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CreationDate,
+        U.DisplayName,
+        U.Reputation,
+        PS.AcceptedAnswerId,
+        PS.AnswerCount,
+        PS.CommentCount,
+        PS.FavoriteCount,
+        RANK() OVER (PARTITION BY PS.AcceptedAnswerId ORDER BY PS.CreationDate DESC) AS AnswerRank
+    FROM PostSummary PS
+    LEFT JOIN TopUsers U ON PS.AcceptedAnswerId = U.UserId
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.AcceptedAnswerId,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.FavoriteCount,
+    COALESCE(UP.UserName, 'Unknown') AS UserName,
+    COALESCE(UP.TotalViews, 0) AS TotalViews,
+    CASE 
+        WHEN PS.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+        ELSE 'Pending'
+    END AS AnswerStatus,
+    PH.CreationDate AS LastEditDate,
+    PH.Comment AS LastEditComment
+FROM PostStatistics PS
+LEFT JOIN UserPosts UP ON PS.AcceptedAnswerId = UP.PostRow AND PS.Title = UP.PostTitle
+LEFT JOIN PostHistory PH ON PS.PostId = PH.PostId AND PH.PostHistoryTypeId = 4
+WHERE PS.AnswerRank = 1 -- Only get latest accepted answers
+ORDER BY PS.CreationDate DESC;
+

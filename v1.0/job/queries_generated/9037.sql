@@ -1,0 +1,54 @@
+WITH RecursiveTitle AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title AS movie_title, 
+        t.production_year, 
+        c.id AS company_id, 
+        c.name AS company_name,
+        COUNT(DISTINCT ca.person_id) AS actor_count
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ca ON cc.subject_id = ca.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, c.id
+),
+TitleInfo AS (
+    SELECT 
+        rt.title_id, 
+        rt.movie_title, 
+        rt.production_year, 
+        rt.company_id, 
+        rt.company_name,
+        rt.actor_count,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM 
+        RecursiveTitle rt
+    LEFT JOIN 
+        movie_keyword mk ON rt.title_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        rt.title_id, rt.movie_title, rt.production_year, rt.company_id, rt.company_name, rt.actor_count
+)
+SELECT 
+    ti.movie_title, 
+    ti.production_year, 
+    ti.company_name, 
+    ti.actor_count, 
+    STRING_AGG(DISTINCT ti.keywords::text, ', ') AS keywords
+FROM 
+    TitleInfo ti
+WHERE 
+    ti.actor_count > 5
+ORDER BY 
+    ti.production_year DESC, ti.actor_count DESC
+LIMIT 10;

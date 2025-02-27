@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Body,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY COUNT(v.Id) DESC) AS RankByVotes
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) -- Upvotes and Downvotes
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS AllTags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                unnest(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><')) AS TagName
+        ) t ON TRUE
+    WHERE 
+        rp.RankByVotes <= 5 -- Top 5 ranked per tag
+    GROUP BY 
+        rp.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.OwnerDisplayName,
+    fp.CommentCount,
+    fp.AllTags,
+    fp.CreationDate,
+    fp.Body
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.CreationDate DESC;

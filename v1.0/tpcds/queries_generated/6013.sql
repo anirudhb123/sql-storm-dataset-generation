@@ -1,0 +1,62 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_gender = 'F'
+    GROUP BY 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender
+    HAVING 
+        SUM(ws.ws_net_paid_inc_tax) > 1000
+), RecentCatalogReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.cr_return_amount) AS total_returned
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr_returned_date_sk > (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY 
+        cr.returning_customer_sk
+), FemaleCustomersWithReturns AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_spent,
+        cr.total_returned
+    FROM 
+        CustomerSales cs
+    LEFT JOIN 
+        RecentCatalogReturns cr ON cs.c_customer_sk = cr.returning_customer_sk
+)
+SELECT 
+    f.c_first_name,
+    f.c_last_name,
+    f.total_spent,
+    COALESCE(f.total_returned, 0) AS total_returned,
+    CASE 
+        WHEN f.total_returned IS NOT NULL THEN 
+            ROUND((f.total_returned / f.total_spent) * 100, 2)
+        ELSE 
+            0
+    END AS return_percentage
+FROM 
+    FemaleCustomersWithReturns f
+ORDER BY 
+    f.total_spent DESC
+LIMIT 10;

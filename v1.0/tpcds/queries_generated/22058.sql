@@ -1,0 +1,63 @@
+
+WITH RECURSIVE inventory_hierarchy AS (
+    SELECT inv.item_sk,
+           inv.warehouse_sk,
+           inv.quantity_on_hand,
+           1 AS level
+    FROM inventory inv
+    WHERE inv.quantity_on_hand IS NOT NULL
+    UNION ALL
+    SELECT ih.item_sk,
+           ih.warehouse_sk,
+           ih.quantity_on_hand * 0.9 AS quantity_on_hand, -- recursively reduce quantity
+           ih.level + 1
+    FROM inventory_hierarchy ih
+    WHERE ih.level < 5
+),
+popular_items AS (
+    SELECT i.i_item_id,
+           i.i_item_desc,
+           SUM(ws.ws_quantity) AS total_sales
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_id, i.i_item_desc
+    HAVING SUM(ws.ws_quantity) > 100
+),
+customer_stats AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           cd.cd_gender,
+           SUM(ss.ss_net_paid_inc_tax) AS total_spent,
+           COUNT(DISTINCT ws.ws_order_number) AS num_orders
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+)
+SELECT cs.c_first_name,
+       cs.c_last_name,
+       cs.total_spent,
+       cs.num_orders,
+       i.item_sk,
+       i.quantity_on_hand,
+       CASE 
+           WHEN cs.total_spent > 1000 THEN 'VIP'
+           WHEN cs.total_spent BETWEEN 500 AND 1000 THEN 'Regular'
+           ELSE 'New'
+       END AS customer_status,
+       CASE 
+           WHEN COUNT(pi.i_item_id) > 10 THEN 'Frequent Purchaser'
+           ELSE 'Occasional Purchaser'
+       END AS purchase_frequency
+FROM customer_stats cs
+FULL OUTER JOIN inventory_hierarchy i ON cs.c_customer_sk = i.item_sk 
+LEFT JOIN popular_items pi ON pi.i_item_id = i.item_sk
+WHERE (cs.num_orders > 5 OR cs.total_spent IS NULL) 
+  AND (i.quantity_on_hand > 0 OR i.quantity_on_hand IS NULL)
+GROUP BY cs.c_first_name, cs.c_last_name, cs.total_spent, cs.num_orders, 
+         i.item_sk, i.quantity_on_hand
+HAVING COUNT(DISTINCT pi.i_item_id) > 5
+ORDER BY cs.total_spent DESC, i.quantity_on_hand
+LIMIT 50 OFFSET (SELECT COUNT(*) FROM customer) / 2;

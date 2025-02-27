@@ -1,0 +1,54 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000  -- Start with movies from 2000 onwards
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id, 
+        at.title, 
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id, 
+    mh.movie_title, 
+    mh.production_year,
+    COUNT(distinct ci.person_id) OVER (PARTITION BY mh.movie_id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+    ARRAY_AGG(DISTINCT mk.keyword) AS associated_keywords
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+WHERE 
+    ci.note IS NULL  -- Exclude any roles with notes
+GROUP BY 
+    mh.movie_id, 
+    mh.movie_title,
+    mh.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 3  -- Only include movies with more than 3 cast members
+ORDER BY 
+    mh.production_year DESC, 
+    total_cast DESC;  -- Order by latest production year and total cast size
+

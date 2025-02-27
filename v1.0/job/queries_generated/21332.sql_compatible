@@ -1,0 +1,51 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        CONCAT('Sequel to: ', mh.title) AS title,
+        mh.production_year + 1 AS production_year,
+        mh.depth + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        aka_title m ON m.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS num_movies,
+    AVG(COALESCE(c.nr_order, 0)) AS avg_order,
+    STRING_AGG(DISTINCT k.keyword, ', ' ORDER BY k.keyword) AS keywords,
+    COUNT(DISTINCT mh.movie_id) FILTER (WHERE mh.depth <= 2) AS sequels_count
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+LEFT JOIN 
+    movie_keyword mk ON c.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_hierarchy mh ON c.movie_id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL AND ak.name <> 'Unknown'
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 10
+ORDER BY 
+    num_movies DESC,
+    avg_order DESC
+LIMIT 5;

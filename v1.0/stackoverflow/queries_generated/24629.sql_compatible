@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.LastActivityDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        DENSE_RANK() OVER (ORDER BY COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) DESC) AS PopularityRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    AND (p.Score > 0 OR p.Body IS NOT NULL)
+    GROUP BY p.Id, p.Title, p.OwnerUserId, p.CreationDate, p.LastActivityDate
+),
+UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        MAX(p.LastActivityDate) AS LastActive,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END), 0) AS AcceptedAnswers
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+ClosedPosts AS (
+    SELECT
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS CloseDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10) 
+    GROUP BY ph.PostId, ph.UserId, ph.Comment
+),
+FinalData AS (
+    SELECT
+        ps.PostId,
+        ps.Title,
+        ps.CommentCount,
+        us.DisplayName AS OwnerDisplayName,
+        us.Reputation,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges,
+        ps.PopularityRank,
+        cp.CloseDate
+    FROM RankedPosts ps
+    JOIN UserStats us ON ps.OwnerUserId = us.UserId
+    LEFT OUTER JOIN ClosedPosts cp ON ps.PostId = cp.PostId
+)
+SELECT
+    fd.OwnerDisplayName,
+    fd.Reputation,
+    fd.GoldBadges,
+    fd.SilverBadges,
+    fd.BronzeBadges,
+    COUNT(DISTINCT fd.PostId) AS TotalPosts,
+    SUM(CASE WHEN fd.CloseDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPostsCount,
+    COUNT(DISTINCT fd.CommentCount) FILTER (WHERE fd.CommentCount > 0) AS ActivePostsWithComments,
+    STRING_AGG(fd.Title, ', ') AS PostTitles
+FROM FinalData fd
+GROUP BY fd.OwnerDisplayName, fd.Reputation, fd.GoldBadges, fd.SilverBadges, fd.BronzeBadges
+HAVING SUM(fd.CommentCount) > 0
+ORDER BY COUNT(DISTINCT fd.PostId) DESC, fd.Reputation DESC
+LIMIT 10;

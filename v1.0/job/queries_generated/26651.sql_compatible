@@ -1,0 +1,56 @@
+
+WITH movie_years AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM aka_title AS mt
+    JOIN movie_companies AS mc ON mt.id = mc.movie_id
+    GROUP BY mt.id, mt.title, mt.production_year
+),
+actor_roles AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count,
+        ARRAY_AGG(DISTINCT mt.title ORDER BY mt.production_year) AS movies
+    FROM aka_name AS ak
+    JOIN cast_info AS ci ON ak.person_id = ci.person_id
+    JOIN aka_title AS mt ON ci.movie_id = mt.id
+    GROUP BY ak.name
+),
+keyword_summary AS (
+    SELECT 
+        mk.keyword AS keyword,
+        COUNT(DISTINCT mk.movie_id) AS movie_count
+    FROM movie_keyword AS mk
+    GROUP BY mk.keyword
+),
+full_movie_info AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        ak.name AS actor_name,
+        ko.keyword,
+        (SELECT COUNT(*) FROM movie_info WHERE movie_info.movie_id = mt.id) AS info_count
+    FROM aka_title AS mt
+    JOIN cast_info AS ci ON mt.id = ci.movie_id
+    JOIN aka_name AS ak ON ci.person_id = ak.person_id
+    LEFT JOIN movie_keyword AS mk ON mt.id = mk.movie_id
+    LEFT JOIN keyword AS ko ON mk.keyword_id = ko.id
+)
+
+SELECT 
+    my.production_year,
+    my.movie_title,
+    my.company_count,
+    ar.actor_name,
+    ar.movies_count,
+    ar.movies,
+    ks.keyword,
+    fmi.info_count
+FROM movie_years AS my
+JOIN actor_roles AS ar ON my.movie_title = ANY(ar.movies)
+LEFT JOIN keyword_summary AS ks ON ks.movie_count > 5 
+LEFT JOIN full_movie_info AS fmi ON my.movie_title = fmi.movie_title
+WHERE my.production_year BETWEEN 2000 AND 2020
+ORDER BY my.production_year DESC, my.company_count DESC, ar.movies_count DESC;

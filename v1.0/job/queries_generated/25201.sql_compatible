@@ -1,0 +1,34 @@
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.nr_order AS cast_order,
+    k.keyword AS movie_keyword,
+    p.info AS person_info,
+    COALESCE(i.info, 'No additional info available') AS movie_info,
+    COUNT(DISTINCT m.id) AS total_movie_count,
+    STRING_AGG(DISTINCT c2.name, ', ') AS co_actors
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info p ON a.person_id = p.person_id
+LEFT JOIN 
+    movie_info i ON t.id = i.movie_id
+LEFT JOIN 
+    cast_info c2 ON c.movie_id = c2.movie_id AND c2.person_id != c.person_id
+WHERE 
+    a.name IS NOT NULL
+    AND t.production_year >= 2000
+    AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'Nationality' LIMIT 1)
+GROUP BY 
+    a.name, t.title, c.nr_order, k.keyword, p.info, i.info
+ORDER BY 
+    total_movie_count DESC, a.name;

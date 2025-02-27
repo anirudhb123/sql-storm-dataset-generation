@@ -1,0 +1,45 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate) AS order_level
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice,
+           oh.order_level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey AND o.o_orderdate > oh.o_orderdate
+),
+SupplierPartCount AS (
+    SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+SalesMetrics AS (
+    SELECT c.c_custkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY c.c_custkey
+)
+SELECT p.p_name, 
+       COALESCE(sm.total_sales, 0) AS total_sales, 
+       COALESCE(sp.supplier_count, 0) AS supplier_count, 
+       COUNT(DISTINCT oh.o_orderkey) AS order_count
+FROM part p
+LEFT JOIN SupplierPartCount sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN SalesMetrics sm ON p.p_partkey = sm.total_orders
+LEFT JOIN OrderHierarchy oh ON oh.o_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey 
+    WHERE l.l_partkey = p.p_partkey
+)
+GROUP BY p.p_name, sm.total_sales, sp.supplier_count
+HAVING COALESCE(sm.total_sales, 0) > 1000
+ORDER BY total_sales DESC, supplier_count DESC;

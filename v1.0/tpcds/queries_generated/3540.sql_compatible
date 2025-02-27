@@ -1,0 +1,62 @@
+
+WITH CustomerSales AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_web_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MAX(ws.ws_sold_date_sk) AS last_purchase_date
+    FROM
+        customer c
+    INNER JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_web_sales,
+        cs.order_count
+    FROM
+        CustomerSales cs
+    JOIN
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE
+        cs.total_web_sales > (SELECT AVG(total_web_sales) FROM CustomerSales)
+        AND cs.order_count > 3
+),
+RecentPurchases AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        DATEDIFF(CAST('2002-10-01' AS DATE), FROM_UNIXTIME(cs.last_purchase_date)) AS days_since_last_purchase
+    FROM
+        CustomerSales cs
+    JOIN
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+),
+LoyaltyRanking AS (
+    SELECT
+        r.*,
+        DENSE_RANK() OVER (ORDER BY r.total_web_sales DESC) AS sales_rank
+    FROM
+        HighValueCustomers r
+)
+SELECT
+    l.c_first_name,
+    l.c_last_name,
+    l.total_web_sales,
+    l.order_count,
+    COALESCE(r.days_since_last_purchase, 'No purchases') AS last_purchase_info,
+    l.sales_rank
+FROM
+    LoyaltyRanking l
+LEFT JOIN
+    RecentPurchases r ON l.c_customer_sk = r.c_customer_sk
+ORDER BY
+    l.sales_rank ASC;

@@ -1,0 +1,47 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        COALESCE(mt.season_nr, 0) AS season,  
+        mt.episode_nr,
+        CAST(NULL AS TEXT) AS parent_movie_title,
+        mv.id AS movie_id,
+        1 AS level
+    FROM aka_title mt
+    LEFT JOIN title mv ON mv.id = mt.movie_id
+    WHERE mt.production_year IS NOT NULL
+    
+    UNION ALL
+
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        COALESCE(mt.season_nr, 0),
+        mt.episode_nr,
+        mh.movie_title AS parent_movie_title,
+        mv.id AS movie_id,
+        level + 1
+    FROM aka_title mt
+    JOIN movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN title mv ON mv.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    mh.season,
+    mh.episode_nr,
+    mh.parent_movie_title,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS rank_in_year,
+    (SELECT COUNT(*)
+     FROM movie_info mi
+     WHERE mi.movie_id = mh.movie_id AND mi.info_type_id IN (
+         SELECT id 
+         FROM info_type WHERE info LIKE '%rating%')) AS movie_rating_count,
+    ARRAY_AGG(DISTINCT ak.name) AS associated_names
+FROM movie_hierarchy mh
+LEFT JOIN cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN aka_name ak ON ak.person_id = ci.person_id
+GROUP BY mh.movie_title, mh.production_year, mh.season, mh.episode_nr, mh.parent_movie_title
+HAVING COUNT(DISTINCT ak.id) > 3  
+ORDER BY mh.production_year DESC, rank_in_year ASC;

@@ -1,0 +1,4 @@
+SELECT min(an.name) AS cool_actor_pseudonym, min(t.title) AS series_named_after_char
+FROM aka_name AS an, cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE an.person_id = n.id AND n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND an.person_id = ci.person_id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND cn.md5sum IN ('c3b8c145f80d24ae4aa85e0b52ddbb40') AND cn.name_pcode_sf IS NOT NULL AND t.kind_id IN (0, 1, 3, 4, 6, 7) AND an.md5sum < '7b2a5576b714f39b52d118efa38a66d1' AND an.name > 'Yau, Pa-Yan';

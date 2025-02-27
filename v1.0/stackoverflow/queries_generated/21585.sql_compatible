@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY P.Id) AS UpVoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY P.Id) AS DownVoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year') 
+        AND P.Score IS NOT NULL
+),
+CommentSummary AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount,
+        STRING_AGG(C.Text, ' | ') AS CombinedComments
+    FROM 
+        Comments C
+    GROUP BY 
+        C.PostId
+),
+MergedData AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        (RP.Score + (RP.UpVoteCount - RP.DownVoteCount)) AS AdjustedScore,
+        RP.ViewCount,
+        RP.OwnerDisplayName,
+        COALESCE(CS.CommentCount, 0) AS TotalComments,
+        CS.CombinedComments
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        CommentSummary CS ON RP.PostId = CS.PostId
+),
+FilteredPosts AS (
+    SELECT 
+        MD.*,
+        CASE 
+            WHEN TotalComments > 5 THEN 'Hot Post'
+            WHEN AdjustedScore > 10 THEN 'Popular Post'
+            ELSE 'Regular Post'
+        END AS PostCategory
+    FROM 
+        MergedData MD
+    WHERE 
+        AdjustedScore > 0
+)
+
+SELECT 
+    FP.PostId,
+    FP.Title,
+    FP.CreationDate,
+    FP.AdjustedScore,
+    FP.ViewCount,
+    FP.OwnerDisplayName,
+    FP.TotalComments,
+    FP.CombinedComments,
+    FP.PostCategory,
+    (SELECT COUNT(*) FROM Posts PA WHERE PA.AcceptedAnswerId = FP.PostId) AS AcceptedAnswers,
+    (SELECT STRING_AGG(DISTINCT T.TagName, ', ') FROM UNNEST(string_to_array(FP.Tags, '><')) AS T(TagName) WHERE T.TagName IS NOT NULL) AS RelatedTags
+FROM 
+    FilteredPosts FP
+WHERE 
+    FP.PostCategory = 'Hot Post'
+ORDER BY 
+    FP.AdjustedScore DESC, 
+    FP.ViewCount DESC
+LIMIT 10;

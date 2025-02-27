@@ -1,0 +1,67 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges,
+        SUM(COALESCE(U.UpVotes, 0) - COALESCE(U.DownVotes, 0)) AS VoteBalance
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostInfo AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(P.ANSWERCOUNT, 0) AS AnswerCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate > NOW() - INTERVAL '1 year' -- Considering only last year's posts
+    GROUP BY P.Id, P.Title, P.CreationDate, P.ViewCount, P.AnswerCount, U.DisplayName
+),
+AggregatedPostInfo AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        AnswerCount,
+        OwnerDisplayName,
+        CommentCount,
+        RecentPostRank,
+        NTILE(4) OVER (ORDER BY ViewCount DESC) AS ViewCountQuartile
+    FROM PostInfo
+)
+SELECT 
+    U.DisplayName AS UserName,
+    UGold.GoldBadges,
+    USilver.SilverBadges,
+    UBronze.BronzeBadges,
+    P.Title,
+    P.CreationDate,
+    P.ViewCount,
+    P.AnswerCount,
+    P.CommentCount,
+    P.RecentPostRank,
+    CASE WHEN P.RecentPostRank = 1 THEN 'Most Recent' ELSE 'Older Posts' END AS PostRecency,
+    CASE 
+        WHEN P.ViewCount IS NULL THEN 'No Views Yet'
+        WHEN P.ViewCount = 0 THEN 'Non-engaged Post'
+        WHEN P.ViewCount < 100 THEN 'Less than a Hundred Views'
+        WHEN P.ViewCount BETWEEN 100 AND 1000 THEN 'Moderately Viewed'
+        ELSE 'Highly Viewed'
+    END AS ViewCategory
+FROM AggregatedPostInfo P
+JOIN UserBadges UGold ON UGold.UserId = P.OwnerUserId
+JOIN UserBadges USilver ON USilver.UserId = P.OwnerUserId
+JOIN UserBadges UBronze ON UBronze.UserId = P.OwnerUserId
+WHERE P.ViewCountQuartile = 1 -- Focusing on the top 25% Viewed Posts
+ORDER BY P.ViewCount DESC, P.CreationDate DESC
+LIMIT 50;

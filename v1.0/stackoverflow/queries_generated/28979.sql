@@ -1,0 +1,50 @@
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    GROUP BY 
+        Tags.TagName
+), UserReputation AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        SUM(CASE WHEN Post.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN Post.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(Post.Score) AS TotalScore
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts AS Post ON Users.Id = Post.OwnerUserId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+), TopTags AS (
+    SELECT 
+        TagCounts.TagName,
+        TagCounts.PostCount,
+        ROW_NUMBER() OVER (ORDER BY TagCounts.PostCount DESC) AS TagRank
+    FROM 
+        TagCounts
+)
+SELECT 
+    U.DisplayName,
+    U.QuestionsAsked,
+    U.AnswersGiven,
+    U.TotalScore,
+    T.TagName,
+    T.PostCount
+FROM 
+    UserReputation U
+JOIN 
+    TopTags T ON U.UserId IN (
+        SELECT DISTINCT UserId 
+        FROM Posts 
+        WHERE Tags LIKE '%' || T.TagName || '%'
+    )
+WHERE 
+    T.TagRank <= 10
+ORDER BY 
+    U.TotalScore DESC, U.DisplayName ASC;

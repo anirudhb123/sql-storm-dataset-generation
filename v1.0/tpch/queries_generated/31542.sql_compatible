@@ -1,0 +1,61 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    
+    UNION ALL
+    
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN supplier sp ON sh.s_suppkey = sp.s_suppkey
+    WHERE sp.s_acctbal > 10000
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_within_nation
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+part_supplier_info AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_availqty) AS total_available,
+        MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+high_value_orders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus, o.o_orderdate
+)
+SELECT 
+    r.r_name,
+    c.c_name,
+    s.s_name,
+    CONCAT('Total: $', ROUND(COALESCE(SUM(h.revenue), 0), 2)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS number_of_orders,
+    AVG(ph.total_available) AS avg_part_available,
+    SUM(ph.max_supply_cost) AS aggregate_supply_cost
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN customer_order_summary c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN high_value_orders h ON c.c_custkey = h.o_orderkey
+LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+JOIN part_supplier_info ph ON s.s_suppkey = ph.p_partkey
+WHERE c.total_spent > 50000 AND h.order_rank <= 5
+GROUP BY r.r_name, c.c_name, s.s_name
+ORDER BY total_revenue DESC;

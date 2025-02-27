@@ -1,0 +1,51 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM 
+        title t 
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorTitles AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(DISTINCT ct.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT t.title, ', ') AS movie_titles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    JOIN 
+        RankedTitles rt ON t.id = rt.title_id
+    GROUP BY 
+        a.name
+)
+SELECT 
+    a.actor_name,
+    a.total_movies,
+    COALESCE(b.total_awards, 0) AS total_awards,
+    a.movie_titles
+FROM 
+    ActorTitles a
+LEFT JOIN (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT mi.movie_id) AS total_awards
+    FROM 
+        movie_info mi
+    JOIN 
+        complete_cast cc ON mi.movie_id = cc.movie_id
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Award')
+    GROUP BY 
+        ci.person_id
+) b ON a.actor_name = (SELECT name FROM aka_name WHERE person_id = b.person_id LIMIT 1)
+WHERE 
+    a.total_movies > 5
+ORDER BY 
+    a.total_movies DESC, a.actor_name ASC;

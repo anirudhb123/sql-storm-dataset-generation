@@ -1,0 +1,37 @@
+
+WITH sales_summary AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_quantity) AS total_quantity_sold,
+        SUM(ss_net_profit) AS total_net_profit,
+        AVG(ss_sales_price) AS avg_sales_price
+    FROM 
+        store_sales
+    WHERE
+        ss_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') 
+                            AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    GROUP BY 
+        s_store_sk
+),
+top_stores AS (
+    SELECT 
+        s_store_sk,
+        total_quantity_sold,
+        total_net_profit,
+        RANK() OVER (ORDER BY total_net_profit DESC) AS profit_rank
+    FROM 
+        sales_summary
+)
+SELECT 
+    s_store.s_store_name,
+    s_store.s_city,
+    top_stores.total_quantity_sold,
+    top_stores.total_net_profit
+FROM 
+    top_stores
+JOIN 
+    store s_store ON top_stores.s_store_sk = s_store.s_store_sk
+WHERE 
+    top_stores.profit_rank <= 10
+ORDER BY 
+    top_stores.total_net_profit DESC;

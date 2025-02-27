@@ -1,0 +1,28 @@
+SELECT 
+    CONCAT(c.c_name, ' from ', s.s_name, ' (', s.s_address, ')') AS supplier_customer_info,
+    SUBSTRING_INDEX(PARSER(s.p_name), ' ', 1) AS first_word_of_part_name,
+    REPLACE(TRIM(s.s_comment), ' ', '-') AS supplier_comment_style,
+    GROUP_CONCAT(DISTINCT r.r_name ORDER BY r.r_name DESC SEPARATOR ', ') AS regions_supplied,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    customer c ON c.c_nationkey = s.s_nationkey
+JOIN 
+    orders o ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON n.n_nationkey = c.c_nationkey
+JOIN 
+    region r ON r.r_regionkey = n.n_regionkey
+WHERE 
+    s.s_acctbal > 10000 AND p.p_size BETWEEN 10 AND 100
+GROUP BY 
+    supplier_customer_info, first_word_of_part_name, supplier_comment_style
+HAVING 
+    order_count > 5
+ORDER BY 
+    order_count DESC, first_word_of_part_name ASC;

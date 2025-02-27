@@ -1,0 +1,84 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_web_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id
+),
+DemographicStats AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+),
+ItemSales AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_units_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_id
+),
+SalesRank AS (
+    SELECT 
+        c.c_customer_id,
+        ROW_NUMBER() OVER (ORDER BY cs.total_web_sales DESC) AS rank,
+        cs.total_web_sales,
+        cs.total_orders
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        RANK() OVER (ORDER BY is.total_net_profit DESC) AS item_rank,
+        is.total_units_sold
+    FROM 
+        ItemSales is
+    WHERE 
+        is.total_units_sold > (
+            SELECT 
+                AVG(total_units_sold) 
+            FROM 
+                ItemSales
+        )
+)
+SELECT 
+    sr.customer_id,
+    sr.rank,
+    ds.cd_gender,
+    ds.avg_purchase_estimate,
+    ti.i_item_id,
+    ti.item_rank,
+    ti.total_units_sold
+FROM 
+    SalesRank sr
+JOIN 
+    DemographicStats ds ON sr.rank <= 10
+LEFT JOIN 
+    TopItems ti ON sr.total_orders > 5
+WHERE 
+    ds.customer_count > 0
+ORDER BY 
+    sr.rank, ds.cd_gender DESC, ti.item_rank;

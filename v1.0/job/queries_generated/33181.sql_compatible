@@ -1,0 +1,90 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title AS m 
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title AS m 
+    JOIN 
+        movie_link AS ml ON m.id = ml.linked_movie_id 
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+),
+
+ActorRoles AS (
+    SELECT 
+        ci.person_id,
+        r.role AS role_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info AS ci 
+    JOIN 
+        role_type AS r ON ci.role_id = r.id
+    GROUP BY 
+        ci.person_id, r.role
+),
+
+TopActors AS (
+    SELECT 
+        ar.person_id,
+        ak.name AS actor_name,
+        RANK() OVER (ORDER BY SUM(ar.movie_count) DESC) AS actor_rank
+    FROM 
+        ActorRoles AS ar 
+    JOIN 
+        aka_name AS ak ON ar.person_id = ak.person_id
+    GROUP BY 
+        ar.person_id, ak.name
+    HAVING 
+        COUNT(ar.movie_count) >= 5  
+),
+
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS movie_keyword,
+        COUNT(DISTINCT ci.person_id) AS total_cast
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        movie_keyword AS mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        cast_info AS ci ON m.id = ci.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year, mk.keyword
+    HAVING 
+        m.production_year >= 2000  
+)
+
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    ti.actor_name,
+    ti.actor_rank,
+    mi.movie_keyword,
+    mi.total_cast
+FROM 
+    MovieHierarchy AS mh
+JOIN 
+    MovieInfo AS mi ON mh.movie_id = mi.movie_id
+JOIN 
+    TopActors AS ti ON ti.actor_rank <= 10  
+ORDER BY 
+    mh.production_year DESC, 
+    ti.actor_rank;

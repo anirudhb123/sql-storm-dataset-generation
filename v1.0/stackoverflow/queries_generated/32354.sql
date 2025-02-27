@@ -1,0 +1,90 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '') AS TagsList,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '') AS TagsList,
+        r.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursiveCTE r ON p.ParentId = r.PostId
+),
+AggregatedScores AS (
+    SELECT 
+        OwnerUserId,
+        SUM(Score) AS TotalScore,
+        COUNT(Id) AS PostCount
+    FROM 
+        Posts
+    GROUP BY 
+        OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+FilteredResults AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.Score,
+        r.TagsList,
+        a.TotalScore,
+        b.BadgeCount,
+        b.HighestBadgeClass,
+        ROW_NUMBER() OVER (PARTITION BY r.OwnerUserId ORDER BY r.CreationDate DESC) AS Ranking
+    FROM 
+        RecursiveCTE r
+    JOIN 
+        AggregatedScores a ON r.OwnerUserId = a.OwnerUserId
+    LEFT JOIN 
+        UserBadges b ON r.OwnerUserId = b.UserId
+    WHERE 
+        r.Level = 1 AND
+        r.CreationDate >= NOW() - INTERVAL '1 year' AND
+        r.Score > 5
+)
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.CreationDate,
+    fr.Score,
+    fr.TagsList,
+    fr.TotalScore,
+    fr.BadgeCount,
+    fr.HighestBadgeClass
+FROM 
+    FilteredResults fr
+WHERE 
+    fr.BadgeCount > 1
+ORDER BY 
+    fr.TotalScore DESC, 
+    fr.Ranking
+LIMIT 100;

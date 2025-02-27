@@ -1,0 +1,36 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        c.kind AS company_type,
+        r.role AS role,
+        a.name AS actor_name,
+        p.info AS actor_info
+    FROM title t
+    JOIN movie_companies mc ON t.id = mc.movie_id
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN complete_cast cc ON t.id = cc.movie_id
+    JOIN cast_info ci ON cc.subject_id = ci.id
+    JOIN role_type r ON ci.role_id = r.id
+    JOIN aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN person_info p ON a.person_id = p.person_id
+    WHERE t.production_year BETWEEN 2000 AND 2023
+), KeywordDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        k.keyword AS movie_keyword
+    FROM title t
+    JOIN movie_keyword mk ON t.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.company_type,
+    md.role,
+    md.actor_name,
+    STRING_AGG(kd.movie_keyword, ', ') AS keywords
+FROM MovieDetails md
+LEFT JOIN KeywordDetails kd ON md.movie_title = kd.movie_title
+GROUP BY md.movie_title, md.production_year, md.company_type, md.role, md.actor_name
+ORDER BY md.production_year DESC, md.movie_title;

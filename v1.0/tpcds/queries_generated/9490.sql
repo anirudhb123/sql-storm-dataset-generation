@@ -1,0 +1,71 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_value
+    FROM
+        store_returns
+    GROUP BY
+        sr_customer_sk
+),
+CustomerDetails AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        dh.hd_income_band_sk,
+        ih.ib_lower_bound,
+        ih.ib_upper_bound
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics dh ON c.c_current_hdemo_sk = dh.hd_demo_sk
+    LEFT JOIN income_band ih ON dh.hd_income_band_sk = ih.ib_income_band_sk
+),
+ReturnMetrics AS (
+    SELECT
+        cd.c_customer_id,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        dh.ib_lower_bound,
+        dh.ib_upper_bound,
+        cr.total_returns,
+        cr.total_return_value
+    FROM
+        CustomerDetails cd
+    LEFT JOIN CustomerReturns cr ON cd.c_customer_id = cr.sr_customer_sk
+)
+SELECT
+    r.c_first_name,
+    r.c_last_name,
+    r.cd_gender,
+    r.cd_marital_status,
+    r.cd_education_status,
+    r.ib_lower_bound,
+    r.ib_upper_bound,
+    COUNT(r.total_returns) AS return_count,
+    AVG(r.total_return_value) AS avg_return_value,
+    SUM(r.total_return_value) AS total_return_value
+FROM
+    ReturnMetrics r
+WHERE
+    r.total_returns IS NOT NULL
+GROUP BY
+    r.c_first_name,
+    r.c_last_name,
+    r.cd_gender,
+    r.cd_marital_status,
+    r.cd_education_status,
+    r.ib_lower_bound,
+    r.ib_upper_bound
+ORDER BY
+    return_count DESC,
+    total_return_value DESC
+LIMIT 100;

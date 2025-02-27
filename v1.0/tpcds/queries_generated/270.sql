@@ -1,0 +1,73 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_paid DESC) as rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (
+            SELECT 
+                d.d_date_sk 
+            FROM 
+                date_dim d 
+            WHERE 
+                d.d_year = 2022 AND d.d_month_seq = 6
+            LIMIT 1
+        )
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        cd.cd_marital_status,
+        ca.ca_city,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+        LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+        LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_income_band_sk, cd.cd_marital_status, ca.ca_city
+),
+top_customers AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        cd.cd_marital_status,
+        cd.ca_city,
+        cd.order_count,
+        SUM(rs.ws_net_paid) AS total_spent,
+        DENSE_RANK() OVER (ORDER BY SUM(rs.ws_net_paid) DESC) AS spending_rank
+    FROM 
+        customer_details cd
+        JOIN ranked_sales rs ON cd.c_customer_sk = rs.ws_order_number
+    GROUP BY 
+        cd.c_customer_sk, cd.cd_gender, cd.cd_income_band_sk, cd.cd_marital_status, cd.ca_city, cd.order_count
+)
+SELECT 
+    t.c_customer_sk,
+    t.cd_gender,
+    t.cd_income_band_sk,
+    t.cd_marital_status,
+    t.ca_city,
+    t.total_spent,
+    t.spending_rank,
+    COALESCE((SELECT 
+                COUNT(*) 
+              FROM 
+                web_returns wr 
+              WHERE 
+                wr.wr_returning_customer_sk = t.c_customer_sk), 0) AS return_count
+FROM 
+    top_customers t
+WHERE 
+    t.spending_rank <= 10
+ORDER BY 
+    t.total_spent DESC;

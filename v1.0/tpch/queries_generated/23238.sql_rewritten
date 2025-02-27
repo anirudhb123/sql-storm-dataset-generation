@@ -1,0 +1,55 @@
+WITH RECURSIVE nation_rpc AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name, 1 AS depth
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE r.r_name LIKE 'C%'  
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, r.r_name, nr.depth + 1
+    FROM nation_rpc nr
+    JOIN nation n ON nr.n_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE nr.depth < 3 
+),
+supp_with_avail AS (
+    SELECT ps.ps_suppkey, SUM(ps.ps_availqty) AS total_avail
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+    HAVING SUM(ps.ps_availqty) > (SELECT AVG(ps_availqty) FROM partsupp)
+),
+high_value_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, COUNT(li.l_orderkey) AS item_count
+    FROM orders o
+    LEFT JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE o.o_totalprice > (
+        SELECT AVG(o_totalprice) FROM orders
+    )
+    GROUP BY o.o_orderkey
+    HAVING COUNT(li.l_orderkey) > 5
+),
+sized_parts AS (
+    SELECT p.p_partkey, p.p_size, p.p_retailprice * p.p_size AS weighted_price
+    FROM part p
+    WHERE p.p_size BETWEEN 2 AND 10
+),
+duplicated_customers AS (
+    SELECT c.c_custkey, c.c_name, COUNT(*) AS duplications
+    FROM customer c
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COUNT(*) > 1
+)
+SELECT d.cust_info, avg_price.avg_price, nv.n_name, COALESCE(s.total_avail,0) AS total_avail
+FROM (
+    SELECT dc.c_custkey AS cust_info, dc.c_name
+    FROM duplicated_customers dc
+) AS d
+JOIN (
+    SELECT o.o_custkey, AVG(o.o_totalprice) AS avg_price
+    FROM high_value_orders o
+    GROUP BY o.o_custkey
+) AS avg_price ON d.c_custkey = avg_price.o_custkey
+LEFT JOIN supp_with_avail s ON s.ps_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps JOIN sized_parts sp ON ps.ps_partkey = sp.p_partkey)
+JOIN nation_rpc nv ON nv.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = d.cust_info)
+ORDER BY total_avail DESC, avg_price.avg_price
+LIMIT 100;

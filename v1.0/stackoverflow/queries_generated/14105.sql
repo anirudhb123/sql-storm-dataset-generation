@@ -1,0 +1,27 @@
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    P.CreationDate,
+    U.DisplayName AS OwnerDisplayName,
+    COUNT(C.Id) AS CommentCount,
+    COUNT(V.Id) AS VoteCount,
+    SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    SUM(B.Reputation) AS TotalReputation
+FROM 
+    Posts P
+LEFT JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+LEFT JOIN 
+    Badges B ON U.Id = B.UserId
+WHERE 
+    P.PostTypeId = 1 -- Only questions
+GROUP BY 
+    P.Id, U.DisplayName
+ORDER BY 
+    P.CreationDate DESC
+LIMIT 100;

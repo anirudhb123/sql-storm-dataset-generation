@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.AnswerCount,
+        COALESCE(ARRAY_AGG(DISTINCT pt.Name) FILTER (WHERE pt.Name IS NOT NULL), '{}') AS PostTypes,
+        COALESCE(ARRAY_AGG(DISTINCT u.DisplayName) FILTER (WHERE u.DisplayName IS NOT NULL), '{}') AS AuthorNames,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount,
+        (SELECT JSON_AGG(b.Name) FROM Badges b WHERE b.UserId = p.OwnerUserId) AS UserBadges
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostTypes pt ON pt.Id = (SELECT p2.PostTypeId FROM Posts p2 WHERE p2.Id = rp.PostId)
+    LEFT JOIN 
+        Users u ON u.Id = (SELECT p2.OwnerUserId FROM Posts p2 WHERE p2.Id = rp.PostId)
+    GROUP BY 
+        rp.PostId, rp.Title, rp.ViewCount, rp.Score, rp.AnswerCount
+),
+FinalResults AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.ViewCount,
+        pd.Score,
+        pd.AnswerCount,
+        pd.PostTypes,
+        pd.AuthorNames,
+        pd.CommentCount,
+        pd.UserBadges,
+        CASE 
+            WHEN pd.ViewCount > 1000 AND pd.Score > 50 THEN 'High Visibility Post'
+            ELSE 'Normal Post'
+        END AS VisibilityStatus
+    FROM 
+        PostDetails pd
+    WHERE 
+        pd.CommentCount > 5 
+        OR pd.AnswerCount > 0
+)
+SELECT 
+    FR.PostId,
+    FR.Title,
+    FR.ViewCount,
+    FR.Score,
+    FR.AnswerCount,
+    FR.PostTypes,
+    FR.AuthorNames,
+    FR.CommentCount,
+    FR.UserBadges,
+    FR.VisibilityStatus,
+    CASE 
+        WHEN FR.VisibilityStatus = 'High Visibility Post' THEN 'Promote'
+        ELSE 'Monitor'
+    END AS ActionRequired
+FROM 
+    FinalResults FR
+WHERE 
+    FR.CommentCount IS NOT NULL
+ORDER BY 
+    FR.Score DESC, 
+    FR.ViewCount DESC;

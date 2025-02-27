@@ -1,0 +1,77 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rank_cost,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_partkey
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        r.r_name,
+        COALESCE(NULLIF(s.s_comment, ''), 'No comment') AS adjusted_comment
+    FROM 
+        RankedSuppliers s
+    LEFT JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.rank_cost = 1 AND s.total_avail_qty > (
+            SELECT AVG(total_avail_qty) FROM RankedSuppliers
+        )
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+FinalResults AS (
+    SELECT 
+        fs.s_suppkey,
+        fs.s_name,
+        fs.adjusted_comment,
+        COALESCE(co.order_count, 0) AS customer_order_count,
+        COALESCE(co.total_spent, 0) AS customer_total_spent
+    FROM 
+        FilteredSuppliers fs
+    FULL OUTER JOIN 
+        CustomerOrders co ON fs.s_suppkey = (SELECT MIN(ps.ps_suppkey) FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_retailprice BETWEEN 10.00 AND 100.00))
+)
+SELECT 
+    fs.s_suppkey,
+    fs.s_name,
+    fs.adjusted_comment,
+    COALESCE(co.customer_order_count, 0) AS customer_order_count,
+    COALESCE(co.customer_total_spent, 0) AS customer_total_spent,
+    CASE 
+        WHEN fs.s_name IS NULL THEN 'Unknown Supplier'
+        ELSE fs.s_name
+    END AS display_supplier_name
+FROM 
+    FilteredSuppliers fs
+FULL OUTER JOIN 
+    CustomerOrders co ON fs.s_suppkey = (SELECT MAX(ps.ps_suppkey) OVER ()) 
+WHERE 
+    fs.s_name IS NOT NULL OR co.c_custkey IS NOT NULL
+ORDER BY 
+    fs.s_suppkey NULLS LAST, 
+    co.customer_order_count DESC;

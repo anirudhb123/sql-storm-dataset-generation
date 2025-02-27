@@ -1,0 +1,61 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_zip,
+        CONCAT(ca_city, ', ', ca_state, ' ', ca_zip) AS formatted_location
+    FROM 
+        customer_address
+), CustomerProfile AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_birth_month,
+        c.c_birth_year,
+        cd.cd_gender,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Mr. ' || c.c_last_name
+            WHEN cd.cd_gender = 'F' THEN 'Ms. ' || c.c_last_name
+            ELSE c.c_last_name
+        END AS salutation
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), AggregateSales AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+)
+
+SELECT 
+    cp.full_name,
+    cp.salutation,
+    ad.formatted_location,
+    asales.total_sales,
+    asales.order_count,
+    CASE 
+        WHEN asales.total_sales IS NULL THEN 'No Sales'
+        WHEN asales.total_sales < 100 THEN 'Low Value Customer'
+        WHEN asales.total_sales >= 100 AND asales.total_sales < 1000 THEN 'Medium Value Customer'
+        ELSE 'High Value Customer'
+    END AS customer_segment
+FROM 
+    CustomerProfile cp
+LEFT JOIN 
+    AggregateSales asales ON cp.c_customer_id = CAST(asales.ws_bill_customer_sk AS CHAR(16))
+LEFT JOIN 
+    AddressDetails ad ON cp.c_customer_id = ad.ca_address_id
+WHERE 
+    cp.c_birth_month = 12 AND cp.c_birth_year > 1980
+ORDER BY 
+    total_sales DESC NULLS LAST;

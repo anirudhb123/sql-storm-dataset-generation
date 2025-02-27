@@ -1,0 +1,61 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        COALESCE(LastAccessDate, cast('2024-10-01 12:34:56' as timestamp)) AS LastAccessDate,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+TagStatistics AS (
+    SELECT 
+        Id AS TagId,
+        TagName,
+        COUNT(*) FILTER (WHERE PostTypeId = 1) AS QuestionCount,
+        COUNT(*) FILTER (WHERE PostTypeId = 2) AS AnswerCount,
+        SUM(ViewCount) AS TotalViewCount
+    FROM Posts
+    CROSS JOIN LATERAL unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName
+    GROUP BY TagId, TagName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(cl.Name, 'Not Closed') AS CloseReason,
+        COALESCE(ph.Count, 0) AS HistoryCount,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11)
+    LEFT JOIN CloseReasonTypes cl ON ph.Comment::int = cl.Id
+)
+SELECT 
+    u.UserId,
+    u.Reputation,
+    u.LastAccessDate,
+    ts.TagName,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.TotalViewCount,
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.CloseReason,
+    pd.HistoryCount
+FROM UserReputation u
+JOIN TagStatistics ts ON ts.QuestionCount > 0
+JOIN PostDetails pd ON pd.UserPostRank <= 5
+WHERE 
+    u.Reputation > 1000 AND 
+    (
+        pd.ViewCount IS NULL OR pd.ViewCount > 50
+    ) AND 
+    pd.CloseReason IS NOT NULL
+ORDER BY 
+    u.Reputation DESC,
+    ts.TotalViewCount DESC,
+    pd.CreationDate DESC
+LIMIT 50;

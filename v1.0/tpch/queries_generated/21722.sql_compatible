@@ -1,0 +1,97 @@
+
+WITH RecursiveSupplier AS (
+    SELECT 
+        s_suppkey, 
+        s_name, 
+        s_nationkey, 
+        s_acctbal, 
+        s_comment,
+        1 AS level
+    FROM 
+        supplier
+    WHERE 
+        s_acctbal > (SELECT AVG(s_acctbal) FROM supplier HAVING COUNT(*) > 1)
+     
+    UNION ALL
+    
+    SELECT 
+        ps.ps_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        s.s_acctbal, 
+        s.s_comment,
+        rs.level + 1
+    FROM 
+        RecursiveSupplier rs
+    JOIN 
+        partsupp ps ON rs.s_suppkey = ps.ps_suppkey
+    JOIN 
+        supplier s ON ps.ps_partkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal < rs.s_acctbal
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_price,
+        COUNT(li.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND li.l_shipdate >= DATE '1996-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+OrderStats AS (
+    SELECT 
+        fo.o_orderkey,
+        fo.total_price,
+        fo.item_count,
+        RANK() OVER (PARTITION BY fo.total_price ORDER BY fo.item_count DESC) AS price_rank,
+        ROW_NUMBER() OVER (PARTITION BY fo.total_price ORDER BY fo.total_price DESC) AS price_number
+    FROM 
+        FilteredOrders fo
+)
+SELECT 
+    ps.ps_partkey, 
+    p.p_name,
+    r.r_name,
+    ns.n_name,
+    rs.s_name,
+    os.total_price, 
+    os.item_count,
+    COALESCE(ROUND(SUM(s.s_acctbal) / NULLIF(COUNT(DISTINCT rs.s_suppkey), 0), 2), 0) AS avg_acctbal,
+    CASE 
+        WHEN os.total_price > 10000 THEN 'High Value'
+        WHEN os.total_price BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS price_category
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RecursiveSupplier rs ON ps.ps_suppkey = rs.s_suppkey
+JOIN 
+    nation ns ON rs.s_nationkey = ns.n_nationkey
+JOIN 
+    region r ON ns.n_regionkey = r.r_regionkey
+JOIN 
+    OrderStats os ON os.o_orderkey = ps.ps_partkey 
+GROUP BY 
+    ps.ps_partkey, 
+    p.p_name, 
+    r.r_name, 
+    ns.n_name, 
+    rs.s_name, 
+    os.total_price, 
+    os.item_count
+HAVING 
+    os.price_rank = 1 
+    AND COUNT(DISTINCT rs.s_suppkey) > 1
+ORDER BY 
+    avg_acctbal DESC, 
+    os.total_price DESC;

@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.ViewCount > 1000 AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TagPostCount AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    GROUP BY 
+        Tag
+),
+PopularTags AS (
+    SELECT 
+        Tag, 
+        PostCount
+    FROM 
+        TagPostCount
+    WHERE 
+        PostCount > 10
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.Tags,
+    rp.ViewCount,
+    rp.CreationDate,
+    pt.Name AS PostType,
+    ut.UserId,
+    ubc.BadgeCount,
+    ubc.GoldBadges,
+    ubc.SilverBadges,
+    ubc.BronzeBadges
+FROM 
+    RankedPosts rp
+JOIN 
+    Posts p ON rp.PostId = p.Id
+JOIN 
+    Users ut ON p.OwnerUserId = ut.Id
+JOIN 
+    UserBadgeCounts ubc ON ut.Id = ubc.UserId
+JOIN 
+    PopularTags pt ON pt.Tag = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))
+WHERE 
+    rp.Rank <= 3
+ORDER BY 
+    rp.ViewCount DESC;

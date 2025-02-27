@@ -1,0 +1,52 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS NetLikes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostOrder
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.Reputation,
+        COUNT(p.PostId) AS PostCount,
+        MAX(rp.Score) AS MaxPostScore
+    FROM UserReputation ur
+    JOIN Posts p ON ur.UserId = p.OwnerUserId
+    JOIN RecentPosts rp ON p.Id = rp.PostId
+    WHERE ur.Reputation > 1000
+    GROUP BY ur.UserId, ur.DisplayName, ur.Reputation
+    ORDER BY ur.Reputation DESC
+    LIMIT 10
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.PostCount,
+    COALESCE(rp.Title, 'No Recent Posts') AS RecentPostTitle,
+    COALESCE(rp.NetLikes, 0) AS RecentPostNetLikes,
+    COUNT(DISTINCT b.Id) AS BadgeCount
+FROM TopUsers tu
+LEFT JOIN RecentPosts rp ON tu.UserId = rp.OwnerUserId AND rp.PostOrder = 1
+LEFT JOIN Badges b ON tu.UserId = b.UserId
+WHERE tu.Reputation IS NOT NULL
+GROUP BY tu.UserId, tu.DisplayName, tu.Reputation, rp.Title, rp.NetLikes
+HAVING COUNT(DISTINCT b.Id) > 1
+ORDER BY tu.Reputation DESC;

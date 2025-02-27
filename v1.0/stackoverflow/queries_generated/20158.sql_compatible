@@ -1,0 +1,94 @@
+
+WITH UserBadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+), 
+
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        AVG(P.Score) AS AvgScore,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+), 
+
+PostHistoryChange AS (
+    SELECT 
+        PH.UserId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LatestEdit
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        PH.UserId
+), 
+
+ActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(P.PostCount, 0) AS PostCount,
+        COALESCE(UBC.BadgeCount, 0) AS BadgeCount,
+        COALESCE(PH.EditCount, 0) AS EditCount,
+        U.LastAccessDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostStatistics P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        UserBadgeCounts UBC ON U.Id = UBC.UserId
+    LEFT JOIN 
+        PostHistoryChange PH ON U.Id = PH.UserId
+    WHERE 
+        U.LastAccessDate >= CURRENT_TIMESTAMP - INTERVAL '1 year'
+),
+
+RankedUsers AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, BadgeCount DESC, PostCount DESC, EditCount DESC) AS UserRank
+    FROM 
+        ActiveUsers
+)
+
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    PostCount,
+    BadgeCount,
+    EditCount,
+    UserRank,
+    CASE 
+        WHEN BadgeCount > 10 THEN 'Challenger'
+        WHEN EditCount > 100 THEN 'Veteran'
+        ELSE 'Newbie'
+    END AS UserType,
+    COALESCE(PH.LatestEdit, 'Never') AS LastEditFromHistory
+FROM 
+    RankedUsers R
+LEFT JOIN 
+    PostHistoryChange PH ON R.UserId = PH.UserId
+WHERE 
+    R.UserRank <= 50 
+ORDER BY 
+    UserRank;

@@ -1,0 +1,46 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews,
+        SUM(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        pt.Name AS PostType,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id) AS VoteCount
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.PostCount,
+    ups.TotalViews,
+    ups.TotalScore,
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.PostType,
+    pd.CommentCount,
+    pd.VoteCount
+FROM 
+    UserPostStats ups
+JOIN 
+    PostDetails pd ON ups.UserId = pd.OwnerUserId
+ORDER BY 
+    ups.TotalScore DESC, ups.TotalViews DESC
+LIMIT 100;

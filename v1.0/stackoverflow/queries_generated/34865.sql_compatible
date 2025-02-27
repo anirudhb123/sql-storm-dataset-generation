@@ -1,0 +1,87 @@
+
+WITH RECURSIVE UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes, 
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(DISTINCT p.Id) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id
+),
+PostPerformance AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS Author,
+        DATEDIFF('2024-10-01 12:34:56'::timestamp, p.CreationDate) AS DaysSincePosted,
+        COUNT(c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= DATEADD(MONTH, -6, '2024-10-01 12:34:56'::timestamp) 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+BadgedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(ue.PostCount, 0) AS TotalPosts,
+    COALESCE(ue.CommentCount, 0) AS TotalComments,
+    COALESCE(ue.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(ue.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(bu.BadgeCount, 0) AS TotalBadges,
+    bu.BadgeNames,
+    pp.PostId,
+    pp.Title,
+    pp.Score,
+    pp.ViewCount,
+    pp.DaysSincePosted,
+    pp.TotalComments AS PostComments,
+    pp.TotalUpVotes AS PostUpVotes,
+    pp.TotalDownVotes AS PostDownVotes
+FROM 
+    Users u
+LEFT JOIN 
+    UserEngagement ue ON u.Id = ue.UserId
+LEFT JOIN 
+    BadgedUsers bu ON u.Id = bu.UserId
+LEFT JOIN 
+    PostPerformance pp ON pp.Author = u.DisplayName
+WHERE 
+    (ue.PostCount > 5 OR pp.PostId IS NOT NULL) 
+ORDER BY 
+    TotalPosts DESC, TotalUpVotes DESC
+FETCH FIRST 50 ROWS ONLY;

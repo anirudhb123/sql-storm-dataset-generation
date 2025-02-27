@@ -1,0 +1,31 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) -- Filter suppliers with above-average account balance
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.Level < 3 -- Limit hierarchy to 3 levels
+),
+TotalOrderValue AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalValue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate < '2023-01-01' -- Consider orders shipped before 2023
+    GROUP BY o.o_orderkey
+),
+SupplierOrders AS (
+    SELECT sp.ps_suppkey, SUM(tov.TotalValue) AS SupTotalValue
+    FROM partsupp sp
+    JOIN TotalOrderValue tov ON sp.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_size > 20 LIMIT 1) -- Example part filter
+    GROUP BY sp.ps_suppkey
+)
+SELECT n.n_name, COALESCE(sh.Level, 0) AS SupplierLevel, COUNT(DISTINCT so.ps_suppkey) AS SupplierCount,
+       SUM(so.SupTotalValue) AS TotalValuePerNation
+FROM nation n
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN SupplierOrders so ON sh.s_suppkey = so.ps_suppkey
+WHERE n.n_name LIKE 'A%' -- Filter for nations starting with 'A'
+GROUP BY n.n_name, sh.Level
+ORDER BY TotalValuePerNation DESC, n.n_name;

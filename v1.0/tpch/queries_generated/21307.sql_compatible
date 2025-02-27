@@ -1,0 +1,100 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+), 
+SupplierWithHighCost AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_supplycost) > (
+            SELECT AVG(ps_supplycost) FROM partsupp
+        )
+), 
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_totalprice, 
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS total_price_rank
+    FROM 
+        orders o 
+    WHERE 
+        o.o_totalprice IS NOT NULL AND 
+        o.o_orderstatus IN ('O', 'F') 
+        AND EXISTS (
+            SELECT 1 
+            FROM lineitem l 
+            WHERE l.l_orderkey = o.o_orderkey AND l.l_returnflag = 'N'
+        )
+), 
+CustomerSegment AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_mktsegment,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'Zero Bal' 
+            WHEN c.c_acctbal >= 1000 THEN 'High' 
+            ELSE 'Low' 
+        END AS account_status
+    FROM 
+        customer c
+), 
+FinalResult AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        p.p_name,
+        ps.total_supply_cost,
+        CASE 
+            WHEN (RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) = 1) 
+                THEN 'Best Order' 
+            ELSE 'Regular Order' 
+        END AS order_type,
+        COALESCE(pr.price_rank, 0) AS part_price_rank
+    FROM 
+        FilteredOrders o
+    JOIN 
+        CustomerSegment c ON o.o_custkey = c.c_custkey 
+    LEFT JOIN 
+        SupplierWithHighCost ps ON ps.ps_partkey IN (
+            SELECT l.l_partkey 
+            FROM lineitem l 
+            WHERE l.l_orderkey = o.o_orderkey
+        )
+    LEFT JOIN 
+        RankedParts pr ON pr.p_partkey IN (
+            SELECT l.l_partkey 
+            FROM lineitem l 
+            WHERE l.l_orderkey = o.o_orderkey
+        )
+    WHERE 
+        (o.o_orderdate >= '1997-01-01' OR o.o_orderstatus IS NULL)
+)
+
+SELECT 
+    fr.o_orderkey, 
+    fr.c_name, 
+    fr.p_name, 
+    fr.total_supply_cost, 
+    fr.order_type, 
+    fr.part_price_rank
+FROM 
+    FinalResult fr
+ORDER BY 
+    fr.o_orderkey ASC, 
+    fr.total_supply_cost DESC
+FETCH FIRST 100 ROWS ONLY;

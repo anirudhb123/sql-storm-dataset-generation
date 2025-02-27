@@ -1,0 +1,75 @@
+WITH RECURSIVE UserVoteHistory AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        v.PostId,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), TargetedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes,
+        COALESCE(SUM(v.VoteTypeId = 6), 0) AS CloseVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days' 
+        AND p.ViewCount > 10
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+), TaggedPosts AS (
+    SELECT 
+        t.TagName,
+        p.Id AS PostId,
+        p.Title
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+), FinalPostData AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        th.Upvotes,
+        th.Downvotes,
+        th.CloseVotes,
+        COUNT(DISTINCT tp.TagName) AS TagCount
+    FROM 
+        TargetedPosts th
+    JOIN 
+        TaggedPosts tp ON th.PostId = tp.PostId
+    GROUP BY 
+        th.PostId, th.Title, th.Upvotes, th.Downvotes, th.CloseVotes
+)
+SELECT 
+    fpd.PostId,
+    fpd.Title,
+    fpd.Upvotes,
+    fpd.Downvotes,
+    fpd.CloseVotes,
+    fpd.TagCount,
+    CASE 
+        WHEN fpd.Upvotes > fpd.Downvotes THEN 'Positive'
+        WHEN fpd.CloseVotes > 0 THEN 'Closed'
+        ELSE 'Neutral'
+    END AS PostStatus
+FROM 
+    FinalPostData fpd
+LEFT JOIN 
+    UserVoteHistory uvh ON fpd.PostId = uvh.PostId
+WHERE 
+    uvh.VoteCount > 5 
+    OR fpd.Upvotes > 5
+ORDER BY 
+    fpd.Upvotes DESC, fpd.Downvotes ASC;

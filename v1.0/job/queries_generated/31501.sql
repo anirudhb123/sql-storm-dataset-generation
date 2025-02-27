@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000  -- Filter for movies produced in or after 2000
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE
+        mh.level < 5  -- Limit depth of recursion to avoid excessive levels
+)
+SELECT
+    a.name AS actor_name,
+    t.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mc.company_id) AS num_production_companies,
+    AVG(years_since_last_movie) AS avg_years_since_last_movie,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank_company_count
+FROM
+    cast_info ci
+JOIN
+    aka_name a ON ci.person_id = a.person_id
+JOIN
+    aka_title t ON ci.movie_id = t.id
+LEFT JOIN
+    movie_companies mc ON mc.movie_id = t.id
+LEFT JOIN
+    movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN
+    keyword kw ON mk.keyword_id = kw.id
+JOIN
+    MovieHierarchy mh ON mh.movie_id = t.id
+CROSS JOIN LATERAL (
+    SELECT 
+        EXTRACT(YEAR FROM CURRENT_DATE) - mh.production_year AS years_since_last_movie
+    ) years
+WHERE
+    a.name IS NOT NULL
+GROUP BY
+    a.name, t.title, mh.production_year
+ORDER BY
+    mh.production_year DESC, num_production_companies DESC
+LIMIT 10;

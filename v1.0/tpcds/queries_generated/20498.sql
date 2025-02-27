@@ -1,0 +1,85 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        DENSE_RANK() OVER (ORDER BY SUM(ws_net_paid) DESC) AS sales_rank,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) AS row_num
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+),
+high_value_customers AS (
+    SELECT
+        c_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS high_order_count
+    FROM
+        web_sales ws
+    JOIN
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY
+        c_customer_sk
+    HAVING
+        COUNT(DISTINCT ws_order_number) > 10
+),
+inventory_analysis AS (
+    SELECT
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity,
+        CASE
+            WHEN SUM(inv.inv_quantity_on_hand) < 50 THEN 'Low Stock'
+            WHEN SUM(inv.inv_quantity_on_hand) BETWEEN 50 AND 200 THEN 'Medium Stock'
+            ELSE 'High Stock'
+        END AS stock_level
+    FROM
+        inventory inv
+    GROUP BY
+        inv.inv_item_sk
+),
+sales_and_inventory AS (
+    SELECT
+        s.ws_item_sk,
+        COALESCE(i.total_quantity, 0) AS total_inventory,
+        s.total_sales,
+        h.high_order_count
+    FROM
+        sales_cte s
+    LEFT JOIN
+        inventory_analysis i ON s.ws_item_sk = i.inv_item_sk
+    LEFT JOIN
+        high_value_customers h ON h.c_customer_sk = (SELECT MAX(c.c_customer_sk) FROM customer c WHERE c.c_current_cdemo_sk IS NOT NULL)
+    WHERE
+        s.sales_rank <= 10
+),
+final_output AS (
+    SELECT
+        sa.ws_item_sk,
+        sa.total_sales,
+        sa.total_inventory,
+        sa.high_order_count,
+        CASE
+            WHEN sa.total_sales > 10000 AND sa.total_inventory < 100 THEN 'Reorder'
+            WHEN sa.total_sales < 5000 AND sa.total_inventory >= 100 THEN 'Sale Opportunity'
+            ELSE 'Monitor'
+        END AS recommendation
+    FROM
+        sales_and_inventory sa
+)
+SELECT
+    f.ws_item_sk,
+    f.total_sales,
+    f.total_inventory,
+    f.high_order_count,
+    f.recommendation
+FROM
+    final_output f
+WHERE
+    f.recommendation IS NOT NULL
+ORDER BY
+    f.total_sales DESC
+FETCH FIRST 10 ROWS ONLY
+WITH UR;

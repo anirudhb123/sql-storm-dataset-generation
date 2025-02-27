@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+),
+MonthlySales AS (
+    SELECT 
+        DATE_TRUNC('month', o.o_orderdate) AS order_month,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY order_month
+),
+PartImpact AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(p.p_retailprice) AS avg_retail_price,
+        MAX(p.p_size) AS max_size
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT 
+    n.n_name AS nation,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(ps.ps_supplycost * pi.total_avail_qty) AS total_supply_cost,
+    COALESCE(SUM(ms.total_sales), 0) AS total_monthly_sales,
+    ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ms.total_sales) DESC) AS sales_rank
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN supplier s ON c.c_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN PartImpact pi ON ps.ps_partkey = pi.p_partkey
+LEFT JOIN MonthlySales ms ON DATE_TRUNC('month', cast('1998-10-01' as date)) = ms.order_month
+WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_acctbal IS NOT NULL) 
+    AND (COALESCE(c.c_mktsegment, '') <> 'N/A' OR ms.total_sales IS NOT NULL)
+GROUP BY n.n_name, n.n_nationkey
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY total_supply_cost DESC;

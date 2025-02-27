@@ -1,0 +1,54 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name
+    FROM SupplierStats s
+    WHERE total_value > (
+        SELECT AVG(total_value) 
+        FROM SupplierStats
+    )
+),
+OrderMetrics AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(l.l_orderkey) AS item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    r.r_name AS region_name,
+    ns.n_name AS nation_name,
+    ts.s_name AS top_supplier_name,
+    om.o_orderkey,
+    om.net_revenue,
+    mos.total_items,
+    CASE 
+        WHEN om.net_revenue IS NULL THEN 'No Revenue'
+        WHEN om.net_revenue > 10000 THEN 'High Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM region r
+LEFT JOIN nation ns ON ns.n_regionkey = r.r_regionkey
+LEFT JOIN TopSuppliers ts ON ts.s_nationkey = ns.n_nationkey
+FULL OUTER JOIN (
+    SELECT o.o_orderkey, COUNT(l.l_orderkey) AS total_items
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+) mos ON om.o_orderkey = mos.o_orderkey
+JOIN OrderMetrics om ON ts.s_suppkey = om.s_suppkey
+WHERE om.item_count > 5 AND ts.part_count > 3
+ORDER BY r.r_name, n_name, revenue_category DESC;

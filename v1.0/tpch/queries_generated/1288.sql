@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.total_supply_cost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rank <= 3
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+CombinedData AS (
+    SELECT 
+        ts.region_name,
+        ts.nation_name,
+        os.o_orderkey,
+        os.o_orderdate,
+        os.total_price,
+        os.line_count,
+        COALESCE(ts.total_supply_cost, 0) AS supplier_cost
+    FROM 
+        OrderStats os
+    LEFT JOIN 
+        TopSuppliers ts ON os.o_orderkey % 10 = ts.s_suppkey % 10
+)
+SELECT 
+    region_name,
+    nation_name,
+    COUNT(DISTINCT o_orderkey) AS order_count,
+    SUM(total_price) AS total_revenue,
+    AVG(line_count) AS avg_line_items,
+    MAX(supplier_cost) AS max_supplier_cost
+FROM 
+    CombinedData
+GROUP BY 
+    region_name, nation_name
+HAVING 
+    SUM(total_price) > 10000
+ORDER BY 
+    total_revenue DESC, region_name, nation_name;

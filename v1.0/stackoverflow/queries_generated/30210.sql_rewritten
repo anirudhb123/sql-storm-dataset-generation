@@ -1,0 +1,95 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        a.CreationDate,
+        a.ViewCount,
+        a.Score,
+        r.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursiveCTE r ON a.ParentId = r.PostId
+    WHERE 
+        a.PostTypeId = 2  
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT ph.Id) AS PostHistoryCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        PostHistory ph ON ph.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+
+MostActiveUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.TotalBounties,
+        us.QuestionCount,
+        us.PostHistoryCount,
+        DENSE_RANK() OVER (ORDER BY us.QuestionCount DESC) AS Rnk
+    FROM 
+        UserStats us
+)
+
+SELECT 
+    r.PostId,
+    r.Title,
+    u.DisplayName AS OwnerDisplayName,
+    r.ViewCount,
+    r.Score,
+    r.Level,
+    u.Reputation AS OwnerReputation,
+    COALESCE(b.BadgeCount, 0) AS BadgeCount,
+    COALESCE(mau.QuestionCount, 0) AS ActiveUserQuestions
+FROM 
+    RecursiveCTE r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+) b ON u.Id = b.UserId
+LEFT JOIN 
+    MostActiveUsers mau ON u.Id = mau.UserId
+WHERE 
+    r.Score > 10 
+ORDER BY 
+    r.Level DESC, 
+    r.Score DESC;

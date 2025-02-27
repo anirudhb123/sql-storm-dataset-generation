@@ -1,0 +1,60 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rnk,
+        COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0) AS NetVotes,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+                    SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM Votes
+         GROUP BY PostId) v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '90 days'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerName,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.NetVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rnk = 1
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerName,
+    tp.CreationDate,
+    tp.CommentCount,
+    tp.NetVotes,
+    CASE 
+        WHEN tp.NetVotes > 10 THEN 'Hot'
+        WHEN tp.NetVotes BETWEEN 1 AND 10 THEN 'Trending'
+        ELSE 'Under Radar'
+    END AS Status,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    (SELECT PostId, 
+            TRIM(value) AS TagName 
+     FROM Posts, 
+          UNNEST(string_to_array(Tags, ',')) AS value) t ON tp.PostId = t.PostId
+GROUP BY 
+    tp.PostId, tp.Title, tp.OwnerName, tp.CreationDate, tp.CommentCount, tp.NetVotes
+ORDER BY 
+    tp.NetVotes DESC, tp.CreationDate DESC;

@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.PostTypeId = 1 -- Only questions
+),
+TopUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM
+        Users u
+    JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY
+        u.Id, u.DisplayName
+    HAVING
+        COUNT(DISTINCT p.Id) > 5 -- Only users with more than 5 questions
+),
+UserBadges AS (
+    SELECT
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM
+        Badges b
+    WHERE
+        b.Class = 1 -- Only Gold badges
+    GROUP BY
+        b.UserId
+)
+SELECT
+    tu.DisplayName,
+    tu.QuestionCount,
+    tu.TotalScore,
+    tu.TotalViews,
+    COALESCE(ub.BadgeCount, 0) AS GoldBadgeCount,
+    rp.Rank AS PostRank
+FROM
+    TopUsers tu
+LEFT JOIN
+    UserBadges ub ON tu.UserId = ub.UserId
+LEFT JOIN
+    RankedPosts rp ON tu.UserId = rp.OwnerDisplayName
+ORDER BY
+    tu.TotalScore DESC,
+    tu.QuestionCount DESC,
+    GoldBadgeCount DESC
+LIMIT 50;

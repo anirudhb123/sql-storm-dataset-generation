@@ -1,0 +1,75 @@
+
+WITH RankedMovies AS (
+    SELECT
+        a.id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS rn
+    FROM
+        aka_name a
+    JOIN
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE
+        t.production_year IS NOT NULL
+),
+MovieGenres AS (
+    SELECT
+        t.id AS movie_id,
+        STRING_AGG(DISTINCT kg.keyword, ', ') AS genres
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_keyword mk ON t.movie_id = mk.movie_id
+    LEFT JOIN
+        keyword kg ON mk.keyword_id = kg.id
+    WHERE
+        kg.keyword IS NOT NULL
+    GROUP BY
+        t.id
+),
+MovieCompaniesInfo AS (
+    SELECT
+        mc.movie_id,
+        COUNT(DISTINCT cn.name) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY
+        mc.movie_id
+),
+TopMovies AS (
+    SELECT
+        rm.actor_id,
+        rm.actor_name,
+        rm.movie_title,
+        rm.production_year,
+        mg.genres,
+        mci.company_count,
+        mci.company_names
+    FROM
+        RankedMovies rm
+    LEFT JOIN
+        MovieGenres mg ON rm.movie_title = mg.movie_id
+    LEFT JOIN
+        MovieCompaniesInfo mci ON rm.movie_title = mci.movie_id
+    WHERE
+        rm.rn = 1
+)
+SELECT
+    t.actor_name,
+    t.movie_title,
+    t.production_year,
+    COALESCE(t.genres, 'No Genres') AS genres,
+    COALESCE(t.company_count, 0) AS company_count,
+    COALESCE(t.company_names, 'No Companies') AS company_names
+FROM
+    TopMovies t
+WHERE
+    t.production_year >= 2000
+ORDER BY
+    t.production_year DESC, t.actor_name;

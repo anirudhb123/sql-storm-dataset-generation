@@ -1,0 +1,55 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        COALESCE(AVG(m_info.info), 'N/A') AS average_rating
+    FROM 
+        title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        movie_info m_info ON t.id = m_info.movie_id AND m_info.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        t.id
+),
+movies_with_keywords AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title, 
+        rm.production_year, 
+        rm.cast_count,
+        rm.average_rating,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year, rm.cast_count, rm.average_rating
+)
+SELECT 
+    mwk.title, 
+    mwk.production_year, 
+    mwk.cast_count, 
+    mwk.average_rating,
+    mwk.keywords,
+    cn.name AS company_name,
+    ct.kind AS company_type
+FROM 
+    movies_with_keywords mwk
+LEFT JOIN 
+    movie_companies mc ON mwk.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    mwk.production_year > 2000
+ORDER BY 
+    mwk.production_year DESC, mwk.cast_count DESC;

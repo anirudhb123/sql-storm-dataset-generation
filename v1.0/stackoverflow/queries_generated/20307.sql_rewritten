@@ -1,0 +1,79 @@
+WITH UserDetails AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.Views
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.OwnerUserId,
+        LAG(p.CreationDate) OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate) AS PreviousPostDate,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        p.CreationDate
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+UsersWithRecentActivity AS (
+    SELECT 
+        ud.UserId,
+        ud.DisplayName,
+        ud.Reputation,
+        ud.Views,
+        rp.Id AS RecentPostId,
+        rp.CommentCount,
+        rp.CreationDate AS RecentPostDate,
+        CASE 
+            WHEN rp.PreviousPostDate IS NOT NULL AND rp.PreviousPostDate < rp.CreationDate THEN TRUE
+            ELSE FALSE
+        END AS IsNewerThanPrevious
+    FROM 
+        UserDetails ud
+    JOIN 
+        RecentPosts rp ON ud.UserId = rp.OwnerUserId
+),
+TopBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 OR b.Class = 2  
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.Views,
+    rp.RecentPostId,
+    rp.CommentCount,
+    rp.RecentPostDate,
+    u.IsNewerThanPrevious,
+    COALESCE(tb.BadgeNames, 'No Badges') AS TopBadges
+FROM 
+    UsersWithRecentActivity u
+LEFT JOIN 
+    TopBadges tb ON u.UserId = tb.UserId
+WHERE 
+    u.Reputation > 1000 AND                                      
+    (u.CommentCount IS NOT NULL AND u.CommentCount > 5) OR     
+    u.IsNewerThanPrevious                                        
+ORDER BY 
+    u.Reputation DESC,
+    u.Views DESC
+LIMIT 100;

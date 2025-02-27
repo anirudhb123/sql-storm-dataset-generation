@@ -1,0 +1,48 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_profit) AS avg_profit,
+        d.d_year,
+        d.d_month_seq
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2020 AND 2023
+    GROUP BY 
+        c.c_customer_id, d.d_year, d.d_month_seq
+),
+RankedSales AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY year, month ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        (SELECT 
+            SUBSTRING_INDEX(c_customer_id, 'C', -1) AS customer_id,
+            total_sales,
+            order_count,
+            avg_profit,
+            d_year AS year, 
+            d_month_seq AS month
+        FROM 
+            SalesSummary) AS sales_data
+)
+SELECT 
+    r.customer_id,
+    r.total_sales,
+    r.order_count,
+    r.avg_profit,
+    r.year,
+    r.month
+FROM 
+    RankedSales r
+WHERE 
+    r.sales_rank <= 10
+ORDER BY 
+    r.year, r.month, r.total_sales DESC;

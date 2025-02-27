@@ -1,0 +1,47 @@
+
+WITH RECURSIVE supply_chain AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost ASC) AS rnk
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+),
+total_ordered AS (
+    SELECT o.o_orderkey, SUM(l.l_quantity) AS total_quantity
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+),
+inventory_status AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty,
+           SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+
+SELECT 
+    ts.c_name,
+    ts.total_spent,
+    COALESCE(is.total_avail_qty, 0) AS total_available_quantity,
+    COALESCE(is.total_supply_cost, 0) AS total_supply_cost,
+    sc.s_name AS supplier_name,
+    SUM(sc.ps_availqty) AS total_quantity_from_supplier
+FROM top_customers ts
+LEFT JOIN inventory_status is ON ts.total_spent > 1000
+LEFT JOIN supply_chain sc ON is.total_avail_qty > 0 AND sc.ps_partkey IN (
+    SELECT p.p_partkey
+    FROM part p
+    WHERE p.p_size > 10
+)
+GROUP BY ts.c_name, ts.total_spent, is.total_avail_qty, is.total_supply_cost, sc.s_name
+ORDER BY ts.total_spent DESC
+LIMIT 10;

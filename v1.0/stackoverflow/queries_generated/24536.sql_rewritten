@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+),
+ClosedPostDetails AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate AS ClosureDate,
+        COUNT(ph.Id) AS CloseVotes,
+        STRING_AGG(ph.Comment, '; ') AS CloseComments
+    FROM
+        PostHistory ph
+    WHERE
+        ph.PostHistoryTypeId = 10 
+    GROUP BY
+        ph.PostId, ph.CreationDate
+)
+SELECT
+    up.DisplayName,
+    up.UserId,
+    up.Reputation,
+    up.BadgeCount,
+    up.GoldBadges,
+    up.SilverBadges,
+    up.BronzeBadges,
+    rp.Title,
+    rp.CreationDate AS PostCreationDate,
+    cr.ClosureDate,
+    cr.CloseVotes,
+    cr.CloseComments,
+    CASE
+        WHEN cr.CloseVotes IS NULL THEN 'Not Closed'
+        WHEN cr.CloseVotes >= 5 THEN 'Frequently Closed'
+        ELSE 'Occasionally Closed'
+    END AS CloseStatus,
+    CASE 
+        WHEN rp.PostTypeId = 1 AND rp.PostRank = 1 THEN 'Recent Question'
+        WHEN rp.PostTypeId = 2 AND rp.PostRank = 1 THEN 'Most Recent Answer'
+        ELSE 'Older Post Activity'
+    END AS PostActivityStatus
+FROM
+    RankedPosts rp
+JOIN
+    UserReputation up ON rp.OwnerUserId = up.UserId
+LEFT JOIN
+    ClosedPostDetails cr ON rp.PostId = cr.PostId
+WHERE
+    up.Reputation > 1000
+    AND (cr.CloseVotes IS NULL OR cr.CloseVotes < 3)
+ORDER BY
+    up.Reputation DESC, 
+    rp.CreationDate DESC;

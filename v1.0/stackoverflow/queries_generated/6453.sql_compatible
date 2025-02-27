@@ -1,0 +1,57 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostsCreated,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvotesReceived,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvotesReceived,
+        AVG(P.Score) AS AvgPostScore,
+        COUNT(DISTINCT B.Id) AS BadgesEarned,
+        MAX(U.Reputation) AS MaxReputation
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    WHERE U.CreationDate < DATE('2024-10-01') - INTERVAL '1 year'
+    GROUP BY U.Id, U.DisplayName
+),
+PostMetrics AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        PH.CreationDate AS LastEditDate
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5)
+    WHERE P.CreationDate >= DATE('2024-10-01') - INTERVAL '1 month'
+),
+TopUsers AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        UA.PostsCreated,
+        UA.UpvotesReceived,
+        UA.BadgesEarned,
+        ROW_NUMBER() OVER (ORDER BY UA.MaxReputation DESC) AS Rank
+    FROM UserActivity UA
+    JOIN Users U ON U.Id = UA.UserId
+    WHERE UA.PostsCreated > 10
+)
+SELECT 
+    TU.Rank,
+    TU.DisplayName,
+    TU.PostsCreated,
+    TU.UpvotesReceived,
+    PM.PostId,
+    PM.Title,
+    PM.ViewCount,
+    PM.AnswerCount,
+    PM.CommentCount,
+    PM.LastEditDate
+FROM TopUsers TU
+JOIN PostMetrics PM ON TU.UserId = PM.PostId
+ORDER BY TU.Rank, PM.ViewCount DESC
+LIMIT 50;

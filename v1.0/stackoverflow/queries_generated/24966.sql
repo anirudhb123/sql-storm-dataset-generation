@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+AggregatedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerDisplayName,
+        COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+        cp.FirstClosedDate,
+        cp.CloseCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerDisplayName = ub.UserId
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.Rank <= 10
+)
+SELECT 
+    PostId,
+    Title,
+    ViewCount,
+    Score,
+    OwnerDisplayName,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    CASE 
+        WHEN FirstClosedDate IS NOT NULL THEN CONCAT('Closed on ', TO_CHAR(FirstClosedDate, 'YYYY-MM-DD'))
+        ELSE 'Open'
+    END AS PostStatus,
+    CloseCount
+FROM 
+    AggregatedData
+ORDER BY 
+    Score DESC, CloseCount DESC NULLS LAST;

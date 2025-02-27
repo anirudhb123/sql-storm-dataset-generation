@@ -1,0 +1,49 @@
+
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS Level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.Level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+OrderedSales AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, COUNT(DISTINCT ps.ps_partkey) AS part_count,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal > 5000
+    GROUP BY s.s_suppkey
+),
+ProductPerformance AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_quantity) AS total_quantity,
+           SUM(l.l_extendedprice) AS total_revenue
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(l.l_quantity) > 100
+),
+FinalReport AS (
+    SELECT ns.n_name, pp.p_name, sp.part_count, pp.total_quantity, pp.total_revenue,
+           CASE 
+               WHEN pp.total_revenue IS NULL THEN 0 
+               ELSE pp.total_revenue / NULLIF(pp.total_quantity, 0)
+           END AS avg_revenue_per_unit
+    FROM NationHierarchy ns
+    LEFT JOIN SupplierStats sp ON ns.n_nationkey = sp.s_suppkey
+    JOIN ProductPerformance pp ON pp.p_partkey = sp.part_count
+)
+SELECT r.r_name, COUNT(fr.n_name) AS total_nations, 
+       SUM(fr.avg_revenue_per_unit) AS total_avg_revenue 
+FROM region r
+LEFT JOIN FinalReport fr ON r.r_regionkey = fr.n_regionkey
+GROUP BY r.r_name
+ORDER BY total_nations DESC, total_avg_revenue DESC;

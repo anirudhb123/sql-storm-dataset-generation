@@ -1,0 +1,62 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        UpVoteCount,
+        DownVoteCount,
+        ReputationRank,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY Reputation) OVER () AS MedianReputation
+    FROM 
+        UserStats
+    WHERE 
+        Reputation > 100 AND 
+        AnswerCount > 5
+    ORDER BY 
+        UpVoteCount DESC
+    FETCH FIRST 10 ROWS ONLY
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.PostCount,
+    u.QuestionCount,
+    u.AnswerCount,
+    u.UpVoteCount,
+    u.DownVoteCount,
+    CASE 
+        WHEN u.Reputation > u.MedianReputation THEN 'Above Median'
+        ELSE 'Below Median'
+    END AS ReputationComparison
+FROM 
+    TopUsers u
+LEFT JOIN 
+    Badges b ON u.UserId = b.UserId
+WHERE 
+    b.Class = 1 OR b.Class = 2 
+ORDER BY 
+    u.Reputation DESC;

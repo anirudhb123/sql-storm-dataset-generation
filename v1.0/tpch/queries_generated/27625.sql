@@ -1,0 +1,78 @@
+WITH RankedProducts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank
+    FROM 
+        part p
+    WHERE 
+        p.p_type LIKE '%steel%' AND 
+        p.p_size BETWEEN 1 AND 50
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_nationkey,
+        s.s_phone,
+        s.s_acctbal,
+        s.s_comment
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal >= 1000 AND 
+        s.s_comment NOT LIKE '%defective%'
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) AS num_lineitems
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice
+)
+SELECT 
+    c.c_name, 
+    c.c_address, 
+    c.c_phone, 
+    c.c_acctbal, 
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    SUM(co.o_totalprice) AS total_spent,
+    STRING_AGG(DISTINCT CONCAT(pp.p_name, ' (', pp.p_brand, ')'), ', ') AS purchased_products,
+    COUNT(DISTINCT fs.s_suppkey) AS unique_suppliers
+FROM 
+    customer c
+JOIN 
+    CustomerOrders co ON c.c_custkey = co.o_custkey
+JOIN 
+    lineitem l ON co.o_orderkey = l.l_orderkey
+JOIN 
+    RankedProducts pp ON l.l_partkey = pp.p_partkey AND pp.rank <= 10
+JOIN 
+    FilteredSuppliers fs ON l.l_suppkey = fs.s_suppkey
+WHERE 
+    c.c_mktsegment = 'BUILDING'
+GROUP BY 
+    c.c_custkey
+HAVING 
+    total_orders > 5 AND 
+    total_spent > 5000
+ORDER BY 
+    total_spent DESC;

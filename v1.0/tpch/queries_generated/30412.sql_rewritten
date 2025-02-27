@@ -1,0 +1,64 @@
+WITH RECURSIVE TotalSales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        c.c_name,
+        c.c_mktsegment
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_mktsegment
+),
+RankedSales AS (
+    SELECT 
+        ts.c_custkey,
+        ts.total_sales,
+        RANK() OVER (PARTITION BY ts.c_mktsegment ORDER BY ts.total_sales DESC) AS sales_rank
+    FROM 
+        TotalSales ts
+),
+HighValueCustomers AS (
+    SELECT 
+        rs.c_custkey,
+        rs.total_sales,
+        rs.sales_rank,
+        p.p_name,
+        p.p_size
+    FROM 
+        RankedSales rs
+    JOIN 
+        partsupp ps ON ps.ps_supplycost < (
+            SELECT AVG(ps_supplycost) 
+            FROM partsupp
+            WHERE ps_partkey = rs.c_custkey
+        )
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        rs.sales_rank <= 10
+)
+SELECT 
+    hvc.c_custkey,
+    hvc.total_sales,
+    hvc.sales_rank,
+    COALESCE(p.p_name, 'Unknown Part') AS part_name,
+    CASE 
+        WHEN p.p_size IS NULL THEN 'Not Specified'
+        ELSE CAST(p.p_size AS VARCHAR)
+    END AS part_size
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    lineitem l ON hvc.c_custkey = l.l_suppkey
+WHERE 
+    l.l_returnflag = 'R'
+OR 
+    l.l_shipmode NOT IN ('AIR', 'CAR')
+ORDER BY 
+    hvc.total_sales DESC;

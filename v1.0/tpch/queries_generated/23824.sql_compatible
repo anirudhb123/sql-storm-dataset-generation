@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+), 
+CTE_Lines AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price, 
+           COUNT(DISTINCT l.l_suppkey) AS supplier_count
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+),
+CTE_Supplier_Count AS (
+    SELECT COUNT(*) AS total_suppliers, 
+           MAX(s_acctbal) AS max_acctbal
+    FROM SupplierHierarchy
+), 
+CTE_Orders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS row_num,
+           CASE 
+               WHEN o.o_totalprice > 1000 THEN 'High'
+               WHEN o.o_totalprice BETWEEN 500 AND 1000 THEN 'Medium'
+               ELSE 'Low'
+           END AS price_category
+    FROM orders o
+)
+SELECT 
+    o.o_orderkey AS order_key,
+    o.o_orderdate AS order_date,
+    o.price_category,
+    COALESCE(sc.total_suppliers, 0) AS total_suppliers, 
+    COALESCE(sc.max_acctbal, 0.00) AS max_acctbal,
+    COALESCE(l.total_price, 0.00) AS order_total_price,
+    p.p_name,
+    r.r_name
+FROM CTE_Orders o
+LEFT JOIN CTE_Lines l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN CTE_Supplier_Count sc ON 1 = 1
+INNER JOIN part p ON l.l_orderkey = p.p_partkey
+LEFT JOIN nation n ON n.n_nationkey = (SELECT c.c_nationkey 
+                                         FROM customer c WHERE c.c_custkey = o.o_custkey)
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE o.o_orderdate BETWEEN DATE '1995-01-01' AND DATE '1996-12-31'
+  AND (r.r_name LIKE '%Europe%' OR r.r_name IS NULL)
+  AND (l.total_price > (SELECT AVG(total_price) FROM CTE_Lines) OR l.total_price IS NULL)
+ORDER BY o.o_orderdate DESC, r.r_name NULLS FIRST
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

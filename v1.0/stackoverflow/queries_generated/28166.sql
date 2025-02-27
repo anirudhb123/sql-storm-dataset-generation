@@ -1,0 +1,74 @@
+WITH TagCounts AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.Score) AS AverageScore
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+),
+Ranking AS (
+    SELECT 
+        TagName,
+        PostsCount,
+        TotalViews,
+        TotalScore,
+        AverageScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank,
+        RANK() OVER (ORDER BY PostsCount DESC) AS CountRank
+    FROM TagCounts
+),
+TopTags AS (
+    SELECT
+        TagName,
+        PostsCount,
+        TotalViews,
+        TotalScore,
+        AverageScore,
+        ScoreRank,
+        CountRank
+    FROM Ranking
+    WHERE ScoreRank <= 10 OR CountRank <= 10
+)
+SELECT 
+    tt.TagName,
+    tt.PostsCount,
+    tt.TotalViews,
+    tt.TotalScore,
+    tt.AverageScore,
+    COALESCE(ut.BadgeCount, 0) AS BadgeCount,
+    ut.UserCount AS UserCount,
+    STRING_AGG(DISTINCT b.Name) AS UserBadges
+FROM TopTags tt
+LEFT JOIN (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        COUNT(DISTINCT u.Id) OVER () AS UserCount
+    FROM Users u
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    GROUP BY u.Id
+) ut ON tt.TagName IN (
+    SELECT unnest(string_to_array(u.AboutMe, ' '))
+    FROM Users u
+    WHERE u.AboutMe IS NOT NULL
+)
+LEFT JOIN Badges b ON b.UserId IN (
+    SELECT u.Id
+    FROM Users u
+    WHERE u.AboutMe IS NOT NULL AND 
+          t.TagName IN (SELECT unnest(string_to_array(u.AboutMe, ' ')))
+)
+GROUP BY 
+    tt.TagName, 
+    tt.PostsCount, 
+    tt.TotalViews, 
+    tt.TotalScore, 
+    tt.AverageScore, 
+    ut.BadgeCount, 
+    ut.UserCount
+ORDER BY 
+    tt.TotalScore DESC, 
+    tt.PostsCount DESC;

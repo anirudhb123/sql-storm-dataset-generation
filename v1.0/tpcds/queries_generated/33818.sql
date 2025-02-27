@@ -1,0 +1,57 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_sold_date_sk, 
+        cs_item_sk, 
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_net_paid) AS total_sales
+    FROM catalog_sales
+    WHERE cs_sold_date_sk IN (SELECT ws_sold_date_sk FROM web_sales GROUP BY ws_sold_date_sk)
+    GROUP BY cs_sold_date_sk, cs_item_sk
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        SUM(ws_net_profit) AS total_profit
+    FROM customer c
+    INNER JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender
+),
+shipping_summary AS (
+    SELECT 
+        sm.sm_ship_mode_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_ship_cost) AS total_shipping_cost
+    FROM web_sales ws
+    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk 
+    GROUP BY sm.sm_ship_mode_id
+)
+SELECT 
+    ca_state,
+    SUM(total_quantity) AS total_quantity_sold,
+    AVG(total_sales) AS average_sales,
+    SUM(cs.total_profit) AS customer_total_profit,
+    ss.total_orders,
+    ss.total_shipping_cost
+FROM customer_address ca
+LEFT JOIN sales_summary ss ON ca.ca_address_sk = (
+    SELECT c.c_current_addr_sk
+    FROM customer c 
+    WHERE c.c_customer_sk IN (SELECT DISTINCT cd.c_customer_sk FROM customer_stats cd)
+)
+LEFT JOIN customer_stats cs ON cs.c_customer_sk IN (
+    SELECT DISTINCT c.c_customer_sk FROM customer c WHERE c.c_current_addr_sk = ca.ca_address_sk
+)
+GROUP BY ca_state
+ORDER BY total_quantity_sold DESC
+LIMIT 10;

@@ -1,0 +1,32 @@
+
+SELECT 
+    u.DisplayName AS User,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS TotalClosures,
+    SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS TotalReopenings,
+    AVG(p.Score) AS AveragePostScore,
+    AVG(p.ViewCount) AS AverageViewCount,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+    COUNT(DISTINCT b.Id) AS TotalBadges
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    UNNEST(string_to_array(p.Tags, '><')) AS tag_name(t)
+JOIN 
+    Tags t ON t.TagName = TRIM(BOTH '<>' FROM tag_name.t)
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.DisplayName, u.Id
+ORDER BY 
+    TotalPosts DESC
+LIMIT 50;

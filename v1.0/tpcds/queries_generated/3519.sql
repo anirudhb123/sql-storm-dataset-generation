@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.order_number,
+        ws.quantity,
+        ws.ext_sales_price,
+        ws.net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ext_sales_price DESC) AS SalesRank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk BETWEEN 2451782 AND 2451787 -- Assuming these are valid date SKs within range.
+),
+CustomerReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr.return_amount) AS total_return_amount
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.returned_date_sk
+),
+HighProfitSales AS (
+    SELECT 
+        c.customer_sk,
+        c.first_name,
+        c.last_name,
+        SUM(ws.net_profit) AS total_net_profit
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.customer_sk = ws.bill_customer_sk
+    WHERE 
+        ws.sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        c.customer_sk, c.first_name, c.last_name
+    HAVING 
+        SUM(ws.net_profit) > 1000
+)
+SELECT 
+    ws.web_site_sk,
+    ws.order_number,
+    ws.quantity,
+    rs.ext_sales_price,
+    cr.total_returns,
+    cr.total_return_amount,
+    hps.customer_sk,
+    hps.first_name,
+    hps.last_name,
+    hps.total_net_profit
+FROM 
+    RankedSales rs
+LEFT JOIN 
+    CustomerReturns cr ON cr.returned_date_sk = rs.web_site_sk
+LEFT JOIN 
+    HighProfitSales hps ON hps.total_net_profit IS NOT NULL
+WHERE 
+    rs.SalesRank = 1 
+    AND (cr.total_returns IS NULL OR cr.total_returns > 0)
+ORDER BY 
+    rs.web_site_sk, rs.order_number;

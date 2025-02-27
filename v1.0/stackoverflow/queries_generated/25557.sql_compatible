@@ -1,0 +1,65 @@
+
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 AND Posts.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswerCount
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><'))
+    GROUP BY 
+        Tags.TagName
+),
+PostVoteStats AS (
+    SELECT 
+        Posts.Id AS PostId,
+        COUNT(CASE WHEN Votes.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN Votes.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN Votes.VoteTypeId = 4 THEN 1 END) AS OffensiveVotes
+    FROM 
+        Posts
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Posts.Id
+),
+UserEngagement AS (
+    SELECT 
+        Users.Id AS UserId,
+        COUNT(DISTINCT Posts.Id) AS TotalPosts,
+        COUNT(DISTINCT Comments.Id) AS TotalComments,
+        MAX(Posts.CreationDate) AS LastPostDate
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    GROUP BY 
+        Users.Id
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.AcceptedAnswerCount,
+    COALESCE(SUM(pvs.UpVotes), 0) AS TotalUpVotes,
+    COALESCE(SUM(pvs.DownVotes), 0) AS TotalDownVotes,
+    COALESCE(SUM(pvs.OffensiveVotes), 0) AS TotalOffensiveVotes,
+    COALESCE(ue.TotalPosts, 0) AS UserPostCount,
+    COALESCE(ue.TotalComments, 0) AS UserCommentCount,
+    ue.LastPostDate
+FROM 
+    TagStats ts
+LEFT JOIN 
+    PostVoteStats pvs ON ts.TagName = ANY(string_to_array(substring((SELECT Tags FROM Posts WHERE Id = pvs.PostId), 2, length((SELECT Tags FROM Posts WHERE Id = pvs.PostId))-2), '><'))
+LEFT JOIN 
+    UserEngagement ue ON ue.TotalPosts > 0
+GROUP BY 
+    ts.TagName, ts.PostCount, ts.QuestionCount, ts.AnswerCount, ts.AcceptedAnswerCount, ue.TotalPosts, ue.TotalComments, ue.LastPostDate
+ORDER BY 
+    ts.PostCount DESC, ts.QuestionCount DESC;

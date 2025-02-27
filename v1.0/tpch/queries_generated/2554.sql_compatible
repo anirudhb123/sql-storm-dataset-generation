@@ -1,0 +1,67 @@
+
+WITH SupplierData AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ps.ps_comment,
+        RANK() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost ASC) AS price_rank
+    FROM 
+        SupplierData s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.rn <= 3
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    ts.s_name,
+    ts.nation_name,
+    ts.p_name,
+    ts.ps_availqty,
+    ts.ps_supplycost,
+    od.total_revenue,
+    COALESCE(NULLIF(ts.ps_supplycost, 0), 1) AS adjusted_supplycost,
+    CASE 
+        WHEN od.total_revenue > 10000 THEN 'High Revenue'
+        ELSE 'Low Revenue' 
+    END AS revenue_category
+FROM 
+    TopSuppliers ts
+LEFT JOIN 
+    OrderDetails od ON ts.s_suppkey = od.o_orderkey
+WHERE 
+    ts.price_rank = 1
+ORDER BY 
+    ts.nation_name, ts.ps_supplycost DESC;

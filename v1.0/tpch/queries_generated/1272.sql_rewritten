@@ -1,0 +1,61 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(DISTINCT o.o_orderkey) AS OrderCount,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    n.n_name AS NationName,
+    COUNT(DISTINCT c.c_custkey) AS CustomerCount,
+    SUM(cs.TotalSpent) AS TotalRevenue,
+    MAX(rs.o_orderdate) AS LastOrderDate,
+    COALESCE(SUM(ss.TotalCost), 0) AS TotalSupplierCost
+FROM 
+    nation n
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    CustomerStats cs ON c.c_custkey = cs.c_custkey
+LEFT JOIN 
+    RankedOrders rs ON cs.OrderCount > 0 AND rs.OrderRank = 1
+LEFT JOIN 
+    SupplierSummary ss ON c.c_custkey = (SELECT c2.c_custkey FROM customer c2 WHERE c2.c_nationkey = n.n_nationkey LIMIT 1)
+WHERE 
+    n.n_nationkey IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    TotalRevenue DESC;

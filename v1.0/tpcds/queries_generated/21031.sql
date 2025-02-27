@@ -1,0 +1,57 @@
+
+WITH RECURSIVE date_ranges AS (
+    SELECT MIN(d_date_sk) AS start_date_sk, MAX(d_date_sk) AS end_date_sk
+    FROM date_dim
+),
+customer_stats AS (
+    SELECT cd_gender, 
+           cd_marital_status, 
+           COUNT(c_customer_sk) AS total_customers,
+           COUNT(DISTINCT CASE WHEN c_first_shipto_date_sk IS NOT NULL THEN c_customer_sk END) AS active_customers,
+           AVG(cd_purchase_estimate) AS average_purchase_estimate
+    FROM customer
+    LEFT JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY cd_gender, cd_marital_status
+),
+sales_summary AS (
+    SELECT ws_bill_customer_sk AS customer_sk,
+           SUM(ws_net_profit) AS total_profit,
+           COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN (SELECT start_date_sk FROM date_ranges) 
+                             AND (SELECT end_date_sk FROM date_ranges)
+    GROUP BY ws_bill_customer_sk
+),
+item_sales AS (
+    SELECT i_item_id,
+           AVG(ws_sales_price) AS average_price,
+           SUM(ws_quantity) AS total_quantity_sold
+    FROM web_sales
+    JOIN item ON ws_item_sk = i_item_sk
+    GROUP BY i_item_id
+),
+combined AS (
+    SELECT cs.cd_gender,
+           cs.cd_marital_status,
+           cs.total_customers,
+           cs.active_customers,
+           ss.total_profit,
+           ss.total_orders,
+           is.average_price,
+           is.total_quantity_sold,
+           RANK() OVER (PARTITION BY cs.cd_gender ORDER BY ss.total_profit DESC) AS profit_rank
+    FROM customer_stats cs
+    LEFT JOIN sales_summary ss ON cs.total_customers > 0
+    LEFT JOIN item_sales is ON ss.customer_sk = c_customer_sk
+)
+SELECT cd_gender,
+       cd_marital_status,
+       COALESCE(SUM(total_profit), 0) AS total_profit,
+       COALESCE(SUM(total_orders), 0) AS total_orders,
+       COALESCE(SUM(average_price), 0) AS avg_price,
+       COALESCE(SUM(total_quantity_sold), 0) AS total_qty_sold,
+       COUNT(*) FILTER (WHERE profit_rank < 5) AS top_profit_customers
+FROM combined
+WHERE (cd_gender = 'M' OR cd_gender IS NULL)
+GROUP BY cd_gender, cd_marital_status
+ORDER BY total_profit DESC, cd_marital_status;

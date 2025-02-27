@@ -1,0 +1,32 @@
+WITH RecursiveTags AS (
+    SELECT Id, TagName, COUNT(*) AS TagCount
+    FROM Tags
+    GROUP BY Id, TagName
+),
+RankedPostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS Tag,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY t.TagName) AS TagRank
+    FROM Posts p
+    JOIN RecursiveTags t ON t.TagName = UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))
+)
+SELECT 
+    u.DisplayName AS UserName,
+    p.Title,
+    p.CreationDate,
+    ARRAY_AGG(rt.Tag) AS AssociatedTags,
+    COUNT(c.Id) AS CommentCount,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+    MAX(ph.CreationDate) AS LastEditDate
+FROM Posts p
+JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN Comments c ON p.Id = c.PostId
+LEFT JOIN Votes v ON p.Id = v.PostId
+LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+JOIN RankedPostTags rt ON p.Id = rt.PostId
+WHERE p.PostTypeId = 1  -- Only consider questions
+GROUP BY u.DisplayName, p.Title, p.CreationDate
+ORDER BY COUNT(c.Id) DESC, UpVotes - DownVotes DESC
+LIMIT 10;

@@ -1,0 +1,48 @@
+WITH movie_details AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        t.kind_id,
+        ak.name AS actor_name,
+        ak.person_id,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    JOIN 
+        cast_info c ON ak.movie_id = c.movie_id
+    JOIN 
+        aka_name an ON c.person_id = an.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year > 2000
+        AND ak.title ILIKE '%action%'
+    GROUP BY 
+        t.title, t.production_year, t.kind_id, ak.name, ak.person_id
+), 
+actor_counts AS (
+    SELECT 
+        md.actor_name,
+        COUNT(DISTINCT md.movie_title) AS movie_count
+    FROM 
+        movie_details md
+    GROUP BY 
+        md.actor_name
+) 
+SELECT 
+    ac.actor_name,
+    ac.movie_count,
+    STRING_AGG(DISTINCT md.keywords || ', ') AS associated_keywords
+FROM 
+    actor_counts ac
+JOIN 
+    movie_details md ON ac.actor_name = md.actor_name
+GROUP BY 
+    ac.actor_name, ac.movie_count
+ORDER BY 
+    ac.movie_count DESC
+LIMIT 10;

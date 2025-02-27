@@ -1,0 +1,111 @@
+
+WITH RECURSIVE UserScore AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CAST(0 AS INT) AS TotalScore
+    FROM 
+        Users
+    WHERE 
+        Reputation > 0
+    UNION ALL
+    SELECT 
+        u.Id,
+        u.Reputation,
+        us.TotalScore + COALESCE((SELECT SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE -1 END) 
+                                        FROM Votes v 
+                                        WHERE v.UserId = u.Id), 0)
+    FROM 
+        Users u
+    INNER JOIN 
+        UserScore us ON u.Id = us.UserId
+    WHERE 
+        us.TotalScore IS NULL
+),
+
+LatestPostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate IS NOT NULL
+),
+
+PostLinkStatistics AS (
+    SELECT 
+        pl.PostId,
+        COUNT(*) AS RelatedPostsCount
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+),
+
+ClosedPostReasons AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseReasonCount,
+        MAX(ph.CreationDate) AS LatestCloseDate,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON CAST(ph.Comment AS INT) = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+
+FinalResults AS (
+    SELECT 
+        u.DisplayName,
+        us.Reputation,
+        us.TotalScore,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(pl.RelatedPostsCount, 0) AS RelatedPostsCount,
+        COALESCE(cpr.CloseReasonCount, 0) AS CloseReasonCount,
+        COALESCE(cpr.LatestCloseDate, 'N/A') AS LatestCloseDate,
+        COALESCE(cpr.CloseReasons, 'No Close Reasons') AS CloseReasons
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserScore us ON u.Id = us.UserId
+    LEFT JOIN 
+        LatestPostDetails p ON u.Id = p.OwnerUserId AND p.rn = 1
+    LEFT JOIN 
+        PostLinkStatistics pl ON p.PostId = pl.PostId
+    LEFT JOIN 
+        ClosedPostReasons cpr ON p.PostId = cpr.PostId
+    WHERE 
+        u.Reputation > 100
+)
+
+SELECT 
+    DisplayName,
+    Reputation,
+    TotalScore,
+    Title,
+    CreationDate,
+    ViewCount,
+    Score,
+    RelatedPostsCount,
+    CloseReasonCount,
+    LatestCloseDate,
+    CloseReasons
+FROM 
+    FinalResults
+ORDER BY 
+    TotalScore DESC,
+    Reputation DESC
+FETCH FIRST 10 ROWS ONLY;

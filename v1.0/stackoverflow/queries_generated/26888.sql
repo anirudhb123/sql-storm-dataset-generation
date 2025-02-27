@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.Tags,
+        P.CreationDate,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(RB.UserId) AS RevisionsCount,
+        RANK() OVER (PARTITION BY P.TagCount ORDER BY P.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory RB ON P.Id = RB.PostId
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.Tags, P.CreationDate
+),
+TopTags AS (
+    SELECT 
+        TRIM(UNNEST(STRING_TO_ARRAY(P.Tags, '> <'))) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 5  -- Get the top 5 tags
+),
+PostStats AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Body,
+        RP.Tags,
+        RP.CreationDate,
+        RP.CommentCount,
+        RP.RevisionsCount,
+        TT.TagName,
+        RP.ViewRank
+    FROM 
+        RankedPosts RP
+    JOIN 
+        TopTags TT ON TT.TagName = ANY (STRING_TO_ARRAY(RP.Tags, '> <'))
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.Body,
+    PS.Tags,
+    PS.CreationDate,
+    PS.CommentCount,
+    PS.RevisionsCount,
+    PS.TagName,
+    PS.ViewRank
+FROM 
+    PostStats PS
+ORDER BY 
+    PS.ViewRank, PS.CommentCount DESC;

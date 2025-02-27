@@ -1,0 +1,54 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.level < 5
+),
+AveragePrices AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+)
+
+SELECT p.p_name, 
+       r.r_name AS region, 
+       n.n_name AS nation, 
+       s.s_name AS supplier,
+       COALESCE(AVG(ap.avg_supplycost), 0) AS avg_supply_cost,
+       SUM(COALESCE(ls.total_revenue, 0)) AS total_revenue,
+       COUNT(DISTINCT oh.o_orderkey) AS order_count
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN AveragePrices ap ON p.p_partkey = ap.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN LineItemSummary ls ON ls.l_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_orderkey = p.p_partkey
+)
+LEFT JOIN OrderHierarchy oh ON oh.o_orderkey = ls.l_orderkey
+WHERE p.p_size > 10 AND s.s_acctbal IS NOT NULL
+GROUP BY p.p_name, r.r_name, n.n_name, s.s_name
+HAVING SUM(COALESCE(ls.total_revenue, 0)) > 1000 
+ORDER BY total_revenue DESC, avg_supply_cost ASC
+LIMIT 50;

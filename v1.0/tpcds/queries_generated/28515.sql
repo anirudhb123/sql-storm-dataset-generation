@@ -1,0 +1,39 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+),
+AddressDetails AS (
+    SELECT 
+        ca.ca_address_id,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        customer_address ca
+)
+SELECT 
+    cs.c_customer_id,
+    cs.c_first_name,
+    cs.c_last_name,
+    ad.ca_city,
+    ad.ca_state,
+    cs.total_sales
+FROM 
+    CustomerSales cs
+JOIN 
+    AddressDetails ad ON cs.c_customer_id = (SELECT c.c_customer_id FROM customer c WHERE c.c_current_addr_sk = ad.ca_address_sk)
+WHERE 
+    cs.total_sales > 1000 AND
+    (LOWER(ad.ca_city) LIKE '%new%' OR LOWER(ad.ca_state) = 'ca')
+ORDER BY 
+    cs.total_sales DESC
+LIMIT 10;

@@ -1,0 +1,43 @@
+
+WITH RecursiveSalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        COALESCE(ws.ws_quantity, 0) AS total_quantity,
+        COALESCE(ws.ws_ext_sales_price, 0) AS total_sales,
+        COALESCE(ws.ws_ext_tax, 0) AS total_tax,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_order_number DESC) AS row_num
+    FROM web_sales ws
+    UNION ALL
+    SELECT 
+        cs.cs_item_sk,
+        cs.cs_order_number,
+        COALESCE(cs.cs_quantity, 0),
+        COALESCE(cs.cs_ext_sales_price, 0),
+        COALESCE(cs.cs_ext_tax, 0),
+        ROW_NUMBER() OVER (PARTITION BY cs.cs_item_sk ORDER BY cs.cs_order_number DESC)
+    FROM catalog_sales cs
+    WHERE cs.cs_item_sk IN (SELECT DISTINCT ws_item_sk FROM web_sales)
+)
+SELECT 
+    item.i_item_id,
+    item.i_product_name,
+    SUM(rsd.total_quantity) AS total_quantity,
+    SUM(rsd.total_sales) AS total_sales,
+    SUM(rsd.total_tax) AS total_tax,
+    AVG(rsd.total_sales) OVER (PARTITION BY item.i_item_sk) AS avg_sales,
+    COUNT(DISTINCT rsd.ws_order_number) AS order_count,
+    CASE 
+        WHEN SUM(rsd.total_sales) IS NULL THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END AS sales_status,
+    CASE 
+        WHEN MAX(rsd.row_num) = 1 THEN 'Latest Sale'
+        ELSE 'Multiple Sales'
+    END AS sale_type
+FROM RecursiveSalesData rsd
+JOIN item ON item.i_item_sk = rsd.ws_item_sk
+GROUP BY item.i_item_id, item.i_product_name
+HAVING SUM(rsd.total_quantity) > 0
+ORDER BY total_sales DESC
+LIMIT 100;

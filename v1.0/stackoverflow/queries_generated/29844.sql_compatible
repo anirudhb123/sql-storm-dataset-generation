@@ -1,0 +1,66 @@
+
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(Posts.Score, 0)) AS TotalScore
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, LENGTH(Posts.Tags) - 2), '><')::text[])
+    GROUP BY 
+        Tags.TagName
+), 
+UserStats AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS QuestionsCount,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(Posts.Score, 0)) AS TotalScore,
+        SUM(COALESCE(Badges.Class, 0)) AS TotalBadges
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId AND Posts.PostTypeId = 1
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+), 
+VoteStats AS (
+    SELECT 
+        Posts.Id AS PostId,
+        COUNT(Votes.Id) AS TotalVotes,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Posts.Id
+)
+SELECT 
+    UserStats.DisplayName AS UserName,
+    UserStats.QuestionsCount,
+    UserStats.TotalViews AS UserTotalViews,
+    UserStats.TotalScore AS UserTotalScore,
+    UserStats.TotalBadges,
+    TagStats.TagName,
+    TagStats.PostCount AS TagPostCount,
+    TagStats.TotalViews AS TagTotalViews,
+    TagStats.TotalScore AS TagTotalScore,
+    VoteStats.TotalVotes,
+    VoteStats.UpVotes,
+    VoteStats.DownVotes
+FROM 
+    UserStats
+JOIN 
+    TagStats ON TRUE 
+JOIN 
+    VoteStats ON VoteStats.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = UserStats.UserId)
+ORDER BY 
+    UserStats.TotalViews DESC, 
+    TagStats.TotalScore DESC;

@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 10
+)
+SELECT 
+    p.Id as PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.UpVotes,
+    p.DownVotes,
+    p.CommentCount,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags
+FROM 
+    TopPosts p
+LEFT JOIN 
+    PostsTags pt ON p.PostId = pt.PostId
+LEFT JOIN 
+    Tags t ON pt.TagId = t.Id
+GROUP BY 
+    p.PostId, p.Title, p.CreationDate, p.Score, p.ViewCount, p.UpVotes, p.DownVotes, p.CommentCount
+ORDER BY 
+    p.Score DESC;

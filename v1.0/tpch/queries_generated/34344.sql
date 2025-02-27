@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000.00
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal AND s.s_acctbal > 5000.00
+),
+OrderCounts AS (
+    SELECT o_custkey, COUNT(o_orderkey) AS order_count
+    FROM orders
+    GROUP BY o_custkey
+),
+LineItemDetails AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, l.l_quantity, l.l_extendedprice,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rank
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2023-12-31'
+)
+SELECT 
+    n.n_name AS nation,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(COALESCE(s.s_acctbal, 0)) AS total_supplier_balance,
+    AVG(oc.order_count) AS avg_orders_per_customer,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ' (', ps.ps_availqty, ')'), ', ') AS part_details
+FROM nation n
+LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN part p ON p.p_partkey = ps.ps_partkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN OrderCounts oc ON oc.o_custkey = c.c_custkey
+LEFT JOIN LineItemDetails lid ON lid.l_suppkey = s.s_suppkey
+WHERE s.s_acctbal IS NOT NULL AND p.p_size BETWEEN 5 AND 20
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 0 AND SUM(COALESCE(s.s_acctbal, 0)) > 10000.00
+ORDER BY total_supplier_balance DESC;

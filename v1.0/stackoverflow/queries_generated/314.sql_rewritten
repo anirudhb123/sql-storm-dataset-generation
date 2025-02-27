@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id, 
+        P.Title, 
+        P.Score, 
+        P.CreationDate, 
+        P.AnswerCount, 
+        P.ViewCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' 
+        AND P.Score > 0
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS DownVotes,
+        COALESCE(SUM(B.Class = 1), 0) AS GoldBadges,
+        COALESCE(SUM(B.Class = 2), 0) AS SilverBadges,
+        COALESCE(SUM(B.Class = 3), 0) AS BronzeBadges,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    LEFT JOIN 
+        Badges B ON B.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    U.DisplayName,
+    U.UpVotes,
+    U.DownVotes,
+    U.GoldBadges,
+    U.SilverBadges,
+    U.BronzeBadges,
+    COUNT(R.Id) AS PostCount,
+    MAX(R.Score) AS HighestScore,
+    SUM(R.ViewCount) AS TotalViews
+FROM 
+    UserStats U
+LEFT JOIN 
+    RankedPosts R ON U.UserId = R.OwnerUserId
+WHERE 
+    U.TotalPosts > 0
+GROUP BY 
+    U.DisplayName, U.UpVotes, U.DownVotes, U.GoldBadges, U.SilverBadges, U.BronzeBadges
+HAVING 
+    SUM(R.ViewCount) > 1000
+ORDER BY 
+    HighestScore DESC, PostCount DESC;

@@ -1,0 +1,85 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        COALESCE(
+            (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0
+        ) AS UpVoteCount,
+        COALESCE(
+            (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0
+        ) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment 
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+        AND ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '6 months'
+),
+PostSummary AS (
+    SELECT
+        up.PostId,
+        up.Title,
+        up.ViewCount,
+        up.UpVoteCount,
+        up.DownVoteCount,
+        ub.BadgeCount,
+        cp.Title AS ClosedTitle
+    FROM 
+        RankedPosts up
+    LEFT JOIN 
+        UserBadges ub ON up.OwnerUserId = ub.UserId
+    LEFT JOIN 
+        ClosedPosts cp ON up.PostId = cp.Id
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.ViewCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    ps.BadgeCount,
+    CASE 
+        WHEN ps.ClosedTitle IS NOT NULL THEN CONCAT('This post was closed with reason: ', ps.ClosedTitle)
+        ELSE 'This post is open for discussion.'
+    END AS ClosureStatus
+FROM 
+    PostSummary ps
+WHERE 
+    ps.BadgeCount > 0 
+    AND ps.UpVoteCount - ps.DownVoteCount > 5
+ORDER BY 
+    ps.ViewCount DESC, 
+    ps.ClosedTitle IS NULL DESC, 
+    ps.BadgeCount DESC
+LIMIT 50;

@@ -1,0 +1,28 @@
+
+SELECT 
+    p.p_name,
+    CONCAT('Supplier: ', s.s_name, ' (ID: ', s.s_suppkey, ') | Price: $', FORMAT(ps.ps_supplycost, 2), ' | Comments: ', ps.ps_comment) AS supplier_details,
+    COUNT(DISTINCT c.c_custkey) AS customer_count, 
+    SUM(l.l_quantity) AS total_quantity,
+    COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS returns,
+    MAX(o.o_orderdate) AS last_order_date
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_name LIKE '%widget%' 
+    AND s.s_comment NOT LIKE '%cheap%'
+    AND l.l_shipdate >= '1997-01-01'
+GROUP BY 
+    p.p_name, s.s_name, s.s_suppkey, ps.ps_supplycost, ps.ps_comment
+ORDER BY 
+    total_quantity DESC, p.p_name;

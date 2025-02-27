@@ -1,0 +1,83 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        Id,
+        PostTypeId,
+        ParentId,
+        Title,
+        CreationDate,
+        Score,
+        COALESCE(ViewCount, 0) AS ViewCount,
+        OwnerUserId,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT
+        p.Id,
+        p.PostTypeId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(p.ViewCount, 0) AS ViewCount,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.Reputation
+),
+PostVoteSummary AS (
+    SELECT
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PopularPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.Score + COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0) AS NetScore,
+        ROW_NUMBER() OVER (ORDER BY (p.Score + COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0)) DESC) AS PopularityRank,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN PostVoteSummary v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY p.Id, p.Title, p.Score
+)
+SELECT
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    r.Level AS PostLevel,
+    COALESCE(v.UpVotes, 0) AS UpVotes,
+    COALESCE(v.DownVotes, 0) AS DownVotes,
+    ps.PopularityRank,
+    CASE 
+        WHEN u.Reputation > 1000 THEN 'Expert'
+        WHEN u.Reputation > 100 THEN 'Intermediate'
+        ELSE 'Novice'
+    END AS UserLevel
+FROM Users u
+JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN PostVoteSummary v ON p.Id = v.PostId
+JOIN RecursivePostHierarchy r ON p.Id = r.Id
+JOIN PopularPosts ps ON p.Id = ps.PostId
+WHERE u.Reputation IS NOT NULL
+ORDER BY ps.PopularityRank, u.Reputation DESC;

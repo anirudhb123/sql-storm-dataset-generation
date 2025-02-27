@@ -1,0 +1,51 @@
+WITH RECURSIVE MovieChain AS (
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS chain_level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= EXTRACT(YEAR FROM cast('2024-10-01' as date)) - 10
+
+    UNION ALL
+    
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mc.chain_level + 1
+    FROM 
+        MovieChain mc
+    JOIN 
+        movie_link ml ON mc.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+
+
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT mc.movie_id) AS total_linked_movies,
+    AVG(mc.chain_level) AS avg_chain_level,
+    STRING_AGG(DISTINCT t.title, ', ') AS titles_in_chain
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    MovieChain mc ON ci.movie_id = mc.movie_id
+JOIN 
+    aka_title t ON ci.movie_id = t.id
+WHERE 
+    ak.name IS NOT NULL 
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT mc.movie_id) > 0 
+ORDER BY 
+    total_linked_movies DESC
+LIMIT 10;

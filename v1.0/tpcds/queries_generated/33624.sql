@@ -1,0 +1,72 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_net_profit,
+        1 AS level
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk
+    UNION ALL
+    SELECT 
+        sh.ss_store_sk,
+        SUM(ssa.ss_net_profit) AS total_net_profit,
+        level + 1
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store_sales ssa ON sh.ss_store_sk = ssa.ss_store_sk
+    WHERE 
+        level < 5
+    GROUP BY 
+        sh.ss_store_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_within_gender
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+),
+sales_summary AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    ci.ca_city,
+    ci.cd_gender,
+    ss.total_sales,
+    ss.avg_net_profit,
+    CASE 
+        WHEN ss.order_count > 100 THEN 'High Volume'
+        WHEN ss.order_count BETWEEN 50 AND 100 THEN 'Medium Volume'
+        ELSE 'Low Volume'
+    END AS order_volume,
+    sh.total_net_profit
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_summary ss ON ci.rank_within_gender <= 10
+LEFT JOIN 
+    sales_hierarchy sh ON sh.ss_store_sk = ss.w_warehouse_id
+WHERE 
+    ci.rank_within_gender <= 5
+    AND (ci.cd_marital_status IS NULL OR ci.cd_marital_status = 'S')
+ORDER BY 
+    ci.ca_city, ss.total_sales DESC;

@@ -1,0 +1,71 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as rank_orders
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) as total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+PartAvailability AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) as total_avail_qty,
+        AVG(ps.ps_supplycost) as avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(*) AS line_count,
+        AVG(l.l_tax) as avg_tax
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    sd.s_name,
+    pa.p_name,
+    pa.total_avail_qty,
+    ls.total_revenue,
+    ls.line_count,
+    ls.avg_tax
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    LineItemStats ls ON r.o_orderkey = ls.l_orderkey
+INNER JOIN 
+    PartAvailability pa ON r.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_orderkey = r.o_orderkey)
+LEFT JOIN 
+    SupplierDetails sd ON sd.total_supply_value = (SELECT MAX(total_supply_value) FROM SupplierDetails WHERE s_nationkey = sd.s_nationkey)
+WHERE 
+    r.rank_orders <= 10
+ORDER BY 
+    r.o_totalprice DESC;

@@ -1,0 +1,46 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws_item_sk, SUM(ws_quantity) AS total_quantity, SUM(ws_sales_price) AS total_sales
+    FROM web_sales
+    GROUP BY ws_item_sk
+    UNION ALL
+    SELECT cs_item_sk, SUM(cs_quantity) AS total_quantity, SUM(cs_sales_price) AS total_sales
+    FROM catalog_sales
+    GROUP BY cs_item_sk
+),
+AggregateSales AS (
+    SELECT i.i_item_id, 
+           COALESCE(ws.total_quantity, 0) AS web_sales_quantity, 
+           COALESCE(cs.total_quantity, 0) AS catalog_sales_quantity,
+           (COALESCE(ws.total_sales, 0) + COALESCE(cs.total_sales, 0)) AS total_sales
+    FROM item i
+    LEFT JOIN (SELECT ws_item_sk, SUM(ws_quantity) AS total_quantity, SUM(ws_sales_price) AS total_sales FROM web_sales GROUP BY ws_item_sk) ws 
+      ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN (SELECT cs_item_sk, SUM(cs_quantity) AS total_quantity, SUM(cs_sales_price) AS total_sales FROM catalog_sales GROUP BY cs_item_sk) cs
+      ON i.i_item_sk = cs.cs_item_sk
+),
+CustomerReturns AS (
+    SELECT c.c_customer_id, 
+           SUM(sr.return_quantity) AS total_returns, 
+           SUM(cr.return_quantity) AS catalog_returns
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    GROUP BY c.c_customer_id
+)
+SELECT a.i_item_id,
+       a.web_sales_quantity,
+       a.catalog_sales_quantity,
+       a.total_sales,
+       COALESCE(r.total_returns, 0) AS total_returns,
+       COALESCE(r.catalog_returns, 0) AS catalog_returns,
+       CASE 
+           WHEN a.total_sales > 10000 THEN 'High Sales'
+           WHEN a.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Sales'
+           ELSE 'Low Sales' 
+       END AS sales_category
+FROM AggregateSales a
+LEFT JOIN CustomerReturns r ON a.i_item_id = r.c_customer_id
+WHERE (a.total_sales IS NOT NULL OR r.total_returns IS NOT NULL)
+ORDER BY a.total_sales DESC
+LIMIT 100;

@@ -1,0 +1,75 @@
+
+WITH RECURSIVE UserVotes AS (
+    SELECT 
+        v.UserId AS VoterId,
+        p.OwnerUserId AS PostOwnerId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    JOIN Posts p ON v.PostId = p.Id
+    GROUP BY v.UserId, p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges b
+    GROUP BY b.UserId
+), 
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title, 
+        p.CreationDate,
+        p.Score,
+        COALESCE(u.VoterId, -1) AS LastVoterId,
+        COALESCE(ub.BadgeCount, 0) AS UserBadgeCount
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId AS VoterId,
+            COUNT(DISTINCT PostId) AS VoteCount
+        FROM Votes
+        GROUP BY OwnerUserId
+    ) u ON u.VoterId = p.OwnerUserId
+    LEFT JOIN UserBadges ub ON ub.UserId = p.OwnerUserId
+),
+AggregatePostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedCount,
+        MAX(p.CreationDate) AS LastActivityDate,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON ph.PostId = p.Id
+    GROUP BY p.Id
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.Score,
+    aps.CommentCount,
+    aps.ClosedCount,
+    aps.LastActivityDate,
+    aps.TotalViews,
+    uv.TotalVotes,
+    uv.UpVotes,
+    uv.DownVotes,
+    ub.BadgeCount AS UserBadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+FROM PostActivity pa
+LEFT JOIN AggregatePostStats aps ON pa.PostId = aps.PostId
+LEFT JOIN UserVotes uv ON pa.LastVoterId = uv.VoterId
+LEFT JOIN UserBadges ub ON ub.UserId = pa.LastVoterId
+WHERE pa.Score > 0 AND aps.TotalViews > 100
+ORDER BY pa.CreationDate DESC
+LIMIT 50;

@@ -1,0 +1,82 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT kc.person_id) OVER (PARTITION BY t.id) AS cast_count,
+        ROW_NUMBER() OVER (ORDER BY t.production_year DESC, t.title) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name kc ON ci.person_id = kc.person_id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%')
+),
+TopMovies AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        ROW_NUMBER() OVER (ORDER BY rm.cast_count DESC) AS top_rn
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.cast_count > 0
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(cn.name, ', ') AS company_names,
+        ARRAY_AGG(DISTINCT ct.kind ORDER BY ct.kind) AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    mk.keywords,
+    mc.company_names,
+    mc.company_types,
+    (SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = tm.title_id AND cc.status_id IS NOT NULL) AS complete_cast_count,
+    CASE 
+        WHEN mc.company_names IS NULL THEN 'No Companies'
+        ELSE 'Companies Listed'
+    END AS company_status,
+    CASE 
+        WHEN tm.cast_count = (SELECT MAX(cast_count) FROM TopMovies) THEN 'Most Cast Members'
+        ELSE NULL
+    END AS special_note
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieKeywords mk ON tm.title_id = mk.movie_id
+LEFT JOIN 
+    MovieCompanies mc ON tm.title_id = mc.movie_id
+WHERE 
+    tm.top_rn <= 10
+ORDER BY 
+    tm.production_year DESC, 
+    tm.cast_count DESC;

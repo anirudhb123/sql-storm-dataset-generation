@@ -1,0 +1,8 @@
+SELECT p_name, SUM(l_extendedprice * (1 - l_discount)) AS revenue
+FROM lineitem
+JOIN partsupp ON lineitem.l_partkey = partsupp.ps_partkey
+JOIN supplier ON partsupp.ps_suppkey = supplier.s_suppkey
+JOIN customer ON supplier.s_nationkey = customer.c_nationkey
+WHERE customer.c_acctbal > 1000
+GROUP BY p_name
+ORDER BY revenue DESC;

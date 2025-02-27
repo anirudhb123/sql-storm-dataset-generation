@@ -1,0 +1,84 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, '2024-10-01')
+),
+
+VoteSummary AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        SUM(CASE WHEN v.CreationDate > DATEADD(DAY, -30, '2024-10-01 12:34:56') THEN (CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE -1 END) ELSE 0 END) AS RecentVoteImpact
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+
+MostVotedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        vs.Upvotes,
+        vs.Downvotes,
+        (vs.Upvotes - vs.Downvotes) AS NetVotes,
+        COALESCE(NULLIF(vs.RecentVoteImpact, 0), NULL) AS AdjustedImpact
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        VoteSummary vs ON rp.PostId = vs.PostId
+    WHERE 
+        rp.PostRank = 1
+),
+
+OpenPostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+)
+
+SELECT 
+    mp.Title,
+    mp.CreationDate,
+    mp.Score,
+    mp.ViewCount,
+    mp.Upvotes,
+    mp.Downvotes,
+    mp.NetVotes,
+    ph.UserId AS LastActionUser,
+    ph.CreationDate AS LastActionDate,
+    CASE 
+        WHEN mp.AdjustedImpact IS NOT NULL THEN 'Has Recent Voting Impact'
+        ELSE 'No Recent Voting Impact'
+    END AS ImpactStatus
+FROM 
+    MostVotedPosts mp
+LEFT JOIN 
+    OpenPostHistory ph ON mp.PostId = ph.PostId
+WHERE 
+    mp.NetVotes > 0 AND 
+    (ph.CreationDate IS NULL OR ph.CreationDate >= DATEADD(DAY, -30, '2024-10-01 12:34:56'))
+ORDER BY 
+    mp.NetVotes DESC, 
+    mp.ViewCount DESC;

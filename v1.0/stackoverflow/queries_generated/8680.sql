@@ -1,0 +1,45 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.Rank,
+    rp.CommentCount,
+    rp.Upvotes,
+    rp.Downvotes,
+    CASE 
+        WHEN rp.Rank <= 10 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Rank <= 100
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 50;

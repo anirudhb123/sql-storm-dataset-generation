@@ -1,0 +1,74 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorCompanyInfo AS (
+    SELECT 
+        ci.movie_id,
+        cn.name AS company_name,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS note_count
+    FROM 
+        cast_info ci
+    JOIN 
+        movie_companies mc ON ci.movie_id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        ci.movie_id, cn.name
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ac.actor_count,
+        ac.note_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorCompanyInfo ac ON rm.movie_id = ac.movie_id
+    WHERE 
+        (rm.production_year > 2000 AND ac.actor_count >= 5)
+        OR (rm.production_year <= 2000 AND ac.note_count < 3)
+),
+FinalResults AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        COALESCE(fm.actor_count, 0) AS actor_count,
+        COALESCE(fm.note_count, 0) AS note_count,
+        CASE 
+            WHEN fm.production_year > 2005 THEN 'Modern Era' 
+            ELSE 'Classic Era' 
+        END AS movie_era
+    FROM 
+        FilteredMovies fm
+    ORDER BY 
+        fm.production_year DESC,
+        fm.title ASC
+)
+SELECT 
+    fr.title,
+    fr.production_year,
+    fr.actor_count,
+    fr.note_count,
+    fr.movie_era,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aliases
+FROM 
+    FinalResults fr
+LEFT JOIN 
+    aka_name ak ON ak.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = fr.movie_id)
+GROUP BY 
+    fr.title, fr.production_year, fr.actor_count, fr.note_count, fr.movie_era
+HAVING 
+    COUNT(DISTINCT ak.name) > 2 
+ORDER BY 
+    fr.production_year DESC;

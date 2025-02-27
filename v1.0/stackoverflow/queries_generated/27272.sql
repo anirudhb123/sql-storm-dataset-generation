@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+),
+PopularTags AS (
+    SELECT 
+        TRIM(unnest(string_to_array(p.Tags, '>'))::varchar) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+    GROUP BY 
+        TRIM(unnest(string_to_array(p.Tags, '>')))
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)   -- Edits on Title, Body, Tags
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+    ORDER BY 
+        ph.CreationDate DESC
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.AnswerCount,
+    pt.TagName,
+    re.EditCount,
+    ub.BadgeCount,
+    ub.BadgeNames
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PopularTags pt ON rp.PostId IN (SELECT PostId FROM Posts WHERE Tags LIKE '%' || pt.TagName || '%')
+LEFT JOIN 
+    RecentEdits re ON rp.PostId = re.PostId
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE 
+    rp.UserPostRank = 1
+    AND rp.ViewCount > 100
+ORDER BY 
+    rp.ViewCount DESC, 
+    re.EditCount DESC;

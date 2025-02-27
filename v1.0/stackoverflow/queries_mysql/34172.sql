@@ -1,0 +1,80 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        GROUP_CONCAT(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT DISTINCT TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(p.Tags, '><', n.n), '><', -1)) AS tag
+         FROM (SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL 
+               SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL 
+               SELECT 9 UNION ALL SELECT 10) n) AS tag ON true
+    JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.CreationDate > DATE_SUB('2024-10-01 12:34:56', INTERVAL 1 YEAR)
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.Tags,
+        COALESCE(pvs.Upvotes, 0) AS Upvotes,
+        COALESCE(pvs.Downvotes, 0) AS Downvotes,
+        COALESCE(pvs.TotalVotes, 0) AS TotalVotes,
+        RANK() OVER (ORDER BY rp.Score DESC, rp.ViewCount DESC) AS Rank
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        PostVoteSummary pvs ON rp.PostId = pvs.PostId
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.Tags,
+    tp.Upvotes,
+    tp.Downvotes,
+    tp.TotalVotes,
+    CASE 
+        WHEN tp.Upvotes > 0 THEN ROUND(tp.Upvotes / NULLIF(tp.TotalVotes, 0), 2)
+        ELSE 0
+    END AS UpvoteRatio,
+    CASE 
+        WHEN tp.Rank <= 10 THEN 'Top 10 Post'
+        ELSE 'Other'
+    END AS PostRanking
+FROM 
+    TopPosts tp
+WHERE 
+    tp.Rank <= 10 OR (tp.Upvotes - tp.Downvotes) > 5
+ORDER BY 
+    tp.Rank;

@@ -1,0 +1,47 @@
+WITH RegionData AS (
+    SELECT r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_name
+),
+SupplierPartData AS (
+    SELECT s.s_suppkey, COUNT(DISTINCT ps.ps_partkey) AS supplied_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+TotalOrderValue AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    GROUP BY o.o_custkey
+),
+LineItemAnalysis AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS line_total
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+FinalBenchmark AS (
+    SELECT 
+        r.r_name AS region,
+        rd.nation_count,
+        COUNT(DISTINCT sa.s_suppkey) AS total_suppliers,
+        SUM(o.total_spent) AS total_region_spending,
+        COUNT(DISTINCT l.l_orderkey) AS total_orders,
+        SUM(la.line_total) AS total_line_items_value
+    FROM RegionData rd
+    JOIN region r ON rd.r_name = r.r_name
+    JOIN SupplierPartData sa ON sa.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps)
+    JOIN TotalOrderValue o ON o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey))
+    JOIN LineItemAnalysis la ON la.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)))
+    GROUP BY r.r_name, rd.nation_count
+)
+SELECT 
+    region,
+    nation_count,
+    total_suppliers,
+    total_region_spending,
+    total_orders,
+    total_line_items_value
+FROM FinalBenchmark
+ORDER BY total_spending DESC, region;

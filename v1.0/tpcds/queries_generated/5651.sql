@@ -1,0 +1,41 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_sales_price) AS total_sales, 
+        SUM(ws_ext_discount_amt) AS total_discount,
+        SUM(ws_net_paid_inc_tax) AS total_net_paid
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_gender,
+        cd.cd_demo_sk,
+        cd.cd_marital_status, 
+        cd.cd_education_status,
+        SUM(sd.total_sales) AS total_sales_per_customer
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN SalesData sd ON c.c_customer_sk = sd.ws_item_sk
+    GROUP BY c.c_customer_sk, c.c_gender, cd.cd_demo_sk, cd.cd_marital_status, cd.cd_education_status
+),
+RankedCustomers AS (
+    SELECT 
+        *, 
+        RANK() OVER (PARTITION BY cd_demo_sk ORDER BY total_sales_per_customer DESC) AS sales_rank
+    FROM CustomerData
+)
+SELECT 
+    rc.c_customer_sk, 
+    rc.c_gender, 
+    rc.cd_demo_sk,
+    rc.cd_marital_status, 
+    rc.cd_education_status,
+    rc.total_sales_per_customer
+FROM RankedCustomers rc
+WHERE rc.sales_rank <= 5
+ORDER BY rc.cd_demo_sk, rc.total_sales_per_customer DESC;

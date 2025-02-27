@@ -1,0 +1,117 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score > 0 
+        AND p.ViewCount IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        ub.BadgeCount,
+        ub.BadgeNames,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 10 THEN 1 ELSE 0 END), 0) AS DeleteVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, ub.BadgeCount, ub.BadgeNames
+),
+PostsWithComments AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.BadgeCount,
+        pd.BadgeNames,
+        pd.UpVotes,
+        pd.DownVotes,
+        pd.DeleteVotes,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        Comments c ON pd.PostId = c.PostId
+    GROUP BY 
+        pd.PostId, pd.Title, pd.CreationDate, pd.BadgeCount, pd.BadgeNames, pd.UpVotes, pd.DownVotes, pd.DeleteVotes
+),
+FinalResults AS (
+    SELECT 
+        pwc.PostId,
+        pwc.Title,
+        pwc.CreationDate,
+        pwc.BadgeCount,
+        pwc.BadgeNames,
+        pwc.UpVotes,
+        pwc.DownVotes,
+        pwc.DeleteVotes,
+        pwc.CommentCount,
+        pwc.LastCommentDate,
+        CASE 
+            WHEN pwc.CommentCount = 0 THEN 'No Comments' 
+            ELSE 'Comments Available' 
+        END AS CommentAvailability,
+        CASE 
+            WHEN pwc.DeleteVotes > 0 THEN 'Potentially Removed' 
+            ELSE 'Active' 
+        END AS PostStatus
+    FROM 
+        PostsWithComments pwc
+    WHERE 
+        pwc.CommentCount > 0
+    ORDER BY 
+        pwc.CreationDate DESC
+)
+SELECT 
+    postId,
+    Title, 
+    CreationDate, 
+    BadgeCount, 
+    BadgeNames, 
+    UpVotes, 
+    DownVotes, 
+    DeleteVotes, 
+    CommentCount, 
+    LastCommentDate, 
+    CommentAvailability, 
+    PostStatus
+FROM 
+    FinalResults
+WHERE 
+    BadgeCount IS NOT NULL
+    AND PostStatus = 'Active'
+    AND EXISTS (SELECT 1 FROM Posts p WHERE p.Id = FinalResults.PostId AND p.ClosedDate IS NULL)
+ORDER BY 
+    Score DESC
+LIMIT 100;

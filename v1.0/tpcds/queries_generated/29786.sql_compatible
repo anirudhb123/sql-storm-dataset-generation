@@ -1,0 +1,42 @@
+
+WITH RECURSIVE address_parts AS (
+    SELECT
+        ca_address_sk,
+        TRIM(SUBSTRING_INDEX(ca_street_name, ' ', 1)) AS first_word,
+        TRIM(SUBSTRING_INDEX(ca_street_name, ' ', -1)) AS last_word,
+        ca_street_name,
+        LENGTH(ca_street_name) AS name_length
+    FROM
+        customer_address
+), 
+gender_education AS (
+    SELECT
+        cd_gender,
+        cd_education_status,
+        COUNT(*) AS demographic_count
+    FROM
+        customer_demographics
+    GROUP BY 
+        cd_gender, cd_education_status
+),
+address_statistics AS (
+    SELECT
+        AVG(name_length) AS avg_street_name_length,
+        MAX(name_length) AS max_street_name_length,
+        MIN(name_length) AS min_street_name_length
+    FROM
+        address_parts
+)
+SELECT 
+    g.cd_gender,
+    g.cd_education_status,
+    g.demographic_count,
+    a.avg_street_name_length,
+    a.max_street_name_length,
+    a.min_street_name_length
+FROM 
+    gender_education g
+CROSS JOIN 
+    address_statistics a
+ORDER BY 
+    g.cd_gender, g.cd_education_status;

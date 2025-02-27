@@ -1,0 +1,68 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk, 0 AS level
+    FROM customer c
+    WHERE c.c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk, ch.level + 1
+    FROM customer_hierarchy ch
+    JOIN customer c ON c.c_current_cdemo_sk = ch.c_current_cdemo_sk
+    WHERE ch.level < 10
+),
+sales_summary AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws.ws_item_sk
+),
+return_summary AS (
+    SELECT
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returns,
+        AVG(wr.wr_return_amt) AS avg_return_amt,
+        COUNT(DISTINCT wr.wr_order_number) AS return_count
+    FROM web_returns wr
+    WHERE wr.wr_returned_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY wr.wr_item_sk
+),
+final_summary AS (
+    SELECT
+        ss.ws_item_sk,
+        ss.total_sales,
+        ss.avg_sales_price,
+        ss.order_count,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        COALESCE(rs.avg_return_amt, 0) AS avg_return_amt,
+        COALESCE(rs.return_count, 0) AS return_count,
+        CASE 
+            WHEN rs.return_count > 0 THEN (ss.total_sales::DECIMAL / rs.return_count) 
+            ELSE NULL 
+        END AS sales_per_return
+    FROM sales_summary ss
+    LEFT JOIN return_summary rs ON ss.ws_item_sk = rs.wr_item_sk
+),
+excluded_items AS (
+    SELECT DISTINCT sr.sr_item_sk 
+    FROM store_returns sr 
+    WHERE sr.sr_return_quantity > 0
+)
+SELECT 
+    ch.c_first_name,
+    ch.c_last_name,
+    f.ws_item_sk,
+    f.total_sales,
+    f.avg_sales_price,
+    f.order_count,
+    f.total_returns,
+    f.avg_return_amt,
+    f.return_count,
+    f.sales_per_return
+FROM final_summary f
+JOIN customer_hierarchy ch ON f.order_count > 5
+WHERE f.ws_item_sk NOT IN (SELECT item_sk FROM excluded_items)
+ORDER BY f.total_sales DESC, ch.c_last_name ASC
+LIMIT 100;

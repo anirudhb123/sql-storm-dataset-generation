@@ -1,0 +1,81 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aliases,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT c.role, ', ') AS roles,
+        COALESCE(ci.note, 'No note') AS additional_info
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        info_type it ON mi.info_type_id = it.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    LEFT JOIN 
+        movie_info_idx mii ON t.id = mii.movie_id
+    LEFT JOIN 
+        title tt ON tt.id = t.id
+    LEFT JOIN 
+        char_name ch ON ch.imdb_id = tt.imdb_id
+    LEFT JOIN 
+        kind_type kt ON t.kind_id = kt.id
+    LEFT JOIN 
+        link_type lt ON mc.note = lt.link
+    GROUP BY 
+        t.id, t.title, t.production_year, ci.note
+),
+
+FinalResults AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.aliases,
+        md.keywords,
+        md.roles,
+        md.additional_info,
+        COUNT(DISTINCT m.id) AS total_movies,
+        COUNT(DISTINCT mk.id) AS total_keywords
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        aka_title m ON md.movie_id = m.id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY 
+        md.movie_id, md.title, md.production_year, md.aliases, 
+        md.keywords, md.roles, md.additional_info
+)
+
+SELECT 
+    *,
+    LENGTH(title) AS title_length,
+    UPPER(title) AS title_uppercase
+FROM 
+    FinalResults
+WHERE 
+    production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    production_year DESC, title_length DESC
+FETCH FIRST 50 ROWS ONLY;

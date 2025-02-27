@@ -1,0 +1,55 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 0 AS level
+    FROM customer c
+    WHERE c.c_nationkey IS NOT NULL
+
+    UNION ALL
+
+    SELECT ch.c_custkey, ch.c_name, ch.c_nationkey, level + 1
+    FROM CustomerHierarchy ch
+    JOIN customer c ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_custkey != ch.c_custkey AND level < 3
+),
+SalesSummary AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY c.c_custkey
+),
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, ROW_NUMBER() OVER (ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+), 
+LineItemDetails AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_price
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    rh.c_custkey, 
+    rh.c_name, 
+    ss.total_sales,
+    p.p_partkey,
+    p.total_available,
+    s.avg_supply_cost,
+    li.net_price,
+    CASE 
+        WHEN ss.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Exists'
+    END AS sales_status
+FROM CustomerHierarchy rh
+LEFT JOIN SalesSummary ss ON rh.c_custkey = ss.c_custkey
+LEFT JOIN PartSupplierInfo p ON p.total_available >= 50
+LEFT JOIN RankedSuppliers s ON s.rank <= 5
+LEFT JOIN LineItemDetails li ON li.l_orderkey = ss.total_sales
+WHERE rh.level = 1 
+ORDER BY rh.c_name, ss.total_sales DESC
+LIMIT 100;

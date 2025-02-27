@@ -1,0 +1,72 @@
+WITH RecursiveUserStats AS (
+    
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COALESCE(SUM(CASE WHEN P.Score > 0 THEN P.Score ELSE 0 END), 0) AS TotalScore,
+        COALESCE(COUNT(DISTINCT P.Id), 0) AS TotalPosts,
+        1 AS Level
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+    UNION ALL
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        R.TotalScore + COALESCE(SUM(CASE WHEN P.Score > 0 THEN P.Score ELSE 0 END), 0),
+        R.TotalPosts + COALESCE(COUNT(DISTINCT P.Id), 0),
+        Level + 1
+    FROM 
+        Users U
+    INNER JOIN 
+        RecursiveUserStats R ON U.Id = R.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, R.TotalScore, R.TotalPosts, Level
+),
+(SELECT 
+    P.Id AS PostId,
+    P.Title,
+    P.CreationDate,
+    P.ViewCount,
+    PT.Name AS PostType,
+    COALESCE(COUNT(C.Id), 0) AS CommentCount,
+    COALESCE(V.UpVotes, 0) AS UpVotes,
+    COALESCE(V.DownVotes, 0) AS DownVotes
+FROM 
+    Posts P
+JOIN 
+    PostTypes PT ON P.PostTypeId = PT.Id
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    (SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId) V ON P.Id = V.PostId
+WHERE 
+    P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+GROUP BY 
+    P.Id, P.Title, P.CreationDate, P.ViewCount, PT.Name, V.UpVotes, V.DownVotes) AS LatestPosts
+LEFT JOIN 
+    (SELECT 
+        R.UserId, R.DisplayName, R.Reputation, R.TotalScore
+    FROM 
+        RecursiveUserStats R
+    WHERE 
+        R.Reputation >= 1000) AS ActiveUsers ON LatestPosts.OwnerUserId = ActiveUsers.UserId
+ORDER BY 
+    LatestPosts.ViewCount DESC, ActiveUsers.TotalScore DESC
+LIMIT 10;

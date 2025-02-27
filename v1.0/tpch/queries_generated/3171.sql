@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' 
+        AND o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+TotalSales AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_price
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+) 
+SELECT 
+    r.r_name, 
+    COUNT(DISTINCT co.c_custkey) AS customer_count, 
+    COALESCE(SUM(ts.total_lineitem_price), 0) AS total_sales, 
+    AVG(CASE WHEN rs.rank = 1 THEN rs.s_acctbal END) AS avg_top_supplier_balance
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+LEFT JOIN 
+    CustomerOrders co ON co.total_spent > 1000
+LEFT JOIN 
+    TotalSales ts ON co.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ts.l_orderkey LIMIT 1)
+GROUP BY 
+    r.r_name
+ORDER BY 
+    r.r_name DESC
+HAVING 
+    COUNT(DISTINCT co.c_custkey) > 5
+    AND COALESCE(SUM(ts.total_lineitem_price), 0) > 10000;

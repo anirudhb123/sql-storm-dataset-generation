@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 500
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rnk
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+),
+PartSupplierAggregates AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_availqty,
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, pa.total_availqty, pa.avg_supplycost
+    FROM part p
+    LEFT JOIN PartSupplierAggregates pa ON p.p_partkey = pa.ps_partkey
+    WHERE p.p_retailprice > 100 AND (pa.total_availqty IS NULL OR pa.total_availqty > 50)
+)
+SELECT nh.n_name, COUNT(DISTINCT lo.l_orderkey) AS order_count,
+       SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_sales,
+       AVG(lo.l_tax) AS avg_tax_rate,
+       ROW_NUMBER() OVER (PARTITION BY nh.n_name ORDER BY SUM(lo.l_extendedprice) DESC) AS rn
+FROM lineitem lo
+JOIN orders o ON lo.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN nation nh ON c.c_nationkey = nh.n_nationkey
+JOIN FilteredParts fp ON lo.l_partkey = fp.p_partkey
+LEFT JOIN SupplierHierarchy sh ON c.c_nationkey = sh.s_nationkey
+WHERE lo.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+  AND (lo.l_returnflag = 'N' OR lo.l_linestatus = 'O')
+GROUP BY nh.n_name
+HAVING COUNT(DISTINCT lo.l_orderkey) > 10
+ORDER BY total_sales DESC
+LIMIT 10;

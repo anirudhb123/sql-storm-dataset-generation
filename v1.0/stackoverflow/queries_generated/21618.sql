@@ -1,0 +1,98 @@
+WITH UserRankings AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        DENSE_RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+),
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(p.LastActivityDate) AS LastActivity
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.AcceptedAnswerId
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostDetails AS (
+    SELECT 
+        app.PostId,
+        app.Title,
+        app.CreationDate,
+        COALESCE(ps.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(ps.DownVotes, 0) AS TotalDownVotes,
+        COALESCE(a.UserRank, 'Unranked') AS UserRank,
+        app.LastActivity
+    FROM 
+        ActivePosts app
+    LEFT JOIN 
+        PostVoteSummary ps ON app.PostId = ps.PostId
+    LEFT JOIN 
+        UserRankings a ON app.AcceptedAnswerId = a.UserId
+)
+SELECT 
+    pd.Title,
+    pd.CreationDate,
+    pd.TotalUpVotes,
+    pd.TotalDownVotes,
+    pd.UserRank,
+    MAX(pd.LastActivity) OVER (PARTITION BY pd.UserRank ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS MaxActivityForRank,
+    CASE 
+        WHEN pd.UserRank = 'Unranked' THEN 'No Rank'
+        WHEN pd.TotalUpVotes - pd.TotalDownVotes > 10 THEN 'Highly Favorable'
+        ELSE 'Needs Improvement'
+    END AS PostQuality
+FROM 
+    PostDetails pd
+WHERE 
+    pd.LastActivity >= CURRENT_DATE - INTERVAL '30 days'
+ORDER BY 
+    pd.UserRank, pd.TotalUpVotes DESC, pd.Title
+LIMIT 100;
+
+WITH RECURSIVE PostTags AS (
+    SELECT 
+        Id, 
+        UNNEST(string_to_array(Tags, '><')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        Tags IS NOT NULL
+)
+SELECT 
+    pt.Tag,
+    COUNT(DISTINCT p.Id) AS PostsCount,
+    SUM(v.CreationDate IS NOT NULL) AS VotesCount
+FROM 
+    PostTags pt
+LEFT JOIN 
+    Posts p ON pt.Id = p.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+GROUP BY 
+    pt.Tag
+HAVING 
+    COUNT(DISTINCT p.Id) > 5
+ORDER BY 
+    PostsCount DESC
+LIMIT 10;

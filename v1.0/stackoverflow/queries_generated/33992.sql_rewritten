@@ -1,0 +1,58 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, Reputation, CreationDate, DisplayName, 
+           1 AS Level
+    FROM Users
+    WHERE Id = 1  
+
+    UNION ALL
+
+    SELECT u.Id, u.Reputation, u.CreationDate, u.DisplayName, 
+           uh.Level + 1
+    FROM Users u
+    INNER JOIN UserHierarchy uh ON u.Id = uh.Id + 1  
+),
+PostVoteStats AS (
+    SELECT p.Id AS PostId,
+           p.OwnerUserId,
+           COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+           COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+           COUNT(DISTINCT v.UserId) AS UniqueVoters
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.CreationDate,
+           p.ClosedDate,
+           ph.Comment AS CloseReason
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    WHERE p.ClosedDate IS NOT NULL
+),
+TopUsers AS (
+    SELECT TOP 10 u.DisplayName, 
+                  SUM(ps.UpVotes - ps.DownVotes) AS Score
+    FROM Users u
+    JOIN PostVoteStats ps ON u.Id = ps.OwnerUserId
+    GROUP BY u.DisplayName
+    ORDER BY Score DESC
+)
+SELECT DISTINCT 
+    u.DisplayName AS UserName,
+    u.CreationDate,
+    uh.Level AS UserLevel,
+    p.Title AS PostTitle,
+    COALESCE(cp.CloseReason, 'Open') AS CloseReason,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    pvs.UniqueVoters
+FROM Users u
+LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN PostVoteStats pvs ON p.Id = pvs.PostId
+LEFT JOIN ClosedPosts cp ON p.Id = cp.PostId
+JOIN UserHierarchy uh ON u.Id = uh.Id
+WHERE u.Reputation > 100
+  AND p.CreationDate >= DATEADD(year, -1, GETDATE())
+ORDER BY pvs.UpVotes DESC, p.CreationDate DESC;

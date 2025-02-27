@@ -1,0 +1,57 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'F' AND
+        o.o_orderdate >= DATE '1995-01-01' AND
+        o.o_orderdate < DATE '1996-01-01'
+),
+TopCustomers AS (
+    SELECT 
+        n.n_name AS r_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_revenue
+    FROM 
+        RankedOrders r
+    JOIN 
+        nation n ON r.c_nationkey = n.n_nationkey
+    JOIN 
+        region rg ON n.n_regionkey = rg.r_regionkey
+    WHERE 
+        rnk <= 5
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    rc.r_name, 
+    rc.total_orders, 
+    rc.total_revenue, 
+    p.p_name,
+    SUM(ps.ps_supplycost * li.l_quantity) AS total_supplycost
+FROM 
+    TopCustomers rc
+LEFT JOIN 
+    lineitem li ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F')
+LEFT JOIN 
+    partsupp ps ON li.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    part p ON li.l_partkey = p.p_partkey
+GROUP BY 
+    rc.r_name, 
+    rc.total_orders, 
+    rc.total_revenue, 
+    p.p_name
+ORDER BY 
+    rc.total_revenue DESC, 
+    rc.total_orders DESC
+LIMIT 10;

@@ -1,0 +1,53 @@
+WITH RankedParts AS (
+    SELECT p_partkey, p_name, p_brand, p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p_brand ORDER BY p_retailprice DESC) AS rank
+    FROM part
+    WHERE p_size BETWEEN 5 AND 20
+),
+HighValueSuppliers AS (
+    SELECT s_suppkey, s_name, s_acctbal,
+           CASE WHEN s_acctbal IS NULL THEN 0 ELSE s_acctbal END AS adjusted_acctbal
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY c.c_custkey, c.c_name
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+           STRING_AGG(DISTINCT l.l_shipmode, ', ') AS ship_modes
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE l.l_shipdate IS NOT NULL AND l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT np.p_partkey) AS num_expensive_parts,
+    COUNT(DISTINCT c.c_custkey) AS num_customers,
+    SUM(COALESCE(ho.total_spent, 0)) AS total_customer_spending,
+    AVG(ho.total_spent) AS avg_spending_per_customer,
+    STRING_AGG(DISTINCT od.ship_modes, '|') AS unique_ship_modes,
+    SUM(CASE WHEN rp.rank <= 5 THEN rp.p_retailprice ELSE 0 END) AS top_part_retail_price_sum
+FROM RankedParts rp
+JOIN HighValueSuppliers s ON s.s_suppkey IN (
+    SELECT ps.suppkey
+    FROM partsupp ps
+    WHERE ps.partkey = rp.p_partkey
+)
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN CustomerOrders ho ON ho.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders) 
+LEFT JOIN OrderDetails od ON ho.c_custkey IN (
+    SELECT DISTINCT c.c_custkey 
+    FROM customer c
+    WHERE c.c_custkey = ho.c_custkey
+) 
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT rp.p_partkey) > 0
+ORDER BY r.r_name DESC;

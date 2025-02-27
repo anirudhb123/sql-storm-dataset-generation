@@ -1,0 +1,79 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS total_spent_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_orders,
+        cs.total_spent
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.total_spent_rank <= 10
+),
+ItemSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        AVG(ws.ws_net_paid) AS avg_price
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+WarehouseSales AS (
+    SELECT 
+        inv.inv_warehouse_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        AVG(ws.ws_net_paid) AS avg_net_paid
+    FROM 
+        inventory inv
+    JOIN 
+        web_sales ws ON inv.inv_item_sk = ws.ws_item_sk
+    GROUP BY 
+        inv.inv_warehouse_sk
+)
+SELECT 
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_orders,
+    tc.total_spent,
+    COUNT(DISTINCT is.ws_item_sk) AS unique_items_purchased,
+    COALESCE(SUM(ws.net_profit), 0) AS total_profit_from_sales,
+    ws.avg_net_paid AS average_net_paid,
+    wb.warehouse_id
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    web_sales ws ON tc.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    ItemSales is ON ws.ws_item_sk = is.ws_item_sk
+LEFT JOIN 
+    WarehouseSales wb ON ws.ws_warehouse_sk = wb.inv_warehouse_sk
+GROUP BY 
+    tc.c_first_name, 
+    tc.c_last_name, 
+    tc.total_orders, 
+    tc.total_spent, 
+    ws.avg_net_paid, 
+    wb.warehouse_id
+ORDER BY 
+    tc.total_spent DESC, 
+    tc.total_orders ASC;

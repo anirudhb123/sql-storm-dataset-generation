@@ -1,0 +1,88 @@
+
+WITH RECURSIVE CTE_Sales AS (
+    SELECT 
+        ws.order_number,
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(*) AS sales_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_cdemo_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_sales_price > 0
+    GROUP BY 
+        ws.order_number, ws_item_sk
+    UNION ALL
+    SELECT 
+        cs.order_number,
+        cs_item_sk,
+        SUM(cs_sales_price) AS total_sales,
+        COUNT(*) AS sales_count,
+        ROW_NUMBER() OVER (PARTITION BY cs_bill_cdemo_sk ORDER BY SUM(cs_sales_price) DESC) AS rank
+    FROM 
+        catalog_sales cs
+    WHERE 
+        cs_sales_price > 0
+    GROUP BY 
+        cs.order_number, cs_item_sk
+),
+DateRank AS (
+    SELECT 
+        d_year,
+        d_month_seq,
+        d_day_name,
+        ROW_NUMBER() OVER (PARTITION BY d_month_seq ORDER BY d_date DESC) AS day_rank
+    FROM 
+        date_dim
+    WHERE 
+        d_year = 2023
+),
+CustomerStats AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(SUM(ws.ws_quantity), 0) AS total_web_sales,
+        COALESCE(SUM(cs.cs_quantity), 0) AS total_catalog_sales
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        (SELECT ws_bill_cdemo_sk, ws_quantity FROM web_sales) ws ON cd.cd_demo_sk = ws.ws_bill_cdemo_sk
+    LEFT JOIN 
+        (SELECT cs_bill_cdemo_sk, cs_quantity FROM catalog_sales) cs ON cd.cd_demo_sk = cs.cs_bill_cdemo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+AggregateReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        SUM(sr.return_quantity) AS total_returns,
+        SUM(sr.return_amt) AS total_return_amount
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.returned_date_sk
+)
+SELECT 
+    cs.cd_demo_sk,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    SUM(COALESCE(ws.ws_quantity, 0)) AS total_web_sales,
+    SUM(COALESCE(cs.cs_quantity, 0)) AS total_catalog_sales,
+    ar.total_returns,
+    ar.total_return_amount,
+    dr.d_year,
+    dr.d_month_seq,
+    dr.d_day_name
+FROM 
+    CustomerStats cs
+LEFT JOIN 
+    AggregateReturns ar ON ar.returned_date_sk = (SELECT d_date_sk FROM date_dim d WHERE d.d_year = 2023 ORDER BY d.d_date DESC LIMIT 1)
+CROSS JOIN 
+    DateRank dr
+GROUP BY 
+    cs.cd_demo_sk, cs.cd_gender, cs.cd_marital_status, ar.total_returns, ar.total_return_amount, dr.d_year, dr.d_month_seq, dr.d_day_name
+HAVING 
+    SUM(COALESCE(ws.ws_quantity, 0)) > 10 OR SUM(COALESCE(cs.cs_quantity, 0)) > 5
+ORDER BY 
+    total_web_sales DESC, total_catalog_sales DESC;

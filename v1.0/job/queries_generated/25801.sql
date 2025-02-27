@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year >= 2000 -- Filter for newer movies
+    GROUP BY 
+        t.id, t.title, t.production_year
+    HAVING 
+        COUNT(DISTINCT c.person_id) > 2 -- Only movies with more than 2 cast members
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title, 
+        rm.production_year,
+        rm.cast_count,
+        mci.company_names
+    FROM 
+        RankedMovies rm
+    JOIN (
+        SELECT 
+            mc.movie_id,
+            STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+        FROM 
+            movie_companies mc
+        JOIN 
+            company_name cn ON mc.company_id = cn.id
+        GROUP BY 
+            mc.movie_id
+    ) mci ON rm.movie_id = mci.movie_id
+)
+
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.cast_count,
+    fm.company_names,
+    (SELECT COUNT(DISTINCT k.keyword)
+     FROM movie_keyword mk
+     JOIN keyword k ON mk.keyword_id = k.id
+     WHERE mk.movie_id = fm.movie_id) AS keyword_count,
+    (SELECT STRING_AGG(pi.info, '; ') 
+     FROM person_info pi 
+     JOIN cast_info ci ON pi.person_id = ci.person_id 
+     WHERE ci.movie_id = fm.movie_id) AS cast_infos
+FROM 
+    FilteredMovies fm
+ORDER BY 
+    fm.production_year DESC, 
+    fm.cast_count DESC;

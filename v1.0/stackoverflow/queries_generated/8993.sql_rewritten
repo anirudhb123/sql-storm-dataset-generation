@@ -1,0 +1,48 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS Upvotes,
+        SUM(v.VoteTypeId = 3) AS Downvotes,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(a.Id) DESC, SUM(v.VoteTypeId = 2) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+)
+
+SELECT 
+    up.DisplayName AS UserDisplayName,
+    up.Reputation,
+    rp.Title,
+    rp.CreationDate,
+    rp.AnswerCount,
+    rp.Upvotes,
+    rp.Downvotes,
+    rp.Rank AS PostRank
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation up ON rp.OwnerUserId = up.UserId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    up.Reputation DESC, rp.AnswerCount DESC;

@@ -1,0 +1,54 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        wr_returned_date_sk, 
+        wr_item_sk, 
+        wr_return_quantity, 
+        wr_net_loss, 
+        1 AS level
+    FROM web_returns
+    WHERE wr_returned_date_sk = (SELECT MAX(wr_returned_date_sk) FROM web_returns)
+    
+    UNION ALL
+    
+    SELECT 
+        wr.returned_date_sk, 
+        wr.item_sk, 
+        SUM(wr.return_quantity) AS wr_return_quantity, 
+        SUM(wr.net_loss) AS wr_net_loss,
+        cr.level + 1 
+    FROM web_returns wr
+    JOIN CustomerReturns cr ON wr.returned_date_sk = cr.wr_returned_date_sk - 1
+    GROUP BY wr.item_sk, cr.level
+), 
+TotalSales AS (
+    SELECT 
+        ws.item_sk,
+        SUM(ws.net_paid) AS total_net_paid
+    FROM web_sales ws
+    WHERE ws.ship_date_sk IS NOT NULL
+    GROUP BY ws.item_sk
+),
+AddressInfo AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY ca.ca_city) AS row_num
+    FROM customer_address ca
+)
+SELECT 
+    cr.wr_item_sk,
+    COALESCE(TS.total_net_paid, 0) AS total_net_sales,
+    SUM(cr.wr_return_quantity) AS total_return_quantity,
+    SUM(cr.wr_net_loss) AS total_net_loss,
+    AI.ca_city,
+    AI.ca_state,
+    AI.ca_country
+FROM CustomerReturns cr
+LEFT JOIN TotalSales TS ON cr.wr_item_sk = TS.item_sk
+RIGHT JOIN AddressInfo AI ON AI.row_num = cr.level
+GROUP BY cr.wr_item_sk, TS.total_net_paid, AI.ca_city, AI.ca_state, AI.ca_country
+HAVING SUM(cr.wr_return_quantity) > 10 OR SUM(cr.wr_net_loss) > 500
+ORDER BY total_return_quantity DESC;

@@ -1,0 +1,68 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%<', T.TagName, '>%')
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    GROUP BY 
+        T.TagName
+), UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostsCreated,
+        SUM(V.BountyAmount) AS TotalBounties,
+        SUM(U.UpVotes) AS TotalUpVotes,
+        SUM(U.DownVotes) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+), PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        STRING_AGG(PHT.Name, ', ') AS HistoryTypes,
+        COUNT(PH.Id) AS RevisionCount,
+        MAX(PH.CreationDate) AS LastEditedDate
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    GROUP BY 
+        PH.PostId
+)
+
+SELECT 
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalComments,
+    TS.TotalViews,
+    TS.TotalScore,
+    US.DisplayName AS TopUser,
+    US.PostsCreated,
+    US.TotalBounties,
+    US.TotalUpVotes,
+    US.TotalDownVotes,
+    PHS.HistoryTypes,
+    PHS.RevisionCount,
+    PHS.LastEditedDate
+FROM 
+    TagStatistics TS
+JOIN 
+    UserStatistics US ON US.PostsCreated = (SELECT MAX(PostsCreated) FROM UserStatistics)
+JOIN 
+    PostHistorySummary PHS ON PHS.PostId = (SELECT PostId FROM PostHistory ORDER BY LastEditedDate DESC LIMIT 1)
+ORDER BY 
+    TS.TotalViews DESC;

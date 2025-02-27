@@ -1,0 +1,89 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SupplierStats AS (
+    SELECT 
+        r.r_regionkey, 
+        COUNT(DISTINCT s.s_suppkey) AS num_suppliers, 
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_regionkey
+),
+PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_supplycost, 
+        COALESCE(rs.s_name, 'No Supplier') AS supplier_name
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey AND rs.rnk = 1
+),
+FinalResults AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        psd.supplier_name,
+        COALESCE(AVG(s.s_acctbal), 0) AS avg_acctbal,
+        SUM(o.total_value) AS total_order_value
+    FROM 
+        PartSupplierDetails psd
+    LEFT JOIN 
+        SupplierStats ss ON psd.p_partkey = ss.r_regionkey
+    LEFT JOIN 
+        HighValueOrders o ON o.o_custkey IN (
+            SELECT c.c_custkey 
+            FROM customer c 
+            WHERE c.c_acctbal > 5000
+        )
+    GROUP BY 
+        p.p_partkey, p.p_name, psd.supplier_name
+)
+SELECT 
+    f.p_partkey, 
+    f.p_name, 
+    f.supplier_name,
+    f.avg_acctbal,
+    f.total_order_value,
+    CASE 
+        WHEN f.total_order_value IS NULL THEN 'No Orders'
+        ELSE 'Orders Exist'
+    END AS order_status
+FROM 
+    FinalResults f
+ORDER BY 
+    f.p_partkey, 
+    f.total_order_value DESC;

@@ -1,0 +1,54 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id, 
+        at.title, 
+        at.production_year, 
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    SUM(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'box office') THEN CAST(mi.info AS numeric) ELSE 0 END) AS total_box_office,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY mh.level) AS movie_level
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    aka_title at ON mh.movie_id = at.id
+WHERE 
+    ak.name IS NOT NULL 
+    AND mh.production_year IS NOT NULL
+GROUP BY 
+    ak.name, at.title, mh.production_year
+HAVING 
+    total_box_office > 0
+ORDER BY 
+    production_year DESC, actor_name;

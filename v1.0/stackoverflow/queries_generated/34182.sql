@@ -1,0 +1,91 @@
+WITH RecursivePostCTE AS (
+    -- Recursive CTE to fetch posts and their accepted answers
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.AcceptedAnswerId, 
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+
+    UNION ALL
+
+    SELECT 
+        ans.Id AS PostId, 
+        ans.Title,
+        ans.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts ans
+    INNER JOIN 
+        RecursivePostCTE r ON ans.ParentId = r.PostId
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    COUNT(b.Id) AS BadgeCount,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+    SUM(CASE WHEN vc.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN vc.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN p.ViewCount ELSE 0 END), 0) AS TotalQuestionViews,
+    COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN p.ViewCount ELSE 0 END), 0) AS TotalAnswerViews,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    MAX(p.LastActivityDate) AS LastActive
+FROM 
+    Users u
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Votes vc ON p.Id = vc.PostId
+LEFT JOIN 
+    (SELECT DISTINCT unnest(string_to_array(Tags, ', ')) AS TagName FROM Posts) t ON t.TagName = ANY(string_to_array(p.Tags, ', '))
+LEFT JOIN 
+    RecursivePostCTE r ON p.Id = r.PostId
+WHERE 
+    u.Reputation > 100
+GROUP BY 
+    u.Id
+HAVING 
+    COUNT(b.Id) > 0 AND COUNT(DISTINCT p.Id) > 10
+ORDER BY 
+    u.Reputation DESC,
+    TotalPosts DESC
+LIMIT 50;
+
+-- Additional Utility Query for examining the data integrity of tags related to each post
+WITH PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        unnest(string_to_array(p.Tags, ', ')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+),
+TagUsageCount AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS UsageCount
+    FROM 
+        PostTags
+    GROUP BY 
+        Tag
+)
+SELECT 
+    tg.TagName,
+    tg.Count AS TagTotalCount,
+    COALESCE(tuc.UsageCount, 0) AS UsageCount,
+    (tg.Count - COALESCE(tuc.UsageCount, 0)) AS UnusedCount
+FROM 
+    Tags tg
+LEFT JOIN 
+    TagUsageCount tuc ON tg.TagName = tuc.Tag
+WHERE 
+    tg.Count > 0
+ORDER BY 
+    UnusedCount DESC;

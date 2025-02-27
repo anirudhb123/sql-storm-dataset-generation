@@ -1,0 +1,77 @@
+WITH TagStatistics AS (
+    SELECT
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount,
+        SUM(v.VoteTypeId = 10) AS DeletionVoteCount
+    FROM
+        Tags t
+    LEFT JOIN
+        Posts p ON p.Tags ILIKE '%<' || t.TagName || '>%'
+    LEFT JOIN
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN
+        Votes v ON v.PostId = p.Id
+    GROUP BY
+        t.Id, t.TagName
+),
+MostActiveUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(b.Class) AS TotalBadges,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS UserRank
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN
+        Badges b ON b.UserId = u.Id
+    GROUP BY
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM
+        PostHistory ph
+    WHERE
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+)
+SELECT
+    ts.TagName,
+    ts.PostCount,
+    ts.CommentCount,
+    ts.UpVoteCount,
+    ts.DownVoteCount,
+    ts.DeletionVoteCount,
+    u.DisplayName AS MostActiveUser,
+    u.UserRank,
+    ph.UserId AS PostHistoryUserId,
+    ph.Comment AS RecentComment
+FROM
+    TagStatistics ts
+LEFT JOIN
+    MostActiveUsers u ON ts.PostCount = u.PostCount
+LEFT JOIN
+    RecentPostHistory ph ON ts.PostCount = (
+        SELECT COUNT(*) FROM Posts p WHERE p.PostTypeId = 1 AND p.Id = ph.PostId
+    )
+WHERE
+    ts.DeletionVoteCount > 0  
+    AND u.UserRank <= 5        
+    AND ph.rn = 1              
+ORDER BY
+    ts.UpVoteCount DESC NULLS LAST;

@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, u.DisplayName
+), ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+
+SELECT 
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.Score,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    (SELECT COUNT(*) FROM ClosedPostHistory cph WHERE cph.PostId = rp.Id AND cph.HistoryRank = 1) AS ClosedCommentsCount,
+    CASE 
+        WHEN rp.Score IS NULL THEN 'No Score'
+        WHEN rp.Score > 0 THEN 'Positive Score'
+        WHEN rp.Score = 0 THEN 'Neutral Score'
+        ELSE 'Negative Score'
+    END AS ScoreDescription,
+    COALESCE((
+        SELECT STRING_AGG(Tag.TagName, ', ')
+        FROM Tags Tag
+        WHERE Tag.Id IN (
+            SELECT UNNEST(string_to_array(substring(rp.Tags, 2, length(rp.Tags) - 2), '><')::int[]))
+        )
+    ), 'No Tags') AS Tags
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.Score DESC
+LIMIT 20;

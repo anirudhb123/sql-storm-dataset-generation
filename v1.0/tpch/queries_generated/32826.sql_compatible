@@ -1,0 +1,40 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, NULL AS parent_suppkey
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.s_suppkey
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey != sh.s_suppkey
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+),
+ProductInfo AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+    HAVING COUNT(DISTINCT l.l_orderkey) > 5
+),
+OrderedSuppliers AS (
+    SELECT sh.s_suppkey, sh.s_name, sh.s_acctbal, ph.total_price
+    FROM SupplierHierarchy sh
+    LEFT JOIN ProductInfo ph ON sh.s_suppkey IN (SELECT ps.ps_suppkey FROM PartSupplier ps WHERE ps.rn = 1 AND ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 20))
+)
+SELECT rt.r_name, COUNT(DISTINCT os.s_suppkey) AS supplier_count, AVG(os.s_acctbal) AS avg_acctbal, SUM(os.total_price) AS total_profit
+FROM region rt
+JOIN nation n ON rt.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN OrderedSuppliers os ON s.s_suppkey = os.s_suppkey
+GROUP BY rt.r_name
+ORDER BY total_profit DESC
+LIMIT 10;

@@ -1,0 +1,31 @@
+SELECT 
+    p.p_name AS part_name,
+    s.s_name AS supplier_name,
+    n.n_name AS nation_name,
+    c.c_name AS customer_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(DATEDIFF(l.l_shipdate, o.o_orderdate)) AS avg_days_to_ship
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_type LIKE '%steel%'
+    AND s.s_acctbal > 1000
+GROUP BY 
+    p.p_name, s.s_name, n.n_name, c.c_name
+HAVING 
+    total_orders > 10
+ORDER BY 
+    total_revenue DESC, avg_days_to_ship ASC;

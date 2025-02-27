@@ -1,0 +1,58 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(day, -30, GETDATE())
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        AVG(s.s_acctbal) AS avg_supplier_balance
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    SUM(s.total_supply_cost) AS total_supply_cost,
+    AVG(NULLIF(s.avg_supplier_balance, 0)) AS avg_non_zero_supplier_balance
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    RankedOrders ro ON o.o_orderkey = ro.o_orderkey AND ro.order_rank <= 5
+WHERE 
+    r.r_name IS NOT NULL
+    AND (o.o_orderstatus = 'F' OR o.o_orderstatus = 'P')
+GROUP BY 
+    r.r_name, n.n_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY 
+    total_revenue DESC;

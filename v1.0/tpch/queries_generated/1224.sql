@@ -1,0 +1,84 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_shippriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01'
+), SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+), CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 100
+    GROUP BY 
+        c.c_custkey, c.c_name
+), OutstandingLines AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_quantity) AS total_quantity,
+        MAX(l.l_discount) AS max_discount
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate IS NULL
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    r.o_shippriority,
+    sp.total_available,
+    co.order_count,
+    co.total_spent,
+    ol.total_quantity,
+    ol.max_discount
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    SupplierParts sp ON sp.ps_partkey IN (
+        SELECT ps.ps_partkey
+        FROM partsupp ps
+        WHERE ps.ps_suppkey IN (
+            SELECT s.s_suppkey
+            FROM supplier s
+            WHERE s.s_acctbal IS NOT NULL
+            AND s.s_acctbal > (
+                SELECT AVG(s2.s_acctbal) FROM supplier s2
+            )
+        )
+    )
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey IN (
+        SELECT o.o_custkey
+        FROM orders o
+        WHERE o.o_orderstatus = 'O'
+    )
+LEFT JOIN 
+    OutstandingLines ol ON ol.l_orderkey = r.o_orderkey
+WHERE 
+    r.price_rank <= 10
+ORDER BY 
+    r.o_totalprice DESC, r.o_orderdate ASC
+LIMIT 100;

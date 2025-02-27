@@ -1,0 +1,41 @@
+WITH RankedMovies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(p.info) AS avg_income,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        title m
+    LEFT JOIN
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN
+        person_info p ON c.person_id = p.person_id
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        m.id, m.title, m.production_year
+),
+TopMovies AS (
+    SELECT
+        *,
+        RANK() OVER (ORDER BY cast_count DESC, production_year DESC) AS movie_rank
+    FROM
+        RankedMovies
+)
+SELECT
+    t.movie_id,
+    t.movie_title,
+    t.production_year,
+    t.cast_count,
+    t.avg_income,
+    t.keywords
+FROM
+    TopMovies t
+WHERE
+    t.movie_rank <= 10
+ORDER BY
+    t.cast_count DESC, t.production_year DESC;

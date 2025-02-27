@@ -1,0 +1,105 @@
+WITH RecursivePostParents AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ParentId,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ParentId,
+        RP.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostParents RP ON P.ParentId = RP.Id
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(V.UpVotes, 0) AS UpVotes,
+        COALESCE(V.DownVotes, 0) AS DownVotes,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM 
+            Votes
+         GROUP BY 
+            PostId) V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, V.UpVotes, V.DownVotes
+),
+ClosedPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.UserDisplayName,
+        PH.Comment,
+        PH.Text
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10 
+)
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    PStats.UpVotes,
+    PStats.DownVotes,
+    PStats.CommentCount,
+    COALESCE(ClosedPostHistory.UserDisplayName, 'N/A') AS CloserUser,
+    ClosedPostHistory.CreationDate AS ClosedDate,
+    CASE 
+        WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Accepted Answer Exists'
+        ELSE 'No Accepted Answer'
+    END AS AnswerStatus,
+    UserBadges.GoldBadges,
+    UserBadges.SilverBadges,
+    UserBadges.BronzeBadges,
+    RP.Level AS ParentLevel
+FROM 
+    Posts P
+INNER JOIN 
+    PostStatistics PStats ON P.Id = PStats.PostId
+LEFT JOIN 
+    ClosedPostHistory ON P.Id = ClosedPostHistory.PostId
+LEFT JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    UserBadges ON U.Id = UserBadges.UserId
+LEFT JOIN 
+    RecursivePostParents RP ON P.Id = RP.Id
+WHERE 
+    (P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' OR 
+    P.Tags LIKE '%SQL%')
+ORDER BY 
+    PStats.UpVotes DESC, 
+    PStats.DownVotes ASC;

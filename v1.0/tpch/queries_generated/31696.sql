@@ -1,0 +1,45 @@
+WITH RECURSIVE TopRegions AS (
+    SELECT r_name, r_regionkey, 
+           ROW_NUMBER() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY r.r_name, r.r_regionkey
+    HAVING SUM(o.o_totalprice) > 1000000
+    UNION ALL
+    SELECT r_name, r_regionkey, 
+           ROW_NUMBER() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE r.r_name NOT IN (SELECT r_name FROM TopRegions)
+    GROUP BY r.r_name, r.r_regionkey
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, 
+           o.o_orderdate, o.o_orderpriority, 
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS status_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01' 
+      AND o.o_orderdate < DATE '2024-01-01'
+),
+AggregatedData AS (
+    SELECT c.c_name, COUNT(DISTINCT o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN FilteredOrders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_name
+)
+SELECT r.r_name, ad.c_name, ad.order_count, ad.total_spent
+FROM TopRegions r
+JOIN AggregatedData ad ON ad.total_spent > 0
+WHERE ad.order_count IS NOT NULL
+ORDER BY r.r_name, ad.total_spent DESC;

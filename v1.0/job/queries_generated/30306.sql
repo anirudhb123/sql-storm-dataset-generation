@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year = 2020
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    COUNT(DISTINCT cc.role_id) AS role_count,
+    AVG(CASE 
+            WHEN mp.info IS NULL THEN 0 
+            ELSE LENGTH(mp.info) 
+        END) AS average_info_length,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    MAX(mh.level) AS movie_depth
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mp ON mt.id = mp.movie_id AND mp.info_type_id = (SELECT id FROM info_type WHERE info = 'summary')
+LEFT JOIN 
+    movie_hierarchy mh ON mt.id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL 
+    AND mt.production_year IS NOT NULL 
+    AND (LOWER(ak.name) LIKE '%john%' OR COALESCE(ak.surname_pcode, '') = '12345')
+GROUP BY 
+    ak.name, mt.title
+ORDER BY 
+    role_count DESC, movie_title
+HAVING 
+    COUNT(DISTINCT cc.role_id) > 1;
+
+### Explanation:
+1. **Recursive CTE (`movie_hierarchy`)**: This portion builds a hierarchy of movies linked to those from the year 2020.
+2. **Main Query Components**: 
+    - Uses various joins to gather specific data about actors, their movies, roles, and linked keywords.
+    - It includes aggregates like `COUNT(DISTINCT cc.role_id)` and `AVG(...)` to calculate average lengths of information.
+    - `STRING_AGG` is used to compile keywords associated with each movie.
+3. **Filters in `WHERE`**: The conditions added ensure only relevant actors and movies based on names and production years are included.
+4. **Grouping and Ordering**: The results are grouped by actor and movie title and ordered to emphasize those with more roles.
+5. **Having Clause**: The `HAVING` clause filters the final results to show only actors with more than one distinct role. 
+
+This query depicts the interconnectedness of movies and actors while performing various SQL functionalities for benchmarking.

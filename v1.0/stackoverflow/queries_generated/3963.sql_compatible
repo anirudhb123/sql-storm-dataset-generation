@@ -1,0 +1,37 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS rnk,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS total_posts
+    FROM 
+        Posts p
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    pp.Title,
+    pp.ViewCount,
+    pp.CreationDate,
+    CASE 
+        WHEN pp.rnk = 1 THEN 'Most Viewed'
+        ELSE 'Other Posts'
+    END AS PostCategory,
+    COALESCE(b.Name, 'No Badge') AS BadgeName,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = pp.Id) AS CommentCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = pp.Id AND v.VoteTypeId = 2) AS UpvoteCount
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts pp ON u.Id = pp.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId AND b.Class = 1 
+WHERE 
+    pp.ViewCount > 100
+    AND pp.rnk <= 2
+ORDER BY 
+    u.Reputation DESC, pp.ViewCount DESC;

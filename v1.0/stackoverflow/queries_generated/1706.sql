@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId = 1 
+        AND P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, U.DisplayName, P.CreationDate, P.ViewCount
+),
+TopContributors AS (
+    SELECT 
+        OwnerUserId, 
+        COUNT(*) AS ContributionCount
+    FROM 
+        RankedPosts
+    GROUP BY 
+        OwnerUserId
+    HAVING 
+        COUNT(*) > 5
+),
+ClosedPostDetails AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseEvents,
+        STRING_AGG(PH.Comment, '; ') AS CloseReasons
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RP.Id,
+    RP.Title,
+    RP.CreationDate,
+    RP.ViewCount,
+    RP.OwnerDisplayName,
+    RP.UpVotes,
+    RP.DownVotes,
+    T.ContributionCount,
+    COALESCE(CP.CloseEvents, 0) AS CloseEvents,
+    COALESCE(CP.CloseReasons, 'None') AS CloseReasons
+FROM 
+    RankedPosts RP
+JOIN 
+    TopContributors T ON RP.Id = T.OwnerUserId
+LEFT JOIN 
+    ClosedPostDetails CP ON RP.Id = CP.PostId
+WHERE 
+    RP.PostRank = 1
+ORDER BY 
+    RP.ViewCount DESC;

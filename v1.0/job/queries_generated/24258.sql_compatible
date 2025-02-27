@@ -1,0 +1,99 @@
+
+WITH RecursiveMovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT
+        lm.linked_movie_id,
+        lm.linked_movie_id AS title,
+        mt.production_year,
+        level + 1
+    FROM
+        movie_link lm
+    JOIN
+        RecursiveMovieHierarchy rmh ON rmh.movie_id = lm.movie_id
+    JOIN
+        aka_title mt ON lm.linked_movie_id = mt.id
+    WHERE
+        level < 5
+),
+CompanyWithMovies AS (
+    SELECT
+        c.name AS company_name,
+        mc.movie_id,
+        at.production_year,
+        COUNT(*) AS movie_count
+    FROM
+        company_name c
+    LEFT JOIN
+        movie_companies mc ON c.id = mc.company_id
+    LEFT JOIN
+        aka_title at ON mc.movie_id = at.id
+    GROUP BY
+        c.name, mc.movie_id, at.production_year
+),
+ActorRoles AS (
+    SELECT
+        ak.name AS actor_name,
+        ct.kind AS role_name,
+        COUNT(*) AS role_count
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY
+        ak.name, ct.kind
+),
+TitleWithKeywords AS (
+    SELECT
+        at.title,
+        STRING_AGG(kw.keyword, ', ') AS keywords
+    FROM
+        aka_title at
+    LEFT JOIN
+        movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY
+        at.title
+)
+SELECT
+    RANK() OVER (ORDER BY cm.movie_count DESC) AS movie_rank,
+    cm.company_name,
+    cm.movie_id,
+    R.title,
+    R.production_year,
+    ak.actor_name,
+    ar.role_name,
+    ar.role_count,
+    STRING_AGG(wk.keywords, '; ') AS all_keywords,
+    CASE 
+        WHEN cm.movie_count IS NULL THEN 'No Movies'
+        ELSE 'Has Movies'
+    END AS movie_presence
+FROM
+    CompanyWithMovies cm
+LEFT JOIN
+    RecursiveMovieHierarchy R ON cm.movie_id = R.movie_id
+LEFT JOIN
+    ActorRoles ar ON R.title = ar.actor_name
+LEFT JOIN
+    TitleWithKeywords wk ON R.title = wk.title
+WHERE
+    (cm.movie_count IS NOT NULL AND R.title IS NOT NULL)
+    OR (ar.role_count > 1 AND R.title IS NULL)
+GROUP BY
+    cm.company_name, cm.movie_id, R.title, R.production_year, ak.actor_name, ar.role_name, ar.role_count, cm.movie_count
+HAVING
+    COUNT(DISTINCT wk.keywords) > 0
+ORDER BY
+    movie_rank, cm.company_name, R.production_year DESC NULLS LAST;

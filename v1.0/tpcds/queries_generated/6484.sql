@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT 
+        w.w_warehouse_name,
+        i.i_item_id,
+        SUM(ss.ss_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY w.w_warehouse_id ORDER BY SUM(ss.ss_sales_price) DESC) AS sales_rank
+    FROM 
+        store_sales ss
+    JOIN 
+        item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN 
+        warehouse w ON ss.ss_store_sk = w.w_warehouse_sk
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023) 
+                               AND (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        w.w_warehouse_name, i.i_item_id
+),
+TopItems AS (
+    SELECT 
+        warehouse_name,
+        i_item_id,
+        total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 10
+),
+MonthlyReturns AS (
+    SELECT 
+        EXTRACT(MONTH FROM d.d_date) AS return_month,
+        SUM(sr_return_amount) AS total_return_amount
+    FROM 
+        store_returns sr
+    JOIN 
+        date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    GROUP BY 
+        return_month
+)
+SELECT 
+    ti.warehouse_name,
+    ti.i_item_id,
+    ti.total_sales,
+    mr.return_month,
+    mr.total_return_amount,
+    ROUND((ti.total_sales - COALESCE(mr.total_return_amount, 0)), 2) AS net_sales
+FROM 
+    TopItems ti
+LEFT JOIN 
+    MonthlyReturns mr ON EXTRACT(MONTH FROM CURRENT_DATE) = mr.return_month
+ORDER BY 
+    ti.total_sales DESC;

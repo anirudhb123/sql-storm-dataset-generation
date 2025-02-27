@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.Views,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagPostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 10
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '2 years'
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        SUM(COALESCE(v.BountyAmount, 0)) > 100
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.Views,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    pt.TagPostCount,
+    tu.TotalBounty,
+    tu.PostCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PopularTags pt ON rp.Tags LIKE '%' || pt.TagName || '%'
+LEFT JOIN 
+    TopUsers tu ON rp.OwnerUserId = tu.Id
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.CreationDate DESC;

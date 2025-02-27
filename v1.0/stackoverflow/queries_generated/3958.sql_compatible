@@ -1,0 +1,91 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Score,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY U.CreationDate DESC) AS RN
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.Views
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        Views, 
+        PostCount, 
+        UpVotes, 
+        DownVotes, 
+        Score
+    FROM 
+        UserStats
+    WHERE 
+        RN = 1
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.CreationDate, 
+        P.ViewCount, 
+        U.DisplayName AS Author,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, U.DisplayName
+),
+JoinResults AS (
+    SELECT 
+        TU.UserId,
+        TU.DisplayName AS UserName,
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.ViewCount,
+        RP.CommentCount,
+        RP.UpVoteCount
+    FROM 
+        TopUsers TU
+    LEFT JOIN 
+        RecentPosts RP ON TU.UserId = RP.Author
+)
+SELECT 
+    J.UserId,
+    J.UserName,
+    J.Title,
+    J.ViewCount,
+    J.CreationDate,
+    CASE 
+        WHEN J.CommentCount IS NULL THEN 'No Comments'
+        ELSE CAST(J.CommentCount AS VARCHAR) || ' Comments'
+    END AS Comments,
+    COALESCE(J.UpVoteCount, 0) AS UpVotes
+FROM 
+    JoinResults J
+WHERE 
+    J.UserId IS NOT NULL
+ORDER BY 
+    J.UserId, J.CreationDate DESC
+LIMIT 100;

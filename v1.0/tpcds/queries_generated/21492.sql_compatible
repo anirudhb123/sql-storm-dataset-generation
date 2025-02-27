@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS sales_rank,
+        COALESCE(NULLIF(ws.ws_ext_sales_price, 0), NULL) AS effective_sales_price,
+        CASE 
+            WHEN ws.ws_ship_date_sk IS NULL THEN 'Pending'
+            ELSE 'Shipped'
+        END AS shipping_status
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) - 30 FROM date_dim d WHERE d.d_current_month = 'Y')
+),
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returns,
+        AVG(cr.return_amt_inc_tax) AS avg_return_amount
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.cr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        cr.returning_customer_sk
+),
+SalesDetails AS (
+    SELECT 
+        cs.cs_order_number,
+        cs.cs_item_sk,
+        cs.cs_quantity,
+        (cs.cs_sales_price - cs.cs_ext_discount_amt) AS net_sales,
+        CASE 
+            WHEN cs.cs_quantity > 10 THEN 'Bulk Purchase'
+            ELSE 'Standard Purchase'
+        END AS purchase_type
+    FROM 
+        catalog_sales cs
+)
+SELECT 
+    s.store_name,
+    RANK() OVER (ORDER BY SUM(rs.ws_quantity) DESC) AS store_rank,
+    SUM(rs.ws_quantity) AS total_sales,
+    COUNT(DISTINCT cr.returning_customer_sk) AS num_returns,
+    AVG(cr.avg_return_amount) AS avg_return_value,
+    MAX(rs.effective_sales_price) AS max_effective_sales_price,
+    COUNT(CASE WHEN sd.purchase_type = 'Bulk Purchase' THEN 1 END) AS bulk_purchase_count
+FROM 
+    store s
+LEFT JOIN 
+    RankedSales rs ON s.s_store_sk = rs.web_site_sk
+LEFT JOIN 
+    CustomerReturns cr ON rs.ws_order_number = cr.returning_customer_sk
+LEFT JOIN 
+    SalesDetails sd ON rs.ws_order_number = sd.cs_order_number
+GROUP BY 
+    s.store_name
+HAVING 
+    SUM(rs.ws_quantity) > 1000 AND 
+    (COUNT(DISTINCT cr.returning_customer_sk) = 0 OR AVG(cr.avg_return_amount) < 100)
+ORDER BY 
+    store_rank;

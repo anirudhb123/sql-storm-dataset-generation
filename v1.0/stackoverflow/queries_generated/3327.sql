@@ -1,0 +1,65 @@
+WITH UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(COALESCE(C.CommentCount, 0)) AS TotalComments,
+        SUM(V.VoteTypeId = 2) AS UpVotesReceived
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id
+), TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        PostCount, 
+        QuestionCount, 
+        AnswerCount, 
+        TotalComments, 
+        UpVotesReceived,
+        RANK() OVER (ORDER BY PostCount DESC) AS PostRank
+    FROM 
+        UserEngagement
+)
+SELECT 
+    T.DisplayName,
+    T.PostCount,
+    T.QuestionCount,
+    T.AnswerCount,
+    T.TotalComments,
+    T.UpVotesReceived,
+    CASE 
+        WHEN T.PostCount IS NULL THEN 'No Posts'
+        WHEN T.QuestionCount > T.AnswerCount THEN 'More Questions'
+        ELSE 'More Answers' 
+    END AS EngagementType,
+    COALESCE(HistoryChange.Comment, 'N/A') AS LastPostChange
+FROM 
+    TopUsers T
+LEFT JOIN 
+    (
+        SELECT 
+            PH.UserDisplayName,
+            PH.PostId,
+            PH.Comment,
+            ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS rn
+        FROM 
+            PostHistory PH
+        WHERE 
+            PH.PostHistoryTypeId IN (4, 5, 6) -- Title, Body, Tags Edited
+    ) HistoryChange ON T.UserId = HistoryChange.UserDisplayName AND HistoryChange.rn = 1
+WHERE 
+    T.PostRank <= 10
+ORDER BY 
+    T.PostRank;

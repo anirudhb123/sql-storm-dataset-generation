@@ -1,0 +1,84 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' 
+        AND o.o_orderdate < DATE '1997-01-01'
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        p.p_brand,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_brand
+),
+CustomerPurchaseSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '1996-01-01' 
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierRanking AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    r.o_orderstatus,
+    c.c_name AS customer_name,
+    COALESCE(cus.total_spent, 0) AS customer_total_spent,
+    COALESCE(s.total_cost, 0) AS supplier_total_cost,
+    s.p_name,
+    s.total_available,
+    CASE 
+        WHEN r.o_orderstatus = 'F' THEN 'Finalized'
+        WHEN r.o_orderstatus = 'P' THEN 'Pending'
+        ELSE 'Other'
+    END AS order_status_description
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    CustomerPurchaseSummary cus ON r.o_orderkey = cus.total_orders
+LEFT JOIN 
+    SupplierPartDetails s ON r.o_orderkey = s.ps_partkey
+LEFT JOIN 
+    SupplierRanking sr ON s.ps_suppkey = sr.s_suppkey
+WHERE 
+    r.order_rank <= 10
+ORDER BY 
+    r.o_orderdate DESC, r.o_orderkey;

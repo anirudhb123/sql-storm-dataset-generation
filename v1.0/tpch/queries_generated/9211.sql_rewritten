@@ -1,0 +1,58 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+        COUNT(l.l_orderkey) AS line_item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_name,
+        ss.total_available,
+        ss.total_cost,
+        RANK() OVER (ORDER BY ss.total_available DESC) AS supplier_rank
+    FROM 
+        SupplierStats ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+)
+SELECT 
+    os.o_orderkey,
+    os.o_orderdate,
+    os.order_value,
+    ts.s_name AS top_supplier,
+    ts.total_available,
+    ts.total_cost
+FROM 
+    OrderDetails os
+JOIN 
+    lineitem l ON os.o_orderkey = l.l_orderkey
+JOIN 
+    TopSuppliers ts ON l.l_suppkey = ts.s_suppkey
+WHERE 
+    ts.supplier_rank <= 5
+ORDER BY 
+    os.order_value DESC, os.o_orderdate ASC
+LIMIT 100;

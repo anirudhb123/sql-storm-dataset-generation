@@ -1,0 +1,76 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON V.UserId = U.Id
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalComments,
+        Upvotes,
+        Downvotes,
+        GoldBadges,
+        SilverBadges,
+        BronzeBadges,
+        Rank
+    FROM 
+        UserActivity
+    WHERE 
+        Rank <= 10
+),
+StringAnalysis AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        AVG(LENGTH(P.Body)) AS AvgBodyLength,
+        STRING_AGG(DISTINCT P.Title, ', ') AS SampleTitles
+    FROM 
+        Posts P
+    JOIN 
+        Tags T ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE 
+        P.PostTypeId = 1  
+    GROUP BY 
+        T.TagName
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.TotalPosts,
+    U.TotalComments,
+    U.Upvotes,
+    U.Downvotes,
+    U.GoldBadges,
+    U.SilverBadges,
+    U.BronzeBadges,
+    S.TagName,
+    S.PostCount,
+    S.AvgBodyLength,
+    S.SampleTitles
+FROM 
+    TopActiveUsers U
+JOIN 
+    StringAnalysis S ON S.PostCount > 0
+ORDER BY 
+    U.Reputation DESC, S.PostCount DESC;

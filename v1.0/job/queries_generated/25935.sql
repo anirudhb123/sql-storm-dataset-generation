@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        r.role AS actor_role,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY a.name) AS actor_rank
+    FROM 
+        aka_title AS t
+    JOIN 
+        cast_info AS c ON t.id = c.movie_id
+    JOIN 
+        aka_name AS a ON c.person_id = a.person_id
+    JOIN 
+        role_type AS r ON c.role_id = r.id
+    WHERE 
+        t.production_year > 2000
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        STRING_AGG(actor_name, ', ') AS cast_names,
+        COUNT(DISTINCT actor_name) AS num_actors
+    FROM 
+        RankedMovies
+    WHERE 
+        actor_rank <= 3 -- Get top 3 actors
+    GROUP BY 
+        movie_id, title, production_year
+)
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    tm.cast_names,
+    tm.num_actors,
+    c.kind AS company_type,
+    AVG(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') THEN CAST(mi.info AS numeric) END) AS avg_budget
+FROM 
+    TopMovies AS tm
+LEFT JOIN 
+    movie_companies AS mc ON tm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type AS c ON mc.company_type_id = c.id
+LEFT JOIN 
+    movie_info AS mi ON tm.movie_id = mi.movie_id
+GROUP BY 
+    tm.movie_id, tm.title, tm.production_year, c.kind
+HAVING 
+    AVG(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') THEN CAST(mi.info AS numeric) END) IS NOT NULL
+ORDER BY 
+    tm.num_actors DESC, tm.production_year DESC;

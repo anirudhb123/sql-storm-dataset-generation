@@ -1,0 +1,60 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT p.Id AS PostId, p.ParentId, p.Title,
+           1 AS Level,
+           CAST(p.Title AS VARCHAR(100)) AS Path
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT p.Id AS PostId, p.ParentId, p.Title,
+           r.Level + 1 AS Level,
+           CAST(CONCAT(r.Path, ' -> ', p.Title) AS VARCHAR(100)) AS Path
+    FROM Posts p
+    JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+RecentPostVotes AS (
+    SELECT p.Id AS PostId, p.Title, v.VoteTypeId, COUNT(v.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+    GROUP BY p.Id, p.Title, v.VoteTypeId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(v.VoteCount, 0) AS TotalVotes,
+        COALESCE(c.CommentCount, 0) AS TotalComments,
+        COUNT(DISTINCT ph.Id) AS HistoryEntries
+    FROM Posts p
+    LEFT JOIN RecentPostVotes v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id, p.Title
+),
+TopPosts AS (
+    SELECT 
+        ps.Id,
+        ps.Title,
+        ps.TotalVotes,
+        ps.TotalComments,
+        ROW_NUMBER() OVER (ORDER BY ps.TotalVotes DESC, ps.TotalComments DESC) AS rn
+    FROM PostStatistics ps
+    WHERE ps.TotalVotes > 0 OR ps.TotalComments > 0
+)
+SELECT 
+    tp.Id AS PostId,
+    tp.Title,
+    tp.TotalVotes,
+    tp.TotalComments,
+    r.Path AS PostHierarchy
+FROM TopPosts tp
+LEFT JOIN RecursivePostHierarchy r ON tp.Id = r.PostId
+WHERE tp.rn <= 10
+ORDER BY tp.TotalVotes DESC, tp.TotalComments DESC;

@@ -1,0 +1,64 @@
+WITH RECURSIVE UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.AnswerCount, 0)) AS TotalAnswers,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY SUM(COALESCE(p.Score, 0)) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentActivity AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(p.LastActivityDate) AS LastPostDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.OwnerUserId
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS UsageCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 5
+)
+SELECT 
+    u.DisplayName,
+    ups.PostCount,
+    ups.TotalScore,
+    ups.TotalViews,
+    ups.TotalAnswers,
+    ra.CommentCount,
+    ra.LastPostDate,
+    (SELECT STRING_AGG(tt.TagName, ', ') 
+     FROM TopTags tt) AS TopTags
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    RecentActivity ra ON ups.UserId = ra.OwnerUserId
+WHERE 
+    ups.Rank <= 10
+ORDER BY 
+    ups.TotalScore DESC;

@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName, p.PostTypeId, p.Title, p.CreationDate, p.Score, p.ViewCount
+), TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        Score,
+        ViewCount,
+        Rank,
+        CommentCount,
+        UpVotes,
+        DownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+), PostWithTags AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.OwnerDisplayName,
+        tp.Score,
+        tp.ViewCount,
+        tp.CommentCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostsWithTags pt ON tp.PostId = pt.PostId
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    GROUP BY 
+        tp.PostId, tp.Title, tp.OwnerDisplayName, tp.Score, tp.ViewCount, tp.CommentCount
+), UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 50
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ua.DisplayName AS User,
+    ua.PostCount,
+    ua.UpVoteCount,
+    ua.DownVoteCount,
+    pt.Title AS PostTitle,
+    pt.Score AS PostScore,
+    pt.ViewCount AS PostViewCount,
+    pt.CommentCount,
+    pt.Tags
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    PostWithTags pt ON ua.PostCount > 0
+WHERE 
+    ua.UpVoteCount > ua.DownVoteCount
+ORDER BY 
+    ua.PostCount DESC, pt.Score DESC
+LIMIT 20;

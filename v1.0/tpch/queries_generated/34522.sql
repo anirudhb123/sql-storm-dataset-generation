@@ -1,0 +1,38 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal) 
+        FROM supplier 
+        WHERE s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = 1)
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+), 
+part_avg_price AS (
+    SELECT ps.ps_partkey,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    pp.avg_supply_cost,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY total_sales DESC) AS sales_rank
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN supplier_hierarchy s ON s.s_suppkey = l.l_suppkey
+JOIN part_avg_price pp ON pp.ps_partkey = p.p_partkey
+WHERE p.p_retailprice > 100
+  AND (pp.avg_supply_cost / p.p_retailprice) > 0.1
+  AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY p.p_partkey, p.p_name, s.s_name, pp.avg_supply_cost
+HAVING SUM(l.l_quantity) > 50
+ORDER BY total_sales DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

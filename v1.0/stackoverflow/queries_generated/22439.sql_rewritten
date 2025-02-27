@@ -1,0 +1,98 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpvoteCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownvoteCount,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        MAX(U.CreationDate) AS LastActive
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 0
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostRanks AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+CommentRanks AS (
+    SELECT 
+        C.Id AS CommentId,
+        C.PostId,
+        C.CreationDate,
+        C.Score,
+        RANK() OVER (PARTITION BY C.PostId ORDER BY C.CreationDate DESC) AS CommentRank
+    FROM 
+        Comments C
+),
+RecentVotes AS (
+    SELECT 
+        V.UserId,
+        V.PostId,
+        V.VoteTypeId,
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes V
+    WHERE 
+        V.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        V.UserId, V.PostId, V.VoteTypeId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    US.UpvoteCount,
+    US.DownvoteCount,
+    P.Title AS TopPostTitle,
+    PS.Rank AS TopPostRank,
+    C.CommentId,
+    CR.CommentRank,
+    NVL(RV.VoteCount, 0) AS RecentVoteCount,
+    CASE 
+        WHEN U.Location IS NOT NULL THEN U.Location 
+        ELSE 'Unknown' 
+    END AS UserLocation,
+    CASE 
+        WHEN U.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '365 days' THEN 'Veteran' 
+        ELSE 'Newcomer' 
+    END AS UserType,
+    PO.Score,
+    COALESCE(PT.Name, 'N/A') AS PostType 
+FROM 
+    UserStats US
+JOIN 
+    Users U ON US.UserId = U.Id
+LEFT JOIN 
+    PostRanks PS ON U.Id = PS.OwnerUserId AND PS.Rank = 1
+LEFT JOIN 
+    Comments C ON C.PostId = PS.PostId
+LEFT JOIN 
+    CommentRanks CR ON C.Id = CR.CommentId
+LEFT JOIN 
+    Votes RV ON RV.UserId = U.Id AND RV.PostId = PS.PostId
+LEFT JOIN 
+    PostTypes PT ON PT.Id = (SELECT P.PostTypeId FROM Posts P WHERE P.Id = PS.PostId LIMIT 1)
+WHERE 
+    US.TotalPosts > 10
+AND 
+    (US.TotalComments IS NULL OR US.TotalComments > 5)
+ORDER BY 
+    U.Reputation DESC, US.UpvoteCount DESC;

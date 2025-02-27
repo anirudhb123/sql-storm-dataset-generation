@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        at.production_year IS NOT NULL AND 
+        (at.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') OR
+         at.kind_id = (SELECT id FROM kind_type WHERE kind = 'tv series'))
+),
+ActorInfo AS (
+    SELECT 
+        ak.name AS actor_name,
+        pi.info AS actor_bio,
+        ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY pi.id DESC) AS info_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        person_info pi ON ci.person_id = pi.person_id
+    WHERE 
+        pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        STRING_AGG(DISTINCT ai.actor_name, ', ') AS actors,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        cast_info ci ON rm.movie_id = ci.movie_id
+    LEFT JOIN 
+        ActorInfo ai ON ci.person_id = ai.actor_id AND ai.info_rank = 1
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+)
+SELECT 
+    fm.*,
+    COALESCE(fm.keyword_count, 0) AS total_keywords,
+    CASE 
+        WHEN fm.production_year < 2000 THEN 'Classic'
+        WHEN fm.production_year >= 2000 AND fm.production_year < 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS release_period,
+    COUNT(DISTINCT ci.movie_id) AS total_castings,
+    SUM(CASE WHEN ci.note IS NULL THEN 1 ELSE 0 END) AS null_notes_count
+FROM 
+    FilteredMovies fm
+LEFT OUTER JOIN 
+    cast_info ci ON fm.movie_id = ci.movie_id
+WHERE 
+    (NULLIF(fm.keyword_count, 0) IS NOT NULL OR fm.production_year > 2015) AND
+    fm.actors LIKE '%John%'
+GROUP BY 
+    fm.movie_id, fm.title, fm.production_year, fm.keyword_count
+ORDER BY 
+    fm.production_year DESC, fm.title;

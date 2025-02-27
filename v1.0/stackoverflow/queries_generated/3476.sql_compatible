@@ -1,0 +1,63 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(p.Score) AS TotalScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        Questions,
+        Answers,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS Rank
+    FROM UserActivity
+    WHERE TotalPosts > 0
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Tags t
+    JOIN Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::text[])
+    GROUP BY t.TagName
+    HAVING COUNT(p.Id) > 10
+),
+Results AS (
+    SELECT 
+        tu.DisplayName,
+        tu.TotalPosts,
+        tu.Questions,
+        tu.Answers,
+        tu.TotalScore,
+        pt.TagName,
+        pt.PostCount,
+        pt.TotalViews
+    FROM TopUsers tu
+    JOIN PopularTags pt ON tu.Rank <= 10
+)
+SELECT 
+    r.DisplayName,
+    r.TotalPosts,
+    r.Questions,
+    r.Answers,
+    r.TotalScore,
+    r.TagName,
+    r.PostCount,
+    r.TotalViews
+FROM Results r
+FULL OUTER JOIN Badges b ON r.UserId = b.UserId
+    AND b.Class = 1 
+    AND b.Date > (CAST('2024-10-01' AS DATE) - INTERVAL '1 year')
+WHERE r.TotalPosts IS NOT NULL
+ORDER BY r.TotalScore DESC, r.TagName;

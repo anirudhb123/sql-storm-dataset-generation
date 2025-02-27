@@ -1,0 +1,50 @@
+
+WITH TotalSales AS (
+    SELECT 
+        p.p_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS sales
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+TopSuppliers AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name,
+        sd.nation_name,
+        ROW_NUMBER() OVER (PARTITION BY sd.nation_name ORDER BY sd.s_acctbal DESC) AS rn
+    FROM 
+        SupplierDetails sd
+)
+SELECT 
+    r.r_name AS region,
+    ts.s_name AS supplier_name,
+    ts.s_acctbal AS account_balance,
+    ts.nation_name,
+    ts.rn
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    TopSuppliers ts ON n.n_nationkey = ts.nation_name
+WHERE 
+    ts.rn <= 3
+ORDER BY 
+    r.r_name, ts.s_acctbal DESC;

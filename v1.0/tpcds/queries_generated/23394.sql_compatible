@@ -1,0 +1,80 @@
+
+WITH RecursiveSales AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_ext_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price DESC) AS rn
+    FROM
+        web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE
+        c.c_birth_month BETWEEN 1 AND 6 AND
+        c.c_preferred_cust_flag = 'Y'
+),
+SalesSummary AS (
+    SELECT
+        rs.ws_order_number,
+        SUM(COALESCE(rs.ws_quantity, 0)) AS total_quantity,
+        SUM(rs.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT rs.ws_item_sk) AS distinct_items
+    FROM
+        RecursiveSales rs
+    WHERE
+        rs.rn <= 5  
+    GROUP BY
+        rs.ws_order_number
+),
+WarehouseDetails AS (
+    SELECT
+        w.w_warehouse_sk,
+        w.w_country,
+        COUNT(DISTINCT rs.ws_order_number) AS order_count,
+        SUM(COALESCE(rs.total_net_profit, 0)) AS cumulative_profit
+    FROM
+        warehouse w
+    LEFT JOIN web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    LEFT JOIN SalesSummary rs ON ws.ws_order_number = rs.ws_order_number
+    GROUP BY
+        w.w_warehouse_sk,
+        w.w_country
+),
+FinalResults AS (
+    SELECT
+        wd.w_country,
+        wd.order_count,
+        wd.cumulative_profit,
+        RANK() OVER (ORDER BY wd.cumulative_profit DESC) AS profit_rank,
+        CASE
+            WHEN wd.order_count IS NULL THEN 'No Orders'
+            WHEN wd.cumulative_profit IS NULL THEN 'No Profit'
+            ELSE 'Active'
+        END AS order_status
+    FROM
+        WarehouseDetails wd
+)
+SELECT
+    fr.w_country,
+    fr.order_count,
+    fr.cumulative_profit,
+    fr.profit_rank,
+    fr.order_status
+FROM
+    FinalResults fr
+WHERE
+    fr.order_status = 'Active'
+ORDER BY
+    fr.cumulative_profit DESC
+FETCH FIRST 10 ROWS ONLY
+UNION ALL
+SELECT
+    'TOTAL' AS w_country,
+    COUNT(*) AS order_count,
+    SUM(cumulative_profit) AS cumulative_profit,
+    NULL AS profit_rank,
+    NULL AS order_status
+FROM
+    FinalResults;

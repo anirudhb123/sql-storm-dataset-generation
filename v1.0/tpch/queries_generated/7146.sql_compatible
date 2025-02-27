@@ -1,0 +1,39 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           c.c_name, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS RevenueRank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_name
+),
+TopRevenueOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           c.c_name, 
+           r.TotalRevenue
+    FROM RankedOrders r
+    JOIN orders o ON r.o_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE r.RevenueRank <= 5
+),
+SupplierRevenue AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           SUM(ps.ps_supplycost * l.l_quantity) AS SupplierRevenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN TopRevenueOrders t ON l.l_orderkey = t.o_orderkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT s.s_name, 
+       sr.SupplierRevenue, 
+       t.o_orderkey, 
+       t.TotalRevenue 
+FROM SupplierRevenue sr
+JOIN TopRevenueOrders t ON t.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_suppkey = sr.s_suppkey)
+ORDER BY sr.SupplierRevenue DESC, t.TotalRevenue DESC;

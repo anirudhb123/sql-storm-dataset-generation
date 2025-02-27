@@ -1,0 +1,83 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.AcceptedAnswerId,
+        a.ParentId,
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy r ON r.PostId = a.ParentId
+    WHERE 
+        a.PostTypeId = 2  
+),
+
+PostVoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopenedDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+
+FinalPostSummary AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        pc.UpVotes,
+        pc.DownVotes,
+        COALESCE(phs.LastClosedDate, 'No Closure') AS LastClosedDate,
+        COALESCE(phs.LastReopenedDate, 'Never Reopened') AS LastReopenedDate,
+        rh.Level
+    FROM 
+        RecursivePostHierarchy rh
+    LEFT JOIN 
+        PostVoteCounts pc ON rh.PostId = pc.PostId
+    LEFT JOIN 
+        PostHistorySummary phs ON rh.PostId = phs.PostId
+)
+
+SELECT 
+    Title,
+    UpVotes,
+    DownVotes,
+    LastClosedDate,
+    LastReopenedDate,
+    Level
+FROM 
+    FinalPostSummary
+WHERE 
+    Level < 3  
+ORDER BY 
+    UpVotes DESC NULLS LAST,  
+    DownVotes ASC NULLS LAST;

@@ -1,0 +1,47 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+supplier_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, l.l_returnflag, l.l_linestatus, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus <> 'F'
+),
+nation_summary AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count,
+           AVG(c.c_acctbal) AS avg_acctbal,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT r.r_name, n.n_name,
+       COALESCE(SUM(lo.total_order_value), 0) AS total_order_value,
+       COALESCE(MAX(n.customer_count), 0) AS total_customers,
+       COALESCE(AVG(lo.average_salary), 0) AS avg_supply_cost,
+       CASE 
+           WHEN COUNT(DISTINCT s.s_name) > 0 THEN 'Multiple Suppliers'
+           ELSE 'Single Supplier'
+       END AS supplier_status
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+           AVG(ps.ps_supplycost) AS average_salary
+    FROM supplier s
+    JOIN supplier_orders o ON s.s_suppkey = o.o_orderkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey AND l.l_suppkey = ps.ps_suppkey
+    WHERE l.l_shipmode IN ('AIR', 'TRUCK') AND s.s_acctbal IS NOT NULL
+    GROUP BY o.o_orderkey
+) lo ON n.n_nationkey = lo.o_orderkey
+LEFT JOIN top_suppliers s ON s.s_suppkey = lo.o_orderkey
+GROUP BY r.r_name, n.n_name
+HAVING SUM(CASE WHEN lo.total_order_value > 2000 THEN 1 ELSE 0 END) > 5
+ORDER BY r.r_name DESC, n.n_name ASC;

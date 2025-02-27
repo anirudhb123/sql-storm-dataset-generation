@@ -1,0 +1,59 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' 
+        AND o.o_orderdate < DATE '1996-12-31'
+    GROUP BY 
+        o.o_orderkey, c.c_nationkey
+),
+HighRevenueNations AS (
+    SELECT 
+        n.n_name,
+        SUM(ro.revenue) AS total_revenue
+    FROM 
+        RankedOrders ro
+    JOIN 
+        customer c ON ro.o_orderkey = o.o_orderkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        ro.rank <= 5
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    rn.n_name,
+    COALESCE(h.total_revenue, 0) AS total_revenue,
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    HighRevenueNations h ON h.n_name = p.p_comment
+JOIN 
+    region r ON r.r_regionkey = (
+        SELECT 
+            n.n_regionkey 
+        FROM 
+            nation n 
+        WHERE 
+            n.n_name = h.n_name
+        LIMIT 1
+    )
+GROUP BY 
+    rn.n_name, h.total_revenue, p.p_name, p.p_brand, p.p_retailprice
+ORDER BY 
+    total_revenue DESC, p.p_retailprice ASC;

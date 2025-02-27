@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankPerUser
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, ',')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        Tag
+),
+TagRanked AS (
+    SELECT 
+        Tag,
+        TagCount,
+        ROW_NUMBER() OVER (ORDER BY TagCount DESC) AS TagRank
+    FROM 
+        PopularTags
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        p.Title,
+        p.CreationDate,
+        ph.UserDisplayName,
+        ph.CreationDate AS EditDate,
+        ph.Comment AS HistoryComment,
+        p.Body AS OriginalBody,
+        CASE WHEN ph.PostHistoryTypeId = 10 THEN (SELECT Name FROM CloseReasonTypes WHERE Id::int = ph.Comment::int) END AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) -- Charting close/reopen/delete actions
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.AnswerCount,
+    tt.Tag,
+    tt.TagCount,
+    pha.EditDate,
+    pha.HistoryComment,
+    pha.CloseReason,
+    rp.RankPerUser
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagRanked tt ON tt.Tag = ANY(string_to_array(rp.Tags, ','))
+LEFT JOIN 
+    PostHistoryAnalysis pha ON pha.PostId = rp.PostId
+WHERE 
+    rp.RankPerUser <= 5 -- Top 5 ranked posts per user
+ORDER BY 
+    rp.RankPerUser, tt.TagCount DESC;
+

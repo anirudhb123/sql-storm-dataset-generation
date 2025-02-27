@@ -1,0 +1,67 @@
+
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(tag.TagName) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS tag(TagName) ON TRUE
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000  
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(pc.TagCount, 0) AS NumberOfTags,
+        COALESCE(badgeCount.BadgeCount, 0) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostTagCounts pc ON p.Id = pc.PostId
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) badgeCount ON p.OwnerUserId = badgeCount.UserId
+    WHERE 
+        p.PostTypeId = 1  
+)
+SELECT 
+    ud.UserId,
+    ud.DisplayName,
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.NumberOfTags,
+    pd.BadgeCount,
+    tu.Rank
+FROM 
+    PostDetails pd
+JOIN 
+    Users ud ON pd.PostId = ud.Id
+JOIN 
+    TopUsers tu ON ud.Id = tu.UserId
+ORDER BY 
+    tu.Rank, pd.ViewCount DESC
+LIMIT 10;

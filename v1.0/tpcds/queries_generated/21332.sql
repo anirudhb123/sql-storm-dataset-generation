@@ -1,0 +1,57 @@
+
+WITH RECURSIVE address_tree AS (
+    SELECT ca_address_sk, ca_street_number, ca_street_name, ca_city, ca_state, 1 AS level
+    FROM customer_address
+    WHERE ca_state IS NOT NULL
+    UNION ALL
+    SELECT ca_address_sk, ca_street_number, ca_street_name, ca_city, ca_state, level + 1
+    FROM customer_address
+    JOIN address_tree ON address_tree.ca_state = customer_address.ca_state
+    WHERE address_tree.level < 5
+), ranked_customers AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), sales_summary AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        MAX(ws_net_profit) AS max_profit
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+)
+SELECT 
+    a.ca_street_number,
+    a.ca_street_name,
+    a.ca_city,
+    a.ca_state,
+    COALESCE(r.c_customer_id, 'N/A') AS customer_id,
+    COALESCE(r.c_first_name, 'Unknown') AS customer_first_name,
+    COALESCE(r.c_last_name, 'Unknown') AS customer_last_name,
+    s.total_sales,
+    s.order_count,
+    s.max_profit,
+    CASE 
+        WHEN r.rank IS NULL THEN 'Bronze'
+        WHEN r.rank <= 5 THEN 'Gold'
+        WHEN r.rank <= 10 THEN 'Silver'
+        ELSE 'Regular'
+    END AS customer_tier
+FROM address_tree a
+LEFT OUTER JOIN ranked_customers r ON r.rank <= 10
+LEFT JOIN sales_summary s ON s.ws_bill_customer_sk = r.c_customer_id
+WHERE a.level = 1 
+    AND (a.ca_state IN ('CA', 'NY') OR a.ca_city IS NULL)
+    AND NOT EXISTS (
+        SELECT 1 FROM store_returns sr 
+        WHERE sr.sr_customer_sk = r.c_customer_id
+        AND sr.sr_return_quantity > 0
+    )
+ORDER BY a.ca_city ASC, total_sales DESC NULLS LAST;

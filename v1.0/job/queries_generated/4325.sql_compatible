@@ -1,0 +1,51 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS avg_roles,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    LEFT JOIN 
+        person_info pi ON c.person_id = pi.person_id
+    WHERE 
+        t.production_year >= 2000
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'Movie%')
+    GROUP BY 
+        t.title, t.production_year, t.kind_id
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year,
+        total_cast, 
+        avg_roles
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 10
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(GREATEST(tm.total_cast, 1), 1) AS cast_size,
+    TRIM(CONCAT('Average roles per cast member: ', ROUND(tm.avg_roles, 2))) AS roles_info
+FROM 
+    TopMovies tm
+JOIN 
+    aka_title at ON tm.title = at.title
+LEFT JOIN 
+    movie_info mi ON at.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office' LIMIT 1)
+WHERE 
+    mi.info IS NOT NULL OR mi.info IS NULL
+ORDER BY 
+    tm.production_year DESC, 
+    cast_size DESC;

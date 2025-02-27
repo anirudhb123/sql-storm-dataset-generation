@@ -1,0 +1,53 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title AS movie_title,
+        t.production_year,
+        CASE 
+            WHEN lower(t.title) LIKE '%the%' THEN 'Contains the word "the"' 
+            ELSE 'Does not contain the word "the"' 
+        END AS title_contains_the,
+        ARRAY_AGG(DISTINCT ak.name) AS alternative_names
+    FROM title t
+    LEFT JOIN aka_title ak ON t.id = ak.movie_id
+    GROUP BY t.id, t.title, t.production_year
+),
+PersonDetails AS (
+    SELECT 
+        p.id AS person_id,
+        p.name AS person_name,
+        p.gender,
+        ARRAY_AGG(DISTINCT r.role) AS roles
+    FROM name p
+    JOIN cast_info ci ON p.id = ci.person_id
+    JOIN role_type r ON ci.role_id = r.id
+    GROUP BY p.id, p.name, p.gender
+),
+MovieCast AS (
+    SELECT 
+        md.title_id,
+        md.movie_title,
+        md.production_year,
+        pd.person_id,
+        pd.person_name,
+        pd.gender,
+        pd.roles
+    FROM MovieDetails md
+    JOIN cast_info ci ON md.title_id = ci.movie_id
+    JOIN PersonDetails pd ON ci.person_id = pd.person_id
+)
+SELECT 
+    mc.movie_title,
+    mc.production_year,
+    mc.person_name,
+    mc.gender,
+    string_agg(DISTINCT r.role, ', ') AS roles_list,
+    CASE 
+        WHEN mc.production_year < 2000 THEN 'Classic' 
+        WHEN mc.production_year BETWEEN 2000 AND 2010 THEN 'Modern' 
+        ELSE 'Recent' 
+    END AS era
+FROM MovieCast mc
+JOIN role_type r ON mc.roles @> ARRAY[r.role]
+GROUP BY mc.movie_title, mc.production_year, mc.person_name, mc.gender
+ORDER BY mc.production_year DESC, mc.movie_title;

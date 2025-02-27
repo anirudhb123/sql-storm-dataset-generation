@@ -1,0 +1,76 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        CASE 
+            WHEN p.PostTypeId = 1 THEN 'Question'
+            WHEN p.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(STRING_AGG(DISTINCT Tags, ','), ',')) AS TagName
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS VoteCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId 
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        ue.UserId,
+        ue.DisplayName,
+        ue.VoteCount,
+        ue.CommentCount,
+        ue.BadgeCount,
+        RANK() OVER (ORDER BY (ue.VoteCount + ue.CommentCount) DESC) AS EngagementRank
+    FROM 
+        UserEngagement ue
+)
+SELECT 
+    pt.TagName,
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.ViewCount,
+    r.Score,
+    tu.DisplayName AS TopUser,
+    tu.EngagementRank
+FROM 
+    PopularTags pt
+JOIN 
+    RankedPosts r ON r.Tags LIKE '%' || pt.TagName || '%'
+JOIN 
+    TopUsers tu ON r.OwnerUserId = tu.UserId
+WHERE 
+    tu.EngagementRank <= 5
+ORDER BY 
+    pt.TagName, r.Score DESC;

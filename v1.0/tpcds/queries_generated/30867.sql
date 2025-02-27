@@ -1,0 +1,58 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+trend_data AS (
+    SELECT 
+        d.d_year,
+        SUM(ws.net_profit) AS annual_profit,
+        AVG(ws.net_paid_inc_tax) AS average_order_value,
+        ROW_NUMBER() OVER (ORDER BY d.d_year) AS year_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    ci.total_quantity,
+    ci.total_profit,
+    td.annual_profit,
+    td.average_order_value
+FROM 
+    customer_info c
+FULL OUTER JOIN 
+    sales_data sd ON c.c_customer_sk = sd.ws_item_sk
+JOIN 
+    trend_data td ON sd.rank = 1 AND td.year_rank = 1
+WHERE 
+    (ci.total_quantity IS NOT NULL OR ci.total_profit IS NOT NULL)
+    AND (td.annual_profit > 50000 OR td.average_order_value < 100)
+ORDER BY 
+    td.annual_profit DESC, ci.total_profit DESC
+LIMIT 100;

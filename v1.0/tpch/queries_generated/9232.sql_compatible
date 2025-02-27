@@ -1,0 +1,39 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn,
+        n.n_regionkey
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal, n.n_regionkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name,
+        t.s_suppkey,
+        t.s_name,
+        t.s_acctbal,
+        t.total_supplycost,
+        t.n_regionkey
+    FROM RankedSuppliers t
+    JOIN region r ON t.n_regionkey = r.r_regionkey
+    WHERE t.rn <= 5 
+)
+SELECT 
+    r.r_name AS region,
+    COUNT(DISTINCT o.o_orderkey) AS num_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(s.s_acctbal) AS avg_supplier_balance
+FROM orders o
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN TopSuppliers s ON l.l_suppkey = s.s_suppkey
+JOIN nation n ON s.n_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY r.r_name
+ORDER BY total_revenue DESC;

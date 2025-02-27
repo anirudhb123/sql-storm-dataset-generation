@@ -1,0 +1,59 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS DateRank
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.PostTypeId = 1 
+),
+TopPosts AS (
+    SELECT
+        PostId,
+        Title,
+        ViewCount,
+        AnswerCount,
+        CreationDate,
+        OwnerName
+    FROM
+        RankedPosts
+    WHERE
+        ViewRank <= 5 
+),
+PostDetails AS (
+    SELECT
+        tp.*,
+        pt.Name AS PostType,
+        (
+            SELECT STRING_AGG(tag.TagName, ', ')
+            FROM Tags tag
+            WHERE tag.Id IN (
+                SELECT CAST(unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS integer)
+            )
+        ) AS Tags
+    FROM
+        TopPosts tp
+    JOIN
+        PostTypes pt ON pt.Id = (SELECT PostTypeId FROM Posts WHERE Id = tp.PostId)
+)
+SELECT
+    pd.OwnerName,
+    pd.Title,
+    pd.ViewCount,
+    pd.AnswerCount,
+    pd.CreationDate,
+    pd.PostType,
+    pd.Tags
+FROM
+    PostDetails pd
+ORDER BY
+    pd.ViewCount DESC, pd.CreationDate ASC;

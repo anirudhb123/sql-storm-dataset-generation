@@ -1,0 +1,86 @@
+WITH RecursiveMovie AS (
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mc.company_id,
+        cn.name AS company_name,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY cn.name) AS company_rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+),
+FilteredMovies AS (
+    
+    SELECT 
+        movie_id,
+        title
+    FROM 
+        RecursiveMovie
+    WHERE 
+        production_year >= 1990
+        AND company_id IS NOT NULL
+),
+MoviesWithCast AS (
+    
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        MAX(ci.nr_order) AS max_order
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        cast_info ci ON fm.movie_id = ci.movie_id
+    GROUP BY 
+        fm.movie_id, fm.title
+),
+MoviesWithKeywords AS (
+    
+    SELECT 
+        fw.movie_id,
+        fw.title,
+        fw.total_cast,
+        CASE 
+            WHEN kw.keyword IS NULL THEN 'No Keywords'
+            ELSE STRING_AGG(kw.keyword, ', ')
+        END AS keywords
+    FROM
+        MoviesWithCast fw
+    LEFT JOIN 
+        movie_keyword mk ON fw.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        fw.movie_id, fw.title, fw.total_cast
+),
+RankedMovies AS (
+    
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY total_cast DESC) AS rank
+    FROM 
+        MoviesWithKeywords
+)
+
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.total_cast,
+    rm.keywords,
+    rm.rank,
+    CASE 
+        WHEN rm.rank <= 10 THEN 'Top 10'
+        WHEN rm.total_cast > 50 THEN 'High Cast'
+        ELSE 'Regular'
+    END AS movie_classification
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rank <= 50 
+    AND (rm.keywords IS NOT NULL AND rm.keywords NOT LIKE '%No Keywords%')
+ORDER BY 
+    rm.rank;

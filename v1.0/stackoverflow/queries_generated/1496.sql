@@ -1,0 +1,56 @@
+WITH UserScore AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 1 THEN 1 ELSE 0 END), 0) AS AcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+), PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        COALESCE(CAST(p.ClosedDate AS DATE), '1970-01-01') AS ClosedDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Body, p.ClosedDate
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.UpVotes,
+    us.DownVotes,
+    us.AcceptedAnswers,
+    COUNT(pd.PostId) AS TotalPosts,
+    SUM(CASE WHEN pd.RecentPostRank = 1 THEN 1 ELSE 0 END) AS MostRecentPostFlag,
+    STRING_AGG(DISTINCT pd.Title, '; ') AS RecentPostTitles,
+    COALESCE(MAX(pd.ClosedDate), 'No Closure') AS LatestClosedDate
+FROM 
+    UserScore us
+JOIN 
+    PostDetails pd ON us.UserId = pd.PostId
+GROUP BY 
+    us.UserId, us.DisplayName, us.Reputation, us.UpVotes, us.DownVotes, us.AcceptedAnswers 
+HAVING 
+    SUM(CASE WHEN pd.RecentPostRank = 1 THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    us.Reputation DESC
+LIMIT 10;

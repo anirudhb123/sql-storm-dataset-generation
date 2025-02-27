@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        COALESCE(po.OpenUserCount, 0) AS OpenUserCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS rn,
+        DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS dr
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(DISTINCT UserId) AS OpenUserCount
+        FROM 
+            Votes
+        WHERE 
+            VoteTypeId = 2 
+        GROUP BY 
+            PostId
+    ) po ON po.PostId = p.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+),
+UserBadges AS (
+    SELECT 
+        b.UserId, 
+        STRING_AGG(b.Name, ', ') AS badge_names
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 
+    GROUP BY 
+        b.UserId
+),
+PostEditHistory AS (
+    SELECT 
+        ph.PostId, 
+        ph.PostHistoryTypeId, 
+        COUNT(*) AS EditCount,
+        ARRAY_AGG(DISTINCT ph.UserDisplayName) AS Editors
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId, 
+        ph.PostHistoryTypeId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.Score,
+        rb.badge_names,
+        pe.EditCount,
+        pe.Editors
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserBadges rb ON rb.UserId = rp.OwnerUserId
+    LEFT JOIN 
+        PostEditHistory pe ON pe.PostId = rp.PostId
+    WHERE 
+        rp.rn <= 5 
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.badge_names,
+    tp.EditCount,
+    CASE 
+        WHEN tp.EditCount IS NULL THEN 'No edits'
+        ELSE tp.Editors::text
+    END AS Editors
+FROM 
+    TopPosts tp
+WHERE 
+    tp.Score > (SELECT AVG(Score) FROM Posts) 
+ORDER BY 
+    tp.Score DESC, tp.Title;

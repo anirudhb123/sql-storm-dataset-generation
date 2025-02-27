@@ -1,0 +1,72 @@
+
+WITH RECURSIVE DateSeries AS (
+    SELECT d_date_sk, d_date, d_year, d_month_seq
+    FROM date_dim
+    WHERE d_date BETWEEN '2023-01-01' AND '2023-12-31'
+    UNION ALL
+    SELECT d.d_date_sk, d.d_date, d.d_year, d.d_month_seq
+    FROM date_dim d
+    JOIN DateSeries ds ON d.d_date > ds.d_date
+    WHERE d.d_date <= '2023-12-31'
+),
+SalesData AS (
+    SELECT
+        ws_bill_customer_sk,
+        ws_sold_date_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders,
+        AVG(ws_net_profit) AS avg_net_profit
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk, ws_sold_date_sk
+),
+CustomerReturns AS (
+    SELECT
+        wr_returning_customer_sk,
+        SUM(COALESCE(wr_return_amt, 0)) AS total_return_amt,
+        COUNT(wr_order_number) AS total_returns
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+),
+FilteredSales AS (
+    SELECT
+        sd.ws_bill_customer_sk,
+        sd.ws_sold_date_sk,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        sd.total_orders,
+        sd.avg_net_profit
+    FROM SalesData sd
+    LEFT JOIN CustomerReturns cr ON sd.ws_bill_customer_sk = cr.wr_returning_customer_sk
+),
+ActiveCustomers AS (
+    SELECT
+        ca.c_customer_sk,
+        ca.c_first_name,
+        ca.c_last_name,
+        ca.c_email_address,
+        ca.c_birth_day,
+        ca.c_birth_month,
+        ca.c_birth_year,
+        ROW_NUMBER() OVER (PARTITION BY ca.c_customer_sk ORDER BY ds.d_month_seq DESC) AS rn
+    FROM customer ca
+    JOIN FilteredSales fs ON ca.c_customer_sk = fs.ws_bill_customer_sk
+    JOIN DateSeries ds ON fs.ws_sold_date_sk = ds.d_date_sk
+)
+SELECT 
+    ac.c_customer_sk,
+    ac.c_first_name,
+    ac.c_last_name,
+    ac.c_email_address,
+    ac.c_birth_day,
+    ac.c_birth_month,
+    COALESCE(ac.c_birth_year, 1900) AS birth_year,
+    SUM(CASE WHEN fs.total_sales > 1000 THEN fs.total_sales ELSE 0 END) AS high_sales,
+    MAX(COALESCE(fs.total_return_amt, 0)) AS max_return_amt,
+    DENSE_RANK() OVER (ORDER BY SUM(fs.total_sales) DESC) AS sales_rank
+FROM ActiveCustomers ac
+JOIN FilteredSales fs ON ac.c_customer_sk = fs.ws_bill_customer_sk
+WHERE ac.rn = 1
+GROUP BY ac.c_customer_sk, ac.c_first_name, ac.c_last_name, ac.c_email_address, ac.c_birth_day, ac.c_birth_month, ac.c_birth_year
+HAVING SUM(fs.total_orders) > 10 AND MAX(fs.avg_net_profit) IS NOT NULL
+ORDER BY sales_rank
+LIMIT 10;

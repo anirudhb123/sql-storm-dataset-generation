@@ -1,0 +1,50 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        REPLACE(c.c_email_address, '@', ' [at] ') AS obfuscated_email
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+monthly_sales AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_net_sales) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq
+)
+SELECT 
+    ci.full_name,
+    ci.ca_city,
+    ci.ca_state,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ms.d_year,
+    ms.d_month_seq,
+    ms.total_sales,
+    SUBSTRING(ci.obfuscated_email, 1, 5) AS email_preview
+FROM 
+    customer_info ci
+JOIN 
+    monthly_sales ms ON EXTRACT(YEAR FROM CURRENT_DATE) = ms.d_year
+WHERE 
+    ci.cd_marital_status = 'M' AND 
+    ms.total_sales > 1000
+ORDER BY 
+    ms.total_sales DESC
+LIMIT 50;

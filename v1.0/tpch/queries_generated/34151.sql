@@ -1,0 +1,46 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, o_orderstatus,
+           CAST(o_orderkey AS VARCHAR) AS order_path
+    FROM orders
+    WHERE o_orderstatus = 'O'  -- Only considering open orders
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus,
+           CONCAT(oh.order_path, ' -> ', o.o_orderkey)
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate AND o.o_orderstatus = 'O'
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY total_supply_cost DESC
+    LIMIT 10
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_order_amount,
+           COUNT(DISTINCT o.o_orderkey) AS orders_count, 
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+) 
+
+SELECT 
+    co.c_custkey, 
+    co.c_name, 
+    co.total_order_amount, 
+    co.orders_count,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_lineitem_value,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS returned_quantity,
+    ROW_NUMBER() OVER (PARTITION BY co.c_custkey ORDER BY co.total_order_amount DESC) AS cust_rank,
+    th.order_path
+FROM CustomerOrderSummary co
+LEFT JOIN lineitem l ON l.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = co.c_custkey)
+LEFT JOIN OrderHierarchy th ON th.o_custkey = co.c_custkey
+WHERE co.total_order_amount IS NOT NULL
+GROUP BY co.c_custkey, co.c_name, th.order_path
+HAVING co.orders_count > 5
+ORDER BY co.total_order_amount DESC
+LIMIT 50;

@@ -1,0 +1,70 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        supplier s
+),
+AveragePrice AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(ps.ps_supplycost) AS AvgSupplyCost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal 
+    FROM 
+        customer c 
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c1.c_acctbal) FROM customer c1)
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.extendedprice,
+        l.discount,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS LineItemRank
+    FROM 
+        lineitem l 
+    WHERE 
+        l.l_discount BETWEEN 0.05 AND 0.10
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COUNT(DISTINCT o.o_orderkey) AS OrderCount,
+    COALESCE(SUM(l.extendedprice * (1 - l.discount)), 0) AS TotalRevenue,
+    MAX(rn.s_name) AS TopSupplier,
+    MAX(rn.s_acctbal) AS TopSupplierBalance,
+    STRING_AGG(DISTINCT cust.c_name, '; ') AS HighValueCustomerNames
+FROM 
+    part p 
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey 
+LEFT JOIN 
+    RankedSuppliers rn ON ps.ps_suppkey = rn.s_suppkey 
+LEFT JOIN 
+    orders o ON o.o_orderkey IN (SELECT l.l_orderkey FROM FilteredLineItems l WHERE l.l_partkey = p.p_partkey)
+LEFT JOIN 
+    HighValueCustomers cust ON cust.c_custkey = o.o_custkey 
+WHERE 
+    p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_size IS NOT NULL AND p_size > 10)
+GROUP BY 
+    p.p_partkey, p.p_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5 
+AND 
+    SUM(COALESCE(l.extendedprice * (1 - l.discount), 0)) > (SELECT AVG(l.extendedprice) FROM lineitem WHERE l.discount = 0.01)
+ORDER BY 
+    TotalRevenue DESC, p.p_name ASC;

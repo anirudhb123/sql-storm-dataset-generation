@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(DISTINCT CASE WHEN ci.role_id IS NOT NULL THEN ci.person_id END) OVER (PARTITION BY t.id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    WHERE 
+        t.production_year IS NOT NULL 
+),
+MoviesWithGenres AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS genres
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.title_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        rm.title_id, rm.title, rm.production_year
+),
+MoviesWithAdditionalInfo AS (
+    SELECT 
+        mwg.title_id,
+        mwg.title,
+        mwg.production_year,
+        mwg.genres,
+        pi.info AS person_info
+    FROM 
+        MoviesWithGenres mwg
+    LEFT JOIN 
+        person_info pi ON pi.person_id = (SELECT ci.person_id FROM cast_info ci 
+                                            WHERE ci.movie_id = mwg.title_id 
+                                            ORDER BY ci.nr_order LIMIT 1)
+)
+SELECT 
+    mwai.title,
+    mwai.production_year,
+    mwai.genres,
+    mwai.person_info,
+    COALESCE(mwa.cast_count, 0) AS total_cast,
+    CASE 
+        WHEN mwai.production_year < 2000 THEN 'Classic'
+        WHEN mwai.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS Era
+FROM 
+    MoviesWithAdditionalInfo mwai
+LEFT JOIN 
+    (SELECT title_id, COUNT(*) AS cast_count FROM RankedMovies GROUP BY title_id) mwa
+ON 
+    mwai.title_id = mwa.title_id
+WHERE 
+    mwai.genres LIKE '%Drama%' OR 
+    mwai.person_info IS NULL
+ORDER BY 
+    mwai.production_year DESC, mwai.title;

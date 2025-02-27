@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+), 
+MonthlySales AS (
+    SELECT 
+        EXTRACT(MONTH FROM o.o_orderdate) AS sale_month,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o 
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY sale_month
+), 
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(NULLIF(p.p_brand, ''), 'Unknown') AS brand_name,
+        CASE 
+            WHEN p.p_size > 20 THEN 'Large'
+            WHEN p.p_size IS NULL THEN 'Undefined'
+            ELSE 'Small'
+        END AS size_category
+    FROM part p
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+), 
+SupplierPartCounts AS (
+    SELECT 
+        ps.ps_partkey, 
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    n.n_name,
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COALESCE(SUM(ms.total_sales), 0) AS monthly_sales,
+    SUM(CASE WHEN ps.supplier_count > 0 THEN 1 ELSE 0 END) AS part_with_suppliers,
+    COUNT(DISTINCT fps.p_partkey) AS filtered_parts_count
+FROM nation n
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN RankedSuppliers rs ON n.n_nationkey = rs.s_suppkey
+LEFT JOIN orders o ON o.o_custkey IN (SELECT DISTINCT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+LEFT JOIN MonthlySales ms ON EXTRACT(MONTH FROM o.o_orderdate) = ms.sale_month
+LEFT JOIN SupplierPartCounts ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM FilteredParts p)
+LEFT JOIN FilteredParts fps ON fps.p_partkey = ps.ps_partkey
+WHERE r.r_name IS NOT NULL
+GROUP BY n.n_name, r.r_name
+HAVING SUM(COALESCE(o.o_totalprice, 0)) > 10000
+ORDER BY total_orders DESC, monthly_sales DESC;

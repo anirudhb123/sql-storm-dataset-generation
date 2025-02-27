@@ -1,0 +1,46 @@
+
+WITH RECURSIVE demographic_summary AS (
+    SELECT h.hd_demo_sk, 
+           SUM(CASE WHEN h.hd_income_band_sk IS NOT NULL THEN 1 ELSE 0 END) AS income_count,
+           COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM household_demographics h
+    LEFT JOIN customer c ON h.hd_demo_sk = c.c_current_hdemo_sk
+    GROUP BY h.hd_demo_sk
+),
+date_summary AS (
+    SELECT d.d_year, 
+           d.d_month_seq,
+           SUM(COALESCE(ws.ws_net_profit, 0)) AS total_net_profit,
+           COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_year, d.d_month_seq
+),
+qualified_stores AS (
+    SELECT s.s_store_sk, 
+           s.s_store_name,
+           SUM(COALESCE(ss.ss_net_profit, 0)) AS store_profit
+    FROM store s
+    LEFT JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    WHERE s.s_number_employees > 50
+    GROUP BY s.s_store_sk, s.s_store_name
+)
+SELECT d.d_year, 
+       d.d_month_seq,
+       SUM(ds.total_net_profit) AS monthly_net_profit,
+       SUM(ds.order_count) AS total_orders,
+       COUNT(DISTINCT qual.s_store_sk) AS qualified_store_count,
+       SUM(COALESCE(demo.income_count, 0)) AS total_income_count,
+       AVG(CASE 
+           WHEN demo.customer_count > 0 THEN CAST(demo.customer_count AS FLOAT) / NULLIF(demo.income_count, 0)
+           ELSE NULL 
+       END) AS average_customers_per_income_band
+FROM date_summary ds
+JOIN date_dim d ON ds.d_year = d.d_year AND ds.d_month_seq = d.d_month_seq
+LEFT JOIN demographic_summary demo ON demo.hd_demo_sk IN (SELECT hd_income_band_sk FROM income_band)
+LEFT JOIN qualified_stores qual ON qual.store_profit > (
+    SELECT AVG(store_profit) FROM qualified_stores
+)
+WHERE d.d_month_seq IN (SELECT DISTINCT d_month_seq FROM date_dim WHERE d.d_year = d.d_year)
+GROUP BY d.d_year, d.d_month_seq
+ORDER BY d.d_year, d.d_month_seq;

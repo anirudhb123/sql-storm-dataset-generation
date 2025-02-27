@@ -1,0 +1,43 @@
+
+WITH RECURSIVE order_dates AS (
+    SELECT o_orderdate, RANK() OVER (PARTITION BY o_orderdate ORDER BY o_totalprice DESC) AS rnk
+    FROM orders
+    WHERE o_orderdate >= '1997-01-01'
+), 
+supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), 
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_ext_price,
+           COUNT(*) AS item_count, 
+           AVG(l.l_discount) AS avg_discount,
+           MAX(l.l_tax) AS max_tax
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+), 
+nation_info AS (
+    SELECT n.n_nationkey, n.n_name,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT 
+    d.o_orderdate,
+    COALESCE(ns.n_name, 'Unknown') AS nation_name,
+    ss.s_name AS supplier_name,
+    l.total_ext_price,
+    l.item_count,
+    l.avg_discount,
+    SUM(COALESCE(l.max_tax, 0)) AS total_max_tax,
+    ss.total_supply_cost
+FROM order_dates d
+LEFT JOIN lineitem_summary l ON d.o_orderdate = (SELECT MIN(o.o_orderdate) FROM orders o WHERE o.o_orderkey = l.l_orderkey)
+LEFT JOIN supplier_summary ss ON ss.s_suppkey = l.l_orderkey % 10 
+LEFT JOIN nation_info ns ON ns.supplier_count > 5
+GROUP BY d.o_orderdate, ns.n_name, ss.s_name, l.total_ext_price, l.item_count, l.avg_discount, ss.total_supply_cost
+HAVING SUM(l.total_ext_price) > 10000
+ORDER BY d.o_orderdate DESC, total_ext_price DESC;

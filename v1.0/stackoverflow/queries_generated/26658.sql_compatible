@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        pm.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Tags IS NOT NULL
+),
+TagStats AS (
+    SELECT 
+        TRIM(SUBSTRING(t.TagName, 2, LENGTH(t.TagName) - 2)) AS Tag,
+        COUNT(*) AS PostCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Posts p
+    INNER JOIN 
+        Tags t ON POSITION(t.TagName IN p.Tags) > 0
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        TRIM(SUBSTRING(t.TagName, 2, LENGTH(t.TagName) - 2))
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        SUM(COALESCE(br.Count, 0)) AS BadgesEarned
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Badges br ON u.Id = br.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.Rank,
+    rp.Title,
+    rp.OwnerDisplayName,
+    ts.Tag AS PopularTag,
+    ts.PostCount AS TotalPostsForTag,
+    ts.TotalScore AS TotalScoreForTag,
+    ua.QuestionsAsked,
+    ua.BadgesEarned
+FROM 
+    RankedPosts rp
+JOIN 
+    TagStats ts ON POSITION(ts.Tag IN rp.Tags) > 0
+JOIN 
+    UserActivity ua ON rp.OwnerDisplayName = ua.UserId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    ts.TotalScore DESC, 
+    rp.Rank;

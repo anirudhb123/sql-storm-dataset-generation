@@ -1,0 +1,63 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_store_sk,
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt) AS total_returned_amount,
+        RANK() OVER (PARTITION BY sr_store_sk ORDER BY SUM(sr_return_quantity) DESC) AS return_rank
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) - 30 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        sr_store_sk, sr_item_sk
+),
+TopReturnedItems AS (
+    SELECT 
+        r.sr_store_sk,
+        r.sr_item_sk,
+        r.total_returned_quantity,
+        r.total_returned_amount,
+        i.i_item_desc,
+        s.s_store_name
+    FROM 
+        RankedReturns r
+    JOIN 
+        item i ON r.sr_item_sk = i.i_item_sk
+    JOIN 
+        store s ON r.sr_store_sk = s.s_store_sk
+    WHERE 
+        r.return_rank <= 5
+),
+StoreSalesSummary AS (
+    SELECT 
+        ws_store_sk,
+        SUM(ws_sales_price) AS total_sales_amount,
+        COUNT(ws_order_number) AS total_sales_count
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws_store_sk
+)
+SELECT 
+    s.s_store_name,
+    total_sales.total_sales_amount,
+    total_sales.total_sales_count,
+    COUNT(top_items.sr_item_sk) AS top_returned_items_count,
+    SUM(top_items.total_returned_quantity) AS total_returned_quantity,
+    SUM(top_items.total_returned_amount) AS total_returned_amount
+FROM 
+    StoreSalesSummary total_sales
+JOIN 
+    store s ON total_sales.ws_store_sk = s.s_store_sk
+LEFT JOIN 
+    TopReturnedItems top_items ON s.s_store_sk = top_items.sr_store_sk
+GROUP BY 
+    s.s_store_name, total_sales.total_sales_amount, total_sales.total_sales_count
+ORDER BY 
+    total_sales.total_sales_amount DESC, top_returned_items_count DESC;

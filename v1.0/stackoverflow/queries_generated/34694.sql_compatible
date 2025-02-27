@@ -1,0 +1,107 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        p.CreationDate,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.Id
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpvoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownvoteCount,
+        COALESCE(AVG(vi.Score), 0) AS AverageScore,
+        COALESCE(BIT_OR(vt.TagBased), 0) AS TagBadge
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    LEFT JOIN 
+        Votes vi ON p.Id = vi.PostId
+    GROUP BY 
+        p.Id, p.Title
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS CloseCount,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ph.Id AS PostId,
+    ph.Title,
+    ps.CommentCount,
+    ps.UpvoteCount,
+    ps.DownvoteCount,
+    ps.AverageScore,
+    COALESCE(cph.CloseCount, 0) AS TotalCloseCount,
+    cph.LastCloseDate,
+    (SELECT 
+         ARRAY_AGG(DISTINCT t.TagName) 
+     FROM 
+         Tags t 
+     WHERE 
+         t.WikiPostId = ph.Id) AS Tags,
+    CASE 
+        WHEN ps.AverageScore > 100 THEN TRUE 
+        ELSE FALSE 
+    END AS "Top Contributor"
+FROM 
+    PostHierarchy ph
+LEFT JOIN 
+    PostStats ps ON ph.Id = ps.PostId
+LEFT JOIN 
+    ClosedPostHistory cph ON ph.Id = cph.PostId
+WHERE 
+    (ps.CommentCount + ps.UpvoteCount) > 10
+    AND ph.Level = 0
+ORDER BY 
+    ps.AverageScore DESC
+LIMIT 50;

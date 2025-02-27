@@ -1,0 +1,74 @@
+WITH RecursivePostHierarchy AS (
+    -- Base case: Select all questions and their answers
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Questions
+
+    UNION ALL
+
+    -- Recursive case: Select answers related to questions
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+)
+
+-- Main query: Get detailed information on questions, their accepted answers, and user reputation
+SELECT 
+    q.PostId AS QuestionId,
+    q.Title AS QuestionTitle,
+    q.CreationDate AS QuestionCreated,
+    a.PostId AS AnswerId,
+    a.CreationDate AS AnswerCreated,
+    u.Id AS UserId,
+    u.DisplayName AS UserName,
+    u.Reputation,
+    COUNT(c.Id) AS CommentCount,
+    AVG(v.Score) AS AverageVoteScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RecursivePostHierarchy q
+LEFT JOIN 
+    Posts a ON q.AcceptedAnswerId = a.Id
+LEFT JOIN 
+    Users u ON q.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON c.PostId = q.PostId
+LEFT JOIN 
+    Votes v ON v.PostId = q.PostId
+LEFT JOIN 
+    LATERAL (SELECT 
+                  unnest(string_to_array(p.Tags, '><')) AS TagName 
+              FROM 
+                  Posts p 
+              WHERE 
+                  p.Id = q.PostId) t ON TRUE
+WHERE 
+    q.Level = 1    -- Only include top level Questions
+GROUP BY 
+    q.PostId, 
+    q.Title, 
+    q.CreationDate, 
+    a.PostId, 
+    a.CreationDate,
+    u.Id, 
+    u.DisplayName,
+    u.Reputation
+ORDER BY 
+    u.Reputation DESC, 
+    q.CreationDate DESC;
+
+This SQL query uses a recursive CTE to construct a hierarchy of questions and their answers, subsequently aggregating various metrics such as comment counts and average vote scores. It also retrieves user details and tags associated with each question, showcasing the relationships and interactions in the Stack Overflow schema effectively.

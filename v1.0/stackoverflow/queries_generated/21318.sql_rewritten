@@ -1,0 +1,82 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(b.TotalBadges, 0) AS TotalBadges,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS TotalBadges
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) b ON p.OwnerUserId = b.UserId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.PostTypeId
+), FilteredPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate,
+        rp.OwnerUserId,
+        rp.PostTypeId,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.TotalBadges
+    FROM 
+        RecentPosts rp
+    WHERE 
+        rp.PostTypeId IN (1, 2) AND
+        rp.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' AND
+        rp.UpVotes > rp.DownVotes
+), UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        MAX(b.Date) AS LastBadgeDate,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    fp.Title,
+    fp.CreationDate,
+    u.DisplayName,
+    u.AnswerCount,
+    u.CommentCount,
+    CASE 
+        WHEN u.LastBadgeDate IS NULL THEN 'No Badges'
+        ELSE 'Has Badges'
+    END AS BadgeStatus,
+    fp.UpVotes - fp.DownVotes AS NetVotes,
+    LAG(fp.CreationDate) OVER (PARTITION BY fp.OwnerUserId ORDER BY fp.CreationDate) AS PreviousPostDate,
+    COALESCE(DATEDIFF(fp.CreationDate, LAG(fp.CreationDate) OVER (PARTITION BY fp.OwnerUserId ORDER BY fp.CreationDate)), 0) AS DaysSinceLastPost
+FROM 
+    FilteredPosts fp
+JOIN 
+    UserActivity u ON fp.OwnerUserId = u.UserId
+WHERE 
+    u.CommentCount > 0 OR u.AnswerCount > 0
+ORDER BY 
+    NetVotes DESC, fp.CreationDate DESC
+LIMIT 100;

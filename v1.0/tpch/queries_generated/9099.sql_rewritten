@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS SupplierRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+FrequentCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS OrderCount,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 10
+),
+DateFilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS Revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+
+SELECT 
+    n.n_name AS Nation,
+    COUNT(DISTINCT rs.s_suppkey) AS SupplierCount,
+    AVG(fc.TotalSpent) AS AvgCustomerSpent,
+    SUM(dfl.Revenue) AS TotalRevenue
+FROM 
+    RankedSuppliers rs
+JOIN 
+    nation n ON rs.s_nationkey = n.n_nationkey
+JOIN 
+    FrequentCustomers fc ON fc.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey)
+LEFT JOIN 
+    DateFilteredLineItems dfl ON dfl.l_orderkey IN (SELECT o.o_orderkey FROM orders o)
+GROUP BY 
+    n.n_name
+ORDER BY 
+    SupplierCount DESC, AvgCustomerSpent DESC
+LIMIT 10;

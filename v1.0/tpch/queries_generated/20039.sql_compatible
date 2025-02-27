@@ -1,0 +1,53 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal * 1.1, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN supplier s ON sh.s_nationkey = s.s_nationkey
+    WHERE sh.level < 3 AND s.s_acctbal < sh.s_acctbal
+),
+part_supplier AS (
+    SELECT ps.ps_partkey,
+           SUM(ps.ps_availqty) AS total_availqty,
+           COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+top_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    WHERE p.p_container IS NOT NULL AND p.p_size > 5
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           DENSE_RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COUNT(o.o_orderkey) >= 3 AND SUM(o.o_totalprice) > 500
+),
+ranked_lineitems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_discount,
+           RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rank
+    FROM lineitem l
+    WHERE l.l_returnflag = 'A' AND l.l_shipmode IN ('AIR', 'GROUND')
+)
+SELECT r.r_name, 
+       COALESCE(COUNT(DISTINCT p.p_partkey), 0) AS part_count,
+       MAX(CASE WHEN sh.level IS NOT NULL THEN sh.s_acctbal ELSE 0 END) AS max_acctbal,
+       SUM(CASE WHEN co.rank IS NOT NULL THEN co.total_spent ELSE 0 END) AS total_customer_spending,
+       SUM(CASE WHEN rl.rank = 1 THEN l.l_extendedprice ELSE 0 END) AS top_lineitem_price
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier_hierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN part_supplier ps ON ps.ps_partkey = (SELECT p.p_partkey FROM top_parts p WHERE p.rn = 1 LIMIT 1)
+LEFT JOIN customer_orders co ON co.order_count > 0 AND co.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+LEFT JOIN ranked_lineitems rl ON rl.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+LEFT JOIN lineitem l ON l.l_orderkey = rl.l_orderkey
+GROUP BY r.r_name
+ORDER BY part_count DESC, max_acctbal ASC NULLS LAST;

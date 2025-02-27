@@ -1,0 +1,45 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighSpenders AS (
+    SELECT 
+        c.custkey,
+        c.c_name,
+        co.total_spent,
+        co.order_count,
+        r.r_name AS region
+    FROM 
+        CustomerOrders co
+    JOIN 
+        supplier s ON co.c_custkey = s.s_nationkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        co.total_spent > 10000
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(*) AS high_spender_count,
+    AVG(co.total_spent) AS avg_spent
+FROM 
+    HighSpenders co
+JOIN 
+    region r ON co.region = r.r_regionkey
+GROUP BY 
+    r.r_name
+ORDER BY 
+    high_spender_count DESC, avg_spent DESC;

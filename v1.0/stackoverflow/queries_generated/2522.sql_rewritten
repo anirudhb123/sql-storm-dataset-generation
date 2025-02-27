@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS ScoreRank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpvoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownvoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '180 days'
+    GROUP BY 
+        P.Id
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        SUM(RP.Score) AS TotalScore,
+        COUNT(RP.PostId) AS PostCount
+    FROM 
+        Users U
+    JOIN 
+        RankedPosts RP ON U.Id = RP.OwnerUserId
+    WHERE 
+        RP.ScoreRank <= 3
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+    HAVING 
+        SUM(RP.Score) > 100
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        STRING_AGG(B.Name, ', ') AS Badges,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.TotalScore,
+    TU.PostCount,
+    COALESCE(UB.Badges, 'No Badges') AS Badges,
+    UB.BadgeCount
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    UserBadges UB ON TU.UserId = UB.UserId
+ORDER BY 
+    TU.TotalScore DESC, TU.PostCount DESC
+LIMIT 10;

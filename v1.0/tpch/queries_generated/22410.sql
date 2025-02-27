@@ -1,0 +1,52 @@
+WITH RecursiveSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, rs.level + 1
+    FROM supplier s
+    JOIN RecursiveSupplier rs ON s.s_nationkey = rs.s_nationkey
+    WHERE rs.level < 3 AND s.s_acctbal > rs.s_acctbal * 0.5
+),
+
+HighValueOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+),
+
+PartSupplierSummary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available, MAX(ps.ps_supplycost) AS max_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, p.p_comment
+    FROM part p
+    WHERE (p.p_retailprice > 0 OR p.p_retailprice IS NULL)
+      AND (p.p_size BETWEEN 1 AND 10 OR p.p_name LIKE '%widget%')
+)
+
+SELECT 
+    R.r_name,
+    COUNT(DISTINCT cs.c_custkey) AS customer_count,
+    SUM(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * l.l_discount ELSE 0 END) AS total_discounted_amount,
+    AVG(COALESCE(ps.total_available, 0)) AS avg_available_qty,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ' (', s.s_acctbal, ')'), '; ') AS supplier_info
+FROM region R
+LEFT JOIN nation N ON R.r_regionkey = N.n_regionkey
+LEFT JOIN customer cs ON cs.c_nationkey = N.n_nationkey
+LEFT JOIN HighValueOrders hvo ON cs.c_custkey = hvo.o_orderkey
+LEFT JOIN PartSupplierSummary ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM FilteredParts p)
+LEFT JOIN RecursiveSupplier s ON s.s_nationkey = N.n_nationkey
+WHERE R.r_name IS NOT NULL
+GROUP BY R.r_name
+HAVING SUM(hvo.total_revenue) > 50000 OR R.r_name LIKE 'Asia%'
+ORDER BY R.r_name DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

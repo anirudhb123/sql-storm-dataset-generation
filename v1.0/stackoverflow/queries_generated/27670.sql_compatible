@@ -1,0 +1,72 @@
+
+WITH TagCounts AS (
+    SELECT 
+        STRING_AGG(DISTINCT t.TagName, ', ') AS AllTags,
+        COUNT(*) AS TagCount,
+        p.Id
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        u.DisplayName, u.Reputation
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 10
+),
+RecentEdits AS (
+    SELECT 
+        ph.UserDisplayName,
+        ph.CreationDate,
+        p.Title,
+        p.Id AS PostId,
+        T.Name AS PostHistoryType
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes T ON ph.PostHistoryTypeId = T.Id
+    WHERE 
+        ph.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days' 
+    ORDER BY 
+        ph.CreationDate DESC
+    LIMIT 20
+)
+SELECT 
+    tu.DisplayName AS TopUser,
+    tu.Reputation,
+    tu.QuestionCount,
+    tc.AllTags,
+    tc.TagCount,
+    re.UserDisplayName AS Editor,
+    re.CreationDate AS EditDate,
+    re.Title AS EditedPostTitle,
+    re.PostId
+FROM 
+    TopUsers tu
+JOIN 
+    TagCounts tc ON true 
+JOIN 
+    RecentEdits re ON true 
+ORDER BY 
+    tu.Reputation DESC, 
+    tc.TagCount DESC, 
+    re.EditDate DESC;

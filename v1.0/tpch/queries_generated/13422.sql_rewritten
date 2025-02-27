@@ -1,0 +1,25 @@
+SELECT 
+    p_brand, 
+    p_type, 
+    SUM(l_extendedprice * (1 - l_discount)) AS revenue 
+FROM 
+    part 
+JOIN 
+    lineitem ON part.p_partkey = lineitem.l_partkey 
+JOIN 
+    partsupp ON part.p_partkey = partsupp.ps_partkey 
+JOIN 
+    supplier ON partsupp.ps_suppkey = supplier.s_suppkey 
+JOIN 
+    customer ON supplier.s_nationkey = customer.c_nationkey 
+JOIN 
+    orders ON customer.c_custkey = orders.o_custkey 
+WHERE 
+    o_orderdate >= DATE '1997-01-01' 
+    AND o_orderdate < DATE '1998-01-01' 
+GROUP BY 
+    p_brand, 
+    p_type 
+ORDER BY 
+    revenue DESC 
+LIMIT 10;

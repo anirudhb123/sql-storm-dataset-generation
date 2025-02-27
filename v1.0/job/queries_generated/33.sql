@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS actor_count,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_by_actor_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank_by_actor_count <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors,
+        p.info AS director_info,
+        kc.keyword AS keywords
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        cast_info ci ON tm.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_companies mc ON tm.movie_id = mc.movie_id AND mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Director')
+    LEFT JOIN 
+        person_info p ON mc.company_id = p.person_id
+    LEFT JOIN 
+        movie_keyword mk ON tm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    GROUP BY 
+        tm.movie_id, tm.title, p.info
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    COALESCE(md.actors, 'No actors listed') AS actors,
+    COALESCE(md.director_info, 'Director information not available') AS director_info,
+    COALESCE(md.keywords, 'No keywords found') AS keywords
+FROM 
+    MovieDetails md
+ORDER BY 
+    md.production_year DESC, md.title;

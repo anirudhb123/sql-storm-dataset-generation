@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    UNION ALL
+    SELECT 
+        mt.linked_movie_id AS movie_id,
+        a.title,
+        a.production_year,
+        mh.level + 1 AS level
+    FROM 
+        movie_link mt
+    JOIN 
+        aka_title a ON mt.linked_movie_id = a.movie_id
+    JOIN 
+        movie_hierarchy mh ON mt.movie_id = mh.movie_id
+),
+cast_summary AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+movie_info_summary AS (
+    SELECT 
+        mi.movie_id,
+        LISTAGG(mii.info, '; ') WITHIN GROUP (ORDER BY mii.info_type_id) AS info_details
+    FROM 
+        movie_info mi
+    JOIN 
+        movie_info_idx mii ON mi.movie_id = mii.movie_id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    cs.total_cast,
+    cs.cast_names,
+    mis.info_details,
+    CASE 
+        WHEN mh.level > 0 THEN 'Part of a series'
+        ELSE 'Standalone Movie'
+    END AS movie_type,
+    COALESCE(mis.info_details, 'No additional info') AS additional_info
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_summary cs ON mh.movie_id = cs.movie_id
+LEFT JOIN 
+    movie_info_summary mis ON mh.movie_id = mis.movie_id
+WHERE 
+    mh.production_year >= 2000
+    AND (cs.total_cast > 5 OR cs.total_cast IS NULL)
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title;

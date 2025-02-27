@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_phone,
+        CONCAT(TRIM(s.s_name), ' - ', TRIM(s.s_address)) AS Supplier_Info,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS Rank
+    FROM 
+        supplier s
+),
+CombinedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        LEFT(p.p_comment, 20) AS Short_Comment,
+        CONCAT(p.p_name, ' (', p.p_brand, ')') AS Product_Description
+    FROM 
+        part p
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS Total_Spent,
+        COUNT(o.o_orderkey) AS Order_Count,
+        STRING_AGG(DISTINCT CONCAT('Order:', o.o_orderkey, ' Date:', o.o_orderdate), '; ') AS Order_Summary
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    cs.c_name,
+    cs.Total_Spent,
+    cs.Order_Count,
+    ps.Supplier_Info,
+    cp.Product_Description,
+    cp.Short_Comment
+FROM 
+    CustomerOrderDetails cs
+JOIN 
+    PartsSupp ps ON ps.ps_availqty > 10
+JOIN 
+    CombinedParts cp ON cp.p_partkey = ps.ps_partkey
+JOIN 
+    RankedSuppliers rs ON rs.s_suppkey = ps.ps_suppkey
+WHERE 
+    rs.Rank <= 3
+ORDER BY 
+    cs.Total_Spent DESC, cs.Order_Count DESC;

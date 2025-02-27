@@ -1,0 +1,48 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        string_agg(DISTINCT c.name, ', ') AS cast_names,
+        kt.keyword AS keyword,
+        GROUP_CONCAT(DISTINCT cn.name ORDER BY cn.name) AS company_names,
+        info.info AS movie_info
+    FROM title t
+    LEFT JOIN cast_info ci ON ci.movie_id = t.id
+    LEFT JOIN aka_name an ON an.person_id = ci.person_id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN keyword kt ON kt.id = mk.keyword_id
+    LEFT JOIN movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN company_name cn ON cn.id = mc.company_id
+    LEFT JOIN movie_info mi ON mi.movie_id = t.id
+    LEFT JOIN info_type info ON info.id = mi.info_type_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, t.title, t.production_year, kt.keyword, info.info
+),
+
+AggregateMovies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        ARRAY_AGG(cast_names) AS all_cast,
+        ARRAY_AGG(DISTINCT keyword) AS keywords,
+        ARRAY_AGG(DISTINCT company_names) AS companies,
+        COUNT(DISTINCT movie_info) AS info_count
+    FROM MovieDetails
+    GROUP BY movie_id, movie_title, production_year
+)
+
+SELECT 
+    movie_id,
+    movie_title,
+    production_year,
+    all_cast,
+    keywords,
+    companies,
+    info_count
+FROM AggregateMovies
+WHERE array_length(all_cast, 1) > 5
+ORDER BY production_year DESC;

@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) OVER(PARTITION BY p.Id) AS CommentCount,
+        RANK() OVER(ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+ClosingAttempts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstCloseAttempt,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseAttemptsCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- closed and reopened
+    GROUP BY 
+        ph.PostId
+),
+HotQuestions AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        ra.CloseAttemptsCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosingAttempts ra ON rp.PostId = ra.PostId
+    WHERE 
+        rp.ScoreRank <= 10 -- Top 10 scored posts
+)
+SELECT 
+    hq.PostId,
+    hq.Title AS QuestionTitle,
+    hq.Score AS QuestionScore,
+    COALESCE(at.FirstCloseAttempt, 'No close attempts') AS FirstCloseAttempt,
+    at.CloseAttemptsCount AS NumberOfCloseAttempts,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[]))
+                    FROM Posts p
+                    WHERE p.Id = hq.PostId)
+    ) AS Tags
+FROM 
+    HotQuestions hq
+LEFT JOIN 
+    ClosingAttempts at ON hq.PostId = at.PostId
+ORDER BY 
+    hq.QuestionScore DESC;

@@ -1,0 +1,54 @@
+WITH RankedQuestions AS (
+    SELECT
+        p.Id AS QuestionId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(NULLIF(p.Body, ''), 'No body content available') AS BodyContent,
+        ROW_NUMBER() OVER (PARTITION BY u.Reputation ORDER BY p.CreationDate DESC) as Rank,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        STRING_TO_ARRAY(substring(p.Tags, 2, length(p.Tags)-2), '> <') AS tags ON TRUE 
+    LEFT JOIN 
+        Tags t ON t.TagName = ANY(tags)
+    WHERE
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY
+        p.Id, u.DisplayName, p.CreationDate, p.Score, p.AnswerCount, p.CommentCount, p.Body
+),
+TopQuestions AS (
+    SELECT
+        *,
+        CASE 
+            WHEN AnswerCount > 10 THEN 'Popular'
+            WHEN Score > 5 THEN 'Highly Rated'
+            ELSE 'Regular'
+        END AS PostQuality
+    FROM
+        RankedQuestions
+    WHERE
+        Rank <= 5 -- Select only the top 5 questions per reputation category
+)
+SELECT
+    RANK() OVER (ORDER BY Score DESC) AS GlobalRank,
+    QuestionId,
+    Title,
+    CreationDate,
+    OwnerDisplayName,
+    Score,
+    AnswerCount,
+    CommentCount,
+    PostQuality,
+    TagsList,
+    BodyContent
+FROM
+    TopQuestions
+ORDER BY
+    GlobalRank;

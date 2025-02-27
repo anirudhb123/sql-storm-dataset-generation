@@ -1,0 +1,64 @@
+
+WITH UserPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TagPostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, '><'))
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagPostCount DESC
+    LIMIT 10
+),
+UserBadges AS (
+    SELECT 
+        ub.UserId,
+        STRING_AGG(b.Name, ', ' ORDER BY b.Class) AS BadgeNames,
+        COUNT(b.Id) AS TotalBadges
+    FROM 
+        Badges b
+    JOIN 
+        Users ub ON b.UserId = ub.Id
+    GROUP BY 
+        ub.UserId
+)
+
+SELECT 
+    up.DisplayName,
+    up.PostCount,
+    up.QuestionCount,
+    up.AnswerCount,
+    ut.BadgeNames,
+    ut.TotalBadges,
+    pt.TagName,
+    pt.TagPostCount
+FROM 
+    UserPosts up
+LEFT JOIN 
+    UserBadges ut ON up.UserId = ut.UserId
+CROSS JOIN 
+    PopularTags pt
+WHERE 
+    up.PostCount > 0
+ORDER BY 
+    up.PostCount DESC, 
+    pt.TagPostCount DESC;

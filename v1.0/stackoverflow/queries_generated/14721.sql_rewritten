@@ -1,0 +1,47 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(c.Id) AS TotalComments,
+        SUM(v.Score) AS TotalVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+TagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostsCount,
+        SUM(p.ViewCount) AS TotalViewCount
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.Id, t.TagName
+),
+PostTypeStats AS (
+    SELECT 
+        pt.Id AS PostTypeId,
+        pt.Name AS PostTypeName,
+        COUNT(p.Id) AS TotalPosts,
+        AVG(p.Score) AS AverageScore
+    FROM PostTypes pt
+    LEFT JOIN Posts p ON p.PostTypeId = pt.Id
+    GROUP BY pt.Id, pt.Name
+)
+SELECT 
+    u.UserId,
+    u.TotalPosts,
+    u.TotalComments,
+    u.TotalVotes,
+    t.TagName,
+    t.PostsCount AS TagPostsCount,
+    t.TotalViewCount AS TagTotalViewCount,
+    pt.PostTypeName,
+    pt.TotalPosts AS TypePostsCount,
+    pt.AverageScore
+FROM UserPostStats u
+CROSS JOIN TagStats t
+CROSS JOIN PostTypeStats pt
+ORDER BY u.UserId, t.TagId, pt.PostTypeId;

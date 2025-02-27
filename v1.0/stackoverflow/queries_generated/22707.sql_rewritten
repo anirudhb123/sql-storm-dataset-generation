@@ -1,0 +1,85 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY SUM(v.CreationDate) DESC) AS ActivityRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId OR c.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalComments,
+        UpVotes,
+        DownVotes,
+        RANK() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM 
+        UserActivity
+    WHERE 
+        TotalPosts > 0
+),
+CurrentBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        b.UserId
+),
+UserStatistics AS (
+    SELECT 
+        tu.DisplayName,
+        tu.Reputation,
+        tu.TotalPosts,
+        tu.TotalComments,
+        COALESCE(cb.BadgeNames, 'No Badges') AS BadgeNames,
+        CASE 
+            WHEN tu.UpVotes - tu.DownVotes > 0 THEN 'Positive'
+            WHEN tu.UpVotes - tu.DownVotes < 0 THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteSentiment
+    FROM 
+        TopUsers tu
+    LEFT JOIN 
+        CurrentBadges cb ON tu.UserId = cb.UserId
+)
+SELECT 
+    UserStatistics.DisplayName,
+    UserStatistics.Reputation,
+    UserStatistics.BadgeNames,
+    UserStatistics.TotalPosts,
+    UserStatistics.TotalComments,
+    UserStatistics.VoteSentiment,
+    COUNT(DISTINCT ph.PostId) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount,
+    COUNT(pl.RelatedPostId) AS RelatedPostLinks
+FROM 
+    UserStatistics
+LEFT JOIN 
+    PostHistory ph ON ph.UserId = UserStatistics.UserId
+LEFT JOIN 
+    PostLinks pl ON pl.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = UserStatistics.UserId)
+GROUP BY 
+    UserStatistics.DisplayName, UserStatistics.Reputation, UserStatistics.BadgeNames, 
+    UserStatistics.TotalPosts, UserStatistics.TotalComments, UserStatistics.VoteSentiment
+ORDER BY 
+    UserStatistics.Reputation DESC, TotalPosts DESC;

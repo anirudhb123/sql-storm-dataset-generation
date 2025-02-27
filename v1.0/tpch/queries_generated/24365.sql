@@ -1,0 +1,57 @@
+WITH RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(CASE 
+            WHEN o.o_orderstatus = 'F' THEN l.l_extendedprice * (1 - l.l_discount) 
+            ELSE 0 
+        END) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE r.r_comment IS NOT NULL
+    GROUP BY r.r_name
+),
+FilteredSales AS (
+    SELECT
+        region_name,
+        total_sales,
+        order_count,
+        RANK() OVER (PARTITION BY region_name ORDER BY total_sales DESC) AS sales_rank
+    FROM RegionalSales
+    WHERE total_sales > 10000
+),
+TopRegions AS (
+    SELECT region_name
+    FROM FilteredSales
+    WHERE sales_rank <= 5
+),
+FinalResults AS (
+    SELECT 
+        fr.region_name,
+        fs.total_sales,
+        fs.order_count,
+        COALESCE(ROUND(fs.total_sales / NULLIF(fs.order_count, 0), 2), 0) AS avg_sales_per_order,
+        CASE 
+            WHEN fs.total_sales IS NULL THEN 'No Sales'
+            WHEN fs.total_sales > 50000 THEN 'High Sales Region'
+            ELSE 'Medium Sales Region'
+        END AS sales_category
+    FROM FilteredSales fs
+    JOIN TopRegions fr ON fs.region_name = fr.region_name
+)
+SELECT 
+    fr.region_name,
+    fr.total_sales,
+    fr.order_count,
+    fr.avg_sales_per_order,
+    ARRAY_AGG(DISTINCT COALESCE(s.s_name, 'Unknown Supplier')) AS suppliers
+FROM FinalResults fr
+LEFT JOIN partsupp ps ON fr.region_name = (SELECT n.n_name FROM nation n JOIN region r ON n.n_regionkey = r.r_regionkey WHERE r.r_name = fr.region_name)
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+GROUP BY fr.region_name, fr.total_sales, fr.order_count, fr.avg_sales_per_order
+ORDER BY fr.total_sales DESC;

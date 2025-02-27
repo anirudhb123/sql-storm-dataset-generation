@@ -1,0 +1,56 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(AVG(vote.Score), 0) AS AverageScore,
+        COUNT(CASE WHEN c.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN ph.Id IS NOT NULL THEN 1 END) AS EditCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.OwnerUserId = u.Id THEN 1 ELSE 0 END) AS PostsCreated,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        COUNT(DISTINCT b.Id) AS BadgesEarned
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.AverageScore,
+    ps.CommentCount,
+    ps.EditCount,
+    ue.DisplayName AS UserOwner,
+    ue.PostsCreated,
+    ue.CommentsMade,
+    ue.BadgesEarned
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.OwnerUserId = u.Id
+JOIN 
+    UserEngagement ue ON u.Id = ue.UserId
+ORDER BY 
+    ps.AverageScore DESC, ps.CreationDate DESC;

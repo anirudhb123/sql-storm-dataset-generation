@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        DENSE_RANK() OVER (ORDER BY c.c_acctbal DESC) AS account_rank
+    FROM
+        customer c
+    WHERE
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+OrderDetails AS (
+    SELECT
+        o.o_orderkey,
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY
+        o.o_orderkey, l.l_partkey
+)
+SELECT
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(od.total_price) AS total_revenue,
+    MAX(s.total_available_quantity) AS max_available_quantity
+FROM
+    RankedSuppliers s
+LEFT JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN
+    HighValueCustomers c ON c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'O')
+JOIN
+    OrderDetails od ON od.l_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+GROUP BY
+    r.r_name
+HAVING
+    SUM(od.total_price) > 1000000
+ORDER BY
+    total_revenue DESC;

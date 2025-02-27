@@ -1,0 +1,70 @@
+WITH UserReputation AS (
+    SELECT 
+        Id, 
+        Reputation, 
+        CASE 
+            WHEN Reputation >= 1000 THEN 'High'
+            WHEN Reputation >= 100 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationGroup
+    FROM Users
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT PL.RelatedPostId) AS RelatedPostsCount,
+        RANK() OVER (ORDER BY P.Score DESC) AS RankByScore,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate) AS PostOrder
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostLinks PL ON P.Id = PL.PostId
+    GROUP BY P.Id
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        UR.ReputationGroup,
+        PS.PostId,
+        PS.Title,
+        PS.CreationDate,
+        PS.Score,
+        PS.TotalBounty,
+        PS.UpVotes,
+        PS.DownVotes,
+        PS.CommentCount,
+        PS.RelatedPostsCount,
+        PS.RankByScore,
+        PS.PostOrder
+    FROM Users U
+    JOIN UserReputation UR ON U.Id = UR.Id
+    LEFT JOIN PostStats PS ON U.Id = PS.OwnerUserId
+)
+SELECT 
+    UPS.UserId,
+    UPS.DisplayName,
+    UPS.ReputationGroup,
+    UPS.PostId,
+    UPS.Title,
+    UPS.CreationDate,
+    UPS.Score,
+    UPS.TotalBounty,
+    UPS.UpVotes,
+    UPS.DownVotes,
+    UPS.CommentCount,
+    UPS.RelatedPostsCount,
+    UPS.RankByScore,
+    UPS.PostOrder
+FROM UserPostStats UPS
+WHERE UPS.ReputationGroup = 'High'
+AND UPS.UpVotes - UPS.DownVotes > 5
+ORDER BY UPS.RankByScore DESC, UPS.CreationDate DESC
+LIMIT 10;

@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS rank_score,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate ASC) AS rank_time
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasonNames
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    ub.BadgeCount,
+    ub.HighestBadgeClass,
+    cr.CloseReasonNames
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    CloseReasons cr ON rp.PostId = cr.PostId
+WHERE 
+    rp.rank_score <= 5 
+    AND rp.rank_time <= 3 
+    AND (c_is_moderator_only IS NULL OR c_is_moderator_only = 0) 
+ORDER BY 
+    u.Reputation DESC,
+    rp.ViewCount DESC
+LIMIT 100;

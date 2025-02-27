@@ -1,0 +1,57 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        w.warehouse_name,
+        SUM(ss.ss_net_profit) AS total_profit,
+        1 AS level
+    FROM 
+        warehouse w
+    JOIN 
+        store s ON s.s_company_id = w.w_warehouse_sk
+    JOIN 
+        store_sales ss ON ss.ss_store_sk = s.s_store_sk
+    GROUP BY 
+        w.warehouse_name
+
+    UNION ALL
+
+    SELECT 
+        sh.warehouse_name,
+        SUM(ss.ss_net_profit) AS total_profit,
+        sh.level + 1
+    FROM 
+        SalesHierarchy sh
+    JOIN 
+        store s ON s.s_division_id = sh.level
+    JOIN 
+        store_sales ss ON ss.ss_store_sk = s.s_store_sk
+    GROUP BY 
+        sh.warehouse_name
+),
+RankedSales AS (
+    SELECT 
+        warehouse_name, 
+        total_profit,
+        RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
+    FROM 
+        SalesHierarchy
+)
+SELECT 
+    r.warehouse_name,
+    r.total_profit,
+    CASE 
+        WHEN r.profit_rank <= 10 THEN 'Top 10'
+        ELSE 'Below Top 10'
+    END AS performance_category
+FROM 
+    RankedSales r
+LEFT JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = 
+      (SELECT c_current_cdemo_sk FROM customer c WHERE c.c_current_addr_sk IN 
+           (SELECT ca_address_sk FROM customer_address WHERE ca_city = 'San Francisco'))
+WHERE 
+    cd.cd_marital_status IS NOT NULL
+OR 
+    cd.cd_gender IS NULL
+ORDER BY 
+    r.total_profit DESC;

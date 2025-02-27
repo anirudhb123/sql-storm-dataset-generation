@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal + h.s_acctbal AS s_acctbal, s.n_nationkey, h.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy h ON s.s_nationkey = h.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND h.level < 5
+),
+NationalSupplier AS (
+    SELECT n.n_name, SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.n_nationkey
+    GROUP BY n.n_name
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING COUNT(DISTINCT ps.ps_suppkey) > 1
+),
+RankedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, RANK() OVER (ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_size IS NOT NULL AND p.p_container IS NOT NULL
+),
+OrderSummaries AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    n.n_name AS Nation,
+    np.total_acctbal AS Total_Supplier_Account_Balance,
+    pp.total_supply_cost AS Total_Part_Supply_Cost,
+    rp.p_name AS Part_Name,
+    os.total_order_value AS Total_Order_Value,
+    COALESCE(np.total_acctbal, 0) + COALESCE(pp.total_supply_cost, 0) AS Combined_Value
+FROM NationalSupplier np
+FULL OUTER JOIN PartSupplier pp ON np.n_name IS NOT NULL AND pp.ps_partkey IS NOT NULL
+JOIN RankedParts rp ON rp.price_rank = 1
+LEFT JOIN OrderSummaries os ON os.o_orderkey IS NOT NULL
+WHERE np.total_acctbal < 10000
+AND pp.total_supply_cost BETWEEN 500.00 AND 1000.00
+AND (rp.p_name LIKE '%part%' OR rp.p_name NOT LIKE '%special%')
+ORDER BY Combined_Value DESC NULLS LAST
+LIMIT 10;

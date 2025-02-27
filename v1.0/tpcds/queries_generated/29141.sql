@@ -1,0 +1,67 @@
+
+WITH detailed_customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        d.d_date,
+        sm.sm_type AS shipping_type,
+        w.w_warehouse_name
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+),
+aggregated_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(sd.ws_sales_price * sd.ws_quantity) AS total_spent,
+        COUNT(sd.ws_order_number) AS order_count
+    FROM 
+        detailed_customer_info c
+    JOIN 
+        sales_data sd ON c.c_customer_id = sd.ws_order_number
+    GROUP BY 
+        c.c_customer_id
+)
+
+SELECT 
+    dci.c_customer_id,
+    dci.c_first_name,
+    dci.c_last_name,
+    dci.ca_city,
+    dci.ca_state,
+    dci.cd_gender,
+    dci.cd_marital_status,
+    dci.cd_education_status,
+    dci.cd_purchase_estimate,
+    COALESCE(as.total_spent, 0) AS total_spent,
+    COALESCE(as.order_count, 0) AS order_count
+FROM 
+    detailed_customer_info dci
+LEFT JOIN 
+    aggregated_sales as ON dci.c_customer_id = as.c_customer_id
+ORDER BY 
+    total_spent DESC, c_last_name ASC;

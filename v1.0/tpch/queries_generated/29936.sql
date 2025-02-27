@@ -1,0 +1,53 @@
+WITH SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey AS SupplierKey,
+        s.s_name AS SupplierName,
+        p.p_partkey AS PartKey,
+        p.p_name AS PartName,
+        p.p_brand AS Brand,
+        p.p_container AS Container,
+        ps.ps_availqty AS AvailableQuantity,
+        ps.ps_supplycost AS SupplyCost,
+        CONCAT(s.s_name, ' supplies ', p.p_name, ' for $', ROUND(ps.ps_supplycost, 2)) AS SupplyInfo
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey AS CustomerKey,
+        c.c_name AS CustomerName,
+        o.o_orderkey AS OrderKey,
+        o.o_orderdate AS OrderDate,
+        o.o_totalprice AS TotalPrice,
+        STRING_AGG(CONCAT(p.p_name, ' - Quantity: ', l.l_quantity) ORDER BY l.l_linenumber) AS LineItems
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        part p ON l.l_partkey = p.p_partkey
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+)
+SELECT 
+    spd.SupplierName,
+    spd.PartName,
+    spd.AvailableQuantity,
+    spd.SupplyCost,
+    cod.CustomerName,
+    cod.OrderDate,
+    cod.TotalPrice,
+    cod.LineItems,
+    spd.SupplyInfo
+FROM 
+    SupplierPartDetails spd
+JOIN 
+    CustomerOrderDetails cod ON spd.PartKey IN (SELECT DISTINCT l.l_partkey FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_name = cod.CustomerName))
+ORDER BY 
+    spd.SupplierName, cod.OrderDate DESC;

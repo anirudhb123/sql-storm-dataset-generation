@@ -1,0 +1,56 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        NULL AS parent_id,
+        0 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mc.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.movie_id,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link mc ON mh.movie_id = mc.movie_id
+    JOIN 
+        aka_title mt ON mc.linked_movie_id = mt.id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    COALESCE((SELECT COUNT(DISTINCT c.person_id) 
+               FROM cast_info c 
+               WHERE c.movie_id = mh.movie_id 
+               AND c.note IS NOT NULL), 0) AS actor_count,
+    mh.depth,
+    STRING_AGG(a.name, ', ') AS actors,
+    CASE 
+        WHEN mh.depth = 0 THEN 'Original Movie' 
+        ELSE 'Related Movie' 
+    END AS movie_type
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info c ON mh.movie_id = c.movie_id
+LEFT JOIN 
+    aka_name a ON c.person_id = a.person_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.kind_id, mh.depth 
+ORDER BY 
+    mh.production_year DESC NULLS LAST, 
+    actor_count DESC, 
+    mh.depth ASC;

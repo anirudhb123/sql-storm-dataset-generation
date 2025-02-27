@@ -1,0 +1,59 @@
+
+WITH RECURSIVE potential_customers AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           d.d_date,
+           ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY d.d_date DESC) as recent_purchase
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE c.c_birth_year < (EXTRACT(YEAR FROM CURRENT_DATE) - 18)
+),
+customer_address_details AS (
+    SELECT ca.ca_address_sk, 
+           ca.ca_city, 
+           ca.ca_state,
+           CASE 
+               WHEN ca.ca_city IS NULL THEN 'Unknown City' 
+               ELSE ca.ca_city 
+           END AS city_info
+    FROM customer_address ca
+),
+sales_info AS (
+    SELECT ws.ws_item_sk,
+           SUM(ws.ws_quantity) AS total_sales,
+           SUM(ws.ws_ext_sales_price) AS total_sales_revenue,
+           AVG(ws.ws_net_profit) AS average_net_profit
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+sales_ranked AS (
+    SELECT si.ws_item_sk, 
+           si.total_sales, 
+           si.total_sales_revenue, 
+           si.average_net_profit,
+           RANK() OVER (ORDER BY si.total_sales DESC) AS sales_rank
+    FROM sales_info si
+)
+SELECT   CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name,
+         ca.city_info,
+         ca.ca_state,
+         sr.total_sales,
+         sr.total_sales_revenue,
+         sr.average_net_profit,
+         CASE 
+             WHEN sr.sales_rank <= 10 THEN 'Top Seller'
+             ELSE 'Regular Seller'
+         END AS sales_category
+FROM potential_customers c
+JOIN customer_address_details ca ON c.c_customer_sk = ca.ca_address_sk 
+LEFT JOIN sales_ranked sr ON EXISTS (
+    SELECT 1 
+    FROM inventory inv 
+    WHERE inv.inv_item_sk = sr.ws_item_sk 
+      AND inv.inv_quantity_on_hand > 0
+)
+WHERE c.recent_purchase = 1
+  AND (ca.ca_state = 'CA' OR ca.ca_state IS NULL)
+ORDER BY sr.total_sales DESC, c.c_last_name ASC;

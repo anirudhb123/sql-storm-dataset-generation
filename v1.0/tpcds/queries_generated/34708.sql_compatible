@@ -1,0 +1,70 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+
+    UNION ALL
+
+    SELECT 
+        cs_sold_date_sk,
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_ext_sales_price) AS total_sales
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_sold_date_sk, cs_item_sk
+),
+item_sales AS (
+    SELECT 
+        i_item_id,
+        COALESCE(SUM(total_quantity), 0) AS quantity_sold,
+        COALESCE(SUM(total_sales), 0) AS sales_amount
+    FROM 
+        item 
+    LEFT JOIN 
+        sales_data ON item.i_item_sk = sales_data.ws_item_sk OR item.i_item_sk = sales_data.cs_item_sk
+    GROUP BY 
+        i_item_id
+),
+customers AS (
+    SELECT 
+        c_customer_id,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS rank
+    FROM 
+        customer 
+    LEFT JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.cd_gender,
+    c.cd_marital_status,
+    i.quantity_sold,
+    i.sales_amount,
+    (SELECT COUNT(DISTINCT ws_order_number) 
+     FROM web_sales 
+     WHERE ws_bill_customer_sk = c.c_customer_id) AS web_orders,
+    (SELECT COUNT(*) 
+     FROM store_sales 
+     WHERE ss_customer_sk = c.c_customer_id) AS store_orders
+FROM 
+    customers c
+JOIN 
+    item_sales i ON c.rank <= 10 
+WHERE 
+    (c.cd_gender = 'F' AND c.cd_marital_status = 'S' AND i.sales_amount > 1000)
+    OR (c.cd_gender = 'M' AND i.quantity_sold > 5)
+ORDER BY 
+    i.sales_amount DESC
+FETCH FIRST 50 ROWS ONLY;

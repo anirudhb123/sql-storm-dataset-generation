@@ -1,0 +1,55 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned_quantity,
+        SUM(cr_return_amt) AS total_return_amount,
+        SUM(cr_fee) AS total_fee
+    FROM catalog_returns
+    GROUP BY cr_returning_customer_sk
+),
+WebReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_web_returned_quantity,
+        SUM(wr_return_amt) AS total_web_return_amount
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_quantity) AS total_web_sales_quantity,
+        SUM(ws_net_paid) AS total_web_sales_amount
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+CombinedReturns AS (
+    SELECT 
+        COALESCE(c.cr_returning_customer_sk, w.wr_returning_customer_sk) AS customer_sk,
+        COALESCE(c.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(c.total_return_amount, 0) AS total_return_amount,
+        COALESCE(w.total_web_returned_quantity, 0) AS total_web_returned_quantity,
+        COALESCE(w.total_web_return_amount, 0) AS total_web_return_amount
+    FROM CustomerReturns c
+    FULL OUTER JOIN WebReturns w ON c.cr_returning_customer_sk = w.wr_returning_customer_sk
+)
+SELECT 
+    cs.customer_sk,
+    cs.total_returned_quantity,
+    cs.total_returned_amount,
+    cs.total_web_returned_quantity,
+    cs.total_web_return_amount,
+    ss.total_web_sales_quantity,
+    ss.total_web_sales_amount,
+    CASE 
+        WHEN ss.total_web_sales_amount IS NULL THEN 0
+        ELSE (cs.total_return_amount / ss.total_web_sales_amount) * 100 
+    END AS return_percentage
+FROM CombinedReturns cs
+LEFT JOIN SalesSummary ss ON cs.customer_sk = ss.ws_bill_customer_sk
+WHERE 
+    (cs.total_returned_quantity > 10 OR cs.total_web_returned_quantity > 5)
+    AND (cs.total_return_amount > 100 OR cs.total_web_return_amount > 50)
+ORDER BY return_percentage DESC
+LIMIT 100;

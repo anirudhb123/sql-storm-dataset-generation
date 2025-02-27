@@ -1,0 +1,78 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice, 
+        o.o_orderdate,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) as price_rank
+    FROM 
+        orders o
+), 
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey,
+        s.s_suppkey,
+        s.s_name
+),
+HighValueNations AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name,
+        COUNT(c.c_custkey) AS customer_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_nationkey = n.n_nationkey)
+    GROUP BY 
+        n.n_nationkey, n.n_name
+    HAVING 
+        COUNT(c.c_custkey) > 5
+),
+TopLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS item_rank
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_partkey
+)
+SELECT 
+    DISTINCT 
+    r.r_name,
+    n.n_name,
+    s.s_name,
+    CASE 
+        WHEN ra.price_rank IS NULL THEN 'No Orders' 
+        ELSE CONCAT('Rank: ', ra.price_rank) 
+    END AS order_rank,
+    sa.total_available,
+    COALESCE(tli.total_sales, 0) AS total_sales
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SupplierAvailability sa ON sa.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10)
+LEFT JOIN 
+    HighValueNations hvn ON hvn.n_nationkey = n.n_nationkey
+LEFT JOIN 
+    RankedOrders ra ON ra.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderdate >= '2023-01-01')
+LEFT JOIN 
+    TopLineItems tli ON tli.l_orderkey = ra.o_orderkey
+WHERE 
+    sa.total_available IS NOT NULL OR 
+    hvn.customer_count IS NULL
+ORDER BY 
+    r.r_name, n.n_name, sa.total_available DESC;

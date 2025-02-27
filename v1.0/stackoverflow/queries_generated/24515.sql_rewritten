@@ -1,0 +1,69 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Date) AS LastBadgeDate
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId 
+    GROUP BY U.Id, U.Reputation
+), 
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        P.ViewCount,
+        P.CreationDate,
+        P.AcceptedAnswerId,
+        COALESCE((SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE((SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 3), 0) AS DownVoteCount,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+            ELSE 'Not Accepted' 
+        END AS AnswerStatus
+    FROM Posts P
+), 
+TagStats AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        SUM(P.ViewCount) AS TotalViews,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM Tags T
+    LEFT JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.Id, T.TagName
+), 
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount
+    FROM PostHistory PH
+    WHERE PH.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY PH.PostId, PH.PostHistoryTypeId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UB.BadgeCount,
+    U.LastAccessDate,
+    P.PostId,
+    PD.PostTypeId,
+    PD.ViewCount,
+    PD.CommentCount,
+    PD.UpVoteCount,
+    PD.DownVoteCount,
+    PD.AnswerStatus,
+    COALESCE(TS.TotalViews, 0) AS TagTotalViews,
+    COALESCE(TS.PostCount, 0) AS TagPostCount,
+    COALESCE(PHS.ChangeCount, 0) AS PostHistoryChangeCount
+FROM Users U
+JOIN UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN PostDetails PD ON PD.PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = U.Id)
+LEFT JOIN TagStats TS ON TS.TagId IN (SELECT unnest(string_to_array(PD.Tags, ','))::int) 
+LEFT JOIN PostHistorySummary PHS ON PHS.PostId = PD.PostId
+WHERE U.Reputation > 100 
+AND U.CreationDate < cast('2024-10-01' as date) - INTERVAL '5 years'
+ORDER BY U.Reputation DESC, PD.ViewCount DESC
+FETCH FIRST 100 ROWS ONLY;

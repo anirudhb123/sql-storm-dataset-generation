@@ -1,0 +1,58 @@
+
+WITH RECURSIVE DateRange AS (
+    SELECT d_date_sk, d_date FROM date_dim
+    WHERE d_date BETWEEN '2022-01-01' AND '2022-12-31'
+    UNION ALL
+    SELECT d_date_sk + 1, d_date FROM date_dim
+    WHERE d_date_sk < (SELECT MAX(d_date_sk) FROM date_dim)
+),
+CustomerReturns AS (
+    SELECT 
+        sr_cdemo_sk,
+        SUM(sr_return_quantity) AS total_returned_items,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amount,
+        COUNT(DISTINCT sr_ticket_number) AS total_return_transactions
+    FROM store_returns
+    GROUP BY sr_cdemo_sk
+),
+ExcessiveReturns AS (
+    SELECT 
+        cr.c_customer_sk,
+        cr.c_first_name,
+        cr.c_last_name,
+        cr.c_email_address,
+        cr.c_birth_year,
+        ct.total_returned_items,
+        ct.total_returned_amount,
+        ROW_NUMBER() OVER (PARTITION BY cr.c_customer_sk ORDER BY ct.total_returned_amount DESC) AS rn
+    FROM customer cr
+    INNER JOIN CustomerReturns ct ON cr.c_current_cdemo_sk = ct.sr_cdemo_sk
+    WHERE ct.total_returned_items > 5 -- Assuming customers who returned more than 5 items are problematic
+),
+SelectedWarehouses AS (
+    SELECT w.w_warehouse_name, SUM(DISTINCT COALESCE(inv.inv_quantity_on_hand, 0)) AS total_inventory
+    FROM warehouse w
+    LEFT JOIN inventory inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    GROUP BY w.w_warehouse_name
+    HAVING SUM(DISTINCT COALESCE(inv.inv_quantity_on_hand, 0)) > (SELECT AVG(inv_quantity_on_hand) FROM inventory)
+)
+SELECT 
+    coalesce(er.c_first_name, 'Unknown') AS customer_first_name,
+    coalesce(er.c_last_name, 'Unknown') AS customer_last_name,
+    CASE 
+        WHEN er.c_email_address LIKE '%@%' THEN er.c_email_address
+        ELSE 'N/A'
+    END AS customer_email,
+    ew.w_warehouse_name,
+    ew.total_inventory
+FROM ExcessiveReturns er
+FULL OUTER JOIN SelectedWarehouses ew ON 1=1
+WHERE 
+    (
+        CURRENT_DATE - DATE(er.c_birth_year || '-01-01') < INTERVAL '18 years' 
+        OR 
+        er.total_returned_amount IS NULL
+    )
+ORDER BY 
+    customer_first_name, total_inventory DESC
+LIMIT 50 OFFSET 10;

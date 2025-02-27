@@ -1,0 +1,38 @@
+
+WITH AddressSummary AS (
+    SELECT 
+        ca_state,
+        COUNT(DISTINCT ca_address_id) AS unique_addresses,
+        COUNT(DISTINCT ca_city) AS unique_cities,
+        SUM(LENGTH(ca_street_name)) AS total_street_name_length
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+),
+DemographicSummary AS (
+    SELECT 
+        cd_gender,
+        COUNT(cd_demo_sk) AS demographic_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(DISTINCT cd_credit_rating) AS unique_credit_ratings
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+)
+SELECT 
+    AS.ca_state,
+    AS.unique_addresses,
+    AS.unique_cities,
+    AS.total_street_name_length,
+    DS.cd_gender,
+    DS.demographic_count,
+    DS.avg_purchase_estimate,
+    DS.unique_credit_ratings
+FROM 
+    AddressSummary AS AS
+JOIN 
+    DemographicSummary DS ON AS.unique_addresses > DS.demographic_count
+ORDER BY 
+    AS.total_street_name_length DESC, DS.avg_purchase_estimate DESC;

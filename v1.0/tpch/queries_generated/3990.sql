@@ -1,0 +1,57 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+AggregateLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01'
+        AND l.l_shipdate < DATE '2024-01-01'
+    GROUP BY 
+        l.l_orderkey
+),
+HighRevenueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        al.total_revenue
+    FROM 
+        orders o
+    JOIN 
+        AggregateLineItems al ON o.o_orderkey = al.l_orderkey
+    WHERE 
+        al.total_revenue > 10000
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT o.o_orderkey) AS high_revenue_order_count,
+    COALESCE(SUM(r.s_acctbal), 0) AS total_supplier_account_balance,
+    AVG(o.o_totalprice) AS avg_order_price
+FROM 
+    HighRevenueOrders o
+LEFT JOIN 
+    RankedSuppliers r ON r.rn = 1 AND r.s_nationkey = (SELECT n_nationkey FROM nation WHERE n_name = n.n_name)
+JOIN 
+    nation n ON n.n_nationkey = (SELECT DISTINCT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_orderkey)
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_supplier_account_balance DESC, 
+    avg_order_price DESC;

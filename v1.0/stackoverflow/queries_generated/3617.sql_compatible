@@ -1,0 +1,81 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyAllocated
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id AND v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalBountyAllocated,
+        ROW_NUMBER() OVER (ORDER BY TotalPosts DESC) AS Rank
+    FROM 
+        UserPostStats
+),
+RecentActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(c.Id) AS CommentCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    u.DisplayName,
+    up.TotalPosts,
+    up.TotalQuestions,
+    up.TotalAnswers,
+    ra.CommentCount,
+    ra.LastPostDate,
+    up.TotalBountyAllocated
+FROM 
+    UserPostStats up
+JOIN 
+    RecentActivity ra ON up.UserId = ra.UserId
+WHERE 
+    up.TotalPosts > 5
+    AND ra.CommentCount > 0
+    AND ra.LastPostDate IS NOT NULL
+UNION ALL
+SELECT 
+    'N/A' AS DisplayName,
+    SUM(up.TotalPosts) AS TotalPosts,
+    SUM(up.TotalQuestions) AS TotalQuestions,
+    SUM(up.TotalAnswers) AS TotalAnswers,
+    COUNT(up.UserId) AS CommentCount,
+    MAX(ra.LastPostDate) AS LastPostDate,
+    SUM(up.TotalBountyAllocated) AS TotalBountyAllocated
+FROM 
+    UserPostStats up
+LEFT JOIN 
+    RecentActivity ra ON up.UserId = ra.UserId
+GROUP BY 
+    ra.LastPostDate
+ORDER BY 
+    TotalPosts DESC;

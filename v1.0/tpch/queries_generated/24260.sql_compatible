@@ -1,0 +1,50 @@
+
+WITH RECURSIVE supplier_rank AS (
+    SELECT s_suppkey, s_name, s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rank
+    FROM supplier
+), 
+high_value_nations AS (
+    SELECT n_name, n_regionkey, COUNT(s_suppkey) AS supplier_count
+    FROM nation
+    JOIN supplier ON nation.n_nationkey = supplier.s_nationkey
+    GROUP BY n_name, n_regionkey
+    HAVING COUNT(s_suppkey) > 5
+), 
+part_supp_summary AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_availqty) AS total_avail_qty, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    r.r_name AS region_name,
+    p.p_name AS part_name,
+    ps.total_avail_qty,
+    ps.avg_supply_cost,
+    COUNT(DISTINCT o.o_orderkey) FILTER (WHERE o.o_orderstatus = 'F') AS completed_orders,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned_qty,
+    s.s_name AS supplier_name,
+    s_rank.rank AS supplier_rank,
+    CASE 
+        WHEN ps.avg_supply_cost < 50 THEN 'Budget' 
+        WHEN ps.avg_supply_cost BETWEEN 50 AND 100 THEN 'Mid-range'
+        ELSE 'Premium'
+    END AS cost_category
+FROM part p
+LEFT JOIN part_supp_summary ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN orders o ON o.o_orderkey = l.l_orderkey
+JOIN supplier s ON s.s_suppkey = l.l_suppkey
+JOIN high_value_nations hvn ON s.s_nationkey = hvn.n_nationkey
+JOIN region r ON hvn.n_regionkey = r.r_regionkey
+JOIN supplier_rank s_rank ON s.s_suppkey = s_rank.s_suppkey
+WHERE p.p_size IS NOT NULL 
+  AND (p.p_comment LIKE '%plastic%' OR p.p_mfgr = 'Manufacturer#1')
+  AND COALESCE(o.o_totalprice, 0) > 1000
+GROUP BY r.r_name, p.p_name, ps.total_avail_qty, 
+         ps.avg_supply_cost, s.s_name, s_rank.rank
+HAVING SUM(l.l_quantity) > 10 AND COUNT(DISTINCT o.o_orderkey) > 3
+ORDER BY region_name, total_avail_qty DESC, supplier_rank
+LIMIT 100;

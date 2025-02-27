@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL AND s_acctbal > 10000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND sh.level < 5
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+SupplierPartCosts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           p.p_retailprice, (ps.ps_supplycost / NULLIF(p.p_retailprice, 0)) AS cost_ratio
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+)
+SELECT 
+    C.c_name,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS revenue,
+    COUNT(DISTINCT ro.o_orderkey) AS total_orders,
+    MAX(s.s_acctbal) AS max_supplier_balance,
+    AVG(sp.cost_ratio) AS avg_cost_ratio,
+    COUNT(DISTINCT CASE WHEN lo.l_shipdate = lo.l_commitdate THEN lo.l_orderkey END) AS perfect_ship_count
+FROM customer C
+JOIN RecentOrders ro ON C.c_custkey = ro.o_custkey
+LEFT JOIN lineitem lo ON ro.o_orderkey = lo.l_orderkey
+LEFT JOIN SupplierPartCosts sp ON lo.l_partkey = sp.ps_partkey
+LEFT JOIN SupplierHierarchy sh ON C.c_nationkey = sh.s_nationkey
+WHERE C.c_acctbal IS NOT NULL
+GROUP BY C.c_name
+HAVING SUM(lo.l_extendedprice * (1 - lo.l_discount)) > 1000 
+   OR MAX(sh.level) >= 2
+ORDER BY revenue DESC
+LIMIT 10;

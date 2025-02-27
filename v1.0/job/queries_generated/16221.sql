@@ -1,0 +1,20 @@
+SELECT 
+    a.name AS aka_name,
+    t.title AS movie_title,
+    ci.note AS role_note,
+    c.name AS company_name,
+    m.production_year
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name c ON mc.company_id = c.id
+JOIN 
+    movie_info m ON t.id = m.movie_id
+WHERE 
+    m.info_type_id = 1; -- Assuming we're filtering by a specific info_type_id

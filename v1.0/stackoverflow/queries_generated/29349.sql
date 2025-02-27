@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Considering only Questions
+    AND 
+        p.CreationDate >= NOW() - INTERVAL '1 year' -- Questions posted in the last year
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.Reputation
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5 -- Taking top 5 questions per user
+),
+TagStatistics AS (
+    SELECT 
+        TRIM(BOTH '<>' FROM UNNEST(string_to_array(Tags, '>')) ) AS TagName, 
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+),
+TopTags AS (
+    SELECT 
+        TagName, 
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStatistics
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.Reputation,
+    tt.TagName,
+    tt.PostCount
+FROM 
+    TopPosts tp
+JOIN 
+    TopTags tt ON tt.TagName = ANY(STRING_TO_ARRAY(tp.Tags, '>'))
+ORDER BY 
+    tp.Score DESC, 
+    tp.ViewCount DESC;

@@ -1,0 +1,43 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 1 AS level
+    FROM aka_title m
+    WHERE m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+    UNION ALL
+    SELECT m.id AS movie_id, m.title, m.production_year, mh.level + 1
+    FROM aka_title m
+    JOIN movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN aka_title m2 ON ml.linked_movie_id = m2.id
+    JOIN movie_hierarchy mh ON m.id = mh.movie_id
+    WHERE m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+cast_aggregates AS (
+    SELECT c.movie_id,
+           COUNT(c.person_id) AS actor_count,
+           STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    GROUP BY c.movie_id
+),
+movie_info_aggregates AS (
+    SELECT m.id AS movie_id,
+           MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') THEN mi.info END) AS budget,
+           MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office') THEN mi.info END) AS box_office
+    FROM aka_title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id
+    GROUP BY m.id
+)
+SELECT mh.title,
+       mh.production_year,
+       ca.actor_count,
+       ca.actor_names,
+       mia.budget,
+       mia.box_office,
+       COALESCE(CAST(mia.box_office AS NUMERIC), 0) - COALESCE(CAST(mia.budget AS NUMERIC), 0) AS profit_loss,
+       ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COALESCE(CAST(mia.box_office AS NUMERIC), 0) DESC) AS ranking
+FROM movie_hierarchy mh
+LEFT JOIN cast_aggregates ca ON mh.movie_id = ca.movie_id
+LEFT JOIN movie_info_aggregates mia ON mh.movie_id = mia.movie_id
+WHERE mh.level = 1 
+ORDER BY mh.production_year DESC, profit_loss DESC
+LIMIT 50;

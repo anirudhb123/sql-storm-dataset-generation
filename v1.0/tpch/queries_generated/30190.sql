@@ -1,0 +1,55 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+    ORDER BY total_supply_value DESC
+    LIMIT 10
+),
+customer_orders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+part_sales AS (
+    SELECT p.p_partkey, p.p_name, COUNT(l.l_orderkey) AS sales_count, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+nation_sales AS (
+    SELECT n.n_nationkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS nation_sales_total
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY n.n_nationkey
+),
+ranked_nations AS (
+    SELECT n.n_nationkey, n.n_name, ns.nation_sales_total, 
+           RANK() OVER (ORDER BY ns.nation_sales_total DESC) AS sales_rank
+    FROM nation n
+    JOIN nation_sales ns ON n.n_nationkey = ns.n_nationkey
+),
+result AS (
+    SELECT cu.c_custkey, cu.order_count, cu.total_spent, 
+           ps.sales_count AS total_parts_sold, ps.total_sales, 
+           rs.n_name AS nation_name, rs.sales_rank
+    FROM customer_orders cu
+    LEFT JOIN part_sales ps ON ps.sales_count > 0
+    LEFT JOIN ranked_nations rs ON rs.sales_rank <= 5
+)
+SELECT 
+    COALESCE(c.c_name, 'N/A') AS customer_name,
+    COALESCE(n.n_name, 'Unknown') AS nation,
+    COALESCE(ord.order_count, 0) AS total_orders,
+    COALESCE(ord.total_spent, 0.00) AS amount_spent,
+    COALESCE(ps.total_parts_sold, 0) AS total_parts_sold,
+    COALESCE(ps.total_sales, 0.00) AS total_sales,
+    COALESCE(rs.sales_rank, 'N/A') AS rank
+FROM result ord
+FULL OUTER JOIN customer c ON ord.c_custkey = c.c_custkey
+FULL OUTER JOIN ranked_nations rs ON ord.nation_name = rs.n_name
+ORDER BY c.c_name, ord.total_spent DESC;

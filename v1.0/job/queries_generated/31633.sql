@@ -1,0 +1,53 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mt.season_nr, 0) AS season_number,
+        COALESCE(mt.episode_nr, 0) AS episode_number,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL  -- Starting point for recursion: top-level movies
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mt.season_nr, 0),
+        COALESCE(mt.episode_nr, 0), 
+        depth + 1
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id  -- Join to find episodes
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY at.production_year DESC) AS rank,
+    SUM(CASE WHEN mk.keyword IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY ak.person_id) AS keyword_count,
+    COALESCE(cin.note, 'No role specified') AS role_note,
+    mh.depth AS movie_depth
+FROM 
+    aka_name ak
+JOIN 
+    cast_info cin ON ak.person_id = cin.person_id
+JOIN 
+    aka_title at ON cin.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = at.id
+WHERE 
+    at.production_year >= 2000
+    AND (at.kind_id IN (1, 2) OR at.kind_id IS NULL)  -- Considering specific genres or showing nulls
+ORDER BY 
+    ak.name, 
+    at.production_year DESC;
+

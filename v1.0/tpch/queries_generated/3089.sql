@@ -1,0 +1,61 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), OrderStats AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice, 
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+), LineItemStats AS (
+    SELECT 
+        l.l_orderkey, 
+        COUNT(*) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    n.n_name AS nation, 
+    COUNT(DISTINCT o.o_orderkey) AS total_orders, 
+    SUM(COALESCE(l.total_line_price, 0)) AS total_revenue, 
+    AVG(s.total_cost) AS avg_supplier_cost,
+    MAX(s.part_count) AS max_parts_per_supplier,
+    STRING_AGG(DISTINCT c.c_name, ', ') AS customer_names
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    orders o ON ps.ps_partkey = o.o_orderkey
+LEFT JOIN 
+    LineItemStats l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    n.n_name IS NOT NULL AND 
+    s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)   
+GROUP BY 
+    n.n_name
+ORDER BY 
+    total_revenue DESC 
+FETCH FIRST 10 ROWS ONLY;

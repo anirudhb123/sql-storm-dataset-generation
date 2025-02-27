@@ -1,0 +1,76 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- BountyStart, BountyClose
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Badges b ON b.UserId = p.OwnerUserId
+    GROUP BY p.Id
+),
+PopularPosts AS (
+    SELECT 
+        ps.*,
+        CASE 
+            WHEN TotalBounty > 0 THEN 'Bountied Post'
+            ELSE 'Regular Post'
+        END AS PostType
+    FROM PostStats ps
+    WHERE Rank <= 10
+),
+MaxScores AS (
+    SELECT 
+        PostTypeId,
+        MAX(Score) AS MaxScore
+    FROM Posts
+    GROUP BY PostTypeId
+),
+PostMetrics AS (
+    SELECT 
+        pp.PostId,
+        pp.Title,
+        pp.Score,
+        pp.ViewCount,
+        pp.TotalBounty,
+        pp.PostType,
+        ms.MaxScore,
+        CASE 
+            WHEN pp.Score = ms.MaxScore THEN 'Top Score'
+            ELSE 'Below Top Score'
+        END AS ScoreComparison
+    FROM PopularPosts pp
+    JOIN MaxScores ms ON pp.PostTypeId = ms.PostTypeId
+)
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.Score,
+    pm.ViewCount,
+    pm.TotalBounty,
+    pm.PostType,
+    pm.MaxScore,
+    pm.ScoreComparison,
+    JSON_AGG(DISTINCT COALESCE(c.Text, '')) AS RecentComments,
+    ROW_NUMBER() OVER (ORDER BY pm.TotalBounty DESC, pm.Score DESC) AS OverallRank
+FROM PostMetrics pm
+LEFT JOIN Comments c ON pm.PostId = c.PostId 
+WHERE c.CreationDate >= NOW() - INTERVAL '30 days' 
+GROUP BY 
+    pm.PostId, pm.Title, pm.Score, pm.ViewCount, pm.TotalBounty, pm.PostType, pm.MaxScore, pm.ScoreComparison
+ORDER BY 
+    OverallRank
+LIMIT 20;
+
+-- The above query combines multiple advanced SQL concepts:
+-- 1. Common Table Expressions (CTEs) to organize data and calculations.
+-- 2. Window functions like ROW_NUMBER() for ranking posts and identifying top scorers.
+-- 3. INNER JOIN and LEFT JOIN for combining various related data.
+-- 4. Aggregation functions such as SUM and COUNT to compute total bounties and badges.
+-- 5. String expressions and JSON_AGG to handle comments and provide structured data.
+-- 6. Complex predicates in the case statements to classify posts based on their attributes.

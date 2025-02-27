@@ -1,0 +1,58 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+StarMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        ak.name AS lead_actor
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        cast_info ci ON rm.cast_count = (SELECT MAX(cast_count) FROM RankedMovies WHERE production_year = rm.production_year)
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+)
+SELECT 
+    sm.title,
+    sm.production_year,
+    sm.cast_count,
+    COALESCE(sm.lead_actor, 'Unknown Actor') AS lead_actor
+FROM 
+    StarMovies sm
+WHERE 
+    sm.rank <= 5 
+    AND sm.production_year >= 2000
+ORDER BY 
+    sm.production_year DESC, sm.cast_count DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    at.title,
+    at.production_year,
+    COUNT(ci.person_id) AS cast_count,
+    'Various' AS lead_actor
+FROM 
+    aka_title at
+LEFT JOIN 
+    cast_info ci ON at.id = ci.movie_id
+WHERE 
+    at.production_year < 2000
+GROUP BY 
+    at.id, at.title, at.production_year
+HAVING 
+    COUNT(ci.person_id) > 15
+ORDER BY 
+    at.production_year ASC
+LIMIT 5;

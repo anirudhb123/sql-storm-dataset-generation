@@ -1,0 +1,72 @@
+WITH RECURSIVE movie_ranking AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+top_movies AS (
+    SELECT
+        movie_id,
+        title,
+        production_year,
+        RANK() OVER (ORDER BY cast_count DESC) AS rank
+    FROM
+        movie_ranking
+    WHERE
+        production_year BETWEEN 2000 AND 2023
+),
+movie_genres AS (
+    SELECT
+        t.id AS movie_id,
+        kt.kind AS genre
+    FROM
+        aka_title t
+    JOIN
+        kind_type kt ON t.kind_id = kt.id
+),
+movie_details AS (
+    SELECT
+        t.title,
+        t.production_year,
+        tg.genre,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword
+    FROM
+        top_movies tm
+    JOIN
+        movie_genres tg ON tm.movie_id = tg.movie_id
+    LEFT JOIN
+        movie_keyword mk ON tm.movie_id = mk.movie_id
+    WHERE
+        tm.rank <= 10
+)
+SELECT
+    md.title,
+    md.production_year,
+    STRING_AGG(DISTINCT md.genre, ', ') AS genres,
+    STRING_AGG(DISTINCT md.keyword, ', ') AS keywords
+FROM
+    movie_details md
+GROUP BY
+    md.title,
+    md.production_year
+HAVING
+    COUNT(DISTINCT md.keyword) > 1
+ORDER BY
+    md.production_year DESC, 
+    md.title;
+
+This query comprises several advanced SQL constructs, including:
+
+- **Recursive Common Table Expressions (CTEs)** for ranking movies based on cast count.
+- **Window Functions** (`RANK()`) to provide a ranking of movies by their cast size.
+- **Outer Joins** to account for movies that may not have associated keywords.
+- **String Aggregation** to compile genres and keywords into a list while grouping the results.
+- **Complicated Predicates** in the `HAVING` clause to filter movies that have more than one distinct keyword. 
+- **Grouping and Ordering** to produce a neat output based on production year and title.

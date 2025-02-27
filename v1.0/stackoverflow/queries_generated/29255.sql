@@ -1,0 +1,74 @@
+WITH TagStatistics AS (
+    SELECT 
+        tag.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(p.ViewCount) AS AvgViewCount,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Tags AS tag
+    LEFT JOIN 
+        Posts AS p ON p.Tags LIKE '%' || tag.TagName || '%'
+    GROUP BY 
+        tag.TagName
+), 
+RecentUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        SUM(v.VoteTypeId IN (2, 3)) AS Votes
+    FROM 
+        Users AS u
+    LEFT JOIN 
+        Posts AS p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments AS c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes AS v ON v.UserId = u.Id
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+BenchmarkingStatistics AS (
+    SELECT 
+        rua.UserId,
+        rua.DisplayName,
+        ts.TagName,
+        ts.PostCount,
+        ts.QuestionCount,
+        ts.AnswerCount,
+        ts.AvgViewCount,
+        ts.AvgScore,
+        rua.PostsCreated,
+        rua.CommentsMade,
+        rua.Votes
+    FROM 
+        RecentUserActivity AS rua
+    JOIN 
+        TagStatistics AS ts ON rua.PostsCreated > 0
+    ORDER BY 
+        ts.PostCount DESC,
+        rua.Votes DESC
+)
+SELECT 
+    b.DisplayName,
+    b.TagName,
+    b.PostCount,
+    b.QuestionCount,
+    b.AnswerCount,
+    b.AvgViewCount,
+    b.AvgScore,
+    b.PostsCreated,
+    b.CommentsMade,
+    b.Votes
+FROM 
+    BenchmarkingStatistics AS b
+WHERE 
+    b.PostCount > 5
+ORDER BY 
+    b.AvgScore DESC, 
+    b.AvgViewCount DESC;

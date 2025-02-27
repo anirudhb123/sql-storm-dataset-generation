@@ -1,0 +1,37 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, m.title, 1 AS level 
+    FROM aka_title m
+    WHERE m.production_year >= 2000
+    UNION ALL
+    SELECT m.id AS movie_id, m.title, mh.level + 1 
+    FROM aka_title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+TopMovies AS (
+    SELECT 
+        at.title,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        COUNT(DISTINCT mk.keyword) AS total_keywords,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.id) DESC) AS movie_rank
+    FROM aka_title at
+    LEFT JOIN cast_info ci ON at.movie_id = ci.movie_id
+    LEFT JOIN movie_keyword mk ON at.movie_id = mk.movie_id
+    WHERE at.production_year IS NOT NULL
+    GROUP BY at.id, at.title, at.production_year
+    HAVING COUNT(DISTINCT ci.person_id) > 5
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    tm.total_cast,
+    tm.total_keywords,
+    (SELECT AVG(age) 
+     FROM (SELECT EXTRACT(YEAR FROM AGE(pi.date_of_birth)) AS age 
+           FROM person_info pi 
+           WHERE pi.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = mh.movie_id)) AS ages) AS avg_actor_age
+FROM MovieHierarchy mh
+LEFT JOIN TopMovies tm ON mh.title = tm.title
+WHERE mh.level = 1
+ORDER BY tm.total_cast DESC, mh.title;

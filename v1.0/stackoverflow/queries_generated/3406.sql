@@ -1,0 +1,73 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(COALESCE(C.CommentsCount, 0)) AS TotalComments,
+        SUM(V.VoteCount) AS TotalVotes,
+        RANK() OVER (ORDER BY COUNT(DISTINCT P.Id) DESC) AS UserRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS CommentsCount
+        FROM Comments
+        GROUP BY PostId
+    ) C ON P.Id = C.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName
+), PopularTags AS (
+    SELECT 
+        unnest(string_to_array(T.Tags, '><')) AS TagName, 
+        COUNT(*) AS TagCount
+    FROM Posts P
+    JOIN Tags T ON T.Id = ANY (string_to_array(P.Tags, '><')::int[])
+    GROUP BY TagName
+    ORDER BY TagCount DESC
+    LIMIT 10
+), ClosedPosts AS (
+    SELECT 
+        PH.PostId, 
+        COUNT(*) AS CloseCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (10, 11)
+    GROUP BY PH.PostId
+), Summary AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.PostCount,
+        UA.QuestionCount,
+        UA.AnswerCount,
+        UA.TotalComments,
+        UA.TotalVotes,
+        COALESCE(CP.CloseCount, 0) AS ClosedPostCount,
+        PT.TagName
+    FROM UserActivity UA
+    LEFT JOIN ClosedPosts CP ON UA.UserId = CP.PostId
+    CROSS JOIN PopularTags PT
+)
+
+SELECT 
+    UserId,
+    DisplayName,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    TotalComments,
+    TotalVotes,
+    ClosedPostCount,
+    TagName
+FROM Summary
+WHERE PostCount > 0
+ORDER BY UserRank, ClosedPostCount DESC, TotalVotes DESC;
+

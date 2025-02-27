@@ -1,0 +1,64 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title, 
+        P.Body,
+        P.Tags,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        COUNT(A.Id) AS AnswerCount,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY COUNT(V.Id) DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts A ON A.ParentId = P.Id AND A.PostTypeId = 2
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id 
+    JOIN 
+        Users U ON U.Id = P.OwnerUserId
+    WHERE 
+        P.PostTypeId = 1  
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.Tags, U.DisplayName, P.CreationDate, P.OwnerUserId
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Body, 
+        Tags, 
+        OwnerDisplayName, 
+        CreationDate,
+        AnswerCount,
+        CommentCount,
+        VoteCount,
+        Rank
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5  
+)
+SELECT 
+    T.OwnerDisplayName,
+    T.Title,
+    T.CreationDate,
+    T.AnswerCount,
+    T.CommentCount,
+    T.VoteCount,
+    STRING_AGG(DISTINCT T.Tags, ', ') AS AllTags,
+    COALESCE(PH.LastEditDate, T.CreationDate) AS LastActivity,
+    MAX(PH.CreationDate) AS LastEditDate,
+    PH.Comment AS EditComment
+FROM 
+    TopPosts T
+LEFT JOIN 
+    PostHistory PH ON T.PostId = PH.PostId AND PH.PostHistoryTypeId IN (4, 5, 6)  
+GROUP BY 
+    T.OwnerDisplayName, T.Title, T.CreationDate, T.AnswerCount, T.CommentCount, T.VoteCount
+ORDER BY 
+    T.CreationDate DESC;

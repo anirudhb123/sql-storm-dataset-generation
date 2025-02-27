@@ -1,0 +1,100 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS part_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+),
+SupplierNation AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_nationkey,
+        n.n_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_discount) AS total_discount,
+        SUM(l.l_extendedprice) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_totalprice > 10000 
+    GROUP BY 
+        o.o_orderkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_linenumber) AS line_count,
+        SUM(l.l_extendedprice) AS sum_extended_price,
+        AVG(l.l_discount) AS avg_discount
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+CombinedResults AS (
+    SELECT 
+        p.p_name,
+        sn.n_name AS supplier_nation,
+        oi.o_orderkey,
+        oi.line_count,
+        oi.sum_extended_price,
+        oi.avg_discount,
+        rp.part_rank
+    FROM 
+        RankedParts rp
+    JOIN 
+        partsupp ps ON rp.p_partkey = ps.ps_partkey
+    JOIN 
+        SupplierNation sn ON ps.ps_suppkey = sn.s_suppkey
+    LEFT JOIN 
+        HighValueOrders hv ON hv.o_orderkey = ps.ps_partkey
+    JOIN 
+        OrderDetails oi ON oi.o_orderkey = hv.o_orderkey
+    WHERE 
+        rp.part_rank <= 5 
+        AND (sn.supplier_rank < 3 OR sn.n_nationkey IS NULL)
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    cr.p_name,
+    cr.supplier_nation,
+    cr.line_count,
+    COALESCE(cr.sum_extended_price, 0) AS total_price,
+    cr.avg_discount,
+    CASE 
+        WHEN cr.line_count > 10 THEN 'High'
+        WHEN cr.line_count BETWEEN 5 AND 10 THEN 'Medium'
+        ELSE 'Low'
+    END AS order_classification
+FROM 
+    customer c
+JOIN 
+    CombinedResults cr ON c.c_custkey = cr.o_orderkey
+WHERE 
+    c.c_acctbal IS NOT NULL
+    AND (c.c_mktsegment = 'BUILDING' OR c.c_acctbal = 0.00)
+ORDER BY 
+    c.c_custkey, cr.line_count DESC 
+LIMIT 50;

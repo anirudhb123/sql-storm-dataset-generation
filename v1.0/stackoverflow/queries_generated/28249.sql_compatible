@@ -1,0 +1,96 @@
+
+WITH TagStats AS (
+    SELECT 
+        UNNEST(SPLIT(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    GROUP BY 
+        Tag
+),
+PopularTags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStats
+    WHERE 
+        PostCount > 1  
+),
+UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionsAsked,
+        COUNT(DISTINCT C.Id) AS CommentsMade,
+        COUNT(DISTINCT V.Id) AS VotesGiven,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesGiven,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesGiven
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TagContributions AS (
+    SELECT 
+        P.OwnerUserId,
+        PT.Tag,
+        COUNT(P.Id) AS ContributionCount
+    FROM 
+        Posts P
+    JOIN 
+        UNNEST(SPLIT(SUBSTRING(P.Tags FROM 2 FOR LENGTH(P.Tags) - 2), '><')) AS PT(Tag) ON P.PostTypeId = 1 
+    GROUP BY 
+        P.OwnerUserId, PT.Tag
+),
+AggregatedData AS (
+    SELECT 
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN PC.Tag IS NOT NULL AND PC.ContributionCount IS NOT NULL THEN PC.ContributionCount ELSE 0 END), 0) AS TagContributions,
+        COALESCE(UG.QuestionsAsked, 0) AS QuestionsAsked,
+        COALESCE(UG.CommentsMade, 0) AS CommentsMade,
+        COALESCE(UG.VotesGiven, 0) AS VotesGiven,
+        COALESCE(UG.UpVotesGiven, 0) AS UpVotesGiven,
+        COALESCE(UG.DownVotesGiven, 0) AS DownVotesGiven
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserEngagement UG ON U.Id = UG.UserId
+    LEFT JOIN 
+        TagContributions PC ON U.Id = PC.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    T.Tag,
+    AD.DisplayName,
+    AD.QuestionsAsked,
+    AD.CommentsMade,
+    AD.VotesGiven,
+    AD.UpVotesGiven,
+    AD.DownVotesGiven,
+    RANK() OVER (PARTITION BY T.Tag ORDER BY AD.TagContributions DESC) AS ContributionRank
+FROM 
+    PopularTags T
+JOIN 
+    AggregatedData AD ON AD.TagContributions = (
+        SELECT 
+            COALESCE(SUM(ContributionCount), 0)
+        FROM 
+            TagContributions
+        WHERE 
+            Tag = T.Tag
+    )
+ORDER BY 
+    T.Tag,
+    ContributionRank;

@@ -1,0 +1,36 @@
+
+WITH movie_ratings AS (
+    SELECT t.id AS movie_id,
+           t.title,
+           t.production_year,
+           COUNT(DISTINCT kc.person_id) AS cast_count,
+           STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+           STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM aka_title ak
+    JOIN title t ON ak.movie_id = t.id
+    LEFT JOIN cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN aka_name kn ON ci.person_id = kn.person_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE t.production_year >= 2000
+    GROUP BY t.id, t.title, t.production_year
+),
+genre_distribution AS (
+    SELECT mk.movie_id,
+           STRING_AGG(DISTINCT gt.kind, ', ') AS genres
+    FROM movie_companies mc
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    JOIN kind_type gt ON mc.company_id = gt.id
+    JOIN movie_keyword mk ON mc.movie_id = mk.movie_id
+    GROUP BY mk.movie_id
+)
+SELECT mr.movie_id,
+       mr.title,
+       mr.production_year,
+       mr.cast_count,
+       mr.aka_names,
+       mr.keywords,
+       gd.genres
+FROM movie_ratings mr
+LEFT JOIN genre_distribution gd ON mr.movie_id = gd.movie_id
+ORDER BY mr.production_year DESC, mr.title;

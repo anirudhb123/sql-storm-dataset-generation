@@ -1,0 +1,68 @@
+WITH recent_movies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT cast.id) AS total_cast
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        complete_cast cc ON at.id = cc.movie_id
+    LEFT JOIN 
+        cast_info cast ON cc.subject_id = cast.person_id
+    WHERE 
+        at.production_year >= 2020
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+top_actors AS (
+    SELECT 
+        ak.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+movies_with_keywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    COALESCE(tk.movie_count, 0) AS top_actor_count,
+    mwk.keywords,
+    ROW_NUMBER() OVER (PARTITION BY rm.production_year ORDER BY rm.total_cast DESC) AS rank
+FROM 
+    recent_movies rm
+LEFT JOIN 
+    top_actors tk ON tk.name IN (SELECT 
+                                    ak.name 
+                                  FROM 
+                                    aka_name ak 
+                                  JOIN 
+                                    cast_info ci ON ak.person_id = ci.person_id 
+                                  WHERE 
+                                    ci.movie_id = rm.movie_id)
+LEFT JOIN 
+    movies_with_keywords mwk ON mwk.movie_id = rm.movie_id
+WHERE 
+    rm.total_cast IS NOT NULL
+ORDER BY 
+    rm.production_year DESC, rank
+LIMIT 50;

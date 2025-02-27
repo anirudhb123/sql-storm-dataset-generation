@@ -1,0 +1,73 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS title_rank
+    FROM 
+        ak_title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+cast_details AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        MAX(CASE WHEN r.role IS NOT NULL THEN 1 ELSE 0 END) AS has_role,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = c.person_id
+    LEFT JOIN 
+        role_type r ON r.id = c.role_id
+    GROUP BY 
+        c.movie_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+complete_movie_info AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        cd.actor_count,
+        cd.has_role,
+        cd.actor_names,
+        mk.keywords
+    FROM 
+        ranked_movies m
+    LEFT JOIN 
+        cast_details cd ON m.movie_id = cd.movie_id
+    LEFT JOIN 
+        movie_keywords mk ON m.movie_id = mk.movie_id
+)
+SELECT 
+    cm.title,
+    cm.production_year,
+    COALESCE(cm.actor_count, 0) AS actor_count,
+    COALESCE(cm.has_role, 0) AS has_role,
+    CASE 
+        WHEN cm.actor_count = 0 THEN 'No actors' 
+        WHEN cm.has_role = 1 THEN 'Has roles' 
+        ELSE 'Not all roles' 
+    END AS role_status,
+    COALESCE(cm.keywords, 'No keywords') AS keywords
+FROM 
+    complete_movie_info cm
+WHERE 
+    cm.production_year >= 2000 
+    AND cm.title ILIKE '%avenger%' 
+    AND (cm.actor_count > 0 OR cm.keywords IS NOT NULL)
+ORDER BY 
+    cm.production_year DESC, cm.title;

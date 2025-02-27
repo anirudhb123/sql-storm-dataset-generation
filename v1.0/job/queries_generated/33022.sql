@@ -1,0 +1,49 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        (SELECT COUNT(*) FROM cast_info ci WHERE ci.movie_id = m.id) AS cast_count,
+        1 AS hierarchy_level
+    FROM title m
+    WHERE m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        (SELECT COUNT(*) FROM cast_info ci WHERE ci.movie_id = t.id) AS cast_count,
+        mh.hierarchy_level + 1
+    FROM title t
+    JOIN movie_link ml ON ml.linked_movie_id = t.id
+    JOIN movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    mh.title,
+    mh.production_year,
+    mh.cast_count,
+    COALESCE(ka.name, 'Unknown') AS actor_name,
+    COUNT(mc.company_id) AS production_companies,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    CASE 
+        WHEN mh.cast_count > 5 THEN 'Ensemble'
+        WHEN mh.cast_count BETWEEN 3 AND 5 THEN 'Moderate'
+        ELSE 'Minimal'
+    END AS cast_size_category
+FROM movie_hierarchy mh
+LEFT JOIN cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN aka_name ka ON ka.person_id = ci.person_id
+LEFT JOIN movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN movie_keyword mw ON mw.movie_id = mh.movie_id
+LEFT JOIN keyword kw ON kw.id = mw.keyword_id
+GROUP BY 
+    mh.movie_id, 
+    mh.title, 
+    mh.production_year, 
+    ka.name
+ORDER BY 
+    mh.production_year DESC,
+    mh.title;

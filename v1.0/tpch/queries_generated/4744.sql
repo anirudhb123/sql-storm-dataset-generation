@@ -1,0 +1,52 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus, 
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2022-01-01' 
+        AND o.o_orderdate < '2023-01-01'
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey, 
+        ro.o_totalprice, 
+        ro.o_orderstatus 
+    FROM 
+        RankedOrders ro 
+    WHERE 
+        ro.order_rank <= 10
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps 
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_brand, 
+    p.p_retailprice, 
+    COALESCE(sc.total_supply_cost, 0) AS total_supply_cost,
+    to.o_orderkey
+FROM 
+    part p
+LEFT JOIN 
+    SupplierCosts sc ON p.p_partkey = sc.ps_partkey
+LEFT JOIN 
+    lineitem li ON p.p_partkey = li.l_partkey
+LEFT JOIN 
+    TopOrders to ON li.l_orderkey = to.o_orderkey
+WHERE 
+    p.p_size > 20
+    AND (p.p_retailprice - COALESCE(sc.total_supply_cost, 0) > 0)
+ORDER BY 
+    p.p_name, total_supply_cost DESC;

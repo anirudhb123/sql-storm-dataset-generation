@@ -1,0 +1,76 @@
+
+WITH TagFrequencies AS (
+    SELECT 
+        UNNEST(SPLIT(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS Frequency
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    GROUP BY 
+        Tag
+),
+
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY
+        u.Id, u.DisplayName
+),
+
+TopTags AS (
+    SELECT 
+        Tag,
+        Frequency
+    FROM 
+        TagFrequencies
+    ORDER BY 
+        Frequency DESC
+    LIMIT 5
+),
+
+UserStatistics AS (
+    SELECT 
+        ue.UserId,
+        ue.DisplayName,
+        ue.QuestionCount,
+        ue.TotalViews,
+        ue.UpVotes,
+        ue.DownVotes,
+        ROW_NUMBER() OVER (ORDER BY ue.QuestionCount DESC, ue.TotalViews DESC) AS Rank
+    FROM 
+        UserEngagement ue
+    WHERE 
+        ue.QuestionCount > 0
+)
+
+SELECT 
+    us.DisplayName AS "User",
+    us.QuestionCount AS "Number of Questions",
+    us.TotalViews AS "Total Views",
+    us.UpVotes AS "Upvotes",
+    us.DownVotes AS "Downvotes",
+    tt.Tag AS "Top Tag",
+    tt.Frequency AS "Tag Frequency"
+FROM 
+    UserStatistics us
+JOIN 
+    TopTags tt ON tt.Tag IN (SELECT UNNEST(SPLIT(SUBSTRING((SELECT STRING_AGG(Tags) FROM Posts WHERE PostTypeId = 1) FROM 2 FOR LENGTH((SELECT STRING_AGG(Tags) FROM Posts WHERE PostTypeId = 1)) - 2), '><')))
+                             )
+WHERE 
+    us.Rank <= 10  
+ORDER BY 
+    us.Rank;

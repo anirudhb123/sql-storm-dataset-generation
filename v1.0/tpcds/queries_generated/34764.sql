@@ -1,0 +1,65 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ws_sold_date_sk
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk, ws_sold_date_sk
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        SUM(cs_quantity) AS total_sold,
+        SUM(cs_ext_sales_price) AS total_sales,
+        cs_sold_date_sk
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_item_sk, cs_sold_date_sk
+),
+DateFiltered AS (
+    SELECT 
+        d.d_date,
+        sd.ws_item_sk,
+        sd.total_sold,
+        sd.total_sales
+    FROM 
+        SalesData sd
+    JOIN 
+        date_dim d ON d.d_date_sk = sd.ws_sold_date_sk
+    WHERE 
+        d.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+),
+CustomerReturns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returns,
+        SUM(wr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_item_sk
+)
+SELECT 
+    df.d_date,
+    df.ws_item_sk,
+    df.total_sold,
+    df.total_sales,
+    COALESCE(cr.total_returns, 0) AS total_returns,
+    COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+    (df.total_sales - COALESCE(cr.total_return_amt, 0)) AS net_sales,
+    (df.total_sold - COALESCE(cr.total_returns, 0)) AS net_units_sold,
+    CASE
+        WHEN COALESCE(cr.total_returns, 0) > 0 THEN 'Has Returns'
+        ELSE 'No Returns'
+    END AS return_status,
+    RANK() OVER (PARTITION BY df.d_date ORDER BY net_sales DESC) AS sales_rank
+FROM 
+    DateFiltered df
+LEFT JOIN 
+    CustomerReturns cr ON df.ws_item_sk = cr.wr_item_sk
+ORDER BY 
+    df.d_date, net_sales DESC;

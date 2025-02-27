@@ -1,0 +1,58 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS rank_title,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY a.id) AS cast_count 
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = a.id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.rank_title,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.cast_count > 5
+),
+MovieGenres AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(DISTINCT kg.keyword, ', ' ORDER BY kg.keyword) AS genres
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword kg ON mk.keyword_id = kg.id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.rank_title,
+    COALESCE(mg.genres, 'No Genre') AS genres,
+    CAST((SELECT AVG(cast_count) FROM FilteredMovies) AS NUMERIC(10, 2)) AS avg_cast_count
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    MovieGenres mg ON fm.movie_id = mg.movie_id
+WHERE 
+    fm.production_year >= 2000
+    AND fm.rank_title <= 10
+ORDER BY 
+    fm.production_year DESC, 
+    fm.rank_title ASC;

@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title AS movie_title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    ak.person_id,
+    ak.name AS actor_name,
+    COUNT(DISTINCT ch.movie_id) AS movies_acted_in,
+    SUM(mi.note IS NOT NULL)::int AS awards_count,
+    STRING_AGG(DISTINCT keyword.keyword, ', ') AS keywords,
+    AVG(CASE WHEN kt.kind IS NOT NULL THEN ct.kind END) AS average_company_rating
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+LEFT JOIN 
+    MovieHierarchy mh ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword ON mk.keyword_id = keyword.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Awards')
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+GROUP BY 
+    ak.person_id, 
+    ak.name
+HAVING 
+    COUNT(DISTINCT ch.movie_id) > 1
+ORDER BY 
+    movies_acted_in DESC,
+    awards_count DESC NULLS LAST;

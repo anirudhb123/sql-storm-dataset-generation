@@ -1,0 +1,56 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_orderstatus, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, o.o_custkey, o.o_orderdate, o.o_orderstatus, oh.level + 1
+    FROM orders o
+    INNER JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+), 
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), 
+LineItemStats AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           AVG(l.l_quantity) AS avg_quantity,
+           COUNT(*) AS line_count
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1995-01-01' 
+    GROUP BY l.l_orderkey
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_orderstatus, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+)
+SELECT 
+    c.c_custkey,
+    COALESCE(c.c_name, 'Unknown') AS customer_name,
+    COALESCE(l.total_price, 0) AS total_price,
+    COALESCE(si.total_supply_cost, 0) AS total_supply_cost,
+    COUNT(DISTINCT co.o_orderkey) AS num_orders,
+    SUM(CASE WHEN co.o_orderstatus = 'O' THEN 1 ELSE 0 END) AS active_order_count,
+    MAX(LAG(l.total_price) OVER (PARTITION BY c.c_custkey ORDER BY l.l_orderkey)) AS previous_order_price,
+    SUM(CASE WHEN co.order_rank = 1 THEN 1 ELSE 0 END) AS latest_order_flag
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    LineItemStats l ON co.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierInfo si ON l.l_orderkey = si.s_suppkey  
+LEFT JOIN 
+    customer c ON co.c_custkey = c.c_custkey
+GROUP BY 
+    c.c_custkey, c.c_name, l.total_price, si.total_supply_cost
+HAVING 
+    SUM(CASE WHEN l.total_price IS NULL THEN 1 ELSE 0 END) = 0 AND COALESCE(si.total_supply_cost, 0) > 1000
+ORDER BY 
+    c.c_custkey;

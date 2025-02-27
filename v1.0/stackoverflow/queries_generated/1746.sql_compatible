@@ -1,0 +1,58 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM Posts P
+    WHERE P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+PostScores AS (
+    SELECT 
+        RP.PostId,
+        RP.OwnerUserId,
+        RP.Title,
+        RP.Score,
+        UB.BadgeCount,
+        UB.GoldCount,
+        UB.SilverCount,
+        UB.BronzeCount
+    FROM RecentPosts RP
+    JOIN UserBadges UB ON RP.OwnerUserId = UB.UserId
+    WHERE RP.RecentPostRank = 1
+),
+AggregateScores AS (
+    SELECT 
+        OwnerUserId,
+        SUM(Score) AS TotalScore,
+        AVG(CASE WHEN BadgeCount > 0 THEN Score ELSE NULL END) AS AvgScoreWithBadges,
+        COUNT(DISTINCT PostId) AS PostCount
+    FROM PostScores
+    GROUP BY OwnerUserId
+)
+SELECT 
+    U.DisplayName,
+    AS.TotalScore,
+    AS.AvgScoreWithBadges,
+    AS.PostCount,
+    (SELECT COUNT(*) FROM Votes V WHERE V.UserId = U.Id AND V.VoteTypeId = 2) AS UpVotesGiven,
+    (SELECT COUNT(*) FROM Votes V WHERE V.UserId = U.Id AND V.VoteTypeId = 3) AS DownVotesGiven
+FROM AggregateScores AS AS
+JOIN Users U ON AS.OwnerUserId = U.Id
+ORDER BY AS.TotalScore DESC
+LIMIT 10;

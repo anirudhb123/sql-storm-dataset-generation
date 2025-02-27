@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_totalprice > (
+            SELECT 
+                AVG(o2.o_totalprice) 
+            FROM 
+                orders o2
+        )
+),
+CombinedResults AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT h.o_orderkey) AS high_value_order_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        HighValueOrders h ON c.c_custkey = h.o_custkey
+    LEFT JOIN 
+        lineitem l ON h.o_orderkey = l.l_orderkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    cr.r_name,
+    cr.high_value_order_count,
+    cr.total_revenue,
+    COALESCE(rs.total_supply_cost, 0) AS supplier_cost
+FROM 
+    CombinedResults cr
+LEFT JOIN 
+    RankedSuppliers rs ON cr.r_name = rs.s_nationkey
+WHERE 
+    cr.total_revenue IS NOT NULL
+ORDER BY 
+    cr.total_revenue DESC, cr.high_value_order_count DESC;

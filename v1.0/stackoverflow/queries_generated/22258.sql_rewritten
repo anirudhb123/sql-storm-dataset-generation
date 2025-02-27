@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        CASE 
+            WHEN u.Location IS NULL THEN 'Unknown Location'
+            ELSE u.Location
+        END AS UserLocation,
+        (SELECT COUNT(*) FROM Badges b WHERE b.UserId = u.Id AND b.Class = 1) AS GoldBadges,
+        (SELECT COUNT(*) FROM Badges b WHERE b.UserId = u.Id AND b.Class = 2) AS SilverBadges,
+        (SELECT COUNT(*) FROM Badges b WHERE b.UserId = u.Id AND b.Class = 3) AS BronzeBadges
+    FROM Users u
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopenedDate
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+PopularUserPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        ur.UserId,
+        ur.Reputation,
+        COALESCE(ph.LastClosedDate, ph.LastReopenedDate) AS LastStatusChange,
+        ur.UserLocation,
+        rp.ViewCount
+    FROM RankedPosts rp
+    JOIN UserReputation ur ON rp.OwnerUserId = ur.UserId
+    LEFT JOIN PostHistoryAggregates ph ON rp.PostId = ph.PostId
+    WHERE rp.ViewRank <= 5 
+),
+FinalResults AS (
+    SELECT 
+        pup.PostId,
+        pup.Title,
+        pup.Reputation,
+        pup.UserLocation,
+        pup.ViewCount,
+        COALESCE(pup.LastStatusChange, 'Never') AS StatusChangeInfo,
+        CASE 
+            WHEN pup.ViewCount IS NULL THEN 'No Views' 
+            ELSE 'Views Available'
+        END AS ViewStatus,
+        CASE 
+            WHEN pup.ViewCount = 0 THEN 'Needs Attention'
+            WHEN pup.ViewCount > 100 THEN 'Very Popular'
+            ELSE 'Moderately Popular'
+        END AS PopularityLevel
+    FROM PopularUserPosts pup
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.Reputation,
+    f.UserLocation,
+    f.ViewCount,
+    f.StatusChangeInfo,
+    f.ViewStatus,
+    f.PopularityLevel,
+    STRING_AGG(b.Name, ', ') AS Badges
+FROM FinalResults f
+LEFT JOIN Badges b ON f.PostId = b.UserId 
+GROUP BY 
+    f.PostId, f.Title, f.Reputation, f.UserLocation, f.ViewCount, 
+    f.StatusChangeInfo, f.ViewStatus, f.PopularityLevel
+HAVING 
+    f.Reputation > 50 AND f.ViewCount IS NOT NULL 
+ORDER BY 
+    f.ViewCount DESC, f.PostId
+LIMIT 100;

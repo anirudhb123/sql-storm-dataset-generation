@@ -1,0 +1,65 @@
+WITH RankedMovies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.id DESC) AS year_rank
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+),
+DirectorInfo AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS director_count,
+        MAX(pi.info) AS director_name 
+    FROM 
+        cast_info ci 
+    JOIN 
+        person_info pi ON ci.person_id = pi.person_id
+    WHERE 
+        ci.person_role_id IN (SELECT id FROM role_type WHERE role = 'Director')
+    GROUP BY 
+        ci.movie_id
+),
+KeywordAggregation AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        di.director_count,
+        di.director_name,
+        ka.keywords,
+        COALESCE(ka.keywords, 'No keywords') AS keywords_cleaned 
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        DirectorInfo di ON rm.movie_id = di.movie_id
+    LEFT JOIN 
+        KeywordAggregation ka ON rm.movie_id = ka.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.director_count,
+    md.director_name,
+    md.keywords_cleaned,
+    COALESCE(md.keywords_cleaned LIKE '%Action%', FALSE) AS has_action_keyword 
+FROM 
+    MovieDetails md
+WHERE 
+    md.year_rank <= 5 
+ORDER BY 
+    md.production_year DESC,
+    md.director_count DESC;

@@ -1,0 +1,59 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        1 AS hierarchy_level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        h.hierarchy_level + 1
+    FROM 
+        ActorHierarchy h
+    JOIN 
+        cast_info c ON h.person_id = c.person_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+        AND h.hierarchy_level < 5  
+)
+SELECT 
+    t.title, 
+    t.production_year, 
+    a.actor_name,
+    COUNT(DISTINCT c.movie_id) AS movie_count,
+    AVG(CASE WHEN m.info IS NULL THEN 0 ELSE LENGTH(m.info) END) AS avg_info_length,
+    COUNT(DISTINCT m.keyword_id) AS keyword_count
+FROM 
+    title t
+JOIN 
+    cast_info c ON t.id = c.movie_id
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info m ON t.id = m.movie_id
+WHERE 
+    a.name ILIKE '%John%'  
+    AND t.production_year > 2000
+GROUP BY 
+    t.title, t.production_year, a.actor_name
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 5  
+ORDER BY 
+    avg_info_length DESC, 
+    movie_count DESC
+LIMIT 10;

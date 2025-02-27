@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+
+ClosedPostStats AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseCount,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 11) AS ReopenCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        ph.PostId
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.Score,
+    pa.Upvotes,
+    pa.Downvotes,
+    COALESCE(cs.FirstClosedDate, '1970-01-01') AS FirstClosedDate,
+    COALESCE(cs.LastClosedDate, '1970-01-01') AS LastClosedDate,
+    cs.CloseCount,
+    cs.ReopenCount,
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostCount,
+    ua.GoldBadges,
+    ua.SilverBadges,
+    ua.BronzeBadges
+FROM 
+    RankedPosts pa
+LEFT JOIN 
+    ClosedPostStats cs ON pa.PostId = cs.PostId
+JOIN 
+    UserActivity ua ON pa.OwnerUserId = ua.UserId
+WHERE 
+    pa.RN <= 5 
+    AND (pa.Upvotes - pa.Downvotes) > 10
+ORDER BY 
+    pa.CreationDate DESC;

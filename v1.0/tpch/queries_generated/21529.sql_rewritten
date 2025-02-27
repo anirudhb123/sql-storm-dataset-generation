@@ -1,0 +1,82 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+), AvailableParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+    GROUP BY 
+        ps.ps_partkey
+), CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_linenumber) AS line_items_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate >= DATEADD(MONTH, -6, cast('1998-10-01' as date))
+    GROUP BY 
+        o.o_orderkey
+), NationsWithComments AS (
+    SELECT 
+        n.n_name,
+        n.n_comment,
+        CASE 
+            WHEN n.n_comment IS NULL THEN 'No comment'
+            ELSE n.n_comment
+        END AS processed_comment
+    FROM 
+        nation n
+    WHERE 
+        n.n_nationkey IN (SELECT DISTINCT c.c_nationkey FROM customer c)
+), PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        COALESCE(NULLIF(p.p_container, ''), 'Unknown') AS container,
+        p.p_retailprice,
+        COALESCE(NULLIF(p.p_comment, ''), 'No comment available') AS part_comment
+    FROM 
+        part p
+)
+
+SELECT 
+    pd.p_name,
+    pd.p_mfgr,
+    ns.n_name AS supplier_nation,
+    SUM(co.total_revenue) AS total_revenue,
+    AVG(co.line_items_count) AS avg_line_items_per_order,
+    MAX(ra.s_acctbal) AS max_supplier_balance,
+    STRING_AGG(DISTINCT nc.processed_comment, '; ') AS national_comments
+FROM 
+    PartDetails pd
+LEFT JOIN 
+    AvailableParts ap ON pd.p_partkey = ap.ps_partkey
+LEFT JOIN 
+    RankedSuppliers ra ON ra.rn = 1 
+LEFT JOIN 
+    lineitem l ON l.l_partkey = pd.p_partkey
+LEFT JOIN 
+    CustomerOrders co ON l.l_orderkey = co.o_orderkey
+JOIN 
+    NationsWithComments nc ON nc.n_name = ra.s_name
+GROUP BY 
+    pd.p_name, pd.p_mfgr, ns.n_name
+HAVING 
+    SUM(co.total_revenue) > (SELECT AVG(total_revenue) FROM CustomerOrders)
+ORDER BY 
+    total_revenue DESC;

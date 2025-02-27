@@ -1,0 +1,77 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        AverageScore,
+        LastPostDate,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC, AverageScore DESC) AS UserRank
+    FROM 
+        UserPostStats
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        ph.UserDisplayName AS ClosedBy
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+),
+MostActiveCloseReasons AS (
+    SELECT 
+        ph.Comment AS CloseReason, 
+        COUNT(*) AS CloseReasonCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.Comment
+    ORDER BY 
+        CloseReasonCount DESC
+    LIMIT 5
+)
+SELECT 
+    u.DisplayName,
+    COALESCE(tp.PostCount, 0) AS TotalPosts,
+    COALESCE(tp.QuestionCount, 0) AS TotalQuestions,
+    COALESCE(tp.AnswerCount, 0) AS TotalAnswers,
+    COALESCE(tp.AverageScore, 0) AS AvgScore,
+    cp.Title AS ClosedPostTitle,
+    cp.ClosedDate,
+    cp.ClosedBy,
+    m.CloseReason AS TopCloseReason,
+    m.CloseReasonCount
+FROM 
+    TopUsers tp
+LEFT JOIN 
+    ClosedPosts cp ON tp.UserId = cp.PostId
+CROSS JOIN 
+    (SELECT CloseReason, CloseReasonCount FROM MostActiveCloseReasons m) m
+WHERE 
+    tp.UserRank <= 10
+ORDER BY 
+    TotalPosts DESC, AvgScore DESC;

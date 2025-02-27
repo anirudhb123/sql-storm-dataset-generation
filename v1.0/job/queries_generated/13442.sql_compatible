@@ -1,0 +1,30 @@
+
+SELECT 
+    a.name AS actor_name, 
+    m.title AS movie_title, 
+    m.production_year,
+    c.kind AS role_type,
+    co.name AS company_name
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title m ON ci.movie_id = m.id
+JOIN 
+    role_type c ON ci.role_id = c.id
+JOIN 
+    movie_companies mc ON m.id = mc.movie_id
+JOIN 
+    company_name co ON mc.company_id = co.id
+WHERE 
+    m.production_year >= 2000
+GROUP BY 
+    a.name, 
+    m.title, 
+    m.production_year, 
+    c.kind, 
+    co.name
+ORDER BY 
+    m.production_year DESC, 
+    a.name;

@@ -1,0 +1,90 @@
+
+WITH AddressDetails AS (
+    SELECT
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS FullAddress,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM
+        customer_address
+),
+CustomerDetails AS (
+    SELECT
+        CONCAT(c_first_name, ' ', c_last_name) AS FullName,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_city
+    FROM
+        customer
+    JOIN
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+),
+SalesDetails AS (
+    SELECT
+        ws_order_number,
+        ws_sales_price,
+        ws_quantity,
+        ws_net_profit
+    FROM
+        web_sales
+    UNION ALL
+    SELECT
+        cs_order_number,
+        cs_sales_price,
+        cs_quantity,
+        cs_net_profit
+    FROM
+        catalog_sales
+    UNION ALL
+    SELECT
+        ss_ticket_number,
+        ss_sales_price,
+        ss_quantity,
+        ss_net_profit
+    FROM
+        store_sales
+),
+FinalBenchmark AS (
+    SELECT
+        ad.FullAddress,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_zip,
+        ad.ca_country,
+        cd.FullName,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        SUM(sd.ws_sales_price) AS TotalSalesValue,
+        COUNT(sd.ws_order_number) AS TotalOrders,
+        SUM(sd.ws_net_profit) AS TotalNetProfit
+    FROM
+        AddressDetails ad
+    JOIN
+        CustomerDetails cd ON ad.ca_city = cd.cd_city
+    JOIN
+        SalesDetails sd ON cd.FullName = sd.FullName
+    GROUP BY
+        ad.FullAddress, ad.ca_city, ad.ca_state, ad.ca_zip, ad.ca_country, cd.FullName, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+)
+SELECT
+    FullAddress,
+    ca_city,
+    ca_state,
+    ca_zip,
+    ca_country,
+    FullName,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    TotalSalesValue,
+    TotalOrders,
+    TotalNetProfit
+FROM
+    FinalBenchmark
+ORDER BY
+    TotalSalesValue DESC
+FETCH FIRST 100 ROWS ONLY;

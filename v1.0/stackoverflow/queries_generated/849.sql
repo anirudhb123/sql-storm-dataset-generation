@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.PostTypeId = 1
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS NetVoteScore,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id
+), PostVoteDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS TotalVotes,
+        AVG(v.BountyAmount) AS AverageBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    up.DisplayName,
+    rp.Title,
+    rp.ViewCount,
+    rp.CreationDate,
+    us.NetVoteScore,
+    us.BadgeCount,
+    pvd.TotalVotes,
+    pvd.AverageBounty,
+    CASE 
+        WHEN pvd.TotalVotes IS NULL THEN 'No Votes'
+        WHEN pvd.TotalVotes > 50 THEN 'Highly Voted'
+        ELSE 'Moderate Votes'
+    END AS VoteCategory
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.PostId = up.Id
+JOIN 
+    UserStats us ON up.Id = us.UserId
+LEFT JOIN 
+    PostVoteDetails pvd ON rp.PostId = pvd.PostId
+WHERE 
+    rp.ViewRank = 1
+ORDER BY 
+    us.NetVoteScore DESC, rp.ViewCount DESC;

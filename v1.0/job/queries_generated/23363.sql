@@ -1,0 +1,73 @@
+WITH ranked_titles AS (
+    SELECT 
+        a.id AS aka_id, 
+        a.person_id, 
+        a.name AS actor_name, 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year,
+        RANK() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rank_year,
+        COUNT(DISTINCT c.movie_id) OVER (PARTITION BY a.person_id) AS total_movies,
+        COALESCE(AVG(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END), 0) OVER (PARTITION BY a.person_id) AS avg_notes
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+co_actor_stats AS (
+    SELECT 
+        c.person_id AS co_actor_id, 
+        COUNT(DISTINCT mc.movie_id) AS co_starring_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS co_star_names
+    FROM 
+        cast_info c
+    JOIN 
+        cast_info mc ON c.movie_id = mc.movie_id AND mc.person_id <> c.person_id
+    JOIN 
+        aka_name a ON mc.person_id = a.person_id
+    GROUP BY 
+        c.person_id
+),
+
+company_movie_stats AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies_involved
+    FROM 
+        movie_companies mc
+    JOIN 
+        movie_info m ON mc.movie_id = m.movie_id
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        m.movie_id
+)
+
+SELECT 
+    rt.actor_name,
+    rt.production_year,
+    rt.total_movies,
+    rt.avg_notes,
+    cos.co_starring_count,
+    coalesce(cos.co_star_names, 'No Co-stars') AS co_star_names,
+    cms.company_count,
+    coalesce(cms.companies_involved, 'No Companies') AS companies_involved
+FROM 
+    ranked_titles rt
+LEFT JOIN 
+    co_actor_stats cos ON rt.person_id = cos.co_actor_id
+LEFT JOIN 
+    company_movie_stats cms ON rt.title_id = cms.movie_id
+WHERE 
+    rt.rank_year = 1
+    AND rt.avg_notes > 0.5
+    OR rt.total_movies > 5   -- Using unusual logic to mix conditions 
+ORDER BY 
+    rt.production_year DESC, rt.actor_name
+LIMIT 50;

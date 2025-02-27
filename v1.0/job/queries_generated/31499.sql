@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        m.imdb_id,
+        1 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        m.imdb_id,
+        mh.level + 1
+    FROM 
+        aka_title AS m
+    JOIN 
+        movie_link AS ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        AVG(mk_count) AS avg_keywords,
+        MIN(CASE WHEN c.nr_order IS NOT NULL THEN c.nr_order ELSE 0 END) AS min_cast_order
+    FROM 
+        MovieHierarchy AS mh
+    LEFT JOIN 
+        movie_companies AS mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword AS mk ON mh.movie_id = mk.movie_id
+    LEFT JOIN 
+        cast_info AS c ON mh.movie_id = c.movie_id
+    GROUP BY 
+        mh.movie_id, mh.movie_title, mh.production_year
+),
+RankedMovies AS (
+    SELECT 
+        mi.movie_id,
+        mi.movie_title,
+        mi.production_year,
+        mi.company_count,
+        mi.avg_keywords,
+        mi.min_cast_order,
+        RANK() OVER (PARTITION BY mi.production_year ORDER BY mi.company_count DESC, mi.avg_keywords DESC) AS rank
+    FROM 
+        MovieInfo mi
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.company_count,
+    rm.avg_keywords,
+    rm.min_cast_order,
+    (SELECT COUNT(*) FROM rankedmovies WHERE rank < rm.rank AND production_year = rm.production_year) AS rank_position
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rank <= 10
+ORDER BY 
+    rm.production_year, rm.rank;

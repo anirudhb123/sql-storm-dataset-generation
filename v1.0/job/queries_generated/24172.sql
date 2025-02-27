@@ -1,0 +1,90 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rank_by_year,
+        COUNT(c.id) OVER (PARTITION BY t.id) AS actor_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+MovieActorDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(a.name, 'Unknown') AS actor_name,
+        CASE 
+            WHEN a.gender IS NULL THEN 'Not Specified'
+            ELSE a.gender
+        END AS actor_gender,
+        rm.actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        aka_name a ON a.person_id = c.person_id
+    WHERE 
+        rm.rank_by_year <= 5  -- Get top 5 recent movies by kind
+),
+
+FilteredByKeyword AS (
+    SELECT 
+        mad.movie_id,
+        mad.title,
+        mad.production_year,
+        mad.actor_name,
+        mad.actor_gender,
+        mad.actor_count
+    FROM 
+        MovieActorDetails mad
+    JOIN 
+        movie_keyword mk ON mad.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword LIKE 'Action%'  -- filter on keywords starting with 'Action'
+),
+
+FinalResult AS (
+    SELECT 
+        f.movie_id,
+        f.title,
+        f.production_year,
+        f.actor_name,
+        f.actor_gender,
+        f.actor_count,
+        CASE 
+            WHEN f.actor_count > 1 THEN 'Ensemble Cast'
+            ELSE 'Solo Cast'
+        END AS cast_type,
+        ROW_NUMBER() OVER (ORDER BY f.production_year DESC, f.title) AS row_num
+    FROM 
+        FilteredByKeyword f
+)
+
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    fr.actor_name,
+    fr.actor_gender,
+    fr.cast_type,
+    fr.row_num,
+    NULLIF(fr.actor_count, 0) AS adjusted_actor_count  -- using NULLIF to avoid count being 0
+FROM 
+    FinalResult fr
+WHERE 
+    fr.actor_gender IN ('M', 'F')  -- only Male and Female actors
+ORDER BY 
+    fr.production_year DESC, 
+    fr.actor_name;
+

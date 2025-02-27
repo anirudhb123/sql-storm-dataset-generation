@@ -1,0 +1,89 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.kind_id ORDER BY a.production_year DESC) AS rn,
+        COUNT(DISTINCT b.person_id) AS total_cast_members
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info b ON a.id = b.movie_id
+    LEFT JOIN 
+        complete_cast c ON a.id = c.movie_id
+    WHERE 
+        a.production_year IS NOT NULL 
+        AND a.title IS NOT NULL
+    GROUP BY 
+        a.title, a.production_year, a.kind_id, a.id
+),
+RelatedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ARRAY_AGG(DISTINCT lk.linked_movie_id) AS related_movie_ids
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_link lk ON m.id = lk.movie_id
+    GROUP BY 
+        m.id, m.title
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        STRING_AGG(DISTINCT CONCAT(n.name, ' (', rt.role, ')'), ', ') AS cast_list,
+        SUM(CASE WHEN n.gender = 'F' THEN 1 ELSE 0 END) AS female_cast_count,
+        SUM(CASE WHEN n.gender = 'M' THEN 1 ELSE 0 END) AS male_cast_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name n ON ci.person_id = n.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        ci.note IS NULL 
+    GROUP BY 
+        ci.movie_id
+),
+FinalResults AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.kind_id,
+        rm.total_cast_members,
+        rd.related_movie_ids,
+        cd.cast_list,
+        cd.female_cast_count,
+        cd.male_cast_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        RelatedMovies rd ON rm.movie_title = rd.title
+    LEFT JOIN 
+        CastDetails cd ON rm.rn = 1 AND cd.movie_id = rm.id
+    WHERE 
+        rm.total_cast_members > 3 
+        AND EXISTS (SELECT 1 FROM movie_info mi WHERE mi.movie_id = rm.id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%plot%'))
+)
+SELECT 
+    fr.movie_title,
+    fr.production_year,
+    k.kind AS genre,
+    fr.total_cast_members,
+    fr.related_movie_ids,
+    COALESCE(fr.cast_list, 'No Cast Available') AS cast_list,
+    CASE 
+        WHEN fr.female_cast_count > fr.male_cast_count THEN 'Female Dominant'
+        WHEN fr.male_cast_count > fr.female_cast_count THEN 'Male Dominant'
+        ELSE 'Equal Gender Representation'
+    END AS gender_representation
+FROM 
+    FinalResults fr
+JOIN 
+    kind_type k ON fr.kind_id = k.id
+ORDER BY 
+    fr.production_year DESC, 
+    fr.total_cast_members DESC
+LIMIT 10;

@@ -1,0 +1,65 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        COUNT(DISTINCT IF(ws.ws_web_site_sk IS NULL, ws.ws_item_sk, NULL)) AS unique_items_sold
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+address_sales AS (
+    SELECT 
+        ca.ca_address_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        MAX(ws.ws_sold_date_sk) AS last_sale_date
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        ca.ca_address_id
+),
+state_performance AS (
+    SELECT 
+        ca.ca_state,
+        COUNT(DISTINCT cs.c_customer_id) AS customer_count,
+        SUM(cs.total_profit) AS total_profits,
+        AVG(cs.order_count) AS average_orders,
+        COALESCE(MAX(as.last_sale_date), '1970-01-01') as last_date
+    FROM 
+        customer_sales cs
+    LEFT JOIN 
+        customer c ON cs.c_customer_id = c.c_customer_id
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        address_sales as ON ca.ca_address_id = as.ca_address_id
+    GROUP BY 
+        ca.ca_state
+)
+SELECT 
+    sp.ca_state,
+    sp.customer_count,
+    sp.total_profits,
+    sp.average_orders,
+    DENSE_RANK() OVER (ORDER BY sp.total_profits DESC) AS performance_rank,
+    CASE 
+        WHEN sp.total_profits IS NULL THEN 'No sales recorded'
+        WHEN sp.average_orders > 5 THEN 'Good performance'
+        ELSE 'Needs improvement'
+    END AS performance_desc
+FROM 
+    state_performance sp
+WHERE 
+    sp.customer_count > 10
+ORDER BY 
+    sp.total_profits DESC,
+    sp.ca_state ASC
+LIMIT 20;

@@ -1,0 +1,40 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost ASC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal > 500
+
+    UNION ALL
+
+    SELECT sc.s_suppkey, sc.s_name, ps.ps_partkey, p.p_name, ps.ps_availqty,
+           ps.ps_supplycost, ROW_NUMBER() OVER (PARTITION BY sc.s_suppkey ORDER BY ps.ps_supplycost ASC) AS rank
+    FROM SupplyChain sc
+    JOIN partsupp ps ON sc.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE sc.rank < 5
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY o.o_orderkey
+),
+FilteredCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) IS NOT NULL AND SUM(o.o_totalprice) > 1000
+)
+SELECT f.c_name, f.total_spent, sc.p_partkey, sc.p_name, sc.ps_availqty,
+       ROUND(sc.ps_supplycost * (1 + (CASE WHEN f.total_spent > 5000 THEN 0.1 ELSE 0.2 END)), 2) AS adjusted_supplycost
+FROM FilteredCustomers f
+LEFT JOIN SupplyChain sc ON f.total_spent = sc.ps_availqty
+WHERE f.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'O')
+ORDER BY f.total_spent DESC, adjusted_supplycost ASC;

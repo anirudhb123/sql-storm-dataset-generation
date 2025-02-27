@@ -1,0 +1,51 @@
+
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, NULL AS parent_region
+    FROM region
+    WHERE r_regionkey = 1
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, rh.r_regionkey
+    FROM region r
+    JOIN RegionHierarchy rh ON r.r_regionkey <> rh.r_regionkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+),
+OrderLineSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+           COUNT(*) AS line_count
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT
+    rh.r_name AS region,
+    co.c_name AS customer,
+    ols.line_count,
+    ols.total_value,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    AVG(ps.ps_supplycost) AS avg_supply_cost
+FROM RegionHierarchy rh
+LEFT JOIN nation n ON rh.parent_region = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN CustomerOrders co ON co.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+      AND o.o_orderdate BETWEEN '1997-01-01' AND DATE('1998-10-01')
+)
+LEFT JOIN OrderLineSummary ols ON ols.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+      AND o.o_orderdate < DATE('1998-10-01') - INTERVAL '30 DAY'
+)
+WHERE co.rn = 1
+GROUP BY rh.r_name, co.c_name, ols.line_count, ols.total_value
+HAVING COUNT(DISTINCT ps.s_suppkey) > 2
+ORDER BY ols.total_value DESC
+LIMIT 100;

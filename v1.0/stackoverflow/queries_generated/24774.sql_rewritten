@@ -1,0 +1,54 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.VoteCount, 0)) AS TotalVotes,
+        SUM(COALESCE((SELECT COUNT(*) 
+                     FROM Comments c 
+                     WHERE c.UserId = u.Id), 0)) AS TotalComments
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS VoteCount 
+        FROM Votes 
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '7 days'
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagPopularity
+    FROM Tags t
+    JOIN Posts p ON t.Id = ANY (string_to_array(p.Tags, '::int'))
+    JOIN PostLinks pl ON p.Id = pl.PostId
+    GROUP BY t.TagName
+    HAVING COUNT(pt.PostId) > 10
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    ua.PostCount,
+    ua.TotalVotes,
+    ua.TotalComments,
+    ARRAY_AGG(p.Title) AS RecentPostTitles,
+    COALESCE(rt.TagName, 'No Tags Available') AS PopularTag,
+    COALESCE(rt.TagPopularity, 0) AS TagPopularityScore
+FROM Users u
+LEFT JOIN UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN RecentPosts p ON u.Id = p.OwnerUserId AND p.rn <= 5
+LEFT JOIN PopularTags rt ON rt.TagPopularity > 50
+WHERE u.Reputation > 100 
+GROUP BY u.Id, u.DisplayName, ua.PostCount, ua.TotalVotes, ua.TotalComments
+ORDER BY ua.TotalVotes DESC NULLS LAST, u.DisplayName
+LIMIT 100;

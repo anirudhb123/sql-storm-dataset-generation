@@ -1,0 +1,50 @@
+WITH RankedActors AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT ci.movie_id) DESC) AS actor_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.name
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        string_agg(k.keyword, ', ') AS keywords,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS year_rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.title, mt.production_year
+)
+SELECT 
+    rwa.actor_name,
+    rwa.movie_count,
+    mwk.movie_title,
+    mwk.production_year,
+    mwk.keywords
+FROM 
+    RankedActors rwa
+LEFT JOIN 
+    MoviesWithKeywords mwk ON rwa.movie_count > 0 AND rwa.actor_rank < 20
+WHERE 
+    (mwk.production_year IS NULL OR mwk.production_year > 2000)
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = mwk.movie_title 
+        AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+        AND mi.info IS NULL
+    )
+ORDER BY 
+    rwa.actor_rank, mwk.production_year DESC;

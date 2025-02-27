@@ -1,0 +1,81 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC, mt.id) AS rank_per_year
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        ci.person_id,
+        ca.id AS cast_info_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        CASE 
+            WHEN ci.note IS NULL THEN 'No Note'
+            ELSE ci.note
+        END AS note_detail
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.id
+    WHERE 
+        ci.nr_order IS NOT NULL 
+        AND ci.nr_order < 5
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY cn.name) AS company_rank
+    FROM 
+        movie_companies mc 
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        cn.country_code IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        rv.movie_id,
+        rv.movie_title,
+        rv.production_year,
+        COUNT(DISTINCT cd.person_id) AS distinct_actors,
+        STRING_AGG(DISTINCT cd.note_detail, ', ') AS actor_notes
+    FROM 
+        RankedMovies rv
+    LEFT JOIN 
+        CastDetails cd ON rv.movie_id = cd.movie_id
+    LEFT JOIN 
+        CompanyMovies cm ON rv.movie_id = cm.movie_id
+    WHERE 
+        cm.company_rank <= 3
+    GROUP BY 
+        rv.movie_id, rv.movie_title, rv.production_year
+)
+SELECT 
+    fm.movie_title,
+    fm.production_year,
+    COALESCE(fm.distinct_actors, 0) AS total_actors,
+    CASE 
+        WHEN fm.production_year >= 2000 THEN 'Modern Era'
+        WHEN fm.production_year >= 1950 THEN 'Mid Century'
+        ELSE 'Classic Era'
+    END AS era,
+    (SELECT COUNT(*) FROM aka_name an WHERE an.person_id IN 
+        (SELECT DISTINCT cd.person_id FROM CastDetails cd WHERE cd.movie_id = fm.movie_id)) AS unique_cast_count
+FROM 
+    FilteredMovies fm
+WHERE 
+    fm.distinct_actors > 0
+ORDER BY 
+    fm.production_year DESC, fm.movie_title
+LIMIT 10 OFFSET 0;

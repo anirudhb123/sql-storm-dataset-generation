@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id
+),
+FilteredVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+)
+SELECT 
+    rp.Title,
+    rp.PostId,
+    rp.CreationDate,
+    rp.Score,
+    fv.UpVotes,
+    fv.DownVotes,
+    fv.TotalVotes,
+    ub.BadgeCount,
+    ub.HighestBadgeClass,
+    phd.UserDisplayName AS LastEditor,
+    phd.CreationDate AS LastEditDate,
+    (SELECT STRING_AGG(tag.TagName, ', ') 
+     FROM Tags tag 
+     JOIN LATERAL unnest(string_to_array(rp.Tags, ',')) AS t(tag_name) 
+     ON tag.TagName = t.tag_name) AS TagList
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    FilteredVotes fv ON rp.PostId = fv.PostId
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId AND phd.HistoryRank = 1
+WHERE 
+    rp.CommentCount > 5 
+    AND rp.PostRank <= 3 
+    AND (rp.Score IS NOT NULL AND rp.Score > 0) 
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC;

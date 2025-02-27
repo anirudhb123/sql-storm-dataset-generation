@@ -1,0 +1,79 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        aka_title m ON m.episode_of_id = mh.movie_id
+), 
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        COUNT(CASE WHEN c.role_id IS NOT NULL THEN 1 END) AS cast_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info c ON c.movie_id = mh.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title
+    HAVING 
+        COUNT(c.role_id) > 5
+), 
+FilteredMovies AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        BY_year,
+        CASE 
+            WHEN tm.cast_count > 10 THEN 'Popular'
+            WHEN tm.cast_count BETWEEN 5 AND 10 THEN 'Moderate'
+            ELSE 'Unknown'
+        END AS popularity_category
+    FROM 
+        TopMovies tm
+    JOIN 
+        (SELECT 
+            title.id AS movie_id, 
+            COUNT(DISTINCT c.person_id) AS BY_year
+        FROM 
+            title
+        LEFT JOIN 
+            cast_info c ON c.movie_id = title.id
+        GROUP BY 
+            title.id
+        HAVING 
+            BY_year BETWEEN 2010 AND 2020
+        ) year_data ON tm.movie_id = year_data.movie_id
+)
+SELECT 
+    f.title,
+    f.popularity_category,
+    COUNT(DISTINCT c.person_id) AS unique_actors,
+    STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+    SUM(CASE WHEN c.nr_order IS NULL THEN 0 ELSE 1 END) AS missing_order_count
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    cast_info c ON c.movie_id = f.movie_id
+LEFT JOIN 
+    aka_name a ON a.person_id = c.person_id
+GROUP BY 
+    f.title, f.popularity_category
+ORDER BY 
+    unique_actors DESC, f.title
+LIMIT 10;
+

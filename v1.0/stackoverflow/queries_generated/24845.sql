@@ -1,0 +1,67 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostAnalytics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts,
+        SUM(CASE WHEN P.CreationDate > CURRENT_DATE - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentPosts,
+        STDEVP(P.Score) AS ScoreStdDev
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+ClosedPostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS ClosedPosts,
+        MAX(P.ClosedDate) AS LastClosedDate
+    FROM Posts P
+    WHERE P.ClosedDate IS NOT NULL
+    GROUP BY P.OwnerUserId
+),
+VoteSummary AS (
+    SELECT 
+        V.UserId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM Votes V
+    GROUP BY V.UserId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+    COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+    COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(PA.TotalPosts, 0) AS TotalPosts,
+    COALESCE(PA.PositiveScorePosts, 0) AS PositiveScorePosts,
+    COALESCE(PA.RecentPosts, 0) AS RecentPosts,
+    COALESCE(CPS.ClosedPosts, 0) AS ClosedPosts,
+    COALESCE(CPS.LastClosedDate, 'Never') AS LastClosedDate,
+    COALESCE(VS.TotalUpvotes, 0) AS TotalUpvotes,
+    COALESCE(VS.TotalDownvotes, 0) AS TotalDownvotes,
+    COALESCE(PA.ScoreStdDev, 0) AS ScoreStandardDeviation,
+    CASE 
+        WHEN U.Reputation IS NULL THEN 'Unknown'
+        WHEN U.Reputation < 1000 THEN 'Newbie'
+        WHEN U.Reputation BETWEEN 1000 AND 10000 THEN 'Experienced'
+        ELSE 'Seasoned'
+    END AS ReputationGroup
+FROM Users U
+LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN PostAnalytics PA ON U.Id = PA.OwnerUserId
+LEFT JOIN ClosedPostStats CPS ON U.Id = CPS.OwnerUserId
+LEFT JOIN VoteSummary VS ON U.Id = VS.UserId
+WHERE 
+    (U.LastAccessDate >= CURRENT_TIMESTAMP - INTERVAL '1 year' OR U.Reputation > 500) 
+    AND (UB.GoldBadges IS NOT NULL OR UB.SilverBadges IS NOT NULL OR UB.BronzeBadges IS NOT NULL)
+ORDER BY U.Reputation DESC, U.DisplayName ASC
+LIMIT 100;

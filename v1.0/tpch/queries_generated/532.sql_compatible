@@ -1,0 +1,61 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order,
+        c.c_nationkey
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= '1997-01-01' 
+    AND o.o_orderdate <= '1997-12-31'
+),
+SupplierPartInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        p.p_brand,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_brand
+),
+OrderDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        SUM(l.l_quantity) AS total_quantity,
+        o.o_orderstatus
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY l.l_orderkey, o.o_orderstatus
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS num_parts
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_comment IS NOT NULL)
+    GROUP BY s.s_suppkey, s.s_name
+)
+
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(CASE WHEN oo.rank_order <= 5 THEN od.net_revenue ELSE 0 END) AS top_revenue_orders,
+    AVG(sp.total_available) AS avg_avail_qty,
+    MIN(sp.avg_supply_cost) AS min_supply_cost,
+    COUNT(DISTINCT fs.s_suppkey) AS total_suppliers
+FROM RankedOrders oo
+JOIN OrderDetails od ON oo.o_orderkey = od.l_orderkey
+JOIN nation n ON oo.c_nationkey = n.n_nationkey
+JOIN SupplierPartInfo sp ON sp.ps_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost < 100)
+LEFT JOIN FilteredSuppliers fs ON fs.num_parts > 1
+WHERE oo.o_orderstatus = 'F'
+GROUP BY n.n_name
+ORDER BY total_orders DESC;

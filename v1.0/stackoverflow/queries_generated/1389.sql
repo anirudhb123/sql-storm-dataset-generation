@@ -1,0 +1,66 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.Score) OVER (PARTITION BY U.Id) AS AverageScore,
+        AVG(P.ViewCount) OVER (PARTITION BY U.Id) AS AverageViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopPosters AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        Questions,
+        Answers,
+        TotalViews,
+        TotalScore,
+        AverageScore,
+        AverageViews,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS PostRank
+    FROM 
+        UserPostStats
+),
+ClosedPosts AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS ClosedPostCount,
+        COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS ClosedCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.ClosedDate IS NOT NULL
+    GROUP BY 
+        P.OwnerUserId
+)
+SELECT 
+    T.DisplayName,
+    T.TotalPosts,
+    T.Questions,
+    T.Answers,
+    T.TotalViews,
+    T.TotalScore,
+    T.AverageScore,
+    T.AverageViews,
+    COALESCE(CP.ClosedPostCount, 0) AS ClosedPostCount,
+    COALESCE(CP.ClosedCount, 0) AS ActualClosedCount
+FROM 
+    TopPosters T
+LEFT JOIN 
+    ClosedPosts CP ON T.UserId = CP.OwnerUserId
+WHERE 
+    T.PostRank <= 10
+ORDER BY 
+    T.PostRank;

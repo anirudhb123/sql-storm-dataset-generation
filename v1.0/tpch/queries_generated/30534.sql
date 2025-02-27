@@ -1,0 +1,67 @@
+WITH RECURSIVE SalesSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(ss.total_sales, 0) AS total_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        SalesSummary ss ON c.c_custkey = ss.c_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+),
+SupplierPartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    tc.c_name,
+    tc.total_sales,
+    sp.p_name AS popular_part,
+    sp.supplier_count,
+    sp.max_supply_cost,
+    r.r_name AS region
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    supplier s ON tc.total_sales > 5000
+LEFT JOIN 
+    SupplierPartDetails sp ON s.s_nationkey = (
+        SELECT n.n_nationkey 
+        FROM nation n 
+        WHERE n.n_name = SUBSTRING(s.s_name, 1, LOCATE(' ', s.s_name) - 1)
+    )
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    tc.sales_rank <= 10
+ORDER BY 
+    tc.total_sales DESC, sp.max_supply_cost ASC;

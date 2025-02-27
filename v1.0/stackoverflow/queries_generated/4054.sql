@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        p.AnswerCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+        AND p.PostTypeId = 1  -- Only Questions
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(b.Count, 0) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS QuestionCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        (SELECT UserId, COUNT(*) AS Count FROM Badges GROUP BY UserId) b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        CloseReasonTypes crt ON ph.Comment = crt.Id::TEXT
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+UserStats AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        ur.BadgeCount,
+        COALESCE(cp.CloseCount, 0) AS CloseCount,
+        COALESCE(rp.RecentPostCount, 0) AS RecentPostCount
+    FROM 
+        UserReputation ur
+    LEFT JOIN 
+        (SELECT 
+            OwnerUserId,
+            COUNT(*) AS CloseCount 
+         FROM 
+            ClosedPosts 
+         GROUP BY 
+            OwnerUserId) cp ON ur.UserId = cp.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+            OwnerUserId,
+            COUNT(*) AS RecentPostCount 
+         FROM 
+            RankedPosts 
+         GROUP BY 
+            OwnerUserId) rp ON ur.UserId = rp.OwnerUserId
+)
+SELECT 
+    u.DisplayName,
+    us.Reputation,
+    us.BadgeCount,
+    us.CloseCount,
+    us.RecentPostCount,
+    CASE 
+        WHEN us.CloseCount > 5 THEN 'High' 
+        WHEN us.CloseCount BETWEEN 1 AND 5 THEN 'Moderate' 
+        ELSE 'Low' 
+    END AS CloseRateCategory
+FROM 
+    Users u
+JOIN 
+    UserStats us ON u.Id = us.UserId
+WHERE 
+    us.Reputation > 1000
+ORDER BY 
+    us.Reputation DESC,
+    us.CloseCount DESC;

@@ -1,0 +1,63 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk, 
+        sr_item_sk, 
+        COUNT(sr_return_quantity) AS total_returns,
+        SUM(sr_net_loss) AS total_net_loss,
+        DENSE_RANK() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_net_loss) DESC) AS rank
+    FROM store_returns
+    GROUP BY sr_returned_date_sk, sr_item_sk
+),
+HighReturnItems AS (
+    SELECT 
+        sr_item_sk, 
+        total_returns, 
+        total_net_loss 
+    FROM RankedReturns
+    WHERE rank <= 10
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(SUM(ws.ws_quantity), 0) AS total_quantity_sold,
+        COALESCE(SUM(ws.ws_sales_price * ws.ws_quantity), 0) AS total_sales,
+        COALESCE(SUM(ws.ws_ext_discount_amt), 0) AS total_discount,
+        COALESCE(NULLIF(SUM(ws.ws_net_profit), 0), -1) AS actual_net_profit
+    FROM item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_id, i.i_item_desc
+),
+FinalResults AS (
+    SELECT 
+        hi.sr_item_sk,
+        id.i_item_id,
+        id.i_item_desc,
+        hi.total_returns,
+        hi.total_net_loss,
+        id.total_quantity_sold,
+        id.total_sales,
+        id.total_discount,
+        CASE WHEN id.actual_net_profit = -1 THEN 'No Sales' 
+             ELSE CASE 
+                 WHEN id.actual_net_profit < 0 THEN 'Profit Loss'
+                 ELSE 'Profit' END
+        END AS profit_status
+    FROM HighReturnItems hi
+    JOIN ItemDetails id ON hi.sr_item_sk = id.i_item_sk
+)
+SELECT 
+    fr.sr_item_sk,
+    fr.i_item_id,
+    fr.i_item_desc,
+    fr.total_returns,
+    fr.total_net_loss,
+    fr.total_quantity_sold,
+    fr.total_sales,
+    fr.total_discount,
+    fr.profit_status
+FROM FinalResults fr
+WHERE fr.total_returns > 5
+ORDER BY fr.total_net_loss DESC, fr.total_sales DESC
+LIMIT 50;

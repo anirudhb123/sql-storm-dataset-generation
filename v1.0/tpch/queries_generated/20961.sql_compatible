@@ -1,0 +1,49 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS hierarchy_level
+    FROM nation
+    WHERE n_nationkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.hierarchy_level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_nationkey = nh.n_regionkey
+),
+supplier_summary AS (
+    SELECT s.nationkey, COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+           AVG(s.s_acctbal) AS avg_acct_balance,
+           MAX(s.s_acctbal) AS max_acct_balance
+    FROM supplier s
+    GROUP BY s.nationkey
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(l_extendedprice) FROM lineitem)
+),
+filtered_orders AS (
+    SELECT os.o_orderkey, os.total_revenue, ns.total_suppliers
+    FROM order_summary os
+    JOIN supplier_summary ns ON os.o_custkey = ns.nationkey
+    WHERE os.order_rank <= 5
+    AND ns.total_suppliers > 10
+)
+SELECT rn.r_name, SUM(fo.total_revenue) AS total_revenue_generated,
+       COUNT(DISTINCT fo.o_orderkey) AS total_orders,
+       CASE WHEN SUM(fo.total_revenue) IS NOT NULL THEN SUM(fo.total_revenue) / COUNT(DISTINCT fo.o_orderkey) ELSE NULL END AS avg_revenue_per_order
+FROM filtered_orders fo
+JOIN region rn ON rn.r_regionkey = (
+    SELECT n.n_regionkey
+    FROM nation n
+    WHERE n.n_nationkey = (
+        SELECT MIN(s.s_nationkey)
+        FROM supplier s
+        WHERE s.s_suppkey IN (SELECT DISTINCT l.l_suppkey FROM lineitem l WHERE l.l_returnflag = 'N')
+    )
+)
+GROUP BY rn.r_name
+HAVING SUM(fo.total_revenue) IS NOT NULL
+ORDER BY total_revenue_generated DESC
+LIMIT 10;

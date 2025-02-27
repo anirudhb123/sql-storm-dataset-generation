@@ -1,0 +1,73 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+average_cast AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM
+        cast_info ci
+    GROUP BY
+        ci.movie_id
+),
+ranked_movies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ac.cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY ac.cast_count DESC) AS rank
+    FROM
+        movie_hierarchy mh
+    LEFT JOIN
+        average_cast ac ON mh.movie_id = ac.movie_id
+),
+filtered_ranked_movies AS (
+    SELECT
+        movie_id,
+        title,
+        production_year,
+        cast_count,
+        rank
+    FROM
+        ranked_movies
+    WHERE
+        rank <= 5 OR production_year BETWEEN 2000 AND 2005  -- Get top 5 movies and movies between 2000 and 2005
+)
+SELECT
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.cast_count,
+    COALESCE(g.kind, 'Unknown') AS movie_kind
+FROM
+    filtered_ranked_movies f
+LEFT JOIN
+    kind_type g ON g.id = (SELECT kt.kind_id FROM aka_title at JOIN kind_type kt ON at.kind_id = kt.id WHERE at.id = f.movie_id LIMIT 1)
+WHERE
+    f.cast_count > 0
+ORDER BY
+    f.production_year DESC, f.cast_count DESC;
+

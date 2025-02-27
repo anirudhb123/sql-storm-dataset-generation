@@ -1,0 +1,60 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+), TotalSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01' AND l.l_shipdate < DATE '2024-01-01'
+    GROUP BY 
+        l.l_partkey
+), SupplierInfo AS (
+    SELECT 
+        r.r_name,
+        n.n_name,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(ts.total_revenue, 0) AS total_revenue
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        (SELECT p.p_partkey, ts.total_revenue FROM TotalSales ts JOIN part p ON ts.l_partkey = p.p_partkey) ts ON ts.p_partkey = p.p_partkey
+)
+
+SELECT 
+    si.r_name,
+    si.n_name,
+    si.s_name,
+    si.s_acctbal,
+    si.total_revenue,
+    CASE 
+        WHEN si.total_revenue = 0 THEN 'No Sales'
+        WHEN si.total_revenue < 5000 THEN 'Low Sales'
+        WHEN si.total_revenue >= 5000 AND si.total_revenue < 15000 THEN 'Moderate Sales'
+        ELSE 'High Sales'
+    END AS sales_category,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count
+FROM 
+    SupplierInfo si
+LEFT JOIN 
+    RankedSuppliers rs ON si.s_name = rs.s_name AND rs.rank_acctbal = 1
+GROUP BY 
+    si.r_name, si.n_name, si.s_name, si.s_acctbal, si.total_revenue
+ORDER BY 
+    si.total_revenue DESC, si.s_acctbal DESC;

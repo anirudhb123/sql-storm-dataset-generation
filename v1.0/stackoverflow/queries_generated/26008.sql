@@ -1,0 +1,74 @@
+WITH TagsTable AS (
+    SELECT 
+        p.Id AS PostId,
+        string_agg(t.TagName, ', ') AS TagNames,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag ON TRUE
+    JOIN 
+        Tags t ON t.TagName = tag
+    GROUP BY 
+        p.Id
+),
+PostStatistics AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        p.ClosedDate,
+        pg_catalog.to_char(p.CreationDate, 'YYYY-MM-DD') AS CreationDateFormatted,
+        COALESCE(pt.Name, 'No Type') AS PostType,
+        COALESCE(tg.TagNames, 'No Tags') AS PostTags,
+        tg.TagCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        TagsTable tg ON p.Id = tg.PostId
+    WHERE 
+        p.CreationDate > (NOW() - INTERVAL '1 year')
+),
+UserEngagement AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDateFormatted,
+    ps.PostType,
+    ps.PostTags,
+    ps.Score AS PostScore,
+    ps.VoteCount,
+    ue.UpVotes,
+    ue.DownVotes,
+    ue.AverageScore
+FROM 
+    PostStatistics ps
+JOIN 
+    Users us ON ps.OwnerUserId = us.Id
+LEFT JOIN 
+    UserEngagement ue ON ps.OwnerUserId = ue.OwnerUserId
+ORDER BY 
+    ps.Score DESC, ps.CreationDate DESC
+LIMIT 50;

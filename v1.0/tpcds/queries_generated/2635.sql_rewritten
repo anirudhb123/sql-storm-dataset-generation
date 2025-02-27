@@ -1,0 +1,35 @@
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        c.customer_id,
+        cs.total_sales,
+        cs.order_count,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM CustomerSales cs
+    JOIN customer_address ca ON cs.c_customer_sk = ca.ca_address_sk
+    WHERE ca.ca_state = 'CA'
+)
+SELECT 
+    tc.customer_id,
+    COALESCE(tc.total_sales, 0) AS total_sales,
+    tc.order_count,
+    CASE 
+        WHEN tc.sales_rank <= 10 THEN 'Top 10'
+        ELSE 'Other'
+    END AS customer_category
+FROM TopCustomers tc
+WHERE tc.order_count > (
+    SELECT AVG(order_count) 
+    FROM TopCustomers
+)
+ORDER BY total_sales DESC;

@@ -1,0 +1,98 @@
+WITH RECURSIVE UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        b.Name AS BadgeName,
+        b.Class,
+        b.Date,
+        1 AS BadgeLevel
+    FROM 
+        Users u
+    JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        b.Class = 1
+
+    UNION ALL
+
+    SELECT 
+        ub.UserId,
+        ub.DisplayName,
+        b.Name,
+        b.Class,
+        b.Date,
+        ub.BadgeLevel + 1
+    FROM 
+        UserBadges ub
+    JOIN 
+        Badges b ON ub.UserId = b.UserId
+    WHERE 
+        b.Class IN (2, 3) -- Silver and Bronze badges
+),
+UserScore AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END, 0)) AS TotalUpvotes,
+        SUM(COALESCE(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END, 0)) AS TotalDownvotes,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+UserActivity AS (
+    SELECT 
+        ub.UserId,
+        ub.DisplayName,
+        ub.BadgeName,
+        ub.Class,
+        ub.Date,
+        us.TotalBounty,
+        us.PostCount,
+        us.TotalUpvotes,
+        us.TotalDownvotes,
+        us.CommentCount
+    FROM 
+        UserBadges ub
+    JOIN 
+        UserScore us ON ub.UserId = us.UserId
+),
+TopUsers AS (
+    SELECT 
+        ua.DisplayName,
+        ua.TotalBounty,
+        ua.PostCount,
+        ua.TotalUpvotes,
+        ua.TotalDownvotes,
+        RANK() OVER (ORDER BY ua.TotalBounty DESC) AS BountyRank,
+        RANK() OVER (ORDER BY ua.PostCount DESC) AS PostRank
+    FROM 
+        UserActivity ua
+)
+SELECT 
+    t.DisplayName,
+    t.TotalBounty,
+    t.PostCount,
+    t.TotalUpvotes,
+    t.TotalDownvotes,
+    CASE 
+        WHEN t.BountyRank <= 10 THEN 'Top 10 by Bounty'
+        WHEN t.PostRank <= 10 THEN 'Top 10 by Posts'
+        ELSE 'Other'
+    END AS RankCategory
+FROM 
+    TopUsers t
+WHERE 
+    t.TotalBounty IS NOT NULL
+    OR t.PostCount > 0
+ORDER BY 
+    t.TotalBounty DESC, t.PostCount DESC;

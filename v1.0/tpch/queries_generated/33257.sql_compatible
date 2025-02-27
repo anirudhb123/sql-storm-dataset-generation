@@ -1,0 +1,48 @@
+
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey = (SELECT r_regionkey FROM region WHERE r_name = 'EUROPE')
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F' AND o.o_orderdate >= '1997-01-01'
+),
+SupplierPerformance AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost,
+           COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM partsupp ps
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN CustomerOrders co ON ps.ps_partkey = (SELECT l.l_partkey
+                                                     FROM lineitem l
+                                                     WHERE l.l_orderkey = co.o_orderkey
+                                                     LIMIT 1)
+    LEFT JOIN customer c ON c.c_custkey = co.c_custkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+PerformanceRanking AS (
+    SELECT ps_partkey, ps_suppkey, total_supply_cost, customer_count,
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY total_supply_cost DESC) AS rank
+    FROM SupplierPerformance
+)
+SELECT nh.n_name AS nation_name, 
+       COALESCE(SUM(pp.total_supply_cost), 0) AS total_cost,
+       COUNT(DISTINCT co.o_orderkey) AS total_orders,
+       COUNT(DISTINCT c.c_custkey) AS total_customers
+FROM NationHierarchy nh
+LEFT JOIN PerformanceRanking pp ON nh.n_nationkey = pp.ps_suppkey
+LEFT JOIN CustomerOrders co ON co.o_orderkey = pp.o_orderkey
+LEFT JOIN customer c ON c.c_custkey = co.c_custkey
+WHERE pp.rank = 1 OR pp.rank IS NULL
+GROUP BY nh.n_name
+HAVING COUNT(DISTINCT co.o_orderkey) > 5
+ORDER BY total_cost DESC;

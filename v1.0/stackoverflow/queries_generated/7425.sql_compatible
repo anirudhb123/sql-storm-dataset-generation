@@ -1,0 +1,55 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Tags t
+    JOIN Posts p ON t.Id = CAST(UNNEST(string_to_array(p.Tags, ',')) AS INTEGER)
+    GROUP BY t.TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.TotalPosts,
+        us.TotalQuestions,
+        us.TotalAnswers,
+        us.TotalScore,
+        us.AvgViewCount,
+        ROW_NUMBER() OVER (ORDER BY us.TotalScore DESC) AS Rank
+    FROM UserStatistics us
+    WHERE us.TotalPosts > 50
+)
+SELECT 
+    tu.Rank,
+    tu.DisplayName AS TopUser,
+    tu.TotalPosts,
+    tu.TotalQuestions,
+    tu.TotalAnswers,
+    tu.TotalScore,
+    tu.AvgViewCount,
+    tt.TagName AS PopularTag,
+    tt.PostCount,
+    tt.TotalViews
+FROM TopUsers tu
+CROSS JOIN TopTags tt
+WHERE tu.Rank <= 10
+ORDER BY tu.Rank, tt.PostCount DESC;

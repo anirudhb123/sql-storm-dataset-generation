@@ -1,0 +1,95 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypeNames,
+        STRING_AGG(DISTINCT c.Text, '; ') AS CommentTexts
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Tags, p.CreationDate, p.ViewCount, p.Score, p.AnswerCount, p.CommentCount, p.OwnerUserId
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS HistoryDate,
+        p.Title AS PostTitle,
+        p.Score AS PostScore,
+        CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN 'Closed'
+            WHEN ph.PostHistoryTypeId = 11 THEN 'Reopened'
+            ELSE 'Edited'
+        END AS EditAction,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '6 months'
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Tags,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.CommentCount,
+    ut.DisplayName AS UserName,
+    ut.Reputation,
+    pt.TagName,
+    phd.HistoryDate,
+    phd.EditAction,
+    phd.UserDisplayName AS EditorName,
+    phd.Comment AS EditComment
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation ut ON rp.OwnerUserId = ut.UserId
+JOIN 
+    PopularTags pt ON pt.TagName = ANY(string_to_array(rp.Tags, '><'))
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE 
+    rp.PostRank = 1
+ORDER BY 
+    rp.ViewCount DESC, 
+    rp.Score DESC;

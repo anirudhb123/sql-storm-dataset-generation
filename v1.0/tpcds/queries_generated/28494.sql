@@ -1,0 +1,68 @@
+
+WITH customer_address_details AS (
+    SELECT
+        ca.ca_address_sk,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country
+    FROM
+        customer_address ca
+),
+customer_demo_details AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM
+        customer_demographics cd
+),
+sales_summary AS (
+    SELECT
+        ws.ws_bill_customer_sk AS customer_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM
+        web_sales ws
+    GROUP BY
+        ws.ws_bill_customer_sk
+),
+combined_report AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        ca.full_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ss.total_quantity,
+        ss.total_spent
+    FROM
+        customer c
+    JOIN
+        customer_address_details ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN
+        customer_demo_details cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        sales_summary ss ON c.c_customer_sk = ss.customer_sk
+)
+SELECT
+    c.c_customer_sk,
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+    ca.full_address,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    COALESCE(ss.total_quantity, 0) AS total_quantity,
+    COALESCE(ss.total_spent, 0) AS total_spent,
+    RANK() OVER (ORDER BY COALESCE(ss.total_spent, 0) DESC) AS spending_rank
+FROM
+    combined_report c
+ORDER BY
+    spending_rank
+LIMIT 100;

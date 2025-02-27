@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS RankScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate BETWEEN '2023-01-01' AND '2024-10-01 12:34:56'
+        AND p.Score IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        COALESCE(rb.BadgeCount, 0) AS UserBadgeCount,
+        rb.BadgeNames
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostComments pc ON p.Id = pc.PostId
+    LEFT JOIN 
+        UserBadges rb ON p.OwnerUserId = rb.UserId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Score,
+    pd.CommentCount,
+    pd.UserBadgeCount,
+    pd.BadgeNames,
+    CASE 
+        WHEN pd.Score > 100 THEN 'Highly Engaged'
+        WHEN pd.Score > 50 THEN 'Moderately Engaged'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel,
+    COALESCE(
+        (SELECT
+            STRING_AGG(DISTINCT t.TagName, ', ') 
+         FROM 
+            Tags t 
+         WHERE 
+            t.Id IN (SELECT CAST(UNNEST(string_to_array(pd.Tags, ',')) AS int))
+        ), 'No Tags') AS AssociatedTags
+FROM 
+    PostDetails pd
+WHERE 
+    pd.CommentCount > 10
+ORDER BY 
+    pd.Score DESC,
+    pd.Title ASC
+LIMIT 100;

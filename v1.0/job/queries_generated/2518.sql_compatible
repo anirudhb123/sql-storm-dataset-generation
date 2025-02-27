@@ -1,0 +1,51 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank,
+        COUNT(DISTINCT k.id) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        p.name AS actor_name,
+        rt.role,
+        COUNT(DISTINCT ci.id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id, p.name, rt.role
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    COALESCE(rm.production_year, 'Unknown Year') AS production_year,
+    COALESCE(ar.actor_name, 'Unknown Actor') AS actor_name,
+    COALESCE(ar.role, 'No Role Assigned') AS actor_role,
+    rm.keyword_count,
+    rm.year_rank,
+    CASE 
+        WHEN rm.year_rank = 1 THEN 'Latest Release'
+        ELSE 'Earlier Release'
+    END AS release_category
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorRoles ar ON rm.movie_id = ar.movie_id
+WHERE 
+    rm.keyword_count > 0
+ORDER BY 
+    rm.production_year DESC, rm.title ASC;

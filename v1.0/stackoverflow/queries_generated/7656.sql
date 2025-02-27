@@ -1,0 +1,75 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        Views,
+        UpVotes,
+        DownVotes,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, TotalPosts DESC) AS Rank
+    FROM 
+        UserStats
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        t.TagName,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY v.CreationDate DESC) AS VoteRank
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY (string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3, 6) -- Upvote, Downvote, Close
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Questions and Answers
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.TotalPosts,
+    tu.TotalComments,
+    pp.Title AS PopularPostTitle,
+    pp.Score AS PopularPostScore,
+    pp.ViewCount AS PopularPostViews,
+    pp.AnswerCount AS PopularPostAnswers
+FROM 
+    TopUsers tu
+JOIN 
+    PopularPosts pp ON tu.UserId = pp.PostedByUserId
+WHERE 
+    tu.Rank <= 10
+    AND pp.VoteRank = 1
+ORDER BY 
+    tu.Reputation DESC;

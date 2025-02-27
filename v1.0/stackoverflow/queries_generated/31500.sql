@@ -1,0 +1,58 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Start with Questions
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.ParentId,
+        p2.Title,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy r ON p2.ParentId = r.PostId
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName AS UserDisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    AVG(b.Class) AS AvgBadgeClass,
+    SUM(v.BountyAmount) AS TotalBounties,
+    COUNT(DISTINCT CASE WHEN r.Level = 1 THEN r.PostId END) AS DirectAnswers,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed,
+    MAX(p.CreationDate) AS LastPostDate
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON c.UserId = u.Id
+LEFT JOIN 
+    Badges b ON b.UserId = u.Id
+LEFT JOIN 
+    Votes v ON v.UserId = u.Id
+LEFT JOIN 
+    RecursivePostHierarchy r ON r.PostId = p.AcceptedAnswerId 
+LEFT JOIN 
+    UNNEST(string_to_array(p.Tags, ',')) AS t(TagName) ON TRUE
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 5 -- More than 5 posts
+    AND SUM(v.BountyAmount) > 0 -- User must have contributed to bounty
+ORDER BY 
+    TotalPosts DESC, LastPostDate DESC
+LIMIT 10;

@@ -1,0 +1,63 @@
+WITH RECURSIVE grouped_movies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.kind_id,
+        tx.name AS genre,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        kind_type kt ON a.kind_id = kt.id
+    LEFT JOIN 
+        (SELECT DISTINCT m.id, mtx.kind AS name 
+         FROM movie_companies mc
+         JOIN company_name m ON mc.company_id = m.id
+         JOIN company_type mt ON mc.company_type_id = mt.id
+         WHERE mt.kind = 'Producer') AS tx ON tx.id = a.id
+    WHERE 
+        a.production_year IS NOT NULL AND a.production_year > 2000
+),
+actor_statistics AS (
+    SELECT 
+        c.movie_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT c.role_id) AS roles_count,
+        MAX("/" || k.keyword || "/") AS favorite_genre
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN 
+        movie_keyword mk ON c.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        c.movie_id, ak.name
+)
+SELECT 
+    gm.title,
+    gm.production_year,
+    gm.genre,
+    asct.actor_name,
+    asct.roles_count,
+    ROW_NUMBER() OVER (PARTITION BY gm.production_year ORDER BY asct.roles_count DESC) AS actor_rank,
+    CASE
+        WHEN asct.roles_count IS NULL THEN 'No roles'
+        ELSE 'Active'
+    END AS status
+FROM 
+    grouped_movies gm
+LEFT JOIN 
+    actor_statistics asct ON gm.id = asct.movie_id
+WHERE 
+    gm.year_rank <= 3
+    AND (gm.genre IS NOT NULL OR gm.title LIKE '%Mystery%')
+ORDER BY 
+    gm.production_year DESC, actor_rank;

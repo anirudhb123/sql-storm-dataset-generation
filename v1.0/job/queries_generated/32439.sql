@@ -1,0 +1,51 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT mt.id, mt.title, mt.production_year, mh.level + 1
+    FROM aka_title mt
+    JOIN movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN aka_title mh ON mh.id = ml.linked_movie_id
+    WHERE mh.production_year >= 2000
+),
+RankedMovies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT co.id) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT co.id) DESC) AS rank
+    FROM aka_title m
+    LEFT JOIN movie_companies mc ON mc.movie_id = m.id
+    LEFT JOIN company_name co ON co.id = mc.company_id
+    GROUP BY m.id, m.title, m.production_year
+),
+InterestingCast AS (
+    SELECT
+        c.movie_id,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM cast_info c
+    JOIN aka_name a ON a.person_id = c.person_id
+    WHERE c.nr_order IS NOT NULL
+    GROUP BY c.movie_id
+)
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    rm.company_count,
+    ic.actors,
+    ic.actor_count,
+    COALESCE(NULLIF(it.info, ''), 'No Information') AS info
+FROM MovieHierarchy mh
+LEFT JOIN RankedMovies rm ON mh.movie_id = rm.movie_id
+LEFT JOIN InterestingCast ic ON mh.movie_id = ic.movie_id
+LEFT JOIN movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN info_type it ON it.id = mi.info_type_id
+WHERE rm.rank <= 5
+  AND (ic.actor_count >= 3 OR ic.actors IS NOT NULL)
+ORDER BY mh.production_year, rm.company_count DESC, mh.title;

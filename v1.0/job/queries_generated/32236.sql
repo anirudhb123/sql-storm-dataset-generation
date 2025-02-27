@@ -1,0 +1,46 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 0 AS level
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000
+    UNION ALL
+    SELECT mt.id, mt.title, mt.production_year, mh.level + 1
+    FROM MovieHierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE mt.production_year >= 2000
+),
+CastInfoWithRoles AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT CONCAT(an.name, ' (', rt.role, ')'), ', ') AS cast_details
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.id
+    JOIN role_type rt ON ci.role_id = rt.id
+    GROUP BY ci.movie_id
+),
+MovieInfoWithKeywords AS (
+    SELECT
+        mi.movie_id,
+        ARRAY_AGG(DISTINCT kw.keyword) AS keywords
+    FROM movie_info mi
+    JOIN movie_keyword mk ON mi.movie_id = mk.movie_id
+    JOIN keyword kw ON mk.keyword_id = kw.id
+    GROUP BY mi.movie_id
+)
+SELECT
+    mh.title,
+    mh.production_year,
+    c.cast_count,
+    c.cast_details,
+    COALESCE(k.keywords, ARRAY[]::text[]) AS keywords,
+    (SELECT COUNT(DISTINCT movie_id) FROM complete_cast cc WHERE cc.subject_id IN (
+        SELECT id FROM aka_name WHERE name LIKE 'Tom%')
+    ) AS tom_related_movies_count,
+    MAX(CASE WHEN ci.person_role_id = 1 THEN 'Lead Actor' ELSE 'Supporting Actor' END) AS role_type
+FROM MovieHierarchy mh
+LEFT JOIN CastInfoWithRoles c ON mh.movie_id = c.movie_id
+LEFT JOIN MovieInfoWithKeywords k ON mh.movie_id = k.movie_id
+LEFT JOIN complete_cast cc ON mh.movie_id = cc.movie_id
+GROUP BY mh.movie_id, mh.title, mh.production_year, c.cast_count, c.cast_details, k.keywords
+ORDER BY mh.production_year DESC, c.cast_count DESC;

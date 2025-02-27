@@ -1,0 +1,84 @@
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(P.Score, 0)) AS AverageScore
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE 
+        P.PostTypeId = 1 -- Only considering Questions
+    GROUP BY 
+        T.TagName
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS QuestionsAnswered,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        P.PostTypeId = 2 -- Only considering Answers
+    GROUP BY 
+        U.Id, U.DisplayName
+    ORDER BY 
+        TotalScore DESC
+    LIMIT 5
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerName,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags,
+        C.CommentCount,
+        COALESCE(C.Score, 0) AS Score
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Tags T ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE 
+        P.PostTypeId = 1 -- Only considering Questions
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, U.DisplayName, C.CommentCount
+)
+SELECT 
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews,
+    TS.AverageScore,
+    TU.DisplayName AS TopUser,
+    TU.QuestionsAnswered,
+    TU.TotalScore,
+    PD.Title,
+    PD.Tags,
+    PD.Score
+FROM 
+    TagStatistics TS
+LEFT JOIN 
+    TopUsers TU ON TU.QuestionsAnswered > 0 -- Join with top users who have answered questions
+LEFT JOIN 
+    PostDetails PD ON PD.Id IN (
+        SELECT 
+            P.Id 
+        FROM 
+            Posts P 
+        WHERE 
+            P.PostTypeId = 1 -- Only considering Questions
+        ORDER BY 
+            P.ViewCount DESC 
+        LIMIT 10
+    )
+ORDER BY 
+    TS.TotalViews DESC, TS.PostCount DESC, TU.TotalScore DESC;

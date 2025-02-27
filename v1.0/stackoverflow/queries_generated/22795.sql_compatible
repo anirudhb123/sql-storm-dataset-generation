@@ -1,0 +1,62 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN P.Score ELSE 0 END) AS QuestionScore,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN P.Score ELSE 0 END) AS AnswerScore,
+        AVG(COALESCE(P.ViewCount, 0)) AS AvgViewCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        BadgeCount,
+        CommentCount,
+        QuestionScore,
+        AnswerScore,
+        AvgViewCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserStats
+),
+
+RecentVotes AS (
+    SELECT 
+        V.UserId,
+        V.PostId,
+        V.VoteTypeId,
+        V.CreationDate,
+        P.Title,
+        DENSE_RANK() OVER (PARTITION BY V.UserId ORDER BY V.CreationDate DESC) AS RecentVoteRank
+    FROM Votes V
+    INNER JOIN Posts P ON V.PostId = P.Id
+    WHERE V.CreationDate >= CURRENT_DATE - INTERVAL '1 month'
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.BadgeCount,
+    U.CommentCount,
+    U.QuestionScore,
+    U.AnswerScore,
+    U.AvgViewCount,
+    R.ReputationRank,
+    COALESCE(AVG(RV.VoteTypeId), 0) AS AvgVoteType,
+    STRING_AGG(RV.Title, ', ') AS RecentVotedPosts,
+    COUNT(CASE WHEN RV.RecentVoteRank = 1 THEN 1 END) AS MostRecentVoteCount
+FROM RankedUsers U
+LEFT JOIN RecentVotes RV ON U.UserId = RV.UserId
+GROUP BY U.DisplayName, U.Reputation, U.BadgeCount, U.CommentCount, U.QuestionScore, U.AnswerScore, U.AvgViewCount, R.ReputationRank
+ORDER BY U.Reputation DESC
+LIMIT 10 OFFSET 0;

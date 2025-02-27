@@ -1,0 +1,84 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(day, -30, '2024-10-01')
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId, p.ClosedDate, p.PostTypeId
+), 
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation > 1000 THEN 'High Reputation'
+            WHEN u.Reputation >= 500 THEN 'Medium Reputation'
+            ELSE 'Low Reputation'
+        END AS ReputationLevel
+    FROM 
+        Users u
+    WHERE 
+        u.LastAccessDate >= DATEADD(year, -1, '2024-10-01')
+),
+
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryDate,
+        PHT.Name AS HistoryType,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    WHERE 
+        ph.CreationDate >= DATEADD(month, -6, '2024-10-01')
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.PostStatus,
+    ur.Reputation,
+    ur.ReputationLevel,
+    COALESCE(phd.HistoryType, 'No History') AS HistoryType,
+    COALESCE(phd.HistoryDate, 'N/A') AS LastHistoryDate
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+LEFT JOIN 
+    PostHistoryData phd ON rp.PostId = phd.PostId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC,  
+    rp.CreationDate DESC;

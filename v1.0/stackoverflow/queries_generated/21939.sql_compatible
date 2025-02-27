@@ -1,0 +1,95 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        COALESCE(
+            (SELECT COUNT(*) 
+             FROM Comments c 
+             WHERE c.PostId = p.Id AND c.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '1 year'),
+            0
+        ) AS RecentCommentCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '365 days'
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT ph.Id) AS HistoryCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        PostHistory ph ON u.Id = ph.UserId
+    GROUP BY 
+        u.Id
+),
+SignificantChanges AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.PostHistoryTypeId
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '1 month'
+        AND ph.PostHistoryTypeId IN (10, 11, 12, 19)  
+),
+TopActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        ua.TotalBounty,
+        ua.BadgeCount
+    FROM 
+        Users u
+    INNER JOIN 
+        UserActivity ua ON u.Id = ua.UserId
+    ORDER BY 
+        u.Reputation DESC
+    LIMIT 10
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Score,
+    r.RecentCommentCount,
+    tu.DisplayName AS TopUser,
+    tu.TotalBounty,
+    tu.BadgeCount,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ')
+     FROM Tags t
+     JOIN Posts p ON t.Id = ANY (string_to_array(p.Tags, ', '))
+     WHERE p.Id = r.PostId) AS PostTags,
+    (SELECT COUNT(*)
+     FROM SignificantChanges sc
+     WHERE sc.PostId = r.PostId) AS ChangeCount,
+    CASE 
+        WHEN r.RankByScore <= 3 THEN 'Top Post'
+        WHEN r.RecentCommentCount > 5 THEN 'Engaged Post'
+        ELSE 'Standard Post'
+    END AS PostClassification
+FROM 
+    RankedPosts r
+LEFT JOIN 
+    TopActiveUsers tu ON r.Score > 50  
+WHERE 
+    r.RankByScore <= 10
+    AND r.Score IS NOT NULL
+    AND r.Title IS NOT NULL
+    AND (r.Score BETWEEN 10 AND 100 OR r.RecentCommentCount > 2)  
+ORDER BY 
+    r.Score DESC, 
+    r.Title ASC;

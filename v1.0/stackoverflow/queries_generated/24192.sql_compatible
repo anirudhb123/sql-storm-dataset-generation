@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(CASE WHEN u.Reputation > 1000 THEN 1 ELSE 0 END) AS HighRepUsers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(ph.Comment, '; ') AS EditComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId, ph.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    us.DisplayName AS OwnerName,
+    us.TotalBadges,
+    phs.EditCount,
+    phs.LastEditDate,
+    phs.EditComments,
+    (rp.UpVotes - rp.DownVotes) AS NetScore,
+    CASE 
+        WHEN (rp.UpVotes + rp.DownVotes > 0) THEN (100.0 * rp.UpVotes / NULLIF(rp.UpVotes + rp.DownVotes, 0))
+        ELSE 0 
+    END AS UpvotePercentage,
+    CASE 
+        WHEN phs.LastEditDate IS NOT NULL THEN 'Edited'
+        ELSE 'Unedited'
+    END AS EditStatus,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 FROM PostLinks pl
+            WHERE pl.PostId = rp.PostId AND pl.LinkTypeId = 3
+        ) THEN 'Duplicate Post'
+        ELSE 'Original Post'
+    END AS PostLinkStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    Users us ON rp.OwnerUserId = us.Id
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+WHERE 
+    us.TotalBadges > 0 OR phs.EditCount > 0 
+ORDER BY 
+    NetScore DESC, UpvotePercentage DESC
+LIMIT 50;

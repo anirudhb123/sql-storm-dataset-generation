@@ -1,0 +1,82 @@
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM
+        aka_title t
+    WHERE
+        t.kind_id IN (
+            SELECT id FROM kind_type WHERE kind LIKE 'feature%'
+        )
+),
+ActorInfo AS (
+    SELECT
+        a.name,
+        ci.movie_id,
+        COUNT(successful_cast.person_id) AS successful_appearances,
+        AVG(mr.production_year) AS avg_year_of_movies
+    FROM 
+        aka_name a
+        JOIN cast_info ci ON a.person_id = ci.person_id
+        LEFT JOIN RankedMovies mr ON ci.movie_id = mr.movie_id
+        LEFT JOIN (
+            SELECT
+                person_id,
+                movie_id
+            FROM
+                cast_info
+            WHERE
+                role_id IN (SELECT id FROM role_type WHERE role LIKE '%lead%')
+        ) AS successful_cast ON ci.movie_id = successful_cast.movie_id 
+    WHERE
+        a.name IS NOT NULL
+        AND a.name NOT LIKE '%[0-9]%' -- Exclude names with numbers
+    GROUP BY
+        a.name, ci.movie_id
+),
+TopActors AS (
+    SELECT
+        name,
+        SUM(successful_appearances) AS total_successful,
+        COUNT(movie_id) AS total_movies,
+        DENSE_RANK() OVER (ORDER BY SUM(successful_appearances) DESC) AS actor_rank
+    FROM
+        ActorInfo
+    GROUP BY
+        name
+    HAVING
+        COUNT(movie_id) > 0
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        mk.keyword,
+        t.id AS movie_id,
+        COUNT(mk.id) AS total_keywords
+    FROM
+        aka_title t
+        LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    WHERE
+        t.production_year IS NOT NULL
+        AND t.production_year < (SELECT EXTRACT(YEAR FROM CURRENT_DATE)) -- Exclude current year
+    GROUP BY
+        t.id, t.title, t.production_year
+)
+SELECT 
+    ta.name AS Actor,
+    ta.total_successful AS SuccessfulAppearances,
+    ta.total_movies AS TotalMovies,
+    md.title AS MovieTitle,
+    md.production_year AS ProductionYear,
+    md.total_keywords AS TotalKeywords
+FROM 
+    TopActors ta
+LEFT JOIN 
+    MovieDetails md ON ta.actor_rank <= 10 AND md.production_year IS NOT NULL
+ORDER BY 
+    ta.total_successful DESC, 
+    md.total_keywords DESC NULLS LAST;
+

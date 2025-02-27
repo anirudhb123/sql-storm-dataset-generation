@@ -1,0 +1,57 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 0 AS Level
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.Level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.Level < 5
+),
+
+AverageSupplierCost AS (
+    SELECT n.n_name, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_name
+),
+
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+    FROM part p
+    WHERE p.p_retailprice BETWEEN 10.00 AND 100.00
+),
+
+RankedParts AS (
+    SELECT lp.l_partkey, SUM(lp.l_quantity) AS total_quantity,
+           RANK() OVER (ORDER BY SUM(lp.l_quantity) DESC) AS part_rank
+    FROM lineitem lp
+    GROUP BY lp.l_partkey
+)
+SELECT DISTINCT 
+    oh.o_orderkey,
+    p.p_name,
+    p.p_brand,
+    s.s_name AS supplier_name,
+    n.n_name AS nation_name,
+    rp.total_quantity,
+    ASC.avg_supplycost,
+    CASE 
+        WHEN rp.part_rank <= 10 THEN 'Top 10'
+        ELSE 'Others'
+    END AS part_rank_group
+FROM OrderHierarchy oh
+JOIN lineitem li ON li.l_orderkey = oh.o_orderkey
+JOIN RankedParts rp ON li.l_partkey = rp.l_partkey
+JOIN FilteredParts p ON li.l_partkey = p.p_partkey
+LEFT JOIN supplier s ON li.l_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN AverageSupplierCost ASC ON n.n_name = ASC.n_name
+WHERE li.l_discount > 0.1
+AND li.l_shipdate IS NOT NULL
+ORDER BY oh.o_orderkey, rp.total_quantity DESC
+LIMIT 50;

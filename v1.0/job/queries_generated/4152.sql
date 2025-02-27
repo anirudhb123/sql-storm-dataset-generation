@@ -1,0 +1,61 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        AVG(ci.nr_order) AS avg_order,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        DENSE_RANK() OVER (PARTITION BY t.production_year ORDER BY AVG(ci.nr_order) DESC) AS year_rank
+    FROM 
+        title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    GROUP BY 
+        t.title, t.production_year
+),
+actor_details AS (
+    SELECT 
+        ak.name AS actor_name, 
+        t.title AS movie_title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ak.name) AS actor_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+),
+movies_with_keywords AS (
+    SELECT 
+        t.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id
+)
+SELECT 
+    rv.title AS movie_title,
+    rv.production_year,
+    rv.avg_order,
+    COALESCE(ad.actor_name, 'Unknown Actor') AS actor_name,
+    mv.keywords
+FROM 
+    ranked_movies rv
+LEFT JOIN 
+    actor_details ad ON rv.title = ad.movie_title AND rv.production_year = ad.production_year
+LEFT JOIN 
+    movies_with_keywords mv ON rv.title = mv.movie_id
+WHERE 
+    rv.avg_order > 2 
+    AND rv.total_cast > 5
+    AND rv.year_rank <= 5
+ORDER BY 
+    rv.production_year DESC, rv.avg_order DESC, ad.actor_rank ASC
+LIMIT 20;

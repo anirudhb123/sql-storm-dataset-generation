@@ -1,0 +1,93 @@
+WITH RecursivePostHistory AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS HistoryDate,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS VersionNumber
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+),
+PopularTags AS (
+    
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 5  
+),
+UserReputation AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(b.Date IS NOT NULL), 0) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentContributors AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS RecentPostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(p.Id) > 2
+)
+
+SELECT 
+    ph.PostId,
+    ph.Title,
+    r.UserId AS ContributorId,
+    r.DisplayName AS Contributor,
+    up.TotalBounties,
+    up.TotalViews,
+    up.TotalBadges,
+    pt.TagName,
+    pt.PostCount,
+    CASE 
+        WHEN ph.VersionNumber > 1 THEN 'Edited' 
+        ELSE 'Original' 
+    END AS PostStatus,
+    ph.HistoryDate
+FROM 
+    RecursivePostHistory ph
+JOIN 
+    RecentContributors r ON ph.UserId = r.UserId
+JOIN 
+    UserReputation up ON r.UserId = up.UserId
+LEFT JOIN 
+    PopularTags pt ON pt.PostCount > 5
+WHERE 
+    ph.PostHistoryTypeId IN (4, 5, 10) 
+ORDER BY 
+    ph.HistoryDate DESC, up.TotalViews DESC
+LIMIT 100;

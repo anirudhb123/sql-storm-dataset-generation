@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        CASE 
+            WHEN p.PostTypeId = 1 THEN (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) 
+            ELSE (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) 
+        END AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore,
+        COUNT(b.Id) AS BadgeCount,
+        COUNT(DISTINCT CASE 
+            WHEN post.PostTypeId = 1 THEN post.Id END) AS QuestionCount,
+        COUNT(DISTINCT CASE 
+            WHEN post.PostTypeId = 2 THEN post.Id END) AS AnswerCount
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts post ON u.Id = post.OwnerUserId AND post.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+HighEngagementUsers AS (
+    SELECT 
+        ue.UserId,
+        ue.DisplayName,
+        ue.TotalCommentScore,
+        ue.BadgeCount,
+        ue.QuestionCount,
+        ue.AnswerCount,
+        RANK() OVER (ORDER BY ue.TotalCommentScore + ue.BadgeCount + ue.QuestionCount + ue.AnswerCount DESC) AS EngagementRank
+    FROM 
+        UserEngagement ue
+    WHERE 
+        ue.TotalCommentScore > 0 OR ue.BadgeCount > 0
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.VoteCount,
+    ue.DisplayName,
+    ue.TotalCommentScore,
+    ue.BadgeCount,
+    ue.QuestionCount,
+    ue.AnswerCount
+FROM 
+    RankedPosts rp
+JOIN 
+    HighEngagementUsers ue ON rp.PostId = (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ue.UserId ORDER BY p.Score DESC LIMIT 1)
+WHERE 
+    rp.PostRank <= 10
+ORDER BY 
+    rp.Score DESC, ue.TotalCommentScore DESC;

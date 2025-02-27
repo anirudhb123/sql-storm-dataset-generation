@@ -1,0 +1,60 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+), 
+SalesInfo AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        w.w_warehouse_name,
+        d.d_date AS sale_date
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+), 
+AggregatedSales AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.full_name,
+        SUM(si.ws_sales_price * si.ws_quantity) AS total_spent,
+        COUNT(si.ws_order_number) AS total_orders,
+        AVG(si.ws_sales_price) AS avg_order_value
+    FROM 
+        CustomerInfo ci
+    JOIN 
+        SalesInfo si ON ci.c_customer_id = si.ws_bill_customer_sk
+    GROUP BY 
+        ci.c_customer_id, ci.full_name
+)
+SELECT 
+    a.full_name,
+    a.total_spent,
+    a.total_orders,
+    a.avg_order_value,
+    a.total_orders * a.avg_order_value AS estimated_future_spending
+FROM 
+    AggregatedSales a
+WHERE 
+    a.total_spent > (SELECT AVG(total_spent) FROM AggregatedSales)
+ORDER BY 
+    a.total_spent DESC
+LIMIT 10;

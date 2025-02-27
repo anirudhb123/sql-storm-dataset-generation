@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        p.OwnerUserId,
+        COALESCE(u.Reputation, 0) AS UserReputation,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.OwnerUserId, u.Reputation
+),
+PostHistoryCTE AS (
+    SELECT 
+        ph.PostId,
+        pht.Name AS HistoryTypeName,
+        ph.CreationDate AS HistoryCreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate > DATEADD(day, -30, GETDATE()) 
+    ORDER BY 
+        ph.PostId, HistoryCreationDate DESC
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        p.Title AS ClosedPostTitle,
+        (
+            SELECT COUNT(*)
+            FROM PostHistory ph
+            WHERE ph.PostId = p.Id AND ph.PostHistoryTypeId = 10  
+        ) AS CloseCount
+    FROM 
+        Posts p
+    WHERE 
+        EXISTS (
+            SELECT 1 
+            FROM PostHistory ph 
+            WHERE ph.PostId = p.Id AND ph.PostHistoryTypeId = 10
+        )
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.UserReputation,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    CASE 
+        WHEN cp.ClosedPostId IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS IsClosedPost,
+    COUNT(ph.PostId) AS TotalHistoryCount,
+    STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.ClosedPostId
+LEFT JOIN 
+    PostHistoryCTE ph ON rp.Id = ph.PostId
+GROUP BY 
+    rp.Id, rp.Title, rp.CreationDate, rp.ViewCount, rp.UserReputation, rp.CommentCount, rp.UpVotes, rp.DownVotes, cp.ClosedPostId
+HAVING 
+    rp.Rank = 1  
+ORDER BY 
+    rp.ViewCount DESC NULLS LAST, 
+    rp.CreationDate DESC;

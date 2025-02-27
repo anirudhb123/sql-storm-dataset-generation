@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) AS ViewRank,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Questions and Answers
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title,
+        rp.ViewCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.ViewRank,
+        rp.RecentRank,
+        COALESCE(ph.UserId, -1) AS LastEditorId,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistory ph ON rp.PostId = ph.PostId AND ph.PostHistoryTypeId IN (4, 5) -- Edit Title and Edit Body
+    WHERE 
+        rp.ViewRank <= 100 -- Top 100 viewed posts
+    GROUP BY 
+        rp.PostId, rp.Title, rp.ViewCount, rp.UpVotes, rp.DownVotes, rp.ViewRank, rp.RecentRank, ph.UserId
+)
+SELECT 
+    trp.PostId,
+    trp.Title,
+    trp.ViewCount,
+    trp.UpVotes,
+    trp.DownVotes,
+    trp.LastEditorId,
+    trp.LastEditDate,
+    t.TagName
+FROM 
+    TopRankedPosts trp
+LEFT JOIN 
+    PostTags pt ON trp.PostId = pt.PostId
+LEFT JOIN 
+    Tags t ON pt.TagId = t.Id
+ORDER BY 
+    trp.ViewCount DESC, trp.LastEditDate DESC;

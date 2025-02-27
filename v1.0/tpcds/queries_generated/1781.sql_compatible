@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_quantity,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+),
+PopularItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        SUM(r.ws_quantity) AS total_quantity,
+        SUM(r.ws_net_profit) AS total_profit
+    FROM 
+        RankedSales r
+    JOIN 
+        item i ON r.ws_item_sk = i.i_item_sk
+    WHERE 
+        r.sales_rank <= 5
+    GROUP BY 
+        i.i_item_id, i.i_item_desc
+),
+ReturnsAnalysis AS (
+    SELECT 
+        wr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(wr_return_amt) AS total_returned_amt,
+        AVG(wr_return_quantity) AS avg_return_qty
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_item_sk
+)
+SELECT 
+    p.i_item_id,
+    p.i_item_desc,
+    p.total_quantity,
+    p.total_profit,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    COALESCE(r.total_returned_amt, 0) AS total_returned_amt,
+    COALESCE(r.avg_return_qty, 0) AS avg_return_qty,
+    (p.total_profit - COALESCE(r.total_returned_amt, 0)) AS net_profit_after_returns
+FROM 
+    PopularItems p
+LEFT JOIN 
+    ReturnsAnalysis r ON p.i_item_id = r.wr_item_sk
+ORDER BY 
+    net_profit_after_returns DESC
+FETCH FIRST 10 ROWS ONLY;

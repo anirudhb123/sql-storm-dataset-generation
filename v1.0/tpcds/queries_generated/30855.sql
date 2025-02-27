@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_sales_price,
+        ws_quantity,
+        ws_ext_sales_price,
+        1 AS depth
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+    
+    UNION ALL
+    
+    SELECT 
+        cs_item_sk, 
+        cs_order_number, 
+        cs_sales_price,
+        cs_quantity,
+        cs_ext_sales_price,
+        depth + 1
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_item_sk IN (SELECT ws_item_sk FROM sales_cte)
+)
+SELECT
+    SUM(CASE WHEN depth = 1 THEN ws_ext_sales_price ELSE cs_ext_sales_price END) AS total_sales,
+    COUNT(DISTINCT CASE WHEN depth = 1 THEN ws_order_number ELSE cs_order_number END) AS total_orders,
+    AVG(ws_sales_price) AS avg_web_sales_price,
+    AVG(cs_sales_price) AS avg_catalog_sales_price,
+    COUNT(DISTINCT CASE WHEN ws_item_sk IS NOT NULL THEN ws_item_sk END) AS unique_web_items,
+    COUNT(DISTINCT CASE WHEN cs_item_sk IS NOT NULL THEN cs_item_sk END) AS unique_catalog_items,
+    (SELECT COUNT(*) FROM customer WHERE c_preferred_cust_flag = 'Y') AS preferred_customers,
+    (SELECT SUM(cd_dep_count) FROM customer_demographics) AS total_dependents,
+    CAST(COALESCE(ROUND(AVG(CASE WHEN wd_income_band_sk IS NOT NULL THEN wd_income_band_sk ELSE NULL END), 2), 0) AS DECIMAL(10, 2)) AS avg_income_band
+FROM 
+    sales_cte
+LEFT JOIN 
+    item ON item.i_item_sk = ws_item_sk OR item.i_item_sk = cs_item_sk
+LEFT JOIN 
+    household_demographics h ON h.hd_demo_sk = item.i_brand_id
+LEFT JOIN 
+    income_band ib ON h.hd_income_band_sk = ib.ib_income_band_sk
+LEFT JOIN 
+    (SELECT 
+        w_warehouse_sk, 
+        SUM(inv_quantity_on_hand) AS total_inventory 
+     FROM 
+        inventory 
+     GROUP BY 
+        w_warehouse_sk) AS inv ON inv.w_warehouse_sk = item.i_wholesale_cost
+WHERE 
+    (ws_sales_price IS NOT NULL OR cs_sales_price IS NOT NULL)
+    AND (ws_sales_price > 0 OR cs_sales_price > 0)
+GROUP BY 
+    depth
+ORDER BY 
+    total_sales DESC;

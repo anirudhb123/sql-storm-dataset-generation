@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id, 
+        P.Title, 
+        P.PostTypeId, 
+        P.Score,
+        P.ViewCount,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankScore,
+        DENSE_RANK() OVER (ORDER BY P.CreationDate DESC) AS RankByDate
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TagsCTE AS (
+    SELECT
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE 
+        T.IsModeratorOnly = 0
+    GROUP BY 
+        T.Id, T.TagName
+    HAVING 
+        COUNT(P.Id) > 10
+),
+UserPosts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS UserPostCount,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+    HAVING 
+        COUNT(P.Id) > 5 AND SUM(V.BountyAmount) > 0
+)
+SELECT 
+    R.Id AS PostId,
+    R.Title,
+    R.Score,
+    R.ViewCount,
+    T.TagName,
+    U.UserDisplayName,
+    U.UserPostCount,
+    U.TotalBounty,
+    CASE 
+        WHEN R.RankScore <= 5 THEN 'Top'
+        WHEN R.RankByDate <= 10 THEN 'Recent'
+        ELSE 'Regular' 
+    END AS PostClassification
+FROM 
+    RankedPosts R
+JOIN 
+    TagsCTE T ON R.Title LIKE '%' || T.TagName || '%'
+JOIN 
+    UserPosts U ON R.Id IN (SELECT PostId FROM Votes V WHERE V.UserId = U.UserId)
+WHERE 
+    R.PostTypeId = 1 
+    AND R.Score IS NOT NULL
+ORDER BY 
+    R.Score DESC, R.ViewCount DESC;

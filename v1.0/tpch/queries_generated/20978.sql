@@ -1,0 +1,50 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn,
+        SUM(ps.ps_supplycost * ps.ps_availqty) OVER (PARTITION BY p.p_partkey) AS total_cost,
+        COUNT(DISTINCT s.s_suppkey) OVER (PARTITION BY p.p_partkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+), FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        LAG(o.o_totalprice) OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate) AS prev_order_price,
+        CASE 
+            WHEN o.o_orderstatus = 'F' THEN 'Completed'
+            ELSE 'Incomplete'
+        END AS order_status_desc
+    FROM orders o 
+    WHERE o.o_orderdate >= (SELECT MIN(l_shipdate) FROM lineitem) 
+      AND o.o_orderstatus IN ('O', 'F')
+), HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN FilteredOrders fo ON c.c_custkey = fo.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 100000
+) 
+SELECT 
+    rp.p_name,
+    rp.p_brand,
+    rp.total_cost,
+    hvc.total_spent,
+    CASE 
+        WHEN rp.supplier_count > 5 THEN 'High Supplier Diversity'
+        ELSE 'Low Supplier Diversity'
+    END AS supplier_diversity,
+    hvc.c_name AS top_customer
+FROM RankedParts rp
+LEFT JOIN HighValueCustomers hvc ON rp.p_partkey = hvc.c_custkey
+WHERE rp.rn = 1
+AND rp.total_cost IS NOT NULL
+ORDER BY rp.total_cost DESC, hvc.total_spent ASC
+LIMIT 10;

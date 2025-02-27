@@ -1,0 +1,48 @@
+WITH RECURSIVE RecursiveSales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER(PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+    GROUP BY 
+        c.c_custkey
+), RankedNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        ROW_NUMBER() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS nation_rank
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.n_name AS nation_name,
+    r.total_supply_cost,
+    rs.c_custkey AS customer_key,
+    rs.total_sales,
+    CASE 
+        WHEN rs.sales_rank <= 10 THEN 'Top Customer'
+        ELSE 'Regular Customer' 
+    END AS customer_status,
+    COALESCE(NULLIF(r.total_supply_cost, 0), 1) AS adjusted_supply_cost
+FROM 
+    RankedNations r
+FULL OUTER JOIN 
+    RecursiveSales rs ON r.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = rs.cust_nation_name LIMIT 1)
+WHERE 
+    r.total_supply_cost > 1000 OR rs.total_sales > 5000
+ORDER BY 
+    r.total_supply_cost DESC, rs.total_sales DESC;

@@ -1,0 +1,45 @@
+
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, cte.level + 1
+    FROM supplier s
+    JOIN SupplierCTE cte ON s.s_nationkey = cte.s_nationkey
+    WHERE s.s_acctbal > cte.s_acctbal
+),
+PartOrders AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+    GROUP BY p.p_partkey, p.p_name
+),
+RankedParts AS (
+    SELECT p.*, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.total_sales DESC) AS rank
+    FROM PartOrders p
+),
+CustomerSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, n.n_nationkey
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY c.c_custkey, c.c_name, n.n_nationkey
+)
+
+SELECT r.r_name, 
+       COUNT(DISTINCT CASE WHEN c.total_spent IS NULL THEN c.c_custkey END) AS inactive_customers,
+       SUM(CASE WHEN rp.rank <= 5 THEN rp.total_sales ELSE 0 END) AS top_sales_by_region,
+       AVG(s.s_acctbal) AS avg_supplier_acctbal
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN CustomerSummary c ON s.s_nationkey = c.n_nationkey
+LEFT JOIN RankedParts rp ON s.s_suppkey = rp.p_partkey
+WHERE s.s_acctbal IS NOT NULL AND
+      (rp.total_sales IS NOT NULL OR c.total_spent IS NOT NULL)
+GROUP BY r.r_name
+ORDER BY r.r_name;

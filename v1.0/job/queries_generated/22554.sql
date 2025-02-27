@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_in_year
+    FROM
+        aka_title AS t
+    LEFT JOIN
+        cast_info AS c ON t.id = c.movie_id
+    WHERE
+        t.production_year IS NOT NULL
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+FilteredRankedMovies AS (
+    SELECT
+        rm.title,
+        rm.production_year,
+        rm.actor_count
+    FROM
+        RankedMovies AS rm
+    WHERE
+        rm.rank_in_year <= 5
+)
+SELECT
+    f.title,
+    f.production_year,
+    f.actor_count,
+    coalesce(mci.note, 'No Information') AS company_info,
+    n.name AS lead_actor,
+    CASE
+        WHEN d.country_code IS NOT NULL THEN d.country_code
+        ELSE 'International'
+    END AS movie_country,
+    ARRAY_AGG(DISTINCT k.keyword) FILTER (WHERE k.keyword IS NOT NULL) AS keywords
+FROM
+    FilteredRankedMovies AS f
+LEFT JOIN
+    movie_companies AS mc ON mc.movie_id IN (SELECT id FROM aka_title WHERE title = f.title AND production_year = f.production_year)
+LEFT JOIN
+    company_name AS d ON mc.company_id = d.id
+LEFT JOIN
+    cast_info AS ci ON f.title = (SELECT title FROM aka_title WHERE id = ci.movie_id)
+LEFT JOIN
+    aka_name AS n ON ci.person_id = n.person_id
+LEFT JOIN
+    movie_keyword AS mk ON mk.movie_id = (SELECT id FROM aka_title WHERE title = f.title AND production_year = f.production_year)
+LEFT JOIN
+    keyword AS k ON mk.keyword_id = k.id
+LEFT JOIN
+    movie_info AS mi ON f.production_year = mi.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Genre')
+WHERE
+    f.actor_count > 0
+GROUP BY
+    f.title, f.production_year, f.actor_count, mci.note, n.name, d.country_code
+ORDER BY
+    f.production_year DESC, f.actor_count DESC
+LIMIT 10;

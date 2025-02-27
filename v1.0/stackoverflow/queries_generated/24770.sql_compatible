@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS RecentPostsRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.RankScore,
+        rp.RecentPostsRank,
+        rp.CommentCount,
+        COALESCE(b.UserId, -1) AS BadgeUserId,
+        b.Name AS BadgeName
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Badges b ON rp.PostId = b.UserId AND b.Class = 1  
+    WHERE 
+        rp.RankScore <= 10  
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Score,
+    fp.ViewCount,
+    fp.CommentCount,
+    fp.BadgeName,
+    NULLIF(fp.CommentCount, 0) AS NoCommentsFlag,
+    CASE 
+        WHEN fp.BadgeName IS NOT NULL THEN 'Gold Badge Awarded'
+        ELSE 'No Gold Badge'
+    END AS BadgeStatus,
+    (SELECT STRING_AGG(DISTINCT TAG, ', ') 
+     FROM (SELECT TRIM(value) AS TAG 
+           FROM STRING_SPLIT(p.Tags, ',')) AS TagsTable
+     WHERE TAG IS NOT NULL) AS TagList
+FROM 
+    FilteredPosts fp
+INNER JOIN 
+    Posts p ON fp.PostId = p.Id
+WHERE 
+    fp.RankScore IS NOT NULL
+    AND fp.CommentCount IS NOT NULL
+    AND (fp.BadgeUserId IS NULL OR EXISTS (SELECT 1 FROM Users u WHERE u.Id = fp.BadgeUserId AND u.Reputation > 100))
+ORDER BY 
+    fp.Score DESC, fp.ViewCount DESC, fp.RecentPostsRank ASC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

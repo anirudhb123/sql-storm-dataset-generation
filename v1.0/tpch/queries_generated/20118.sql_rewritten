@@ -1,0 +1,97 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+), 
+HighValueParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice,
+        COUNT(ps.ps_suppkey) AS SupplierCount
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+        OR p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice < 50)
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+    HAVING 
+        COUNT(ps.ps_suppkey) > 3
+), 
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS TotalSpent,
+        COUNT(o.o_orderkey) AS OrderCount
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey
+), 
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name, 
+        COS(PI() * (c.c_custkey + R.NR)) AS CustomerImpact
+    FROM 
+        customer c
+    CROSS JOIN (
+        SELECT 
+            ROW_NUMBER() OVER () AS NR 
+        FROM 
+            generate_series(1, 100) 
+    ) R
+), 
+OrderFilteredByDate AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS PriceRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN '1994-01-01' AND '1996-12-31'
+)
+
+SELECT 
+    S.s_name AS SupplierName,
+    P.p_name AS PartName,
+    C.c_name AS CustomerName,
+    C.TotalSpent,
+    A.o_orderkey,
+    A.o_orderdate,
+    A.PriceRank
+FROM 
+    RankedSuppliers S
+JOIN 
+    HighValueParts P ON EXISTS (
+        SELECT 1 FROM partsupp ps 
+        WHERE ps.ps_partkey = P.p_partkey AND ps.ps_suppkey = S.s_suppkey
+    )
+LEFT JOIN 
+    CustomerOrderSummary C ON C.c_custkey = S.s_suppkey 
+LEFT JOIN 
+    OrderFilteredByDate A ON A.o_orderkey = C.OrderCount
+WHERE 
+    S.SupplierRank <= 5 
+    AND (C.TotalSpent IS NOT NULL AND C.TotalSpent > 1000)
+    AND P.SupplierCount > 3
+ORDER BY 
+    C.TotalSpent DESC, 
+    P.p_retailprice ASC;

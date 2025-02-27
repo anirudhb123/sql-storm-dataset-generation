@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        mh.level < 5 -- limit level to avoid infinite recursion
+)
+
+SELECT 
+    coalesce(cast_info.roles, 'Unknown Role') AS role,
+    COUNT(DISTINCT ci.person_id) AS total_cast_members,
+    COUNT(DISTINCT mh.movie_id) AS total_linked_movies,
+    STRING_AGG(DISTINCT CONCAT(a.name, ' (', a.name_pcode_nf, ')'), ', ') AS actor_names,
+    AVG(CASE 
+        WHEN NULLIF(m.production_year, 0) IS NOT NULL THEN m.production_year 
+        ELSE 1900 END) AS avg_production_year,
+    SUM(CASE 
+        WHEN COALESCE(mt.note, '') LIKE '%#%' THEN 1 
+        ELSE 0 END) AS bizarre_notes_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    aka_title m ON mh.movie_id = m.id
+LEFT JOIN 
+    (SELECT DISTINCT 
+        role_id,
+        STRING_AGG(role, ', ') AS roles 
+     FROM 
+        role_type 
+     GROUP BY 
+        role_id) cast_info ON ci.role_id = cast_info.role_id
+WHERE 
+    mh.production_year >= 2000
+GROUP BY 
+    cast_info.roles
+ORDER BY 
+    total_cast_members DESC,
+    avg_production_year ASC
+LIMIT 10 OFFSET 5; -- skip top 5 results for varied testing
+
+This SQL query explores a hierarchical relationship of movies linked by their associations, including various intricate components like outer joins, common table expressions (CTEs), string aggregation, and NULL handling to present an elaborate snapshot of movie casting data filtered by production years. It incorporates bizarre note counting and handles edge cases like NULLs and string operations, presenting a comprehensive performance benchmarking scenario.

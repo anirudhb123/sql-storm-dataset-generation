@@ -1,0 +1,51 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'GERMANY')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON ps.ps_suppkey = sh.s_suppkey
+    JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+    WHERE sh.level < 3
+),
+agg_part AS (
+    SELECT p.p_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+)
+SELECT 
+    c.c_name,
+    n.n_name AS nation,
+    COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS num_orders,
+    COUNT(DISTINCT li.l_orderkey) AS num_lineitems,
+    (SELECT MAX(total_supplycost) FROM agg_part) AS max_supplycost,
+    EXISTS (SELECT 1 FROM supplier_hierarchy sh WHERE sh.s_nationkey = c.c_nationkey) AS is_in_hierarchy
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE li.l_returnflag = 'R'
+AND n.n_comment IS NOT NULL
+GROUP BY c.c_name, n.n_name
+HAVING COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) > (SELECT AVG(total_revenue) FROM (
+                            SELECT COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) AS total_revenue
+                            FROM customer c2
+                            JOIN orders o2 ON c2.c_custkey = o2.o_custkey
+                            JOIN lineitem li ON o2.o_orderkey = li.l_orderkey
+                            GROUP BY c2.c_name
+                          ) AS temp)
+ORDER BY total_revenue DESC, c.c_name ASC
+LIMIT 10;

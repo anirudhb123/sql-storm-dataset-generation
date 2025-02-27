@@ -1,0 +1,76 @@
+WITH UserBadgeStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AvgViewCount,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+CombinedStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+        COALESCE(UB.GoldCount, 0) AS GoldCount,
+        COALESCE(UB.SilverCount, 0) AS SilverCount,
+        COALESCE(UB.BronzeCount, 0) AS BronzeCount,
+        COALESCE(PS.PostCount, 0) AS PostCount,
+        COALESCE(PS.TotalScore, 0) AS TotalScore,
+        COALESCE(PS.AvgViewCount, 0) AS AvgViewCount,
+        COALESCE(PS.LastPostDate, '1970-01-01') AS LastPostDate
+    FROM Users U
+    LEFT JOIN UserBadgeStats UB ON U.Id = UB.UserId
+    LEFT JOIN PostStatistics PS ON U.Id = PS.OwnerUserId
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        BadgeCount,
+        PostCount,
+        TotalScore,
+        AvgViewCount,
+        LastPostDate,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC, BadgeCount DESC, Reputation DESC) AS Rank
+    FROM CombinedStats
+)
+SELECT 
+    R.Rank,
+    R.DisplayName,
+    CASE 
+        WHEN R.BadgeCount = 0 THEN 'No Badges'
+        WHEN R.GoldCount > 0 THEN 'Gold Badge Holder'
+        ELSE 'Bronze/Silver Badge Holder'
+    END AS BadgeStatus,
+    R.PostCount,
+    R.TotalScore,
+    R.AvgViewCount,
+    COALESCE(DATEDIFF(day, R.LastPostDate, NOW()), -1) AS DaysSinceLastPost,
+    CASE 
+        WHEN DATEDIFF(day, R.LastPostDate, NOW()) > 365 THEN 'Inactive'
+        ELSE 'Active'
+    END AS ActivityLevel
+FROM RankedUsers R
+WHERE R.PostCount > 10
+AND (R.BadgeCount > 0 OR R.PostCount > 5)
+ORDER BY R.Rank
+LIMIT 100;
+
+-- This query amalgamates user statistics from different tables, calculates rankings, and categorizes users 
+-- based on badges and posting activity while employing advanced SQL features such as CTEs, window functions, 
+-- and COALESCE to handle NULL values gracefully.

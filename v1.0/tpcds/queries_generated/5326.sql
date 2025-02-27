@@ -1,0 +1,46 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        dd.d_year = 2022 AND 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        ws.web_site_id, ws.ws_sold_date_sk
+),
+TopWebSites AS (
+    SELECT 
+        web_site_id,
+        total_quantity,
+        total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 10
+)
+SELECT 
+    w.web_site_id,
+    w.web_name,
+    tw.total_quantity,
+    tw.total_sales,
+    (tw.total_sales / COUNT(DISTINCT c.c_customer_id)) AS avg_sales_per_customer
+FROM 
+    web_site w
+JOIN 
+    TopWebSites tw ON w.web_site_id = tw.web_site_id
+JOIN 
+    customer c ON c.c_current_cdemo_sk IS NOT NULL
+GROUP BY 
+    w.web_site_id, w.web_name, tw.total_quantity, tw.total_sales
+ORDER BY 
+    tw.total_sales DESC;

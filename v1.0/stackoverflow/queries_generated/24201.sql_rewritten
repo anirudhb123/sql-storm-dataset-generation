@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(v.Id) OVER (PARTITION BY p.Id) AS VoteCount,
+        CASE
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 1
+            ELSE 0
+        END AS HasAcceptedAnswer
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) 
+    WHERE p.PostTypeId = 1 
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(ph.VoteCount, 0)) AS TotalVotes,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN (
+        SELECT
+            ph.UserId,
+            COUNT(*) AS VoteCount
+        FROM PostHistory ph
+        WHERE ph.PostHistoryTypeId IN (10, 11) 
+        GROUP BY ph.UserId
+    ) ph ON u.Id = ph.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+RelevantPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        ua.TotalVotes,
+        ua.BadgeCount,
+        CASE 
+            WHEN rp.HasAcceptedAnswer = 1 THEN 'Yes' 
+            ELSE 'No' 
+        END AS AcceptedAnswer
+    FROM RankedPosts rp
+    JOIN UserActivity ua ON rp.PostId = ua.UserId
+    WHERE rp.VoteCount > 5 
+)
+
+SELECT 
+    rp.Title AS PostTitle,
+    rp.Score AS PostScore,
+    rp.TotalVotes AS TotalVotes,
+    rp.BadgeCount AS UserBadgeCount,
+    rp.AcceptedAnswer AS HasAcceptedAnswer,
+    COALESCE(cl.Comment, 'No comments') AS LastComment,
+    COALESCE(cl.CreationDate, 'No comments found') AS LastCommentDate
+FROM RelevantPosts rp
+LEFT JOIN (
+    SELECT
+        c.PostId,
+        c.Text AS Comment,
+        c.CreationDate
+    FROM Comments c 
+    WHERE c.CreationDate = (
+        SELECT MAX(CreationDate) 
+        FROM Comments 
+        WHERE PostId = c.PostId
+    )
+) cl ON rp.PostId = cl.PostId
+ORDER BY rp.Score DESC, rp.TotalVotes DESC
+FETCH FIRST 10 ROWS ONLY;

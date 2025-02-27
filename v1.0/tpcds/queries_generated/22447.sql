@@ -1,0 +1,44 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT ws.bill_customer_sk,
+           SUM(ws.net_paid_inc_tax) AS total_sales,
+           COUNT(ws.order_number) AS total_orders,
+           DENSE_RANK() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.net_paid_inc_tax) DESC) as rank
+    FROM web_sales ws
+   INNER JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE i.i_current_price IS NOT NULL
+    GROUP BY ws.bill_customer_sk
+), Customer_Addresses AS (
+    SELECT c.c_customer_sk,
+           ca.ca_city,
+           ca.ca_state,
+           ca.ca_country,
+           ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY ca.ca_address_sk) AS address_rank
+    FROM customer c
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+), Relevant_Customers AS (
+    SELECT a.bill_customer_sk,
+           a.total_sales,
+           a.total_orders,
+           ad.ca_city,
+           ad.ca_state,
+           ad.ca_country
+    FROM Sales_CTE a
+    JOIN Customer_Addresses ad ON a.bill_customer_sk = ad.c_customer_sk
+    WHERE a.rank <= 5
+        AND ad.address_rank = 1
+)
+SELECT rc.bill_customer_sk,
+       rc.total_sales,
+       rc.total_orders,
+       COALESCE(rc.ca_city, 'Unknown City') AS city,
+       COALESCE(rc.ca_state, 'Unknown State') AS state,
+       COALESCE(rc.ca_country, 'Unknown Country') AS country,
+       CASE 
+           WHEN rc.total_sales > 1000 THEN 'High Value'
+           WHEN rc.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+           ELSE 'Low Value'
+       END AS customer_value_category
+FROM Relevant_Customers rc
+ORDER BY rc.total_sales DESC NULLS LAST;
+```

@@ -1,0 +1,91 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number, 
+        ws.ws_quantity, 
+        ws.ws_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > 0
+),
+EligibleStores AS (
+    SELECT 
+        s.s_store_sk, 
+        s.s_store_name,
+        CASE 
+            WHEN s.s_number_employees IS NULL THEN 'UNKNOWN'
+            ELSE CASE 
+                WHEN s.s_number_employees < 10 THEN 'Small'
+                WHEN s.s_number_employees BETWEEN 10 AND 50 THEN 'Medium'
+                ELSE 'Large'
+            END
+        END AS store_size
+    FROM 
+        store s
+    WHERE
+        s.s_state IS NOT NULL
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        COALESCE(cd.cd_dep_count, 0) AS dep_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+CombiningReturns AS (
+    SELECT 
+        cr.cr_item_sk AS item_sk, 
+        SUM(cr.cr_return_quantity) AS total_returns,
+        SUM(cr.cr_return_amount) AS total_return_amount,
+        COUNT(DISTINCT cr.cr_order_number) AS return_count
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.cr_item_sk
+    UNION ALL
+    SELECT 
+        wr.wr_item_sk AS item_sk, 
+        SUM(wr.wr_return_quantity) AS total_returns,
+        SUM(wr.wr_return_amt) AS total_return_amount,
+        COUNT(DISTINCT wr.wr_order_number) AS return_count
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+)
+SELECT 
+    d.d_date AS sale_date, 
+    COALESCE(e.store_size, 'No Store') AS store_classification,
+    SUM(ws.ws_quantity) AS total_sold_quantity,
+    SUM(ws.ws_net_profit) AS total_net_profit,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    COALESCE(r.total_return_amount, 0) AS total_return_amount,
+    COUNT(DISTINCT c.c_customer_id) AS unique_customers,
+    COUNT(DISTINCT cs.cd_gender) FILTER (WHERE cs.cd_gender = 'M') AS male_customers,
+    COUNT(DISTINCT cs.cd_gender) FILTER (WHERE cs.cd_gender = 'F') AS female_customers
+FROM 
+    date_dim d
+LEFT JOIN 
+    web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+LEFT JOIN 
+    EligibleStores e ON ws.ws_bill_addr_sk = e.s_store_sk
+LEFT JOIN 
+    CombiningReturns r ON ws.ws_item_sk = r.item_sk
+LEFT JOIN 
+    CustomerDetails cs ON ws.ws_bill_customer_sk = cs.c_customer_id
+WHERE 
+    d.d_year = 2023 
+    AND (ws.ws_quantity IS NOT NULL OR r.total_returns IS NOT NULL)
+GROUP BY 
+    d.d_date, 
+    e.store_size
+ORDER BY 
+    d.d_date, 
+    store_classification;

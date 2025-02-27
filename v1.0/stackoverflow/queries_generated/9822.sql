@@ -1,0 +1,56 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.UpVotes > p.DownVotes THEN 1 ELSE 0 END) AS PositiveVotes,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryAggregation AS (
+    SELECT 
+        ph.UserId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS PostsClosed,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS PostsDeleted
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.UserId
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.TotalPosts,
+        us.TotalQuestions,
+        us.TotalAnswers,
+        us.PositiveVotes,
+        us.AverageScore,
+        COALESCE(pha.PostsClosed, 0) AS PostsClosed,
+        COALESCE(pha.PostsDeleted, 0) AS PostsDeleted
+    FROM 
+        UserStats us
+    LEFT JOIN 
+        PostHistoryAggregation pha ON us.UserId = pha.UserId
+    ORDER BY 
+        us.TotalPosts DESC
+    LIMIT 10
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.TotalQuestions,
+    tu.TotalAnswers,
+    tu.PositiveVotes,
+    tu.AverageScore,
+    tu.PostsClosed,
+    tu.PostsDeleted
+FROM 
+    TopUsers tu;

@@ -1,0 +1,60 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_mfgr, 
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rank_price,
+        COUNT(*) OVER (PARTITION BY p.p_mfgr) AS mfgr_count
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL
+),
+NationRegions AS (
+    SELECT 
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name, r.r_name
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+LiDetails AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        (l.l_extendedprice * (1 - l.l_discount)) AS net_price,
+        CASE 
+            WHEN l.l_returnflag = 'R' THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status
+    FROM lineitem l
+    WHERE l.l_shipdate >= '1997-01-01'
+)
+SELECT 
+    nr.region_name,
+    nr.nation_name,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    SUM(cs.total_spent) AS total_revenue,
+    AVG(cs.order_count) AS avg_orders_per_customer,
+    COUNT(DISTINCT lp.l_orderkey) AS total_lines,
+    MAX(p.p_name) AS most_expensive_part
+FROM NationRegions nr
+LEFT JOIN CustomerSummary cs ON nr.nation_name = cs.cust_nation_name
+LEFT JOIN RankedParts p ON p.rank_price <= 3
+LEFT JOIN LiDetails lp ON lp.l_partkey = p.p_partkey
+WHERE 
+    (nr.supplier_count BETWEEN 1 AND 10 OR nr.supplier_count IS NULL) AND
+    (cs.last_order_date IS NULL OR cs.last_order_date < cast('1998-10-01' as date) - INTERVAL '30 days')
+GROUP BY nr.region_name, nr.nation_name
+ORDER BY total_revenue DESC, unique_customers DESC;

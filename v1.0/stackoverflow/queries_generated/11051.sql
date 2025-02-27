@@ -1,0 +1,58 @@
+-- Performance benchmarking query to analyze post activity and user interactions
+WITH PostActivity AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT v.Id) AS TotalVotes,
+        AVG(b.Reputation) AS AvgUserReputation
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        p.Id, u.DisplayName
+),
+PostSummary AS (
+    SELECT
+        COUNT(*) AS TotalPosts,
+        SUM(ViewCount) AS TotalViews,
+        AVG(ViewCount) AS AvgViews,
+        SUM(AnswerCount) AS TotalAnswers,
+        AVG(AnswerCount) AS AvgAnswers,
+        SUM(CommentCount) AS TotalComments,
+        AVG(CommentCount) AS AvgComments,
+        SUM(Score) AS TotalScore,
+        AVG(Score) AS AvgScore
+    FROM
+        PostActivity
+)
+SELECT
+    pa.*,
+    ps.TotalPosts,
+    ps.TotalViews,
+    ps.AvgViews,
+    ps.TotalAnswers,
+    ps.AvgAnswers,
+    ps.TotalComments,
+    ps.AvgComments,
+    ps.TotalScore,
+    ps.AvgScore
+FROM
+    PostActivity pa
+CROSS JOIN
+    PostSummary ps
+ORDER BY
+    pa.Score DESC, pa.ViewCount DESC;

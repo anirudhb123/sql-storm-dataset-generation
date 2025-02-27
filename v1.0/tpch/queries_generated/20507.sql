@@ -1,0 +1,54 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate) AS rn
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+),
+preferred_supplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+    HAVING SUM(ps.ps_supplycost) < (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+customer_purchase AS (
+    SELECT c.c_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY c.c_custkey
+),
+nations_with_comments AS (
+    SELECT n.n_nationkey, n.n_name, COALESCE(NULLIF(n.n_comment, ''), 'No Comment Available') AS comment
+    FROM nation n
+)
+SELECT n.n_name, n.comment,
+       COUNT(DISTINCT DISTINCT(ps.ps_partkey)) AS unique_parts,
+       AVG(cp.total_spent) AS avg_spent,
+       SUM(CASE WHEN oh.rn = 1 THEN oh.o_totalprice ELSE 0 END) AS first_order_total,
+       MAX(s.s_acctbal) AS max_supplier_balance
+FROM preferred_supplier ps
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN customer_purchase cp ON s.s_nationkey = cp.c_custkey
+LEFT OUTER JOIN nations_with_comments n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN order_hierarchy oh ON cp.c_custkey = oh.o_orderkey
+WHERE p.p_retailprice > (SELECT MAX(p2.p_retailprice) * 0.1 FROM part p2)
+  AND oh.o_orderdate < CURRENT_DATE - INTERVAL '30 days'
+GROUP BY n.n_name, n.comment
+ORDER BY unique_parts DESC, avg_spent ASC
+UNION ALL
+SELECT 'TOTALS', 'Aggregate Values',
+       COUNT(DISTINCT ps.ps_partkey),
+       AVG(cp.total_spent),
+       SUM(CASE WHEN oh.rn = 1 THEN oh.o_totalprice ELSE 0 END),
+       MAX(s.s_acctbal)
+FROM preferred_supplier ps
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN customer_purchase cp ON s.s_nationkey = cp.c_custkey
+LEFT OUTER JOIN nations_with_comments n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN order_hierarchy oh ON cp.c_custkey = oh.o_orderkey
+WHERE p.p_retailprice > (SELECT MAX(p2.p_retailprice) * 0.1 FROM part p2)
+  AND oh.o_orderdate < CURRENT_DATE - INTERVAL '30 days';

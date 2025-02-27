@@ -1,0 +1,91 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_within_year
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorTitles AS (
+    SELECT 
+        ak.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        c.nr_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        aka_title at ON c.movie_id = at.movie_id
+    JOIN 
+        RankedTitles t ON at.title = t.title AND at.production_year = t.production_year
+    WHERE 
+        t.rank_within_year <= 5
+),
+MissingDirectorInfo AS (
+    SELECT 
+        movie_id,
+        COUNT(*) AS missing_directors_count
+    FROM 
+        movie_companies mc
+    WHERE 
+        mc.company_type_id IS NULL
+    GROUP BY 
+        movie_id
+),
+FinalBenchmark AS (
+    SELECT 
+        a.actor_name,
+        a.movie_title,
+        a.production_year,
+        md.missing_directors_count,
+        COUNT(DISTINCT a.nr_order) AS distinct_roles,
+        STRING_AGG(DISTINCT ak.name, ', ') AS co_actors
+    FROM 
+        ActorTitles a
+    LEFT JOIN 
+        MissingDirectorInfo md ON a.movie_title = (
+            SELECT 
+                at.title 
+            FROM 
+                aka_title at 
+            WHERE 
+                at.movie_id = a.movie_title
+            LIMIT 1
+        )
+    LEFT JOIN 
+        cast_info c ON a.movie_title = (
+            SELECT 
+                at.title 
+            FROM 
+                aka_title at 
+            WHERE 
+                at.movie_id = c.movie_id 
+            LIMIT 1
+        )
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        a.actor_name, a.movie_title, a.production_year, md.missing_directors_count
+    HAVING 
+        COUNT(DISTINCT a.nr_order) > 1
+        AND md.missing_directors_count IS NOT NULL
+)
+SELECT 
+    fb.actor_name,
+    fb.movie_title,
+    fb.production_year,
+    fb.missing_directors_count,
+    fb.distinct_roles,
+    fb.co_actors
+FROM 
+    FinalBenchmark fb
+WHERE 
+    fb.missing_directors_count > 0
+ORDER BY 
+    fb.production_year DESC, 
+    fb.distinct_roles DESC;

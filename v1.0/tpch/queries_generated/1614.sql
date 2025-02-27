@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+PopularParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity_sold
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey
+    HAVING 
+        SUM(l.l_quantity) > 100
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name,
+    s.s_name AS supplier_name,
+    ps.ps_availqty,
+    (ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+    COALESCE(c.total_orders, 0) AS total_orders_by_customer,
+    COALESCE(c.total_spent, 0) AS total_spent_by_customer,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS supplier_order,
+    CURRENT_DATE - p.p_retailprice AS days_since_last_price_change
+FROM 
+    partsupp ps
+LEFT JOIN 
+    RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    PopularParts pp ON ps.ps_partkey = pp.p_partkey
+LEFT JOIN 
+    CustomerOrders c ON c.c_custkey = (SELECT DISTINCT o.o_custkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE l.l_partkey = ps.ps_partkey LIMIT 1)
+WHERE 
+    (ps.ps_availqty IS NULL OR ps.ps_availqty > 50)
+ORDER BY 
+    total_supply_cost DESC, supplier_order ASC;

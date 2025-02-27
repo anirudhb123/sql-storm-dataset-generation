@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '>')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(*) > 5
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+FinalStats AS (
+    SELECT 
+        up.UserId,
+        up.DisplayName,
+        up.TotalPosts,
+        up.PositivePosts,
+        up.AverageScore,
+        pp.ViewRank,
+        pp.ViewCount,
+        pt.TagName
+    FROM 
+        UserStats up
+    JOIN 
+        RankedPosts pp ON up.TotalPosts > 0
+    LEFT JOIN 
+        PopularTags pt ON pp.Title ILIKE '%' || pt.TagName || '%'
+    ORDER BY 
+        up.TotalPosts DESC, pp.ViewCount DESC
+)
+SELECT 
+    fs.UserId,
+    fs.DisplayName,
+    fs.TotalPosts,
+    fs.PositivePosts,
+    fs.AverageScore,
+    fs.ViewRank,
+    fs.ViewCount,
+    COALESCE(pt.TagName, 'No Tags') AS TagName,
+    COALESCE(pdh.LastClosedDate, 'Never Closed') AS LastClosedDate,
+    COALESCE(pdh.CloseCount, 0) AS CloseCount
+FROM 
+    FinalStats fs
+LEFT JOIN 
+    PostHistoryDetails pdh ON fs.UserId = pdh.PostId
+WHERE 
+    fs.ViewRank <= 5
+ORDER BY 
+    fs.TotalPosts DESC, fs.ViewCount DESC;

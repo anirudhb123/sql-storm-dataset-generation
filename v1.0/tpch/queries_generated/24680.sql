@@ -1,0 +1,43 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS acct_rank
+    FROM supplier s
+    JOIN nation n ON s.n_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal) 
+        FROM supplier s2 
+        WHERE s2.n_nationkey = s.n_nationkey
+    )
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(year, -1, GETDATE())
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           SUM(l.l_quantity) AS total_quantity,
+           COUNT(DISTINCT l.l_suppkey) AS supplier_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+
+SELECT n.n_name, 
+       SUM(COALESCE(lis.total_sales, 0)) AS total_sales_amount,
+       COUNT(DISTINCT ro.o_orderkey) AS order_count,
+       COUNT(DISTINCT rs.s_suppkey) AS active_suppliers,
+       CASE 
+           WHEN SUM(COALESCE(lis.total_sales, 0)) > 0 THEN 'Profitable' 
+           ELSE 'Loss' 
+       END AS profitability_status
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.n_nationkey
+LEFT JOIN RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey AND rs.acct_rank <= 10
+LEFT JOIN RecentOrders ro ON s.s_nationkey = (SELECT n2.n_nationkey FROM nation n2 WHERE n2.n_name = n.n_name)
+LEFT JOIN LineItemSummary lis ON ro.o_orderkey = lis.l_orderkey
+WHERE n.n_regionkey IS NOT NULL AND (n.n_name LIKE '%A%' OR n.n_name LIKE '%E%')
+GROUP BY n.n_name
+HAVING SUM(COALESCE(lis.total_sales, 0)) > 1000000
+ORDER BY total_sales_amount DESC, n.n_name
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

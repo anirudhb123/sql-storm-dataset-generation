@@ -1,0 +1,70 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS rank_sales
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 2451545 AND 2451545 + 30 -- Example date range
+),
+TotalReturns AS (
+    SELECT
+        sr_store_sk,
+        SUM(sr_return_quantity) AS total_returned
+    FROM
+        store_returns sr
+    GROUP BY
+        sr_store_sk
+),
+CustomerSales AS (
+    SELECT
+        c.c_customer_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM
+        customer c
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_sk
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(c.c_customer_sk) AS customer_count
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+)
+SELECT
+    cs.c_customer_sk,
+    cs.total_spent,
+    RANK() OVER (ORDER BY cs.total_spent DESC) AS customer_rank,
+    CASE
+        WHEN cs.total_spent IS NULL THEN 'No Purchases'
+        ELSE 'Regular Customer'
+    END AS customer_status,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ts.total_returned
+FROM
+    CustomerSales cs
+LEFT JOIN
+    CustomerDemographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+LEFT JOIN
+    TotalReturns ts ON ts.sr_store_sk = (SELECT s.s_store_sk FROM store s WHERE s.s_store_id = 'STORE_1') -- Example store
+WHERE
+    cd.customer_count > 50
+ORDER BY
+    customer_rank
+FETCH FIRST 100 ROWS ONLY;

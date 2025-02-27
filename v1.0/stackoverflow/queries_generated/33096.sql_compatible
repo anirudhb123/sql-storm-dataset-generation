@@ -1,0 +1,81 @@
+
+WITH RECURSIVE UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        UV.VoteCount,
+        UV.UpVoteCount,
+        UV.DownVoteCount
+    FROM Users U
+    JOIN UserVoteCounts UV ON U.Id = UV.UserId
+    WHERE U.Reputation > 1000 
+    ORDER BY U.Reputation DESC
+    LIMIT 10
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        PS.TotalPosts,
+        PS.Questions,
+        PS.Answers,
+        PS.TotalViews,
+        PS.TotalScore
+    FROM Users U
+    JOIN PostStats PS ON U.Id = PS.OwnerUserId
+),
+TopUserPosts AS (
+    SELECT 
+        U.DisplayName,
+        U.TotalPosts,
+        U.Questions,
+        U.Answers,
+        U.TotalViews,
+        U.TotalScore,
+        ROW_NUMBER() OVER (ORDER BY U.TotalPosts DESC) AS Rank
+    FROM UserPostStats U
+    WHERE U.TotalPosts > 0
+)
+SELECT 
+    TU2.DisplayName AS TopUser,
+    TU.TotalPosts AS PostsCreated,
+    TU.Questions AS QuestionsAsked,
+    TU.Answers AS AnswersGiven,
+    TU.TotalViews AS ViewsReceived,
+    TU.TotalScore AS Score,
+    (SELECT COUNT(DISTINCT C.Id) 
+        FROM Comments C 
+        WHERE C.UserId = TU2.UserId) AS TotalCommentsMade,
+    (SELECT STRING_AGG(T.TagName, ', ') 
+        FROM (
+            SELECT T.TagName 
+            FROM Tags T
+            JOIN Posts P ON T.ExcerptPostId = P.Id
+            WHERE P.OwnerUserId = TU2.UserId
+            LIMIT 3
+        ) AS T) AS TopTagsUsed
+FROM TopUserPosts TU
+JOIN TopUsers TU2 ON TU2.Id = TU.UserId
+ORDER BY TU.Rank;

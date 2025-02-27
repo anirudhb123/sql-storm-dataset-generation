@@ -1,0 +1,52 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.sales_price,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.sales_price DESC) AS price_rank,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk, ws.bill_customer_sk ORDER BY ws.sold_date_sk DESC) AS row_num,
+        COALESCE(ws.coupon_amt, 0) AS adjusted_coupon_amt,
+        CASE 
+            WHEN ws.shipping_fee IS NULL OR ws.shipping_fee < 0 THEN 0
+            ELSE ws.shipping_fee
+        END AS validated_shipping_fee
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        ws.sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_date = '2022-01-01')
+        AND (c.c_birth_year IS NULL OR c.c_birth_year > 1980)
+),
+aggregated_sales AS (
+    SELECT 
+        rs.web_site_sk,
+        SUM(rs.sales_price) AS total_sales,
+        AVG(rs.validated_shipping_fee) AS avg_shipping_fee,
+        COUNT(DISTINCT rs.bill_customer_sk) AS unique_customers
+    FROM 
+        ranked_sales rs
+    WHERE 
+        rs.price_rank <= 5 AND rs.row_num < 10
+    GROUP BY 
+        rs.web_site_sk
+)
+SELECT 
+    ws.web_site_id,
+    as.total_sales,
+    as.avg_shipping_fee,
+    as.unique_customers,
+    (CASE 
+        WHEN as.total_sales IS NULL THEN 0
+        ELSE as.total_sales / NULLIF(as.unique_customers, 0)
+    END) AS sales_per_customer,
+    (SELECT COUNT(*) 
+     FROM item i 
+     WHERE i.i_item_sk IN (SELECT ws.ws_item_sk FROM web_sales ws WHERE ws.web_site_sk = ws.web_site_sk)
+      AND (i.i_current_price > 0 OR i.i_brand_id IS NOT NULL)) AS valid_item_count
+FROM 
+    aggregated_sales as
+JOIN 
+    web_site ws ON as.web_site_sk = ws.web_site_sk
+ORDER BY 
+    sales_per_customer DESC NULLS LAST;

@@ -1,0 +1,45 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent,
+        SUM(ws.ws_quantity) AS total_items,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ws.ws_net_paid) DESC) AS spend_rank
+    FROM customer AS c
+    LEFT JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate, cd.cd_credit_rating
+),
+PromotionStats AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT ws.ws_order_number) AS promo_orders,
+        SUM(ws.ws_net_paid) AS promo_revenue
+    FROM promotion AS p
+    LEFT JOIN web_sales AS ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY p.p_promo_id
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.total_orders,
+    cs.total_spent,
+    cs.total_items,
+    ps.promo_orders,
+    ps.promo_revenue
+FROM CustomerStats AS cs
+LEFT JOIN PromotionStats AS ps ON cs.spend_rank = (SELECT spend_rank FROM CustomerStats WHERE c_customer_sk = cs.c_customer_sk)
+WHERE cs.total_spent IS NOT NULL
+  AND (cs.cd_marital_status = 'M' OR cs.cd_gender = 'F')
+ORDER BY cs.total_spent DESC
+LIMIT 100;

@@ -1,0 +1,57 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws_sold_date_sk, ws_item_sk, SUM(ws_quantity) AS total_quantity
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT ss_sold_date_sk, ss_item_sk, SUM(ss_quantity) AS total_quantity
+    FROM store_sales
+    GROUP BY ss_sold_date_sk, ss_item_sk
+),
+SalesRanked AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank,
+        COUNT(DISTINCT c.c_customer_sk) AS distinct_customers
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE ws.ws_sold_date_sk BETWEEN 2400 AND 2500 
+    GROUP BY ws.ws_item_sk, ws.ws_sales_price, ws.ws_net_profit
+),
+SubqueryResults AS (
+    SELECT 
+        s.s_store_sk,
+        SUM(COALESCE(ss.ss_net_paid, 0)) AS total_net_paid,
+        SUM(COALESCE(ss.ss_ext_discount_amt, 0)) AS total_discount
+    FROM store_sales ss
+    LEFT JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    GROUP BY s.s_store_sk
+),
+FinalResults AS (
+    SELECT 
+        a.ca_city,
+        sr.rank,
+        sr.ws_item_sk,
+        sr.distinct_customers,
+        COALESCE(sr.ws_sales_price * sr.distinct_customers, 0) AS total_sales_value,
+        SUM(sub.total_net_paid) AS total_net_paid_from_stores,
+        SUM(sub.total_discount) AS total_discounts_given
+    FROM SalesRanked sr
+    LEFT JOIN customer_address a ON a.ca_address_sk = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_customer_sk = sr.ws_item_sk)
+    LEFT JOIN SubqueryResults sub ON sub.s_store_sk = sr.rank -- assuming rank matches the store for demonstration
+    GROUP BY a.ca_city, sr.rank, sr.ws_item_sk, sr.distinct_customers
+)
+SELECT 
+    f.ca_city,
+    f.ws_item_sk,
+    MAX(f.total_sales_value) AS max_sales_value,
+    AVG(f.total_net_paid_from_stores) AS avg_net_paid,
+    COUNT(DISTINCT f.rank) AS distinct_store_count,
+    SUM(CASE WHEN f.total_discounts_given IS NULL THEN 0 ELSE f.total_discounts_given END) AS total_discount_value
+FROM FinalResults f
+WHERE f.total_sales_value > 10000
+GROUP BY f.ca_city, f.ws_item_sk
+HAVING COUNT(f.rank) > 1
+ORDER BY max_sales_value DESC;

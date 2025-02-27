@@ -1,0 +1,64 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.DisplayName,
+        CASE
+            WHEN U.Reputation IS NULL THEN 'N/A'
+            WHEN U.Reputation < 100 THEN 'Low Reputation'
+            WHEN U.Reputation BETWEEN 100 AND 1000 THEN 'Medium Reputation'
+            ELSE 'High Reputation'
+        END AS ReputationTier
+    FROM Users U
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        COALESCE(P.Announced, 'No Announcement') AS Announcement,
+        (
+            SELECT COUNT(*)
+            FROM Comments C
+            WHERE C.PostId = P.Id
+        ) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM Posts P 
+    WHERE P.CreationDate > NOW() - INTERVAL '1 year' 
+),
+PostHistoryWithTypes AS (
+    SELECT 
+        PH.Id AS HistoryId,
+        PH.PostId,
+        PHT.Name AS HistoryTypeName,
+        PH.CreationDate AS HistoryCreationDate,
+        PH.Comment
+    FROM PostHistory PH
+    JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+)
+SELECT 
+    UR.DisplayName,
+    UR.Reputation,
+    UR.ReputationTier,
+    PD.Title,
+    PD.CreationDate,
+    PH.HistoryTypeName,
+    PH.HistoryCreationDate,
+    PH.Comment
+FROM UserReputation UR
+JOIN PostDetails PD ON UR.UserId = PD.OwnerUserId
+LEFT JOIN PostHistoryWithTypes PH ON PD.PostId = PH.PostId
+WHERE 
+    (UR.Reputation >= 100 OR PD.CommentCount >= 5)
+    AND (PD.UserPostRank <= 3 OR PH.HistoryCreationDate IS NULL)
+ORDER BY 
+    UR.Reputation DESC,
+    PD.CreationDate ASC
+LIMIT 100;
+
+-- This query does the following:
+-- 1. Creates CTEs to encapsulate user reputation information, post details filtered by the last year, and a join of post history with its types.
+-- 2. Filters users with a minimum reputation or number of comments and posts ranked up to a certain level.
+-- 3. Implements NULL handling with COALESCE and includes bizarre details like "No Announcement" if certain information is missing.
+-- 4. Employs window functions for ranking within user posts.

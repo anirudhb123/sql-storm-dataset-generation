@@ -1,0 +1,78 @@
+WITH PostTagCount AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '> <'))) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    WHERE 
+        u.Reputation > 100  
+    GROUP BY 
+        u.Id
+),
+HighScorePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    GROUP BY 
+        p.Id
+    HAVING 
+        p.Score > 10  
+),
+UserActivity AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ps.TotalPosts, 0) AS TotalPosts,
+        COALESCE(ps.AcceptedAnswers, 0) AS AcceptedAnswers,
+        COALESCE(ps.TotalViews, 0) AS TotalViews,
+        COALESCE(hp.TotalBadges, 0) AS TotalBadges,
+        COUNT(DISTINCT ph.Id) AS EditCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserPostStats ps ON ps.UserId = u.Id
+    LEFT JOIN 
+        HighScorePosts hp ON hp.Id IN (SELECT PostId FROM Posts WHERE OwnerUserId = u.Id)
+    LEFT JOIN 
+        PostHistory ph ON ph.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ua.DisplayName,
+    ua.Reputation,
+    ua.TotalPosts,
+    ua.AcceptedAnswers,
+    ua.TotalViews,
+    ua.TotalBadges,
+    ua.EditCount,
+    ptc.TagCount
+FROM 
+    UserActivity ua
+JOIN 
+    PostTagCount ptc ON ptc.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ua.UserId)
+ORDER BY 
+    ua.TotalViews DESC, 
+    ua.Reputation DESC;

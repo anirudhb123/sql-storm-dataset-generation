@@ -1,0 +1,31 @@
+SELECT 
+    CONCAT(c.c_name, ' / ', s.s_name, ' - ', p.p_name) AS part_supplier_customer,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    SUBSTRING_INDEX(SUBSTRING_INDEX(l.l_comment, ' ', 4), ' ', -4) AS truncated_comment,
+    DATE_FORMAT(o.o_orderdate, '%Y-%m-%d') AS order_date,
+    r.r_name AS region_name
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    part p ON l.l_partkey = p.p_partkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate >= '2023-01-01' 
+    AND l.l_shipdate <= '2023-12-31'
+GROUP BY 
+    part_supplier_customer, order_date, region_name
+HAVING 
+    total_revenue > 10000
+ORDER BY 
+    total_revenue DESC;

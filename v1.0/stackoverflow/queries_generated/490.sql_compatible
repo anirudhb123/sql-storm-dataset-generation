@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerRank,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS DownVotes,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.Score > 0
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > (SELECT AVG(Reputation) FROM Users)
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.Score, 
+        rp.CommentCount,
+        rp.ViewCount,
+        ur.DisplayName AS Owner,
+        ur.Reputation AS OwnerReputation
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+    WHERE 
+        rp.OwnerRank <= 3
+)
+SELECT 
+    tp.*,
+    CASE 
+        WHEN tp.Score > 100 THEN 'High Score'
+        WHEN tp.Score > 50 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    COALESCE((
+        SELECT cr.Reason 
+        FROM CloseReasonTypes cr 
+        WHERE cr.Id = (
+            SELECT 
+                MAX(ph.Comment) 
+            FROM 
+                PostHistory ph 
+            WHERE 
+                ph.PostId = tp.PostId AND ph.PostHistoryTypeId = 10
+            )
+        ), 'Not Closed') AS CloseReason
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level,
+        t.episode_of_id
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    UNION ALL
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        h.level + 1,
+        m.episode_of_id
+    FROM 
+        MovieHierarchy h
+    JOIN 
+        aka_title m ON h.movie_id = m.episode_of_id
+),
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        COUNT(DISTINCT c.id) AS cast_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    LEFT JOIN 
+        cast_info c ON mh.movie_id = c.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.level, mk.keywords
+),
+TopMovies AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY level ORDER BY cast_count DESC) AS rank
+    FROM 
+        FilteredMovies
+)
+SELECT 
+    tm.level,
+    tm.title,
+    tm.production_year,
+    tm.keywords,
+    tm.cast_count
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.level, tm.cast_count DESC;
+
+-- Benchmark: Check performance by adding filtering criteria on the movie title
+WITH BenchmarkFiltered AS (
+    SELECT 
+        t.title
+    FROM 
+        aka_title t
+    WHERE 
+        t.title ILIKE '%adventure%' AND
+        t.production_year > 2000
+)
+SELECT 
+    COUNT(*) AS adventure_movie_count
+FROM 
+    BenchmarkFiltered;
+
+This elaborate SQL query constructs a recursive Common Table Expression (CTE) for retrieving movie hierarchies using outer joins and aggregates data on movies produced between 2000 and 2023. It includes window functions to rank movies by cast count, thereby filtering the top 10 movies per level while accommodating NULL handling in the keyword filtering with `COALESCE`. Additionally, a performance benchmarking section assesses the query's execution when filtering movie titles containing "adventure".

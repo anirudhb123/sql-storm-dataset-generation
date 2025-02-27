@@ -1,0 +1,90 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVoteCount,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TagStatistics AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.Id, t.TagName
+),
+PostHistorySummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.PostHistoryTypeId,
+        COUNT(ph.Id) AS RevisionCount,
+        MAX(ph.CreationDate) AS LastRevisionDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, ph.PostHistoryTypeId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    SUM(pvs.UpVoteCount) AS TotalUpVotes,
+    SUM(pvs.DownVoteCount) AS TotalDownVotes,
+    COUNT(DISTINCT ps.PostId) AS TotalPosts,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags,
+    AVG(ts.AverageScore) AS AveragePostScore,
+    STRING_AGG(DISTINCT CAST(phs.LastRevisionDate AS TEXT), ', ') AS LastRevisionDates,
+    COUNT(DISTINCT CASE WHEN ps.PostId IS NOT NULL THEN ps.PostId END) AS TotalParentPosts,
+    COUNT(DISTINCT phs.PostId) FILTER (WHERE phs.PostHistoryTypeId IN (10, 11)) AS TotalCloseReopens
+FROM 
+    Users u
+LEFT JOIN 
+    Posts ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    PostVoteStats pvs ON ps.Id = pvs.PostId
+LEFT JOIN 
+    TagStatistics ts ON ts.PostCount > 0
+LEFT JOIN 
+    PostHistorySummary phs ON phs.PostId = ps.Id
+LEFT JOIN 
+    RecursivePostHierarchy rph ON ps.Id = rph.PostId
+WHERE 
+    u.Reputation > 100
+GROUP BY 
+    u.Id, u.DisplayName
+ORDER BY 
+    TotalUpVotes DESC, TotalPosts DESC;

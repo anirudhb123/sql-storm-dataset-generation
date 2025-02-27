@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        CAST(mt.title AS VARCHAR(255)) AS full_hierarchy
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        CAST(CONCAT(mh.full_hierarchy, ' -> ', m.title) AS VARCHAR(255))
+    FROM 
+        movie_link ml
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mk.keyword AS movie_keyword,
+    COUNT(DISTINCT m.id) AS movie_count,
+    AVG(m.production_year) AS avg_production_year,
+    STRING_AGG(DISTINCT CONCAT(a.name, ' (', a.surname_pcode, ')'), ', ') AS actor_names,
+    MAX(mh.level) AS max_hierarchy_level
+FROM 
+    movie_keyword mk
+JOIN 
+    aka_title mt ON mk.movie_id = mt.id
+JOIN 
+    complete_cast cc ON cc.movie_id = mt.id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mt.id
+LEFT JOIN 
+    aka_name a ON a.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON mh.movie_id = mt.id
+WHERE 
+    mk.keyword LIKE ANY(ARRAY['%love%', '%drama%'])
+    AND mt.production_year IS NOT NULL
+    AND mt.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    mk.keyword
+ORDER BY 
+    movie_count DESC
+LIMIT 10;
+

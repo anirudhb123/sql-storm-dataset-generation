@@ -1,0 +1,49 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws.ws_sold_date_sk AS SoldDate,
+        SUM(ws.ws_quantity) AS TotalQuantity,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS TotalSales,
+        COUNT(DISTINCT ws.ws_order_number) AS TotalOrders,
+        AVG(ws.ws_sales_price) AS AveragePrice,
+        c.c_gender AS CustomerGender,
+        d.d_year AS SaleYear,
+        d.d_month_seq AS SaleMonth
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 20200101 AND 20211231
+    GROUP BY 
+        ws.ws_sold_date_sk, c.c_gender, d.d_year, d.d_month_seq
+),
+TopSales AS (
+    SELECT 
+        SoldDate,
+        TotalQuantity,
+        TotalSales,
+        TotalOrders,
+        AveragePrice,
+        CustomerGender,
+        ROW_NUMBER() OVER (PARTITION BY SaleYear ORDER BY TotalSales DESC) AS Rank
+    FROM 
+        SalesSummary
+)
+
+SELECT 
+    SaleYear,
+    CustomerGender,
+    SUM(TotalQuantity) AS YearlyQuantity,
+    SUM(TotalSales) AS YearlySales,
+    AVG(AveragePrice) AS AvgYearlyPrice
+FROM 
+    TopSales
+WHERE 
+    Rank <= 10
+GROUP BY 
+    SaleYear, CustomerGender
+ORDER BY 
+    SaleYear, YearlySales DESC;

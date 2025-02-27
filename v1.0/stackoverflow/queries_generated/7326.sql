@@ -1,0 +1,76 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedQuestions
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::int[])
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+PostInfo AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        PH.PostHistoryTypeId,
+        COUNT(PC.Id) AS CommentCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        Comments PC ON P.Id = PC.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.Score, U.DisplayName, PH.PostHistoryTypeId
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation,
+    U.TotalPosts,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.AcceptedQuestions,
+    TT.TagName,
+    PI.Title AS PostTitle,
+    PI.ViewCount,
+    PI.Score,
+    PI.CommentCount,
+    PI.OwnerDisplayName
+FROM 
+    UserStats U
+CROSS JOIN 
+    TopTags TT
+JOIN 
+    PostInfo PI ON U.UserId = PI.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, TT.PostCount DESC, PI.ViewCount DESC
+LIMIT 50;

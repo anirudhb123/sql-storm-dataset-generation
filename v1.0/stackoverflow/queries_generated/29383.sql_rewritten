@@ -1,0 +1,88 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+), 
+TopQuestions AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COALESCE(p.CommentCount, 0) AS CommentCount,
+        p.Tags
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    ORDER BY 
+        p.Score DESC
+    LIMIT 10
+),
+QuestionTags AS (
+    SELECT 
+        t.TagName, 
+        COUNT(pt.QuestionId) AS QuestionCount
+    FROM 
+        Tags t
+    JOIN 
+        (SELECT 
+            unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::varchar AS TagName, 
+            p.Id AS QuestionId
+        FROM 
+            Posts p 
+        WHERE 
+            p.PostTypeId = 1) pt ON t.TagName = pt.TagName
+    GROUP BY 
+        t.TagName
+),
+QuestionStats AS (
+    SELECT 
+        q.QuestionId, 
+        q.Title, 
+        q.CreationDate, 
+        q.Score, 
+        q.AnswerCount, 
+        q.CommentCount, 
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = q.QuestionId) AS TotalComments
+    FROM 
+        TopQuestions q
+    LEFT JOIN 
+        (SELECT 
+            p.Id AS PostId, 
+            unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName
+        FROM 
+            Posts p) t ON q.QuestionId = t.PostId
+    GROUP BY 
+        q.QuestionId, q.Title, q.CreationDate, q.Score, q.AnswerCount, q.CommentCount
+)
+SELECT 
+    u.DisplayName AS TopUser,
+    u.Reputation AS UserReputation,
+    qs.QuestionId,
+    qs.Title AS QuestionTitle,
+    qs.CreationDate AS QuestionCreationDate,
+    qs.Score AS QuestionScore,
+    qs.AnswerCount AS QuestionAnswerCount,
+    qs.CommentCount AS QuestionCommentCount,
+    qs.Tags AS QuestionTags,
+    qs.TotalComments AS TotalCommentsOnQuestion
+FROM 
+    RankedUsers u
+JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+JOIN 
+    QuestionStats qs ON p.Id = qs.QuestionId
+WHERE 
+    u.UserRank <= 10
+ORDER BY 
+    u.Reputation DESC, qs.QuestionScore DESC;

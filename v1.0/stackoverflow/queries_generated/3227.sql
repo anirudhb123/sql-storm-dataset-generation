@@ -1,0 +1,45 @@
+WITH RankedPosts AS (
+    SELECT p.Id, 
+           p.Title, 
+           p.CreationDate, 
+           p.Score, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM Posts p
+    WHERE p.PostTypeId = 1 AND p.Score > 0
+), 
+HighScorePosts AS (
+    SELECT r.Id, r.Title, r.CreationDate, r.Score, u.Reputation, u.DisplayName
+    FROM RankedPosts r
+    JOIN Users u ON r.OwnerUserId = u.Id
+    WHERE r.rn <= 5
+), 
+UserBadges AS (
+    SELECT b.UserId, 
+           COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS Gold,
+           COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS Silver,
+           COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS Bronze
+    FROM Badges b
+    GROUP BY b.UserId
+), 
+PostComments AS (
+    SELECT c.PostId, 
+           COUNT(c.Id) AS CommentCount
+    FROM Comments c
+    GROUP BY c.PostId
+)
+SELECT hp.Id AS PostId, 
+       hp.Title, 
+       hp.CreationDate, 
+       hp.Score, 
+       u.DisplayName AS Author, 
+       u.Reputation, 
+       COALESCE(ub.Gold, 0) AS GoldBadges, 
+       COALESCE(ub.Silver, 0) AS SilverBadges, 
+       COALESCE(ub.Bronze, 0) AS BronzeBadges, 
+       COALESCE(pc.CommentCount, 0) AS TotalComments
+FROM HighScorePosts hp
+LEFT JOIN Users u ON hp.OwnerUserId = u.Id
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN PostComments pc ON hp.Id = pc.PostId
+WHERE hp.Score > (SELECT AVG(Score) FROM Posts WHERE PostTypeId = 1)
+ORDER BY hp.Score DESC, hp.Title ASC;

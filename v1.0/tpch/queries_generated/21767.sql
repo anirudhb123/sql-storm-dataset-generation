@@ -1,0 +1,57 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+), SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS nation_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+), LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_line_total,
+        COUNT(*) AS total_lines
+    FROM lineitem l
+    WHERE l.l_shipdate > '1997-01-01'
+    GROUP BY l.l_orderkey
+), NationalStats AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT c.c_custkey) AS total_customers,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM nation n
+    LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    COALESCE(ls.avg_line_total, 0) AS avg_line_total,
+    COALESCE(su.total_supply_cost, 0) AS total_supply_from_top_supplier,
+    ns.total_customers,
+    ns.total_order_value
+FROM RankedOrders r
+LEFT JOIN LineItemStats ls ON r.o_orderkey = ls.l_orderkey
+LEFT JOIN (
+    SELECT 
+        s.s_nationkey,
+        MAX(sd.total_supply_cost) AS total_supply_cost
+    FROM SupplierDetails sd
+    WHERE sd.nation_rank = 1
+    GROUP BY s.s_nationkey
+) su ON su.s_nationkey = (SELECT n.n_nationkey FROM nation n LIMIT 1)
+LEFT JOIN NationalStats ns ON ns.total_order_value > 0
+WHERE r.order_rank < 10 
+  AND r.o_orderdate BETWEEN '1996-01-01' AND '1997-12-31'
+ORDER BY r.o_orderdate DESC
+LIMIT 100
+OFFSET (SELECT COUNT(*) FROM orders) / 2

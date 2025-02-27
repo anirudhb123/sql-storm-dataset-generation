@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(vt.VoteTypeId = 2) - SUM(vt.VoteTypeId = 3), 0) AS NetVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        p.CreationDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes vt ON p.Id = vt.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.OwnerUserId, u.DisplayName, p.CreationDate
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        cp.CloseCount,
+        cp.LastClosedDate,
+        (CASE 
+            WHEN cp.CloseCount > 0 THEN 'Closed' 
+            ELSE 'Open' 
+        END) AS PostStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.Rank <= 5
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.OwnerDisplayName,
+    tp.NetVotes,
+    tp.CommentCount,
+    tp.CreationDate,
+    tp.PostStatus,
+    COALESCE(NULLIF(tp.LastClosedDate, '1970-01-01 00:00:00'), 'Never') AS LastClosedDate
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

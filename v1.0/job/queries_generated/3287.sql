@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        t.title,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords
+    FROM 
+        TopMovies tm
+    JOIN 
+        movie_keyword mk ON tm.title = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.title
+)
+SELECT 
+    tm.title AS Movie_Title,
+    tm.production_year AS Release_Year,
+    COALESCE(mk.keywords, 'No Keywords') AS Keywords,
+    CASE 
+        WHEN tm.production_year > 2000 THEN 'Modern Era'
+        WHEN tm.production_year BETWEEN 1980 AND 2000 THEN 'Classic Era'
+        ELSE 'Golden Era'
+    END AS Era_Category
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieKeywords mk ON tm.title = mk.title
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = tm.title 
+        AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'IMDb Rating')
+        AND mi.info IS NOT NULL
+    )
+ORDER BY 
+    tm.production_year DESC, 
+    tm.title;

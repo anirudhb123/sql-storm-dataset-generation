@@ -1,0 +1,64 @@
+
+WITH CustomerSales AS (
+    SELECT
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        MAX(ws.ws_sales_price) AS max_sale,
+        MIN(ws.ws_sales_price) AS min_sale,
+        AVG(ws.ws_sales_price) AS avg_sale
+    FROM
+        customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        ws.ws_sales_price IS NOT NULL
+        AND c.c_first_name IS NOT NULL
+    GROUP BY
+        c.c_customer_id
+),
+TopCustomers AS (
+    SELECT
+        cs.c_customer_id,
+        cs.total_profit,
+        cs.total_orders,
+        ROW_NUMBER() OVER (ORDER BY cs.total_profit DESC) AS sales_rank
+    FROM
+        CustomerSales cs
+    WHERE
+        cs.total_orders > 5
+),
+RankedSales AS (
+    SELECT
+        tc.c_customer_id,
+        tc.total_profit,
+        tc.sales_rank,
+        CASE
+            WHEN tc.sales_rank <= 10 THEN 'Top 10%'
+            WHEN tc.sales_rank <= 30 THEN 'Top 30%'
+            ELSE 'Others'
+        END AS profitability_band
+    FROM
+        TopCustomers tc
+)
+SELECT
+    rs.c_customer_id,
+    rs.total_profit,
+    rs.sales_rank,
+    rs.profitability_band,
+    COALESCE(r.r_reason_desc, 'No Reason') AS return_reason,
+    COUNT(sr.sr_ticket_number) AS total_returns,
+    SUM(sr.sr_return_amt_inc_tax) AS total_return_value
+FROM
+    RankedSales rs
+LEFT JOIN store_returns sr ON rs.c_customer_id = sr.sr_customer_sk
+LEFT JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+GROUP BY
+    rs.c_customer_id,
+    rs.total_profit,
+    rs.sales_rank,
+    rs.profitability_band,
+    r.r_reason_desc
+HAVING
+    SUM(sr.sr_return_amt_inc_tax) > 100 OR COUNT(sr.sr_ticket_number) > 0
+ORDER BY
+    rs.sales_rank, rs.total_profit DESC;

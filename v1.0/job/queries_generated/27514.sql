@@ -1,0 +1,50 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        a.id AS actor_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorStats AS (
+    SELECT 
+        a.actor_id,
+        COUNT(DISTINCT r.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT r.title, ', ') AS movies
+    FROM 
+        RankedMovies r
+    GROUP BY 
+        a.actor_id
+),
+YearlySummary AS (
+    SELECT 
+        r.production_year,
+        COUNT(DISTINCT r.movie_id) AS total_movies,
+        AVG(a.movie_count) AS avg_movies_per_actor,
+        STRING_AGG(DISTINCT a.actor_name, ', ') AS top_actors
+    FROM 
+        RankedMovies r
+    JOIN 
+        ActorStats a ON r.actor_id = a.actor_id
+    GROUP BY 
+        r.production_year
+)
+SELECT 
+    y.production_year,
+    y.total_movies,
+    y.avg_movies_per_actor,
+    y.top_actors
+FROM 
+    YearlySummary y
+ORDER BY 
+    y.production_year DESC
+LIMIT 10;

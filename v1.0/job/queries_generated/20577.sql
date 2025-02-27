@@ -1,0 +1,81 @@
+WITH RecursiveCast AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS cast_rank,
+        COALESCE(p.name, 'Unknown') AS actor_name,
+        COALESCE(aka.name, p.name) AS aka_name
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        name p ON c.person_id = p.imdb_id
+    LEFT JOIN 
+        aka_name aka ON p.imdb_id = aka.person_id
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        ARRAY_AGG(DISTINCT cn.name) FILTER (WHERE cn.country_code IS NOT NULL) AS production_companies
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+CoalescedRoles AS (
+    SELECT 
+        rc.movie_id,
+        COUNT(CASE WHEN r.role IS NOT NULL THEN 1 END) AS total_roles,
+        MAX(COALESCE(r.role, 'Other Role')) AS primary_role
+    FROM 
+        RecursiveCast rc
+    LEFT JOIN 
+        role_type r ON rc.cast_rank <= 3 -- calculate roles only for top 3 cast
+    GROUP BY 
+        rc.movie_id
+),
+BenchmarkResults AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        rc.actor_name,
+        rc.aka_name,
+        cr.total_roles,
+        cr.primary_role,
+        COUNT(DISTINCT rc.person_id) OVER (PARTITION BY md.movie_id) AS unique_cast_count
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        RecursiveCast rc ON md.movie_id = rc.movie_id
+    LEFT JOIN 
+        CoalescedRoles cr ON md.movie_id = cr.movie_id
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    actor_name,
+    aka_name,
+    total_roles,
+    primary_role,
+    unique_cast_count
+FROM 
+    BenchmarkResults 
+WHERE 
+    production_year IS NOT NULL 
+    AND unique_cast_count > 0
+    AND (total_roles IS NULL OR total_roles > 2)
+ORDER BY 
+    production_year DESC, 
+    unique_cast_count ASC NULLS LAST;

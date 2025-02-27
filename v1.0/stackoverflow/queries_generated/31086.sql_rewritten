@@ -1,0 +1,94 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) as UserRank
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        u.Reputation > 1000 
+),
+ActivityLog AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+)
+
+SELECT 
+    r.Title AS PostTitle,
+    r.UserRank,
+    u.DisplayName AS OwnerDisplayName,
+    bc.BadgeCount,
+    CASE 
+        WHEN al.LastEditDate IS NOT NULL THEN 'Edited'
+        ELSE 'Not Edited'
+    END AS EditStatus,
+    cp.CloseReason
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadgeCounts bc ON u.Id = bc.UserId
+LEFT JOIN 
+    ActivityLog al ON r.Id = al.PostId
+LEFT JOIN 
+    ClosedPosts cp ON r.Id = cp.Id
+WHERE 
+    r.UserRank <= 5 
+ORDER BY 
+    r.UserRank, u.Reputation DESC;

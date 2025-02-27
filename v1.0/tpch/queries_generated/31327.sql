@@ -1,0 +1,43 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2022-01-01' AND o.o_orderstatus = 'O'
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT p.p_name, 
+       COUNT(DISTINCT ps.ps_suppkey) AS supplier_count, 
+       AVG(pi.ps_supplycost) AS avg_supply_cost, 
+       SUM(ls.total_revenue) AS total_revenue,
+       MAX(os.o_totalprice) AS max_order_total,
+       MIN(os.o_orderdate) AS earliest_order_date,
+       CASE 
+           WHEN AVG(pi.ps_supplycost) IS NULL THEN 'No Supply Cost'
+           ELSE 'Supply Cost Available'
+       END AS cost_availability
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier_hierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN lineitem_summary ls ON ls.l_orderkey = ps.ps_partkey
+LEFT JOIN order_summary os ON os.o_orderkey = ls.l_orderkey
+WHERE p.p_size > 10 AND p.p_retailprice BETWEEN 50.00 AND 500.00
+GROUP BY p.p_name
+HAVING COUNT(DISTINCT ps.ps_suppkey) > 5
+ORDER BY total_revenue DESC
+LIMIT 10;

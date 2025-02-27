@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+TotalSales AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+SupplierData AS (
+    SELECT s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_name, s.s_nationkey
+),
+CustomerSales AS (
+    SELECT c.c_custkey, SUM(ts.total_sales) AS customer_total_sales
+    FROM customer c
+    JOIN TotalSales ts ON c.c_custkey = ts.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT n.n_name, COUNT(DISTINCT sh.s_suppkey) AS supplier_count, 
+       COALESCE(SUM(cs.customer_total_sales), 0) AS total_customer_sales, 
+       MAX(c.c_acctbal) AS max_account_balance,
+       AVG(CASE WHEN sh.level > 1 THEN sh.s_acctbal END) AS avg_acctbal_hierarchy,
+       STRING_AGG(DISTINCT p.p_name, ', ') AS popular_parts
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN CustomerSales cs ON s.s_nationkey = cs.c_custkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+WHERE r.r_name IS NOT NULL AND (sh.s_acctbal IS NULL OR sh.s_acctbal > 1000)
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT sh.s_suppkey) > 5
+ORDER BY total_customer_sales DESC, max_account_balance DESC;

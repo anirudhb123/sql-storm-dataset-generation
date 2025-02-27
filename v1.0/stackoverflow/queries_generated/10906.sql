@@ -1,0 +1,29 @@
+-- Performance benchmarking query for Stack Overflow schema
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    COUNT(c.Id) AS CommentCount,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+    COALESCE(json_agg(DISTINCT t.TagName), '[]') AS Tags,
+    COUNT(DISTINCT b.Id) AS BadgeCount
+FROM 
+    Posts p
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+LEFT JOIN 
+    Badges b ON b.UserId = p.OwnerUserId
+WHERE 
+    p.CreationDate >= '2023-01-01'  -- filter for posts created in the year 2023
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, p.ViewCount
+ORDER BY 
+    p.ViewCount DESC  -- sort by view count for performance comparison
+LIMIT 100;  -- limit to top 100 posts for benchmarking

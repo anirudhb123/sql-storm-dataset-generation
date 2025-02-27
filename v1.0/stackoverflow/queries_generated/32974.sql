@@ -1,0 +1,66 @@
+WITH RECURSIVE UserVoteSummary AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (ORDER BY COUNT(V.Id) DESC) AS VoteRank
+    FROM
+        Users U
+    LEFT JOIN
+        Votes V ON U.Id = V.UserId
+    GROUP BY
+        U.Id, U.DisplayName
+),
+PopularPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS PopularityRank
+    FROM
+        Posts P
+    LEFT JOIN
+        Comments C ON P.Id = C.PostId
+    WHERE
+        P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY
+        P.Id, P.Title, P.Score, P.ViewCount
+),
+TopPostsWithUserVotes AS (
+    SELECT
+        PP.PostId,
+        PP.Title,
+        PP.Score,
+        PP.ViewCount,
+        PP.CommentCount,
+        U.DisplayName AS TopVoter,
+        US.TotalVotes AS VoterTotalVotes
+    FROM
+        PopularPosts PP
+    LEFT JOIN
+        Votes V ON PP.PostId = V.PostId
+    LEFT JOIN
+        UserVoteSummary US ON V.UserId = US.UserId
+    LEFT JOIN
+        Users U ON V.UserId = U.Id
+    WHERE
+        PP.PopularityRank <= 10
+)
+SELECT
+    T.*,
+    CASE 
+        WHEN T.VoterTotalVotes IS NULL THEN 'No votes yet'
+        ELSE COUNT(*) OVER (PARTITION BY T.PostId) || ' total votes'
+    END AS VoteStatus,
+    (SELECT STRING_AGG(DISTINCT Tag.TagName, ', ') 
+        FROM unnest(string_to_array(P.Tags, '><')) AS Tag) AS AssociatedTags
+FROM
+    TopPostsWithUserVotes T
+JOIN
+    Posts P ON T.PostId = P.Id
+ORDER BY
+    T.Score DESC, T.ViewCount DESC;

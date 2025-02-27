@@ -1,0 +1,50 @@
+
+WITH RECURSIVE CategoryHierarchy AS (
+    SELECT i_category as category, i_item_id, i_item_desc, 1 as level
+    FROM item
+    WHERE i_category_id = 1
+    UNION ALL
+    SELECT i_category, i_item_id, i_item_desc, level + 1
+    FROM item i
+    JOIN CategoryHierarchy ch ON i.i_category_id = ch.category
+),
+SalesData AS (
+    SELECT 
+        s.ss_sold_date_sk,
+        s.ss_item_sk,
+        SUM(s.ss_quantity) AS total_quantity,
+        SUM(s.ss_net_paid) AS total_sales,
+        COUNT(DISTINCT s.ss_customer_sk) AS unique_customers
+    FROM store_sales s
+    JOIN customer c ON s.ss_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_country = 'USA'
+    GROUP BY s.ss_sold_date_sk, s.ss_item_sk
+),
+DailySales AS (
+    SELECT 
+        dd.d_date as sales_date,
+        sd.ss_item_sk,
+        sd.total_quantity,
+        sd.total_sales,
+        sd.unique_customers,
+        ROW_NUMBER() OVER (PARTITION BY sd.ss_item_sk ORDER BY dd.d_date) AS sales_rank
+    FROM SalesData sd
+    JOIN date_dim dd ON sd.ss_sold_date_sk = dd.d_date_sk
+)
+SELECT 
+    ch.category,
+    ds.sales_date,
+    ds.total_quantity,
+    ds.total_sales,
+    ds.unique_customers,
+    CASE 
+        WHEN ds.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sales_status,
+    COALESCE((SELECT AVG(total_sales) 
+              FROM DailySales ds2 
+              WHERE ds2.ss_item_sk = ds.ss_item_sk AND ds2.sales_rank < ds.sales_rank), 0) AS avg_previous_sales
+FROM DailySales ds
+JOIN CategoryHierarchy ch ON ds.ss_item_sk = ch.i_item_id
+WHERE ds.sales_rank <= 5
+ORDER BY ch.category, ds.sales_date DESC;

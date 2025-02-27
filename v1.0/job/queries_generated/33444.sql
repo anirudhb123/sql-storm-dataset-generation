@@ -1,0 +1,65 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        COALESCE(t.title, 'Unknown Title') AS title,
+        md5sum,
+        1 AS level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        title t ON m.movie_id = t.id
+
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id,
+        COALESCE(t.title, 'Unknown Title') AS title,
+        mc.md5sum,
+        mh.level + 1
+    FROM 
+        movie_link mc
+    JOIN 
+        movie_hierarchy mh ON mc.movie_id = mh.movie_id
+    LEFT JOIN 
+        title t ON mc.linked_movie_id = t.id
+)
+, movie_cast AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        COUNT(ci.id) AS role_count,
+        RANK() OVER (PARTITION BY c.movie_id ORDER BY COUNT(ci.id) DESC) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        complete_cast c ON ci.movie_id = c.movie_id
+    GROUP BY 
+        c.movie_id, a.name
+    HAVING 
+        COUNT(ci.id) > 1
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.level,
+    mc.actor_name,
+    mc.role_count,
+    CASE 
+        WHEN mc.actor_rank = 1 THEN 'Lead Actor'
+        WHEN mc.actor_rank <= 3 THEN 'Supporting Actor'
+        ELSE 'Minor Role'
+    END AS role_type,
+    COALESCE(mk.keyword, 'No Keywords') AS keyword
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_cast mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+WHERE 
+    mh.level <= 3 
+    AND (mh.md5sum IS NOT NULL OR mc.actor_name IS NOT NULL)
+ORDER BY 
+    mh.level, mh.title, mc.role_count DESC;

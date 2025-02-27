@@ -1,0 +1,45 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        COALESCE(mi.info, 'No Information') AS movie_info,
+        COUNT(c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        complete_cast cc ON m.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id
+    GROUP BY 
+        m.movie_id, m.title, mi.info
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.movie_info,
+    md.cast_count,
+    md.cast_names
+FROM 
+    MovieDetails md
+WHERE 
+    md.cast_count > 3 AND
+    md.title ILIKE '%adventure%'
+ORDER BY 
+    md.production_year DESC, md.cast_count ASC
+LIMIT 10;

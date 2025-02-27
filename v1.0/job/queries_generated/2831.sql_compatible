@@ -1,0 +1,59 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM 
+        title t
+), 
+CastDetails AS (
+    SELECT 
+        c.movie_id, 
+        a.name AS actor_name, 
+        r.role
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+), 
+MovieInfo AS (
+    SELECT 
+        mk.movie_id, 
+        STRING_AGG(DISTINCT ki.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT mt.kind, ', ') AS company_types
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    JOIN 
+        movie_companies mc ON mc.movie_id = mk.movie_id
+    JOIN 
+        company_type mt ON mc.company_type_id = mt.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT DISTINCT
+    rt.title,
+    rt.production_year,
+    cd.actor_name,
+    mi.keywords,
+    COUNT(CASE WHEN ci.id IS NULL THEN 1 END) AS null_movie_count,
+    COALESCE(mi.company_types, 'No companies') AS company_info
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    CastDetails cd ON rt.title_id = cd.movie_id
+LEFT JOIN 
+    MovieInfo mi ON rt.title_id = mi.movie_id
+LEFT JOIN 
+    complete_cast ci ON rt.title_id = ci.movie_id
+WHERE 
+    rt.production_year >= 2000 AND (cd.actor_name IS NOT NULL OR mi.keywords IS NOT NULL)
+GROUP BY 
+    rt.title, rt.production_year, cd.actor_name, mi.keywords, mi.company_types
+ORDER BY 
+    rt.production_year DESC, rt.title ASC;

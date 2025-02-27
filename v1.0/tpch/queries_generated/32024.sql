@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 
+           s_acctbal, s_comment, 
+           CAST(s_name AS varchar(255)) AS full_name,
+           1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000.00
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           s.s_acctbal, s.s_comment,
+           CAST(CONCAT(sh.full_name, ' -> ', s.s_name) AS varchar(255)),
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 1000.00 AND sh.level < 3
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+OrderAnalysis AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+           MAX(l.l_shipdate) AS latest_ship_date
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name
+    FROM CustomerOrders c
+    WHERE c.total_spent > 5000
+)
+SELECT 
+    s.s_name AS supplier_name,
+    s.s_acctbal AS supplier_balance,
+    c.c_name AS customer_name,
+    SUM(o.revenue) AS total_revenue,
+    COUNT(DISTINCT ho.o_orderkey) AS order_count,
+    RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(o.revenue) DESC) AS revenue_rank
+FROM SupplierHierarchy s
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN OrderAnalysis o ON o.o_orderkey IN (SELECT o.o_orderkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE l.l_suppkey = s.s_suppkey)
+LEFT JOIN HighValueCustomers c ON o.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+group by s.s_suppkey, s.s_name, s.s_acctbal, c.c_name
+HAVING SUM(o.revenue) > 1000
+ORDER BY revenue_rank;

@@ -1,0 +1,68 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn
+    FROM 
+        title t
+    WHERE 
+        t.kind_id IN (SELECT k.id FROM kind_type k WHERE k.kind LIKE 'movie%')
+),
+MovieCast AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        c.person_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY m.title ORDER BY c.nr_order) AS actor_order
+    FROM 
+        RankedMovies m
+    JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        m.production_year >= 2000
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        COUNT(*) AS movies_count
+    FROM 
+        MovieCast
+    GROUP BY 
+        actor_name
+    HAVING 
+        COUNT(*) > 5
+),
+ActorDetails AS (
+    SELECT 
+        a.name AS actor_name,
+        p.info AS bio,
+        a.person_id AS actor_id
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        person_info p ON a.person_id = p.person_id
+    WHERE 
+        p.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+)
+SELECT 
+    m.title,
+    m.production_year,
+    m.actor_name,
+    COALESCE(ad.bio, 'No bio available') AS bio,
+    m.actor_order
+FROM 
+    MovieCast m
+LEFT JOIN 
+    TopActors ta ON m.actor_name = ta.actor_name
+LEFT JOIN 
+    ActorDetails ad ON m.actor_name = ad.actor_name
+WHERE 
+    ta.movies_count IS NOT NULL
+ORDER BY 
+    m.production_year DESC, m.actor_order;

@@ -1,0 +1,102 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        rh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        RecursiveMovieHierarchy rh ON ml.linked_movie_id = rh.movie_id
+    JOIN 
+        aka_title m ON m.id = ml.movie_id
+    WHERE 
+        rh.level < 5 
+
+),
+FilteredMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        (CASE 
+            WHEN production_year IS NULL THEN 'No Year'
+            WHEN production_year < 2000 THEN 'Before 2000'
+            ELSE '2000 and later'
+         END) AS year_category
+    FROM 
+        RecursiveMovieHierarchy
+),
+AverageRatings AS (
+    SELECT 
+        m.movie_id,
+        AVG(r.rating) AS avg_rating
+    FROM 
+        movie_info m
+    JOIN 
+        (SELECT movie_id, info 
+         FROM movie_info 
+         WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'rating')) r ON m.movie_id = r.movie_id
+    GROUP BY 
+        m.movie_id
+),
+MoviesWithRoleCounts AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    JOIN 
+        movie_info mi ON ci.movie_id = mi.movie_id
+    GROUP BY 
+        m.movie_id
+),
+FinalResults AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        fm.year_category,
+        COALESCE(ar.avg_rating, 0) AS avg_rating,
+        COALESCE(mrc.actor_count, 0) AS actor_count
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        AverageRatings ar ON fm.movie_id = ar.movie_id
+    LEFT JOIN 
+        MoviesWithRoleCounts mrc ON fm.movie_id = mrc.movie_id
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN avg_rating = 0 THEN 'No Ratings'
+        ELSE CONCAT('Average Rating: ', ROUND(avg_rating, 2))
+    END AS rating_summary,
+    CASE 
+        WHEN actor_count > 5 THEN 'Star-studded'
+        WHEN actor_count BETWEEN 1 AND 5 THEN 'Moderately Cast'
+        ELSE 'Less Than 1 Actor'
+    END AS cast_summary
+FROM 
+    FinalResults
+WHERE 
+    (production_year IS NOT NULL AND production_year >= 2000) 
+    OR year_category = 'No Year'
+ORDER BY 
+    actor_count DESC,
+    avg_rating DESC
+LIMIT 100;

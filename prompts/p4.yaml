@@ -1,0 +1,7 @@
+model: gpt-4o-mini
+base_id: 15000
+count: 5000
+temperature: 1.0
+max_tokens: 1000
+prompt: >-
+  Generate a simple SQL query for benchmarking.

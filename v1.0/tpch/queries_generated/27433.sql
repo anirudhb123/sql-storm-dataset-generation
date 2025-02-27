@@ -1,0 +1,24 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nationkey,
+           CONCAT('Supplier: ', s.s_name, ', Address: ', s.s_address) AS supplier_info,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_address, s.nationkey
+),
+TopSuppliers AS (
+    SELECT *, ROW_NUMBER() OVER (ORDER BY total_supplycost DESC) AS rank
+    FROM SupplierDetails
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, CONCAT('Part Name: ', p.p_name, ', Brand: ', p.p_brand) AS part_info,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+)
+SELECT ts.rank, ts.s_name, ts.s_address, ts.total_supplycost, pd.part_info
+FROM TopSuppliers ts
+JOIN PartDetails pd ON pd.supplier_count > 5
+WHERE ts.rank <= 10
+ORDER BY ts.total_supplycost DESC;

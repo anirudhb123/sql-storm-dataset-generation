@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND -- Only questions
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days' -- Last 30 days
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(rp.UpVotes) AS TotalUpVotes,
+        SUM(rp.DownVotes) AS TotalDownVotes,
+        SUM(rp.CommentCount) AS TotalComments,
+        COUNT(rp.PostId) AS PostsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerDisplayName
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    us.TotalComments,
+    us.PostsCount
+FROM 
+    UserStats us
+WHERE 
+    us.Reputation > 1000 -- Only users with a reputation greater than 1000
+ORDER BY 
+    us.TotalUpVotes DESC, us.TotalComments DESC
+LIMIT 10;

@@ -1,0 +1,52 @@
+WITH RankedMovies AS (
+    SELECT
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM
+        aka_title a
+    LEFT JOIN
+        cast_info c ON a.id = c.movie_id
+    WHERE
+        a.production_year IS NOT NULL
+    GROUP BY
+        a.id
+),
+MovieKeywords AS (
+    SELECT
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword m
+    JOIN
+        keyword k ON m.keyword_id = k.id
+    GROUP BY
+        m.movie_id
+),
+TitleAndKeywords AS (
+    SELECT
+        r.title,
+        r.production_year,
+        COALESCE(mk.keywords, 'No keywords') AS keywords,
+        r.cast_count
+    FROM
+        RankedMovies r
+    LEFT JOIN
+        MovieKeywords mk ON r.id = mk.movie_id
+)
+SELECT
+    t.title,
+    t.production_year,
+    t.keywords,
+    t.cast_count,
+    CASE 
+        WHEN t.rank <= 5 THEN 'Top Movie of the Year'
+        ELSE 'Regular Movie'
+    END AS movie_rank
+FROM
+    TitleAndKeywords t
+WHERE
+    t.cast_count > 5
+ORDER BY
+    t.production_year DESC, t.cast_count DESC;

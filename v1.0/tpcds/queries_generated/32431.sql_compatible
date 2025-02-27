@@ -1,0 +1,60 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws.order_number,
+        SUM(ws.net_profit) AS total_profit,
+        COUNT(ws.order_number) AS order_count,
+        RANK() OVER (PARTITION BY ws.ws_bill_customer_sk ORDER BY SUM(ws.net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' AND
+        cd.cd_marital_status = 'M'
+    GROUP BY 
+        ws.order_number, ws.ws_bill_customer_sk
+),
+Top_Customers AS (
+    SELECT 
+        profit_rank,
+        COUNT(*) AS customer_count
+    FROM 
+        Sales_CTE
+    WHERE 
+        total_profit > 5000
+    GROUP BY 
+        profit_rank
+),
+Inventory_Status AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_stock
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    SUM(ws.net_profit) AS total_profit,
+    COALESCE(TC.customer_count, 0) AS frequent_customers,
+    COALESCE(IS.total_stock, 0) AS total_inventory
+FROM 
+    web_sales ws
+JOIN 
+    customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    Top_Customers TC ON c.c_current_cdemo_sk = TC.profit_rank
+LEFT JOIN 
+    Inventory_Status IS ON ws.ws_item_sk = IS.inv_item_sk
+WHERE 
+    ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+GROUP BY 
+    c.c_first_name, c.c_last_name, TC.customer_count, IS.total_stock
+ORDER BY 
+    total_profit DESC
+LIMIT 10;

@@ -1,0 +1,66 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        mt.episode_of_id,
+        COALESCE(aka.name, 'Unknown') AS film_creator,
+        '' AS film_notes
+    FROM 
+        aka_title AS mt
+    LEFT JOIN 
+        aka_name AS aka ON mt.id = aka.id
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1 AS level,
+        mt.episode_of_id,
+        COALESCE(aka.name, 'Unknown') AS film_creator,
+        ml.note AS film_notes
+    FROM 
+        movie_link AS ml
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title AS mt ON ml.linked_movie_id = mt.id
+    LEFT JOIN 
+        aka_name AS aka ON mt.id = aka.id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    mh.film_creator,
+    mh.film_notes,
+    COUNT(DISTINCT ci.person_id) AS num_cast_members,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS cast_with_notes,
+    STRING_AGG(DISTINCT ci.note, ', ') FILTER (WHERE ci.note IS NOT NULL) AS all_cast_notes,
+    COUNT(DISTINCT mk.keyword) FILTER (WHERE mk.keyword IS NOT NULL) AS num_keywords,
+    COUNT(DISTINCT ci.role_id) AS num_roles,
+    CASE 
+        WHEN COUNT(DISTINCT ci.person_id) > 0 THEN 'Has Cast'
+        ELSE 'No Cast'
+    END AS cast_status,
+    NULLIF(mh.film_notes, '') AS film_note_or_null,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS rank_within_year
+FROM 
+    MovieHierarchy AS mh
+LEFT JOIN 
+    cast_info AS ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_keyword AS mk ON mh.movie_id = mk.movie_id
+WHERE 
+    mh.production_year > 2000
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level, mh.film_creator, mh.film_notes
+ORDER BY 
+    mh.production_year DESC, num_cast_members DESC, mh.title;

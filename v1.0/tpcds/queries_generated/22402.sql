@@ -1,0 +1,41 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT wr_returning_customer_sk, 
+           SUM(wr_return_quantity) AS total_returned_quantity,
+           COUNT(DISTINCT wr_order_number) AS distinct_orders_returned
+    FROM web_returns
+    WHERE wr_returned_date_sk = (SELECT MAX(wr_returned_date_sk) FROM web_returns)
+    GROUP BY wr_returning_customer_sk
+),
+PromotionSummary AS (
+    SELECT p.p_promo_name,
+           COUNT(DISTINCT ws_order_number) AS total_sales,
+           SUM(ws_net_profit) AS total_profit
+    FROM promotion p
+    JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    WHERE p.p_start_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_current_year = 'Y')
+      AND (p.p_end_date_sk IS NULL OR p.p_end_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_current_year = 'Y'))
+    GROUP BY p.p_promo_name
+),
+SeasonalSales AS (
+    SELECT d.d_month_seq,
+           SUM(ws.ws_ext_sales_price) AS monthly_sales
+    FROM date_dim d
+    JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE d.d_year = (SELECT MAX(d_year) FROM date_dim)
+    GROUP BY d.d_month_seq
+)
+SELECT c.c_customer_id,
+       COALESCE(r.total_returned_quantity, 0) AS total_returns,
+       COALESCE(r.distinct_orders_returned, 0) AS orders_returned,
+       COALESCE(p.promo_name, 'No Promotion') AS promo_name,
+       p.total_sales,
+       p.total_profit,
+       s.monthly_sales
+FROM customer c
+LEFT JOIN CustomerReturns r ON c.c_customer_sk = r.wr_returning_customer_sk
+LEFT JOIN PromotionSummary p ON c.c_customer_sk IN (SELECT ws_bill_customer_sk FROM web_sales)
+FULL OUTER JOIN SeasonalSales s ON s.d_month_seq = EXTRACT(MONTH FROM CURRENT_DATE)
+WHERE (c.c_preferred_cust_flag IS NOT NULL AND c.c_preferred_cust_flag = 'Y')
+   OR (r.total_returned_quantity IS NOT NULL AND r.total_returned_quantity > 0)
+ORDER BY total_returns DESC, orders_returned DESC, promo_name;

@@ -1,0 +1,58 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COALESCE(SUM(sr_return_quantity), 0) AS total_return_quantity,
+        DENSE_RANK() OVER (PARTITION BY sr_returning_customer_sk ORDER BY SUM(sr_return_quantity) DESC) AS rnk
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+),
+AggregateWebSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS order_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_customer_sk IS NOT NULL
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    ca.city,
+    ca.state,
+    COALESCE(ca.total_return_quantity, 0) AS total_return_quantity,
+    COALESCE(ws.total_orders, 0) AS total_web_orders,
+    COALESCE(ws.total_net_profit, 0.00) AS total_web_net_profit
+FROM 
+    (SELECT 
+        district.city, district.state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer_address AS district
+    JOIN 
+        customer AS c ON district.ca_address_sk = c.c_current_addr_sk
+    WHERE 
+        district.ca_country = 'USA' AND 
+        district.ca_state IN ('CA', 'NY') 
+    GROUP BY 
+        district.city, district.state) AS ca
+LEFT JOIN 
+    (SELECT 
+        r.returning_customer_sk,
+        w.total_orders,
+        w.total_net_profit
+    FROM 
+        RankedReturns r
+    LEFT JOIN 
+        AggregateWebSales w ON r.returning_customer_sk = w.ws_bill_customer_sk
+    WHERE 
+        rnk = 1
+    ) AS ws ON ca.customer_count > 0
+ORDER BY 
+    total_net_profit DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

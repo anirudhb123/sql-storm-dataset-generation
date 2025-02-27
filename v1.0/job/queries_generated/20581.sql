@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        0 AS hierarchy_level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        CONCAT('Sequel to: ', mh.movie_title) AS movie_title,
+        m.production_year,
+        mh.hierarchy_level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    COUNT(distinct mc.company_id) AS total_companies,
+    MIN(mk.keyword) AS first_keyword,
+    MAX(mk.keyword) AS last_keyword,
+    AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order END) AS average_cast_order,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+    STRING_AGG(DISTINCT ak.name, '; ') AS actors_names,
+    COUNT(DISTINCT CASE WHEN ak.id IS NULL THEN 1 END) AS undefined_aka_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    mh.hierarchy_level > 0 
+    AND (mh.production_year = 2020 OR mh.production_year = 2021)
+    AND (cn.country_code IS NOT NULL OR cn.name IS NOT NULL)
+GROUP BY 
+    mh.movie_title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ak.person_id) > 5
+ORDER BY 
+    mh.production_year DESC, mh.movie_title;
+

@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(SUM(mc.revenue), 0) AS total_revenue
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(SUM(mo.revenue), 0) + mh.total_revenue
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    LEFT JOIN 
+        movie_companies mo ON mt.id = mo.movie_id
+    GROUP BY 
+        ml.linked_movie_id, mt.title, mt.production_year, mh.total_revenue
+)
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    h.total_revenue,
+    COUNT(DISTINCT cc.subject_id) AS actor_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS actors
+FROM 
+    movie_hierarchy h
+LEFT JOIN 
+    complete_cast cc ON h.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    info_type it ON it.id = ci.person_role_id
+WHERE 
+    h.production_year IS NOT NULL
+    AND h.total_revenue > (SELECT AVG(total_revenue) FROM movie_hierarchy)
+GROUP BY 
+    h.movie_id, h.title, h.production_year, h.total_revenue
+ORDER BY 
+    h.total_revenue DESC
+LIMIT 10;

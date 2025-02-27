@@ -1,0 +1,57 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS ranked_sales
+    FROM web_sales
+    WHERE ws_bill_customer_sk IS NOT NULL
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+TopSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_revenue,
+        i.i_item_desc,
+        i.i_current_price,
+        i.i_brand
+    FROM SalesData sd
+    JOIN item i ON sd.ws_item_sk = i.i_item_sk
+    WHERE sd.ranked_sales <= 10
+),
+ReturnStats AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_value
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+SalesReturnComparison AS (
+    SELECT 
+        ts.ws_item_sk,
+        ts.total_quantity,
+        ts.total_revenue,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        COALESCE(rs.total_return_value, 0) AS total_return_value,
+        (ts.total_revenue - COALESCE(rs.total_return_value, 0)) AS net_revenue
+    FROM TopSales ts
+    LEFT JOIN ReturnStats rs ON ts.ws_item_sk = rs.sr_item_sk
+)
+SELECT 
+    ts.i_item_desc,
+    ts.total_quantity,
+    ts.total_revenue,
+    ts.total_returns,
+    ts.total_return_value,
+    ts.net_revenue,
+    (CASE
+        WHEN ts.total_revenue > 0 THEN ROUND((ts.total_returns::decimal / ts.total_quantity) * 100, 2)
+        ELSE 0
+    END) AS return_percentage
+FROM SalesReturnComparison ts
+ORDER BY ts.net_revenue DESC
+LIMIT 20;

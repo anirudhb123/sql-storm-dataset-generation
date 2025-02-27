@@ -1,0 +1,46 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount,
+        COALESCE(COUNT(DISTINCT p.Id), 0) AS PostsCount,
+        COALESCE(COUNT(DISTINCT c.Id), 0) AS CommentsCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.UserId = u.Id
+    GROUP BY u.Id
+),
+UserRanked AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+        DENSE_RANK() OVER (ORDER BY UpVotesCount DESC) AS UpVotesRank
+    FROM UserStats
+),
+TopUsers AS (
+    SELECT UserId, DisplayName, Reputation, UpVotesCount, DownVotesCount, PostsCount, CommentsCount,
+           ReputationRank, UpVotesRank
+    FROM UserRanked
+    WHERE ReputationRank <= 10
+)
+
+SELECT 
+    t.UserId,
+    t.DisplayName,
+    t.Reputation,
+    COALESCE(p.Title, 'N/A') AS TopPost,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    COALESCE(ROUND(AVG(v.BountyAmount), 2), 0) AS AverageBounty,
+    STRING_AGG(DISTINCT CASE WHEN t2.TagName IS NOT NULL THEN t2.TagName ELSE 'No Tags' END, ', ') AS AssociatedTags
+FROM TopUsers t
+LEFT JOIN Posts p ON t.UserId = p.OwnerUserId AND p.Score > 10
+LEFT JOIN Comments c ON t.UserId = c.UserId
+LEFT JOIN PostLinks pl ON pl.PostId = p.Id
+LEFT JOIN Tags t2 ON pl.RelatedPostId = t2.Id
+LEFT JOIN Votes v ON t.UserId = v.UserId AND v.VoteTypeId IN (8, 9)
+GROUP BY t.UserId, t.DisplayName, t.Reputation
+ORDER BY t.Reputation DESC, t.UpVotesCount DESC
+LIMIT 20;

@@ -1,0 +1,44 @@
+
+WITH AddressComponents AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(TRIM(ca_street_number), ' ', TRIM(ca_street_name), ' ', TRIM(ca_street_type), 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(', Suite ', TRIM(ca_suite_number)) ELSE '' END) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM customer_address
+),
+Demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        CONCAT(TRIM(cd_gender), ' ', TRIM(cd_marital_status), ' ', TRIM(cd_education_status)) AS demographic_info
+    FROM customer_demographics
+),
+AggregateSales AS (
+    SELECT 
+        ws_bill_addr_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(ws_order_number) AS number_of_orders
+    FROM web_sales
+    GROUP BY ws_bill_addr_sk
+)
+SELECT 
+    AC.full_address,
+    AC.ca_city,
+    AC.ca_state,
+    AC.ca_zip,
+    D.demographic_info,
+    COALESCE(AS.total_sales, 0) AS total_sales,
+    COALESCE(AS.number_of_orders, 0) AS number_of_orders
+FROM AddressComponents AC
+JOIN customer C ON AC.ca_address_sk = C.c_current_addr_sk
+JOIN Demographics D ON C.c_current_cdemo_sk = D.cd_demo_sk
+LEFT JOIN AggregateSales AS ON AC.ca_address_sk = AS.ws_bill_addr_sk
+WHERE AC.ca_state = 'NY'
+AND (D.cd_marital_status = 'M' OR D.cd_edication_status LIKE '%Bachelor%')
+ORDER BY total_sales DESC
+LIMIT 100;

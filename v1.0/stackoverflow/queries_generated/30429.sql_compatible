@@ -1,0 +1,81 @@
+
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.CreationDate,
+        p2.AcceptedAnswerId,
+        p2.OwnerUserId,
+        p2.PostTypeId,
+        rp.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePosts rp ON p2.ParentId = rp.Id
+),
+PostWithVotes AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        ru.DisplayName AS OwnerDisplayName,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        RecursivePosts rp
+    JOIN 
+        Users ru ON rp.OwnerUserId = ru.Id
+    LEFT JOIN 
+        Votes v ON rp.Id = v.PostId
+    GROUP BY 
+        rp.Id, ru.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.CreationDate,
+        ph.UserDisplayName AS ClosedBy,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+TopClosedPosts AS (
+    SELECT 
+        cp.PostId,
+        cp.ClosedBy,
+        cp.ClosedDate,
+        cp.CloseReason,
+        ROW_NUMBER() OVER (ORDER BY cp.ClosedDate DESC) AS rn
+    FROM 
+        ClosedPosts cp
+)
+SELECT 
+    pv.Title,
+    pv.VoteCount,
+    cp.ClosedBy,
+    cp.ClosedDate,
+    cp.CloseReason
+FROM 
+    PostWithVotes pv
+LEFT JOIN 
+    TopClosedPosts cp ON pv.PostId = cp.PostId
+WHERE 
+    cp.rn IS NULL OR cp.rn <= 5
+ORDER BY 
+    pv.VoteCount DESC, cp.ClosedDate DESC;

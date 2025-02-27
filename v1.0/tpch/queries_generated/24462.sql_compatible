@@ -1,0 +1,49 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_status
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1995-01-01'
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 500 AND c.c_mktsegment = 'BUILDING'
+    GROUP BY c.c_custkey
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(COALESCE(ps.ps_availqty, 0)) AS total_available,
+        MIN(s.s_acctbal) AS min_supp_balance
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_name AS part_name,
+    ra.total_available,
+    cs.total_spent,
+    COUNT(CASE WHEN o.o_orderstatus = 'O' THEN 1 END) AS on_orders,
+    COUNT(DISTINCT CASE WHEN cs.last_order_date < DATE '1996-01-01' THEN cs.c_custkey ELSE NULL END) AS inactive_customers,
+    STRING_AGG(DISTINCT n.n_name, ', ') AS nations,
+    (SELECT COUNT(*)
+     FROM lineitem l
+     WHERE l.l_orderkey = ra.o_orderkey AND l.l_returnflag = 'R') AS returned_items
+FROM part p
+LEFT JOIN SupplierAvailability ra ON ra.ps_partkey = p.p_partkey
+LEFT JOIN CustomerSummary cs ON cs.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey))
+LEFT JOIN nation n ON n.n_nationkey IN (SELECT DISTINCT s.s_nationkey FROM supplier s WHERE s.s_suppkey = ra.ps_suppkey)
+WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) * 0.9 FROM part p2)
+GROUP BY p.p_name, ra.total_available, cs.total_spent
+HAVING COALESCE(ra.total_available, 0) - COALESCE(cs.total_spent, 0) > 100
+ORDER BY p.p_name;

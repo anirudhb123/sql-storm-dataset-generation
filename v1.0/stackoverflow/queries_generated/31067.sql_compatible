@@ -1,0 +1,55 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+)
+
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS Questions,
+    COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS Answers,
+    SUM(p.Score) AS TotalScore,
+    SUM(COALESCE(va.BountyAmount, 0)) AS TotalBountyAmount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags,
+    MAX(ph.CreationDate) AS LastActivityDate,
+    COUNT(DISTINCT ph.Id) AS EditHistoryCount
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Votes va ON p.Id = va.PostId AND va.VoteTypeId IN (8, 9) 
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT DISTINCT value FROM UNNEST(string_to_array(p.Tags, ',')) AS value) 
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) >= 5
+ORDER BY 
+    TotalScore DESC;

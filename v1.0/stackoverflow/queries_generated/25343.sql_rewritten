@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Tags,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS UpVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+        LEFT JOIN Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2 
+        LEFT JOIN Comments c ON p.Id = c.PostId 
+        LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+        LEFT JOIN Badges b ON p.OwnerUserId = b.UserId 
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Body,
+        rp.Tags,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.BadgeCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1 
+),
+
+ConsolidatedData AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.Body,
+        tp.Tags,
+        tp.AnswerCount,
+        tp.CommentCount,
+        tp.UpVotes,
+        tp.BadgeCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS FormattedTags
+    FROM 
+        TopPosts tp
+        LEFT JOIN Tags t ON t.Id = ANY(string_to_array(tp.Tags, ',')::int[]) 
+    GROUP BY 
+        tp.PostId
+)
+
+SELECT 
+    cd.PostId,
+    cd.Title,
+    cd.CreationDate,
+    cd.Body,
+    cd.FormattedTags,
+    cd.AnswerCount,
+    cd.CommentCount,
+    cd.UpVotes,
+    cd.BadgeCount,
+    CASE 
+        WHEN cd.AnswerCount = 0 THEN 'No Answers'
+        WHEN cd.UpVotes = 0 THEN 'Unpopular'
+        ELSE 'Popular'
+    END AS PostPopularity
+FROM 
+    ConsolidatedData cd
+ORDER BY 
+    cd.UpVotes DESC,
+    cd.AnswerCount DESC;

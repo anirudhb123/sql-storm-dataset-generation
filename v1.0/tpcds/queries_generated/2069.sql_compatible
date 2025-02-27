@@ -1,0 +1,58 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        c.c_gender,
+        d.d_year,
+        ROW_NUMBER() OVER (PARTITION BY c.c_gender ORDER BY ws.ws_net_profit DESC) AS rank_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+),
+TopSales AS (
+    SELECT 
+        sd.ws_item_sk, 
+        SUM(sd.ws_quantity) AS total_quantity, 
+        SUM(sd.ws_net_profit) AS total_profit
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.rank_profit <= 10
+    GROUP BY 
+        sd.ws_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returns
+    FROM 
+        web_returns wr
+    JOIN 
+        customer c ON wr.wr_returning_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        wr.wr_item_sk
+)
+SELECT 
+    t.ws_item_sk,
+    t.total_quantity,
+    t.total_profit,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    (t.total_profit - COALESCE(r.total_returns, 0)) AS net_profit_after_returns
+FROM 
+    TopSales t
+LEFT JOIN 
+    CustomerReturns r ON t.ws_item_sk = r.wr_item_sk
+WHERE 
+    (t.total_profit - COALESCE(r.total_returns, 0)) > 5000
+ORDER BY 
+    net_profit_after_returns DESC
+FETCH FIRST 50 ROWS ONLY;

@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS Author,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+TagStatistics AS (
+    SELECT 
+        TRIM(UNNEST(SPLIT_PART(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><', 1))) AS TagName,
+        COUNT(*) AS PostCount,
+        AVG(p.ViewCount) AS AvgViews,
+        AVG(p.Score) AS AvgScore,
+        MIN(p.CreationDate) AS FirstPostDate,
+        MAX(p.CreationDate) AS MostRecentPostDate
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        TRIM(UNNEST(SPLIT_PART(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><', 1)))
+),
+PostHistoryStatistics AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (24, 25) THEN 1 END) AS EditCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.Author,
+    ts.TagName,
+    ts.PostCount,
+    ts.AvgViews,
+    ts.AvgScore,
+    ts.FirstPostDate,
+    ts.MostRecentPostDate,
+    phs.CloseCount,
+    phs.ReopenCount,
+    phs.EditCount
+FROM 
+    RankedPosts rp
+JOIN 
+    TagStatistics ts ON ts.TagName IN (
+        SELECT TRIM(UNNEST(SPLIT_PART(SUBSTRING(rp.Tags, 2, LENGTH(rp.Tags) - 2), '><', 1)))
+    )
+LEFT JOIN 
+    PostHistoryStatistics phs ON rp.PostId = phs.PostId
+WHERE 
+    rp.TagRank = 1
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

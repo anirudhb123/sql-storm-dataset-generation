@@ -1,0 +1,69 @@
+WITH recursive
+  movie_actors AS (
+    SELECT 
+      c.id AS cast_id,
+      p.name AS actor_name,
+      t.title AS movie_title,
+      t.production_year,
+      ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS actor_order
+    FROM 
+      cast_info c
+    JOIN 
+      aka_name p ON c.person_id = p.person_id
+    JOIN 
+      aka_title t ON c.movie_id = t.movie_id
+  ),
+  
+  high_concept_movies AS (
+    SELECT 
+      m.id AS movie_id,
+      m.title,
+      m.production_year,
+      COUNT(DISTINCT k.id) AS keyword_count
+    FROM 
+      aka_title m
+    LEFT JOIN 
+      movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+      keyword k ON mk.keyword_id = k.id
+    WHERE 
+      m.production_year IS NOT NULL
+    GROUP BY 
+      m.id
+    HAVING 
+      COUNT(DISTINCT k.id) > 5
+  ),
+
+  actor_movie_info AS (
+    SELECT 
+      ma.actor_name,
+      ma.movie_title,
+      ma.production_year,
+      CASE 
+        WHEN ma.actor_order = 1 THEN 'Lead Actor'
+        ELSE 'Supporting Actor'
+      END AS actor_role,
+      h.keyword_count
+    FROM 
+      movie_actors ma
+    JOIN 
+      high_concept_movies h ON ma.movie_title = h.title AND ma.production_year = h.production_year
+  )
+
+SELECT 
+  ami.actor_name,
+  ami.movie_title,
+  ami.production_year,
+  ami.actor_role,
+  COALESCE(ami.keyword_count, 0) AS keyword_count,
+  ARRAY_AGG(DISTINCT k.keyword) AS keywords
+FROM 
+  actor_movie_info ami
+LEFT JOIN 
+  movie_keyword mk ON ami.movie_title = (SELECT title FROM aka_title WHERE production_year = ami.production_year)
+LEFT JOIN 
+  keyword k ON mk.keyword_id = k.id
+GROUP BY 
+  ami.actor_name, ami.movie_title, ami.production_year, ami.actor_role, ami.keyword_count
+ORDER BY 
+  ami.production_year DESC, ami.actor_role, ami.actor_name;

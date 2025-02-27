@@ -1,0 +1,97 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        h.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy h ON p.ParentId = h.PostId
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+UserContribution AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN r.RecentPostRank = 1 THEN 1 ELSE 0 END) AS RecentPostCount,
+        SUM(CASE WHEN p.Score >= 0 THEN 1 ELSE 0 END) AS PositiveScores
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        RecentPosts r ON p.Id = r.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostHistoryCount AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(pc.EditCount, 0) AS TotalEdits,
+    uc.TotalPosts,
+    uc.RecentPostCount,
+    uc.PositiveScores,
+    COUNT(DISTINCT ph.PostId) AS TotalResponses,
+    AVG(p.Score) AS AvgScore,
+    COUNT(DISTINCT CASE WHEN t.TagName IS NOT NULL THEN pt.Id END) AS DistinctTagsCount
+FROM 
+    Users u
+LEFT JOIN 
+    UserContribution uc ON u.Id = uc.UserId
+LEFT JOIN 
+    PostHistoryCount pc ON u.Id = pc.PostId
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    PostHierarchy ph ON p.Id = ph.PostId
+LEFT JOIN 
+    Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+WHERE 
+    u.Reputation > 100
+GROUP BY 
+    u.DisplayName, u.Reputation, pc.EditCount, uc.TotalPosts, uc.RecentPostCount, uc.PositiveScores
+ORDER BY 
+    u.Reputation DESC;

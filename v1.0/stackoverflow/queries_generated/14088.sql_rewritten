@@ -1,0 +1,34 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(b.Id) AS BadgeCount,
+        AVG(EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - u.CreationDate))) AS AvgAccountAge,  
+        SUM(CASE WHEN v.UserId IS NOT NULL THEN 1 ELSE 0 END) AS VoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+SELECT 
+    ua.UserId,
+    ua.Reputation,
+    ua.PostCount,
+    ua.CommentCount,
+    ua.BadgeCount,
+    ua.AvgAccountAge,
+    ua.VoteCount
+FROM 
+    UserActivity ua
+ORDER BY 
+    ua.Reputation DESC, ua.PostCount DESC;

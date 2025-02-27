@@ -1,0 +1,59 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(NULLIF(U.Views, 0), 1) AS Views, -- Avoid division by zero
+        COALESCE(U.UpVotes, 0) AS UpVotes,
+        COALESCE(U.DownVotes, 0) AS DownVotes,
+        (COALESCE(U.UpVotes, 0) - COALESCE(U.DownVotes, 0)) AS VoteBalance,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(PH.Id) AS EditHistoryCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostOrder
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY P.Id
+),
+HighlightedPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        U.DisplayName AS OwnerDisplayName,
+        RP.CreationDate,
+        RP.CommentCount,
+        U.Reputation
+    FROM RecentPosts RP
+    JOIN UserStats U ON RP.OwnerUserId = U.UserId
+    WHERE RP.RecentPostOrder <= 3 -- Get the three most recent posts per user
+)
+SELECT 
+    H.PostId,
+    H.Title,
+    H.OwnerDisplayName,
+    H.CreationDate,
+    H.CommentCount,
+    CASE 
+        WHEN H.Reputation > 1000 THEN 'Active Contributor'
+        WHEN H.Reputation BETWEEN 500 AND 1000 THEN 'Moderate Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorStatus,
+    CONCAT('Post titled "', H.Title, '" was created on ', TO_CHAR(H.CreationDate, 'YYYY-MM-DD HH24:MI:SS')) AS FormattedCreationDate
+FROM HighlightedPosts H
+LEFT JOIN Posts P ON H.PostId = P.Id
+WHERE 
+    P.PostTypeId = 1 -- Only interested in questions
+    AND H.CommentCount > 0 -- Only show posts with comments
+ORDER BY H.CreationDate DESC;
+
+-- This query provides insight into recent posts made by users, categorizes contributor status based on reputation, and formats the creation date for readability.

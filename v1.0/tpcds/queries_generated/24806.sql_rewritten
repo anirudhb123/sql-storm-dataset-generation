@@ -1,0 +1,55 @@
+WITH RECURSIVE item_hierarchy AS (
+    SELECT i_item_sk, i_item_desc, i_current_price, i_brand_id, i_size, 0 AS level
+    FROM item
+    WHERE i_current_price IS NOT NULL
+
+    UNION ALL
+
+    SELECT i.i_item_sk, CONCAT(ih.i_item_desc, ' -> ', i.i_item_desc), i.i_current_price * CASE WHEN ih.level = 0 THEN 1.1 ELSE 1.05 END, i.i_brand_id, i.i_size, ih.level + 1
+    FROM item_hierarchy ih
+    JOIN item i ON ih.i_item_sk = i.i_item_sk 
+    WHERE ih.level < 5
+    AND i.i_current_price IS NOT NULL
+),
+
+customer_purchases AS (
+    SELECT c.c_customer_sk, SUM(ws.ws_net_paid) AS total_spent, COUNT(DISTINCT ws.ws_order_number) AS orders_count
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+
+purchase_summary AS (
+    SELECT cp.c_customer_sk, cp.total_spent, cp.orders_count,
+           CASE 
+               WHEN cp.total_spent > 1000 THEN 'High Value'
+               WHEN cp.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+               ELSE 'Low Value'
+           END AS customer_value
+    FROM customer_purchases cp
+),
+
+item_availability AS (
+    SELECT inv.inv_item_sk, SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM inventory inv
+    WHERE inv.inventory_date_sk = (SELECT MAX(inv2.inv_date_sk) FROM inventory inv2)
+    GROUP BY inv.inv_item_sk
+),
+
+final_report AS (
+    SELECT ih.i_item_desc AS item_description,
+           ih.level AS item_level,
+           COALESCE(pa.total_spent, 0) AS total_customer_spent,
+           ia.total_inventory AS inventory_quantity,
+           ih.i_current_price,
+           RANK() OVER (PARTITION BY ih.level ORDER BY ia.total_inventory DESC) AS inventory_rank
+    FROM item_hierarchy ih
+    LEFT JOIN purchase_summary pa ON pa.c_customer_sk = (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = ih.i_item_sk LIMIT 1)
+    LEFT JOIN item_availability ia ON ia.inv_item_sk = ih.i_item_sk
+)
+
+SELECT *
+FROM final_report
+WHERE (total_customer_spent > 0 OR inventory_quantity IS NULL)
+AND (i_current_price - (SELECT AVG(i_current_price) FROM item) > 50)
+ORDER BY inventory_rank, item_level DESC;

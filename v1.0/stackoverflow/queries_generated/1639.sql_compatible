@@ -1,0 +1,60 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBountyVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS LastActivityRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CURRENT_DATE)
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title
+)
+SELECT 
+    us.DisplayName,
+    us.TotalPosts,
+    us.Questions,
+    us.Answers,
+    us.TotalBadges,
+    us.TotalBounty,
+    pa.Title,
+    pa.CommentCount,
+    pa.TotalBountyVotes
+FROM 
+    UserStats us
+JOIN 
+    PostActivity pa ON us.UserId = pa.OwnerUserId
+WHERE 
+    (us.TotalPosts > 10 OR us.TotalBadges > 3)
+    AND pa.LastActivityRank = 1
+ORDER BY 
+    us.TotalPosts DESC, us.TotalBounty DESC
+LIMIT 50 OFFSET 0;

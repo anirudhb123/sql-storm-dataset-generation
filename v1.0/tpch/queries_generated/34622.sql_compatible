@@ -1,0 +1,49 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+MaxPart AS (
+    SELECT ps.ps_partkey, MAX(ps.ps_supplycost) AS max_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+NationSummary AS (
+    SELECT n.n_name, COUNT(s.s_suppkey) AS supplier_count, SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS part_count,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT n.n_name,
+       ns.supplier_count,
+       ns.total_acctbal,
+       l.total_revenue,
+       l.part_count,
+       CASE
+           WHEN l.revenue_rank = 1 THEN 'Top Revenue'
+           ELSE 'Other'
+       END AS revenue_category,
+       COALESCE(MAX(mp.max_supplycost), 0) AS max_supply_cost
+FROM NationSummary ns
+JOIN LineItemSummary l ON ns.supplier_count > 0
+LEFT JOIN MaxPart mp ON mp.ps_partkey = l.l_orderkey
+JOIN region r ON r.r_regionkey = (SELECT n.r_regionkey FROM nation n WHERE n.n_name = ns.n_name)
+WHERE ns.total_acctbal IS NOT NULL
+GROUP BY n.n_name, ns.supplier_count, ns.total_acctbal, l.total_revenue, l.part_count, l.revenue_rank
+ORDER BY ns.supplier_count DESC, l.total_revenue DESC
+FETCH FIRST 100 ROWS ONLY;

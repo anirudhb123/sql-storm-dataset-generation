@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT p.Id, 
+           p.Title, 
+           p.Score, 
+           p.ViewCount, 
+           p.CreationDate, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+           COUNT(c.Id) AS CommentCount,
+           COUNT(DISTINCT ph.Id) AS EditCount,
+           COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.Id END) AS Upvotes,
+           COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS Downvotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= '2023-01-01'
+    GROUP BY p.Id
+),
+TopUsers AS (
+    SELECT OwnerUserId, 
+           SUM(Score) AS TotalScore, 
+           COUNT(Id) AS PostCount 
+    FROM RankedPosts
+    GROUP BY OwnerUserId
+    HAVING SUM(Score) > 100
+),
+PostAnalysis AS (
+    SELECT r.Id, 
+           r.Title, 
+           r.Score, 
+           r.ViewCount, 
+           r.Rank, 
+           tu.TotalScore, 
+           tu.PostCount,
+           CASE 
+               WHEN r.Rank = 1 THEN 'Top Post' 
+               ELSE 'Regular Post' 
+           END AS PostCategory
+    FROM RankedPosts r
+    JOIN TopUsers tu ON r.OwnerUserId = tu.OwnerUserId
+)
+SELECT pa.Id, 
+       pa.Title, 
+       pa.Score, 
+       pa.ViewCount, 
+       pa.PostCategory, 
+       COALESCE(pa.CommentCount, 0) AS TotalComments
+FROM PostAnalysis pa
+WHERE pa.Score > 10
+ORDER BY pa.TotalScore DESC, pa.ViewCount DESC
+FETCH FIRST 100 ROWS ONLY;

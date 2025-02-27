@@ -1,0 +1,58 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        COALESCE(NULLIF(mt.production_year, 0), 'Unknown') AS production_year,
+        1 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        COALESCE(NULLIF(at.production_year, 0), 'Unknown'),
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    INNER JOIN 
+        aka_title AS at ON ml.linked_movie_id = at.id
+    INNER JOIN 
+        movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mh.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mc.id) AS company_count,
+    AVG(info_length) AS avg_info_length
+FROM 
+    cast_info AS ci
+JOIN 
+    aka_name AS ak ON ci.person_id = ak.person_id
+JOIN 
+    movie_companies AS mc ON ci.movie_id = mc.movie_id
+JOIN 
+    movie_hierarchy AS mh ON ci.movie_id = mh.movie_id
+LEFT JOIN (
+    SELECT 
+        movie_id, 
+        ROUND(AVG(LENGTH(info))) AS info_length
+    FROM 
+        movie_info
+    GROUP BY 
+        movie_id
+) AS avg_info ON mh.movie_id = avg_info.movie_id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.name, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT mc.id) > 1 
+ORDER BY 
+    avg_info_length DESC, 
+    company_count ASC;

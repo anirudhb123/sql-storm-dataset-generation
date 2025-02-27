@@ -1,0 +1,90 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id,
+        p.PostTypeId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        1 AS PostLevel
+    FROM 
+        Posts AS p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with Questions
+    UNION ALL
+    SELECT 
+        a.Id,
+        a.PostTypeId,
+        a.Title,
+        a.Score,
+        a.CreationDate,
+        a.OwnerUserId,
+        rp.PostLevel + 1
+    FROM 
+        Posts AS a
+    INNER JOIN 
+        RecursivePostCTE AS rp ON a.ParentId = rp.Id
+    WHERE 
+        a.PostTypeId = 2  -- Only focus on Answers
+),
+PostEngagement AS (
+    SELECT 
+        r.Id,
+        r.Title,
+        r.PostLevel,
+        ISNULL(v.UpVotes, 0) AS UpVotes,
+        ISNULL(v.DownVotes, 0) AS DownVotes,
+        COALESCE(v.UpVotes - v.DownVotes, 0) AS ScoreDifference,
+        ph.PostHistoryTypeId,
+        RANK() OVER (PARTITION BY r.Id ORDER BY ph.CreationDate DESC) AS LastEditRank
+    FROM 
+        RecursivePostCTE AS r
+    LEFT JOIN 
+        (SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM Votes 
+         GROUP BY PostId) AS v ON r.Id = v.PostId
+    LEFT JOIN 
+        PostHistory AS ph ON r.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Title, Body, Tags edits
+),
+FilteredPosts AS (
+    SELECT 
+        pe.*,
+        u.DisplayName AS PostOwner,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        PostEngagement AS pe
+    LEFT JOIN 
+        Users AS u ON pe.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments AS c ON pe.Id = c.PostId
+    LEFT JOIN 
+        Badges AS b ON b.UserId = pe.OwnerUserId
+    GROUP BY 
+        pe.Id, u.DisplayName, pe.UpVotes, pe.DownVotes, pe.ScoreDifference, pe.PostLevel, pe.PostHistoryTypeId
+)
+SELECT 
+    fp.Title,
+    fp.ScoreDifference,
+    fp.CommentCount,
+    fp.BadgeCount,
+    fp.PostLevel,
+    fp.PostOwner,
+    CASE 
+        WHEN fp.ScoreDifference > 0 THEN 'Popular'
+        WHEN fp.ScoreDifference < 0 THEN 'Unpopular'
+        ELSE 'Neutral'
+    END AS PopularityStatus
+FROM 
+    FilteredPosts AS fp
+WHERE 
+    fp.LastEditRank = 1
+ORDER BY 
+    fp.ScoreDifference DESC,
+    fp.CommentCount DESC
+FETCH FIRST 100 ROWS ONLY;

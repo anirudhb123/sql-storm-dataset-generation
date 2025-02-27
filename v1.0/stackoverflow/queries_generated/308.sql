@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.OwnerUserId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        u.DisplayName,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.PostRank = 1
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        pht.Name AS HistoryType,
+        COUNT(*) AS ChangeCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId, pht.Name
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.CreationDate,
+    tp.DisplayName,
+    tp.CommentCount,
+    COALESCE(ps.ChangeCount, 0) AS EditCount
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistorySummary ps ON tp.PostId = ps.PostId AND ps.HistoryType = 'Edit Body'
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    0 AS PostId,
+    'Total Edits' AS Title,
+    SUM(COALESCE(ps.ChangeCount, 0)) AS Score,
+    NULL AS CreationDate,
+    NULL AS DisplayName,
+    NULL AS CommentCount
+FROM 
+    PostHistorySummary ps
+WHERE 
+    ps.HistoryType = 'Edit Body';

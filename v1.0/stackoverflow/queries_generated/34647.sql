@@ -1,0 +1,75 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        MAX(b.Class) AS HighestBadgeClass,
+        AVG(u.Reputation) AS AvgUserReputation,
+        ROW_NUMBER() OVER (PARTITION BY ph.Level ORDER BY COUNT(c.Id) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- BountyStart and BountyClose
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        RecursivePostHierarchy ph ON p.Id = ph.Id
+    GROUP BY 
+        p.Id, p.Title, ph.Level
+),
+FilteredPosts AS (
+    SELECT 
+        ps.Title,
+        ps.CommentCount,
+        ps.TotalBounty,
+        ps.HighestBadgeClass,
+        ps.AvgUserReputation
+    FROM 
+        PostStats ps
+    WHERE 
+        ps.CommentCount > 5 AND 
+        ps.TotalBounty > 0 AND 
+        ps.HighestBadgeClass IS NOT NULL
+)
+SELECT 
+    fp.Title,
+    fp.CommentCount,
+    fp.TotalBounty,
+    fp.HighestBadgeClass,
+    CASE 
+        WHEN fp.AvgUserReputation >= 1000 THEN 'Expert'
+        ELSE 'Novice'
+    END AS UserLevel
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.TotalBounty DESC, 
+    fp.CommentCount DESC;

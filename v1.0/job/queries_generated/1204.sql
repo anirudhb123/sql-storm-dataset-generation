@@ -1,0 +1,82 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS rank_by_year
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+MovieActors AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+),
+ActorMovieCount AS (
+    SELECT 
+        a.actor_name,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        MovieActors a
+    JOIN 
+        cast_info c ON a.movie_id = c.movie_id
+    GROUP BY 
+        a.actor_name
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 5
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword IS NOT NULL
+    GROUP BY 
+        m.id
+),
+FinalResults AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        ak.actor_name,
+        ak.movie_count,
+        mw.keywords
+    FROM 
+        RankedMovies r
+    LEFT JOIN 
+        ActorMovieCount ak ON r.movie_id = ak.movie_id
+    LEFT JOIN 
+        MoviesWithKeywords mw ON r.movie_id = mw.movie_id
+    WHERE 
+        r.rank_by_year <= 10
+    ORDER BY 
+        r.production_year DESC, 
+        ak.movie_count DESC NULLS LAST
+)
+
+SELECT 
+    f.movie_id, 
+    f.title, 
+    f.production_year, 
+    COALESCE(f.actor_name, 'Unknown') AS actor_name,
+    COALESCE(f.movie_count, 0) AS total_movies_acted_in,
+    COALESCE(f.keywords, 'No keywords') AS keywords
+FROM 
+    FinalResults f
+WHERE 
+    f.keywords IS NOT NULL 
+    OR f.actor_name IS NOT NULL;

@@ -1,0 +1,49 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice,
+           COUNT(l.l_orderkey) AS LineCount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+CustomerSegments AS (
+    SELECT c.c_custkey, c.c_name, 
+           CASE
+               WHEN c.c_acctbal > 5000 THEN 'Platinum'
+               WHEN c.c_acctbal BETWEEN 1000 AND 5000 THEN 'Gold'
+               ELSE 'Silver' 
+           END AS Segment
+    FROM customer c
+)
+SELECT COALESCE(HS.s_name, 'Unknown Supplier') AS Supplier_Name,
+       CV.c_name AS Customer_Name,
+       CV.LineCount AS Order_Lines,
+       SUM(p.p_retailprice) AS Total_Part_Value,
+       CASE WHEN CV.LineCount > 3 THEN 'High Volume' ELSE 'Low Volume' END AS Order_Type
+FROM HighValueOrders CV
+LEFT JOIN RankedSuppliers HS ON CV.o_custkey = (SELECT c.c_custkey 
+                                                 FROM customer c 
+                                                 WHERE c.c_custkey = CV.o_custkey 
+                                                 AND c.c_nationkey IN (SELECT n.n_nationkey
+                                                                      FROM nation n 
+                                                                      WHERE n.n_regionkey = (SELECT r.r_regionkey 
+                                                                                             FROM region r 
+                                                                                             WHERE r.r_name = 'ASIA')))
+                                        AND HS.SupplierRank = 1
+JOIN lineitem L ON CV.o_orderkey = L.l_orderkey
+JOIN part P ON L.l_partkey = P.p_partkey
+WHERE CV.o_orderkey IN (SELECT o.o_orderkey 
+                         FROM orders o 
+                         WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31')
+GROUP BY HS.s_name, CV.c_name, CV.LineCount
+HAVING SUM(COALESCE(L.l_extendedprice * (1 - L.l_discount), L.l_extendedprice)) > 10000
+ORDER BY Total_Part_Value DESC, Supplier_Name;

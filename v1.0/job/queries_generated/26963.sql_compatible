@@ -1,0 +1,71 @@
+
+WITH movie_statistics AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS num_cast_members,
+        COALESCE(SUM(mk.keyword_text_count), 0) AS total_keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        (SELECT 
+             movie_id,
+             COUNT(DISTINCT keyword_id) AS keyword_text_count
+         FROM 
+             movie_keyword
+         GROUP BY 
+             movie_id) keyword_counts ON keyword_counts.movie_id = t.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+actor_statistics AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        STRING_AGG(m.title, ', ') AS movie_titles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title m ON c.movie_id = m.id
+    GROUP BY 
+        a.name
+),
+result AS (
+    SELECT 
+        ms.title,
+        ms.production_year,
+        ms.num_cast_members,
+        ms.total_keywords,
+        as.actor_name,
+        as.total_movies,
+        as.movie_titles
+    FROM 
+        movie_statistics ms
+    LEFT JOIN 
+        actor_statistics as ON ms.movie_id IN 
+            (SELECT movie_id FROM cast_info WHERE person_id IN 
+                (SELECT person_id FROM aka_name WHERE name ILIKE '%Smith%'))
+    WHERE 
+        ms.production_year >= 2000
+)
+SELECT 
+    title,
+    production_year,
+    num_cast_members,
+    total_keywords,
+    actor_name,
+    total_movies,
+    movie_titles
+FROM 
+    result
+ORDER BY 
+    production_year DESC, title;

@@ -1,0 +1,35 @@
+
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS hierarchy_level
+    FROM nation
+    WHERE n_nationkey IN (SELECT DISTINCT c_nationkey FROM customer)
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.hierarchy_level + 1
+    FROM nation n
+    INNER JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+SupplierAgg AS (
+    SELECT s_nationkey, COUNT(s_suppkey) AS total_suppliers,
+           SUM(s_acctbal) AS total_account_balance
+    FROM supplier
+    GROUP BY s_nationkey
+),
+PartOrderDetails AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT n.n_name AS nation_name, sa.total_suppliers, sa.total_account_balance, 
+       p.p_name, pod.total_value
+FROM NationHierarchy n
+LEFT JOIN SupplierAgg sa ON n.n_nationkey = sa.s_nationkey
+LEFT JOIN PartOrderDetails pod ON pod.rank = 1
+WHERE sa.total_account_balance IS NOT NULL AND pod.total_value IS NOT NULL
+ORDER BY sa.total_suppliers DESC, pod.total_value DESC
+LIMIT 10;

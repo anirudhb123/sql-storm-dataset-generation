@@ -1,0 +1,63 @@
+
+WITH ActorMovieCount AS (
+    SELECT 
+        ai.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ai
+    JOIN 
+        cast_info ci ON ai.person_id = ci.person_id
+    GROUP BY 
+        ai.person_id
+),
+ProductionYearTitles AS (
+    SELECT 
+        t.production_year,
+        ARRAY_AGG(DISTINCT t.title) AS titles
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.production_year
+),
+TopActors AS (
+    SELECT 
+        ai.name,
+        amc.movie_count
+    FROM 
+        ActorMovieCount amc
+    JOIN 
+        aka_name ai ON ai.person_id = amc.person_id
+    WHERE 
+        amc.movie_count > (
+            SELECT 
+                AVG(movie_count) FROM ActorMovieCount
+        )
+)
+SELECT 
+    pa.name AS Actor_Name,
+    pm.production_year,
+    pm.titles AS Movies_Produced,
+    (SELECT COUNT(*) FROM movie_info mi 
+     WHERE mi.movie_id IN (SELECT ci.movie_id FROM cast_info ci WHERE ci.person_id = pa.person_id)) AS Info_Count,
+    COALESCE((
+        SELECT 
+            COUNT(DISTINCT k.id) 
+        FROM 
+            movie_keyword mk 
+        JOIN 
+            keyword k ON mk.keyword_id = k.id 
+        WHERE 
+            mk.movie_id IN (SELECT ci.movie_id FROM cast_info ci WHERE ci.person_id = pa.person_id)
+    ), 0) AS Unique_Keywords
+FROM 
+    TopActors pa
+JOIN 
+    ProductionYearTitles pm ON pm.production_year IN (
+        SELECT DISTINCT t.production_year 
+        FROM aka_title t 
+        WHERE t.title ILIKE '%' || pa.name || '%'
+    )
+ORDER BY 
+    pa.name, pm.production_year DESC;

@@ -1,0 +1,67 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS depth
+    FROM 
+        aka_title t
+    INNER JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    INNER JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        c.country_code = 'USA'
+        
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        t.title,
+        t.production_year,
+        mh.depth + 1
+    FROM 
+        movie_hierarchy mh
+    INNER JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    INNER JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+    WHERE 
+        mh.depth < 5
+),
+cast_summary AS (
+    SELECT 
+        ak.name AS actor_name,
+        m.title AS movie_title,
+        COUNT(DISTINCT c.person_id) AS num_actors,
+        SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS num_actors_with_notes,
+        m.production_year
+    FROM 
+        movie_hierarchy m
+    JOIN 
+        cast_info c ON m.movie_id = c.movie_id
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        ak.name, m.title, m.production_year
+)
+SELECT 
+    cs.actor_name,
+    cs.movie_title,
+    cs.num_actors,
+    cs.num_actors_with_notes,
+    cs.production_year,
+    CASE 
+        WHEN cs.num_actors = 0 THEN 'No Actors'
+        WHEN cs.num_actors_with_notes = 0 THEN 'Actors Without Notes'
+        ELSE 'All Actors Active'
+    END AS actor_status
+FROM 
+    cast_summary cs
+WHERE 
+    cs.num_actors > 3
+ORDER BY 
+    cs.production_year DESC, 
+    cs.num_actors DESC
+LIMIT 10;

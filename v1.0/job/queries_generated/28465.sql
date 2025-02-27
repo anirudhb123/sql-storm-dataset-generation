@@ -1,0 +1,56 @@
+WITH NameFiltered AS (
+    SELECT 
+        a.id AS aka_id,
+        a.person_id,
+        a.name AS aka_name,
+        c.name AS char_name,
+        t.title AS movie_title,
+        t.production_year
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ca ON a.person_id = ca.person_id
+    JOIN 
+        title t ON ca.movie_id = t.id
+    JOIN 
+        char_name c ON c.imdb_id = a.person_id
+    WHERE 
+        a.name LIKE 'John%'
+),
+KeywordFiltered AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword LIKE '%action%'
+),
+TitleStats AS (
+    SELECT 
+        mf.movie_id,
+        COUNT(DISTINCT mf.subject_id) AS cast_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        complete_cast mf
+    JOIN 
+        KeywordFiltered kf ON mf.movie_id = kf.movie_id
+    GROUP BY 
+        mf.movie_id
+)
+SELECT 
+    nf.aka_id,
+    nf.aka_name,
+    nf.movie_title,
+    nf.production_year,
+    ts.cast_count,
+    ts.keyword_count
+FROM 
+    NameFiltered nf
+JOIN 
+    TitleStats ts ON nf.movie_title = ts.movie_id
+ORDER BY 
+    nf.production_year DESC, 
+    ts.keyword_count DESC;

@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CAST(s.s_name AS VARCHAR(255)) AS full_path
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.nation.n_nationkey, s.s_acctbal,
+           CAST(CONCAT(sh.full_path, ' -> ', s.s_name) AS VARCHAR(255))
+    FROM SupplierHierarchy sh
+    JOIN supplier s ON sh.s_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > 5000
+),
+PopularParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice) AS total_revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(l.l_extendedprice) > 100000
+),
+SupplierRevenue AS (
+    SELECT s.s_suppkey, SUM(l.l_extendedprice) AS total_supplier_revenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey
+),
+FinalAnalysis AS (
+    SELECT p.p_partkey, p.p_name, pr.total_revenue, sr.total_supplier_revenue,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY pr.total_revenue DESC) as revenue_rank
+    FROM PopularParts pr
+    FULL OUTER JOIN SupplierRevenue sr ON sr.total_supplier_revenue > 100000
+    JOIN part p ON p.p_partkey = pr.p_partkey
+    WHERE pr.total_revenue IS NOT NULL OR sr.total_supplier_revenue IS NOT NULL
+)
+SELECT rh.s_name,
+       fa.p_name,
+       COALESCE(fa.total_revenue, 0) AS total_revenue,
+       COALESCE(fa.total_supplier_revenue, 0) AS total_supplier_revenue,
+       CASE WHEN fa.revenue_rank IS NULL THEN 'Unknown' ELSE CAST(fa.revenue_rank AS VARCHAR) END AS revenue_category
+FROM SupplierHierarchy rh
+LEFT JOIN FinalAnalysis fa ON rh.s_suppkey = fa.p_partkey
+WHERE rh.s_acctbal > 15000
+ORDER BY rh.s_name, fa.total_revenue DESC;

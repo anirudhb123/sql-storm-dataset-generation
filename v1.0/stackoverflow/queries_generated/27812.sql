@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) as PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Filtering for questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        UNNEST(string_to_array(p.Tags, '><')) AS TagName
+    FROM 
+        RankedPosts p
+    WHERE 
+        p.PostRank <= 5 -- Top 5 posts per user
+),
+TagStatistics AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS UseCount,
+        ARRAY_AGG(DISTINCT rp.OwnerDisplayName) AS Users,
+        COUNT(DISTINCT rp.Title) AS PostCount,
+        SUM(rp.ViewCount) AS TotalViews
+    FROM 
+        TopTags tt
+    JOIN 
+        RankedPosts rp ON rp.Tags LIKE '%' || tt.TagName || '%'
+    GROUP BY 
+        TagName
+)
+SELECT 
+    ts.TagName,
+    ts.UseCount,
+    ts.Users,
+    ts.PostCount,
+    ts.TotalViews,
+    CASE 
+        WHEN ts.UseCount > 10 THEN 'Popular'
+        WHEN ts.UseCount BETWEEN 5 AND 10 THEN 'Moderate'
+        ELSE 'Less Popular'
+    END AS PopularityCategory
+FROM 
+    TagStatistics ts
+ORDER BY 
+    ts.UseCount DESC;

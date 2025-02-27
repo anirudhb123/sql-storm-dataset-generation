@@ -1,0 +1,27 @@
+
+SELECT 
+    ca.city AS address_city,
+    ca.state AS address_state,
+    COUNT(DISTINCT c.customer_id) AS total_customers,
+    AVG(CASE WHEN cd.gender = 'M' THEN cd.purchase_estimate ELSE NULL END) AS avg_male_purchase_estimate,
+    AVG(CASE WHEN cd.gender = 'F' THEN cd.purchase_estimate ELSE NULL END) AS avg_female_purchase_estimate,
+    SUM(DISTINCT CASE 
+        WHEN ca.city IS NOT NULL 
+        THEN LENGTH(ca.street_name) + LENGTH(ca.street_type)
+        ELSE 0 
+    END) AS total_string_length
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    ca.state IN ('CA', 'NY') 
+GROUP BY 
+    ca.city, ca.state
+HAVING 
+    COUNT(DISTINCT c.customer_id) > 10
+ORDER BY 
+    total_customers DESC
+LIMIT 10;

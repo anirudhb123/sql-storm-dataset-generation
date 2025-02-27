@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostComments AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(rb.PostId, 0) AS RecentPostId,
+    COALESCE(rb.Title, 'No Posts') AS RecentPostTitle,
+    COALESCE(rb.CreationDate, 'N/A') AS RecentPostCreationDate,
+    COALESCE(rb.ViewCount, 0) AS RecentPostViewCount,
+    COALESCE(rb.Score, 0) AS RecentPostScore,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    pc.CommentCount
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rb ON u.Id = rb.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostComments pc ON pc.PostId = COALESCE(rb.PostId, -1)
+WHERE 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users WHERE Reputation IS NOT NULL)
+    AND (ub.GoldBadges > 0 OR ub.SilverBadges > 0 OR ub.BronzeBadges > 0)
+ORDER BY 
+    u.Reputation DESC, 
+    rb.CreationDate DESC
+LIMIT 10;

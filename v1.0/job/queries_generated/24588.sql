@@ -1,0 +1,76 @@
+WITH RecursiveRoleCounts AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        c.person_id
+),
+PersonMovies AS (
+    SELECT 
+        p.id AS person_id,
+        a.name AS person_name,
+        ARRAY_AGG(DISTINCT t.title || ' (' || t.production_year || ')') AS movies,
+        COALESCE(rrc.role_count, 0) AS role_count
+    FROM 
+        aka_name a
+    INNER JOIN 
+        cast_info c ON a.person_id = c.person_id
+    INNER JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    LEFT JOIN 
+        RecursiveRoleCounts rrc ON a.person_id = rrc.person_id 
+    GROUP BY 
+        p.id, a.name
+),
+PopularMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        COUNT(c.person_id) AS cast_size
+    FROM 
+        aka_title m
+    JOIN 
+        cast_info c ON m.movie_id = c.movie_id
+    GROUP BY 
+        m.movie_id, m.title
+    HAVING 
+        COUNT(c.person_id) > 5
+),
+FilteredMovies AS (
+    SELECT 
+        pm.person_id,
+        pm.person_name,
+        pm.movies,
+        pm.role_count,
+        pm.subquery_movies AS sub_movies,
+        string_agg(DISTINCT pm.movies::text, ', ') AS all_movies
+    FROM 
+        PersonMovies pm
+    LEFT JOIN 
+        PopularMovies pmv ON pmv.movie_id = ANY(pm.movies)
+    GROUP BY 
+        pm.person_id, pm.person_name, pm.role_count
+)
+SELECT 
+    f.person_name,
+    f.role_count,
+    f.all_movies,
+    CASE 
+        WHEN f.role_count > 10 THEN 'Highly Active'
+        WHEN f.role_count BETWEEN 5 AND 10 THEN 'Moderately Active'
+        ELSE 'Less Active'
+    END AS activity_level
+FROM 
+    FilteredMovies f
+WHERE 
+    f.role_count IS NOT NULL
+    AND f.person_name IS NOT NULL
+ORDER BY 
+    f.role_count DESC, 
+    f.person_name;

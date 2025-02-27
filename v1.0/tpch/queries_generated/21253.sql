@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM
+        supplier s
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice < 100 THEN 'Cheap'
+            WHEN p.p_retailprice BETWEEN 100 AND 500 THEN 'Moderate'
+            ELSE 'Expensive'
+        END AS price_category
+    FROM 
+        part p
+    WHERE 
+        p.p_comment IS NOT NULL
+),
+AggLineItems AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_linenumber) AS total_lines
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_partkey
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_retailprice, 
+    p.price_category, 
+    s.s_name AS supplier_name,
+    COALESCE(ali.total_revenue, 0) AS total_revenue,
+    ali.total_lines,
+    CASE 
+        WHEN ali.total_revenue > 10000 THEN 'High Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM 
+    FilteredParts p
+LEFT JOIN
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey AND s.rn <= 5
+LEFT JOIN 
+    AggLineItems ali ON p.p_partkey = ali.l_partkey
+WHERE 
+    p.p_size IS NOT NULL AND (p.p_size > 0 OR p.p_size IS NULL)
+ORDER BY 
+    revenue_category DESC,
+    p.p_retailprice ASC NULLS LAST;

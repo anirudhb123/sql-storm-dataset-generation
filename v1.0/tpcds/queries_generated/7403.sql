@@ -1,0 +1,61 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent,
+        AVG(ws.ws_net_paid) AS avg_spent_per_order
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+),
+HighSpenders AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_orders,
+        cs.total_spent,
+        cs.avg_spent_per_order
+    FROM 
+        CustomerStats cs
+    WHERE 
+        cs.total_spent > 1000
+),
+StoreSalesSummary AS (
+    SELECT 
+        ss.s_store_sk,
+        SUM(ss.ss_sales_price) AS total_sales,
+        COUNT(ss.ss_ticket_number) AS total_transactions
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.ss_store_sk = s.s_store_sk
+    GROUP BY 
+        ss.s_store_sk
+)
+SELECT 
+    hs.c_first_name,
+    hs.c_last_name,
+    hs.total_orders,
+    hs.total_spent,
+    hs.avg_spent_per_order,
+    ss.total_sales,
+    ss.total_transactions
+FROM 
+    HighSpenders hs
+JOIN 
+    StoreSalesSummary ss ON hs.total_orders > 10
+ORDER BY 
+    hs.total_spent DESC, ss.total_sales DESC
+LIMIT 50;

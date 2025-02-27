@@ -1,0 +1,91 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_net_paid,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_paid DESC) AS sale_rank,
+        CASE 
+            WHEN ws_net_paid IS NULL THEN 'No Payment' 
+            ELSE 'Paid' 
+        END AS payment_status
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk > (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate >= 1000
+    AND 
+        (cd.cd_credit_rating = 'Good' OR cd.cd_credit_rating IS NULL)
+),
+RecentReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returned_date_sk, sr_item_sk
+    HAVING 
+        COUNT(*) >= 2
+),
+FinalReport AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        rs.ws_item_sk,
+        SUM(rs.ws_quantity) AS total_quantity,
+        SUM(rs.ws_net_paid) AS total_net_paid,
+        COALESCE(rr.total_return_amt, 0) AS total_return_amt,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        CASE 
+            WHEN SUM(rs.ws_net_paid) - COALESCE(rr.total_return_amt, 0) < 0 THEN 'Loss' 
+            ELSE 'Profit' 
+        END AS profit_loss_status
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        CustomerInfo ci ON rs.ws_item_sk IN (SELECT i_item_sk FROM item WHERE i_category_id IN (SELECT DISTINCT i_category_id FROM item WHERE i_formulation LIKE 'Liquid%'))
+    LEFT JOIN 
+        RecentReturns rr ON rs.ws_item_sk = rr.sr_item_sk
+    WHERE 
+        rs.sale_rank = 1
+    GROUP BY 
+        ci.c_customer_sk, ci.c_first_name, ci.c_last_name, rs.ws_item_sk, rr.total_return_amt, ci.cd_gender, ci.cd_marital_status
+)
+
+SELECT 
+    fr.c_customer_sk,
+    fr.c_first_name,
+    fr.c_last_name,
+    fr.ws_item_sk,
+    fr.total_quantity,
+    fr.total_net_paid,
+    fr.total_return_amt,
+    fr.cd_gender,
+    fr.cd_marital_status,
+    fr.profit_loss_status
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.total_net_paid DESC, fr.c_last_name ASC
+LIMIT 50;

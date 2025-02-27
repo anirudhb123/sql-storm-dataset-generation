@@ -1,0 +1,77 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ci.person_id, 
+        ci.movie_id, 
+        1 AS level,
+        p.info AS person_info
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    WHERE 
+        ci.nr_order = 1
+    
+    UNION ALL
+    
+    SELECT 
+        ci.person_id, 
+        ci.movie_id, 
+        ah.level + 1,
+        p.info AS person_info
+    FROM 
+        cast_info ci
+    JOIN 
+        actor_hierarchy ah ON ci.movie_id = ah.movie_id
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    WHERE 
+        ci.nr_order > ah.level
+),
+movie_details AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COALESCE(mk.keyword, 'Unknown') AS keyword,
+        ROW_NUMBER() OVER(PARTITION BY at.id ORDER BY at.production_year DESC) AS ranking
+    FROM
+        aka_title at
+    LEFT JOIN
+        movie_keyword mk ON at.id = mk.movie_id
+    WHERE
+        at.production_year >= 2000
+),
+cast_summary AS (
+    SELECT 
+        ah.person_id,
+        ah.movie_id,
+        COUNT(*) AS role_count
+    FROM 
+        actor_hierarchy ah
+    GROUP BY 
+        ah.person_id, ah.movie_id
+)
+SELECT 
+    md.title AS Movie_Title,
+    md.production_year AS Year,
+    cs.person_id AS Actor_ID,
+    cs.role_count AS Total_Roles,
+    (SELECT COUNT(DISTINCT person_id)
+     FROM cast_info c 
+     WHERE c.movie_id = cs.movie_id) AS Total_Actors,
+    COUNT(DISTINCT mk.keyword) OVER (PARTITION BY md.movie_id) AS Unique_Keywords,
+    CASE 
+        WHEN CAST(cs.role_count AS INTEGER) > 5 THEN 'Prolific Actor'
+        WHEN cs.role_count = 0 THEN 'No Roles'
+        ELSE 'Regular Actor' 
+    END AS Actor_Category
+FROM 
+    movie_details md
+JOIN 
+    cast_summary cs ON md.title = cs.movie_id
+LEFT JOIN 
+    movie_info mi ON cs.movie_id = mi.movie_id
+WHERE 
+    mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget') 
+    AND mi.info IS NOT NULL
+ORDER BY 
+    md.production_year DESC, cs.role_count DESC;

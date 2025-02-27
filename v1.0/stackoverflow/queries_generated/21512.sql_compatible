@@ -1,0 +1,77 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(p.ClosedDate, 'No Close Date') AS CloseDateInfo,
+        EXTRACT(DOW FROM p.CreationDate) + 1 AS CreationDayOfWeek,
+        ARRAY_LENGTH(STRING_TO_ARRAY(p.Tags, '>'), 1) AS TagCount
+    FROM 
+        Posts p
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.Comment,
+        ph.CreationDate AS HistoryDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Comment END) AS CloseReason,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.Comment END) AS ReopenReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId, ph.UserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rb.BadgeCount,
+    COALESCE(ph.CloseReason, 'N/A') AS LastCloseReason,
+    COALESCE(ph.ReopenReason, 'N/A') AS LastReopenReason,
+    rp.CreationDayOfWeek,
+    CASE 
+        WHEN rp.Score IS NULL THEN 'Unknown Score'
+        ELSE CASE 
+            WHEN rp.Score > 0 THEN 'Positive'
+            WHEN rp.Score < 0 THEN 'Negative'
+            ELSE 'Neutral'
+        END
+    END AS ScoreCategory,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 
+            FROM Votes v 
+            WHERE v.PostId = rp.PostId AND v.VoteTypeId IN (2, 3, 4)
+        ) THEN 'Has Votes'
+        ELSE 'No Votes'
+    END AS VotingStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges rb ON rp.PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = rb.UserId)
+LEFT JOIN 
+    PostHistoryDetails ph ON rp.PostId = ph.PostId
+WHERE 
+    rp.Rank <= 10 
+    AND rp.TagCount > 2
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate ASC;

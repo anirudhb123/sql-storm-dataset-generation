@@ -1,0 +1,56 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY s.s_nationkey) AS total_suppliers
+    FROM supplier s
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_size,
+        p.p_type,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS price_rank
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size > 10
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice * (CASE WHEN o.o_orderstatus = 'O' THEN 1 ELSE 0 END)) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COALESCE(RS.s_name, 'No Supplier') AS supplier_name,
+    CASE 
+        WHEN P.price_rank IS NOT NULL THEN 'Active'
+        ELSE 'Inactive'
+    END AS supplier_status,
+    C.total_spent,
+    C.order_count,
+    CASE 
+        WHEN C.total_spent IS NULL AND RS.total_suppliers = 0 THEN 'No Transactions'
+        ELSE NULL
+    END AS transaction_status
+FROM part p
+LEFT JOIN PartSupplierDetails P ON p.p_partkey = P.ps_partkey AND P.price_rank = 1
+LEFT JOIN RankedSuppliers RS ON P.ps_suppkey = RS.s_suppkey
+LEFT JOIN CustomerOrders C ON p.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = RS.s_suppkey FETCH FIRST 1 ROW ONLY)
+WHERE p.p_container LIKE 'L%'
+AND (p.p_retailprice - COALESCE(NULLIF(P.ps_supplycost, 0), p.p_retailprice)) > 0
+OR P.ps_availqty < 20
+)
+ORDER BY C.total_spent DESC NULLS LAST;

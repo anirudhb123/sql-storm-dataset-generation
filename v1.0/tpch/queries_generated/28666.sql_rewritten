@@ -1,0 +1,29 @@
+SELECT 
+    c.c_name AS customer_name, 
+    COUNT(o.o_orderkey) AS total_orders, 
+    SUM(l.l_extendedprice) AS total_spent, 
+    COUNT(DISTINCT s.s_suppkey) AS unique_suppliers,
+    AVG(l.l_discount) AS average_discount_rate,
+    SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT p.p_name ORDER BY p.p_name SEPARATOR ', '), ', ', 5) AS top_parts
+FROM 
+    customer c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    part p ON l.l_partkey = p.p_partkey
+WHERE 
+    c.c_acctbal > 0 
+    AND l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY 
+    c.c_name
+HAVING 
+    total_orders > 5 
+ORDER BY 
+    total_spent DESC
+LIMIT 10;

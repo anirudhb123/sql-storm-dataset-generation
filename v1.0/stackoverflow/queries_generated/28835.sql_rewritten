@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        COUNT(a.Id) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND p.PostTypeId = 1 
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Votes v
+    INNER JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        COUNT(ph.Id) AS EditCount
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    COALESCE(rv.Upvotes, 0) AS TotalUpvotes,
+    COALESCE(rv.Downvotes, 0) AS TotalDownvotes,
+    rp.TagList,
+    pd.HistoryTypes,
+    pd.EditCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentVotes rv ON rp.PostId = rv.PostId
+LEFT JOIN 
+    PostHistoryDetails pd ON rp.PostId = pd.PostId
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 100;

@@ -1,0 +1,62 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        ca.ca_city,
+        ca.ca_state,
+        hd.hd_income_band_sk,
+        hd.hd_buy_potential
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_order_number,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_item_sk) AS item_count,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    GROUP BY ws.web_site_id, ws.ws_order_number
+),
+RankedSales AS (
+    SELECT 
+        web_site_id,
+        total_sales,
+        item_count,
+        sales_rank,
+        RANK() OVER (ORDER BY total_sales DESC) AS overall_rank
+    FROM SalesData
+    WHERE total_sales > 1000
+),
+DemographicSales AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.ca_city,
+        ci.ca_state,
+        rs.total_sales,
+        rs.item_count,
+        rs.overall_rank
+    FROM CustomerInfo ci
+    JOIN RankedSales rs ON ci.c_customer_id = rs.web_site_id 
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT ds.c_customer_id) AS customer_count,
+    AVG(ds.total_sales) AS avg_sales,
+    SUM(ds.item_count) AS total_items_sold
+FROM DemographicSales ds
+JOIN customer_address ca ON ds.c_customer_id = ca.ca_address_id
+WHERE ca.ca_state = 'CA'
+GROUP BY ca.ca_city, ca.ca_state
+HAVING COUNT(DISTINCT ds.c_customer_id) > 5
+ORDER BY avg_sales DESC
+LIMIT 10;

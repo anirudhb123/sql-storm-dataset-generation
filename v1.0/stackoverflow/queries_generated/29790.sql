@@ -1,0 +1,73 @@
+WITH PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only for questions
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgePoints,
+        SUM(COALESCE(v.VoteTypeId = 2, 0)) AS TotalUpVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT pt.PostId) AS PostCount,
+        COUNT(DISTINCT u.UserId) AS ActiveUsers
+    FROM 
+        PostTags pt
+    JOIN 
+        Tags t ON pt.Tag = t.TagName
+    JOIN 
+        UserActivity u ON pt.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.UserId)
+    GROUP BY 
+        t.TagName
+),
+PostScore AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(COALESCE(v.VoteTypeId = 2, 0)) - SUM(COALESCE(v.VoteTypeId = 3, 0)) AS Score
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.ActiveUsers,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    AVG(ps.Score) AS AveragePostScore,
+    SUM(ua.QuestionCount) AS TotalQuestionsByUsers,
+    SUM(ua.TotalBadgePoints) AS TotalBadgeCount,
+    SUM(ua.TotalUpVotes) AS TotalUpVotesByUsers
+FROM 
+    TagStatistics ts
+JOIN 
+    Posts p ON ts.PostCount > 0
+JOIN 
+    PostScore ps ON p.Id = ps.PostId
+JOIN 
+    UserActivity ua ON ua.UserId IN (SELECT OwnerUserId FROM Posts WHERE Id = p.Id)
+GROUP BY 
+    ts.TagName, ts.PostCount, ts.ActiveUsers
+ORDER BY 
+    ts.PostCount DESC;

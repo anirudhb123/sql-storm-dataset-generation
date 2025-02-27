@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s_acctbal DESC) AS rnk
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey
+),
+FlaggedLineItems AS (
+    SELECT
+        l.l_orderkey,
+        COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS returned_items,
+        SUM(CASE WHEN l.l_linestatus = 'F' THEN l.l_extendedprice ELSE 0 END) AS final_price
+    FROM
+        lineitem l
+    GROUP BY
+        l.l_orderkey
+)
+SELECT
+    p.p_partkey,
+    p.p_name,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    SUM(COALESCE(li.final_price, 0)) AS total_sales,
+    c.total_spent,
+    (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = n.n_nationkey) AS avg_national_balance,
+    CASE WHEN c.total_spent IS NULL THEN 'No Orders' ELSE 'Has Orders' END AS order_status
+FROM
+    part p
+LEFT JOIN
+    RankedSuppliers s ON p.p_partkey = s.ps_partkey AND s.rnk = 1
+LEFT JOIN
+    FlaggedLineItems li ON li.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderstatus = 'O')
+JOIN
+    customer c ON c.c_custkey IN (SELECT o_custkey FROM orders WHERE o_orderkey IN (SELECT l_orderkey FROM lineitem WHERE l_partkey = p.p_partkey))
+JOIN
+    nation n ON n.n_nationkey = c.c_nationkey
+GROUP BY
+    p.p_partkey, p.p_name, s.s_name, c.total_spent, n.n_nationkey
+ORDER BY
+    total_sales DESC, p.p_partkey ASC
+HAVING
+    SUM(COALESCE(li.final_price, 0)) > (SELECT AVG(p2.p_retailprice) FROM part p2) OR total_spent IS NULL
+UNION ALL
+SELECT
+    NULL AS p_partkey,
+    'Aggregate' AS p_name,
+    NULL AS supplier_name,
+    SUM(l.l_extendedprice) AS total_sales,
+    NULL AS total_spent,
+    NULL AS avg_national_balance,
+    'Total' AS order_status
+FROM
+    lineitem l
+WHERE
+    l.l_shipdate IS NOT NULL
+ORDER BY
+    total_sales DESC NULLS LAST;

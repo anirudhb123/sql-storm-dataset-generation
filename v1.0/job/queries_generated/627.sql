@@ -1,0 +1,40 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(c.id) AS cast_count,
+        DENSE_RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS rank_per_year
+    FROM title t
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    GROUP BY t.title, t.production_year
+),
+PopularTitles AS (
+    SELECT 
+        rm.title, 
+        rm.production_year
+    FROM RankedMovies rm
+    WHERE rm.rank_per_year <= 5
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        SUM(CASE WHEN ct.kind = 'Production' THEN 1 ELSE 0 END) AS production_company_count
+    FROM movie_companies mc
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id
+)
+SELECT 
+    p.title,
+    p.production_year,
+    cs.company_count,
+    cs.production_company_count,
+    COALESCE(a.name, 'Unknown') AS director_name,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM PopularTitles p
+LEFT JOIN CompanyStats cs ON p.title = (SELECT title FROM title WHERE id = cs.movie_id)
+LEFT JOIN aka_title a ON a.movie_id = cs.movie_id AND a.kind_id = (SELECT id FROM kind_type WHERE kind = 'director')
+LEFT JOIN movie_keyword mk ON mk.movie_id = cs.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+GROUP BY p.title, p.production_year, cs.company_count, cs.production_company_count, a.name
+ORDER BY p.production_year DESC, cs.company_count DESC;

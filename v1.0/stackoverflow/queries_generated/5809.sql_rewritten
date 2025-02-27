@@ -1,0 +1,69 @@
+WITH PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) FILTER (WHERE a.PostTypeId = 2) AS AnswerCount,
+        ARRAY_AGG(DISTINCT tag.TagName) AS TagsArray,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, '><')) AS tag(TagName) ON TRUE
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        b.UserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        SUM(m.Score) AS TotalScore,
+        SUM(m.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN 
+        PostMetrics m ON u.Id = m.OwnerUserId
+    WHERE 
+        u.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, ub.BadgeCount
+)
+SELECT 
+    CAST(tu.UserId AS VARCHAR) || ' - ' || tu.DisplayName AS UserDisplay,
+    tu.Reputation,
+    tu.BadgeCount,
+    tu.TotalScore,
+    tu.TotalViews
+FROM 
+    TopUsers tu
+ORDER BY 
+    tu.TotalScore DESC, 
+    tu.TotalViews DESC 
+LIMIT 10;

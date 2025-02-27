@@ -1,0 +1,31 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+    ORDER BY TotalCost DESC
+    LIMIT 5
+), CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+), LineItemSummary AS (
+    SELECT lo.l_orderkey, SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS TotalRevenue
+    FROM lineitem lo
+    WHERE lo.l_shipdate >= '2023-01-01' 
+    GROUP BY lo.l_orderkey
+)
+SELECT c.c_name, co.o_orderkey, co.o_totalprice AS OrderTotal, 
+       ls.TotalRevenue AS RevenueSummary, rs.s_name AS SupplierName, 
+       rs.TotalCost AS SupplierCost
+FROM CustomerOrders co
+JOIN LineItemSummary ls ON co.o_orderkey = ls.l_orderkey
+JOIN RankedSuppliers rs ON rs.s_suppkey = (SELECT ps.ps_suppkey 
+                                            FROM partsupp ps 
+                                            JOIN part p ON ps.ps_partkey = p.p_partkey 
+                                            WHERE p.p_size = 15 
+                                            ORDER BY ps.ps_supplycost ASC 
+                                            LIMIT 1)
+WHERE co.o_totalprice > 1000
+ORDER BY RevenueSummary DESC, SupplierCost ASC;

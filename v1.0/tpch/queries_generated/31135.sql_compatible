@@ -1,0 +1,37 @@
+
+WITH RECURSIVE revenue_by_nation AS (
+    SELECT n.n_nationkey, n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY n.n_nationkey, n.n_name
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) + r.total_revenue
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN revenue_by_nation r ON n.n_nationkey = r.n_nationkey
+    WHERE l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1997-10-01'
+    GROUP BY n.n_nationkey, n.n_name
+),
+top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_revenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1997-10-01'
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY supplier_revenue DESC
+    LIMIT 5
+)
+SELECT n.n_name, r.total_revenue, ts.s_name, ts.supplier_revenue
+FROM revenue_by_nation r
+LEFT JOIN nation n ON r.n_nationkey = n.n_nationkey
+LEFT JOIN top_suppliers ts ON ts.supplier_revenue > r.total_revenue
+WHERE r.total_revenue IS NOT NULL AND r.total_revenue > 10000
+ORDER BY r.total_revenue DESC, ts.supplier_revenue DESC;

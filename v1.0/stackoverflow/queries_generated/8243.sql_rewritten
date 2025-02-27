@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(v.Id) AS VoteCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, '>')) AS tag_name ON tag_name IS NOT NULL
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_name
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+), 
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Body, 
+        CreationDate, 
+        ViewCount, 
+        Score, 
+        OwnerDisplayName, 
+        VoteCount, 
+        Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        RankScore <= 10
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.OwnerDisplayName,
+    tp.VoteCount,
+    tp.Tags,
+    COALESCE(SUM(b.Class), 0) AS TotalBadges,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    MAX(h.CreationDate) AS LastEditDate
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Badges b ON b.UserId = tp.OwnerUserId
+LEFT JOIN 
+    Comments c ON c.PostId = tp.PostId
+LEFT JOIN 
+    PostHistory h ON h.PostId = tp.PostId
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, tp.ViewCount, tp.Score, tp.OwnerDisplayName, tp.VoteCount, tp.Tags
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

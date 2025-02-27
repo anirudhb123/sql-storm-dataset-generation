@@ -1,0 +1,66 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        AVG(v.CreationDate) AS AvgVoteDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, 
+        p.AnswerCount, p.CommentCount, u.DisplayName
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore,
+        SUM(COALESCE(p.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(p.DownVotes, 0)) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.OwnerDisplayName,
+    ps.TotalComments,
+    ua.UserId,
+    ua.DisplayName AS UserDisplayName,
+    ua.TotalPosts,
+    ua.TotalViews,
+    ua.TotalScore,
+    ua.TotalUpVotes,
+    ua.TotalDownVotes,
+    ps.AvgVoteDate
+FROM 
+    PostStats ps
+JOIN 
+    UserActivity ua ON ps.OwnerDisplayName = ua.DisplayName
+ORDER BY 
+    ps.ViewCount DESC, ps.Score DESC;

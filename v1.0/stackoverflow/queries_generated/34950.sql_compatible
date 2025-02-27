@@ -1,0 +1,102 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        P.OwnerUserId,
+        P.Title,
+        1 AS Level
+    FROM Posts P
+    WHERE P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        P.OwnerUserId,
+        P.Title,
+        Level + 1
+    FROM Posts P
+    INNER JOIN RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+UserPostCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(P.Score, 0)) AS AverageScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    WHERE U.Reputation > 1000
+    GROUP BY U.Id, U.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseOpenCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 33 THEN 1 END) AS PostNoticeCount
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+),
+RecentComments AS (
+    SELECT 
+        C.PostId,
+        C.Text AS CommentText,
+        C.CreationDate
+    FROM Comments C
+    WHERE C.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+),
+TagSummary AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        AVG(P.Score) AS AverageScore
+    FROM Tags T
+    LEFT JOIN Posts P ON P.Tags ILIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+),
+CombinedData AS (
+    SELECT 
+        UPC.UserId,
+        UPC.DisplayName,
+        UPC.PostCount,
+        UPC.TotalViews,
+        UPC.AverageScore,
+        RPH.PostId AS RelatedPostId,
+        RPH.Title AS RelatedPostTitle,
+        PHC.CloseOpenCount,
+        PHC.PostNoticeCount,
+        TC.TagName,
+        TC.PostCount AS TagPostCount,
+        TC.AverageScore AS TagAverageScore,
+        RC.CommentText,
+        RC.CreationDate AS CommentDate
+    FROM UserPostCounts UPC
+    LEFT JOIN RecursivePostHierarchy RPH ON UPC.UserId = RPH.OwnerUserId
+    LEFT JOIN PostHistorySummary PHC ON RPH.PostId = PHC.PostId
+    LEFT JOIN RecentComments RC ON RPH.PostId = RC.PostId
+    LEFT JOIN TagSummary TC ON TC.PostCount > 5
+    WHERE UPC.PostCount > 0
+)
+SELECT 
+    CD.UserId,
+    CD.DisplayName,
+    CD.PostCount,
+    CD.TotalViews,
+    CD.AverageScore,
+    CD.RelatedPostId,
+    CD.RelatedPostTitle,
+    CD.CloseOpenCount,
+    CD.PostNoticeCount,
+    CD.TagName,
+    CD.TagPostCount,
+    CD.TagAverageScore,
+    CD.CommentText,
+    CD.CommentDate
+FROM CombinedData CD
+WHERE (CD.CloseOpenCount > 0 OR CD.PostNoticeCount > 0)
+  AND (CD.AverageScore > 5 OR CD.PostCount > 10)
+ORDER BY CD.TotalViews DESC, CD.AverageScore DESC
+LIMIT 100;

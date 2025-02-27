@@ -1,0 +1,97 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ph.UserDisplayName,
+        ph.PostHistoryTypeId,
+        ph.Text,
+        1 AS RecursionLevel
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostId IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ph.UserDisplayName,
+        ph.PostHistoryTypeId,
+        ph.Text,
+        rph.RecursionLevel + 1
+    FROM 
+        PostHistory ph
+    JOIN 
+        RecursivePostHistory rph ON ph.Id = rph.Id
+    WHERE 
+        ph.UserId = rph.UserId 
+),
+
+RecentPopularPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS PopularityRank,
+        COUNT(DISTINCT v.Id) OVER (PARTITION BY p.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    AND 
+        p.PostTypeId IN (1, 2) 
+),
+
+TopUsersWithBadges AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.DisplayName
+    HAVING 
+        COUNT(b.Id) > 3
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    pp.UserDisplayName AS PostCreator,
+    pp.VoteCount,
+    u.DisplayName AS TopUser,
+    b.BadgeCount,
+    COALESCE(ph.Comment, 'No Comment') AS LatestComment,
+    pp.LastActivityDate
+FROM 
+    RecentPopularPosts pp
+JOIN 
+    Posts p ON pp.Id = p.Id
+LEFT JOIN 
+    Users u ON pp.UserId = u.Id
+LEFT JOIN 
+    TopUsersWithBadges b ON b.DisplayName = u.DisplayName
+LEFT JOIN 
+    Comments ph ON ph.PostId = p.Id
+WHERE 
+    pp.PopularityRank <= 5 
+AND 
+    p.Score > 10 
+ORDER BY 
+    pp.ViewCount DESC,
+    pp.LastActivityDate DESC;

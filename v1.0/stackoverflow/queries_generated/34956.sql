@@ -1,0 +1,89 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rp ON p.ParentId = rp.PostId
+),
+UserVoteSummary AS (
+    SELECT 
+        v.UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT v.PostId) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+PostInteraction AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        COALESCE(u.DisplayName, 'Anonymous') AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(SUM(pih.Score), 0) AS TotalScore,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        RecursivePostHierarchy ph
+    LEFT JOIN 
+        Comments c ON ph.PostId = c.PostId
+    LEFT JOIN 
+        Posts pih ON ph.PostId = pih.ParentId
+    LEFT JOIN 
+        Users u ON ph.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON ph.PostId = v.PostId
+    WHERE 
+        ph.Level = 0  -- Only consider top-level questions
+    GROUP BY 
+        ph.PostId, ph.Title, u.DisplayName
+)
+SELECT 
+    pi.PostId,
+    pi.Title,
+    pi.OwnerDisplayName,
+    pi.CommentCount,
+    pi.TotalScore,
+    uv.UpVotes,
+    uv.DownVotes,
+    pi.LastVoteDate,
+    CASE 
+        WHEN pi.LastVoteDate IS NULL THEN 'No votes yet'
+        ELSE 'Received votes'
+    END AS VoteStatus,
+    COALESCE(t.TagName, 'No Tags') AS TagName
+FROM 
+    PostInteraction pi
+LEFT JOIN 
+    Posts p ON pi.PostId = p.Id
+LEFT JOIN 
+    LATERAL (SELECT 
+                  STRING_AGG(t.TagName, ', ') AS TagName
+              FROM 
+                  Tags t 
+              WHERE 
+                  t.WikiPostId = p.Id) t ON true
+LEFT JOIN 
+    UserVoteSummary uv ON pi.OwnerUserId = uv.UserId
+ORDER BY 
+    pi.CommentCount DESC, 
+    pi.TotalScore DESC;

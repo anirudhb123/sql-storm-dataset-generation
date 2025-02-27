@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScores,
+        COUNT(c.Id) AS TotalComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, u.DisplayName
+),
+HighScorePosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Score, 
+        CreationDate, 
+        OwnerDisplayName, 
+        TotalComments
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByScores = 1
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounties,
+        SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    h.PostId,
+    h.Title,
+    h.Score,
+    h.CreationDate,
+    h.OwnerDisplayName,
+    u.DisplayName AS UserWithTopPost,
+    u.TotalBounties,
+    u.TotalUpVotes,
+    u.TotalPosts
+FROM 
+    HighScorePosts h
+JOIN 
+    UserStats u ON h.OwnerDisplayName = u.DisplayName
+WHERE 
+    u.TotalBounties IS NOT NULL
+ORDER BY 
+    h.Score DESC, u.TotalUpVotes DESC;

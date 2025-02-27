@@ -1,0 +1,81 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+), 
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        MIN(ps.ps_availqty) AS min_supply_quantity
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > 1000 
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost) > 5000
+), 
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(DISTINCT l.l_partkey) AS line_item_count,
+        AVG(l.l_tax) AS average_tax,
+        FIRST_VALUE(o.o_orderdate) OVER (PARTITION BY o.o_orderkey ORDER BY l.l_shipdate ASC) AS first_shipdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey
+), 
+NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        r.r_name IS NOT NULL
+)
+SELECT 
+    n.n_nationkey,
+    COALESCE(SUM(o.net_revenue), 0) AS total_net_revenue,
+    COUNT(DISTINCT s.s_suppkey) AS distinct_suppliers,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS top_parts,
+    MAX(p.p_retailprice) FILTER (WHERE p.rn < 5) AS max_retail_price_top_5
+FROM 
+    OrderStats o
+FULL OUTER JOIN 
+    SupplierInfo s ON o.o_orderkey = s.s_suppkey
+FULL OUTER JOIN 
+    RankedParts p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps)
+JOIN 
+    NationRegion n ON n.n_nationkey = s.s_nationkey OR o.line_item_count = 0
+GROUP BY 
+    n.n_nationkey
+HAVING 
+    COUNT(DISTINCT p.p_partkey) > 3 AND 
+    MAX(o.average_tax) BETWEEN 0.05 AND 0.20 OR 
+    MAX(s.min_supply_quantity) IS NULL
+ORDER BY 
+    total_net_revenue DESC, n.n_nationkey ASC;

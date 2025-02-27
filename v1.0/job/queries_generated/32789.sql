@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieChain AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.title IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        lm.linked_movie_id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        depth + 1
+    FROM 
+        movie_link lm
+    JOIN 
+        aka_title t ON lm.linked_movie_id = t.id
+    JOIN 
+        MovieChain mc ON mc.movie_id = lm.movie_id
+    WHERE 
+        mc.depth < 5  -- limit the depth of the recursive search
+)
+
+SELECT 
+    mc.movie_title,
+    mc.production_year,
+    COALESCE(c.full_name, 'Unknown Actor') AS actor_name,
+    ci.role_id AS actor_role,
+    COUNT(DISTINCT kv.keyword) AS keyword_count,
+    SUM(mv.info IS NOT NULL::int) AS info_entries,
+    ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY mc.depth DESC) AS ranking
+FROM 
+    MovieChain mc
+LEFT JOIN 
+    complete_cast cc ON mc.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name c ON ci.person_id = c.person_id
+LEFT JOIN 
+    movie_keyword kv ON mc.movie_id = kv.movie_id
+LEFT JOIN 
+    movie_info mv ON mc.movie_id = mv.movie_id 
+WHERE 
+    mc.production_year >= 2000 
+    AND mc.production_year <= EXTRACT(YEAR FROM CURRENT_DATE)
+GROUP BY 
+    mc.movie_id, mc.movie_title, mc.production_year, actor_name, ci.role_id
+ORDER BY 
+    ranking, mc.production_year DESC;

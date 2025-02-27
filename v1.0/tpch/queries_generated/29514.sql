@@ -1,0 +1,43 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY p.p_type ORDER BY s.s_acctbal DESC) AS rank_account_balance
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+TopAccountBalance AS (
+    SELECT 
+        r.p_type, 
+        r.s_suppkey, 
+        r.s_name, 
+        r.s_acctbal
+    FROM 
+        RankedSuppliers r
+    WHERE 
+        r.rank_account_balance <= 3
+),
+ConcatenatedInfo AS (
+    SELECT 
+        p.p_name || ' (Type: ' || p.p_type || ', Price: ' || p.p_retailprice || ')' AS part_info,
+        t.s_name,
+        t.s_acctbal
+    FROM 
+        TopAccountBalance t
+    JOIN 
+        part p ON p.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = t.s_suppkey LIMIT 1)
+)
+SELECT 
+    part_info, 
+    s_name, 
+    s_acctbal,
+    CONCAT(part_info, ' suppliered by ', s_name, ' having balance ', s_acctbal) AS full_description
+FROM 
+    ConcatenatedInfo
+ORDER BY 
+    s_acctbal DESC;

@@ -1,0 +1,71 @@
+
+WITH RECURSIVE detailed_sales AS (
+    SELECT
+        w.w_warehouse_id,
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ws.ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS rank
+    FROM
+        web_sales ws
+    JOIN
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+return_info AS (
+    SELECT
+        sr.store_sk,
+        COUNT(sr(sr_item_sk)) AS total_returned_items,
+        SUM(sr_return_amt) AS total_returned_amount
+    FROM
+        store_returns sr
+    GROUP BY
+        sr.store_sk
+),
+sales_summary AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_item_sk) AS total_items_sold,
+        COALESCE(ri.total_returned_amount, 0) AS total_returned_amount
+    FROM
+        web_sales ws
+    JOIN
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN
+        return_info ri ON ri.store_sk = ws.ws_warehouse_sk
+    GROUP BY 
+        c.c_customer_id
+),
+average_sales AS (
+    SELECT 
+        AVG(total_sales) AS avg_sales,
+        AVG(total_returned_amount) AS avg_returned
+    FROM 
+        sales_summary
+)
+SELECT
+    ds.w_warehouse_id,
+    ds.ws_order_number,
+    ds.ws_sold_date_sk,
+    ds.ws_quantity,
+    ds.ws_net_profit,
+    ds.ws_ext_sales_price,
+    ss.total_sales,
+    ss.total_items_sold,
+    ss.total_returned_amount,
+    as.avg_sales,
+    as.avg_returned
+FROM 
+    detailed_sales ds
+JOIN 
+    sales_summary ss ON ds.w_warehouse_id = ss.c_customer_id
+CROSS JOIN 
+    average_sales as
+WHERE 
+    ds.rank <= 5
+ORDER BY 
+    ds.ws_net_profit DESC;

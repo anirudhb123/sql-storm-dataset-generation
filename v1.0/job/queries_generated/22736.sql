@@ -1,0 +1,67 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        0 AS level,
+        NULL AS parent_movie_id
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.id,
+        m.title,
+        mh.level + 1,
+        mh.movie_id
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    COALESCE(CAST(SUM(mi.info IS NOT NULL) AS INTEGER), 0) AS movie_info_count,
+    COUNT(DISTINCT CASE WHEN ci.role_id IS NOT NULL THEN ci.role_id END) AS roles_count,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY COUNT(DISTINCT k.keyword) DESC) AS actor_rank,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    mh.level AS movie_level
+FROM aka_name ak
+JOIN cast_info ci ON ak.person_id = ci.person_id
+JOIN aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+LEFT JOIN movie_info mi ON mt.id = mi.movie_id AND mi.info_type_id IN (
+    SELECT id FROM info_type WHERE info = 'summary'
+)
+LEFT JOIN movie_hierarchy mh ON mt.id = mh.movie_id
+LEFT JOIN complete_cast cc ON mt.id = cc.movie_id
+WHERE ak.name IS NOT NULL AND ak.name != ''
+  AND mt.production_year IS NOT NULL
+  AND mt.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Drama%')
+  AND (ci.note IS NULL OR ci.note NOT LIKE '%cameo%')
+GROUP BY ak.name, mt.title, mh.level
+HAVING COUNT(DISTINCT k.keyword) >= 3
+ORDER BY actor_rank, movie_level DESC;
+
+### Explanation of the Query Constructs:
+
+1. **CTE (Common Table Expression)**: The `movie_hierarchy` CTE creates a recursive structure that contains movies and their hierarchical relationships (linked movies).
+
+2. **Aggregate Functions**: Uses `COUNT`, `SUM`, and `STRING_AGG` for various aggregating calculations, including counting keywords associated with movies and summarizing movie information.
+
+3. **Correlated Subqueries**: The subquery within the `IN` clause filters the movie information to only include summaries.
+
+4. **Outer Joins**: LEFT joins are used to connect to potentially nullable relationships, such as supplementary movie keywords and information.
+
+5. **Window Functions**: `ROW_NUMBER()` ranks actors based on the number of distinct keywords associated with the movies they acted in.
+
+6. **Complex Filtering**: Uses `COALESCE` to handle potential NULL values and includes intricate WHERE conditions to filter down relevant records.
+
+7. **Set Operators**: While not explicitly visible here, the `DISTINCT` and various joins could be considered as implicit set operations creating unique results.
+
+8. **Bizarre SQL Semantics**: The usage of hierarchical movie relationships combined with actor performance metrics, keyword relationships, and selective null logic creates complex semantic behavior within the data retrieval.
+
+This inquiry focuses on a variety of constructs for performance benchmarking, pushing the limits of SQL's expressiveness and complexity.

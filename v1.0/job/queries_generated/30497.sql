@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        0 AS level,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000  -- Focus on movies from the year 2000 onwards
+
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id,
+        mt.title,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title AS movie_title,
+    mh.level AS hierarchy_level,
+    COALESCE(cast_count.total_cast, 0) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+    COALESCE(mkc.total_keywords, 0) AS total_keywords
+FROM 
+    MovieHierarchy mh
+LEFT JOIN (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.id) AS total_cast
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+) cast_count ON cast_count.movie_id = mh.movie_id
+LEFT JOIN (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.id) AS total_keywords
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+) mkc ON mkc.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = mh.movie_id LIMIT 1)  -- Gets an alias name for the first cast member as an example
+GROUP BY 
+    mh.movie_id, mh.title, mh.level
+ORDER BY 
+    mh.level, mh.title;
+

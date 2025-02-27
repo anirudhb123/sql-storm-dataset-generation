@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.Score,
+        u.DisplayName AS Author,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS ActivityRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+        AND p.Score > 0 -- Only questions with a positive score
+),
+LatestTaggedPosts AS (
+    SELECT 
+        pt.TagName,
+        pp.PostId,
+        pp.Title,
+        pp.Score,
+        pp.CreationDate,
+        pp.Author,
+        RANK() OVER (PARTITION BY pt.TagName ORDER BY pp.CreationDate DESC) AS TagRank
+    FROM 
+        Tags pt
+    JOIN 
+        Posts pp ON pp.Tags LIKE '%' || pt.TagName || '%'
+    WHERE 
+        pp.PostTypeId = 1 -- Only Questions
+        AND pp.Score > 0 -- Only questions with a positive score
+),
+AggregatedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Author,
+        rp.Score,
+        lt.TagName,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        LatestTaggedPosts lt ON rp.PostId = lt.PostId
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    WHERE 
+        lt.TagRank = 1 -- Latest post by tag
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Author, rp.Score, lt.TagName
+)
+SELECT 
+    ad.PostId,
+    ad.Title,
+    ad.CreationDate,
+    ad.Author,
+    ad.Score,
+    STRING_AGG(DISTINCT ad.TagName, ', ') AS Tags,
+    SUM(ad.CommentCount) AS TotalComments
+FROM 
+    AggregatedData ad
+GROUP BY 
+    ad.PostId, ad.Title, ad.CreationDate, ad.Author, ad.Score
+ORDER BY 
+    ad.Score DESC, 
+    ad.CreationDate DESC
+LIMIT 100;

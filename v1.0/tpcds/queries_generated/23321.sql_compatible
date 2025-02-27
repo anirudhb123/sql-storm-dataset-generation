@@ -1,0 +1,87 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws.bill_customer_sk,
+        ws.ship_customer_sk,
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank,
+        SUM(ws.ws_sales_price) OVER (PARTITION BY ws.bill_customer_sk) AS total_sales
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sales_price > (
+            SELECT
+                AVG(ws_sales_price)
+            FROM
+                web_sales
+            WHERE
+                ws.bill_customer_sk IS NOT NULL
+        )
+), high_sales AS (
+    SELECT
+        bill_customer_sk,
+        ship_customer_sk,
+        ws_item_sk,
+        ws_order_number,
+        sales_rank,
+        total_sales,
+        CASE
+            WHEN total_sales IS NULL THEN 'No Sales'
+            WHEN sales_rank = 1 THEN 'Highest Sale'
+            ELSE 'Regular Sale'
+        END AS sale_type
+    FROM
+        ranked_sales
+    WHERE
+        sales_rank <= 5
+), return_analysis AS (
+    SELECT
+        wr.returning_customer_sk,
+        wr_item_sk,
+        COUNT(wr.return_order_number) AS total_returns,
+        SUM(wr.return_amt_inc_tax) AS total_return_amt
+    FROM
+        web_returns wr
+    LEFT JOIN
+        high_sales hs ON hs.ws_item_sk = wr_item_sk
+    WHERE
+        wr.returned_date_sk IS NOT NULL
+    GROUP BY
+        wr.returning_customer_sk, wr_item_sk
+), performance_metrics AS (
+    SELECT
+        hs.bill_customer_sk,
+        hs.sale_type,
+        COALESCE(SUM(return_analysis.total_returns), 0) AS total_returns,
+        COALESCE(SUM(return_analysis.total_return_amt), 0) AS total_return_amt,
+        CASE
+            WHEN SUM(return_analysis.total_return_amt) IS NULL OR SUM(return_analysis.total_return_amt) = 0 THEN 'No Return Activity'
+            WHEN SUM(return_analysis.total_return_amt) > 1000 THEN 'High Return Activity'
+            ELSE 'Normal Return Activity'
+        END AS return_activity_level
+    FROM
+        high_sales hs
+    LEFT JOIN
+        return_analysis ON hs.bill_customer_sk = return_analysis.returning_customer_sk
+    GROUP BY
+        hs.bill_customer_sk, hs.sale_type
+)
+SELECT
+    pm.bill_customer_sk,
+    pm.sale_type,
+    pm.total_returns,
+    pm.total_return_amt,
+    pm.return_activity_level,
+    CASE
+        WHEN pm.total_return_amt IS NOT NULL AND pm.total_return_amt > 500 THEN 'Above Average Returns'
+        ELSE 'Average or Below Average Returns'
+    END AS return_comparison
+FROM
+    performance_metrics pm
+WHERE
+    pm.sale_type = 'Highest Sale'
+ORDER BY
+    pm.total_return_amt DESC
+LIMIT 10;

@@ -1,0 +1,48 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE o.o_orderdate > co.o_orderdate
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) as rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+DiscountedLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_discounted_price
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N' AND l.l_shipdate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY l.l_orderkey
+),
+NationRegion AS (
+    SELECT n.n_name, r.r_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name, r.r_name
+    HAVING COUNT(DISTINCT s.s_suppkey) > 5
+)
+SELECT 
+    co.c_name,
+    SUM(co.o_totalprice) AS total_order_value,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    n.n_name AS nation_name,
+    nr.r_name AS region_name,
+    ps.p_name AS part_name,
+    p_avail_qty,
+    total_discounted_price
+FROM CustomerOrders co
+LEFT JOIN NationRegion nr ON co.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = nr.n_name))
+LEFT JOIN PartSupplier ps ON ps.rn = 1
+LEFT JOIN DiscountedLineItems dli ON co.o_orderkey = dli.l_orderkey
+GROUP BY co.c_name, n.n_name, nr.r_name, ps.p_name, ps.p_availqty, total_discounted_price
+HAVING SUM(co.o_totalprice) > 10000
+ORDER BY total_order_value DESC, co.c_name;

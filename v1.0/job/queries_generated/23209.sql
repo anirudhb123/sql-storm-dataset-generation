@@ -1,0 +1,70 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.movie_id,
+        t.title,
+        mt.company_id,
+        0 AS level
+    FROM movie_companies mt
+    JOIN aka_title t ON mt.movie_id = t.movie_id
+    WHERE t.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        t.title,
+        mc.company_id,
+        mh.level + 1
+    FROM movie_companies mc
+    JOIN movie_hierarchy mh ON mc.movie_id = mh.movie_id
+    JOIN aka_title t ON mc.movie_id = t.movie_id
+    WHERE mh.level < 5  -- Limit recursion to 5 levels deep
+),
+
+best_rating AS (
+    SELECT 
+        ci.movie_id,
+        AVG(CASE 
+            WHEN pm.info LIKE '%rating%' THEN CAST(SUBSTRING(pm.info FROM '(\d+(\.\d+)?)') AS DECIMAL)
+            ELSE NULL 
+            END) AS avg_rating
+    FROM complete_cast cc
+    JOIN person_info pm ON cc.subject_id = pm.person_id
+    JOIN movie_info mi ON cc.movie_id = mi.movie_id 
+    WHERE pm.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating') 
+    GROUP BY ci.movie_id
+),
+
+movies_with_associations AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        bt.avg_rating,
+        COUNT(DISTINCT mc.company_id) AS production_companies
+    FROM aka_title t
+    LEFT JOIN best_rating bt ON t.id = bt.movie_id
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    WHERE t.production_year > 2000 
+      AND (bt.avg_rating IS NULL OR bt.avg_rating > 7.0) -- Considering only highly rated or non-rated
+    GROUP BY t.title, t.production_year, bt.avg_rating
+),
+
+final_result AS (
+    SELECT 
+        mh.title,
+        mh.level,
+        mw.production_year,
+        mw.avg_rating,
+        COALESCE(mw.production_companies, 0) AS production_companies
+    FROM movie_hierarchy mh
+    LEFT JOIN movies_with_associations mw ON mh.title = mw.title
+)
+
+SELECT 
+    fr.title,
+    fr.production_year,
+    fr.avg_rating,
+    fr.production_companies
+FROM final_result fr
+WHERE fr.avg_rating IS NOT NULL  -- Only include movies with an average rating
+ORDER BY fr.production_year DESC, fr.avg_rating DESC;

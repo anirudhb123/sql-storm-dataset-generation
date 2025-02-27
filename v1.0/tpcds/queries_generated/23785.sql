@@ -1,0 +1,58 @@
+
+WITH RankedReturns AS (
+    SELECT
+        cr.returning_customer_sk,
+        cr.return_quantity,
+        cr.return_amt_inc_tax,
+        ROW_NUMBER() OVER (PARTITION BY cr.returning_customer_sk ORDER BY cr.returned_date_sk DESC) AS rn,
+        SUM(cr.return_quantity) OVER (PARTITION BY cr.returning_customer_sk) AS total_returned
+    FROM catalog_returns cr
+    JOIN customer c ON cr.returning_customer_sk = c.c_customer_sk
+    WHERE cr.returned_date_sk IN (
+        SELECT d_date_sk 
+        FROM date_dim 
+        WHERE d_year = 2023 AND d_month_seq = (SELECT MAX(d_month_seq) FROM date_dim WHERE d_year = 2023)
+    )
+), CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        c.c_customer_sk,
+        CASE
+            WHEN c.c_birth_year IS NULL THEN 'Unknown'
+            ELSE CONCAT('Born in ', c.c_birth_year)
+        END AS birth_info
+    FROM customer_demographics cd
+    JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+), ItemStats AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        AVG(ws.ws_net_profit) AS average_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+)
+SELECT
+    c.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    r.return_quantity,
+    r.return_amt_inc_tax,
+    ISNULL(i.total_sold, 0) AS total_item_sold,
+    ISNULL(i.average_profit, 0) AS average_item_profit,
+    CASE
+        WHEN r.rn = 1 THEN 'Recent Return'
+        ELSE 'Older Return'
+    END AS return_category,
+    r.total_returned,
+    cd.birth_info
+FROM RankedReturns r
+JOIN CustomerDemographics cd ON r.returning_customer_sk = cd.c_customer_sk
+LEFT JOIN ItemStats i ON r.returning_customer_sk = i.ws_item_sk
+WHERE (cd.cd_gender = 'F' AND r.return_quantity > 0) 
+   OR (cd.cd_gender = 'M' AND r.return_quantity > 2)
+ORDER BY r.return_quantity DESC, cd.cd_purchase_estimate DESC
+FETCH FIRST 50 ROWS ONLY;

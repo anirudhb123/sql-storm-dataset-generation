@@ -1,0 +1,70 @@
+
+WITH customer_data AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        MAX(ws.ws_net_profit) AS highest_profit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+returns_summary AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_qty) AS total_returns,
+        AVG(sr_return_amt) AS average_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+),
+total_summary AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        (COALESCE(ss.total_sales, 0) - COALESCE(rs.total_returns, 0)) AS net_sales
+    FROM 
+        customer_data c
+    LEFT JOIN 
+        sales_summary ss ON c.c_customer_id = ss.ws_bill_customer_sk
+    LEFT JOIN 
+        returns_summary rs ON c.c_customer_id = rs.sr_returning_customer_sk
+)
+SELECT 
+    t.c_customer_id,
+    t.total_sales,
+    t.total_returns,
+    t.net_sales,
+    CASE 
+        WHEN t.net_sales > 1000 THEN 'High Value' 
+        WHEN t.net_sales BETWEEN 500 AND 1000 THEN 'Medium Value' 
+        ELSE 'Low Value' 
+    END AS customer_value,
+    DENSE_RANK() OVER (ORDER BY t.net_sales DESC) AS sales_rank
+FROM 
+    total_summary t
+WHERE 
+    t.total_sales IS NOT NULL 
+    AND (t.total_returns IS NULL OR t.total_returns < 10)
+ORDER BY 
+    t.sales_rank
+LIMIT 100;

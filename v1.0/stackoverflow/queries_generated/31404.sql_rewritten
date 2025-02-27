@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY P.Id) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY P.Id) AS DownVotes,
+        COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END), 0) OVER (PARTITION BY P.Id) AS CloseVoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.CreationDate >= '2023-01-01' 
+        AND P.Score > 0
+),
+FilteredPosts AS (
+    SELECT 
+        RP.* 
+    FROM 
+        RankedPosts RP
+    WHERE 
+        RP.Rank <= 5
+)
+
+SELECT 
+    FP.PostId,
+    FP.Title,
+    FP.OwnerDisplayName,
+    FP.ViewCount,
+    FP.UpVotes,
+    FP.DownVotes,
+    FP.CloseVoteCount,
+    (SELECT COUNT(*) 
+     FROM Comments C 
+     WHERE C.PostId = FP.PostId) AS CommentCount,
+    (SELECT 
+        STRING_AGG(CONVERT(varchar, PT.Name), ', ') 
+     FROM 
+        PostHistoryTypes PT 
+     JOIN 
+        PostHistory PH ON PT.Id = PH.PostHistoryTypeId 
+     WHERE 
+        PH.PostId = FP.PostId) AS HistoryTypes
+FROM 
+    FilteredPosts FP
+WHERE 
+    FP.CloseVoteCount = 0
+ORDER BY 
+    FP.ViewCount DESC;

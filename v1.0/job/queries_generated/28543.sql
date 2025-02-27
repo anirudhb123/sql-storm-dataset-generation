@@ -1,0 +1,61 @@
+WITH MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        GROUP_CONCAT(k.keyword SEPARATOR ', ') AS keywords,
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR ', ') AS companies,
+        COUNT(DISTINCT ca.person_id) AS cast_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ca ON cc.subject_id = ca.person_id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        m.id
+),
+PersonDetails AS (
+    SELECT 
+        p.id AS person_id,
+        p.name AS person_name,
+        pi.info AS person_info,
+        COUNT(ci.movie_id) AS movies_count
+    FROM 
+        name p
+    LEFT JOIN 
+        person_info pi ON p.id = pi.person_id
+    LEFT JOIN 
+        cast_info ci ON p.id = ci.person_id
+    GROUP BY 
+        p.id
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.keywords,
+    md.companies,
+    md.cast_count,
+    pd.person_name,
+    pd.movies_count
+FROM 
+    MovieDetails md
+JOIN 
+    complete_cast cc ON md.movie_id = cc.movie_id
+JOIN 
+    PersonDetails pd ON cc.subject_id = pd.person_id
+ORDER BY 
+    md.production_year DESC, 
+    md.cast_count DESC, 
+    pd.movies_count DESC
+LIMIT 50;

@@ -1,0 +1,69 @@
+
+WITH Ranked_Sales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_paid DESC) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2452100 AND 2452120
+),
+Customer_Spend AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.net_paid) AS total_spend
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY c.c_customer_id
+),
+High_Value_Customers AS (
+    SELECT 
+        c.c_customer_id
+    FROM Customer_Spend csp
+    WHERE csp.total_spend > (
+        SELECT AVG(total_spend) 
+        FROM Customer_Spend
+    )
+),
+Product_Summary AS (
+    SELECT 
+        i.i_item_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_paid) AS total_revenue
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE i.i_curr_price > 50
+    GROUP BY i.i_item_id
+),
+Returns_Summary AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returned,
+        SUM(cr.cr_return_amount) AS total_return_amount
+    FROM catalog_returns cr
+    GROUP BY cr.cr_item_sk
+)
+SELECT 
+    ps.i_item_id,
+    ps.total_orders,
+    ps.total_quantity_sold,
+    ps.total_revenue,
+    COALESCE(rs.total_returned, 0) AS total_returned,
+    COALESCE(rs.total_return_amount, 0) AS total_return_amount,
+    CASE 
+        WHEN ps.total_revenue > 1000 THEN 'High Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM Product_Summary ps
+LEFT JOIN Returns_Summary rs ON ps.i_item_id = rs.cr_item_sk
+WHERE EXISTS (
+    SELECT 1 
+    FROM High_Value_Customers hv 
+    WHERE hv.c_customer_id IN (
+        SELECT DISTINCT ws.ws_ship_customer_sk 
+        FROM web_sales ws
+    )
+) OR ps.total_orders > 10
+ORDER BY ps.total_revenue DESC;

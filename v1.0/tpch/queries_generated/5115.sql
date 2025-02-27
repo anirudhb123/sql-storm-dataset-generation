@@ -1,0 +1,65 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_retailprice, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 50
+), SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_name AS supplier_nation,
+        s.s_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > 1000
+), OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sale,
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    GROUP BY 
+        o.o_orderkey
+), FeaturedProducts AS (
+    SELECT 
+        rp.p_partkey, 
+        rp.p_name, 
+        rp.p_brand, 
+        oi.total_sale, 
+        si.s_name AS supplier_name, 
+        si.supplier_nation
+    FROM 
+        RankedParts rp
+    JOIN 
+        partsupp ps ON rp.p_partkey = ps.ps_partkey
+    JOIN 
+        SupplierInfo si ON ps.ps_suppkey = si.s_suppkey
+    JOIN 
+        OrderSummary oi ON oi.lineitem_count > 5
+    WHERE 
+        rp.rn <= 3
+)
+SELECT 
+    fp.p_name,
+    fp.p_brand,
+    fp.total_sale,
+    fp.supplier_name,
+    fp.supplier_nation
+FROM 
+    FeaturedProducts fp
+ORDER BY 
+    fp.total_sale DESC;

@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_totalprice
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1997-12-31'
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+OrderDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(l.l_tax) AS average_tax,
+        MIN(l.l_shipdate) AS first_ship_date
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    co.c_name,
+    co.order_count,
+    so.total_cost,
+    od.revenue,
+    od.total_quantity,
+    od.average_tax,
+    od.first_ship_date
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    SupplierInfo so ON co.c_custkey = so.s_nationkey 
+LEFT JOIN 
+    OrderDetails od ON co.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = so.s_nationkey)
+WHERE 
+    co.order_count > 5 
+    AND (so.total_cost IS NOT NULL OR so.total_cost IS NULL)
+ORDER BY 
+    co.order_count DESC, 
+    so.total_cost ASC;

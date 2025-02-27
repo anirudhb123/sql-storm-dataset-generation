@@ -1,0 +1,62 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        AVG(COALESCE(P.Score, 0)) AS AvgPostScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(PT.Id) AS TagPostCount
+    FROM Tags T
+    JOIN Posts PT ON T.Id = PT.TagId
+    GROUP BY T.TagName
+    ORDER BY TagPostCount DESC
+    LIMIT 5
+),
+RecentActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.LastActivityDate,
+        U.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate >= (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days')
+    ORDER BY P.LastActivityDate DESC
+    LIMIT 10
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.PostCount,
+    US.QuestionCount,
+    US.AnswerCount,
+    US.TotalViews,
+    US.TotalScore,
+    US.AvgPostScore,
+    PT.TagName,
+    RA.PostId,
+    RA.Title,
+    RA.CreationDate,
+    RA.LastActivityDate,
+    RA.OwnerDisplayName,
+    RA.CommentCount
+FROM UserStatistics US
+CROSS JOIN PopularTags PT
+CROSS JOIN RecentActivity RA
+WHERE US.Reputation > 100
+ORDER BY US.TotalScore DESC, RA.LastActivityDate DESC;

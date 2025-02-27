@@ -1,0 +1,77 @@
+
+WITH RECURSIVE SuppHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SuppHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5 
+    AND s.s_acctbal IS NOT NULL
+),
+
+NationSizes AS (
+    SELECT n.n_nationkey, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey
+),
+
+FilteredParts AS (
+    SELECT p.p_partkey, 
+           p.p_mfgr, 
+           p.p_brand, 
+           SUM(ps.ps_availqty) AS total_availability
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_type LIKE 'metal%')
+    GROUP BY p.p_partkey, p.p_mfgr, p.p_brand
+    HAVING SUM(ps.ps_availqty) > 100
+),
+
+TopCustomers AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY c.c_custkey
+    ORDER BY total_spent DESC
+    LIMIT 10
+),
+
+ComplexAnalysis AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS adjusted_revenue,
+           DENSE_RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    AND o.o_orderstatus = 'F'
+    GROUP BY l.l_orderkey
+),
+
+SupplierStatistics AS (
+    SELECT sh.s_nationkey,
+           AVG(s.s_acctbal) AS avg_acct_bal,
+           MAX(s.s_acctbal) AS max_acct_bal
+    FROM SuppHierarchy sh
+    JOIN supplier s ON sh.s_nationkey = s.s_nationkey
+    GROUP BY sh.s_nationkey
+)
+
+SELECT p.p_partkey,
+       p.p_mfgr,
+       ns.supplier_count,
+       s.avg_acct_bal,
+       ca.adjusted_revenue,
+       ca.revenue_rank
+FROM FilteredParts p
+JOIN NationSizes ns ON (p.p_partkey % 10 = ns.n_nationkey % 10 OR ns.supplier_count IS NULL)
+LEFT JOIN SupplierStatistics s ON p.p_partkey = s.s_nationkey
+INNER JOIN ComplexAnalysis ca ON p.p_partkey = ca.l_orderkey
+WHERE (p.p_name LIKE '%-1%' OR p.p_name IS NOT NULL)
+AND (s.avg_acct_bal IS NULL OR s.avg_acct_bal > 100)
+ORDER BY p.p_partkey, p.p_mfgr DESC;

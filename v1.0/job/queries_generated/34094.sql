@@ -1,0 +1,78 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        title mt ON ml.linked_movie_id = mt.id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+actor_movie AS (
+    SELECT
+        c.person_id,
+        c.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_order
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+),
+company_details AS (
+    SELECT
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type
+    FROM
+        movie_companies mc
+    JOIN
+        company_name co ON mc.company_id = co.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+),
+keywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keyword_list
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+)
+SELECT
+    mh.title,
+    mh.production_year,
+    STRING_AGG(DISTINCT ad.actor_name, ', ') AS actors,
+    STRING_AGG(DISTINCT cd.company_name || ' (' || cd.company_type || ')', ', ') AS company_info,
+    kw.keyword_list
+FROM
+    movie_hierarchy mh
+LEFT JOIN
+    actor_movie ad ON mh.movie_id = ad.movie_id
+LEFT JOIN
+    company_details cd ON mh.movie_id = cd.movie_id
+LEFT JOIN
+    keywords kw ON mh.movie_id = kw.movie_id
+GROUP BY
+    mh.movie_id, mh.title, mh.production_year
+ORDER BY
+    mh.production_year DESC,
+    mh.title;

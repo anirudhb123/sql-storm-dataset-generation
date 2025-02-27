@@ -1,0 +1,80 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.movie_id = m.id
+    WHERE 
+        mh.level < 5  
+),
+cast_info_agg AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+),
+movie_info_extended AS (
+    SELECT 
+        mt.movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mk.keywords, 'None') AS keywords,
+        COALESCE(ca.total_cast, 0) AS total_cast,
+        COALESCE(ca.cast_names, 'Unknown') AS cast_names
+    FROM 
+        movie_hierarchy mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.movie_id = mk.movie_id
+    LEFT JOIN 
+        cast_info_agg ca ON mt.movie_id = ca.movie_id
+),
+ranked_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        keywords,
+        total_cast,
+        cast_names,
+        RANK() OVER (PARTITION BY production_year ORDER BY total_cast DESC) AS rank_by_cast
+    FROM 
+        movie_info_extended
+)
+SELECT 
+    r.*,
+    COALESCE(cn.name, 'Unknown Company') AS production_company
+FROM 
+    ranked_movies r
+LEFT JOIN 
+    movie_companies mc ON r.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.imdb_id
+WHERE 
+    r.rank_by_cast <= 5
+    AND (r.total_cast > 0 OR r.rank_by_cast IS NULL)
+ORDER BY 
+    r.production_year DESC, r.rank_by_cast;

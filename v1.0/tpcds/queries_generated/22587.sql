@@ -1,0 +1,67 @@
+
+WITH RankedWebSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_sales_price DESC) AS SaleRank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_sales_price > 0
+),
+TotalSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws_sales_price) AS TotalSalesAmount
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk
+),
+HighValueReturns AS (
+    SELECT 
+        wr.returned_date_sk,
+        wr.returning_customer_sk,
+        SUM(wr.return_amt) AS TotalReturnAmount
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.return_quantity > 5
+    GROUP BY 
+        wr.returned_date_sk, wr.returning_customer_sk
+)
+SELECT 
+    w.web_site_id,
+    COALESCE(ts.TotalSalesAmount, 0) AS TotalSales,
+    COALESCE(SUM(hv.TotalReturnAmount), 0) AS TotalReturns,
+    SUM(rws.ws_sales_price) AS HighestWebSale,
+    CASE 
+        WHEN COALESCE(ts.TotalSalesAmount, 0) = 0 THEN NULL
+        ELSE ROUND((COALESCE(SUM(hv.TotalReturnAmount), 0) / ts.TotalSalesAmount) * 100, 2)
+    END AS ReturnPercentage
+FROM 
+    web_site w
+LEFT JOIN 
+    TotalSales ts ON w.web_site_sk = ts.web_site_sk
+LEFT JOIN 
+    HighValueReturns hv ON hv.returning_customer_sk IN (
+        SELECT 
+            c.c_customer_sk 
+        FROM 
+            customer c
+        WHERE 
+            c.c_birth_year < (EXTRACT(YEAR FROM GETDATE()) - 18)
+    )
+LEFT JOIN 
+    RankedWebSales rws ON rws.web_site_sk = w.web_site_sk AND rws.SaleRank = 1
+GROUP BY 
+    w.web_site_id, ts.TotalSalesAmount
+HAVING 
+    COALESCE(ts.TotalSalesAmount, 0) > 1000
+ORDER BY 
+    ReturnPercentage DESC, TotalSales DESC;

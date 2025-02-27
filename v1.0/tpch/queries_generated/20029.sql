@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS Rank
+    FROM 
+        supplier s
+),
+AveragePrices AS (
+    SELECT 
+        ps_partkey, 
+        AVG(ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp
+    GROUP BY 
+        ps_partkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        CUME_DIST() OVER (ORDER BY c.c_acctbal DESC) AS cust_dist
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_brand, 
+    ns.n_name AS supplier_nation,
+    CASE 
+        WHEN rs.Rank IS NULL THEN 'Top Tier Supplier' 
+        ELSE 'Lower Tier Supplier' 
+    END AS supplier_tier,
+    COALESCE(avg.avg_supplycost, 0) AS avg_supplycost,
+    CASE 
+        WHEN c.cust_dist IS NOT NULL AND c.cust_dist > 0.5 THEN 'High Value Customer'
+        ELSE 'Standard Customer' 
+    END AS customer_status,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+LEFT JOIN 
+    nation ns ON rs.s_nationkey = ns.n_nationkey
+LEFT JOIN 
+    HighValueCustomers c ON l.l_orderkey IN (SELECT o.o_orderkey 
+                                              FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN 
+    AveragePrices avg ON p.p_partkey = avg.ps_partkey
+WHERE 
+    p.p_size BETWEEN 1 AND 20 
+    AND (l.l_returnflag = 'N' OR l.l_discount > 0.1)
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_brand, 
+    ns.n_name, 
+    rs.Rank, 
+    c.cust_dist
+ORDER BY 
+    total_revenue DESC, 
+    p.p_partkey ASC;

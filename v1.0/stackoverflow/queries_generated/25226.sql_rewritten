@@ -1,0 +1,54 @@
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(COALESCE(Votes.VoteTypeId = 2, 0)::int) AS UpvoteCount,
+        SUM(COALESCE(Votes.VoteTypeId = 3, 0)::int) AS DownvoteCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Posts.Score) AS AverageScore
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Posts.Tags LIKE '%' || Tags.TagName || '%'
+    LEFT JOIN 
+        Votes ON Votes.PostId = Posts.Id
+    GROUP BY 
+        Tags.TagName
+),
+PostSummary AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.CreationDate,
+        Users.DisplayName AS OwnerDisplayName,
+        Tags.TagName,
+        Posts.Score,
+        Posts.ViewCount
+    FROM 
+        Posts
+    JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN 
+        Tags ON Posts.Tags LIKE '%' || Tags.TagName || '%'
+    WHERE 
+        Posts.PostTypeId = 1 
+)
+
+SELECT 
+    TC.TagName,
+    TC.PostCount,
+    TC.UpvoteCount,
+    TC.DownvoteCount,
+    TC.TotalViews,
+    TC.AverageScore,
+    ARRAY_AGG(PS.Title) AS RelatedQuestionTitles,
+    ARRAY_AGG(PS.OwnerDisplayName) AS RelatedOwners,
+    ARRAY_AGG(PS.CreationDate) AS RelatedCreationDates
+FROM 
+    TagCounts TC
+LEFT JOIN 
+    PostSummary PS ON TC.TagName = PS.TagName
+GROUP BY 
+    TC.TagName, TC.PostCount, TC.UpvoteCount, TC.DownvoteCount, TC.TotalViews, TC.AverageScore
+ORDER BY 
+    TC.PostCount DESC, TC.AverageScore DESC;

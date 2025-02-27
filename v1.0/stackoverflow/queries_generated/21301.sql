@@ -1,0 +1,61 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionsAsked,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswersProvided,
+        COALESCE(SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentsMade,
+        COALESCE(SUM(B.Class), 0) AS TotalBadges
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON C.UserId = U.Id
+    LEFT JOIN Badges B ON B.UserId = U.Id
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.ViewCount,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RN,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 
+            ELSE 0 
+        END AS IsAcceptedAnswer
+    FROM Posts P
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.Score,
+        PS.CreationDate,
+        PS.ViewCount,
+        U.DisplayName,
+        PS.IsAcceptedAnswer,
+        ROW_NUMBER() OVER (ORDER BY PS.Score DESC) AS Rank
+    FROM PostStats PS
+    JOIN Users U ON PS.OwnerUserId = U.Id
+)
+SELECT 
+    UA.DisplayName,
+    UA.QuestionsAsked,
+    UA.AnswersProvided,
+    UA.CommentsMade,
+    UA.TotalBadges,
+    TP.Title AS TopPostTitle,
+    TP.Score AS TopPostScore,
+    TP.ViewCount AS TopPostViews,
+    CASE 
+        WHEN TP.IsAcceptedAnswer = 1 THEN 'Yes' 
+        ELSE 'No' 
+    END AS AcceptedAnswerStatus
+FROM UserActivity UA
+LEFT JOIN TopPosts TP ON UA.UserId = TP.OwnerUserId AND TP.Rank <= 5
+WHERE UA.Reputation >= 100
+  AND (TP.ViewCount > 1000 OR TP.Score > 10 OR TP.AcceptedAnswerStatus = 'Yes')
+ORDER BY UA.Reputation DESC, UA.DisplayName;

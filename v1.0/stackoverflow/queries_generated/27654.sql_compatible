@@ -1,0 +1,75 @@
+
+WITH PostTagCounts AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(DISTINCT t.TagName) AS TagCount
+    FROM
+        Posts p
+    JOIN
+        (SELECT UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS TagName, p.Id FROM Posts p) AS t ON t.TagName IS NOT NULL
+    WHERE
+        p.PostTypeId = 1 
+    GROUP BY
+        p.Id
+),
+UserEngagement AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,  
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount,  
+        COALESCE(SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    GROUP BY
+        u.Id
+),
+TopQuestions AS (
+    SELECT
+        p.Id AS QuestionId,
+        p.Title,
+        p.Score,
+        p.Tags,
+        pc.TagCount,
+        ue.UpVotesCount,
+        ue.DownVotesCount,
+        ue.CommentCount
+    FROM
+        Posts p
+    JOIN
+        PostTagCounts pc ON p.Id = pc.PostId
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    JOIN
+        UserEngagement ue ON u.Id = ue.UserId
+    WHERE
+        p.PostTypeId = 1 
+        AND p.Score > 0 
+    ORDER BY
+        p.Score DESC,
+        pc.TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    tq.QuestionId,
+    tq.Title,
+    tq.Score,
+    tq.TagCount,
+    tq.UpVotesCount,
+    tq.DownVotesCount,
+    tq.CommentCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopQuestions tq
+JOIN 
+    (SELECT UNNEST(STRING_TO_ARRAY(SUBSTRING(tq.Tags FROM 2 FOR LENGTH(tq.Tags) - 2), '><')) AS TagName, tq.QuestionId FROM TopQuestions tq) AS t ON t.TagName IS NOT NULL
+GROUP BY 
+    tq.QuestionId, tq.Title, tq.Score, tq.TagCount, tq.UpVotesCount, tq.DownVotesCount, tq.CommentCount
+ORDER BY 
+    tq.Score DESC;

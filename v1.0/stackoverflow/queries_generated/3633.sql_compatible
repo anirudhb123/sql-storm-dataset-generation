@@ -1,0 +1,69 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate, 
+        p.OwnerUserId, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+), UserVotes AS (
+    SELECT 
+        v.PostId, 
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 WHEN vt.Name = 'DownMod' THEN -1 ELSE 0 END) AS UserVoteScore
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+), UserBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(b.Id) AS BadgeCount, 
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+), ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstCloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    p.Title,
+    p.Score,
+    COALESCE(uv.UserVoteScore, 0) AS VoteScore,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    DATEDIFF(CURRENT_TIMESTAMP, u.CreationDate) AS AccountAgeDays,
+    cp.FirstCloseDate,
+    RANK() OVER (ORDER BY COALESCE(uv.UserVoteScore, 0) DESC, p.Score DESC) AS OverallRank
+FROM 
+    Users u
+JOIN 
+    RankedPosts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    UserVotes uv ON p.Id = uv.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    ClosedPosts cp ON p.Id = cp.PostId
+WHERE 
+    p.PostRank = 1
+ORDER BY 
+    OverallRank
+LIMIT 100;

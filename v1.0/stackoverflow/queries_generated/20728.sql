@@ -1,0 +1,96 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        COALESCE(COUNT(DISTINCT c.Id), 0) AS CommentCount,
+        COALESCE(VotesTotal.totalVotes, 0) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            v.PostId, 
+            SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 ELSE 0 END) AS totalVotes 
+        FROM 
+            Votes v
+        GROUP BY 
+            v.PostId
+    ) AS VotesTotal ON p.Id = VotesTotal.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 month'
+        AND p.PostTypeId IN (1, 2) -- Questions and Answers only
+    GROUP BY 
+        p.Id, VotesTotal.totalVotes
+),
+RankedPosts AS (
+    SELECT 
+        rp.*,
+        ROW_NUMBER() OVER (ORDER BY rp.Score DESC, rp.ViewCount DESC) AS Rank
+    FROM 
+        RecentPosts rp
+),
+PostsWithComments AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.Tags,
+        rc.CommentCount,
+        rc.CommentText,
+        rp.TotalVotes,
+        rp.Rank,
+        pwt.IsModeratorOnly,
+        COALESCE(SUM(b.Class) OVER (PARTITION BY rp.PostId), 0) AS TotalBadgeClass
+    FROM 
+        RankedPosts rp
+    LEFT JOIN (
+        SELECT 
+            c.PostId,
+            c.UserId,
+            COUNT(*) AS CommentCount,
+            STRING_AGG(c.Text, '; ') AS CommentText
+        FROM 
+            Comments c
+        GROUP BY 
+            c.PostId, c.UserId
+    ) rc ON rp.PostId = rc.PostId
+    LEFT JOIN Tags t ON POSITION(t.TagName IN rp.Tags) > 0
+    LEFT JOIN Badges b ON b.UserId = rc.UserId
+),
+FilteredResults AS (
+    SELECT 
+        pwc.*,
+        CASE 
+            WHEN TotalVotes > 10 THEN 'Highly Engaged'
+            WHEN TotalVotes BETWEEN 1 AND 10 THEN 'Moderately Engaged'
+            ELSE 'Low Engagement'
+        END AS EngagementLevel
+    FROM 
+        PostsWithComments pwc
+    WHERE 
+        TotalBadgeClass > 0 OR IsModeratorOnly = 1
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    Tags,
+    CommentCount,
+    Rank,
+    EngagementLevel
+FROM 
+    FilteredResults
+WHERE 
+    CommentCount > 0
+ORDER BY 
+    Rank
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

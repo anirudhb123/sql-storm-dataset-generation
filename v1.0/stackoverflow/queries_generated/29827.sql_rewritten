@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpvoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownvoteCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, u.DisplayName
+), 
+HighEngagementPosts AS (
+    SELECT 
+        rp.*,
+        (UpvoteCount - DownvoteCount) AS EngagementScore
+    FROM 
+        RankedPosts rp
+    WHERE 
+        CommentCount > 5 AND UpvoteCount > DownvoteCount
+),
+RecentPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        EngagementScore,
+        DENSE_RANK() OVER (ORDER BY EngagementScore DESC) AS ScoreRanking
+    FROM 
+        HighEngagementPosts
+    WHERE 
+        CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.EngagementScore,
+    rp.ScoreRanking
+FROM 
+    RecentPosts rp
+WHERE 
+    rp.ScoreRanking <= 10
+ORDER BY 
+    rp.EngagementScore DESC;

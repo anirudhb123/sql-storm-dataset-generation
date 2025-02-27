@@ -1,0 +1,71 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs_bill_customer_sk,
+        SUM(cs_net_profit) AS total_net_profit,
+        COUNT(DISTINCT cs_order_number) AS order_count
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) - INTERVAL '6 months' 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        cs_bill_customer_sk
+    UNION ALL
+    SELECT 
+        s.ss_customer_sk,
+        SUM(s.ss_net_profit) AS total_net_profit,
+        COUNT(DISTINCT s.ss_ticket_number) AS order_count
+    FROM 
+        store_sales s
+    JOIN 
+        sales_hierarchy sh ON s.ss_customer_sk = sh.cs_bill_customer_sk
+    GROUP BY 
+        s.ss_customer_sk
+),
+customer_return_stats AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_ticket_number) AS return_count,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) - INTERVAL '3 months'
+    GROUP BY 
+        sr_customer_sk
+),
+combined_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(sh.total_net_profit, 0) AS total_net_profit,
+        COALESCE(sh.order_count, 0) AS order_count,
+        COALESCE(rs.return_count, 0) AS return_count,
+        COALESCE(rs.total_return_amount, 0) AS total_return_amount
+    FROM 
+        customer c
+    LEFT JOIN 
+        sales_hierarchy sh ON c.c_customer_sk = sh.cs_bill_customer_sk
+    LEFT JOIN 
+        customer_return_stats rs ON c.c_customer_sk = rs.sr_customer_sk
+)
+SELECT 
+    c.c_first_name || ' ' || c.c_last_name AS customer_name,
+    c.total_net_profit,
+    c.order_count,
+    c.return_count,
+    c.total_return_amount,
+    CASE 
+        WHEN c.total_net_profit > 1000 THEN 'High Value Customer'
+        WHEN c.total_net_profit > 500 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_segment
+FROM 
+    combined_stats c
+WHERE 
+    c.order_count > 0
+ORDER BY 
+    c.total_net_profit DESC
+LIMIT 10;

@@ -1,0 +1,50 @@
+
+WITH SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           CONCAT('Supplier: ', s.s_name, ', Phone: ', s.s_phone, ', Address: ', s.s_address) AS supplier_details
+    FROM supplier s
+),
+PartInfo AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, 
+           REPLACE(p.p_comment, 'fragile', 'sensitive') AS updated_comment
+    FROM part p
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, 
+           CONCAT('Order Date: ', TO_CHAR(o.o_orderdate, 'YYYY-MM-DD'), 
+                  ', Total Price: $', TO_CHAR(o.o_totalprice, 'FM999999999.00'), 
+                  ', Priority: ', o.o_orderpriority) AS order_summary
+    FROM orders o
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, COUNT(*) AS item_count, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           MAX(l.l_discount) AS max_discount
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    si.supplier_details,
+    pi.p_name,
+    oi.order_summary,
+    li.item_count,
+    li.total_revenue,
+    li.max_discount
+FROM SupplierInfo si
+JOIN PartInfo pi ON si.s_nationkey = (
+    SELECT n.n_nationkey
+    FROM nation n
+    WHERE n.n_name = 'USA'
+)
+JOIN OrderDetails oi ON oi.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+)
+JOIN LineItemSummary li ON li.l_orderkey IN (
+    SELECT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_shipmode = 'AIR'
+)
+ORDER BY li.total_revenue DESC
+LIMIT 100;

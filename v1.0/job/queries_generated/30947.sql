@@ -1,0 +1,64 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM title m
+    WHERE m.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        depth + 1
+    FROM title m
+    JOIN movie_hierarchy mh 
+        ON m.episode_of_id = mh.movie_id
+)
+
+, cast_roles AS (
+    SELECT 
+        ci.movie_id,
+        ct.kind AS role_kind,
+        COUNT(ci.person_id) AS actor_count
+    FROM cast_info ci
+    JOIN role_type ct 
+        ON ci.role_id = ct.id
+    GROUP BY ci.movie_id, ct.kind
+)
+
+, movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mt.info ORDER BY mt.info_type_id) AS info_details
+    FROM movie_info mi
+    JOIN info_type it 
+        ON mi.info_type_id = it.id
+    WHERE mi.info IS NOT NULL
+    GROUP BY mi.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(ca.actor_count, 0) AS total_actors,
+    COALESCE(mid.info_details, 'No Information') AS additional_info,
+    ROW_NUMBER() OVER (ORDER BY mh.production_year DESC) AS ranking
+FROM movie_hierarchy mh
+LEFT JOIN cast_roles ca 
+    ON mh.movie_id = ca.movie_id
+LEFT JOIN movie_info_details mid 
+    ON mh.movie_id = mid.movie_id
+WHERE mh.production_year >= ALL (
+    SELECT production_year 
+    FROM title 
+    WHERE production_year IS NOT NULL
+)
+ORDER BY mh.production_year DESC
+LIMIT 10;
+
+This complex SQL query combines recursive CTEs, outer joins, aggregates, window functions, and string functions to benchmark performance by retrieving a list of movies that have episodes (if any exist) along with their additional actor counts and additional movie information. It ranks the entries based on production year, showcasing the most recent movies first while allowing for NULL handling in various sections to ensure completeness of results.

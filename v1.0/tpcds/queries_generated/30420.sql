@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_growth AS (
+    SELECT 
+        d_year, 
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY d_year ORDER BY SUM(ws_net_profit) DESC) AS year_rank
+    FROM 
+        date_dim dd
+    JOIN 
+        web_sales ws ON dd.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d_year
+),
+customer_statistics AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender,
+        SUM(ws.ws_quantity) AS total_purchases,
+        AVG(ws.ws_net_paid) AS avg_purchase_value,
+        COALESCE(SUM(ws.ws_net_paid), 0) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+top_customers AS (
+    SELECT 
+        * 
+    FROM 
+        customer_statistics
+    WHERE 
+        total_purchases > (
+            SELECT AVG(total_purchases) FROM customer_statistics
+        )
+),
+result AS (
+    SELECT 
+        cu.c_first_name || ' ' || cu.c_last_name AS full_name,
+        cu.total_purchases,
+        cu.avg_purchase_value,
+        sg.total_profit,
+        RANK() OVER (ORDER BY cu.total_spent DESC) AS customer_rank
+    FROM 
+        top_customers cu
+    JOIN 
+        sales_growth sg ON sg.year_rank = 1
+    ORDER BY 
+        cu.total_spent DESC
+)
+SELECT 
+    full_name,
+    total_purchases,
+    avg_purchase_value,
+    total_profit,
+    customer_rank
+FROM 
+    result
+WHERE 
+    customer_rank <= 10
+ORDER BY 
+    total_spent DESC;

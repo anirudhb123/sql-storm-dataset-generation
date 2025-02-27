@@ -1,0 +1,76 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1995-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        o.o_orderkey, c.c_mktsegment
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, p.p_partkey, p.p_name
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(NULLIF(sm.total_supply_cost, 0), 1) AS adjusted_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        (SELECT 
+             s.s_suppkey, 
+             SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost
+        FROM 
+             partsupp ps
+        JOIN 
+             supplier s ON ps.ps_suppkey = s.s_suppkey
+        GROUP BY 
+             s.s_suppkey) sm ON s.s_suppkey = sm.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+),
+FinalReport AS (
+    SELECT 
+        r.r_name AS region_name,
+        COUNT(DISTINCT os.o_orderkey) AS order_count,
+        SUM(os.total_revenue) AS total_revenue,
+        AVG(ss.adjusted_cost) AS avg_supplier_cost
+    FROM 
+        RankedOrders os
+    JOIN 
+        nation n ON (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'EUROPE' AND n.n_regionkey = r.r_regionkey) IS NOT NULL
+    JOIN 
+        FilteredSuppliers ss ON ss.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT ps.ps_partkey FROM partsupp ps))
+    GROUP BY 
+        r.r_regionkey
+)
+SELECT 
+    *
+FROM 
+    FinalReport
+WHERE 
+    total_revenue > (SELECT AVG(total_revenue) FROM FinalReport) 
+ORDER BY 
+    region_name ASC, order_count DESC
+LIMIT 10
+OFFSET 5;

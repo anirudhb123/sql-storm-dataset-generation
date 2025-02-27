@@ -1,0 +1,114 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderstatus IN ('O', 'P')
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts_count
+    FROM 
+        supplier s
+    LEFT JOIN 
+        SupplierParts ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+    HAVING 
+        COUNT(DISTINCT ps.ps_partkey) >= 5
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+),
+FilteredOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderstatus,
+        ro.o_totalprice,
+        ro.o_orderdate,
+        COALESCE(c.total_orders, 0) AS total_orders,
+        COALESCE(c.total_spent, 0) AS total_spent
+    FROM 
+        RankedOrders ro
+    LEFT JOIN 
+        CustomerOrders c ON ro.o_orderkey = c.c_custkey
+)
+
+SELECT 
+    fo.o_orderkey,
+    fo.o_orderstatus,
+    fo.o_totalprice,
+    fo.total_orders,
+    fo.total_spent,
+    sp.total_avail_qty,
+    sp.avg_supply_cost,
+    (fo.o_totalprice / NULLIF(fo.total_orders, 0)) AS avg_spent_per_order,
+    CASE 
+        WHEN sp.avg_supply_cost IS NULL THEN 'No Cost Info'
+        ELSE FORMAT(sp.avg_supply_cost, 'Currency')
+    END AS formatted_supply_cost,
+    CASE 
+        WHEN sp.part_names IS NOT NULL THEN CONCAT('Parts: ', sp.part_names)
+        ELSE 'No Parts Supplied'
+    END AS parts_info
+FROM 
+    FilteredOrders fo
+LEFT JOIN 
+    SupplierParts sp ON fo.o_orderkey = sp.ps_partkey
+WHERE 
+    fo.o_orderstatus <> 'C'
+    AND (sp.total_avail_qty IS NULL OR sp.total_avail_qty > 0)
+ORDER BY 
+    fo.o_totalprice DESC, 
+    fo.o_orderdate ASC
+LIMIT 100
+UNION ALL
+SELECT 
+    NULL AS orderkey, 
+    'Total' AS o_orderstatus, 
+    SUM(fo.o_totalprice) AS total_price, 
+    NULL AS total_orders, 
+    NULL AS total_spent, 
+    NULL AS total_avail_qty,
+    NULL AS avg_supply_cost,
+    NULL AS avg_spent_per_order,
+    NULL AS formatted_supply_cost,
+    NULL AS parts_info
+FROM 
+    FilteredOrders fo;

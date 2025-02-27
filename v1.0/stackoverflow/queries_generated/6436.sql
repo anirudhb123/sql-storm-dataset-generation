@@ -1,0 +1,80 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT c.Id) AS CommentsCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostsCount,
+        CommentsCount,
+        UpVotes,
+        DownVotes,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserStats
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        RANK() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS TagRank
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, '><')::int[])
+    GROUP BY 
+        t.TagName
+),
+CombinedStats AS (
+    SELECT 
+        tu.UserId,
+        tu.DisplayName,
+        tu.Reputation,
+        tu.PostsCount,
+        tu.CommentsCount,
+        tu.UpVotes,
+        tu.DownVotes,
+        tt.TagName,
+        tt.PostCount,
+        tt.TotalViews
+    FROM 
+        TopUsers tu
+    JOIN 
+        PopularTags tt ON tu.PostsCount > 0
+WHERE 
+    tu.ReputationRank <= 10 AND tt.TagRank <= 5
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    PostsCount,
+    CommentsCount,
+    UpVotes,
+    DownVotes,
+    TagName,
+    PostCount,
+    TotalViews
+FROM 
+    CombinedStats
+ORDER BY 
+    Reputation DESC, TotalViews DESC;

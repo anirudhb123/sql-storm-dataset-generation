@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        STRING_AGG(DISTINCT t.TagName, ',') AS Tags,
+        COALESCE(
+            (SELECT COUNT(*) 
+             FROM Comments c 
+             WHERE c.PostId = p.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    OUTER APPLY (
+        SELECT value AS TagName 
+        FROM STRING_SPLIT(SUBSTRING(p.Tags, 2, LEN(p.Tags) - 2), '> <')
+    ) AS t
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+RecentPostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN p.Score > 0 THEN 1 END) AS PositiveVotes,
+        COUNT(CASE WHEN p.Score < 0 THEN 1 END) AS NegativeVotes,
+        AVG(p.ViewCount) AS AvgViewCount,
+        MAX(p.CreationDate) AS LastInteraction
+    FROM 
+        Posts p
+    GROUP BY 
+        p.Id
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.OwnerDisplayName,
+        rp.Tags,
+        rp.CommentCount,
+        rps.PositiveVotes,
+        rps.NegativeVotes,
+        rps.AvgViewCount,
+        rps.LastInteraction,
+        CASE 
+            WHEN rp.Score > 10 THEN 'High Score'
+            WHEN rp.Score BETWEEN 1 AND 10 THEN 'Moderate Score'
+            ELSE 'Low Score'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+    JOIN 
+        RecentPostStatistics rps ON rp.PostId = rps.PostId
+    WHERE 
+        rp.rn = 1 
+)
+SELECT 
+    PostId,
+    Title,
+    OwnerDisplayName,
+    Tags,
+    CommentCount,
+    PositiveVotes,
+    NegativeVotes,
+    AvgViewCount,
+    LastInteraction,
+    ScoreCategory
+FROM 
+    FinalResults
+ORDER BY 
+    LastInteraction DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

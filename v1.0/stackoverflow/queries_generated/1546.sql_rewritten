@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS Questions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS Answers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostVoteDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalScore,
+    ups.TotalViews,
+    ups.Questions,
+    ups.Answers,
+    r.PostId,
+    r.Title AS TopPostTitle,
+    r.CreationDate AS TopPostCreationDate,
+    r.Score AS TopPostScore,
+    pvd.VoteCount,
+    pvd.UpVotes,
+    pvd.DownVotes
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    RankedPosts r ON ups.UserId = r.OwnerUserId AND r.ScoreRank = 1
+LEFT JOIN 
+    PostVoteDetails pvd ON r.PostId = pvd.PostId
+WHERE 
+    ups.TotalPosts > 5
+ORDER BY 
+    ups.TotalScore DESC NULLS LAST;

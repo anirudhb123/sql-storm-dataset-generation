@@ -1,0 +1,45 @@
+WITH RECURSIVE ranked_customers AS (
+    SELECT c_custkey, c_name, c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c_nationkey ORDER BY c_acctbal DESC) AS ranking
+    FROM customer
+    WHERE c_acctbal IS NOT NULL
+), high_value_orders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice,
+           DENSE_RANK() OVER (ORDER BY o_totalprice DESC) AS order_rank
+    FROM orders
+    WHERE o_totalprice > (
+        SELECT AVG(o_totalprice) 
+        FROM orders
+    )
+), nation_supplier AS (
+    SELECT n.n_nationkey, n.n_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE n.n_name LIKE 'N%' OR s.s_name IS NULL
+)
+SELECT rc.c_name AS customer_name, 
+       rc.c_acctbal, 
+       ho.o_orderkey, 
+       ho.o_totalprice,
+       ns.s_name AS supplier_name,
+       COUNT(light.l_orderkey) AS lineitem_count,
+       SUM(light.l_extendedprice * (1 - light.l_discount)) AS revenue_after_discount,
+       CASE 
+           WHEN SUM(light.l_discount) = 0 THEN 'No Discount' 
+           ELSE 'Has Discount' 
+       END AS discount_status,
+       STRING_AGG(light.l_shipmode, ', ') AS shipping_methods
+FROM ranked_customers rc
+LEFT JOIN high_value_orders ho ON rc.c_custkey = ho.o_custkey
+LEFT JOIN lineitem light ON ho.o_orderkey = light.l_orderkey
+LEFT JOIN nation_supplier ns ON rc.c_nationkey = ns.n_nationkey
+WHERE rc.ranking <= 5
+AND EXISTS (
+    SELECT 1
+    FROM supplier s
+    WHERE s.s_acctbal > 10000 AND s.s_nationkey = rc.c_nationkey
+    HAVING AVG(s.s_acctbal) IS NOT NULL
+)
+GROUP BY rc.c_custkey, ho.o_orderkey, ns.s_name
+ORDER BY rc.c_acctbal DESC, ho.o_totalprice DESC
+LIMIT 100;

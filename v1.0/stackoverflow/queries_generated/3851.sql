@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpvoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > (CURRENT_TIMESTAMP - INTERVAL '1 year')
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(p.Id) > 5
+),
+TopPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        mu.DisplayName AS OwnerName,
+        mu.PostCount,
+        mu.TotalScore
+    FROM 
+        RankedPosts rp
+    JOIN 
+        MostActiveUsers mu ON rp.OwnerUserId = mu.Id
+)
+SELECT 
+    tp.Title,
+    tp.OwnerName,
+    tp.CreationDate,
+    COALESCE(NULLIF(tp.Score, 0), 'No Score') AS Score,
+    CASE 
+        WHEN tp.ViewCount IS NULL THEN 'No Views'
+        ELSE tp.ViewCount::text 
+    END AS ViewCount,
+    tp.PostCount,
+    tp.TotalScore
+FROM 
+    TopPosts tp
+WHERE 
+    tp.PostRank <= 3
+ORDER BY 
+    tp.Score DESC NULLS LAST
+LIMIT 10;

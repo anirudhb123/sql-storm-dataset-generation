@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS Author,
+        ROW_NUMBER() OVER (PARTITION BY ARRAY(SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))) ORDER BY p.Score DESC) ORDER BY p.Score DESC) AS RankByTags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Considering only Questions and Answers
+        AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.Score,
+        rp.Author
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByTags <= 5 -- Top 5 posts by tags
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+AuthorStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(pb.BadgeCount, 0) AS BadgeCount,
+        COALESCE(pc.CommentCount, 0) AS TotalComments,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        PostBadges pb ON u.Id = pb.UserId
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    tr.Title,
+    tr.Body,
+    tr.Tags,
+    tr.CreationDate,
+    tr.Score,
+    tr.Author,
+    a.DisplayName AS AuthorDisplayName,
+    a.BadgeCount,
+    a.TotalComments,
+    a.TotalScore
+FROM 
+    TopRankedPosts tr
+JOIN 
+    AuthorStatistics a ON tr.Author = a.DisplayName
+ORDER BY 
+    tr.Score DESC, a.TotalScore DESC
+LIMIT 50;

@@ -1,0 +1,70 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('feature', 'short'))
+),
+FilteredCast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        MAX(p.gender) AS predominant_gender
+    FROM 
+        cast_info ci
+    JOIN 
+        person_info pi ON ci.person_id = pi.person_id
+    JOIN 
+        name p ON pi.person_id = p.imdb_id
+    WHERE 
+        pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birth date')
+    GROUP BY 
+        ci.movie_id
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        rn.total_cast
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        FilteredCast rn ON mc.movie_id = rn.movie_id
+),
+FinalResults AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        COALESCE(cn.company_name, 'Independent') AS production_company,
+        fc.total_cast,
+        fc.predominant_gender
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyMovies cn ON rm.movie_id = cn.movie_id
+    LEFT JOIN 
+        FilteredCast fc ON rm.movie_id = fc.movie_id
+)
+SELECT 
+    *,
+    CASE 
+        WHEN predominant_gender = 'M' THEN 'Male'
+        WHEN predominant_gender = 'F' THEN 'Female'
+        ELSE 'Unspecified'
+    END AS gender_description
+FROM 
+    FinalResults
+WHERE 
+    title_rank <= 5
+ORDER BY 
+    production_year DESC, title;

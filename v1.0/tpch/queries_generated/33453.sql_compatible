@@ -1,0 +1,41 @@
+
+WITH RECURSIVE supply_chain AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+    UNION ALL
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty + sc.ps_availqty AS ps_availqty, 
+           LEAST(ps.ps_supplycost, sc.ps_supplycost) AS ps_supplycost
+    FROM partsupp ps
+    JOIN supply_chain sc ON ps.ps_partkey = sc.ps_partkey
+    WHERE ps.ps_suppkey <> sc.ps_suppkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    INNER JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+countries AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT co.c_name, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+       COUNT(DISTINCT li.l_orderkey) AS num_orders, 
+       COUNT(DISTINCT CASE WHEN li.l_shipdate > '1997-01-01' THEN li.l_orderkey END) AS recent_orders,
+       AVG(sc.ps_supplycost) AS avg_supply_cost
+FROM lineitem li
+LEFT JOIN customer_orders co ON co.c_custkey = (
+    SELECT c.c_custkey 
+    FROM customer c 
+    WHERE c.c_acctbal > 0 
+    ORDER BY c.c_acctbal DESC 
+    FETCH FIRST 1 ROW ONLY
+)
+LEFT JOIN supply_chain sc ON li.l_partkey = sc.ps_partkey
+LEFT JOIN countries cn ON li.l_suppkey = cn.n_nationkey
+WHERE li.l_returnflag = 'N' AND (li.l_shipmode = 'AIR' OR li.l_shipmode = 'TRUCK')
+GROUP BY co.c_name
+HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) > 1000000 OR COUNT(li.l_orderkey) > 500
+ORDER BY total_revenue DESC;

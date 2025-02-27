@@ -1,0 +1,87 @@
+
+WITH RecursiveUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+LastPostComments AS (
+    SELECT 
+        c.UserId,
+        COUNT(c.Id) AS TotalComments,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.UserId
+),
+UserPerformance AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.TotalPosts,
+        u.TotalQuestions,
+        u.TotalAnswers,
+        COALESCE(lc.TotalComments, 0) AS TotalComments,
+        u.LastPostDate,
+        lc.LastCommentDate,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        RecursiveUserActivity u
+    LEFT JOIN 
+        LastPostComments lc ON u.UserId = lc.UserId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    up.TotalPosts,
+    up.TotalQuestions,
+    up.TotalAnswers,
+    up.TotalComments,
+    ps.PostId,
+    ps.Title,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    up.LastPostDate,
+    up.LastCommentDate,
+    up.ReputationRank
+FROM 
+    UserPerformance up
+JOIN 
+    PostStatistics ps ON up.UserId IN (SELECT DISTINCT OwnerUserId FROM Posts WHERE Id = ps.PostId)
+WHERE 
+    up.TotalPosts > 0
+ORDER BY 
+    up.ReputationRank,
+    ps.UpVotes DESC;

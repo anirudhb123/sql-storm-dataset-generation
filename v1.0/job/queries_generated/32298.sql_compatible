@@ -1,0 +1,44 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        CAST(NULL AS INTEGER) AS parent_movie_id,
+        0 AS hierarchy_level
+    FROM title m
+    WHERE m.season_nr IS NULL  
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.movie_id AS parent_movie_id,
+        mh.hierarchy_level + 1
+    FROM title m
+    JOIN movie_link ml ON m.id = ml.movie_id
+    JOIN movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT c.person_id) AS total_cast_members,
+    AVG(CASE WHEN c.role_id IS NOT NULL THEN 1 ELSE 0 END) AS avg_actors_in_roles,
+    SUM(CASE WHEN m.note IS NOT NULL THEN 1 ELSE 0 END) AS movie_notes_count,
+    ARRAY_AGG(DISTINCT co.name) AS companies_involved,
+    (SELECT COUNT(*) FROM movie_keyword mk 
+     WHERE mk.movie_id = mh.movie_id AND mk.keyword_id IS NULL) AS null_keywords_count
+FROM movie_hierarchy mh
+LEFT JOIN cast_info c ON mh.movie_id = c.movie_id
+LEFT JOIN movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN company_name co ON mc.company_id = co.id
+LEFT JOIN movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+LEFT JOIN aka_title a ON mh.movie_id = a.movie_id
+GROUP BY mh.movie_id, mh.title, mh.production_year
+HAVING COUNT(DISTINCT c.person_id) > 0
+ORDER BY mh.production_year DESC, total_cast_members DESC
+LIMIT 100;

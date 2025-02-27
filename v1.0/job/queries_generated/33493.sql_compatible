@@ -1,0 +1,102 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ep.id AS movie_id,
+        ep.title,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title ep
+    JOIN 
+        movie_hierarchy mh ON ep.episode_of_id = mh.movie_id
+),
+company_movie_info AS (
+    SELECT
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mci.id) AS num_info_records
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        movie_info mci ON mc.movie_id = mci.movie_id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+),
+cast_info_with_role AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS num_cast_members,
+        ARRAY_AGG(DISTINCT rt.role) AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id
+),
+ranked_movies AS (
+    SELECT 
+        h.movie_id,
+        h.title,
+        h.level,
+        COALESCE(cmi.company_name, 'Unknown') AS company_name,
+        COALESCE(cmi.company_type, 'N/A') AS company_type,
+        COALESCE(csr.num_cast_members, 0) AS num_cast,
+        cmi.num_info_records,
+        ROW_NUMBER() OVER (PARTITION BY h.level ORDER BY h.title) AS title_rank
+    FROM 
+        movie_hierarchy h
+    LEFT JOIN 
+        company_movie_info cmi ON h.movie_id = cmi.movie_id
+    LEFT JOIN 
+        cast_info_with_role csr ON h.movie_id = csr.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.level,
+    rm.company_name,
+    rm.company_type,
+    rm.num_cast,
+    rm.num_info_records,
+    CASE 
+        WHEN rm.num_cast > 10 THEN 'Large Cast'
+        WHEN rm.num_cast BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size,
+    CASE 
+        WHEN rm.num_info_records IS NULL THEN 'No Info'
+        ELSE CAST(rm.num_info_records AS VARCHAR) || ' Info Records'
+    END AS info_description,
+    STRING_AGG(DISTINCT unnest(csr.roles), ', ') AS roles_list
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    cast_info_with_role csr ON rm.movie_id = csr.movie_id
+GROUP BY 
+    rm.movie_id,
+    rm.title,
+    rm.level,
+    rm.company_name,
+    rm.company_type,
+    rm.num_cast,
+    rm.num_info_records
+ORDER BY 
+    rm.level, rm.title;

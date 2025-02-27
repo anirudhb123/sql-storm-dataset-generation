@@ -1,0 +1,71 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerName,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(pv.UpVotes, 0) AS UpVotes,
+        COALESCE(pv.DownVotes, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+                         SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM Votes
+         GROUP BY PostId) pv ON p.Id = pv.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 month'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT ctr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes ctr ON ph.Comment::INTEGER = ctr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed or Reopened posts
+    GROUP BY 
+        ph.PostId
+),
+HighScorePosts AS (
+    SELECT 
+        rp.*,
+        CASE WHEN cp.LastClosedDate IS NOT NULL THEN 'Closed' ELSE 'Open' END AS Status
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.Score > 10 AND (cp.LastClosedDate IS NULL OR cp.LastClosedDate < NOW() - INTERVAL '2 weeks')
+)
+SELECT 
+    hp.PostId,
+    hp.Title,
+    hp.OwnerName,
+    hp.CreationDate,
+    hp.CommentCount,
+    hp.UpVotes,
+    hp.DownVotes,
+    hp.Score,
+    hp.Status,
+    CASE 
+        WHEN hp.PostRank = 1 THEN 'Most Recent Post by Owner'
+        ELSE NULL
+    END AS PostStatus
+FROM 
+    HighScorePosts hp
+WHERE 
+    (hp.Tags IS NULL OR hp.Tags LIKE '%SQL%') -- Example of a bizarre predicate for tag filtering
+ORDER BY 
+    hp.CreationDate DESC, 
+    hp.UpVotes DESC;

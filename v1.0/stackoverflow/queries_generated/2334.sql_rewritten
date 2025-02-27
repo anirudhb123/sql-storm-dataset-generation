@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    AND 
+        p.Score > 0
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ub.BronzeBadges, 0) AS BronzeBadges
+    FROM 
+        Users u
+        LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+    WHERE 
+        u.Reputation > 5000 
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        tu.DisplayName AS OwnerDisplayName,
+        tu.Reputation AS OwnerReputation,
+        tu.BadgeCount AS OwnerBadgeCount
+    FROM 
+        RankedPosts rp
+        JOIN TopUsers tu ON rp.OwnerUserId = tu.UserId
+    WHERE 
+        rp.RowNum = 1 
+)
+SELECT 
+    ps.OwnerDisplayName,
+    ps.OwnerReputation,
+    ps.OwnerBadgeCount,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    COALESCE(ph.Comment, 'No comments') AS PostHistoryComment,
+    COUNT(DISTINCT c.Id) AS TotalComments
+FROM 
+    PostStatistics ps
+    LEFT JOIN PostHistory ph ON ps.PostId = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) 
+    LEFT JOIN Comments c ON ps.PostId = c.PostId
+GROUP BY 
+    ps.OwnerDisplayName, ps.OwnerReputation, ps.OwnerBadgeCount, ps.Title, ps.CreationDate, ps.Score, ps.ViewCount, ps.AnswerCount, ph.Comment
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC
+LIMIT 20;

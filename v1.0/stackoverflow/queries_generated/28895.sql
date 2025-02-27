@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        u.DisplayName AS Author,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND (v.VoteTypeId = 2 OR v.VoteTypeId = 3)
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.Body, u.DisplayName, p.CreationDate
+),
+UserRankedPosts AS (
+    SELECT 
+        rp.*,
+        ROW_NUMBER() OVER (PARTITION BY Author ORDER BY CreationDate DESC) AS UserPostRank
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    urp.PostId,
+    urp.Title,
+    urp.Body,
+    urp.Author,
+    urp.CreationDate,
+    urp.CommentCount,
+    urp.VoteCount,
+    CASE 
+        WHEN urp.UserPostRank = 1 THEN 'Latest'
+        WHEN urp.UserPostRank <= 3 THEN 'Top Posts'
+        ELSE 'Older Posts'
+    END AS PostCategory,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    UserRankedPosts urp
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            unnest(string_to_array(substring(urp.Tags, 2, length(urp.Tags)-2), '><')) AS TagName
+    ) t ON true
+GROUP BY 
+    urp.PostId, urp.Title, urp.Body, urp.Author, urp.CreationDate, urp.CommentCount, urp.VoteCount, urp.UserPostRank
+ORDER BY 
+    urp.CreationDate DESC, urp.VoteCount DESC
+LIMIT 50;

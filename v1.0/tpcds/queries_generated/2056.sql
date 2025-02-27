@@ -1,0 +1,65 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_profit DESC) AS rank
+    FROM
+        web_sales ws
+    JOIN
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE
+        d.d_year = 2023
+),
+recent_customers AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Mr. ' || c.c_first_name
+            WHEN cd.cd_gender = 'F' THEN 'Ms. ' || c.c_first_name
+            ELSE c.c_first_name
+        END AS salutation,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE
+        c.c_birth_year >= 1985
+),
+total_sales AS (
+    SELECT
+        SUM(ws.net_profit) AS total_profit,
+        wb.web_site_id
+    FROM
+        web_sales ws
+    JOIN
+        web_site wb ON ws.ws_web_site_sk = wb.web_site_sk
+    GROUP BY
+        wb.web_site_id
+)
+
+SELECT
+    COALESCE(rs.web_site_sk, 0) AS website_id,
+    COALESCE(rs.net_profit, 0) AS max_net_profit,
+    (SELECT COUNT(*) FROM recent_customers) AS total_recent_customers,
+    (SELECT total_profit FROM total_sales WHERE web_site_id = 'WS001') AS site_001_profit
+FROM
+    ranked_sales rs
+FULL OUTER JOIN
+    recent_customers rc ON rc.cd_credit_rating = (
+        SELECT cd_credit_rating
+        FROM customer_demographics
+        WHERE cd_demo_sk = (
+            SELECT TOP 1 c.c_current_cdemo_sk
+            FROM customer c
+            ORDER BY c.c_first_shipto_date_sk DESC
+        )
+    )
+WHERE
+    rs.rank = 1
+ORDER BY
+    max_net_profit DESC;

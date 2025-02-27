@@ -1,0 +1,55 @@
+WITH UserReputation AS (
+    SELECT Id, Reputation,
+           CASE 
+               WHEN Reputation < 100 THEN 'Low Reputation'
+               WHEN Reputation BETWEEN 100 AND 500 THEN 'Medium Reputation'
+               ELSE 'High Reputation' 
+           END AS ReputationCategory
+    FROM Users
+),
+PostDetails AS (
+    SELECT p.Id AS PostId, 
+           p.Title,
+           p.CreationDate,
+           u.DisplayName AS OwnerDisplayName,
+           p.Score,
+           COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerStatus
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+),
+RecentVotes AS (
+    SELECT v.PostId,
+           COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+           COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Votes v
+    GROUP BY v.PostId
+),
+PostHistorySummary AS (
+    SELECT ph.PostId, 
+           STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+           MAX(ph.CreationDate) AS LastHistoryDate
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+)
+SELECT pd.PostId,
+       pd.Title,
+       pd.CreationDate,
+       pd.OwnerDisplayName,
+       ur.ReputationCategory,
+       COALESCE(rv.UpVotes, 0) AS UpVotes,
+       COALESCE(rv.DownVotes, 0) AS DownVotes,
+       COALESCE(phs.HistoryTypes, 'No history available') AS HistoryTypes,
+       EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - pd.CreationDate)) AS AgeInSeconds,
+       CASE 
+           WHEN pd.Score IS NULL THEN 'No Score'
+           WHEN pd.Score >= 10 THEN 'Popular Post'
+           ELSE 'Less Popular' 
+       END AS PopularityStatus
+FROM PostDetails pd
+JOIN UserReputation ur ON pd.OwnerDisplayName = ur.Id 
+LEFT JOIN RecentVotes rv ON pd.PostId = rv.PostId
+LEFT JOIN PostHistorySummary phs ON pd.PostId = phs.PostId
+ORDER BY pd.CreationDate DESC
+LIMIT 100;

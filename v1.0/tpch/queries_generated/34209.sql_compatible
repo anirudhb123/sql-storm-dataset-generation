@@ -1,0 +1,49 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)  
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey AND s.s_suppkey <> sh.s_suppkey
+),
+RankedOrders AS (
+    SELECT
+        o_orderkey,
+        o_custkey,
+        o_totalprice,
+        o_orderdate,
+        RANK() OVER (PARTITION BY o_orderstatus ORDER BY o_totalprice DESC) AS price_rank
+    FROM orders
+    WHERE o_orderdate >= DATE '1997-01-01'
+),
+SupplierInfo AS (
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > 100 AND p.p_size IN (1, 2, 3)   
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(l.l_discount * l.l_extendedprice) AS total_discounted_sales,
+    AVG(o.o_totalprice) AS average_order_value,
+    MAX(ro.price_rank) AS highest_order_rank,
+    STRING_AGG(DISTINCT sh.s_name, ', ') AS high_value_suppliers
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN RankedOrders ro ON o.o_orderkey = ro.o_orderkey
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+WHERE l.l_shipdate BETWEEN '1997-10-01' AND '1997-10-31'
+AND o.o_orderstatus IN ('O', 'F')
+GROUP BY n.n_name
+HAVING SUM(l.l_discount * l.l_extendedprice) > 1000000
+ORDER BY total_discounted_sales DESC;

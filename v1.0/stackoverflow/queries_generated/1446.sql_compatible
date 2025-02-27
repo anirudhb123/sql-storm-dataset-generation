@@ -1,0 +1,63 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        RANK() OVER (ORDER BY COUNT(p.Id) DESC) AS PostRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        TotalPosts,
+        TotalComments,
+        TotalUpvotes,
+        TotalDownvotes,
+        PostRank
+    FROM UserActivity
+    WHERE PostRank <= 10
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(ph.Comment, '') AS LastEdit
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(Id) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.CreationDate = (
+        SELECT MAX(CreationDate)
+        FROM PostHistory
+        WHERE PostId = p.Id
+    )
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.TotalComments,
+    pd.Title AS PostTitle,
+    pd.CreationDate,
+    pd.CommentCount,
+    pd.LastEdit 
+FROM TopUsers tu
+JOIN PostDetails pd ON tu.UserId = pd.Author
+ORDER BY tu.TotalPosts DESC, pd.CommentCount DESC
+LIMIT 5;

@@ -1,0 +1,42 @@
+
+WITH SalesData AS (
+    SELECT
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE i.i_current_price IS NOT NULL AND ws.ws_net_profit IS NOT NULL
+    GROUP BY ws.ws_sold_date_sk, ws.ws_item_sk
+),
+TopSellingItems AS (
+    SELECT
+        sd.ws_item_sk,
+        add.ca_city,
+        sd.total_quantity,
+        sd.avg_sales_price,
+        sd.total_net_profit
+    FROM SalesData sd
+    LEFT JOIN customer c ON c.c_customer_sk = (SELECT DISTINCT c_customer_sk FROM web_sales WHERE ws_item_sk = sd.ws_item_sk)
+    LEFT JOIN customer_address add ON c.c_current_addr_sk = add.ca_address_sk
+    WHERE sd.rank <= 5
+)
+SELECT
+    w.w_warehouse_name,
+    tsi.ws_item_sk,
+    tsi.total_quantity,
+    COUNT(DISTINCT tsi.ca_city) AS city_count,
+    CASE
+        WHEN MAX(tsi.total_net_profit) > 1000 THEN 'High Profit'
+        WHEN MAX(tsi.total_net_profit) IS NULL THEN 'No Profit Data'
+        ELSE 'Moderate Profit'
+    END AS profit_category
+FROM TopSellingItems tsi
+JOIN warehouse w ON w.w_warehouse_sk = (SELECT DISTINCT ws.ws_warehouse_sk FROM web_sales ws WHERE ws.ws_item_sk = tsi.ws_item_sk)
+GROUP BY w.w_warehouse_name, tsi.ws_item_sk
+HAVING COUNT(DISTINCT tsi.ca_city) > 1
+ORDER BY profit_category DESC, total_quantity DESC
+OPTION (RECOMPILE);

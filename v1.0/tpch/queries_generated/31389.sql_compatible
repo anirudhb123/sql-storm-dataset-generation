@@ -1,0 +1,43 @@
+
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, ts.total_cost + SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN TopSuppliers ts ON ts.s_suppkey = s.s_suppkey
+    GROUP BY s.s_suppkey, s.s_name, ts.total_cost
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) + ts.total_cost > 100000
+),
+CustomerTotal AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RegionNation AS (
+    SELECT r.r_name AS region_name, n.n_name AS nation_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name, n.n_name
+)
+SELECT 
+    c.c_name,
+    ct.total_spent,
+    COALESCE(ts.total_cost, 0) AS supplier_cost,
+    rn.region_name,
+    rn.nation_name,
+    rn.supplier_count
+FROM CustomerTotal ct
+JOIN customer c ON ct.c_custkey = c.c_custkey
+LEFT JOIN TopSuppliers ts ON c.c_nationkey = ts.s_suppkey
+JOIN RegionNation rn ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = rn.nation_name)
+WHERE ct.total_spent > 50000 
+AND rn.supplier_count > 10
+ORDER BY ct.total_spent DESC, supplier_cost DESC
+LIMIT 100;

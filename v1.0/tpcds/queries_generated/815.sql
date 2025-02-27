@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        dem.hd_income_band_sk,
+        CA.ca_city,
+        RANK() OVER (ORDER BY total_sales_price DESC) AS customer_ranking
+    FROM 
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address CA ON c.c_current_addr_sk = CA.ca_address_sk
+    JOIN RankedSales RS ON c.c_customer_sk = RS.ws_bill_customer_sk
+    LEFT JOIN household_demographics dem ON c.c_current_hdemo_sk = dem.hd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000 AND cd.cd_gender IS NOT NULL
+),
+RecentReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returned,
+        SUM(wr_return_amt_inc_tax) AS total_refunds,
+        COUNT(DISTINCT wr_order_number) AS total_orders_returned
+    FROM 
+        web_returns
+    WHERE 
+        wr_returned_date_sk > (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY 
+        wr_returning_customer_sk
+)
+SELECT 
+    HVC.c_customer_id,
+    HVC.c_first_name,
+    HVC.c_last_name,
+    HVC.cd_gender,
+    HVC.cd_marital_status,
+    HVC.hd_income_band_sk,
+    HVC.ca_city,
+    COALESCE(RR.total_returned, 0) AS total_returned,
+    COALESCE(RR.total_refunds, 0) AS total_refunds,
+    HVC.customer_ranking
+FROM 
+    HighValueCustomers HVC
+LEFT JOIN 
+    RecentReturns RR ON HVC.c_customer_id = RR.wr_returning_customer_sk
+WHERE 
+    HVC.customer_ranking <= 100
+ORDER BY 
+    HVC.customer_ranking;

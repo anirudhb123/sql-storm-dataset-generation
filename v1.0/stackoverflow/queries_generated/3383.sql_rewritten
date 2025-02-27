@@ -1,0 +1,82 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.OwnerUserId, 
+        p.ViewCount,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(v.Score), 0) AS TotalVotes,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostVoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+ClosedPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        history.CreationDate AS ClosedDate,
+        history.UserDisplayName AS ClosedBy
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory history ON p.Id = history.PostId
+    WHERE 
+        history.PostHistoryTypeId = 10
+)
+
+SELECT 
+    u.DisplayName AS UserDisplayName, 
+    u.Reputation,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate,
+    u.BadgeCount,
+    us.TotalBounty,
+    us.TotalVotes,
+    COALESCE(pvc.VoteCount, 0) AS RecentPostVoteCount,
+    cp.ClosedBy,
+    cp.ClosedDate
+FROM 
+    Users u
+LEFT JOIN 
+    RecentPosts rp ON u.Id = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN 
+    UserScores us ON u.Id = us.UserId
+LEFT JOIN 
+    PostVoteCounts pvc ON rp.Id = pvc.PostId
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.Id
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    u.Reputation DESC, 
+    rp.CreationDate DESC
+LIMIT 50;

@@ -1,0 +1,81 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number, 
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        RANK() OVER(PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_paid DESC) AS rank_sales,
+        COALESCE((SELECT AVG(ws_sub.ws_net_paid) 
+                  FROM web_sales ws_sub 
+                  WHERE ws_sub.ws_item_sk = ws.ws_item_sk
+                  AND ws_sub.ws_net_paid IS NOT NULL), 0) AS avg_net_paid
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_net_paid IS NOT NULL
+        AND i.i_current_price > 0
+),
+ItemInventory AS (
+    SELECT 
+        inv.inv_item_sk,
+        inv.inv_quantity_on_hand,
+        COALESCE(SUM(CASE WHEN ws.ws_quantity > 0 THEN 1 ELSE 0 END), 0) AS sale_count
+    FROM 
+        inventory inv
+    LEFT JOIN 
+        web_sales ws ON inv.inv_item_sk = ws.ws_item_sk
+    GROUP BY 
+        inv.inv_item_sk, inv.inv_quantity_on_hand
+),
+SalesComparison AS (
+    SELECT 
+        r.ws_order_number,
+        r.ws_quantity,
+        r.ws_net_paid,
+        i.inv_quantity_on_hand,
+        i.sale_count,
+        CASE 
+            WHEN r.ws_net_paid > i.inv_quantity_on_hand THEN 'Above Inventory'
+            WHEN r.ws_net_paid = i.inv_quantity_on_hand THEN 'Equal Inventory'
+            ELSE 'Below Inventory'
+        END AS inventory_status
+    FROM 
+        RankedSales r
+    JOIN 
+        ItemInventory i ON r.ws_order_number = i.inv_item_sk
+    WHERE 
+        r.rank_sales = 1
+)
+SELECT 
+    COUNT(*) AS total_sales,
+    AVG(ws_net_paid) AS avg_sale_price,
+    MAX(ws_net_paid) AS max_sale_price,
+    MIN(ws_net_paid) AS min_sale_price,
+    SUM(CASE 
+            WHEN inventory_status = 'Above Inventory' THEN 1 
+            ELSE 0 
+        END) AS above_inventory_count,
+    SUM(CASE 
+            WHEN inventory_status = 'Below Inventory' THEN 1 
+            ELSE 0 
+        END) AS below_inventory_count
+FROM 
+    SalesComparison
+WHERE 
+    inventory_status IS NOT NULL
+  AND avg_net_paid > (SELECT AVG(ws_net_paid) FROM web_sales WHERE ws_net_paid IS NOT NULL)
+  AND EXISTS (SELECT 1 
+              FROM customer c 
+              WHERE c.c_current_cdemo_sk IS NOT NULL 
+              AND c.c_last_name IS NOT NULL)
+GROUP BY 
+    CASE 
+        WHEN inv_quantity_on_hand IS NULL THEN 'Unknown Inventory'
+        WHEN inv_quantity_on_hand < 50 THEN 'Low Stock'
+        ELSE 'Sufficient Stock'
+    END
+ORDER BY 
+    total_sales DESC;

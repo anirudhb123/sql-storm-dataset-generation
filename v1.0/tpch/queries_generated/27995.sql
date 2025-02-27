@@ -1,0 +1,31 @@
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(p.p_retailprice) AS avg_retail_price,
+    MIN(l.l_extendedprice) AS min_extended_price,
+    MAX(l.l_discount) AS max_discount,
+    TRIM(CONCAT('Type: ', p.p_type, ', Size: ', p.p_size, ', Container: ', p.p_container)) AS product_details,
+    SUBSTRING_INDEX(p.p_comment, ' ', 5) AS brief_comment
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    p.p_retailprice > 100 
+    AND c.c_mktsegment = 'BUILDING'
+    AND l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+GROUP BY 
+    p.p_name, product_details
+HAVING 
+    supplier_count > 5
+ORDER BY 
+    total_quantity DESC, avg_retail_price ASC;

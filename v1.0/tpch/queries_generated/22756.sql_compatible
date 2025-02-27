@@ -1,0 +1,65 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '12 months'
+), 
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+), 
+OrderLineItem AS (
+    SELECT
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(o.o_totalprice) AS avg_order_value,
+    MAX(o.o_totalprice) AS max_order_value,
+    s.s_name,
+    COALESCE(hl.total_lineitem_value, 0) AS lineitem_value,
+    CASE 
+        WHEN n.n_name IS NULL THEN 'No Nation'
+        ELSE n.n_name
+    END AS nation_name
+FROM 
+    customer c
+LEFT JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    RankedOrders o ON c.c_custkey = o.o_orderkey
+LEFT JOIN 
+    HighValueSuppliers s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size = (SELECT MAX(p2.p_size) FROM part p2)))
+LEFT JOIN 
+    OrderLineItem hl ON o.o_orderkey = hl.l_orderkey
+WHERE 
+    n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE '%East%') 
+    AND (o.o_orderdate IS NOT NULL OR o.o_orderstatus IS NOT NULL)
+GROUP BY 
+    n.n_name, s.s_name, hl.total_lineitem_value
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_orders DESC, avg_order_value ASC;

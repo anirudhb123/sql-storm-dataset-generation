@@ -1,0 +1,62 @@
+WITH SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        ws.ws_net_profit,
+        d.d_date AS sales_date,
+        i.i_item_desc,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sold_date_sk) AS order_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2450807 AND 2450857 
+),
+Refunds AS (
+    SELECT 
+        wr.wr_order_number,
+        SUM(wr.wr_return_quantity) AS total_returned
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_order_number
+),
+Summary AS (
+    SELECT 
+        o.sales_date,
+        o.i_item_desc,
+        SUM(o.ws_quantity) AS total_quantity_sold,
+        COALESCE(r.total_returned, 0) AS total_returned,
+        SUM(o.ws_net_profit) AS total_profit
+    FROM 
+        SalesData o
+    LEFT JOIN 
+        Refunds r ON o.ws_order_number = r.wr_order_number
+    GROUP BY 
+        o.sales_date, o.i_item_desc
+)
+SELECT 
+    s.sales_date,
+    s.i_item_desc,
+    s.total_quantity_sold,
+    s.total_returned,
+    s.total_profit,
+    CASE 
+        WHEN s.total_profit > 1000 THEN 'High Profit'
+        WHEN s.total_profit > 500 THEN 'Medium Profit'
+        ELSE 'Low Profit'
+    END AS profit_category
+FROM 
+    Summary s
+WHERE 
+    s.total_quantity_sold > 0
+ORDER BY 
+    s.sales_date DESC,
+    s.total_profit DESC
+FETCH FIRST 100 ROWS ONLY;

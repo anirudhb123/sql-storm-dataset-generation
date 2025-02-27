@@ -1,0 +1,45 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 1 AS level
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE ch.level < 5
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (
+        SELECT AVG(total_cost) 
+        FROM (
+            SELECT SUM(ps_supplycost * ps_availqty) AS total_cost 
+            FROM supplier s 
+            JOIN partsupp ps ON s.s_suppkey = ps.s_suppkey 
+            GROUP BY s.s_suppkey
+        ) AS avg_costs
+    )
+)
+SELECT 
+    ch.c_name, 
+    ch.level, 
+    od.o_orderdate, 
+    COALESCE(od.total_revenue, 0) AS total_revenue,
+    ts.s_name AS top_supplier_name,
+    ts.total_cost
+FROM CustomerHierarchy ch
+LEFT JOIN OrderDetails od ON ch.c_custkey = od.o_orderkey
+LEFT JOIN TopSuppliers ts ON od.o_orderkey = ts.s_suppkey
+ORDER BY ch.level, total_revenue DESC, ts.total_cost DESC
+LIMIT 50;

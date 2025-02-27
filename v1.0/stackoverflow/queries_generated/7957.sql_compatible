@@ -1,0 +1,94 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 8) THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        COUNT(DISTINCT p.Id) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalUpvotes,
+        TotalDownvotes,
+        AnswerCount,
+        DENSE_RANK() OVER (ORDER BY TotalUpvotes DESC) AS Rank
+    FROM 
+        UserReputation
+),
+
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::text[])
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 5
+),
+
+UserTagInteractions AS (
+    SELECT 
+        u.DisplayName AS UserName,
+        t.TagName,
+        COUNT(p.Id) AS InteractionCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::text[])
+    GROUP BY 
+        u.DisplayName, t.TagName
+),
+
+FinalReport AS (
+    SELECT 
+        tu.DisplayName AS UserName,
+        tu.Reputation,
+        tu.TotalUpvotes,
+        tu.TotalDownvotes,
+        tu.AnswerCount,
+        pt.TagName AS PopularTag,
+        COALESCE(uTag.InteractionCount, 0) AS InteractionCount
+    FROM 
+        TopUsers tu
+    LEFT JOIN 
+        PopularTags pt ON pt.PostCount > 10
+    LEFT JOIN 
+        UserTagInteractions uTag ON uTag.UserName = tu.DisplayName AND uTag.TagName = pt.TagName
+)
+
+SELECT 
+    UserName,
+    Reputation,
+    TotalUpvotes,
+    TotalDownvotes,
+    AnswerCount,
+    PopularTag,
+    InteractionCount
+FROM 
+    FinalReport
+WHERE 
+    Rank <= 10
+ORDER BY 
+    TotalUpvotes DESC, UserName;

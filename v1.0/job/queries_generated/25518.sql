@@ -1,0 +1,68 @@
+WITH TitleWithKeywords AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+), 
+CastWithRoles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id, a.name, r.role
+), 
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT kw.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT ca.actor_name || ' (' || cr.role_name || ')') AS cast_info
+    FROM 
+        TitleWithKeywords twk
+    JOIN 
+        CastWithRoles cr ON twk.title_id = cr.movie_id
+    JOIN 
+        title t ON twk.title_id = t.id
+    GROUP BY 
+        t.title, t.production_year
+)
+SELECT 
+    title,
+    production_year,
+    keywords,
+    cast_info
+FROM 
+    MovieDetails
+WHERE 
+    keywords IS NOT NULL
+ORDER BY 
+    production_year DESC, title;
+
+This query performs the following actions:
+
+1. **Common Table Expressions (CTEs)**: 
+   - `TitleWithKeywords`: This CTE fetches titles with their respective keywords for movies produced between 2000 and 2023.
+   - `CastWithRoles`: This CTE computes counts of roles played by actors in their respective movies and fetches their names.
+
+2. **Final Selection**:
+   - The main query selects movie titles along with their production years, keywords, and casting information, filtering out any titles that do not have associated keywords.
+   - The results are ordered by production year in descending order and then by title.
+
+This structure allows for a comprehensive view of titles, their production years, associated keywords, and the cast details with roles, making it useful for benchmarking string processing within this schema context.

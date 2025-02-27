@@ -1,0 +1,59 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC) AS Rank,
+        COUNT(DISTINCT PostId) OVER (PARTITION BY Id) AS PostCount
+    FROM Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount
+    FROM UserReputation
+    WHERE Rank <= 10
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COALESCE(SUM(PH.CreationDate IS NOT NULL AND PH.PostHistoryTypeId = 10), 0) AS ClosedCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY P.Id, P.Title
+),
+PostRanked AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CommentCount,
+        PS.UpVotes,
+        PS.DownVotes,
+        PS.ClosedCount,
+        RANK() OVER (ORDER BY PS.UpVotes - PS.DownVotes DESC, PS.CommentCount DESC) AS PostRank
+    FROM PostStats PS
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    PR.Title,
+    PR.CommentCount,
+    PR.UpVotes,
+    PR.DownVotes,
+    PR.ClosedCount,
+    PR.PostRank
+FROM TopUsers TU
+LEFT JOIN PostRanked PR ON TU.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = PR.PostId LIMIT 1)
+WHERE PR.PostRank IS NOT NULL
+ORDER BY TU.Reputation DESC, PR.PostRank
+LIMIT 5;

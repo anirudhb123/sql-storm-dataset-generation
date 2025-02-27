@@ -1,0 +1,56 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.Score, 
+        p.AnswerCount, 
+        p.CreationDate, 
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p2.Id, 
+        p2.Title, 
+        p2.Score, 
+        p2.AnswerCount, 
+        p2.CreationDate, 
+        p2.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        Posts p1 ON p2.ParentId = p1.Id
+    WHERE 
+        p1.PostTypeId = 1 
+)
+
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS TotalQuestions,
+    COUNT(DISTINCT ph.Id) AS TotalAnswers,
+    COALESCE(SUM(p.Score), 0) AS TotalQuestionScore,
+    COALESCE(SUM(ph.Score), 0) AS TotalAnswerScore,
+    AVG(CASE WHEN ph.Id IS NOT NULL THEN ph.Score ELSE NULL END) AS AvgAnswerScore,
+    MAX(CASE WHEN p.CreationDate < '2022-01-01' THEN p.CreationDate END) AS LastQuestionBefore2022,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+LEFT JOIN 
+    RecursivePostHierarchy ph ON p.Id = ph.ParentId 
+LEFT JOIN 
+    LATERAL (SELECT DISTINCT UNNEST(string_to_array(p.Tags, '<>')) AS TagName FROM Posts WHERE Id = p.Id) AS t ON TRUE
+WHERE 
+    u.Reputation > 1000 
+GROUP BY 
+    u.Id
+HAVING 
+    COUNT(DISTINCT p.Id) > 5 
+ORDER BY 
+    TotalQuestions DESC, TotalAnswerScore DESC
+LIMIT 20;

@@ -1,0 +1,77 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS title_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS title_rank,
+        MAX(CASE WHEN k.keyword ILIKE '%action%' THEN 1 ELSE 0 END) AS is_action
+    FROM 
+        aka_title a 
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+ActorInfo AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        SUM(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS female_actors,
+        SUM(CASE WHEN p.gender = 'M' THEN 1 ELSE 0 END) AS male_actors
+    FROM 
+        cast_info c 
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    GROUP BY 
+        c.movie_id
+),
+TitleDetails AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        ai.actor_count,
+        ai.female_actors,
+        ai.male_actors,
+        rt.is_action
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        ActorInfo ai ON rt.title_id = ai.movie_id
+)
+SELECT 
+    td.title,
+    td.production_year,
+    td.actor_count,
+    td.female_actors,
+    td.male_actors,
+    CASE 
+        WHEN td.is_action = 1 THEN 'Action Movie' 
+        ELSE 'Non-Action Movie' 
+    END AS movie_type
+FROM 
+    TitleDetails td
+WHERE 
+    td.production_year IS NOT NULL
+    AND td.actor_count IS NOT NULL
+ORDER BY 
+    td.production_year DESC, 
+    td.actor_count DESC
+FETCH FIRST 10 ROWS ONLY
+UNION ALL
+SELECT 
+    'Total Actors' AS title,
+    NULL AS production_year,
+    SUM(ai.actor_count) AS actor_count,
+    SUM(ai.female_actors) AS female_actors,
+    SUM(ai.male_actors) AS male_actors,
+    NULL AS movie_type
+FROM 
+    ActorInfo ai
+WHERE 
+    ai.actor_count > 0
+HAVING 
+    COUNT(*) > 1;

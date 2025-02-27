@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+), SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+), RegionSales AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+    GROUP BY r.r_regionkey, r.r_name
+), FilteredSales AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        r_sales.total_sales,
+        ROW_NUMBER() OVER (ORDER BY r_sales.total_sales DESC) AS sales_rank
+    FROM RegionSales r_sales
+    WHERE r_sales.total_sales IS NOT NULL
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    si.s_name,
+    si.total_avail_qty,
+    rs.r_name AS region,
+    fs.total_sales
+FROM RankedOrders o
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN SupplierInfo si ON ps.ps_suppkey = si.s_suppkey
+JOIN FilteredSales fs ON si.s_nationkey IN (
+        SELECT n.n_nationkey 
+        FROM nation n 
+        WHERE n.n_regionkey = fs.r_regionkey
+    )
+LEFT JOIN region rs ON fs.r_regionkey = rs.r_regionkey
+WHERE o.o_orderstatus = 'O' 
+AND si.total_avail_qty > 100
+ORDER BY o.o_orderdate DESC, o.o_totalprice DESC, fs.total_sales DESC
+LIMIT 100;

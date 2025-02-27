@@ -1,0 +1,81 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.ViewCount,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.ParentId,
+        p2.ViewCount,
+        p2.CreationDate,
+        ph.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p2.ParentId = ph.PostId
+),
+TopVotedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    AND 
+        p.Score > 0
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ph.PostId,
+    ph.Title,
+    ph.ViewCount,
+    ph.Level,
+    u.DisplayName,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    tvp.Rank,
+    CASE 
+        WHEN ph.Level > 1 THEN 'Answer'
+        ELSE 'Question'
+    END AS PostType
+FROM 
+    RecursivePostHierarchy ph
+JOIN 
+    Users u ON ph.PostId = u.Id
+LEFT JOIN 
+    UserBadgeCounts ub ON u.Id = ub.UserId
+LEFT JOIN 
+    TopVotedPosts tvp ON ph.PostId = tvp.Id
+WHERE 
+    ub.BadgeCount IS NOT NULL  
+ORDER BY 
+    ph.ViewCount DESC,
+    ph.CreationDate DESC;

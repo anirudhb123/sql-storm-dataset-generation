@@ -1,0 +1,89 @@
+WITH RecursivePostsCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        CAST(0 AS INT) AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Select only questions
+    UNION ALL
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.Body,
+        a.CreationDate,
+        a.ViewCount,
+        rp.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostsCTE rp ON a.ParentId = rp.PostId
+),
+PostViews AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        OwnerUserId
+),
+UserWithBadges AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        pb.TotalQuestions,
+        pb.TotalViews,
+        ub.BadgeCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        RANK() OVER (ORDER BY pb.TotalViews DESC) AS ViewRank
+    FROM 
+        PostViews pb
+    JOIN 
+        UserWithBadges ub ON pb.OwnerUserId = ub.Id
+)
+SELECT 
+    ru.DisplayName,
+    ru.TotalQuestions,
+    ru.TotalViews,
+    ru.BadgeCount,
+    ru.GoldBadges,
+    ru.SilverBadges,
+    ru.BronzeBadges,
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.Level
+FROM 
+    RankedUsers ru
+LEFT JOIN 
+    RecursivePostsCTE rp ON ru.Id = rp.OwnerUserId
+WHERE 
+    ru.TotalQuestions > 5  -- Filter for users with more than 5 questions
+ORDER BY 
+    ru.ViewRank, ru.BadgeCount DESC;

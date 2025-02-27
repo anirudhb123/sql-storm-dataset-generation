@@ -1,0 +1,71 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUBSTRING(c.c_address, 1, 10) AS short_address,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_address
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS part_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS total_items,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        CASE 
+            WHEN SUM(l.l_discount) > 0.2 THEN 'High Discount'
+            WHEN SUM(l.l_discount) < 0.1 THEN 'Low Discount'
+            ELSE 'Medium Discount'
+        END AS discount_category
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate > '1997-01-01'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    r.r_name,
+    r.r_comment,
+    SUM(co.total_spent) AS total_customer_spent,
+    COUNT(DISTINCT su.s_suppkey) AS unique_suppliers,
+    AVG(ss.avg_supply_cost) AS avg_supply_cost,
+    MAX(od.total_revenue) AS max_order_revenue,
+    (SELECT COUNT(*) FROM orders WHERE o_orderstatus = 'F' AND o_orderkey IN (SELECT o_orderkey FROM RankedOrders WHERE order_rank = 1)) AS completed_orders
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN CustomerOrders co ON c.c_custkey = co.c_custkey
+LEFT JOIN SupplierStats ss ON ss.part_count > 5
+LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN OrderDetails od ON o.o_orderkey = od.o_orderkey
+LEFT JOIN supplier su ON su.s_nationkey = n.n_nationkey
+WHERE r.r_name IS NOT NULL
+  AND (SUM(co.total_spent) IS NOT NULL OR MAX(od.total_revenue) IS NOT NULL)
+GROUP BY r.r_name, r.r_comment
+HAVING COUNT(co.c_custkey) > 10
+   AND AVG(ss.avg_supply_cost) > (
+       SELECT AVG(ps.ps_supplycost) 
+       FROM partsupp ps
+       WHERE ps.ps_availqty IS NOT NULL
+   )
+ORDER BY total_customer_spent DESC, r.r_name ASC;

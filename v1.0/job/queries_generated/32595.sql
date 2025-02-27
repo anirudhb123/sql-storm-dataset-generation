@@ -1,0 +1,69 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN aka_title m ON m.episode_of_id = mh.movie_id
+),
+ActorRoles AS (
+    SELECT 
+        a.name AS actor_name,
+        c.nr_order,
+        r.role,
+        m.title AS movie_title,
+        m.production_year
+    FROM 
+        cast_info c
+    JOIN aka_name a ON a.person_id = c.person_id
+    JOIN aka_title m ON m.id = c.movie_id
+    JOIN role_type r ON r.id = c.role_id
+    WHERE 
+        r.role IS NOT NULL
+),
+MoviesAndActors AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ar.actor_name,
+        ar.role,
+        ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY ar.nr_order) AS actor_order
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN ActorRoles ar ON mh.movie_id = ar.movie_id
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    COALESCE(m.production_year, 'Unknown') AS production_year,
+    COUNT(ar.actor_name) AS actor_count,
+    STRING_AGG(DISTINCT ar.actor_name, ', ') AS actors,
+    MAX(m.actor_order) AS highest_order
+FROM 
+    MoviesAndActors m
+LEFT JOIN 
+    ActorRoles ar ON m.movie_id = ar.movie_title
+GROUP BY 
+    m.movie_id, m.title, m.production_year
+HAVING 
+    SUM(CASE WHEN ar.role LIKE '%lead%' THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    m.production_year DESC, actor_count DESC;
+

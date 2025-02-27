@@ -1,0 +1,71 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_supply_cost,
+        RANK() OVER (ORDER BY ss.total_supply_cost DESC) AS supplier_rank
+    FROM 
+        supplier_stats ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+),
+FilteredOrders AS (
+    SELECT 
+        co.c_custkey,
+        co.total_spent,
+        co.order_count,
+        RANK() OVER (PARTITION BY co.order_count ORDER BY co.total_spent DESC) AS spending_rank
+    FROM 
+        customer_orders co
+    WHERE 
+        co.total_spent > 10000
+),
+FinalResults AS (
+    SELECT 
+        rs.s_name,
+        r.supplier_rank,
+        fo.order_count,
+        fo.total_spent,
+        COALESCE(fo.spending_rank, 'N/A') AS spending_rank
+    FROM 
+        RankedSuppliers rs
+    LEFT JOIN 
+        FilteredOrders fo ON rs.s_suppkey = fo.c_custkey
+)
+SELECT 
+    fr.s_name,
+    fr.supplier_rank,
+    fr.order_count,
+    fr.total_spent,
+    fr.spending_rank
+FROM 
+    FinalResults fr
+WHERE 
+    fr.supplier_rank <= 10
+ORDER BY 
+    fr.supplier_rank, fr.total_spent DESC;

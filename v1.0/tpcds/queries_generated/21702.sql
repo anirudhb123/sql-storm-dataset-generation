@@ -1,0 +1,94 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_customer_sk,
+        sr_returned_date_sk,
+        RANK() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS rnk
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+),
+CustomerPurchase AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+ItemPromotion AS (
+    SELECT 
+        i.i_item_sk,
+        MAX(p.p_discount_active) AS max_discount
+    FROM 
+        item i
+    LEFT JOIN 
+        promotion p ON i.i_item_sk = p.p_item_sk
+    GROUP BY 
+        i.i_item_sk
+),
+SubQueryForIncomeBand AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        COUNT(DISTINCT hd.hd_demo_sk) AS demographic_count
+    FROM 
+        household_demographics hd
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        hd_buy_potential IS NOT NULL 
+    GROUP BY 
+        ib.ib_income_band_sk
+),
+FinalAnalysis AS (
+    SELECT 
+        ca.ca_city,
+        SUM(pr.total_profit) AS city_profit,
+        COUNT(DISTINCT pr.c_customer_sk) AS distinct_customers,
+        AVG(pr.total_orders) AS avg_orders_per_customer,
+        COUNT(DISTINCT ir.rnk) AS return_rank_count
+    FROM 
+        CustomerPurchase pr
+    JOIN 
+        customer c ON pr.c_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        RankedReturns ir ON ir.sr_customer_sk = c.c_customer_sk
+    WHERE 
+        ca.ca_country = 'USA' AND ca.ca_state IS NOT NULL
+    GROUP BY 
+        ca.ca_city
+    HAVING 
+        AVG(pr.total_orders) > (
+            SELECT 
+                AVG(total_orders) 
+            FROM 
+                CustomerPurchase
+        ) AND city_profit > (
+            SELECT 
+                MAX(demographic_count) 
+            FROM 
+                SubQueryForIncomeBand
+        )
+)
+SELECT 
+    ca.ca_city,
+    COALESCE(SUM(FinalAnalysis.city_profit), 0) AS Total_Profit,
+    COALESCE(COUNT(DISTINCT pr.c_customer_sk), 0) AS Total_Customers
+FROM 
+    FinalAnalysis
+RIGHT JOIN 
+    customer_address ca ON FinalAnalysis.ca_city = ca.ca_city
+WHERE 
+    ca.ca_state = 'NY' OR ca.ca_state IS NULL
+GROUP BY 
+    ca.ca_city
+ORDER BY 
+    Total_Profit DESC, ca.ca_city;

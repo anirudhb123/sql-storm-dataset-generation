@@ -1,0 +1,49 @@
+WITH UserReputation AS (
+    SELECT Id, 
+           Reputation,
+           CreationDate,
+           LastAccessDate,
+           UpVotes,
+           DownVotes,
+           (UpVotes - DownVotes) AS NetVotes
+    FROM Users
+),
+TopQuestions AS (
+    SELECT Id, 
+           Title, 
+           Score,
+           ViewCount, 
+           AnswerCount, 
+           CreationDate
+    FROM Posts
+    WHERE PostTypeId = 1 
+    ORDER BY Score DESC
+    LIMIT 10
+),
+QuestionVoteCounts AS (
+    SELECT PostId, 
+           VoteTypeId, 
+           COUNT(*) AS VoteCount
+    FROM Votes
+    GROUP BY PostId, VoteTypeId
+),
+CommentCounts AS (
+    SELECT PostId, 
+           COUNT(*) AS CommentCount
+    FROM Comments
+    GROUP BY PostId
+)
+
+SELECT q.Id AS QuestionId,
+       q.Title,
+       q.Score,
+       q.ViewCount,
+       q.AnswerCount,
+       uc.NetVotes,
+       COALESCE(vc.VoteCount, 0) AS UpVoteCount,
+       COALESCE(cc.CommentCount, 0) AS TotalComments
+FROM TopQuestions q
+LEFT JOIN UserReputation uc ON q.OwnerUserId = uc.Id
+LEFT JOIN QuestionVoteCounts vc ON q.Id = vc.PostId AND vc.VoteTypeId = 2 
+LEFT JOIN CommentCounts cc ON q.Id = cc.PostId
+ORDER BY q.Score DESC;

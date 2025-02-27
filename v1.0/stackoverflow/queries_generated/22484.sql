@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Title ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+), 
+TagInfo AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount,
+        ARRAY_AGG(DISTINCT pt.PostId) AS RelatedPosts
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts pt ON pt.Tags LIKE CONCAT('%', t.TagName, '%') 
+    GROUP BY 
+        t.Id, t.TagName
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        SUM(CASE 
+            WHEN v.VoteTypeId = 2 THEN 1 
+            WHEN v.VoteTypeId = 3 THEN -1 
+            ELSE 0 
+        END) AS VoteBalance
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    ti.TagName,
+    ti.PostCount,
+    ur.Reputation,
+    ur.VoteBalance
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostLinks pl ON rp.PostId = pl.PostId 
+LEFT JOIN 
+    TagInfo ti ON pl.RelatedPostId IN (SELECT unnest(ti.RelatedPosts)) 
+LEFT JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+WHERE 
+    rp.Rank = 1
+    AND (ti.PostCount IS NULL OR ti.PostCount > 0)
+    AND (rp.Score BETWEEN 10 AND 100 OR rp.ViewCount > 1000)
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC
+LIMIT 50;

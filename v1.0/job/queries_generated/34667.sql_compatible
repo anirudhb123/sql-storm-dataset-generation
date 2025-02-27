@@ -1,0 +1,51 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        CAST(mt.title AS VARCHAR) AS full_title,
+        1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        CAST(CONCAT(mh.full_title, ' -> ', m.title) AS VARCHAR),
+        mh.level + 1
+    FROM aka_title m
+    JOIN MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    title.title AS movie_title,
+    title.production_year,
+    COUNT(DISTINCT ci.id) AS cast_count,
+    ROW_NUMBER() OVER (PARTITION BY title.id ORDER BY COUNT(DISTINCT ci.id) DESC) AS role_rank,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COALESCE(c.company_name, 'Unknown') AS company_name,
+    mh.full_title AS hierarchical_title
+FROM cast_info ci
+JOIN aka_name a ON ci.person_id = a.person_id
+JOIN aka_title title ON ci.movie_id = title.id
+LEFT JOIN movie_companies mc ON title.id = mc.movie_id
+LEFT JOIN company_name c ON mc.company_id = c.id
+LEFT JOIN movie_keyword mk ON title.id = mk.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+LEFT JOIN MovieHierarchy mh ON mh.movie_id = title.id
+WHERE title.production_year >= 2000 
+  AND EXISTS (
+      SELECT 1 
+      FROM role_type r 
+      WHERE r.id = ci.role_id AND r.role LIKE 'Actor%'
+  )
+GROUP BY a.name, title.id, title.title, title.production_year, c.company_name, mh.full_title
+HAVING COUNT(DISTINCT ci.id) > 2
+ORDER BY title.production_year DESC, role_rank
+LIMIT 10;

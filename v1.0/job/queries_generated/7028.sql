@@ -1,0 +1,26 @@
+SELECT 
+    ak.name AS actor_name,
+    ti.title AS movie_title,
+    ti.production_year,
+    cc.kind AS cast_type,
+    co.name AS company_name,
+    mi.info AS movie_info
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    title ti ON ci.movie_id = ti.id
+JOIN 
+    complete_cast cc ON ti.id = cc.movie_id
+JOIN 
+    movie_companies mc ON ti.id = mc.movie_id
+JOIN 
+    company_name co ON mc.company_id = co.id
+LEFT JOIN 
+    movie_info mi ON ti.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+WHERE 
+    ti.production_year >= 2000 
+    AND co.country_code = 'USA'
+ORDER BY 
+    ti.production_year DESC, ak.name;

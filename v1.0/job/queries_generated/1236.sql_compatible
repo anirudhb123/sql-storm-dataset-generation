@@ -1,0 +1,61 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS total_cast,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+TopMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_by_cast <= 5
+), 
+MovieInfo AS (
+    SELECT 
+        m.movie_id, 
+        STRING_AGG(mi.info ORDER BY mi.info_type_id) AS infos
+    FROM 
+        TopMovies m
+    LEFT JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id 
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    mi.infos,
+    COALESCE(SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT cn.name), ',', 3), 'Unknown Actors') AS top_actors,
+    CASE 
+        WHEN tm.production_year IS NULL THEN 'Unknown Year'
+        ELSE CAST(tm.production_year AS VARCHAR)
+    END AS production_year_display
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    complete_cast cc ON tm.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    aka_name cn ON ci.person_id = cn.person_id
+LEFT JOIN 
+    MovieInfo mi ON tm.movie_id = mi.movie_id
+GROUP BY 
+    tm.movie_id, tm.title, tm.production_year, mi.infos
+ORDER BY 
+    tm.production_year DESC, tm.title;

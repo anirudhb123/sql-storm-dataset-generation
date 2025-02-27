@@ -1,0 +1,52 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+), SupplierPartAvailability AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name, p.p_partkey, p.p_name
+), OrdersWithLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(*) AS item_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+), NationRegions AS (
+    SELECT 
+        n.n_nationkey,
+        r.r_regionkey,
+        r.r_name,
+        n.n_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    nr.r_name,
+    p.p_name,
+    s.s_name,
+    COALESCE(SUM(soa.total_available), 0) AS total_available,
+    COALESCE(oi.revenue, 0) AS total_revenue,
+    COUNT(DISTINCT ro.o_orderkey) AS order_count,
+    AVG(ro.o_totalprice) AS avg_order_price
+FROM SupplierPartAvailability soa
+FULL OUTER JOIN OrdersWithLineItems oi ON soa.p_partkey = oi.l_orderkey
+JOIN RankedOrders ro ON oi.l_orderkey = ro.o_orderkey AND ro.order_rank <= 5
+JOIN NationRegions nr ON nr.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey = soa.s_suppkey)
+GROUP BY nr.r_name, p.p_name, s.s_name
+HAVING SUM(soa.total_available) > 0
+ORDER BY nr.r_name, total_revenue DESC, total_available DESC;

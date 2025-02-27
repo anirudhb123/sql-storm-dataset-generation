@@ -1,0 +1,61 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.CreationDate AS ClosedDate,
+        u.DisplayName AS ClosedBy
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    JOIN 
+        Users u ON ph.UserId = u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    WHERE 
+        VoteTypeId IN (2, 3) 
+    GROUP BY 
+        UserId
+    ORDER BY 
+        TotalVotes DESC
+    LIMIT 5
+)
+SELECT 
+    ur.DisplayName AS UserWithHighReputation,
+    cp.Title AS ClosedPostTitle,
+    cp.ClosedDate,
+    cp.ClosedBy,
+    u.ReputationRank,
+    COUNT(DISTINCT v.Id) AS NumberOfVotes,
+    STRING_AGG(DISTINCT v.VoteTypeId::varchar, ', ') AS VoteTypes,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+FROM 
+    UserReputation ur
+LEFT JOIN 
+    ClosedPosts cp ON ur.UserId = cp.ClosedBy
+LEFT JOIN 
+    Votes v ON cp.PostId = v.PostId
+JOIN 
+    TopUsers tu ON ur.UserId = tu.UserId
+WHERE 
+    ur.Reputation > 1000 
+GROUP BY 
+    ur.UserId, ur.DisplayName, cp.PostId, cp.Title, cp.ClosedDate, cp.ClosedBy, u.ReputationRank
+ORDER BY 
+    ur.Reputation DESC, cp.ClosedDate DESC;

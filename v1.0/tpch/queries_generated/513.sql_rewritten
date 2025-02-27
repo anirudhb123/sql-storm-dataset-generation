@@ -1,0 +1,74 @@
+WITH SupplierSummary AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        COUNT(DISTINCT ps.ps_partkey) AS PartCount
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalLineValue,
+        COUNT(l.l_linenumber) AS LineCount
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY
+        o.o_orderkey, o.o_orderdate
+),
+NationSummary AS (
+    SELECT
+        n.n_nationkey,
+        n.n_name,
+        SUM(s.s_acctbal) AS TotalAcctBal
+    FROM
+        nation n
+    LEFT JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY
+        n.n_nationkey, n.n_name
+),
+FinalSummary AS (
+    SELECT
+        ns.n_name,
+        ss.s_name,
+        ss.TotalSupplyCost,
+        od.TotalLineValue,
+        od.LineCount,
+        ns.TotalAcctBal
+    FROM
+        SupplierSummary ss
+    LEFT JOIN
+        OrderDetails od ON ss.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10))
+    JOIN
+        supplier s ON ss.s_suppkey = s.s_suppkey
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN
+        NationSummary ns ON n.n_nationkey = ns.n_nationkey
+    WHERE
+        ss.PartCount > 5 AND od.TotalLineValue IS NOT NULL
+)
+SELECT
+    n_name,
+    s_name,
+    TotalSupplyCost,
+    TotalLineValue,
+    LineCount,
+    TotalAcctBal
+FROM
+    FinalSummary
+WHERE
+    TotalAcctBal IS NOT NULL
+ORDER BY 
+    TotalLineValue DESC, TotalSupplyCost ASC;

@@ -1,0 +1,40 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+), FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '2021-01-01' AND '2021-12-31'
+), NationSupplier AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING COUNT(DISTINCT s.s_suppkey) > 0
+), PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           COALESCE(NULLIF(AVG(ps.ps_supplycost), 0), 0) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+), NonProfitableOrders AS (
+    SELECT o.o_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey
+    HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) < 1000
+)
+SELECT ns.n_name, COUNT(DISTINCT rs.s_suppkey) AS total_suppliers,
+       COUNT(DISTINCT fo.o_orderkey) AS non_profitable_orders,
+       SUM(pd.avg_supply_cost) AS total_avg_supply_cost
+FROM NationSupplier ns
+LEFT JOIN RankedSuppliers rs ON ns.n_nationkey = rs.s_nationkey AND rs.rank <= 5
+LEFT JOIN FilteredOrders fo ON fo.o_orderkey IN (SELECT DISTINCT o.o_orderkey
+                                                 FROM NonProfitableOrders o WHERE o.total_revenue < 500)
+LEFT JOIN PartDetails pd ON pd.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty < 10)
+WHERE ns.supplier_count < 10
+GROUP BY ns.n_name
+HAVING total_suppliers > 0 AND COUNT(DISTINCT fo.o_orderkey) > 0;

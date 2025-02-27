@@ -1,0 +1,51 @@
+
+WITH RECURSIVE national_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS ranking,
+           CASE
+               WHEN s.s_acctbal IS NULL THEN 'No Balance'
+               WHEN s.s_acctbal < 50000 THEN 'Low Balance'
+               ELSE 'Adequate Balance'
+           END AS balance_status
+    FROM supplier s
+    JOIN nation n ON s.n_nationkey = n.n_nationkey
+),
+matched_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           CASE 
+               WHEN ps.ps_availqty IS NULL THEN 'N/A'
+               ELSE CAST(ps.ps_availqty AS VARCHAR(255)) || ' available'
+           END AS availability,
+           RANK() OVER (PARTITION BY p.p_partkey ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+aggregated_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+    HAVING SUM(l.l_discount) < 0.5 * SUM(l.l_extendedprice) 
+),
+cross_join_data AS (
+    SELECT r.r_name, ns.s_name, mp.p_name, ao.total_sales,
+           ROW_NUMBER() OVER (ORDER BY ao.total_sales DESC) AS sales_rank
+    FROM region r
+    CROSS JOIN national_suppliers ns
+    LEFT JOIN matched_parts mp ON ns.s_suppkey = mp.p_partkey
+    FULL OUTER JOIN aggregated_orders ao ON ao.total_sales IS NOT NULL
+    WHERE ao.total_sales IS NOT NULL OR ns.s_acctbal IS NULL
+)
+SELECT c1.r_name, c2.s_name, c3.p_name, c4.total_sales, 
+       COALESCE(c4.sales_rank, 0) AS sales_rank,
+       CASE 
+           WHEN c4.total_sales IS NULL THEN 'No Sales'
+           ELSE 'Sales Recorded'
+       END AS sales_status
+FROM cross_join_data c1
+FULL OUTER JOIN national_suppliers c2 ON c1.s_name = c2.s_name
+LEFT JOIN matched_parts c3 ON c2.s_suppkey = c3.p_partkey
+LEFT JOIN aggregated_orders c4 ON c3.p_partkey = c4.o_orderkey
+WHERE (c1.r_name IS NOT NULL AND c1.r_name <> '') 
+  AND (c2.balance_status = 'Adequate Balance' OR c2.balance_status IS NULL)
+ORDER BY c4.total_sales DESC, c2.balance_status, c1.r_name, c3.p_name;

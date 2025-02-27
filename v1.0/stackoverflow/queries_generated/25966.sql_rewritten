@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    rp.Title AS LatestPostTitle,
+    rp.CreationDate AS LatestPostDate,
+    pt.TagName,
+    pt.TagCount,
+    ur.TotalPosts,
+    ur.TotalQuestions,
+    ur.TotalAnswers
+FROM 
+    UserReputation ur
+JOIN 
+    RankedPosts rp ON ur.UserId = rp.OwnerUserId AND rp.PostRank = 1
+JOIN 
+    PopularTags pt ON ur.TotalPosts >= 10 
+WHERE 
+    ur.Reputation > 1000 
+ORDER BY 
+    ur.Reputation DESC, pt.TagCount DESC;

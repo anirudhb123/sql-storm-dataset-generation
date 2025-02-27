@@ -1,0 +1,67 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+cast_details AS (
+    SELECT 
+        c.movie_id,
+        COUNT(c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+),
+movies_with_info AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        kc.keyword,
+        COALESCE(ci.total_cast, 0) AS total_cast,
+        ci.cast_names
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    LEFT JOIN 
+        cast_details ci ON m.id = ci.movie_id
+    WHERE 
+        m.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%movie%')
+),
+final_report AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        m.keyword,
+        m.total_cast,
+        m.cast_names,
+        COALESCE(NULLIF(m.total_cast, 0), 'No cast members') AS cast_report
+    FROM 
+        movies_with_info m
+    WHERE 
+        m.production_year >= 2000
+)
+SELECT 
+    title, 
+    production_year, 
+    keyword,
+    total_cast,
+    cast_names,
+    cast_report
+FROM 
+    final_report
+WHERE 
+    (total_cast > 5 OR keyword IS NOT NULL)
+ORDER BY 
+    production_year DESC, 
+    title ASC;

@@ -1,0 +1,76 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+        AND p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)  
+),
+UpvoteStats AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpvoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownvoteCount
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostCloseHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+    GROUP BY 
+        ph.PostId
+)
+SELECT  
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    UPPER(CONCAT('User ID: ', CAST(rp.OwnerUserId AS VARCHAR(255)))) AS FormattedOwnerId,
+    COALESCE(ups.UpvoteCount, 0) AS TotalUpvotes,
+    COALESCE(ups.DownvoteCount, 0) AS TotalDownvotes,
+    COALESCE(pc.CommentCount, 0) AS TotalComments,
+    rp.CreationDate,
+    CASE 
+        WHEN COALESCE(pc.CommentCount, 0) > 10 THEN 'Hot Topic'
+        ELSE 'Cold Topic'
+    END AS TopicStatus,
+    DATEDIFF(DAY, rp.CreationDate, CURRENT_TIMESTAMP) AS DaysSinceCreation,
+    DENSE_RANK() OVER (ORDER BY rp.Score DESC) AS GlobalPostRank,
+    COALESCE(ch.ClosedDate, 'N/A') AS ClosureStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UpvoteStats ups ON rp.PostId = ups.PostId
+LEFT JOIN 
+    PostComments pc ON rp.PostId = pc.PostId
+LEFT JOIN 
+    PostCloseHistory ch ON rp.PostId = ch.PostId
+WHERE 
+    rp.ScoreRank = 1  
+    AND (DATEDIFF(DAY, rp.CreationDate, CURRENT_TIMESTAMP) < 30 OR COALESCE(pc.CommentCount, 0) > 5)  
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC;

@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        OwnerDisplayName, 
+        CreationDate, 
+        Score, 
+        ViewCount, 
+        AnswerCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON t.Id = ANY(substring(pt.Tags, 2, length(pt.Tags) - 2)::varchar[])
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+PostDetails AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.OwnerDisplayName,
+        tp.CreationDate,
+        tp.Score,
+        pt.TagName,
+        pt.PostCount
+    FROM 
+        TopPosts tp
+    JOIN 
+        PostLinks pl ON tp.PostId = pl.PostId
+    JOIN 
+        Tags pt ON pl.RelatedPostId = pt.WikiPostId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.OwnerDisplayName,
+    pd.CreationDate,
+    pd.Score,
+    ARRAY_AGG(DISTINCT pt.TagName) AS RelatedTags,
+    COUNT(c.Id) AS CommentCount,
+    SUM(c.Score) AS TotalCommentScore
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Comments c ON pd.PostId = c.PostId
+GROUP BY 
+    pd.PostId, pd.Title, pd.OwnerDisplayName, pd.CreationDate, pd.Score
+ORDER BY 
+    pd.Score DESC, COUNT(c.Id) DESC;

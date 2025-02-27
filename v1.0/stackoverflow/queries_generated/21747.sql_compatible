@@ -1,0 +1,75 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        ROW_NUMBER() OVER (PARTITION BY Reputation ORDER BY CreationDate DESC) AS RankByReputation
+    FROM Users
+    WHERE Reputation IS NOT NULL AND Reputation > 0
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.CreationDate
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+),
+VoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM Votes
+    GROUP BY PostId
+),
+TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        p.Id AS PostId,
+        COUNT(t.TagName) AS TagCount
+    FROM Posts p
+    JOIN LATERAL (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName) AS t ON TRUE
+    JOIN Tags ON Tags.TagName = t.TagName
+    GROUP BY Tags.TagName, p.Id
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(vc.UpVotes, 0) AS UpVotes,
+        COALESCE(vc.DownVotes, 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(tc.TagCount) AS TagCount,
+        u.DisplayName AS OwnerDisplayName
+    FROM Posts p
+    LEFT JOIN Comment c ON p.Id = c.PostId
+    LEFT JOIN VoteCounts vc ON p.Id = vc.PostId
+    LEFT JOIN ClosedPosts ph ON p.Id = ph.PostId
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN TagCounts tc ON p.Id = tc.PostId
+    GROUP BY p.Id, p.Title, u.DisplayName
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    ps.ClosedDate,
+    ps.TagCount,
+    CASE 
+        WHEN ps.ClosedDate IS NOT NULL THEN COUNT(cd.UserId) OVER (PARTITION BY ps.PostId)
+        ELSE 0 
+    END AS ClosureVoteCount,
+    COUNT(b.UserId) FILTER (WHERE b.Class = 1) AS GoldBadges
+FROM PostSummary ps
+LEFT JOIN Badges b ON ps.PostId = b.UserId
+LEFT JOIN ClosedPosts cd ON ps.PostId = cd.PostId
+WHERE ps.ClosedDate IS NOT NULL OR ps.UpVotes > ps.DownVotes
+ORDER BY ps.UpVotes DESC, ps.CommentCount DESC, ps.TagCount DESC
+LIMIT 50;

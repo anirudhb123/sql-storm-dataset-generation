@@ -1,0 +1,41 @@
+
+WITH RECURSIVE supplier_region AS (
+    SELECT s.s_suppkey, s.s_name, r.r_name, COUNT(p.p_partkey) AS part_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name, r.r_name
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_name, c.c_mktsegment,
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS market_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, COUNT(l.l_linenumber) AS line_count, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT sr.s_name, sr.r_name, COUNT(DISTINCT ro.o_orderkey) AS order_count,
+       SUM(l.total_value) AS aggregate_value, 
+       COALESCE(NULLIF(MIN(ro.o_orderdate), MAX(ro.o_orderdate)), NULL) AS date_difference,
+       AVG(CASE WHEN l.l_quantity IS NOT NULL THEN l.l_quantity ELSE 0 END) AS avg_quantity,
+       STRING_AGG(DISTINCT p.p_comment || ' (' || p.p_brand || ')', '; ') AS part_comments
+FROM supplier_region sr
+LEFT JOIN ranked_orders ro ON sr.s_suppkey = (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    JOIN part p ON ps.ps_partkey = p.p_partkey 
+    WHERE sr.part_count > 0
+    LIMIT 1
+)
+FULL OUTER JOIN lineitem_summary l ON l.l_orderkey = ro.o_orderkey
+WHERE sr.part_count > 10
+GROUP BY sr.s_name, sr.r_name
+HAVING COUNT(DISTINCT ro.o_orderkey) > 5 OR SUM(l.total_value) < 100000
+ORDER BY sr.s_name, sr.r_name;

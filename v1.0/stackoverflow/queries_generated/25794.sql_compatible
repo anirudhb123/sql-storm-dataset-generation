@@ -1,0 +1,63 @@
+
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName, 
+        COUNT(DISTINCT Posts.Id) AS PostCount, 
+        SUM(Posts.ViewCount) AS TotalViews, 
+        AVG(Posts.Score) AS AverageScore
+    FROM Tags
+    JOIN Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, LENGTH(Posts.Tags) - 2), '><')::text[])
+    GROUP BY Tags.TagName
+),
+BadgeStats AS (
+    SELECT 
+        Users.DisplayName,
+        COUNT(DISTINCT Badges.Id) AS BadgeCount,
+        SUM(Users.Reputation) AS TotalReputation
+    FROM Badges
+    JOIN Users ON Badges.UserId = Users.Id
+    GROUP BY Users.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        Posts.Id AS PostId,
+        COUNT(Comments.Id) AS CommentCount,
+        COUNT(Votes.Id) AS VoteCount
+    FROM Posts
+    LEFT JOIN Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN Votes ON Posts.Id = Votes.PostId
+    GROUP BY Posts.Id
+),
+StringProcessing AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.Body,
+        Tags.TagName,
+        TagStats.PostCount,
+        TagStats.TotalViews,
+        TagStats.AverageScore,
+        PostActivity.CommentCount,
+        PostActivity.VoteCount,
+        BadgeStats.BadgeCount,
+        BadgeStats.TotalReputation
+    FROM Posts
+    JOIN TagStats ON TRUE
+    JOIN BadgeStats ON TRUE
+    JOIN PostActivity ON Posts.Id = PostActivity.PostId
+    JOIN Tags ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, LENGTH(Posts.Tags) - 2), '><')::text[])
+    WHERE LENGTH(Posts.Body) > 1000  
+)
+SELECT 
+    Title,
+    TagName,
+    BadgeCount,
+    TotalReputation,
+    PostCount,
+    TotalViews,
+    AverageScore,
+    CommentCount,
+    VoteCount
+FROM StringProcessing
+ORDER BY TotalViews DESC, AverageScore DESC
+LIMIT 50;

@@ -1,0 +1,79 @@
+
+WITH Recursive_CTE AS (
+    SELECT 
+        c.movie_id,
+        a.person_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+),
+Movies_Info AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(mk.keyword_id) AS keywords_count,
+        COUNT(DISTINCT ci.person_id) AS total_actors,
+        MAX(SUBSTRING(t.title FROM 1 FOR 5)) AS short_title, 
+        (SELECT STRING_AGG(a.actor_name, ', ' ORDER BY c.actor_order)
+         FROM Recursive_CTE c
+         JOIN aka_name a ON c.person_id = a.person_id
+         WHERE c.movie_id = t.id) AS actor_names_list 
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+Movies_With_Companies AS (
+    SELECT 
+        mi.movie_id,
+        mi.movie_title,
+        mi.production_year,
+        mc.company_id,
+        co.name AS company_name,
+        co.country_code,
+        ROW_NUMBER() OVER (PARTITION BY mi.movie_id ORDER BY co.name) AS company_rank
+    FROM 
+        Movies_Info mi
+    LEFT JOIN 
+        movie_companies mc ON mi.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+)
+SELECT 
+    mwc.movie_id,
+    mwc.movie_title,
+    mwc.production_year,
+    mwc.company_name,
+    mi.keywords_count,
+    mi.total_actors,
+    mi.actor_names_list,
+    CASE 
+        WHEN mwc.company_rank IS NULL THEN 'Independent'
+        ELSE 'Production Company'
+    END AS company_type,
+    CASE 
+        WHEN mi.production_year BETWEEN 1990 AND 1999 THEN '90s Classic'
+        WHEN mi.production_year IS NULL THEN 'Year Unknown'
+        ELSE 'Modern Film'
+    END AS movie_era
+FROM 
+    Movies_With_Companies mwc
+JOIN 
+    Movies_Info mi ON mwc.movie_id = mi.movie_id
+WHERE 
+    (mwc.country_code IS NOT NULL OR mwc.company_name IS NULL) 
+    AND (mi.production_year IS NULL OR mi.keywords_count > 0) 
+ORDER BY 
+    mi.keywords_count DESC,
+    mwc.production_year DESC
+FETCH FIRST 50 ROWS ONLY;

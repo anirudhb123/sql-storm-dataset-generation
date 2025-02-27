@@ -1,0 +1,75 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        at.id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rank_per_year,
+        COUNT(*) OVER (PARTITION BY at.production_year) AS total_per_year
+    FROM aka_title at
+    WHERE at.kind_id IN (
+        SELECT id FROM kind_type WHERE kind LIKE '%Feature%'
+    )
+),
+FullCast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        ak.person_id,
+        ci.person_role_id,
+        ci.nr_order,
+        CTE.rank_per_year,
+        CTE.total_per_year
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    JOIN RankedMovies CTE ON ci.movie_id = CTE.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(SUM(mk.keyword)::VARCHAR, 'No Keywords') AS movie_keywords,
+        COALESCE(GROUP_CONCAT(DISTINCT nm.name ORDER BY nm.name), 'No Actors') AS actor_list,
+        COUNT(DISTINCT MK.movie_id) AS keyword_count,
+        COUNT(DISTINCT FC.actor_name) AS unique_actor_count
+    FROM aka_title m
+    LEFT JOIN movie_keyword MK ON m.id = MK.movie_id
+    LEFT JOIN FullCast FC ON m.id = FC.movie_id
+    JOIN name nm ON FC.person_id = nm.id
+    GROUP BY m.id, m.title
+),
+FinalOutput AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.movie_keywords,
+        md.actor_list,
+        md.keyword_count,
+        md.unique_actor_count,
+        CASE 
+            WHEN md.keyword_count IS NULL THEN 'No keywords found'
+            WHEN md.unique_actor_count = 0 THEN 'No actors listed'
+            ELSE 'Data available'
+        END AS status
+    FROM MovieDetails md
+    WHERE md.movie_id IN (
+        SELECT movie_id FROM complete_cast WHERE status_id = (
+            SELECT id FROM info_type WHERE info = 'Released'
+        )
+    )
+)
+SELECT 
+    fo.title,
+    fo.movie_keywords,
+    fo.actor_list,
+    fo.keyword_count,
+    fo.unique_actor_count,
+    fo.status,
+    COALESCE((SELECT AVG(total_per_year) FROM RankedMovies), 0) AS avg_total_per_year,
+    CASE 
+        WHEN fo.keyword_count > 5 THEN 'Highly Tagged'
+        WHEN fo.actor_list = 'No Actors' THEN 'Actor List Missing'
+        ELSE 'Average Movie'
+    END AS movie_classification
+FROM FinalOutput fo
+ORDER BY fo.keyword_count DESC, fo.unique_actor_count ASC, fo.title;

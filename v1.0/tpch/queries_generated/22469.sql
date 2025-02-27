@@ -1,0 +1,55 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_name LIKE '%land%'
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+), 
+SupplierStats AS (
+    SELECT s_nationkey,
+           COUNT(DISTINCT s_suppkey) AS total_suppliers,
+           SUM(s_acctbal) AS total_account_balance,
+           AVG(s_acctbal) AS avg_account_balance
+    FROM supplier
+    GROUP BY s_nationkey
+),
+PartSupplierStats AS (
+    SELECT ps.partkey,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(*) AS total_supply_count
+    FROM partsupp ps
+    GROUP BY ps.partkey
+),
+RankedOrders AS (
+    SELECT o_orderkey,
+           o_custkey,
+           o_totalprice,
+           RANK() OVER (PARTITION BY o_custkey ORDER BY o_totalprice DESC) AS rank
+    FROM orders
+),
+CustomerReturnAnalysis AS (
+    SELECT c.c_custkey,
+           SUM(CASE WHEN l_returnflag = 'R' THEN l_quantity ELSE 0 END) AS total_returned,
+           COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           c.c_acctbal
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_acctbal
+)
+SELECT n.n_name,
+       COALESCE(s.total_suppliers, 0) AS total_suppliers,
+       COALESCE(s.total_account_balance, 0) AS total_account_balance,
+       COALESCE(s.avg_account_balance, 0.00) AS avg_account_balance,
+       COALESCE(ps.total_supply_cost, 0.00) AS total_supply_cost,
+       COALESCE(cr.total_returned, 0) AS total_returned,
+       cr.total_orders,
+       ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY COALESCE(cr.total_orders, 0) DESC) AS order_rank
+FROM NationHierarchy n
+LEFT JOIN SupplierStats s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN PartSupplierStats ps ON ps.partkey IN (SELECT pp.p_partkey FROM part pp WHERE pp.p_size > 0)
+LEFT JOIN CustomerReturnAnalysis cr ON cr.c_custkey IN (SELECT DISTINCT c.c_custkey FROM customer c WHERE c.c_name LIKE 'A%')
+WHERE n.level < 3
+ORDER BY n.n_name, order_rank;

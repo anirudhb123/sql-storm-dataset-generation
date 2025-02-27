@@ -1,0 +1,90 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_nationkey
+    FROM 
+        RankedSuppliers s
+    WHERE 
+        s.supplier_rank <= 5
+),
+EligibleParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_brand,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_size = 10 THEN 'Small Package'
+            WHEN p.p_size BETWEEN 11 AND 20 THEN 'Medium Package'
+            ELSE 'Large Package'
+        END AS package_type
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+        AND (p.p_size = 10 OR p.p_size >= 50)
+),
+OrderCount AS (
+    SELECT 
+        o.o_custkey,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_custkey
+),
+CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+)
+SELECT 
+    p.p_partkey,
+    p.package_type,
+    ts.s_name,
+    ts.s_acctbal,
+    cn.n_name AS customer_nation,
+    oc.total_orders,
+    COALESCE(oc.total_orders, 0) AS order_count,
+    CASE 
+        WHEN p.p_retailprice > 100 THEN 'Premium Item'
+        ELSE 'Regular Item'
+    END AS item_category
+FROM 
+    EligibleParts p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    TopSuppliers ts ON ps.ps_suppkey = ts.s_suppkey
+LEFT JOIN 
+    OrderCount oc ON oc.o_custkey = (SELECT o.o_custkey 
+                                       FROM orders o 
+                                       WHERE o.o_orderkey = (SELECT MIN(o2.o_orderkey) 
+                                                              FROM orders o2 
+                                                              WHERE o2.o_custkey IS NOT NULL
+                                                              AND o2.o_orderdate >= '1997-01-01'))
+LEFT JOIN 
+    CustomerNation cn ON cn.c_custkey = oc.o_custkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    OR p.p_brand IN (SELECT DISTINCT p3.p_brand 
+                     FROM part p3 
+                     WHERE p3.p_mfgr = 'Manufacturer#1')
+ORDER BY 
+    p.package_type, 
+    ts.s_acctbal DESC;

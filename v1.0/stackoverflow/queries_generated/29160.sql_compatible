@@ -1,0 +1,69 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, u.DisplayName
+),
+TaggedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Author,
+        rp.CommentCount,
+        UNNEST(STRING_TO_ARRAY(rp.Tags, ',')) AS Tag
+    FROM 
+        RankedPosts rp
+),
+TagCounts AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS PostCount,
+        STRING_AGG(DISTINCT Title, ', ') AS PostTitles
+    FROM 
+        TaggedPosts
+    GROUP BY 
+        Tag
+),
+MostPopularTags AS (
+    SELECT 
+        Tag,
+        PostCount
+    FROM 
+        TagCounts
+    ORDER BY 
+        PostCount DESC
+    LIMIT 5
+)
+
+SELECT 
+    t.Tag,
+    t.PostCount,
+    t.PostTitles,
+    COUNT(v.Id) AS TotalVotes
+FROM 
+    MostPopularTags t
+LEFT JOIN 
+    Posts p ON p.Tags LIKE '%' || t.Tag || '%'
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id
+GROUP BY 
+    t.Tag, t.PostCount, t.PostTitles
+ORDER BY 
+    t.PostCount DESC;

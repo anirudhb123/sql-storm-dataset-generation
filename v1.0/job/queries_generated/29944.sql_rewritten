@@ -1,0 +1,58 @@
+WITH ranked_titles AS (
+    SELECT 
+        at.title, 
+        at.production_year, 
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY avl_actors_count DESC) AS rn
+    FROM 
+        aka_title at
+    JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN (
+        SELECT 
+            movie_id, 
+            COUNT(DISTINCT person_id) AS avl_actors_count 
+        FROM 
+            cast_info 
+        GROUP BY 
+            movie_id
+    ) actor_count ON at.id = actor_count.movie_id
+    ORDER BY 
+        at.production_year DESC
+),
+filtered_titles AS (
+    SELECT 
+        title, 
+        production_year
+    FROM 
+        ranked_titles
+    WHERE 
+        rn <= 5  
+)
+
+SELECT 
+    f.title, 
+    f.production_year, 
+    STRING_AGG(DISTINCT ak.name, ', ') AS cast_names,
+    COUNT(DISTINCT m.keyword_id) AS keywords_count,
+    STRING_AGG(DISTINCT cn.name, ', ') AS companies
+FROM 
+    filtered_titles f
+LEFT JOIN 
+    cast_info ci ON f.title = (SELECT title FROM aka_title WHERE id = ci.movie_id)
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON f.title = (SELECT title FROM aka_title WHERE id = mk.movie_id)
+LEFT JOIN 
+    keyword m ON mk.keyword_id = m.id
+LEFT JOIN 
+    movie_companies mc ON f.title = (SELECT title FROM aka_title WHERE id = mc.movie_id)
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+GROUP BY 
+    f.title, f.production_year
+ORDER BY 
+    f.production_year DESC;

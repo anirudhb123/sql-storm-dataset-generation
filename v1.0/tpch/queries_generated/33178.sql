@@ -1,0 +1,39 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+), order_summary AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+), part_metrics AS (
+    SELECT p.p_partkey, AVG(ps.ps_supplycost) AS avg_supply_cost, SUM(l.l_extendedprice) AS total_revenue
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY p.p_partkey
+), combined_metrics AS (
+    SELECT p.p_name, pm.avg_supply_cost, pm.total_revenue,
+           CASE 
+               WHEN pm.total_revenue IS NULL THEN 'No Revenue'
+               WHEN pm.total_revenue > 10000 THEN 'High Revenue'
+               ELSE 'Low Revenue'
+           END AS revenue_category
+    FROM part_metrics pm
+    JOIN part p ON pm.p_partkey = p.p_partkey
+)
+SELECT s.s_name, sh.level, os.total_orders, 
+       os.total_spent, cm.p_name, cm.avg_supply_cost, cm.total_revenue, 
+       cm.revenue_category
+FROM supplier_hierarchy sh
+LEFT JOIN order_summary os ON sh.s_nationkey = os.c_custkey
+JOIN combined_metrics cm ON os.total_orders > 5 AND cm.avg_supply_cost IS NOT NULL
+WHERE sh.level = 2
+ORDER BY cm.total_revenue DESC, os.total_spent DESC
+FETCH FIRST 10 ROWS ONLY;

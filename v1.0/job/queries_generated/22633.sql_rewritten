@@ -1,0 +1,47 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        COALESCE(c.role, 'Unknown') AS role,
+        COUNT(*) OVER (PARTITION BY a.id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+        AND (a.title LIKE '%Mystery%' OR a.title LIKE '%Thriller%')
+),
+
+role_summary AS (
+    SELECT
+        r.role,
+        COUNT(DISTINCT r.movie_title) AS movie_count,
+        MAX(r.production_year) AS last_movie_year
+    FROM 
+        ranked_movies r
+    GROUP BY 
+        r.role
+    HAVING 
+        COUNT(DISTINCT r.movie_title) > 5
+)
+
+SELECT 
+    a.name,
+    r.role,
+    COALESCE(r.movie_count, 0) AS movie_count,
+    COALESCE(r.last_movie_year, 'N/A') AS last_movie_year,
+    STRING_AGG(DISTINCT m.title, ', ') WITHIN GROUP (ORDER BY m.production_year DESC) AS movies
+FROM 
+    aka_name a
+LEFT JOIN 
+    role_summary r ON r.role = (SELECT role FROM cast_info cc WHERE cc.person_id = a.person_id ORDER BY cc.nr_order LIMIT 1)
+LEFT JOIN 
+    aka_title m ON m.id IN (SELECT mc.movie_id FROM cast_info mc WHERE mc.person_id = a.person_id)
+WHERE 
+    a.name IS NOT NULL
+GROUP BY 
+    a.name, r.role
+ORDER BY 
+    movie_count DESC NULLS LAST, a.name;

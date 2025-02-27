@@ -1,0 +1,74 @@
+WITH TopTags AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    GROUP BY 
+        t.Id, t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePostsCount,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePostsCount,
+        SUM(CASE WHEN p.Reputation IS NOT NULL THEN u.Reputation ELSE 0 END) AS TotalReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ht.Name AS PostHistoryType
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        PostHistoryTypes ht ON ph.PostHistoryTypeId = ht.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, ht.Name
+)
+SELECT 
+    t.TagName, 
+    us.DisplayName,
+    us.PostsCount,
+    us.PositivePostsCount,
+    us.NegativePostsCount,
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.ViewCount,
+    pa.CommentCount,
+    pa.PostHistoryType
+FROM 
+    TopTags t
+JOIN 
+    UserStats us ON us.PostsCount > 10
+JOIN 
+    PostActivity pa ON pa.PostHistoryType = 'Edit Body'
+WHERE 
+    pa.CreationDate >= NOW() - INTERVAL '30 days'
+ORDER BY 
+    t.TagName, us.TotalReputation DESC;
+

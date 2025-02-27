@@ -1,0 +1,75 @@
+WITH RegionalSales AS (
+    SELECT
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+    GROUP BY 
+        r.r_name
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(NULLIF(MAX(o.o_totalprice), 0), AVG(o.o_totalprice) OVER (PARTITION BY c.c_custkey)) AS avg_or_max_total,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY COALESCE(SUM(l.l_extendedprice), 0) DESC) AS customer_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopRegions AS (
+    SELECT 
+        region_name,
+        total_sales,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        RegionalSales
+    WHERE 
+        total_sales > (SELECT AVG(total_sales) FROM RegionalSales)
+)
+
+SELECT 
+    r.region_name,
+    r.total_sales,
+    c.c_name AS customer_name,
+    c.avg_or_max_total,
+    CASE 
+        WHEN c.customer_rank < 3 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status
+FROM 
+    TopRegions r
+LEFT JOIN 
+    CustomerStats c ON c.avg_or_max_total IN (
+        SELECT 
+            TOP 5 avg_or_max_total 
+        FROM 
+            CustomerStats 
+        ORDER BY 
+            avg_or_max_total DESC
+    )
+WHERE 
+    r.sales_rank <= 10
+ORDER BY 
+    r.total_sales DESC, c.c_name ASC
+OPTION (MAXRECURSION 50);

@@ -1,0 +1,92 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.Score,
+        a.ViewCount,
+        a.OwnerUserId,
+        rp.Level + 1 AS Level
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostCTE rp ON a.ParentId = rp.PostId
+),
+RankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerUserId,
+        rp.Level,
+        RANK() OVER (PARTITION BY rp.OwnerUserId ORDER BY rp.Score DESC) AS UserRank
+    FROM 
+        RecursivePostCTE rp
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(b.Badges, 'None') AS Badges,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, b.BadgeCount, b.Badges
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    up.BadgeCount,
+    up.Badges,
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.Level,
+    up.Upvotes,
+    up.Downvotes
+FROM 
+    RankedPosts rp
+INNER JOIN 
+    UserStats up ON rp.OwnerUserId = up.UserId
+WHERE 
+    up.Reputation > 1000 
+ORDER BY 
+    rp.Score DESC,
+    up.Reputation DESC
+LIMIT 50;

@@ -1,0 +1,43 @@
+WITH FilteredParts AS (
+    SELECT 
+        p_name, 
+        p_container, 
+        p_retailprice, 
+        LENGTH(p_comment) AS comment_length
+    FROM part
+    WHERE p_retailprice > (SELECT AVG(p_retailprice) FROM part) 
+      AND p_size BETWEEN 10 AND 50
+), SuppliersWithPrefixedNames AS (
+    SELECT 
+        s_name, 
+        s_address, 
+        CONCAT('Supplier: ', s_name) AS prefixed_name,
+        s_comment,
+        LENGTH(s_comment) AS comment_length
+    FROM supplier
+    WHERE s_acctbal > 1000
+), CombinedData AS (
+    SELECT 
+        fp.p_name,
+        fp.p_container,
+        fp.p_retailprice,
+        sp.prefixed_name,
+        sp.s_address,
+        fp.comment_length AS part_comment_length,
+        sp.comment_length AS supplier_comment_length
+    FROM FilteredParts fp
+    JOIN partsupp ps ON fp.p_partkey = ps.ps_partkey
+    JOIN SuppliersWithPrefixedNames sp ON ps.ps_suppkey = sp.s_suppkey
+)
+SELECT 
+    p_name,
+    p_container,
+    p_retailprice,
+    prefixed_name,
+    s_address,
+    part_comment_length,
+    supplier_comment_length
+FROM CombinedData
+WHERE part_comment_length > 20 
+ORDER BY p_retailprice DESC, s_address ASC
+LIMIT 10;

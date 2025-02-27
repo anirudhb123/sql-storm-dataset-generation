@@ -1,0 +1,65 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.Reputation + COALESCE(b.Class, 0) * 1000) AS TotalReputation
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+
+RecentPostEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6) 
+),
+
+PostVoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    u.DisplayName AS OwnerName,
+    ur.TotalReputation,
+    COALESCE(up.UpVoteCount, 0) AS UpVoteCount,
+    COALESCE(dp.DownVoteCount, 0) AS DownVoteCount,
+    COALESCE(ed.UserDisplayName, 'No Edits') AS LastEditor,
+    COALESCE(ed.CreationDate, 'No Edits') AS LastEditDate
+FROM RecursivePostHierarchy r
+JOIN Users u ON r.OwnerUserId = u.Id
+JOIN UserReputation ur ON ur.UserId = u.Id
+LEFT JOIN PostVoteCounts up ON r.PostId = up.PostId
+LEFT JOIN PostVoteCounts dp ON r.PostId = dp.PostId
+LEFT JOIN RecentPostEdits ed ON r.PostId = ed.PostId AND ed.EditRank = 1
+ORDER BY r.PostId;

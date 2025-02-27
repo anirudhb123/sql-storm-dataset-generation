@@ -1,0 +1,25 @@
+SELECT 
+    p.p_type,
+    COUNT(DISTINCT s.s_suppkey) AS num_suppliers,
+    SUM(CASE 
+        WHEN LENGTH(p.p_name) >= 10 THEN 1 
+        ELSE 0 
+    END) AS long_part_names,
+    AVG(p.p_retailprice) AS avg_retail_price,
+    REGEXP_REPLACE(LOWER(p.p_comment), '[^a-z ]', '') AS cleaned_comment
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+GROUP BY 
+    p.p_type
+HAVING 
+    COUNT(DISTINCT s.s_suppkey) > 5 AND 
+    SUM(CASE 
+        WHEN LENGTH(p.p_name) >= 10 THEN 1 
+        ELSE 0 
+    END) > 0
+ORDER BY 
+    avg_retail_price DESC;

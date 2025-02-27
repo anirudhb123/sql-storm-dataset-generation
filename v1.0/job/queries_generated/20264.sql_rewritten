@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        AVG(pi.rating) AS avg_rating
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            AVG(info::numeric) AS rating
+         FROM 
+            movie_info 
+         WHERE 
+            info_type_id IN (SELECT id FROM info_type WHERE info = 'rating')
+         GROUP BY 
+            movie_id) pi ON mt.id = pi.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.title, mt.production_year
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 5
+),
+TopRatedMovies AS (
+    SELECT 
+        RANK() OVER (ORDER BY avg_rating DESC) AS rank,
+        title,
+        production_year,
+        actor_count
+    FROM 
+        RankedMovies
+),
+FrequentGenres AS (
+    SELECT 
+        mt.id AS movie_id,
+        array_agg(DISTINCT kt.keyword) AS genres
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    JOIN 
+        keyword kt ON mk.keyword_id = kt.id
+    GROUP BY 
+        mt.id
+    HAVING 
+        COUNT(DISTINCT kt.keyword) > 2
+)
+SELECT 
+    T.rank,
+    T.title,
+    T.production_year,
+    T.actor_count,
+    COALESCE(F.genres, '{}') AS genres
+FROM 
+    TopRatedMovies T
+LEFT JOIN 
+    FrequentGenres F ON T.title = F.movie_id
+WHERE 
+    T.rank <= 10
+ORDER BY 
+    T.avg_rating DESC, T.production_year ASC;

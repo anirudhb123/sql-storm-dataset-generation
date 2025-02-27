@@ -1,0 +1,92 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS EditTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01' as date) - INTERVAL '180 days'
+    GROUP BY 
+        ph.PostId
+),
+CombinedPostData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        COALESCE(phc.EditCount, 0) AS EditCount,
+        phc.LastEditDate,
+        phc.EditTypes,
+        CASE 
+            WHEN rp.AcceptedAnswerId IS NOT NULL THEN 'Accepted' 
+            ELSE 'Not Accepted' 
+        END AS AnswerStatus
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        PostHistoryCounts phc ON rp.PostId = phc.PostId
+)
+SELECT 
+    c.BindUserId,
+    cp.PostId,
+    cp.Title,
+    cp.CreationDate,
+    cp.Score,
+    cp.ViewCount,
+    cp.OwnerDisplayName,
+    cp.CommentCount,
+    AVG(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS AvgUpVotes,
+    COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS TotalDownVotes,
+    cp.EditCount,
+    cp.LastEditDate,
+    cp.EditTypes,
+    cp.AnswerStatus,
+    CASE 
+        WHEN cp.AnswerStatus = 'Accepted' AND cp.EditCount > 5 THEN 'Highly Edited Accepted Answer' 
+        ELSE 'Other' 
+    END AS StatusCategory
+FROM 
+    CombinedPostData cp
+LEFT JOIN 
+    Votes v ON cp.PostId = v.PostId
+LEFT JOIN 
+    Users c ON v.UserId = c.Id
+WHERE 
+    cp.ViewCount >= 100
+GROUP BY 
+    c.BindUserId, cp.PostId, cp.Title, cp.CreationDate, cp.Score, cp.ViewCount, cp.OwnerDisplayName, 
+    cp.CommentCount, cp.EditCount, cp.LastEditDate, cp.EditTypes, cp.AnswerStatus
+ORDER BY 
+    cp.CreationDate DESC
+FETCH FIRST 100 ROWS ONLY;

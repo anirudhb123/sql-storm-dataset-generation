@@ -1,0 +1,77 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId IN (10, 11) THEN 1 ELSE 0 END) AS ClosedPostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        BadgeCount,
+        QuestionCount,
+        AnswerCount,
+        ClosedPostCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserStatistics
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(T.Tags, '><')) AS TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Posts P
+    JOIN 
+        Tags T ON T.Id = ANY(SELECT unnest(string_to_array(substring(P.Tags, 2, CHARACTER_LENGTH(P.Tags) - 2), '><')))
+    GROUP BY 
+        TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+PostsWithTags AS (
+    SELECT 
+        P.Title,
+        P.Body,
+        T.TagName,
+        P.OwnerUserId
+    FROM 
+        Posts P
+    JOIN 
+        Tags T ON T.Id = ANY(SELECT unnest(string_to_array(substring(P.Tags, 2, CHARACTER_LENGTH(P.Tags) - 2), '><')))
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.BadgeCount,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.ClosedPostCount,
+    PT.TagName,
+    COUNT(PW.Title) AS RelevantPosts
+FROM 
+    TopUsers U
+JOIN 
+    PopularTags PT ON U.QuestionCount >= 5
+LEFT JOIN 
+    PostsWithTags PW ON U.UserId = PW.OwnerUserId
+GROUP BY 
+    U.UserId, U.DisplayName, U.Reputation, U.BadgeCount, U.QuestionCount, U.AnswerCount, U.ClosedPostCount, PT.TagName
+ORDER BY 
+    U.Reputation DESC, RelevantPosts DESC;

@@ -1,0 +1,59 @@
+
+WITH RecursiveMovieConnections AS (
+    SELECT 
+        m.movie_id, 
+        COALESCE(m.title, 'Unknown Title') AS title,
+        COALESCE(GROUP_CONCAT(cn.name SEPARATOR ', '), 'No Companies') AS companies,
+        COALESCE(GROUP_CONCAT(k.keyword SEPARATOR ', '), 'No Keywords') AS keywords,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        AVG(COALESCE(mi.info_type_id, 0)) AS avg_info_type_id
+    FROM 
+        aka_title m
+    LEFT JOIN
+        movie_companies mc ON m.movie_id = mc.movie_id
+    LEFT JOIN
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON m.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id
+    GROUP BY 
+        m.movie_id, m.title
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 0
+),
+RankedMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        companies, 
+        keywords, 
+        total_cast, 
+        avg_info_type_id, 
+        RANK() OVER (ORDER BY total_cast DESC, avg_info_type_id ASC) AS rank
+    FROM 
+        RecursiveMovieConnections
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.companies,
+    rm.keywords,
+    CASE 
+        WHEN rm.total_cast > 10 THEN 'Large Cast'
+        WHEN rm.total_cast BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast' 
+    END AS cast_size_category,
+    rm.rank
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rank <= 10
+ORDER BY 
+    rm.rank;

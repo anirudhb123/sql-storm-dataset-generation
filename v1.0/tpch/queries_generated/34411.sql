@@ -1,0 +1,68 @@
+WITH RECURSIVE top_customers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 1 AS level
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+    AND c.c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, tc.level + 1
+    FROM customer c
+    JOIN top_customers tc ON c.c_acctbal < tc.c_acctbal
+    WHERE tc.level < 5
+), customer_order_summary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_orders, COUNT(o.o_orderkey) AS order_count,
+           DENSE_RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+), item_summary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), lineitem_analysis AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice - l.l_discount) AS revenue,
+           MIN(l.l_shipdate) AS earliest_ship_date,
+           MAX(l.l_shipdate) AS latest_ship_date,
+           COUNT(DISTINCT l.l_suppkey) AS supplier_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+
+SELECT 
+    c.c_name,
+    COALESCE(cos.total_orders, 0) AS total_orders,
+    COALESCE(cos.order_count, 0) AS order_count,
+    ra.total_available,
+    ra.avg_supplycost,
+    la.revenue,
+    la.earliest_ship_date,
+    la.latest_ship_date,
+    CASE
+        WHEN cos.order_count > 10 THEN 'High-Value Customer'
+        WHEN cos.order_count BETWEEN 5 AND 10 THEN 'Medium-Value Customer'
+        ELSE 'Low-Value Customer'
+    END AS customer_category
+FROM top_customers tc
+LEFT JOIN customer_order_summary cos ON tc.c_custkey = cos.c_custkey
+LEFT JOIN item_summary ra ON ra.ps_partkey IN (
+    SELECT ps.ps_partkey
+    FROM partsupp ps 
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_nationkey NOT IN (
+        SELECT n.n_nationkey 
+        FROM nation n 
+        WHERE n.n_regionkey = (
+            SELECT r.r_regionkey 
+            FROM region r 
+            WHERE r.r_name = 'ASIA'
+        )
+    )
+)
+LEFT JOIN lineitem_analysis la ON la.l_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o 
+    WHERE o.o_orderstatus = 'F' 
+    AND o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+)
+WHERE tc.level <= 3
+ORDER BY total_orders DESC, c.c_name;

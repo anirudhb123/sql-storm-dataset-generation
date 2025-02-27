@@ -1,0 +1,45 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+TotalSales AS (
+    SELECT 
+        l.l_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    INNER JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    GROUP BY l.l_suppkey
+),
+FilterSales AS (
+    SELECT ts.l_suppkey, 
+           ts.total_sales,
+           CASE 
+               WHEN ts.total_sales > 10000 THEN 'HIGH'
+               WHEN ts.total_sales BETWEEN 5000 AND 10000 THEN 'MEDIUM'
+               ELSE 'LOW'
+           END AS sales_category
+    FROM TotalSales ts
+    WHERE ts.total_sales IS NOT NULL
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(COALESCE(ts.total_sales, 0)) AS total_sales_value,
+    MAX(COALESCE(s.s_acctbal, 0)) AS max_supplier_acctbal,
+    MIN(RANKED.rn) AS min_rank_in_nation
+FROM nation n
+LEFT JOIN RankedSuppliers RANKED ON n.n_nationkey = RANKED.s_nationkey AND RANKED.rn <= 5
+LEFT JOIN FilterSales ts ON ts.l_suppkey = RANKED.s_suppkey
+LEFT JOIN supplier s ON s.s_suppkey = RANKED.s_suppkey
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT s.s_suppkey) > 0 AND SUM(COALESCE(ts.total_sales, 0)) IS NOT NULL
+ORDER BY total_sales_value DESC, n.n_name ASC
+LIMIT 10;

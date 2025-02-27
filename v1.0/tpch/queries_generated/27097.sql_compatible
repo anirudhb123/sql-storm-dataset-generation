@@ -1,0 +1,49 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        LENGTH(s.s_name) > 10
+), FilteredParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_type, 
+        p.p_retailprice,
+        CONCAT('Part: ', p.p_name, ', Type: ', p.p_type) AS part_description
+    FROM 
+        part p
+    WHERE 
+        LOWER(p.p_name) LIKE '%widget%'
+), SupplierParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        rp.s_suppkey, 
+        rp.s_name, 
+        pf.part_description
+    FROM 
+        partsupp ps 
+    JOIN 
+        RankedSuppliers rp ON ps.ps_suppkey = rp.s_suppkey
+    JOIN 
+        FilteredParts pf ON ps.ps_partkey = pf.p_partkey
+    WHERE 
+        rp.rn <= 5
+)
+SELECT 
+    sp.part_description, 
+    COUNT(sp.s_suppkey) AS supplier_count 
+FROM 
+    SupplierParts sp
+GROUP BY 
+    sp.part_description
+ORDER BY 
+    supplier_count DESC, 
+    sp.part_description;

@@ -1,0 +1,24 @@
+SELECT 
+    CONCAT('Supplier Name: ', s_name, ', Address: ', s_address, ', Nation: ', n_name) AS supplier_info,
+    LEFT(s_comment, 30) AS short_comment,
+    COUNT(DISTINCT ps_partkey) AS total_parts,
+    AVG(ps_supplycost) AS avg_supply_cost,
+    MAX(l_extendedprice) AS max_extended_price,
+    SUM(l_quantity) AS total_quantity_sold
+FROM 
+    supplier s
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+WHERE 
+    l_shipdate BETWEEN '2023-01-01' AND '2023-12-31' 
+GROUP BY 
+    s.suppkey, s_name, s_address, n_name, s_comment
+HAVING 
+    COUNT(DISTINCT ps_partkey) > 10 AND AVG(ps_supplycost) < 50.00
+ORDER BY 
+    total_quantity_sold DESC, avg_supply_cost ASC
+LIMIT 100;

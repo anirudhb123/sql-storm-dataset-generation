@@ -1,0 +1,82 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        Id,
+        Reputation,
+        CreationDate,
+        Location,
+        DisplayName,
+        Reputation AS RootReputation
+    FROM 
+        Users
+    WHERE 
+        Reputation > 0
+    
+    UNION ALL
+    
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.CreationDate,
+        u.Location,
+        u.DisplayName,
+        urc.RootReputation
+    FROM 
+        Users u
+    INNER JOIN 
+        UserReputationCTE urc ON u.Reputation < urc.Reputation
+    WHERE 
+        u.Reputation > 0
+), 
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+FilteredPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        p.AnswerCount,
+        ps.VoteCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        PostVoteSummary ps ON p.Id = ps.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND (ps.VoteCount > 10 OR p.ViewCount > 1000)
+)
+SELECT 
+    user.DisplayName,
+    COUNT(fp.PostId) AS TotalPosts,
+    SUM(fp.Score) AS TotalScore,
+    STRING_AGG(fp.Title, ', ') AS PostTitles,
+    AVG(u.Reputation) AS AverageReputation
+FROM 
+    FilteredPosts fp
+JOIN 
+    Users user ON fp.OwnerUserId = user.Id
+JOIN 
+    UserReputationCTE ur ON user.Id = ur.Id
+GROUP BY 
+    user.DisplayName
+HAVING 
+    COUNT(fp.PostId) > 5
+    AND AVG(u.Reputation) > 100
+ORDER BY 
+    TotalPosts DESC;

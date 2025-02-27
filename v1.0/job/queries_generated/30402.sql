@@ -1,0 +1,70 @@
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        1 AS depth
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        depth + 1
+    FROM 
+        MovieCTE m
+    JOIN 
+        movie_link ml ON m.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+    WHERE 
+        t.production_year >= 2000
+)
+
+SELECT 
+    m.title AS Movie_Title,
+    COUNT(DISTINCT ca.person_id) AS Total_Cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS Actors,
+    AVG(CASE WHEN ai.info IS NOT NULL THEN LENGTH(ai.info) ELSE 0 END) AS Average_Info_Length,
+    MAX(m.production_year) AS Latest_Production_Year,
+    COUNT(DISTINCT mk.keyword) AS Total_Keywords,
+    ROW_NUMBER() OVER (PARTITION BY m.kind_id ORDER BY COUNT(DISTINCT ca.person_id) DESC) AS Rank_By_Cast
+FROM 
+    MovieCTE m
+LEFT JOIN 
+    cast_info ca ON m.movie_id = ca.movie_id
+LEFT JOIN 
+    aka_name ak ON ca.person_id = ak.person_id
+LEFT JOIN 
+    movie_info ai ON m.movie_id = ai.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+WHERE 
+    m.depth <= 3 
+GROUP BY 
+    m.title
+HAVING 
+    COUNT(DISTINCT ca.person_id) > 1 
+ORDER BY 
+    Rank_By_Cast, m.production_year DESC;
+
+This query does the following:
+
+1. **CTE for Recursive Movie Links**: It creates a recursive Common Table Expression (CTE) to explore movies released in or after 2000 and their linked movies up to a depth of 3, allowing complex relationships to be examined.
+
+2. **Aggregate Calculations**: It counts distinct cast members, aggregates actor names, computes the average length of additional info associated with movies, and counts keywords related to movies.
+
+3. **String Aggregation**: It concatenates actor names into a single string for display.
+
+4. **Window Function**: It ranks movies based on the number of cast members within each movie kind/type.
+
+5. **Condition on Grouping**: Each movie is filtered to only include those with more than one distinct cast member.
+
+6. **Ordering**: Finally, the results are ordered by rank and production year, contributing to performance benchmarking and insights on movie relationships.

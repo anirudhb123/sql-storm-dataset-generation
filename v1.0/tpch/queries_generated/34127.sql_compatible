@@ -1,0 +1,67 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, CAST(s_name AS VARCHAR(255)) AS full_name, 1 AS level
+    FROM supplier
+    WHERE s_nationkey = (SELECT n_nationkey FROM nation WHERE n_name = 'GERMANY')
+    
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, CONCAT(sh.full_name, ' -> ', s.s_name), sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+
+OrderStatistics AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS unique_customers,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY o.o_orderkey
+),
+
+CustomerRevenue AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS customer_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.o_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey, c.c_name
+),
+
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        cr.customer_revenue,
+        DENSE_RANK() OVER (ORDER BY cr.customer_revenue DESC) AS revenue_rank
+    FROM customer c
+    JOIN CustomerRevenue cr ON c.c_custkey = cr.c_custkey
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity_sold,
+    AVG(COALESCE(l.l_discount, 0)) AS avg_discount,
+    COUNT(DISTINCT o.o_orderkey) AS number_of_orders,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS suppliers,
+    MAX(sr.full_name) AS top_supplier_path
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN SupplierHierarchy sr ON s.s_suppkey = sr.s_suppkey
+WHERE p.p_size > 10 AND (p.p_retailprice IS NULL OR p.p_retailprice < 100.00)
+GROUP BY p.p_partkey, p.p_name, p.p_brand
+HAVING SUM(l.l_extendedprice) > (SELECT AVG(total_revenue) FROM OrderStatistics WHERE rank <= 10)
+ORDER BY total_quantity_sold DESC, avg_discount DESC;

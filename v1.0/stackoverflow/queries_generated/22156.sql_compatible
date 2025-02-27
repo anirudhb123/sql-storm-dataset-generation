@@ -1,0 +1,75 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        COALESCE(bd.BadgeCount, 0) AS BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS BadgeCount 
+        FROM Badges 
+        GROUP BY UserId
+    ) bd ON u.Id = bd.UserId
+),
+
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.ClosedDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPosts,
+        AVG(p.Score) AS AvgScore
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+
+UserPostStats AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        ps.TotalPosts,
+        ps.TotalQuestions,
+        ps.TotalAnswers,
+        ps.ClosedPosts,
+        ps.AvgScore,
+        us.Reputation + COALESCE(us.BadgeCount * 100, 0) AS AdjustedReputation
+    FROM UserStats us
+    LEFT JOIN PostStats ps ON us.UserId = ps.OwnerUserId
+)
+
+SELECT 
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.ClosedPosts,
+    ups.AvgScore,
+    ups.AdjustedReputation,
+    CASE 
+        WHEN ups.TotalPosts IS NULL THEN 'No Posts'
+        WHEN ups.ClosedPosts > 0 THEN 'Has Closed Posts'
+        ELSE 'Active Contributor'
+    END AS UserStatus,
+    STRING_AGG(DISTINCT CONCAT(pt.Name, ': ', pp.Count), ', ') AS PostTypes
+FROM UserPostStats ups
+LEFT JOIN (
+    SELECT 
+        OwnerUserId, 
+        pt.Name, 
+        COUNT(*) AS Count
+    FROM Posts p
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY OwnerUserId, pt.Name
+) pp ON ups.UserId = pp.OwnerUserId
+LEFT JOIN PostHistory ph ON ph.UserId = ups.UserId AND ph.PostId IS NOT NULL
+GROUP BY ups.DisplayName, ups.TotalPosts, ups.TotalQuestions, ups.TotalAnswers, ups.ClosedPosts, ups.AvgScore, ups.AdjustedReputation
+ORDER BY ups.AdjustedReputation DESC
+LIMIT 10;

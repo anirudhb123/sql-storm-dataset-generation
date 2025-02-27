@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND cn.name > 'Sound Investment Studio Livonia Michigan' AND cn.md5sum IN ('03bbdae321718d67a46661e9a9107f51', '0c148be898f07099c9ec15854379d71b', '2901ba2e31ccac8051ab7f8309f8376d', '32958df14dceb7ec20c51eb6c0e09c4d', '5823899a800721a6d37c709706447e1c', '5faa8ae24aaafed57f9f71d64a5c4a43', '88728bd8f0e8e85574ebdc2a33536a34', 'a903bc8a4e5fa8d2351da253929578ab', 'd6f452bf4bef607e0ac5a9a1a141c8c9', 'f7e53a5533f50a7ae3394e11b8aebc1a') AND n.md5sum IS NOT NULL;

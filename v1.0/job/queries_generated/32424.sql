@@ -1,0 +1,48 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level,
+        NULL AS parent_movie_id
+    FROM title t
+    WHERE t.kind_id = 1  -- Assuming kind_id = 1 is for main movies
+
+    UNION ALL
+
+    SELECT 
+        mt.linked_movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM movie_link mt
+    JOIN title t ON mt.linked_movie_id = t.id
+    JOIN MovieHierarchy mh ON mt.movie_id = mh.movie_id
+)
+
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    COALESCE(a.name, 'Unknown') AS actor_name,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    COUNT(DISTINCT c.id) AS company_count,
+    ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY a.name) AS actor_rank,
+    CASE 
+        WHEN AVG(COALESCE(CAST(pi.info AS float), 0)) > 70 THEN 'High Rating'
+        WHEN AVG(COALESCE(CAST(pi.info AS float), 0)) <= 70 AND AVG(COALESCE(CAST(pi.info AS float), 0)) > 40 THEN 'Medium Rating'
+        ELSE 'Low Rating' 
+    END AS rating_category
+FROM MovieHierarchy m
+LEFT JOIN cast_info ci ON m.movie_id = ci.movie_id
+LEFT JOIN aka_name a ON ci.person_id = a.person_id
+LEFT JOIN movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN company_name c ON mc.company_id = c.id
+LEFT JOIN movie_info mi ON m.movie_id = mi.movie_id
+LEFT JOIN person_info pi ON ci.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+WHERE m.level = 1
+GROUP BY m.id, m.title, m.production_year, a.name
+HAVING COUNT(DISTINCT c.id) > 5  -- Filter for movies with more than 5 companies involved
+ORDER BY m.production_year DESC, actor_rank;

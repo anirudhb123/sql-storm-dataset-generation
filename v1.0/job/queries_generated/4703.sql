@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+ActorCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ac.actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorCounts ac ON rm.movie_id = ac.movie_id
+),
+KeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(ac.actor_count, 0) AS actor_count,
+    COALESCE(kc.keyword_count, 0) AS keyword_count,
+    CASE 
+        WHEN md.production_year < 2000 THEN 'Classic'
+        WHEN md.production_year >= 2000 AND md.production_year < 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    KeywordCounts kc ON md.movie_id = kc.movie_id
+LEFT JOIN 
+    (SELECT * FROM movie_info WHERE info_type_id IN (SELECT id FROM info_type WHERE info = 'Box Office')) AS mi
+    ON md.movie_id = mi.movie_id
+ORDER BY 
+    md.production_year DESC, md.title;

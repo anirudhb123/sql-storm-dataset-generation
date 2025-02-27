@@ -1,0 +1,60 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        1 AS Level,
+        CAST(p.Title AS VARCHAR(300)) AS Path
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Questions
+    
+    UNION ALL
+    
+    SELECT 
+        a.Id,
+        a.Title,
+        a.Body,
+        a.CreationDate,
+        Level + 1,
+        CAST(r.Path + ' -> ' + a.Title AS VARCHAR(300))
+    FROM 
+        Posts a
+    JOIN 
+        Posts q ON a.ParentId = q.Id
+    JOIN 
+        RecursivePostCTE r ON q.Id = r.Id
+    WHERE 
+        a.PostTypeId = 2  -- Answers
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.Title AS PostTitle,
+    rp.CreationDate AS PostDate,
+    rp.Level AS AnswerLevel,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    RecursivePostCTE rp
+LEFT JOIN 
+    Comments c ON c.PostId = rp.Id
+LEFT JOIN 
+    Votes v ON v.PostId = rp.Id
+LEFT JOIN 
+    (SELECT 
+         pt.Id, 
+         tt.TagName
+     FROM 
+         Tags tt 
+     JOIN 
+         Posts pt ON pt.Tags LIKE '%' + tt.TagName + '%') t ON t.Id = rp.Id
+GROUP BY 
+    rp.Id, rp.Title, rp.CreationDate, rp.Level
+HAVING 
+    COUNT(c.Id) > 0 OR SUM(v.VoteTypeId IN (2, 3)) > 0
+ORDER BY 
+    rp.CreationDate DESC;

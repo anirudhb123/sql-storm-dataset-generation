@@ -1,0 +1,46 @@
+WITH UserPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.OwnerDisplayName IS NOT NULL THEN 1 ELSE 0 END) AS CommunityPosts
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges b
+    GROUP BY b.UserId
+),
+UserTagCounts AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(t.Id) AS TagCount
+    FROM Posts p
+    JOIN Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '>'))::int [])
+                          )
+    GROUP BY p.OwnerUserId
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.TotalPosts,
+    up.TotalQuestions,
+    up.TotalAnswers,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    COALESCE(utc.TagCount, 0) AS UniqueTagCount,
+    (COALESCE(up.TotalPosts, 0) + COALESCE(ub.GoldBadges, 0) + COALESCE(ub.SilverBadges, 0) + COALESCE(ub.BronzeBadges, 0)) AS EngagementScore
+FROM UserPosts up
+LEFT JOIN UserBadges ub ON up.UserId = ub.UserId
+LEFT JOIN UserTagCounts utc ON up.UserId = utc.OwnerUserId
+ORDER BY EngagementScore DESC
+LIMIT 10;

@@ -1,0 +1,54 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+),
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        SUM(P.Score) AS TotalScore
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        UR.UserId,
+        UR.DisplayName,
+        PS.TotalPosts,
+        PS.TotalQuestions,
+        PS.TotalAnswers,
+        PS.TotalScore,
+        UR.Reputation,
+        UR.ReputationRank
+    FROM UserReputation UR
+    JOIN PostStatistics PS ON UR.UserId = PS.OwnerUserId
+    WHERE UR.ReputationRank <= 10
+)
+SELECT 
+    TU.DisplayName,
+    TU.TotalPosts,
+    TU.TotalQuestions,
+    TU.TotalAnswers,
+    TU.TotalScore,
+    COALESCE(PH.CloseReasonId, 'N/A') AS CloseReason,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+FROM TopUsers TU
+LEFT JOIN Posts P ON TU.UserId = P.OwnerUserId
+LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (10, 11) 
+LEFT JOIN STRING_TO_ARRAY(P.Tags, '>') AS TagArray TAGS ON TRUE
+LEFT JOIN Tags T ON T.TagName = TagArray.value
+GROUP BY 
+    TU.DisplayName,
+    TU.TotalPosts,
+    TU.TotalQuestions,
+    TU.TotalAnswers,
+    TU.TotalScore,
+    PH.CloseReasonId
+ORDER BY TU.TotalScore DESC;

@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 1000 AND sh.level < 5
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > 50
+    GROUP BY p.p_partkey, p.p_name
+),
+RankedLineItems AS (
+    SELECT l.*, 
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS item_rank
+    FROM lineitem l
+    WHERE l.l_discount BETWEEN 0.05 AND 0.2
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS total_filled_orders,
+    SUM(pl.total_avail_qty) AS total_available_parts,
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+    AVG(l.l_extendedprice) AS average_price
+FROM nation n
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN PartSupplier pl ON pl.p_partkey = (SELECT ps.ps_partkey 
+                                                FROM partsupp ps 
+                                                WHERE ps.ps_suppkey IN (SELECT sh.s_suppkey FROM SupplierHierarchy sh WHERE sh.level <= 3))
+LEFT JOIN RankedLineItems l ON l.l_orderkey = o.o_orderkey
+WHERE n.n_regionkey IS NOT NULL
+GROUP BY n.n_name
+ORDER BY customer_count DESC, total_filled_orders DESC;

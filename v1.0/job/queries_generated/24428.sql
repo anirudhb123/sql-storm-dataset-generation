@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieChain AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        movie_link.linked_movie_id,
+        1 AS depth
+    FROM aka_title
+    JOIN movie_link ON aka_title.movie_id = movie_link.movie_id
+    JOIN title ON movie_link.linked_movie_id = title.id
+    WHERE title.production_year IS NOT NULL 
+
+    UNION ALL
+
+    SELECT 
+        mc.movie_id,
+        title.title,
+        title.production_year,
+        movie_link.linked_movie_id,
+        mc.depth + 1
+    FROM MovieChain mc
+    JOIN movie_link ON mc.linked_movie_id = movie_link.movie_id
+    JOIN title ON movie_link.linked_movie_id = title.id
+    WHERE title.production_year IS NOT NULL 
+    AND mc.depth < 5
+),
+TopMovie AS (
+    SELECT 
+        title,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        DENSE_RANK() OVER (ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM movie_info mi
+    JOIN aka_title at ON mi.movie_id = at.id
+    JOIN cast_info ci ON ci.movie_id = at.id
+    GROUP BY title
+    HAVING COUNT(DISTINCT ci.person_id) > 3
+),
+FilteredMovies AS (
+    SELECT 
+        MC.movie_id,
+        MC.title,
+        MC.production_year,
+        MC.depth
+    FROM MovieChain MC
+    JOIN TopMovie TM ON MC.title = TM.title
+    WHERE MC.depth >= 2
+)
+SELECT 
+    FM.title,
+    FM.production_year,
+    COALESCE(COUNT(DISTINCT F.actor_id), 0) AS actors_in_chain,
+    STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+    MAX(FM.depth) AS max_depth
+FROM FilteredMovies FM
+LEFT JOIN (
+    SELECT 
+        ci.movie_id,
+        ci.person_id AS actor_id,
+        COUNT(DISTINCT ci.id) AS appearances
+    FROM cast_info ci
+    GROUP BY ci.movie_id, ci.person_id
+) F ON FM.movie_id = F.movie_id
+LEFT JOIN aka_name a ON F.actor_id = a.person_id
+GROUP BY FM.title, FM.production_year
+ORDER BY FM.production_year DESC, actors_in_chain DESC
+LIMIT 10;
+

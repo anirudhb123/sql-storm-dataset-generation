@@ -1,0 +1,43 @@
+WITH RECURSIVE ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+supplier_ranked AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           RANK() OVER (ORDER BY s.s_acctbal DESC) AS acct_rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+part_supplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, 
+           AVG(ps.ps_supplycost) OVER (PARTITION BY ps.ps_partkey) AS avg_supplycost
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS return_count
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT p.p_name, 
+       COALESCE(SUM(l.total_revenue), 0) AS total_revenue,
+       COALESCE(MAX(r.order_rank), 0) AS max_order_rank,
+       s.s_name AS top_supplier,
+       (SELECT COUNT(DISTINCT n.n_nationkey) FROM nation n WHERE n.n_regionkey = r.r_regionkey) AS distinct_nations,
+       CASE 
+           WHEN SUM(l.total_revenue) > 10000 THEN 'High Revenue'
+           WHEN SUM(l.total_revenue) BETWEEN 5000 AND 10000 THEN 'Medium Revenue'
+           ELSE 'Low Revenue'
+       END AS revenue_category
+FROM part p
+LEFT JOIN part_supplier ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier_ranked s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN lineitem_summary l ON l.l_orderkey IN (SELECT o_orderkey FROM ranked_orders WHERE order_rank = 1)
+LEFT JOIN region r ON s.s_nationkey = r.r_regionkey
+GROUP BY p.p_name, s.s_name, r.r_regionkey
+HAVING COUNT(DISTINCT s.s_suppkey) > 0
+ORDER BY total_revenue DESC NULLS LAST;

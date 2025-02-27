@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        p.LastActivityDate,
+        COUNT(c.Id) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.LastActivityDate DESC) AS ActivityRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+), 
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+), 
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT c.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes c ON ph.Comment::int = c.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    COALESCE(ps.Upvotes, 0) AS Upvotes,
+    COALESCE(ps.Downvotes, 0) AS Downvotes,
+    COALESCE(ps.TotalVotes, 0) AS TotalVotes,
+    CASE 
+        WHEN rp.AcceptedAnswerId IS NOT NULL THEN 'Accepted Answer Available'
+        ELSE 'No Accepted Answer'
+    END AS AnswerStatus,
+    COALESCE(cp.LastClosedDate, 'Never Closed') AS LastClosedDate,
+    COALESCE(cp.CloseReasons, 'No Close Reasons') AS CloseReasons,
+    rp.LastActivityDate,
+    rp.ActivityRank
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteSummary ps ON rp.PostId = ps.PostId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.ActivityRank <= 5
+ORDER BY 
+    rp.LastActivityDate DESC;

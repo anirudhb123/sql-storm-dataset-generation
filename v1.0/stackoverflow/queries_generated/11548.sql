@@ -1,0 +1,48 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(V.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(V.DownVotes, 0)) AS TotalDownVotes,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostStats AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.ViewCount, P.Score
+)
+SELECT
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.PostCount,
+    US.TotalUpVotes,
+    US.TotalDownVotes,
+    US.BadgeCount,
+    PS.PostId,
+    PS.Title,
+    PS.ViewCount,
+    PS.Score,
+    PS.CommentCount,
+    PS.UpVoteCount,
+    PS.DownVoteCount
+FROM UserStats US
+JOIN PostStats PS ON US.UserId = PS.PostId
+ORDER BY US.Reputation DESC, PS.ViewCount DESC;

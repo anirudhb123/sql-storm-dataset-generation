@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.AnswerCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  -- BountyStart votes
+    GROUP BY 
+        u.Id
+),
+UserPostDetails AS (
+    SELECT 
+        us.DisplayName,
+        us.BadgeCount,
+        us.PostCount,
+        us.TotalBounty,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount
+    FROM 
+        UserStatistics us
+    JOIN 
+        RankedPosts rp ON us.UserId = rp.OwnerUserId
+    WHERE 
+        rp.RankByScore = 1
+),
+TopPosts AS (
+    SELECT 
+        pd.DisplayName,
+        pd.Title,
+        pd.CreationDate,
+        pd.Score,
+        pd.ViewCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(ph.CloseReasonTypes, 'None') AS LastCloseReason
+    FROM 
+        UserPostDetails pd
+    LEFT JOIN 
+        (SELECT 
+            PostId, COUNT(*) AS CommentCount 
+            FROM Comments 
+            GROUP BY PostId) c ON pd.Title = c.PostId
+    LEFT JOIN 
+        (SELECT 
+            ph.PostId, STRING_AGG(CAST(cr.Name AS VARCHAR), ', ') AS CloseReasonTypes 
+            FROM PostHistory ph 
+            JOIN CloseReasonTypes cr ON ph.Comment::int = cr.Id 
+            WHERE ph.PostHistoryTypeId IN (10, 11)  -- Close/Reopen
+            GROUP BY ph.PostId) ph ON pd.Title = ph.PostId
+)
+SELECT 
+    t.DisplayName,
+    t.Title,
+    t.CreationDate,
+    t.Score,
+    t.ViewCount,
+    t.CommentCount,
+    t.LastCloseReason
+FROM 
+    TopPosts t
+WHERE 
+    t.Score > (SELECT AVG(Score) FROM Posts)  -- Posts with above average scores
+ORDER BY 
+    t.Score DESC
+LIMIT 10;

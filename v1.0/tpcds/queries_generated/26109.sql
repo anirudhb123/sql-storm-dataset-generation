@@ -1,0 +1,65 @@
+
+WITH AddressAnalysis AS (
+    SELECT 
+        ca.ca_city,
+        ca.ca_state,
+        LENGTH(ca.ca_street_name) AS street_name_length,
+        COUNT(*) AS address_count
+    FROM 
+        customer_address ca
+    WHERE 
+        ca.ca_city IS NOT NULL 
+        AND ca.ca_state IS NOT NULL
+    GROUP BY 
+        ca.ca_city, 
+        ca.ca_state, 
+        LENGTH(ca.ca_street_name)
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(cd.cd_purchase_estimate) AS total_purchase_estimate,
+        COUNT(c.c_customer_sk) AS customer_count
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd.cd_gender, 
+        cd.cd_marital_status
+),
+MergedAnalysis AS (
+    SELECT 
+        aa.ca_city,
+        aa.ca_state,
+        aa.street_name_length,
+        aa.address_count,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.total_purchase_estimate,
+        cd.customer_count
+    FROM 
+        AddressAnalysis aa
+    JOIN 
+        CustomerDemographics cd ON random() <0.05  -- Sampling for analysis
+)
+SELECT 
+    ma.ca_city,
+    ma.ca_state,
+    AVG(ma.street_name_length) AS avg_street_name_length,
+    SUM(ma.address_count) AS total_address_count,
+    ma.cd_gender,
+    ma.cd_marital_status,
+    AVG(ma.total_purchase_estimate) AS avg_purchase_estimate,
+    SUM(ma.customer_count) AS total_customers
+FROM 
+    MergedAnalysis ma
+GROUP BY 
+    ma.ca_city, 
+    ma.ca_state, 
+    ma.cd_gender, 
+    ma.cd_marital_status
+ORDER BY 
+    total_address_count DESC
+LIMIT 10;

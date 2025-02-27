@@ -1,0 +1,65 @@
+
+WITH sales_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        FIRST_VALUE(ws.ws_sales_price) OVER (PARTITION BY c.c_customer_sk ORDER BY ws.ws_sold_date_sk DESC) AS last_order_price
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1970 AND 1980
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+), inventory_status AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity,
+        COUNT(DISTINCT inv.inv_warehouse_sk) AS active_warehouses
+    FROM 
+        inventory inv
+    WHERE 
+        inv.inv_date_sk = (SELECT MAX(inv_date_sk) FROM inventory)
+    GROUP BY 
+        inv.inv_item_sk
+), item_profit AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_net_profit,
+        COALESCE(SUM(cs.cs_net_profit), 0) AS catalog_net_profit
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_id
+)
+SELECT 
+    ss.c_customer_sk,
+    ss.c_first_name,
+    ss.c_last_name,
+    ss.total_profit,
+    ss.total_orders,
+    ss.last_order_price,
+    COALESCE(i.total_quantity, 0) AS total_item_quantity,
+    i.active_warehouses,
+    ip.total_net_profit AS item_profit,
+    ip.catalog_net_profit
+FROM 
+    sales_summary ss
+LEFT JOIN 
+    inventory_status i ON ss.total_orders > 0
+LEFT JOIN 
+    item_profit ip ON ss.total_orders = 0
+WHERE 
+    ss.total_profit > 1000
+ORDER BY 
+    ss.total_profit DESC
+FETCH FIRST 50 ROWS ONLY;

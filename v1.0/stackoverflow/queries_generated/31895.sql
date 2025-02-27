@@ -1,0 +1,87 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.Reputation, 
+        U.DisplayName, 
+        U.CreationDate,
+        1 AS Level
+    FROM Users U
+    WHERE U.Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        U.Id AS UserId, 
+        U.Reputation, 
+        U.DisplayName, 
+        U.CreationDate,
+        UR.Level + 1
+    FROM Users U
+    JOIN UserReputation UR ON U.Reputation > (UR.Reputation * 0.8) AND U.Id <> UR.UserId
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.CreationDate,
+        COALESCE(PV.UpVotes, 0) AS UpVotes,
+        COALESCE(PV.DownVotes, 0) AS DownVotes,
+        COALESCE(PV.Score, 0) AS Score,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentsCount
+    FROM Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE -1 END) AS Score
+        FROM Votes
+        GROUP BY PostId
+    ) PV ON P.Id = PV.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.Id, PV.UpVotes, PV.DownVotes, PV.Score
+),
+CloseReasons AS (
+    SELECT 
+        P.Id AS PostId,
+        PH.CreationDate AS ClosedDate,
+        CR.Name AS CloseReason
+    FROM PostHistory PH
+    JOIN CloseReasonTypes CR ON PH.Comment::int = CR.Id
+    JOIN Posts P ON PH.PostId = P.Id
+    WHERE PH.PostHistoryTypeId = 10
+),
+UserPosts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    UR.UserId,
+    UR.DisplayName,
+    UR.Reputation,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.UpVotes,
+    PS.DownVotes,
+    PS.CommentsCount,
+    CR.CloseReason,
+    UP.TotalPosts,
+    UP.Questions,
+    UP.Answers
+FROM UserReputation UR
+LEFT JOIN PostStats PS ON UR.UserId = PS.OwnerUserId
+LEFT JOIN CloseReasons CR ON PS.PostId = CR.PostId
+LEFT JOIN UserPosts UP ON UR.UserId = UP.UserId
+WHERE (UP.TotalPosts > 5 OR UR.Level = 1)
+ORDER BY UR.Reputation DESC, PS.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

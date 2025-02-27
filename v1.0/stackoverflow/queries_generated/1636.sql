@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())
+),
+TopPosts AS (
+    SELECT 
+        rp.OwnerUserId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.rank,
+        CASE 
+            WHEN rp.CommentCount > 5 THEN 'High Engagement'
+            WHEN rp.CommentCount BETWEEN 1 AND 5 THEN 'Moderate Engagement'
+            ELSE 'Low Engagement'
+        END AS EngagementLevel
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rank <= 3
+),
+BadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    bc.BadgeCount,
+    tp.EngagementLevel
+FROM 
+    Users u
+LEFT JOIN 
+    TopPosts tp ON u.Id = tp.OwnerUserId
+LEFT JOIN 
+    BadgeCounts bc ON u.Id = bc.UserId
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

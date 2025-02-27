@@ -1,0 +1,62 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        sns.s_nationkey,
+        RANK() OVER (PARTITION BY sns.s_nationkey ORDER BY s.s_acctbal DESC) AS AccountRank
+    FROM supplier s
+    JOIN nation sns ON s.s_nationkey = sns.n_nationkey
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS TotalOrders,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '1995-01-01' AND '1996-12-31'
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierStatistics AS (
+    SELECT 
+        p.p_partkey,
+        p.p_brand,
+        AVG(ps.ps_supplycost) AS AvgSupplyCost,
+        MAX(ps.ps_availqty) AS MaxAvailableQty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_brand
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS SalesAmount,
+        COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS ReturnsCount
+    FROM lineitem l
+    WHERE l.l_shipdate >= '1995-01-01' AND l.l_shipdate <= '1996-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    SUM(f.SalesAmount) AS TotalSales,
+    COUNT(DISTINCT f.l_orderkey) AS UniqueOrders,
+    r.s_name AS TopSupplier,
+    r.AccountRank,
+    ps.MaxAvailableQty,
+    ps.AvgSupplyCost
+FROM CustomerOrderSummary c
+JOIN FilteredLineItems f ON c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = f.l_orderkey)
+JOIN RankedSuppliers r ON f.l_orderkey IN (
+    SELECT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_partkey IN (
+        SELECT p.p_partkey 
+        FROM part p 
+        WHERE p.p_brand LIKE 'Brand%')
+) 
+LEFT JOIN PartSupplierStatistics ps ON r.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_brand = r.p_brand LIMIT 1))
+WHERE c.TotalOrders > 5
+GROUP BY c.c_name, r.s_name, r.AccountRank, ps.MaxAvailableQty, ps.AvgSupplyCost
+HAVING SUM(f.SalesAmount) > 10000
+ORDER BY TotalSales DESC, c.c_name ASC;

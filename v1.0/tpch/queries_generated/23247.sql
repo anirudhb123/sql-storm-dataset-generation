@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk,
+        COALESCE(NULLIF(s.s_comment, ''), 'No Comment') AS normalized_comment
+    FROM supplier s
+),
+ExpandedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        (SELECT AVG(ps_supplycost) 
+         FROM partsupp ps 
+         WHERE ps.ps_partkey = p.p_partkey) AS avg_supplycost,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 0 
+            ELSE p.p_retailprice * 1.1 
+        END AS inflated_price
+    FROM part p
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey 
+    WHERE o.o_orderstatus IN ('F', 'O') -- Finished or On Hold
+    GROUP BY c.c_custkey, c.c_name
+),
+LineItemAnalysis AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_price,
+        MAX(CASE WHEN l.l_returnflag = 'Y' THEN 1 ELSE 0 END) AS has_returns
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT cs.c_custkey) AS unique_customers,
+    SUM(ep.inflated_price) AS total_inflated_parts_cost,
+    AVG(l.total_lineitem_price) AS average_lineitem_price,
+    AVG(ss.s_acctbal) AS avg_supplier_balance,
+    STRING_AGG(rs.normalized_comment, '; ') AS supplier_comments
+FROM RankedSuppliers rs
+JOIN nation ns ON ns.n_nationkey = rs.s_nationkey
+JOIN ExpandedParts ep ON ep.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = rs.s_suppkey)
+JOIN CustomerOrders cs ON cs.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders) 
+LEFT JOIN LineItemAnalysis l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+GROUP BY ns.n_name
+HAVING COUNT(DISTINCT cs.c_custkey) > 5
+ORDER BY unique_customers DESC, total_inflated_parts_cost ASC;

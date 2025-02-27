@@ -1,0 +1,80 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        1 AS PostLevel,
+        CAST(p.Title AS VARCHAR(MAX)) AS Path
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        r.PostLevel + 1,
+        CAST(r.Path + ' -> ' + p.Title AS VARCHAR(MAX))
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2  
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(DATEDIFF(SECOND, p.CreationDate, GETDATE())) AS AvgPostAgeInSec
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        p.Title,
+        pt.Name AS PostHistoryTypeName
+    FROM 
+        PostHistory ph 
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= DATEADD(DAY, -7, GETDATE()) 
+)
+SELECT 
+    u.DisplayName AS User,
+    u.TotalPosts,
+    u.TotalQuestions,
+    u.TotalAnswers,
+    u.AvgPostAgeInSec,
+    COALESCE(rpc.Path, 'No Parent') AS PostPath,
+    COUNT(DISTINCT rph.PostId) AS RecentPostHistories,
+    STRING_AGG(DISTINCT rph.PostHistoryTypeName, ', ') AS RecentPostHistoryTypes
+FROM 
+    UserPostStats u 
+LEFT JOIN 
+    RecursivePostCTE rpc ON u.UserId = rpc.OwnerUserId
+LEFT JOIN 
+    RecentPostHistory rph ON rpc.PostId = rph.PostId
+GROUP BY 
+    u.UserId, u.DisplayName, rpc.Path
+ORDER BY 
+    u.TotalPosts DESC,
+    u.TotalAnswers DESC;

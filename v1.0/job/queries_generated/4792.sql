@@ -1,0 +1,81 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    AND 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'feature'))
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 10
+),
+MovieDetails AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        GROUP_CONCAT(DISTINCT COALESCE(CONCAT(p.first_name, ' ', p.last_name), 'Unknown')) AS actors,
+        COALESCE(MIN(mi.info), 'No Info Available') AS movie_info
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = tm.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = cc.movie_id
+    LEFT JOIN 
+        aka_name p ON p.person_id = ci.person_id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = tm.movie_id
+    GROUP BY 
+        tm.movie_id, tm.title
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.actors,
+    md.movie_info,
+    COUNT(DISTINCT mk.keyword_id) AS keyword_count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = md.movie_id
+GROUP BY 
+    md.movie_id, md.title, md.actors, md.movie_info
+HAVING 
+    COUNT(DISTINCT mk.keyword_id) > 0
+ORDER BY 
+    md.title;
+
+-- Get movies with specific predicates using NULL logic
+SELECT
+    t.title,
+    COALESCE(c.company_name, 'No Studio') AS company,
+    COUNT(DISTINCT ci.person_id) AS actor_count
+FROM 
+    aka_title t
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+LEFT JOIN 
+    company_name c ON c.id = mc.company_id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = t.id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = t.id
+WHERE 
+    t.production_year IS NOT NULL
+    AND (c.country_code IS NULL OR c.country_code = 'USA')
+GROUP BY 
+    t.id, t.title, c.company_name
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY 
+    actor_count DESC;

@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        CONCAT(u.DisplayName, ' (', u.Reputation, ' pts)') AS OwnerDetails,
+        COUNT(a.Id) AS AnswerCount,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id
+    LEFT JOIN 
+        STRING_TO_ARRAY(substring(p.Tags, 2, length(p.Tags)-2), '>') AS tag_names ON tag_names IS NOT NULL
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_names
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation
+),
+TopRankedPosts AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (ORDER BY ViewCount DESC) AS GlobalRank
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank = 1
+)
+SELECT 
+    TRP.PostId,
+    TRP.Title,
+    TRP.CreationDate,
+    TRP.ViewCount,
+    TRP.AnswerCount,
+    TRP.OwnerDetails,
+    TRP.Tags,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = TRP.PostId AND v.VoteTypeId = 2) AS TotalUpVotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = TRP.PostId AND v.VoteTypeId = 3) AS TotalDownVotes,
+    TRP.GlobalRank
+FROM 
+    TopRankedPosts TRP
+WHERE 
+    TRP.GlobalRank <= 10 
+ORDER BY 
+    TRP.ViewCount DESC, 
+    TRP.CreationDate DESC;

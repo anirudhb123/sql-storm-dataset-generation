@@ -1,0 +1,65 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS ClosedPosts,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (12, 13) THEN 1 ELSE 0 END) AS DeletedPosts,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 24 THEN 1 ELSE 0 END) AS SuggestedEdits,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounties
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9)
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+RankedUsers AS (
+    SELECT 
+        UA.*,
+        ROW_NUMBER() OVER (PARTITION BY UA.Reputation ORDER BY UA.PostCount DESC, UA.CommentCount DESC) AS ReputationRank,
+        RANK() OVER (ORDER BY UA.Reputation DESC) AS OverallRank
+    FROM 
+        UserActivity UA
+)
+SELECT 
+    U.DisplayName,
+    U.UserId,
+    CASE 
+        WHEN R.OverallRank <= 10 THEN 'Top User'
+        WHEN R.ReputationRank = 1 THEN 'Top in Reputation'
+        ELSE 'Regular User' 
+    END AS UserType,
+    U.Reputation,
+    U.PostCount,
+    U.CommentCount,
+    CTE.ClosedPostCount,
+    CTE.DeletedPostCount,
+    CTE.SuggestedEditsCount,
+    U.TotalBounties,
+    COALESCE(NULLIF(U.Views, 0), 'No Views') AS ViewStats
+FROM 
+    RankedUsers U
+LEFT JOIN (
+    SELECT 
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedPostCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 12 THEN 1 ELSE 0 END) AS DeletedPostCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 24 THEN 1 ELSE 0 END) AS SuggestedEditsCount
+    FROM 
+        PostHistory PH
+) CTE ON TRUE
+WHERE 
+    U.Reputation > 1000
+    AND U.PostCount > 5
+ORDER BY 
+    U.Reputation DESC, 
+    U.PostCount DESC;

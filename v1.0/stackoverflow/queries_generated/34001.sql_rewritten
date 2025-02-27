@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpVoteCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+
+SubQuery AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.PostRank,
+        rp.CommentCount,
+        CASE 
+            WHEN rp.CommentCount = 0 THEN 'No Comments'
+            WHEN rp.CommentCount < 5 THEN 'Few Comments'
+            ELSE 'Many Comments' 
+        END AS CommentCategory
+    FROM RankedPosts rp
+    WHERE rp.PostRank <= 10
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN 'Close Action'
+            WHEN ph.PostHistoryTypeId IN (12, 13) THEN 'Delete Action'
+            ELSE 'Other Action' 
+        END AS ActionType
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+)
+
+SELECT 
+    sq.PostId,
+    sq.Title,
+    sq.OwnerDisplayName,
+    sq.CreationDate,
+    sq.CommentCategory,
+    COALESCE(SUM(CASE WHEN p.ActionType = 'Close Action' THEN 1 ELSE 0 END), 0) AS CloseActions,
+    COALESCE(SUM(CASE WHEN p.ActionType = 'Delete Action' THEN 1 ELSE 0 END), 0) AS DeleteActions
+FROM SubQuery sq
+LEFT JOIN PostHistoryDetails p ON sq.PostId = p.PostId
+GROUP BY 
+    sq.PostId, sq.Title, sq.OwnerDisplayName, sq.CreationDate, sq.CommentCategory
+ORDER BY 
+    sq.CreationDate DESC
+LIMIT 50;

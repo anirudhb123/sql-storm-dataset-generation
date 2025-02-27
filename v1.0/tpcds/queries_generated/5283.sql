@@ -1,0 +1,62 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        customer_id,
+        total_net_profit,
+        order_count
+    FROM 
+        ranked_sales
+    WHERE 
+        profit_rank <= 10
+),
+return_stats AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS total_return_amount,
+        COUNT(DISTINCT wr_order_number) AS total_returns
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+customer_metrics AS (
+    SELECT 
+        tc.customer_id,
+        tc.total_net_profit,
+        tc.order_count,
+        COALESCE(rs.total_return_amount, 0) AS total_return_amount,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        (tc.total_net_profit - COALESCE(rs.total_return_amount, 0)) AS net_profit_after_returns
+    FROM 
+        top_customers tc
+    LEFT JOIN 
+        return_stats rs ON tc.customer_id = rs.wr_returning_customer_sk
+)
+SELECT 
+    cm.customer_id,
+    cm.total_net_profit,
+    cm.order_count,
+    cm.total_return_amount,
+    cm.total_returns,
+    cm.net_profit_after_returns
+FROM 
+    customer_metrics cm
+ORDER BY 
+    cm.net_profit_after_returns DESC;

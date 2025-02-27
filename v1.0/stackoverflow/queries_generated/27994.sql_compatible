@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title, 
+        p.Body, 
+        p.ViewCount, 
+        p.Score, 
+        ARRAY_AGG(pt.Name ORDER BY pt.Name) AS PostTypeNames, 
+        ARRAY_AGG(t.TagName ORDER BY t.TagName) AS Tags, 
+        COALESCE(COUNT(c.Id), 0) AS CommentCount, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::text[]) 
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.ViewCount, p.Score, p.OwnerUserId
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Body, 
+        ViewCount, 
+        Score, 
+        PostTypeNames, 
+        Tags, 
+        CommentCount 
+    FROM 
+        RankedPosts 
+    WHERE 
+        UserPostRank <= 5 
+),
+PopularTags AS (
+    SELECT 
+        t.TagName, 
+        COUNT(p.Id) AS PostCount 
+    FROM 
+        Tags t 
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::text[]) 
+    GROUP BY 
+        t.TagName 
+    HAVING 
+        COUNT(p.Id) > 10 
+) 
+SELECT 
+    tp.Title, 
+    tp.ViewCount, 
+    tp.Score, 
+    tp.CommentCount, 
+    tp.Tags, 
+    pt.Name AS PostTypeName, 
+    ARRAY_AGG(ptt.TagName) AS PopularTags 
+FROM 
+    TopPosts tp 
+JOIN 
+    PostTypes pt ON tp.PostTypeNames[1] = pt.Name 
+LEFT JOIN 
+    PopularTags ptt ON ptt.TagName = ANY(tp.Tags) 
+GROUP BY 
+    tp.Title, tp.ViewCount, tp.Score, tp.CommentCount, tp.Tags, pt.Name 
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

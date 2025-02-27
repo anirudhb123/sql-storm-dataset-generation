@@ -1,0 +1,76 @@
+WITH RecursiveUserPostCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(P.Id) AS PostCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    WHERE U.Reputation > 0
+    GROUP BY U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM RecursiveUserPostCounts
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostTypeCounts AS (
+    SELECT 
+        P.PostTypeId,
+        COUNT(P.Id) AS TotalPosts
+    FROM Posts P
+    GROUP BY P.PostTypeId
+),
+ClosedPostReasons AS (
+    SELECT 
+        PH.PostId,
+        PH.Comment,
+        PH.CreationDate,
+        PH.UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS CommentRank
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10 
+),
+CommentsWithScore AS (
+    SELECT 
+        C.Id AS CommentId,
+        C.Score,
+        C.PostId,
+        C.Text,
+        ROW_NUMBER() OVER (PARTITION BY C.PostId ORDER BY C.Score DESC) AS ScoreRank
+    FROM Comments C
+),
+UserPostingStats AS (
+    SELECT 
+        U.DisplayName,
+        UA.PostCount,
+        UB.BadgeCount,
+        COALESCE(SUM(CASE WHEN C.ScoreRank = 1 THEN 1 ELSE 0 END), 0) AS HighestScoreComments,
+        COALESCE(SUM(CASE WHEN CB.CommentRank = 1 THEN 1 ELSE 0 END), 0) AS ClosedPosts
+    FROM Users U
+    LEFT JOIN TopUsers UA ON U.Id = UA.UserId
+    LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+    LEFT JOIN CommentsWithScore C ON U.Id = C.UserId
+    LEFT JOIN ClosedPostReasons CB ON U.Id = CB.UserId
+    GROUP BY U.DisplayName, UA.PostCount, UB.BadgeCount
+)
+SELECT 
+    UPS.DisplayName,
+    UPS.PostCount,
+    UPS.BadgeCount,
+    UPS.HighestScoreComments,
+    UPS.ClosedPosts,
+    PTC.PostTypeId,
+    PTC.TotalPosts
+FROM UserPostingStats UPS
+JOIN PostTypeCounts PTC ON UPS.PostCount > 0
+WHERE UPS.PostCount > 5
+ORDER BY UPS.PostCount DESC, UPS.BadgeCount DESC;

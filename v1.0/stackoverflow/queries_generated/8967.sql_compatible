@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 ELSE 0 END), 0) AS NetVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostEngagement AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.Tags,
+        rp.NetVotes,
+        rp.CommentCount,
+        ur.Reputation AS UserReputation,
+        ur.BadgeCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON u.Id = rp.OwnerUserId
+    JOIN 
+        UserReputation ur ON u.Id = ur.UserId
+)
+SELECT 
+    pe.PostId,
+    pe.Title,
+    pe.CreationDate,
+    pe.Score,
+    pe.ViewCount,
+    pe.Tags,
+    pe.NetVotes,
+    pe.CommentCount,
+    pe.UserReputation,
+    pe.BadgeCount,
+    RANK() OVER (ORDER BY pe.NetVotes DESC, pe.Score DESC) AS EngagementRank
+FROM 
+    PostEngagement pe
+WHERE 
+    pe.ViewCount > 100
+ORDER BY 
+    EngagementRank,
+    pe.CreationDate DESC
+FETCH FIRST 50 ROWS ONLY;

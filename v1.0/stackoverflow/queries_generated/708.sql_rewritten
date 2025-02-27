@@ -1,0 +1,55 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        COALESCE(AVG(V.Score), 0) AS AverageScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON V.PostId = P.Id AND V.VoteTypeId = 2
+    GROUP BY U.Id, U.DisplayName
+), UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges B
+    GROUP BY B.UserId
+), UserStats AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.PostCount,
+        UA.QuestionCount,
+        UA.AnswerCount,
+        UA.CommentCount,
+        UA.AverageScore,
+        COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+        COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+        COALESCE(UB.BronzeBadges, 0) AS BronzeBadges
+    FROM UserActivity UA
+    LEFT JOIN UserBadges UB ON UA.UserId = UB.UserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    CommentCount,
+    AverageScore,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges
+FROM UserStats
+WHERE 
+    PostCount > 0
+ORDER BY 
+    AverageScore DESC,
+    PostCount DESC
+LIMIT 10;

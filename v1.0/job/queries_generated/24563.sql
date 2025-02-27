@@ -1,0 +1,65 @@
+WITH movie_data AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(k.keyword, 'Unknown') AS keyword,
+        COUNT(ci.person_id) AS cast_count,
+        AVG(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE NULL END) OVER (PARTITION BY t.id) AS avg_roles
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY 
+        t.id, k.keyword
+), company_data AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name) AS companies,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+), ranked_movies AS (
+    SELECT 
+        md.*,
+        cd.companies,
+        cd.company_count,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.cast_count DESC, cd.company_count DESC) AS rank
+    FROM 
+        movie_data md
+    JOIN 
+        company_data cd ON md.movie_id = cd.movie_id
+)
+SELECT 
+    r.title,
+    r.production_year,
+    r.cast_count,
+    r.companies,
+    r.company_count,
+    CASE 
+        WHEN r.rank = 1 THEN 'Top'
+        WHEN r.rank <= 3 THEN 'Top 3'
+        ELSE 'Other'
+    END AS rank_category
+FROM 
+    ranked_movies r
+WHERE 
+    r.cast_count >= 5
+    AND (r.production_year IS NOT NULL OR EXISTS (
+        SELECT 1
+        FROM title ti 
+        WHERE ti.production_year = r.production_year AND ti.kind_id IS NULL
+        LIMIT 1
+    ))
+ORDER BY 
+    r.production_year DESC, r.cast_count DESC;

@@ -1,0 +1,60 @@
+
+WITH RecursiveTopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrderCounts AS (
+    SELECT 
+        o.o_custkey, 
+        COUNT(o.o_orderkey) AS order_count
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_mktsegment
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer) 
+      AND c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_comment LIKE '%preferred%')
+),
+SupplierCustomerJoin AS (
+    SELECT 
+        fs.s_suppkey,
+        fs.s_name,
+        fc.c_custkey,
+        fc.c_name
+    FROM RecursiveTopSuppliers fs
+    LEFT JOIN FilteredCustomers fc ON fs.s_nationkey = fc.c_nationkey
+    WHERE fs.rank <= 5 
+),
+FinalReport AS (
+    SELECT 
+        sc.s_suppkey,
+        sc.s_name,
+        COALESCE(cc.order_count, 0) AS total_orders,
+        COALESCE(sc.c_name, 'No Customer') AS customer_name
+    FROM SupplierCustomerJoin sc
+    LEFT JOIN CustomerOrderCounts cc ON sc.c_custkey = cc.o_custkey
+)
+SELECT 
+    fr.s_suppkey,
+    fr.s_name,
+    fr.total_orders,
+    fr.customer_name,
+    CASE 
+        WHEN fr.total_orders > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS supplier_status
+FROM FinalReport fr
+WHERE fr.customer_name IS NULL OR fr.total_orders > 3
+ORDER BY fr.total_orders DESC, fr.s_name ASC
+FETCH FIRST 50 ROWS ONLY;

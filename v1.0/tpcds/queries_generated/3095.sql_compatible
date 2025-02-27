@@ -1,0 +1,65 @@
+
+WITH ItemSales AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_item_desc,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY i.i_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2458849 AND 2459180 
+    GROUP BY 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_item_desc
+),
+CustomerReturns AS (
+    SELECT 
+        sr.sr_item_sk,
+        SUM(sr.sr_return_quantity) AS total_returned_quantity,
+        SUM(sr.sr_return_amt_inc_tax) AS total_returned_amount
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_item_sk
+),
+TotalSales AS (
+    SELECT 
+        i.i_item_sk,
+        COALESCE(is.total_quantity_sold, 0) AS total_quantity_sold,
+        COALESCE(cr.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(is.total_net_profit, 0) AS total_net_profit,
+        COALESCE(cr.total_returned_amount, 0) AS total_returned_amount
+    FROM 
+        item i
+    LEFT JOIN 
+        ItemSales is ON i.i_item_sk = is.i_item_sk
+    LEFT JOIN 
+        CustomerReturns cr ON i.i_item_sk = cr.sr_item_sk
+)
+SELECT 
+    t.i_item_sk,
+    t.total_quantity_sold,
+    t.total_returned_quantity,
+    t.total_net_profit,
+    t.total_returned_amount,
+    (t.total_net_profit - t.total_returned_amount) AS net_profit_after_returns,
+    ROUND(NULLIF(t.total_quantity_sold, 0) - NULLIF(t.total_returned_quantity, 0), 0) AS net_quantity_sold,
+    CASE 
+        WHEN t.total_quantity_sold = 0 THEN 'No Sales'
+        WHEN ROUND(NULLIF(t.total_quantity_sold, 0) - NULLIF(t.total_returned_quantity, 0), 0) < 0 THEN 'Excess Returns'
+        ELSE 'Normal'
+    END AS sales_status
+FROM 
+    TotalSales t
+WHERE 
+    t.total_net_profit > 0
+ORDER BY 
+    t.total_net_profit DESC
+FETCH FIRST 10 ROWS ONLY;

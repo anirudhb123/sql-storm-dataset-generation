@@ -1,0 +1,55 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER(PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name
+    FROM RankedOrders ro
+    WHERE ro.rn <= 5
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_comment
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount,
+        SUM(l.l_quantity) AS total_quantity
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.o_totalprice,
+    to.c_name,
+    ld.total_price_after_discount,
+    ld.total_quantity,
+    sd.s_name,
+    sd.s_acctbal,
+    sd.s_comment
+FROM TopOrders to
+JOIN LineItemDetails ld ON to.o_orderkey = ld.l_orderkey
+JOIN SupplierDetails sd ON sd.ps_partkey IN (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+);

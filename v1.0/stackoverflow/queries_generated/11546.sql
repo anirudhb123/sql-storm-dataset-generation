@@ -1,0 +1,67 @@
+-- Performance benchmarking SQL Query
+WITH PostSummary AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation AS OwnerReputation
+    FROM
+        Posts P
+    JOIN
+        Users U ON P.OwnerUserId = U.Id
+    WHERE
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TagSummary AS (
+    SELECT
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM
+        Tags T
+    JOIN
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY
+        T.TagName
+),
+BadgeSummary AS (
+    SELECT
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM
+        Users U
+    LEFT JOIN
+        Badges B ON U.Id = B.UserId
+    GROUP BY
+        U.Id
+)
+SELECT
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.LastActivityDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.FavoriteCount,
+    PS.OwnerDisplayName,
+    PS.OwnerReputation,
+    TS.TagName,
+    TS.PostCount,
+    BS.BadgeCount
+FROM
+    PostSummary PS
+LEFT JOIN
+    TagSummary TS ON PS.Tags LIKE '%' || TS.TagName || '%'
+LEFT JOIN
+    BadgeSummary BS ON PS.OwnerUserId = BS.UserId
+ORDER BY
+    PS.LastActivityDate DESC;
+

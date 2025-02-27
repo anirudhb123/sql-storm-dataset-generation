@@ -1,0 +1,66 @@
+
+WITH UserTagCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        CONCAT(u.DisplayName, ' (', COUNT(DISTINCT t.TagName), ' tags)') AS UserTags,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+            p.Id AS PostId, 
+            unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS TagName
+         FROM 
+            Posts p 
+         WHERE 
+            p.PostTypeId = 1) t ON p.Id = t.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+), TagUsage AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS TagPostCount,
+        SUM(p.ViewCount) AS TagTotalViews
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))
+    GROUP BY 
+        t.TagName
+), TopUsers AS (
+    SELECT 
+        UserId,
+        UserTags,
+        PostCount,
+        TotalViews,
+        RANK() OVER (ORDER BY TotalViews DESC) AS ViewRank
+    FROM 
+        UserTagCounts
+), TopTags AS (
+    SELECT 
+        TagName,
+        TagPostCount,
+        TagTotalViews,
+        RANK() OVER (ORDER BY TagTotalViews DESC) AS TagRank
+    FROM 
+        TagUsage
+)
+SELECT 
+    tu.UserTags, 
+    tu.PostCount,
+    tu.TotalViews AS UserTotalViews,
+    tt.TagName,
+    tt.TagPostCount,
+    tt.TagTotalViews AS TagTotalViews
+FROM 
+    TopUsers tu
+JOIN 
+    TopTags tt ON tu.ViewRank <= 5 AND tt.TagRank <= 5
+WHERE 
+    tu.PostCount > 0
+ORDER BY 
+    tu.TotalViews DESC, 
+    tt.TagTotalViews DESC;

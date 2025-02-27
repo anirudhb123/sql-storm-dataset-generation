@@ -1,0 +1,69 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        CONCAT(u.DisplayName, ' (Reputation: ', u.Reputation, ')') AS Owner,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        (SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId = p.Id) AS EditCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><') AS tag_array
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_array
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation, p.Title, p.Body, p.CreationDate, p.ViewCount
+),
+RankedPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.Body,
+        pd.CreationDate,
+        pd.ViewCount,
+        pd.Owner,
+        pd.Tags,
+        pd.EditCount,
+        RANK() OVER (ORDER BY pd.ViewCount DESC) AS RankByViews
+    FROM 
+        PostDetails pd
+    WHERE 
+        pd.ViewCount > 100 -- Considering only popular questions
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.CreationDate AS CloseDate,
+        p.Title AS ClosedPostTitle,
+        STRING_AGG(CASE WHEN ph.PostHistoryTypeId = 10 THEN 'Closed' END, ', ') AS ClosureReasons
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed and Reopened
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Owner,
+    rp.EditCount,
+    cp.CloseDate,
+    cp.ClosedPostTitle,
+    cp.ClosureReasons
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+ORDER BY 
+    rp.RankByViews;

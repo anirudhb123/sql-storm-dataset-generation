@@ -1,0 +1,59 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Tags,
+        p.Score,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        p2.CreationDate,
+        p2.Tags,
+        p2.Score,
+        p2.OwnerUserId,
+        Level + 1 AS Level
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostCTE r ON p2.ParentId = r.PostId
+)
+SELECT 
+    u.DisplayName AS Author,
+    u.Reputation,
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Tags,
+    COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+    COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Id END) AS CloseCount,
+    COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.Id END) AS ReopenCount,
+    STRING_AGG(DISTINCT b.Name, ', ') AS BadgeNames,
+    ROW_NUMBER() OVER (PARTITION BY r.PostId ORDER BY r.Score DESC) AS PostRanking
+FROM 
+    RecursivePostCTE r
+LEFT JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON r.PostId = v.PostId
+LEFT JOIN 
+    Comments c ON r.PostId = c.PostId
+LEFT JOIN 
+    PostHistory ph ON r.PostId = ph.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+WHERE 
+    r.Score > 0
+GROUP BY 
+    u.DisplayName, u.Reputation, r.PostId, r.Title, r.CreationDate, r.Tags
+ORDER BY 
+    PostRanking, r.CreationDate DESC;

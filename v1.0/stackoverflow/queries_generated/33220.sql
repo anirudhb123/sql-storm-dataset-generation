@@ -1,0 +1,74 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)  -- Focusing on post close, reopen, and delete events
+), 
+PostVoteStatistics AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostRankings AS (
+    SELECT 
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        COALESCE(pvs.UpVotes, 0) AS UpVotes,
+        COALESCE(pvs.DownVotes, 0) AS DownVotes,
+        COALESCE(pvs.TotalVotes, 0) AS TotalVotes,
+        RANK() OVER (ORDER BY p.ViewCount DESC) AS ViewRank,
+        RANK() OVER (ORDER BY COALESCE(pvs.UpVotes, 0) DESC) AS UpVoteRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteStatistics pvs ON p.Id = pvs.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'  -- Considering posts created in the last year
+),
+ClosedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.TotalVotes,
+        rph.UserId AS ClosingUserId, 
+        rph.CreationDate AS ClosingDate
+    FROM 
+        PostRankings rp
+    JOIN 
+        RecursivePostHistory rph ON rp.Title = (SELECT Title FROM Posts WHERE Id = rph.PostId LIMIT 1)  -- join on the post title
+    WHERE 
+        rph.PostHistoryTypeId = 10  -- Only choosing closed posts
+)
+SELECT 
+    cp.Title,
+    cp.CreationDate,
+    cp.ViewCount,
+    cp.UpVotes,
+    cp.DownVotes,
+    cp.TotalVotes,
+    u.DisplayName AS CloserName,
+    cp.ClosingDate
+FROM 
+    ClosedPosts cp
+JOIN 
+    Users u ON cp.ClosingUserId = u.Id
+ORDER BY 
+    cp.TotalVotes DESC, cp.ViewCount DESC;

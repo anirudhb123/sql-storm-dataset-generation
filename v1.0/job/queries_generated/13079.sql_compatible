@@ -1,0 +1,34 @@
+
+SELECT 
+    t.title AS movie_title,
+    c.name AS person_name,
+    r.role AS role_type,
+    ak.name AS aka_name,
+    mi.info AS movie_info
+FROM 
+    title t
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id
+JOIN 
+    person_info pi ON pi.person_id = ci.person_id
+JOIN 
+    name n ON n.id = pi.person_id
+JOIN 
+    role_type r ON r.id = ci.role_id
+JOIN 
+    aka_name ak ON ak.person_id = n.id
+JOIN 
+    movie_info mi ON mi.movie_id = t.id
+WHERE 
+    t.production_year >= 2000
+GROUP BY 
+    t.title,
+    n.name,
+    r.role,
+    ak.name,
+    mi.info
+ORDER BY 
+    t.production_year DESC, 
+    t.title;

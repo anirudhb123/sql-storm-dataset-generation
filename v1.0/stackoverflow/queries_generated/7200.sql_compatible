@@ -1,0 +1,58 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(AVG(vote.Score), 0) AS AverageVoteScore,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes vote ON p.Id = vote.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        Score,
+        OwnerDisplayName,
+        AverageVoteScore,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank <= 10
+)
+SELECT 
+    fp.Title,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.OwnerDisplayName,
+    fp.AverageVoteScore,
+    fp.CommentCount,
+    CASE 
+        WHEN fp.Score > 0 THEN 'Positive'
+        WHEN fp.Score < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS Sentiment
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.Score DESC, 
+    fp.ViewCount DESC;

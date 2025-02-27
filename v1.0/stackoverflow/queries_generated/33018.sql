@@ -1,0 +1,90 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.ParentId,
+        1 AS Level
+    FROM
+        Posts P
+    WHERE
+        P.PostTypeId = 1  -- Start with Questions
+    UNION ALL
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.ParentId,
+        Level + 1
+    FROM
+        Posts P
+    INNER JOIN RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+PostDetails AS (
+    SELECT
+        RP.PostId,
+        RP.Title,
+        U.DisplayName AS OwnerDisplayName,
+        RP.Level,
+        COUNT(A.Id) AS AnswerCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM
+        RecursivePostHierarchy RP
+    LEFT JOIN Users U ON RP.OwnerUserId = U.Id
+    LEFT JOIN Posts A ON A.ParentId = RP.PostId
+    LEFT JOIN Votes V ON V.PostId = RP.PostId
+    LEFT JOIN Comments C ON C.PostId = RP.PostId
+    LEFT JOIN PostHistory PH ON PH.PostId = RP.PostId
+    GROUP BY
+        RP.PostId, RP.Title, U.DisplayName, RP.Level
+),
+RecentBadges AS (
+    SELECT
+        B.UserId,
+        COUNT(*) AS BadgeCount
+    FROM
+        Badges B
+    WHERE
+        B.Date >= NOW() - INTERVAL '1 YEAR'
+    GROUP BY
+        B.UserId
+),
+HighReputationUsers AS (
+    SELECT
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(RB.BadgeCount, 0) AS RecentBadgeCount
+    FROM
+        Users U
+    LEFT JOIN RecentBadges RB ON U.Id = RB.UserId
+    WHERE
+        U.Reputation > 1000
+)
+SELECT
+    PD.PostId,
+    PD.Title,
+    PD.OwnerDisplayName,
+    PD.Level,
+    PD.AnswerCount,
+    PD.UpVotes,
+    PD.DownVotes,
+    PD.CommentCount,
+    PD.LastEditDate,
+    HUR.DisplayName AS HighReputationOwner,
+    HUR.Reputation AS HighReputation,
+    HUR.RecentBadgeCount
+FROM
+    PostDetails PD
+LEFT JOIN HighReputationUsers HUR ON PD.OwnerUserId = HUR.Id
+WHERE
+    PD.AnswerCount > 5 -- Only interested in questions with more than 5 answers
+ORDER BY
+    PD.UpVotes DESC,
+    PD.LastEditDate DESC
+LIMIT 100;

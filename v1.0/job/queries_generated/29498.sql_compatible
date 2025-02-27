@@ -1,0 +1,57 @@
+
+WITH MovieDetails AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT c.name, ', ') AS companies,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors,
+        COUNT(DISTINCT m.person_id) AS actor_count,
+        AVG(CASE WHEN pi.info_type_id = 1 THEN pi.info END) AS avg_actor_income,
+        MIN(pi.info_type_id) AS min_actor_info_type,
+        MAX(pi.info_type_id) AS max_actor_info_type
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        cast_info m ON m.movie_id = t.id
+    LEFT JOIN
+        aka_name a ON a.person_id = m.person_id
+    LEFT JOIN
+        movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN
+        company_name c ON c.id = mc.company_id
+    LEFT JOIN
+        person_info pi ON pi.person_id = m.person_id
+    GROUP BY
+        t.id, t.title, t.production_year, t.kind_id
+),
+RankedMovies AS (
+    SELECT
+        md.*,
+        RANK() OVER (ORDER BY md.avg_actor_income DESC) AS income_rank
+    FROM
+        MovieDetails md
+)
+SELECT
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.kind_id,
+    rm.keywords,
+    rm.companies,
+    rm.actors,
+    rm.actor_count,
+    rm.avg_actor_income,
+    rm.income_rank
+FROM
+    RankedMovies rm
+WHERE
+    rm.actor_count > 5
+ORDER BY
+    rm.income_rank;

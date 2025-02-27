@@ -1,0 +1,67 @@
+WITH MovieTitles AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        kt.kind AS kind,
+        k.keyword AS genre
+    FROM 
+        aka_title a
+    JOIN 
+        kind_type kt ON a.kind_id = kt.id
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.production_year >= 2000
+),
+ActorDetails AS (
+    SELECT 
+        c.movie_id,
+        ak.name AS actor_name,
+        r.role AS actor_role
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        ak.name IS NOT NULL 
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    mt.title,
+    mt.production_year,
+    mt.kind,
+    ad.actor_name,
+    ad.actor_role,
+    cd.company_name,
+    cd.company_type,
+    CASE 
+        WHEN mt.production_year BETWEEN 2000 AND 2010 THEN '2000s'
+        WHEN mt.production_year BETWEEN 2011 AND 2020 THEN '2010s'
+        ELSE 'Other'
+    END AS decade,
+    COUNT(DISTINCT ad.actor_name) OVER (PARTITION BY mt.movie_id) AS actor_count
+FROM 
+    MovieTitles mt
+LEFT JOIN 
+    ActorDetails ad ON mt.movie_id = ad.movie_id
+LEFT JOIN 
+    CompanyDetails cd ON mt.movie_id = cd.movie_id
+ORDER BY 
+    mt.production_year DESC, 
+    mt.title;

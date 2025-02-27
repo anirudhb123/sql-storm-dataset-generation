@@ -1,0 +1,73 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        b.Name AS BadgeName,
+        b.Class,
+        ROW_NUMBER() OVER (PARTITION BY b.UserId ORDER BY b.Date DESC) AS rn
+    FROM 
+        Badges b
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.Reputation,
+        ua.PostCount,
+        ua.AnswerCount,
+        ua.TotalBounty,
+        rb.BadgeName,
+        rb.Class
+    FROM 
+        UserActivity ua
+    LEFT JOIN 
+        RecentBadges rb ON ua.UserId = rb.UserId AND rb.rn = 1  
+    WHERE 
+        ua.Reputation > (SELECT AVG(Reputation) FROM Users)
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.Reputation,
+    tu.PostCount,
+    tu.AnswerCount,
+    COALESCE(tu.BadgeName, 'No Badge') AS LatestBadge,
+    tu.Class,
+    COUNT(DISTINCT p.Id) AS TotalPostsEdited,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    AVG(COALESCE(p.ViewCount, 0)) AS AverageViews,
+    SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS TotalClosures,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    Posts p ON tu.UserId = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    STRING_TO_ARRAY(p.Tags, ',') AS tags_array ON TRUE
+LEFT JOIN 
+    Tags t ON t.Id = tags_array::int
+GROUP BY 
+    tu.UserId, tu.DisplayName, tu.Reputation, tu.PostCount, tu.AnswerCount, tu.BadgeName, tu.Class
+ORDER BY 
+    tu.Reputation DESC, tu.PostCount DESC
+LIMIT 10;

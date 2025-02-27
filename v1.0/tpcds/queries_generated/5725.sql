@@ -1,0 +1,51 @@
+
+WITH RecentSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk > (SELECT d_date_sk FROM date_dim WHERE d_date = CURRENT_DATE - INTERVAL '30 days')
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        rs.total_quantity,
+        rs.total_sales,
+        rs.total_orders,
+        ROW_NUMBER() OVER (ORDER BY rs.total_sales DESC) AS rank
+    FROM 
+        RecentSales rs
+    JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+)
+SELECT 
+    ti.i_item_id,
+    ti.total_quantity,
+    ti.total_sales,
+    ti.total_orders,
+    ci.c_first_name,
+    ci.c_last_name,
+    ca.ca_city,
+    ca.ca_state
+FROM 
+    TopItems ti
+JOIN 
+    customer c ON c.c_customer_sk IN (
+        SELECT DISTINCT ws_bill_customer_sk 
+        FROM web_sales 
+        WHERE ws_item_sk = ti.ws_item_sk
+    )
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+WHERE 
+    ti.rank <= 10
+ORDER BY 
+    ti.total_sales DESC;

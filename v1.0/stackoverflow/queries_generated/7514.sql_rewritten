@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY pv.CreationDate DESC) AS PostRevisionRank
+    FROM 
+        Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id 
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory pv ON p.Id = pv.PostId
+    WHERE 
+        p.CreationDate >= '2020-01-01' 
+        AND p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.AnswerCount, u.DisplayName
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRevisionRank = 1
+),
+PostMetrics AS (
+    SELECT 
+        trp.PostId,
+        trp.Title,
+        trp.ViewCount,
+        trp.AnswerCount,
+        trp.OwnerDisplayName,
+        trp.VoteCount,
+        COALESCE(SUM(b.Class = 1), 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2), 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3), 0) AS BronzeBadges
+    FROM 
+        TopRankedPosts trp
+    LEFT JOIN Badges b ON trp.OwnerDisplayName = b.UserId
+    GROUP BY 
+        trp.PostId, trp.Title, trp.ViewCount, trp.AnswerCount, trp.OwnerDisplayName, trp.VoteCount
+)
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.ViewCount,
+    pm.AnswerCount,
+    pm.OwnerDisplayName,
+    pm.VoteCount,
+    pm.GoldBadges,
+    pm.SilverBadges,
+    pm.BronzeBadges
+FROM 
+    PostMetrics pm
+ORDER BY 
+    pm.ViewCount DESC, pm.VoteCount DESC
+LIMIT 20;

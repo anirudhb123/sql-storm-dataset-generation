@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(MAX(co.CreationDate), p.CreationDate) AS LastActiveDate,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY MAX(ph.CreationDate) DESC) AS HistoryRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.Body, p.CreationDate, p.ViewCount
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - rp.LastActiveDate)) AS InactivityDuration
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.HistoryRank = 1 AND
+        rp.InactivityDuration < 604800 
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.OwnerDisplayName,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.AnswerCount,
+    fp.CommentCount,
+    fp.UpVotes,
+    fp.DownVotes,
+    CASE 
+        WHEN fp.UpVotes - fp.DownVotes > 0 THEN 'Positive' 
+        WHEN fp.UpVotes - fp.DownVotes < 0 THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS Sentiment
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.ViewCount DESC, fp.CreationDate DESC
+LIMIT 10;

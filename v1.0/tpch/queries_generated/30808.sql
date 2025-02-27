@@ -1,0 +1,45 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           0 AS level, 
+           CAST(c.c_name AS VARCHAR(1000)) AS path
+    FROM customer c
+    WHERE c.c_acctbal > 5000
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           ch.level + 1, 
+           ch.path || ' -> ' || c.c_name
+    FROM customer c
+    JOIN CustomerHierarchy ch ON ch.c_custkey = c.c_nationkey
+    WHERE ch.level < 3
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+FilteredSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, 
+           (ps.ps_supplycost - AVG(ps2.ps_supplycost)) AS cost_diff
+    FROM partsupp ps
+    JOIN partsupp ps2 ON ps.ps_partkey = ps2.ps_partkey AND ps.ps_suppkey <> ps2.ps_suppkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty
+    HAVING (ps.ps_availqty > 10 OR cost_diff > 0)
+)
+SELECT p.p_name, COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+       COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+       SUM(os.total_sales) AS total_order_sales,
+       ROUND(AVG(s.s_acctbal), 2) AS avg_supplier_balance
+FROM part p
+LEFT JOIN FilteredSuppliers fs ON p.p_partkey = fs.ps_partkey
+LEFT JOIN supplier s ON fs.ps_suppkey = s.s_suppkey
+LEFT JOIN OrderSummary os ON os.o_custkey = s.s_nationkey
+LEFT JOIN customer c ON c.c_custkey = os.o_custkey
+WHERE p.p_retailprice > 100
+GROUP BY p.p_name, customer_name, supplier_name
+HAVING SUM(os.total_sales) IS NOT NULL OR supplier_name IS NOT NULL
+ORDER BY total_order_sales DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

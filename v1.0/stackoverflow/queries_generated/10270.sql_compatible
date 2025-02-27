@@ -1,0 +1,42 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        U.Reputation AS UserReputation,
+        U.DisplayName AS UserDisplayName,
+        T.TagName
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    JOIN 
+        (SELECT 
+            PostId, 
+            STRING_AGG(T.TagName, ', ') AS TagName
+         FROM 
+            Posts P
+         JOIN 
+            Tags T ON T.Id = ANY(string_to_array(P.Tags, ',')::text[])
+         GROUP BY 
+            PostId
+        ) AS T ON p.Id = T.PostId
+    WHERE 
+        p.CreationDate > '2021-01-01'
+)
+
+SELECT 
+    COUNT(*) AS TotalPosts,
+    AVG(Score) AS AvgScore,
+    SUM(ViewCount) AS TotalViews,
+    SUM(AnswerCount) AS TotalAnswers,
+    AVG(UserReputation) AS AvgUserReputation,
+    STRING_AGG(DISTINCT TagName, ', ') AS TagsUsed
+FROM 
+    PostStats
+GROUP BY 
+    UserReputation;

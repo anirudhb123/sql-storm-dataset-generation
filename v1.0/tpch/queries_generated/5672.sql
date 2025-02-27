@@ -1,0 +1,84 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopOrders AS (
+    SELECT 
+        o_orderkey,
+        o_orderdate,
+        revenue
+    FROM 
+        RankedOrders
+    WHERE 
+        order_rank <= 10
+),
+SupplierStats AS (
+    SELECT 
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name
+),
+FinalReport AS (
+    SELECT 
+        t.o_orderkey,
+        t.o_orderdate,
+        s.s_name AS supplier_name,
+        t.revenue,
+        ss.total_supply_cost
+    FROM 
+        TopOrders t
+    LEFT JOIN 
+        SupplierStats ss ON ss.total_supply_cost = (
+            SELECT MAX(total_supply_cost) 
+            FROM SupplierStats
+        ) 
+    LEFT JOIN 
+        supplier s ON s.s_suppkey = (
+            SELECT ps.ps_suppkey 
+            FROM partsupp ps 
+            JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+            WHERE l.l_orderkey = t.o_orderkey 
+            ORDER BY ps.ps_supplycost DESC LIMIT 1
+        )
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    s.s_name AS top_supplier
+FROM 
+    TopOrders o
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    supplier s ON s.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT l.l_partkey 
+            FROM lineitem l 
+            WHERE l.l_orderkey = o.o_orderkey
+        ) 
+        ORDER BY ps.ps_supplycost DESC 
+        LIMIT 1
+    )
+GROUP BY 
+    o.o_orderkey, o.o_orderdate, s.s_name
+ORDER BY 
+    total_revenue DESC;

@@ -1,0 +1,46 @@
+
+WITH RECURSIVE CustomerOrderHierarchy AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate) AS order_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IS NOT NULL
+    UNION ALL
+    SELECT coh.c_custkey, coh.c_name, o.o_orderkey, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY coh.c_custkey ORDER BY o.o_orderdate) AS order_rank
+    FROM CustomerOrderHierarchy coh
+    JOIN orders o ON coh.c_custkey = o.o_custkey
+    WHERE coh.order_rank < 5
+),
+OrderLineDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(l.l_linenumber) AS item_count,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS returns
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate > DATE '1996-01-01' OR l.l_returnflag IS NULL
+    GROUP BY o.o_orderkey
+),
+HighValueProducts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.ps_availqty,
+           AVG(ps.ps_supplycost) OVER (PARTITION BY p.p_partkey) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p_retailprice) FROM part)
+    AND ps.ps_availqty IS NOT NULL
+)
+
+SELECT coh.c_name, coh.o_orderkey, ol.total_sales, ol.item_count, p.p_name, p.avg_supply_cost,
+       CASE
+           WHEN ol.returns > 0 THEN 'Contains Returns'
+           ELSE 'No Returns'
+       END AS return_status
+FROM CustomerOrderHierarchy coh
+LEFT JOIN OrderLineDetails ol ON coh.o_orderkey = ol.o_orderkey
+LEFT JOIN HighValueProducts p ON ol.o_orderkey IN (
+    SELECT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_partkey = p.p_partkey
+)
+WHERE coh.order_rank <= 5 OR p.avg_supply_cost IS NULL
+ORDER BY coh.c_name, ol.total_sales DESC, coh.o_orderkey;

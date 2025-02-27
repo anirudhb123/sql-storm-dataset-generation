@@ -1,0 +1,60 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT A.Id) AS TotalAnswers,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Posts A ON A.ParentId = P.Id 
+    LEFT JOIN Votes V ON V.UserId = U.Id
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        P.LastActivityDate,
+        P.Tags
+    FROM Posts P
+),
+CommentStatistics AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS TotalComments
+    FROM Comments C
+    GROUP BY C.PostId
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.TotalPosts,
+    US.TotalAnswers,
+    US.TotalUpVotes,
+    US.TotalDownVotes,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.ViewCount,
+    PS.Score,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.FavoriteCount,
+    PS.LastActivityDate,
+    PS.Tags,
+    COALESCE(CS.TotalComments, 0) AS TotalCommentsByPost
+FROM UserStatistics US
+JOIN PostStatistics PS ON US.TotalPosts > 0
+LEFT JOIN CommentStatistics CS ON PS.PostId = CS.PostId
+ORDER BY US.Reputation DESC, PS.ViewCount DESC;

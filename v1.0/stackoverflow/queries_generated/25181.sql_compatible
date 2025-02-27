@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= '2023-01-01' 
+),
+AggregatedData AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalQuestions,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes, 
+        COALESCE(AVG(LENGTH(p.Body)), 0) AS AvgBodyLength 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.OwnerUserId
+),
+QuestionDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerDisplayName,
+        ad.TotalQuestions,
+        ad.TotalUpvotes,
+        ad.TotalDownvotes,
+        ad.AvgBodyLength
+    FROM 
+        RankedPosts rp
+    JOIN 
+        AggregatedData ad ON rp.OwnerUserId = ad.OwnerUserId
+    WHERE 
+        rp.Rank = 1 
+)
+SELECT 
+    qd.*,
+    ARRAY_LENGTH(NULLIF(string_to_array(qd.Tags, '><'), '{}'), 1) AS TagCount,
+    CASE 
+        WHEN qd.TotalUpvotes > qd.TotalDownvotes THEN 'Positive Feedback'
+        WHEN qd.TotalDownvotes > qd.TotalUpvotes THEN 'Negative Feedback'
+        ELSE 'Neutral Feedback'
+    END AS FeedbackSummary
+FROM 
+    QuestionDetails qd
+ORDER BY 
+    qd.Score DESC, 
+    qd.CreationDate DESC;

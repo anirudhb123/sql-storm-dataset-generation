@@ -1,0 +1,80 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        c.name AS company_name,
+        RANK() OVER (PARTITION BY a.id ORDER BY a.production_year DESC) AS movie_rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        c.country_code IS NOT NULL
+),
+HighProductionMovies AS (
+    SELECT 
+        movie_title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        movie_rank = 1 AND production_year > 2000
+),
+ActorsInHighProductionMovies AS (
+    SELECT 
+        DISTINCT k.keyword,
+        p.name AS actor_name,
+        m.title AS movie_title,
+        m.production_year
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    JOIN 
+        aka_title m ON ci.movie_id = m.id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        m.id IN (SELECT a.movie_title FROM HighProductionMovies a) AND 
+        p.name IS NOT NULL
+),
+AggregatedActors AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT movie_title) AS movie_count,
+        STRING_AGG(DISTINCT keyword, ', ') AS keywords
+    FROM 
+        ActorsInHighProductionMovies
+    WHERE 
+        actor_name IS NOT NULL 
+    GROUP BY 
+        actor_name
+),
+FinalResults AS (
+    SELECT 
+        a.actor_name,
+        a.movie_count,
+        COALESCE(a.keywords, 'No Keywords') AS keywords
+    FROM 
+        AggregatedActors a
+    WHERE 
+        a.movie_count > 5
+    UNION ALL
+    SELECT 
+        NULL AS actor_name,
+        NULL AS movie_count,
+        'Total Unique Actors: ' || CAST(COUNT(DISTINCT actor_name) AS VARCHAR) 
+    FROM 
+        AggregatedActors
+)
+SELECT 
+    * 
+FROM 
+    FinalResults
+ORDER BY 
+    movie_count DESC NULLS LAST;

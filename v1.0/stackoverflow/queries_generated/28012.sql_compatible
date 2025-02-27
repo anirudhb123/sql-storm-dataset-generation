@@ -1,0 +1,93 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.LastActivityDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.Body, p.Tags, p.CreationDate, p.LastActivityDate, p.OwnerUserId
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(SPLIT(REPLACE(REPLACE(p.Tags, '<', ''), '>', ''), '>')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(*) > 5 
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersProvided,
+        SUM(CASE WHEN b.UserId = u.Id THEN 1 ELSE 0 END) AS BadgesEarned,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON (p.Id = v.PostId AND p.PostTypeId IN (1, 2))
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.Tags,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.LastActivityDate,
+    rp.CommentCount,
+    rp.AnswerCount,
+    rp.Upvotes,
+    rp.Downvotes,
+    pt.TagName,
+    us.UserId,
+    us.DisplayName AS UserDisplayName,
+    us.QuestionsAsked,
+    us.AnswersProvided,
+    us.BadgesEarned,
+    us.TotalUpvotesReceived,
+    us.TotalDownvotesReceived
+FROM 
+    RankedPosts rp
+JOIN 
+    UserStats us ON rp.OwnerUserId = us.UserId
+JOIN 
+    PopularTags pt ON pt.TagName IN (SPLIT(REPLACE(REPLACE(rp.Tags, '<', ''), '>', ''), '>'))
+WHERE 
+    rp.UserPostRank <= 5 
+ORDER BY 
+    rp.LastActivityDate DESC, rp.Upvotes DESC;

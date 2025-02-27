@@ -1,0 +1,37 @@
+WITH SupplierTotals AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+), RegionSales AS (
+    SELECT n.n_regionkey, SUM(o.o_totalprice) AS total_sales
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_regionkey
+), PartSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY l.l_partkey
+), FinalReport AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        pt.total_revenue,
+        st.total_cost,
+        rs.total_sales
+    FROM part p
+    LEFT JOIN PartSales pt ON p.p_partkey = pt.l_partkey
+    LEFT JOIN SupplierTotals st ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s))
+    LEFT JOIN RegionSales rs ON st.total_cost IS NOT NULL
+)
+SELECT 
+    p_partkey, 
+    p_name, 
+    COALESCE(total_revenue, 0) AS total_revenue, 
+    COALESCE(total_cost, 0) AS total_cost, 
+    COALESCE(total_sales, 0) AS total_sales
+FROM FinalReport
+ORDER BY total_revenue DESC, total_cost DESC, total_sales DESC
+LIMIT 10;

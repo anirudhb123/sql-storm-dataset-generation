@@ -1,0 +1,95 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        a.surname_pcode,
+        1 AS level
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        ci.movie_id IN (SELECT movie_id FROM aka_title WHERE production_year >= 2000)
+
+    UNION ALL
+
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        a.surname_pcode,
+        ah.level + 1
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        ActorHierarchy ah ON ci.movie_id IN (SELECT movie_id FROM complete_cast cc WHERE cc.subject_id = ah.person_id)
+    WHERE 
+        ah.level < 5 
+),
+
+FilteredMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT cb.kind, ', ' ORDER BY cb.kind) AS company_types
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type cb ON mc.company_type_id = cb.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY
+        t.title, t.production_year
+    HAVING 
+        COUNT(DISTINCT mc.company_id) > 1
+),
+
+GenreKeywords AS (
+    SELECT 
+        t.id AS title_id,
+        k.keyword,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, k.keyword
+)
+
+SELECT 
+    mv.title,
+    mv.production_year,
+    mv.company_count,
+    mv.company_types,
+    ak.actor_name,
+    ak.level,
+    k.keyword AS movie_keyword,
+    COALESCE(cast_info.note, 'No note available') AS cast_note,
+    COUNT(DISTINCT k.id) OVER (PARTITION BY mv.title) AS unique_keyword_count,
+    CASE 
+        WHEN mv.company_count > 5 THEN 'Large Production'
+        WHEN mv.company_count BETWEEN 3 AND 5 THEN 'Medium Production'
+        ELSE 'Small Production'
+    END AS production_size
+FROM 
+    FilteredMovies mv
+LEFT JOIN 
+    ActorHierarchy ak ON mv.title = ak.actor_name
+LEFT JOIN 
+    GenreKeywords k ON mv.title = (SELECT title FROM aka_title WHERE id IN (SELECT movie_id FROM movie_keyword WHERE keyword_id IN (SELECT id FROM keyword WHERE phonetic_code IS NOT NULL)))
+LEFT JOIN 
+    cast_info ON mv.title = (SELECT t.title FROM aka_title t JOIN cast_info ci ON t.id = ci.movie_id WHERE ci.person_id = ak.person_id) 
+WHERE 
+    NOT EXISTS (SELECT 1 FROM movie_info mi WHERE mi.movie_id = mv.title AND mi.info LIKE '%delayed%')
+ORDER BY 
+    mv.production_year DESC, 
+    unique_keyword_count DESC, 
+    production_size;

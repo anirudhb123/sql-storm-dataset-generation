@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_movie_id
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    mh.level,
+    COALESCE(aka.name, 'Unknown Actor') AS actor_name,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    AVG(mi.info_length) AS avg_info_length
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name aka ON cc.subject_id = aka.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN (
+    SELECT 
+        mi.movie_id,
+        LENGTH(mi.info) AS info_length
+    FROM 
+        movie_info mi
+    WHERE 
+        mi.note IS NULL
+) mi ON mh.movie_id = mi.movie_id
+WHERE 
+    mh.production_year IS NOT NULL
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year, mh.level, aka.name
+ORDER BY 
+    mh.level DESC, COUNT(DISTINCT mc.company_id) DESC, avg_info_length DESC
+LIMIT 100;

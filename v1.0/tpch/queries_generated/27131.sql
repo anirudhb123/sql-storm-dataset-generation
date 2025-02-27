@@ -1,0 +1,25 @@
+SELECT 
+    p.p_name, 
+    s.s_name, 
+    n.n_name, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    CONCAT('Total Revenue from ', p.p_name, ' supplied by ', s.s_name, ' from ', n.n_name, ': ', FORMAT(SUM(l.l_extendedprice * (1 - l.l_discount)), 2)) AS revenue_statement
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    p.p_name, s.s_name, n.n_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

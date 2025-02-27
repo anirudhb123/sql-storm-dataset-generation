@@ -1,0 +1,75 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER(PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) as order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'P') 
+        AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+),
+SupplierPart AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available 
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_availqty) > 0
+),
+FilteredLineItem AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_discount,
+        l.l_tax,
+        l.l_returnflag,
+        l.l_linestatus,
+        CASE 
+            WHEN l.l_shipdate < l.l_commitdate THEN 'Delayed'
+            ELSE 'On Time'
+        END AS shipping_status
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_discount BETWEEN 0.05 AND 0.2
+        AND l.l_tax IS NOT NULL
+),
+CombinedResult AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(DISTINCT l.l_orderkey) AS lineitem_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        SUM(CASE WHEN l.l_returnflag = 'Y' THEN l.l_quantity ELSE 0 END) AS returned_quantity,
+        FIRST_VALUE(s.s_name) OVER(PARTITION BY o.o_orderkey ORDER BY s.s_acctbal DESC) AS top_supplier_name
+    FROM 
+        RankedOrders o
+    LEFT OUTER JOIN FilteredLineItem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN SupplierPart sp ON l.l_partkey = sp.ps_partkey
+    LEFT JOIN supplier s ON sp.ps_suppkey = s.s_suppkey
+    WHERE 
+        o.o_totalprice IS NOT NULL
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        COUNT(DISTINCT l.l_orderkey) > 0
+)
+SELECT 
+    r.*, 
+    COALESCE((SELECT AVG(sp.total_available) FROM SupplierPart sp), 0) AS avg_supplier_avail
+FROM 
+    CombinedResult r
+WHERE 
+    EXISTS (SELECT 1 FROM orders o WHERE o.o_orderkey = r.o_orderkey AND o.o_orderstatus = 'O')
+ORDER BY 
+    r.lineitem_count DESC, 
+    r.net_revenue ASC, 
+    r.top_supplier_name;

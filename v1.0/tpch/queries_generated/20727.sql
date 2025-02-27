@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    
+    UNION ALL
+
+    SELECT s2.s_suppkey, s2.s_name, s2.s_nationkey, sh.level + 1
+    FROM supplier s2
+    JOIN SupplierHierarchy sh ON sh.s_nationkey = s2.s_nationkey
+    WHERE sh.level < 5
+),
+OrderedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_shipdate DESC) AS rn
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+    HAVING SUM(l.l_quantity) > 10
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_totalprice) AS max_order_price
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING MAX(o.o_totalprice) IS NOT NULL OR COUNT(o.o_orderkey) <= 5
+)
+SELECT 
+    p.p_name,
+    COALESCE(SUM(CASE WHEN li.l_returnflag = 'R' THEN li.l_quantity END), 0) AS return_quantity,
+    AVG(CASE WHEN c.order_count > 0 THEN c.max_order_price ELSE NULL END) AS avg_order_price,
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+    STRING_AGG(DISTINCT n.n_name, ', ') AS nation_names
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN lineitem li ON li.l_partkey = p.p_partkey
+LEFT JOIN CustomerOrders c ON c.c_custkey = li.l_orderkey
+LEFT JOIN nation n ON n.n_nationkey = sh.s_nationkey
+WHERE p.p_size BETWEEN 1 AND 50 
+  AND (p.p_mfgr LIKE 'Manufacturer%' OR p.p_container IS NULL)
+GROUP BY p.p_name
+HAVING COUNT(DISTINCT li.l_linenumber) > (SELECT COUNT(*) FROM lineitem)
+   OR COALESCE(AVG(c.max_order_price), 0) > 1000
+ORDER BY return_quantity DESC, avg_order_price ASC
+WITHIN GROUP (ORDER BY p.p_name);
+

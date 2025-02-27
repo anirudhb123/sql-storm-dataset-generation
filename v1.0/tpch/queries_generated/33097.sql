@@ -1,0 +1,53 @@
+WITH RECURSIVE order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2024-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name
+),
+high_value_orders AS (
+    SELECT 
+        os.o_orderkey,
+        os.o_orderdate,
+        os.c_name,
+        os.total_revenue
+    FROM 
+        order_summary os
+    WHERE 
+        os.revenue_rank <= 5
+)
+SELECT 
+    hvo.o_orderkey,
+    hvo.o_orderdate,
+    hvo.c_name,
+    COALESCE(s.s_name, 'N/A') AS supplier_name,
+    p.p_name,
+    l.l_quantity,
+    l.l_discount,
+    l.l_extendedprice,
+    RANK() OVER (PARTITION BY hvo.o_orderkey ORDER BY l.l_extendedprice DESC) AS line_item_rank
+FROM 
+    high_value_orders hvo
+LEFT JOIN 
+    lineitem l ON hvo.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    part p ON l.l_partkey = p.p_partkey
+WHERE 
+    p.p_size > 10 OR (p.p_size IS NULL AND hvo.total_revenue > 1000)
+ORDER BY 
+    hvo.o_orderdate, hvo.o_orderkey, line_item_rank;

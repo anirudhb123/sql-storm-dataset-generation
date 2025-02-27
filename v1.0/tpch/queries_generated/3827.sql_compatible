@@ -1,0 +1,67 @@
+
+WITH SupplierSales AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+CustomerOrderCounts AS (
+    SELECT
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL
+    GROUP BY
+        c.c_custkey
+),
+TopSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM
+        SupplierSales s
+),
+TopCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COALESCE(cc.order_count, 0) AS order_count,
+        RANK() OVER (ORDER BY COALESCE(cc.order_count, 0) DESC) AS customer_rank
+    FROM
+        customer c
+    LEFT JOIN
+        CustomerOrderCounts cc ON c.c_custkey = cc.c_custkey
+)
+SELECT
+    ts.s_name AS supplier_name,
+    tc.c_name AS customer_name,
+    ts.sales_rank,
+    tc.customer_rank,
+    CASE
+        WHEN ts.sales_rank <= 10 AND tc.customer_rank <= 10 THEN 'Top Supplier & Customer'
+        WHEN ts.sales_rank <= 10 THEN 'Top Supplier'
+        WHEN tc.customer_rank <= 10 THEN 'Top Customer'
+        ELSE 'Regular'
+    END AS classification
+FROM
+    TopSuppliers ts
+FULL OUTER JOIN
+    TopCustomers tc ON ts.s_suppkey = tc.c_custkey
+WHERE
+    (ts.sales_rank <= 10 OR tc.customer_rank <= 10)
+    AND (ts.total_sales IS NOT NULL OR tc.order_count IS NOT NULL)
+ORDER BY
+    classification, ts.s_name, tc.c_name;

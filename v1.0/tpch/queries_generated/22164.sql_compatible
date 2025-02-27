@@ -1,0 +1,74 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER(PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= CURRENT_DATE - INTERVAL '6 months'
+),
+TopRegionSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name, r.r_name
+    HAVING SUM(ps.ps_supplycost) > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(l.l_linenumber) AS total_lines,
+        AVG(l.l_extendedprice) AS avg_extended_price
+    FROM lineitem l
+    WHERE l.l_shipdate < l.l_commitdate
+    GROUP BY l.l_orderkey, l.l_partkey, l.l_suppkey
+),
+CustomerMetrics AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value,
+        STRING_AGG(DISTINCT r.r_name, ', ') AS regions,
+        SUM(CASE WHEN o.o_orderstatus = 'F' THEN 1 ELSE 0 END) AS completed_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY c.c_custkey
+),
+FinalBenchmark AS (
+    SELECT 
+        co.c_custkey,
+        co.order_count,
+        co.total_spent,
+        co.avg_order_value,
+        COALESCE(ts.total_supplycost, 0) AS supplier_cost,
+        COALESCE(ls.total_quantity, 0) AS line_item_quantity
+    FROM CustomerMetrics co
+    LEFT JOIN TopRegionSuppliers ts ON co.regions LIKE '%' || ts.region_name || '%'
+    LEFT JOIN LineItemStats ls ON co.order_count > 0 AND ls.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+)
+SELECT 
+    fb.*,
+    CASE 
+        WHEN fb.total_spent IS NULL THEN 'No Data' 
+        WHEN fb.total_spent < 1000 THEN 'Low Value Customer'
+        WHEN fb.total_spent BETWEEN 1000 AND 5000 THEN 'Medium Value Customer'
+        ELSE 'High Value Customer' 
+    END AS customer_value_category
+FROM FinalBenchmark fb
+WHERE fb.order_count > 0
+ORDER BY fb.total_spent DESC, fb.avg_order_value ASC;

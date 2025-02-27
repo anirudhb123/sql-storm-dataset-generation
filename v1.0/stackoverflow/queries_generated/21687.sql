@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Score,
+        P.ViewCount,
+        P.Title,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC, P.ViewCount DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostStatistics AS (
+    SELECT 
+        RP.PostId,
+        RP.OwnerDisplayName,
+        RP.Title,
+        RP.Score,
+        (COALESCE(PH.TypologyCount, 0) + COALESCE(CAST(NULLIF(PH.LastCloseReason, '') AS int), 0)) AS Adjustment,
+        (RP.Score + (COALESCE(PH.TypologyCount, 0) + COALESCE(CAST(NULLIF(PH.LastCloseReason, '') AS int), 0))) * 0.1) AS AdjustedScore
+    FROM 
+        RankedPosts RP
+    LEFT JOIN (
+        SELECT 
+            Ph.PostId,
+            COUNT(*) FILTER (WHERE Ph.PostHistoryTypeId IN (10, 11, 12)) AS TypologyCount,
+            MAX(CAST(Ph.Comment AS int)) AS LastCloseReason
+        FROM 
+            PostHistory Ph
+        GROUP BY 
+            Ph.PostId
+    ) PH ON RP.PostId = PH.PostId
+),
+FinalResults AS (
+    SELECT 
+        PS.PostId,
+        PS.OwnerDisplayName,
+        PS.Title,
+        PS.AdjustedScore,
+        RANK() OVER (ORDER BY PS.AdjustedScore DESC) AS FinalRank
+    FROM 
+        PostStatistics PS
+)
+SELECT 
+    FR.PostId,
+    FR.OwnerDisplayName,
+    FR.Title,
+    FR.AdjustedScore,
+    CASE 
+        WHEN FR.FinalRank <= 10 THEN 'Top 10'
+        WHEN FR.FinalRank <= 50 THEN 'Top 50'
+        ELSE 'Others'
+    END AS RankingCategory
+FROM 
+    FinalResults FR
+WHERE 
+    FR.AdjustedScore IS NOT NULL
+ORDER BY 
+    FR.FinalRank;

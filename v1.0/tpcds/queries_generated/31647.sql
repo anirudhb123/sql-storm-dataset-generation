@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        s.s_store_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS net_revenue,
+        SUM(ws.ws_net_paid_inc_tax) AS net_revenue_tax_included,
+        ROW_NUMBER() OVER (PARTITION BY s.s_store_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        store s
+    LEFT JOIN 
+        web_sales ws ON s.s_store_sk = ws.ws_store_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-10-01') 
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-10-31')
+    GROUP BY 
+        s.s_store_id
+),
+filtered_sales AS (
+    SELECT 
+        s.s_store_id,
+        total_sales,
+        total_orders,
+        net_revenue,
+        net_revenue_tax_included
+    FROM 
+        sales_summary s
+    WHERE 
+        total_sales IS NOT NULL AND total_orders > 10
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_paid) AS customer_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_gender = 'F' AND 
+        cd.cd_marital_status = 'M'
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    fs.s_store_id,
+    fs.total_sales,
+    fs.total_orders,
+    ci.c_customer_id,
+    ci.customer_spent,
+    ci.cd_gender,
+    ci.cd_marital_status
+FROM 
+    filtered_sales fs
+LEFT JOIN 
+    customer_info ci ON fs.total_sales > ci.customer_spent
+WHERE 
+    ci.customer_spent IS NOT NULL OR ci.customer_spent IS NULL
+ORDER BY 
+    fs.total_sales DESC, 
+    ci.customer_spent ASC
+LIMIT 100;

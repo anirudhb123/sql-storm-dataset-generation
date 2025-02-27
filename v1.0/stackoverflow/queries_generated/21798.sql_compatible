@@ -1,0 +1,100 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END), 0) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+
+PostRelatedStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT L.RelatedPostId) AS RelatedPostCount,
+        AVG(COALESCE(P.Score, 0)) AS AvgScore
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostLinks L ON P.Id = L.PostId
+    GROUP BY 
+        P.Id, P.Title, P.OwnerUserId
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        STRING_AGG(CASE WHEN PH.Comment IS NOT NULL THEN PH.Comment ELSE 'No Comment' END, '; ') AS ChangeComments
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId
+),
+
+FinalStats AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        UPS.UpVotes,
+        UPS.DownVotes,
+        P.PostId,
+        P.Title,
+        P.CommentCount,
+        P.RelatedPostCount,
+        P.AvgScore,
+        COALESCE(PHD.ChangeCount, 0) AS ChangeCount,
+        PHD.ChangeComments
+    FROM 
+        UserVoteStats UPS
+    JOIN 
+        Posts P ON UPS.UserId = P.OwnerUserId
+    LEFT JOIN 
+        PostRelatedStats PR ON P.Id = PR.PostId
+    LEFT JOIN 
+        PostHistoryDetails PHD ON P.Id = PHD.PostId
+    WHERE 
+        UPS.TotalVotes > 0
+    ORDER BY 
+        UPS.TotalVotes DESC, P.AvgScore DESC
+)
+
+SELECT 
+    F.UserId,
+    F.DisplayName,
+    F.UpVotes,
+    F.DownVotes,
+    F.PostId,
+    F.Title,
+    F.CommentCount,
+    F.RelatedPostCount,
+    F.AvgScore,
+    F.ChangeCount,
+    F.ChangeComments
+FROM 
+    FinalStats F
+WHERE 
+    F.ChangeCount BETWEEN 1 AND 10 
+    AND (F.CommentCount > 0 OR F.RelatedPostCount > 0)
+    AND NOT EXISTS (
+        SELECT 1 FROM Posts P 
+        WHERE P.Id = F.PostId AND P.ViewCount < 100
+    )
+    AND (F.UpVotes + F.DownVotes) > (
+        SELECT AVG(UpVotes + DownVotes) 
+        FROM UserVoteStats
+    )
+ORDER BY 
+    F.AvgScore DESC, F.UserId;

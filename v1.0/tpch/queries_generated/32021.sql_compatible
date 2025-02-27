@@ -1,0 +1,57 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(COALESCE(s.s_acctbal, 0)) AS total_acctbal
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+
+    UNION ALL
+
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(s.s_acctbal) 
+    FROM 
+        nation n
+    JOIN 
+        RecursiveCTE r ON r.n_nationkey = n.n_nationkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE 
+        r.total_acctbal < 1000  
+)
+
+SELECT 
+    r.r_name AS region_name, 
+    rc.n_name AS nation_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(COALESCE(l.l_extendedprice, 0) * (1 - l.l_discount)) AS avg_revenue,
+    COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN l.l_orderkey END) AS total_returns,
+    COUNT(DISTINCT c.c_custkey) AS total_customers
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    RecursiveCTE rc ON n.n_nationkey = rc.n_nationkey
+WHERE 
+    o.o_orderstatus = 'O'
+    AND (l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31' OR l.l_shipdate IS NULL)
+GROUP BY 
+    r.r_name, rc.n_name
+HAVING 
+    AVG(COALESCE(l.l_tax, 0)) > 0.05
+ORDER BY 
+    r.r_name, total_orders DESC;

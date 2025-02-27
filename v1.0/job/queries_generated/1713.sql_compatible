@@ -1,0 +1,64 @@
+
+WITH MovieCounts AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        COUNT(DISTINCT cc.person_id) AS cast_count
+    FROM 
+        title
+    LEFT JOIN 
+        complete_cast cc ON title.id = cc.movie_id
+    GROUP BY 
+        title.id, title.title
+),
+KeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        m.company_id,
+        m.movie_id,
+        c.name AS company_name,
+        ci.kind AS company_type
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    JOIN 
+        company_type ci ON m.company_type_id = ci.id
+),
+RankedMovies AS (
+    SELECT 
+        mc.movie_id,
+        mc.title,
+        mc.cast_count,
+        kc.keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY mc.cast_count ORDER BY kc.keyword_count DESC) AS rank
+    FROM 
+        MovieCounts mc
+    LEFT JOIN 
+        KeywordCounts kc ON mc.movie_id = kc.movie_id
+)
+SELECT 
+    rm.title,
+    rm.cast_count,
+    COALESCE(rm.keyword_count, 0) AS keyword_count,
+    mi.company_name,
+    mi.company_type
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieInfo mi ON rm.movie_id = mi.movie_id
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    rm.cast_count DESC, 
+    rm.keyword_count DESC;

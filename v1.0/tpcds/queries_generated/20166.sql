@@ -1,0 +1,82 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS rank_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price) AS rank_price
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2458908 AND 2458909
+), 
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        COALESCE(cd.cd_gender, 'N/A') AS gender,
+        COUNT(DISTINCT cd.cd_demo_sk) AS demo_count,
+        SUM(CASE WHEN cd.cd_marital_status = 'M' THEN 1 ELSE 0 END) AS married_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, cd.cd_gender
+),
+item_sales_summary AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_id
+),
+address_info AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_city ORDER BY ca.ca_zip DESC) AS city_rank
+    FROM 
+        customer_address ca
+)
+SELECT 
+    cd.c_first_name,
+    cd.gender,
+    iss.total_quantity,
+    iss.total_profit,
+    ai.ca_city,
+    ai.ca_state,
+    COUNT(DISTINCT rs.ws_order_number) AS sales_count,
+    MAX(CASE WHEN rs.rank_profit = 1 THEN rs.ws_sales_price ELSE NULL END) AS highest_sale_price,
+    MIN(CASE WHEN rs.rank_price = 1 THEN rs.ws_sales_price ELSE NULL END) AS lowest_sale_price,
+    CASE 
+        WHEN cd.married_count > 0 THEN 'Married' 
+        WHEN cd.married_count = 0 THEN 'Single' 
+        ELSE 'Unknown' 
+    END AS marital_status
+FROM 
+    customer_data cd
+LEFT JOIN 
+    item_sales_summary iss ON cd.c_customer_sk = iss.i_item_sk
+LEFT JOIN 
+    ranked_sales rs ON iss.i_item_sk = rs.ws_item_sk
+LEFT JOIN 
+    address_info ai ON cd.c_customer_sk = ai.ca_address_sk
+WHERE 
+    ai.city_rank <= 5 AND 
+    (cd.gender = 'M' OR cd.gender IS NULL) AND 
+    (iss.total_profit IS NOT NULL OR iss.total_quantity > 0)
+GROUP BY 
+    cd.c_first_name, cd.gender, iss.total_quantity, iss.total_profit, ai.ca_city, ai.ca_state
+ORDER BY 
+    total_profit DESC, total_quantity DESC
+LIMIT 50;

@@ -1,0 +1,71 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank_year,
+        COUNT(DISTINCT mc.company_id) OVER (PARTITION BY a.id) AS company_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+ActorMovieCount AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.person_id
+),
+TopActors AS (
+    SELECT 
+        a.id,
+        a.name,
+        COALESCE(am.movie_count, 0) AS movie_count
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        ActorMovieCount am ON a.person_id = am.person_id
+    WHERE 
+        a.name IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        r.title,
+        r.production_year,
+        t.kind AS title_kind,
+        r.company_count,
+        ta.movie_count AS top_actor_count
+    FROM 
+        RankedMovies r
+    JOIN 
+        title t ON r.title = t.title
+    LEFT JOIN 
+        TopActors ta ON ta.movie_count > 5
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.title_kind,
+    md.company_count,
+    COUNT(DISTINCT c.id) AS cast_members,
+    CASE 
+        WHEN md.top_actor_count IS NOT NULL THEN 
+            'Top Actor Feature'
+        ELSE 
+            'Regular Feature'
+    END AS feature_type
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    complete_cast c ON md.title = (SELECT title FROM title WHERE id = c.movie_id LIMIT 1)
+GROUP BY 
+    md.title, md.production_year, md.title_kind, md.company_count, md.top_actor_count
+HAVING 
+    md.company_count > 2 OR COUNT(DISTINCT c.id) > 5
+ORDER BY 
+    md.production_year DESC, md.company_count DESC;

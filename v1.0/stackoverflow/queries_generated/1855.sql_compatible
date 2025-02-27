@@ -1,0 +1,46 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(DAY, -90, '2024-10-01')
+)
+SELECT 
+    ur.UserId,
+    ur.DisplayName,
+    ur.Reputation,
+    ur.PostCount,
+    ur.AnswerCount,
+    ur.QuestionCount,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate
+FROM 
+    UserReputation ur
+LEFT JOIN 
+    RecentPosts rp ON ur.UserId = rp.OwnerUserId AND rp.rn = 1
+ORDER BY 
+    ur.Reputation DESC,
+    ur.PostCount DESC
+LIMIT 10;

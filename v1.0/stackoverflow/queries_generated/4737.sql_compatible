@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(v.VoteCount, 0)) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            postId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            postId
+    ) v ON v.postId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(p.Id) > 10
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        p.Title AS ClosedPostTitle,
+        ph.CreationDate AS ClosedDate,
+        cr.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        CloseReasonTypes cr ON (ph.Comment::jsonb->>'CloseReasonId')::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+FinalReport AS (
+    SELECT 
+        tu.UserId,
+        tu.DisplayName,
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate AS PostCreationDate,
+        rp.Score,
+        cp.ClosedPostId,
+        cp.ClosedPostTitle,
+        cp.ClosedDate,
+        cp.CloseReason,
+        tu.TotalVotes
+    FROM 
+        TopUsers tu
+    JOIN 
+        RankedPosts rp ON rp.UserPostRank <= 5
+    LEFT JOIN 
+        ClosedPosts cp ON cp.ClosedPostId = rp.PostId
+)
+SELECT 
+    fr.UserId,
+    fr.DisplayName,
+    fr.PostId,
+    fr.Title,
+    fr.PostCreationDate,
+    fr.Score,
+    fr.ClosedPostId,
+    fr.ClosedPostTitle,
+    fr.ClosedDate,
+    fr.CloseReason,
+    fr.TotalVotes
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.TotalVotes DESC, fr.PostCreationDate DESC
+LIMIT 20;

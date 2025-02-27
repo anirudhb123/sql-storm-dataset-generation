@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        COALESCE(u.DisplayName, 'Community') AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpvoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownvoteCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate > (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year')
+),
+ClosedPostCounts AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS CloseCount
+    FROM PostHistory
+    WHERE PostHistoryTypeId IN (10, 11) 
+    GROUP BY PostId
+),
+BadgedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostsWithTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN LATERAL (
+        SELECT TRIM(UNNEST(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '>'))) ) AS TagName
+    ) t ON true
+    GROUP BY p.Id
+)
+SELECT 
+    rp.Id,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.OwnerDisplayName,
+    COALESCE(CPC.CloseCount, 0) AS CloseCount,
+    CASE 
+        WHEN bu.BadgeCount > 5 THEN 'Veteran'
+        WHEN bu.BadgeCount IS NULL THEN 'Newbie'
+        ELSE 'Regular'
+    END AS UserStatus,
+    COALESCE(pwt.Tags, 'No Tags') AS Tags,
+    (rp.UpvoteCount - rp.DownvoteCount) AS NetVotes,
+    (SELECT COUNT(*) FROM Posts q WHERE q.AcceptedAnswerId = rp.Id) AS AcceptedAnswerCount
+FROM RankedPosts rp
+LEFT JOIN ClosedPostCounts CPC ON rp.Id = CPC.PostId
+LEFT JOIN BadgedUsers bu ON rp.OwnerDisplayName = bu.UserId
+LEFT JOIN PostsWithTags pwt ON rp.Id = pwt.PostId
+WHERE rp.ViewRank <= 5
+ORDER BY NetVotes DESC, rp.CreationDate DESC
+LIMIT 100;

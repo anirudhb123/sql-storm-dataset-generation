@@ -1,0 +1,68 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS order_level
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+    UNION ALL
+    SELECT 
+        oh.o_orderkey,
+        oh.o_orderdate,
+        oh.o_totalprice,
+        oh.order_level + 1
+    FROM 
+        lineitem l
+    JOIN OrderHierarchy oh ON l.l_orderkey = oh.o_orderkey
+    WHERE 
+        l.l_returnflag = 'N'
+),
+SupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 1000
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    ch.o_orderkey,
+    ch.o_orderdate,
+    ch.o_totalprice AS order_amount,
+    sc.avg_supplycost AS average_supply_cost,
+    co.c_name AS customer_name,
+    co.total_spent,
+    COALESCE(NULLIF(co.order_count, 0), 1) AS valid_order_count,
+    CASE 
+        WHEN (ch.o_totalprice > co.total_spent) THEN 'Spender'
+        ELSE 'Saver'
+    END AS spender_status
+FROM 
+    OrderHierarchy ch
+LEFT JOIN 
+    SupplierCost sc ON sc.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = ch.o_orderkey)
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ch.o_orderkey)
+WHERE 
+    ch.order_level <= 5
+ORDER BY 
+    ch.o_orderdate DESC, co.total_spent DESC;

@@ -1,0 +1,62 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        0 AS level,
+        ARRAY[mt.title] AS path
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year BETWEEN 1990 AND 2023
+    
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id,
+        at.title AS movie_title,
+        mh.level + 1,
+        mh.path || at.title
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE
+        mh.level < 3
+        AND at.production_year BETWEEN 1990 AND 2023
+)
+
+SELECT
+    mh.movie_id,
+    mh.movie_title,
+    COUNT(DISTINCT cc.person_id) AS cast_count,
+    STRING_AGG(DISTINCT ak.name, ', ') FILTER (WHERE ak.name IS NOT NULL) AS cast_names,
+    AVG(CAST(mk.info AS FLOAT)) AS average_rating,
+    CASE 
+        WHEN MIN(mt.production_year) IS NULL THEN 'Unknown'
+        ELSE CAST(MIN(mt.production_year) AS TEXT)
+    END AS first_production_year,
+    COUNT(DISTINCT CASE WHEN at.production_year IS NULL THEN at.production_year ELSE NULL END) AS null_production_year_count,
+    ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY COUNT(cc.person_id) DESC) AS ranking
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    complete_cast cc ON cc.movie_id = mh.movie_id
+LEFT JOIN
+    aka_name ak ON ak.person_id = cc.person_id
+LEFT JOIN
+    movie_info mk ON mk.movie_id = mh.movie_id AND mk.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+LEFT JOIN
+    aka_title mt ON mh.movie_id = mt.id
+WHERE
+    mh.level <= 2
+GROUP BY
+    mh.movie_id, mh.movie_title
+HAVING
+    COUNT(DISTINCT cc.person_id) > 5
+ORDER BY
+    average_rating DESC NULLS LAST,
+    cast_count DESC
+LIMIT 100;

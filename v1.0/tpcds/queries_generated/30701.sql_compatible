@@ -1,0 +1,68 @@
+
+WITH RECURSIVE income_bracket AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound
+    FROM income_band
+    WHERE ib_lower_bound IS NOT NULL
+    UNION ALL
+    SELECT ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+    FROM income_band ib
+    INNER JOIN income_bracket ibr ON ib.ib_income_band_sk = ibr.ib_income_band_sk + 1
+),
+customer_with_income AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name, 
+        c.c_last_name,
+        cd.cd_gender, 
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            ELSE CAST(cd.cd_purchase_estimate AS VARCHAR(255))
+        END AS purchase_estimate,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            ELSE 'Single'
+        END AS marital_status
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        s.s_store_name,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_sales,
+        AVG(ss.ss_sales_price) AS avg_sales_price,
+        ROW_NUMBER() OVER(PARTITION BY s.s_store_name ORDER BY SUM(ss.ss_net_profit) DESC) AS store_rank
+    FROM store s
+    JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY s.s_store_name
+),
+web_sales_summary AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid) AS avg_order_value
+    FROM web_sales ws
+    GROUP BY ws.web_site_id
+)
+SELECT 
+    cwa.c_customer_id,
+    cwa.c_first_name,
+    cwa.c_last_name,
+    cwa.purchase_estimate,
+    cwa.income_band,
+    ss.s_store_name,
+    ss.total_net_profit AS store_total_net_profit,
+    wss.total_net_profit AS web_total_net_profit,
+    ss.total_sales,
+    wss.total_orders,
+    ss.avg_sales_price,
+    wss.avg_order_value
+FROM customer_with_income cwa
+LEFT JOIN sales_summary ss ON ss.store_rank <= 5
+LEFT JOIN web_sales_summary wss ON wss.web_site_id = 'SITE_1'
+WHERE cwa.marital_status = 'Married'
+AND cwa.income_band IS NOT NULL
+ORDER BY cwa.c_first_name, cwa.c_last_name;

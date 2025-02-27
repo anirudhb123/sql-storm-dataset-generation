@@ -1,0 +1,76 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        COALESCE(c.Rank, 0) AS Rank, 
+        0 AS Level
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            ParentId, 
+            COUNT(*) AS Rank
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 2 
+        GROUP BY 
+            ParentId
+    ) c ON p.Id = c.ParentId
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        COALESCE(c.Rank, 0) + 1, 
+        Level + 1 
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostCTE rp ON p.ParentId = rp.PostId
+),
+UserVotes AS (
+    SELECT 
+        v.PostId, 
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes, 
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+TopTags AS (
+    SELECT 
+        tt.PostId,
+        t.TagName,
+        ROW_NUMBER() OVER (PARTITION BY tt.PostId ORDER BY tt.CreationDate DESC) AS rn
+    FROM 
+        Tags t
+    INNER JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    JOIN PostLinks tt ON tt.PostId = p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Rank,
+    COALESCE(uv.UpVotes, 0) AS UpVotes,
+    COALESCE(uv.DownVotes, 0) AS DownVotes,
+    COALESCE(uv.TotalVotes, 0) AS TotalVotes,
+    STRING_AGG(tt.TagName, ', ') AS Tags
+FROM 
+    RecursivePostCTE rp
+LEFT JOIN 
+    UserVotes uv ON rp.PostId = uv.PostId
+LEFT JOIN 
+    TopTags tt ON rp.PostId = tt.PostId AND tt.rn <= 3
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.Rank
+ORDER BY 
+    rp.Rank DESC, rp.CreationDate DESC
+LIMIT 100;

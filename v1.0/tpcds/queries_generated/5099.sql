@@ -1,0 +1,57 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ws.ws_ship_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_purchase_estimate > 5000
+),
+top_sales AS (
+    SELECT 
+        sales.web_site_sk,
+        sales.total_sales,
+        sales.total_orders,
+        sales.avg_net_profit,
+        cases.gender AS gender,
+        CASE 
+            WHEN cases.marital_status = 'M' THEN 'Married'
+            ELSE 'Unmarried' 
+        END AS marital_status
+    FROM 
+        sales_summary sales
+    JOIN 
+        customer_demographics cases ON sales.unique_customers = cases.cd_demo_sk
+    ORDER BY 
+        sales.total_sales DESC
+    LIMIT 10
+)
+SELECT 
+    ts.web_site_sk,
+    ts.total_sales,
+    ts.total_orders,
+    ts.avg_net_profit,
+    ts.gender,
+    ts.marital_status
+FROM 
+    top_sales ts;

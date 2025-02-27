@@ -1,0 +1,59 @@
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CloseReasonId,
+        CASE 
+            WHEN p.CloseReasonId IS NOT NULL THEN ct.Name 
+            ELSE 'Open' 
+        END AS ClosureStatus,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN CloseReasonTypes ct ON p.CloseReasonId = ct.Id
+    LEFT JOIN LATERAL (
+        SELECT 
+            unnest(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS TagName
+    ) t ON TRUE
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, p.CloseReasonId
+),
+TopUsers AS (
+    SELECT 
+        u.Id, 
+        u.DisplayName, 
+        u.Reputation, 
+        ub.BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+    JOIN UserBadges ub ON u.Id = ub.UserId
+)
+SELECT 
+    au.DisplayName AS TopUserName,
+    au.Reputation AS UserReputation,
+    au.BadgeCount AS UserBadgeCount,
+    ap.PostId,
+    ap.Title AS PostTitle,
+    ap.CreationDate AS PostCreationDate,
+    ap.Score AS PostScore,
+    ap.ViewCount AS PostViewCount,
+    ap.AnswerCount AS PostAnswerCount,
+    ap.ClosureStatus,
+    ap.Tags AS PostTags
+FROM ActivePosts ap
+JOIN TopUsers au ON au.UserRank <= 10
+WHERE ap.Score > 10
+ORDER BY au.Reputation DESC, ap.CreationDate DESC;

@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.Tags
+),
+RecentPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.Tags,
+        rp.CommentCount,
+        rp.VoteCount,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.Rank = 1
+        AND rp.CreationDate >= CURRENT_DATE - INTERVAL '30 days' -- Last 30 days
+)
+SELECT 
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.VoteCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList,
+    COALESCE(SUM(b.Class = 1), 0) AS GoldBadges,
+    COALESCE(SUM(b.Class = 2), 0) AS SilverBadges,
+    COALESCE(SUM(b.Class = 3), 0) AS BronzeBadges
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    Tags t ON rp.Tags LIKE CONCAT('%', t.TagName, '%')
+LEFT JOIN 
+    Badges b ON rp.OwnerDisplayName = b.UserId
+GROUP BY 
+    rp.Title, rp.OwnerDisplayName, rp.CreationDate, rp.ViewCount, rp.CommentCount, rp.VoteCount
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

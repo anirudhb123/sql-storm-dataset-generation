@@ -1,0 +1,65 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        ARRAY(SELECT tg.TagName FROM Tags tg WHERE tg.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::integer[])) AS PostTags
+    FROM
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+RecentUserPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        rp.Rank = 1
+        AND u.Reputation > 1000
+),
+TagsStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(*) AS PostCount,
+        STRING_AGG(DISTINCT p.Title, ', ') AS RelatedPosts
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(*) > 10
+)
+SELECT 
+    u.DisplayName AS UserName,
+    r.UserId,
+    r.PostId,
+    r.Title AS RecentPostTitle,
+    r.CreationDate AS RecentPostDate,
+    ts.TagName,
+    ts.PostCount AS TagPostCount,
+    ts.RelatedPosts
+FROM 
+    RecentUserPosts r
+JOIN 
+    Users u ON r.UserId = u.Id
+JOIN 
+    TagsStats ts ON ts.TagName = ANY(r.PostTags)
+ORDER BY 
+    ts.PostCount DESC,
+    r.CreationDate DESC
+LIMIT 10;

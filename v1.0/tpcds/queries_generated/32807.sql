@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid
+    FROM
+        web_sales
+    GROUP BY
+        ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT
+        cs_sold_date_sk,
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_net_paid) AS total_net_paid
+    FROM
+        catalog_sales
+    GROUP BY
+        cs_sold_date_sk, cs_item_sk
+),
+inventory_status AS (
+    SELECT
+        inv_date_sk,
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_on_hand
+    FROM
+        inventory
+    GROUP BY
+        inv_date_sk, inv_item_sk
+),
+date_analysis AS (
+    SELECT
+        d.d_date,
+        d.d_year,
+        COALESCE(sd.total_quantity, 0) AS total_quantity,
+        COALESCE(sd.total_net_paid, 0) AS total_net_paid,
+        COALESCE(is.total_on_hand, 0) AS total_inventory
+    FROM
+        date_dim d
+    LEFT JOIN (
+        SELECT
+            ws_sold_date_sk AS sold_date_sk,
+            ws_item_sk,
+            SUM(ws_quantity) AS total_quantity,
+            SUM(ws_net_paid) AS total_net_paid
+        FROM
+            web_sales
+        GROUP BY
+            ws_sold_date_sk, ws_item_sk
+    ) sd ON d.d_date_sk = sd.sold_date_sk
+    LEFT JOIN inventory_status is ON d.d_date_sk = is.inv_date_sk
+)
+SELECT 
+    da.d_year,
+    SUM(da.total_quantity) AS total_sales_quantity,
+    SUM(da.total_net_paid) AS total_sales_amount,
+    SUM(da.total_inventory) AS total_inventory
+FROM 
+    date_analysis da
+WHERE 
+    da.d_year BETWEEN 2020 AND 2023
+GROUP BY 
+    da.d_year
+ORDER BY 
+    da.d_year ASC
+HAVING 
+    SUM(da.total_net_paid) > 10000

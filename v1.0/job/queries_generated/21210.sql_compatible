@@ -1,0 +1,87 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS title_rank,
+        COUNT(cc.subject_id) OVER (PARTITION BY mt.id) AS cast_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.title_rank,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.cast_count > 1
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword ORDER BY k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+FinalOutput AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        fm.title_rank,
+        mk.keywords,
+        ci.person_role_id,
+        ci.note AS role_note
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        cast_info ci ON fm.movie_id = ci.movie_id
+    LEFT JOIN 
+        MovieKeywords mk ON fm.movie_id = mk.movie_id
+    WHERE 
+        ci.note IS NOT NULL OR mk.keywords IS NOT NULL
+)
+
+SELECT 
+    fo.movie_id,
+    fo.title,
+    fo.production_year,
+    fo.title_rank,
+    fo.keywords,
+    COALESCE(fo.role_note, 'No Role Note') AS role_note,
+    (SELECT 
+        COUNT(*) FROM aka_name an 
+     WHERE 
+         an.person_id IN (SELECT DISTINCT ci.person_id 
+                          FROM cast_info ci 
+                          WHERE ci.movie_id = fo.movie_id)) AS distinct_person_count,
+    (SELECT 
+        COUNT(DISTINCT ci2.role_id) 
+     FROM 
+        cast_info ci2 
+     WHERE 
+        ci2.movie_id = fo.movie_id) AS distinct_role_count
+FROM 
+    FinalOutput fo
+WHERE 
+    fo.title_rank < 5 
+    AND (fo.production_year BETWEEN 2000 AND 2023)
+ORDER BY 
+    fo.production_year DESC, 
+    fo.title ASC
+LIMIT 10;

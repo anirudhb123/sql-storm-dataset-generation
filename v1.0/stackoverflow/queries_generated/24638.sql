@@ -1,0 +1,79 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostId IS NOT NULL
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.DownVotes, 0)) AS TotalDownVotes,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS TotalComments,
+        MAX(COALESCE(v.VoteTypeId, 0)) FILTER (WHERE v.VoteTypeId = 2) AS LastUpVoteType,
+        'Tag: ' || COALESCE(NULLIF(STRING_AGG(DISTINCT t.TagName, ', '), ''), 'No Tags') AS TagList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Tags t ON t.WikiPostId = p.Id
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName,
+    up.TotalPosts,
+    up.TotalUpVotes,
+    up.TotalDownVotes,
+    rq.PostId,
+    rq.Title,
+    rq.CreationDate,
+    rq.TotalComments,
+    rq.TagList,
+    ph.UserDisplayName AS LastEditor
+FROM 
+    UserActivity up
+JOIN 
+    RecentQuestions rq ON up.UserId = rq.OwnerUserId
+LEFT JOIN 
+    RecursivePostHistory ph ON rq.PostId = ph.PostId AND ph.rn = 1
+WHERE 
+    up.TotalPosts > 0
+    AND up.TotalDownVotes <= 0 
+    AND (SELECT COUNT(*) FROM Badges b WHERE b.UserId = up.UserId AND b.Class = 3) > 0
+ORDER BY 
+    up.TotalPosts DESC, rq.CreationDate DESC
+LIMIT 100;
+
+This SQL query combines various advanced constructs: CTEs for recursion, filtering, and details about user activity; uses window functions for ranking; includes rich string expressions for tag management; incorporates complex filtering logic including NULL handling and peculiar cases, such as the existence of posts with no votes or zero comments.

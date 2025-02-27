@@ -1,0 +1,46 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.title AS movie_title, 
+           m.production_year, 
+           1 AS level
+    FROM aka_title m
+    WHERE m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT CONCAT(m.title, ' Related Movie') AS movie_title, 
+           m.production_year + 1 AS production_year, 
+           mh.level + 1
+    FROM aka_title m
+    JOIN movie_hierarchy mh ON m.episode_of_id = (SELECT id FROM aka_title WHERE title = mh.movie_title LIMIT 1)
+)
+
+SELECT an.name AS actor_name,
+       mt.title AS movie_title,
+       mt.production_year,
+       COUNT(c.id) OVER (PARTITION BY mt.id) AS total_cast,
+       STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+       COALESCE(c.role_id, 0) AS role_id,
+       CASE 
+           WHEN c.note IS NULL THEN 'No notes available'
+           ELSE c.note 
+       END AS notes
+FROM aka_name an
+LEFT JOIN cast_info c ON an.person_id = c.person_id
+INNER JOIN aka_title mt ON c.movie_id = mt.id
+LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+WHERE mt.production_year >= 2000
+AND (an.name ILIKE '%Smith%' OR an.name ILIKE '%Johnson%')
+AND (mt.note IS NULL OR mt.note NOT LIKE '%unavailable%')
+  AND EXISTS (SELECT 1 
+              FROM movie_info mi 
+              WHERE mi.movie_id = mt.id 
+                AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis'))
+  AND NOT EXISTS (SELECT 1 
+                  FROM movie_link ml 
+                  WHERE ml.movie_id = mt.id 
+                    AND ml.link_type_id = (SELECT id FROM link_type WHERE link = 'Sequel'))
+GROUP BY an.name, mt.title, mt.production_year, c.role_id, c.note
+ORDER BY mt.production_year DESC, an.name
+LIMIT 100;

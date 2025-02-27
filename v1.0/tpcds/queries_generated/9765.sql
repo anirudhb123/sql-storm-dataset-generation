@@ -1,0 +1,67 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(COALESCE(ws.ws_net_paid, 0) + COALESCE(cs.cs_net_paid, 0) + COALESCE(ss.ss_net_paid, 0)) AS total_sales
+    FROM 
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_sales,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.total_sales > 0
+),
+SalesByMonth AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_net_paid) AS web_sales,
+        SUM(cs.cs_net_paid) AS catalog_sales,
+        SUM(ss.ss_net_paid) AS store_sales
+    FROM 
+        date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    LEFT JOIN store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    GROUP BY d.d_year, d.d_month_seq
+),
+MonthlySalesGrowth AS (
+    SELECT 
+        year,
+        month_seq,
+        web_sales,
+        catalog_sales,
+        store_sales,
+        (web_sales + catalog_sales + store_sales) AS total_sales,
+        LAG((web_sales + catalog_sales + store_sales), 1) OVER (ORDER BY year, month_seq) AS previous_month_sales,
+        CASE 
+            WHEN LAG((web_sales + catalog_sales + store_sales), 1) OVER (ORDER BY year, month_seq) IS NULL THEN NULL
+            ELSE ((web_sales + catalog_sales + store_sales) - LAG((web_sales + catalog_sales + store_sales), 1) OVER (ORDER BY year, month_seq)) / NULLIF(LAG((web_sales + catalog_sales + store_sales), 1) OVER (ORDER BY year, month_seq), 0) * 100
+        END AS growth_rate
+    FROM 
+        SalesByMonth
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.total_sales,
+    m.year,
+    m.month_seq,
+    m.total_sales,
+    m.growth_rate
+FROM 
+    TopCustomers tc
+JOIN MonthlySalesGrowth m ON m.total_sales > 0
+WHERE 
+    m.growth_rate IS NOT NULL
+ORDER BY 
+    tc.total_sales DESC, m.year DESC, m.month_seq DESC
+LIMIT 50;

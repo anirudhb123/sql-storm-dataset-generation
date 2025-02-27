@@ -1,0 +1,82 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(CAST(P.ViewCount AS bigint), 0)) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+), 
+ActiveTopUsers AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.UpVotes,
+        U.DownVotes,
+        ROW_NUMBER() OVER (ORDER BY (U.UpVotes - U.DownVotes) DESC, U.TotalViews DESC) AS Rnk
+    FROM 
+        UserStatistics U
+    WHERE 
+        U.UpVotes > U.DownVotes AND 
+        U.PostCount > 5
+), 
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(T.TagName) AS TagsArray,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.CreationDate END) AS LastClosedDate
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Tags T ON POSITION(CONCAT('<', T.TagName, '>') IN P.Tags) > 0
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, U.DisplayName
+), 
+ClosedPosts AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.OwnerDisplayName,
+        CASE 
+            WHEN PD.LastClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open' 
+        END AS Status
+    FROM 
+        PostDetails PD
+)
+SELECT 
+    U.DisplayName AS TopUser,
+    COUNT(DISTINCT PD.PostId) AS PostsCreated,
+    SUM(CASE WHEN CP.Status = 'Closed' THEN 1 ELSE 0 END) AS ClosedPostsCount,
+    SUM(PD.ViewCount) AS TotalViews
+FROM 
+    ActiveTopUsers U
+LEFT JOIN 
+    PostDetails PD ON U.UserId = PD.OwnerDisplayName
+LEFT JOIN 
+    ClosedPosts CP ON PD.PostId = CP.PostId
+GROUP BY 
+    U.DisplayName
+HAVING 
+    COUNT(DISTINCT PD.PostId) >= 3
+ORDER BY 
+    TotalViews DESC;

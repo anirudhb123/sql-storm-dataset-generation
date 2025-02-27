@@ -1,0 +1,50 @@
+-- Performance Benchmarking SQL Query
+
+-- This query benchmarks the performance of some essential operations within the Stack Overflow schema.
+-- It retrieves various aggregated metrics from the Posts, Users, Comments, and Votes tables.
+
+WITH PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY p.Id, p.Title, p.AcceptedAnswerId, p.OwnerUserId, p.CreationDate
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(COALESCE(DATEDIFF(CURRENT_TIMESTAMP, p.CreationDate), 0)) AS AvgPostAgeInDays
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+)
+
+SELECT 
+    pm.PostId,
+    pm.Title,
+    u.UserId,
+    u.DisplayName,
+    pm.CommentCount,
+    pm.UpVoteCount,
+    pm.DownVoteCount,
+    u.PostCount,
+    u.TotalScore,
+    u.AvgPostAgeInDays,
+    pm.CreationDate
+FROM PostMetrics pm
+JOIN UserMetrics u ON pm.OwnerUserId = u.UserId
+ORDER BY pm.CommentCount DESC, pm.UpVoteCount DESC
+LIMIT 100;

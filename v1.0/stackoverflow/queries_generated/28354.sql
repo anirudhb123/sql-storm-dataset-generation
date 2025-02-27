@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        SUBSTRING(p.Body, 1, 250) AS Snippet,
+        u.DisplayName AS Author,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+), 
+TagsWithCount AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 10
+), 
+CommentStats AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+), 
+PostRemark AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Snippet,
+        rp.ViewCount,
+        rp.Score,
+        rp.CreationDate,
+        rp.Author,
+        rp.Reputation,
+        tc.TagName,
+        cs.CommentCount,
+        cs.LastCommentDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        TagsWithCount tc ON rp.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE '%' || tc.TagName || '%')
+    LEFT JOIN 
+        CommentStats cs ON rp.PostId = cs.PostId
+)
+SELECT 
+    PostRemark.PostId,
+    PostRemark.Title,
+    PostRemark.Snippet,
+    PostRemark.ViewCount,
+    PostRemark.Score,
+    PostRemark.CreationDate,
+    PostRemark.Author,
+    PostRemark.Reputation,
+    PostRemark.TagName,
+    COALESCE(PostRemark.CommentCount, 0) AS TotalComments,
+    PostRemark.LastCommentDate
+FROM 
+    PostRemark
+WHERE 
+    PostRemark.Rank <= 5
+ORDER BY 
+    PostRemark.Score DESC,
+    PostRemark.ViewCount DESC;

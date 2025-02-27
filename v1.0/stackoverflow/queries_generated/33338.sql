@@ -1,0 +1,89 @@
+WITH RecursivePostTree AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        R.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostTree R ON P.ParentId = R.PostId
+), 
+
+PostVoteStats AS (
+    SELECT 
+        PostId,
+        COUNT(*) FILTER (WHERE VoteTypeId = 2) AS UpVotes,
+        COUNT(*) FILTER (WHERE VoteTypeId = 3) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+
+UserBadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+
+SELECT 
+    R.PostId,
+    R.Title,
+    R.OwnerUserId,
+    U.DisplayName AS OwnerDisplayName,
+    UReputation.Reputation AS OwnerReputation,
+    R.CreationDate,
+    COALESCE(PVS.UpVotes, 0) AS UpVoteCount,
+    COALESCE(PVS.DownVotes, 0) AS DownVoteCount,
+    COALESCE(UBC.BadgeCount, 0) AS UserBadgeCount,
+    UBC.GoldBadges,
+    UBC.SilverBadges,
+    UBC.BronzeBadges,
+    R.Level
+FROM 
+    RecursivePostTree R
+LEFT JOIN 
+    Users U ON R.OwnerUserId = U.Id
+LEFT JOIN 
+    UserBadgeCounts UBC ON U.Id = UBC.UserId
+LEFT JOIN 
+    PostVoteStats PVS ON R.PostId = PVS.PostId
+JOIN 
+    (SELECT 
+         Id, 
+         Reputation
+     FROM 
+         Users 
+     WHERE 
+         Reputation > 100) UReputation ON U.Id = UReputation.Id
+WHERE 
+    R.Title IS NOT NULL 
+ORDER BY 
+    R.Level, R.CreationDate DESC;
+
+
+This query utilizes a recursive Common Table Expression (CTE) to build a hierarchical representation of posts, capturing the post ID, title, user details, and vote counts with outer joins and filtering. Each section is designed to accumulate metrics and statistics relevant to users and their engagement in the post structure. It includes NULL handling and ensures that all calculations are done to produce a detailed report that could be used for performance benchmarking or similar analytical purposes.

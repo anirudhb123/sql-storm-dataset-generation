@@ -1,0 +1,44 @@
+
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_availqty) AS total_available_quantity, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartPopularity AS (
+    SELECT 
+        l.l_partkey, 
+        SUM(l.l_quantity) AS total_sold_quantity,
+        DENSE_RANK() OVER (ORDER BY SUM(l.l_quantity) DESC) AS popularity_rank
+    FROM lineitem l
+    GROUP BY l.l_partkey
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_retailprice,
+    COALESCE(ss.total_available_quantity, 0) AS available_quantity,
+    COALESCE(ss.total_supply_cost, 0) AS total_supply_cost,
+    CASE WHEN cps.total_orders IS NULL THEN 'No Orders' ELSE 'Ordered' END AS order_status,
+    ppop.popularity_rank
+FROM part p
+LEFT JOIN SupplierSummary ss ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ss.s_suppkey)
+LEFT JOIN CustomerOrderStats cps ON cps.total_orders > 0
+LEFT JOIN PartPopularity ppop ON ppop.l_partkey = p.p_partkey
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) FROM part p2
+)
+ORDER BY p.p_name, ppop.popularity_rank DESC;

@@ -1,0 +1,62 @@
+WITH UserBadges AS (
+    SELECT u.Id AS UserId,
+           u.Reputation,
+           COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+           COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+           COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.Reputation
+),
+PostStatistics AS (
+    SELECT p.OwnerUserId,
+           COUNT(DISTINCT p.Id) AS TotalPosts,
+           COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+           COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+           MAX(p.CreationDate) AS LastPostDate
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT ph.UserId,
+           COUNT(ph.Id) AS TotalClosed,
+           STRING_AGG(DISTINCT ct.Name, ', ') AS ClosedReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes ct ON ph.Comment::int = ct.Id
+    WHERE ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY ph.UserId
+),
+TopUsers AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           up.Reputation,
+           up.GoldBadges,
+           up.SilverBadges,
+           up.BronzeBadges,
+           ps.TotalPosts,
+           ps.TotalQuestions,
+           ps.TotalAnswers,
+           cu.TotalClosed,
+           cu.ClosedReasons,
+           ROW_NUMBER() OVER (ORDER BY up.Reputation DESC) AS Ranking
+    FROM UserBadges up
+    JOIN PostStatistics ps ON up.UserId = ps.OwnerUserId
+    LEFT JOIN ClosedPosts cu ON up.UserId = cu.UserId
+    WHERE up.Reputation > 1000 -- only users with reputation > 1000
+)
+SELECT t.UserId,
+       t.DisplayName,
+       t.Reputation,
+       t.TotalPosts,
+       t.TotalQuestions,
+       t.TotalAnswers,
+       COALESCE(t.TotalClosed, 0) AS TotalClosedPosts,
+       COALESCE(t.ClosedReasons, 'None') AS ClosedReasons,
+       CASE WHEN t.Reputation IS NULL THEN 'No Data'
+            WHEN t.TotalPosts = 0 THEN 'Inactive'
+            ELSE 'Active' END AS UserStatus
+FROM TopUsers t
+WHERE t.Ranking <= 10
+ORDER BY t.Ranking;
+
+This SQL query performs several operations to benchmark user activity within a Stack Overflow-like database schema. It uses CTEs to aggregate badge counts for users, summarize posts, record closed posts, and finally generates a ranking of top users based on their reputation, total posts, and engagement, encapsulating a complexity of joins, aggregates, conditional expressions, and logical checks.

@@ -1,0 +1,69 @@
+WITH movie_cast AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        c.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+),
+recent_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year
+    FROM aka_title m
+    WHERE m.production_year >= 2020
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+),
+movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(mi.info, '; ') AS movie_info
+    FROM movie_info mi
+    GROUP BY mi.movie_id
+),
+movie_ratings AS (
+    SELECT 
+        m.movie_id,
+        AVG(mr.rating) AS avg_rating
+    FROM movie_rating mr
+    JOIN movie_info_details m ON mr.movie_id = m.movie_id
+    GROUP BY m.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    STRING_AGG(DISTINCT mc.company_name, ', ') AS production_companies,
+    STRING_AGG(DISTINCT mc.actor_name, ', ') AS lead_actors,
+    CASE 
+        WHEN AVG(mr.avg_rating) IS NULL THEN 'No Ratings'
+        ELSE CAST(AVG(mr.avg_rating) AS TEXT)
+    END AS average_rating,
+    mi.movie_info
+FROM recent_movies rm
+LEFT JOIN company_details mc ON rm.movie_id = mc.movie_id
+LEFT JOIN movie_cast mca ON rm.movie_id = mca.movie_id AND mca.actor_rank <= 3
+LEFT JOIN movie_info_details mi ON rm.movie_id = mi.movie_id
+LEFT JOIN movie_ratings mr ON rm.movie_id = mr.movie_id
+GROUP BY rm.title, rm.production_year, mi.movie_info
+HAVING 
+    (COUNT(DISTINCT mc.company_name) > 1 OR AVG(mr.avg_rating) IS NULL)
+    AND rm.production_year IS NOT NULL
+ORDER BY rm.production_year DESC, rm.title;
+
+This query showcases the use of:
+- Common Table Expressions (CTEs) to modularize the query by creating temporary results such as `movie_cast`, `recent_movies`, `company_details`, `movie_info_details`, and `movie_ratings`.
+- STRING_AGG to concatenate multiple row results into single string values.
+- LEFT JOINs to incorporate details from multiple tables.
+- Conditional logic with CASE for handling NULLs when calculating average ratings.
+- HAVING clause to filter results based on aggregate functions and NULL conditions, showcasing complex predicates.
+- ORDER BY to sort the final result set based on production year and title, facilitating a benchmark for movie details queried.

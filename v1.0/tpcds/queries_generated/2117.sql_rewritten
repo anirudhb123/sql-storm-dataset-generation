@@ -1,0 +1,67 @@
+WITH SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_ship_mode_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_amount
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2451545 AND 2451870  
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_ship_mode_sk, ws.ws_item_sk
+),
+PromoData AS (
+    SELECT 
+        p.p_promo_sk,
+        p.p_promo_id,
+        p.p_discount_active,
+        p.p_start_date_sk,
+        p.p_end_date_sk
+    FROM 
+        promotion p
+    WHERE 
+        p.p_discount_active = 'Y'
+),
+RankedSales AS (
+    SELECT 
+        sd.ws_sold_date_sk,
+        sd.ws_ship_mode_sk,
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_amount,
+        ROW_NUMBER() OVER (PARTITION BY sd.ws_ship_mode_sk ORDER BY sd.total_amount DESC) AS sales_rank
+    FROM 
+        SalesData sd
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    SUM(ws.ws_net_paid_inc_tax) AS total_revenue,
+    AVG(ws.ws_net_paid_inc_tax) AS avg_order_value,
+    COALESCE(rd.total_quantity, 0) AS total_quantity,
+    COALESCE(rd.total_amount, 0) AS total_amount,
+    CASE 
+        WHEN COUNT(DISTINCT ws.ws_order_number) > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS order_status
+FROM 
+    store_sales ss
+LEFT JOIN 
+    customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    RankedSales rd ON ss.ss_item_sk = rd.ws_item_sk AND ss.ss_sold_date_sk = rd.ws_sold_date_sk
+LEFT JOIN 
+    PromoData pd ON rd.ws_item_sk IN (SELECT p.p_item_sk FROM promotion p WHERE pd.p_promo_sk = p.p_promo_sk)
+WHERE 
+    ca.ca_state = 'CA' 
+    AND ss.ss_net_profit > 100
+GROUP BY 
+    ca.ca_city, ca.ca_state
+HAVING 
+    SUM(ws.ws_quantity) > 50 
+    OR MAX(rd.sales_rank) < 5
+ORDER BY 
+    total_revenue DESC;

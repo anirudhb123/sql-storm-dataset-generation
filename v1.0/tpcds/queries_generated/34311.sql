@@ -1,0 +1,73 @@
+
+WITH RECURSIVE Sales_Data AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_sold_date_sk, 
+        cs_item_sk, 
+        total_sales + SUM(cs_sales_price),
+        total_orders + COUNT(cs_order_number)
+    FROM 
+        catalog_sales, Sales_Data
+    WHERE 
+        cs_sold_date_sk = Sales_Data.ws_sold_date_sk 
+        AND cs_item_sk = Sales_Data.ws_item_sk
+    GROUP BY 
+        cs_sold_date_sk, cs_item_sk, total_sales, total_orders
+), 
+Agg_Sales AS (
+    SELECT 
+        sd.ws_sold_date_sk,
+        sd.ws_item_sk,
+        sd.total_sales,
+        sd.total_orders,
+        ROW_NUMBER() OVER (PARTITION BY sd.ws_item_sk ORDER BY sd.total_sales DESC) as sales_rank
+    FROM 
+        Sales_Data sd
+),
+Customer_Summary AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        SUM(COALESCE(ss.ss_net_paid_inc_tax, 0)) AS total_spent,
+        COUNT(ss.ss_ticket_number) AS total_tickets,
+        AVG(COALESCE(cd.cd_dep_count, 0)) AS avg_dependents
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    cs.total_spent,
+    cs.total_tickets,
+    SUM(AS.total_sales) AS total_web_sales,
+    COUNT(DISTINCT cs.c_customer_sk) AS unique_customers
+FROM 
+    customer_address ca
+LEFT JOIN 
+    Customer_Summary cs ON cs.c_customer_sk = ca.ca_address_sk
+LEFT JOIN 
+    Agg_Sales AS AS ON AS.ws_item_sk = cs.total_spent
+WHERE 
+    ca.ca_state IN ('NY', 'CA') 
+    AND cs.total_spent > (SELECT AVG(total_spent) FROM Customer_Summary)
+GROUP BY 
+    ca.ca_city, ca.ca_state, cs.total_spent, cs.total_tickets
+HAVING 
+    COUNT(DISTINCT cs.c_customer_sk) >= 5
+ORDER BY 
+    total_web_sales DESC;

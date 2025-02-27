@@ -1,0 +1,57 @@
+
+WITH CustomerReturnDetails AS (
+    SELECT 
+        c.c_customer_id, 
+        SUM(sr_return_quantity) AS total_returned, 
+        SUM(sr_return_amt) AS total_return_amt, 
+        SUM(sr_return_tax) AS total_return_tax
+    FROM 
+        customer c
+    JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    JOIN 
+        date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    WHERE 
+        d.d_date >= '2022-01-01' AND d.d_date <= '2023-12-31'
+    GROUP BY 
+        c.c_customer_id
+), CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status, 
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+), ReturnStatistics AS (
+    SELECT 
+        r.cd_demo_sk,
+        r.customer_count,
+        COALESCE(rd.total_returned, 0) AS total_returned, 
+        COALESCE(rd.total_return_amt, 0) AS total_return_amt,
+        COALESCE(rd.total_return_tax, 0) AS total_return_tax
+    FROM 
+        CustomerDemographics r
+    LEFT JOIN 
+        CustomerReturnDetails rd ON r.cd_demo_sk = rd.c_customer_id
+)
+
+SELECT 
+    demo.cd_gender,
+    demo.cd_marital_status,
+    SUM(rs.total_returned) AS overall_returned,
+    SUM(rs.total_return_amt) AS overall_return_amount,
+    SUM(rs.total_return_tax) AS overall_return_tax
+FROM 
+    ReturnStatistics rs
+JOIN 
+    customer_demographics demo ON rs.cd_demo_sk = demo.cd_demo_sk
+GROUP BY 
+    demo.cd_gender, demo.cd_marital_status
+ORDER BY 
+    overall_return_amount DESC;

@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.CreationDate, p.PostTypeId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Rank,
+    rp.Upvotes,
+    rp.Downvotes,
+    ISNULL(cp.LastClosedDate, 'No Closure') AS LastClosedDate,
+    CAST(CONVERT(VARCHAR, rp.CreationDate, 120) AS VARCHAR(30)) AS FormattedDate
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.PostId DESC
+
+UNION ALL
+
+SELECT 
+    -1 AS PostId,
+    'Aggregate Statistics' AS Title,
+    SUM(ViewCount) AS ViewCount,
+    NULL AS Rank,
+    SUM(Upvotes) AS Upvotes,
+    SUM(Downvotes) AS Downvotes,
+    NULL AS LastClosedDate,
+    NULL AS FormattedDate
+FROM 
+    RankedPosts;

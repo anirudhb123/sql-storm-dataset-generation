@@ -1,0 +1,74 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_amt) AS total_returned,
+        COUNT(sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        cr.sr_customer_sk,
+        cr.total_returned,
+        cr.return_count,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE 
+            WHEN cr.return_count > 5 THEN 'Frequent Returner'
+            ELSE 'Occasional Returner'
+        END AS returner_type
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        customer_demographics cd ON cr.sr_customer_sk = cd.cd_demo_sk
+    WHERE 
+        cr.total_returned > (SELECT AVG(total_returned) FROM CustomerReturns)
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cc.cc_name,
+        wa.w_warehouse_name,
+        cr.returner_type
+    FROM 
+        customer c
+    LEFT JOIN 
+        HighReturnCustomers hr ON c.c_customer_sk = hr.sr_customer_sk
+    LEFT JOIN 
+        call_center cc ON c.c_current_hdemo_sk = cc.cc_call_center_sk
+    LEFT JOIN 
+        warehouse wa ON c.c_current_addr_sk = wa.w_warehouse_sk
+    WHERE 
+        hr.returner_type IS NOT NULL
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cc_name,
+    ci.w_warehouse_name,
+    hr.returner_type,
+    COALESCE(ROUND(AVG(total_returned), 2), 'N/A') AS avg_return_amt,
+    COUNT(DISTINCT CASE WHEN hr.cd_gender = 'M' THEN ci.c_customer_id END) 
+        OVER() AS male_customers_count,
+    CASE 
+        WHEN ci.c_last_name IS NULL THEN 'Name Unknown' 
+        ELSE CONCAT(ci.c_first_name, ' ', ci.c_last_name) 
+    END AS full_name,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM HighReturnCustomers WHERE sr_customer_sk = ci.c_customer_id) 
+        THEN 'Yes' ELSE 'No' 
+    END AS high_returner_flag
+FROM 
+    CustomerInfo ci
+LEFT JOIN 
+    HighReturnCustomers hr ON ci.c_customer_id = hr.sr_customer_sk
+GROUP BY 
+    ci.c_customer_id, ci.c_first_name, ci.c_last_name, ci.cc_name, ci.w_warehouse_name, hr.returner_type
+ORDER BY 
+    avg_return_amt DESC NULLS LAST;

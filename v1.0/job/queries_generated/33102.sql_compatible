@@ -1,0 +1,67 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        CAST(mt.title AS CHAR) AS path
+    FROM aka_title mt
+    WHERE mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || m.title AS CHAR)
+    FROM aka_title m
+    INNER JOIN movie_hierarchy mh ON m.episode_of_id = mh.movie_id
+),
+actor_movies AS (
+    SELECT 
+        akn.name AS actor_name,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY akn.id ORDER BY mt.production_year DESC) AS movie_rank
+    FROM aka_name akn
+    INNER JOIN cast_info ci ON akn.person_id = ci.person_id
+    INNER JOIN aka_title mt ON ci.movie_id = mt.movie_id
+    WHERE akn.name IS NOT NULL
+),
+keyword_summary AS (
+    SELECT 
+        mt.id AS movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    INNER JOIN aka_title mt ON mk.movie_id = mt.id
+    GROUP BY mt.id
+),
+movie_info_summary AS (
+    SELECT 
+        mt.id AS movie_id,
+        STRING_AGG(mi.info || ' (' || it.info || ')', '; ') AS info_details
+    FROM movie_info mi
+    INNER JOIN movie_info_idx mi_idx ON mi.id = mi_idx.id
+    INNER JOIN info_type it ON mi.info_type_id = it.id
+    INNER JOIN aka_title mt ON mi.movie_id = mt.id
+    WHERE mi.info IS NOT NULL
+    GROUP BY mt.id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(am.actor_name, 'Unknown Actor') AS actor_name,
+    COALESCE(ks.keywords, 'No Keywords') AS keywords,
+    COALESCE(isd.info_details, 'No Information') AS info_details,
+    mh.level,
+    mh.path
+FROM movie_hierarchy mh
+LEFT JOIN actor_movies am ON mh.movie_id = am.movie_id AND am.movie_rank = 1
+LEFT JOIN keyword_summary ks ON mh.movie_id = ks.movie_id
+LEFT JOIN movie_info_summary isd ON mh.movie_id = isd.movie_id
+WHERE mh.production_year > 2000
+ORDER BY mh.production_year DESC, mh.level, mh.path;

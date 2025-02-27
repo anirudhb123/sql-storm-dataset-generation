@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS RankByTags
+    FROM 
+        Posts p 
+    WHERE 
+        p.PostTypeId = 1 -- We're only interested in questions
+),
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS QuestionsCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.AnswerCount) AS TotalAnswers
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+BadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.Title AS PostTitle,
+    rp.ViewCount,
+    ts.Tag,
+    ts.QuestionsCount,
+    ts.TotalViews,
+    ts.TotalScore,
+    ts.TotalAnswers,
+    bc.BadgeCount,
+    bc.GoldBadges,
+    bc.SilverBadges,
+    bc.BronzeBadges
+FROM 
+    RankedPosts rp
+JOIN 
+    TagStatistics ts ON ts.Tag IN (SELECT unnest(string_to_array(substring(rp.Tags, 2, length(rp.Tags) - 2), '><')))
+JOIN 
+    BadgeCounts bc ON rp.OwnerUserId = bc.UserId
+WHERE 
+    rp.RankByTags <= 3 -- Top 3 ranked posts per tag
+ORDER BY 
+    ts.Tag, rp.Score DESC;

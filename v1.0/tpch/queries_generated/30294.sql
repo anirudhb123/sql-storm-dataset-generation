@@ -1,0 +1,57 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey,
+           s_name,
+           s_nationkey,
+           s_acctbal,
+           0 AS level
+    FROM supplier
+    WHERE s_nationkey = (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_nationkey,
+           s.s_acctbal,
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+OrderSummary AS (
+    SELECT o.o_custkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+CombinedResults AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           c.c_acctbal,
+           COALESCE(os.total_revenue, 0) AS revenue,
+           os.order_count,
+           sh.s_name AS supplier_name,
+           sh.level
+    FROM customer c
+    LEFT JOIN OrderSummary os ON c.c_custkey = os.o_custkey
+    LEFT JOIN SupplierHierarchy sh ON c.c_nationkey = sh.s_nationkey
+)
+SELECT c.c_custkey,
+       c.c_name,
+       c.c_acctbal,
+       c.revenue,
+       c.order_count,
+       c.supplier_name,
+       ROUND(AVG(NULLIF(c.revenue, 0)) OVER (PARTITION BY c.c_nationkey), 2) AS avg_revenue_by_nation,
+       CASE 
+           WHEN c.c_acctbal IS NULL THEN 'No Balance'
+           WHEN c.c_acctbal < 1000 THEN 'Low Balance'
+           ELSE 'Sufficient Balance'
+       END AS balance_status
+FROM CombinedResults c
+WHERE c.level BETWEEN 0 AND 2
+ORDER BY revenue DESC, c.c_name ASC
+LIMIT 50;

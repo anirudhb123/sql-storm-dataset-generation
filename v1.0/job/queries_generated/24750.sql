@@ -1,0 +1,92 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m2.id,
+        m2.title,
+        m2.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml 
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m2 ON ml.linked_movie_id = m2.id
+), 
+
+actor_movie_info AS (
+    SELECT 
+        a.name, 
+        a.person_id, 
+        mt.title, 
+        mt.production_year,
+        COUNT(DISTINCT c.id) AS total_roles,
+        SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS roles_with_notes
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title mt ON c.movie_id = mt.id
+    WHERE 
+        a.name IS NOT NULL
+        AND mt.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        a.name, a.person_id, mt.title, mt.production_year
+),
+
+movie_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+),
+
+ranked_movies AS (
+    SELECT 
+        mv.movie_id,
+        mv.title,
+        mv.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mv.production_year ORDER BY COUNT(am.person_id) DESC) AS rank,
+        COALESCE(k.keywords, ARRAY[]::text[]) AS keywords
+    FROM 
+        movie_hierarchy mv 
+    LEFT JOIN 
+        actor_movie_info am ON mv.movie_id = am.movie_id
+    LEFT JOIN 
+        movie_keywords k ON mv.movie_id = k.movie_id
+    GROUP BY 
+        mv.movie_id, mv.title, mv.production_year, k.keywords
+)
+
+SELECT 
+    r.title,
+    r.production_year,
+    r.rank,
+    r.keywords,
+    (SELECT COUNT(*) FROM movie_companies mc WHERE mc.movie_id = r.movie_id) AS company_count,
+    (SELECT COUNT(DISTINCT c.person_id) FROM cast_info c WHERE c.movie_id = r.movie_id) AS unique_actor_count,
+    (SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = r.movie_id AND cc.status_id IS NULL) AS pending_casts
+FROM 
+    ranked_movies r
+WHERE 
+    r.rank <= 5
+ORDER BY 
+    r.production_year DESC, r.rank;

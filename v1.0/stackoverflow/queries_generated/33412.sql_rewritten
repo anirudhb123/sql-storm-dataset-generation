@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE()) 
+), UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+), PostVoteCounts AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v 
+    GROUP BY 
+        v.PostId
+), CommentsRanked AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY c.PostId ORDER BY c.CreationDate DESC) AS RecentCommentRank
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    COALESCE(pvc.UpVotes, 0) AS UpVotes,
+    COALESCE(pvc.DownVotes, 0) AS DownVotes,
+    COALESCE(cr.CommentCount, 0) AS TotalComments
+FROM 
+    Users up
+LEFT JOIN 
+    RankedPosts rp ON up.Id = rp.OwnerUserId
+LEFT JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+LEFT JOIN 
+    PostVoteCounts pvc ON rp.PostId = pvc.PostId
+LEFT JOIN 
+    CommentsRanked cr ON rp.PostId = cr.PostId AND cr.RecentCommentRank = 1
+WHERE 
+    rp.Rank = 1 
+ORDER BY 
+    up.Reputation DESC, rp.Score DESC
+OPTION (RECOMPILE);

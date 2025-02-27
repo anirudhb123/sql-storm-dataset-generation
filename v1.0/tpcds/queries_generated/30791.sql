@@ -1,0 +1,48 @@
+
+WITH RECURSIVE IncomeBands AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound
+    FROM income_band
+    WHERE ib_lower_bound IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+    FROM income_band ib
+    INNER JOIN IncomeBands ib_prev ON ib.ib_lower_bound > ib_prev.ib_upper_bound
+),
+SalesData AS (
+    SELECT
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_net_profit) AS total_profit,
+        COUNT(DISTINCT cs_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY SUM(cs_net_profit) DESC) AS profit_rank
+    FROM catalog_sales
+    GROUP BY cs_item_sk
+)
+SELECT
+    item.i_item_id,
+    item.i_item_desc,
+    sd.total_quantity,
+    sd.total_profit,
+    sd.total_orders,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    ca.ca_city,
+    ca.ca_state
+FROM SalesData sd
+INNER JOIN item ON item.i_item_sk = sd.cs_item_sk
+LEFT JOIN customer c ON c.c_customer_sk = (
+    SELECT c_customer_sk FROM web_sales WHERE ws_item_sk = sd.cs_item_sk LIMIT 1
+)
+LEFT JOIN customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+LEFT JOIN customer_address ca ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN (SELECT DISTINCT cs_item_sk FROM catalog_sales WHERE cs_sales_price < 0) AS NegativeSales 
+        ON NegativeSales.cs_item_sk = sd.cs_item_sk
+WHERE sd.total_profit > 100
+AND cd.cd_gender IS NOT NULL
+AND item.i_current_price > COALESCE((SELECT AVG(i_current_price) FROM item), 0)
+ORDER BY sd.total_profit DESC
+LIMIT 100;
+

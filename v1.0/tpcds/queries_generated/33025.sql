@@ -1,0 +1,60 @@
+
+WITH RECURSIVE SalesGrowth AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (ORDER BY SUM(ss_net_profit) DESC) AS rank
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY s_store_sk
+    HAVING total_net_profit > 0
+),
+Promotions AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT ws_order_number) AS total_sales
+    FROM promotion p
+    JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    WHERE p.p_start_date_sk <= (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+      AND p.p_end_date_sk >= (SELECT MIN(ws_sold_date_sk) FROM web_sales)
+    GROUP BY p.p_promo_id
+),
+CustomerReturns AS (
+    SELECT 
+        sr_cdemo_sk,
+        SUM(sr_return_amt) AS total_returns,
+        COUNT(*) AS return_count
+    FROM store_returns
+    GROUP BY sr_cdemo_sk
+    HAVING total_returns > 100
+),
+StorePerformance AS (
+    SELECT 
+        s.s_store_id,
+        COALESCE(SUM(ss_ext_sales_price), 0) AS total_store_sales,
+        COALESCE(SUM(sr_return_amt), 0) AS total_returns,
+        COALESCE(SUM(ws_ext_sales_price), 0) AS online_sales,
+        COALESCE(cr.return_count, 0) AS total_return_count
+    FROM store s
+    LEFT JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    LEFT JOIN CustomerReturns cr ON s.s_store_sk = cr.sr_cdemo_sk
+    LEFT JOIN web_sales ws ON s.s_store_sk = ws.ws_warehouse_sk
+    GROUP BY s.s_store_id
+)
+SELECT 
+    sp.s_store_id,
+    sp.total_store_sales,
+    sp.total_returns,
+    sp.online_sales,
+    (sp.total_store_sales - sp.total_returns) AS net_sales,
+    sg.total_net_profit AS store_net_profit,
+    CASE
+        WHEN sp.net_sales > 0 THEN ROUND((sg.total_net_profit / NULLIF(sp.net_sales, 0)) * 100, 2)
+        ELSE 0
+    END AS net_profit_margin,
+    p.p_promo_id,
+    p.total_sales AS promo_sales_count
+FROM StorePerformance sp
+JOIN SalesGrowth sg ON sp.s_store_sk = sg.s_store_sk
+LEFT JOIN Promotions p ON p.total_sales > 5
+ORDER BY sp.total_store_sales DESC, net_profit_margin DESC;

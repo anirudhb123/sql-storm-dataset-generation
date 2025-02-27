@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.PostTypeId
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(crt.Name, ', ') AS CloseReason
+    FROM PostHistory ph
+    JOIN CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11) -- Only closing or reopening histories
+    GROUP BY ph.PostId
+),
+HighViewPost AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        ViewCount,
+        COALESCE(STRING_AGG(DISTINCT t.TagName, ', '), 'No Tags') AS Tags
+    FROM RankedPosts rp
+    LEFT JOIN LATERAL (
+        SELECT 
+            unnest(string_to_array((SELECT Tags FROM Posts WHERE Id = rp.PostId), ',')) AS TagName
+    ) AS t ON true
+    WHERE rp.ViewCount > 1000
+    GROUP BY rp.PostId, rp.Title, rp.Score, rp.ViewCount
+),
+FinalResults AS (
+    SELECT
+        hp.PostId, 
+        hp.Title,
+        hp.Score,
+        hp.ViewCount,
+        hp.Tags,
+        cr.CloseReason,
+        hp.RankByScore
+    FROM HighViewPost hp
+    LEFT JOIN CloseReasons cr ON hp.PostId = cr.PostId
+)
+SELECT 
+    frPost.PostId,
+    frPost.Title,
+    frPost.Score,
+    frPost.ViewCount,
+    COALESCE(frPost.Tags, 'No associated tags') AS Tags,
+    COALESCE(frPost.CloseReason, 'Not Closed') AS CloseStatus,
+    CASE WHEN frPost.RankByScore IS NULL THEN 'Unranked' ELSE 'Ranked' END AS RankingStatus,
+    CASE WHEN frPost.Score IS NULL THEN 'Score Unknown' ELSE 'Score Available' END AS ScoreStatus
+FROM FinalResults frPost
+ORDER BY frPost.Score DESC NULLS LAST, frPost.ViewCount DESC;

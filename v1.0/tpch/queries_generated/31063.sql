@@ -1,0 +1,47 @@
+WITH RECURSIVE region_hierarchy AS (
+    SELECT r.r_regionkey, r.r_name, 1 AS level
+    FROM region r
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, rh.level + 1
+    FROM region_hierarchy rh
+    JOIN nation n ON rh.r_regionkey = n.n_regionkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+supplier_stats AS (
+    SELECT s.n_nationkey, COUNT(DISTINCT s.s_suppkey) AS unique_suppliers, SUM(s.s_acctbal) AS total_balance
+    FROM supplier s
+    GROUP BY s.n_nationkey
+),
+customer_order_stats AS (
+    SELECT c.c_nationkey, COUNT(DISTINCT o.o_orderkey) AS order_count, AVG(o.o_totalprice) AS avg_order_total
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_nationkey
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linestatus DESC) AS line_number
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT r.r_name,
+       coalesce(s.unique_suppliers, 0) AS unique_suppliers,
+       coalesce(cs.order_count, 0) AS order_count,
+       coalesce(cs.avg_order_total, 0) AS avg_order_total,
+       ls.net_value,
+       CASE 
+           WHEN ls.net_value IS NOT NULL AND ls.net_value > 1000 THEN 'High Value'
+           WHEN ls.net_value IS NULL THEN 'No Line Items'
+           ELSE 'Standard Value'
+       END AS value_category
+FROM region_hierarchy r
+LEFT JOIN supplier_stats s ON r.r_regionkey = s.n_nationkey
+LEFT JOIN customer_order_stats cs ON r.r_regionkey = cs.c_nationkey
+LEFT JOIN lineitem_summary ls ON cs.order_count > 0 AND ls.l_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+)
+WHERE r.level = 1
+ORDER BY r.r_name, value_category DESC;

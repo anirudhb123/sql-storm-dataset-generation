@@ -1,0 +1,53 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(SUM(mci.company_id), 0) AS company_count,
+        COUNT(DISTINCT c.id) AS cast_count,
+        AVG(CASE WHEN pi.info_type_id = 1 THEN pi.info END) AS average_rating
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = t.id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.id
+    LEFT JOIN 
+        movie_companies mci ON mci.movie_id = t.id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = t.id
+    LEFT JOIN 
+        person_info pi ON pi.person_id = c.person_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+RankedMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.company_count,
+        md.cast_count,
+        md.average_rating,
+        RANK() OVER (ORDER BY md.average_rating DESC) AS rating_rank,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.cast_count DESC) AS yearly_rank
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.company_count,
+    rm.cast_count,
+    rm.average_rating
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rating_rank <= 10
+    OR rm.yearly_rank <= 5
+ORDER BY 
+    rm.average_rating DESC, rm.production_year DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

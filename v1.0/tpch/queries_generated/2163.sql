@@ -1,0 +1,57 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        orders o 
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -12, GETDATE())
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        COUNT(ps.ps_partkey) AS TotalPartsSupplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+),
+CustomerAggregates AS (
+    SELECT 
+        c.c_nationkey,
+        COUNT(DISTINCT o.o_orderkey) AS OrderCount,
+        SUM(o.o_totalprice) AS TotalSales
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_nationkey
+)
+SELECT 
+    n.n_name AS NationName,
+    COALESCE(sa.TotalSales, 0) AS TotalSales,
+    COALESCE(ca.OrderCount, 0) AS NumberOfOrders,
+    COUNT(DISTINCT sd.s_suppkey) AS SupplierCount,
+    AVG(sd.s_acctbal) AS AverageSupplierBalance
+FROM 
+    nation n
+LEFT JOIN 
+    CustomerAggregates ca ON n.n_nationkey = ca.c_nationkey
+LEFT JOIN 
+    SupplierDetails sd ON n.n_nationkey = sd.s_nationkey
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate <= GETDATE())
+GROUP BY 
+    n.n_name
+ORDER BY 
+    TotalSales DESC, NumberOfOrders DESC
+WITH ROLLUP;

@@ -1,0 +1,48 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        t.title,
+        1 AS level
+    FROM
+        aka_title t
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    WHERE 
+        mc.company_type_id IN (
+            SELECT id FROM company_type WHERE kind = 'Production'
+        )
+    
+    UNION ALL
+
+    SELECT
+        m.movie_id,
+        t.title,
+        mh.level + 1
+    FROM
+        movie_hierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title t ON ml.linked_movie_id = t.id
+)
+
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT t.title, ', ') AS titles,
+    COALESCE(NULLIF(SUM(mh.level), 0), 'Not Applicable') AS hierarchy_level,
+    AVG(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS noted_roles
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = c.movie_id
+GROUP BY 
+    a.name
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 5
+ORDER BY 
+    movie_count DESC;

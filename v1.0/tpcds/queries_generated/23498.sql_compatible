@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        'Web' AS sale_channel,
+        ws_item_sk AS item_sk,
+        ws_order_number,
+        ws_quantity AS quantity,
+        ws_net_profit AS net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rank_profit
+    FROM 
+        web_sales 
+    WHERE 
+        ws_net_profit > 0 
+        AND ws_sold_date_sk > (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+),
+StoreSales AS (
+    SELECT 
+        'Store' AS sale_channel,
+        ss_item_sk AS item_sk,
+        ss_ticket_number,
+        ss_quantity AS quantity,
+        ss_net_profit AS net_profit,
+        RANK() OVER (PARTITION BY ss_item_sk ORDER BY ss_net_profit DESC) AS rank_profit
+    FROM 
+        store_sales 
+    WHERE 
+        ss_net_profit > 0 
+        AND ss_sold_date_sk > (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+),
+CombinedSales AS (
+    SELECT * FROM RankedSales
+    UNION ALL
+    SELECT * FROM StoreSales
+),
+TopSales AS (
+    SELECT 
+        sale_channel,
+        item_sk,
+        SUM(quantity) AS total_quantity,
+        SUM(net_profit) AS total_profit
+    FROM CombinedSales
+    WHERE rank_profit <= 5
+    GROUP BY sale_channel, item_sk
+)
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    ca.ca_state,
+    SUM(ts.total_quantity) AS total_quantity_sold,
+    SUM(ts.total_profit) AS total_profit_generated,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ts.total_profit) OVER (PARTITION BY ca.ca_state) AS median_profit_per_state
+FROM customer c
+     JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+     JOIN TopSales ts ON ts.item_sk IN (
+        SELECT i_item_sk 
+        FROM item 
+        WHERE i_current_price BETWEEN 10 AND 100
+     )
+WHERE 
+    c.c_preferred_cust_flag = 'Y'
+    AND (ca.ca_state IS NOT NULL OR ca.ca_city IS NOT NULL)
+GROUP BY c.c_customer_id, ca.ca_city, ca.ca_state
+HAVING SUM(ts.total_profit) > (
+    SELECT AVG(total_profit_generated)
+    FROM TopSales
+)
+ORDER BY total_profit_generated DESC;

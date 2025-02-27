@@ -1,0 +1,85 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVotingSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    INNER JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(p.ViewCount) AS TotalViews,
+        RANK() OVER (ORDER BY SUM(p.ViewCount) DESC) AS Rank
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS TagCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 5
+)
+SELECT 
+    ph.PostId,
+    ph.Title,
+    ps.UpVotes,
+    ps.DownVotes,
+    u.DisplayName AS TopUser,
+    u.TotalViews,
+    t.TagName,
+    t.TagCount
+FROM 
+    RecursivePostHierarchy ph
+LEFT JOIN 
+    PostVotingSummary ps ON ph.PostId = ps.PostId
+JOIN 
+    TopUsers u ON u.Rank <= 10
+JOIN 
+    PopularTags t ON t.TagCount >= 3
+WHERE 
+    ph.Level <= 2
+ORDER BY 
+    ph.Title, ps.UpVotes DESC;

@@ -1,0 +1,85 @@
+WITH TagUsage AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(MAX(V.CreationDate), '1970-01-01'::timestamp) AS LastVoteDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId IN (1, 2) 
+    GROUP BY 
+        P.Id
+),
+PostRanking AS (
+    SELECT
+        P.TopTag,
+        SUM(P.VoteCount) AS TotalVotes
+    FROM (
+        SELECT 
+            T.Tag AS TopTag,
+            PA.PostId,
+            PA.ViewCount,
+            PA.Score,
+            RANK() OVER (PARTITION BY T.Tag ORDER BY PA.Score DESC) AS Rank,
+            (SELECT COUNT(*) FROM Votes WHERE PostId = PA.PostId AND VoteTypeId = 2) AS VoteCount
+        FROM 
+            TagUsage T
+        JOIN 
+            Posts P ON P.Tags LIKE '%' || T.Tag || '%'
+        JOIN 
+            PostActivity PA ON P.Id = PA.PostId
+    ) AS P
+    WHERE P.Rank <= 5
+    GROUP BY P.TopTag
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.BadgeCount,
+    U.GoldBadges,
+    U.SilverBadges,
+    U.BronzeBadges,
+    PT.Tag,
+    PT.TotalVotes
+FROM 
+    UserReputation U
+JOIN 
+    PostRanking PT ON PT.Tag IN (SELECT Tag FROM TagUsage)
+ORDER BY 
+    U.Reputation DESC, PT.TotalVotes DESC
+LIMIT 10;

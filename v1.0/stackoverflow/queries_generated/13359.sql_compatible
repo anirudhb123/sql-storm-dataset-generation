@@ -1,0 +1,61 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(c.Id, 0)) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostTypeStats AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(p.Id) AS PostCount,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        pt.Name
+),
+BadgeStats AS (
+    SELECT 
+        b.Name AS BadgeName,
+        COUNT(b.Id) AS AwardCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.Name
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.PostCount,
+    us.TotalScore,
+    us.TotalViews,
+    us.TotalComments,
+    pts.PostType,
+    pts.PostCount AS PostsByType,
+    pts.AverageScore AS AvgScoreByType,
+    pts.TotalViews AS TotalViewsByType,
+    bs.BadgeName,
+    COALESCE(bs.AwardCount, 0) AS TotalAwards
+FROM 
+    UserStats us
+JOIN 
+    PostTypeStats pts ON us.PostCount > 0
+LEFT JOIN 
+    BadgeStats bs ON us.UserId = bs.Id
+ORDER BY 
+    us.TotalScore DESC, us.TotalViews DESC, us.PostCount DESC;

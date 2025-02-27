@@ -1,0 +1,78 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND 
+        o.o_orderdate < DATE '1997-01-01'
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 5000
+),
+PartSupplierData AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        s.s_name,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS supplier_rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+HighSupplyParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        PartSupplierData p
+    WHERE 
+        p.supplier_rank = 1
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderstatus,
+    o.o_totalprice,
+    o.o_orderdate,
+    c.c_name AS customer_name,
+    h.total_spent,
+    p.p_name AS part_name,
+    p.total_avail_qty
+FROM 
+    RankedOrders o
+FULL OUTER JOIN 
+    HighValueCustomers h ON o.o_orderkey = h.c_custkey
+LEFT JOIN 
+    HighSupplyParts p ON o.o_orderkey = p.p_partkey
+WHERE 
+    (o.o_orderstatus = 'O' AND o.o_totalprice > 200)
+    OR (h.total_spent IS NOT NULL AND h.total_spent > 1000)
+ORDER BY 
+    o.o_orderdate DESC, 
+    h.total_spent DESC;

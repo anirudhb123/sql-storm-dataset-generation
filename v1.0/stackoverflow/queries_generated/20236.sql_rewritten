@@ -1,0 +1,65 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.Reputation
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReopenCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.Tags
+),
+BubbleList AS (
+    SELECT 
+        p.PostId,
+        pd.Title,
+        pd.Score,
+        pd.ViewCount,
+        pd.CommentCount,
+        pd.CloseReopenCount,
+        CASE 
+            WHEN pd.CloseReopenCount > 0 THEN 'Closed/Reopened'
+            ELSE 'Active'
+        END AS PostStatus,
+        ROW_NUMBER() OVER (PARTITION BY pd.CloseReopenCount ORDER BY pd.Score DESC) AS BubbleRank
+    FROM PostDetails pd
+    JOIN Posts p ON pd.PostId = p.Id
+)
+SELECT 
+    u.DisplayName,
+    us.Reputation,
+    us.TotalUpvotes,
+    us.TotalDownvotes,
+    bl.Title,
+    bl.Score,
+    bl.ViewCount,
+    bl.CommentCount,
+    bl.PostStatus,
+    bl.BubbleRank,
+    (SELECT COUNT(*) FROM Posts ps WHERE ps.OwnerUserId = u.Id AND ps.CreationDate < cast('2024-10-01' as date)) AS OldPostCount,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t
+     WHERE t.Id IN (SELECT UNNEST(string_to_array(bl.Title, ' '))::int))
+    ) AS RelevantTags
+FROM UserStats us
+JOIN Users u ON u.Id = us.UserId
+JOIN BubbleList bl ON bl.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+WHERE us.Reputation > (SELECT AVG(Reputation) FROM Users) 
+AND bl.BubbleRank <= 5
+ORDER BY us.Reputation DESC, bl.Score DESC;

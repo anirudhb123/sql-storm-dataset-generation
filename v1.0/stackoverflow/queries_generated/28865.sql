@@ -1,0 +1,65 @@
+WITH TagList AS (
+    SELECT DISTINCT
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><'))) AS Tag
+    FROM Posts
+    WHERE PostTypeId = 1 -- Only questions for tagging
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        ARRAY_AGG(DISTINCT TL.Tag) AS Tags,
+        U.DisplayName AS OwnerDisplayName,
+        P.AnswerCount,
+        P.ViewCount,
+        P.Score
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    JOIN TagList TL ON TL.Tag = ANY (string_to_array(SUBSTRING(P.Tags FROM 2 FOR LENGTH(P.Tags) - 2), '><'))
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY P.Id, U.DisplayName
+),
+UserPostCounts AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostsCreated,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS Questions,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS Answers
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    UP.DisplayName AS UserName,
+    UBC.BadgeCount,
+    UBC.GoldBadges,
+    UBC.SilverBadges,
+    UBC.BronzeBadges,
+    UPC.PostsCreated,
+    UPC.Questions,
+    UPC.Answers,
+    PA.Title AS PopularPost,
+    PA.Score AS PostScore,
+    PA.ViewCount AS PopularPostViews,
+    PA.Tags AS PopularPostTags
+FROM UserBadges UBC
+JOIN UserPostCounts UPC ON UBC.UserId = UPC.UserId
+LEFT JOIN PostAnalytics PA ON UPC.UserId = PA.OwnerDisplayName
+WHERE UBC.BadgeCount > 0
+ORDER BY UBC.BadgeCount DESC, PA.ViewCount DESC
+LIMIT 10;

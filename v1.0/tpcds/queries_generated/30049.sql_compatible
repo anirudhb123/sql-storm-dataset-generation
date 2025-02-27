@@ -1,0 +1,43 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        0 AS level
+    FROM 
+        customer
+    WHERE 
+        c_customer_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        s.ss_customer_sk,
+        CONCAT(s.c_first_name, ' - Order #', s.ss_ticket_number) AS c_first_name,
+        sh.c_last_name,
+        level + 1
+    FROM 
+        store_sales s
+    JOIN 
+        sales_hierarchy sh ON s.ss_customer_sk = sh.c_customer_sk
+)
+SELECT 
+    sh.c_customer_sk,
+    sh.c_first_name,
+    sh.c_last_name,
+    COUNT(s.ss_ticket_number) AS order_count,
+    SUM(s.ss_sales_price) AS total_sales,
+    MAX(s.ss_sold_date_sk) AS last_order_date,
+    ROW_NUMBER() OVER (PARTITION BY sh.c_customer_sk ORDER BY SUM(s.ss_sales_price) DESC) AS sales_rank
+FROM 
+    sales_hierarchy sh
+LEFT JOIN 
+    store_sales s ON sh.c_customer_sk = s.ss_customer_sk
+GROUP BY 
+    sh.c_customer_sk, sh.c_first_name, sh.c_last_name
+HAVING 
+    SUM(s.ss_sales_price) IS NOT NULL
+ORDER BY 
+    total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

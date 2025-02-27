@@ -1,0 +1,85 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title AS m
+    WHERE
+        m.kind_id = 1  
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        movie_link AS ml
+    JOIN
+        movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+    JOIN
+        aka_title AS m ON ml.linked_movie_id = m.id
+    WHERE
+        m.kind_id = 1
+),
+actors_info AS (
+    SELECT
+        a.id AS actor_id,
+        a.name AS actor_name,
+        c.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS role_order
+    FROM
+        cast_info AS c
+    JOIN
+        aka_name AS a ON c.person_id = a.person_id
+    WHERE
+        c.nr_order IS NOT NULL
+),
+movie_keywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword AS mk
+    JOIN
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+),
+aggregated_movie_info AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(ki.keywords, 'No keywords') AS keywords,
+        COUNT(DISTINCT ai.actor_id) AS actor_count,
+        SUM(CASE WHEN ai.role_order <= 3 THEN 1 ELSE 0 END) AS top_3_actors
+    FROM
+        movie_hierarchy AS mh
+    LEFT JOIN
+        actors_info AS ai ON mh.movie_id = ai.movie_id
+    LEFT JOIN
+        movie_keywords AS ki ON mh.movie_id = ki.movie_id
+    GROUP BY
+        mh.movie_id, mh.title, mh.production_year
+)
+SELECT
+    ami.title,
+    ami.production_year,
+    ami.keywords,
+    ami.actor_count,
+    ami.top_3_actors,
+    CASE
+        WHEN ami.actor_count = 0 THEN 'No cast'
+        WHEN ami.actor_count < 5 THEN 'Few casts'
+        ELSE 'Many casts'
+    END AS cast_category
+FROM
+    aggregated_movie_info AS ami
+WHERE
+    ami.production_year >= 2000
+ORDER BY
+    ami.production_year DESC, ami.actor_count DESC;

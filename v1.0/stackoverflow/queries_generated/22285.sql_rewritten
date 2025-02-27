@@ -1,0 +1,111 @@
+WITH UserVotes AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 2) AS UpVotes,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 3) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId = 8 THEN V.BountyAmount ELSE 0 END) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(P.Score, 0) AS Score,
+        COALESCE(P.AnswerCount, 0) AS AnswerCount,
+        COALESCE(P.ViewCount, 0) AS ViewCount,
+        COUNT(C.Id) AS CommentCount,
+        MAX(C.CreationDate) AS LastCommentDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id
+),
+PostBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        MAX(B.Class) AS HighestBadgeClass
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+        COALESCE(UB.HighestBadgeClass, 0) AS HighestBadge,
+        COALESCE(V.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(V.DownVotes, 0) AS TotalDownVotes,
+        COALESCE(V.TotalBounty, 0) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostBadges UB ON U.Id = UB.UserId
+    LEFT JOIN 
+        UserVotes V ON U.Id = V.UserId
+),
+QuestionDetails AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.Score,
+        PS.AnswerCount,
+        PS.ViewCount,
+        PS.CommentCount,
+        PS.LastCommentDate,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation AS OwnerReputation,
+        U.AccountId AS OwnerAccountId
+    FROM 
+        PostStatistics PS
+    JOIN 
+        Posts P ON PS.PostId = P.Id
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+)
+SELECT 
+    QD.Title,
+    QD.OwnerDisplayName,
+    QD.OwnerReputation,
+    QD.Score,
+    QD.AnswerCount,
+    QD.ViewCount,
+    QD.CommentCount,
+    QD.LastCommentDate,
+    UA.BadgeCount,
+    UA.HighestBadge,
+    UA.TotalUpVotes,
+    UA.TotalDownVotes,
+    UA.TotalBounty,
+    CASE 
+        WHEN QD.Score > 10 THEN 'Popular'
+        WHEN QD.Score BETWEEN 5 AND 10 THEN 'Moderate'
+        ELSE 'New'
+    END AS PopularityStatus,
+    CASE 
+        WHEN QD.LastCommentDate IS NOT NULL 
+            THEN DATEDIFF('DAY', QD.LastCommentDate, cast('2024-10-01 12:34:56' as timestamp)) 
+            ELSE NULL 
+    END AS DaysSinceLastComment
+FROM 
+    QuestionDetails QD
+JOIN 
+    UserActivity UA ON QD.OwnerAccountId = UA.UserId
+WHERE 
+    QD.CommentCount > 0
+ORDER BY 
+    QD.Score DESC, 
+    QD.ViewCount ASC
+LIMIT 50;

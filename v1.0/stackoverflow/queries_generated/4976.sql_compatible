@@ -1,0 +1,76 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.OwnerUserId, 
+        p.PostTypeId, 
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+), 
+UserScores AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+), 
+MostActiveUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        PostCount, 
+        TotalBounty,
+        DENSE_RANK() OVER (ORDER BY PostCount DESC) AS UserRank
+    FROM 
+        UserScores
+), 
+TopPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.Score, 
+        rp.ViewCount, 
+        u.DisplayName AS OwnerDisplayName,
+        up.Reputation
+    FROM 
+        RecentPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        MostActiveUsers up ON rp.OwnerUserId = up.UserId
+    WHERE 
+        rp.rn = 1 AND 
+        (up.UserRank IS NOT NULL AND up.UserRank <= 10)
+)
+SELECT 
+    tp.Title, 
+    tp.CreationDate, 
+    tp.Score, 
+    tp.ViewCount, 
+    tp.OwnerDisplayName,
+    COALESCE(up.Reputation, 'No Rank') AS Reputation
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    MostActiveUsers up ON tp.OwnerUserId = up.UserId
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC
+LIMIT 50;

@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastUpdated
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 12) -- Closed or Deleted Posts
+    GROUP BY 
+        ph.PostId
+),
+ClosedPostInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(h.HistoryCount, 0) AS ClosedHistoryCount,
+        PH.LastUpdated
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistories h ON p.Id = h.PostId
+    INNER JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        pt.Id IN (1, 2) -- Questions and Answers
+)
+SELECT 
+    u.DisplayName,
+    ub.Badges,
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    cp.ClosedHistoryCount,
+    cp.LastUpdated,
+    CASE 
+        WHEN cp.ClosedHistoryCount > 0 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    ClosedPostInfo cp ON rp.PostId = cp.PostId
+WHERE 
+    ub.BadgeCount > 0 -- Only users with badges
+    OR cp.ClosedHistoryCount > 0 -- OR posts that have been closed
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate ASC
+LIMIT 100;

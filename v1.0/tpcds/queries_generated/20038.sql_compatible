@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        SUM(ws.ws_sales_price) OVER (PARTITION BY ws.ws_item_sk) AS total_sales
+    FROM web_sales ws
+    WHERE ws.ws_sales_price IS NOT NULL
+),
+TopSales AS (
+    SELECT
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        rs.ws_sales_price,
+        rs.total_sales
+    FROM RankedSales rs
+    WHERE rs.price_rank <= 5
+),
+ReturnData AS (
+    SELECT
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returns
+    FROM catalog_returns cr
+    GROUP BY cr.cr_item_sk
+),
+FinalReport AS (
+    SELECT 
+        ts.ws_item_sk,
+        ts.ws_order_number,
+        ts.ws_sales_price,
+        COALESCE(rd.total_returns, 0) AS total_returns,
+        CASE 
+            WHEN COALESCE(rd.total_returns, 0) > 0 THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status,
+        CASE 
+            WHEN ts.total_sales > 1000 THEN 'High Sales'
+            WHEN ts.total_sales BETWEEN 500 AND 1000 THEN 'Medium Sales'
+            ELSE 'Low Sales'
+        END AS sales_category
+    FROM TopSales ts
+    LEFT JOIN ReturnData rd ON ts.ws_item_sk = rd.cr_item_sk
+)
+SELECT 
+    f.ws_item_sk,
+    f.ws_order_number,
+    f.ws_sales_price,
+    f.total_returns,
+    f.return_status,
+    f.sales_category,
+    STRING_AGG(DISTINCT CONCAT('Order: ', f.ws_order_number, ' | Price: ', f.ws_sales_price), ', ') 
+        OVER (PARTITION BY f.ws_item_sk) AS all_sales_info
+FROM FinalReport f
+WHERE f.sales_category = 'High Sales'
+   OR f.return_status = 'Returned'
+ORDER BY f.ws_item_sk, f.ws_order_number DESC;

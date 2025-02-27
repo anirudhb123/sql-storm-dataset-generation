@@ -1,0 +1,69 @@
+
+WITH AddressParts AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+DemographicCounts AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        COUNT(*) AS household_count
+    FROM 
+        household_demographics
+    JOIN 
+        customer ON hd_demo_sk = c_current_hdemo_sk
+    GROUP BY 
+        cd_demo_sk, 
+        cd_gender
+),
+SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(COALESCE(ws.ws_net_profit, 0)) AS total_web_profit,
+        SUM(COALESCE(ss.ss_net_profit, 0)) AS total_store_profit,
+        SUM(COALESCE(cs.cs_net_profit, 0)) AS total_catalog_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    a.full_address,
+    a.ca_city,
+    a.ca_state,
+    a.ca_zip,
+    d.cd_gender,
+    d.household_count,
+    cs.total_web_profit,
+    cs.total_store_profit,
+    cs.total_catalog_profit
+FROM 
+    AddressParts a
+JOIN 
+    DemographicCounts d ON d.cd_demo_sk = (SELECT c.c_current_hdemo_sk FROM customer c WHERE c.c_current_addr_sk = a.ca_address_sk LIMIT 1)
+JOIN 
+    CustomerSales cs ON cs.c_customer_sk = (SELECT c.c_customer_sk FROM customer c WHERE c.c_current_addr_sk = a.ca_address_sk LIMIT 1)
+ORDER BY 
+    d.household_count DESC, cs.total_web_profit DESC;

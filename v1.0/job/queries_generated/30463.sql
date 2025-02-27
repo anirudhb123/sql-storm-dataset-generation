@@ -1,0 +1,100 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    UNION ALL
+    SELECT
+        m.id,
+        m.title,
+        m.production_year,
+        h.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        MovieHierarchy h ON ml.linked_movie_id = h.movie_id
+    JOIN
+        aka_title m ON ml.movie_id = m.id
+    WHERE
+        h.level < 3  -- Limit hierarchy depth
+),
+CastWithRole AS (
+    SELECT
+        ci.movie_id,
+        c.id AS person_id,
+        c.role_id,
+        c.nr_order,
+        ak.name AS actor_name,
+        rt.role AS role_name
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN
+        role_type rt ON ci.role_id = rt.id
+),
+MovieWithKeywords AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        m.id, m.title, m.production_year
+),
+CastWithCompanyInfo AS (
+    SELECT
+        cwr.movie_id,
+        cwr.actor_name,
+        cwr.role_name,
+        company.name AS company_name,
+        company.country_code
+    FROM
+        CastWithRole cwr
+    LEFT JOIN
+        movie_companies mc ON cwr.movie_id = mc.movie_id
+    LEFT JOIN
+        company_name company ON mc.company_id = company.id
+),
+FinalResult AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT cwr.person_id) AS total_cast,
+        w.keywords,
+        STRING_AGG(DISTINCT cwr.company_name, ', ') AS production_companies
+    FROM
+        MovieHierarchy mh
+    LEFT JOIN
+        CastWithCompanyInfo cwr ON mh.movie_id = cwr.movie_id
+    LEFT JOIN
+        MovieWithKeywords w ON mh.movie_id = w.movie_id
+    GROUP BY
+        mh.movie_id, mh.title, mh.production_year, w.keywords
+    HAVING
+        COUNT(DISTINCT cwr.person_id) > 1   -- Only movies with more than one cast member
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_cast > 5 THEN 'Large Cast'
+        WHEN total_cast > 1 THEN 'Featured Cast'
+        ELSE 'Solo Cast' 
+    END AS cast_size_category
+FROM
+    FinalResult
+ORDER BY 
+    total_cast DESC,
+    production_year DESC;

@@ -1,0 +1,71 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS total_actors,
+        SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS featured_actors,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_in_year
+    FROM 
+        aka_title m
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+    GROUP BY 
+        m.title, m.production_year
+), 
+high_featured_movies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.total_actors,
+        rm.featured_actors,
+        CASE 
+            WHEN rm.featured_actors > 50 THEN 'High'
+            WHEN rm.featured_actors BETWEEN 20 AND 50 THEN 'Medium'
+            ELSE 'Low'
+        END AS featured_actor_category
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.rank_in_year <= 10
+), 
+actor_movies AS (
+    SELECT 
+        a.name AS actor_name,
+        m.title AS movie_title,
+        CASE 
+            WHEN m.production_year > 2000 THEN 'Post-2000'
+            ELSE 'Pre-2000'
+        END AS period
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title m ON c.movie_id = m.id
+)
+
+SELECT 
+    hm.title,
+    hm.production_year,
+    hm.featured_actors,
+    hm.featured_actor_category,
+    STRING_AGG(DISTINCT am.actor_name ORDER BY am.actor_name) AS actor_names,
+    MAX(am.period) AS movie_period,
+    CASE 
+        WHEN hm.featured_actors IS NULL THEN 'No Featured Actors'
+        WHEN hm.featured_actors BETWEEN 1 AND 5 THEN 'Few Featured Actors'
+        ELSE 'Many Featured Actors'
+    END AS featured_actor_status
+FROM 
+    high_featured_movies hm
+LEFT JOIN 
+    actor_movies am ON hm.title = am.movie_title
+GROUP BY 
+    hm.title, hm.production_year, hm.featured_actors, hm.featured_actor_category
+ORDER BY 
+    hm.featured_actors DESC,
+    hm.production_year DESC
+LIMIT 20;

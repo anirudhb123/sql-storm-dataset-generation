@@ -1,0 +1,84 @@
+
+WITH UserReputation AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        CASE 
+            WHEN U.Reputation IS NULL THEN 'No Reputation'
+            WHEN U.Reputation < 100 THEN 'Low Reputation'
+            WHEN U.Reputation BETWEEN 100 AND 500 THEN 'Moderate Reputation'
+            ELSE 'High Reputation'
+        END AS ReputationCategory
+    FROM Users U
+),
+PostsWithTags AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.Tags,
+        STRING_AGG(T.TagName, ', ') AS TagList
+    FROM Posts P
+    LEFT JOIN Tags T ON T.Id IN (SELECT UNNEST(string_to_array(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '><')))
+    GROUP BY P.Id
+),
+ClosedPosts AS (
+    SELECT
+        P.Id,
+        P.Title,
+        PH.Comment AS CloseReason,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY P.Id, PH.Comment
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        ARRAY_AGG(B.Name) AS BadgeNames,
+        COUNT(*) AS BadgeCount
+    FROM Badges B
+    GROUP BY B.UserId
+),
+AggregatedData AS (
+    SELECT
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(UB.BadgeCount, 0) AS TotalBadges,
+        COALESCE(PW.PostCount, 0) AS TotalPosts,
+        COALESCE(CP.Count, 0) AS ClosedPostCount,
+        U.UserId
+    FROM UserReputation U
+    LEFT JOIN UserBadges UB ON U.UserId = UB.UserId
+    LEFT JOIN (SELECT OwnerUserId, COUNT(*) AS PostCount FROM Posts GROUP BY OwnerUserId) PW ON U.UserId = PW.OwnerUserId
+    LEFT JOIN (SELECT OwnerUserId, COUNT(*) AS Count FROM ClosedPosts GROUP BY OwnerUserId) CP ON U.UserId = CP.OwnerUserId
+)
+SELECT 
+    AD.DisplayName,
+    AD.Reputation,
+    AD.TotalBadges,
+    AD.TotalPosts,
+    AD.ClosedPostCount,
+    CASE 
+        WHEN AD.TotalPosts = 0 THEN 'No Posts'
+        WHEN AD.TotalPosts > 10 THEN 'Highly Active'
+        ELSE 'Moderately Active'
+    END AS ActivityLevel,
+    (SELECT STRING_AGG(PWT.TagList, ', ') 
+     FROM PostsWithTags PWT 
+     WHERE PWT.PostId IN (
+        SELECT P.Id 
+        FROM Posts P 
+        WHERE P.OwnerUserId = AD.UserId 
+        ORDER BY P.CreationDate DESC 
+        LIMIT 5
+    )) AS RecentPostTags
+FROM AggregatedData AD
+WHERE AD.Reputation > 0 
+GROUP BY AD.DisplayName, AD.Reputation, AD.TotalBadges, AD.TotalPosts, AD.ClosedPostCount
+ORDER BY AD.TotalPosts DESC, AD.Reputation DESC
+LIMIT 50;

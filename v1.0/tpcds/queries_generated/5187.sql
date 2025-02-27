@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        w.warehouse_name,
+        s.store_name,
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (PARTITION BY w.warehouse_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.warehouse_sk
+    JOIN 
+        store s ON ws.ws_ship_addr_sk = s.s_addr_sk
+    GROUP BY 
+        w.warehouse_name, s.store_name, i.i_item_id
+),
+TopSellingItems AS (
+    SELECT 
+        warehouse_name, 
+        store_name,
+        i_item_id, 
+        total_quantity, 
+        total_profit 
+    FROM 
+        RankedSales 
+    WHERE 
+        profit_rank <= 5
+),
+CustomerReturns AS (
+    SELECT 
+        sr.return_quantity AS return_qty,
+        sr.return_amt AS return_amount,
+        i.i_item_id 
+    FROM 
+        store_returns sr
+    JOIN 
+        item i ON sr.sr_item_sk = i.i_item_sk
+)
+SELECT 
+    tsi.warehouse_name,
+    tsi.store_name,
+    tsi.i_item_id,
+    tsi.total_quantity,
+    tsi.total_profit,
+    COALESCE(SUM(cr.return_qty), 0) AS total_return_qty,
+    COALESCE(SUM(cr.return_amount), 0) AS total_return_amt,
+    CASE 
+        WHEN tsi.total_profit > 0 THEN ROUND((COALESCE(SUM(cr.return_qty), 0) / tsi.total_quantity) * 100, 2)
+        ELSE 0 
+    END AS return_percentage
+FROM 
+    TopSellingItems tsi
+LEFT JOIN 
+    CustomerReturns cr ON tsi.i_item_id = cr.i_item_id
+GROUP BY 
+    tsi.warehouse_name, tsi.store_name, tsi.i_item_id, tsi.total_quantity, tsi.total_profit
+ORDER BY 
+    tsi.warehouse_name, tsi.store_name, tsi.total_profit DESC;

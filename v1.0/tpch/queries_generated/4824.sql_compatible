@@ -1,0 +1,64 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        o.o_orderpriority
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+    AND 
+        o.o_totalprice > 500
+),
+PartSupplies AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    c.c_name,
+    co.o_orderkey,
+    co.o_orderdate,
+    ps.p_partkey,
+    ps.total_available,
+    ps.avg_supply_cost,
+    ss.s_name AS supplier_name,
+    ss.rank AS supplier_rank,
+    CASE 
+        WHEN ps.total_available IS NULL THEN 'Out of Stock' 
+        ELSE 'In Stock'
+    END AS stock_status
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    PartSupplies ps ON ps.p_partkey = co.o_orderkey
+LEFT JOIN 
+    RankedSuppliers ss ON ss.s_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = co.c_custkey) AND ss.rank = 1
+WHERE 
+    ps.total_available IS NOT NULL OR ss.s_suppkey IS NOT NULL
+ORDER BY 
+    co.o_orderdate DESC,
+    co.o_totalprice DESC;

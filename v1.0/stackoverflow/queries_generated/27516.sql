@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS Author,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, ',')) AS tag ON true
+    LEFT JOIN 
+        Tags t ON tag::varchar = t.TagName
+    WHERE 
+        p.PostTypeId = 1  -- Filter to only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+), PostScores AS (
+    SELECT 
+        PostId,
+        Title,
+        ViewCount,
+        CreationDate,
+        Score,
+        Author,
+        UpVotes,
+        DownVotes,
+        Tags,
+        (ViewCount + (UpVotes - DownVotes) * 10) AS PostScore  -- Weighted scoring
+    FROM 
+        RankedPosts
+)
+SELECT 
+    PostId,
+    Title,
+    ViewCount,
+    CreationDate,
+    Score,
+    Author,
+    UpVotes,
+    DownVotes,
+    Tags,
+    PostScore,
+    RANK() OVER (ORDER BY PostScore DESC) AS Rank
+FROM 
+    PostScores
+WHERE 
+    PostScore > 0  -- Only consider posts with positive score
+ORDER BY 
+    Rank
+LIMIT 
+    10;  -- Top 10 posts
+This query benchmarks string processing by aggregating tags from multiple posts, while ranking these posts based on a dynamically calculated score derived from views, upvotes, and downvotes.

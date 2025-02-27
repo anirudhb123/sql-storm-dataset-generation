@@ -1,0 +1,68 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        COALESCE(SUM(P.ViewCount), 0) AS TotalViews,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId AND C.UserId = U.Id
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+RankedUsers AS (
+    SELECT 
+        UA.*,
+        RANK() OVER (ORDER BY UA.Reputation DESC, UA.TotalViews DESC, UA.TotalPosts DESC) AS UserRank
+    FROM 
+        UserActivity UA
+),
+TopActiveUsers AS (
+    SELECT 
+        UserId, DisplayName, Reputation, TotalBounties, TotalViews, TotalComments, TotalPosts, TotalBadges, UserRank
+    FROM 
+        RankedUsers
+    WHERE 
+        UserRank <= 10
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PH.CreationDate AS ClosedDate,
+        PH.UserDisplayName AS ClosedBy
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId = 10 -- Post Closed
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation,
+    U.TotalBounties,
+    U.TotalViews,
+    U.TotalComments,
+    U.TotalPosts,
+    U.TotalBadges,
+    CP.Title AS ClosedPostTitle,
+    CP.ClosedDate,
+    CP.ClosedBy
+FROM 
+    TopActiveUsers U
+LEFT JOIN 
+    ClosedPosts CP ON U.TotalPosts > 0
+ORDER BY 
+    U.UserRank, U.DisplayName;

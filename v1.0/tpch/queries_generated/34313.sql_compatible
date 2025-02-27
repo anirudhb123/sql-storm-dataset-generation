@@ -1,0 +1,48 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+NationDetails AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name, COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_nationkey, n.n_name, r.r_name
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty >= 10
+)
+SELECT nh.n_name, nh.r_name, 
+       SUM(COALESCE(co.total_spent, 0)) AS total_spent,
+       MAX(su.s_acctbal) AS max_supplier_acctbal,
+       SUM(ps.ps_supplycost) AS total_supplycost
+FROM NationDetails nh
+LEFT JOIN CustomerOrders co ON nh.customer_count > 0
+LEFT JOIN SupplierHierarchy su ON nh.n_nationkey = su.s_nationkey
+LEFT JOIN PartSupplier ps ON ps.rank = 1 
+WHERE nh.customer_count IS NOT NULL
+GROUP BY nh.n_name, nh.r_name
+HAVING SUM(COALESCE(co.total_spent, 0)) > (SELECT AVG(total_spent) FROM CustomerOrders)
+ORDER BY total_spent DESC, max_supplier_acctbal ASC;

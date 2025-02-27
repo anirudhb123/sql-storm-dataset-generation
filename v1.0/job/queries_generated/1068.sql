@@ -1,0 +1,58 @@
+WITH RankedMovies AS (
+    SELECT
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.id) AS cast_count,
+        AVG(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note_ratio,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.id) DESC) AS rn
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info c ON t.id = c.movie_id
+    GROUP BY
+        t.title, t.production_year
+),
+TopMovies AS (
+    SELECT
+        title,
+        production_year,
+        cast_count,
+        has_note_ratio
+    FROM
+        RankedMovies
+    WHERE
+        rn <= 5
+),
+NullCheck AS (
+    SELECT
+        m.title,
+        COALESCE(m.production_year, 'Unknown') AS production_year,
+        COALESCE(m.cast_count, 0) AS cast_count,
+        m.has_note_ratio
+    FROM
+        TopMovies m
+)
+SELECT
+    n.name,
+    nt.kind AS title_kind,
+    nm.info AS person_information,
+    nm.production_year,
+    n.gender,
+    CASE
+        WHEN nm.cast_count > 0 THEN 'Has Cast'
+        ELSE 'No Cast'
+    END AS cast_status
+FROM
+    NullCheck nm
+JOIN
+    movie_info mi ON nm.title = mi.info
+JOIN
+    title nt ON nt.title = nm.title
+JOIN
+    aka_name n ON n.person_id = (SELECT person_id FROM cast_info WHERE movie_id = nt.id LIMIT 1)
+WHERE
+    nm.has_note_ratio > 0.5
+    AND nm.cast_count IS NOT NULL
+ORDER BY
+    nm.production_year DESC,
+    nm.cast_count DESC;

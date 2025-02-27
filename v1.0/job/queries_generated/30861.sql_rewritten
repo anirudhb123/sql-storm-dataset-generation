@@ -1,0 +1,47 @@
+WITH RECURSIVE CastHierarchy AS (
+    
+    SELECT 
+        c.movie_id,
+        a.person_id,
+        a.name AS actor_name,
+        1 AS level
+    FROM
+        cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    WHERE
+        c.nr_order = 1  
+
+    UNION ALL
+
+    
+    SELECT 
+        m.movie_id,
+        a.person_id,
+        a.name AS actor_name,
+        h.level + 1
+    FROM 
+        movie_link m
+    JOIN CastHierarchy h ON m.movie_id = h.movie_id
+    JOIN cast_info c ON m.linked_movie_id = c.movie_id
+    JOIN aka_name a ON c.person_id = a.person_id
+)
+SELECT 
+    ch.actor_name,
+    COUNT(DISTINCT ch.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT t.title, ', ') AS titles,
+    AVG(t.production_year) AS avg_production_year,
+    MIN(t.production_year) AS earliest_year,
+    MAX(t.production_year) AS latest_year,
+    JSON_AGG(DISTINCT ci.note) FILTER (WHERE ci.note IS NOT NULL) AS notes
+FROM 
+    CastHierarchy ch
+JOIN 
+    title t ON ch.movie_id = t.id
+LEFT JOIN 
+    cast_info ci ON ch.movie_id = ci.movie_id AND ch.person_id = ci.person_id
+GROUP BY 
+    ch.actor_name
+HAVING 
+    COUNT(DISTINCT ch.movie_id) > 1  
+ORDER BY 
+    movie_count DESC, earliest_year ASC;

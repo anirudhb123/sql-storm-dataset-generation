@@ -1,0 +1,78 @@
+
+WITH RECURSIVE sales_trend AS (
+    SELECT 
+        d.d_year,
+        SUM(ws.net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY SUM(ws.net_profit) DESC) as profit_rank
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_year
+),
+promotions_analysis AS (
+    SELECT 
+        p.p_promo_name,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_count,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        promotion p
+    LEFT JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_name
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cd.cd_gender, 'Unknown') AS gender,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+sales_summary AS (
+    SELECT 
+        w.w_warehouse_name,
+        SUM(ss.ss_net_paid) AS warehouse_net_sales,
+        AVG(ss.ss_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ss_ticket_number) AS transaction_count
+    FROM 
+        warehouse w
+    JOIN 
+        store s ON s.s_store_sk IN (
+            SELECT s_store_sk FROM store_sales WHERE ss_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+        )
+    JOIN 
+        store_sales ss ON ss.ss_store_sk = s.s_store_sk
+    GROUP BY 
+        w.w_warehouse_name
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.gender,
+    cs.total_spent,
+    cs.total_orders,
+    pm.p_promo_name,
+    pm.orders_count,
+    pm.total_sales,
+    st.total_profit,
+    st.d_year
+FROM 
+    customer_stats cs
+LEFT JOIN 
+    promotions_analysis pm ON cs.total_spent > 1000
+LEFT JOIN 
+    sales_trend st ON st.profit_rank = 1
+ORDER BY 
+    cs.total_spent DESC, st.d_year DESC;

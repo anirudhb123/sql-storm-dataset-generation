@@ -1,0 +1,61 @@
+
+WITH customer_data AS (
+    SELECT 
+        c.c_customer_sk, 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name, 
+        ca.ca_city, 
+        ca.ca_state, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status,
+        CONCAT(c.c_email_address, ' (', c.c_login, ')') AS email_login
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_data AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_sales_price) AS total_sales, 
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= 2458802 
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+benchmark_data AS (
+    SELECT 
+        cd.customer_name,
+        cd.ca_city,
+        cd.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.email_login,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        COALESCE(sd.total_orders, 0) AS total_orders,
+        LEAST(LENGTH(cd.customer_name), 50) AS name_length,
+        LENGTH(cd.email_login) - LENGTH(REPLACE(cd.email_login, '@', '')) AS email_at_count
+    FROM 
+        customer_data cd
+    LEFT JOIN 
+        sales_data sd ON cd.c_customer_sk = sd.ws_bill_customer_sk
+)
+SELECT 
+    CONCAT('Customer: ', customer_name, ' | City: ', ca_city, ' | State: ', ca_state, 
+           ' | Gender: ', cd_gender, ' | Marital Status: ', cd_marital_status, 
+           ' | Education: ', cd_education_status, ' | Email/Login: ', email_login, 
+           ' | Total Sales: $', FORMAT(total_sales, 2), 
+           ' | Total Orders: ', total_orders, 
+           ' | Name Length: ', name_length, 
+           ' | Email @ Count: ', email_at_count) AS benchmark_result
+FROM 
+    benchmark_data
+ORDER BY 
+    total_sales DESC 
+LIMIT 100;

@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    WHERE sh.level < 5
+),
+ProductStats AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_availqty) AS total_available_qty,
+           AVG(p.p_retailprice) AS avg_price,
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_type
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           STRING_AGG(DISTINCT p.p_name, ', ') AS purchased_products
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN part p ON l.l_partkey = p.p_partkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT n.n_name, 
+       SUM(o.total_spent) AS total_spent,
+       SUM(CASE WHEN o.order_count > 0 THEN 1 ELSE 0 END) AS active_customers,
+       COALESCE(SUM(ps.total_available_qty), 0) AS total_parts_available,
+       STRING_AGG(DISTINCT ps.p_name) AS top_products
+FROM nation n
+LEFT JOIN CustomerOrderSummary o ON n.n_nationkey = o.c_nationkey
+LEFT JOIN ProductStats ps ON ps.rank <= 5
+WHERE n.n_name IN (SELECT DISTINCT n_name FROM nation WHERE n_regionkey IN (SELECT r_regionkey FROM region WHERE r_name LIKE 'N%'))
+GROUP BY n.n_name
+HAVING SUM(o.total_spent) IS NOT NULL AND COUNT(o.c_custkey) > 5
+ORDER BY total_spent DESC;
+

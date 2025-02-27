@@ -1,0 +1,62 @@
+WITH address_stats AS (
+    SELECT
+        ca_state,
+        COUNT(*) AS total_addresses,
+        AVG(LENGTH(ca_street_name)) AS avg_street_name_length,
+        AVG(LENGTH(ca_city)) AS avg_city_length,
+        SUM(CASE WHEN ca_zip LIKE '0%' THEN 1 ELSE 0 END) AS zip_start_with_zero_count
+    FROM
+        customer_address
+    GROUP BY
+        ca_state
+),
+demo_stats AS (
+    SELECT
+        cd_gender,
+        COUNT(*) AS total_demographics,
+        AVG(cd_dep_count) AS avg_dep_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        SUM(CASE WHEN cd_credit_rating = 'AA' THEN 1 ELSE 0 END) AS aa_credit_rating_count
+    FROM
+        customer_demographics
+    GROUP BY
+        cd_gender
+),
+date_stats AS (
+    SELECT
+        d_year,
+        COUNT(*) AS total_dates,
+        SUM(CASE WHEN d_holiday = 'Y' THEN 1 ELSE 0 END) AS holiday_count,
+        SUM(CASE WHEN d_weekend = 'Y' THEN 1 ELSE 0 END) AS weekend_count,
+        AVG(DATE_PART('day', d_last_dom - d_first_dom + 1)) AS avg_days_in_month
+    FROM
+        date_dim
+    GROUP BY
+        d_year
+)
+
+SELECT
+    a.ca_state,
+    a.total_addresses,
+    a.avg_street_name_length,
+    a.avg_city_length,
+    a.zip_start_with_zero_count,
+    d.cd_gender,
+    d.total_demographics,
+    d.avg_dep_count,
+    d.avg_purchase_estimate,
+    d.aa_credit_rating_count,
+    dt.d_year,
+    dt.total_dates,
+    dt.holiday_count,
+    dt.weekend_count,
+    dt.avg_days_in_month
+FROM
+    address_stats a
+JOIN
+    demo_stats d ON a.total_addresses > 100 
+JOIN
+    date_stats dt ON dt.total_dates > 5000 
+ORDER BY
+    a.total_addresses DESC, d.total_demographics DESC, dt.total_dates DESC
+LIMIT 50;

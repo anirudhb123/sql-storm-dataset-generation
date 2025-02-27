@@ -1,0 +1,86 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        AVG(v.BountyAmount) FILTER (WHERE v.BountyAmount IS NOT NULL) AS AvgBounty
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName, p.PostTypeId
+),
+FilteredTags AS (
+    SELECT 
+        t.TagName,
+        t.Count,
+        ARRAY_AGG(DISTINCT p.Title) AS RelatedPosts
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName, t.Count
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN 'Post Status Change'
+            ELSE 'Other Change'
+        END AS ChangeType,
+        COUNT(*) AS ChangeCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+FinalResult AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerName,
+        rp.CreationDate,
+        rp.CommentCount,
+        COALESCE(ph.ChangeCount, 0) AS RecentChanges,
+        ft.TagName,
+        ft.Count AS TagCount,
+        ft.RelatedPosts,
+        rp.AvgBounty
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryInfo ph ON rp.PostId = ph.PostId
+    LEFT JOIN 
+        FilteredTags ft ON ft.TagName IS NOT NULL
+    WHERE 
+        rp.PostRank <= 5
+    ORDER BY 
+        rp.CreationDate DESC
+)
+SELECT 
+    *,
+    CASE 
+        WHEN RecentChanges > 0 THEN 'Updated'
+        ELSE 'Stable'
+    END AS StabilityStatus,
+    STRING_AGG(DISTINCT TagName, ', ') AS UniqueTags,
+    LEAD(CreationDate) OVER (ORDER BY CreationDate) AS NextPostDate
+FROM 
+    FinalResult
+GROUP BY 
+    PostId, Title, OwnerName, CreationDate, CommentCount, RecentChanges, TagName, TagCount, RelatedPosts, AvgBounty
+ORDER BY 
+    CreationDate DESC;

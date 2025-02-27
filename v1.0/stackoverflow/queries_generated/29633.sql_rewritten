@@ -1,0 +1,73 @@
+WITH PostEngagement AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        ROUND(EXTRACT(EPOCH FROM (p.LastActivityDate - p.CreationDate)) / 3600, 2) AS HoursToActivity,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(v.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(v.DownVoteCount, 0) AS DownVoteCount,
+        (COALESCE(v.UpVoteCount, 0) - COALESCE(v.DownVoteCount, 0)) AS NetVoteScore,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(v.UpVoteCount, 0) DESC, p.CreationDate DESC) AS Rank
+    FROM
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT
+            PostId,
+            STRING_AGG(TagName, ', ') AS TagName
+        FROM 
+            Tags t
+        JOIN 
+            STRING_TO_ARRAY((SELECT Tags FROM Posts WHERE Id = t.Id), ',') AS TagIds ON TagIds::int = t.Id
+        GROUP BY 
+            PostId
+    ) t ON p.Id = t.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.LastActivityDate, c.CommentCount, v.UpVoteCount, v.DownVoteCount
+)
+
+SELECT
+    PostId,
+    Title,
+    CASE 
+        WHEN HoursToActivity < 1 THEN 'New'
+        WHEN HoursToActivity BETWEEN 1 AND 24 THEN 'Active'
+        ELSE 'Stale'
+    END AS ActivityStatus,
+    CommentCount,
+    UpVoteCount,
+    DownVoteCount,
+    NetVoteScore,
+    Tags,
+    Rank
+FROM
+    PostEngagement
+WHERE 
+    NetVoteScore > 0
+ORDER BY
+    Rank
+LIMIT 100;

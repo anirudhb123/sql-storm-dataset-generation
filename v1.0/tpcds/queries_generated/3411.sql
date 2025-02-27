@@ -1,0 +1,64 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.web_site_id,
+        COALESCE(SUM(ws.ws_ext_sales_price), 0) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS average_sales_price,
+        MAX(ws.ws_net_profit) AS max_profit,
+        MIN(ws.ws_net_profit) AS min_profit
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023 
+        AND (cd.cd_marital_status = 'M' OR cd.cd_gender = 'F')
+    GROUP BY 
+        ws.web_site_id
+),
+warehouse_data AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        warehouse w
+    JOIN 
+        inventory inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+),
+customer_performance AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_net_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+    HAVING 
+        total_net_profit > 1000
+)
+SELECT 
+    sd.web_site_id,
+    sd.total_sales,
+    sd.total_orders,
+    sd.average_sales_price,
+    wd.total_inventory,
+    cp.total_net_profit
+FROM 
+    sales_data sd
+JOIN 
+    warehouse_data wd ON sd.web_site_id = wd.w_warehouse_id
+FULL OUTER JOIN 
+    customer_performance cp ON cp.total_orders > 5
+ORDER BY 
+    sd.total_sales DESC, 
+    cp.total_net_profit DESC;

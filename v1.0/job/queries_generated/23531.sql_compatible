@@ -1,0 +1,57 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS year_rank
+    FROM 
+        aka_title mt
+    JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    GROUP BY 
+        mt.title, mt.production_year
+), 
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+), 
+TitleWithKeywords AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.total_cast,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON rm.title = mk.movie_id
+)
+
+SELECT 
+    twk.title,
+    twk.production_year,
+    twk.total_cast,
+    twk.keywords,
+    COALESCE(NULLIF(twk.production_year, 0)::TEXT, 'Unknown Year') AS formatted_year,
+    CASE 
+        WHEN twk.total_cast = 0 THEN 'No Cast'
+        WHEN twk.total_cast > 10 THEN 'Large Cast'
+        ELSE 'Small Cast'
+    END AS cast_category
+FROM 
+    TitleWithKeywords twk
+WHERE 
+    twk.total_cast > 2 OR twk.keywords != 'No Keywords'
+ORDER BY 
+    twk.production_year DESC, twk.total_cast DESC
+LIMIT 15;

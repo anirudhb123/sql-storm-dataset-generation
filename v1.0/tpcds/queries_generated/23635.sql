@@ -1,0 +1,46 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number, 
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN (SELECT MAX(d.d_date_sk) - 30 FROM date_dim d) AND (SELECT MAX(d2.d_date_sk) FROM date_dim d2)
+    GROUP BY ws.ws_item_sk, ws.ws_order_number
+),
+HighPerformers AS (
+    SELECT 
+        i.i_item_id, 
+        i.i_item_desc, 
+        rs.total_sales,
+        CASE WHEN rs.rank = 1 THEN 'Top Seller' ELSE 'Regular Seller' END AS seller_type
+    FROM RecursiveSales rs
+    JOIN item i ON i.i_item_sk = rs.ws_item_sk
+    WHERE rs.rank <= 10
+),
+CustomerReturns AS (
+    SELECT 
+        cr.cr_item_sk, 
+        SUM(cr.cr_return_quantity) AS total_returns,
+        COUNT(DISTINCT cr.cr_returning_customer_sk) AS unique_customers
+    FROM catalog_returns cr
+    WHERE cr.cr_returned_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY cr.cr_item_sk
+)
+SELECT 
+    hp.i_item_id, 
+    hp.i_item_desc, 
+    hp.total_sales,
+    COALESCE(cr.total_returns, 0) AS total_returns,
+    CASE 
+        WHEN COALESCE(cr.total_returns, 0) > 0 THEN 'Returns Detected'
+        ELSE 'No Returns'
+    END AS return_status,
+    CASE 
+        WHEN hp.total_sales > 1000 THEN 'High Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM HighPerformers hp
+LEFT JOIN CustomerReturns cr ON hp.i_item_id = cr.cr_item_sk
+ORDER BY hp.total_sales DESC NULLS LAST;

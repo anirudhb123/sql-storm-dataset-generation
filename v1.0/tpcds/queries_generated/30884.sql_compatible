@@ -1,0 +1,67 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_sold_date_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS SalesRank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk, ws_sold_date_sk
+), RankedSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_sales,
+        DENSE_RANK() OVER (ORDER BY cs.total_sales DESC) AS total_sales_rank
+    FROM 
+        customer c
+    JOIN 
+        SalesCTE cs ON c.c_customer_sk = cs.ws_bill_customer_sk
+    WHERE 
+        cs.total_sales > 1000
+), PromotionStats AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(ws_order_number) AS promo_sales_count,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_id
+    HAVING 
+        COUNT(ws_order_number) > 10
+), ThisMonthSales AS (
+    SELECT 
+        d.d_date_id,
+        SUM(ws_ext_sales_price) AS monthly_sales
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE 
+        d.d_date BETWEEN DATE_TRUNC('MONTH', '2002-10-01') AND '2002-10-01'
+    GROUP BY 
+        d.d_date_id
+)
+SELECT 
+    rs.c_first_name,
+    rs.c_last_name,
+    rs.total_sales,
+    ps.promo_sales_count,
+    ps.total_profit,
+    COALESCE(sms.monthly_sales, 0) AS this_month_sales
+FROM 
+    RankedSales rs
+LEFT JOIN 
+    PromotionStats ps ON rs.total_sales_rank = 1 
+LEFT JOIN 
+    ThisMonthSales sms ON sms.d_date_id = '2002-10-01'
+WHERE 
+    rs.total_sales_rank <= 5
+ORDER BY 
+    rs.total_sales DESC;

@@ -1,0 +1,49 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        pt.Name AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 DAY'
+    GROUP BY 
+        p.Id, pt.Name
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.PostType
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rk = 1
+)
+SELECT 
+    u.DisplayName AS Author,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.PostType
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON tp.PostId = u.Id
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

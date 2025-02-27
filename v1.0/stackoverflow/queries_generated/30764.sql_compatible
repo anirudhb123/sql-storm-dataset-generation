@@ -1,0 +1,77 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.PostId AS HistoricalPostId,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+),
+RecentUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    r.TotalPosts,
+    r.TotalQuestions,
+    r.TotalAnswers,
+    t.TagName,
+    t.TotalViews,
+    COALESCE(p.CreationDate, 'No History') AS LastActivity,
+    ph.Comment,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = p.Id 
+       AND v.VoteTypeId = 2) AS UpVotes,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = p.Id 
+       AND v.VoteTypeId = 3) AS DownVotes
+FROM 
+    Users u
+JOIN 
+    RecentUserActivity r ON u.Id = r.UserId
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    TopTags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+LEFT JOIN 
+    RecursivePostHistory ph ON p.Id = ph.PostId AND ph.RowNum = 1
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    u.Reputation DESC, r.TotalPosts DESC;

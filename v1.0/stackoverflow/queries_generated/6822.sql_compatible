@@ -1,0 +1,56 @@
+
+WITH TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+),
+PopularPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        ROW_NUMBER() OVER (ORDER BY P.Score DESC) AS PopularityRank
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1
+),
+RecentActivities AS (
+    SELECT 
+        H.UserId,
+        COUNT(*) AS EditCount,
+        MAX(H.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory H
+    WHERE 
+        H.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        H.UserId
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation,
+    PP.Title AS PopularPost,
+    PP.ViewCount,
+    PP.Score,
+    RA.EditCount,
+    RA.LastEditDate
+FROM 
+    TopUsers U
+JOIN 
+    PopularPosts PP ON U.Id = PP.OwnerUserId 
+JOIN 
+    RecentActivities RA ON U.Id = RA.UserId
+WHERE 
+    U.Rank <= 10 AND PP.PopularityRank <= 5
+ORDER BY 
+    U.Reputation DESC, PP.Score DESC;

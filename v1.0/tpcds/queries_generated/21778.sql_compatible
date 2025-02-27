@@ -1,0 +1,80 @@
+
+WITH customer_return_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        COALESCE(SUM(sr.return_quantity), 0) AS total_returned_quantity,
+        COALESCE(SUM(sr.return_amt), 0) AS total_returned_amount,
+        COUNT(DISTINCT sr.ticket_number) AS number_of_returns
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.customer_sk
+    GROUP BY c.c_customer_sk, c.c_customer_id
+), 
+item_sales_summary AS (
+    SELECT 
+        ws.item_sk,
+        COUNT(ws.order_number) AS total_orders,
+        SUM(ws.sales_price) AS total_sales,
+        SUM(ws.quantity) AS total_quantity_sold
+    FROM web_sales ws
+    GROUP BY ws.item_sk
+), 
+high_return_items AS (
+    SELECT 
+        sr_item_sk,
+        SUM(total_returned_quantity) AS returned_quantity_total,
+        SUM(total_returned_amount) AS returned_amount_total
+    FROM (
+        SELECT 
+            sr.item_sk AS sr_item_sk,
+            SUM(sr.return_quantity) AS total_returned_quantity,
+            SUM(sr.return_amt) AS total_returned_amount
+        FROM store_returns sr
+        JOIN customer_return_summary crs ON sr.customer_sk = crs.c_customer_sk
+        GROUP BY sr.item_sk
+    ) AS subquery
+    GROUP BY sr_item_sk
+), 
+item_with_high_returns AS (
+    SELECT
+        i.item_sk,
+        i.item_id,
+        COALESCE(hi.returned_quantity_total, 0) AS total_returns,
+        i.current_price,
+        (SELECT AVG(ws.net_profit) 
+         FROM web_sales ws 
+         WHERE ws.item_sk = i.item_sk) AS average_net_profit
+    FROM item i
+    LEFT JOIN high_return_items hi ON i.item_sk = hi.sr_item_sk
+    WHERE i.current_price > (
+        SELECT AVG(current_price) FROM item
+    )
+    AND (hi.returned_quantity_total > (SELECT AVG(returned_quantity_total) FROM high_return_items))
+), 
+final_selection AS (
+    SELECT 
+        iwh.item_sk,
+        iwh.item_id,
+        iwh.total_returns,
+        iwh.current_price,
+        iwh.average_net_profit,
+        CASE 
+            WHEN iwh.average_net_profit IS NULL THEN 'NO DATA' 
+            WHEN iwh.average_net_profit < 0 THEN 'LOSS'
+            ELSE 'PROFIT'
+        END AS profit_status
+    FROM item_with_high_returns iwh
+)
+SELECT 
+    f.item_sk,
+    f.item_id,
+    f.total_returns,
+    f.current_price,
+    f.average_net_profit,
+    f.profit_status,
+    ROW_NUMBER() OVER (PARTITION BY f.profit_status ORDER BY f.total_returns DESC) AS return_rank
+FROM final_selection f
+WHERE f.total_returns > (
+    SELECT AVG(total_returns) FROM final_selection
+)
+ORDER BY f.profit_status, f.total_returns DESC;

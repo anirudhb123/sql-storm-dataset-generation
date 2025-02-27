@@ -1,0 +1,61 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        CONCAT(REPLACE(REPLACE(ca.ca_street_number, ' ', ''), ',', ''), ' ', 
+               REPLACE(REPLACE(ca.ca_street_name, ' ', ''), ',', ''), ' ', 
+               ca.ca_street_type) AS full_address
+    FROM 
+        customer AS c
+    JOIN 
+        customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+ItemsSold AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_ext_sales_price) AS total_sales_value
+    FROM 
+        web_sales AS ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2459620 AND 2459626  
+    GROUP BY 
+        ws.ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        items.total_quantity_sold,
+        items.total_sales_value,
+        ROW_NUMBER() OVER (ORDER BY items.total_sales_value DESC) AS sales_rank
+    FROM 
+        item AS i
+    JOIN 
+        ItemsSold AS items ON i.i_item_sk = items.ws_item_sk
+)
+SELECT 
+    c.customer_full_name,
+    c.cd_gender,
+    c.cd_marital_status,
+    ti.i_item_id,
+    ti.i_item_desc,
+    ti.total_sales_value,
+    ti.sales_rank
+FROM 
+    CustomerInfo AS c
+JOIN 
+    TopItems AS ti ON c.c_customer_sk = (SELECT cs.ss_customer_sk 
+                                           FROM store_sales AS cs 
+                                           WHERE cs.ss_item_sk = ti.ws_item_sk 
+                                           ORDER BY cs.ss_net_profit DESC LIMIT 1)
+WHERE 
+    ti.sales_rank <= 10
+ORDER BY 
+    ti.sales_rank;

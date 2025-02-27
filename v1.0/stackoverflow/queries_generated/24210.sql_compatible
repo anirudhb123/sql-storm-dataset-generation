@@ -1,0 +1,56 @@
+
+WITH RankedPosts AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.CreationDate,
+           p.ViewCount,
+           U.DisplayName AS OwnerDisplayName,
+           RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+           COUNT(c.Id) AS CommentCount,
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM Posts p
+    JOIN Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY p.Id, U.DisplayName, p.CreationDate, p.ViewCount
+),
+PostHistoryAnalyses AS (
+    SELECT ph.PostId,
+           ph.Comment,
+           ph.CreationDate AS HistoryDate,
+           PHT.Name AS HistoryType,
+           ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM PostHistory ph
+    JOIN PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11, 12)  
+),
+PostsWithHistory AS (
+    SELECT rp.*,
+           ph.HistoryType,
+           ph.HistoryDate
+    FROM RankedPosts rp
+    LEFT JOIN PostHistoryAnalyses ph ON rp.PostId = ph.PostId AND ph.HistoryRank = 1
+)
+SELECT pwh.PostId,
+       pwh.Title,
+       pwh.CreationDate,
+       pwh.ViewCount,
+       pwh.CommentCount,
+       pwh.UpVoteCount,
+       pwh.DownVoteCount,
+       pwh.OwnerDisplayName,
+       CASE 
+           WHEN pwh.HistoryType IS NOT NULL 
+           THEN CONCAT('Last action: ', pwh.HistoryType, ' on ', TO_CHAR(pwh.HistoryDate, 'YYYY-MM-DD HH24:MI:SS'))
+           ELSE 'No history available'
+       END AS LastAction,
+       CASE 
+           WHEN U.Reputation IS NULL OR U.Reputation < 0 THEN 'Unknown reputation'
+           ELSE CAST(U.Reputation AS VARCHAR)
+       END AS OwnerReputation
+FROM PostsWithHistory pwh
+JOIN Users U ON pwh.OwnerDisplayName = U.DisplayName
+ORDER BY pwh.PostRank, pwh.CreationDate DESC
+LIMIT 100 OFFSET 0;

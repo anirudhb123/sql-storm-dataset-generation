@@ -1,0 +1,70 @@
+
+WITH SupplierTotal AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerOrderCounts AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+TopCustomers AS (
+    SELECT 
+        cac.c_custkey,
+        cac.order_count,
+        ROW_NUMBER() OVER (ORDER BY cac.order_count DESC) AS rank
+    FROM 
+        CustomerOrderCounts cac
+)
+SELECT 
+    n.n_name AS nation_name,
+    SUM(CASE 
+        WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) 
+        ELSE 0 
+    END) AS returned_revenue,
+    COALESCE(ST.total_cost, 0) AS supplier_total_cost,
+    TC.rank AS customer_rank
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    SupplierTotal ST ON c.c_custkey = ST.s_suppkey
+LEFT JOIN 
+    TopCustomers TC ON c.c_custkey = TC.c_custkey
+WHERE 
+    l.l_shipdate >= DATEADD(MONTH, -3, '1998-10-01')
+GROUP BY 
+    n.n_name, ST.total_cost, TC.rank
+HAVING 
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    returned_revenue DESC, supplier_total_cost ASC;

@@ -1,0 +1,78 @@
+
+WITH supplier_details AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        n.n_name AS nation_name,
+        s.s_acctbal,
+        s.s_comment
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+part_supplier_info AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        (ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        (SELECT COUNT(*) FROM lineitem l WHERE l.l_partkey = ps.ps_partkey) AS lineitem_count
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+customer_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        c.c_name,
+        o.o_orderstatus,
+        o.o_totalprice
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+),
+final_results AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        p.p_name AS part_name,
+        psi.total_cost,
+        co.o_orderkey,
+        co.c_name AS customer_name,
+        co.o_totalprice
+    FROM 
+        supplier_details sdi
+    JOIN 
+        part_supplier_info psi ON sdi.s_suppkey = psi.ps_suppkey
+    JOIN 
+        customer_orders co ON psi.ps_partkey = (
+            SELECT ps.ps_partkey 
+            FROM partsupp ps 
+            WHERE ps.ps_suppkey = sdi.s_suppkey 
+            ORDER BY ps.ps_availqty DESC 
+            LIMIT 1
+        )
+)
+SELECT 
+    supplier_name,
+    part_name,
+    total_cost,
+    o_orderkey,
+    customer_name,
+    o_totalprice,
+    CONCAT(supplier_name, ' - ', part_name) AS supplier_part_info,
+    ROUND(total_cost / NULLIF(o_totalprice, 0), 2) AS cost_to_price_ratio
+FROM 
+    final_results
+ORDER BY 
+    total_cost DESC, o_orderkey;

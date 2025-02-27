@@ -1,0 +1,91 @@
+WITH RECURSIVE UserBadgeHierarchy AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        b.Class,
+        b.Name AS BadgeName,
+        b.Date AS BadgeDate,
+        1 AS Level
+    FROM 
+        Users u
+    JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        b.Class = 1  
+    UNION ALL
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        b.Class,
+        b.Name AS BadgeName,
+        b.Date AS BadgeDate,
+        uh.Level + 1
+    FROM 
+        Users u
+    JOIN 
+        Badges b ON u.Id = b.UserId
+    JOIN 
+        UserBadgeHierarchy uh ON uh.UserId = u.Id
+    WHERE 
+        b.Class = 2  
+),
+PostsWithTagCount AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(t.TagName) AS TagCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,  
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes  
+    FROM 
+        Posts p
+    LEFT JOIN 
+        STRING_TO_ARRAY(substring(p.Tags, 2, length(p.Tags)-2), '><') AS t(TagName)
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE((SELECT COUNT(c.Id) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(pl.Id) FROM PostLinks pl WHERE pl.PostId = p.Id), 0) AS LinkCount,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS ActivityRank
+    FROM 
+        Posts p
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ub.BadgeName,
+    ub.BadgeDate,
+    p.Title AS PostTitle,
+    p.CreationDate AS PostCreationDate,
+    pt.TagCount,
+    pa.CommentCount,
+    pa.LinkCount,
+    COALESCE(pt.Upvotes - pt.Downvotes, 0) AS NetVoteCount,
+    CASE
+        WHEN ub.Class = 1 THEN 'Gold'
+        WHEN ub.Class = 2 THEN 'Silver'
+        ELSE 'Other'
+    END AS BadgeType
+FROM 
+    Users u
+JOIN 
+    UserBadgeHierarchy ub ON u.Id = ub.UserId
+JOIN 
+    PostsWithTagCount pt ON u.Id = pt.OwnerUserId
+JOIN 
+    PostActivity pa ON pt.PostId = pa.PostId
+WHERE 
+    u.Reputation > 500
+ORDER BY 
+    u.Reputation DESC, 
+    pa.ActivityRank,
+    pt.TagCount DESC
+LIMIT 100;

@@ -1,0 +1,45 @@
+
+WITH RECURSIVE InvalidAddresses AS (
+    SELECT ca_address_sk, ca_address_id,
+           CASE
+               WHEN ca_street_number IS NULL OR ca_street_name IS NULL THEN 'Invalid'
+               ELSE 'Valid'
+           END AS address_status
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+),
+SalesData AS (
+    SELECT 
+        s_store_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_revenue,
+        AVG(ws_net_paid) AS avg_net_paid
+    FROM web_sales
+    INNER JOIN store ON web_sales.ws_store_sk = store.s_store_sk
+    GROUP BY s_store_sk
+),
+NestedPromotions AS (
+    SELECT p.p_promo_sk, p.p_promo_name,
+           (SELECT COUNT(*) FROM web_sales ws WHERE ws.ws_promo_sk = p.p_promo_sk) AS promo_usage
+    FROM promotion p
+    WHERE p.p_discount_active = 'Y'
+)
+SELECT 
+    ca.ca_address_id, 
+    ca.ca_city,
+    sales.total_quantity,
+    sales.total_revenue,
+    promos.p_promo_name AS promo_name,
+    COALESCE(NULLIF(cd.cd_gender, ''), 'Not Specified') AS gender,
+    ROW_NUMBER() OVER (PARTITION BY ca.ca_address_id ORDER BY sales.total_revenue DESC) AS revenue_rank
+FROM InvalidAddresses ca
+LEFT OUTER JOIN SalesData sales ON ca.ca_address_sk = sales.s_store_sk
+LEFT JOIN NestedPromotions promos ON promos.promo_usage > 0
+JOIN customer_demographics cd ON cd.cd_demo_sk = 
+    (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_current_addr_sk = ca.ca_address_sk LIMIT 1)
+WHERE (ca.address_status = 'Invalid' OR sales.total_quantity > 100)
+  AND (sales.total_revenue IS NOT NULL OR sales.total_quantity > 50)
+  AND (promos.p_promo_name IS NOT NULL OR EXISTS (SELECT 1 FROM web_returns wr WHERE wr.wr_returning_customer_sk IS NOT NULL))
+GROUP BY ca.ca_address_id, ca.ca_city, sales.total_quantity, sales.total_revenue, promos.p_promo_name, cd.cd_gender
+ORDER BY revenue_rank, ca.ca_city DESC
+FETCH FIRST 100 ROWS ONLY;

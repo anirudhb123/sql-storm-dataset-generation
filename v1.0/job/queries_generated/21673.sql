@@ -1,0 +1,78 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+
+SELECT 
+    a.name AS Actor,
+    COUNT(DISTINCT c.movie_id) AS Movie_Count,
+    STRING_AGG(DISTINCT at.title, ', ') AS Movies,
+    CASE 
+        WHEN COUNT(DISTINCT c.movie_id) > 10 THEN 'Prolific Actor'
+        WHEN COUNT(DISTINCT c.movie_id) BETWEEN 5 AND 10 THEN 'Moderate Actor'
+        ELSE 'Newcomer'
+    END AS Actor_Status,
+    SUM(mh.depth) AS Total_Linked_Depth,
+    AVG(mh.production_year) FILTER (WHERE mh.production_year IS NOT NULL) AS Avg_Production_Year,
+    MAX(mh.production_year) AS Latest_Production_Year,
+    MIN(mh.production_year) AS Earliest_Production_Year,
+    JSON_AGG(DISTINCT m.movie_id) FILTER (WHERE m.kind_id IS NOT NULL) AS Movie_IDs_JSON
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    MovieHierarchy mh ON c.movie_id = mh.movie_id
+JOIN 
+    aka_title at ON at.id = mh.movie_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id AND mi.info_type_id = 1
+WHERE 
+    a.name IS NOT NULL
+    AND a.name <> ''
+    AND (at.title LIKE '%The%' OR a.surname_pcode IS NULL)
+GROUP BY 
+    a.name
+HAVING 
+    AVG(mh.depth) > 1
+ORDER BY 
+    Movie_Count DESC, Actor ASC
+LIMIT 100;
+
+### Explanation:
+1. **CTEs**: The query employs a Common Table Expression (CTE) named `MovieHierarchy` with recursion to capture hierarchical relationships between movies linked together, showing a depth for links.
+  
+2. **Selections**: It selects the actor's name, counts movies they appear in, aggregates movie titles into a string, and classifies actors into categories based on their counts.
+
+3. **Calculations**: It computes total linked hierarchy depth, averages production years, and finds the latest and earliest production years.
+
+4. **JSON Aggregation**: The query demonstrates advanced JSON aggregation to compile a list of movie IDs as JSON.
+
+5. **Filters and Conditions**: Unique NULL checks, string conditions, and filters in aggregation functions showcase handling of NULL and complex predicates.
+
+6. **Ordering and Limiting**: The result is ordered by the number of movies in descending order and limited to the top 100 actors.
+
+This SQL query encapsulates a diverse range of SQL techniques to demonstrate benchmarking performance against a complex dataset.

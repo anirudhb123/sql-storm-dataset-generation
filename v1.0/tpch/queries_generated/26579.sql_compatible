@@ -1,0 +1,24 @@
+
+SELECT
+    CONCAT('Part: ', p_name, ' | Supplier: ', s_name, ' | Region: ', r_name) AS detail_report,
+    SUBSTRING_INDEX(p_comment, ' ', 5) AS brief_comment,
+    SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+FROM
+    part
+JOIN
+    partsupp ON part.p_partkey = partsupp.ps_partkey
+JOIN
+    supplier ON partsupp.ps_suppkey = supplier.s_suppkey
+JOIN
+    nation ON supplier.s_nationkey = nation.n_nationkey
+JOIN
+    region ON nation.n_regionkey = region.r_regionkey
+JOIN
+    lineitem ON lineitem.l_partkey = part.p_partkey
+GROUP BY
+    p_name, s_name, r_name, p_comment
+HAVING
+    SUM(l_extendedprice * (1 - l_discount)) > 10000
+ORDER BY
+    total_revenue DESC
+LIMIT 10;

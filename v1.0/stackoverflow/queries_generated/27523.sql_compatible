@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS RankByTag
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+TagStatistics AS (
+    SELECT
+        TRIM(UNNEST(string_to_array(Tags, '><'))) AS TagName,
+        COUNT(*) AS TotalQuestions,
+        AVG(Score) AS AvgScore,
+        MAX(CreationDate) AS MostRecentPost
+    FROM
+        RankedPosts
+    GROUP BY 
+        TRIM(UNNEST(string_to_array(Tags, '><')))
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        TotalQuestions,
+        AvgScore,
+        MostRecentPost,
+        RANK() OVER (ORDER BY TotalQuestions DESC) AS TagRank
+    FROM 
+        TagStatistics
+    WHERE 
+        TotalQuestions > 10
+)
+SELECT 
+    tt.TagName,
+    tt.TotalQuestions,
+    tt.AvgScore,
+    tt.MostRecentPost,
+    ph.Comment AS MostLikedComment,
+    ph.UserDisplayName AS CommentedBy,
+    COUNT(v.Id) AS VoteCount
+FROM 
+    TopTags tt
+LEFT JOIN 
+    Posts p ON p.Tags LIKE '%' || tt.TagName || '%'
+LEFT JOIN 
+    Comments c ON c.PostId = p.Id
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = p.Id AND ph.PostHistoryTypeId = 24 
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id
+GROUP BY 
+    tt.TagName, tt.TotalQuestions, tt.AvgScore, tt.MostRecentPost, ph.Comment, ph.UserDisplayName
+ORDER BY 
+    tt.TagRank;

@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM Posts p
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '7 days'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostLinksCount AS (
+    SELECT 
+        pl.PostId,
+        COUNT(pl.RelatedPostId) AS RelatedCount
+    FROM PostLinks pl
+    GROUP BY pl.PostId
+),
+VoteStats AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    GROUP BY v.PostId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    COALESCE(pc.RelatedCount, 0) AS RelatedLinks,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    ur.Reputation AS UserReputation,
+    ur.DisplayName AS UserDisplayName,
+    CASE 
+        WHEN p.PostTypeId = 1 THEN 'Question'
+        WHEN p.PostTypeId = 2 THEN 'Answer'
+        ELSE 'Other'
+    END AS PostType,
+    CASE 
+        WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Accepted Answer'
+        ELSE 'No Accepted Answer'
+    END AS AnswerStatus
+FROM RankedPosts p
+LEFT JOIN PostLinksCount pc ON p.PostId = pc.PostId
+LEFT JOIN VoteStats vs ON p.PostId = vs.PostId
+LEFT JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN UserReputation ur ON u.Id = ur.UserId
+WHERE p.Rank <= 5
+AND (p.ViewCount > 100 OR p.Score > 10)
+ORDER BY p.Score DESC, p.CreationDate DESC
+LIMIT 10;

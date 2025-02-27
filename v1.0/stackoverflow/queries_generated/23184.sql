@@ -1,0 +1,81 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        COALESCE(PV.TotalUpVotes, 0) AS UpVotes,
+        COALESCE(PV.TotalDownVotes, 0) AS DownVotes,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN C.UserId IS NOT NULL THEN 1 ELSE 0 END) AS UserComments
+    FROM 
+        Posts P
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+         FROM 
+            Votes
+         GROUP BY 
+            PostId) PV ON P.Id = PV.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, PV.TotalUpVotes, PV.TotalDownVotes
+),
+ClosedPostDetails AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseReasonCount,
+        STRING_AGG(CRT.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory PH
+    INNER JOIN 
+        CloseReasonTypes CRT ON PH.Comment::int = CRT.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    GROUP BY 
+        PH.PostId
+),
+RankedPosts AS (
+    SELECT 
+        PS.*,
+        ROW_NUMBER() OVER (PARTITION BY PS.PostTypeId ORDER BY PS.UpVotes DESC) AS Rank
+    FROM 
+        PostStats PS
+)
+
+SELECT 
+    U.DisplayName,
+    UB.BadgeCount,
+    RP.Title,
+    RP.UpVotes,
+    RP.DownVotes,
+    RP.CommentCount,
+    COALESCE(CPD.CloseReasonCount, 0) AS CloseReasonCount,
+    COALESCE(CPD.CloseReasons, 'None') AS CloseReasons,
+    RP.Rank
+FROM 
+    RankedPosts RP
+JOIN 
+    UserBadges UB ON RP.PostId % (UB.BadgeCount + 1) = 0  -- to correlate selections with badges
+LEFT JOIN 
+    ClosedPostDetails CPD ON RP.PostId = CPD.PostId
+WHERE 
+    RP.UpVotes > 5
+    OR RP.DownVotes < 0
+ORDER BY 
+    RP.Rank, UB.BadgeCount DESC;

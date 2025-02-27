@@ -1,0 +1,66 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.CreationDate IS NOT NULL THEN 1 ELSE 0 END) AS VoteCount,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount,
+        SUM(CASE WHEN P.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days') THEN 1 ELSE 0 END) AS RecentPosts
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        PT.Name AS PostType,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT V.Id) AS VoteCount
+    FROM 
+        Posts P
+    JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, PT.Name
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.PostCount,
+    UA.CommentCount,
+    UA.VoteCount,
+    UA.BadgeCount,
+    UA.RecentPosts,
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    PD.ViewCount,
+    PD.PostType,
+    PD.CommentCount AS PostCommentCount,
+    PD.VoteCount AS PostVoteCount
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    PostDetails PD ON UA.UserId = PD.PostId 
+ORDER BY 
+    UA.Reputation DESC, PD.CreationDate DESC;

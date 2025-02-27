@@ -1,0 +1,64 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    INNER JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        r.r_regionkey,
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, r.r_regionkey
+)
+SELECT 
+    p.p_name,
+    p.p_mfgr,
+    COALESCE(ss.total_available, 0) AS total_available,
+    COALESCE(ss.avg_supply_cost, 0) AS avg_supply_cost_per_price,
+    n_count.nation_name,
+    COUNT(o.o_orderkey) AS order_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    SupplierSummary ss ON ss.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN 
+    NationRegion n_count ON n_count.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey)
+WHERE 
+    l.l_shipdate >= DATE '1997-01-01' AND (o.o_orderstatus = 'F' OR o.o_orderstatus = 'O')
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_mfgr, n_count.nation_name, ss.total_available, ss.avg_supply_cost
+ORDER BY 
+    total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

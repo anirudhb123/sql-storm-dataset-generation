@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVotesCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVotesCount,
+        COALESCE(b.Class, 0) AS BadgeClass
+    FROM 
+        Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId AND b.Date > p.CreationDate
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+PostStatistics AS (
+    SELECT 
+        rp.*,
+        (UpVotesCount - DownVotesCount) AS ScoreDifference,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.Id) AS CommentCount
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.RankScore,
+    ps.ScoreDifference,
+    ps.CommentCount,
+    CASE 
+        WHEN ps.BadgeClass = 1 THEN 'Gold'
+        WHEN ps.BadgeClass = 2 THEN 'Silver'
+        WHEN ps.BadgeClass = 3 THEN 'Bronze'
+        ELSE 'No Badge'
+    END AS UserBadge
+FROM 
+    PostStatistics ps
+WHERE 
+    ps.RankScore <= 10
+    AND ps.ScoreDifference > 0
+ORDER BY 
+    ps.ScoreDifference DESC
+UNION
+SELECT 
+    'Total Votes' AS Title,
+    SUM(ps.Score) AS TotalScore,
+    SUM(ps.ViewCount) AS TotalViews,
+    NULL AS RankScore,
+    NULL AS ScoreDifference,
+    SUM(ps.CommentCount) AS TotalComments,
+    'Aggregate' AS UserBadge
+FROM 
+    PostStatistics ps
+WHERE 
+    ps.CreationDate >= CURRENT_DATE - INTERVAL '1 month';

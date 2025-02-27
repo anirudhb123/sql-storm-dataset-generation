@@ -1,0 +1,29 @@
+
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    ci.nr_order AS cast_order,
+    ci.note AS role_note,
+    COUNT(DISTINCT mk.keyword) AS associated_keywords,
+    COUNT(DISTINCT tc.company_id) AS production_companies,
+    pi.info AS actor_info
+FROM 
+    title t
+JOIN 
+    cast_info ci ON t.id = ci.movie_id
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    movie_companies tc ON t.id = tc.movie_id
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id
+WHERE 
+    t.production_year >= 2000
+    AND mk.keyword IN ('Action', 'Drama') 
+    AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+GROUP BY 
+    t.title, a.name, ci.nr_order, ci.note, pi.info
+ORDER BY 
+    movie_title, cast_order;

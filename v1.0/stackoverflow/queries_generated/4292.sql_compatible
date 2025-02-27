@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        u.Reputation
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+), 
+TopUsers AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount 
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+    GROUP BY 
+        OwnerUserId
+), 
+AverageScore AS (
+    SELECT 
+        OwnerUserId,
+        AVG(Score) AS AvgPostScore
+    FROM 
+        RankedPosts
+    GROUP BY 
+        OwnerUserId
+),
+RelatedPosts AS (
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        lt.Name AS LinkTypeName
+    FROM 
+        PostLinks pl
+    JOIN 
+        LinkTypes lt ON pl.LinkTypeId = lt.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(tp.PostCount, 0) AS TopPostCount,
+    COALESCE(ascore.AvgPostScore, 0) AS AverageScore,
+    COUNT(DISTINCT rp.RelatedPostId) AS RelatedPostCount
+FROM 
+    Users u
+LEFT JOIN 
+    TopUsers tp ON u.Id = tp.OwnerUserId
+LEFT JOIN 
+    AverageScore ascore ON u.Id = ascore.OwnerUserId
+LEFT JOIN 
+    RelatedPosts rp ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+WHERE 
+    u.Reputation > 100
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation, tp.PostCount, ascore.AvgPostScore
+HAVING 
+    COUNT(DISTINCT rp.RelatedPostId) > 0
+ORDER BY 
+    u.Reputation DESC
+LIMIT 10;

@@ -1,0 +1,56 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT kc.movie_id) AS keyword_count,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT kc.movie_id) DESC) AS rank_by_keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+JoinedInfo AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        pi.info AS actor_info,
+        ct.kind AS cast_type,
+        r.role AS role_type
+    FROM 
+        RankedTitles t
+    JOIN 
+        complete_cast cc ON t.title_id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        person_info pi ON a.person_id = pi.person_id
+    LEFT JOIN 
+        role_type r ON ci.role_id = r.id
+    LEFT JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    WHERE 
+        t.rank_by_keywords <= 5  -- Limiting to Top 5 titles by keyword count per year
+)
+SELECT 
+    title_id,
+    title,
+    production_year,
+    actor_name,
+    actor_info,
+    COUNT(DISTINCT role_type) AS distinct_roles,
+    ARRAY_AGG(DISTINCT cast_type) AS cast_types
+FROM 
+    JoinedInfo
+GROUP BY 
+    title_id, title, production_year, actor_name, actor_info
+ORDER BY 
+    production_year DESC, COUNT(DISTINCT role_type) DESC;

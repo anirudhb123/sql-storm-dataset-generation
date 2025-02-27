@@ -1,0 +1,51 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        MAX(v.CreationDate) AS LastVoteDate,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY v.CreationDate DESC) AS VoteRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                UNNEST(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS TagName
+        ) t ON TRUE
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title
+),
+RecentActivity AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.CommentCount,
+        rp.LastVoteDate,
+        RANK() OVER (ORDER BY rp.CommentCount DESC, rp.LastVoteDate DESC) AS ActivityRank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.LastVoteDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days' 
+)
+SELECT 
+    ra.PostId,
+    ra.Title,
+    ra.Tags,
+    ra.CommentCount,
+    ra.LastVoteDate,
+    ra.ActivityRank
+FROM 
+    RecentActivity ra
+WHERE 
+    ra.ActivityRank <= 10 
+ORDER BY 
+    ra.CommentCount DESC, ra.LastVoteDate DESC;

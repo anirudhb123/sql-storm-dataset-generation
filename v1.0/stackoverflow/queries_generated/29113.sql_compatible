@@ -1,0 +1,90 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id IN (SELECT CAST(UNNEST(string_to_array(Posts.Tags, '><')) AS INT))
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagCounts
+    WHERE 
+        PostCount > 0
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalAnswers,
+        TotalQuestions,
+        RANK() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM 
+        UserReputation
+    WHERE 
+        TotalPosts > 0
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        P.Title,
+        P.Body,
+        PH.UserDisplayName AS Editor,
+        P.OwnerDisplayName AS OriginalAuthor,
+        P.HistoryTypeId,
+        COUNT(CH.Id) AS CommentCount
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    LEFT JOIN 
+        Comments CH ON P.Id = CH.PostId
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6, 10, 11, 12) 
+    GROUP BY 
+        PH.PostId, PH.CreationDate, P.Title, P.Body, PH.UserDisplayName, P.OwnerDisplayName, P.HistoryTypeId
+)
+SELECT 
+    T.TagName,
+    T.PostCount AS PostsWithTag,
+    U.DisplayName AS TopUser,
+    U.Reputation AS UserReputation,
+    PHD.Title AS EditedPostTitle,
+    PHD.Editor AS LastEditedBy,
+    PHD.CommentCount
+FROM 
+    TopTags T
+JOIN 
+    TopUsers U ON TRUE 
+LEFT JOIN 
+    PostHistoryDetails PHD ON T.TagName IN (SELECT CAST(UNNEST(string_to_array(PHD.Title, '><')) AS TEXT))
+WHERE 
+    T.TagRank <= 10 AND U.UserRank <= 10 
+ORDER BY 
+    T.PostCount DESC, U.Reputation DESC, PHD.CreationDate DESC;

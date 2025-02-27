@@ -1,0 +1,64 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mt.kind AS movie_type,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT an.name, ', ') AS all_actors,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        title m
+    JOIN 
+        aka_title mt ON m.id = mt.movie_id
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id, m.title, m.production_year, mt.kind
+),
+MovieGenres AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(DISTINCT kt.keyword, ', ') AS genres
+    FROM 
+        title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword kt ON mk.keyword_id = kt.id
+    GROUP BY 
+        m.id
+),
+CompleteMovieDetails AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        r.movie_type,
+        r.cast_count,
+        r.all_actors,
+        g.genres
+    FROM 
+        RankedMovies r
+    JOIN 
+        MovieGenres g ON r.movie_id = g.movie_id
+    WHERE 
+        r.rank <= 10
+)
+SELECT 
+    cmd.title,
+    cmd.production_year,
+    cmd.movie_type,
+    cmd.cast_count,
+    cmd.all_actors,
+    cmd.genres
+FROM 
+    CompleteMovieDetails cmd
+ORDER BY 
+    cmd.cast_count DESC, 
+    cmd.production_year ASC;

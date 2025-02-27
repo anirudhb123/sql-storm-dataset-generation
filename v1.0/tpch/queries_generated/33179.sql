@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey AND s.suppkey <> sh.s_suppkey
+    WHERE s.s_acctbal > sh.level * 500
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+HighValueOrders AS (
+    SELECT o.orderdate, COUNT(o.o_orderkey) AS order_count, SUM(o.total_value) AS total_value
+    FROM OrderDetails o
+    GROUP BY o.orderdate
+    HAVING SUM(o.total_value) > 100000
+),
+SupplierRegions AS (
+    SELECT DISTINCT r.r_name, SUM(s.s_acctbal) AS total_acctbal
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY r.r_name
+)
+SELECT sr.r_name,
+       COALESCE(s.total_acctbal, 0) AS total_supplier_balance,
+       COALESCE(h.order_count, 0) AS high_value_order_count,
+       COALESCE(h.total_value, 0) AS high_value_total
+FROM SupplierRegions sr
+LEFT JOIN (
+    SELECT o.orderdate, COUNT(o.o_orderkey) AS order_count, SUM(o.total_value) AS total_value
+    FROM HighValueOrders o
+    GROUP BY o.orderdate
+) h ON h.orderdate = (SELECT MAX(orderdate) FROM HighValueOrders)
+LEFT JOIN (
+    SELECT p_brand, AVG(p_retailprice) AS avg_price
+    FROM part
+    GROUP BY p_brand
+    HAVING avg_price < 100.00
+) p ON 1 = 1
+WHERE sr.total_acctbal IS NOT NULL OR h.order_count IS NOT NULL
+ORDER BY sr.r_name;

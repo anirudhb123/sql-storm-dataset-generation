@@ -1,0 +1,66 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        NULL AS parent_customer,
+        1 AS level
+    FROM 
+        customer c
+    WHERE 
+        c.c_customer_sk IS NOT NULL
+    UNION ALL
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        sh.c_customer_sk AS parent_customer,
+        sh.level + 1
+    FROM 
+        customer c
+    JOIN 
+        SalesHierarchy sh ON c.c_current_cdemo_sk = sh.c_customer_sk
+),
+AggregatedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        SalesHierarchy sh ON ws.ws_ship_customer_sk = sh.c_customer_sk
+    GROUP BY 
+        ws.web_site_sk
+),
+FilteredSales AS (
+    SELECT 
+        as.web_site_sk,
+        as.total_net_profit,
+        as.total_orders
+    FROM 
+        AggregatedSales as
+    WHERE 
+        as.total_net_profit IS NOT NULL AND 
+        as.total_orders > 5
+)
+SELECT 
+    w.w_warehouse_name,
+    fs.total_net_profit,
+    fs.total_orders,
+    CASE 
+        WHEN fs.total_net_profit > 10000 THEN 'High Performer'
+        WHEN fs.total_net_profit BETWEEN 5000 AND 10000 THEN 'Average Performer'
+        ELSE 'Low Performer'
+    END AS performance_category
+FROM 
+    FilteredSales fs
+LEFT JOIN 
+    warehouse w ON fs.web_site_sk = w.w_warehouse_sk
+WHERE 
+    w.w_warehouse_name IS NOT NULL
+ORDER BY 
+    fs.total_net_profit DESC
+LIMIT 10;

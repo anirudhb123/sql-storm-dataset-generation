@@ -1,0 +1,59 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank,
+        SUM(CASE WHEN k.keyword = 'action' THEN 1 ELSE 0 END) OVER (PARTITION BY a.id) AS action_count,
+        a.id
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+CastInfoWithRoles AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        COALESCE(ct.kind, 'Unknown') AS role_type,
+        DENSE_RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        role_type ct ON ci.role_id = ct.id
+),
+CompanyAndInfo AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    cm.company_count,
+    cm.company_names,
+    cwr.role_type,
+    cwr.role_order,
+    rm.action_count
+FROM 
+    RankedMovies rm
+JOIN 
+    CompanyAndInfo cm ON rm.id = cm.movie_id
+LEFT JOIN 
+    CastInfoWithRoles cwr ON rm.id = cwr.movie_id
+WHERE 
+    (cm.company_count > 0 OR rm.year_rank = 1) 
+    AND (cwr.role_order IS NULL OR cwr.role_order <= 5) 
+ORDER BY 
+    rm.production_year DESC, 
+    rm.action_count DESC, 
+    cwr.role_order ASC;

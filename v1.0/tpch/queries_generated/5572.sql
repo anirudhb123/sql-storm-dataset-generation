@@ -1,0 +1,32 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_name AS nation_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+),
+HighCostSuppliers AS (
+    SELECT 
+        r.r_name AS region_name, 
+        SUM(rs.total_cost) AS regional_cost
+    FROM RankedSuppliers rs
+    JOIN nation n ON rs.nation_name = n.n_name
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE rs.rank <= 5
+    GROUP BY r.r_name
+)
+SELECT 
+    hcs.region_name, 
+    hcs.regional_cost, 
+    p.p_name, 
+    SUM(l.l_extendedprice) AS total_revenue
+FROM HighCostSuppliers hcs
+JOIN lineitem l ON l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+JOIN part p ON l.l_partkey = p.p_partkey
+GROUP BY hcs.region_name, hcs.regional_cost, p.p_name
+ORDER BY hcs.region_name, total_revenue DESC;

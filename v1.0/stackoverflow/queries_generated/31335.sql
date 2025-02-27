@@ -1,0 +1,88 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        0 AS Level,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        Level + 1,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostMetrics AS (
+    SELECT 
+        ph.PostId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpvoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownvoteCount,
+        AVG(CAST(v.VoteTypeId AS FLOAT)) AS AverageVote,
+        COALESCE(SUM(b.Class = 1), 0) AS GoldBadgeCount,
+        COALESCE(SUM(b.Class = 2), 0) AS SilverBadgeCount,
+        COALESCE(SUM(b.Class = 3), 0) AS BronzeBadgeCount
+    FROM 
+        RecursivePostHierarchy ph
+    LEFT JOIN 
+        Comments c ON c.PostId = ph.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = ph.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = ph.OwnerUserId
+    GROUP BY 
+        ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(pm.UpvoteCount - pm.DownvoteCount) AS NetVoteCount,
+        RANK() OVER (ORDER BY SUM(pm.UpvoteCount - pm.DownvoteCount) DESC) AS UserRank
+    FROM 
+        Users u
+    JOIN 
+        PostMetrics pm ON u.Id = pm.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    pm.PostId,
+    pm.CommentCount,
+    pm.UpvoteCount,
+    pm.DownvoteCount,
+    pm.AverageVote,
+    pm.GoldBadgeCount,
+    pm.SilverBadgeCount,
+    pm.BronzeBadgeCount,
+    tu.UserId,
+    tu.DisplayName,
+    tu.NetVoteCount,
+    tu.UserRank
+FROM 
+    PostMetrics pm
+LEFT JOIN 
+    TopUsers tu ON pm.OwnerUserId = tu.UserId
+WHERE 
+    pm.CommentCount > 0
+    AND pm.UpvoteCount > pm.DownvoteCount
+    AND tu.UserRank <= 10
+ORDER BY 
+    pm.Score DESC, 
+    pm.PostId
+OPTION (MAXRECURSION 100);

@@ -1,0 +1,76 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 20000101 AND 20231231
+    GROUP BY 
+        ws_item_sk
+),
+CustomerAge AS (
+    SELECT 
+        c_customer_sk,
+        YEAR(CURRENT_DATE) - c_birth_year AS age
+    FROM 
+        customer
+),
+HighValueCustomers AS (
+    SELECT 
+        cd_demo_sk
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_purchase_estimate > 10000
+),
+CustomerAddresses AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_suite_number, ', ', ca_city, ', ', ca_state) AS full_address
+    FROM 
+        customer_address
+    WHERE 
+        ca_state IS NOT NULL
+),
+PromotionDetails AS (
+    SELECT 
+        p_promo_sk,
+        p_promo_name,
+        CASE WHEN p_cost > 100 THEN 'High Cost' ELSE 'Low Cost' END AS cost_category
+    FROM 
+        promotion
+    WHERE 
+        p_discount_active = 'Y'
+)
+SELECT 
+    cs.ws_item_sk,
+    cs.total_quantity,
+    cs.total_sales,
+    COUNT(DISTINCT cc.c_customer_sk) AS total_customers,
+    AVG(ca.age) AS avg_customer_age,
+    STRING_AGG(DISTINCT pa.full_address, '; ') AS customer_addresses,
+    pd.cost_category
+FROM 
+    RankedSales cs
+LEFT JOIN 
+    web_sales ws ON cs.ws_item_sk = ws.ws_item_sk
+LEFT JOIN 
+    CustomerAge ca ON ws.ws_bill_customer_sk = ca.c_customer_sk
+LEFT JOIN 
+    HighValueCustomers hv ON ws.ws_bill_cdemo_sk = hv.cd_demo_sk
+LEFT JOIN 
+    CustomerAddresses pa ON ws.ws_bill_addr_sk = pa.ca_address_sk
+LEFT JOIN 
+    PromotionDetails pd ON ws.ws_promo_sk = pd.p_promo_sk
+WHERE 
+    cs.sales_rank <= 10 AND 
+    (ca.age IS NULL OR ca.age > 30)
+GROUP BY 
+    cs.ws_item_sk, pd.cost_category
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, ps.ps_partkey, 
+           ps.ps_availqty, ps.ps_supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+), 
+NationDetails AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name AS region_name, 
+           SUM(ps.ps_availqty) AS total_avail_qty
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN partsupp ps ON n.n_nationkey = (SELECT DISTINCT s.s_nationkey 
+                                                FROM supplier s 
+                                                WHERE s.s_suppkey = ps.ps_suppkey)
+    GROUP BY n.n_nationkey, n.n_name, r.r_name
+), 
+EnhancedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           ROUND(SUM(l.l_extendedprice * (1 - l.l_discount)), 2) AS net_price,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate
+)
+SELECT d.n_name,
+       d.region_name,
+       SUM(d.total_avail_qty) AS total_avail_parts,
+       COUNT(o.o_orderkey) AS total_orders,
+       AVG(e.net_price) AS avg_net_price,
+       MAX(e.o_totalprice) AS max_order_price,
+       CASE 
+           WHEN COUNT(o.o_orderkey) > 0 THEN 'Orders Present'
+           ELSE 'No Orders'
+       END AS order_status
+FROM NationDetails d
+LEFT JOIN EnhancedOrders e ON d.n_nationkey = (SELECT c.c_nationkey 
+                                                 FROM customer c 
+                                                 JOIN orders o ON c.c_custkey = o.o_custkey 
+                                                 WHERE o.o_orderkey IS NOT NULL)
+LEFT JOIN orders o ON d.n_nationkey = (SELECT c.c_nationkey 
+                                        FROM customer c 
+                                        WHERE c.c_custkey = o.o_custkey)
+GROUP BY d.n_nationkey, d.n_name, d.region_name
+HAVING SUM(d.total_avail_qty) > 0
+ORDER BY total_avail_parts DESC, avg_net_price DESC;

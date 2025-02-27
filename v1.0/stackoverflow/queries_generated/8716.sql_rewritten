@@ -1,0 +1,50 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' 
+        AND p.PostTypeId = 1
+    GROUP BY 
+        p.Id, u.DisplayName
+), TopPosts AS (
+    SELECT 
+        PostId, Title, CreationDate, ViewCount, Score, Author, CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.Author,
+    tp.CommentCount,
+    COALESCE(JSON_AGG(b.Name) FILTER (WHERE b.Id IS NOT NULL), '[]') AS Badges,
+    COALESCE(JSON_AGG(ph.Comment) FILTER (WHERE ph.PostId IS NOT NULL), '[]') AS PostHistoryComments
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Badges b ON tp.Author = (SELECT DisplayName FROM Users u WHERE u.Id = b.UserId)
+LEFT JOIN 
+    PostHistory ph ON tp.PostId = ph.PostId AND ph.CreationDate >= tp.CreationDate
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, tp.ViewCount, tp.Score, tp.Author, tp.CommentCount
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

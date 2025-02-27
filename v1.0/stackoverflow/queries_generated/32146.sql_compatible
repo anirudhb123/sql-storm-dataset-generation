@@ -1,0 +1,63 @@
+
+WITH RecursiveCTE AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.AcceptedAnswerId,
+        1 AS Level
+    FROM
+        Posts P
+    WHERE
+        P.PostTypeId = 1 
+        AND P.AcceptedAnswerId IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.AcceptedAnswerId,
+        Level + 1
+    FROM
+        Posts P
+    INNER JOIN
+        RecursiveCTE R ON P.ParentId = R.PostId 
+)
+SELECT
+    U.DisplayName AS UserName,
+    U.Reputation,
+    U.LastAccessDate,
+    COUNT(DISTINCT P.Id) AS TotalPosts,
+    COUNT(DISTINCT C.Id) AS TotalComments,
+    SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+    SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+    COUNT(B.Id) AS TotalBadges,
+    AVG(EXTRACT(EPOCH FROM (P.LastActivityDate - P.CreationDate)) / 3600) AS AvgPostAgeInHours,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed
+FROM
+    Users U
+LEFT JOIN
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN
+    Comments C ON P.Id = C.PostId
+LEFT JOIN
+    Votes V ON P.Id = V.PostId
+LEFT JOIN
+    Badges B ON U.Id = B.UserId
+LEFT JOIN
+    LATERAL (
+        SELECT
+            unnest(string_to_array(P.Tags, ',')) AS TagName
+    ) T ON TRUE
+WHERE
+    U.Reputation > 1000
+GROUP BY
+    U.Id, U.DisplayName, U.Reputation, U.LastAccessDate
+HAVING
+    COUNT(DISTINCT P.Id) > 10
+ORDER BY
+    TotalUpvotes DESC,
+    AvgPostAgeInHours ASC
+LIMIT 50;

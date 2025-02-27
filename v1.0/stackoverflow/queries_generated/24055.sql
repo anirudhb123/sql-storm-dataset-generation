@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER(PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days' 
+        AND p.ViewCount IS NOT NULL
+),
+
+TagPostCounts AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id IN (SELECT UNNEST(string_to_array(p.Tags, '><'))::int) -- Split and convert tags
+    GROUP BY 
+        t.TagName
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Author,
+    rp.ViewCount,
+    rp.Score,
+    tc.PostCount AS TagPostCount,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagPostCounts tc ON tc.TagName = ANY(string_to_array(rp.Title, ' '))
+LEFT JOIN 
+    UserBadges ub ON rp.Author = ub.UserId
+WHERE 
+    rp.Rank <= 5 
+    AND (rp.Score > 0 OR rp.ViewCount > 100) 
+    AND (rp.CreationDate IS NOT NULL OR rp.Author IS NOT NULL)
+ORDER BY 
+    rp.Score DESC,
+    rp.ViewCount DESC;
+
+-- This query integrates various SQL constructs including CTEs, window functions,
+-- correlated subqueries, outer joins, complicated predicates, and string expressions.

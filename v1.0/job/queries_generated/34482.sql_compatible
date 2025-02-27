@@ -1,0 +1,53 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        CONCAT('Sequel of: ', mh.movie_title) AS movie_title,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.movie_id
+)
+SELECT 
+    m.movie_id,
+    m.movie_title,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    AVG(pi.year_of_birth) AS avg_birth_year,
+    STRING_AGG(DISTINCT cn.name, ', ') AS companies
+FROM 
+    MovieHierarchy m
+LEFT JOIN 
+    cast_info ci ON m.movie_id = ci.movie_id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id AND cn.country_code IS NOT NULL
+GROUP BY 
+    m.movie_id,
+    m.movie_title,
+    m.level
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0 AND
+    AVG(pi.year_of_birth) IS NOT NULL
+ORDER BY 
+    m.level, m.movie_title
+OFFSET 5 ROWS
+FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,74 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_external_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_ext_sales_price DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Unknown'
+        END AS gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(*) OVER(PARTITION BY cd.cd_marital_status) AS marital_count,
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+    HAVING 
+        SUM(ws.ws_sales_price) > 5000
+),
+RecentReturns AS (
+    SELECT 
+        sr_items.sr_item_sk,
+        COUNT(sr_items.sr_return_quantity) AS return_count
+    FROM 
+        store_returns sr_items
+    WHERE 
+        sr_items.sr_returned_date_sk > (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        sr_items.sr_item_sk
+)
+SELECT 
+    fc.gender,
+    fc.marital_status,
+    fc.total_spent,
+    COALESCE(rr.return_count, 0) AS return_count,
+    MAX(rs.ws_sales_price) AS max_sales_price,
+    MIN(rs.ws_sales_price) AS min_sales_price,
+    ROUND(AVG(rs.ws_sales_price), 2) AS avg_sales_price,
+    CASE 
+        WHEN MAX(rs.ws_sales_price) IS NULL THEN 'No sales'
+        WHEN MAX(rs.ws_sales_price) > 100 THEN 'High roller'
+        ELSE 'Regular spender'
+    END AS customer_type
+FROM 
+    FilteredCustomers fc
+LEFT JOIN 
+    RankedSales rs ON fc.c_customer_sk = rs.ws_order_number
+LEFT JOIN 
+    RecentReturns rr ON rs.ws_item_sk = rr.sr_item_sk
+WHERE 
+    fc.marital_count > 10
+GROUP BY 
+    fc.gender, fc.marital_status, fc.total_spent, rr.return_count
+ORDER BY 
+    total_spent DESC, fc.gender;

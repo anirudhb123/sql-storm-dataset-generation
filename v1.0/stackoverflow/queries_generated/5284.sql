@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, '>')) AS t(TagName) ON TRUE
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '7 days'
+    GROUP BY 
+        p.Id
+),
+TopUsersPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.Tags
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        rp.PostRank <= 5
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.Reputation,
+    COUNT(tu.PostId) AS TotalPosts,
+    SUM(tu.Score) AS TotalScore,
+    ARRAY_AGG(tu.Tags) AS AllTags,
+    MAX(tu.CreationDate) AS LastPostDate
+FROM 
+    TopUsersPosts tu
+GROUP BY 
+    tu.UserId, tu.DisplayName, tu.Reputation
+ORDER BY 
+    TotalScore DESC, TotalPosts DESC
+LIMIT 10;

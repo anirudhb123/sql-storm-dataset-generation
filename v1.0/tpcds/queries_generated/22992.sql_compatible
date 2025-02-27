@@ -1,0 +1,58 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+FilteredReturns AS (
+    SELECT
+        sr.return_month,
+        sr.return_reason,
+        COUNT(*) AS total_returns,
+        SUM(sr.return_amt) AS total_return_amt
+    FROM (
+        SELECT 
+            DATE_TRUNC('month', d.d_date) AS return_month,
+            r.r_reason_desc AS return_reason,
+            sr.*
+        FROM 
+            store_returns sr 
+        LEFT JOIN 
+            date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+        LEFT JOIN 
+            reason r ON sr.sr_reason_sk = r.r_reason_sk
+    ) sr
+    GROUP BY 
+        sr.return_month, sr.return_reason
+)
+SELECT 
+    rc.c_customer_id,
+    rc.cd_gender,
+    COALESCE(fr.total_returns, 0) AS total_returns,
+    COALESCE(fr.total_return_amt, 0) AS total_return_amt,
+    CASE 
+        WHEN COALESCE(fr.total_returns, 0) > 100 THEN 'High Return'
+        WHEN COALESCE(fr.total_returns, 0) BETWEEN 50 AND 100 THEN 'Medium Return'
+        ELSE 'Low Return'
+    END AS return_category
+FROM 
+    RankedCustomers rc
+LEFT JOIN 
+    FilteredReturns fr ON rc.c_customer_id = fr.return_reason
+WHERE 
+    rc.purchase_rank <= 10
+    AND (rc.cd_gender = 'M' OR rc.cd_income_band_sk IS NOT NULL)
+ORDER BY 
+    rc.cd_gender, 
+    return_category DESC, 
+    rc.c_customer_id;

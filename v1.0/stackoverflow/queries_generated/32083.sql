@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE()) -- Posts created in the last year
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS DeleteCount,
+        MAX(ph.CreationDate) AS LastModified
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+PostsWithStats AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.CreationDate,
+        u.UserId,
+        u.Reputation,
+        ps.CloseCount,
+        ps.DeleteCount,
+        ps.LastModified,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.PostId) AS CommentCount
+    FROM 
+        RankedPosts p
+    JOIN 
+        UserStats u ON p.OwnerUserId = u.UserId
+    JOIN 
+        PostHistorySummary ps ON p.PostId = ps.PostId
+)
+SELECT 
+    pws.PostId,
+    pws.Title,
+    pws.CreationDate,
+    u.DisplayName,
+    u.Reputation,
+    pws.CommentCount,
+    COALESCE(pws.CloseCount, 0) AS CloseCount,
+    COALESCE(pws.DeleteCount, 0) AS DeleteCount,
+    DATEDIFF(day, pws.LastModified, GETDATE()) AS DaysSinceLastModified
+FROM 
+    PostsWithStats pws
+JOIN 
+    Users u ON pws.UserId = u.Id
+WHERE 
+    (pws.Reputation > 100 OR pws.CommentCount > 5) -- Filter for active users
+    AND pws.PostRank <= 5 -- Top 5 recent posts per user
+ORDER BY 
+    pws.CreationDate DESC
+OPTION (MAXDOP 1); -- For performance benchmarking

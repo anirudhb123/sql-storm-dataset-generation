@@ -1,0 +1,83 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        ph.CreationDate AS RevisionDate, 
+        ph.Comment, 
+        ph.UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+), 
+RecentPostActivity AS (
+    SELECT 
+        p.Id AS PostId, 
+        COUNT(DISTINCT c.Id) AS CommentCount, 
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        p.CreationDate, 
+        p.LastActivityDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.CreationDate, p.LastActivityDate
+),
+PopularTags AS (
+    SELECT 
+        t.TagName, 
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags)-2), '><')::int[])
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        pt.Name = 'Question'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 10
+)
+SELECT 
+    rpa.PostId,
+    rpa.CommentCount, 
+    rpa.VoteCount,
+    rpa.UpVoteCount,
+    rpa.DownVoteCount,
+    rp.Title,
+    rp.RevisionDate,
+    rp.Comment AS LastComment,
+    rp.UserDisplayName AS LastEditor
+FROM 
+    RecentPostActivity rpa
+LEFT JOIN 
+    RecursivePostHistory rp ON rpa.PostId = rp.PostId AND rp.rn = 1
+WHERE 
+    rpa.CommentCount > 0
+    AND rpa.LastActivityDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+ORDER BY 
+    rpa.VoteCount DESC, rpa.CommentCount DESC
+LIMIT 100;
+
+-- Get the top tags in terms of popularity and the corresponding posts
+SELECT 
+    pt.TagName, 
+    pt.PostCount,
+    p.Id AS PopularPostId,
+    p.Title AS PopularPostTitle
+FROM 
+    PopularTags pt
+JOIN 
+    Posts p ON p.Tags ILIKE '%' || pt.TagName || '%' 
+ORDER BY 
+    pt.PostCount DESC, 
+    p.CreationDate DESC
+LIMIT 50;

@@ -1,0 +1,36 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal,
+           CASE WHEN s_acctbal > 1000 THEN 'High' ELSE 'Low' END AS acctbal_category,
+           NULL AS parent_suppkey
+    FROM supplier
+    UNION ALL
+    SELECT p.s_suppkey, p.s_name, p.s_acctbal,
+           CASE WHEN p.s_acctbal > 1000 THEN 'High' ELSE 'Low' END AS acctbal_category,
+           sh.s_suppkey AS parent_suppkey
+    FROM supplier p
+    JOIN supplier_hierarchy sh ON p.s_acctbal < sh.s_acctbal
+    WHERE sh.s_suppkey IS NOT NULL
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+customer_ranking AS (
+    SELECT c.c_custkey, c.c_name, DENSE_RANK() OVER (ORDER BY SUM(os.total_price) DESC) AS cust_rank
+    FROM customer c
+    JOIN order_summary os ON c.c_custkey = os.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT n.n_name, 
+       COUNT(DISTINCT sh.s_suppkey) AS suppliers_count, 
+       SUM(CASE WHEN cr.cust_rank <= 5 THEN os.total_price ELSE 0 END) AS top_customers_total,
+       STRING_AGG(DISTINCT CONCAT('Supplier: ', sh.s_name, ' (Balance: ', sh.s_acctbal, ')'), '; ') AS supplier_details
+FROM nation n
+LEFT JOIN supplier_hierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN order_summary os ON os.o_custkey IN (SELECT c.c_custkey FROM customer_ranking cr WHERE cr.cust_rank <= 5)
+WHERE n.n_name NOT LIKE '%land' OR n.n_name IS NULL
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT sh.s_suppkey) > 0
+ORDER BY suppliers_count DESC NULLS LAST;

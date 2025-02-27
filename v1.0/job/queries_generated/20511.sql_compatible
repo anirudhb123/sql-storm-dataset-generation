@@ -1,0 +1,32 @@
+
+WITH RecursiveGenre AS (
+    SELECT t.id AS title_id, t.title, k.keyword
+    FROM title t
+    JOIN movie_keyword mk ON t.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    WHERE LOWER(k.keyword) IN ('drama', 'comedy', 'thriller')
+),
+RankedActors AS (
+    SELECT ak.id AS actor_id, ak.name AS actor_name, COUNT(ci.movie_id) AS movie_count,
+           RANK() OVER (PARTITION BY ak.name ORDER BY COUNT(ci.movie_id) DESC) AS rank
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY ak.id, ak.name
+),
+MovieDetails AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 
+           STRING_AGG(DISTINCT c.name ORDER BY c.name) AS company_names,
+           COALESCE(AVG(CASE WHEN mvi.info LIKE '%budget%' THEN 1 ELSE 0 END), 0) AS average_budget_info
+    FROM aka_title mt
+    LEFT JOIN movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN company_name c ON mc.company_id = c.id
+    LEFT JOIN movie_info mvi ON mt.id = mvi.movie_id AND mvi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget')
+    GROUP BY mt.id, mt.title, mt.production_year
+)
+SELECT mg.title_id, mg.title, ra.actor_name, ra.movie_count, md.movie_id, md.company_names, md.average_budget_info
+FROM RecursiveGenre mg
+JOIN RankedActors ra ON mg.title_id = ra.actor_id
+FULL OUTER JOIN MovieDetails md ON mg.title_id = md.movie_id
+WHERE (md.average_budget_info IS NULL OR md.average_budget_info > 0) 
+  AND (ra.rank <= 5 OR ra.actor_name IS NULL)
+ORDER BY md.production_year DESC, mg.title ASC, ra.movie_count DESC;

@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year,
+        1 AS level,
+        CAST(m.title AS VARCHAR(255)) AS full_title
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year,
+        level + 1,
+        CONCAT(mh.full_title, ' -> ', m.title) AS full_title
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    mh.full_title,
+    COUNT(DISTINCT c.person_id) AS actor_count,
+    SUM(CASE 
+        WHEN c.role_id IS NOT NULL THEN 1 
+        ELSE 0 
+    END) AS principal_roles,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_info c ON mh.movie_id = c.movie_id
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+JOIN 
+    info_type it ON c.person_role_id = it.id
+WHERE 
+    mh.level = 1 AND 
+    (it.info != 'Uncredited' OR it.info IS NULL)
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level, mh.full_title
+HAVING 
+    COUNT(DISTINCT c.person_id) > 5
+ORDER BY 
+    actor_count DESC, 
+    mh.production_year DESC;

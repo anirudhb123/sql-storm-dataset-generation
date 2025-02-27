@@ -1,0 +1,85 @@
+WITH Recursive_Cast AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS rn,
+        COALESCE(cn.name, 'Unknown') AS actor_name,
+        CASE 
+            WHEN ci.note IS NULL THEN 'None'
+            ELSE ci.note 
+        END AS role_note
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        aka_name cn ON ci.person_id = cn.person_id
+),
+Movie_Details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+),
+Actor_Role AS (
+    SELECT 
+        movie_id,
+        actor_name,
+        rn,
+        role_note,
+        RANK() OVER (PARTITION BY movie_id ORDER BY rn DESC) AS role_rank
+    FROM 
+        Recursive_Cast
+),
+Aggregated_Stats AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        COUNT(rn) AS total_cast,
+        STRING_AGG(DISTINCT actor_name, ', ') AS actor_list,
+        MIN(production_year) AS earliest_year,
+        MAX(production_year) AS latest_year,
+        SUM(CASE WHEN role_rank = 1 THEN 1 ELSE 0 END) AS leading_roles_count
+    FROM 
+        Movie_Details md
+    LEFT JOIN 
+        Actor_Role ar ON md.movie_id = ar.movie_id
+    GROUP BY 
+        md.movie_id, md.title
+),
+Null_Check AS (
+    SELECT 
+        movie_id,
+        title,
+        total_cast,
+        actor_list,
+        leading_roles_count,
+        COALESCE(NULLIF(earliest_year, latest_year), NULL) AS year_span
+    FROM 
+        Aggregated_Stats
+    WHERE 
+        total_cast > 0 
+        AND year_span IS NOT NULL
+)
+SELECT 
+    n.title,
+    n.total_cast,
+    n.actor_list,
+    n.leading_roles_count,
+    CASE 
+        WHEN n.total_cast > 10 THEN 'Ensemble Cast'
+        WHEN n.leading_roles_count = 0 THEN 'No Leading Roles'
+        ELSE 'Regular Cast'
+    END AS cast_type,
+    n.year_span
+FROM 
+    Null_Check n
+ORDER BY 
+    n.total_cast DESC, n.leading_roles_count DESC;

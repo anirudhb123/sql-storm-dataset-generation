@@ -1,0 +1,70 @@
+WITH RankedMovies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        ROW_NUMBER() OVER (PARTITION BY title.production_year ORDER BY title.title) AS rn,
+        COUNT(*) OVER (PARTITION BY title.production_year) AS total_movies
+    FROM title
+    WHERE title.production_year >= 2000
+),
+ActorCount AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    WHERE an.name IS NOT NULL
+    GROUP BY ci.movie_id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+MoviesWithActors AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(ac.actor_count, 0) AS actor_count,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        rm.total_movies
+    FROM RankedMovies rm
+    LEFT JOIN ActorCount ac ON rm.movie_id = ac.movie_id
+    LEFT JOIN MovieKeywords mk ON rm.movie_id = mk.movie_id
+),
+FamousMovies AS (
+    SELECT 
+        mwa.*,
+        CASE 
+            WHEN actor_count >= 10 THEN 'Famous'
+            WHEN actor_count >= 5 THEN 'Moderately Famous'
+            ELSE 'Lesser Known'
+        END AS fame_rank
+    FROM MoviesWithActors mwa
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.actor_count,
+    f.keywords,
+    f.fame_rank,
+    (SELECT COUNT(*) FROM movie_companies mc WHERE mc.movie_id = f.movie_id AND mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Distributor')) AS distributor_count,
+    ARRAY_AGG(DISTINCT c.kind ORDER BY c.kind) AS company_kinds,
+    NULLIF(f.total_movies, 0) AS total_movies_not_null,
+    CASE 
+        WHEN f.production_year BETWEEN 2000 AND 2010 THEN 'Recent'
+        WHEN f.production_year < 2000 THEN 'Old School'
+        ELSE 'Future Release'
+    END AS release_period
+FROM FamousMovies f
+LEFT JOIN movie_companies mc ON f.movie_id = mc.movie_id
+LEFT JOIN company_type c ON mc.company_type_id = c.id
+GROUP BY f.movie_id, f.title, f.production_year, f.actor_count, f.keywords, f.fame_rank, f.total_movies
+HAVING f.actor_count > 0
+ORDER BY f.production_year DESC, f.actor_count DESC
+LIMIT 50;

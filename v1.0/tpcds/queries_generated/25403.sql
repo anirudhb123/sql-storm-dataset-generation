@@ -1,0 +1,23 @@
+
+SELECT c.c_customer_id,
+       CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+       d.d_date AS purchase_date,
+       SUM(CASE WHEN ws.ws_ship_date_sk IS NOT NULL THEN ws.ws_ext_sales_price ELSE 0 END) AS total_web_sales,
+       SUM(CASE WHEN ss.ss_sold_date_sk IS NOT NULL THEN ss.ss_ext_sales_price ELSE 0 END) AS total_store_sales,
+       COUNT(DISTINCT ws.ws_order_number) AS total_web_orders,
+       COUNT(DISTINCT ss.ss_ticket_number) AS total_store_tickets,
+       COUNT(DISTINCT wr.wr_order_number) AS total_web_returns,
+       COUNT(DISTINCT sr.sr_ticket_number) AS total_store_returns,
+       MAX(i.i_item_desc) AS last_purchased_item,
+       MAX(CASE WHEN ws.ws_ship_date_sk IS NOT NULL THEN ws.ws_shipped_date_sk ELSE NULL END) AS last_web_purchase_date,
+       MAX(CASE WHEN ss.ss_sold_date_sk IS NOT NULL THEN ss.ss_sold_date_sk ELSE NULL END) AS last_store_purchase_date
+FROM customer c
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN date_dim d ON d.d_date_sk = COALESCE(ws.ws_ship_date_sk, ss.ss_sold_date_sk)
+LEFT JOIN web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_returning_customer_sk
+LEFT JOIN item i ON i.i_item_sk = COALESCE(ws.ws_item_sk, ss.ss_item_sk)
+WHERE d.d_year = 2023
+GROUP BY c.c_customer_id, c.c_first_name, c.c_last_name, d.d_date
+ORDER BY total_web_sales DESC, total_store_sales DESC;

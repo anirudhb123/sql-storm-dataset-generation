@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_supplycost DESC) AS SupplierRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATEADD(year, -1, GETDATE())
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -3, GETDATE())
+),
+SupplierPerformance AS (
+    SELECT 
+        rs.s_suppkey,
+        COUNT(DISTINCT ro.o_orderkey) AS OrderCount,
+        SUM(ro.l_extendedprice * (1 - ro.l_discount)) AS TotalRevenue,
+        AVG(ro.l_tax) AS AvgTaxRate
+    FROM 
+        RankedSuppliers rs
+    LEFT JOIN 
+        RecentOrders ro ON rs.s_suppkey = ro.l_suppkey
+    GROUP BY 
+        rs.s_suppkey
+)
+SELECT 
+    hvc.c_custkey,
+    hvc.c_name,
+    sp.s_suppkey,
+    sp.OrderCount,
+    sp.TotalRevenue,
+    sp.AvgTaxRate
+FROM 
+    HighValueCustomers hvc
+JOIN 
+    SupplierPerformance sp ON hvc.c_custkey = sp.s_suppkey
+WHERE 
+    sp.OrderCount > 5
+ORDER BY 
+    hvc.total_spent DESC, sp.TotalRevenue DESC;

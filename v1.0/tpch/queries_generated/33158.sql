@@ -1,0 +1,48 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+           RANK() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS spending_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+supplier_availability AS (
+    SELECT p.p_partkey, SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY p.p_partkey
+),
+ordered_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           COALESCE(sa.total_available, 0) AS available_qty,
+           (CASE 
+                WHEN s.s_acctbal >= 1000 THEN 'High Value'
+                WHEN s.s_acctbal < 1000 AND s.s_acctbal > 0 THEN 'Medium Value'
+                ELSE 'Low Value' 
+            END) AS supplier_value
+    FROM supplier s
+    LEFT JOIN supplier_availability sa ON s.s_suppkey = sa.ps_suppkey
+),
+final_report AS (
+    SELECT nh.n_name AS nation_name, co.c_name AS customer_name,
+           co.total_spent, os.supplier_value, 
+           ROW_NUMBER() OVER (PARTITION BY nh.n_name ORDER BY co.total_spent DESC) AS customer_rank
+    FROM customer_orders co
+    JOIN customer c ON co.c_custkey = c.c_custkey
+    JOIN nation_hierarchy nh ON c.c_nationkey = nh.n_nationkey
+    JOIN ordered_suppliers os ON os.available_qty > 0
+)
+SELECT fr.nation_name, fr.customer_name, fr.total_spent, fr.supplier_value
+FROM final_report fr
+WHERE fr.customer_rank <= 10
+ORDER BY fr.nation_name, fr.total_spent DESC;

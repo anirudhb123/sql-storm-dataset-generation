@@ -1,0 +1,79 @@
+WITH MovieRoles AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS role_count,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles,
+        MIN(c.nr_order) AS min_order,
+        MAX(c.nr_order) AS max_order
+    FROM cast_info c
+    JOIN role_type r ON c.role_id = r.id
+    WHERE c.note IS NULL OR c.note NOT LIKE '%uncredited%'
+    GROUP BY c.movie_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(k.keywords, 'No Keywords') AS keywords
+    FROM aka_title m
+    LEFT JOIN (
+        SELECT 
+            mk.movie_id,
+            STRING_AGG(mk.keyword, ', ') AS keywords
+        FROM movie_keyword mk
+        JOIN keyword k ON mk.keyword_id = k.id
+        GROUP BY mk.movie_id
+    ) k ON m.id = k.movie_id
+),
+MoviesWithPersonInfo AS (
+    SELECT 
+        p.person_id,
+        p.info AS personal_info,
+        mv.movie_id,
+        mv.title
+    FROM person_info p
+    JOIN MovieRoles r ON p.person_id = r.movie_id
+    JOIN MoviesWithKeywords mv ON r.movie_id = mv.movie_id
+)
+SELECT 
+    mv.title,
+    mv.keywords,
+    COALESCE(mr.role_count, 0) AS number_of_roles,
+    mr.roles,
+    mpi.personal_info,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = mv.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%award%')) AS award_count,
+    CASE 
+        WHEN mr.role_count > 5 THEN 'Ensemble Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM MoviesWithKeywords mv
+LEFT JOIN MovieRoles mr ON mv.movie_id = mr.movie_id
+LEFT JOIN MoviesWithPersonInfo mpi ON mv.movie_id = mpi.movie_id
+WHERE mv.keywords IS NOT NULL
+ORDER BY mv.title ASC, number_of_roles DESC
+LIMIT 100;
+
+### Explanation of Constructs Used:
+
+1. **CTEs (Common Table Expressions)**: 
+   - `MovieRoles`: Aggregates role-related data from `cast_info` to get the count of unique roles per movie, concatenates the roles, and finds min/max order.
+   - `MoviesWithKeywords`: Retrieves movie titles and their associated keywords, ensuring that 'No Keywords' is returned if no keywords are present.
+   - `MoviesWithPersonInfo`: Joins `person_info` with movies and roles to add personal information about the persons involved in the movies.
+
+2. **Coalescing and String Aggregation**: 
+   - Uses `COALESCE` for handling NULL values.
+   - Employs `STRING_AGG` to concatenate values such as keywords and roles.
+
+3. **Subquery**: 
+   - A subquery to count how many awards are associated with each movie from the `movie_info` table.
+
+4. **CASE Statement**: 
+   - Categorizes movies based on the number of roles into 'Ensemble Cast' or 'Small Cast'.
+
+5. **Proper Use of Outer Joins**: 
+   - LEFT joins are utilized to ensure movies are included even if they lack certain associated information (e.g., keywords or roles).
+
+6. **Filtering with Complicated Predicates**: 
+   - The query removes uncredited roles and ensures movies that have keywords are displayed.
+
+This query encompasses an elaborate interaction of many SQL concepts, showcasing how to perform advanced data retrieval operations.

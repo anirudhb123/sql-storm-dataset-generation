@@ -1,0 +1,52 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderkey IS NOT NULL
+    UNION ALL
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM CustomerOrders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderkey > co.o_orderkey
+),
+SupplierPartCost AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_supplycost, 
+           RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost) AS rank_cost
+    FROM partsupp ps
+    WHERE ps.ps_supplycost IS NOT NULL
+),
+LineItemStats AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+           AVG(l.l_quantity) AS avg_quantity,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS returns_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    co.c_name,
+    COALESCE(lis.net_revenue, 0) AS total_net_revenue,
+    COALESCE(lis.avg_quantity, 0) AS average_quantity,
+    spc.ps_supplycost,
+    CASE 
+        WHEN spc.ps_supplycost IS NOT NULL THEN 
+            CASE 
+                WHEN spc.ps_supplycost < 100 THEN 'Cheap'
+                WHEN spc.ps_supplycost BETWEEN 100 AND 500 THEN 'Moderate'
+                ELSE 'Expensive'
+            END
+        ELSE 'No Cost'
+    END AS cost_category,
+    r.r_name AS region_name
+FROM CustomerOrders co
+FULL OUTER JOIN LineItemStats lis ON co.o_orderkey = lis.l_orderkey
+LEFT JOIN supplier s ON s.s_suppkey = (SELECT ps.ps_suppkey 
+                                         FROM SupplierPartCost spc 
+                                         WHERE spc.rank_cost = 1 AND spc.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = co.o_orderkey)
+                                         LIMIT 1)
+LEFT JOIN region r ON s.s_nationkey = (SELECT n.n_nationkey 
+                                        FROM nation n 
+                                        WHERE n.n_regionkey = (SELECT r2.r_regionkey FROM region r2 WHERE r2.r_name = r.r_name LIMIT 1))
+WHERE co.o_orderdate >= '1997-01-01' 
+AND co.o_orderdate <= '1997-12-31'
+ORDER BY total_net_revenue DESC, co.c_name ASC;

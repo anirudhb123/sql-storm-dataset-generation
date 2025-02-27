@@ -1,0 +1,39 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM web_sales
+    GROUP BY ws_item_sk, ws_sold_date_sk
+),
+FilteredSales AS (
+    SELECT 
+        w.wholesale_cost,
+        s.ws_item_sk,
+        s.total_sales,
+        COALESCE((
+            SELECT SUM(ws_net_profit) 
+            FROM web_sales ws 
+            WHERE ws.ws_item_sk = s.ws_item_sk 
+              AND ws.ws_sold_date_sk BETWEEN DATE '2002-10-01' - INTERVAL '6 MONTH' AND DATE '2002-10-01'
+        ), 0) AS potential_profit
+    FROM SalesCTE s
+    JOIN item w ON s.ws_item_sk = w.i_item_sk
+    WHERE s.rn = 1
+)
+SELECT 
+    fs.ws_item_sk,
+    fs.total_sales,
+    fs.wholesale_cost,
+    fs.potential_profit,
+    CASE 
+        WHEN fs.potential_profit IS NULL THEN 'No Profit Data'
+        WHEN fs.potential_profit > fs.total_sales THEN 'High Potential'
+        ELSE 'Average Potential'
+    END AS potential_category
+FROM FilteredSales fs
+WHERE fs.total_sales > 100
+ORDER BY fs.potential_profit DESC
+FETCH FIRST 10 ROWS ONLY;

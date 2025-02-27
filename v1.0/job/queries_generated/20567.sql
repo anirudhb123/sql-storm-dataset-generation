@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+
+SELECT
+    a.id AS actor_id,
+    a.name AS actor_name,
+    COUNT(DISTINCT ch.title) AS total_credits,
+    SUM(CASE WHEN mh.level > 0 THEN 1 ELSE 0 END) AS linked_movies_count,
+    STRING_AGG(DISTINCT m.title, '; ') AS movie_titles,
+    MAX(CASE WHEN m.production_year < 2000 THEN 'Classic' ELSE 'Modern' END) AS era,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY COUNT(DISTINCT m.id) DESC) AS rank
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    aka_title m ON c.movie_id = m.id
+LEFT JOIN 
+    MovieHierarchy mh ON m.id = mh.movie_id
+LEFT JOIN 
+    char_name ch ON a.name = ch.name
+WHERE 
+    a.name_pcode_cf IS NOT NULL
+    AND (m.production_year >= 1980 OR m.production_year IS NULL)
+    AND a.id NOT IN (SELECT id FROM aka_name WHERE name LIKE '%Smith%')
+GROUP BY 
+    a.id, a.name
+HAVING 
+    COUNT(DISTINCT ch.id) > 0
+    AND SUM(m.production_year) > 2000 -- ensuring that movies are of later years for a meaningful sum
+ORDER BY 
+    total_credits DESC,
+    actor_id ASC
+FETCH FIRST 20 ROWS ONLY;

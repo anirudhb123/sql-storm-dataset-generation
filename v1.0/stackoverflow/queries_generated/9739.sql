@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        u.Reputation AS OwnerReputation,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagNames
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                t.TagName 
+            FROM 
+                Tags t 
+            WHERE 
+                t.Id IN (SELECT unnest(string_to_array(substr(p.Tags, 2, length(p.Tags)-2), '><')::int[]))
+        ) t ON true
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.Reputation
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerUserId,
+        AnswerCount,
+        CommentCount,
+        OwnerReputation,
+        TotalComments,
+        TagNames
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    u.DisplayName AS OwnerName,
+    u.Reputation AS OwnerReputation,
+    p.AnswerCount,
+    p.CommentCount,
+    p.TotalComments,
+    p.TagNames,
+    ph.UserDisplayName AS LastEditedBy,
+    ph.CreationDate AS LastEditDate,
+    ph.Comment AS EditComment
+FROM 
+    TopPosts p
+LEFT JOIN 
+    PostHistory ph ON p.PostId = ph.PostId
+WHERE 
+    ph.PostHistoryTypeId IN (4, 5, 6)  -- Edit Title, Edit Body, Edit Tags
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC;

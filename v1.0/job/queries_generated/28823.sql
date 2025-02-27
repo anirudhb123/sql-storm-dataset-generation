@@ -1,0 +1,53 @@
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name SEPARATOR ', ') AS actors,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword SEPARATOR ', ') AS keywords,
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR ', ') AS companies
+    FROM 
+        title m
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        m.id, m.title, m.production_year
+), ranked_movies AS (
+    SELECT 
+        md.movie_id,
+        md.movie_title,
+        md.production_year,
+        md.actors,
+        md.keywords,
+        md.companies,
+        ROW_NUMBER() OVER (ORDER BY md.production_year DESC) AS rank
+    FROM 
+        movie_details md
+)
+SELECT 
+    rm.rank,
+    rm.movie_title,
+    rm.production_year,
+    rm.actors,
+    rm.keywords,
+    rm.companies
+FROM 
+    ranked_movies rm
+WHERE 
+    rm.rank <= 10
+ORDER BY 
+    rm.production_year DESC;
+
+This SQL query generates a summary of the top 10 ranked movies produced between the years 2000 and 2023, enriching the result with a concatenated list of actors, keywords, and companies associated with each movie. It employs common table expressions (CTEs) to organize the data and makes use of window functions for ranking the movies based on their production year. The final result set presents crucial details like movie title, production year, actors, keywords, and companies.

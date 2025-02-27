@@ -1,0 +1,83 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.PostId
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(RE.CreationDate, p.CreationDate) AS EngagementDate,
+        RANK() OVER (PARTITION BY p.Id ORDER BY p.Score DESC) AS ScoreRank, 
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        RecursivePosts RE ON p.Id = RE.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score, RE.CreationDate
+)
+SELECT 
+    u.DisplayName AS User,
+    ue.PostCount,
+    ue.TotalBounty,
+    ue.TotalUpVotes,
+    ue.TotalDownVotes,
+    pe.PostId,
+    pe.Title,
+    pe.Score,
+    pe.CommentCount,
+    pe.EngagementDate
+FROM 
+    UserEngagement ue
+JOIN 
+    PostEngagement pe ON ue.UserId = pe.OwnerUserId
+WHERE 
+    ue.PostCount > 10
+ORDER BY 
+    ue.TotalUpVotes DESC, 
+    pe.ScoreRank ASC
+LIMIT 100;
+

@@ -1,0 +1,47 @@
+
+WITH RECURSIVE part_hierarchy AS (
+    SELECT p_partkey, 
+           p_name, 
+           0 AS level
+    FROM part
+    WHERE p_size = (SELECT MAX(p_size) FROM part)
+    
+    UNION ALL
+    
+    SELECT p.p_partkey, 
+           p.p_name, 
+           ph.level + 1
+    FROM part_hierarchy ph
+    JOIN partsupp ps ON ph.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_regionkey IN (SELECT r_regionkey FROM region WHERE r_name LIKE 'A%') 
+      AND ph.level < 5
+)
+
+SELECT 
+    ph.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    RANK() OVER (PARTITION BY ph.p_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank,
+    CASE 
+        WHEN COUNT(DISTINCT o.o_orderkey) > 0 THEN 'Yes' 
+        ELSE 'No' 
+    END AS has_orders,
+    COALESCE(NULLIF(MAX(l.l_shipdate), DATE '1900-01-01'), MIN(l.l_shipdate)) AS latest_ship_date
+FROM part_hierarchy ph
+LEFT OUTER JOIN lineitem l ON ph.p_partkey = l.l_partkey
+LEFT OUTER JOIN orders o ON l.l_orderkey = o.o_orderkey
+WHERE l.l_shipmode IN ('AIR', 'SHIP')
+GROUP BY ph.p_name
+HAVING total_revenue > (
+    SELECT AVG(total_revenue)
+    FROM (
+        SELECT SUM(l_temp.l_extendedprice * (1 - l_temp.l_discount)) AS total_revenue
+        FROM lineitem l_temp
+        JOIN orders o_temp ON l_temp.l_orderkey = o_temp.o_orderkey
+        GROUP BY o_temp.o_orderkey
+    ) AS averages
+)
+ORDER BY revenue_rank, total_revenue DESC
+LIMIT 10;

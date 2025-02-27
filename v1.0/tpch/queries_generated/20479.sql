@@ -1,0 +1,77 @@
+WITH RECURSIVE top_customers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rn
+    FROM
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+part_suppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT s.s_suppkey) AS supp_count,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+),
+yearly_sales AS (
+    SELECT 
+        EXTRACT(YEAR FROM l_shipdate) AS sale_year,
+        SUM(l_extendedprice * (1 - l_discount)) AS net_sales
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate >= DATE '2021-01-01'
+    GROUP BY 
+        sale_year
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(ps.supp_count, 0) AS supplier_count,
+    ps.avg_acctbal,
+    cs.total_spent,
+    ys.sale_year,
+    ys.net_sales
+FROM 
+    part p
+LEFT JOIN 
+    part_suppliers ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    top_customers cs ON cs.rn <= 10
+LEFT JOIN 
+    yearly_sales ys ON ys.sale_year = EXTRACT(YEAR FROM CURRENT_DATE)
+WHERE 
+    (p.p_brand = 'Brand#42' OR p.p_size > 50)
+    AND (cs.total_spent > 10000 OR cs.c_custkey IS NULL)
+ORDER BY 
+    p.p_partkey, supplier_count DESC, total_spent DESC
+FETCH FIRST 50 ROWS ONLY
+UNION ALL
+SELECT 
+    NULL AS p_partkey,
+    'NULL_PART' AS p_name,
+    0 AS supplier_count,
+    NULL AS avg_acctbal,
+    SUM(o.o_totalprice) AS total_sales,
+    NULL AS sale_year,
+    NULL AS net_sales
+FROM 
+    orders o
+WHERE 
+    o.o_orderstatus NOT LIKE 'F%'
+    AND o.o_totalprice IS NOT NULL
+HAVING 
+    COUNT(o.o_orderkey) > 10;

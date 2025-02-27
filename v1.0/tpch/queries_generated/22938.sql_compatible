@@ -1,0 +1,91 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(co.total_orders, 0) AS total_orders,
+        COALESCE(co.total_spent, 0) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS supply_value
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_availqty) > (SELECT AVG(ps2.ps_availqty) FROM partsupp ps2)
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_net_price,
+    COUNT(DISTINCT ho.c_custkey) AS high_value_customer_count,
+    s_r.s_name AS best_supplier
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    HighValueCustomers ho ON ho.total_orders > 5 
+    AND p.p_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM SupplierParts ps 
+        WHERE ps.ps_suppkey IN (
+            SELECT s.s_suppkey 
+            FROM RankedSuppliers s 
+            WHERE s.supplier_rank = 1
+        )
+    )
+LEFT JOIN 
+    SupplierParts sp ON sp.ps_partkey = p.p_partkey
+LEFT JOIN 
+    RankedSuppliers s_r ON s_r.s_suppkey = sp.ps_suppkey
+WHERE 
+    p.p_retailprice IS NOT NULL
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand
+HAVING 
+    AVG(COALESCE(l.l_extendedprice, 0) * (1 - COALESCE(l.l_discount, 0))) > (
+        SELECT AVG(subquery.avg_net_price) 
+        FROM (
+            SELECT 
+                AVG(l_extendedprice * (1 - l_discount)) AS avg_net_price
+            FROM 
+                lineitem
+            GROUP BY 
+                l_orderkey
+        ) subquery
+    )
+ORDER BY 
+    avg_net_price DESC;

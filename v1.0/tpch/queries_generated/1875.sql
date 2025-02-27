@@ -1,0 +1,75 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        COUNT(ps.ps_partkey) AS supplied_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+    HAVING 
+        SUM(ps.ps_availqty) IS NOT NULL
+),
+LineItemAnalysis AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales,
+        COUNT(CASE WHEN l.l_returnflag = 'Y' THEN 1 END) AS returned_items
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    COALESCE(sc.total_spent, 0) AS total_spent,
+    COALESCE(ss.total_avail_qty, 0) AS supplier_availability,
+    la.net_sales,
+    la.returned_items
+FROM 
+    TopCustomers sc
+LEFT JOIN 
+    SupplierStats ss ON ss.s_suppkey IN (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        WHERE ps.ps_partkey IN (
+            SELECT p.p_partkey
+            FROM part p
+            WHERE p.p_brand = 'Brand#23'
+        )
+    )
+LEFT JOIN 
+    LineItemAnalysis la ON la.l_orderkey IN (
+        SELECT o.o_orderkey
+        FROM RankedOrders ro
+        WHERE ro.order_rank = 1
+    )
+JOIN 
+    customer c ON c.c_custkey = sc.c_custkey
+ORDER BY 
+    total_spent DESC, supplier_availability DESC;

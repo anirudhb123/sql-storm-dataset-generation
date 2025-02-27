@@ -1,0 +1,57 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        MAX(co.CreationDate) AS LastCommentDate,
+        MAX(ph.CreationDate) AS LastHistoryDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.LastCommentDate,
+    ps.LastHistoryDate,
+    us.UserId,
+    us.DisplayName,
+    us.BadgeCount,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.PostId = u.Id
+JOIN 
+    UserStats us ON u.Id = us.UserId
+ORDER BY 
+    ps.VoteCount DESC, ps.CommentCount DESC;

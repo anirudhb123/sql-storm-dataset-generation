@@ -1,0 +1,50 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, c_acctbal, 0 AS Level
+    FROM customer
+    WHERE c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.Level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal BETWEEN 500 AND 1000
+),
+TotalOrderValue AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+QualifiedSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS available_quantity
+    FROM partsupp ps
+    WHERE ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+RegionOrders AS (
+    SELECT r.r_name, COUNT(o.o_orderkey) AS order_count,
+           COALESCE(SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice END), 0) AS finalized_orders_value
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY r.r_name
+    HAVING COUNT(o.o_orderkey) > 10
+)
+SELECT ch.c_name, r.r_name, ch.Level, 
+       tv.total_value, COALESCE(sd.s_name, 'No Supplier') AS supplier_name,
+       COALESCE(qs.available_quantity, 0) AS total_available_quantity
+FROM CustomerHierarchy ch
+JOIN TotalOrderValue tv ON ch.c_custkey = tv.o_custkey
+JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey
+                                    FROM nation n
+                                    WHERE n.n_nationkey = ch.c_nationkey)
+LEFT JOIN QualifiedSuppliers qs ON ch.c_custkey = qs.ps_partkey
+LEFT JOIN SupplierDetails sd ON qs.ps_suppkey = sd.s_suppkey AND sd.rn = 1
+WHERE tv.total_value IS NOT NULL AND (ch.c_acctbal LIKE '100[1-9]%' OR ch.c_acctbal IS NOT NULL)
+ORDER BY r.r_name, ch.Level DESC;

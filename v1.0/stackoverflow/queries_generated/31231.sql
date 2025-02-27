@@ -1,0 +1,88 @@
+WITH RecursiveUserReputation AS (
+    SELECT 
+        U.Id,
+        U.Reputation,
+        U.CreationDate,
+        U.DisplayName,
+        CAST(0 AS INT) AS RecursiveLevel
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation IS NOT NULL
+        
+    UNION ALL
+
+    SELECT
+        U.Id,
+        U.Reputation,
+        U.CreationDate,
+        U.DisplayName,
+        R.RecursiveLevel + 1
+    FROM 
+        Users U
+    INNER JOIN 
+        RecursiveUserReputation R ON U.Reputation > R.Reputation
+    WHERE 
+        R.RecursiveLevel < 10
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN PH.UserId IS NOT NULL THEN 1 END) AS EditCount,
+        MAX(P.CreationDate) AS LatestPostDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5, 6)
+    GROUP BY 
+        P.Id, P.OwnerUserId
+),
+UserPostAnalytics AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        PS.PostId,
+        PS.Upvotes,
+        PS.Downvotes,
+        PS.CommentCount,
+        PS.EditCount,
+        PS.LatestPostDate,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY PS.Upvotes DESC) AS UserPostRank
+    FROM 
+        Users U
+    INNER JOIN 
+        PostStats PS ON U.Id = PS.OwnerUserId
+    WHERE 
+        U.Reputation > 1000 -- Filtering active users with reputation
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(UP.Upvotes, 0) AS TotalUpvotes,
+    COALESCE(UP.Downvotes, 0) AS TotalDownvotes,
+    COALESCE(UP.CommentCount, 0) AS TotalComments,
+    CASE 
+        WHEN UP.LatestPostDate IS NOT NULL THEN DATEDIFF(CURRENT_TIMESTAMP, UP.LatestPostDate)
+        ELSE NULL 
+    END AS DaysSinceLastPost,
+    RUR.RecursiveLevel
+FROM 
+    Users U
+LEFT JOIN 
+    UserPostAnalytics UP ON U.Id = UP.DisplayName
+LEFT JOIN 
+    RecursiveUserReputation RUR ON U.Id = RUR.Id
+WHERE 
+    RUR.RecursiveLevel < 10
+ORDER BY 
+    U.Reputation DESC, 
+    DaysSinceLastPost NULLS FIRST
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,77 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level,
+        NULL::integer AS parent_movie_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mh.level + 1,
+        mh.movie_id AS parent_movie_id
+    FROM 
+        aka_title m
+    JOIN 
+        movie_hierarchy mh ON m.episode_of_id = mh.movie_id
+),
+title_stats AS (
+    SELECT 
+        a.title,
+        COUNT(cc.id) AS cast_count,
+        AVG(m.production_year) AS avg_production_year,
+        MAX(m.production_year) AS max_production_year,
+        MIN(m.production_year) AS min_production_year
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        movie_info mi ON a.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.title
+),
+keyword_stats AS (
+    SELECT 
+        mw.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mw
+    JOIN 
+        keyword k ON mw.keyword_id = k.id
+    GROUP BY 
+        mw.movie_id
+)
+SELECT 
+    mh.level,
+    mh.title AS movie_title,
+    ts.cast_count,
+    ts.avg_production_year,
+    ts.max_production_year,
+    ts.min_production_year,
+    ks.keywords,
+    COUNT(DISTINCT co.id) AS company_count
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    title_stats ts ON mh.movie_id = ts.movie_id
+LEFT JOIN 
+    keyword_stats ks ON mh.movie_id = ks.movie_id
+LEFT JOIN 
+    movie_companies co ON mh.movie_id = co.movie_id
+GROUP BY 
+    mh.level, mh.title, ts.cast_count, ts.avg_production_year, ts.max_production_year, ts.min_production_year, ks.keywords
+ORDER BY 
+    mh.level, ts.avg_production_year DESC NULLS LAST;

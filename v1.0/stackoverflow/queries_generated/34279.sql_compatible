@@ -1,0 +1,59 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        r.Level + 1 AS Level
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts q ON a.ParentId = q.Id  
+    INNER JOIN 
+        RecursivePostHierarchy r ON q.Id = r.PostId  
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+    COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+    COALESCE(MAX(b.Date), 'Never Awarded') AS LastAwardDate,
+    RANK() OVER (ORDER BY COALESCE(SUM(v.BountyAmount), 0) DESC) AS UserRank
+
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId AND b.Class = 1  
+
+WHERE 
+    u.Reputation > 1000 AND  
+    u.CreationDate < CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '2 years'  
+
+GROUP BY 
+    u.DisplayName
+
+HAVING 
+    COUNT(DISTINCT p.Id) > 10  
+
+ORDER BY 
+    UserRank
+LIMIT 10;

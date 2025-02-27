@@ -1,0 +1,48 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderstatus, o.o_orderdate,
+           (SELECT COUNT(*) FROM lineitem l WHERE l.l_orderkey = o.o_orderkey AND l.l_discount > 0.05) AS discount_count
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+      AND EXISTS (SELECT 1 FROM customer c WHERE c.c_custkey = o.o_custkey AND c.c_acctbal IS NOT NULL)
+),
+SupplierInfo AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty,
+           COALESCE(pr.p_retailprice * ps.ps_availqty, 0) AS supplier_value
+    FROM partsupp ps
+    LEFT JOIN part pr ON ps.ps_partkey = pr.p_partkey
+    WHERE ps.ps_availqty > 0
+),
+Final AS (
+    SELECT fo.o_orderkey, fo.o_totalprice, SUM(si.supplier_value) AS total_supplier_value
+    FROM FilteredOrders fo
+    LEFT JOIN SupplierInfo si ON si.ps_partkey IN (
+        SELECT l.l_partkey 
+        FROM lineitem l 
+        WHERE l.l_orderkey = fo.o_orderkey 
+          AND l.l_returnflag = 'N' 
+          AND l.l_linestatus = 'F'
+    )
+    GROUP BY fo.o_orderkey, fo.o_totalprice
+)
+SELECT f.o_orderkey, f.o_totalprice, 
+       SUM(CASE WHEN rs.rank = 1 THEN rs.s_acctbal ELSE 0 END) AS top_supplier_account_balance,
+       CASE 
+           WHEN f.total_supplier_value IS NULL THEN 'No Suppliers'
+           ELSE 'Has Suppliers'
+       END AS supplier_status
+FROM Final f
+LEFT JOIN RankedSuppliers rs ON f.o_orderkey = (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_orderkey = f.o_orderkey
+    AND EXISTS (SELECT 1 FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+)
+GROUP BY f.o_orderkey, f.o_totalprice, f.total_supplier_value
+HAVING SUM(COALESCE(f.total_supplier_value, 0)) > 1000
+ORDER BY f.o_totalprice DESC NULLS LAST;

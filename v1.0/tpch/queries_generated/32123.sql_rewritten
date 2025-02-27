@@ -1,0 +1,68 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s_suppkey, s_name, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal = (SELECT MAX(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ts.level + 1
+    FROM supplier s
+    JOIN top_suppliers ts ON s.s_acctbal > ts.s_acctbal
+    WHERE ts.level < 5
+),
+recent_orders AS (
+    SELECT o_orderkey, o_custkey, o_totalprice, o_orderdate
+    FROM orders
+    WHERE o_orderdate >= (cast('1998-10-01' as date) - INTERVAL '1 year')
+),
+order_items AS (
+    SELECT 
+        li.l_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+        COUNT(li.l_orderkey) AS item_count
+    FROM lineitem li
+    WHERE li.l_shipdate < cast('1998-10-01' as date)
+      AND li.l_returnflag = 'N'
+    GROUP BY li.l_orderkey
+),
+ranked_orders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_totalprice,
+        oi.total_revenue,
+        RANK() OVER (ORDER BY oi.total_revenue DESC) AS revenue_rank
+    FROM recent_orders ro
+    JOIN order_items oi ON ro.o_orderkey = oi.l_orderkey
+),
+customer_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    cs.c_name,
+    cs.total_orders,
+    cs.total_spent,
+    COALESCE(ts.s_name, 'No Supplier') AS top_supplier,
+    COALESCE(ts.s_acctbal, 0) AS supplier_balance,
+    ro.total_revenue AS order_revenue,
+    ro.revenue_rank
+FROM customer_summary cs
+LEFT JOIN top_suppliers ts ON cs.total_spent = (
+    SELECT MAX(total_spent) 
+    FROM customer_summary 
+    WHERE total_spent <= cs.total_spent
+)
+LEFT JOIN ranked_orders ro ON cs.total_orders = (
+    SELECT COUNT(*) 
+    FROM orders 
+    WHERE o_custkey = cs.c_custkey
+)
+WHERE cs.total_spent > 1000
+ORDER BY cs.total_spent DESC, ro.revenue_rank
+LIMIT 10;

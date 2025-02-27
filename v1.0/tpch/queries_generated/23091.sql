@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, NULL::integer AS parent_suppkey
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name LIKE 'A%')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.s_suppkey
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey AND s.s_suppkey != sh.s_suppkey
+), 
+AvailableParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_retailprice, 
+           (SELECT SUM(ps.ps_availqty) FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey) AS total_available
+    FROM part p 
+    WHERE p.p_size IS NOT NULL AND p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size > 0)
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, COALESCE(o.o_orderstatus, '') AS order_status,
+           STRING_AGG(DISTINCT l.l_shipmode, ',') AS ship_modes,
+           SUM(l.l_discount) AS total_discount
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IS NOT NULL AND l.l_shipdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+MaxPrice AS (
+    SELECT MAX(p.p_retailprice) AS max_retail_price FROM part p
+),
+PartSupplierData AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, s.s_name AS supplier_name,
+           CASE 
+               WHEN ps.ps_supplycost < (SELECT AVG(ps2.ps_supplycost) FROM partsupp ps2 WHERE ps2.ps_partkey = p.p_partkey)
+               THEN 'Under Market Rate'
+               ELSE 'Above Market Rate' 
+           END AS cost_comparison
+    FROM AvailableParts p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN SupplierHierarchy s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT f.o_orderkey, f.order_status,
+       ARRAY_AGG(DISTINCT p.p_name) AS part_names, 
+       COUNT(DISTINCT s.s_name) AS unique_suppliers,
+       f.total_discount, 
+       (SELECT COUNT(*) FROM part p WHERE p.p_retailprice < (SELECT max_retail_price FROM MaxPrice)) AS lower_than_max_count
+FROM FilteredOrders f
+JOIN PartSupplierData p ON f.o_custkey IN (
+    SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT MIN(n.n_nationkey) FROM nation n)
+)
+GROUP BY f.o_orderkey, f.order_status, f.total_discount
+HAVING SUM(f.total_discount) > 0 AND COUNT(DISTINCT f.ship_modes) > 1
+ORDER BY f.order_status DESC, unique_suppliers DESC;

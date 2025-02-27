@@ -1,0 +1,79 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_net_paid, 
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_paid DESC) AS SalesRank
+    FROM 
+        web_sales
+    WHERE 
+        ws_net_paid IS NOT NULL
+        AND ws_net_paid > 100
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS TotalReturnedAmount,
+        COUNT(*) AS TotalReturns
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+HighReturners AS (
+    SELECT 
+        cr.wr_returning_customer_sk
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        customer c ON c.c_customer_sk = cr.wr_returning_customer_sk
+    WHERE 
+        cr.TotalReturnedAmount > (
+            SELECT AVG(TotalReturnedAmount) 
+            FROM CustomerReturns
+        )
+),
+TopSales AS (
+    SELECT 
+        rs.ws_item_sk, 
+        rs.ws_order_number, 
+        rs.ws_net_paid, 
+        CASE 
+            WHEN EXISTS (SELECT 1 FROM HighReturners hr WHERE hr.wr_returning_customer_sk = rs.ws_bill_customer_sk) 
+            THEN 'High Returner' 
+            ELSE 'Regular' 
+        END AS CustomerType
+    FROM 
+        RankedSales rs
+)
+SELECT 
+    t.ws_item_sk,
+    t.ws_order_number,
+    t.ws_net_paid,
+    COALESCE(c.c_first_name || ' ' || c.c_last_name, 'Unknown') AS CustomerName,
+    t.CustomerType,
+    CASE 
+        WHEN t.ws_net_paid > 200 THEN 'High Value Sale'
+        WHEN t.ws_net_paid BETWEEN 100 AND 200 THEN 'Medium Value Sale'
+        ELSE 'Low Value Sale'
+    END AS SaleCategory
+FROM 
+    TopSales t
+LEFT JOIN 
+    customer c ON c.c_customer_sk = (
+        SELECT 
+            ws_bill_customer_sk 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_order_number = t.ws_order_number
+        LIMIT 1
+    )
+WHERE 
+    t.CustomerType = 'High Returner'
+    OR (t.CustomerType = 'Regular' AND t.ws_net_paid < 150)
+ORDER BY 
+    t.ws_net_paid DESC, 
+    CustomerName ASC
+LIMIT 50;

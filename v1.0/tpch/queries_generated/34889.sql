@@ -1,0 +1,29 @@
+WITH RECURSIVE RegionCounts AS (
+    SELECT r_regionkey, r_name, COUNT(n.n_nationkey) AS nation_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_regionkey, r.r_name
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, COUNT(n.n_nationkey)
+    FROM RegionCounts rc
+    JOIN nation n ON n.n_regionkey = (SELECT n2.n_regionkey FROM nation n2 WHERE n2.n_nationkey = rc.r_regionkey)
+    GROUP BY r.r_regionkey, r.r_name
+)
+SELECT 
+    s.s_name AS supplier_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    r.r_name AS region_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    MAX(l.l_shipdate) AS latest_ship_date,
+    AVG(o.o_totalprice) AS avg_order_price
+FROM supplier s
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN region r ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = r.r_regionkey)
+WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+AND (s.s_acctbal IS NOT NULL OR o.o_orderstatus = 'F')
+GROUP BY s.s_name, r.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_revenue DESC;

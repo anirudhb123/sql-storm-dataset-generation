@@ -1,0 +1,42 @@
+WITH RankedMovies AS (
+    SELECT
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) as YearRank,
+        COUNT(c.id) OVER (PARTITION BY m.id) AS ActorCount,
+        COALESCE(k.keyword, 'Unknown') AS Keyword
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN
+        cast_info c ON cc.subject_id = c.person_id
+    WHERE
+        m.production_year IS NOT NULL
+)
+
+SELECT
+    rm.title,
+    rm.production_year,
+    rm.ActorCount,
+    rm.Keyword,
+    SUM(CASE WHEN c.note IS NULL THEN 0 ELSE 1 END) AS NonNullNotes,
+    STRING_AGG(DISTINCT COALESCE(a.name, 'Anonymous'), ', ') AS ActorNames
+FROM
+    RankedMovies rm
+LEFT JOIN
+    cast_info c ON c.movie_id IN (SELECT m.id FROM aka_title m WHERE YEAR(m.production_year) = rm.production_year)
+LEFT JOIN
+    aka_name a ON a.person_id = c.person_id
+WHERE
+    rm.YearRank <= 10
+GROUP BY
+    rm.title, rm.production_year, rm.ActorCount, rm.Keyword
+HAVING
+    COUNT(c.id) > 5 OR SUM(CASE WHEN rm.Keyword IS NOT NULL THEN 1 ELSE 0 END) > 0
+ORDER BY
+    rm.production_year DESC, rm.ActorCount DESC NULLS LAST;

@@ -1,0 +1,68 @@
+WITH RECURSIVE SalesRecursive AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        o.o_orderdate
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) + r.total_sales AS total_sales,
+        o.o_orderdate
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN SalesRecursive r ON o.o_orderkey = r.o_orderkey
+    WHERE o.o_orderdate > r.o_orderdate
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+TopRegions AS (
+    SELECT 
+        n.n_regionkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS region_sales
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY n.n_regionkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+),
+FinalReport AS (
+    SELECT 
+        r.r_name,
+        COALESCE(p.part_names, 'No Parts') AS part_names,
+        COALESCE(s.total_supplycost, 0) AS supplier_total_cost,
+        COALESCE(ts.region_sales, 0) AS total_region_sales
+    FROM region r
+    LEFT JOIN (
+        SELECT 
+            pt.n_nationkey,
+            STRING_AGG(pt.p_name, ', ') AS part_names
+        FROM part pt
+        JOIN partsupp ps ON pt.p_partkey = ps.ps_partkey
+        GROUP BY pt.n_nationkey
+    ) p ON r.r_regionkey = p.n_nationkey
+    LEFT JOIN SupplierStats s ON r.r_regionkey = s.s_suppkey
+    LEFT JOIN TopRegions ts ON r.r_regionkey = ts.n_regionkey
+)
+SELECT 
+    r.r_name,
+    AVG(fs.total_sales) AS average_sales,
+    MAX(fs.total_sales) AS max_sales,
+    MIN(fs.total_sales) AS min_sales,
+    SUM(CASE WHEN fs.total_sales IS NULL THEN 0 ELSE 1 END) AS non_null_sales_count
+FROM FinalReport fs
+JOIN region r ON fs.r_regionkey = r.r_regionkey
+WHERE r.r_name IS NOT NULL 
+GROUP BY r.r_name
+ORDER BY average_sales DESC;

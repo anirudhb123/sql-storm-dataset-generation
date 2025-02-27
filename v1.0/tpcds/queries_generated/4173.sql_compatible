@@ -1,0 +1,75 @@
+
+WITH SalesSummary AS (
+    SELECT
+        s.s_store_id,
+        SUM(ss.net_paid) AS total_sales,
+        COUNT(DISTINCT ss.ticket_number) AS total_transactions,
+        AVG(ss.net_paid) AS average_transaction_value
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.s_store_sk = s.s_store_sk
+    WHERE
+        ss.sold_date_sk IN (SELECT d.d_date_sk
+                            FROM date_dim d 
+                            WHERE d.d_year = 2023 AND d.d_month_seq BETWEEN 1 AND 12)
+    GROUP BY 
+        s.s_store_id
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        hd.hd_income_band_sk,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other' 
+        END AS gender,
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+SalesRanked AS (
+    SELECT 
+        ss.*,
+        RANK() OVER (PARTITION BY ss.s_item_sk ORDER BY ss.s_net_profit DESC) AS item_rank
+    FROM 
+        store_sales ss
+)
+
+SELECT 
+    cs.c_customer_id,
+    cs.gender,
+    SUM(ss.total_sales) AS total_sales,
+    AVG(ss.average_transaction_value) AS avg_value,
+    MIN(ib.ib_lower_bound) AS income_lower_bound,
+    MAX(ib.ib_upper_bound) AS income_upper_bound,
+    COUNT(ss.total_transactions) AS transaction_count
+FROM 
+    CustomerDemographics cs
+JOIN 
+    SalesSummary ss ON cs.c_customer_id = ss.s_store_id
+LEFT JOIN 
+    SalesRanked sr ON sr.ss_customer_sk = cs.c_customer_id
+JOIN 
+    inventory inv ON inv.inv_item_sk = sr.s_item_sk
+LEFT JOIN 
+    catalog_sales c ON c.cs_item_sk = sr.s_item_sk
+WHERE 
+    (cs.gender = 'Male' OR cs.gender = 'Female')
+    AND ss.total_sales > 1000
+    AND sr.item_rank = 1
+GROUP BY 
+    cs.c_customer_id, cs.gender, ib.ib_lower_bound, ib.ib_upper_bound
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

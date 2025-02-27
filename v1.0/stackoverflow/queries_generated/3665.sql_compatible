@@ -1,0 +1,61 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+),
+RecentActivities AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionsAsked,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswersGiven,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentsMade
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY P.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        UR.UserId,
+        UR.DisplayName,
+        COALESCE(RA.QuestionsAsked, 0) AS QuestionsAsked,
+        COALESCE(RA.AnswersGiven, 0) AS AnswersGiven,
+        COALESCE(RA.CommentsMade, 0) AS CommentsMade
+    FROM UserReputation UR
+    LEFT JOIN RecentActivities RA ON UR.UserId = RA.OwnerUserId
+    WHERE UR.ReputationRank <= 10
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.AnswerCount,
+        P.ViewCount,
+        U.DisplayName AS AuthorName,
+        PT.Name AS PostType,
+        P.OwnerUserId
+    FROM Posts P
+    INNER JOIN Users U ON P.OwnerUserId = U.Id
+    INNER JOIN PostTypes PT ON P.PostTypeId = PT.Id
+)
+SELECT 
+    TU.DisplayName,
+    TU.QuestionsAsked,
+    TU.AnswersGiven,
+    TU.CommentsMade,
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    PD.ViewCount,
+    PD.PostType
+FROM TopUsers TU
+JOIN PostDetails PD ON TU.UserId = PD.OwnerUserId
+WHERE PD.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '60 days'
+ORDER BY TU.Reputation DESC, PD.Score DESC
+LIMIT 20;

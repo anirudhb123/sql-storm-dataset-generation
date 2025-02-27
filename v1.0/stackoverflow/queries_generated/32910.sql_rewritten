@@ -1,0 +1,87 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        P.PostTypeId,
+        P.AcceptedAnswerId,
+        CAST(NULL AS varchar(500)) AS AnswerDetails
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.CreationDate,
+        P2.ViewCount,
+        P2.Score,
+        U.DisplayName AS OwnerDisplayName,
+        P2.PostTypeId,
+        P2.AcceptedAnswerId,
+        CAST(CONCAT('Answer by ', U2.DisplayName, ': ', SUBSTRING(P2.Body, 1, 50), '...') AS varchar(500)) AS AnswerDetails
+    FROM 
+        Posts P2
+    JOIN 
+        Users U2 ON P2.OwnerUserId = U2.Id
+    WHERE 
+        P2.ParentId IN (SELECT PostId FROM RecursiveCTE)
+),
+RankedPosts AS (
+    SELECT 
+        R.*,
+        ROW_NUMBER() OVER (PARTITION BY R.PostId ORDER BY R.CreationDate DESC) AS RN
+    FROM 
+        RecursiveCTE R
+),
+QuestionStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(O.Id) AS AnswerCount,
+        MAX(P.ViewCount) AS MaxViewCount,
+        AVG(U.Reputation) AS AvgReputation,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts O ON P.Id = O.ParentId
+    LEFT JOIN 
+        Users U ON O.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    LEFT JOIN 
+        Tags T ON T.Id = P.Id
+    WHERE 
+        P.PostTypeId = 1  
+    GROUP BY 
+        P.Id, P.Title
+)
+SELECT 
+    Q.PostId,
+    Q.Title,
+    Q.AnswerCount,
+    Q.MaxViewCount,
+    Q.AvgReputation,
+    COALESCE(R.AnswerDetails, 'No Answers') AS LastAnswerDetails,
+    CASE 
+        WHEN Q.MaxViewCount IS NULL THEN 'No Views'
+        WHEN Q.MaxViewCount > 100 THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS PopularityCategory
+FROM 
+    QuestionStats Q
+LEFT JOIN 
+    RankedPosts R ON Q.PostId = R.PostId AND R.RN = 1
+WHERE 
+    Q.AvgReputation > 1000  
+ORDER BY 
+    Q.AnswerCount DESC, Q.MaxViewCount DESC;

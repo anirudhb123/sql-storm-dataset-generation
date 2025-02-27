@@ -1,0 +1,69 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        AVG(v.BountyAmount) AS AvgBounty,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  
+    LEFT JOIN 
+        LATERAL string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), ',') AS tag_array (tag)
+    LEFT JOIN 
+        Tags t ON tag_array.tag = t.TagName
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, U.DisplayName, p.Title, p.Body, p.CreationDate
+),
+MaxAvgBounties AS (
+    SELECT 
+        OwnerDisplayName,
+        MAX(AvgBounty) AS MaxBounty
+    FROM 
+        RankedPosts
+    GROUP BY 
+        OwnerDisplayName
+),
+TopOwners AS (
+    SELECT 
+        RP.OwnerDisplayName,
+        RP.Title,
+        RP.CommentCount,
+        RP.AnswerCount,
+        RP.Tags,
+        RP.CreationDate
+    FROM 
+        RankedPosts RP
+    JOIN 
+        MaxAvgBounties MAB ON RP.OwnerDisplayName = MAB.OwnerDisplayName AND RP.AvgBounty = MAB.MaxBounty
+    ORDER BY 
+        RP.CreationDate DESC
+)
+SELECT 
+    *,
+    CASE 
+        WHEN CommentCount > 10 THEN 'Highly Discussed'
+        WHEN AnswerCount > 5 THEN 'Many Answers'
+        ELSE 'Moderate Engagement'
+    END AS EngagementLevel
+FROM 
+    TopOwners
+WHERE 
+    CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+ORDER BY 
+    CreationDate DESC;

@@ -1,0 +1,88 @@
+WITH RecursiveTagLinks AS (
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        1 AS LinkLevel
+    FROM 
+        PostLinks pl
+    WHERE 
+        pl.LinkTypeId = 1
+
+    UNION ALL
+
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        rtl.LinkLevel + 1
+    FROM 
+        PostLinks pl
+    INNER JOIN 
+        RecursiveTagLinks rtl ON pl.PostId = rtl.RelatedPostId
+    WHERE 
+        pl.LinkTypeId = 1 AND 
+        rtl.LinkLevel < 5  
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT c.Id) AS CommentsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostVoteData AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    t.TagName,
+    rtl.LinkLevel,
+    uReputation.Reputation AS UserReputation,
+    pvd.UpVotes,
+    pvd.DownVotes,
+    CASE 
+        WHEN pvd.TotalVotes > 0 THEN CAST(pvd.UpVotes AS decimal) / CAST(pvd.TotalVotes AS decimal)
+        ELSE NULL
+    END AS VoteRatio,
+    STRING_AGG(distinct CAST(pl.RelatedPostId AS varchar), ', ') AS RelatedPosts
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+JOIN 
+    Tags t ON t.ExcerptPostId = p.Id
+LEFT JOIN 
+    RecursiveTagLinks rtl ON rtl.PostId = p.Id
+LEFT JOIN 
+    UserReputation uReputation ON uReputation.UserId = u.Id
+LEFT JOIN 
+    PostVoteData pvd ON pvd.PostId = p.Id
+LEFT JOIN 
+    PostLinks pl ON pl.PostId = p.Id
+WHERE 
+    t.TagName IS NOT NULL
+GROUP BY 
+    p.Id, u.DisplayName, rtl.LinkLevel, uReputation.Reputation, pvd.UpVotes, pvd.DownVotes
+ORDER BY 
+    UserReputation DESC, VoteRatio DESC NULLS LAST
+LIMIT 100;

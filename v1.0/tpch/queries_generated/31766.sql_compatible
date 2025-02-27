@@ -1,0 +1,70 @@
+
+WITH RECURSIVE ranked_orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE('1998-10-01') - INTERVAL '12 months'
+),
+supplier_summary AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+nation_supplier AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name,
+        SUM(ss.total_cost) AS total_supplier_cost
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier_summary ss ON n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = ss.s_suppkey)
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    p.p_name,
+    ps.ps_availqty,
+    ns.n_name,
+    o.o_totalprice,
+    r.first_order_date AS o_orderdate,
+    CASE 
+        WHEN o.o_orderstatus = 'F' THEN 'Completed'
+        WHEN o.o_orderstatus = 'P' THEN 'Pending'
+        ELSE 'Unknown'
+    END AS order_status,
+    COALESCE(ns.total_supplier_cost, 0) AS total_supplier_cost,
+    RANK() OVER (PARTITION BY ns.n_name ORDER BY o.o_totalprice DESC) AS regional_rank
+FROM 
+    lineitem l
+JOIN 
+    part p ON l.l_partkey = p.p_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    (SELECT * FROM nation_supplier) ns ON s.s_nationkey = ns.n_nationkey
+JOIN 
+    (SELECT DISTINCT o_orderkey, MIN(o_orderdate) AS first_order_date 
+     FROM orders 
+     GROUP BY o_orderkey) r ON o.o_orderkey = r.o_orderkey
+WHERE 
+    l.l_quantity > (SELECT AVG(l2.l_quantity) 
+                    FROM lineitem l2 
+                    WHERE l2.l_partkey = l.l_partkey)
+ORDER BY 
+    ns.n_name, o.o_totalprice DESC;

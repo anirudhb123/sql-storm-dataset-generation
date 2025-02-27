@@ -1,0 +1,69 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+        AND o.o_orderdate < DATE '1997-01-01'
+        AND c.c_acctbal > 0
+    GROUP BY 
+        o.o_orderkey, c.c_name
+),
+TopSales AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY total_sales DESC) AS rank
+    FROM 
+        SalesCTE
+    WHERE 
+        sales_rank <= 10
+),
+PartSuppliers AS (
+    SELECT 
+        p.p_partkey,
+        p.p_brand,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_brand
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(CASE WHEN ps.ps_supplycost > 100 THEN ps.ps_supplycost END) AS expensive_supplies
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        COALESCE(s.s_acctbal, 0) > 5000
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    ts.c_name AS Customer_Name,
+    ts.total_sales AS Total_Sales,
+    ps.p_brand AS Part_Brand,
+    ps.total_supply_cost AS Total_Supply_Cost,
+    fs.expensive_supplies AS Expensive_Supplies
+FROM 
+    TopSales ts
+FULL OUTER JOIN 
+    PartSuppliers ps ON ps.p_partkey = ts.o_orderkey 
+FULL OUTER JOIN 
+    FilteredSuppliers fs ON fs.s_suppkey = (SELECT MIN(s_suppkey) FROM supplier)  
+WHERE 
+    ts.total_sales IS NOT NULL OR ps.total_supply_cost IS NOT NULL OR fs.expensive_supplies IS NOT NULL
+ORDER BY 
+    ts.total_sales DESC, ps.total_supply_cost DESC;

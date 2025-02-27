@@ -1,0 +1,65 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1996-01-01' AND 
+        o.o_orderdate < '1997-01-01'
+), 
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        MAX(ps.ps_supplycost) AS max_supplycost,
+        MIN(COALESCE(p.p_size, 0)) AS min_part_size
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+), 
+CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        n.n_comment IS NOT NULL
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    COUNT(DISTINCT cp.c_custkey) OVER (PARTITION BY r.o_orderkey) AS unique_customers,
+    SUM(sp.total_avail_qty) AS total_avail_quantity,
+    AVG(sp.max_supplycost) AS average_max_supplycost,
+    CONCAT('Order ', CAST(r.o_orderkey AS VARCHAR), ' of date ', TO_CHAR(r.o_orderdate, 'YYYY-MM-DD')) AS order_summary
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    lineitem l ON r.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierParts sp ON l.l_partkey = sp.ps_partkey
+LEFT JOIN 
+    CustomerNation cp ON r.o_orderkey = cp.c_custkey
+WHERE 
+    r.order_rank = 1 
+    AND (sp.total_avail_qty IS NULL OR sp.total_avail_qty > 50)
+GROUP BY 
+    r.o_orderkey, r.o_orderdate, r.o_totalprice
+HAVING 
+    SUM(sp.total_avail_qty) > 100
+ORDER BY 
+    r.o_totalprice DESC
+LIMIT 10;

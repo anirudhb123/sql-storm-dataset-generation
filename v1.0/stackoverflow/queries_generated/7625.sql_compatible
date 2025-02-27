@@ -1,0 +1,59 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CURRENT_TIMESTAMP) 
+        AND p.Score > 0
+),
+MostVotedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId AND v.VoteTypeId = 2  
+    WHERE 
+        rp.Rank <= 10 
+    GROUP BY 
+        rp.PostId, rp.Title
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        t.TagName
+    FROM 
+        Posts p
+    JOIN 
+        UNNEST(SPLIT(p.Tags, '><')) AS t(TagName) ON p.Id = t.PostId
+)
+SELECT 
+    mp.Title,
+    mp.VoteCount,
+    STRING_AGG(pt.TagName, ', ') AS Tags,
+    u.DisplayName AS OwnerName,
+    p.CreationDate
+FROM 
+    MostVotedPosts mp
+JOIN 
+    Posts p ON mp.PostId = p.Id
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostTags pt ON p.Id = pt.PostId
+GROUP BY 
+    mp.Title, mp.VoteCount, u.DisplayName, p.CreationDate
+ORDER BY 
+    mp.VoteCount DESC, p.CreationDate DESC
+LIMIT 10;

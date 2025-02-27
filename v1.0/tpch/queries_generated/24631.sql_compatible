@@ -1,0 +1,83 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_orderdate, 
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(YEAR, -1, '1998-10-01')
+), 
+HighValueLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        l.l_partkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_discount < 0.1
+    GROUP BY 
+        l.l_orderkey, l.l_partkey
+    HAVING 
+        COUNT(*) > 1
+), 
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 500000
+), 
+OrderLineItemPercentages AS (
+    SELECT 
+        lo.l_orderkey,
+        COUNT(lo.l_linenumber) AS total_lines,
+        SUM(CASE WHEN lo.l_returnflag = 'R' THEN 1 ELSE 0 END) AS total_returns
+    FROM 
+        lineitem lo
+    GROUP BY 
+        lo.l_orderkey
+)
+
+SELECT 
+    r.o_orderkey,
+    (CASE 
+        WHEN r.order_rank <= 5 THEN 'Top Ranked' 
+        ELSE 'Other' 
+    END) AS rank_category,
+    sd.s_name,
+    COALESCE(sd.total_supply_cost, 0) AS supplier_cost,
+    (SELECT 
+        ROUND(AVG(total_value), 2) 
+     FROM 
+        HighValueLineItems hvl 
+     WHERE 
+        hvl.l_orderkey = r.o_orderkey) AS average_high_value,
+    (SELECT 
+        (100.0 * ol.total_returns / ol.total_lines) 
+     FROM 
+        OrderLineItemPercentages ol 
+     WHERE 
+        ol.l_orderkey = r.o_orderkey) AS return_percentage
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    SupplierDetails sd ON r.o_custkey = sd.s_suppkey
+ORDER BY 
+    rank_category, r.o_orderkey ASC
+FETCH FIRST 100 ROWS ONLY;

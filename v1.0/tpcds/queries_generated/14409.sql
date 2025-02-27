@@ -1,0 +1,25 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        d.d_year
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws.web_site_id, d.d_year
+)
+SELECT 
+    web_site_id,
+    total_quantity,
+    total_sales,
+    d_year
+FROM 
+    sales_data
+WHERE 
+    d_year BETWEEN 2021 AND 2023
+ORDER BY 
+    d_year, total_sales DESC;

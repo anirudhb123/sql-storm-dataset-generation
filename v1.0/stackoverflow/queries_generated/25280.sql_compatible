@@ -1,0 +1,77 @@
+
+WITH FilteredPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.OwnerUserId,
+        p.TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2022-01-01' 
+        AND p.ViewCount > 100
+        AND p.Title IS NOT NULL
+),
+TagsList AS (
+    SELECT 
+        p.Id AS PostId,
+        TAG AS Tag
+    FROM 
+        Posts p,
+        UNNEST(SPLIT(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS Tag
+    WHERE 
+        p.Tags IS NOT NULL
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        TagsList
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(*) > 5
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        PostsCount DESC
+    LIMIT 10
+)
+SELECT
+    f.PostId,
+    f.Title,
+    f.CreationDate,
+    f.Body,
+    f.OwnerUserId,
+    t.Tag,
+    u.UserId,
+    u.DisplayName,
+    u.PostsCount,
+    u.TotalBounty
+FROM 
+    FilteredPosts f
+JOIN 
+    TopTags t ON f.Tags LIKE '%' || t.Tag || '%'
+JOIN 
+    UserActivity u ON f.OwnerUserId = u.UserId
+WHERE 
+    f.Body LIKE '%string processing%'
+ORDER BY 
+    f.CreationDate DESC, 
+    u.TotalBounty DESC;

@@ -1,0 +1,54 @@
+
+WITH Address_City AS (
+    SELECT 
+        ca_city,
+        COUNT(*) AS address_count,
+        AVG(ca_gmt_offset) AS avg_gmt_offset
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city
+),
+Customer_Demographics AS (
+    SELECT
+        cd_gender,
+        COUNT(*) AS demographic_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        SUM(cd_dep_count) AS total_dependents
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+Sales_Analysis AS (
+    SELECT 
+        ws_bill_cdemo_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_cdemo_sk
+)
+SELECT 
+    a.ca_city,
+    a.address_count,
+    a.avg_gmt_offset,
+    c.cd_gender,
+    c.demographic_count,
+    c.avg_purchase_estimate,
+    c.total_dependents,
+    s.total_net_profit,
+    s.total_orders
+FROM 
+    Address_City a
+JOIN 
+    Customer_Demographics c ON a.address_count > 50
+JOIN 
+    Sales_Analysis s ON c.demographic_count > 100
+WHERE 
+    a.avg_gmt_offset > 0
+ORDER BY 
+    a.address_count DESC, 
+    c.avg_purchase_estimate DESC
+LIMIT 100;

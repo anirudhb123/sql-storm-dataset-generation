@@ -1,0 +1,52 @@
+WITH PostScores AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END), 0) AS TotalVotes,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) - 
+                           COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) DESC AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.Title,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.TotalVotes,
+    ub.UserId,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+FROM 
+    PostScores ps
+LEFT JOIN 
+    Users u ON ps.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    ps.TotalVotes > 0
+ORDER BY 
+    ps.Rank, ub.GoldBadges DESC, ub.SilverBadges DESC, ub.BronzeBadges DESC;

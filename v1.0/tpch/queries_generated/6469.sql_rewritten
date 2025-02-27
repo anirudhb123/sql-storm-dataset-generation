@@ -1,0 +1,33 @@
+WITH RECURSIVE supply_chain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 100
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, ps.ps_partkey, ps.ps_availqty + sc.ps_availqty, ps.ps_supplycost
+    FROM supply_chain sc
+    JOIN supplier s ON sc.s_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 50
+),
+cust_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, n.n_name
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+),
+order_details AS (
+    SELECT co.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM cust_orders co
+    JOIN lineitem l ON co.o_orderkey = l.l_orderkey
+    GROUP BY co.o_orderkey
+)
+SELECT r.r_name AS region, COUNT(DISTINCT co.c_custkey) AS unique_customers, SUM(od.total_revenue) AS total_revenue
+FROM order_details od
+JOIN cust_orders co ON od.o_orderkey = co.o_orderkey
+JOIN nation n ON co.n_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+GROUP BY r.r_name
+HAVING SUM(od.total_revenue) > 1000000
+ORDER BY total_revenue DESC;

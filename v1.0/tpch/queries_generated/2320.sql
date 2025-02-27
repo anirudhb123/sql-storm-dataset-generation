@@ -1,0 +1,69 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer WHERE c_acctbal IS NOT NULL)
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    INNER JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        co.total_spent,
+        DENSE_RANK() OVER (ORDER BY co.total_spent DESC) AS spending_rank
+    FROM 
+        CustomerOrders co
+    WHERE 
+        co.total_spent > 10000
+),
+TopSuppliers AS (
+    SELECT 
+        sp.s_suppkey,
+        sp.s_name,
+        sp.total_available,
+        sp.total_supply_cost,
+        DENSE_RANK() OVER (ORDER BY sp.total_supply_cost DESC) AS supply_rank
+    FROM 
+        SupplierParts sp
+    WHERE 
+        sp.total_supply_cost > 50000
+)
+SELECT 
+    hvc.c_name AS customer_name,
+    hvc.total_spent AS customer_total_spent,
+    ts.s_name AS supplier_name,
+    ts.total_supply_cost AS supplier_total_supply_cost
+FROM 
+    HighValueCustomers hvc
+FULL OUTER JOIN 
+    TopSuppliers ts ON hvc.custkey = ts.s_suppkey
+WHERE 
+    (hvc.total_spent IS NOT NULL OR ts.total_supply_cost IS NOT NULL) 
+    AND (
+        hvc.spending_rank <= 10 
+        OR ts.supply_rank <= 10
+    )
+ORDER BY 
+    customer_total_spent DESC, 
+    supplier_total_supply_cost DESC;

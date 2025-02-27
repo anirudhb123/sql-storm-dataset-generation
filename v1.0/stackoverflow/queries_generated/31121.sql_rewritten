@@ -1,0 +1,86 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        Score,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        Level + 1
+    FROM 
+        Posts p
+        INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+
+RecentUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+        LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    WHERE 
+        u.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        m.UserId,
+        m.DisplayName,
+        m.PostCount,
+        m.TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY m.UserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+        LEFT JOIN RecentUserActivity m ON p.OwnerUserId = m.UserId
+        LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE 
+        p.Score > 10 AND 
+        (p.ViewCount IS NULL OR p.ViewCount > 100)
+)
+
+SELECT 
+    ps.Id AS PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.DisplayName AS Owner,
+    ps.PostCount,
+    ps.TotalBounty,
+    ps.CommentCount,
+    rph.Level AS AnswerLevel
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    RecursivePostHierarchy rph ON ps.Id = rph.ParentId
+WHERE 
+    ps.UserPostRank = 1
+ORDER BY 
+    ps.Score DESC, 
+    ps.ViewCount DESC
+LIMIT 50;

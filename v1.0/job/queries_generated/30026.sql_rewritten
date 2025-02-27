@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM
+        aka_title t
+    JOIN
+        movie_link ml ON ml.movie_id = t.id
+    WHERE
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+    UNION ALL
+    SELECT
+        t.id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM
+        aka_title t
+    JOIN
+        movie_link ml ON ml.linked_movie_id = t.id
+    JOIN
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT
+    ak.name AS actor_name,
+    th.title AS movie_title,
+    th.production_year,
+    COUNT(*) OVER (PARTITION BY ak.person_id) AS total_movies,
+    mh.level AS hierarchy_level,
+    ARRAY_AGG(DISTINCT kw.keyword) AS keywords,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+FROM
+    cast_info ci
+JOIN
+    aka_name ak ON ak.person_id = ci.person_id
+JOIN
+    aka_title th ON th.id = ci.movie_id
+LEFT JOIN
+    movie_keyword mk ON mk.movie_id = th.id
+LEFT JOIN
+    keyword kw ON kw.id = mk.keyword_id
+LEFT JOIN
+    movie_companies mc ON mc.movie_id = th.id
+LEFT JOIN
+    company_name cn ON cn.id = mc.company_id
+LEFT JOIN
+    movie_hierarchy mh ON mh.movie_id = th.id
+WHERE
+    th.production_year IS NOT NULL
+    AND ak.name IS NOT NULL
+    AND th.title NOT LIKE '%Untitled%'
+GROUP BY
+    ak.name,
+    th.id,
+    mh.level
+ORDER BY
+    total_movies DESC,
+    th.production_year DESC
+LIMIT 100;

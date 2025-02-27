@@ -1,0 +1,56 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM aka_title m
+    WHERE m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM aka_title m
+    JOIN movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN aka_title mh ON mh.id = ml.linked_movie_id
+)
+
+SELECT 
+    co.name AS company_name,
+    t.title AS movie_title,
+    t.production_year,
+    a.name AS actor_name,
+    COUNT(DISTINCT t.id) AS total_movies,
+    AVG(CASE WHEN t.production_year IS NOT NULL THEN t.production_year ELSE NULL END) AS avg_production_year,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COALESCE(ci.note, 'No role info available') AS role_info
+FROM 
+    movie_companies mc
+JOIN 
+    company_name co ON mc.company_id = co.id
+JOIN 
+    aka_title t ON mc.movie_id = t.id
+LEFT JOIN 
+    cast_info ci ON t.id = ci.movie_id
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_hierarchy mh ON t.id = mh.movie_id
+WHERE 
+    co.country_code IS NOT NULL
+    AND t.production_year >= 2000
+GROUP BY 
+    co.name, t.title, t.production_year, a.name, ci.note
+HAVING 
+    COUNT(DISTINCT t.id) > 1
+ORDER BY 
+    total_movies DESC, avg_production_year DESC;

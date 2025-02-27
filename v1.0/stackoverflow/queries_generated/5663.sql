@@ -1,0 +1,49 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, u.Reputation
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        ViewCount,
+        OwnerReputation,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank <= 10
+)
+SELECT 
+    t.Title AS PostTitle,
+    t.Score,
+    t.ViewCount,
+    t.OwnerReputation,
+    t.CommentCount,
+    pt.Name AS PostType,
+    ph.Comment AS PostHistoryComment
+FROM 
+    TopPosts t
+JOIN 
+    PostTypes pt ON pt.Id = (SELECT PostTypeId FROM Posts WHERE Id = t.PostId)
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = t.PostId AND ph.PostHistoryTypeId IN (10, 11)
+ORDER BY 
+    t.Score DESC, t.ViewCount DESC;

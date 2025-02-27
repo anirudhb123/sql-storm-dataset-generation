@@ -1,0 +1,57 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk,
+           1 AS hierarchy_level
+    FROM customer c
+    WHERE c.c_current_cdemo_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT c2.c_customer_sk, c2.c_first_name, c2.c_last_name, c2.c_current_cdemo_sk,
+           ch.hierarchy_level + 1
+    FROM customer c2
+    JOIN CustomerHierarchy ch ON c2.c_current_cdemo_sk = ch.c_current_cdemo_sk
+    WHERE ch.hierarchy_level < 3  -- Limit depth to 3 for the hierarchy
+),
+SalesData AS (
+    SELECT ws.ws_sold_date_sk,
+           SUM(ws.ws_sales_price) AS total_sales,
+           COUNT(*) AS total_transactions,
+           d.d_year,
+           d.d_month_seq,
+           d.d_week_seq
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2023
+    GROUP BY ws.ws_sold_date_sk, d.d_year, d.d_month_seq, d.d_week_seq
+),
+AggregateSales AS (
+    SELECT d_year, d_month_seq, SUM(total_sales) AS monthly_sales, 
+           SUM(total_transactions) AS transaction_count
+    FROM SalesData
+    GROUP BY d_year, d_month_seq
+),
+Demographics AS (
+    SELECT cd.cd_gender, COUNT(*) AS customer_count,
+           AVG(cd.cd_purchase_estimate) AS avg_purchase,
+           COUNT(DISTINCT c.c_customer_id) AS distinct_customers
+    FROM customer_demographics cd
+    JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_gender
+),
+FinalReport AS (
+    SELECT ch.c_first_name || ' ' || ch.c_last_name AS customer_name,
+           ch.hierarchy_level,
+           a.monthly_sales,
+           d.cd_gender,
+           d.customer_count,
+           d.avg_purchase
+    FROM CustomerHierarchy ch
+    LEFT JOIN AggregateSales a ON a.d_year = 2023
+    LEFT JOIN Demographics d ON d.cd_gender IS NOT NULL
+)
+SELECT *
+FROM FinalReport
+WHERE (monthly_sales > 10000 OR avg_purchase > 500) 
+  AND DISTINCT_CUSTOMERS IS NOT NULL
+ORDER BY hierarchy_level DESC, monthly_sales DESC;

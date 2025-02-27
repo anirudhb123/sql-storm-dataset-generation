@@ -1,0 +1,81 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank_per_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorMovieCounts AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+),
+TopActors AS (
+    SELECT 
+        a.name,
+        amc.movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        ActorMovieCounts amc ON a.person_id = amc.person_id
+    WHERE 
+        amc.movie_count > (
+            SELECT AVG(movie_count) FROM ActorMovieCounts
+        )
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        CASE 
+            WHEN rm.production_year < 2000 THEN 'Old Movie'
+            WHEN rm.production_year BETWEEN 2000 AND 2015 THEN 'Recent Movie'
+            ELSE 'Current Movie'
+        END AS movie_age_category
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank_per_year <= 5
+),
+MovieGenres AS (
+    SELECT 
+        mt.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS genres
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.movie_age_category,
+    tg.name AS top_actor,
+    mg.genres
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_companies mc ON fm.movie_id = mc.movie_id
+LEFT JOIN 
+    TopActors tg ON mc.company_id = tg.person_id
+LEFT JOIN 
+    MovieGenres mg ON fm.movie_id = mg.movie_id
+WHERE 
+    mc.company_type_id IS NULL 
+    OR tg.movie_count IS NOT NULL
+ORDER BY 
+    fm.production_year DESC,
+    fm.title;

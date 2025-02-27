@@ -1,0 +1,43 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        t.TagName,
+        RANK() OVER (PARTITION BY t.TagName ORDER BY p.Score DESC, p.CreationDate DESC) AS RankByScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL string_to_array(p.Tags, '<>') AS ta(Tag) ON true
+    JOIN 
+        Tags t ON ta.Tag = t.TagName
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+)
+
+SELECT 
+    rp.PostId, 
+    rp.Title, 
+    rp.Body, 
+    rp.CreationDate,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Comments c ON c.PostId = rp.PostId
+LEFT JOIN 
+    Votes v ON v.PostId = rp.PostId
+WHERE 
+    rp.RankByScore <= 5  -- Top 5 posts per tag
+GROUP BY 
+    rp.PostId, rp.Title, rp.Body, rp.CreationDate
+ORDER BY 
+    rp.CreationDate DESC;

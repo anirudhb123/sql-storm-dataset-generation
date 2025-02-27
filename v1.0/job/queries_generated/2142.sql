@@ -1,0 +1,52 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT cc.person_id) OVER (PARTITION BY mt.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT cc.person_id) DESC) AS rn
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        cast_info cc ON mc.subject_id = cc.id
+    WHERE 
+        mt.production_year BETWEEN 2000 AND 2020 
+        AND mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(SUM(mi.info IS NOT NULL)::int, 0) AS info_count,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_info mi ON rm.movie_id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    WHERE 
+        rm.rn <= 5 
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.info_count,
+    COALESCE(md.keywords, 'No keywords found') AS keywords_list,
+    CASE 
+        WHEN md.info_count > 3 THEN 'Highly documented' 
+        ELSE 'Less documented' 
+    END AS documentation_status
+FROM 
+    MovieDetails md
+ORDER BY 
+    md.production_year DESC, 
+    md.cast_count DESC NULLS LAST;

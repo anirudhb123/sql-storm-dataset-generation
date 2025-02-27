@@ -1,0 +1,103 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(V.BountyAmount) AS TotalBounty,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COALESCE(NULLIF(AVG(P.Score), 0), -1) AS AveragePostScore,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.CreationDate < NOW() - INTERVAL '1 year'
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        PostCount, 
+        TotalBounty, 
+        TotalUpVotes, 
+        TotalDownVotes, 
+        AveragePostScore, 
+        Rank
+    FROM 
+        UserStats
+    WHERE 
+        Rank <= 10
+),
+PostHistoryRanked AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        RANK() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11, 12, 13)  -- Consider only those that impact closure
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(PH.UserId) FILTER (WHERE PH.PostHistoryTypeId = 10) AS CloseCount,
+        COUNT(PH.UserId) FILTER (WHERE PH.PostHistoryTypeId = 11) AS ReopenCount,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistoryRanked PH ON P.Id = PH.PostId
+    WHERE 
+        P.ClosedDate IS NOT NULL
+    GROUP BY 
+        P.Id, P.Title
+    HAVING 
+        CloseCount > ReopenCount
+),
+PostDetails AS (
+    SELECT 
+        C.FullPostId,
+        C.Title AS ClosedPostTitle,
+        C.CloseCount,
+        C.ReopenCount,
+        T.TagName,
+        PS.UserId AS LastEditorId,
+        U.DisplayName AS LastEditorName
+    FROM 
+        ClosedPosts C 
+    LEFT JOIN 
+        Posts PS ON C.PostId = PS.Id 
+    LEFT JOIN 
+        Tags T ON T.Id = PS.Id
+    LEFT JOIN 
+        Users U ON PS.LastEditorUserId = U.Id
+)
+SELECT 
+    PU.UserId,
+    PU.DisplayName,
+    PU.Reputation,
+    PU.PostCount,
+    PU.TotalBounty,
+    PD.ClosedPostTitle,
+    PD.CloseCount,
+    PD.ReopenCount,
+    PD.LastEditorId,
+    PD.LastEditorName
+FROM 
+    TopUsers PU
+INNER JOIN 
+    PostDetails PD ON PU.UserId = PD.LastEditorId
+ORDER BY 
+    PU.Reputation DESC, PD.CloseCount DESC;

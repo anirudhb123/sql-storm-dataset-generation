@@ -1,0 +1,82 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        SUM(vt.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(vt.VoteTypeId = 3) AS TotalDownvotes,
+        SUM(b.Class = 1) AS TotalGoldBadges,
+        SUM(b.Class = 2) AS TotalSilverBadges,
+        SUM(b.Class = 3) AS TotalBronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes vt ON p.Id = vt.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), p.CreationDate) AS PostAgeDays,
+        COUNT(c.Id) AS CommentCount,
+        (SELECT COUNT(1) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS Upvotes,
+        (SELECT COUNT(1) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId, 
+        ua.DisplayName,
+        ua.TotalPosts, 
+        ua.TotalQuestions, 
+        ua.TotalAnswers,
+        ua.TotalUpvotes, 
+        ua.TotalDownvotes,
+        ua.TotalGoldBadges + ua.TotalSilverBadges * 0.5 + ua.TotalBronzeBadges * 0.25 AS BadgeScore,
+        ROW_NUMBER() OVER (ORDER BY ua.TotalPosts DESC, ua.TotalUpvotes DESC) AS UserRank
+    FROM 
+        UserActivity ua
+)
+SELECT 
+    tu.UserId, 
+    tu.DisplayName, 
+    tu.TotalPosts, 
+    tu.TotalQuestions, 
+    tu.TotalAnswers, 
+    tu.TotalUpvotes, 
+    tu.TotalDownvotes,
+    tu.BadgeScore,
+    ps.PostId,
+    ps.Title,
+    ps.ViewCount,
+    ps.Score,
+    ps.CommentCount,
+    ps.Upvotes,
+    ps.Downvotes,
+    ps.PostAgeDays
+FROM 
+    TopUsers tu
+JOIN 
+    PostStatistics ps ON tu.TotalPosts > 0
+WHERE 
+    tu.UserRank <= 10
+ORDER BY 
+    ps.Score DESC, 
+    ps.ViewCount DESC;

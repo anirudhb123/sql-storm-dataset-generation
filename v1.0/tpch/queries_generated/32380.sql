@@ -1,0 +1,49 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level 
+    FROM nation 
+    WHERE n_regionkey = 1  -- Start from a specific region
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1 
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+part_supplier_summary AS (
+    SELECT ps.ps_partkey,
+           SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_partkey
+),
+customer_order_totals AS (
+    SELECT c.c_custkey,
+           SUM(o.o_totalprice) AS total_orders
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+ranked_suppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+)
+SELECT n.n_name,
+       p.p_name,
+       ps.total_available,
+       ps.avg_supply_cost,
+       co.total_orders,
+       rs.s_name,
+       rs.rank
+FROM nation n
+LEFT JOIN part p ON p.p_type LIKE 'some_type%' -- Example predicate
+LEFT JOIN part_supplier_summary ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN customer_order_totals co ON co.total_orders > 10000 -- Complex condition
+LEFT JOIN ranked_suppliers rs ON rs.suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+WHERE n.n_nationkey IN (SELECT n_nationkey FROM nation_hierarchy)
+  AND (ps.total_available IS NOT NULL OR co.total_orders IS NULL)
+ORDER BY n.n_name, ps.avg_supply_cost DESC NULLS LAST;

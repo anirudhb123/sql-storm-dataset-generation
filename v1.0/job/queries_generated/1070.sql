@@ -1,0 +1,42 @@
+WITH ActorMovieCount AS (
+    SELECT
+        a.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    GROUP BY a.person_id
+),
+PopularMovies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        COUNT(DISTINCT c.id) AS cast_count
+    FROM aka_title m
+    LEFT JOIN cast_info c ON m.id = c.movie_id
+    GROUP BY m.id, m.title
+    HAVING COUNT(DISTINCT c.id) > 5
+),
+MovieInfo AS (
+    SELECT
+        m.id AS movie_id,
+        mi.info AS genre
+    FROM aka_title m
+    JOIN movie_info mi ON m.id = mi.movie_id
+    WHERE mi.info_type_id = (SELECT id FROM info_type WHERE info = 'genre')
+)
+SELECT DISTINCT
+    a.name,
+    am.movie_count,
+    pm.title AS popular_movie,
+    mi.genre
+FROM aka_name a
+JOIN ActorMovieCount am ON a.person_id = am.person_id
+LEFT JOIN PopularMovies pm ON a.person_id IN (
+    SELECT c.person_id
+    FROM cast_info c
+    WHERE c.movie_id = pm.movie_id
+)
+LEFT JOIN MovieInfo mi ON pm.movie_id = mi.movie_id
+WHERE am.movie_count > 10
+AND pm.title IS NOT NULL
+ORDER BY am.movie_count DESC, pm.title;

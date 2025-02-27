@@ -1,0 +1,62 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT p.p_partkey) AS unique_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        stats.total_supply_value,
+        stats.unique_parts
+    FROM 
+        SupplierStats stats
+    WHERE 
+        stats.total_supply_value > (SELECT AVG(total_supply_value) FROM SupplierStats)
+)
+SELECT 
+    c.c_name AS customer_name,
+    c.total_orders,
+    c.total_spent,
+    s.s_name AS supplier_name,
+    s.total_supply_value,
+    s.unique_parts
+FROM 
+    CustomerOrders c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    HighValueSuppliers s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    c.total_spent > 5000
+ORDER BY 
+    c.total_spent DESC, s.total_supply_value DESC;

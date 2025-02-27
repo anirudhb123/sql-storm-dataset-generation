@@ -1,0 +1,59 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2022-01-01'
+), 
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        ps.ps_partkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, ps.ps_partkey
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        r.r_regionkey
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        r.r_name LIKE 'Asia%'
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    coalesce(sp.total_supply_value, 0) AS supply_value,
+    COUNT(DISTINCT cr.c_custkey) AS total_customers,
+    SUM(l.l_discount * l.l_extendedprice) AS total_discount
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierParts sp ON sp.ps_partkey = l.l_partkey
+LEFT JOIN 
+    CustomerRegion cr ON cr.c_custkey = o.o_custkey
+WHERE 
+    o.order_rank = 1 
+    AND (l.l_returnflag = 'R' OR l.l_returnflag IS NULL)
+GROUP BY 
+    o.o_orderkey, o.o_orderdate
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    o.o_orderdate DESC, supply_value DESC;

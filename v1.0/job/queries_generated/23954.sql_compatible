@@ -1,0 +1,64 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        COALESCE(SUBSTRING(ak.name FROM '[^ ]+$'), 'Unknown') AS last_actor_name,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS actor_rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+MoviesWithLinks AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        ml.linked_movie_id,
+        ml.link_type_id,
+        COUNT(DISTINCT ml.linked_movie_id) OVER (PARTITION BY rm.movie_title) AS total_links
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_link ml ON rm.movie_title = (SELECT title FROM aka_title WHERE id = ml.movie_id)
+    WHERE 
+        rm.actor_rank <= 3
+),
+UniqueKeywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS all_keywords
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.id
+)
+
+SELECT 
+    mw.movie_title,
+    mw.production_year,
+    mw.total_links,
+    uk.all_keywords,
+    COALESCE(CASE WHEN mw.total_links > 0 THEN 'Has Links' ELSE 'No Links' END, 'Unknown') AS link_status,
+    CASE 
+        WHEN mw.total_links IS NULL OR mw.total_links < 1 THEN 'Potentially Isolated' 
+        ELSE 'Connected' 
+    END AS connectivity_status,
+    RANK() OVER (ORDER BY mw.production_year DESC, mw.total_links DESC) AS popularity_rank
+FROM 
+    MoviesWithLinks mw
+LEFT JOIN 
+    UniqueKeywords uk ON mw.movie_title = (SELECT title FROM aka_title WHERE id = uk.movie_id)
+ORDER BY 
+    mw.production_year DESC, mw.total_links DESC;

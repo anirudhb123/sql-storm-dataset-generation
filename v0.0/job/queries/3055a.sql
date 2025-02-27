@@ -1,0 +1,4 @@
+SELECT min(n.name) AS voicing_actress, min(t.title) AS jap_engl_voiced_movie
+FROM aka_name AS an, char_name AS chn, cast_info AS ci, company_name AS cn, info_type AS it, movie_companies AS mc, movie_info AS mi, name AS n, role_type AS rt, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND t.id = ci.movie_id AND mc.movie_id = ci.movie_id AND mc.movie_id = mi.movie_id AND mi.movie_id = ci.movie_id AND cn.id = mc.company_id AND it.id = mi.info_type_id AND n.id = ci.person_id AND rt.id = ci.role_id AND n.id = an.person_id AND ci.person_id = an.person_id AND chn.id = ci.person_role_id
+AND mi.info IN ('$11,094,241 (USA) (24 August 1997)', '$47,074 (USA) (5 February 2012) (4 screens)', '$548,925 (USA) (6 February 2011) (231 screens)', '5892', 'Canada:15 January 2008', 'Cardinal Ravenwood: [His last lines] The Metalocalypse... Has Begun.', 'Philippines:25', 'Rebichon, Michel. In: "Studio" (France), September 1996, Pg. 12, (MG)') AND ci.nr_order < 5505;

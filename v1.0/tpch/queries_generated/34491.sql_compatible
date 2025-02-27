@@ -1,0 +1,55 @@
+
+WITH RECURSIVE OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_clerk, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_clerk
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(total_revenue) FROM (
+        SELECT SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+        FROM orders
+        JOIN lineitem ON orders.o_orderkey = lineitem.l_orderkey
+        WHERE orders.o_orderstatus = 'F'
+        GROUP BY orders.o_orderkey
+    ) AS avg_revenue)
+),
+RankedOrders AS (
+    SELECT o_orderkey, o_orderdate, o_clerk, total_revenue, ROW_NUMBER() OVER (PARTITION BY o_clerk ORDER BY total_revenue DESC) AS revenue_rank
+    FROM OrderSummary
+),
+TopClerks AS (
+    SELECT DISTINCT o_clerk
+    FROM RankedOrders
+    WHERE revenue_rank <= 3
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+NationRegionInfo AS (
+    SELECT n.n_name AS nation_name, r.r_name AS region_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    c.c_name,
+    n.n_name,
+    r.r_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS customer_revenue,
+    COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS total_supply_cost,
+    COALESCE(ROUND(AVG(l.l_discount), 2), 0) AS avg_discount,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM customer c
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN NationRegionInfo n ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = n.nation_name)
+LEFT JOIN region r ON n.n_name = r.r_name
+WHERE c.c_acctbal > 0
+GROUP BY c.c_name, n.n_name, r.r_name
+HAVING COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) > (SELECT AVG(customer_revenue) FROM RankedOrders)
+ORDER BY customer_revenue DESC
+LIMIT 100;

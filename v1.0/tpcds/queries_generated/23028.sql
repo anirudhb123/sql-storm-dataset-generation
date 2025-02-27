@@ -1,0 +1,54 @@
+
+WITH RECURSIVE address_chain AS (
+    SELECT ca_address_sk, ca_street_number, ca_street_name, ca_city, ca_state, 
+           ROW_NUMBER() OVER (PARTITION BY ca_state ORDER BY ca_address_sk) AS rn
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+),
+sales_summary AS (
+    SELECT ws_bill_customer_sk, 
+           SUM(ws_sales_price) AS total_sales, 
+           COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+customer_data AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           COALESCE(cd.cd_gender, 'U') AS gender, 
+           COALESCE(cd.cd_marital_status, 'M') AS marital_status,
+           COALESCE(cd.cd_purchase_estimate, 0) AS purchase_estimate,
+           SUM(ss.ss_net_profit) OVER (PARTITION BY c.c_customer_sk) AS total_profit
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE c.c_birth_month = 2 AND (c.c_birth_day IS NULL OR c.c_birth_day > 15)
+),
+promotional_data AS (
+    SELECT p.p_promo_id, p.p_promo_name, p.p_start_date_sk, p.p_end_date_sk,
+           COUNT(DISTINCT ws.ws_order_number) AS promo_order_count
+    FROM promotion p
+    LEFT JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk 
+    WHERE p.p_discount_active = 'Y'
+    GROUP BY p.p_promo_id, p.p_promo_name, p.p_start_date_sk, p.p_end_date_sk
+),
+final_report AS (
+    SELECT cu.c_first_name, cu.c_last_name, 
+           ad.ca_street_number || ' ' || ad.ca_street_name AS full_address,
+           cu.total_profit,
+           COALESCE(ps.promo_order_count, 0) AS promotional_orders,
+           CASE 
+               WHEN total_sales IS NULL THEN 'No Sales'
+               WHEN total_sales > 1000 THEN 'High Value'
+               ELSE 'Regular'
+           END AS customer_value
+    FROM customer_data cu
+    LEFT JOIN sales_summary ss ON cu.c_customer_sk = ss.ws_bill_customer_sk
+    LEFT JOIN address_chain ad ON cu.c_current_addr_sk = ad.ca_address_sk
+    LEFT JOIN promotional_data ps ON cu.c_customer_sk = ps.ws_bill_customer_sk
+    WHERE cu.gender IN ('M', 'F') AND cu.purchase_estimate > 500
+)
+SELECT fr.*, 
+       ROW_NUMBER() OVER (ORDER BY fr.total_profit DESC) as rank
+FROM final_report fr
+WHERE fr.promotional_orders > 0 OR fr.total_profit IS NULL
+ORDER BY rank, fr.c_first_name;

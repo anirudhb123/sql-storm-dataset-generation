@@ -1,0 +1,72 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT p.Id, p.Title, p.ParentId, r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.Reputation
+),
+
+TopUsers AS (
+    SELECT UserId, Reputation, BadgeCount
+    FROM UserReputation
+    WHERE ReputationRank <= 10
+),
+
+PostVoteCounts AS (
+    SELECT 
+        p.Id AS PostId, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+
+TopPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        pv.UpVotes,
+        pv.DownVotes,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC, pv.UpVotes DESC) AS Rank
+    FROM Posts p
+    JOIN PostVoteCounts pv ON p.Id = pv.PostId
+    WHERE p.PostTypeId = 1 
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    u.BadgeCount,
+    p.Title AS PostTitle,
+    p.ViewCount,
+    p.UpVotes,
+    p.DownVotes,
+    r.Level AS PostLevel,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM TopUsers u
+JOIN TopPosts p ON u.UserId = p.OwnerUserId
+JOIN RecursivePostHierarchy r ON p.Id = r.Id
+LEFT JOIN (
+    SELECT unnest(string_to_array(p.Tags, '<>')) AS TagName
+) AS t ON TRUE
+WHERE r.Level = 1 
+GROUP BY u.UserId, u.DisplayName, u.Reputation, u.BadgeCount, p.Id, p.Title, p.ViewCount, p.UpVotes, p.DownVotes, r.Level
+ORDER BY u.Reputation DESC, p.ViewCount DESC;

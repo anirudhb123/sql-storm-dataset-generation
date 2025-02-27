@@ -1,0 +1,37 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+FilteredParts AS (
+    SELECT p.p_partkey, 
+           MAX(CASE WHEN ps.ps_availqty > 0 THEN ps.ps_supplycost END) AS max_supplycost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, 
+           COALESCE(SUM(o.o_totalprice), 0) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING COUNT(DISTINCT o.o_orderkey) > 1
+)
+SELECT n.n_name,
+       COUNT(DISTINCT ps.p_partkey) AS available_parts,
+       AVG(co.total_spent) AS avg_customer_spending,
+       STRING_AGG(DISTINCT CONCAT(s.s_name, ': ', s.s_acctbal), '; ') AS supplier_info
+FROM nation n
+LEFT JOIN RankedSuppliers s ON n.n_nationkey = s.s_nationkey AND s.rn <= 3
+LEFT JOIN FilteredParts ps ON ps.max_supplycost IS NOT NULL
+LEFT JOIN CustomerOrders co ON co.c_custkey IN (SELECT DISTINCT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT ps.p_partkey) >= 2
+   AND AVG(co.total_spent) > (SELECT AVG(total_spent) FROM CustomerOrders)
+ORDER BY n.n_name DESC;

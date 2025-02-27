@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE
+        mh.depth < 3  -- Limit recursion depth to avoid overly large result sets.
+),
+RankedMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.depth ASC) AS rank_depth,
+        COUNT(ml.linked_movie_id) OVER (PARTITION BY mh.production_year) AS total_links
+    FROM
+        MovieHierarchy mh
+    LEFT JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+),
+IncompleteCast AS (
+    SELECT DISTINCT
+        coalesce(c.person_id, ci.person_id) AS person_id,
+        ci.movie_id,
+        COALESCE(a.name, n.name) AS full_name,
+        COUNT(DISTINCT c.id) AS cast_count
+    FROM
+        cast_info c
+    FULL OUTER JOIN
+        complete_cast ci ON c.movie_id = ci.movie_id
+    LEFT JOIN
+        aka_name a ON a.person_id = c.person_id
+    LEFT JOIN
+        name n ON n.id = ci.subject_id
+    GROUP BY
+        1, 2, 3
+)
+SELECT
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    ic.full_name,
+    ic.cast_count,
+    rm.rank_depth,
+    rm.total_links
+FROM
+    RankedMovies rm
+LEFT JOIN
+    IncompleteCast ic ON rm.movie_id = ic.movie_id
+WHERE
+    rm.rank_depth < 5
+    AND ic.cast_count > 2
+ORDER BY
+    rm.production_year DESC,
+    rm.title ASC;

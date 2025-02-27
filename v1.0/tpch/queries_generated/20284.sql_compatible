@@ -1,0 +1,67 @@
+
+WITH RegionalSales AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY 
+        n.n_name
+),
+TopNations AS (
+    SELECT 
+        nation_name, 
+        total_sales,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        RegionalSales
+),
+FilteredNations AS (
+    SELECT 
+        nation_name,
+        total_sales
+    FROM 
+        TopNations
+    WHERE 
+        sales_rank <= 10
+)
+SELECT 
+    fn.nation_name,
+    fn.total_sales,
+    COALESCE(NULLIF(fn.total_sales, 0) / NULLIF(SUM(fn.total_sales) OVER (), 0), 0) AS sales_percentage,
+    CONCAT('Sales for ', fn.nation_name, ' is ', CAST(fn.total_sales AS VARCHAR(20)), ' with percentage ', ROUND(COALESCE(NULLIF(fn.total_sales, 0), 1) / NULLIF(SUM(fn.total_sales) OVER (), 0), 4) * 100, 2) , '%')
+FROM 
+    FilteredNations fn
+LEFT JOIN 
+    region r ON EXISTS (
+        SELECT 1 
+        FROM nation n 
+        WHERE n.n_name = fn.nation_name AND n.n_regionkey = r.r_regionkey
+    )
+WHERE 
+    r.r_name IS NOT NULL
+ORDER BY 
+    fn.total_sales DESC
+UNION ALL
+SELECT 
+    'Grand Total' AS nation_name,
+    SUM(total_sales) AS total_sales,
+    NULL AS sales_percentage,
+    'Total sales across all selected nations' AS comment
+FROM 
+    FilteredNations
+HAVING 
+    SUM(total_sales) > 0;

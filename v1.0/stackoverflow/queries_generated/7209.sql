@@ -1,0 +1,65 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 10 THEN 1 ELSE 0 END) AS ClosedPosts,
+        SUM(CASE WHEN P.PostTypeId IN (1, 2) THEN P.Score ELSE 0 END) AS TotalScore,
+        NULLIF(SUM(P.Views), 0) AS TotalViews
+    FROM 
+        Users U 
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+PostActivity AS (
+    SELECT 
+        PH.UserId,
+        COUNT(*) AS EditCount,
+        COUNT(DISTINCT PH.PostId) AS EditedPosts
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) -- Title, Body, Tags Edited
+    GROUP BY 
+        PH.UserId
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    COALESCE(U.TotalPosts, 0) AS TotalPosts,
+    COALESCE(U.QuestionCount, 0) AS QuestionCount,
+    COALESCE(U.AnswerCount, 0) AS AnswerCount,
+    COALESCE(U.ClosedPosts, 0) AS ClosedPosts,
+    COALESCE(U.TotalScore, 0) AS TotalScore,
+    COALESCE(U.TotalViews, 0) AS TotalViews,
+    COALESCE(UB.BadgeCount, 0) AS TotalBadges,
+    COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+    COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+    COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(PA.EditCount, 0) AS TotalEdits,
+    COALESCE(PA.EditedPosts, 0) AS EditedPosts
+FROM 
+    UserStats U
+LEFT JOIN 
+    UserBadges UB ON U.UserId = UB.UserId
+LEFT JOIN 
+    PostActivity PA ON U.UserId = PA.UserId
+ORDER BY 
+    TotalScore DESC, TotalPosts DESC
+LIMIT 100;

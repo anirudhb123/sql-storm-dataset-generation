@@ -1,0 +1,74 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        COUNT(P.Id) AS PostCount, 
+        SUM(V.BountyAmount) AS TotalBounties,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.CreationDate < NOW() - INTERVAL '1 year'
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostRank AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.Score, 
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+TopPosts AS (
+    SELECT 
+        UR.UserId, 
+        UR.DisplayName, 
+        PR.PostId, 
+        PR.Title, 
+        PR.Score 
+    FROM 
+        UserStats UR
+    JOIN 
+        PostRank PR ON UR.UserId = PR.OwnerUserId
+    WHERE 
+        PR.Rank <= 3
+),
+CombinedResults AS (
+    SELECT 
+        US.DisplayName AS User, 
+        COALESCE(SUM(UP.PostCount), 0) AS PostCount,
+        COALESCE(SUM(UP.TotalBounties), 0) AS TotalBounties,
+        COUNT(TP.PostId) AS TopPostsCount
+    FROM 
+        UserStats US
+    LEFT JOIN 
+        TopPosts TP ON US.UserId = TP.UserId
+    GROUP BY 
+        US.DisplayName
+)
+SELECT 
+    CR.User, 
+    CR.PostCount, 
+    CR.TotalBounties, 
+    CR.TopPostsCount, 
+    (SELECT COUNT(*) FROM Votes V WHERE V.UserId IN (SELECT U.Id FROM Users U WHERE U.Reputation > 1000)
+                                  AND V.CreationDate >= NOW() - INTERVAL '1 month') AS ActiveVoters,
+    CASE 
+        WHEN CR.TotalBounties IS NULL THEN 'No Bounties'
+        ELSE 'Has Bounties'
+    END AS BountyStatus
+FROM 
+    CombinedResults CR
+ORDER BY 
+    CR.TotalBounties DESC, 
+    CR.TopPostsCount DESC;

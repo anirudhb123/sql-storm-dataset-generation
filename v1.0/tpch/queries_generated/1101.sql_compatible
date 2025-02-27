@@ -1,0 +1,49 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' 
+        AND o.o_totalprice > 1000
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    cs.c_custkey,
+    cs.c_name,
+    cs.total_spent,
+    cs.order_count,
+    COALESCE(CONCAT('Customer: ', cs.c_name, ' (Total: ', CAST(cs.total_spent AS VARCHAR), ')'), 'No Orders') AS customer_info,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(l.l_extendedprice) AS avg_price
+FROM 
+    CustomerSummary cs
+LEFT JOIN 
+    lineitem l ON cs.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT o2.o_orderkey FROM RankedOrders o2 WHERE o2.o_orderkey = o.o_orderkey))
+WHERE 
+    cs.total_spent > 2000
+GROUP BY 
+    cs.c_custkey, cs.c_name, cs.total_spent, cs.order_count
+HAVING 
+    COUNT(DISTINCT l.l_orderkey) > 1
+ORDER BY 
+    cs.total_spent DESC
+LIMIT 50;

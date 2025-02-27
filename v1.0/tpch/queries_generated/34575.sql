@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE sh.level < 3
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_nationkey,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+),
+AverageLineItemPrices AS (
+    SELECT l.l_partkey, AVG(l.l_extendedprice) AS avg_price
+    FROM lineitem l
+    GROUP BY l.l_partkey
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_brand, 
+    COALESCE(SUM(ps.ps_availqty), 0) AS total_available_qty,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    RANK() OVER (ORDER BY total_revenue DESC) AS revenue_rank,
+    CASE 
+        WHEN AVG(lip.avg_price) IS NULL THEN 'No Data'
+        ELSE CONCAT('Average Price: $', CAST(AVG(lip.avg_price) AS VARCHAR(10)))
+    END AS avg_price_info,
+    r.r_name
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN RecentOrders ro ON ro.o_orderkey = l.l_orderkey
+LEFT JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = l.l_suppkey))
+LEFT JOIN AverageLineItemPrices lip ON lip.l_partkey = p.p_partkey
+GROUP BY p.p_partkey, p.p_name, p.p_brand, r.r_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) IS NOT NULL
+ORDER BY revenue_rank, total_orders DESC
+FETCH FIRST 10 ROWS ONLY;

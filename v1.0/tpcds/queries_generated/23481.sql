@@ -1,0 +1,49 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        sr.return_item_sk,
+        sr.return_quantity,
+        sr.return_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr.return_item_sk ORDER BY sr.returned_date_sk DESC) AS rn,
+        COALESCE(sr.return_quantity * sr.return_amt, 0) AS total_return_value
+    FROM store_returns sr
+), 
+ItemSales AS (
+    SELECT 
+        ws.item_sk,
+        SUM(ws.net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.order_number) AS total_sales_count 
+    FROM web_sales ws
+    GROUP BY ws.item_sk
+), 
+IncomeDistribution AS (
+    SELECT 
+        hd.income_band_sk,
+        COUNT(*) AS customer_count,
+        SUM(hd.dep_count) AS total_dependents
+    FROM household_demographics hd
+    WHERE hd.income_band_sk IS NOT NULL
+    GROUP BY hd.income_band_sk
+)
+SELECT 
+    ca.city,
+    ca.state,
+    COUNT(DISTINCT c.customer_sk) AS total_customers,
+    SUM(ir.total_return_value) AS total_return_values,
+    SUM(is.total_net_profit) AS total_profit,
+    SUM(id.customer_count) AS total_income_bands,
+    CASE
+        WHEN AVG(is.total_net_profit) IS NULL THEN 'No sales'
+        ELSE 'Sales Average: ' || CAST(AVG(is.total_net_profit) AS VARCHAR)
+    END AS sales_info,
+    COALESCE(NULLIF(AVG(id.total_dependents), 0), 'No dependents') AS dependent_info
+FROM customer_address ca
+JOIN customer c ON ca.address_sk = c.current_addr_sk
+LEFT JOIN RankedReturns ir ON ir.return_item_sk IN (SELECT i.item_sk FROM item i WHERE i.wholesale_cost > 10.00)
+LEFT JOIN ItemSales is ON c.current_cdemo_sk = is.item_sk
+LEFT JOIN IncomeDistribution id ON id.income_band_sk = c.current_hdemo_sk
+WHERE ca.state IN ('CA', 'NV')
+GROUP BY ca.city, ca.state
+ORDER BY total_customers DESC, total_return_values DESC;

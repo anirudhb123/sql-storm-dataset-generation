@@ -1,0 +1,70 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        mt.production_year, 
+        NULL AS parent_id, 
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.title IS NOT NULL AND mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mk.movie_id,
+        CONCAT(mh.movie_title, ' -> ', mk.movie_title) AS movie_title,
+        mk.production_year,
+        mh.movie_id AS parent_id,
+        mh.level + 1 AS level
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mk ON ml.linked_movie_id = mk.id
+    WHERE 
+        mk.title IS NOT NULL
+)
+SELECT 
+    DISTINCT
+    n.name AS actor_name,
+    t.title AS movie_title,
+    mh.production_year,
+    mh.level,
+    CASE 
+        WHEN a.note IS NULL THEN 'No Note'
+        ELSE a.note
+    END AS role_note,
+    COALESCE(COUNT(DISTINCT m.id) OVER(PARTITION BY n.id ORDER BY mh.level), 0) AS total_movies,
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = mh.movie_id 
+     AND mi.info_type_id = 
+         (SELECT id FROM info_type WHERE info = 'User Rating')) AS user_rating
+FROM 
+    aka_name n
+JOIN 
+    cast_info a ON n.person_id = a.person_id
+JOIN 
+    movie_companies mc ON a.movie_id = mc.movie_id
+JOIN 
+    aka_title t ON a.movie_id = t.id
+LEFT JOIN 
+    movie_hierarchy mh ON t.id = mh.movie_id
+WHERE 
+    (mh.production_year >= 2000 OR mh.production_year IS NULL)
+    AND (a.role_id IN 
+        (SELECT id FROM role_type WHERE role LIKE '%Lead%')
+        OR a.note IS NOT NULL) 
+    AND n.name NOT LIKE '%Anonymous%'
+    AND mc.company_id IN 
+        (SELECT c.id FROM company_name c WHERE c.country_code = 'USA')
+GROUP BY 
+    n.name, t.title, mh.production_year, a.note, mh.level
+ORDER BY 
+    total_movies DESC, 
+    actor_name ASC, 
+    mh.production_year DESC;

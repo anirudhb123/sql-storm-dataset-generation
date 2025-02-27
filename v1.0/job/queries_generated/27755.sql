@@ -1,0 +1,64 @@
+WITH MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        k.keyword AS movie_keyword,
+        ARRAY_AGG(DISTINCT c.name) AS cast_names,
+        ARRAY_AGG(DISTINCT co.name) AS company_names
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+RatingDetails AS (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT name) AS review_count,
+        AVG(star_rating) AS average_rating
+    FROM (
+        SELECT 
+            m.id AS movie_id,
+            r.name,
+            r.star_rating
+        FROM 
+            aka_title m
+        JOIN 
+            reviews r ON m.id = r.movie_id
+    ) AS movie_reviews
+    GROUP BY 
+        movie_id
+)
+SELECT 
+    md.movie_id,
+    md.movie_title,
+    md.production_year,
+    md.movie_keyword,
+    md.cast_names,
+    md.company_names,
+    rd.review_count,
+    rd.average_rating
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    RatingDetails rd ON md.movie_id = rd.movie_id
+WHERE 
+    md.production_year >= 2000
+ORDER BY 
+    md.production_year DESC, 
+    rd.average_rating DESC 
+LIMIT 50;

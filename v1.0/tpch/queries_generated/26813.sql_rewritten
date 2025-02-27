@@ -1,0 +1,18 @@
+SELECT 
+    CONCAT('Supplier: ', s_name, ', Nation: ', n_name, 
+           ', Item: ', p_name, ', Quantity Available: ', ps_availqty, 
+           ', Average Price: ', AVG(ps_supplycost) OVER(PARTITION BY ps_partkey)) AS supplier_info,
+    TRIM(REGEXP_REPLACE(p_comment, 'sensitive|confidential', '***', 'i')) AS sanitized_comment
+FROM
+    supplier s
+JOIN
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE
+    LENGTH(s_name) > 10
+    AND DATE_PART('year', cast('1998-10-01' as date)) - DATE_PART('year', MAX(o_orderdate) OVER(PARTITION BY s.s_suppkey)) < 2
+ORDER BY
+    s_name, n_name DESC;

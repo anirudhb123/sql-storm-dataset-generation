@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommunicationLicensed AS Content,
+        CASE 
+            WHEN p.Score IS NULL THEN 'N/A' 
+            ELSE CAST(p.Score AS varchar)
+        END AS Score_Display,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+),
+PostLinkCounts AS (
+    SELECT 
+        pl.PostId,
+        COUNT(pl.RelatedPostId) AS LinkCount
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+),
+UserVotes AS (
+    SELECT
+        v.PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score_Display,
+    rp.ViewCount,
+    COALESCE(pcl.LinkCount, 0) AS TotalLinks,
+    COALESCE(uv.VoteCount, 0) AS TotalVotes,
+    uv.UpVotes,
+    uv.DownVotes,
+    CASE 
+        WHEN rp.AnswerCount > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS ActivityStatus,
+    MAX(CASE WHEN ph.Comment IS NOT NULL THEN ph.Comment ELSE 'No Comments' END) AS LastComment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostLinkCounts pcl ON rp.PostId = pcl.PostId
+LEFT JOIN 
+    UserVotes uv ON rp.PostId = uv.PostId
+LEFT JOIN 
+    Comments ph ON rp.PostId = ph.PostId
+WHERE 
+    rp.Rank <= 5
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.Score_Display, rp.ViewCount, rp.AnswerCount, pcl.LinkCount, uv.VoteCount, uv.UpVotes, uv.DownVotes
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

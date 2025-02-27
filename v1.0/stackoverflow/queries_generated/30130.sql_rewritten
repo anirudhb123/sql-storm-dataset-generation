@@ -1,0 +1,108 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+), PostVotes AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN VoteTypeId = 4 THEN 1 END) AS OffensiveVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+), UserRank AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+), RecentlyEditedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.LastEditDate,
+        p.Body,
+        p.LastActivityDate,
+        pst.ViewCount,
+        pst.Score,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COALESCE(v.OffensiveVotes, 0) AS OffensiveVotes,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVotes v ON p.Id = v.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+    WHERE 
+        p.LastEditDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+), UserPosts AS (
+    SELECT 
+        u.DisplayName,
+        up.PostId,
+        up.Title,
+        up.LastEditDate,
+        up.ViewCount,
+        up.Score,
+        up.UpVotes,
+        up.DownVotes,
+        up.OffensiveVotes,
+        up.PostStatus
+    FROM 
+        Users u
+    JOIN 
+        RecentlyEditedPosts up ON u.Id = up.OwnerUserId
+), FinalResults AS (
+    SELECT 
+        p.*,
+        r.Reputation,
+        r.Rank,
+        ROW_NUMBER() OVER (PARTITION BY p.PostStatus ORDER BY p.Score DESC, p.ViewCount DESC) AS RowNum
+    FROM 
+        UserPosts p
+    JOIN 
+        UserRank r ON p.UserId = r.UserId
+)
+SELECT 
+    PostId,
+    Title,
+    LastEditDate,
+    ViewCount,
+    Score,
+    UpVotes,
+    DownVotes,
+    OffensiveVotes,
+    Reputation,
+    Rank,
+    PostStatus
+FROM 
+    FinalResults
+WHERE 
+    RowNum <= 10
+ORDER BY 
+    PostStatus, Score DESC, ViewCount DESC;

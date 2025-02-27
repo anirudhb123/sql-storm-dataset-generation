@@ -1,0 +1,49 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        p.p_partkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS Rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, p.p_partkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal
+    FROM 
+        RankedSuppliers s
+    WHERE 
+        s.Rank <= 5
+)
+SELECT 
+    c.c_custkey, 
+    c.c_name, 
+    o.o_orderkey, 
+    o.o_orderdate, 
+    o.o_totalprice, 
+    ts.s_suppkey, 
+    ts.s_name, 
+    ts.s_acctbal
+FROM 
+    customer c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    TopSuppliers ts ON l.l_suppkey = ts.s_suppkey
+WHERE 
+    o.o_orderdate >= DATE '2023-01-01'
+    AND o.o_orderdate < DATE '2024-01-01'
+ORDER BY 
+    o.o_orderdate, c.c_custkey, ts.s_suppkey;

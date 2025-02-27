@@ -1,0 +1,66 @@
+
+WITH SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_suppkey, s.s_name
+),
+RankedParts AS (
+    SELECT 
+        sp.ps_partkey,
+        sp.s_suppkey,
+        sp.s_name,
+        sp.total_avail_qty,
+        sp.total_supply_cost,
+        RANK() OVER (PARTITION BY sp.ps_partkey ORDER BY sp.total_avail_qty DESC) AS part_rank
+    FROM 
+        SupplierParts sp
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+TopCustomers AS (
+    SELECT 
+        co.o_custkey,
+        SUM(co.total_revenue) AS total_spent,
+        RANK() OVER (ORDER BY SUM(co.total_revenue) DESC) AS cust_rank
+    FROM 
+        CustomerOrders co
+    GROUP BY 
+        co.o_custkey
+)
+SELECT 
+    tp.cust_rank,
+    rp.s_name,
+    rp.part_rank,
+    rp.total_avail_qty,
+    rp.total_supply_cost,
+    CASE 
+        WHEN tp.total_spent IS NULL THEN 'No Orders'
+        ELSE FORMAT(tp.total_spent, 'C')
+    END AS formatted_spent
+FROM 
+    RankedParts rp
+LEFT JOIN 
+    TopCustomers tp ON rp.s_suppkey = tp.o_custkey
+ORDER BY 
+    tp.cust_rank, rp.part_rank;

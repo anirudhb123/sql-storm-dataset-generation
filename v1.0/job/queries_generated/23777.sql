@@ -1,0 +1,72 @@
+WITH RankedMovies AS (
+    SELECT 
+        T.id AS movie_id,
+        T.title,
+        T.production_year,
+        ROW_NUMBER() OVER (PARTITION BY T.production_year ORDER BY T.title) AS title_rank,
+        COUNT(CASE WHEN K.keyword = 'Dramatic' THEN 1 END) OVER (PARTITION BY T.id) AS dramatic_count
+    FROM 
+        aka_title T
+    JOIN 
+        movie_keyword MK ON T.id = MK.movie_id
+    JOIN 
+        keyword K ON MK.keyword_id = K.id
+),
+TopDramaticMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        dramatic_count > 0
+    AND 
+        title_rank <= 5
+),
+ActorInfo AS (
+    SELECT 
+        C.movie_id,
+        A.name AS actor_name,
+        R.role AS role_name,
+        COALESCE(P.info, 'No Info') AS additional_info
+    FROM 
+        cast_info C
+    JOIN 
+        aka_name A ON C.person_id = A.person_id
+    JOIN 
+        role_type R ON C.role_id = R.id
+    LEFT JOIN 
+        person_info P ON A.person_id = P.person_id AND P.info_type_id IN (SELECT id FROM info_type WHERE info = 'Biography')
+),
+TopDramaticActors AS (
+    SELECT 
+        TM.title,
+        AI.actor_name,
+        AI.role_name,
+        TM.production_year
+    FROM 
+        TopDramaticMovies TM
+    JOIN 
+        ActorInfo AI ON TM.movie_id = AI.movie_id
+)
+SELECT 
+    TD.*,
+    (SELECT COUNT(DISTINCT C.company_id) 
+     FROM movie_companies C 
+     WHERE C.movie_id = TD.movie_id) AS distinct_company_count,
+    (SELECT STRING_AGG(N.name, ', ') 
+     FROM name N 
+     WHERE N.imdb_id IN (SELECT DISTINCT P.person_id FROM cast_info CI JOIN aka_name AN ON CI.person_id = AN.person_id WHERE CI.movie_id = TD.movie_id))
+FROM 
+    TopDramaticActors TD
+LEFT JOIN 
+    movie_info MI ON TD.title = MI.info AND MI.note IS NULL
+WHERE 
+    (production_year IS NOT NULL AND production_year >= 2000)
+    OR (role_name IS NULL AND actor_name LIKE '%a%')
+    OR (actor_name IS NOT NULL AND actor_name LIKE '%S%')
+ORDER BY 
+    TD.production_year DESC, 
+    TD.actor_name ASC
+LIMIT 100;

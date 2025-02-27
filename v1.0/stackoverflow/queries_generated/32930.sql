@@ -1,0 +1,92 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Questions
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy r ON p2.ParentId = r.Id
+),
+PostVoteStatistics AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN VoteTypeId = 10 THEN 1 END) AS Deletions
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+QuestionDetails AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title AS QuestionTitle,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate AS QuestionCreatedDate,
+        p.AnswerCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.Deletions,
+        COALESCE(
+            (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 
+            0
+        ) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostVoteStatistics ps ON ps.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 -- Questions
+)
+SELECT 
+    qd.QuestionId,
+    qd.QuestionTitle,
+    qd.OwnerDisplayName,
+    qd.QuestionCreatedDate,
+    qd.AnswerCount,
+    qd.UpVotes,
+    qd.DownVotes,
+    qd.Deletions,
+    qd.CommentCount,
+    (
+        SELECT STRING_AGG(t.TagName, ', ') 
+        FROM Tags t 
+        JOIN (
+            SELECT Id FROM Posts WHERE Id = qd.QuestionId
+        ) AS p ON p.Id = t.ExcerptPostId
+    ) AS TagsAssociated,
+    COALESCE( 
+        (SELECT MAX(LastActivityDate) FROM Posts p2 WHERE p2.ParentId = qd.QuestionId), 
+        'No Answers Yet'
+    ) AS LastActivityOfAnswers,
+    CASE 
+        WHEN qd.AnswerCount > 0 THEN 'Has Answers'
+        ELSE 'No Answers'
+    END AS AnswerStatus,
+    (SELECT COUNT(*) FROM RecursivePostHierarchy rh WHERE rh.OwnerUserId = qd.OwnerDisplayName) AS TotalThreadsCreated
+FROM 
+    QuestionDetails qd 
+WHERE 
+    qd.rn = 1 -- Only latest entry per question
+ORDER BY 
+    qd.QuestionCreatedDate DESC;

@@ -1,0 +1,58 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, '2024-10-01')
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(rp.Upvotes - rp.Downvotes) AS Score,
+        COUNT(rp.Id) AS PostCount
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(rp.Id) > 5
+)
+SELECT 
+    u.DisplayName,
+    COALESCE(b.UserCount, 0) AS TotalFollowers,
+    SUM(t.Score) AS TotalScore,
+    AVG(t.Score) AS AverageScore
+FROM 
+    TopUsers t
+JOIN 
+    Users u ON u.Id = t.UserId
+LEFT JOIN 
+    (SELECT 
+        UserId, COUNT(*) AS UserCount 
+     FROM 
+        Badges 
+     GROUP BY 
+        UserId) AS b ON b.UserId = u.Id
+GROUP BY 
+    u.DisplayName, b.UserCount
+ORDER BY 
+    TotalScore DESC
+LIMIT 10;

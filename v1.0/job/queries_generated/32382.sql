@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 1990
+    UNION ALL
+    SELECT 
+        mk.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = mk.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    am.title AS movie_title,
+    am.production_year,
+    COUNT(DISTINCT mg.id) AS total_keywords,
+    AVG(pr.info::float) AS avg_rating,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY am.production_year DESC) AS rn
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_title am ON mh.movie_id = am.id
+LEFT JOIN 
+    movie_keyword mg ON am.id = mg.movie_id
+LEFT JOIN 
+    movie_info mi ON am.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+LEFT JOIN 
+    person_info pr ON ak.person_id = pr.person_id AND pr.info_type_id = (SELECT id FROM info_type WHERE info = 'Average Rating')
+WHERE 
+    ak.name IS NOT NULL
+    AND mi.info IS NOT NULL
+    AND mi.note IS NOT NULL
+GROUP BY 
+    ak.name, am.title, am.production_year
+HAVING 
+    COUNT(DISTINCT mg.id) > 5
+ORDER BY 
+    avg_rating DESC, total_keywords DESC;
+
+This query includes:
+- A recursive CTE to create a hierarchy of movies.
+- Various joins to fetch actor names, movie titles, and associated keywords.
+- NULL checks in the WHERE clause to avoid processing rows with missing data.
+- Aggregate functions for counting keywords associated with movies and computing average ratings.
+- A window function to assign row numbers for actors across different movies.
+- A HAVING clause to filter results based on the keyword count threshold.

@@ -1,0 +1,82 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+RecentUserBadges AS (
+    SELECT 
+        b.UserId,
+        b.Name AS BadgeName,
+        ROW_NUMBER() OVER(PARTITION BY b.UserId ORDER BY b.Date DESC) AS BadgeRank
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 YEAR'
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COALESCE(rp.Level, -1) AS PostLevel,
+    COALESCE(u.DisplayName, 'Deleted User') AS Author,
+    COALESCE(v.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(v.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(b.BadgeName, 'No Recent Badge') AS RecentBadge,
+    u.Reputation AS AuthorReputation,
+    p.CreationDate,
+    p.LastActivityDate
+FROM 
+    Posts p
+LEFT JOIN 
+    RecursivePostHierarchy rp ON p.Id = rp.Id
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostVoteCounts v ON p.Id = v.PostId
+LEFT JOIN 
+    RecentUserBadges b ON u.Id = b.UserId AND b.BadgeRank = 1
+WHERE 
+    p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 DAYS'
+GROUP BY 
+    p.Id, 
+    p.Title, 
+    rp.Level, 
+    u.DisplayName, 
+    v.UpVotes, 
+    v.DownVotes, 
+    b.BadgeName, 
+    u.Reputation, 
+    p.CreationDate, 
+    p.LastActivityDate
+ORDER BY 
+    TotalUpVotes DESC,
+    p.CreationDate DESC
+LIMIT 100;

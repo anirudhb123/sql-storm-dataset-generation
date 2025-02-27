@@ -1,0 +1,68 @@
+
+WITH UsersRanked AS (
+    SELECT 
+        Id, 
+        Reputation, 
+        DisplayName, 
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+        CASE 
+            WHEN Reputation > 10000 THEN 'High'
+            WHEN Reputation > 1000 THEN 'Medium'
+            ELSE 'Low' 
+        END AS ReputationGroup
+    FROM Users
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,  
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount  
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)  
+    GROUP BY p.Id, p.PostTypeId, p.CreationDate
+),
+ClosedPosts AS (
+    SELECT 
+        PostId, 
+        COUNT(*) AS CloseCount
+    FROM PostHistory
+    WHERE PostHistoryTypeId = 10  
+    GROUP BY PostId
+),
+Combined AS (
+    SELECT 
+        ps.PostId, 
+        ps.PostTypeId, 
+        ps.CreationDate, 
+        ps.CommentCount, 
+        ps.UpVoteCount, 
+        ps.DownVoteCount,
+        COALESCE(cp.CloseCount, 0) AS CloseCount,
+        ur.DisplayName,
+        ur.ReputationGroup
+    FROM PostStats ps
+    LEFT JOIN ClosedPosts cp ON ps.PostId = cp.PostId
+    LEFT JOIN UsersRanked ur ON ps.PostId = ur.Id  
+)
+SELECT 
+    C.PostId,
+    C.PostTypeId,
+    C.CreationDate,
+    C.CommentCount,
+    C.UpVoteCount,
+    C.DownVoteCount,
+    C.CloseCount,
+    C.DisplayName,
+    C.ReputationGroup
+FROM Combined C
+WHERE 
+    (C.CloseCount > 0 AND C.UpVoteCount > C.DownVoteCount)  
+    OR 
+    (C.CloseCount = 0 AND C.CommentCount > 5)               
+ORDER BY C.CommentCount DESC, C.UpVoteCount DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

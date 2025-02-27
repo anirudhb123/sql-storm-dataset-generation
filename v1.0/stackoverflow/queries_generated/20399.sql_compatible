@@ -1,0 +1,89 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank,
+        ARRAY(
+            SELECT t.TagName 
+            FROM Tags t 
+            WHERE t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int) 
+                           GROUP BY t.TagName
+            ) 
+            ORDER BY t.TagName
+        ) AS PostTags
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived,
+        COUNT(DISTINCT c.Id) AS CommentsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostHistoryOverview AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 1 THEN ph.CreationDate END) AS InitialTitleChange,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS PostClosedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS Deletions
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    p.PostId,
+    p.Title,
+    p.Rank,
+    p.Score,
+    p.ViewCount,
+    p.PostTags,
+    COUNT(DISTINCT c.Id) FILTER (WHERE c.CreationDate > DATE '2024-10-01' - INTERVAL '30 days') AS RecentComments,
+    ph.InitialTitleChange,
+    ph.PostClosedDate,
+    ph.Deletions,
+    COALESCE(ua.PostsCreated, 0) AS UserPostsCreated,
+    COALESCE(ua.UpVotesReceived, 0) AS UserUpVotesReceived,
+    COALESCE(ua.DownVotesReceived, 0) AS UserDownVotesReceived,
+    COALESCE(ua.CommentsCount, 0) AS UserCommentsCount
+FROM 
+    RankedPosts p
+JOIN 
+    Users up ON p.OwnerUserId = up.Id
+LEFT JOIN 
+    Comments c ON p.PostId = c.PostId
+LEFT JOIN 
+    UserActivity ua ON up.Id = ua.UserId
+LEFT JOIN 
+    PostHistoryOverview ph ON p.PostId = ph.PostId
+WHERE 
+    p.Rank <= 10
+    AND (p.Score IS NOT NULL OR p.ViewCount IS NOT NULL)
+GROUP BY 
+    up.UserId, up.DisplayName, p.PostId, p.Title, p.Rank, p.Score, p.ViewCount, p.PostTags, ph.InitialTitleChange, ph.PostClosedDate, ph.Deletions, ua.PostsCreated, ua.UpVotesReceived, ua.DownVotesReceived, ua.CommentsCount
+ORDER BY 
+    p.Rank, p.Score DESC;

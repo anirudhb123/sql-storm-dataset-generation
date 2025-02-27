@@ -1,0 +1,91 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS year_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY m.id) AS cast_count,
+        CASE 
+            WHEN m.production_year IS NULL THEN 'Unknown Year' 
+            ELSE CAST(m.production_year AS CHAR)
+        END AS production_year_str
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+),
+GenreCount AS (
+    SELECT 
+        k.keyword AS genre,
+        COUNT(m.id) AS movie_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title m ON mk.movie_id = m.id
+    GROUP BY 
+        k.keyword
+    HAVING 
+        COUNT(m.id) > 5
+),
+HighProfileActors AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS featured_movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.id, a.name
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 10
+),
+DirectorStats AS (
+    SELECT 
+        co.company_id,
+        co.name AS company_name,
+        COUNT(DISTINCT m.id) AS directed_movies,
+        AVG(m.production_year) AS average_year,
+        COUNT(DISTINCT m.id) FILTER (WHERE m.production_year IS NOT NULL) AS non_null_years
+    FROM 
+        movie_companies mc
+    JOIN 
+        aka_title m ON mc.movie_id = m.id
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    WHERE 
+        mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Director')
+    GROUP BY 
+        co.company_id, co.name
+)
+SELECT 
+    rm.title,
+    rm.production_year_str,
+    rm.cast_count,
+    gc.genre,
+    ha.actor_name,
+    ds.company_name,
+    ds.directed_movies,
+    ds.average_year,
+    ds.non_null_years
+FROM 
+    RankedMovies rm
+JOIN 
+    GenreCount gc ON rm.movie_id = gc.movie_count
+JOIN 
+    HighProfileActors ha ON rm.cast_count > 3
+JOIN 
+    DirectorStats ds ON ds.directed_movies >= 5
+WHERE 
+    (rm.year_rank <= 5 OR rm.cast_count > 10)
+    AND (rm.production_year IS NOT NULL OR rm.production_year_str = 'Unknown Year')
+ORDER BY 
+    rm.production_year DESC,
+    rm.title ASC
+LIMIT 100;

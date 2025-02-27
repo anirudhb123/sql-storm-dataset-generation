@@ -1,0 +1,73 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS VoteCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+HighReputationUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        BadgeCount,
+        VoteCount,
+        TotalViews
+    FROM 
+        UserStats
+    WHERE 
+        Reputation > (SELECT AVG(Reputation) FROM Users)
+),
+TargetPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.Tags, p.CreationDate
+)
+SELECT 
+    ruh.DisplayName AS HighReputationUser,
+    t.Title AS PostTitle,
+    t.Tags,
+    MAX(t.LastEditDate) AS LastEdit,
+    MAX(ts.TotalViews) AS TotalPostViews,
+    MAX(ts.VoteCount) AS TotalVotes,
+    SUM(CASE WHEN t.CommentCount > 0 THEN 1 ELSE 0 END) AS TotalPostsWithComments
+FROM 
+    HighReputationUsers ruh
+JOIN 
+    UserStats us ON ruh.UserId = us.UserId
+JOIN 
+    TargetPosts t ON t.CreationDate > ruh.CreationDate
+LEFT JOIN 
+    UserStats ts ON t.PostId = ts.UserId
+GROUP BY 
+    ruh.DisplayName, t.Title, t.Tags
+ORDER BY 
+    ruh.Reputation DESC, TotalPostViews DESC;

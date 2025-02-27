@@ -1,0 +1,52 @@
+WITH CustomerPurchaseSummary AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.net_paid) AS total_spent,
+        COUNT(ws.order_number) AS total_orders,
+        AVG(ws.net_paid) AS avg_order_value
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+), 
+HighValueCustomers AS (
+    SELECT 
+        cps.c_customer_sk,
+        cps.total_spent,
+        cps.total_orders,
+        cps.avg_order_value,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        CustomerPurchaseSummary cps
+    JOIN 
+        customer_demographics cd ON cps.c_customer_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        cps.total_spent > (SELECT AVG(total_spent) FROM CustomerPurchaseSummary)
+)
+SELECT 
+    hvc.c_customer_sk,
+    hvc.total_spent,
+    hvc.total_orders,
+    hvc.avg_order_value,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    hvc.ca_city,
+    hvc.ca_state,
+    COUNT(DISTINCT ws.ws_order_number) AS orders_in_last_30_days,
+    SUM(ws.ws_net_paid) AS total_last_30_days_spent
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    web_sales ws ON hvc.c_customer_sk = ws.ws_bill_customer_sk AND ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date >= cast('2002-10-01' as date) - INTERVAL '30 days')
+GROUP BY 
+    hvc.c_customer_sk, hvc.total_spent, hvc.total_orders, hvc.avg_order_value, hvc.cd_gender, hvc.cd_marital_status, hvc.ca_city, hvc.ca_state
+ORDER BY 
+    hvc.total_spent DESC
+LIMIT 100;

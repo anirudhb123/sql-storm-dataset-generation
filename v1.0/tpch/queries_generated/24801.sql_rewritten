@@ -1,0 +1,93 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY o.o_orderkey) AS total_line_item_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+),
+ActiveSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available_quantity
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        DENSE_RANK() OVER (ORDER BY c.c_acctbal DESC) AS value_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name,
+        r.r_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.s_acctbal < 500
+),
+FinalOutput AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        ro.order_rank,
+        hvc.c_name AS high_value_customer,
+        sd.s_name AS supplier_name,
+        COUNT(l.l_orderkey) AS total_lines,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_adjusted
+    FROM 
+        RankedOrders ro
+    LEFT JOIN 
+        lineitem l ON ro.o_orderkey = l.l_orderkey
+    JOIN 
+        HighValueCustomers hvc ON hvc.c_custkey = (SELECT o2.o_custkey FROM orders o2 WHERE o2.o_orderkey = ro.o_orderkey)
+    LEFT JOIN 
+        ActiveSuppliers as ON l.l_partkey = as.ps_partkey
+    LEFT JOIN 
+        SupplierDetails sd ON as.ps_suppkey = sd.s_suppkey
+    WHERE 
+        ro.order_rank <= 10 
+        AND (sd.s_name IS NOT NULL OR sd.s_name LIKE '%ACME%')
+    GROUP BY 
+        ro.o_orderkey, ro.o_orderdate, ro.order_rank, hvc.c_name, sd.s_name
+)
+SELECT 
+    fo.o_orderkey,
+    fo.o_orderdate,
+    fo.order_rank,
+    fo.high_value_customer,
+    fo.supplier_name,
+    fo.total_lines,
+    fo.total_price_adjusted,
+    CASE 
+        WHEN fo.total_price_adjusted > 1000 THEN 'High Value'
+        WHEN fo.total_price_adjusted IS NULL THEN 'No Value'
+        ELSE 'Regular Value'
+    END AS value_category
+FROM 
+    FinalOutput fo
+ORDER BY 
+    fo.order_rank, fo.o_orderdate DESC;

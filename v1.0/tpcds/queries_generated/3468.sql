@@ -1,0 +1,55 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        cd.cd_dep_employed_count,
+        cd.cd_dep_college_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+sales_data AS (
+    SELECT 
+        ws.ws_order_number, 
+        ws.ws_net_paid, 
+        ws.ws_ext_sales_price, 
+        ws.ws_item_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_paid DESC) as rn
+    FROM web_sales ws
+    WHERE ws.ws_net_paid > 0
+),
+return_data AS (
+    SELECT 
+        wr.wr_order_number,
+        SUM(wr.wr_return_quantity) AS total_returns,
+        SUM(wr.wr_return_amt) AS total_return_amount
+    FROM web_returns wr
+    GROUP BY wr.wr_order_number
+),
+profitability AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(sd.ws_net_paid) AS total_sales,
+        COALESCE(SUM(rd.total_returns), 0) AS total_returns,
+        SUM(sd.ws_net_paid) - COALESCE(SUM(rd.total_returns), 0) AS net_profit
+    FROM customer_info c
+    LEFT JOIN sales_data sd ON c.c_customer_id = sd.ws_order_number
+    LEFT JOIN return_data rd ON sd.ws_order_number = rd.wr_order_number
+    GROUP BY c.c_customer_id
+)
+SELECT 
+    ci.c_customer_id,
+    ci.cd_gender,
+    SUM(p.total_sales) AS total_sales,
+    SUM(p.total_returns) AS total_returns,
+    SUM(p.net_profit) AS net_profit
+FROM customer_info ci
+LEFT JOIN profitability p ON ci.c_customer_id = p.c_customer_id
+GROUP BY ci.c_customer_id, ci.cd_gender
+HAVING SUM(p.net_profit) > 0
+ORDER BY SUM(p.net_profit) DESC
+LIMIT 100;

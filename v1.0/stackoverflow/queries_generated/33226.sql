@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1 -- Only Questions
+        AND p.Score IS NOT NULL
+),
+RecentActivity AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate AS ActivityDate,
+        PHT.Name AS ActivityType,
+        ph.UserDisplayName,
+        ph.Comment
+    FROM
+        PostHistory ph
+    JOIN
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    WHERE
+        ph.CreationDate > NOW() - INTERVAL '30 days'
+),
+UserBadgeCounts AS (
+    SELECT
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM
+        Badges b
+    GROUP BY
+        b.UserId
+),
+AggregatedUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+        SUM(CASE WHEN (r.PostId IS NOT NULL) THEN 1 ELSE 0 END) AS QuestionsPosted,
+        AVG(r.Score) AS AverageScore
+    FROM
+        Users u
+    LEFT JOIN
+        UserBadgeCounts ub ON u.Id = ub.UserId
+    LEFT JOIN
+        RankedPosts r ON u.Id = r.OwnerUserId
+    GROUP BY
+        u.Id, u.DisplayName, u.Reputation
+),
+ActivitySummary AS (
+    SELECT
+        a.UserId,
+        COUNT(a.PostId) AS RecentActivitiesCount,
+        ARRAY_AGG(a.ActivityType) AS Activities
+    FROM
+        RecentActivity a
+    GROUP BY
+        a.UserId
+)
+
+SELECT
+    au.UserId,
+    au.DisplayName,
+    au.Reputation,
+    au.GoldBadges,
+    au.SilverBadges,
+    au.BronzeBadges,
+    au.QuestionsPosted,
+    au.AverageScore,
+    COALESCE(asum.RecentActivitiesCount, 0) AS RecentActivitiesCount,
+    COALESCE(asum.Activities, '{}') AS Activities
+FROM
+    AggregatedUsers au
+LEFT JOIN
+    ActivitySummary asum ON au.UserId = asum.UserId
+WHERE
+    au.Reputation > 1000
+ORDER BY
+    au.Reputation DESC,
+    au.DisplayName;

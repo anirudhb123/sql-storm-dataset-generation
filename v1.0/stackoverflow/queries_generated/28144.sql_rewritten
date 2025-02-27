@@ -1,0 +1,68 @@
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName AS Tag,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+),
+PopularUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS AnswerCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 2
+    GROUP BY 
+        U.Id, U.DisplayName
+    HAVING 
+        COUNT(DISTINCT P.Id) >= 5
+),
+PostHistoryInsights AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        COUNT(DISTINCT PH.UserId) AS UniqueEditors
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    TS.Tag,
+    TS.PostCount,
+    TS.TotalViews,
+    TS.TotalScore,
+    TS.AverageScore,
+    PU.UserId,
+    PU.DisplayName,
+    PU.AnswerCount,
+    PU.AcceptedAnswers,
+    PHI.EditCount,
+    PHI.LastEditDate,
+    PHI.UniqueEditors
+FROM 
+    TagStatistics TS
+LEFT JOIN 
+    PopularUsers PU ON PU.AnswerCount > 10
+LEFT JOIN 
+    PostHistoryInsights PHI ON PHI.PostId IN (
+        SELECT P.Id 
+        FROM Posts P 
+        WHERE P.Tags LIKE '%' || TS.Tag || '%'
+    )
+ORDER BY 
+    TS.TotalViews DESC, 
+    TS.AverageScore DESC;

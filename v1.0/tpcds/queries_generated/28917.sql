@@ -1,0 +1,69 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        REPLACE(REPLACE(ca_zip, '-', ''), ' ', '') AS clean_zip
+    FROM 
+        customer_address
+),
+DemographicDetails AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        CONCAT(cd_gender, '/', cd_marital_status) AS gender_marital_status,
+        cd_purchase_estimate
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_purchase_estimate > 1000
+),
+DateDetails AS (
+    SELECT 
+        d_date_id,
+        d_day_name,
+        d_month_seq,
+        CONCAT(d_day_name, ', ', d_month_seq) AS formatted_date
+    FROM 
+        date_dim
+    WHERE 
+        d_year = 2023
+),
+CombinedDetails AS (
+    SELECT 
+        a.full_address,
+        a.ca_city,
+        a.ca_state,
+        d.gender_marital_status,
+        d.cd_purchase_estimate,
+        date.formatted_date
+    FROM 
+        AddressDetails a
+    JOIN 
+        customer c ON a.ca_address_id = c.c_customer_id
+    JOIN 
+        DemographicDetails d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    JOIN 
+        DateDetails date ON c.c_first_shipto_date_sk = date.d_date_id
+)
+SELECT 
+    full_address,
+    ca_city,
+    ca_state,
+    gender_marital_status,
+    AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+    COUNT(*) AS total_customers
+FROM 
+    CombinedDetails
+GROUP BY 
+    full_address,
+    ca_city,
+    ca_state,
+    gender_marital_status
+ORDER BY 
+    avg_purchase_estimate DESC
+LIMIT 10;

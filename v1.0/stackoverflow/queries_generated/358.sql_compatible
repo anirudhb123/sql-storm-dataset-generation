@@ -1,0 +1,70 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+),
+TopTags AS (
+    SELECT 
+        T.TagName, 
+        COUNT(P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON T.Id = ANY(string_to_array(P.Tags, '><'))::integer[]
+    GROUP BY T.TagName
+    HAVING COUNT(P.Id) > 5
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.ViewCount, 
+        P.Score,
+        P.CreationDate,
+        COALESCE(CNT.CommentCount, 0) AS CommentCount
+    FROM Posts P
+    LEFT JOIN (
+        SELECT PostId, COUNT(Id) AS CommentCount
+        FROM Comments 
+        GROUP BY PostId
+    ) CNT ON P.Id = CNT.PostId
+    WHERE P.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId, 
+        COUNT(*) AS CloseCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.PostId
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedPostsCount
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    UR.DisplayName AS TopUser, 
+    UR.Reputation, 
+    TT.TagName,
+    PP.Title AS PopularPostTitle,
+    PP.ViewCount,
+    PP.Score,
+    UA.TotalPosts,
+    UA.ClosedPostsCount
+FROM UserReputation UR
+JOIN TopTags TT ON TT.PostCount > 10
+JOIN PopularPosts PP ON PP.ViewCount > 1000
+JOIN UserActivity UA ON UA.UserId = UR.UserId
+LEFT JOIN ClosedPosts CP ON CP.PostId = PP.PostId
+WHERE UR.ReputationRank <= 10
+ORDER BY UR.Reputation DESC, PP.ViewCount DESC
+LIMIT 10;

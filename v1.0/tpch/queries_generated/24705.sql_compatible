@@ -1,0 +1,85 @@
+
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_availability,
+        SUM(ps.ps_supplycost) AS total_cost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty) DESC) AS rank_within_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+), 
+
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS lineitem_count,
+        MAX(o.o_orderdate) AS latest_order_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+  
+NationsAndRegions AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name,
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name, r.r_name
+)
+
+SELECT 
+    ss.s_name,
+    n.n_name,
+    r.r_name,
+    COALESCE(ss.total_availability, 0) AS total_availability,
+    COALESCE(ss.total_cost, 0) AS total_cost,
+    CASE 
+        WHEN ss.rank_within_nation <= 5 THEN 'Top Supplier'
+        ELSE 'Regular Supplier'
+    END AS supplier_rank,
+    os.total_revenue,
+    os.lineitem_count,
+    os.latest_order_date
+FROM 
+    SupplierSummary ss
+FULL OUTER JOIN 
+    NationsAndRegions n ON ss.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    OrderStats os ON ss.s_suppkey = os.o_orderkey 
+WHERE 
+    ss.total_availability >= (
+        SELECT 
+            AVG(total_availability) 
+        FROM 
+            SupplierSummary 
+        WHERE 
+            rank_within_nation IS NOT NULL
+    )
+OR 
+    n.supplier_count > (
+        SELECT 
+            COUNT(DISTINCT s.s_suppkey) / 10 
+            FROM 
+                supplier s 
+            WHERE 
+                s.s_acctbal IS NOT NULL
+    )
+ORDER BY 
+    total_revenue DESC NULLS LAST;

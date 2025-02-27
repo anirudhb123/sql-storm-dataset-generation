@@ -1,0 +1,77 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 1000
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(s.s_acctbal) AS total_balance
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+NationsWithComments AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        LEFT(n.n_comment, 20) AS short_comment
+    FROM 
+        nation n
+    WHERE 
+        n.n_comment IS NOT NULL
+),
+TotalLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipmode = 'AIR' AND 
+        l.l_returnflag IS NOT NULL
+    GROUP BY 
+        l.l_orderkey
+)
+
+SELECT 
+    n.n_name AS r_name, 
+    COALESCE(sd.total_balance, 0) AS total_balance, 
+    CONCAT('Order #', ro.o_orderkey, ' for ', ro.o_totalprice) AS order_details,
+    n.short_comment
+FROM 
+    RankedOrders ro
+JOIN 
+    NationsWithComments n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = ro.o_custkey)
+LEFT JOIN 
+    SupplierDetails sd ON sd.part_count IN (SELECT COUNT(*) FROM HighValueParts)
+LEFT JOIN 
+    TotalLineItems tl ON tl.l_orderkey = ro.o_orderkey
+WHERE 
+    ro.order_rank BETWEEN 1 AND 5
+ORDER BY 
+    total_balance DESC, ro.o_totalprice ASC, n.short_comment;

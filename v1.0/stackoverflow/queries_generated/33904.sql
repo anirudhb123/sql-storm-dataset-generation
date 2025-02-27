@@ -1,0 +1,77 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId,
+        CreationDate,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(c.Id) AS TotalComments,
+        AVG(DATEDIFF(CURRENT_TIMESTAMP, p.CreationDate)) AS AvgPostAge
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    ua.TotalPosts,
+    ua.TotalComments,
+    ua.TotalBounty,
+    ua.AvgPostAge,
+    COALESCE(cl.CloseCount, 0) AS ClosedPostsCount,
+    COUNT(DISTINCT r.Id) AS AnswerCount,
+    AVG(r.Level) AS AvgHierarchyLevel
+FROM 
+    UserActivity ua
+JOIN 
+    Users u ON ua.UserId = u.Id
+LEFT JOIN 
+    ClosedPosts cl ON cl.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+LEFT JOIN 
+    RecursivePostHierarchy r ON r.ParentId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+GROUP BY 
+    u.UserId, u.DisplayName, ua.TotalPosts, ua.TotalComments, ua.TotalBounty, ua.AvgPostAge, cl.CloseCount
+ORDER BY 
+    TotalBounty DESC, TotalPosts DESC;

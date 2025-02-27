@@ -1,0 +1,56 @@
+
+WITH DateFilters AS (
+    SELECT d_date_sk, d_year, d_month_seq
+    FROM date_dim
+    WHERE d_year BETWEEN 2020 AND 2023
+),
+ItemStats AS (
+    SELECT
+        i.i_item_id,
+        SUM(COALESCE(ws.ws_quantity, 0)) AS total_quantity_sold,
+        AVG(NULLIF(ws.ws_sales_price, 0)) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_id
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        SUM(IF(cd.cd_dep_count IS NULL, 0, cd.cd_dep_count)) AS total_dependents
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_income_band_sk IS NOT NULL
+    GROUP BY cd.cd_gender, cd.cd_marital_status
+),
+SalesData AS (
+    SELECT
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid_inc_tax) AS avg_net_payment
+    FROM web_sales ws
+    INNER JOIN DateFilters df ON ws.ws_sold_date_sk = df.d_date_sk
+    GROUP BY ws.ws_bill_customer_sk
+),
+FinalReport AS (
+    SELECT
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.customer_count,
+        s.total_net_profit,
+        s.total_orders,
+        s.avg_net_payment,
+        i.total_quantity_sold,
+        i.avg_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY s.total_net_profit DESC) AS row_num
+    FROM CustomerDemographics cd
+    LEFT JOIN SalesData s ON cd.customer_count > s.total_orders
+    LEFT JOIN ItemStats i ON i.order_count < s.total_orders
+)
+SELECT *
+FROM FinalReport
+WHERE row_num <= 5
+ORDER BY cd_gender, total_net_profit DESC

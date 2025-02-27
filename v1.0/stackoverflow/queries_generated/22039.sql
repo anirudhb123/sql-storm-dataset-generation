@@ -1,0 +1,66 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        CASE 
+            WHEN U.Reputation > 1000 THEN 'High Rep'
+            WHEN U.Reputation BETWEEN 500 AND 1000 THEN 'Medium Rep'
+            ELSE 'Low Rep' 
+        END AS ReputationCategory
+    FROM Users U
+), 
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS TotalComments,
+        COUNT(DISTINCT V.UserId) FILTER (WHERE V.VoteTypeId = 2) AS TotalUpVotes,
+        COUNT(DISTINCT V.UserId) FILTER (WHERE V.VoteTypeId = 3) AS TotalDownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+), 
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        C.Name AS CloseReason
+    FROM PostHistory PH
+    JOIN CloseReasonTypes C ON PH.Comment::int = C.Id
+    WHERE PH.PostHistoryTypeId = 10
+), 
+PostTags AS (
+    SELECT 
+        P.Id AS PostId,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM Posts P
+    LEFT JOIN LATERAL string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><') AS TagName ON TRUE
+    LEFT JOIN Tags T ON T.TagName = TagName
+    GROUP BY P.Id
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.ReputationCategory,
+    P.Title AS PostTitle,
+    P.CreationDate AS PostCreationDate,
+    P.TotalComments,
+    P.TotalUpVotes,
+    P.TotalDownVotes,
+    COALESCE(C.CloseReason, 'Not Closed') AS CloseReason,
+    STRING_AGG(T.Tags, ', ') AS PostTags,
+    P.PostRank
+FROM UserReputation U
+JOIN PostStatistics P ON U.UserId = P.UserId
+LEFT JOIN ClosedPosts C ON P.PostId = C.PostId
+LEFT JOIN PostTags T ON P.PostId = T.PostId
+WHERE 
+    (U.Reputation > 500 OR U.LastAccessDate > NOW() - INTERVAL '30 days') 
+    AND (P.TotalComments > 5 OR P.TotalUpVotes > 10)
+GROUP BY U.UserId, P.Title, P.CreationDate, C.CloseReason, P.TotalComments, P.TotalUpVotes, P.TotalDownVotes, P.PostRank
+ORDER BY U.Reputation DESC, P.PostRank
+LIMIT 100;

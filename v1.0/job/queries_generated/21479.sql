@@ -1,0 +1,70 @@
+WITH RecursiveActors AS (
+    SELECT
+        c.person_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM
+        cast_info ci
+    JOIN
+        aka_name a ON ci.person_id = a.person_id
+    JOIN
+        aka_title at ON ci.movie_id = at.movie_id
+    WHERE
+        at.production_year >= 2000
+    GROUP BY
+        c.person_id, a.name
+    HAVING
+        COUNT(DISTINCT ci.movie_id) >= 5
+),
+MoviesWithKeywords AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        title m
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        m.production_year BETWEEN 2010 AND 2020
+    GROUP BY
+        m.id, m.title
+),
+ActorMovieDetails AS (
+    SELECT
+        ra.actor_name,
+        mwk.title,
+        mwk.keywords,
+        ROW_NUMBER() OVER (PARTITION BY ra.actor_name ORDER BY mwk.movie_id DESC) AS ranking
+    FROM
+        RecursiveActors ra
+    JOIN
+        cast_info ci ON ra.person_id = ci.person_id
+    JOIN
+        MoviesWithKeywords mwk ON ci.movie_id = mwk.movie_id
+)
+
+SELECT
+    amd.actor_name,
+    amd.title,
+    amd.keywords,
+    CASE 
+        WHEN amd.ranking = 1 THEN 'Most Recent'
+        WHEN amd.ranking <= 5 THEN 'Top 5'
+        ELSE 'Older'
+    END AS movie_category,
+    COALESCE(NOT EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = amd.movie_id 
+        AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+    ), TRUE) AS box_office_info_missing
+FROM
+    ActorMovieDetails amd
+WHERE
+    amd.ranking <= 10
+ORDER BY 
+    amd.actor_name, 
+    amd.ranking;

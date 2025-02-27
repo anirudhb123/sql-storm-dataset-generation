@@ -1,0 +1,41 @@
+SELECT 
+    a.name AS aka_name, 
+    t.title AS movie_title, 
+    c.role_id AS cast_role_id, 
+    c.nr_order AS cast_order, 
+    n.name AS actor_name, 
+    i.info AS movie_info, 
+    k.keyword AS movie_keyword, 
+    ct.kind AS company_type_kind, 
+    cm.name AS company_name,
+    MIN(m.production_year) AS first_movie_year,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS all_keywords
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    name n ON a.person_id = n.imdb_id
+JOIN 
+    movie_info m ON t.id = m.movie_id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    company_name cm ON mc.company_id = cm.id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    a.name IS NOT NULL 
+    AND t.production_year > 2000
+GROUP BY 
+    a.name, t.title, c.role_id, c.nr_order, n.name, i.info, k.keyword, ct.kind, cm.name
+ORDER BY 
+    first_movie_year ASC, aka_name ASC;
+
+This query will provide detailed information about alternative names (aka_name), movie titles, actor roles, company details, and associated keywords, filtering out movies produced after 2000 and aggregating relevant data efficiently for benchmarking string processing in a relational context.

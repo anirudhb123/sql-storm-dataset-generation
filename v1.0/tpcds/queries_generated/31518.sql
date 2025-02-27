@@ -1,0 +1,43 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT i_item_sk, i_item_id, i_item_desc, i_current_price, i_brand
+    FROM item
+    WHERE i_item_sk < 1000  -- Limiting to a subset for performance testing
+    UNION ALL
+    SELECT i.i_item_sk, i.i_item_id, i.i_item_desc, i.i_current_price, i.i_brand
+    FROM item i
+    JOIN item_hierarchy ih ON ih.i_item_sk = i.i_item_sk - 1  -- Simulating a recursive relationship
+),
+customer_info AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name,
+           cd.cd_gender, cd.cd_marital_status, 
+           cd.cd_purchase_estimate, 
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT web.ws_sold_date_sk, web.ws_item_sk, SUM(web.ws_sales_price) AS total_sales,
+           COUNT(DISTINCT web.ws_order_number) AS order_count,
+           DATE(d.d_date) AS sold_date
+    FROM web_sales web
+    JOIN date_dim d ON web.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2023
+    GROUP BY web.ws_sold_date_sk, web.ws_item_sk, d.d_date
+)
+SELECT 
+    hi.i_item_id,
+    hi.i_item_desc,
+    hi.i_current_price,
+    COALESCE(cs.total_sales, 0) as total_website_sales,
+    COALESCE(ss.order_count, 0) as total_orders,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status
+FROM item_hierarchy hi
+FULL OUTER JOIN sales_summary cs ON hi.i_item_sk = cs.ws_item_sk
+LEFT JOIN customer_info ci ON ci.gender_rank = 1  -- Limit to top customers per gender
+WHERE (hi.i_current_price > 50 OR cs.total_sales > 1000) 
+AND (ci.cd_marital_status = 'M' OR ci.cd_purchase_estimate > 500)
+ORDER BY hi.i_item_desc, total_website_sales DESC;

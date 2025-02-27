@@ -1,0 +1,41 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS average_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_type
+),
+TopPartTypes AS (
+    SELECT 
+        p_type,
+        AVG(total_available_quantity) AS avg_qty,
+        MAX(average_supply_cost) AS max_cost
+    FROM 
+        RankedParts
+    WHERE 
+        rank <= 5
+    GROUP BY 
+        p_type
+)
+SELECT 
+    p_type,
+    avg_qty,
+    max_cost,
+    (SELECT COUNT(*) FROM supplier s WHERE EXISTS (
+        SELECT 1 
+        FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey AND ps.ps_partkey IN (
+            SELECT p_partkey FROM RankedParts WHERE rank <= 5
+        )
+    )) AS active_suppliers
+FROM 
+    TopPartTypes
+ORDER BY 
+    avg_qty DESC, max_cost ASC;

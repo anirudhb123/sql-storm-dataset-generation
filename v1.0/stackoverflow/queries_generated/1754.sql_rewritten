@@ -1,0 +1,46 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN p.Score > 0 THEN p.Score ELSE 0 END), 0) AS TotalPositiveScore,
+        COALESCE(AVG(p.ViewCount), 0) AS AvgViewCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalPositiveScore,
+        AvgViewCount,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS PostRank
+    FROM UserStats
+    WHERE TotalPosts > 10
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalPositiveScore,
+    u.AvgViewCount,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate,
+    rp.Score AS RecentPostScore
+FROM TopUsers u
+LEFT JOIN RecentPosts rp ON u.UserId = rp.OwnerDisplayName
+WHERE rp.RecentPostRank = 1
+ORDER BY u.TotalPosts DESC, u.TotalPositiveScore DESC, u.AvgViewCount DESC;

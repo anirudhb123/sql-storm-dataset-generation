@@ -1,0 +1,55 @@
+
+-- Performance Benchmarking Query
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        w.w_warehouse_name,
+        c.c_state,
+        DENSE_RANK() OVER (PARTITION BY c.c_state ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.ws_item_sk, w.w_warehouse_name, c.c_state
+),
+TopSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity_sold,
+        sd.total_sales,
+        sd.w_warehouse_name,
+        sd.c_state
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.sales_rank <= 10
+)
+SELECT 
+    ts.ws_item_sk,
+    ts.total_quantity_sold,
+    ts.total_sales,
+    ts.w_warehouse_name,
+    ts.c_state,
+    c.c_birth_year,
+    COUNT(DISTINCT cs.cs_order_number) AS order_count
+FROM 
+    TopSales ts
+LEFT JOIN 
+    catalog_sales cs ON ts.ws_item_sk = cs.cs_item_sk
+LEFT JOIN 
+    customer_demographics cdem ON ts.ws_item_sk = cdem.cd_demo_sk
+JOIN 
+    customer c ON ts.ws_item_sk = c.c_customer_sk
+GROUP BY 
+    ts.ws_item_sk, ts.total_quantity_sold, ts.total_sales, ts.w_warehouse_name, ts.c_state, c.c_birth_year
+ORDER BY 
+    ts.total_sales DESC;

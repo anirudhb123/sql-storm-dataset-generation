@@ -1,0 +1,101 @@
+WITH RecursiveNameCTE AS (
+    SELECT 
+        id, person_id, name, 
+        md5sum,
+        CAST(name AS VARCHAR(255)) AS Full_Name
+    FROM 
+        aka_name
+    WHERE 
+        LENGTH(name) > 3  
+    UNION ALL
+    SELECT 
+        a.id, a.person_id, a.name, 
+        a.md5sum,
+        CONCAT(b.Full_Name, ' ', a.name) AS Full_Name
+    FROM 
+        aka_name a
+    INNER JOIN 
+        RecursiveNameCTE b ON a.person_id = b.person_id
+    WHERE 
+        a.id <> b.id
+),
+MovieInfoCTE AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title,
+        KEYWORD_COUNT.keywords_count,
+        COALESCE(info.info, 'N/A') AS movie_info,
+        COUNT(DISTINCT cm.company_id) AS company_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies cm ON m.id = cm.movie_id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            COUNT(DISTINCT keyword_id) AS keywords_count
+         FROM 
+            movie_keyword 
+         GROUP BY 
+            movie_id) AS KEYWORD_COUNT ON KEYWORD_COUNT.movie_id = m.id
+    WHERE 
+        m.production_year >= 2000 OR
+        (m.production_year < 2000 AND mi.info_type_id IS NOT NULL)
+    GROUP BY 
+        m.id, m.title, mi.info
+),
+ActorStats AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        AVG(CASE WHEN r.role IS NOT NULL THEN r.role ELSE 'Unknown' END) AS average_role_length
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.person_id
+),
+FinalStats AS (
+    SELECT 
+        r.name,
+        m.movie_title,
+        m.movie_info,
+        a.movie_count,
+        a.average_role_length
+    FROM 
+        RecursiveNameCTE r
+    JOIN 
+        cast_info c ON r.person_id = c.person_id
+    JOIN 
+        MovieInfoCTE m ON c.movie_id = m.movie_id
+    JOIN 
+        ActorStats a ON c.person_id = a.person_id
+    WHERE 
+        a.movie_count > 1 AND
+        m.company_count IS NOT NULL
+)
+
+SELECT 
+    f.name,
+    f.movie_title,
+    f.movie_info,
+    f.movie_count,
+    f.average_role_length,
+    CASE 
+        WHEN f.average_role_length > 10 THEN 'Long' 
+        WHEN f.average_role_length IS NULL THEN 'No Roles' 
+        ELSE 'Short' 
+    END AS role_length_category
+FROM 
+    FinalStats f
+ORDER BY 
+    f.movie_count DESC, 
+    f.average_role_length ASC
+LIMIT 100;

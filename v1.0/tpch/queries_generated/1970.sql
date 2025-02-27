@@ -1,0 +1,39 @@
+WITH SupplierPerformance AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(ps.ps_availqty * ps.ps_supplycost) DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT cust.c_custkey, cust.c_name
+    FROM CustomerOrderSummary cust
+    WHERE cust.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderSummary)
+),
+PartStats AS (
+    SELECT p.p_partkey, p.p_name, AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price,
+           SUM(l.l_quantity) AS total_quantity
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT s.s_name AS Supplier_Name, 
+       c.c_name AS Customer_Name, 
+       ps.p_name AS Part_Name, 
+       ps.avg_price AS Average_Price,
+       ps.total_quantity AS Total_Quantity,
+       sp.total_supply_cost AS Supplier_Total_Cost
+FROM SupplierPerformance sp
+FULL OUTER JOIN HighValueCustomers c ON sp.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps 
+                                                         JOIN part p ON ps.ps_partkey = p.p_partkey 
+                                                         WHERE p.p_name LIKE '%widget%' LIMIT 1)
+LEFT JOIN PartStats ps ON ps.total_quantity > 500
+WHERE sp.total_supply_cost IS NOT NULL OR c.c_custkey IS NULL
+ORDER BY c.c_name, ps.avg_price DESC;

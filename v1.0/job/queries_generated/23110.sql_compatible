@@ -1,0 +1,108 @@
+
+WITH RECURSIVE title_hierarchy AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.episode_of_id,
+        t.season_nr,
+        t.episode_nr,
+        0 AS level
+    FROM 
+        title t
+    WHERE 
+        t.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.episode_of_id,
+        t.season_nr,
+        t.episode_nr,
+        th.level + 1
+    FROM 
+        title t
+    JOIN
+        title_hierarchy th ON t.episode_of_id = th.title_id
+),
+ranked_titles AS (
+    SELECT 
+        th.title_id,
+        th.title,
+        th.production_year,
+        th.level,
+        ROW_NUMBER() OVER (PARTITION BY th.production_year ORDER BY th.level DESC) AS title_rank
+    FROM 
+        title_hierarchy th
+    WHERE 
+        th.production_year IS NOT NULL
+),
+non_top_titles AS (
+    SELECT
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        rt.level
+    FROM
+        ranked_titles rt
+    WHERE
+        rt.title_rank > 1
+),
+movie_info_with_keywords AS (
+    SELECT
+        mt.movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords,
+        COUNT(mk.id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY
+        mt.movie_id
+),
+cast_with_roles AS (
+    SELECT 
+        ai.person_id,
+        ai.movie_id,
+        rt.role
+    FROM 
+        cast_info ai
+    JOIN 
+        role_type rt ON ai.role_id = rt.id
+)
+SELECT 
+    t.title AS Movie_Title,
+    t.production_year AS Production_Year,
+    kw.keywords AS Associated_Keywords,
+    c.person_id AS Actor_ID,
+    c.role AS Actor_Role,
+    CASE
+        WHEN c.person_id IS NULL THEN 'No Cast'
+        ELSE 'Cast Available'
+    END AS Cast_Status,
+    COALESCE(n.name, 'Unknown') AS Character_Name,
+    COUNT(mk.id) FILTER (WHERE mk.keyword IS NOT NULL) AS Total_Keywords
+FROM 
+    non_top_titles t
+LEFT JOIN 
+    movie_info_with_keywords kw ON t.title_id = kw.movie_id
+LEFT JOIN 
+    cast_with_roles c ON c.movie_id = t.title_id
+LEFT JOIN 
+    name n ON n.id = c.person_id
+WHERE 
+    t.level <= 2 
+    AND (t.production_year BETWEEN 2000 AND 2020)
+GROUP BY 
+    t.title, 
+    t.production_year, 
+    kw.keywords,
+    c.person_id,
+    c.role,
+    n.name
+ORDER BY 
+    t.production_year DESC,
+    Total_Keywords DESC;

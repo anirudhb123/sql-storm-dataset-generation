@@ -1,0 +1,80 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM movie_link ml
+    WHERE ml.linked_movie_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        mh.depth + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.linked_movie_id
+),
+top_movies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(*) AS total_actors,
+        COUNT(DISTINCT mk.keyword) AS unique_keywords
+    FROM title mt
+    LEFT JOIN cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+    WHERE 
+        mt.production_year >= 2000
+    GROUP BY mt.id
+    HAVING COUNT(*) > 10
+),
+movie_company_summary AS (
+    SELECT
+        mc.movie_id,
+        COUNT(DISTINCT c.name) AS total_companies,
+        STRING_AGG(DISTINCT c.name, ', ') AS companies_list
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    GROUP BY mc.movie_id
+),
+enhanced_movies AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        tm.total_actors,
+        tm.unique_keywords,
+        mcs.total_companies,
+        mcs.companies_list,
+        COALESCE(r.rank_val, 0) AS average_rating
+    FROM top_movies tm
+    LEFT JOIN movie_company_summary mcs ON tm.id = mcs.movie_id
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            AVG(CAST(CASE WHEN info_type_id = (SELECT id FROM info_type WHERE info = 'rating') THEN info END AS FLOAT)) AS rank_val
+        FROM movie_info
+        GROUP BY movie_id
+    ) r ON tm.id = r.movie_id
+)
+SELECT 
+    em.title,
+    em.production_year,
+    em.total_actors,
+    em.unique_keywords,
+    em.total_companies,
+    em.companies_list,
+    em.average_rating,
+    COUNT(DISTINCT mh.linked_movie_id) AS total_related_movies
+FROM enhanced_movies em
+LEFT JOIN movie_hierarchy mh ON em.id = mh.movie_id
+GROUP BY 
+    em.title,
+    em.production_year,
+    em.total_actors,
+    em.unique_keywords,
+    em.total_companies,
+    em.companies_list,
+    em.average_rating
+ORDER BY em.average_rating DESC
+LIMIT 10;

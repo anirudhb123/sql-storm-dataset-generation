@@ -1,0 +1,88 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        1 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        rp.Level + 1
+    FROM Posts p
+    JOIN RecursivePosts rp ON p.ParentId = rp.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(
+            CASE 
+                WHEN p.PostTypeId = 1 THEN 1 
+                ELSE 0 
+            END
+        ) AS QuestionCount,
+        SUM(
+            CASE 
+                WHEN p.PostTypeId = 2 THEN 1 
+                ELSE 0 
+            END
+        ) AS AnswerCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEdited,
+        COUNT(*) AS EditCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+),
+PostsWithVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Level,
+    us.UserId,
+    us.PostCount,
+    us.QuestionCount,
+    us.AnswerCount,
+    ph.LastEdited,
+    ph.EditCount,
+    ph.HistoryTypes,
+    pv.VoteCount,
+    pv.UpVotes,
+    pv.DownVotes,
+    CASE 
+        WHEN pv.UpVotes > pv.DownVotes THEN 'Mostly Upvoted'
+        WHEN pv.DownVotes > pv.UpVotes THEN 'Mostly Downvoted'
+        ELSE 'Neutral'
+    END AS VoteNature
+FROM RecursivePosts rp
+JOIN UserStats us ON rp.PostId = us.UserId
+JOIN PostHistoryAggregates ph ON rp.PostId = ph.PostId
+JOIN PostsWithVotes pv ON rp.PostId = pv.PostId
+WHERE rp.Level <= 3
+ORDER BY rp.Level, us.PostCount DESC, pv.VoteCount DESC;

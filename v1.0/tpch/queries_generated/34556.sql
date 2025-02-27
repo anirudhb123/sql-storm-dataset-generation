@@ -1,0 +1,57 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS lvl
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)  -- Base case: suppliers with above-average account balance
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.lvl + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey  -- Join with itself to create hierarchy by nation
+    WHERE s.s_acctbal > sh.s_acctbal  -- Only keep suppliers with more account balance than their hierarchy
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartDetails AS (
+    SELECT p.p_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+RankedLineItems AS (
+    SELECT l.*, 
+           RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS price_rank
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'  -- Filter out returned items
+)
+SELECT 
+    n.n_name AS nation_name,
+    SUM(c.total_spent) AS total_customer_spending,
+    COUNT(DISTINCT sh.s_suppkey) AS unique_suppliers,
+    (SELECT COUNT(DISTINCT p.p_partkey) FROM part p 
+     WHERE p.p_retailprice > 100.00) AS high_price_parts,
+    AVG(pd.total_supplycost) AS avg_supply_cost
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN CustomerOrders co ON c.c_custkey = co.c_custkey
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN PartDetails pd ON pd.p_partkey IN (SELECT DISTINCT l.l_partkey FROM RankedLineItems l WHERE l.price_rank = 1)
+GROUP BY n.n_name
+
+UNION
+
+SELECT 
+    'Total' AS nation_name,
+    SUM(co.total_spent) AS total_customer_spending,
+    COUNT(DISTINCT sh.s_suppkey) AS unique_suppliers,
+    (SELECT COUNT(DISTINCT p.p_partkey) FROM part p 
+     WHERE p.p_retailprice > 100.00) AS high_price_parts,
+    AVG(pd.total_supplycost) AS avg_supply_cost
+FROM national n
+CROSS JOIN CustomerOrders co
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN PartDetails pd ON pd.p_partkey IN (SELECT DISTINCT l.l_partkey FROM RankedLineItems l WHERE l.price_rank = 1);

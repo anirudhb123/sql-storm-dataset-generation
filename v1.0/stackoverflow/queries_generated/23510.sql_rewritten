@@ -1,0 +1,100 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1
+),
+UserStatistics AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId IN (6, 7) THEN v.PostId END) AS CloseReopenCount
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN
+        Votes v ON u.Id = v.UserId
+    GROUP BY
+        u.Id
+),
+RecentPostHistory AS (
+    SELECT
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM
+        PostHistory ph
+    WHERE
+        ph.PostHistoryTypeId IN (10, 11, 12) 
+),
+CombinedData AS (
+    SELECT
+        p.PostId,
+        p.Title,
+        p.CreationDate AS PostCreationDate,
+        u.DisplayName AS OwnerName,
+        us.Reputation,
+        us.BadgeCount,
+        us.UpVoteCount,
+        us.DownVoteCount,
+        CASE
+            WHEN r.PostRank IS NOT NULL THEN r.PostRank
+            ELSE NULL
+        END AS OwnerPostRank,
+        CASE
+            WHEN ph.HistoryRank = 1 THEN ph.PostHistoryTypeId
+            ELSE NULL
+        END AS LatestAction
+    FROM
+        RankedPosts r
+    FULL OUTER JOIN
+        RecentPostHistory ph ON r.PostId = ph.PostId
+    JOIN
+        Users u ON u.Id = r.OwnerUserId
+    JOIN
+        UserStatistics us ON us.UserId = r.OwnerUserId
+)
+SELECT
+    cd.PostId,
+    cd.Title,
+    cd.PostCreationDate,
+    cd.OwnerName,
+    cd.Reputation,
+    cd.BadgeCount,
+    cd.UpVoteCount,
+    cd.DownVoteCount,
+    COALESCE(cd.OwnerPostRank, 999) AS OwnerPostRank, 
+    CASE
+        WHEN cd.LatestAction IN (10, 11) THEN 'Closed/Reopened'
+        WHEN cd.LatestAction = 12 THEN 'Deleted'
+        ELSE 'Active'
+    END AS PostStatus,
+    CASE
+        WHEN cd.Reputation IS NULL THEN 'No Reputation'
+        WHEN cd.Reputation < 100 THEN 'New User'
+        WHEN cd.Reputation BETWEEN 100 AND 999 THEN 'Intermediate User'
+        ELSE 'Experienced User'
+    END AS UserExperienceLevel
+FROM
+    CombinedData cd
+WHERE
+    cd.Reputation IS NOT NULL
+    AND cd.BadgeCount > 0
+ORDER BY
+    cd.PostId DESC
+LIMIT 50;

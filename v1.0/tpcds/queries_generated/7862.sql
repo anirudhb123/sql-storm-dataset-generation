@@ -1,0 +1,51 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_web_sales,
+        SUM(cs.cs_net_paid) AS total_catalog_sales,
+        SUM(ss.ss_net_paid) AS total_store_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2450000 AND 2450600
+        OR cs.cs_sold_date_sk BETWEEN 2450000 AND 2450600
+        OR ss.ss_sold_date_sk BETWEEN 2450000 AND 2450600
+    GROUP BY 
+        c.c_customer_id
+), CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT cs.c_customer_id) AS num_customers
+    FROM 
+        customer_demographics cd
+    JOIN 
+        CustomerSales cs ON cs.c_customer_id = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+), TopDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        num_customers,
+        RANK() OVER (ORDER BY num_customers DESC) AS demo_rank
+    FROM 
+        CustomerDemographics cd
+)
+SELECT 
+    td.cd_gender,
+    td.cd_marital_status,
+    td.num_customers
+FROM 
+    TopDemographics td
+WHERE 
+    td.demo_rank <= 10
+ORDER BY 
+    td.num_customers DESC;

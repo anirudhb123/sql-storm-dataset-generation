@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+)
+SELECT 
+    tp.Id,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    tp.CloseCount,
+    JSON_AGG(DISTINCT u.DisplayName) AS CommentUserNames,
+    COUNT(CASE WHEN tp.CloseCount > 0 THEN 1 END) OVER () AS TotalClosedPosts
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Comments c ON tp.Id = c.PostId
+LEFT JOIN 
+    Users u ON c.UserId = u.Id
+GROUP BY 
+    tp.Id, tp.Title, tp.CreationDate, tp.Score, tp.CommentCount, tp.UpVoteCount, tp.CloseCount
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

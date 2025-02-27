@@ -1,0 +1,76 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        SUM(ws_sales_price) OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL AND 
+        ws_sales_price > (SELECT AVG(ws_sales_price) FROM web_sales WHERE ws_sales_price IS NOT NULL)
+),
+ItemInventory AS (
+    SELECT 
+        i.i_item_id, 
+        COALESCE(SUM(inv_quantity_on_hand), 0) AS total_inventory
+    FROM 
+        item i
+    LEFT JOIN 
+        inventory inv ON i.i_item_sk = inv.inv_item_sk
+    GROUP BY 
+        i.i_item_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd_cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS demographic_rank
+    FROM 
+        customer_demographics cd 
+    WHERE 
+        cd_purchase_estimate IS NOT NULL
+)
+SELECT 
+    ir.ws_item_sk,
+    ir.ws_order_number,
+    ir.total_sales,
+    ii.total_inventory,
+    cd.cd_demo_sk,
+    cd.cd_gender,
+    cd.cd_marital_status
+FROM 
+    RankedSales ir
+JOIN 
+    ItemInventory ii ON ir.ws_item_sk = ii.i_item_id
+LEFT JOIN 
+    CustomerDemographics cd ON ir.ws_order_number = cd.cd_demo_sk
+WHERE 
+    ir.sales_rank = 1 AND
+    (ii.total_inventory IS NULL OR ii.total_inventory > 10) AND 
+    (cd.cd_marital_status IS NULL OR cd.cd_marital_status = 'M')
+ORDER BY 
+    ir.total_sales DESC,
+    ii.total_inventory ASC 
+LIMIT 100
+UNION ALL
+SELECT 
+    NULL AS ws_item_sk,
+    NULL AS ws_order_number,
+    NULL AS total_sales,
+    COUNT(*) AS total_inventory,
+    NULL AS cd_demo_sk,
+    NULL AS cd_gender,
+    NULL AS cd_marital_status
+FROM 
+    web_sales ws
+WHERE 
+    ws_sales_price IS NULL
+GROUP BY 
+    ws_bill_customer_sk
+HAVING 
+    COUNT(*) > 5;

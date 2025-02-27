@@ -1,0 +1,87 @@
+WITH RecursivePostHistory AS (
+    SELECT
+        ph.Id,
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER(PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+),
+LatestPostDetails AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Score,
+        u.DisplayName as OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        MAX(CASE WHEN ph.UserId IS NOT NULL THEN 'Edited' ELSE 'New' END) as PostStatus
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        RecursivePostHistory rph ON p.Id = rph.PostId AND rph.rn = 1
+    WHERE 
+        p.CreationDate >= (CURRENT_DATE - INTERVAL '6 months')
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostScores AS (
+    SELECT
+        pd.PostId,
+        pd.Title,
+        pd.OwnerDisplayName,
+        pd.ViewCount,
+        pd.AnswerCount,
+        pd.CommentCount,
+        pd.Score,
+        pd.TotalComments,
+        pd.UpVotes,
+        pd.DownVotes,
+        pd.PostStatus,
+        RANK() OVER (ORDER BY pd.Score DESC) AS RankScore
+    FROM
+        LatestPostDetails pd
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.OwnerDisplayName,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.Score,
+    ps.TotalComments,
+    ps.UpVotes,
+    ps.DownVotes,
+    CASE
+        WHEN ps.PostStatus = 'New' AND ps.Score = 0 THEN 'Needs Attention'
+        WHEN ps.PostStatus = 'Edited' AND ps.Score < 5 THEN 'Consider Revising'
+        ELSE 'Good Post'
+    END AS PostFeedback
+FROM 
+    PostScores ps
+WHERE 
+    ps.RankScore <= 10
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC
+LIMIT 100
+OFFSET (SELECT COALESCE(MAX(vote_count), 0) FROM (SELECT 
+    COUNT(v.Id) AS vote_count
+    FROM Votes v
+    GROUP BY v.PostId) AS sub) % 100
+WITH UR;

@@ -1,0 +1,92 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        wr.returning_cdemo_sk,
+        wr.returned_date_sk,
+        wr.return_quantity,
+        wr.return_amt,
+        RANK() OVER (PARTITION BY wr.returning_customer_sk ORDER BY wr.returned_date_sk DESC) AS rn
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.return_quantity IS NOT NULL 
+        AND wr.returned_date_sk IN (
+            SELECT d_date_sk 
+            FROM date_dim 
+            WHERE d_year = (SELECT MAX(d_year) FROM date_dim) 
+            AND d_moy IN (5, 6)
+        )
+),
+AggregateReturns AS (
+    SELECT 
+        r.returning_customer_sk,
+        SUM(r.return_quantity) AS total_returned_quantity,
+        SUM(r.return_amt) AS total_returned_amount
+    FROM 
+        RankedReturns r
+    WHERE 
+        r.rn <= 5
+    GROUP BY 
+        r.returning_customer_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Unknown'
+        END AS marital_status_desc,
+        COALESCE(iw.bill_count, 0) AS bill_count,
+        COALESCE(ar.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(ar.total_returned_amount, 0) AS total_returned_amount
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN (
+        SELECT 
+            ws_bill_customer_sk,
+            COUNT(*) AS bill_count
+        FROM 
+            web_sales
+        GROUP BY 
+            ws_bill_customer_sk
+    ) iw ON c.c_customer_sk = iw.ws_bill_customer_sk
+    LEFT JOIN 
+        AggregateReturns ar ON c.c_customer_sk = ar.returning_customer_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000
+        AND cd.cd_gender = 'F'
+),
+CustomerRanking AS (
+    SELECT 
+        *,
+        DENSE_RANK() OVER (ORDER BY total_returned_quantity DESC, total_returned_amount DESC) AS rank
+    FROM 
+        CustomerDetails
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.marital_status_desc,
+    cd.total_returned_quantity,
+    cd.total_returned_amount,
+    CASE 
+        WHEN cd.rank <= 10 THEN 'Top 10 Customers'
+        ELSE 'Regular Customer'
+    END AS customer_classification
+FROM 
+    CustomerRanking cd
+WHERE 
+    cd.total_returned_quantity > (
+        SELECT AVG(total_returned_quantity) FROM CustomerRanking
+    )
+ORDER BY 
+    cd.rank, cd.total_returned_quantity DESC;

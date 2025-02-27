@@ -1,0 +1,69 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_profit IS NOT NULL
+), 
+filtered_items AS (
+    SELECT 
+        i.i_item_id, 
+        i.i_product_name, 
+        i.i_current_price,
+        i.i_brand,
+        CASE 
+            WHEN i.i_current_price < 10 THEN 'Cheap'
+            WHEN i.i_current_price BETWEEN 10 AND 100 THEN 'Affordable'
+            WHEN i.i_current_price > 100 THEN 'Expensive'
+            ELSE 'Unknown'
+        END AS price_category
+    FROM 
+        item i
+    WHERE 
+        i.i_current_price IS NOT NULL
+), 
+promotions_summary AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    WHERE 
+        p.p_discount_active = 'Y'
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    r.ws_order_number,
+    r.ws_item_sk,
+    fi.i_product_name,
+    fi.price_category,
+    fi.i_brand,
+    ps.total_orders,
+    ps.total_profit,
+    COALESCE(ps.total_profit, 0) * 1.25 AS adjusted_profit,
+    CASE 
+        WHEN ps.total_orders IS NULL THEN 'No Orders'
+        WHEN ps.total_orders > 100 THEN 'High Volume'
+        ELSE 'Regular Volume'
+    END AS order_status
+FROM 
+    ranked_sales r
+LEFT JOIN 
+    filtered_items fi ON r.ws_item_sk = fi.i_item_sk
+LEFT JOIN 
+    promotions_summary ps ON r.ws_order_number = ps.total_orders
+WHERE 
+    r.rank = 1 AND
+    (fi.i_brand IS NOT NULL OR fi.i_brand <> 'Unknown')
+ORDER BY 
+    adjusted_profit DESC
+LIMIT 100;

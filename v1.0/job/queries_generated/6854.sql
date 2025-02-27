@@ -1,0 +1,26 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    cck.kind AS cast_kind,
+    GROUP_CONCAT(DISTINCT k.keyword) AS movie_keywords,
+    GROUP_CONCAT(DISTINCT ci.info) AS movie_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.movie_id
+JOIN 
+    comp_cast_type cck ON ci.person_role_id = cck.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+GROUP BY 
+    a.name, t.title, cck.kind
+HAVING 
+    COUNT(DISTINCT k.keyword) > 3 AND AVG(LENGTH(mi.info)) > 20
+ORDER BY 
+    movie_title ASC, actor_name DESC;

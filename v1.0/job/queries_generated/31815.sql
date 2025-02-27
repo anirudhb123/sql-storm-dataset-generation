@@ -1,0 +1,65 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        COALESCE(t.production_year, 0) AS production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code = 'USA' AND 
+        t.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        CONCAT(mh.movie_title, ' (Sequel)') AS movie_title,
+        mh.production_year + 1, -- Increment year for hypothetical sequel
+        level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title lt ON ml.linked_movie_id = lt.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mh.movie_title,
+    mh.production_year,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY mh.level DESC) AS performance_rank,
+    COUNT(DISTINCT mc.company_id) AS companies_involved,
+    SUM(CASE 
+            WHEN mi.info_type_id IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS info_count,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS related_keywords
+FROM 
+    MovieHierarchy mh
+JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+JOIN 
+    cast_info ci ON ci.id = cc.subject_id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword kw ON mh.movie_id = kw.movie_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+WHERE 
+    mh.production_year > 2000 
+    AND ak.name IS NOT NULL
+GROUP BY 
+    ak.name, mh.movie_title, mh.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    performance_rank, actor_name;

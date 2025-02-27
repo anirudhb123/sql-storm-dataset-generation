@@ -1,0 +1,61 @@
+
+WITH recent_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales AS ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.web_site_sk, ws.ws_sold_date_sk
+),
+top_web_sites AS (
+    SELECT 
+        w.w_warehouse_name,
+        r.r_reason_desc,
+        COALESCE(s.total_sales, 0) AS recent_sales
+    FROM 
+        warehouse AS w
+    LEFT JOIN
+        (SELECT 
+            web_site_sk,
+            MAX(total_sales) AS max_sales
+        FROM 
+            recent_sales
+        WHERE 
+            sales_rank <= 5
+        GROUP BY 
+            web_site_sk) AS s ON w.w_warehouse_sk = s.web_site_sk
+    JOIN 
+        reason AS r ON r.r_reason_sk = (SELECT MIN(sr_reason_sk) 
+                                         FROM store_returns 
+                                         WHERE sr_store_sk = (SELECT s_store_sk 
+                                                               FROM store 
+                                                               WHERE s_store_name LIKE 'A%'))
+)
+SELECT 
+    w.w_warehouse_name,
+    r.r_reason_desc,
+    t.total_sales,
+    (SELECT COUNT(*) 
+     FROM customer AS c 
+     WHERE c.c_customer_sk IN (SELECT customer_sk 
+                                FROM store_sales ss 
+                                WHERE ss.ss_sold_date_sk >= (SELECT MIN(d_date_sk) 
+                                                               FROM date_dim 
+                                                               WHERE d_year = 2023))) AS active_customers,
+    (SELECT AVG(cd_purchase_estimate) 
+     FROM customer_demographics 
+     WHERE cd_income_band_sk IN (SELECT hd_income_band_sk 
+                                  FROM household_demographics 
+                                  WHERE hd_buy_potential = 'High')) AS avg_high_income_potential
+FROM 
+    top_web_sites AS t
+WHERE 
+    t.recent_sales > 0
+ORDER BY 
+    recent_sales DESC;

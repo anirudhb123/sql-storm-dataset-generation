@@ -1,0 +1,71 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level,
+        NULL::integer AS parent_id
+    FROM title m
+    WHERE m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_id
+    FROM title e
+    INNER JOIN movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+),
+cast_summary AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    GROUP BY c.movie_id
+),
+movie_details AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        cs.total_cast,
+        cs.actors,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords
+    FROM (
+        SELECT 
+            mh.movie_id,
+            mh.title,
+            mh.production_year
+        FROM movie_hierarchy mh
+    ) m
+    LEFT JOIN cast_summary cs ON m.movie_id = cs.movie_id
+    LEFT JOIN (
+        SELECT 
+            mk.movie_id,
+            STRING_AGG(k.keyword, ', ') AS keywords
+        FROM movie_keyword mk
+        JOIN keyword k ON mk.keyword_id = k.id
+        GROUP BY mk.movie_id
+    ) mk ON m.movie_id = mk.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.total_cast,
+    md.actors,
+    md.keywords,
+    CASE 
+        WHEN md.production_year < 2000 THEN 'Classic'
+        WHEN md.production_year >= 2000 AND md.production_year < 2015 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era,
+    COUNT(ca.id) OVER (PARTITION BY md.movie_id) AS awards_count
+FROM movie_details md
+LEFT JOIN complete_cast ca ON md.movie_id = ca.movie_id
+WHERE md.total_cast > 5
+ORDER BY md.production_year DESC, md.title ASC;

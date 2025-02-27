@@ -1,0 +1,73 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_movie_id
+    FROM 
+        aka_title mt
+    JOIN movie_link ml ON ml.movie_id = mh.movie_id AND ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+    JOIN movie_hierarchy mh ON mh.movie_id = ml.linked_movie_id
+)
+SELECT 
+    mk.keyword AS related_genre,
+    mh.level AS hierarchy_level,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    AVG(EXTRACT(YEAR FROM AGE(CURRENT_DATE, mt.production_year))) AS avg_movie_age,
+    STRING_AGG(DISTINCT ak.name, ', ') AS cast_names,
+    CASE 
+        WHEN COUNT(DISTINCT ak.name) = 0 THEN 'No Cast Available'
+        ELSE 'Cast Available'
+    END AS cast_availability
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'genre')
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id 
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mh.movie_id 
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+GROUP BY 
+    mk.keyword, mh.level
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0 
+ORDER BY 
+    mh.level DESC, avg_movie_age ASC 
+LIMIT 50
+OFFSET 10;
+
+### Explanation:
+
+1. **Recursive CTE (`movie_hierarchy`)**: This captures a hierarchy of movies and their sequels, allowing for visualization of relationships.
+
+2. **Main SELECT**: This pulls data like related genres, the number of cast members, average age of movies, and names of the cast.
+
+3. **LEFT JOINs**: Used to gather related data from several tables, ensuring even those with no matches still appear in results with NULL values handled properly.
+
+4. **Aggregations**: Includes `COUNT()`, `AVG()`, `STRING_AGG()` for statistical information on movies and their cast.
+
+5. **CASE Statement**: To handle the presence or absence of cast members dynamically.
+
+6. **HAVING Clause**: Filters results based on the count of distinct cast members.
+
+7. **Ordering and Pagination**: Results are sorted and limited, facilitating easier browsing of results.
+
+This query leverages various SQL concepts to provide an insightful overview of the movie hierarchy, related genres, and cast details, showcasing intricate SQL capabilities.

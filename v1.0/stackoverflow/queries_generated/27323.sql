@@ -1,0 +1,52 @@
+WITH StringPerformance AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT t.TagName ORDER BY t.TagName SEPARATOR ', '), ', ', 10), 'No Tags') AS SampleTags,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Tags t ON FIND_IN_SET(t.TagName, SUBSTRING(SUBSTRING_INDEX(p.Tags, '<>', -1), 2, LENGTH(SUBSTRING_INDEX(p.Tags, '<>', -1)) - 2))
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    WHERE
+        p.PostTypeId = 1 -- only questions
+    GROUP BY
+        p.Id
+),
+AggregateResults AS (
+    SELECT
+        COUNT(*) AS TotalPosts,
+        COUNT(DISTINCT OwnerDisplayName) AS UniquePostOwners,
+        AVG(CommentCount) AS AvgCommentsPerPost,
+        AVG(VoteCount) AS AvgVotesPerPost,
+        MAX(LENGTH(Body)) AS MaxBodyLength,
+        MIN(LENGTH(Body)) AS MinBodyLength,
+        MAX(LENGTH(Title)) AS MaxTitleLength,
+        MIN(LENGTH(Title)) AS MinTitleLength,
+        STRING_AGG(SampleTags) AS AllSampleTags
+    FROM
+        StringPerformance
+)
+SELECT
+    ar.TotalPosts,
+    ar.UniquePostOwners,
+    ar.AvgCommentsPerPost,
+    ar.AvgVotesPerPost,
+    ar.MaxBodyLength,
+    ar.MinBodyLength,
+    ar.MaxTitleLength,
+    ar.MinTitleLength,
+    ar.AllSampleTags
+FROM
+    AggregateResults ar;

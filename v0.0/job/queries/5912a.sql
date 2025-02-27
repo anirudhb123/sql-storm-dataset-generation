@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND t.title > 'A Day in the Life of Connie De La Torre' AND t.md5sum IN ('0737acf42aeccab870378934845a3aef', '53ee0937341489065ce992a8e025a8f9', '675f9b2618b62c4b92a36f6416cd0f31', '7fd924b6a7821681e5e2e7cf489dce8f', '86e1e0771c2eb0ecd2b02fca4bf64843', 'aa583e0add68764dfc7fed80dcf4eeec', 'c2e6cced759a9227f1f09d361accae00', 'e382c69c7c307631884b3a84041c0913');

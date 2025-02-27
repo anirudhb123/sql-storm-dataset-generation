@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 500
+),
+PartSupplierSummary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available_qty,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY c.c_custkey, c.c_name
+),
+RegionDetails AS (
+    SELECT r.r_regionkey, r.r_name, COUNT(n.n_nationkey) AS nations_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_regionkey, r.r_name
+)
+SELECT r.r_name, rs.total_orders, rs.total_spent, COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       p.p_name, ps.total_available_qty, ps.total_supply_cost, 
+       ntile(4) OVER (PARTITION BY r.r_name ORDER BY rs.total_spent DESC) AS spending_quartile
+FROM RegionDetails r
+JOIN CustomerOrderSummary rs ON rs.total_orders > 5
+LEFT JOIN PartSupplierSummary ps ON ps.ps_partkey IN (SELECT p.p_partkey 
+                                                       FROM part p 
+                                                       WHERE p.p_retailprice > 50)
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = rs.c_custkey
+GROUP BY r.r_name, rs.total_orders, rs.total_spent, p.p_name, ps.total_available_qty, ps.total_supply_cost
+ORDER BY r.r_name, spending_quartile, rs.total_spent DESC;

@@ -1,0 +1,65 @@
+WITH SupplyDetails AS (
+    SELECT 
+        ps.partkey,
+        SUM(CASE WHEN ps.ps_supplycost IS NOT NULL THEN ps.ps_supplycost ELSE 0 END) AS TotalSupplyCost,
+        COUNT(DISTINCT ps.s_suppkey) AS SupplierCount
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+BestSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS PartsSupplied,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY COUNT(DISTINCT ps.ps_partkey) DESC) AS Ranking
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CriticalOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS NetRevenue,
+        SUM(l.l_tax) AS TotalTax,
+        COUNT(DISTINCT l.l_partkey) AS LineItemCount
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_totalprice > 5000 AND 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    c.c_name AS CustomerName,
+    r.r_name AS Region,
+    COALESCE(sd.TotalSupplyCost, 0) AS TotalSupplyCost,
+    COALESCE(bs.SupplierCount, 0) AS UniqueSuppliers,
+    co.NetRevenue AS OrderNetRevenue,
+    co.TotalTax AS OrderTotalTax,
+    bs.PartsSupplied AS PartsSuppliedByBestSupplier,
+    CONCAT('Region: ', r.r_name, ' - Order Key: ', co.o_orderkey) AS OrderInfo
+FROM 
+    customer c
+LEFT JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    SupplyDetails sd ON sd.partkey IN (SELECT ps.ps_partkey FROM partsupp ps JOIN orders o ON ps.ps_partkey = o.o_orderkey WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN 
+    BestSuppliers bs ON bs.Ranking = 1 AND bs.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    CriticalOrders co ON co.o_orderkey = (SELECT MAX(o_orderkey) FROM orders o WHERE o.o_custkey = c.c_custkey)
+WHERE 
+    (c.c_acctbal >= 1.00 OR c.c_phone LIKE '123%')
+    AND (r.r_name IS NOT NULL) 
+ORDER BY 
+    c.c_name, co.NetRevenue DESC;

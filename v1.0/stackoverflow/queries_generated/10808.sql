@@ -1,0 +1,68 @@
+-- Performance benchmarking query to assess post statistics, user activity, and vote distribution
+
+WITH PostStatistics AS (
+    SELECT 
+        p.PostTypeId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(p.AcceptedAnswerId) AS AcceptedAnswers,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.CreationDate) AS AvgCreationDate
+    FROM 
+        Posts p
+    GROUP BY 
+        p.PostTypeId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS PostCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounties,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+VoteDistribution AS (
+    SELECT 
+        vt.Name AS VoteType,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        vt.Name
+)
+
+SELECT 
+    ps.PostTypeId,
+    ps.TotalPosts,
+    ps.AcceptedAnswers,
+    ps.TotalScore,
+    ps.TotalViews,
+    ua.UserId,
+    ua.PostCount,
+    ua.CommentCount,
+    ua.TotalBounties,
+    ua.UpVotes,
+    ua.DownVotes,
+    vd.VoteType,
+    vd.VoteCount
+FROM 
+    PostStatistics ps
+JOIN 
+    UserActivity ua ON ua.PostCount > 0
+JOIN 
+    VoteDistribution vd ON vd.VoteCount > 0
+ORDER BY 
+    ps.PostTypeId, ua.UserId, vd.VoteType;

@@ -1,0 +1,80 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank,
+        COUNT(b.id) AS cast_count,
+        a.id
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info b ON a.id = b.movie_id
+    WHERE 
+        a.production_year IS NOT NULL 
+        AND a.title IS NOT NULL 
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+
+movie_genre AS (
+    SELECT 
+        c.movie_id,
+        STRING_AGG(DISTINCT g.keyword, ', ') AS genres
+    FROM 
+        movie_keyword c
+    JOIN 
+        keyword g ON c.keyword_id = g.id
+    GROUP BY 
+        c.movie_id
+),
+
+personal_info AS (
+    SELECT 
+        p.person_id,
+        STRING_AGG(DISTINCT p.info, '; ') AS all_info,
+        COUNT(DISTINCT p.info_type_id) AS info_types_count
+    FROM 
+        person_info p
+    GROUP BY 
+        p.person_id
+),
+
+null_handling AS (
+    SELECT 
+        DISTINCT x.movie_title,
+        x.production_year,
+        COALESCE(y.genres, 'Unknown') AS genres,
+        COALESCE(z.all_info, 'No information') AS individual_info,
+        CASE 
+            WHEN x.year_rank < 3 THEN 'Top 3 of Year'
+            ELSE 'Outside Top 3'
+        END AS ranking_category
+    FROM 
+        ranked_movies x
+    LEFT JOIN 
+        movie_genre y ON x.id = y.movie_id
+    LEFT JOIN 
+        personal_info z ON EXISTS (SELECT 1 FROM cast_info ci WHERE ci.movie_id = x.id AND ci.person_id = z.person_id)
+    WHERE 
+        x.production_year BETWEEN 1990 AND 2023
+)
+
+SELECT 
+    n.name AS actor_name,
+    nm.movie_title,
+    nm.production_year,
+    nm.genres,
+    nm.individual_info,
+    nm.ranking_category
+FROM 
+    null_handling nm
+JOIN 
+    cast_info ci ON nm.movie_title = (SELECT title FROM aka_title WHERE id = ci.movie_id)
+JOIN 
+    aka_name n ON ci.person_id = n.person_id
+WHERE 
+    n.name LIKE '%Smith%' OR n.name IS NULL
+ORDER BY 
+    nm.production_year DESC, actor_name
+FETCH FIRST 100 ROWS ONLY;

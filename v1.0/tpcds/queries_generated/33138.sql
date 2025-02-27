@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ss.sold_date_sk,
+        SUM(ss.ss_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ss_customer_sk) AS unique_customers,
+        ROW_NUMBER() OVER (PARTITION BY ss.sold_date_sk ORDER BY SUM(ss.ss_sales_price) DESC) AS rank_sales
+    FROM store_sales ss
+    GROUP BY ss.sold_date_sk
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown Purchase Estimate'
+            ELSE CAST(cd.cd_purchase_estimate AS VARCHAR)
+        END AS purchase_estimate_info
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+item_details AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price
+    FROM item i
+    WHERE i.i_rec_start_date <= CURRENT_DATE 
+      AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > CURRENT_DATE)
+),
+top_sales AS (
+    SELECT 
+        sd.sold_date_sk,
+        sd.total_sales,
+        sd.unique_customers,
+        ROW_NUMBER() OVER (ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM sales_data sd
+    WHERE sd.rank_sales <= 5
+)
+SELECT 
+    t.sd.sold_date_sk,
+    t.sd.total_sales,
+    t.sd.unique_customers,
+    c.c_first_name,
+    c.c_last_name,
+    i.i_item_desc,
+    i.i_current_price
+FROM top_sales t
+LEFT JOIN customer_details c ON c.c_customer_sk IN (
+    SELECT DISTINCT ss.ss_customer_sk FROM store_sales ss WHERE ss.ss_sold_date_sk = t.sold_date_sk
+)
+LEFT JOIN item_details i ON i.i_item_sk IN (
+    SELECT DISTINCT ss.ss_item_sk FROM store_sales ss WHERE ss.ss_sold_date_sk = t.sold_date_sk
+)
+ORDER BY t.total_sales DESC, c.c_last_name, c.c_first_name;

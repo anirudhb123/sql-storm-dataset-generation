@@ -1,0 +1,38 @@
+WITH SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, ss.total_supply_cost
+    FROM supplier s
+    JOIN SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+    WHERE ss.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierStats)
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spend
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighSpenderCustomers AS (
+    SELECT co.c_custkey, co.c_name, co.total_spend
+    FROM CustomerOrders co
+    WHERE co.total_spend > (SELECT AVG(total_spend) FROM CustomerOrders)
+)
+SELECT t.s_name AS supplier_name, hs.c_name AS high_spender_name,
+       COUNT(DISTINCT p.p_partkey) AS parts_supplied,
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+       AVG(DATEDIFF(l.l_shipdate, l.l_orderdate)) AS avg_delivery_time
+FROM TopSuppliers t
+LEFT JOIN partsupp ps ON t.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN HighSpenderCustomers hs ON hs.total_spend > (SELECT AVG(total_spend) FROM HighSpenderCustomers)
+WHERE l.l_returnflag = 'N' AND hs.c_custkey IS NOT NULL
+GROUP BY t.s_name, hs.c_name
+HAVING COUNT(DISTINCT p.p_partkey) > 5
+ORDER BY total_sales DESC;

@@ -1,0 +1,49 @@
+
+WITH address_parts AS (
+    SELECT 
+        ca_address_sk,
+        TRIM(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM customer_address
+),
+demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_buy_potential
+    FROM customer_demographics
+    JOIN household_demographics ON cd_demo_sk = hd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS total_orders
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+)
+SELECT 
+    a.full_address,
+    a.ca_city,
+    a.ca_state,
+    a.ca_zip,
+    a.ca_country,
+    d.cd_gender,
+    d.cd_marital_status,
+    d.cd_education_status,
+    s.total_profit,
+    s.total_orders
+FROM address_parts a
+JOIN customer c ON a.ca_address_sk = c.c_current_addr_sk
+JOIN demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+LEFT JOIN sales_summary s ON c.c_customer_sk = s.ws_bill_customer_sk
+WHERE d.cd_marital_status = 'M' 
+  AND d.cd_gender = 'F'
+  AND s.total_profit > (SELECT AVG(total_profit) FROM sales_summary)
+ORDER BY a.ca_city, total_profit DESC
+LIMIT 50;

@@ -1,0 +1,58 @@
+
+WITH RECURSIVE income_summary AS (
+    SELECT 
+        hd_income_band_sk, 
+        MIN(hd_buy_potential) AS min_buy_potential,
+        MAX(hd_buy_potential) AS max_buy_potential
+    FROM household_demographics
+    WHERE hd_dep_count IS NOT NULL
+    GROUP BY hd_income_band_sk
+),
+best_selling_items AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        RANK() OVER (PARTITION BY EXTRACT(YEAR FROM CURRENT_DATE) ORDER BY SUM(ws_quantity) DESC) AS item_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+    GROUP BY ws_item_sk
+    HAVING COUNT(DISTINCT ws_order_number) > 2
+),
+customer_preferences AS (
+    SELECT 
+        c.c_customer_id,
+        cd.gender,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_ext_sales_price) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id, cd.gender
+    HAVING SUM(ws_ext_sales_price) > (SELECT AVG(total_spent) FROM (
+        SELECT SUM(ws_ext_sales_price) AS total_spent
+        FROM web_sales
+        GROUP BY ws_bill_customer_sk
+    ) AS total)
+)
+SELECT 
+    ca.ca_city, 
+    COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+    SUM(ws.ws_net_paid) AS total_revenue,
+    COALESCE(MAX(bs.total_quantity), 0) AS best_selling_quantity,
+    ISNULL(i.min_buy_potential, 'Not Available') AS min_potential,
+    i.max_buy_potential
+FROM customer_address ca
+JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN best_selling_items bs ON ws.ws_item_sk = bs.ws_item_sk AND bs.item_rank = 1
+LEFT JOIN income_summary i ON c.c_current_hdemo_sk = i.hd_income_band_sk
+WHERE ca.ca_city IS NOT NULL
+AND (EXISTS (
+        SELECT 1 
+        FROM customer_preferences cp 
+        WHERE cp.c_customer_id = c.c_customer_id 
+        AND cp.order_count > 3
+    ) OR c.c_preferred_cust_flag = 'Y')
+GROUP BY ca.ca_city, i.min_buy_potential, i.max_buy_potential
+ORDER BY total_revenue DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

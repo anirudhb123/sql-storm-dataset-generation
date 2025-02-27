@@ -1,0 +1,65 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        s.s_store_sk,
+        SUM(ss.ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ticket_number) AS transaction_count,
+        ROW_NUMBER() OVER (PARTITION BY s.s_store_sk ORDER BY SUM(ss.ext_sales_price) DESC) AS sales_rank
+    FROM 
+        store s
+    LEFT JOIN 
+        store_sales ss ON s.s_store_sk = ss.s_store_sk
+    GROUP BY 
+        s.s_store_sk
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        d.d_year,
+        cd.cd_gender,
+        cs.total_sales,
+        cs.transaction_count,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cs.total_sales DESC) AS gender_sales_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim d ON c.c_first_sales_date_sk = d.d_date_sk
+    LEFT JOIN 
+        sales_summary cs ON cs.s_store_sk = (SELECT s.s_store_sk FROM store s ORDER BY s.s_store_sk LIMIT 1)
+),
+high_value_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ws.ws_net_paid) DESC) AS value_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+)
+SELECT 
+    cdc.c_first_name,
+    cdc.c_last_name,
+    cdc.cd_gender,
+    SUM(cdc.total_spent) AS high_value_total,
+    COUNT(cdc.order_count) AS high_value_orders,
+    AVG(cdc.total_spent) AS avg_spent_per_order
+FROM 
+    high_value_customers cdc
+WHERE 
+    cdc.value_rank <= 10
+GROUP BY 
+    cdc.c_first_name, cdc.c_last_name, cdc.cd_gender
+ORDER BY 
+    high_value_total DESC;
+

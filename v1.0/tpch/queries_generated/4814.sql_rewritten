@@ -1,0 +1,74 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1997-12-31'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        c.c_custkey
+),
+RankedSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_sales,
+        RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM 
+        SupplierSales ss 
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.order_count,
+        c.total_spent,
+        RANK() OVER (ORDER BY c.total_spent DESC) AS customer_rank
+    FROM 
+        CustomerOrders c
+),
+FinalReport AS (
+    SELECT 
+        tc.c_custkey,
+        tc.order_count,
+        tc.total_spent,
+        rs.s_name,
+        rs.total_sales
+    FROM 
+        TopCustomers tc
+    LEFT JOIN 
+        RankedSales rs ON tc.customer_rank = rs.sales_rank
+    WHERE 
+        tc.total_spent > 1000 OR rs.total_sales IS NOT NULL
+)
+SELECT 
+    fr.c_custkey,
+    fr.order_count,
+    fr.total_spent,
+    COALESCE(fr.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(fr.total_sales, 0) AS total_sales
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.total_spent DESC, fr.supplier_name;

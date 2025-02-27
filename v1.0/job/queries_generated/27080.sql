@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY k.keyword) AS keyword_rank
+    FROM 
+        title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+CastInformation AS (
+    SELECT 
+        ci.movie_id,
+        p.id AS actor_id,
+        p.name AS actor_name,
+        r.role AS role_type,
+        ci.nr_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+InfoSummary AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT it.info || ': ' || mi.info, '; ') AS movie_info_summary
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.movie_title,
+    rm.production_year,
+    STRING_AGG(DISTINCT ci.actor_name, ', ') AS actors,
+    STRING_AGG(DISTINCT ci.role_type, ', ') AS roles,
+    STRING_AGG(DISTINCT mc.company_name, ', ') AS production_companies,
+    STRING_AGG(DISTINCT mc.company_type, ', ') AS company_types,
+    SUM(CASE WHEN rm.keyword_rank <= 3 THEN 1 ELSE 0 END) AS top_keywords_count,
+    is.movie_info_summary
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastInformation ci ON rm.movie_id = ci.movie_id
+LEFT JOIN 
+    MovieCompanies mc ON rm.movie_id = mc.movie_id
+LEFT JOIN 
+    InfoSummary is ON rm.movie_id = is.movie_id
+GROUP BY 
+    rm.movie_id, rm.movie_title, rm.production_year, is.movie_info_summary
+ORDER BY 
+    rm.production_year DESC, rm.movie_title ASC;

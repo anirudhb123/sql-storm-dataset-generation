@@ -1,0 +1,53 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_nationkey = nh.n_regionkey
+),
+ranked_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal > 0
+),
+high_value_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           DENSE_RANK() OVER (ORDER BY o.o_totalprice DESC) AS high_value_rank
+    FROM orders o
+    WHERE o.o_totalprice > 1000
+),
+part_supplier_info AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost, ps.ps_comment,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS supplier_rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+joined_data AS (
+    SELECT n.n_name AS nation_name, 
+           p.p_name AS part_name, 
+           SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM lineitem li
+    JOIN orders o ON li.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN supplier s ON li.l_suppkey = s.s_suppkey
+    JOIN partsupp ps ON li.l_partkey = ps.ps_partkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE li.l_shipdate >= DATE '1997-01-01' AND li.l_shipdate < DATE '1997-12-31'
+    AND li.l_returnflag = 'N'
+    AND (p.p_size = 10 OR p.p_size IS NULL)
+    GROUP BY n.n_name, p.p_name
+)
+SELECT j.nation_name, j.part_name, 
+       j.total_revenue, j.order_count,
+       COALESCE(s.rank, 0) AS supplier_rank,
+       COALESCE(o.high_value_rank, 0) AS order_rank
+FROM joined_data j
+LEFT JOIN ranked_suppliers s ON j.nation_name = (SELECT n_name FROM nation WHERE n_nationkey = s.s_nationkey)
+LEFT JOIN high_value_orders o ON j.order_count = o.o_orderkey
+WHERE j.total_revenue IS NOT NULL
+ORDER BY j.total_revenue DESC, j.order_count DESC;

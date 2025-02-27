@@ -1,0 +1,62 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS item_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+CustomerData AS (
+    SELECT 
+        c_customer_sk,
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        hd_income_band_sk
+    FROM 
+        customer 
+    LEFT JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    LEFT JOIN 
+        household_demographics ON c_current_hdemo_sk = hd_demo_sk
+),
+Promotions AS (
+    SELECT 
+        p_item_sk,
+        COUNT(p_promo_sk) AS promotion_count,
+        MAX(p_start_date_sk) AS max_start_date
+    FROM 
+        promotion
+    GROUP BY 
+        p_item_sk
+)
+SELECT 
+    ca_state,
+    SUM(total_quantity) AS total_quantity_sold,
+    COUNT(DISTINCT c_customer_sk) AS unique_customers,
+    AVG(total_net_paid) AS avg_net_paid,
+    promotions.promotion_count,
+    CUME_DIST() OVER (PARTITION BY ca_state ORDER BY SUM(total_net_paid) DESC) AS state_cume_dist
+FROM 
+    SalesData sd
+JOIN 
+    item i ON sd.ws_item_sk = i.i_item_sk
+JOIN 
+    customer c ON sd.ws_bill_customer_sk = c.c_customer_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    Promotions promotions ON i.i_item_sk = promotions.p_item_sk
+WHERE 
+    sd.item_rank = 1 AND 
+    sd.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+GROUP BY 
+    ca_state, promotions.promotion_count
+ORDER BY 
+    total_quantity_sold DESC
+LIMIT 10;

@@ -1,0 +1,27 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.note AS character_name,
+    r.role AS role_description,
+    co.name AS company_name,
+    m.production_year
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    role_type r ON ci.role_id = r.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+WHERE 
+    m.production_year BETWEEN 1990 AND 2020
+    AND a.name ILIKE 'John%'
+ORDER BY 
+    m.production_year DESC, 
+    a.name;

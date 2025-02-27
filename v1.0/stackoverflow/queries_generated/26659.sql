@@ -1,0 +1,68 @@
+WITH TagOccurrences AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only consider questions
+    GROUP BY 
+        Tag
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName AS UserName,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(V.VoteTypeId = 2, 0)::int) AS TotalUpVotes,
+        SUM(COALESCE(V.VoteTypeId = 3, 0)::int) AS TotalDownVotes,
+        COUNT(DISTINCT P.Id) AS TotalQuestions,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id
+),
+TagUserInteractions AS (
+    SELECT 
+        TO.Tag,
+        UA.UserId,
+        UA.UserName,
+        COUNT(DISTINCT P.Id) AS QuestionsCreated,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(COALESCE(V.VoteTypeId = 2, 0)::int) AS UpVotes,
+        SUM(COALESCE(V.VoteTypeId = 3, 0)::int) AS DownVotes
+    FROM 
+        TagOccurrences TO
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || TO.Tag || '%'
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    JOIN 
+        UserActivity UA ON U.Id = UA.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        TO.Tag, UA.UserId, UA.UserName
+)
+SELECT 
+    T.Tag,
+    COUNT(DISTINCT T.UserId) AS ActiveUsers,
+    SUM(T.QuestionsCreated) AS TotalQuestionsCreated,
+    SUM(T.TotalViews) AS TotalViews,
+    SUM(T.UpVotes) AS TotalUpVotes,
+    SUM(T.DownVotes) AS TotalDownVotes
+FROM 
+    TagUserInteractions T
+GROUP BY 
+    T.Tag
+ORDER BY 
+    SUM(T.QuestionsCreated) DESC, 
+    SUM(T.TotalViews) DESC
+LIMIT 10;

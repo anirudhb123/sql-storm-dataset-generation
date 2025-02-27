@@ -1,0 +1,49 @@
+-- Performance benchmarking query to analyze posts and their associated metadata
+WITH PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        U.DisplayName AS OwnerDisplayName,
+        T.TagName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVoteCount,
+        COUNT(CASE WHEN B.Id IS NOT NULL THEN 1 END) AS BadgeCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Tags T ON T.Id IN (SELECT UNNEST(string_to_array(P.Tags, ',')::int[]))  -- Assuming Tags stored as comma-separated IDs
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        P.Id, U.DisplayName, P.Title, P.CreationDate, P.Score, P.ViewCount, P.AnswerCount, P.CommentCount, P.FavoriteCount, T.TagName
+)
+
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    AnswerCount,
+    CommentCount,
+    FavoriteCount,
+    OwnerDisplayName,
+    TagName,
+    UpVoteCount,
+    DownVoteCount,
+    BadgeCount
+FROM 
+    PostStatistics
+ORDER BY 
+    Score DESC, ViewCount DESC
+LIMIT 100; -- Limiting to top 100 posts for performance analysis

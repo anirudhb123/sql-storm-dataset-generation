@@ -1,0 +1,27 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS role_kind,
+    ci.note AS cast_note,
+    m.info AS movie_info,
+    GROUP_CONCAT(k.keyword, ', ') AS keywords
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    role_type c ON ci.role_id = c.id
+LEFT JOIN 
+    movie_info m ON t.id = m.movie_id AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    a.name, t.title, c.kind, ci.note, m.info
+ORDER BY 
+    a.name, t.title;

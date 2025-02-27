@@ -1,0 +1,51 @@
+
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_comment, 
+           ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rn
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+), 
+
+PartStats AS (
+    SELECT p_partkey, 
+           SUM(ps_availqty) AS total_available, 
+           AVG(ps_supplycost) AS avg_cost,
+           COUNT(DISTINCT ps_suppkey) AS supplier_count
+    FROM partsupp
+    GROUP BY p_partkey
+), 
+
+OrderTotals AS (
+    SELECT o_custkey, 
+           COUNT(DISTINCT o_orderkey) AS order_count, 
+           SUM(o_totalprice) AS total_spent
+    FROM orders
+    GROUP BY o_custkey
+), 
+
+CustomerAnalysis AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           COALESCE(o.total_spent, 0) AS total_spent,
+           RANK() OVER (ORDER BY COALESCE(o.total_spent, 0) DESC) AS spending_rank
+    FROM customer c
+    LEFT JOIN OrderTotals o ON c.c_custkey = o.o_custkey
+)
+
+SELECT 
+    pa.p_partkey,
+    pa.total_available,
+    pa.avg_cost,
+    CASE 
+        WHEN sa.rn IS NOT NULL THEN sa.s_name 
+        ELSE 'No Supplier Available' 
+    END AS top_supplier,
+    ca.c_name AS customer_name,
+    ca.total_spent,
+    ROW_NUMBER() OVER (PARTITION BY ca.spending_rank ORDER BY pa.total_available DESC) AS rank_within_spending
+FROM PartStats pa
+LEFT JOIN SupplierCTE sa ON pa.total_available > (SELECT AVG(total_available) FROM PartStats) 
+    AND pa.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp))
+LEFT JOIN CustomerAnalysis ca ON pa.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_supplierkey = sa.s_suppkey)
+WHERE ca.total_spent > 0 OR pa.total_available IS NOT NULL
+ORDER BY pa.total_available DESC, ca.total_spent ASC;

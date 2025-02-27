@@ -1,0 +1,49 @@
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT cc.person_id) AS num_actors,
+        AVG(CASE WHEN pi.info IS NOT NULL THEN 1 ELSE 0 END) AS has_info,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT cc.person_id) DESC) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        person_info pi ON cc.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birth date')
+    WHERE 
+        t.production_year >= 2000
+        AND (t.note IS NULL OR t.note NOT LIKE '%unknown%')
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MovieKeywordCTE AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.num_actors,
+    rm.has_info,
+    mk.keywords
+FROM 
+    RecursiveMovieCTE rm
+LEFT JOIN 
+    MovieKeywordCTE mk ON rm.movie_id = mk.movie_id 
+WHERE 
+    rm.rn <= 5 
+ORDER BY 
+    rm.production_year, rm.num_actors DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

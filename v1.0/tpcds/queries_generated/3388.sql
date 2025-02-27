@@ -1,0 +1,72 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_sales,
+        cs.order_count
+    FROM 
+        customer_sales cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.sales_rank <= 10
+),
+item_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_ext_sales_price) AS total_revenue
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+returns_summary AS (
+    SELECT
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returns,
+        SUM(wr.wr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+)
+SELECT 
+    tc.c_first_name,
+    tc.c_last_name,
+    it.i_item_id,
+    COALESCE(is.total_quantity_sold, 0) AS quantity_sold,
+    COALESCE(is.total_revenue, 0.00) AS total_revenue,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    COALESCE(rs.total_return_amount, 0.00) AS total_return_amount,
+    CASE 
+        WHEN COALESCE(is.total_revenue, 0) > 0 THEN 
+            (COALESCE(rs.total_return_amount, 0) / COALESCE(is.total_revenue, 1)) * 100
+        ELSE 0 
+    END AS return_rate_percentage
+FROM 
+    top_customers tc
+JOIN 
+    item_sales is ON is.ws_item_sk = tc.c_customer_sk
+LEFT JOIN 
+    returns_summary rs ON rs.wr_item_sk = is.ws_item_sk
+ORDER BY 
+    total_revenue DESC, 
+    return_rate_percentage ASC;

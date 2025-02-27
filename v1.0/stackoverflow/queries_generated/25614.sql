@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.Tags,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC, P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- considering only questions
+),
+TagStatistics AS (
+    SELECT 
+        TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(P.Tags, 2, LENGTH(P.Tags)-2), '><'))) ) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        TagName
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank,
+        (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = U.Id AND PostTypeId = 1) AS QuestionCount
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 0
+)
+SELECT 
+    T4.UserId,
+    T4.DisplayName,
+    T4.Reputation,
+    T4.UserRank,
+    T4.QuestionCount,
+    T3.TagName,
+    T3.TagCount,
+    COALESCE(T2.BadgeCount, 0) AS BadgeCount,
+    COALESCE(T2.GoldBadges, 0) AS GoldBadges,
+    COALESCE(T2.SilverBadges, 0) AS SilverBadges,
+    COALESCE(T2.BronzeBadges, 0) AS BronzeBadges,
+    T1.PostId,
+    T1.Title,
+    T1.Score,
+    T1.ViewCount,
+    T1.CreationDate
+FROM 
+    RankedPosts T1
+JOIN 
+    TopUsers T4 ON T1.OwnerUserId = T4.Id
+LEFT JOIN 
+    UserBadges T2 ON T4.Id = T2.UserId
+LEFT JOIN 
+    TagStatistics T3 ON T1.Tags LIKE '%' || T3.TagName || '%'
+WHERE 
+    T1.Rank <= 3 -- Get top 3 highest scored questions per user
+ORDER BY 
+    T4.Reputation DESC, 
+    T1.Score DESC;

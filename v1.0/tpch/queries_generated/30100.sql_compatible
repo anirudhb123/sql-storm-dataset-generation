@@ -1,0 +1,53 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) AND sh.level < 5
+),
+TotalSales AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_price
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartSuppliers AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 100
+),
+RegionSales AS (
+    SELECT n.n_nationkey, r.r_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS region_total
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY n.n_nationkey, r.r_name
+),
+RankedSales AS (
+    SELECT r.r_name, rs.region_total,
+           RANK() OVER (ORDER BY rs.region_total DESC) AS sales_rank
+    FROM RegionSales rs
+    JOIN region r ON rs.n_nationkey = r.r_regionkey
+)
+SELECT sh.s_name, 
+       ps.p_name, 
+       ps.ps_availqty, 
+       ts.total_price, 
+       rs.r_name, 
+       rs.sales_rank
+FROM SupplierHierarchy sh
+FULL OUTER JOIN PartSuppliers ps ON sh.s_nationkey = ps.ps_supplycost
+FULL OUTER JOIN TotalSales ts ON sh.s_suppkey = ts.c_custkey
+FULL OUTER JOIN RankedSales rs ON rs.r_name IS NOT NULL
+WHERE (ts.total_price IS NOT NULL OR ps.ps_availqty > 200)
+  AND (sh.level = 1 OR rs.sales_rank <= 10)
+ORDER BY rs.sales_rank, ts.total_price DESC;

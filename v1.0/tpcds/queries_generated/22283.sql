@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM web_sales ws
+    WHERE ws.ws_sales_price > 0
+),
+SalesSummary AS (
+    SELECT 
+        item.i_item_id,
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS total_sales,
+        COUNT(rs.ws_order_number) AS total_orders,
+        AVG(rs.ws_sales_price) AS avg_price,
+        MAX(rs.ws_sales_price) AS max_price,
+        MIN(rs.ws_sales_price) AS min_price
+    FROM RankedSales rs
+    JOIN item ON rs.ws_item_sk = item.i_item_sk
+    WHERE rs.rn = 1
+    GROUP BY item.i_item_id
+),
+StoreInfo AS (
+    SELECT 
+        s.s_store_id,
+        s.s_state,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_sales_count,
+        SUM(ss.ss_net_profit) AS store_profit
+    FROM store s
+    LEFT JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY s.s_store_id, s.s_state
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        CASE 
+            WHEN cd.cd_age > 50 THEN 'Senior'
+            WHEN cd.cd_age BETWEEN 30 AND 50 THEN 'Adult'
+            ELSE 'Youth'
+        END AS age_group
+    FROM customer_demographics cd
+    WHERE cd.cd_gender IS NOT NULL
+)
+SELECT 
+    s.s_store_id,
+    si.state,
+    SUM(COALESCE(ss.total_sales, 0)) AS total_store_sales,
+    SUM(si.store_profit) AS total_profit,
+    COUNT(DISTINCT cd.cd_demo_sk) AS active_customers,
+    AVG(ss.avg_price) AS average_sales_price,
+    COUNT(DISTINCT cd.cd_gender) AS unique_genders,
+    COUNT(DISTINCT CASE WHEN cd.age_group = 'Senior' THEN cd.cd_demo_sk END) AS senior_customers
+FROM StoreInfo si
+LEFT JOIN SalesSummary ss ON si.store_sales_count > 0
+LEFT JOIN CustomerDemographics cd ON cd.cd_demo_sk = ss.total_orders
+GROUP BY s.s_store_id, si.state
+HAVING COUNT(DISTINCT ss.total_orders) > 5
+ORDER BY total_store_sales DESC NULLS LAST;

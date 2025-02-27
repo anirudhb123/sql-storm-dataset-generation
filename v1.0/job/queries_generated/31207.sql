@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        MovieHierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level,
+        COALESCE(mi.info, 'No Info') AS movie_info,
+        COUNT(DISTINCT c.id) AS cast_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+    LEFT JOIN 
+        cast_info c ON mh.movie_id = c.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.level, mi.info
+),
+
+RankedMovies AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        fm.level,
+        fm.movie_info,
+        fm.cast_count,
+        ROW_NUMBER() OVER (PARTITION BY fm.level ORDER BY fm.cast_count DESC) AS rank
+    FROM 
+        FilteredMovies fm
+)
+
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.level,
+    fm.movie_info,
+    fm.cast_count,
+    fm.rank,
+    COALESCE(NULLIF(fm.cast_count, 0), 'No cast information') AS cast_info_status
+FROM 
+    RankedMovies fm
+WHERE 
+    fm.rank <= 5 OR fm.movie_info LIKE '%adventure%'
+ORDER BY 
+    fm.level ASC, fm.cast_count DESC;
+
+-- This query provides a ranking of movies along with their details based on the number of cast members, 
+-- differentiating between levels in a multilevel series, and incorporating movie information while handling NULLs.

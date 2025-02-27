@@ -1,0 +1,78 @@
+
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(ca.name, 'No Actor') AS actor_name,
+        COALESCE(comp.name, 'Independent') AS company_name,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY ca.nr_order) AS actor_order
+    FROM 
+        aka_title m
+    LEFT JOIN cast_info ca ON m.id = ca.movie_id
+    LEFT JOIN movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN company_name comp ON mc.company_id = comp.id
+    WHERE 
+        m.production_year IS NOT NULL
+),
+
+ActorInfo AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count,
+        AVG(EXTRACT(YEAR FROM CURRENT_DATE) - EXTRACT(YEAR FROM a.birth_date)) AS avg_actor_age
+    FROM 
+        aka_name a
+    LEFT JOIN cast_info ci ON a.person_id = ci.person_id
+    GROUP BY a.id, a.name
+),
+
+MovieKeywordCTE AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+
+FinalResults AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.actor_name,
+        m.company_name,
+        m.production_year,
+        ai.movie_count,
+        mk.keywords,
+        CASE 
+            WHEN ai.avg_actor_age IS NULL THEN 'Unknown Age'
+            WHEN ai.avg_actor_age > 40 THEN 'Mature Actor'
+            ELSE 'Young Actor' 
+        END AS age_category
+    FROM 
+        RecursiveMovieCTE m
+    LEFT JOIN ActorInfo ai ON m.actor_name = ai.actor_name
+    LEFT JOIN MovieKeywordCTE mk ON m.movie_id = mk.movie_id
+)
+
+SELECT 
+    movie_id,
+    title,
+    actor_name,
+    company_name,
+    production_year,
+    movie_count,
+    keywords,
+    age_category
+FROM 
+    FinalResults
+WHERE 
+    production_year > 2000
+    AND (actor_name LIKE 'A%' OR company_name IS NULL)
+ORDER BY 
+    production_year DESC, 
+    movie_count DESC
+LIMIT 50;

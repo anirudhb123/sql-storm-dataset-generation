@@ -1,0 +1,53 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT i_item_sk, i_item_id, i_current_price, 0 AS level
+    FROM item
+    WHERE i_item_sk = (SELECT MIN(i_item_sk) FROM item)
+
+    UNION ALL
+
+    SELECT i.i_item_sk, i.i_item_id, i.i_current_price, ih.level + 1
+    FROM item i
+    JOIN ItemHierarchy ih ON i.i_item_sk > ih.i_item_sk
+    WHERE i.i_current_price < ih.i_current_price
+),
+DailySales AS (
+    SELECT 
+        d.d_date,
+        COALESCE(SUM(ws.ws_ext_sales_price), 0) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (ORDER BY d.d_date) AS sales_rank
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_date
+),
+CustomerDemographics AS (
+    SELECT cd.cd_demo_sk, cd.cd_gender, 
+           DENSE_RANK() OVER (ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM customer_demographics cd
+    WHERE cd_cd_demo_sk IN (
+        SELECT DISTINCT c.c_current_cdemo_sk
+        FROM customer c 
+        WHERE c.c_first_shipto_date_sk IS NOT NULL
+    )
+)
+SELECT 
+    d.d_date,
+    ds.total_sales,
+    ds.total_orders,
+    ch.i_item_id,
+    ch.i_current_price,
+    cd.cd_gender,
+    CASE 
+        WHEN cd.purchase_rank <= 10 THEN 'Top Customers'
+        ELSE 'Other Customers'
+    END AS customer_category
+FROM DailySales ds
+JOIN date_dim d ON ds.d_date = d.d_date
+LEFT JOIN ItemHierarchy ch ON ch.level = 0
+JOIN CustomerDemographics cd ON cd.cd_demo_sk = (SELECT MIN(c.c_current_cdemo_sk) FROM customer c)
+WHERE ds.total_sales > (
+    SELECT AVG(total_sales)
+    FROM DailySales
+)
+ORDER BY d.d_date DESC, ds.total_sales DESC;

@@ -1,0 +1,61 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2024-01-01'
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        COALESCE(SUM(l.l_extendedprice) / NULLIF(SUM(l.l_quantity), 0), 0) AS avg_price_per_unit
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    r.c_name,
+    ts.s_name AS supplier_name,
+    co.order_count,
+    co.avg_price_per_unit
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    TopSuppliers ts ON r.o_orderkey = ts.s_suppkey -- Simulating an outer join
+JOIN 
+    CustomerOrders co ON r.c_name = co.c_custkey 
+WHERE 
+    r.order_rank <= 5
+ORDER BY 
+    r.o_totalprice DESC, r.o_orderdate ASC;

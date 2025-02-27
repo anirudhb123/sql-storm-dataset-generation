@@ -1,0 +1,77 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        ps.ps_partkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+MaxOrders AS (
+    SELECT 
+        o.o_custkey,
+        MAX(o.o_totalprice) AS max_totalprice
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' 
+    AND 
+        o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY 
+        o.o_custkey
+),
+TotalSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l 
+    GROUP BY 
+        l.l_partkey
+),
+RegionSummary AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_account_balance
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_regionkey, r.r_name
+)
+SELECT 
+    p.p_name,
+    rc.r_name,
+    ts.total_sales,
+    sc.s_name,
+    MAX(o.max_totalprice) OVER (PARTITION BY p.p_partkey) AS max_price,
+    COUNT(DISTINCT o.o_custkey) AS order_count,
+    COALESCE(SUM(sc.ps_availqty), 0) AS total_available_qty
+FROM 
+    part p
+LEFT JOIN 
+    TotalSales ts ON p.p_partkey = ts.l_partkey
+LEFT JOIN 
+    RegionSummary rc ON p.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey LIMIT 1)
+LEFT JOIN 
+    SupplyChain sc ON p.p_partkey = sc.ps_partkey
+LEFT JOIN 
+    MaxOrders o ON o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = sc.s_nationkey LIMIT 1)
+GROUP BY 
+    p.p_partkey, rc.r_name, ts.total_sales, sc.s_name
+HAVING 
+    MAX(o.max_totalprice) > 1000
+ORDER BY 
+    ts.total_sales DESC, sc.s_name ASC;

@@ -1,0 +1,55 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_id
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender
+)
+SELECT 
+    rs.web_site_id,
+    rs.total_sales,
+    cs.cd_gender,
+    AVG(cs.total_spent) AS average_spent,
+    SUM(cs.total_orders) AS total_orders_count
+FROM 
+    RankedSales rs
+JOIN 
+    CustomerStats cs ON rs.web_site_id = (
+        SELECT 
+            ws.web_site_id 
+        FROM 
+            web_sales ws 
+        WHERE 
+            ws.ws_bill_customer_sk IN (SELECT c.c_customer_sk FROM customer c WHERE c.c_customer_id = cs.c_customer_id)
+        LIMIT 1
+    )
+GROUP BY 
+    rs.web_site_id, cs.cd_gender
+ORDER BY 
+    rs.total_sales DESC, average_spent DESC
+LIMIT 10;

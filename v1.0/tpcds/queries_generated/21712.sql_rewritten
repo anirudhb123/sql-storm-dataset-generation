@@ -1,0 +1,45 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (
+        SELECT d.d_date_sk 
+        FROM date_dim d 
+        WHERE d.d_year = 2001 AND d.d_dow NOT IN (1, 7)  
+    )
+    GROUP BY ws.ws_item_sk
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        COALESCE(p.p_promo_name, 'No Promotion') AS promo_name,
+        COALESCE(p.p_discount_active, '0') AS discount_active
+    FROM item i
+    LEFT JOIN promotion p ON i.i_item_sk = p.p_item_sk AND p.p_start_date_sk <= CAST(cast('2002-10-01' as date) AS DATE) AND p.p_end_date_sk >= CAST(cast('2002-10-01' as date) AS DATE)
+)
+SELECT 
+    id.i_item_sk,
+    id.i_item_desc,
+    id.i_current_price,
+    COALESCE(rk.total_quantity, 0) AS total_quantity_sold,
+    COALESCE(rk.total_net_paid, 0) AS total_net_paid,
+    id.promo_name,
+    id.discount_active,
+    CASE 
+        WHEN id.discount_active = '1' THEN 'Discount Applied'
+        ELSE 'Full Price'
+    END AS pricing_status,
+    CASE 
+        WHEN rk.rank <= 10 THEN 'Top Selling Item'
+        ELSE 'Regular Item'
+    END AS item_status
+FROM ItemDetails id
+LEFT JOIN RankedSales rk ON id.i_item_sk = rk.ws_item_sk
+WHERE id.i_current_price IS NOT NULL  
+ORDER BY total_net_paid DESC NULLS LAST
+OFFSET 0 ROWS FETCH NEXT 20 ROWS ONLY;

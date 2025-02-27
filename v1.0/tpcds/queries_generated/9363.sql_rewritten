@@ -1,0 +1,49 @@
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_web_page_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        AVG(ws.ws_quantity) AS avg_quantity_sold
+    FROM 
+        web_sales AS ws
+    JOIN 
+        item AS i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        date_dim AS dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2000
+    AND 
+        dd.d_moy IN (11, 12)  
+    GROUP BY 
+        ws.ws_item_sk, ws.ws_web_page_sk
+),
+TopSellingItems AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.ws_web_page_sk,
+        sd.total_net_profit,
+        rd.r_reason_desc
+    FROM 
+        SalesData AS sd
+    LEFT JOIN 
+        store_returns AS sr ON sd.ws_item_sk = sr.sr_item_sk
+    LEFT JOIN 
+        reason AS rd ON sr.sr_reason_sk = rd.r_reason_sk
+    WHERE 
+        sd.total_net_profit > 50000  
+)
+SELECT 
+    ts.ws_item_sk,
+    ts.ws_web_page_sk,
+    ts.total_net_profit,
+    ts.total_orders,
+    ts.avg_sales_price,
+    ts.avg_quantity_sold,
+    ts.r_reason_desc
+FROM 
+    TopSellingItems AS ts
+ORDER BY 
+    ts.total_net_profit DESC
+LIMIT 10;

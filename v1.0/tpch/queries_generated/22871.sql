@@ -1,0 +1,89 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+), 
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_type,
+        CASE 
+            WHEN p.p_size >= 20 THEN 'Large' 
+            ELSE 'Small' 
+        END AS size_category
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice BETWEEN 50 AND 200
+), 
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+
+SELECT 
+    n.n_name,
+    rp.s_name,
+    fp.p_name,
+    COALESCE(ho.order_value, 0) AS total_order_value,
+    CASE 
+        WHEN co.total_orders IS NULL THEN 'No Orders'
+        ELSE CAST(co.total_orders AS VARCHAR)
+    END AS total_orders_by_customer,
+    AVG(rp.s_acctbal) OVER (PARTITION BY n.n_nationkey) AS avg_supplier_balance
+FROM 
+    RankedSuppliers rp
+JOIN 
+    nation n ON rp.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    FilteredParts fp ON fp.p_partkey IN (
+        SELECT 
+            ps.ps_partkey 
+        FROM 
+            partsupp ps 
+        WHERE 
+            ps.ps_supplycost < 200
+    )
+LEFT JOIN 
+    HighValueOrders ho ON ho.o_orderkey IN (
+        SELECT 
+            l.l_orderkey 
+        FROM 
+            lineitem l 
+        WHERE 
+            l.l_quantity > (SELECT AVG(l2.l_quantity) FROM lineitem l2)
+    )
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = rp.s_suppkey
+WHERE 
+    n.n_name LIKE '%land%'
+ORDER BY 
+    rp.s_name DESC, 
+    fp.p_name ASC;

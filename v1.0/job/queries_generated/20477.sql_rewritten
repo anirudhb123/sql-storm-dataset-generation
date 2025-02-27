@@ -1,0 +1,43 @@
+WITH RECURSIVE genre_hierarchy AS (
+    SELECT kt.kind AS genre
+    FROM kind_type kt
+    WHERE kt.kind IN (SELECT DISTINCT kind_id FROM aka_title WHERE production_year >= 2000)
+    
+    UNION ALL
+    
+    SELECT kt.kind
+    FROM kind_type kt
+    JOIN genre_hierarchy gh ON gh.genre = kt.kind
+)
+, movie_statistics AS (
+    SELECT
+        at.title,
+        at.production_year,
+        COALESCE(SUM(ci.nr_order), 0) AS total_cast,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        AVG(length(mi.info)) FILTER (WHERE mi.info_type_id = 5) AS avg_info_length 
+    FROM aka_title at
+    LEFT JOIN complete_cast cc ON at.id = cc.movie_id
+    LEFT JOIN cast_info ci ON ci.movie_id = at.id
+    LEFT JOIN movie_companies mc ON mc.movie_id = at.id
+    LEFT JOIN movie_info mi ON mi.movie_id = at.id
+    WHERE at.production_year BETWEEN 2000 AND 2023
+    GROUP BY at.title, at.production_year
+)
+SELECT
+    ms.title,
+    ms.production_year,
+    ms.total_cast,
+    ms.total_companies,
+    ms.avg_info_length,
+    g.genre AS genre
+FROM
+    movie_statistics ms
+LEFT JOIN genre_hierarchy g ON ms.production_year % 2 = 0 
+WHERE
+    (ms.total_cast > 5 OR ms.total_companies > 2) 
+    AND (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = (SELECT id FROM aka_title WHERE title = ms.title LIMIT 1)) > 2
+ORDER BY
+    ms.production_year DESC,
+    ms.total_cast DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

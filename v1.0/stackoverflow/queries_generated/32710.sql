@@ -1,0 +1,41 @@
+WITH RecursivePosts AS (
+    -- Recursive CTE to get hierarchy of posts and answers
+    SELECT P.Id AS PostId, P.ParentId, P.Title, P.CreationDate, P.Score, P.OwnerUserId, 0 AS Level
+    FROM Posts P
+    WHERE P.PostTypeId = 1  -- Start from Questions
+
+    UNION ALL
+
+    SELECT P2.Id, P2.ParentId, P2.Title, P2.CreationDate, P2.Score, P2.OwnerUserId, RP.Level + 1
+    FROM Posts P2
+    INNER JOIN RecursivePosts RP ON RP.PostId = P2.ParentId
+)
+
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    COUNT(DISTINCT P.Id) AS TotalPosts,
+    COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS TotalAnswers,
+    SUM(P.Score) AS TotalScore,
+    COUNT(DISTINCT B.Id) AS TotalBadges,
+    COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+    COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+    MAX(P.CreationDate) AS LastActivity,
+    (SELECT COUNT(*) 
+     FROM Comments C 
+     WHERE C.UserId = U.Id) AS TotalComments,
+    ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+FROM Users U
+LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN Badges B ON U.Id = B.UserId
+LEFT JOIN Votes V ON P.Id = V.PostId
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS TotalLinks
+     FROM PostLinks
+     GROUP BY PostId) PL ON P.Id = PL.PostId
+WHERE U.Reputation > 1000  -- Only include users with a reputation greater than 1000
+GROUP BY U.Id, U.DisplayName, U.Reputation
+HAVING COUNT(DISTINCT P.Id) > 5  -- Having more than 5 posts
+ORDER BY UserRank
+LIMIT 50;  -- Limit to top 50 users

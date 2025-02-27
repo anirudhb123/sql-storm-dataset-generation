@@ -1,0 +1,71 @@
+WITH RECURSIVE PriceRank AS (
+    SELECT 
+        ps.partkey,
+        ps.suppkey,
+        ps.availqty,
+        ps.supplycost,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY ps.supplycost) AS rank
+    FROM 
+        partsupp ps
+),
+TotalLineItem AS (
+    SELECT 
+        o.orderkey,
+        SUM(l.extendedprice * (1 - l.discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.orderkey = l.orderkey
+    GROUP BY 
+        o.orderkey
+),
+NationSum AS (
+    SELECT 
+        n.n_nationkey,
+        SUM(s.acctbal) AS total_acctbal
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.nationkey
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_mfgr,
+    COALESCE(n.n_name, 'Unknown') AS nation_name,
+    ps.availqty,
+    TRUNCATE(ps.supplycost, 2) AS supply_cost,
+    t.total_price,
+    ns.total_acctbal,
+    RANK() OVER (PARTITION BY p.p_partkey ORDER BY t.total_price DESC) AS price_rank
+FROM 
+    part p
+LEFT JOIN 
+    PriceRank ps ON p.p_partkey = ps.partkey AND ps.rank = 1
+LEFT JOIN 
+    TotalLineItem t ON t.orderkey IN (
+        SELECT 
+            o.orderkey 
+        FROM 
+            orders o 
+        WHERE 
+            o.o_orderstatus = 'F'
+    )
+LEFT JOIN 
+    nation n ON n.n_nationkey = (
+        SELECT 
+            s.nationkey 
+        FROM 
+            supplier s 
+        WHERE 
+            s.s_suppkey = ps.suppkey
+    )
+LEFT JOIN 
+    NationSum ns ON ns.n_nationkey = n.n_nationkey
+WHERE 
+    p.p_size > 20 
+    AND (ps.availqty IS NULL OR ps.availqty >= 100)
+ORDER BY 
+    total_price DESC NULLS LAST;

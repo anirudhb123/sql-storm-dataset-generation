@@ -1,0 +1,72 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, OwnerUserId, ParentId, CreationDate, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT p.Id, p.Title, p.OwnerUserId, p.ParentId, p.CreationDate, rph.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.vote_amount) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    GROUP BY u.Id, u.DisplayName
+),
+PostScoreCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.OwnerUserId,
+        COALESCE(u.DisplayName, 'Anonymous') AS OwnerDisplayName,
+        PH.OpenedCount,
+        PHR.LastAnswerDate
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS OpenedCount
+        FROM PostHistory 
+        WHERE PostHistoryTypeId = 10 
+        GROUP BY PostId
+    ) PH ON p.Id = PH.PostId
+    LEFT JOIN (
+        SELECT 
+            ParentId AS PostId,
+            MAX(CreationDate) AS LastAnswerDate
+        FROM Posts 
+        WHERE PostTypeId = 2
+        GROUP BY ParentId
+    ) PHR ON p.Id = PHR.PostId
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+)
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(ps.Score) AS TotalScore,
+    AVG(ps.Score) AS AveragePostScore,
+    SUM(CASE WHEN ps.OpenedCount IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPostCount,
+    MAX(ps.LastAnswerDate) AS MostRecentAnswerDate,
+    STRING_AGG(DISTINCT tag.TagName, ', ') AS AssociatedTags
+FROM UserActivity AS u
+JOIN Posts AS p ON u.UserId = p.OwnerUserId
+JOIN PostScoreCTE AS ps ON p.Id = ps.PostId
+LEFT JOIN Tags AS tag ON tag.Id IN (
+    SELECT DISTINCT CAST(UNNEST(string_to_array(p.Tags, '><')) AS INT)
+)
+WHERE ps.OwnerDisplayName IS NOT NULL
+GROUP BY u.UserId, u.DisplayName
+HAVING COUNT(DISTINCT p.Id) > 10
+ORDER BY TotalPosts DESC, AveragePostScore DESC;

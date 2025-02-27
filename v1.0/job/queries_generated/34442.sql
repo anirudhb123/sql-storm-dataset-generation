@@ -1,0 +1,77 @@
+WITH RECURSIVE GenreHierarchy AS (
+    SELECT 
+        k.id AS keyword_id,
+        k.keyword,
+        ARRAY[k.keyword] AS path
+    FROM 
+        keyword k
+    WHERE 
+        k.keyword IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        k.id AS keyword_id,
+        k.keyword,
+        gh.path || k.keyword
+    FROM 
+        keyword k
+    JOIN 
+        movie_keyword mk ON mk.keyword_id = k.id
+    JOIN 
+        GenreHierarchy gh ON mk.movie_id = (
+            SELECT 
+                mk_sub.movie_id
+            FROM 
+                movie_keyword mk_sub
+            WHERE 
+                mk_sub.keyword_id = gh.keyword_id
+            LIMIT 1
+        )
+    WHERE 
+        k.keyword IS NOT NULL
+),
+MovieRatings AS (
+    SELECT 
+        mt.movie_id,
+        AVG(mi.info::numeric) AS average_rating
+    FROM 
+        movie_info mi
+    JOIN 
+        title mt ON mi.movie_id = mt.id
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        mt.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COALESCE(mr.average_rating, 0) AS avg_rating,
+        gh.path AS genre_path
+    FROM 
+        title t
+    LEFT JOIN 
+        MovieRatings mr ON t.id = mr.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        GenreHierarchy gh ON mk.keyword_id = gh.keyword_id
+    WHERE 
+        t.production_year >= 2000
+        AND mr.average_rating > 7.0
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.avg_rating,
+    string_agg(DISTINCT fm.genre_path::text, ', ') AS genres
+FROM 
+    FilteredMovies fm
+GROUP BY 
+    fm.title, fm.production_year, fm.avg_rating
+ORDER BY 
+    fm.avg_rating DESC, 
+    fm.production_year DESC;

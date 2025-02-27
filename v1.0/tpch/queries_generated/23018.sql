@@ -1,0 +1,42 @@
+WITH RankedSuppliers AS (
+    SELECT s_name,
+           s_acctbal,
+           RANK() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rnk_acctbal
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+),
+TotalOrderPrices AS (
+    SELECT o_custkey,
+           SUM(o_totalprice) AS total_price
+    FROM orders
+    WHERE o_orderdate >= '2022-01-01' AND o_orderdate < '2022-12-31'
+    GROUP BY o_custkey
+),
+HighValuePartSupp AS (
+    SELECT ps_partkey, 
+           SUM(ps_supplycost) AS total_supply_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+    HAVING SUM(ps_availqty) > 100
+)
+SELECT p.p_name,
+       r.r_name,
+       COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+       COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN l.l_orderkey END) AS total_returns,
+       STRING_AGG(DISTINCT s.s_name, ', ') AS suppliers_in_region,
+       AVG(CASE WHEN ts.total_price > 10000 THEN ts.total_price ELSE NULL END) AS avg_high_value_customer_order
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN RankedSuppliers s ON n.n_nationkey = s.s_nationkey AND s.rnk_acctbal <= 5
+LEFT JOIN TotalOrderPrices ts ON c.c_custkey = ts.o_custkey
+LEFT JOIN HighValuePartSupp hvps ON hvps.ps_partkey = p.p_partkey
+WHERE p.p_retailprice > (SELECT AVG(p_retailprice) FROM part WHERE p_size < 30)
+AND (l.l_discount IS NULL OR l.l_discount < 0.1)
+GROUP BY p.p_partkey, r.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 1
+ORDER BY total_revenue DESC;

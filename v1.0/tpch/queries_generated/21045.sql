@@ -1,0 +1,73 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_size,
+        ROW_NUMBER() OVER (PARTITION BY p.p_size ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size = p.p_size)
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'UnknownBalance'
+            WHEN s.s_acctbal < 500.00 THEN 'LowBalance'
+            ELSE 'SufficientBalance'
+        END AS balance_category
+    FROM 
+        supplier s
+    WHERE 
+        s.s_nationkey IN (SELECT DISTINCT n.n_nationkey FROM nation n WHERE n.n_name IS NOT NULL)
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        LAG(o.o_orderdate) OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate) AS previous_order_date
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+    AND o.o_orderdate >= CURRENT_DATE - INTERVAL '1 month'
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.p_partkey,
+    r.p_name,
+    r.p_retailprice,
+    COALESCE(l.total_sales, 0) AS total_sales,
+    s.balance_category,
+    CASE
+        WHEN r.rn <= 5 THEN 'Top_Parts'
+        ELSE 'Others'
+    END AS part_rank,
+    ROW_NUMBER() OVER (PARTITION BY s.balance_category ORDER BY s.s_acctbal DESC) AS supplier_rank
+FROM 
+    RankedParts r
+LEFT JOIN 
+    LineItemSummary l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'FRANCE')))
+LEFT JOIN 
+    SupplierInfo s ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = r.p_partkey ORDER BY ps.ps_supplycost DESC LIMIT 1)
+WHERE 
+    EXISTS (SELECT 1 FROM partsupp ps WHERE ps.ps_partkey = r.p_partkey AND ps.ps_availqty > 0)
+ORDER BY 
+    r.p_retailprice DESC, 
+    total_sales ASC, 
+    supplier_rank DESC;

@@ -1,0 +1,50 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        COUNT(DISTINCT CASE WHEN p.AcknowledgedAnswerId IS NOT NULL THEN p.Id END) AS AcceptedAnswers,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.UserId,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        p.Title,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY ph.UserId ORDER BY ph.CreationDate DESC) AS RowNum
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT 
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.AcceptedAnswers,
+    ups.TotalViews,
+    rph.PostId,
+    rph.Title,
+    rph.PostHistoryTypeId,
+    rph.CreationDate
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    RecentPostHistory rph ON ups.UserId = rph.UserId AND rph.RowNum = 1
+ORDER BY 
+    ups.TotalViews DESC, 
+    ups.DisplayName;

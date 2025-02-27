@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS row_num,
+        COUNT(*) OVER (PARTITION BY m.production_year) AS total_movies
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+CastInfoWithRole AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.role_id) AS role_count,
+        MAX(rt.role) AS highest_role,
+        MIN(rt.role) AS lowest_role
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        SUM(mi.info IS NOT NULL) AS info_count,
+        c.role_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY info_count DESC) AS info_rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_info mi ON a.id = mi.movie_id
+    LEFT JOIN 
+        CastInfoWithRole c ON a.id = c.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year, c.role_count
+),
+SelectedMovies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        info_count,
+        role_count,
+        info_rank
+    FROM 
+        MovieDetails
+    WHERE 
+        info_count > 0 AND 
+        role_count IS NOT NULL
+)
+SELECT 
+    sm.movie_title,
+    sm.production_year,
+    sm.info_count,
+    COALESCE(sm.role_count, 0) AS role_count,
+    CASE 
+        WHEN sm.info_rank <= 10 THEN 'Top 10'
+        WHEN sm.info_rank BETWEEN 11 AND 20 THEN 'Top 20'
+        ELSE 'Below Top 20'
+    END AS ranking_category,
+    (SELECT STRING_AGG(DISTINCT k.keyword, ', ') 
+     FROM movie_keyword mk 
+     JOIN keyword k ON mk.keyword_id = k.id 
+     WHERE mk.movie_id = (SELECT movie_id FROM SelectedMovies WHERE movie_title = sm.movie_title)) AS keywords
+FROM 
+    SelectedMovies sm
+ORDER BY 
+    sm.production_year DESC, sm.info_count DESC
+LIMIT 50;

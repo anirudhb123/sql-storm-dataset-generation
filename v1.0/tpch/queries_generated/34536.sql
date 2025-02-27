@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+),
+SupplierPartCounts AS (
+    SELECT ps.ps_partkey, COUNT(*) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_name, 
+    p.p_mfgr,
+    COALESCE(supp_count.supplier_count, 0) AS number_of_suppliers,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS returned_items,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price,
+    COUNT(DISTINCT c.c_custkey) AS total_customers
+FROM part p
+LEFT JOIN SupplierPartCounts supp_count ON p.p_partkey = supp_count.ps_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN region r ON c.c_nationkey = r.r_regionkey
+WHERE r.r_name IS NOT NULL
+AND p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+AND EXISTS (
+    SELECT 1 
+    FROM SupplierHierarchy sh 
+    WHERE sh.s_nationkey = c.c_nationkey AND sh.level <= 2
+)
+GROUP BY p.p_partkey, p.p_name, p.p_mfgr
+HAVING AVG(l.l_extendedprice) > 1000
+ORDER BY number_of_suppliers DESC, p.p_name;

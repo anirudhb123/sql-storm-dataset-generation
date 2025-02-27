@@ -1,0 +1,50 @@
+
+WITH RECURSIVE supplier_tree AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, st.level + 1
+    FROM supplier s
+    JOIN supplier_tree st ON s.s_nationkey = st.s_nationkey
+    WHERE st.level < 5
+),
+nation_orders AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(o.o_orderkey) AS order_count
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING COUNT(o.o_orderkey) > (
+        SELECT AVG(order_count)
+        FROM (
+            SELECT COUNT(o.o_orderkey) AS order_count
+            FROM customer c
+            JOIN orders o ON c.c_custkey = o.o_custkey
+            GROUP BY c.c_nationkey
+        ) AS avg_orders
+    )
+),
+part_supplier_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_availqty) > 0
+)
+SELECT
+    n.n_name,
+    COALESCE(ps.total_supply_cost, 0) AS total_supply_cost,
+    nt.order_count,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY nt.order_count DESC) AS rank
+FROM nation_orders nt
+FULL OUTER JOIN part_supplier_summary ps ON nt.n_nationkey = (
+    SELECT s.n_nationkey
+    FROM supplier s
+    WHERE s.s_suppkey IN (SELECT s_suppkey FROM supplier_tree)
+    LIMIT 1
+)
+JOIN region r ON nt.n_nationkey = r.r_regionkey
+WHERE (nt.order_count IS NOT NULL OR ps.total_supply_cost > 100.00)
+  AND r.r_name LIKE 'e%'
+ORDER BY total_supply_cost DESC, nt.order_count ASC;

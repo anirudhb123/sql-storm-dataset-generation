@@ -1,0 +1,70 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        LastAccessDate,
+        Views,
+        UpVotes,
+        DownVotes,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        COUNT(DISTINCT Comments.Id) AS CommentCount
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Comments ON Users.Id = Comments.UserId
+    GROUP BY 
+        Users.Id, Reputation, CreationDate, LastAccessDate, Views, UpVotes, DownVotes
+),
+PostMetrics AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.PostTypeId,
+        Posts.CreationDate,
+        Posts.Score,
+        Posts.ViewCount,
+        Posts.AnswerCount,
+        Posts.CommentCount,
+        Posts.FavoriteCount,
+        Users.Reputation AS OwnerReputation
+    FROM 
+        Posts
+    JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+),
+TagMetrics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, ',')::int[])
+    GROUP BY 
+        Tags.TagName
+)
+SELECT 
+    u.UserId,
+    u.Reputation,
+    u.PostCount,
+    u.CommentCount,
+    p.PostId,
+    p.Title,
+    p.ViewCount,
+    p.AnswerCount,
+    p.OwnerReputation,
+    t.TagName,
+    t.PostCount AS TagPostCount,
+    t.TotalViews
+FROM 
+    UserReputation u
+LEFT JOIN 
+    PostMetrics p ON u.UserId = p.OwnerUserId
+LEFT JOIN 
+    TagMetrics t ON p.PostId = t.PostCount
+ORDER BY 
+    u.Reputation DESC, p.Score DESC;

@@ -1,0 +1,55 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankScore,
+        RANK() OVER (ORDER BY p.CreationDate DESC) AS RankCreation
+    FROM Posts p
+    WHERE p.PostTypeId = 1
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        COUNT(DISTINCT ph.Id) AS TotalPostHistory,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN PostHistory ph ON u.Id = ph.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.Reputation
+),
+TopPosts AS (
+    SELECT 
+        rp.Title,
+        rp.Score,
+        us.UserId,
+        us.Reputation,
+        COALESCE(rp.RankScore, 0) AS RankScore,
+        COALESCE(rp.RankCreation, 0) AS RankCreation
+    FROM RankedPosts rp
+    JOIN UserStats us ON rp.OwnerUserId = us.UserId
+)
+SELECT 
+    tp.Title,
+    tp.Score,
+    tp.Reputation,
+    tp.RankScore,
+    tp.RankCreation,
+    STRING_AGG(DISTINCT c.Text, '; ') AS CommentTexts,
+    COUNT(DISTINCT v.Id) AS VoteCount
+FROM TopPosts tp
+LEFT JOIN Comments c ON c.PostId IN (SELECT Id FROM Posts WHERE Title = tp.Title)
+LEFT JOIN Votes v ON v.PostId IN (SELECT Id FROM Posts WHERE Title = tp.Title)
+WHERE tp.Score > 10
+GROUP BY tp.Title, tp.Score, tp.Reputation, tp.RankScore, tp.RankCreation
+HAVING COUNT(DISTINCT c.Id) > 0 OR COUNT(DISTINCT v.Id) > 0
+ORDER BY tp.RankScore DESC, tp.RankCreation ASC;

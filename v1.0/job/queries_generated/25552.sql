@@ -1,0 +1,48 @@
+WITH movie_details AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        STRING_AGG(DISTINCT c.role_id::text, ', ') AS role_ids,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        title t
+    JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        aka_title ak ON ak.movie_id = t.id
+    JOIN 
+        complete_cast cc ON cc.movie_id = t.id
+    JOIN 
+        cast_info ci ON ci.movie_id = cc.movie_id
+    JOIN 
+        aka_name akn ON akn.person_id = ci.person_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+        AND mi.info LIKE '%award%'
+    GROUP BY 
+        t.id, t.title, t.production_year
+)
+
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.aka_names,
+    md.cast_count,
+    kt.kind AS keyword_type,
+    k.keyword AS keyword
+FROM 
+    movie_details md
+JOIN 
+    movie_keyword mk ON md.movie_title = (SELECT title FROM title WHERE id = mk.movie_id)
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    kind_type kt ON k.phonetic_code = kt.id::varchar(5)
+ORDER BY 
+    md.production_year DESC, 
+    md.cast_count DESC;
+
+This query aggregates information about movies produced between 2000 and 2023, including their titles, production years, alternative names, cast counts, keywords, and kinds of those keywords. It joins multiple tables to gather this data, making it a complex SQL query suitable for benchmarking string processing.

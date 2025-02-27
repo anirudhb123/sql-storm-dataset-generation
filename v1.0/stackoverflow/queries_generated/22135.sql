@@ -1,0 +1,113 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RankedUserActivity AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalBounty,
+        TotalUpvotes,
+        TotalDownvotes,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        RANK() OVER (ORDER BY TotalBounty DESC, TotalUpvotes DESC, TotalPosts DESC) AS Rank
+    FROM 
+        UserActivity
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COALESCE(NULLIF(P.AnswerCount, 0), 1) AS AnswerCount, -- Avoid zero division
+        P.ClosedDate,
+        CASE 
+            WHEN P.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus
+    FROM 
+        Posts P
+),
+VoteStatistics AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS Downvotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+CommentDetails AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS TotalComments
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+)
+
+SELECT 
+    R.DisplayName,
+    R.TotalBounty,
+    R.TotalUpvotes,
+    R.TotalDownvotes,
+    R.TotalPosts,
+    R.TotalComments,
+    R.TotalBadges,
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    P.ViewCount,
+    P.Score,
+    PS.PostStatus,
+    COALESCE(VS.Upvotes, 0) AS PostUpvotes,
+    COALESCE(VS.Downvotes, 0) AS PostDownvotes,
+    COALESCE(CD.TotalComments, 0) AS PostTotalComments,
+    CASE 
+        WHEN R.TotalPosts > 0 AND R.TotalBadges > 0 THEN 'Active Contributor'
+        ELSE 'Lurker'
+    END AS UserType
+FROM 
+    RankedUserActivity R
+LEFT JOIN 
+    PostDetails P ON R.TotalPosts > 0
+LEFT JOIN 
+    VoteStatistics VS ON P.PostId = VS.PostId
+LEFT JOIN 
+    CommentDetails CD ON P.PostId = CD.PostId
+WHERE 
+    R.Rank <= 10 -- Get top 10 users
+ORDER BY 
+    R.Rank, P.Score DESC NULLS LAST; -- Order by rank and post score
+This complex SQL query includes:
+- Common Table Expressions (CTEs) to compute user activity, rank users, and gather post details.
+- Various aggregate functions and conditional statements for effective summarization and categorization.
+- Outer joins to account for users without posts or votes.
+- Complicated predicates and expressions that categorize users based on their activity.
+- NULL logic to ensure zero-values are handled gracefully, particularly with COALESCE and NULLIF.
+- Dense ranking for user ranking incorporating multiple criteria, showcasing a rich combination of SQL features.

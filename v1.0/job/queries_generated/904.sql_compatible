@@ -1,0 +1,47 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY m.info_type_id DESC) AS rank
+    FROM title t
+    JOIN movie_info m ON t.id = m.movie_id
+    WHERE m.info_type_id IS NOT NULL
+),
+FilteredTitles AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year
+    FROM RankedMovies
+    WHERE rank <= 5
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    ft.title,
+    ft.production_year,
+    cd.company_name,
+    cd.company_type,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    (SELECT COUNT(*) 
+     FROM movie_keyword mk 
+     WHERE mk.movie_id = ft.movie_id) AS keyword_count,
+    COALESCE(SUM(NULLIF(ci.nr_order, 0)), 0) AS role_order_sum,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+FROM FilteredTitles ft
+LEFT JOIN complete_cast cc ON ft.movie_id = cc.movie_id
+LEFT JOIN cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN aka_title ak ON ft.movie_id = ak.movie_id
+LEFT JOIN CompanyDetails cd ON ft.movie_id = cd.movie_id
+GROUP BY ft.movie_id, ft.title, ft.production_year, cd.company_name, cd.company_type
+HAVING COUNT(DISTINCT ci.person_id) > 3
+ORDER BY ft.production_year DESC, ft.title ASC;

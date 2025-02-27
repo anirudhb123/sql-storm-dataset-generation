@@ -1,0 +1,68 @@
+
+WITH RECURSIVE RevenueCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rn
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_item_sk
+),
+CustomerStats AS (
+    SELECT 
+        c_customer_sk,
+        cd_gender,
+        cd_marital_status,
+        SUM(ws_ext_sales_price) AS customer_spending,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        customer AS c
+    JOIN web_sales AS ws ON ws_bill_customer_sk = c.c_customer_sk
+    JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c_customer_sk, cd_gender, cd_marital_status
+),
+OrderSummary AS (
+    SELECT 
+        cs.cs_order_number,
+        SUM(cs.cs_ext_sales_price) AS total_order_sales,
+        SUM(cs.cs_ext_tax) AS total_order_tax,
+        CASE 
+            WHEN SUM(cs.cs_ext_sales_price) > 1000 THEN 'High Value'
+            WHEN SUM(cs.cs_ext_sales_price) BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS order_value_category
+    FROM 
+        catalog_sales AS cs
+    GROUP BY 
+        cs.cs_order_number
+)
+SELECT 
+    ca.*, 
+    cs.c_customer_sk, 
+    cs.cd_gender, 
+    cs.customer_spending, 
+    cs.order_count, 
+    os.total_order_sales, 
+    os.total_order_tax, 
+    os.order_value_category,
+    COALESCE(NULLIF(ws.ws_net_profit, 0), 'No Profit') AS profit_status,
+    RANK() OVER (ORDER BY ca.ca_address_sk) AS rank
+FROM 
+    customer_address AS ca
+LEFT JOIN 
+    CustomerStats AS cs ON cs.c_customer_sk = ca.ca_address_sk
+LEFT JOIN 
+    OrderSummary AS os ON os.cs_order_number = (
+        SELECT 
+            ws_order_number 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_item_sk (SELECT ws_item_sk FROM RevenueCTE WHERE rn = 1)
+          LIMIT 1
+    )
+ORDER BY 
+    ca.ca_city, cs.customer_spending DESC
+FETCH FIRST 50 ROWS ONLY;

@@ -1,0 +1,38 @@
+WITH FilteredPart AS (
+    SELECT p_partkey, 
+           CONCAT('Part Name: ', p_name) AS formatted_name, 
+           UPPER(p_mfgr) AS upper_mfgr, 
+           LOWER(p_comment) AS lower_comment
+    FROM part
+    WHERE p_size > 20
+), 
+SupplierRegion AS (
+    SELECT s.s_suppkey, 
+           r.r_name AS region_name, 
+           COUNT(DISTINCT s.s_nationkey) AS nation_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY s.s_suppkey, r.r_name
+), 
+OrderLineItem AS (
+    SELECT o.o_orderkey, 
+           l.l_partkey, 
+           l.l_quantity, 
+           ROUND(l.l_extendedprice * (1 - l.l_discount), 2) AS net_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+)
+SELECT fp.formatted_name, 
+       fp.upper_mfgr, 
+       fp.lower_comment, 
+       sr.region_name, 
+       sr.nation_count, 
+       SUM(oli.net_price) AS total_net_price
+FROM FilteredPart fp
+JOIN SupplierRegion sr ON sr.s_suppkey IN (SELECT ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = fp.p_partkey)
+JOIN OrderLineItem oli ON oli.l_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_partkey = fp.p_partkey)
+GROUP BY fp.formatted_name, fp.upper_mfgr, fp.lower_comment, sr.region_name, sr.nation_count
+HAVING total_net_price > 1000
+ORDER BY total_net_price DESC;

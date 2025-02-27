@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 /* Considering only Questions */
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        Tags,
+        CreationDate,
+        ViewCount,
+        Score,
+        OwnerDisplayName,
+        CommentCount,
+        BadgeCount
+    FROM 
+        RankedPosts
+    WHERE 
+        TagRank <= 5 /* Filter for top 5 Posts per Tag */
+),
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(Tags, ',')) AS Tag, 
+        COUNT(*) AS PostCount, 
+        AVG(ViewCount) AS AverageViews
+    FROM 
+        FilteredPosts
+    GROUP BY 
+        Tag
+),
+FinalStatistics AS (
+    SELECT 
+        f.PostId,
+        f.Title,
+        f.Body,
+        f.Tags,
+        f.CreationDate,
+        f.ViewCount,
+        f.Score,
+        f.OwnerDisplayName,
+        f.CommentCount,
+        f.BadgeCount,
+        t.Tag,
+        t.PostCount,
+        t.AverageViews
+    FROM 
+        FilteredPosts f
+    JOIN 
+        TagStatistics t ON t.Tag = ANY(string_to_array(f.Tags, ','))
+)
+SELECT 
+    PostId,
+    Title,
+    Body,
+    Tags,
+    CreationDate,
+    ViewCount,
+    Score,
+    OwnerDisplayName,
+    CommentCount,
+    BadgeCount,
+    Tag,
+    PostCount,
+    AverageViews
+FROM 
+    FinalStatistics
+ORDER BY 
+    Score DESC, ViewCount DESC;

@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        pt.Name AS PostType, 
+        COALESCE(ph.EditBody, p.Body) AS CurrentBody, 
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn
+    FROM Posts p
+    LEFT JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (5, 8) -- Edit Body / Rollback Body
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        u.Views, 
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE u.Reputation > (SELECT AVG(Reputation) FROM Users WHERE Reputation IS NOT NULL)
+    GROUP BY u.Id
+    HAVING COUNT(b.Id) > 0
+),
+PostSummary AS (
+    SELECT 
+        PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(DISTINCT ptl.RelatedPostId) AS RelatedPostsCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+    LEFT JOIN PostLinks ptl ON p.Id = ptl.PostId
+    GROUP BY PostId
+),
+FinalPostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CurrentBody,
+        rp.CreationDate,
+        au.DisplayName AS TopUser,
+        au.Reputation,
+        ps.CommentCount,
+        ps.TotalBounty,
+        ps.RelatedPostsCount,
+        ROW_NUMBER() OVER (ORDER BY ps.TotalBounty DESC, ps.CommentCount DESC) AS OverallRank
+    FROM RankedPosts rp
+    LEFT JOIN ActiveUsers au ON au.UserId = (SELECT u.Id FROM Users u WHERE u.Id = rp.PostId) -- Assuming PostId is correlated with some user
+    LEFT JOIN PostSummary ps ON ps.PostId = rp.PostId
+    WHERE rp.rn = 1 -- Get the latest body revision
+)
+SELECT 
+    PostId,
+    Title,
+    CurrentBody,
+    CreationDate,
+    TopUser,
+    Reputation,
+    CommentCount,
+    TotalBounty,
+    RelatedPostsCount,
+    CASE 
+        WHEN TotalBounty IS NULL THEN 'No Bounty'
+        WHEN TotalBounty > 100 THEN 'High Bounty'
+        ELSE 'Normal Bounty' 
+    END AS BountyStatus
+FROM FinalPostStats
+WHERE OverallRank <= 10 -- Limit to top 10 posts based on aggregate criteria
+ORDER BY OverallRank;

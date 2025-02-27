@@ -1,0 +1,81 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rnk
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+EnrichedCast AS (
+    SELECT 
+        c.id AS cast_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order,
+        COALESCE(LOWER(a.name), 'unknown') AS actor_name_lower
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        c.note IS NULL
+),
+CompanyTitles AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        c.country_code = 'USA'
+)
+SELECT 
+    rt.title_id,
+    rt.title,
+    rt.production_year,
+    ec.actor_name,
+    ec.actor_order,
+    ct.company_name,
+    ct.company_type
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    EnrichedCast ec ON rt.title_id = ec.cast_id
+LEFT JOIN 
+    CompanyTitles ct ON rt.title_id = ct.movie_id
+WHERE 
+    rt.rnk <= 5
+ORDER BY 
+    rt.production_year DESC, 
+    ec.actor_order ASC
+UNION ALL
+SELECT 
+    NULL AS title_id,
+    'Total US Productions' AS title,
+    COUNT(DISTINCT rt.production_year) AS production_year,
+    NULL AS actor_name,
+    NULL AS actor_order,
+    NULL AS company_name,
+    NULL AS company_type
+FROM 
+    RankedTitles rt
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM CompanyTitles ct
+        WHERE ct.movie_id = rt.title_id
+    )
+GROUP BY rt.production_year
+HAVING COUNT(DISTINCT rt.production_year) > 10
+ORDER BY 
+    production_year DESC;

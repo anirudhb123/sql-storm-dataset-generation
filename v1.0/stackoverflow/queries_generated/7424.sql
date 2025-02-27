@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.Rank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+)
+SELECT 
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    COALESCE(SUM(b.Class = 1), 0) AS GoldBadges,
+    COALESCE(SUM(b.Class = 2), 0) AS SilverBadges,
+    COALESCE(SUM(b.Class = 3), 0) AS BronzeBadges
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Badges b ON tp.OwnerDisplayName = b.UserId
+GROUP BY 
+    tp.PostId, tp.Title, tp.OwnerDisplayName, tp.CreationDate, tp.Score, tp.ViewCount
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

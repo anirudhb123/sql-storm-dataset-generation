@@ -1,0 +1,39 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM supplier s
+), PartSupplierSummary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), FilteredLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, l.l_discount,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice ELSE 0 END) AS total_returned
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY l.l_orderkey, l.l_partkey, l.l_quantity, l.l_discount
+)
+
+SELECT p.p_name, p.p_brand, p.p_mfgr,
+       COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+       COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS revenue,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity END) AS total_returned_qty,
+       SUM(CASE WHEN o.o_orderstatus = 'O' THEN 1 ELSE 0 END) OVER (PARTITION BY p.p_partkey) AS open_orders,
+       COUNT(DISTINCT r.r_regionkey) AS distinct_regions_supplying
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey AND s.rank_acctbal = 1
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.n_regionkey
+WHERE p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_container IS NULL)
+  AND p.p_retailprice > (SELECT AVG(p_retailprice) FROM part WHERE p_type = 'PROMO')
+GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_mfgr, s.s_name
+HAVING COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) IS NOT NULL
+   OR COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY revenue DESC
+LIMIT 100 OFFSET (SELECT COUNT(*) FROM part) / 2;

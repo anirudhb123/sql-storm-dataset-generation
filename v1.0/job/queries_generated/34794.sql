@@ -1,0 +1,129 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+cast_analysis AS (
+    SELECT 
+        ai.name,
+        COUNT(ci.movie_id) AS movie_count,
+        AVG(mt.production_year) AS avg_production_year
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ai ON ci.person_id = ai.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.id
+    GROUP BY 
+        ai.name
+),
+
+company_analysis AS (
+    SELECT 
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(mc.movie_id) AS movie_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        cn.name, ct.kind
+),
+
+keyword_summary AS (
+    SELECT 
+        k.keyword,
+        COUNT(mk.movie_id) AS movie_count
+    FROM 
+        keyword k
+    LEFT JOIN 
+        movie_keyword mk ON k.id = mk.keyword_id
+    GROUP BY 
+        k.keyword
+),
+
+final_result AS (
+    SELECT 
+        mh.title AS movie_title,
+        mh.production_year,
+        ca.name AS actor_name,
+        ca.movie_count AS actor_movie_count,
+        ca.avg_production_year AS actor_avg_year,
+        co.company_name,
+        co.company_type,
+        co.movie_count AS company_movie_count,
+        ks.keyword,
+        ks.movie_count AS keyword_movie_count,
+        ROW_NUMBER() OVER (PARTITION BY mh.title ORDER BY ca.movie_count DESC) AS rank
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        cast_analysis ca ON EXISTS (
+            SELECT 1
+            FROM cast_info ci
+            WHERE ci.movie_id = mh.movie_id AND ci.person_id IN (
+                SELECT person_id FROM aka_name
+                WHERE name = ca.name
+            )
+        )
+    JOIN 
+        company_analysis co ON EXISTS (
+            SELECT 1 
+            FROM movie_companies mc
+            WHERE mc.movie_id = mh.movie_id AND mc.company_id IN (
+                SELECT id FROM company_name
+                WHERE name = co.company_name
+            )
+        )
+    LEFT JOIN 
+        keyword_summary ks ON EXISTS (
+            SELECT 1
+            FROM movie_keyword mk
+            WHERE mk.movie_id = mh.movie_id AND mk.keyword_id IN (
+                SELECT id FROM keyword
+                WHERE keyword = ks.keyword
+            )
+        )
+)
+
+SELECT
+    f.movie_title,
+    f.production_year,
+    f.actor_name,
+    f.actor_movie_count,
+    f.actor_avg_year,
+    f.company_name,
+    f.company_type,
+    f.company_movie_count,
+    f.keyword,
+    f.keyword_movie_count
+FROM 
+    final_result f
+WHERE 
+    f.rank = 1
+ORDER BY 
+    f.production_year DESC;

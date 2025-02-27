@@ -1,0 +1,61 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN vt.Id = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN vt.Id = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT CONCAT(ph.UserDisplayName, ': ', ph.Comment), '; ') AS EditComments,
+        COUNT(ph.Id) FILTER (WHERE ph.PostHistoryTypeId IN (4, 5, 6)) AS TotalEdits
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY ph.PostId
+),
+
+PostsWithComments AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    GROUP BY p.Id
+)
+
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.PostCount,
+    us.Upvotes - us.Downvotes AS NetVotes,
+    us.GoldBadges + us.SilverBadges + us.BronzeBadges AS TotalBadges,
+    us.UserRank,
+    p.PostId,
+    p.CommentCount,
+    p.TotalBounty,
+    COALESCE(rph.LastEditDate, 'Never') AS LastEdit,
+    rph.EditComments,
+    rph.TotalEdits
+FROM UserStatistics us
+JOIN PostsWithComments p ON us.UserId = p.PostId
+LEFT JOIN RecentPostHistory rph ON p.PostId = rph.PostId
+WHERE us.PostCount > 5 AND us.NetVotes > 10
+ORDER BY us.UserRank, p.CommentCount DESC
+LIMIT 100;
+

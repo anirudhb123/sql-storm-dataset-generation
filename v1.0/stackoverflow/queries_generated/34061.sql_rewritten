@@ -1,0 +1,63 @@
+WITH RecursivePosts AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ViewCount,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ViewCount,
+        rp.Level + 1
+    FROM Posts p
+    JOIN RecursivePosts rp ON p.ParentId = rp.PostId
+), UserPostStats AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionsPosted,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswersPosted,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN p.ViewCount ELSE 0 END), 0) AS TotalViews,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN p.Score ELSE 0 END), 0) AS TotalAnswerScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+), ClosedPostReasons AS (
+    
+    SELECT 
+        ph.PostId,
+        STRING_AGG(CASE WHEN ph.PostHistoryTypeId = 10 THEN cr.Name END, ', ') AS CloseReasons,
+        COUNT(*) AS CloseCount
+    FROM PostHistory ph
+    JOIN CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+)
+
+SELECT 
+    up.DisplayName,
+    up.QuestionsPosted,
+    up.AnswersPosted,
+    up.TotalViews,
+    up.TotalAnswerScore,
+    rp.Title AS QuestionTitle,
+    rp.ViewCount AS QuestionViewCount,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount,
+    COALESCE(cpr.CloseReasons, 'Not Closed') AS PostCloseReasons,
+    COALESCE(cpr.CloseCount, 0) AS NumberOfClosures
+FROM UserPostStats up
+JOIN RecursivePosts rp ON up.UserId = rp.OwnerUserId
+LEFT JOIN ClosedPostReasons cpr ON rp.PostId = cpr.PostId
+WHERE up.QuestionsPosted > 0
+ORDER BY up.TotalViews DESC, up.DisplayName ASC;

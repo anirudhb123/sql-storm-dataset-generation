@@ -1,0 +1,90 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_mfgr,
+        p.p_type,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rnk
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+), 
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(ps.ps_availqty) AS total_available,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        COUNT(l.l_orderkey) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -3, GETDATE())
+    GROUP BY 
+        o.o_orderkey, 
+        o.o_orderdate
+), 
+CustomerPurchaseTrend AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(CASE 
+                WHEN o.o_orderstatus = 'F' THEN ol.order_total 
+                ELSE 0 
+            END) AS total_spent,
+        COUNT(o.o_orderkey) AS orders_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        RecentOrders ol ON o.o_orderkey = ol.o_orderkey
+    GROUP BY 
+        c.c_custkey, 
+        c.c_name
+)
+SELECT 
+    ct.c_custkey,
+    ct.c_name,
+    COALESCE(ct.total_spent, 0) AS total_spent,
+    COALESCE(s.total_available, 0) AS total_available,
+    np.part_name,
+    COUNT(*) AS related_parts_count
+FROM 
+    CustomerPurchaseTrend ct
+LEFT JOIN 
+    SupplierStats s ON ct.c_custkey = s.s_suppkey
+LEFT JOIN 
+    (SELECT 
+         rp.p_name AS part_name, 
+         rp.p_brand
+     FROM 
+         RankedParts rp 
+     WHERE 
+         rp.rnk <= 3) np ON np.p_brand IN (SELECT DISTINCT s.s_brand FROM supplier s)
+GROUP BY 
+    ct.c_custkey, 
+    ct.c_name, 
+    s.total_available, 
+    np.part_name
+HAVING 
+    COUNT(np.part_name) > 0
+ORDER BY 
+    total_spent DESC, 
+    ct.c_name ASC;

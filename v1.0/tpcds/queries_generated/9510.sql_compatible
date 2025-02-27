@@ -1,0 +1,44 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk
+    FROM 
+        customer c
+        JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+        LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2459471 AND 2459512 
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status, hd.hd_income_band_sk
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_sales,
+        cs.order_count,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_sales,
+    tc.order_count,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound
+FROM 
+    TopCustomers tc
+    LEFT JOIN customer_demographics cd ON tc.c_customer_id = cd.cd_demo_sk
+    LEFT JOIN income_band ib ON cd.cd_credit_rating = ib.ib_income_band_sk
+WHERE 
+    tc.sales_rank <= 100
+ORDER BY 
+    tc.total_sales DESC;

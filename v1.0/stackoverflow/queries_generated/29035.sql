@@ -1,0 +1,73 @@
+WITH TagCounts AS (
+    SELECT 
+        LOWER(TRIM(unnest(string_to_array(Tags, '><')))) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Considering only Questions for tagging
+    GROUP BY 
+        TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagCounts
+),
+UserActivity AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionsAsked,
+        COUNT(DISTINCT A.Id) AS AnswersGiven,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvotesReceived,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvotesReceived,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgesEarned
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1 -- Questions
+    LEFT JOIN 
+        Posts A ON U.Id = A.OwnerUserId AND A.PostTypeId = 2 -- Answers
+    LEFT JOIN 
+        Votes V ON A.Id = V.PostId -- Count votes for answers
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId -- Count badges for users
+    GROUP BY 
+        U.Id
+),
+UserTagStats AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        TT.TagName,
+        TT.PostCount,
+        ROW_NUMBER() OVER (PARTITION BY U.UserId ORDER BY TT.PostCount DESC) AS TagRank
+    FROM 
+        UserActivity U
+    JOIN 
+        Posts P ON U.UserId = P.OwnerUserId
+    JOIN 
+        TagCounts TT ON TT.PostCount > 0 
+    WHERE 
+        P.PostTypeId = 1 -- Questions
+)
+SELECT 
+    U.DisplayName,
+    U.QuestionsAsked,
+    U.AnswersGiven,
+    U.UpvotesReceived,
+    U.DownvotesReceived,
+    U.BadgesEarned,
+    STRING_AGG(CONCAT(TT.TagName, ' (', TT.PostCount, ')'), ', ') AS TopTags
+FROM 
+    UserActivity U
+LEFT JOIN 
+    UserTagStats TT ON U.UserId = TT.UserId AND TT.TagRank <= 3 -- Get top 3 tags by user
+GROUP BY 
+    U.UserId, U.DisplayName
+ORDER BY 
+    U.QuestionsAsked DESC, U.UpvotesReceived DESC;

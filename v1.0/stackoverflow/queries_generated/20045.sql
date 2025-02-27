@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id) - SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS Score
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.PostTypeId IN (1, 2)
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        MAX(b.Date) AS LastBadgeDate 
+    FROM 
+        Badges b 
+    WHERE 
+        b.Class = 1 
+        OR (b.Class = 2 AND b.Date >= NOW() - INTERVAL '6 months')
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    up.OwnerUserId,
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    COALESCE(AVG(rp.Score), 0) AS AvgPostScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    COUNT(DISTINCT rb.LastBadgeDate) AS RecentBadgesCount
+FROM 
+    RankedPosts rp
+JOIN 
+    Posts p ON rp.PostId = p.Id
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    PostLinks pl ON p.Id = pl.PostId
+LEFT JOIN 
+    Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+LEFT JOIN 
+    RecentBadges rb ON u.Id = rb.UserId
+WHERE 
+    u.Reputation >= 1000
+GROUP BY 
+    up.OwnerUserId, u.DisplayName
+ORDER BY 
+    TotalPosts DESC, AvgPostScore DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY
+UNION
+SELECT 
+    NULL AS OwnerUserId,
+    'Total Results' AS DisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalComments,
+    NULL AS AvgPostScore,
+    NULL AS Tags,
+    COUNT(DISTINCT rb.LastBadgeDate) AS RecentBadgesCount
+FROM 
+    Posts p
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    RecentBadges rb ON u.Id = rb.UserId
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '1 year'
+WITH ROLLUP;

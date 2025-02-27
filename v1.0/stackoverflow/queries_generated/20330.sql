@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS rn,
+        DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '3 months'
+),
+PostWithVotes AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score
+),
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseCount,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 11) AS ReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+FinalResults AS (
+    SELECT 
+        pw.PostId,
+        pw.Title,
+        pw.CreationDate,
+        pw.ViewCount,
+        pw.Score,
+        pw.Upvotes,
+        pw.Downvotes,
+        COALESCE(phc.CloseCount, 0) AS CloseCount,
+        COALESCE(phc.ReopenCount, 0) AS ReopenCount,
+        CASE 
+            WHEN pw.Upvotes - pw.Downvotes < 0 THEN 'Needs Improvement'
+            WHEN pw.Upvotes = 0 AND pw.Downvotes = 0 THEN 'No Votes Yet'
+            ELSE 'Reception Mixed'
+        END AS VoteReception,
+        CASE 
+            WHEN pw.Score > 50 THEN 'Highly Rated'
+            WHEN pw.Score <= 50 AND pw.Score > 0 THEN 'Moderately Rated'
+            ELSE 'Poor Rating'
+        END AS RatingCategory
+    FROM 
+        PostWithVotes pw
+    LEFT JOIN 
+        PostHistoryCounts phc ON pw.PostId = phc.PostId
+    WHERE 
+        pw.ViewCount > (
+            SELECT AVG(ViewCount) 
+            FROM Posts 
+            WHERE CreationDate > NOW() - INTERVAL '1 year'
+        )
+    ORDER BY 
+        pw.Score DESC, pw.ViewCount DESC
+)
+SELECT 
+    fr.*,
+    CASE 
+        WHEN fr.CloseCount > fr.ReopenCount THEN 'Mostly Closed'
+        ELSE 'Open to Reopen'
+    END AS ClosureInfo,
+    CASE 
+        WHEN fr.RecentRank <= 5 THEN 'Hot Post'
+        ELSE 'Regular Post'
+    END AS PostStatus
+FROM 
+    FinalResults fr
+WHERE 
+    fr.rn <= 10 OR (fr.rn IS NULL AND fr.CloseCount = 0)
+ORDER BY 
+    fr.ViewCount DESC, fr.CreationDate DESC;

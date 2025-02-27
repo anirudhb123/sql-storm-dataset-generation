@@ -1,0 +1,88 @@
+WITH RECURSIVE UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopPosters AS (
+    SELECT 
+        UserId,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        UserPostCounts
+),
+PostVoteDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 10 THEN 1 ELSE 0 END), 0) AS Deletions
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostHistoryAggregation AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 10)  
+    GROUP BY 
+        ph.PostId
+),
+FinalReport AS (
+    SELECT 
+        u.DisplayName,
+        pp.PostId,
+        phs.EditCount,
+        pp.UpVotes,
+        pp.DownVotes,
+        pp.Deletions,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY pp.PostId) AS PostSequence,
+        COALESCE(phs.LastEditDate, 'No Edits'::timestamp) AS LastEditDate,
+        CASE 
+            WHEN pp.UpVotes > pp.DownVotes THEN 'Positive'
+            WHEN pp.UpVotes < pp.DownVotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteSentiment
+    FROM 
+        Users u
+    JOIN 
+        Posts pp ON u.Id = pp.OwnerUserId
+    LEFT JOIN 
+        PostVoteDetails ppv ON pp.Id = ppv.PostId
+    LEFT JOIN 
+        PostHistoryAggregation phs ON pp.Id = phs.PostId
+    WHERE 
+        u.Reputation > 1000
+)
+SELECT 
+    fr.DisplayName,
+    fr.PostId,
+    fr.EditCount,
+    fr.UpVotes,
+    fr.DownVotes,
+    fr.Deletions,
+    fr.PostSequence,
+    fr.LastEditDate,
+    fr.VoteSentiment,
+    COALESCE(NULLIF(fr.LastEditDate, 'No Edits'::timestamp), 'No Edits') AS EffectiveLastEditDate
+FROM 
+    FinalReport fr
+WHERE 
+    fr.EditCount > 0
+ORDER BY 
+    fr.EditCount DESC, 
+    fr.VoteSentiment ASC;

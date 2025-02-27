@@ -1,0 +1,50 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_web_sales,
+        SUM(cs.cs_net_paid) AS total_catalog_sales,
+        SUM(ss.ss_net_paid) AS total_store_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS web_orders,
+        COUNT(DISTINCT cs.cs_order_number) AS catalog_orders,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_orders
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_id
+),
+sales_summary AS (
+    SELECT 
+        c_customer_id,
+        total_web_sales,
+        total_catalog_sales,
+        total_store_sales,
+        CASE 
+            WHEN total_web_sales > total_catalog_sales AND total_web_sales > total_store_sales THEN 'Web'
+            WHEN total_catalog_sales > total_web_sales AND total_catalog_sales > total_store_sales THEN 'Catalog'
+            ELSE 'Store'
+        END AS preferred_channel,
+        web_orders,
+        catalog_orders,
+        store_orders
+    FROM customer_sales
+)
+SELECT 
+    s.c_customer_id,
+    s.total_web_sales,
+    s.total_catalog_sales,
+    s.total_store_sales,
+    s.preferred_channel,
+    r.r_reason_desc AS common_return_reason,
+    COUNT(DISTINCT wr.wr_order_number) AS total_web_returns,
+    COUNT(DISTINCT cr.cr_order_number) AS total_catalog_returns,
+    COUNT(DISTINCT sr.sr_ticket_number) AS total_store_returns
+FROM sales_summary s
+LEFT JOIN web_returns wr ON s.c_customer_id = wr.wr_returning_customer_sk
+LEFT JOIN catalog_returns cr ON s.c_customer_id = cr.cr_returning_customer_sk
+LEFT JOIN store_returns sr ON s.c_customer_id = sr.sr_customer_sk
+LEFT JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk OR cr.cr_reason_sk = r.r_reason_sk OR sr.sr_reason_sk = r.r_reason_sk
+GROUP BY s.c_customer_id, s.total_web_sales, s.total_catalog_sales, s.total_store_sales, s.preferred_channel, r.r_reason_desc
+HAVING s.total_web_sales > 1000 OR s.total_catalog_sales > 1000 OR s.total_store_sales > 1000
+ORDER BY s.total_web_sales DESC, s.total_catalog_sales DESC, s.total_store_sales DESC;

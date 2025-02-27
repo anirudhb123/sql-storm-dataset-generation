@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        pt.Name AS PostType,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+CommentsStats AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS CommentCount,
+        MAX(CreationDate) AS LastCommentDate
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.PostType,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        cs.CommentCount,
+        cs.LastCommentDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        CommentsStats cs ON rp.PostId = cs.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostsCreated,
+        SUM(vt.BountyAmount) AS TotalBounty,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    pd.Title,
+    pd.PostType,
+    pd.Score,
+    pd.ViewCount,
+    pd.CommentCount,
+    pd.LastCommentDate,
+    ua.DisplayName AS Author,
+    ua.PostsCreated,
+    ua.TotalBounty,
+    ua.Upvotes,
+    ua.Downvotes
+FROM 
+    PostDetails pd
+JOIN 
+    UserActivity ua ON pd.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ua.UserId)
+WHERE 
+    pd.Rank <= 5
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

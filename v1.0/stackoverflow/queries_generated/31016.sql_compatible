@@ -1,0 +1,68 @@
+
+WITH RecursiveTagUsage AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS TagRank
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.Id, T.TagName
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastEditDate,
+        MAX(PH.PostHistoryTypeId) AS LastActionType,
+        COUNT(PH.Id) AS EditCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    R.TagId,
+    R.TagName,
+    R.PostCount,
+    R.QuestionCount,
+    R.AnswerCount,
+    U.UserId,
+    U.DisplayName,
+    U.BadgeCount,
+    U.GoldBadgeCount,
+    U.SilverBadgeCount,
+    U.BronzeBadgeCount,
+    COALESCE(PH.LastEditDate, 'No Edits') AS LastEditDate,
+    COALESCE(PH.LastActionType, 'No Action') AS LastActionType,
+    COALESCE(PH.EditCount, 0) AS EditCount
+FROM 
+    RecursiveTagUsage R
+LEFT JOIN 
+    UserBadges U ON U.BadgeCount > 0
+LEFT JOIN 
+    RecentPostHistory PH ON PH.PostId = (SELECT Id FROM Posts WHERE Tags LIKE '%' || R.TagName || '%' LIMIT 1)
+WHERE 
+    R.TagRank <= 10
+ORDER BY 
+    R.PostCount DESC, 
+    U.BadgeCount DESC;

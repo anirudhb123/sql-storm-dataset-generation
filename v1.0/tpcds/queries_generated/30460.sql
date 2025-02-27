@@ -1,0 +1,63 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_addr_sk, 0 AS level
+    FROM customer
+    WHERE c_current_cdemo_sk IS NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_addr_sk, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+),
+SalesData AS (
+    SELECT 
+        cs_bill_customer_sk AS customer_sk,
+        SUM(cs_net_paid) AS total_sales,
+        COUNT(cs_order_number) AS order_count
+    FROM catalog_sales
+    GROUP BY cs_bill_customer_sk
+),
+SalesRanked AS (
+    SELECT 
+        sh.customer_sk,
+        sh.total_sales,
+        sh.order_count,
+        DENSE_RANK() OVER (ORDER BY sh.total_sales DESC) AS sales_rank
+    FROM SalesData sh
+),
+CustomerSales AS (
+    SELECT 
+        ch.c_customer_sk,
+        ch.c_first_name,
+        ch.c_last_name,
+        COALESCE(sr.total_sales, 0) AS total_sales,
+        COALESCE(sr.order_count, 0) AS order_count,
+        COALESCE(sr.sales_rank, NULL) AS sales_rank
+    FROM CustomerHierarchy ch
+    LEFT JOIN SalesRanked sr ON ch.c_customer_sk = sr.customer_sk
+),
+AddressData AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT cs.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY ca.ca_address_sk, ca.ca_city, ca.ca_state
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    c.total_sales,
+    c.order_count,
+    a.customer_count,
+    CASE 
+        WHEN c.sales_rank IS NULL THEN 'No Sales'
+        WHEN c.order_count = 0 THEN 'Inactive'
+        ELSE 'Active'
+    END AS customer_status
+FROM CustomerSales c
+JOIN AddressData a ON c.c_current_addr_sk = a.ca_address_sk
+WHERE a.customer_count > 10
+ORDER BY c.total_sales DESC
+LIMIT 100;

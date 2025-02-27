@@ -1,0 +1,51 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON ps.ps_partkey = s.s_suppkey
+    WHERE sh.level < 5
+),
+
+total_orders AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+
+nations_info AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+
+SELECT 
+    r.r_name,
+    ni.n_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders_count,
+    SUM(t.total_spent) AS total_revenue,
+    SUM(l.total_lineitem_value) AS total_lineitem_value,
+    AVG(s.s_acctbal) AS avg_supplier_balance,
+    MAX(CASE WHEN l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31' THEN 1 ELSE 0 END) AS shipped_in_current_year
+FROM region r
+JOIN nations_info ni ON r.r_regionkey = ni.n_nationkey
+LEFT JOIN total_orders t ON ni.n_nationkey = t.o_custkey
+LEFT JOIN lineitem_summary l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = t.o_custkey)
+LEFT JOIN supplier_hierarchy s ON s.s_nationkey = ni.n_nationkey
+WHERE r.r_name IS NOT NULL
+GROUP BY r.r_name, ni.n_name
+HAVING AVG(s.s_acctbal) > 5000
+ORDER BY total_orders_count DESC, total_revenue DESC;

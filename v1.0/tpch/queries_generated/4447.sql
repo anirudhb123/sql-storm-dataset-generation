@@ -1,0 +1,76 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_price
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2024-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerOrderCounts AS (
+    SELECT 
+        c.c_nationkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_nationkey
+),
+NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name,
+        COALESCE(c.order_count, 0) AS total_orders
+    FROM 
+        nation n
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        CustomerOrderCounts c ON n.n_nationkey = c.c_nationkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    s.total_availqty,
+    sr.region_name,
+    no.total_orders,
+    CASE 
+        WHEN no.total_orders IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status
+FROM 
+    part p
+JOIN 
+    SupplierParts s ON p.p_partkey = s.ps_partkey
+JOIN 
+    NationRegion no ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+LEFT JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+WHERE 
+    s.avg_supplycost < (
+        SELECT 
+            AVG(ps.ps_supplycost) 
+        FROM 
+            partsupp ps
+    )
+ORDER BY 
+    p.p_retailprice DESC, 
+    no.total_orders DESC;

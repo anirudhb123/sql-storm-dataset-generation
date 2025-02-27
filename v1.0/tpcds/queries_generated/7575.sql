@@ -1,0 +1,64 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY 
+        c.c_customer_id
+), ItemSales AS (
+    SELECT 
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_ext_sales_price) AS total_revenue
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_id
+), CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        CASE 
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            ELSE 'Other' 
+        END AS gender,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT 
+    cs.c_customer_id,
+    cs.total_sales,
+    cs.avg_sales_price,
+    cs.order_count,
+    cd.gender,
+    cd.ib_lower_bound AS income_lower_bound,
+    cd.ib_upper_bound AS income_upper_bound,
+    is.total_quantity_sold,
+    is.total_revenue
+FROM 
+    CustomerSales cs
+JOIN 
+    CustomerDemographics cd ON cs.c_customer_id = cd.cd_demo_sk
+JOIN 
+    ItemSales is ON is.total_revenue > 1000
+WHERE 
+    cs.total_sales > 500
+ORDER BY 
+    total_sales DESC
+LIMIT 50;

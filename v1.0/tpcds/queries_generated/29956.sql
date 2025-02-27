@@ -1,0 +1,37 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, IF(ca_suite_number IS NOT NULL, CONCAT(' Suite ', ca_suite_number), ''), ', ', ca_city, ', ', ca_state, ' ', ca_zip) AS full_address,
+        LENGTH(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, IF(ca_suite_number IS NOT NULL, CONCAT(' Suite ', ca_suite_number), ''), ', ', ca_city, ', ', ca_state, ' ', ca_zip)) AS address_length
+    FROM customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CD.cd_gender,
+        CD.cd_marital_status,
+        CD.cd_education_status,
+        AD.full_address,
+        AD.address_length
+    FROM customer c
+    JOIN customer_demographics CD ON c.c_current_cdemo_sk = CD.cd_demo_sk
+    JOIN AddressDetails AD ON c.c_current_addr_sk = AD.ca_address_id
+),
+AggregatedData AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        AVG(address_length) AS avg_address_length,
+        COUNT(*) AS customer_count
+    FROM CustomerDetails
+    GROUP BY cd_gender, cd_marital_status
+)
+SELECT 
+    cd_gender,
+    cd_marital_status,
+    avg_address_length,
+    customer_count,
+    RANK() OVER (ORDER BY avg_address_length DESC) AS rank_by_address_length
+FROM AggregatedData
+ORDER BY avg_address_length DESC;

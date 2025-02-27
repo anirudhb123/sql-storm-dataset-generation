@@ -1,0 +1,82 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        u.Reputation > 0
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostSummaries AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        pp.Id AS ParentPostId,
+        t.TagName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts pp ON p.ParentId = pp.Id
+    LEFT JOIN 
+        LATERAL (SELECT DISTINCT unnest(string_to_array(p.Tags, '<>')) AS TagName) t ON TRUE
+    WHERE 
+        p.LastActivityDate >= NOW() - INTERVAL '1 year'
+),
+HighScoringPosts AS (
+    SELECT 
+        ps.*,
+        ur.UserId,
+        ur.Reputation,
+        ur.BadgeCount,
+        ur.PostCount,
+        ur.CommentCount
+    FROM 
+        PostSummaries ps
+    JOIN 
+        UserReputation ur ON ps.OwnerUserId = ur.UserId
+    WHERE 
+        ps.Score > 10
+    ORDER BY 
+        ps.Score DESC
+    LIMIT 50
+)
+SELECT 
+    hsp.PostId,
+    hsp.Title,
+    hsp.CreationDate,
+    hsp.Score,
+    hsp.ViewCount,
+    hsp.AcceptedAnswerId,
+    hsp.ParentPostId,
+    hsp.TagName,
+    ur.UserId AS OwnerUserId,
+    ur.Reputation AS OwnerReputation,
+    ur.BadgeCount AS OwnerBadgeCount,
+    ur.PostCount AS OwnerPostCount,
+    ur.CommentCount AS OwnerCommentCount
+FROM 
+    HighScoringPosts hsp
+JOIN 
+    UserReputation ur ON hsp.OwnerUserId = ur.UserId
+ORDER BY 
+    hsp.Score DESC, 
+    ur.Reputation DESC;

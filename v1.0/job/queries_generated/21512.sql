@@ -1,0 +1,82 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(mk.keyword_count, 0) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title ASC) AS movie_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_movies
+    FROM 
+        aka_title t
+    LEFT JOIN (
+        SELECT 
+            movie_id, 
+            COUNT(*) AS keyword_count
+        FROM 
+            movie_keyword
+        GROUP BY 
+            movie_id
+    ) mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+), ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role_name,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order ASC) AS actor_rank
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    INNER JOIN 
+        role_type rt ON ci.role_id = rt.id
+), MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count,
+        STRING_AGG(DISTINCT cname.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cname ON mc.company_id = cname.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.keyword_count,
+    ar.actor_name,
+    ar.role_name,
+    ar.actor_rank,
+    mc.company_count,
+    mc.companies,
+    CASE 
+        WHEN rm.keyword_count > 5 THEN 'Popular Keywords'
+        ELSE 'Niche Keywords'
+    END AS keyword_category,
+    CASE 
+        WHEN mc.company_count > 3 THEN 'Major Production'
+        ELSE 'Independent'
+    END AS production_type,
+    (SELECT COUNT(*) FROM cast_info ci2 WHERE ci2.movie_id = rm.movie_id AND ci2.nr_order IS NOT NULL) AS total_cast_members,
+    NULLIF((
+        SELECT AVG(CASE WHEN nr_order IS NOT NULL THEN 1 ELSE 0 END)
+        FROM cast_info ci3
+        WHERE ci3.movie_id = rm.movie_id
+    ), 0) AS avg_cast_order
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorRoles ar ON rm.movie_id = ar.movie_id
+LEFT JOIN 
+    MovieCompanies mc ON rm.movie_id = mc.movie_id
+WHERE 
+    rm.movie_rank <= 5 OR ar.actor_rank IS NOT NULL
+ORDER BY 
+    rm.production_year DESC, 
+    rm.keyword_count DESC, 
+    ar.actor_rank ASC;

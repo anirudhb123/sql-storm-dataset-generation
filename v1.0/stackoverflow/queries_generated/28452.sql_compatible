@@ -1,0 +1,59 @@
+
+WITH UserTags AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        ts.TagName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(CASE WHEN p.ViewCount > 1000 THEN 1 ELSE 0 END) AS HighViewCountQuestions
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    CROSS JOIN 
+        LATERAL string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><') AS ts(TagName)
+    GROUP BY 
+        u.Id, u.DisplayName, ts.TagName
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT ut.UserId) AS UserCount,
+        SUM(ut.QuestionCount) AS TotalQuestions,
+        SUM(ut.HighViewCountQuestions) AS HighViewCount
+    FROM 
+        UserTags ut
+    JOIN 
+        Tags t ON ut.TagName = t.TagName
+    GROUP BY 
+        t.TagName
+),
+Benchmark AS (
+    SELECT 
+        ts.TagName,
+        ts.UserCount,
+        ts.TotalQuestions,
+        ts.HighViewCount,
+        CASE 
+            WHEN ts.UserCount > 0 THEN ts.TotalQuestions / CAST(ts.UserCount AS float)
+            ELSE 0
+        END AS AvgQuestionsPerUser,
+        CASE 
+            WHEN ts.UserCount > 0 THEN ts.HighViewCount / CAST(ts.UserCount AS float)
+            ELSE 0
+        END AS AvgHighViewCountPerUser
+    FROM 
+        TagStats ts
+)
+SELECT 
+    b.TagName,
+    b.UserCount,
+    b.TotalQuestions,
+    b.HighViewCount,
+    b.AvgQuestionsPerUser,
+    b.AvgHighViewCountPerUser
+FROM 
+    Benchmark b
+ORDER BY 
+    b.AvgQuestionsPerUser DESC, b.AvgHighViewCountPerUser DESC
+LIMIT 10;

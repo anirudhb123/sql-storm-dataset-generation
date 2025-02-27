@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+),
+
+RecentPosts AS (
+    SELECT 
+        PostID,
+        Title,
+        Body,
+        CreationDate,
+        OwnerDisplayName,
+        CommentCount,
+        UpVotes,
+        DownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        RN <= 5 -- Latest 5 posts per user
+),
+
+TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Posts p
+    CROSS JOIN 
+        LATERAL STRING_TO_ARRAY(p.Tags, ',') AS tag
+    GROUP BY 
+        Tags.TagName
+),
+
+FinalResults AS (
+    SELECT 
+        r.PostID,
+        r.Title,
+        r.OwnerDisplayName,
+        r.CreationDate,
+        r.UpVotes,
+        r.DownVotes,
+        r.CommentCount,
+        t.TagName,
+        COUNT(t.TagName) OVER (PARTITION BY t.TagName) AS TagFrequency
+    FROM 
+        RecentPosts r
+    LEFT JOIN 
+        TagStats t ON (r.Title ILIKE '%' || t.TagName || '%')
+)
+
+SELECT 
+    PostID,
+    Title,
+    OwnerDisplayName,
+    CreationDate,
+    UpVotes,
+    DownVotes,
+    CommentCount,
+    TagName,
+    TagFrequency
+FROM 
+    FinalResults
+WHERE 
+    TagFrequency > 1 -- Only tags that appear in more than one post
+ORDER BY 
+    CreationDate DESC;

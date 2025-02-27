@@ -1,0 +1,50 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, 1 AS level
+    FROM customer
+    WHERE c_current_cdemo_sk IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+),
+PurchaseSummary AS (
+    SELECT
+        cd.cd_demo_sk,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS purchase_count,
+        AVG(ws.ws_sales_price) AS avg_item_price,
+        COUNT(DISTINCT ws.ws_item_sk) AS unique_items_purchased
+    FROM web_sales ws
+    JOIN customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_demo_sk
+),
+TopCustomers AS (
+    SELECT
+        cd.cd_gender,
+        SUM(ps.total_spent) AS total_revenue,
+        COUNT(DISTINCT ps.purchase_count) AS distinct_purchase_counts
+    FROM PurchaseSummary ps
+    JOIN customer_demographics cd ON ps.cd_demo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender
+)
+SELECT
+    ch.c_first_name,
+    ch.c_last_name,
+    cd.cd_gender,
+    ph.total_revenue,
+    ph.distinct_purchase_counts,
+    ROW_NUMBER() OVER (PARTITION BY ch.c_customer_sk ORDER BY ph.total_revenue DESC) AS revenue_rank,
+    CASE 
+        WHEN ph.total_revenue IS NULL THEN 'No Purchases'
+        ELSE CAST(ph.total_revenue AS VARCHAR)
+    END AS revenue_status,
+    COALESCE(NULLIF(cd.cd_marital_status, 'S'), 'Single') AS marital_status_fixed
+FROM CustomerHierarchy ch
+LEFT JOIN TopCustomers ph ON ch.c_customer_sk = ph.cd_demo_sk
+JOIN customer_demographics cd ON ch.c_customer_sk = cd.cd_demo_sk
+WHERE ch.level <= 3
+ORDER BY ph.total_revenue DESC NULLS LAST
+LIMIT 100;

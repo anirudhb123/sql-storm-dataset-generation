@@ -1,0 +1,81 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_orderstatus,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as order_rank
+    FROM 
+        orders o
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(s.s_acctbal) FILTER (WHERE s.s_acctbal > 0) AS avg_positive_acctbal
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_suppkey
+),
+PartRegion AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        r.r_name,
+        p.p_retailprice - COALESCE(LAG(p.p_retailprice) OVER (PARTITION BY p.p_type ORDER BY p.p_partkey), 0) AS price_diff,
+        CASE WHEN p.p_size IS NULL THEN 'Size Unknown' ELSE CAST(p.p_size AS VARCHAR) END AS size_label
+    FROM 
+        part p
+    JOIN 
+        nation n ON n.n_nationkey = (SELECT MIN(s.s_nationkey) FROM supplier s WHERE s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey))
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_extendedprice,
+        CASE 
+            WHEN l.l_discount > 0.1 THEN l.l_extendedprice * (1 - l.l_discount) 
+            ELSE l.l_extendedprice 
+        END AS net_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+),
+AggregatedData AS (
+    SELECT 
+        pr.r_name,
+        COUNT(DISTINCT fo.o_orderkey) AS total_orders,
+        SUM(fl.net_price) AS total_sales,
+        SUM(cost_part.ps_supplycost * (fl.l_quantity * (1 - fl.l_discount))) AS total_cost
+    FROM 
+        FilteredLineItems fl
+    JOIN 
+        RankedOrders fo ON fl.l_orderkey = fo.o_orderkey
+    JOIN 
+        PartRegion pr ON pr.p_partkey = fl.l_partkey
+    LEFT JOIN 
+        partsupp cost_part ON cost_part.ps_partkey = pr.p_partkey
+    GROUP BY 
+        pr.r_name
+)
+SELECT 
+    r_name,
+    total_orders,
+    total_sales,
+    total_cost,
+    CASE 
+        WHEN total_cost = 0 THEN NULL 
+        ELSE (total_sales - total_cost) / total_cost 
+    END AS profit_margin
+FROM 
+    AggregatedData
+ORDER BY 
+    profit_margin DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

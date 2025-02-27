@@ -1,0 +1,79 @@
+WITH RECURSIVE sales_trends AS (
+    SELECT 
+        ws_sold_date_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_sold_date_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk
+    HAVING 
+        SUM(ws_ext_sales_price) > 0
+    UNION ALL
+    SELECT 
+        ws_sold_date_sk,
+        total_sales * 1.05,  
+        rank
+    FROM 
+        sales_trends
+    WHERE 
+        rank < 10
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(ws_order_number) AS order_count,
+        SUM(ws_ext_sales_price) AS total_spent,
+        MIN(ws_sold_date_sk) AS first_purchase_date,
+        DATEDIFF(cast('2002-10-01' as date), MIN(ws_sold_date_sk)) AS days_since_first_purchase
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+top_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.order_count,
+        cs.total_spent,
+        ROW_NUMBER() OVER (ORDER BY cs.total_spent DESC) AS rank
+    FROM 
+        customer_sales cs
+    WHERE 
+        cs.days_since_first_purchase < 365 AND cs.total_spent IS NOT NULL
+    ORDER BY 
+        cs.total_spent DESC
+    LIMIT 100
+),
+daily_sales AS (
+    SELECT 
+        dd.d_date AS sales_date,
+        COALESCE(SUM(ws.ws_ext_sales_price), 0) AS total_sales,
+        DENSE_RANK() OVER (ORDER BY COALESCE(SUM(ws.ws_ext_sales_price), 0) DESC) AS sales_rank
+    FROM 
+        date_dim dd
+    LEFT JOIN 
+        web_sales ws ON dd.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        dd.d_date
+)
+SELECT 
+    t.customer_name,
+    t.total_spent,
+    t.order_count,
+    ds.sales_date,
+    ds.total_sales,
+    ds.sales_rank
+FROM 
+    top_customers t
+JOIN 
+    customer c ON c.c_customer_sk = t.c_customer_sk
+JOIN 
+    (SELECT c_customer_sk, CONCAT(c_first_name, ' ', c_last_name) AS customer_name 
+     FROM customer) cn ON cn.c_customer_sk = t.c_customer_sk
+JOIN 
+    daily_sales ds ON ds.total_sales > 1000
+ORDER BY 
+    t.total_spent DESC, ds.sales_date DESC;

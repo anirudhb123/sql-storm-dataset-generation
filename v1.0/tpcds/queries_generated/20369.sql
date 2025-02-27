@@ -1,0 +1,72 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        AVG(sr_net_loss) AS average_net_loss
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        ca.ca_country,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            WHEN cd.cd_purchase_estimate < 500 THEN 'Low'
+            WHEN cd.cd_purchase_estimate BETWEEN 500 AND 1500 THEN 'Medium'
+            ELSE 'High'
+        END AS purchase_estimate_band
+    FROM customer_demographics cd
+    LEFT JOIN customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+ItemSales AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        SUM(ws_net_paid) AS total_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+HighValueCustomers AS (
+    SELECT
+        cr.sr_customer_sk,
+        CTE1.total_returns,
+        CTE1.total_return_amount,
+        CTE1.total_return_quantity,
+        cdem.buying_habits,
+        cdem.cd_gender,
+        cdem.cd_marital_status,
+        SUM(ISNULL(is.total_net_paid, 0)) AS sales_sum,
+        (SELECT COUNT(*) FROM store_sales ss WHERE ss.ss_customer_sk = cr.sr_customer_sk) AS store_sale_count
+    FROM CustomerReturns cr
+    JOIN CustomerDemographics cdem ON cr.sr_customer_sk = cdem.cd_demo_sk
+    LEFT JOIN ItemSales is ON cr.sr_customer_sk = is.ws_item_sk
+    WHERE cr.total_return_quantity > 10 OR cdem.cd_purchase_estimate > 1500
+    GROUP BY cr.sr_customer_sk, cdem.cd_gender, cdem.cd_marital_status, cdem.buying_habits
+)
+SELECT DISTINCT
+    hvc.sr_customer_sk,
+    hvc.total_returns,
+    hvc.total_return_amount,
+    hvc.total_return_quantity,
+    hvc.cd_gender,
+    CASE 
+        WHEN hvc.cd_gender IS NULL THEN 'Gender Unknown'
+        ELSE hvc.cd_gender 
+    END AS gender_label,
+    hvc.sales_sum,
+    hvc.store_sale_count,
+    RANK() OVER (ORDER BY hvc.total_return_amount DESC) AS return_value_rank
+FROM HighValueCustomers hvc
+JOIN ItemSales is ON hvc.sr_customer_sk = is.ws_item_sk
+WHERE hvc.store_sale_count > 5 AND hvc.total_returns IS NOT NULL
+ORDER BY hvc.total_return_amount DESC, hvc.total_return_quantity ASC;

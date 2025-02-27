@@ -1,0 +1,58 @@
+WITH RECURSIVE RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+), SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        S.rank
+    FROM 
+        supplier s
+    JOIN (
+        SELECT 
+            ps.ps_suppkey,
+            RANK() OVER (ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+        FROM 
+            partsupp ps
+        GROUP BY 
+            ps.ps_suppkey
+    ) AS S ON s.s_suppkey = S.ps_suppkey
+    WHERE 
+        S.rank <= 10
+)
+SELECT 
+    r.o_orderkey,
+    r.o_totalprice,
+    COALESCE(s.s_name, 'Unknown') AS supplier_name,
+    (SELECT COUNT(*) FROM lineitem l WHERE l.l_orderkey = r.o_orderkey) AS lineitem_count,
+    t.total_supplycost
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    lineitem l ON l.l_orderkey = r.o_orderkey
+LEFT JOIN 
+    SupplierCosts t ON t.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = r.o_orderkey)
+LEFT JOIN 
+    TopSuppliers s ON s.s_suppkey = l.l_suppkey
+WHERE 
+    r.order_rank <= 5
+ORDER BY 
+    r.o_orderdate DESC, r.o_totalprice DESC;

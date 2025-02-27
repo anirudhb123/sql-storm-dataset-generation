@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+        AND p.CreationDate >= NOW() - INTERVAL '1 year' -- Last year
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(b.Class = 1, 0) + COALESCE(b.Class = 2, 0) + COALESCE(b.Class = 3, 0)) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TagFrequency AS (
+    SELECT 
+        UNNEST(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS Frequency
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        Tag
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    u.DisplayName AS Owner,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    us.QuestionCount,
+    us.TotalScore,
+    us.BadgeCount,
+    tf.Tag,
+    tf.Frequency
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+JOIN 
+    UserStats us ON u.Id = us.UserId
+JOIN 
+    TagFrequency tf ON rp.Tags LIKE '%' || tf.Tag || '%'
+WHERE 
+    rp.Rank <= 5 -- Top 5 posts per tag
+ORDER BY 
+    tf.Frequency DESC, 
+    rp.CreationDate DESC;

@@ -1,0 +1,47 @@
+
+WITH CustomerSales AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           SUM(ws.ws_ext_sales_price) AS total_sales,
+           COUNT(ws.ws_order_number) AS total_orders
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_sold_date_sk BETWEEN 2450000 AND 2450600 -- an example date range
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+DemographicAnalysis AS (
+    SELECT cd.cd_demo_sk,
+           cd.cd_gender,
+           cd.cd_marital_status,
+           cd.cd_education_status,
+           SUM(cs.cs_ext_sales_price) AS total_catalog_sales
+    FROM customer_demographics cd
+    JOIN catalog_sales cs ON cd.cd_demo_sk = cs.cs_bill_cdemo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+TopCustomers AS (
+    SELECT cs.c_customer_sk,
+           cs.c_first_name,
+           cs.c_last_name,
+           cs.total_sales,
+           RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM CustomerSales cs
+),
+AggregateResults AS (
+    SELECT d.cd_gender,
+           d.cd_marital_status,
+           COUNT(DISTINCT tc.c_customer_sk) AS customer_count,
+           SUM(tc.total_sales) AS cumulative_sales
+    FROM DemographicAnalysis d
+    JOIN TopCustomers tc ON d.cd_demo_sk = tc.c_customer_sk
+    GROUP BY d.cd_gender, d.cd_marital_status
+)
+SELECT agg.cd_gender,
+       agg.cd_marital_status,
+       agg.customer_count,
+       agg.cumulative_sales,
+       AVG(agg.cumulative_sales / NULLIF(agg.customer_count, 0)) AS average_sales_per_customer
+FROM AggregateResults agg
+GROUP BY agg.cd_gender, agg.cd_marital_status
+ORDER BY avg_sales_per_customer DESC;

@@ -1,0 +1,21 @@
+
+SELECT 
+    p_name, 
+    SUM(l_extendedprice * (1 - l_discount)) AS revenue
+FROM 
+    lineitem
+JOIN 
+    partsupp ON l_partkey = ps_partkey
+JOIN 
+    supplier ON ps_suppkey = s_suppkey
+JOIN 
+    nation ON s_nationkey = n_nationkey
+JOIN 
+    region ON n_regionkey = r_regionkey
+WHERE 
+    r_name = 'ASIA'
+GROUP BY 
+    p_name
+ORDER BY 
+    revenue DESC
+FETCH FIRST 10 ROWS ONLY;

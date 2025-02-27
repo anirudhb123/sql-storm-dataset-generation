@@ -1,0 +1,42 @@
+
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    r.role AS role_name,
+    c.nr_order AS cast_order,
+    k.keyword AS related_keyword,
+    ci.kind AS company_type,
+    m.info AS movie_info,
+    y.production_year,
+    y.season_nr,
+    y.episode_nr
+FROM 
+    title y
+JOIN 
+    cast_info c ON y.id = c.movie_id
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+JOIN 
+    role_type r ON c.role_id = r.id
+JOIN 
+    movie_keyword mk ON y.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    complete_cast cc ON y.id = cc.movie_id
+JOIN 
+    movie_companies mc ON y.id = mc.movie_id
+JOIN 
+    company_type ci ON mc.company_type_id = ci.id
+JOIN 
+    movie_info m ON y.id = m.movie_id
+WHERE 
+    y.production_year BETWEEN 2000 AND 2020
+    AND ci.kind ILIKE '%production%'
+    AND r.role ILIKE '%actor%'
+GROUP BY 
+    t.title, a.name, r.role, c.nr_order, k.keyword, ci.kind, m.info, 
+    y.production_year, y.season_nr, y.episode_nr
+ORDER BY 
+    y.production_year DESC, 
+    c.nr_order ASC;

@@ -1,0 +1,61 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        MAX(u.CreationDate) AS AccountCreationDate,
+        MAX(u.LastAccessDate) AS LastActiveDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    WHERE u.Reputation > 0 OR u.Location IS NOT NULL
+    GROUP BY u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY t.TagName
+    HAVING COUNT(DISTINCT p.Id) > 10
+),
+RecentPostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.PostHistoryTypeId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '90 days'
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalBounty,
+    ua.TotalPosts,
+    ua.TotalQuestions,
+    ua.TotalAnswers,
+    ua.TotalComments,
+    ua.TotalBadges,
+    pt.TagName,
+    pt.PostCount,
+    rph.Title AS RecentPostTitle,
+    rph.UserDisplayName AS LastEditor,
+    rph.CreationDate AS LastEditDate
+FROM UserActivity ua
+CROSS JOIN PopularTags pt
+LEFT JOIN RecentPostHistory rph ON ua.UserId = rph.UserId AND rph.rn = 1
+WHERE pt.PostCount > 15
+ORDER BY ua.TotalBounty DESC, ua.LastActiveDate DESC
+LIMIT 50;

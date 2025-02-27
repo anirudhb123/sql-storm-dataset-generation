@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+
+AnswerDetails AS (
+    SELECT 
+        a.Id AS AnswerId,
+        a.ParentId,
+        COUNT(v.Id) AS VoteCount,
+        AVG(v.BountyAmount) AS AverageBounty
+    FROM Posts a
+    LEFT JOIN Votes v ON a.Id = v.PostId AND v.VoteTypeId IN (2, 3)
+    WHERE a.PostTypeId = 2
+    GROUP BY a.Id
+),
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId, ph.UserId
+),
+
+DetailedPostSummary AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        COALESCE(ad.VoteCount, 0) AS AnswerVoteCount,
+        COALESCE(ad.AverageBounty, 0) AS AverageBountyAmount,
+        cp.LastClosedDate,
+        rp.Score,
+        rp.ViewCount
+    FROM RankedPosts rp
+    LEFT JOIN AnswerDetails ad ON rp.PostId = ad.ParentId
+    LEFT JOIN ClosedPosts cp ON rp.PostId = cp.PostId
+)
+
+SELECT 
+    dps.PostId,
+    dps.Title,
+    dps.Score,
+    dps.ViewCount,
+    COALESCE(dps.AnswerVoteCount, 0) AS AnswerVotes,
+    CASE 
+        WHEN dps.AverageBountyAmount = 0 THEN 'No Bounty'
+        WHEN dps.AverageBountyAmount > 0 AND dps.LastClosedDate IS NULL THEN 'Bounty Available'
+        ELSE 'Closed with Bounty'
+    END AS PostStatus,
+    CASE 
+        WHEN dps.LastClosedDate IS NOT NULL THEN 'Closed on ' || TO_CHAR(dps.LastClosedDate, 'YYYY-MM-DD HH24:MI:SS')
+        ELSE 'Active'
+    END AS ClosureInfo,
+    STRING_AGG(DISTINCT bc.Name, ', ') AS BadgeNames
+FROM DetailedPostSummary dps
+LEFT JOIN Badges bc ON dps.PostId = bc.UserId
+GROUP BY
+    dps.PostId, dps.Title, dps.Score, dps.ViewCount, dps.AnswerVoteCount, dps.AverageBountyAmount, dps.LastClosedDate
+ORDER BY 
+    dps.Score DESC, 
+    dps.ViewCount DESC;

@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_item_sk,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER(PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) as sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+SalesSummary AS (
+    SELECT 
+        w.w_warehouse_name,
+        SUM(COALESCE(rs.ws_net_profit, 0)) AS total_net_profit,
+        COUNT(DISTINCT rs.ws_item_sk) AS total_items_sold
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        RankedSales rs ON w.w_warehouse_sk = rs.web_site_sk
+    GROUP BY 
+        w.warehouse_name
+),
+CustomerStats AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(COALESCE(cd.cd_purchase_estimate, 0)) AS avg_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    ss.warehouse_name,
+    ss.total_net_profit,
+    ss.total_items_sold,
+    cs.cd_gender,
+    cs.customer_count,
+    cs.avg_purchase_estimate
+FROM 
+    SalesSummary ss
+FULL OUTER JOIN 
+    CustomerStats cs ON ss.total_items_sold > 100 AND cs.customer_count > 10
+WHERE 
+    ss.total_net_profit > 1000 OR cs.avg_purchase_estimate IS NULL
+ORDER BY 
+    ss.total_net_profit DESC, cs.customer_count DESC;

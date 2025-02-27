@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_ext_sales_price,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_ext_sales_price DESC) AS price_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (
+            SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023
+        ) AND (
+            SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023
+        )
+),
+TopSales AS (
+    SELECT 
+        r.web_site_sk,
+        r.ws_order_number,
+        r.ws_item_sk,
+        r.ws_quantity,
+        r.ws_ext_sales_price
+    FROM 
+        RankedSales r
+    WHERE 
+        r.price_rank <= 10
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        i.i_brand
+    FROM 
+        item i
+)
+SELECT 
+    ts.ws_order_number,
+    ts.ws_item_sk,
+    ts.ws_quantity,
+    id.i_item_desc,
+    id.i_current_price,
+    id.i_brand,
+    COALESCE(ts.ws_ext_sales_price, 0) AS ext_sales_price,
+    (CASE WHEN ts.ws_quantity IS NULL THEN 0 ELSE ts.ws_quantity * id.i_current_price END) AS total_sales_value
+FROM 
+    TopSales ts
+LEFT JOIN 
+    ItemDetails id ON ts.ws_item_sk = id.i_item_sk
+ORDER BY 
+    total_sales_value DESC;
+

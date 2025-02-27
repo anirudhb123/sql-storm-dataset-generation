@@ -1,0 +1,72 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1994-01-01' 
+        AND o.o_orderdate < '1995-01-01'
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(CASE WHEN ps.ps_availqty IS NULL THEN 0 ELSE ps.ps_availqty END) AS total_avail_qty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_acctbal,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_price
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_acctbal
+    HAVING 
+        AVG(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_brand,
+        p.p_retailprice,
+        NULLIF(SUBSTRING(p.p_comment, 1, 10), '') AS short_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS brand_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+)
+SELECT 
+    d.p_partkey,
+    d.p_brand,
+    COALESCE(s.total_avail_qty, 0) AS available_quantity,
+    c.c_name,
+    c.c_acctbal,
+    ro.o_orderkey,
+    ro.o_totalprice,
+    ro.o_orderdate
+FROM 
+    PartDetails d
+LEFT JOIN 
+    SupplierAvailability s ON s.ps_partkey = d.p_partkey
+INNER JOIN 
+    CustomerStats c ON c.order_count > 0
+FULL OUTER JOIN 
+    RankedOrders ro ON ro.o_orderkey = (SELECT MAX(o_orderkey) FROM RankedOrders r WHERE r.rn = 1)
+WHERE 
+    (d.brand_rank <= 5 OR d.short_comment IS NOT NULL)
+    AND (s.total_avail_qty IS NOT NULL OR d.p_brand LIKE '%special%')
+ORDER BY 
+    d.p_retailprice DESC, c.order_count DESC NULLS LAST;

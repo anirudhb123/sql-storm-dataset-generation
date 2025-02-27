@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS RankScore
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '365 days'
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        AnswerCount,
+        OwnerDisplayName
+    FROM 
+        RankedPosts
+    WHERE 
+        RankScore <= 10
+),
+PostDetails AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.Score,
+        tp.ViewCount,
+        tp.AnswerCount,
+        tp.OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT tg.TagName) AS Tags
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Comments c ON tp.PostId = c.PostId
+    LEFT JOIN 
+        unnest(string_to_array(tp.Tags, ',')) AS tg(TagName) ON true
+    GROUP BY 
+        tp.PostId, tp.Title, tp.CreationDate, tp.Score, tp.ViewCount, tp.AnswerCount, tp.OwnerDisplayName
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.AnswerCount,
+    pd.CommentCount,
+    pd.OwnerDisplayName,
+    tg.TagName
+FROM 
+    PostDetails pd
+JOIN 
+    LATERAL unnest(pd.Tags) AS tg(TagName) ON true
+ORDER BY 
+    pd.Score DESC, pd.CreationDate DESC;

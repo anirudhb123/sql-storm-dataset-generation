@@ -1,0 +1,55 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_ws_item_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws_ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+    GROUP BY 
+        ws_item_sk
+), item_sales AS (
+    SELECT 
+        i.i_item_id,
+        COALESCE(sd.total_net_profit, 0) AS total_net_profit,
+        COALESCE(sd.total_orders, 0) AS total_orders
+    FROM 
+        item i
+    LEFT JOIN 
+        sales_data sd ON i.i_item_sk = sd.ws_item_sk
+), ranked_items AS (
+    SELECT 
+        item_id,
+        total_net_profit,
+        total_orders,
+        RANK() OVER (ORDER BY total_net_profit DESC) AS item_rank
+    FROM 
+        item_sales
+)
+SELECT 
+    r.item_id,
+    r.total_net_profit,
+    r.total_orders,
+    i.i_item_desc,
+    (SELECT 
+        AVG(inv_quantity_on_hand) 
+     FROM 
+        inventory 
+     WHERE 
+        inv_item_sk = r.item_id
+    ) AS avg_inventory,
+    (CASE 
+        WHEN r.total_orders = 0 THEN NULL 
+        ELSE r.total_net_profit / r.total_orders 
+    END) AS avg_profit_per_order
+FROM 
+    ranked_items r
+JOIN 
+    item i ON r.item_id = i.i_item_id
+WHERE 
+    r.item_rank <= 10
+ORDER BY 
+    r.total_net_profit DESC;

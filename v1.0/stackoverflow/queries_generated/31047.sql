@@ -1,0 +1,99 @@
+WITH RecursiveAnswerCount AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(*) AS AnswerCount
+    FROM 
+        Posts p 
+    WHERE 
+        p.PostTypeId = 2 -- Only answers
+    GROUP BY 
+        p.ParentId
+), DetailedPostHistory AS (
+    SELECT 
+        ph.PostId, 
+        ph.PostHistoryTypeId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RevisionRank,
+        MAX(ph.UserId) OVER (PARTITION BY ph.PostId) AS LastEditorId
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate BETWEEN NOW() - INTERVAL '1 YEAR' AND NOW()
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        b.Class,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, b.Class
+), ActiveUsers AS (
+    SELECT 
+        u.Id, 
+        u.DisplayName, 
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadgeCount,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadgeCount,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.LastAccessDate >= NOW() - INTERVAL '30 DAYS'
+    GROUP BY 
+        u.Id
+), PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(a.AnswerCount, 0) AS TotalAnswers,
+        COALESCE(ph.RevisionRank, 0) AS RevisionCount,
+        u.UserId,
+        u.DisplayName AS UserDisplayName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursiveAnswerCount a ON p.Id = a.PostId
+    LEFT JOIN 
+        DetailedPostHistory ph ON p.Id = ph.PostId AND ph.RevisionRank = 1
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 YEAR'
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.TotalAnswers,
+    ps.RevisionCount,
+    au.DisplayName AS OwnerName,
+    au.Reputation AS OwnerReputation,
+    au.GoldBadgeCount,
+    au.SilverBadgeCount,
+    au.BronzeBadgeCount,
+    ph.CreationDate AS LastEditDate,
+    CASE
+        WHEN ph.LastEditorId IS NOT NULL THEN (SELECT DisplayName FROM Users WHERE Id = ph.LastEditorId)
+        ELSE 'N/A'
+    END AS LastEditedBy
+FROM 
+    PostSummary ps
+JOIN 
+    ActiveUsers au ON ps.UserId = au.UserId
+LEFT JOIN 
+    DetailedPostHistory ph ON ps.PostId = ph.PostId
+WHERE 
+    ps.TotalAnswers > 10
+ORDER BY 
+    ps.Score DESC, ps.TotalAnswers DESC;

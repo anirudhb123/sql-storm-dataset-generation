@@ -1,0 +1,62 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT ca_address_sk, ca_street_number, ca_street_name, ca_city, ca_state
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+
+    UNION ALL
+
+    SELECT a.ca_address_sk, a.ca_street_number, a.ca_street_name, a.ca_city, a.ca_state
+    FROM customer_address a
+    JOIN AddressHierarchy ah ON a.ca_address_sk = ah.ca_address_sk + 1
+    WHERE a.ca_state IS NOT NULL
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT sr.ticket_number) AS total_returns,
+        SUM(sr.return_amt) AS total_returned_amount,
+        COUNT(DISTINCT wr.order_number) AS total_web_returns,
+        SUM(wr.return_amt) AS total_web_returned_amount,
+        AVG(COALESCE(hd.dep_count, 0)) AS avg_dependents,
+        MAX(hd.vehicle_count) AS max_vehicle_count
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    GROUP BY c.c_customer_id
+),
+TopCustomers AS (
+    SELECT c.c_customer_id, cs.total_returns, cs.total_returned_amount
+    FROM customer c
+    JOIN CustomerStats cs ON c.c_customer_id = cs.c_customer_id
+    WHERE cs.total_returns > 50 OR cs.total_returned_amount > 1000
+    ORDER BY cs.total_returned_amount DESC
+    LIMIT 10
+)
+SELECT 
+    ah.ca_city,
+    ah.ca_state,
+    tc.c_customer_id,
+    tc.total_returns,
+    TC.total_returned_amount,
+    ROW_NUMBER() OVER (PARTITION BY ah.ca_city ORDER BY tc.total_returned_amount DESC) AS city_rank
+FROM TopCustomers tc
+JOIN AddressHierarchy ah ON tc.c_customer_id IN (
+    SELECT ca_address_id
+    FROM customer_address
+    WHERE ca_city = ah.ca_city AND ca_state = ah.ca_state
+)
+LEFT JOIN (
+    SELECT DISTINCT wd.web_site_id, bad.ct AS total_web_sales
+    FROM web_sales ws
+    INNER JOIN web_page wd ON ws.ws_web_page_sk = wd.wp_web_page_sk
+    LEFT JOIN (
+        SELECT SUM(ws_sales_price) AS ct, ws_bill_customer_sk
+        FROM web_sales
+        GROUP BY ws_bill_customer_sk
+    ) bad ON ws.ws_bill_customer_sk = bad.ws_bill_customer_sk
+) sales ON sales.ws_bill_customer_sk = tc.c_customer_id
+WHERE (ah.ca_city IS NOT NULL AND ah.ca_state LIKE 'CA')
+AND sales.total_web_sales IS NOT NULL
+ORDER BY ah.ca_city, tc.total_returned_amount DESC;

@@ -1,0 +1,86 @@
+WITH RECURSIVE UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        b.Name AS BadgeName, 
+        b.Class AS BadgeClass, 
+        b.Date AS AwardDate
+    FROM Users u
+    JOIN Badges b ON u.Id = b.UserId
+    WHERE u.Reputation > 1000  -- Only consider users with reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        ub.UserId, 
+        b.Name, 
+        b.Class, 
+        b.Date
+    FROM UserBadges ub
+    JOIN Badges b ON ub.UserId = b.UserId 
+    WHERE b.Class > ub.BadgeClass  -- Show only higher class badges
+),
+
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS VoteCount,
+        MAX(b.AwardDate) AS LastBadgeAwardDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2  -- Counting only upvotes
+    LEFT JOIN UserBadges b ON p.OwnerUserId = b.UserId
+    WHERE p.CreationDate >= DATEADD(YEAR, -1, GETDATE())  -- Posts created in the last year
+    GROUP BY p.Id
+),
+
+RankedPosts AS (
+    SELECT 
+        ps.PostId, 
+        ps.Title, 
+        ps.Score,
+        ps.ViewCount,
+        ps.CommentCount,
+        ps.VoteCount,
+        ps.LastBadgeAwardDate,
+        RANK() OVER (ORDER BY ps.Score DESC, ps.ViewCount DESC) AS PostRank
+    FROM PostStatistics ps
+),
+
+RecentPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title,
+        p.OwnerUserId, 
+        ps.PostRank
+    FROM Posts p
+    JOIN RankedPosts ps ON p.Id = ps.PostId
+    WHERE ps.PostRank <= 10  -- Top 10 ranked posts
+),
+
+UserInfo AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName, 
+        u.Reputation, 
+        u.Location,
+        r.PostRank
+    FROM Users u
+    LEFT JOIN RecentPosts r ON u.Id = r.OwnerUserId
+    WHERE u.Reputation > 500  -- Limit to users with reputation over 500
+)
+
+SELECT 
+    u.DisplayName AS UserDisplayName, 
+    u.Reputation,
+    u.Location, 
+    COUNT(DISTINCT r.PostId) AS PostsCount, 
+    AVG(r.PostRank) AS AvgPostRank
+FROM UserInfo u
+JOIN RecentPosts r ON u.UserId = r.OwnerUserId
+GROUP BY u.UserId, u.DisplayName, u.Reputation, u.Location
+HAVING COUNT(DISTINCT r.PostId) > 5  -- Users with more than 5 recent posts
+ORDER BY AvgPostRank DESC;

@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        1 AS depth
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    WHERE 
+        mc.company_type_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        t.title,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+    WHERE 
+        mh.depth < 3 
+    
+)
+
+SELECT 
+    t.title AS Movie_Title,
+    coalesce(cn.name, 'Unknown') AS Company_Name,
+    string_agg(distinct ak.name, ', ') AS Actor_Names,
+    m.production_year AS Production_Year,
+    COUNT(DISTINCT k.keyword) AS Keyword_Count,
+    CASE 
+        WHEN m.production_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END AS Era,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY ak.name) AS actor_rank,
+    mh.depth AS Hierarchy_Depth
+FROM 
+    MovieHierarchy mh
+JOIN 
+    aka_title m ON mh.movie_id = m.id
+LEFT OUTER JOIN 
+    movie_companies mc ON m.id = mc.movie_id
+LEFT OUTER JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT OUTER JOIN 
+    cast_info ci ON m.id = ci.movie_id
+LEFT OUTER JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT OUTER JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    m.production_year IS NOT NULL
+    AND (cn.country_code IS NULL OR cn.country_code != 'US')
+GROUP BY 
+    m.id, cn.name, m.production_year, mh.depth
+ORDER BY 
+    m.production_year, Hierarchy_Depth DESC;

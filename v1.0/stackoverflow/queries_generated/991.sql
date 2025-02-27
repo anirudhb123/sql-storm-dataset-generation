@@ -1,0 +1,59 @@
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(t.Id) AS TagCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = p.Id
+    GROUP BY 
+        p.Id
+),
+RecentActivities AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    GROUP BY 
+        p.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(c.Score, 0)) AS TotalComments,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    ua.TotalViews,
+    ua.TotalComments,
+    ua.PostCount,
+    ptc.TagCount,
+    ra.LastEditDate,
+    ra.ClosedDate
+FROM 
+    Users u
+LEFT JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN 
+    PostTagCounts ptc ON ptc.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+LEFT JOIN 
+    RecentActivities ra ON ra.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+WHERE 
+    ua.TotalViews > 1000 AND 
+    (ra.ClosedDate IS NULL OR ra.ClosedDate > NOW() - INTERVAL '30 days')
+ORDER BY 
+    ua.PostCount DESC, ua.TotalViews DESC;

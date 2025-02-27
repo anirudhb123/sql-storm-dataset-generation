@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, '>')) AS tag_id ON t.Id = tag_id
+    LEFT JOIN 
+        Tags t ON t.Id = tag_id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        ViewCount, 
+        Score, 
+        Rank, 
+        CommentCount, 
+        TagsList
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    up.TotalBounty,
+    tp.Title AS TopPostTitle,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.TagsList
+FROM 
+    UserStats up
+LEFT JOIN 
+    TopPosts tp ON up.UserId = tp.OwnerUserId
+WHERE 
+    up.UserRank <= 50
+ORDER BY 
+    up.Reputation DESC, up.TotalBounty DESC;

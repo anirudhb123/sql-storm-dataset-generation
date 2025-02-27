@@ -1,0 +1,74 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        movie_id, 
+        COUNT(*) OVER (PARTITION BY movie_id) AS total_cast_members,
+        (SELECT COUNT(*) FROM cast_info ci2 WHERE ci2.movie_id = ci1.movie_id AND ci2.nr_order = 1) AS first_role_count
+    FROM 
+        cast_info ci1
+    GROUP BY 
+        movie_id
+),
+ActorsWithRoles AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        ci.movie_id,
+        ci.person_role_id,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+),
+MoviesWithInfo AS (
+    SELECT 
+        tit.title AS movie_title,
+        tit.production_year,
+        COALESCE(mci.total_cast_members, 0) AS total_cast,
+        COALESCE(kw.keyword, 'Uncategorized') AS keyword
+    FROM 
+        aka_title tit
+    LEFT JOIN 
+        RecursiveCTE mci ON tit.id = mci.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON tit.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+),
+TopMovies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        total_cast,
+        keyword,
+        ROW_NUMBER() OVER (ORDER BY total_cast DESC, production_year) AS rank
+    FROM 
+        MoviesWithInfo
+    WHERE 
+        production_year IS NOT NULL
+)
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    tm.total_cast,
+    tm.keyword,
+    CASE 
+        WHEN tm.total_cast IS NULL THEN 'No actors'
+        ELSE
+            (SELECT 
+                COUNT(*) 
+             FROM 
+                ActorsWithRoles ar 
+             WHERE 
+                ar.movie_id = (SELECT id FROM aka_title WHERE title = tm.movie_title LIMIT 1) 
+             AND 
+                ar.role_rank = 1)
+    END AS leading_actors_count
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.rank;

@@ -1,0 +1,84 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1996-01-01'
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+SupplierPartStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+ExtremeStats AS (
+    SELECT 
+        COALESCE(MAX(total_spent), 0) AS max_spent,
+        COALESCE(MIN(total_spent), 0) AS min_spent,
+        COALESCE(SUM(total_spent) / NULLIF(COUNT(total_spent), 0), 0) AS avg_spent
+    FROM CustomerOrderStats
+),
+FilteredNation AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        CASE 
+            WHEN n.n_comment IS NULL THEN 'No comment available'
+            ELSE n.n_comment 
+        END AS comment
+    FROM nation n
+    WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE '%south%')
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 0
+            ELSE p.p_retailprice END AS retail_price,
+        p.p_mfgr
+    FROM part p 
+    WHERE p.p_size BETWEEN 10 AND 50
+),
+CombinedStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        su.s_suppkey,
+        su.total_available,
+        su.max_supply_cost,
+        c.order_count,
+        c.total_spent,
+        c.avg_spent
+    FROM PartDetails p
+    JOIN SupplierPartStats su ON p.p_partkey = su.total_available
+    LEFT JOIN CustomerOrderStats c ON c.order_count > (SELECT AVG(order_count) FROM CustomerOrderStats)
+)
+SELECT 
+    fn.n_name,
+    COUNT(DISTINCT co.o_orderkey) AS order_count,
+    SUM(co.total_spent) AS total_spent,
+    SUM(CASE WHEN co.total_spent >= (SELECT max_spent FROM ExtremeStats) THEN 1 ELSE 0 END) AS high_value_orders,
+    AVG(COALESCE(CASE WHEN p.retail_price IS NULL THEN NULL ELSE p.retail_price END, 0)) AS avg_retail_price
+FROM FilteredNation fn
+LEFT JOIN CombinedStats co ON fn.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+LEFT JOIN RankedOrders ro ON co.o_orderkey = ro.o_orderkey AND ro.order_rank <= 10
+GROUP BY fn.n_name
+HAVING SUM(co.total_spent) > (SELECT avg_spent FROM ExtremeStats) 
+   AND COUNT(DISTINCT co.o_orderkey) > 5
+ORDER BY total_spent DESC;

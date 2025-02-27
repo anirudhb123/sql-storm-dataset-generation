@@ -1,0 +1,62 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON V.PostId = P.Id
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(CAST(UPD.UserId AS VARCHAR), 'No Edits') AS LastEditedBy,
+        P.LastEditDate
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            UserId, 
+            MAX(LastEditDate) AS LastEditDate 
+        FROM 
+            Posts 
+        WHERE 
+            LastEditDate IS NOT NULL 
+        GROUP BY 
+            PostId, UserId
+    ) AS UPD ON P.Id = UPD.PostId
+)
+SELECT 
+    UDS.UserId,
+    UDS.UpVotes,
+    UDS.DownVotes,
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    PD.ViewCount,
+    PD.LastEditedBy,
+    PD.LastEditDate,
+    ROW_NUMBER() OVER (PARTITION BY UDS.UserId ORDER BY PD.Score DESC) AS Rank
+FROM 
+    UserVoteStats UDS
+FULL OUTER JOIN 
+    PostDetails PD ON UDS.UserId = PD.LastEditedBy
+WHERE 
+    (UDS.UpVotes + UDS.DownVotes > 0)
+    OR PD.Score > 10
+ORDER BY 
+    UDS.UpVotes DESC, PD.ViewCount DESC;

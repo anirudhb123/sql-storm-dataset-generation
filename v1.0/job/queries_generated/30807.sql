@@ -1,0 +1,62 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_id, 
+    mh.title, 
+    mh.production_year,
+    mh.level,
+    COALESCE(cast_info.person_id, -1) AS lead_actor_id,
+    CONCAT_WS(' ', ak.name, name.surname_pcode) AS actor_full_name,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    COUNT(DISTINCT mc.company_id) AS production_company_count
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id AND ci.nr_order = 1
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    name ON ak.person_id = name.imdb_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+WHERE 
+    mh.level <= 2
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level, ak.name, name.surname_pcode, ci.person_id
+ORDER BY 
+    mh.production_year DESC, mh.level, keyword_count DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;
+
+-- This query creates a recursive CTE to explore a movie hierarchy based on linked movies,
+-- and retrieves detailed information about each movie including the lead actor, actor's full name, 
+-- the number of associated keywords, and the count of production companies, 
+-- all while utilizing various SQL constructs such as joins, string functions, aggregation, and 
+-- filtering based on the hierarchical level.

@@ -1,0 +1,77 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS aka_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year ASC) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        aka_title t ON a.id = t.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CompanyCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.movie_id
+),
+HighProfileCast AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS high_cast_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        r.role IN ('Lead', 'Main', 'Featured')
+    GROUP BY 
+        c.movie_id
+),
+CombinedInfo AS (
+    SELECT 
+        m.movie_id,
+        m.movie_title,
+        m.production_year,
+        COALESCE(cc.company_count, 0) AS company_count,
+        COALESCE(hp.high_cast_count, 0) AS high_cast_count,
+        CASE 
+            WHEN COALESCE(cc.company_count, 0) >= 5 AND COALESCE(hp.high_cast_count, 0) >= 3 THEN 'High Profile'
+            WHEN COALESCE(cc.company_count, 0) < 5 AND COALESCE(hp.high_cast_count, 0) < 3 THEN 'Indie'
+            ELSE 'Moderate'
+        END AS movie_profile
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        CompanyCounts cc ON maka_id = cc.movie_id
+    LEFT JOIN 
+        HighProfileCast hp ON maka_id = hp.movie_id
+)
+SELECT 
+    c.movie_profile,
+    c.movie_title,
+    c.production_year,
+    STRING_AGG(DISTINCT ak.name, ', ') AS known_aliases,
+    COUNT(DISTINCT k.keyword) AS keyword_count
+FROM 
+    CombinedInfo c
+LEFT JOIN 
+    movie_keyword mk ON c.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = c.movie_id
+WHERE 
+    c.production_year != 2077  -- Avoid the year '2077' due to paranormal investments
+GROUP BY 
+    c.movie_profile, c.movie_title, c.production_year
+HAVING 
+    COUNT(DISTINCT ak.name) > 0 
+ORDER BY 
+    movie_profile DESC, c.production_year DESC;

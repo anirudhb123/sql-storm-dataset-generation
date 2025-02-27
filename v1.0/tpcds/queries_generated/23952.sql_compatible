@@ -1,0 +1,80 @@
+
+WITH ItemDetails AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        i.i_wholesale_cost,
+        ROW_NUMBER() OVER (PARTITION BY i.i_category_id ORDER BY i.i_current_price DESC) AS price_rank
+    FROM 
+        item i
+    WHERE 
+        i.i_rec_start_date <= (SELECT MAX(d.d_date) FROM date_dim d WHERE d.d_current_year = 1)
+        AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date >= (SELECT MAX(d.d_date) FROM date_dim d WHERE d.d_current_year = 1))
+),
+CustomerWithPurchases AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        COALESCE(SUM(ws.ws_sales_price), 0) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (ORDER BY COALESCE(SUM(ws.ws_sales_price), 0) DESC) AS spending_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.total_spent,
+        c.total_orders
+    FROM 
+        CustomerWithPurchases c
+    WHERE 
+        c.spending_rank <= 10
+),
+ReturnsDetails AS (
+    SELECT 
+        sr.sr_item_sk,
+        COUNT(sr.sr_return_quantity) AS total_returns,
+        SUM(sr.sr_return_amt_inc_tax) AS total_returned_value
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_item_sk
+),
+ItemReturnSummary AS (
+    SELECT 
+        id.i_item_id,
+        COUNT(DISTINCT r.total_returns) AS return_count,
+        SUM(r.total_returned_value) AS total_return_value,
+        MAX(id.i_current_price) - MIN(id.i_current_price) AS price_fluctuation
+    FROM 
+        ItemDetails id
+    LEFT JOIN 
+        ReturnsDetails r ON id.i_item_sk = r.sr_item_sk
+    WHERE 
+        id.price_rank <= 5
+    GROUP BY 
+        id.i_item_id
+)
+SELECT 
+    tc.c_customer_id,
+    irs.return_count,
+    irs.total_return_value,
+    (CASE 
+        WHEN irs.price_fluctuation > 0 THEN 'Price Increased'
+        WHEN irs.price_fluctuation < 0 THEN 'Price Decreased'
+        ELSE 'No Price Change'
+    END) AS price_change_status,
+    RANK() OVER (ORDER BY irs.total_return_value DESC) AS return_rank
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    ItemReturnSummary irs ON irs.return_count > 1
+ORDER BY 
+    tc.total_spent DESC, irs.total_return_value DESC;

@@ -1,0 +1,120 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        r.Rank,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerRank
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS Rank 
+        FROM 
+            Votes 
+        WHERE 
+            VoteTypeId = 2
+        GROUP BY 
+            PostId
+    ) r ON p.Id = r.PostId
+    WHERE 
+        p.PostTypeId = 1
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostComments AS (
+    SELECT 
+        PostId, 
+        COUNT(*) AS CommentCount
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+PostSummary AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        COALESCE(pc.CommentCount, 0) AS TotalComments,
+        rp.Score,
+        rb.BadgeCount,
+        rb.HighestBadgeClass
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostComments pc ON rp.PostId = pc.PostId
+    LEFT JOIN 
+        UserBadges rb ON rp.OwnerUserId = rb.UserId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.TotalComments,
+    ps.Score,
+    ps.BadgeCount,
+    (CASE 
+        WHEN ps.BadgeCount > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END) AS UserActivityStatus,
+    (SELECT 
+        STRING_AGG(DISTINCT tag.TagName, ', ')
+     FROM 
+        Tags tag 
+     WHERE 
+        tag.WikiPostId = ps.PostId) AS RelatedTags
+FROM 
+    PostSummary ps
+WHERE 
+    ps.Score > 10
+ORDER BY 
+    ps.Score DESC, 
+    ps.CreationDate DESC
+LIMIT 50;
+
+WITH RECURSIVE CommentHiearchy AS (
+    SELECT 
+        c.Id,
+        c.PostId,
+        c.Text,
+        c.UserId,
+        1 AS Level
+    FROM 
+        Comments c
+    WHERE 
+        c.PostId IN (SELECT PostId FROM RankedPosts)
+    UNION ALL
+    SELECT 
+        c.Id,
+        c.PostId,
+        c.Text,
+        c.UserId,
+        ch.Level + 1
+    FROM 
+        Comments c
+    INNER JOIN 
+        CommentHiearchy ch ON c.PostId = ch.PostId
+)
+SELECT 
+    ch.PostId,
+    COUNT(*) AS SubCommentCount
+FROM 
+    CommentHiearchy ch
+GROUP BY 
+    ch.PostId;

@@ -1,0 +1,86 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 2 
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+
+PostLinksAgg AS (
+    SELECT 
+        pl.PostId,
+        COUNT(pl.RelatedPostId) AS RelatedPostsCount
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+)
+
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    rp.Title,
+    rp.CreationDate,
+    rp.UserPostRank,
+    us.BadgeCount,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    COALESCE(pla.RelatedPostsCount, 0) AS RelatedPostsCount
+FROM 
+    ActiveUsers u
+JOIN 
+    RankedPosts rp ON u.Id = rp.PostId
+JOIN 
+    UserStats us ON u.Id = us.UserId
+LEFT JOIN 
+    PostLinksAgg pla ON rp.PostId = pla.PostId
+WHERE 
+    rp.UserPostRank = 1
+ORDER BY 
+    u.Reputation DESC, 
+    rp.CreationDate DESC;

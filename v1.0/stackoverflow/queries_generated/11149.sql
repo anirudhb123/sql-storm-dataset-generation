@@ -1,0 +1,48 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT a.Id) AS TotalAnswers,
+        COUNT(DISTINCT q.Id) AS TotalQuestions,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Posts q ON p.PostTypeId = 1 -- Filter for Questions
+    LEFT JOIN Posts a ON p.PostTypeId = 2 -- Filter for Answers
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.TagName) AS TagCount
+    FROM 
+        Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalAnswers,
+    us.TotalQuestions,
+    us.TotalBounty,
+    pt.TagName,
+    pt.TagCount
+FROM 
+    UserStats us
+JOIN 
+    PopularTags pt ON us.UserId IN (SELECT DISTINCT p.OwnerUserId FROM Posts p WHERE p.Tags LIKE CONCAT('%', pt.TagName, '%'))
+ORDER BY 
+    us.TotalPosts DESC, us.Reputation DESC
+LIMIT 100;

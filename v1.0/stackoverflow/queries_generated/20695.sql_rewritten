@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserVoteStats AS (
+    SELECT 
+        v.UserId,
+        COUNT(DISTINCT v.PostId) AS UpVoteCount,
+        COUNT(DISTINCT CASE WHEN vt.Name = 'DownMod' THEN v.PostId END) AS DownVoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS TotalUpVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS FirstClosedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        us.UpVoteCount,
+        us.DownVoteCount,
+        us.TotalUpVotes,
+        CASE 
+            WHEN u.Reputation IS NULL THEN 'Unknown'
+            ELSE CASE 
+                WHEN u.Reputation > 1000 THEN 'Expert'
+                WHEN u.Reputation BETWEEN 500 AND 1000 THEN 'Intermediate'
+                ELSE 'Beginner'
+            END
+        END AS ReputationLevel
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserVoteStats us ON u.Id = us.UserId
+    WHERE 
+        u.CreationDate < (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '5 years')
+)
+SELECT 
+    tu.DisplayName,
+    COUNT(DISTINCT rp.PostId) AS PostsCreated,
+    COALESCE(SUM(CASE WHEN cp.FirstClosedDate IS NOT NULL THEN 1 ELSE 0 END), 0) AS ClosedPosts,
+    COALESCE(SUM(cp.ReopenCount), 0) AS ReopenedPosts,
+    tu.ReputationLevel,
+    AVG(rp.Score) AS AverageScore,
+    SUM(rp.ViewCount) AS TotalViews
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    RankedPosts rp ON tu.UserId = rp.OwnerUserId AND rp.UserPostRank <= 5
+LEFT JOIN 
+    ClosedPostHistory cp ON rp.PostId = cp.PostId
+GROUP BY 
+    tu.DisplayName, tu.ReputationLevel
+HAVING 
+    COUNT(DISTINCT rp.PostId) > 0
+ORDER BY 
+    TotalViews DESC, AverageScore DESC;

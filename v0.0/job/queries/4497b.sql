@@ -1,0 +1,4 @@
+SELECT min(an.name) AS alternative_name, min(chn.name) AS voiced_character, min(n.name) AS voicing_actress, min(t.title) AS american_movie
+FROM aka_name AS an, char_name AS chn, cast_info AS ci, company_name AS cn, movie_companies AS mc, name AS n, role_type AS rt, title AS t
+WHERE ci.movie_id = t.id AND t.id = mc.movie_id AND ci.movie_id = mc.movie_id AND mc.company_id = cn.id AND ci.role_id = rt.id AND n.id = ci.person_id AND chn.id = ci.person_role_id AND an.person_id = n.id AND an.person_id = ci.person_id
+AND mc.note IN ('(1987) (USA) (theatrical) (as Adventure Films Dist.)', '(1990) (USA) (all media) (TurboGrafx-16 version)', '(2001) (Poland) (VHS)', '(2004) (Belgium) (TV) (VRT TV1)', '(2012) (Saudi Arabia) (all media)', '(as Why Not)') AND an.name_pcode_nf = 'W4365' AND mc.company_type_id = 2 AND ci.person_id < 2282306 AND cn.name_pcode_sf IS NOT NULL;

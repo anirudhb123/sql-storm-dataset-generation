@@ -1,0 +1,57 @@
+
+WITH RecursiveMovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mt.season_nr,
+        mt.episode_nr,
+        NULL AS parent_id,
+        0 AS level
+    FROM title mt
+    WHERE mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        e.kind_id,
+        e.season_nr,
+        e.episode_nr,
+        p.movie_id AS parent_id,
+        p.level + 1
+    FROM title e
+    JOIN RecursiveMovieHierarchy p ON e.episode_of_id = p.movie_id
+)
+
+SELECT
+    m.title AS movie_title,
+    m.production_year,
+    a.name AS actor_name,
+    r.role AS actor_role,
+    COUNT(k.keyword) OVER (PARTITION BY m.movie_id) AS keyword_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COALESCE(c.comp_cast_type, 'N/A') AS comp_cast_type,
+    CASE 
+        WHEN m.season_nr IS NOT NULL AND m.episode_nr IS NOT NULL THEN 'Episode'
+        WHEN m.season_nr IS NOT NULL THEN 'Season'
+        ELSE 'Standalone Movie' 
+    END AS movie_type,
+    STRING_AGG(DISTINCT cn.name, '; ') AS companies_involved
+FROM RecursiveMovieHierarchy m
+LEFT JOIN cast_info ci ON ci.movie_id = m.movie_id
+LEFT JOIN aka_name a ON a.person_id = ci.person_id
+LEFT JOIN role_type r ON r.id = ci.role_id
+LEFT JOIN movie_keyword mk ON mk.movie_id = m.movie_id
+LEFT JOIN keyword k ON k.id = mk.keyword_id
+LEFT JOIN movie_companies mc ON mc.movie_id = m.movie_id
+LEFT JOIN company_name cn ON cn.id = mc.company_id
+LEFT JOIN comp_cast_type c ON c.id = ci.person_role_id
+WHERE m.production_year BETWEEN 2000 AND 2023
+AND (m.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('Movie', 'Series', 'Documentary')))
+GROUP BY m.movie_id, m.title, m.production_year, a.name, r.role, c.comp_cast_type
+ORDER BY m.production_year DESC, movie_title
+LIMIT 100;

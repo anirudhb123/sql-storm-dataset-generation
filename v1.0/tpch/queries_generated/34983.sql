@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 1000
+), 
+OrderStats AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY o.o_orderkey
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, ROW_NUMBER() OVER (ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'F'
+),
+PartStats AS (
+    SELECT p.p_partkey, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT 
+    ph.s_suppkey,
+    ph.s_name,
+    ph.s_nationkey,
+    r.o_orderkey,
+    r.order_rank,
+    COALESCE(ps.avg_supply_cost, 0) AS average_supply_cost,
+    os.total_sales
+FROM SupplierHierarchy ph
+LEFT JOIN RankedOrders r ON ph.s_nationkey = r.o_orderkey 
+LEFT JOIN PartStats ps ON ph.s_suppkey = ps.p_partkey
+LEFT JOIN OrderStats os ON r.o_orderkey = os.o_orderkey
+WHERE ph.level < 5 AND os.total_sales > 50000
+ORDER BY ph.s_name, r.order_rank, average_supply_cost DESC;

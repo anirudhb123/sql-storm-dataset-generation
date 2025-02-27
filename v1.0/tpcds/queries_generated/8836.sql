@@ -1,0 +1,69 @@
+
+WITH SalesData AS (
+    SELECT 
+        w.warehouse_id,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        w.warehouse_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        SUM(s.total_sales) AS demographic_sales
+    FROM 
+        customer_demo cd
+    JOIN customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN SalesData s ON s.warehouse_id IN (
+        SELECT 
+            w.warehouse_id
+        FROM 
+            warehouse w
+        WHERE 
+            w.warehouse_sq_ft > 10000
+    )
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, ca.ca_city, ca.ca_state, ca.ca_country
+),
+IncomeBands AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        SUM(d.demographic_sales) AS total_demographic_sales
+    FROM 
+        household_demographics h
+    JOIN CustomerDemographics d ON d.cd_demo_sk = h.hd_demo_sk
+    JOIN income_band ib ON h.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+)
+SELECT 
+    ib.ib_income_band_sk,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    ib.total_demographic_sales,
+    COUNT(DISTINCT d.cd_demo_sk) AS customer_count
+FROM 
+    IncomeBands ib
+JOIN CustomerDemographics d ON d.cd_demo_sk IN (
+        SELECT cd.cd_demo_sk FROM customer_demographics cd WHERE cd.cd_purchase_estimate > 1000
+    )
+GROUP BY 
+    ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+ORDER BY 
+    total_demographic_sales DESC;

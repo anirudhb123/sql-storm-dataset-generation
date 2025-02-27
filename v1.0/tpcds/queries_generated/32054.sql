@@ -1,0 +1,33 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT ws_sold_date_sk, ws_item_sk, ws_quantity, 
+           ws_ext_sales_price, 
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    UNION ALL
+    SELECT cs_sold_date_sk, cs_item_sk, cs_quantity, 
+           cs_ext_sales_price 
+    FROM catalog_sales
+    WHERE cs_sold_date_sk < (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+)
+SELECT ca_state, 
+       SUM(COALESCE(ws_ext_sales_price, 0) + COALESCE(cs_ext_sales_price, 0)) AS total_sales,
+       COUNT(DISTINCT CASE WHEN cd_gender = 'F' THEN c_customer_id END) AS female_customers,
+       COUNT(DISTINCT CASE WHEN cd_gender = 'M' THEN c_customer_id END) AS male_customers,
+       AVG(cd_purchase_estimate) AS avg_purchase_estimate
+FROM customer_address
+JOIN customer ON ca_address_sk = c_current_addr_sk
+LEFT JOIN customer_demographics cd ON c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN sales_cte s ON (s.ws_item_sk = c_current_addr_sk OR s.cs_item_sk = c_current_addr_sk)
+LEFT JOIN store_sales ss ON ss.ss_item_sk = s.ws_item_sk AND ss.ss_sold_date_sk = s.ws_sold_date_sk
+LEFT JOIN catalog_sales cs ON cs.cs_item_sk = s.cs_item_sk AND cs.cs_order_number = ss.ss_ticket_number
+WHERE ca_state IS NOT NULL
+GROUP BY ca_state
+HAVING total_sales > (SELECT AVG(total_sales) FROM (
+    SELECT SUM(ws_ext_sales_price + cs_ext_sales_price) AS total_sales
+    FROM web_sales
+    FULL OUTER JOIN catalog_sales ON ws_item_sk = cs_item_sk
+    GROUP BY ws_item_sk
+) as avg_sales) 
+ORDER BY total_sales DESC;

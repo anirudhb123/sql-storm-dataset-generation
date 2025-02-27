@@ -1,0 +1,55 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023 AND 
+        (ws.ws_sales_price IS NOT NULL OR ws.ws_sales_price <> 0)
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT r.sr_ticket_number) AS returns_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_returns r ON c.c_customer_sk = r.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    RANK() OVER (ORDER BY ci.returns_count DESC) AS return_rank,
+    COALESCE(SUM(rs.ws_quantity * rs.ws_sales_price), 0) AS total_sales_value,
+    CASE 
+        WHEN ci.cd_marital_status = 'M' THEN 'Married'
+        WHEN ci.cd_marital_status = 'S' THEN 'Single'
+        ELSE 'Other'
+    END AS marital_status_label
+FROM 
+    customer_info ci
+LEFT JOIN 
+    ranked_sales rs ON ci.c_customer_sk = rs.ws_item_sk
+GROUP BY 
+    ci.c_customer_sk, ci.cd_gender, ci.cd_marital_status
+HAVING 
+    total_sales_value > (SELECT AVG(ws_sales_price) 
+                         FROM web_sales 
+                         WHERE ws_sales_price IS NOT NULL) * (1 + 0.1)
+ORDER BY 
+    return_rank, total_sales_value DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,92 @@
+WITH RegionalSummary AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(s.s_acctbal) AS total_supplier_balance
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+FinalSummary AS (
+    SELECT 
+        r.r_name,
+        RHS.total_order_value,
+        RHS.total_supplier_balance,
+        COALESCE(CAST(AVG(HP.c_acctbal) AS DECIMAL(12, 2)), 0) AS avg_high_value_account
+    FROM 
+        RegionalSummary RHS
+    FULL OUTER JOIN (
+        SELECT 
+            n.n_name,
+            SUM(od.total_value) AS total_order_value
+        FROM 
+            OrderDetails od
+        JOIN 
+            lineitem l ON od.o_orderkey = l.l_orderkey
+        JOIN 
+            partsupp ps ON l.l_partkey = ps.ps_partkey
+        JOIN 
+            supplier s ON ps.ps_suppkey = s.s_suppkey
+        JOIN 
+            nation n ON s.s_nationkey = n.n_nationkey
+        GROUP BY 
+            n.n_name
+    ) AS OrdersByNation ON RHS.r_name = OrdersByNation.n_name
+    CROSS JOIN 
+        HighValueCustomers HP
+    WHERE 
+        HP.rank = 1
+)
+SELECT 
+    f.r_name,
+    f.total_order_value,
+    f.total_supplier_balance,
+    f.avg_high_value_account,
+    CASE 
+        WHEN f.total_supplier_balance > 0 THEN 'Profitable'
+        ELSE 'Unprofitable'
+    END AS profitability_status
+FROM 
+    FinalSummary f
+WHERE 
+    f.total_order_value IS NOT NULL OR f.total_supplier_balance IS NOT NULL
+ORDER BY 
+    f.r_name ASC, f.avg_high_value_account DESC;

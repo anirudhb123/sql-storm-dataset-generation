@@ -1,0 +1,53 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE 
+            WHEN PH.PostHistoryTypeId IN (10, 11) THEN 
+                CASE 
+                    WHEN PH.Comment::int IS NOT NULL THEN 1 
+                    ELSE 0 
+                END 
+            ELSE 0 
+        END) AS CloseVoteCount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN PostHistory PH ON U.Id = PH.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 
+            (SELECT Title FROM Posts A WHERE A.Id = P.AcceptedAnswerId)
+            ELSE 'No Accepted Answer' 
+        END AS AcceptedAnswerTitle,
+        COALESCE((SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id), 0) AS CommentCount
+    FROM Posts P
+)
+SELECT 
+    UDS.UserId,
+    UDS.DisplayName,
+    COUNT(DISTINCT PD.PostId) AS TotalPostsVotedOn,
+    SUM(PD.Score) AS TotalScoreEarned,
+    UDS.UpVotes,
+    UDS.DownVotes,
+    UDS.CloseVoteCount
+FROM UserVoteSummary UDS
+JOIN PostDetails PD ON PD.PostId IN (
+    SELECT DISTINCT V.PostId 
+    FROM Votes V 
+    WHERE V.UserId = UDS.UserId
+)
+GROUP BY UDS.UserId, UDS.DisplayName, UDS.UpVotes, UDS.DownVotes, UDS.CloseVoteCount
+HAVING COUNT(DISTINCT PD.PostId) > 0
+ORDER BY TotalScoreEarned DESC, UDS.UserId
+LIMIT 10;
+

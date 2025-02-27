@@ -1,0 +1,29 @@
+
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    SUM(ss.ss_net_paid) AS total_sales,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+    COUNT(DISTINCT cr.cr_order_number) AS total_returns,
+    d.d_year,
+    d.d_month_seq
+FROM 
+    customer c
+JOIN 
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+LEFT JOIN 
+    store_returns cr ON c.c_customer_sk = cr.sr_customer_sk
+WHERE 
+    d.d_year >= 2020 
+    AND d.d_year <= 2023
+    AND cd.cd_gender = 'M'
+GROUP BY 
+    c.c_customer_id, c.c_first_name, c.c_last_name, d.d_year, d.d_month_seq
+ORDER BY 
+    total_sales DESC 
+LIMIT 100;

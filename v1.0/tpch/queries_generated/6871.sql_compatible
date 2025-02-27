@@ -1,0 +1,38 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, RANK() OVER (ORDER BY total_value DESC) AS supplier_rank
+    FROM RankedSuppliers s
+), NationalCustomerOrders AS (
+    SELECT c.c_nationkey, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_nationkey
+), NationDetails AS (
+    SELECT n.n_nationkey, n.n_name, rc.order_count
+    FROM nation n
+    JOIN NationalCustomerOrders rc ON n.n_nationkey = rc.c_nationkey
+), SupplierRegion AS (
+    SELECT n.n_nationkey, r.r_regionkey, r.r_name, SUM(ts.total_value) AS supplier_value
+    FROM NationDetails n
+    JOIN region r ON n.n_nationkey = r.r_regionkey
+    JOIN TopSuppliers ts ON ts.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT p.p_partkey 
+            FROM part p 
+            WHERE p.p_size > 10
+        )
+    )
+    GROUP BY n.n_nationkey, r.r_regionkey, r.r_name
+)
+SELECT r.r_name, COUNT(sr.supplier_value) AS supplier_count, AVG(sr.supplier_value) AS avg_supplier_value
+FROM SupplierRegion sr
+JOIN region r ON sr.r_regionkey = r.r_regionkey
+GROUP BY r.r_name
+ORDER BY supplier_count DESC, avg_supplier_value DESC;

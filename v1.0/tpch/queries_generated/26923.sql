@@ -1,0 +1,27 @@
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(p.mfgr_score) AS average_manufacturer_score,
+    STRING_AGG(DISTINCT n.n_name, ', ') AS nations_supply_from,
+    CASE 
+        WHEN SUM(l.l_quantity) > 100 THEN 'High'
+        WHEN SUM(l.l_quantity) BETWEEN 50 AND 100 THEN 'Medium'
+        ELSE 'Low'
+    END AS supply_quantity_category
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+GROUP BY 
+    p.p_name
+HAVING 
+    AVG(p.p_retailprice) > 20.00
+ORDER BY 
+    total_available_quantity DESC;

@@ -1,0 +1,84 @@
+WITH RankedUsers AS (
+    SELECT 
+        Id, 
+        Reputation,
+        CreationDate,
+        DisplayName,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+),
+RecentPosts AS (
+    SELECT 
+        P.Id, 
+        P.Title, 
+        P.CreationDate, 
+        P.Score, 
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostVotes AS (
+    SELECT 
+        PostId, 
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) as LastClosedDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        PH.PostId
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    P.Title,
+    P.CreationDate,
+    COALESCE(V.UpVotes, 0) AS UpVotes,
+    COALESCE(V.DownVotes, 0) AS DownVotes,
+    COUNT(C.CommentId) AS CommentCount,
+    CASE 
+        WHEN CP.LastClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    R.ReputationRank,
+    RANK() OVER (PARTITION BY U.Id ORDER BY COALESCE(V.UpVotes - V.DownVotes, 0) DESC) AS UserPostRank
+FROM 
+    RankedUsers R
+JOIN 
+    RecentPosts P ON R.Id = P.OwnerUserId
+LEFT JOIN 
+    PostVotes V ON P.Id = V.PostId
+LEFT JOIN 
+    (SELECT 
+        C.PostId, 
+        COUNT(C.Id) AS CommentId
+    FROM 
+        Comments C
+    GROUP BY 
+        C.PostId) C ON P.Id = C.PostId
+LEFT JOIN 
+    ClosedPosts CP ON P.Id = CP.PostId
+WHERE 
+    R.ReputationRank <= 100
+    AND (COALESCE(V.UpVotes, 0) - COALESCE(V.DownVotes, 0)) > 0
+    OR P.CreationDate < (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days')
+ORDER BY 
+    R.Reputation DESC,
+    P.CreationDate DESC;

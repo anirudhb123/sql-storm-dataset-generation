@@ -1,0 +1,101 @@
+WITH RECURSIVE income_cte AS (
+    SELECT 
+        ib_income_band_sk,
+        ib_lower_bound,
+        ib_upper_bound,
+        1 AS level
+    FROM 
+        income_band
+    WHERE 
+        ib_lower_bound IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        cte.level + 1
+    FROM 
+        income_band ib
+    JOIN 
+        income_cte cte ON ib.ib_lower_bound > cte.ib_upper_bound
+    WHERE 
+        cte.level < 10
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_marital_status,
+        cd.cd_gender,
+        cd.cd_purchase_estimate,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            WHEN cd.cd_purchase_estimate < 1000 THEN 'Low'
+            WHEN cd.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium'
+            ELSE 'High' 
+        END AS purchase_band,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status IN ('M', 'S') OR cd.cd_gender IS NOT NULL
+),
+sales_summary AS (
+    SELECT 
+        s.ss_item_sk,
+        SUM(s.ss_quantity) AS total_quantity,
+        SUM(s.ss_net_paid) AS total_sales,
+        COUNT(DISTINCT s.ss_ticket_number) AS order_count
+    FROM 
+        store_sales s
+    JOIN 
+        customer_info ci ON ci.c_customer_sk = s.ss_customer_sk
+    WHERE 
+        s.ss_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2001)
+    GROUP BY 
+        s.ss_item_sk
+),
+promotions AS (
+    SELECT 
+        p.p_promo_sk,
+        p.p_promo_name,
+        p.p_start_date_sk,
+        p.p_end_date_sk,
+        COUNT(DISTINCT cs.cs_order_number) AS promotion_order_count
+    FROM 
+        promotion p
+    LEFT JOIN 
+        catalog_sales cs ON p.p_promo_sk = cs.cs_promo_sk
+    WHERE 
+        p.p_discount_active = 'Y'
+    GROUP BY 
+        p.p_promo_sk, p.p_promo_name, p.p_start_date_sk, p.p_end_date_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    SUM(ss.total_quantity) AS overall_quantity,
+    SUM(ss.total_sales) AS overall_sales,
+    coalesce(pr.promotion_order_count, 0) AS total_promotions,
+    MAX(income.ib_upper_bound) AS max_income_band,
+    MAX(income.ib_lower_bound) AS min_income_band
+FROM 
+    customer_info ci
+JOIN 
+    sales_summary ss ON ci.c_customer_sk = ss.ss_item_sk  
+FULL OUTER JOIN 
+    income_cte income ON (ci.rank BETWEEN income.ib_lower_bound AND income.ib_upper_bound)
+LEFT JOIN 
+    promotions pr ON ci.c_customer_sk = pr.p_promo_sk  
+GROUP BY 
+    ci.c_first_name, ci.c_last_name
+HAVING 
+    SUM(ss.total_sales) > (SELECT AVG(total_sales) FROM sales_summary) OR ci.c_first_name LIKE 'A%' 
+ORDER BY 
+    overall_sales DESC, ci.c_last_name ASC
+LIMIT 100 OFFSET 10;

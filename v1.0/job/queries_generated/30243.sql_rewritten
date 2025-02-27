@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+TopMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        MovieHierarchy m
+    LEFT JOIN 
+        complete_cast cc ON m.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        m.movie_id, m.title, m.production_year
+    HAVING 
+        COUNT(DISTINCT c.person_id) > 5
+),
+
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    cd.companies, 
+    cd.company_types
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    CompanyDetails cd ON tm.movie_id = cd.movie_id
+WHERE 
+    tm.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    tm.cast_count DESC, 
+    tm.production_year ASC;

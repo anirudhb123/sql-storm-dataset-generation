@@ -1,0 +1,4 @@
+SELECT min(mc.note) AS production_note, min(t.title) AS movie_title, min(t.production_year) AS movie_year
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info_idx AS mi_idx, title AS t
+WHERE ct.id = mc.company_type_id AND t.id = mc.movie_id AND t.id = mi_idx.movie_id AND mc.movie_id = mi_idx.movie_id AND it.id = mi_idx.info_type_id
+AND mc.note IN ('(1947) (Denmark) (theatrical) (re-release)', '(2006) (USA) (DVD) (Season 1)', '(2009) (USA) (DVD) (R-rated version)', '(2010) (Argentina) (DVD) (Double feature with "Monsters vs Aliens" [2009])', '(videos "Six Underground" and "Spin Spin Sugar")');

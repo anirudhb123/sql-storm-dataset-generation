@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title AS PostTitle,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.Title AS PostTitle,
+        P.ParentId,
+        R.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy R ON P.ParentId = R.PostId
+),
+PostMetrics AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) AS UpvoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        MAX(B.Date) AS LastBadgeDate,
+        COALESCE(U.Reputation, 0) AS UserReputation  
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        P.Id, U.Reputation
+),
+PostStatusChanges AS (
+    SELECT 
+        PH.PostId,
+        MAX(History.CreationDate) AS LastChangeDate,
+        PH.PostHistoryTypeId AS ChangeTypeId
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId
+),
+FinalMetrics AS (
+    SELECT 
+        PM.Id, 
+        PM.Title, 
+        PM.CommentCount,
+        PM.TotalUpvotes - PM.TotalDownvotes AS NetVotes,
+        P.LastChangeDate,
+        CASE 
+            WHEN P.ChangeTypeId IN (10, 11) THEN 'Closed/Reopened'
+            ELSE 'Active'
+        END AS PostStatus,
+        R.Level AS PostHierarchyLevel
+    FROM 
+        PostMetrics PM
+    LEFT JOIN 
+        (SELECT PostId, LastChangeDate, ChangeTypeId FROM PostStatusChanges) P ON PM.Id = P.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy R ON PM.Id = R.PostId
+)
+SELECT 
+    F.Id AS PostId,
+    F.Title,
+    F.CommentCount,
+    F.NetVotes,
+    F.LastChangeDate,
+    F.PostStatus,
+    F.PostHierarchyLevel,
+    CASE 
+        WHEN F.CommentCount > 50 THEN 'High Activity'
+        WHEN F.CommentCount BETWEEN 20 AND 50 THEN 'Moderate Activity'
+        ELSE 'Low Activity'
+    END AS ActivityLevel
+FROM 
+    FinalMetrics F
+WHERE 
+    F.NetVotes >= 0 
+ORDER BY 
+    F.NetVotes DESC, 
+    F.LastChangeDate DESC;

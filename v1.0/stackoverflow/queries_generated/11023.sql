@@ -1,0 +1,55 @@
+-- Performance Benchmarking Query
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.PostTypeId, p.CreationDate, p.Score, p.ViewCount
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(u.Reputation) AS TotalReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.PostId,
+    ps.PostTypeId,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    us.UserId,
+    us.BadgeCount,
+    us.TotalReputation
+FROM 
+    PostStatistics ps
+JOIN 
+    Users u ON ps.OwnerUserId = u.Id
+JOIN 
+    UserStatistics us ON u.Id = us.UserId
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC
+LIMIT 100;

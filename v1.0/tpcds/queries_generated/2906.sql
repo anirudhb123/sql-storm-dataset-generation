@@ -1,0 +1,54 @@
+
+WITH SalesData AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank_profit,
+        CASE 
+            WHEN ws.ws_quantity BETWEEN 1 AND 5 THEN 'Low'
+            WHEN ws.ws_quantity BETWEEN 6 AND 15 THEN 'Medium'
+            WHEN ws.ws_quantity > 15 THEN 'High'
+            ELSE 'Unknown'
+        END AS quantity_band
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk = (
+        SELECT MAX(d_date_sk)
+        FROM date_dim 
+        WHERE d_date = CURRENT_DATE
+    )
+),
+
+AggregatedSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        SUM(sd.ws_quantity) AS total_sales_volume,
+        AVG(sd.ws_sales_price) AS average_sales_price,
+        SUM(sd.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT sd.ws_order_number) AS total_orders,
+        STRING_AGG(DISTINCT sd.quantity_band, ', ') AS sales_volume_band
+    FROM SalesData sd
+    WHERE sd.rank_profit <= 5
+    GROUP BY sd.ws_item_sk
+)
+
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(as.total_sales_volume, 0) AS total_sales_volume,
+    COALESCE(as.average_sales_price, 0) AS average_sales_price,
+    COALESCE(as.total_net_profit, 0) AS total_net_profit,
+    COALESCE(as.total_orders, 0) AS total_orders,
+    COALESCE(as.sales_volume_band, 'None') AS sales_volume_band,
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+FROM item i
+LEFT JOIN AggregatedSales as ON i.i_item_sk = as.ws_item_sk
+LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+LEFT JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+GROUP BY i.i_item_id, i.i_item_desc, as.total_sales_volume, as.average_sales_price, as.total_net_profit, as.total_orders, as.sales_volume_band, ca.ca_city, ca.ca_state
+ORDER BY total_net_profit DESC LIMIT 10;

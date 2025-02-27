@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate BETWEEN NOW() - INTERVAL '1 year' AND NOW()
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.OwnerUserId
+),
+TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank = 1
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation > 1000 THEN 'High'
+            WHEN u.Reputation BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationLevel
+    FROM 
+        Users u
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    COALESCE(u.DisplayName, 'Anonymous') AS UserDisplayName,
+    ur.Reputation,
+    ur.ReputationLevel,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = tp.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = tp.Id AND v.VoteTypeId = 3) AS DownVoteCount
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+JOIN 
+    UserReputation ur ON ur.UserId = tp.OwnerUserId
+WHERE 
+    tp.ViewCount > 50
+ORDER BY 
+    tp.ViewCount DESC;

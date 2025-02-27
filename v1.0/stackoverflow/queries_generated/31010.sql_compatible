@@ -1,0 +1,109 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        OwnerUserId,
+        Score,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostScores AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        COALESCE(ROUND(AVG(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE -1 END), 2), 0) AS WeightScore,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.Score
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        RANK() OVER(ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.Score AS PostScore,
+        COALESCE(ph.WeightScore, 0) AS WeightedScore,
+        ph.CommentCount,
+        u.DisplayName AS OwnerName,
+        u.Reputation AS OwnerReputation,
+        ur.BadgeCount,
+        ph.PostRank
+    FROM 
+        PostScores ph
+    INNER JOIN 
+        Posts p ON ph.Id = p.Id
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserReputation ur ON u.Id = ur.UserId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.PostScore,
+    p.WeightedScore,
+    p.CommentCount,
+    p.OwnerName,
+    p.OwnerReputation,
+    p.BadgeCount,
+    COALESCE(ph.Id, -1) AS ParentPostId,
+    CASE 
+        WHEN ph.Title IS NOT NULL THEN 'Has Parent'
+        ELSE 'No Parent'
+    END AS ParentStatus,
+    CASE 
+        WHEN p.CommentCount > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS ActivityStatus
+FROM 
+    PostStatistics p
+LEFT JOIN 
+    RecursivePostHierarchy ph ON p.PostId = ph.Id
+WHERE 
+    p.OwnerReputation > 1000
+ORDER BY 
+    p.PostScore DESC, p.CommentCount DESC;

@@ -1,0 +1,53 @@
+WITH RankedLineItems AS (
+    SELECT 
+        l_orderkey,
+        l_partkey,
+        l_suppkey,
+        l_quantity,
+        l_extendedprice,
+        l_discount,
+        ROW_NUMBER() OVER (PARTITION BY l_orderkey ORDER BY l_extendedprice DESC) AS rk
+    FROM 
+        lineitem
+),
+SupplierRegion AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        r.r_name AS region_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, r.r_name
+)
+SELECT 
+    c.c_name,
+    o.o_orderkey,
+    li.l_partkey,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_price,
+    sr.region_name,
+    COALESCE(AVG(sr.total_supply_cost), 0) AS avg_supply_cost,
+    MAX(li.l_shipdate) AS last_ship_date
+FROM 
+    customer c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    RankedLineItems li ON o.o_orderkey = li.l_orderkey AND li.rk = 1
+LEFT JOIN 
+    SupplierRegion sr ON li.l_suppkey = sr.s_suppkey
+WHERE 
+    o.o_orderdate >= '1996-01-01' 
+    AND o.o_orderdate < '1997-01-01' 
+    AND (li.l_returnflag IS NULL OR li.l_returnflag = 'N')
+GROUP BY 
+    c.c_name, o.o_orderkey, li.l_partkey, sr.region_name
+ORDER BY 
+    total_price DESC, last_ship_date DESC;

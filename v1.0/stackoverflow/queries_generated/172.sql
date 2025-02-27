@@ -1,0 +1,68 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.Views,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.Reputation, U.Views
+),
+
+TopUsers AS (
+    SELECT 
+        UserId,
+        Reputation,
+        Views,
+        TotalBounties,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS RN
+    FROM UserStats
+),
+
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        PH.CreationDate,
+        PH.Comment AS CloseReason,
+        DATEDIFF(day, P.CreationDate, PH.CreationDate) AS DaysToClose
+    FROM PostHistory PH
+    JOIN Posts P ON PH.PostId = P.Id
+    WHERE PH.PostHistoryTypeId = 10
+),
+
+RecentActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN P.LastActivityDate > CURRENT_TIMESTAMP - INTERVAL '30 days' THEN 1 END) AS RecentPosts,
+        COUNT(CASE WHEN C.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days' THEN 1 END) AS RecentComments
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY U.Id, U.DisplayName
+)
+
+SELECT 
+    TU.UserId,
+    U.DisplayName,
+    TU.Reputation,
+    TU.TotalPosts,
+    TU.TotalQuestions,
+    TU.TotalAnswers,
+    COALESCE(CP.DaysToClose, NULL) AS DaysToClose,
+    RA.RecentPosts,
+    RA.RecentComments
+FROM TopUsers TU
+JOIN Users U ON TU.UserId = U.Id
+LEFT JOIN ClosedPosts CP ON U.Id = CP.UserId
+LEFT JOIN RecentActivity RA ON U.Id = RA.UserId
+WHERE TU.RN <= 10
+ORDER BY TU.Reputation DESC, RecentPosts DESC;

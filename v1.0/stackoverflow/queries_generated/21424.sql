@@ -1,0 +1,64 @@
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,  -- Upvotes
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,  -- Downvotes
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PopularTags AS (
+    SELECT 
+        TRIM(t.TagName) AS Tag,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT v.UserId) AS VoterCount
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 1  -- Questions only
+    GROUP BY t.Id
+),
+RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        p.ViewCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReopenCount,
+        RANK() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS ActivityRank
+    FROM Posts p
+    INNER JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'  -- Filter for recent posts
+    GROUP BY p.Id, u.DisplayName
+)
+SELECT 
+    ue.UserId, 
+    ue.DisplayName,
+    ue.PostCount AS TotalPosts, 
+    ue.UpVotes, 
+    ue.DownVotes, 
+    ue.CommentCount, 
+    ue.BadgeCount,
+    pt.Tag,
+    pt.PostCount AS TagPostCount, 
+    pt.VoterCount,
+    ra.Title AS RecentPostTitle,
+    ra.CreationDate AS RecentPostDate,
+    ra.Author AS RecentPostAuthor,
+    ra.ViewCount,
+    ra.CloseReopenCount
+FROM UserEngagement ue
+LEFT JOIN PopularTags pt ON pt.PostCount > 5  -- Only consider popular tags
+LEFT JOIN RecentActivity ra ON ra.ActivityRank = 1  -- Most recent activity for each post
+WHERE ue.Reputation > 100
+ORDER BY ue.Reputation DESC, ue.PostCount DESC, pt.PostCount DESC NULLS LAST
+LIMIT 100;

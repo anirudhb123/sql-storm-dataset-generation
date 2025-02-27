@@ -1,0 +1,58 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.Views,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.Views,
+        rp.Tags,
+        rp.OwnerDisplayName,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 10 AND 
+        rp.Score > 0 
+),
+TagStats AS (
+    SELECT 
+        unnest(string_to_array(rp.Tags, '>')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        FilteredPosts rp
+    GROUP BY 
+        TagName
+)
+SELECT 
+    fs.PostId,
+    fs.Title,
+    fs.Views,
+    fs.OwnerDisplayName,
+    ts.TagName,
+    ts.PostCount
+FROM 
+    FilteredPosts fs
+LEFT JOIN 
+    TagStats ts ON ts.TagName = ANY(string_to_array(fs.Tags, '>'))
+ORDER BY 
+    fs.Views DESC, 
+    fs.Score DESC;

@@ -1,0 +1,60 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_id
+),
+CustomerReturnStats AS (
+    SELECT
+        c.c_customer_id,
+        COUNT(DISTINCT wr.wr_order_number) AS web_returns_count,
+        SUM(wr.wr_return_amt) AS total_web_return_amount
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    WHERE 
+        wr.wr_item_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_id
+),
+TopWebSales AS (
+    SELECT 
+        sales.*,
+        cs_item_sk,
+        cs_sales_price,
+        cs_net_profit,
+        cs_ext_discount_amt
+    FROM 
+        SalesData sales
+    JOIN 
+        catalog_sales cs ON sales.web_site_id = cs.cs_ship_mode_sk
+    WHERE 
+        sales.rank <= 5
+)
+SELECT 
+    tws.web_site_id,
+    tws.total_quantity,
+    tws.total_profit,
+    tws.avg_sales_price,
+    tws.order_count,
+    COALESCE(cust.web_returns_count, 0) AS customer_web_returns,
+    COALESCE(cust.total_web_return_amount, 0.00) AS total_web_return_amount
+FROM 
+    TopWebSales tws
+LEFT JOIN 
+    CustomerReturnStats cust ON tws.web_site_id = cust.c_customer_id
+ORDER BY 
+    tws.total_profit DESC;

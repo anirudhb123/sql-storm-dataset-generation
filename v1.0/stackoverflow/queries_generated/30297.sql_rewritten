@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostHistoryAggregated AS (
+    SELECT 
+        ph.PostId, 
+        ph.PostHistoryTypeId,
+        COUNT(*) AS AggregateCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 6, 10, 11)  
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+TagsResolved AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        STRING_TO_ARRAY(p.Tags, ',') AS tag_array ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(BOTH '"' FROM tag_array)
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.AnswerCount,
+    pha.LastEditDate,
+    tr.Tags,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.Id AND v.VoteTypeId = 2) AS UpVotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.Id AND v.VoteTypeId = 3) AS DownVotes,
+    CASE 
+        WHEN ph.AggregateCount IS NULL THEN 'No edits/closures'
+        ELSE 'Edited/Closed'
+    END AS EditStatus,
+    CASE 
+        WHEN rp.UserPostRank = 1 THEN 'Most Recent Post'
+        ELSE NULL
+    END AS PostRankStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryAggregated ph ON rp.Id = ph.PostId
+LEFT JOIN 
+    TagsResolved tr ON rp.Id = tr.PostId
+WHERE 
+    rp.AnswerCount > 0
+ORDER BY 
+    rp.CreationDate DESC, rp.AnswerCount DESC;

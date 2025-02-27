@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+AggregatedLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate >= '1996-01-01' AND l.l_shipdate < '1997-01-01'
+    GROUP BY l.l_orderkey
+),
+NationRevenue AS (
+    SELECT n.n_nationkey, SUM(agli.total_revenue) AS nation_revenue
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN AggregatedLineItems agli ON ps.ps_partkey = agli.l_orderkey
+    GROUP BY n.n_nationkey
+),
+RankedNations AS (
+    SELECT nr.n_nationkey, nr.nation_revenue,
+           RANK() OVER (ORDER BY nr.nation_revenue DESC) AS rank_position
+    FROM NationRevenue nr
+)
+SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+       COALESCE(rn.nation_revenue, 0) AS total_revenue,
+       sh.level AS supplier_level
+FROM part p
+LEFT JOIN RankedNations rn ON rn.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey IN 
+    (SELECT ps_suppkey FROM partsupp WHERE ps_partkey = p.p_partkey)
+    AND s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) LIMIT 1)
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey IN 
+    (SELECT ps_suppkey FROM partsupp WHERE ps_partkey = p.p_partkey)
+    AND s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) LIMIT 1)
+WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size > 20)
+ORDER BY total_revenue DESC, p.p_name;

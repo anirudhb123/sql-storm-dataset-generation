@@ -1,0 +1,104 @@
+
+WITH UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBountyEarned
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 9 
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        DENSE_RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS ScoreRank,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+        AND P.ViewCount > (SELECT AVG(ViewCount) FROM Posts) 
+),
+RecentActivity AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        PH.PostId
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        SUM(UPVotes - DownVotes) AS NetVotes,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+FinalReport AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        UE.TotalPosts,
+        UE.Questions,
+        UE.Answers,
+        PS.Title,
+        PS.ScoreRank,
+        RA.EditCount,
+        RA.LastEditDate,
+        TU.NetVotes,
+        TU.BadgeCount,
+        CASE 
+            WHEN UE.TotalPosts > 10 THEN 'High Activity'
+            WHEN UE.TotalPosts BETWEEN 5 AND 10 THEN 'Moderate Activity'
+            ELSE 'Low Activity'
+        END AS ActivityLevel
+    FROM 
+        UserEngagement UE
+    JOIN 
+        TopUsers TU ON UE.UserId = TU.UserId
+    JOIN 
+        PostStats PS ON UE.UserId = PS.OwnerUserId 
+    LEFT JOIN 
+        RecentActivity RA ON PS.PostId = RA.PostId
+    WHERE 
+        UE.TotalPosts > 0 AND 
+        (TU.NetVotes IS NOT NULL OR TU.BadgeCount > 0) 
+)
+SELECT 
+    DisplayName,
+    Reputation,
+    TotalPosts,
+    Questions,
+    Answers,
+    Title,
+    ScoreRank,
+    EditCount,
+    LastEditDate,
+    NetVotes,
+    BadgeCount,
+    ActivityLevel
+FROM 
+    FinalReport
+ORDER BY 
+    Reputation DESC, ScoreRank
+LIMIT 50;

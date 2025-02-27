@@ -1,0 +1,75 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        CreationDate, 
+        0 AS Depth 
+    FROM 
+        Posts 
+    WHERE 
+        ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        p.CreationDate, 
+        r.Depth + 1 
+    FROM 
+        Posts p 
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostMetrics AS (
+    SELECT 
+        po.Id AS PostId,
+        po.Title,
+        po.CreationDate,
+        po.ViewCount,
+        po.Score,
+        COUNT(co.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY po.OwnerUserId ORDER BY po.CreationDate DESC) AS RankWithinUser
+    FROM 
+        Posts po
+    LEFT JOIN 
+        Comments co ON po.Id = co.PostId
+    LEFT JOIN 
+        Votes v ON po.Id = v.PostId AND v.VoteTypeId = 8 
+    GROUP BY 
+        po.Id, po.Title, po.CreationDate, po.ViewCount, po.Score
+),
+TopPosts AS (
+    SELECT 
+        pm.*, 
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY pm.ViewCount DESC, pm.Score DESC) AS PopularityRank
+    FROM 
+        PostMetrics pm
+    JOIN 
+        Users U ON pm.OwnerUserId = U.Id
+)
+SELECT 
+    pp.PostId, 
+    pp.Title, 
+    pp.CreationDate, 
+    pp.ViewCount, 
+    pp.Score,
+    pp.CommentCount, 
+    pp.TotalBounty, 
+    pp.OwnerDisplayName,
+    pp.Reputation,
+    pp.PopularityRank,
+    COALESCE(ph.Depth, -1) AS PostDepth
+FROM 
+    TopPosts pp
+LEFT JOIN 
+    RecursivePostHierarchy ph ON pp.PostId = ph.Id
+WHERE 
+    pp.PopularityRank <= 10 
+    AND pp.Reputation >= 1000 
+ORDER BY 
+    pp.PopularityRank, pp.CreationDate DESC;

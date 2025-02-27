@@ -1,0 +1,46 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'Europe')
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+TopSuppliers AS (
+    SELECT s.s_name, s.total_supply_cost, n.n_name 
+    FROM RankedSuppliers s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE rank <= 3
+)
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    ts.n_name
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    TopSuppliers ts ON l.l_suppkey = ts.s_suppkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey AND l.l_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+GROUP BY 
+    p.p_name, ts.n_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY 
+    total_revenue DESC;

@@ -1,0 +1,52 @@
+
+WITH ranked_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+), 
+part_availability AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail
+    FROM partsupp ps
+    WHERE ps.ps_supplycost < (SELECT AVG(ps2.ps_supplycost) FROM partsupp ps2)
+    GROUP BY ps.ps_partkey
+), 
+high_value_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL 
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+)
+SELECT DISTINCT n.n_name, pa.ps_partkey, p.p_name, COUNT(o.o_orderkey) AS order_count,
+       COALESCE(SUM(l.l_extendedprice), 0) AS total_revenue,
+       S.winner_nation AS winner_supp_key
+FROM nation n
+LEFT JOIN ranked_suppliers rs ON n.n_nationkey = rs.s_nationkey
+LEFT JOIN part_availability pa ON pa.ps_partkey IN (
+    SELECT DISTINCT ps_partkey
+    FROM partsupp
+    WHERE ps_availqty > 0
+)
+LEFT JOIN lineitem l ON l.l_orderkey IN (
+    SELECT o_orderkey
+    FROM orders 
+    WHERE o_orderstatus = 'F'
+)
+LEFT JOIN orders o ON o.o_orderkey = l.l_orderkey
+JOIN part p ON p.p_partkey = pa.ps_partkey
+LEFT JOIN (
+    SELECT DISTINCT supplier.s_nationkey AS winner_nation, ps.partkey AS winner_partkey
+    FROM partsupp ps
+    JOIN supplier ON supplier.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty = (
+        SELECT MAX(ps2.ps_availqty) FROM partsupp ps2
+        WHERE ps2.ps_partkey = ps.ps_partkey
+        GROUP BY ps2.ps_partkey
+    )
+) AS S ON p.p_partkey = S.winner_partkey AND n.n_nationkey = S.winner_nation
+WHERE n.n_nationkey IN (SELECT DISTINCT s_nationkey FROM ranked_suppliers WHERE rn <= 3)
+GROUP BY n.n_name, pa.ps_partkey, p.p_name, S.winner_nation
+HAVING COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY total_revenue DESC, n.n_name;

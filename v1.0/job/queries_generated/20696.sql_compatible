@@ -1,0 +1,76 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS movie_rank,
+        COUNT(ci.person_id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        COUNT(DISTINCT cn.country_code) AS country_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+keyword_count AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_total
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+final_movie_info AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        ci.companies,
+        ci.country_count,
+        kc.keyword_total,
+        rm.cast_count,
+        CASE 
+            WHEN rm.cast_count = 0 THEN 'No Cast'
+            WHEN rm.cast_count < 5 THEN 'Few Cast'
+            WHEN rm.cast_count BETWEEN 5 AND 15 THEN 'Moderate Cast'
+            ELSE 'Many Cast'
+        END AS cast_quality
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        company_info ci ON ci.movie_id = rm.title_id
+    LEFT JOIN 
+        keyword_count kc ON kc.movie_id = rm.title_id
+    WHERE 
+        rm.movie_rank <= 5
+        AND (rm.production_year IS NOT NULL AND rm.production_year > 2000)
+)
+SELECT 
+    fmi.title,
+    fmi.production_year,
+    fmi.companies,
+    fmi.country_count,
+    fmi.keyword_total,
+    fmi.cast_count,
+    fmi.cast_quality,
+    COALESCE(fmi.keyword_total, 0) - COALESCE(fmi.country_count, 0) AS keyword_country_diff,
+    COALESCE(CASE WHEN fmi.cast_quality = 'No Cast' THEN NULL ELSE fmi.cast_count END, 'N/A') AS adjusted_cast_count
+FROM 
+    final_movie_info fmi
+ORDER BY 
+    fmi.production_year DESC,
+    fmi.cast_count DESC;

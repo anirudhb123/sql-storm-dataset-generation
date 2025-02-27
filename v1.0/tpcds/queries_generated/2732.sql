@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_sold_date_sk ORDER BY ws_net_profit DESC) AS rank
+    FROM
+        web_sales ws
+    WHERE
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+),
+CustomerReturns AS (
+    SELECT
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS total_return_amt,
+        COUNT(*) AS return_count
+    FROM
+        web_returns
+    GROUP BY
+        wr_returning_customer_sk
+    HAVING
+        COUNT(*) > 5
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_marital_status,
+        cd.cd_gender,
+        cd.cd_purchase_estimate,
+        ca.ca_country,
+        COALESCE(SUM(ws.ws_sales_price * ws.ws_quantity), 0) AS total_spent,
+        COALESCE(SUM(cr_return_amount), 0) AS total_returns
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN
+        web_returns cr ON c.c_customer_sk = cr.wr_returning_customer_sk
+    WHERE
+        cd.cd_purchase_estimate > 1000
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_marital_status, cd.cd_gender, cd.cd_purchase_estimate, ca.ca_country
+    HAVING
+        total_spent - total_returns > 500
+)
+SELECT
+    hv.*, 
+    COALESCE(rs.ws_quantity, 0) AS best_sales_quantity,
+    rs.ws_sales_price AS best_sales_price,
+    RANK() OVER (ORDER BY hv.total_spent DESC) AS customer_rank
+FROM
+    HighValueCustomers hv
+LEFT JOIN
+    RankedSales rs ON hv.c_customer_sk = rs.web_site_sk 
+WHERE 
+    rs.rank = 1 OR rs.rank IS NULL
+ORDER BY
+    hv.total_spent DESC
+LIMIT 10;

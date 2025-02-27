@@ -1,0 +1,49 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, n_comment, 1 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, n.n_comment, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+), 
+monthly_sales AS (
+    SELECT 
+        DATE_TRUNC('month', o.o_orderdate) AS sales_month,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY sales_month
+), 
+supplier_totals AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+high_sales AS (
+    SELECT sales_month, total_sales
+    FROM monthly_sales 
+    WHERE total_sales > (SELECT AVG(total_sales) FROM monthly_sales)
+)
+SELECT 
+    rh.r_name AS region_name,
+    nh.n_name AS nation_name,
+    COALESCE(st.s_name, 'Unknown Supplier') AS supplier_name,
+    hs.sales_month,
+    hs.total_sales,
+    nt.total_supply_cost
+FROM region rh
+LEFT JOIN nation_hierarchy nh ON rh.r_regionkey = nh.n_regionkey
+LEFT JOIN supplier_totals st ON nh.n_nationkey = st.s_suppkey
+JOIN high_sales hs ON hs.sales_month = DATE_TRUNC('month', CURRENT_DATE)
+LEFT JOIN lineitem l ON st.s_suppkey = l.l_suppkey
+WHERE 
+    (st.total_supply_cost > 10000 OR st.total_supply_cost IS NULL)
+    AND l.l_returnflag = 'R'
+ORDER BY region_name, nation_name, total_sales DESC;

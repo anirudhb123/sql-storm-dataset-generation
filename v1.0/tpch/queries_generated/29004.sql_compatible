@@ -1,0 +1,70 @@
+
+WITH RecursiveParts AS (
+    SELECT 
+        p_partkey,
+        p_name,
+        p_retailprice,
+        LENGTH(p_name) AS name_length
+    FROM 
+        part 
+    WHERE 
+        p_size > 10
+    UNION ALL
+    SELECT 
+        ps.ps_partkey,
+        CONCAT(rp.p_name, ' - ', SUBSTRING(ps.ps_comment, 1, 20)) AS p_name,
+        rp.p_retailprice,
+        LENGTH(CONCAT(rp.p_name, ' - ', SUBSTRING(ps.ps_comment, 1, 20))) AS name_length
+    FROM 
+        partsupp ps
+    JOIN 
+        RecursiveParts rp ON ps.ps_partkey = rp.p_partkey
+    WHERE 
+        ps.ps_availqty < 100
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        CONCAT(s.s_name, ' (', s.s_phone, ')') AS formatted_info
+    FROM 
+        supplier s
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    rp.p_partkey,
+    rp.p_name,
+    rp.p_retailprice,
+    si.formatted_info,
+    co.order_count,
+    rp.name_length,
+    rp.name_length * co.order_count AS benchmark_metric
+FROM 
+    RecursiveParts rp
+JOIN 
+    SupplierInfo si ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost < 50)
+JOIN 
+    CustomerOrders co ON co.order_count > 5
+WHERE 
+    rp.name_length > 10 
+GROUP BY 
+    rp.p_partkey, 
+    rp.p_name, 
+    rp.p_retailprice, 
+    si.formatted_info, 
+    co.order_count, 
+    rp.name_length
+ORDER BY 
+    benchmark_metric DESC;

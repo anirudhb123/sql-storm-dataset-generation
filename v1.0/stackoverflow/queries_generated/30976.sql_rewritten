@@ -1,0 +1,67 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.PostTypeId, 
+        p.AcceptedAnswerId, 
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.PostTypeId, 
+        p.AcceptedAnswerId, 
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p 
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+)
+
+
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+    AVG(v.BountyAmount) AS AverageBounty,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+    MAX(b.Name) AS TopBadge,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags, 
+    ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(DISTINCT p.Id) DESC) AS Rank
+
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id
+LEFT JOIN 
+    Badges b ON b.UserId = u.Id
+LEFT JOIN 
+    Tags t ON t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::int[])
+LEFT JOIN 
+    RecursivePostHierarchy rph ON rph.PostId = p.Id
+
+WHERE 
+    u.Reputation > 0 
+    AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    AND (v.VoteTypeId IS NULL OR v.VoteTypeId IN (2, 3)) 
+
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 5 
+
+ORDER BY 
+    TotalPosts DESC, 
+    UserDisplayName;

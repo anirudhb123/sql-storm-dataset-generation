@@ -1,0 +1,85 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(cc.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(cc.id) DESC) AS year_rank,
+        AVG(CASE 
+                WHEN pi.info IS NOT NULL THEN 1 
+                ELSE 0 
+            END) AS average_info_available,
+        STRING_AGG(DISTINCT cn.name, ', ') AS production_companies
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = mt.id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_info mi ON mt.id = mi.movie_id
+    LEFT JOIN 
+        person_info pi ON cc.person_id = pi.person_id AND pi.info_type_id = 1
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.title, mt.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        rm.average_info_available,
+        rm.production_companies
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.cast_count > (SELECT AVG(cast_count) FROM RankedMovies)
+        AND rm.average_info_available < 0.75
+),
+PotentialSequels AS (
+    SELECT 
+        DISTINCT mt.title AS original_title,
+        mt2.title AS sequel_title,
+        mt2.production_year,
+        COALESCE(link.lid, -1) AS link_status
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link link ON mt.id = link.movie_id
+    LEFT JOIN 
+        aka_title mt2 ON link.linked_movie_id = mt2.id
+    WHERE 
+        mt.production_year IS NOT NULL
+        AND mt2.production_year > mt.production_year
+),
+FinalResults AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        fm.cast_count,
+        fm.production_companies,
+        ps.sequel_title,
+        ps.link_status
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        PotentialSequels ps ON fm.title = ps.original_title
+)
+SELECT 
+    fr.title,
+    fr.production_year,
+    fr.cast_count,
+    fr.production_companies,
+    COALESCE(fr.sequel_title, 'No Sequels') AS sequel_title,
+    CASE 
+        WHEN fr.link_status >= 0 THEN 'Linked' 
+        ELSE 'Not Linked' 
+    END AS link_status
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.production_year DESC, fr.cast_count DESC;

@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY ws.net_profit DESC) AS profit_rank,
+        SUM(ws.quantity) OVER (PARTITION BY ws.web_site_id) AS total_quantity,
+        COUNT(DISTINCT ws.bill_customer_sk) OVER (PARTITION BY ws.web_site_id) AS unique_customers
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2021)
+        AND ws.net_profit IS NOT NULL
+),
+TopPerformingSites AS (
+    SELECT 
+        web_site_id, 
+        net_profit, 
+        total_quantity, 
+        unique_customers 
+    FROM 
+        RankedSales 
+    WHERE 
+        profit_rank <= 5
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(cd.cd_dep_count, 0) AS dependent_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    tp.web_site_id,
+    SUM(tp.net_profit) AS total_profit,
+    AVG(cd.dependent_count) AS avg_dependents,
+    COUNT(DISTINCT cd.c_customer_sk) AS customer_count,
+    CASE 
+        WHEN avg_dependents > 3 THEN 'High Dependency'
+        WHEN avg_dependents IN (1, 2) THEN 'Medium Dependency'
+        ELSE 'No Dependents'
+    END AS dependency_status
+FROM 
+    TopPerformingSites tp
+JOIN 
+    CustomerDemographics cd ON cd.c_customer_sk IN 
+    (SELECT DISTINCT ws.bill_customer_sk 
+     FROM web_sales ws 
+     WHERE ws.web_site_id = tp.web_site_id)
+GROUP BY 
+    tp.web_site_id
+HAVING 
+    SUM(tp.net_profit) > 
+    (SELECT AVG(net_profit) 
+     FROM TopPerformingSites)
+ORDER BY 
+    total_profit DESC
+LIMIT 10;

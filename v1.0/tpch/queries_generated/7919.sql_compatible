@@ -1,0 +1,53 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        s.s_name AS supplier_name,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        o.o_orderdate BETWEEN '1995-01-01' AND '1997-01-01'
+        AND o.o_orderstatus = 'O'
+),
+TopOrders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_orderdate,
+        r.o_totalprice,
+        r.c_name,
+        r.supplier_name
+    FROM 
+        RankedOrders r
+    WHERE 
+        r.order_rank = 1
+)
+SELECT 
+    t.o_orderkey,
+    t.o_orderdate,
+    t.o_totalprice,
+    t.c_name,
+    COUNT(*) OVER (PARTITION BY t.o_orderkey) AS lineitem_count,
+    ROUND(SUM(ps.ps_supplycost) OVER (PARTITION BY t.o_orderkey), 2) AS total_supply_cost
+FROM 
+    TopOrders t
+JOIN 
+    lineitem l ON t.o_orderkey = l.l_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+GROUP BY 
+    t.o_orderkey, t.o_orderdate, t.o_totalprice, t.c_name
+ORDER BY 
+    t.o_totalprice DESC
+LIMIT 10;

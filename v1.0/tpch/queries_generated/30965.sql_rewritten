@@ -1,0 +1,86 @@
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) as row_num
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+TopSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * l.l_quantity) AS total_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        ps.ps_suppkey
+    ORDER BY 
+        total_cost DESC
+    LIMIT 5
+),
+RegionSales AS (
+    SELECT 
+        r.r_name,
+        SUM(sd.o_totalprice) AS total_sales
+    FROM 
+        SalesData sd
+    JOIN 
+        customer c ON sd.o_orderkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name
+),
+DetailedSales AS (
+    SELECT 
+        sd.o_orderdate,
+        sd.o_orderkey,
+        SUM(sd.l_extendedprice * (1 - sd.l_discount)) AS net_revenue,
+        COUNT(DISTINCT sd.l_partkey) AS unique_products,
+        MAX(sd.l_quantity) AS max_quantity,
+        CASE 
+            WHEN SUM(sd.l_quantity) IS NULL THEN 0 
+            ELSE SUM(sd.l_quantity) 
+        END AS total_quantity
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.row_num <= 3
+    GROUP BY 
+        sd.o_orderdate, sd.o_orderkey
+)
+SELECT 
+    r.r_name,
+    rs.total_sales,
+    ds.o_orderdate,
+    ds.net_revenue,
+    ds.unique_products,
+    ds.max_quantity,
+    ds.total_quantity,
+    ts.ps_suppkey,
+    ts.total_cost
+FROM 
+    RegionSales rs
+JOIN 
+    Region r ON r.r_name = rs.r_name
+LEFT JOIN 
+    DetailedSales ds ON ds.o_orderdate >= DATE '1997-01-01'
+LEFT JOIN 
+    TopSuppliers ts ON ts.ps_suppkey = (SELECT ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = ds.o_orderkey) LIMIT 1)
+WHERE 
+    rs.total_sales > 100000
+ORDER BY 
+    r.r_name, ds.o_orderdate;

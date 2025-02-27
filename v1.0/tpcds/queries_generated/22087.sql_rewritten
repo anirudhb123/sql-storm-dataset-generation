@@ -1,0 +1,63 @@
+WITH sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_list_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_list_price * ws.ws_quantity) DESC) AS item_rank
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    LEFT JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2451545 AND 2451545 + 30 
+        AND (i.i_current_price IS NOT NULL AND i.i_current_price > 0) 
+        AND (p.p_start_date_sk IS NULL OR p.p_end_date_sk IS NULL OR (p.p_start_date_sk <= ws.ws_sold_date_sk AND p.p_end_date_sk >= ws.ws_sold_date_sk))
+    GROUP BY ws.ws_item_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+),
+aggregated_sales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_sales,
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        COALESCE(NULLIF((total_quantity - LEAD(total_quantity) OVER (PARTITION BY sd.ws_item_sk ORDER BY sd.total_sales DESC)), 0), 0) AS previous_sales_diff
+    FROM sales_data sd
+    JOIN customer_info ci ON ci.gender_rank <= 5
+)
+SELECT 
+    ags.ws_item_sk,
+    ags.total_quantity,
+    ags.total_sales,
+    ags.c_customer_sk,
+    ags.c_first_name,
+    ags.c_last_name,
+    ags.cd_gender,
+    ags.cd_marital_status,
+    CASE WHEN ags.previous_sales_diff IS NULL THEN 'N/A' ELSE ags.previous_sales_diff END AS sales_difference
+FROM aggregated_sales ags
+LEFT JOIN store s ON s.s_store_sk = (
+    SELECT s2.s_store_sk
+    FROM store s2
+    WHERE s2.s_number_employees IS NOT NULL
+    ORDER BY RAND() LIMIT 1
+)
+WHERE ags.total_sales > (SELECT AVG(total_sales) FROM sales_data) * 0.75
+ORDER BY ags.total_sales DESC
+LIMIT 10;

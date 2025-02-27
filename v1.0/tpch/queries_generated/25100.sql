@@ -1,0 +1,26 @@
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    AVG(l.l_quantity) AS average_quantity,
+    SUM(CASE WHEN l.l_returnflag = 'Y' THEN l.l_extendedprice ELSE 0 END) AS total_returned_price,
+    STRING_AGG(DISTINCT CONCAT(c.c_name, ': ', l.l_comment), '; ') AS customer_comments
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_retailprice BETWEEN 50.00 AND 300.00
+    AND p.p_comment LIKE '%special%'
+    AND l.l_shipdate >= '2023-01-01'
+GROUP BY 
+    p.p_partkey, p.p_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    average_quantity DESC;

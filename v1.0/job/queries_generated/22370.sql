@@ -1,0 +1,70 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id DESC) AS rank_in_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2020
+),
+ActorDetails AS (
+    SELECT 
+        k.person_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS titles_list
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        RankedMovies t ON c.movie_id = t.movie_id
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        k.person_id, a.name
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 5
+),
+CompanyStatistics AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.name) AS company_count,
+        MAX(CASE WHEN ct.kind LIKE 'Production%' THEN 1 ELSE 0 END) AS has_production_company
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    ad.actor_name,
+    COUNT(DISTINCT cs.movie_id) AS movies_with_companies,
+    SUM(cs.company_count) AS total_companies_in_movies,
+    SUM(CASE WHEN cs.has_production_company = 1 THEN 1 ELSE 0 END) AS movies_with_production_companies,
+    COUNT(DISTINCT r.movie_id) AS ranked_movies
+FROM 
+    ActorDetails ad
+LEFT JOIN 
+    CompanyStatistics cs ON ad.movie_count = cs.movie_id
+LEFT JOIN 
+    RankedMovies r ON ad.movie_count = r.movie_id
+WHERE 
+    ad.actor_name IS NOT NULL
+    AND ad.actor_name NOT LIKE '%Mr.%'
+    AND ad.actor_name NOT LIKE '%Ms.%'
+    AND r.production_year IS NOT NULL
+GROUP BY 
+    ad.actor_name
+HAVING 
+    SUM(cs.company_count) > 10
+ORDER BY 
+    movies_with_companies DESC, total_companies_in_movies ASC
+LIMIT 50;
+
+This SQL query takes advantage of Common Table Expressions (CTEs) to segment the query into manageable parts, applying window functions to rank movies based on their production years. It includes multiple joins and uses aggregate functions alongside string manipulations, filters to handle NULL values, and checks for specific naming patterns. The overall result yields a list of actors, along with statistics on movies related to production companies. The hypothetical use of bizarre "Mr." and "Ms." filters adds an unusual semantic consideration to the actor's name.

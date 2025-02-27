@@ -1,0 +1,50 @@
+
+WITH SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        n.n_name AS nation_name,
+        s.s_address,
+        LENGTH(s.s_comment) AS comment_length
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_mfgr,
+        p.p_size,
+        p.p_container,
+        (SELECT COUNT(*) FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey) AS available_supplies,
+        LENGTH(p.p_comment) AS comment_length
+    FROM part p
+),
+OrderSummaries AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        o.o_orderdate,
+        LENGTH(o.o_comment) AS comment_length
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+)
+SELECT 
+    si.s_name,
+    si.nation_name,
+    pd.p_name,
+    pd.p_brand,
+    os.total_sales,
+    si.comment_length AS supplier_comment_length,
+    pd.comment_length AS part_comment_length,
+    os.comment_length AS order_comment_length
+FROM SupplierInfo si
+JOIN PartDetails pd ON si.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+JOIN OrderSummaries os ON os.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = si.n_nationkey LIMIT 1)
+WHERE pd.available_supplies > 0
+ORDER BY os.total_sales DESC
+LIMIT 100;

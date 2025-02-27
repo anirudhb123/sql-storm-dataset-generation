@@ -1,0 +1,50 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighVolumeOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_quantity) AS total_quantity 
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey 
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_quantity) > 100
+)
+SELECT 
+    n.n_name AS nation, 
+    COUNT(DISTINCT o.o_orderkey) AS order_count, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    AVG(s.total_cost) AS avg_supplier_cost,
+    MAX(o.o_totalprice) AS highest_order_value 
+FROM 
+    HighVolumeOrders o
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+WHERE 
+    rs.rn <= 5 -- Consider top 5 suppliers by total supply cost per nation
+GROUP BY 
+    n.n_name
+ORDER BY 
+    order_count DESC, revenue DESC;

@@ -1,0 +1,45 @@
+
+WITH RECURSIVE supply_chain(s_suppkey, total_cost) AS (
+    SELECT ps_supplierkey, SUM(ps_supplycost) 
+    FROM partsupp 
+    GROUP BY ps_supplierkey
+), nation_suppliers AS (
+    SELECT n.n_name, n.n_nationkey, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name, n.n_nationkey
+), max_supplier_count AS (
+    SELECT MAX(supplier_count) AS max_count
+    FROM nation_suppliers
+), nation_with_max_suppliers AS (
+    SELECT n.n_nationkey, n.n_name
+    FROM nation_suppliers n
+    JOIN max_supplier_count m ON n.supplier_count = m.max_count
+), risky_orders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS risky_total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F') AND l.l_discount > 0.1
+    GROUP BY o.o_orderkey
+), combined AS (
+    SELECT ns.n_name, l.l_orderkey, COUNT(DISTINCT s.s_suppkey) AS supplier_count, 
+           SUM(l.l_extendedprice) AS total_revenue,
+           ROW_NUMBER() OVER(PARTITION BY ns.n_nationkey ORDER BY SUM(l.l_extendedprice) DESC) AS rn
+    FROM risky_orders ro
+    JOIN lineitem l ON ro.o_orderkey = l.l_orderkey
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN nation_with_max_suppliers ns ON s.s_nationkey = ns.n_nationkey
+    GROUP BY ns.n_name, l.l_orderkey
+)
+SELECT DISTINCT c.c_name, c.c_acctbal, COALESCE(cc.max_total, 0) AS max_revenue
+FROM customer c
+LEFT JOIN (
+    SELECT cn.rn, cn.n_name, SUM(cn.total_revenue) AS max_total
+    FROM combined cn
+    WHERE cn.rn = 1
+    GROUP BY cn.rn, cn.n_name
+) cc ON c.c_nationkey IN (SELECT n.n_nationkey FROM nation_with_max_suppliers n)
+WHERE c.c_acctbal IS NOT NULL
+ORDER BY COALESCE(c.c_acctbal, 0) DESC, max_revenue DESC
+LIMIT 10;

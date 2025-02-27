@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank,
+        COUNT(DISTINCT kw.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+DirectorInfo AS (
+    SELECT 
+        ci.movie_id,
+        ARRAY_AGG(DISTINCT c.name) AS directors,
+        COUNT(DISTINCT ci.person_id) AS director_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    JOIN 
+        name c ON ci.person_id = c.imdb_id
+    WHERE 
+        r.role = 'director'
+    GROUP BY 
+        ci.movie_id
+),
+MovieStats AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.year_rank,
+        COALESCE(di.directors, ARRAY[]::text[]) AS directors,
+        COALESCE(di.director_count, 0) AS director_count,
+        rm.keyword_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        DirectorInfo di ON rm.movie_id = di.movie_id
+)
+SELECT 
+    ms.title,
+    ms.production_year,
+    ms.directors,
+    ms.keyword_count,
+    CASE 
+        WHEN ms.director_count > 1 THEN 'Multiple Directors'
+        WHEN ms.director_count = 1 THEN 'Single Director'
+        ELSE 'No Directors'
+    END AS director_status
+FROM 
+    MovieStats ms
+WHERE 
+    ms.year_rank <= 5 AND 
+    (ms.keyword_count > 3 OR ms.production_year = 2020)
+ORDER BY 
+    ms.production_year DESC, ms.keyword_count DESC;

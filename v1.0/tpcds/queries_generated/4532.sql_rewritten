@@ -1,0 +1,58 @@
+WITH RankedSales AS (
+    SELECT 
+        w.warehouse_name,
+        ss.sold_date_sk,
+        COUNT(ss.ticket_number) AS total_sales,
+        SUM(ss.net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY w.warehouse_name ORDER BY SUM(ss.net_profit) DESC) AS sales_rank
+    FROM 
+        store_sales ss
+    JOIN 
+        warehouse w ON ss.store_sk = w.warehouse_sk
+    WHERE 
+        ss.sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2001-10-01')
+                            AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2001-10-31')
+    GROUP BY 
+        w.warehouse_name, ss.sold_date_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.gender,
+        cd.marital_status,
+        cd.education_status,
+        cd.purchase_estimate,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT 
+    cs.c_customer_id,
+    cs.c_first_name,
+    cs.c_last_name,
+    r.sales_rank,
+    r.total_sales,
+    r.total_net_profit,
+    CASE
+        WHEN cd.gender = 'M' THEN 'Male'
+        WHEN cd.gender = 'F' THEN 'Female'
+        ELSE 'Unknown'
+    END AS gender_description,
+    CONCAT(cd.education_status, ' ', cd.marital_status) AS education_marital_combined,
+    COALESCE(cd.purchase_estimate, 0) AS estimated_purchase_power
+FROM 
+    customer cs
+JOIN 
+    CustomerDemographics cd ON cs.current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    RankedSales r ON r.warehouse_name = (SELECT w.warehouse_name FROM warehouse w WHERE w.warehouse_sk = cs.current_addr_sk)
+WHERE 
+    r.sales_rank <= 5 
+ORDER BY 
+    r.total_net_profit DESC,
+    cs.c_last_name ASC;

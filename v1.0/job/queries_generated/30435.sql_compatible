@@ -1,0 +1,91 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level 
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.level + 1 
+    FROM 
+        aka_title mt 
+    JOIN 
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names,
+        STRING_AGG(DISTINCT rt.role, ', ') AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS total_keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+final_result AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        cast.total_cast,
+        cast.cast_names,
+        cast.roles,
+        COALESCE(mk.total_keywords, 0) AS total_keywords,
+        mh.level
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_details cast ON mh.movie_id = cast.movie_id
+    LEFT JOIN 
+        movie_keywords mk ON mh.movie_id = mk.movie_id
+)
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    fr.total_cast,
+    fr.cast_names,
+    fr.roles,
+    fr.total_keywords,
+    fr.level,
+    CASE 
+        WHEN fr.level > 1 THEN 'Sequel/Series'
+        ELSE 'Standalone'
+    END AS movie_type,
+    CASE 
+        WHEN fr.total_keywords > 5 THEN 'Rich Keywords'
+        ELSE 'Limited Keywords'
+    END AS keyword_quality
+FROM 
+    final_result fr
+ORDER BY 
+    fr.production_year DESC,
+    fr.total_cast DESC;

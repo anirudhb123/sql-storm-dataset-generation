@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(NULLIF(p.AcceptedAnswerId, -1), NULL) AS AcceptedAnswerId,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- only questions
+),
+PostVoteStatistics AS (
+    SELECT
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+ParticipatingUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(P.BadgeNames, 'None') AS Badges,
+        COALESCE(P.BadgeCount, 0) AS BadgeCount,
+        SUM(rp.Score + COALESCE(ps.UpVotes, 0) - COALESCE(ps.DownVotes, 0)) AS NetScore,
+        SUM(CASE WHEN rp.Rank = 1 THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    LEFT JOIN 
+        PostVoteStatistics ps ON rp.PostId = ps.PostId
+    LEFT JOIN 
+        UserBadges P ON u.Id = P.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, P.BadgeNames, P.BadgeCount
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.Badges,
+    u.BadgeCount,
+    u.NetScore,
+    CASE 
+        WHEN u.NetScore > 100 THEN 'High Contributor'
+        WHEN u.NetScore BETWEEN 50 AND 100 THEN 'Moderate Contributor'
+        ELSE 'Low Contribution'
+    END AS ContributionLevel,
+    u.AcceptedAnswers
+FROM 
+    ParticipatingUsers u
+WHERE 
+    u.AcceptedAnswers > 0
+ORDER BY 
+    u.NetScore DESC,
+    u.Reputation DESC;

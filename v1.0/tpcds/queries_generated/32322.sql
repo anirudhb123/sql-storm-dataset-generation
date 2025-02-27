@@ -1,0 +1,70 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price DESC) AS Rnk
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    UNION ALL
+    SELECT 
+        cs.cs_catalog_page_sk,
+        cs.cs_order_number,
+        cs.cs_sold_date_sk,
+        cs.cs_item_sk,
+        cs.cs_quantity,
+        cs.cs_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY cs.cs_order_number ORDER BY cs.cs_sales_price DESC) AS Rnk
+    FROM 
+        catalog_sales cs
+    WHERE 
+        cs.cs_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+CustomerReturn AS (
+    SELECT 
+        sr.sr_customer_sk,
+        SUM(sr.sr_return_quantity) AS Total_Returned,
+        SUM(sr.sr_return_amt_inc_tax) AS Total_Return_Amount
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_customer_sk
+    HAVING 
+        Total_Returned > 0
+),
+TopSales AS (
+    SELECT 
+        sd.web_site_sk,
+        SUM(sd.ws_quantity) AS Total_Quantity_Sold,
+        SUM(sd.ws_sales_price * sd.ws_quantity) AS Total_Sales_Amount
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.Rnk <= 10
+    GROUP BY 
+        sd.web_site_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    ts.Total_Quantity_Sold,
+    ts.Total_Sales_Amount,
+    COALESCE(cr.Total_Returned, 0) AS Total_Returned,
+    COALESCE(cr.Total_Return_Amount, 0) AS Total_Return_Amount
+FROM 
+    TopSales ts
+JOIN 
+    customer_address ca ON ts.web_site_sk = ca.ca_address_sk
+LEFT JOIN 
+    CustomerReturn cr ON cr.sr_customer_sk = (SELECT c_customer_sk FROM customer WHERE c_current_addr_sk = ca.ca_address_sk)
+WHERE 
+    ca.ca_state IS NOT NULL
+ORDER BY 
+    ts.Total_Sales_Amount DESC
+LIMIT 50;

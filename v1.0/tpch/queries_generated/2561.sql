@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2024-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        s.s_name,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_name, p.p_name
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_extended_price,
+        AVG(l.l_quantity) AS average_quantity,
+        COUNT(CASE WHEN l.l_returnflag = 'Y' THEN 1 END) AS return_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    rs.o_orderkey,
+    rs.o_orderdate,
+    rs.o_orderpriority,
+    cps.s_name,
+    cps.p_name,
+    lts.total_extended_price,
+    cs.total_orders,
+    cs.total_spent
+FROM 
+    RankedOrders rs
+LEFT JOIN 
+    SupplierParts cps ON cps.total_available > 100
+LEFT JOIN 
+    LineItemSummary lts ON rs.o_orderkey = lts.l_orderkey
+JOIN 
+    CustomerSummary cs ON rs.o_orderkey IN 
+        (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+WHERE 
+    rs.rank <= 5
+    AND (cs.total_spent IS NOT NULL AND cs.total_spent > 5000)
+ORDER BY 
+    rs.o_orderdate DESC, 
+    lts.total_extended_price DESC;

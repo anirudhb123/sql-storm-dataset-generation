@@ -1,0 +1,65 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(ps.ps_availqty) AS total_available, 
+        COUNT(DISTINCT ps.ps_partkey) AS distinct_parts, 
+        MAX(s.s_acctbal) AS max_acctbal
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS total_items
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        CASE
+            WHEN max_acctbal >= 10000 THEN 'High Value'
+            WHEN max_acctbal BETWEEN 5000 AND 9999 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS acctbal_category
+    FROM SupplierStats s
+    WHERE total_available > 50
+)
+SELECT 
+    rc.c_custkey,
+    rc.c_name,
+    rc.c_acctbal,
+    fs.s_name,
+    o.total_revenue,
+    o.total_items,
+    CASE
+        WHEN o.total_revenue IS NULL THEN 'No Orders'
+        WHEN o.total_revenue > 1000 THEN 'High Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM RankedCustomers rc
+LEFT JOIN OrderDetails o ON rc.c_custkey = o.o_custkey
+JOIN FilteredSuppliers fs ON fs.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    GROUP BY ps.ps_suppkey
+)
+WHERE rc.rank <= 10
+ORDER BY rc.c_acctbal DESC, o.total_revenue DESC NULLS LAST;

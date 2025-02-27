@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.Score,
+        p.AnswerCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 -- Upvotes only
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, '>')) AS tagIds ON t.Id = tagIds
+    LEFT JOIN 
+        Tags t ON t.Id = CAST(TRIM(BOTH ' ' FROM tagIds) AS INT)
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TopUser AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER(ORDER BY SUM(COALESCE(p.Score, 0)) DESC) AS UserRank
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1 -- Questions
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+ActivityHistory AS (
+    SELECT 
+        ph.UserId,
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstActivity,
+        MAX(ph.CreationDate) AS LastActivity
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed and Reopened
+    GROUP BY 
+        ph.UserId, ph.PostId
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.LastActivityDate,
+    rp.Score,
+    rp.VoteCount,
+    rp.Tags,
+    tu.UserRank,
+    ah.FirstActivity,
+    ah.LastActivity
+FROM 
+    RankedPosts rp
+JOIN 
+    TopUser tu ON rp.Id = tu.UserId
+LEFT JOIN 
+    ActivityHistory ah ON rp.Id = ah.PostId
+WHERE 
+    tu.UserRank <= 10 -- Top 10 users
+ORDER BY 
+    rp.Score DESC,
+    rp.LastActivityDate DESC;

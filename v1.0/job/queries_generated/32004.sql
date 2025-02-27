@@ -1,0 +1,95 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+genre_distribution AS (
+    SELECT 
+        t.id AS title_id,
+        COUNT(DISTINCT kg.keyword) AS genre_count
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kg ON mk.keyword_id = kg.id
+    GROUP BY 
+        t.id
+),
+top_performers AS (
+    SELECT 
+        ca.person_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_info mi ON ci.movie_id = mi.movie_id
+    WHERE 
+        mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'BoxOffice') 
+        AND mi.info IS NOT NULL
+    GROUP BY 
+        ca.person_id, a.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY gd.genre_count DESC) AS rank
+    FROM 
+        title t
+    JOIN 
+        genre_distribution gd ON t.id = gd.title_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    tp.actor_name,
+    tp.movie_count,
+    rt.rank
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    top_performers tp ON tp.movie_count > 10
+LEFT JOIN 
+    ranked_titles rt ON rt.title_id = mh.movie_id
+WHERE 
+    mh.level = 0
+ORDER BY 
+    mh.production_year DESC, rt.rank ASC
+LIMIT 50;
+
+This SQL query generates performance benchmarks by constructing several advanced SQL constructs:
+
+1. **Recursive CTE (`movie_hierarchy`)**: Builds a hierarchy of movies based on their links.
+2. **Aggregated Subquery (`genre_distribution`)**: Counts distinct genres associated with each movie.
+3. **Correlated Subquery (`top_performers`)**: Identifies top actors who have appeared in more than five box office movies.
+4. **Window Function (`ranked_titles`)**: Ranks titles within their production years by genre count.
+5. **Outer Joins and Filtering**: Combines results to present movies, their hierarchy, top performers, and ranks, applying complex filtering and sorting logic.
+
+This query is designed to provide insights into the relationships and performance metrics of movies and actors, making it suitable for performance benchmarking in a database testing scenario.

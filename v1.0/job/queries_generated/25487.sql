@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT m.company_id) AS num_production_companies,
+        STRING_AGG(DISTINCT c.name, ', ') AS production_company_names,
+        SUM(CASE WHEN k.keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_count
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies m ON t.id = m.movie_id
+    LEFT JOIN 
+        company_name c ON m.company_id = c.id
+    LEFT JOIN 
+        movie_keyword mw ON t.id = mw.movie_id
+    LEFT JOIN 
+        keyword k ON mw.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.num_production_companies,
+        rm.production_company_names,
+        rm.keyword_count,
+        ROW_NUMBER() OVER (ORDER BY rm.production_year DESC, rm.num_production_companies DESC) AS rank
+    FROM 
+        RankedMovies rm
+)
+
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.num_production_companies,
+    md.production_company_names,
+    md.keyword_count,
+    ci.role AS cast_role,
+    CONCAT_WS(' ', p.first_name, p.last_name) AS actor_name
+FROM 
+    MovieDetails md
+JOIN 
+    cast_info ci ON md.movie_id = ci.movie_id
+JOIN 
+    aka_name p ON ci.person_id = p.person_id
+WHERE 
+    md.keyword_count > 0
+ORDER BY 
+    md.rank
+LIMIT 10;
+
+This query benchmarks string processing by aggregating production company names and counting keywords associated with movies while also providing details about the cast. It utilizes various string functions such as `STRING_AGG` and `CONCAT_WS` to showcase the capabilities of string processing within the context of the data schema. The final output limits to the top 10 movies based on production year and the number of production companies.

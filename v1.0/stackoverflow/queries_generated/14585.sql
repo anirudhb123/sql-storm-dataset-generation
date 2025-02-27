@@ -1,0 +1,53 @@
+-- Performance Benchmarking Query 
+WITH ActiveUsers AS (
+    SELECT 
+        Id,
+        Reputation,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN Posts.PostTypeId = 3 THEN 1 ELSE 0 END) AS Wikis,
+        SUM(CASE WHEN Posts.PostTypeId IN (4, 5) THEN 1 ELSE 0 END) AS TagWikis,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY 
+        Users.Id, Users.Reputation
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.Reputation,
+    au.PostCount,
+    au.Questions,
+    au.Answers,
+    au.Wikis,
+    au.TagWikis,
+    au.TotalUpVotes,
+    au.TotalDownVotes,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges
+FROM 
+    Users u
+LEFT JOIN 
+    ActiveUsers au ON u.Id = au.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+ORDER BY 
+    Reputation DESC, PostCount DESC;

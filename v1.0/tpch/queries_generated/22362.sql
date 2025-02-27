@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rk,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'No Balance'
+            WHEN s.s_acctbal < 1000 THEN 'Low Balance'
+            WHEN s.s_acctbal BETWEEN 1000 AND 5000 THEN 'Medium Balance'
+            ELSE 'High Balance'
+        END AS balance_category
+    FROM 
+        supplier s
+), 
+HighValueParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice > (SELECT AVG(p_retailprice) FROM part) THEN 'Expensive'
+            ELSE 'Affordable'
+        END AS price_category
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_linenumber) AS total_items,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        SUM(l.l_discount) AS total_discount
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    R.s_name AS supplier_name,
+    H.p_name AS part_name,
+    H.p_retailprice,
+    O.total_items,
+    O.total_revenue,
+    O.total_discount,
+    R.rk AS supplier_rank,
+    R.balance_category,
+    H.price_category
+FROM 
+    RankedSuppliers R
+LEFT JOIN 
+    partsupp ps ON R.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    HighValueParts H ON ps.ps_partkey = H.p_partkey
+JOIN 
+    OrderStats O ON O.total_items > 5 -- only consider orders with more than 5 items
+WHERE 
+    R.rk = 1 -- only top supplier in each nation
+AND 
+    H.price_category = 'Expensive'
+OR 
+    R.balance_category = 'High Balance'
+ORDER BY 
+    R.s_name, H.p_name
+LIMIT 100;

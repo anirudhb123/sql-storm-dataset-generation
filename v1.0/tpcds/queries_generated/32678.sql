@@ -1,0 +1,90 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) as sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    HAVING 
+        SUM(ws_quantity) > 0
+), item_info AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_product_name,
+        COALESCE(i.i_current_price, 0) AS current_price,
+        CASE 
+            WHEN EXISTS (SELECT 1 FROM promotion p WHERE p.p_item_sk = i.i_item_sk AND p.p_discount_active = 'Y') 
+            THEN 'On Promotion' 
+            ELSE 'Regular Price' 
+        END AS price_status
+    FROM 
+        item i
+), customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) as customer_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+), aggregated_sales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        SUM(web.ws_net_paid) AS total_net_paid,
+        COUNT(DISTINCT web.ws_order_number) AS total_orders,
+        SUM(web.ws_quantity) AS total_quantity
+    FROM 
+        web_sales web
+    JOIN 
+        item item ON web.ws_item_sk = item.i_item_sk
+    GROUP BY 
+        item.i_item_id, item.i_product_name
+), high_value_customers AS (
+    SELECT
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ABS(SUM(ws.ws_net_paid)) AS total_spent
+    FROM
+        customer_info ci
+    JOIN 
+        web_sales ws ON ci.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        ci.c_customer_sk, ci.c_first_name, ci.c_last_name
+    HAVING 
+        total_spent > 1000
+)
+SELECT 
+    hi.c_first_name,
+    hi.c_last_name,
+    ii.i_item_id,
+    ii.i_product_name,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    ii.current_price,
+    ii.price_status,
+    COALESCE(agg.total_net_paid, 0) AS total_net_paid,
+    COALESCE(agg.total_orders, 0) AS total_orders,
+    COALESCE(agg.total_quantity, 0) AS total_quantity
+FROM 
+    high_value_customers hi
+LEFT JOIN 
+    sales_hierarchy s ON s.ws_item_sk IN (SELECT ii.i_item_sk FROM item_info ii)
+LEFT JOIN 
+    item_info ii ON hi.c_customer_sk IN (SELECT ci.c_customer_sk FROM customer_info ci)
+LEFT JOIN 
+    aggregated_sales agg ON ii.i_item_id = agg.i_item_id
+ORDER BY 
+    hi.c_last_name, hi.c_first_name, total_sales DESC
+LIMIT 100;

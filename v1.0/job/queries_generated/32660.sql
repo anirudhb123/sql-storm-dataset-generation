@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        0 AS level,
+        m.production_year,
+        t.kind AS movie_kind
+    FROM
+        aka_title m
+    JOIN
+        kind_type t ON m.kind_id = t.id
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.level + 1,
+        mh.production_year,
+        mh.movie_kind
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    WHERE
+        mh.level < 3 
+)
+
+SELECT
+    mk.keyword,
+    m.title,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    AVG(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS female_ratio,
+    COUNT(DISTINCT ci.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT a.name, ', ') AS actors,
+    ROW_NUMBER() OVER (PARTITION BY mk.keyword ORDER BY total_cast DESC) AS rank
+FROM
+    MovieHierarchy m
+LEFT JOIN
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN
+    cast_info c ON c.movie_id = m.movie_id
+LEFT JOIN
+    name a ON c.person_id = a.id
+LEFT JOIN
+    person_info p ON p.person_id = c.person_id AND p.info_type_id = (
+        SELECT id FROM info_type WHERE info = 'gender'
+    )
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = m.movie_id
+LEFT JOIN 
+    aka_name an ON an.person_id = c.person_id
+WHERE
+    mk.keyword IS NOT NULL
+    AND m.production_year >= 2000
+GROUP BY
+    mk.keyword, m.title
+HAVING
+    COUNT(DISTINCT c.person_id) > 0
+ORDER BY
+    female_ratio DESC, total_cast DESC;

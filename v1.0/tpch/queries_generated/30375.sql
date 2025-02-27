@@ -1,0 +1,80 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.orderkey,
+        o.custkey,
+        o.orderstatus,
+        o.totalprice,
+        o.orderdate,
+        o.orderpriority,
+        o.clerk,
+        o.shippriority,
+        o.comment,
+        1 AS level
+    FROM orders o
+    WHERE o.orderstatus = 'O'  -- Assuming 'O' is for open orders
+    UNION ALL
+    SELECT 
+        o2.orderkey,
+        o2.custkey,
+        o2.orderstatus,
+        o2.totalprice,
+        o2.orderdate,
+        o2.orderpriority,
+        o2.clerk,
+        o2.shippriority,
+        o2.comment,
+        oh.level + 1
+    FROM orders o2
+    JOIN OrderHierarchy oh ON o2.custkey = oh.custkey AND o2.orderdate > oh.orderdate
+),
+SupplierPart AS (
+    SELECT 
+        p.p_name,
+        s.s_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ps.ps_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+CustomerTotal AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(o.o_totalprice), 0) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RegionSupplier AS (
+    SELECT 
+        r.r_name,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+)
+SELECT 
+    oh.orderkey,
+    oh.orderdate,
+    oh.totalprice,
+    c.c_name,
+    ct.total_spent,
+    sp.p_name,
+    sp.s_name AS supplier_name,
+    sp.ps_supplycost,
+    rs.r_name,
+    rs.s_acctbal
+FROM OrderHierarchy oh
+JOIN CustomerTotal ct ON oh.custkey = ct.c_custkey
+LEFT JOIN SupplierPart sp ON sp.rn = 1  -- Get the cheapest supplier for each part
+LEFT JOIN RegionSupplier rs ON involved.region = rs.r_name
+WHERE ct.total_spent > 10000  -- Filter for customers who spent more than $10,000
+  AND sp.ps_availqty > 0  -- Only consider available parts
+  AND oh.level <= 3  -- Limit the hierarchy level for performance
+ORDER BY oh.orderdate, oh.totalprice DESC
+LIMIT 50;

@@ -1,0 +1,65 @@
+
+WITH AddressConcat AS (
+    SELECT 
+        ca_address_sk, 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL AND ca_suite_number <> '' 
+                    THEN CONCAT(' Suite ', ca_suite_number)
+                    ELSE ''
+               END) AS full_address,
+        ca_city, 
+        ca_state
+    FROM 
+        customer_address
+), 
+CustomerAddressInfo AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        a.full_address, 
+        a.ca_city, 
+        a.ca_state
+    FROM 
+        customer c
+    JOIN 
+        AddressConcat a ON c.c_current_addr_sk = a.ca_address_sk
+    WHERE 
+        c.c_first_name IS NOT NULL AND c.c_last_name IS NOT NULL
+), 
+DemographicInfo AS (
+    SELECT 
+        c.customer_info, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status
+    FROM 
+        CustomerAddressInfo c
+    JOIN 
+        customer_demographics cd ON c.c_customer_id = cd.cd_demo_sk
+), 
+Result AS (
+    SELECT 
+        c.customer_info, 
+        d.cd_gender, 
+        d.cd_marital_status, 
+        d.cd_education_status, 
+        COUNT(*) OVER (PARTITION BY d.cd_gender, d.cd_marital_status) AS demographic_count
+    FROM 
+        CustomerAddressInfo c
+    JOIN 
+        DemographicInfo d ON c.customer_info = d.customer_info
+)
+SELECT 
+    cd_gender, 
+    cd_marital_status, 
+    COUNT(*) AS total_count, 
+    AVG(demographic_count) AS avg_demo_count
+FROM 
+    Result
+GROUP BY 
+    cd_gender, 
+    cd_marital_status
+ORDER BY 
+    cd_gender, 
+    cd_marital_status;

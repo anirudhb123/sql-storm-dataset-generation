@@ -1,0 +1,53 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 50
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY total_supplycost DESC
+    LIMIT 10
+),
+order_details AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY o.o_orderkey
+),
+supplier_stats AS (
+    SELECT r.r_name, COUNT(DISTINCT s.s_suppkey) AS num_suppliers, SUM(s.s_acctbal) AS total_account_balance
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name
+),
+combined AS (
+    SELECT sh.s_suppkey, sh.s_name, ss.num_suppliers, ss.total_account_balance, td.total_revenue
+    FROM supplier_hierarchy sh
+    LEFT JOIN supplier_stats ss ON sh.s_nationkey = ss.n_nationkey
+    LEFT JOIN order_details td ON sh.s_suppkey = td.o_orderkey
+)
+SELECT 
+    COALESCE(c.s_name, 'Unknown Supplier') AS supplier_name,
+    COALESCE(c.num_suppliers, 0) AS total_suppliers,
+    COALESCE(c.total_account_balance, 0.00) AS account_balance,
+    COALESCE(c.total_revenue, 0.00) AS order_revenue,
+    CASE 
+        WHEN c.total_account_balance > 10000 THEN 'High Value'
+        WHEN c.total_account_balance BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS supplier_value
+FROM combined c
+ORDER BY c.total_revenue DESC NULLS LAST;

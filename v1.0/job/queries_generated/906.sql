@@ -1,0 +1,63 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tv'))
+),
+TopRatedMovies AS (
+    SELECT 
+        ti.movie_id,
+        AVG(r.rating) AS avg_rating
+    FROM 
+        movie_info mi
+    JOIN 
+        title ti ON mi.movie_id = ti.id
+    JOIN 
+        (SELECT 
+             movie_id,
+             AVG(rating) AS rating
+         FROM 
+             movie_info 
+         WHERE 
+             info_type_id = (SELECT id FROM info_type WHERE info = 'rating') 
+         GROUP BY 
+             movie_id) r ON ti.id = r.movie_id
+    GROUP BY 
+        ti.movie_id
+    HAVING 
+        AVG(r.rating) > 7
+),
+MovieDetails AS (
+    SELECT 
+        ti.title,
+        ti.production_year,
+        c.name AS company_name,
+        r.avg_rating
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        MovieCompanies mc ON rt.title_id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        TopRatedMovies r ON rt.title_id = r.movie_id
+    WHERE
+        rt.title_rank <= 5
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.company_name,
+    md.avg_rating,
+    (SELECT COUNT(*) 
+     FROM cast_info ci 
+     WHERE ci.movie_id = md.title_id AND ci.note IS NULL) AS null_roles
+FROM 
+    MovieDetails md
+ORDER BY 
+    md.avg_rating DESC, md.production_year ASC;

@@ -1,0 +1,64 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY ps.ps_supplycost ASC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        o.o_orderdate >= DATEADD(month, -6, CURRENT_TIMESTAMP)
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartRevenue AS (
+    SELECT 
+        p.p_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    ps.s_suppkey,
+    ps.s_name,
+    SUM(pr.revenue) AS total_revenue,
+    COUNT(DISTINCT co.c_custkey) AS unique_customers,
+    MAX(co.total_spent) AS max_customer_spent
+FROM 
+    RankedSuppliers ps
+JOIN 
+    PartRevenue pr ON ps.s_suppkey = pr.p_partkey
+LEFT JOIN 
+    CustomerOrderSummary co ON co.total_spent >= 1000
+WHERE 
+    ps.rnk = 1
+GROUP BY 
+    ps.s_suppkey, ps.s_name
+HAVING 
+    SUM(pr.revenue) IS NOT NULL
+ORDER BY 
+    total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

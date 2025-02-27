@@ -1,0 +1,91 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.n_name,
+        s.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation s ON rs.s_nationkey = s.n_nationkey
+    WHERE 
+        rs.rnk <= 5
+),
+AggregateOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.custkey
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_brand,
+        p.p_type,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+FilteredParts AS (
+    SELECT 
+        sp.ps_partkey,
+        sp.ps_suppkey,
+        sp.p_brand,
+        sp.p_type,
+        sp.ps_availqty,
+        sp.ps_supplycost
+    FROM 
+        SupplierParts sp
+    WHERE 
+        sp.rn = 1 AND sp.ps_availqty >= 100
+)
+SELECT 
+    tp.s_suppkey,
+    tp.s_name,
+    tp.n_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(lp.l_extendedprice * (1 - lp.l_discount)) AS total_revenue,
+    (SELECT COUNT(DISTINCT c.c_custkey)
+     FROM customer c
+     WHERE c.c_nationkey = tp.s_nationkey) AS customer_count,
+    CASE 
+        WHEN SUM(lp.l_extendedprice * (1 - lp.l_discount)) IS NOT NULL 
+        THEN ROUND(SUM(lp.l_extendedprice * (1 - lp.l_discount)), 2) 
+        ELSE 0 
+    END AS final_revenue
+FROM 
+    TopSuppliers tp
+LEFT JOIN 
+    lineitem lp ON lp.l_suppkey = tp.s_suppkey
+LEFT JOIN 
+    orders o ON o.o_orderkey = lp.l_orderkey
+WHERE 
+    EXISTS (SELECT 1 FROM FilteredParts fp WHERE fp.ps_suppkey = tp.s_suppkey)
+GROUP BY 
+    tp.s_suppkey, tp.s_name, tp.n_name
+HAVING 
+    total_revenue > 10000
+ORDER BY 
+    total_revenue DESC 
+LIMIT 10;

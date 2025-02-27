@@ -1,0 +1,56 @@
+WITH SupplierProfit AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        CASE 
+            WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) > 0 
+            THEN SUM(l.l_extendedprice * (1 - l.l_discount)) - SUM(ps.ps_supplycost * ps.ps_availqty)
+            ELSE NULL 
+        END AS profit
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        sp.s_suppkey,
+        sp.s_name,
+        sp.profit,
+        RANK() OVER (ORDER BY sp.profit DESC) AS rank_profit
+    FROM SupplierProfit sp
+    WHERE sp.profit IS NOT NULL
+),
+FilteredSuppliers AS (
+    SELECT 
+        ts.s_suppkey,
+        ts.s_name,
+        ts.profit
+    FROM TopSuppliers ts
+    WHERE ts.rank_profit <= 10
+)
+
+SELECT 
+    f.s_suppkey,
+    f.s_name,
+    COALESCE(f.profit, 0) AS profit,
+    (SELECT COUNT(DISTINCT o.o_orderkey)
+     FROM orders o
+     WHERE o.o_custkey IN (
+         SELECT c.c_custkey
+         FROM customer c
+         WHERE c.c_nationkey = (
+             SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA' LIMIT 1
+         )
+     )) AS total_orders_for_us_customers
+FROM FilteredSuppliers f
+LEFT JOIN region r ON r.r_regionkey = (
+    SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (
+        SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey = f.s_suppkey
+    )
+)
+WHERE r.r_name IS NOT NULL
+ORDER BY f.profit DESC;

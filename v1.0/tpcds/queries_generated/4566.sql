@@ -1,0 +1,42 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS SalesRank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > 0
+),
+TotalSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS TotalRevenue
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk
+)
+SELECT 
+    w.warehouse_id,
+    w.warehouse_name,
+    w.warehouse_sq_ft,
+    COALESCE(ts.TotalRevenue, 0) AS TotalRevenue,
+    COALESCE(rs.SalesRank, 0) AS TopSalesRank
+FROM 
+    warehouse w
+LEFT JOIN 
+    TotalSales ts ON w.warehouse_sk = (SELECT ws.ws_warehouse_sk FROM web_sales ws WHERE ws.ws_item_sk IN (SELECT ws_item_sk FROM RankedSales WHERE SalesRank = 1) LIMIT 1)
+LEFT JOIN 
+    RankedSales rs ON w.warehouse_sk = (SELECT ws.ws_warehouse_sk FROM web_sales ws WHERE ws.ws_item_sk = rs.ws_item_sk LIMIT 1)
+ORDER BY 
+    TotalRevenue DESC, 
+    TopSalesRank;

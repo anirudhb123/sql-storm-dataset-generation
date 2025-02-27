@@ -1,0 +1,61 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        TotalBounties,
+        RANK() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM UserStats
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        pt.Name AS PostType,
+        p.ViewCount,
+        p.Score
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT 
+    tu.Rank,
+    tu.DisplayName,
+    tu.Reputation,
+    tu.TotalPosts,
+    tu.TotalComments,
+    tu.TotalBadges,
+    tu.TotalBounties,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.PostType,
+    rp.ViewCount,
+    rp.Score
+FROM TopUsers tu
+JOIN RecentPosts rp ON tu.UserId = rp.OwnerDisplayName
+ORDER BY tu.Rank, rp.CreationDate DESC
+LIMIT 100;

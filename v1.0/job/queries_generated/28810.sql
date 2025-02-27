@@ -1,0 +1,77 @@
+WITH ranked_titles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT kc.id) AS keyword_count,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT kc.id) DESC) AS rank_in_year
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_keyword mk ON mk.movie_id = t.movie_id
+    LEFT JOIN
+        keyword kc ON kc.id = mk.keyword_id
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+casted_titles AS (
+    SELECT
+        c.movie_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT c.id) AS role_count
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON a.person_id = c.person_id
+    GROUP BY
+        c.movie_id, a.name
+),
+detailed_movie_info AS (
+    SELECT
+        mt.movie_id,
+        t.title,
+        mt.note AS company_note,
+        i.info AS movie_info,
+        ct.kind AS company_type
+    FROM
+        movie_companies mt
+    JOIN
+        title t ON t.id = mt.movie_id
+    JOIN
+        company_type ct ON ct.id = mt.company_type_id
+    JOIN
+        movie_info i ON i.movie_id = mt.movie_id
+    WHERE
+        i.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+),
+aggregated_data AS (
+    SELECT
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        CAST(COALESCE(SUM(ct.role_count), 0) AS integer) AS total_roles,
+        rt.keyword_count,
+        MIN(dt.movie_info) AS synopsis,
+        STRING_AGG(DISTINCT dt.company_type, ', ') AS production_companies
+    FROM
+        ranked_titles rt
+    LEFT JOIN
+        casted_titles ct ON ct.movie_id = rt.title_id
+    LEFT JOIN
+        detailed_movie_info dt ON dt.movie_id = rt.title_id
+    GROUP BY
+        rt.title_id, rt.title, rt.production_year, rt.keyword_count
+)
+SELECT
+    *,
+    CASE 
+        WHEN total_roles > 10 THEN 'Highly Casted'
+        WHEN total_roles BETWEEN 5 AND 10 THEN 'Moderately Casted'
+        ELSE 'Less Casted'
+    END AS casting_category
+FROM
+    aggregated_data
+WHERE
+    rank_in_year <= 5
+ORDER BY
+    production_year DESC, keyword_count DESC;

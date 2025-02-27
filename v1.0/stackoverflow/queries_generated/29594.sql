@@ -1,0 +1,45 @@
+WITH TagFrequency AS (
+    SELECT
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><'))) AS TagName,
+        COUNT(*) AS PostCount
+    FROM
+        Posts
+    WHERE
+        PostTypeId = 1  -- Only considering questions
+    GROUP BY
+        TagName
+),
+TopTags AS (
+    SELECT
+        TagName,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM
+        TagFrequency
+    WHERE
+        PostCount > 1
+)
+SELECT
+    u.DisplayName AS User,
+    u.Reputation AS Reputation,
+    t.TagName,
+    pt.Name AS PostType,
+    COUNT(p.Id) AS PostCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+FROM
+    Users u
+JOIN
+    Posts p ON u.Id = p.OwnerUserId
+JOIN
+    PostTypes pt ON p.PostTypeId = pt.Id
+JOIN
+    VoteTypes v ON v.PostId = p.Id
+JOIN
+    TopTags t ON t.TagName = ANY(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><'))
+WHERE
+    t.Rank <= 5  -- Limit to top 5 tags
+GROUP BY
+    u.Id, t.TagName, pt.Name
+ORDER BY
+    t.Rank, u.Reputation DESC;

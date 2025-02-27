@@ -1,0 +1,82 @@
+WITH movie_years AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_order
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+cast_details AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT CONCAT(aka.name, ' (', r.role, ')'), '; ') AS cast_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name aka ON c.person_id = aka.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+),
+info_details AS (
+    SELECT 
+        m.movie_id,
+        MAX(CASE WHEN it.info = 'budget' THEN m.info ELSE NULL END) AS budget,
+        MAX(CASE WHEN it.info = 'gross' THEN m.info ELSE NULL END) AS gross
+    FROM 
+        movie_info m
+    JOIN 
+        info_type it ON m.info_type_id = it.id
+    GROUP BY 
+        m.movie_id
+),
+ranked_movies AS (
+    SELECT 
+        my.movie_id,
+        my.title,
+        my.production_year,
+        cd.total_cast,
+        id.budget,
+        id.gross,
+        COALESCE(id.gross::FLOAT / NULLIF(id.budget::FLOAT, 0), 0) AS profitability
+    FROM 
+        movie_years my
+    LEFT JOIN 
+        cast_details cd ON my.movie_id = cd.movie_id
+    LEFT JOIN 
+        info_details id ON my.movie_id = id.movie_id
+),
+final_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        total_cast,
+        budget,
+        gross,
+        profitability,
+        RANK() OVER (ORDER BY profitability DESC, production_year DESC) AS profitability_rank
+    FROM 
+        ranked_movies
+)
+
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.total_cast,
+    fm.budget,
+    fm.gross,
+    fm.profitability,
+    fm.profitability_rank
+FROM 
+    final_movies fm
+WHERE 
+    (fm.profitability > 2 OR fm.budget IS NULL)
+ORDER BY 
+    fm.profitability_rank ASC, fm.production_year DESC;

@@ -1,0 +1,71 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(ci.role_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(ci.role_id) DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    GROUP BY 
+        a.title, a.production_year, a.id
+),
+CompanyMovieCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+KeywordCount AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        COALESCE(cc.company_count, 0) AS company_count,
+        COALESCE(kc.keyword_count, 0) AS keyword_count,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyMovieCounts cc ON rm.id = cc.movie_id
+    LEFT JOIN 
+        KeywordCount kc ON rm.id = kc.movie_id
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.cast_count,
+    md.company_count,
+    md.keyword_count,
+    CASE 
+        WHEN md.cast_count > 10 THEN 'Large Cast'
+        WHEN md.cast_count BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size,
+    NULLIF(md.company_count, 0) AS non_zero_company_count,
+    COUNT(*) OVER() AS total_movies
+FROM 
+    MovieDetails md
+WHERE 
+    md.production_year IS NOT NULL
+    AND (md.keyword_count <= 5 OR md.company_count IS NULL)
+ORDER BY 
+    md.production_year DESC, 
+    cast_size;

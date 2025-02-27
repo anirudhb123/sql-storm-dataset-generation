@@ -1,0 +1,77 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        ws_promo_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk, 
+        ws.web_name, 
+        ws_promo_sk
+),
+Date_Sales AS (
+    SELECT 
+        dd.d_year, 
+        SUM(ws.ws_sales_price) AS total_revenue,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year BETWEEN 2022 AND 2023
+    GROUP BY 
+        dd.d_year
+),
+Customer_Sales AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_count,
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+Top_Customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        RANK() OVER (ORDER BY cs.total_spent DESC) AS customer_rank
+    FROM 
+        Customer_Sales cs
+    WHERE 
+        cs.orders_count > 5
+),
+Final_Sales AS (
+    SELECT 
+        d.d_year AS year,
+        S.web_name,
+        S.total_sales,
+        C.orders_count,
+        R.customer_rank
+    FROM 
+        Date_Sales d
+    JOIN 
+        Sales_CTE S ON S.ws_promo_sk = d.d_year
+    LEFT JOIN 
+        Top_Customers R ON R.c_customer_sk = S.web_site_sk
+)
+SELECT 
+    F.year,
+    F.web_name,
+    F.total_sales,
+    F.orders_count,
+    COALESCE(F.customer_rank, 'N/A') AS customer_rank
+FROM 
+    Final_Sales F
+WHERE 
+    F.total_sales > (SELECT AVG(total_sales) FROM Sales_CTE)
+ORDER BY 
+    F.total_sales DESC
+FETCH FIRST 20 ROWS ONLY;

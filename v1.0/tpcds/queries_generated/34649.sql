@@ -1,0 +1,54 @@
+
+WITH RECURSIVE monthly_sales AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_net_paid) AS total_sales
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq
+    UNION ALL
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(cs.cs_net_paid) AS total_sales
+    FROM 
+        date_dim d
+    JOIN 
+        catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(a.ca_city, 'Unknown') AS city,
+    COALESCE(SUM(ws.ws_net_paid), 0) AS total_web_sales,
+    SUM(CASE WHEN cs.cs_order_number IS NOT NULL THEN cs.cs_net_paid ELSE 0 END) AS total_catalog_sales,
+    AVG(wr.w_return_amt) FILTER (WHERE wr.w_returned_date_sk IS NOT NULL) AS avg_web_return,
+    ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+LEFT JOIN 
+    web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+WHERE 
+    (c.c_birth_year > 1980 OR c.c_birth_year IS NULL)
+    AND a.ca_state IS NOT NULL 
+    AND a.ca_country = 'USA'
+GROUP BY 
+    c.c_customer_id, c.c_first_name, c.c_last_name, a.ca_city
+HAVING 
+    SUM(ws.ws_net_paid) > (SELECT AVG(total_sales) FROM monthly_sales WHERE d_year = 2023)
+ORDER BY 
+    total_web_sales DESC
+LIMIT 50;

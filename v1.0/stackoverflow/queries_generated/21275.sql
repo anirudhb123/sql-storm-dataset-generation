@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+PostHistoryAggregated AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteCount,
+        MAX(ph.CreationDate) AS LastHistoryActionDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    ue.DisplayName,
+    ue.CommentCount,
+    ue.TotalBounties,
+    uh.CloseCount,
+    uh.DeleteCount,
+    CASE 
+        WHEN rp.Score >= 100 THEN 'Highly Engaging'
+        WHEN rp.Score BETWEEN 50 AND 99 THEN 'Moderately Engaging'
+        ELSE 'Less Engaging'
+    END AS EngagementCategory,
+    CASE 
+        WHEN uh.TotalBounties > 0 THEN 'Active Bounty Contributor'
+        ELSE 'Regular User' 
+    END AS UserStatus,
+    COALESCE(DATE_PART('day', CURRENT_DATE - uh.LastActivityDate), 'N/A') AS DaysSinceLastActivity
+FROM 
+    RankedPosts rp
+JOIN 
+    UserEngagement ue ON ue.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostHistoryAggregated uh ON uh.PostId = rp.PostId
+WHERE 
+    rp.Rank <= 10
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;
+

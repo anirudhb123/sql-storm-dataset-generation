@@ -1,0 +1,65 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank_by_price
+    FROM 
+        part p
+),
+
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        COALESCE(SUM(ps.ps_supplycost), 0) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_price
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' OR o.o_orderdate IS NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+
+SELECT 
+    cp.c_name,
+    COUNT(DISTINCT cp.c_custkey) AS customer_count,
+    SUM(cp.order_count) AS total_orders,
+    AVG(cp.avg_order_price) AS average_order_value,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ' - ', CAST(p.p_retailprice AS VARCHAR)), ', ') AS products,
+    COALESCE(STRING_AGG(DISTINCT s.s_name ORDER BY s.total_supply_cost DESC), 'No Suppliers') AS suppliers,
+    MAX(rp.rank_by_price) AS highest_ranked_product
+FROM 
+    CustomerOrders cp
+LEFT JOIN 
+    RankedParts rp ON rp.rank_by_price <= 3
+LEFT JOIN 
+    SupplierInfo s ON s.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierInfo) 
+WHERE 
+    cp.order_count > 0
+GROUP BY 
+    cp.c_name
+HAVING 
+    MAX(rp.rank_by_price) IS NOT NULL
+ORDER BY 
+    total_orders DESC, average_order_value DESC;

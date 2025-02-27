@@ -1,0 +1,54 @@
+
+WITH customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk,
+        hd.hd_dep_count,
+        hd.hd_vehicle_count,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 90 
+                                AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, 
+        hd.hd_income_band_sk, hd.hd_dep_count, hd.hd_vehicle_count
+),
+income_stats AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        COUNT(*) AS customer_count,
+        AVG(total_net_profit) AS average_net_profit,
+        SUM(total_quantity) AS total_quantity_sold
+    FROM 
+        customer_data
+    JOIN 
+        income_band ib ON customer_data.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        ib.ib_income_band_sk
+)
+SELECT 
+    ib.ib_income_band_sk,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    is.customer_count,
+    is.average_net_profit,
+    is.total_quantity_sold
+FROM 
+    income_band ib
+LEFT JOIN 
+    income_stats is ON ib.ib_income_band_sk = is.ib_income_band_sk
+ORDER BY 
+    ib.ib_income_band_sk;

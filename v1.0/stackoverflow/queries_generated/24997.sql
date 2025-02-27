@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount) FILTER (WHERE v.VoteTypeId = 8), 0) as TotalBounty,
+        SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpvoteCount,
+        SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+),
+RecentPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        CommentCount,
+        TotalBounty,
+        UpvoteCount,
+        DownvoteCount,
+        CASE 
+            WHEN rn = 1 THEN 'New' 
+            WHEN rn <= 5 THEN 'Popular' 
+            ELSE 'Archived' 
+        END AS PostStatus
+    FROM 
+        RankedPosts 
+    WHERE 
+        CreationDate >= NOW() - INTERVAL '30 days' 
+),
+TagsWithPostCount AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, '>')::int[])
+    GROUP BY 
+        t.TagName
+),
+DistinctUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.CommentCount,
+    rp.TotalBounty,
+    rp.UpvoteCount,
+    rp.DownvoteCount,
+    rp.PostStatus,
+    t.TagName,
+    tp.PostCount AS RelatedPostCount,
+    u.DisplayName AS UserName,
+    u.PostsCreated
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    TagsWithPostCount t ON t.PostCount > 1
+LEFT JOIN 
+    DistinctUsers u ON u.UserId IN (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+WHERE 
+    rp.Score > (SELECT AVG(Score) FROM Posts) -- Filtering to only include highly rated posts
+ORDER BY 
+    rp.CreationDate DESC,
+    rp.Score DESC
+LIMIT 50; 
+This SQL query showcases a complex combination of CTEs, window functions, outer joins, and filtering logic to retrieve recent, high-scoring posts along with related tag and user metrics for performance benchmarking.

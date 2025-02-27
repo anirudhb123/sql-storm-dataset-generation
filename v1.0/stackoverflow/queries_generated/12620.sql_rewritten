@@ -1,0 +1,14 @@
+SELECT 
+    COUNT(p.Id) AS TotalPosts,
+    AVG(p.Score) AS AveragePostScore,
+    SUM(v.Id IS NOT NULL) AS TotalVotes
+FROM 
+    Posts p
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+WHERE 
+    p.CreationDate >= '2023-01-01' 
+GROUP BY 
+    p.OwnerUserId
+ORDER BY 
+    TotalPosts DESC;

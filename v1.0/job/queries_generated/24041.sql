@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS YearRank,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY at.id) AS CastCount
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        complete_cast cc ON at.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    WHERE 
+        at.production_year IS NOT NULL
+),
+HighCastMovies AS (
+    SELECT 
+        title_id, 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        CastCount > 5
+),
+FinalMovies AS (
+    SELECT 
+        HCM.title, 
+        HCM.production_year, 
+        COALESCE(cn.name, 'Unknown Company') AS distributor, 
+        KM.keyword AS genre_keyword
+    FROM 
+        HighCastMovies HCM
+    LEFT JOIN 
+        movie_companies MC ON HCM.title_id = MC.movie_id
+    LEFT JOIN 
+        company_name cn ON MC.company_id = cn.id 
+    LEFT JOIN 
+        movie_keyword MK ON HCM.title_id = MK.movie_id
+    LEFT JOIN 
+        keyword KM ON MK.keyword_id = KM.id
+    WHERE 
+        (MC.company_type_id IS NULL OR cn.country_code != 'US' OR cn.country_code IS NULL)
+    GROUP BY 
+        HCM.title, 
+        HCM.production_year, 
+        cn.name, 
+        KM.keyword
+    HAVING 
+        COUNT(DISTINCT cn.id) > 1
+)
+SELECT 
+    FM.*,
+    CASE 
+        WHEN FM.production_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END AS movie_age,
+    (SELECT COUNT(*) FROM movie_info MI WHERE MI.movie_id = FM.title_id AND MI.info_type_id IN (SELECT id FROM info_type WHERE info = 'Rating')) AS rating_count
+FROM 
+    FinalMovies FM
+ORDER BY 
+    FM.production_year DESC, 
+    FM.title;

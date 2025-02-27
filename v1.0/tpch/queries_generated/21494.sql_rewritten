@@ -1,0 +1,77 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+),
+supplier_stats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+part_availability AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name,
+        COALESCE(SUM(ps.ps_availqty), 0) AS available_quantity,
+        MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+regions AS (
+    SELECT 
+        r.r_regionkey, 
+        r.r_name, 
+        r.r_comment,
+        (SELECT COUNT(DISTINCT n.n_nationkey) FROM nation n WHERE n.n_regionkey = r.r_regionkey) AS nation_count
+    FROM 
+        region r
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    COALESCE(rn.total_parts, 0) AS supplier_part_count,
+    pi.p_name,
+    pa.available_quantity,
+    pa.max_supply_cost,
+    CASE 
+        WHEN o.o_orderstatus = 'F' THEN 'Fulfilled'
+        ELSE 'Pending'
+    END AS order_status,
+    r.r_name AS region_name,
+    rs.region_count
+FROM 
+    ranked_orders o
+LEFT JOIN 
+    supplier_stats rn ON rn.total_parts > (SELECT AVG(total_parts) FROM supplier_stats)
+LEFT JOIN 
+    part_availability pa ON pa.available_quantity > 0
+LEFT JOIN 
+    regions r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n JOIN customer c ON n.n_nationkey = c.c_nationkey WHERE c.c_custkey = o.o_custkey LIMIT 1)
+LEFT JOIN 
+    part p ON p.p_partkey = pa.p_partkey
+WHERE 
+    o.o_totalprice IS NOT NULL AND
+    o.o_orderstatus IS NOT NULL
+ORDER BY 
+    o.o_orderdate DESC, 
+    order_status, 
+    rn.total_parts DESC
+LIMIT 100;

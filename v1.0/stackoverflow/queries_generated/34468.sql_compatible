@@ -1,0 +1,109 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.LastActivityDate,
+        p.Score,
+        p.PostTypeId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.LastActivityDate,
+        p.Score,
+        p.PostTypeId,
+        rpc.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE rpc ON p.ParentId = rpc.PostId
+), 
+
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+), 
+
+PostBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 
+    GROUP BY 
+        b.UserId
+), 
+
+UserRanking AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+), 
+
+PostInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ps.UpVotes,
+        ps.DownVotes,
+        rpc.Level,
+        u.DisplayName AS OwnerDisplayName,
+        u.Location,
+        ur.ReputationRank,
+        COALESCE(pb.BadgeCount, 0) AS GoldBadgeCount,
+        pb.LastBadgeDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteSummary ps ON p.Id = ps.PostId
+    LEFT JOIN 
+        RecursivePostCTE rpc ON p.Id = rpc.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserRanking ur ON u.Id = ur.UserId
+    LEFT JOIN 
+        PostBadges pb ON u.Id = pb.UserId
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')  
+)
+
+SELECT 
+    pi.PostId,
+    pi.Title,
+    pi.UpVotes,
+    pi.DownVotes,
+    pi.Level,
+    pi.OwnerDisplayName,
+    pi.Location,
+    pi.ReputationRank,
+    pi.GoldBadgeCount,
+    pi.LastBadgeDate,
+    ROW_NUMBER() OVER (PARTITION BY pi.Level ORDER BY pi.UpVotes DESC) AS RankWithinLevel
+FROM 
+    PostInfo pi
+ORDER BY 
+    pi.Level, pi.UpVotes DESC;

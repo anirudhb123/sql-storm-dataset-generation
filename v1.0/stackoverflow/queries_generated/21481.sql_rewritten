@@ -1,0 +1,76 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostScoreRanking AS (
+    SELECT 
+        p.Id,
+        p.OwnerUserId,
+        p.Score,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score IS NOT NULL
+),
+ClosedPostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate AS CloseDate,
+        ph.Comment AS CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS ReasonRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+),
+UserScoreAndBadgeSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(bc.BadgeCount, 0) AS BadgeCount,
+        COALESCE(psr.Score, 0) AS HighestScore,
+        COALESCE(psr.ScoreRank, NULL) AS ScoreRank,
+        cp.CloseReason AS MostRecentCloseReason
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadgeCounts bc ON u.Id = bc.UserId
+    LEFT JOIN 
+        PostScoreRanking psr ON u.Id = psr.OwnerUserId AND psr.ScoreRank = 1
+    LEFT JOIN 
+        ClosedPostDetails cp ON u.Id = (
+            SELECT OwnerUserId 
+            FROM Posts 
+            WHERE Id = cp.PostId
+        ) 
+    WHERE 
+        (bc.BadgeCount > 0 OR psr.HighestScore > 0 OR cp.CloseReason IS NOT NULL)
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.BadgeCount,
+    u.HighestScore,
+    u.ScoreRank,
+    COALESCE(u.MostRecentCloseReason, 'No recent closes') AS RecentCloseReason
+FROM 
+    UserScoreAndBadgeSummary u
+WHERE 
+    (u.Reputation > 500 OR u.BadgeCount > 5)
+ORDER BY 
+    u.Reputation DESC, u.BadgeCount DESC;

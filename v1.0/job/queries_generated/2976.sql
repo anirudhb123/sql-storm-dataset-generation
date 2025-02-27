@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        actor_id,
+        actor_name,
+        movie_title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    f.actor_name,
+    f.movie_title,
+    f.production_year,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    (SELECT COUNT(*) FROM cast_info ci2 WHERE ci2.movie_id = f.movie_id AND ci2.role_id = ci.role_id) AS role_count
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    movie_info mi ON f.movie_id = mi.movie_id 
+LEFT JOIN 
+    MovieKeywords mk ON f.movie_id = mk.movie_id
+JOIN 
+    cast_info ci ON f.actor_id = ci.person_id
+ORDER BY 
+    f.actor_name, f.production_year DESC;

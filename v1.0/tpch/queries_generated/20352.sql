@@ -1,0 +1,83 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 1 AND 25 AND 
+        p.p_retailprice IS NOT NULL
+),
+TotalSupplierCost AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(o.o_totalprice) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+    GROUP BY 
+        c.c_custkey
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        n.n_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS nation_rank
+    FROM 
+        supplier s
+    INNER JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+)
+SELECT 
+    rp.p_partkey, 
+    rp.p_name, 
+    rp.p_retailprice, 
+    CASE 
+        WHEN rp.price_rank <= 5 THEN 'Top 5'
+        ELSE 'Other' 
+    END AS price_category,
+    sp.total_cost,
+    COALESCE(co.total_orders, 0) AS customer_order_total,
+    si.n_name AS supplier_nation,
+    si.nation_rank 
+FROM 
+    RankedParts rp
+LEFT JOIN 
+    TotalSupplierCost sp ON rp.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey IN (
+        SELECT DISTINCT o.o_custkey 
+        FROM orders o 
+        WHERE o.o_totalprice > 1000
+    )
+LEFT JOIN 
+    SupplierInfo si ON si.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = rp.p_partkey
+    )
+WHERE 
+    RPAD(rp.p_name, 55, ' ') LIKE '%Part%'
+    OR rp.p_retailprice < (
+        SELECT AVG(p2.p_retailprice) 
+        FROM part p2
+    )
+ORDER BY 
+    rp.p_partkey ASC, 
+    price_category DESC, 
+    customer_order_total DESC;

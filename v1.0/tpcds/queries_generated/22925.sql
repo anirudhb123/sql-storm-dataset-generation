@@ -1,0 +1,93 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws 
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL
+        AND ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        ws.web_site_sk, ws.ws_order_number
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band_sk,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'UNKNOWN' 
+            ELSE 
+                CASE 
+                    WHEN cd.cd_purchase_estimate < 500 THEN 'LOW'
+                    WHEN cd.cd_purchase_estimate BETWEEN 500 AND 1500 THEN 'MEDIUM'
+                    ELSE 'HIGH'
+                END 
+        END AS purchase_category
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+AggregateReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount,
+        SUM(sr_return_quantity) AS total_return_quantity 
+    FROM 
+        store_returns sr
+    WHERE 
+        sr_returned_date_sk IS NOT NULL 
+    GROUP BY 
+        sr_returning_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.purchase_category,
+        COALESCE(SUM(rs.total profit), 0) AS total_sales_profit,
+        COALESCE(SUM(ar.total_return_amount), 0) AS total_return_loss,
+        COALESCE(SUM(ar.total_return_quantity), 0) AS return_quantity
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        RankedSales rs ON ci.c_customer_sk = rs.web_site_sk
+    LEFT JOIN 
+        AggregateReturns ar ON ci.c_customer_sk = ar.sr_returning_customer_sk
+    GROUP BY 
+        ci.c_first_name, ci.c_last_name, ci.cd_gender, ci.purchase_category
+)
+SELECT 
+    f.c_first_name,
+    f.c_last_name,
+    f.cd_gender,
+    f.purchase_category,
+    f.total_sales_profit - f.total_return_loss AS net_profit,
+    ROW_NUMBER() OVER (ORDER BY net_profit DESC) AS profit_rank
+FROM 
+    FinalReport f
+WHERE 
+    f.net_profit > 0
+    AND EXISTS (
+        SELECT 1 
+        FROM customer c 
+        WHERE c.c_customer_sk = f.c_customer_sk 
+        AND c.c_last_name IS NOT NULL
+    )
+ORDER BY 
+    profit_rank
+LIMIT 50;

@@ -1,0 +1,81 @@
+
+WITH RECURSIVE UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        b.Name AS BadgeName,
+        b.Class,
+        b.Date,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY b.Date DESC) AS BadgeRank
+    FROM 
+        Users u
+    JOIN 
+        Badges b ON u.Id = b.UserId
+), UserPostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        MAX(p.Score) AS MaxScore,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+), RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= DATEADD(YEAR, -1, '2024-10-01')
+), CombinedStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(ubs.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ups.QuestionCount, 0) AS QuestionCount,
+        COALESCE(ups.AnswerCount, 0) AS AnswerCount,
+        COALESCE(ups.MaxScore, 0) AS MaxScore,
+        COALESCE(ups.TotalViews, 0) AS TotalViews,
+        ARRAY_AGG(DISTINCT b.BadgeName) AS Badges
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount
+        FROM 
+            UserBadges
+        WHERE 
+            BadgeRank = 1  
+        GROUP BY 
+            UserId
+    ) ubs ON u.Id = ubs.UserId
+    LEFT JOIN UserPostStats ups ON u.Id = ups.OwnerUserId
+    LEFT JOIN UserBadges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    cs.UserId,
+    cs.DisplayName,
+    cs.BadgeCount,
+    cs.QuestionCount,
+    cs.AnswerCount,
+    cs.MaxScore,
+    cs.TotalViews,
+    STRING_AGG(DISTINCT cs.Badges, ', ') AS BadgeList
+FROM 
+    CombinedStats cs
+LEFT JOIN 
+    RecentPostHistory rph ON cs.UserId = rph.UserId AND rph.HistoryRank = 1
+GROUP BY 
+    cs.UserId, cs.DisplayName, cs.BadgeCount, cs.QuestionCount, cs.AnswerCount, cs.MaxScore, cs.TotalViews
+ORDER BY 
+    cs.TotalViews DESC, cs.BadgeCount DESC
+LIMIT 10;

@@ -1,0 +1,48 @@
+
+WITH CustomerAddressData AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, 
+               COALESCE(CONCAT(' Suite ', ca.ca_suite_number), '')) AS full_address,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_bill_customer_sk AS customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+EnhancedData AS (
+    SELECT 
+        cad.c_customer_id,
+        cad.full_name,
+        cad.full_address,
+        cad.ca_city,
+        cad.ca_state,
+        COALESCE(sd.total_sales, 0) AS total_sales
+    FROM 
+        CustomerAddressData cad
+    LEFT JOIN 
+        SalesData sd ON cad.c_customer_id = sd.customer_sk
+)
+SELECT 
+    full_name,
+    full_address,
+    CONCAT(ca_city, ', ', ca_state) AS location,
+    total_sales
+FROM 
+    EnhancedData
+WHERE 
+    total_sales > 1000
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM title m 
+    WHERE m.production_year >= 2000
+
+    UNION ALL 
+
+    SELECT 
+        linked.movie_id,
+        linked.linked_movie_id AS title,
+        m.production_year,
+        level + 1
+    FROM MovieHierarchy mh
+    JOIN movie_link linked ON mh.movie_id = linked.movie_id
+    JOIN title m ON linked.linked_movie_id = m.id
+    WHERE m.production_year >= 2000
+),
+MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT CONCAT(c.name, ' (', ct.kind, ')'), ', ') AS companies,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS row_num
+    FROM MovieHierarchy mh
+    LEFT JOIN movie_companies mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN company_name c ON mc.company_id = c.id
+    LEFT JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mh.movie_id, mh.title, mh.production_year
+),
+PersonalDetails AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS acting_roles,
+        AVG(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE NULL END) AS avg_acts_per_movie
+    FROM aka_name a
+    LEFT JOIN cast_info ci ON a.person_id = ci.person_id
+    GROUP BY a.person_id, a.name
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.company_count,
+    md.companies,
+    pd.person_id,
+    pd.name AS actor_name,
+    pd.total_movies,
+    pd.acting_roles,
+    pd.avg_acts_per_movie
+FROM MovieDetails md
+LEFT JOIN PersonalDetails pd ON md.movie_id = pd.total_movies
+WHERE (md.production_year BETWEEN 2000 AND 2023 OR md.company_count > 0)
+ORDER BY md.production_year DESC, md.title;

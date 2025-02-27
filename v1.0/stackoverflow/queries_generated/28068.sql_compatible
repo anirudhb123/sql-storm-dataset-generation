@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY ARRAY_LENGTH(SPLIT_PART(p.Tags, '>', 1)::TEXT[], 1) ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.Score,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.Rank,
+        COALESCE(ah.AcceptedAnswerId, 0) AS AcceptedAnswerId
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Posts ah ON rp.PostId = ah.AcceptedAnswerId
+    WHERE 
+        rp.Rank <= 10 
+),
+TagCounts AS (
+    SELECT 
+        UNNEST(SPLIT_PART(rp.Tags, '>', 1)::TEXT[]) AS Tag,
+        COUNT(*) AS Count
+    FROM 
+        FilteredPosts rp
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        Count
+    FROM 
+        TagCounts
+    ORDER BY 
+        Count DESC
+    LIMIT 5 
+)
+SELECT 
+    fp.Title,
+    fp.Score,
+    fp.CreationDate,
+    fp.OwnerDisplayName,
+    tt.Tag,
+    tt.Count
+FROM 
+    FilteredPosts fp
+JOIN 
+    TopTags tt ON tt.Tag = ANY(SPLIT_PART(fp.Tags, '>', 1)::TEXT[])
+ORDER BY 
+    fp.Score DESC, 
+    tt.Count DESC;

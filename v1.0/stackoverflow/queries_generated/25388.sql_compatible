@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Body, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank,
+        (SELECT COUNT(*) FROM UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))) AS tag) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, CAST('2024-10-01' AS DATE)) 
+        AND (p.PostTypeId = 1 OR p.PostTypeId = 2) 
+), 
+TopQuestions AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Body, 
+        CreationDate, 
+        Score, 
+        ViewCount, 
+        AnswerCount, 
+        CommentCount, 
+        TagCount
+    FROM 
+        RankedPosts 
+    WHERE 
+        Rank <= 5 
+        AND TagCount >= 3 
+), 
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(c.Id) AS CommentsMade, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvotesReceived 
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    tq.Title, 
+    tq.ViewCount, 
+    tq.Score, 
+    ua.DisplayName AS TopCommenter, 
+    ua.CommentsMade, 
+    ua.UpvotesReceived
+FROM 
+    TopQuestions tq
+JOIN 
+    UserActivity ua ON ua.UpvotesReceived = (
+        SELECT MAX(UpvotesReceived) FROM UserActivity
+    )
+ORDER BY 
+    tq.Score DESC, 
+    tq.ViewCount DESC;

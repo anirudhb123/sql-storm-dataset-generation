@@ -1,0 +1,99 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        DENSE_RANK() OVER (PARTITION BY p.p_brand ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+LatestOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        MAX(o.o_totalprice) OVER (PARTITION BY o.o_custkey) AS max_price
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= (CURRENT_DATE - INTERVAL '2 year')
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 0
+    GROUP BY 
+        c.c_custkey
+),
+RegionSupplier AS (
+    SELECT 
+        r.r_regionkey,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_regionkey
+),
+FinalResults AS (
+    SELECT 
+        cs.c_custkey,
+        cs.total_orders,
+        cs.avg_order_value,
+        rs.s_name,
+        rs.s_acctbal,
+        ls.o_orderkey,
+        ls.max_price
+    FROM 
+        CustomerStats cs
+    JOIN 
+        LatestOrders ls ON cs.c_custkey = ls.o_custkey
+    JOIN 
+        RankedSuppliers rs ON rs.rnk = 1
+    WHERE 
+        cs.total_orders > 5
+        AND (rs.s_acctbal > 10000 OR rs.s_acctbal IS NULL)
+    ORDER BY 
+        cs.avg_order_value DESC
+)
+SELECT 
+    f.*,
+    COALESCE(rg.supplier_count, 0) AS total_suppliers
+FROM 
+    FinalResults f
+LEFT JOIN 
+    RegionSupplier rg ON rg.supplier_count = (SELECT MAX(supplier_count) FROM RegionSupplier)
+WHERE 
+    f.max_price IS NOT NULL
+    AND f.s_name NOT LIKE '%retired%'
+UNION ALL
+SELECT 
+    'Aggregate' AS c_custkey,
+    COUNT(*) AS total_orders,
+    AVG(avg_order_value) AS avg_order_value,
+    NULL AS s_name,
+    NULL AS s_acctbal,
+    NULL AS o_orderkey,
+    NULL AS max_price
+FROM 
+    FinalResults
+WHERE 
+    avg_order_value IS NOT NULL
+HAVING 
+    COUNT(*) > 10;

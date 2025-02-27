@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS depth
+    FROM
+        aka_title m
+    WHERE 
+        m.production_year >= 2000  
+    
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id 
+)
+SELECT 
+    m.id AS movie_id,
+    m.title,
+    m.production_year,
+    COUNT(DISTINCT c.person_id) AS actor_count,
+    STRING_AGG(DISTINCT c.note, ', ') AS cast_notes,
+    AVG(pr.rating) AS avg_rating,
+    ARRAY_AGG(DISTINCT k.keyword) AS keywords_associated,
+    CASE 
+        WHEN AVG(pr.rating) IS NULL THEN 'No Ratings'
+        ELSE CASE 
+            WHEN AVG(pr.rating) >= 8 THEN 'Highly Rated'
+            WHEN AVG(pr.rating) >= 5 THEN 'Moderately Rated'
+            ELSE 'Low Rated'
+        END 
+    END AS rating_category,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY AVG(pr.rating) DESC) AS rank_within_year
+FROM 
+    MovieHierarchy m
+LEFT JOIN 
+    cast_info c ON m.movie_id = c.movie_id
+LEFT JOIN 
+    movie_info mi ON m.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    (SELECT 
+         movie_id, 
+         AVG(rating) AS rating 
+     FROM 
+         movie_info 
+     WHERE 
+         info_type_id = (SELECT id FROM info_type WHERE info = 'rating') 
+     GROUP BY 
+         movie_id) pr ON m.movie_id = pr.movie_id
+WHERE 
+    (c.role_id IN (SELECT id FROM role_type WHERE role LIKE 'Actor%'))
+    OR (c.note IS NOT NULL)
+GROUP BY 
+    m.id, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT c.person_id) > 1
+ORDER BY 
+    m.production_year DESC, avg_rating DESC;

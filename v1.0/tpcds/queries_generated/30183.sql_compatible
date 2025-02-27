@@ -1,0 +1,60 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ws_net_profit
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2451545 AND 2451555 
+    UNION ALL
+    SELECT
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity * 2, 
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ws.ws_net_profit * 1.1 
+    FROM web_sales ws
+    JOIN SalesCTE s ON ws.ws_sold_date_sk > s.ws_sold_date_sk 
+),
+CustomerReturns AS (
+    SELECT
+        sr_returned_date_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM store_returns
+    GROUP BY sr_returned_date_sk
+),
+SalesSummary AS (
+    SELECT
+        d.d_date_id,
+        SUM(s.ws_quantity) AS total_sales_quantity,
+        SUM(COALESCE(s.ws_sales_price, 0)) AS total_sales_value,
+        COALESCE(CR.total_returns, 0) AS total_returns,
+        COALESCE(CR.total_return_amount, 0) AS total_return_amount,
+        SUM(s.ws_net_profit) AS total_net_profit
+    FROM date_dim d
+    LEFT JOIN SalesCTE s ON d.d_date_sk = s.ws_sold_date_sk
+    LEFT JOIN CustomerReturns CR ON d.d_date_sk = CR.sr_returned_date_sk
+    GROUP BY d.d_date_id
+),
+RankedSales AS (
+    SELECT
+        s.*,
+        ROW_NUMBER() OVER (PARTITION BY s.d_date_id ORDER BY s.total_sales_value DESC) AS sales_rank
+    FROM SalesSummary s
+)
+SELECT
+    s.d_date_id,
+    s.total_sales_quantity,
+    s.total_sales_value,
+    s.total_returns,
+    s.total_return_amount,
+    s.total_net_profit,
+    CASE WHEN s.sales_rank <= 10 THEN 'Top Performer' ELSE 'Regular' END AS performance_category
+FROM RankedSales s
+WHERE s.total_sales_quantity > 0 AND s.total_sales_value IS NOT NULL
+ORDER BY s.d_date_id;

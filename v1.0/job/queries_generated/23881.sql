@@ -1,0 +1,51 @@
+WITH RecursiveActor AS (
+    SELECT a.id, a.person_id, a.name, a.md5sum
+    FROM aka_name a
+    WHERE a.name LIKE 'John%'
+),
+MovieRole AS (
+    SELECT c.movie_id, r.role, COUNT(c.person_role_id) AS role_count
+    FROM cast_info c
+    JOIN role_type r ON c.role_id = r.id
+    WHERE c.note IS NULL
+    GROUP BY c.movie_id, r.role
+),
+TopMovies AS (
+    SELECT m.id AS movie_id, m.title, YEAR(m.production_year) AS year,
+           ROW_NUMBER() OVER (PARTITION BY m.kind_id ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM aka_title m
+    LEFT JOIN cast_info c ON m.id = c.movie_id
+    GROUP BY m.id, m.title, m.kind_id, m.production_year
+    HAVING COUNT(c.person_id) >= 10
+),
+FilteredMovies AS (
+    SELECT tm.*, 
+           mt.info AS movie_info, 
+           COALESCE(k.keyword, 'No Keyword') AS keyword
+    FROM TopMovies tm
+    LEFT JOIN movie_info_idx mt ON tm.movie_id = mt.movie_id 
+          AND mt.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot' LIMIT 1)
+    LEFT JOIN movie_keyword mk ON tm.movie_id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE tm.year > 2000 AND (tm.year IS NOT NULL OR mt.info IS NOT NULL)
+),
+ComparativeAnalysis AS (
+    SELECT f.title, f.year, 
+           SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS notes_present,
+           AVG(mr.role_count) AS avg_roles
+    FROM FilteredMovies f
+    JOIN cast_info c ON f.movie_id = c.movie_id
+    JOIN MovieRole mr ON f.movie_id = mr.movie_id
+    GROUP BY f.title, f.year
+)
+SELECT f.title, f.year, f.keyword, 
+       ca.notes_present, ca.avg_roles,
+       CASE 
+           WHEN ca.avg_roles = 0 THEN 'No Roles'
+           WHEN ca.notes_present > 5 THEN 'Highly Documented'
+           ELSE 'Normal'
+       END AS documentation_status
+FROM FilteredMovies f
+JOIN ComparativeAnalysis ca ON f.title = ca.title AND f.year = ca.year
+WHERE f.keyword IS DISTINCT FROM 'No Keyword'
+ORDER BY ca.avg_roles DESC, ca.notes_present DESC;

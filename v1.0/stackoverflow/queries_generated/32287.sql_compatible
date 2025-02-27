@@ -1,0 +1,58 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreatedDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    GROUP BY 
+        u.Id, u.Reputation
+),
+BadgesWithCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass 
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= DATEADD(YEAR, -1, '2024-10-01')
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    ur.UserId,
+    ur.Reputation,
+    ur.QuestionsAsked,
+    COALESCE(bc.BadgeCount, 0) AS BadgeCount,
+    COALESCE(bc.HighestBadgeClass, 0) AS HighestBadgeClass,
+    rp.Title,
+    rp.Score,
+    rp.CreatedDate
+FROM 
+    UserReputation ur
+LEFT JOIN 
+    BadgesWithCounts bc ON ur.UserId = bc.UserId
+LEFT JOIN 
+    RankedPosts rp ON ur.UserId = rp.OwnerUserId AND rp.PostRank = 1 
+WHERE 
+    (ur.Reputation >= 100 AND COALESCE(bc.BadgeCount, 0) > 2) OR (rp.Score > 10) 
+ORDER BY 
+    ur.Reputation DESC, 
+    rp.CreatedDate DESC;

@@ -1,0 +1,39 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost,
+           RANK() OVER (PARTITION BY p.p_type ORDER BY ps.ps_supplycost DESC) AS part_rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0 AND p.p_retailprice IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+FilteredOrders AS (
+    SELECT co.c_custkey, co.order_count, co.total_spent
+    FROM CustomerOrders co
+    WHERE co.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+)
+SELECT DISTINCT
+    n.n_name,
+    p.p_name,
+    COALESCE(rs.s_name, 'Unknown Supplier') AS supplier,
+    hp.ps_supplycost,
+    fo.order_count,
+    fo.total_spent
+FROM HighValueParts hp
+FULL OUTER JOIN RankedSuppliers rs ON hp.part_rank = 1 AND rs.rn = 1
+FULL OUTER JOIN nation n ON n.n_nationkey = (SELECT n_nationkey FROM supplier s WHERE s.s_suppkey = rs.s_suppkey LIMIT 1)
+RIGHT JOIN FilteredOrders fo ON fo.c_custkey = (SELECT c_custkey FROM customer c WHERE c.c_nationkey = n.n_regionkey LIMIT 1)
+WHERE (hp.p_partkey IS NULL OR hp.ps_supplycost IS NOT NULL)
+  AND (rs.s_acctbal IS NULL OR rs.s_acctbal > 1000)
+ORDER BY n.n_name, p.p_name;

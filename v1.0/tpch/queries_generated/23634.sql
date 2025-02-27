@@ -1,0 +1,94 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+        AND o.o_orderstatus IN ('O', 'F')
+),
+SupplierPartAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        COALESCE(SUM(o.o_totalprice), 0) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        cus.c_custkey,
+        cus.c_name,
+        cus.total_orders,
+        cus.total_spent
+    FROM 
+        CustomerOrderSummary cus
+    WHERE 
+        cus.total_spent > 10000
+        AND cus.total_orders >= 5
+),
+ProductRank AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        RANK() OVER (ORDER BY AVG(l.l_extendedprice) DESC) AS price_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    DISTINCT c.c_name,
+    c.c_custkey,
+    MAX(o.o_orderdate) AS last_order_date,
+    CASE 
+        WHEN AVG(s.total_avail_qty) IS NULL THEN 'No Supply'
+        ELSE 'Available'
+    END AS availability_status,
+    CONCAT('High-value customer since ', TO_CHAR(MIN(o.o_orderdate), 'YYYY-MM-DD')) AS customer_tenure,
+    (SELECT 
+        COALESCE(MAX(price_rank), 0)
+     FROM 
+        ProductRank pr
+     WHERE 
+        pr.price_rank <= 5) AS top_product_rank
+FROM 
+    HighValueCustomers c
+LEFT JOIN 
+    RankedOrders o ON c.c_custkey = o.o_orderkey
+LEFT JOIN 
+    SupplierPartAvailability s ON s.ps_partkey IN (
+        SELECT 
+            DISTINCT l.l_partkey 
+        FROM 
+            lineitem l 
+        WHERE 
+            l.l_orderkey = o.o_orderkey
+    )
+GROUP BY 
+    c.c_custkey, c.c_name
+HAVING 
+    COUNT(o.o_orderkey) > 0
+ORDER BY 
+    last_order_date DESC;

@@ -1,0 +1,37 @@
+SELECT
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    p.p_brand,
+    p.p_type,
+    p.p_size,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    MAX(o.o_orderdate) AS last_order_date,
+    RANK() OVER (PARTITION BY p.p_brand ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS brand_rank,
+    REPLACE(REGEXP_REPLACE(p.p_comment, '[^a-zA-Z0-9 ]', ''), ' ', '-') AS sanitized_comment
+FROM
+    part p
+JOIN
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE
+    o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+GROUP BY
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    p.p_brand,
+    p.p_type,
+    p.p_size
+HAVING
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY
+    revenue DESC;

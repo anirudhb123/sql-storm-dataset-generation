@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(v.Id) OVER (PARTITION BY p.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.Rank,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(b.Class), 0) AS BadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId AND b.Date >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    WHERE 
+        rp.Rank <= 10
+    GROUP BY 
+        rp.PostId, u.DisplayName
+),
+PostLinksRecursive AS (
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        1 AS Level
+    FROM 
+        PostLinks pl
+    UNION ALL
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        pl.Level + 1
+    FROM 
+        PostLinksRecursive pl
+    JOIN 
+        PostLinks pl2 ON pl.RelatedPostId = pl2.PostId
+    WHERE 
+        pl.Level < 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    tp.BadgeCount,
+    (SELECT COUNT(*) FROM PostLinks pl WHERE pl.PostId = tp.PostId) AS LinkedPostsCount,
+    (SELECT string_agg(DISTINCT pl.RelatedPostId::text, ', ') 
+     FROM PostLinks pl 
+     WHERE pl.PostId = tp.PostId) AS RelatedPostIds,
+    CASE 
+        WHEN tp.BadgeCount >= 5 THEN 'High Achiever'
+        WHEN tp.BadgeCount >= 3 THEN 'Moderate Achiever'
+        ELSE 'Newcomer'
+    END AS UserLevel,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM CloseReasonTypes crt WHERE crt.Id IN (SELECT DISTINCT CAST(ph.Comment AS int) FROM PostHistory ph WHERE ph.PostId = tp.PostId AND ph.PostHistoryTypeId = 10)) THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostLinksRecursive plr ON tp.PostId = plr.PostId
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

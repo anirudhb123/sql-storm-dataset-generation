@@ -1,0 +1,39 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal = (SELECT MAX(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ts.level + 1
+    FROM supplier s
+    JOIN top_suppliers ts ON s.s_acctbal = ts.s_acctbal AND s.s_suppkey <> ts.s_suppkey
+    WHERE s.s_acctbal < ts.s_acctbal AND ts.level < 5
+),
+part_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+customer_order AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent, AVG(o.o_orderdate) AS avg_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+ranked_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM supplier s
+    JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT cs.c_custkey, cs.c_name, cs.order_count, cs.total_spent, ts.s_name AS top_supplier_name,
+       ps.p_name, ps.total_supplycost, rs.revenue_rank
+FROM customer_order cs
+LEFT JOIN top_suppliers ts ON ts.level = 1
+LEFT JOIN part_summary ps ON ps.total_supplycost > 10000
+JOIN ranked_suppliers rs ON rs.revenue_rank <= 3
+WHERE cs.total_spent IS NOT NULL
+ORDER BY cs.total_spent DESC, ps.total_supplycost ASC;

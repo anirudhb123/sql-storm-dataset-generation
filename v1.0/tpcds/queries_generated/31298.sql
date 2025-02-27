@@ -1,0 +1,73 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_demo_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_purchase_estimate, 
+        cd.cd_credit_rating,
+        0 AS level
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender = 'F' AND cd.cd_purchase_estimate > 1000
+
+    UNION ALL
+
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_demo_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_purchase_estimate, 
+        cd.cd_credit_rating,
+        ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.cd_demo_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+)
+
+SELECT 
+    ch.c_customer_sk,
+    CONCAT(ch.c_first_name, ' ', ch.c_last_name) AS full_name,
+    ch.cd_gender,
+    ch.cd_marital_status,
+    SUM(ws.ws_net_paid) AS total_spent,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    FIRST_VALUE(ws.ws_ext_sales_price) OVER (PARTITION BY ch.c_customer_sk ORDER BY ws.ws_sold_date_sk DESC) AS last_order_value,
+    MAX(ws.ws_sold_date_sk) AS last_purchase_date
+FROM CustomerHierarchy ch
+LEFT JOIN web_sales ws ON ch.c_customer_sk = ws.ws_bill_customer_sk
+GROUP BY ch.c_customer_sk, ch.c_first_name, ch.c_last_name, ch.cd_gender, ch.cd_marital_status
+HAVING total_spent > 5000 AND COUNT(DISTINCT ws.ws_order_number) > 3
+ORDER BY total_spent DESC
+LIMIT 10;
+
+WITH ItemSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+)
+
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    isales.total_quantity,
+    isales.total_profit,
+    COALESCE(SUM(sr.sr_return_quantity), 0) AS total_returns,
+    COALESCE(SUM(sr.sr_return_amt), 0) AS total_return_amount
+FROM item i
+JOIN ItemSales isales ON i.i_item_sk = isales.ws_item_sk
+LEFT JOIN store_returns sr ON sr.sr_item_sk = i.i_item_sk
+GROUP BY i.i_item_id, i.i_item_desc, isales.total_quantity, isales.total_profit
+HAVING total_profit > 1000
+ORDER BY total_profit DESC
+LIMIT 5;

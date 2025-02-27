@@ -1,0 +1,94 @@
+
+WITH RECURSIVE income_analysis AS (
+    SELECT 
+        hd_demo_sk,
+        hd_income_band_sk,
+        hd_buy_potential,
+        hd_dep_count,
+        hd_vehicle_count,
+        1 AS level
+    FROM 
+        household_demographics
+    WHERE 
+        hd_buy_potential IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ha.hd_demo_sk,
+        ha.hd_income_band_sk,
+        ha.hd_buy_potential,
+        ha.hd_dep_count + 1,
+        ha.hd_vehicle_count + 1,
+        level + 1
+    FROM 
+        household_demographics ha
+    JOIN 
+        income_analysis ia ON ha.hd_income_band_sk = ia.hd_income_band_sk
+    WHERE 
+        ha.hd_demo_sk <> ia.hd_demo_sk AND 
+        ia.level < 3
+    ORDER BY 
+        hd_income_band_sk, level
+),
+temp_delivery AS (
+    SELECT 
+        ws.web_site_id, 
+        ws.web_name, 
+        COUNT(*) AS num_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        ws.web_site_id, ws.web_name
+    HAVING 
+        COUNT(*) >= 50
+),
+frequent_returns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        COUNT(DISTINCT cr_item_sk) AS return_count,
+        SUM(cr_return_amt) AS total_return_amt,
+        SUM(cr_return_qty) AS total_return_qty
+    FROM 
+        catalog_returns
+    WHERE 
+        cr_returned_date_sk > (
+            SELECT MAX(d_date_sk) 
+            FROM date_dim 
+            WHERE d_current_month = 'Y'
+        ) 
+    GROUP BY 
+        cr_returning_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    ia.hd_income_band_sk,
+    ia.hd_buy_potential,
+    COALESCE(SUM(dr.num_orders), 0) AS total_orders,
+    COALESCE(SUM(fr.return_count), 0) AS total_returns,
+    COALESCE(SUM(fr.total_return_amt), 0) AS total_return_amount,
+    CASE 
+        WHEN COUNT(DISTINCT dr.web_site_id) > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS activity_status
+FROM 
+    customer c
+LEFT JOIN 
+    income_analysis ia ON c.c_current_hdemo_sk = ia.hd_demo_sk
+LEFT JOIN 
+    temp_delivery dr ON c.c_customer_sk = dr.web_site_id
+LEFT JOIN 
+    frequent_returns fr ON c.c_customer_sk = fr.cr_returning_customer_sk
+GROUP BY 
+    c.c_customer_id, c.c_first_name, c.c_last_name, 
+    ia.hd_income_band_sk, ia.hd_buy_potential
+ORDER BY 
+    total_orders DESC NULLS LAST,
+    total_return_amount ASC NULLS FIRST
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,80 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 1) THEN 1 ELSE 0 END) AS PositiveVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS NegativeVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+PostActivity AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseCount,
+        COUNT(DISTINCT ph.Id) FILTER (WHERE ph.PostHistoryTypeId = 11) AS ReopenCount,
+        AVG(EXTRACT(EPOCH FROM (NOW() - p.CreationDate))) AS AvgTimeToActivity -- in seconds
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+    GROUP BY 
+        p.Id
+),
+FinalStats AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        COALESCE(ps.PostId, -1) AS PostId,
+        COALESCE(ps.Title, 'No Posts') AS PostTitle,
+        upvotes.UpVotes,
+        upvotes.DownVotes,
+        ps.CommentCount,
+        ps.CloseCount,
+        ps.ReopenCount,
+        ps.AvgTimeToActivity
+    FROM 
+        UserVoteStats u
+    LEFT JOIN 
+        PostActivity ps ON ps.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.UserId)
+    LEFT JOIN 
+        UserVoteStats upvotes ON upvotes.UserId = u.UserId
+),
+RankedFinalStats AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY DisplayName ORDER BY AvgTimeToActivity DESC) AS RankByActivity
+    FROM 
+        FinalStats
+)
+SELECT 
+    DisplayName,
+    PostTitle,
+    UpVotes,
+    DownVotes,
+    CommentCount,
+    CloseCount,
+    ReopenCount,
+    AvgTimeToActivity,
+    RankByActivity
+FROM 
+    RankedFinalStats
+WHERE 
+    RankByActivity <= 10
+ORDER BY 
+    AvgTimeToActivity DESC, DisplayName;

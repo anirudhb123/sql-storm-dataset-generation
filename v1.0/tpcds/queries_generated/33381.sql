@@ -1,0 +1,77 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, 
+        ws_item_sk
+    
+    UNION ALL
+    
+    SELECT 
+        s.ss_sold_date_sk,
+        s.ss_item_sk,
+        SUM(s.ss_net_profit) + c.total_net_profit
+    FROM 
+        store_sales s
+    JOIN 
+        SalesCTE c ON s.ss_item_sk = c.ws_item_sk
+    GROUP BY 
+        s.ss_sold_date_sk, 
+        s.ss_item_sk
+),
+CustomerDemo AS (
+    SELECT 
+        cd_demo_sk, 
+        cd_gender, 
+        cd_marital_status, 
+        cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) as rn
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_purchase_estimate > 5000
+),
+TotalSales AS (
+    SELECT 
+        d.d_year,
+        SUM(coalesce(s.total_net_profit, 0)) AS annual_net_profit
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        SalesCTE s ON d.d_date_sk = s.ws_sold_date_sk
+    GROUP BY 
+        d.d_year
+)
+SELECT 
+    ca.city,
+    ca.state,
+    d.d_year,
+    t.annual_net_profit,
+    cd.cd_gender,
+    COUNT(*) AS customer_count,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    CustomerDemo cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    TotalSales t ON d.d_year = t.d_year
+JOIN 
+    date_dim d ON d.d_date_sk IN (c.c_first_sales_date_sk, c.c_last_review_date_sk)
+GROUP BY 
+    ca.city, 
+    ca.state, 
+    d.d_year, 
+    cd.cd_gender
+HAVING 
+    COUNT(*) > 10
+ORDER BY 
+    t.annual_net_profit DESC, 
+    customer_count DESC;

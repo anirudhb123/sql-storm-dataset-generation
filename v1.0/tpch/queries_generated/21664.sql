@@ -1,0 +1,84 @@
+WITH RECURSIVE ranked_supplier AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+available_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(SUM(ps.ps_availqty), 0) as total_availqty
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+    HAVING 
+        COALESCE(SUM(ps.ps_availqty), 0) > 0
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'P') -- Filter for finished or pending orders
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+complex_summary AS (
+    SELECT 
+        cs.c_custkey,
+        cs.c_name,
+        cs.total_spent,
+        cs.order_count,
+        (SELECT COUNT(*) FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)) AS total_items_ordered,
+        RANK() OVER (ORDER BY cs.total_spent DESC) AS customer_rank
+    FROM 
+        customer_order_summary cs
+)
+SELECT 
+    cs.c_custkey,
+    cs.c_name,
+    cs.total_spent,
+    cs.order_count,
+    cs.total_items_ordered,
+    CASE 
+        WHEN cs.total_spent > 1000 THEN 'High Value' 
+        WHEN cs.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value' 
+        ELSE 'Low Value' 
+    END AS customer_value,
+    ps.p_name,
+    ps.p_retailprice,
+    COALESCE((SELECT COUNT(*) FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey) AND l.l_partkey = ps.p_partkey), 0) AS ordered_quantity
+FROM 
+    complex_summary cs
+JOIN 
+    available_parts ps ON ps.total_availqty > (
+        SELECT AVG(total_availqty) FROM available_parts
+    )
+LEFT JOIN 
+    ranked_supplier rs ON cs.c_custkey IN (
+        SELECT c.c_custkey 
+        FROM customer c 
+        JOIN supplier s ON c.c_nationkey = s.s_nationkey 
+        WHERE s.s_suppkey = rs.s_suppkey
+    )
+WHERE 
+    rs.rank = 1
+ORDER BY 
+    cs.total_spent DESC, cs.c_name ASC;

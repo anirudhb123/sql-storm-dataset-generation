@@ -1,0 +1,66 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN T.IsModeratorOnly = 1 THEN 1 ELSE 0 END) AS ModeratorOnlyCount,
+        SUM(CASE WHEN T.IsRequired = 1 THEN 1 ELSE 0 END) AS RequiredCount,
+        COALESCE(SUM(Posts.ViewCount), 0) AS TotalViewCount,
+        COALESCE(SUM(Posts.Score), 0) AS TotalScore
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts ON Posts.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        ModeratorOnlyCount,
+        RequiredCount,
+        TotalViewCount,
+        TotalScore,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC) AS RankByScore,
+        ROW_NUMBER() OVER (ORDER BY TotalViewCount DESC) AS RankByViews
+    FROM 
+        TagStatistics
+),
+FilteredTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        ModeratorOnlyCount,
+        RequiredCount,
+        TotalViewCount,
+        TotalScore,
+        RankByScore,
+        RankByViews
+    FROM 
+        PopularTags
+    WHERE 
+        PostCount > 10 
+)
+SELECT 
+    FT.TagName,
+    FT.PostCount,
+    FT.ModeratorOnlyCount,
+    FT.RequiredCount,
+    FT.TotalViewCount,
+    FT.TotalScore,
+    FT.RankByScore,
+    FT.RankByViews,
+    P.Title AS NotablePostTitle,
+    P.CreationDate AS NotablePostDate,
+    U.DisplayName AS PostOwner
+FROM 
+    FilteredTags FT
+LEFT JOIN 
+    Posts P ON P.Tags LIKE '%' || FT.TagName || '%'
+LEFT JOIN 
+    Users U ON P.OwnerUserId = U.Id
+WHERE 
+    P.ViewCount = (SELECT MAX(ViewCount) FROM Posts WHERE Tags LIKE '%' || FT.TagName || '%')
+ORDER BY 
+    FT.TotalScore DESC, FT.TotalViewCount DESC;

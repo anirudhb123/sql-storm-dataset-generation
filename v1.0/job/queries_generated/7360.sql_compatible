@@ -1,0 +1,29 @@
+
+SELECT
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS cast_role,
+    g.kind AS genre,
+    p.info AS person_info
+FROM
+    aka_name a
+JOIN
+    cast_info ci ON a.person_id = ci.person_id
+JOIN
+    title t ON ci.movie_id = t.id
+JOIN
+    kind_type g ON t.kind_id = g.id
+JOIN
+    person_info p ON a.person_id = p.person_id
+WHERE
+    p.info_type_id = (SELECT id FROM info_type WHERE info = 'birth date')
+    AND t.production_year BETWEEN 1995 AND 2023
+GROUP BY
+    a.name,
+    t.title,
+    c.kind,
+    g.kind,
+    p.info
+ORDER BY
+    t.production_year DESC, a.name ASC
+LIMIT 100;

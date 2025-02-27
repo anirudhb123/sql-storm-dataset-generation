@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        CASE
+            WHEN p.Score >= 100 THEN 'High Score'
+            WHEN p.Score BETWEEN 50 AND 99 THEN 'Medium Score'
+            ELSE 'Low Score'
+        END AS ScoreCategory,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.CreationDate, p.Score, p.ViewCount
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        MAX(p.ViewCount) AS MaxViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Score AS PostScore,
+    u.DisplayName AS PostOwner,
+    r.CreationDate,
+    r.ScoreCategory,
+    r.CommentCount,
+    r.Upvotes,
+    us.TotalScore AS OwnerTotalScore,
+    us.MaxViews AS OwnerMaxViews,
+    pt.TagName,
+    pt.PostCount AS PopularTagCount
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    UserScores us ON u.Id = us.UserId
+LEFT JOIN 
+    PopularTags pt ON ARRAY_LENGTH(string_to_array(r.Title, ' '), 1) < 5 
+                     AND pt.TagName IN (SELECT unnest(string_to_array(r.Tags, ',')))
+WHERE 
+    (r.UserPostRank = 1 OR r.ScoreCategory = 'High Score')
+    AND (r.ViewCount IS NOT NULL OR r.CommentCount IS NOT NULL)
+ORDER BY 
+    r.CreationDate DESC,
+    r.Score DESC;

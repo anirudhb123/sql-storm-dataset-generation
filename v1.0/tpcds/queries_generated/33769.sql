@@ -1,0 +1,57 @@
+
+WITH RECURSIVE Address_Hierarchy AS (
+    SELECT ca_address_sk, ca_city, ca_state, 1 AS level
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+    UNION ALL
+    SELECT ca.ca_address_sk, ca.ca_city, ca.ca_state, ah.level + 1
+    FROM customer_address ca
+    JOIN Address_Hierarchy ah ON ca.ca_address_sk = ah.ca_address_sk
+),
+Aggregated_Sales AS (
+    SELECT 
+        ws.web_site_sk, 
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales, 
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) as sale_rank
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_current_addr_sk IS NOT NULL
+    GROUP BY ws.web_site_sk
+),
+Top_Customers AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ss.ss_net_paid_inc_tax) AS total_store_spent,
+        COUNT(ss.ss_ticket_number) AS total_purchases
+    FROM customer c
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_id
+    HAVING SUM(ss.ss_net_paid_inc_tax) > 1000
+),
+Customer_Demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics cd
+    GROUP BY cd.cd_demo_sk
+)
+SELECT 
+    ah.ca_city,
+    ah.ca_state,
+    ts.total_sales,
+    tc.total_store_spent,
+    cd.gender,
+    cd.avg_purchase_estimate
+FROM Address_Hierarchy ah
+FULL OUTER JOIN Aggregated_Sales ts ON ah.ca_state = (SELECT ca_state FROM customer_address WHERE ca_address_sk = ts.web_site_sk)
+LEFT JOIN Top_Customers tc ON tc.total_store_spent > 5000
+JOIN Customer_Demographics cd ON cd.cd_demo_sk = tc.total_purchases
+WHERE ts.order_count > 10
+  AND (cd.avg_purchase_estimate IS NOT NULL OR cd.avg_purchase_estimate > 300)
+ORDER BY ah.ca_city, ts.total_sales DESC;

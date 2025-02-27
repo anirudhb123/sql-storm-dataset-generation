@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+PartSupplierStats AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_availqty, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING total_spent > 10000
+),
+RegionStats AS (
+    SELECT r.r_name, COUNT(DISTINCT n.n_nationkey) AS num_nations, SUM(s.s_acctbal) AS total_acctbal
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name
+)
+SELECT r.r_name, 
+       COALESCE(r.num_nations, 0) AS num_nations,
+       COALESCE(r.total_acctbal, 0) AS total_acctbal,
+       ps.total_availqty,
+       ps.avg_supplycost,
+       tc.total_spent
+FROM RegionStats r
+FULL OUTER JOIN PartSupplierStats ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size = 20)
+LEFT JOIN TopCustomers tc ON tc.c_custkey = (
+    SELECT t.c_custkey 
+    FROM TopCustomers t 
+    ORDER BY t.total_spent DESC 
+    LIMIT 1
+)
+WHERE r.total_acctbal IS NOT NULL OR ps.total_availqty IS NOT NULL
+ORDER BY r.r_name ASC, tc.total_spent DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.PostTypeId = 1  -- Only Questions
+    GROUP BY p.Id, p.Title, p.Score, p.CreationDate, p.OwnerUserId
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.CommentCount,
+        CASE WHEN rp.Score > 10 THEN 'High' 
+             WHEN rp.Score BETWEEN 1 AND 10 THEN 'Medium' 
+             ELSE 'Low' END AS ScoreCategory,
+        COALESCE((
+            SELECT COUNT(*) 
+            FROM Votes v 
+            WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2 -- Upvotes
+        ), 0) AS UpVoteCount
+    FROM RankedPosts rp
+    WHERE rn = 1
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(CONCAT(pt.Name, ': ', ph.Comment), '; ') AS HistoricalComments,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE ph.PostId IN (SELECT PostId FROM FilteredPosts)
+    GROUP BY ph.PostId
+),
+
+FinalResult AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.Score,
+        fp.CreationDate,
+        fp.CommentCount,
+        fp.ScoreCategory,
+        phd.HistoricalComments,
+        phd.LastEditDate
+    FROM FilteredPosts fp
+    LEFT JOIN PostHistoryDetails phd ON fp.PostId = phd.PostId
+)
+
+SELECT 
+    fr.PostId,
+    fr.Title AS PostTitle,
+    fr.Score,
+    fr.CreationDate,
+    fr.CommentCount,
+    fr.ScoreCategory,
+    COALESCE(fr.HistoricalComments, 'No history available') AS HistoricalComments,
+    CASE 
+        WHEN fr.LastEditDate IS NULL THEN 'Never edited' 
+        ELSE 'Last edited on ' || TO_CHAR(fr.LastEditDate, 'YYYY-MM-DD HH24:MI:SS') 
+    END AS EditStatus
+FROM FinalResult fr
+ORDER BY fr.Score DESC, fr.CreationDate DESC
+LIMIT 100;
+
+-- Additionally implemented corner cases and NULL logic to handle:
+-- 1. No comments resulting in count zero
+-- 2. Posts with no history being marked clearly in the output
+-- 3. Score classification encompassing bizarre ranges.

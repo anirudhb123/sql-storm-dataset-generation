@@ -1,0 +1,61 @@
+
+WITH RECURSIVE ActorMovieCount AS (
+    SELECT
+        a.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM
+        aka_name a
+    JOIN
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY
+        a.person_id
+    HAVING
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+MovieStats AS (
+    SELECT
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        AVG(p.age) AS avg_age,
+        SUM(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info='Box Office') THEN CAST(mi.info AS FLOAT) ELSE 0 END) AS total_box_office,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        title t
+    JOIN
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN
+        person_info p ON ci.person_id = p.person_id
+    LEFT JOIN
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        t.production_year >= 2000
+        AND (p.info_type_id IS NULL OR p.info_type_id <> (SELECT id FROM info_type WHERE info='Age'))
+    GROUP BY
+        t.title, t.production_year
+    HAVING
+        COUNT(DISTINCT ci.person_id) > 2
+    ORDER BY
+        avg_age DESC
+    FETCH FIRST 10 ROWS ONLY
+)
+SELECT
+    m.title,
+    m.production_year,
+    COALESCE(m.actor_count, 0) AS actor_count,
+    COALESCE(m.avg_age, 0) AS avg_age,
+    COALESCE(m.total_box_office, 0) AS total_box_office,
+    COALESCE(m.keywords, '[No Keywords]') AS keywords,
+    rk.movie_count
+FROM
+    MovieStats m
+LEFT JOIN
+    ActorMovieCount rk ON rk.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = m.id)
+ORDER BY
+    m.total_box_office DESC NULLS LAST, 
+    m.production_year DESC, 
+    m.title;

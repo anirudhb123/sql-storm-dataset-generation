@@ -1,0 +1,63 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ss_sold_date_sk,
+        ss_item_sk,
+        ss_quantity,
+        ss_net_paid,
+        ss_net_paid_inc_tax,
+        ROW_NUMBER() OVER (PARTITION BY ss_item_sk ORDER BY ss_sold_date_sk) AS rn
+    FROM 
+        store_sales
+    WHERE 
+        ss_net_paid > 0
+),
+TotalSales AS (
+    SELECT 
+        ss_item_sk,
+        SUM(ss_net_paid) AS total_sales,
+        SUM(ss_quantity) AS total_quantity,
+        COUNT(DISTINCT ss_ticket_number) AS sales_count
+    FROM 
+        store_sales
+    WHERE 
+        ss_net_paid_inc_tax IS NOT NULL
+    GROUP BY 
+        ss_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_product_name,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    COALESCE(ts.total_quantity, 0) AS total_quantity,
+    COALESCE(ts.sales_count, 0) AS sales_count,
+    ca.ca_city,
+    ca.ca_state,
+    (SELECT COUNT(DISTINCT sr_customer_sk) 
+     FROM store_returns 
+     WHERE sr_item_sk = i.i_item_sk) AS return_count,
+    (SELECT AVG(ss_net_paid) 
+     FROM store_sales 
+     WHERE ss_item_sk = i.i_item_sk
+     GROUP BY ss_item_sk) AS avg_sales_price,
+    (SELECT GROUP_CONCAT(DISTINCT sm_type) 
+     FROM ship_mode 
+     WHERE sm_ship_mode_sk IN 
+         (SELECT DISTINCT ws_ship_mode_sk FROM web_sales WHERE ws_item_sk = i.i_item_sk)
+    ) AS shipping_modes,
+    (SELECT STRING_AGG(DISTINCT wp_type) 
+     FROM web_page 
+     WHERE wp_customer_sk IN 
+         (SELECT DISTINCT sr_customer_sk FROM store_returns WHERE sr_item_sk = i.i_item_sk)
+    ) AS web_page_types
+FROM 
+    item i
+LEFT JOIN 
+    TotalSales ts ON i.i_item_sk = ts.ss_item_sk
+LEFT JOIN 
+    customer_address ca ON ca.ca_address_sk = (SELECT c_current_addr_sk FROM customer WHERE c_current_cdemo_sk = i.i_item_sk)
+WHERE 
+    EXISTS (SELECT 1 FROM SalesCTE WHERE ss_item_sk = i.i_item_sk AND rn <= 5)
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

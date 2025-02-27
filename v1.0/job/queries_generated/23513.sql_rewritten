@@ -1,0 +1,79 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS actor_count,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank_within_year
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        k.keyword,
+        COALESCE(mk.movie_id, -1) AS movie_with_keyword 
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        COUNT(*) AS num_movies,
+        MAX(m.production_year) AS latest_movie_year
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        aka_title m ON mc.movie_id = m.id
+    GROUP BY 
+        mc.movie_id, c.name
+),
+NullLogicExample AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        (SELECT COUNT(*) FROM cast_info ci WHERE ci.movie_id = m.id AND ci.note IS NULL) AS null_note_count
+    FROM 
+        aka_title m
+    WHERE 
+        EXISTS (
+            SELECT 1 FROM cast_info ci 
+            WHERE ci.movie_id = m.id AND ci.person_role_id IS NOT NULL
+        )
+)
+SELECT 
+    r.title AS Movie_Title,
+    r.production_year AS Year,
+    r.actor_count AS Actor_Count,
+    n.null_note_count AS Null_Notes,
+    COALESCE(k.keyword, 'No Keywords') AS Keyword,
+    cs.company_name AS Producing_Company,
+    cs.num_movies AS Company_Movie_Count,
+    CASE 
+        WHEN r.rank_within_year <= 5 THEN 'Top 5 of Year' 
+        ELSE 'Other' 
+    END AS Rank_Category
+FROM 
+    RankedMovies r
+LEFT JOIN 
+    MoviesWithKeywords k ON r.title = k.title AND r.production_year = k.production_year
+LEFT JOIN 
+    CompanyStats cs ON r.id = cs.movie_id
+LEFT JOIN 
+    NullLogicExample n ON r.title = n.title
+WHERE 
+    r.actor_count > 0 OR n.null_note_count > 5
+ORDER BY 
+    r.production_year DESC, 
+    r.actor_count DESC;

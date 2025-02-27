@@ -1,0 +1,41 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, NULL AS parent_suppkey
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.s_suppkey
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON sh.s_suppkey = s.s_suppkey
+    WHERE s.s_acctbal < sh.s_acctbal
+), recent_orders AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(month, -6, '1998-10-01'::date)
+    GROUP BY o.o_custkey
+), customer_segment AS (
+    SELECT c.c_custkey, c.c_name, c.c_mktsegment, COALESCE(ro.total_spent, 0) AS total_spent
+    FROM customer c
+    LEFT JOIN recent_orders ro ON c.c_custkey = ro.o_custkey
+), order_details AS (
+    SELECT l.l_orderkey, l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey, l.l_partkey
+), ranked_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY AVG(ps.ps_supplycost) DESC) AS rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+    HAVING AVG(ps.ps_supplycost) IS NOT NULL
+), supplier_summary AS (
+    SELECT sh.parent_suppkey, sh.s_suppkey, SUM(sh.s_acctbal) AS total_acctbal
+    FROM supplier_hierarchy sh
+    GROUP BY sh.parent_suppkey, sh.s_suppkey
+)
+SELECT cs.c_name, cs.c_mktsegment, cs.total_spent, rp.p_name, rp.p_retailprice, ss.total_acctbal
+FROM customer_segment cs
+JOIN ranked_parts rp ON cs.total_spent > (SELECT AVG(total_spent) FROM customer_segment)
+LEFT JOIN supplier_summary ss ON ss.parent_suppkey IS NULL
+WHERE rp.rank <= 5
+ORDER BY cs.total_spent DESC, ss.total_acctbal DESC;

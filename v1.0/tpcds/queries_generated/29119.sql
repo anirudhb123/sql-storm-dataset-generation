@@ -1,0 +1,27 @@
+
+SELECT 
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_customer_name,
+    ca.ca_city,
+    ca.ca_state,
+    SUM(ws.ws_quantity) AS total_quantity_sold,
+    SUM(ws.ws_sales_price) AS total_sales_amount,
+    DATE_FORMAT(d.d_date, '%Y-%m') AS sales_month,
+    REPLACE(SUBSTRING_INDEX(wp.wp_url, '/', -1), '.html', '') AS page_name
+FROM 
+    customer AS c
+JOIN 
+    customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+JOIN 
+    web_page AS wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+WHERE 
+    d.d_year = 2023 AND 
+    ca.ca_state = 'NY'
+GROUP BY 
+    full_customer_name, ca.ca_city, ca.ca_state, sales_month, page_name
+ORDER BY 
+    total_sales_amount DESC
+LIMIT 10;

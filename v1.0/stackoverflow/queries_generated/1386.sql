@@ -1,0 +1,77 @@
+WITH UserScore AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+), PopularPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.Score, 
+        P.ViewCount,
+        COUNT(C.ID) AS CommentCount,
+        RANK() OVER (ORDER BY P.Score DESC, P.ViewCount DESC) AS PopularityRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount
+), UserPostSummary AS (
+    SELECT 
+        U.UserId, 
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(PP.PostCount, 0) AS UserPostCount,
+        COALESCE(PP.TotalBounty, 0) AS UserTotalBounty,
+        COALESCE(PP.TotalUpvotes, 0) AS UserTotalUpvotes,
+        COALESCE(PP.TotalDownvotes, 0) AS UserTotalDownvotes,
+        CASE 
+            WHEN UP.ReputationRank IS NOT NULL THEN UP.ReputationRank 
+            ELSE 'Not Ranked' 
+        END AS UserReputationRank,
+        PP.PostId, 
+        PP.Title AS PopularPostTitle,
+        PP.Score AS PopularPostScore,
+        PP.CommentCount AS PopularPostCommentCount
+    FROM 
+        UserScore UP
+    LEFT JOIN 
+        PopularPosts PP ON UP.UserId = PP.PostId
+)
+SELECT 
+    UserId, 
+    DisplayName, 
+    Reputation,
+    UserPostCount,
+    UserTotalBounty,
+    UserTotalUpvotes,
+    UserTotalDownvotes,
+    UserReputationRank,
+    PopularPostTitle,
+    PopularPostScore,
+    PopularPostCommentCount
+FROM 
+    UserPostSummary
+WHERE
+    (UserPostCount > 10 OR UserTotalBounty > 50) 
+    AND (UserTotalUpvotes - UserTotalDownvotes) > 5
+ORDER BY 
+    Reputation DESC, UserPostCount DESC 
+OFFSET 5 ROWS 
+FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,31 @@
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    p.Score,
+    p.ViewCount,
+    COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) AS VoteCount,
+    ph.UserDisplayName AS LastEditorDisplayName,
+    ph.LastEditDate,
+    p.Tags
+FROM 
+    Posts AS p
+LEFT JOIN 
+    Users AS u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments AS c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes AS v ON p.Id = v.PostId
+LEFT JOIN 
+    PostHistory AS ph ON p.LastEditorUserId = ph.UserId AND p.Id = ph.PostId
+WHERE 
+    p.CreationDate >= '2023-01-01' 
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, 
+    u.DisplayName, ph.UserDisplayName, ph.LastEditDate, p.Tags
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

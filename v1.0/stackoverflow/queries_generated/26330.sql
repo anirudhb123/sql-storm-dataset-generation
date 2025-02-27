@@ -1,0 +1,66 @@
+WITH TagCounts AS (
+    SELECT
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM
+        Tags
+    JOIN
+        Posts ON Posts.Tags LIKE CONCAT('%<', Tags.TagName, '>%')
+    GROUP BY
+        Tags.TagName
+),
+TopTags AS (
+    SELECT
+        TagName,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM
+        TagCounts
+    WHERE
+        PostCount > 0
+),
+UserReputation AS (
+    SELECT
+        Users.Id AS UserId,
+        Users.DisplayName,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN Answers.AnswerCount ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN Posts.Score ELSE 0 END) AS TotalScore,
+        Users.Reputation
+    FROM
+        Users
+    LEFT JOIN
+        Posts ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(*) AS AnswerCount
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 2
+        GROUP BY 
+            ParentId
+    ) AS Answers ON Answers.ParentId = Posts.Id
+    GROUP BY
+        Users.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT t.TagName) AS TagsUsed,
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+    SUM(p.Score) AS TotalScore,
+    tt.TagName AS MostUsedTag
+FROM 
+    UserReputation u
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.UserId
+LEFT JOIN 
+    TopTags tt ON tt.TagRank = 1 AND p.Tags LIKE CONCAT('%<', tt.TagName, '>%')
+GROUP BY 
+    u.UserId, u.DisplayName, u.Reputation
+HAVING 
+    COUNT(DISTINCT t.TagName) > 5
+ORDER BY 
+    TotalScore DESC, u.Reputation DESC;

@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS RankInCategory
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, '2024-10-01')
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, pt.Name
+),
+
+HighScorePosts AS (
+    SELECT 
+        rp.*,
+        COALESCE(NULLIF(u.Reputation, 0), 1) AS AdjustedReputation
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.PostId IN (SELECT AnsweredPostId FROM Posts WHERE AcceptedAnswerId = rp.PostId)
+    WHERE 
+        RankInCategory = 1
+),
+
+MergedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        MAX(p.CreationDate) AS LatestCreationDate
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(STRING_TO_ARRAY(p.Tags, ',')))
+    GROUP BY 
+        p.Id
+),
+
+FinalResults AS (
+    SELECT 
+        hsp.PostId,
+        hsp.Title,
+        hsp.CreationDate,
+        hsp.Score,
+        hsp.ViewCount,
+        hsp.CommentCount,
+        hsp.AdjustedReputation,
+        mp.Tags,
+        ROW_NUMBER() OVER (PARTITION BY hsp.AdjustedReputation ORDER BY hsp.Score DESC) AS ReputationRank
+    FROM 
+        HighScorePosts hsp
+    LEFT JOIN 
+        MergedPosts mp ON hsp.PostId = mp.PostId
+)
+
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.CreationDate,
+    fr.Score,
+    fr.ViewCount,
+    fr.CommentCount,
+    fr.AdjustedReputation,
+    fr.Tags,
+    fr.ReputationRank
+FROM 
+    FinalResults fr
+WHERE 
+    fr.Score > 10 AND (
+        (fr.AdjustedReputation IS NOT NULL AND fr.AdjustedReputation > 1000) 
+        OR (fr.Tags IS NULL)
+    )
+ORDER BY 
+    fr.ReputationRank DESC, fr.Score DESC;

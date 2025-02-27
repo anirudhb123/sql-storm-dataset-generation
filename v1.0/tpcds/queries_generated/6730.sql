@@ -1,0 +1,53 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        c.c_customer_id, 
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        AVG(i.i_current_price) AS avg_item_price,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        d.d_year
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2021 AND 2022
+    GROUP BY 
+        c.c_customer_id, d.d_year
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ss.c_customer_id) AS customer_count,
+        SUM(ss.total_quantity) AS total_quantity,
+        SUM(ss.total_net_profit) AS total_profit
+    FROM 
+        SalesSummary ss
+    JOIN 
+        customer_demographics cd ON ss.c_customer_id IN (
+            SELECT c_customer_id FROM customer WHERE c_customer_sk IN (
+                SELECT DISTINCT ss.c_customer_id FROM SalesSummary
+            )
+        )
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.customer_count,
+    cd.total_quantity,
+    cd.total_profit,
+    RANK() OVER (ORDER BY cd.total_profit DESC) AS profit_rank
+FROM 
+    CustomerDemographics cd
+ORDER BY 
+    cd.total_profit DESC, 
+    cd.customer_count DESC
+LIMIT 10;

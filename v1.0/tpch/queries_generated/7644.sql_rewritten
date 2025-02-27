@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty * ps.ps_supplycost) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+BestSupplierByNation AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        rs.s_name AS best_supplier_name,
+        rs.total_cost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rank = 1
+),
+OrderStatistics AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    b.region_name,
+    b.nation_name,
+    b.best_supplier_name,
+    SUM(os.total_line_value) AS total_order_value,
+    COUNT(os.o_orderkey) AS total_orders,
+    COUNT(DISTINCT os.line_count) AS distinct_line_counts
+FROM 
+    BestSupplierByNation b
+JOIN 
+    OrderStatistics os ON b.best_supplier_name = (SELECT s.s_name FROM supplier s JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey WHERE o.o_orderstatus = 'O'))
+GROUP BY 
+    b.region_name, b.nation_name, b.best_supplier_name
+ORDER BY 
+    total_order_value DESC
+LIMIT 10;

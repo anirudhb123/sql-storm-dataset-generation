@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS Score, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostLinks pl ON pl.PostId = p.Id
+    LEFT JOIN 
+        Tags t ON t.Id = pl.RelatedPostId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' 
+    GROUP BY 
+        p.Id
+),
+HotQuestions AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.Tags,
+        rp.Score
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Score > 5 
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    uq.DisplayName AS UserName,
+    uq.Reputation,
+    uq.BadgeCount,
+    hq.Title,
+    hq.ViewCount,
+    hq.AnswerCount,
+    hq.CommentCount,
+    hq.Tags
+FROM 
+    HotQuestions hq
+JOIN 
+    RankedPosts rp ON rp.PostId = hq.PostId
+JOIN 
+    UserReputation uq ON uq.UserId = rp.OwnerUserId
+ORDER BY 
+    hq.ViewCount DESC, uq.Reputation DESC
+LIMIT 10;

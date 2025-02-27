@@ -1,0 +1,41 @@
+
+WITH RecentPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, 
+           p.ViewCount, p.AnswerCount, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT u.Id AS UserId, 
+           u.Reputation, 
+           COUNT(DISTINCT p.Id) AS TotalPosts,
+           SUM(CASE WHEN p.ViewCount > 1000 THEN 1 ELSE 0 END) AS HighViewCountPosts
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.Reputation
+),
+PostHistoryStats AS (
+    SELECT ph.PostId, 
+           COUNT(*) AS EditCount,
+           MAX(ph.CreationDate) AS LastEditDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 24)  
+    GROUP BY ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    us.TotalPosts,
+    us.HighViewCountPosts,
+    COUNT(rp.Id) AS RecentPostsCount,
+    COALESCE(MAX(phe.LastEditDate), 'Never Edited') AS MostRecentEdit,
+    COALESCE(SUM(CASE WHEN rp.ViewCount > 10000 THEN 1 ELSE 0 END), 0) AS HighViewCountRecentPosts
+FROM Users u
+JOIN UserStats us ON u.Id = us.UserId
+LEFT JOIN RecentPosts rp ON u.Id = rp.OwnerUserId AND rp.rn <= 5
+LEFT JOIN PostHistoryStats phe ON rp.Id = phe.PostId
+WHERE u.Location IS NOT NULL
+GROUP BY u.Id, u.DisplayName, u.Reputation, us.TotalPosts, us.HighViewCountPosts
+ORDER BY u.Reputation DESC, RecentPostsCount DESC
+LIMIT 10;

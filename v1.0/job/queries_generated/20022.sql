@@ -1,0 +1,91 @@
+WITH RankedMovieInfo AS (
+    SELECT 
+        mt.title, 
+        mt.production_year, 
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT mk.keyword) DESC) AS rn
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        m.title, 
+        m.production_year,
+        COALESCE(mk.keyword_count, 0) AS keyword_count,
+        (CASE 
+            WHEN m.production_year < 2000 THEN 'Classic'
+            WHEN m.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+            ELSE 'Recent'
+         END) AS era,
+         COUNT(DISTINCT c.person_id) AS cast_size
+    FROM 
+        RankedMovieInfo m
+    LEFT JOIN 
+        cast_info c ON m.title = (SELECT title FROM aka_title WHERE id = c.movie_id LIMIT 1)
+    WHERE 
+        m.rn = 1    -- Selecting only the top movie per year based on keyword count
+    GROUP BY 
+        m.title, m.production_year, mk.keyword_count
+    ORDER BY 
+        m.production_year DESC
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT co.name) AS company_count,
+        MAX(ct.kind) AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.era,
+    fm.keyword_count,
+    fm.cast_size,
+    COALESCE(mc.company_count, 0) AS company_count,
+    mc.company_type
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    MovieCompanies mc ON fm.title = (SELECT title FROM aka_title WHERE id = mc.movie_id LIMIT 1)
+WHERE 
+    (fm.cast_size > 5 OR mc.company_count > 2)  -- Filter for movies with significant casts or production companies.
+ORDER BY 
+    fm.production_year DESC, 
+    fm.keyword_count DESC
+LIMIT 100;
+
+-- Additional dynamic filtering on NULL values
+SELECT 
+    * 
+FROM 
+    (SELECT 
+         title, 
+         production_year, 
+         era,
+         keyword_count,
+         cast_size,
+         company_count,
+         company_type
+     FROM 
+         FilteredMovies
+     WHERE 
+         cast_size IS NOT NULL
+     OR 
+         keyword_count IS NULL) AS filtered_results
+WHERE 
+    company_type != 'Independent'
+ORDER BY 
+    production_year, 
+    title;

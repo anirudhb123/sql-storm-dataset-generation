@@ -1,0 +1,80 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        coalesce(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS NetVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        STRING_AGG(DISTINCT CONCAT(ph.Comment, ' (', ph.CreationDate, ')'), '; ') AS EditComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+PostCloud AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags t
+    INNER JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.NetVotes,
+        ps.CommentCount,
+        ROW_NUMBER() OVER (ORDER BY ps.NetVotes DESC, ps.CommentCount DESC) AS Rank
+    FROM 
+        PostStatistics ps
+)
+SELECT 
+    tp.Title,
+    tp.NetVotes,
+    tp.CommentCount,
+    ph.Level AS HierarchyLevel,
+    tc.TagName
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    RecursivePostHierarchy ph ON tp.PostId = ph.PostId
+LEFT JOIN 
+    PostCloud tc ON tc.PostCount > 10
+WHERE 
+    tp.Rank <= 10
+ORDER BY 
+    tp.NetVotes DESC, tp.CommentCount DESC;

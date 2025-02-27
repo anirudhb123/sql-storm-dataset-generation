@@ -1,0 +1,25 @@
+
+SELECT 
+    ca.country AS country,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+    SUM(ws.ws_sales_price) AS total_sales,
+    AVG(cd_purchase_estimate) AS average_purchase_estimation,
+    STRING_AGG(DISTINCT CONCAT(c.c_first_name, ' ', c.c_last_name), '; ') AS customer_names,
+    MAX(CASE WHEN cd_gender = 'F' THEN 1 ELSE 0 END) AS female_customers,
+    MAX(CASE WHEN cd_gender = 'M' THEN 1 ELSE 0 END) AS male_customers
+FROM 
+    customer AS c
+JOIN 
+    customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    date_dim AS dd ON ws.ws_sold_date_sk = dd.d_date_sk
+WHERE 
+    dd.d_year = 2023
+GROUP BY 
+    ca.country
+ORDER BY 
+    total_sales DESC;

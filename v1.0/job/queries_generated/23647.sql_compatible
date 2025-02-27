@@ -1,0 +1,72 @@
+
+WITH RecursiveTitleCTE AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        0 AS recursion_level
+    FROM 
+        title t
+    WHERE 
+        t.production_year > 2000
+        
+    UNION ALL
+    
+    SELECT 
+        tt.id AS title_id,
+        tt.title,
+        tt.production_year,
+        tt.kind_id,
+        rt.recursion_level + 1
+    FROM 
+        title tt
+    INNER JOIN 
+        movie_link ml ON tt.id = ml.linked_movie_id
+    INNER JOIN 
+        RecursiveTitleCTE rt ON ml.movie_id = rt.title_id
+    WHERE 
+        rt.recursion_level < 2
+),
+AggregatedTitleInfo AS (
+    SELECT 
+        rt.title,
+        COUNT(DISTINCT ci.person_id) AS actors_count,
+        AVG(CASE WHEN t.production_year IS NOT NULL THEN t.production_year ELSE 0 END) AS avg_prod_year,
+        STRING_AGG(DISTINCT COALESCE(aka.name, 'Unknown Actor'), ', ') AS actors_list
+    FROM 
+        RecursiveTitleCTE rt
+    LEFT JOIN 
+        cast_info ci ON rt.title_id = ci.movie_id
+    LEFT JOIN 
+        aka_name aka ON ci.person_id = aka.person_id
+    LEFT JOIN 
+        title t ON t.id = rt.title_id
+    GROUP BY 
+        rt.title
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 0
+),
+FilteredTitles AS (
+    SELECT 
+        title,
+        actors_count,
+        avg_prod_year,
+        actors_list
+    FROM 
+        AggregatedTitleInfo
+    WHERE 
+        actors_count > 1 AND avg_prod_year < 2020
+)
+SELECT 
+    ft.title,
+    ft.actors_count,
+    ft.avg_prod_year,
+    ft.actors_list,
+    LEAD(ft.actors_count) OVER (ORDER BY ft.avg_prod_year ASC) AS next_actors_count,
+    LAG(ft.avg_prod_year, 1, NULL) OVER (ORDER BY ft.avg_prod_year DESC) AS prev_avg_prod_year
+FROM 
+    FilteredTitles ft
+ORDER BY 
+    ft.avg_prod_year DESC
+LIMIT 10;

@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        NULL::text AS parent_title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        p.title AS parent_title,
+        h.level + 1
+    FROM 
+        aka_title e
+    JOIN 
+        movie_hierarchy h ON e.episode_of_id = h.movie_id
+    JOIN 
+        aka_title p ON h.movie_id = p.id
+)
+
+SELECT 
+    m.id AS movie_id,
+    m.title,
+    ARRAY_AGG(DISTINCT a.name) AS actors,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    AVG(CASE WHEN ci.nr_order IS NOT NULL THEN 1 ELSE 0 END) AS avg_order_presence,
+    STRING_AGG(DISTINCT ni.info || ' ( ' || it.info || ' )', '; ') AS additional_info
+FROM 
+    movie_hierarchy m
+LEFT JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name a ON a.person_id = ci.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.movie_id
+LEFT JOIN 
+    keyword kc ON kc.id = mk.keyword_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = m.movie_id
+LEFT JOIN 
+    info_type it ON it.id = mi.info_type_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = m.movie_id
+WHERE 
+    m.level <= 3
+GROUP BY 
+    m.id, m.title
+ORDER BY 
+    keyword_count DESC, COALESCE(min(ci.nr_order), 0)
+LIMIT 100;

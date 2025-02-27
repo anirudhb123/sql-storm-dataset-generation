@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS RankProfit
+    FROM web_sales
+    WHERE ws_net_profit IS NOT NULL
+), 
+TopProfitSales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number,
+        ws_net_profit 
+    FROM RankedSales
+    WHERE RankProfit <= 3
+),
+TopReturns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS Total_Returned_Quantity,
+        SUM(wr_return_amt) AS Total_Returned_Amount
+    FROM web_returns
+    GROUP BY wr_item_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        ts.ws_item_sk,
+        ts.ws_order_number,
+        ts.ws_net_profit,
+        COALESCE(tr.Total_Returned_Quantity, 0) AS Total_Returned_Quantity,
+        COALESCE(tr.Total_Returned_Amount, 0) AS Total_Returned_Amount
+    FROM TopProfitSales ts
+    LEFT JOIN TopReturns tr ON ts.ws_item_sk = tr.wr_item_sk
+)
+SELECT 
+    s.ws_item_sk, 
+    SUM(ws.ws_quantity) AS Total_Quantity_Sold,
+    SUM(s.ws_net_profit) AS Total_Net_Profit,
+    COUNT(DISTINCT s.ws_order_number) AS Unique_Orders,
+    SUM(s.Total_Returned_Quantity) AS Total_Returned_Quantity,
+    (SUM(s.ws_net_profit) - SUM(s.Total_Returned_Amount)) AS Adjusted_Profit,
+    CASE 
+        WHEN COUNT(DISTINCT s.ws_order_number) > 0 THEN (SUM(s.Total_Returned_Amount) / COUNT(DISTINCT s.ws_order_number)) 
+        ELSE NULL 
+    END AS Average_Return_Amount_Per_Order
+FROM SalesAndReturns s
+JOIN item i ON s.ws_item_sk = i.i_item_sk
+WHERE 
+    (i.i_current_price - i.i_wholesale_cost) > 0 
+    AND (s.ws_net_profit > 0 OR s.Total_Returned_Quantity IS NOT NULL)
+GROUP BY 
+    s.ws_item_sk
+HAVING 
+    Adjusted_Profit > 0 
+    AND COUNT(s.ws_order_number) > 1 
+ORDER BY 
+    Total_Net_Profit DESC
+LIMIT 10 OFFSET 5;

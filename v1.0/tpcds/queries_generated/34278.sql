@@ -1,0 +1,61 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws_item_sk, SUM(ws_net_profit) AS total_net_profit
+    FROM web_sales
+    GROUP BY ws_item_sk
+    UNION ALL
+    SELECT cs_item_sk, SUM(cs_net_profit)
+    FROM catalog_sales
+    GROUP BY cs_item_sk
+), RankedSales AS (
+    SELECT item_sk, total_net_profit,
+           RANK() OVER (ORDER BY total_net_profit DESC) AS profit_rank
+    FROM (
+        SELECT ws_item_sk AS item_sk, SUM(ws_net_profit) AS total_net_profit
+        FROM web_sales
+        GROUP BY ws_item_sk
+        UNION ALL
+        SELECT cs_item_sk AS item_sk, SUM(cs_net_profit) AS total_net_profit
+        FROM catalog_sales
+        GROUP BY cs_item_sk
+    ) AS CombinedSales
+), CustomerDemographics AS (
+    SELECT cd_demo_sk, 
+           CASE 
+               WHEN cd_income_band_sk IS NULL THEN 'UNKNOWN'
+               ELSE (SELECT ib_lower_bound || '-' || ib_upper_bound
+                     FROM income_band 
+                     WHERE ib_income_band_sk = cd_income_band_sk)
+           END AS income_band,
+           cd_gender,
+           cd_marital_status
+    FROM customer_demographics
+), ItemDetails AS (
+    SELECT i_item_sk, i_product_name, i_category, i_brand_id, i_current_price
+    FROM item
+), TopItems AS (
+    SELECT item_details.i_item_sk, 
+           item_details.i_product_name, 
+           item_details.i_category, 
+           item_details.i_current_price, 
+           ranked_sales.total_net_profit
+    FROM RankedSales ranked_sales
+    JOIN ItemDetails item_details ON ranked_sales.item_sk = item_details.i_item_sk
+    WHERE ranked_sales.profit_rank <= 10
+)
+SELECT cust.c_first_name, cust.c_last_name, cd.income_band, cd.cd_gender, cd.cd_marital_status,
+       top_items.i_product_name, top_items.i_category, top_items.i_current_price, top_items.total_net_profit
+FROM customer cust
+INNER JOIN CustomerDemographics cd ON cust.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN TopItems top_items ON top_items.i_item_sk IN (
+    SELECT DISTINCT ws_item_sk
+    FROM web_sales
+    WHERE ws_bill_customer_sk = cust.c_customer_sk
+    UNION
+    SELECT DISTINCT cs_item_sk
+    FROM catalog_sales
+    WHERE cs_bill_customer_sk = cust.c_customer_sk
+)
+WHERE cd.cd_gender = 'F'
+AND cd.cd_marital_status = 'M'
+ORDER BY top_items.total_net_profit DESC, cust.c_last_name;

@@ -1,0 +1,66 @@
+-- Performance Benchmarking Query
+-- This query will assess performance by aggregating post statistics along with user interactions
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AnswerCount, p.CommentCount
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT v.Id) AS TotalVotes,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.TotalComments,
+    ps.TotalUpVotes,
+    ps.TotalDownVotes,
+    us.UserId,
+    us.DisplayName,
+    us.TotalVotes,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.PostId = u.Id -- Example condition; adjust as necessary for context
+LEFT JOIN 
+    UserStats us ON us.UserId = p.OwnerUserId
+ORDER BY 
+    ps.ViewCount DESC, ps.Score DESC;

@@ -1,0 +1,74 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswer,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        COALESCE(p2.AcceptedAnswerId, 0) AS AcceptedAnswer,
+        p2.CreationDate,
+        p2.OwnerUserId,
+        p2.Score,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostCTE r ON p2.ParentId = r.PostId
+),
+VoteSummary AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        CASE 
+            WHEN rp.AcceptedAnswer > 0 THEN 1 
+            ELSE 0 
+        END AS IsAccepted
+    FROM 
+        RecursivePostCTE rp
+    LEFT JOIN 
+        VoteSummary ps ON rp.PostId = ps.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.UpVoteCount, 
+    ps.DownVoteCount,
+    ps.IsAccepted,
+    CASE 
+        WHEN ps.Score > 10 THEN 'High-Score'
+        WHEN ps.Score BETWEEN 5 AND 10 THEN 'Medium-Score'
+        ELSE 'Low-Score'
+    END AS ScoreCategory
+FROM 
+    PostStats ps
+WHERE 
+    ps.CreationDate >= DATEADD(MONTH, -6, CURRENT_TIMESTAMP)
+ORDER BY 
+    ps.Score DESC

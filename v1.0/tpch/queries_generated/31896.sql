@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+TotalOrders AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2024-01-01'
+    GROUP BY o.o_custkey
+),
+PartSuppliers AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > 100
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(ol.total_spent) AS total_spending,
+    STRING_AGG(DISTINCT sp.s_name, ', ') AS supplier_names,
+    (SELECT AVG(total_supply_cost) FROM PartSuppliers) AS avg_supply_cost,
+    SUM(CASE WHEN li.l_returnflag = 'R' THEN 1 ELSE 0 END) AS returned_items
+FROM customer c
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN TotalOrders ol ON c.c_custkey = ol.o_custkey
+LEFT JOIN lineitem li ON c.c_custkey = li.l_orderkey
+LEFT JOIN SupplierHierarchy sh ON c.c_nationkey = sh.s_nationkey
+LEFT JOIN supplier sp ON sp.s_nationkey = n.n_nationkey
+GROUP BY n.n_name
+HAVING SUM(ol.total_spent) > 1000
+ORDER BY nation_name;

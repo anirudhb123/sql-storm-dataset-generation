@@ -1,0 +1,47 @@
+-- Performance benchmarking query to analyze the number of posts, users, and votes with join operations and groupings
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    ups.UserId,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.TotalViews,
+    ups.TotalScore,
+    pvs.TotalVotes,
+    pvs.TotalUpVotes,
+    pvs.TotalDownVotes
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    PostVoteStats pvs ON ups.TotalPosts > 0 -- Joining to include only users with posts
+ORDER BY 
+    ups.TotalPosts DESC, ups.TotalScore DESC;

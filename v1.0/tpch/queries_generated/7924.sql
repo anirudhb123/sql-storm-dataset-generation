@@ -1,0 +1,49 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+), TopSuppliers AS (
+    SELECT 
+        nation_name,
+        s.s_suppkey,
+        s.s_name,
+        total_supply_cost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        supplier s ON rs.s_suppkey = s.s_suppkey
+    WHERE 
+        rank = 1
+)
+SELECT 
+    o.o_orderkey,
+    c.c_name,
+    ts.s_name,
+    ts.nation_name,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue
+FROM 
+    orders o
+JOIN 
+    lineitem li ON o.o_orderkey = li.l_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    TopSuppliers ts ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = ts.nation_name)
+WHERE 
+    o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2024-01-01'
+GROUP BY 
+    o.o_orderkey, c.c_name, ts.s_name, ts.nation_name
+ORDER BY 
+    revenue DESC
+LIMIT 10;

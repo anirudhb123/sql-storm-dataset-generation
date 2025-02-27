@@ -1,0 +1,79 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND t.title IS NOT NULL
+),
+
+CastInfoWithRoles AS (
+    SELECT 
+        c.id AS cast_id,
+        c.movie_id,
+        r.role AS role_name,
+        a.name AS actor_name,
+        ca.kind AS person_role 
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        role_type r ON r.id = c.role_id
+    LEFT JOIN 
+        aka_name a ON a.person_id = c.person_id
+    LEFT JOIN 
+        comp_cast_type ca ON ca.id = c.person_role_id
+),
+
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT t.title, ', ') AS all_titles,  
+        STRING_AGG(DISTINCT k.keyword, ', ') AS movie_keywords,
+        COALESCE(a_actor.actor_name, 'Unknown') AS leading_actor,
+        MAX(CASE WHEN k.keyword LIKE '%Award%' THEN 'Award Winner' ELSE 'Not an Award' END) AS award_status
+    FROM 
+        movie_keyword mk
+    LEFT JOIN 
+        aka_title m ON m.id = mk.movie_id
+    LEFT JOIN 
+        RankedTitles rt ON rt.title_id = m.id
+    LEFT JOIN 
+        CastInfoWithRoles a_actor ON a_actor.movie_id = m.id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        m.movie_id, a_actor.actor_name
+)
+
+SELECT 
+    md.movie_id,
+    md.all_titles,
+    md.movie_keywords,
+    md.leading_actor,
+    md.award_status,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    SUM(CASE WHEN md.award_status = 'Award Winner' THEN 1 ELSE 0 END) OVER() AS total_award_winners,
+    CASE 
+        WHEN md.all_titles IS NULL THEN 'No Title'
+        ELSE 'Has Title'
+    END AS title_existence,
+    (SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = md.movie_id AND cc.status_id = (
+        SELECT MAX(status_id) FROM complete_cast
+    )) AS latest_status_count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    complete_cast c ON c.movie_id = md.movie_id
+WHERE 
+    md.production_year IS NOT NULL
+    AND md.all_titles LIKE '%*%'
+GROUP BY 
+    md.movie_id, md.all_titles, md.movie_keywords, md.leading_actor, md.award_status
+HAVING 
+    SUM(CASE WHEN title_existence = 'Has Title' THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    md.all_titles ASC NULLS LAST;

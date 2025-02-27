@@ -1,0 +1,43 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT ws.sold_date_sk, ws.item_sk, 
+           SUM(ws.net_profit) AS total_net_profit,
+           COUNT(ws.order_number) AS total_orders,
+           DENSE_RANK() OVER (PARTITION BY ws.sold_date_sk ORDER BY SUM(ws.net_profit) DESC) AS profit_rank
+    FROM web_sales ws
+    JOIN customer c ON ws.bill_customer_sk = c.c_customer_sk
+    GROUP BY ws.sold_date_sk, ws.item_sk
+    HAVING SUM(ws.net_profit) > 0
+), rank_cte AS (
+    SELECT c.c_current_addr_sk,
+           SUM(case when cd_gender = 'F' then total_net_profit else 0 end) AS female_net_profit,
+           SUM(case when cd_gender = 'M' then total_net_profit else 0 end) AS male_net_profit,
+           MAX(total_orders) FILTER (WHERE profit_rank = 1) AS max_orders
+    FROM sales_cte ss
+    JOIN customer_demographics cd ON ss.bill_customer_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY c.c_current_addr_sk
+    HAVING SUM(total_net_profit) IS NOT NULL AND (SUM(total_net_profit) > 1000 OR max_orders > 5)
+)
+SELECT ca.ca_city, 
+       COUNT(DISTINCT r.c_current_addr_sk) AS address_count, 
+       MAX(r.female_net_profit) AS max_female_profit, 
+       MIN(COALESCE(r.male_net_profit, 0)) AS min_male_profit
+FROM rank_cte r
+JOIN customer_address ca ON r.c_current_addr_sk = ca.ca_address_sk
+GROUP BY ca.ca_city
+HAVING COUNT(*) > 3
+ORDER BY address_count DESC, max_female_profit DESC 
+LIMIT 10 OFFSET 5
+UNION ALL
+SELECT ca.ca_city, 
+       NULL AS address_count, 
+       SUM(r.female_net_profit) AS total_female_profit, 
+       NULL AS min_male_profit
+FROM rank_cte r
+JOIN customer_address ca ON r.c_current_addr_sk = ca.ca_address_sk
+WHERE ca.ca_state = 'CA'
+GROUP BY ca.ca_city
+HAVING COUNT(r.c_current_addr_sk) = 1
+ORDER BY total_female_profit DESC
+LIMIT 5;

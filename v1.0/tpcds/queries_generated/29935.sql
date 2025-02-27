@@ -1,0 +1,34 @@
+
+WITH StringProcessing AS (
+    SELECT 
+        c.c_first_name,
+        c.c_last_name,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        LENGTH(CONCAT(c.c_first_name, ' ', c.c_last_name)) AS full_name_length,
+        UPPER(CONCAT(c.c_first_name, ' ', c.c_last_name)) AS full_name_upper,
+        LOWER(CONCAT(c.c_first_name, ' ', c.c_last_name)) AS full_name_lower,
+        REPLACE(CONCAT(c.c_first_name, ' ', c.c_last_name), ' ', '-') AS full_name_hyphenated,
+        SUBSTRING(CONCAT(c.c_first_name, ' ', c.c_last_name), 1, 10) AS full_name_substr,
+        COUNT(DISTINCT ca.ca_city) OVER () AS distinct_city_count,
+        COUNT(DISTINCT ca.ca_state) OVER () AS distinct_state_count
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 2000
+)
+SELECT 
+    full_name, 
+    full_name_length, 
+    full_name_upper, 
+    full_name_lower, 
+    full_name_hyphenated, 
+    full_name_substr,
+    distinct_city_count,
+    distinct_state_count
+FROM 
+    StringProcessing
+ORDER BY 
+    full_name_length DESC
+LIMIT 100;

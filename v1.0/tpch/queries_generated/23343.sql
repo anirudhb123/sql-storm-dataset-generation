@@ -1,0 +1,44 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 1 AS level
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > (
+        SELECT AVG(c_acctbal) 
+        FROM customer 
+        WHERE c_comment IS NOT NULL
+    )
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_custkey <> ch.c_custkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(COALESCE(p.p_retailprice * ps.ps_availqty, 0)) AS total_retail_value,
+    MAX(l.l_shipdate) AS latest_shipdate,
+    CASE 
+        WHEN MAX(c.c_acctbal) IS NULL THEN 'No Balance'
+        ELSE 'Has Balance'
+    END AS balance_status
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN lineitem l ON l.l_partkey = p.p_partkey
+JOIN CustomerHierarchy c ON c.c_nationkey = n.n_nationkey
+WHERE 
+    (l.l_discount > 0 AND l.l_discount < 0.1 OR l.l_returnflag = 'R')
+    AND p.p_size BETWEEN 10 AND 20
+GROUP BY 
+    r.r_name, n.n_name 
+ORDER BY 
+    region_name DESC, nation_name ASC
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) < (
+        SELECT AVG(o.o_totalprice) 
+        FROM orders o 
+        WHERE o.o_orderstatus = 'O'
+    ) OR COUNT(DISTINCT l.l_orderkey) > 100

@@ -1,0 +1,51 @@
+WITH PostCounts AS (
+    SELECT
+        OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN PostTypeId IN (4, 5) THEN 1 ELSE 0 END) AS TotalTagWikis
+    FROM
+        Posts
+    GROUP BY
+        OwnerUserId
+),
+VoteCounts AS (
+    SELECT
+        PostId,
+        COUNT(*) AS VoteCount
+    FROM
+        Votes
+    GROUP BY
+        PostId
+),
+BadgeCounts AS (
+    SELECT
+        UserId,
+        COUNT(*) AS TotalBadges
+    FROM
+        Badges
+    GROUP BY
+        UserId
+)
+SELECT
+    U.Id AS UserId,
+    U.DisplayName,
+    COALESCE(PC.TotalPosts, 0) AS TotalPosts,
+    COALESCE(PC.TotalQuestions, 0) AS TotalQuestions,
+    COALESCE(PC.TotalAnswers, 0) AS TotalAnswers,
+    COALESCE(PC.TotalTagWikis, 0) AS TotalTagWikis,
+    COALESCE(VC.VoteCount, 0) AS TotalVotes,
+    COALESCE(BAC.TotalBadges, 0) AS TotalBadges,
+    U.Reputation,
+    U.CreationDate
+FROM
+    Users U
+LEFT JOIN
+    PostCounts PC ON U.Id = PC.OwnerUserId
+LEFT JOIN
+    VoteCounts VC ON VC.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id)
+LEFT JOIN
+    BadgeCounts BAC ON U.Id = BAC.UserId
+ORDER BY
+    U.Reputation DESC;

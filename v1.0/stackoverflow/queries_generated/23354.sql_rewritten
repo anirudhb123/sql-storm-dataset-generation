@@ -1,0 +1,74 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS QuestionCount,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS AnswerCount,
+        MAX(p.CreationDate) AS LastPostDate,
+        RANK() OVER (PARTITION BY u.Id ORDER BY SUM(COALESCE(v.BountyAmount, 0)) DESC) AS BountyRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    WHERE u.Reputation > 100 
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostCount,
+        ua.TotalScore,
+        ua.QuestionCount,
+        ua.AnswerCount,
+        ua.LastPostDate,
+        ua.BountyRank,
+        RANK() OVER (ORDER BY ua.TotalScore DESC) AS ScoreRank
+    FROM UserActivity ua
+),
+PostInformation AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        PT.Name AS PostType,
+        COALESCE( u.DisplayName, 'Community User' ) AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        MAX(h.CreationDate) AS LastHistoryChange
+    FROM Posts p
+    LEFT JOIN PostTypes PT ON p.PostTypeId = PT.Id
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory h ON p.Id = h.PostId
+    WHERE p.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+    GROUP BY p.Id, PT.Name, u.DisplayName
+),
+FinalOutput AS (
+    SELECT 
+        tu.DisplayName AS UserDisplayName,
+        COUNT(DISTINCT pi.PostId) AS ActivePostsCount,
+        SUM(pi.CommentCount) AS TotalComments,
+        AVG(COALESCE(pi.UpVoteCount, 0)) AS AverageUpVotes,
+        COUNT(DISTINCT CASE WHEN pi.PostType = 'Question' THEN pi.PostId END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN pi.PostType = 'Answer' THEN pi.PostId END) AS TotalAnswers,
+        COUNT(DISTINCT CASE WHEN pi.LastHistoryChange IS NOT NULL THEN pi.PostId END) AS PostsWithHistoryChange
+    FROM TopUsers tu
+    LEFT JOIN PostInformation pi ON tu.UserId = pi.OwnerUserId
+    WHERE tu.ScoreRank <= 50 
+    GROUP BY tu.DisplayName
+)
+SELECT 
+    UserDisplayName, 
+    ActivePostsCount, 
+    TotalComments, 
+    AverageUpVotes, 
+    TotalQuestions, 
+    TotalAnswers, 
+    PostsWithHistoryChange
+FROM FinalOutput
+ORDER BY ActivePostsCount DESC, TotalComments DESC;

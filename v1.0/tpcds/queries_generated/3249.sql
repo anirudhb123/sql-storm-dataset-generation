@@ -1,0 +1,62 @@
+
+WITH CustomerReturnStats AS (
+    SELECT
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returned_quantity,
+        SUM(cr.return_amt_inc_tax) AS total_returned_amt
+    FROM
+        catalog_returns cr
+    GROUP BY
+        cr.returning_customer_sk
+),
+SalesStats AS (
+    SELECT
+        ws.bill_customer_sk,
+        COUNT(ws.order_number) AS total_orders,
+        SUM(ws.ext_sales_price) AS total_sales
+    FROM
+        web_sales ws
+    WHERE
+        ws.sold_date_sk = (SELECT d_date_sk FROM date_dim dd WHERE dd.d_date = CURRENT_DATE)
+    GROUP BY
+        ws.bill_customer_sk
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        CASE
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM
+        customer_demographics cd
+)
+SELECT
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    cd.gender,
+    cd.cd_marital_status,
+    COALESCE(ss.total_orders, 0) AS total_orders,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(crs.total_returned_quantity, 0) AS total_returned_quantity,
+    COALESCE(crs.total_returned_amt, 0) AS total_returned_amt,
+    CASE
+        WHEN ss.total_sales - COALESCE(crs.total_returned_amt, 0) < 0 THEN 'Negative Profit'
+        ELSE 'Positive Profit'
+    END AS profit_status
+FROM
+    customer c
+LEFT JOIN CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN SalesStats ss ON c.c_customer_sk = ss.bill_customer_sk
+LEFT JOIN CustomerReturnStats crs ON c.c_customer_sk = crs.returning_customer_sk
+WHERE
+    (cd.cd_purchase_estimate > 500 AND cd.cd_credit_rating = 'Excellent')
+    OR (cd.cd_marital_status = 'M' AND cd.cd_purchase_estimate IS NOT NULL)
+ORDER BY
+    total_sales DESC,
+    total_returned_quantity ASC;

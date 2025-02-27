@@ -1,0 +1,87 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.person_id) DESC) AS rn
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.title, 
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rn <= 3
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        COALESCE(COUNT(DISTINCT mc.company_id), 0) AS company_count
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        MovieKeywords mk ON tm.title = (SELECT title FROM aka_title WHERE id IN (SELECT movie_id FROM movie_keyword WHERE movie_id IS NOT NULL LIMIT 1))
+    LEFT JOIN 
+        movie_companies mc ON (SELECT movie_id FROM movie_companies WHERE company_id IS NOT NULL LIMIT 1) = mc.movie_id
+    GROUP BY 
+        tm.title, tm.production_year, mk.keywords
+),
+PersonInfo AS (
+    SELECT 
+        ai.name AS actor_name,
+        pi.info AS actor_info
+    FROM 
+        aka_name ai
+    JOIN 
+        person_info pi ON ai.person_id = pi.person_id
+    WHERE 
+        pi.info_type_id IN (SELECT id FROM info_type WHERE info ILIKE '%actor%')
+),
+FinalOutput AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.keywords,
+        CONCAT(ROUND((EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) - (SELECT MIN(m.production_year) FROM aka_title m)) / 60), ' minutes since the first movie'),
+            ' | ',
+            CASE WHEN md.company_count > 0 THEN 'Produced by various companies' ELSE 'No production companies listed' END) AS company_info,
+        STRING_AGG(pi.actor_name, ', ') AS actor_names
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        cast_info ci ON md.title = (SELECT title FROM aka_title WHERE id = ci.movie_id)
+    LEFT JOIN 
+        PersonInfo pi ON ci.person_id = pi.person_id
+    GROUP BY 
+        md.title, md.production_year, md.keywords, md.company_count
+)
+SELECT 
+    title,
+    production_year,
+    keywords,
+    company_info,
+    actor_names
+FROM 
+    FinalOutput
+ORDER BY 
+    production_year DESC, title ASC;

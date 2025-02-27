@@ -1,0 +1,55 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        t.kind AS title_kind,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        aka_title a
+    INNER JOIN 
+        title t ON a.movie_id = t.id
+    LEFT JOIN 
+        cast_info ci ON a.movie_id = ci.movie_id
+    WHERE 
+        a.production_year IS NOT NULL AND 
+        t.kind IS NOT NULL
+    GROUP BY 
+        a.title, a.production_year, t.kind
+),
+filtered_movies AS (
+    SELECT 
+        rt.movie_title, 
+        rt.production_year, 
+        rt.title_kind, 
+        rt.cast_count 
+    FROM 
+        ranked_titles rt
+    WHERE 
+        rt.rank <= 5
+)
+SELECT 
+    fm.movie_title,
+    fm.production_year,
+    fm.title_kind,
+    fm.cast_count,
+    pi.gender,
+    STRING_AGG(DISTINCT n.name ORDER BY n.name) AS cast_names,
+    STRING_AGG(DISTINCT kw.keyword ORDER BY kw.keyword) AS keywords
+FROM 
+    filtered_movies fm
+LEFT JOIN 
+    complete_cast cc ON fm.movie_title = cc.movie_id
+LEFT JOIN 
+    person_info pi ON cc.subject_id = pi.person_id
+LEFT JOIN 
+    name n ON pi.person_id = n.id
+LEFT JOIN 
+    movie_keyword mk ON fm.movie_title = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+GROUP BY 
+    fm.movie_title, fm.production_year, fm.title_kind, fm.cast_count, pi.gender
+ORDER BY 
+    fm.production_year DESC, fm.cast_count DESC;

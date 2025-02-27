@@ -1,0 +1,66 @@
+WITH RecursiveTags AS (
+    SELECT Id, TagName, ExcerptPostId,
+           COUNT(*) OVER (PARTITION BY Count) AS TagCount
+    FROM Tags
+    WHERE IsModeratorOnly = 0
+),
+UserStats AS (
+    SELECT u.Id AS UserId,
+           u.Reputation,
+           u.DisplayName,
+           COUNT(b.Id) AS BadgeCount,
+           SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+           SUM(CASE WHEN p.PostTypeId = 2 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AnswerCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.Reputation, u.DisplayName
+),
+RecentPostEdits AS (
+    SELECT ph.PostId,
+           ph.CreationDate,
+           ph.UserDisplayName,
+           ph.Comment,
+           ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6) 
+      AND ph.CreationDate > NOW() - INTERVAL '30 days'
+),
+PostSummary AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.CreationDate,
+           p.Score,
+           COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+           STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+           COUNT(DISTINCT c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  -- BountyStart and BountyClose
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN RecursiveTags t ON t.ExcerptPostId = p.Id
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score
+),
+UserPostActivity AS (
+    SELECT u.UserId,
+           COUNT(ps.PostId) AS PostCount,
+           COUNT(cs.CommentCount) AS TotalComments,
+           SUM(ps.Score) AS TotalScore
+    FROM UserStats u
+    LEFT JOIN PostSummary ps ON ps.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.UserId)
+    LEFT JOIN (SELECT PostId, COUNT(Id) AS CommentCount FROM Comments GROUP BY PostId) cs ON cs.PostId = ps.PostId
+    GROUP BY u.UserId
+)
+SELECT u.DisplayName,
+       u.Reputation,
+       u.BadgeCount,
+       u.QuestionCount,
+       up.PostCount,
+       up.TotalComments,
+       up.TotalScore,
+       COALESCE(rpe.UserDisplayName, 'No Edits') AS LastEditor,
+       COALESCE(rpe.Comment, 'N/A') AS LastEditComment
+FROM UserStats u
+LEFT JOIN UserPostActivity up ON u.UserId = up.UserId
+LEFT JOIN RecentPostEdits rpe ON rpe.PostId = (SELECT MAX(PostId) FROM Posts WHERE OwnerUserId = u.UserId)
+ORDER BY u.Reputation DESC,
+         up.PostCount DESC;

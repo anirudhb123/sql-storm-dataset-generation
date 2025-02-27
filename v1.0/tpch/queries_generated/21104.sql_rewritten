@@ -1,0 +1,80 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        CASE 
+            WHEN l.l_discount = 0 THEN l.l_extendedprice 
+            ELSE l.l_extendedprice * (1 - l.l_discount) 
+        END AS adjusted_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+        AND l.l_returnflag = 'N'
+),
+AggregatedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(f.adjusted_price) AS total_price,
+        COUNT(DISTINCT f.l_partkey) AS part_count
+    FROM 
+        orders o
+    JOIN 
+        FilteredLineItems f ON o.o_orderkey = f.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+NationVendorCounts AS (
+    SELECT 
+        n.n_nationkey,
+        COUNT(DISTINCT CASE WHEN s.rnk = 1 THEN s.s_suppkey END) AS vendor_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        RankedSuppliers s ON n.n_nationkey = s.s_nationkey AND s.rnk <= 3
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(a.total_price), 0) AS total_sales,
+    COALESCE(v.vendor_count, 0) AS vendor_count
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    AggregatedOrders a ON n.n_nationkey = a.o_orderkey 
+LEFT JOIN 
+    NationVendorCounts v ON n.n_nationkey = v.n_nationkey
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(COALESCE(a.total_price, 0)) > 10000 OR v.vendor_count > 5
+ORDER BY 
+    total_sales DESC, vendor_count ASC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Special Region' AS r_name,
+    SUM(a.total_price) AS total_sales,
+    COUNT(v.vendor_count) AS vendor_count
+FROM 
+    AggregatedOrders a
+LEFT JOIN 
+    NationVendorCounts v ON v.vendor_count > 0
+WHERE 
+    a.total_price < 5000
+ORDER BY 
+    total_sales DESC

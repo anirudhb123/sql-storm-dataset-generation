@@ -1,0 +1,69 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        p.ViewCount 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id
+    UNION ALL
+    SELECT 
+        pl.RelatedPostId AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        p.ViewCount 
+    FROM 
+        PostLinks pl
+    INNER JOIN 
+        Posts p ON pl.RelatedPostId = p.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        pl.RelatedPostId
+),
+RankedPosts AS (
+    SELECT 
+        r.*,
+        ROW_NUMBER() OVER (PARTITION BY r.OwnerUserId ORDER BY r.ViewCount DESC) AS UserPostRank,
+        RANK() OVER (ORDER BY r.UpVotes DESC, r.ViewCount DESC) AS OverallPopularityRank
+    FROM 
+        RecursiveCTE r
+)
+SELECT 
+    up.DisplayName AS UserDisplayName,
+    COUNT(b.Id) AS BadgeCount,
+    rp.*
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+LEFT JOIN 
+    Badges b ON up.Id = b.UserId
+WHERE 
+    rp.UserPostRank <= 5
+GROUP BY 
+    up.DisplayName, rp.PostId, rp.Title, rp.CreationDate, rp.AcceptedAnswerId, rp.OwnerUserId, 
+    rp.CommentCount, rp.UpVotes, rp.DownVotes, rp.ViewCount
+ORDER BY 
+    rp.OverallPopularityRank, rp.CreationDate DESC
+FETCH FIRST 100 ROWS ONLY;

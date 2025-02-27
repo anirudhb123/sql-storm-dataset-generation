@@ -1,0 +1,48 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        AVG(CASE WHEN info.info IS NOT NULL THEN 1.0 ELSE 0.0 END) AS has_info,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rn
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        movie_info m ON a.id = m.movie_id
+    LEFT JOIN 
+        movie_keyword k ON a.id = k.movie_id
+    LEFT JOIN 
+        keyword kw ON k.keyword_id = kw.id
+    GROUP BY 
+        a.title, a.production_year
+), TopMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.actor_count,
+        rm.has_info
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rn <= 5
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    CASE 
+        WHEN tm.has_info > 0.5 THEN 'Yes' 
+        ELSE 'No' 
+    END AS info_available
+FROM 
+    TopMovies tm
+WHERE 
+    tm.actor_count > (
+        SELECT AVG(actor_count) FROM TopMovies
+    )
+ORDER BY 
+    tm.production_year DESC,
+    tm.actor_count DESC;

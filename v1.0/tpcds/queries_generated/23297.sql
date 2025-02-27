@@ -1,0 +1,68 @@
+
+WITH RECURSIVE customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(ws.ws_ext_sales_price, 0) AS total_web_sales,
+        COALESCE(cs.cs_ext_sales_price, 0) AS total_catalog_sales,
+        CASE 
+            WHEN COALESCE(ws.ws_ext_sales_price, 0) = 0 AND COALESCE(cs.cs_ext_sales_price, 0) = 0 THEN 'No Sales'
+            WHEN COALESCE(ws.ws_ext_sales_price, 0) > COALESCE(cs.cs_ext_sales_price, 0) THEN 'Web Sales Dominant'
+            ELSE 'Catalog Sales Dominant'
+        END AS sales_dominance,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY COALESCE(ws.ws_ext_sales_price, 0) DESC) AS web_rank,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY COALESCE(cs.cs_ext_sales_price, 0) DESC) AS catalog_rank
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+),
+aggregated_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(cs.total_web_sales) AS total_web_sales,
+        SUM(cs.total_catalog_sales) AS total_catalog_sales,
+        AVG(CASE 
+            WHEN cs.total_web_sales > 0 THEN cs.total_web_sales 
+            ELSE NULL 
+        END) AS avg_web_sales,
+        AVG(CASE 
+            WHEN cs.total_catalog_sales > 0 THEN cs.total_catalog_sales 
+            ELSE NULL 
+        END) AS avg_catalog_sales,
+        MAX(sales_dominance) AS sales_dominance
+    FROM customer_sales cs
+    JOIN customer c ON cs.c_customer_sk = c.c_customer_sk
+    GROUP BY c.c_customer_id
+)
+SELECT 
+    a.c_customer_id,
+    a.total_web_sales,
+    a.total_catalog_sales,
+    COALESCE(a.avg_web_sales, 0) AS avg_web_sales,
+    COALESCE(a.avg_catalog_sales, 0) AS avg_catalog_sales,
+    CASE 
+        WHEN a.sales_dominance = 'Web Sales Dominant' 
+            THEN 'Web Preference Detected' 
+        WHEN a.sales_dominance = 'Catalog Sales Dominant' 
+            THEN 'Catalog Preference Detected' 
+        ELSE 'Neutral Customer'
+    END AS customer_preference,
+    ROW_NUMBER() OVER (ORDER BY a.total_web_sales + a.total_catalog_sales DESC) AS sales_rank
+FROM aggregated_sales a
+WHERE (a.total_web_sales + a.total_catalog_sales) > 1000 
+  OR (a.avg_web_sales IS NOT NULL AND a.avg_catalog_sales IS NOT NULL)
+ORDER BY sales_rank
+FETCH FIRST 10 ROWS ONLY
+UNION ALL 
+SELECT 
+    NULL AS c_customer_id,
+    SUM(ws.ws_ext_sales_price) AS total_web_sales,
+    SUM(cs.cs_ext_sales_price) AS total_catalog_sales,
+    NULL AS avg_web_sales,
+    NULL AS avg_catalog_sales,
+    'Total' AS customer_preference,
+    NULL AS sales_rank
+FROM web_sales ws
+FULL OUTER JOIN catalog_sales cs ON ws.ws_item_sk = cs.cs_item_sk
+WHERE (ws.ws_ext_sales_price > 0 OR cs.cs_ext_sales_price > 0);

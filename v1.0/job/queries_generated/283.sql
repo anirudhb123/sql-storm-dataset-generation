@@ -1,0 +1,47 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        SUM(CASE WHEN ci.kind_id = 1 THEN 1 ELSE 0 END) AS lead_roles,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        role_type rt ON c.role_id = rt.id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        title_id,
+        title,
+        production_year,
+        cast_count,
+        lead_roles,
+        actor_names,
+        RANK() OVER (PARTITION BY production_year ORDER BY cast_count DESC, lead_roles DESC) AS rank
+    FROM 
+        MovieDetails
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    tm.lead_roles,
+    tm.actor_names
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank <= 10 AND 
+    tm.production_year IS NOT NULL
+ORDER BY 
+    tm.production_year DESC, 
+    tm.cast_count DESC;

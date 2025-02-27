@@ -1,0 +1,56 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' AND
+        o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+), 
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS TotalAvailable
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2) 
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+)
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT lo.o_orderkey) AS TotalOrders,
+    AVG(lo.l_extendedprice * (1 - lo.l_discount)) AS AvgNetPrice,
+    SUM(CASE WHEN lo.l_returnflag = 'R' THEN lo.l_quantity ELSE 0 END) AS TotalReturned,
+    rt1.r_name AS RegionName,
+    rt2.r_name AS SupplierRegion
+FROM 
+    part p
+LEFT JOIN 
+    lineitem lo ON p.p_partkey = lo.l_partkey
+LEFT JOIN 
+    RankedOrders ro ON lo.l_orderkey = ro.o_orderkey
+JOIN 
+    supplier s ON lo.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region rt1 ON n.n_regionkey = rt1.r_regionkey
+LEFT JOIN 
+    (SELECT DISTINCT n2.n_regionkey, r2.r_name
+     FROM nation n2 JOIN region r2 ON n2.n_regionkey = r2.r_regionkey) AS sr ON n.n_regionkey = sr.n_regionkey
+GROUP BY 
+    p.p_name, rt1.r_name, rt2.r_name
+HAVING 
+    COUNT(DISTINCT lo.o_orderkey) > 5 AND 
+    AVG(lo.l_extendedprice * (1 - lo.l_discount)) > 1000.00
+ORDER BY 
+    TotalOrders DESC, AvgNetPrice DESC;

@@ -1,0 +1,86 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        COALESCE(AVG(ph.CreationDate), DATE '1970-01-01') AS AvgPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        u.Reputation > 100 
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        u.UserId,
+        u.Reputation,
+        u.BadgeCount,
+        u.AvgPostDate,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        UserReputation u
+    WHERE 
+        u.BadgeCount > 5 
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        p.Title AS ClosedTitle,
+        ph.CreationDate AS ClosedDate,
+        ph.UserDisplayName AS ClosedBy,
+        pt.Name AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 
+    JOIN 
+        CloseReasonTypes pt ON pt.Id = CAST(ph.Comment AS INTEGER)
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    u.DisplayName AS Author,
+    u.Reputation,
+    u.BadgeCount,
+    t.ClosedPostId,
+    t.ClosedTitle,
+    t.ClosedDate,
+    t.ClosedBy,
+    t.CloseReason
+FROM 
+    RecursivePostCTE p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    ClosedPosts t ON p.PostId = t.ClosedPostId
+JOIN 
+    TopUsers tu ON u.Id = tu.UserId
+WHERE 
+    p.ViewCount > 1000
+    AND p.Score >= 0
+ORDER BY 
+    p.CreationDate DESC, 
+    u.Reputation DESC;

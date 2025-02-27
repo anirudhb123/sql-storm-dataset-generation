@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswer,
+        pt.Name AS PostType,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankByViews,
+        DENSE_RANK() OVER (ORDER BY COUNT(DISTINCT v.Id) DESC) AS RankByVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+        AND (p.AcceptedAnswerId IS NULL OR p.AcceptedAnswerId != p.Id)
+    GROUP BY 
+        p.Id, pt.Name, p.CreationDate, p.AcceptedAnswerId
+    HAVING 
+        SUM(CASE WHEN c.Score IS NOT NULL THEN 1 ELSE 0 END) > 5
+),
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount,
+        MIN(ph.CreationDate) AS FirstClosedDate,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Closed posts
+    GROUP BY 
+        ph.PostId
+    HAVING 
+        COUNT(*) > 1
+)
+
+SELECT 
+    p.PostId,
+    p.Title,
+    p.PostType,
+    p.CreationDate,
+    p.CommentCount,
+    p.UpVotes,
+    p.DownVotes,
+    closed.FirstClosedDate,
+    closed.LastClosedDate,
+    COALESCE(NULLIF(p.AcceptedAnswer, -1), 'No Accepted Answer') AS AcceptedAnswerStatus,
+    CASE 
+        WHEN p.RankByVotes <= 3 THEN 'Top Vote Getter'
+        ELSE 'Standard' 
+    END AS PostCategory,
+    CASE 
+        WHEN closed.HistoryCount IS NOT NULL THEN
+            'Closed Multiple Times'
+        ELSE 
+            'Active Post'
+    END AS PostStatus
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    ClosedPosts closed ON closed.PostId = p.PostId
+WHERE 
+    p.RankByViews < 10
+ORDER BY 
+    p.CommentCount DESC,
+    p.RankByVotes ASC
+LIMIT 50;

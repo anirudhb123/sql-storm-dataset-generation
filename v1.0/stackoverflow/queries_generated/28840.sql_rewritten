@@ -1,0 +1,47 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(CAST(SUM(v.VoteTypeId = 2) AS INT), 0) AS UpVotes,
+        COALESCE(CAST(SUM(v.VoteTypeId = 3) AS INT), 0) AS DownVotes,
+        (COALESCE(CAST(SUM(v.VoteTypeId = 2) AS INT), 0) - COALESCE(CAST(SUM(v.VoteTypeId = 3) AS INT), 0)) AS Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY (COALESCE(CAST(SUM(v.VoteTypeId = 2) AS INT), 0) - COALESCE(CAST(SUM(v.VoteTypeId = 3) AS INT), 0)) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount
+),
+
+TopPosts AS (
+    SELECT 
+        PostId, Title, ViewCount, UpVotes, DownVotes, Score
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+)
+
+SELECT 
+    tp.Title,
+    tp.ViewCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.Score,
+    t.TagName,
+    u.DisplayName AS UserDisplayName,
+    u.Reputation
+FROM 
+    TopPosts tp
+JOIN 
+    Posts p ON tp.PostId = p.Id
+LEFT JOIN 
+    Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

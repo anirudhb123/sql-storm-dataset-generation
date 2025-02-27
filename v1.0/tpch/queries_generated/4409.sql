@@ -1,0 +1,55 @@
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name
+    FROM CustomerOrders co
+    WHERE co.total_spent > (
+        SELECT AVG(total_spent) FROM CustomerOrders
+    )
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        MAX(ps.ps_availqty) AS max_availqty,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+)
+SELECT 
+    hvc.c_name AS high_value_customer,
+    pd.p_name AS part_name,
+    pd.total_supplycost,
+    pd.max_availqty,
+    ss.total_cost AS supplier_total_cost
+FROM HighValueCustomers hvc
+CROSS JOIN PartDetails pd
+LEFT JOIN SupplierSummary ss ON ss.part_count > (
+    SELECT COUNT(*) FROM partsupp
+    WHERE ps_availqty = pd.max_availqty AND ps_partkey = pd.p_partkey
+)
+WHERE pd.total_supplycost IS NOT NULL
+ORDER BY hvc.c_name, pd.part_name
+LIMIT 100;

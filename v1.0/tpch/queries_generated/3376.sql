@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+)
+
+SELECT 
+    c.c_name AS customer_name,
+    s.s_name AS supplier_name,
+    SUM(lo.order_value) AS total_order_value,
+    r.r_name AS region_name,
+    rs.total_supply_cost
+FROM 
+    RecentOrders lo
+JOIN 
+    HighValueCustomers c ON lo.o_custkey = c.c_custkey
+JOIN 
+    supplier s ON s.s_nationkey = c.c_nationkey
+JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    rs.rank <= 5 
+    AND c.cust_rank <= 10
+GROUP BY 
+    c.c_name, s.s_name, r.r_name, rs.total_supply_cost
+HAVING 
+    SUM(lo.order_value) > 10000
+ORDER BY 
+    total_order_value DESC;

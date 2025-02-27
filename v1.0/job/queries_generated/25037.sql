@@ -1,0 +1,78 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        AVG(CASE 
+            WHEN k.keyword IS NOT NULL THEN 1 
+            ELSE 0 
+        END) * 100 AS keyword_coverage,
+        COUNT(c.person_id) AS total_cast,
+        ROW_NUMBER() OVER (ORDER BY AVG(CASE 
+            WHEN k.keyword IS NOT NULL THEN 1 
+            ELSE 0 
+        END) DESC, COUNT(c.person_id) DESC) AS rank
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    GROUP BY 
+        m.id
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        keyword_coverage,
+        total_cast
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 10
+),
+DetailedInfo AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        tm.total_cast,
+        ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+        ARRAY_AGG(DISTINCT cn.name) AS company_names,
+        ARRAY_AGG(DISTINCT rt.role) AS roles
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        complete_cast cc ON tm.movie_id = cc.movie_id
+    LEFT JOIN 
+        aka_name ak ON cc.subject_id = ak.person_id
+    LEFT JOIN 
+        movie_companies mc ON tm.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        role_type rt ON cc.role_id = rt.id
+    GROUP BY 
+        tm.title, tm.production_year, tm.total_cast
+)
+SELECT 
+    title,
+    production_year,
+    total_cast,
+    akas.name AS aka_names,
+    companies.name AS company_names,
+    roles.role AS roles
+FROM 
+    DetailedInfo
+CROSS JOIN 
+    LATERAL unnest(aka_names) AS akas(name)
+CROSS JOIN 
+    LATERAL unnest(company_names) AS companies(name)
+CROSS JOIN 
+    LATERAL unnest(roles) AS roles(role)
+ORDER BY 
+    production_year DESC, total_cast DESC;

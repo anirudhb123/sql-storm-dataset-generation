@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        CASE 
+            WHEN u.EmailHash IS NOT NULL THEN 'Has Email'
+            ELSE 'No Email'
+        END AS EmailStatus
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        ph.UserId AS LastEditorId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Comment END) AS CloseReason
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.UserId
+)
+SELECT 
+    up.UserId,
+    up.Reputation,
+    up.EmailStatus,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    phs.LastEditDate,
+    phs.CloseReason
+FROM 
+    UserReputation up
+JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+WHERE 
+    rp.UserPostRank = 1
+ORDER BY 
+    up.Reputation DESC, rp.Score DESC
+LIMIT 50;

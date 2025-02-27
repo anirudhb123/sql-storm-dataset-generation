@@ -1,0 +1,99 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        U.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(PH.EditCount, 0) AS EditCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS EditCount
+        FROM 
+            PostHistory
+        WHERE 
+            PostHistoryTypeId IN (4, 5) 
+        GROUP BY 
+            PostId
+    ) PH ON rp.Id = PH.PostId
+    WHERE 
+        rp.PostRank <= 5
+    GROUP BY 
+        rp.Id, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.AnswerCount, PH.EditCount
+),
+UserBadges AS (
+    SELECT 
+        UserId, 
+        COUNT(*) AS TotalBadges, 
+        SUM(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges 
+    GROUP BY 
+        UserId
+),
+PostDetails AS (
+    SELECT 
+        tp.Id AS PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.Score,
+        tp.ViewCount,
+        tp.CommentCount,
+        ub.TotalBadges,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Users u ON tp.OwnerReputation = u.Reputation
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.CommentCount,
+    pd.TotalBadges,
+    COALESCE(pd.GoldBadges, 0) AS GoldBadges,
+    COALESCE(pd.SilverBadges, 0) AS SilverBadges,
+    COALESCE(pd.BronzeBadges, 0) AS BronzeBadges,
+    CASE 
+        WHEN pd.CommentCount > 10 THEN 'High Engagement'
+        WHEN pd.CommentCount BETWEEN 5 AND 10 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

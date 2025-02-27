@@ -1,0 +1,61 @@
+
+WITH RECURSIVE Profits_CTE AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        CAST(ws.ws_net_profit AS DECIMAL(15,2)) AS profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM web_sales AS ws
+    WHERE ws.ws_ship_date_sk IS NOT NULL
+),
+Customer_Returns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        COUNT(cr.returning_customer_sk) AS total_returns,
+        SUM(cr.cr_return_amt) AS total_return_amount
+    FROM catalog_returns AS cr
+    GROUP BY cr.returning_customer_sk
+),
+Aggregate_Stats AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(cd.cd_gender, 'Unknown') AS gender,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COALESCE(cr.total_returns, 0) AS return_count,
+        COALESCE(cr.total_return_amount, 0.00) AS return_amount,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_profit) FILTER (WHERE ws.ws_net_profit > 0) AS avg_positive_profit
+    FROM customer AS c
+    LEFT JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN Customer_Returns AS cr ON c.c_customer_sk = cr.returning_customer_sk
+    WHERE c.c_first_shipto_date_sk IS NOT NULL
+    GROUP BY c.c_customer_id, cd.cd_gender
+),
+Final_Output AS (
+    SELECT
+        ag.c_customer_id,
+        ag.gender,
+        ag.total_profit,
+        ag.return_count,
+        ag.return_amount,
+        ag.order_count,
+        CASE 
+            WHEN ag.total_profit >= 1000 THEN 'High Roller'
+            WHEN ag.total_profit >= 500 THEN 'Moderate Spender'
+            WHEN ag.total_profit < 1 THEN 'Minimal Impact'
+            ELSE 'Average Customer'
+        END AS customer_segment,
+        ROW_NUMBER() OVER (ORDER BY ag.total_profit DESC) AS rank
+    FROM Aggregate_Stats AS ag
+)
+SELECT 
+    f.*,
+    CASE 
+        WHEN f.rank = 1 THEN 'Top Customer'
+        WHEN f.total_return_amount / NULLIF(f.return_count, 0) < 10 THEN 'Low Return Rate'
+        ELSE 'Standard Customer'
+    END AS customer_quality
+FROM Final_Output AS f
+WHERE f.return_count <= (SELECT AVG(return_count) FROM Final_Output) 
+ORDER BY f.total_profit DESC;

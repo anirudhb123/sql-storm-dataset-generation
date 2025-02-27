@@ -1,0 +1,94 @@
+
+WITH UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 6 THEN 1 END) AS CloseVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(PV.UpVotes, 0) AS UpVotes,
+        COALESCE(PV.DownVotes, 0) AS DownVotes,
+        COALESCE(PV.CloseVotes, 0) AS CloseVotes,
+        RANK() OVER (ORDER BY P.Score DESC) AS ScoreRank
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PV.PostId,
+            SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+            SUM(CASE WHEN V.VoteTypeId = 6 THEN 1 ELSE 0 END) AS CloseVotes
+        FROM 
+            Posts PV
+        JOIN 
+            Votes V ON PV.Id = V.PostId
+        GROUP BY 
+            PV.PostId
+    ) PV ON P.Id = PV.PostId
+),
+ClosedPosts AS (
+    SELECT DISTINCT 
+        PH.PostId,
+        CT.Name AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CT ON PH.Comment = CAST(CT.Id AS INT)
+    WHERE 
+        PH.PostHistoryTypeId = 10 
+),
+PostMetrics AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CreationDate,
+        PS.Score,
+        PS.UpVotes,
+        PS.DownVotes,
+        PS.CloseVotes,
+        CP.CloseReason,
+        PS.ScoreRank,
+        CASE 
+            WHEN PS.Score > 100 THEN 'High Score'
+            WHEN PS.Score BETWEEN 50 AND 100 THEN 'Medium Score'
+            ELSE 'Low Score'
+        END AS ScoreCategory
+    FROM 
+        PostStats PS
+    LEFT JOIN 
+        ClosedPosts CP ON PS.PostId = CP.PostId
+)
+SELECT 
+    PM.PostId,
+    PM.Title,
+    PM.CreationDate,
+    PM.Score,
+    PM.UpVotes,
+    PM.DownVotes,
+    PM.CloseVotes,
+    PM.CloseReason,
+    PM.ScoreRank,
+    PM.ScoreCategory,
+    U.DisplayName AS MostActiveUser,
+    U.Reputation
+FROM 
+    PostMetrics PM
+LEFT JOIN 
+    UserVoteCounts U ON PM.UpVotes = (SELECT MAX(UpVotes) FROM UserVoteCounts)
+ORDER BY 
+    PM.ScoreRank,
+    PM.CreationDate DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

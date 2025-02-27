@@ -1,0 +1,63 @@
+
+WITH sales_data AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MAX(d.d_date) AS last_purchase_date,
+        cd.cd_gender,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, ib.ib_lower_bound, ib.ib_upper_bound
+),
+customer_summary AS (
+    SELECT 
+        gender,
+        income_range,
+        COUNT(DISTINCT customer_id) AS customer_count,
+        SUM(total_sales) AS total_sales,
+        AVG(order_count) AS avg_orders
+    FROM (
+        SELECT 
+            cd_gender AS gender,
+            CONCAT(ib.ib_lower_bound, '-', ib.ib_upper_bound) AS income_range,
+            c_customer_id,
+            total_sales,
+            order_count
+        FROM 
+            sales_data
+        JOIN 
+            customer_demographics cd ON sales_data.c_customer_id = cd.cd_demo_sk
+        LEFT JOIN 
+            household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+        LEFT JOIN 
+            income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    ) AS customers
+    GROUP BY 
+        gender, income_range
+)
+SELECT 
+    gender,
+    income_range,
+    customer_count,
+    total_sales,
+    avg_orders
+FROM 
+    customer_summary
+ORDER BY 
+    total_sales DESC;

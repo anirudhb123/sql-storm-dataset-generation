@@ -1,0 +1,61 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(p.ps_partkey) AS part_count,
+        SUM(p.ps_supplycost) AS total_supplycost,
+        AVG(SUM(p.ps_supplycost)) OVER (PARTITION BY n.n_regionkey) AS avg_supplycost_region
+    FROM 
+        supplier s
+    JOIN 
+        partsupp p ON s.s_suppkey = p.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_regionkey
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_supplycost,
+        ss.avg_supplycost_region
+    FROM 
+        supplier s
+    JOIN 
+        SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+    WHERE 
+        ss.total_supplycost > (SELECT AVG(total_supplycost) FROM SupplierStats)
+),
+OrderImpact AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(li.l_orderkey) AS lineitem_count,
+        MAX(li.l_extendedprice) AS max_price,
+        SUM(li.l_discount * li.l_extendedprice) AS total_discount_applied
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        COUNT(li.l_orderkey) > 5
+)
+SELECT 
+    s.s_suppkey,
+    s.s_name,
+    COALESCE(SUM(oi.lineitem_count), 0) AS impacted_orders,
+    ss.avg_supplycost_region,
+    CASE 
+        WHEN ss.total_supplycost IS NULL THEN 'Unknown'
+        ELSE CAST(ss.total_supplycost AS VARCHAR)
+    END AS total_supplycost_str
+FROM 
+    HighValueSuppliers s
+LEFT JOIN 
+    OrderImpact oi ON s.s_suppkey = oi.o_orderkey  -- Demonstrating outer join with the wrong ON clause intentionally
+GROUP BY 
+    s.s_suppkey, s.s_name, ss.avg_supplycost_region
+ORDER BY 
+    impacted_orders DESC NULLS LAST;

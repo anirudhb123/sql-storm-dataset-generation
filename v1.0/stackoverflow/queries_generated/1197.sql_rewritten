@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  
+    WHERE 
+        p.Score > 10
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+HighlightedPosts AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        ub.BadgeCount,
+        GREATEST(COALESCE(ub.HighestBadgeClass, 0), CASE WHEN rp.TotalBounty > 0 THEN 3 ELSE 0 END) AS HighlightClass
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+    WHERE 
+        rp.Rank <= 5  
+)
+SELECT 
+    hp.PostId,
+    hp.Title,
+    hp.Score,
+    hp.ViewCount,
+    hp.BadgeCount,
+    hp.HighlightClass,
+    CASE 
+        WHEN hp.HighlightClass > 0 THEN 'Featured Post'
+        ELSE 'Regular Post' 
+    END AS PostStatus
+FROM 
+    HighlightedPosts hp
+ORDER BY 
+    hp.HighlightClass DESC, hp.Score DESC;

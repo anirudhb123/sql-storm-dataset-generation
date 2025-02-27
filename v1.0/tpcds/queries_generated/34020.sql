@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        SUM(ws_quantity) > 0
+), 
+HighestSellingItems AS (
+    SELECT 
+        sd.ws_item_sk, 
+        i.i_item_desc, 
+        sd.total_quantity, 
+        sd.total_profit, 
+        RANK() OVER (ORDER BY sd.total_profit DESC) AS profit_rank
+    FROM 
+        SalesData sd
+    JOIN 
+        item i ON sd.ws_item_sk = i.i_item_sk
+    WHERE 
+        sd.rank = 1
+), 
+SalesByRegion AS (
+    SELECT 
+        w.w_warehouse_id, 
+        SUM(ws.ws_net_profit) AS regional_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+) 
+SELECT 
+    hsi.ws_item_sk, 
+    hsi.i_item_desc, 
+    hsi.total_quantity, 
+    hsi.total_profit, 
+    sbr.regional_profit,
+    COALESCE(sbr.regional_profit, 0) / NULLIF(hsi.total_profit, 0) AS profit_share,
+    CASE 
+        WHEN hsi.total_profit > 1000 THEN 'High Profit'
+        WHEN hsi.total_profit BETWEEN 500 AND 1000 THEN 'Moderate Profit'
+        ELSE 'Low Profit'
+    END AS profit_category
+FROM 
+    HighestSellingItems hsi
+LEFT JOIN 
+    SalesByRegion sbr ON hsi.ws_item_sk = sbr.w_warehouse_id
+ORDER BY 
+    hsi.total_profit DESC
+FETCH FIRST 10 ROWS ONLY;

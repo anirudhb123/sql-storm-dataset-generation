@@ -1,0 +1,71 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank_acctbal,
+        (SELECT COUNT(*) FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey) AS supply_count
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_name LIKE 'N%' 
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_mfgr,
+        CASE 
+            WHEN p.p_retailprice > (SELECT AVG(p1.p_retailprice) FROM part p1) THEN 'High Value' 
+            ELSE 'Normal Value' 
+        END AS value_category
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_supplycost < (SELECT AVG(ps1.ps_supplycost) FROM partsupp ps1))
+),
+PartOrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_discount,
+        l.l_extendedprice,
+        l.l_returnflag,
+        p.value_category,
+        l.l_suppkey
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        HighValueParts p ON l.l_partkey = p.p_partkey
+)
+SELECT 
+    ns.n_name AS nation_name,
+    COALESCE(RS.s_name, 'Unknown Supplier') AS supplier_name,
+    COUNT(DISTINCT po.o_orderkey) AS order_count,
+    SUM(po.l_extendedprice - po.l_discount) AS total_revenue,
+    AVG(po.l_quantity) AS average_quantity,
+    MAX(po.l_discount) AS max_discount,
+    COUNT(DISTINCT CASE WHEN po.l_returnflag = 'R' THEN po.l_partkey END) AS return_count
+FROM 
+    PartOrderDetails po
+LEFT JOIN 
+    RankedSuppliers RS ON RS.s_suppkey = po.l_suppkey
+JOIN 
+    nation ns ON ns.n_nationkey = RS.n_nationkey
+WHERE 
+    RS.rank_acctbal <= 5
+GROUP BY 
+    ns.n_name, 
+    RS.s_name
+HAVING 
+    SUM(po.l_extendedprice - po.l_discount) > (SELECT AVG(l_extendedprice) FROM lineitem)
+ORDER BY 
+    order_count DESC,
+    total_revenue DESC;

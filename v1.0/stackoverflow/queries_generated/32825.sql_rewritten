@@ -1,0 +1,53 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, 0 AS Depth
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.Title, p.ParentId, r.Depth + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserBadges AS (
+    SELECT U.Id AS UserId, 
+           U.DisplayName, 
+           COUNT(B.Id) AS BadgeCount,
+           SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+           SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+           SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostVotes AS (
+    SELECT P.Id AS PostId, 
+           COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+           COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+           COUNT(CASE WHEN V.VoteTypeId IN (6, 10) THEN 1 END) AS CloseVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+),
+HighlightedPosts AS (
+    SELECT P.Id, 
+           P.Title,
+           RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank,
+           COALESCE(V.UpVotes, 0) AS UpVotes,
+           COALESCE(V.DownVotes, 0) AS DownVotes,
+           COALESCE(V.CloseVotes, 0) AS CloseVotes,
+           PH.Depth
+    FROM Posts P
+    LEFT JOIN PostVotes V ON P.Id = V.PostId
+    LEFT JOIN RecursivePostHierarchy PH ON P.Id = PH.Id
+)
+SELECT P.Title AS PostTitle,
+       U.DisplayName AS Owner,
+       UBad.BadgeCount,
+       H.UpVotes,
+       H.DownVotes,
+       H.CloseVotes
+FROM HighlightedPosts H
+JOIN Users U ON H.OwnerUserId = U.Id
+JOIN UserBadges UBad ON U.Id = UBad.UserId
+WHERE H.Rank = 1 
+  AND H.CloseVotes > 0 
+ORDER BY H.Depth, H.CloseVotes DESC, H.UpVotes DESC;

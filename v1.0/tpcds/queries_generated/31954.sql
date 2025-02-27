@@ -1,0 +1,48 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        COUNT(ws.order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ext_sales_price) DESC) AS rn
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.web_site_sk
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        SUM(ws.ext_sales_price) AS total_spent
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender
+),
+average_stats AS (
+    SELECT 
+        cd.cd_gender,
+        AVG(total_spent) AS avg_spent,
+        COUNT(DISTINCT cs.c_customer_sk) AS customer_count
+    FROM customer_stats cs
+    JOIN customer_demographics cd ON cs.cd_gender = cd.cd_gender
+    GROUP BY cd.cd_gender
+)
+SELECT 
+    ws.web_site_id,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    CASE 
+        WHEN a.avg_spent IS NULL THEN 'N/A' 
+        ELSE CAST(a.avg_spent AS CHAR(20)) 
+    END AS avg_spent_female,
+    CASE 
+        WHEN a.customer_count = 0 THEN 'No customers' 
+        ELSE CAST(a.customer_count AS CHAR(20)) 
+    END AS customer_count
+FROM web_site ws
+LEFT JOIN sales_cte s ON ws.web_site_sk = s.web_site_sk
+LEFT JOIN average_stats a ON a.cd_gender = 'F'
+WHERE ws.web_manager IS NOT NULL
+ORDER BY total_sales DESC
+LIMIT 10;

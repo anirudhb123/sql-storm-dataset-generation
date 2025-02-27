@@ -1,0 +1,30 @@
+
+WITH nation_supplier AS (
+    SELECT n.n_name AS nation_name, COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+part_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available_qty, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    GROUP BY o.o_orderkey
+)
+SELECT ns.nation_name, 
+       ps.p_name, 
+       ps.total_available_qty, 
+       ps.avg_supply_cost, 
+       os.total_revenue
+FROM nation_supplier ns
+JOIN part_summary ps ON ns.supplier_count > 10
+LEFT JOIN order_summary os ON ps.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+ORDER BY ns.nation_name, ps.avg_supply_cost DESC
+LIMIT 100;

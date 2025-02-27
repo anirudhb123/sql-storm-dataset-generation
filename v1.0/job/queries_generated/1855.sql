@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 5
+),
+MoviesWithKeywords AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        movie_keyword mk ON fm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        fm.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        m.title,
+        COALESCE(mi.info, 'No information') AS info
+    FROM 
+        MoviesWithKeywords m
+    LEFT JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis' LIMIT 1)
+)
+SELECT 
+    m.title,
+    m.production_year,
+    m.keywords,
+    mi.info
+FROM 
+    MoviesWithKeywords m
+LEFT JOIN 
+    MovieInfo mi ON m.title = mi.title
+WHERE 
+    m.production_year >= 2000
+ORDER BY 
+    m.production_year DESC;

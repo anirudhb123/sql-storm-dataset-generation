@@ -1,0 +1,67 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        1 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT 
+        p.s_suppkey,
+        p.s_name,
+        p.s_nationkey,
+        sh.depth + 1
+    FROM supplier p
+    JOIN supplier_hierarchy sh ON p.s_nationkey = sh.s_nationkey
+    WHERE p.s_acctbal > 5000 AND sh.depth < 5
+),
+part_orders AS (
+    SELECT 
+        p.p_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY p.p_partkey
+),
+high_value_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.comment,
+        po.total_revenue,
+        po.order_count
+    FROM part p
+    JOIN part_orders po ON p.p_partkey = po.p_partkey
+    WHERE po.total_revenue > 100000
+),
+nation_summary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT 
+    ns.n_name,
+    ns.total_acctbal,
+    COUNT(DISTINCT h.s_suppkey) AS supplier_count,
+    AVG(h.depth) AS avg_hierarchy_depth,
+    hvp.p_partkey,
+    hvp.p_name,
+    hvp.p_retailprice,
+    hvp.total_revenue,
+    hvp.order_count
+FROM nation_summary ns
+JOIN supplier_hierarchy h ON ns.n_nationkey = h.s_nationkey
+JOIN high_value_parts hvp ON hvp.p_partkey = h.p_partkey
+WHERE ns.total_acctbal IS NOT NULL
+GROUP BY ns.n_name, ns.total_acctbal, hvp.p_partkey, hvp.p_name, hvp.p_retailprice, hvp.total_revenue, hvp.order_count
+ORDER BY ns.n_name, ns.total_acctbal DESC;

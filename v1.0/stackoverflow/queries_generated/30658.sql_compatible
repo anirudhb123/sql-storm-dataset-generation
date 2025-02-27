@@ -1,0 +1,88 @@
+
+WITH RECURSIVE RankedPosts AS (
+    SELECT 
+        Id,
+        Title,
+        OwnerUserId,
+        Score,
+        CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY OwnerUserId ORDER BY Score DESC) AS Rank
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+), 
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+), 
+PostHistoryCounts AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory
+    WHERE 
+        PostHistoryTypeId IN (4, 5) 
+    GROUP BY 
+        PostId
+), 
+UsersWithBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+), 
+EnhancedPostData AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        U.Reputation,
+        COALESCE(PVC.UpVotes, 0) AS UpVotes,
+        COALESCE(PVC.DownVotes, 0) AS DownVotes,
+        COALESCE(PHC.EditCount, 0) AS EditCount,
+        R.Rank,
+        U.DisplayName,
+        U.Location,
+        U.EmailHash
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostVoteCounts PVC ON P.Id = PVC.PostId
+    LEFT JOIN 
+        PostHistoryCounts PHC ON P.Id = PHC.PostId
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    JOIN 
+        RankedPosts R ON P.Id = R.Id
+)
+
+SELECT 
+    E.PostId,
+    E.Title,
+    E.DisplayName,
+    E.Reputation,
+    E.UpVotes,
+    E.DownVotes,
+    E.EditCount,
+    U.BadgeCount,
+    U.BadgeNames
+FROM 
+    EnhancedPostData E
+LEFT JOIN 
+    UsersWithBadges U ON E.OwnerUserId = U.UserId
+WHERE 
+    E.Rank <= 5  
+ORDER BY 
+    E.Reputation DESC, E.UpVotes DESC;

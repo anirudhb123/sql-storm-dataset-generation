@@ -1,0 +1,72 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn,
+        CASE 
+            WHEN o.o_orderstatus = 'O' THEN 'Open'
+            WHEN o.o_orderstatus = 'F' THEN 'Finished'
+            ELSE 'Unknown'
+        END AS status_description
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+),
+FilteredLineItems AS (
+    SELECT 
+        l.*,
+        p.p_name,
+        CASE 
+            WHEN l.l_discount > 0.1 THEN l.l_extendedprice * (1 - l.l_discount)
+            ELSE l.l_extendedprice
+        END AS effective_price
+    FROM 
+        lineitem l
+    JOIN 
+        part p ON l.l_partkey = p.p_partkey
+    WHERE 
+        l.l_shipmode IN ('AIR', 'TRUCK')
+        AND l.l_returnflag = 'N'
+),
+SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(f.effective_price) AS total_sales,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        FilteredLineItems f ON ps.ps_partkey = f.l_partkey
+    GROUP BY 
+        s.s_suppkey
+),
+SalesWithRanks AS (
+    SELECT 
+        s.s_suppkey,
+        s.total_sales,
+        s.order_count,
+        RANK() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM 
+        SupplierSales s
+)
+SELECT 
+    o.o_orderkey,
+    r.status_description,
+    COALESCE(ss.total_sales, 0) AS supplier_sales,
+    CASE 
+        WHEN ss.order_count IS NULL THEN 'No orders'
+        ELSE CONCAT('Orders: ', ss.order_count)
+    END AS order_info
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    SalesWithRanks ss ON r.o_orderkey = ss.s_suppkey
+WHERE 
+    r.rn = 1
+    AND (r.o_totalprice IS NOT NULL OR ss.total_sales > 1000.00)
+ORDER BY 
+    r.o_orderdate DESC, ss.total_sales DESC;

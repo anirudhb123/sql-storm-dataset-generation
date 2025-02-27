@@ -1,0 +1,76 @@
+
+WITH RECURSIVE ranked_sales AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_net_paid,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_paid DESC) AS rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2458201 AND 2458230
+), 
+sales_summary AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        COALESCE(SUM(ws.ws_net_paid), 0) AS total_sales,
+        COALESCE(SUM(ws.ws_net_paid - ws.ws_ext_discount_amt), 0) AS total_net_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_ext_tax) AS average_tax
+    FROM item
+    LEFT JOIN web_sales ws ON item.i_item_sk = ws.ws_item_sk
+    GROUP BY item.i_item_id, item.i_product_name
+), 
+customer_analysis AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        COUNT(DISTINCT c.c_customer_id) AS total_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd_gender, cd_marital_status
+), 
+null_checks AS (
+    SELECT 
+        COUNT(*) AS null_count,
+        SUM(CASE WHEN ca_street_number IS NULL THEN 1 ELSE 0 END) AS street_number_nulls,
+        SUM(CASE WHEN ca_city IS NULL THEN 1 ELSE 0 END) AS city_nulls,
+        SUM(CASE WHEN ca_state IS NULL THEN 1 ELSE 0 END) AS state_nulls
+    FROM customer_address
+), 
+joined_data AS (
+    SELECT 
+        s.s_store_name, 
+        s.s_city,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        COALESCE(ws.ws_net_paid, 0) * 0.1 AS promo_discount,
+        CASE 
+            WHEN ws.ws_net_profit IS NULL THEN 'Zero Profit'
+            WHEN ws.ws_net_profit < 0 THEN 'Negative Profit'
+            ELSE 'Positive Profit'
+        END AS profit_status,
+        RANK() OVER (PARTITION BY s.s_store_sk ORDER BY ws.ws_net_profit DESC) AS store_rank
+    FROM store s
+    LEFT JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    LEFT JOIN web_sales ws ON ss.ss_item_sk = ws.ws_item_sk
+    WHERE ws.ws_order_number IN (SELECT ws_order_number FROM ranked_sales WHERE rank <= 5)
+)
+SELECT 
+    j.s_store_name, 
+    j.s_city, 
+    SUM(j.ws_net_profit) AS total_store_profit, 
+    AVG(s.total_sales) AS avg_item_sales,
+    ca.total_customers,
+    n.null_count,
+    n.street_number_nulls,
+    n.city_nulls,
+    n.state_nulls
+FROM joined_data j
+JOIN sales_summary s ON j.ws_order_number = s.i_item_id
+JOIN customer_analysis ca ON 1=1
+JOIN null_checks n ON 1=1
+WHERE j.profit_status = 'Positive Profit'
+GROUP BY j.s_store_name, j.s_city, ca.total_customers, n.null_count, n.street_number_nulls, n.city_nulls, n.state_nulls
+HAVING AVG(s.total_sales) > 10000
+ORDER BY total_store_profit DESC;

@@ -1,0 +1,48 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'  
+    UNION ALL
+    SELECT oh.o_orderkey, oh.o_totalprice, oh.o_orderdate, oh.o_orderstatus, ohp.level + 1
+    FROM orders oh
+    INNER JOIN OrderHierarchy ohp ON oh.o_orderkey = ohp.o_orderkey
+),
+SupplierStats AS (
+    SELECT ps.s_suppkey, SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           ROW_NUMBER() OVER (PARTITION BY ps.s_suppkey ORDER BY SUM(ps.ps_availqty) DESC) AS rn
+    FROM partsupp ps
+    GROUP BY ps.s_suppkey
+    HAVING SUM(ps.ps_availqty) > 1000
+),
+CustomerOverview AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) IS NOT NULL
+),
+FinalReport AS (
+    SELECT c.c_name, o.o_orderdate, l.l_quantity * (1 - l.l_discount) AS net_price,
+           COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+    WHERE l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+      AND l.l_returnflag = 'N'
+)
+SELECT f.c_name, f.o_orderdate, 
+       SUM(f.net_price) OVER (PARTITION BY f.c_name ORDER BY f.o_orderdate) AS cumulative_spent,
+       CASE
+           WHEN SUM(f.net_price) OVER (PARTITION BY f.c_name) > 1000 THEN 'High Value'
+           WHEN SUM(f.net_price) OVER (PARTITION BY f.c_name) IS NULL THEN 'No Orders'
+           ELSE 'Medium Value'
+       END AS customer_value,
+       (SELECT COUNT(DISTINCT s.s_suppkey) FROM SupplierStats s WHERE s.total_available > 500) AS supplier_count,
+       (SELECT COUNT(*) FROM OrderHierarchy) AS total_open_orders
+FROM FinalReport f
+WHERE f.o_orderdate >= DATE '1996-01-01'
+ORDER BY f.c_name, f.o_orderdate;

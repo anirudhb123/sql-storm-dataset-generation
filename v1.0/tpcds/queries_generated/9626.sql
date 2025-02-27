@@ -1,0 +1,48 @@
+
+WITH recent_sales AS (
+    SELECT 
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        c.c_customer_id,
+        ca.ca_country,
+        d.d_year,
+        d.d_month_seq
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer_demographics cd
+)
+SELECT 
+    rd.c_customer_id,
+    COUNT(DISTINCT rd.ws_sales_price) AS unique_price_count,
+    SUM(rd.ws_quantity) AS total_quantity,
+    SUM(CASE WHEN cd.cd_gender = 'F' THEN rd.ws_sales_price ELSE 0 END) AS total_sales_female,
+    SUM(CASE WHEN cd.cd_gender = 'M' THEN rd.ws_sales_price ELSE 0 END) AS total_sales_male,
+    AVG(rd.ws_sales_price) AS average_sales_price,
+    rd.ca_country,
+    rd.d_month_seq
+FROM 
+    recent_sales rd
+LEFT JOIN 
+    customer_demographics cd ON rd.c_customer_id = cd.cd_demo_sk
+GROUP BY 
+    rd.c_customer_id, rd.ca_country, rd.d_month_seq
+ORDER BY 
+    total_quantity DESC, average_sales_price DESC
+LIMIT 100;

@@ -1,0 +1,66 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        SUM(cs_quantity),
+        SUM(cs_net_profit)
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        cs_item_sk
+),
+AggregatedSales AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(s.total_quantity, 0) AS quantity_sold,
+        COALESCE(s.total_profit, 0) AS profit_generated
+    FROM 
+        item i
+    LEFT JOIN (
+        SELECT 
+            ws_item_sk, 
+            SUM(total_quantity) AS total_quantity, 
+            SUM(total_profit) AS total_profit 
+        FROM 
+            SalesCTE 
+        GROUP BY 
+            ws_item_sk
+    ) s ON i.i_item_sk = s.ws_item_sk
+)
+SELECT
+    a.i_item_id,
+    a.i_item_desc,
+    a.quantity_sold,
+    a.profit_generated,
+    CASE 
+        WHEN b.ib_income_band_sk IS NOT NULL THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS income_band_status
+FROM 
+    AggregatedSales a
+LEFT JOIN 
+    household_demographics b ON b.hd_demo_sk IN (
+        SELECT 
+            cd_demo_sk 
+        FROM 
+            customer_demographics 
+        WHERE 
+            cd_purchase_estimate > (SELECT AVG(cd_purchase_estimate) FROM customer_demographics)
+    )
+ORDER BY 
+    a.profit_generated DESC
+LIMIT 10;

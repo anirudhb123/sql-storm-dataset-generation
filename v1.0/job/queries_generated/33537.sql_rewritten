@@ -1,0 +1,76 @@
+WITH RECURSIVE title_hierarchy AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year,
+        0 AS level
+    FROM 
+        title t
+    WHERE 
+        t.episode_of_id IS NULL  
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS title_id, 
+        e.title, 
+        e.production_year,
+        th.level + 1
+    FROM 
+        title e
+    INNER JOIN 
+        title_hierarchy th ON e.episode_of_id = th.title_id  
+),
+cast_stats AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+),
+keyword_stats AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    th.title_id,
+    th.title AS title,
+    th.production_year,
+    cs.cast_count,
+    cs.cast_names,
+    ks.keyword_count,
+    ks.keywords,
+    COALESCE(NULLIF(th.level, 0), 'N/A') AS title_level,
+    CASE 
+        WHEN ks.keyword_count > 5 THEN 'High'
+        WHEN ks.keyword_count BETWEEN 3 AND 5 THEN 'Medium'
+        ELSE 'Low'
+    END AS keyword_density,
+    COUNT(DISTINCT mc.company_id) AS production_companies
+FROM 
+    title_hierarchy th
+LEFT JOIN 
+    cast_stats cs ON th.title_id = cs.movie_id
+LEFT JOIN 
+    keyword_stats ks ON th.title_id = ks.movie_id
+LEFT JOIN 
+    movie_companies mc ON th.title_id = mc.movie_id
+GROUP BY 
+    th.title_id, th.title, th.production_year, cs.cast_count, cs.cast_names, ks.keyword_count, ks.keywords, th.level
+ORDER BY 
+    th.production_year DESC, 
+    title_density DESC;

@@ -1,0 +1,77 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rn
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+actor_movie_counts AS (
+    SELECT 
+        ka.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        MAX(t.production_year) AS last_movie_year
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    GROUP BY 
+        ka.person_id
+),
+movies_with_actors AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS actor_count,
+        MAX(a.name) AS lead_actor_name
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        t.title, t.production_year
+    HAVING 
+        COUNT(ci.person_id) > 0
+),
+extended_keyword_search AS (
+    SELECT 
+        m_key.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m_key
+    JOIN 
+        keyword k ON m_key.keyword_id = k.id
+    GROUP BY 
+        m_key.movie_id
+)
+SELECT 
+    rm.title_id,
+    rm.title,
+    rm.production_year,
+    ma.actor_count,
+    ma.lead_actor_name,
+    ak.movie_count AS actor_movie_count,
+    ek.keywords
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    movies_with_actors ma ON rm.title = ma.title AND rm.production_year = ma.production_year
+LEFT JOIN 
+    actor_movie_counts ak ON ak.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = rm.title_id)
+LEFT JOIN 
+    extended_keyword_search ek ON ek.movie_id = rm.title_id
+WHERE 
+    (rm.title ILIKE '%The%' OR rm.title ILIKE '%Life%')
+    AND (ak.movie_count IS NULL OR ak.movie_count > 5)
+ORDER BY 
+    rm.production_year DESC, 
+    ma.actor_count DESC NULLS LAST, 
+    rm.title;

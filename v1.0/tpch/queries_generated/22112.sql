@@ -1,0 +1,70 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+),
+SupplierPerformance AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    r.n_name AS nation_name,
+    COALESCE(MAX(rp.price_rank), 0) AS max_price_rank,
+    COALESCE(MAX(c.total_orders), 0) AS order_count,
+    COALESCE(SUM(sp.avg_supply_cost), 0) AS avg_supply_cost,
+    CASE 
+        WHEN SUM(sp.unique_parts_supplied) IS NULL THEN 'No Supply'
+        ELSE CAST(SUM(sp.unique_parts_supplied) AS VARCHAR)
+    END AS unique_parts
+FROM 
+    nation r
+LEFT JOIN 
+    RankedParts rp ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = rp.p_partkey % (SELECT COUNT(*) FROM nation))
+LEFT JOIN 
+    CustomerOrders c ON c.c_custkey = (SELECT MAX(c1.c_custkey) FROM HighValueCustomers c1 WHERE c1.c_custkey COLLATE SQL_Latin1_General_CP1_CI_AS = c.c_custkey)
+LEFT JOIN 
+    SupplierPerformance sp ON sp.s_suppkey = (SELECT MIN(s.s_suppkey) FROM supplier s WHERE s.s_name LIKE 'S%')
+GROUP BY 
+    r.n_name
+HAVING 
+    r.n_name IS NOT NULL
+ORDER BY 
+    r.n_name, unique_parts DESC;

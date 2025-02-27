@@ -1,0 +1,64 @@
+
+WITH RECURSIVE UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS LatestPostRank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+RecentEdits AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate AS EditDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6) 
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeList,
+        COUNT(*) AS BadgeCount
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.OwnerDisplayName,
+    CASE WHEN re.EditDate IS NOT NULL THEN 'Edited' 
+         ELSE 'Not Edited' END AS EditStatus,
+    ub.BadgeList,
+    ub.BadgeCount
+FROM UserPostStats ups
+LEFT JOIN RankedPosts rp ON ups.UserId = rp.OwnerDisplayName
+LEFT JOIN RecentEdits re ON rp.PostId = re.PostId AND re.EditRank = 1
+LEFT JOIN UserBadges ub ON ups.UserId = ub.UserId
+WHERE ups.TotalPosts > 0
+ORDER BY ups.TotalPosts DESC, rp.CreationDate DESC
+LIMIT 50;

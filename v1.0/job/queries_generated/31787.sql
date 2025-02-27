@@ -1,0 +1,65 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mt.episode_of_id,
+        mt.season_nr,
+        mt.episode_nr,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000  -- Filter for movies produced since 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        at.episode_of_id,
+        at.season_nr,
+        at.episode_nr,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT cn.name, '; ') AS company_names,
+    CASE 
+        WHEN AVG(CASE WHEN ci.role_id IS NULL THEN 0 ELSE 1 END) > 0 THEN 'Has Cast' 
+        ELSE 'No Cast' 
+    END AS cast_status,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS ranking
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    mh.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')  -- Only movies
+    AND (mh.episode_of_id IS NULL OR mh.season_nr IS NOT NULL)  -- Filter out non-series episodes
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level
+ORDER BY 
+    mh.production_year DESC, ranking ASC;

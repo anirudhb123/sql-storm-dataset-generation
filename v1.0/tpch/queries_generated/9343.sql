@@ -1,0 +1,72 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank_within_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.total_spent,
+        RANK() OVER (ORDER BY c.total_spent DESC) AS rank
+    FROM 
+        CustomerOrders c
+),
+SupplierStats AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    tc.c_custkey,
+    tc.c_name,
+    tc.total_spent,
+    ss.r_name AS supplier_region,
+    ss.supplier_count,
+    ss.total_avail_qty,
+    rs.total_cost AS supplier_total_cost,
+    rs.rank_within_nation
+FROM 
+    TopCustomers tc
+JOIN 
+    RankedSuppliers rs ON rs.s_nationkey = (SELECT n.n_nationkey FROM nation n JOIN customer c ON n.n_nationkey = c.c_nationkey WHERE c.c_custkey = tc.c_custkey LIMIT 1)
+JOIN 
+    SupplierStats ss ON ss.r_name = (SELECT r.r_name FROM region r JOIN nation n ON r.r_regionkey = n.n_regionkey WHERE n.n_nationkey = rs.n_nationkey LIMIT 1)
+WHERE 
+    tc.rank <= 10
+ORDER BY 
+    tc.total_spent DESC, 
+    rs.total_cost DESC;

@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankByUser,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        Author,
+        RankByUser,
+        CommentCount,
+        UpVotes,
+        DownVotes,
+        (UpVotes - DownVotes) AS NetVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByUser = 1
+),
+FinalResults AS (
+    SELECT 
+        pp.PostId,
+        pp.Title,
+        pp.Author,
+        pp.Score,
+        pp.CommentCount,
+        pp.NetVotes,
+        CASE WHEN pp.NetVotes > 0 THEN 'Positive'
+             WHEN pp.NetVotes < 0 THEN 'Negative'
+             ELSE 'Neutral' END AS VoteType
+    FROM 
+        PopularPosts pp
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.Author,
+    f.Score,
+    f.CommentCount,
+    f.NetVotes,
+    f.VoteType,
+    COALESCE(t.TagName, 'No Tag') AS MainTag,
+    ph.Name AS PostHistoryType
+FROM 
+    FinalResults f
+LEFT JOIN 
+    PostLinks pl ON f.PostId = pl.PostId
+LEFT JOIN 
+    Posts t ON pl.RelatedPostId = t.Id AND t.PostTypeId = 4 -- TagWiki
+LEFT JOIN 
+    PostHistory ph ON f.PostId = ph.PostId AND ph.CreationDate = (
+        SELECT MAX(CreationDate)
+        FROM PostHistory
+        WHERE PostId = f.PostId
+    )
+ORDER BY 
+    f.NetVotes DESC, f.CreationDate DESC
+LIMIT 100;

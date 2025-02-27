@@ -1,0 +1,58 @@
+WITH TotalSales AS (
+    SELECT
+        ws.bill_customer_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        COUNT(ws.order_number) AS order_count
+    FROM
+        web_sales ws
+    JOIN
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE
+        cd.cd_gender = 'F'
+        AND cd.cd_marital_status = 'M'
+        AND cd.cd_education_status IN ('Bachelors', 'Masters')
+        AND ws.sold_date_sk BETWEEN 2458855 AND 2459186 
+    GROUP BY
+        ws.bill_customer_sk
+),
+HighValueCustomers AS (
+    SELECT
+        t.bill_customer_sk,
+        t.total_sales,
+        t.order_count,
+        RANK() OVER (ORDER BY t.total_sales DESC) AS sales_rank
+    FROM
+        TotalSales t
+    WHERE
+        t.total_sales > 1000
+),
+SalesDetails AS (
+    SELECT
+        hvc.bill_customer_sk,
+        hvc.total_sales,
+        hvc.order_count,
+        COUNT(ws.order_number) AS web_sales_count,
+        SUM(ws.ext_tax) AS total_tax
+    FROM
+        HighValueCustomers hvc
+    LEFT JOIN
+        web_sales ws ON hvc.bill_customer_sk = ws.bill_customer_sk
+    GROUP BY
+        hvc.bill_customer_sk, hvc.total_sales, hvc.order_count
+)
+SELECT
+    hvc.bill_customer_sk,
+    hvc.total_sales,
+    hvc.order_count,
+    sd.web_sales_count,
+    sd.total_tax
+FROM
+    HighValueCustomers hvc
+JOIN
+    SalesDetails sd ON hvc.bill_customer_sk = sd.bill_customer_sk
+WHERE
+    hvc.sales_rank <= 10
+ORDER BY
+    hvc.total_sales DESC;

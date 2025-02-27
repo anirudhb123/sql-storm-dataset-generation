@@ -1,0 +1,61 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        supplier s
+),
+AvailableParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        p.p_name,
+        p.p_retailprice
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+OrdersWithLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT cs.c_custkey) AS customer_count,
+    SUM(COALESCE(a.ps_availqty, 0)) AS total_available_quantity,
+    AVG(RS.s_acctbal) AS avg_supplier_balance,
+    COUNT(OL.o_orderkey) AS total_orders,
+    MAX(OL.total_price) AS max_order_value
+FROM 
+    nation n
+LEFT JOIN 
+    customer cs ON n.n_nationkey = cs.c_nationkey
+LEFT JOIN 
+    RankedSuppliers RS ON n.n_nationkey = RS.s_nationkey AND RS.rank <= 5
+LEFT JOIN 
+    AvailableParts a ON RS.s_suppkey = a.ps_suppkey
+LEFT JOIN 
+    OrdersWithLineItems OL ON cs.c_custkey = OL.o_orderkey
+WHERE 
+    n.n_name IS NOT NULL AND
+    (RS.s_acctbal IS NOT NULL OR a.ps_availqty IS NOT NULL)
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT cs.c_custkey) > 10
+ORDER BY 
+    total_orders DESC, avg_supplier_balance DESC;

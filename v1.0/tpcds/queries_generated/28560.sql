@@ -1,0 +1,53 @@
+
+WITH DetailedReturns AS (
+    SELECT 
+        sr.store_sk,
+        SUM(sr.return_qty) AS total_return_qty,
+        SUM(sr.return_amt) AS total_return_amt,
+        DATE(d.d_date) AS return_date,
+        i.item_desc,
+        ca.city AS return_city,
+        ca.state AS return_state
+    FROM 
+        store_returns sr
+    JOIN 
+        date_dim d ON sr.returned_date_sk = d.d_date_sk
+    JOIN 
+        item i ON sr.item_sk = i.item_sk
+    JOIN 
+        customer_address ca ON sr.addr_sk = ca.ca_address_sk
+    GROUP BY 
+        sr.store_sk, 
+        DATE(d.d_date), 
+        i.item_desc, 
+        ca.city, 
+        ca.state
+),
+RankedReturns AS (
+    SELECT 
+        store_sk, 
+        return_date, 
+        item_desc, 
+        return_city, 
+        return_state,
+        total_return_qty, 
+        total_return_amt,
+        DENSE_RANK() OVER (PARTITION BY store_sk ORDER BY total_return_qty DESC) AS rank_qty,
+        DENSE_RANK() OVER (PARTITION BY store_sk ORDER BY total_return_amt DESC) AS rank_amt
+    FROM 
+        DetailedReturns
+)
+SELECT 
+    store_sk,
+    return_date,
+    item_desc,
+    return_city,
+    return_state,
+    total_return_qty,
+    total_return_amt
+FROM 
+    RankedReturns
+WHERE 
+    rank_qty <= 3 OR rank_amt <= 3
+ORDER BY 
+    store_sk, return_date, rank_qty, rank_amt;

@@ -1,0 +1,55 @@
+WITH RankedReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        sr.item_sk,
+        sr.customer_sk,
+        sr.return_quantity,
+        RANK() OVER (PARTITION BY sr.item_sk ORDER BY sr.return_quantity DESC) AS return_rank
+    FROM store_returns sr
+    WHERE sr.return_quantity > 0
+),
+CustomerStats AS (
+    SELECT 
+        c.customer_sk,
+        COUNT(DISTINCT sr.ticket_number) AS total_returns,
+        SUM(sr.return_quantity) AS total_returned_qty,
+        COALESCE(MAX(CASE WHEN cd_gender = 'F' THEN 1 ELSE 0 END), 0) AS female_customer,
+        COALESCE(MAX(CASE WHEN cd_gender = 'M' THEN 1 ELSE 0 END), 0) AS male_customer
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.customer_sk = sr.customer_sk
+    LEFT JOIN customer_demographics cd ON c.current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c.customer_sk
+    HAVING COUNT(DISTINCT sr.ticket_number) > 2
+),
+PopularItems AS (
+    SELECT 
+        ws.item_sk,
+        SUM(ws.quantity) AS total_sold,
+        SUM(cs.ext_sales_price) AS total_revenue,
+        CASE 
+            WHEN SUM(ws.quantity) IS NULL THEN 'Never Sold'
+            WHEN SUM(ws.quantity) = 0 THEN 'Zero Sold'
+            ELSE 'Sold'
+        END AS sales_status
+    FROM web_sales ws
+    LEFT JOIN catalog_sales cs ON ws.item_sk = cs.item_sk
+    GROUP BY ws.item_sk
+    HAVING SUM(ws.quantity) IS NOT NULL AND SUM(ws.quantity) > 0
+)
+SELECT 
+    ca.ca_city,
+    SUM(pr.total_returns) AS city_return_count,
+    AVG(cs.total_returned_qty) AS avg_returned_quantity,
+    MAX(pi.sales_status) AS popular_item_status,
+    COALESCE(SUM(pi.total_revenue), 0) AS city_total_revenue
+FROM customer_address ca
+LEFT JOIN CustomerStats cs ON cs.customer_sk = ca.ca_address_sk
+LEFT JOIN RankedReturns pr ON pr.returned_date_sk = ca.ca_address_sk
+LEFT JOIN PopularItems pi ON pi.item_sk = pr.item_sk
+WHERE ca.ca_country IS NOT NULL 
+  AND ca.ca_state IN ('CA', 'TX') 
+  AND (EXTRACT(YEAR FROM cast('2002-10-01 12:34:56' as timestamp)) - cs.total_returns) >= 1
+GROUP BY ca.ca_city
+ORDER BY city_return_count DESC, ca.ca_city ASC
+FETCH FIRST 10 ROWS ONLY;

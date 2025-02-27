@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) as Rank,
+        COALESCE(CAST(SUBSTRING(p.Body, 1, 100) AS VARCHAR(200)), 'No content') AS Preview
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND p.Score IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id as UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    CASE 
+        WHEN rp.Rank = 1 THEN 'Top Post' 
+        ELSE 'Regular Post' 
+    END AS PostRanking,
+    ARRAY_AGG(DISTINCT c.Text) AS CommentTexts,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.Id AND v.VoteTypeId = 2) AS UpvoteCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Comments c ON rp.Id = c.PostId
+INNER JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE 
+    (rp.ViewCount > 100 OR rp.Score > 10)
+GROUP BY 
+    rp.Id, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 50
+UNION
+SELECT 
+    'Aggregate Stats' AS Title,
+    NULL AS CreationDate,
+    AVG(Score) AS AvgScore,
+    SUM(ViewCount) AS TotalViewCount,
+    NULL AS GoldBadges,
+    NULL AS SilverBadges,
+    NULL AS BronzeBadges,
+    NULL AS PostRanking,
+    NULL AS CommentTexts,
+    NULL AS UpvoteCount
+FROM 
+    Posts
+WHERE 
+    PostTypeId = 1
+HAVING 
+    COUNT(*) > 10;

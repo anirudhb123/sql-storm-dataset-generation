@@ -1,0 +1,71 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ss_item_sk,
+        SUM(ss_net_paid) AS total_sales,
+        COUNT(ss_ticket_number) AS sale_count,
+        ss_sold_date_sk
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_item_sk, ss_sold_date_sk
+    UNION ALL
+    SELECT 
+        sc.ss_item_sk,
+        sc.total_sales + s.total_sales,
+        sc.sale_count + s.sale_count,
+        s.ss_sold_date_sk
+    FROM 
+        Sales_CTE sc
+    JOIN 
+        store_sales s ON sc.ss_item_sk = s.ss_item_sk
+    WHERE 
+        sc.ss_sold_date_sk < s.ss_sold_date_sk
+),
+Filtered_Sales AS (
+    SELECT 
+        s.ss_item_sk,
+        s.total_sales,
+        s.sale_count,
+        s.ss_sold_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY s.ss_item_sk ORDER BY s.total_sales DESC) AS rnk
+    FROM 
+        Sales_CTE s
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    fs.total_sales,
+    fs.sale_count,
+    d.d_date,
+    ca.ca_city,
+    ca.ca_state,
+    CASE 
+        WHEN fs.total_sales IS NULL THEN 'No Sales'
+        ELSE CONCAT('Sales: ', fs.total_sales)
+    END AS sales_status,
+    COALESCE(sm.sm_type, 'Standard') AS ship_mode_type
+FROM 
+    Filtered_Sales fs
+JOIN 
+    item i ON fs.ss_item_sk = i.i_item_sk
+LEFT JOIN 
+    date_dim d ON fs.ss_sold_date_sk = d.d_date_sk
+LEFT JOIN 
+    customer_address ca ON i.i_item_id = ca.ca_address_id
+LEFT JOIN 
+    ship_mode sm ON sm.sm_ship_mode_sk = (
+        SELECT 
+            ws_ship_mode_sk
+        FROM 
+            web_sales
+        WHERE 
+            ws_item_sk = i.i_item_sk
+        FETCH FIRST 1 ROWS ONLY
+    )
+WHERE 
+    fs.rnk = 1
+AND 
+    fs.total_sales > 1000
+ORDER BY 
+    fs.total_sales DESC;

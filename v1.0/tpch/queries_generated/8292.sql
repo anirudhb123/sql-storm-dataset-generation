@@ -1,0 +1,27 @@
+WITH Supplier_Nations AS (
+    SELECT n.n_name, SUM(s.s_acctbal) AS total_acctbal
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+), Part_Stats AS (
+    SELECT p.p_partkey, p.p_name, AVG(ps.ps_supplycost) AS avg_supplycost, COUNT(ps.ps_suppkey) AS supply_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+), Order_Summary AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY o.o_custkey
+)
+SELECT rn.n_name, ps.p_name, ps.avg_supplycost, ps.supply_count, os.total_revenue
+FROM Supplier_Nations rn
+JOIN Part_Stats ps ON rn.total_acctbal > 10000
+JOIN Order_Summary os ON os.o_custkey IN (
+    SELECT c.c_custkey
+    FROM customer c
+    WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = rn.n_name)
+)
+ORDER BY rn.n_name, ps.avg_supplycost DESC, os.total_revenue DESC
+LIMIT 10;

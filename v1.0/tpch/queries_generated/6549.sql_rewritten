@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_regionkey
+), AggregatedData AS (
+    SELECT 
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '1997-01-01' AND l.l_shipdate < '1997-12-31'
+    GROUP BY 
+        o.o_orderdate
+), FinalReport AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(ad.total_revenue) AS annual_revenue,
+        COUNT(DISTINCT ad.order_count) AS total_orders,
+        MIN(rs.total_supply_value) AS min_supplier_value,
+        MAX(rs.total_supply_value) AS max_supplier_value
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        AggregatedData ad ON n.n_regionkey = ad.o_orderdate
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    region_name,
+    annual_revenue,
+    total_orders,
+    min_supplier_value,
+    max_supplier_value
+FROM 
+    FinalReport
+ORDER BY 
+    annual_revenue DESC;

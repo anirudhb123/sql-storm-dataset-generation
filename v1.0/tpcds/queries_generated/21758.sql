@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_profit IS NOT NULL 
+        AND ws.ws_sales_price > 0 
+        AND EXISTS (
+            SELECT 1 
+            FROM item i 
+            WHERE i.i_item_sk = ws.ws_item_sk AND i.i_current_price > 0
+        )
+),
+TopSales AS (
+    SELECT 
+        web_site_id,
+        ws_order_number,
+        ws_sales_price,
+        ws_ext_sales_price
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 10
+),
+AggregateSales AS (
+    SELECT 
+        web_site_id,
+        COUNT(*) AS total_orders,
+        SUM(ws_ext_sales_price) AS total_sales_amount
+    FROM 
+        TopSales
+    GROUP BY 
+        web_site_id
+)
+SELECT 
+    ws.web_site_id,
+    COALESCE(as.total_orders, 0) AS total_orders,
+    COALESCE(as.total_sales_amount, 0.00) AS total_sales_amount,
+    CASE 
+        WHEN COALESCE(as.total_orders, 0) = 0 THEN 0
+        ELSE ROUND(COALESCE(as.total_sales_amount, 0) / as.total_orders, 2) 
+    END AS average_sales_price,
+    COUNT(DISTINCT ws.ws_order_number) FILTER (WHERE ws.ws_net_profit < 0) AS negative_profit_orders,
+    (SELECT COUNT(*) FROM store_returns sr WHERE sr.sr_returned_date_sk = DATE_PART('year', CURRENT_DATE) 
+     AND sr.sr_item_sk IN (SELECT i.i_item_sk FROM item i WHERE i.i_current_price < 10) 
+     GROUP BY sr.sr_item_sk) AS low_price_returns
+FROM 
+    web_sales ws
+LEFT JOIN 
+    AggregateSales as ON ws.web_site_id = as.web_site_id
+GROUP BY 
+    ws.web_site_id
+ORDER BY 
+    total_sales_amount DESC
+LIMIT 50;

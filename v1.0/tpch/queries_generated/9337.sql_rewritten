@@ -1,0 +1,31 @@
+WITH SupplierAggregate AS (
+    SELECT s_nationkey, SUM(s_acctbal) AS total_acctbal, COUNT(*) AS supplier_count
+    FROM supplier
+    GROUP BY s_nationkey
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_mfgr, p.p_brand, p.p_type, ps.ps_availqty, ps.ps_supplycost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+OrderStats AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-12-31'
+    GROUP BY o.o_custkey
+),
+CustomerRevenue AS (
+    SELECT c.c_custkey, c.c_name, os.revenue
+    FROM customer c
+    JOIN OrderStats os ON c.c_custkey = os.o_custkey
+)
+SELECT r.r_name, sa.total_acctbal, sa.supplier_count, cr.c_custkey, cr.c_name, cr.revenue
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN SupplierAggregate sa ON n.n_nationkey = sa.s_nationkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN PartSupplier ps ON s.s_suppkey = ps.ps_suppkey
+JOIN CustomerRevenue cr ON s.s_nationkey = cr.c_nationkey
+WHERE sa.total_acctbal > 10000 AND cr.revenue > 5000
+ORDER BY r.r_name, cr.revenue DESC;

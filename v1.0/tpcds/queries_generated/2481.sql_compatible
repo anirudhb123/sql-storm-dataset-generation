@@ -1,0 +1,99 @@
+
+WITH RankedWebSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk, ws.ws_item_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk, 
+        SUM(ws.ws_sales_price) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+    HAVING 
+        SUM(ws.ws_sales_price) > 10000
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_purchase_estimate >= (
+            SELECT 
+                AVG(cd_purchase_estimate) 
+            FROM 
+                customer_demographics
+        )
+),
+ReturnSummary AS (
+    SELECT 
+        sr_store_sk,
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_store_sk
+    HAVING 
+        SUM(sr_return_amt_inc_tax) > 100
+),
+FinalResults AS (
+    SELECT 
+        w.w_warehouse_id,
+        wc.c_customer_sk,
+        wc.total_spent,
+        RANK() OVER (ORDER BY wc.total_spent DESC) AS customer_rank,
+        rw.ws_item_sk,
+        rw.total_sales,
+        CASE 
+            WHEN rw.total_sales IS NULL THEN 'No Sales'
+            ELSE 'Sales Recorded'
+        END AS sales_status,
+        rs.total_returns,
+        rs.total_returned_amt
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        HighValueCustomers wc ON w.w_warehouse_id = wc.c_customer_sk
+    LEFT JOIN 
+        RankedWebSales rw ON rw.web_site_sk = w.w_warehouse_id
+    LEFT JOIN 
+        ReturnSummary rs ON rs.sr_store_sk = w.w_warehouse_id
+)
+SELECT 
+    wr.w_warehouse_id,
+    wr.customer_rank,
+    wr.total_spent,
+    wr.total_sales,
+    wr.sales_status,
+    wr.total_returns,
+    CASE 
+        WHEN wr.total_returns IS NULL THEN 'No Returns'
+        ELSE 'Returns Present'
+    END AS return_status
+FROM 
+    FinalResults wr
+WHERE 
+    wr.customer_rank <= 10
+ORDER BY 
+    wr.total_spent DESC, wr.total_sales DESC;

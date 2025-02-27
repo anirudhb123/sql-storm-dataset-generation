@@ -1,0 +1,81 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        a.ParentId,
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN RecursivePostHierarchy r ON a.ParentId = r.PostId
+),
+RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ph.PostId,
+    ph.Title,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation,
+    r.ReputationRank,
+    pvs.TotalUpVotes,
+    pvs.TotalDownVotes,
+    pvs.TotalVotes,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY p.Score DESC) AS PostRank
+FROM 
+    RecursivePostHierarchy ph
+INNER JOIN 
+    Posts p ON ph.PostId = p.Id
+INNER JOIN 
+    Users u ON p.OwnerUserId = u.Id
+INNER JOIN 
+    RankedUsers r ON u.Id = r.UserId
+INNER JOIN 
+    PostVoteSummary pvs ON p.Id = pvs.PostId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+GROUP BY 
+    ph.PostId, 
+    ph.Title,
+    u.DisplayName,
+    u.Reputation,
+    r.ReputationRank,
+    pvs.TotalUpVotes,
+    pvs.TotalDownVotes,
+    pvs.TotalVotes
+HAVING 
+    COUNT(DISTINCT c.Id) > 0 
+ORDER BY 
+    pvs.TotalUpVotes DESC, 
+    pvs.TotalVotes DESC;

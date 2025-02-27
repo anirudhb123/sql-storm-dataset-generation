@@ -1,0 +1,75 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id
+),
+ReturnStats AS (
+    SELECT 
+        cr_returning_customer_sk,
+        COUNT(*) AS return_count,
+        SUM(cr_return_amount) AS total_returned
+    FROM catalog_returns
+    WHERE cr_return_quantity > 0
+    GROUP BY cr_returning_customer_sk
+),
+DemographicAnalysis AS (
+    SELECT 
+        cd.cd_gender,
+        SUM(cs.cs_net_profit) AS total_profit,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(DISTINCT cs.cs_order_number) AS order_count
+    FROM customer_demographics cd
+    JOIN store_sales cs ON cd.cd_demo_sk = cs.ss_cdemo_sk
+    WHERE cd.cd_marital_status = 'M'
+    GROUP BY cd.cd_gender
+),
+ItemSales AS (
+    SELECT 
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        AVG(ws.ws_sales_price) AS avg_price
+    FROM item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_id
+),
+CombinedStats AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_sales,
+        IFNULL(rs.return_count, 0) AS returns,
+        IFNULL(rs.total_returned, 0) AS returned_amount,
+        da.total_profit,
+        i.total_quantity_sold,
+        i.avg_price
+    FROM CustomerSales cs
+    LEFT JOIN ReturnStats rs ON cs.c_customer_id = rs.cr_returning_customer_sk
+    LEFT JOIN DemographicAnalysis da ON 1 = 1
+    LEFT JOIN ItemSales i ON i.i_item_id IN (
+        SELECT DISTINCT ws.ws_item_sk
+        FROM web_sales ws
+        WHERE ws.ws_bill_customer_sk = (SELECT c.c_customer_sk FROM customer c WHERE c.c_customer_id = cs.c_customer_id LIMIT 1)
+    )
+)
+SELECT 
+    c.c_customer_id,
+    cs.total_sales,
+    returns,
+    returned_amount,
+    total_profit,
+    total_quantity_sold,
+    avg_price,
+    CASE 
+        WHEN total_sales > 1000 THEN 'High value customer'
+        WHEN total_sales BETWEEN 500 AND 1000 THEN 'Medium value customer'
+        ELSE 'Low value customer' 
+    END AS customer_value
+FROM CombinedStats cs
+JOIN customer c ON cs.c_customer_id = c.c_customer_id
+WHERE cs.total_sales IS NOT NULL
+ORDER BY total_sales DESC
+LIMIT 100;

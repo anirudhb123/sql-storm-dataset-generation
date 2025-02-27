@@ -1,0 +1,61 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AnswerCount, p.CommentCount, p.FavoriteCount
+)
+
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.PostCount,
+    us.TotalScore,
+    us.TotalViews,
+    us.BadgeCount,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount AS PostViews,
+    ps.Score AS PostScore,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.Tags
+FROM 
+    UserStats us
+JOIN 
+    PostStats ps ON us.UserId = ps.OwnerUserId
+ORDER BY 
+    us.TotalScore DESC, 
+    us.Reputation DESC, 
+    ps.ViewCount DESC
+LIMIT 100;

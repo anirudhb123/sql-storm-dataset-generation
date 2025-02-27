@@ -1,0 +1,82 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+),
+ProductAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        p.p_name,
+        p.p_brand,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_availqty DESC) AS rank_qty
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+ComplexJoin AS (
+    SELECT 
+        c.c_name,
+        r.r_name,
+        co.total_spent,
+        ps.ps_availqty
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        CustomerOrders co ON c.c_custkey = co.o_custkey
+    LEFT JOIN 
+        ProductAvailability ps ON co.o_orderkey = ps.ps_partkey
+    WHERE 
+        (co.total_spent > 1000 OR ps.ps_availqty IS NULL)
+)
+SELECT 
+    c.c_name,
+    COUNT(DISTINCT co.o_orderkey) AS order_count,
+    AVG(co.total_spent) AS avg_spent,
+    SUM(COALESCE(ps.ps_availqty, 0)) AS total_avail_quantity,
+    MAX(s.s_acctbal) AS max_supplier_balance
+FROM 
+    ComplexJoin c
+JOIN 
+    RankedSuppliers s ON c.c_name LIKE CONCAT('%', s.s_name, '%')
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM lineitem l 
+        WHERE l.l_returnflag = 'Y' AND l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+    )
+GROUP BY 
+    c.c_name
+HAVING 
+    COUNT(DISTINCT co.order_count) > 5
+ORDER BY 
+    avg_spent DESC, c.c_name ASC;

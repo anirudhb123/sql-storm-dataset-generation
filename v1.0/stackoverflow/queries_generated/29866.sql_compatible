@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankByViews
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::text[])
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.Tags,
+        rp.CommentCount,
+        CASE 
+            WHEN rp.RankByViews <= 5 THEN 'Top 5'
+            WHEN rp.RankByViews <= 10 THEN 'Top 10'
+            ELSE 'Other'
+        END AS ViewRankCategory
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.Tags,
+    ps.CommentCount,
+    ps.ViewRankCategory,
+    COUNT(DISTINCT ph.Id) AS EditHistoryCount
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    PostHistory ph ON ps.PostId = ph.PostId
+WHERE 
+    ps.CommentCount > 5 
+GROUP BY 
+    ps.PostId, ps.Title, ps.CreationDate, ps.ViewCount, ps.Score, ps.Tags, 
+    ps.CommentCount, ps.ViewRankCategory
+ORDER BY 
+    ps.ViewCount DESC, ps.CreationDate DESC
+LIMIT 10;

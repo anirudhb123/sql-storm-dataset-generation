@@ -1,0 +1,34 @@
+-- Performance Benchmarking Query
+
+-- This query aims to assess the performance of a SELECT join operation across multiple tables
+-- in the Stack Overflow schema
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            unnest(string_to_array(p.Tags, '<>')) AS TagName
+    ) t ON true
+WHERE 
+    p.CreationDate >= '2023-01-01' -- Filter for posts created in 2023
+GROUP BY 
+    p.Id, u.DisplayName
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

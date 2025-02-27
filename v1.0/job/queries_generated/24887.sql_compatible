@@ -1,0 +1,62 @@
+
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(SUM(ca.nr_order), 0) AS total_cast_order,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY COALESCE(SUM(ca.nr_order), 0) DESC) AS cast_rank
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        cast_info AS ca ON m.movie_id = ca.movie_id
+    GROUP BY 
+        m.id, m.title
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id, 
+        rm.movie_title,
+        rm.total_cast_order
+    FROM 
+        RecursiveMovieCTE rm
+    WHERE 
+        rm.total_cast_order > (SELECT AVG(total_cast_order) FROM RecursiveMovieCTE)
+),
+ExtendedInfo AS (
+    SELECT 
+        fm.movie_id,
+        fm.movie_title,
+        COALESCE(m.production_year, 0) AS production_year,
+        COALESCE(SUM(mk.keyword), 'No Keywords') AS movie_keywords,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        movie_info mi ON fm.movie_id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON fm.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON fm.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        fm.movie_id, fm.movie_title, m.production_year
+)
+SELECT 
+    ei.movie_id,
+    ei.movie_title,
+    ei.production_year,
+    ei.movie_keywords,
+    ei.company_names,
+    CASE 
+        WHEN ei.production_year <= 2000 THEN 'Classic'
+        WHEN ei.production_year BETWEEN 2001 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era_category,
+    (SELECT COUNT(*) FROM kind_type kt WHERE kt.id = (SELECT kind_id FROM aka_title WHERE movie_id = ei.movie_id)) AS kind_count
+FROM 
+    ExtendedInfo ei
+WHERE 
+    ei.movie_keywords <> 'No Keywords'
+ORDER BY 
+    ei.production_year DESC, ei.movie_title;

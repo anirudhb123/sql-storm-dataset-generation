@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal) 
+        FROM supplier s2
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+CustomerOrderCount AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT p.p_partkey, 
+       p.p_name, 
+       SUM(p.ps_supplycost * ps.ps_availqty) AS total_cost, 
+       COUNT(DISTINCT o.o_orderkey) AS order_count, 
+       AVG(cuc.order_count) AS avg_orders_per_customer,
+       COALESCE(r.r_name, 'Unknown Region') AS region_name
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN OrderSummary os ON os.o_orderkey = ps.ps_partkey
+LEFT JOIN CustomerOrderCount cuc ON cuc.c_custkey = s.s_suppkey
+WHERE p.p_size > 10
+  AND (s.s_acctbal IS NOT NULL OR r.r_name IS NOT NULL)
+GROUP BY p.p_partkey, p.p_name, r.r_name
+HAVING SUM(p.ps_supplycost * ps.ps_availqty) > (
+    SELECT AVG(ps2.ps_supplycost * ps2.ps_availqty) 
+    FROM partsupp ps2
+)
+ORDER BY total_cost DESC, p.p_name;

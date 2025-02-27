@@ -1,0 +1,77 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_net_profit,
+        1 AS level
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ss_store_sk
+    UNION ALL
+    SELECT 
+        s.s_store_sk,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        sh.level + 1
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store s ON sh.ss_store_sk = s.s_store_sk
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    WHERE 
+        sh.level < 3  -- Limiting the recursive hierarchy to 3 levels
+    GROUP BY 
+        s.s_store_sk
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+address_summary AS (
+    SELECT 
+        ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_estimate
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        ca_state
+)
+SELECT 
+    sh.ss_store_sk,
+    sh.total_net_profit,
+    cs.total_orders,
+    cs.total_spent,
+    COALESCE(asum.customer_count, 0) AS state_customer_count,
+    asum.avg_estimate
+FROM 
+    sales_hierarchy sh
+LEFT JOIN 
+    customer_sales cs ON sh.ss_store_sk = cs.c_customer_sk
+LEFT JOIN 
+    address_summary asum ON asum.ca_state = (
+        SELECT 
+            ca.ca_state 
+        FROM 
+            customer_address ca 
+        WHERE 
+            ca.ca_address_sk = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_customer_sk = cs.c_customer_sk)
+        LIMIT 1
+    )
+ORDER BY 
+    sh.total_net_profit DESC;

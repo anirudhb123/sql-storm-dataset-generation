@@ -1,0 +1,57 @@
+
+WITH RECURSIVE UserVoteCounts AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS VoteCount,
+        SUM(CASE WHEN VoteTypeId IN (2, 8) THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes
+    GROUP BY UserId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        COALESCE(ph.CloseReasonId, 'None') AS CloseReason,
+        pt.Name AS PostTypeName,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    LEFT JOIN PostTypes pt ON p.PostTypeId = pt.Id
+)
+SELECT 
+    ud.UserId,
+    ud.VoteCount,
+    ud.UpVotes,
+    ud.DownVotes,
+    pd.PostId,
+    pd.Title,
+    pd.ViewCount,
+    pd.CreationDate,
+    pd.Score,
+    pd.CloseReason,
+    pd.PostTypeName,
+    pd.OwnerDisplayName,
+    pd.OwnerReputation,
+    CASE 
+        WHEN pd.CloseReason = 'None' AND ud.UpVotes > ud.DownVotes THEN 'Popular'
+        WHEN pd.CloseReason <> 'None' THEN 'Closed'
+        ELSE 'Needs Attention'
+    END AS PostStatus,
+    CASE 
+        WHEN pd.UserPostRank = 1 THEN 'Latest Post'
+        ELSE 'Earlier Post'
+    END AS PostRankStatus
+FROM UserVoteCounts ud
+JOIN PostDetails pd ON ud.UserId = pd.OwnerUserId
+WHERE ud.VoteCount > 10
+  AND pd.CommentCount > 0
+ORDER BY pd.ViewCount DESC, pd.Score DESC
+LIMIT 100;

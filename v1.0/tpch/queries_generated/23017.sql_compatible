@@ -1,0 +1,48 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (ORDER BY o.o_orderdate DESC) AS recency_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= DATEADD(DAY, -30, CAST('1998-10-01' AS DATE))
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice ELSE 0 END) AS total_returned_revenue,
+    AVG(l.l_discount) AS avg_discount,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ' [', CAST(rs.rank AS VARCHAR) AS TEXT, ']')) AS supplier_info,
+    r.r_name
+FROM lineitem l
+JOIN RecentOrders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN RankedSuppliers rs ON l.l_suppkey = rs.s_suppkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE l.l_shipdate IS NOT NULL
+GROUP BY n.n_name, r.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 10
+   AND SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+   AND EXISTS (
+       SELECT 1 
+       FROM supplier s
+       JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+       WHERE s.s_suppkey = rs.s_suppkey AND s.s_acctbal IS NOT NULL
+       GROUP BY s.s_suppkey
+       HAVING SUM(ps.ps_availqty) > 50
+   )
+ORDER BY total_returned_revenue DESC, avg_discount ASC
+FETCH FIRST 50 ROWS ONLY;

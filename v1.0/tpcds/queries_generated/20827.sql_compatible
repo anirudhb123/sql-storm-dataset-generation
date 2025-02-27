@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss.ss_item_sk,
+        ss.ss_sales_price,
+        ss.ss_net_paid,
+        DENSE_RANK() OVER (PARTITION BY ss.ss_item_sk ORDER BY ss.ss_sales_price DESC) AS price_rank,
+        DENSE_RANK() OVER (PARTITION BY ss.ss_item_sk ORDER BY ss.ss_net_paid DESC) AS net_paid_rank
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.ss_sold_date_sk > (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2020)
+),
+FilteredSales AS (
+    SELECT 
+        rs.ss_item_sk,
+        rs.ss_sales_price,
+        rs.ss_net_paid,
+        CASE 
+            WHEN rs.price_rank = 1 AND rs.net_paid_rank = 1 THEN 'Top Sales'
+            WHEN rs.price_rank = 1 THEN 'Top Price'
+            WHEN rs.net_paid_rank = 1 THEN 'Top Net Paid'
+            ELSE 'Other'
+        END AS sales_category
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.ss_sales_price IS NOT NULL AND rs.ss_net_paid IS NOT NULL
+),
+ItemStatistics AS (
+    SELECT 
+        i.i_item_id,
+        SUM(fs.ss_sales_price) AS total_sales_price,
+        COUNT(*) AS sales_count,
+        AVG(fs.ss_net_paid) AS avg_net_paid
+    FROM 
+        FilteredSales fs
+    JOIN 
+        item i ON i.i_item_sk = fs.ss_item_sk
+    GROUP BY 
+        i.i_item_id
+)
+SELECT 
+    is.i_item_id,
+    CASE 
+        WHEN is.avg_net_paid IS NULL THEN 'No Data'
+        WHEN is.avg_net_paid > 100 THEN 'High Average'
+        WHEN is.avg_net_paid BETWEEN 50 AND 100 THEN 'Medium Average'
+        ELSE 'Low Average'
+    END AS avg_category,
+    COALESCE(is.total_sales_price, 0) AS total_sales,
+    is.sales_count,
+    CASE 
+        WHEN COUNT(DISTINCT fs.sales_category) > 1 THEN 'Diverse Sales'
+        ELSE 'Focused Sales'
+    END AS sales_focus
+FROM 
+    ItemStatistics is
+LEFT JOIN 
+    FilteredSales fs ON fs.ss_item_sk IN (SELECT DISTINCT ss_item_sk FROM store_sales)
+GROUP BY 
+    is.i_item_id, is.total_sales_price, is.sales_count, is.avg_net_paid
+HAVING 
+    COUNT(fs.ss_item_sk) > 1
+ORDER BY 
+    total_sales_price DESC;

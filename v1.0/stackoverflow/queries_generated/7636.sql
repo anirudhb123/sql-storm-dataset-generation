@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    AND 
+        p.Score > 0
+),
+PostStatistics AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(*) AS TotalPosts,
+        AVG(ViewCount) AS AvgViewCount,
+        SUM(Score) AS TotalScore
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostTypes pt ON rp.PostId = rp.PostId
+    GROUP BY 
+        pt.Name
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ps.PostType,
+    ps.TotalPosts,
+    ps.AvgViewCount,
+    ps.TotalScore,
+    ub.DisplayName AS TopUser,
+    ub.BadgeCount
+FROM 
+    PostStatistics ps
+JOIN 
+    (SELECT 
+         OwnerUserId, 
+         COUNT(*) AS UserPostCount 
+     FROM 
+         Posts 
+     WHERE 
+         CreationDate >= CURRENT_DATE - INTERVAL '30 days' 
+     GROUP BY 
+         OwnerUserId 
+     ORDER BY 
+         UserPostCount DESC 
+     LIMIT 1) topUser ON topUser.OwnerUserId = ub.UserId
+JOIN 
+    UserBadges ub ON ub.UserId = topUser.OwnerUserId
+ORDER BY 
+    ps.TotalScore DESC;

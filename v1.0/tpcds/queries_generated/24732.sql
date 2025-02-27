@@ -1,0 +1,59 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk, 
+        sr_item_sk, 
+        COUNT(*) AS total_returns, 
+        SUM(sr_return_amt) AS total_return_amount,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY COUNT(*) DESC) AS return_rank
+    FROM store_returns
+    WHERE sr_returned_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY sr_item_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        COUNT(DISTINCT wr_order_number) AS total_web_returns,
+        SUM(wr_return_amt) AS total_web_return_amt,
+        COALESCE(MAX(wr_return_quantity), 0) AS max_return_quantity
+    FROM customer c
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.w_returning_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+),
+PopularItems AS (
+    SELECT 
+        ir.i_item_sk,
+        ir.i_item_id,
+        SUM(ir.ws_quantity) AS total_quantity_sold,
+        AVG(ir.ws_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ir.ws_order_number) AS orders_count
+    FROM web_sales ir
+    JOIN item i ON ir.ws_item_sk = i.i_item_sk
+    WHERE ir.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+          AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ir.i_item_sk, ir.i_item_id
+    HAVING SUM(ir.ws_quantity) > 100
+    ORDER BY total_quantity_sold DESC
+    FETCH FIRST 10 ROWS ONLY
+)
+SELECT 
+    ci.c_customer_sk, 
+    ci.cd_gender, 
+    ci.cd_marital_status, 
+    pi.i_item_id, 
+    pi.total_quantity_sold, 
+    CASE 
+        WHEN ci.total_web_returns IS NULL THEN 'No Returns'
+        ELSE CAST(ci.total_web_returns AS VARCHAR)
+    END AS return_status,
+    COALESCE(r.total_returns, 0) AS store_return_count,
+    AVG(ci.max_return_quantity) OVER (PARTITION BY ci.cd_gender ORDER BY ci.total_web_returns DESC) AS avg_return_quantity_per_gender
+FROM CustomerInfo ci
+LEFT JOIN PopularItems pi ON ci.total_web_returns > 0
+LEFT JOIN RankedReturns r ON pi.i_item_sk = r.sr_item_sk 
+WHERE ci.cd_marital_status = 'M' 
+      AND (ci.total_web_return_amt > 100 OR ci.max_return_quantity IS NULL)
+ORDER BY pi.total_quantity_sold DESC, ci.c_customer_sk;

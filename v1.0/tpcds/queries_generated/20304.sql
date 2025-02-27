@@ -1,0 +1,80 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        ws.web_class,
+        SUM(ws.ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.web_class ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk, ws.web_name, ws.web_class
+),
+Customer_Stats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+High_Value_Customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_orders,
+        cs.total_spent,
+        CASE 
+            WHEN cs.total_spent > 10000 THEN 'High Value'
+            WHEN cs.total_spent BETWEEN 5000 AND 10000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value
+    FROM 
+        Customer_Stats cs
+    WHERE 
+        cs.total_orders > 5
+),
+Top_Profit_Websites AS (
+    SELECT 
+        sc.web_name,
+        sc.web_class,
+        sc.total_profit,
+        RANK() OVER (ORDER BY sc.total_profit DESC) AS website_rank
+    FROM 
+        Sales_CTE sc
+    WHERE 
+        sc.profit_rank <= 3
+)
+SELECT 
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.total_orders,
+    hvc.total_spent,
+    hvc.customer_value,
+    tpw.web_name,
+    tpw.web_class,
+    tpw.total_profit
+FROM 
+    High_Value_Customers hvc
+FULL OUTER JOIN 
+    Top_Profit_Websites tpw ON tpw.web_class = hvc.c_last_name
+WHERE 
+    (hvc.customer_value = 'High Value' OR tpw.total_profit IS NOT NULL)
+ORDER BY 
+    hvc.total_spent DESC NULLS LAST, tpw.total_profit DESC NULLS LAST;

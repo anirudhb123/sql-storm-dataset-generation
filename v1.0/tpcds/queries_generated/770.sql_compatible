@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2450219 AND 2450584 
+    GROUP BY 
+        ws.web_site_sk
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_returned_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(wr.wr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.wr_returned_date_sk BETWEEN 2450219 AND 2450584
+    GROUP BY 
+        wr.wr_returned_customer_sk
+)
+SELECT 
+    w.web_site_id,
+    w.web_name,
+    COALESCE(r.total_sales, 0) AS total_sales,
+    COALESCE(cr.total_returns, 0) AS total_returns,
+    COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+    (COALESCE(r.total_sales, 0) - COALESCE(cr.total_return_amount, 0)) AS net_sales,
+    CASE 
+        WHEN COALESCE(cr.total_returns, 0) > 0 THEN 
+            (COALESCE(cr.total_return_amount, 0) / NULLIF(COALESCE(r.total_sales, 0), 0)) * 100
+        ELSE 
+            0
+    END AS return_rate_percentage
+FROM 
+    web_site w
+LEFT JOIN 
+    RankedSales r ON w.web_site_sk = r.web_site_sk
+LEFT JOIN 
+    CustomerReturns cr ON cr.wr_returned_customer_sk = (
+        SELECT c.c_customer_sk 
+        FROM customer c 
+        WHERE c.c_customer_id = (
+            SELECT DISTINCT wr_returning_customer_sk 
+            FROM web_returns 
+            WHERE wr.web_page_sk IN (
+                SELECT wp.web_page_sk 
+                FROM web_page wp 
+                WHERE wp.web_site_sk = w.web_site_sk
+            )
+            LIMIT 1
+        )
+    )
+WHERE 
+    r.sales_rank = 1 OR r.sales_rank IS NULL
+ORDER BY 
+    net_sales DESC;

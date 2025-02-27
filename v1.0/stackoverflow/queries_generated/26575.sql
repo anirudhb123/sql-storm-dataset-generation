@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only considering Questions
+),
+
+TopPostsByTag AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.Tags,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 3 -- Top 3 questions per tag
+),
+
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(tp.PostId) AS TotalPosts,
+        AVG(tp.Score) AS AvgScore,
+        SUM(tp.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    LEFT JOIN 
+        TopPostsByTag tp ON tp.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TotalPosts DESC
+),
+
+UserContributions AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(v.BountyAmount) AS TotalBounty,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS ScoreAdjustment
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    ts.TagName,
+    ts.TotalPosts,
+    ts.AvgScore,
+    ts.TotalViews,
+    uc.DisplayName AS TopContributor,
+    uc.TotalPosts AS ContributionCount,
+    uc.TotalBounty
+FROM 
+    TagStatistics ts
+JOIN 
+    UserContributions uc ON ts.TotalPosts > 0 
+ORDER BY 
+    ts.TotalPosts DESC,
+    uc.TotalPosts DESC;

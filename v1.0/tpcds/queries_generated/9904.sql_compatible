@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk, ws.ws_item_sk
+),
+TopSellingItems AS (
+    SELECT
+        r.web_site_sk,
+        r.ws_item_sk,
+        r.total_sales
+    FROM 
+        RankedSales r
+    WHERE 
+        r.sales_rank <= 5
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_ext_sales_price) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+PurchaseDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        AVG(cp.total_spent) AS avg_spent
+    FROM 
+        CustomerPurchases cp
+    INNER JOIN 
+        customer_demographics cd ON cp.c_customer_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    pd.avg_spent,
+    COUNT(DISTINCT ti.ws_item_sk) AS unique_items_purchased
+FROM 
+    PurchaseDemographics pd
+INNER JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = pd.cd_demo_sk
+INNER JOIN 
+    TopSellingItems ti ON ti.web_site_sk IN (SELECT DISTINCT web_site_sk FROM web_site)
+GROUP BY 
+    cd.cd_gender, cd.cd_marital_status, pd.avg_spent
+ORDER BY 
+    pd.avg_spent DESC
+LIMIT 10;

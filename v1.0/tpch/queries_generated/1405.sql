@@ -1,0 +1,75 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_mktsegment,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > 100.00
+    GROUP BY 
+        ps.ps_partkey, 
+        ps.ps_suppkey
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(SUM(lp.l_quantity), 0) AS total_quantity_sold,
+        CASE 
+            WHEN COALESCE(SUM(lp.l_discount), 0) > 0 THEN 'Discounted'
+            ELSE 'Regular'
+        END AS price_status
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem lp ON p.p_partkey = lp.l_partkey
+    GROUP BY 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    f.p_partkey,
+    f.p_name,
+    f.total_quantity_sold,
+    f.price_status,
+    s.ps_supplycost,
+    f.p_retailprice - s.ps_supplycost AS price_difference
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    FilteredParts f ON r.o_orderkey = (
+        SELECT l.l_orderkey 
+        FROM lineitem l 
+        WHERE l.l_orderkey = r.o_orderkey
+        LIMIT 1
+    )
+INNER JOIN 
+    SupplierParts s ON f.p_partkey = s.ps_partkey
+WHERE 
+    r.order_rank <= 5
+ORDER BY 
+    r.o_orderdate DESC, 
+    price_difference DESC;

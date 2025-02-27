@@ -1,0 +1,62 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE 
+        o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+    AND o.o_orderstatus IN ('O', 'F')
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(ps.ps_partkey) AS part_count
+    FROM supplier s
+    INNER JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(ps.ps_supplycost) FROM partsupp)
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        CASE 
+            WHEN p.p_size IS NULL THEN 'SIZE_NOT_SPECIFIED'
+            ELSE p.p_size
+        END AS size_description,
+        p.p_retailprice,
+        p.p_comment
+    FROM part p
+    WHERE p.p_container LIKE 'SM%'
+    AND p.p_retailprice > 100
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderstatus,
+    COUNT(DISTINCT li.l_orderkey) AS total_line_items,
+    s.s_name AS supplier_name,
+    COALESCE(pd.size_description, 'UNKNOWN_SIZE') AS part_size, 
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS net_revenue,
+    RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(li.l_extendedprice * (1 - li.l_discount)) DESC) AS revenue_rank
+FROM RankedOrders o
+LEFT JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+LEFT JOIN SupplierInfo s ON li.l_suppkey = s.s_suppkey
+LEFT JOIN PartDetails pd ON li.l_partkey = pd.p_partkey
+WHERE 
+    li.l_shipdate > o.o_orderdate 
+    AND li.l_returnflag = 'N'
+GROUP BY 
+    o.o_orderkey, 
+    o.o_orderstatus, 
+    s.s_name, 
+    pd.size_description
+HAVING 
+    SUM(li.l_extendedprice * (1 - li.l_discount)) IS NOT NULL 
+    OR COUNT(li.l_orderkey) > 0
+ORDER BY 
+    o.o_orderstatus, revenue_rank;

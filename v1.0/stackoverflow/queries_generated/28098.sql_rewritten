@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+),
+PostTags AS (
+    SELECT 
+        p.PostId,
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        PostTags
+    GROUP BY 
+        Tag
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+PostsWithTopTags AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        STRING_AGG(tt.Tag, ', ') AS TopTags
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostTags pt ON rp.PostId = pt.PostId
+    JOIN 
+        TopTags tt ON pt.Tag = tt.Tag
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.CreationDate, rp.ViewCount, rp.Score
+)
+SELECT 
+    pwtt.PostId,
+    pwtt.Title,
+    pwtt.Body,
+    pwtt.CreationDate,
+    pwtt.ViewCount,
+    pwtt.Score,
+    pwtt.TopTags,
+    COALESCE(u.DisplayName, 'Anonymous') AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(b.Id) AS BadgeCount
+FROM 
+    PostsWithTopTags pwtt
+LEFT JOIN 
+    Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = pwtt.PostId)
+LEFT JOIN 
+    Comments c ON c.PostId = pwtt.PostId
+LEFT JOIN 
+    Badges b ON b.UserId = u.Id
+GROUP BY 
+    pwtt.PostId, pwtt.Title, pwtt.Body, pwtt.CreationDate, pwtt.ViewCount, pwtt.Score, u.DisplayName
+ORDER BY 
+    pwtt.Score DESC, pwtt.ViewCount DESC;

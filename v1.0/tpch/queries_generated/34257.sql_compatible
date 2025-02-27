@@ -1,0 +1,56 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS lvl
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.lvl + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.lvl < 5
+),
+SupplierSummary AS (
+    SELECT ps.ps_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > 1000.00
+    GROUP BY ps.ps_suppkey
+),
+NationRegion AS (
+    SELECT n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+LineItemAnalysis AS (
+    SELECT l.l_orderkey, COUNT(*) AS total_lines,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+           AVG(l.l_quantity) AS avg_quantity
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    oh.o_orderkey,
+    oh.o_orderdate,
+    COALESCE(l.total_lines, 0) AS total_lines,
+    COALESCE(l.net_revenue, 0) AS net_revenue,
+    COALESCE(s.total_supplycost, 0) AS total_supplycost,
+    nr.n_name,
+    nr.r_name
+FROM OrderHierarchy oh
+LEFT JOIN LineItemAnalysis l ON oh.o_orderkey = l.l_orderkey
+LEFT JOIN SupplierSummary s ON s.ps_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+    WHERE li.l_orderkey = oh.o_orderkey
+    GROUP BY ps.ps_suppkey
+)
+JOIN NationRegion nr ON nr.n_name IN (
+    SELECT DISTINCT o.o_custkey
+    FROM orders o
+    WHERE o.o_orderkey = oh.o_orderkey
+)
+WHERE oh.lvl = 1
+ORDER BY oh.o_orderdate DESC, nr.n_name;

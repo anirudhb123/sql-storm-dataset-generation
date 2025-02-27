@@ -1,0 +1,77 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS HasAcceptedAnswer,
+        MAX(P.CreationDate) AS LatestActivity
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id
+),
+FilteredUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.LastAccessDate,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 100
+),
+UserPostDetails AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName AS UserDisplayName,
+        PS.Title AS PostTitle,
+        PS.CommentCount,
+        PS.HasAcceptedAnswer,
+        PS.LatestActivity,
+        UV.TotalVotes,
+        UV.UpVotes,
+        UV.DownVotes
+    FROM 
+        FilteredUsers U
+    LEFT JOIN 
+        PostStats PS ON PS.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id)
+    LEFT JOIN 
+        UserVoteStats UV ON U.Id = UV.UserId
+)
+SELECT 
+    UserDisplayName,
+    PostTitle,
+    CommentCount,
+    HasAcceptedAnswer,
+    LatestActivity,
+    COALESCE(UpVotes, 0) AS UpVotes,
+    COALESCE(DownVotes, 0) AS DownVotes,
+    CASE 
+        WHEN LatestActivity < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 'Inactive'
+        ELSE 'Active'
+    END AS UserActivityStatus
+FROM 
+    UserPostDetails
+WHERE 
+    CommentCount > 0
+ORDER BY 
+    LatestActivity DESC
+LIMIT 10;

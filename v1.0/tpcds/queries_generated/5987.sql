@@ -1,0 +1,44 @@
+
+WITH CustomerStats AS (
+    SELECT
+        cd_gender,
+        COUNT(DISTINCT c_customer_sk) AS total_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(DISTINCT c_birth_country) AS unique_birth_countries
+    FROM
+        customer
+    JOIN
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY
+        cd_gender
+),
+SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        ws.web_site_id
+)
+SELECT 
+    cs.cd_gender,
+    cs.total_customers,
+    cs.avg_purchase_estimate,
+    cs.unique_birth_countries,
+    sd.web_site_id,
+    sd.total_net_profit,
+    sd.total_orders,
+    sd.avg_sales_price
+FROM 
+    CustomerStats cs
+JOIN 
+    SalesData sd ON (cs.total_customers > 100 AND sd.total_orders > 10)
+ORDER BY 
+    cs.avg_purchase_estimate DESC, 
+    sd.total_net_profit DESC
+LIMIT 50;

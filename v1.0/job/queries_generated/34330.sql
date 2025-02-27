@@ -1,0 +1,96 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        ARRAY[mt.title] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        path || m.title
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE 
+        mh.level < 5  -- Limit depth to 5 levels for performance
+),
+ActorStats AS (
+    SELECT 
+        a.person_id,
+        a.note,
+        COUNT(DISTINCT cm.id) AS movie_count,
+        ARRAY_AGG(DISTINCT mt.title) AS movies
+    FROM 
+        cast_info a
+    LEFT JOIN 
+        aka_title mt ON a.movie_id = mt.id
+    LEFT JOIN 
+        complete_cast cc ON a.movie_id = cc.movie_id
+    LEFT JOIN 
+        person_info pi ON a.person_id = pi.person_id
+    GROUP BY 
+        a.person_id, a.note
+    HAVING 
+        COUNT(DISTINCT mt.id) > 2
+),
+MovieInfo AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        (SELECT COUNT(DISTINCT person_id) FROM cast_info WHERE movie_id = mt.id) AS actor_count,
+        (SELECT STRING_AGG(pi.info, ', ') 
+         FROM person_info pi 
+         WHERE pi.person_id IN (SELECT person_id FROM cast_info WHERE movie_id = mt.id)) AS actor_info
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+MovieStats AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS row_num
+    FROM 
+        MovieHierarchy mh
+),
+FinalStats AS (
+    SELECT 
+        mi.title,
+        mi.production_year,
+        COALESCE(as.movie_count, 0) AS actor_count,
+        COALESCE(mk.keyword_count, 0) AS keyword_count
+    FROM 
+        MovieInfo mi
+    LEFT JOIN 
+        ActorStats as ON mi.movie_id = as.person_id
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            COUNT(DISTINCT keyword_id) AS keyword_count 
+         FROM 
+            movie_keyword 
+         GROUP BY 
+            movie_id) mk ON mi.movie_id = mk.movie_id
+)
+SELECT *
+FROM FinalStats
+WHERE 
+    actor_count > 2 OR keyword_count > 1
+ORDER BY 
+    production_year DESC, actor_count DESC
+LIMIT 100;

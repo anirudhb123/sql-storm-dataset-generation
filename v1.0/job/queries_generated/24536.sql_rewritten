@@ -1,0 +1,64 @@
+WITH Recursive ActorsCTE AS (
+    
+    SELECT 
+        pk.id AS actor_id,
+        ak.name AS actor_name,
+        c.movie_id,
+        t.title,
+        ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY c.nr_order) as role_order
+    FROM aka_name ak
+    JOIN cast_info c ON ak.person_id = c.person_id
+    JOIN aka_title t ON c.movie_id = t.movie_id
+    WHERE ak.name IS NOT NULL AND ak.name <> ''
+    
+    UNION ALL
+    
+    SELECT 
+        r.actor_id,
+        r.actor_name,
+        r.movie_id,
+        t.title,
+        r.role_order + 1
+    FROM ActorsCTE r
+    JOIN cast_info c ON r.movie_id = c.movie_id 
+    JOIN aka_name ak ON c.person_id = ak.person_id
+    JOIN aka_title t ON c.movie_id = t.movie_id
+    WHERE ak.name IS NOT NULL AND ak.name <> ''
+),
+MoviesWithKeywords AS (
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        k.keyword,
+        COUNT(mk.id) AS keyword_count
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY m.id, m.title, k.keyword
+),
+FilteredMovies AS (
+    
+    SELECT 
+        mwk.movie_id,
+        mwk.title,
+        mwk.keyword,
+        mwk.keyword_count
+    FROM MoviesWithKeywords mwk
+    WHERE mwk.keyword_count > 2
+)
+SELECT 
+    a.actor_name,
+    f.title,
+    COALESCE(f.keyword, 'N/A') AS keyword,
+    CASE 
+        WHEN f.keyword IS NOT NULL THEN 'Has Keywords' 
+        ELSE 'No Keywords' 
+    END AS keyword_status,
+    SUM(a.role_order) OVER (PARTITION BY a.actor_id) AS total_roles,
+    COUNT(DISTINCT f.movie_id) AS distinct_movies
+FROM ActorsCTE a
+FULL OUTER JOIN FilteredMovies f ON a.movie_id = f.movie_id
+GROUP BY a.actor_id, a.actor_name, f.title, f.keyword
+HAVING SUM(a.role_order) > 1
+ORDER BY total_roles DESC, a.actor_name ASC;

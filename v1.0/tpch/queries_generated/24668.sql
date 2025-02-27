@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank_within_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+FilteredSuppliers AS (
+    SELECT 
+        r.r_name, 
+        rs.s_name, 
+        rs.total_supply_value 
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rank_within_nation <= 3
+    AND 
+        rs.total_supply_value IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        ROW_NUMBER() OVER (ORDER BY co.total_order_value DESC) AS customer_rank
+    FROM 
+        CustomerOrders co
+    JOIN 
+        customer c ON co.c_custkey = c.c_custkey
+)
+SELECT 
+    COALESCE(tc.c_name, 'Unknown Customer') AS customer, 
+    fs.r_name AS region, 
+    SUM(fs.total_supply_value) AS region_supply_value,
+    COUNT(DISTINCT tc.c_custkey) AS unique_customers
+FROM 
+    FilteredSuppliers fs
+FULL OUTER JOIN 
+    TopCustomers tc ON fs.s_name = (SELECT s_name FROM supplier WHERE s_suppkey = (SELECT MIN(s_suppkey) FROM supplier WHERE s_suppkey IS NOT NULL) LIMIT 1)
+GROUP BY 
+    tc.c_name, fs.r_name
+HAVING 
+    SUM(fs.total_supply_value) > (SELECT AVG(total_supply_value) FROM FilteredSuppliers) 
+    OR
+    (COUNT(DISTINCT tc.c_custkey) < 10 AND fs.r_name IS NOT NULL)
+ORDER BY 
+    region_supply_value DESC, customer;

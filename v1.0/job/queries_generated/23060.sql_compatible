@@ -1,0 +1,83 @@
+
+WITH RECURSIVE RecursiveTitleHierarchy AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year AS probession_year,
+        COALESCE(ct.kind, 'Other') AS kind,
+        0 AS depth
+    FROM 
+        title t
+    LEFT JOIN 
+        kind_type ct ON t.kind_id = ct.id
+    UNION ALL
+    SELECT 
+        mt.linked_movie_id AS title_id,
+        lt.title,
+        lt.production_year,
+        COALESCE(kt.kind, 'Other') AS kind,
+        r.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title lt ON ml.linked_movie_id = lt.id
+    JOIN 
+        RecursiveTitleHierarchy r ON ml.movie_id = r.title_id
+    LEFT JOIN 
+        kind_type kt ON lt.kind_id = kt.id
+),
+MovieAwards AS (
+    SELECT 
+        mi.movie_id,
+        COUNT(*) AS award_count
+    FROM 
+        movie_info mi
+    INNER JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        it.info ILIKE '%award%'
+    GROUP BY 
+        mi.movie_id
+),
+CastInfoDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) FILTER (WHERE ci.note IS NULL) AS distinct_cast_without_notes,
+        COUNT(DISTINCT ci.person_id) FILTER (WHERE ci.note IS NOT NULL) AS distinct_cast_with_notes
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+MovieTitleDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        COALESCE(ct.kind, 'Unknown') AS kind,
+        COALESCE(ma.award_count, 0) AS award_count,
+        COALESCE(ca.distinct_cast_without_notes, 0) AS cast_wo_notes,
+        COALESCE(ca.distinct_cast_with_notes, 0) AS cast_w_notes
+    FROM 
+        title t
+    LEFT JOIN 
+        kind_type ct ON t.kind_id = ct.id
+    LEFT JOIN 
+        MovieAwards ma ON t.id = ma.movie_id
+    LEFT JOIN 
+        CastInfoDetails ca ON t.id = ca.movie_id
+)
+SELECT 
+    mtd.title,
+    mtd.kind,
+    mtd.award_count,
+    mtd.cast_wo_notes,
+    mtd.cast_w_notes,
+    (SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = mtd.title_id) AS total_complete_cast,
+    RANK() OVER (PARTITION BY mtd.kind ORDER BY mtd.award_count DESC) AS kind_rank
+FROM 
+    MovieTitleDetails mtd
+WHERE 
+    mtd.award_count > 0 
+    OR mtd.cast_wo_notes > 0
+ORDER BY 
+    mtd.kind, mtd.award_count DESC, mtd.cast_wo_notes DESC;

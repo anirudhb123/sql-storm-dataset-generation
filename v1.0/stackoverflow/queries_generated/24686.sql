@@ -1,0 +1,104 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '>')) AS t(TagName)
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.PostTypeId
+),
+PostVotingSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostsWithBadges AS (
+    SELECT 
+        u.DisplayName,
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ISNULL(pb.BadgeCount, 0) AS BadgeCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) pb ON u.Id = pb.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    COALESCE(ps.UpVotes, 0) AS UpVotes,
+    COALESCE(ps.DownVotes, 0) AS DownVotes,
+    pb.BadgeCount,
+    rp.TagsList,
+    CASE 
+        WHEN rp.Rank = 1 THEN 'Top Post'
+        WHEN pb.BadgeCount > 5 THEN 'Experienced User'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVotingSummary ps ON rp.PostId = ps.PostId
+LEFT JOIN 
+    PostsWithBadges pb ON rp.PostId = pb.PostId
+WHERE 
+    rp.Rank <= 10
+    AND (pb.BadgeCount IS NULL OR pb.BadgeCount > 0) -- Filter users with at least one badge
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC
+OFFSET 0 ROWS FETCH NEXT 20 ROWS ONLY;
+
+WITH PythonAndTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT t.TagName) AS TagCount,
+        STRING_AGG(CASE WHEN t.TagName LIKE '%python%' THEN t.TagName END, ', ') AS PythonTags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '>')) AS t(TagName)
+    WHERE 
+        t.TagName IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    *,
+    CASE 
+        WHEN TagCount > 5 THEN 'Popular Topic'
+        ELSE 'Niche Topic'
+    END AS TopicType
+FROM 
+    PythonAndTags
+WHERE 
+    PythonTags IS NOT NULL
+ORDER BY 
+    TagCount DESC;

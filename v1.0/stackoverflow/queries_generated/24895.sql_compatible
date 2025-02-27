@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, p.CreationDate, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT CONCAT(pht.Name, ': ', ph.Comment), '; ') AS HistoryComment,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+BestPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        CASE 
+            WHEN rp.PostRank = 1 THEN 'Best Post'
+            ELSE 'Regular Post'
+        END AS PostLabel,
+        COALESCE(phd.HistoryComment, 'No History') AS PostHistory,
+        COALESCE(phd.LastChangeDate, 'Never') AS LastChange
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryDetails phd ON rp.PostId = phd.PostId
+    WHERE 
+        rp.PostRank <= 3
+)
+SELECT 
+    bp.PostId,
+    bp.Title,
+    bp.Score,
+    CASE WHEN bp.ViewCount IS NULL THEN 'Views data not available' ELSE CAST(bp.ViewCount AS VARCHAR) END AS ViewCount,
+    bp.OwnerDisplayName,
+    bp.PostLabel,
+    bp.PostHistory,
+    CASE 
+        WHEN bp.LastChange = 'Never' THEN 'No changes made to this post' 
+        ELSE bp.LastChange 
+    END AS LastChange
+FROM 
+    BestPosts bp
+ORDER BY 
+    bp.Score DESC, 
+    bp.ViewCount DESC;

@@ -1,0 +1,93 @@
+WITH RecursiveTagCount AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostFrequency
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '>'))::int[]
+    GROUP BY 
+        Tags.TagName
+),
+PopularPosts AS (
+    SELECT 
+        Posts.Id AS PostID,
+        Posts.Title,
+        Posts.CreationDate,
+        Posts.ViewCount,
+        Users.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY Posts.OwnerUserId ORDER BY Posts.ViewCount DESC) AS Rank
+    FROM 
+        Posts
+    JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    WHERE 
+        Posts.PostTypeId = 1  -- Only questions
+),
+CloseReasonDetails AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        STRING_AGG(CASE WHEN PostHistoryTypeId = 10 THEN Comment END, ', ') AS CloseReasons
+    FROM 
+        PostHistory
+    GROUP BY 
+        PostId
+),
+TagStatistics AS (
+    SELECT 
+        tag.TagName,
+        tag.Count AS TotalTagCount,
+        COALESCE(ct.PostFrequency, 0) AS CountInPosts
+    FROM 
+        Tags tag
+    LEFT JOIN 
+        RecursiveTagCount ct ON tag.TagName = ct.TagName
+),
+UsersBadges AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(CASE WHEN Badges.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN Badges.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN Badges.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.Id
+)
+
+SELECT 
+    p.PostID,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.OwnerName,
+    STRING_AGG(ct.TagName, ', ') AS AssociatedTags,
+    cr.CloseCount,
+    cr.CloseReasons,
+    ub.DisplayName AS UserName,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.PostID AND v.VoteTypeId = 2) AS UpvoteCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.PostID AND v.VoteTypeId = 3) AS DownvoteCount
+FROM 
+    PopularPosts p
+LEFT JOIN 
+    PostLinks pl ON p.PostID = pl.PostId
+LEFT JOIN 
+    Tags t ON pl.RelatedPostId = t.Id
+LEFT JOIN 
+    CloseReasonDetails cr ON p.PostID = cr.PostId
+LEFT JOIN 
+    UsersBadges ub ON p.OwnerUserId = ub.UserId
+GROUP BY 
+    p.PostID, p.Title, p.CreationDate, p.ViewCount, p.OwnerName, cr.CloseCount, cr.CloseReasons, ub.DisplayName, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+HAVING 
+    COUNT(DISTINCT t.TagName) > 0
+ORDER BY 
+    p.ViewCount DESC, p.CreationDate DESC
+LIMIT 50;

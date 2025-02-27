@@ -1,0 +1,55 @@
+
+WITH AddressCounts AS (
+    SELECT 
+        ca_city,
+        COUNT(*) AS city_count,
+        STRING_AGG(ca_street_name, ', ') AS street_names,
+        STRING_AGG(CASE WHEN ca_street_type IS NOT NULL THEN ca_street_type ELSE 'Unknown' END, ', ') AS street_types
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city
+),
+Demographics AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS demographic_count,
+        STRING_AGG(cd_marital_status, ', ') AS marital_statuses,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+Sales AS (
+    SELECT 
+        SUM(ws_net_paid) AS total_sales,
+        STRING_AGG(DISTINCT i_category, ', ') AS unique_categories,
+        STRING_AGG(DISTINCT ws_ship_mode_sk, ', ') AS ship_modes,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    JOIN 
+        item ON ws_item_sk = i_item_sk
+)
+SELECT 
+    ac.ca_city,
+    ac.city_count,
+    ac.street_names,
+    ac.street_types,
+    d.cd_gender,
+    d.demographic_count,
+    d.marital_statuses,
+    d.avg_purchase_estimate,
+    s.total_sales,
+    s.unique_categories,
+    s.ship_modes,
+    s.total_orders
+FROM 
+    AddressCounts ac
+JOIN 
+    Demographics d ON ac.city_count > 100
+CROSS JOIN 
+    Sales s
+ORDER BY 
+    ac.city_count DESC, d.demographic_count DESC;

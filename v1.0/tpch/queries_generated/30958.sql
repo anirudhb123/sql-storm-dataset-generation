@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.n_nationkey)
+),
+PartStats AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_availqty) AS total_available,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+NationStats AS (
+    SELECT n.n_nationkey, 
+           n.n_name, 
+           COUNT(DISTINCT c.c_custkey) AS customer_count, 
+           SUM(o.o_totalprice) AS total_revenue
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING SUM(o.o_totalprice) IS NOT NULL
+),
+RankedParts AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+)
+SELECT n.n_name, 
+       ps.p_name, 
+       ps.total_available, 
+       ps.supplier_count, 
+       ns.customer_count, 
+       ns.total_revenue,
+       COALESCE(ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY ns.total_revenue DESC), 0) AS revenue_rank
+FROM PartStats ps
+JOIN RankedParts rp ON ps.p_partkey = rp.p_partkey
+JOIN NationStats ns ON ns.customer_count > 0
+JOIN nation n ON n.n_nationkey = ns.n_nationkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+WHERE rp.price_rank < 5 AND (ns.total_revenue IS NOT NULL OR ns.total_revenue > 10000)
+ORDER BY n.n_name, ps.total_available DESC, ns.total_revenue DESC;

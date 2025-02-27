@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 100000.00
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 5
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+LineItemStats AS (
+    SELECT l.l_orderkey, COUNT(*) AS item_count, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+HighValueSuppliers AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 500000.00
+),
+FinalReport AS (
+    SELECT c.c_name, co.total_spent, l.total_revenue, 
+           COALESCE(sh.s_name, 'No Higher Supplier') AS supplier_name,
+           HOUR(CURRENT_TIMESTAMP) AS current_hour
+    FROM CustomerOrders co
+    LEFT JOIN LineItemStats l ON co.c_custkey = l.l_orderkey
+    LEFT JOIN SupplierHierarchy sh ON l.l_orderkey = sh.s_suppkey
+    WHERE co.total_spent IS NOT NULL AND (l.total_revenue IS NOT NULL OR l.total_revenue IS NULL)
+)
+SELECT DISTINCT p.p_name, p.p_brand, p.p_container, f.total_spent, f.total_revenue, 
+       f.supplier_name, f.current_hour
+FROM part p
+LEFT JOIN FinalReport f ON p.p_partkey = CAST(f.total_spent AS INTEGER)
+WHERE p.p_retailprice BETWEEN 10.00 AND 200.00
+  AND p.p_size IN (SELECT DISTINCT pt.p_size FROM part pt WHERE pt.p_container IS NOT NULL)
+ORDER BY f.total_spent DESC, f.total_revenue ASC;

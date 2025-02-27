@@ -1,0 +1,65 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+RecentPurchases AS (
+    SELECT 
+        ws.bill_customer_sk,
+        COUNT(ws.ws_order_number) AS purchase_count,
+        SUM(ws.ws_ext_sales_price) AS total_spent
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_date >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY 
+        ws.bill_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.ca_city,
+        cd.ca_state,
+        cd.ca_zip,
+        cd.ca_country,
+        rp.purchase_count,
+        rp.total_spent
+    FROM 
+        CustomerDetails cd
+    JOIN 
+        RecentPurchases rp ON cd.c_customer_sk = rp.bill_customer_sk
+    WHERE 
+        rp.total_spent > 1000
+)
+SELECT 
+    CONCAT(first_name, ' ', last_name) AS full_name,
+    purchase_count,
+    total_spent,
+    LEFT(ca_city, 10) AS short_city,
+    ca_state,
+    ca_zip,
+    UPPER(ca_country) AS country_uppercase
+FROM 
+    HighValueCustomers
+ORDER BY 
+    total_spent DESC
+LIMIT 100;

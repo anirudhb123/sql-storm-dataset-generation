@@ -1,0 +1,93 @@
+
+WITH RECURSIVE CTE_HIERARCHY AS (
+    SELECT 
+        s_store_sk,
+        s_store_id,
+        s_store_name,
+        s_number_employees,
+        s_floor_space,
+        CAST(s_store_name AS VARCHAR(255)) AS hierarchy_name,
+        1 AS hierarchy_level
+    FROM 
+        store
+    WHERE 
+        s_floor_space > 1000
+
+    UNION ALL
+
+    SELECT 
+        s_store_sk,
+        s_store_id,
+        s_store_name,
+        s_number_employees,
+        s_floor_space,
+        CONCAT(cte.hierarchy_name, ' > ', s_store_name) AS hierarchy_name,
+        hierarchy_level + 1
+    FROM 
+        store s
+    JOIN 
+        CTE_HIERARCHY cte ON cte.s_store_sk = s.s_store_sk
+    WHERE 
+        s_floor_space > 1000
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, 
+        cd.cd_purchase_estimate, cd.cd_credit_rating, hd.hd_income_band_sk
+),
+order_summary AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        SUM(ws.ws_quantity) AS total_items_sold
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_sold_date_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_purchase_estimate,
+    ci.cd_credit_rating,
+    dh.d_date AS sales_date,
+    os.total_profit,
+    os.total_items_sold,
+    sh.s_store_name,
+    ROW_NUMBER() OVER (PARTITION BY ci.c_customer_sk ORDER BY os.total_profit DESC) AS profit_rank
+FROM 
+    customer_info ci
+JOIN 
+    order_summary os ON ci.c_customer_sk = os.ws_sold_date_sk
+JOIN 
+    date_dim dh ON os.ws_sold_date_sk = dh.d_date_sk
+LEFT JOIN 
+    store s ON ci.c_customer_sk = s.s_store_sk
+LEFT JOIN 
+    CTE_HIERARCHY sh ON s.s_store_sk = sh.s_store_sk
+WHERE 
+    ci.cd_purchase_estimate BETWEEN 1000 AND 5000
+    AND ci.cd_gender IS NOT NULL
+ORDER BY 
+    total_profit DESC, 
+    sales_date ASC;

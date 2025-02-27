@@ -1,0 +1,66 @@
+WITH OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS average_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+PartRevenue AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_part_revenue
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name,
+    ns.n_name AS supplier_nation,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COALESCE(SUM(os.total_revenue), 0) AS total_revenue,
+    COUNT(DISTINCT pi.p_partkey) AS total_parts,
+    SUM(pi.total_part_revenue) AS aggregate_part_revenue,
+    SUM(si.total_available) AS total_available_qty,
+    AVG(si.average_cost) AS avg_supply_cost
+FROM 
+    region r
+JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    supplier s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierInfo si ON s.s_suppkey = si.s_suppkey
+LEFT JOIN 
+    OrderSummary os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = ns.n_nationkey))
+LEFT JOIN 
+    PartRevenue pi ON pi.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+GROUP BY 
+    r.r_name, ns.n_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

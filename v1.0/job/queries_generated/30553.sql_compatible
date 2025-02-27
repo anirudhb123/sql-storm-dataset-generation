@@ -1,0 +1,58 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    INNER JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    INNER JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+SELECT 
+    a.id AS actor_id,
+    a.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS number_of_movies,
+    AVG(ti.production_year) AS average_production_year,
+    STRING_AGG(DISTINCT ti.title, ', ') AS movie_titles,
+    MAX(ti.production_year) AS last_production_year,
+    SUM(CASE WHEN t.kind_id = (SELECT id FROM kind_type WHERE kind = 'series') THEN 1 ELSE 0 END) AS series_count,
+    COUNT(DISTINCT mw.keyword) AS total_keywords,
+    COUNT(DISTINCT cc.id) FILTER (WHERE cc.status_id IS NULL) AS current_projects
+FROM 
+    aka_name a
+LEFT JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN 
+    complete_cast cc ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    movie_info mi ON cc.movie_id = mi.movie_id
+LEFT JOIN 
+    aka_title ti ON ci.movie_id = ti.id
+LEFT JOIN 
+    movie_keyword mw ON ti.id = mw.movie_id
+LEFT JOIN 
+    movie_hierarchy mh ON ti.id = mh.movie_id
+WHERE 
+    a.name IS NOT NULL 
+    AND (mi.info_type_id IS NULL OR mi.info_type_id != (SELECT id FROM info_type WHERE info = 'box office'))
+GROUP BY 
+    a.id, a.name
+ORDER BY 
+    number_of_movies DESC, last_production_year DESC
+LIMIT 100;

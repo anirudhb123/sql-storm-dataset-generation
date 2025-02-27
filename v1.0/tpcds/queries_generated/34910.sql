@@ -1,0 +1,37 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT ws_item_sk, SUM(ws_quantity) AS total_quantity,
+           RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+                             AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY ws_item_sk
+),
+top_sales AS (
+    SELECT item.i_item_id, item.i_item_desc, sales_cte.total_quantity
+    FROM sales_cte
+    JOIN item ON sales_cte.ws_item_sk = item.i_item_sk
+    WHERE sales_cte.rank <= 10
+),
+customer_addresses AS (
+    SELECT ca_city, ca_state, COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_address
+    JOIN customer c ON ca_address_sk = c.c_current_addr_sk
+    GROUP BY ca_city, ca_state
+),
+sales_with_addresses AS (
+    SELECT t.i_item_id, t.i_item_desc, ta.ca_city, ta.ca_state, 
+           ta.customer_count, CAST(SUM(ws_ext_sales_price) AS DECIMAL(10, 2)) AS total_sales
+    FROM top_sales t
+    LEFT JOIN web_sales w ON t.i_item_sk = w.ws_item_sk
+    LEFT JOIN customer_addresses ta ON w.ws_bill_addr_sk = ta.ca_address_sk
+    GROUP BY t.i_item_id, t.i_item_desc, ta.ca_city, ta.ca_state, ta.customer_count
+)
+SELECT t.i_item_id, t.i_item_desc, 
+       COALESCE(SUM(s.total_sales), 0) AS total_sales, 
+       COALESCE(s.customer_count, 0) AS customer_count
+FROM top_sales t
+LEFT JOIN sales_with_addresses s ON t.i_item_id = s.i_item_id
+GROUP BY t.i_item_id, t.i_item_desc
+ORDER BY total_sales DESC
+LIMIT 10;

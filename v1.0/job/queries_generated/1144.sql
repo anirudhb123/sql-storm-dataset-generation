@@ -1,0 +1,46 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank,
+        COUNT(DISTINCT ci.person_id) AS total_cast
+    FROM
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.total_cast
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank = 1
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(STRING_AGG(DISTINCT ak.name, ', '), 'No Cast') AS actors,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = tm.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Award')) AS awards_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    complete_cast cc ON tm.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = tm.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+GROUP BY 
+    tm.movie_id, tm.title, tm.production_year
+HAVING 
+    tm.total_cast > 5
+ORDER BY 
+    tm.production_year DESC, tm.title;

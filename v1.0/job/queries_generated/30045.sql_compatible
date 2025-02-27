@@ -1,0 +1,61 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1 AS level
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    MH.title AS movie_title,
+    MH.production_year,
+    COALESCE(A.name, 'Unknown Actor') AS actor_name,
+    R.role AS actor_role,
+    MP.company_name AS production_company,
+    COUNT(DISTINCT MC.company_id) AS num_production_companies,
+    AVG(P.age) AS average_age_at_release,
+    STRING_AGG(DISTINCT K.keyword, ', ') AS keywords,
+    MAX(MH.level) AS hierarchy_level
+FROM 
+    MovieHierarchy MH
+LEFT JOIN 
+    cast_info C ON MH.movie_id = C.movie_id
+LEFT JOIN 
+    aka_name A ON C.person_id = A.person_id
+LEFT JOIN 
+    role_type R ON C.role_id = R.id
+LEFT JOIN 
+    movie_companies MC ON MH.movie_id = MC.movie_id
+LEFT JOIN 
+    company_name MP ON MC.company_id = MP.id
+LEFT JOIN 
+    movie_keyword MK ON MH.movie_id = MK.movie_id
+LEFT JOIN 
+    keyword K ON MK.keyword_id = K.id
+LEFT JOIN 
+    person_info P ON A.person_id = P.person_id AND P.info_type_id = (SELECT id FROM info_type WHERE info = 'age')
+WHERE 
+    MH.production_year >= 2000
+GROUP BY 
+    MH.title, MH.production_year, A.name, R.role, MP.company_name
+ORDER BY 
+    MH.production_year DESC, num_production_companies DESC, hierarchy_level;

@@ -1,0 +1,60 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 10 THEN 1 ELSE 0 END) AS ClosedPostCount,
+        SUM(CASE WHEN p.PostTypeId = 12 THEN 1 ELSE 0 END) AS DeletedPostCount,
+        AVG(v.VoteCount) AS AverageVotes,
+        COUNT(DISTINCT u.Id) AS ActiveUsers
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substr(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS VoteCount FROM Votes GROUP BY PostId) v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+RecentActivity AS (
+    SELECT 
+        p.Title,
+        p.CreationDate,
+        p.Tags,
+        u.DisplayName,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.LastActivityDate DESC) AS ActivityRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+)
+
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.ClosedPostCount,
+    ts.DeletedPostCount,
+    ts.AverageVotes,
+    ts.ActiveUsers,
+    ra.Title AS RecentPostTitle,
+    ra.CreationDate AS RecentPostCreationDate,
+    ra.DisplayName AS RecentPostOwner,
+    ra.ViewCount AS RecentPostViews,
+    ra.Score AS RecentPostScore
+FROM 
+    TagStatistics ts
+LEFT JOIN 
+    RecentActivity ra ON ts.TagName = ANY(string_to_array(ra.Tags, ','))
+WHERE 
+    ts.PostCount > 0
+ORDER BY 
+    ts.PostCount DESC, ts.AverageVotes DESC;

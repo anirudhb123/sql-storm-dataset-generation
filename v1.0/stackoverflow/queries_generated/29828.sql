@@ -1,0 +1,53 @@
+WITH TagStatistics AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Only considering questions
+    GROUP BY 
+        Tag
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(P.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(P.Score), 0) AS TotalScore,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        COUNT(DISTINCT CASE WHEN PH.UserId IS NOT NULL THEN PH.PostId END) AS EditsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1  -- Only questions
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+MostPopularTags AS (
+    SELECT 
+        Tag, 
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStatistics
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalViews,
+    U.TotalScore,
+    U.QuestionCount,
+    U.EditsCount,
+    MPT.Tag AS MostPopularTag,
+    MPT.PostCount AS MostPopularTagCount
+FROM 
+    UserActivity U
+LEFT JOIN 
+    MostPopularTags MPT ON U.QuestionCount > 0  -- Only users with questions
+WHERE 
+    U.TotalViews > 1000  -- Filter for users with significant activity
+ORDER BY 
+    U.TotalScore DESC, U.QuestionCount DESC;

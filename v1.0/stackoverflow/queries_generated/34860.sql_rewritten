@@ -1,0 +1,101 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ph.Text,
+        1 AS Level
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+
+    UNION ALL
+
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ph.Text,
+        rp.Level + 1
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        RecursivePostHistory rp ON ph.PostId = rp.PostId
+    WHERE 
+        ph.CreationDate < rp.CreationDate 
+),
+PostScore AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        DENSE_RANK() OVER (ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostAnalytics AS (
+    SELECT 
+        p.PostId,
+        pp.Title,
+        p.CreationDate,
+        ph.Comment AS LastComment,
+        ub.BadgeCount,
+        ub.BadgeNames,
+        ps.TotalVotes,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.Rank,
+        ROW_NUMBER() OVER (PARTITION BY p.PostId ORDER BY ph.CreationDate DESC) AS LatestAction
+    FROM 
+        RecursivePostHistory p
+    JOIN 
+        Posts pp ON p.PostId = pp.Id
+    LEFT JOIN 
+        UserBadges ub ON p.UserId = ub.UserId
+    LEFT JOIN 
+        PostScore ps ON p.PostId = ps.PostId
+    WHERE 
+        p.UserId IS NOT NULL
+)
+SELECT 
+    pa.Title,
+    pa.CreationDate,
+    pa.LastComment,
+    COALESCE(pa.BadgeCount, 0) AS BadgeCount,
+    pa.BadgeNames,
+    pa.TotalVotes,
+    pa.UpVotes,
+    pa.DownVotes,
+    pa.Rank
+FROM 
+    PostAnalytics pa
+WHERE 
+    pa.LatestAction = 1  
+ORDER BY 
+    pa.Rank ASC, 
+    pa.CreationDate DESC
+FETCH FIRST 100 ROWS ONLY;

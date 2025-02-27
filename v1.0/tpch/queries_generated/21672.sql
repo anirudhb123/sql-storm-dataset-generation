@@ -1,0 +1,48 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+TotalLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_quantity) AS total_quantity
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+FrequentCustomers AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING COUNT(o.o_orderkey) > 5
+),
+RegionNationDetails AS (
+    SELECT r.r_name, n.n_name, COUNT(*) AS nation_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_name, n.n_name
+)
+SELECT ps.ps_partkey, 
+       p.p_name, 
+       s.s_name, 
+       COALESCE(TotalItems.total_quantity, 0) AS total_line_items, 
+       CASE 
+           WHEN r.nd_nation_count IS NULL THEN 'Unknown Region' 
+           ELSE r.r_name 
+       END AS region_name,
+       CASE 
+           WHEN ranked.rank = 1 THEN 'Top Supplier'
+           ELSE 'Regular Supplier'
+       END AS supplier_category,
+       CONCAT(p.p_comment, ' - ', COALESCE(NULLIF(p.p_container, ''), 'No Container')) AS detailed_comment
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN RankedSuppliers ranked ON ps.ps_suppkey = ranked.s_suppkey
+LEFT JOIN TotalLineItems TotalItems ON ps.ps_partkey = TotalItems.l_orderkey
+LEFT JOIN RegionNationDetails r ON r.n_name = (SELECT n.n_name 
+                                                 FROM nation n 
+                                                 WHERE n.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey = ranked.s_suppkey))
+WHERE p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 1000.00)
+  AND (ranked.rank IS NULL OR ranked.rank <= 3)
+  AND (EXISTS (SELECT 1 FROM FrequentCustomers f WHERE f.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ps.ps_partkey)))
+ORDER BY ps.ps_partkey;

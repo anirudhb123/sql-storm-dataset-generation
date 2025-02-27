@@ -1,0 +1,85 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        0 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        r.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    pm.UpVotes,
+    pm.DownVotes,
+    pm.CommentCount,
+    u.DisplayName AS AuthorName,
+    u.Reputation AS AuthorReputation,
+    CASE 
+        WHEN r.Depth = 0 THEN 'Top-Level Post' 
+        ELSE CONCAT('Response to Post ID ', r.ParentId)
+    END AS PostType,
+    CASE 
+        WHEN pm.RecentPostRank <= 5 THEN 'Recent Contributor' 
+        ELSE 'Regular Contributor'
+    END AS ContributorStatus,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     JOIN LATERAL STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '>') AS tagname ON tagname = t.TagName
+     WHERE p.Id = t.ExcerptPostId) AS Tags,
+    ROW_NUMBER() OVER (ORDER BY pm.UpVotes - pm.DownVotes DESC) AS PostScore
+FROM 
+    RecursivePostHierarchy r
+LEFT JOIN 
+    PostMetrics pm ON r.PostId = pm.PostId
+LEFT JOIN 
+    Users u ON pm.OwnerUserId = u.Id
+WHERE 
+    u.Reputation > 100
+ORDER BY 
+    PostScore DESC, 
+    r.CreationDate DESC;

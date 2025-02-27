@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.Score,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS RankByScore
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+), 
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.DisplayName,
+        U.Location,
+        CASE 
+            WHEN U.Reputation >= 1000 THEN 'High'
+            WHEN U.Reputation >= 100 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationLevel
+    FROM 
+        Users U
+), 
+PostComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Comments C
+    GROUP BY 
+        C.PostId
+), 
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        PH.CreationDate,
+        PH.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS RecentEdit
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) -- Only edits to Title, Body, or Tags
+)
+
+SELECT 
+    UP.DisplayName,
+    UP.Location,
+    RP.Title,
+    RP.Score,
+    RP.CreationDate,
+    COALESCE(PC.CommentCount, 0) AS TotalComments,
+    U.ReputationLevel,
+    PH.RecentEdit
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    UserReputation U ON RP.OwnerUserId = U.UserId
+LEFT JOIN 
+    PostComments PC ON RP.PostId = PC.PostId
+LEFT JOIN 
+    RecentPostHistory PH ON RP.PostId = PH.PostId AND PH.RecentEdit = 1
+WHERE 
+    RP.RankByScore <= 5 -- Top 5 questions by score per user
+ORDER BY 
+    U.Reputation DESC, 
+    RP.Score DESC;
+

@@ -1,0 +1,57 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_order_number,
+        ws_quantity,
+        ws_net_profit,
+        ws_sales_price,
+        ws_ship_date_sk,
+        DENSE_RANK() OVER (PARTITION BY ws_order_number ORDER BY ws_ship_date_sk DESC) AS rank
+    FROM 
+        web_sales
+),
+ReturnsData AS (
+    SELECT 
+        wr_order_number,
+        SUM(wr_return_quantity) AS total_returns,
+        SUM(wr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_order_number
+),
+AggregatedSales AS (
+    SELECT 
+        sd.ws_order_number,
+        SUM(sd.ws_quantity) AS total_quantity,
+        SUM(sd.ws_net_profit) AS total_net_profit,
+        SUM(sd.ws_sales_price) AS total_sales_price,
+        COALESCE(rd.total_returns, 0) AS total_returns,
+        COALESCE(rd.total_return_amt, 0) AS total_return_amt
+    FROM 
+        SalesData sd
+    LEFT JOIN 
+        ReturnsData rd ON sd.ws_order_number = rd.wr_order_number
+    GROUP BY 
+        sd.ws_order_number
+)
+SELECT 
+    a.ws_order_number,
+    a.total_quantity,
+    a.total_net_profit,
+    a.total_sales_price,
+    a.total_returns,
+    a.total_return_amt,
+    CASE 
+        WHEN a.total_returns > 0 THEN 'Returned'
+        ELSE 'Not Returned'
+    END AS return_status
+FROM 
+    AggregatedSales a
+WHERE 
+    a.total_net_profit > (
+        SELECT AVG(total_net_profit) * 1.2 FROM AggregatedSales
+    )
+ORDER BY 
+    a.total_sales_price DESC
+FETCH FIRST 10 ROWS ONLY;

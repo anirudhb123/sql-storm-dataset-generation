@@ -1,0 +1,66 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2010
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.level,
+        COUNT(ci.id) AS cast_count,
+        AVG(movie_info.info::numeric) AS avg_rating
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        movie_info mi ON mh.movie_id = mi.movie_id
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        mh.movie_id, mh.title, mh.level
+),
+PopularMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.level,
+        rm.cast_count,
+        rm.avg_rating,
+        ROW_NUMBER() OVER (PARTITION BY rm.level ORDER BY rm.cast_count DESC) AS rn
+    FROM 
+        RankedMovies rm
+)
+SELECT 
+    pm.movie_id,
+    pm.title,
+    pm.level,
+    pm.cast_count,
+    pm.avg_rating
+FROM 
+    PopularMovies pm
+WHERE 
+    pm.rn <= 5
+ORDER BY 
+    pm.level, pm.cast_count DESC;
+
+This SQL query performs a complex benchmarking operation based on the provided `Join Order Benchmark` schema. It includes recursive CTEs to form a hierarchy of movies, ranks them based on the number of cast members and average movie ratings, and outputs the top five movies from each level.

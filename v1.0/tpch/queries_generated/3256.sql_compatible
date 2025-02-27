@@ -1,0 +1,69 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name
+    FROM 
+        SupplierStats s
+    WHERE 
+        s.total_available > 1000 AND s.avg_supply_cost < (SELECT AVG(avg_supply_cost) FROM SupplierStats)
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name
+    FROM 
+        CustomerOrders c
+    WHERE 
+        c.total_spent > 5000 AND c.order_count > 5
+)
+SELECT 
+    hvs.s_suppkey,
+    hvs.s_name,
+    hvc.c_custkey,
+    hvc.c_name,
+    COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) AS total_value
+FROM 
+    HighValueSuppliers hvs
+CROSS JOIN 
+    HighValueCustomers hvc
+LEFT JOIN 
+    lineitem li ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = hvc.c_custkey)
+WHERE 
+    li.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+GROUP BY 
+    hvs.s_suppkey, hvs.s_name, hvc.c_custkey, hvc.c_name
+ORDER BY 
+    total_value DESC
+LIMIT 10;

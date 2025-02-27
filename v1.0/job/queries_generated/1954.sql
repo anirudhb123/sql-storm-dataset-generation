@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+CoActors AS (
+    SELECT 
+        ci.movie_id,
+        GROUP_CONCAT(DISTINCT ak.name ORDER BY ak.name) AS co_actor_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title,
+        rm.production_year,
+        COALESCE(ca.co_actor_names, 'No Co-actors') AS co_actors,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CoActors ca ON rm.movie_id = ca.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year, ca.co_actor_names
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.co_actors,
+    md.keyword_count,
+    CASE 
+        WHEN md.keyword_count > 5 THEN 'Popular'
+        WHEN md.keyword_count BETWEEN 1 AND 5 THEN 'Moderate'
+        ELSE 'Rare'
+    END AS popularity,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        complete_cast cc 
+     WHERE 
+        cc.movie_id = md.movie_id 
+        AND cc.status_id IS NOT NULL) AS complete_cast_count
+FROM 
+    MovieDetails md
+WHERE 
+    md.keyword_count IS NOT NULL
+ORDER BY 
+    md.production_year DESC, md.title;

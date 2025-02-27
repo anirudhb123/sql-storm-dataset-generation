@@ -1,0 +1,55 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_net_profit,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_net_profit DESC) AS rank_profit
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 1000 AND 2000
+),
+top_customers AS (
+    SELECT 
+        cs_bill_customer_sk,
+        SUM(cs_net_profit) AS total_profit,
+        COUNT(DISTINCT cs_order_number) AS total_orders
+    FROM catalog_sales
+    WHERE cs_sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY cs_bill_customer_sk
+    HAVING SUM(cs_net_profit) > (SELECT AVG(total_profit) FROM (
+        SELECT 
+            SUM(cs_net_profit) AS total_profit
+        FROM catalog_sales
+        GROUP BY cs_bill_customer_sk
+    ) AS avg_profit)
+),
+store_info AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        SUM(ss_net_profit) AS store_profit,
+        COUNT(ss_ticket_number) AS total_sales
+    FROM store_sales
+    LEFT JOIN store ON store.s_store_sk = store_sales.ss_store_sk
+    GROUP BY s_store_sk, s_store_name
+    HAVING SUM(ss_net_profit) > 10000
+)
+SELECT 
+    ca.ca_address_id, 
+    ca.ca_city, 
+    ca.ca_state,
+    SUM(COALESCE(ts.total_profit, 0)) AS total_profit,
+    COUNT(DISTINCT CASE WHEN ts.total_orders > 1 THEN ts.cs_bill_customer_sk END) AS repeat_customers,
+    AVG(st.store_profit) AS average_store_profit
+FROM customer_address ca
+LEFT JOIN top_customers ts ON ca.ca_address_sk = ts.cs_bill_customer_sk
+LEFT JOIN store_info st ON st.s_store_sk IN (
+    SELECT sr_store_sk 
+    FROM store_returns 
+    WHERE sr_return_date_sk BETWEEN 1000 AND 2000
+)
+WHERE ca.ca_state IS NOT NULL
+GROUP BY ca.ca_address_id, ca.ca_city, ca.ca_state
+HAVING SUM(COALESCE(ts.total_profit, 0)) IS NOT NULL
+ORDER BY total_profit DESC;

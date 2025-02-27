@@ -1,0 +1,75 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CASE 
+            WHEN Reputation > 1000 THEN 'High'
+            WHEN Reputation BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationCategory,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostStats AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(C.PostId) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId = 10 THEN 1 ELSE 0 END) AS DeleteVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts P
+        LEFT JOIN Comments C ON P.Id = C.PostId
+        LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate > DATEADD(year, -1, '2024-10-01')
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        COUNT(*) AS HistoryCount,
+        STRING_AGG(DISTINCT PH.UserDisplayName, ', ') AS EditorNames
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId, PH.CreationDate
+),
+FinalRanking AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CommentCount,
+        PS.UpVotes,
+        PS.DownVotes,
+        PH.HistoryCount,
+        UR.ReputationCategory,
+        UR.ReputationRank
+    FROM 
+        PostStats PS
+        INNER JOIN PostHistoryAnalysis PH ON PS.PostId = PH.PostId
+        LEFT JOIN UserReputation UR ON PS.UserPostRank = UR.ReputationRank
+)
+SELECT 
+    FR.Title,
+    FR.CommentCount,
+    FR.UpVotes,
+    FR.DownVotes,
+    FR.HistoryCount,
+    COALESCE(FR.ReputationCategory, 'Unknown') AS ReputationCategory
+FROM 
+    FinalRanking FR
+WHERE 
+    FR.HistoryCount > 1
+    AND (FR.UpVotes - FR.DownVotes) > 0
+ORDER BY 
+    FR.HistoryCount DESC, FR.UpVotes DESC;

@@ -1,0 +1,43 @@
+
+WITH Recursive_Aka AS (
+    SELECT a.id AS aka_id, a.person_id, a.name, a.imdb_index, 
+           ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY a.name) AS rn
+    FROM aka_name a
+),
+Movie_Cast AS (
+    SELECT ci.id AS cast_id, ci.movie_id, ci.person_id, r.role, 
+           m.title AS movie_title, m.production_year
+    FROM cast_info ci
+    JOIN role_type r ON ci.role_id = r.id
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN aka_title m ON ci.movie_id = m.id
+),
+Keyword_Stats AS (
+    SELECT mk.movie_id, COUNT(DISTINCT k.keyword) AS unique_keyword_count
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+Movie_Info AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 
+           COUNT(DISTINCT mc.company_id) AS production_company_count,
+           k.unique_keyword_count
+    FROM aka_title m
+    LEFT JOIN movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN Keyword_Stats k ON m.id = k.movie_id
+    WHERE m.production_year > 2000
+    GROUP BY m.id, m.title, m.production_year, k.unique_keyword_count
+)
+SELECT 
+    aaka.name AS actor_name, 
+    m.title AS movie_title, 
+    m.production_year, 
+    mc.production_company_count, 
+    COALESCE(k.unique_keyword_count, 0) AS unique_keywords,
+    ROW_NUMBER() OVER (PARTITION BY aaka.person_id ORDER BY m.production_year DESC) AS rn
+FROM Movie_Cast c
+JOIN Recursive_Aka aaka ON c.person_id = aaka.person_id
+JOIN Movie_Info m ON c.movie_id = m.movie_id
+LEFT JOIN Keyword_Stats k ON m.movie_id = k.movie_id
+WHERE aaka.rn <= 5  
+ORDER BY aaka.person_id, m.production_year DESC;

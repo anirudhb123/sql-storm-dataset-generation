@@ -1,0 +1,77 @@
+
+WITH RecursiveUserBadgeCount AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.Score,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate > DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+),
+PostScoreDetails AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9)
+    GROUP BY 
+        P.Id, P.Title, P.Score
+),
+FinalOutput AS (
+    SELECT 
+        U.DisplayName,
+        R.BadgeCount,
+        R.UserId,
+        RP.Title,
+        RP.Score,
+        PD.CommentCount,
+        PD.TotalBounty
+    FROM 
+        RecursiveUserBadgeCount R
+    JOIN 
+        Users U ON R.UserId = U.Id
+    JOIN 
+        RecentPosts RP ON RP.OwnerUserId = U.Id
+    JOIN 
+        PostScoreDetails PD ON RP.PostId = PD.Id
+    WHERE 
+        R.BadgeCount > 0 AND RP.PostRank = 1
+    ORDER BY 
+        R.BadgeCount DESC, PD.Score DESC
+)
+SELECT 
+    F.DisplayName,
+    F.BadgeCount,
+    F.Title,
+    F.Score,
+    F.CommentCount,
+    F.TotalBounty
+FROM 
+    FinalOutput F
+WHERE 
+    F.Score > 10
+ORDER BY 
+    F.BadgeCount DESC, F.Score DESC
+LIMIT 10;

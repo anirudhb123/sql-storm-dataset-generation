@@ -1,0 +1,67 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(NULLIF(mt.season_nr, 0), NULL) AS season_number,
+        COALESCE(NULLIF(mt.episode_nr, 0), NULL) AS episode_number,
+        1 AS depth
+    FROM aka_title mt
+    WHERE mt.episode_of_id IS NULL
+
+    UNION ALL
+    
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        COALESCE(NULLIF(mt.season_nr, 0), NULL),
+        COALESCE(NULLIF(mt.episode_nr, 0), NULL),
+        depth + 1
+    FROM aka_title mt
+    JOIN movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+
+actor_roles AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT rt.role, ', ') AS roles,
+        AVG(CASE WHEN ci.note IS NULL THEN 0 ELSE 1 END) AS null_note_ratio
+    FROM cast_info ci
+    LEFT JOIN role_type rt ON ci.role_id = rt.id
+    GROUP BY ci.person_id
+),
+
+leading_actors AS (
+    SELECT 
+        ak.name,
+        ar.movie_count,
+        ar.roles,
+        ROW_NUMBER() OVER (PARTITION BY ar.movie_count ORDER BY ar.movie_count DESC) AS rank
+    FROM aka_name ak
+    JOIN actor_roles ar ON ak.person_id = ar.person_id
+    WHERE ar.movie_count > 0
+)
+
+SELECT 
+    mh.title,
+    mh.production_year,
+    la.name AS leading_actor,
+    la.movie_count AS leading_actor_movie_count,
+    la.roles AS leading_actor_roles,
+    mh.season_number,
+    mh.episode_number,
+    COUNT(DISTINCT mc.id) AS movie_company_count,
+    COALESCE(MAX(CASE WHEN mi.id IS NOT NULL THEN 1 ELSE 0 END), 0) AS has_info
+FROM movie_hierarchy mh
+LEFT JOIN movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN leading_actors la ON mh.movie_id IN (
+    SELECT ci.movie_id
+    FROM cast_info ci
+    WHERE ci.person_id IN (SELECT person_id FROM leading_actors WHERE rank <= 3)
+)
+LEFT JOIN movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Summary')
+GROUP BY mh.title, mh.production_year, la.name, la.movie_count, la.roles, mh.season_number, mh.episode_number
+ORDER BY mh.production_year DESC, la.movie_count DESC;

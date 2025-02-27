@@ -1,0 +1,92 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1 AS Level
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostsCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '365 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    ph.PostId,
+    ph.Title AS PostTitle,
+    ps.CreationDate AS PostCreationDate,
+    ps.Score AS PostScore,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    ps.RelatedPostsCount,
+    ph.Level
+FROM 
+    Users u
+JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+JOIN 
+    PostHierarchy ph ON u.Id = ph.PostId
+JOIN 
+    PostStatistics ps ON ph.PostId = ps.PostId
+WHERE 
+    ps.Score > 0 
+    AND ub.BadgeCount > 0 
+    AND ph.Level = 0
+ORDER BY 
+    u.Reputation DESC, 
+    ps.UpVotes DESC
+LIMIT 100;

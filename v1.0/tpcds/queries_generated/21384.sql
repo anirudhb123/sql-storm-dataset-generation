@@ -1,0 +1,80 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number, 
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rn,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ws.ws_quantity
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL AND 
+        ws.ws_net_profit > 0
+),
+high_profit_items AS (
+    SELECT 
+        item.i_item_id, 
+        item.i_item_desc, 
+        SUM(rank.ws_net_profit) AS total_profit,
+        AVG(rank.ws_net_profit) AS avg_profit,
+        COUNT(rank.ws_order_number) AS order_count
+    FROM 
+        ranked_sales rank
+    JOIN 
+        item ON rank.ws_item_sk = item.i_item_sk
+    WHERE 
+        rank.rn <= 5
+    GROUP BY 
+        item.i_item_id, item.i_item_desc
+),
+customer_summary AS (
+    SELECT 
+        customer.c_customer_id,
+        cd.cd_gender,
+        coalesce(cd.cd_marital_status, 'unknown') AS marital_status,
+        COUNT(DISTINCT h.hd_demo_sk) AS household_count
+    FROM 
+        customer customer
+    LEFT JOIN 
+        customer_demographics cd ON customer.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics h ON customer.c_current_hdemo_sk = h.hd_demo_sk
+    GROUP BY 
+        customer.c_customer_id, cd.cd_gender, cd.cd_marital_status
+),
+combined_summary AS (
+    SELECT 
+        c.c_customer_id,
+        c.marital_status,
+        SUM(hp.total_profit) AS total_customer_profit,
+        COUNT(DISTINCT hp.i_item_id) AS unique_items_purchased
+    FROM 
+        customer_summary c
+    LEFT JOIN 
+        high_profit_items hp ON c.c_customer_id = hp.i_item_id
+    GROUP BY 
+        c.c_customer_id, c.marital_status
+)
+SELECT DISTINCT
+    cs.c_customer_id,
+    cs.marital_status,
+    COALESCE(cs.total_customer_profit, 0) AS customer_profit,
+    CASE 
+        WHEN cs.unique_items_purchased > 10 THEN 'Frequent Buyer'
+        WHEN cs.unique_items_purchased BETWEEN 5 AND 10 THEN 'Occasional Buyer'
+        ELSE 'Rare Buyer' 
+    END AS purchasing_frec
+FROM 
+    combined_summary cs 
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM customer c 
+        WHERE c.c_customer_id = cs.c_customer_id AND (c.c_birth_year IS NULL OR c.c_birth_year < 1970)
+    )
+ORDER BY 
+    cs.customer_profit DESC, 
+    cs.c_customer_id
+LIMIT 100;

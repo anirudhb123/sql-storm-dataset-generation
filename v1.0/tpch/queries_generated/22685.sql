@@ -1,0 +1,42 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderstatus,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= (CURRENT_DATE - INTERVAL '1 year')
+),
+CustomerSummary AS (
+    SELECT c.c_custkey, c.c_name,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierPartDetails AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey,
+           p.p_retailprice * ps.ps_availqty AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           CASE 
+               WHEN o.o_totalprice > 1000 THEN 'High Value'
+               ELSE 'Regular'
+           END AS order_type
+    FROM orders o
+)
+SELECT cs.c_name, cs.total_spent, cs.order_count,
+       COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+       SUM(spd.total_supply_value) AS total_supply_value,
+       COUNT(DISTINCT ho.o_orderkey) AS count_high_value_orders
+FROM CustomerSummary cs
+LEFT JOIN SupplierPartDetails spd ON cs.total_spent > 5000
+LEFT JOIN supplier s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_availqty >= ALL (SELECT ps2.ps_availqty FROM partsupp ps2 WHERE ps2.ps_partkey = spd.p_partkey))
+LEFT JOIN HighValueOrders ho ON ho.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey AND o.o_totalprice > 1000)
+GROUP BY cs.c_name, cs.total_spent, cs.order_count, s.s_name
+HAVING COUNT(DISTINCT ho.o_orderkey) > 0 OR SUM(spd.total_supply_value) IS NULL
+ORDER BY cs.total_spent DESC, count_high_value_orders ASC;

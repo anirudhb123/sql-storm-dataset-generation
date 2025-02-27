@@ -1,0 +1,57 @@
+
+WITH RECURSIVE CustomerSales AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rn
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+AddressInfo AS (
+    SELECT 
+        ca.ca_address_sk, 
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip) AS full_address
+    FROM 
+        customer_address ca
+    WHERE 
+        ca.ca_country IS NOT NULL
+),
+ShippingModes AS (
+    SELECT 
+        sm.sm_ship_mode_id, 
+        sm.sm_type,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_ext_ship_cost) AS total_shipping_cost
+    FROM 
+        ship_mode sm
+    JOIN 
+        web_sales ws ON sm.sm_ship_mode_sk = ws.ws_ship_mode_sk
+    GROUP BY 
+        sm.sm_ship_mode_id, sm.sm_type
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.total_profit,
+    ai.full_address,
+    sm.order_count,
+    sm.total_shipping_cost
+FROM 
+    CustomerSales cs
+JOIN 
+    AddressInfo ai ON cs.c_customer_sk = ai.ca_address_sk
+LEFT JOIN 
+    ShippingModes sm ON cs.c_customer_sk = sm.sm_ship_mode_id
+WHERE 
+    cs.rn = 1
+    AND cs.total_profit > (SELECT AVG(total_profit) FROM CustomerSales)
+ORDER BY 
+    cs.total_profit DESC
+LIMIT 10;

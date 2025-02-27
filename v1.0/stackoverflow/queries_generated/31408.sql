@@ -1,0 +1,85 @@
+WITH RecursiveUserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM Users u
+    WHERE u.Reputation > 0
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        COALESCE(a.OwnerUserId, -1) AS AcceptedAnswerOwnerId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN v.VoteTypeId = 4 THEN 1 ELSE 0 END) AS OffensiveVotes
+    FROM Posts p
+    LEFT JOIN Posts a ON p.AcceptedAnswerId = a.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount, p.AcceptedAnswerId, p.OwnerUserId, p.PostTypeId
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RecentHistoryRank
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+),
+PostSummary AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(rus.Reputation, 0) AS OwnerReputation,
+        pd.CommentCount,
+        pd.Upvotes,
+        pd.Downvotes,
+        pd.OffensiveVotes,
+        COALESCE(rph.RecentHistoryRank, 0) AS RecentStatus
+    FROM PostDetails pd
+    JOIN Users u ON pd.OwnerUserId = u.Id
+    LEFT JOIN RecursiveUserStats rus ON u.Id = rus.UserId
+    LEFT JOIN RecentPostHistory rph ON pd.PostId = rph.PostId
+    WHERE pd.PostTypeId IN (1, 2) -- Considering Questions and Answers
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.OwnerDisplayName,
+    ps.OwnerReputation,
+    ps.CommentCount,
+    ps.Upvotes,
+    ps.Downvotes,
+    ps.OffensiveVotes,
+    (CASE 
+        WHEN ps.RecentStatus = 1 THEN 'Closed Most Recently' 
+        WHEN ps.RecentStatus = 2 THEN 'Reopened Most Recently' 
+        ELSE 'No Recent Closure/Reopening' 
+    END) AS RecentStatus
+FROM PostSummary ps
+WHERE ps.OwnerReputation > (
+    SELECT AVG(Reputation) FROM Users
+)
+ORDER BY ps.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY;

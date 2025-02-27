@@ -1,0 +1,57 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_profit,
+        1 AS level
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_month_seq = 5)
+    GROUP BY 
+        ss_store_sk
+
+    UNION ALL
+
+    SELECT 
+        ss.store_sk,
+        s.total_profit * 0.95 AS total_profit,
+        level + 1
+    FROM 
+        SalesCTE s
+    JOIN 
+        store ss ON s.ss_store_sk = ss.s_store_sk
+    WHERE 
+        level < 5
+)
+
+SELECT 
+    w.w_warehouse_id,
+    ca.ca_city,
+    SUM(COALESCE(ws.ws_net_profit, 0)) AS total_web_profit,
+    AVG(COALESCE(ss.ss_net_profit, 0)) AS avg_store_profit,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+    CASE 
+        WHEN SUM(ws.ws_net_profit) IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sales_status
+FROM 
+    warehouse w
+LEFT JOIN 
+    store s ON w.w_warehouse_sk = s.s_warehouse_sk
+LEFT JOIN 
+    web_sales ws ON ws.ws_ship_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+LEFT JOIN 
+    store_sales ss ON ss.ss_store_sk = s.s_store_sk
+LEFT JOIN 
+    customer c ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    customer_address ca ON ca.ca_address_sk = c.c_current_addr_sk
+WHERE 
+    w.w_warehouse_name LIKE '%Central%'
+    AND NOT EXISTS (SELECT 1 FROM store_returns sr WHERE sr.sr_store_sk = s.s_store_sk AND sr.sr_return_quantity > 0)
+GROUP BY 
+    w.w_warehouse_id, ca.ca_city
+ORDER BY 
+    total_web_profit DESC
+LIMIT 10;

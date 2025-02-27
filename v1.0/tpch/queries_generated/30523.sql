@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 500
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE s.s_acctbal > sh.s_acctbal * 1.05
+),
+AverageOrderValue AS (
+    SELECT o_custkey, AVG(o_totalprice) AS avg_order_value
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    GROUP BY o_custkey
+),
+PartSupplierStats AS (
+    SELECT ps.partkey, COUNT(DISTINCT ps.suppkey) AS supplier_count,
+           SUM(ps.ps_supplycost) AS total_supplycost,
+           MAX(ps.ps_availqty) AS max_avail_qty
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > 100
+    GROUP BY ps.partkey
+)
+SELECT c.c_name,
+       COALESCE(a.avg_order_value, 0) AS average_order_value,
+       COALESCE(sh.s_name, 'No Supplier') AS supplier_name,
+       p.p_name,
+       p.p_retailprice,
+       ps.supplier_count,
+       ps.total_supplycost,
+       ps.max_avail_qty
+FROM customer c
+LEFT JOIN AverageOrderValue a ON c.c_custkey = a.o_custkey
+LEFT JOIN SupplierHierarchy sh ON sh.level = 1
+JOIN PartSupplierStats ps ON ps.partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_availqty IS NOT NULL)
+JOIN part p ON p.p_partkey = ps.partkey
+WHERE c.c_acctbal > 300
+ORDER BY average_order_value DESC, c.c_name ASC;

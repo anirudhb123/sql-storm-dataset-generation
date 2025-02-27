@@ -1,0 +1,83 @@
+WITH RECURSIVE UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        b.Name AS BadgeName,
+        b.Class,
+        b.Date
+    FROM 
+        Users u
+    JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        b.Class = 1  -- Gold badges
+
+    UNION ALL
+
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        b.Name AS BadgeName,
+        b.Class,
+        b.Date
+    FROM 
+        Users u
+    JOIN 
+        Badges b ON u.Id = b.UserId
+    JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    WHERE 
+        b.Class IN (2, 3)  -- Silver or Bronze badges
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY 
+        p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ps.TotalPosts, 0) AS TotalPosts,
+        COALESCE(ps.TotalQuestions, 0) AS TotalQuestions,
+        COALESCE(ps.TotalAnswers, 0) AS TotalAnswers,
+        COALESCE(ps.AverageScore, 0) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        PostStats ps ON u.Id = ps.OwnerUserId
+),
+FilteredUsers AS (
+    SELECT 
+        ur.DisplayName,
+        ur.Reputation,
+        ub.BadgeName
+    FROM 
+        UserReputation ur
+    LEFT JOIN 
+        UserBadges ub ON ur.Id = ub.UserId
+    WHERE 
+        ur.Reputation > 1000  -- Users with reputation greater than 1000
+)
+SELECT 
+    fu.DisplayName,
+    fu.Reputation,
+    STRING_AGG(fu.BadgeName, ', ') AS Badges
+FROM 
+    FilteredUsers fu
+GROUP BY 
+    fu.DisplayName,
+    fu.Reputation
+ORDER BY 
+    fu.Reputation DESC
+OPTION (MAXRECURSION 0);

@@ -1,0 +1,43 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+aggregated_parts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier_hierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+region_sales AS (
+    SELECT SUM(o.o_totalprice) AS total_sales, n.n_regionkey
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_regionkey
+),
+ranked_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_container IS NOT NULL AND p.p_size > 10
+)
+SELECT r.r_name, 
+       SUM(rs.total_sales) AS total_region_sales, 
+       rp.p_name AS top_part_name, 
+       ap.total_supply_cost
+FROM region r
+LEFT JOIN region_sales rs ON r.r_regionkey = rs.n_regionkey
+LEFT JOIN ranked_parts rp ON rp.price_rank = 1
+LEFT JOIN aggregated_parts ap ON ap.ps_partkey = rp.p_partkey
+WHERE r.r_name IS NOT NULL
+GROUP BY r.r_name, rp.p_name, ap.total_supply_cost
+HAVING SUM(rs.total_sales) > COALESCE((SELECT AVG(total_sales) FROM region_sales), 0);

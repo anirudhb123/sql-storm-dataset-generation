@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Views,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        ph.UserId,
+        ph.Comment
+    FROM 
+        PostHistory ph 
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    u.DisplayName,
+    rp.Title,
+    rp.Views,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    COALESCE(cp.CloseDate, 'Not Closed') AS CloseDate,
+    CASE 
+        WHEN cp.CloseDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    DATEDIFF(CURRENT_TIMESTAMP, rp.CreationDate) AS DaysSinceCreated
+FROM 
+    RankedPosts rp
+INNER JOIN 
+    Users u ON rp.Id = u.Id
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.PostId
+WHERE 
+    rp.ViewCount > 100
+    AND rp.PostRank = 1
+    AND (cp.CloseDate IS NULL OR cp.CloseDate > DATEADD(DAY, -30, CURRENT_TIMESTAMP))
+ORDER BY 
+    rp.UpVotes DESC
+LIMIT 10;

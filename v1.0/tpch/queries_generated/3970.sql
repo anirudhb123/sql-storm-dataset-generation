@@ -1,0 +1,36 @@
+WITH SupplierSummary AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(ps.ps_partkey) AS total_parts,
+           SUM(ps.ps_availqty) AS total_available_qty,
+           SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_custkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate > '2022-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_custkey
+),
+CustomerRanks AS (
+    SELECT c.c_custkey, c.c_name, RANK() OVER (ORDER BY SUM(od.total_order_value) DESC) AS customer_rank
+    FROM customer c
+    JOIN OrderDetails od ON c.c_custkey = od.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(od.total_order_value) > 1000
+),
+RegionSupplier AS (
+    SELECT n.n_regionkey, r.r_name, s.s_name, ss.total_parts, ss.total_available_qty
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN SupplierSummary ss ON s.s_suppkey = ss.s_suppkey
+)
+SELECT rs.r_name, rs.s_name, rs.total_parts, rs.total_available_qty,
+       cr.c_name, cr.customer_rank
+FROM RegionSupplier rs
+FULL OUTER JOIN CustomerRanks cr ON rs.total_available_qty > 100
+WHERE rs.total_parts IS NOT NULL OR cr.customer_rank IS NOT NULL
+ORDER BY rs.r_name, cr.customer_rank;

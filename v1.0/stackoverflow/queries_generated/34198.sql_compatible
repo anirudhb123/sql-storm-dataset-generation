@@ -1,0 +1,89 @@
+
+WITH RECURSIVE UserHierarchy AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        WebsiteUrl,
+        Location,
+        CAST(DisplayName AS VARCHAR(1000)) AS HierarchyPath,
+        0 AS Level
+    FROM 
+        Users
+    WHERE 
+        Reputation > 1000  
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.WebsiteUrl,
+        u.Location,
+        CONCAT(uh.HierarchyPath, ' -> ', u.DisplayName) AS HierarchyPath,
+        uh.Level + 1
+    FROM 
+        Users u
+    INNER JOIN 
+        UserHierarchy uh ON u.Id = uh.Id + 1  
+    WHERE 
+        u.Reputation > 1000
+),
+TopUsers AS (
+    SELECT
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        NULLIF(u.WebsiteUrl, '') AS WebsiteUrl,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.WebsiteUrl
+    HAVING 
+        SUM(v.BountyAmount) > 0
+),
+RecentPostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalAnswers,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS TotalQuestions,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    uh.HierarchyPath,
+    u.Reputation,
+    u.CreationDate,
+    u.WebsiteUrl,
+    ps.TotalPosts,
+    ps.TotalAnswers,
+    ps.TotalQuestions,
+    ps.LastPostDate,
+    tb.TotalBounty
+FROM 
+    Users u
+LEFT JOIN 
+    RecentPostStats ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    TopUsers tb ON u.Id = tb.Id
+LEFT JOIN 
+    PostHistory ph ON ph.UserId = u.Id AND ph.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 year'  
+WHERE 
+    (tb.TotalBounty IS NOT NULL OR u.Reputation > 10000)  
+ORDER BY 
+    u.Reputation DESC,
+    ps.TotalPosts DESC
+LIMIT 10;

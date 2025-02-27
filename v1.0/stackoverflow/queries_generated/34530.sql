@@ -1,0 +1,88 @@
+WITH RecursivePostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(P.AnswerCount, 0) AS TotalAnswers,
+        COALESCE(P.CommentCount, 0) AS TotalComments,
+        COALESCE(P.FavoriteCount, 0) AS TotalFavorites,
+        P.Score,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank 
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.LastAccessDate,
+        P.TotalAnswers,
+        P.TotalComments,
+        P.TotalFavorites,
+        U.BadgeCount,
+        U.BadgeNames
+    FROM 
+        Users U
+    JOIN 
+        UserBadges UB ON U.Id = UB.UserId
+    JOIN 
+        RecursivePostStats P ON P.UserId = U.Id
+    WHERE 
+        U.Reputation > 1000
+    ORDER BY 
+        P.TotalAnswers DESC, U.Reputation DESC
+    LIMIT 10
+),
+PostHistoryMetrics AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT PHT.Name, ', ') AS EditTypes
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PHT.Id = PH.PostHistoryTypeId
+    WHERE 
+        PH.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    PU.DisplayName,
+    PU.Reputation,
+    PU.LastAccessDate,
+    COALESCE(PHM.EditCount, 0) AS TotalEdits,
+    COALESCE(PHM.LastEditDate, 'No edits') AS LastEditDate,
+    COALESCE(PHM.EditTypes, 'None') AS EditHistory,
+    PS.PostId,
+    PS.Title,
+    PS.Score,
+    PS.TotalAnswers,
+    PS.TotalComments,
+    PS.TotalFavorites
+FROM 
+    TopUsers PU
+LEFT JOIN 
+    RecursivePostStats PS ON PU.Id = PS.OwnerUserId
+LEFT JOIN 
+    PostHistoryMetrics PHM ON PS.PostId = PHM.PostId
+WHERE 
+    PS.UserPostRank <= 5 OR PS.TotalAnswers >= 2 -- filter to show top posts or highly active users
+ORDER BY 
+    PU.Reputation DESC, PS.Score DESC;

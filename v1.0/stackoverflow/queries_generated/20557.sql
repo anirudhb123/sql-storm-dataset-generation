@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS PostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) OVER (PARTITION BY p.Id, v.VoteTypeId) AS UniqueVoteTypes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    AND 
+        p.Score IS NOT NULL
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        CASE 
+            WHEN rp.CommentCount > 0 THEN 'Contains Comments'
+            ELSE 'No Comments'
+        END AS CommentStatus,
+        CASE 
+            WHEN rp.PostRank <= 10 THEN 'Top 10 Posts'
+            ELSE 'Other Posts'
+        END AS PostCategory,
+        COALESCE(
+            ARRAY_AGG(DISTINCT t.TagName) FILTER (WHERE t.TagName IS NOT NULL),
+            '{}'
+        ) AS Tags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UNNEST(SPLIT_PART(rp.Title, ' ', 1)) AS Part ON TRUE
+    LEFT JOIN 
+        Posts p ON p.Id = rp.PostId
+    LEFT JOIN 
+        Tags t ON t.WikiPostId = p.Id
+    WHERE 
+        Part IS NOT NULL
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.CommentCount, rp.PostRank
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.CommentCount,
+    fp.CommentStatus,
+    fp.PostCategory,
+    STRING_AGG(f.Tags, ', ') AS CombinedTags
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    FilteredPosts f ON f.PostCategory = fp.PostCategory AND f.PostId <> fp.PostId
+GROUP BY 
+    fp.PostId, fp.Title, fp.CreationDate, fp.ViewCount, fp.Score, fp.CommentCount, fp.CommentStatus, fp.PostCategory
+HAVING 
+    COUNT(DISTINCT f.PostId) > 0
+ORDER BY 
+    fp.CreationDate DESC, fp.Score DESC
+LIMIT 50;

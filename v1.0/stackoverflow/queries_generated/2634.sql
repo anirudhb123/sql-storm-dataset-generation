@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(SUM(b.Class), 0) AS TotalBadgeClass,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostActivity AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        pt.Name AS PostHistoryType,
+        COUNT(*) AS ActionCount
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    GROUP BY 
+        ph.PostId, ph.UserId, ph.CreationDate, ph.Comment, pt.Name
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    rp.Title,
+    rp.Score,
+    rp.CommentCount,
+    COALESCE(pa.ActionCount, 0) AS TotalPostActions,
+    MAX(pa.CreationDate) AS LastActivityDate,
+    CASE 
+        WHEN rp.PostRank = 1 THEN 'Latest'
+        ELSE 'Older'
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation up ON rp.OwnerUserId = up.UserId
+LEFT JOIN 
+    PostActivity pa ON rp.PostId = pa.PostId
+WHERE 
+    up.Reputation > 1000
+ORDER BY 
+    up.Reputation DESC, 
+    rp.Score DESC
+LIMIT 100;

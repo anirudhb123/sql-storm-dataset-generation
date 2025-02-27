@@ -1,0 +1,77 @@
+
+WITH RECURSIVE CTE_Sales AS (
+    SELECT 
+        ss_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk, ss_sold_date_sk
+    HAVING 
+        SUM(ss_net_paid) > 1000
+),
+CTE_Customer AS (
+    SELECT 
+        c_customer_sk,
+        COUNT(DISTINCT ss_ticket_number) AS transaction_count,
+        SUM(ss_net_paid_inc_tax) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c_customer_sk
+    HAVING 
+        total_spent > 10000
+)
+SELECT 
+    ca_state,
+    COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+    SUM(t.total_sales) AS total_sales_amount,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+    SUM(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_customers,
+    SUM(CASE WHEN cd.cd_marital_status = 'M' AND cd.cd_dep_count IS NULL THEN 1 ELSE 0 END) AS unmarried_males
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    CTE_Customer cc ON c.c_customer_sk = cc.c_customer_sk
+JOIN 
+    CTE_Sales t ON c.c_current_addr_sk = t.ss_store_sk
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    ca.ca_city IS NOT NULL
+    AND ca.ca_state IN ('CA', 'NY', 'TX')
+GROUP BY 
+    ca_state
+ORDER BY 
+    total_sales_amount DESC
+FETCH FIRST 10 ROWS ONLY
+UNION ALL
+SELECT 
+    'Other' AS ca_state,
+    COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+    SUM(t.total_sales) AS total_sales_amount,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+    SUM(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_customers,
+    SUM(CASE WHEN cd.cd_marital_status = 'M' AND cd.cd_dep_count IS NULL THEN 1 ELSE 0 END) AS unmarried_males
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    CTE_Customer cc ON c.c_customer_sk = cc.c_customer_sk
+JOIN 
+    CTE_Sales t ON c.c_current_addr_sk = t.ss_store_sk
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    ca.ca_city IS NULL
+GROUP BY 
+    'Other'
+ORDER BY 
+    total_sales_amount DESC;

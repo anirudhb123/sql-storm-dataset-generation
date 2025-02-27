@@ -1,0 +1,62 @@
+
+WITH SupplyDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        c.c_mktsegment,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderstatus IN ('O', 'F')
+),
+ProductSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        l.l_shipmode = 'AIR' AND l.l_shipdate < DATE '1998-10-01'
+    GROUP BY 
+        l.l_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(sd.total_avail_qty, 0) AS total_avail_qty,
+    COALESCE(sd.avg_supply_cost, 0) AS avg_supply_cost,
+    ps.total_sales,
+    ps.order_count,
+    c.c_mktsegment,
+    c.c_name
+FROM 
+    part p
+LEFT JOIN 
+    SupplyDetails sd ON p.p_partkey = sd.ps_partkey
+LEFT JOIN 
+    ProductSales ps ON p.p_partkey = ps.l_partkey
+LEFT JOIN 
+    CustomerOrders c ON c.o_orderkey IN (
+        SELECT o_orderkey FROM orders WHERE o_orderstatus = 'O'
+    )
+WHERE 
+    p.p_retailprice > (SELECT AVG(p_retailprice) FROM part) 
+    AND (ps.total_sales IS NOT NULL OR sd.avg_supply_cost < 50)
+ORDER BY 
+    ps.total_sales DESC, sd.avg_supply_cost ASC, p.p_name;

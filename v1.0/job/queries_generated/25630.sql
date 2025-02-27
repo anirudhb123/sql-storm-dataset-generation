@@ -1,0 +1,72 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword AS keyword,
+        c.name AS company_name
+    FROM 
+        aka_title AS t
+    JOIN 
+        movie_keyword AS mk ON t.id = mk.movie_id
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies AS mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name AS c ON mc.company_id = c.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+),
+ActorDetails AS (
+    SELECT 
+        p.id AS person_id,
+        a.name AS actor_name,
+        p.gender,
+        GROUP_CONCAT(DISTINCT m.movie_title ORDER BY m.production_year) AS movies
+    FROM 
+        aka_name AS a
+    JOIN 
+        cast_info AS ci ON a.person_id = ci.person_id
+    JOIN 
+        MovieDetails AS m ON ci.movie_id = m.movie_id
+    JOIN 
+        name AS p ON a.person_id = p.imdb_id
+    GROUP BY 
+        p.id, a.name, p.gender
+),
+RoleStatistics AS (
+    SELECT 
+        rt.role AS actor_role,
+        COUNT(DISTINCT ad.person_id) AS number_of_actors,
+        GROUP_CONCAT(DISTINCT ad.actor_name ORDER BY ad.actor_name) AS actors_list
+    FROM 
+        role_type AS rt
+    LEFT JOIN 
+        cast_info AS ci ON rt.id = ci.role_id
+    LEFT JOIN 
+        ActorDetails AS ad ON ci.person_id = ad.person_id
+    GROUP BY 
+        rt.role
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.keyword,
+    ad.actor_name,
+    ad.gender,
+    rs.actor_role,
+    rs.number_of_actors,
+    rs.actors_list
+FROM 
+    MovieDetails AS md
+JOIN 
+    cast_info AS ci ON md.movie_id = ci.movie_id
+JOIN 
+    ActorDetails AS ad ON ci.person_id = ad.person_id
+JOIN 
+    RoleStatistics AS rs ON ci.person_role_id = rs.actor_role
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_title, 
+    ad.actor_name;

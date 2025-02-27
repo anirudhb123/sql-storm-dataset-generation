@@ -1,0 +1,52 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(p.Score) AS AvgScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.Reputation > 100
+    GROUP BY u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        TRIM(unnest(string_to_array(p.Tags, '>'))) AS TagName,
+        COUNT(*) AS TagCount
+    FROM Posts p
+    WHERE p.PostTypeId = 1
+    GROUP BY TagName
+    HAVING COUNT(*) > 10
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        TotalPosts, 
+        Questions, 
+        Answers, 
+        AvgScore, 
+        TotalViews,
+        ROW_NUMBER() OVER (ORDER BY TotalPosts DESC, AvgScore DESC) AS Ranking
+    FROM UserPostStats
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.Questions,
+    tu.Answers,
+    tu.AvgScore,
+    pt.TagName AS PopularTag,
+    pt.TagCount
+FROM TopUsers tu
+LEFT JOIN PopularTags pt ON tu.Questions > 5 AND pt.TagName IN (
+    SELECT DISTINCT TRIM(unnest(string_to_array(p.Tags, '>')))
+    FROM Posts p
+    WHERE p.OwnerUserId = tu.UserId
+)
+WHERE tu.Ranking <= 10
+ORDER BY tu.Ranking, pt.TagCount DESC
+FETCH FIRST 15 ROWS ONLY;

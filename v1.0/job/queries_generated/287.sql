@@ -1,0 +1,61 @@
+WITH ranked_titles AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS aka_name,
+        t.title AS movie_title,
+        t.production_year,
+        RANK() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS title_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+),
+movies_with_keywords AS (
+    SELECT 
+        m.title AS movie_title,
+        m.production_year,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+companies_with_types AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(*) AS total_movies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+)
+SELECT 
+    rt.aka_name,
+    rt.movie_title,
+    rt.production_year,
+    rtk.keywords,
+    COALESCE(ct.company_name, 'Independent') AS production_company,
+    COALESCE(ct.company_type, 'Unknown') AS company_type,
+    rt.title_rank
+FROM 
+    ranked_titles rt
+LEFT JOIN 
+    movies_with_keywords rtk ON rt.movie_title = rtk.movie_title AND rt.production_year = rtk.production_year
+LEFT JOIN 
+    companies_with_types ct ON rt.movie_title = (SELECT title FROM title WHERE id = rt.movie_id) 
+WHERE 
+    rt.title_rank <= 3
+ORDER BY 
+    rt.aka_name, rt.production_year DESC;

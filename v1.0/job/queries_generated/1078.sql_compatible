@@ -1,0 +1,57 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+CompanyMovieCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS total_companies
+    FROM 
+        movie_companies mc
+    INNER JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+CastRoles AS (
+    SELECT 
+        p.person_id,
+        r.role,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    JOIN 
+        person_info p ON ci.person_id = p.person_id
+    GROUP BY 
+        p.person_id, r.role
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.total_cast,
+    COALESCE(cm.total_companies, 0) AS total_companies,
+    (SELECT STRING_AGG(DISTINCT CONCAT(cast_roles.role, ' (', cast_roles.role_count, ')'), ', ')
+     FROM CastRoles cast_roles 
+     WHERE cast_roles.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = rm.id)) AS roles_summary
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CompanyMovieCounts cm ON rm.id = cm.movie_id
+WHERE 
+    rm.rank_by_cast <= 5 
+    AND rm.total_cast > 0
+ORDER BY 
+    rm.production_year DESC, 
+    rm.total_cast DESC;

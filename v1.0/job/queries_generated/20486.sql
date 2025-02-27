@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.movie_id,
+        t.title,
+        t.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    JOIN 
+        title t ON mt.movie_id = t.id
+    WHERE 
+        t.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+    WHERE 
+        mh.depth < 5 -- Limit depth for performance
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mh.production_year AS movie_year,
+    COUNT(DISTINCT cc.id) AS cast_count,
+    AVG(CASE 
+          WHEN ti.info IS NULL THEN 0 
+          ELSE LENGTH(ti.info) 
+        END) AS avg_info_length,
+    STRING_AGG(DISTINCT COALESCE(kw.keyword, 'No Keyword'), ', ') AS keywords_list,
+    SUM(CASE 
+        WHEN pi.info LIKE '%Oscar%' THEN 1 
+        ELSE 0 
+    END) AS oscar_wins
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info ti ON mh.movie_id = ti.movie_id
+LEFT JOIN 
+    person_info pi ON ak.person_id = pi.person_id 
+WHERE 
+    ak.name IS NOT NULL 
+    AND mh.production_year < 2000
+GROUP BY 
+    ak.name, mt.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT cc.id) > 2 
+ORDER BY 
+    oscar_wins DESC, avg_info_length DESC
+LIMIT 10
+OFFSET 0;
+
+This query constructs a recursive common table expression (CTE) `movie_hierarchy` to explore relationships among movies linked through the `movie_link` table, filtering for proper production years. It combines various SQL constructs, such as aggregations, string functions, and conditional calculations. The result set is ordered by the number of Oscar wins and the length of associated information strings, demonstrating advanced SQL capabilities while exploring complex relationships.

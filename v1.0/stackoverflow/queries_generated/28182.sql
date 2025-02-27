@@ -1,0 +1,68 @@
+WITH TagCounts AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Considering only questions
+    GROUP BY 
+        Tag
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews,
+        SUM(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1 -- Only consider questions
+    GROUP BY 
+        u.Id
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagCounts
+),
+ActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionsAsked,
+        TotalViews,
+        TotalScore,
+        ROW_NUMBER() OVER (ORDER BY QuestionsAsked DESC) AS UserRank
+    FROM 
+        UserActivity
+)
+
+SELECT 
+    ut.UserId,
+    ut.DisplayName,
+    tt.Tag,
+    tt.PostCount,
+    ut.QuestionsAsked,
+    ut.TotalViews,
+    ut.TotalScore
+FROM 
+    ActiveUsers ut
+JOIN 
+    (SELECT 
+        tt.Tag,
+        tt.PostCount,
+        tt.Rank
+     FROM 
+        TopTags tt
+     WHERE 
+        tt.Rank <= 5) AS tt ON ut.UserRank <= 10 -- Joining top tags with top 10 active users
+ORDER BY 
+    tt.PostCount DESC, ut.TotalViews DESC, ut.TotalScore DESC;

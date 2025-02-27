@@ -1,0 +1,66 @@
+WITH ProcessedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        REPLACE(LOWER(p.Title), ' ', '') AS TitleNormalized,
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'), 1) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.Body IS NOT NULL
+), 
+PostStats AS (
+    SELECT
+        pp.PostId,
+        pp.Title,
+        pp.ViewCount,
+        pp.TagCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        ProcessedPosts pp
+    LEFT JOIN 
+        Comments c ON c.PostId = pp.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = pp.OwnerUserId
+    GROUP BY 
+        pp.PostId, pp.Title, pp.ViewCount, pp.TagCount
+),
+FilteredPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.TagCount,
+        ps.CommentCount,
+        ps.GoldBadges,
+        ps.SilverBadges,
+        ps.BronzeBadges,
+        (ps.ViewCount * 0.3 + ps.TagCount * 0.2 + ps.CommentCount * 0.5 + 
+         ps.GoldBadges * 3 + ps.SilverBadges * 2 + ps.BronzeBadges * 1 ) AS BenchScore
+    FROM 
+        PostStats ps
+    WHERE 
+        ps.TagCount > 0
+)
+SELECT 
+    PostId,
+    Title,
+    ViewCount,
+    TagCount,
+    CommentCount,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    BenchScore
+FROM 
+    FilteredPosts
+ORDER BY 
+    BenchScore DESC
+LIMIT 10;

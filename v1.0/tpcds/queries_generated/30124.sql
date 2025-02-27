@@ -1,0 +1,55 @@
+
+WITH RECURSIVE income_ranges AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound
+    FROM income_band
+    WHERE ib_lower_bound IS NOT NULL
+
+    UNION ALL
+
+    SELECT ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+    FROM income_band ib
+    JOIN income_ranges ir ON ib.ib_lower_bound > ir.ib_upper_bound
+),
+
+customer_counts AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(c.c_customer_sk) AS total_customers,
+        COUNT(DISTINCT c.c_customer_sk) FILTER (WHERE c.c_current_cdemo_sk IS NOT NULL) AS active_customers
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender
+),
+
+sales_data AS (
+    SELECT 
+        s.ss_sold_date_sk,
+        SUM(s.ss_net_profit) AS total_net_profit,
+        SUM(s.ss_quantity) AS total_quantity,
+        DATE_DIM.d_year
+    FROM store_sales s
+    JOIN date_dim DATE_DIM ON s.ss_sold_date_sk = DATE_DIM.d_date_sk
+    GROUP BY s.ss_sold_date_sk, DATE_DIM.d_year
+),
+
+top_stores AS (
+    SELECT 
+        st.s_store_id,
+        SUM(st.ss_net_profit) AS total_net_profit
+    FROM store_sales st
+    GROUP BY st.s_store_id
+    ORDER BY total_net_profit DESC
+    LIMIT 10
+)
+
+SELECT 
+    ia.ib_income_band_sk,
+    SUM(cc.total_customers) AS gender_totals,
+    AVG(sd.total_net_profit) AS avg_net_profit,
+    ARRAY_AGG(ts.s_store_id) AS top_stores
+FROM income_ranges ia
+LEFT JOIN customer_counts cc ON cc.total_customers BETWEEN ia.ib_lower_bound AND ia.ib_upper_bound
+LEFT JOIN sales_data sd ON sd.total_quantity > 1000
+LEFT JOIN top_stores ts ON TRUE
+GROUP BY ia.ib_income_band_sk
+ORDER BY ia.ib_income_band_sk;

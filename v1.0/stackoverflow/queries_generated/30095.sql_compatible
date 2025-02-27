@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.Views,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Views DESC) AS RankByViews,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.Views, p.CreationDate, p.PostTypeId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.Views,
+        rp.CreationDate,
+        rp.RankByViews,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByViews <= 5
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Views) AS TotalViews,
+        SUM(p.Score) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ue.UserId,
+    ue.DisplayName,
+    ue.TotalPosts,
+    ue.TotalViews,
+    ue.TotalScore,
+    ue.GoldBadges,
+    ue.SilverBadges,
+    ue.BronzeBadges,
+    tp.Title AS TopPostTitle,
+    tp.Views AS TopPostViews,
+    tp.Score AS TopPostScore,
+    tp.CommentCount AS TopPostComments
+FROM 
+    UserEngagement ue
+LEFT JOIN 
+    TopPosts tp ON tp.UserId = ue.UserId
+WHERE 
+    ue.TotalPosts > 0
+ORDER BY 
+    ue.TotalScore DESC,
+    ue.TotalViews DESC
+LIMIT 10 OFFSET 0;

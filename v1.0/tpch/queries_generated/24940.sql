@@ -1,0 +1,62 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal IS NOT NULL 
+      AND s.s_acctbal > 1000
+), 
+TotalOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F' 
+    GROUP BY o.o_orderkey
+), 
+SupplierDetails AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        COALESCE(MAX(to.total_price), 0) AS max_total_price,
+        SUM(CASE WHEN to.total_price > 5000 THEN 1 ELSE 0 END) AS high_value_orders
+    FROM RankedSuppliers rs
+    LEFT JOIN TotalOrders to ON rs.s_suppkey = to.o_orderkey
+    GROUP BY rs.s_suppkey, rs.s_name
+)
+SELECT 
+    sd.s_name,
+    sd.max_total_price,
+    sd.high_value_orders,
+    CASE 
+        WHEN sd.high_value_orders > 10 THEN 'High Performer' 
+        ELSE 'Regular Supplier' 
+    END AS performance_category
+FROM SupplierDetails sd
+WHERE sd.max_total_price IS NOT NULL 
+  AND sd.s_name NOT LIKE '%test%'
+ORDER BY sd.max_total_price DESC 
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;
+
+SELECT 
+    p.p_name,
+    SUM(l.l_quantity) AS total_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+WHERE p.p_retailprice BETWEEN 50.00 AND 200.00
+GROUP BY p.p_name
+HAVING SUM(l.l_quantity) > 100
+UNION
+SELECT 
+    NULL AS p_name,
+    NULL AS total_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM orders o
+WHERE o.o_orderstatus = 'O';

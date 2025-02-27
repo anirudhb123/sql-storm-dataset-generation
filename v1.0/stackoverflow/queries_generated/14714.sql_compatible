@@ -1,0 +1,65 @@
+
+WITH PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(A.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,  
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount 
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Posts A ON P.Id = A.AcceptedAnswerId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, A.AcceptedAnswerId
+),
+UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteGiven,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteGiven
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.AcceptedAnswerId,
+    PS.CommentCount,
+    PS.UpVoteCount,
+    PS.DownVoteCount,
+    US.UserId,
+    US.DisplayName AS AuthorDisplayName,
+    US.PostCount,
+    US.BadgeCount,
+    US.UpVoteGiven,
+    US.DownVoteGiven
+FROM 
+    PostStatistics PS
+LEFT JOIN 
+    UserStatistics US ON PS.AcceptedAnswerId = US.UserId
+ORDER BY 
+    PS.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,50 @@
+
+WITH RECURSIVE region_summary AS (
+    SELECT r_regionkey,
+           r_name,
+           COUNT(n.nationkey) AS nation_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_regionkey, r.r_name
+),
+customer_summary AS (
+    SELECT c.nationkey AS c_nationkey,
+           COUNT(DISTINCT o.orderkey) AS order_count,
+           SUM(c.acctbal) AS total_acctbal,
+           AVG(c.acctbal) AS average_acctbal
+    FROM customer c
+    LEFT JOIN orders o ON c.custkey = o.custkey
+    GROUP BY c.nationkey
+),
+part_supp_summary AS (
+    SELECT ps.partkey AS ps_partkey,
+           SUM(ps.supplycost * ps.availqty) AS total_supplycost,
+           MAX(ps.supplycost) AS max_supplycost
+    FROM partsupp ps
+    GROUP BY ps.partkey
+),
+ranked_orders AS (
+    SELECT o.orderkey,
+           o.totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.orderstatus ORDER BY o.totalprice DESC) AS rank
+    FROM orders o
+)
+SELECT r.r_name,
+       cs.order_count,
+       ps.total_supplycost,
+       COALESCE(cs.total_acctbal, 0) AS total_acctbal,
+       RANK() OVER (ORDER BY COALESCE(cs.total_acctbal, 0) DESC) AS acctbal_rank,
+       CASE 
+           WHEN ps.total_supplycost IS NULL THEN 'Unknown'
+           ELSE CASE 
+               WHEN ps.total_supplycost < 1000 THEN 'Low'
+               WHEN ps.total_supplycost BETWEEN 1000 AND 5000 THEN 'Medium'
+               ELSE 'High'
+           END
+       END AS cost_category
+FROM region_summary r
+LEFT JOIN customer_summary cs ON r.r_regionkey = cs.c_nationkey
+LEFT JOIN part_supp_summary ps ON r.r_regionkey = ps.ps_partkey
+FULL OUTER JOIN ranked_orders ro ON cs.order_count > 5 OR (cs.order_count IS NULL AND ro.rank <= 10)
+WHERE r.r_name LIKE 'A%' OR r.r_name IS NULL
+ORDER BY total_acctbal DESC NULLS LAST, r.r_name;

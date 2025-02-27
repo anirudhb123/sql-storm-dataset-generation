@@ -1,0 +1,39 @@
+
+WITH RECURSIVE part_supplier_cte AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_availqty) AS total_avail_qty,
+           SUM(ps.ps_supplycost) AS total_supply_cost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+), aggregated_orders AS (
+    SELECT o.o_orderkey, o.o_orderstatus,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+           COUNT(DISTINCT l.l_linenumber) AS line_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('F', 'O') 
+    AND l.l_discount >= 0.1
+    GROUP BY o.o_orderkey, o.o_orderstatus
+), top_part_supplier AS (
+    SELECT p.p_partkey, p.p_name, ps.total_avail_qty, ps.total_supply_cost 
+    FROM part p
+    LEFT JOIN part_supplier_cte ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.rank = 1
+    ORDER BY ps.total_supply_cost DESC
+    LIMIT 10
+)
+SELECT r.r_name, n.n_name, COUNT(DISTINCT c.c_custkey) AS total_customers,
+       AVG(COALESCE(o.net_revenue, 0)) AS avg_revenue,
+       STRING_AGG(DISTINCT ps.p_name, ', ') AS part_names
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN top_part_supplier ps ON s.s_suppkey = ps.ps_suppkey
+WHERE c.c_acctbal IS NOT NULL 
+  AND s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = n.n_nationkey)
+GROUP BY r.r_name, n.n_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_customers DESC, avg_revenue ASC NULLS LAST;

@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        PostId
+),
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+AggregateData AS (
+    SELECT 
+        up.SummaryUser,
+        up.TotalPosts,
+        COALESCE(b.GoldBadges, 0) AS GoldBadges,
+        COALESCE(b.SilverBadges, 0) AS SilverBadges,
+        COALESCE(b.BronzeBadges, 0) AS BronzeBadges,
+        SUM(vs.UpVotes) AS TotalUpVotes,
+        SUM(vs.DownVotes) AS TotalDownVotes
+    FROM 
+        (SELECT 
+            u.Id AS SummaryUser,
+            COUNT(p.Id) AS TotalPosts
+        FROM 
+            Users u
+        LEFT JOIN 
+            Posts p ON u.Id = p.OwnerUserId
+        GROUP BY 
+            u.Id) up
+    LEFT JOIN 
+        UserBadgeCounts b ON up.SummaryUser = b.UserId
+    LEFT JOIN 
+        PostVoteSummary vs ON vs.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = up.SummaryUser)
+    GROUP BY 
+        up.SummaryUser, up.TotalPosts, b.GoldBadges, b.SilverBadges, b.BronzeBadges
+)
+SELECT 
+    a.SummaryUser,
+    a.TotalPosts,
+    a.GoldBadges,
+    a.SilverBadges,
+    a.BronzeBadges,
+    a.TotalUpVotes,
+    a.TotalDownVotes,
+    100.0 * a.TotalUpVotes / NULLIF(a.TotalPosts, 0) AS UpVotesPerPost,
+    CASE 
+        WHEN a.TotalDownVotes > 0 THEN 'Negative Feedback'
+        WHEN a.TotalUpVotes > 0 THEN 'Positive Feedback'
+        ELSE 'No Feedback' 
+    END AS FeedbackStatus
+FROM 
+    AggregateData a
+WHERE 
+    a.TotalPosts > 10
+ORDER BY 
+    a.TotalPosts DESC, a.TotalUpVotes DESC;

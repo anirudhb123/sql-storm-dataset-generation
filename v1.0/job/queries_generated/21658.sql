@@ -1,0 +1,86 @@
+WITH RecursiveMovieCast AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS cast_order
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.nr_order IS NOT NULL
+), 
+DistinctKeywords AS (
+    SELECT DISTINCT 
+        mk.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+), 
+ProductionYears AS (
+    SELECT 
+        a.id AS aka_id,
+        t.production_year,
+        t.title AS movie_title,
+        CASE WHEN t.production_year IS NULL THEN 'Unknown Year' ELSE CAST(t.production_year AS TEXT) END AS year_display
+    FROM 
+        aka_title a
+    JOIN 
+        title t ON a.movie_id = t.id
+), 
+CompanyAggregates AS (
+    SELECT 
+        mc.movie_id, 
+        COUNT(DISTINCT c.name) AS num_production_companies,
+        STRING_AGG(DISTINCT c.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+), 
+FullCastInformation AS (
+    SELECT 
+        p.name AS actor_name,
+        r.role AS role_name,
+        rm.cast_order,
+        pm.movie_title,
+        pm.year_display,
+        ca.num_production_companies,
+        ca.company_names,
+        ARRAY_AGG(DISTINCT dk.keyword) AS keywords
+    FROM 
+        RecursiveMovieCast rm
+    JOIN 
+        aka_name p ON rm.person_id = p.person_id
+    JOIN 
+        role_type r ON rm.role_id = r.id
+    JOIN 
+        ProductionYears pm ON rm.movie_id = pm.aka_id
+    LEFT JOIN 
+        CompanyAggregates ca ON rm.movie_id = ca.movie_id
+    LEFT JOIN 
+        DistinctKeywords dk ON rm.movie_id = dk.movie_id
+    GROUP BY 
+        p.name, r.role, rm.cast_order, pm.movie_title, pm.year_display, ca.num_production_companies, ca.company_names
+    ORDER BY 
+        pm.production_year DESC, rm.movie_id, rm.cast_order
+)
+SELECT 
+    actor_name,
+    role_name,
+    movie_title,
+    year_display,
+    num_production_companies,
+    company_names,
+    CASE 
+        WHEN keywords IS NULL THEN 'No Keywords' 
+        ELSE ARRAY_TO_STRING(keywords, ', ') 
+    END AS aggregated_keywords
+FROM 
+    FullCastInformation
+WHERE 
+    year_display != 'Unknown Year'
+ORDER BY 
+    year_display, actor_name;

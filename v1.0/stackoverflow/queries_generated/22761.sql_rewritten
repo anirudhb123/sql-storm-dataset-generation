@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) 
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.ViewCount
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        SUM(b.Class) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+), BadPostHistory AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEdited,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 10) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id,
+    p.Title,
+    p.CreationDate,
+    ur.UserId,
+    ur.Reputation,
+    ur.TotalBadges,
+    r.ViewRank,
+    r.ViewCount,
+    COALESCE(bph.EditCount, 0) AS EditCount,
+    COALESCE(bph.LastEdited, 'No Edits') AS LastEdited,
+    COALESCE(bph.HistoryTypes, 'No History') AS HistoryTypes
+FROM 
+    RankedPosts r
+JOIN 
+    Posts p ON r.PostId = p.Id
+JOIN 
+    UserReputation ur ON p.OwnerUserId = ur.UserId
+LEFT JOIN 
+    BadPostHistory bph ON p.Id = bph.PostId
+WHERE 
+    r.ViewRank <= 5 
+ORDER BY 
+    ur.Reputation DESC, r.ViewCount DESC
+LIMIT 20;

@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, title AS t
+WHERE cn.id = mc.company_id AND mc.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND mc.movie_id = mk.movie_id
+AND mk.id > 2137472 AND t.md5sum IN ('23c0d3069a74588f100bac165188b6d5', '2ff4aa8928d3a744f65f2c201d20eda5', '3990306bda3b46edf70c8a8a81fcf034', '4250670f2750ae0241fb1bf244c6a7cb', '71df5c6b03d4023aefaa27814bbb23cb', '93d6309d8cd5d257a093261efe40039b', 'a8196a95c84f6b2ed48cbebc62c7d55d', 'd8b1500c5819565c463b023e72e12cbd', 'dbd210d0a272b7df4bbb60f98db74d7c', 'e9fc9bff4b2faceb3a467ff26f565ded');

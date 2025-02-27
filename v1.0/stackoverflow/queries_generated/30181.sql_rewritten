@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        U.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score > 0 
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 
+    GROUP BY 
+        b.UserId
+),
+ReputationStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(UB.BadgeCount, 0) AS GoldBadges,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserBadges UB ON U.Id = UB.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    R.PostId,
+    R.Title,
+    R.CreationDate,
+    R.Score,
+    R.ViewCount,
+    R.Reputation,
+    CASE 
+        WHEN U.GoldBadges > 0 THEN 'Has Gold Badge'
+        ELSE 'No Gold Badge'
+    END AS BadgeStatus,
+    CASE 
+        WHEN R.Score > (SELECT AVG(Score) FROM Posts) THEN 'Above Average Score'
+        ELSE 'Below Average Score'
+    END AS ScoreComparison,
+    R.CreationDate,
+    R.Reputation
+FROM 
+    RankedPosts R
+LEFT JOIN 
+    ReputationStats U ON R.OwnerUserId = U.UserId
+WHERE R.Rank = 1 
+ORDER BY 
+    R.Score DESC, 
+    R.ViewCount DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

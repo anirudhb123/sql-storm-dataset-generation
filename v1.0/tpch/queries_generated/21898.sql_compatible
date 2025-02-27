@@ -1,0 +1,68 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS SupplierRank,
+        p.p_partkey,
+        p.p_retailprice
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+), 
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSpent
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N'
+        AND c.c_acctbal > 1000
+    GROUP BY 
+        o.o_orderkey, c.c_custkey, c.c_name
+), 
+PartAggregates AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS TotalAvailable
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+
+SELECT 
+    c.c_name, 
+    COALESCE(RCT.s_name, 'No Supplier Available') AS SupplierName,
+    COALESCE(pa.TotalAvailable, 0) AS TotalAvailable,
+    CASE 
+        WHEN o.TotalSpent IS NULL THEN 'No Orders'
+        ELSE CAST(o.TotalSpent AS CHAR)
+    END AS TotalSpent,
+    CASE 
+        WHEN pa.TotalAvailable > 0 THEN 'In Stock'
+        ELSE 'Out of Stock'
+    END AS StockStatus
+FROM 
+    CustomerOrders o
+FULL OUTER JOIN RankedSuppliers RCT ON RCT.SupplierRank = 1
+FULL OUTER JOIN PartAggregates pa ON RCT.p_partkey = pa.ps_partkey
+LEFT JOIN customer c ON o.c_custkey = c.c_custkey
+WHERE 
+    (c.c_name IS NOT NULL AND c.c_name <> '') 
+    OR (RCT.s_name IS NOT NULL AND RCT.s_name <> '')
+ORDER BY 
+    TotalSpent DESC NULLS LAST;

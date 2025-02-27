@@ -1,0 +1,103 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        0 AS depth
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        mh.depth + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+    WHERE 
+        mh.depth < 5
+),
+
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        ak.person_id,
+        COUNT(ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT kt.keyword, ', ') AS keywords
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        movie_keyword mk ON ci.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kt ON mk.keyword_id = kt.id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.name, ak.person_id
+),
+
+company_info AS (
+    SELECT 
+        cn.name AS company_name,
+        COUNT(mc.movie_id) AS total_movies,
+        MAX(ct.kind) AS company_type
+    FROM 
+        company_name cn
+    JOIN 
+        movie_companies mc ON cn.id = mc.company_id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        cn.country_code IS NOT NULL
+    GROUP BY 
+        cn.name
+),
+
+top_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.depth DESC) AS rn
+    FROM 
+        movie_hierarchy mh
+)
+
+SELECT 
+    t.title AS movie_title,
+    t.production_year,
+    ai.actor_name,
+    ai.movie_count AS actor_movie_count,
+    ci.company_name,
+    ci.total_movies AS produced_movies,
+    ci.company_type,
+    tk.keywords AS associated_keywords
+FROM 
+    top_movies t
+LEFT JOIN 
+    actor_info ai ON t.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = ai.person_id)
+LEFT JOIN 
+    movie_companies mc ON t.movie_id = mc.movie_id
+LEFT JOIN 
+    company_info ci ON mc.company_id = ci.company_name
+LEFT JOIN 
+    (SELECT movie_id, STRING_AGG(DISTINCT keyword, ', ') AS keywords
+     FROM movie_keyword
+     JOIN keyword ON movie_keyword.keyword_id = keyword.id
+     GROUP BY movie_id) tk ON t.movie_id = tk.movie_id
+WHERE 
+    t.rn <= 5
+    AND (ci.total_movies IS NOT NULL OR ai.movie_count > 1 OR tk.keywords IS NOT NULL)
+ORDER BY 
+    t.production_year DESC, 
+    ai.movie_count DESC;

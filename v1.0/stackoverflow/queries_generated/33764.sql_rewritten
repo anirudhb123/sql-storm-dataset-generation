@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        CreationDate, 
+        OwnerUserId, 
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        p.CreationDate, 
+        p.OwnerUserId, 
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(AVG(v.BountyAmount), 0) AS AvgBounty,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        RANK() OVER (ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId, 
+        ps.Title, 
+        ps.ViewCount, 
+        ps.Score, 
+        ps.AvgBounty, 
+        ps.CommentCount
+    FROM 
+        PostStats ps
+    WHERE 
+        ps.PostRank <= 10
+),
+UsersWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        b.Date >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.ViewCount,
+    p.Score,
+    p.AvgBounty,
+    u.DisplayName AS Owner,
+    COALESCE(ub.BadgeCount, 0) AS OwnerBadgeCount,
+    CASE 
+        WHEN p.Score > 10 THEN 'High Score'
+        WHEN p.Score BETWEEN 5 AND 10 THEN 'Moderate Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    (SELECT COUNT(*) 
+     FROM Comments c 
+     WHERE c.PostId = p.Id) AS TotalComments
+FROM 
+    TopPosts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UsersWithBadges ub ON u.Id = ub.UserId
+ORDER BY 
+    p.ViewCount DESC, p.Score DESC;

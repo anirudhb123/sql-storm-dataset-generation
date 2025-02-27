@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_name AS nation_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+TopSuppliers AS (
+    SELECT 
+        nation_name, 
+        s_suppkey, 
+        s_name, 
+        total_supply_cost
+    FROM 
+        RankedSuppliers
+    WHERE 
+        rank <= 5
+),
+OrderTotals AS (
+    SELECT 
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_custkey
+)
+SELECT 
+    ts.nation_name,
+    ts.s_name,
+    ot.total_order_value,
+    COUNT(DISTINCT ot.o_custkey) AS customer_count
+FROM 
+    TopSuppliers ts
+JOIN 
+    OrderTotals ot ON ts.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT l.l_partkey 
+            FROM lineitem l 
+            WHERE l.l_shipdate >= DATE '1997-01-01'
+        )
+    )
+GROUP BY 
+    ts.nation_name, 
+    ts.s_name, 
+    ot.total_order_value
+ORDER BY 
+    ts.nation_name, 
+    ot.total_order_value DESC;

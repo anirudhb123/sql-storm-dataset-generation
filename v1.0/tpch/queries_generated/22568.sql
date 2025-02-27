@@ -1,0 +1,67 @@
+WITH RecursivePartSuppliers AS (
+    SELECT ps_partkey, 
+           ps_suppkey, 
+           ps_availqty, 
+           ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) AS rn
+    FROM partsupp
+    WHERE ps_availqty > 0
+),
+FilteredCustomers AS (
+    SELECT c_custkey, 
+           CASE 
+               WHEN c_acctbal IS NULL THEN 'No Balance' 
+               ELSE CAST(c_acctbal AS varchar) 
+           END AS account_status, 
+           n.n_name AS nation_name 
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE n.n_name IS NOT NULL AND c_name LIKE '%Inc%'
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_custkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue 
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATEADD(month, -6, GETDATE())
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS total_cost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OuterJoinResults AS (
+    SELECT rc.ps_partkey, 
+           rc.ps_suppkey, 
+           rc.ps_availqty, 
+           rc.ps_supplycost, 
+           fc.account_status, 
+           ro.total_revenue,
+           sd.total_cost
+    FROM RecursivePartSuppliers rc
+    LEFT JOIN FilteredCustomers fc ON rc.ps_suppkey = fc.c_custkey
+    FULL OUTER JOIN RecentOrders ro ON fc.c_custkey = ro.o_custkey 
+    LEFT JOIN SupplierDetails sd ON rc.ps_suppkey = sd.s_suppkey
+)
+
+SELECT o.ps_partkey, 
+       o.ps_suppkey,
+       o.ps_availqty, 
+       o.ps_supplycost,
+       o.account_status,
+       COALESCE(o.total_revenue, 0) AS total_revenue,
+       o.total_cost,
+       CASE 
+           WHEN o.total_revenue > o.total_cost THEN 'Profitable'
+           ELSE 'Not Profitable'
+       END AS profitability_status
+FROM OuterJoinResults o
+WHERE (o.ps_availqty IS NOT NULL OR o.total_revenue > 1000)
+AND (o.account_status <> 'No Balance' OR o.total_cost < 5000)
+ORDER BY o.total_revenue DESC, o.ps_supplycost ASC
+FETCH FIRST 100 ROWS ONLY;

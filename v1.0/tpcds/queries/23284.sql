@@ -1,0 +1,75 @@
+
+WITH customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        SUM(ws.ws_quantity) AS total_quantity,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_ext_sales_price) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS gender_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_marital_status IN ('M', 'S')
+        AND c.c_birth_month IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+item_average AS (
+    SELECT 
+        i.i_item_sk,
+        AVG(i.i_current_price) AS avg_price
+    FROM 
+        item i
+    WHERE 
+        i.i_rec_start_date <= '2002-10-01'
+        AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date >= '2002-10-01')
+    GROUP BY 
+        i.i_item_sk
+),
+warehouse_performance AS (
+    SELECT 
+        w.w_warehouse_sk,
+        (SUM(inv.inv_quantity_on_hand) * AVG(ws.ws_quantity)) AS performance_index
+    FROM 
+        warehouse w
+    JOIN 
+        inventory inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    LEFT JOIN 
+        web_sales ws ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_sk
+    HAVING 
+        COUNT(DISTINCT ws.ws_order_number) > 10
+)
+SELECT 
+    cs.full_name,
+    cs.cd_gender,
+    cs.total_quantity,
+    cs.order_count,
+    cs.total_spent,
+    ia.i_item_sk,
+    ia.avg_price,
+    wp.performance_index,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'Caution: No Purchases'
+        WHEN cs.total_spent > (SELECT AVG(total_spent) FROM customer_summary) THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_category
+FROM 
+    customer_summary cs
+JOIN 
+    item_average ia ON cs.order_count > 5
+LEFT JOIN 
+    warehouse_performance wp ON wp.w_warehouse_sk = (SELECT w.w_warehouse_sk FROM warehouse w ORDER BY w.w_warehouse_sq_ft DESC LIMIT 1)
+WHERE 
+    cs.gender_rank <= 10
+ORDER BY 
+    cs.total_spent DESC;

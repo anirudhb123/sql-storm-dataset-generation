@@ -1,0 +1,77 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        hd.hd_income_band_sk,
+        COUNT(DISTINCT sr.ticket_number) AS total_returns,
+        SUM(sr.return_amt_inc_tax) AS total_return_amount,
+        AVG(sr.return_quantity) AS avg_return_quantity
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, 
+        cd.cd_marital_status, cd.cd_education_status, cd.cd_purchase_estimate, 
+        hd.hd_income_band_sk
+),
+SalesSummary AS (
+    SELECT 
+        cs.cs_bill_customer_sk,
+        SUM(cs.cs_net_profit) AS total_net_profit,
+        COUNT(cs.cs_order_number) AS total_orders,
+        SUM(cs.cs_quantity) AS total_quantity_sold
+    FROM 
+        catalog_sales cs
+    GROUP BY 
+        cs.cs_bill_customer_sk
+),
+ShippingModes AS (
+    SELECT 
+        ws.ws_ship_mode_sk,
+        sm.sm_carrier,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY 
+        ws.ws_ship_mode_sk, sm.sm_carrier
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_education_status,
+    ci.cd_purchase_estimate,
+    ci.hd_income_band_sk,
+    ci.total_returns,
+    ci.total_return_amount,
+    ci.avg_return_quantity,
+    ss.total_net_profit,
+    ss.total_orders,
+    ss.total_quantity_sold,
+    sm.order_count AS total_shipping_mode_orders
+FROM 
+    CustomerInfo ci
+LEFT JOIN 
+    SalesSummary ss ON ci.c_customer_id = ss.cs_bill_customer_sk
+LEFT JOIN 
+    ShippingModes sm ON sm.ws_ship_mode_sk = (SELECT MIN(ws_ship_mode_sk) FROM web_sales ws WHERE ws.ws_bill_customer_sk = ci.c_customer_sk)
+WHERE 
+    ci.total_returns > 0
+ORDER BY 
+    ci.total_return_amount DESC
+LIMIT 100;

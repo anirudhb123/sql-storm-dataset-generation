@@ -1,0 +1,56 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+), ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) as order_rank
+    FROM orders o
+), part_supplier_details AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) as avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+), customers_with_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('F', 'P')
+), aggregate_supplier AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT n.n_name AS nation_name,
+       COUNT(DISTINCT c.c_custkey) AS number_of_customers,
+       COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       SUM(o.o_totalprice) AS total_revenue,
+       AVG(r.total_available) AS avg_available_parts,
+       MAX(as.total_supply_cost) AS max_supply_cost
+FROM nation_hierarchy n
+LEFT JOIN customers_with_orders c ON n.n_nationkey = c.c_custkey
+LEFT JOIN ranked_orders o ON c.o_orderkey = o.o_orderkey
+LEFT JOIN part_supplier_details r ON r.p_partkey IN (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_availqty IS NOT NULL
+)
+LEFT JOIN aggregate_supplier as ON as.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_supplycost > (
+        SELECT AVG(ps2.ps_supplycost) 
+        FROM partsupp ps2
+        WHERE ps2.ps_availqty IS NOT NULL
+    )
+)
+GROUP BY n.n_name
+HAVING total_orders > 0 AND number_of_customers > 0
+ORDER BY total_revenue DESC
+LIMIT 10;

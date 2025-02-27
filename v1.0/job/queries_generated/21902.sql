@@ -1,0 +1,56 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year > 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1 AS level
+    FROM
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE
+        mh.level < 3  -- Limit to depth of 3 for performance
+)
+
+SELECT 
+    ak.name AS actor_name,
+    ak.name_pcode_nf AS actor_name_nf,
+    COUNT(DISTINCT ch.movie_id) AS total_movies,
+    AVG(CASE WHEN mt.production_year IS NOT NULL THEN mt.production_year ELSE NULL END) AS avg_production_year,
+    STRING_AGG(DISTINCT mt.title, ', ' ORDER BY mt.production_year DESC) AS movie_titles,
+    MAX(mh.level) AS max_link_depth
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+LEFT JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    person_info pi ON ak.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'bio')
+WHERE 
+    ak.name IS NOT NULL
+    AND ak.name != ''
+    AND (pi.info IS NULL OR pi.info != 'retired')
+GROUP BY 
+    ak.id, ak.name, ak.name_pcode_nf
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 5
+    AND AVG(COALESCE(mt.production_year, 0)) > 2010 -- Average of production years > 2010
+ORDER BY 
+    total_movies DESC, avg_production_year DESC
+LIMIT 20;
+This SQL query utilizes various constructs including CTEs for recursive queries, outer joins, window functions, and string aggregation, with unspecified edge case handling like NULL logic and predicates. The query is aimed explicitly at ranking actors with certain criteria based on their movie participation after 2000, providing a comprehensive view of their contributions along with hierarchical link depth of movies they starred in.

@@ -1,0 +1,83 @@
+
+WITH RECURSIVE CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_profit) AS total_sales_profit
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year >= 1990
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING 
+        SUM(ws.ws_net_profit) IS NOT NULL
+    UNION ALL
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        SUM(ws.ws_net_profit) + SUM(p.p_discount_active::numeric) AS total_sales_profit
+    FROM 
+        CustomerSales AS cs
+    JOIN 
+        web_sales AS ws ON cs.c_customer_sk = ws.ws_ship_customer_sk
+    JOIN 
+        promotion AS p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE 
+        (ws.ws_sold_date_sk > 0) OR 
+        (p.p_discount_active IS NULL)
+    GROUP BY 
+        cs.c_customer_sk, cs.c_first_name, cs.c_last_name
+    HAVING 
+        SUM(ws.ws_net_profit) + SUM(p.p_discount_active::numeric) IS NOT NULL
+),
+InventorySummary AS (
+    SELECT 
+        inv.inv_warehouse_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory AS inv
+    WHERE 
+        inv.inv_quantity_on_hand > 0
+    GROUP BY 
+        inv.inv_warehouse_sk
+),
+CustomerSummary AS (
+    SELECT 
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_dep_count) AS avg_dependents
+    FROM 
+        customer AS c
+    JOIN 
+        customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        ca.ca_state
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.total_sales_profit,
+    is.inv_warehouse_sk,
+    is.total_inventory,
+    cps.customer_count,
+    cps.avg_dependents
+FROM 
+    CustomerSales AS cs
+LEFT JOIN 
+    InventorySummary AS is ON cs.c_customer_sk = is.inv_warehouse_sk
+JOIN 
+    CustomerSummary AS cps ON is.inv_warehouse_sk = cps.customer_count
+WHERE 
+    cs.total_sales_profit > (
+        SELECT AVG(total_sales_profit) FROM CustomerSales
+    )
+ORDER BY 
+    cs.total_sales_profit DESC
+LIMIT 100;

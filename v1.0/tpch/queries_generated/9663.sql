@@ -1,0 +1,27 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_mktsegment, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+TopOrders AS (
+    SELECT ro.o_orderkey, ro.o_orderdate, ro.o_totalprice, ro.c_mktsegment
+    FROM RankedOrders ro
+    WHERE ro.rank <= 10
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, s.s_suppkey, p.p_name, p.p_brand, p.p_type, 
+           SUM(ps.ps_availqty) AS total_avail_qty, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_partkey, s.s_suppkey, p.p_name, p.p_brand, p.p_type
+)
+SELECT to.o_orderkey, to.o_orderdate, to.o_totalprice, to.c_mktsegment, 
+       ps.p_name, ps.p_brand, ps.p_type, ps.total_avail_qty, ps.total_supply_cost
+FROM TopOrders to
+JOIN lineitem l ON to.o_orderkey = l.l_orderkey
+JOIN PartSupplier ps ON l.l_partkey = ps.ps_partkey
+WHERE ps.total_avail_qty > 100
+ORDER BY to.o_orderdate, ps.p_name;

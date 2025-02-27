@@ -1,0 +1,63 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rn,
+        COUNT(*) OVER () AS total_movies
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+top_cast AS (
+    SELECT 
+        c.movie_id,
+        ak.name AS actor_name,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        c.movie_id, ak.name
+    HAVING 
+        COUNT(*) > 1
+),
+movie_summary AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(SUM(CASE WHEN mc.company_type_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS company_count,
+        COALESCE(STRING_AGG(DISTINCT k.keyword, ', '), 'No Keywords') AS keywords
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        m.kind_id IN (1, 2) -- Assuming kind_ids represent feature films or documentaries
+    GROUP BY 
+        m.id
+)
+SELECT 
+    ts.title,
+    ts.production_year,
+    SUM(ms.company_count) OVER (PARTITION BY ts.production_year) AS total_companies_in_year,
+    jsonb_agg(DISTINCT tc.actor_name) AS actors,
+    ts.total_movies
+FROM 
+    ranked_titles ts
+LEFT JOIN 
+    top_cast tc ON ts.title_id = tc.movie_id
+LEFT JOIN 
+    movie_summary ms ON ts.title_id = ms.movie_id
+WHERE 
+    ts.rn <= 5 -- Get top 5 movies each year
+GROUP BY 
+    ts.title, ts.production_year, ts.total_movies
+ORDER BY 
+    ts.production_year DESC, ts.title;

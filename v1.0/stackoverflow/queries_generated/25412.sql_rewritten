@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.Tags,
+        U.DisplayName AS Author,
+        P.CreationDate,
+        P.Score,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RankByAuthor,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.PostTypeId = 1 
+        AND P.Score > 0 
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+RecentHighScorerPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        Tags,
+        Author,
+        CreationDate,
+        Score,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByAuthor = 1
+    ORDER BY 
+        Score DESC
+    LIMIT 10
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    R.PostId,
+    R.Title,
+    R.Body,
+    R.Tags,
+    R.Author,
+    R.CreationDate,
+    R.Score,
+    R.CommentCount,
+    B.BadgeCount
+FROM 
+    RecentHighScorerPosts R
+LEFT JOIN 
+    UserBadges B ON R.Author = B.UserId
+ORDER BY 
+    R.Score DESC, R.CreationDate DESC;

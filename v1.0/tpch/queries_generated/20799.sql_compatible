@@ -1,0 +1,88 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, DATE '1998-10-01') 
+        AND o.o_orderstatus IN ('O', 'F', 'P')
+), 
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_availqty) AS total_available_qty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+), 
+CustomerBalance AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N' 
+        AND o.o_orderdate >= DATEADD(YEAR, -1, DATE '1998-10-01')
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        STRING_AGG(s.s_name, ', ') AS supplier_names,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        p.p_size IN (SELECT DISTINCT p2.p_size FROM part p2 WHERE p2.p_retailprice > 100)
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    p.p_partkey,
+    p.p_name,
+    s.total_available_qty,
+    cb.total_spent,
+    CASE 
+        WHEN cb.total_spent IS NULL THEN 0 
+        ELSE cb.total_spent 
+    END AS customer_spending 
+FROM 
+    RankedOrders o 
+JOIN 
+    PartSupplierDetails p ON MOD(o.o_orderkey, 10) = MOD(p.p_partkey, 10)
+LEFT JOIN 
+    SupplierAvailability s ON p.p_partkey = s.ps_partkey
+LEFT JOIN 
+    CustomerBalance cb ON cb.c_custkey = (SELECT c.c_custkey 
+                                           FROM customer c 
+                                           WHERE c.c_acctbal = (
+                                                SELECT MAX(c2.c_acctbal) 
+                                                FROM customer c2 
+                                                WHERE c2.c_nationkey IS NOT NULL 
+                                                AND c2.c_nationkey > 0)
+                                           LIMIT 1)
+ORDER BY 
+    o.o_orderdate DESC, 
+    p.p_name ASC, 
+    customer_spending DESC;

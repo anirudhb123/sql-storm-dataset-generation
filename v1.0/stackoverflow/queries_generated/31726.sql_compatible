@@ -1,0 +1,112 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        0 AS Level
+    FROM 
+        Posts 
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.Id
+),
+UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalVotes,
+        UpVotes,
+        DownVotes,
+        RANK() OVER (ORDER BY TotalVotes DESC) AS Rank
+    FROM 
+        UserVoteSummary
+    WHERE 
+        TotalVotes > 0
+),
+ClosedPosts AS (
+    SELECT 
+        ph.Id AS PostId,
+        ph.Title,
+        COUNT(DISTINCT v.Id) AS TotalCloseVotes,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    INNER JOIN 
+        Votes v ON ph.PostId = v.PostId AND v.VoteTypeId = 6
+    WHERE 
+        pht.Name = 'Post Closed'
+    GROUP BY 
+        ph.Id, ph.Title
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score
+)
+SELECT 
+    rp.Title AS RecentPostTitle,
+    rp.ViewCount,
+    rp.Score,
+    ph.Level AS PostLevel,
+    cu.DisplayName,
+    cu.UpVotes,
+    cu.DownVotes,
+    cp.TotalCloseVotes,
+    cp.LastCloseDate,
+    CASE 
+        WHEN cp.TotalCloseVotes IS NOT NULL THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    PostHierarchy ph ON rp.Id = ph.Id
+LEFT JOIN 
+    TopUsers cu ON ph.OwnerUserId = cu.UserId
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.PostId
+WHERE 
+    rp.LastCommentDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+ORDER BY 
+    rp.ViewCount DESC,
+    rp.Score DESC
+LIMIT 100;

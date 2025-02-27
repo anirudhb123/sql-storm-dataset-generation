@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        OwnerDisplayName,
+        CommentCount,
+        AnswerCount
+    FROM 
+        RankedPosts
+    WHERE 
+        OwnerRank <= 5
+)
+SELECT 
+    t.OwnerDisplayName,
+    t.Title,
+    t.CreationDate,
+    t.Score,
+    t.CommentCount,
+    t.AnswerCount,
+    ph.CreatedDate AS LastEditDate,
+    ph.Comment AS LastEditComment
+FROM 
+    TopPosts t
+LEFT JOIN 
+    PostHistory ph ON t.PostId = ph.PostId
+WHERE 
+    ph.CreationDate = (SELECT MAX(CreationDate) 
+                       FROM PostHistory 
+                       WHERE PostId = t.PostId 
+                       AND PostHistoryTypeId IN (4, 5, 6)) 
+ORDER BY 
+    t.Score DESC, 
+    t.CreationDate ASC;

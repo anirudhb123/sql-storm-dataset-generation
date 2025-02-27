@@ -1,0 +1,74 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        COALESCE(mci.note, 'No Company Info') AS company_info,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY mci.note DESC NULLS LAST) AS company_rank
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mci ON t.id = mci.movie_id
+    LEFT JOIN 
+        title m ON m.id = t.id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+cast_and_info AS (
+    SELECT 
+        ca.movie_id,
+        COUNT(DISTINCT ca.person_id) AS actor_count,
+        STRING_AGG(a.name, ', ' ORDER BY a.name) AS actors_list,
+        MAX(m.production_year) AS latest_year
+    FROM 
+        cast_info ca
+    INNER JOIN 
+        aka_name a ON ca.person_id = a.person_id
+    LEFT JOIN 
+        aka_title t ON ca.movie_id = t.id
+    LEFT JOIN 
+        movie_info mi ON ca.movie_id = mi.movie_id 
+    GROUP BY 
+        ca.movie_id
+),
+title_stats AS (
+    SELECT 
+        title.movie_id,
+        title.title,
+        ci.actor_count,
+        ci.actors_list,
+        mh.company_info,
+        mh.company_rank
+    FROM 
+        movie_hierarchy mh
+    FULL OUTER JOIN 
+        cast_and_info ci ON mh.movie_id = ci.movie_id
+),
+filter_stats AS (
+    SELECT 
+        movie_id,
+        title,
+        actor_count,
+        actors_list,
+        company_info,
+        company_rank,
+        ROW_NUMBER() OVER (ORDER BY actor_count DESC, movie_id) AS row_num
+    FROM 
+        title_stats
+    WHERE 
+        actor_count > 1
+        AND (company_info NOT LIKE '%No Company Info%' OR company_rank = 1)
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.actor_count,
+    f.actors_list,
+    f.company_info
+FROM 
+    filter_stats f
+WHERE 
+    f.row_num <= 20
+ORDER BY 
+    f.actor_count DESC, f.movie_id;

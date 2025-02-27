@@ -1,0 +1,49 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        company_count,
+        keyword_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5
+)
+SELECT 
+    t.title,
+    t.production_year,
+    x.name AS actor_name,
+    p.info AS actor_info,
+    x.gender,
+    t.company_count,
+    t.keyword_count
+FROM 
+    TopMovies t
+JOIN 
+    cast_info c ON c.movie_id = (SELECT id FROM aka_title WHERE title = t.title)
+JOIN 
+    aka_name x ON c.person_id = x.person_id
+JOIN 
+    person_info p ON x.person_id = p.person_id
+WHERE 
+    p.info_type_id = (SELECT id FROM info_type WHERE info = 'birth year')
+ORDER BY 
+    t.production_year DESC, t.company_count DESC;

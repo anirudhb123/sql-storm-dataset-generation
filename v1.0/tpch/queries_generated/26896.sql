@@ -1,0 +1,19 @@
+SELECT
+    CONCAT('Supplier: ', s.s_name, ' | Part: ', p.p_name, ' | Price: $', FORMAT(ps.ps_supplycost, 2), 
+           ' | Nation: ', n.n_name, ' | Region: ', r.r_name) AS info
+FROM
+    partsupp ps
+JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE
+    p.p_retailprice > 100
+    AND s.s_acctbal BETWEEN 5000.00 AND 10000.00
+ORDER BY
+    r.r_name, s.s_name
+LIMIT 50;

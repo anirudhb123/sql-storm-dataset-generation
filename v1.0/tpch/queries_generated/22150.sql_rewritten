@@ -1,0 +1,49 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderstatus IN ('O', 'F')
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS average_supply_cost,
+        STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+SalesSummary AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        MAX(l.l_quantity) AS max_quantity_per_order
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_partkey
+)
+SELECT 
+    p.p_name,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(ss.order_count, 0) AS order_count,
+    COALESCE(ss.max_quantity_per_order, 0) AS max_quantity_per_order,
+    r.r_name AS region_name,
+    spd.total_available_qty,
+    spd.average_supply_cost,
+    spd.supplier_names
+FROM part p
+LEFT JOIN SalesSummary ss ON p.p_partkey = ss.l_partkey
+JOIN SupplierPartDetails spd ON p.p_partkey = spd.ps_partkey
+JOIN nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = (SELECT o.o_custkey FROM RankedOrders o WHERE o.order_rank = 1))
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE (COALESCE(ss.total_sales, 0) > 1000 OR spd.average_supply_cost < 50)
+AND (p.p_size BETWEEN 20 AND 50 OR p.p_name LIKE '%special%')
+ORDER BY total_sales DESC, p.p_name
+FETCH FIRST 10 ROWS ONLY;

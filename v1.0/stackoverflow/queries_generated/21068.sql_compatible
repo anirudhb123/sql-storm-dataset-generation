@@ -1,0 +1,72 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        CASE 
+            WHEN Reputation >= 1000 THEN 'High'
+            WHEN Reputation BETWEEN 100 AND 999 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationLevel
+    FROM Users
+),
+RecentPostCounts AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentPostCount
+    FROM Posts
+    GROUP BY OwnerUserId
+),
+PostScoreHistory AS (
+    SELECT 
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS ScoreRank
+    FROM Posts p
+    WHERE p.Score IS NOT NULL
+),
+TopComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(*) AS CommentCount
+    FROM Comments c
+    GROUP BY c.PostId
+    HAVING COUNT(*) > 5
+),
+PostContributions AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(TopCom.CommentCount, 0) AS TotalComments,
+        COALESCE(rp.RecentPostCount, 0) AS RecentPostCount,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName AS EditorDisplayName,
+        ph.Comment AS EditComment
+    FROM Posts p
+    LEFT JOIN TopComments TopCom ON p.Id = TopCom.PostId
+    LEFT JOIN RecentPostCounts rp ON p.OwnerUserId = rp.OwnerUserId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.CreationDate = (
+        SELECT MAX(CreationDate)
+        FROM PostHistory
+        WHERE PostId = p.Id
+    )
+    WHERE p.CreationDate < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+)
+SELECT 
+    ur.UserId,
+    ur.Reputation,
+    ur.ReputationLevel,
+    COUNT(DISTINCT pc.PostId) AS TotalContributions,
+    SUM(pc.TotalComments) AS SumOfComments,
+    AVG(CASE WHEN pc.RecentPostCount > 0 THEN 1 ELSE 0 END) AS AvgRecentActivity,
+    STRING_AGG(DISTINCT pc.EditorDisplayName, ', ') AS Editors,
+    JSON_AGG(DISTINCT JSON_BUILD_OBJECT('PostId', pc.PostId, 'EditType', pc.PostHistoryTypeId, 'EditDate', pc.HistoryDate, 'Comment', pc.EditComment)) AS EditDetails
+FROM UserReputation ur
+JOIN Posts p ON ur.UserId = p.OwnerUserId
+LEFT JOIN PostContributions pc ON p.Id = pc.PostId
+GROUP BY ur.UserId, ur.Reputation, ur.ReputationLevel
+HAVING COUNT(DISTINCT pc.PostId) > 3
+ORDER BY ur.Reputation DESC;

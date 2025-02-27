@@ -1,0 +1,89 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(
+            COUNT(DISTINCT P.Id) FILTER (WHERE P.PostTypeId = 1), 
+            0
+        ) AS QuestionsAsked,
+        COALESCE(
+            COUNT(DISTINCT P.Id) FILTER (WHERE P.PostTypeId = 2), 
+            0
+        ) AS AnswersGiven,
+        COUNT(DISTINCT B.Id) AS BadgesEarned,
+        MAX(U.CreationDate) AS AccountCreationDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+UserRanked AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+        RANK() OVER (ORDER BY UpVotes DESC) AS OverallUpVoteRank
+    FROM 
+        UserStats
+),
+UserRanksWithImproperGrammar AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalBounties,
+        UpVotes,
+        DownVotes,
+        QuestionsAsked,
+        AnswersGiven,
+        BadgesEarned,
+        AccountCreationDate,
+        CASE 
+            WHEN ReputationRank BETWEEN 1 AND 10 THEN 'Top 10 Users'
+            WHEN ReputationRank BETWEEN 11 AND 50 THEN 'Top 50 Users'
+            ELSE 'Users Below Top 50'
+        END AS UserCategory,
+        CASE 
+            WHEN OverallUpVoteRank = 1 THEN 'The UpVote Champion'
+            ELSE NULL
+        END AS UpVoteTitle
+    FROM 
+        UserRanked
+)
+SELECT 
+    U.DisplayName AS User, 
+    U.Reputation, 
+    U.TotalBounties, 
+    U.UpVotes, 
+    U.DownVotes, 
+    U.QuestionsAsked, 
+    U.AnswersGiven, 
+    U.BadgesEarned, 
+    U.AccountCreationDate,
+    U.UserCategory,
+    COALESCE(U.UpVoteTitle, 'No Title') AS UpVoteRecognition,
+    CASE 
+        WHEN NOT EXISTS (
+            SELECT 1
+            FROM Posts P2
+            WHERE P2.OwnerUserId = U.UserId 
+            AND P2.ClosedDate IS NOT NULL
+        ) THEN 'Active Contributor'
+        ELSE 'Has Closed Contributions'
+    END AS ContributionStatus
+FROM 
+    UserRanksWithImproperGrammar U
+WHERE 
+    (U.Reputation > 100 OR U.UserCategory = 'Top 10 Users')
+ORDER BY 
+    U.Reputation DESC, 
+    U.TotalBounties DESC;

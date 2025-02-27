@@ -1,0 +1,84 @@
+WITH RecursiveTagPostCounts AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags AS t
+    LEFT JOIN 
+        Posts AS p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    GROUP BY 
+        t.Id
+    HAVING 
+        COUNT(p.Id) > 0
+),
+UserReputationChanges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE 
+                WHEN bh.Date >= NOW() - INTERVAL '1 year' THEN 1 
+                ELSE 0 
+            END) AS BadgeCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        RANK() OVER (ORDER BY SUM(bh.Class) DESC) AS UserRank
+    FROM 
+        Users AS u
+    LEFT JOIN 
+        Badges AS bh ON u.Id = bh.UserId
+    LEFT JOIN 
+        Votes AS v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostVoteDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts AS p
+    LEFT JOIN 
+        Votes AS v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory AS ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Closed
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    ph.TagId,
+    rt.TagName,
+    COALESCE(pvc.TotalVotes, 0) AS TotalVotes,
+    COALESCE(pvc.UpVotes, 0) AS UpVotes,
+    COALESCE(pvc.DownVotes, 0) AS DownVotes,
+    COALESCE(cph.LastClosedDate, 'No Closure') AS LastClosedDate,
+    urc.BadgeCount,
+    urc.UserRank
+FROM 
+    Users AS u
+LEFT JOIN 
+    UserReputationChanges AS urc ON u.Id = urc.UserId
+LEFT JOIN 
+    RecursiveTagPostCounts AS rt ON u.Id = rt.TagId -- Associate Users and Tags based on Posts they engaged with, if applicable.
+LEFT JOIN 
+    PostVoteDetails AS pvc ON pvc.PostId IN (SELECT DISTINCT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+LEFT JOIN 
+    ClosedPostHistory AS cph ON cph.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+WHERE 
+    u.Reputation > 1000 -- Only including users with high reputation
+ORDER BY 
+    u.Reputation DESC, 
+    urc.UserRank;

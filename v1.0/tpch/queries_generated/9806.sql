@@ -1,0 +1,54 @@
+WITH SupplierCosts AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+HighCostSuppliers AS (
+    SELECT 
+        s.s_name,
+        s.s_acctbal,
+        sc.total_cost,
+        sc.part_count
+    FROM 
+        supplier s
+    JOIN 
+        SupplierCosts sc ON s.s_suppkey = sc.s_suppkey
+    WHERE 
+        sc.total_cost > (SELECT AVG(total_cost) FROM SupplierCosts)
+),
+RecentOrders AS (
+    SELECT 
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' - INTERVAL '1 year'
+    GROUP BY 
+        o.o_custkey
+)
+SELECT 
+    h.s_name AS supplier_name,
+    h.s_acctbal AS supplier_account_balance,
+    r.n_name AS nation_name,
+    ro.total_spent AS customer_spending
+FROM 
+    HighCostSuppliers h
+JOIN 
+    nation r ON h.s_nationkey = r.n_nationkey
+JOIN 
+    customer c ON h.s_nationkey = c.c_nationkey
+JOIN 
+    RecentOrders ro ON c.c_custkey = ro.o_custkey
+ORDER BY 
+    ro.total_spent DESC, h.total_cost DESC
+LIMIT 10;

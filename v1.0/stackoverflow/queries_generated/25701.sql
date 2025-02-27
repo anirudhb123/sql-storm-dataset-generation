@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>') AS tag_array ON true
+    LEFT JOIN 
+        Tags t ON tag_array = t.TagName
+    WHERE 
+        p.PostTypeId IN (1, 2) AND -- Questions and Answers
+        p.CreationDate >= NOW() - INTERVAL '1 year' -- Posts from the last year
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, pt.Name
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.ViewCount,
+        rp.Score,
+        rp.Tags,
+        rp.Rank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5 -- Top 5 posts per type
+),
+PostsWithBadges AS (
+    SELECT 
+        pp.PostId,
+        pp.Title,
+        pp.OwnerDisplayName,
+        pp.ViewCount,
+        pp.Score,
+        pp.Tags,
+        b.Name AS BadgeName
+    FROM 
+        PopularPosts pp
+    LEFT JOIN 
+        Badges b ON pp.OwnerDisplayName = b.UserId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.OwnerDisplayName,
+    p.ViewCount,
+    p.Score,
+    p.Tags,
+    COALESCE(b.BadgeName, 'No Badge') AS BadgeStatus
+FROM 
+    PostsWithBadges p
+LEFT JOIN 
+    Users u ON p.OwnerDisplayName = u.DisplayName
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC;

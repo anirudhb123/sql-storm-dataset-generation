@@ -1,0 +1,44 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank_year,
+        COUNT(c.id) OVER (PARTITION BY a.id) AS total_cast
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+),
+FilteredTitles AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        rt.rank_year,
+        rt.total_cast,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        movie_keyword mk ON rt.title = mk.movie_id
+    WHERE 
+        rt.rank_year <= 10
+)
+SELECT 
+    ft.title,
+    ft.production_year,
+    ft.total_cast,
+    ft.keyword,
+    CASE 
+        WHEN ft.total_cast > 5 THEN 'Large Cast'
+        WHEN ft.total_cast BETWEEN 3 AND 5 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size,
+    (SELECT AVG(total_cast) FROM FilteredTitles WHERE total_cast IS NOT NULL) AS avg_cast,
+    COUNT(*) OVER() AS total_titles
+FROM 
+    FilteredTitles ft
+WHERE 
+    ft.production_year >= 2000
+ORDER BY 
+    ft.production_year DESC, ft.total_cast DESC
+LIMIT 50;

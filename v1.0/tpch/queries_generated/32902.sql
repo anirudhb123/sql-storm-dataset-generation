@@ -1,0 +1,31 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+), CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY o.o_orderkey) AS order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+), NationRegions AS (
+    SELECT n.n_nationkey, n.n_name AS nation_name, r.r_name AS region_name,
+           COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name, r.r_name
+)
+
+SELECT cr.region_name, cr.nation_name, COUNT(co.o_orderkey) AS total_orders,
+       SUM(co.order_value) AS total_value,
+       AVG(s.availqty) AS avg_avail_qty
+FROM CustomerOrders co
+JOIN NationRegions cr ON cr.nation_name = (SELECT n_name FROM nation WHERE n_nationkey = co.o_custkey) 
+LEFT JOIN SupplyChain s ON s.ps_partkey = (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = co.o_orderkey LIMIT 1)
+GROUP BY cr.region_name, cr.nation_name
+HAVING SUM(co.order_value) > 10000
+ORDER BY total_value DESC
+LIMIT 5;
+

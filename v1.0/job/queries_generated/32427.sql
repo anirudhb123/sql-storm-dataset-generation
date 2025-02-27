@@ -1,0 +1,73 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        NULL::integer AS parent_movie_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m2.id AS movie_id,
+        m2.title,
+        m2.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        title m2 ON ml.linked_movie_id = m2.id
+    WHERE 
+        m2.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+ranked_cast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+),
+movie_info_extended AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT it.info, ', ') AS info_summary
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    ARRAY_AGG(DISTINCT rc.name ORDER BY rc.role_rank) AS cast_names,
+    COALESCE(mie.info_summary, 'No additional info') AS additional_info,
+    COUNT(DISTINCT ml.linked_movie_id) AS related_movies_count
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    ranked_cast rc ON mh.movie_id = rc.movie_id
+LEFT JOIN 
+    movie_link ml ON mh.movie_id = ml.movie_id
+LEFT JOIN 
+    movie_info_extended mie ON mh.movie_id = mie.movie_id
+WHERE 
+    mh.production_year >= 2000
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mie.info_summary
+HAVING 
+    COUNT(DISTINCT rc.name) >= 2
+ORDER BY 
+    mh.production_year DESC, mh.title;

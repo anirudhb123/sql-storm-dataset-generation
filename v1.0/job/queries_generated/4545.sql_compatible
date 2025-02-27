@@ -1,0 +1,55 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY m.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    GROUP BY 
+        m.title,
+        m.production_year,
+        m.id
+),
+top_movies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.rank <= 5
+),
+movies_with_keywords AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        top_movies tm
+    LEFT JOIN 
+        movie_keyword mk ON tm.title = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        tm.title,
+        tm.production_year
+)
+SELECT 
+    mwk.title,
+    mwk.production_year,
+    mwk.keywords,
+    COALESCE(mo.info, 'No Info Available') AS movie_info
+FROM 
+    movies_with_keywords mwk
+LEFT JOIN 
+    movie_info mo ON mwk.production_year = mo.movie_id
+WHERE 
+    mwk.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    mwk.production_year DESC, 
+    mwk.title;

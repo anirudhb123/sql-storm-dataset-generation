@@ -1,0 +1,4 @@
+SELECT min(n.name) AS voicing_actress, min(t.title) AS jap_engl_voiced_movie
+FROM aka_name AS an, char_name AS chn, cast_info AS ci, company_name AS cn, info_type AS it, movie_companies AS mc, movie_info AS mi, name AS n, role_type AS rt, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND t.id = ci.movie_id AND mc.movie_id = ci.movie_id AND mc.movie_id = mi.movie_id AND mi.movie_id = ci.movie_id AND cn.id = mc.company_id AND it.id = mi.info_type_id AND n.id = ci.person_id AND rt.id = ci.role_id AND n.id = an.person_id AND ci.person_id = an.person_id AND chn.id = ci.person_role_id
+AND t.md5sum IN ('00f08fa894402991aa68259d70e99e47', '3670e0877cdd959562acceef4da06609', '4565597d16af94c52f26ef01f29de749', '534fc95ea7f08c748e2070e1884e0932', '5cbdc5c09fab2fcc7d848ef3f94f5b54', '95579096d50b4994e09cfb8f17a467ed', '993dc00d0768cddba7c692a3d7a9ef07', '9da5229dcd22cb674c38a2aceb9bee5c', 'ab30f3bc730abb622de2f7a015bcc77c', 'f267dc49250f0f0b4652e351ea2694f9');

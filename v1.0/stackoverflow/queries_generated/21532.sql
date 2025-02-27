@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN p.ViewCount > 100 THEN 1 ELSE 0 END) AS HighViewPosts,
+        AVG(p.Score) FILTER (WHERE p.Score IS NOT NULL) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(CASE 
+            WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN ph.CreationDate 
+            ELSE NULL END) AS LastEdited,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.BadgeCount,
+    us.HighViewPosts,
+    us.AverageScore,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate,
+    rp.Score AS RecentPostScore,
+    rp.ViewCount AS RecentPostViews,
+    ph.EditCount AS TotalEdits,
+    ph.LastEdited AS LastEditDate,
+    ph.HistoryTypes AS PostHistoryTypeNames
+FROM 
+    UserStats us
+LEFT JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId AND rp.PostRank = 1
+LEFT JOIN 
+    PostHistories ph ON rp.PostId = ph.PostId
+WHERE 
+    us.BadgeCount > 0 AND 
+    (us.AverageScore IS NULL OR us.AverageScore > 10)
+ORDER BY 
+    us.HighViewPosts DESC,
+    us.BadgeCount DESC NULLS LAST;
+

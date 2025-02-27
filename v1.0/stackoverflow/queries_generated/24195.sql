@@ -1,0 +1,89 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) -- Considering Close, Reopen, Delete and Undelete
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(
+            CASE 
+                WHEN p.PostTypeId = 1 THEN p.Score
+                ELSE 0
+            END
+        ) AS TotalQuestionScores,
+        AVG(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS AvgViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS CloseDate,
+        COALESCE(ph.Comment, 'No reason provided') AS CloseReason,
+        p.Score
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 
+    WHERE 
+        ph.rn = 1 -- Get the latest close reason
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.BadgeCount,
+    us.TotalQuestionScores,
+    us.AvgViewCount,
+    cp.PostId,
+    cp.Title,
+    cp.CloseDate,
+    cp.CloseReason,
+    ue.CommentCount,
+    ue.UpVoteCount,
+    ue.DownVoteCount
+FROM 
+    UserStats us
+LEFT JOIN 
+    ClosedPosts cp ON us.UserId IN (SELECT OwnerUserId FROM Posts WHERE Id = cp.PostId)
+LEFT JOIN 
+    UserEngagement ue ON us.UserId = ue.UserId
+WHERE 
+    us.BadgeCount > 0 OR ue.CommentCount > 0
+ORDER BY 
+    us.BadgeCount DESC, us.TotalQuestionScores DESC, ue.UpVoteCount DESC;
+
+This SQL query provides a comprehensive overview of user statistics, including the number of badges, total question scores, recent closed posts, and user engagement metrics like comments and votes. It combines various SQL constructs such as CTEs, outer joins, window functions, and nuanced conditions to create a complex and detailed report.

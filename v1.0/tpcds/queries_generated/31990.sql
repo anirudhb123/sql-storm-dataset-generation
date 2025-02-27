@@ -1,0 +1,70 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT
+        ws_sold_date_sk,
+        SUM(ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (ORDER BY SUM(ws_net_profit) DESC) AS sales_rank
+    FROM
+        web_sales
+    GROUP BY
+        ws_sold_date_sk
+    HAVING
+        SUM(ws_net_profit) > (SELECT AVG(ws_net_profit) FROM web_sales WHERE ws_sold_date_sk IS NOT NULL)
+),
+Customer_CTE AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        d.d_year,
+        d.d_month_seq,
+        cd.cd_gender,
+        SUM(ws.net_profit) AS total_spent
+    FROM
+        customer AS c
+    JOIN
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE
+        cd.cd_gender IS NOT NULL
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name, d.d_year, d.d_month_seq, cd.cd_gender
+),
+High_Value_Customer AS (
+    SELECT
+        cte.c_customer_sk,
+        cte.c_first_name,
+        cte.c_last_name,
+        cte.total_spent,
+        cte.d_year,
+        cte.d_month_seq,
+        ROW_NUMBER() OVER (PARTITION BY cte.d_year ORDER BY cte.total_spent DESC) AS customer_rank
+    FROM
+        Customer_CTE AS cte
+    WHERE
+        cte.total_spent > (SELECT AVG(total_spent) FROM Customer_CTE)
+)
+SELECT
+    a.ca_city,
+    a.ca_state,
+    COALESCE(hvc.c_first_name || ' ' || hvc.c_last_name, 'Unknown Customer') AS customer_name,
+    COALESCE(SUM(ss.ss_net_profit), 0) AS total_store_sales,
+    CASE 
+        WHEN a.ca_state IS NOT NULL THEN 'Active'
+        ELSE 'Inactive'
+    END AS city_status
+FROM
+    customer_address AS a
+LEFT JOIN
+    store_sales AS ss ON a.ca_address_sk = ss.ss_addr_sk
+LEFT JOIN
+    High_Value_Customer AS hvc ON hvc.c_customer_sk IN (SELECT c_cust_sk FROM store WHERE ss_store_sk = hvc.c_customer_sk)
+WHERE
+    a.ca_city LIKE '%New%' OR a.ca_state IN (SELECT DISTINCT ca_state FROM customer_address WHERE ca_country = 'USA')
+GROUP BY
+    a.ca_city, a.ca_state, hvc.c_first_name, hvc.c_last_name
+ORDER BY
+    a.ca_state, total_store_sales DESC;

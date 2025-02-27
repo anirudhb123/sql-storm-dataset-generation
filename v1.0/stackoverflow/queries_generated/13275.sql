@@ -1,0 +1,49 @@
+-- Performance benchmarking query on Stack Overflow schema
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(a.AcceptedAnswerId, 0) AS AcceptedAnswerId
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+                       SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM Votes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT PostId, MIN(CASE WHEN PostTypeId = 1 THEN Id END) AS AcceptedAnswerId
+        FROM Posts
+        WHERE PostTypeId = 2 -- Answers
+        GROUP BY PostId
+    ) a ON p.Id = a.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    CASE WHEN ps.AcceptedAnswerId IS NOT NULL THEN 'Yes' ELSE 'No' END AS HasAcceptedAnswer
+FROM 
+    PostStats ps
+WHERE 
+    ps.ViewCount > 1000 -- Adjust this threshold for performance testing
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC
+LIMIT 100; -- Limit the results for benchmarking purposes

@@ -1,0 +1,90 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Date) AS MostRecentBadgeDate
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+), BadgeStats AS (
+    SELECT 
+        UserId,
+        BadgeCount,
+        CASE 
+            WHEN BadgeCount = 0 THEN 'No Badges'
+            WHEN BadgeCount <= 5 THEN 'Few Badges'
+            WHEN BadgeCount <= 15 THEN 'Moderate Badges'
+            ELSE 'Many Badges'
+        END AS BadgeCategory,
+        RANK() OVER (PARTITION BY BadgeCategory ORDER BY MostRecentBadgeDate DESC) AS CategoryRank
+    FROM UserBadges
+), TopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(C.Id) AS CommentCount,
+        SUM(V.BountyAmount) AS TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY P.ViewCount DESC) AS ViewRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) 
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY P.Id, P.Title
+), UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(AVG(P.ViewCount), 0) AS AvgPostViews,
+        COALESCE(SUM(P.AnswerCount), 0) AS TotalAnswers,
+        COUNT(DISTINCT P.Id) AS TotalPosts
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName
+), Combined AS (
+    SELECT 
+        B.UserId,
+        B.BadgeCategory,
+        B.BadgeCount,
+        U.AvgPostViews,
+        U.TotalAnswers,
+        U.TotalPosts,
+        T.PostId,
+        T.Title,
+        T.CommentCount,
+        T.TotalBounty,
+        CASE 
+            WHEN U.TotalPosts > 0 THEN (U.TotalAnswers::float / U.TotalPosts) * 100
+            ELSE NULL
+        END AS AnswerRate
+    FROM BadgeStats B
+    JOIN UserPostStats U ON B.UserId = U.UserId
+    LEFT JOIN TopPosts T ON U.UserId = T.PostId 
+    WHERE B.BadgeCategory IN ('Few Badges', 'Moderate Badges')
+), FinalOutput AS (
+    SELECT 
+        C.UserId,
+        C.BadgeCategory,
+        C.BadgeCount,
+        C.AvgPostViews,
+        C.TotalAnswers,
+        C.AnswerRate,
+        C.CommentCount,
+        C.TotalBounty,
+        RANK() OVER (ORDER BY C.AvgPostViews DESC NULLS LAST) AS ViewRank
+    FROM Combined C
+)
+SELECT 
+    UserId,
+    BadgeCategory,
+    BadgeCount,
+    AvgPostViews,
+    TotalAnswers,
+    AnswerRate,
+    CommentCount,
+    TotalBounty,
+    ViewRank
+FROM FinalOutput
+WHERE (TotalAnswers > 5 OR CommentCount > 10) 
+  AND (AnswerRate IS NOT NULL AND AnswerRate > 50)
+ORDER BY ViewRank ASC, BadgeCount DESC;

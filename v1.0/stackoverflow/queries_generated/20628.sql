@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RecentID
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '6 months' AND 
+        p.Score IS NOT NULL
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment AS CloseReason,
+        ph.CreationDate AS CloseDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS CloseEvent
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Closed
+),
+UniqueTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(*) AS TagUsageCount
+    FROM 
+        Tags t
+    INNER JOIN 
+        Posts p ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '>'))::int)
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(*) > 5
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(cp.CloseReason, 'Open') AS PostCloseReason,
+    COALESCE(cp.CloseDate, 'Open') AS PostCloseDate,
+    rp.ViewCount,
+    rp.Rank,
+    ut.TagName,
+    ut.TagUsageCount,
+    CASE 
+        WHEN rp.RecentID = 1 THEN 'Most Recent'
+        WHEN rp.Rank <= 5 THEN 'Top Rank'
+        ELSE 'Others'
+    END AS PostCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    UniqueTags ut ON ut.TagUsageCount > 5
+WHERE 
+    (rp.Rank <= 10 AND cp.CloseEvent IS NULL) OR 
+    (cp.CloseEvent IS NOT NULL AND cp.CloseDate >= NOW() - INTERVAL '1 week')
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;

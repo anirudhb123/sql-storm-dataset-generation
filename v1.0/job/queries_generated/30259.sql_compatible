@@ -1,0 +1,105 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        1 AS level,
+        ci.movie_id
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        ci.movie_id IN (
+            SELECT 
+                mk.movie_id
+            FROM 
+                movie_keyword mk
+            JOIN 
+                keyword k ON mk.keyword_id = k.id
+            WHERE 
+                k.keyword = 'Action'
+        )
+    UNION ALL
+    SELECT 
+        ca.person_id,
+        a.name AS actor_name,
+        ah.level + 1,
+        ca.movie_id
+    FROM 
+        cast_info ca
+    JOIN 
+        actor_hierarchy ah ON ca.movie_id IN (
+            SELECT 
+                ml.linked_movie_id
+            FROM 
+                movie_link ml
+            WHERE 
+                ml.movie_id = ah.movie_id
+        )
+    JOIN 
+        aka_name a ON ca.person_id = a.person_id
+),
+movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        mcm.company_id,
+        c.name AS company_name,
+        t.id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        title t
+    JOIN 
+        movie_companies mcm ON t.id = mcm.movie_id
+    JOIN 
+        company_name c ON mcm.company_id = c.id
+    WHERE 
+        t.production_year >= 2000
+        AND c.country_code IS NOT NULL
+),
+top_movies AS (
+    SELECT 
+        md.*,
+        COUNT(ah.actor_name) AS actor_count
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        actor_hierarchy ah ON md.movie_id = ah.movie_id
+    GROUP BY 
+        md.movie_id, md.company_name, md.title, md.production_year, md.company_id, md.rn
+    HAVING 
+        COUNT(ah.actor_name) > 5
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.company_name,
+    tm.actor_count,
+    COALESCE(ca.time_on_screen, 'unknown') AS time_on_screen,
+    COUNT(DISTINCT k.keyword) AS keyword_count
+FROM 
+    top_movies tm
+LEFT JOIN 
+    movie_info mi ON tm.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Duration')
+LEFT JOIN 
+    (SELECT 
+        title.movie_id, 
+        SUM(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Duration') THEN CAST(mi.info AS INTEGER) ELSE 0 END) AS time_on_screen
+     FROM 
+        movie_info mi
+     JOIN 
+        title ON mi.movie_id = title.id
+     GROUP BY 
+        title.movie_id) ca ON tm.movie_id = ca.movie_id
+LEFT JOIN 
+    movie_keyword mk ON tm.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    tm.rn = 1
+GROUP BY 
+    tm.title, tm.production_year, tm.company_name, tm.actor_count, ca.time_on_screen
+ORDER BY 
+    tm.production_year DESC, 
+    tm.actor_count DESC;

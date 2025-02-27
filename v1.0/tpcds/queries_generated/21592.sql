@@ -1,0 +1,57 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ss_item_sk, 
+        SUM(ss_quantity) AS total_quantity,
+        MAX(ss_net_profit) AS max_profit,
+        MIN(ss_net_paid) AS min_paid
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2021-01-01')
+                              AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2021-12-31')
+    GROUP BY ss_item_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY c.c_birth_year DESC) AS rn
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+item_sales AS (
+    SELECT 
+        i.i_item_id, 
+        SUM(ws.ws_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS average_profit
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2021)
+    GROUP BY i.i_item_id
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name, 
+    ci.cd_gender,
+    sd.total_quantity,
+    sd.max_profit,
+    sd.min_paid,
+    is.total_sales,
+    is.average_profit,
+    (CASE 
+         WHEN ci.income_band BETWEEN 1 AND 3 THEN 'Low Income'
+         WHEN ci.income_band BETWEEN 4 AND 6 THEN 'Middle Income'
+         ELSE 'High Income'
+    END) AS income_category
+FROM customer_info ci
+LEFT JOIN sales_data sd ON ci.c_customer_sk = sd.ss_item_sk
+LEFT JOIN item_sales is ON sd.ss_item_sk = is.i_item_id
+WHERE (ci.cd_marital_status = 'M' OR ci.cd_marital_status IS NULL)
+  AND (sd.total_quantity IS NOT NULL OR is.average_profit > 100)
+  AND (ci.rn = 1)
+ORDER BY income_category DESC, sd.max_profit ASC
+FETCH FIRST 50 ROWS ONLY;

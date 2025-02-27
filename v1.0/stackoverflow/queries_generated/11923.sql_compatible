@@ -1,0 +1,75 @@
+
+WITH PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(P.Tags, '<>')) AS TagName) AS T ON TRUE
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, P.AnswerCount, P.CommentCount, P.FavoriteCount, U.DisplayName
+),
+UserMetrics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(V.BountyAmount) AS TotalBountyAmount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+)
+
+SELECT 
+    PM.PostId,
+    PM.Title,
+    PM.CreationDate,
+    PM.Score,
+    PM.ViewCount,
+    PM.AnswerCount,
+    PM.CommentCount,
+    PM.FavoriteCount,
+    PM.OwnerDisplayName,
+    PM.UpVotes,
+    PM.DownVotes,
+    UM.UserId,
+    UM.DisplayName AS UserDisplayName,
+    UM.Reputation,
+    UM.BadgeCount,
+    UM.PostCount,
+    UM.TotalBountyAmount,
+    PM.Tags
+FROM 
+    PostMetrics PM
+JOIN 
+    UserMetrics UM ON PM.OwnerDisplayName = UM.DisplayName
+ORDER BY 
+    PM.CreationDate DESC
+LIMIT 100;

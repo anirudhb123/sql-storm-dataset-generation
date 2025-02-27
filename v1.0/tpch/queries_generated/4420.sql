@@ -1,0 +1,64 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS total_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        CUME_DIST() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS spend_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+OrderLineDetails AS (
+    SELECT 
+        ol.l_orderkey,
+        SUM(ol.l_extendedprice * (1 - ol.l_discount)) AS total_line_value,
+        COUNT(DISTINCT ol.l_partkey) AS distinct_parts_ordered
+    FROM 
+        lineitem ol
+    WHERE 
+        ol.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        ol.l_orderkey
+)
+
+SELECT 
+    COALESCE(cs.c_name, 'Unknown Customer') AS customer_name,
+    COALESCE(ss.s_name, 'Unknown Supplier') AS supplier_name,
+    cs.total_orders,
+    cs.total_spent,
+    ss.total_available_qty,
+    ss.total_supply_cost,
+    od.total_line_value,
+    od.distinct_parts_ordered
+FROM 
+    CustomerOrders cs
+FULL OUTER JOIN 
+    SupplierStats ss ON cs.total_orders > 0
+LEFT JOIN 
+    OrderLineDetails od ON cs.total_orders = od.distinct_parts_ordered
+WHERE 
+    (cs.spend_rank <= 0.1 OR ss.total_parts > 5)
+    AND ss.total_supply_cost IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC, ss.total_available_qty ASC
+LIMIT 100;

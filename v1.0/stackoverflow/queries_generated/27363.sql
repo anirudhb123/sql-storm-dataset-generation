@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        u.DisplayName AS OwnerDisplayName,
+        array_agg(DISTINCT t.TagName) AS TagList
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')))
+    WHERE 
+        p.PostTypeId = 1  -- Focusing only on questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Focusing only on questions
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.Tags,
+    rp.ViewCount,
+    rp.Score,
+    rp.Rank,
+    rp.OwnerDisplayName,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    pa.CommentCount,
+    pa.LastVoteDate,
+    rp.TagList
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN 
+    PostActivity pa ON rp.PostId = pa.PostId
+WHERE 
+    rp.Rank <= 5 -- Fetching the latest 5 questions for each user
+ORDER BY 
+    rp.OwnerDisplayName, rp.CreationDate DESC;

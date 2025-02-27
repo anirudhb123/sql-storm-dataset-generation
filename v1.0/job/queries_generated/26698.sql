@@ -1,0 +1,74 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(mk.id) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY COUNT(mk.id) DESC) AS rank
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id
+),
+actor_roles AS (
+    SELECT 
+        ki.person_id,
+        ki.role_id,
+        COUNT(ki.movie_id) AS movie_count
+    FROM 
+        cast_info ki
+    JOIN 
+        role_type r ON ki.role_id = r.id
+    GROUP BY 
+        ki.person_id, ki.role_id
+),
+top_actors AS (
+    SELECT 
+        na.name AS actor_name,
+        a.movie_count,
+        r.role
+    FROM 
+        actor_roles a
+    JOIN 
+        aka_name na ON a.person_id = na.person_id
+    JOIN 
+        role_type r ON a.role_id = r.id
+    WHERE 
+        a.movie_count > 5
+),
+high_keyword_titles AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        rt.keyword_count
+    FROM 
+        ranked_titles rt
+    WHERE 
+        rt.rank = 1 AND rt.keyword_count > 3
+),
+movies_with_actors AS (
+    SELECT 
+        ht.title AS title,
+        ht.production_year,
+        ta.actor_name,
+        ta.role
+    FROM 
+        high_keyword_titles ht
+    JOIN 
+        cast_info ci ON ht.title_id = ci.movie_id
+    JOIN 
+        top_actors ta ON ci.person_id = ta.person_id
+)
+SELECT 
+    m.title,
+    m.production_year,
+    GROUP_CONCAT(m.actor_name || ' (' || m.role || ')' separator ', ') AS actors
+FROM 
+    movies_with_actors m
+GROUP BY 
+    m.title, m.production_year
+ORDER BY 
+    m.production_year DESC, m.title;

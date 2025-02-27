@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name,
+        n.n_name,
+        rs.s_name,
+        rs.total_supply
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rn <= 3
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    ts.r_name AS Region,
+    ts.n_name AS Nation,
+    ts.s_name AS Supplier,
+    co.c_custkey AS CustomerID,
+    co.c_name AS CustomerName,
+    co.order_count AS OrdersPlaced,
+    co.total_spent AS TotalSpent,
+    COALESCE(NULLIF(co.total_spent, 0), 1) / NULLIF(ts.total_supply, 0) AS SpendToSupplyRatio
+FROM 
+    TopSuppliers ts
+CROSS JOIN 
+    CustomerOrders co
+WHERE 
+    co.order_count > 0
+ORDER BY 
+    ts.r_name, ts.n_name, ts.s_name, co.total_spent DESC;

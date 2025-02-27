@@ -1,0 +1,71 @@
+
+WITH RECURSIVE total_sales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.net_profit) AS total_net_profit,
+        COUNT(ws.order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.net_profit) DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk >= (
+            SELECT MAX(d_date_sk) 
+            FROM date_dim 
+            WHERE d_year = 2023 AND d_month_seq IN (1, 2)
+        )
+    GROUP BY 
+        ws.bill_customer_sk
+),
+high_value_customers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ts.total_net_profit,
+        ts.total_orders
+    FROM 
+        customer c
+    JOIN 
+        total_sales ts ON c.c_customer_sk = ts.bill_customer_sk
+    WHERE 
+        ts.total_net_profit > (
+            SELECT AVG(total_net_profit)
+            FROM total_sales
+        )
+),
+customer_addresses AS (
+    SELECT 
+        ca.ca_address_id,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_address_id, ca.ca_city, ca.ca_state
+)
+SELECT 
+    hv.c_customer_id,
+    hv.c_first_name,
+    hv.c_last_name,
+    SUM(cs.net_profit) AS total_catalog_net_profit,
+    COALESCE(ca.customer_count, 0) AS customer_count,
+    AVG(CASE WHEN cs.net_profit IS NULL THEN 0 ELSE cs.net_profit END) AS avg_catalog_net_profit
+FROM 
+    high_value_customers hv
+LEFT JOIN 
+    catalog_sales cs ON hv.c_customer_id = cs.cs_bill_customer_sk
+LEFT JOIN 
+    customer_addresses ca ON hv.total_orders > ca.customer_count
+GROUP BY 
+    hv.c_customer_id, hv.c_first_name, hv.c_last_name, ca.customer_count
+HAVING 
+    total_catalog_net_profit > (
+        SELECT AVG(cs.net_profit) 
+        FROM catalog_sales cs
+    )
+ORDER BY 
+    total_catalog_net_profit DESC
+LIMIT 100;

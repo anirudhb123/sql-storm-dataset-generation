@@ -1,0 +1,39 @@
+
+WITH RecursivePostHistory AS (
+    
+    SELECT ph.PostId, ph.CreationDate, ph.UserId, ph.UserDisplayName, 
+           ph.PostHistoryTypeId, ph.Comment, 
+           1 AS Level
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 24  
+    
+    UNION ALL
+    
+    SELECT ph.PostId, ph.CreationDate, ph.UserId, ph.UserDisplayName, 
+           ph.PostHistoryTypeId, ph.Comment, 
+           Level + 1
+    FROM PostHistory ph
+    INNER JOIN RecursivePostHistory rph ON ph.PostId = rph.PostId
+    WHERE ph.PostHistoryTypeId = 10  
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+    AVG(p.Score) AS AvgPostScore,
+    SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS PostsClosed,
+    MAX(ph.CreationDate) AS LastPostHistoryDate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM Users u
+LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN Tags t ON t.WikiPostId = p.Id OR t.ExcerptPostId = p.Id
+LEFT JOIN RecursivePostHistory rph ON rph.UserId = u.Id
+WHERE u.Reputation > 1000 
+  AND (ph.PostHistoryTypeId IN (10, 24) OR ph.PostHistoryTypeId IS NULL)
+GROUP BY u.Id, u.DisplayName, u.Reputation
+ORDER BY u.Reputation DESC
+LIMIT 50;

@@ -1,0 +1,98 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    WHERE
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY
+        p.Id, u.Reputation
+),
+
+PostHistoryCTE AS (
+    SELECT
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 1 THEN 1 END) AS TitleEdits,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 9 THEN 1 END) AS TagRollbacks,
+        MAX(ph.CreationDate) AS LastActionDate
+    FROM
+        PostHistory ph
+    GROUP BY
+        ph.PostId
+),
+
+PostAnalytics AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        p.CommCount,
+        COALESCE(ph.CloseCount, 0) AS CloseCount,
+        COALESCE(ph.DeleteCount, 0) AS DeleteCount,
+        COALESCE(ph.TitleEdits, 0) AS TitleEdits,
+        COALESCE(ph.TagRollbacks, 0) AS TagRollbacks,
+        DENSE_RANK() OVER (ORDER BY rp.Score DESC) AS Rank,
+        CASE
+            WHEN rp.Reputation < 100 THEN 'Newbie'
+            WHEN rp.Reputation BETWEEN 100 AND 1000 THEN 'Contributor'
+            ELSE 'Experienced'
+        END AS UserLevel
+    FROM
+        RankedPosts rp
+    LEFT JOIN
+        PostHistoryCTE ph ON rp.PostId = ph.PostId
+),
+
+FinalOutput AS (
+    SELECT 
+        pa.PostId,
+        pa.Title,
+        pa.Score,
+        pa.CommentCount AS CommCount,
+        pa.CloseCount,
+        pa.DeleteCount,
+        pa.TitleEdits,
+        pa.TagRollbacks,
+        pa.Rank,
+        pa.UserLevel,
+        CASE
+            WHEN pa.CommentCount > 10 THEN 'Highly Engaged'
+            WHEN pa.Score >= 10 THEN 'Popular Post'
+            ELSE 'Low Engagement'
+        END AS EngagementLevel
+    FROM 
+        PostAnalytics pa
+    WHERE
+        pa.Rank <= 100
+    ORDER BY 
+        pa.Rank, pa.UserLevel
+)
+
+SELECT 
+    f.EngagementLevel,
+    f.UserLevel,
+    COUNT(f.PostId) AS PostCount,
+    AVG(f.Score) AS AvgScore,
+    SUM(f.CloseCount) AS TotalClosed,
+    SUM(f.DeleteCount) AS TotalDeleted
+FROM 
+    FinalOutput f
+GROUP BY 
+    f.EngagementLevel, f.UserLevel
+ORDER BY 
+    TotalClosed DESC, AvgScore DESC;

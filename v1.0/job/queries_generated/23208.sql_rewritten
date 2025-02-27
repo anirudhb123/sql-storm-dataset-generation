@@ -1,0 +1,60 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(SUM(mc.company_id), 0) AS company_count,
+        COALESCE(SUM(mi.info_type_id), 0) AS info_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS year_rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    GROUP BY 
+        m.id
+),
+actor_roles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ca.person_id) AS unique_actors,
+        STRING_AGG(DISTINCT cn.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        aka_name cn ON ci.person_id = cn.person_id
+    GROUP BY 
+        ci.movie_id
+),
+ranked_movies AS (
+    SELECT 
+        mh.*,
+        ar.unique_actors,
+        ar.cast_names,
+        DENSE_RANK() OVER (ORDER BY mh.company_count DESC, mh.info_count DESC) AS movie_rank
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        actor_roles ar ON mh.movie_id = ar.movie_id
+)
+SELECT 
+    r.title,
+    r.production_year,
+    r.company_count,
+    r.info_count,
+    r.unique_actors,
+    r.cast_names,
+    CASE 
+        WHEN r.movie_rank <= 10 THEN 'Top Tier'
+        WHEN r.movie_rank BETWEEN 11 AND 50 THEN 'Mid Tier'
+        ELSE 'Other'
+    END AS movie_tier,
+    COALESCE((SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = r.movie_id AND mk.keyword_id IS NOT NULL), 0) AS keyword_count
+FROM 
+    ranked_movies r
+WHERE 
+    r.year_rank <= 5 
+    AND r.company_count IS NOT NULL
+    AND r.unique_actors > 5 
+ORDER BY 
+    r.year_rank, r.company_count DESC;

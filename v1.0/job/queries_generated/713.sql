@@ -1,0 +1,48 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER(PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN aka_title t ON ci.movie_id = t.movie_id
+), LatestTitles AS (
+    SELECT 
+        actor_name,
+        movie_title,
+        production_year
+    FROM RankedTitles
+    WHERE rn = 1
+), CompanyInfo AS (
+    SELECT 
+        c.name AS company_name,
+        ct.kind AS company_type,
+        mc.movie_id
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+), MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+SELECT 
+    lt.actor_name,
+    lt.movie_title,
+    lt.production_year,
+    ci.company_name,
+    ci.company_type,
+    COALESCE(mk.keywords, 'No keywords') AS keywords
+FROM LatestTitles lt
+LEFT JOIN CompanyInfo ci ON lt.production_year = (
+    SELECT MAX(t.production_year)
+    FROM CompanyInfo t
+    WHERE t.movie_id = ci.movie_id
+)
+LEFT JOIN MovieKeywords mk ON lt.production_year = mk.movie_id
+WHERE lt.production_year IS NOT NULL
+ORDER BY lt.production_year DESC, lt.actor_name;

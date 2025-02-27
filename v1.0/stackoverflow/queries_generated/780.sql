@@ -1,0 +1,58 @@
+WITH UserScore AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.UpVotes,
+        U.DownVotes,
+        (U.UpVotes - U.DownVotes) AS NetVotes,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+),
+PopularPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        COALESCE(A.AcceptedAnswerCount, 0) AS AcceptedAnswerCount,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 2) AS UpVoteCount,
+        ROW_NUMBER() OVER (ORDER BY P.ViewCount DESC) AS PopularityRank
+    FROM Posts P
+    LEFT JOIN (
+        SELECT ParentId, COUNT(*) AS AcceptedAnswerCount
+        FROM Posts
+        WHERE PostTypeId = 2 AND AcceptedAnswerId IS NOT NULL
+        GROUP BY ParentId
+    ) A ON P.Id = A.ParentId
+    WHERE P.PostTypeId = 1 AND P.ClosedDate IS NULL
+),
+Combined AS (
+    SELECT
+        U.DisplayName,
+        U.Reputation,
+        P.Title,
+        P.ViewCount,
+        P.CommentCount,
+        P.AcceptedAnswerCount,
+        P.UpVoteCount,
+        U.ReputationRank,
+        P.PopularityRank
+    FROM UserScore U
+    JOIN PopularPosts P ON U.Id = P.OwnerUserId
+)
+SELECT
+    DisplayName,
+    Reputation,
+    Title,
+    ViewCount,
+    CommentCount,
+    AcceptedAnswerCount,
+    UpVoteCount,
+    ReputationRank,
+    PopularityRank
+FROM Combined
+WHERE ReputationRank <= 10 OR PopularityRank <= 10
+ORDER BY Reputation DESC, PopularityRank ASC
+LIMIT 20;

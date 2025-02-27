@@ -1,0 +1,53 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, oh.level + 1
+    FROM orders oh
+    JOIN OrderHierarchy rh ON oh.o_orderkey = rh.o_orderkey
+    WHERE oh.o_orderdate > rh.o_orderdate
+),
+CustomerPurchases AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01' OR o.o_orderdate IS NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierPartDetails AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size BETWEEN 1 AND 50
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+)
+SELECT DISTINCT
+    c.c_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_line_items_value,
+    MAX(CASE WHEN r.r_name IS NOT NULL THEN s.s_name ELSE 'Unknown Supplier' END) AS supplier_name,
+    COUNT(DISTINCT o.o_orderkey) AS number_of_orders,
+    COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN l.l_orderkey END) AS returns_count,
+    STRING_AGG(DISTINCT CAST(p.p_name AS VARCHAR), '; ') AS product_names
+FROM
+    CustomerPurchases c
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN SupplierPartDetails sp ON l.l_suppkey = sp.s_suppkey AND l.l_partkey = sp.p_partkey
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN HighValueOrders hvo ON o.o_orderkey = hvo.o_orderkey
+WHERE
+    c.c_acctbal IS NOT NULL
+    AND l.l_shipmode IN ('AIR', 'SEA') 
+GROUP BY c.c_custkey, c.c_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+ORDER BY total_line_items_value DESC
+FETCH FIRST 10 ROWS ONLY;

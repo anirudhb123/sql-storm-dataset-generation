@@ -1,0 +1,76 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        c.kind AS company_type,
+        k.keyword AS movie_keyword,
+        ARRAY_AGG(DISTINCT a.name) AS starring_actors
+    FROM 
+        aka_title AS t
+    JOIN 
+        movie_companies AS mc ON t.id = mc.movie_id
+    JOIN 
+        company_name AS c ON mc.company_id = c.id
+    JOIN 
+        movie_keyword AS mk ON t.id = mk.movie_id
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    JOIN 
+        complete_cast AS cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info AS ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name AS a ON ci.person_id = a.person_id
+    GROUP BY 
+        t.title, t.production_year, c.kind
+),
+ActorRoles AS (
+    SELECT 
+        a.name AS actor_name,
+        rt.role AS role_name,
+        COUNT(*) AS total_roles
+    FROM 
+        cast_info AS ci
+    JOIN 
+        aka_name AS a ON ci.person_id = a.person_id
+    JOIN 
+        role_type AS rt ON ci.role_id = rt.id
+    GROUP BY 
+        a.name, rt.role
+),
+TopKeywords AS (
+    SELECT 
+        keyword,
+        COUNT(*) AS keyword_count
+    FROM 
+        movie_keyword AS mk
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        keyword
+    ORDER BY 
+        keyword_count DESC
+    LIMIT 10
+)
+
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.company_type,
+    md.movie_keyword,
+    md.starring_actors,
+    ar.actor_name,
+    ar.role_name,
+    ar.total_roles,
+    tk.keyword AS top_keyword,
+    tk.keyword_count
+FROM 
+    MovieDetails AS md
+LEFT JOIN 
+    ActorRoles AS ar ON md.starring_actors::text LIKE '%' || ar.actor_name || '%'
+LEFT JOIN 
+    TopKeywords AS tk ON md.movie_keyword = tk.keyword
+WHERE 
+    md.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    md.production_year DESC, ar.total_roles DESC;

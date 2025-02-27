@@ -1,0 +1,69 @@
+WITH RecursivePostVotes AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(V.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(V.DownVoteCount, 0) AS DownVoteCount,
+        COALESCE(V.VoteCount, 0) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY V.CreationDate DESC) AS VoteRank
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+            COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVoteCount,
+            COUNT(*) AS VoteCount,
+            MAX(CreationDate) AS LastVoteDate
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+), 
+PostHistoryAnalysis AS (
+    SELECT 
+        Ph.PostId,
+        Ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        MIN(Ph.CreationDate) AS FirstChangeDate,
+        MAX(Ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory Ph
+    WHERE 
+        Ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        Ph.PostId, Ph.PostHistoryTypeId
+),
+PostStats AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ViewCount,
+        COALESCE(PI.ChangeCount, 0) AS TotalChanges,
+        COALESCE(EV.UpVoteCount - EV.DownVoteCount, 0) AS NetVotes,
+        CASE 
+            WHEN COALESCE(EV.VoteCount, 0) = 0 THEN 'No Votes'
+            WHEN EV.UpVoteCount > EV.DownVoteCount THEN 'Mostly Positive'
+            ELSE 'Mixed or Negative'
+        END AS VoteSentiment
+    FROM 
+        Posts P
+    LEFT JOIN PostHistoryAnalysis PI ON P.Id = PI.PostId
+    LEFT JOIN RecursivePostVotes EV ON P.Id = EV.PostId
+)
+SELECT 
+    PS.Id,
+    PS.Title,
+    PS.ViewCount,
+    PS.TotalChanges,
+    PS.NetVotes,
+    PS.VoteSentiment,
+    RANK() OVER (ORDER BY PS.ViewCount DESC) AS ViewRank
+FROM 
+    PostStats PS
+WHERE 
+    PS.ViewCount > 100 
+ORDER BY 
+    PS.TotalChanges DESC, PS.NetVotes DESC, PS.ViewCount DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

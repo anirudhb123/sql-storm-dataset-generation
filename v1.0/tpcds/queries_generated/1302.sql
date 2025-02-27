@@ -1,0 +1,68 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+RankedCustomers AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        r.total_returned,
+        r.total_return_amount,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY r.total_return_amount DESC) AS return_rank
+    FROM 
+        CustomerDemographics cd
+    LEFT JOIN 
+        CustomerReturns r ON cd.c_customer_sk = r.sr_customer_sk
+)
+SELECT 
+    rc.c_customer_sk,
+    rc.cd_gender,
+    rc.cd_marital_status,
+    rc.cd_education_status,
+    COALESCE(rc.total_returned, 0) AS total_returned,
+    COALESCE(rc.total_return_amount, 0) AS total_return_amount,
+    rc.return_rank
+FROM 
+    RankedCustomers rc
+WHERE 
+    rc.return_rank <= 10
+ORDER BY 
+    rc.cd_gender, rc.total_return_amount DESC
+UNION ALL
+SELECT 
+    ca.ca_address_sk AS customer_address_id,
+    'N/A' AS cd_gender,
+    'N/A' AS cd_marital_status,
+    'N/A' AS cd_education_status,
+    0 AS total_returned,
+    0 AS total_return_amount,
+    0 AS return_rank
+FROM 
+    customer_address ca
+WHERE 
+    NOT EXISTS (SELECT 1 FROM customer c WHERE c.c_current_addr_sk = ca.ca_address_sk);

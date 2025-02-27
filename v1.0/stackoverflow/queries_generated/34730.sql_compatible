@@ -1,0 +1,84 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CAST(Title AS VARCHAR(500)) AS FullTitle,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        CAST(rph.FullTitle || ' -> ' || p.Title AS VARCHAR(500)) AS FullTitle,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COALESCE(v.VoteCount, 0) AS VoteCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(ph.RevisionCount, 0) AS RevisionCount
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+            COUNT(*) AS VoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS RevisionCount
+        FROM PostHistory
+        GROUP BY PostId
+    ) ph ON p.Id = ph.PostId
+),
+PopularPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.VoteCount,
+        ps.CommentCount,
+        ROW_NUMBER() OVER (ORDER BY ps.UpVotes DESC, ps.VoteCount DESC) AS Rank
+    FROM PostStatistics ps
+)
+SELECT 
+    rph.FullTitle AS PostHierarchy,
+    pp.Title,
+    pp.UpVotes,
+    pp.DownVotes,
+    pp.VoteCount,
+    pp.CommentCount,
+    (pp.UpVotes - pp.DownVotes) AS NetVotes,
+    CASE 
+        WHEN pp.UpVotes > pp.DownVotes THEN 'Positive'
+        WHEN pp.UpVotes < pp.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteStatus
+FROM PopularPosts pp
+LEFT JOIN RecursivePostHierarchy rph ON pp.PostId = rph.Id
+WHERE pp.Rank <= 10
+ORDER BY pp.Rank;

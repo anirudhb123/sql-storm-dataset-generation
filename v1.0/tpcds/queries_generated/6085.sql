@@ -1,0 +1,61 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit,
+        d.d_year,
+        d.d_month_seq
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws.ws_item_sk, d.d_year, d.d_month_seq
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(DISTINCT c.c_customer_id) AS total_customers
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+aggregate_sales AS (
+    SELECT 
+        si.ws_item_sk,
+        si.total_quantity_sold,
+        si.total_sales,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        RANK() OVER (PARTITION BY ci.cd_gender ORDER BY si.total_sales DESC) AS sales_rank
+    FROM 
+        sales_data si
+    JOIN 
+        customer_info ci ON si.ws_item_sk = ci.c_customer_sk
+)
+
+SELECT 
+    a.cd_gender,
+    a.cd_marital_status,
+    a.cd_education_status,
+    SUM(a.total_sales) AS aggregate_sales,
+    SUM(a.total_profit) AS aggregate_profit,
+    COUNT(DISTINCT a.ws_item_sk) AS unique_items_sold
+FROM 
+    aggregate_sales a
+WHERE 
+    a.sales_rank <= 5
+GROUP BY 
+    a.cd_gender, a.cd_marital_status, a.cd_education_status
+ORDER BY 
+    aggregate_sales DESC
+LIMIT 10;

@@ -1,0 +1,57 @@
+
+WITH TagCounts AS (
+    SELECT 
+        TRIM(unnest(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><'))) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(*) > 1  
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS QuestionsAsked,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveVotesReceived,
+        AVG(EXTRACT(EPOCH FROM (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - u.CreationDate)) / 86400) AS AverageDaysSinceAccountCreation
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagUserActivities AS (
+    SELECT 
+        t.TagName,
+        u.UserId,
+        u.DisplayName,
+        ua.QuestionsAsked,
+        ua.PositiveVotesReceived,
+        ua.AverageDaysSinceAccountCreation
+    FROM 
+        TagCounts t
+    JOIN 
+        Posts p ON t.TagName = ANY(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><'))
+    JOIN 
+        UserActivity ua ON p.OwnerUserId = ua.UserId
+)
+SELECT 
+    t.TagName,
+    COUNT(DISTINCT t.UserId) AS UniqueUsers,
+    AVG(t.QuestionsAsked) AS AvgQuestionsAsked,
+    AVG(t.PositiveVotesReceived) AS AvgPositiveVotes,
+    AVG(t.AverageDaysSinceAccountCreation) AS AvgDaysSinceCreation
+FROM 
+    TagUserActivities t
+GROUP BY 
+    t.TagName
+ORDER BY 
+    UniqueUsers DESC, AvgPositiveVotes DESC;

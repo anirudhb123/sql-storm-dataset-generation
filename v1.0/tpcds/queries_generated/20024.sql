@@ -1,0 +1,67 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.return_qty) AS total_return_qty,
+        ROW_NUMBER() OVER (PARTITION BY wr.returning_customer_sk ORDER BY SUM(wr.return_qty) DESC) AS return_rank
+    FROM web_returns wr
+    WHERE wr.return_qty > 0
+    GROUP BY wr.returning_customer_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        SUM(is.ws_quantity) AS total_sold_qty,
+        COALESCE(avg(ws.ws_sales_price), 0) AS avg_selling_price
+    FROM item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_item_desc, i.i_current_price
+),
+ExtensiveReport AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(rr.returning_customer_sk) AS return_count,
+        COALESCE(SUM(ir.total_return_qty), 0) AS total_returns,
+        COALESCE(SUM(ir.total_return_qty * id.avg_selling_price), 0) AS total_return_value
+    FROM CustomerDetails cd
+    LEFT JOIN RankedReturns rr ON cd.c_customer_sk = rr.returning_customer_sk
+    LEFT JOIN ItemDetails id ON rr.returning_customer_sk = id.i_item_sk
+    GROUP BY cd.c_customer_sk, cd.c_first_name, cd.c_last_name, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    er.c_customer_sk,
+    er.c_first_name,
+    er.c_last_name,
+    er.cd_gender,
+    er.cd_marital_status,
+    er.return_count,
+    er.total_returns,
+    er.total_return_value,
+    CASE 
+        WHEN er.total_return_value IS NULL THEN 'No Returns'
+        WHEN er.total_return_value > 1000 THEN 'High Return Value'
+        ELSE 'Low Return Value'
+    END AS return_value_category
+FROM ExtensiveReport er
+WHERE 
+    (er.return_count > 5 OR 
+    (er.total_return_value > 500 AND er.return_count IS NOT NULL))
+ORDER BY return_value_category DESC, total_return_value DESC
+FETCH FIRST 100 ROWS ONLY;

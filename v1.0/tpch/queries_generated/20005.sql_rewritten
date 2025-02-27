@@ -1,0 +1,87 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        CAST(s.s_name AS VARCHAR(100)) AS full_name,
+        1 AS level
+    FROM 
+        supplier s
+    UNION ALL
+    SELECT 
+        p.s_suppkey,
+        p.s_name,
+        p.s_acctbal,
+        CONCAT(sh.full_name, ' -> ', p.s_name),
+        sh.level + 1
+    FROM 
+        supplier p
+    INNER JOIN 
+        SupplierHierarchy sh ON p.s_suppkey = sh.s_suppkey
+    WHERE 
+        p.s_acctbal > sh.s_acctbal
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey,
+        p.p_name
+),
+QualifiedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (
+            SELECT AVG(o2.o_totalprice) 
+            FROM orders o2 
+            WHERE o2.o_orderdate >= DATEADD(day, -30, GETDATE())
+        )
+)
+SELECT 
+    nd.n_name AS nation_name,
+    rc.r_name AS region_name,
+    pp.p_name AS part_name,
+    COUNT(DISTINCT l.l_orderkey) AS total_orders,
+    MAX(l.l_extendedprice) AS max_extended_price,
+    AVG(CASE WHEN l.l_discount > 0 THEN l.l_quantity END) AS average_discounted_qty,
+    STRING_AGG(DISTINCT sh.full_name, ', ') AS supplier_path
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation nd ON c.c_nationkey = nd.n_nationkey
+JOIN 
+    region rc ON nd.n_regionkey = rc.r_regionkey
+JOIN 
+    PartDetails pp ON l.l_partkey = pp.p_partkey
+LEFT JOIN 
+    SupplierHierarchy sh ON l.l_suppkey = sh.s_suppkey
+WHERE 
+    l.l_returnflag = 'R' 
+    AND l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY 
+    nd.n_name, rc.r_name, pp.p_name
+HAVING 
+    MAX(l.l_extendedprice) > (
+        SELECT MIN(total_supply_cost) 
+        FROM PartDetails 
+        WHERE supplier_count > 5
+    )
+ORDER BY 
+    total_orders DESC, region_name, nation_name;

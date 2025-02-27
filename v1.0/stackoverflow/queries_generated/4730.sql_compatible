@@ -1,0 +1,92 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PopularPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.LastActivityDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score
+    HAVING 
+        COUNT(DISTINCT c.Id) > 5 OR COUNT(DISTINCT v.Id) > 10
+),
+PostHistoryAggregate AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+SELECT 
+    u.DisplayName AS UserName,
+    us.Reputation,
+    rp.PostId,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate,
+    pp.ViewCount AS PopularPostViewCount,
+    pp.Score AS PopularPostScore,
+    pha.LastChangeDate,
+    pha.ChangeCount
+FROM 
+    UserStatistics us
+JOIN 
+    RecentPosts rp ON us.UserId = rp.OwnerUserId AND rp.rn = 1
+JOIN 
+    PopularPosts pp ON rp.PostId = pp.Id
+LEFT JOIN 
+    PostHistoryAggregate pha ON rp.PostId = pha.PostId
+WHERE 
+    us.PostCount > 0
+ORDER BY 
+    us.Reputation DESC, pp.ViewCount DESC
+LIMIT 100;

@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RankWithinType,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS Upvotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS Downvotes,
+        COALESCE(NULLIF(SUBSTRING_INDEX(p.Tags, '><', -1), ''), '<no tags>') AS LastTag 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+RecentEdits AS (
+    SELECT 
+        h.PostId, 
+        MAX(h.CreationDate) AS LastEditDate, 
+        STRING_AGG(DISTINCT h.UserDisplayName, ', ') AS Editors
+    FROM 
+        PostHistory h
+    WHERE 
+        h.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        h.PostId
+),
+TagCounts AS (
+    SELECT 
+        p.Id AS PostId, 
+        t.TagName, 
+        COUNT(t.Id) AS TagUsageCount
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.WikiPostId = p.Id 
+    GROUP BY 
+        p.Id, t.TagName
+),
+PostStats AS (
+    SELECT 
+        rp.*, 
+        re.LastEditDate, 
+        re.Editors,
+        COALESCE(tc.TagName, '<no tags>') AS MostUsedTag,
+        COALESCE(tc.TagUsageCount, 0) AS TagUsageCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentEdits re ON rp.PostId = re.PostId
+    LEFT JOIN 
+        (SELECT PostId, TagName, TagUsageCount FROM TagCounts ORDER BY TagUsageCount DESC LIMIT 1) tc ON rp.PostId = tc.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.ViewCount,
+    ps.Score,
+    ps.RankWithinType,
+    ps.LastEditDate,
+    ps.Editors,
+    ps.MostUsedTag,
+    ps.TagUsageCount,
+    CASE 
+        WHEN ps.Upvotes > ps.Downvotes THEN 'Positive Engagement'
+        WHEN ps.Upvotes < ps.Downvotes THEN 'Negative Engagement'
+        ELSE 'Neutral Engagement'
+    END AS EngagementStatus,
+    CASE 
+        WHEN ps.TagUsageCount > 10 THEN 'Highly Tagged'
+        WHEN ps.TagUsageCount BETWEEN 5 AND 10 THEN 'Moderately Tagged'
+        ELSE 'Sparingly Tagged'
+    END AS TaggingStatus,
+    CASE 
+        WHEN ps.ViewCount::FLOAT / NULLIF(NULLIF(EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - ps.CreationDate)), 0), 0) > 0 THEN 'Trending'
+        ELSE 'Not Trending'
+    END AS TrendStatus
+FROM 
+    PostStats ps
+WHERE 
+    ps.ViewCount > (
+        SELECT AVG(ViewCount) FROM Posts WHERE CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    )
+    AND ps.LastEditDate IS NOT NULL
+ORDER BY 
+    ps.RankWithinType, ps.Score DESC
+LIMIT 100;

@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_address, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank,
+        o.o_orderdate
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+TotalSales AS (
+    SELECT
+        c.c_nationkey,
+        SUM(RO.total_sales) AS total_order_sales
+    FROM customer c
+    JOIN RankedOrders RO ON c.c_custkey = RO.o_custkey
+    GROUP BY c.c_nationkey
+),
+PopularSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    RANK() OVER (ORDER BY TS.total_order_sales DESC) AS nation_rank,
+    COALESCE(SH.s_name, 'No supplier') AS supplier_name,
+    PS.total_supply_cost,
+    TS.total_order_sales
+FROM nation n
+LEFT JOIN TotalSales TS ON n.n_nationkey = TS.c_nationkey
+LEFT JOIN SupplierHierarchy SH ON n.n_nationkey = SH.s_suppkey
+LEFT JOIN PopularSuppliers PS ON SH.s_suppkey = PS.ps_suppkey
+WHERE n.r_regionkey = (SELECT r_regionkey FROM region WHERE r_name = 'Asia')
+ORDER BY nation_rank, supplier_name;

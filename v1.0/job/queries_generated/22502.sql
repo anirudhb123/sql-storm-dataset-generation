@@ -1,0 +1,84 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) as rank,
+        COUNT(c.movie_id) OVER (PARTITION BY t.id) as cast_count
+    FROM 
+        aka_title t 
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL AND 
+        (t.title ILIKE '%fantasy%' OR 
+        t.title ILIKE '%adventure%')
+),
+TopMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year, 
+        rank, 
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5  -- Limit to top 5 titles per production year
+),
+UniqueMovies AS (
+    SELECT 
+        tm.*, 
+        COALESCE(r.role, 'Unknown') AS role
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        (SELECT DISTINCT ON (c.movie_id) c.movie_id, rt.role 
+         FROM cast_info c 
+         JOIN role_type rt ON c.role_id = rt.id 
+         ORDER BY c.movie_id, rt.role_id) r ON tm.movie_id = r.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        um.movie_id,
+        um.title,
+        um.production_year,
+        um.role,
+        mii.info AS additional_info,
+        mi.note AS movie_note
+    FROM 
+        UniqueMovies um
+    LEFT JOIN 
+        movie_info_idx mii ON um.movie_id = mii.movie_id AND mii.info_type_id = (SELECT id FROM info_type WHERE info LIKE 'Genre') 
+    LEFT JOIN 
+        movie_info mi ON um.movie_id = mi.movie_id
+)
+SELECT 
+    m.movie_id, 
+    m.title, 
+    m.production_year,
+    m.role, 
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    STRING_AGG(DISTINCT mn.name, ', ' ORDER BY mn.name) AS associated_names,
+    SUM(CASE WHEN m.additional_info IS NOT NULL THEN 1 ELSE 0 END) AS has_additional_info,
+    COUNT(DISTINCT kw.keyword) FILTER (WHERE kw.keyword IS NOT NULL) AS keyword_count
+FROM 
+    MovieInfo m
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    aka_name mn ON mn.person_id IN (SELECT DISTINCT person_id FROM cast_info WHERE movie_id = m.movie_id)
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+GROUP BY 
+    m.movie_id, m.title, m.production_year, m.role
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1 AND 
+    SUM(CASE WHEN kw.keyword IS NOT NULL THEN 1 ELSE 0 END) > 2
+ORDER BY 
+    m.production_year DESC, 
+    m.title ASC;

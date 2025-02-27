@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+        LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+        LEFT JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2022
+        AND d.d_month_seq BETWEEN 1 AND 12
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+),
+ReturnInfo AS (
+    SELECT 
+        sr.returned_customer_sk,
+        SUM(sr.sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT sr.sr_item_sk) AS unique_items_returned
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.sr_return_quantity > 0
+    GROUP BY 
+        sr.returned_customer_sk
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_customer_sk AS returned_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(rs.total_sales, 0) AS total_sales,
+        COALESCE(ri.total_returns, 0) AS total_returns
+    FROM 
+        customer c
+        LEFT JOIN ReturnInfo ri ON c.c_customer_sk = ri.returned_customer_sk
+        LEFT JOIN RankedSales rs ON c.c_customer_id = rs.c_customer_id
+)
+SELECT 
+    fc.c_first_name,
+    fc.c_last_name,
+    fc.total_sales,
+    fc.total_returns,
+    CASE 
+        WHEN fc.total_sales IS NULL THEN 'Unknown'
+        WHEN fc.total_sales > 1000 THEN 'High'
+        WHEN fc.total_sales > 500 AND fc.total_sales <= 1000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category,
+    CASE 
+        WHEN fc.total_returns > 0 THEN 'Returns Made' 
+        ELSE 'No Returns' 
+    END AS return_status
+FROM 
+    FilteredCustomers fc
+WHERE 
+    (fc.total_returns IS NOT NULL AND fc.total_returns > 0) OR 
+    (fc.total_sales IS NOT NULL AND fc.total_sales > 0)
+ORDER BY 
+    fc.total_sales DESC,
+    fc.total_returns ASC
+LIMIT 50;

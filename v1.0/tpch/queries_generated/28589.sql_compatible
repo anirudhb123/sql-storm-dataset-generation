@@ -1,0 +1,48 @@
+
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        n.n_name AS nation_name,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_address, n.n_name
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name AS customer_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        AVG(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_ratio
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, c.c_name
+)
+SELECT 
+    sd.s_name,
+    sd.nation_name,
+    sd.supplied_parts,
+    ROUND(sd.total_supply_cost, 2) AS total_supply_cost,
+    os.customer_name,
+    os.total_order_value,
+    ROUND(os.return_ratio * 100, 2) AS return_percentage
+FROM 
+    SupplierDetails sd
+JOIN 
+    OrderSummary os ON sd.supplied_parts > 0 
+ORDER BY 
+    sd.total_supply_cost DESC, os.total_order_value DESC
+LIMIT 100;

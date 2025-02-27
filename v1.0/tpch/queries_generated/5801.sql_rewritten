@@ -1,0 +1,53 @@
+WITH RegionalSales AS (
+    SELECT 
+        r.r_name AS region,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1996-01-01'
+    GROUP BY 
+        r.r_name
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CombinedSales AS (
+    SELECT 
+        rs.region,
+        rs.total_sales,
+        sp.supplier_cost,
+        rs.total_sales / NULLIF(sp.supplier_cost, 0) AS sales_to_cost_ratio
+    FROM 
+        RegionalSales rs
+    JOIN 
+        SupplierParts sp ON rs.region = (SELECT n.r_name FROM nation n JOIN region r ON n.n_regionkey = r.r_regionkey WHERE r.r_regionkey = (SELECT r_regionkey FROM nation WHERE n_name = rs.region LIMIT 1))
+)
+SELECT 
+    region,
+    total_sales,
+    supplier_cost,
+    sales_to_cost_ratio
+FROM 
+    CombinedSales
+WHERE 
+    sales_to_cost_ratio > 1
+ORDER BY 
+    sales_to_cost_ratio DESC
+LIMIT 10;

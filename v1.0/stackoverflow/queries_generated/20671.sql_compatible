@@ -1,0 +1,60 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 YEAR)
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionCount,
+        AnswerCount,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC, QuestionCount DESC) AS UserRank
+    FROM 
+        UserPostStats
+    WHERE 
+        TotalScore > 0
+)
+SELECT 
+    u.DisplayName AS TopUser,
+    u.TotalScore,
+    COALESCE(rp.PostId, -1) AS TopPostId,
+    COALESCE(rp.Title, 'No Posts') AS TopPostTitle,
+    COALESCE(rp.Score, -1) AS HighestScore,
+    CASE 
+        WHEN u.LastPostDate IS NULL THEN 'No Activity' 
+        WHEN u.LastPostDate < DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 30 DAY) THEN 'Inactive' 
+        ELSE 'Active' 
+    END AS ActivityStatus
+FROM 
+    TopUsers u
+LEFT JOIN 
+    RankedPosts rp ON u.UserId = rp.OwnerUserId AND rp.OwnerPostRank = 1
+WHERE 
+    u.UserRank <= 10
+ORDER BY 
+    u.TotalScore DESC;

@@ -1,0 +1,57 @@
+
+WITH RECURSIVE recursive_supp AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal, 
+           CAST(s.s_name AS VARCHAR(40)) AS enriched_name
+    FROM supplier s 
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000.00
+    UNION ALL
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal * 1.1, 
+           CONCAT(r.enriched_name, ' + ', s.s_name)
+    FROM supplier s 
+    JOIN recursive_supp r ON s.s_suppkey <> r.s_suppkey AND r.s_acctbal < s.s_acctbal
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+),
+part_supplier AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           ps.ps_availqty, 
+           ps.ps_supplycost, 
+           ps.ps_comment,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM part p 
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty IS NOT NULL AND ps.ps_availqty > 0
+),
+average_cost AS (
+    SELECT p.p_partkey, 
+           AVG(ps.ps_supplycost) AS avg_cost
+    FROM part p 
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT DISTINCT 
+    ns.n_name,
+    ns.n_comment,
+    CASE 
+        WHEN ps.ps_supplycost IS NULL THEN 'Cost Not Available'
+        ELSE FORMAT(ps.ps_supplycost, 'C', 'en-US')
+    END AS formatted_cost,
+    rs.enriched_name,
+    pc.avg_cost
+FROM nation ns
+LEFT JOIN supplier s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN part_supplier ps ON s.s_suppkey = ps.s_suppkey AND ps.rn = 1
+LEFT JOIN average_cost pc ON ps.p_partkey = pc.p_partkey
+LEFT JOIN recursive_supp rs ON s.s_suppkey = rs.s_suppkey
+WHERE ns.n_regionkey LIKE '%' || (SELECT MAX(r.r_regionkey) FROM region r) 
+  AND (pc.avg_cost IS NULL OR pc.avg_cost < 20.00)
+  AND (rs.enriched_name IS NOT NULL OR s.s_name IS NOT NULL)
+  AND (CASE 
+            WHEN s.s_acctbal IS NULL THEN 1 
+            ELSE (CASE WHEN s.s_acctbal < 5000.00 THEN 1 ELSE 0 END) 
+        END) = 0
+ORDER BY ns.n_name, s.s_name;

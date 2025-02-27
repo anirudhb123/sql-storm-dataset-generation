@@ -1,0 +1,26 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS company_type,
+    ki.keyword AS movie_keyword,
+    pi.info AS person_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    keyword ki ON t.id = ki.movie_id
+JOIN 
+    person_info pi ON a.person_id = pi.person_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2020
+    AND pi.note IS NOT NULL
+ORDER BY 
+    t.production_year DESC, 
+    a.name;

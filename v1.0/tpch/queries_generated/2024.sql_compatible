@@ -1,0 +1,72 @@
+
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+RankedRegions AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY c.c_acctbal DESC) AS rank
+    FROM 
+        CustomerRegion c
+)
+SELECT 
+    s.s_name,
+    ss.total_sales,
+    cr.nation_name,
+    cr.region_name,
+    cr.c_name AS customer_name,
+    cr.c_acctbal
+FROM 
+    SupplierSales ss
+LEFT JOIN 
+    RankedRegions cr ON ss.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT l.l_partkey 
+            FROM lineitem l 
+            JOIN orders o ON l.l_orderkey = o.o_orderkey 
+            WHERE o.o_totalprice < 10000
+        ) 
+        LIMIT 1
+    )
+WHERE 
+    cr.rank <= 5
+ORDER BY 
+    ss.total_sales DESC, 
+    cr.region_name, 
+    customer_name;

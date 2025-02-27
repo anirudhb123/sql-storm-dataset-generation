@@ -1,0 +1,106 @@
+
+WITH RECURSIVE address_paths AS (
+    SELECT 
+        ca_address_sk,
+        ca_city,
+        ca_state,
+        ca_country,
+        1 AS path_level,
+        CAST(ca_address_sk AS VARCHAR(255)) AS path 
+    FROM customer_address
+    WHERE ca_state IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ca_address_sk,
+        ca_city,
+        ca_state,
+        ca_country,
+        ap.path_level + 1,
+        CAST(CONCAT(ap.path, '->', ca_address_sk) AS VARCHAR(255))
+    FROM customer_address ca
+    JOIN address_paths ap ON ca.ca_address_sk <> ap.ca_address_sk
+    WHERE ca_state IS NOT NULL AND ap.path_level < 5
+),
+
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender,
+        COUNT(DISTINCT s.ss_ticket_number) AS total_transactions,
+        SUM(s.ss_net_profit) AS total_profit,
+        MAX(s.ss_net_paid_inc_tax) AS highest_purchase,
+        AVG(s.ss_net_profit) AS avg_profit
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_sales s ON c.c_customer_sk = s.ss_customer_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender
+),
+
+filtered_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.gender,
+        cs.total_transactions,
+        cs.total_profit,
+        cs.highest_purchase,
+        cs.avg_profit
+    FROM customer_stats cs
+    WHERE cs.total_transactions > 0
+    AND cs.total_profit < 0
+),
+
+country_stats AS (
+    SELECT 
+        ca.ca_country,
+        COUNT(DISTINCT fs.c_customer_sk) AS negative_profit_customers,
+        SUM(fs.total_transactions) AS total_negative_transactions
+    FROM customer_address ca
+    JOIN filtered_customers fs ON fs.c_customer_sk = (
+        SELECT c.c_customer_sk 
+        FROM customer c 
+        WHERE c.c_current_addr_sk = ca.ca_address_sk
+        LIMIT 1
+    )
+    GROUP BY ca.ca_country
+)
+
+SELECT 
+    ca.ca_country,
+    IFNULL(cs.negative_profit_customers, 0) AS negative_profit_customers,
+    IFNULL(cs.total_negative_transactions, 0) AS total_negative_transactions,
+    ROW_NUMBER() OVER (PARTITION BY ca.ca_country ORDER BY cs.negative_profit_customers DESC) AS rank
+FROM customer_address ca
+LEFT JOIN country_stats cs ON ca.ca_country = cs.ca_country
+WHERE ca.ca_state NOT IN ('NI', 'NY')
+ORDER BY rank, ca.ca_country;
+
+SELECT 
+    DISTINCT ca.ca_city, 
+    COUNT(DISTINCT fs.c_customer_sk) AS unique_customers,
+    SUM(fs.total_transactions) AS total_transactions
+FROM customer_address ca
+JOIN filtered_customers fs ON fs.c_customer_sk = (
+    SELECT c.c_customer_sk 
+    FROM customer c 
+    WHERE c.c_current_addr_sk = ca.ca_address_sk
+    LIMIT 1
+)
+WHERE ca.ca_city IS NOT NULL 
+GROUP BY ca.ca_city
+HAVING SUM(fs.total_profit) < -1000;
+
+SELECT 
+    'Total Negative Profit Customers' AS Info,
+    COUNT(DISTINCT fs.c_customer_sk) AS Customer_Count
+FROM filtered_customers fs
+WHERE EXISTS (
+    SELECT 1
+    FROM warehouse w
+    WHERE w.w_warehouse_name LIKE '%Extreme%'
+);

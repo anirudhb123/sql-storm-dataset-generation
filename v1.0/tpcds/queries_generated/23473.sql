@@ -1,0 +1,88 @@
+
+WITH customer_summary AS (
+    SELECT 
+        c.c_customer_id, 
+        SUM(coalesce(ord.amount, 0)) AS total_spent,
+        COUNT(ord.order_id) AS order_count,
+        CASE 
+            WHEN COUNT(ord.order_id) = 0 THEN 'no_orders'
+            WHEN SUM(coalesce(ord.amount, 0)) > 1000 THEN 'high_value'
+            WHEN SUM(coalesce(ord.amount, 0)) BETWEEN 500 AND 1000 THEN 'medium_value'
+            ELSE 'low_value'
+        END AS customer_value_segment
+    FROM 
+        customer c
+    LEFT JOIN (
+        SELECT 
+            ws_bill_customer_sk AS customer_sk, 
+            ws_net_paid AS amount,
+            ws_order_number AS order_id
+        FROM 
+            web_sales
+        UNION ALL
+        SELECT 
+            cs_bill_customer_sk AS customer_sk, 
+            cs_net_paid AS amount,
+            cs_order_number AS order_id
+        FROM 
+            catalog_sales
+        UNION ALL
+        SELECT 
+            ss_customer_sk AS customer_sk, 
+            ss_net_paid AS amount,
+            ss_ticket_number AS order_id
+        FROM 
+            store_sales
+    ) ord ON c.c_customer_sk = ord.customer_sk
+    GROUP BY 
+        c.c_customer_id
+), 
+address_summary AS (
+    SELECT 
+        ca.ca_address_id,
+        COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+        MAX(ca.ca_zip) AS max_zip,
+        MIN(ca.ca_zip) AS min_zip
+    FROM 
+        customer_address ca
+    JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_address_id
+),
+monthly_sales AS (
+    SELECT 
+        d.d_month_seq AS month,
+        SUM(ws.net_paid) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk 
+    GROUP BY 
+        d.d_month_seq
+    ORDER BY 
+        month
+)
+SELECT 
+    cs.c_customer_id,
+    cs.total_spent,
+    cs.order_count,
+    asu.unique_customers,
+    asu.max_zip,
+    asu.min_zip,
+    ms.month,
+    ms.total_sales,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No Spending'
+        WHEN cs.total_spent != 0 THEN cs.total_spent / NULLIF(ms.total_sales, 0) 
+        ELSE 0 
+    END AS spending_ratio,
+    ROW_NUMBER() OVER (PARTITION BY cs.customer_value_segment ORDER BY cs.total_spent DESC) AS rank
+FROM 
+    customer_summary cs
+LEFT JOIN address_summary asu ON asu.unique_customers > 0
+LEFT JOIN monthly_sales ms ON ms.month IN (SELECT d_month_seq FROM date_dim WHERE d_year = 2023)
+WHERE 
+    (cs.customer_value_segment = 'high_value' OR cs.customer_value_segment = 'medium_value')
+    AND cs.total_spent IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC, 
+    rank;

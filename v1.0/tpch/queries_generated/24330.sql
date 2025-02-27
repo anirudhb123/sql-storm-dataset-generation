@@ -1,0 +1,93 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS Rank
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (
+            SELECT 
+                AVG(ps1.ps_supplycost * ps1.ps_availqty)
+            FROM 
+                partsupp ps1
+        )
+),
+FrequentCustomers AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS OrderCount
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        COUNT(o.o_orderkey) >= (
+            SELECT 
+                COUNT(o2.o_orderkey)
+            FROM 
+                orders o2
+            WHERE 
+                o2.o_orderdate >= DATEADD(MONTH, -12, GETDATE())
+            GROUP BY 
+                o2.o_custkey
+            ORDER BY 
+                COUNT(o2.o_orderkey) DESC
+            OFFSET 5 ROWS FETCH NEXT 1 ROWS ONLY
+        )
+)
+SELECT 
+    p.p_name,
+    r.r_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS Revenue,
+    COUNT(DISTINCT o.o_orderkey) AS NumberOfOrders,
+    COALESCE(MAX(s.s_name), 'Not Available') AS SupplierName
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    RankedSuppliers s ON l.l_suppkey = s.s_suppkey AND s.Rank = 1
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_retailprice > (
+        SELECT 
+            AVG(p1.p_retailprice)
+        FROM 
+            part p1
+    )
+AND 
+    EXISTS (
+        SELECT 
+            1
+        FROM 
+            HighValueParts h
+        WHERE 
+            h.ps_partkey = p.p_partkey
+    )
+AND 
+    o.o_orderstatus IN ('O', 'P')
+GROUP BY 
+    p.p_name, r.r_name
+HAVING 
+    Revenue > 100000
+ORDER BY 
+    Revenue DESC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

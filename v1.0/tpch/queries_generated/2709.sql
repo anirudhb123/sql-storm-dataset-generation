@@ -1,0 +1,75 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_supplycost ASC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS most_recent_order
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        co.order_count,
+        co.total_spent
+    FROM 
+        CustomerOrders co
+    JOIN 
+        customer c ON co.c_custkey = c.c_custkey
+    WHERE 
+        co.total_spent > 10000
+),
+PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_brand
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_brand LIKE 'Brand%' AND
+        ps.ps_availqty > 0
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ps.ps_supplycost,
+    s.s_name AS supplier_name,
+    c.c_name AS top_customer_name,
+    tc.total_spent
+FROM 
+    PartSupplierDetails ps
+LEFT JOIN 
+    RankedSuppliers s ON ps.p_partkey = s.s_suppkey
+LEFT JOIN 
+    TopCustomers tc ON s.s_suppkey = tc.c_custkey
+WHERE 
+    ps.ps_supplycost < (
+        SELECT AVG(ps2.ps_supplycost)
+        FROM partsupp ps2
+        WHERE ps2.ps_partkey = ps.p_partkey
+    )
+ORDER BY 
+    p.p_partkey, s.s_supplycost;

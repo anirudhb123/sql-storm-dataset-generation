@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT cc.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT cc.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info cc ON t.id = cc.movie_id
+    GROUP BY 
+        t.id
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        m.id AS movie_id, 
+        k.keyword
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    tm.title, 
+    tm.production_year, 
+    STRING_AGG(mk.keyword, ', ') AS keywords,
+    COALESCE(n.name, 'Unknown') AS main_actor,
+    COUNT(DISTINCT mp.id) AS num_production_companies
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieKeywords mk ON tm.title = mk.movie_id
+LEFT JOIN 
+    movie_companies mp ON tm.id = mp.movie_id
+LEFT JOIN 
+    complete_cast cc ON tm.id = cc.movie_id
+LEFT JOIN 
+    aka_name n ON cc.subject_id = n.person_id
+WHERE 
+    tm.production_year BETWEEN 2000 AND 2022
+GROUP BY 
+    tm.title, tm.production_year, n.name
+ORDER BY 
+    tm.production_year DESC;

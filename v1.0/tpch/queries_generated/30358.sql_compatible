@@ -1,0 +1,51 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, CAST(s.s_name AS VARCHAR(255)) AS path
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, CONCAT(sh.path, ' -> ', s.s_name)
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey <> sh.s_suppkey
+),
+RegionalPerformance AS (
+    SELECT n.n_name, COUNT(DISTINCT c.c_custkey) AS unique_customers,
+           SUM(o.o_totalprice) AS total_order_value,
+           AVG(s.s_acctbal) AS avg_account_balance
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN customer c ON s.s_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY n.n_name
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+)
+SELECT r.r_name, 
+       rp.unique_customers, 
+       rp.total_order_value,
+       SUM(CASE WHEN lo.l_discount > 0 THEN lo.l_extendedprice ELSE 0 END) AS total_discounted_sales,
+       COALESCE(SUM(si.s_acctbal), 0) AS supplier_account_balance,
+       si.path
+FROM region r
+LEFT JOIN RegionalPerformance rp ON r.r_regionkey = (
+    SELECT n.n_regionkey 
+    FROM nation n
+    WHERE n.n_name = r.r_name
+)
+LEFT JOIN RankedOrders o ON rp.unique_customers > 10
+LEFT JOIN lineitem lo ON o.o_orderkey = lo.l_orderkey
+LEFT JOIN SupplierHierarchy si ON si.s_nationkey IN (
+    SELECT DISTINCT c.c_nationkey 
+    FROM customer c
+    WHERE c.c_custkey IN (SELECT o_custkey FROM orders WHERE o_orderdate >= '1997-01-01')
+)
+GROUP BY r.r_name, rp.unique_customers, rp.total_order_value, si.path
+HAVING rp.total_order_value IS NOT NULL
+ORDER BY rp.total_order_value DESC, r.r_name;

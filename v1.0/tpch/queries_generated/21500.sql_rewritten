@@ -1,0 +1,74 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueSuppliers AS (
+    SELECT 
+        r.r_name,
+        n.n_name,
+        rs.s_name,
+        rs.total_supply_value
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rank <= 5
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-10-01'
+    GROUP BY 
+        o.o_orderkey
+),
+CustomerOrderCount AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    cu.c_custkey,
+    cu.c_name,
+    cu.order_count,
+    COALESCE(s.total_supply_value, 0) AS supplier_value,
+    os.total_price AS total_order_value,
+    CASE 
+        WHEN cu.order_count > 10 THEN 'Frequent'
+        ELSE 'Occasional'
+    END AS customer_type
+FROM 
+    CustomerOrderCount cu
+LEFT JOIN 
+    HighValueSuppliers s ON cu.order_count > 0 AND s.total_supply_value IS NOT NULL
+JOIN 
+    OrderSummary os ON cu.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = os.o_orderkey)
+WHERE 
+    s.total_supply_value > 10000 OR s.total_supply_value IS NULL
+ORDER BY 
+    cu.order_count DESC, supplier_value DESC;

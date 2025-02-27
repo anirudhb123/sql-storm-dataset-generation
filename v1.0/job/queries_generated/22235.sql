@@ -1,0 +1,82 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(ct.kind, 'Unknown') AS company_type,
+        COALESCE(cn.name, 'No Company') AS company_name,
+        CASE 
+            WHEN mt.production_year IS NULL THEN 'No Year' 
+            WHEN mt.production_year < 2000 THEN 'Before 2000' 
+            ELSE 'After 2000' 
+        END AS production_period
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id 
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        COALESCE(c.company_type, 'Unknown') AS company_type,
+        COALESCE(cn.name, 'No Company') AS company_name,
+        CASE 
+            WHEN at.production_year IS NULL THEN 'No Year' 
+            WHEN at.production_year < 2000 THEN 'Before 2000' 
+            ELSE 'After 2000' 
+        END AS production_period
+    FROM 
+        movie_link ml 
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    LEFT JOIN 
+        movie_companies mc ON at.id = mc.movie_id
+    LEFT JOIN 
+        (SELECT DISTINCT mc2.movie_id, ct.kind AS company_type 
+         FROM movie_companies mc2
+         JOIN company_type ct ON mc2.company_type_id = ct.id) c ON c.movie_id = ml.linked_movie_id
+    WHERE 
+        ml.link_type_id IN (SELECT id FROM link_type WHERE link LIKE 'sequel%')
+),
+AggregatedMovies AS (
+    SELECT 
+        mh.*,
+        SUM(CASE WHEN mh.production_period = 'Before 2000' THEN 1 ELSE 0 END) OVER (PARTITION BY mh.company_name) AS count_before_2000,
+        COUNT(*) OVER (PARTITION BY mh.phone_type) AS total_movies
+    FROM 
+        MovieHierarchy mh
+),
+FinalResults AS (
+    SELECT 
+        am.title,
+        am.production_year,
+        am.company_type,
+        am.company_name,
+        am.count_before_2000,
+        am.total_movies,
+        CONCAT(am.title, ' | ', COALESCE(am.company_name, 'Unknown Company')) AS title_company_info
+    FROM 
+        AggregatedMovies am
+    WHERE 
+        am.company_name IS NOT NULL
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_movies IS NULL OR total_movies = 0 THEN 'No Movies'
+        WHEN count_before_2000 = total_movies THEN 'All Before 2000'
+        ELSE 'Mixed Production Years'
+    END AS movie_production_status
+FROM 
+    FinalResults
+ORDER BY 
+    total_movies DESC, production_year ASC, title ASC;

@@ -1,0 +1,82 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title ASC) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorCounts AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+MoviesWithInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(ac.actor_count, 0) AS total_actors,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords_list
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        ActorCounts ac ON m.id = ac.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id, m.title, ac.actor_count
+),
+MovieRatings AS (
+    SELECT 
+        movie_id,
+        AVG(rating) AS avg_rating
+    FROM 
+        (
+            SELECT 
+                movie_id,
+                COALESCE(rating, 0) AS rating
+            FROM 
+                movie_info
+            WHERE 
+                info_type_id IN (SELECT id FROM info_type WHERE info = 'rating')
+        ) sub
+    GROUP BY 
+        movie_id
+)
+SELECT 
+    m.movie_id,
+    m.movie_title,
+    m.total_actors,
+    COALESCE(r.avg_rating, 'N/A') AS average_rating,
+    CASE 
+        WHEN m.total_actors > 10 THEN 'Large Cast'
+        WHEN m.total_actors BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category,
+    CASE 
+        WHEN m.keywords_list IS NOT NULL THEN LENGTH(m.keywords_list) 
+        ELSE 0 
+    END AS keyword_length
+FROM 
+    MoviesWithInfo m
+LEFT JOIN 
+    MovieRatings r ON m.movie_id = r.movie_id
+WHERE 
+    (r.avg_rating IS NOT NULL OR m.total_actors > 5) 
+    AND (m.keywords_list IS NULL OR m.keywords_list LIKE '%Drama%')
+ORDER BY 
+    m.total_actors DESC, 
+    m.movie_title ASC
+LIMIT 50;

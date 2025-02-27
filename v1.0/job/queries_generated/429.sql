@@ -1,0 +1,67 @@
+WITH ranked_titles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS year_rank
+    FROM
+        title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+person_roles AS (
+    SELECT
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM
+        cast_info c
+    JOIN
+        role_type r ON c.role_id = r.id
+    GROUP BY
+        c.person_id
+),
+companies AS (
+    SELECT
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        MAX(ct.kind) AS company_type
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY
+        mc.movie_id
+),
+keywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keyword_list
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+)
+SELECT
+    rt.title,
+    rt.production_year,
+    COALESCE(pr.movie_count, 0) AS roles_count,
+    pr.roles,
+    COALESCE(c.company_names, 'No Companies') AS companies,
+    COALESCE(k.keyword_list, 'No Keywords') AS keywords
+FROM
+    ranked_titles rt
+LEFT JOIN
+    person_roles pr ON rt.title_id IN (SELECT movie_id FROM cast_info WHERE person_id IN (SELECT person_id FROM aka_name WHERE name ILIKE '%John%'))
+LEFT JOIN
+    companies c ON rt.title_id = c.movie_id
+LEFT JOIN
+    keywords k ON rt.title_id = k.movie_id
+WHERE
+    rt.year_rank <= 5 
+ORDER BY
+    rt.production_year DESC, rt.title;

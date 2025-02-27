@@ -1,0 +1,80 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        rc.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursiveCTE rc ON p.ParentId = rc.Id
+    WHERE 
+        p.PostTypeId = 2  
+),
+RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerRank,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, U.DisplayName, p.Score
+),
+PostHistorySummary AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        ph.PostHistoryTypeId,
+        COUNT(ph.Id) AS ChangeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, ph.PostHistoryTypeId
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.VoteCount,
+    COALESCE(SUM(CASE WHEN phs.PostHistoryTypeId = 10 THEN phs.ChangeCount END), 0) AS TotalCloseVotes,
+    COALESCE(SUM(CASE WHEN phs.PostHistoryTypeId = 11 THEN phs.ChangeCount END), 0) AS TotalReopenVotes,
+    rc.Level
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistorySummary phs ON rp.Id = phs.PostId
+LEFT JOIN 
+    RecursiveCTE rc ON rp.Id = rc.Id
+WHERE 
+    rp.OwnerRank = 1  
+GROUP BY 
+    rp.Id, rp.Title, rp.OwnerDisplayName, rp.CommentCount, rp.VoteCount, rc.Level
+ORDER BY 
+    rp.VoteCount DESC, rc.Level ASC;

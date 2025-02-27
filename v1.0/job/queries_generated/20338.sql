@@ -1,0 +1,103 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+QualifiedActors AS (
+    SELECT 
+        ka.person_id,
+        ka.name,
+        COUNT(ci.movie_id) AS movie_count,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note
+    FROM 
+        aka_name ka
+    LEFT JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    GROUP BY 
+        ka.person_id
+    HAVING 
+        COUNT(ci.movie_id) > 5
+),
+FilteredKeywords AS (
+    SELECT 
+        kw.keyword,
+        COUNT(mk.movie_id) AS keyword_count
+    FROM 
+        keyword kw
+    JOIN 
+        movie_keyword mk ON kw.id = mk.keyword_id
+    WHERE 
+        kw.keyword LIKE '%action%'
+    GROUP BY 
+        kw.keyword
+    HAVING 
+        COUNT(mk.movie_id) > 10
+),
+TitleInfo AS (
+    SELECT 
+        tit.id AS title_id,
+        tit.title,
+        ti.info AS trivia
+    FROM 
+        title tit
+    JOIN 
+        movie_info mi ON tit.id = mi.movie_id
+    JOIN 
+        info_type ti ON mi.info_type_id = ti.id
+    WHERE 
+        ti.info LIKE '%behind the scenes%'
+)
+
+SELECT 
+    ak.name, 
+    COUNT(DISTINCT cm.movie_id) AS total_movies,
+    MAX(CASE WHEN kw.keyword IS NOT NULL THEN kw.keyword ELSE 'No Keyword' END) AS notable_keyword,
+    SUM(CASE WHEN ti.trivia IS NOT NULL THEN 1 ELSE 0 END) AS trivia_count,
+    COALESCE(rm.title, 'No Title') AS latest_title,
+    COALESCE(rm.production_year, 'Unknown Year') AS latest_year
+FROM 
+    QualifiedActors ak
+LEFT JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+LEFT JOIN 
+    RankedMovies rm ON ci.movie_id = rm.movie_id AND rm.rank_year = 1
+LEFT JOIN 
+    movie_keyword mk ON ci.movie_id = mk.movie_id
+LEFT JOIN 
+    FilteredKeywords kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    TitleInfo ti ON ci.movie_id = ti.title_id
+WHERE 
+    ak.movie_count > 10
+GROUP BY 
+    ak.name, rm.title, rm.production_year
+ORDER BY 
+    total_movies DESC, ak.name
+LIMIT 20;
+
+-- For NULL logic and edge cases:
+SELECT 
+    c.name AS character_name,
+    COALESCE(cg.kind, 'Unknown Character Type') AS character_type,
+    COUNT(DISTINCT cc.movie_id) AS movies_as_character,
+    SUM(CASE WHEN cc.note IS NULL THEN 1 ELSE 0 END) AS movies_without_notes
+FROM 
+    char_name c
+LEFT JOIN 
+    comp_cast_type cg ON cg.id = c.id -- possibly incorrect join leading to unexpected NULLs
+LEFT JOIN 
+    complete_cast cc ON c.id = cc.subject_id
+WHERE 
+    cc.movie_id IS NULL OR cc.status_id IS NULL
+GROUP BY 
+    c.name, cg.kind
+HAVING 
+    COUNT(DISTINCT cc.movie_id) > 0 
+ORDER BY 
+    character_name;

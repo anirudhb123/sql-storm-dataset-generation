@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Filtering only Questions
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        b.UserId
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rb.BadgeNames,
+        CASE 
+            WHEN rp.ViewCount > 1000 THEN 'Popular'
+            WHEN rp.ViewCount BETWEEN 500 AND 1000 THEN 'Moderately Popular'
+            ELSE 'Less Popular'
+        END AS Popularity
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentBadges rb ON rp.OwnerUserId = rb.UserId
+    WHERE 
+        rp.PostRank = 1 -- Latest post per user
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.OwnerDisplayName,
+    TO_CHAR(ps.CreationDate, 'YYYY-MM-DD') AS CreationDate,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.BadgeNames,
+    ps.Popularity
+FROM 
+    PostStatistics ps
+ORDER BY 
+    ps.ViewCount DESC, ps.CreationDate DESC
+LIMIT 10;

@@ -1,0 +1,41 @@
+WITH RECURSIVE UserPostCounts AS (
+    SELECT OwnerUserId, COUNT(*) AS PostCount
+    FROM Posts
+    WHERE CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY OwnerUserId
+), 
+UserReputation AS (
+    SELECT Id, Reputation
+    FROM Users
+    WHERE Reputation > 1000
+), 
+TopUsers AS (
+    SELECT u.Id, u.DisplayName, u.Reputation, COALESCE(upc.PostCount, 0) AS PostCount
+    FROM UserReputation u
+    LEFT JOIN UserPostCounts upc ON u.Id = upc.OwnerUserId
+    ORDER BY u.Reputation DESC
+    LIMIT 10
+),
+PostScores AS (
+    SELECT p.Id, p.Title, p.Score, p.ViewCount, p.Tags,
+           ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS ScoreRank,
+           RANK() OVER (ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM Posts p
+    WHERE p.CreationDate > NOW() - INTERVAL '1 month' AND p.Score IS NOT NULL
+),
+ClosedPosts AS (
+    SELECT ph.PostId, ph.CreationDate, ph.Comment
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE pht.Name = 'Post Closed'
+)
+SELECT tu.DisplayName, tu.Reputation, tu.PostCount,
+       ps.Title, ps.Score, ps.ViewCount,
+       cp.CreationDate AS ClosedDate, cp.Comment AS CloseComment
+FROM TopUsers tu
+LEFT JOIN PostScores ps ON ps.ScoreRank <= 20
+LEFT JOIN ClosedPosts cp ON ps.Id = cp.PostId
+WHERE (ps.Score > 10 OR cp.PostId IS NOT NULL)
+ORDER BY tu.Reputation DESC, ps.Score DESC
+LIMIT 50;
+

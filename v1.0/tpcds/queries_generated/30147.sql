@@ -1,0 +1,52 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT s_store_sk, s_store_name, s_number_employees, s_floor_space, s_closed_date_sk, 
+           1 AS level
+    FROM store
+    WHERE s_closed_date_sk IS NULL
+    UNION ALL
+    SELECT s_store_sk, s_store_name, s_number_employees, s_floor_space, s_closed_date_sk, 
+           sh.level + 1
+    FROM store s
+    JOIN sales_hierarchy sh ON s.s_store_sk = sh.s_store_sk
+),
+total_sales AS (
+    SELECT ss_store_sk,
+           SUM(ss_net_paid) AS total_net_paid,
+           COUNT(ss_ticket_number) AS total_sales_count,
+           AVG(ss_list_price) AS avg_list_price
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY ss_store_sk
+),
+customer_sales AS (
+    SELECT c.c_customer_sk, 
+           SUM(ws.ws_sales_price) AS total_sales,
+           STRING_AGG(DISTINCT c.c_email_address, ', ') AS email_list
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+recent_demographics AS (
+    SELECT cd.cd_demo_sk, 
+           COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+           SUM(CASE WHEN cd.cd_marital_status = 'M' THEN 1 ELSE 0 END) AS married_count
+    FROM customer_demographics cd
+    JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_demo_sk
+)
+SELECT 
+    sh.s_store_name,
+    th.total_net_paid,
+    th.total_sales_count,
+    th.avg_list_price,
+    cd.customer_count,
+    cd.married_count,
+    COALESCE(cd.email_list, 'No Sales') AS email_list
+FROM sales_hierarchy sh
+LEFT JOIN total_sales th ON sh.s_store_sk = th.ss_store_sk
+LEFT JOIN recent_demographics cd ON cd.cd_demo_sk = sh.s_store_sk
+WHERE th.total_net_paid > (SELECT AVG(total_net_paid)
+                             FROM total_sales)
+ORDER BY sh.level DESC, th.total_net_paid DESC
+LIMIT 10;

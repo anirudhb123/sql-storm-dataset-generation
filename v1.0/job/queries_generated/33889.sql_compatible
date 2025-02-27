@@ -1,0 +1,58 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT ci.id AS cast_id, ci.person_id, a.name AS actor_name, 1 AS hierarchy_level
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    WHERE ci.movie_id IN (SELECT id FROM aka_title WHERE production_year >= 2000) 
+
+    UNION ALL
+
+    SELECT ci.id AS cast_id, ci.person_id, a.name AS actor_name, ah.hierarchy_level + 1
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN ActorHierarchy ah ON ci.movie_id = ah.cast_id 
+    WHERE ci.nr_order > ah.hierarchy_level 
+
+), MovieStats AS (
+    SELECT 
+        mt.title,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        AVG(mk.freq) AS avg_keywords,
+        COUNT(CASE WHEN ci.note IS NOT NULL THEN 1 END) AS note_count
+    FROM aka_title mt
+    LEFT JOIN cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN (
+        SELECT mk.movie_id, COUNT(mk.id) AS freq
+        FROM movie_keyword mk
+        GROUP BY mk.movie_id
+    ) mk ON mt.id = mk.movie_id
+    WHERE mt.production_year >= 2000
+    GROUP BY mt.title
+), MovieCompanyStats AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        STRING_AGG(cn.name, ', ') AS companies,
+        COUNT(mc.company_id) AS num_companions
+    FROM aka_title m
+    LEFT JOIN movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY m.id, m.title
+)
+SELECT 
+    s.title,
+    s.actor_count,
+    s.avg_keywords,
+    s.note_count,
+    cs.companies,
+    cs.num_companions,
+    COALESCE(mh.actor_count, 0) AS hierarchy_actor_count
+FROM MovieStats s
+LEFT JOIN MovieCompanyStats cs ON s.title = cs.title
+LEFT JOIN (
+    SELECT actor_name, COUNT(cast_id) AS actor_count
+    FROM ActorHierarchy
+    WHERE hierarchy_level = 2 
+    GROUP BY actor_name
+) mh ON mh.actor_name = (SELECT al.actor_name FROM ActorHierarchy al WHERE al.hierarchy_level = 1 LIMIT 1)
+ORDER BY s.actor_count DESC, s.title;

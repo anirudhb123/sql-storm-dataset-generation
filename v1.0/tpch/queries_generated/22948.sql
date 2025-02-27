@@ -1,0 +1,45 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, 
+           ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank,
+           (SELECT COUNT(DISTINCT ps_partkey) 
+            FROM partsupp ps 
+            WHERE ps.ps_suppkey = s.s_suppkey) AS part_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+ContingentSales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_retailprice, 
+           CASE 
+               WHEN p.p_size >= 10 THEN 'Large'
+               WHEN p.p_size BETWEEN 5 AND 9 THEN 'Medium'
+               ELSE 'Small'
+           END AS size_category
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL AND p.p_retailprice > 10.00
+),
+SupplierParts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, 
+           RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS lowest_cost_rank
+    FROM partsupp ps
+)
+SELECT 
+    r.r_name AS region_name,
+    COALESCE(SUM(CASE WHEN rs.rank <= 3 THEN rs.part_count ELSE 0 END), 0) AS top_suppliers_part_count,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(COALESCE(cs.total_sales, 0)) AS total_fulfilled_sales,
+    STRING_AGG(CONCAT(fp.size_category, ' Parts'), ', ') AS categorized_parts
+FROM region r
+LEFT JOIN RankedSuppliers rs ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = rs.s_nationkey)
+LEFT JOIN customer c ON r.r_regionkey = c.c_nationkey
+LEFT JOIN ContingentSales cs ON cs.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus IN ('F', 'O'))
+LEFT JOIN FilteredParts fp ON fp.p_partkey IN (SELECT ps.ps_partkey FROM SupplierParts ps WHERE ps.ps_suppkey = rs.s_suppkey AND ps.lowest_cost_rank = 1)
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY total_fulfilled_sales DESC NULLS LAST;

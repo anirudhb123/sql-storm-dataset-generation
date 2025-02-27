@@ -1,0 +1,70 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS year_count
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CoActors AS (
+    SELECT 
+        c.movie_id,
+        a.name AS co_actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+),
+FilmStatistics AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(COALESCE(m.info_type_id, 0)) AS avg_info_type
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    GROUP BY 
+        m.id, m.title
+),
+CompanyTitles AS (
+    SELECT 
+        mt.movie_id,
+        ARRAY_AGG(DISTINCT cn.name) AS company_names
+    FROM 
+        movie_companies mt
+    JOIN 
+        company_name cn ON mt.company_id = cn.id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    fs.total_cast,
+    fs.avg_info_type,
+    ct.company_names,
+    CASE 
+        WHEN rt.year_count > 3 THEN 'Popular Year'
+        ELSE 'Less Popular Year'
+    END AS popularity,
+    coactor.co_actor_name
+FROM 
+    RankedTitles rt
+JOIN 
+    FilmStatistics fs ON rt.title = fs.title AND rt.production_year = fs.production_year
+LEFT JOIN 
+    CompanyTitles ct ON fs.movie_id = ct.movie_id
+LEFT JOIN 
+    CoActors coactor ON fs.movie_id = coactor.movie_id AND coactor.actor_rank <= 3
+WHERE 
+    fs.total_cast > 10
+ORDER BY 
+    rt.production_year DESC, fs.total_cast DESC;

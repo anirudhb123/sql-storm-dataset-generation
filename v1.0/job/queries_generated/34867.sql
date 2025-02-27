@@ -1,0 +1,65 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+top_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.kind_id ORDER BY mh.production_year DESC) AS rank
+    FROM 
+        movie_hierarchy mh
+)
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') FILTER (WHERE k.keyword IS NOT NULL) AS keywords,
+    CASE 
+        WHEN mt.production_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END AS movie_type,
+    COUNT(DISTINCT c.id) OVER (PARTITION BY mt.id) AS cast_count
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    movie_companies mc ON c.movie_id = mc.movie_id
+JOIN 
+    top_movies mt ON c.movie_id = mt.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mt.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.name, mt.title, mt.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    movie_type, movie_title;

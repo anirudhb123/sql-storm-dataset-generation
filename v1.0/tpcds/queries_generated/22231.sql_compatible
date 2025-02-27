@@ -1,0 +1,74 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sold_date_sk,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        cs_order_number,
+        cs_sold_date_sk,
+        cs_sales_price * 0.8, 
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY cs_order_number) AS rn
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sales_price IS NOT NULL
+),
+combined_sales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        COALESCE(SUM(sd.ws_sales_price), 0) AS total_web_sales,
+        COALESCE(SUM(sd.cs_sales_price), 0) AS total_catalog_sales
+    FROM 
+        item
+    LEFT JOIN 
+        sales_data sd ON item.i_item_sk = sd.ws_item_sk OR item.i_item_sk = sd.cs_item_sk
+    GROUP BY 
+        item.i_item_id, item.i_item_desc
+),
+aggregated_sales AS (
+    SELECT 
+        i_item_id,
+        i_item_desc,
+        total_web_sales,
+        total_catalog_sales,
+        total_web_sales + total_catalog_sales AS overall_sales
+    FROM 
+        combined_sales
+),
+high_sales AS (
+    SELECT 
+        *,
+        NTILE(4) OVER (ORDER BY overall_sales DESC) AS sales_quartile
+    FROM 
+        aggregated_sales
+)
+SELECT 
+    hs.i_item_id,
+    hs.i_item_desc,
+    hs.total_web_sales,
+    hs.total_catalog_sales,
+    hs.overall_sales,
+    CASE 
+        WHEN hs.sales_quartile = 1 THEN 'Top Performers'
+        WHEN hs.sales_quartile = 2 THEN 'Above Average'
+        WHEN hs.sales_quartile = 3 THEN 'Below Average'
+        ELSE 'Underperformers'
+    END AS sales_category
+FROM 
+    high_sales hs
+WHERE 
+    hs.overall_sales IS NOT NULL
+    AND (hs.total_web_sales IS NOT NULL OR hs.total_catalog_sales IS NOT NULL)
+ORDER BY 
+    hs.overall_sales DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,75 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mp.kind_id ORDER BY m.production_year DESC) AS rank_by_year,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY m.id) AS total_cast,
+        COUNT(DISTINCT k.keyword) OVER (PARTITION BY m.id) AS total_keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    JOIN 
+        kind_type mp ON m.kind_id = mp.id
+    WHERE 
+        m.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN total_keywords > 5 THEN 'High Keyword'
+            WHEN total_keywords BETWEEN 3 AND 5 THEN 'Medium Keyword'
+            ELSE 'Low Keyword'
+        END AS keyword_category
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_by_year <= 3
+        AND (production_year > 2000 OR movie_title LIKE 'A%')
+),
+CompanyCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cp.id) AS company_count,
+        COALESCE(SUM(CASE WHEN c.company_type_id = 1 THEN 1 ELSE 0 END), 0) AS production_company_count
+    FROM 
+        movie_companies mc 
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    fm.movie_id,
+    fm.movie_title,
+    fm.production_year,
+    fm.keyword_category,
+    cc.company_count,
+    cc.production_company_count,
+    COUNT(DISTINCT ci.person_id) AS distinct_actors,
+    STRING_AGG(DISTINCT CONCAT(a.name, ' (', r.role, ')'), '; ') AS cast_list
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    cast_info ci ON fm.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    role_type r ON ci.role_id = r.id
+JOIN 
+    CompanyCounts cc ON fm.movie_id = cc.movie_id
+WHERE 
+    a.name IS NOT NULL
+GROUP BY 
+    fm.movie_id, fm.movie_title, fm.production_year, fm.keyword_category, cc.company_count, cc.production_company_count
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 3
+    AND cc.production_company_count > 0
+ORDER BY 
+    fm.production_year DESC, fm.movie_title;

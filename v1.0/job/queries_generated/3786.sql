@@ -1,0 +1,52 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rn
+    FROM 
+        title t
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+),
+ActorMovies AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS total_movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.person_id, a.name
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 5
+)
+SELECT 
+    m.title,
+    m.production_year,
+    ac.name AS actor_name,
+    am.total_movies,
+    COALESCE(kw.keyword, 'No keyword') AS keyword,
+    CASE 
+        WHEN m.production_year < 2010 THEN 'Classic'
+        ELSE 'Modern'
+    END AS movie_category
+FROM 
+    RankedMovies m
+LEFT JOIN 
+    movie_keyword mk ON m.title_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+JOIN 
+    cast_info ci ON m.title_id = ci.movie_id
+JOIN 
+    ActorMovies ac ON ci.person_id = ac.person_id
+WHERE 
+    m.production_year IS NOT NULL
+    AND (ac.total_movies IS NULL OR ac.total_movies > 10)
+ORDER BY 
+    m.production_year DESC, 
+    movie_category, 
+    actor_name;

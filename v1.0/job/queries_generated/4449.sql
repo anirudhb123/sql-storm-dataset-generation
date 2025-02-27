@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.kind_id ORDER BY a.production_year DESC) as rn
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+MovieActors AS (
+    SELECT 
+        m.title,
+        c.person_id,
+        p.info,
+        ROW_NUMBER() OVER (PARTITION BY m.title ORDER BY c.nr_order) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_title m ON c.movie_id = m.id
+    JOIN 
+        person_info p ON c.person_id = p.person_id
+    WHERE 
+        p.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+),
+MovieKeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    tg.kind_id,
+    COALESCE(mkc.keyword_count, 0) AS total_keywords,
+    STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieActors a ON rm.title = a.title
+LEFT JOIN 
+    movie_info m ON rm.title = m.movie_id
+LEFT JOIN 
+    MovieKeywordCounts mkc ON rm.id = mkc.movie_id
+LEFT JOIN 
+    kind_type tg ON rm.kind_id = tg.id
+WHERE 
+    rm.rn <= 5 AND (m.note IS NULL OR m.note <> 'deleted')
+GROUP BY 
+    rm.title, rm.production_year, tg.kind_id, mkc.keyword_count
+HAVING 
+    COALESCE(mkc.keyword_count, 0) > 2
+ORDER BY 
+    rm.production_year DESC, total_keywords DESC;

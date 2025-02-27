@@ -1,0 +1,81 @@
+
+WITH RECURSIVE AddressStats AS (
+    SELECT 
+        ca_address_sk,
+        ca_city,
+        ca_state,
+        COUNT(DISTINCT c_customer_sk) AS customer_count,
+        SUM(COALESCE(ss_net_paid, 0)) AS total_sales
+    FROM 
+        customer_address 
+    LEFT JOIN 
+        customer ON customer.c_current_addr_sk = customer_address.ca_address_sk
+    LEFT JOIN 
+        store_sales ON store_sales.ss_addr_sk = customer_address.ca_address_sk
+    GROUP BY 
+        ca_address_sk, ca_city, ca_state
+), 
+SalesDetails AS (
+    SELECT 
+        ws_item_sk, 
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_quantity_sold,
+        SUM(ws_ext_sales_price) AS total_sales_price,
+        MAX(ws_net_profit) AS max_net_profit
+    FROM 
+        web_sales 
+    JOIN 
+        date_dim ON date_dim.d_date_sk = ws_sold_date_sk
+    WHERE 
+        d_year = 2023
+    GROUP BY 
+        ws_item_sk, ws_sold_date_sk
+), 
+Demographics AS (
+    SELECT 
+        cd_gender, 
+        cd_marital_status, 
+        COUNT(DISTINCT c_customer_sk) AS demographic_count
+    FROM 
+        customer_demographics 
+    LEFT JOIN 
+        customer ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    GROUP BY 
+        cd_gender, cd_marital_status
+), 
+ItemRanking AS (
+    SELECT 
+        i_item_sk,
+        i_item_id,
+        ROW_NUMBER() OVER (PARTITION BY i_item_sk ORDER BY SUM(cs_net_profit) DESC) AS item_rank
+    FROM 
+        catalog_sales 
+    JOIN 
+        item ON item.i_item_sk = catalog_sales.cs_item_sk
+    GROUP BY 
+        i_item_sk, i_item_id
+)
+
+SELECT 
+    AS.address_sk,
+    AS.city,
+    AS.state,
+    DS.total_sales,
+    DG.demographic_count,
+    IR.i_item_id,
+    IR.item_rank
+FROM 
+    AddressStats AS
+LEFT JOIN 
+    SalesDetails DS ON AS.customer_count > 5 AND DS.total_quantity_sold > 10
+LEFT JOIN 
+    Demographics DG ON (DG.cd_gender IS NOT NULL OR DG.cd_marital_status = 'M') 
+LEFT JOIN 
+    ItemRanking IR ON IR.item_rank <= 10 
+WHERE 
+    AS.total_sales > (SELECT AVG(total_sales) FROM AddressStats)
+ORDER BY 
+    AS.customer_count DESC, DS.total_sales ASC 
+LIMIT 50;
+
+```

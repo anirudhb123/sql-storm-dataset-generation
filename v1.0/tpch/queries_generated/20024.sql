@@ -1,0 +1,49 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT sp.s_suppkey, sp.s_name, sp.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY sp.s_nationkey ORDER BY sp.s_acctbal DESC)
+    FROM supplier sp
+    JOIN supplier_hierarchy sh ON sp.s_nationkey = sh.s_suppkey
+    WHERE sh.rank <= 3
+),
+part_details AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, 
+           COALESCE(MIN(ps.ps_supplycost), 0) AS min_supplycost,
+           COALESCE(MAX(ps.ps_availqty), 0) AS max_availqty,
+           p.p_retailprice * 0.9 AS discounted_price
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+),
+customer_order_summary AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS total_orders, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F') -- Open and Finished Orders
+    GROUP BY c.c_custkey
+),
+final_summary AS (
+    SELECT ph.p_partkey, pd.p_name, cs.c_custkey,
+           cs.total_orders, cs.total_spent,
+           ROW_NUMBER() OVER (PARTITION BY pd.p_brand ORDER BY cs.total_spent DESC) AS rank_per_brand 
+    FROM part_details pd
+    JOIN lineitem li ON pd.p_partkey = li.l_partkey
+    JOIN orders o ON li.l_orderkey = o.o_orderkey
+    JOIN customer_order_summary cs ON o.o_custkey = cs.c_custkey
+    WHERE pd.discounted_price < cs.total_spent
+)
+SELECT fs.p_name, fs.total_orders, fs.total_spent, 
+       CASE WHEN fs.rank_per_brand <= 5 THEN 'Top Performer' 
+            WHEN fs.rank_per_brand <= 10 THEN 'Average Performer'
+            ELSE 'Low Performer' END AS performance_category,
+       s.s_name AS top_supplier
+FROM final_summary fs
+LEFT JOIN supplier s ON fs.p_partkey = s.s_suppkey
+WHERE fs.total_orders > 0
+ORDER BY fs.total_spent DESC
+LIMIT 50;

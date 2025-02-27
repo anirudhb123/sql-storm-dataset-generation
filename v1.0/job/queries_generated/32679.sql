@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- Base case: select root movies
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    -- Recursive case: find linked movies
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        mh.level + 1 AS level
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mh.level,
+    COUNT(DISTINCT m.id) OVER (PARTITION BY ak.person_id) AS total_movies,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COALESCE(ci.note, 'No Role Specified') AS role_note
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_title mt ON mh.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    mt.production_year >= 2000
+GROUP BY 
+    ak.name, mt.title, mh.level, ci.note
+HAVING 
+    COUNT(DISTINCT k.keyword) > 0
+ORDER BY 
+    mh.level DESC, total_movies DESC;
+

@@ -1,0 +1,56 @@
+-- Performance benchmarking query to analyze post statistics, user engagement, and votes
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        u.Reputation AS OwnerReputation,
+        COUNT(v.Id) AS TotalVotes,
+        COUNT(c.Id) AS TotalComments
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= '2022-01-01' -- filter for posts created from January 1, 2022
+    GROUP BY p.Id, u.Reputation
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT v.Id) AS TotalVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.OwnerReputation,
+    ps.TotalVotes,
+    us.UserId,
+    us.DisplayName AS UserDisplayName,
+    us.Reputation AS UserReputation,
+    us.TotalPosts,
+    us.TotalComments,
+    us.TotalVotes AS UserTotalVotes
+FROM PostStats ps
+JOIN UserStats us ON ps.OwnerReputation = us.Reputation
+ORDER BY ps.Score DESC, ps.ViewCount DESC;

@@ -1,0 +1,37 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+BestCustomers AS (
+    SELECT 
+        c.customer_id,
+        cs.total_sales,
+        cs.order_count,
+        DENSE_RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON c.c_customer_id = cs.c_customer_id
+)
+SELECT 
+    bc.customer_id,
+    bc.total_sales,
+    bc.order_count,
+    d.d_year AS sales_year
+FROM 
+    BestCustomers bc
+JOIN 
+    date_dim d ON d.d_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales ws WHERE ws.ws_bill_customer_sk = bc.customer_id)
+WHERE 
+    bc.sales_rank <= 10
+ORDER BY 
+    bc.total_sales DESC;

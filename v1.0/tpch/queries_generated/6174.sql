@@ -1,0 +1,45 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        s.nationkey, 
+        DENSE_RANK() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+), CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+), OrderDetails AS (
+    SELECT 
+        co.c_custkey, 
+        co.c_name, 
+        co.o_orderkey, 
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM CustomerOrders co
+    JOIN lineitem li ON co.o_orderkey = li.l_orderkey
+    GROUP BY co.c_custkey, co.c_name, co.o_orderkey
+), SupplierPerformance AS (
+    SELECT 
+        rs.s_suppkey, 
+        rs.s_name, 
+        SUM(od.total_revenue) AS supplier_revenue
+    FROM RankedSuppliers rs
+    JOIN OrderDetails od ON rs.s_suppkey = od.o_orderkey
+    GROUP BY rs.s_suppkey, rs.s_name
+)
+SELECT 
+    rp.n_name AS region_name,
+    COUNT(DISTINCT sp.s_suppkey) AS unique_suppliers,
+    SUM(sp.supplier_revenue) AS total_revenue_per_region
+FROM SupplierPerformance sp
+JOIN nation rp ON sp.nationkey = rp.n_nationkey
+GROUP BY rp.n_name
+HAVING total_revenue_per_region > 100000
+ORDER BY total_revenue_per_region DESC;

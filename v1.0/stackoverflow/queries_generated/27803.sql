@@ -1,0 +1,73 @@
+WITH TagCounts AS (
+    SELECT 
+        tag.TagName, 
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 12 THEN 1 ELSE 0 END) AS DeletedPostsCount
+    FROM 
+        Tags tag
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || tag.TagName || '%'
+    GROUP BY 
+        tag.TagName
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT c.Id) AS CommentsCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryChanges AS (
+    SELECT 
+        ph.PostId, 
+        MAX(ph.CreationDate) AS LastChangeDate, 
+        STRING_AGG(ph.Comment, '; ') AS ChangeComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)  -- considering close, reopen, delete actions
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    tc.TagName,
+    tc.PostCount,
+    tc.QuestionCount,
+    tc.AnswerCount,
+    u.UserId,
+    u.Reputation,
+    u.PostsCount,
+    u.CommentsCount,
+    u.GoldBadges,
+    u.SilverBadges,
+    u.BronzeBadges,
+    phc.LastChangeDate,
+    phc.ChangeComments
+FROM 
+    TagCounts tc
+JOIN 
+    Posts p ON p.Tags LIKE '%' || tc.TagName || '%'
+JOIN 
+    UserReputation u ON p.OwnerUserId = u.UserId
+LEFT JOIN 
+    PostHistoryChanges phc ON phc.PostId = p.Id
+WHERE 
+    tc.PostCount > 10  -- only consider tags with more than 10 associated posts
+ORDER BY 
+    tc.PostCount DESC, 
+    u.Reputation DESC;

@@ -1,0 +1,55 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ak.name) AS aka_names,
+        GROUP_CONCAT(DISTINCT c.role) AS cast_roles,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT cn.name) AS companies_involved
+    FROM 
+        title t
+    LEFT JOIN aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN role_type c ON ci.person_role_id = c.id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        t.id
+    HAVING 
+        t.production_year >= 2000
+),
+
+TopMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        aka_names,
+        cast_roles,
+        keywords,
+        companies_involved
+    FROM 
+        MovieDetails
+    WHERE 
+        aka_names IS NOT NULL 
+        OR cast_roles IS NOT NULL 
+        OR keywords IS NOT NULL 
+        OR companies_involved IS NOT NULL
+    ORDER BY 
+        production_year DESC
+    LIMIT 10
+)
+
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    aka_names,
+    cast_roles,
+    keywords,
+    companies_involved
+FROM 
+    TopMovies;

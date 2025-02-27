@@ -1,0 +1,64 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 3) AS DownVotes,
+        COALESCE(P.ClosedDate, 'Open') AS PostStatus
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        Questions,
+        Answers,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM 
+        UserPostStats
+    WHERE 
+        TotalPosts > 5
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    P.PostTitle,
+    P.CreationDate,
+    P.Score,
+    P.CommentCount,
+    P.UpVotes,
+    P.DownVotes,
+    P.PostStatus,
+    T.ScoreRank
+FROM 
+    TopUsers T
+JOIN 
+    UserPostStats U ON T.UserId = U.UserId
+JOIN 
+    PostDetails P ON U.TotalPosts = (SELECT MAX(TotalPosts) FROM UserPostStats WHERE UserId = U.UserId)
+ORDER BY 
+    T.ScoreRank, P.CreationDate DESC
+LIMIT 10;

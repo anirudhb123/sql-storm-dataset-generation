@@ -1,0 +1,57 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(c.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.id) DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.title, a.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        ARRAY_AGG(DISTINCT ak.name) AS actor_names,
+        ARRAY_AGG(DISTINCT kc.keyword) AS keywords
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = (SELECT a.id FROM aka_title a WHERE a.title = tm.title AND a.production_year = tm.production_year)
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        movie_keyword mk ON tm.title = (SELECT a.title FROM aka_title a WHERE a.production_year = tm.production_year AND a.title = tm.title)
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    GROUP BY 
+        tm.title, tm.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(md.actor_names, ARRAY[]::text[]) AS actor_names,
+    COALESCE(md.keywords, ARRAY[]::text[]) AS keywords,
+    CASE 
+        WHEN md.production_year < 2000 THEN 'Classic'
+        WHEN md.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era
+FROM 
+    MovieDetails md
+ORDER BY 
+    md.production_year DESC;

@@ -1,0 +1,85 @@
+
+WITH UserPostStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.PostId END) AS ClosedPostCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 24 THEN ph.PostId END) AS EditCount,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(p.ViewCount), 0) DESC) AS ViewRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        QuestionCount,
+        AnswerCount,
+        TotalViews,
+        ClosedPostCount,
+        EditCount,
+        ViewRank
+    FROM 
+        UserPostStatistics
+    WHERE 
+        TotalViews > 1000
+),
+PostDetail AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        bt.Name AS BadgeType,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        PostTypes bt ON p.PostTypeId = bt.Id
+    LEFT JOIN 
+        LATERAL (SELECT tag.TagName FROM unnest(string_to_array(p.Tags, '><')) AS tag) t ON true
+    GROUP BY 
+        p.Id, bt.Name
+)
+SELECT 
+    tu.DisplayName,
+    pu.Title,
+    pu.Score,
+    pu.ViewCount,
+    pu.Tags,
+    tu.TotalViews,
+    tu.ClosedPostCount,
+    tu.EditCount,
+    CASE 
+        WHEN tu.ClosedPostCount = 0 THEN 'Active User' 
+        WHEN tu.ClosedPostCount > 3 THEN 'Cautious Contributor' 
+        ELSE 'Regular User' 
+    END AS UserStatus,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 
+            FROM Votes v 
+            WHERE v.UserId = tu.UserId 
+            AND v.PostId IN (SELECT PostId FROM PostDetail)
+            AND v.VoteTypeId = 2
+        ) THEN 'Has Upvoted Posts'
+        ELSE 'No Upvotes'
+    END AS UserEngagement
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    PostDetail pu ON tu.UserId = pu.PostId
+ORDER BY 
+    tu.ViewRank, pu.Score DESC
+LIMIT 20;

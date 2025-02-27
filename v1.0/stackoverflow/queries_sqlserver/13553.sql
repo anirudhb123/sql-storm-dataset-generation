@@ -1,0 +1,16 @@
+
+SELECT 
+    pt.Name AS PostType,
+    COUNT(p.Id) AS TotalPosts,
+    AVG(p.Score) AS AverageScore,
+    COUNT(v.Id) AS TotalVotes
+FROM 
+    Posts p
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+GROUP BY 
+    pt.Name, p.Score
+ORDER BY 
+    TotalPosts DESC;

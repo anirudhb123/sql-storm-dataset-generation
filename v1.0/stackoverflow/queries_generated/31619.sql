@@ -1,0 +1,87 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        OwnerUserId,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL  -- Start with top-level posts (questions)
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+)
+, UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+, PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS TotalUpVotes,  -- 2 is UpMod
+        SUM(v.VoteTypeId = 3) AS TotalDownVotes, -- 3 is DownMod
+        AVG(p.Score) OVER (PARTITION BY p.OwnerUserId) AS AvgScoreByUser,
+        MIN(p.CreationDate) AS FirstPostDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rph.Title AS QuestionTitle,
+    u.DisplayName AS UserName,
+    u.Reputation,
+    ps.CommentCount,
+    ps.TotalUpVotes,
+    ps.TotalDownVotes,
+    ps.AvgScoreByUser,
+    ps.FirstPostDate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RecursivePostHierarchy rph
+JOIN 
+    Posts p ON rph.Id = p.Id
+JOIN 
+    UserReputation u ON p.OwnerUserId = u.UserId
+JOIN 
+    PostStats ps ON p.Id = ps.PostId
+LEFT JOIN 
+    Tags t ON t.Count > 5  -- Only include tags that are used more than 5 times
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '1 year'  -- Posts created in the last year
+GROUP BY 
+    rph.Title, u.DisplayName, u.Reputation, ps.CommentCount, ps.TotalUpVotes, ps.TotalDownVotes, ps.AvgScoreByUser, ps.FirstPostDate
+ORDER BY 
+    u.Reputation DESC, ps.TotalUpVotes DESC
+LIMIT 
+    10;

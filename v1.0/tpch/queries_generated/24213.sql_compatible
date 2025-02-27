@@ -1,0 +1,71 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+AggregateParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+OrderDetails AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT c.c_custkey) AS total_customers
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(a.total_cost), 0) AS total_part_cost,
+    AVG(d.total_revenue) AS avg_order_revenue,
+    COUNT(DISTINCT s.s_suppkey) AS total_suppliers
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    RankedSuppliers s ON n.n_nationkey = s.s_nationkey AND s.rn <= 3
+LEFT JOIN 
+    AggregateParts a ON s.s_suppkey = a.p_partkey
+LEFT JOIN 
+    OrderDetails d ON d.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F')
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(CASE WHEN a.total_cost IS NULL OR a.total_cost < 1000 THEN 1 ELSE 0 END) > 0
+UNION ALL
+SELECT 
+    'Unknown' AS r_name,
+    COUNT(*) AS total_part_cost,
+    NULL AS avg_order_revenue,
+    NULL AS total_suppliers
+FROM 
+    part p
+WHERE 
+    p.p_retailprice IS NULL OR p.p_retailprice <= 0
+ORDER BY 
+    r_name DESC;

@@ -1,0 +1,83 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL  
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.Id  
+),
+RecentPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.Score, 
+        p.OwnerUserId, 
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'  
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ph.Id AS PostId,
+    ph.Title,
+    ph.Level,
+    COALESCE(rb.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(rb.BadgeNames, 'None') AS UserBadgeNames,
+    pv.UpVotes,
+    pv.DownVotes,
+    rp.RecentRank
+FROM 
+    PostHierarchy ph
+LEFT JOIN 
+    RecentPosts rp ON ph.Id = rp.Id
+LEFT JOIN 
+    UserBadges rb ON ph.OwnerUserId = rb.UserId
+LEFT JOIN 
+    PostVotes pv ON ph.Id = pv.PostId
+WHERE 
+    ph.Level = 0 OR (ph.Level > 0 AND pv.UpVotes IS NOT NULL)  
+ORDER BY 
+    ph.Level, 
+    pv.UpVotes DESC NULLS LAST, 
+    rp.RecentRank;

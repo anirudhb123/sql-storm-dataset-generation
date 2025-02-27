@@ -1,0 +1,93 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        1 AS level,
+        s_manager
+    FROM 
+        store
+    WHERE 
+        s_closed_date_sk IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        st.s_store_sk,
+        st.s_store_name,
+        sh.level + 1 AS level,
+        st.s_manager
+    FROM 
+        store st
+    JOIN 
+        sales_hierarchy sh ON st.s_manager = sh.s_store_name
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band,
+        COUNT(DISTINCT web_sales.ws_order_number) AS total_orders,
+        SUM(web_sales.ws_sales_price) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        web_sales ON c.c_customer_sk = web_sales.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, hd.hd_income_band_sk
+),
+monthly_sales AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ss_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        store_sales s ON d.d_date_sk = s.ss_sold_date_sk
+    WHERE 
+        d.d_year >= 2020
+    GROUP BY 
+        d.d_year, d.d_month_seq
+),
+top_customers AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.total_orders,
+        ci.total_spent,
+        RANK() OVER (ORDER BY ci.total_spent DESC) AS customer_rank
+    FROM 
+        customer_info ci
+)
+SELECT 
+    s.s_store_name,
+    sh.level,
+    t.d_year,
+    t.d_month_seq,
+    SUM(t.total_sales) AS monthly_sales,
+    SUM(t.order_count) AS total_orders,
+    COUNT(tc.c_customer_sk) AS top_customer_count
+FROM 
+    sales_hierarchy sh
+JOIN 
+    store s ON sh.s_store_sk = s.s_store_sk
+JOIN 
+    monthly_sales t ON t.d_year = YEAR(CURRENT_DATE) AND t.d_month_seq = MONTH(CURRENT_DATE)
+LEFT JOIN 
+    top_customers tc ON tc.total_spent > 1000 AND tc.c_customer_sk IN (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_ship_addr_sk = tc.c_customer_sk)
+GROUP BY 
+    s.s_store_name, sh.level, t.d_year, t.d_month_seq
+HAVING 
+    SUM(t.total_sales) > 10000
+ORDER BY 
+    s.s_store_name, sh.level, t.d_year, t.d_month_seq;

@@ -1,0 +1,59 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returned_quantity,
+        SUM(cr.return_amt) AS total_returned_amount
+    FROM
+        catalog_returns cr
+    GROUP BY
+        cr.returning_customer_sk
+),
+WebSalesStats AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        AVG(ws.ws_sales_price) AS average_sales_price,
+        COUNT(DISTINCT ws.order_number) AS total_orders
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.bill_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_marital_status,
+        cd.cd_gender,
+        COUNT(DISTINCT cs.cs_order_number) AS total_catalog_orders,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY COUNT(DISTINCT cs.cs_order_number) DESC) AS gender_order_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_marital_status, cd.cd_gender
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.cd_marital_status,
+    cd.cd_gender,
+    COALESCE(cs.total_catalog_orders, 0) AS total_orders_catalog,
+    COALESCE(ws.total_quantity_sold, 0) AS total_quantity_sold,
+    COALESCE(ws.average_sales_price, 0) AS average_sales_price,
+    COALESCE(cr.total_returned_quantity, 0) AS total_returned_quantity,
+    COALESCE(cr.total_returned_amount, 0) AS total_returned_amount
+FROM 
+    CustomerDemographics cd
+LEFT JOIN 
+    WebSalesStats ws ON cd.c_customer_sk = ws.bill_customer_sk
+LEFT JOIN 
+    CustomerReturns cr ON cd.c_customer_sk = cr.returning_customer_sk
+WHERE 
+    (cd.cd_marital_status = 'M' AND cr.total_returned_quantity > 0) OR 
+    (cd.cd_gender = 'F' AND ws.total_quantity_sold > 100)
+ORDER BY 
+    cd.c_customer_sk,
+    cd.cd_gender DESC;

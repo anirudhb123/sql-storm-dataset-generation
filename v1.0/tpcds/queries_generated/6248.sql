@@ -1,0 +1,66 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_item_sk, 
+        COUNT(ws_order_number) AS total_orders, 
+        SUM(ws_quantity) AS total_quantity_sold, 
+        SUM(ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_item_sk
+),
+TopSellingItems AS (
+    SELECT 
+        sd.ws_item_sk,
+        i.i_item_desc,
+        sd.total_orders,
+        sd.total_quantity_sold,
+        sd.total_profit
+    FROM 
+        SalesData sd
+    JOIN 
+        item i ON sd.ws_item_sk = i.i_item_sk
+    WHERE 
+        sd.profit_rank <= 10
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        COUNT(ws_order_number) AS orders_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+)
+SELECT 
+    si.i_item_desc,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_credit_rating,
+    TO_CHAR(SUM(sd.total_quantity_sold), 'FM999,999') AS total_quantities_sold,
+    TO_CHAR(SUM(sd.total_profit), 'FM999,999.00') AS total_profits
+FROM 
+    TopSellingItems si
+JOIN 
+    SalesData sd ON si.ws_item_sk = sd.ws_item_sk
+JOIN 
+    CustomerInfo ci ON ci.orders_count > 0
+GROUP BY 
+    si.i_item_desc, ci.c_first_name, ci.c_last_name, ci.cd_gender, ci.cd_marital_status, ci.cd_credit_rating
+ORDER BY 
+    SUM(sd.total_profit) DESC;

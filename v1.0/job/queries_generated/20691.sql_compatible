@@ -1,0 +1,55 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year,
+           mt.kind_id, 0 AS level,
+           mt.id AS root_movie_id
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT ml.linked_movie_id AS movie_id, mt.title, mt.production_year,
+           mt.kind_id, mh.level + 1, mh.root_movie_id
+    FROM movie_link ml
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+keyword_info AS (
+    SELECT mk.movie_id, k.keyword, ROW_NUMBER() OVER (PARTITION BY mk.movie_id ORDER BY k.keyword) AS keyword_rank,
+           CASE 
+               WHEN k.keyword IS NULL THEN 'Keyword Missing'
+               ELSE 'Keyword Present'
+           END AS keyword_status
+    FROM movie_keyword mk
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+),
+grouped_cast AS (
+    SELECT ci.movie_id,
+           STRING_AGG(aka.name, ', ') AS cast_names,
+           COUNT(DISTINCT ci.person_id) AS total_actors
+    FROM cast_info ci
+    JOIN aka_name aka ON ci.person_id = aka.person_id
+    GROUP BY ci.movie_id
+)
+SELECT mh.title AS movie_title,
+       mh.production_year,
+       mh.level,
+       g.cast_names,
+       g.total_actors,
+       ki.keyword,
+       ki.keyword_rank,
+       ki.keyword_status,
+       CASE 
+           WHEN mh.production_year > 2000 THEN 'Modern Era'
+           WHEN mh.production_year BETWEEN 1980 AND 2000 THEN 'Classic Era'
+           ELSE 'Golden Era'
+       END AS movie_era,
+       DENSE_RANK() OVER (PARTITION BY mh.kind_id ORDER BY g.total_actors DESC) AS rank_by_cast_size,
+       COUNT(DISTINCT ki.keyword) OVER (PARTITION BY mh.movie_id) AS unique_keyword_count
+FROM movie_hierarchy mh
+LEFT JOIN grouped_cast g ON mh.movie_id = g.movie_id
+LEFT JOIN keyword_info ki ON mh.movie_id = ki.movie_id
+WHERE mh.level < 3 
+  AND (g.total_actors IS NULL OR g.total_actors > 0) 
+GROUP BY mh.title, mh.production_year, mh.level, g.cast_names, g.total_actors, ki.keyword, ki.keyword_rank, ki.keyword_status
+ORDER BY mh.production_year DESC, g.total_actors DESC;

@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.AnswerCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    tp.AnswerCount,
+    pt.Name AS PostTypeName,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    TopPosts tp
+JOIN 
+    PostTypes pt ON tp.PostId = p.Id
+LEFT JOIN 
+    Posts p ON p.Id = tp.PostId
+LEFT JOIN 
+    UNNEST(string_to_array(tp.Tags, ',')) AS t(TagName) ON t.TagName IS NOT NULL
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, tp.ViewCount, tp.OwnerDisplayName, tp.CommentCount, tp.AnswerCount, pt.Name
+ORDER BY 
+    tp.ViewCount DESC
+LIMIT 10;

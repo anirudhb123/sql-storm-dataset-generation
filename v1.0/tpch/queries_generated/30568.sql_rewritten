@@ -1,0 +1,55 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY c.c_custkey, c.c_name
+
+    UNION ALL
+
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) + s.total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN SalesCTE s ON s.c_custkey = c.c_custkey
+    WHERE o.o_orderdate < DATE '1997-01-01' 
+    GROUP BY c.c_custkey, c.c_name, s.total_sales
+),
+AverageSales AS (
+    SELECT 
+        c.c_nationkey,
+        AVG(s.total_sales) AS avg_sales
+    FROM SalesCTE s
+    JOIN customer c ON s.c_custkey = c.c_custkey
+    GROUP BY c.c_nationkey
+),
+HighAvgSalesNation AS (
+    SELECT 
+        n.n_name, 
+        a.avg_sales
+    FROM nation n
+    JOIN AverageSales a ON n.n_nationkey = a.c_nationkey
+    WHERE a.avg_sales > (SELECT AVG(avg_sales) FROM AverageSales)
+)
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    AVG(p.p_retailprice) AS avg_price,
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity_sold,
+    string_agg(DISTINCT n.n_name, ', ') AS regions
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN HighAvgSalesNation hasn ON hasn.n_name = n.n_name
+GROUP BY p.p_partkey
+HAVING AVG(p.p_retailprice) < 100 AND COUNT(DISTINCT ps.ps_suppkey) > 2
+ORDER BY avg_price DESC;

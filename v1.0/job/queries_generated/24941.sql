@@ -1,0 +1,65 @@
+WITH RecursiveMovie AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year, 
+        t.imdb_index, 
+        t.kind_id,
+        COALESCE(mci.company_id, 0) AS company_id,
+        'Top Level' AS recursion_level
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mci ON t.id = mci.movie_id
+    WHERE 
+        t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS title_id, 
+        m.title, 
+        m.production_year,
+        m.imdb_index, 
+        m.kind_id,
+        COALESCE(mci.company_id, 0) AS company_id,
+        'Sub Level' AS recursion_level
+    FROM 
+        title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        RecursiveMovie r ON ml.movie_id = r.title_id
+    LEFT JOIN 
+        movie_companies mci ON m.id = mci.movie_id
+)
+
+SELECT 
+    r.title_id,
+    r.title AS movie_title,
+    r.production_year,
+    r.recursion_level,
+    COALESCE(kt.keyword, 'No Keyword') AS movie_keyword,
+    COUNT(ci.person_id) AS total_cast,
+    STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+    ROW_NUMBER() OVER (PARTITION BY r.title_id ORDER BY COUNT(ci.person_id) DESC) AS rank_by_cast
+FROM 
+    RecursiveMovie r
+LEFT JOIN 
+    movie_keyword mk ON r.title_id = mk.movie_id
+LEFT JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+LEFT JOIN 
+    cast_info ci ON r.title_id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+WHERE 
+    r.production_year BETWEEN 2000 AND 2023 
+    AND (r.kind_id IS NOT NULL OR r.company_id = 0)
+GROUP BY 
+    r.title_id, r.title, r.production_year, r.recursion_level, kt.keyword
+HAVING 
+    (COUNT(ci.person_id) > 3 OR r.recursion_level = 'Top Level')
+ORDER BY 
+    rank_by_cast DESC, r.production_year DESC;
+

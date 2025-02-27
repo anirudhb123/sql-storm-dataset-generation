@@ -1,0 +1,67 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'P') OR o.o_orderstatus IS NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+OrderLineStats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(l.l_linenumber) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '1997-01-01' AND l.l_shipdate < '1997-01-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    COALESCE(SUM(cs.total_spent), 0) AS total_spent,
+    AVG(COALESCE(cs.total_orders, 0)) AS avg_orders,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+    MAX(ols.revenue) AS highest_revenue
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey AND rs.rank = 1
+LEFT JOIN 
+    CustomerOrders cs ON s.s_nationkey = cs.c_nationkey
+LEFT JOIN 
+    OrderLineStats ols ON cs.total_orders > 0
+WHERE 
+    n.n_name IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    COALESCE(SUM(cs.total_spent), 0) > 10000 OR COUNT(DISTINCT rs.s_suppkey) > 5
+ORDER BY 
+    total_spent DESC, highest_revenue ASC;

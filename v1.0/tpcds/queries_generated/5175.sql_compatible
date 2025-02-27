@@ -1,0 +1,54 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        CASE 
+            WHEN cd.cd_purchase_estimate < 10000 THEN 'Low'
+            WHEN cd.cd_purchase_estimate BETWEEN 10000 AND 50000 THEN 'Medium'
+            ELSE 'High'
+        END AS Purchase_Band,
+        COUNT(sr.returned_date_sk) AS Returns_Count,
+        SUM(sr.return_amt) AS Total_Returns_Amt,
+        SUM(sr.return_tax) AS Total_Returns_Tax
+    FROM 
+        customer c 
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+),
+SalesStats AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS Total_Sales_Amt,
+        SUM(ws_net_profit) AS Total_Profit_Amt
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.Purchase_Band,
+    cs.Returns_Count,
+    cs.Total_Returns_Amt,
+    cs.Total_Returns_Tax,
+    ss.Total_Sales_Amt,
+    ss.Total_Profit_Amt
+FROM 
+    CustomerStats cs
+    LEFT JOIN SalesStats ss ON cs.c_customer_sk = ss.ws_bill_customer_sk
+WHERE 
+    cs.Total_Returns_Amt > 1000 OR ss.Total_Sales_Amt > 5000
+ORDER BY 
+    cs.Total_Returns_Amt DESC, ss.Total_Sales_Amt DESC
+FETCH FIRST 100 ROWS ONLY;

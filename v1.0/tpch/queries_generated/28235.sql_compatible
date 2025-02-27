@@ -1,0 +1,26 @@
+
+SELECT 
+    CONCAT(s.s_name, ' from ', n.n_name, ', ', r.r_name) AS supplier_info,
+    SUBSTRING_INDEX(p.p_name, ' ', 1) AS primary_name,
+    LENGTH(p.p_comment) AS comment_length,
+    REPLACE(p.p_comment, 'quality', 'excellence') AS modified_comment,
+    COALESCE(NULLIF(LTRIM(RTRIM(p.p_comment)), ''), 'No comment provided') AS final_comment
+FROM 
+    supplier s
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    p.p_size > 10
+    AND p.p_retailprice BETWEEN 100.00 AND 1000.00
+    AND s.s_acctbal > 500.00
+GROUP BY 
+    s.s_name, n.n_name, r.r_name, p.p_name, p.p_comment
+ORDER BY 
+    comment_length DESC
+LIMIT 100;

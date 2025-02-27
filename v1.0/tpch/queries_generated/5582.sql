@@ -1,0 +1,29 @@
+WITH SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost, 
+           RANK() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost ASC) as rank_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+RankedSuppliers AS (
+    SELECT sp.s_suppkey, sp.s_name, sp.p_partkey, sp.p_name, sp.ps_availqty, sp.ps_supplycost
+    FROM SupplierParts sp
+    WHERE sp.rank_cost <= 5
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) as order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+)
+SELECT cs.c_custkey, cs.c_name, cs.o_orderkey, cs.o_orderdate, cs.o_totalprice, 
+       rs.s_suppkey, rs.s_name, rs.p_partkey, rs.p_name, rs.ps_availqty, rs.ps_supplycost
+FROM CustomerOrders cs
+JOIN RankedSuppliers rs ON cs.o_orderkey IN (
+    SELECT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_partkey IN (SELECT p_partkey FROM ranked_parts)
+) 
+WHERE cs.order_rank <= 3
+ORDER BY cs.c_custkey, cs.o_orderdate DESC, rs.ps_supplycost;

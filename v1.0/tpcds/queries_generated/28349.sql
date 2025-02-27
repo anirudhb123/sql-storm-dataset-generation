@@ -1,0 +1,69 @@
+
+WITH Address_Info AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+Demographic_Info AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating
+    FROM 
+        customer_demographics
+),
+Sales_Info AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid
+    FROM 
+        web_sales ws
+    JOIN 
+        Address_Info ai ON ws.ws_bill_addr_sk = ai.ca_address_sk
+    GROUP BY 
+        ws.web_site_id
+),
+Customer_Segment AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        di.cd_gender,
+        di.cd_marital_status,
+        si.total_quantity,
+        si.total_net_paid
+    FROM 
+        customer c
+    JOIN 
+        Demographic_Info di ON c.c_current_cdemo_sk = di.cd_demo_sk
+    JOIN 
+        Sales_Info si ON c.c_customer_sk = si.ws_bill_customer_sk
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.total_quantity,
+    cs.total_net_paid,
+    COUNT(DISTINCT CASE WHEN cs.cd_marital_status = 'M' THEN cs.c_customer_sk END) AS married_customers,
+    AVG(CASE WHEN cs.cd_gender = 'F' THEN cs.total_net_paid ELSE NULL END) AS average_female_spending
+FROM 
+    Customer_Segment cs
+GROUP BY 
+    cs.c_customer_sk, cs.c_first_name, cs.c_last_name, cs.cd_gender, cs.cd_marital_status
+HAVING 
+    total_net_paid > 1000
+ORDER BY 
+    total_net_paid DESC
+LIMIT 10;

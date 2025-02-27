@@ -1,0 +1,34 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY DATE_TRUNC('month', o.o_orderdate) ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) as revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name
+), MonthlyRevenue AS (
+    SELECT 
+        DATE_TRUNC('month', o.o_orderdate) AS month,
+        SUM(total_revenue) AS monthly_total_revenue
+    FROM 
+        RankedOrders
+    WHERE 
+        revenue_rank <= 10
+    GROUP BY 
+        month
+)
+SELECT 
+    month, 
+    monthly_total_revenue,
+    LEAD(monthly_total_revenue) OVER (ORDER BY month) - monthly_total_revenue AS revenue_change
+FROM 
+    MonthlyRevenue
+ORDER BY 
+    month;

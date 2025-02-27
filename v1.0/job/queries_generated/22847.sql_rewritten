@@ -1,0 +1,59 @@
+WITH RecursiveTitleCTE AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COALESCE(mci.note, 'No company info') AS company_note,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS row_num
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mci ON t.id = mci.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COALESCE(mci.note, 'No company info') AS company_note,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS row_num
+    FROM 
+        RecursiveTitleCTE rt
+    JOIN 
+        aka_title t ON rt.title_id = t.id AND rt.production_year < t.production_year
+    LEFT JOIN 
+        movie_companies mci ON t.id = mci.movie_id
+),
+FilteredTitles AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        rt.company_note,
+        COUNT(DISTINCT mci.company_id) OVER (PARTITION BY rt.production_year) AS company_count_per_year,
+        SUM(CASE WHEN mci.note IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY rt.production_year) AS noted_companies
+    FROM 
+        RecursiveTitleCTE rt
+    LEFT JOIN 
+        movie_companies mci ON rt.title_id = mci.movie_id
+)
+SELECT 
+    ft.title,
+    ft.production_year,
+    ft.company_note,
+    ft.company_count_per_year,
+    ft.noted_companies,
+    CASE 
+        WHEN ft.noted_companies > 0 THEN 'Has Notes'
+        ELSE 'No Notes'
+    END AS note_status,
+    CONCAT('Title: ', ft.title, ', Year: ', ft.production_year, ', Company Note: ', ft.company_note) AS full_info
+FROM 
+    FilteredTitles ft
+WHERE 
+    ft.company_count_per_year > 1 
+ORDER BY 
+    ft.production_year DESC,
+    ft.title;

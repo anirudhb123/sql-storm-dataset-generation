@@ -1,0 +1,76 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM
+        orders o
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE
+        o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+),
+TopOrders AS (
+    SELECT
+        ro.o_orderkey,
+        ro.o_totalprice,
+        ro.o_orderdate,
+        ro.c_nationkey
+    FROM
+        RankedOrders ro
+    WHERE
+        ro.order_rank <= 10
+),
+SupplierDetails AS (
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM
+        partsupp ps
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY
+        ps.ps_partkey, ps.ps_suppkey
+),
+OrderLineItems AS (
+    SELECT
+        li.l_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM
+        lineitem li
+    GROUP BY
+        li.l_orderkey
+),
+FinalResults AS (
+    SELECT
+        to.o_orderkey,
+        to.o_totalprice,
+        ol.total_revenue,
+        sd.total_supply_cost,
+        n.n_name
+    FROM
+        TopOrders to
+    LEFT JOIN
+        OrderLineItems ol ON to.o_orderkey = ol.l_orderkey
+    LEFT JOIN
+        supplier s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l WHERE l.l_orderkey = to.o_orderkey))
+    LEFT JOIN
+        SupplierDetails sd ON sd.ps_suppkey = s.s_suppkey
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+)
+SELECT
+    fr.o_orderkey,
+    fr.o_totalprice,
+    fr.total_revenue,
+    fr.total_supply_cost,
+    fr.n_name
+FROM
+    FinalResults fr
+WHERE
+    fr.total_revenue > 10000
+ORDER BY
+    fr.o_totalprice DESC;

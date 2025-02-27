@@ -1,0 +1,36 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT ci.person_id,
+           c.name AS actor_name,
+           1 AS level
+    FROM cast_info ci
+    JOIN aka_name c ON ci.person_id = c.person_id
+    WHERE ci.movie_id = (SELECT id FROM title WHERE title = 'Inception')  
+
+    UNION ALL
+
+    SELECT ci.person_id,
+           c.name AS actor_name,
+           ah.level + 1
+    FROM cast_info ci
+    JOIN aka_name c ON ci.person_id = c.person_id
+    JOIN ActorHierarchy ah ON ci.movie_id = ah.person_id
+)
+
+SELECT
+    ah.actor_name,
+    COUNT(DISTINCT ci.movie_id) AS movie_count,
+    MAX(t.production_year) AS latest_movie,
+    STRING_AGG(DISTINCT t.title, ', ') AS movie_titles,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    SUM(CASE 
+            WHEN ci.note IS NULL THEN 0 
+            ELSE 1 
+        END) AS non_null_notes
+FROM ActorHierarchy ah
+JOIN cast_info ci ON ah.person_id = ci.person_id
+JOIN title t ON ci.movie_id = t.id
+LEFT JOIN movie_keyword mk ON mk.movie_id = t.id
+GROUP BY ah.actor_name
+HAVING COUNT(DISTINCT ci.movie_id) > 1
+ORDER BY movie_count DESC, latest_movie DESC
+LIMIT 10;

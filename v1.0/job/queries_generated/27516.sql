@@ -1,0 +1,46 @@
+WITH RankedMovies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        COUNT(DISTINCT cast_info.person_id) AS num_of_cast,
+        STRING_AGG(DISTINCT aka_name.name, ', ') AS cast_names
+    FROM title
+    JOIN cast_info ON title.id = cast_info.movie_id
+    JOIN aka_name ON aka_name.person_id = cast_info.person_id
+    GROUP BY title.id
+),
+PopularGenres AS (
+    SELECT 
+        movie_id,
+        STRING_AGG(DISTINCT kind_type.kind, ', ') AS genres
+    FROM movie_companies
+    JOIN company_type ON movie_companies.company_type_id = company_type.id
+    JOIN movie_keyword ON movie_companies.movie_id = movie_keyword.movie_id
+    JOIN keyword ON movie_keyword.keyword_id = keyword.id
+    JOIN kind_type ON keyword.phonetic_code = kind_type.id
+    GROUP BY movie_id
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.num_of_cast,
+        rm.cast_names,
+        pg.genres
+    FROM RankedMovies rm
+    LEFT JOIN PopularGenres pg ON rm.movie_id = pg.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.num_of_cast,
+    md.cast_names,
+    COALESCE(md.genres, 'Unknown') AS genres
+FROM MovieDetails md
+WHERE md.num_of_cast > 0
+ORDER BY md.production_year DESC, md.num_of_cast DESC
+LIMIT 100;
+

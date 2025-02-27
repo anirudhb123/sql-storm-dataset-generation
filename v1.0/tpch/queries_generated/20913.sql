@@ -1,0 +1,59 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+    UNION ALL
+    SELECT cc.c_custkey, cc.c_name, cc.c_acctbal, ch.level + 1
+    FROM customer cc
+    JOIN customer_hierarchy ch ON cc.c_custkey = ch.c_custkey
+    WHERE cc.c_acctbal < ch.c_acctbal
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate < CURRENT_DATE - INTERVAL '1 year'
+),
+supplier_part_summary AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           AVG(l.l_quantity) AS avg_quantity,
+           MAX(l.l_tax) AS max_tax
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT DISTINCT
+    n.n_name,
+    r.r_name,
+    p.p_mfgr,
+    COALESCE(NULLIF(SUM(ls.total_price), 0), NULL) AS total_sales,
+    MAX(sp.total_supply_cost) AS max_supply_cost,
+    COUNT(DISTINCT ch.c_custkey) AS customer_count,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(ls.total_price) DESC) AS region_sales_rank
+FROM nation n
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN lineitem_summary ls ON ls.l_orderkey IN (
+    SELECT lo.o_orderkey
+    FROM ranked_orders lo
+    WHERE lo.price_rank <= 5
+)
+LEFT JOIN partsupp ps ON ps.ps_partkey IN (
+    SELECT p.p_partkey
+    FROM part p
+    WHERE p.p_container IN ('BOX', 'PACK')
+)
+LEFT JOIN supplier_part_summary sp ON sp.s_suppkey = ps.ps_suppkey
+LEFT JOIN customer_hierarchy ch ON ch.c_custkey IN (
+    SELECT c.c_custkey
+    FROM customer c
+    WHERE c.c_mktsegment = 'BUILDING'
+)
+GROUP BY n.n_name, r.r_name, p.p_mfgr
+HAVING SUM(ls.total_price) > (SELECT AVG(total_price) FROM lineitem_summary) OR COUNT(DISTINCT ch.c_custkey) > 10
+ORDER BY total_sales DESC, customer_count ASC
+LIMIT 100;

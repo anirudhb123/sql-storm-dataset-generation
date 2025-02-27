@@ -1,0 +1,66 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(c.kind, 'Unknown') AS company_type,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_type c ON mc.company_type_id = c.id
+    WHERE 
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(c.kind, 'Unknown') AS company_type,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    mh.company_type,
+    COUNT(DISTINCT ci.person_id) AS num_actors,
+    AVG(CASE WHEN pi.info IS NOT NULL THEN LENGTH(pi.info) ELSE NULL END) AS avg_info_length,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors_names,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    SUM(CASE WHEN mi.note IS NOT NULL THEN 1 ELSE 0 END) AS info_notes
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+WHERE 
+    mh.production_year >= 2000
+    AND mh.company_type IS NOT NULL
+    AND (mh.level < 3 OR mh.company_type NOT LIKE 'Big Studio%')
+GROUP BY 
+    mh.movie_title, mh.production_year, mh.company_type
+HAVING 
+    COUNT(DISTINCT ci.person_id) >= 2
+ORDER BY 
+    mh.production_year DESC, num_actors DESC
+LIMIT 100;

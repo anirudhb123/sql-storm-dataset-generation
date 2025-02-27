@@ -1,0 +1,63 @@
+WITH RECURSIVE price_changes AS (
+    SELECT 
+        ps.partkey, 
+        ps.suppkey, 
+        ps.ps_supplycost AS current_cost,
+        0 AS level
+    FROM partsupp ps
+    UNION ALL
+    SELECT 
+        pc.partkey, 
+        pc.suppkey, 
+        pc.current_cost * 1.05 AS current_cost, 
+        pc.level + 1
+    FROM price_changes pc
+    WHERE pc.level < 4
+),
+total_orders AS (
+    SELECT 
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY o.o_custkey
+),
+supplier_info AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+ranked_orders AS (
+    SELECT 
+        customer.c_custkey, 
+        customer.c_name, 
+        total_orders.total_spent,
+        RANK() OVER (PARTITION BY customer.c_nationkey ORDER BY total_orders.total_spent DESC) AS spending_rank
+    FROM customer
+    JOIN total_orders ON customer.c_custkey = total_orders.o_custkey
+),
+final_report AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(sp.total_supply_cost, 0) AS total_supply_cost,
+        COALESCE(pr.current_cost, 0) AS predicted_cost,
+        ro.c_name,
+        ro.total_spent,
+        ro.spending_rank
+    FROM part p
+    LEFT JOIN supplier_info sp ON p.p_partkey = sp.ps_partkey
+    LEFT JOIN price_changes pr ON p.p_partkey = pr.partkey 
+    JOIN ranked_orders ro ON ro.total_spent > sp.total_supply_cost
+    WHERE p.p_size BETWEEN 10 AND 20
+        AND (p.p_retailprice IS NOT NULL OR p.p_comment IS NOT NULL)
+    ORDER BY ro.spending_rank, total_supply_cost DESC
+)
+SELECT * FROM final_report
+WHERE spending_rank <= 5
+ORDER BY total_spent DESC, predicted_cost ASC;

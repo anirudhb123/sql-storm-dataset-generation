@@ -1,0 +1,57 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        DENSE_RANK() OVER (PARTITION BY p.p_type ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank 
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey 
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, p.p_type 
+), 
+RegionNations AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        r.r_name AS region 
+    FROM 
+        nation n 
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count, 
+        SUM(o.o_totalprice) AS total_spent 
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    rn.region, 
+    s.s_name, 
+    s.total_supply_value, 
+    co.c_name AS customer_name, 
+    co.order_count, 
+    co.total_spent
+FROM 
+    RankedSuppliers s
+JOIN 
+    RegionNations rn ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps JOIN part p ON ps.ps_partkey = p.p_partkey WHERE p.p_type = (SELECT p.p_type FROM part WHERE p.p_key = s.s_suppkey LIMIT 1))
+JOIN 
+    CustomerOrders co ON s.s_suppkey = co.c_custkey
+WHERE 
+    s.rank = 1 AND co.total_spent > 5000
+ORDER BY 
+    rn.region, s.total_supply_value DESC;

@@ -1,0 +1,78 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(vs.UpVotes), 0) AS TotalUpVotes,
+        COALESCE(SUM(vs.DownVotes), 0) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        (SELECT 
+            UserId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM 
+            Votes
+         GROUP BY 
+            UserId) vs ON u.Id = vs.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = p.TagId
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 5
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (CURRENT_TIMESTAMP - INTERVAL '30 days')
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalUpVotes,
+    u.TotalDownVotes,
+    u.TotalPosts,
+    u.TotalComments,
+    ARRAY_AGG(tt.TagName) AS TopTags,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate
+FROM 
+    UserStats u
+LEFT JOIN 
+    TopTags tt ON u.TotalPosts >= 5
+LEFT JOIN 
+    RecentPosts rp ON u.UserId = rp.OwnerUserId AND rp.Rn = 1
+WHERE 
+    u.TotalUpVotes > 10 OR u.TotalComments > 5
+GROUP BY 
+    u.UserId, u.DisplayName, rp.Title, rp.CreationDate
+HAVING 
+    COUNT(tt.TagName) > 0
+ORDER BY 
+    u.TotalUpVotes DESC, u.TotalComments DESC;

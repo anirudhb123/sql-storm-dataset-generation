@@ -1,0 +1,51 @@
+WITH TagCounts AS (
+    SELECT
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Only consider questions
+    GROUP BY 
+        TagName
+),
+UserReputation AS (
+    SELECT
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(COALESCE(B.Class, 0)) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1  -- Questions only
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+TopTags AS (
+    SELECT
+        TagName,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagCounts
+)
+SELECT 
+    U.DisplayName AS UserDisplayName,
+    U.Reputation,
+    T.TagName,
+    TC.PostCount,
+    U.TotalBadges
+FROM 
+    UserReputation U
+JOIN 
+    TopTags T ON U.QuestionCount > 0
+JOIN 
+    TagCounts TC ON T.TagName = TC.TagName
+WHERE 
+    T.TagRank <= 10  -- Top 10 tags
+ORDER BY 
+    U.Reputation DESC, 
+    TC.PostCount DESC;

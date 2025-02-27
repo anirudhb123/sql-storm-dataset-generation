@@ -1,0 +1,79 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredCast AS (
+    SELECT 
+        c.id AS cast_id,
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        a.name IS NOT NULL
+        AND r.role IS NOT NULL
+        AND a.name NOT LIKE '%Extra%' -- Exclude extras
+),
+MoviesWithInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ci.actor_name,
+        ci.role_name,
+        COUNT(DISTINCT ki.keyword) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    JOIN 
+        FilteredCast ci ON ci.movie_id = m.id
+    GROUP BY 
+        m.id, m.title, ci.actor_name, ci.role_name
+),
+FinalResults AS (
+    SELECT 
+        ROW_NUMBER() OVER (ORDER BY tt.title_id) AS row_num,
+        tt.title,
+        tt.production_year,
+        COALESCE(fc.actor_name, 'Unknown Actor') AS actor_name,
+        fc.role_name,
+        COALESCE(mwi.keyword_count, 0) AS keyword_count
+    FROM 
+        RankedTitles tt
+    LEFT JOIN 
+        MoviesWithInfo mwi ON tt.title_id = mwi.movie_id
+    LEFT JOIN 
+        FilteredCast fc ON mwi.movie_id = fc.movie_id
+)
+SELECT 
+    f.row_num,
+    f.title AS movie_title,
+    f.production_year AS release_year,
+    f.actor_name,
+    f.role_name,
+    f.keyword_count,
+    CASE 
+        WHEN f.row_num % 2 = 0 THEN 'Even Row'
+        ELSE 'Odd Row'
+    END AS row_type,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = f.row_num) AS info_count -- Subquery demonstrating the use of row_num as a reference
+FROM 
+    FinalResults f
+WHERE 
+    f.keyword_count > 1 OR f.actor_name LIKE '%John%'
+ORDER BY 
+    f.production_year DESC NULLS LAST, f.title;

@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+        LEFT JOIN LATERAL (
+            SELECT 
+                UNNEST(string_to_array(p.Tags, '><')) AS TagName
+        ) t ON true
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserBadgeInfo AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges,
+        SUM(b.Class) AS TotalBadgeClass  -- unusual aggregate operation
+    FROM 
+        Users u
+        LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+        AND ph.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    rb.PostId,
+    rb.Title,
+    rb.CreationDate,
+    rb.Score,
+    rb.ViewCount,
+    rb.CommentCount,
+    rb.UpVotes,
+    rb.DownVotes,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    cp.LastClosedDate,
+    cp.CloseCount,
+    CASE 
+        WHEN cp.CloseCount > 0 THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus,
+    CASE 
+        WHEN rb.CommentCount = 0 
+             AND rb.UpVotes > 0 
+             AND ub.TotalBadgeClass IS NULL THEN 'Lonely High Performer'
+        ELSE 'Standard'
+    END AS PostTypeClassification
+FROM 
+    RankedPosts rb
+    JOIN Users up ON rb.OwnerUserId = up.Id
+    LEFT JOIN UserBadgeInfo ub ON up.Id = ub.UserId
+    LEFT JOIN ClosedPosts cp ON rb.PostId = cp.PostId
+WHERE 
+    rb.PostRank = 1 
+    AND (ub.GoldBadges IS NOT NULL OR ub.SilverBadges IS NOT NULL OR ub.BronzeBadges IS NOT NULL)
+ORDER BY 
+    rb.Score DESC,
+    rb.ViewCount DESC;
+

@@ -1,0 +1,28 @@
+SELECT 
+    U.DisplayName AS UserDisplayName,
+    SUM(P.ViewCount) AS TotalViews,
+    COUNT(DISTINCT P.Id) AS TotalPosts,
+    COUNT(DISTINCT C.Id) AS TotalComments,
+    SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+    SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+    ROUND(AVG(P.Score), 2) AS AverageScore,
+    MAX(P.CreationDate) AS LastPostDate,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS AssociatedTags
+FROM 
+    Users U
+JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId AND V.UserId = U.Id
+LEFT JOIN 
+    string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><') AS T(TagName)
+WHERE 
+    U.Reputation > 1000 AND 
+    P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+GROUP BY 
+    U.Id
+ORDER BY 
+    TotalViews DESC, TotalPosts DESC
+LIMIT 10;

@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.Tags,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.ViewCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT A.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.ViewCount DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Posts A ON P.Id = A.ParentId AND P.PostTypeId = 1
+    WHERE 
+        P.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.Tags, U.DisplayName, P.CreationDate, P.LastActivityDate, P.ViewCount
+),
+FilteredPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Body,
+        RP.Tags,
+        RP.OwnerDisplayName,
+        RP.CreationDate,
+        RP.LastActivityDate,
+        RP.ViewCount,
+        RP.CommentCount,
+        RP.AnswerCount,
+        RP.Rank
+    FROM 
+        RankedPosts RP
+    WHERE 
+        RP.Rank <= 10
+),
+TopTags AS (
+    SELECT 
+        UNNEST(string_to_array(SUBSTRING(FT.Tags, 2, LENGTH(FT.Tags)-2), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        FilteredPosts FT
+    GROUP BY 
+        UNNEST(string_to_array(SUBSTRING(FT.Tags, 2, LENGTH(FT.Tags)-2), '><'))
+    ORDER BY 
+        TagCount DESC
+)
+SELECT 
+    FT.Title,
+    FT.OwnerDisplayName,
+    FT.CreationDate,
+    FT.ViewCount,
+    FT.CommentCount,
+    FT.AnswerCount,
+    TT.TagName,
+    TT.TagCount
+FROM 
+    FilteredPosts FT
+JOIN 
+    TopTags TT ON TT.TagName = ANY(string_to_array(SUBSTRING(FT.Tags, 2, LENGTH(FT.Tags)-2), '><'))
+ORDER BY 
+    FT.ViewCount DESC, FT.CreationDate DESC;

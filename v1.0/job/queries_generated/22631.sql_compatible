@@ -1,0 +1,80 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS movie_rank,
+        COUNT(DISTINCT k.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+ActorInfo AS (
+    SELECT 
+        a.person_id,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        CASE 
+            WHEN COUNT(DISTINCT c.movie_id) > 0 THEN MAX(t.production_year)
+            ELSE NULL 
+        END AS last_movie_year
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info c ON a.person_id = c.person_id
+    LEFT JOIN 
+        RankedMovies t ON c.movie_id = t.movie_id
+    GROUP BY 
+        a.person_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT co.id) AS company_count,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+),
+PopularMovies AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        r.keyword_count,
+        ac.actor_names,
+        mc.company_count,
+        mc.companies
+    FROM 
+        RankedMovies r
+    LEFT JOIN 
+        ActorInfo ac ON r.movie_id = ac.person_id
+    LEFT JOIN 
+        MovieCompanies mc ON r.movie_id = mc.movie_id
+    WHERE 
+        r.movie_rank <= 5 AND 
+        (mc.company_count IS NOT NULL OR ac.actor_names IS NOT NULL)
+)
+SELECT 
+    pm.title,
+    pm.production_year,
+    COALESCE(pm.companies, 'No Companies') AS companies_involved,
+    COALESCE(pm.actor_names, 'No Actors') AS actors_list,
+    CASE 
+        WHEN pm.keyword_count IS NULL THEN 'No Keywords'
+        ELSE CAST(pm.keyword_count AS CHAR) || ' Keywords' 
+    END AS keyword_summary,
+    COALESCE(ac.last_movie_year, 'Never Acted') AS last_active
+FROM 
+    PopularMovies pm
+LEFT JOIN 
+    ActorInfo ac ON pm.movie_id = ac.person_id
+ORDER BY 
+    pm.production_year DESC, pm.keyword_count DESC;

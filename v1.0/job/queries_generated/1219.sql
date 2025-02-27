@@ -1,0 +1,58 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS year_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+), 
+ActorsInfo AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name AS actor_name,
+        CAST(COUNT(ci.movie_id) AS INTEGER) AS movie_count
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.id, ak.name
+), 
+MoviesWithActors AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        a.actor_name,
+        a.movie_count,
+        RANK() OVER (PARTITION BY m.production_year ORDER BY a.movie_count DESC) AS actor_rank
+    FROM 
+        RankedMovies m
+    JOIN 
+        cast_info ci ON m.movie_id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+)
+SELECT 
+    m.title,
+    m.production_year,
+    COALESCE(a.actor_name, 'Unknown Actor') AS actor_name,
+    m.year_rank,
+    m.actor_rank,
+    CASE 
+        WHEN m.production_year < 2000 THEN 'Before 2000'
+        WHEN m.production_year BETWEEN 2000 AND 2010 THEN '2000-2010'
+        ELSE 'After 2010'
+    END AS production_period
+FROM 
+    MoviesWithActors m
+LEFT JOIN 
+    ActorsInfo a ON m.actor_name = a.actor_name
+WHERE 
+    m.actor_rank <= 5
+ORDER BY 
+    m.production_year DESC, 
+    m.actor_rank ASC
+LIMIT 50;

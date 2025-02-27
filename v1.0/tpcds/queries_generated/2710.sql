@@ -1,0 +1,49 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(cr.return_amount) AS total_return_amount,
+        AVG(cr.return_quantity) AS avg_return_quantity
+    FROM web_returns cr
+    GROUP BY cr.returning_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+    HAVING SUM(ws.ws_net_paid) > 5000
+),
+RecentSales AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        COUNT(ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_date > CURRENT_DATE - INTERVAL '1 YEAR'
+    GROUP BY ws.ws_bill_customer_sk
+)
+SELECT 
+    r.returning_customer_sk,
+    COALESCE(cuc.c_first_name, 'Unknown') AS customer_first_name,
+    COALESCE(cuc.c_last_name, 'Unknown') AS customer_last_name,
+    cuc.total_spent AS customer_total_spent,
+    r.total_returns,
+    r.total_return_amount,
+    r.avg_return_quantity,
+    recent.order_count,
+    recent.total_spent AS recent_total_spent
+FROM CustomerReturns r
+LEFT JOIN HighValueCustomers cuc ON r.returning_customer_sk = cuc.c_customer_sk
+LEFT JOIN RecentSales recent ON r.returning_customer_sk = recent.ws_bill_customer_sk
+WHERE (recent.order_count IS NOT NULL OR (recent.order_count IS NULL AND r.total_returns > 0))
+ORDER BY r.total_returns DESC, r.total_return_amount DESC
+LIMIT 100;

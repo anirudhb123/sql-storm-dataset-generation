@@ -1,0 +1,77 @@
+
+WITH SupplierStats AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+NationSummary AS (
+    SELECT
+        n.n_name,
+        SUM(COALESCE(cs.total_spent, 0)) AS region_total,
+        COUNT(DISTINCT cs.c_custkey) AS customer_count
+    FROM
+        nation n
+    LEFT JOIN
+        CustomerOrders cs ON cs.c_custkey IN (
+            SELECT c.c_custkey 
+            FROM customer c 
+            WHERE c.c_nationkey = n.n_nationkey
+        )
+    GROUP BY
+        n.n_name
+)
+SELECT
+    ns.n_name,
+    ns.region_total,
+    ns.customer_count,
+    ss.total_supply_cost,
+    ss.total_parts
+FROM
+    NationSummary ns
+LEFT JOIN
+    SupplierStats ss ON ns.n_name = 
+        CASE 
+            WHEN ss.s_name LIKE '%ACME%' THEN 'Acme Region'
+            ELSE 'Unknown Region' 
+        END
+ORDER BY
+    ns.region_total DESC,
+    ns.customer_count ASC
+LIMIT 10
+UNION ALL
+SELECT
+    'Total' AS n_name,
+    SUM(region_total) AS region_total,
+    SUM(customer_count) AS customer_count,
+    SUM(ss.total_supply_cost) AS total_supply_cost,
+    NULL AS total_parts
+FROM
+    NationSummary ns
+JOIN SupplierStats ss ON ns.n_name = 
+        CASE 
+            WHEN ss.s_name LIKE '%ACME%' THEN 'Acme Region'
+            ELSE 'Unknown Region' 
+        END;

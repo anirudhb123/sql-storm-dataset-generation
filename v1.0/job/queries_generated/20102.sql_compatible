@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL 
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ah.id AS actor_id,
+    ak.name AS actor_name,
+    mh.title AS movie_title,
+    mh.production_year,
+    cf.kind AS role_type,
+    COUNT(DISTINCT mc.company_id) AS production_companies_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY mh.production_year DESC) AS rank
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    movie_companies mc ON c.movie_id = mc.movie_id
+JOIN 
+    movie_hierarchy mh ON c.movie_id = mh.movie_id
+JOIN 
+    role_type cf ON c.role_id = cf.id
+LEFT JOIN 
+    movie_keyword k ON mh.movie_id = k.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    ak.name IS NOT NULL
+    AND (mh.production_year >= 2000 OR mh.title LIKE '%Action%')  
+GROUP BY 
+    ak.id, ak.name, mh.title, mh.production_year, cf.kind, rank
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1  
+ORDER BY 
+    rank
+FETCH FIRST 10 ROWS ONLY;

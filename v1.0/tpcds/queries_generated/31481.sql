@@ -1,0 +1,62 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk
+),
+DemographicSummary AS (
+    SELECT 
+        cd.cd_demo_sk,
+        COUNT(c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        MAX(cd.cd_dep_count) AS max_dependents
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk
+),
+ReturnDetails AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns 
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    sa.s_store_sk,
+    d.d_date AS sales_date,
+    SUM(ss.ss_ext_sales_price) AS store_sales_amount,
+    COALESCE(SUM(rd.total_returns), 0) AS total_returns,
+    COALESCE(SUM(rd.total_return_amount), 0) AS total_return_amount,
+    SUM(DISTINCT dh.customer_count) AS unique_demographic_customers,
+    MAX(CASE WHEN d.d_year = 2023 THEN dh.avg_purchase_estimate ELSE NULL END) AS avg_purchase_est_2023
+FROM 
+    store_sales ss
+JOIN 
+    store s ON ss.ss_store_sk = s.s_store_sk
+JOIN 
+    date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+LEFT JOIN 
+    ReturnDetails rd ON ss.ss_item_sk = rd.sr_item_sk
+LEFT JOIN 
+    DemographicSummary dh ON s.s_store_sk = dh.cd_demo_sk
+WHERE 
+    s.s_state = 'CA' AND 
+    (d.d_year = 2022 OR d.d_year = 2023) AND
+    s.s_number_employees >= 10
+GROUP BY 
+    sa.s_store_sk, d.d_date
+ORDER BY 
+    store_sales_amount DESC, sales_date DESC
+LIMIT 100
+;

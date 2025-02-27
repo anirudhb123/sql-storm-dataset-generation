@@ -1,0 +1,68 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotesCount,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 3) THEN 
+                    CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE -1 END 
+                 ELSE 0 END) AS VoteNetScore
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostTags AS (
+    SELECT 
+        P.Id AS PostId,
+        STRING_AGG(T.TagName, ', ') AS TagsList,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN LATERAL STRING_TO_ARRAY(P.Tags, ',') AS Tag_Ids ON TRUE
+    LEFT JOIN Tags T ON T.Id = CAST(Tag_Ids AS INT)
+    GROUP BY P.Id
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.ViewCount) AS AvgViewsPerPost,
+        SUM(P.AnswerCount) AS TotalAnswers,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    WHERE U.Reputation IS NOT NULL
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    UPS.UserId,
+    UPS.DisplayName,
+    UPS.PostCount,
+    UPS.TotalViews,
+    UPS.AvgViewsPerPost,
+    UPS.TotalAnswers,
+    UPS.TotalScore,
+    UVS.UpVotesCount,
+    UVS.DownVotesCount,
+    UVS.VoteNetScore,
+    PT.TotallyUniqueTags,
+    PT.TotalScore AS PostTagsScore
+FROM UserPostStats UPS
+LEFT JOIN UserVoteStats UVS ON UPS.UserId = UVS.UserId
+LEFT JOIN (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(DISTINCT T.Id) AS TotallyUniqueTags,
+        SUM(PT.TotalScore) AS TotalScore
+    FROM Posts P 
+    LEFT JOIN LATERAL STRING_TO_ARRAY(P.Tags, ',') AS Tag_Ids ON TRUE
+    LEFT JOIN Tags T ON T.Id = CAST(Tag_Ids AS INT)
+    JOIN PostTags PT ON PT.PostId = P.Id
+    GROUP BY P.OwnerUserId
+) PT ON UPS.UserId = PT.OwnerUserId
+WHERE UPS.TotalViews > (SELECT AVG(TotalViews) FROM UserPostStats)
+ORDER BY UPS.TotalScore DESC NULLS LAST;

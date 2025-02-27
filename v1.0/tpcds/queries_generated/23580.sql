@@ -1,0 +1,48 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_order_number, 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank
+    FROM web_sales ws
+    WHERE ws.ws_sales_price IS NOT NULL AND ws.ws_sales_price > 0
+), 
+avg_sales AS (
+    SELECT 
+        ws_item_sk,
+        AVG(ws_sales_price) AS avg_price
+    FROM web_sales
+    GROUP BY ws_item_sk
+), 
+high_sales AS (
+    SELECT 
+        r.ws_order_number,
+        r.ws_item_sk,
+        r.ws_sales_price
+    FROM ranked_sales r
+    JOIN avg_sales a ON r.ws_item_sk = a.ws_item_sk
+    WHERE r.sales_rank = 1 AND r.ws_sales_price > a.avg_price
+), 
+store_sales_summary AS (
+    SELECT 
+        ss.ss_store_sk,
+        SUM(ss.ss_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS transaction_count
+    FROM store_sales ss
+    GROUP BY ss.ss_store_sk
+)
+SELECT 
+    s.s_store_name,
+    s.s_city,
+    COALESCE(s.total_sales, 0) AS total_store_sales,
+    COALESCE(s.transaction_count, 0) AS store_transaction_count,
+    COUNT(DISTINCT h.ws_order_number) AS high_sales_count,
+    STRING_AGG(DISTINCT h.ws_order_number) AS order_numbers
+FROM store_sales_summary s
+LEFT JOIN high_sales h ON s.ss_store_sk = h.ws_item_sk
+LEFT JOIN store st ON s.ss_store_sk = st.s_store_sk
+WHERE (s.total_sales > 10000 OR s.transaction_count > 100) AND st.s_state IS NOT NULL
+GROUP BY s.s_store_name, s.s_city
+HAVING SUM(s.total_sales) IS NOT NULL
+ORDER BY total_store_sales DESC, s.s_city ASC;

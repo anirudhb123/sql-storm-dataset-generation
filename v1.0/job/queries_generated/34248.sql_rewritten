@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        NULL::integer AS parent_id,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.movie_id,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    mh.title AS linked_movie_title,
+    mh.production_year AS linked_movie_year,
+    ak.name AS actor_name,
+    COUNT(*) OVER (PARTITION BY ak.id) AS movie_count,
+    CASE 
+        WHEN ak.gender = 'M' THEN 'Male Actor'
+        WHEN ak.gender = 'F' THEN 'Female Actor'
+        ELSE 'Unknown Gender'
+    END AS actor_gender,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    MAX(mi.info) FILTER (WHERE it.info = 'box office') AS box_office_info
+FROM 
+    MovieHierarchy mh
+JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id
+JOIN 
+    cast_info ca ON ca.id = cc.subject_id
+JOIN 
+    aka_name ak ON ak.person_id = ca.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id
+LEFT JOIN 
+    info_type it ON it.id = mi.info_type_id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    mh.movie_id, mh.title, ak.id, ak.gender, mh.production_year
+HAVING 
+    COUNT(DISTINCT k.keyword) > 2
+ORDER BY 
+    mh.production_year DESC, actor_name;

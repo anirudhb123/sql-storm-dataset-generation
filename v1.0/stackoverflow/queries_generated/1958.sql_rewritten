@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RN
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.PostTypeId = 1
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(u.LastAccessDate) AS LastAccess
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+), TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        ur.BadgeCount,
+        ur.LastAccess
+    FROM 
+        UserReputation ur
+    WHERE 
+        ur.Reputation > (SELECT AVG(Reputation) FROM Users) 
+    ORDER BY 
+        ur.BadgeCount DESC 
+    LIMIT 10
+)
+SELECT 
+    t.UserId,
+    t.Reputation,
+    t.BadgeCount,
+    p.PostId,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    COALESCE(c.Text, 'No comments yet') AS Comments
+FROM 
+    TopUsers t
+LEFT JOIN 
+    RankedPosts p ON t.UserId = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON p.PostId = c.PostId
+WHERE 
+    p.RN = 1
+ORDER BY 
+    t.Reputation DESC, 
+    p.Score DESC
+OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY
+UNION ALL
+SELECT 
+    NULL AS UserId,
+    NULL AS Reputation,
+    NULL AS BadgeCount,
+    NULL AS PostId,
+    'No Posts' AS Title,
+    0 AS Score,
+    0 AS ViewCount,
+    'No comments available' AS Comments
+FROM 
+    Dual
+WHERE 
+    NOT EXISTS (SELECT 1 FROM TopUsers);

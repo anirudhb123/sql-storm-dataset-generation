@@ -1,0 +1,50 @@
+WITH ActorRanking AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT ti.title, ', ') AS movies
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title ti ON ci.movie_id = ti.id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.name
+),
+PopularMovies AS (
+    SELECT 
+        title.title,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        title
+    JOIN 
+        movie_keyword mk ON title.id = mk.movie_id
+    GROUP BY 
+        title.title
+    HAVING 
+        COUNT(mk.keyword_id) > 5
+),
+ActorMovieOverview AS (
+    SELECT 
+        ar.actor_name,
+        ar.movie_count,
+        pm.title AS popular_movie,
+        (SELECT COUNT(*) FROM movie_companies mc WHERE mc.movie_id = pm.id) AS company_count
+    FROM 
+        ActorRanking ar
+    JOIN 
+        PopularMovies pm ON ar.movies LIKE '%' || pm.title || '%'
+)
+SELECT 
+    amo.actor_name,
+    amo.movie_count,
+    amo.popular_movie,
+    amo.company_count
+FROM 
+    ActorMovieOverview amo
+ORDER BY 
+    amo.movie_count DESC, 
+    amo.popular_movie;

@@ -1,0 +1,26 @@
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(ps.ps_supplycost) AS average_supply_cost,
+    STRING_AGG(DISTINCT SUBSTRING(s.s_name, 1, 10), ', ') AS supplier_names,
+    CONCAT('Total Part in ', r.r_name) AS region_summary
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_retailprice > 100
+GROUP BY 
+    p.p_name, r.r_name
+HAVING 
+    COUNT(DISTINCT s.s_suppkey) > 1
+ORDER BY 
+    total_available_quantity DESC
+LIMIT 10;

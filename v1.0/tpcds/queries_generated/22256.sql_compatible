@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        cs.cs_item_sk,
+        cs.cs_order_number,
+        SUM(cs.cs_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY cs.cs_item_sk ORDER BY SUM(cs.cs_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        catalog_sales cs
+    WHERE 
+        cs.cs_sales_price IS NOT NULL
+    GROUP BY 
+        cs.cs_item_sk, cs.cs_order_number
+), 
+TopSales AS (
+    SELECT * 
+    FROM SalesCTE 
+    WHERE sales_rank <= 3
+),
+AddressInfo AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY ca.ca_city) AS city_rank
+    FROM 
+        customer_address ca
+    WHERE 
+        ca.ca_country IS NOT NULL AND ca.ca_state IS NOT NULL
+),
+FilteredAddresses AS (
+    SELECT 
+        ai.*
+    FROM 
+        AddressInfo ai
+    WHERE 
+        ai.city_rank BETWEEN 1 AND 5
+)
+SELECT 
+    COALESCE(SUM(ts.total_sales), 0) AS total_top_sales,
+    COUNT(DISTINCT fa.ca_address_sk) AS unique_address_count,
+    AVG(COALESCE(d.d_current_day, 1)) AS average_current_day
+FROM 
+    TopSales ts
+LEFT JOIN 
+    FilteredAddresses fa ON fa.ca_address_sk IN (
+        SELECT DISTINCT sr_addr_sk 
+        FROM store_returns sr 
+        WHERE sr_return_quantity > 0
+    )
+FULL OUTER JOIN 
+    date_dim d ON d.d_date_sk IN (
+        SELECT DISTINCT ws_sold_date_sk 
+        FROM web_sales 
+        WHERE ws_sales_price > 100
+    )
+WHERE 
+    DATEDIFF(DAY, CAST('2002-10-01' AS DATE), d.d_date) BETWEEN -30 AND 0
+GROUP BY 
+    d.d_year, d.d_month_seq, d.d_current_day
+ORDER BY 
+    total_top_sales DESC
+LIMIT 10;

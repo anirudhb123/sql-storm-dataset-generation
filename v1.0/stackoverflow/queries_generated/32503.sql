@@ -1,0 +1,66 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        Location,
+        WebsiteUrl,
+        1 AS Level
+    FROM 
+        Users
+    WHERE 
+        Reputation IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.Location,
+        u.WebsiteUrl,
+        uh.Level + 1
+    FROM 
+        Users u
+    JOIN 
+        UserHierarchy uh ON u.Id = uh.Id
+      WHERE 
+        u.Reputation > 1000
+)
+
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    MAX(v.CreationDate) AS LastVoteDate,
+    COALESCE(b.Name, 'No Badge') AS HighestBadge,
+    uh.DisplayName AS UserName,
+    uh.Reputation AS UserReputation,
+    ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.ViewCount DESC) AS PostRank,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+    CASE
+        WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    Posts p
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Badges b ON b.UserId = p.OwnerUserId
+LEFT JOIN 
+    UserHierarchy uh ON p.OwnerUserId = uh.Id
+WHERE 
+    p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY 
+    p.Id, uh.DisplayName, uh.Reputation, b.Name
+HAVING 
+    COUNT(DISTINCT c.Id) > 0
+ORDER BY 
+    PostRank, Upvotes DESC;

@@ -1,0 +1,63 @@
+WITH RegionalSales AS (
+    SELECT 
+        r.r_name AS Region, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSales
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+    GROUP BY 
+        r.r_name
+),
+CustomerRanking AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS CustomerTotal
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    ORDER BY 
+        CustomerTotal DESC
+    LIMIT 5
+)
+SELECT 
+    r.Region, 
+    r.TotalSales, 
+    c.c_name AS TopCustomer, 
+    c.CustomerTotal
+FROM 
+    RegionalSales r
+JOIN 
+    CustomerRanking c ON r.Region = (
+        SELECT 
+            r_name 
+        FROM 
+            nation n 
+        JOIN 
+            region r ON n.n_regionkey = r.r_regionkey 
+        WHERE 
+            n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps))
+        LIMIT 1
+    )
+ORDER BY 
+    r.TotalSales DESC, c.CustomerTotal DESC;

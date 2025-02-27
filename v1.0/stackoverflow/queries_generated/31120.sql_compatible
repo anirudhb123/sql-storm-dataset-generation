@@ -1,0 +1,99 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.PostId
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY 
+        v.PostId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        COALESCE(rv.VoteCount, 0) AS TotalVotes,
+        COALESCE(rv.UpVotes, 0) AS UpVotes,
+        COALESCE(rv.DownVotes, 0) AS DownVotes,
+        COALESCE(ph.Level, 0) AS HierarchyLevel
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecentVotes rv ON p.Id = rv.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy ph ON p.Id = ph.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2)  
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        TotalScore DESC
+    LIMIT 10
+)
+
+SELECT 
+    ps.Title AS PostTitle,
+    ps.ViewCount,
+    ps.TotalVotes,
+    ps.UpVotes,
+    ps.DownVotes,
+    tu.DisplayName AS TopUser,
+    tu.TotalScore,
+    tu.PostCount,
+    ps.HierarchyLevel
+FROM 
+    PostStatistics ps
+JOIN 
+    TopUsers tu ON ps.Id = (SELECT 
+                                p.Id 
+                             FROM 
+                                Posts p 
+                             WHERE 
+                                p.OwnerUserId = tu.Id 
+                             ORDER BY 
+                                p.ViewCount DESC 
+                             LIMIT 1)  
+WHERE 
+    ps.HierarchyLevel > 0  
+ORDER BY 
+    ps.ViewCount DESC, 
+    ps.TotalVotes DESC;

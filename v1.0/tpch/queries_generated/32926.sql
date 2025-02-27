@@ -1,0 +1,43 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = ch.c_custkey)
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(MONTH, -12, CURRENT_DATE) 
+),
+SupplierStats AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available, MAX(s.s_acctbal) AS max_supplier_acctbal
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS orders_count,
+    AVG(lo.l_extendedprice) AS avg_extended_price,
+    MAX(o.o_totalprice) AS max_order_price,
+    sr.total_available,
+    sr.max_supplier_acctbal,
+    ch.level AS customer_level,
+    CASE 
+        WHEN MAX(o.o_orderdate) IS NULL THEN 'No Orders'
+        ELSE 'Regular Customer' 
+    END AS customer_status
+FROM customer c
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem lo ON o.o_orderkey = lo.l_orderkey
+JOIN SupplierStats sr ON lo.l_partkey = sr.ps_partkey
+LEFT JOIN CustomerHierarchy ch ON c.c_custkey = ch.c_custkey
+GROUP BY c.c_name, sr.total_available, sr.max_supplier_acctbal, ch.level
+HAVING SUM(lo.l_extendedprice * (1 - lo.l_discount)) > 1000
+ORDER BY total_revenue DESC
+LIMIT 10;

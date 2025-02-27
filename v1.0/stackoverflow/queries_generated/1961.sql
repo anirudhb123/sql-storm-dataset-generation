@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(DISTINCT pv.Id) OVER (PARTITION BY p.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN Votes pv ON p.Id = pv.PostId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        DATEDIFF(CURRENT_TIMESTAMP, u.LastAccessDate) AS DaysSinceLastActive
+    FROM 
+        Users u
+    WHERE 
+        u.LastAccessDate >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY)
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN pht.Name = 'Post Closed' THEN ph.CreationDate END) AS LastClosedDate,
+        COUNT(CASE WHEN pht.Name = 'Edit Body' THEN 1 END) AS EditCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    ru.DisplayName,
+    ru.Reputation,
+    ru.DaysSinceLastActive,
+    ph.LastClosedDate,
+    ph.EditCount,
+    rp.TotalVotes,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+FROM 
+    RankedPosts rp
+JOIN 
+    ActiveUsers ru ON rp.OwnerUserId = ru.UserId
+LEFT JOIN 
+    PostHistorySummary ph ON rp.Id = ph.PostId
+LEFT JOIN 
+    Votes v ON rp.Id = v.PostId
+WHERE 
+    rp.PostRank = 1
+    AND rp.Score > 50 
+    AND (ru.Reputation IS NOT NULL AND ru.Reputation > 100)
+GROUP BY 
+    rp.Title, rp.CreationDate, ru.DisplayName, ru.Reputation, ru.DaysSinceLastActive, ph.LastClosedDate, ph.EditCount
+ORDER BY 
+    rp.Score DESC, ru.Reputation DESC;

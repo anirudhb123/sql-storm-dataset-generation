@@ -1,0 +1,60 @@
+WITH RECURSIVE CTE_Sales AS (
+    SELECT 
+        s.s_store_id,
+        SUM(ss.net_paid) AS total_sales,
+        COUNT(ss.ticket_number) AS total_transactions
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.s_store_sk = s.s_store_sk
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN 2451545 AND 2451549  
+    GROUP BY 
+        s.s_store_id
+
+    UNION ALL
+
+    SELECT 
+        s.s_store_id,
+        SUM(ss.net_paid) + CTE_Sales.total_sales AS total_sales,
+        COUNT(ss.ticket_number) + CTE_Sales.total_transactions AS total_transactions
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.s_store_sk = s.s_store_sk
+    JOIN 
+        CTE_Sales ON s.s_store_id = CTE_Sales.s_store_id
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN 2451550 AND 2451554  
+    GROUP BY 
+        s.s_store_id
+)
+
+SELECT 
+    sa.ca_city,
+    ca.ca_state,
+    SUM(ws.ws_net_paid) AS total_web_sales,
+    AVG(ws.ws_net_profit) AS avg_net_profit,
+    COUNT(DISTINCT c.c_customer_id) AS customer_count,
+    MAX(c.c_birth_year) AS most_recent_birth_year,
+    MIN(c.c_birth_year) AS oldest_birth_year,
+    RANK() OVER (PARTITION BY ca.ca_state ORDER BY SUM(ws.ws_net_paid) DESC) AS state_rank
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    CTE_Sales cs ON cs.s_store_id = c.c_current_hdemo_sk  
+WHERE 
+    c.c_birth_year IS NOT NULL
+    AND ca.ca_state IS NOT NULL
+    AND ws.ws_sold_date_sk IS NOT NULL
+GROUP BY 
+    ca.ca_city, ca.ca_state
+HAVING 
+    SUM(ws.ws_net_paid) > 100000  
+ORDER BY 
+    total_web_sales DESC
+LIMIT 10;

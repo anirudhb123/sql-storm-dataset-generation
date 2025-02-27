@@ -1,0 +1,73 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        Row_Number() OVER (PARTITION BY (CASE WHEN Reputation IS NULL THEN 1 ELSE 0 END) ORDER BY Reputation DESC) AS Rank
+    FROM Users
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        MAX(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS HasAcceptedAnswer
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS HistoryCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS WasClosed,
+        MIN(ph.CreationDate) AS FirstHistoryDate
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.TotalComments,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.TotalViews,
+        ph.HistoryCount,
+        ph.WasClosed,
+        u.DisplayName,
+        ROW_NUMBER() OVER (ORDER BY ps.UpVotes - ps.DownVotes DESC, ps.TotalComments DESC) AS PostRank
+    FROM PostStats ps
+    JOIN PostHistories ph ON ps.PostId = ph.PostId
+    LEFT JOIN Users u ON ps.PostId IN (SELECT DISTINCT ParentId FROM Posts WHERE ParentId IS NOT NULL)
+    WHERE ps.TotalViews > 100
+)
+
+SELECT 
+    tp.PostId,
+    tp.TotalComments,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.TotalViews,
+    tp.WasClosed,
+    tp.DisplayName,
+    CASE 
+        WHEN tp.UpVotes > 0 AND tp.DownVotes = 0 THEN 'Highly Favorable'
+        WHEN tp.UpVotes = 0 AND tp.DownVotes > 0 THEN 'Highly Unfavorable'
+        ELSE 'Mixed Feedback'
+    END AS FeedbackType,
+    CASE 
+        WHEN tp.HistoryCount > 5 THEN 'Frequent Edits'
+        ELSE 'Stable Post'
+    END AS Stability,
+    NULLIF(tp.UpVotes, 0) AS NonZeroUpVotes
+FROM TopPosts tp
+WHERE tp.PostRank <= 10
+AND EXISTS (
+    SELECT 1 FROM UserReputation ur 
+    WHERE ur.UserId = tp.DisplayName AND ur.Rank = 1
+)
+ORDER BY tp.TotalViews DESC, tp.UpVotes DESC;

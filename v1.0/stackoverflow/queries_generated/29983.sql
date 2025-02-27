@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS TagRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.CreationDate, p.Tags, u.DisplayName
+),
+MostCommented AS (
+    SELECT 
+        PostId,
+        SUM(CommentCount) AS TotalComments
+    FROM 
+        RankedPosts
+    WHERE 
+        TagRank <= 5 -- Top 5 posts per tag
+    GROUP BY 
+        PostId
+),
+TopTags AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.OwnerDisplayName,
+    r.ViewCount,
+    t.Tag AS TopTag,
+    COALESCE(m.TotalComments, 0) AS TotalComments
+FROM 
+    RankedPosts r
+JOIN 
+    TopTags t ON t.Tag = ANY(string_to_array(substring(r.Tags, 2, length(r.Tags)-2), '><'))
+LEFT JOIN 
+    MostCommented m ON r.PostId = m.PostId
+WHERE 
+    r.TagRank <= 5 -- Top 5 posts per tag
+ORDER BY 
+    r.ViewCount DESC, 
+    TotalComments DESC
+LIMIT 30;

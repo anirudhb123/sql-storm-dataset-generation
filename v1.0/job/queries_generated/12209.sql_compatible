@@ -1,0 +1,25 @@
+
+SELECT 
+    na.name AS actor_name,
+    ti.title AS movie_title,
+    ti.production_year,
+    ct.kind AS company_type,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS movie_keywords
+FROM 
+    aka_name na
+JOIN 
+    cast_info ci ON na.person_id = ci.person_id
+JOIN 
+    title ti ON ci.movie_id = ti.id
+JOIN 
+    movie_companies mc ON ti.id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_keyword mk ON ti.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+GROUP BY 
+    na.name, ti.title, ti.production_year, ct.kind
+ORDER BY 
+    ti.production_year DESC;

@@ -1,0 +1,81 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        UA.*,
+        RANK() OVER (ORDER BY TotalPosts DESC, UpVotes DESC, DownVotes ASC) AS Rank
+    FROM 
+        UserActivity UA
+),
+PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(COUNT(DISTINCT C.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        P.OwnerUserId
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT DISTINCT 
+        P.Id AS PostId,
+        P.Title,
+        PH.CreationDate,
+        PH.Comment
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+)
+SELECT 
+    RU.Rank,
+    RU.DisplayName,
+    PM.Title AS PostTitle,
+    PM.CreationDate AS PostCreationDate,
+    PM.CommentCount,
+    PM.UpVoteCount,
+    PM.DownVoteCount,
+    CP.Comment AS CloseReason
+FROM 
+    RankedUsers RU
+JOIN 
+    PostMetrics PM ON RU.UserId = PM.OwnerUserId
+LEFT JOIN 
+    ClosedPosts CP ON PM.PostId = CP.PostId
+WHERE 
+    RU.TotalPosts > 0
+ORDER BY 
+    RU.Rank;

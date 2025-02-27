@@ -1,0 +1,77 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(UP.VoteCount, 0) AS UpVotes,
+        COALESCE(DN.VoteCount, 0) AS DownVotes,
+        P.AnswerCount,
+        P.CommentCount,
+        P.Score,
+        P.CreationDate,
+        P.LastActivityDate,
+        U.Reputation AS UserReputation,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(COUNT(CM.Id), 0) AS CommentCount
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS VoteCount FROM Votes WHERE VoteTypeId = 2 GROUP BY PostId
+    ) UP ON P.Id = UP.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS VoteCount FROM Votes WHERE VoteTypeId = 3 GROUP BY PostId
+    ) DN ON P.Id = DN.PostId
+    LEFT JOIN Comments CM ON P.Id = CM.PostId
+    GROUP BY P.Id, U.Reputation, U.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        P.Title AS ClosedPostTitle,
+        PH.Comment AS CloseReason,
+        U.DisplayName AS ClosedBy
+    FROM PostHistory PH
+    JOIN Posts P ON PH.PostId = P.Id
+    JOIN Users U ON PH.UserId = U.Id
+    WHERE PH.PostHistoryTypeId = 10
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+    HAVING COUNT(P.Id) > 10
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.UpVotes,
+    PS.DownVotes,
+    PS.CommentCount,
+    PS.Score,
+    PS.UserReputation,
+    PS.OwnerDisplayName,
+    COALESCE(CP.ClosedPostTitle, 'N/A') AS ClosedPostTitle,
+    COALESCE(CP.CloseReason, 'N/A') AS CloseReason,
+    COALESCE(CP.ClosedBy, 'N/A') AS ClosedBy,
+    T.TagName,
+    T.PostCount,
+    UR.ReputationRank
+FROM PostStats PS
+LEFT JOIN ClosedPosts CP ON PS.PostId = CP.PostId
+JOIN PopularTags T ON PS.Title LIKE '%' || T.TagName || '%'
+JOIN UserReputation UR ON PS.OwnerUserId = UR.UserId
+WHERE PS.Score > 0
+  AND PS.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+ORDER BY PS.LastActivityDate DESC, PS.Score DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

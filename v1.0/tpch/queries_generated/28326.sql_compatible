@@ -1,0 +1,69 @@
+
+WITH SupplierDetails AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        SUBSTRING(s.s_comment, 1, 30) AS short_comment,
+        CONCAT('Supplier: ', s.s_name, ', Account Balance: $', FORMAT(s.s_acctbal, 2)) AS description
+    FROM
+        supplier s
+),
+PartDetails AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_retailprice,
+        (SELECT COUNT(*) FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey) AS supplier_count,
+        CONCAT('Type: ', p.p_type, ', Price: $', FORMAT(p.p_retailprice, 2)) AS part_description
+    FROM
+        part p
+),
+CustomerOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        CONCAT('Order Total: $', FORMAT(o.o_totalprice, 2), ', Status: ', o.o_orderstatus) AS order_info
+    FROM
+        orders o
+),
+LineItemAggregation AS (
+    SELECT
+        l.l_orderkey,
+        SUM(l.l_quantity) AS total_quantity,
+        SUM(l.l_extendedprice) AS total_extended_price
+    FROM
+        lineitem l
+    GROUP BY
+        l.l_orderkey
+)
+SELECT
+    s.s_name AS Supplier_Name,
+    p.p_name AS Part_Name,
+    c.c_name AS Customer_Name,
+    o.order_info,
+    CASE 
+        WHEN la.total_quantity > 100 THEN 'Large' 
+        ELSE 'Small' 
+    END AS order_size,
+    s.description AS Supplier_Description
+FROM
+    SupplierDetails s
+JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN
+    PartDetails p ON ps.ps_partkey = p.p_partkey
+JOIN
+    CustomerOrders c ON c.o_orderkey = ps.ps_partkey
+JOIN
+    LineItemAggregation la ON c.o_orderkey = la.l_orderkey
+ORDER BY
+    p.p_name, s.s_name;

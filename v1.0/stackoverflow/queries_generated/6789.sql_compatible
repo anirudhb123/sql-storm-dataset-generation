@@ -1,0 +1,50 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostsCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        AVG(u.Reputation) AS AverageReputation,
+        SUM(b.Class) AS BadgesCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+), PopularTags AS (
+    SELECT 
+        TRIM(unnest(string_to_array(Tags, ','))) AS Tag,
+        COUNT(*) AS TagCount
+    FROM Posts
+    WHERE PostTypeId = 1
+    GROUP BY Tag
+    ORDER BY TagCount DESC
+    LIMIT 10
+), CloseReasonHistories AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate,
+        ph.Comment AS CloseReason,
+        pt.Name AS PostTypeName
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE ph.PostHistoryTypeId = 10
+)
+SELECT 
+    us.DisplayName,
+    us.PostsCount,
+    us.PositivePosts,
+    us.NegativePosts,
+    us.AverageReputation,
+    us.BadgesCount,
+    pt.Tag,
+    (SELECT COUNT(*) FROM CloseReasonHistories WHERE PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = us.UserId)) AS CloseReasonCount,
+    ch.CloseReason,
+    ch.CreationDate
+FROM UserStatistics us
+JOIN PopularTags pt ON us.PostsCount > 0
+LEFT JOIN CloseReasonHistories ch ON us.UserId IN (SELECT OwnerUserId FROM Posts WHERE Id = ch.PostId)
+ORDER BY us.AverageReputation DESC, us.PostsCount DESC;

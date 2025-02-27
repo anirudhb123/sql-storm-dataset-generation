@@ -1,0 +1,84 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000 
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+aggregated_cast AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+),
+
+average_years AS (
+    SELECT 
+        mh.movie_id,
+        AVG(mh.production_year) OVER (PARTITION BY mh.movie_id) AS avg_year
+    FROM 
+        movie_hierarchy mh
+),
+
+filtered_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ac.cast_count,
+        ac.actor_names,
+        ay.avg_year
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        aggregated_cast ac ON mh.movie_id = ac.movie_id
+    LEFT JOIN 
+        average_years ay ON mh.movie_id = ay.movie_id
+    WHERE 
+        ac.cast_count IS NOT NULL 
+        AND mh.production_year >= ay.avg_year 
+)
+
+SELECT 
+    fm.title,
+    fm.production_year,
+    COALESCE(fm.cast_count, 0) AS total_cast,
+    fm.actor_names,
+    CASE 
+        WHEN fm.production_year IS NULL THEN 'Unknown Year'
+        WHEN fm.production_year < 2010 THEN 'Older Movie'
+        ELSE 'Modern Movie'
+    END AS movie_category
+FROM 
+    filtered_movies fm
+WHERE 
+    fm.title ILIKE '%The%' 
+ORDER BY 
+    fm.production_year DESC,
+    fm.total_cast DESC
+LIMIT 50;

@@ -1,0 +1,97 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        at.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+
+FilteredActors AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+),
+
+MoviesWithActors AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        fa.actor_name,
+        fa.actor_rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        FilteredActors fa ON mh.movie_id = fa.movie_id
+),
+
+GenreKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    mw.movie_id,
+    mw.title,
+    mw.production_year,
+    mw.actor_name,
+    mw.actor_rank,
+    COALESCE(gk.keywords, 'No Keywords') AS keywords,
+    COUNT(DISTINCT mw.actor_name) OVER (PARTITION BY mw.movie_id) AS total_actors,
+    CASE 
+        WHEN mw.production_year < 2000 THEN 'Classic'
+        WHEN mw.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS movie_age_category
+FROM 
+    MoviesWithActors mw
+LEFT JOIN 
+    GenreKeywords gk ON mw.movie_id = gk.movie_id
+WHERE 
+    mw.actor_rank <= 3
+GROUP BY 
+    mw.movie_id,
+    mw.title,
+    mw.production_year,
+    mw.actor_name,
+    mw.actor_rank,
+    gk.keywords
+ORDER BY 
+    mw.production_year DESC, 
+    mw.movie_id,
+    mw.actor_rank;

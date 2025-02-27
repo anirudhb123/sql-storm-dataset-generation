@@ -1,0 +1,74 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        u.CreationDate, 
+        DENSE_RANK() OVER (ORDER BY u.Reputation DESC) AS Rank,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+TopQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Posts a ON p.Id = a.ParentId
+    WHERE p.PostTypeId = 1  -- Only questions
+    GROUP BY p.Id, u.DisplayName
+    ORDER BY p.Score DESC
+    LIMIT 10
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount
+    FROM Users u
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+),
+BenchmarkData AS (
+    SELECT 
+        ru.UserId,
+        ru.DisplayName,
+        ru.Reputation,
+        ru.Rank,
+        tq.Title AS TopQuestionTitle,
+        tq.Score AS TopQuestionScore,
+        aq.AnswerCount,
+        au.CommentCount,
+        au.VoteCount
+    FROM RankedUsers ru
+    JOIN TopQuestions tq ON ru.UserId = tq.OwnerUserId
+    JOIN ActiveUsers au ON ru.UserId = au.UserId
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(Id) AS AnswerCount
+        FROM Posts
+        WHERE PostTypeId = 2 -- Only answers
+        GROUP BY ParentId
+    ) aq ON tq.PostId = aq.ParentId
+)
+SELECT 
+    bd.UserId,
+    bd.DisplayName,
+    bd.Reputation,
+    bd.Rank,
+    bd.TopQuestionTitle,
+    bd.TopQuestionScore,
+    bd.AnswerCount,
+    bd.CommentCount,
+    bd.VoteCount
+FROM BenchmarkData bd
+ORDER BY bd.Rank;

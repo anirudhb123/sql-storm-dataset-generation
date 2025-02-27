@@ -1,0 +1,97 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+top_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+    ORDER BY 
+        cast_count DESC
+    LIMIT 10
+),
+
+number_of_keywords AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        mt.movie_id
+),
+
+movie_details AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.production_year,
+        COALESCE(nk.keyword_count, 0) AS keyword_count,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        top_movies tm
+    LEFT JOIN 
+        number_of_keywords nk ON tm.movie_id = nk.movie_id
+    LEFT JOIN 
+        complete_cast cc ON tm.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        tm.movie_id, tm.title, tm.production_year, nk.keyword_count
+)
+
+SELECT 
+    md.title,
+    md.production_year,
+    md.cast_count,
+    md.keyword_count,
+    CASE 
+        WHEN md.keyword_count > 5 THEN 'High Keyword Count'
+        WHEN md.keyword_count BETWEEN 3 AND 5 THEN 'Moderate Keyword Count'
+        ELSE 'Low Keyword Count'
+    END AS keyword_count_category,
+    COALESCE(n.name, 'Unknown') AS director_name
+FROM 
+    movie_details md
+LEFT JOIN 
+    movie_companies mc ON md.movie_id = mc.movie_id 
+LEFT JOIN 
+    company_name n ON mc.company_id = n.id AND mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Director' LIMIT 1)
+ORDER BY 
+    md.cast_count DESC,
+    md.keyword_count DESC;

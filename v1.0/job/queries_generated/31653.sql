@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        CAST(mt.title AS text) AS path
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.kind_id = 1  -- Assuming 1 is for Movies
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' > ' || m.title AS text)
+    FROM 
+        movie_link ml 
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COUNT(DISTINCT cc.person_id) AS total_cast,
+    AVG(CASE 
+            WHEN pi.info IS NOT NULL THEN 1 
+            ELSE 0 END) AS avg_person_info
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    complete_cast cc ON mt.id = cc.movie_id
+LEFT JOIN 
+    person_info pi ON ak.person_id = pi.person_id
+WHERE 
+    mt.production_year >= 2000 
+    AND ak.name IS NOT NULL
+GROUP BY 
+    ak.name, mt.title, mt.production_year
+HAVING 
+    COUNT(DISTINCT k.id) >= 3
+ORDER BY 
+    total_cast DESC, mt.production_year DESC;
+
+This query combines a recursive Common Table Expression (CTE) to build a movie hierarchy, joins several tables to gather detailed information about actors, movies, and keywords, and uses aggregation and filtering to return a curated list of movies with significant actor cast counts and keyword associations.

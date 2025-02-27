@@ -1,0 +1,97 @@
+
+WITH RECURSIVE UserPostActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(v.PositiveVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.NegativeVotes, 0)) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId,
+            Id,
+            Score
+        FROM 
+            Posts
+    ) p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS PositiveVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS NegativeVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PostId ORDER BY CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > CURRENT_DATE - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(cp.Id) AS CloseCount,
+        MAX(cp.CreationDate) AS LastClosedDate
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            ph.PostId,
+            ph.CreationDate
+        FROM 
+            PostHistory ph
+        WHERE 
+            ph.PostHistoryTypeId = 10 
+    ) cp ON p.Id = cp.PostId
+    GROUP BY 
+        p.Id, p.Title
+    HAVING 
+        COUNT(cp.Id) > 0
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.CreationDate,
+    COALESCE(pa.PostCount, 0) AS TotalPosts,
+    COALESCE(pa.TotalUpVotes, 0) AS TotalUpVotes,
+    COALESCE(pa.TotalDownVotes, 0) AS TotalDownVotes,
+    COALESCE(cp.CloseCount, 0) AS CloseCount,
+    cp.Title AS ClosedPostTitle,
+    cp.LastClosedDate
+FROM 
+    Users u
+LEFT JOIN UserPostActivity pa ON u.Id = pa.UserId
+LEFT JOIN ClosedPosts cp ON u.Id IN (
+    SELECT DISTINCT 
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.Id IN (SELECT PostId FROM RecentPostHistory WHERE UserId = u.Id)
+) OR u.Id IN (
+    SELECT DISTINCT 
+        p.LastEditorUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.Id IN (SELECT PostId FROM RecentPostHistory WHERE UserId = u.Id)
+)
+ORDER BY 
+    u.Reputation DESC, 
+    CloseCount DESC;

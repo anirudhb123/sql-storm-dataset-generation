@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+OrdersWithHighPrice AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice,
+        CASE 
+            WHEN o.o_orderstatus = 'O' THEN 'Open'
+            ELSE 'Closed'
+        END AS order_status,
+        o.o_orderdate
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > 2000
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(*) AS total_items
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    oos.o_orderkey,
+    oos.order_status,
+    r.s_name AS supplier_name,
+    COALESCE(AVG(ps.ps_supplycost), 0) AS avg_supply_cost,
+    SUM(CASE WHEN l.total_price IS NULL THEN 0 ELSE l.total_price END) AS total_lineitem_price,
+    MAX(p.p_retailprice) AS highest_part_price,
+    STRING_AGG(DISTINCT p.p_name, ', ') WITHIN GROUP (ORDER BY p.p_name) AS part_names
+FROM 
+    OrdersWithHighPrice oos
+LEFT JOIN 
+    LineItemSummary l ON oos.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    partsupp ps ON l.l_orderkey = ps.ps_partkey
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    RankedSuppliers r ON r.rnk = 1 AND r.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    customer c ON oos.o_orderkey = c.c_custkey
+WHERE 
+    p.p_size IS NOT NULL 
+    AND (p.p_retailprice IS NOT NULL OR p.p_comment != '')
+    AND (c.c_acctbal = 0 OR c.c_mktsegment = 'BUILDING')
+GROUP BY 
+    oos.o_orderkey, oos.order_status, r.s_name
+HAVING 
+    MAX(p.p_retailprice) IS NOT NULL
+ORDER BY 
+    oos.o_orderkey DESC;

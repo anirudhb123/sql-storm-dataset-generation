@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.web_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rank
+    FROM web_sales ws
+    WHERE ws.ws_ship_date_sk IS NOT NULL
+),
+TotalSales AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    GROUP BY ws.web_site_sk
+),
+CustomerAddress AS (
+    SELECT
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state
+    FROM customer_address ca
+    WHERE ca.ca_state = 'CA'
+),
+HighValueReturns AS (
+    SELECT
+        sr.return_amount,
+        sr.return_quantity,
+        r.r_reason_desc
+    FROM store_returns sr
+    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    WHERE sr.return_amount > 100 AND sr.return_quantity > 5
+)
+SELECT
+    ts.web_site_sk,
+    ts.total_profit,
+    ts.total_orders,
+    COALESCE(rs.rank, 0) AS top_rank,
+    ca.ca_city,
+    COUNT(DISTINCT hvr.return_quantity) AS high_value_returns_count
+FROM TotalSales ts
+LEFT JOIN RankedSales rs ON ts.web_site_sk = rs.web_site_sk AND rs.rank = 1
+LEFT JOIN CustomerAddress ca ON ts.web_site_sk IN (SELECT DISTINCT ws.web_site_sk FROM web_sales ws WHERE ws.ws_ship_addr_sk = ca.ca_address_sk)
+LEFT JOIN HighValueReturns hvr ON hvr.return_amount IS NOT NULL
+GROUP BY
+    ts.web_site_sk,
+    ts.total_profit,
+    ts.total_orders,
+    ca.ca_city
+HAVING ts.total_profit > 5000 AND COUNT(DISTINCT hvr.return_quantity) < 10
+ORDER BY ts.total_profit DESC, ts.web_site_sk;

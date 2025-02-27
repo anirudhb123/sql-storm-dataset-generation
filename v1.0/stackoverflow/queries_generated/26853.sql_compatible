@@ -1,0 +1,67 @@
+
+WITH TagCounts AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><'))) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><')))
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.AnswerCount, 0)) AS TotalAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        tc.TagName,
+        tc.PostCount,
+        ROW_NUMBER() OVER (ORDER BY tc.PostCount DESC) AS Rank
+    FROM 
+        TagCounts tc
+    WHERE 
+        tc.PostCount > 10 
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.QuestionsAsked,
+        us.TotalScore,
+        us.TotalViews,
+        us.TotalAnswers,
+        RANK() OVER (ORDER BY us.TotalViews DESC) AS Rank
+    FROM 
+        UserStats us
+    WHERE 
+        us.QuestionsAsked > 5 
+)
+SELECT 
+    tu.Rank AS UserRank,
+    tu.DisplayName AS UserName,
+    tu.QuestionsAsked,
+    tu.TotalScore,
+    tu.TotalViews,
+    tu.TotalAnswers,
+    pt.TagName AS PopularTag,
+    pt.PostCount AS TagPostCount
+FROM 
+    TopUsers tu
+JOIN 
+    PopularTags pt ON pt.Rank <= 5 
+ORDER BY 
+    tu.TotalViews DESC, 
+    pt.TagPostCount DESC;

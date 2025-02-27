@@ -1,0 +1,46 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS order_level
+    FROM orders
+    WHERE o_orderdate >= '1997-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, oh.order_level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey AND o.o_orderdate > oh.o_orderdate
+    WHERE oh.order_level < 5
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING total_cost > (SELECT AVG(ps_supplycost * ps_availqty) FROM partsupp ps)
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COUNT(o.o_orderkey) > 5
+),
+LineItemsSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+CompositeResult AS (
+    SELECT oh.o_orderkey, oh.o_totalprice, c.c_name, ts.s_name, l.total_sales
+    FROM OrderHierarchy oh
+    JOIN CustomerOrders c ON oh.o_custkey = c.c_custkey
+    LEFT JOIN TopSuppliers ts ON oh.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_orderkey = oh.o_orderkey)
+    JOIN LineItemsSummary l ON oh.o_orderkey = l.l_orderkey
+)
+SELECT r.r_name, COUNT(cr.o_orderkey) AS order_count, 
+       AVG(cr.o_totalprice) AS average_price, 
+       SUM(cr.total_sales) AS total_sales, 
+       STRING_AGG(DISTINCT cr.s_name) AS suppliers
+FROM CompositeResult cr
+JOIN nation n ON n.n_nationkey = cr.c_custkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+GROUP BY r.r_name
+ORDER BY total_sales DESC
+LIMIT 10;

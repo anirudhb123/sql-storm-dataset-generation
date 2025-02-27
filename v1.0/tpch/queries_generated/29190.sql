@@ -1,0 +1,39 @@
+WITH String_Benchmark AS (
+    SELECT 
+        p.p_name,
+        s.s_name,
+        c.c_name,
+        CONCAT('Part: ', p.p_name, ', Supplier: ', s.s_name, ', Customer: ', c.c_name) AS composite_string,
+        LENGTH(CONCAT('Part: ', p.p_name, ', Supplier: ', s.s_name, ', Customer: ', c.c_name)) AS string_length,
+        UPPER(CONCAT(p.p_name, s.s_name, c.c_name)) AS upper_case_string,
+        LOWER(CONCAT(p.p_name, s.s_name, c.c_name)) AS lower_case_string,
+        REPLACE(CONCAT(p.p_name, s.s_name, c.c_name), ' ', '-') AS replaced_string,
+        CHAR_LENGTH(CONCAT(p.p_name, s.s_name, c.c_name)) AS char_length,
+        SUBSTRING(CONCAT(p.p_name, s.s_name, c.c_name), 1, 50) AS substring_string
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        customer c ON s.s_nationkey = c.c_nationkey
+)
+SELECT 
+    p_name, 
+    s_name, 
+    c_name, 
+    composite_string, 
+    string_length, 
+    upper_case_string, 
+    lower_case_string, 
+    replaced_string, 
+    char_length,
+    substring_string
+FROM 
+    String_Benchmark
+WHERE 
+    string_length > 60
+ORDER BY 
+    string_length DESC
+LIMIT 100;

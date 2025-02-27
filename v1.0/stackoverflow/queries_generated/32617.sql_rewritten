@@ -1,0 +1,62 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        Posts a ON p.ParentId = a.Id
+    WHERE 
+        a.PostTypeId = 1 
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT p2.Id) AS AnswerCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MAX(c.CreationDate) AS LastCommentDate,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    AVG(EXTRACT(EPOCH FROM (p.LastActivityDate - p.CreationDate))) AS AvgPostLifetimeInSeconds,
+    ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY SUM(v.CreationDate) DESC) AS UserActivityLevel
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId 
+LEFT JOIN 
+    Posts p2 ON p.AcceptedAnswerId = p2.Id 
+LEFT JOIN 
+    Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%') 
+LEFT JOIN 
+    Comments c ON c.PostId = p.Id 
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id 
+WHERE 
+    u.Reputation > 1000 AND 
+    u.LastAccessDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+GROUP BY 
+    u.Id
+HAVING 
+    COUNT(DISTINCT p.Id) > 5 
+ORDER BY 
+    TotalUpVotes DESC, AvgPostLifetimeInSeconds ASC;

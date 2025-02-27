@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  -- BountyStart votes
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.TotalBounties,
+        us.TotalPosts,
+        us.TotalBadges,
+        RANK() OVER (ORDER BY us.TotalBounties DESC, us.TotalPosts DESC) AS UserRank
+    FROM 
+        UserStats us 
+    WHERE 
+        us.TotalPosts > 10
+)
+SELECT 
+    ru.DisplayName AS UserName,
+    ru.TotalBounties,
+    (SELECT COUNT(*) FROM RankedPosts rp WHERE rp.PostId IN (SELECT DISTINCT p.Id FROM Posts p WHERE p.OwnerUserId = ru.UserId)) AS EffectivePosts,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsHighlighted
+FROM 
+    TopUsers ru
+LEFT JOIN 
+    Posts p ON ru.UserId = p.OwnerUserId
+LEFT JOIN 
+    TAGS t ON t.Id = ANY(STRING_TO_ARRAY(p.Tags, ',')::int[])
+WHERE 
+    ru.UserRank <= 10
+GROUP BY 
+    ru.UserId, ru.DisplayName, ru.TotalBounties
+ORDER BY 
+    ru.TotalBounties DESC;

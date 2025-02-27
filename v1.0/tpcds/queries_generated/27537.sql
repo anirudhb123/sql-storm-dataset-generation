@@ -1,0 +1,53 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_city,
+        COUNT(*) AS total_addresses,
+        COUNT(DISTINCT ca_zip) AS unique_zips,
+        STRING_AGG(DISTINCT ca_street_name, ', ') AS street_names,
+        STRING_AGG(DISTINCT ca_street_type, ', ') AS street_types
+    FROM 
+        customer_address
+    WHERE 
+        ca_state = 'CA'
+    GROUP BY 
+        ca_city
+),
+DemographicStats AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS total_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase,
+        STRING_AGG(DISTINCT cd_education_status, ', ') AS education_statuses
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+CombinedStats AS (
+    SELECT
+        as.ca_city,
+        as.total_addresses,
+        as.unique_zips,
+        as.street_names,
+        as.street_types,
+        ds.cd_gender,
+        ds.total_customers,
+        ds.avg_purchase,
+        ds.education_statuses
+    FROM 
+        AddressStats as
+    LEFT JOIN 
+        DemographicStats ds ON ds.total_customers > 0
+)
+SELECT 
+    *,
+    CONCAT('City: ', ca_city, '; Total Addresses: ', total_addresses, '; Unique Zips: ', unique_zips, 
+           '; Street Names: ', street_names, '; Street Types: ', street_types, 
+           '; Gender: ', cd_gender, '; Total Customers: ', total_customers, 
+           '; Avg Purchase Estimate: ', COALESCE(avg_purchase, 0), 
+           '; Education Statuses: ', education_statuses) AS detailed_summary
+FROM 
+    CombinedStats
+ORDER BY 
+    total_addresses DESC;

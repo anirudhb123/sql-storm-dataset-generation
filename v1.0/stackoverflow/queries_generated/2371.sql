@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.ViewCount > 100
+), PostVoteDetails AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpvoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownvoteCount
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+), UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+), RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(pvd.UpvoteCount, 0) AS Upvotes,
+    COALESCE(pvd.DownvoteCount, 0) AS Downvotes,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(rc.CommentCount, 0) AS RecentComments,
+    rp.ViewCount,
+    rp.Score
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteDetails pvd ON rp.Id = pvd.PostId
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    RecentComments rc ON rp.Id = rc.PostId
+WHERE 
+    rp.PostRank = 1
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

@@ -1,0 +1,46 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_customer_sk,
+        ws_sales_price,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS sale_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+),
+RecentReturns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returned,
+        SUM(wr_return_amt) AS total_return_amount
+    FROM web_returns
+    WHERE wr_returned_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+    GROUP BY wr_item_sk
+),
+SalesSummary AS (
+    SELECT 
+        item.i_item_id,
+        COALESCE(SUM(ws.ws_sales_price * ws.ws_quantity), 0) AS total_sales,
+        COALESCE(SUM(CASE WHEN rr.total_returned IS NOT NULL THEN rr.total_returned ELSE 0 END), 0) AS total_returns,
+        COUNT(DISTINCT r.sale_rank) AS distinct_sales_prices
+    FROM item
+    LEFT JOIN web_sales ws ON item.i_item_sk = ws.ws_item_sk
+    LEFT JOIN RankedSales r ON ws.ws_item_sk = r.ws_item_sk
+    LEFT JOIN RecentReturns rr ON ws.ws_item_sk = rr.wr_item_sk
+    GROUP BY item.i_item_id
+)
+SELECT 
+    ss.i_item_id,
+    ss.total_sales,
+    ss.total_returns,
+    ss.distinct_sales_prices,
+    CASE 
+        WHEN ss.total_sales > 10000 THEN 'High Performer'
+        WHEN ss.total_sales BETWEEN 5000 AND 10000 THEN 'Moderate Performer'
+        ELSE 'Low Performer' 
+    END AS performance_category
+FROM SalesSummary ss
+WHERE ss.total_sales IS NOT NULL
+ORDER BY ss.total_sales DESC
+LIMIT 10;

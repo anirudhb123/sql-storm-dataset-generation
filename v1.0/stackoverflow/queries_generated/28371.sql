@@ -1,0 +1,49 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(DISTINCT a.Id) DESC) AS OwnerRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.OwnerUserId, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        (UpVotes - DownVotes) AS NetVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        OwnerRank = 1
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.OwnerDisplayName,
+    tp.AnswerCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.NetVotes
+FROM 
+    TopPosts tp
+WHERE 
+    tp.NetVotes > 10 -- Only show posts with a high net vote count
+ORDER BY 
+    tp.NetVotes DESC, 
+    tp.AnswerCount DESC;

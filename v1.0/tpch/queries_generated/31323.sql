@@ -1,0 +1,56 @@
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_sales,
+        o.o_orderdate
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2022-01-01'
+    GROUP BY c.c_custkey, c.c_name, o.o_orderdate
+    HAVING SUM(o.o_totalprice) > 1000
+
+    UNION ALL
+
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) + prev.total_sales AS total_sales,
+        o.o_orderdate
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN Sales_CTE prev ON c.c_custkey = prev.c_custkey
+    WHERE o.o_orderdate > prev.o_orderdate
+    GROUP BY c.c_custkey, c.c_name, o.o_orderdate
+), Discounted_Parts AS (
+    SELECT 
+        ps.partkey,
+        SUM(ps.ps_supplycost * (1 - l.l_discount)) AS net_cost
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY ps.ps_partkey
+), Region_Summary AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(s.s_acctbal) AS total_supply_balance
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name
+)
+SELECT 
+    ss.c_custkey,
+    ss.c_name,
+    ss.total_sales,
+    dp.net_cost,
+    rs.r_name,
+    rs.nation_count,
+    rs.total_supply_balance
+FROM Sales_CTE ss
+JOIN Discounted_Parts dp ON ss.c_custkey = dp.partkey
+JOIN Region_Summary rs ON ss.c_custkey = rs.nation_count
+WHERE ss.total_sales > 2000
+ORDER BY ss.total_sales DESC
+LIMIT 10;

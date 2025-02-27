@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title AS movie_title,
+        mh.level + 1 AS level
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    m.name AS actor_name,
+    m.movie_title,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    AVG(mi.rating) AS average_movie_rating,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY m.name ORDER BY mi.rating DESC) AS ranking,
+    MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Release Date') THEN mi.info END) AS release_date
+FROM 
+    movie_hierarchy mh
+JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+JOIN 
+    aka_name m ON ci.person_id = m.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mw ON mh.movie_id = mw.movie_id
+LEFT JOIN 
+    keyword k ON mw.keyword_id = k.id
+WHERE 
+    c.note IS NULL 
+AND 
+    (mh.level < 3 OR (mh.level = 3 AND k.keyword IS NOT NULL))
+GROUP BY 
+    m.name, mh.movie_title
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    actor_name, average_movie_rating DESC;
+
+This SQL query demonstrates various features such as recursive CTEs to explore connected movies, aggregate functions to count distinct production companies and average ratings, conditional logic within the SELECT clause, window functions to rank actors based on their movie ratings, outer joins to include all related data, and it filters based on the hierarchy level and null notes. Additionally, it employs string aggregation to collect movie keywords.

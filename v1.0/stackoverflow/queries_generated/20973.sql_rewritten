@@ -1,0 +1,66 @@
+WITH UserVoteCounts AS (
+    SELECT 
+        UserId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT PostId) AS PostCount
+    FROM Votes 
+    GROUP BY UserId
+), 
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS TotalDownVotes,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS CloseCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY p.Id
+),
+RankedPosts AS (
+    SELECT 
+        ps.*,
+        RANK() OVER (ORDER BY ps.TotalUpVotes DESC, ps.TotalDownVotes ASC, ps.ViewCount DESC) AS UpVoteRank
+    FROM PostStatistics ps
+),
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass 
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+    COALESCE(upc.UpVotes, 0) AS UserUpVotes,
+    COALESCE(upc.DownVotes, 0) AS UserDownVotes,
+    rp.Title,
+    rp.TotalUpVotes,
+    rp.TotalDownVotes,
+    rp.CloseCount,
+    rp.PostRank,
+    rp.UpVoteRank,
+    CASE 
+        WHEN rp.CloseCount > 0 THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus,
+    CASE 
+        WHEN rp.UpVoteRank <= 10 THEN 'Hot Post'
+        ELSE 'Normal Post'
+    END AS PostHeat
+FROM Users u
+LEFT JOIN UserVoteCounts upc ON u.Id = upc.UserId
+LEFT JOIN UserBadgeCounts ub ON u.Id = ub.UserId
+LEFT JOIN RankedPosts rp ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Posts.Id = rp.PostId)
+WHERE u.Reputation > 100
+ORDER BY rp.UpVoteRank ASC, u.Reputation DESC
+LIMIT 50;

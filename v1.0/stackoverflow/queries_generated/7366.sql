@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        P.ViewCount,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostMetrics AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.OwnerDisplayName,
+        RP.ViewCount,
+        RP.Score,
+        COALESCE(C.CommentCount, 0) AS CommentCount,
+        COALESCE(A.AnswerCount, 0) AS AnswerCount
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount
+         FROM Comments
+         GROUP BY PostId) C ON RP.PostId = C.PostId
+    LEFT JOIN 
+        (SELECT ParentId AS PostId, COUNT(*) AS AnswerCount
+         FROM Posts
+         WHERE PostTypeId = 2
+         GROUP BY ParentId) A ON RP.PostId = A.PostId
+)
+SELECT 
+    PM.PostId,
+    PM.Title,
+    PM.OwnerDisplayName,
+    PM.ViewCount,
+    PM.Score,
+    PM.CommentCount,
+    PM.AnswerCount,
+    (SELECT STRING_AGG(T.TagName, ', ') 
+     FROM Tags T 
+     JOIN Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%') 
+     WHERE P.Id = PM.PostId) AS Tags
+FROM 
+    PostMetrics PM
+WHERE 
+    PM.PostRank = 1
+ORDER BY 
+    PM.Score DESC, PM.ViewCount DESC
+LIMIT 10;

@@ -1,0 +1,58 @@
+WITH OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        c.c_nationkey,
+        c.c_mktsegment,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_nationkey, c.c_mktsegment
+),
+SupplierPerformance AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_suppkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(os.total_revenue) AS customer_revenue
+    FROM 
+        OrderSummary os
+    JOIN 
+        customer c ON os.c_nationkey = c.c_nationkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    ORDER BY 
+        customer_revenue DESC
+    LIMIT 10
+)
+SELECT 
+    tc.c_custkey,
+    tc.c_name,
+    sp.ps_suppkey,
+    sp.supplier_cost,
+    sp.supplied_parts
+FROM 
+    TopCustomers tc
+JOIN 
+    SupplierPerformance sp ON tc.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = sp.ps_suppkey)
+ORDER BY 
+    supplier_cost DESC, customer_revenue DESC;

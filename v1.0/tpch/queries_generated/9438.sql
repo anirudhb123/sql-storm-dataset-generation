@@ -1,0 +1,51 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-10-01'
+),
+top_spenders AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        ranked_orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.order_rank <= 10
+    GROUP BY 
+        r.r_name, n.n_name
+),
+avg_spending AS (
+    SELECT 
+        r.region_name,
+        AVG(total_spent) AS avg_spend
+    FROM 
+        top_spenders r
+    GROUP BY 
+        r.region_name
+)
+
+SELECT 
+    region_name,
+    avg_spend
+FROM 
+    avg_spending
+ORDER BY 
+    avg_spend DESC
+LIMIT 5;

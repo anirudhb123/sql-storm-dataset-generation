@@ -1,0 +1,47 @@
+
+WITH RankedSales AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ss.ss_quantity) AS total_quantity,
+        SUM(ss.ss_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY w.w_warehouse_id ORDER BY SUM(ss.ss_sales_price) DESC) AS sales_rank
+    FROM 
+        store_sales ss
+    JOIN 
+        warehouse w ON ss.ss_store_sk = w.w_warehouse_sk
+    JOIN 
+        date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        w.w_warehouse_id
+),
+TopWarehouses AS (
+    SELECT 
+        warehouse_id,
+        total_quantity,
+        total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 5
+)
+SELECT 
+    tw.warehouse_id,
+    tw.total_quantity,
+    tw.total_sales,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers
+FROM 
+    TopWarehouses tw
+JOIN 
+    store s ON tw.warehouse_id = s.s_store_id
+JOIN 
+    customer c ON c.c_current_addr_sk = s.s_store_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+GROUP BY 
+    tw.warehouse_id, tw.total_quantity, tw.total_sales, cd.cd_gender, cd.cd_marital_status
+ORDER BY 
+    tw.total_sales DESC;

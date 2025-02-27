@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT ws_sold_date_sk, 
+           ws_item_sk, 
+           ws_sales_price, 
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM web_sales
+    WHERE ws_sales_price IS NOT NULL
+), 
+aggregated_sales AS (
+    SELECT ws_sold_date_sk, 
+           ws_item_sk, 
+           SUM(ws_sales_price) AS total_sales, 
+           COUNT(*) AS sales_count
+    FROM sales_data
+    GROUP BY ws_sold_date_sk, ws_item_sk
+), 
+customer_avg AS (
+    SELECT c.c_customer_sk, 
+           AVG(COALESCE(cd_purchase_estimate, 0)) AS avg_purchase_estimate
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c.c_customer_sk
+), 
+top_customers AS (
+    SELECT c_customer_sk
+    FROM customer_avg
+    WHERE avg_purchase_estimate > (
+        SELECT AVG(avg_purchase_estimate) FROM customer_avg
+    )
+    LIMIT 20
+), 
+item_details AS (
+    SELECT i.i_item_sk, 
+           i.i_item_desc,
+           ROW_NUMBER() OVER (ORDER BY i.i_current_price DESC) AS price_rank
+    FROM item i
+    WHERE i.i_rec_start_date <= CURRENT_DATE AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date >= CURRENT_DATE)
+)
+SELECT wd.d_date, 
+       it.i_item_desc,
+       COALESCE(SUM(wb.net_qty), 0) AS web_sales_qty,
+       COALESCE(SUM(ss.net_qty), 0) AS store_sales_qty,
+       SUM(COALESCE(wd.total_sales, 0) + COALESCE(ss.total_sales, 0)) AS combined_sales_value,
+       ct.c_customer_id,
+       CASE 
+           WHEN wd.total_sales > 1000 THEN 'High Sales'
+           ELSE 'Low Sales'
+       END AS sales_category
+FROM aggregated_sales wd
+FULL OUTER JOIN store_sales ss ON wd.ws_sold_date_sk = ss.ss_sold_date_sk AND wd.ws_item_sk = ss.ss_item_sk
+JOIN item_details it ON COALESCE(wd.ws_item_sk, ss.ss_item_sk) = it.i_item_sk
+JOIN top_customers ct ON ct.c_customer_sk = ss.ss_customer_sk
+WHERE wd.ws_sold_date_sk BETWEEN (
+        SELECT MIN(d_date_sk) FROM date_dim
+     ) AND (
+        SELECT MAX(d_date_sk) FROM date_dim
+     )
+GROUP BY wd.d_date, it.i_item_desc, ct.c_customer_id
+HAVING COUNT(DISTINCT CASE WHEN wd.ws_item_sk IS NULL THEN 1 END) > 0 
+   OR COUNT(DISTINCT CASE WHEN ss.ss_item_sk IS NULL THEN 1 END) > 0
+ORDER BY combined_sales_value DESC
+LIMIT 100;

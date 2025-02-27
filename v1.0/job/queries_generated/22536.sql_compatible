@@ -1,0 +1,94 @@
+
+WITH RecursiveMoviePaths AS (
+    SELECT 
+        mc.movie_id, 
+        mc.company_id, 
+        cn.name AS company_name, 
+        1 AS depth
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+
+    UNION ALL
+
+    SELECT 
+        mc.movie_id, 
+        mc.company_id, 
+        cn.name AS company_name, 
+        rp.depth + 1
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN RecursiveMoviePaths rp ON mc.movie_id = rp.movie_id
+    WHERE rp.depth < 5
+),
+CTE_AkaNames AS (
+    SELECT 
+        a.person_id, 
+        a.name, 
+        a.person_id % 5 AS category, 
+        COUNT(*) OVER (PARTITION BY a.person_id) AS name_count
+    FROM aka_name a
+    WHERE a.name IS NOT NULL
+),
+CTE_CompleteCast AS (
+    SELECT 
+        cc.movie_id, 
+        COUNT(cc.subject_id) AS cast_count
+    FROM complete_cast cc
+    GROUP BY cc.movie_id
+),
+TopMovies AS (
+    SELECT 
+        ct.movie_id, 
+        COUNT(DISTINCT cc.person_id) AS total_cast,
+        MAX(COALESCE(at.production_year, 1990)) AS max_year,
+        SUM(CASE WHEN cc.nr_order IS NULL THEN 0 ELSE 1 END) AS order_based_count
+    FROM cast_info cc
+    LEFT JOIN aka_name an ON cc.person_id = an.person_id
+    LEFT JOIN aka_title at ON cc.movie_id = at.movie_id
+    GROUP BY ct.movie_id
+    HAVING COUNT(DISTINCT cc.person_id) > 3
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title,
+        COALESCE(mk.keyword, 'Unknown') AS keyword, 
+        COALESCE(cm.name, 'No Company') AS company,
+        COALESCE(k.keyword, 'N/A') AS movie_keyword,
+        COALESCE(m.production_year, 'Year Unknown') AS production_year
+    FROM title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN company_name cm ON cm.id IN (
+        SELECT mc.company_id FROM movie_companies mc WHERE mc.movie_id = m.id
+    )
+    LEFT JOIN keyword k ON k.id IN (
+        SELECT mk.keyword_id FROM movie_keyword mk WHERE mk.movie_id = m.id
+    )
+),
+FinalSelections AS (
+    SELECT 
+        md.*, 
+        RANK() OVER (PARTITION BY md.production_year ORDER BY md.total_cast DESC) AS rank_by_total_cast
+    FROM MovieDetails md
+    LEFT JOIN TopMovies tm ON md.movie_id = tm.movie_id
+    ORDER BY md.production_year DESC, rank_by_total_cast ASC
+)
+SELECT 
+    fs.movie_id, 
+    fs.title, 
+    fs.company, 
+    fs.keyword, 
+    fs.production_year,
+    fn.name AS aka_name,
+    fn.name_count,
+    COUNT(DISTINCT rmp.company_name) AS associated_companies
+FROM FinalSelections fs
+LEFT JOIN CTE_AkaNames fn ON fn.person_id IN (
+    SELECT DISTINCT cc.person_id 
+    FROM cast_info cc 
+    WHERE cc.movie_id = fs.movie_id
+)
+LEFT JOIN RecursiveMoviePaths rmp ON rmp.movie_id = fs.movie_id
+WHERE fs.production_year IS NOT NULL
+GROUP BY fs.movie_id, fs.title, fs.company, fs.keyword, fs.production_year, fn.name, fn.name_count
+ORDER BY fs.production_year DESC, fs.title;

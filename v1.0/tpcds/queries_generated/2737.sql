@@ -1,0 +1,72 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.web_site_id, 
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        SUM(ws.net_profit) AS total_profit,
+        AVG(ws_quantity) AS avg_quantity_per_order
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    LEFT JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+    AND 
+        cd.cd_credit_rating IS NOT NULL
+    GROUP BY 
+        ws.web_site_id
+),
+promotion_summary AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT ws.order_number) AS promo_order_count,
+        SUM(ws.net_profit) AS promo_total_profit
+    FROM 
+        promotion p 
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_id
+),
+income_brackets AS (
+    SELECT 
+        CASE
+            WHEN income.ib_income_band_sk = 1 THEN 'Low'
+            WHEN income.ib_income_band_sk = 2 THEN 'Medium'
+            WHEN income.ib_income_band_sk = 3 THEN 'High'
+            ELSE 'Undefined'
+        END AS income_bracket,
+        SUM(ws.net_profit) AS income_profits
+    FROM 
+        web_sales ws
+    JOIN 
+        household_demographics hd ON ws.ws_bill_cdemo_sk = hd.hd_demo_sk
+    JOIN 
+        income_band income ON hd.hd_income_band_sk = income.ib_income_band_sk
+    GROUP BY 
+        income_bracket
+)
+SELECT 
+    sd.web_site_id,
+    sd.total_orders,
+    sd.total_profit,
+    sd.avg_quantity_per_order,
+    ps.promo_order_count,
+    ps.promo_total_profit,
+    ib.income_bracket,
+    ib.income_profits
+FROM 
+    sales_data sd
+LEFT JOIN 
+    promotion_summary ps ON ps.promo_order_count > 0
+LEFT JOIN 
+    income_brackets ib ON sd.total_profit > 0
+WHERE 
+    sd.total_orders > 0
+ORDER BY 
+    sd.total_profit DESC, 
+    sd.total_orders DESC;

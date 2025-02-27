@@ -1,0 +1,85 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+inventory_levels AS (
+    SELECT 
+        inv_date_sk, 
+        inv_item_sk, 
+        SUM(inv_quantity_on_hand) AS total_on_hand
+    FROM 
+        inventory
+    GROUP BY 
+        inv_date_sk, inv_item_sk
+),
+store_data AS (
+    SELECT 
+        ss_item_sk, 
+        SUM(ss_net_profit) AS store_profit
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ss_item_sk
+),
+customer_returns AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_amount) AS total_returns
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_item_sk
+),
+customer_spend AS (
+    SELECT 
+        c.c_customer_sk, 
+        SUM(ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+return_data AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returned
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_item_sk
+)
+SELECT 
+    i.item_id,
+    COALESCE(sd.total_profit, 0) AS web_profit, 
+    COALESCE(st.store_profit, 0) AS store_profit,
+    COALESCE(inv.total_on_hand, 0) AS inventory_on_hand,
+    COALESCE(cr.total_returns, 0) AS total_returns,
+    COALESCE(cs.total_spent, 0) AS customer_spend,
+    (COALESCE(sd.total_profit, 0) + COALESCE(st.store_profit, 0) - COALESCE(cr.total_returns, 0)) AS net_profit
+FROM 
+    item i
+LEFT JOIN 
+    sales_data sd ON i.i_item_sk = sd.ws_item_sk
+LEFT JOIN 
+    store_data st ON i.i_item_sk = st.ss_item_sk
+LEFT JOIN 
+    inventory_levels inv ON i.i_item_sk = inv.inv_item_sk
+LEFT JOIN 
+    customer_returns cr ON i.i_item_sk = cr.cr_item_sk
+LEFT JOIN 
+    customer_spend cs ON cs.c_customer_sk = (SELECT TOP 1 c_customer_sk FROM customer ORDER BY NEWID())
+WHERE 
+    (sd.rank <= 10 OR sd.rank IS NULL)
+ORDER BY 
+    net_profit DESC;

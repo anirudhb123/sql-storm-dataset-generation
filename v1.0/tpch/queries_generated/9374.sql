@@ -1,0 +1,26 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_nationkey,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+),
+TopOrders AS (
+    SELECT ro.o_orderkey, ro.o_orderdate, ro.o_totalprice, n.n_name
+    FROM RankedOrders ro
+    JOIN nation n ON ro.c_nationkey = n.n_nationkey
+    WHERE ro.order_rank <= 10
+),
+AggregatedLineItems AS (
+    SELECT lo.l_orderkey, SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue,
+           COUNT(lo.l_orderkey) AS item_count
+    FROM lineitem lo
+    JOIN TopOrders to ON lo.l_orderkey = to.o_orderkey
+    GROUP BY lo.l_orderkey
+)
+SELECT to.o_orderkey, to.o_orderdate, to.o_totalprice, ali.total_revenue, ali.item_count, n.r_name
+FROM TopOrders to
+JOIN AggregatedLineItems ali ON to.o_orderkey = ali.l_orderkey
+JOIN nation n ON to.c_nationkey = n.n_nationkey
+WHERE ali.total_revenue > 10000
+ORDER BY ali.total_revenue DESC, to.o_orderdate DESC
+LIMIT 20;

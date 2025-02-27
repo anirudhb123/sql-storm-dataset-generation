@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        COALESCE(m.title, 'Unknown Title') AS title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id,
+        COALESCE(m.title, 'Unknown Title'),
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+        JOIN aka_title m ON ml.linked_movie_id = m.id
+        JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name,
+    COUNT(DISTINCT c.movie_id) AS total_movies,
+    AVG(DISTINCT EXTRACT(YEAR FROM age(CURRENT_DATE, m.production_year))) AS avg_age_of_movies,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    MAX(CASE WHEN p.info_type_id = (SELECT id FROM info_type WHERE info = 'Height') THEN p.info END) AS height
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info c ON ak.person_id = c.person_id
+LEFT JOIN 
+    MovieHierarchy m ON c.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info p ON ak.person_id = p.person_id
+WHERE 
+    ak.name IS NOT NULL
+    AND (m.production_year < 2000 OR m.production_year IS NULL)
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 1
+ORDER BY 
+    total_movies DESC, ak.name
+LIMIT 10;
+

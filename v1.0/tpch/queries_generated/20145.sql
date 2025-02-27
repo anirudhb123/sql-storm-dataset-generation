@@ -1,0 +1,46 @@
+WITH HighValueOrders AS (
+    SELECT o_orderkey, SUM(l_extendedprice * (1 - l_discount)) AS TotalValue
+    FROM orders
+    JOIN lineitem ON o_orderkey = l_orderkey
+    GROUP BY o_orderkey
+    HAVING SUM(l_extendedprice * (1 - l_discount)) > (
+        SELECT AVG(SUM(l_extendedprice * (1 - l_discount))) 
+        FROM orders
+        JOIN lineitem ON o_orderkey = l_orderkey
+        GROUP BY o_orderkey
+    )
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+DenseRankedParts AS (
+    SELECT p.p_partkey, p.p_name, COUNT(DISTINCT ps.ps_suppkey) AS SuppCount,
+           DENSE_RANK() OVER (ORDER BY COUNT(DISTINCT ps.ps_suppkey) DESC) AS PartRank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT DISTINCT c.c_name, c.c_address, c.c_acctbal, r.r_name, 
+       COALESCE(sp.SupplierCount, 0) AS SupplierCount,
+       COALESCE(hvo.TotalValue, 0) AS HighOrderValue, 
+       dp.p_name AS PopularPart
+FROM customer c
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN (
+    SELECT s.nationkey, COUNT(DISTINCT s.s_suppkey) AS SupplierCount
+    FROM SupplierInfo s
+    WHERE s.SupplierRank <= 3
+    GROUP BY s.nationkey
+) AS sp ON n.n_nationkey = sp.nationkey
+LEFT JOIN HighValueOrders hvo ON c.c_custkey = hvo.o_orderkey
+LEFT JOIN DenseRankedParts dp ON dp.PartRank = (
+    SELECT MAX(PartRank) 
+    FROM DenseRankedParts
+)
+WHERE (c.c_acctbal IS NOT NULL AND c.c_acctbal > 0)
+OR (SELECT COUNT(*) FROM orders WHERE o_custkey = c.c_custkey) = 0
+ORDER BY c.c_name DESC, HighOrderValue DESC;

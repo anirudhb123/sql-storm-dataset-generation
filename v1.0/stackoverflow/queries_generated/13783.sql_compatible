@@ -1,0 +1,64 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 4 THEN 1 ELSE 0 END) AS TagWikiCount,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.Reputation
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(C) AS CommentCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount
+),
+HistoryStats AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(H.Id) AS EditCount,
+        COUNT(CASE WHEN H.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN H.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteUndeleteCount
+    FROM Posts P
+    LEFT JOIN PostHistory H ON P.Id = H.PostId
+    GROUP BY P.Id
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.PostCount,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.TagWikiCount,
+    U.UpVotes,
+    U.DownVotes,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.CommentCount,
+    H.EditCount,
+    H.CloseReopenCount,
+    H.DeleteUndeleteCount,
+    U.BadgeCount
+FROM UserStats U
+JOIN PostSummary PS ON U.UserId = PS.OwnerUserId
+JOIN HistoryStats H ON PS.PostId = H.PostId
+ORDER BY U.Reputation DESC, PS.Score DESC
+LIMIT 100;

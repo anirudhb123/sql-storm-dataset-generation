@@ -1,0 +1,82 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        AVG(COALESCE(vote.Score, 0)) AS AverageScore,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes vote ON p.Id = vote.PostId
+    LEFT JOIN 
+        (SELECT DISTINCT 
+            unnest(string_to_array(Tags, '><')) AS TagName, 
+            Id 
+         FROM Posts) t ON t.Id = p.Id
+    GROUP BY 
+        u.Id
+),
+InactiveUsers AS (
+    SELECT 
+        ua.UserId, 
+        ua.DisplayName, 
+        ua.TotalPosts, 
+        ua.TotalAnswers, 
+        ua.TotalQuestions, 
+        ua.AverageScore, 
+        ua.Tags
+    FROM 
+        UserActivity ua
+    WHERE 
+        ua.TotalPosts = 0
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    GROUP BY 
+        rp.PostId, rp.Title
+)
+SELECT 
+    iu.DisplayName, 
+    iu.TotalPosts, 
+    iu.TotalAnswers, 
+    iu.TotalQuestions, 
+    iu.AverageScore, 
+    iu.Tags, 
+    ps.Title, 
+    ps.CommentCount, 
+    ps.UpVotes, 
+    ps.DownVotes
+FROM 
+    InactiveUsers iu
+LEFT JOIN 
+    PostStatistics ps ON iu.UserId = ps.PostId
+ORDER BY 
+    iu.DisplayName, ps.Title
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

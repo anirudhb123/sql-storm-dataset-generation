@@ -1,0 +1,71 @@
+
+WITH RECURSIVE sales_info AS (
+    SELECT
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) as rn
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk > (
+            SELECT MAX(ws_sold_date_sk) - 30 FROM web_sales
+        )
+),
+customer_summary AS (
+    SELECT
+        c.c_customer_sk,
+        SUM(CASE WHEN (ws_quantity IS NULL OR ws_quantity = 0) THEN 0 ELSE ws_quantity END) AS total_quantity,
+        COUNT(DISTINCT c.c_customer_id) AS total_orders,
+        MAX(ws_sales_price) AS max_price
+    FROM
+        customer c
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY
+        c.c_customer_sk
+),
+address_info AS (
+    SELECT
+        ca.ca_city,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(COALESCE(cs.net_profit, 0)) AS total_profit
+    FROM
+        customer_address ca
+    JOIN
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN
+        (SELECT
+            sr_customer_sk,
+            SUM(sr_net_loss) AS net_profit
+         FROM
+            store_returns
+         GROUP BY
+            sr_customer_sk) AS sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN
+        catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    GROUP BY
+        ca.ca_city
+)
+SELECT 
+    ci.ca_city,
+    cs.total_orders,
+    cs.total_quantity,
+    ci.customer_count,
+    ci.total_profit,
+    MAX(ci.max_price) OVER () AS overall_max_price,
+    SUM(ws_ext_sales_price) AS total_web_sales
+FROM 
+    address_info ci
+JOIN 
+    customer_summary cs ON ci.customer_count = cs.total_orders
+LEFT JOIN 
+    sales_info si ON cs.c_customer_sk = si.ws_item_sk
+GROUP BY 
+    ci.ca_city, cs.total_orders, cs.total_quantity, ci.customer_count, ci.total_profit
+HAVING 
+    ci.customer_count > 5 AND overall_max_price > 100
+ORDER BY 
+    total_web_sales DESC;

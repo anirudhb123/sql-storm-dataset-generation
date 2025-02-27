@@ -1,0 +1,44 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        1 AS level
+    FROM aka_title t
+    JOIN movie_keyword mk ON t.id = mk.movie_id
+    WHERE t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mm.id AS movie_id,
+        mt.title,
+        mm.production_year,
+        COALESCE(mk2.keyword, 'No Keyword') AS keyword,
+        mh.level + 1
+    FROM movie_hierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+    LEFT JOIN movie_keyword mk2 ON mt.id = mk2.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT mc.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT mh.title, ', ') AS movies,
+    AVG(mh.production_year) AS avg_year,
+    CASE 
+        WHEN COUNT(DISTINCT mh.movie_id) > 5 THEN 'Prolific Actor'
+        ELSE 'Emerging Talent' 
+    END AS actor_status
+FROM aka_name a
+JOIN cast_info ci ON a.person_id = ci.person_id
+JOIN complete_cast cc ON ci.movie_id = cc.movie_id
+LEFT JOIN movie_hierarchy mh ON cc.movie_id = mh.movie_id
+LEFT JOIN movie_companies mc ON mh.movie_id = mc.movie_id
+WHERE a.name IS NOT NULL 
+    AND a.name <> ''
+GROUP BY a.name
+HAVING COUNT(DISTINCT mc.movie_id) >= 2
+ORDER BY movie_count DESC, avg_year ASC;

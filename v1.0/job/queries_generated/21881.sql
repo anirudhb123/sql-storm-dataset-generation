@@ -1,0 +1,105 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorMovieCredits AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movies,
+        MAX(t.production_year) AS last_movie_year
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        title t ON c.movie_id = t.id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.person_id, a.name
+),
+TopActors AS (
+    SELECT 
+        amc.person_id,
+        amc.name,
+        amc.movie_count,
+        amc.movies,
+        amc.last_movie_year,
+        DENSE_RANK() OVER (ORDER BY amc.movie_count DESC) AS actor_rank
+    FROM 
+        ActorMovieCredits amc
+    WHERE 
+        amc.movie_count > 5
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title
+),
+TheatricalRevenue AS (
+    SELECT 
+        'A' AS revenue_type,
+        SUM(mi.info::numeric) AS total_revenue
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        it.info ILIKE '%box office%'
+),
+StreamingRevenue AS (
+    SELECT 
+        'B' AS revenue_type,
+        SUM(mi.info::numeric) AS total_revenue
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        it.info ILIKE '%streaming%'
+),
+FinalRevenue AS (
+    SELECT
+        COALESCE(tr.total_revenue, 0) AS theatrical_revenue,
+        COALESCE(sr.total_revenue, 0) AS streaming_revenue
+    FROM 
+        TheatricalRevenue tr
+    FULL OUTER JOIN 
+        StreamingRevenue sr ON tr.revenue_type = sr.revenue_type
+)
+SELECT 
+    ta.name AS actor_name,
+    ta.movie_count,
+    ta.last_movie_year,
+    mwk.title,
+    mwk.keywords,
+    fr.theatrical_revenue,
+    fr.streaming_revenue
+FROM 
+    TopActors ta
+JOIN 
+    MoviesWithKeywords mwk ON ta.movie_count > 10
+LEFT JOIN 
+    FinalRevenue fr ON true
+WHERE 
+    ta.actor_rank <= 10
+ORDER BY 
+    ta.movie_count DESC, ta.last_movie_year;

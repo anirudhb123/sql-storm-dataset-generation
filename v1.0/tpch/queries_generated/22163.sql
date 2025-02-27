@@ -1,0 +1,85 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_orderstatus, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderstatus
+),
+NationSummary AS (
+    SELECT 
+        n.n_nationkey, 
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(c.c_acctbal) AS total_acctbal
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_container,
+    COUNT(DISTINCT l.l_orderkey) AS order_count,
+    AVG(l.l_quantity) AS avg_quantity,
+    MAX(l.l_extendedprice) AS max_extendedprice,
+    COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END), 0) AS return_count,
+    REGEXP_REPLACE(STRING_AGG(DISTINCT s.s_name, ', '), '^(, )|(, $)', '') AS suppliers,
+    COUNT(ns.supplier_count) AS nations_with_suppliers
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON l.l_suppkey = rs.s_suppkey AND rs.rn <= 5
+LEFT JOIN 
+    NationSummary ns ON rs.s_nationkey = ns.n_nationkey
+WHERE 
+    p.p_retailprice > (
+        SELECT 
+            AVG(p2.p_retailprice) 
+        FROM 
+            part p2
+        WHERE 
+            p2.p_size IS NOT NULL
+    )
+AND 
+    p.p_comment LIKE '%special%'
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_container
+HAVING 
+    SUM(l.l_extendedprice) > (
+        SELECT 
+            AVG(net_value) 
+        FROM 
+            FilteredOrders fo
+        WHERE 
+            fo.o_orderstatus = 'O'
+    )
+ORDER BY 
+    order_count DESC NULLS LAST;

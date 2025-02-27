@@ -1,0 +1,89 @@
+WITH RECURSIVE RecursiveTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ct.kind) AS rn
+    FROM 
+        aka_title t
+    INNER JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    INNER JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND t.title IS NOT NULL
+    UNION ALL
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY rt.title_id ORDER BY ct.kind) AS rn
+    FROM 
+        RecursiveTitles rt
+    JOIN 
+        movie_companies mc ON rt.title_id = mc.movie_id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        mc.note IS NOT NULL
+),
+AggregatedInfo AS (
+    SELECT 
+        title_id,
+        COUNT(DISTINCT company_type) AS distinct_company_types,
+        MAX(production_year) AS latest_year
+    FROM 
+        RecursiveTitles
+    GROUP BY 
+        title_id
+),
+FilteredTitles AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        ai.distinct_company_types,
+        ai.latest_year
+    FROM 
+        RecursiveTitles rt
+    JOIN 
+        AggregatedInfo ai ON rt.title_id = ai.title_id
+    WHERE 
+        ai.distinct_company_types > 1 
+        AND (ai.latest_year IS NULL OR ai.latest_year >= 2000)
+),
+FinalTitleList AS (
+    SELECT 
+        ft.title,
+        ft.latest_year,
+        CASE 
+            WHEN ft.latest_year IS NOT NULL THEN 'Released'
+            ELSE 'Upcoming'
+        END AS release_status,
+        RANK() OVER (ORDER BY ft.latest_year DESC) AS ranking
+    FROM 
+        FilteredTitles ft
+)
+SELECT 
+    f.title,
+    f.latest_year,
+    f.release_status,
+    CASE 
+        WHEN f.ranking <= 10 THEN 'Top 10'
+        ELSE 'Below Top 10'
+    END AS ranking_category,
+    STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+FROM 
+    FinalTitleList f
+LEFT JOIN 
+    movie_companies mc ON f.title = (SELECT title FROM aka_title WHERE id = f.title_id)
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    (f.latest_year IS NOT NULL OR f.release_status = 'Upcoming')
+GROUP BY 
+    f.title, f.latest_year, f.release_status, f.ranking
+ORDER BY 
+    f.ranking, f.latest_year DESC;

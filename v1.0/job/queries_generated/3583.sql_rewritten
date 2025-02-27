@@ -1,0 +1,70 @@
+WITH ranked_movies AS (
+    SELECT
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY a.production_year) AS movie_count
+    FROM
+        aka_title a
+    WHERE
+        a.production_year IS NOT NULL
+),
+company_details AS (
+    SELECT
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM
+        movie_companies mc
+    JOIN
+        company_name c ON mc.company_id = c.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE
+        c.country_code IS NOT NULL
+),
+cast_details AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT n.name, ', ') AS cast_names
+    FROM
+        cast_info ci
+    JOIN
+        aka_name n ON ci.person_id = n.person_id
+    GROUP BY
+        ci.movie_id
+),
+movie_info_details AS (
+    SELECT
+        mi.movie_id,
+        MAX(CASE WHEN it.info = 'budget' THEN mi.info END) AS budget,
+        MAX(CASE WHEN it.info = 'rating' THEN mi.info END) AS rating
+    FROM
+        movie_info mi
+    JOIN
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY
+        mi.movie_id
+)
+SELECT
+    r.title,
+    r.production_year,
+    r.movie_count,
+    cd.company_name,
+    cd.company_type,
+    coalesce(ca.cast_count, 0) AS total_cast,
+    coalesce(ca.cast_names, 'No cast information') AS cast_names,
+    coalesce(mb.budget, 'N/A') AS budget,
+    coalesce(mb.rating, 'N/A') AS rating
+FROM
+    ranked_movies r
+LEFT JOIN
+    company_details cd ON r.title = cd.company_name 
+LEFT JOIN
+    cast_details ca ON r.id = ca.movie_id
+LEFT JOIN
+    movie_info_details mb ON r.id = mb.movie_id
+WHERE
+    r.rn <= 5
+ORDER BY
+    r.production_year DESC, r.title;

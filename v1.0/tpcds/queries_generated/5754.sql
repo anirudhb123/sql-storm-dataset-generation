@@ -1,0 +1,65 @@
+
+WITH aggregated_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_web_page_sk) AS pages_viewed
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2451522 AND 2451528
+    GROUP BY 
+        ws_bill_customer_sk
+),
+high_value_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        ad.ca_city,
+        ad.ca_state,
+        ag.total_orders,
+        ag.total_profit,
+        ag.pages_viewed
+    FROM 
+        customer c
+    JOIN 
+        aggregated_sales ag ON c.c_customer_sk = ag.ws_bill_customer_sk
+    JOIN 
+        customer_address ad ON c.c_current_addr_sk = ad.ca_address_sk
+    WHERE 
+        ag.total_profit > 1000
+        AND ag.total_orders > 5
+),
+top_web_pages AS (
+    SELECT 
+        wp.wb_web_page_sk,
+        wp.wp_url,
+        SUM(ws_ext_sales_price) AS total_revenue
+    FROM 
+        web_page wp
+    JOIN 
+        web_sales ws ON wp.wp_web_page_sk = ws.ws_web_page_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2451522 AND 2451528
+    GROUP BY 
+        wp.wb_web_page_sk, wp.wp_url
+    ORDER BY 
+        total_revenue DESC
+    LIMIT 10
+)
+SELECT 
+    hvc.c_customer_sk,
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.ca_city,
+    hvc.ca_state,
+    twp.wp_url,
+    twp.total_revenue
+FROM 
+    high_value_customers hvc
+JOIN 
+    top_web_pages twp ON hvc.pages_viewed > 5
+ORDER BY 
+    hvc.total_profit DESC, twp.total_revenue DESC;

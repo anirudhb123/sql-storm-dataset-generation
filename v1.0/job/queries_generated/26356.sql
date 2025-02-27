@@ -1,0 +1,57 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        COUNT(ki.id) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ki.id) DESC) AS rank_per_year
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_keyword mk ON at.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+PersonRoleCounts AS (
+    SELECT 
+        ci.person_id,
+        p.name,
+        COUNT(ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT at.title, ', ') AS movies
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    GROUP BY 
+        ci.person_id, p.name
+),
+PopularRoles AS (
+    SELECT 
+        rt.person_id,
+        rt.name,
+        COUNT(DISTINCT rt.title_id) AS title_count,
+        SUM(CASE WHEN rt.title_id IN (SELECT title_id FROM RankedTitles WHERE rank_per_year <= 5) THEN 1 ELSE 0 END) AS popular_count
+    FROM 
+        PersonRoleCounts rt
+    JOIN 
+        cast_info ci ON rt.person_id = ci.person_id
+    GROUP BY 
+        rt.person_id, rt.name
+)
+SELECT 
+    p.name AS actor_name,
+    p.movie_count,
+    p.movies,
+    r.title_count,
+    r.popular_count,
+    r.popular_count * 100.0 / NULLIF(p.movie_count, 0) AS popularity_percentage
+FROM 
+    PersonRoleCounts p
+JOIN 
+    PopularRoles r ON p.person_id = r.person_id
+ORDER BY 
+    popularity_percentage DESC, p.name;

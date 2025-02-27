@@ -1,0 +1,58 @@
+
+WITH PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        pt.Name AS PostType,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        p.Id, pt.Name, p.CreationDate, p.Score, p.ViewCount
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    pa.PostId,
+    pa.CommentCount,
+    pa.UpVoteCount,
+    pa.DownVoteCount,
+    pa.PostType,
+    pa.CreationDate,
+    pa.Score,
+    pa.ViewCount,
+    ua.UserId,
+    ua.PostCount,
+    ua.GoldBadges,
+    ua.SilverBadges,
+    ua.BronzeBadges
+FROM 
+    PostActivity pa
+INNER JOIN 
+    UserActivity ua ON pa.UserId = ua.UserId
+ORDER BY 
+    pa.ViewCount DESC, pa.Score DESC;

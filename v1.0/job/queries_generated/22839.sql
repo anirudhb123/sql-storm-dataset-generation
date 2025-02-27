@@ -1,0 +1,95 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+),
+actor_role_info AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        c.info AS role_description,
+        COUNT(DISTINCT ci.movie_id) AS movies_count
+    FROM 
+        aka_name AS ak
+    LEFT JOIN 
+        cast_info AS ci ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        role_type AS c ON ci.role_id = c.id
+    GROUP BY 
+        ak.person_id, ak.name, c.info
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords_list
+    FROM 
+        movie_keyword AS mk
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+complex_join AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ARRAY_AGG(DISTINCT ak.name) AS actors,
+        COALESCE(mk.keywords_list, 'No keywords') AS keywords,
+        CASE 
+            WHEN mh.production_year < 2000 THEN 'Classic'
+            WHEN mh.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+            ELSE 'Recent'
+        END AS era
+    FROM 
+        movie_hierarchy AS mh
+    LEFT JOIN 
+        cast_info AS ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name AS ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        movie_keywords AS mk ON mh.movie_id = mk.movie_id
+    WHERE 
+        mh.level <= 2
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+)
+SELECT 
+    cm.movie_id,
+    cm.title,
+    cm.production_year,
+    cm.era,
+    COALESCE(ai.movies_count, 0) AS total_roles,
+    CASE 
+        WHEN strstr(cm.keywords, 'Drama') THEN 'Drama Enthusiast'
+        WHEN NULLIF(cm.keywords, 'No keywords') IS NULL THEN 'Unknown Genre'
+        ELSE 'Genre Explorer'
+    END AS engagement_level
+FROM 
+    complex_join AS cm
+LEFT JOIN 
+    actor_role_info AS ai ON ai.person_id IN (SELECT ci.person_id FROM cast_info AS ci WHERE ci.movie_id = cm.movie_id)
+ORDER BY 
+    cm.production_year DESC, 
+    total_roles DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

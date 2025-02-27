@@ -1,0 +1,53 @@
+-- Performance Benchmarking Query
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COALESCE(SUM(b.Id IS NOT NULL), 0) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= '2023-01-01'  -- Filter posts created in the current year
+    GROUP BY 
+        p.Id, p.Title
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(u.UpVotes) AS UserUpVotes,
+        SUM(u.DownVotes) AS UserDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    us.UserId,
+    us.DisplayName,
+    us.PostCount,
+    us.UserUpVotes,
+    us.UserDownVotes
+FROM 
+    PostStats ps
+JOIN 
+    Users us ON ps.PostId = us.Id  -- Adjust this JOIN condition if needed
+ORDER BY 
+    ps.UpVotes DESC, ps.CommentCount DESC;  -- Sort by UpVotes and CommentCount

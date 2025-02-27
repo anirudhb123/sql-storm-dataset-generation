@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') -- only movies
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS supporting_actor_count,
+    AVG(COALESCE(mi.info, '0')) AS average_rating,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ci.person_id = ak.person_id
+JOIN 
+    aka_title at ON at.id = ci.movie_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = at.id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = at.id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+LEFT JOIN 
+    movie_keyword mw ON mw.movie_id = at.id
+LEFT JOIN 
+    keyword kw ON kw.id = mw.keyword_id
+JOIN 
+    movie_hierarchy mh ON mh.movie_id = at.id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.name, at.title, at.production_year
+HAVING 
+    COUNT(DISTINCT mw.keyword_id) > 0
+ORDER BY 
+    average_rating DESC, movie_title ASC;
+
+This query constructs a recursive Common Table Expression (CTE) to represent a hierarchy of movies that are linked to one another. It retrieves information about actors, movies, associated companies, ratings, and keywords while applying various SQL features such as aggregate functions, string aggregation, and conditional logic.
+
+Components included:
+
+- Recursive CTE for movie hierarchy.
+- JOINs to connect multiple tables and gather relevant data.
+- Aggregation functions such as COUNT() and AVG().
+- String aggregation through STRING_AGG().
+- Use of COALESCE for handling NULL values.
+- A HAVING clause to filter results based on aggregated conditions.
+- Order by clause to sort results meaningfully.

@@ -1,0 +1,47 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_manager,
+        s_sales_price,
+        1 AS level
+    FROM store s
+    JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    WHERE ss.ss_sold_date_sk = (SELECT MAX(ss2.ss_sold_date_sk) FROM store_sales ss2)
+
+    UNION ALL
+
+    SELECT 
+        s2.s_store_sk,
+        s2.s_store_name,
+        s2.s_manager,
+        sh.sales_price * (1 + COALESCE(NULLIF(sh.sales_price, 0) / sh.sales_price, 0)) AS sales_price,
+        level + 1
+    FROM sales_hierarchy sh
+    JOIN store s2 ON sh.s_store_sk = s2.s_store_sk
+    WHERE sh.level < 5
+)
+
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    SUM(COALESCE(ss.ss_net_paid, 0)) AS total_spent,
+    COUNT(DISTINCT ss.ss_ticket_number) AS total_purchases,
+    MAX(d.d_date) AS last_purchase_date,
+    CASE
+        WHEN SUM(ss.ss_net_paid) > 1000 THEN 'High Value'
+        WHEN SUM(ss.ss_net_paid) > 500 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value,
+    ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY total_spent DESC) AS rank
+FROM customer c
+LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+LEFT JOIN sales_hierarchy sh ON ss.ss_store_sk = sh.s_store_sk
+WHERE d.d_year = 2023
+GROUP BY c.c_customer_id, c.c_first_name, c.c_last_name
+HAVING COUNT(DISTINCT ss.ss_order_number) > 5
+ORDER BY total_spent DESC
+LIMIT 10;

@@ -1,0 +1,62 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name,
+        ro.c_acctbal
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.rn <= 5
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT s.s_suppkey) AS unique_suppliers
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.o_totalprice,
+    to.c_name,
+    to.c_acctbal,
+    ss.total_supply_cost,
+    ss.unique_suppliers,
+    p.p_name,
+    p.p_retailprice
+FROM 
+    TopOrders to
+JOIN 
+    lineitem l ON to.o_orderkey = l.l_orderkey
+JOIN 
+    part p ON l.l_partkey = p.p_partkey
+JOIN 
+    SupplierStats ss ON p.p_partkey = ss.ps_partkey
+WHERE 
+    to.o_totalprice > 10000 
+ORDER BY 
+    to.o_orderdate DESC, 
+    to.o_totalprice DESC;

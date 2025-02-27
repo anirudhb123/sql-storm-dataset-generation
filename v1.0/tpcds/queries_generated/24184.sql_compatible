@@ -1,0 +1,88 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.ship_customer_sk,
+        ws.item_sk,
+        ws.web_site_sk,
+        ws.sales_price,
+        ws.net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws.net_profit DESC) AS sale_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+        AND ws.sales_price IS NOT NULL
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        cd.cd_dep_employed_count,
+        wc.warehouse_name,
+        CASE 
+            WHEN cd.cd_dep_count IS NULL THEN 'Unknown'
+            ELSE CASE 
+                WHEN cd.cd_dep_count = 0 THEN 'No Dependents'
+                WHEN cd.cd_dep_count < 3 THEN 'Few Dependents'
+                ELSE 'Many Dependents'
+            END 
+        END AS dependent_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        warehouse wc ON wc.warehouse_sk = (
+            SELECT inv.inv_warehouse_sk 
+            FROM inventory inv 
+            WHERE inv.inv_item_sk IN (SELECT item_sk FROM RankedSales WHERE sale_rank = 1)
+            GROUP BY inv.inv_warehouse_sk 
+            ORDER BY SUM(inv.inv_quantity_on_hand) DESC 
+            FETCH FIRST 1 ROW ONLY
+        )
+),
+CustomerSales AS (
+    SELECT 
+        rd.bill_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(*) AS total_sales,
+        SUM(rd.net_profit) AS total_profit
+    FROM 
+        RankedSales rd
+    INNER JOIN 
+        CustomerDetails cd ON rd.bill_customer_sk = cd.c_customer_sk
+    WHERE 
+        rd.sale_rank <= 5
+    GROUP BY 
+        rd.bill_customer_sk, cd.c_first_name, cd.c_last_name, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    cs.bill_customer_sk,
+    cs.total_sales,
+    cs.total_profit,
+    cd.dependent_status,
+    CASE 
+        WHEN cd.cd_gender = 'M' AND cd.cd_marital_status = 'S' THEN 'Single Male'
+        WHEN cd.cd_gender = 'F' AND cd.cd_marital_status = 'S' THEN 'Single Female'
+        ELSE 'Other'
+    END AS customer_category,
+    COALESCE(NULLIF(cd.cd_credit_rating, 'Bad'), 'No Rating') AS final_credit_rating
+FROM 
+    CustomerSales cs
+JOIN 
+    CustomerDetails cd ON cs.bill_customer_sk = cd.c_customer_sk
+WHERE 
+    cs.total_profit > (SELECT AVG(total_profit) FROM CustomerSales)
+    AND cd.dependent_status != 'Unknown'
+ORDER BY 
+    cs.total_profit DESC
+FETCH FIRST 10 ROWS ONLY;

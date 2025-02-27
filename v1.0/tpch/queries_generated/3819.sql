@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS average_order_value
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        orders o ON o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN 
+                                    (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = 
+                                    (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')))
+    )
+    JOIN 
+        lineitem l ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        rs.rank <= 5
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+FinalResults AS (
+    SELECT 
+        ts.s_name,
+        ts.order_count,
+        ts.average_order_value,
+        COALESCE(r.total_cost, 0) AS total_cost
+    FROM 
+        TopSuppliers ts
+    LEFT JOIN 
+        RankedSuppliers r ON ts.s_suppkey = r.s_suppkey
+)
+SELECT 
+    f.s_name,
+    f.order_count,
+    f.average_order_value,
+    f.total_cost,
+    CASE 
+        WHEN f.total_cost > 100000 THEN 'High'
+        WHEN f.total_cost > 50000 THEN 'Medium'
+        ELSE 'Low'
+    END AS cost_category
+FROM 
+    FinalResults f
+ORDER BY 
+    f.order_count DESC, f.average_order_value DESC;

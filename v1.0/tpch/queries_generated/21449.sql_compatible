@@ -1,0 +1,50 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON ps.ps_suppkey = sh.s_suppkey
+    JOIN supplier s ON ps.ps_partkey = s.s_suppkey
+    WHERE sh.level < 5
+), national_summary AS (
+    SELECT n.n_nationkey, n.n_name,
+           COUNT(DISTINCT c.c_custkey) AS customer_count,
+           SUM(o.o_totalprice) AS total_revenue
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey, n.n_name
+), part_metrics AS (
+    SELECT p.p_partkey, SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ps.ps_supplycost) AS median_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT r.r_name, ns.customer_count, ns.total_revenue,
+       pm.total_available, pm.avg_supply_cost, pm.median_supply_cost,
+       ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY ns.total_revenue DESC) AS rnk
+FROM region r
+JOIN national_summary ns ON r.r_regionkey = ns.n_nationkey
+JOIN part_metrics pm ON ns.n_nationkey = CAST(pm.p_partkey % 5 AS INTEGER)
+WHERE (ns.total_revenue IS NOT NULL OR pm.total_available > 100)
+  AND (r.r_name LIKE 'A%' OR r.r_name LIKE 'B%')
+  AND EXISTS (
+      SELECT 1 FROM supplier_hierarchy sh
+      WHERE sh.s_nationkey = ns.n_nationkey
+      GROUP BY sh.s_nationkey 
+      HAVING COUNT(*) > 1
+  )
+UNION ALL
+SELECT 'TOTAL' AS r_name, SUM(ns.customer_count), SUM(ns.total_revenue),
+       SUM(pm.total_available), AVG(pm.avg_supply_cost), AVG(pm.median_supply_cost)
+FROM region r
+JOIN national_summary ns ON r.r_regionkey = ns.n_nationkey
+JOIN part_metrics pm ON ns.n_nationkey = CAST(pm.p_partkey % 5 AS INTEGER)
+WHERE r.r_regionkey IS NOT NULL
+GROUP BY r.r_regionkey
+ORDER BY r_name, rnk NULLS LAST;

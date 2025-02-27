@@ -1,0 +1,46 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returned,
+        ROW_NUMBER() OVER (PARTITION BY wr_returning_customer_sk ORDER BY SUM(wr_return_quantity) DESC) AS rn
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+),
+SalesData AS (
+    SELECT 
+        ws_ship_customer_sk,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_net_profit,
+        AVG(ws_sales_price) AS avg_sales_price
+    FROM web_sales
+    GROUP BY ws_ship_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ci.ib_income_band_sk,
+        COUNT(*) AS cust_count
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics ci ON c.c_current_hdemo_sk = ci.hd_demo_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, ci.ib_income_band_sk
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cd.ib_income_band_sk,
+    COALESCE(SD.total_orders, 0) AS total_orders,
+    COALESCE(SD.total_net_profit, 0) AS total_net_profit,
+    COUNT(RR.returning_customer_sk) AS returning_customers,
+    AVG(RR.total_returned) AS avg_returns
+FROM CustomerDemographics cd
+LEFT JOIN SalesData SD ON cd.c_customer_sk = SD.ws_ship_customer_sk
+LEFT JOIN RankedReturns RR ON cd.c_customer_sk = RR.returning_customer_sk AND RR.rn <= 3
+GROUP BY cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, cd.ib_income_band_sk
+HAVING (COUNT(RR.returning_customer_sk) > 0 OR SUM(SD.total_net_profit) > 1000)
+ORDER BY cd.cd_gender, cd.cd_marital_status, cd.cd_education_status;

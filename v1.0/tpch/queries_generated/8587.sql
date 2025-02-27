@@ -1,0 +1,50 @@
+WITH SupplierCosts AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+NationRegions AS (
+    SELECT 
+        n.n_nationkey,
+        r.r_regionkey,
+        r.r_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    nr.r_name,
+    SUM(sc.total_supply_cost) AS total_supply_cost,
+    SUM(co.total_order_value) AS total_order_value,
+    COUNT(DISTINCT sc.s_suppkey) AS unique_suppliers,
+    COUNT(DISTINCT co.c_custkey) AS unique_customers
+FROM 
+    NationRegions nr
+LEFT JOIN 
+    supplier s ON s.s_nationkey IN (SELECT n_nationkey FROM NationRegions WHERE r_name = nr.r_name)
+LEFT JOIN 
+    SupplierCosts sc ON s.s_suppkey = sc.s_suppkey
+LEFT JOIN 
+    CustomerOrders co ON TRUE
+GROUP BY 
+    nr.r_name
+ORDER BY 
+    total_supply_cost DESC, total_order_value DESC;

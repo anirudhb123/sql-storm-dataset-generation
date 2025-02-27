@@ -1,0 +1,77 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT ca.person_id) AS num_cast_members,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT ca.person_id) DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info ca ON a.movie_id = ca.movie_id
+    GROUP BY 
+        a.title, a.production_year
+),
+MostStarredMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank <= 3
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+CompanyMovies AS (
+    SELECT 
+        m.movie_id,
+        GROUP_CONCAT(c.name || ' (' || ct.kind || ')') AS companies
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    mm.title,
+    mm.production_year,
+    mk.keywords,
+    cm.companies,
+    CASE 
+        WHEN mm.production_year < 2000 THEN 'Classic'
+        WHEN mm.production_year BETWEEN 2000 AND 2010 THEN 'Modern Era'
+        ELSE 'Recent'
+    END AS era,
+    COUNT(DISTINCT ca.person_id) AS unique_cast_members,
+    COUNT(DISTINCT ct.id) AS unique_roles
+FROM 
+    MostStarredMovies mm
+LEFT JOIN 
+    movie_keyword mk ON mm.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_companies mc ON mm.movie_id = mc.movie_id
+LEFT JOIN 
+    companyMovies cm ON mm.movie_id = cm.movie_id
+LEFT JOIN 
+    cast_info ca ON mm.movie_id = ca.movie_id
+LEFT JOIN 
+    role_type ct ON ca.role_id = ct.id
+GROUP BY 
+    mm.title, mm.production_year, mk.keywords, cm.companies
+HAVING 
+    unique_cast_members > 0 AND 
+    SUM(CASE WHEN ct.role IS NULL THEN 1 ELSE 0 END) > 2
+ORDER BY 
+    mm.production_year DESC, unique_cast_members DESC;

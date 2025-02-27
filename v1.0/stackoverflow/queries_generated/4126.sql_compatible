@@ -1,0 +1,72 @@
+
+WITH UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT P.Id) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(A.AverageScore, 0) AS AverageAnswerScore,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        DENSE_RANK() OVER (ORDER BY P.Score DESC) AS ScoreRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts A ON P.Id = A.ParentId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 10
+)
+SELECT 
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalComments,
+    U.Upvotes,
+    U.Downvotes,
+    P.Title AS PopularPost,
+    P.AverageAnswerScore,
+    T.TagName
+FROM 
+    UserEngagement U
+JOIN 
+    PostStatistics P ON U.UserId = P.PostId
+JOIN 
+    PopularTags T ON P.Tags LIKE '%' || T.TagName || '%'
+WHERE 
+    U.UserRank <= 10
+ORDER BY 
+    U.Upvotes DESC, P.ScoreRank ASC;

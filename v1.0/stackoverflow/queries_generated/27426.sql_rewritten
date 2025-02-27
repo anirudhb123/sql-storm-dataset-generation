@@ -1,0 +1,76 @@
+WITH RelevantPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Tags,
+        p.Score,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.PostTypeId,
+        
+        string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS TagArray,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TagStatistics AS (
+    SELECT 
+        unnest(Tags) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        RelevantPosts
+    GROUP BY 
+        Tag
+),
+ActiveUsers AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS ActivePostCount,
+        SUM(Score) AS TotalScore,
+        AVG(CreationDate::date) AS AvgCreateDate  
+    FROM 
+        RelevantPosts
+    GROUP BY 
+        OwnerUserId
+)
+SELECT 
+    rp.PostId, 
+    rp.Title, 
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    (
+        SELECT 
+            ARRAY_AGG(ts.Tag ORDER BY ts.TagCount DESC)
+        FROM 
+            TagStatistics ts
+        WHERE 
+            ts.Tag IN (SELECT unnest(rp.TagArray))
+    ) AS RelevantTags,
+    au.ActivePostCount,
+    au.TotalScore,
+    au.AvgCreateDate
+FROM 
+    RelevantPosts rp
+JOIN 
+    ActiveUsers au ON rp.OwnerUserId = au.OwnerUserId
+ORDER BY 
+    rp.Score DESC, 
+    rp.CommentCount DESC
+LIMIT 50;

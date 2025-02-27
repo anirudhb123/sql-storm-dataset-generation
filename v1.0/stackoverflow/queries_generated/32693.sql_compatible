@@ -1,0 +1,72 @@
+
+WITH RecursiveUserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.CreationDate,
+        0 AS Level
+    FROM Users U
+    WHERE U.Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        U.Id,
+        U.Reputation,
+        U.CreationDate,
+        R.Level + 1
+    FROM Users U
+    JOIN RecursiveUserReputation R ON U.Id = R.UserId
+    WHERE R.Level < 5 
+),
+PostScores AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Score AS PostScore,
+        P.OwnerUserId,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) 
+    GROUP BY P.Id, P.Score, P.OwnerUserId
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS NumberOfPosts,
+        SUM(PS.PostScore) AS TotalScore,
+        SUM(PS.TotalBounty) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN PostScores PS ON P.Id = PS.PostId
+    WHERE U.Reputation > 5000
+    GROUP BY U.Id, U.DisplayName
+),
+PostEditHistory AS (
+    SELECT 
+        P.Id AS PostId,
+        MAX(PH.CreationDate) AS LastEditDate,
+        COUNT(*) AS EditCount
+    FROM PostHistory PH
+    INNER JOIN Posts P ON PH.PostId = P.Id
+    WHERE PH.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY P.Id
+)
+SELECT 
+    U.NumberOfPosts,
+    U.TotalScore,
+    U.TotalBounty,
+    P.Title,
+    P.CreationDate,
+    PH.LastEditDate,
+    PH.EditCount,
+    R.Reputation AS UserReputation
+FROM UserPostStats U
+JOIN Posts P ON U.UserId = P.OwnerUserId
+LEFT JOIN PostEditHistory PH ON P.Id = PH.PostId
+LEFT JOIN RecursiveUserReputation R ON U.UserId = R.UserId
+WHERE 
+    (U.TotalScore > 1000 OR U.TotalBounty > 0)
+    AND P.CreationDate BETWEEN DATE '2024-10-01' - INTERVAL '1 year' AND DATE '2024-10-01'
+ORDER BY U.TotalScore DESC, U.NumberOfPosts DESC
+LIMIT 50;

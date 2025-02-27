@@ -1,0 +1,74 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mn.name, 'Unknown') AS movie_name,
+        0 AS level
+    FROM 
+        title m
+    LEFT JOIN 
+        aka_title mn ON m.id = mn.movie_id
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mn.name, 'Unknown') AS movie_name,
+        mh.level + 1
+    FROM 
+        title m
+    INNER JOIN 
+        movie_link ml ON m.id = ml.movie_id
+    INNER JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+),
+cast_ranked AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    INNER JOIN 
+        role_type r ON ci.role_id = r.id
+),
+movie_keyword_count AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.movie_name,
+    COALESCE(cr.actor_name, 'No Cast') AS top_actor,
+    COALESCE(cr.role_name, 'N/A') AS top_actor_role,
+    COALESCE(mkc.keyword_count, 0) AS keyword_count,
+    CASE 
+        WHEN mh.level > 0 THEN 'Related Movie'
+        ELSE 'Standalone Movie'
+    END AS movie_type
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_ranked cr ON mh.movie_id = cr.movie_id AND cr.actor_rank = 1 
+LEFT JOIN 
+    movie_keyword_count mkc ON mh.movie_id = mkc.movie_id
+WHERE 
+    mh.production_year > 2000
+ORDER BY 
+    mh.production_year DESC, mh.title;

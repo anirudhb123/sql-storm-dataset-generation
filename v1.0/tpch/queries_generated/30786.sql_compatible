@@ -1,0 +1,54 @@
+
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r.r_regionkey, r.r_name, 0 AS level
+    FROM region r
+    WHERE r.r_regionkey = 1
+    
+    UNION ALL
+    
+    SELECT r.r_regionkey, r.r_name, rh.level + 1
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN RegionHierarchy rh ON n.n_regionkey = rh.r_regionkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+LineItemDetails AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+),
+
+AggregatedStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        MAX(l.total_value) AS max_line_value,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN LineItemDetails l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F')
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_availqty) > 0
+)
+
+SELECT 
+    rh.r_name AS region_name,
+    cus.c_name AS customer_name,
+    cus.total_spent,
+    stats.p_name AS part_name,
+    stats.total_available,
+    stats.max_line_value
+FROM RegionHierarchy rh
+JOIN nation n ON rh.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN CustomerOrderSummary cus ON s.s_suppkey = cus.c_custkey
+JOIN AggregatedStats stats ON stats.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey AND ps.ps_availqty > 0)
+WHERE cus.avg_order_value > (SELECT AVG(total_spent) FROM CustomerOrderSummary)
+ORDER BY rh.region_name, cus.total_spent DESC, stats.max_line_value DESC;

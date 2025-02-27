@@ -1,0 +1,93 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL AND mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5  -- Limit the depth of recursion to prevent excessive growth
+), ActorRoles AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT case 
+            when rc.role IS NOT NULL then rc.role 
+            else 'Unknown' end) AS role_count,
+        STRING_AGG(DISTINCT rc.role, ', ') AS roles
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        role_type rc ON ci.role_id = rc.id
+    GROUP BY 
+        ci.person_id
+), CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+), MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ai.role_count,
+        ai.roles,
+        ci.companies,
+        ci.company_count,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.production_year DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        ActorRoles ai ON mh.movie_id = ai.person_id
+    LEFT JOIN 
+        CompanyInfo ci ON mh.movie_id = ci.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(md.roles, 'No roles assigned') AS roles,
+    COALESCE(md.companies, 'No companies listed') AS companies,
+    md.company_count,
+    CASE 
+        WHEN md.rank = 1 THEN 'Latest in Year' 
+        WHEN md.rank BETWEEN 2 AND 5 THEN 'Older Movie' 
+        ELSE 'Distant Past' 
+    END AS movie_age_category,
+    COUNT(DISTINCT km.keyword) AS keyword_count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    movie_keyword mk ON md.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword km ON mk.keyword_id = km.id
+GROUP BY 
+    md.title, md.production_year, md.roles, md.companies, md.company_count, md.rank
+ORDER BY 
+    md.production_year DESC, md.title
+HAVING 
+    (md.company_count > 1 OR (md.company_count = 1 AND md.roles IS NOT NULL))
+    AND (keyword_count IS NOT NULL OR md.roles LIKE '%Hero%')
+LIMIT 100;

@@ -1,0 +1,86 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.item_sk,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws.net_paid DESC) AS sales_rank,
+        DENSE_RANK() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws.net_paid DESC) AS dense_rank_sales
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.net_paid > (
+            SELECT 
+                AVG(ws_inner.net_paid) 
+            FROM 
+                web_sales ws_inner 
+            WHERE 
+                ws_inner.item_sk = ws.item_sk 
+                AND ws_inner.bill_customer_sk IS NOT NULL
+        )
+),
+TotalReturns AS (
+    SELECT 
+        sr.return_store_sk AS store_sk,
+        SUM(sr.return_quantity) AS total_returned_items,
+        COUNT(DISTINCT sr.return_ticket_number) AS total_return_transactions
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.return_store_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cu.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        COALESCE(cd.cd_dep_count, 0) AS dependents,
+        COALESCE(cd.cd_dep_employed_count, 0) AS employed_dependents
+    FROM 
+        customer cu
+    LEFT JOIN 
+        customer_demographics cd ON cu.c_current_cdemo_sk = cd.cd_demo_sk
+),
+FinalReport AS (
+    SELECT 
+        cs.bill_customer_sk AS customer_sk,
+        MAX(rs.sales_rank) AS max_sales_rank,
+        MIN(rs.sales_rank) AS min_sales_rank,
+        SUM(tr.total_returned_items) AS total_returns,
+        cd.cd_gender,
+        SUM(CASE WHEN cd.cd_marital_status = 'M' THEN 1 ELSE 0 END) AS married_customers,
+        COUNT(DISTINCT cu.c_customer_id) AS unique_customers
+    FROM 
+        RankedSales rs
+    INNER JOIN 
+        TotalReturns tr ON rs.bill_customer_sk = tr.store_sk
+    LEFT JOIN 
+        CustomerDemographics cd ON cd.c_customer_sk = rs.bill_customer_sk
+    INNER JOIN 
+        customer cu ON rs.bill_customer_sk = cu.c_customer_sk
+    WHERE 
+        cd.cd_credit_rating IS NOT NULL
+        AND (cd.cd_gender IS NULL OR cd.cd_gender IN ('M', 'F'))
+    GROUP BY 
+        cs.bill_customer_sk, cd.cd_gender
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_returns > 100 THEN 'High Return'
+        WHEN total_returns BETWEEN 50 AND 100 THEN 'Medium Return'
+        ELSE 'Low Return'
+    END AS return_category,
+    CASE 
+        WHEN max_sales_rank = 1 THEN 'Top Buyer'
+        WHEN min_sales_rank > 1 THEN 'Average Buyer'
+        ELSE 'Possibly Lapsed Buyer'
+    END AS buyer_status
+FROM 
+    FinalReport 
+WHERE 
+    (total_returns = (SELECT MAX(total_returns) FROM FinalReport) 
+    OR total_returns < (SELECT MIN(total_returns) FROM FinalReport WHERE total_returns IS NOT NULL))
+ORDER BY 
+    unique_customers DESC, total_returns ASC;

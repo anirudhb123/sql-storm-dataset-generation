@@ -1,0 +1,76 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS rank,
+        o.o_custkey
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        n.n_name AS nation_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name AS supplier_name,
+        p.p_name AS part_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_name
+),
+OrderLineDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '1996-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+
+SELECT 
+    o.o_orderkey AS orderkey,
+    c.c_name AS customer_name,
+    c.nation_name,
+    o.o_orderdate,
+    ol.total_revenue,
+    sp.supplier_name,
+    sp.part_name,
+    COALESCE(sp.total_cost, 0) AS total_supply_cost,
+    o.o_totalprice - COALESCE(sp.total_cost, 0) AS profit_margin
+FROM 
+    RankedOrders o
+JOIN 
+    OrderLineDetails ol ON o.o_orderkey = ol.l_orderkey
+JOIN 
+    CustomerDetails c ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    SupplierPartDetails sp ON sp.supplier_name = (SELECT s.s_name FROM supplier s WHERE s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey) LIMIT 1) LIMIT 1)
+WHERE 
+    o.rank <= 5 
+ORDER BY 
+    o.o_orderdate DESC, profit_margin DESC;

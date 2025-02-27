@@ -1,0 +1,77 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        COUNT(DISTINCT ps.ps_partkey) > 5
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        o.o_orderdate,
+        c.c_mktsegment
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_mktsegment
+),
+FinalReport AS (
+    SELECT 
+        r.r_name AS region_name, 
+        np.n_name AS nation_name, 
+        COUNT(DISTINCT cs.c_custkey) AS customer_count,
+        SUM(oss.total_revenue) AS total_revenue,
+        SUM(rp.total_supply_cost) AS total_supply_cost
+    FROM 
+        region r
+    JOIN 
+        nation np ON r.r_regionkey = np.n_regionkey
+    JOIN 
+        customer cs ON cs.c_nationkey = np.n_nationkey
+    LEFT JOIN 
+        OrderSummary oss ON cs.c_custkey = oss.o_custkey
+    LEFT JOIN 
+        RankedParts rp ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps JOIN supplier s ON ps.ps_suppkey = s.s_suppkey WHERE s.s_suppkey IN (SELECT s_suppkey FROM TopSuppliers))
+    GROUP BY 
+        r.r_name, np.n_name
+)
+SELECT 
+    region_name,
+    nation_name,
+    customer_count,
+    total_revenue,
+    total_supply_cost,
+    (CASE 
+        WHEN total_revenue > total_supply_cost THEN 'Profitable'
+        ELSE 'Loss'
+    END) AS profit_status
+FROM 
+    FinalReport
+ORDER BY 
+    total_revenue DESC;

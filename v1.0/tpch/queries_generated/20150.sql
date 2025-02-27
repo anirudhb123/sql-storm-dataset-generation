@@ -1,0 +1,74 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        supplier s 
+    WHERE 
+        s.s_acctbal IS NOT NULL
+), 
+AvailableParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM 
+        part p 
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey 
+    WHERE 
+        ps.ps_availqty > 0
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        c.c_nationkey
+    FROM 
+        customer c 
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY 
+        c.c_custkey, c.c_nationkey
+), 
+HighestSpentPerNation AS (
+    SELECT 
+        co.c_nationkey,
+        MAX(co.total_spent) AS highest_spent
+    FROM 
+        CustomerOrders co
+    GROUP BY 
+        co.c_nationkey
+) 
+SELECT 
+    COALESCE(ns.r_name, 'Unknown') AS region_name,
+    ns.total_available_parts,
+    SUM(CASE WHEN hsp.highest_spent IS NOT NULL THEN hsp.highest_spent ELSE 0 END) AS total_highest_spent,
+    COUNT(DISTINCT ds.s_suppkey) AS distinct_supplier_count,
+    MAX(COALESCE(ls.l_quantity, 0)) AS max_lineitem_quantity
+FROM 
+    region ns
+LEFT JOIN (
+    SELECT 
+        r.r_regionkey, 
+        COUNT(ap.p_partkey) AS total_available_parts
+    FROM 
+        region r 
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey 
+    LEFT JOIN 
+        AvailableParts ap ON r.r_regionkey = (SELECT DISTINCT n_regionkey FROM nation WHERE n_nationkey = ap.ps_suppkey)
+    GROUP BY 
+        r.r_regionkey
+) AS ap ON ns.r_regionkey = ap.r_regionkey
+LEFT JOIN RankedSuppliers ds ON ds.rank = 1
+LEFT JOIN HighestSpentPerNation hsp ON hsp.c_nationkey = ns.r_regionkey
+LEFT JOIN lineitem ls ON ls.l_supplycost IN (SELECT ps.ps_supplycost FROM partsupp ps WHERE ps.ps_availqty IS NOT NULL)
+GROUP BY 
+    ns.r_name
+ORDER BY 
+    total_highest_spent DESC NULLS LAST;

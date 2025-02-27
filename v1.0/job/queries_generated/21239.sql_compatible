@@ -1,0 +1,79 @@
+
+WITH RECURSIVE movie_rank AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        RANK() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title mt
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+influential_person AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        COUNT(DISTINCT m.title) AS appeared_in_movies
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title m ON ci.movie_id = m.id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.person_id, ak.name
+    HAVING 
+        COUNT(DISTINCT m.id) > 1
+),
+cast_info_with_rank AS (
+    SELECT 
+        ci.id,
+        ci.movie_id,
+        ci.person_id,
+        ci.note,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order ASC) AS role_rank
+    FROM 
+        cast_info ci
+)
+SELECT 
+    mt.title,
+    mt.production_year,
+    COUNT(DISTINCT cp.person_id) AS influential_actors_count,
+    STRING_AGG(DISTINCT CASE 
+        WHEN cp.name IS NOT NULL AND lw.link_type_id IS NULL THEN cp.name 
+        ELSE 'Unknown Actor'
+    END, ', ') AS influential_actors,
+    COALESCE(mr.rank_by_cast, 0) AS cast_rank,
+    MIN(CASE WHEN mr.rank_by_cast < 5 THEN 'Top Movie' ELSE 'Others' END) AS classification
+FROM 
+    aka_title mt
+LEFT JOIN 
+    cast_info_with_rank ciwr ON mt.id = ciwr.movie_id
+LEFT JOIN 
+    influential_person cp ON ciwr.person_id = cp.person_id
+LEFT JOIN 
+    movie_link ml ON mt.id = ml.movie_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mt.id AND mi.info_type_id = (
+        SELECT id FROM info_type WHERE info = 'budget'
+    )
+LEFT JOIN 
+    movie_rank mr ON mt.id = mr.movie_id
+LEFT JOIN 
+    link_type lw ON ml.link_type_id = lw.id
+WHERE 
+    mt.production_year IS NOT NULL
+AND
+    (mt.production_year > 2000 OR mt.production_year IS NULL)
+GROUP BY 
+    mt.title, mt.production_year, mr.rank_by_cast
+HAVING 
+    COUNT(DISTINCT cp.person_id) >= 3
+ORDER BY 
+    mt.production_year DESC, influential_actors_count DESC;

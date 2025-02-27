@@ -1,0 +1,51 @@
+
+WITH Address_Info AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM customer_address
+),
+Gender_Demo AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS gender_count
+    FROM customer_demographics
+    GROUP BY cd_gender
+),
+Customer_Details AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        a.full_address,
+        g.cd_gender
+    FROM customer c
+    JOIN Address_Info a ON c.c_current_addr_sk = a.ca_address_id
+    JOIN customer_demographics g ON c.c_current_cdemo_sk = g.cd_demo_sk
+),
+Sales_Summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+)
+SELECT 
+    cd.c_customer_id,
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.full_address,
+    cd.cd_gender,
+    ss.total_sales,
+    ss.order_count,
+    gd.gender_count
+FROM Customer_Details cd
+LEFT JOIN Sales_Summary ss ON cd.c_customer_id = ss.ws_bill_customer_sk
+JOIN Gender_Demo gd ON cd.cd_gender = gd.cd_gender
+WHERE cd.c_first_name LIKE 'A%' AND gd.gender_count > 10
+ORDER BY ss.total_sales DESC, cd.c_last_name ASC;

@@ -1,0 +1,74 @@
+WITH Tag_Counts AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Only questions
+    GROUP BY 
+        Tag
+),
+Top_Tags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        Tag_Counts
+    WHERE 
+        PostCount > 10  -- Tags with more than 10 questions
+),
+User_Activity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS QuestionsAsked,
+        SUM(COALESCE(v.VoteCount, 0)) AS TotalVotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1  -- Questions
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount 
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+Relevant_Data AS (
+    SELECT 
+        ta.Tag,
+        ta.PostCount,
+        ua.UserId,
+        ua.DisplayName,
+        ua.QuestionsAsked,
+        ua.TotalVotesReceived
+    FROM 
+        Top_Tags ta
+    JOIN 
+        User_Activity ua 
+    ON 
+        ua.QuestionsAsked > 0  -- Only consider users with questions
+)
+SELECT 
+    rd.Tag,
+    rd.PostCount,
+    rd.DisplayName,
+    rd.QuestionsAsked,
+    rd.TotalVotesReceived,
+    CASE 
+        WHEN rd.TotalVotesReceived > 100 THEN 'Expert Contributor' 
+        WHEN rd.TotalVotesReceived BETWEEN 50 AND 100 THEN 'Active Contributor' 
+        ELSE 'Emerging Contributor' 
+    END AS ContributorLevel
+FROM 
+    Relevant_Data rd
+ORDER BY 
+    rd.PostCount DESC,
+    rd.TotalVotesReceived DESC;

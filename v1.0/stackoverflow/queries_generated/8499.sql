@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        OwnerDisplayName, 
+        Score, 
+        ViewCount, 
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+)
+SELECT 
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    JSON_AGG(DISTINCT t.TagName) AS Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    (SELECT 
+         unnest(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><')) AS TagName, 
+         p.Id AS PostId 
+     FROM 
+         Posts p) t ON tp.PostId = t.PostId
+GROUP BY 
+    tp.PostId, tp.Title, tp.OwnerDisplayName, tp.CreationDate, tp.Score, tp.ViewCount, tp.CommentCount
+ORDER BY 
+    tp.Score DESC;

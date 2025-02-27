@@ -1,0 +1,54 @@
+WITH RECURSIVE sales_dates AS (
+    SELECT MIN(d_date) AS sale_date
+    FROM date_dim
+    WHERE d_current_year = 'Y'
+    UNION ALL
+    SELECT DATEADD(day, 1, sale_date)
+    FROM sales_dates
+    WHERE sale_date < (SELECT MAX(d_date) FROM date_dim WHERE d_current_year = 'Y')
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(COALESCE(ws_ext_sales_price, 0)) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        MAX(CASE WHEN c_preferred_cust_flag = 'Y' THEN 1 ELSE 0 END) AS preferred_customer,
+        COUNT(DISTINCT c_email_address) FILTER (WHERE c_email_address IS NOT NULL) AS email_count
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY c.c_customer_sk
+),
+historical_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_quantity) DESC) AS rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_dow = 2) 
+    GROUP BY ws.ws_item_sk
+),
+ranked_items AS (
+    SELECT 
+        i.i_item_id,
+        hs.total_quantity,
+        hs.total_orders,
+        ROW_NUMBER() OVER (ORDER BY hs.total_quantity DESC) AS item_rank
+    FROM historical_sales hs
+    JOIN item i ON hs.ws_item_sk = i.i_item_sk
+    WHERE hs.rank <= 10
+)
+SELECT 
+    ca.ca_city,
+    SUM(cs.total_sales) AS city_sales,
+    SUM(cs.order_count) AS city_orders,
+    (SELECT COUNT(*) FROM customer_stats cu WHERE cu.preferred_customer = 1) AS total_preferred_customers,
+    STRING_AGG(ri.i_item_id, ', ') AS top_items
+FROM customer_stats cs
+JOIN customer c ON cs.c_customer_sk = c.c_customer_sk
+LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN ranked_items ri ON ri.item_rank <= 5
+GROUP BY ca.ca_city
+HAVING SUM(cs.total_sales) IS NOT NULL AND COUNT(ri.i_item_id) > 0
+ORDER BY city_sales DESC
+FETCH FIRST 10 ROWS ONLY;

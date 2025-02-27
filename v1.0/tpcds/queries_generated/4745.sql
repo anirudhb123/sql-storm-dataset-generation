@@ -1,0 +1,73 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY 
+        ws.web_site_sk, ws.web_name
+), 
+TopWebsites AS (
+    SELECT 
+        web_site_sk, 
+        web_name 
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 10
+), 
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_email_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        CASE 
+            WHEN cd.cd_income_band_sk IS NOT NULL THEN 
+                CONCAT('Income: ', ib.ib_lower_bound, ' - ', ib.ib_upper_bound)
+            ELSE 
+                'No Income Information'
+        END AS income_info
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+CustomerSales AS (
+    SELECT 
+        cs.ss_customer_sk,
+        SUM(cs.ss_net_paid) AS total_spent
+    FROM 
+        store_sales cs
+    JOIN 
+        CustomerDetails cd ON cs.ss_customer_sk = cd.c_customer_sk
+    GROUP BY 
+        cs.ss_customer_sk
+)
+SELECT 
+    tw.web_name,
+    cd.c_email_address,
+    cd.income_info,
+    cs.total_spent,
+    RANK() OVER (PARTITION BY tw.web_name ORDER BY cs.total_spent DESC) AS customer_rank
+FROM 
+    TopWebsites tw
+JOIN 
+    CustomerDetails cd ON cd.c_customer_sk IN (SELECT ss_customer_sk FROM store_sales)
+LEFT JOIN 
+    CustomerSales cs ON cd.c_customer_sk = cs.ss_customer_sk
+ORDER BY 
+    tw.web_name, customer_rank;
+

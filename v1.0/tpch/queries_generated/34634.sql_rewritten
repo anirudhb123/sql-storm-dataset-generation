@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+ExtensiveParts AS (
+    SELECT p.p_partkey, COUNT(DISTINCT ps.s_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size > 15
+    GROUP BY p.p_partkey
+    HAVING COUNT(DISTINCT ps.s_suppkey) > 5
+)
+SELECT DISTINCT
+    p.p_name,
+    r.r_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+    COUNT(DISTINCT o.o_orderkey) OVER (PARTITION BY p.p_partkey) AS order_count,
+    sh.level,
+    CASE 
+        WHEN o.o_orderdate < cast('1998-10-01' as date) - INTERVAL '1 year' THEN 'Old Order'
+        ELSE 'Recent Order'
+    END AS order_timing
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN region r ON s.s_nationkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN HighValueOrders o ON l.l_orderkey = o.o_orderkey
+JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+JOIN ExtensiveParts ep ON p.p_partkey = ep.p_partkey
+WHERE r.r_name IN ('ASIA', 'EUROPE') 
+  AND p.p_retailprice IS NOT NULL
+GROUP BY p.p_name, r.r_name, sh.level, o.o_orderdate
+ORDER BY total_price DESC, order_count DESC
+FETCH FIRST 100 ROWS ONLY;

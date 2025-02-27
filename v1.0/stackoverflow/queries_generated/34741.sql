@@ -1,0 +1,86 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.ParentId, 
+        p.Title, 
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    UNION ALL
+    SELECT 
+        p.Id AS PostId, 
+        p.ParentId, 
+        p.Title, 
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.PostId
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        u.DisplayName AS Owner,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+TopContributors AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.ViewCount IS NOT NULL
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(p.Id) > 10
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS ChangeRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Owner,
+    r.CreationDate,
+    ph.Level,
+    tc.DisplayName AS TopContributor,
+    tc.PostCount AS ContributorPostCount,
+    COALESCE(Closed.ChangeRank, 0) AS ClosedChangeRank
+FROM 
+    RecentPosts r
+LEFT JOIN 
+    RecursivePostHierarchy ph ON r.PostId = ph.PostId
+LEFT JOIN 
+    TopContributors tc ON r.OwnerUserId = tc.UserId
+LEFT JOIN 
+    ClosedPosts Closed ON r.Id = Closed.PostId
+WHERE 
+    r.PostRank = 1
+ORDER BY 
+    r.CreationDate DESC, 
+    ph.Level ASC
+LIMIT 100;

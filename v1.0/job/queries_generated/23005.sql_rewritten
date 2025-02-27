@@ -1,0 +1,89 @@
+WITH RECURSIVE MovieChain AS (
+    
+    SELECT 
+        ml.movie_id, 
+        ml.linked_movie_id, 
+        1 AS depth
+    FROM 
+        movie_link ml
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')  
+
+    UNION ALL
+
+    SELECT 
+        ml.movie_id, 
+        ml.linked_movie_id, 
+        m.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieChain m ON ml.movie_id = m.linked_movie_id
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+),
+
+TitleKeywordSummary AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        MAX(ai.production_year) AS latest_production_year
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        MovieChain mc2 ON mc2.movie_id = t.id
+    LEFT JOIN 
+        aka_title ai ON mc2.linked_movie_id = ai.id  
+    GROUP BY 
+        t.id, t.title
+),
+
+PersonInfo AS (
+    SELECT 
+        n.id AS person_id,
+        n.name,
+        pi.info AS additional_info,
+        pi.note,
+        COALESCE(pi.info, 'No Info') AS info_status
+    FROM 
+        name n
+    LEFT JOIN 
+        person_info pi ON n.imdb_id = pi.person_id
+    WHERE 
+        n.gender IS NOT NULL
+)
+SELECT 
+    t.title,
+    t.keywords,
+    pi.name,
+    pi.info_status,
+    COUNT(DISTINCT ci.person_id) OVER (PARTITION BY t.id) AS total_cast,
+    MAX(CASE WHEN pi.info IS NOT NULL OR pi.note IS NOT NULL THEN 'Info Present' ELSE 'No Info' END) AS info_available,
+    AVG(EXTRACT(YEAR FROM cast('2024-10-01' as date)) - t.latest_production_year) AS avg_years_since_last_title
+FROM 
+    TitleKeywordSummary t
+JOIN 
+    PersonInfo pi ON t.cast_count > 0
+LEFT JOIN 
+    cast_info ci ON pi.person_id = ci.person_id
+WHERE 
+    t.company_count > 1 
+    AND t.title IS NOT NULL 
+    AND EXISTS (SELECT 1 FROM movie_link ml WHERE ml.movie_id = t.title_id AND ml.link_type_id = (SELECT id FROM link_type WHERE link = 'remake'))
+GROUP BY 
+    t.title, t.keywords, pi.name, pi.info_status
+ORDER BY 
+    avg_years_since_last_title DESC, t.title;

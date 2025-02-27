@@ -1,0 +1,60 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierTotalCost AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_retailprice > 100.00
+    GROUP BY 
+        ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 500.00
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.total_revenue,
+    stc.total_cost,
+    co.order_count,
+    co.total_spent
+FROM 
+    RankedOrders ro
+JOIN 
+    SupplierTotalCost stc ON stc.ps_suppkey = (SELECT ps_suppkey FROM partsupp ORDER BY RANDOM() LIMIT 1)
+JOIN 
+    CustomerOrders co ON co.order_count > 5
+WHERE 
+    ro.revenue_rank <= 10
+ORDER BY 
+    ro.total_revenue DESC;

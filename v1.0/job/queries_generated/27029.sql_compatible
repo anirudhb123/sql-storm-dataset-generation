@@ -1,0 +1,59 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY k.keyword) AS keyword_rank
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year > 2000
+),
+ActorDetails AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS actor_role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ' ORDER BY cn.name) AS companies,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rt.title_id,
+    rt.title,
+    rt.production_year,
+    rt.keyword,
+    ad.actor_name,
+    ad.actor_role,
+    mc.companies,
+    mc.company_count
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    ActorDetails ad ON rt.title_id = ad.movie_id AND ad.actor_rank <= 3
+LEFT JOIN 
+    MovieCompanies mc ON rt.title_id = mc.movie_id
+ORDER BY 
+    rt.production_year DESC, rt.title;

@@ -1,0 +1,40 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM aka_title mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id, at.production_year ORDER BY ak.name) AS actor_order,
+    COUNT(DISTINCT mc.company_id) AS total_movie_companies,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+    SUM(CASE WHEN at.production_year = EXTRACT(YEAR FROM CURRENT_DATE) THEN 1 ELSE 0 END) AS is_current_year_release
+FROM aka_name ak
+JOIN cast_info ci ON ak.person_id = ci.person_id
+JOIN aka_title at ON ci.movie_id = at.id
+LEFT JOIN movie_companies mc ON mc.movie_id = at.id
+LEFT JOIN company_name cn ON mc.company_id = cn.id
+LEFT JOIN MovieHierarchy mh ON mh.movie_id = at.id
+WHERE ak.name IS NOT NULL 
+AND ak.name != ''
+AND at.production_year IS NOT NULL
+GROUP BY ak.id, ak.name, at.title, at.production_year
+ORDER BY total_movie_companies DESC, actor_order;

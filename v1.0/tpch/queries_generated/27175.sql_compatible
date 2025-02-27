@@ -1,0 +1,68 @@
+
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        s.s_nationkey,
+        n.n_name AS nation_name,
+        CONCAT(s.s_address, ', ', s.s_phone) AS supplier_info,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey, n.n_name, s.s_address, s.s_phone
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_name AS customer_name,
+        c.c_address,
+        c.c_acctbal,
+        c.c_mktsegment,
+        SUBSTRING(c.c_comment, 1, 30) AS short_comment,
+        c.c_nationkey
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > 5000
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        TO_CHAR(o.o_orderdate, 'YYYY-MM-DD') AS formatted_order_date,
+        l.l_returnflag,
+        l.l_linestatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate, l.l_returnflag, l.l_linestatus
+)
+SELECT 
+    sd.supplier_name,
+    sd.nation_name,
+    sd.supplier_info,
+    cd.customer_name,
+    cd.c_address,
+    cd.c_acctbal,
+    cd.c_mktsegment,
+    od.o_orderkey,
+    od.o_orderstatus,
+    od.formatted_order_date,
+    od.total_price_after_discount
+FROM 
+    SupplierDetails sd
+JOIN 
+    CustomerDetails cd ON sd.s_nationkey = cd.c_nationkey
+JOIN 
+    OrderDetails od ON od.o_totalprice > sd.total_supply_cost
+WHERE 
+    sd.total_supply_cost > 1000
+ORDER BY 
+    sd.supplier_name, cd.customer_name, od.o_orderkey;

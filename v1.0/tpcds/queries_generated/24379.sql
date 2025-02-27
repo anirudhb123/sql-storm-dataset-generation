@@ -1,0 +1,98 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER(PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS rnk
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 1 AND 10000
+        AND ws.ws_net_profit IS NOT NULL
+),
+HighProfitSales AS (
+    SELECT 
+        r.ws_order_number,
+        r.ws_item_sk,
+        r.ws_quantity,
+        r.ws_net_profit
+    FROM 
+        RankedSales r
+    WHERE 
+        r.rnk <= 3
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+AddressInfo AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        CASE 
+            WHEN ca.ca_city IS NULL THEN 'Unknown City'
+            ELSE ca.ca_city
+        END AS display_city
+    FROM 
+        customer_address ca
+    WHERE 
+        ca.ca_state IN ('CA', 'NY', 'TX') 
+        OR ca.ca_city IS NULL
+),
+ReturnsSummary AS (
+    SELECT 
+        sr.sr_returned_date_sk,
+        SUM(sr.sr_return_quantity) AS total_returns,
+        AVG(sr.sr_return_amt) AS avg_return_amt,
+        COUNT(DISTINCT sr.sr_ticket_number) AS unique_tickets
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.sr_return_quantity > 0
+    GROUP BY 
+        sr.sr_returned_date_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ai.display_city,
+    MAX(hp.ws_net_profit) AS max_profit,
+    SUM(r.total_returns) OVER (PARTITION BY ai.ca_city ORDER BY ci.c_first_name) AS returns_for_city,
+    CASE 
+        WHEN COUNT(DISTINCT hp.ws_item_sk) > 0 THEN 
+            (SELECT COUNT(*) FROM HighProfitSales hps WHERE hps.ws_order_number = hp.ws_order_number)
+        ELSE 
+            NULL
+    END AS high_profit_count,
+    COALESCE(SUM(hp.ws_quantity), 0) AS total_quantity_sold
+FROM 
+    CustomerInfo ci 
+JOIN 
+    AddressInfo ai ON ci.c_customer_sk = ai.ca_address_sk
+LEFT JOIN 
+    HighProfitSales hp ON ci.order_count < 10 
+LEFT JOIN 
+    ReturnsSummary r ON r.sr_returned_date_sk = 1
+GROUP BY 
+    ci.c_first_name, ci.c_last_name, ai.display_city
+HAVING 
+    total_quantity_sold > 100 AND max_profit IS NOT NULL
+ORDER BY 
+    total_quantity_sold DESC, max_profit DESC;

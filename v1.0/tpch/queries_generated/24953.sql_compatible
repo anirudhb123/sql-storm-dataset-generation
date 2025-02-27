@@ -1,0 +1,42 @@
+
+WITH RECURSIVE customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) AS total_revenue
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+ranked_sales AS (
+    SELECT c.c_custkey, c.c_name, SUM(co.total_revenue) AS total_rev,
+           RANK() OVER (PARTITION BY c.c_custkey ORDER BY SUM(co.total_revenue) DESC) AS revenue_rank
+    FROM customer c
+    JOIN customer_orders co ON c.c_custkey = co.c_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+part_supplier_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+dual_summary AS (
+    SELECT rs.*, pss.*
+    FROM ranked_sales rs
+    FULL OUTER JOIN part_supplier_summary pss ON rs.total_rev > pss.total_cost
+    WHERE rs.revenue_rank IS NOT NULL OR pss.p_partkey IS NOT NULL
+)
+SELECT r.*, region_data.*
+FROM dual_summary r
+CROSS JOIN (SELECT DISTINCT r_regionkey, r_name, r_comment 
+            FROM region WHERE r_name LIKE 'N%') AS region_data
+WHERE EXISTS (
+    SELECT 1
+    FROM nation n
+    WHERE n.n_regionkey = region_data.r_regionkey
+    AND n.n_nationkey IN (SELECT s_nationkey FROM supplier WHERE s_acctbal IS NOT NULL)
+)
+AND (r.total_rev IS NULL OR r.total_rev < 1000)
+ORDER BY COALESCE(r.total_rev, 0) DESC, COALESCE(p.p_name, 'ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ') ASC
+LIMIT 100 OFFSET (SELECT COUNT(*) FROM dual_summary) / 2;

@@ -1,0 +1,74 @@
+
+WITH RECURSIVE sales_with_returns AS (
+    SELECT ws_item_sk,
+           ws_order_number,
+           ws_sales_price,
+           ws_quantity,
+           ws_ext_sales_price,
+           ws_net_paid,
+           ws_net_profit,
+           'web' AS source
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 20220101 AND 20220131
+    UNION ALL
+    SELECT cs_item_sk,
+           cs_order_number,
+           cs_sales_price,
+           cs_quantity,
+           cs_ext_sales_price,
+           cs_net_paid,
+           cs_net_profit,
+           'catalog' AS source
+    FROM catalog_sales
+    WHERE cs_sold_date_sk BETWEEN 20220101 AND 20220131
+),
+returns_summary AS (
+    SELECT sr_item_sk,
+           SUM(COALESCE(sr_return_quantity, 0)) AS total_returned_quantity,
+           SUM(COALESCE(sr_return_amt, 0)) AS total_returned_amt
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+combined_sales AS (
+    SELECT s.ws_item_sk,
+           SUM(s.ws_quantity) AS total_quantity_sold,
+           SUM(s.ws_net_paid) AS total_net_paid,
+           SUM(s.ws_net_profit) AS total_net_profit,
+           COALESCE(r.total_returned_quantity, 0) AS total_returned_quantity,
+           COALESCE(r.total_returned_amt, 0) AS total_returned_amt
+    FROM sales_with_returns s
+    LEFT JOIN returns_summary r ON s.ws_item_sk = r.sr_item_sk
+    GROUP BY s.ws_item_sk
+),
+final_summary AS (
+    SELECT cs.ws_item_sk,
+           cs.total_quantity_sold,
+           cs.total_net_paid,
+           cs.total_net_profit,
+           cs.total_returned_quantity,
+           cs.total_returned_amt,
+           CASE
+               WHEN cs.total_net_paid > 0 THEN (cs.total_net_profit::decimal / cs.total_net_paid) * 100
+               ELSE NULL
+           END AS profit_margin_percentage,
+           RANK() OVER (ORDER BY cs.total_net_profit DESC) AS item_rank
+    FROM combined_sales cs
+)
+SELECT f.ws_item_sk,
+       f.total_quantity_sold,
+       f.total_net_paid,
+       f.total_net_profit,
+       f.total_returned_quantity,
+       f.total_returned_amt,
+       f.profit_margin_percentage,
+       CASE 
+           WHEN f.total_returned_quantity > 0 THEN 'Returned'
+           WHEN f.total_quantity_sold > 100 THEN 'High Volume'
+           ELSE 'Normal Volume'
+       END AS sales_category,
+       COALESCE((SELECT max(cs_net_profit) 
+                 FROM combined_sales 
+                 WHERE total_returned_quantity = 0), 0) AS max_profit_without_returns
+FROM final_summary f
+ORDER BY f.item_rank
+LIMIT 10;

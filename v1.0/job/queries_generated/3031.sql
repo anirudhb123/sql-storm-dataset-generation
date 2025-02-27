@@ -1,0 +1,54 @@
+WITH movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.id
+    GROUP BY 
+        t.title, t.production_year
+), 
+company_details AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT c.id) AS company_count,
+        MAX(CASE WHEN ct.kind = 'Distributor' THEN c.name END) AS distributor_name
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON c.id = m.company_id
+    JOIN 
+        company_type ct ON ct.id = m.company_type_id
+    GROUP BY 
+        m.movie_id
+), 
+final_results AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.cast_count,
+        COALESCE(cd.company_count, 0) AS company_count,
+        cd.distributor_name,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.cast_count DESC) AS rank
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        company_details cd ON cd.movie_id = md.id
+)
+SELECT 
+    title,
+    production_year,
+    cast_count,
+    company_count,
+    distributor_name
+FROM 
+    final_results
+WHERE 
+    rank <= 5
+ORDER BY 
+    production_year, cast_count DESC;

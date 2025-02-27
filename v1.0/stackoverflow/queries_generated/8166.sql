@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND p.Score > 0
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+), TopRankedPosts AS (
+    SELECT 
+        r.Title,
+        u.DisplayName AS Owner,
+        r.Score,
+        r.ViewCount,
+        r.Rank
+    FROM 
+        RankedPosts r
+    JOIN 
+        Users u ON r.OwnerUserId = u.Id
+    WHERE 
+        r.Rank <= 5
+), PostDetails AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(c.TotalComments, 0) AS CommentCount,
+        COALESCE(v.UpVotes, 0) AS UpVoteCount,
+        COALESCE(v.DownVotes, 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS TotalComments 
+        FROM Comments 
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    us.Reputation,
+    us.PostCount,
+    us.TotalViews,
+    us.TotalScore,
+    t.Title,
+    t.Score,
+    t.ViewCount,
+    t.CommentCount,
+    t.UpVoteCount,
+    t.DownVoteCount
+FROM 
+    UserStats us
+JOIN 
+    TopRankedPosts t ON us.UserId = t.Owner
+ORDER BY 
+    us.Reputation DESC, t.Score DESC;

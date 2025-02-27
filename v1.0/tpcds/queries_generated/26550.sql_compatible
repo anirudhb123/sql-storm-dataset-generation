@@ -1,0 +1,51 @@
+
+WITH Address_Agg AS (
+    SELECT 
+        ca_city,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        COUNT(*) AS address_count
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city, ca_street_number, ca_street_name, ca_street_type
+),
+Customer_Agg AS (
+    SELECT 
+        cd_gender,
+        COUNT(c_customer_sk) AS customer_count,
+        SUM(cd_dep_count) AS total_dependents
+    FROM 
+        customer 
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY 
+        cd_gender
+),
+Sales_Agg AS (
+    SELECT 
+        ws_bill_cdemo_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_cdemo_sk
+)
+SELECT 
+    aa.ca_city,
+    aa.full_address,
+    ca.cd_gender,
+    ca.customer_count,
+    ca.total_dependents,
+    sa.total_sales,
+    sa.total_profit
+FROM 
+    Address_Agg aa
+JOIN 
+    Customer_Agg ca ON ca.cd_gender IS NOT NULL
+LEFT JOIN 
+    Sales_Agg sa ON sa.ws_bill_cdemo_sk = ca.cd_gender
+WHERE 
+    aa.address_count > 1
+ORDER BY 
+    sa.total_sales DESC, ca.customer_count DESC;

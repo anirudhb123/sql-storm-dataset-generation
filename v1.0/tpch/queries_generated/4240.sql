@@ -1,0 +1,80 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartOrders AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_price
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY 
+        l.l_orderkey
+),
+BestParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(SUM(l.l_quantity), 0) AS total_quantity_sold
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+    HAVING 
+        total_quantity_sold > 50
+)
+SELECT 
+    c.c_name AS customer_name,
+    r.r_name AS region,
+    COUNT(DISTINCT o.o_orderkey) AS number_of_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_savings,
+    STRING_AGG(DISTINCT bp.p_name, ', ') AS best_selling_parts,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name
+FROM 
+    CustomerOrders co
+JOIN 
+    customer c ON co.c_custkey = c.c_custkey
+LEFT JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    PartOrders po ON po.l_orderkey = co.c_custkey
+LEFT JOIN 
+    RankedSuppliers s ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM BestParts bp WHERE bp.total_quantity_sold > 100) LIMIT 1)
+LEFT JOIN 
+    lineitem l ON l.l_orderkey = co.c_custkey
+LEFT JOIN 
+    BestParts bp ON bp.p_partkey = l.l_partkey
+WHERE 
+    c.c_acctbal IS NOT NULL AND co.order_count > 5
+GROUP BY 
+    c.c_name, r.r_name, s.s_name
+ORDER BY 
+    total_savings DESC
+LIMIT 10;

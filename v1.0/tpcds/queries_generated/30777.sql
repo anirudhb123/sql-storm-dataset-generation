@@ -1,0 +1,56 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ws_bill_customer_sk, 
+        ws_ship_customer_sk, 
+        ws_ext_sales_price, 
+        ws_sold_date_sk, 
+        1 AS level,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    
+    UNION ALL
+    
+    SELECT 
+        ws.bill_customer_sk,
+        ws.ship_customer_sk,
+        ws.ext_sales_price * 1.10 AS ws_ext_sales_price, 
+        ws.sold_date_sk,
+        sh.level + 1,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws.sold_date_sk DESC) AS rn
+    FROM web_sales ws
+    JOIN sales_hierarchy sh ON ws.bill_customer_sk = sh.ws_ship_customer_sk
+    WHERE sh.level < 5
+),
+
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(sh.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT sh.ws_sold_date_sk) AS purchase_dates
+    FROM sales_hierarchy sh
+    JOIN customer c ON sh.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE sh.ws_ext_sales_price IS NOT NULL
+    GROUP BY c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+)
+
+SELECT 
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.total_sales,
+    ci.purchase_dates,
+    (CASE
+        WHEN ci.total_sales > 1000 THEN 'High Value'
+        WHEN ci.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END) AS customer_value,
+    ROW_NUMBER() OVER (ORDER BY ci.total_sales DESC) AS rank
+FROM customer_info ci
+WHERE ci.purchase_dates > 1
+ORDER BY ci.rank
+LIMIT 100;

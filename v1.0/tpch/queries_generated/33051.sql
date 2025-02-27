@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, NULL AS parent_suppkey
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.s_suppkey
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_acctbal < sh.s_acctbal
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount,
+           COUNT(l.l_orderkey) AS line_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+CustomerAnalysis AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RegionalStats AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name AS region_name, COUNT(s.s_suppkey) AS supplier_count,
+           AVG(s.s_acctbal) AS avg_acctbal
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name, r.r_name
+)
+SELECT 
+    C.c_name AS customer_name,
+    COALESCE(SH.s_name, 'No Supplier') AS related_supplier,
+    O.total_amount AS order_total,
+    O.line_count AS orders_line_count,
+    RA.region_name,
+    RA.avg_acctbal,
+    RA.supplier_count
+FROM CustomerAnalysis C
+LEFT JOIN OrderSummary O ON C.c_custkey = O.o_orderkey
+LEFT JOIN SupplierHierarchy SH ON SH.parent_suppkey = C.c_custkey
+JOIN RegionalStats RA ON C.c_nationkey = RA.n_nationkey
+WHERE RA.avg_acctbal IS NOT NULL
+  AND (C.total_spent > 5000 OR O.total_amount IS NOT NULL)
+ORDER BY C.c_name, O.total_amount DESC;

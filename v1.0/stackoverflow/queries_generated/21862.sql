@@ -1,0 +1,102 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score IS NOT NULL AND 
+        p.ViewCount > 0
+),
+UserBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(rb.BadgeCount, 0) AS TotalBadges,
+        COUNT(p.Id) AS PostsCount,
+        SUM(
+            CASE 
+                WHEN p.PostTypeId = 1 THEN 1 
+                ELSE 0 
+            END
+        ) AS QuestionCount,
+        SUM(
+            CASE 
+                WHEN p.ViewCount < 10 THEN 1 
+                ELSE 0 
+            END
+        ) AS LowViewPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges rb ON u.Id = rb.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostRanking AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        ua.TotalBadges,
+        ua.PostsCount,
+        ua.QuestionCount,
+        ua.LowViewPosts,
+        pp.PostId,
+        pp.CreationDate,
+        pp.Score,
+        RANK() OVER (PARTITION BY u.Id ORDER BY pp.Score DESC) AS ScoreRank
+    FROM 
+        Users u
+    JOIN 
+        UserActivity ua ON u.Id = ua.UserId
+    INNER JOIN 
+        RankedPosts pp ON pp.OwnerUserId = u.Id
+)
+SELECT 
+    r.UserId, 
+    u.DisplayName,
+    u.Reputation,
+    u.Location,
+    COALESCE(b.BadgeNames, 'No Badges') AS Badges,
+    p.PostId,
+    p.CreationDate,
+    p.Score,
+    p.ScoreRank,
+    CASE 
+        WHEN p.Score > 100 THEN 'Popular' 
+        ELSE 'Regular' 
+    END AS PostType,
+    CASE 
+        WHEN p.CreationDate < NOW() - INTERVAL '1 year' THEN 'Legacy Post' 
+        ELSE 'Recent Post' 
+    END AS PostAge
+FROM 
+    PostRanking p
+JOIN 
+    Users u ON u.Id = p.UserId
+LEFT JOIN  
+    UserBadges b ON b.UserId = u.Id
+WHERE 
+    p.ScoreRank = 1
+ORDER BY 
+    p.Score DESC, 
+    p.CreationDate ASC
+LIMIT 100;
+

@@ -1,0 +1,69 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, ',')) AS tag_name ON tag_name IS NOT NULL
+    LEFT JOIN 
+        Tags t ON t.TagName = trim(both ' ' from tag_name)
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT b.Id) AS BadgesCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.Upvotes,
+    ps.Downvotes,
+    us.UserId,
+    us.DisplayName AS Author,
+    us.Reputation AS AuthorReputation,
+    us.PostsCount AS AuthorPostsCount,
+    us.BadgesCount AS AuthorBadgesCount,
+    ps.Tags
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+JOIN 
+    UserStats us ON u.Id = us.UserId
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC
+LIMIT 100;

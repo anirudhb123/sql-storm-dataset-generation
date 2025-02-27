@@ -1,0 +1,68 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        p.p_size,
+        COUNT(ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p 
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, p.p_size
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND o.o_orderstatus = 'O' 
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(CASE WHEN hs.rn <= 5 THEN hs.s_acctbal END), 0) AS top_supplier_balance,
+    COUNT(DISTINCT hpp.p_partkey) AS high_value_parts,
+    coss.total_spent,
+    coss.order_count
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey 
+LEFT JOIN 
+    RankedSuppliers hs ON n.n_nationkey = hs.s_nationkey
+LEFT JOIN 
+    HighValueParts hpp ON hpp.supplier_count > 1
+LEFT JOIN 
+    CustomerOrderSummary coss ON coss.total_spent > 1000
+WHERE 
+    r.r_name IS NOT NULL AND (hs.s_acctbal IS NOT NULL OR hs.s_suppkey IS NULL)
+GROUP BY 
+    r.r_name, coss.total_spent, coss.order_count
+HAVING 
+    COUNT(DISTINCT hs.s_suppkey) > 3 
+    AND (MAX(coss.order_count) > 10 
+    OR NOT EXISTS (SELECT 1 FROM lineitem l WHERE l.l_shipstatus = 'F'))
+ORDER BY 
+    r.r_name ASC;

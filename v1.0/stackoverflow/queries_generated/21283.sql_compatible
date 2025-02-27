@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CAST('2024-10-01' AS date)) 
+        AND p.Score IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.CreationDate, p.Score, p.PostTypeId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.Score,
+        rp.Rank,
+        rp.CommentCount,
+        (rp.UpVotes - rp.DownVotes) AS NetVotes,
+        CASE 
+            WHEN rp.ViewCount = 0 THEN NULL 
+            ELSE ROUND((CAST(rp.Score AS decimal) / NULLIF(rp.ViewCount, 0)) * 100, 2)
+        END AS ScorePerView
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= DATEADD(day, -30, CAST('2024-10-01' AS date))
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    fp.Title,
+    fp.ViewCount,
+    fp.Score,
+    fp.CommentCount,
+    fp.NetVotes,
+    fp.ScorePerView,
+    ub.BadgeCount,
+    ub.BadgeNames
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    Users u ON fp.PostId IN (SELECT p.OwnerUserId FROM Posts p WHERE fp.PostId = p.Id)
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    NOT EXISTS (
+        SELECT 1 
+        FROM PostHistory ph 
+        WHERE ph.PostId = fp.PostId 
+          AND ph.PostHistoryTypeId IN (10, 20)
+    )
+ORDER BY 
+    fp.Score DESC, fp.ViewCount DESC
+FETCH FIRST 100 ROWS ONLY;

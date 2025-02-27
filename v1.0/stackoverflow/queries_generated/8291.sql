@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS Owner,
+        p.CreationDate,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankInType
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+), 
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 10
+), 
+BadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), 
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+) 
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Owner,
+    rp.Score,
+    rp.ViewCount,
+    rp.RankInType,
+    pt.TagName,
+    bs.BadgeCount,
+    COALESCE(pc.CommentCount, 0) AS CommentCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PopularTags pt ON rp.ViewCount > 100 AND rp.PostTypeId = 1
+LEFT JOIN 
+    BadgeStats bs ON rp.OwnerUserId = bs.UserId
+LEFT JOIN 
+    PostComments pc ON rp.PostId = pc.PostId
+WHERE 
+    rp.RankInType <= 5
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

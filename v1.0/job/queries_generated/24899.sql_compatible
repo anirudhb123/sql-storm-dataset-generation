@@ -1,0 +1,61 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY mt.id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS rank_by_year
+    FROM aka_title mt
+    LEFT JOIN cast_info ci ON mt.id = ci.movie_id
+    WHERE mt.production_year IS NOT NULL
+),
+CompanyMovieInfo AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        STRING_AGG(DISTINCT ki.keyword, ', ') AS keywords
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN movie_keyword mk ON mc.movie_id = mk.movie_id
+    LEFT JOIN keyword ki ON mk.keyword_id = ki.id
+    GROUP BY mc.movie_id, cn.name, ct.kind
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        rm.total_cast,
+        cmi.company_name,
+        cmi.company_type,
+        cmi.keywords
+    FROM RankedMovies rm
+    LEFT JOIN CompanyMovieInfo cmi ON rm.movie_id = cmi.movie_id
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        GROUP_CONCAT(DISTINCT r.role) AS roles
+    FROM cast_info ci
+    JOIN role_type r ON ci.role_id = r.id
+    WHERE r.role IS NOT NULL
+    GROUP BY ci.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.movie_title,
+    md.production_year,
+    COALESCE(md.total_cast, 0) AS total_cast,
+    COALESCE(md.company_name, 'Independent') AS company_name,
+    COALESCE(md.company_type, 'N/A') AS company_type,
+    COALESCE(md.keywords, 'No Keywords') AS keywords,
+    COALESCE(cr.roles, 'No Roles Available') AS roles
+FROM MovieDetails md
+LEFT JOIN CastRoles cr ON md.movie_id = cr.movie_id
+WHERE (md.production_year >= 2000 OR md.company_type IS NULL)
+    AND (md.total_cast > 5 OR md.rank_by_year = 1)
+ORDER BY md.production_year DESC, md.movie_title ASC
+LIMIT 100 OFFSET 0;

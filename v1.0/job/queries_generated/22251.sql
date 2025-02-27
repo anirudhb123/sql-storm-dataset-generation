@@ -1,0 +1,75 @@
+WITH RecursiveRecentMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year > (SELECT MAX(t2.production_year) - 10 FROM aka_title t2)
+),
+ActorStats AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        COUNT(DISTINCT CASE WHEN c.person_role_id IS NOT NULL THEN c.movie_id END) AS acting_movies,
+        AVG(EXTRACT(YEAR FROM AGE(t.production_year::date))) AS avg_movie_age
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    JOIN 
+        title t ON t.id = c.movie_id
+    GROUP BY 
+        a.person_id
+),
+CompanyMovies AS (
+    SELECT 
+        m.movie_id,
+        COALESCE(c.name, 'Unknown') AS company_name,
+        COUNT(DISTINCT m.id) AS total_companies
+    FROM 
+        movie_companies m
+    LEFT JOIN 
+        company_name c ON c.id = m.company_id
+    GROUP BY 
+        m.movie_id, c.name
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    r.movie_title,
+    r.production_year,
+    COALESCE(a.total_movies, 0) AS total_actor_movies,
+    COALESCE(a.avg_movie_age, 0) AS average_actor_movie_age,
+    COALESCE(c.total_companies, 0) AS total_movie_companies,
+    COALESCE(k.keywords, 'No Keywords') AS movie_keywords,
+    CASE 
+        WHEN a.total_movies > 10 THEN 'Prolific Actor'
+        WHEN a.total_movies BETWEEN 5 AND 10 THEN 'Moderate Actor'
+        ELSE 'Newcomer'
+    END AS actor_status
+FROM 
+    RecursiveRecentMovies r
+LEFT JOIN 
+    ActorStats a ON a.total_movies > 0 AND a.person_id IN (SELECT person_id FROM cast_info WHERE movie_id = r.movie_id)
+LEFT JOIN 
+    CompanyMovies c ON c.movie_id = r.movie_id
+LEFT JOIN 
+    MovieKeywords k ON k.movie_id = r.movie_id
+WHERE 
+    r.production_year IS NOT NULL
+ORDER BY 
+    r.production_year DESC, 
+    r.movie_title ASC
+FETCH FIRST 20 ROWS ONLY;

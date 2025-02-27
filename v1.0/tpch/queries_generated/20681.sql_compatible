@@ -1,0 +1,98 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+AvailableParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        (ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > (
+            SELECT AVG(ps2.ps_availqty) 
+            FROM partsupp ps2 
+            WHERE ps2.ps_partkey = ps.ps_partkey
+        )
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+),
+ProductSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_name AS supplier_name,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey, p.p_name, s.s_name
+    HAVING 
+        COUNT(DISTINCT s.s_name) > 2
+)
+SELECT 
+    c.c_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(CASE 
+        WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) 
+        ELSE 0 
+    END) AS returned_value,
+    MAX(r.average_supply_cost) AS max_avg_supply_cost,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ' - ', ps.supplier_name), '; ') AS part_supplier_info
+FROM 
+    CustomerOrderStats c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    ProductSupplierInfo ps ON ps.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedSuppliers r ON r.s_suppkey = l.l_suppkey AND r.rnk = 1
+WHERE 
+    o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+GROUP BY 
+    c.c_name
+HAVING 
+    SUM(l.l_quantity) > (
+        SELECT 
+            SUM(l2.l_quantity) * 0.5 
+        FROM 
+            lineitem l2 
+        WHERE 
+            l2.l_shipdate > '1996-01-01' AND 
+            l2.l_shipdate < '1997-01-01'
+    )
+ORDER BY 
+    total_orders DESC, returned_value ASC
+LIMIT 10;

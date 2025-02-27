@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level,
+        CAST(t.title AS VARCHAR(255)) AS full_title
+    FROM title t
+    WHERE t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1,
+        CAST(mh.full_title || ' -> ' || t.title AS VARCHAR(255))
+    FROM MovieHierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN title t ON ml.linked_movie_id = t.id
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    mh.full_title,
+    COALESCE(k.keywords, 'No keywords') AS keywords,
+    COUNT(DISTINCT ci.person_id) AS num_cast_members,
+    MAX(ci.nr_order) AS highest_order
+FROM MovieHierarchy mh
+LEFT JOIN movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+LEFT JOIN cast_info ci ON mh.movie_id = ci.movie_id
+WHERE mh.level <= 3
+GROUP BY
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    mh.full_title
+ORDER BY 
+    mh.production_year DESC,
+    mh.level ASC, 
+    num_cast_members DESC;
+
+### Explanation:
+
+1. **CTE with Recursion**: The `MovieHierarchy` CTE recursively fetches movies and their linked versions produced from 2000 onwards. The recursion captures the link hierarchy up to three levels deep.
+
+2. **LEFT JOINs**: Leveraged to extract keywords relating to the movie as well as cast information, ensuring we correctly include movies even if they don't have associated keywords or cast members.
+
+3. **Aggregations**: Using `COUNT(DISTINCT ci.person_id)` to count unique cast members and `MAX(ci.nr_order)` to find the highest order listed among them.
+
+4. **COALESCE for NULL Logic**: The `COALESCE` function handles cases where there are movies without keywords by replacing `NULL` with 'No keywords'.
+
+5. **Complicated predicates**: The `WHERE` clause enforces a limit on the hierarchical depth (up to 3 levels).
+
+6. **Ordering**: The result set is ordered by `production_year` descending, `level` ascending, and then `num_cast_members` descending to provide meaningful organization of results.
+
+This complex query provides a comprehensive view of a movie's relationships and associated cast, while demonstrating proficient use of various SQL constructs.

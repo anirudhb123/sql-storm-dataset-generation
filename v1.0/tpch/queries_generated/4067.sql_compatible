@@ -1,0 +1,61 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_price,
+        COUNT(*) AS lineitem_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    COALESCE(cos.c_name, ss.s_name) AS c_name,
+    COALESCE(ss.total_supplycost, 0) AS total_supplycost,
+    COALESCE(cos.total_spent, 0) AS total_spent,
+    COALESCE(lis.total_lineitem_price, 0) AS total_lineitem_price,
+    COALESCE(ss.part_count, 0) AS part_count,
+    COALESCE(cos.order_count, 0) AS order_count,
+    COALESCE(lis.lineitem_count, 0) AS lineitem_count
+FROM 
+    SupplierStats ss
+FULL OUTER JOIN 
+    CustomerOrderStats cos ON ss.part_count > 5 OR cos.order_count > 2
+FULL OUTER JOIN 
+    LineItemStats lis ON cos.order_count = 0 OR lis.total_lineitem_price IS NOT NULL
+WHERE 
+    COALESCE(ss.total_supplycost, 0) > 1000 
+    OR COALESCE(cos.total_spent, 0) < 500
+ORDER BY 
+    COALESCE(ss.total_supplycost, 0) DESC, 
+    COALESCE(cos.total_spent, 0) ASC;

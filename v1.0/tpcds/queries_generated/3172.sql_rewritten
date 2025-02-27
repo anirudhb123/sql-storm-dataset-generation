@@ -1,0 +1,56 @@
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk, ws_sold_date_sk
+),
+TopSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.total_quantity,
+        rs.total_revenue,
+        d.d_year,
+        d.d_month_seq,
+        d.d_week_seq,
+        COUNT(DISTINCT ws.ship_customer_sk) AS unique_customers
+    FROM 
+        RankedSales rs
+    JOIN 
+        date_dim d ON rs.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        rs.sales_rank <= 10
+    GROUP BY 
+        rs.ws_item_sk, d.d_year, d.d_month_seq, d.d_week_seq
+)
+SELECT 
+    ts.ws_item_sk,
+    i.i_item_desc,
+    ts.total_quantity,
+    ts.total_revenue,
+    ts.unique_customers,
+    COALESCE((SELECT 
+                   SUM(sr_return_quantity) 
+               FROM 
+                   store_returns sr 
+               WHERE 
+                   sr.sr_item_sk = ts.ws_item_sk 
+                   AND sr.sr_returned_date_sk BETWEEN 20200101 AND 20201231), 0) AS total_returns,
+    COALESCE((SELECT 
+                   SUM(ws.net_paid) 
+               FROM 
+                   web_sales ws 
+               WHERE 
+                   ws.ws_item_sk = ts.ws_item_sk 
+                   AND ws.ws_sold_date_sk < 20200101), 0) AS revenue_before_1998
+FROM 
+    TopSales ts
+JOIN 
+    item i ON ts.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    customer c ON c.c_customer_sk IS NULL;

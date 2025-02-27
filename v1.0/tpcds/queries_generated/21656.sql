@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_sales_price, 
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_bill_customer_sk ORDER BY ws.ws_net_profit DESC) AS SalesRank
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_year IS NOT NULL
+),
+DemographicsWithIncome AS (
+    SELECT 
+        cd.cd_demo_sk,
+        COUNT(*) AS CustomerCount,
+        AVG(cd.cd_purchase_estimate) AS AvgPurchaseEstimate,
+        SUM(CASE WHEN hd.hd_income_band_sk IS NULL THEN 0 ELSE 1 END) AS NotNullIncomeCount
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    GROUP BY cd.cd_demo_sk
+),
+FilteredReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(CASE WHEN sr_return_quantity > 0 THEN sr_return_quantity ELSE 0 END) AS TotalReturns,
+        SUM(sr_return_amt) AS TotalReturnAmount
+    FROM store_returns
+    GROUP BY sr_customer_sk
+    HAVING SUM(sr_return_quantity) > 0
+)
+SELECT 
+    ca.ca_city,
+    COALESCE(d.CustomerCount, 0) AS CustomerCount,
+    COALESCE(r.TotalReturns, 0) AS TotalReturns,
+    COALESCE(r.TotalReturnAmount, 0) AS TotalReturnAmount,
+    d.AvgPurchaseEstimate,
+    rs.ws_sales_price AS BestSalePrice
+FROM customer_address ca
+LEFT JOIN DemographicsWithIncome d ON d.cd_demo_sk IN (
+    SELECT cd.cd_demo_sk 
+    FROM customer c 
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk 
+    WHERE c.c_current_addr_sk = ca.ca_address_sk
+)
+LEFT JOIN FilteredReturns r ON r.sr_customer_sk IN (
+    SELECT ws_bill_customer_sk 
+    FROM web_sales 
+    WHERE ws_ship_customer_sk IN (
+        SELECT c_customer_sk 
+        FROM customer 
+        WHERE c_current_addr_sk = ca.ca_address_sk
+    )
+)
+LEFT JOIN RankedSales rs ON rs.ws_item_sk = (
+    SELECT TOP 1 ws_item_sk 
+    FROM web_sales 
+    WHERE ws_bill_customer_sk = r.sr_customer_sk 
+    ORDER BY ws_net_profit DESC
+)
+WHERE ca.ca_state IS NOT NULL
+ORDER BY ca.ca_city, d.CustomerCount DESC, r.TotalReturns DESC;

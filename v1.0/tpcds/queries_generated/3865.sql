@@ -1,0 +1,73 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    GROUP BY 
+        ws.web_site_sk, ws.ws_order_number
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(SUM(ws.ws_ext_sales_price), 0) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+),
+high_value_customers AS (
+    SELECT 
+        ci.*,
+        CASE 
+            WHEN ci.total_spent > 1000 THEN 'High'
+            WHEN ci.total_spent BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low' 
+        END AS customer_value
+    FROM 
+        customer_info ci
+),
+returns_summary AS (
+    SELECT 
+        sr.sr_returned_date_sk,
+        SUM(sr.sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT sr.sr_ticket_number) AS return_count
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_returned_date_sk
+)
+SELECT 
+    w.web_name,
+    hv.customer_value,
+    COUNT(hv.c_customer_sk) AS customer_count,
+    COALESCE(rs.total_sales, 0) AS total_sales,
+    COALESCE(rs.sales_rank, 0) AS sales_rank,
+    r.total_returns,
+    r.return_count
+FROM 
+    ranked_sales rs
+FULL OUTER JOIN 
+    high_value_customers hv ON rs.web_site_sk = hv.c_customer_sk
+FULL OUTER JOIN 
+    returns_summary r ON hv.c_customer_sk = r.sr_returned_date_sk
+JOIN 
+    web_site w ON rs.web_site_sk = w.web_site_sk
+GROUP BY 
+    w.web_name, hv.customer_value, rs.total_sales, rs.sales_rank, r.total_returns, r.return_count
+HAVING 
+    customer_count > 1
+ORDER BY 
+    w.web_name, customer_value, total_sales DESC;

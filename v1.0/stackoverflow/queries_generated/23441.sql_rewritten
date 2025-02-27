@@ -1,0 +1,90 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+    WHERE u.Reputation IS NOT NULL AND u.Reputation > 0
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COALESCE(MAX(ph.CreationDate), p.CreationDate) AS LastEditDate
+    FROM Posts p
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    LEFT JOIN PostHistory ph ON ph.PostId = p.Id
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY p.Id, p.OwnerUserId, p.PostTypeId, p.CreationDate, p.Score
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.OwnerUserId,
+        rp.PostTypeId,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.LastEditDate,
+        RANK() OVER (PARTITION BY rp.OwnerUserId ORDER BY rp.Score DESC) AS PostRank
+    FROM RecentPosts rp
+),
+ValidPosts AS (
+    SELECT 
+        fp.PostId,
+        fp.OwnerUserId,
+        fp.PostTypeId,
+        fp.CreationDate,
+        fp.Score,
+        fp.CommentCount,
+        fp.UpVotes,
+        fp.DownVotes,
+        fp.LastEditDate
+    FROM FilteredPosts fp
+    WHERE fp.PostRank = 1 AND fp.Score BETWEEN 10 AND 100
+),
+UserBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(*) AS BadgeCount
+    FROM Badges b
+    WHERE b.Class = 1
+    GROUP BY b.UserId
+),
+ActiveUsers AS (
+    SELECT 
+        ru.DisplayName,
+        ru.Reputation,
+        COALESCE(ub.BadgeCount, 0) AS GoldBadgeCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownVotes,
+        COUNT(DISTINCT fp.PostId) AS ActivePostCount
+    FROM RankedUsers ru
+    LEFT JOIN UserBadges ub ON ru.UserId = ub.UserId
+    LEFT JOIN ValidPosts fp ON ru.UserId = fp.OwnerUserId
+    LEFT JOIN Votes v ON v.UserId = ru.UserId
+    WHERE ru.UserRank <= 100
+    GROUP BY ru.DisplayName, ru.Reputation, ub.BadgeCount
+)
+SELECT 
+    au.DisplayName,
+    au.Reputation,
+    au.GoldBadgeCount,
+    au.TotalUpVotes,
+    au.TotalDownVotes,
+    au.ActivePostCount
+FROM ActiveUsers au
+WHERE au.Reputation IS NOT NULL
+ORDER BY au.Reputation DESC, au.ActivePostCount DESC
+LIMIT 10;

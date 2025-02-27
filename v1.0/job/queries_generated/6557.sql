@@ -1,0 +1,55 @@
+WITH movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        c.kind AS comp_kind,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.title, t.production_year, c.kind
+),
+actor_details AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(DISTINCT md.title) AS movies_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        complete_cast cc ON ci.movie_id = cc.movie_id
+    JOIN 
+        movie_details md ON cc.movie_id = md.movie_id
+    GROUP BY 
+        a.name
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.comp_kind,
+    md.actor_count,
+    ad.actor_name,
+    ad.movies_count,
+    md.keywords
+FROM 
+    movie_details md
+JOIN 
+    actor_details ad ON md.actor_count > 5
+ORDER BY 
+    md.production_year DESC, md.title;

@@ -1,0 +1,58 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.VoteTypeId = 2) AS UpVotes, -- VoteTypeId = 2 for UpMod
+        SUM(v.VoteTypeId = 3) AS DownVotes -- VoteTypeId = 3 for DownMod
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount
+)
+SELECT 
+    u.UserId,
+    u.TotalUpVotes,
+    u.TotalDownVotes,
+    u.TotalBadges,
+    u.TotalPosts,
+    u.TotalComments,
+    p.PostId,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    p.TotalComments AS PostTotalComments,
+    p.UpVotes AS PostUpVotes,
+    p.DownVotes AS PostDownVotes
+FROM 
+    UserStats u
+JOIN 
+    PostStats p ON u.UserId = p.OwnerUserId
+ORDER BY 
+    u.TotalUpVotes DESC, u.TotalPosts DESC;

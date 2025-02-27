@@ -1,0 +1,38 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_profit) AS average_profit,
+        COUNT(DISTINCT c.c_customer_id) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 AND dd.d_month_seq BETWEEN 1 AND 6
+    GROUP BY 
+        ws.web_site_id
+)
+SELECT 
+    w.warehouse_name,
+    sd.total_sales,
+    sd.total_orders,
+    sd.average_profit,
+    sd.unique_customers
+FROM 
+    warehouse w
+JOIN 
+    SalesData sd ON w.w_warehouse_sk = (SELECT inv.inv_warehouse_sk 
+                                         FROM inventory inv 
+                                         GROUP BY inv.inv_warehouse_sk 
+                                         ORDER BY SUM(inv.inv_quantity_on_hand) DESC 
+                                         LIMIT 1)
+WHERE 
+    w.w_country = 'USA'
+ORDER BY 
+    sd.total_sales DESC
+LIMIT 10;

@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    GROUP_CONCAT(DISTINCT mh.title) AS related_movies,
+    COUNT(DISTINCT mi.movie_id) AS info_count,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND ak.name <> ''
+    AND (mi.info IS NULL OR mi.info LIKE '%Best%')
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 3 
+    AND COUNT(DISTINCT mk.keyword) > 5
+ORDER BY 
+    actor_name;

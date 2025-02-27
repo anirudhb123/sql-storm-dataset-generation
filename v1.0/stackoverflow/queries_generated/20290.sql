@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        U.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(COALESCE(c.Id, NULL)) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostsWithBadges AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.OwnerReputation,
+        COALESCE(b.Count, 0) AS BadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS Count
+        FROM 
+            Badges
+        WHERE 
+            Class = 1 -- Gold badges only
+        GROUP BY 
+            UserId
+    ) b ON rp.OwnerReputation < 1000 AND rp.PostRank <= 3 AND b.UserId = rp.OwnerUserId
+)
+SELECT 
+    pwb.Title,
+    pwb.CreationDate,
+    pwb.ViewCount,
+    pwb.OwnerReputation,
+    pwb.BadgeCount,
+    CASE 
+        WHEN pwb.BadgeCount > 0 THEN 'Gold Badge Holder'
+        ELSE 'No Gold Badges'
+    END AS BadgeStatus,
+    CONCAT('Post created on ', TO_CHAR(pwb.CreationDate, 'DD Mon YYYY'), ', Owner: ', COALESCE(U.DisplayName, 'Unknown')) AS PostSummary
+FROM 
+    PostsWithBadges pwb
+LEFT JOIN 
+    Users U ON pwb.OwnerUserId = U.Id
+WHERE 
+    pwb.BadgeCount > 0 OR pwb.ViewCount > 100
+ORDER BY 
+    pwb.ViewCount DESC,
+    pwb.BadgeCount DESC
+LIMIT 50
+OFFSET COALESCE(NULLIF(:page_offset, 0), 0);

@@ -1,0 +1,38 @@
+WITH SupplierSummary AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerRegion AS (
+    SELECT c.c_custkey, r.r_regionkey, r.r_name, 
+           ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+           CASE WHEN o.o_orderstatus = 'F' THEN 'Confirmed' ELSE 'Pending' END AS order_status
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderstatus
+),
+RankedOrders AS (
+    SELECT *, RANK() OVER (PARTITION BY order_status ORDER BY revenue DESC) AS revenue_rank
+    FROM OrderDetails
+)
+SELECT c.c_name, r.r_name, ss.s_name, 
+       sos.o_totalprice, sos.revenue, 
+       sos.order_status, 
+       COALESCE(ss.total_cost, 0) as supplier_cost,
+       CASE 
+           WHEN sos.revenue > 1000 THEN 'High Revenue'
+           ELSE 'Low Revenue'
+       END AS revenue_category
+FROM CustomerRegion cr
+LEFT JOIN RankedOrders sos ON cr.c_custkey = sos.o_orderkey
+LEFT JOIN SupplierSummary ss ON sos.o_orderkey = ss.s_suppkey
+WHERE cr.rank <= 5 AND (cr.r_regionkey IS NOT NULL OR ss.total_cost IS NOT NULL)
+ORDER BY cr.r_regionkey, sos.revenue DESC;

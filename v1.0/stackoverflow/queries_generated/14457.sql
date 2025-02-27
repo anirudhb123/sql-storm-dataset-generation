@@ -1,0 +1,54 @@
+-- Performance benchmarking query to analyze the most active users and their post interactions
+
+WITH UserPostActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.Score) AS TotalScore,
+        SUM(COALESCE(c.CommentCount, 0)) AS TotalComments,
+        SUM(COALESCE(b.Id, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+UserActivityRanked AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalScore,
+        TotalComments,
+        TotalBadges,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC) AS Rank
+    FROM 
+        UserPostActivity
+)
+
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalQuestions,
+    TotalAnswers,
+    TotalScore,
+    TotalComments,
+    TotalBadges,
+    Rank
+FROM 
+    UserActivityRanked
+WHERE 
+    Rank <= 10 -- Change the limit for benchmarking to top N users
+ORDER BY 
+    Rank;

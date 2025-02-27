@@ -1,0 +1,74 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ship_customer_sk,
+        ws_item_sk,
+        ws_order_number,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ship_customer_sk, ws_item_sk, ws_order_number
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        MAX(cd_purchase_estimate) AS max_purchase_estimate,
+        MIN(cd_credit_rating) AS min_credit_rating,
+        COUNT(DISTINCT cd_marital_status) AS marital_status_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        CONCAT(i.i_brand, ' - ', i.i_category) AS item_details,
+        CASE
+            WHEN i.i_current_price IS NULL THEN 'Price Not Available'
+            ELSE TO_CHAR(i.i_current_price, 'FM$999,999.00')
+        END AS formatted_price
+    FROM 
+        item i
+),
+SalesReturns AS (
+    SELECT 
+        sr_return_date_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(sr_return_amt) AS total_return_amt,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returned_date_sk
+)
+SELECT 
+    cs.c_customer_sk,
+    i.item_details,
+    rs.total_sales,
+    rs.sales_rank,
+    cs.max_purchase_estimate,
+    cs.min_credit_rating,
+    COALESCE(sr.total_return_quantity, 0) AS total_returned,
+    COALESCE(sr.total_return_amt, 0) AS total_return_amt,
+    sr.return_count
+FROM 
+    CustomerStats cs
+JOIN 
+    RankedSales rs ON cs.c_customer_sk = rs.ship_customer_sk
+JOIN 
+    ItemDetails i ON rs.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    SalesReturns sr ON sr.sr_returned_date_sk = (SELECT d_date_sk FROM date_dim WHERE d_date = CURRENT_DATE)
+WHERE 
+    (cs.marital_status_count > 1 OR cs.max_purchase_estimate > 1000)
+    AND i.formatted_price IS NOT NULL
+ORDER BY 
+    total_sales DESC, 
+    cs.c_customer_sk
+LIMIT 50;

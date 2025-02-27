@@ -1,0 +1,78 @@
+WITH UserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        CASE 
+            WHEN Reputation >= 1000 THEN 'High' 
+            WHEN Reputation BETWEEN 500 AND 999 THEN 'Medium' 
+            ELSE 'Low' 
+        END AS ReputationCategory
+    FROM Users
+),
+PostsWithTags AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(CAST(NULLIF(TAG.TagName, '') AS varchar)) AS TagCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '> <') AS TAG(TagName) 
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.OwnerUserId
+),
+FilteredPosts AS (
+    SELECT 
+        P.PostId,
+        P.Title,
+        P.ReputationCategory,
+        P.TagCount,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        PostsWithTags P
+    JOIN UserReputation U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.TagCount > 2 
+        AND P.CreationDate >= NOW() - INTERVAL '3 months'
+        AND (P.ReputationCategory = 'High' OR P.ReputationCategory IS NULL)
+),
+PostActivities AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS HistoryDate,
+        PH.PostHistoryTypeId,
+        PH.UserDisplayName,
+        (
+            SELECT COUNT(*) 
+            FROM Comments C 
+            WHERE C.PostId = PH.PostId
+        ) AS TotalComments,
+        (SELECT array_agg(PH.Comment) 
+         FROM PostHistory PH2 
+         WHERE PH2.PostId = PH.PostId AND PH2.PostHistoryTypeId = 10) AS CloseReasons
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) -- Close and Reopen actions
+)
+SELECT 
+    FP.OwnerDisplayName,
+    FP.Title,
+    FP.TagCount,
+    PA.HistoryDate,
+    PA.UserDisplayName AS ActionBy,
+    PA.PostHistoryTypeId,
+    PA.TotalComments,
+    COALESCE(PA.CloseReasons, '{}') AS CloseReasons
+FROM 
+    FilteredPosts FP
+LEFT JOIN 
+    PostActivities PA ON FP.PostId = PA.PostId
+WHERE 
+    FP.TagCount IS NOT NULL 
+    AND (FP.ReputationCategory = 'High' OR PA.PostHistoryTypeId IS NOT NULL)
+ORDER BY 
+    FP.TagCount DESC, 
+    FP.Title ASC;

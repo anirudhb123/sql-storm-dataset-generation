@@ -1,0 +1,35 @@
+WITH SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal
+    FROM customer c
+    WHERE c.c_acctbal > (
+        SELECT AVG(c2.c_acctbal) 
+        FROM customer c2
+    )
+),
+OrdersAndLineItems AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, 
+           l.l_partkey, l.l_quantity, l.l_extendedprice, l.l_discount, l.l_tax
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01'
+)
+SELECT 
+    r.r_name AS region,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(li.l_extendedprice) AS total_revenue,
+    AVG(sp.ps_supplycost) AS avg_supply_cost,
+    SUM(CASE WHEN c.c_acctbal > 10000 THEN 1 ELSE 0 END) AS high_value_customers
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN SupplierParts sp ON s.s_suppkey = sp.s_suppkey
+JOIN OrdersAndLineItems o ON sp.p_partkey = o.l_partkey
+JOIN HighValueCustomers c ON o.o_custkey = c.c_custkey
+GROUP BY r.r_name
+ORDER BY total_orders DESC, total_revenue DESC;

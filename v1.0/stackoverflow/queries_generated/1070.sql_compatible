@@ -1,0 +1,77 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  
+    WHERE 
+        p.PostTypeId = 1  
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+        AND u.Reputation > 1000
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+), FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerDisplayName,
+        rn,
+        CommentCount,
+        TotalBounty,
+        CASE 
+          WHEN TotalBounty > 0 THEN 'Has Bounty'
+          ELSE 'No Bounty'
+        END AS BountyStatus
+    FROM 
+        RankedPosts
+    WHERE 
+        rn = 1
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.CreationDate,
+    f.Score,
+    f.ViewCount,
+    f.OwnerDisplayName,
+    f.CommentCount,
+    f.BountyStatus
+FROM 
+    FilteredPosts f
+WHERE 
+    f.CommentCount > 5
+ORDER BY 
+    f.Score DESC, 
+    f.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY
+UNION ALL
+SELECT 
+    NULL AS PostId,
+    'Total Reputable Users' AS Title,
+    NULL AS CreationDate,
+    COUNT(DISTINCT u.Id) AS Score,
+    NULL AS ViewCount,
+    NULL AS OwnerDisplayName,
+    NULL AS CommentCount,
+    NULL AS BountyStatus
+FROM 
+    Users u
+WHERE 
+    u.Reputation > 1000;

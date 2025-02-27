@@ -1,0 +1,38 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_birth_year, 
+           cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating, 
+           SUM(ws.ws_ext_sales_price) AS total_sales, 
+           COUNT(ws.ws_order_number) AS order_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_birth_year, 
+             cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+    UNION ALL
+    SELECT sh.c_customer_sk, sh.c_first_name, sh.c_last_name, sh.c_birth_year, 
+           sh.cd_gender, sh.cd_marital_status, sh.cd_credit_rating, 
+           sh.total_sales + ws.ws_ext_sales_price AS total_sales, 
+           sh.order_count + 1 AS order_count
+    FROM sales_hierarchy sh
+    JOIN web_sales ws ON sh.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_ext_sales_price > 0
+),
+ranked_sales AS (
+    SELECT customer_sk, c_first_name, c_last_name, c_birth_year, 
+           cd_gender, cd_marital_status, cd_credit_rating, total_sales, order_count,
+           RANK() OVER (PARTITION BY cd_marital_status ORDER BY total_sales DESC) AS sales_rank
+    FROM sales_hierarchy
+)
+SELECT r.c_first_name, r.c_last_name, r.cd_gender, r.cd_marital_status,
+       r.total_sales, r.order_count
+FROM ranked_sales r
+LEFT JOIN customer_address ca ON ca.ca_address_sk = (
+    SELECT c.c_current_addr_sk
+    FROM customer c
+    WHERE c.c_customer_sk = r.customer_sk
+)
+WHERE r.sales_rank <= 10
+AND (r.cd_gender = 'M' OR r.cd_gender IS NULL)
+AND r.total_sales > (SELECT AVG(total_sales) FROM ranked_sales)
+ORDER BY r.total_sales DESC;

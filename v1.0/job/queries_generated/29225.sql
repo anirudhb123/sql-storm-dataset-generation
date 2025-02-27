@@ -1,0 +1,49 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        c.name AS company_name,
+        p.name AS person_name,
+        p.gender,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, c.name, p.name, p.gender
+),
+GenderCount AS (
+    SELECT 
+        gender,
+        COUNT(*) AS total_movies,
+        COUNT(DISTINCT title_id) AS unique_movies
+    FROM 
+        MovieDetails
+    GROUP BY 
+        gender
+)
+SELECT 
+    gc.gender,
+    gc.total_movies,
+    gc.unique_movies,
+    ROUND(CAST(total_movies AS DECIMAL) / NULLIF(unique_movies, 0), 2) AS avg_movies_per_title
+FROM 
+    GenderCount gc
+ORDER BY 
+    gc.total_movies DESC;

@@ -1,0 +1,82 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        cr_item_sk,
+        cr_return_quantity,
+        cr_return_amount,
+        RANK() OVER (PARTITION BY cr_returning_customer_sk ORDER BY cr_return_quantity DESC) AS rn
+    FROM catalog_returns
+    WHERE cr_return_quantity IS NOT NULL AND cr_returning_customer_sk IS NOT NULL
+),
+
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        COUNT(DISTINCT c_customer_sk) AS customer_count,
+        SUM(CASE WHEN cd_marital_status = 'M' THEN cd_dep_count ELSE 0 END) AS married_dependents
+    FROM customer_demographics
+    LEFT JOIN customer ON cd_demo_sk = c_current_cdemo_sk
+    WHERE c_customer_sk IS NOT NULL
+    GROUP BY cd_demo_sk, cd_gender, cd_marital_status, cd_education_status
+),
+
+ReturnStatistics AS (
+    SELECT 
+        r.rc_customer_sk,
+        SUM(r.rc_return_quantity) AS total_returned,
+        SUM(r.rc_return_amount) AS total_return_amount,
+        AVG(r.rc_return_quantity) AS avg_returned
+    FROM (
+        SELECT 
+            cr.returning_customer_sk AS rc_customer_sk,
+            cr.return_quantity AS rc_return_quantity,
+            cr.return_amount AS rc_return_amount
+        FROM catalog_returns cr
+        WHERE cr.return_quantity > 0
+    ) r
+    GROUP BY r.rc_customer_sk
+),
+
+FinalReport AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.customer_count,
+        ISNULL(rs.total_returned, 0) AS total_returned,
+        CASE 
+            WHEN cd.customer_count > 0 THEN CAST(ROUND(rs.total_return_amount / cd.customer_count, 2) AS decimal(10,2))
+            ELSE NULL 
+        END AS avg_return_per_customer,
+        CASE
+            WHEN cd_married_dependents > 0 THEN 'Has Dependents'
+            ELSE 'No Dependents'
+        END AS dependent_status
+    FROM CustomerDemographics cd
+    LEFT JOIN ReturnStatistics rs ON cd.cd_demo_sk = rs.rc_customer_sk
+)
+
+SELECT 
+    fr.cd_gender,
+    fr.cd_marital_status,
+    fr.customer_count,
+    fr.total_returned,
+    fr.avg_return_per_customer,
+    fr.dependent_status,
+    (SELECT 
+        COUNT(*)
+     FROM 
+        RankedReturns rr
+     WHERE 
+        rr.cr_returning_customer_sk = fr.rc_customer_sk AND 
+        rr.rn <= 10
+    ) AS top_return_count
+FROM 
+    FinalReport fr
+WHERE 
+    fr.customer_count > 0 OR fr.total_returned IS NOT NULL
+ORDER BY 
+    fr.total_returned DESC NULLS LAST;

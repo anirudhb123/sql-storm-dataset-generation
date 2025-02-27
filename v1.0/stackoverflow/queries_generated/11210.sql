@@ -1,0 +1,31 @@
+-- Performance Benchmarking Query
+-- This query will aggregate data from several tables to evaluate system performance
+-- by calculating the number of posts, average score, and the total votes by post type.
+
+WITH PostStats AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(p.Id) AS TotalPosts,
+        AVG(p.Score) AS AverageScore,
+        SUM(v.VoteTypeId = 2::smallint) AS TotalUpvotes,
+        SUM(v.VoteTypeId = 3::smallint) AS TotalDownvotes
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        pt.Name
+)
+
+SELECT 
+    PostType,
+    TotalPosts,
+    AverageScore,
+    TotalUpvotes,
+    TotalDownvotes
+FROM 
+    PostStats
+ORDER BY 
+    TotalPosts DESC;

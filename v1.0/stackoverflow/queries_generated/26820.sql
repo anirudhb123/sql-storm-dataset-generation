@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Body,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.ViewCount DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '> <')) AS tag(tag) ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag.tag
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.AnswerCount, p.CommentCount, p.Body, p.CreationDate, pt.Name
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CommentCount,
+    rp.Body,
+    rp.CreationDate,
+    rp.Rank,
+    rp.Tags,
+    u.DisplayName AS OwnerDisplayName,
+    COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS NetVotes, -- Net Upvotes - Downvotes
+    COALESCE(b.BadgeCount, 0) AS UserBadgeCount
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Votes v ON v.PostId = rp.PostId
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+) b ON b.UserId = u.Id
+WHERE 
+    rp.Rank <= 5 -- Only top 5 posts per category
+ORDER BY 
+    rp.Rank, rp.ViewCount DESC;

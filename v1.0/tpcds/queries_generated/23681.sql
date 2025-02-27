@@ -1,0 +1,67 @@
+
+WITH RECURSIVE AddressCounts AS (
+    SELECT ca_address_sk, ca_city, COUNT(*) AS total_customers
+    FROM customer
+    INNER JOIN customer_address ON c_current_addr_sk = ca_address_sk
+    GROUP BY ca_address_sk, ca_city
+),
+RankedCustomers AS (
+    SELECT cd_demo_sk,
+           cd_gender,
+           DENSE_RANK() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS purchase_rank
+    FROM customer_demographics
+),
+RecentSales AS (
+    SELECT ws_bill_customer_sk,
+           SUM(ws_net_paid) AS total_spent
+    FROM web_sales
+    WHERE ws_sold_date_sk > (SELECT d_date_sk FROM date_dim WHERE d_date = CURRENT_DATE - INTERVAL '30 DAY')
+    GROUP BY ws_bill_customer_sk
+),
+StoreSalesStats AS (
+    SELECT ss_store_sk,
+           AVG(ss_sales_price) AS avg_sales_price,
+           MAX(ss_sales_price) AS max_sales_price,
+           MIN(ss_sales_price) AS min_sales_price
+    FROM store_sales
+    GROUP BY ss_store_sk
+),
+CustomerManagerSales AS (
+    SELECT c.c_customer_id,
+           s.s_manager,
+           SUM(ws_net_paid) AS total_sales
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN store s ON s.s_store_sk = ws.ws_warehouse_sk
+    GROUP BY c.c_customer_id, s.s_manager
+    HAVING SUM(ws_net_paid) IS NOT NULL
+),
+NULLHandle AS (
+    SELECT sm.sm_type,
+           SUM(COALESCE(ws.ws_net_paid, 0)) AS total_sales
+    FROM ship_mode sm
+    LEFT JOIN web_sales ws ON sm.sm_ship_mode_sk = ws.ws_ship_mode_sk
+    GROUP BY sm.sm_type
+)
+SELECT ac.ca_city,
+       COALESCE(ac.total_customers, 0) AS customer_count,
+       rc.cd_gender,
+       rc.purchase_rank,
+       rs.total_spent,
+       ss.avg_sales_price,
+       ss.max_sales_price,
+       ss.min_sales_price,
+       chc.c_customer_id,
+       chc.total_sales,
+       nh.sm_type,
+       nh.total_sales AS total_by_ship_mode
+FROM AddressCounts ac
+FULL OUTER JOIN RankedCustomers rc ON true
+LEFT JOIN RecentSales rs ON rs.ws_bill_customer_sk = rc.cd_demo_sk
+JOIN StoreSalesStats ss ON ss.ss_store_sk IN (SELECT s.s_store_sk FROM store s WHERE s.s_closed_date_sk IS NULL)
+FULL JOIN CustomerManagerSales chc ON chc.c_customer_id IS NOT NULL
+RIGHT JOIN NULLHandle nh ON nh.sm_type IS NOT NULL
+WHERE (ac.total_customers > 0 OR rs.total_spent IS NOT NULL)
+  AND (chc.total_sales IS NOT NULL OR nh.total_sales IS NOT NULL)
+ORDER BY ac.ca_city, rc.cd_gender, chc.total_sales DESC
+LIMIT 100 OFFSET 10;

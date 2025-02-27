@@ -1,0 +1,48 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword,
+        ARRAY_AGG(DISTINCT c.id) AS cast_ids,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    WHERE 
+        t.production_year >= 2000
+        AND k.keyword ILIKE '%action%'
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword
+),
+filtered_movies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.keyword,
+        (SELECT COUNT(*) FROM cast_info ci WHERE ci.movie_id IN (
+            SELECT movie_id FROM complete_cast cc WHERE cc.subject_id IN (SELECT person_id FROM aka_name WHERE name LIKE '%Smith%')
+        )) AS smith_count
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.rn = 1
+)
+SELECT 
+    title,
+    production_year,
+    keyword,
+    smith_count
+FROM 
+    filtered_movies
+ORDER BY 
+    production_year DESC;

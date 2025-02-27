@@ -1,0 +1,74 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year,
+        COALESCE(mtl.linked_movie_id, 0) AS linked_movie_id,
+        1 AS depth
+    FROM 
+        aka_title AS mt
+    LEFT JOIN
+        movie_link AS mtl ON mt.id = mtl.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(mtl.linked_movie_id, 0),
+        mh.depth + 1
+    FROM 
+        RecursiveMovieHierarchy AS mh
+    JOIN
+        movie_link AS mtl ON mh.linked_movie_id = mtl.movie_id
+    WHERE 
+        mh.depth < 5 
+),
+RankedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        DENSE_RANK() OVER (PARTITION BY rm.production_year ORDER BY rm.movie_id) AS yearly_rank,
+        COUNT(DISTINCT rn.person_id) OVER (PARTITION BY rm.movie_id) AS actor_count,
+        SUM(CASE WHEN rn.gender = 'F' THEN 1 ELSE 0 END) OVER (PARTITION BY rm.movie_id) AS female_cast_count,
+        STRING_AGG(DISTINCT rn.name, ', ') FILTER (WHERE rn.name IS NOT NULL) OVER (PARTITION BY rm.movie_id) AS cast_names
+    FROM 
+        RecursiveMovieHierarchy AS rm
+    LEFT JOIN 
+        cast_info AS ci ON rm.movie_id = ci.movie_id
+    LEFT JOIN 
+        name AS rn ON ci.person_id = rn.id
+),
+FilteredMovies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN actor_count = 0 THEN 'No Cast'
+            WHEN female_cast_count = 0 THEN 'All Male Cast'
+            ELSE 'Diverse Cast'
+        END AS cast_diversity
+    FROM 
+        RankedMovies
+    WHERE 
+        production_year BETWEEN 2000 AND 2020 
+        AND (yearly_rank <= 5 OR cast_diversity = 'Diverse Cast')
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.actor_count,
+    f.female_cast_count,
+    f.cast_names,
+    f.cast_diversity,
+    COALESCE(mt.info, 'N/A') AS movie_info
+FROM 
+    FilteredMovies AS f
+LEFT JOIN 
+    movie_info AS mt ON f.movie_id = mt.movie_id AND mt.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+ORDER BY 
+    f.production_year DESC, 
+    f.actor_count DESC;

@@ -1,0 +1,78 @@
+
+WITH TagStats AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS PostCount,
+        STRING_AGG(DISTINCT PostTitle, ', ') AS AssociatedPosts
+    FROM (
+        SELECT 
+            t.TagName,
+            p.Title AS PostTitle
+        FROM 
+            Posts p
+        JOIN 
+            Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+        WHERE 
+            p.CreationDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 year' 
+            AND p.PostTypeId = 1  
+    ) AS TagJoin
+    GROUP BY 
+        TagName
+),
+UserEngagement AS (
+    SELECT 
+        u.DisplayName,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(c.Score, 0)) AS TotalComments,
+        SUM(COALESCE(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END, 0)) AS TotalUpVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        u.DisplayName
+),
+PostActionHistory AS (
+    SELECT 
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        p.Title AS PostTitle,
+        p.CreationDate AS PostCreationDate,
+        pht.Name AS ActionType
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON p.Id = ph.PostId
+    JOIN 
+        PostHistoryTypes pht ON pht.Id = ph.PostHistoryTypeId
+    WHERE 
+        ph.CreationDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '6 months'
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.AssociatedPosts,
+    ue.DisplayName AS UserDisplayName,
+    ue.TotalViews,
+    ue.TotalComments,
+    ue.TotalUpVotes,
+    pah.UserDisplayName AS HistoryUserDisplayName,
+    pah.CreationDate AS HistoryCreationDate,
+    pah.Comment AS HistoryComment,
+    pah.PostTitle AS ActionPostTitle,
+    pah.ActionType AS HistoryActionType
+FROM 
+    TagStats ts
+JOIN 
+    UserEngagement ue ON ue.TotalViews > 1000  
+LEFT JOIN 
+    PostActionHistory pah ON pah.PostTitle IN (SELECT UNNEST(string_to_array(ts.AssociatedPosts, ', ')))
+ORDER BY 
+    ts.PostCount DESC, ue.TotalViews DESC, pah.CreationDate DESC;

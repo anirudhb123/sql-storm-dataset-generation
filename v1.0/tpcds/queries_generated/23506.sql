@@ -1,0 +1,78 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+        AND c.c_last_name IS NOT NULL
+),
+AddressCount AS (
+    SELECT 
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(CASE WHEN c.c_salutation IS NOT NULL THEN 1 ELSE 0 END) AS salutation_present
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        ca.ca_state
+),
+SalesTotals AS (
+    SELECT 
+        sm.sm_carrier,
+        SUM(ws.ws_net_paid) AS total_net_paid
+    FROM 
+        web_sales ws
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY 
+        sm.sm_carrier
+),
+ItemAnalysis AS (
+    SELECT 
+        i.i_item_sk,
+        COUNT(CASE WHEN ws.ws_quantity > 10 THEN 1 END) AS high_sales_count,
+        AVG(ws.ws_sales_price) AS average_sales_price
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk
+)
+SELECT 
+    ac.ca_state,
+    ac.customer_count,
+    ac.salutation_present,
+    st.sm_carrier,
+    st.total_net_paid,
+    ia.i_item_sk,
+    ia.high_sales_count,
+    ia.average_sales_price,
+    rs.ws_order_number,
+    CASE 
+        WHEN rs.rn <= 5 THEN 'Top Order'
+        ELSE 'Regular Order'
+    END AS order_category
+FROM 
+    AddressCount ac
+LEFT JOIN 
+    SalesTotals st ON ac.customer_count > (SELECT AVG(customer_count) FROM AddressCount)
+LEFT JOIN 
+    ItemAnalysis ia ON ia.high_sales_count > 0
+LEFT JOIN 
+    RankedSales rs ON ia.i_item_sk IN (SELECT ws.ws_item_sk FROM web_sales ws WHERE ws.ws_order_number = rs.ws_order_number)
+WHERE 
+    ac.customer_count IS NOT NULL 
+    AND (st.total_net_paid IS NULL OR st.total_net_paid > 1000)
+ORDER BY 
+    ac.ca_state, st.total_net_paid DESC, ia.average_sales_price ASC;

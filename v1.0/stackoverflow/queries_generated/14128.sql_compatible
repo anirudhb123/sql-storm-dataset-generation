@@ -1,0 +1,63 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.PostTypeId, p.Score, p.ViewCount
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostTypeCounts AS (
+    SELECT 
+        pt.Id AS PostTypeId,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        PostTypes pt
+    LEFT JOIN 
+        Posts p ON pt.Id = p.PostTypeId
+    GROUP BY 
+        pt.Id
+)
+
+SELECT 
+    ps.PostId,
+    ps.PostTypeId,
+    pst.PostCount AS TotalPostsByType,
+    us.UserId,
+    us.BadgeCount,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    ps.Score,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.VoteCount
+FROM 
+    PostStats ps
+JOIN 
+    UserStats us ON ps.PostTypeId = 1 
+LEFT JOIN 
+    PostTypeCounts pst ON ps.PostTypeId = pst.PostTypeId
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

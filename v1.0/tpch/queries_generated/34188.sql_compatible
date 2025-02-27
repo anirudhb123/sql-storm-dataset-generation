@@ -1,0 +1,52 @@
+
+WITH RECURSIVE RecentOrders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice
+    FROM orders
+    WHERE o_orderdate >= CAST('1998-10-01' AS DATE) - INTERVAL '1 YEAR'
+
+    UNION ALL
+
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice
+    FROM orders o
+    JOIN RecentOrders ro ON o.o_orderkey > ro.o_orderkey
+    WHERE o.o_orderdate >= CAST('1998-10-01' AS DATE) - INTERVAL '1 YEAR'
+),
+SupplierTotalCost AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * l.l_quantity) AS total_cost
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, stc.total_cost
+    FROM supplier s
+    JOIN SupplierTotalCost stc ON s.s_suppkey = stc.ps_partkey
+    ORDER BY stc.total_cost DESC
+    LIMIT 10
+),
+CustomerSpend AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, SUM(o.o_totalprice) AS total_spend
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+NationRegions AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    ns.r_name AS nation,
+    ts.s_name AS top_supplier,
+    COALESCE(cs.total_spend, 0) AS customer_total_spend,
+    ts.total_cost AS supplier_total_cost,
+    EXTRACT(YEAR FROM CAST('1998-10-01' AS DATE)) - EXTRACT(YEAR FROM ro.o_orderdate) AS order_age
+FROM RecentOrders ro
+LEFT JOIN CustomerSpend cs ON ro.o_custkey = cs.c_custkey
+JOIN NationRegions ns ON cs.c_nationkey = ns.n_nationkey
+JOIN TopSuppliers ts ON ts.s_nationkey = ns.n_nationkey
+WHERE cs.total_spend IS NOT NULL
+  AND ts.total_cost > (SELECT AVG(total_cost) FROM SupplierTotalCost)
+ORDER BY customer_total_spend DESC, supplier_total_cost ASC;

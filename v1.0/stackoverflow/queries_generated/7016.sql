@@ -1,0 +1,72 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        p.AcceptedAnswerId,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS Upvotes,
+        SUM(v.VoteTypeId = 3) AS Downvotes,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, '>')) AS t(TagName) ON true
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+CloseDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        cht.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cht ON ph.Comment::int = cht.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+Result AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.Score,
+        pd.ViewCount,
+        pd.OwnerDisplayName,
+        pd.AcceptedAnswerId,
+        pd.AnswerCount,
+        pd.Upvotes,
+        pd.Downvotes,
+        COALESCE(cd.CloseDate, 'No Close') AS CloseDate,
+        COALESCE(cd.CloseReason, 'Not Closed') AS CloseReason,
+        pd.Tags
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        CloseDetails cd ON pd.PostId = cd.PostId
+)
+SELECT 
+    *,
+    (Upvotes - Downvotes) AS NetVotes,
+    CASE 
+        WHEN AcceptedAnswerId IS NOT NULL THEN 'Accepted Answer Exists'
+        ELSE 'No Accepted Answer'
+    END AS AnswerStatus
+FROM 
+    Result
+ORDER BY 
+    CreationDate DESC
+LIMIT 100;

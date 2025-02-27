@@ -1,0 +1,50 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        NULL AS parent_title,
+        1 AS level
+    FROM title m
+    WHERE m.episode_of_id IS NULL  
+    
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        m.title AS parent_title,
+        m.level + 1
+    FROM title e
+    JOIN MovieHierarchy m ON e.episode_of_id = m.movie_id
+),
+CastSummary AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY ci.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(DISTINCT ki.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword ki ON mk.keyword_id = ki.id
+    JOIN aka_title mt ON mt.id = mk.movie_id
+    GROUP BY mt.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title AS movie_title,
+    mh.parent_title,
+    mh.level,
+    COALESCE(cs.cast_count, 0) AS number_of_cast,
+    COALESCE(cs.cast_names, 'No cast listed') AS cast_details,
+    COALESCE(mi.keywords, 'No keywords') AS movie_keywords
+FROM MovieHierarchy mh
+LEFT JOIN CastSummary cs ON mh.movie_id = cs.movie_id
+LEFT JOIN MovieInfo mi ON mh.movie_id = mi.movie_id
+ORDER BY mh.level, mh.movie_title;

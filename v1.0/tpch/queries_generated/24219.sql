@@ -1,0 +1,53 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1995-01-01' 
+    AND o.o_orderdate < '1997-01-01'
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_availqty) > (SELECT AVG(ps_availqty) FROM partsupp)
+),
+OrderAnalysis AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        oi.l_extendedprice,
+        oi.l_discount,
+        CASE 
+            WHEN oi.l_returnflag = 'R' THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus, oi.l_returnflag ORDER BY oi.l_discount DESC) AS order_rank
+    FROM RankedOrders o
+    LEFT JOIN lineitem oi ON o.o_orderkey = oi.l_orderkey
+)
+SELECT 
+    fa.s_name,
+    COUNT(oa.o_orderkey) AS order_count,
+    SUM(oa.l_extendedprice * (1 - oa.l_discount)) AS net_revenue,
+    AVG(CASE WHEN oa.return_status = 'Returned' THEN oi.l_extendedprice ELSE NULL END) AS avg_returned_price,
+    COALESCE(MAX(price_rank), 0) AS highest_rank,
+    CONCAT('Supplier: ', fa.s_name, ' | Orders: ', COUNT(oa.o_orderkey)) AS summary
+FROM FilteredSuppliers fa
+LEFT JOIN OrderAnalysis oa ON fa.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    JOIN lineitem li ON ps.ps_partkey = li.l_partkey 
+    WHERE li.l_orderkey IN (SELECT o_orderkey FROM RankedOrders)
+)
+GROUP BY fa.s_name
+HAVING COUNT(oa.o_orderkey) > 5
+ORDER BY net_revenue DESC, order_count ASC
+LIMIT 10;

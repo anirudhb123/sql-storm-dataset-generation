@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS rank,
+        COUNT(c.Id) AS CommentsCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.CreationDate, p.Score, p.PostTypeId
+),
+TopPosts AS (
+    SELECT 
+        rp.Id, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.Score, 
+        rp.OwnerDisplayName, 
+        rp.rank,
+        CASE 
+            WHEN rp.score > 10 THEN 'High Scorer'
+            WHEN rp.score BETWEEN 5 AND 10 THEN 'Medium Scorer'
+            ELSE 'Low Scorer'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rank <= 5
+)
+
+SELECT 
+    tp.Id,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.OwnerDisplayName,
+    tp.ScoreCategory,
+    COALESCE(b.Name, 'No Badge') AS BadgeName,
+    CASE 
+        WHEN tp.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month' THEN 'Old'
+        ELSE 'Recent'
+    END AS PostAge,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Badges b ON tp.OwnerDisplayName = b.UserDisplayName AND b.Class = 1
+LEFT JOIN 
+    Tags t ON t.ExcerptPostId = tp.Id
+GROUP BY 
+    tp.Id, tp.Title, tp.CreationDate, tp.Score, tp.OwnerDisplayName, tp.ScoreCategory, b.Name
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

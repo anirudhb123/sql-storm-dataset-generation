@@ -1,0 +1,68 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        1 AS level
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        mh.level + 1
+    FROM
+        movie_hierarchy mh
+    JOIN
+        movie_link ml ON ml.movie_id = mh.movie_id
+    LEFT JOIN
+        aka_title m ON ml.linked_movie_id = m.id
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    WHERE
+        mh.level < 5
+),
+
+cast_summary AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM
+        cast_info c
+    JOIN
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY
+        c.movie_id
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.keyword,
+    cs.total_cast,
+    cs.cast_names,
+    RANK() OVER (PARTITION BY mh.production_year ORDER BY cs.total_cast DESC) AS rank_within_year,
+    CASE 
+        WHEN cs.total_cast IS NULL THEN 'No Cast Info'
+        ELSE 'Has Cast Info'
+    END AS cast_info_status
+FROM
+    movie_hierarchy mh
+LEFT JOIN
+    cast_summary cs ON mh.movie_id = cs.movie_id
+WHERE
+    mh.level = 1
+ORDER BY
+    mh.production_year DESC,
+    rank_within_year;

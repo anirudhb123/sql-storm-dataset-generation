@@ -1,0 +1,72 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+PersonRoleCount AS (
+    SELECT 
+        ci.person_id, 
+        COUNT(*) AS role_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+),
+TopPersons AS (
+    SELECT 
+        p.name, 
+        prc.role_count
+    FROM 
+        person_info pi
+    JOIN 
+        PersonRoleCount prc ON pi.person_id = prc.person_id
+    JOIN 
+        aka_name p ON pi.person_id = p.person_id
+    WHERE 
+        prc.role_count > 5
+),
+CompanyDetails AS (
+    SELECT 
+        cmp.name AS company_name,
+        ct.kind AS company_type,
+        mc.movie_id
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cmp ON mc.company_id = cmp.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+FinalBenchmark AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        tp.name AS top_actor,
+        cd.company_name,
+        cd.company_type,
+        rt.keyword,
+        rt.rank
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        TopPersons tp ON rt.rank = 1  
+    LEFT JOIN 
+        CompanyDetails cd ON rt.production_year = EXTRACT(YEAR FROM cast('2024-10-01' as date))  
+)
+SELECT 
+    *
+FROM 
+    FinalBenchmark
+WHERE 
+    production_year IS NOT NULL
+ORDER BY 
+    production_year DESC, 
+    title;

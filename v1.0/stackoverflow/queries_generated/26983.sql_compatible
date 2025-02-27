@@ -1,0 +1,55 @@
+
+WITH ProcessedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><')::text[])
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.OwnerName,
+    pp.CreationDate,
+    pp.CommentCount,
+    pp.BadgeCount,
+    pp.TagsList,
+    phs.HistoryCount,
+    phs.HistoryTypes
+FROM 
+    ProcessedPosts pp
+LEFT JOIN 
+    PostHistorySummary phs ON pp.PostId = phs.PostId
+ORDER BY 
+    pp.CommentCount DESC, pp.BadgeCount DESC, pp.CreationDate DESC
+LIMIT 100;

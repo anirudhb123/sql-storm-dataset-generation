@@ -1,0 +1,44 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViewCount,
+        MAX(COALESCE(b.Date, '1970-01-01'::timestamp)) AS LastBadgeDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(cl.Name, 'No Reason') AS CloseReason,
+        DENSE_RANK() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS PostRank,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.Score DESC) AS ScoreRank
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    LEFT JOIN CloseReasonTypes cl ON ph.Comment::int = cl.Id
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostCount,
+    ua.PositivePosts,
+    ua.AvgViewCount,
+    ua.LastBadgeDate,
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.CloseReason
+FROM UserActivity ua
+JOIN PostDetails pd ON ua.UserId = pd.UserId
+WHERE ua.PostCount > 5
+ORDER BY ua.UserId, pd.PostRank
+FETCH FIRST 10 ROWS ONLY;

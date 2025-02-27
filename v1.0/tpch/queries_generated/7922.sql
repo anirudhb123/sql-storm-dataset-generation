@@ -1,0 +1,35 @@
+WITH region_summary AS (
+    SELECT r.r_name AS region_name, SUM(s.s_acctbal) AS total_acctbal
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, co.total_spent
+    FROM customer_orders co
+    JOIN customer c ON co.c_custkey = c.c_custkey
+    ORDER BY co.total_spent DESC
+    LIMIT 10
+),
+lineitem_details AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, l.l_extendedprice, l.l_discount, l.l_tax
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'F'
+)
+SELECT ts.c_name, ts.total_spent, rg.region_name, SUM(ld.l_extendedprice * (1 - ld.l_discount)) AS revenue
+FROM top_customers ts
+JOIN customer c ON ts.c_custkey = c.c_custkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region rg ON n.n_regionkey = rg.r_regionkey
+JOIN lineitem_details ld ON c.c_custkey = o.o_custkey
+GROUP BY ts.c_name, ts.total_spent, rg.region_name
+HAVING SUM(ld.l_extendedprice * (1 - ld.l_discount)) > 10000
+ORDER BY revenue DESC;

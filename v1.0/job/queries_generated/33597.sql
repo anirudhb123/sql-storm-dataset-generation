@@ -1,0 +1,56 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        ARRAY[mt.title] AS full_path,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        lt.title,
+        mh.full_path || lt.title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title lt ON ml.linked_movie_id = lt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.depth,
+    mh.full_path,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    COUNT(DISTINCT mi.info_type_id) AS info_type_count,
+    STRING_AGG(DISTINCT cct.kind, ', ') AS company_kinds,
+    COALESCE(SUM(mi.info::int), 0) AS total_info_value,
+    MAX(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_notes,
+    ROW_NUMBER() OVER (PARTITION BY mh.depth ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_within_depth
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type cct ON mc.company_type_id = cct.id
+WHERE 
+    mh.depth < 3
+GROUP BY 
+    mh.movie_id, mh.title, mh.depth, mh.full_path
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 3
+ORDER BY 
+    mh.depth, actor_count DESC, total_info_value DESC;

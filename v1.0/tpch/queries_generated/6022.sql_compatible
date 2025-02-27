@@ -1,0 +1,47 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+HighValueOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.total_revenue,
+        rp.r_name
+    FROM 
+        RankedOrders ro
+    JOIN 
+        nation n ON ro.o_orderkey % 5 = n.n_nationkey
+    JOIN 
+        region rp ON n.n_regionkey = rp.r_regionkey
+    WHERE 
+        ro.total_revenue > (SELECT AVG(total_revenue) FROM RankedOrders)
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.total_revenue,
+    r.r_name
+FROM 
+    HighValueOrders o
+JOIN 
+    supplier s ON o.o_orderkey % 10 = s.s_suppkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    p.p_retailprice > 100
+ORDER BY 
+    o.total_revenue DESC
+LIMIT 100;

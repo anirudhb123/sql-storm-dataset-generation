@@ -1,0 +1,58 @@
+WITH RECURSIVE part_supplier_agg AS (
+    SELECT ps.partkey, 
+           SUM(ps.ps_availqty) as total_available,
+           SUM(ps.ps_supplycost) as total_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.partkey
+), 
+customer_order_summary AS (
+    SELECT c.c_custkey,
+           COUNT(o.o_orderkey) as order_count,
+           SUM(o.o_totalprice) as total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) as rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+), 
+nation_region_stats AS (
+    SELECT n.n_nationkey,
+           n.n_name,
+           r.r_name,
+           AVG(ps.total_available) as avg_available,
+           MAX(cs.total_spent) as max_customer_spent
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN part_supplier_agg ps ON ps.partkey IN (
+        SELECT ps_partkey FROM partsupp WHERE ps_availqty > 0
+    )
+    LEFT JOIN customer_order_summary cs ON cs.c_custkey IN (
+        SELECT o.o_custkey FROM orders o 
+        WHERE o.o_orderstatus = 'O' AND o.o_totalprice IS NOT NULL
+    )
+    GROUP BY n.n_nationkey, n.n_name, r.r_name
+), 
+final_stats AS (
+    SELECT nrs.n_name, 
+           nrs.r_name, 
+           nrs.avg_available,
+           COALESCE(nrs.max_customer_spent, 0) as max_customer_spent,
+           CASE 
+               WHEN nrs.avg_available IS NULL THEN 'No Availability'
+               WHEN nrs.max_customer_spent > 10000 THEN 'High Spending'
+               ELSE 'Normal Spending'
+           END as customer_spending_category
+    FROM nation_region_stats nrs
+)
+SELECT f.n_name || ' (' || f.r_name || ') - Avg Available: ' || 
+       COALESCE(TO_CHAR(f.avg_available), 'N/A') || 
+       ', Max Spent: ' || 
+       COALESCE(TO_CHAR(f.max_customer_spent, 'FM$999,999.00'), 'N/A') || 
+       ' - Category: ' || f.customer_spending_category
+FROM final_stats f
+WHERE f.max_customer_spent > (
+    SELECT AVG(max_spent) 
+    FROM (SELECT COALESCE(MAX(cs.total_spent), 0) as max_spent 
+          FROM customer_order_summary cs GROUP BY cs.c_custkey) as subquery
+)
+ORDER BY f.max_customer_spent DESC;

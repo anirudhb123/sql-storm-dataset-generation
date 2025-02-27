@@ -1,0 +1,60 @@
+
+WITH RECURSIVE item_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales,
+        SUM(ws_sales_price * ws_quantity) AS total_revenue
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 7 FROM date_dim) -- Last 7 days
+    GROUP BY 
+        ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        SUM(cs_quantity) AS total_sales,
+        SUM(cs_sales_price * cs_quantity) AS total_revenue
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk >= (SELECT MAX(d_date_sk) - 7 FROM date_dim)
+    GROUP BY 
+        cs_item_sk
+),
+sales_summary AS (
+    SELECT 
+        it.i_item_id,
+        it.i_item_desc,
+        COALESCE(is.total_sales, 0) AS total_sales,
+        COALESCE(is.total_revenue, 0) AS total_revenue,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(is.total_revenue, 0) DESC) AS revenue_rank
+    FROM 
+        item it
+    LEFT JOIN (
+        SELECT 
+            ws_item_sk,
+            SUM(total_sales) AS total_sales,
+            SUM(total_revenue) AS total_revenue
+        FROM 
+            item_sales
+        GROUP BY 
+            ws_item_sk
+    ) is ON it.i_item_sk = is.ws_item_sk
+)
+SELECT 
+    s.s_store_id,
+    s.s_store_name,
+    ss.i_item_id,
+    ss.i_item_desc,
+    ss.total_sales,
+    ss.total_revenue,
+    ss.revenue_rank
+FROM 
+    sales_summary ss
+JOIN 
+    store s ON ss.total_revenue > (SELECT AVG(total_revenue) FROM sales_summary) -- Filtering high revenue items
+WHERE 
+    ss.revenue_rank <= 10 -- Top 10 items
+ORDER BY 
+    ss.total_revenue DESC;

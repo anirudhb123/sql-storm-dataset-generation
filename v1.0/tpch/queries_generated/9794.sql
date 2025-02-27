@@ -1,0 +1,30 @@
+WITH SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS nation, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name AS customer_name, n.n_name AS nation,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM lineitem l
+    JOIN SupplierInfo si ON l.l_suppkey = si.s_suppkey
+    WHERE l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING COUNT(DISTINCT l.l_orderkey) > 10
+)
+SELECT si.s_name, si.nation, os.customer_name, os.order_rank, SUM(si.total_cost) AS supplier_total_cost, 
+       AVG(os.o_totalprice) AS average_order_value
+FROM SupplierInfo si
+JOIN OrderSummary os ON si.nation = os.nation
+JOIN TopSuppliers ts ON si.s_suppkey = ts.s_suppkey
+GROUP BY si.s_name, si.nation, os.customer_name, os.order_rank
+ORDER BY supplier_total_cost DESC, average_order_value DESC;

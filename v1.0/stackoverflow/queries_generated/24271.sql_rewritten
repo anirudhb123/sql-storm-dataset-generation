@@ -1,0 +1,100 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank,
+        p.OwnerUserId,
+        COALESCE(SUBSTRING(p.Tags FROM '#"#"##"#'), 'No Tags') AS PrimaryTag
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+), FlaggedUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(DISTINCT b.Id) > 5
+), RecentVotes AS (
+    SELECT 
+        v.PostId,
+        v.VoteTypeId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        v.PostId
+    HAVING 
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) > 0
+), PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+    GROUP BY 
+        c.PostId
+), DetailedPostInfo AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.Rank,
+        rp.PrimaryTag,
+        COALESCE(rv.VoteCount, 0) AS TotalVotes,
+        COALESCE(rv.UpvoteCount, 0) AS Upvotes,
+        COALESCE(rv.DownvoteCount, 0) AS Downvotes,
+        COALESCE(pc.CommentCount, 0) AS Comments,
+        fu.DisplayName AS TopUser,
+        fu.GoldBadges,
+        fu.SilverBadges,
+        fu.BronzeBadges
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentVotes rv ON rp.PostId = rv.PostId
+    LEFT JOIN 
+        PostComments pc ON rp.PostId = pc.PostId
+    LEFT JOIN 
+        FlaggedUsers fu ON rp.OwnerUserId = fu.Id
+    WHERE 
+        rp.Rank <= 10
+)
+SELECT 
+    d.PostId,
+    d.Title,
+    d.Score,
+    d.TotalVotes,
+    d.Upvotes,
+    d.Downvotes,
+    d.Comments,
+    d.PrimaryTag,
+    d.TopUser,
+    CASE 
+        WHEN d.GoldBadges > 0 THEN 'Gold Star'
+        WHEN d.SilverBadges > 0 THEN 'Silver Star'
+        WHEN d.BronzeBadges > 0 THEN 'Bronze Star'
+        ELSE 'No Badges'
+    END AS BadgeRating
+FROM 
+    DetailedPostInfo d
+ORDER BY 
+    d.Score DESC, d.TotalVotes DESC;

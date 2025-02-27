@@ -1,0 +1,79 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        OwnerUserId,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+  
+    UNION ALL
+  
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph
+    ON p.ParentId = rph.Id
+),
+UserVoteSummary AS (
+    SELECT 
+        v.UserId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM Votes v
+    INNER JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY v.UserId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedLinks,
+        COALESCE(pp.TotalUpvotes, 0) AS TotalUpvotes,
+        COALESCE(pp.TotalDownvotes, 0) AS TotalDownvotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN UserVoteSummary pp ON p.OwnerUserId = pp.UserId
+    GROUP BY p.Id, p.Title, p.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        MAX(ph.CreationDate) OVER (PARTITION BY ph.PostId) AS LastClosedDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10 -- Post Closed
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    u.DisplayName AS OwnerDisplayName,
+    ps.CommentCount,
+    ps.RelatedLinks,
+    ps.TotalUpvotes,
+    ps.TotalDownvotes,
+    CASE 
+        WHEN cp.PostId IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    COALESCE(cp.LastClosedDate, p.CreationDate) AS StatusUpdateDate
+FROM Posts p
+JOIN Users u ON p.OwnerUserId = u.Id
+JOIN PostStatistics ps ON p.Id = ps.Id
+LEFT JOIN ClosedPosts cp ON p.Id = cp.PostId
+WHERE 
+    p.CreationDate > CURRENT_DATE - INTERVAL '1 year' 
+    AND (ps.TotalUpvotes - ps.TotalDownvotes) > 10
+ORDER BY 
+    ps.TotalUpvotes DESC, 
+    ps.CommentCount DESC;

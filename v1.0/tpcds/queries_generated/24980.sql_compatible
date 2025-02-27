@@ -1,0 +1,58 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ws.ws_bill_customer_sk,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 1 AND 30
+),
+ReturnsData AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returns,
+        SUM(cr.cr_return_amt) AS total_return_amount
+    FROM catalog_returns cr
+    GROUP BY cr.cr_item_sk
+),
+CustomerGender AS (
+    SELECT
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        (cd.cd_marital_status = 'M' AND cd.cd_dep_count IS NOT NULL) OR
+        (cd.cd_marital_status = 'S' AND cd.cd_dep_count IS NULL)
+    GROUP BY cd.cd_gender
+)
+SELECT 
+    sd.ws_order_number,
+    sd.ws_item_sk,
+    sd.ws_sales_price * sd.ws_quantity AS total_sales,
+    rd.total_returns,
+    rd.total_return_amount,
+    cg.cd_gender,
+    cg.customer_count
+FROM SalesData sd
+FULL OUTER JOIN ReturnsData rd ON sd.ws_item_sk = rd.cr_item_sk
+LEFT JOIN CustomerGender cg ON cg.customer_count > 0
+WHERE 
+    (sd.profit_rank <= 5 OR rd.total_returns IS NOT NULL)
+    AND (sd.ws_net_profit IS NOT NULL OR rd.total_return_amount IS NULL)
+GROUP BY 
+    sd.ws_order_number,
+    sd.ws_item_sk,
+    sd.ws_sales_price,
+    sd.ws_quantity,
+    sd.ws_net_profit,
+    sd.ws_bill_customer_sk,
+    rd.total_returns,
+    rd.total_return_amount,
+    cg.cd_gender,
+    cg.customer_count
+ORDER BY total_sales DESC, sd.ws_order_number;

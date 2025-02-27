@@ -1,0 +1,75 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COALESCE(AVG(V.BountyAmount), 0) AS AvgBounty
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id
+),
+
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        COUNT(C.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseCount,
+        COALESCE(SUM(PH.PostHistoryTypeId = 52)::int, 0) AS HotCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY P.Id, P.Score, P.ViewCount, P.Title, P.OwnerUserId
+),
+
+CTE_UserRanked AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.TotalVotes,
+        U.UpVotes,
+        U.DownVotes,
+        U.AvgBounty,
+        RANK() OVER (ORDER BY U.TotalVotes DESC) AS VoteRank
+    FROM UserVoteSummary U
+),
+
+CTE_PostRanked AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.Score,
+        PS.ViewCount,
+        PS.CommentCount,
+        PS.CloseCount,
+        PS.HotCount,
+        RANK() OVER (ORDER BY PS.Score DESC) AS ScoreRank
+    FROM PostSummary PS
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalVotes,
+    U.UpVotes,
+    U.DownVotes,
+    U.AvgBounty,
+    P.PostId,
+    P.Title,
+    P.Score,
+    P.ViewCount,
+    P.CommentCount,
+    P.CloseCount,
+    P.HotCount
+FROM CTE_UserRanked U
+FULL OUTER JOIN CTE_PostRanked P ON U.UserId = P.OwnerUserId
+WHERE (U.TotalVotes > 10 OR U.UpVotes >= ALL (SELECT MAX(U2.UpVotes) FROM CTE_UserRanked U2 WHERE U2.VoteRank <= 5)) 
+    AND (P.CommentCount IS NOT NULL OR P.CloseCount > 0) 
+    AND (P.Title IS NOT NULL AND P.Title ilike '%sql%')
+ORDER BY COALESCE(U.TotalVotes, 0) DESC, COALESCE(P.Score, 0) DESC;

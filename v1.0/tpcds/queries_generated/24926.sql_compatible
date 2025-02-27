@@ -1,0 +1,68 @@
+
+WITH SalesDetails AS (
+    SELECT 
+        ws.web_site_id,
+        ws.web_name,
+        ws.ws_net_profit,
+        dd.d_year,
+        dd.d_month_seq,
+        SUM(ws.ws_quantity) AS Total_Quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS Total_Net_Paid,
+        COUNT(DISTINCT ws.ws_order_number) AS Total_Orders
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year BETWEEN 2020 AND 2023
+        AND ws.ws_net_profit IS NOT NULL
+    GROUP BY 
+        ws.web_site_id, ws.web_name, dd.d_year, dd.d_month_seq
+),
+ProfitAnalysis AS (
+    SELECT 
+        web_site_id,
+        web_name,
+        d_year,
+        d_month_seq,
+        Total_Quantity,
+        Total_Net_Paid,
+        Total_Orders,
+        NULLIF(Total_Net_Paid, 0) AS Non_Zero_Paid, 
+        CASE 
+            WHEN Total_Orders = 0 THEN NULL
+            ELSE Total_Net_Paid / Total_Orders
+        END AS Avg_Payment_Per_Order
+    FROM 
+        SalesDetails
+)
+SELECT 
+    pa.web_name,
+    pa.d_year,
+    pa.d_month_seq,
+    pa.Total_Quantity,
+    pa.Total_Net_Paid,
+    pa.Total_Orders,
+    COALESCE(pa.Avg_Payment_Per_Order, 0) AS Avg_Payment,
+    CASE 
+        WHEN pa.Total_Quantity > 1000 THEN 'High Volume'
+        WHEN pa.Total_Quantity BETWEEN 500 AND 1000 THEN 'Medium Volume'
+        ELSE 'Low Volume'
+    END AS Volume_Category,
+    (SELECT 
+        AVG(sp.ws_net_profit)
+     FROM 
+        web_sales AS sp 
+     WHERE 
+        sp.ws_web_site_sk = pa.web_site_id AND 
+        sp.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = pa.d_year)
+    ) AS Avg_Web_Site_Profit
+FROM 
+    ProfitAnalysis AS pa
+LEFT JOIN 
+    customer AS c ON c.c_current_addr_sk IN (SELECT w_warehouse_sk FROM warehouse WHERE w_warehouse_id = pa.web_site_id) 
+WHERE 
+    pa.Total_Net_Paid IS NOT NULL
+ORDER BY 
+    pa.d_year, pa.d_month_seq DESC, pa.Total_Net_Paid DESC
+FETCH FIRST 50 ROWS ONLY;

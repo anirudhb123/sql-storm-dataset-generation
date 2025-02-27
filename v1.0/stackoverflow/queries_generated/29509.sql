@@ -1,0 +1,76 @@
+WITH TagDetails AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        STRING_AGG(DISTINCT p.Title, '; ') AS PostTitles
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%' )
+    GROUP BY 
+        t.TagName
+),
+UserActivity AS (
+    SELECT 
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostsCreated
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Owner,
+        pt.Name AS PostType,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(h.HistoryCount, 0) AS HistoryCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount
+         FROM Comments
+         GROUP BY PostId) c ON c.PostId = p.Id
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS HistoryCount
+         FROM PostHistory
+         GROUP BY PostId) h ON h.PostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+)
+SELECT 
+    td.TagName,
+    td.PostCount,
+    td.PostTitles,
+    ua.DisplayName,
+    ua.UpVotes,
+    ua.DownVotes,
+    ua.PostsCreated,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Owner,
+    ps.PostType,
+    ps.CommentCount,
+    ps.HistoryCount
+FROM 
+    TagDetails td
+JOIN 
+    UserActivity ua ON td.TagName IN (SELECT UNNEST(string_to_array(tf.TagName, ' ')) FROM Tags tf)
+JOIN 
+    PostSummary ps ON ps.PostId IN (SELECT p.Id FROM Posts p WHERE p.Tags LIKE CONCAT('%<', td.TagName, '>%' ))
+ORDER BY 
+    td.PostCount DESC, ua.UpVotes DESC;

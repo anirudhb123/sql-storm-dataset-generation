@@ -1,0 +1,39 @@
+
+WITH RankedAddresses AS (
+    SELECT 
+        ca_address_sk,
+        ca_street_name,
+        ca_city,
+        ca_state,
+        ROW_NUMBER() OVER (PARTITION BY ca_city ORDER BY ca_street_name) as rank
+    FROM 
+        customer_address
+    WHERE 
+        ca_state IN ('CA', 'NY') 
+        AND CHAR_LENGTH(ca_street_name) > 10
+), 
+AddressStats AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS address_count,
+        AVG(CHAR_LENGTH(ca_street_name)) AS avg_street_name_length
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+)
+SELECT 
+    ra.ca_address_sk,
+    ra.ca_street_name,
+    ra.ca_city,
+    ra.ca_state,
+    as.address_count,
+    as.avg_street_name_length
+FROM 
+    RankedAddresses ra
+JOIN 
+    AddressStats as ON ra.ca_state = as.ca_state
+WHERE 
+    ra.rank <= 5
+ORDER BY 
+    ra.ca_state, ra.rank;

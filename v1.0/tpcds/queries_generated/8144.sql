@@ -1,0 +1,67 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        dd.d_year,
+        hd.hd_income_band_sk
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics hd ON hd.hd_demo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim dd ON c.c_first_sales_date_sk = dd.d_date_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+FinalMetrics AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.d_year,
+        hd.hd_income_band_sk,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        COALESCE(sd.order_count, 0) AS order_count
+    FROM 
+        CustomerDetails cd
+    LEFT JOIN 
+        SalesData sd ON cd.c_customer_sk = sd.ws_bill_customer_sk
+)
+SELECT 
+    f.c_customer_sk,
+    f.c_first_name,
+    f.c_last_name,
+    f.cd_gender,
+    f.cd_marital_status,
+    f.d_year,
+    f.hd_income_band_sk,
+    f.total_sales,
+    f.order_count,
+    CASE 
+        WHEN f.total_sales > 1000 THEN 'High Value Customer'
+        WHEN f.total_sales > 500 THEN 'Mid Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_segment
+FROM 
+    FinalMetrics f
+WHERE 
+    f.order_count > 0
+ORDER BY 
+    f.total_sales DESC
+LIMIT 100;

@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        n.n_name AS nation, 
+        RANK() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+), 
+HighValueParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_supplycost, 
+        ps.ps_availqty, 
+        (ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 100
+), 
+NationOrders AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        COUNT(DISTINCT o.o_orderkey) AS order_count, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name AS region, 
+    ns.n_name AS nation, 
+    COUNT(DISTINCT o.o_orderkey) AS total_orders, 
+    SUM(o.o_totalprice) AS total_revenue, 
+    SUM(hp.total_value) AS total_parts_value,
+    COUNT(rs.s_suppkey) AS supplier_count
+FROM 
+    region r
+JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+JOIN 
+    NationOrders o ON ns.n_nationkey = o.n_nationkey
+JOIN 
+    HighValueParts hp ON hp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps JOIN supplier s ON ps.ps_suppkey = s.s_suppkey WHERE s.s_nationkey = ns.n_nationkey)
+LEFT JOIN 
+    RankedSuppliers rs ON ns.n_nationkey = rs.national_key AND rs.rank <= 5
+GROUP BY 
+    r.r_name, ns.n_name
+ORDER BY 
+    total_revenue DESC, total_orders DESC;

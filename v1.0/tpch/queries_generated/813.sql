@@ -1,0 +1,47 @@
+WITH SupplierOrderStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM
+        supplier s
+    LEFT JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+RegionStats AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+        SUM(ss.total_orders) AS total_orders_in_region,
+        SUM(ss.total_revenue) AS total_revenue_in_region
+    FROM
+        nation n
+    JOIN
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN
+        SupplierOrderStats ss ON ss.s_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = n.n_nationkey)
+    GROUP BY
+        n.n_regionkey, r.r_name
+)
+SELECT
+    r.r_name,
+    r.total_suppliers,
+    COALESCE(r.total_orders_in_region, 0) AS total_orders_in_region,
+    COALESCE(r.total_revenue_in_region, 0.00) AS total_revenue_in_region,
+    CASE 
+        WHEN r.total_orders_in_region > 0 THEN r.total_revenue_in_region / r.total_orders_in_region 
+        ELSE 0 
+    END AS avg_revenue_per_order
+FROM
+    RegionStats r
+ORDER BY 
+    r.total_revenue_in_region DESC;

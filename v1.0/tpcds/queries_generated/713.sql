@@ -1,0 +1,46 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk, 
+        sr_item_sk, 
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_amt) DESC) AS return_rank
+    FROM store_returns
+    GROUP BY sr_returned_date_sk, sr_item_sk
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        COUNT(cd_demo_sk) OVER (PARTITION BY cd_gender) AS gender_count
+    FROM customer_demographics
+), 
+SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        AVG(ws_net_paid) AS average_net_paid,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ws_net_profit) AS median_profit
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim) -- Last 30 days
+    GROUP BY ws_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    COALESCE(r.total_return_amt, 0) AS total_return_amt,
+    COALESCE(cd.cd_gender, 'Unknown') AS customer_gender,
+    s.total_sales,
+    s.average_net_paid,
+    s.total_orders,
+    s.median_profit
+FROM item i
+LEFT JOIN RankedReturns r ON i.i_item_sk = r.sr_item_sk AND r.return_rank = 1
+LEFT JOIN CustomerDemographics cd ON cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_current_addr_sk = (SELECT ca.ca_address_sk FROM customer_address ca WHERE ca.ca_address_id = (SELECT ws_ship_addr_sk FROM web_sales ws WHERE ws_item_sk = i.i_item_sk LIMIT 1) LIMIT 1))
+JOIN SalesData s ON i.i_item_sk = s.ws_item_sk
+WHERE i.i_current_price > 10.00 
+    AND (s.total_sales > 1000 OR r.total_returns IS NOT NULL)
+ORDER BY total_returns DESC, total_sales DESC;

@@ -1,0 +1,58 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+),
+PersonMovieInfo AS (
+    SELECT 
+        p.id AS person_id,
+        p.name,
+        c.movie_id,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY p.id ORDER BY c.nr_order) AS role_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+FilteredMovieInfo AS (
+    SELECT 
+        m.movie_id,
+        m.info,
+        i.info_type_id,
+        rk.title_id,
+        rk.title,
+        rk.production_year
+    FROM 
+        movie_info m
+    JOIN 
+        movie_info_idx idx ON m.id = idx.id
+    JOIN 
+        info_type i ON m.info_type_id = i.id
+    JOIN 
+        RankedTitles rk ON m.movie_id = rk.title_id
+    WHERE 
+        LOWER(m.info) LIKE '%award%' -- Focusing on information about awards
+)
+SELECT 
+    pmi.person_id,
+    pmi.name,
+    fmi.title,
+    fmi.production_year,
+    fmi.info AS award_info,
+    fmi.info_type_id
+FROM 
+    PersonMovieInfo pmi
+JOIN 
+    FilteredMovieInfo fmi ON pmi.movie_id = fmi.movie_id
+WHERE 
+    pmi.role_rank = 1 -- Taking only the first role of each person
+ORDER BY 
+    fmi.production_year DESC, 
+    pmi.name;

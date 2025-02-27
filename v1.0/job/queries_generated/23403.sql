@@ -1,0 +1,69 @@
+WITH movie_details AS (
+    SELECT
+        at.title AS movie_title,
+        c.id AS cast_info_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY at.id ORDER BY c.nr_order) AS actor_order,
+        COALESCE(ci.note, 'No Note') AS cast_note
+    FROM
+        aka_title at
+    JOIN
+        cast_info c ON at.movie_id = c.movie_id
+    LEFT JOIN
+        aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN
+        complete_cast cc ON at.id = cc.movie_id
+    LEFT JOIN
+        company_name co ON co.imdb_id = at.id
+    LEFT JOIN
+        movie_companies mc ON mc.movie_id = at.id
+    WHERE
+        at.production_year > 2000
+        AND ak.name IS NOT NULL
+),
+
+keyword_details AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(mk.keyword_id::text, ', ') AS keyword_ids
+    FROM
+        movie_keyword mk
+    GROUP BY
+        mk.movie_id
+),
+
+actor_info AS (
+    SELECT
+        pn.name AS person_name,
+        pi.info AS person_info,
+        ROW_NUMBER() OVER (ORDER BY pn.name) AS person_rank
+    FROM
+        name pn
+    LEFT JOIN
+        person_info pi ON pn.imdb_id = pi.person_id
+    WHERE
+        pn.gender = 'M'
+)
+
+SELECT
+    md.movie_title,
+    md.actor_name,
+    md.cast_note,
+    COALESCE(kd.keyword_ids, 'No Keywords') AS keywords,
+    ai.person_name,
+    CASE 
+        WHEN ai.person_info IS NULL THEN 'No Info Available'
+        ELSE ai.person_info
+    END AS person_info
+FROM
+    movie_details md
+FULL OUTER JOIN
+    keyword_details kd ON md.cast_info_id = kd.movie_id
+LEFT JOIN
+    actor_info ai ON md.actor_name = ai.person_name
+WHERE
+    md.actor_order IS NOT NULL
+    AND (ai.person_rank IS NULL OR ai.person_rank < 5)  -- Limiting to top 5 actors
+ORDER BY
+    md.movie_title,
+    md.actor_order;

@@ -1,0 +1,60 @@
+WITH ActorMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        ka.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT t.title, ', ' ORDER BY t.title) AS movie_titles
+    FROM
+        aka_name ka
+    JOIN cast_info ci ON ka.person_id = ci.person_id
+    JOIN title t ON ci.movie_id = t.id
+    WHERE 
+        ka.name ILIKE '%Smith%'
+    GROUP BY 
+        a.id, ka.name
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        COALESCE(mi.info, 'No Info Available') AS info,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id AND mi.note IS NULL
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year, mi.info
+),
+Combined AS (
+    SELECT 
+        am.actor_id,
+        am.actor_name,
+        am.total_movies,
+        am.movie_titles,
+        mi.movie_title,
+        mi.production_year,
+        mi.info,
+        mi.keyword_count
+    FROM 
+        ActorMovies am
+    LEFT JOIN MovieInfo mi ON am.total_movies > 2
+    ORDER BY 
+        am.total_movies DESC, 
+        mi.production_year ASC
+)
+SELECT 
+    actor_id,
+    actor_name,
+    total_movies,
+    movie_titles,
+    movie_title,
+    production_year,
+    info,
+    keyword_count
+FROM 
+    Combined
+WHERE 
+    total_movies > 5
+LIMIT 10;

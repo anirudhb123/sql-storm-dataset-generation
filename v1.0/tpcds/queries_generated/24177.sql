@@ -1,0 +1,68 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank_profit,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_profit > 0
+    GROUP BY 
+        ws.ws_item_sk, ws.ws_order_number
+),
+aggregate_sales AS (
+    SELECT 
+        rs.ws_item_sk,
+        SUM(rs.total_quantity) AS grand_total_quantity,
+        MAX(rs.avg_sales_price) AS max_avg_sales_price,
+        SUM(rs.unique_customers) OVER (PARTITION BY rs.ws_item_sk) AS total_unique_customers
+    FROM 
+        ranked_sales rs 
+    GROUP BY 
+        rs.ws_item_sk
+),
+customer_prefs AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender
+    HAVING 
+        COUNT(ws.ws_order_number) > 5
+)
+SELECT 
+    cs.ws_item_sk,
+    cs.grand_total_quantity,
+    cs.max_avg_sales_price,
+    cp.total_unique_customers,
+    cp.c_customer_id,
+    cp.cd_gender,
+    CASE 
+        WHEN cp.total_net_profit IS NULL THEN 'No Profit'
+        ELSE 'Profit Exists'
+    END AS profit_status
+FROM 
+    aggregate_sales cs
+JOIN 
+    customer_prefs cp ON EXISTS (
+        SELECT 1 
+        FROM ranked_sales rs 
+        WHERE rs.ws_item_sk = cs.ws_item_sk 
+        AND rs.rank_profit = 1
+    )
+WHERE 
+    cs.grand_total_quantity > 1000
+ORDER BY 
+    cs.max_avg_sales_price DESC,
+    cp.cd_gender DESC;

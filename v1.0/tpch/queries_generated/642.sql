@@ -1,0 +1,59 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemDetail AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(l.l_linenumber) AS total_lines,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    cs.c_name,
+    COALESCE(cs.total_orders, 0) AS total_orders,
+    COALESCE(cs.total_spent, 0) AS total_spent,
+    ss.total_available_quantity,
+    ss.average_supply_cost,
+    ld.total_lines,
+    ld.total_line_value
+FROM 
+    CustomerOrders cs
+FULL OUTER JOIN 
+    SupplierStats ss ON cs.total_orders > 0 AND ss.total_available_quantity IS NOT NULL
+FULL OUTER JOIN 
+    LineItemDetail ld ON cs.total_orders > 0 OR ld.total_lines IS NOT NULL
+WHERE 
+    (cs.total_spent > 1000 OR ss.average_supply_cost IS NULL)
+    AND (ss.total_available_quantity IS NOT NULL OR ld.total_line_value < 10000)
+ORDER BY 
+    cs.total_spent DESC, ss.average_supply_cost ASC;

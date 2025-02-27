@@ -1,0 +1,86 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    UNION ALL
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        aka_title m
+    JOIN
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE
+        mh.level < 3 
+),
+cast_roles AS (
+    SELECT
+        c.movie_id,
+        r.role,
+        p.name AS person_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY r.role) AS role_rank
+    FROM
+        cast_info c
+    JOIN
+        role_type r ON c.role_id = r.id
+    JOIN
+        aka_name p ON c.person_id = p.person_id
+),
+keywords AS (
+    SELECT
+        mk.movie_id,
+        k.keyword
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+),
+movie_details AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        COUNT(DISTINCT cr.person_name) AS cast_count
+    FROM
+        movie_hierarchy mh
+    LEFT JOIN
+        cast_roles cr ON mh.movie_id = cr.movie_id
+    LEFT JOIN
+        keywords k ON mh.movie_id = k.movie_id
+    GROUP BY
+        mh.movie_id, mh.title, mh.production_year
+)
+SELECT
+    md.title,
+    md.production_year,
+    md.cast_count,
+    CASE
+        WHEN md.cast_count > 10 THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS popularity,
+    COALESCE(md.keywords::text, 'No Keywords') AS keywords
+FROM
+    movie_details md
+WHERE
+    md.production_year >= 2000
+    AND EXISTS (
+        SELECT 1
+        FROM movie_info mi
+        WHERE mi.movie_id = md.movie_id
+        AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'box office')
+        AND CAST(mi.info AS numeric) > 1000000 
+    )
+ORDER BY
+    md.production_year DESC, md.title;

@@ -1,0 +1,90 @@
+WITH RECURSIVE TotalSales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey
+
+    UNION ALL
+
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) + ts.total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        TotalSales ts ON c.c_custkey = ts.c_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey
+),
+RankedSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        ts.total_sales,
+        RANK() OVER (ORDER BY ts.total_sales DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        TotalSales ts ON c.c_custkey = ts.c_custkey
+    WHERE 
+        ts.total_sales > 0
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_supplycost,
+        ps.ps_availqty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    rs.c_name,
+    rs.total_sales,
+    ps.p_name,
+    ps.ps_availqty,
+    ps.ps_supplycost,
+    ps.ps_supplycost * ps.ps_availqty AS total_value_stock,
+    CASE 
+        WHEN rs.sales_rank <= 10 THEN 'Top Customer'
+        ELSE 'Regular Customer' 
+    END AS customer_category
+FROM 
+    RankedSales rs
+LEFT JOIN 
+    PartSupplier ps ON rs.c_custkey IN (
+        SELECT 
+            c.c_custkey
+        FROM 
+            lineitem l
+        JOIN 
+            orders o ON l.l_orderkey = o.o_orderkey
+        JOIN 
+            customer c ON o.o_custkey = c.c_custkey
+        WHERE 
+            l.l_shipdate >= '2023-01-01'
+            AND l.l_returnflag = 'N'
+        GROUP BY 
+            c.c_custkey
+    )
+WHERE 
+    ps.ps_availqty IS NOT NULL
+ORDER BY 
+    total_value_stock DESC;

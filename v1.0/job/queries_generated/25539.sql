@@ -1,0 +1,59 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        GROUP_CONCAT(DISTINCT ak.name) AS aka_names
+    FROM 
+        aka_title AS ak
+    JOIN 
+        title AS t ON ak.movie_id = t.id
+    GROUP BY 
+        t.id, t.title, t.production_year, t.kind_id
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS num_actors,
+        STRING_AGG(DISTINCT CONCAT(cn.name, ' (', rt.role, ')'), '; ') AS actor_roles
+    FROM 
+        cast_info AS ci
+    JOIN 
+        role_type AS rt ON ci.person_role_id = rt.id
+    JOIN 
+        char_name AS cn ON ci.person_id = cn.imdb_id
+    GROUP BY 
+        ci.movie_id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS num_companies,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.kind_id,
+    cd.num_actors,
+    cd.actor_roles,
+    co.num_companies,
+    co.company_names
+FROM 
+    MovieDetails AS md
+LEFT JOIN 
+    CastDetails AS cd ON md.movie_id = cd.movie_id
+LEFT JOIN 
+    CompanyDetails AS co ON md.movie_id = co.movie_id
+WHERE 
+    md.production_year >= 2000
+    AND md.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tv series'))
+ORDER BY 
+    md.production_year DESC, md.title;

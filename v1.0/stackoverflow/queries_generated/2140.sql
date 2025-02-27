@@ -1,0 +1,81 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(PV.VoteCount, 0) AS VoteCount,
+        COALESCE(CH.CommentCount, 0) AS CommentCount,
+        P.Body
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) PV ON P.Id = PV.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) CH ON P.Id = CH.PostId
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+TopUsers AS (
+    SELECT 
+        U.Id, 
+        U.DisplayName, 
+        U.Reputation
+    FROM 
+        UserReputation U
+    WHERE 
+        U.ReputationRank <= 10
+),
+PostStats AS (
+    SELECT 
+        RP.Title,
+        RP.OwnerUserId,
+        RP.VoteCount,
+        RP.CommentCount,
+        UR.DisplayName AS OwnerDisplayName
+    FROM 
+        RecentPosts RP
+    JOIN 
+        TopUsers UR ON RP.OwnerUserId = UR.Id
+)
+SELECT 
+    PS.OwnerDisplayName,
+    PS.Title,
+    PS.VoteCount,
+    PS.CommentCount,
+    CASE 
+        WHEN PS.VoteCount > 10 THEN 'Popular'
+        WHEN PS.VoteCount BETWEEN 5 AND 10 THEN 'Moderately Popular'
+        ELSE 'Less Popular'
+    END AS PopularityCategory,
+    (SELECT COUNT(*) FROM Posts P WHERE P.OwnerUserId = PS.OwnerUserId AND P.CreationDate >= CURRENT_DATE - INTERVAL '1 year') AS RecentPostCount
+FROM 
+    PostStats PS
+ORDER BY 
+    PS.VoteCount DESC
+LIMIT 10
+OFFSET 0;

@@ -1,0 +1,50 @@
+WITH RECURSIVE monthly_totals AS (
+    SELECT 
+        EXTRACT(YEAR FROM o_orderdate) AS order_year,
+        EXTRACT(MONTH FROM o_orderdate) AS order_month,
+        SUM(o_totalprice) AS total_sales
+    FROM orders
+    GROUP BY 
+        EXTRACT(YEAR FROM o_orderdate), 
+        EXTRACT(MONTH FROM o_orderdate)
+),
+
+top_nations AS (
+    SELECT 
+        n.n_name,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+    ORDER BY total_acctbal DESC
+    LIMIT 5
+),
+
+part_sales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN 0 ELSE l.l_extendedprice * (1 - l.l_discount) END) AS sales
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' 
+    GROUP BY p.p_partkey, p.p_name
+)
+
+SELECT 
+    m.order_year, 
+    m.order_month, 
+    m.total_sales,
+    tn.n_name AS top_nation,
+    ps.p_name,
+    ps.sales,
+    COALESCE(ps.sales, 0) AS adjusted_sales,
+    CASE 
+        WHEN ps.sales IS NULL THEN 'No Sales' 
+        ELSE 'Sales Found' 
+    END AS sales_status
+FROM monthly_totals m
+CROSS JOIN top_nations tn
+LEFT JOIN part_sales ps ON ps.sales > 1000
+ORDER BY m.order_year, m.order_month, tn.total_acctbal DESC, ps.sales DESC;

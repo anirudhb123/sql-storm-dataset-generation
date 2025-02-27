@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(v.Id) AS VoteCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsList
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2  
+    LEFT JOIN 
+        (SELECT 
+             p.Id AS PostId, 
+             regexp_split_to_table(p.Tags, '><') AS TagName
+         FROM 
+             Posts p
+         WHERE 
+             p.Tags IS NOT NULL) AS t ON p.Id = t.PostId  
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+    ORDER BY 
+        VoteCount DESC, p.CreationDate DESC
+    LIMIT 10  
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS EditDate,
+        ph.UserDisplayName AS Editor,
+        ph.Comment AS EditReason,
+        ph.PostHistoryTypeId,
+        CASE 
+            WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 'Title/Body/Tags Edited'
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN 'Post Closed/Reopened'
+            ELSE 'Other'
+        END AS EditType
+    FROM 
+        PostHistory ph
+    JOIN 
+        RankedPosts rp ON ph.PostId = rp.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.Author,
+    rp.VoteCount,
+    rp.TagsList,
+    json_agg(json_build_object('EditDate', ph.EditDate, 'Editor', ph.Editor, 'EditReason', ph.EditReason, 'EditType', ph.EditType)) AS EditHistory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryDetails ph ON rp.PostId = ph.PostId
+GROUP BY 
+    rp.PostId, rp.Title, rp.Body, rp.CreationDate, rp.Author, rp.VoteCount, rp.TagsList
+ORDER BY 
+    rp.VoteCount DESC;

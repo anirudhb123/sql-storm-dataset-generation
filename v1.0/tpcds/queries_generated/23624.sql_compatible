@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk
+), 
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        STRING_AGG(DISTINCT cd.cd_gender, ',') AS gender_distribution
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk
+), 
+SalesWithReturns AS (
+    SELECT 
+        r.sr_item_sk,
+        SUM(r.sr_return_quantity) AS total_returns,
+        SUM(r.sr_return_amt) AS total_return_amount,
+        COALESCE(SUM(r.sr_return_tax), 0) AS total_return_tax
+    FROM 
+        store_returns r
+    GROUP BY 
+        r.sr_item_sk
+)
+SELECT 
+    ca.ca_city,
+    SUM(RS.total_sales) AS city_total_sales,
+    COUNT(DISTINCT CS.c_customer_sk) AS unique_customers,
+    AVG(CS.avg_purchase_estimate) AS avg_customer_estimation,
+    COALESCE(SUM(SWR.total_returns), 0) AS total_returned_qty,
+    CASE 
+        WHEN SUM(RS.total_sales) > 10000 THEN 'High Sales'
+        WHEN SUM(RS.total_sales) BETWEEN 5000 AND 10000 THEN 'Moderate Sales'
+        ELSE 'Low Sales'
+    END AS sales_category
+FROM 
+    customer_address ca
+LEFT JOIN 
+    RankedSales RS ON ca.ca_address_sk = RS.web_site_sk
+LEFT JOIN 
+    CustomerStats CS ON CS.c_customer_sk IN (SELECT c.c_customer_sk FROM customer c WHERE c.c_current_addr_sk = ca.ca_address_sk)
+LEFT JOIN 
+    SalesWithReturns SWR ON RS.web_site_sk = SWR.sr_item_sk
+WHERE 
+    ca.ca_state = 'CA' AND 
+    (SWR.total_returns IS NULL OR SWR.total_return_amount < 100)
+GROUP BY 
+    ca.ca_city
+HAVING 
+    COUNT(DISTINCT CS.c_customer_sk) > 1
+ORDER BY 
+    city_total_sales DESC;

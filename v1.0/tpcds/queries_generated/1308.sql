@@ -1,0 +1,61 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        sr_customer_sk,
+        sr_return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_return_quantity DESC) AS rn
+    FROM 
+        store_returns
+), 
+ItemSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), 
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit,
+        AVG(CASE WHEN cd.cd_marital_status = 'M' THEN 1 ELSE 0 END) AS marital_status_ratio
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender
+)
+SELECT 
+    ci.ca_city,
+    COUNT(DISTINCT cs.c_customer_sk) AS customer_count,
+    SUM(COALESCE(ir.return_quantity, 0)) AS total_returned_qty,
+    SUM(COALESCE(is.total_sales, 0)) AS total_sales_amt,
+    AVG(cs.total_profit) AS avg_profit_per_customer,
+    (SELECT AVG(total_orders) 
+     FROM CustomerStats) AS avg_orders_per_customer
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    RankedReturns ir ON ir.sr_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    ItemSales is ON is.ws_item_sk = ir.sr_item_sk
+JOIN 
+    CustomerStats cs ON cs.c_customer_sk = c.c_customer_sk
+GROUP BY 
+    ci.ca_city
+HAVING 
+    COUNT(DISTINCT cs.c_customer_sk) > 10
+ORDER BY 
+    total_sales_amt DESC;

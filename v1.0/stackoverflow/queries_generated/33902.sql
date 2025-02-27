@@ -1,0 +1,88 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- selecting only questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+BadgesSummary AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        phh.PostTitle AS ParentPostTitle,
+        COALESCE(vs.UpVotes, 0) AS UpVotes,
+        COALESCE(vs.DownVotes, 0) AS DownVotes,
+        COALESCE(bs.BadgeCount, 0) AS UserBadgeCount,
+        COALESCE(bs.BadgeNames, 'No Badges') AS UserBadges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHierarchy phh ON p.ParentId = phh.PostId
+    LEFT JOIN 
+        PostVoteSummary vs ON p.Id = vs.PostId
+    LEFT JOIN 
+        BadgesSummary bs ON p.OwnerUserId = bs.UserId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.ParentPostTitle,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.UserBadgeCount,
+    pd.UserBadges,
+    CASE 
+        WHEN pd.ViewCount > 1000 THEN 'Popular'
+        WHEN pd.ViewCount > 100 THEN 'Moderate'
+        ELSE 'Less Popular'
+    END AS PopularityRank
+FROM 
+    PostDetails pd
+WHERE 
+    pd.UpVotes - pd.DownVotes > 0 -- filter posts with net positive votes
+ORDER BY 
+    pd.UpVotes DESC
+LIMIT 50;
+
+This SQL query performs several complex operations, including recursive common table expressions (CTEs) to establish post hierarchies, aggregate voting results from the Votes table, and summarize user badges. The results are then filtered and ranked based on popularity. The combination of these elements showcases various SQL features, including outer joins, correlated subqueries, window functions with aggregation, and complex predicates.

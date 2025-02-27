@@ -1,0 +1,70 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN P.AnswerCount ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(V.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(V.VoteTypeId = 3) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostEngagement AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerName,
+        COUNT(C.Id) AS CommentCount,
+        SUM(V.VoteTypeId = 2) AS UpVotes,
+        SUM(V.VoteTypeId = 3) AS DownVotes,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, U.DisplayName
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.BadgeCount,
+    US.TotalQuestions,
+    US.TotalAnswers,
+    US.TotalViews,
+    US.TotalUpVotes,
+    US.TotalDownVotes,
+    PE.PostId,
+    PE.Title AS PostTitle,
+    PE.CreationDate AS PostCreationDate,
+    PE.OwnerName,
+    PE.CommentCount,
+    PE.UpVotes AS PostUpVotes,
+    PE.DownVotes AS PostDownVotes,
+    PE.CloseCount
+FROM 
+    UserStats US
+JOIN 
+    PostEngagement PE ON US.UserId = PE.OwnerName
+ORDER BY 
+    US.Reputation DESC, PE.UpVotes DESC
+LIMIT 50;

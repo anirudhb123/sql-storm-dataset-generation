@@ -1,0 +1,49 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(ps.ps_supplycost) AS part_count,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        sp.total_supplycost,
+        RANK() OVER (ORDER BY sp.total_supplycost DESC) AS supplier_rank
+    FROM supplier s
+    JOIN SupplierParts sp ON s.s_suppkey = sp.s_suppkey
+)
+SELECT 
+    co.c_name,
+    COUNT(co.o_orderkey) AS total_orders,
+    SUM(co.o_totalprice) AS total_spent,
+    STRING_AGG(DISTINCT CONCAT(CAST(co.o_orderdate AS VARCHAR), ': ', CAST(co.o_orderkey AS VARCHAR)), '; ') AS order_history,
+    TOP.s_name AS top_supplier,
+    TOP.total_supplycost
+FROM CustomerOrders co
+LEFT JOIN TopSuppliers TOP ON co.o_orderkey IN (
+    SELECT l.l_orderkey 
+    FROM lineitem l 
+    WHERE l.l_suppkey = TOP.s_suppkey
+)
+WHERE co.rn = 1
+GROUP BY co.c_name, TOP.s_name, TOP.total_supplycost
+HAVING SUM(co.o_totalprice) > (SELECT AVG(o.o_totalprice) * 2 FROM orders o)
+ORDER BY total_spent DESC;

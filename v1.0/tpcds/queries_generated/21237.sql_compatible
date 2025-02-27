@@ -1,0 +1,56 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        COUNT(DISTINCT sr.sr_ticket_number) AS return_count,
+        SUM(COALESCE(sr.sr_return_amt, 0)) AS total_return_amt
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name
+), 
+HighReturnCustomers AS (
+    SELECT 
+        cr.c_customer_sk,
+        cr.c_first_name,
+        cr.return_count,
+        cr.total_return_amt,
+        DENSE_RANK() OVER (ORDER BY cr.total_return_amt DESC) AS rank
+    FROM 
+        CustomerReturns cr
+    WHERE 
+        cr.total_return_amt > (SELECT AVG(total_return_amt) FROM CustomerReturns)
+)
+SELECT 
+    c.c_customer_id,
+    c.c_email_address,
+    COALESCE(hc.total_return_amt, 0) AS high_return_amt,
+    COALESCE(hc.return_count, 0) AS return_count,
+    CASE 
+        WHEN hc.return_count > 0 THEN 'High Return'
+        ELSE 'Normal'
+    END AS return_category
+FROM 
+    customer c
+LEFT JOIN 
+    HighReturnCustomers hc ON c.c_customer_sk = hc.c_customer_sk
+WHERE 
+    c.c_preferred_cust_flag = 'Y' 
+    AND (hc.rank IS NULL OR hc.rank <= 10)
+UNION ALL
+SELECT 
+    c.c_customer_id,
+    c.c_email_address,
+    0 AS high_return_amt,
+    0 AS return_count,
+    'Normal' AS return_category
+FROM 
+    customer c
+WHERE 
+    c.c_customer_sk NOT IN (SELECT c_customer_sk FROM HighReturnCustomers)
+    AND c.c_preferred_cust_flag = 'N'
+ORDER BY 
+    high_return_amt DESC, c.c_customer_id;

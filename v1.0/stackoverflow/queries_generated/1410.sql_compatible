@@ -1,0 +1,66 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(V.VoteCount, 0)) AS TotalVotes,
+        RANK() OVER (ORDER BY COUNT(P.Id) DESC) AS PostRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, DisplayName, Reputation, TotalVotes, PostCount
+    FROM 
+        UserActivity
+    WHERE 
+        PostRank <= 10
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+            ELSE 'Not Accepted'
+        END AS AnswerStatus,
+        COALESCE(P.ClosedDate, 'Open') AS StatusDate,
+        P.OwnerUserId
+    FROM 
+        Posts P
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    P.Title,
+    P.ViewCount,
+    P.AnswerStatus,
+    P.StatusDate,
+    (CASE 
+        WHEN TU.Reputation > 1000 THEN 'High Reputation User'
+        ELSE 'Regular User'
+    END) AS UserType
+FROM 
+    TopUsers TU
+JOIN 
+    PostDetails P ON TU.UserId = P.OwnerUserId
+WHERE 
+    P.ViewCount >= 100
+ORDER BY 
+    TU.Reputation DESC, P.ViewCount DESC;

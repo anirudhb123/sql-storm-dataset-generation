@@ -1,0 +1,72 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId IN (2)), 0) AS UpVotes, -- upvote
+        COALESCE(SUM(v.VoteTypeId IN (3)), 0) AS DownVotes -- downvote
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+AcceptanceStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(a.Id) AS AcceptedCount
+    FROM Posts p
+    LEFT JOIN Posts a ON p.AcceptedAnswerId = a.Id
+    WHERE p.PostTypeId = 1 -- only questions
+    GROUP BY p.Id
+),
+FinalMetrics AS (
+    SELECT 
+        p.Title,
+        pm.CommentCount,
+        pm.UpVotes,
+        pm.DownVotes,
+        COALESCE(a.AcceptedCount, 0) AS AcceptedCount,
+        ub.UserId,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        CASE 
+            WHEN ub.GoldBadges > 0 THEN 'Gold Star'
+            WHEN ub.SilverBadges > 0 THEN 'Silver Star'
+            WHEN ub.BronzeBadges > 0 THEN 'Bronze Star'
+            ELSE 'No Stars' END AS BadgeStatus
+    FROM Posts p
+    JOIN PostMetrics pm ON p.Id = pm.PostId
+    LEFT JOIN AcceptanceStats a ON p.Id = a.PostId
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+    WHERE p.CreationDate > COALESCE((SELECT MAX(ClosedDate) FROM Posts WHERE ClosedDate IS NOT NULL), '1970-01-01')
+        AND (pm.UpVotes - pm.DownVotes) > 10
+    ORDER BY pm.CommentCount DESC, p.CreationDate DESC
+)
+SELECT 
+    Title,
+    CommentCount,
+    UpVotes,
+    DownVotes,
+    AcceptedCount,
+    BadgeStatus
+FROM FinalMetrics
+WHERE AcceptedCount > 0
+    OR BadgeStatus = 'Gold Star'
+LIMIT 100;
+
+-- This query retrieves the titles of posts with a significant number of upvotes minus downvotes,
+-- filtered to only include those that have either a non-zero count of accepted answers or any gold badges.
+-- It includes CTEs (Common Table Expressions) for intermediate aggregations,
+-- highly leveraging joins and outer joins to pull in various relevant user and badge information.
+-- The final sorting prioritizes comments and post creation dates while returning a restricted number of results.

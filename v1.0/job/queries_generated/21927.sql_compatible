@@ -1,0 +1,94 @@
+
+WITH RECURSIVE TitleHierarchy AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.kind_id, 
+        t.production_year,
+        1 AS hierarchy_level,
+        t.imdb_index,
+        t.phonetic_code
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    UNION ALL
+    SELECT 
+        t.id AS title_id, 
+        t.title,
+        t.kind_id, 
+        t.production_year,
+        th.hierarchy_level + 1,
+        t.imdb_index,
+        t.phonetic_code
+    FROM 
+        aka_title t
+    JOIN 
+        TitleHierarchy th ON t.episode_of_id = th.title_id
+),
+FilteredTitles AS (
+    SELECT 
+        title_id, 
+        title, 
+        production_year,
+        kind_id,
+        hierarchy_level
+    FROM 
+        TitleHierarchy
+    WHERE 
+        hierarchy_level < 5
+),
+ActorTitles AS (
+    SELECT 
+        a.person_id, 
+        a.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS latest_title_rank,
+        t.title AS movie_title,
+        t.production_year
+    FROM 
+        cast_info a
+    JOIN 
+        aka_title t ON a.movie_id = t.id
+    WHERE 
+        a.nr_order < 3
+),
+ActorInfo AS (
+    SELECT 
+        p.name,
+        p.id AS person_id,
+        COALESCE(SUM(CASE WHEN t.kind_id IS NULL THEN 1 ELSE 0 END), 0) AS missing_kind_count,
+        COUNT(DISTINCT a.movie_id) AS total_movies
+    FROM 
+        aka_name p
+    LEFT JOIN 
+        ActorTitles a ON p.person_id = a.person_id
+    LEFT JOIN 
+        aka_title t ON a.movie_id = t.id
+    GROUP BY 
+        p.name, p.id
+)
+SELECT 
+    ai.name,
+    ai.total_movies,
+    ai.missing_kind_count,
+    STRING_AGG(DISTINCT ft.title, ', ') AS top_titles,
+    STRING_AGG(DISTINCT CAST(ft.production_year AS VARCHAR), ', ') AS production_years,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM 
+    ActorInfo ai
+LEFT JOIN 
+    FilteredTitles ft ON ai.person_id IN (
+        SELECT ci.person_id 
+        FROM cast_info ci
+        WHERE ci.movie_id IN (SELECT title_id FROM FilteredTitles)
+    )
+LEFT JOIN 
+    movie_keyword mk ON ft.title_id = mk.movie_id
+GROUP BY 
+    ai.name, ai.total_movies, ai.missing_kind_count
+HAVING 
+    COUNT(DISTINCT ft.title) > 2
+ORDER BY 
+    ai.total_movies DESC,
+    ai.missing_kind_count ASC
+LIMIT 10;

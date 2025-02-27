@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_site_id,
+        ws_net_paid,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_net_paid DESC) AS sales_rank,
+        CASE 
+            WHEN ws_net_paid > 1000 THEN 'High Value'
+            WHEN ws_net_paid BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS value_category
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_bill_customer_sk IS NOT NULL
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        hd.hd_income_band_sk,
+        COALESCE(SUM(ws.ws_net_paid), 0) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, hd.hd_income_band_sk
+),
+TopCustomers AS (
+    SELECT 
+        cd.c_customer_id,
+        cd.total_spent,
+        RANK() OVER (ORDER BY cd.total_spent DESC) AS customer_rank
+    FROM 
+        CustomerDetails cd
+    WHERE 
+        cd.total_spent IS NOT NULL OR cd.hd_income_band_sk IS NOT NULL
+)
+SELECT
+    rc.web_site_id,
+    rc.sales_rank,
+    tc.c_customer_id,
+    tc.total_spent,
+    tc.customer_rank,
+    tc.total_spent - COALESCE(NULLIF((SELECT MAX(total_spent) FROM CustomerDetails WHERE total_spent < tc.total_spent), 0), 0) AS previous_spent
+FROM 
+    RankedSales rc
+JOIN 
+    TopCustomers tc ON rc.web_site_sk = tc.c_customer_id
+WHERE 
+    rc.value_category = 'High Value' AND
+    (tc.total_spent > (SELECT AVG(total_spent) FROM CustomerDetails) OR tc.total_spent IS NULL)
+ORDER BY 
+    rc.web_site_id, tc.customer_rank DESC
+OPTION (MAXDOP 1);

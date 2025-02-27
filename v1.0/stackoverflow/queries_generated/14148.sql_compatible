@@ -1,0 +1,52 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(p.Score) AS AvgScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+HighestScoredPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    ORDER BY 
+        p.Score DESC
+    LIMIT 10
+)
+
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.PostCount,
+    u.Questions,
+    u.Answers,
+    u.AvgScore,
+    u.TotalViews,
+    h.PostId,
+    h.Title,
+    h.Score,
+    h.CreationDate,
+    h.OwnerDisplayName
+FROM 
+    UserPostStats u
+JOIN 
+    HighestScoredPosts h ON u.UserId = h.OwnerDisplayName
+ORDER BY 
+    u.AvgScore DESC;

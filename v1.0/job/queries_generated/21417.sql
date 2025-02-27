@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        CAST(mt.title AS VARCHAR(255)) AS full_title
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1 AS level,
+        CAST(mh.full_title || ' -> ' || at.title AS VARCHAR(255)) AS full_title
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COALESCE(SUM(ci.nr_order), 0) AS total_roles,
+    STRING_AGG(DISTINCT mh.full_title, ', ') AS linked_movies,
+    COUNT(DISTINCT mj.info) FILTER (WHERE mj.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget')) AS budget_entries,
+    COUNT(DISTINCT mj.info) FILTER (WHERE mj.info_type_id = (SELECT id FROM info_type WHERE info = 'BoxOffice')) AS box_office_entries
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+LEFT JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    MovieHierarchy mh ON mt.id = mh.movie_id
+LEFT JOIN 
+    movie_info mj ON mt.id = mj.movie_id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.name, mt.title, mt.production_year
+HAVING 
+    (SUM(ci.nr_order) > 0 OR (SUM(ci.nr_order) IS NULL AND ARRAY_LENGTH(ARRAY(SELECT DISTINCT info FROM movie_info WHERE movie_id = mt.id), 1) = 0)) 
+    AND (mt.production_year IS NOT NULL OR mg.title IS NULL)
+ORDER BY 
+    actor_name,
+    production_year DESC
+LIMIT 50;
+
+This query utilizes various SQL concepts:
+
+- **Common Table Expressions (CTEs)** to create a recursive structure reflecting movie hierarchies.
+- **Outer joins** to maintain records of actors even if they have no associated movie roles.
+- **Aggregations** to count total roles and linked movies.
+- **Coalesce** and **Filters** to handle potential NULL logic and calculations.
+- **Bizarre semantics** in the HAVING clause, creating unusual conditions for selecting records.
+- **String aggregation** for linked movie names into a single field.
+
+This showcases a deep SQL query that could be appropriate for performance benchmarking, as it combines multiple layers of complexity while also handling potential pitfalls of NULLs and undefined relations.

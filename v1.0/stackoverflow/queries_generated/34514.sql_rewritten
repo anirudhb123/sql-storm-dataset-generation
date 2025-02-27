@@ -1,0 +1,56 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.OwnerUserId,
+        CAST(0 AS INT) AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.Score,
+        p2.OwnerUserId,
+        rp.Depth + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        Posts p ON p2.ParentId = p.Id
+    INNER JOIN 
+        RecursivePosts rp ON p.Id = rp.Id
+)
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS TotalQuestions,
+    SUM(p.Score) AS TotalScore,
+    AVG(p.Score) AS AvgScore,
+    COUNT(DISTINCT nec.Id) AS TotalCloseComments,
+    CASE 
+        WHEN u.Reputation > 1000 THEN 'High Reputation'
+        WHEN u.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationTier,
+    ARRAY_AGG(DISTINCT t.TagName) AS TagsPredominantlyUsed,
+    MAX(p.CreationDate) AS LastActiveDate
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = p.Id AND ph.PostHistoryTypeId = 10
+LEFT JOIN 
+    Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+LEFT JOIN 
+    Comments nec ON nec.PostId = p.Id AND nec.CreationDate BETWEEN cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' AND cast('2024-10-01 12:34:56' as timestamp)
+GROUP BY 
+    u.Id
+HAVING 
+    COUNT(DISTINCT p.Id) > 0 AND SUM(p.Score) > 50
+ORDER BY 
+    TotalQuestions DESC, TotalScore DESC;

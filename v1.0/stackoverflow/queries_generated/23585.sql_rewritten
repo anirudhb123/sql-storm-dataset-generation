@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.Id AS UserId,
+        u.DisplayName AS UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(NULLIF(STRING_AGG(DISTINCT t.TagName, ',') FILTER (WHERE t.TagName IS NOT NULL), ''), '') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT 
+             Id, 
+             TagName 
+         FROM 
+             Tags 
+         WHERE 
+             TagName IS NOT NULL) t ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+AggregatedVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId IN (2, 8) THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes 
+    GROUP BY 
+        PostId
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS TotalCloseReopen,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS TotalDeleted,
+        MAX(ph.CreationDate) AS LastEdit
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    av.UpVotes,
+    av.DownVotes,
+    rp.CommentCount,
+    ps.TotalCloseReopen,
+    ps.TotalDeleted,
+    ps.LastEdit,
+    CASE 
+        WHEN rp.RankScore = 1 THEN 'Top Post'
+        WHEN rp.RankScore <= 5 THEN 'Popular Post'
+        ELSE 'Regular Post'
+    END AS PostType,
+    CASE 
+        WHEN rp.Tags IS NULL THEN 'Unlabeled'
+        ELSE rp.Tags 
+    END AS Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    AggregatedVotes av ON rp.PostId = av.PostId
+LEFT JOIN 
+    PostHistoryStats ps ON rp.PostId = ps.PostId
+WHERE 
+    (av.UpVotes - av.DownVotes) > 5 OR
+    (rp.CommentCount > 10 AND rp.Score >= 5)
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,70 @@
+
+WITH UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN VT.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VT.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN VoteTypes VT ON V.VoteTypeId = VT.Id
+    GROUP BY U.Id
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(PA.UV, 0) AS UpvoteCount,
+        COALESCE(PA.DV, 0) AS DownvoteCount,
+        P.ANSWER_COUNT,
+        P.CLOSED_DATE,
+        P.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName
+    FROM Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UV,
+            COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DV
+        FROM Votes V
+        GROUP BY PostId
+    ) PA ON P.Id = PA.PostId
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS HistoryDate,
+        PHT.Name AS HistoryType,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS RN
+    FROM PostHistory PH
+    JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE PH.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 MONTH'
+),
+AggregatedPostHistory AS (
+    SELECT 
+        PostId,
+        STRING_AGG(HistoryType, ', ') AS RecentChanges
+    FROM RecentPostHistory
+    WHERE RN <= 5
+    GROUP BY PostId
+)
+SELECT 
+    PD.Title,
+    PD.CreationDate,
+    PD.UpvoteCount,
+    PD.DownvoteCount,
+    UVC.TotalVotes,
+    UVC.UpVotes,
+    UVC.DownVotes,
+    COALESCE(APH.RecentChanges, 'No recent changes') AS RecentPostChanges,
+    CASE 
+        WHEN PD.CLOSED_DATE IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM PostDetails PD
+LEFT JOIN UserVoteCounts UVC ON PD.OwnerUserId = UVC.UserId
+LEFT JOIN AggregatedPostHistory APH ON PD.PostId = APH.PostId
+ORDER BY PD.CreationDate DESC
+LIMIT 100;

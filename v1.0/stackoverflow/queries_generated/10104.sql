@@ -1,0 +1,67 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.Reputation, U.Views, U.UpVotes, U.DownVotes
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        PT.Name AS PostTypeName,
+        COUNT(V.Id) AS VoteCount
+    FROM Posts P
+    JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.Score, P.ViewCount, P.AnswerCount, P.CommentCount, P.FavoriteCount, PT.Name
+),
+CombinedStats AS (
+    SELECT 
+        U.UserId,
+        U.Reputation,
+        U.Views,
+        P.PostId,
+        P.Title,
+        P.Score AS PostScore,
+        P.ViewCount AS PostViewCount,
+        P.AnswerCount,
+        P.CommentCount AS PostCommentCount,
+        P.FavoriteCount AS PostFavoriteCount,
+        P.VoteCount,
+        (P.Score + U.Reputation) AS TotalScore
+    FROM UserStats U
+    JOIN PostStats P ON U.UserId = P.OwnerUserId
+)
+
+SELECT 
+    UserId,
+    Reputation,
+    Views,
+    PostId,
+    Title,
+    PostScore,
+    PostViewCount,
+    AnswerCount,
+    PostCommentCount,
+    PostFavoriteCount,
+    VoteCount,
+    TotalScore
+FROM CombinedStats
+ORDER BY TotalScore DESC
+LIMIT 100;

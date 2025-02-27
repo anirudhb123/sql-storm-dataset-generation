@@ -1,0 +1,67 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_customer_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_return_amt DESC) AS rn,
+        COALESCE(NULLIF(sr_return_amt, 0), NULL) AS effective_return_amt
+    FROM store_returns
+    WHERE sr_return_quantity > 0
+),
+WarehouseSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS total_sales,
+        AVG(ws_net_paid) AS avg_paid
+    FROM web_sales
+    WHERE ws_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        CASE 
+            WHEN cd_credit_rating IS NULL THEN 'Unknown'
+            ELSE cd_credit_rating
+        END AS credit_rating,
+        COUNT(DISTINCT CASE WHEN c_preferred_cust_flag = 'Y' THEN c_customer_id END) AS preferred_cust_count
+    FROM customer_demographics
+    JOIN customer ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY cd_demo_sk, cd_gender, cd_marital_status, cd_credit_rating
+)
+SELECT 
+    wr.refunded_customer_sk,
+    wr.returning_customer_sk,
+    wr_item_sk,
+    MAX(effective_return_amt) AS max_effective_return_amt,
+    SUM(total_profit) AS total_sales_profit,
+    AVG(avg_paid) AS average_web_sales,
+    COUNT(DISTINCT CASE WHEN cd_gender = 'M' THEN cd_demo_sk END) AS male_customers,
+    COUNT(DISTINCT CASE WHEN cd_gender = 'F' THEN cd_demo_sk END) AS female_customers
+FROM 
+    (SELECT 
+        wr_item_sk,
+        wr_returned_amount,
+        wr.refunded_customer_sk,
+        wr.returning_customer_sk
+    FROM web_returns wr
+    LEFT JOIN RankedReturns rr ON wr.wr_item_sk = rr.sr_item_sk AND rr.rn = 1
+    WHERE wr_return_amt IS NOT NULL
+    ) AS wr
+LEFT JOIN WarehouseSales ws ON wr_item_sk = ws.ws_item_sk
+LEFT JOIN CustomerDemographics cd ON wr.refunded_customer_sk = cd.cd_demo_sk
+GROUP BY 
+    wr.refunded_customer_sk,
+    wr.returning_customer_sk,
+    wr_item_sk
+HAVING 
+    MAX(effective_return_amt) > 0
+ORDER BY 
+    total_sales_profit DESC, 
+    average_web_sales ASC
+```

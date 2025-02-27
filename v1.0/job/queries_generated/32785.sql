@@ -1,0 +1,50 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT p.id AS actor_id, ak.name AS actor_name, ca.movie_id, 1 AS depth
+    FROM aka_name ak
+    JOIN cast_info ca ON ak.person_id = ca.person_id
+    JOIN title t ON ca.movie_id = t.id
+    JOIN person_info pi ON ak.person_id = pi.person_id
+    WHERE t.production_year > 2000 AND pi.info_type_id = (
+        SELECT id FROM info_type WHERE info = 'birthdate'
+    )
+    UNION ALL
+    SELECT p.id AS actor_id, ak.name AS actor_name, ca.movie_id, ah.depth + 1
+    FROM actor_hierarchy ah
+    JOIN cast_info ca ON ah.actor_id = ca.person_id
+    JOIN aka_name ak ON ca.person_id = ak.person_id
+    JOIN title t ON ca.movie_id = t.id
+    WHERE t.production_year > 2000
+),
+movie_stats AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        COUNT(ca.id) AS cast_count,
+        ARRAY_AGG(DISTINCT ak.name) AS actor_names,
+        AVG(CASE WHEN mt.info IS NOT NULL THEN length(mt.info) END) AS average_note_length
+    FROM title t
+    LEFT JOIN cast_info ca ON t.id = ca.movie_id
+    LEFT JOIN movie_info mt ON t.id = mt.movie_id AND mt.info_type_id = (SELECT id FROM info_type WHERE info = 'note')
+    GROUP BY t.id, t.title
+),
+popular_movies AS (
+    SELECT
+        ms.movie_id,
+        ms.title,
+        ms.cast_count,
+        ms.actor_names,
+        ms.average_note_length,
+        RANK() OVER (ORDER BY ms.cast_count DESC) AS rank
+    FROM movie_stats ms
+    WHERE ms.cast_count > 0
+)
+SELECT
+    ph.actor_name,
+    pm.title,
+    pm.cast_count,
+    pm.average_note_length,
+    COALESCE(NULLIF(pm.average_note_length, 0), 'No Notes') AS note_length_status
+FROM actor_hierarchy ph
+JOIN popular_movies pm ON ph.movie_id = pm.movie_id
+WHERE pm.rank <= 10
+ORDER BY pm.cast_count DESC, ph.actor_name;

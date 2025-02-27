@@ -1,0 +1,59 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 
+           0 AS level, 
+           CAST(s_name AS VARCHAR(255)) AS path
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           sh.level + 1,
+           CAST(sh.path || ' -> ' || s.s_name AS VARCHAR(255))
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 10  -- Limiting levels to avoid infinite recursion
+),
+OrderStats AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING COUNT(DISTINCT o.o_orderkey) > 1
+),
+TopProducts AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_quantity) AS total_quantity, 
+           CUME_DIST() OVER (ORDER BY SUM(l.l_quantity) DESC) AS cumulative_dist
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(l.l_quantity) > 100
+),
+RandomSample AS (
+    SELECT c.c_custkey, c.c_name, n.n_name, 
+           ROUND(RANDOM() * 100, 2) AS random_metric
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE (c.c_acctbal IS NULL OR c.c_acctbal > 1000)
+    ORDER BY random_metric DESC
+    LIMIT 10
+)
+SELECT s.s_name, sh.level, 
+       COALESCE(os.total_revenue, 0) AS total_revenue, 
+       COALESCE(tp.total_quantity, 0) AS total_quantity,
+       r.c_name, r.random_metric
+FROM SupplierHierarchy sh
+LEFT JOIN OrderStats os ON sh.s_suppkey = os.o_orderkey
+LEFT JOIN TopProducts tp ON sh.s_suppkey = tp.p_partkey
+JOIN RandomSample r ON r.c_custkey = sh.s_nationkey
+WHERE r.random_metric IS NOT NULL 
+      AND (sh.level % 2 = 0 OR tp.total_quantity > 50)
+ORDER BY sh.level ASC, os.total_revenue DESC
+FETCH FIRST 100 ROWS ONLY;

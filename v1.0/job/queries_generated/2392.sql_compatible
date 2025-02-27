@@ -1,0 +1,66 @@
+
+WITH MovieRankings AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        ROW_NUMBER() OVER(PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank,
+        COALESCE(m.info, 'No Description') AS movie_info,
+        t.production_year
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info m ON t.id = m.movie_id AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'description')
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopActors AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        mk.keyword,
+        COALESCE(cn.name, 'Unknown Company') AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_keyword mk
+    JOIN 
+        movie_companies mc ON mk.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    mr.movie_id,
+    mr.title,
+    mr.production_year,
+    mr.movie_info,
+    ta.actor_name,
+    ta.movie_count,
+    md.keyword,
+    md.company_name,
+    md.company_type
+FROM 
+    MovieRankings mr
+LEFT JOIN 
+    TopActors ta ON ta.movie_count > 5
+LEFT JOIN 
+    MovieDetails md ON mr.movie_id = md.movie_id
+WHERE 
+    mr.rank <= 10
+ORDER BY 
+    mr.production_year DESC, 
+    ta.movie_count DESC;

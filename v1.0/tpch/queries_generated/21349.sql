@@ -1,0 +1,67 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice,
+        DENSE_RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        AVG(s.s_acctbal) AS avg_acctbal,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        CASE 
+            WHEN c.c_acctbal > 1000 THEN 'Premium'
+            ELSE 'Standard' 
+        END AS customer_type
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_linenumber) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus <> 'F' AND l.l_discount BETWEEN 0.05 AND 0.3
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    r.r_name,
+    s.avg_acctbal,
+    ROW_NUMBER() OVER (PARTITION BY fc.customer_type ORDER BY s.avg_acctbal DESC) AS customer_rank,
+    SUM(d.total_sales) AS total_revenue,
+    ARRAY_AGG(DISTINCT rp.p_name) AS popular_parts
+FROM region r
+LEFT JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN supplier_stats s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN filtered_customers fc ON fc.c_custkey = s.s_suppkey
+LEFT JOIN order_details d ON d.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_custkey = fc.c_custkey
+)
+LEFT JOIN ranked_parts rp ON rp.p_partkey IN (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_suppkey = s.s_suppkey
+)
+WHERE d.total_sales IS NOT NULL
+GROUP BY r.r_name, s.avg_acctbal, fc.customer_type
+HAVING SUM(d.total_sales) > 10000 OR COUNT(rp.p_partkey) > 5
+ORDER BY r.r_name, customer_rank DESC;

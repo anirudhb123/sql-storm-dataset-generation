@@ -1,0 +1,48 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rev_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_orderstatus
+), top_orders AS (
+    SELECT 
+        ro.o_orderkey, 
+        ro.total_revenue, 
+        ro.o_orderdate, 
+        s.s_name AS supplier_name,
+        p.p_name AS part_name
+    FROM 
+        ranked_orders ro
+    JOIN 
+        lineitem l ON ro.o_orderkey = l.l_orderkey
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        part p ON l.l_partkey = p.p_partkey
+    WHERE 
+        ro.rev_rank <= 10
+)
+SELECT 
+    TO_CHAR(o.o_orderdate, 'YYYY-MM') AS order_month,
+    SUM(to.total_revenue) AS monthly_revenue,
+    COUNT(DISTINCT to.o_orderkey) AS number_of_orders,
+    COUNT(DISTINCT to.supplier_name) AS suppliers_count,
+    COUNT(DISTINCT to.part_name) AS parts_count
+FROM 
+    top_orders to
+JOIN 
+    orders o ON to.o_orderkey = o.o_orderkey
+GROUP BY 
+    order_month
+ORDER BY 
+    order_month;

@@ -1,0 +1,76 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedLinks,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId, 
+        ur.Reputation,
+        ps.PostId
+    FROM 
+        UserReputation ur
+    JOIN 
+        Posts ps ON ps.OwnerUserId = ur.UserId
+    WHERE 
+        ur.UserRank <= 10
+)
+SELECT 
+    ps.Title,
+    ps.ViewCount,
+    ps.Score,
+    ps.CommentCount,
+    ps.RelatedLinks,
+    ps.Upvotes,
+    ps.Downvotes,
+    ur.DisplayName AS TopUser,
+    ur.Reputation AS UserReputation,
+    COALESCE(rp.LastEditDate, 'Never Edited') AS LastEditDate
+FROM 
+    PostStats ps
+LEFT JOIN 
+    TopUsers ur ON ur.PostId = ps.PostId
+LEFT JOIN 
+    RecentPostHistory rp ON rp.PostId = ps.PostId
+WHERE 
+    ps.Score >= 10 -- Filter for popular posts
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC
+LIMIT 50;
+This SQL query aims to retrieve a detailed statistics report on popular posts while taking into account user reputations and recent edits. It employs several advanced SQL constructs including Common Table Expressions (CTEs), window functions, a variety of JOIN types, and filtering conditions to provide a comprehensive view in a single query.

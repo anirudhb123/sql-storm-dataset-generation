@@ -1,0 +1,61 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ak.id AS actor_id, 
+        ak.name AS actor_name, 
+        ct.kind AS cast_type, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY t.production_year DESC) AS most_recent_role
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    JOIN title t ON ci.movie_id = t.id
+    JOIN comp_cast_type ct ON ci.role_id = ct.id
+    WHERE ct.kind IS NOT NULL
+      AND t.production_year IS NOT NULL
+),
+keyword_counts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.id) AS keyword_count
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+movie_info_details AS (
+    SELECT 
+        mi.movie_id, 
+        STRING_AGG(DISTINCT mi.info, ', ') AS info_texts,
+        COUNT(mk.id) FILTER (WHERE mk.id IS NOT NULL) AS keyword_listed
+    FROM movie_info mi
+    LEFT JOIN movie_keyword mk ON mi.movie_id = mk.movie_id
+    GROUP BY mi.movie_id
+),
+actors_with_keywords AS (
+    SELECT 
+        ah.actor_id,
+        ah.actor_name,
+        ah.production_year, 
+        mh.movie_id,
+        COALESCE(kc.keyword_count, 0) AS keyword_count,
+        COALESCE(mid.info_texts, 'No info') AS movie_info,
+        ah.cast_type
+    FROM actor_hierarchy ah
+    JOIN complete_cast mh ON ah.actor_id = mh.subject_id
+    LEFT JOIN keyword_counts kc ON mh.movie_id = kc.movie_id
+    LEFT JOIN movie_info_details mid ON mh.movie_id = mid.movie_id
+    WHERE (ah.most_recent_role = 1 OR ah.production_year > 2010)
+      AND ah.actor_name NOT LIKE '%(archive)%' 
+)
+SELECT 
+    actor_name, 
+    production_year, 
+    COUNT(DISTINCT movie_id) AS movie_count,
+    SUM(keyword_count) AS total_keywords,
+    STRING_AGG(DISTINCT movie_info, '; ') AS movie_information
+FROM actors_with_keywords
+WHERE cast_type IS NOT NULL
+GROUP BY actor_name, production_year
+HAVING COUNT(DISTINCT movie_id) > 3
+ORDER BY total_keywords DESC
+LIMIT 100;
+
+-- The above query provides a detailed performance benchmark of actors by aggregating their movie appearances, the number of keywords related to those movies, and any additional informational context, while ensuring we respect the requirements for NULLs and distinct counts.

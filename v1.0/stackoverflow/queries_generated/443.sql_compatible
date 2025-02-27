@@ -1,0 +1,59 @@
+
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        COUNT(DISTINCT a.Id) AS AnswersProvided,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Posts a ON u.Id = a.OwnerUserId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id AND v.PostId IN (p.Id, a.Id)
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(ph.CloseReasonTypes, 'Open') AS ClosureStatus,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11)
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+)
+SELECT 
+    ue.DisplayName,
+    ue.QuestionsAsked,
+    ue.AnswersProvided,
+    ue.UpVotesReceived,
+    ue.DownVotesReceived,
+    pm.Title,
+    pm.CreationDate,
+    pm.ViewCount,
+    pm.ClosureStatus,
+    CASE 
+        WHEN pm.PostRank = 1 THEN 'Most Recent Post'
+        ELSE 'Older Post'
+    END AS PostStatus
+FROM 
+    UserEngagement ue
+JOIN 
+    PostMetrics pm ON ue.UserId = pm.OwnerUserId
+WHERE 
+    (ue.QuestionsAsked > 0 OR ue.AnswersProvided > 0)
+    AND pm.ClosureStatus IS NOT NULL
+ORDER BY 
+    ue.UpVotesReceived DESC, ue.DownVotesReceived ASC;

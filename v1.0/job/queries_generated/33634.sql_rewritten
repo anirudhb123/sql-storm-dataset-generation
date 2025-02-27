@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.title IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT ch.name) AS character_count,
+    STRING_AGG(DISTINCT CONCAT(mh.title, ' (', mh.production_year, ')'), ', ') AS movie_details,
+    SUM(CASE WHEN ko.keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY COUNT(DISTINCT ch.name) DESC) AS row_num
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    char_name ch ON ci.person_role_id = ch.id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword ko ON mk.keyword_id = ko.id
+WHERE 
+    ak.name IS NOT NULL
+    AND mh.production_year >= 2000
+    AND (ak.name_pcode_cf IS NOT NULL OR ak.name_pcode_nf IS NOT NULL)
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 2
+ORDER BY 
+    keyword_count DESC,
+    character_count DESC
+LIMIT 100;

@@ -1,0 +1,34 @@
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS company_type,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    AVG(mr.info) AS average_rating
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.movie_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type c ON mc.company_type_id = c.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+JOIN 
+    info_type it ON mi.info_type_id = it.id
+JOIN 
+    movie_rating mr ON t.id = mr.movie_id  -- Assuming movie_rating table exists for ratings
+WHERE 
+    t.production_year >= 2000
+    AND a.name IS NOT NULL
+    AND it.info = 'Rating'
+GROUP BY 
+    a.name, t.title, c.kind
+ORDER BY 
+    average_rating DESC, keyword_count DESC
+LIMIT 10;

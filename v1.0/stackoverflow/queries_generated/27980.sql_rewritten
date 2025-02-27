@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(a.Id) DESC) AS UserPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, u.DisplayName
+),
+TopQuestions AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        Tags,
+        OwnerDisplayName,
+        AnswerCount,
+        UpVotes - DownVotes AS NetVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        UserPostRank = 1  
+    ORDER BY 
+        NetVotes DESC, AnswerCount DESC
+)
+SELECT 
+    tq.PostId,
+    tq.Title,
+    tq.OwnerDisplayName,
+    tq.AnswerCount,
+    tq.NetVotes,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagList,
+    pht.Name AS PostHistoryType
+FROM 
+    TopQuestions tq
+JOIN 
+    Posts p ON tq.PostId = p.Id
+LEFT JOIN 
+    STRING_TO_ARRAY(substring(p.Tags, 2, length(p.Tags)-2), '><') AS tag_array ON TRUE
+LEFT JOIN 
+    Tags t ON t.TagName IN (SELECT UNNEST(tag_array))
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = p.Id AND ph.CreationDate = (
+        SELECT 
+            MAX(CreationDate) 
+        FROM 
+            PostHistory 
+        WHERE 
+            PostId = p.Id
+    )
+LEFT JOIN 
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+GROUP BY 
+    tq.PostId, tq.Title, tq.OwnerDisplayName, tq.AnswerCount, tq.NetVotes, pht.Name
+ORDER BY 
+    tq.NetVotes DESC, tq.AnswerCount DESC;

@@ -1,0 +1,75 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(ci.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(ci.person_id) DESC) AS ranking
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+), 
+HighCastMovies AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title, 
+        rm.production_year, 
+        rm.total_cast
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.ranking <= 5
+), 
+MovieDetails AS (
+    SELECT 
+        hm.movie_id,
+        hm.title,
+        hm.production_year,
+        COALESCE(SUM(CASE WHEN mc.company_type_id = 1 THEN 1 ELSE 0 END), 0) AS major_company_count,
+        COALESCE(SUM(CASE WHEN mc.company_type_id <> 1 THEN 1 ELSE 0 END), 0) AS minor_company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        HighCastMovies hm
+    LEFT JOIN 
+        movie_companies mc ON hm.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        hm.movie_id, hm.title, hm.production_year
+),
+KeywordStats AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.total_cast,
+    md.major_company_count,
+    md.minor_company_count,
+    md.company_names,
+    COALESCE(ks.keyword_count, 0) AS keyword_count,
+    COALESCE(ks.keywords, 'None') AS keywords
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    KeywordStats ks ON md.movie_id = ks.movie_id
+WHERE 
+    md.major_company_count >= 2
+ORDER BY 
+    md.total_cast DESC, md.production_year ASC;

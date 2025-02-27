@@ -1,0 +1,64 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        sr_returning_customer_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        r.sr_returning_customer_sk AS returning_customer_sk,
+        r.return_count,
+        r.total_return_amount,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        hi.hd_income_band_sk,
+        hi.hd_buy_potential
+    FROM 
+        RankedReturns r
+    JOIN 
+        customer c ON r.sr_returning_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hi ON c.c_current_hdemo_sk = hi.hd_demo_sk
+    WHERE 
+        r.return_count > 5
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_ext_discount_amt) AS total_discount
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    hrc.returning_customer_sk,
+    hrc.return_count,
+    hrc.total_return_amount,
+    COALESCE(sd.total_sales, 0) AS total_sales,
+    COALESCE(sd.total_discount, 0) AS total_discount,
+    hrc.cd_gender,
+    hrc.cd_marital_status,
+    hrc.cd_purchase_estimate,
+    hrc.hd_income_band_sk,
+    hrc.hd_buy_potential
+FROM 
+    HighReturnCustomers hrc
+LEFT JOIN 
+    SalesData sd ON hrc.returning_customer_sk = sd.ws_bill_customer_sk
+ORDER BY 
+    hrc.total_return_amount DESC
+LIMIT 100;

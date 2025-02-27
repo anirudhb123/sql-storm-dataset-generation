@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CAST('2024-10-01' AS DATE))
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(*) AS TitleEditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (1, 4, 10)
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    us.Reputation,
+    us.PostsCount,
+    us.TotalBounties,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    COALESCE(ph.CloseCount, 0) AS CloseCount,
+    COALESCE(ph.TitleEditCount, 0) AS TitleEditCount,
+    CASE 
+        WHEN us.Reputation > 1000 THEN 'High Rep User'
+        WHEN us.Reputation IS NULL THEN 'New User'
+        ELSE 'Mid Rep User'
+    END AS ReputationCategory
+FROM 
+    Users u
+JOIN 
+    UserStats us ON u.Id = us.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN 
+    PostHistorySummary ph ON rp.PostId = ph.PostId
+WHERE 
+    us.PostsCount > 5
+ORDER BY 
+    us.Reputation DESC, rp.CreationDate DESC;

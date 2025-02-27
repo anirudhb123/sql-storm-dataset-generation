@@ -1,0 +1,15 @@
+SELECT 
+    s.s_name AS supplier_name,
+    p.p_name AS part_name,
+    REPLACE(REPLACE(CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ', Availability: ', ps.ps_availqty, ', Cost: $', FORMAT(ps.ps_supplycost, 2)), ' ', '%20'), ',', '%2C') AS formatted_info
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    LOWER(p.p_mfgr) LIKE '%s%' AND
+    ps.ps_availqty > 0
+ORDER BY 
+    s.s_name, p.p_name;

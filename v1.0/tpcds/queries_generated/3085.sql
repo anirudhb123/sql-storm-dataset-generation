@@ -1,0 +1,49 @@
+
+WITH CustomerInfo AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           cd.cd_gender,
+           cd.cd_marital_status,
+           cd.cd_sales_amt,
+           cd.cd_purchase_estimate,
+           COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+           SUM(ws.ws_sales_price) AS total_sales,
+           DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+),
+HighValueCustomers AS (
+    SELECT ci.*, 
+           CASE 
+               WHEN total_sales > 10000 THEN 'High Value'
+               WHEN total_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+               ELSE 'Low Value'
+           END AS customer_value,
+           RANK() OVER (ORDER BY total_sales DESC) AS overall_rank
+    FROM CustomerInfo ci
+    WHERE total_orders > 0
+),
+TopStores AS (
+    SELECT ss.ss_store_sk, 
+           SUM(ss.ss_sales_price) AS total_store_sales,
+           RANK() OVER (ORDER BY SUM(ss.ss_sales_price) DESC) AS store_rank
+    FROM store_sales ss
+    GROUP BY ss.ss_store_sk
+)
+SELECT ci.c_first_name, 
+       ci.c_last_name, 
+       ci.cd_gender, 
+       ci.customer_value, 
+       ts.total_store_sales, 
+       ts.store_rank,
+       avg(cd.cd_purchase_estimate) AS avg_purchase_estimate
+FROM HighValueCustomers ci
+JOIN TopStores ts ON ts.store_rank <= 5
+JOIN customer_demographics cd ON ci.c_customer_sk = cd.cd_demo_sk
+WHERE ci.total_orders > 10 
+AND ci.cd_marital_status = 'M'
+GROUP BY ci.c_first_name, ci.c_last_name, ci.cd_gender, ci.customer_value, ts.total_store_sales, ts.store_rank
+ORDER BY ci.customer_value DESC, ts.total_store_sales DESC;

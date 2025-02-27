@@ -1,0 +1,46 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        a.id AS movie_id, 
+        COUNT(c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM 
+        aka_title a
+    JOIN 
+        complete_cast cc ON cc.movie_id = a.id
+    JOIN 
+        cast_info c ON c.movie_id = a.id
+    JOIN 
+        aka_name ak ON ak.person_id = c.person_id
+    GROUP BY 
+        a.title, a.production_year, a.id
+),
+
+TopRankedMovies AS (
+    SELECT 
+        rm.title, 
+        rm.production_year, 
+        rm.cast_count, 
+        rm.actors,
+        ROW_NUMBER() OVER (ORDER BY rm.cast_count DESC) AS rank
+    FROM 
+        RankedMovies rm
+)
+
+SELECT 
+    tr.title, 
+    tr.production_year, 
+    tr.cast_count, 
+    tr.actors, 
+    m.info AS movie_info
+FROM 
+    TopRankedMovies tr
+LEFT JOIN 
+    movie_info m ON m.movie_id = tr.movie_id
+WHERE 
+    tr.rank <= 10
+ORDER BY 
+    tr.cast_count DESC;
+
+This SQL query retrieves the top 10 movies with the most cast members along with their respective actors and year of production. The results also include movie information where available. The `WITH` clause is used to create common table expressions for readable and maintainable code while performing the joins and aggregations necessary to produce the desired output.

@@ -1,0 +1,89 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        ARRAY[mt.title] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        path || at.title
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ah.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    STRING_AGG(DISTINCT COALESCE(cn.name, 'Unknown'), ', ') AS company_names,
+    ROW_NUMBER() OVER (PARTITION BY ah.name ORDER BY mt.production_year DESC) AS ranking
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ah ON ci.person_id = ah.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    movie_companies mc ON mt.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    mt.production_year BETWEEN 2000 AND 2020 
+    AND ci.nr_order IS NOT NULL
+GROUP BY 
+    ah.name, mt.title, mt.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    actor_name, movie_title;
+
+-- Adding a check for the top actors based on their number of roles across titles
+WITH ActorRoles AS (
+    SELECT 
+        an.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        an.name
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        role_count,
+        RANK() OVER (ORDER BY role_count DESC) AS actor_rank
+    FROM 
+        ActorRoles
+)
+SELECT 
+    th.actor_name,
+    COUNT(DISTINCT mh.movie_id) AS movie_count,
+    MAX(mh.level) AS max_level,
+    ARRAY_AGG(mh.path) AS movie_paths
+FROM 
+    TopActors th
+JOIN 
+    MovieHierarchy mh ON th.actor_name = ANY(mh.path)
+WHERE 
+    th.actor_rank <= 10
+GROUP BY 
+    th.actor_name
+ORDER BY 
+    movie_count DESC;

@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only considering Questions
+),
+PostHistoryParse AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS HistoryCreationDate,
+        ph.Comment,
+        ph.Text AS NewValue,
+        p.Title AS PostTitle,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseVotesCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId, ph.UserDisplayName, ph.CreationDate, p.Title
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.Score,
+    p.hp.HistoryCreationDate,
+    p.hp.UserDisplayName AS Editor,
+    p.hp.CloseVotesCount,
+    p.hp.HistoryTypes,
+    JSON_BUILD_OBJECT('PostTitle', p.hp.PostTitle, 'NewValue', p.hp.NewValue) AS PostEditDetails
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryParse p.hp ON rp.PostId = p.hp.PostId
+WHERE 
+    rp.TagRank <= 5 -- Top 5 questions per tag by score
+ORDER BY 
+    rp.Tags, rp.Score DESC;

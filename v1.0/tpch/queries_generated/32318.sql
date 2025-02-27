@@ -1,0 +1,46 @@
+WITH RECURSIVE CustomerCTE AS (
+    SELECT c_custkey, c_name, c_nationkey, c_acctbal, 1 AS level
+    FROM customer
+    WHERE c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, level + 1
+    FROM customer c
+    JOIN CustomerCTE cte ON c.c_nationkey = cte.c_nationkey
+    WHERE c.custkey <> cte.c_custkey AND level < 3
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_name, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_totalprice > 5000
+),
+SupplierSummary AS (
+    SELECT s.s_suppkey, SUM(ps.ps_availqty) AS total_available, 
+           AVG(ps.ps_supplycost) AS avg_supplycost, 
+           COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+    HAVING SUM(ps.ps_availqty) > 1000
+)
+SELECT r.r_name,
+       COALESCE(SUM(HighValueOrders.o_totalprice), 0) AS total_order_price,
+       COALESCE(SUM(SupplierSummary.avg_supplycost), 0) AS total_avg_supplycost,
+       COUNT(DISTINCT ccte.c_custkey) AS customer_count
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN HighValueOrders ON c.c_custkey = HighValueOrders.o_custkey
+LEFT JOIN SupplierSummary ON SupplierSummary.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > 100 AND p.p_size < 20
+)
+LEFT JOIN CustomerCTE ccte ON c.c_custkey = ccte.c_custkey
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT c.c_suppkey) > 5
+ORDER BY total_order_price DESC;

@@ -1,0 +1,41 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           1 as level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate >= '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+ranked_orders AS (
+    SELECT os.o_orderkey, os.total_revenue,
+           RANK() OVER (PARTITION BY os.o_orderdate ORDER BY os.total_revenue DESC) AS revenue_rank
+    FROM order_summary os
+)
+SELECT p.p_name, 
+       COALESCE(SUM(ps.ps_availqty), 0) AS total_available_qty,
+       AVG(sh.s_acctbal) AS avg_supplier_acctbal,
+       COUNT(DISTINCT ro.o_orderkey) AS order_count,
+       MAX(ro.total_revenue) AS max_order_revenue
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier_hierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN ranked_orders ro ON ro.total_revenue > 5000
+WHERE p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > (SELECT AVG(p_retailprice) FROM part))
+AND (p.p_comment LIKE '%fragile%' OR p.p_comment IS NULL)
+GROUP BY p.p_name
+HAVING AVG(sh.s_acctbal) IS NOT NULL
+ORDER BY max_order_revenue DESC
+LIMIT 10;

@@ -1,0 +1,48 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_customer_id, c_first_name, c_last_name, c_current_addr_sk,
+           1 AS level
+    FROM customer
+    WHERE c_customer_sk < 10
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_customer_id, c.c_first_name, c.c_last_name, c.c_current_addr_sk,
+           ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+),
+filtered_customers AS (
+    SELECT cu.c_customer_sk, cu.c_first_name, cu.c_last_name, ca.ca_city, ca.ca_state,
+           ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY cu.c_last_name) AS rn
+    FROM customer cu
+    JOIN customer_address ca ON cu.c_current_addr_sk = ca.ca_address_sk
+    WHERE ca.ca_city IS NOT NULL AND cu.c_birth_year > 1980
+),
+item_summary AS (
+    SELECT ws.ws_item_sk, 
+           SUM(ws.ws_quantity) AS total_sold,
+           AVG(ws.ws_sales_price) AS avg_sales_price,
+           MAX(ws.ws_sales_price) AS max_sales_price
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk > (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY ws.ws_item_sk
+)
+
+SELECT ch.c_customer_id, ch.c_first_name, ch.c_last_name, fc.ca_city, fc.ca_state,
+       COALESCE(is.total_sold, 0) AS total_sold_items,
+       item.i_item_id,
+       item.i_product_name,
+       item.i_current_price
+FROM customer_hierarchy ch
+LEFT OUTER JOIN filtered_customers fc ON ch.c_customer_sk = fc.c_customer_sk
+LEFT JOIN item i ON i.i_item_sk IN (
+    SELECT cs.cs_item_sk 
+    FROM catalog_sales cs 
+    WHERE cs.cs_bill_customer_sk = ch.c_customer_sk
+    GROUP BY cs.cs_item_sk
+)
+LEFT JOIN item_summary is ON is.ws_item_sk = i.i_item_sk
+WHERE fc.rn <= 5 AND (ch.level = 1 OR fc.ca_state = 'CA')
+ORDER BY fc.ca_state, total_sold_items DESC
+FETCH FIRST 20 ROWS ONLY;

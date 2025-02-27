@@ -1,0 +1,69 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        U.DisplayName AS OwnerName,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, U.DisplayName
+    ORDER BY 
+        P.ViewCount DESC
+    LIMIT 10
+)
+SELECT 
+    Us.DisplayName AS UserName,
+    Us.TotalPosts,
+    Us.TotalComments,
+    Us.TotalBadges,
+    Us.TotalUpVotes,
+    Us.TotalDownVotes,
+    Pp.Title AS PostTitle,
+    Pp.ViewCount AS PostViews,
+    Pp.CommentCount AS PostCommentCount,
+    Pp.OwnerName AS PostOwner,
+    Pp.CreationDate AS PostCreationDate
+FROM 
+    UserStats Us
+JOIN 
+    PopularPosts Pp ON Us.UserId = Pp.OwnerUserId
+ORDER BY 
+    Us.TotalPosts DESC, Pp.ViewCount DESC;

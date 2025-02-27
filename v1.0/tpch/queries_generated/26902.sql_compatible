@@ -1,0 +1,27 @@
+
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    AVG(ps.ps_supplycost) AS average_supply_cost,
+    MAX(CASE WHEN s.s_acctbal > 5000 THEN 'High' ELSE 'Low' END) AS supplier_account_balance_category,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ' (', s.s_address, ')'), '; ') AS suppliers_details
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    r.r_name LIKE 'Europe%'
+GROUP BY 
+    p.p_name,
+    s.s_acctbal
+HAVING 
+    COUNT(DISTINCT ps.s_suppkey) > 2
+ORDER BY 
+    average_supply_cost DESC
+FETCH FIRST 10 ROWS ONLY;

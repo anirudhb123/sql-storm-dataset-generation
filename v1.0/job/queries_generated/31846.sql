@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.kind_id = 1  -- Assuming 1 corresponds to 'movie'
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title AS m
+    INNER JOIN 
+        movie_link AS ml ON m.id = ml.linked_movie_id
+    INNER JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+),
+CastInfoWithRole AS (
+    SELECT 
+        ci.id AS cast_id,
+        ci.movie_id,
+        ci.person_id,
+        rt.role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info AS ci
+    JOIN 
+        role_type AS rt ON ci.role_id = rt.id
+),
+MovieKeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword AS mk
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT cwr.cast_id) AS total_cast,
+    COALESCE(mkc.keyword_count, 0) AS keyword_count,
+    STRING_AGG(DISTINCT cn.name, ', ') AS cast_names,
+    MAX(CASE WHEN cn.gender = 'M' THEN cn.name END) AS lead_male_cast,
+    MIN(CASE WHEN cn.gender = 'F' THEN cn.name END) AS lead_female_cast
+FROM 
+    MovieHierarchy AS mh
+LEFT JOIN 
+    complete_cast AS cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    CastInfoWithRole AS cwr ON cc.subject_id = cwr.person_id
+LEFT JOIN 
+    name AS cn ON cwr.person_id = cn.id
+LEFT JOIN 
+    MovieKeywordCounts AS mkc ON mh.movie_id = mkc.movie_id
+WHERE 
+    mh.production_year BETWEEN 1990 AND 2023
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT cwr.cast_id) > 5 OR COALESCE(mkc.keyword_count, 0) > 3
+ORDER BY 
+    mh.production_year DESC, total_cast DESC;

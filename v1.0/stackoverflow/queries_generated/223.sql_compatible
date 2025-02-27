@@ -1,0 +1,65 @@
+
+WITH UserBadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(*) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE B.Class = 3) AS BronzeBadges,
+        DENSE_RANK() OVER (ORDER BY COUNT(*) DESC) AS BadgeRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        AVG(P.Score) AS AvgScore
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+        COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+        COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+        COALESCE(PS.TotalPosts, 0) AS TotalPosts,
+        COALESCE(PS.TotalViews, 0) AS TotalViews,
+        COALESCE(PS.AvgScore, 0) AS AvgScore,
+        RANK() OVER (ORDER BY COALESCE(PS.TotalPosts, 0) DESC, COALESCE(PS.TotalViews, 0) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserBadgeCounts UB ON U.Id = UB.UserId
+    LEFT JOIN 
+        PostStats PS ON U.Id = PS.OwnerUserId
+)
+SELECT 
+    TU.UserId,
+    TU.DisplayName,
+    TU.GoldBadges,
+    TU.SilverBadges,
+    TU.BronzeBadges,
+    TU.TotalPosts,
+    TU.TotalViews,
+    TU.AvgScore,
+    CASE 
+        WHEN TU.UserRank <= 10 THEN 'Top User'
+        WHEN TU.UserRank BETWEEN 11 AND 50 THEN 'Intermediate User'
+        ELSE 'Novice User'
+    END AS UserCategory
+FROM 
+    TopUsers TU
+WHERE 
+    TU.TotalPosts > 0
+ORDER BY 
+    TU.UserRank
+FETCH FIRST 20 ROWS ONLY;

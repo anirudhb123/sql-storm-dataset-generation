@@ -1,0 +1,77 @@
+
+WITH RECURSIVE address_tree AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, 1 AS level
+    FROM customer_address
+    WHERE ca_state IS NOT NULL
+    UNION ALL
+    SELECT ca.ca_address_sk, ca.ca_city, ca.ca_state, ca.ca_country, at.level + 1
+    FROM customer_address ca
+    JOIN address_tree at ON ca.ca_county = at.ca_city
+    WHERE at.level < 5
+),
+customer_data AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           cd.cd_gender,
+           cd.cd_marital_status,
+           cd.cd_dep_count,
+           cd.cd_credit_rating,
+           ca.ca_city,
+           ca.ca_state,
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_month DESC) as rn
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cd.cd_dep_count IS NOT NULL 
+      AND cd.cd_marital_status IS NOT NULL
+      AND (ca.ca_city IS NOT NULL OR ca.ca_state IS NOT NULL)
+),
+sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS unique_orders,
+        ROUND(SUM(ws.ws_ext_sales_price) - SUM(ws.ws_coupon_amt), 2) AS net_sales,
+        CASE 
+            WHEN SUM(ws.ws_quantity) > 100 THEN 'High'
+            WHEN SUM(ws.ws_quantity) BETWEEN 50 AND 100 THEN 'Medium'
+            ELSE 'Low'
+        END AS sales_category
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 2451545 AND 2451547
+    GROUP BY ws.ws_item_sk
+),
+combined AS (
+    SELECT 
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        sd.total_sales,
+        sd.net_sales,
+        CASE 
+            WHEN sd.net_sales > 500 THEN 'Above Average'
+            WHEN sd.net_sales BETWEEN 200 AND 500 THEN 'Average'
+            ELSE 'Below Average'
+        END AS sales_performance
+    FROM customer_data c
+    LEFT JOIN sales_data sd ON c.c_customer_sk = sd.ws_item_sk
+    LEFT JOIN address_tree ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE c.rn <= 5 AND (c.ca_state IS NOT NULL OR c.ca_city IS NOT NULL)
+)
+SELECT DISTINCT 
+    cb.c_first_name,
+    cb.c_last_name,
+    cb.ca_city,
+    COALESCE(cb.ca_state, 'Unknown') AS state,
+    COALESCE(cb.sales_category, 'No Sales Data') AS category,
+    MIN(cb.net_sales) AS min_net_sales,
+    MAX(cb.net_sales) AS max_net_sales,
+    AVG(cb.net_sales) AS avg_net_sales,
+    COUNT(CASE WHEN cb.sales_performance = 'Above Average' THEN 1 END) AS count_above_avg,
+    COUNT(CASE WHEN cb.sales_performance = 'Below Average' THEN 1 END) AS count_below_avg
+FROM combined cb
+GROUP BY cb.c_first_name, cb.c_last_name, cb.ca_city, cb.ca_state
+HAVING COUNT(*) > 1 AND (avg_net_sales > 300 OR MIN(net_sales) IS NULL)
+ORDER BY 5 DESC, avg_net_sales DESC;

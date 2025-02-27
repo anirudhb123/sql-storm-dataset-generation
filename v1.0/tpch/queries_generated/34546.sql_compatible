@@ -1,0 +1,47 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS order_level
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, oh.order_level + 1
+    FROM orders oh
+    JOIN OrderHierarchy ohier ON oh.o_custkey = ohier.o_orderkey
+)
+SELECT
+    p.p_name,
+    s.s_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(o.o_totalprice) AS avg_order_value,
+    region_info.r_name,
+    CASE 
+        WHEN AVG(s.s_acctbal) > 1000 THEN 'High Value'
+        ELSE 'Standard'
+    END AS supplier_status,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice) DESC) AS rank
+FROM
+    part p
+JOIN
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN
+    orders o ON o.o_orderkey = l.l_orderkey
+LEFT JOIN (
+    SELECT r.r_regionkey, r.r_name
+    FROM region r
+    JOIN nation n ON n.n_regionkey = r.r_regionkey
+) AS region_info ON s.s_nationkey = region_info.r_regionkey
+WHERE
+    l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+GROUP BY
+    p.p_name, s.s_name, region_info.r_name, p.p_partkey
+HAVING
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000
+ORDER BY
+    total_revenue DESC, rank;

@@ -1,0 +1,65 @@
+
+WITH customer_data AS (
+    SELECT 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state,
+        CASE 
+            WHEN cd.cd_purchase_estimate > 1000 THEN 'High Value'
+            WHEN cd.cd_purchase_estimate BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+item_data AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        i.i_brand,
+        i.i_category
+    FROM 
+        item i
+    WHERE 
+        i.i_current_price > 20
+),
+sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        cs.cs_sales_price,
+        CASE 
+            WHEN ws.ws_sales_price < cs.cs_sales_price THEN 'Discounted'
+            ELSE 'Regular Price'
+        END AS price_type
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        catalog_sales cs ON ws.ws_item_sk = cs.cs_item_sk
+)
+SELECT 
+    c.customer_value,
+    COUNT(DISTINCT c.full_name) AS customer_count,
+    COUNT(DISTINCT sa.ws_order_number) AS total_orders,
+    SUM(sa.ws_sales_price) AS total_sales,
+    i.i_brand,
+    i.i_category,
+    AVG(i.i_current_price) AS avg_item_price
+FROM 
+    customer_data c
+JOIN 
+    sales_data sa ON c.full_name = (SELECT CONCAT(c.c_first_name, ' ', c.c_last_name) FROM customer c WHERE c.c_customer_sk = sa.ws_bill_customer_sk)
+JOIN 
+    item_data i ON sa.ws_item_sk = i.i_item_id
+GROUP BY 
+    c.customer_value, i.i_brand, i.i_category
+ORDER BY 
+    total_sales DESC;

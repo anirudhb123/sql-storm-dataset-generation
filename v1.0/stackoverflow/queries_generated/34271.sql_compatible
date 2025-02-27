@@ -1,0 +1,82 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score IS NOT NULL
+),
+ActivitySummary AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(p.AnswerCount, 0)) AS TotalAnswers,
+        SUM(COALESCE(c.CommentCount, 0)) AS TotalComments,
+        MAX(p.LastActivityDate) AS MostRecentActivity
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON c.PostId = p.Id
+    WHERE 
+        u.Reputation > 100 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagActivity AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+PostCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Comment END) AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    a.UserId,
+    a.DisplayName,
+    a.QuestionCount,
+    a.TotalAnswers,
+    a.TotalComments,
+    a.MostRecentActivity,
+    COALESCE(c.LastClosedDate, 'No Closures') AS LastClosedDate,
+    COALESCE(c.CloseReason, 'Not Applicable') AS CloseReason,
+    t.TagName,
+    t.PostCount
+FROM 
+    ActivitySummary a
+LEFT JOIN 
+    PostCloseReasons c ON a.UserId = c.PostId 
+LEFT JOIN 
+    TagActivity t ON t.PostCount > 10 
+WHERE 
+    a.QuestionCount > 0
+ORDER BY 
+    a.TotalAnswers DESC,
+    a.MostRecentActivity DESC;

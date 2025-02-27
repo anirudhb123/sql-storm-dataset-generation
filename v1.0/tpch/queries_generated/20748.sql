@@ -1,0 +1,76 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice IS NOT NULL AND 
+        o.o_orderstatus IN ('O', 'F')
+), 
+lowest_priced_items AS (
+    SELECT 
+        l.l_orderkey, 
+        l.l_partkey, 
+        l.l_discount,
+        RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice * (1 - l.l_discount) ASC) AS item_rank
+    FROM 
+        lineitem l 
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2021-01-01' AND DATE '2021-12-31'
+),
+distinct_suppliers AS (
+    SELECT DISTINCT 
+        s.s_suppkey, 
+        s.s_name
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty > 0 
+        AND s.s_acctbal IS NOT NULL
+),
+double_outer_join AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        n.n_name AS nation_name,
+        COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS brand_rank
+    FROM 
+        part p 
+    FULL OUTER JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey 
+    FULL OUTER JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey 
+    LEFT JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+)
+SELECT 
+    d.part_name, 
+    d.nation_name, 
+    COUNT(DISTINCT d.supplier_name) AS unique_suppliers,
+    AVG(d.p_retailprice) AS avg_retail_price,
+    MAX(d.brand_rank) AS max_brand_rank
+FROM 
+    double_outer_join d
+JOIN 
+    ranked_orders ro ON d.supplier_name != ro.price_rank::text
+LEFT JOIN 
+    lowest_priced_items lpi ON d.p_partkey = lpi.l_partkey AND lpi.item_rank = 1
+WHERE 
+    d.nation_name IS NOT NULL 
+    AND (lpi.l_discount IS NULL OR lpi.l_discount < 0.1)
+GROUP BY 
+    d.part_name, 
+    d.nation_name
+HAVING 
+    COUNT(lpi.l_orderkey) > 0
+ORDER BY 
+    avg_retail_price DESC NULLS LAST;

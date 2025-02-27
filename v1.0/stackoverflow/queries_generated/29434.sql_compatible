@@ -1,0 +1,74 @@
+
+WITH FilteredPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        CARDINALITY(string_to_array(substring(p.Tags, 2, LENGTH(p.Tags)-2), '><')) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year' 
+        AND p.Score > (SELECT AVG(Score) FROM Posts WHERE PostTypeId = 1) 
+        AND COALESCE(p.ClosedDate, false) = false 
+),
+
+RankedPosts AS (
+    SELECT 
+        fp.*,
+        RANK() OVER (ORDER BY fp.Score DESC, fp.ViewCount DESC) AS RankScore
+    FROM 
+        FilteredPosts fp
+),
+
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.LastActivityDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.OwnerDisplayName,
+        rp.TagCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankScore <= 100 
+)
+
+SELECT 
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.LastActivityDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.TagCount,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.TagName IN (
+         SELECT UNNEST(string_to_array(substring(tp.Tags, 2, LENGTH(tp.Tags)-2), '><'))
+     )) AS Tags
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, 
+    tp.ViewCount DESC;

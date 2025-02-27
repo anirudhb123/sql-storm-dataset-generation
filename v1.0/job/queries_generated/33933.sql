@@ -1,0 +1,84 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::text AS parent_movie_title,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.title AS parent_movie_title,
+        mh.level + 1
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+cast_stats AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS total_cast,
+        COUNT(DISTINCT ci.role_id) AS unique_roles
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+top_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        cs.total_cast,
+        cs.unique_roles,
+        RANK() OVER (ORDER BY cs.total_cast DESC) AS rank_by_cast
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_stats cs ON mh.movie_id = cs.movie_id
+    WHERE 
+        mh.level = 0
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(aka.name, 'Unknown') AS director_name,
+    tm.total_cast,
+    tm.unique_roles,
+    CASE 
+        WHEN tm.rank_by_cast <= 10 THEN 'Top 10'
+        WHEN tm.rank_by_cast <= 50 THEN 'Top 50'
+        ELSE 'Others'
+    END AS cast_rank_category
+FROM 
+    top_movies tm
+LEFT JOIN 
+    movie_companies mc ON tm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id AND cn.country_code = 'USA'
+LEFT JOIN 
+    aka_name aka ON aka.person_id = mc.company_id  -- Assuming directors are stored in *company_name*
+WHERE 
+    tm.total_cast IS NOT NULL
+ORDER BY 
+    tm.production_year DESC, 
+    tm.total_cast DESC;
+
+This SQL query performs an elaborate benchmarking operation that involves:
+
+1. A recursive CTE (`movie_hierarchy`) to create a hierarchy of movies, indicating which are the parent movies and differentiating episodes from their parent series.
+2. Another CTE (`cast_stats`) to aggregate cast statistics for each movie, calculating the total number of cast members and the number of unique roles.
+3. A final CTE (`top_movies`) that combines the hierarchy and casting statistics, ranking movies by the total number of cast members.
+4. The main SELECT statement pulls relevant information, including the title, production year, a possible director name (assuming directors are stored as companies), and categorizes by cast rank.
+5. It includes several outer joins, uses a window function for ranking, and applies conditional logic to create meaningful output categorization.
+
+This showcases advanced SQL features alongside intricate logic that emphasizes performance benchmarking in the defined schema.

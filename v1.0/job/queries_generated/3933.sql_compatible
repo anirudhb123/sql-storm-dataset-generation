@@ -1,0 +1,69 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COALESCE(c.role_id, 0) AS role_id,
+        RANK() OVER (PARTITION BY a.id ORDER BY a.production_year DESC) AS rank_year
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+), movie_info_summary AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT mi.info, ', ') AS movie_info,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        movie_info m
+    JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    GROUP BY 
+        m.movie_id
+), external_movie_links AS (
+    SELECT 
+        ml.movie_id,
+        COUNT(DISTINCT ml.linked_movie_id) AS linked_count
+    FROM 
+        movie_link ml
+    GROUP BY 
+        ml.movie_id
+), person_movie_info AS (
+    SELECT 
+        pi.person_id,
+        COUNT(DISTINCT c.movie_id) AS movies_count,
+        MAX(COALESCE(ct.kind, 'Unknown')) AS company_type
+    FROM 
+        person_info pi
+    LEFT JOIN 
+        cast_info c ON pi.person_id = c.person_id
+    LEFT JOIN 
+        movie_companies mc ON c.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        pi.person_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    pm.movies_count,
+    pm.company_type,
+    mis.movie_info,
+    mis.keyword_count,
+    COALESCE(ml.linked_count, 0) AS linked_movie_count
+FROM 
+    ranked_movies rm
+JOIN 
+    person_movie_info pm ON rm.role_id = pm.person_id
+LEFT JOIN 
+    movie_info_summary mis ON rm.id = mis.movie_id
+LEFT JOIN 
+    external_movie_links ml ON rm.id = ml.movie_id
+WHERE 
+    rm.rank_year = 1
+ORDER BY 
+    rm.production_year DESC, 
+    pm.movies_count DESC;

@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_paid DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_net_paid IS NOT NULL
+),
+AggregateReturns AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returns,
+        AVG(cr_return_amt) AS avg_return_amt,
+        COUNT(DISTINCT cr_order_number) AS unique_returns_count
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_item_sk
+),
+CustomerStats AS (
+    SELECT 
+        c_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_paid) AS total_spent
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c_customer_sk
+)
+SELECT 
+    r.ws_item_sk,
+    r.ws_order_number,
+    COALESCE(a.total_returns, 0) AS total_returns,
+    COALESCE(a.avg_return_amt, 0) AS avg_return_amt,
+    s.total_orders,
+    s.total_spent
+FROM 
+    RankedSales r
+LEFT JOIN 
+    AggregateReturns a ON r.ws_item_sk = a.cr_item_sk
+JOIN 
+    CustomerStats s ON r.ws_order_number IN (SELECT DISTINCT ws_order_number FROM web_sales WHERE ws_bill_customer_sk = s.c_customer_sk)
+WHERE 
+    r.rn = 1
+    AND (a.total_returns > 0 OR s.total_spent > 1000)
+    AND r.ws_quantity > 0
+ORDER BY 
+    r.ws_item_sk, 
+    total_spent DESC 
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE
+        p.CreationDate >= DATEADD(YEAR, -1, '2024-10-01')
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.Score,
+        ub.BadgeCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+    WHERE 
+        rp.rn = 1 AND ub.BadgeCount > 0
+)
+SELECT 
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    STRING_AGG(DISTINCT pt.Name || ' (' || pt.Id || ')', ', ') AS PostTypes
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostTypes pt ON pt.Id IN (SELECT DISTINCT p.PostTypeId FROM Posts p WHERE p.Id = fp.PostId)
+LEFT JOIN 
+    UserBadges ub ON fp.OwnerUserId = ub.UserId
+GROUP BY 
+    fp.PostId, fp.Title, fp.CreationDate, fp.Score, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+HAVING 
+    SUM(fp.Score) > 10
+ORDER BY 
+    fp.Score DESC
+LIMIT 10;

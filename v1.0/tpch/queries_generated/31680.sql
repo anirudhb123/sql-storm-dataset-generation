@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_nationkey = sh.s_nationkey)
+),
+DistinctRegions AS (
+    SELECT DISTINCT r.r_name 
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    WHERE n.n_name LIKE 'N%'
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderstatus, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+)
+SELECT 
+    p.p_name,
+    COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS total_supply_cost,
+    AVG(os.total_revenue) AS avg_order_revenue,
+    DENSE_RANK() OVER (PARTITION BY p.p_brand ORDER BY COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) DESC) AS rank_supply_cost,
+    (SELECT COUNT(DISTINCT c.c_custkey) 
+     FROM customer c 
+     WHERE c.c_nationkey IN (SELECT DISTINCT n.n_nationkey FROM nation n WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM DistinctRegions r))
+    ) AS total_customers_in_regions
+FROM part p
+LEFT OUTER JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN OrderSummary os ON os.o_orderstatus = 'F'
+GROUP BY p.p_name
+HAVING COUNT(DISTINCT ps.ps_suppkey) > 1 AND AVG(ps.ps_availqty) IS NOT NULL
+ORDER BY rank_supply_cost, total_supply_cost DESC;

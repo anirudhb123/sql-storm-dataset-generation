@@ -1,0 +1,75 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.imdb_index) AS rank,
+        ARRAY_AGG(DISTINCT k.keyword) FILTER (WHERE k.keyword IS NOT NULL) AS keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+ActorsWithRoles AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        r.role,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS roles_with_notes
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        a.id, a.name, r.role
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mc.note) AS unique_anecdotes
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        c.country_code IS NOT NULL
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind 
+)
+SELECT 
+    rm.title_id,
+    rm.title,
+    rm.production_year,
+    rm.rank,
+    COALESCE(aw.role, 'No role') AS actor_role,
+    COALESCE(aw.movie_count, 0) AS total_movies,
+    COALESCE(ci.company_name, 'No Company') AS company_name,
+    COALESCE(ci.company_type, 'Unknown') AS company_type,
+    COALESCE(ci.unique_anecdotes, 0) AS anecdotes_count,
+    rm.keywords AS movie_keywords
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorsWithRoles aw ON aw.movie_count > 10 AND NOT (aw.name IS NULL OR aw.role IS NULL)  -- bizarre condition for filtering actors
+LEFT JOIN 
+    CompanyInfo ci ON ci.movie_id = rm.title_id 
+WHERE 
+    rm.rank <= 5  -- arbitrary choice to limit to top 5 per year
+ORDER BY 
+    rm.production_year DESC,
+    rm.rank ASC,
+    COALESCE(aw.total_movies, 0) DESC
+LIMIT 100;

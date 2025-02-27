@@ -1,0 +1,60 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+high_profit_items AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        ranked_sales.total_quantity,
+        ranked_sales.total_net_profit
+    FROM 
+        ranked_sales
+    JOIN 
+        item ON ranked_sales.ws_item_sk = item.i_item_sk
+    WHERE 
+        ranked_sales.rn = 1 AND ranked_sales.total_net_profit > (SELECT AVG(total_net_profit) FROM ranked_sales)
+),
+returned_items AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returns,
+        SUM(cr_return_amount) AS total_return_amount
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_item_sk
+)
+SELECT 
+    hi.i_item_id,
+    hi.i_item_desc,
+    hi.total_quantity,
+    hi.total_net_profit,
+    COALESCE(ri.total_returns, 0) AS total_returns,
+    COALESCE(ri.total_return_amount, 0) AS total_return_amount,
+    CASE 
+        WHEN COALESCE(ri.total_returns, 0) > 0 THEN 'Returned'
+        ELSE 'Not Returned'
+    END AS return_status,
+    CASE 
+        WHEN hi.total_net_profit > 10000 THEN 'High Profit'
+        WHEN hi.total_net_profit BETWEEN 5000 AND 10000 THEN 'Medium Profit'
+        ELSE 'Low Profit'
+    END AS profit_category
+FROM 
+    high_profit_items hi
+LEFT JOIN 
+    returned_items ri ON hi.i_item_id = ri.cr_item_sk
+WHERE 
+    hi.total_quantity > (SELECT MAX(total_quantity) FROM high_profit_items) * 0.1
+ORDER BY 
+    hi.total_net_profit DESC, hi.i_item_id
+LIMIT 50;

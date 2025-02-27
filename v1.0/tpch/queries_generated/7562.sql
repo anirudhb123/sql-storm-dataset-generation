@@ -1,0 +1,29 @@
+WITH supplier_part AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderstatus, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F' -- filtering only completed orders
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT r.r_name, COUNT(DISTINCT c.c_custkey) AS customer_count, 
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       SUM(ps.ps_availqty) AS total_avail_qty,
+       SUM(ps.ps_supplycost) AS total_supplycost,
+       SUM(ls.total_revenue) AS total_revenue
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier_part sp ON n.n_nationkey = sp.s_suppkey
+JOIN customer_orders co ON sp.s_suppkey = co.o_orderkey
+JOIN lineitem_summary ls ON co.o_orderkey = ls.l_orderkey
+GROUP BY r.r_name
+ORDER BY total_revenue DESC;

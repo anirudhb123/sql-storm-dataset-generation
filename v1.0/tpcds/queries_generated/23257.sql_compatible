@@ -1,0 +1,86 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amount) AS total_return_amount,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_amount) DESC) AS rn
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+    GROUP BY 
+        sr_item_sk
+),
+TopReturningItems AS (
+    SELECT 
+        rr.sr_item_sk,
+        rr.total_returns,
+        rr.total_return_amount,
+        COALESCE((
+            SELECT 
+                MAX(s.sm_ship_mode_id) 
+            FROM 
+                ship_mode s 
+            WHERE 
+                s.sm_ship_mode_sk IN (SELECT DISTINCT sr_ship_mode_sk FROM catalog_returns cr WHERE cr.cr_item_sk = rr.sr_item_sk)
+        ), 'UNKNOWN') AS preferred_ship_mode
+    FROM 
+        RankedReturns rr
+    WHERE 
+        rr.rn <= 10
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_birth_month IS NOT NULL
+),
+FinalReport AS (
+    SELECT 
+        tbi.sr_item_sk,
+        tbi.total_returns,
+        tbi.total_return_amount,
+        cd.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        (CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'NO ESTIMATE' 
+            WHEN cd.cd_purchase_estimate < 100 THEN 'LOW SPENDER'
+            WHEN cd.cd_purchase_estimate BETWEEN 100 AND 500 THEN 'MID SPENDER'
+            ELSE 'HIGH SPENDER'
+         END) AS customer_segment,
+        (SELECT COUNT(*) FROM customer WHERE c_birth_month = 12) AS customers_born_in_december,
+        ABS(SUM(sr_return_quantity)) FILTER (WHERE sr_return_quantity IS NOT NULL) OVER (PARTITION BY cd.cd_gender) AS total_return_quantity_by_gender
+    FROM 
+        TopReturningItems tbi
+    JOIN 
+        CustomerDetails cd ON cd.c_customer_id IN (SELECT DISTINCT sr_customer_sk FROM store_returns WHERE sr_item_sk = tbi.sr_item_sk)
+)
+SELECT 
+    fr.sr_item_sk,
+    fr.total_returns,
+    fr.total_return_amount,
+    fr.customer_segment,
+    fr.total_return_quantity_by_gender,
+    COALESCE(wp.wp_url, 'NO URL') AS web_page_url
+FROM 
+    FinalReport fr
+LEFT JOIN 
+    web_page wp ON fr.sr_item_sk = wp.wp_web_page_sk
+WHERE 
+    fr.total_returns > 5 
+    OR fr.total_return_amount > 1000
+ORDER BY 
+    fr.total_return_amount DESC
+LIMIT 50;

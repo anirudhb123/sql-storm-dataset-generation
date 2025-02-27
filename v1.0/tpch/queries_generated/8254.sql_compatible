@@ -1,0 +1,36 @@
+
+WITH supplier_part_info AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+), customer_order_info AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+), nation_region_info AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+), aggregated_info AS (
+    SELECT 
+        n.r_name AS region_name,
+        p.p_name AS part_name,
+        s.s_name AS supplier_name,
+        SUM(l.l_quantity) AS total_quantity,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    JOIN customer_order_info coi ON l.l_orderkey = coi.o_orderkey
+    JOIN supplier_part_info spi ON l.l_partkey = spi.ps_partkey AND l.l_suppkey = spi.s_suppkey
+    JOIN nation n ON coi.c_custkey = n.n_nationkey
+    JOIN part p ON spi.ps_partkey = p.p_partkey -- Added missing join for part
+    JOIN supplier s ON spi.s_suppkey = s.s_suppkey -- Added missing join for supplier
+    GROUP BY n.r_name, p.p_name, s.s_name
+)
+SELECT region_name, part_name, supplier_name, total_quantity, total_revenue
+FROM aggregated_info
+WHERE total_revenue > (
+    SELECT AVG(total_revenue) FROM aggregated_info
+)
+ORDER BY total_revenue DESC
+LIMIT 10;

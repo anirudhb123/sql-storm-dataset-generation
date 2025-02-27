@@ -1,0 +1,33 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 50000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON ps.ps_partkey = s.s_suppkey
+    WHERE s.s_acctbal > 50000 AND sh.level < 5
+),
+total_sales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2022-01-01' AND l.l_shipdate < '2023-01-01'
+    GROUP BY o.o_orderkey
+),
+average_supplier_sales AS (
+    SELECT sh.s_name, AVG(ts.total_price) AS avg_sales
+    FROM supplier_hierarchy sh
+    LEFT JOIN total_sales ts ON sh.s_suppkey = ts.o_orderkey
+    GROUP BY sh.s_name
+)
+SELECT n.n_name, r.r_name, AVG(as.avg_sales) AS avg_sales_per_region
+FROM average_supplier_sales as
+JOIN supplier s ON as.s_name = s.s_name
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE as.avg_sales IS NOT NULL
+GROUP BY n.n_name, r.r_name
+ORDER BY avg_sales_per_region DESC
+LIMIT 10;

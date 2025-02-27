@@ -1,0 +1,76 @@
+
+WITH RECURSIVE UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgeClass,
+        RANK() OVER (ORDER BY COUNT(p.Id) DESC) AS RankByPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p2.RelatedPostId) AS RelatedLinks
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        PostLinks p2 ON p.Id = p2.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+    GROUP BY 
+        p.Id, p.Title
+),
+UserPostStats AS (
+    SELECT 
+        ue.UserId,
+        ue.Reputation,
+        ps.PostId,
+        ps.Title,
+        ps.CommentCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.RelatedLinks
+    FROM 
+        UserEngagement ue
+    JOIN 
+        Posts p ON ue.UserId = p.OwnerUserId
+    JOIN 
+        PostStats ps ON p.Id = ps.PostId
+)
+SELECT 
+    ups.UserId,
+    ups.Reputation,
+    COUNT(ups.PostId) AS TotalPosts,
+    SUM(ups.CommentCount) AS TotalComments,
+    SUM(ups.UpVotes) AS TotalUpVotes,
+    SUM(ups.DownVotes) AS TotalDownVotes,
+    LAG(SUM(ups.UpVotes)) OVER (PARTITION BY ups.UserId ORDER BY ups.PostId) AS PreviousUserUpVotes,
+    CASE
+        WHEN SUM(ups.UpVotes) > SUM(ups.DownVotes) THEN 'More Upvotes'
+        WHEN SUM(ups.DownVotes) > SUM(ups.UpVotes) THEN 'More Downvotes'
+        ELSE 'Equal Votes'
+    END AS VoteStatus
+FROM 
+    UserPostStats ups
+GROUP BY 
+    ups.UserId, ups.Reputation
+HAVING 
+    COUNT(ups.PostId) > 5
+ORDER BY 
+    TotalPosts DESC, ups.Reputation DESC;

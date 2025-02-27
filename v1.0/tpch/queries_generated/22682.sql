@@ -1,0 +1,45 @@
+WITH RECURSIVE region_supply AS (
+    SELECT r.r_regionkey, r.r_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY r.r_regionkey, r.r_name
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_order_value,
+           COUNT(o.o_orderkey) OVER (PARTITION BY c.c_custkey) AS order_count
+    FROM customer c
+    INNER JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey
+),
+high_value_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.net_order_value) AS total_value, order_count
+    FROM customer_orders o
+    JOIN customer c ON o.c_custkey = c.c_custkey
+    GROUP BY c.c_custkey, c.c_name, order_count
+    HAVING SUM(o.net_order_value) > 10000 AND COUNT(o.o_orderkey) > 5
+),
+detailed_suppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           COALESCE(SUM(l.l_quantity), 0) as total_quantity_sold,
+           MAX(l.l_discount) AS max_discount
+    FROM partsupp ps
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+)
+SELECT DISTINCT c.c_name, r.r_name, 
+       COALESCE(SUM(rs.total_supply_cost), 0) AS supply_cost,
+       COALESCE(SUM(hvc.total_value), 0) AS customer_value,
+       COALESCE(AVG(ds.max_discount), 0) AS average_discount
+FROM high_value_customers hvc
+FULL OUTER JOIN region_supply rs ON hvc.c_custkey IS NULL OR hvc.total_value IS NULL
+LEFT JOIN detailed_suppliers ds ON hvc.c_custkey = (SELECT c.c_custkey 
+                                                     FROM customer c WHERE hvc.c_custkey = c.c_custkey)
+LEFT JOIN region r ON hvc.c_custkey IS NULL
+WHERE (ds.total_quantity_sold > 0 OR hvc.total_value IS NULL)
+GROUP BY c.c_name, r.r_name
+ORDER BY supply_cost DESC, customer_value ASC
+LIMIT 100 OFFSET 50;

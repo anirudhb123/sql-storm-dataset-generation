@@ -1,0 +1,81 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 0
+),
+PostDetails AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 year'
+    GROUP BY 
+        P.OwnerUserId
+),
+BadgeSummary AS (
+    SELECT 
+        B.UserId,
+        STRING_AGG(B.Name, ', ') AS Badges,
+        COUNT(*) FILTER (WHERE B.Class = 1) AS GoldBadgesCount,
+        COUNT(*) FILTER (WHERE B.Class = 2) AS SilverBadgesCount,
+        COUNT(*) FILTER (WHERE B.Class = 3) AS BronzeBadgesCount
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        US.Reputation,
+        PS.PostCount,
+        PS.QuestionCount,
+        PS.AnswerCount,
+        BS.Badges,
+        COALESCE(BS.GoldBadgesCount, 0) AS GoldBadgesCount,
+        COALESCE(BS.SilverBadgesCount, 0) AS SilverBadgesCount,
+        COALESCE(BS.BronzeBadgesCount, 0) AS BronzeBadgesCount
+    FROM 
+        UserStats US
+    LEFT JOIN 
+        PostDetails PS ON US.UserId = PS.OwnerUserId
+    LEFT JOIN 
+        BadgeSummary BS ON US.UserId = BS.UserId
+    WHERE 
+        US.ReputationRank <= 10
+)
+SELECT 
+    T.DisplayName,
+    T.Reputation,
+    T.PostCount,
+    T.QuestionCount,
+    T.AnswerCount,
+    T.Badges,
+    T.GoldBadgesCount + T.SilverBadgesCount + T.BronzeBadgesCount AS TotalBadges,
+    CASE 
+        WHEN T.Reputation > 1000 THEN 'Expert'
+        WHEN T.Reputation BETWEEN 500 AND 1000 THEN 'Intermediate'
+        ELSE 'Novice' 
+    END AS UserLevel,
+    (SELECT COUNT(*) FROM Comments C WHERE C.UserId = T.UserId) AS CommentCount
+FROM 
+    TopUsers T
+ORDER BY 
+    T.Reputation DESC
+LIMIT 10;

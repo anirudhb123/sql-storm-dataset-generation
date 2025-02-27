@@ -1,0 +1,73 @@
+WITH RecursivePostLinks AS (
+    SELECT 
+        pl.PostId, 
+        pl.RelatedPostId, 
+        1 AS LinkLevel
+    FROM 
+        PostLinks pl
+    
+    UNION ALL
+    
+    SELECT 
+        pl.PostId, 
+        pl.RelatedPostId, 
+        r.LinkLevel + 1
+    FROM 
+        PostLinks pl
+    INNER JOIN 
+        RecursivePostLinks r ON pl.PostId = r.RelatedPostId
+),
+RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.Score,
+        p.ViewCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.PostTypeId, p.Score, p.ViewCount, p.OwnerUserId
+),
+PostHistoryCount AS (
+    SELECT
+        ph.PostId,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 10, 11) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    p.CommentCount,
+    u.DisplayName AS OwnerDisplayName,
+    COALESCE(phc.EditCount, 0) AS EditCount,
+    COALESCE(rpl.LinkLevel, 0) AS MaxLinkLevel,
+    (p.UpVotes - p.DownVotes) AS VoteBalance
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    PostHistoryCount phc ON p.Id = phc.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    (SELECT PostId, MAX(LinkLevel) AS LinkLevel FROM RecursivePostLinks GROUP BY PostId) rpl ON p.Id = rpl.PostId
+WHERE 
+    (p.PostTypeId = 1 AND p.Score > 10) OR (p.Tags LIKE '%SQL%')
+ORDER BY 
+    VoteBalance DESC, EditCount ASC, p.ViewCount DESC
+LIMIT 100;

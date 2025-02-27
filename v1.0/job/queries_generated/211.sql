@@ -1,0 +1,55 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rnk
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+actor_titles AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        m.title AS movie_title,
+        m.production_year
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN aka_title m ON ci.movie_id = m.id
+),
+company_movies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+),
+movie_keywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM movie_keyword m
+    JOIN keyword k ON m.keyword_id = k.id
+    GROUP BY m.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title AS movie_title,
+    rm.production_year,
+    act.actor_name,
+    comp.company_name,
+    comp.company_type,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    CASE 
+        WHEN rm.production_year > 2000 THEN 'Modern'
+        WHEN rm.production_year < 1950 THEN 'Classic'
+        ELSE 'Vintage'
+    END AS era
+FROM ranked_movies rm
+LEFT JOIN actor_titles act ON rm.movie_id = act.movie_title
+LEFT JOIN company_movies comp ON rm.movie_id = comp.movie_id
+LEFT JOIN movie_keywords mk ON rm.movie_id = mk.movie_id
+WHERE rm.rnk <= 5
+ORDER BY rm.production_year DESC, rm.title;

@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL 
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        r.Level + 1 AS Level
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotesGiven,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotesGiven,
+        COUNT(v.Id) AS TotalVotesGiven,
+        AVG(u.Reputation) AS AvgUserReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+RecentPostEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName AS Editor,
+        ph.CreationDate AS EditDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 4 THEN ph.Comment END) AS LastTitleChange,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 5 THEN ph.Comment END) AS LastBodyChange
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        ph.PostId, ph.UserDisplayName, ph.CreationDate
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(phh.Level), 0) AS ReplyCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy phh ON p.Id = phh.ParentId
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    pe.TotalUpVotes,
+    pe.TotalDownVotes,
+    pe.CommentCount,
+    (SELECT COUNT(*) FROM RecentPostEdits rpe WHERE rpe.PostId = p.Id) AS EditCount,
+    u.UserId,
+    u.UpVotesGiven,
+    u.DownVotesGiven,
+    u.TotalVotesGiven,
+    u.AvgUserReputation
+FROM 
+    Posts p
+JOIN 
+    PostEngagement pe ON p.Id = pe.PostId
+JOIN 
+    UserVoteStats u ON p.OwnerUserId = u.UserId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId AND ph.CreationDate = 
+        (SELECT MAX(CreationDate) FROM PostHistory WHERE PostId = p.Id)
+WHERE 
+    p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '365 days' 
+    AND pe.TotalUpVotes > 10
+ORDER BY 
+    pe.TotalUpVotes DESC, u.AvgUserReputation DESC
+LIMIT 100;

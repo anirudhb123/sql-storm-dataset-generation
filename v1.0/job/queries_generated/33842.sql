@@ -1,0 +1,52 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- CTE to build a hierarchy of movies and their direct links
+    SELECT ml.movie_id, ml.linked_movie_id, 1 AS level
+    FROM movie_link ml
+    UNION ALL
+    SELECT ml.movie_id, ml.linked_movie_id, mh.level + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.linked_movie_id
+),
+actor_performance AS (
+    -- Get actor's performance metrics for the movies from the hierarchy
+    SELECT 
+        ka.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        SUM(CASE 
+            WHEN ki.keyword = 'Award' THEN 1 
+            ELSE 0 END) AS award_movies,
+        AVG(COALESCE(m.production_year, 0)) AS avg_production_year
+    FROM aka_name ka
+    JOIN cast_info ci ON ka.person_id = ci.person_id
+    JOIN movie_companies mc ON ci.movie_id = mc.movie_id
+    JOIN movie_hierarchy mh ON ci.movie_id = mh.movie_id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = ci.movie_id
+    LEFT JOIN keyword ki ON mk.keyword_id = ki.id
+    LEFT JOIN title m ON m.id = ci.movie_id
+    GROUP BY ka.name
+),
+movie_rating AS (
+    -- Determine a ranking of movies based on production year and award count
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ROW_NUMBER() OVER (ORDER BY m.production_year DESC, COUNT(ki.id) DESC) AS rating_rank
+    FROM title m
+    LEFT JOIN movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN keyword ki ON mk.keyword_id = ki.id
+    GROUP BY m.id
+)
+SELECT 
+    ap.actor_name,
+    ap.total_movies,
+    ap.award_movies,
+    ap.avg_production_year,
+    mr.title,
+    mr.rating_rank
+FROM actor_performance ap
+JOIN movie_rating mr ON ap.total_movies > 0
+WHERE ap.award_movies > 0 
+AND ap.avg_production_year < (SELECT AVG(production_year) FROM title WHERE production_year IS NOT NULL)
+ORDER BY ap.award_movies DESC, mr.rating_rank;
+
+

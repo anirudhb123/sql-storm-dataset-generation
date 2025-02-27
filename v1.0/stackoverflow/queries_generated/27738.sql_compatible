@@ -1,0 +1,78 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    LEFT JOIN 
+        Badges B ON B.UserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.Views, U.UpVotes, U.DownVotes
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        PT.Name AS PostType,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseOpenCount,
+        COUNT(DISTINCT PH.Id) AS EditCount
+    FROM 
+        Posts P
+    JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    LEFT JOIN 
+        PostHistory PH ON PH.PostId = P.Id
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.CreationDate, PT.Name
+),
+StringProcessing AS (
+    SELECT 
+        U.DisplayName,
+        P.Title,
+        P.Body,
+        LENGTH(P.Body) AS BodyLength,
+        SUBSTRING(P.Body FOR CHAR_LENGTH(P.Body)) AS FirstParagraph,
+        ARRAY_LENGTH(string_to_array(P.Tags, '><'), 1) AS TagCount,
+        COALESCE(PD.EditCount, 0) AS EditActions
+    FROM 
+        UserStats U
+    JOIN 
+        Posts P ON P.OwnerUserId = U.UserId
+    LEFT JOIN 
+        PostDetails PD ON PD.PostId = P.Id
+    WHERE 
+        U.Reputation > 500 
+)
+SELECT 
+    DisplayName,
+    Title,
+    BodyLength,
+    FirstParagraph,
+    TagCount,
+    EditActions
+FROM 
+    StringProcessing
+ORDER BY 
+    BodyLength DESC, TagCount DESC
+LIMIT 100;

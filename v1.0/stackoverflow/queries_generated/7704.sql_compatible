@@ -1,0 +1,39 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankByViews
+    FROM Posts p
+    JOIN Users U ON p.OwnerUserId = U.Id
+    WHERE p.CreationDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 year'
+),
+AggregatedData AS (
+    SELECT 
+        p.PostTypeId,
+        COUNT(*) AS TotalPosts,
+        AVG(p.Score) AS AvgScore,
+        SUM(p.AnswerCount) AS TotalAnswers,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT OwnerDisplayName) AS UniqueUsers
+    FROM RankedPosts p
+    GROUP BY p.PostTypeId
+)
+SELECT 
+    pt.Name AS PostTypeName,
+    ad.TotalPosts,
+    ad.AvgScore,
+    ad.TotalAnswers,
+    ad.TotalViews,
+    ad.UniqueUsers,
+    (SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId IN (SELECT rp.PostId FROM RankedPosts rp)) AS TotalPostHistories
+FROM AggregatedData ad
+JOIN PostTypes pt ON ad.PostTypeId = pt.Id
+WHERE ad.TotalPosts > 0
+ORDER BY ad.TotalViews DESC, ad.AvgScore DESC;

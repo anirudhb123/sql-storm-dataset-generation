@@ -1,0 +1,49 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           o.custkey,
+           1 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    UNION ALL
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           oh.custkey,
+           oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.custkey
+    WHERE oh.level < 5
+),
+CombinedData AS (
+    SELECT c.c_name,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           c.c_acctbal,
+           r.r_name AS region,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE o.o_orderstatus = 'F'
+      AND l.l_shipdate BETWEEN DATEADD(month, -6, GETDATE()) AND GETDATE()
+    GROUP BY c.c_name, c.c_acctbal, r.r_name
+)
+SELECT cd.c_name,
+       cd.total_revenue,
+       cd.c_acctbal,
+       cd.region
+FROM CombinedData cd
+WHERE cd.revenue_rank <= 10
+ORDER BY cd.total_revenue DESC
+UNION
+SELECT NULL, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       NULL,
+       'All Regions' AS region
+FROM lineitem l
+WHERE l.l_shipdate BETWEEN DATEADD(month, -6, GETDATE()) AND GETDATE()
+  AND l.l_returnflag = 'R'
+GROUP BY l.l_returnflag
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+ORDER BY total_revenue DESC;

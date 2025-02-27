@@ -1,0 +1,58 @@
+
+WITH CustomerStatistics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_id) AS total_customers,
+        SUM(CASE WHEN cd.cd_purchase_estimate > 1000 THEN 1 ELSE 0 END) AS high_value_customers,
+        AVG(cd.cd_dep_count) AS avg_dependent_count
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+),
+SalesSummary AS (
+    SELECT 
+        d.d_month_seq,
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_month_seq
+),
+ItemStatistics AS (
+    SELECT 
+        i.i_category AS item_category,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_quantity) AS total_items_sold,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_category
+)
+SELECT 
+    cs.cd_gender,
+    cs.cd_marital_status,
+    ss.d_month_seq,
+    ss.total_sales,
+    ss.total_profit,
+    is.item_category,
+    is.total_orders,
+    is.total_items_sold,
+    is.avg_sales_price
+FROM 
+    CustomerStatistics cs
+JOIN 
+    SalesSummary ss ON 1=1
+JOIN 
+    ItemStatistics is ON 1=1
+ORDER BY 
+    cs.cd_gender, cs.cd_marital_status, ss.d_month_seq, is.item_category;

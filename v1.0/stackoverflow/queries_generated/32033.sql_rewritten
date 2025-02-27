@@ -1,0 +1,52 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        1 AS Level,
+        u.CreationDate,
+        u.Location
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000 
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        urc.Level + 1,
+        u.CreationDate,
+        u.Location
+    FROM 
+        Users u
+    JOIN
+        UserReputationCTE urc ON u.Reputation > urc.Reputation
+    WHERE 
+        urc.Level < 5 
+)
+SELECT 
+    ur.Id,
+    ur.DisplayName,
+    ur.Reputation,
+    ur.Level,
+    COUNT(DISTINCT p.Id) AS PostsCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    AVG(v.BountyAmount) FILTER (WHERE v.BountyAmount IS NOT NULL) AS AverageBounty
+FROM 
+    UserReputationCTE ur
+LEFT JOIN 
+    Posts p ON ur.Id = p.OwnerUserId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+GROUP BY 
+    ur.Id, ur.DisplayName, ur.Reputation, ur.Level
+HAVING 
+    COUNT(DISTINCT p.Id) > 5 
+ORDER BY 
+    ur.Reputation DESC, 
+    ur.Level ASC 
+LIMIT 10;

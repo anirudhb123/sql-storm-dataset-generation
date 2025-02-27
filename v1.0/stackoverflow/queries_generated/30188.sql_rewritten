@@ -1,0 +1,64 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 0
+    GROUP BY 
+        U.Id
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    RU.UserId,
+    RU.DisplayName,
+    RU.Reputation,
+    RU.ReputationRank,
+    COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+    COALESCE(UB.BadgeNames, 'No Badges') AS BadgeNames,
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate AS RecentPostDate,
+    RP.Score AS RecentPostScore,
+    RP.ViewCount AS RecentPostViews
+FROM 
+    RankedUsers RU
+LEFT JOIN 
+    UserBadges UB ON RU.UserId = UB.UserId
+LEFT JOIN 
+    RecentPosts RP ON RU.UserId = RP.PostId
+WHERE 
+    RU.ReputationRank <= 10
+ORDER BY 
+    RU.Reputation DESC, RP.RecentPostDate DESC;

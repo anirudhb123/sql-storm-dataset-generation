@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        AVG(v.BountyAmount) AS AvgBounty
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id AND v.VoteTypeId = 8 
+    GROUP BY 
+        t.TagName
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        ph.UserDisplayName,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+),
+RecentPosts AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.ViewCount,
+        r.Score,
+        r.OwnerName,
+        CASE 
+            WHEN r.ViewCount > 1000 THEN 'High'
+            WHEN r.ViewCount BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ViewCategory,
+        COALESCE(cp.CloseDate, 'Not Closed') AS ClosureInfo
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        ClosedPostHistory cp ON r.PostId = cp.PostId
+    WHERE 
+        r.PostRank <= 5 
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.OwnerName,
+    rp.ViewCategory,
+    ts.PostCount AS TagUsageCount,
+    ts.TotalBounties AS TagTotalBounties,
+    ts.AvgBounty AS TagAvgBounty,
+    rp.ClosureInfo,
+    CASE 
+        WHEN rp.ClosureInfo = 'Not Closed' AND rp.Score > 50 THEN 'Potentially Featured'
+        ELSE 'Regular'
+    END AS PostType
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    TagStats ts ON EXISTS (SELECT 1 FROM Tags t WHERE rp.Title LIKE '%' || t.TagName || '%')
+ORDER BY 
+    rp.ViewCount DESC, rp.Score DESC;

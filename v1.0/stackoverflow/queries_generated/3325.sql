@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(v.Id) OVER (PARTITION BY p.Id) AS vote_count
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 -- UpVotes
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS last_updated,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS close_count,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS reopen_count
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS user_id,
+        COUNT(b.Id) AS badge_count,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS gold_badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.vote_count,
+    phs.last_updated,
+    phs.close_count,
+    phs.reopen_count,
+    ub.badge_count,
+    ub.gold_badges
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryStats phs ON rp.Id = phs.PostId
+JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.user_id
+WHERE 
+    rp.rn = 1 
+    AND (phs.close_count > 0 OR phs.reopen_count > 0)
+ORDER BY 
+    rp.Score DESC, 
+    phs.last_updated DESC
+LIMIT 50;

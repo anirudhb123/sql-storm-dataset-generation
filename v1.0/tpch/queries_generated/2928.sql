@@ -1,0 +1,80 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_container,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 100.00
+),
+SupplierStats AS (
+    SELECT 
+        s.s_nationkey,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+),
+SupplierPartSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        pp.price_rank,
+        s.total_parts,
+        s.total_supply_cost
+    FROM 
+        SupplierStats s
+    LEFT JOIN 
+        RankedParts pp ON pp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+),
+FinalSummary AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(DISTINCT h.order_value) AS total_high_value_orders,
+        AVG(sp.total_supply_cost) AS avg_supply_cost
+    FROM 
+        HighValueOrders h
+    JOIN 
+        supplier s ON h.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = s.s_suppkey)
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        SupplierPartSummary sp ON s.s_suppkey = sp.s_suppkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    fs.nation_name,
+    fs.total_high_value_orders,
+    COALESCE(fs.avg_supply_cost, 0) AS avg_supply_cost
+FROM 
+    FinalSummary fs
+WHERE 
+    fs.total_high_value_orders > 500
+ORDER BY 
+    fs.nation_name;

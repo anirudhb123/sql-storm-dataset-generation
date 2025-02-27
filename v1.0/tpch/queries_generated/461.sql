@@ -1,0 +1,81 @@
+WITH SupplierRevenue AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE
+        l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        sr.total_revenue,
+        RANK() OVER (ORDER BY sr.total_revenue DESC) AS revenue_rank
+    FROM
+        supplier s
+    LEFT JOIN
+        SupplierRevenue sr ON s.s_suppkey = sr.s_suppkey
+),
+PartDetail AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        COALESCE(ps.ps_availqty, 0) AS available_quantity,
+        COALESCE(sr.total_revenue, 0) AS supplier_revenue
+    FROM
+        part p
+    LEFT JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN
+        SupplierRevenue sr ON ps.ps_suppkey = sr.s_suppkey
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > (
+            SELECT AVG(c2.c_acctbal)
+            FROM customer c2
+            WHERE c2.c_nationkey = c.c_nationkey
+        )
+    GROUP BY
+        c.c_custkey, c.c_name
+)
+SELECT
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    pd.available_quantity,
+    cs.c_name,
+    cs.total_spent,
+    ts.total_revenue
+FROM
+    PartDetail pd
+JOIN
+    TopSuppliers ts ON pd.supplier_revenue > ts.total_revenue / 10 -- Join on suppliers with significant revenue
+LEFT JOIN
+    CustomerOrders cs ON cs.total_spent > 1000 -- Joining only customers who spent more than 1000
+WHERE
+    pd.p_retailprice < 50.00 -- Filter to find affordable parts
+ORDER BY
+    pd.available_quantity DESC,
+    ts.revenue_rank
+LIMIT 100;

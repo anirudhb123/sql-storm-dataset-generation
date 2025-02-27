@@ -1,0 +1,45 @@
+WITH RECURSIVE supplier_chain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT p.ps_suppkey, s.s_name, s.s_nationkey, level + 1
+    FROM partsupp p
+    JOIN supplier s ON p.ps_suppkey = s.s_suppkey
+    JOIN supplier_chain sc ON p.ps_partkey = sc.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL AND level < 5
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank,
+    r.r_name AS region_name,
+    NULLIF(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END), 0) AS total_returns
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    supplier_chain sc ON l.l_suppkey = sc.s_suppkey
+JOIN 
+    supplier s ON sc.s_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+    AND (l.l_shipmode = 'AIR' OR l.l_shipmode = 'GROUND')
+GROUP BY 
+    p.p_partkey, p.p_name, r.r_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000
+ORDER BY 
+    total_revenue DESC, p.p_partkey;

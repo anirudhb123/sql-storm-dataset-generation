@@ -1,0 +1,65 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        RANK() OVER (PARTITION BY sr_returning_customer_sk ORDER BY SUM(sr_return_amt_inc_tax) DESC) AS rnk
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        COALESCE(hd_income_band_sk, 0) AS income_band,
+        CASE 
+            WHEN cd_purchase_estimate IS NULL OR cd_purchase_estimate < 100 THEN 'Low'
+            WHEN cd_purchase_estimate BETWEEN 100 AND 500 THEN 'Medium'
+            ELSE 'High' 
+        END AS purchase_band
+    FROM 
+        customer_demographics
+    LEFT JOIN household_demographics ON cd_demo_sk = hd_demo_sk
+),
+DetailedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS total_orders,
+        AVG(ws_sales_price) AS avg_sales_price
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk = (SELECT MAX(ws_ship_date_sk) FROM web_sales)
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    cd.cd_demo_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.purchase_band,
+    dr.total_returns,
+    dr.total_return_amount,
+    ds.total_profit,
+    ds.total_orders,
+    ds.avg_sales_price
+FROM 
+    CustomerDemographics cd
+LEFT JOIN RankedReturns dr ON cd.cd_demo_sk = dr.sr_returning_customer_sk
+LEFT JOIN DetailedSales ds ON cd.cd_demo_sk = ds.ws_bill_customer_sk
+WHERE 
+    (dr.total_returns IS NULL OR dr.total_returns > 5)
+    AND (
+        ds.total_profit IS NOT NULL 
+        AND ds.avg_sales_price >= 20.00
+        OR (cd.cd_gender = 'F' AND cd.cd_marital_status = 'M')
+    )
+ORDER BY 
+    cd.cd_demo_sk,
+    ds.total_profit DESC;

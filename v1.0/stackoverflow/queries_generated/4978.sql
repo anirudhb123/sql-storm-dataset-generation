@@ -1,0 +1,61 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        COALESCE(NULLIF(u.LastAccessDate, u.CreationDate), '1900-01-01') AS LastActiveDate,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        t.Count,
+        ROW_NUMBER() OVER (ORDER BY t.Count DESC) AS TagRank
+    FROM 
+        Tags t
+    WHERE 
+        t.IsModeratorOnly = 0
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    t.TagName,
+    t.Count AS TagCount,
+    ps.Title,
+    ps.CommentCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    CASE 
+        WHEN ps.UpVoteCount > ps.DownVoteCount THEN 'Upvoted'
+        ELSE 'Downvoted'
+    END AS VoteStatus
+FROM 
+    UserReputation u
+JOIN 
+    PostStats ps ON u.UserId = ps.OwnerUserId
+LEFT JOIN 
+    PostLinks pl ON ps.PostId = pl.PostId
+LEFT JOIN 
+    TopTags t ON pl.RelatedPostId = t.Id
+WHERE 
+    u.Rank <= 10 AND (t.TagRank <= 5 OR t.TagRank IS NULL)
+ORDER BY 
+    u.Reputation DESC, ps.ViewCount DESC;

@@ -1,0 +1,61 @@
+
+WITH AddressSearch AS (
+    SELECT
+        ca_address_sk,
+        ca_city,
+        ca_state,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address
+    FROM
+        customer_address
+    WHERE
+        ca_city LIKE '%ville%'
+),
+GenderDemo AS (
+    SELECT
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate
+    FROM
+        customer_demographics
+    WHERE
+        cd_purchase_estimate > 5000
+),
+SalesData AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS unique_orders
+    FROM
+        web_sales ws
+    JOIN
+        AddressSearch a ON ws.ws_bill_addr_sk = a.ca_address_sk
+    GROUP BY
+        ws.web_site_sk
+),
+CombinedResults AS (
+    SELECT
+        s.web_site_id,
+        s.total_sales,
+        s.unique_orders,
+        g.cd_gender,
+        g.cd_marital_status
+    FROM
+        SalesData s
+    JOIN
+        GenderDemo g ON s.web_site_sk = g.cd_demo_sk
+)
+SELECT
+    web_site_id,
+    total_sales,
+    unique_orders,
+    COUNT(*) AS demo_count,
+    SUM(CASE WHEN cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+    SUM(CASE WHEN cd_marital_status = 'M' THEN 1 ELSE 0 END) AS married_count
+FROM
+    CombinedResults
+GROUP BY
+    web_site_id, total_sales, unique_orders
+ORDER BY
+    total_sales DESC
+LIMIT 10;

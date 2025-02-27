@@ -1,0 +1,58 @@
+WITH SupplierStatistics AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        COUNT(DISTINCT ps.ps_partkey) AS UniquePartsSupplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS TotalOrders,
+        SUM(o.o_totalprice) AS TotalOrderValue
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemAnalysis AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_quantity * l.l_extendedprice * (1 - l.l_discount)) AS Revenue,
+        COUNT(DISTINCT l.l_partkey) AS DistinctProducts
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    cs.c_name,
+    ss.s_name,
+    cs.TotalOrders,
+    cs.TotalOrderValue,
+    ss.TotalSupplyCost,
+    la.Revenue,
+    la.DistinctProducts
+FROM 
+    CustomerOrders cs
+LEFT JOIN 
+    SupplierStatistics ss ON ss.UniquePartsSupplied > 5
+LEFT JOIN 
+    LineItemAnalysis la ON la.l_orderkey IN (SELECT l_orderkey FROM lineitem WHERE l_shipinstruct = 'DELIVER IN PERSON')
+WHERE 
+    cs.TotalOrderValue > 1000
+    AND ss.TotalSupplyCost IS NOT NULL
+ORDER BY 
+    cs.TotalOrderValue DESC, 
+    ss.TotalSupplyCost ASC;

@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM
+        aka_title mt
+    LEFT JOIN
+        cast_info ci ON mt.id = ci.movie_id
+    GROUP BY
+        mt.title, mt.production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 5
+),
+CompanyCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        tm.movie_title,
+        tm.production_year,
+        tc.company_count,
+        CASE 
+            WHEN tc.company_count IS NULL THEN 'No Companies' 
+            ELSE CAST(tc.company_count AS TEXT) 
+        END AS company_info
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        CompanyCounts tc ON tm.movie_title = (SELECT title FROM aka_title WHERE id = mc.movie_id) 
+),
+FinalReport AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.company_info,
+        COALESCE(md.cast_count, 0) AS total_cast
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    fr.movie_title,
+    fr.production_year,
+    fr.company_info,
+    fr.total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors
+FROM 
+    FinalReport fr
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = (SELECT id FROM aka_title WHERE title = fr.movie_title)
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+GROUP BY 
+    fr.movie_title, fr.production_year, fr.company_info, fr.total_cast
+ORDER BY 
+    fr.production_year DESC, fr.total_cast DESC;

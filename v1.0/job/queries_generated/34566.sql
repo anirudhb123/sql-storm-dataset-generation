@@ -1,0 +1,72 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        c.movie_id,
+        t.title AS movie_title,
+        1 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        c.nr_order = 1  -- Starting from the lead actor
+
+    UNION ALL
+
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        c.movie_id,
+        t.title AS movie_title,
+        ah.level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    JOIN 
+        ActorHierarchy ah ON c.movie_id = ah.movie_id
+    WHERE 
+        c.nr_order > ah.level -- Adding supporting actors
+),
+
+RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS movie_rank
+    FROM 
+        movie_info mi
+    JOIN 
+        title t ON mi.movie_id = t.id
+    JOIN 
+        cast_info c ON c.movie_id = t.id
+    GROUP BY 
+        t.title, t.production_year
+)
+
+SELECT 
+    ah.actor_name AS Lead_Actor,
+    ah.movie_title AS Movie_Title,
+    ah.level AS Actor_Level,
+    rm.production_year AS Production_Year,
+    rm.total_cast AS Total_Cast,
+    (CASE 
+        WHEN rm.total_cast IS NULL THEN 'N/A'
+        ELSE CAST((100.0 * ah.level / rm.total_cast) AS TEXT) || '%' 
+    END) AS Contribution_Percentage
+FROM 
+    ActorHierarchy ah
+JOIN 
+    RankedMovies rm ON ah.movie_title = rm.title AND ah.movie_title IS NOT NULL
+WHERE 
+    rm.movie_rank <= 5 -- Top 5 movies by cast size for each year
+ORDER BY 
+    rm.production_year DESC, 
+    ah.movie_title, 
+    ah.level;

@@ -1,0 +1,72 @@
+
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(t.TagName) AS TagCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS tag_name ON TRUE
+    JOIN
+        Tags t ON t.TagName = tag_name
+    GROUP BY 
+        p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation
+    FROM 
+        Users u
+),
+PostScoreRanking AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Score,
+        RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserBadgeCount AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+FinalBenchmark AS (
+    SELECT 
+        p.PostId,
+        pt.TagCount,
+        ur.Reputation,
+        ps.ScoreRank,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        p.Title
+    FROM 
+        PostTagCounts pt
+    JOIN 
+        Posts p ON p.Id = pt.PostId
+    JOIN 
+        UserReputation ur ON ur.UserId = p.OwnerUserId
+    JOIN 
+        PostScoreRanking ps ON ps.PostId = p.Id
+    LEFT JOIN 
+        UserBadgeCount ub ON ub.UserId = p.OwnerUserId
+    WHERE 
+        pt.TagCount > 3 AND ur.Reputation > 1000 
+)
+SELECT 
+    fb.Title,
+    fb.TagCount,
+    fb.Reputation,
+    fb.ScoreRank,
+    fb.BadgeCount
+FROM 
+    FinalBenchmark fb
+ORDER BY 
+    fb.ScoreRank, fb.Reputation DESC;

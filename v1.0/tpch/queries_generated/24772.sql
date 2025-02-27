@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank_by_acctbal
+    FROM 
+        supplier s
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_linenumber) AS total_line_items,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'No Account Balance'
+            ELSE CASE 
+                WHEN c.c_acctbal < 500 THEN 'Low Balance'
+                WHEN c.c_acctbal BETWEEN 500 AND 1000 THEN 'Medium Balance'
+                ELSE 'High Balance'
+            END 
+        END AS balance_status
+    FROM 
+        customer c
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    ps.ps_partkey,
+    ps.ps_supplycost,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(os.total_revenue) AS average_revenue_per_order,
+    COUNT(DISTINCT cs.c_custkey) AS customer_count,
+    SUM(NULLIF(s_rank.rank_by_acctbal, NULL)) AS total_suppliers_ranking
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    OrderStats os ON os.o_orderkey = ps.ps_partkey
+LEFT JOIN 
+    CustomerInfo cs ON cs.c_custkey = s.s_suppkey
+LEFT JOIN 
+    RankedSuppliers s_rank ON s.s_suppkey = s_rank.s_suppkey
+WHERE 
+    r.r_name IS NOT NULL
+    AND (s.s_name IS NOT NULL OR ps.ps_supplycost > 100)
+GROUP BY 
+    r.r_name,
+    n.n_name,
+    ps.ps_partkey,
+    ps.ps_supplycost
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    region_name, total_revenue DESC, customer_count ASC;

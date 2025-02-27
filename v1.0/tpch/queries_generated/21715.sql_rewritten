@@ -1,0 +1,42 @@
+WITH RECURSIVE nation_supply AS (
+    SELECT n.n_nationkey, n.n_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM nation_supply ns
+    JOIN nation n ON ns.n_nationkey = n.n_nationkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal < ns.s_acctbal * 0.95
+),
+available_parts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_availqty) > 100
+),
+high_value_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM orders o
+    WHERE o.o_totalprice > 1000 AND o.o_orderstatus = 'O'
+    ORDER BY o.o_totalprice DESC
+    LIMIT 10
+),
+lineitem_data AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_extendedprice * (1 - l.l_discount) AS net_price,
+           DENSE_RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS order_rank
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N' AND l.l_shipdate < cast('1998-10-01' as date) - INTERVAL '30 days'
+)
+SELECT DISTINCT ns.n_name, p.p_name, COUNT(DISTINCT ho.o_orderkey) AS order_count,
+                SUM(ld.net_price) AS total_net_price
+FROM nation_supply ns
+JOIN available_parts p ON ns.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN high_value_orders ho ON ho.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)
+LEFT JOIN lineitem_data ld ON ld.l_orderkey = ho.o_orderkey
+WHERE ns.s_acctbal IS NOT NULL AND p.total_available > 0
+GROUP BY ns.n_name, p.p_name
+HAVING SUM(ld.net_price) > 5000 OR COUNT(DISTINCT ho.o_orderkey) > 5
+ORDER BY total_net_price DESC, ns.n_name ASC NULLS LAST;

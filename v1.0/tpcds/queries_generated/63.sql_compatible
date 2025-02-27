@@ -1,0 +1,78 @@
+
+WITH RankedSales AS (
+    SELECT 
+        cs.cs_item_sk,
+        cs.cs_sales_price,
+        cs.cs_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY cs.cs_item_sk ORDER BY cs.cs_net_paid DESC) AS sales_rank
+    FROM 
+        catalog_sales cs
+    WHERE 
+        cs.cs_sold_date_sk BETWEEN 1 AND 10000
+), 
+CustomerReturns AS (
+    SELECT 
+        sr.sr_item_sk,
+        SUM(sr.sr_return_quantity) AS total_return_quantity,
+        SUM(sr.sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_item_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk,
+        CASE 
+            WHEN hd.hd_income_band_sk IS NULL THEN 'Unknown' 
+            ELSE CAST(hd.hd_income_band_sk AS VARCHAR(255))
+        END AS income_band
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+SalesWithDemographics AS (
+    SELECT 
+        cs.cs_item_sk,
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.income_band,
+        cs.cs_sales_price,
+        COALESCE(cr.total_return_quantity, 0) AS total_return_quantity,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        cs.cs_net_paid
+    FROM 
+        catalog_sales cs
+    JOIN 
+        web_sales ws ON cs.cs_item_sk = ws.ws_item_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        CustomerReturns cr ON cs.cs_item_sk = cr.sr_item_sk
+)
+SELECT 
+    sd.c_customer_sk,
+    sd.income_band,
+    SUM(sd.cs_sales_price) AS total_sales,
+    AVG(sd.cs_net_paid) AS avg_net_paid,
+    SUM(sd.total_return_quantity) AS total_returns,
+    SUM(sd.total_return_amt) AS total_return_amt,
+    COUNT(DISTINCT sr.sr_returning_customer_sk) AS distinct_customers
+FROM 
+    SalesWithDemographics sd
+LEFT JOIN 
+    store_returns sr ON sd.cs_item_sk = sr.sr_item_sk
+WHERE 
+    sd.cs_net_paid > 0
+GROUP BY 
+    sd.c_customer_sk, sd.income_band
+HAVING 
+    SUM(sd.total_return_amt) < AVG(sd.cs_net_paid) * 0.5
+ORDER BY 
+    total_sales DESC;

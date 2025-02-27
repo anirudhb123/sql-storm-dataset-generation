@@ -1,0 +1,61 @@
+
+WITH RECURSIVE ItemProfit AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        (ws.ws_sales_price - ws.ws_wholesale_cost) AS profit,
+        ROW_NUMBER() OVER (PARTITION BY i.i_item_sk ORDER BY (ws.ws_sales_price - ws.ws_wholesale_cost) DESC) AS rank
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    WHERE ws.ws_sold_date_sk BETWEEN 1 AND 365
+),
+AggregateProfits AS (
+    SELECT 
+        ca.ca_city,
+        SUM(ip.profit) AS total_profit,
+        COUNT(DISTINCT ip.i_item_id) AS item_count
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN ItemProfit ip ON ip.i_item_sk IN (SELECT DISTINCT ws.ws_item_sk FROM web_sales ws WHERE ws.ws_bill_customer_sk = c.c_customer_sk)
+    GROUP BY ca.ca_city
+),
+MaxProfit AS (
+    SELECT 
+        ca.ca_city,
+        total_profit, 
+        item_count,
+        ROW_NUMBER() OVER (ORDER BY total_profit DESC) AS city_rank
+    FROM AggregateProfits
+    WHERE total_profit IS NOT NULL
+),
+TopCities AS (
+    SELECT
+        city_rank,
+        ca_city,
+        total_profit,
+        item_count,
+        CASE 
+            WHEN total_profit IS NULL THEN 'N/A'
+            ELSE CAST(total_profit AS VARCHAR)
+        END AS profit_label
+    FROM MaxProfit 
+    WHERE city_rank <= 5
+    UNION ALL
+    SELECT 
+        city_rank + 100 AS city_rank,
+        'Across All Cities' AS ca_city,
+        SUM(total_profit) AS total_profit,
+        SUM(item_count) AS item_count,
+        COALESCE(RANK() OVER (ORDER BY SUM(total_profit) DESC), 0) AS profit_label
+    FROM MaxProfit
+    GROUP BY city_rank
+)
+SELECT 
+    city_rank,
+    ca_city,
+    total_profit,
+    item_count,
+    profit_label
+FROM TopCities
+WHERE (total_profit IS NOT NULL OR item_count > 0)
+ORDER BY city_rank;

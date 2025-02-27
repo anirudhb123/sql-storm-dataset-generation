@@ -1,0 +1,43 @@
+WITH RECURSIVE Supplier_Orders AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON l.l_partkey = p.p_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+      AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY s.s_suppkey, s.s_name
+),
+Top_Suppliers AS (
+    SELECT
+        s_nationkey,
+        count(*) AS supplier_count
+    FROM Supplier_Orders
+    WHERE rank <= 5
+    GROUP BY s_nationkey
+),
+Regions AS (
+    SELECT
+        r.r_regionkey,
+        r.r_name,
+        COALESCE(ts.supplier_count, 0) AS supplier_count
+    FROM region r
+    LEFT JOIN Top_Suppliers ts ON r.r_regionkey = ts.s_nationkey
+)
+SELECT 
+    r.r_name,
+    r.supplier_count,
+    CASE
+        WHEN r.supplier_count > 10 THEN 'High Supply'
+        WHEN r.supplier_count BETWEEN 5 AND 10 THEN 'Medium Supply'
+        ELSE 'Low Supply'
+    END AS supply_category
+FROM Regions r
+WHERE r.supplier_count IS NOT NULL
+ORDER BY r.supplier_count DESC;
+

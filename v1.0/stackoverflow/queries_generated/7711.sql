@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), 
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.Reputation
+), 
+PostWithBadges AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.AnswerCount,
+        rp.CommentCount,
+        ur.Reputation,
+        ur.BadgeCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+    WHERE 
+        rp.PostRank = 1
+)
+SELECT 
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    p.CreationDate,
+    p.AnswerCount,
+    p.CommentCount,
+    u.DisplayName,
+    u.Reputation,
+    u.BadgeCount,
+    COUNT(c.Id) AS TotalComments
+FROM 
+    PostWithBadges p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.PostId = c.PostId
+WHERE 
+    p.Score > 0
+GROUP BY 
+    p.PostId, p.Title, p.Score, p.ViewCount, p.CreationDate, p.AnswerCount, p.CommentCount, u.DisplayName, u.Reputation, u.BadgeCount
+ORDER BY 
+    p.Score DESC, 
+    p.ViewCount DESC
+LIMIT 10;

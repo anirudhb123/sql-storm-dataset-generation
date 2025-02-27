@@ -1,0 +1,64 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        MAX(ws.ws_net_profit) AS max_net_profit,
+        MIN(ws.ws_net_profit) AS min_net_profit
+    FROM 
+        web_sales AS ws
+    JOIN 
+        web_site AS w ON ws.ws_web_site_sk = w.web_site_sk
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2021 AND 2023
+    GROUP BY 
+        ws.web_site_id
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_quantity) AS customer_total_quantity,
+        SUM(ws.ws_ext_sales_price) AS customer_total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS customer_total_orders
+    FROM 
+        customer AS c
+    JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.customer_total_quantity,
+        cs.customer_total_sales,
+        cs.customer_total_orders,
+        RANK() OVER (ORDER BY cs.customer_total_sales DESC) AS sales_rank
+    FROM 
+        customer_summary AS cs
+)
+SELECT 
+    ss.web_site_id,
+    ss.total_quantity_sold,
+    ss.total_sales,
+    ss.total_orders,
+    ss.avg_sales_price,
+    ss.max_net_profit,
+    ss.min_net_profit,
+    tc.c_customer_id,
+    tc.customer_total_quantity,
+    tc.customer_total_sales,
+    tc.customer_total_orders
+FROM 
+    sales_summary AS ss
+LEFT JOIN 
+    top_customers AS tc ON ss.total_sales > 1000
+ORDER BY 
+    ss.total_sales DESC, 
+    tc.customer_total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

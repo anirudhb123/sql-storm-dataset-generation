@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(co.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments co ON p.Id = co.PostId
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+),
+ClosedPosts AS (
+    SELECT DISTINCT
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    AND 
+        ph.CreationDate >= NOW() - INTERVAL '6 months'
+)
+SELECT 
+    t.UserId,
+    t.DisplayName,
+    COUNT(DISTINCT rp.Id) AS TotalPosts,
+    SUM(rp.Score) AS TotalScore,
+    AVG(rp.ViewCount) AS AvgViews,
+    COUNT(cp.PostId) AS ClosedPostCount
+FROM 
+    TopUsers t
+JOIN 
+    RankedPosts rp ON t.UserId = rp.OwnerUserId
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.PostId
+GROUP BY 
+    t.UserId, t.DisplayName
+HAVING 
+    COUNT(DISTINCT rp.Id) > 5
+ORDER BY 
+    TotalScore DESC, AvgViews DESC
+LIMIT 10;
+

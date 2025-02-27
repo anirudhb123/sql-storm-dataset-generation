@@ -1,0 +1,54 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM customer_address
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        CONCAT(cd_gender, ' ', cd_marital_status) AS gender_status
+    FROM customer_demographics
+),
+SalesDetails AS (
+    SELECT 
+        ws_order_number,
+        COUNT(ws_item_sk) AS total_items_sold,
+        SUM(ws_sales_price) AS total_sales,
+        SUM(ws_ext_discount_amt) AS total_discounts,
+        COUNT(DISTINCT ws_bill_customer_sk) AS unique_customers
+    FROM web_sales
+    GROUP BY ws_order_number
+),
+Analysis AS (
+    SELECT 
+        dw.d_year,
+        dt.d_month_seq,
+        cd.gender_status,
+        SUM(sd.total_sales) AS overall_sales,
+        SUM(sd.total_discounts) AS overall_discounts,
+        COUNT(DISTINCT sd.unique_customers) AS customers_count,
+        AVG(CHAR_LENGTH(ad.full_address)) AS avg_address_length
+    FROM SalesDetails sd
+    JOIN date_dim dt ON dt.d_date_sk = sd.ws_sold_date_sk
+    JOIN CustomerDemographics cd ON cd.cd_demo_sk = sd.ws_bill_cdemo_sk
+    JOIN AddressDetails ad ON ad.ca_address_sk = sd.ws_bill_addr_sk
+    GROUP BY dw.d_year, dt.d_month_seq, cd.gender_status
+)
+SELECT 
+    d_year,
+    d_month_seq,
+    gender_status,
+    overall_sales,
+    overall_discounts,
+    customers_count,
+    avg_address_length
+FROM Analysis
+ORDER BY d_year DESC, d_month_seq DESC;

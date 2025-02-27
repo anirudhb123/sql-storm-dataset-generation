@@ -1,0 +1,54 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        ws_net_profit AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk, ws_net_profit
+),
+Sales_Join AS (
+    SELECT 
+        cs.cs_item_sk,
+        COALESCE(SUM(cs.cs_quantity), 0) AS total_catalog_quantity,
+        SUM(cs.cs_net_profit) AS total_catalog_profit
+    FROM 
+        catalog_sales cs 
+    LEFT JOIN 
+        Sales_CTE sc ON cs.cs_item_sk = sc.ws_item_sk
+    GROUP BY 
+        cs.cs_item_sk
+),
+Filtered_Inventory AS (
+    SELECT 
+        inv.inv_item_sk,
+        AVG(inv.inv_quantity_on_hand) AS avg_quantity_on_hand
+    FROM 
+        inventory inv
+    WHERE 
+        inv.inv_quantity_on_hand IS NOT NULL
+    GROUP BY 
+        inv.inv_item_sk
+)
+SELECT 
+    s.ws_item_sk,
+    COALESCE(s.total_quantity, 0) AS web_sales_quantity,
+    COALESCE(s.total_profit, 0) AS web_sales_profit,
+    COALESCE(c.total_catalog_quantity, 0) AS catalog_sales_quantity,
+    COALESCE(c.total_catalog_profit, 0) AS catalog_sales_profit,
+    COALESCE(i.avg_quantity_on_hand, 0) AS average_inventory
+FROM 
+    Sales_CTE s
+FULL OUTER JOIN 
+    Sales_Join c ON s.ws_item_sk = c.cs_item_sk
+LEFT JOIN 
+    Filtered_Inventory i ON COALESCE(s.ws_item_sk, c.cs_item_sk) = i.inv_item_sk
+WHERE 
+    (s.total_quantity > 100 OR c.total_catalog_quantity > 100)
+    AND (i.avg_quantity_on_hand IS NOT NULL OR s.ws_item_sk IS NOT NULL)
+ORDER BY 
+    web_sales_profit DESC
+LIMIT 100;

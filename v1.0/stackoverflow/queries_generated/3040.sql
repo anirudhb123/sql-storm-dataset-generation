@@ -1,0 +1,82 @@
+WITH UserScore AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 WHEN V.VoteTypeId = 3 THEN -1 ELSE 0 END), 0) AS NetVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id AND V.PostId = P.Id
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        NetVotes,
+        PostCount,
+        CommentCount,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, NetVotes DESC) AS Rank
+    FROM 
+        UserScore
+),
+PostWithComments AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(C.Id) AS TotalComments,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate
+),
+CombinedData AS (
+    SELECT 
+        U.DisplayName AS UserDisplayName,
+        PU.PostId,
+        PU.Title,
+        PU.TotalComments,
+        PU.CreationDate,
+        CASE 
+            WHEN PU.TotalComments > 0 THEN 'Active Contributor'
+            ELSE 'New Contributor'
+        END AS ContributorStatus
+    FROM 
+        TopUsers U
+    JOIN 
+        PostWithComments PU ON U.UserId = PU.OwnerUserId
+    WHERE 
+        U.Rank <= 100
+)
+SELECT 
+    CD.UserDisplayName,
+    CD.PostId,
+    CD.Title,
+    CD.TotalComments,
+    CD.CreationDate,
+    CD.ContributorStatus,
+    COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+    COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+FROM 
+    CombinedData CD
+LEFT JOIN 
+    Votes V ON CD.PostId = V.PostId
+GROUP BY 
+    CD.UserDisplayName, CD.PostId, CD.Title, CD.TotalComments, CD.CreationDate, CD.ContributorStatus
+ORDER BY 
+    CD.ContributorStatus DESC, CD.CreationDate DESC;

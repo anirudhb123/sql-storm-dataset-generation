@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        ph.UserDisplayName AS ClosedBy,
+        ctr.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes ctr ON ph.Comment::int = ctr.Id -- Casting Comment to int as it's a CloseReasonId
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+),
+AnswerCount AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(a.Id) AS TotalAnswers
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.OwnerDisplayName,
+    CASE 
+        WHEN cp.CloseDate IS NOT NULL THEN 'Closed on ' || TO_CHAR(cp.CloseDate, 'YYYY-MM-DD HH24:MI:SS') || ' by ' || cp.ClosedBy || ' (Reason: ' || cp.CloseReason || ')'
+        ELSE 'Open'
+    END AS Status,
+    ac.TotalAnswers
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    AnswerCount ac ON rp.PostId = ac.PostId
+WHERE 
+    rp.Rank <= 5 -- Top 5 most viewed posts per user
+ORDER BY 
+    rp.CreationDate DESC; -- Order by creation date of posts

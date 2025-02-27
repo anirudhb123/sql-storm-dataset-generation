@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mj.linked_movie_id, 0) AS linked_movie_id,
+        1 AS level
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_link mj ON m.id = mj.movie_id
+    WHERE 
+        m.production_year >= 2000
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mj.linked_movie_id, 0) AS linked_movie_id,
+        mh.level + 1 AS level
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        title m ON mh.linked_movie_id = m.id
+    LEFT JOIN 
+        movie_link mj ON m.id = mj.movie_id
+)
+SELECT 
+    m.title AS movie_title,
+    COUNT(c.id) AS cast_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+    AVG(CAST(mi.info AS FLOAT)) AS average_rating,
+    mess.rank AS rank
+FROM 
+    movie_hierarchy m
+LEFT JOIN 
+    cast_info c ON m.movie_id = c.movie_id
+LEFT JOIN 
+    aka_title ak ON m.movie_id = ak.movie_id
+LEFT JOIN 
+    movie_info mi ON m.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating') 
+LEFT JOIN 
+    (SELECT 
+        movie_id, 
+        DENSE_RANK() OVER (ORDER BY AVG(CAST(info AS FLOAT)) DESC) AS rank
+     FROM 
+        movie_info 
+     WHERE 
+        info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+     GROUP BY 
+        movie_id) mess ON m.movie_id = mess.movie_id
+GROUP BY 
+    m.movie_id, m.title, mess.rank
+HAVING 
+    COUNT(c.id) >= 5
+ORDER BY 
+    average_rating DESC, 
+    movie_title ASC;

@@ -1,0 +1,62 @@
+WITH OrderedCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS spend_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        MIN(ps.ps_supplycost) AS min_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_brand, 
+    s.s_name AS supplier_name, 
+    ROUND(SUM(l.l_extendedprice * (1 - l.l_discount)), 2) AS total_revenue,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    CASE 
+        WHEN p.p_size IS NULL THEN 'Unknown Size' 
+        ELSE p.p_size::text
+    END AS part_size_desc,
+    COALESCE(r.r_name, 'No Region') AS region_name
+FROM 
+    lineitem l
+JOIN 
+    part p ON l.l_partkey = p.p_partkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    OrderedCustomers oc ON oc.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey ORDER BY c.c_acctbal DESC LIMIT 1)
+LEFT JOIN 
+    SupplierParts sp ON sp.ps_partkey = p.p_partkey AND sp.ps_suppkey = s.s_suppkey
+WHERE 
+    l.l_quantity > CASE WHEN p.p_size < 10 THEN 10 ELSE 0 END
+    AND (l.l_returnflag = 'R' OR l.l_linestatus = 'O')
+GROUP BY 
+    p.p_partkey, s.s_suppkey, s.s_name, r.r_name, p.p_size
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+ORDER BY 
+    total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

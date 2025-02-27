@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank,
+        SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVoteCount,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+      AND 
+        p.PostTypeId = 1
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate AS EditDate,
+        ph.Comment,
+        pht.Name AS HistoryTypeName
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= CURRENT_DATE - INTERVAL '60 days'
+      AND 
+        ph.PostHistoryTypeId IN (5, 6) -- Edit Body or Edit Tags
+),
+AggregatedHistory AS (
+    SELECT 
+        phd.PostId,
+        SUM(CASE WHEN phd.HistoryTypeName = 'Edit Body' THEN 1 ELSE 0 END) AS BodyEditCount,
+        SUM(CASE WHEN phd.HistoryTypeName = 'Edit Tags' THEN 1 ELSE 0 END) AS TagEditCount
+    FROM 
+        PostHistoryData phd
+    GROUP BY 
+        phd.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    rp.CommentCount,
+    COALESCE(ah.BodyEditCount, 0) AS BodyEditCount,
+    COALESCE(ah.TagEditCount, 0) AS TagEditCount,
+    CASE 
+        WHEN rp.ViewRank = 1 THEN 'Top View'
+        ELSE 'Regular'
+    END AS ViewCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    AggregatedHistory ah ON rp.PostId = ah.PostId
+WHERE 
+    rp.UpVoteCount > rp.DownVoteCount
+  AND 
+    rp.CommentCount > 0
+ORDER BY 
+    rp.ViewCount DESC, rp.Title
+FETCH FIRST 10 ROWS ONLY;

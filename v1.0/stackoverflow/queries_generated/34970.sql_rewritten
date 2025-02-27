@@ -1,0 +1,50 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        ph.Level + 1 AS Level
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+)
+
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalAnswers,
+    ROUND(AVG(DATEDIFF(p.LastActivityDate, p.CreationDate)), 2) AS AvgActivityDuration,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    ph.Level AS PostLevel,
+    ROW_NUMBER() OVER (PARTITION BY ph.Level ORDER BY COUNT(p.Id) DESC) AS PostRank
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostHierarchy ph ON p.ParentId = ph.PostId
+LEFT JOIN 
+    STRING_SPLIT(p.Tags, ',') AS t ON t.TagName IS NOT NULL
+WHERE 
+    p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+GROUP BY 
+    u.DisplayName, ph.Level
+HAVING 
+    COUNT(DISTINCT p.Id) > 5
+ORDER BY 
+    PostLevel, TotalPosts DESC;

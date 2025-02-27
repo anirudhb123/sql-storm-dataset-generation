@@ -1,0 +1,81 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS order_level
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderdate >= '2022-01-01'
+        
+    UNION ALL
+    
+    SELECT
+        co.c_custkey,
+        co.c_name,
+        co.c_acctbal,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        co.order_level + 1
+    FROM
+        CustomerOrders co
+    JOIN
+        orders o ON co.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderdate > (SELECT MAX(o2.o_orderdate) FROM orders o2 WHERE o2.o_custkey = co.c_custkey AND o2.o_orderdate < o.o_orderdate)
+)
+
+SELECT
+    r.r_name,
+    n.n_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT co.o_orderkey) AS order_count,
+    AVG(co.o_totalprice) AS avg_order_value,
+    MAX(co.order_level) AS max_recursive_orders,
+    STRING_AGG(DISTINCT p.p_name || ' (' || p.p_size || ')', ', ') AS product_details
+FROM
+    lineitem l
+JOIN
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN
+    CustomerOrders co ON o.o_orderkey = co.o_orderkey
+WHERE
+    o.o_orderstatus = 'F'
+    AND l.l_shipdate IS NOT NULL
+GROUP BY
+    r.r_name, n.n_name
+HAVING
+    total_revenue > (
+        SELECT AVG(total_revenue) 
+        FROM (
+            SELECT 
+                SUM(l2.l_extendedprice * (1 - l2.l_discount)) AS total_revenue
+            FROM 
+                lineitem l2 
+            JOIN 
+                orders o2 ON l2.l_orderkey = o2.o_orderkey 
+            WHERE 
+                o2.o_orderstatus = 'F'
+            GROUP BY 
+                o2.o_orderkey
+        ) AS revenue_stats
+    )
+ORDER BY
+    total_revenue DESC;

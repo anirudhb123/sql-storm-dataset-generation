@@ -1,0 +1,69 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr_ticket_number) AS return_count,
+        SUM(sr_return_amt) AS total_return_amount,
+        RANK() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_amt) DESC) AS return_rank
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_email_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(NULLIF(cd.cd_credit_rating, ''), 'Unknown') AS credit_rating,
+        ARRAY_AGG(DISTINCT ca.ca_city) AS cities
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_email_address, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate, cd.cd_credit_rating
+),
+SalesInfo AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_quantity) AS total_quantity_sold
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) 
+                             AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws.web_site_id
+)
+SELECT 
+    ci.c_email_address,
+    ci.cd_gender,
+    ci.credit_rating,
+    ci.cities,
+    rs.return_count,
+    rs.total_return_amount,
+    si.total_sales,
+    si.total_quantity_sold
+FROM 
+    CustomerInfo ci
+LEFT JOIN 
+    RankedReturns rs ON EXISTS (
+        SELECT 1 
+        FROM store_sales s
+        WHERE s.ss_item_sk IN (SELECT sr_item_sk FROM RankedReturns WHERE return_rank = 1)
+        AND s.ss_customer_sk = ci.c_customer_sk
+    )
+LEFT JOIN 
+    SalesInfo si ON si.web_site_id = (SELECT web_site_id FROM web_site ORDER BY RANDOM() LIMIT 1)
+WHERE 
+    ci.cd_marital_status = 'M' 
+    AND ci.cd_purchase_estimate > 1000
+ORDER BY 
+    total_return_amount DESC NULLS LAST
+LIMIT 50;

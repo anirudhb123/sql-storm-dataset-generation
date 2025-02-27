@@ -1,0 +1,99 @@
+
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 END) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (ORDER BY COUNT(V.Id) DESC) AS VoteRank
+    FROM 
+        Users U 
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS ClosureEvents,
+        JSON_AGG(DISTINCT PT.Name) AS PostTypes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    GROUP BY 
+        P.Id, P.Title
+),
+RankedPosts AS (
+    SELECT 
+        PA.PostId,
+        PA.Title,
+        PA.CommentCount,
+        PA.ClosureEvents,
+        PA.PostTypes,
+        ROW_NUMBER() OVER (ORDER BY PA.CommentCount DESC, PA.ClosureEvents DESC) AS PostRank
+    FROM 
+        PostActivity PA
+    WHERE 
+        PA.CommentCount > 0
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(COALESCE(B.Class, 0)) AS TotalBadgeClass
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+UserPerformance AS (
+    SELECT 
+        US.UserId,
+        US.DisplayName,
+        US.VoteCount,
+        US.UpVotes,
+        US.DownVotes,
+        COALESCE(TP.TotalBadgeClass, 0) AS TotalBadgeClass,
+        RANK() OVER (ORDER BY (US.UpVotes - US.DownVotes) + COALESCE(TP.TotalBadgeClass, 0) DESC) AS PerformanceRank
+    FROM 
+        UserVoteSummary US
+    LEFT JOIN 
+        TopUsers TP ON US.UserId = TP.UserId
+)
+SELECT 
+    RP.Title AS PostTitle,
+    RP.CommentCount,
+    RP.ClosureEvents,
+    UP.DisplayName AS UserName,
+    UP.VoteCount,
+    UP.UpVotes,
+    UP.DownVotes,
+    UP.TotalBadgeClass,
+    UP.PerformanceRank,
+    RP.PostTypes
+FROM 
+    RankedPosts RP
+JOIN 
+    UserPerformance UP ON UP.UserId IN (
+        SELECT DISTINCT 
+            COALESCE(P.OwnerUserId, -1) 
+        FROM 
+            Posts P 
+        WHERE 
+            P.Id = RP.PostId
+    )
+WHERE 
+    RP.PostRank <= 10
+ORDER BY 
+    RP.CommentCount DESC, UP.PerformanceRank;

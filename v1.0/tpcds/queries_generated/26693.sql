@@ -1,0 +1,60 @@
+
+WITH AddressComponents AS (
+    SELECT 
+        ca_address_sk,
+        TRIM(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS full_address,
+        LOWER(ca_city) AS city_lower,
+        ca_state,
+        SUBSTR(ca_zip, 1, 5) AS zip_prefix
+    FROM 
+        customer_address
+),
+CustomerAnalysis AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(TRIM(c.c_first_name), ' ', TRIM(c.c_last_name)) AS full_name,
+        cd_cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        a.full_address,
+        a.city_lower,
+        a.ca_state,
+        a.zip_prefix
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        AddressComponents a ON c.c_current_addr_sk = a.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        cs.cs_item_sk,
+        SUM(cs.cs_quantity) AS total_quantity_sold,
+        SUM(cs.cs_net_profit) AS total_net_profit
+    FROM 
+        catalog_sales cs
+    GROUP BY 
+        cs.cs_item_sk
+)
+SELECT 
+    c.full_name,
+    c.cd_gender,
+    COUNT(DISTINCT sale.cs_item_sk) AS items_purchased,
+    COALESCE(SUM(sale.total_quantity_sold), 0) AS total_items_sold,
+    COALESCE(SUM(sale.total_net_profit), 0) AS total_net_profit_generated,
+    c.city_lower,
+    c.ca_state,
+    c.zip_prefix
+FROM 
+    CustomerAnalysis c
+LEFT JOIN 
+    SalesData sale ON c.c_customer_sk = sale.cs_item_sk
+WHERE 
+    c.city_lower LIKE 'n%' AND 
+    c.ca_state IN ('CA', 'NY')
+GROUP BY 
+    c.full_name, c.cd_gender, c.city_lower, c.ca_state, c.zip_prefix
+ORDER BY 
+    total_net_profit_generated DESC
+LIMIT 100;

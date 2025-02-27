@@ -1,0 +1,70 @@
+
+WITH RankedMovies AS (
+    SELECT
+        a.title,
+        a.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(ci.person_id) DESC) AS year_rank
+    FROM
+        aka_title a
+    LEFT JOIN
+        cast_info ci ON a.id = ci.movie_id
+    GROUP BY
+        a.title, a.production_year
+),
+HighCastMovies AS (
+    SELECT
+        title,
+        production_year,
+        cast_count
+    FROM
+        RankedMovies
+    WHERE
+        year_rank <= 5
+),
+MovieKeywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+),
+MoviesAndKeywords AS (
+    SELECT
+        hcm.title,
+        hcm.production_year,
+        hcm.cast_count,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords
+    FROM
+        HighCastMovies hcm
+    LEFT JOIN
+        MovieKeywords mk ON hcm.title = (SELECT a.title FROM aka_title a WHERE a.id IN (SELECT ci.movie_id FROM cast_info ci WHERE ci.nr_order = 1) LIMIT 1)
+)
+SELECT
+    mak.title,
+    mak.production_year,
+    mak.cast_count,
+    mak.keywords,
+    CASE
+        WHEN mak.keywords LIKE '%action%' THEN 'Action Movie'
+        WHEN mak.keywords LIKE '%drama%' THEN 'Drama Movie'
+        WHEN mak.keywords IS NULL OR mak.keywords = 'No Keywords' THEN 'Unclassified'
+        ELSE 'Other Genre'
+    END AS genre_classification,
+    COUNT(DISTINCT ci.person_id) OVER(PARTITION BY mak.production_year) AS unique_cast_count,
+    CASE
+        WHEN mak.cast_count > 5 THEN 'Large Cast'
+        ELSE 'Small Cast'
+    END AS cast_size
+FROM
+    MoviesAndKeywords mak
+LEFT JOIN
+    cast_info ci ON ci.movie_id = (SELECT a.id FROM aka_title a WHERE a.title = mak.title LIMIT 1)
+WHERE
+    mak.production_year IS NOT NULL
+ORDER BY
+    mak.production_year DESC, mak.cast_count DESC;

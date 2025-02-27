@@ -1,0 +1,57 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_ship_date_sk AS ship_date,
+        ws.ws_item_sk AS item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        COALESCE(cr.cr_return_quantity, 0) AS return_quantity,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        SUM(COALESCE(cr.cr_return_amount, 0)) AS total_returns
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        web_returns cr ON ws.ws_item_sk = cr.wr_item_sk AND ws.ws_order_number = cr.wr_order_number
+    GROUP BY 
+        ws.ws_ship_date_sk, ws.ws_item_sk
+), ItemData AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        i.i_brand,
+        SUM(sd.total_sales) AS total_sales,
+        SUM(sd.total_returns) AS total_returns
+    FROM 
+        item i
+    JOIN 
+        SalesData sd ON i.i_item_sk = sd.item_sk
+    GROUP BY 
+        i.i_item_id, i.i_item_desc, i.i_current_price, i.i_brand
+), CustomerStats AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        SUM(id.total_sales) AS total_sales_value,
+        SUM(id.total_returns) AS total_returns_value,
+        AVG(id.total_sales) AS avg_sales_per_customer
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        ItemData id ON cd.cd_demo_sk = id.item_sk
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    cs.cd_gender,
+    cs.customer_count,
+    cs.total_sales_value,
+    cs.total_returns_value,
+    cs.avg_sales_per_customer,
+    (cs.total_sales_value - cs.total_returns_value) AS net_sales
+FROM 
+    CustomerStats cs
+ORDER BY 
+    cs.total_sales_value DESC;

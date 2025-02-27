@@ -1,0 +1,82 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL::integer AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL  
+    
+    UNION ALL
+    
+    SELECT 
+        et.id AS movie_id,
+        et.title,
+        et.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_movie_id
+    FROM 
+        aka_title et
+    JOIN 
+        MovieHierarchy mh ON et.episode_of_id = mh.movie_id  
+),
+CastInfoWithRoles AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        rc.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rc ON ci.role_id = rc.id
+),
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(ci.movie_id) AS cast_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CastInfoWithRoles ci ON mh.movie_id = ci.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+    HAVING 
+        COUNT(ci.movie_id) > 5  
+),
+PopularMovies AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.production_year,
+        tm.cast_count,
+        RANK() OVER (ORDER BY tm.cast_count DESC) AS popularity_rank
+    FROM 
+        TopMovies tm
+)
+SELECT 
+    pm.title,
+    pm.production_year,
+    pm.cast_count,
+    COALESCE(ka.name, 'Unknown') AS lead_actor,
+    COALESCE(kt.keyword, 'No Keywords') AS keywords
+FROM 
+    PopularMovies pm
+LEFT JOIN 
+    cast_info ci ON pm.movie_id = ci.movie_id AND ci.nr_order = 1  
+LEFT JOIN 
+    aka_name ka ON ci.person_id = ka.person_id
+LEFT JOIN 
+    movie_keyword mk ON pm.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+WHERE 
+    pm.popularity_rank <= 10 
+ORDER BY 
+    pm.cast_count DESC, 
+    pm.title ASC;

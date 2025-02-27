@@ -1,0 +1,75 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mv.id AS movie_id,
+        mv.title,
+        mv.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mv ON ml.linked_movie_id = mv.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+, employee_info AS (
+    SELECT 
+        pi.person_id,
+        pi.info AS profession,
+        ROW_NUMBER() OVER (PARTITION BY pi.person_id ORDER BY pi.id) AS rn
+    FROM 
+        person_info pi
+    WHERE 
+        pi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Profession')
+)
+SELECT 
+    mh.title AS Movie_Title,
+    mh.production_year AS Production_Year,
+    ak.name AS Actor_Name,
+    COALESCE(pi.profession, 'Unknown') AS Profession,
+    COUNT(DISTINCT mc.company_id) AS Production_Companies,
+    COUNT(DISTINCT mk.keyword_id) AS Total_Keywords
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    employee_info pi ON ak.person_id = pi.person_id AND pi.rn = 1
+WHERE 
+    mh.production_year >= 2000
+GROUP BY 
+    mh.movie_id, ak.name, pi.profession
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 1
+ORDER BY 
+    mh.production_year DESC, 
+    Movie_Title ASC;
+
+This SQL query implements several advanced constructs:
+- A **recursive CTE (`movie_hierarchy`)** to derive a hierarchy of movies.
+- The use of **window functions** (`ROW_NUMBER`) to enumerate professions per person.
+- **JOINs** across multiple tables including `complete_cast`, `cast_info`, `aka_name`, and `movie_companies` to collate data related to movies and their cast and production details.
+- **COALESCE** for handling NULL values to provide defaults.
+- A **HAVING** clause that filters to only include movies featuring actors who have appeared in more than one title.
+- A final output sorted by `production_year` and `Movie_Title`. 
+
+This query serves as a performance benchmark by querying potentially large datasets with multiple aggregations and filtering criteria.

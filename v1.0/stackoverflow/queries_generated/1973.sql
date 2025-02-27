@@ -1,0 +1,48 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostEngagement AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        COALESCE(P.AnswerCount, 0) AS AnswerCount,
+        COALESCE(P.CommentCount, 0) AS CommentCount,
+        COALESCE(P.FavoriteCount, 0) AS FavoriteCount,
+        RANK() OVER (ORDER BY P.Score DESC, P.CreationDate DESC) AS RankScore
+    FROM Posts P
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        MIN(PH.CreationDate) AS ClosedDate,
+        COUNT(*) AS ClosureCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.PostId
+)
+SELECT 
+    U.DisplayName,
+    U.TotalVotes,
+    COALESCE(PE.PostId, 0) AS PostId,
+    COALESCE(PE.Title, 'No Active Posts') AS PostTitle,
+    COALESCE(PE.AnswerCount, 0) AS AnswerCount,
+    COALESCE(CP.ClosedDate, 'No Closure') AS ClosedDate,
+    COALESCE(CP.ClosureCount, 0) AS ClosureCount,
+    CASE 
+        WHEN CP.ClosedDate IS NOT NULL THEN 'Closed' 
+        ELSE 'Active' 
+    END AS PostStatus
+FROM UserVoteStats U
+LEFT JOIN PostEngagement PE ON PE.RankScore <= 10
+LEFT JOIN ClosedPosts CP ON CP.PostId = PE.PostId
+WHERE U.TotalVotes >= 5
+ORDER BY U.TotalVotes DESC, PostStatus ASC;

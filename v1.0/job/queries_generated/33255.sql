@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+, CastRoles AS (
+    SELECT 
+        c.movie_id,
+        r.role AS role_name,
+        COUNT(c.person_id) AS num_actors
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id, r.role
+)
+, MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.level,
+    cr.role_name,
+    COALESCE(cr.num_actors, 0) AS num_actors,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastRoles cr ON mh.movie_id = cr.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON mh.movie_id = mk.movie_id
+WHERE 
+    mh.level <= 3
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title ASC;
+
+-- Additional performance metrics can be added by reviewing execution time, 
+-- and analyzing output through EXPLAIN ANALYZE to assess query plans.

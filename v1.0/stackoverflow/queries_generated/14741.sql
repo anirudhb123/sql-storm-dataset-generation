@@ -1,0 +1,42 @@
+-- Performance benchmarking query for the StackOverflow schema 
+
+-- Measure query performance on retrieving user statistics, post counts, and average votes
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+AggregatedStats AS (
+    SELECT 
+        AVG(Reputation) AS AvgReputation,
+        AVG(PostCount) AS AvgPostCount,
+        AVG(UpVotes) AS AvgUpVotes,
+        AVG(DownVotes) AS AvgDownVotes
+    FROM 
+        UserStats
+)
+
+SELECT 
+    U.*,
+    A.AvgReputation,
+    A.AvgPostCount,
+    A.AvgUpVotes,
+    A.AvgDownVotes
+FROM 
+    UserStats U, AggregatedStats A
+WHERE 
+    U.Reputation > 1000  -- Filter to include users with high reputation for more relevant benchmarking
+ORDER BY 
+    U.Reputation DESC;

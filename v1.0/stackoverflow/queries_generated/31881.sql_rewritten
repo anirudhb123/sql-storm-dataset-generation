@@ -1,0 +1,75 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        P2.Id,
+        P2.Title,
+        P2.OwnerUserId,
+        P2.ParentId,
+        R.Level + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostHierarchy R ON P2.ParentId = R.PostId
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        AVG(RH.Level) AS AvgAnswerDepth
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId 
+    LEFT JOIN 
+        RecursivePostHierarchy RH ON RH.PostId = P.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalAnswers,
+        TotalQuestions,
+        AvgAnswerDepth,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS RankByPosts,
+        RANK() OVER (ORDER BY TotalAnswers DESC) AS RankByAnswers,
+        ROW_NUMBER() OVER (PARTITION BY (CASE WHEN TotalQuestions > 0 THEN 'Questions' ELSE 'Others' END) 
+                    ORDER BY TotalQuestions DESC) AS RowNumByQuestions
+    FROM 
+        UserPostStats
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalAnswers,
+    U.TotalQuestions,
+    U.AvgAnswerDepth,
+    U.RankByPosts,
+    U.RankByAnswers,
+    CASE 
+        WHEN U.RowNumByQuestions <= 5 THEN 'Top Question Contributor'
+        ELSE 'Regular User'
+    END AS ContributionType
+FROM 
+    TopUsers U
+WHERE 
+    U.TotalPosts > 0
+ORDER BY 
+    U.RankByPosts, U.RankByAnswers
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

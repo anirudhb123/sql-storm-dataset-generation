@@ -1,0 +1,76 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_paid DESC) AS rnk
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_paid > 0
+),
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returns,
+        COUNT(*) AS number_of_returns
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.return_quantity IS NOT NULL
+    GROUP BY 
+        cr.returning_customer_sk
+),
+BestCustomer AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        ca.ca_city,
+        ca.ca_state,
+        SUM(COALESCE(r.total_returns, 0)) AS total_returns,
+        SUM(COALESCE(ws.ws_net_paid, 0)) AS total_spent
+    FROM 
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN RankedSales rs ON c.c_customer_sk = rs.ws_order_number
+    LEFT JOIN CustomerReturns r ON c.c_customer_sk = r.returning_customer_sk
+    WHERE 
+        cd.cd_marital_status = 'M' AND 
+        (ca.ca_country IS NULL OR ca.ca_country = 'USA') AND
+        COALESCE(r.total_returns, 0) < 5
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, ca.ca_city, ca.ca_state
+    HAVING 
+        SUM(COALESCE(ws.ws_net_paid, 0)) > 1000
+)
+SELECT 
+    bc.c_customer_id,
+    bc.cd_gender,
+    bc.ca_city,
+    bc.ca_state,
+    bc.total_returns,
+    bc.total_spent,
+    CASE 
+        WHEN bc.total_spent > 5000 THEN 'Platinum'
+        WHEN bc.total_spent BETWEEN 3000 AND 5000 THEN 'Gold'
+        WHEN bc.total_spent BETWEEN 1000 AND 3000 THEN 'Silver'
+        ELSE 'Bronze'
+    END AS loyalty_tier
+FROM 
+    BestCustomer bc
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM CustomerReturns cr
+        WHERE cr.returning_customer_sk = bc.c_customer_id
+        GROUP BY cr.returning_customer_sk
+        HAVING COUNT(*) > 2
+    )
+ORDER BY 
+    total_spent DESC,
+    total_returns ASC
+LIMIT 10;

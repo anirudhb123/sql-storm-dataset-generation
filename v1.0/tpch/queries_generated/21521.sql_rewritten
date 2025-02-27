@@ -1,0 +1,82 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1997-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) as part_count,
+        SUM(ps.ps_supplycost) as total_supplycost,
+        AVG(ps.ps_availqty) as avg_availqty
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 1000.00
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        total_spent > 5000
+),
+RecentOrders AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        RankedOrders ro ON l.l_orderkey = ro.o_orderkey
+    WHERE 
+        ro.order_rank <= 10
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(ss.total_supplycost, 0) AS total_supply_cost,
+    COALESCE(ss.part_count, 0) AS supplier_part_count,
+    COALESCE(hv.total_spent, 0) AS high_value_customer_spent,
+    COALESCE(r.net_revenue, 0) AS recent_order_revenue
+FROM 
+    part p
+LEFT JOIN 
+    SupplierStats ss ON ss.part_count > 5
+LEFT JOIN 
+    HighValueCustomers hv ON hv.order_count > 3
+LEFT JOIN 
+    RecentOrders r ON r.l_orderkey IS NOT NULL
+WHERE 
+    p.p_retailprice > (
+        SELECT 
+            AVG(p2.p_retailprice)
+        FROM 
+            part p2
+        WHERE 
+            p2.p_size NOT IN (SELECT DISTINCT p3.p_size FROM part p3 WHERE p3.p_size < 10)
+    )
+ORDER BY 
+    p.p_partkey ASC
+LIMIT 50;

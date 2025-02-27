@@ -1,0 +1,67 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, GETDATE())
+),
+SupplierSummary AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        c.c_mktsegment,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'Unknown'
+            WHEN c.c_acctbal > 5000 THEN 'High Value'
+            ELSE 'Standard'
+        END AS customer_segment
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL
+)
+SELECT 
+    s.s_name,
+    s.s_nationkey,
+    ns.n_name AS supplier_nation,
+    ps.total_available,
+    hvc.customer_segment,
+    COUNT(DISTINCT lo.o_orderkey) AS order_count,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_sales
+FROM 
+    supplier s
+LEFT JOIN 
+    lineitem lo ON lo.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderkey = lo.l_orderkey
+JOIN 
+    SupplierSummary ps ON ps.ps_partkey = lo.l_partkey
+JOIN 
+    nation ns ON ns.n_nationkey = s.s_nationkey
+JOIN 
+    HighValueCustomers hvc ON hvc.c_custkey = lo.l_orderkey
+WHERE 
+    (ro.o_orderstatus IN ('O', 'F') OR ro.o_orderstatus IS NULL)
+    AND ps.total_available > 100
+GROUP BY 
+    s.s_name, s.s_nationkey, ns.n_name, hvc.customer_segment
+HAVING 
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) > 100000
+ORDER BY 
+    total_sales DESC, s.s_name ASC;

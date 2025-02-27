@@ -1,0 +1,36 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderpriority ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, c.c_name, o.o_orderpriority
+),
+TopCustomers AS (
+    SELECT 
+        r.o_orderpriority,
+        r.c_name,
+        r.total_revenue
+    FROM 
+        RankedOrders r
+    WHERE 
+        r.revenue_rank <= 5
+)
+SELECT 
+    t.o_orderpriority,
+    COUNT(*) AS customer_count,
+    AVG(t.total_revenue) AS average_revenue,
+    MAX(t.total_revenue) AS max_revenue
+FROM 
+    TopCustomers t
+GROUP BY 
+    t.o_orderpriority
+ORDER BY 
+    t.o_orderpriority;

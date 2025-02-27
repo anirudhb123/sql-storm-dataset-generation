@@ -1,0 +1,68 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title m
+    JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(CAST(SUM(CASE WHEN c.nr_order IS NOT NULL THEN 1 ELSE 0 END) AS INTEGER), 0) AS actor_count,
+        COALESCE(StarringRoles.num_roles, 0) AS num_roles,
+        COALESCE(STRING_AGG(DISTINCT cn.name, ', '), 'No Companies') AS production_companies,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS rn
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info c ON c.movie_id = mh.movie_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = mh.movie_id
+    LEFT JOIN 
+        company_name cn ON cn.id = mc.company_id
+    LEFT JOIN (
+        SELECT 
+            ci.movie_id,
+            COUNT(DISTINCT ci.role_id) AS num_roles
+        FROM 
+            cast_info ci 
+        GROUP BY 
+            ci.movie_id
+    ) AS StarringRoles ON StarringRoles.movie_id = mh.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_count,
+    md.num_roles,
+    md.production_companies,
+    CASE 
+        WHEN md.actor_count > 10 THEN 'Blockbuster'
+        WHEN md.actor_count BETWEEN 5 AND 10 THEN 'Moderate Success'
+        ELSE 'Indie Film' 
+    END AS film_category
+FROM 
+    MovieDetails md
+WHERE 
+    md.production_year >= 2000
+ORDER BY 
+    md.production_year DESC, md.title;
+

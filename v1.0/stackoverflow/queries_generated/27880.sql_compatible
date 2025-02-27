@@ -1,0 +1,87 @@
+
+WITH TagStats AS (
+    SELECT 
+        unnest(string_to_array(substr(Tags, 2, length(Tags) - 2), '> <')) AS Tag,
+        COUNT(*) AS PostCount,
+        SUM(ViewCount) AS TotalViews,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Posts
+    GROUP BY 
+        Tag
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostsCreated,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT B.Id) AS BadgesCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostHistoryCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(PH.Id) AS EditCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReopenCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId 
+    GROUP BY 
+        P.Id
+),
+FinalBenchmark AS (
+    SELECT 
+        TS.Tag,
+        TS.PostCount,
+        TS.TotalViews,
+        TS.QuestionCount,
+        TS.AnswerCount,
+        US.UserId,
+        US.DisplayName,
+        US.PostsCreated,
+        US.TotalViews AS UserTotalViews,
+        US.TotalScore,
+        US.BadgesCount,
+        PHC.EditCount,
+        PHC.CloseReopenCount
+    FROM 
+        TagStats TS
+    JOIN 
+        UserStats US ON US.PostsCreated > 0
+    JOIN 
+        PostHistoryCounts PHC ON PHC.PostId IN (
+            SELECT P.Id 
+            FROM Posts P 
+            WHERE P.Tags LIKE '%' || TS.Tag || '%'
+        )
+)
+SELECT 
+    Tag, 
+    PostCount, 
+    TotalViews, 
+    QuestionCount,
+    AnswerCount, 
+    UserId, 
+    DisplayName, 
+    PostsCreated, 
+    UserTotalViews, 
+    TotalScore, 
+    BadgesCount, 
+    EditCount, 
+    CloseReopenCount
+FROM 
+    FinalBenchmark
+ORDER BY 
+    TotalViews DESC, 
+    PostsCreated DESC;

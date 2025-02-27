@@ -1,0 +1,75 @@
+
+WITH SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation,
+        r.r_name AS region,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, n.n_name, r.r_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > 5000
+),
+LineItemAgg AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(l.l_linenumber) AS line_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N' AND l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    si.s_name,
+    si.nation,
+    si.region,
+    si.part_count,
+    COALESCE(HVC.c_name, 'Not a High Value Customer') AS high_value_customer,
+    COALESCE(CO.total_spent, 0) AS customer_spent,
+    LIA.revenue,
+    LIA.line_count
+FROM 
+    SupplierInfo si
+FULL OUTER JOIN 
+    HighValueCustomers HVC ON si.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_retailprice > 100) LIMIT 1)
+LEFT JOIN 
+    CustomerOrders CO ON si.s_acctbal < CO.total_spent
+JOIN 
+    LineItemAgg LIA ON LIA.l_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = CO.c_custkey LIMIT 1)
+WHERE 
+    si.part_count > 5
+ORDER BY 
+    si.part_count DESC, LIA.revenue DESC;

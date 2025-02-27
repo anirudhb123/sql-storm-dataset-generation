@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.level * 500
+),
+LineItemStats AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(*) AS item_count,
+           AVG(l.l_quantity) AS avg_quantity
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate,
+           l.total_revenue,
+           CASE
+               WHEN l.total_revenue > 10000 THEN 'High Value'
+               ELSE 'Regular'
+           END AS order_type
+    FROM orders o
+    JOIN LineItemStats l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+)
+SELECT r.r_name, 
+       n.n_name,
+       COUNT(DISTINCT c.c_custkey) AS customer_count,
+       SUM(o.total_revenue) AS total_revenue,
+       AVG(o.total_revenue) AS avg_revenue,
+       MAX(o.total_revenue) AS max_revenue,
+       MIN(o.total_revenue) AS min_revenue,
+       CASE 
+           WHEN SUM(o.total_revenue) IS NULL THEN 'No Revenue'
+           ELSE 'Revenue Available'
+       END AS revenue_status
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN HighValueOrders o ON c.c_custkey = o.o_orderkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+GROUP BY r.r_name, n.n_name
+ORDER BY total_revenue DESC
+LIMIT 10;

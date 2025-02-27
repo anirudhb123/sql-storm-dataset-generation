@@ -1,0 +1,91 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1995-01-01' AND o.o_orderdate < '1996-01-01'
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 100000
+),
+SupplierWithNoParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        COUNT(ps.ps_partkey) = 0
+),
+OrderLineDetails AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        COALESCE(NULLIF(l.l_discount, 0), 1) AS effective_discount,
+        l.l_returnflag,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS line_number
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1995-01-01' AND l.l_shipdate < '1996-01-01'
+)
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY rc.total_spent DESC, s.s_name ASC) AS rank,
+    c.c_name,
+    c.c_custkey,
+    rc.o_orderkey,
+    rc.o_orderstatus,
+    rc.o_totalprice,
+    SUM(ld.l_extendedprice * ld.effective_discount) AS total_discounted_value,
+    COALESCE(sp.s_name, 'No Supplier') AS supplier_name,
+    CASE 
+        WHEN s.last_order IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status
+FROM 
+    RankedOrders rc
+JOIN 
+    HighValueCustomers c ON rc.o_custkey = c.c_custkey
+LEFT JOIN 
+    SupplierWithNoParts sp ON sp.s_suppkey = rc.o_orderkey
+LEFT JOIN 
+    OrderLineDetails ld ON ld.l_orderkey = rc.o_orderkey
+LEFT JOIN (
+    SELECT 
+        o.o_orderkey,
+        MAX(o.o_orderdate) AS last_order
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_orderkey
+) s ON s.o_orderkey = rc.o_orderkey
+GROUP BY 
+    c.c_name, c.c_custkey, rc.o_orderkey, rc.o_orderstatus, rc.o_totalprice, sp.s_name
+HAVING 
+    SUM(ld.l_extendedprice) > 1000
+ORDER BY 
+    rank;

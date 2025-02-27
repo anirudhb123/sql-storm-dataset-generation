@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.AnswerCount,
+        p.CommentCount,
+        p.LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.PostTypeId = 1 -- Only Questions
+), UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.Reputation
+), ClosedPostHistory AS (
+    SELECT
+        ph.PostId,
+        MIN(ph.CreationDate) AS ClosedDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11) -- Post Closed, Post Reopened
+    GROUP BY ph.PostId
+), PostStatistics AS (
+    SELECT
+        r.PostId,
+        r.Title,
+        r.CreationDate AS QuestionDate,
+        COALESCE(c.ClosedDate, '1970-01-01') AS ClosedDate,
+        u.Reputation,
+        u.BadgeCount,
+        r.AnswerCount,
+        r.CommentCount,
+        r.LastActivityDate,
+        r.PostRank,
+        DATEDIFF('second', r.CreationDate, COALESCE(c.ClosedDate, CURRENT_TIMESTAMP)) AS OpenDuration
+    FROM RankedPosts r
+    JOIN UserReputation u ON r.OwnerUserId = u.UserId
+    LEFT JOIN ClosedPostHistory c ON r.PostId = c.PostId
+    WHERE r.PostRank = 1 -- Get only the latest question per user
+), AnsweredPosts AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(a.Id) AS AnswerCount
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId
+    WHERE p.PostTypeId = 1 -- Only Questions
+    GROUP BY p.Id
+)
+SELECT
+    ps.Title,
+    ps.Reputation,
+    ps.BadgeCount,
+    ps.OpenDuration,
+    CASE 
+        WHEN aps.AnswerCount > 0 THEN 'Answered'
+        ELSE 'Unanswered'
+    END AS AnswerStatus,
+    CASE 
+        WHEN ps.OpenDuration > 0 THEN CONCAT('Open for ', CAST(ps.OpenDuration / 3600 AS INTEGER), ' hours')
+        ELSE 'Closed'
+    END AS DurationStatus
+FROM PostStatistics ps
+LEFT JOIN AnsweredPosts aps ON ps.PostId = aps.PostId
+WHERE ps.OpenDuration > 0
+ORDER BY ps.Reputation DESC, ps.OpenDuration DESC;

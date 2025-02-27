@@ -1,0 +1,42 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_totalprice,
+           o.o_orderdate,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierCosts AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+SupplierRegion AS (
+    SELECT s.s_suppkey, 
+           n.n_name AS nation_name, 
+           r.r_name AS region_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT o.o_orderkey,
+       o.o_totalprice,
+       COALESCE(NULLIF(o.o_orderstatus, 'F'), 'Pending') AS order_status,
+       s.nation_name,
+       s.region_name,
+       RANK() OVER (PARTITION BY s.region_name ORDER BY o.o_totalprice DESC) AS regional_rank,
+       CASE 
+           WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000 THEN 'High Value Order'
+           ELSE 'Standard Order'
+       END AS order_value_category,
+       pc.total_supply_cost
+FROM RankedOrders o
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN SupplierRegion s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN SupplierCosts pc ON l.l_partkey = pc.ps_partkey
+WHERE o.order_rank <= 10
+GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderstatus, s.nation_name, s.region_name, pc.total_supply_cost
+ORDER BY o.o_totalprice DESC, regional_rank
+FETCH FIRST 50 ROWS ONLY;

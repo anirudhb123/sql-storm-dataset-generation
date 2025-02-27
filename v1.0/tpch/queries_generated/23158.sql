@@ -1,0 +1,87 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_size ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+),
+SupplierStats AS (
+    SELECT 
+        s.s_nationkey,
+        COUNT(DISTINCT s.s_suppkey) AS unique_suppliers,
+        SUM(s.s_acctbal) AS total_acctbal,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM supplier s
+    GROUP BY s.s_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        CASE 
+            WHEN o.o_orderstatus = 'F' THEN 'Completed'
+            ELSE 'Pending'
+        END AS order_status_desc
+    FROM orders o
+    WHERE o.o_totalprice > (
+        SELECT AVG(o2.o_totalprice) 
+        FROM orders o2 
+        WHERE o2.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31'
+    )
+),
+OrderLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(*) AS line_count
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(oss.total_sales), 0) AS total_sales,
+    COALESCE(MAX(oss.line_count), 0) AS max_line_item_count,
+    p.p_name,
+    p.p_retailprice,
+    CONCAT('Highest priced part in size ', p.p_size, ': ', MAX(CASE WHEN rp.price_rank = 1 THEN p.p_name END)) AS top_part_name,
+    ss.unique_suppliers,
+    ss.total_acctbal,
+    ss.avg_acctbal,
+    CASE 
+        WHEN ss.avg_acctbal IS NULL THEN 'No suppliers'
+        WHEN ss.avg_acctbal < 1000 THEN 'Low average'
+        WHEN ss.avg_acctbal BETWEEN 1000 AND 5000 THEN 'Moderate average'
+        ELSE 'High average'
+    END AS supplier_acctbal_category
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierStats ss ON n.n_nationkey = ss.s_nationkey
+LEFT JOIN HighValueOrders o ON ss.s_nationkey = (
+    SELECT DISTINCT c.c_nationkey 
+    FROM customer c 
+    WHERE c.c_custkey IN (
+        SELECT DISTINCT o2.o_custkey 
+        FROM orders o2 
+        WHERE o2.o_orderkey = o.o_orderkey
+    )
+)
+LEFT JOIN OrderLineItems oss ON o.o_orderkey = oss.l_orderkey
+LEFT JOIN RankedParts rp ON rp.p_partkey IN (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_availqty > 0
+)
+GROUP BY 
+    r.r_name, 
+    p.p_name, 
+    p.p_retailprice, 
+    ss.unique_suppliers, 
+    ss.total_acctbal, 
+    ss.avg_acctbal
+ORDER BY 
+    total_sales DESC, 
+    max_line_item_count ASC;

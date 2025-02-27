@@ -1,0 +1,61 @@
+WITH UserScore AS (
+    SELECT Id, 
+           Reputation, 
+           CASE 
+               WHEN Reputation > 1000 THEN 'High Reputation'
+               WHEN Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+               ELSE 'Low Reputation'
+           END AS ReputationCategory,
+           COUNT(DISTINCT PostId) AS PostCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, Reputation
+), PostStats AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.CreationDate,
+           p.ViewCount,
+           COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+           COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes,
+           COALESCE(AVG(p.Score) FILTER (WHERE p.Score IS NOT NULL), 0) AS AvgScore
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount
+), ClosedPosts AS (
+    SELECT ph.PostId,
+           ph.CreationDate,
+           ph.Comment
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+      AND ph.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+), PostDetail AS (
+    SELECT ps.PostId,
+           ps.Title,
+           ps.CreationDate,
+           ps.ViewCount,
+           ps.Upvotes,
+           ps.Downvotes,
+           ps.AvgScore,
+           COALESCE(cp.Comment, 'Not Closed') AS CloseComment,
+           CASE 
+               WHEN us.ReputationCategory = 'High Reputation' THEN 'Priority Post'
+               ELSE 'Regular Post'
+           END AS PriorityLevel
+    FROM PostStats ps
+    LEFT JOIN ClosedPosts cp ON ps.PostId = cp.PostId
+    LEFT JOIN UserScore us ON ps.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = us.Id)
+)
+SELECT 
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.Upvotes,
+    pd.Downvotes,
+    pd.AvgScore,
+    pd.CloseComment,
+    pd.PriorityLevel,
+    ROW_NUMBER() OVER (PARTITION BY pd.PriorityLevel ORDER BY pd.Upvotes DESC) AS Rank
+FROM PostDetail pd
+WHERE pd.ViewCount > 100
+  AND pd.Upvotes - pd.Downvotes > 0
+ORDER BY pd.PriorityLevel, Rank;

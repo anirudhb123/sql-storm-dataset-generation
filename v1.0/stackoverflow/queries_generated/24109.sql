@@ -1,0 +1,72 @@
+WITH UserReputation AS (
+    SELECT Id, Reputation, 
+           CASE 
+               WHEN Reputation > 1000 THEN 'High Reputation'
+               WHEN Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+               ELSE 'Low Reputation'
+           END AS ReputationTier,
+           ROW_NUMBER() OVER (PARTITION BY CASE 
+                                               WHEN Reputation > 1000 THEN 'High Reputation'
+                                               WHEN Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+                                               ELSE 'Low Reputation'
+                                             END 
+                              ORDER BY Reputation DESC) AS RankWithinTier
+    FROM Users
+),
+PostStatistics AS (
+    SELECT P.Id AS PostId,
+           P.Title,
+           P.PostTypeId,
+           COALESCE(A.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+           P.CreationDate,
+           P.ViewCount,
+           P.Score,
+           COALESCE(C.Count, 0) AS CommentCount,
+           U.ReputationTier,
+           CASE 
+               WHEN P.Score > 0 THEN 'Positive'
+               WHEN P.Score < 0 THEN 'Negative'
+               ELSE 'Neutral'
+           END AS ScoreCategory
+    FROM Posts P
+    LEFT JOIN (
+        SELECT ParentId AS AcceptedAnswerId
+        FROM Posts 
+        WHERE PostTypeId = 2 
+        GROUP BY ParentId
+    ) A ON P.Id = A.AcceptedAnswerId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS Count 
+        FROM Comments 
+        GROUP BY PostId
+    ) C ON P.Id = C.PostId
+    JOIN UserReputation U ON P.OwnerUserId = U.Id
+)
+SELECT PS.PostId, 
+       PS.Title, 
+       PS.ViewCount, 
+       PS.Score, 
+       PS.ReputationTier,
+       PS.ScoreCategory,
+       STRING_AGG(CONCAT_WS(': ', U.DisplayName, V.VoteTypeId), '; ') AS VotesInfo,
+       PH.CommentsDetails
+FROM PostStatistics PS
+LEFT JOIN Votes V ON PS.PostId = V.PostId
+LEFT JOIN (
+    SELECT Ph.PostId, STRING_AGG(CONCAT(Ph.CreationDate, ' - ', Ph.Comment), '; ') AS CommentsDetails
+    FROM PostHistory Ph
+    WHERE Ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY Ph.PostId
+) PH ON PS.PostId = PH.PostId
+WHERE PS.ReputationTier = 'High Reputation'
+  AND PS.ScoreCategory = 'Positive'
+  AND PS.ViewCount >= 100
+  AND EXISTS (SELECT 1 
+              FROM Votes 
+              WHERE PostId = PS.PostId 
+                AND VoteTypeId = 1)  -- Only include posts accepted by originator
+GROUP BY PS.PostId, PS.Title, PS.ViewCount, PS.Score, 
+         PS.ReputationTier, PS.ScoreCategory, PH.CommentsDetails
+HAVING COUNT(V.Id) > 5  -- Only include posts with more than 5 votes
+ORDER BY PS.Score DESC;
+

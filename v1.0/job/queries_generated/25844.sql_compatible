@@ -1,0 +1,75 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT mk.keyword) DESC) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT cc.kind) AS roles_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        comp_cast_type cc ON ci.person_role_id = cc.id
+    GROUP BY 
+        ci.movie_id, a.name
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+MovieInfo AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        COUNT(DISTINCT mi.info) AS info_count
+    FROM
+        title t
+    LEFT JOIN
+        movie_info mi ON t.id = mi.movie_id
+    GROUP BY
+        t.id, t.title
+)
+SELECT 
+    rt.rank,
+    rt.title,
+    rt.production_year,
+    rt.keyword_count,
+    cd.actor_name,
+    cd.roles_count,
+    co.company_name,
+    co.company_type,
+    mi.info_count
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    CastDetails cd ON rt.title_id = cd.movie_id
+LEFT JOIN 
+    CompanyDetails co ON rt.title_id = co.movie_id
+LEFT JOIN 
+    MovieInfo mi ON rt.title_id = mi.title_id
+WHERE
+    rt.rank <= 5
+ORDER BY 
+    rt.production_year DESC, rt.rank;

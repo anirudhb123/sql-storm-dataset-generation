@@ -1,0 +1,48 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey, n.n_name
+), TopSuppliers AS (
+    SELECT 
+        rs.nation_name,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.total_supply_cost
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rank = 1
+)
+SELECT 
+    o.o_orderkey,
+    c.c_name,
+    ts.s_name,
+    ts.nation_name,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue
+FROM 
+    orders o
+JOIN 
+    lineitem li ON o.o_orderkey = li.l_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    TopSuppliers ts ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = ts.nation_name)
+WHERE 
+    o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+GROUP BY 
+    o.o_orderkey, c.c_name, ts.s_name, ts.nation_name
+ORDER BY 
+    revenue DESC
+FETCH FIRST 10 ROWS ONLY;

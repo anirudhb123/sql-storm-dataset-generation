@@ -1,0 +1,51 @@
+
+WITH ranked_movies AS (
+    SELECT
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY b.nr_order) AS rank,
+        COUNT(CASE WHEN c.kind = 'distributor' THEN 1 END) OVER (PARTITION BY a.id) AS distributor_count,
+        COALESCE(MAX(d.name), 'Unknown') AS distributor_name
+    FROM
+        aka_title a
+    LEFT JOIN
+        movie_companies b ON a.id = b.movie_id
+    LEFT JOIN
+        company_type c ON b.company_type_id = c.id
+    LEFT JOIN
+        company_name d ON b.company_id = d.id
+    WHERE
+        a.production_year IS NOT NULL
+        AND a.production_year > 2000
+    GROUP BY
+        a.id, a.title, a.production_year
+),
+movie_keywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords_list
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+)
+SELECT
+    rm.title,
+    rm.production_year,
+    rm.rank,
+    rm.distributor_count,
+    rm.distributor_name,
+    mk.keywords_list
+FROM
+    ranked_movies rm
+LEFT JOIN
+    movie_keywords mk ON rm.movie_id = mk.movie_id
+WHERE
+    rm.rank = 1
+ORDER BY
+    rm.production_year DESC,
+    rm.title
+LIMIT 100;

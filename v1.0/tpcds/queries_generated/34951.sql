@@ -1,0 +1,89 @@
+
+WITH RECURSIVE SalesTrend AS (
+    SELECT 
+        d_year, 
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    GROUP BY 
+        d_year
+    UNION ALL
+    SELECT 
+        d_year + 1, 
+        SUM(ws_ext_sales_price)
+    FROM 
+        web_sales
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    WHERE 
+        d_year <= EXTRACT(YEAR FROM CURRENT_DATE)
+    GROUP BY 
+        d_year
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        hd.hd_income_band_sk,
+        hd.hd_buy_potential
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+InventoryDetails AS (
+    SELECT 
+        inv_w.w_warehouse_name,
+        inv.i_item_id,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM 
+        inventory inv
+    JOIN 
+        warehouse inv_w ON inv.inv_warehouse_sk = inv_w.w_warehouse_sk
+    GROUP BY 
+        inv_w.w_warehouse_name, inv.i_item_id
+),
+SalesAnalysis AS (
+    SELECT 
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        ROW_NUMBER() OVER (PARTITION BY ci.cd_gender ORDER BY SUM(ws.ws_net_paid) DESC) as rnk
+    FROM 
+        web_sales ws
+    JOIN 
+        CustomerInfo ci ON ws.ws_bill_customer_sk = ci.c_customer_sk
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY 
+        ci.c_first_name, ci.c_last_name, ci.cd_gender
+)
+SELECT 
+    sa.c_first_name,
+    sa.c_last_name,
+    sa.cd_gender,
+    sa.total_net_paid,
+    sa.total_quantity_sold,
+    inv.total_quantity,
+    st.total_sales
+FROM 
+    SalesAnalysis sa
+JOIN 
+    InventoryDetails inv ON sa.cd_gender = CASE WHEN inv.total_quantity > 100 THEN 'M' ELSE 'F' END
+JOIN 
+    SalesTrend st ON 1=1
+WHERE 
+    sa.rnk <= 5
+ORDER BY 
+    sa.total_net_paid DESC
+LIMIT 100;

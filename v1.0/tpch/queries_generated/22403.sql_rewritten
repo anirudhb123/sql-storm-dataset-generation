@@ -1,0 +1,74 @@
+WITH RECURSIVE OrderCTE AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) as rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+), SupplierInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        AVG(s.s_acctbal) AS avg_supplier_balance
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+), ComplexOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        COALESCE(oi.r_regionkey, 0) AS r_region,
+        SUM(li.l_quantity * (1 - li.l_discount)) AS total_quantity,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    LEFT JOIN 
+        order_cte oi ON o.o_orderkey = oi.o_orderkey AND oi.rn = 1
+    WHERE 
+        li.l_shipdate BETWEEN o.o_orderdate AND o.o_orderdate + INTERVAL '30 days'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate, oi.r_regionkey
+)
+SELECT 
+    COALESCE(CASE 
+        WHEN r.r_name IS NOT NULL THEN r.r_name 
+        ELSE 'Unknown Region' END, 'N/A') AS region_name,
+    o.o_orderkey,
+    o.total_quantity,
+    o.total_revenue,
+    si.total_supplycost,
+    si.supplier_count,
+    si.avg_supplier_balance,
+    CASE 
+        WHEN o.total_revenue > 10000 THEN 'High Value'
+        WHEN o.total_revenue BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS order_value_category
+FROM 
+    ComplexOrders o
+LEFT JOIN 
+    region r ON o.r_region = r.r_regionkey
+LEFT JOIN 
+    SupplierInfo si ON si.ps_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+WHERE 
+    o.total_quantity IS NOT NULL 
+    AND o.total_revenue IS NOT NULL 
+    AND o.o_orderkey NOT IN (SELECT o_orderkey FROM orders WHERE o_orderstatus = 'C')
+ORDER BY 
+    o.total_revenue DESC, 
+    o.total_quantity ASC;

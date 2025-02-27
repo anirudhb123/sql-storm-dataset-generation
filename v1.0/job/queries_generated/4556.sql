@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.imdb_index,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    WHERE 
+        a.production_year >= 2000
+    AND 
+        mk.keyword_id IN (SELECT id FROM keyword WHERE keyword IN ('drama', 'comedy'))
+),
+FilteredCast AS (
+    SELECT 
+        c.movie_id,
+        COUNT(CASE WHEN r.role = 'Actor' THEN 1 ELSE NULL END) AS actor_count,
+        COUNT(CASE WHEN r.role = 'Director' THEN 1 ELSE NULL END) AS director_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        COALESCE(COUNT(DISTINCT cn.id), 0) AS company_count
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+FinalResults AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        fc.actor_count,
+        fc.director_count,
+        mc.company_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        FilteredCast fc ON rm.imdb_index = fc.movie_id
+    LEFT JOIN 
+        MovieCompanies mc ON rm.imdb_index = mc.movie_id
+    WHERE 
+        (fc.actor_count IS NOT NULL OR fc.director_count IS NOT NULL)
+)
+SELECT 
+    title,
+    production_year,
+    actor_count,
+    director_count,
+    company_count 
+FROM 
+    FinalResults
+WHERE 
+    production_year IN (SELECT DISTINCT production_year FROM FinalResults)
+ORDER BY 
+    production_year DESC, 
+    title;

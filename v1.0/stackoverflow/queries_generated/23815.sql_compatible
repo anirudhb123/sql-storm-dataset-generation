@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+
+PostHistoryAnalytics AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS ClosedCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeletedCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 18 THEN 1 END) AS MergedCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    p.Title AS "Post Title",
+    COALESCE(up.TotalPosts, 0) AS "Number of Posts by User",
+    COALESCE(ua.TotalBounties, 0) AS "Total Bounty Amount",
+    COALESCE(pha.ClosedCount, 0) AS "Times Closed",
+    COALESCE(p.Rank, 0) AS "Post Rank",
+    CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Yes' ELSE 'No' END AS "Has Accepted Answer",
+    STRING_AGG(t.TagName, ', ') AS "Tags"
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    Users u ON p.PostTypeId = 1 AND u.Id = p.OwnerUserId 
+LEFT JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN 
+    PostHistoryAnalytics pha ON p.PostId = pha.PostId
+LEFT JOIN 
+    Posts p2 ON p2.Id = p.AcceptedAnswerId
+LEFT JOIN 
+    LATERAL (SELECT unnest(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2)::text[]) AS TagName) t ON true
+WHERE 
+    (p.Score > 10 OR p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')) 
+    AND (p.PostTypeId IN (1, 2)) 
+    AND (p.LastActivityDate IS NOT NULL OR p.LastEditDate IS NOT NULL) 
+GROUP BY 
+    p.Title, ua.TotalBounties, pha.ClosedCount, p.Rank, up.TotalPosts
+ORDER BY 
+    p.Rank ASC, p2.CreationDate DESC;

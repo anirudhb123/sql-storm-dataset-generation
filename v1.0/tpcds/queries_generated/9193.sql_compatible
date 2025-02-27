@@ -1,0 +1,47 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2001 
+        AND d.d_moy BETWEEN 1 AND 6  
+    GROUP BY 
+        ws.web_site_id
+),
+TopSales AS (
+    SELECT 
+        web_site_id,
+        total_profit,
+        total_orders
+    FROM 
+        RankedSales
+    WHERE 
+        profit_rank <= 5
+)
+
+SELECT 
+    w.web_site_name,
+    ts.total_profit,
+    ts.total_orders,
+    w.web_country,
+    w.web_city,
+    COUNT(DISTINCT ws.ws_item_sk) AS unique_items_sold
+FROM 
+    TopSales ts
+JOIN 
+    web_site w ON ts.web_site_id = w.web_site_id
+JOIN 
+    web_sales ws ON ws.ws_web_site_sk = w.web_site_sk
+GROUP BY 
+    w.web_site_name, ts.total_profit, ts.total_orders, w.web_country, w.web_city
+ORDER BY 
+    ts.total_profit DESC;

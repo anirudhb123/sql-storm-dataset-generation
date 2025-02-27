@@ -1,0 +1,47 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(vb.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS Upvotes,
+        COALESCE(SUM(vb.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS Downvotes,
+        pg.Name AS PostType,
+        COALESCE(b.Name, 'No Badge') AS UserBadge,
+        u.DisplayName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        VoteTypes vb ON vb.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostTypes pg ON pg.Id = p.PostTypeId
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId AND b.Class = 1
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    rp.Rank,
+    rp.CommentCount,
+    rp.Upvotes,
+    rp.Downvotes,
+    rp.PostType,
+    rp.UserBadge,
+    rp.DisplayName
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC;

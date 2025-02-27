@@ -1,0 +1,55 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS level,
+        mt.production_year,
+        CAST(mt.title AS VARCHAR(255)) AS full_path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL -- Start with the parent movies
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        mh.level + 1 AS level,
+        m.production_year,
+        CONCAT(mh.full_path, ' -> ', m.title) AS full_path
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    mh.full_path,
+    COALESCE((SELECT COUNT(*) 
+              FROM complete_cast cc 
+              WHERE cc.movie_id = mh.movie_id), 0) AS cast_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    AVG(COALESCE(mk.id, 0)) AS average_keyword_id,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level) AS movie_rank
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year, mh.full_path
+HAVING 
+    COUNT(DISTINCT ci.id) > 2
+ORDER BY 
+    mh.production_year DESC, movie_rank;

@@ -1,0 +1,78 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(ph.CreationDate) AS LastEditDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title
+),
+RankedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CommentCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ph.Level,
+        ps.LastEditDate,
+        ps.EditRank
+    FROM 
+        PostStats ps
+    LEFT JOIN 
+        RecursivePostHierarchy ph ON ps.PostId = ph.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    COALESCE(rp.Level, -1) AS HierarchicalLevel,
+    CASE 
+        WHEN rp.EditRank = 1 THEN 'Most Recent Edit'
+        WHEN rp.EditRank > 1 THEN 'Earlier Edit'
+        ELSE 'No Edits'
+    END AS EditStatus
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.UpVotes > 5
+ORDER BY 
+    rp.UpVotes DESC, 
+    rp.CommentCount DESC;

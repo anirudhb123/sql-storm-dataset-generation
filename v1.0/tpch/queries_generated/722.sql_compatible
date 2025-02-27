@@ -1,0 +1,95 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, c.c_custkey
+),
+TopSuppliers AS (
+    SELECT 
+        ps_partkey,
+        s_suppkey
+    FROM 
+        RankedSuppliers
+    WHERE 
+        rn = 1
+),
+TotalAmountSpent AS (
+    SELECT 
+        c.c_custkey,
+        SUM(co.total_spent) AS total_spent
+    FROM 
+        CustomerOrders co
+    JOIN 
+        customer c ON co.c_custkey = c.c_custkey
+    GROUP BY 
+        c.c_custkey
+)
+
+SELECT 
+    p.p_name,
+    p.p_brand,
+    r.r_name,
+    COALESCE(ts.s_suppkey, 0) AS top_supplier,
+    ta.total_spent,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    TopSuppliers ts ON ps.ps_partkey = ts.ps_partkey
+LEFT JOIN 
+    region r ON r.r_regionkey = (
+        SELECT n.n_regionkey 
+        FROM nation n 
+        WHERE n.n_nationkey = (
+            SELECT DISTINCT c.c_nationkey 
+            FROM customer c 
+            WHERE c.c_custkey = (
+                SELECT DISTINCT co.c_custkey 
+                FROM CustomerOrders co 
+                JOIN orders o ON co.o_orderkey = o.o_orderkey 
+                LIMIT 1
+            )
+            LIMIT 1
+        )
+    )
+LEFT JOIN 
+    TotalAmountSpent ta ON ta.c_custkey = (
+        SELECT DISTINCT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_nationkey = (
+            SELECT DISTINCT n.n_nationkey 
+            FROM nation n 
+            WHERE n.n_regionkey = r.r_regionkey 
+            LIMIT 1
+        )
+    )
+WHERE 
+    p.p_retailprice > 100
+GROUP BY 
+    p.p_name, p.p_brand, r.r_name, ts.s_suppkey, ta.total_spent
+ORDER BY 
+    ta.total_spent DESC NULLS LAST;

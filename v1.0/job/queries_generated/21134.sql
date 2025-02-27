@@ -1,0 +1,59 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth,
+        CAST(mt.title AS VARCHAR(255)) AS path
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000  -- Filter for movies produced from 2000 onwards
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1,
+        CAST(mh.path || ' -> ' || at.title AS VARCHAR(255)) AS path
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.depth,
+    mh.path,
+    COUNT(DISTINCT ci.person_id) AS num_cast_members,
+    STRING_AGG(DISTINCT ak.name, ', ') FILTER (WHERE ak.name IS NOT NULL) AS cast_names,
+    AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_order,
+    COUNT(DISTINCT CASE WHEN ci.note IS NOT NULL THEN ci.note END) AS unique_notes,
+    CASE 
+        WHEN COUNT(DISTINCT ci.note) = 0 THEN 'No notes available'
+        ELSE 'Notes available'
+    END AS notes_status
+FROM
+    movie_hierarchy mh
+LEFT JOIN
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN
+    aka_name ak ON ci.person_id = ak.person_id
+WHERE
+    mh.depth <= 3  -- Limit to a maximum hierarchy depth
+GROUP BY
+    mh.movie_id, mh.title, mh.depth, mh.path
+ORDER BY
+    mh.production_year DESC,
+    mh.depth,
+    num_cast_members DESC
+LIMIT 100;

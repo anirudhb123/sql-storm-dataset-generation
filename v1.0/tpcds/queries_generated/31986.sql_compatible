@@ -1,0 +1,55 @@
+
+WITH RECURSIVE SalesTrend AS (
+  SELECT 
+    d.d_date,
+    SUM(ws.ws_net_profit) AS total_profit,
+    ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM d.d_date) ORDER BY d.d_date) AS month_rank
+  FROM 
+    web_sales ws
+  JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+  WHERE 
+    d.d_date BETWEEN '2022-01-01' AND '2023-12-31'
+  GROUP BY 
+    d.d_date
+  
+  UNION ALL
+  
+  SELECT 
+    d.d_date,
+    SUM(ss.ss_net_profit) AS total_profit,
+    ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM d.d_date) ORDER BY d.d_date) AS month_rank
+  FROM 
+    store_sales ss
+  JOIN 
+    date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+  WHERE 
+    d.d_date BETWEEN '2022-01-01' AND '2023-12-31'
+  GROUP BY 
+    d.d_date
+), MonthlyProfit AS (
+  SELECT 
+    TO_CHAR(d.d_date, 'YYYY-MM') AS month,
+    SUM(total_profit) AS monthly_profit
+  FROM 
+    SalesTrend st
+  JOIN 
+    date_dim d ON st.d_date = d.d_date
+  GROUP BY 
+    TO_CHAR(d.d_date, 'YYYY-MM')
+)
+
+SELECT 
+  mp.month,
+  mp.monthly_profit,
+  LAG(mp.monthly_profit) OVER (ORDER BY mp.month) AS prev_month_profit,
+  CASE 
+    WHEN mp.monthly_profit IS NULL THEN 'No Data'
+    WHEN mp.monthly_profit > LAG(mp.monthly_profit) OVER (ORDER BY mp.month) THEN 'Increase'
+    WHEN mp.monthly_profit < LAG(mp.monthly_profit) OVER (ORDER BY mp.month) THEN 'Decrease'
+    ELSE 'No Change'
+  END AS trend
+FROM 
+  MonthlyProfit mp
+ORDER BY 
+  mp.month;

@@ -1,0 +1,51 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) as order_rank
+    FROM orders o
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name AS supplier_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_name AS part_name
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    sp.supplier_name,
+    pp.part_name,
+    COALESCE(cp.total_orders, 0) AS total_orders,
+    COALESCE(cp.total_spent, 0.00) AS total_spent,
+    RANK() OVER (PARTITION BY r.r_name ORDER BY COALESCE(cp.total_spent, 0) DESC) AS spend_rank
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierPartDetails sp ON n.n_nationkey = (
+    SELECT DISTINCT s.s_nationkey FROM supplier s WHERE s.s_name LIKE 'Supplier%'
+)
+LEFT JOIN CustomerPurchases cp ON cp.c_custkey IN (
+    SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderdate > DATE '1998-10-01' - INTERVAL '1 year'
+)
+LEFT JOIN part pp ON pp.p_partkey IN (
+    SELECT DISTINCT ps.ps_partkey FROM partsupp ps JOIN supplier s ON ps.ps_suppkey = s.s_suppkey WHERE s.s_nationkey = n.n_nationkey
+)
+WHERE pp.p_size > 10 
+   OR (pp.p_retailprice < 100 AND sp.ps_supplycost > 10)
+ORDER BY r.r_name, spend_rank;

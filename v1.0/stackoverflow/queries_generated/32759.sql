@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '>'))::int)
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= NOW() - INTERVAL '30 days'  -- Votes in the last 30 days
+    GROUP BY 
+        v.PostId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 24 THEN 1 END) AS EditCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostID,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.Tags,
+    COALESCE(rv.VoteCount, 0) AS RecentVoteCount,
+    COALESCE(rv.UpVotes, 0) AS RecentUpVotes,
+    COALESCE(rv.DownVotes, 0) AS RecentDownVotes,
+    COALESCE(phs.LastClosedDate, 'No Closure') AS LastClosedDate,
+    phs.EditCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentVotes rv ON rp.PostID = rv.PostId
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostID = phs.PostId
+WHERE 
+    rp.Rank <= 5  -- Top 5 questions per user based on score
+ORDER BY 
+    rp.CreationDate DESC;

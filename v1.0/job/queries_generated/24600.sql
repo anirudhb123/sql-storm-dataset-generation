@@ -1,0 +1,51 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT a.id AS actor_id, a.name AS actor_name, 1 AS hierarchy_level
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    WHERE c.movie_id IN (SELECT movie_id FROM aka_title WHERE production_year > 2000)
+
+    UNION ALL
+
+    SELECT ah.actor_id, ah.actor_name, ah.hierarchy_level + 1
+    FROM ActorHierarchy ah
+    JOIN cast_info c ON ah.actor_id = c.person_id
+    WHERE c.movie_id IN (SELECT movie_id FROM aka_title WHERE production_year > 2000)
+),
+
+TopMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_cast_order,
+        STRING_AGG(DISTINCT CASE WHEN c.note IS NOT NULL THEN c.note ELSE 'No Note' END, ', ') AS cast_notes
+    FROM aka_title t
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+    GROUP BY t.id
+    HAVING COUNT(DISTINCT c.person_id) > 5
+    ORDER BY cast_count DESC
+    LIMIT 10
+)
+
+SELECT 
+    tm.movie_id,
+    tm.movie_title,
+    tm.cast_count,
+    tm.avg_cast_order,
+    ah.actor_name, 
+    ah.hierarchy_level,
+    CASE 
+        WHEN MIN(mk.keyword) IS NULL THEN 'No keywords found' 
+        ELSE STRING_AGG(DISTINCT mk.keyword, ', ')
+    END AS associated_keywords
+FROM TopMovies tm
+LEFT JOIN ActorHierarchy ah ON ah.actor_id IN (SELECT person_id FROM cast_info WHERE movie_id = tm.movie_id)
+LEFT JOIN movie_keyword mk ON mk.movie_id = tm.movie_id
+GROUP BY tm.movie_id, tm.movie_title, tm.cast_count, tm.avg_cast_order, ah.actor_name, ah.hierarchy_level
+ORDER BY tm.cast_count DESC, ah.hierarchy_level ASC;
+
+This query:
+- Creates a recursive CTE (`ActorHierarchy`) to build a hierarchy of actors involved in movies produced after 2000.
+- Creates a second CTE (`TopMovies`) to gather the top movies based on the count of distinct cast members and their average order.
+- Finally, it selects the relevant details including the movie title, associated keywords, and actor hierarchy level, demonstrating a variety of SQL constructs such as outer joins, groupings, and conditionals. The use of `CASE` statements and string aggregation indicates handling of potential NULL values and ensures comprehensive output.

@@ -1,0 +1,30 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.depth + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice < 100 AND sh.depth < 5
+),
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+)
+SELECT 
+    s.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    sh.depth AS supplier_depth,
+    tc.total_spent
+FROM supplier_hierarchy sh
+JOIN supplier s ON sh.s_suppkey = s.s_suppkey
+JOIN top_customers tc ON s.s_nationkey = tc.c_nationkey
+JOIN customer c ON tc.c_custkey = c.c_custkey
+ORDER BY tc.total_spent DESC, supplier_name ASC
+LIMIT 10;

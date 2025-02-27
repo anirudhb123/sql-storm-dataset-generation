@@ -1,0 +1,72 @@
+WITH TagFrequency AS (
+    SELECT 
+        TRIM(tag) AS TagName,
+        COUNT(*) AS PostCount
+    FROM (
+        SELECT 
+            UNNEST(STRING_TO_ARRAY(SUBSTR(Tags, 2, LENGTH(Tags) - 2), '><')) AS tag
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 1  -- Only questions
+    ) AS TagList
+    GROUP BY 
+        TRIM(tag)
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(V.VoteTypeId = 2) AS Upvotes,
+        SUM(V.VoteTypeId = 3) AS Downvotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1  -- Questions
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+    ORDER BY 
+        QuestionCount DESC
+    LIMIT 10
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        T.TagName,
+        U.DisplayName AS OwnerName,
+        (SELECT COUNT(*) FROM Votes WHERE PostId = P.Id AND VoteTypeId = 2) AS Upvotes,
+        (SELECT COUNT(*) FROM Votes WHERE PostId = P.Id AND VoteTypeId = 3) AS Downvotes,
+        (SELECT COUNT(*) FROM Comments WHERE PostId = P.Id) AS CommentCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    JOIN 
+        TagFrequency T ON POSITION(T.TagName IN P.Tags) > 0
+    WHERE 
+        P.PostTypeId = 1  -- Only questions
+)
+SELECT 
+    PS.Title,
+    PS.CreationDate,
+    PS.ViewCount,
+    PS.Score,
+    PS.Upvotes - PS.Downvotes AS NetVotes,
+    PS.CommentCount,
+    TU.DisplayName AS TopUser
+FROM 
+    PostStats PS
+CROSS JOIN 
+    (SELECT DisplayName FROM TopUsers ORDER BY RANDOM() LIMIT 1) TU
+WHERE 
+    PS.ViewCount > 100  -- Filtering for questions with more than 100 views
+ORDER BY 
+    PS.ViewCount DESC
+LIMIT 5;

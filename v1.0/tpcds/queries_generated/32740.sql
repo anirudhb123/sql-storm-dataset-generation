@@ -1,0 +1,55 @@
+
+WITH RECURSIVE date_hierarchy AS (
+    SELECT d_date_sk, d_date, d_year, d_month_seq, d_dow, d_current_month
+    FROM date_dim
+    WHERE d_year = (SELECT MAX(d_year) FROM date_dim) -- Get the latest year
+    UNION ALL
+    SELECT d.d_date_sk, d.d_date, d.d_year, d.d_month_seq, d.d_dow, d.d_current_month
+    FROM date_dim d
+    INNER JOIN date_hierarchy dh ON d.d_date_sk = dh.d_date_sk - 1
+), 
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(COALESCE(ws.ws_net_paid, 0)) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MIN(ws.ws_sold_date_sk) AS first_order_date,
+        MAX(ws.ws_sold_date_sk) AS last_order_date,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(COALESCE(ws.ws_net_paid, 0)) DESC) AS customer_rank
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+item_sales AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(COALESCE(ws.ws_quantity, 0)) AS total_quantity,
+        AVG(ws.ws_net_paid) AS avg_price
+    FROM item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk
+),
+customer_item_analysis AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.order_count,
+        cs.total_sales,
+        ia.i_item_sk,
+        ia.total_quantity,
+        ia.avg_price,
+        ROW_NUMBER() OVER (PARTITION BY cs.c_customer_sk ORDER BY ia.total_quantity DESC) AS item_rank
+    FROM customer_summary cs
+    JOIN item_sales ia ON cs.total_sales > 0
+)
+SELECT 
+    dh.d_date, 
+    ci.c_customer_sk, 
+    ci.order_count, 
+    ci.total_sales, 
+    ci.i_item_sk, 
+    ci.total_quantity, 
+    ci.avg_price
+FROM customer_item_analysis ci
+JOIN date_hierarchy dh ON ci.order_count > 0
+WHERE ci.item_rank < 6
+ORDER BY dh.d_date, ci.total_sales DESC;

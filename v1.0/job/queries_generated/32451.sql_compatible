@@ -1,0 +1,90 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        mv.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link mv
+    INNER JOIN 
+        aka_title mt ON mv.linked_movie_id = mt.id
+    INNER JOIN 
+        movie_hierarchy mh ON mv.movie_id = mh.movie_id
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+), 
+
+actor_info AS (
+    SELECT 
+        a.person_id,
+        a.note,
+        p.name,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY a.nr_order) AS role_order
+    FROM 
+        cast_info a
+    JOIN 
+        aka_name p ON a.person_id = p.person_id
+    WHERE 
+        a.note IS NOT NULL
+), 
+
+movie_ranking AS (
+    SELECT 
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        MAX(t.production_year) AS latest_year
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.production_year
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 3
+), 
+
+movie_details AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(r.actor_count, 0) AS total_actors
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_ranking r ON mh.production_year = r.production_year
+)
+
+SELECT 
+    md.title,
+    md.production_year,
+    md.total_actors,
+    a.name AS actor_name,
+    a.role_order,
+    CONCAT(a.name, ' played a role in ', md.title) AS actor_role_desc,
+    CASE 
+        WHEN md.total_actors > 10 THEN 'Popular Movie'
+        ELSE 'Less Known Movie'
+    END AS popularity_indicator
+FROM 
+    movie_details md
+LEFT JOIN 
+    actor_info a ON md.movie_id = a.person_id
+LEFT JOIN 
+    movie_ranking r ON md.production_year = r.production_year
+ORDER BY 
+    md.production_year DESC, 
+    md.total_actors DESC;

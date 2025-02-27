@@ -1,0 +1,90 @@
+
+WITH RankedWebSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM web_sales
+    WHERE ws_net_profit > (
+        SELECT AVG(ws_net_profit)
+        FROM web_sales
+        WHERE ws_item_sk IS NOT NULL
+    )
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY cd.cd_purchase_estimate DESC) AS customer_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+),
+TopCustomers AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM CustomerInfo ci
+    JOIN web_sales ws ON ci.c_customer_sk = ws.ws_bill_customer_sk 
+    WHERE ci.customer_rank <= 10
+    GROUP BY ci.c_customer_sk, ci.c_first_name, ci.c_last_name
+),
+CombinedReturns AS (
+    SELECT 
+        'web' AS return_type,
+        wr_returning_customer_sk AS customer_sk,
+        SUM(wr_return_amt) AS total_return
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+    UNION ALL
+    SELECT 
+        'store' AS return_type,
+        sr_returning_customer_sk AS customer_sk,
+        SUM(sr_return_amt) AS total_return
+    FROM store_returns
+    GROUP BY sr_returning_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        tc.c_customer_sk,
+        tc.c_first_name,
+        tc.c_last_name,
+        COALESCE(cr.total_return, 0) AS total_return,
+        COALESCE(rws.ws_net_profit, 0) AS total_profit
+    FROM TopCustomers tc
+    LEFT JOIN CombinedReturns cr ON tc.c_customer_sk = cr.customer_sk
+    LEFT JOIN (
+        SELECT 
+            ws_bill_customer_sk,
+            SUM(ws_net_profit) AS ws_net_profit
+        FROM web_sales
+        GROUP BY ws_bill_customer_sk
+    ) rws ON tc.c_customer_sk = rws.ws_bill_customer_sk
+)
+SELECT 
+    f.c_customer_sk,
+    f.c_first_name,
+    f.c_last_name,
+    f.total_return,
+    f.total_profit,
+    CASE 
+        WHEN f.total_profit > 0 THEN 'Profitable'
+        ELSE 'Unprofitable'
+    END AS profitability_status,
+    (SELECT COUNT(DISTINCT ws_item_sk) 
+     FROM web_sales 
+     WHERE ws_bill_customer_sk = f.c_customer_sk) AS unique_items_purchased
+FROM FinalReport f
+WHERE f.total_return IS NOT NULL
+  AND f.total_profit IS NOT NULL
+ORDER BY f.total_profit DESC, f.total_return DESC
+LIMIT 20;

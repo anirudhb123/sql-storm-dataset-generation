@@ -1,0 +1,54 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id, 
+        SUM(ws.ws_quantity) AS total_quantity, 
+        SUM(ws.ws_net_profit) AS total_profit, 
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        MAX(ws.ws_net_paid_inc_tax) AS max_paid_incl_tax,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2022 AND 2023 
+        AND cd.cd_gender = 'F' 
+        AND cd.cd_marital_status = 'M'
+    GROUP BY 
+        ws.web_site_id
+), WarehouseData AS (
+    SELECT 
+        w.w_warehouse_id, 
+        COUNT(DISTINCT ws.ws_item_sk) AS distinct_items, 
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        SUM(ws.ws_ext_ship_cost) AS total_ship_cost
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+)
+
+SELECT 
+    s.web_site_id,
+    s.total_quantity,
+    s.total_profit,
+    s.avg_sales_price,
+    s.max_paid_incl_tax,
+    w.w_warehouse_id,
+    w.distinct_items,
+    w.total_discount,
+    w.total_ship_cost
+FROM 
+    SalesData s
+JOIN 
+    WarehouseData w ON s.web_site_id = w.w_warehouse_id
+ORDER BY 
+    total_profit DESC, total_quantity DESC
+LIMIT 100;

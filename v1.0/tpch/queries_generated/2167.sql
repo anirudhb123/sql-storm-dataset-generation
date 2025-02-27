@@ -1,0 +1,46 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS ranking
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS total_orders,
+           MAX(o.o_orderdate) AS last_order_date,
+           MIN(o.o_orderdate) AS first_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierInfo AS (
+    SELECT p.p_partkey, 
+           SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+
+SELECT cs.c_name, 
+       cs.total_spent,
+       COALESCE(rs.s_name, 'No Supplier') AS primary_supplier,
+       pti.total_available,
+       pti.avg_supply_cost,
+       DATEDIFF(CURRENT_DATE, cs.last_order_date) AS days_since_last_order
+FROM CustomerOrderStats cs
+LEFT JOIN RankedSuppliers rs ON cs.total_orders > 10 AND rs.ranking = 1
+LEFT JOIN PartSupplierInfo pti ON EXISTS (
+    SELECT 1
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_custkey = cs.c_custkey AND l.l_partkey = pti.p_partkey
+) 
+WHERE cs.total_spent > 1000
+ORDER BY cs.total_spent DESC
+LIMIT 50;

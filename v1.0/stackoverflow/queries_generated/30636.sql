@@ -1,0 +1,77 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.PostTypeId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.PostTypeId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+AggregateVotes AS (
+    SELECT 
+        v.PostId, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(pahh.Level, 0) AS HierarchyLevel,
+        AV.UpVotes,
+        AV.DownVotes,
+        (AV.UpVotes - AV.DownVotes) AS NetScore,
+        CASE 
+            WHEN p.CreationDate >= NOW() - INTERVAL '7 days' THEN 'Recent'
+            ELSE 'Old' 
+        END AS PostAge
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHierarchy pahh ON p.Id = pahh.PostId
+    LEFT JOIN 
+        AggregateVotes AV ON p.Id = AV.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.HierarchyLevel,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.NetScore,
+    ps.PostAge,
+    ROW_NUMBER() OVER (PARTITION BY ps.PostAge ORDER BY ps.NetScore DESC) AS Rank
+FROM 
+    PostStatistics ps
+WHERE 
+    ps.UpVotes IS NOT NULL 
+    AND ps.DownVotes IS NOT NULL 
+    AND ps.PostId IN (SELECT DISTINCT PostId FROM Comments WHERE Score > 0)
+ORDER BY 
+    ps.PostAge, ps.NetScore DESC;
+

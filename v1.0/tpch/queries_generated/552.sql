@@ -1,0 +1,58 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+)
+SELECT 
+    p.p_name,
+    n.n_name AS supplier_nation,
+    SUM(l.l_quantity) AS total_quantity,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    (
+        SELECT 
+            ps.ps_partkey, 
+            ps.ps_suppkey 
+        FROM 
+            SupplierParts ps
+        WHERE 
+            ps.total_avail_qty > (SELECT AVG(total_avail_qty) FROM SupplierParts)
+    ) AS sp ON l.l_partkey = sp.ps_partkey
+JOIN 
+    supplier s ON sp.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    RankedOrders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    AND (o.o_orderstatus = 'F' OR o.o_orderstatus IS NULL)
+GROUP BY 
+    p.p_name, n.n_name
+HAVING 
+    COUNT(o.o_orderkey) > 5
+ORDER BY 
+    total_quantity DESC, revenue_rank;

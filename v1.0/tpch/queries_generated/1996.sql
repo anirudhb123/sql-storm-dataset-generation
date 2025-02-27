@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) as order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+), 
+SupplierPrices AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(s.price_sum, 0) AS total_price
+    FROM supplier s
+    LEFT JOIN (
+        SELECT 
+            l.l_suppkey,
+            SUM(l.l_extendedprice * (1 - l.l_discount)) AS price_sum
+        FROM lineitem l
+        WHERE l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+        GROUP BY l.l_suppkey
+    ) AS SupplierEarnings ON s.s_suppkey = SupplierEarnings.l_suppkey
+    WHERE s.s_acctbal > 1000
+),
+CustomerOrderCounts AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+
+SELECT 
+    r.o_orderkey,
+    r.o_orderstatus,
+    r.o_totalprice,
+    sp.total_supply_cost,
+    COALESCE(hs.s_name, 'No Supplier') AS supplier_name,
+    cc.order_count
+FROM RankedOrders r
+LEFT JOIN SupplierPrices sp ON r.o_orderkey = sp.ps_partkey
+LEFT JOIN HighValueSuppliers hs ON sp.ps_suppkey = hs.s_suppkey
+LEFT JOIN CustomerOrderCounts cc ON r.o_orderkey = cc.c_custkey
+WHERE r.order_rank <= 10
+AND (sp.total_supply_cost > 10000 OR hs.total_price > 20000)
+ORDER BY r.o_totalprice DESC, r.o_orderdate ASC;

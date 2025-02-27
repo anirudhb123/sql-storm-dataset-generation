@@ -1,0 +1,69 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        Score,
+        1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        ph.Level + 1
+    FROM Posts p
+    JOIN RecursivePostHierarchy ph ON p.ParentId = ph.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(ph.Level) AS PostLevel
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN RecursivePostHierarchy ph ON p.Id = ph.Id
+    GROUP BY p.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteCounts,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+
+SELECT 
+    p.Id,
+    p.Title,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    ps.BadgeCount,
+    phd.CloseCount,
+    phd.DeleteCounts,
+    phd.LastEdited,
+    CASE 
+        WHEN phd.CloseCount > 0 THEN 'Closed'
+        WHEN phd.DeleteCounts > 0 THEN 'Deleted'
+        ELSE 'Active'
+    END AS PostStatus
+FROM Posts p
+JOIN PostStats ps ON p.Id = ps.PostId
+LEFT JOIN PostHistoryDetails phd ON p.Id = phd.PostId
+WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+ORDER BY ps.PostLevel DESC, ps.UpVotes - ps.DownVotes DESC, p.CreationDate DESC
+LIMIT 50;

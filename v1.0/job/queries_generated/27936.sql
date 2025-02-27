@@ -1,0 +1,64 @@
+WITH MovieDetails AS (
+    SELECT
+        a.title,
+        a.production_year,
+        a.kind_id,
+        GROUP_CONCAT(distinct c.name) AS cast_names,
+        GROUP_CONCAT(distinct k.keyword) AS keywords,
+        GROUP_CONCAT(distinct co.name) AS company_names
+    FROM
+        aka_title a
+    JOIN
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    JOIN
+        cast_info ci ON a.id = ci.movie_id
+    JOIN
+        aka_name c ON ci.person_id = c.person_id
+    JOIN
+        movie_companies mc ON a.id = mc.movie_id
+    JOIN
+        company_name co ON mc.company_id = co.id
+    WHERE
+        a.production_year BETWEEN 2000 AND 2023
+    GROUP BY
+        a.id
+),
+RoleCounts AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.role_id) AS distinct_roles
+    FROM
+        cast_info ci
+    GROUP BY
+        ci.movie_id
+),
+TopMovies AS (
+    SELECT
+        md.title,
+        md.production_year,
+        md.cast_names,
+        md.keywords,
+        md.company_names,
+        rc.distinct_roles
+    FROM
+        MovieDetails md
+    JOIN
+        RoleCounts rc ON md.id = rc.movie_id
+    ORDER BY
+        md.production_year DESC,
+        rc.distinct_roles DESC
+    LIMIT 10
+)
+SELECT 
+    title,
+    production_year,
+    cast_names,
+    keywords,
+    company_names,
+    distinct_roles
+FROM
+    TopMovies;
+
+This query performs several operations within a Common Table Expressions (CTEs) structure. It collects movie details, aggregates cast names, keywords, and company names, counts distinct roles in movies, and then fetches the top 10 movies from the years between 2000 and 2023, ordering by the year of production and the count of distinct roles.

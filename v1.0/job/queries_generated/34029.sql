@@ -1,0 +1,73 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        a.title,
+        a.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link m
+    JOIN 
+        aka_title a ON m.linked_movie_id = a.id
+    JOIN 
+        movie_hierarchy mh ON m.movie_id = mh.movie_id
+),
+
+cast_info_with_rank AS (
+    SELECT 
+        ci.id,
+        ci.person_id,
+        ci.movie_id,
+        ci.person_role_id,
+        ci.nr_order,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+),
+
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT c.person_id) AS cast_count,
+    MAX(ci_with_rank.role_rank) AS max_role_rank,
+    ci.company_count,
+    ci.company_names
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_info_with_rank c ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    company_info ci ON ci.movie_id = mh.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, ci.company_count, ci.company_names
+HAVING 
+    COUNT(DISTINCT c.person_id) > 5 AND 
+    MAX(ci_with_rank.role_rank) < 3
+ORDER BY 
+    mh.production_year DESC, 
+    CAST(mh.movie_id AS INTEGER) ASC;

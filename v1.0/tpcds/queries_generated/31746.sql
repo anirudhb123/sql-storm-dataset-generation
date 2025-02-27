@@ -1,0 +1,77 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_web_site_sk,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - INTERVAL '3 months'
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk, ws_web_site_sk
+), ranked_sales AS (
+    SELECT 
+        w.web_site_id,
+        w.web_name,
+        s.ws_item_sk,
+        s.total_sales
+    FROM 
+        sales_cte s
+    JOIN 
+        web_site w ON s.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        s.rank <= 5
+), customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender
+), income_analysis AS (
+    SELECT 
+        hd.hd_demo_sk,
+        ib.ib_income_band_sk,
+        COUNT(*) AS demographic_count,
+        SUM(total_spent) FILTER (WHERE cd_gender = 'F') AS female_spending,
+        SUM(total_spent) FILTER (WHERE cd_gender = 'M') AS male_spending
+    FROM 
+        customer_stats AS cs
+    JOIN 
+        household_demographics hd ON cs.c_customer_sk = hd.hd_demo_sk
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        hd.hd_demo_sk, ib.ib_income_band_sk
+)
+SELECT 
+    r.web_site_id,
+    r.web_name,
+    ia.ib_income_band_sk,
+    ia.demographic_count,
+    ia.female_spending,
+    ia.male_spending,
+    CASE 
+        WHEN ia.female_spending IS NULL THEN 0 
+        ELSE ia.female_spending 
+    END AS female_spending_adjusted,
+    CASE 
+        WHEN ia.male_spending IS NULL THEN 0 
+        ELSE ia.male_spending 
+    END AS male_spending_adjusted
+FROM 
+    ranked_sales r
+JOIN 
+    income_analysis ia ON r.ws_item_sk = ia.hd_demo_sk
+ORDER BY 
+    r.total_sales DESC,ia.female_spending_adjusted DESC;

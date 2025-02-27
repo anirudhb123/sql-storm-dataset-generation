@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS total_orders,
+        RANK() OVER (ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+
+    UNION ALL
+
+    SELECT 
+        cs_bill_customer_sk,
+        SUM(cs_net_profit) AS total_profit,
+        COUNT(cs_order_number) AS total_orders,
+        RANK() OVER (ORDER BY SUM(cs_net_profit) DESC) AS profit_rank
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_bill_customer_sk
+),
+avg_customer_profit AS (
+    SELECT 
+        COUNT(DISTINCT ws_bill_customer_sk) AS customer_count,
+        AVG(total_profit) AS average_profit
+    FROM 
+        sales_summary
+    WHERE 
+        profit_rank <= 100
+),
+customer_demographics AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        SUM(total_orders) AS order_count
+    FROM 
+        sales_summary
+    LEFT JOIN 
+        customer ON sales_summary.ws_bill_customer_sk = customer.c_customer_sk
+    LEFT JOIN 
+        customer_demographics ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    GROUP BY 
+        cd_gender, cd_marital_status
+)
+SELECT 
+    cdem.cd_gender,
+    cdem.cd_marital_status,
+    cdem.order_count,
+    COALESCE(acp.average_profit, 0) AS average_profit_per_customer,
+    CASE 
+        WHEN cdem.order_count > 100 THEN 'High Engagement'
+        WHEN cdem.order_count > 50 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement'
+    END AS engagement_level
+FROM 
+    customer_demographics AS cdem
+CROSS JOIN 
+    avg_customer_profit AS acp
+ORDER BY 
+    cdem.order_count DESC;

@@ -1,0 +1,81 @@
+WITH regional_sales AS (
+    SELECT
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        region r
+    JOIN
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY
+        r.r_name
+),
+national_sales AS (
+    SELECT
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        nation n
+    JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY
+        n.n_name
+),
+top_part_sales AS (
+    SELECT
+        p.p_name AS part_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        part p
+    JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY
+        p.p_name
+    ORDER BY
+        total_sales DESC
+    LIMIT 10
+)
+SELECT
+    r.region_name,
+    n.nation_name,
+    t.part_name,
+    r.total_sales AS region_sales,
+    n.total_sales AS nation_sales,
+    t.total_sales AS part_sales
+FROM
+    regional_sales r
+JOIN
+    national_sales n ON r.region_name = n.nation_name
+JOIN
+    top_part_sales t ON n.nation_name = (SELECT n2.n_name FROM nation n2 WHERE n2.n_nationkey = (SELECT s_nationkey FROM supplier WHERE EXISTS (SELECT 1 FROM partsupp WHERE ps_suppkey = s.s_suppkey)))
+ORDER BY
+    r.region_sales DESC, n.nation_sales DESC, t.part_sales DESC;

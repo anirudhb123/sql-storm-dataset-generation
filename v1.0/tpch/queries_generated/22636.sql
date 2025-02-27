@@ -1,0 +1,42 @@
+WITH RECURSIVE cust_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM cust_orders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderdate > co.o_orderdate
+),
+order_totals AS (
+    SELECT o.custkey, SUM(o.o_totalprice) AS total_spent
+    FROM cust_orders o
+    GROUP BY o.custkey
+),
+part_info AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_size, ps.ps_availqty, ps.ps_supplycost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size BETWEEN 10 AND 20
+)
+SELECT
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    COUNT(DISTINCT co.o_orderkey) AS order_count,
+    SUM(co.o_totalprice) AS total_revenue,
+    pi.p_name AS part_name,
+    pi.ps_availqty AS available_quantity,
+    pi.ps_supplycost AS supply_cost,
+    ROUND((SUM(co.o_totalprice) / NULLIF(COUNT(DISTINCT co.o_orderkey), 0)), 2) AS avg_spent_per_order
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+JOIN cust_orders co ON l.l_orderkey = co.o_orderkey
+JOIN part_info pi ON l.l_partkey = pi.p_partkey
+WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_comment IS NOT NULL)
+GROUP BY r.r_name, n.n_name, s.s_name, pi.p_name, pi.ps_availqty, pi.ps_supplycost
+HAVING SUM(co.o_totalprice) > (SELECT AVG(total_spent) FROM order_totals) AND COUNT(DISTINCT co.o_orderkey) > 0
+ORDER BY total_revenue DESC, region_name ASC, nation_name ASC;

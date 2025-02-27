@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS TagRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.Score, u.DisplayName
+),
+TopRankedPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Body, 
+        Tags, 
+        CreationDate,
+        Score,
+        OwnerDisplayName
+    FROM 
+        RankedPosts
+    WHERE 
+        TagRank = 1
+),
+UserReputation AS (
+    SELECT 
+        UserId,
+        SUM(Reputation) AS TotalReputation,
+        COUNT(DISTINCT p.Id) AS PostsCount
+    FROM 
+        Users u
+    INNER JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        UserId
+)
+SELECT 
+    trp.PostId,
+    trp.Title,
+    trp.Body,
+    trp.Tags,
+    trp.CreationDate,
+    trp.Score,
+    trp.OwnerDisplayName,
+    ur.TotalReputation,
+    ur.PostsCount,
+    CASE
+        WHEN ur.TotalReputation > 1000 THEN 'High Reputation'
+        WHEN ur.TotalReputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationCategory
+FROM 
+    TopRankedPosts trp
+LEFT JOIN 
+    UserReputation ur ON trp.OwnerDisplayName = ur.UserId
+ORDER BY 
+    trp.CreationDate DESC;

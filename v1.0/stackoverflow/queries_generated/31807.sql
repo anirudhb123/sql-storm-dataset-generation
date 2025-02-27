@@ -1,0 +1,70 @@
+WITH RecursiveUserPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostScores AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(r.TotalPosts, 0) AS UserTotalPosts,
+        COALESCE(r.TotalViews, 0) AS UserTotalViews,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM Posts p
+    LEFT JOIN RecursiveUserPosts r ON p.OwnerUserId = r.UserId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(*) AS TotalVotes
+    FROM Votes v
+    WHERE v.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY v.PostId
+),
+PopularPostStats AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.Score,
+        rp.UserTotalPosts,
+        rp.UserTotalViews,
+        rv.Upvotes,
+        rv.Downvotes,
+        rv.TotalVotes,
+        ps.Rank
+    FROM PostScores ps
+    LEFT JOIN RecursiveUserPosts rp ON ps.UserId = rp.UserId
+    LEFT JOIN RecentVotes rv ON ps.PostId = rv.PostId
+    WHERE ps.Rank <= 10
+),
+FinalResults AS (
+    SELECT 
+        pps.*,
+        (CASE 
+            WHEN pps.Upvotes IS NOT NULL AND pps.TotalVotes > 0 THEN 
+                ROUND((pps.Upvotes::decimal / pps.TotalVotes) * 100, 2) 
+            ELSE NULL 
+        END) AS UpvotePercentage
+    FROM PopularPostStats pps
+)
+
+SELECT 
+    fr.UserDisplayName,
+    fr.Title,
+    fr.Score,
+    fr.Upvotes,
+    fr.Downvotes,
+    fr.UpvotePercentage,
+    fr.UserTotalPosts,
+    fr.UserTotalViews
+FROM FinalResults fr
+ORDER BY fr.Score DESC, fr.Upvotes DESC;

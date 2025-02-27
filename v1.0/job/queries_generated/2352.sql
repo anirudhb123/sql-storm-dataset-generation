@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rank_in_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieCast AS (
+    SELECT 
+        cc.movie_id,
+        COUNT(DISTINCT ai.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM 
+        complete_cast cc
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        cc.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        mc.cast_count,
+        mc.actor_names
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieCast mc ON rm.movie_id = mc.movie_id
+    WHERE 
+        rm.rank_in_year <= 3
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    COALESCE(fm.cast_count, 0) AS total_cast,
+    CASE 
+        WHEN fm.cast_count IS NOT NULL THEN 'Has Cast'
+        ELSE 'No Cast'
+    END AS cast_status,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = fm.movie_id) AS info_count,
+    CONCAT('Movie: ', fm.title, ' | Year: ', fm.production_year) AS movie_details
+FROM 
+    FilteredMovies fm
+ORDER BY 
+    fm.production_year DESC, 
+    fm.title ASC;

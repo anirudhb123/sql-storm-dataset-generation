@@ -1,0 +1,79 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_net_paid) AS total_sales
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY
+        ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT
+        cs_sold_date_sk,
+        cs_item_sk,
+        SUM(cs_net_paid) + SC.total_sales AS total_sales
+    FROM
+        catalog_sales CS
+    JOIN
+        Sales_CTE SC ON CS.cs_sold_date_sk = SC.ws_sold_date_sk
+    GROUP BY
+        cs_sold_date_sk, cs_item_sk
+),
+Sales_Analysis AS (
+    SELECT
+        I.i_item_id,
+        I.i_item_desc,
+        S.total_sales,
+        D.d_year,
+        ROW_NUMBER() OVER (PARTITION BY D.d_year ORDER BY S.total_sales DESC) AS sales_rank
+    FROM
+        Sales_CTE S
+    JOIN
+        item I ON S.ws_item_sk = I.i_item_sk
+    JOIN
+        date_dim D ON S.ws_sold_date_sk = D.d_date_sk
+),
+Customer_Data AS (
+    SELECT
+        C.c_customer_id,
+        CD.cd_gender,
+        CD.cd_marital_status,
+        CD.cd_education_status,
+        COALESCE(REGEXP_REPLACE(C.c_email_address, '@.*$', ''), 'unknown@unknown.com') AS masked_email,
+        R.r_reason_desc
+    FROM
+        customer C
+    JOIN
+        customer_demographics CD ON C.c_current_cdemo_sk = CD.cd_demo_sk
+    LEFT JOIN
+        store_returns SR ON C.c_customer_sk = SR.sr_customer_sk
+    LEFT JOIN
+        reason R ON SR.sr_reason_sk = R.r_reason_sk
+    WHERE
+        CD.cd_marital_status = 'M' AND
+        (CD.cd_gender = 'F' OR CD.cd_gender IS NULL)
+)
+SELECT
+    CA.c_customer_id,
+    CA.masked_email,
+    SA.i_item_desc,
+    SA.total_sales,
+    SA.sales_rank,
+    COALESCE(SR.sr_return_quantity, 0) AS total_returns,
+    D.d_month_seq AS sales_month
+FROM
+    Customer_Data CA
+JOIN
+    Sales_Analysis SA ON CA.c_customer_id = SA.i_item_id
+JOIN
+    date_dim D ON SA.total_sales IS NOT NULL
+LEFT JOIN
+    store_returns SR ON SR.sr_item_sk = SA.i_item_id
+WHERE
+    D.d_year = 2023 AND
+    SA.sales_rank <= 10
+ORDER BY
+    total_sales DESC;

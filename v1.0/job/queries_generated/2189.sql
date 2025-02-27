@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS actor_count_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.actor_count_rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        GROUP_CONCAT(DISTINCT ak.name) AS actor_names,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        complete_cast cc ON fm.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = fm.movie_id 
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        movie_keyword mk ON fm.movie_id = mk.movie_id
+    GROUP BY 
+        fm.movie_id, fm.title, fm.production_year
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.actor_names,
+    md.keyword_count,
+    COALESCE(CASE WHEN md.keyword_count > 0 THEN 'Has keywords' ELSE 'No keywords' END, 'No data') AS keyword_status
+FROM 
+    MovieDetails md
+ORDER BY 
+    md.production_year DESC, 
+    md.keyword_count DESC;

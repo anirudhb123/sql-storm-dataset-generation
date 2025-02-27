@@ -1,0 +1,48 @@
+WITH RECURSIVE CostHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal,
+           0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ch.level + 1
+    FROM supplier s
+    JOIN CostHierarchy ch ON s.s_suppkey = ch.s_suppkey
+    WHERE ch.level < 5
+),
+RankedLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, l.l_quantity, l.l_extendedprice,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rank,
+           SUM(l.l_quantity) OVER (PARTITION BY l.l_partkey) AS total_quantity
+    FROM lineitem l
+),
+DistinctSuppliers AS (
+    SELECT DISTINCT s.s_suppkey, s.s_name
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+),
+OrderSummaries AS (
+    SELECT o.o_orderkey, o.o_orderstatus, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate > '2022-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+)
+SELECT r.r_name, COUNT(DISTINCT od.o_orderkey) AS total_orders, AVG(od.total_revenue) AS avg_order_revenue,
+       SUM(ch.s_acctbal) AS total_account_balance, 
+       COALESCE(SUM(CASE WHEN r.r_name IS NULL THEN 1 ELSE 0 END), 0) AS null_region_count
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders od ON c.c_custkey = od.o_custkey
+LEFT JOIN CostHierarchy ch ON ch.s_suppkey = c.c_custkey
+WHERE EXISTS (
+    SELECT 1
+    FROM DistinctSuppliers ds
+    JOIN RankedLineItems rli ON ds.s_suppkey = rli.l_suppkey
+    WHERE rli.rank = 1 AND rli.total_quantity > 100
+)
+GROUP BY r.r_name
+ORDER BY total_orders DESC;

@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL
+),
+CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.return_quantity) AS total_returned_quantity,
+        COUNT(DISTINCT wr.return_order_number) AS total_returns
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.returned_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        wr.returning_customer_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    cd.cd_gender,
+    COUNT(DISTINCT ws.ws_order_number) AS total_sales,
+    COALESCE(SUM(ws.ws_sales_price), 0) AS total_revenue,
+    COUNT(DISTINCT cr.cr_order_number) AS total_catalog_returns,
+    COUNT(DISTINCT sr.sr_ticket_number) AS total_store_returns,
+    COALESCE(CR.total_returned_quantity, 0) AS total_web_returns,
+    CASE 
+        WHEN COUNT(DISTINCT ws.ws_order_number) > 0 THEN 
+            (SUM(ws.ws_sales_price) / COUNT(DISTINCT ws.ws_order_number))
+        ELSE 0 
+    END AS avg_order_value
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    catalog_returns cr ON ws.ws_order_number = cr.cr_order_number
+LEFT JOIN 
+    store_returns sr ON ws.ws_item_sk = sr.sr_item_sk AND ws.ws_order_number = sr.sr_ticket_number
+LEFT JOIN 
+    CustomerReturns CR ON c.c_customer_sk = CR.returning_customer_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    c.c_birth_year BETWEEN 1980 AND 2000
+    AND (cr.cr_order_number IS NULL OR sr.sr_ticket_number IS NULL OR (cr.cr_order_number IS NOT NULL AND sr.sr_ticket_number IS NOT NULL))
+GROUP BY 
+    ca.ca_city, 
+    ca.ca_state, 
+    cd.cd_gender
+HAVING 
+    COUNT(DISTINCT ws.ws_order_number) > 10
+ORDER BY 
+    total_revenue DESC
+FETCH FIRST 20 ROWS ONLY;

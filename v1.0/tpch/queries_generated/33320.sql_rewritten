@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)  
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey  
+    WHERE s.suppkey <> sh.s_suppkey
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '1996-01-01' AND l.l_shipdate <= '1996-12-31'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(os.total_amount) as total_spent
+    FROM customer c
+    JOIN OrderSummary os ON c.c_custkey = os.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(os.total_amount) > 10000  
+),
+PartSuppliers AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+RankedSuppliers AS (
+    SELECT sh.s_suppkey, sh.s_name, ROW_NUMBER() OVER (PARTITION BY sh.s_nationkey ORDER BY sh.s_acctbal DESC) AS rank
+    FROM SupplierHierarchy sh
+)
+SELECT tc.c_name, tc.total_spent, ps.p_name, ps.total_cost, rs.s_name AS supplier_name
+FROM TopCustomers tc
+LEFT JOIN PartSuppliers ps ON tc.total_spent > ps.total_cost * 1.1  
+LEFT JOIN RankedSuppliers rs ON tc.c_custkey = rs.s_suppkey  
+WHERE rs.rank = 1  
+ORDER BY tc.total_spent DESC, ps.total_cost ASC;

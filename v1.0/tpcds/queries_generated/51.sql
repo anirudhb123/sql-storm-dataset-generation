@@ -1,0 +1,43 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_web_site_sk ORDER BY ws.ws_net_profit DESC) AS SalesRank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 2451545 AND 2451555 -- Filtering a date range
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        cd.cd_gender,
+        COUNT(DISTINCT ws.ws_order_number) AS TotalOrders,
+        SUM(ws.ws_net_profit) AS TotalSpent
+    FROM customer c
+    INNER JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_current_cdemo_sk, cd.cd_gender
+),
+TopCustomer AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.cd_gender,
+        cs.TotalOrders,
+        cs.TotalSpent,
+        RANK() OVER (ORDER BY cs.TotalSpent DESC) AS CustomerRank
+    FROM CustomerStats cs
+)
+SELECT 
+    COALESCE(tc.cd_gender, 'Unknown') AS CustomerGender,
+    COALESCE(RS.ws_order_number, 0) AS OrderNumber,
+    SUM(RS.ws_sales_price) AS TotalSales,
+    AVG(RS.ws_net_profit) AS AvgNetProfit,
+    COUNT(tc.c_customer_sk) AS CustomerCount
+FROM RankedSales RS
+FULL OUTER JOIN TopCustomer tc ON RS.web_site_sk = tc.c_customer_sk 
+WHERE (tc.CustomerRank <= 10 OR tc.CustomerRank IS NULL) -- limiting to top 10 customers or NULL values
+GROUP BY CustomerGender, OrderNumber
+ORDER BY CustomerGender, TotalSales DESC;

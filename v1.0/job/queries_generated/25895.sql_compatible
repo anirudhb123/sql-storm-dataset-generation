@@ -1,0 +1,52 @@
+
+WITH MovieData AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        c.name AS company_name,
+        r.role,
+        a.name AS actor_name,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    JOIN 
+        company_name c ON c.id = mc.company_id
+    JOIN 
+        cast_info ca ON ca.movie_id = t.id
+    JOIN 
+        aka_name a ON a.person_id = ca.person_id
+    JOIN 
+        role_type r ON r.id = ca.role_id
+    JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, t.title, t.production_year, c.name, r.role, a.name
+),
+
+AggregateData AS (
+    SELECT
+        production_year,
+        COUNT(DISTINCT movie_id) AS total_movies,
+        COUNT(DISTINCT actor_name) AS total_actors,
+        SUM(keyword_count) AS total_keywords
+    FROM 
+        MovieData
+    GROUP BY 
+        production_year
+)
+
+SELECT 
+    ad.production_year,
+    ad.total_movies,
+    ad.total_actors,
+    ad.total_keywords,
+    COALESCE(ROUND(ad.total_keywords / NULLIF(ad.total_movies, 0)::decimal, 2), 0) AS avg_keywords_per_movie
+FROM 
+    AggregateData ad
+ORDER BY 
+    ad.production_year DESC;

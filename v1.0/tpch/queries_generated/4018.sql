@@ -1,0 +1,70 @@
+WITH SupplierCosts AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+LineItemDiscounts AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS discounted_price,
+        COUNT(*) AS item_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+),
+RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_orderstatus
+)
+SELECT 
+    c.c_name,
+    SUM(COALESCE(lo.discounted_price, 0)) AS total_discounted_spent,
+    SUM(cc.total_spent) AS total_customer_orders,
+    AVG(s.total_supply_cost) AS avg_supply_cost,
+    COUNT(DISTINCT ro.o_orderkey) AS distinct_orders_ranked
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerOrders cc ON c.c_custkey = cc.c_custkey
+LEFT JOIN 
+    LineItemDiscounts lo ON lo.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN 
+    SupplierCosts s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps JOIN lineitem l ON ps.ps_partkey = l.l_partkey WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey))
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+WHERE 
+    c.c_acctbal IS NOT NULL AND 
+    c.c_mktsegment = 'BUILDING'
+GROUP BY 
+    c.c_name
+ORDER BY 
+    total_discounted_spent DESC;

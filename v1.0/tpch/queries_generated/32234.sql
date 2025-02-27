@@ -1,0 +1,74 @@
+WITH RECURSIVE SalesRank AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 50000
+),
+SupplierPart AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+RegionSupplier AS (
+    SELECT 
+        n.n_nationkey,
+        r.r_name,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        n.n_nationkey, r.r_name
+)
+SELECT 
+    c.c_name,
+    COALESCE(ts.total_spent, 0) AS total_spent,
+    COALESCE(rn.total_acctbal, 0) AS total_acctbal,
+    COUNT(DISTINCT sr.o_orderkey) AS order_count,
+    COUNT(DISTINCT sp.ps_partkey) AS part_count
+FROM 
+    customer c
+LEFT JOIN 
+    TopCustomers ts ON c.c_custkey = ts.c_custkey
+LEFT JOIN 
+    RegionSupplier rn ON c.c_nationkey = rn.n_nationkey
+LEFT JOIN 
+    SalesRank sr ON sr.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN 
+    SupplierPart sp ON sp.ps_partkey IN (SELECT l.l_partkey FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey WHERE o.o_custkey = c.c_custkey)
+WHERE 
+    (ts.total_spent IS NULL OR ts.total_spent > 0)
+GROUP BY 
+    c.c_name, ts.total_spent, rn.total_acctbal
+ORDER BY 
+    total_spent DESC, total_acctbal DESC;

@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerName,
+        COUNT(a.Id) AS AnswerCount,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC, p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank <= 5 -- Selecting top 5 posts per tag
+)
+SELECT 
+    tp.Title,
+    tp.Body,
+    tp.Tags,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.OwnerName,
+    (SELECT STRING_AGG(c.Text, ' | ') 
+     FROM Comments c 
+     WHERE c.PostId = tp.PostId) AS Comments,
+    (SELECT STRING_AGG(DISTINCT ct.Name, ', ') 
+     FROM PostHistory ph
+     JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+     WHERE ph.PostId = tp.PostId AND pt.Name LIKE '%Closed%') AS CloseReasons
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.ViewCount DESC
+LIMIT 10;

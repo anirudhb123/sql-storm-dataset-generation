@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) as rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.n_nationkey
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+NationCosts AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COALESCE(SUM(rs.total_cost), 0) AS nation_total_cost
+    FROM 
+        nation n
+    LEFT JOIN 
+        RankedSuppliers rs ON n.n_nationkey = rs.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    nc.n_name,
+    nc.nation_total_cost,
+    COUNT(DISTINCT ro.o_orderkey) AS recent_orders,
+    AVG(ro.total_price) AS avg_recent_order_value
+FROM 
+    NationCosts nc
+LEFT JOIN 
+    RecentOrders ro ON nc.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = ro.o_custkey)
+GROUP BY 
+    nc.n_name, nc.nation_total_cost
+HAVING 
+    nation_total_cost > (SELECT AVG(nation_total_cost) FROM NationCosts)
+ORDER BY 
+    nation_total_cost DESC;

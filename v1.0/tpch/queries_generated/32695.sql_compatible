@@ -1,0 +1,42 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY co.c_custkey ORDER BY o.o_orderdate DESC)
+    FROM CustomerOrders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderdate < (SELECT MAX(o.o_orderdate) FROM orders)
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, s.s_suppkey, SUM(ps.ps_availqty) AS total_availqty,
+           SUM(ps.ps_supplycost) AS total_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p.p_partkey, p.p_name, s.s_suppkey
+),
+RankedParts AS (
+    SELECT p.*, ROW_NUMBER() OVER (ORDER BY p.p_retailprice DESC) AS PriceRank
+    FROM part p
+    WHERE p.p_size = (SELECT MAX(p_size) FROM part)
+)
+SELECT co.c_custkey, co.c_name, co.o_orderkey, co.o_orderdate, 
+       co.o_totalprice, pp.p_name, ps.s_suppkey, pp.p_retailprice, 
+       pp.PriceRank,
+       CASE WHEN pp.PriceRank > 3 THEN 'High Price' ELSE 'Low Price' END AS PriceCategory
+FROM CustomerOrders co
+FULL OUTER JOIN RankedParts pp ON co.o_orderkey = (
+    SELECT DISTINCT l.l_orderkey FROM lineitem l WHERE l.l_partkey = pp.p_partkey
+    ORDER BY l.l_extendedprice DESC LIMIT 1
+)
+JOIN PartSupplier ps ON pp.p_partkey = ps.p_partkey
+WHERE co.o_orderdate IS NOT NULL
+AND (pp.p_retailprice IS NOT NULL OR ps.total_availqty IS NOT NULL)
+GROUP BY co.c_custkey, co.c_name, co.o_orderkey, co.o_orderdate, 
+         co.o_totalprice, pp.p_name, ps.s_suppkey, pp.p_retailprice, 
+         pp.PriceRank;

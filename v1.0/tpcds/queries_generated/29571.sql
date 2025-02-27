@@ -1,0 +1,50 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_ca_address_sk,
+        CONCAT_WS(' ', ca_street_number, ca_street_name, ca_street_type, COALESCE(ca_suite_number, ''), ca_city, ca_state, ca_zip) AS full_address,
+        ca_country
+    FROM 
+        customer_address
+),
+DemographicDetails AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        CASE 
+            WHEN cd_purchase_estimate < 10000 THEN 'Low'
+            WHEN cd_purchase_estimate BETWEEN 10000 AND 50000 THEN 'Medium'
+            ELSE 'High'
+        END AS purchase_estimate_category
+    FROM 
+        customer_demographics
+),
+CustomerFullDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ad.full_address,
+        dm.cd_gender,
+        dm.purchase_estimate_category
+    FROM 
+        customer c
+    JOIN 
+        AddressDetails ad ON c.c_current_addr_sk = ad.ca_address_sk
+    JOIN 
+        DemographicDetails dm ON c.c_current_cdemo_sk = dm.cd_demo_sk
+)
+SELECT 
+    full_name,
+    full_address,
+    cd_gender,
+    purchase_estimate_category,
+    COUNT(*) OVER (PARTITION BY purchase_estimate_category) AS category_count
+FROM 
+    CustomerFullDetails
+WHERE 
+    cd_gender = 'F' AND 
+    purchase_estimate_category IN ('Medium', 'High')
+ORDER BY 
+    purchase_estimate_category, full_name;

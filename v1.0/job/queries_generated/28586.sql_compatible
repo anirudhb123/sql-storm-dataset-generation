@@ -1,0 +1,50 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        ak.name AS aka_name,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY LENGTH(t.title) DESC) AS rank_by_length
+    FROM 
+        title t
+    JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredTitles AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.aka_name,
+        rt.production_year
+    FROM 
+        RankedTitles rt
+    WHERE 
+        rt.rank_by_length <= 5  
+),
+Contribution AS (
+    SELECT 
+        mt.title_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        FilteredTitles mt ON mc.movie_id = mt.title_id
+    GROUP BY 
+        mt.title_id
+)
+SELECT 
+    ft.title_id,
+    ft.title,
+    ft.aka_name,
+    ft.production_year,
+    COALESCE(c.company_count, 0) AS company_count
+FROM 
+    FilteredTitles ft
+LEFT JOIN 
+    Contribution c ON ft.title_id = c.title_id
+ORDER BY 
+    ft.production_year DESC,
+    ft.title ASC;

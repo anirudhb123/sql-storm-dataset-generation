@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        U.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        PostTags pt ON p.Id = pt.PostId
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, U.DisplayName, p.Title, p.CreationDate
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        CreationDate,
+        AnswerCount,
+        CommentCount,
+        Tags,
+        RANK() OVER (ORDER BY AnswerCount DESC, CommentCount DESC) AS OverallRank
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByScore = 1 -- Only take the top-ranked posts per user
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.OwnerDisplayName,
+    f.CreationDate,
+    f.AnswerCount,
+    f.CommentCount,
+    f.Tags
+FROM 
+    FilteredPosts f
+WHERE 
+    f.OverallRank <= 10 -- Get top 10 overall questions
+ORDER BY 
+    f.CreationDate DESC;

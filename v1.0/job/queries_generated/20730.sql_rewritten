@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 0 AS level
+    FROM aka_title mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') AND mt.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT ml.linked_movie_id, at.title, at.production_year, mh.level + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+    WHERE at.production_year IS NOT NULL
+),
+
+aggregated_cast AS (
+    SELECT ci.movie_id, COUNT(DISTINCT ci.person_id) AS cast_count,
+           STRING_AGG(DISTINCT ak.name, ', ') AS cast_names,
+           (SELECT STRING_AGG(DISTINCT co.name, ', ') 
+            FROM movie_companies mc
+            JOIN company_name co ON mc.company_id = co.id
+            WHERE mc.movie_id = ci.movie_id
+            AND co.country_code IS NOT NULL) AS production_companies
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY ci.movie_id
+),
+
+movie_info_ext AS (
+    SELECT mt.id AS movie_id,
+           mt.title,
+           (SELECT COUNT(DISTINCT mf.id)
+            FROM movie_info mf
+            WHERE mf.movie_id = mt.id AND mf.info_type_id = (SELECT id FROM info_type WHERE info = 'budget')) AS budget_info,
+           (SELECT COUNT(DISTINCT mj.keyword)
+            FROM movie_keyword mj
+            WHERE mj.movie_id = mt.id) AS keyword_count
+    FROM aka_title mt
+),
+
+final_output AS (
+    SELECT mh.movie_id, mh.title, mh.production_year, ac.cast_count, ac.cast_names,
+           mie.budget_info, mie.keyword_count, 
+           ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY ac.cast_count DESC) AS ranked
+    FROM movie_hierarchy mh
+    LEFT JOIN aggregated_cast ac ON mh.movie_id = ac.movie_id
+    LEFT JOIN movie_info_ext mie ON mh.movie_id = mie.movie_id
+)
+
+SELECT movie_id, title, production_year, 
+       COALESCE(cast_count, 0) AS cast_count,
+       COALESCE(cast_names, 'No Cast') AS cast_names,
+       COALESCE(budget_info, 0) AS budget_info,
+       COALESCE(keyword_count, 0) AS keyword_count,
+       ranked
+FROM final_output
+WHERE ranked <= 5 OR production_year IS NULL
+ORDER BY production_year DESC, cast_count DESC;

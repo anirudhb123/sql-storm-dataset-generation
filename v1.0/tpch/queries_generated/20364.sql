@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+FilteredParts AS (
+    SELECT p.p_partkey, 
+           p.p_name,
+           MAX(p.p_retailprice) OVER (PARTITION BY p.p_brand) AS max_retailprice,
+           COUNT(DISTINCT ps.ps_supplycost) AS supply_cost_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(CASE WHEN p.p_size IS NULL THEN 1 ELSE 0 END) < 2
+)
+SELECT DISTINCT
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    SUM(CASE WHEN li.l_returnflag = 'R' THEN li.l_extendedprice * (1 - li.l_discount) END) AS returned_revenue,
+    AVG(COALESCE(c.c_acctbal, 0)) AS avg_acctbal,
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+    pk.retail_price_ratio
+FROM nation n
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+LEFT JOIN FilteredParts pk ON li.l_partkey = pk.p_partkey
+LEFT JOIN SupplierHierarchy sh ON c.c_nationkey = sh.s_nationkey
+WHERE n.n_name NOT LIKE '%land%'
+AND EXISTS (
+    SELECT 1
+    FROM lineitem li2
+    WHERE li2.l_orderkey = li.l_orderkey
+    AND li2.l_discount > 0.05
+)
+GROUP BY n.n_name, r.r_name, pk.max_retailprice
+HAVING COUNT(o.o_orderkey) > 5
+ORDER BY returned_revenue DESC, avg_acctbal ASC
+LIMIT 10;

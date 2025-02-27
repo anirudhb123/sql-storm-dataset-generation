@@ -1,0 +1,57 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+    GROUP BY 
+        at.title, at.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank_by_cast <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        mt.movie_id, 
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mt
+    INNER JOIN 
+        keyword mk ON mt.keyword_id = mk.id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    COALESCE(COUNT(DISTINCT c.person_id), 0) AS total_cast,
+    MAX(CASE WHEN ci.note IS NOT NULL THEN 'Note Available' ELSE 'No Note' END) AS note_status
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    aka_title at ON tm.title = at.title AND tm.production_year = at.production_year
+LEFT JOIN 
+    cast_info c ON at.id = c.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON at.id = mk.movie_id
+LEFT JOIN 
+    complete_cast cc ON at.id = cc.movie_id AND cc.status_id = 1
+WHERE 
+    tm.production_year >= 2000
+GROUP BY 
+    tm.title, tm.production_year, mk.keywords
+ORDER BY 
+    tm.production_year DESC, total_cast DESC;

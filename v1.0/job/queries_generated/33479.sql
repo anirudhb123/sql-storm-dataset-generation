@@ -1,0 +1,53 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        1 AS level,
+        t.title AS title,
+        t.production_year AS production_year
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    WHERE 
+        mc.company_type_id IN (SELECT id FROM company_type WHERE kind = 'Production Company')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        mh.level + 1 AS level,
+        t.title,
+        t.production_year
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+)
+
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    COUNT(DISTINCT c.person_id) AS cast_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS actors,
+    MIN(CASE WHEN pi.info_type_id = 1 THEN pi.info END) AS birthdate,
+    MAX(CASE WHEN pi.info_type_id = 2 THEN pi.info END) AS deathdate,
+    AVG(CASE WHEN h.production_year IS NOT NULL THEN h.production_year END) OVER (PARTITION BY YEAR(h.production_year)) AS avg_production_year,
+    ROW_NUMBER() OVER (PARTITION BY h.production_year ORDER BY h.movie_id) AS row_num
+FROM 
+    movie_hierarchy h
+LEFT JOIN 
+    complete_cast cc ON h.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    aka_name a ON c.person_id = a.person_id
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id
+GROUP BY 
+    h.movie_id, h.title, h.production_year
+ORDER BY 
+    h.production_year DESC, cast_count DESC
+LIMIT 100;

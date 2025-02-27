@@ -1,0 +1,79 @@
+WITH RecursiveTagCount AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(t.TagName) AS TagCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = p.Id
+    GROUP BY 
+        p.Id
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(p.Score) AS AvgPostScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+RecentEdits AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS EditCount,
+        MAX(CreationDate) AS LastEditDate
+    FROM 
+        PostHistory
+    WHERE 
+        PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        PostId
+),
+TopUsersPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(COALESCE(up.TotalPosts, 0)) AS TotalPosts,
+        SUM(COALESCE(up.TotalQuestions, 0)) AS TotalQuestions,
+        SUM(COALESCE(up.TotalAnswers, 0)) AS TotalAnswers,
+        SUM(COALESCE(re.EditCount, 0)) AS TotalEdits
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserPostStats up ON u.Id = up.UserId
+    LEFT JOIN 
+        RecentEdits re ON re.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    utp.TotalPosts,
+    utp.TotalQuestions,
+    utp.TotalAnswers,
+    utp.TotalEdits,
+    COALESCE(rtc.TagCount, 0) AS TagCount,
+    CASE 
+        WHEN u.Location IS NULL THEN 'Location not set'
+        ELSE u.Location
+    END AS UserLocation
+FROM 
+    TopUsersPosts utp
+JOIN 
+    Users u ON u.Id = utp.UserId
+LEFT JOIN 
+    RecursiveTagCount rtc ON rtc.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+WHERE 
+    utp.TotalPosts > 5
+ORDER BY 
+    u.Reputation DESC, utp.TotalPosts DESC
+FETCH FIRST 10 ROWS ONLY;

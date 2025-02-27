@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank
+    FROM
+        Posts p
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    WHERE
+        p.PostTypeId = 1 -- Focusing on questions
+    GROUP BY
+        p.Id, u.DisplayName
+),
+FilteredRankedPosts AS (
+    SELECT
+        rp.*,
+        JSON_AGG(DISTINCT t.TagName) AS Tags
+    FROM
+        RankedPosts rp
+    LEFT JOIN
+        Posts p ON rp.PostId = p.Id
+    LEFT JOIN
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE
+        rp.Rank <= 10 -- Top 10 questions by views
+    GROUP BY
+        rp.PostId, rp.Title, rp.CreationDate, rp.Body, rp.ViewCount, rp.OwnerDisplayName, rp.CommentCount, rp.VoteCount
+)
+SELECT
+    frp.PostId,
+    frp.Title,
+    frp.CreationDate,
+    frp.Body,
+    frp.ViewCount,
+    frp.OwnerDisplayName,
+    frp.CommentCount,
+    frp.VoteCount,
+    frp.Tags
+FROM
+    FilteredRankedPosts frp
+ORDER BY
+    frp.ViewCount DESC;

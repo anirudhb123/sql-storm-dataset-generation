@@ -1,0 +1,55 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id, 
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2022
+    GROUP BY 
+        ws.web_site_id, ws.web_site_sk
+),
+CustomerMetrics AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_count,
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    rs.web_site_id,
+    cm.cd_gender,
+    cm.cd_marital_status,
+    SUM(cm.total_spent) AS total_spent,
+    SUM(cm.orders_count) AS total_orders,
+    COUNT(DISTINCT cm.c_customer_id) AS unique_customers
+FROM 
+    RankedSales rs
+JOIN 
+    CustomerMetrics cm ON rs.web_site_id = (
+        SELECT 
+            ws.web_site_id 
+        FROM 
+            web_sales ws 
+        WHERE 
+            ws.ws_server_idx = 1 AND 
+            ws.ws_bill_customer_sk IN (SELECT c.c_customer_sk FROM customer c)
+    )
+GROUP BY 
+    rs.web_site_id, cm.cd_gender, cm.cd_marital_status
+ORDER BY 
+    total_spent DESC;

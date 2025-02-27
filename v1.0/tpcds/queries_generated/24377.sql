@@ -1,0 +1,53 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year DESC) AS rnk
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_birth_year IS NOT NULL AND cd.cd_marital_status IN ('M', 'S')
+),
+sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        ws.web_site_sk
+),
+returns_summary AS (
+    SELECT 
+        coalesce(sr_store_sk, cr_call_center_sk) AS location_id,
+        SUM(cr_return_amount + coalesce(sr_return_amt, 0)) AS total_returns
+    FROM 
+        catalog_returns cr
+    FULL OUTER JOIN 
+        store_returns sr ON cr.cr_item_sk = sr.sr_item_sk
+    GROUP BY 
+        location_id
+)
+SELECT 
+    rc.c_customer_id,
+    COALESCE(ss.total_sales, 0) AS total_sales_from_site,
+    COALESCE(rs.total_returns, 0) AS total_returns
+FROM 
+    ranked_customers rc
+LEFT JOIN 
+    sales_summary ss ON rc.c_customer_sk = ss.web_site_sk
+LEFT JOIN 
+    returns_summary rs ON ss.web_site_sk = rs.location_id
+WHERE 
+    rc.rnk = 1
+    AND (COALESCE(ss.total_sales, 0) - COALESCE(rs.total_returns, 0)) / NULLIF(ss.total_sales, 0) > 0.1
+ORDER BY 
+    rc.c_customer_id ASC;

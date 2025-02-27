@@ -1,0 +1,46 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        SUM(ws_net_profit) AS total_net_profit,
+        d_year,
+        c_country
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk, d_year, c_country
+),
+RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        total_quantity,
+        total_sales,
+        total_net_profit,
+        d_year,
+        c_country,
+        RANK() OVER (PARTITION BY d_year, c_country ORDER BY total_net_profit DESC) AS sales_rank
+    FROM 
+        SalesData
+)
+SELECT 
+    d_year,
+    c_country,
+    COUNT(*) AS num_top_sales,
+    AVG(total_sales) AS avg_sales,
+    SUM(total_quantity) AS total_quantity_sold
+FROM 
+    RankedSales
+WHERE 
+    sales_rank <= 10
+GROUP BY 
+    d_year, c_country
+ORDER BY 
+    d_year, c_country;

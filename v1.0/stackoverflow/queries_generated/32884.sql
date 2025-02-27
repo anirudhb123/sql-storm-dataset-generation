@@ -1,0 +1,85 @@
+WITH RecursivePostCounts AS (
+    -- Recursive CTE to count the number of answers for each question
+    SELECT 
+        p.Id AS QuestionId,
+        COUNT(pa.Id) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts pa ON p.Id = pa.ParentId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id
+    
+    UNION ALL
+    
+    SELECT 
+        rc.QuestionId,
+        rc.AnswerCount + COUNT(pa.Id)
+    FROM 
+        RecursivePostCounts rc
+    LEFT JOIN 
+        Posts pa ON rc.QuestionId = pa.ParentId
+    WHERE 
+        pa.PostTypeId = 2 -- Only answers
+    GROUP BY 
+        rc.QuestionId, rc.AnswerCount
+),
+PostVoteStats AS (
+    -- CTE to aggregate votes and identify popular questions
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id
+),
+RecentUsersWithBadges AS (
+    -- CTE to find users with badges created in the last year, along with their reputation
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    WHERE 
+        b.Date >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.Reputation
+)
+SELECT 
+    p.Title AS QuestionTitle,
+    rc.AnswerCount,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    pvs.TotalVotes,
+    u.DisplayName AS UserDisplayName,
+    u.Reputation AS UserReputation,
+    rb.BadgeCount
+FROM 
+    Posts p
+JOIN 
+    RecursivePostCounts rc ON p.Id = rc.QuestionId
+LEFT JOIN 
+    PostVoteStats pvs ON p.Id = pvs.PostId
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    RecentUsersWithBadges rb ON u.Id = rb.UserId
+WHERE 
+    p.CreationDate >= '2023-01-01' -- Questions created this year
+    AND (p.ClosedDate IS NULL OR p.ClosedDate >= NOW() - INTERVAL '1 month') -- Open questions or recently closed
+ORDER BY 
+    pvs.UpVotes DESC, 
+    rc.AnswerCount DESC
+LIMIT 10; -- Top 10 trending questions

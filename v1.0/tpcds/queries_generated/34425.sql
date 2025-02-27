@@ -1,0 +1,73 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        1 AS level
+    FROM
+        web_sales ws
+    JOIN
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE
+        d.d_year = 2023
+    GROUP BY
+        ws.web_site_sk
+
+    UNION ALL
+
+    SELECT
+        ws.web_site_sk,
+        sh.total_profit * 0.9 AS total_profit,
+        sh.level + 1
+    FROM
+        web_sales ws
+    JOIN
+        sales_hierarchy sh ON ws.ws_web_site_sk = sh.web_site_sk
+    WHERE
+        sh.level < 10
+),
+customer_performance AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_profit) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, c.c_first_name, c.c_last_name
+),
+top_customers AS (
+    SELECT 
+        cp.full_name,
+        cp.total_sales,
+        dp.d_week_seq,
+        dp.d_month_seq,
+        ROW_NUMBER() OVER (PARTITION BY dp.d_week_seq ORDER BY cp.total_sales DESC) AS sales_rank
+    FROM 
+        customer_performance cp
+    JOIN 
+        date_dim dp ON EXTRACT(MONTH FROM CURRENT_DATE) = dp.d_month_seq
+    WHERE 
+        cp.total_sales IS NOT NULL
+)
+SELECT
+    sh.web_site_sk,
+    sh.total_profit,
+    tc.full_name,
+    tc.total_sales,
+    tc.sales_rank
+FROM 
+    sales_hierarchy sh
+LEFT JOIN 
+    top_customers tc ON sh.total_profit > 1000 AND tc.sales_rank <= 5
+WHERE
+    sh.total_profit IS NOT NULL
+ORDER BY 
+    sh.total_profit DESC, tc.total_sales DESC;

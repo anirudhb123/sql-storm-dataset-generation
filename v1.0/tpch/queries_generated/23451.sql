@@ -1,0 +1,62 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_orderstatus, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(MONTH, -6, GETDATE())
+), 
+SupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spending
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 100000
+), 
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        l.l_partkey, 
+        l.l_quantity, 
+        l.l_discount, 
+        l.l_extendedprice, 
+        CASE 
+            WHEN l.l_discount = 0 THEN l.l_extendedprice
+            ELSE (l.l_extendedprice * (1 - l.l_discount))
+        END AS adjusted_price
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate <= CURRENT_DATE
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name,
+    COALESCE(S.s_total_supply_cost, 0) AS total_supply_cost, 
+    COALESCE(c.total_spending, 0) AS customer_spending,
+    COUNT(DISTINCT lo.l_orderkey) AS number_of_orders,
+    ROUND(AVG(lo.adjusted_price), 2) AS avg_adjusted_price
+FROM part p
+LEFT JOIN SupplierCost S ON p.p_partkey = S.ps_partkey
+LEFT JOIN FilteredLineItems lo ON p.p_partkey = lo.l_partkey
+LEFT JOIN HighValueCustomers c ON c.c_custkey IN (
+    SELECT o.o_custkey 
+    FROM RankedOrders o 
+    WHERE o.order_rank = 1 AND o.o_orderstatus = 'F'
+)
+GROUP BY p.p_partkey, p.p_name
+HAVING SUM(lo.l_quantity) IS NOT NULL OR COUNT(lo.l_orderkey) > 0
+ORDER BY total_supply_cost DESC, customer_spending DESC
+LIMIT 100;

@@ -1,0 +1,99 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        0 AS level,
+        CAST(m.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        level + 1,
+        CONCAT(h.path, ' -> ', m.title)
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy h ON ml.movie_id = h.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        h.movie_id,
+        h.movie_title,
+        h.production_year,
+        COUNT(DISTINCT ca.person_id) AS actor_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        MovieHierarchy h
+    LEFT JOIN 
+        complete_cast cc ON h.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ca ON cc.subject_id = ca.person_id
+    LEFT JOIN 
+        movie_keyword mk ON h.movie_id = mk.movie_id
+    GROUP BY 
+        h.movie_id, h.movie_title, h.production_year
+    HAVING 
+        COUNT(DISTINCT ca.person_id) > 0 AND
+        h.production_year <= (EXTRACT(YEAR FROM cast('2024-10-01' as date)) - 10)
+),
+RankedMovies AS (
+    SELECT 
+        fm.movie_id,
+        fm.movie_title,
+        fm.production_year,
+        fm.actor_count,
+        fm.keyword_count,
+        ROW_NUMBER() OVER (ORDER BY fm.actor_count DESC, fm.keyword_count ASC) AS rank
+    FROM 
+        FilteredMovies fm
+),
+FinalResults AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        rm.actor_count,
+        rm.keyword_count,
+        CASE 
+            WHEN rm.actor_count > 10 THEN 'Many Actors'
+            WHEN rm.actor_count BETWEEN 5 AND 10 THEN 'Moderate Actors'
+            ELSE 'Few Actors'
+        END AS actor_category,
+        CASE 
+            WHEN rm.keyword_count > 5 THEN 'Rich in Keywords'
+            ELSE 'Sparse Keywords'
+        END AS keyword_category
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 50
+)
+SELECT 
+    fr.movie_id,
+    fr.movie_title,
+    fr.production_year,
+    fr.actor_count,
+    fr.keyword_count,
+    fr.actor_category,
+    fr.keyword_category,
+    COALESCE(NULLIF(fr.actor_count - fr.keyword_count, 0), 'No Difference') AS diversity_indicator,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM aka_name an WHERE an.person_id IN (SELECT ca.person_id FROM cast_info ca WHERE ca.movie_id = fr.movie_id)) 
+        THEN 'Has Actor Names'
+        ELSE 'No Actor Names'
+    END AS actor_name_status
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.production_year DESC, 
+    fr.actor_count DESC;

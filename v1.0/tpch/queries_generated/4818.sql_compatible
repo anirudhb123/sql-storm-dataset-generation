@@ -1,0 +1,51 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_orderdate,
+        o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS rn
+    FROM orders
+    WHERE o_orderdate >= DATE '1996-01-01'
+),
+CustomerRegions AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_regionkey,
+        r.r_name AS region_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 1000
+    GROUP BY c.c_custkey, c.c_name, n.n_regionkey, r.r_name
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 50000
+)
+SELECT 
+    cr.region_name,
+    COUNT(DISTINCT cr.c_custkey) AS customer_count,
+    SUM(HVP.total_supply_cost) AS high_value_parts_cost,
+    AVG(ho.o_totalprice) AS avg_order_value
+FROM CustomerRegions cr
+LEFT JOIN HighValueParts HVP ON cr.c_custkey IN (
+    SELECT DISTINCT o.o_custkey
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_discount > 0.05
+)
+LEFT JOIN RankedOrders ho ON cr.c_custkey = ho.o_custkey AND ho.rn = 1
+GROUP BY cr.region_name
+ORDER BY customer_count DESC, high_value_parts_cost DESC
+FETCH FIRST 10 ROWS ONLY;

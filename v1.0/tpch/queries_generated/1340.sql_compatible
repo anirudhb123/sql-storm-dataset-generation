@@ -1,0 +1,59 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        ROW_NUMBER() OVER (ORDER BY total_cost DESC) AS rank,
+        total_cost
+    FROM 
+        SupplierStats s
+),
+RankedCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        ROW_NUMBER() OVER (ORDER BY total_spent DESC) AS rank,
+        total_spent
+    FROM 
+        CustomerOrders c
+)
+
+SELECT 
+    rc.c_name, 
+    CONCAT('Supplier: ', rs.s_name) AS supplier_details,
+    rs.rank AS supplier_rank, 
+    rc.rank AS customer_rank
+FROM 
+    RankedSuppliers rs
+FULL OUTER JOIN 
+    RankedCustomers rc ON rs.rank = rc.rank
+WHERE 
+    (rs.total_cost > 10000 OR rc.total_spent IS NULL)
+    AND (rc.c_addr IS NULL OR LENGTH(rc.c_name) > 5)
+ORDER BY 
+    COALESCE(rs.rank, 0), COALESCE(rc.rank, 0);

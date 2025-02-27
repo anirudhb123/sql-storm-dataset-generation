@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY b.person_role_id) AS rn,
+        CAST(b.nr_order AS INTEGER) AS order_number,
+        b.notes_or_role AS role_note,
+        c.name AS actor_name,
+        d.kind AS company_type,
+        k.keyword AS associated_keyword
+    FROM 
+        aka_title a
+    JOIN 
+        cast_info b ON a.id = b.movie_id
+    LEFT JOIN 
+        company_name d ON a.id = d.imdb_id
+    JOIN 
+        keyword k ON a.id = k.id
+    JOIN 
+        aka_name c ON b.person_id = c.person_id
+    WHERE 
+        a.production_year IS NOT NULL
+        AND b.nr_order IS NOT NULL
+        AND (b.note IS NULL OR b.note LIKE '%special%')
+),
+DistinctKeywords AS (
+    SELECT DISTINCT keyword
+    FROM movie_keyword mk
+    WHERE mk.movie_id IN (
+        SELECT movie_id 
+        FROM RankedMovies
+        WHERE production_year > 2000
+    )
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_title, 
+        rm.production_year,
+        COUNT(DISTINCT dk.keyword) AS keyword_count,
+        STRING_AGG(dk.keyword, ', ') AS all_keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        DistinctKeywords dk ON rm.movie_title = dk.keyword
+    GROUP BY 
+        rm.movie_title, rm.production_year
+)
+SELECT 
+    f.movie_title,
+    f.production_year,
+    CASE 
+        WHEN f.keyword_count > 5 THEN 'High Keywords'
+        WHEN f.keyword_count BETWEEN 3 AND 5 THEN 'Moderate Keywords'
+        ELSE 'Low Keywords'
+    END AS keyword_category,
+    CASE 
+        WHEN f.movie_title IS NULL THEN 'Untitled'
+        ELSE f.movie_title
+    END AS safe_movie_title
+FROM 
+    FilteredMovies f
+WHERE 
+    NOT EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = (SELECT id FROM aka_title WHERE title = f.movie_title LIMIT 1)
+        AND mi.info_type_id = 1  
+        AND mi.info IS NULL
+    )
+ORDER BY 
+    f.production_year DESC, 
+    f.keyword_count DESC
+LIMIT 10;

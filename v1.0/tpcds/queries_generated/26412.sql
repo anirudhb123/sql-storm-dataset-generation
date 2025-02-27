@@ -1,0 +1,61 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        CONCAT(ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip) AS city_state_zip,
+        ca.ca_country,
+        c.c_birth_day,
+        c.c_birth_month,
+        c.c_birth_year
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        cd.cd_gender = 'F' AND
+        cd.cd_marital_status = 'M'
+),
+SalesInfo AS (
+    SELECT 
+        ws.ws_ship_date_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_ship_date_sk
+),
+DateInfo AS (
+    SELECT 
+        d.d_date_sk,
+        d.d_year,
+        d.d_month,
+        d.d_day_name
+    FROM 
+        date_dim d
+)
+SELECT 
+    ci.full_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    si.total_sales,
+    si.order_count,
+    di.d_year,
+    di.d_month,
+    di.d_day_name
+FROM 
+    CustomerInfo ci
+JOIN 
+    SalesInfo si ON ci.c_customer_sk = (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_ship_date_sk = si.ws_ship_date_sk LIMIT 1)
+JOIN 
+    DateInfo di ON si.ws_ship_date_sk = di.d_date_sk
+ORDER BY 
+    si.total_sales DESC, 
+    ci.full_name;

@@ -1,0 +1,55 @@
+
+WITH string_metrics AS (
+    SELECT 
+        p.p_partkey,
+        LENGTH(p.p_name) AS name_length,
+        UPPER(p.p_mfgr) AS upper_mfgr,
+        LOWER(p.p_brand) AS lower_brand,
+        REPLACE(p.p_comment, 'a', '@') AS modified_comment,
+        CONCAT(p.p_name, ' - ', CAST(p.p_retailprice AS CHAR)) AS name_price
+    FROM 
+        part p
+),
+nation_metrics AS (
+    SELECT 
+        n.n_nationkey,
+        INITCAP(n.n_name) AS nation_name,
+        LENGTH(n.n_comment) AS comment_length,
+        LEFT(n.n_comment, 30) AS truncated_comment
+    FROM 
+        nation n
+),
+supplier_metrics AS (
+    SELECT 
+        s.s_suppkey,
+        CHAR_LENGTH(s.s_name) AS supplier_name_length,
+        REGEXP_REPLACE(s.s_comment, '[^A-Za-z0-9]', '') AS cleaned_comment,
+        CONCAT('Supplier: ', s.s_name) AS formatted_name
+    FROM 
+        supplier s
+)
+SELECT 
+    sm.p_partkey,
+    sm.name_length,
+    nm.nation_name,
+    nm.comment_length,
+    sup.supplier_name_length,
+    sup.formatted_name
+FROM 
+    string_metrics sm
+JOIN 
+    nation_metrics nm ON sm.p_partkey % 10 = nm.n_nationkey % 10
+JOIN 
+    supplier_metrics sup ON nm.n_nationkey % 5 = sup.s_suppkey % 5
+WHERE 
+    sm.name_length > 20 
+GROUP BY 
+    sm.p_partkey,
+    sm.name_length,
+    nm.nation_name,
+    nm.comment_length,
+    sup.supplier_name_length,
+    sup.formatted_name
+ORDER BY 
+    sm.name_length DESC, 
+    nm.comment_length ASC;

@@ -1,0 +1,60 @@
+WITH FilteredPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Body,
+        p.CreationDate,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate >= '2020-01-01' -- Only questions created in 2020 or later
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.Tags, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        fp.PostId, 
+        fp.Title, 
+        fp.Body, 
+        fp.CreationDate, 
+        fp.Tags, 
+        fp.OwnerDisplayName, 
+        fp.CommentCount, 
+        fp.UpVoteCount, 
+        fp.DownVoteCount,
+        ROW_NUMBER() OVER (ORDER BY fp.UpVoteCount DESC, fp.CommentCount DESC) AS TopPostRank -- Ranking based on upvotes and comments
+    FROM 
+        FilteredPosts fp
+    WHERE 
+        fp.PostRank = 1 -- Get only the latest post per user
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.CreationDate,
+    tp.Tags,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    tp.DownVoteCount
+FROM 
+    TopPosts tp
+WHERE 
+    tp.TopPostRank <= 10 -- Limit to top 10 posts by ranking
+ORDER BY 
+    tp.UpVoteCount DESC, tp.CommentCount DESC; -- Final order by upvotes and comments

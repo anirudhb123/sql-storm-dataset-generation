@@ -1,0 +1,79 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        c.c_birth_year, 
+        1 AS level,
+        NULL AS parent_customer_sk
+    FROM 
+        customer c
+    WHERE 
+        c.c_birth_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        s.ss_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        c.c_birth_year, 
+        sh.level + 1,
+        sh.c_customer_sk
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store_sales s ON sh.c_customer_sk = s.ss_customer_sk
+    JOIN 
+        customer c ON s.ss_customer_sk = c.c_customer_sk
+    WHERE 
+        sh.level < 3 
+),
+date_range AS (
+    SELECT 
+        d.d_date_sk, 
+        d.d_date
+    FROM 
+        date_dim d
+    WHERE 
+        d.d_date BETWEEN '2001-01-01' AND '2001-12-31'
+),
+sales_info AS (
+    SELECT 
+        s.ss_sold_date_sk,
+        s.ss_item_sk,
+        SUM(s.ss_sales_price) AS total_sales,
+        SUM(s.ss_quantity) AS total_quantity,
+        COUNT(DISTINCT s.ss_ticket_number) AS transaction_count
+    FROM 
+        store_sales s
+    JOIN 
+        date_range dr ON s.ss_sold_date_sk = dr.d_date_sk
+    GROUP BY 
+        s.ss_sold_date_sk, s.ss_item_sk
+)
+SELECT 
+    sh.c_first_name,
+    sh.c_last_name, 
+    sh.c_birth_year, 
+    si.ss_sold_date_sk,
+    di.d_date,
+    COALESCE(si.total_sales, 0) AS total_sales,
+    COALESCE(si.total_quantity, 0) AS total_quantity,
+    CASE 
+        WHEN si.transaction_count IS NULL THEN 'No Sales'
+        ELSE CONCAT('Total Transactions: ', si.transaction_count)
+    END AS transaction_summary,
+    CASE 
+        WHEN sh.level = 1 THEN 'New Customer'
+        WHEN sh.level = 2 THEN 'Returning Customer'
+        ELSE 'VIP Customer'
+    END AS customer_type
+FROM 
+    sales_hierarchy sh
+LEFT JOIN 
+    sales_info si ON sh.c_customer_sk = si.ss_customer_sk
+LEFT JOIN 
+    date_range di ON si.ss_sold_date_sk = di.d_date_sk
+ORDER BY 
+    sh.c_last_name, sh.c_first_name;

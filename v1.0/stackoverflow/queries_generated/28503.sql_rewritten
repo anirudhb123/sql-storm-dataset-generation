@@ -1,0 +1,65 @@
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId, 
+        COUNT(DISTINCT t.TagName) AS TagCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+    GROUP BY 
+        p.Id
+), UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(p.Id) AS PostCount, 
+        SUM(p.ViewCount) AS TotalViewCount, 
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id
+), TopUsers AS (
+    SELECT 
+        u.Id, 
+        u.DisplayName, 
+        upc.PostCount, 
+        upc.TotalViewCount, 
+        upc.TotalScore,
+        RANK() OVER (ORDER BY upc.TotalScore DESC) AS ScoreRank
+    FROM 
+        Users u
+    JOIN 
+        UserPostCounts upc ON u.Id = upc.UserId
+    WHERE 
+        u.Reputation > 100
+), PopularPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        pc.TagCount,
+        RANK() OVER (ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    JOIN 
+        PostTagCounts pc ON p.Id = pc.PostId
+    WHERE 
+        p.ViewCount > 1000 AND p.PostTypeId = 1 
+)
+SELECT 
+    tu.DisplayName, 
+    tu.PostCount, 
+    pp.Title AS PopularPostTitle, 
+    pp.ViewRank, 
+    pp.TagCount AS AssociatedTagCount,
+    pp.CreationDate AS PostCreationDate
+FROM 
+    TopUsers tu
+JOIN 
+    PopularPosts pp ON tu.Id = pp.OwnerUserId
+WHERE 
+    tu.ScoreRank <= 10 
+ORDER BY 
+    tu.ScoreRank, pp.ViewRank;

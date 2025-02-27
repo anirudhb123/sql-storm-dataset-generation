@@ -1,0 +1,56 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) + s.total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        SalesCTE s ON o.o_orderkey = s.o_orderkey
+    WHERE 
+        o.o_orderdate < DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    c.c_name,
+    n.n_name AS nation,
+    r.r_name AS region,
+    COALESCE(SUM(s.total_sales), 0) AS total_sales,
+    COUNT(o.o_orderkey) AS order_count,
+    RANK() OVER (ORDER BY COALESCE(SUM(s.total_sales), 0) DESC) AS sales_rank
+FROM 
+    customer c
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    SalesCTE s ON o.o_orderkey = s.o_orderkey
+WHERE 
+    c.c_acctbal > 0 AND 
+    c.c_mktsegment = 'BUILDING' AND
+    (n.n_comment NOT LIKE '%special%' OR n.n_comment IS NULL)
+GROUP BY 
+    c.c_name, n.n_name, r.r_name
+HAVING 
+    COALESCE(SUM(s.total_sales), 0) > 1000
+ORDER BY 
+    sales_rank ASC;

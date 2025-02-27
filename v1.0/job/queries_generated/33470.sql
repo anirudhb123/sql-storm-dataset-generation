@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        t.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link t
+    JOIN 
+        MovieHierarchy mh ON t.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON t.linked_movie_id = m.id
+    WHERE 
+        t.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel') 
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY mh.level DESC) AS movie_level_rank,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT kn.keyword, ', ') AS keyword_list,
+    COALESCE(ci.note, 'No Note') AS role_note
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    MovieHierarchy mh ON at.id = mh.movie_id
+LEFT JOIN 
+    keyword kn ON mk.keyword_id = kn.id
+WHERE 
+    ak.name IS NOT NULL 
+    AND ak.name NOT LIKE '%test%'
+    AND at.production_year >= 2000
+GROUP BY 
+    ak.id, at.title, at.production_year, ci.note
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 0
+ORDER BY 
+    actor_name, movie_level_rank;

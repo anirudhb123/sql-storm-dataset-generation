@@ -1,0 +1,43 @@
+
+WITH RECURSIVE customer_income AS (
+    SELECT cd_demo_sk, cd_gender, cd_marital_status, cd_purchase_estimate,
+           ib_income_band_sk
+    FROM customer_demographics
+    LEFT JOIN household_demographics ON cd_demo_sk = hd_demo_sk
+    LEFT JOIN income_band ON hd_income_band_sk = ib_income_band_sk
+    WHERE cd_purchase_estimate IS NOT NULL
+    UNION ALL
+    SELECT cd_demo_sk, cd_gender, cd_marital_status, cd_purchase_estimate * 1.1, ib_income_band_sk
+    FROM customer_demographics
+    JOIN customer_income ON cd_demo_sk = cd_demo_sk
+    WHERE cd_purchase_estimate < 5000
+),
+sales_summary AS (
+    SELECT ws_bill_cdemo_sk, SUM(ws_ext_sales_price) AS total_sales,
+           COUNT(DISTINCT ws_order_number) AS order_count,
+           CASE 
+               WHEN SUM(ws_ext_sales_price) IS NULL THEN 'No Sales'
+               WHEN SUM(ws_ext_sales_price) < 100 THEN 'Low Sales'
+               ELSE 'High Sales'
+           END AS sales_category
+    FROM web_sales
+    GROUP BY ws_bill_cdemo_sk
+),
+ranked_sales AS (
+    SELECT css.ws_bill_cdemo_sk, css.total_sales, css.order_count, css.sales_category,
+           RANK() OVER (PARTITION BY css.sales_category ORDER BY css.total_sales DESC) AS sales_rank
+    FROM sales_summary css
+)
+SELECT ca.ca_state, ci.cd_gender, ci.cd_marital_status,
+       COALESCE(rs.total_sales, 0) AS total_sales,
+       CASE 
+           WHEN rs.sales_rank IS NULL THEN 'Not Ranked'
+           ELSE CAST(rs.sales_rank AS VARCHAR(10))
+       END AS sales_rank,
+       COALESCE(ci.ib_income_band_sk, -1) AS income_band
+FROM customer_income ci
+FULL OUTER JOIN ranked_sales rs ON ci.cd_demo_sk = rs.ws_bill_cdemo_sk
+JOIN customer_address ca ON ci.cd_demo_sk = ca.ca_address_sk
+WHERE ci.cd_gender IS NOT NULL
+  AND (ci.ib_income_band_sk IS NOT NULL OR ci.ib_income_band_sk NOT IN (1, 2, 3))
+  AND rs.total_sales IS NOT DISTINCT FROM (SELECT AVG(total_sales) FROM sales_summary);

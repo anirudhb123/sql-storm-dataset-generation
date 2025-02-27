@@ -1,0 +1,76 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_amount) AS total_return_amount,
+        COUNT(*) AS total_returns
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        cr.returning_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cd.cd_gender, 'Unknown') AS gender,
+        COALESCE(hd.hd_buy_potential, 'Unknown') AS buy_potential,
+        RANK() OVER (ORDER BY SUM(cr.cr_return_amount) DESC) AS rank
+    FROM 
+        catalog_returns cr
+    JOIN 
+        customer c ON cr.returning_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    GROUP BY 
+        cr.returning_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, hd.hd_buy_potential
+),
+SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(ws.ws_quantity) AS total_quantity,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk
+),
+Return Rates AS (
+    SELECT 
+        s.s_item_sk,
+        COALESCE(SUM(cr.cr_return_quantity), 0) AS total_returned,
+        COALESCE(SUM(cr.cr_return_amount), 0) AS total_return_amount,
+        (COALESCE(SUM(cr.cr_return_quantity), 0) / NULLIF(SUM(sd.total_quantity), 0)) * 100 AS return_rate
+    FROM 
+        SalesData sd
+    LEFT JOIN 
+        catalog_returns cr ON sd.ws_item_sk = cr.cr_item_sk
+    GROUP BY 
+        s.s_item_sk
+)
+SELECT 
+    tc.rank,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.gender,
+    tc.buy_potential,
+    rr.total_returned,
+    rr.total_return_amount,
+    rr.return_rate
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    ReturnRates rr ON tc.returning_customer_sk = rr.s_item_sk
+WHERE 
+    tc.rank <= 10
+ORDER BY 
+    rr.return_rate DESC;

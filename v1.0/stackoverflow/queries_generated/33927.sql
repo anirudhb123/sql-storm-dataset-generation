@@ -1,0 +1,100 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        ROW_NUMBER() OVER (ORDER BY SUM(p.Score) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryWithCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        p.Title,
+        COALESCE(cr.Name, 'Not Closed') AS CloseReason
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Posts p ON ph.PostId = p.Id
+    LEFT JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed and Reopened
+),
+PostVotesSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+RecursiveCTE AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS EditCount,
+        ph.PostId,
+        ROW_NUMBER() OVER (PARTITION BY ph.UserId ORDER BY COUNT(*) DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5) -- Title and Body Edits
+    GROUP BY 
+        ph.UserId, ph.PostId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.ViewCount,
+    RP.AnswerCount,
+    UV.DisplayName AS UserDisplayName,
+    US.TotalScore,
+    US.TotalPosts,
+    Phc.CloseReason,
+    PVS.UpVotes,
+    PVS.DownVotes,
+    RCTE.EditCount
+FROM 
+    RankedPosts RP
+JOIN 
+    Users UV ON RP.AnswerCount > 0 -- Only include posts with answers
+LEFT JOIN 
+    UserScores US ON UV.Id = US.UserId
+LEFT JOIN 
+    PostHistoryWithCloseReasons Phc ON RP.PostId = Phc.PostId
+LEFT JOIN 
+    PostVotesSummary PVS ON RP.PostId = PVS.PostId
+LEFT JOIN 
+    RecursiveCTE RCTE ON UV.Id = RCTE.UserId AND RCTE.rn = 1
+WHERE 
+    RP.rn <= 10 -- Top 10 latest posts for each PostType
+ORDER BY 
+    RP.CreationDate DESC;

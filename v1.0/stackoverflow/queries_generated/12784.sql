@@ -1,0 +1,53 @@
+-- Performance Benchmarking Query for Stack Overflow Schema
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(V.BountyAmount) AS TotalBounty,
+        SUM(U.UpVotes) AS TotalUpVotes,
+        SUM(U.DownVotes) AS TotalDownVotes,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CommentCount,
+        P.CreationDate,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        MAX(V.CreationDate) AS LastVoteDate
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.Score, P.ViewCount, P.CommentCount, P.CreationDate
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.PostCount,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.TotalBounty,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    U.LastPostDate,
+    P.PostId,
+    P.Title,
+    P.Score,
+    P.ViewCount,
+    P.CommentCount,
+    P.CreationDate,
+    P.LastVoteDate
+FROM UserStats U
+JOIN PostStats P ON U.UserId = P.OwnerUserId
+ORDER BY U.PostCount DESC, U.TotalUpVotes DESC;

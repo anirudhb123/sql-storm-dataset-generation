@@ -1,0 +1,79 @@
+
+WITH RankedTitles AS (
+    SELECT
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS title_rank
+    FROM
+        aka_name a
+    JOIN
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE
+        t.production_year IS NOT NULL
+),
+HighRankedActors AS (
+    SELECT
+        actor_name,
+        movie_title,
+        production_year
+    FROM
+        RankedTitles
+    WHERE
+        title_rank <= 5
+),
+FilteredActors AS (
+    SELECT DISTINCT
+        actor_name,
+        COUNT(*) OVER (PARTITION BY actor_name) AS movie_count
+    FROM
+        HighRankedActors
+    WHERE
+        production_year >= 2000
+),
+ComplicatedStatistics AS (
+    SELECT
+        f.actor_name,
+        f.movie_count,
+        COALESCE(MIN(m.note), 'No notes available') AS note_summary,
+        MAX(t.kind_id) AS highest_kind_id
+    FROM
+        FilteredActors f
+    LEFT JOIN
+        cast_info ci ON ci.person_id = (SELECT id FROM aka_name WHERE name = f.actor_name LIMIT 1)
+    LEFT JOIN
+        movie_companies mc ON mc.movie_id = ci.movie_id
+    LEFT JOIN
+        movie_info mi ON mi.movie_id = ci.movie_id
+    LEFT JOIN
+        aka_title t ON t.movie_id = ci.movie_id
+    LEFT JOIN
+        comp_cast_type cct ON cct.id = ci.person_role_id
+    WHERE
+        cct.kind IS NOT NULL AND cct.kind <> ''
+    GROUP BY
+        f.actor_name, f.movie_count
+)
+SELECT
+    ca.actor_name,
+    ca.movie_count,
+    ct.kind AS cast_type,
+    CASE 
+        WHEN ca.movie_count > 10 THEN 'Prolific'
+        WHEN ca.movie_count BETWEEN 5 AND 10 THEN 'Moderate'
+        ELSE 'Rare'
+    END AS actor_category,
+    cs.note_summary,
+    cs.highest_kind_id
+FROM
+    FilteredActors ca
+JOIN
+    ComplicatedStatistics cs ON ca.actor_name = cs.actor_name
+LEFT JOIN
+    comp_cast_type ct ON ct.id = (SELECT ci.person_role_id FROM cast_info ci WHERE ci.person_id = (SELECT id FROM aka_name WHERE name = ca.actor_name LIMIT 1) LIMIT 1)
+WHERE
+    ca.movie_count IS NOT NULL
+ORDER BY
+    ca.movie_count DESC, ca.actor_name;

@@ -1,0 +1,31 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, c.c_nationkey,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rnk
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+),
+TopOrders AS (
+    SELECT ro.o_orderkey, ro.o_orderdate, ro.o_totalprice, ro.c_name, n.n_name AS nation_name
+    FROM RankedOrders ro
+    JOIN nation n ON ro.c_nationkey = n.n_nationkey
+    WHERE ro.rnk <= 5
+),
+SupplierSummary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > 100
+    GROUP BY ps.ps_partkey
+),
+OrderDetails AS (
+    SELECT lo.l_orderkey, SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS revenue
+    FROM lineitem lo
+    GROUP BY lo.l_orderkey
+)
+SELECT to.o_orderkey, to.o_orderdate, to.o_totalprice, to.c_name, to.nation_name,
+       os.total_supply_cost AS supplier_cost, od.revenue as order_revenue
+FROM TopOrders to
+LEFT JOIN SupplierSummary os ON to.o_orderkey = os.ps_partkey
+LEFT JOIN OrderDetails od ON to.o_orderkey = od.l_orderkey
+ORDER BY to.o_orderdate DESC, to.o_totalprice DESC;

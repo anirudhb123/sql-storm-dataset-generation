@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank,
+        DENSE_RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'  -- Consider only recent posts
+),
+UserAggregate AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        SUM(v.Id IS NOT NULL)::int AS VoteCount
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Votes v ON v.PostId = p.Id
+    GROUP BY
+        u.Id
+),
+CloseReasons AS (
+    SELECT
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN cr.Name END) AS CloseReasonName
+    FROM
+        PostHistory ph
+    LEFT JOIN
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    GROUP BY
+        ph.PostId
+)
+SELECT
+    u.Id AS UserId,
+    u.DisplayName,
+    ua.PostCount,
+    ua.TotalBounty,
+    ua.VoteCount,
+    rp.ViewRank,
+    rp.ScoreRank,
+    cr.CloseReasonName,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM
+    Users u
+LEFT JOIN
+    UserAggregate ua ON u.Id = ua.UserId
+LEFT JOIN
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN
+    PostLinks pl ON pl.PostId = rp.PostId
+LEFT JOIN
+    Posts p ON pl.RelatedPostId = p.Id
+LEFT JOIN
+    Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])  -- Assuming Tags are stored comma-separated in the Posts table
+LEFT JOIN
+    CloseReasons cr ON rp.PostId = cr.PostId
+GROUP BY
+    u.Id, u.DisplayName, ua.PostCount, ua.TotalBounty, ua.VoteCount, rp.ViewRank, rp.ScoreRank, cr.CloseReasonName
+HAVING
+    (ua.PostCount > 5 AND ua.TotalBounty > 100) OR
+    (rp.ViewRank < 5 AND cr.CloseReasonName IS NULL)
+ORDER BY
+    ua.TotalBounty DESC, 
+    rp.ScoreRank ASC,
+    u.DisplayName;

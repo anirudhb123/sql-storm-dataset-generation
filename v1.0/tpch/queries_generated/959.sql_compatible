@@ -1,0 +1,70 @@
+
+WITH supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+high_value_customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c.c_acctbal) FROM customer)
+),
+order_details AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        l.l_quantity * l.l_extendedprice * (1 - l.l_discount) AS revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+),
+ranked_orders AS (
+    SELECT 
+        od.o_orderkey,
+        od.o_orderdate,
+        od.revenue,
+        RANK() OVER (PARTITION BY DATE_TRUNC('month', od.o_orderdate) ORDER BY od.revenue DESC) AS monthly_rank
+    FROM 
+        order_details od
+)
+SELECT 
+    ns.n_name AS nation_name,
+    p.p_name AS part_name,
+    ss.total_available,
+    ss.avg_supply_cost,
+    SUM(ro.revenue) AS total_revenue,
+    COUNT(DISTINCT rc.c_custkey) AS high_value_customer_count
+FROM 
+    ranked_orders ro
+LEFT JOIN 
+    lineitem l ON ro.o_orderkey = l.l_orderkey
+INNER JOIN 
+    part p ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    supplier_summary ss ON l.l_suppkey = ss.s_suppkey
+LEFT JOIN 
+    high_value_customers rc ON ro.o_orderkey = rc.c_custkey
+LEFT JOIN 
+    nation ns ON rc.c_nationkey = ns.n_nationkey
+GROUP BY 
+    ns.n_name, p.p_name, ss.total_available, ss.avg_supply_cost
+HAVING 
+    SUM(ro.revenue) > 1000
+ORDER BY 
+    total_revenue DESC, ns.n_name, p.p_name;

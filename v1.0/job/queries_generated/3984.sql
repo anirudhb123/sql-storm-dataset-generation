@@ -1,0 +1,61 @@
+WITH ranked_movies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank_within_year
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+top_movies AS (
+    SELECT 
+        title,
+        production_year,
+        cast_count
+    FROM 
+        ranked_movies
+    WHERE 
+        rank_within_year <= 5
+),
+movie_details AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        STRING_AGG(aka.name, ', ') AS cast_names,
+        STRING_AGG(mk.keyword, ', ') AS keywords,
+        CASE 
+            WHEN EXISTS (
+                SELECT 1 
+                FROM movie_info mi 
+                WHERE mi.movie_id = at.id 
+                AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+            ) THEN 'Yes'
+            ELSE 'No'
+        END AS has_rating
+    FROM 
+        top_movies tm
+    LEFT JOIN 
+        aka_name aka ON aka.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id IN (SELECT id FROM aka_title WHERE title = tm.title AND production_year = tm.production_year))
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id IN (SELECT at.id FROM aka_title at WHERE at.title = tm.title AND at.production_year = tm.production_year)
+    GROUP BY 
+        tm.title, tm.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.cast_names,
+    md.keywords,
+    md.has_rating
+FROM 
+    movie_details md
+WHERE 
+    md.production_year = (SELECT MAX(production_year) FROM top_movies)
+ORDER BY 
+    md.cast_count DESC;

@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypeNames
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, pt.Name, p.Title, p.Tags, p.CreationDate, p.Score, p.ViewCount
+),
+TopScoringPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.PostTypeNames
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS TotalComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    tsa.PostId,
+    tsa.Title,
+    tsa.Tags,
+    tsa.CreationDate,
+    tsa.Score,
+    u.DisplayName AS TopUser,
+    ua.CommentCount,
+    ua.BadgeCount,
+    ua.TotalBounty,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.TotalComments
+FROM 
+    TopScoringPosts tsa
+JOIN 
+    UserActivity ua ON ua.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = tsa.PostId) 
+JOIN 
+    PostStatistics ps ON ps.PostId = tsa.PostId
+ORDER BY 
+    tsa.Score DESC, ua.CommentCount DESC;

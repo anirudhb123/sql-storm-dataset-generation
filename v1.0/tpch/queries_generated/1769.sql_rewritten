@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        r.r_name AS region,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+),
+HighValuePartSuppliers AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        ps.ps_availqty, 
+        ps.ps_supplycost,
+        p.p_name,
+        p.p_container,
+        p.p_retailprice
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(li.l_orderkey) AS line_count,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_price
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        o.o_orderkey
+)
+
+SELECT 
+    rs.s_suppkey,
+    rs.s_name,
+    rs.region,
+    hp.ps_partkey,
+    hp.p_name,
+    hp.p_retailprice,
+    os.line_count,
+    os.total_price
+FROM 
+    RankedSuppliers rs
+LEFT JOIN 
+    HighValuePartSuppliers hp ON rs.s_suppkey = hp.ps_suppkey
+FULL OUTER JOIN 
+    OrderSummary os ON os.o_orderkey = (
+        SELECT MIN(o.o_orderkey)
+        FROM orders o 
+        WHERE o.o_orderkey > (
+            SELECT MAX(o2.o_orderkey) 
+            FROM orders o2 
+            WHERE os.line_count > 5)
+    )
+WHERE 
+    hp.p_retailprice IS NOT NULL
+    OR os.total_price IS NOT NULL
+ORDER BY 
+    rs.region, rs.rank;

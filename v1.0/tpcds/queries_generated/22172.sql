@@ -1,0 +1,79 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk, 
+        ws_sales_price, 
+        ws_quantity, 
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_sales_price DESC) AS rn 
+    FROM 
+        web_sales ws 
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesSummary AS (
+    SELECT 
+        ci.c_customer_id,
+        SUM(CASE WHEN rs.ws_sales_price > 100 THEN rs.ws_quantity ELSE 0 END) AS Total_Expensive_Items,
+        COUNT(*) AS Total_Orders,
+        MAX(rs.ws_sales_price) AS Max_Sale_Price,
+        AVG(rs.ws_sales_price) AS Avg_Sale_Price
+    FROM 
+        CustomerInfo ci
+    JOIN 
+        web_sales w ON ci.c_customer_sk = w.ws_bill_customer_sk
+    JOIN 
+        RankedSales rs ON w.ws_item_sk = rs.ws_item_sk
+    GROUP BY 
+        ci.c_customer_id
+),
+ReturnSummary AS (
+    SELECT 
+        wr.refunded_customer_sk,
+        COUNT(*) as total_returns,
+        SUM(wr_return_amt_inc_tax) AS total_returned_amount
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.refunded_customer_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    COALESCE(ss.Total_Orders, 0) AS Total_Orders,
+    COALESCE(ss.Total_Expensive_Items, 0) AS Total_Expensive_Items,
+    COALESCE(rs.total_returns, 0) AS Total_Returns,
+    COALESCE(rs.total_returned_amount, 0) AS Total_Returned_Amount,
+    CASE 
+        WHEN COALESCE(ss.Avg_Sale_Price, 0) > 0 THEN 'Active' 
+        ELSE 'Inactive' 
+    END AS Customer_Status
+FROM 
+    CustomerInfo ci
+LEFT JOIN 
+    SalesSummary ss ON ci.c_customer_id = ss.c_customer_id
+LEFT JOIN 
+    ReturnSummary rs ON ci.c_customer_sk = rs.refunded_customer_sk
+WHERE 
+    ci.cd_purchase_estimate IS NOT NULL
+AND 
+    NOT EXISTS (
+        SELECT 1 
+        FROM store_returns sr 
+        WHERE sr.s_returned_date_sk IS NOT NULL 
+        AND sr.sr_customer_sk = ci.c_customer_sk 
+        HAVING SUM(sr.return_quantity) > 5
+    );

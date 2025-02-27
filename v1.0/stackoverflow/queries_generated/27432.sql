@@ -1,0 +1,66 @@
+WITH UserPostStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 3 THEN 1 ELSE 0 END) AS WikiCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        QuestionCount,
+        AnswerCount,
+        WikiCount,
+        TotalViews,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM 
+        UserPostStatistics
+),
+UserBadges AS (
+    SELECT 
+        ub.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users ub
+    LEFT JOIN 
+        Badges b ON ub.Id = b.UserId
+    GROUP BY 
+        ub.UserId
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.QuestionCount,
+    tu.AnswerCount,
+    tu.WikiCount,
+    tu.TotalViews,
+    tu.TotalScore,
+    ub.TotalBadges,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    tu.ScoreRank
+FROM 
+    TopUsers tu
+JOIN 
+    UserBadges ub ON tu.UserId = ub.UserId
+WHERE 
+    tu.ScoreRank <= 10
+ORDER BY 
+    tu.ScoreRank;

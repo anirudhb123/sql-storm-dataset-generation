@@ -1,0 +1,54 @@
+WITH MovieInfo AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        GROUP_CONCAT(DISTINCT cn.name SEPARATOR ', ') AS company_names,
+        GROUP_CONCAT(DISTINCT kw.keyword SEPARATOR ', ') AS keywords,
+        GROUP_CONCAT(DISTINCT pi.info SEPARATOR '; ') AS person_info
+    FROM aka_title mt
+    INNER JOIN movie_companies mc ON mt.id = mc.movie_id
+    INNER JOIN company_name cn ON mc.company_id = cn.id
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN person_info pi ON cc.subject_id = pi.person_id
+    WHERE mt.production_year >= 2000
+    GROUP BY mt.id
+),
+ActorInfo AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        GROUP_CONCAT(DISTINCT mt.title ORDER BY mt.production_year SEPARATOR ', ') AS movies
+    FROM aka_name ak
+    LEFT JOIN cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN aka_title mt ON ci.movie_id = mt.id
+    GROUP BY ak.id
+),
+Summary AS (
+    SELECT 
+        mi.movie_id,
+        mi.title,
+        mi.production_year,
+        ai.actor_id,
+        ai.name AS actor_name,
+        ai.movie_count,
+        ai.movies,
+        mi.company_names,
+        mi.keywords,
+        mi.person_info
+    FROM MovieInfo mi
+    JOIN ActorInfo ai ON mi.movie_id IN (SELECT ci.movie_id FROM cast_info ci WHERE ci.person_id = ai.actor_id)
+)
+SELECT 
+    title,
+    production_year,
+    actor_name,
+    movie_count,
+    company_names,
+    keywords,
+    person_info
+FROM Summary
+ORDER BY production_year DESC, title ASC;

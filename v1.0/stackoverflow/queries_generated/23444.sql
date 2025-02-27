@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AnswerCount,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounties,
+        COUNT(DISTINCT p.Id) AS PostsCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  -- BountyStart and BountyClose
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+BadgesWithPosts AS (
+    SELECT 
+        b.UserId,
+        b.Name AS BadgeName,
+        COUNT(DISTINCT b.Date) AS BadgeCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Badges b
+    INNER JOIN 
+        Posts p ON b.UserId = p.OwnerUserId
+    GROUP BY 
+        b.UserId, b.Name
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+FinalMetrics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.AnswerCount,
+        rp.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        tup.TotalBounties,
+        tup.PostsCount,
+        bwp.BadgeName,
+        bwp.BadgeCount,
+        cp.CloseCount,
+        cp.LastClosedDate
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.PostId = u.Id
+    LEFT JOIN 
+        TopUsers tup ON u.Id = tup.UserId 
+    LEFT JOIN 
+        BadgesWithPosts bwp ON u.Id = bwp.UserId
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+)
+SELECT 
+    DISTINCT f.Title, 
+    f.OwnerDisplayName,
+    f.TotalBounties,
+    COALESCE(f.BadgeName, 'No Badge') AS BadgeName,
+    f.BadgeCount,
+    f.CloseCount,
+    COALESCE(f.LastClosedDate::DATE, '9999-12-31') AS LastClosedDate
+FROM 
+    FinalMetrics f
+WHERE 
+    f.AnswerCount > 0 OR f.TotalBounties IS NOT NULL
+ORDER BY 
+    f.AnswerCount DESC, 
+    f.TotalBounties DESC;
+

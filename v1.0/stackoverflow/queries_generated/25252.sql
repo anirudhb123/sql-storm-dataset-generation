@@ -1,0 +1,60 @@
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM Tags
+    JOIN Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::int[])
+    GROUP BY Tags.TagName
+),
+UserReputation AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        SUM(COALESCE(Votes.VoteTypeId = 2, 0)) AS UpVotes,
+        SUM(COALESCE(Votes.VoteTypeId = 3, 0)) AS DownVotes,
+        SUM(Badges.Class = 1) AS GoldBadges, 
+        SUM(Badges.Class = 2) AS SilverBadges,
+        SUM(Badges.Class = 3) AS BronzeBadges
+    FROM Users
+    LEFT JOIN Votes ON Users.Id = Votes.UserId
+    LEFT JOIN Badges ON Users.Id = Badges.UserId
+    GROUP BY Users.Id
+),
+PostSummary AS (
+    SELECT 
+        Posts.Id,
+        Posts.Title,
+        Posts.Body,
+        Posts.Score,
+        COALESCE(PostHistory.UserId, -1) AS LastEditorId,
+        COALESCE(PostHistory.LastEditDate, Posts.CreationDate) AS LastEditDate,
+        (SELECT COUNT(*) FROM Comments WHERE Comments.PostId = Posts.Id) AS CommentCount
+    FROM Posts
+    LEFT JOIN PostHistory ON PostHistory.PostId = Posts.Id AND PostHistory.CreationDate = (
+        SELECT MAX(CreationDate) FROM PostHistory WHERE PostId = Posts.Id
+    )
+)
+SELECT 
+    Tags.TagName,
+    TagStats.PostCount,
+    TagStats.QuestionCount,
+    TagStats.AnswerCount,
+    Users.DisplayName,
+    UserReputation.UpVotes,
+    UserReputation.DownVotes,
+    UserReputation.GoldBadges,
+    UserReputation.SilverBadges,
+    UserReputation.BronzeBadges,
+    Posts.Title AS PostTitle,
+    Posts.Score AS PostScore,
+    Posts.CommentCount,
+    Posts.LastEditDate 
+FROM TagStats
+JOIN PostLinks ON TagStats.TagName = (SELECT TagName FROM Tags WHERE Id = PostLinks.RelatedPostId)
+JOIN PostSummary AS Posts ON PostLinks.PostId = Posts.Id
+JOIN UserReputation ON Posts.LastEditorId = UserReputation.UserId
+JOIN Users ON UserReputation.UserId = Users.Id
+WHERE UserReputation.Reputation > 1000
+ORDER BY TagStats.PostCount DESC, UserReputation.UpVotes DESC;

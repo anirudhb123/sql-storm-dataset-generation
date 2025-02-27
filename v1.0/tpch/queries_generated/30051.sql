@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+
+OrderStatistics AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY o.o_orderkey
+),
+
+RegionNation AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name, n.n_name
+)
+
+SELECT 
+    CONCAT('Order #', o.o_orderkey, ' - Total Revenue: $', ROUND(os.total_revenue, 2)) AS order_summary,
+    rh.region_name,
+    rh.nation_name,
+    sh.s_name AS supplier_name,
+    sh.level
+FROM OrderStatistics os
+JOIN orders o ON os.o_orderkey = o.o_orderkey
+CROSS JOIN RegionNation rh
+LEFT JOIN SupplierHierarchy sh ON sh.level = 2 AND sh.s_nationkey = rh.nation_name
+WHERE os.unique_suppliers > 3 
+AND o.o_orderstatus IN ('O', 'F')
+ORDER BY os.total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

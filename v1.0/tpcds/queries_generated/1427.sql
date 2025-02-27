@@ -1,0 +1,52 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year DESC) AS rn
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+CustomerAddresses AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        COUNT(DISTINCT ca.ca_address_sk) OVER (PARTITION BY ca.ca_state) AS city_count
+    FROM customer_address ca
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY ws.ws_item_sk
+)
+SELECT 
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.cd_gender,
+    ca.ca_city,
+    ca.ca_state,
+    ca.ca_country,
+    sd.total_sold,
+    sd.total_net_profit,
+    CASE 
+        WHEN sd.total_net_profit IS NULL THEN 'No Profit'
+        WHEN sd.total_net_profit > 1000 THEN 'High Profit'
+        ELSE 'Regular Profit'
+    END AS profit_category
+FROM RankedCustomers rc
+LEFT JOIN CustomerAddresses ca ON rc.c_customer_sk = ca.ca_address_sk
+LEFT JOIN SalesData sd ON rc.c_customer_sk = sd.ws_item_sk
+WHERE rc.rn = 1
+AND (rc.cd_marital_status = 'M' OR rc.cd_credit_rating = 'Good')
+ORDER BY sd.total_net_profit DESC
+LIMIT 50;

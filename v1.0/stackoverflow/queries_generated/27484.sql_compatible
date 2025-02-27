@@ -1,0 +1,58 @@
+
+WITH ProcessedTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+),
+TagAggregates AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS TagCount,
+        MIN(CreationDate) AS FirstUsed,
+        MAX(CreationDate) AS LastUsed
+    FROM ProcessedTags
+    GROUP BY TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        TagCount,
+        FirstUsed,
+        LastUsed,
+        ROW_NUMBER() OVER (ORDER BY TagCount DESC) AS TagRank
+    FROM TagAggregates
+),
+TopTagPosts AS (
+    SELECT 
+        t.TagName,
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS Author,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        t.TagRank
+    FROM ProcessedTags t
+    JOIN Posts p ON t.PostId = p.Id
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE t.TagName IN (SELECT TagName FROM TopTags WHERE TagRank <= 10)  
+)
+SELECT 
+    tt.TagName,
+    COUNT(tp.PostId) AS PostCount,
+    AVG(tp.ViewCount) AS AvgViewCount,
+    AVG(tp.Score) AS AvgScore,
+    JSON_AGG(JSON_BUILD_OBJECT(
+        'PostId', tp.PostId,
+        'Title', tp.Title,
+        'Author', tp.Author,
+        'CreationDate', tp.CreationDate
+    )) AS PostsDetails
+FROM TopTags tt
+LEFT JOIN TopTagPosts tp ON tt.TagName = tp.TagName
+GROUP BY tt.TagName
+ORDER BY PostCount DESC;

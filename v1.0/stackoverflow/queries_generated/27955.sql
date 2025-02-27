@@ -1,0 +1,75 @@
+WITH TagCounts AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        PostId
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Questions only
+),
+TagStatistics AS (
+    SELECT 
+        Tag, 
+        COUNT(*) AS PostCount,
+        AVG(ViewCount) AS AverageViewCount,
+        AVG(AnswerCount) AS AverageAnswerCount,
+        AVG(CommentCount) AS AverageCommentCount
+    FROM 
+        TagCounts
+    JOIN
+        Posts ON TagCounts.PostId = Posts.Id
+    GROUP BY 
+        Tag
+),
+UserEngagement AS (
+    SELECT 
+        UserId,
+        COUNT(DISTINCT PostId) AS PostsCreated,
+        SUM(VoteTypeId IN (2)) AS UpVotes,
+        SUM(VoteTypeId IN (3)) AS DownVotes
+    FROM 
+        Votes
+    JOIN 
+        Posts ON Votes.PostId = Posts.Id
+    GROUP BY 
+        UserId
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        AverageViewCount,
+        AverageAnswerCount,
+        AverageCommentCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStatistics
+)
+
+SELECT 
+    t.Tag,
+    t.PostCount,
+    t.AverageViewCount,
+    t.AverageAnswerCount,
+    t.AverageCommentCount,
+    u.DisplayName,
+    u.Reputation,
+    e.PostsCreated,
+    e.UpVotes,
+    e.DownVotes
+FROM 
+    TopTags t
+JOIN 
+    Users u ON EXISTS (
+        SELECT 1 
+        FROM Posts p
+        JOIN UserEngagement e ON p.OwnerUserId = e.UserId
+        WHERE p.PostTypeId = 1 AND t.Tag = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))
+    )
+JOIN 
+    UserEngagement e ON u.Id = e.UserId
+WHERE 
+    t.TagRank <= 10
+ORDER BY 
+    t.PostCount DESC, 
+    e.UpVotes DESC;

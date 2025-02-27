@@ -1,0 +1,101 @@
+WITH RecursivePostCTE AS (
+    -- Recursive CTE to find all answers related to questions
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2  -- Answers
+),
+UserBadges AS (
+    -- CTE to aggregate badges by user and badge class
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserPostStats AS (
+    -- CTE to summarize user contributions to questions and answers
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionsCount,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswersCount,
+        COALESCE(SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END), 0) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostVoteAggregates AS (
+    -- CTE to aggregate votes on posts
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+-- Main query to combine all the data
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.QuestionsCount,
+    u.AnswersCount,
+    u.TotalViews,
+    COALESCE(b.BadgeCount, 0) AS TotalBadges,
+    COALESCE(b.GoldCount, 0) AS GoldBadges,
+    COALESCE(b.SilverCount, 0) AS SilverBadges,
+    COALESCE(b.BronzeCount, 0) AS BronzeBadges,
+    pp.PostId,
+    pp.Title AS PostTitle,
+    pp.UpVotes,
+    pp.DownVotes,
+    pp.Score,
+    pp.CreationDate AS PostCreationDate,
+    MAX(rp.Level) AS MaxAnswerHierarchyLevel
+FROM 
+    UserPostStats u
+LEFT JOIN 
+    UserBadges b ON u.UserId = b.UserId
+LEFT JOIN 
+    Posts p ON u.UserId = p.OwnerUserId
+LEFT JOIN 
+    PostVoteAggregates pp ON p.Id = pp.PostId
+LEFT JOIN 
+    RecursivePostCTE rp ON p.Id = rp.PostId
+GROUP BY 
+    u.UserId, u.DisplayName, u.QuestionsCount, u.AnswersCount, u.TotalViews, b.BadgeCount, b.GoldCount, b.SilverCount, b.BronzeCount, pp.PostId, pp.Title, pp.UpVotes, pp.DownVotes, pp.Score, pp.CreationDate
+HAVING 
+    COALESCE(b.BadgeCount, 0) + u.QuestionsCount + u.AnswersCount > 5  -- Filter for engaged users
+ORDER BY 
+    u.TotalViews DESC, u.DisplayName;

@@ -1,0 +1,72 @@
+WITH RecursiveMovieInfo AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(
+            (
+                SELECT STRING_AGG(DISTINCT r.role ORDER BY r.role) 
+                FROM role_type r 
+                JOIN cast_info c ON r.id = c.role_id 
+                WHERE c.movie_id = mt.id
+            ), 'No roles assigned') AS roles,
+        mci.company_name,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS rn
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mci ON mt.id = mci.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL AND mt.production_year > 2000
+),
+
+AggregatedInfo AS (
+    SELECT 
+        rmi.movie_id,
+        rmi.title,
+        rmi.production_year,
+        rmi.roles,
+        COUNT(mci.company_id) AS company_count,
+        CASE 
+            WHEN COUNT(DISTINCT mci.company_id) = 0 THEN 'No Companies'
+            WHEN COUNT(DISTINCT mci.company_id) < 3 THEN 'Few Companies'
+            ELSE 'Many Companies' 
+        END AS company_status
+    FROM 
+        RecursiveMovieInfo rmi
+    LEFT JOIN 
+        movie_companies mci ON rmi.movie_id = mci.movie_id
+    GROUP BY 
+        rmi.movie_id, rmi.title, rmi.production_year, rmi.roles
+)
+
+SELECT 
+    ai.movie_id,
+    ai.title,
+    ai.production_year,
+    ai.roles,
+    ai.company_count,
+    ai.company_status,
+    (
+        SELECT STRING_AGG(DISTINCT k.keyword, ', ')
+        FROM movie_keyword mk 
+        JOIN keyword k ON mk.keyword_id = k.id 
+        WHERE mk.movie_id = ai.movie_id
+    ) AS keywords,
+    (
+        SELECT 
+            AVG(CASE WHEN COALESCE(ml.linked_movie_id, 0) > 0 THEN 1 ELSE NULL END)
+            FROM movie_link ml 
+            WHERE ml.movie_id = ai.movie_id
+    ) AS average_links,
+    CASE 
+        WHEN ai.company_status = 'Few Companies' THEN 'Explore further for collaboration opportunities.'
+        WHEN ai.company_count IS NULL THEN 'No data available on companies.'
+        ELSE 'Rich company involvement.'
+    END AS recommendation
+FROM 
+    AggregatedInfo ai
+WHERE 
+    ai.company_count > 1
+ORDER BY 
+    ai.production_year DESC, ai.title;

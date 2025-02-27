@@ -1,0 +1,54 @@
+WITH RECURSIVE RelatedSuppliers AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+    FROM supplier s
+    JOIN RelatedSuppliers rs ON s.s_nationkey = rs.s_nationkey
+    WHERE s.suppkey <> rs.s_suppkey
+),
+CostliestParts AS (
+    SELECT p.p_partkey, p.p_name, MAX(ps.ps_supplycost) AS max_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey
+),
+HighSpendingCustomers AS (
+    SELECT c.c_custkey, cs.total_spent
+    FROM customer c
+    JOIN CustomerOrders cs ON c.c_custkey = cs.c_custkey
+    WHERE cs.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+),
+PartSupplierCount AS (
+    SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    p.p_partkey,
+    COALESCE(MAX(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice END), 0) AS return_sales,
+    COALESCE(MAX(CASE WHEN l.l_returnflag = 'N' THEN l.l_extendedprice END), 0) AS normal_sales,
+    t.total_spent,
+    COUNT(DISTINCT rs.s_suppkey) AS related_supplier_count,
+    CASE 
+        WHEN p.p_retailprice < 0 THEN 'Negative Price' 
+        ELSE 'Normal Price' 
+    END AS price_status,
+    COALESCE(pc.supplier_count, 0) AS supplier_count
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN HighSpendingCustomers t ON EXISTS (SELECT 1 FROM orders o WHERE o.o_custkey = t.c_custkey AND o.o_totalprice > 1000)
+JOIN RelatedSuppliers rs ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_acctbal > 1000))
+LEFT JOIN PartSupplierCount pc ON p.p_partkey = pc.ps_partkey
+GROUP BY p.p_partkey, p.p_name, t.total_spent
+HAVING COUNT(DISTINCT l.l_orderkey) > 5
+ORDER BY return_sales DESC, normal_sales ASC, p.p_name;

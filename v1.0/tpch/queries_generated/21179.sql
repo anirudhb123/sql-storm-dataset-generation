@@ -1,0 +1,41 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s1.s_acctbal) 
+        FROM supplier s1 
+        WHERE s1.s_nationkey = s.s_nationkey
+    )
+),
+AggLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(*) AS item_count
+    FROM lineitem l
+    WHERE l.l_shipmode IN ('AIR', 'TRUCK')
+      AND l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    INNER JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+      AND o.o_totalprice > (SELECT AVG(o1.o_totalprice) FROM orders o1 WHERE o1.o_orderstatus = 'O')
+),
+NationRegion AS (
+    SELECT n.n_name, r.r_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n 
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name, r.r_name
+)
+SELECT co.c_name, co.o_orderdate, COALESCE(rl.total_revenue, 0) AS revenue, 
+       ns.supplier_count, rs.s_name, rs.s_acctbal
+FROM CustomerOrders co
+LEFT JOIN AggLineItems rl ON co.o_orderkey = rl.l_orderkey
+LEFT JOIN RankedSuppliers rs ON co.o_custkey = rs.s_suppkey
+JOIN NationRegion ns ON ns.n_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = co.c_nationkey)
+WHERE rs.rank_acctbal <= 5 AND ns.supplier_count > 10
+ORDER BY co.o_orderdate DESC, revenue DESC
+FETCH FIRST 100 ROWS ONLY;

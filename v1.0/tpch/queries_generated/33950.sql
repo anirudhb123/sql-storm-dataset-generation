@@ -1,0 +1,54 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_orderstatus, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_orderstatus, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey AND o.o_orderdate > oh.o_orderdate
+),
+RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerBalance AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 1000
+)
+SELECT 
+    oh.o_orderkey,
+    oh.o_orderdate,
+    cp.c_name AS customer_name,
+    rp.p_name AS part_name,
+    rp.p_retailprice,
+    si.s_name AS supplier_name,
+    si.total_supply_cost,
+    cb.total_order_value,
+    CASE 
+        WHEN cb.total_order_value > 2000 THEN 'High Value Customer' 
+        ELSE 'Regular Customer' 
+    END AS customer_segment,
+    ROW_NUMBER() OVER (PARTITION BY cb.c_custkey ORDER BY oh.o_orderdate DESC) AS recent_order_rank
+FROM OrderHierarchy oh
+JOIN RankedParts rp ON rp.price_rank <= 3
+JOIN SupplierInfo si ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = si.s_suppkey)
+JOIN CustomerBalance cb ON oh.o_custkey = cb.c_custkey
+LEFT JOIN nation n ON cb.c_nationkey = n.n_nationkey
+WHERE n.n_regionkey IS NOT NULL
+ORDER BY oh.o_orderdate DESC, cb.total_order_value DESC;

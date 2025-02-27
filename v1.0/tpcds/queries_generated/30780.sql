@@ -1,0 +1,54 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs.c_demo_sk,
+        cs.cs_order_number,
+        cs.cs_sales_price,
+        1 AS level,
+        CAST(cs.cs_order_number AS CHAR(36)) AS path
+    FROM 
+        catalog_sales cs
+    WHERE 
+        cs.cs_sales_price > (SELECT AVG(cs_ext_sales_price) FROM catalog_sales)
+    
+    UNION ALL
+    
+    SELECT 
+        cs.c_demo_sk,
+        cs.cs_order_number,
+        cs.cs_sales_price,
+        sh.level + 1,
+        CONCAT(sh.path, ' -> ', cs.cs_order_number)
+    FROM 
+        catalog_sales cs
+    JOIN 
+        sales_hierarchy sh ON cs.c_demo_sk = sh.c_demo_sk
+    WHERE 
+        sh.level < 5
+)
+
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT cs.c_demo_sk) AS total_customers,
+    SUM(cs.cs_sales_price) AS total_sales,
+    MAX(cs.cs_sales_price) AS max_sale,
+    AVG(cs.cs_sales_price) AS avg_sale
+FROM 
+    sales_hierarchy sh
+JOIN 
+    customer_demographics cs ON sh.c_demo_sk = cs.cd_demo_sk
+JOIN 
+    customer_address ca ON cs.c_demo_sk = ca.ca_address_sk
+WHERE 
+    cs.cd_gender = 'M'
+    AND cs.cd_marital_status = 'S'
+    AND cs.cd_purchase_estimate > 500
+GROUP BY 
+    ca.ca_city, ca.ca_state
+HAVING 
+    SUM(cs.cs_sales_price) > 10000
+ORDER BY 
+    total_sales DESC
+LIMIT 10
+```

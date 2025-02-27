@@ -1,0 +1,53 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 1 AS level
+    FROM nation n
+    WHERE n.n_name LIKE 'A%'
+    
+    UNION ALL
+    
+    SELECT nh.n_nationkey, n.n_name, n.n_regionkey, level + 1
+    FROM nation_hierarchy nh
+    JOIN nation n ON nh.n_regionkey = n.n_regionkey
+    WHERE n.n_name LIKE 'B%' AND nh.level < 3
+), part_stats AS (
+    SELECT p.p_partkey, COUNT(ps.ps_suppkey) AS supplier_count,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem l ON ps.ps_suppkey = l.l_suppkey
+    GROUP BY p.p_partkey
+), high_value_orders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+), supplier_performance AS (
+    SELECT s.s_suppkey, s.s_name, SUM(l.l_quantity) AS total_quantity
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey, s.s_name
+), ranked_suppliers AS (
+    SELECT s.*, RANK() OVER (ORDER BY total_quantity DESC) AS supplier_rank
+    FROM supplier_performance s
+)
+SELECT c.c_name, COALESCE(p.p_name, 'Unknown Part') AS part_name, 
+       n.n_name AS nation_name, 
+       nh.level AS hierarchy_level,
+       r.supplier_rank, 
+       r.total_quantity,
+       CASE WHEN r.total_quantity IS NULL THEN 'No Suppliers' 
+            ELSE 'Active Supplier' END AS supplier_status
+FROM customer c
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN part_stats p ON l.l_partkey = p.p_partkey
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN nation_hierarchy nh ON n.n_nationkey = nh.n_nationkey
+LEFT JOIN ranked_suppliers r ON r.s_suppkey = l.l_suppkey
+WHERE c.c_acctbal > 500 AND (n.r_name IS NOT NULL OR r.supplier_rank < 5)
+ORDER BY c.c_name, supplier_rank ASC, total_quantity DESC
+LIMIT 10
+OFFSET (SELECT COUNT(*) FROM customer) / 2;

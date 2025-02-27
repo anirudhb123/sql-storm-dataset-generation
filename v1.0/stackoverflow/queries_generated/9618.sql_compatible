@@ -1,0 +1,84 @@
+
+WITH RankedTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY COUNT(p.Id) DESC) AS Rank
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::text[])
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        t.TagName
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentsMade,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC, p.CreationDate DESC) AS PopularityRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+)
+
+SELECT 
+    rt.TagName,
+    rt.PostCount,
+    rt.QuestionCount,
+    rt.AnswerCount,
+    rt.UpVotes AS TagUpVotes,
+    rt.DownVotes AS TagDownVotes,
+    ue.UserId,
+    ue.QuestionsAsked,
+    ue.AnswersGiven,
+    ue.CommentsMade,
+    ue.UpVotesReceived AS UserUpVotesReceived,
+    ue.DownVotesReceived AS UserDownVotesReceived,
+    pp.PostId,
+    pp.Title AS PopularPostTitle,
+    pp.ViewCount AS PopularPostViewCount,
+    pp.CreationDate AS PopularPostCreationDate,
+    pp.Score AS PopularPostScore,
+    pp.AnswerCount AS PopularPostAnswerCount,
+    pp.CommentCount AS PopularPostCommentCount
+FROM 
+    RankedTags rt
+JOIN 
+    UserEngagement ue ON rt.Rank = ue.UserId % 100 
+JOIN 
+    PopularPosts pp ON rt.PostCount > 10 AND pp.PopularityRank <= 10 
+WHERE 
+    rt.Rank <= 20
+ORDER BY 
+    rt.PostCount DESC, ue.QuestionsAsked DESC, pp.ViewCount DESC;

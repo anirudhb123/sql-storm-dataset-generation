@@ -1,0 +1,68 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        ROW_NUMBER() OVER (PARTITION BY YEAR(o.o_orderdate) ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2022-01-01'
+),
+
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_availqty > 0
+    GROUP BY 
+        ps.ps_partkey
+),
+
+CustomerInfo AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        n.n_name AS nation_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, n.n_name
+)
+
+SELECT 
+    p.p_name, 
+    p.p_retailprice, 
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity_sold, 
+    COALESCE(SUM(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * (1 - l.l_discount) END), 0) AS total_discounted_sales,
+    c.c_name AS customer_name,
+    r.r_name AS region_name,
+    RANK() OVER (PARTITION BY p.p_partkey ORDER BY COALESCE(SUM(l.l_quantity), 0) DESC) AS sales_rank
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    CustomerInfo c ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    nation n ON c.nation_name = n.n_name
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_retailprice > 0
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_retailprice, c.c_name, r.r_name
+HAVING 
+    total_quantity_sold > 10 OR customer_name IS NOT NULL
+ORDER BY 
+    sales_rank, total_discounted_sales DESC;

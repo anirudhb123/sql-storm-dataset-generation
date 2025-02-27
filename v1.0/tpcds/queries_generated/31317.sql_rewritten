@@ -1,0 +1,59 @@
+WITH RECURSIVE sales_cte AS (
+    SELECT
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk >= 2451545 
+    GROUP BY ws_bill_customer_sk
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state
+    FROM customer AS c
+    JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+sales_summary AS (
+    SELECT
+        ci.customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        COALESCE(s.total_sales, 0) AS total_sales,
+        COALESCE(s.order_count, 0) AS order_count
+    FROM customer_info AS ci
+    LEFT JOIN sales_cte AS s ON ci.customer_sk = s.customer_sk
+)
+SELECT
+    s.customer_sk,
+    s.c_first_name,
+    s.c_last_name,
+    s.cd_gender,
+    s.cd_marital_status,
+    s.total_sales,
+    s.order_count,
+    CASE 
+        WHEN s.total_sales > 1000 THEN 'High Value'
+        WHEN s.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value,
+    (SELECT COUNT(DISTINCT ws_item_sk) 
+     FROM web_sales 
+     WHERE ws_bill_customer_sk = s.customer_sk) AS unique_items_bought,
+    (SELECT MAX(ws_sales_price)
+     FROM web_sales 
+     WHERE ws_bill_customer_sk = s.customer_sk) AS max_purchase_price
+FROM sales_summary AS s
+ORDER BY total_sales DESC, c_last_name ASC
+LIMIT 100
+OFFSET 0;

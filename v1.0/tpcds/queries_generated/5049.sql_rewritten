@@ -1,0 +1,52 @@
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+SalesByDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        AVG(cs.total_sales) AS avg_sales,
+        AVG(cs.order_count) AS avg_order_count
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer_demographics cd ON cs.c_customer_id = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+),
+SalesByDate AS (
+    SELECT 
+        dd.d_year,
+        dd.d_month_seq,
+        SUM(ws.ws_net_paid) AS monthly_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY 
+        dd.d_year, dd.d_month_seq
+)
+SELECT 
+    bd.cd_gender,
+    bd.cd_marital_status,
+    sd.d_year,
+    sd.d_month_seq,
+    MAX(sd.monthly_sales) AS peak_monthly_sales,
+    AVG(bd.avg_sales) AS avg_sales_per_demo
+FROM 
+    SalesByDemographics bd
+JOIN 
+    SalesByDate sd ON bd.cd_gender = 'F' 
+GROUP BY 
+    bd.cd_gender, bd.cd_marital_status, sd.d_year, sd.d_month_seq
+ORDER BY 
+    sd.d_year, sd.d_month_seq;

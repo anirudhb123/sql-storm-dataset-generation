@@ -1,0 +1,111 @@
+WITH RECURSIVE RelatedPosts AS (
+    SELECT
+        pl.PostId,
+        pl.RelatedPostId,
+        lt.Name AS LinkTypeName,
+        1 AS Level
+    FROM
+        PostLinks pl
+    JOIN
+        LinkTypes lt ON pl.LinkTypeId = lt.Id
+    WHERE
+        pl.PostId IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        rp.PostId,
+        pl.RelatedPostId,
+        lt.Name AS LinkTypeName,
+        rp.Level + 1
+    FROM
+        RelatedPosts rp
+    JOIN
+        PostLinks pl ON rp.RelatedPostId = pl.PostId
+    JOIN
+        LinkTypes lt ON pl.LinkTypeId = lt.Id
+    WHERE
+        rp.Level < 5 
+),
+UserReputationRanks AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        DENSE_RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+PostWithComments AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        MAX(p.LastActivityDate) AS LastActivity
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    WHERE
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY
+        p.Id
+),
+RankedPosts AS (
+    SELECT 
+        pwc.PostId,
+        pwc.Title,
+        pwc.CommentCount,
+        pwc.TotalBounty,
+        CASE 
+            WHEN pwc.CommentCount > 10 THEN 'Highly Discussed'
+            WHEN pwc.CommentCount BETWEEN 5 AND 10 THEN 'Moderately Discussed'
+            ELSE 'Less Discussed'
+        END AS DiscussionCategory,
+        RANK() OVER (ORDER BY pwc.TotalBounty DESC) AS BountyRank
+    FROM 
+        PostWithComments pwc
+),
+PostHistoryData AS (
+    SELECT
+        ph.PostId,
+        pht.Name AS PostHistoryType,
+        COUNT(*) AS ChangesCount,
+        MIN(ph.CreationDate) AS FirstChangeDate,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM
+        PostHistory ph
+    JOIN
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY
+        ph.PostId, pht.Name
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    up.ReputationRank,
+    rp.PostId,
+    rp.Title,
+    rp.CommentCount,
+    rp.TotalBounty,
+    rp.DiscussionCategory,
+    rp.BountyRank,
+    phd.ChangesCount,
+    phd.FirstChangeDate,
+    phd.LastChangeDate,
+    COALESCE(pw.PostId, 'No Related Posts') AS RelatedPostId
+FROM 
+    UserReputationRanks up
+JOIN 
+    RankedPosts rp ON up.Id = rp.PostId
+LEFT JOIN 
+    PostHistoryData phd ON rp.PostId = phd.PostId
+LEFT JOIN 
+    RelatedPosts pw ON rp.PostId = pw.PostId
+WHERE 
+    up.ReputationRank <= 50 
+ORDER BY 
+    up.Reputation DESC, rp.BountyRank;

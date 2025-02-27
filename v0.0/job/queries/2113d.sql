@@ -1,0 +1,4 @@
+SELECT min(mc.note) AS production_note, min(t.title) AS movie_title, min(t.production_year) AS movie_year
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info_idx AS mi_idx, title AS t
+WHERE ct.id = mc.company_type_id AND t.id = mc.movie_id AND t.id = mi_idx.movie_id AND mc.movie_id = mi_idx.movie_id AND it.id = mi_idx.info_type_id
+AND mc.note IN ('(1933) (USA) (theatrical) (as Paramount Productions, Inc.)', '(1945) (USA) (all media) (non-theatrical)', '(1966-1996) (USA) (TV) (original syndication release)', '(2002) (Ireland) (theatrical) (film festival)', '(2004) (worldwide) (all media) (31 episodes)', '(2004-????) (worldwide) (all media) (3-D version)', '(2007) (Finland) (TV) (broadcast premiere)', '(2008) (USA) (DVD) (Included in "The Complete Inspector Lynley Mysteries")', '(in association with Iconomy, LLC)', '(presents) (as A Cabbage Film)');

@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank
+    FROM web_sales
+),
+InventoryStatus AS (
+    SELECT
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_inventory,
+        CASE
+            WHEN SUM(inv_quantity_on_hand) = 0 THEN 'Out of Stock'
+            ELSE 'In Stock'
+        END AS inventory_status
+    FROM inventory
+    GROUP BY inv_item_sk
+),
+CustomerDetails AS (
+    SELECT
+        c_customer_sk,
+        COALESCE(c_first_name, 'Unknown') AS first_name,
+        COALESCE(c_last_name, 'Unknown') AS last_name,
+        cd_marital_status,
+        cd_gender
+    FROM customer
+    LEFT JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+)
+SELECT
+    cd.first_name,
+    cd.last_name,
+    COALESCE(rs.ws_sales_price, 0) AS last_purchase_price,
+    COALESCE(is.total_inventory, 0) AS inventory_level,
+    is.inventory_status,
+    COUNT(DISTINCT rs.ws_order_number) AS total_orders,
+    MAX(rs.ws_sales_price) AS max_price,
+    AVG(rs.ws_sales_price) OVER () AS avg_price,
+    CASE
+        WHEN MAX(rs.ws_sales_price) IS NULL THEN 'No Sales'
+        WHEN MAX(rs.ws_sales_price) > 500 THEN 'High Value Item'
+        ELSE 'Standard Value Item'
+    END AS item_value_category
+FROM CustomerDetails cd
+LEFT JOIN RankedSales rs ON cd.c_customer_sk = rs.ws_order_number
+LEFT JOIN InventoryStatus is ON rs.ws_item_sk = is.inv_item_sk
+WHERE cd.cd_gender = 'F'
+AND (cd.cd_marital_status IS NULL OR cd.cd_marital_status != 'S')
+GROUP BY cd.first_name, cd.last_name, is.total_inventory, is.inventory_status
+HAVING COUNT(CASE WHEN rs.ws_sales_price IS NOT NULL THEN 1 END) > 3
+ORDER BY cd.last_name, cd.first_name
+LIMIT 10;

@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal,
+           0 AS level
+    FROM supplier
+    WHERE s_comment LIKE '%important%' 
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+), 
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           o.o_orderdate, o.o_orderstatus,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS ranking
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_orderstatus
+), 
+CustomerNation AS (
+    SELECT c.c_custkey, n.n_name, c.c_acctbal 
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+)
+
+SELECT DISTINCT sh.s_name AS Supplier, 
+                cn.n_name AS Nation, 
+                os.total_revenue AS Total_Revenue,
+                os.o_orderdate AS Order_Date,
+                os.o_orderstatus AS Order_Status,
+                CASE
+                    WHEN os.total_revenue IS NULL THEN 'No Revenue'
+                    ELSE 'Revenue Exists'
+                END AS Revenue_Status,
+                CONCAT('Supplier ', sh.s_name, ' has order ', os.ranking, ' with total revenue of ', COALESCE(os.total_revenue, 0)) AS Revenue_Info
+FROM SupplierHierarchy sh
+LEFT JOIN OrderSummary os ON sh.s_suppkey = os.o_orderkey
+LEFT JOIN CustomerNation cn ON sh.s_nationkey = cn.c_nationkey
+WHERE os.o_orderdate BETWEEN '2022-01-01' AND '2023-12-31'
+  AND COALESCE(os.total_revenue, 0) > 1000
+ORDER BY sh.level DESC, os.total_revenue DESC;

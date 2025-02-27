@@ -1,0 +1,44 @@
+
+WITH RECURSIVE OrderRecursive AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) as rn
+    FROM orders o
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS parts_handled
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerTotal AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS num_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+SalesAnalysis AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT p.p_name, 
+       COALESCE(ss.total_avail_qty, 0) AS Supplier_Availability,
+       COALESCE(cs.total_spent, 0) AS Customer_Spending,
+       ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY COALESCE(cs.total_spent, 0) DESC) AS customer_rank
+FROM part p
+LEFT JOIN SupplierStats ss ON p.p_partkey = ss.s_suppkey
+LEFT JOIN CustomerTotal cs ON cs.total_spent > p.p_retailprice
+WHERE (SELECT COUNT(*) FROM lineitem l WHERE l.l_partkey = p.p_partkey) > 0
+UNION ALL 
+SELECT p.p_name, 
+       NULL AS Supplier_Availability,
+       SUM(s.total_spent) AS Customer_Spending
+FROM part p
+INNER JOIN lineitem l ON l.l_partkey = p.p_partkey
+JOIN CustomerTotal s ON l.l_orderkey = s.c_custkey
+WHERE l.l_shipdate > DATE '1997-01-01' AND l.l_tax IS NOT NULL
+GROUP BY p.p_name
+ORDER BY Customer_Spending DESC, Supplier_Availability;

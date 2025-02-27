@@ -1,0 +1,32 @@
+
+WITH String_Benchmark AS (
+    SELECT
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CASE
+            WHEN cd_gender = 'M' THEN 'Mr. ' || c.c_last_name
+            WHEN cd_gender = 'F' THEN 'Ms. ' || c.c_last_name
+            ELSE c.c_last_name
+        END AS salutation,
+        TRIM(UPPER(c.c_email_address)) AS normalized_email,
+        LPAD(ca_zip, 10, '0') AS padded_zip,
+        LENGTH(REPLACE(ca_street_name, ' ', '')) AS street_name_length,
+        SUBSTR(ca_city, 1, 5) AS city_prefix,
+        COUNT(DISTINCT w.w_warehouse_name) OVER () AS total_warehouses
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN warehouse w ON w.w_warehouse_sk IN (
+        SELECT inv.inv_warehouse_sk 
+        FROM inventory inv 
+        WHERE inv.inv_quantity_on_hand > 0
+    )
+    WHERE c.c_first_shipto_date_sk IS NOT NULL
+)
+SELECT 
+    COUNT(*) AS total_customers, 
+    AVG(LENGTH(full_name)) AS avg_name_length, 
+    MAX(street_name_length) AS max_street_name_length,
+    MIN(street_name_length) AS min_street_name_length,
+    STRING_AGG(DISTINCT normalized_email) AS email_list
+FROM String_Benchmark;

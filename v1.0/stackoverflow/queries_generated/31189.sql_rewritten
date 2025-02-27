@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(c.UserDisplayName, 'Community') AS OwnerDisplayName,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(DISTINCT v.Id) OVER (PARTITION BY p.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.PostTypeId = 1
+),
+AggregatedVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    WHERE 
+        CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        PostId
+),
+RecentActivity AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS ActivityRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    rp.Rank,
+    COALESCE(av.UpVotes, 0) AS UpVotes,
+    COALESCE(av.DownVotes, 0) AS DownVotes,
+    (rp.Score + COALESCE(av.UpVotes, 0) - COALESCE(av.DownVotes, 0)) AS NetScore,
+    (SELECT COUNT(*) FROM Comments WHERE PostId = rp.PostId) AS CommentCount,
+    (SELECT COUNT(*) FROM PostLinks WHERE PostId = rp.PostId) AS LinkCount,
+    (SELECT COUNT(*) FROM RecentActivity ra WHERE ra.PostId = rp.PostId AND ra.ActivityRank = 1) AS RecentAction
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    AggregatedVotes av ON rp.PostId = av.PostId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    NetScore DESC, rp.CreationDate DESC;

@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN SupplyChain sc ON sc.ps_partkey = ps.ps_partkey
+    WHERE ps.ps_supplycost < sc.ps_supplycost
+),
+AggregatedData AS (
+    SELECT sc.s_suppkey, sc.s_name, SUM(sc.ps_availqty) AS total_available, 
+           AVG(sc.ps_supplycost) AS avg_cost,
+           ROW_NUMBER() OVER (PARTITION BY sc.s_suppkey ORDER BY SUM(sc.ps_availqty) DESC) AS rnk
+    FROM SupplyChain sc
+    GROUP BY sc.s_suppkey, sc.s_name
+)
+SELECT c.c_name AS customer_name, r.r_name AS region_name, ad.s_name AS supplier_name, ad.total_available, ad.avg_cost
+FROM customer c
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN AggregatedData ad ON ad.s_suppkey = (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps 
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+    WHERE l.l_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_orderdate BETWEEN DATE_SUB(CAST('1998-10-01' AS DATE), INTERVAL 30 DAY) AND CAST('1998-10-01' AS DATE)
+    )
+    GROUP BY ps.ps_suppkey 
+    ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC 
+    LIMIT 1
+)
+WHERE ad.rnk = 1
+ORDER BY ad.avg_cost DESC
+LIMIT 10;

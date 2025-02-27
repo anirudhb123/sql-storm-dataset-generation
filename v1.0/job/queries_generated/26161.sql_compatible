@@ -1,0 +1,44 @@
+
+WITH RankedTitles AS (
+    SELECT
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY LENGTH(a.title) DESC) AS rn
+    FROM
+        aka_title a
+    WHERE
+        a.production_year BETWEEN 2000 AND 2023
+),
+FilteredActors AS (
+    SELECT
+        ak.name AS actor_name,
+        ak.person_id
+    FROM
+        aka_name ak
+    WHERE
+        ak.name ILIKE '%Smith%'
+),
+ActorTitles AS (
+    SELECT
+        ft.actor_name,
+        rt.title,
+        rt.production_year
+    FROM
+        RankedTitles rt
+    JOIN
+        cast_info ci ON rt.id = ci.movie_id
+    JOIN
+        FilteredActors ft ON ci.person_id = ft.person_id
+)
+SELECT
+    at.actor_name,
+    COUNT(at.title) AS title_count,
+    STRING_AGG(DISTINCT at.title, '; ') AS titles,
+    STRING_AGG(DISTINCT CAST(at.production_year AS TEXT), ', ') AS production_years
+FROM
+    ActorTitles at
+GROUP BY
+    at.actor_name
+ORDER BY
+    title_count DESC
+LIMIT 10;

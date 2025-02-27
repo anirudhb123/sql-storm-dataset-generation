@@ -1,0 +1,77 @@
+WITH RECURSIVE item_hierarchy AS (
+    SELECT 
+        i_item_sk,
+        i_item_id,
+        i_item_desc,
+        i_current_price,
+        i_rec_start_date,
+        i_rec_end_date,
+        1 AS level
+    FROM item
+    WHERE i_rec_start_date <= cast('2002-10-01' as date) AND (i_rec_end_date IS NULL OR i_rec_end_date > cast('2002-10-01' as date))
+    UNION ALL
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        CONCAT(ih.i_item_desc, ' > ', i.i_item_desc) AS i_item_desc,
+        i.i_current_price,
+        i.i_rec_start_date,
+        i.i_rec_end_date,
+        ih.level + 1
+    FROM item_hierarchy ih
+    JOIN item i ON ih.i_item_sk = i.i_item_sk
+    WHERE i.i_rec_start_date <= cast('2002-10-01' as date) AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > cast('2002-10-01' as date))
+),
+sales_summary AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year >= 2000
+    GROUP BY d.d_year, d.d_month_seq
+),
+customer_activity AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_birth_year IS NOT NULL
+    GROUP BY c.c_customer_sk
+),
+customer_ranking AS (
+    SELECT 
+        c.c_customer_sk,
+        ca.total_orders,
+        ca.total_spent,
+        DENSE_RANK() OVER (ORDER BY ca.total_spent DESC) AS rank
+    FROM customer_activity ca
+    JOIN customer c ON ca.c_customer_sk = c.c_customer_sk
+),
+high_value_customers AS (
+    SELECT 
+        cr.*,
+        ROW_NUMBER() OVER (PARTITION BY cr.rank ORDER BY cr.total_spent DESC) AS row_num
+    FROM customer_ranking cr
+    WHERE cr.rank <= 10
+)
+SELECT 
+    hvc.c_customer_sk,
+    hvc.total_orders,
+    hvc.total_spent,
+    ih.i_item_id,
+    ih.i_item_desc,
+    ih.i_current_price,
+    ss.total_quantity_sold,
+    ss.total_sales
+FROM high_value_customers hvc
+LEFT JOIN item_hierarchy ih ON hvc.c_customer_sk = ih.i_item_sk
+LEFT JOIN sales_summary ss ON ss.d_year = EXTRACT(YEAR FROM cast('2002-10-01' as date))
+WHERE hvc.row_num <= 5
+ORDER BY hvc.total_spent DESC, ss.total_sales DESC
+LIMIT 50;

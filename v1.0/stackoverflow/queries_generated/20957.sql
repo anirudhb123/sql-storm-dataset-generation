@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.Score,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        COUNT(c.Id) AS CommentCount,
+        AVG(v.BountyAmount) AS AvgBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  -- BountyStart, BountyClose
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title, p.Score
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS ClosureCount,
+        MAX(ph.CreationDate) AS LastClosureDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(rb.UserPostRank, 0) AS RecentPostRank,
+    COALESCE(ub.BadgeNames, 'No Badges') AS UserBadges,
+    COALESCE(p.PostId, -1) AS ClosedPostId,
+    COALESCE(cp.ClosureCount, 0) AS TotalCloseActions,
+    COALESCE(cp.LastClosureDate, 'No Closures') AS LastCloseDate,
+    SUM(COALESCE(p.Score, 0)) AS TotalScore,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    AVG(p.AvgBounty) AS AverageBounty
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rb ON u.Id = rb.OwnerUserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    ClosedPosts cp ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = cp.PostId)
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+GROUP BY 
+    u.Id, u.DisplayName, rb.UserPostRank, ub.BadgeNames, cp.PostId, cp.ClosureCount, cp.LastClosureDate
+HAVING 
+    COUNT(p.Id) > 0 OR COUNT(DISTINCT cp.PostId) > 0
+ORDER BY 
+    TotalScore DESC, RecentPostRank ASC;

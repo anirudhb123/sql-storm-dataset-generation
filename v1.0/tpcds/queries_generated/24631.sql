@@ -1,0 +1,58 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_quantity,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) as rn
+    FROM web_sales
+    WHERE ws_net_profit IS NOT NULL
+), 
+top_sales AS (
+    SELECT 
+        sd.ws_order_number,
+        sd.ws_item_sk,
+        sd.ws_quantity,
+        sd.ws_net_profit,
+        (SELECT SUM(ws_net_profit) 
+         FROM web_sales 
+         WHERE ws_item_sk = sd.ws_item_sk AND ws_net_profit IS NOT NULL) as total_profit
+    FROM sales_data sd
+    WHERE sd.rn <= 5
+),
+inventory_summary AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory 
+    FROM inventory inv
+    GROUP BY inv.inv_item_sk
+),
+high_performance_sales AS (
+    SELECT 
+        ts.ws_order_number,
+        ts.ws_item_sk,
+        ts.ws_quantity,
+        ts.ws_net_profit,
+        inv.total_inventory
+    FROM top_sales ts
+    LEFT JOIN inventory_summary inv ON ts.ws_item_sk = inv.inv_item_sk
+    WHERE ts.ws_net_profit > 1000 
+      AND (SELECT COUNT(*) 
+           FROM store_sales ss 
+           WHERE ss.ss_item_sk = ts.ws_item_sk AND ss.ss_sold_date_sk < (CURRENT_DATE - INTERVAL '30 days')) = 0
+      AND ts.ws_quantity > (SELECT AVG(ws_quantity) FROM web_sales WHERE ws_net_profit >= 500)
+)
+SELECT 
+    h.ws_order_number,
+    h.ws_item_sk,
+    h.ws_quantity,
+    h.ws_net_profit,
+    h.total_inventory,
+    (CASE 
+        WHEN h.total_inventory IS NULL THEN 'No inventory'
+        WHEN h.ws_quantity > h.total_inventory THEN 'Over Sold'
+        ELSE 'Under Sold'
+    END) as sale_status
+FROM high_performance_sales h
+ORDER BY h.ws_net_profit DESC;

@@ -1,0 +1,38 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_acctbal, 0 AS level
+    FROM customer
+    WHERE c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON ch.custkey = c.c_nationkey
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+TotalSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY l.l_partkey
+)
+SELECT p.p_partkey, p.p_name, p.p_brand, p.p_type,
+       COALESCE(ts.total_revenue, 0) AS total_revenue,
+       (SELECT AVG(c.c_acctbal) FROM customer c WHERE c.c_nationkey = n.n_nationkey) AS avg_customer_balance,
+       sr.s_name AS top_supplier,
+       ch.level
+FROM part p
+LEFT JOIN TotalSales ts ON p.p_partkey = ts.l_partkey
+LEFT JOIN supplier sr ON sr.s_suppkey = (SELECT ps.ps_suppkey 
+                                          FROM partsupp ps 
+                                          WHERE ps.ps_partkey = p.p_partkey 
+                                          ORDER BY ps.ps_supplycost ASC 
+                                          LIMIT 1)
+JOIN nation n ON sr.s_nationkey = n.n_nationkey
+LEFT JOIN CustomerHierarchy ch ON ch.c_custkey = n.n_nationkey
+WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size > 50)
+  AND (n.r_name LIKE '%East%' OR n.r_name IS NULL)
+ORDER BY total_revenue DESC, p.p_partkey;

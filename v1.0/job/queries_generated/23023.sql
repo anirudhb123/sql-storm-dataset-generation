@@ -1,0 +1,70 @@
+WITH RECURSIVE cast_hierarchy AS (
+    SELECT
+        ci1.movie_id,
+        ci1.person_id,
+        1 AS depth,
+        coalesce(NULLIF(role.role, ''), 'Unknown') AS role_played,
+        ROW_NUMBER() OVER (PARTITION BY ci1.movie_id ORDER BY ci1.nr_order) AS role_order
+    FROM cast_info ci1
+    JOIN role_type role ON ci1.role_id = role.id
+    UNION ALL
+    SELECT
+        ci2.movie_id,
+        ci2.person_id,
+        ch.depth + 1,
+        COALESCE(NULLIF(role.role, ''), 'Unknown') AS role_played,
+        ROW_NUMBER() OVER (PARTITION BY ci2.movie_id ORDER BY ci2.nr_order) AS role_order
+    FROM cast_info ci2
+    INNER JOIN cast_hierarchy ch ON ci2.movie_id = ch.movie_id
+    JOIN role_type role ON ci2.role_id = role.id
+    WHERE ci2.person_id <> ch.person_id
+),
+movie_cast AS (
+    SELECT
+        mt.title AS movie_title,
+        ak.name AS actor_name,
+        COUNT(ch.person_id) AS co_actor_count,
+        MAX(ch.depth) AS max_depth,
+        STRING_AGG(DISTINCT ch.role_played, ', ') AS roles_played
+    FROM aka_title mt
+    JOIN cast_info ci ON mt.id = ci.movie_id
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN cast_hierarchy ch ON mt.id = ch.movie_id
+    GROUP BY mt.title, ak.name
+),
+keyword_count AS (
+    SELECT
+        mt.id AS movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM aka_title mt
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY mt.id
+),
+top_movies AS (
+    SELECT
+        mc.movie_title,
+        mc.actor_name,
+        mc.co_actor_count,
+        mc.max_depth,
+        mc.roles_played,
+        k.keyword_count
+    FROM movie_cast mc
+    JOIN keyword_count k ON mc.movie_id = k.movie_id
+    WHERE k.keyword_count > 3 -- Filter for movies with more than 3 keywords
+    ORDER BY mc.co_actor_count DESC, mc.max_depth DESC
+    LIMIT 10
+)
+
+SELECT
+    *,
+    CASE
+        WHEN max_depth > 5 THEN 'Epic Ensemble'
+        WHEN co_actor_count > 5 THEN 'Star-Studded'
+        ELSE 'Regular Cast'
+    END AS cast_category,
+    CASE
+        WHEN actor_name IS NULL THEN 'Unnamed Actor'
+        WHEN actor_name ILIKE '%John%' THEN 'Famous Actor'
+        ELSE 'Less Known Actor'
+    END AS actor_category
+FROM top_movies;

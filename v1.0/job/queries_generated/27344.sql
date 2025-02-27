@@ -1,0 +1,64 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        COALESCE(STRING_AGG(DISTINCT ak.name, ', ' ORDER BY ak.name), 'No Cast') AS cast_members,
+        COUNT(DISTINCT ci.person_id) AS num_cast_members
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        at.id, at.title, at.production_year, at.kind_id
+),
+KeywordCount AS (
+    SELECT 
+        ak.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title ak ON mk.movie_id = ak.id
+    GROUP BY 
+        ak.movie_id
+),
+TitleInfo AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        rt.kind_id,
+        rt.cast_members,
+        rt.num_cast_members,
+        COALESCE(kc.keyword_count, 0) AS keyword_count
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        KeywordCount kc ON rt.title_id = kc.movie_id
+)
+SELECT 
+    ti.title,
+    ti.production_year,
+    k.kind AS kind_type,
+    ti.cast_members,
+    ti.num_cast_members,
+    ti.keyword_count,
+    COUNT(DISTINCT ci.person_role_id) AS unique_roles,
+    AVG(ti.num_cast_members) OVER () AS avg_cast_size,
+    STRING_AGG(DISTINCT co.name, ', ') AS production_companies
+FROM 
+    TitleInfo ti
+JOIN 
+    kind_type k ON ti.kind_id = k.id
+LEFT JOIN 
+    movie_companies mc ON ti.title_id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+GROUP BY 
+    ti.title_id, ti.title, ti.production_year, k.kind, ti.cast_members, ti.num_cast_members, ti.keyword_count
+ORDER BY 
+    ti.production_year DESC, ti.title;

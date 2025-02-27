@@ -1,0 +1,62 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        0 AS Level,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        Users.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        Users ON p.OwnerUserId = Users.Id
+    WHERE 
+        p.PostTypeId = 1  -- Questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        Level + 1,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        Users.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy h ON p.ParentId = h.PostId
+    JOIN 
+        Users ON p.OwnerUserId = Users.Id
+)
+SELECT 
+    ph.PostId,
+    ph.Title,
+    ph.CreationDate,
+    ph.Score,
+    ph.Level,
+    ph.OwnerUserId,
+    ph.OwnerDisplayName,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = ph.PostId AND v.VoteTypeId = 2) AS UpvoteCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = ph.PostId AND v.VoteTypeId = 3) AS DownvoteCount,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = ph.PostId) AS CommentCount,
+    (SELECT COUNT(*) FROM Posts a WHERE a.ParentId = ph.PostId) AS AnswerCount,
+    COALESCE(Tags.Count, 0) AS TagCount,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.Id IN (
+         SELECT UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::int[])
+     )) AS TagNames
+FROM 
+    RecursivePostHierarchy ph
+LEFT JOIN 
+    Posts p ON ph.PostId = p.Id
+LEFT JOIN 
+    Tags ON p.Id = Tags.WikiPostId 
+WHERE 
+    ph.Level = 0   -- Only top-level questions
+ORDER BY 
+    ph.CreationDate DESC
+LIMIT 100;

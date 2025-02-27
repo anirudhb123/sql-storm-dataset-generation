@@ -1,0 +1,53 @@
+
+WITH RecursivePostHistory AS (
+    SELECT ph.Id,
+           ph.PostId,
+           ph.PostHistoryTypeId,
+           ph.UserId,
+           ph.CreationDate,
+           ph.Comment,
+           ph.Text,
+           1 AS Level
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11, 12)  
+
+    UNION ALL
+
+    SELECT ph.Id,
+           ph.PostId,
+           ph.PostHistoryTypeId,
+           ph.UserId,
+           ph.CreationDate,
+           ph.Comment,
+           ph.Text,
+           rph.Level + 1
+    FROM PostHistory ph
+    INNER JOIN RecursivePostHistory rph ON ph.PostId = rph.PostId
+    WHERE ph.CreationDate < rph.CreationDate  
+)
+
+SELECT p.Id AS PostId,
+       p.Title,
+       u.DisplayName AS OwnerName,
+       COUNT(v.Id) AS VoteCount,
+       SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+       SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+       COUNT(DISTINCT b.Id) AS BadgeCount,
+       STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+       MAX(rph.CreationDate) AS LastActionDate,
+       MAX(rph.Comment) AS LastActionComment,
+       CASE
+           WHEN MAX(rph.PostHistoryTypeId) = 10 THEN 'Closed'
+           WHEN MAX(rph.PostHistoryTypeId) = 11 THEN 'Reopened'
+           WHEN MAX(rph.PostHistoryTypeId) = 12 THEN 'Deleted'
+           ELSE 'Active'
+       END AS PostState
+FROM Posts p
+LEFT JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN Votes v ON p.Id = v.PostId
+LEFT JOIN Badges b ON u.Id = b.UserId
+LEFT JOIN Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+LEFT JOIN RecursivePostHistory rph ON p.Id = rph.PostId
+GROUP BY p.Id, p.Title, u.DisplayName
+HAVING COUNT(v.Id) > 10 
+ORDER BY VoteCount DESC, LastActionDate DESC;

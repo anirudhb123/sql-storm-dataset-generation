@@ -1,0 +1,70 @@
+WITH RECURSIVE RankedOrders AS (
+    SELECT 
+        o_orderkey, 
+        o_custkey, 
+        o_totalprice,
+        RANK() OVER (PARTITION BY o_orderstatus ORDER BY o_totalprice DESC) AS rank_order
+    FROM 
+        orders
+    WHERE 
+        o_orderdate >= DATE '2022-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COALESCE(SUM(o.o_totalprice), 0) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 0
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+FilteredLineItems AS (
+    SELECT 
+        li.l_orderkey, 
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM 
+        lineitem li
+    WHERE 
+        li.l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY 
+        li.l_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderstatus,
+    ro.rank_order,
+    co.total_spent,
+    ss.total_supply_cost,
+    fl.total_revenue,
+    CASE 
+        WHEN ss.total_supply_cost IS NULL THEN 'No Suppliers' 
+        ELSE 'Suppliers Found' 
+    END AS supplier_status
+FROM 
+    RankedOrders ro
+JOIN orders o ON ro.o_orderkey = o.o_orderkey
+LEFT JOIN CustomerOrders co ON o.o_custkey = co.c_custkey
+LEFT JOIN SupplierStats ss ON ss.part_count > 10
+LEFT JOIN FilteredLineItems fl ON fl.l_orderkey = o.o_orderkey
+WHERE 
+    o.o_orderstatus IN ('O', 'F') AND 
+    (ss.total_supply_cost IS NOT NULL OR co.total_spent > 0)
+ORDER BY 
+    o.o_orderkey, co.total_spent DESC;

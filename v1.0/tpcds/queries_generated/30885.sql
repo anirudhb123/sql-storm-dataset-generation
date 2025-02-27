@@ -1,0 +1,61 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk
+    FROM customer
+    WHERE c_customer_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk
+    FROM customer c
+    JOIN CustomerHierarchy ch ON ch.c_current_cdemo_sk = c.c_current_cdemo_sk
+),
+MonthlySales AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM date_dim d
+    JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_year, d.d_month_seq
+),
+Promotions AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(ws.ws_order_number) AS promo_order_count,
+        SUM(ws.ws_net_paid_inc_tax) AS promo_revenue
+    FROM promotion p
+    JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY p.p_promo_id
+),
+TopCustomers AS (
+    SELECT 
+        ch.c_customer_sk, 
+        ch.c_first_name, 
+        ch.c_last_name,
+        SUM(ss.ss_sales_price) AS total_spent
+    FROM CustomerHierarchy ch
+    JOIN store_sales ss ON ch.c_customer_sk = ss.ss_customer_sk
+    GROUP BY ch.c_customer_sk, ch.c_first_name, ch.c_last_name
+    ORDER BY total_spent DESC
+    LIMIT 10
+)
+SELECT 
+    m.d_year,
+    m.d_month_seq,
+    m.total_sales,
+    m.order_count,
+    m.unique_customers,
+    p.p_promo_id,
+    p.promo_order_count,
+    p.promo_revenue,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_spent
+FROM MonthlySales m
+LEFT JOIN Promotions p ON m.d_year = EXTRACT(YEAR FROM p.promo_id) 
+                    AND m.d_month_seq = EXTRACT(MONTH FROM p.promo_id)
+JOIN TopCustomers tc ON True
+WHERE m.total_sales > (SELECT AVG(total_sales) FROM MonthlySales) 
+  AND p.promo_revenue IS NOT NULL
+ORDER BY m.d_year, m.d_month_seq DESC;

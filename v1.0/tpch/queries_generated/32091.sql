@@ -1,0 +1,85 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS order_level
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    UNION ALL
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        co.order_level + 1
+    FROM 
+        CustomerOrders co
+    JOIN 
+        orders o ON co.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate > (
+            SELECT MAX(o2.o_orderdate) 
+            FROM orders o2 
+            WHERE o2.o_custkey = co.c_custkey
+        )
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+TotalSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_partkey
+)
+SELECT 
+    p.p_name,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    COUNT(DISTINCT co.o_orderkey) AS order_count,
+    rs.s_name AS highest_supplier,
+    CASE 
+        WHEN rs.s_suppkey IS NULL THEN 'No Supplier'
+        ELSE 'Has Supplier'
+    END AS supplier_status
+FROM 
+    part p
+LEFT JOIN 
+    TotalSales ts ON p.p_partkey = ts.l_partkey
+LEFT JOIN 
+    CustomerOrders co ON co.o_orderkey IN (
+        SELECT o.o_orderkey
+        FROM orders o
+        WHERE o.o_orderstatus = 'F'
+    )
+LEFT JOIN 
+    RankedSuppliers rs ON p.p_partkey = rs.ps_partkey AND rs.supplier_rank = 1
+GROUP BY 
+    p.p_name, ts.total_sales, rs.s_name
+HAVING 
+    COALESCE(ts.total_sales, 0) > 1000 
+ORDER BY 
+    total_sales DESC, order_count DESC;

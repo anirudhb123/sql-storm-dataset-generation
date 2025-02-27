@@ -1,0 +1,50 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    WHERE 
+        an.name IS NOT NULL
+    GROUP BY 
+        ci.person_id
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 10
+),
+popular_movies AS (
+    SELECT 
+        at.title,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        AVG(COALESCE(mi.info::numeric, 0)) AS avg_rating
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    LEFT JOIN 
+        movie_info mi ON at.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    WHERE 
+        at.production_year >= 2000
+    GROUP BY 
+        at.title
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 5
+)
+SELECT 
+    ah.person_id,
+    an.name,
+    pm.title,
+    pm.actor_count,
+    pm.avg_rating
+FROM 
+    actor_hierarchy ah
+JOIN 
+    aka_name an ON ah.person_id = an.person_id
+JOIN 
+    popular_movies pm ON an.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id IN (SELECT movie_id FROM aka_title WHERE production_year >= 2000))
+WHERE 
+    ah.movie_count > 5
+ORDER BY 
+    pm.avg_rating DESC, pm.actor_count DESC
+LIMIT 10;

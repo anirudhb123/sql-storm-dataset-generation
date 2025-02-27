@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 AND /* Questions only */
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId, 
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 /* Post Closed */
+    GROUP BY 
+        ph.PostId
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+SELECT 
+    rp.Id,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    COALESCE(cp.LastClosedDate, 'Not Closed') AS LastClosedDate,
+    COALESCE(cp.CloseReasons, 'N/A') AS CloseReasons,
+    COALESCE(pvc.UpVotes, 0) AS UpVotes,
+    COALESCE(pvc.DownVotes, 0) AS DownVotes
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPostHistory cp ON rp.Id = cp.PostId
+LEFT JOIN 
+    PostVoteCounts pvc ON rp.Id = pvc.PostId
+WHERE 
+    rp.Rank <= 3 /* Top 3 most viewed questions for each user */
+ORDER BY 
+    rp.OwnerDisplayName ASC, 
+    rp.ViewCount DESC;

@@ -1,0 +1,65 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.refunded_customer_sk,
+        sr.returned_date_sk,
+        sr.return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY sr.refunded_customer_sk ORDER BY sr.returned_date_sk DESC) AS rnk 
+    FROM 
+        store_returns sr 
+    WHERE 
+        sr.return_quantity > 0
+),
+CustomerRefunds AS (
+    SELECT 
+        r.refunded_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(r.return_quantity) AS total_returned_qty
+    FROM 
+        RankedReturns r
+    WHERE 
+        r.rnk <= 5  
+    GROUP BY 
+        r.refunded_customer_sk
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_bill_customer_sk
+),
+CombinedData AS (
+    SELECT 
+        cd.refunded_customer_sk,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        COALESCE(cd.total_returns, 0) AS total_returns,
+        COALESCE(cd.total_returned_qty, 0) AS total_returned_qty,
+        CASE 
+            WHEN COALESCE(sd.total_sales, 0) > 0 THEN ROUND((COALESCE(cd.total_returned_qty, 0) * 100.0 / sd.total_sales), 2)
+            ELSE 0
+        END AS return_percentage
+    FROM 
+        CustomerRefunds cd
+    LEFT JOIN 
+        SalesData sd ON cd.refunded_customer_sk = sd.customer_sk
+)
+SELECT 
+    c.customer_id,
+    c.first_name,
+    c.last_name,
+    cd.total_sales,
+    cd.total_returns,
+    cd.total_returned_qty,
+    cd.return_percentage
+FROM 
+    CombinedData cd
+JOIN 
+    customer c ON cd.refunded_customer_sk = c.c_customer_sk
+WHERE 
+    cd.return_percentage > 10  
+ORDER BY 
+    cd.return_percentage DESC;

@@ -1,0 +1,58 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+latest_returns AS (
+    SELECT 
+        sr.sr_returned_date_sk,
+        sr.sr_item_sk,
+        SUM(sr.sr_return_quantity) AS total_returned,
+        SUM(sr.sr_return_amt_inc_tax) AS total_return_amt,
+        COUNT(sr.sr_ticket_number) AS return_count
+    FROM store_returns sr
+    WHERE sr.sr_returned_date_sk = (SELECT MAX(sr_inner.sr_returned_date_sk) FROM store_returns sr_inner)
+    GROUP BY sr.sr_returned_date_sk, sr.sr_item_sk
+),
+aggregate_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = EXTRACT(YEAR FROM DATE '2002-10-01') AND d.d_month_seq IN (1, 2, 3)) 
+        AND ws.ws_sold_date_sk <= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = EXTRACT(YEAR FROM DATE '2002-10-01') AND d.d_month_seq IN (12))
+    GROUP BY ws.ws_item_sk
+)
+SELECT 
+    rc.c_customer_id,
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.cd_gender,
+    rc.cd_marital_status,
+    rc.cd_purchase_estimate,
+    COALESCE(lr.total_returned, 0) AS total_returned,
+    COALESCE(lr.total_return_amt, 0) AS total_return_amt,
+    COALESCE(as.total_quantity_sold, 0) AS total_quantity_sold,
+    COALESCE(as.total_net_profit, 0) AS total_net_profit,
+    CASE 
+        WHEN rc.purchase_rank < 5 THEN 'Top Customer'
+        WHEN COALESCE(lr.total_returned, 0) > 10 THEN 'Frequent Returner'
+        ELSE 'Regular Customer'
+    END AS customer_category
+FROM ranked_customers rc
+LEFT JOIN latest_returns lr ON lr.sr_item_sk = (SELECT i.i_item_sk FROM item i ORDER BY RANDOM() LIMIT 1)
+LEFT JOIN aggregate_sales as ON as.ws_item_sk = (SELECT i.i_item_sk FROM item i ORDER BY RANDOM() LIMIT 1)
+WHERE rc.cd_marital_status IN ('M', 'S')
+  AND (rc.cd_purchase_estimate IS NOT NULL OR lr.total_returned IS NOT NULL)
+ORDER BY rc.cd_purchase_estimate DESC, rc.c_last_name ASC
+LIMIT 50;

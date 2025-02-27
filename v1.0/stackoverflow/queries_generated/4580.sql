@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.VoteTypeId = 2) AS UpvotesReceived,
+        SUM(v.VoteTypeId = 3) AS DownvotesReceived,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    COALESCE(us.DisplayName, 'Anonymous') AS OwnerName,
+    rp.Score,
+    rp.ViewCount,
+    rp.CreationDate,
+    rp.CommentCount,
+    us.UpvotesReceived - us.DownvotesReceived AS ReputationChange,
+    phd.EditCount AS RecentEditCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserStatistics us ON rp.OwnerUserId = us.UserId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.Id = phd.PostId
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    ReputationChange DESC NULLS LAST, 
+    rp.Score DESC
+LIMIT 100;

@@ -1,0 +1,79 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'F'
+),
+TopCustomerOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name,
+        ro.c_acctbal,
+        n.n_name AS nation_name
+    FROM 
+        RankedOrders ro
+    JOIN 
+        nation n ON ro.c_nationkey = n.n_nationkey
+    WHERE 
+        ro.rn <= 5
+),
+SupplierInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        s.s_name AS supplier_name,
+        si.total_available_qty,
+        si.average_supply_cost
+    FROM 
+        part p
+    JOIN 
+        SupplierInfo si ON p.p_partkey = si.ps_partkey
+    JOIN 
+        supplier s ON si.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.o_totalprice,
+    to.c_name,
+    to.c_acctbal,
+    pd.p_name,
+    pd.p_retailprice,
+    pd.supplier_name,
+    pd.total_available_qty,
+    pd.average_supply_cost
+FROM 
+    TopCustomerOrders to
+JOIN 
+    lineitem li ON to.o_orderkey = li.l_orderkey
+JOIN 
+    PartDetails pd ON li.l_partkey = pd.p_partkey
+WHERE 
+    to.o_totalprice > (SELECT AVG(o.o_totalprice) FROM orders o)
+ORDER BY 
+    to.o_orderdate DESC, to.o_totalprice DESC;

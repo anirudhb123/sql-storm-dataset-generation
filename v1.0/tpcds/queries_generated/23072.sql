@@ -1,0 +1,55 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ext_sales_price) DESC) AS rank_sales
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE i.i_current_price IS NOT NULL
+        AND ws.ws_sold_date_sk BETWEEN 1 AND 365
+    GROUP BY ws.web_site_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Other'
+        END AS marital_status,
+        COALESCE(hd.hd_buy_potential, 'Unknown') AS buy_potential
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+)
+SELECT 
+    w.w_warehouse_name,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.gender,
+    cs.total_sales,
+    COUNT(DISTINCT cs.c_customer_sk) OVER (PARTITION BY cs.warehouse_sk) AS customer_count,
+    CASE 
+        WHEN cs.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Present'
+    END AS sales_status
+FROM ranked_sales cs
+JOIN warehouse w ON cs.web_site_sk = w.w_warehouse_sk
+JOIN customer_info ci ON ci.c_customer_sk IN (
+    SELECT DISTINCT ws_ship_customer_sk
+    FROM web_sales 
+    WHERE ws_ship_date_sk IS NOT NULL 
+        AND ws_item_sk IN (
+            SELECT i_item_sk
+            FROM item
+            WHERE i_current_price < 30 OR i_current_price IS NULL
+        )
+)
+WHERE cs.total_sales > 1000
+AND w.w_country IS NOT NULL
+ORDER BY cs.total_sales DESC, ci.c_last_name ASC
+LIMIT 10;

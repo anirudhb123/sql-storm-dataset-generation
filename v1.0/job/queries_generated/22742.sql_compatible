@@ -1,0 +1,78 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title AS MovieTitle,
+        at.production_year AS ProductionYear,
+        COUNT(DISTINCT ci.person_id) AS TotalCast,
+        RANK() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS RankByCast
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    WHERE 
+        at.production_year IS NOT NULL AND 
+        at.title IS NOT NULL 
+    GROUP BY 
+        at.title, at.production_year
+),
+TopMovies AS (
+    SELECT 
+        MovieTitle, 
+        ProductionYear
+    FROM 
+        RankedMovies
+    WHERE 
+        RankByCast <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(k.keyword, ', ') AS Keywords
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    INNER JOIN 
+        aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY 
+        mt.movie_id
+),
+CombinedMovieInfo AS (
+    SELECT 
+        tm.MovieTitle,
+        tm.ProductionYear,
+        COALESCE(mk.Keywords, 'No Keywords') AS Keywords,
+        COUNT(DISTINCT mi.info_type_id) AS InfoCount
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        MovieKeywords mk ON (tm.MovieTitle = mk.movie_id)
+    LEFT JOIN 
+        movie_info mi ON (tm.MovieTitle = mi.movie_id)
+    GROUP BY 
+        tm.MovieTitle, tm.ProductionYear, mk.Keywords
+),
+FinalOutput AS (
+    SELECT 
+        MovieTitle,
+        ProductionYear,
+        Keywords,
+        InfoCount,
+        CASE 
+            WHEN InfoCount > 0 THEN 'Has Information'
+            ELSE 'No Information'
+        END AS InfoStatus,
+        ROW_NUMBER() OVER (ORDER BY ProductionYear DESC, InfoCount DESC) AS RowNum
+    FROM 
+        CombinedMovieInfo
+    WHERE 
+        InfoCount > 0 OR 
+        (InfoCount = 0 AND Keywords LIKE '%Action%')
+)
+
+SELECT 
+    *
+FROM 
+    FinalOutput
+WHERE 
+    RowNum <= 10;

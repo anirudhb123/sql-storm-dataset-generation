@@ -1,0 +1,63 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ', ', ca_city, ', ', ca_state, ' ', ca_zip) AS full_address
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        d.cd_gender,
+        d.cd_marital_status,
+        ad.full_address
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    JOIN 
+        AddressDetails ad ON c.c_current_addr_sk = ad.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_item_sk) AS total_items_sold
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_order_number
+),
+SalesOverview AS (
+    SELECT 
+        cd.c_customer_id,
+        cd.c_first_name,
+        cd.c_last_name,
+        sd.total_sales,
+        sd.total_items_sold
+    FROM 
+        CustomerDetails cd
+    LEFT JOIN 
+        SalesData sd ON cd.c_customer_id = sd.ws_order_number -- assuming order number maps to customer ID for benchmarking
+)
+SELECT 
+    c.customer_id,
+    c.first_name,
+    c.last_name,
+    COALESCE(s.total_sales, 0) AS sales_amount,
+    s.total_items_sold,
+    LENGTH(c.first_name) + LENGTH(c.last_name) AS name_length,
+    CASE 
+        WHEN s.total_sales > 1000 THEN 'High'
+        WHEN s.total_sales BETWEEN 500 AND 1000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM 
+    CustomerDetails c
+LEFT JOIN 
+    SalesOverview s ON c.c_customer_id = s.customer_id
+ORDER BY 
+    sales_amount DESC, name_length ASC;

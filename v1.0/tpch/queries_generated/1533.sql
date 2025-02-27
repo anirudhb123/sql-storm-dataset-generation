@@ -1,0 +1,68 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate <= DATE '2022-12-31'
+),
+supplier_part_info AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name AS supplier_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    c.c_name,
+    c.order_count,
+    c.total_spent,
+    COALESCE(sp.supplier_name, 'No Supplier') AS supplier_name,
+    COALESCE(sp.total_available_qty, 0) AS total_available_qty,
+    COALESCE(sp.total_supply_cost, 0.00) AS total_supply_cost,
+    ro.o_orderkey,
+    ro.o_totalprice,
+    CASE 
+        WHEN ro.o_orderstatus = 'O' THEN 'Open'
+        ELSE 'Closed'
+    END AS order_status
+FROM 
+    customer_order_summary c
+LEFT JOIN 
+    supplier_part_info sp ON c.c_custkey = (SELECT c2.c_custkey 
+                                              FROM customer c2 
+                                              JOIN orders o ON c2.c_custkey = o.o_custkey 
+                                              WHERE o.o_orderkey = ro.o_orderkey 
+                                              LIMIT 1)
+LEFT JOIN 
+    ranked_orders ro ON c.c_custkey = (SELECT o.o_custkey 
+                                        FROM orders o 
+                                        WHERE o.o_orderkey = ro.o_orderkey 
+                                        LIMIT 1)
+ORDER BY 
+    c.total_spent DESC, 
+    ro.o_orderdate DESC
+LIMIT 100;

@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        aka_title t
+    JOIN 
+        MovieHierarchy mh ON t.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    MAX(CASE 
+            WHEN ci.nr_order IS NOT NULL THEN ci.nr_order 
+            ELSE 0 
+        END) AS max_order,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+    STRING_AGG(DISTINCT mk.keyword, '; ') AS keywords,
+    AVG(CASE 
+            WHEN m.production_year IS NOT NULL THEN m.production_year 
+            ELSE NULL 
+        END) AS avg_production_year,
+    (SELECT 
+        COUNT(DISTINCT cc.id) 
+     FROM 
+        complete_cast cc 
+     WHERE 
+        cc.movie_id = m.movie_id AND 
+        cc.status_id IS NOT NULL) AS complete_cast_count
+FROM 
+    MovieHierarchy m
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = m.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.movie_id
+GROUP BY 
+    m.movie_id, m.title, m.production_year
+ORDER BY 
+    total_cast DESC, max_order DESC
+LIMIT 
+    10;

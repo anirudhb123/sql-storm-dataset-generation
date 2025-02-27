@@ -1,0 +1,96 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentPostActions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(com.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastActionDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments com ON p.Id = com.PostId
+    LEFT JOIN 
+        RecursivePostHistory ph ON p.Id = ph.PostId AND ph.rn <= 5
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    us.TotalPosts,
+    us.TotalUpvotes,
+    us.TotalDownvotes,
+    us.TotalBadges,
+    pp.PostId,
+    pp.Title,
+    pp.CommentCount,
+    pp.LastActionDate,
+    (CASE 
+        WHEN pp.CommentCount > 10 THEN 'Very Active'
+        WHEN pp.CommentCount >= 5 THEN 'Active'
+        ELSE 'Less Active'
+    END) AS ActivityLevel
+FROM 
+    UserStats us
+JOIN 
+    Users u ON u.Id = us.UserId
+LEFT JOIN 
+    RecentPostActions pp ON pp.LastActionDate IS NOT NULL
+WHERE 
+    us.TotalPosts > 0
+ORDER BY 
+    us.TotalUpvotes DESC, pp.LastActionDate DESC
+LIMIT 100;
+
+-- Additional Stats and Correlation
+SELECT 
+    ph.UserId,
+    COUNT(DISTINCT ph.PostId) AS PostHistoryCount,
+    AVG(COALESCE(NULLIF(p.Score, 0), NULL)) AS AvgPostScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS JoinedTags
+FROM 
+    PostHistory ph
+JOIN 
+    Posts p ON ph.PostId = p.Id
+LEFT JOIN 
+    LATERAL (SELECT UNNEST(string_to_array(p.Tags, ',')) AS TagName) AS t ON TRUE
+WHERE 
+    ph.CreationDate > NOW() - INTERVAL '1 year'
+GROUP BY 
+    ph.UserId
+HAVING 
+    COUNT(DISTINCT ph.PostId) > 5;

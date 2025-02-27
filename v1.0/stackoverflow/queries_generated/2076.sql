@@ -1,0 +1,68 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        AVG(extract(epoch from (p.LastActivityDate - p.CreationDate)) / 3600.0) AS AvgPostAgeInHours
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > now() - interval '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS CloseDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.UpVotes,
+    us.DownVotes,
+    us.PostCount,
+    us.AvgPostAgeInHours,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostCreationDate,
+    rp.ViewCount AS RecentPostViewCount,
+    cp.ClosedPostId,
+    cp.UserDisplayName AS ClosedPostBy,
+    cp.CloseDate
+FROM 
+    UserStats us
+LEFT JOIN 
+    RecentPosts rp ON us.UserId = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN 
+    ClosedPosts cp ON us.UserId = cp.ClosedPostBy
+WHERE 
+    us.Reputation > 100
+ORDER BY 
+    us.Reputation DESC, us.PostCount DESC;

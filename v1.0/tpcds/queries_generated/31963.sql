@@ -1,0 +1,48 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rn
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c.c_birth_year < 2000
+    GROUP BY ws.web_site_sk
+), 
+Top_Sites AS (
+    SELECT * FROM Sales_CTE WHERE rn <= 5
+),
+Address_Summary AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        MAX(cd.cd_purchase_estimate) AS max_purchase_estimate
+    FROM customer_address ca
+    JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY ca.ca_address_sk, ca.ca_city
+),
+Combined_Result AS (
+    SELECT 
+        s.web_site_sk,
+        s.total_net_profit,
+        s.total_orders,
+        a.ca_city,
+        a.customer_count,
+        a.max_purchase_estimate
+    FROM Top_Sites s
+    JOIN Address_Summary a ON s.web_site_sk = a.ca_address_sk
+)
+SELECT 
+    cr.ca_city,
+    SUM(cr.total_net_profit) AS total_sales_profit,
+    AVG(cr.max_purchase_estimate) AS avg_purchase_estimate,
+    COUNT(DISTINCT cr.web_site_sk) AS unique_web_sites
+FROM Combined_Result cr
+GROUP BY cr.ca_city
+HAVING COUNT(DISTINCT cr.web_site_sk) > 1
+ORDER BY total_sales_profit DESC
+LIMIT 10;

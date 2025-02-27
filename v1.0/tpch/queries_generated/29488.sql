@@ -1,0 +1,83 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_address, 
+        n.n_name AS nation_name, 
+        r.r_name AS region_name, 
+        s.s_acctbal, 
+        s.s_comment
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_type, 
+        p.p_size, 
+        p.p_retailprice, 
+        p.p_comment
+    FROM 
+        part p
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_orderstatus, 
+        o.o_totalprice, 
+        o.o_comment, 
+        c.c_name AS customer_name, 
+        c.c_acctbal AS customer_balance
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey, 
+        l.l_partkey, 
+        l.l_quantity, 
+        l.l_extendedprice, 
+        l.l_discount, 
+        l.l_tax, 
+        l.l_returnflag, 
+        l.l_linestatus, 
+        l.l_shipdate
+    FROM 
+        lineitem l
+)
+SELECT 
+    sd.s_name AS supplier_name, 
+    pd.p_name AS part_name, 
+    od.order_date, 
+    SUM(ld.l_quantity) AS total_quantity, 
+    SUM(ld.l_extendedprice) AS total_revenue,
+    ROUND(SUM(ld.l_discount), 2) AS total_discount,
+    ROUND(SUM(ld.l_tax), 2) AS total_tax,
+    CONCAT(sd.nation_name, ' - ', sd.region_name) AS location_details,
+    LEFT(sd.s_comment, 50) AS supplier_comment_excerpt
+FROM 
+    SupplierDetails sd
+JOIN 
+    partsupp ps ON sd.s_suppkey = ps.ps_suppkey
+JOIN 
+    PartDetails pd ON ps.ps_partkey = pd.p_partkey
+JOIN 
+    LineItemDetails ld ON ld.l_partkey = pd.p_partkey
+JOIN 
+    OrderDetails od ON ld.l_orderkey = od.o_orderkey
+WHERE 
+    od.o_orderstatus = 'O' 
+    AND ld.l_shipdate >= '2023-01-01'
+GROUP BY 
+    sd.s_name, pd.p_name, od.o_orderdate, sd.nation_name, sd.region_name, sd.s_comment
+ORDER BY 
+    total_revenue DESC, sd.s_name;

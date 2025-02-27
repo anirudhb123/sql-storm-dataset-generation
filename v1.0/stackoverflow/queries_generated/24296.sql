@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title, 
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 YEAR'
+        AND p.PostTypeId = 1
+        AND p.Score IS NOT NULL
+), 
+
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(rp.Id) AS UserPostsCount,
+        SUM(rp.Score) AS TotalScore,
+        COALESCE(SUM(rp.ViewCount), 0) AS TotalViews,
+        AVG(rp.Score) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        u.Reputation IS NOT NULL
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostHistoryDetail AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseCount,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 19 THEN 1 ELSE 0 END), 0) AS ProtectCount,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 ELSE 0 END), 0) AS DeleteCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.UserPostsCount,
+    ups.TotalScore,
+    ups.TotalViews,
+    ups.AvgScore,
+    COALESCE(phd.CloseCount, 0) AS TotalCloseCount,
+    COALESCE(phd.ProtectCount, 0) AS TotalProtectCount,
+    COALESCE(phd.DeleteCount, 0) AS TotalDeleteCount,
+    CASE 
+        WHEN ups.AvgScore IS NULL OR ups.AvgScore = 0 THEN 'No Score'
+        WHEN ups.AvgScore >= 10 THEN 'Debater'
+        WHEN ups.AvgScore BETWEEN 1 AND 9 THEN 'Novice'
+        ELSE 'Unknown'
+    END AS Status
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    PostHistoryDetail phd ON phd.PostId = ups.UserPostsCount
+WHERE 
+    ups.UserPostsCount > 0
+ORDER BY 
+    ups.TotalScore DESC 
+LIMIT 10;
+
+-- The query above retrieves the top ten users who have created the most posts in the last year, 
+-- along with their total score, total views, average score, and details about post history actions. 
+-- It uses window functions for ranking posts, 
+-- and creates common table expressions (`CTEs`) for storing intermediate results, allowing complex calculations and aggregation.

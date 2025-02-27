@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER(PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price > 0
+    GROUP BY 
+        ws.ws_item_sk, ws.ws_order_number
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_category,
+        RANK() OVER(ORDER BY i.i_item_desc) AS category_rank
+    FROM 
+        item i
+    WHERE 
+        i.i_rec_start_date <= DATE '2002-10-01' 
+        AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > DATE '2002-10-01')
+)
+SELECT 
+    d.d_date AS transaction_date,
+    COALESCE(RS.total_quantity, 0) AS web_sales_quantity,
+    COALESCE(RS.total_net_profit, 0) AS web_sales_profit,
+    ID.i_item_id,
+    ID.i_item_desc,
+    ID.i_category,
+    ID.category_rank,
+    SUM(CASE WHEN WS.ws_web_page_sk IS NULL THEN 1 ELSE 0 END) AS missing_web_page_count
+FROM 
+    date_dim d
+LEFT JOIN 
+    RankedSales RS ON RS.ws_order_number IN (
+        SELECT ws_order_number
+        FROM web_sales
+        WHERE ws_sold_date_sk = d.d_date_sk
+    )
+LEFT JOIN 
+    ItemDetails ID ON RS.ws_item_sk = ID.i_item_sk
+LEFT JOIN 
+    web_sales WS ON WS.ws_sold_date_sk = d.d_date_sk AND WS.ws_item_sk = RS.ws_item_sk
+WHERE 
+    d.d_dow BETWEEN 0 AND 6 
+    AND (ID.category_rank IS NULL OR ID.category_rank = 1)
+GROUP BY 
+    d.d_date, RS.total_quantity, RS.total_net_profit, ID.i_item_id, ID.i_item_desc, ID.i_category, ID.category_rank
+HAVING 
+    (COALESCE(RS.total_net_profit, 0) / NULLIF(COALESCE(RS.total_quantity, 0), 0)) > 10
+ORDER BY 
+    d.d_date DESC, web_sales_profit DESC;

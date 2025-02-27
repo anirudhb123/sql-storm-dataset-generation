@@ -1,0 +1,70 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL AS parent_movie_id,
+        1 AS level
+    FROM
+        aka_title AS mt
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.movie_id AS parent_movie_id,
+        mh.level + 1
+    FROM
+        movie_link AS ml
+    JOIN
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+    JOIN
+        aka_title AS m ON ml.linked_movie_id = m.id
+)
+
+SELECT 
+    COALESCE(a.name, n.name) AS actor_name,
+    COUNT(DISTINCT ch.movie_id) AS total_movies,
+    AVG(CASE WHEN n.gender = 'M' THEN 1 ELSE 0 END) * 100 AS male_percentage,
+    SUM(CASE WHEN it.info LIKE '%Oscar%' THEN 1 ELSE 0 END) AS oscar_movies,
+    ROW_NUMBER() OVER (PARTITION BY n.gender ORDER BY COUNT(DISTINCT ch.movie_id) DESC) AS rank
+FROM 
+    cast_info AS ch
+JOIN 
+    aka_name AS a ON ch.person_id = a.person_id
+LEFT JOIN 
+    complete_cast AS cc ON ch.movie_id = cc.movie_id
+LEFT JOIN 
+    title AS t ON ch.movie_id = t.id
+LEFT JOIN 
+    person_info AS pi ON a.person_id = pi.person_id
+LEFT JOIN 
+    movie_info AS mi ON ch.movie_id = mi.movie_id
+LEFT JOIN 
+    info_type AS it ON mi.info_type_id = it.id
+LEFT JOIN 
+    name AS n ON a.person_id = n.imdb_id
+LEFT JOIN 
+    MovieHierarchy AS mh ON ch.movie_id = mh.movie_id
+WHERE 
+    (n.gender IS NOT NULL OR a.name IS NOT NULL)
+    AND (n.surname_pcode IS NULL OR n.surname_pcode = 'AB')
+GROUP BY 
+    actor_name
+HAVING 
+    COUNT(DISTINCT ch.movie_id) > 5 
+    AND SUM(CASE WHEN t.production_year IS NULL THEN 1 ELSE 0 END) < 2
+ORDER BY 
+    total_movies DESC, actor_name;
+
+-- The SQL statement contains:
+-- 1. CTE for hierarchical movie relationships
+-- 2. Outer joins to include NULL cases
+-- 3. Usage of COALESCE to handle name resolution
+-- 4. Complex aggregate functions with conditional logic and window functions
+-- 5. Correlated subquery logic in the WHERE clause
+-- 6. Utilization of NULL logic for filtering results

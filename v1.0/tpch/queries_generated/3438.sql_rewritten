@@ -1,0 +1,55 @@
+WITH SupplierCost AS (
+    SELECT ps.ps_partkey,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey,
+           SUM(o.o_totalprice) AS total_order_value,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY c.c_custkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           RANK() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS supplier_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_availqty) > 100
+),
+OrderDetails AS (
+    SELECT l.l_orderkey,
+           l.l_partkey,
+           l.l_quantity,
+           l.l_extendedprice,
+           l.l_discount,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS rn,
+           CASE
+               WHEN l.l_discount > 0.2 THEN 'high_discount'
+               ELSE 'standard_discount'
+           END AS discount_category
+    FROM lineitem l
+)
+
+SELECT 
+    c.c_name,
+    r.r_name,
+    SUM(ods.l_extendedprice * (1 - ods.l_discount)) AS net_revenue,
+    COALESCE(SUM(sc.total_supply_cost), 0) AS total_supply_cost,
+    MAX(ocs.total_order_value) AS highest_order_value,
+    COUNT(DISTINCT ods.l_orderkey) AS order_count,
+    MAX(ts.supplier_rank) AS max_supplier_rank
+FROM OrderDetails ods
+JOIN CustomerOrderSummary ocs ON ocs.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ods.l_orderkey)
+JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT s.s_nationkey FROM supplier s JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey WHERE ps.ps_partkey = ods.l_partkey LIMIT 1))
+LEFT JOIN SupplierCost sc ON sc.ps_partkey = ods.l_partkey
+LEFT JOIN TopSuppliers ts ON ts.s_suppkey = (SELECT l.l_suppkey FROM lineitem l WHERE l.l_orderkey = ods.l_orderkey LIMIT 1)
+WHERE ods.discount_category = 'high_discount'
+GROUP BY c.c_name, r.r_name
+Having MAX(ocs.order_count) > 5
+ORDER BY net_revenue DESC;

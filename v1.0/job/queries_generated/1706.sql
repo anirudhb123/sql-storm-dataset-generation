@@ -1,0 +1,34 @@
+WITH movie_roles AS (
+    SELECT c.movie_id, r.role, ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) as role_order
+    FROM cast_info c
+    JOIN role_type r ON c.role_id = r.id
+),
+movie_details AS (
+    SELECT t.title, t.production_year, k.keyword, 
+           COALESCE(NULLIF(m.note, ''), 'No Note') AS movie_note,
+           ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) as title_rank
+    FROM aka_title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN movie_info_idx m ON t.id = m.movie_id
+    WHERE t.production_year IS NOT NULL
+),
+final_selection AS (
+    SELECT md.title, md.production_year, md.keyword, 
+           STRING_AGG(DISTINCT mr.role, ', ') AS roles,
+           COUNT(DISTINCT c.person_id) AS total_cast
+    FROM movie_details md
+    LEFT JOIN movie_roles mr ON md.title = mr.movie_id
+    LEFT JOIN cast_info c ON c.movie_id = md.movie_id
+    WHERE md.title_rank = 1
+    GROUP BY md.title, md.production_year, md.keyword
+)
+
+SELECT fs.title, fs.production_year, fs.keyword, fs.roles, fs.total_cast
+FROM final_selection fs
+WHERE fs.total_cast > (SELECT AVG(total_cast) 
+                        FROM final_selection 
+                        WHERE roles IS NOT NULL 
+                        HAVING COUNT(roles) > 0)
+ORDER BY fs.production_year DESC, fs.title;

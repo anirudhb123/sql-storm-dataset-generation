@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.UserId END) AS UpVoteCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.UserId END) AS DownVoteCount,
+        NTILE(5) OVER (ORDER BY COUNT(c.Id) DESC) AS CommentRank,
+        NTILE(5) OVER (ORDER BY COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.UserId END) DESC) AS UpVoteRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        CommentCount,
+        UpVoteCount,
+        DownVoteCount,
+        CommentRank,
+        UpVoteRank
+    FROM 
+        RankedPosts
+    WHERE 
+        CommentRank = 1 OR UpVoteRank = 1
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    u.DisplayName AS OwnerName,
+    CASE 
+        WHEN tp.CommentCount > 50 THEN 'Highly Discussed'
+        WHEN tp.UpVoteCount > 100 THEN 'Popular'
+        ELSE 'Normal'
+    END AS PostCategory,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopPosts tp
+JOIN 
+    Posts p ON tp.PostId = p.Id
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    (SELECT UNNEST(STRING_TO_ARRAY(p.Tags, '>')) AS TagName FROM Posts p) AS tagArray ON true
+LEFT JOIN 
+    Tags t ON tagArray.TagName = t.TagName
+GROUP BY 
+    tp.PostId, u.DisplayName, tp.CommentCount, tp.UpVoteCount, tp.DownVoteCount
+ORDER BY 
+    tp.CommentCount DESC, tp.UpVoteCount DESC;

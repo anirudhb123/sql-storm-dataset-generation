@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY t.id) AS cast_count
+    FROM
+        aka_title t
+    LEFT JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN
+        cast_info ci ON cc.subject_id = ci.person_id
+    WHERE
+        t.production_year >= 2000
+), NullFilmTitles AS (
+    SELECT
+        t.production_year,
+        COUNT(t.id) AS null_titles
+    FROM
+        title t
+    WHERE
+        t.title IS NULL
+    GROUP BY
+        t.production_year
+), CompanyDetails AS (
+    SELECT
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS company_rank
+    FROM
+        movie_companies mc
+    JOIN
+        company_name c ON mc.company_id = c.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    cd.company_name,
+    cd.company_type,
+    nt.null_titles
+FROM
+    RankedMovies rm
+LEFT JOIN
+    CompanyDetails cd ON rm.movie_id = cd.movie_id
+LEFT JOIN
+    NullFilmTitles nt ON rm.production_year = nt.production_year
+WHERE
+    rm.title_rank <= 5
+    AND (cd.company_name IS NOT NULL OR cd.company_type IS NULL)
+ORDER BY
+    rm.production_year DESC, rm.title;

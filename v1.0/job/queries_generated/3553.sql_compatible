@@ -1,0 +1,55 @@
+
+WITH RankedMovies AS (
+    SELECT
+        T.id AS movie_id,
+        T.title,
+        T.production_year,
+        COALESCE(SUM(CASE WHEN C.role_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY T.production_year ORDER BY T.production_year DESC, T.title ASC) AS rank
+    FROM
+        aka_title T
+    LEFT JOIN
+        cast_info C ON T.id = C.movie_id
+    GROUP BY
+        T.id, T.title, T.production_year
+),
+MovieKeywords AS (
+    SELECT
+        M.id AS movie_id,
+        STRING_AGG(K.keyword, ', ') AS keywords
+    FROM
+        aka_title M
+    LEFT JOIN
+        movie_keyword MK ON M.id = MK.movie_id
+    LEFT JOIN
+        keyword K ON MK.keyword_id = K.id
+    GROUP BY
+        M.id
+),
+MoviesWithDetails AS (
+    SELECT
+        RM.movie_id,
+        RM.title,
+        RM.production_year,
+        RM.cast_count,
+        COALESCE(MK.keywords, 'No keywords') AS keywords
+    FROM
+        RankedMovies RM
+    LEFT JOIN
+        MovieKeywords MK ON RM.movie_id = MK.movie_id
+)
+SELECT
+    MWD.movie_id,
+    MWD.title,
+    MWD.production_year,
+    MWD.cast_count,
+    MWD.keywords,
+    (SELECT COUNT(*) FROM complete_cast CC WHERE CC.movie_id = MWD.movie_id AND CC.status_id = 1) AS complete_status_count,
+    (SELECT AVG(P.info) FROM person_info P WHERE P.person_id IN (SELECT DISTINCT C.person_id FROM cast_info C WHERE C.movie_id = MWD.movie_id)) AS avg_person_info
+FROM
+    MoviesWithDetails MWD
+WHERE
+    MWD.cast_count > 0
+    AND MWD.production_year BETWEEN 2000 AND 2023
+ORDER BY
+    MWD.production_year DESC, MWD.cast_count DESC;

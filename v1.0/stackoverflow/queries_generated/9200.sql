@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.OwnerPostRank <= 5
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON t.Id = ANY(string_to_array(pt.Tags, ',')::int[])
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.OwnerDisplayName,
+    fp.CommentCount,
+    tt.TagName
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    TopTags tt ON tt.TagCount > 10
+ORDER BY 
+    fp.CreationDate DESC;

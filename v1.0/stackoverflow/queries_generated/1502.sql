@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.CreationDate,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+)
+SELECT 
+    p.Title AS PostTitle,
+    p.CreationDate AS PostCreationDate,
+    u.DisplayName AS OwnerName,
+    u.Reputation AS OwnerReputation,
+    COALESCE(cl.CloseReason, 'Open') AS ClosureStatus,
+    rp.Score AS PostScore,
+    rp.ViewCount AS PostViewCount,
+    rp.CommentCount AS TotalComments,
+    CASE 
+        WHEN rp.Rank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostType
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    ClosedPosts cl ON rp.Id = cl.Id
+WHERE 
+    u.Id IN (SELECT UserId FROM TopUsers WHERE UserRank <= 10)
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

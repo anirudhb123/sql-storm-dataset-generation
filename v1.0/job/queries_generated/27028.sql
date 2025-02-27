@@ -1,0 +1,54 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword AS movie_keyword,
+        GROUP_CONCAT(DISTINCT c.name) AS cast_members,
+        GROUP_CONCAT(DISTINCT ci.kind) AS company_types
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+PopularMovies AS (
+    SELECT 
+        md.movie_id,
+        md.movie_title,
+        md.production_year,
+        COUNT(DISTINCT md.cast_members) AS cast_count,
+        COUNT(DISTINCT md.movie_keyword) AS keyword_count,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT md.movie_keyword) DESC, md.production_year DESC) AS rank
+    FROM 
+        MovieDetails md
+    GROUP BY 
+        md.movie_id, md.movie_title, md.production_year
+    HAVING 
+        COUNT(DISTINCT md.movie_keyword) > 0
+)
+SELECT 
+    pm.rank,
+    pm.movie_title,
+    pm.production_year,
+    pm.cast_count,
+    pm.keyword_count
+FROM 
+    PopularMovies pm
+WHERE 
+    pm.rank <= 10
+ORDER BY 
+    pm.rank;

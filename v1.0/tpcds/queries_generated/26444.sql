@@ -1,0 +1,49 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_id, 
+        ca_street_number, 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city, 
+        ca_state, 
+        ca_zip 
+    FROM customer_address
+),
+CustomerInfo AS (
+    SELECT 
+        c_customer_id, 
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name, 
+        cd_gender, 
+        cd_marital_status, 
+        cd_purchase_estimate 
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk, 
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        COUNT(DISTINCT ws_item_sk) AS unique_items_sold
+    FROM web_sales 
+    GROUP BY ws_bill_customer_sk
+)
+SELECT 
+    ci.full_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_purchase_estimate,
+    ad.full_address,
+    ad.ca_city,
+    ad.ca_state,
+    ad.ca_zip,
+    sd.total_sales,
+    sd.order_count,
+    sd.unique_items_sold
+FROM CustomerInfo ci
+JOIN AddressDetails ad ON ci.c_customer_id = (SELECT ca_address_id FROM customer_address WHERE ca_address_sk = c.c_current_addr_sk)
+LEFT JOIN SalesData sd ON ci.c_customer_id = sd.ws_bill_customer_sk
+WHERE ci.cd_gender = 'F' 
+AND ci.cd_purchase_estimate > 1000
+ORDER BY sd.total_sales DESC
+LIMIT 100;

@@ -1,0 +1,46 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 1 AS level
+    FROM nation n
+    WHERE n.n_regionkey IS NOT NULL
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, nh.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS orders_count,
+        MAX(o.o_orderdate) AS last_order_date,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+parts_with_supplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    nh.n_name AS nation_name,
+    pws.p_name AS part_name,
+    cust.c_name AS customer_name,
+    cust.total_spent AS customer_spent,
+    pws.total_available AS part_availability,
+    (CASE WHEN cust.orders_count IS NULL THEN 'No Orders' ELSE 'Has Orders' END) AS order_status,
+    ROW_NUMBER() OVER (PARTITION BY nh.n_name ORDER BY cust.total_spent DESC) AS customer_rank
+FROM nation_hierarchy nh
+LEFT JOIN customer_order_summary cust ON nh.n_nationkey = cust.c_nationkey
+LEFT JOIN parts_with_supplier pws ON pws.total_available > 0
+WHERE cust.total_spent > 1000 OR cust.c_custkey IS NULL
+ORDER BY nh.n_name, customer_rank;

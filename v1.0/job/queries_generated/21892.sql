@@ -1,0 +1,54 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+), 
+MovieDetails AS (
+    SELECT 
+        mt.movie_id,
+        mt.company_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(mk.id) AS keyword_count,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords
+    FROM movie_companies mt
+    LEFT JOIN company_name c ON mt.company_id = c.id
+    LEFT JOIN company_type ct ON mt.company_type_id = ct.id
+    LEFT JOIN movie_keyword mk ON mt.movie_id = mk.movie_id
+    GROUP BY mt.movie_id, mt.company_id, c.name, ct.kind
+), 
+FilteredTitles AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        md.movie_id,
+        md.company_name,
+        md.company_type,
+        md.keyword_count,
+        md.keywords
+    FROM RankedTitles rt
+    JOIN MovieDetails md ON rt.production_year = EXTRACT(YEAR FROM CURRENT_DATE) - md.keyword_count
+    WHERE rt.rn <= 3 OR md.keyword_count IS NULL
+)
+SELECT 
+    ft.title,
+    ft.production_year,
+    ft.company_name,
+    ft.company_type,
+    COALESCE(ft.keywords, 'No keywords') AS keywords,
+    CASE WHEN ft.production_year IS NOT NULL THEN ft.production_year ELSE 'Unknown Year' END AS year_info
+FROM FilteredTitles ft
+LEFT JOIN aka_title at ON ft.title_id = at.id
+LEFT JOIN aka_name an ON an.person_id = (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = ft.movie_id LIMIT 1)
+WHERE EXISTS (
+    SELECT 1
+    FROM movie_info mi
+    WHERE mi.movie_id = ft.movie_id
+    AND mi.info LIKE '%Award%'
+)
+AND (ft.company_name IS NOT NULL OR ft.keyword_count > 0)
+ORDER BY ft.production_year DESC, ft.title;

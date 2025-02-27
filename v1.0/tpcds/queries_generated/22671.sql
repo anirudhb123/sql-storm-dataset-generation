@@ -1,0 +1,54 @@
+
+WITH RECURSIVE IncomeCategorization AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound,
+           CASE 
+               WHEN ib_lower_bound IS NULL OR ib_upper_bound IS NULL THEN 'Undefined'
+               ELSE
+                   CASE WHEN (ib_upper_bound - ib_lower_bound) < 1000 THEN 'Low Income'
+                        WHEN (ib_upper_bound - ib_lower_bound) BETWEEN 1000 AND 5000 THEN 'Middle Income'
+                        ELSE 'High Income' END 
+           END AS income_category
+    FROM income_band
+),
+CustomerDetails AS (
+    SELECT c.c_customer_sk, c.c_customer_id, cd.cd_gender, cd.cd_marital_status,
+           cd.cd_credit_rating, cd.cd_dep_count,
+           CASE WHEN cd.cd_dep_employed_count IS NULL THEN 0 ELSE cd.cd_dep_employed_count END AS employed_count,
+           addr.ca_city,
+           ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY cd.cd_purchase_estimate DESC) AS r_num
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address addr ON c.c_current_addr_sk = addr.ca_address_sk
+),
+SalesAggregation AS (
+    SELECT ws_bill_customer_sk,
+           SUM(ws_net_profit) AS total_profit,
+           COUNT(ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+ClusteredSales AS (
+    SELECT da.c_customer_id, 
+           COALESCE(sa.total_profit, 0) AS total_profit,
+           COALESCE(sa.order_count, 0) AS order_count,
+           ROW_NUMBER() OVER (PARTITION BY da.c_customer_id ORDER BY COALESCE(sa.total_profit, 0) DESC) AS rank
+    FROM CustomerDetails da
+    LEFT JOIN SalesAggregation sa ON da.c_customer_sk = sa.ws_bill_customer_sk
+)
+SELECT * 
+FROM ClusteredSales
+WHERE rank = 1 
+  AND (total_profit > 0 OR order_count > 5)
+  AND EXISTS (
+      SELECT 1 
+      FROM IncomeCategorization ib 
+      WHERE ib.ib_income_band_sk = (
+          SELECT hd.hd_income_band_sk 
+          FROM household_demographics hd 
+          WHERE hd.hd_demo_sk = (SELECT c.c_current_hdemo_sk 
+                                 FROM customer c 
+                                 WHERE c.c_customer_sk = ClusteredSales.c_customer_id)
+      )
+      AND income_category = 'High Income'
+  )
+ORDER BY total_profit DESC, order_count DESC;

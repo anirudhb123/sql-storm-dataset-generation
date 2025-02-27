@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId, 
+        ph.CreationDate AS EditDate,
+        ph.UserId,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)
+),
+PostStats AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.PostRank,
+        COALESCE(re.EditDate, 'No Edits') AS LastEdit,
+        COALESCE(re.UserId, 'N/A') AS LastEditor,
+        rp.CommentCount,
+        rp.TotalBounty
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentEdits re ON rp.Id = re.PostId
+)
+SELECT 
+    ps.Title,
+    ps.Score,
+    ps.CreationDate,
+    ps.LastEdit,
+    ps.LastEditor,
+    ps.CommentCount,
+    ps.TotalBounty
+FROM 
+    PostStats ps
+WHERE 
+    ps.PostRank <= 5
+ORDER BY 
+    ps.Score DESC, ps.CreationDate DESC;

@@ -1,0 +1,61 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore,
+        STRING_AGG(DISTINCT p.OwnerDisplayName, ', ') AS Owners
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.Reputation) AS TotalReputation,
+        COUNT(DISTINCT p.Id) AS PostsContributed,
+        SUM(COALESCE(p.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(p.DownVotes, 0)) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+ClosedPostReasons AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        ct.Name AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    JOIN 
+        CloseReasonTypes ct ON ph.Comment::int = ct.Id 
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AverageScore,
+    us.DisplayName AS TopOwner,
+    us.TotalReputation AS OwnerReputation,
+    (SELECT COUNT(*) FROM ClosedPostReasons cpr WHERE cpr.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE '%' || ts.TagName || '%')) AS ClosedPostCount,
+    (SELECT STRING_AGG(ClosedDate::text, ', ') FROM ClosedPostReasons cpr WHERE cpr.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE '%' || ts.TagName || '%')) AS ClosedDates
+FROM 
+    TagStatistics ts
+JOIN 
+    UserReputation us ON ts.Owners LIKE '%' || us.DisplayName || '%'
+ORDER BY 
+    ts.PostCount DESC, 
+    us.TotalReputation DESC
+LIMIT 10;

@@ -1,0 +1,51 @@
+WITH movie_details AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        SUM(CASE WHEN mc.company_type_id IS NOT NULL THEN 1 ELSE 0 END) AS production_companies
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    WHERE 
+        a.production_year >= 2000
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+ranked_movies AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.actor_count,
+        md.actors,
+        md.production_companies,
+        RANK() OVER (PARTITION BY md.production_year ORDER BY md.actor_count DESC) AS actor_rank
+    FROM 
+        movie_details md
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.actor_count,
+    rm.actors,
+    rm.production_companies
+FROM 
+    ranked_movies rm
+WHERE 
+    rm.actor_rank <= 5
+ORDER BY 
+    rm.production_year DESC, rm.actor_count DESC
+UNION ALL
+SELECT 
+    'No Movies' AS title,
+    NULL AS production_year,
+    NULL AS actor_count,
+    NULL AS actors,
+    NULL AS production_companies
+WHERE NOT EXISTS (SELECT 1 FROM ranked_movies);

@@ -1,0 +1,89 @@
+
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE
+        ps.ps_availqty > 0
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        SUM(o.o_totalprice * CASE WHEN o.o_orderstatus = 'O' THEN 1 ELSE 0 END) AS active_total
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey
+),
+NationStats AS (
+    SELECT
+        n.n_nationkey,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        SUM(c.c_acctbal) AS total_acctbal
+    FROM
+        nation n
+    JOIN
+        customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY
+        n.n_nationkey
+),
+ExtensiveLineItems AS (
+    SELECT
+        l.l_orderkey,
+        COUNT(*) AS item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM
+        lineitem l
+    WHERE
+        l.l_returnflag = 'N'
+    GROUP BY
+        l.l_orderkey
+)
+SELECT
+    p.p_partkey,
+    p.p_name,
+    ps.ps_availqty,
+    COALESCE(ss.s_name, 'Unknown Supplier') AS top_supplier,
+    ns.customer_count,
+    ol.item_count,
+    ol.total_value,
+    CASE 
+        WHEN ns.total_acctbal IS NULL THEN 'No Accounts' 
+        ELSE 'Balance Exists' 
+    END AS balance_info
+FROM
+    part p
+LEFT JOIN
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN
+    RankedSuppliers ss ON ps.ps_suppkey = ss.s_suppkey AND ss.rn = 1
+LEFT JOIN
+    NationStats ns ON p.p_type LIKE '%' || ns.n_nationkey || '%'
+LEFT JOIN
+    ExtensiveLineItems ol ON ps.ps_partkey = ol.l_orderkey
+WHERE
+    p.p_size = (SELECT MAX(p2.p_size) FROM part p2 WHERE p2.p_retailprice > 100)
+    OR EXISTS (
+        SELECT 1 
+        FROM orders o 
+        WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)
+    )
+GROUP BY
+    p.p_partkey,
+    p.p_name,
+    ps.ps_availqty,
+    ss.s_name,
+    ns.customer_count,
+    ol.item_count,
+    ol.total_value,
+    ns.total_acctbal
+ORDER BY
+    p.p_partkey DESC, balance_info;

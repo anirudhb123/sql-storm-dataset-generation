@@ -1,0 +1,64 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_number_employees,
+        s_floor_space,
+        1 AS level
+    FROM 
+        store
+    WHERE 
+        s_number_employees > 50
+
+    UNION ALL
+
+    SELECT 
+        sh.s_store_sk,
+        sh.s_store_name,
+        sh.s_number_employees,
+        sh.s_floor_space,
+        sh.level + 1
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store st ON sh.s_store_sk = st.s_store_sk
+    WHERE 
+        st.s_number_employees <= 50
+)
+
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    SUM(ws.ws_net_profit) AS total_profit,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    CASE 
+        WHEN SUM(ws.ws_net_profit) > 10000 THEN 'High Profit'
+        WHEN SUM(ws.ws_net_profit) BETWEEN 5000 AND 10000 THEN 'Moderate Profit'
+        ELSE 'Low Profit'
+    END AS profit_category,
+    RANK() OVER (PARTITION BY ca.ca_city ORDER BY total_profit DESC) as city_profit_rank,
+    DENSE_RANK() OVER (ORDER BY c.c_birth_year DESC) as birth_year_rank
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    store s ON ws.ws_store_sk = s.s_store_sk
+LEFT JOIN 
+    sales_hierarchy sh ON s.s_store_sk = sh.s_store_sk
+WHERE 
+    ca.ca_city IS NOT NULL
+    AND c.c_birth_year IS NOT NULL
+    AND ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) 
+    AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+GROUP BY 
+    c.c_first_name, c.c_last_name, ca.ca_city
+HAVING 
+    SUM(ws.ws_net_profit) > 5000
+ORDER BY 
+    total_profit DESC, c.c_last_name, c.c_first_name;
+

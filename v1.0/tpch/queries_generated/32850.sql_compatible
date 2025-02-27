@@ -1,0 +1,45 @@
+
+WITH RECURSIVE RegionsCTE AS (
+    SELECT r_regionkey, r_name, r_comment, 0 AS depth
+    FROM region
+    WHERE r_name LIKE 'A%'
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, r.r_comment, rc.depth + 1
+    FROM region r
+    JOIN RegionsCTE rc ON r.r_regionkey = rc.r_regionkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierPartCost AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT *, DENSE_RANK() OVER (ORDER BY total_cost DESC) AS supplier_rank
+    FROM SupplierPartCost
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+    HAVING SUM(l.l_extendedprice) > 10000
+)
+SELECT c.c_name, co.o_orderkey, co.o_totalprice, 
+       COALESCE(r.r_name, 'UNKNOWN') AS region, 
+       lp.total_price AS lineitem_total, 
+       ts.s_name AS top_supplier
+FROM CustomerOrders co
+LEFT JOIN lineitem li ON co.o_orderkey = li.l_orderkey
+LEFT JOIN LineItemSummary lp ON li.l_orderkey = lp.l_orderkey
+LEFT JOIN TopSuppliers ts ON li.l_partkey = ts.ps_partkey
+LEFT JOIN nation n ON ts.s_suppkey = n.n_nationkey
+LEFT JOIN RegionsCTE r ON n.n_regionkey = r.r_regionkey
+WHERE co.order_rank = 1 AND lp.total_price IS NOT NULL
+ORDER BY co.o_totalprice DESC, r.r_name;

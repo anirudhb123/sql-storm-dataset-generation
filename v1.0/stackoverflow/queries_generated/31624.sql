@@ -1,0 +1,80 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        AcceptedAnswerId,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Top-level questions
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+)
+
+-- Define a CTE for user stats aggregation
+, UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+
+-- Main query to retrieve detailed posts info with user stats
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.ViewCount,
+    p.CreationDate,
+    COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+    COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount,
+    us.DisplayName AS OwnerDisplayName,
+    us.QuestionCount AS TotalQuestionsAnswered,
+    us.AnswerCount AS TotalAnswersGiven,
+    rph.Level AS PostHierarchyLevel,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags
+FROM 
+    Posts p
+JOIN 
+    UserStats us ON p.OwnerUserId = us.UserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::int[]) -- Assuming Tags are comma-separated IDs
+LEFT JOIN 
+    RecursivePostHierarchy rph ON p.Id = rph.Id
+WHERE 
+    (p.ViewCount > 100 OR p.LastActivityDate > NOW() - INTERVAL '30 days') -- Filtering conditions
+GROUP BY 
+    p.Id, 
+    us.DisplayName, 
+    rph.Level
+ORDER BY 
+    p.ViewCount DESC, 
+    us.TotalUpVotes - us.TotalDownVotes DESC
+LIMIT 100;

@@ -1,0 +1,47 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2450000 AND 2450500
+    GROUP BY 
+        ws.web_site_sk
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_addr_sk,
+        d.d_year,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(CAST(hd.hd_income_band_sk AS VARCHAR) , 'Unknown') AS income_band
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    JOIN 
+        date_dim d ON c.c_first_sales_date_sk = d.d_date_sk
+)
+SELECT 
+    cd.income_band,
+    SUM(sd.total_sales) AS total_sales_by_income_band,
+    AVG(sd.order_count) AS avg_orders_per_site
+FROM 
+    sales_data sd
+JOIN 
+    customer_data cd ON cd.c_current_addr_sk = sd.web_site_sk 
+GROUP BY 
+    cd.income_band
+HAVING 
+    SUM(sd.total_sales) > 10000
+ORDER BY 
+    total_sales_by_income_band DESC
+FETCH FIRST 10 ROWS ONLY;

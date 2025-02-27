@@ -1,0 +1,56 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= NOW() - INTERVAL 1 YEAR
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionsAsked,
+        TotalViews,
+        TotalScore,
+        GoldBadges,
+        SilverBadges,
+        BronzeBadges,
+        @rank := IF(@prevTotalScore = TotalScore, @rank, @rank + 1) AS RankByScore,
+        @prevTotalScore := TotalScore
+    FROM 
+        UserActivity, (SELECT @rank := 0, @prevTotalScore := NULL) r
+    ORDER BY 
+        TotalScore DESC
+)
+SELECT 
+    UserId,
+    DisplayName,
+    QuestionsAsked,
+    TotalViews,
+    TotalScore,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    RankByScore
+FROM 
+    TopUsers
+WHERE 
+    RankByScore <= 10
+ORDER BY 
+    RankByScore;

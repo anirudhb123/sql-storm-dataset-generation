@@ -1,0 +1,41 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_comment, 0 AS level
+    FROM supplier
+    WHERE s_nationkey = (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+),
+RankedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+TopOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, r.total_price
+    FROM orders o
+    JOIN RankedLineItems r ON o.o_orderkey = r.l_orderkey
+    WHERE r.rank <= 5
+)
+SELECT 
+    p.p_mfgr,
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+    MAX(to.total_price) AS max_order_value
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN TopOrders to ON to.o_orderkey = ps.ps_partkey
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice)
+    FROM part p2 
+    WHERE p2.p_size BETWEEN 10 AND 20
+) AND p.p_comment IS NOT NULL
+GROUP BY p.p_mfgr
+ORDER BY total_supply_cost DESC
+LIMIT 10;

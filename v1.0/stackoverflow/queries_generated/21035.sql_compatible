@@ -1,0 +1,98 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+),
+
+PostHistoryAggregates AS (
+    SELECT
+        ph.PostId,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (4, 5) THEN 1 ELSE 0 END) AS WasEdited
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        COUNT(b.Id) AS TotalBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+
+TopUserPosts AS (
+    SELECT 
+        up.UserId,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(rp.CommentCount, 0)) AS TotalComments,
+        SUM(COALESCE(ph.EditCount, 0)) AS TotalEdits,
+        STRING_AGG(DISTINCT ub.BadgeNames, '; ') AS UserBadges
+    FROM 
+        Users up
+    LEFT JOIN 
+        Posts p ON up.Id = p.OwnerUserId
+    LEFT JOIN 
+        RankedPosts rp ON p.Id = rp.PostId
+    LEFT JOIN 
+        PostHistoryAggregates ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        UserBadges ub ON up.Id = ub.UserId
+    GROUP BY 
+        up.Id
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    t.TotalPosts,
+    t.TotalViews,
+    t.TotalComments,
+    t.TotalEdits,
+    t.UserBadges,
+    CASE 
+        WHEN u.Location IS NULL THEN 'Location Unknown'
+        ELSE u.Location
+    END AS LocationInfo,
+    CASE 
+        WHEN t.TotalPosts > 0 THEN ROUND(COALESCE(t.TotalComments, 0) * 1.0 / t.TotalPosts, 2)
+        ELSE 0
+    END AS CommentToPostRatio,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 
+            FROM Posts np 
+            WHERE np.OwnerUserId = u.Id AND np.CreationDate < '2024-10-01 12:34:56'::timestamp - INTERVAL '3 months'
+        ) THEN 'Not Active'
+        ELSE 'Active'
+    END AS ActivityStatus
+FROM 
+    Users u
+JOIN 
+    TopUserPosts t ON u.Id = t.UserId
+WHERE 
+    u.Reputation > 100
+ORDER BY 
+    t.TotalViews DESC
+FETCH FIRST 10 ROWS ONLY;

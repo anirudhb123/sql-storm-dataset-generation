@@ -1,0 +1,54 @@
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS TotalBadges, 
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId, 
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId IN (1, 2) THEN p.ViewCount ELSE 0 END) AS TotalViews,
+        AVG(p.Score) AS AvgScore
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+RecentVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        ROW_NUMBER() OVER (PARTITION BY v.UserId ORDER BY v.CreationDate DESC) AS VoteRank
+    FROM Votes v
+    GROUP BY v.UserId
+)
+SELECT 
+    u.DisplayName AS UserName,
+    COALESCE(ub.TotalBadges, 0) AS TotalBadges,
+    COALESCE(ub.BadgeNames, 'None') AS BadgeNames,
+    COALESCE(ps.TotalPosts, 0) AS TotalPosts,
+    COALESCE(ps.TotalQuestions, 0) AS TotalQuestions,
+    COALESCE(ps.TotalAnswers, 0) AS TotalAnswers,
+    COALESCE(ps.TotalViews, 0) AS TotalViews,
+    COALESCE(ps.AvgScore, 0) AS AvgScore,
+    COALESCE(rv.TotalVotes, 0) AS RecentVoteCount,
+    COALESCE(rv.UpVotesCount, 0) AS UpVotesCount,
+    COALESCE(rv.DownVotesCount, 0) AS DownVotesCount,
+    CASE 
+        WHEN rv.TotalVotes IS NOT NULL AND rv.TotalVotes > 0 THEN 'Active Voter'
+        ELSE 'Inactive Voter'
+    END AS VotingStatus
+FROM Users u
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN PostStats ps ON u.Id = ps.OwnerUserId
+LEFT JOIN RecentVotes rv ON u.Id = rv.UserId
+WHERE u.Reputation > 1000
+AND (rv.VoteRank IS NULL OR rv.VoteRank <= 5)  
+ORDER BY u.Reputation DESC, TotalPosts DESC;

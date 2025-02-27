@@ -1,0 +1,60 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11, 12, 13) THEN 1 ELSE 0 END) AS TotalCloseRevisions,
+        AVG(COALESCE(EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - p.CreationDate)), 0)) AS AvgPostAgeInSecs
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE u.Reputation > 100 AND u.CreationDate < cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM Posts p
+    WHERE p.ViewCount > (SELECT AVG(ViewCount) FROM Posts)
+),
+ClosedPostReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.Reputation,
+    ua.TotalPosts,
+    ua.TotalAnswers,
+    ua.AvgPostAgeInSecs,
+    COALESCE(bb.TotalBadges, 0) AS TotalBadges,
+    COALESCE(bb.HighestBadgeClass, 0) AS HighestBadgeClass,
+    pp.Title AS PopularPostTitle,
+    pp.ViewCount AS PopularPostViewCount,
+    cr.CloseReasons AS ClosedReasons
+FROM UserActivity ua
+LEFT JOIN UserBadges bb ON ua.UserId = bb.UserId
+LEFT JOIN PopularPosts pp ON ua.UserId = pp.OwnerUserId AND pp.Rank = 1
+LEFT JOIN ClosedPostReasons cr ON pp.PostId = cr.PostId
+WHERE ua.TotalAnswers > 5
+    AND (ua.TotalCloseRevisions > 0 OR cr.CloseReasons IS NOT NULL)
+ORDER BY ua.Reputation DESC, ua.TotalPosts DESC;

@@ -1,0 +1,75 @@
+WITH RecursiveActorTitles AS (
+    SELECT 
+        a.id AS actor_id, 
+        a.name AS actor_name, 
+        t.title AS movie_title, 
+        t.production_year AS year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS title_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL 
+        AND a.name <> '' 
+        AND t.production_year IS NOT NULL
+),
+CompanyInfo AS (
+    SELECT 
+        cc.name AS company_name, 
+        kc.keyword AS company_keyword,
+        cnt.country_code,
+        ROW_NUMBER() OVER (PARTITION BY cc.id ORDER BY kc.keyword) AS keyword_rank
+    FROM 
+        company_name cc
+    LEFT JOIN 
+        movie_companies mc ON cc.id = mc.company_id
+    LEFT JOIN 
+        movie_keyword mk ON mc.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    LEFT JOIN 
+        complete_cast co ON mc.movie_id = co.movie_id
+    LEFT JOIN 
+        person_info pi ON co.subject_id = pi.person_id
+    LEFT JOIN 
+        (SELECT DISTINCT country_code FROM company_name) cnt ON cc.country_code = cnt.country_code
+),
+AggregatedData AS (
+    SELECT 
+        actor_id,
+        actor_name,
+        COUNT(movie_title) AS movie_count,
+        STRING_AGG(DISTINCT movie_title, ', ') AS all_movies,
+        MAX(year) AS latest_year
+    FROM 
+        RecursiveActorTitles
+    GROUP BY 
+        actor_id, actor_name
+)
+SELECT 
+    ad.actor_name, 
+    ad.movie_count, 
+    ad.all_movies, 
+    ci.company_name, 
+    ci.company_keyword,
+    COALESCE(ci.country_code, 'Unknown') AS company_country,
+    CASE 
+        WHEN ad.latest_year > 2000 THEN 'Post-2000' 
+        WHEN ad.latest_year BETWEEN 1990 AND 2000 THEN '90s to 2000' 
+        ELSE 'Before 90s' 
+    END AS era,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.info_type_id = 1 AND mi.info LIKE '%Oscar%') AS total_oscar_nominations
+FROM 
+    AggregatedData ad
+FULL OUTER JOIN 
+    CompanyInfo ci ON ad.actor_id IS NULL OR ci.keyword_rank = 1
+WHERE 
+    ad.movie_count > 5
+    OR ci.company_keyword IS NOT NULL
+ORDER BY 
+    ad.movie_count DESC, 
+    ci.company_name ASC;
+

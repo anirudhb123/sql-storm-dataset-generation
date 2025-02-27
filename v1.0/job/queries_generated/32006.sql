@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COALESCE(CAST(mk.keyword AS TEXT), 'No Keywords') AS keyword,
+    COUNT(cc.person_id) AS cast_count,
+    AVG(CASE WHEN pi.info IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY mt.id) AS has_person_info
+FROM 
+    aka_name ak
+JOIN 
+    cast_info cc ON ak.person_id = cc.person_id
+JOIN 
+    aka_title mt ON cc.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    person_info pi ON ak.person_id = pi.person_id
+LEFT JOIN 
+    MovieHierarchy mh ON mt.id = mh.movie_id
+WHERE 
+    mt.production_year BETWEEN 2000 AND 2020
+    AND (ak.surname_pcode IS NOT NULL OR ak.name_pcode_cf IS NULL)
+GROUP BY 
+    ak.name,
+    mt.title,
+    mt.production_year,
+    mk.keyword
+ORDER BY 
+    mt.production_year DESC, 
+    cast_count DESC;
+
+-- Bonus: Display the recursive hierarchy of related movies
+SELECT 
+    mh.level,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT cc.person_id) AS total_cast 
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info cc ON mh.movie_id = cc.movie_id
+GROUP BY 
+    mh.level,
+    mh.title,
+    mh.production_year
+ORDER BY 
+    mh.level, 
+    total_cast DESC;
+
+This SQL query provides an elaborate performance benchmark incorporating CTEs for recursive movie relationships, aggregates, string manipulations, and conditional logic with grouping and ordering based on the retrieved movie details, as well as utilizing outer joins to enhance the variety of the results.

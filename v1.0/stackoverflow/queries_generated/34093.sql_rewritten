@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.AnswerCount, 
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' 
+        AND p.PostTypeId = 1  
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesReceived,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1  
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id  
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+    GROUP BY 
+        ph.PostId
+),
+FinalReport AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS UserDisplayName,
+        us.QuestionCount,
+        us.UpVotesReceived,
+        us.DownVotesReceived,
+        cp.CloseCount,
+        cp.CloseReasons
+    FROM 
+        RankedPosts p
+    JOIN 
+        UserStats us ON p.OwnerUserId = us.UserId
+    LEFT JOIN 
+        ClosedPosts cp ON p.PostId = cp.PostId
+    WHERE 
+        p.PostRank = 1
+)
+
+SELECT * 
+FROM FinalReport
+WHERE 
+    (CloseCount IS NULL OR CloseCount = 0)  
+ORDER BY 
+    Score DESC, 
+    CreationDate DESC 
+LIMIT 50;

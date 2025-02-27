@@ -1,0 +1,77 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.PostTypeId, p.CreationDate, p.AcceptedAnswerId, p.ParentId
+),
+RecentUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        NULLIF(u.Location, '') AS Location,
+        RANK() OVER (ORDER BY u.CreationDate DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    rpc.Title AS RecentPostTitle,
+    rpc.AnswerCount,
+    rb.BadgeCount,
+    rb.BadgeNames,
+    rpu.UserPostRank,
+    rpu.CreationDate AS PostCreationDate
+FROM 
+    RecentUsers u
+LEFT JOIN 
+    RecursivePostCTE rpc ON u.Id = rpc.OwnerUserId
+LEFT JOIN 
+    UserBadges rb ON u.Id = rb.UserId
+LEFT JOIN 
+    (
+        SELECT 
+            r.Id,
+            r.OwnerUserId,
+            r.Title,
+            r.CreationDate
+        FROM 
+            RecursivePostCTE r
+        WHERE 
+            r.AnswerCount > 0
+    ) rpu ON u.Id = rpu.OwnerUserId
+WHERE 
+    rb.BadgeCount > 0 
+    OR rpu.UserPostRank IS NOT NULL
+ORDER BY 
+    u.Reputation DESC, 
+    rpu.CreationDate DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankScore
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+PostVoteCounts AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE NULL END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE NULL END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+JoinedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        ISNULL(pvc.UpVotes, 0) AS UpVotes,
+        ISNULL(pvc.DownVotes, 0) AS DownVotes,
+        rp.RankScore
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostVoteCounts pvc ON rp.PostId = pvc.PostId
+)
+SELECT 
+    jd.PostId,
+    jd.Title,
+    jd.Score,
+    jd.UpVotes,
+    jd.DownVotes,
+    jd.OwnerDisplayName,
+    CASE 
+        WHEN jd.RankScore IS NULL THEN 'No Posts'
+        WHEN jd.RankScore = 1 THEN 'Top Post'
+        ELSE 'Rank: ' || jd.RankScore::text 
+    END AS PostRank,
+    COALESCE(
+        (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+         FROM Tags t 
+         JOIN Posts p ON t.Id = p.Id 
+         WHERE p.Id = jd.PostId), 'No Tags') AS Tags
+FROM 
+    JoinedData jd
+WHERE 
+    jd.Score > 0
+ORDER BY 
+    jd.ViewCount DESC, jd.Score DESC
+LIMIT 100;

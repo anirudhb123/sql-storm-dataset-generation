@@ -1,0 +1,65 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1996-01-01' 
+      AND o.o_orderdate < DATE '1997-01-01'
+),
+HighValueOrders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_orderdate,
+        r.o_totalprice
+    FROM RankedOrders r
+    WHERE r.order_rank <= 10
+),
+SupplierOfferings AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_value,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_comment,
+        so.total_supply_value,
+        so.supplier_count
+    FROM supplier s
+    JOIN SupplierOfferings so ON s.s_suppkey = so.ps_suppkey
+    WHERE so.total_supply_value > (
+        SELECT AVG(total_supply_value) FROM SupplierOfferings
+    )
+    ORDER BY so.total_supply_value DESC
+    LIMIT 5
+)
+SELECT 
+    coalesce(SO.s_name, 'Unknown Supplier') AS supplier_name,
+    COALESCE(ho.o_orderkey, -1) AS order_key,
+    ho.o_orderdate,
+    ho.o_totalprice,
+    r.r_name AS region_name,
+    nt.n_name AS nation_name
+FROM HighValueOrders ho
+FULL OUTER JOIN TopSuppliers SO ON ho.o_orderkey = SO.s_supplier_count
+JOIN supplier sup ON sup.s_suppkey = SO.s_suppkey 
+LEFT JOIN nation nt ON suppl.s_nationkey = nt.n_nationkey
+JOIN region r ON nt.n_regionkey = r.r_regionkey
+WHERE 
+    (ho.o_orderkey IS NULL OR ho.o_orderdate IS NOT NULL) 
+    AND (sup.s_acctbal IS NULL OR sup.s_acctbal > 5000)
+    AND (LEFT(SO.s_name, 3) NOT LIKE 'ABC' OR SO.s_name IS NULL)
+ORDER BY 
+    r.r_name, 
+    ho.o_orderdate DESC,
+    COALESCE(SO.total_supply_value, 0) DESC
+LIMIT 50;

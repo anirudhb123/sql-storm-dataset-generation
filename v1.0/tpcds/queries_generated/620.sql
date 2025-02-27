@@ -1,0 +1,52 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ss.ss_sold_date_sk,
+        ss.ss_item_sk,
+        ss.ss_ticket_number,
+        ss.ss_sales_price,
+        ss.ss_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ss.ss_item_sk ORDER BY ss.ss_sales_price DESC) AS price_rank
+    FROM 
+        store_sales ss
+)
+
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+    SUM(ss.ss_sales_price * ss.ss_quantity) AS total_sales,
+    CASE 
+        WHEN SUM(ss.ss_sales_price * ss.ss_quantity) IS NULL THEN 'No Sales'
+        ELSE 'Sales Available'
+    END AS sales_status,
+    AVG(ss.ss_sales_price) AS avg_sales_price,
+    MAX(ss.ss_sales_price) AS max_sales_price,
+    MIN(ss.ss_sales_price) AS min_sales_price
+FROM 
+    customer_address ca
+LEFT JOIN 
+    (SELECT 
+        wr_item_sk, 
+        wr_return_quantity, 
+        wr_return_amt 
+     FROM 
+        web_returns 
+     WHERE 
+        wr_return_quantity > 0 
+    ) wr ON wr.wr_item_sk = ranked_sales.ss_item_sk
+JOIN 
+    store_sales ss ON ss.ss_item_sk = ranked_sales.ss_item_sk
+LEFT JOIN 
+    ranked_sales cs ON ss.ss_item_sk = cs.ss_item_sk 
+WHERE 
+    cs.price_rank = 1
+AND 
+    ss.ss_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2022)
+GROUP BY 
+    ca.ca_city,
+    ca.ca_state
+HAVING 
+    total_sales > 5000
+ORDER BY 
+    total_sales DESC;

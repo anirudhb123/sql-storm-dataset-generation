@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity_sold,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk BETWEEN 2458849 AND 2459513 -- Example date range
+    GROUP BY
+        ws_item_sk
+),
+TopItems AS (
+    SELECT
+        item.i_item_id,
+        item.i_item_desc,
+        RankedSales.total_quantity_sold,
+        RankedSales.total_sales
+    FROM
+        RankedSales
+    JOIN
+        item ON RankedSales.ws_item_sk = item.i_item_sk
+    WHERE
+        RankedSales.sales_rank <= 10 -- Top 10 items sold
+),
+CustomerDemographics AS (
+    SELECT
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM
+        customer_demographics
+    GROUP BY
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk
+)
+SELECT
+    TOPItems.i_item_id,
+    TOPItems.i_item_desc,
+    TOPItems.total_quantity_sold,
+    TOPItems.total_sales,
+    CustomerDemographics.cd_gender,
+    CustomerDemographics.cd_marital_status,
+    CustomerDemographics.avg_purchase_estimate
+FROM
+    TopItems
+JOIN
+    CustomerDemographics ON CustomerDemographics.cd_income_band_sk = (
+        SELECT hd_income_band_sk
+        FROM household_demographics
+        WHERE hd_demo_sk = (SELECT c_current_hdemo_sk FROM customer WHERE c_customer_sk IN (SELECT DISTINCT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = TopItems.ws_item_sk))
+    )
+ORDER BY
+    TOPItems.total_sales DESC;

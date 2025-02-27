@@ -1,0 +1,58 @@
+
+WITH movie_details AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        ak.name AS actor_name,
+        c.variable_name AS character_name,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY ak.name) AS actor_order,
+        COUNT(DISTINCT mc.company_id) OVER (PARTITION BY mt.id) AS company_count,
+        mt.id AS movie_id
+    FROM 
+        aka_title mt
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        char_name c ON ci.person_id = c.imdb_id
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    WHERE 
+        mt.production_year >= 2000
+        AND ak.name IS NOT NULL
+        AND ci.nr_order IS NOT NULL
+),
+role_statistics AS (
+    SELECT 
+        ml.movie_id,
+        COUNT(DISTINCT ml.linked_movie_id) AS linked_movies_count
+    FROM 
+        movie_link ml
+    GROUP BY 
+        ml.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_name,
+    md.character_name,
+    md.actor_order,
+    COALESCE(rs.linked_movies_count, 0) AS linked_movies_count,
+    CASE
+        WHEN md.company_count > 5 THEN 'High'
+        WHEN md.company_count BETWEEN 3 AND 5 THEN 'Medium'
+        ELSE 'Low'
+    END AS company_involvement
+FROM 
+    movie_details md
+LEFT JOIN 
+    role_statistics rs ON md.movie_id = rs.movie_id
+WHERE 
+    (
+        md.actor_order = 1 
+        OR md.actor_order = 2
+    )
+ORDER BY 
+    md.production_year DESC, 
+    md.title ASC;

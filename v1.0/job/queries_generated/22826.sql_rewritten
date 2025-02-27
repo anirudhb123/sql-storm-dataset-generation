@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        mt.kind_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        mc.linked_movie_id, 
+        mt.title, 
+        mt.production_year, 
+        mt.kind_id,
+        mh.depth + 1
+    FROM 
+        movie_link mc 
+        INNER JOIN aka_title mt ON mc.movie_id = mt.id
+        INNER JOIN MovieHierarchy mh ON mc.movie_id = mh.movie_id
+),
+AggregatedInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ka.name, ', ') AS actors_names,
+        MAX(m.production_year) AS last_release_year,
+        MIN(m.production_year) AS first_release_year
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        aka_name ka ON c.person_id = ka.person_id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.kind_id,
+    ai.total_cast,
+    ai.actors_names,
+    CASE 
+        WHEN ai.first_release_year IS NULL THEN 'Unknown'
+        WHEN ai.first_release_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END AS era,
+    RANK() OVER (PARTITION BY mh.kind_id ORDER BY ai.total_cast DESC) AS cast_rank
+FROM 
+    MovieHierarchy mh
+JOIN 
+    AggregatedInfo ai ON mh.movie_id = ai.movie_id
+WHERE 
+    mh.depth = 1
+    AND ai.total_cast > 0
+    AND (ai.first_release_year IS NULL OR ai.last_release_year BETWEEN 1990 AND 2023)
+ORDER BY 
+    mh.production_year DESC,
+    cast_rank ASC
+LIMIT 50;

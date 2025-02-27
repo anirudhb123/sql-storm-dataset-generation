@@ -1,0 +1,89 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level,
+        ARRAY[mt.id] AS path
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.level + 1,
+        mh.path || m.id
+    FROM
+        aka_title m
+    JOIN MovieHierarchy mh ON m.id = m.episode_of_id
+),
+MovieInfoCTE AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        ARRAY_AGG(DISTINCT it.info) AS infos,
+        COALESCE(MAX(CASE WHEN mt.production_year IS NOT NULL THEN mt.production_year END), 0) AS max_year
+    FROM
+        aka_title mt
+    LEFT JOIN
+        movie_info mi ON mt.id = mi.movie_id
+    LEFT JOIN
+        info_type it ON mi.info_type_id = it.id
+    WHERE
+        mt.production_year >= 2000
+    GROUP BY
+        mt.id, mt.title
+),
+CastInfoCTE AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast
+    FROM
+        cast_info ci
+    JOIN
+        aka_title at ON ci.movie_id = at.id
+    WHERE
+        at.production_year >= 2000
+    GROUP BY
+        ci.movie_id
+),
+FinalResults AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mi.infos,
+        COALESCE(ci.total_cast, 0) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS rank_in_year
+    FROM
+        MovieHierarchy mh
+    LEFT JOIN
+        MovieInfoCTE mi ON mh.movie_id = mi.movie_id
+    LEFT JOIN
+        CastInfoCTE ci ON mh.movie_id = ci.movie_id
+)
+SELECT
+    fr.*,
+    CASE
+        WHEN fr.total_cast > 10 THEN 'Large Cast'
+        WHEN fr.total_cast BETWEEN 1 AND 10 THEN 'Medium Cast'
+        ELSE 'No Cast'
+    END AS cast_size,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM
+    FinalResults fr
+LEFT JOIN
+    movie_keyword mk ON fr.movie_id = mk.movie_id
+LEFT JOIN
+    keyword k ON mk.keyword_id = k.id
+WHERE
+    fr.rank_in_year <= 5
+GROUP BY
+    fr.movie_id, fr.title, fr.production_year, fr.infos, fr.total_cast
+ORDER BY
+    fr.production_year DESC, fr.title;

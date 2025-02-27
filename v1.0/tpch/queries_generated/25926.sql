@@ -1,0 +1,21 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_name, s.s_acctbal, p.p_name,
+           ROW_NUMBER() OVER (PARTITION BY p.p_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal > 10000
+), 
+CustomerOrders AS (
+    SELECT c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_name ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+)
+SELECT c.c_name, co.o_orderkey, co.o_totalprice, co.o_orderdate, 
+       rs.s_name AS Top_Supplier, rs.p_name AS Part_Name
+FROM CustomerOrders co
+JOIN RankedSuppliers rs ON co.o_orderkey = rs.rank
+WHERE rs.rank = 1
+ORDER BY co.o_orderdate DESC, co.o_totalprice DESC;

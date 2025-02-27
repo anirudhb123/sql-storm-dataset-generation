@@ -1,0 +1,83 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(mci.company_id) DESC) AS company_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mci ON t.id = mci.movie_id
+    GROUP BY 
+        t.id
+),
+TopRankedMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        company_rank = 1
+),
+ActorRoles AS (
+    SELECT 
+        ak.name AS actor_name,
+        c.movie_id,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+DetailedMovieInfo AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT ar.actor_name ORDER BY ar.role_order) AS actors,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        COALESCE(SUM(CASE WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END), 0) AS info_count
+    FROM 
+        TopRankedMovies t
+    JOIN 
+        ActorRoles ar ON t.movie_id = ar.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_info mi ON t.movie_id = mi.movie_id
+    GROUP BY 
+        t.title, t.production_year
+)
+SELECT 
+    dmi.title,
+    dmi.production_year,
+    dmi.actors,
+    dmi.keyword_count,
+    dmi.info_count,
+    CASE 
+        WHEN dmi.keyword_count > 5 THEN 'Highly Tagged'
+        WHEN dmi.info_count = 0 THEN 'Info Unavailable'
+        ELSE 'Average'
+    END AS movie_category,
+    COALESCE(STRING_AGG(DISTINCT c.name, ', ' ORDER BY c.name), 'No Companies') AS companies
+FROM 
+    DetailedMovieInfo dmi
+LEFT JOIN 
+    movie_companies mc ON dmi.production_year = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+GROUP BY 
+    dmi.title, dmi.production_year, dmi.actors, dmi.keyword_count, dmi.info_count
+ORDER BY 
+    dmi.production_year DESC, dmi.title;
+
+This SQL query performs several advanced operations:
+- It uses Common Table Expressions (CTEs) to break down the query into manageable parts, assessing rankings based on company associations.
+- It employs window functions for ranking and ordering roles.
+- It aggregates actor names into an array and counts keywords and info entries.
+- The final selection applies conditional logic for categorization and concatenates company names, ensuring efficient handling of potential NULL values with COALESCE.
+- It is designed to factor in corner cases such as movies with no associated companies or info.

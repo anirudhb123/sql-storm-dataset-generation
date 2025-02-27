@@ -1,0 +1,65 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank
+    FROM
+        web_sales ws
+    GROUP BY
+        ws.web_site_sk
+    HAVING
+        SUM(ws.ws_ext_sales_price) > 1000  -- Filter sites with substantial sales
+),
+high_value_customers AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS customer_rank
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE
+        cd.cd_purchase_estimate IS NOT NULL
+),
+item_sales AS (
+    SELECT
+        i.i_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM
+        item i
+    JOIN
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    WHERE
+        ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY
+        i.i_item_sk
+)
+SELECT
+    s.w_warehouse_id,
+    ss.total_sales,
+    hvc.c_customer_id,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    hvc.cd_purchase_estimate,
+    COUNT(DISTINCT item_sales.total_quantity_sold) AS items_sold_last_year,
+    COALESCE(LOG(1 + SUM(item_sales.avg_sales_price)), 0) AS log_avg_sales_price
+FROM
+    warehouse s
+LEFT JOIN
+    sales_summary ss ON s.w_warehouse_sk = ss.web_site_sk
+FULL OUTER JOIN
+    high_value_customers hvc ON hvc.customer_rank <= 10
+LEFT JOIN
+    item_sales ON item_sales.total_quantity_sold > 0
+WHERE
+    s.w_warehouse_id IS NOT NULL
+GROUP BY
+    s.w_warehouse_id, ss.total_sales, hvc.c_customer_id, hvc.cd_gender, hvc.cd_marital_status, hvc.cd_purchase_estimate
+ORDER BY
+    ss.total_sales DESC, hvc.cd_purchase_estimate DESC;

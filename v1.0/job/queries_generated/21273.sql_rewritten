@@ -1,0 +1,69 @@
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        CAST(NULL AS TEXT) AS previous_movie_title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        cte.title AS previous_movie_title,
+        cte.level + 1
+    FROM 
+        RecursiveMovieCTE cte
+    JOIN 
+        movie_link ml ON cte.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        cte.level < 5  
+)
+SELECT 
+    DISTINCT 
+    ak.name AS actor_name,
+    ak.name_pcode_nf AS actor_name_pcode_nf,
+    mh.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY mh.production_year DESC) AS recent_movie_rank
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+JOIN 
+    RecursiveMovieCTE mh ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword kc ON kc.id = mk.keyword_id 
+WHERE 
+    mh.production_year >= 2000 
+    AND (LOWER(ak.name) LIKE '%john%' OR ak.name IS NULL)
+    AND EXISTS (
+        SELECT 
+            1
+        FROM 
+            title t
+        WHERE 
+            t.id = mh.movie_id 
+            AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'Feature%')
+    )
+GROUP BY 
+    ak.person_id,
+    ak.name,
+    ak.name_pcode_nf,
+    mh.title,
+    mh.production_year
+HAVING 
+    COUNT(DISTINCT kc.id) > 3
+ORDER BY 
+    recent_movie_rank, 
+    mh.production_year DESC, 
+    ak.name;

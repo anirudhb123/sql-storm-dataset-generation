@@ -1,0 +1,80 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.web_site_id,
+        ws.web_name, 
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk > (SELECT MAX(d.d_date_sk) - 365 FROM date_dim d)
+    GROUP BY 
+        ws.web_site_id, ws.web_name
+), 
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band,
+        COUNT(cs.cs_order_number) AS total_store_orders,
+        COUNT(ws.ws_order_number) AS total_web_orders,
+        SUM(cs.cs_ext_sales_price) AS total_store_sales,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        store_sales cs ON c.c_customer_sk = cs.ss_customer_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, hd.hd_income_band_sk 
+), 
+PromoSummary AS (
+    SELECT 
+        p.p_promo_id,
+        p.p_promo_name,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    WHERE 
+        p.p_start_date_sk <= CURRENT_DATE AND 
+        (p.p_end_date_sk IS NULL OR p.p_end_date_sk >= CURRENT_DATE)
+    GROUP BY 
+        p.p_promo_id, p.p_promo_name
+)
+
+SELECT 
+    cs.c_customer_sk,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.cd_education_status,
+    cs.income_band,
+    cs.total_store_orders,
+    cs.total_store_sales,
+    cs.total_web_orders,
+    cs.total_web_sales,
+    COALESCE(ps.total_profit, 0) AS total_promo_profit,
+    COALESCE(ps.order_count, 0) AS promo_order_count,
+    ss.web_site_id,
+    ss.web_name,
+    ss.total_sales
+FROM 
+    CustomerStats cs
+LEFT JOIN 
+    PromoSummary ps ON cs.total_web_orders > 0
+LEFT JOIN 
+    SalesCTE ss ON ss.sales_rank <= 5
+WHERE 
+    (cs.total_store_orders + cs.total_web_orders) > 10
+ORDER BY 
+    cs.total_store_sales DESC, cs.total_web_sales DESC;

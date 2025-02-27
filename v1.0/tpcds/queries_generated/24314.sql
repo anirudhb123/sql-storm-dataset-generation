@@ -1,0 +1,50 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_order_number DESC) AS rank_order
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_date = CURRENT_DATE - INTERVAL '1' YEAR)
+),
+HighValueReturns AS (
+    SELECT
+        sr_item_sk,
+        SUM(sr_net_loss) AS total_loss,
+        COUNT(*) AS total_returns
+    FROM store_returns 
+    WHERE sr_return_quantity > 0
+    GROUP BY sr_item_sk
+    HAVING SUM(sr_net_loss) IS NOT NULL
+),
+RetentionCustomers AS (
+    SELECT DISTINCT 
+        c.c_customer_id,
+        DENSE_RANK() OVER (ORDER BY h.total_returns DESC) AS customer_rank
+    FROM customer c
+    JOIN HighValueReturns h ON c.c_customer_sk = h.sr_customer_sk
+    WHERE c.c_birth_year = (SELECT MAX(c2.c_birth_year) FROM customer c2)
+),
+IncomeStatistics AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        AVG(IFNULL(hd.hd_dep_count, 0)) AS avg_dependents,
+        COUNT(DISTINCT hd.hd_demo_sk) AS total_households
+    FROM household_demographics hd
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY ib.ib_income_band_sk
+)
+SELECT 
+    r.c_customer_id,
+    r.rank_order,
+    i.avg_dependents,
+    i.total_households,
+    COALESCE(SUM(sr.return_quantity), 0) AS total_returned
+FROM RetentionCustomers r
+LEFT JOIN RankedSales rs ON r.c_customer_id = rs.ws_order_number
+LEFT JOIN IncomeStatistics i ON i.ib_income_band_sk = (SELECT hd.hd_income_band_sk FROM household_demographics hd WHERE hd.hd_demo_sk = r.c_customer_id LIMIT 1)
+LEFT JOIN store_returns sr ON sr.sr_customer_sk = r.c_customer_id
+WHERE r.customer_rank <= 10
+GROUP BY r.c_customer_id, r.rank_order, i.avg_dependents, i.total_households
+ORDER BY r.customer_rank, r.c_customer_id;

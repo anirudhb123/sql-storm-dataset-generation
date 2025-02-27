@@ -1,0 +1,46 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           c.c_birth_month, ca.ca_city, 
+           0 AS Level
+    FROM customer c 
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk 
+    WHERE c.c_birth_month IS NOT NULL
+    UNION ALL
+    SELECT ch.c_customer_sk, ch.c_first_name, ch.c_last_name, 
+           ch.c_birth_month, ch.ca_city, 
+           Level + 1
+    FROM CustomerHierarchy ch
+    JOIN customer c2 ON ch.c_customer_sk = c2.c_current_cdemo_sk 
+    WHERE ch.Level < 5
+)
+SELECT 
+    ch.c_customer_sk,
+    ch.c_first_name,
+    ch.c_last_name,
+    ch.ca_city,
+    ch.c_birth_month,
+    CASE 
+        WHEN ch.c_birth_month <= 6 THEN 'First half'
+        ELSE 'Second half'
+    END AS Birth_Half,
+    COUNT(DISTINCT sr.sr_ticket_number) AS Total_Returns,
+    AVG(ws.ws_sales_price) AS Avg_Sales_Price,
+    SUM(COALESCE(ws.ws_ext_sales_price, 0) - ws.ws_ext_discount_amt) OVER (PARTITION BY ch.c_customer_sk) AS Net_Sales
+FROM 
+    CustomerHierarchy ch
+LEFT JOIN 
+    store_returns sr ON ch.c_customer_sk = sr.sr_customer_sk
+LEFT JOIN 
+    web_sales ws ON ch.c_customer_sk = ws.ws_bill_customer_sk
+WHERE 
+    ch.c_birth_month IS NOT NULL
+    AND (ch.ca_city LIKE '%York%' OR ch.ca_city IS NULL)
+GROUP BY 
+    ch.c_customer_sk, ch.c_first_name, ch.c_last_name, 
+    ch.ca_city, ch.c_birth_month
+HAVING 
+    COUNT(DISTINCT sr.sr_ticket_number) > 3
+ORDER BY 
+    Net_Sales DESC, ch.c_last_name ASC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

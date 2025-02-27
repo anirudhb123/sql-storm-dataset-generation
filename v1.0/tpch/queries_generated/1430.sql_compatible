@@ -1,0 +1,47 @@
+
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders AS o
+    JOIN customer AS c ON o.o_custkey = c.c_custkey
+    JOIN lineitem AS l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    AND o.o_orderdate >= DATE '1996-01-01'
+    AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_name, c.c_nationkey
+),
+TopCustomers AS (
+    SELECT
+        r.r_name,
+        COUNT(DISTINCT ro.o_orderkey) AS total_orders,
+        AVG(ro.total_revenue) AS avg_revenue
+    FROM RankedOrders AS ro
+    JOIN nation AS n ON ro.c_nationkey = n.n_nationkey
+    JOIN region AS r ON n.n_regionkey = r.r_regionkey
+    WHERE ro.revenue_rank <= 5
+    GROUP BY r.r_name
+),
+SupplierPart AS (
+    SELECT
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp AS ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    COALESCE(sp.total_available, 0) AS total_available,
+    COALESCE(sp.avg_supply_cost, 0) AS avg_supply_cost,
+    tc.r_name,
+    tc.total_orders,
+    ROUND(tc.avg_revenue, 2) AS avg_revenue
+FROM part AS p
+LEFT JOIN SupplierPart AS sp ON p.p_partkey = sp.ps_partkey
+JOIN TopCustomers AS tc ON tc.total_orders > 10
+WHERE p.p_retailprice > 100
+ORDER BY tc.avg_revenue DESC, total_available DESC;

@@ -1,0 +1,90 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN cr.Name END) AS CloseReason,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes cr ON ph.Comment = cr.Id::TEXT
+    GROUP BY 
+        ph.PostId
+),
+PostBadges AS (
+    SELECT 
+        b.UserId,
+        ARRAY_AGG(b.Name) AS Badges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserStats AS (
+    SELECT 
+        u.Id,
+        u.Reputation,
+        COALESCE(pb.Badges, '{}') AS Badges,
+        SUM(CASE WHEN v.CreationDate IS NOT NULL THEN 1 ELSE 0 END) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 4) THEN 1 ELSE 0 END) AS PositiveVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        PostBadges pb ON u.Id = pb.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    cr.CloseReason AS LastCloseReason,
+    cr.CloseReopenCount,
+    us.Reputation,
+    us.Badges,
+    us.VoteCount,
+    us.PositiveVotes,
+    CASE 
+        WHEN us.Reputation > 1000 AND us.Badges IS NOT NULL THEN 'Elite'
+        WHEN us.Reputation > 1000 THEN 'Experienced'
+        WHEN us.Badges IS NOT NULL THEN 'Novice with Badges'
+        ELSE 'Newbie'
+    END AS UserLevel,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM Posts p2 WHERE p2.AcceptedAnswerId = rp.Id) THEN 'Accepted Answer'
+        ELSE 'Not Accepted'
+    END AS AnswerStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    CloseReasons cr ON rp.Id = cr.PostId
+JOIN 
+    UserStats us ON rp.OwnerUserId = us.Id
+WHERE 
+    (rp.Score > 10 OR cr.CloseReopenCount > 0)
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC, 
+    rp.CreationDate ASC;

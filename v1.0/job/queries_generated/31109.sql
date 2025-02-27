@@ -1,0 +1,43 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM title m
+    WHERE m.episode_of_id IS NULL  -- Get root movies that are not episodes
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1
+    FROM title e
+    INNER JOIN movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    t.title AS movie_title,
+    mh.level AS episode_level,
+    m.duration,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COALESCE(cn.name, 'Unknown') AS company_name,
+    COUNT(DISTINCT c.role_id) AS total_roles,
+    SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS notes_present
+FROM aka_name ak
+JOIN cast_info c ON ak.person_id = c.person_id
+JOIN title t ON c.movie_id = t.id
+LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN company_name cn ON mc.company_id = cn.id
+LEFT JOIN movie_hierarchy mh ON t.id = mh.movie_id
+WHERE ak.name IS NOT NULL
+    AND t.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    ak.name, t.title, mh.level, m.duration, cn.name
+ORDER BY 
+    mh.level, ak.name;
+

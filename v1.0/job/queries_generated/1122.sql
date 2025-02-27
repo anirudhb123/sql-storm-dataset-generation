@@ -1,0 +1,72 @@
+WITH MovieData AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword,
+        COUNT(DISTINCT cc.person_id) AS actor_count,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS noted_roles
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY 
+        t.title, t.production_year, k.keyword
+),
+RankedMovies AS (
+    SELECT 
+        title,
+        production_year,
+        keyword,
+        actor_count,
+        noted_roles,
+        RANK() OVER (PARTITION BY production_year ORDER BY actor_count DESC) AS rank_within_year
+    FROM 
+        MovieData
+),
+FinalOutput AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.keyword,
+        rm.actor_count,
+        rm.noted_roles,
+        COALESCE(gender_stats.gender_count, 0) AS gender_count,
+        CASE 
+            WHEN rm.actor_count > 10 THEN 'Highly Casted'
+            WHEN rm.actor_count BETWEEN 5 AND 10 THEN 'Moderately Casted'
+            ELSE 'Lightly Casted'
+        END AS casting_category
+    FROM 
+        RankedMovies rm
+    LEFT JOIN (
+        SELECT 
+            ci.role_id,
+            COUNT(DISTINCT n.gender) AS gender_count
+        FROM 
+            cast_info ci
+        JOIN 
+            name n ON ci.person_id = n.imdb_id
+        GROUP BY 
+            ci.role_id
+    ) AS gender_stats ON rm.keyword = gender_stats.role_id
+    WHERE 
+        rm.rank_within_year < 5
+)
+SELECT 
+    fo.title,
+    fo.production_year,
+    fo.keyword,
+    fo.actor_count,
+    fo.noted_roles,
+    fo.gender_count,
+    fo.casting_category
+FROM 
+    FinalOutput fo
+ORDER BY 
+    fo.production_year DESC, fo.actor_count DESC;

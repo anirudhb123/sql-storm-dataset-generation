@@ -1,0 +1,53 @@
+WITH RECURSIVE product_sales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_sales
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '2021-01-01' AND l.l_shipdate < DATE '2022-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000
+    UNION ALL
+    SELECT 
+        ps.ps_partkey,
+        (SELECT p_name FROM part WHERE p_partkey = ps.ps_partkey) AS p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_sales
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '2021-01-01' AND l.l_shipdate < DATE '2022-01-01'
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        COUNT(DISTINCT l.l_orderkey) > (SELECT COUNT(*) FROM orders WHERE o_orderstatus = 'O') / 2
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(ps.total_sales), 0) AS total_region_sales,
+    STRING_AGG(p.p_name, ', ') AS product_names
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    product_sales ps ON s.s_suppkey = ps.p_partkey
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT s.s_suppkey) > (SELECT COUNT(*) FROM supplier) * 0.1
+ORDER BY 
+    total_region_sales DESC, r.r_name
+LIMIT 10
+OFFSET (SELECT COUNT(DISTINCT r_name) FROM region) - 10 * (2 - 1);

@@ -1,0 +1,62 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_order_number, 
+        ws_item_sk, 
+        ws_sales_price, 
+        ws_quantity, 
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_sales_price DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_date = '2001-01-01')
+),
+
+Return_Amounts AS (
+    SELECT 
+        wr_order_number,
+        SUM(wr_return_amt) AS total_return_amt,
+        SUM(wr_return_qty) AS total_return_qty
+    FROM 
+        web_returns
+    WHERE 
+        wr_returned_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2001-01-01') 
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2001-02-01')
+    GROUP BY 
+        wr_order_number
+),
+
+Top_Sales AS (
+    SELECT 
+        s.ws_order_number, 
+        s.ws_item_sk,
+        s.ws_sales_price * s.ws_quantity AS total_sales,
+        COALESCE(r.total_return_amt, 0) AS total_return_amt,
+        COALESCE(r.total_return_qty, 0) AS total_return_qty,
+        s.ws_net_profit - COALESCE(r.total_return_amt, 0) AS net_profit_after_returns
+    FROM 
+        Sales_CTE s
+    LEFT JOIN 
+        Return_Amounts r ON s.ws_order_number = r.wr_order_number
+    WHERE 
+        s.rn = 1  
+)
+
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    ts.total_sales,
+    ts.total_return_amt,
+    ts.net_profit_after_returns,
+    CASE 
+        WHEN ts.net_profit_after_returns < 0 THEN 'Loss'
+        ELSE 'Profit'
+    END AS profit_status
+FROM 
+    Top_Sales ts
+JOIN 
+    item i ON ts.ws_item_sk = i.i_item_sk
+ORDER BY 
+    ts.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

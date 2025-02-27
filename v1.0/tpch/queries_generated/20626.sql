@@ -1,0 +1,52 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderstatus, o_orderdate, 0 AS Level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderstatus, o.o_orderdate, oh.Level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE oh.Level < 5
+),
+SupplierPricing AS (
+    SELECT ps_suppkey, SUM(ps_supplycost * ps_availqty) AS TotalCost
+    FROM partsupp
+    WHERE ps_supplycost > 0
+    GROUP BY ps_suppkey
+),
+AggregatedOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS TotalSpent,
+        COUNT(DISTINCT o.o_orderkey) AS OrdersCount
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+    GROUP BY c.c_custkey
+)
+SELECT
+    r.r_name AS RegionName,
+    n.n_name AS NationName,
+    p.p_name AS PartName,
+    COUNT(DISTINCT oh.o_orderkey) AS OrderCount,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS Revenue,
+    AVG(sp.TotalCost) FILTER (WHERE sp.TotalCost IS NOT NULL) AS AvgSupplierCost,
+    STRING_AGG(DISTINCT CONCAT(c.c_name, ': ', ag.TotalSpent), '; ') AS CustomerOverview
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN OrderHierarchy oh ON l.l_orderkey = oh.o_orderkey
+JOIN AggregatedOrders ag ON ag.c_custkey = oh.o_custkey
+LEFT JOIN SupplierPricing sp ON s.s_suppkey = sp.ps_suppkey
+WHERE r.r_name LIKE 'A%'
+  AND l.l_shipdate IS NOT NULL
+  AND l.l_tax > 0
+  AND (l.l_returnflag = 'N' OR l.l_returnflag IS NULL)
+GROUP BY r.r_name, n.n_name, p.p_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY Revenue DESC, OrderCount DESC;

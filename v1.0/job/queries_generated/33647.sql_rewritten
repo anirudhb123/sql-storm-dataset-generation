@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS level,
+        NULL::integer AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.season_nr IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        me.id AS movie_id,
+        me.title AS movie_title,
+        mh.level + 1,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title me
+    JOIN 
+        movie_link ml ON me.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.level,
+    COALESCE(k.keyword, 'No Keyword') AS keyword,
+    COALESCE(pm.actor_count, 0) AS actor_count,
+    CASE 
+        WHEN mh.level > 1 THEN 'Child Movie'
+        ELSE 'Top-level Movie'
+    END AS movie_type
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+) pm ON pm.movie_id = mh.movie_id
+ORDER BY 
+    mh.level, mh.movie_title;

@@ -1,0 +1,73 @@
+WITH TagData AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        STRING_AGG(DISTINCT p.Title, ', ') AS RelatedPostTitles
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+VoteStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserPostData AS (
+    SELECT 
+        u.DisplayName AS UserDisplayName,
+        COUNT(p.Id) AS UserPostCount,
+        SUM(COALESCE(vs.Upvotes, 0)) AS UserTotalUpvotes,
+        SUM(COALESCE(vs.Downvotes, 0)) AS UserTotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        VoteStatistics vs ON p.Id = vs.PostId
+    GROUP BY 
+        u.DisplayName
+),
+PostHistoryChanges AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(ph.Id) AS ChangeCount,
+        STRING_AGG(DISTINCT ph.UserDisplayName, ', ') AS EditorsNames
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+SELECT 
+    td.TagName,
+    td.PostCount,
+    td.RelatedPostTitles,
+    upd.UserDisplayName,
+    upd.UserPostCount,
+    upd.UserTotalUpvotes,
+    upd.UserTotalDownvotes,
+    phc.ChangeCount,
+    phc.EditorsNames
+FROM 
+    TagData td
+JOIN 
+    UserPostData upd ON upd.UserPostCount > 0
+LEFT JOIN 
+    PostHistoryChanges phc ON phc.PostId IN (
+        SELECT p.Id
+        FROM Posts p 
+        WHERE p.Tags LIKE '%' || td.TagName || '%'
+        )
+ORDER BY 
+    td.PostCount DESC, upd.UserDisplayName;

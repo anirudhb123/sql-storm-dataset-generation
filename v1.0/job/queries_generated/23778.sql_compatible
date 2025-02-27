@@ -1,0 +1,68 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.phonetic_code,
+        CAST(NULL AS VARCHAR) AS parent_title,
+        1 AS hierarchy_level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+        
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.phonetic_code,
+        mh.title AS parent_title,
+        mh.hierarchy_level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ah.name AS actor_name,
+    mh.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mc.company_id) AS production_companies_count,
+    SUM(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'box_office') 
+             THEN CAST(mi.info AS NUMERIC) ELSE 0 END) AS total_box_office,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY mi.note DESC) AS rank_info,
+    AVG(NULLIF(ko.id, 0)) OVER (PARTITION BY mh.movie_id) AS average_keyword_id,
+    COUNT(CASE WHEN ci.note IS NOT NULL THEN 1 END) AS non_null_cast_notes
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ah ON ci.person_id = ah.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+WHERE 
+    mh.production_year > 2000
+    AND (ah.name IS NOT NULL OR ci.note LIKE '%lead%')
+GROUP BY 
+    ah.name, mh.title, mh.production_year, mh.movie_id
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    total_box_office DESC NULLS LAST,
+    movie_title ASC,
+    actor_name DESC;

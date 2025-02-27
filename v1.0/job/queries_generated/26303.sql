@@ -1,0 +1,56 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name SEPARATOR ', ') AS actors,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword SEPARATOR ', ') AS keywords,
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR ', ') AS companies
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id
+),
+MovieInfo AS (
+    SELECT 
+        md.title_id,
+        md.title,
+        md.production_year,
+        md.actors,
+        md.keywords,
+        mi.info AS additional_info
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        movie_info mi ON md.title_id = mi.movie_id
+    WHERE 
+        mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Rating')
+)
+SELECT 
+    mi.title_id,
+    mi.title,
+    mi.production_year,
+    mi.actors,
+    mi.keywords,
+    mi.additional_info
+FROM 
+    MovieInfo mi
+WHERE 
+    mi.additional_info IS NOT NULL
+ORDER BY 
+    mi.production_year DESC, 
+    mi.title;

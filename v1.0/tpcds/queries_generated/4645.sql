@@ -1,0 +1,69 @@
+
+WITH sales_data AS (
+    SELECT 
+        w.w_warehouse_id,
+        w.w_warehouse_name,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_paid) AS avg_order_value
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id, w.w_warehouse_name
+), 
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+returns_data AS (
+    SELECT 
+        sr.sr_store_sk,
+        SUM(sr.sr_return_amt) AS total_return_amt,
+        COUNT(sr.sr_ticket_number) AS return_count
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_store_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    SUM(sd.total_sales) AS total_sales,
+    sd.order_count,
+    COALESCE(rd.total_return_amt, 0) AS total_return_amt,
+    rd.return_count,
+    CASE 
+        WHEN SUM(sd.total_sales) > 10000 THEN 'VIP'
+        WHEN SUM(sd.total_sales) BETWEEN 5000 AND 10000 THEN 'Regular'
+        ELSE 'New'
+    END AS customer_segment
+FROM 
+    sales_data sd
+JOIN 
+    customer_info ci ON sd.w_warehouse_id = (
+        SELECT 
+            ws.ws_web_site_sk 
+        FROM 
+            web_sales ws 
+        WHERE 
+            ws.ws_bill_customer_sk = ci.c_customer_id 
+        LIMIT 1
+    )
+LEFT JOIN 
+    returns_data rd ON sd.w_warehouse_id = rd.sr_store_sk
+GROUP BY 
+    ci.c_customer_id, ci.c_first_name, ci.c_last_name, sd.order_count, rd.total_return_amt, rd.return_count
+ORDER BY 
+    total_sales DESC, ci.c_last_name ASC;

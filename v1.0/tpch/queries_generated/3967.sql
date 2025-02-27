@@ -1,0 +1,61 @@
+WITH SupplierPerformance AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderAnalysis AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_quantity * l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_extendedprice DESC) AS rank_based_on_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+),
+HighValueOrders AS (
+    SELECT 
+        oa.o_orderkey,
+        oa.total_lineitem_value
+    FROM 
+        OrderAnalysis oa
+    WHERE 
+        oa.total_lineitem_value > (SELECT AVG(total_lineitem_value) FROM OrderAnalysis)
+)
+SELECT 
+    np.n_name,
+    COALESCE(np.suppliers_count, 0) AS suppliers_count,
+    COALESCE(hv.total_lineitem_value, 0) AS high_value_order_total
+FROM 
+    (SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS suppliers_count
+     FROM 
+        nation n
+     LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+     GROUP BY 
+        n.n_name) np
+FULL OUTER JOIN 
+    (SELECT 
+        o.o_orderkey,
+        SUM(oa.total_lineitem_value) AS total_lineitem_value
+     FROM 
+        HighValueOrders oa
+     JOIN 
+        orders o ON oa.o_orderkey = o.o_orderkey
+     GROUP BY 
+        o.o_orderkey) hv ON np.suppliers_count = hv.total_lineitem_value
+ORDER BY 
+    np.n_name DESC NULLS LAST;

@@ -1,0 +1,56 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(ps.ps_partkey) AS total_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+OrderLineAggregation AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        COUNT(l.l_linenumber) AS line_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+CombinedStats AS (
+    SELECT 
+        cs.c_custkey, 
+        cs.c_name, 
+        ss.s_suppkey, 
+        ss.s_name,
+        cs.total_orders,
+        cs.total_spent,
+        os.total_value AS order_total_value,
+        os.line_count
+    FROM CustomerStats cs
+    JOIN SupplierStats ss ON cs.total_orders > 5 -- Let's consider only customers with more than 5 orders
+    JOIN OrderLineAggregation os ON cs.total_orders = os.line_count
+)
+SELECT 
+    c.c_name AS customer_name,
+    s.s_name AS supplier_name,
+    cs.total_orders,
+    cs.total_spent,
+    ss.total_supply_cost,
+    os.total_value AS order_total_value,
+    os.line_count
+FROM CombinedStats cs
+JOIN customer c ON cs.c_custkey = c.c_custkey
+JOIN supplier s ON cs.s_suppkey = s.s_suppkey
+WHERE cs.total_spent > 1000
+ORDER BY total_spent DESC
+LIMIT 10;

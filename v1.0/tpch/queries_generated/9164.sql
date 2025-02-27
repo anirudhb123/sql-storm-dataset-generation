@@ -1,0 +1,32 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 1000 AND sh.level < 5
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size BETWEEN 10 AND 20
+),
+OrderStats AS (
+    SELECT o.o_orderkey, COUNT(l.l_orderkey) AS line_item_count, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01'
+    GROUP BY o.o_orderkey
+),
+FinalResults AS (
+    SELECT sh.s_name, sh.level, pd.p_name, os.total_revenue
+    FROM SupplierHierarchy sh
+    JOIN PartDetails pd ON pd.ps_supplycost <= 100
+    JOIN OrderStats os ON os.line_item_count > 1
+    ORDER BY os.total_revenue DESC, sh.level ASC
+)
+SELECT * FROM FinalResults
+LIMIT 10;

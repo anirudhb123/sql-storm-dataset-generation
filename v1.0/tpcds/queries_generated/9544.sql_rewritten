@@ -1,0 +1,58 @@
+WITH customer_stats AS (
+    SELECT 
+        c.c_current_cdemo_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT cs.cs_order_number) AS order_count,
+        AVG(DATEDIFF(DAY, d.d_date, cast('2002-10-01' as date))) AS avg_days_since_last_order
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY 
+        c.c_current_cdemo_sk
+),
+demographic_details AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_income_band_sk
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+final_stats AS (
+    SELECT 
+        cs.c_current_cdemo_sk,
+        ds.cd_gender,
+        ds.cd_marital_status,
+        ds.ib_income_band_sk,
+        cs.total_net_profit,
+        cs.order_count,
+        cs.avg_days_since_last_order
+    FROM 
+        customer_stats cs
+    JOIN 
+        demographic_details ds ON cs.c_current_cdemo_sk = ds.cd_demo_sk
+)
+SELECT 
+    fs.cd_gender,
+    fs.cd_marital_status,
+    fs.ib_income_band_sk,
+    COUNT(*) AS customer_count,
+    AVG(fs.total_net_profit) AS avg_net_profit,
+    SUM(fs.order_count) AS total_orders,
+    AVG(fs.avg_days_since_last_order) AS avg_days_since_last_order
+FROM 
+    final_stats fs
+GROUP BY 
+    fs.cd_gender, fs.cd_marital_status, fs.ib_income_band_sk
+ORDER BY 
+    avg_net_profit DESC, total_orders DESC;

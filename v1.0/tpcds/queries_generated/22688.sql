@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank
+    FROM web_sales ws
+    GROUP BY ws.web_site_sk
+),
+CustomerReturns AS (
+    SELECT
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returns,
+        MAX(wr_return_amt) AS max_return_amt
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+),
+SalesWithReturns AS (
+    SELECT
+        cs.cs_ship_mode_sk,
+        COUNT(DISTINCT cs.cs_order_number) AS order_count,
+        COALESCE(SUM(cs.cs_ext_sales_price - COALESCE(cr.cr_return_amount, 0)), 0) AS net_sales,
+        COALESCE(SUM(cr.cr_return_amount), 0) AS total_returns
+    FROM catalog_sales cs
+    LEFT JOIN catalog_returns cr ON cs.cs_order_number = cr.cr_order_number
+    GROUP BY cs.cs_ship_mode_sk
+),
+AddressJoin AS (
+    SELECT
+        c.c_customer_id,
+        ca.ca_city AS customer_city,
+        sm.sm_type AS ship_mode_type,
+        COALESCE(cd.cd_gender, 'U') AS gender_flag -- 'U' for unknown
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN ship_mode sm ON sm.sm_ship_mode_sk IN (SELECT DISTINCT cs.cs_ship_mode_sk FROM catalog_sales cs)
+)
+SELECT
+    a.customer_city,
+    COUNT(DISTINCT a.c_customer_id) AS customer_count,
+    SUM(swr.total_sales) AS total_web_sales,
+    SUM(sar.net_sales) AS total_net_sales,
+    AVG(sar.total_returns) AS average_returns,
+    MAX(swr.max_return_amt) AS max_return_amt,
+    COUNT(DISTINCT a.c_customer_id) FILTER(WHERE a.gender_flag = 'M') AS male_customers,
+    COUNT(DISTINCT a.c_customer_id) FILTER(WHERE a.gender_flag = 'F') AS female_customers
+FROM AddressJoin a
+LEFT JOIN RankedSales swr ON a.c_customer_id = swr.web_site_sk
+LEFT JOIN CustomerReturns cr ON cr.wr_returning_customer_sk = a.c_customer_id
+LEFT JOIN SalesWithReturns sar ON a.c_customer_id = sar.cs_ship_mode_sk
+WHERE a.customer_city IS NOT NULL
+  AND (a.gender_flag IS NOT NULL OR a.gender_flag = 'U') -- include unknown genders
+GROUP BY a.customer_city
+HAVING COUNT(DISTINCT a.c_customer_id) > 10
+ORDER BY total_web_sales DESC, customer_city ASC;

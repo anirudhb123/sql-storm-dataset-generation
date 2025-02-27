@@ -1,0 +1,52 @@
+WITH RecursiveMovieLinks AS (
+    SELECT ml.movie_id, ml.linked_movie_id, l.link AS link_type
+    FROM movie_link ml
+    JOIN link_type l ON ml.link_type_id = l.id
+    UNION ALL
+    SELECT ml.movie_id, ml.linked_movie_id, l.link AS link_type
+    FROM movie_link ml
+    JOIN RecursiveMovieLinks rml ON ml.movie_id = rml.linked_movie_id
+    JOIN link_type l ON ml.link_type_id = l.id
+),
+MovieProductionYearCTE AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+ActorRolesCTE AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        COUNT(DISTINCT ci.role_id) AS total_roles,
+        MAX(CASE WHEN r.role = 'Lead' THEN 1 ELSE 0 END) AS is_lead
+    FROM cast_info ci
+    JOIN role_type r ON ci.role_id = r.id
+    GROUP BY ci.person_id, ci.movie_id
+),
+FilteredActors AS (
+    SELECT DISTINCT ak.id AS actor_id, ak.name, p.info
+    FROM aka_name ak
+    LEFT JOIN person_info p ON ak.person_id = p.person_id
+    WHERE ak.name IS NOT NULL
+)
+SELECT 
+    t.title,
+    t.production_year,
+    STRING_AGG(DISTINCT ak.name ORDER BY ak.name) AS actors,
+    COUNT(DISTINCT mv.linked_movie_id) AS linked_movies,
+    COALESCE(SUM(ar.total_roles), 0) AS roles_contributed,
+    (SELECT COUNT(1) FROM translated_keywords k WHERE k.movie_id = t.id) AS keyword_count
+FROM title t
+LEFT JOIN RecursiveMovieLinks mv ON t.id = mv.movie_id
+LEFT JOIN ActorRolesCTE ar ON t.id = ar.movie_id
+LEFT JOIN FilteredActors ak ON ak.actor_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = t.id)
+LEFT JOIN movie_keyword mk ON mk.movie_id = t.id
+WHERE t.production_year >= (SELECT MIN(production_year) FROM title) 
+GROUP BY t.id
+HAVING COUNT(DISTINCT ak.name) > 0 
+ORDER BY t.production_year DESC, t.title ASC;
+

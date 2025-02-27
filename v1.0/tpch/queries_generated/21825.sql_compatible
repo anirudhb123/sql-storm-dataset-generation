@@ -1,0 +1,49 @@
+
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal * 0.9, cte.level + 1
+    FROM supplier s
+    JOIN SupplierCTE cte ON s.s_nationkey = cte.s_nationkey
+    WHERE cte.level < 3 AND s.s_acctbal < cte.s_acctbal
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    WHERE p.p_size IS NOT NULL AND p.p_comment NOT LIKE '%obsolete%'
+),
+NationSupplier AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           AVG(l.l_quantity) AS avg_quantity,
+           MAX(l.l_tax) AS max_tax,
+           COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+    WHERE o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY o.o_orderkey, s.s_name
+),
+ComplexAggregate AS (
+    SELECT p.p_name, SUM(od.total_sales) AS total_sales,
+           COUNT(DISTINCT od.o_orderkey) AS order_count
+    FROM FilteredParts p
+    JOIN OrderDetails od ON p.p_partkey = od.o_orderkey % 10
+    GROUP BY p.p_name
+    HAVING SUM(od.total_sales) > 50000
+)
+SELECT n.n_name, ns.supplier_count, ca.p_name, ca.total_sales, ca.order_count
+FROM NationSupplier ns
+LEFT JOIN ComplexAggregate ca ON ns.supplier_count > 10
+JOIN region r ON ns.supplier_count < 20
+WHERE r.r_name LIKE 'Eastern%' OR r.r_comment IS NULL
+ORDER BY ca.total_sales DESC, ns.n_name
+FETCH FIRST 15 ROWS ONLY;

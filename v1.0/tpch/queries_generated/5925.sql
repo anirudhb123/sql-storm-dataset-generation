@@ -1,0 +1,53 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal, 
+        c.c_mktsegment, 
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS rank
+    FROM 
+        customer c
+), 
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+), 
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01' AND l.l_shipdate < DATE '2024-01-01'
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        total_sales > 10000
+) 
+SELECT 
+    rc.c_name, 
+    rc.c_acctbal, 
+    rc.c_mktsegment, 
+    od.total_sales, 
+    COUNT(DISTINCT ps.ps_partkey) AS part_count,
+    SUM(ps.ps_supplycost) AS total_supply_cost
+FROM 
+    RankedCustomers rc
+JOIN 
+    OrderDetails od ON rc.c_custkey = od.o_orderkey
+JOIN 
+    partsupp ps ON ps.ps_suppkey IN (SELECT s_suppkey FROM HighValueSuppliers) 
+GROUP BY 
+    rc.c_name, rc.c_acctbal, rc.c_mktsegment, od.total_sales
+ORDER BY 
+    total_sales DESC, rc.c_acctbal DESC
+LIMIT 100;

@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5 
+),
+BadgedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        b.Name AS BadgeName,
+        b.Class
+    FROM 
+        Users u
+    JOIN 
+        Badges b ON u.Id = b.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS CloseCount
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        p.Id
+),
+UserInsights AS (
+    SELECT 
+        tu.UserId,
+        tu.DisplayName,
+        tu.QuestionCount,
+        tu.TotalViews,
+        COALESCE(SUM(bu.BadgeName IS NOT NULL), 0) AS BadgeCount,
+        COALESCE(cp.CloseCount, 0) AS ClosedPostCount
+    FROM 
+        TopUsers tu
+    LEFT JOIN 
+        BadgedUsers bu ON tu.UserId = bu.UserId
+    LEFT JOIN 
+        ClosedPosts cp ON cp.PostId IN (
+            SELECT Id FROM Posts WHERE OwnerUserId = tu.UserId
+        )
+    GROUP BY 
+        tu.UserId, tu.DisplayName, tu.QuestionCount, tu.TotalViews, cp.CloseCount
+)
+SELECT 
+    ui.UserId,
+    ui.DisplayName,
+    ui.QuestionCount,
+    ui.TotalViews,
+    ui.BadgeCount,
+    ui.ClosedPostCount,
+    COUNT(DISTINCT rp.PostId) AS TopPostsCount
+FROM 
+    UserInsights ui
+LEFT JOIN 
+    RankedPosts rp ON rp.PostId = (
+        SELECT PostId FROM RankedPosts WHERE Rank <= 5 AND OwnerUserId = ui.UserId
+    )
+GROUP BY 
+    ui.UserId, ui.DisplayName, ui.QuestionCount, ui.TotalViews, ui.BadgeCount, ui.ClosedPostCount
+ORDER BY 
+    ui.Reputation DESC
+LIMIT 10;

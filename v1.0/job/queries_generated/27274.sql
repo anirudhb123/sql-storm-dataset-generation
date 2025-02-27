@@ -1,0 +1,48 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        k.keyword AS movie_keyword,
+        ARRAY_AGG(DISTINCT c.name) AS cast_names,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank_year
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        a.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'feature'))
+        AND a.production_year >= 2000
+    GROUP BY 
+        a.id, a.title, a.production_year, k.keyword
+),
+
+FilteredTitles AS (
+    SELECT 
+        rt.movie_title,
+        rt.production_year,
+        rt.movie_keyword,
+        rt.cast_names
+    FROM 
+        RankedTitles rt
+    WHERE 
+        rt.rank_year <= 10 -- Get top 10 recent movies
+)
+
+SELECT 
+    ft.movie_title,
+    ft.production_year,
+    ft.movie_keyword,
+    ft.cast_names
+FROM 
+    FilteredTitles ft
+ORDER BY 
+    ft.production_year DESC, 
+    ft.movie_title ASC;

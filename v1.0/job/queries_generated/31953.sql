@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 3  -- limiting the hierarchy depth to 3 levels
+)
+
+SELECT 
+    ah.name AS actor_name,
+    ak.title AS movie_title,
+    ak.production_year,
+    COUNT(DISTINCT mc.company_id) AS num_companies,
+    MAX(CASE WHEN mc.note IS NOT NULL THEN mc.note ELSE 'No notes' END) AS notes,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY ah.id ORDER BY ak.production_year DESC) AS rank_in_movies,
+    AVG(COALESCE(mi.info::float, 0)) AS average_info_value
+FROM 
+    aka_name ah
+JOIN 
+    cast_info ci ON ah.person_id = ci.person_id
+JOIN 
+    movie_hierarchy ak ON ci.movie_id = ak.movie_id
+LEFT JOIN 
+    movie_companies mc ON ak.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mw ON ak.movie_id = mw.movie_id
+LEFT JOIN 
+    keyword k ON mw.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON ak.movie_id = mi.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Rating')
+WHERE 
+    ah.name IS NOT NULL 
+    AND ak.production_year >= 2000 
+GROUP BY 
+    ah.name, ak.title, ak.production_year
+ORDER BY 
+    rank_in_movies, ak.production_year DESC;

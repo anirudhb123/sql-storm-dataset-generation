@@ -1,0 +1,49 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        r.total_sales
+    FROM 
+        customer c
+    JOIN 
+        ranked_sales r ON c.c_customer_sk = r.ws_bill_customer_sk
+    WHERE 
+        r.sales_rank <= 10
+)
+SELECT 
+    t.c_customer_sk,
+    t.c_first_name,
+    t.c_last_name,
+    COALESCE(t.total_sales, 0) AS total_sales,
+    SUM(sr_return_quantity) AS total_returns,
+    COUNT(DISTINCT ws_order_number) AS total_orders,
+    AVG(CASE WHEN s.ss_item_sk IS NOT NULL THEN s.ss_sales_price END) AS avg_item_price,
+    STRING_AGG(DISTINCT CONCAT(i.i_product_name, ' (', i.i_item_id, ')') ORDER BY i.i_product_name) AS purchased_items
+FROM 
+    top_customers t
+LEFT JOIN 
+    store_returns sr ON t.c_customer_sk = sr.sr_customer_sk
+LEFT JOIN 
+    web_sales ws ON t.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    store_sales s ON ws.ws_item_sk = s.ss_item_sk
+LEFT JOIN 
+    item i ON ws.ws_item_sk = i.i_item_sk
+GROUP BY 
+    t.c_customer_sk, t.c_first_name, t.c_last_name
+HAVING 
+    COALESCE(t.total_sales, 0) > 1000 AND total_returns IS NOT NULL
+ORDER BY 
+    total_sales DESC;

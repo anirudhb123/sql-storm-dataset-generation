@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        MAX(ph.CreationDate) AS LastHistoryDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+ProcessedTags AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        string_agg(distinct tag.tagname, ', ') AS ProcessedTags
+    FROM 
+        RankedPosts rp
+    CROSS JOIN 
+        LATERAL string_to_array(rp.Tags, ',') AS tag 
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.OwnerDisplayName, rp.CommentCount
+),
+FilteredPosts AS (
+    SELECT 
+        pt.PostId,
+        pt.Title,
+        pt.Body,
+        pt.OwnerDisplayName,
+        pt.CommentCount,
+        pt.ProcessedTags
+    FROM 
+        ProcessedTags pt
+    WHERE 
+        pt.CommentCount > 0 
+)
+SELECT 
+    fp.OwnerDisplayName,
+    fp.Title,
+    fp.CommentCount,
+    fp.ProcessedTags,
+    EXTRACT(epoch FROM (cast('2024-10-01 12:34:56' as timestamp) - fp.LastHistoryDate)) AS DaysSinceLastEdit
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    DaysSinceLastEdit DESC, 
+    fp.CommentCount DESC
+LIMIT 10;

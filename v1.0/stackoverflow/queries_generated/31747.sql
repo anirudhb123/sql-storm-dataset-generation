@@ -1,0 +1,106 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.ParentId,
+        php.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy php ON p2.ParentId = php.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        SUM(COALESCE(c.CommentCount, 0)) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+             PostId, COUNT(Id) AS CommentCount 
+         FROM 
+             Comments 
+         GROUP BY 
+             PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        TotalBounty,
+        TotalComments,
+        RANK() OVER (ORDER BY PostCount DESC, TotalBounty DESC) AS UserRank
+    FROM 
+        UserActivity
+),
+LatestEdits AS (
+    SELECT 
+        p.Id AS PostId,
+        p.LastEditDate,
+        p.Title,
+        ph.Comment AS EditComment
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        p.Id, p.Title
+)
+
+SELECT 
+    pu.UserId,
+    pu.DisplayName,
+    pu.PostCount,
+    pu.TotalBounty,
+    pu.TotalComments,
+    pu.UserRank,
+    COALESCE(lp.PostId, closed.PostId) AS PostId,
+    COALESCE(lp.Title, closed.Title) AS PostTitle,
+    COALESCE(lp.LastEditDate, NULL) AS LastEdited,
+    closed.LastClosedDate AS LastClosed
+FROM 
+    TopUsers pu
+LEFT JOIN 
+    LatestEdits lp ON pu.UserId = lp.EditComment -- Here we're joining on edit comments
+LEFT JOIN 
+    ClosedPosts closed ON lp.PostId = closed.PostId
+WHERE 
+    pu.UserRank <= 10 
+ORDER BY 
+    pu.UserRank;

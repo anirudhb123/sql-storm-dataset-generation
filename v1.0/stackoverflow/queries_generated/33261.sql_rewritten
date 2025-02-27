@@ -1,0 +1,82 @@
+WITH RECURSIVE Post_CTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.AcceptedAnswerId,
+        1 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.AcceptedAnswerId,
+        Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        Post_CTE cte ON cte.Id = p.ParentId
+    WHERE 
+        p.PostTypeId = 2  
+),
+VoteCounts AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostStatus AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN 'Closed' 
+                 WHEN ph.PostHistoryTypeId = 11 THEN 'Reopened' 
+                 ELSE NULL END) AS Status,
+        COUNT(ph.Id) AS HistoryCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    u.DisplayName AS OwnerName,
+    pc.Depth,
+    COALESCE(vc.Upvotes, 0) AS TotalUpvotes,
+    COALESCE(vc.Downvotes, 0) AS TotalDownvotes,
+    ps.Status AS PostStatus,
+    ps.HistoryCount,
+    COUNT(c.Id) AS CommentCount,
+    SUM(DISTINCT CASE WHEN c.Score > 0 THEN c.Score ELSE 0 END) AS PositiveCommentsScore
+FROM 
+    Post_CTE pc
+JOIN 
+    Posts p ON pc.Id = p.Id
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    VoteCounts vc ON p.Id = vc.PostId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    PostStatus ps ON p.Id = ps.PostId
+WHERE 
+    p.CreationDate >= DATEADD(YEAR, -2, GETDATE()) 
+GROUP BY 
+    p.Id, p.Title, u.DisplayName, pc.Depth, vc.Upvotes, vc.Downvotes, ps.Status, ps.HistoryCount
+HAVING 
+    COALESCE(vc.Upvotes, 0) - COALESCE(vc.Downvotes, 0) > 10
+ORDER BY 
+    pc.Depth ASC, ps.HistoryCount DESC, COALESCE(vc.Upvotes, 0) DESC;

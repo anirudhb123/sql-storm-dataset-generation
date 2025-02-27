@@ -1,0 +1,46 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_preferred_cust_flag = 'Y'
+),
+AggregatedReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        AVG(sr_return_amt) AS average_return
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+MaxReturns AS (
+    SELECT 
+        sr_customer_sk,
+        MAX(total_returns) AS max_return_count
+    FROM AggregatedReturns
+    GROUP BY sr_customer_sk
+)
+SELECT 
+    a.c_customer_sk,
+    a.c_first_name,
+    a.c_last_name,
+    CASE 
+        WHEN b.total_returns IS NULL THEN 'No Returns'
+        ELSE CAST(b.total_returns AS VARCHAR)
+    END AS total_returns,
+    r.sales_rank,
+    r.ws_sales_price
+FROM customer a
+LEFT JOIN AggregatedReturns b ON a.c_customer_sk = b.sr_customer_sk
+JOIN RankedSales r ON a.c_customer_sk = r.ws_order_number
+WHERE 
+    (b.total_returns IS NULL OR b.total_returns = (
+        SELECT MAX(total_returns) FROM AggregatedReturns
+    )) 
+    AND r.sales_rank <= 5
+ORDER BY a.c_last_name, a.c_first_name;

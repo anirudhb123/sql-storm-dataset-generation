@@ -1,0 +1,77 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.movie_id
+    WHERE 
+        mh.level < 5  
+),
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id, 
+        mh.title,
+        mh.production_year,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY RANDOM()) AS rn,
+        COALESCE(NULLIF(mt.info, ''), 'N/A') AS movie_info
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        movie_info mt ON mh.movie_id = mt.movie_id AND mt.note IS NULL
+),
+AggregatedMovies AS (
+    SELECT 
+        fm.production_year,
+        COUNT(*) AS movie_count,
+        STRING_AGG(fm.title, '; ') AS all_titles
+    FROM 
+        FilteredMovies fm
+    WHERE 
+        fm.level = 1
+    GROUP BY 
+        fm.production_year
+)
+SELECT 
+    am.production_year,
+    am.movie_count,
+    am.all_titles,
+    COALESCE(MAX(CASE WHEN c.gender = 'M' THEN 1 ELSE 0 END), 0) AS male_actors,
+    SUM(CASE WHEN k.keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_count
+FROM 
+    AggregatedMovies am
+JOIN 
+    movie_companies mc ON mc.movie_id IN (SELECT fm.movie_id FROM FilteredMovies fm WHERE fm.rn <= 5)
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mc.movie_id
+LEFT JOIN 
+    name n ON n.id = ci.person_id
+LEFT JOIN 
+    movie_keyword k ON k.movie_id = mc.movie_id
+WHERE 
+    am.movie_count > 0
+GROUP BY 
+    am.production_year, am.movie_count, am.all_titles
+ORDER BY 
+    am.production_year DESC, am.movie_count DESC;

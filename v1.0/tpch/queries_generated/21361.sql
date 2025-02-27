@@ -1,0 +1,69 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank_by_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (
+        SELECT AVG(total_value) 
+        FROM (
+            SELECT 
+                SUM(ps2.ps_supplycost * ps2.ps_availqty) AS total_value
+            FROM supplier s2
+            JOIN partsupp ps2 ON s2.s_suppkey = ps2.ps_suppkey
+            GROUP BY s2.s_suppkey
+        ) AS supplier_totals
+    )
+),
+JoinedData AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        AVG(l.l_extendedprice) AS avg_extended_price
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY r.r_name, n.n_name
+)
+SELECT 
+    j.region_name,
+    j.nation_name,
+    j.order_count,
+    j.part_count,
+    j.avg_extended_price,
+    rp.p_name,
+    hvs.s_name,
+    CASE WHEN j.order_count > 0 THEN (rp.total_supply_cost / j.order_count) ELSE NULL END AS cost_per_order
+FROM JoinedData j
+CROSS JOIN RankedParts rp
+JOIN HighValueSuppliers hvs ON rp.total_supply_cost IS NOT NULL
+WHERE j.part_count > 0 
+ORDER BY j.order_count DESC, rp.rank_by_cost
+LIMIT 100 OFFSET 10;

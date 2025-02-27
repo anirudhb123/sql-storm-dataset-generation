@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+), 
+HighValueParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 50
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 5000
+),
+OrderAmounts AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        ROUND(o.order_total * 0.1, 2) AS adjusted_total,
+        o.o_orderstatus
+    FROM 
+        OrderAmounts o
+    WHERE 
+        o.order_total BETWEEN 100 AND 10000
+)
+
+SELECT 
+    n.n_name,
+    r.r_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    COALESCE(SUM(hp.total_supply_cost), 0) AS total_parts_cost,
+    MAX(CASE WHEN fo.o_orderstatus = 'O' THEN fo.adjusted_total ELSE NULL END) AS max_order_adjusted_total,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    RankedSuppliers s ON s.rn <= 3 AND n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    HighValueParts hp ON hp.p_partkey IN (SELECT ps.p_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+LEFT JOIN 
+    FilteredOrders fo ON fo.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey IS NOT NULL)
+WHERE 
+    r.r_name NOT LIKE 'A%' AND (s.s_acctbal IS NULL OR s.s_acctbal > 1000)
+GROUP BY 
+    n.n_name, r.r_name
+ORDER BY 
+    supplier_count DESC, total_parts_cost DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,88 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        MAX(cd_purchase_estimate) AS max_estimate,
+        COUNT(DISTINCT cd_demo_sk) AS demo_count,
+        AVG(cd_dep_count) AS avg_dep_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_id
+),
+TopStores AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_net_paid) AS total_revenue,
+        RANK() OVER (ORDER BY SUM(ss_net_paid) DESC) AS revenue_rank
+    FROM 
+        store_sales
+    GROUP BY 
+        s_store_sk
+),
+FilteredReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_return_quantity,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity IS NOT NULL
+    GROUP BY 
+        sr_item_sk, sr_return_quantity
+    HAVING 
+        SUM(sr_return_amt) > 100
+)
+SELECT 
+    ca.ca_city,
+    SUM(COALESCE(rs.total_sales, 0)) AS aggregated_sales,
+    AVG(cs.max_estimate) AS average_purchase_estimate,
+    r.total_return_amt,
+    CASE 
+        WHEN AVG(cs.avg_dep_count) IS NULL THEN 'No Data'
+        ELSE 'Data Available'
+    END AS data_status,
+    STRING_AGG(DISTINCT s.s_store_name, ', ') AS store_names
+FROM 
+    customer_address ca
+LEFT JOIN 
+    RankedSales rs ON ca.ca_address_sk = (
+        SELECT c.c_current_addr_sk 
+        FROM customer c 
+        WHERE c.c_customer_id IN (SELECT c_customer_id FROM customer_stats)
+        LIMIT 1
+    )
+LEFT JOIN 
+    CustomerStats cs ON cs.c_customer_id IN (
+        SELECT c.c_customer_id 
+        FROM customer c 
+        WHERE c.c_current_addr_sk = ca.ca_address_sk
+    )
+LEFT JOIN 
+    TopStores ts ON ts.s_store_sk IN (
+        SELECT ss_store_sk 
+        FROM store_sales 
+        WHERE ss_item_sk IN (SELECT sr_item_sk FROM FilteredReturns)
+    )
+LEFT JOIN 
+    FilteredReturns r ON r.sr_item_sk = rs.ws_item_sk
+GROUP BY 
+    ca.ca_city
+HAVING 
+    SUM(COALESCE(rs.total_sales, 0)) > 1000
+ORDER BY 
+    aggregated_sales DESC;

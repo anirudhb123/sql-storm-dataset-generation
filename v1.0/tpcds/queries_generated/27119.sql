@@ -1,0 +1,54 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COALESCE(ha.hd_income_band_sk, 0) AS income_band,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        REGEXP_REPLACE(c.c_email_address, '@.*$', '@example.com') AS masked_email
+    FROM 
+        customer c
+    INNER JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics ha ON c.c_customer_sk = ha.hd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid_inc_tax) AS total_revenue
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_bill_customer_sk
+)
+SELECT 
+    cd.full_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cd.income_band,
+    cd.ca_city,
+    cd.ca_state,
+    cd.ca_country,
+    cd.masked_email,
+    ss.total_orders,
+    ss.total_revenue
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    SalesSummary ss ON cd.c_customer_id = ss.ws_bill_customer_sk
+WHERE 
+    cd.cd_gender = 'F' AND
+    ss.total_orders > 5
+ORDER BY 
+    ss.total_revenue DESC
+LIMIT 100;

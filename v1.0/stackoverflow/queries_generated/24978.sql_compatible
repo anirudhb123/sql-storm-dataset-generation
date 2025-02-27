@@ -1,0 +1,94 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Class) AS HighestBadgeClass,
+        SUM(CASE WHEN B.TagBased = 1 THEN 1 ELSE 0 END) AS TagBasedCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        P.AcceptedAnswerId,
+        COALESCE(P.ViewCount, 0) AS ViewCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN V.Id END) AS UpVoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN V.Id END) AS DownVoteCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(substring(P.Tags, 2, LENGTH(P.Tags) - 2), '><')) AS TagName) AS T
+    GROUP BY 
+        P.Id
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS CloseCount,
+        MIN(PH.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        PH.PostId
+),
+UserPostInteraction AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        (SELECT COALESCE(SUM(ViewCount), 0) FROM PostStats WHERE PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id)) AS TotalPostViews,
+        (SELECT COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) FROM PostHistory PH WHERE PH.UserId = U.Id) AS TotalCloseVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+    UB.HighestBadgeClass,
+    COALESCE(UPI.TotalPosts, 0) AS TotalPosts,
+    COALESCE(UPI.TotalPostViews, 0) AS TotalPostViews,
+    COALESCE(CP.CloseCount, 0) AS TotalCloseVotes,
+    PS.PostId,
+    PS.PostTypeId,
+    PS.ViewCount,
+    PS.CommentCount,
+    PS.UpVoteCount,
+    PS.DownVoteCount,
+    PS.Tags,
+    CASE 
+        WHEN CP.FirstClosedDate IS NOT NULL THEN 'Closed' 
+        ELSE 'Active' 
+    END AS PostStatus
+FROM 
+    Users U
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN 
+    UserPostInteraction UPI ON U.Id = UPI.UserId
+LEFT JOIN 
+    PostStats PS ON U.Id = PS.OwnerUserId
+LEFT JOIN 
+    ClosedPosts CP ON PS.PostId = CP.PostId
+WHERE 
+    (PS.UpVoteCount - PS.DownVoteCount) > 5 
+    OR (UB.TagBasedCount >= 2 AND U.Reputation > 100)
+ORDER BY 
+    BadgeCount DESC, TotalPosts DESC, TotalPostViews DESC;

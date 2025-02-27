@@ -1,0 +1,38 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+),
+PartSupplierSummary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail_qty, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(pss.total_avail_qty, 0) AS total_avail_qty,
+    psc.avg_supplycost,
+    s.s_name AS supplier_name,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank,
+    RANK() OVER (ORDER BY COALESCE(pss.total_avail_qty, 0) DESC) AS availability_rank,
+    (CASE WHEN SUM(CASE WHEN li.l_discount > 0 THEN li.l_extendedprice * (1 - li.l_discount) ELSE li.l_extendedprice END) > 1000 
+          THEN 'High Value' 
+          ELSE 'Low Value' END) AS order_value_category
+FROM part p
+LEFT OUTER JOIN PartSupplierSummary pss ON p.p_partkey = pss.ps_partkey
+LEFT JOIN lineitem li ON li.l_partkey = p.p_partkey
+LEFT JOIN supplier s ON s.s_suppkey = li.l_suppkey
+WHERE EXISTS (
+    SELECT 1
+    FROM customer c
+    WHERE c.c_nationkey = s.s_nationkey
+    AND c.c_acctbal < 1000
+)
+GROUP BY p.p_partkey, p.p_name, psc.avg_supplycost, s.s_name
+HAVING total_avail_qty < (SELECT AVG(ps_availqty) FROM partsupp)
+ORDER BY availability_rank DESC, supplier_rank;

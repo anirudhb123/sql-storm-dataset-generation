@@ -1,0 +1,42 @@
+WITH RECURSIVE customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    UNION ALL
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer_orders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderdate > co.o_orderdate
+),
+supplying_info AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * l.l_quantity) AS total_supply_cost
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_partkey
+),
+ranked_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           RANK() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT co.c_name,
+       co.o_orderdate,
+       co.o_totalprice,
+       CASE
+           WHEN si.total_supply_cost IS NULL THEN 'No Supply Cost'
+           ELSE CAST(si.total_supply_cost AS VARCHAR(50))
+       END AS supply_cost_info,
+       ro.order_count,
+       CASE
+           WHEN ro.order_rank = 1 THEN 'Top Customer'
+           ELSE 'Regular Customer'
+       END AS customer_status
+FROM customer_orders co
+LEFT JOIN supplying_info si ON co.o_orderkey = si.ps_partkey
+JOIN ranked_orders ro ON co.c_custkey = ro.c_custkey
+WHERE co.o_orderdate IS NOT NULL
+  AND (ro.order_count > 5 OR co.o_totalprice > 1000)
+ORDER BY co.o_orderdate DESC, ro.order_count DESC;

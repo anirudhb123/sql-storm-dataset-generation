@@ -1,0 +1,41 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice
+    FROM OrderHierarchy oh
+    JOIN orders o ON oh.o_orderkey = o.o_orderkey
+    WHERE oh.rn < 5
+),
+CustomerTotals AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, s.s_name,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    ch.c_custkey, ch.c_name,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue,
+    AVG(ch.total_spent) AS avg_spent,
+    COUNT(DISTINCT li.l_orderkey) AS order_count,
+    CASE WHEN AVG(ch.total_spent) IS NULL THEN 'No Spending'
+         ELSE 'Customer Spends' END AS spending_status
+FROM CustomerTotals ch
+LEFT JOIN lineitem li ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey = ch.c_custkey)
+LEFT JOIN PartSupplierInfo psi ON li.l_partkey = psi.p_partkey
+WHERE psi.rn = 1 AND ch.total_spent IS NOT NULL
+GROUP BY ch.c_custkey, ch.c_name
+HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) > 1000
+ORDER BY revenue DESC
+LIMIT 10;

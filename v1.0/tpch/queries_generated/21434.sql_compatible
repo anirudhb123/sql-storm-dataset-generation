@@ -1,0 +1,42 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal < sh.s_acctbal
+),
+total_spending AS (
+    SELECT c.c_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey
+),
+part_details AS (
+    SELECT p.p_partkey, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           AVG(p.p_retailprice) AS avg_price,
+           MAX(p.p_size) AS max_size
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT rh.n_name AS region_name,
+       pd.p_name,
+       pd.avg_price,
+       COALESCE(NULLIF(pd.supplier_count, 0), -1) AS supplier_count,
+       cb.total_spent,
+       RANK() OVER (PARTITION BY rh.n_name ORDER BY cb.total_spent DESC) AS spending_rank
+FROM region r
+JOIN nation rh ON r.r_regionkey = rh.n_regionkey
+JOIN part_details pd ON pd.supplier_count > 0
+LEFT JOIN total_spending cb ON cb.c_custkey = (SELECT c.c_custkey FROM customer WHERE c.c_nationkey = rh.n_nationkey ORDER BY c.c_acctbal DESC LIMIT 1)
+WHERE EXISTS (SELECT 1 
+              FROM lineitem l 
+              WHERE l.l_partkey = pd.p_partkey AND l.l_returnflag = 'N' AND l.l_discount > 0.1)
+  AND rh.n_name NOT LIKE '%land'
+ORDER BY rh.n_name, spending_rank;

@@ -1,0 +1,66 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        ca.person_id,
+        ca.movie_id,
+        ca.note AS role_note,
+        COALESCE(na.name, 'Unknown') AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ca.movie_id ORDER BY ca.nr_order) AS actor_order
+    FROM 
+        cast_info ca
+    LEFT JOIN 
+        aka_name na ON ca.person_id = na.person_id
+    WHERE 
+        ca.note IS NOT NULL
+),
+
+MovieInfoCTE AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mi.info, 'No Information') AS movie_info,
+        mi.note AS info_note,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY 
+        m.id, m.title, mi.info, mi.note
+),
+
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    m.movie_id AS MovieID,
+    m.title AS MovieTitle,
+    COALESCE(mi.movie_info, 'No Info Available') AS MovieInfo,
+    cc.actor_order AS ActorOrder,
+    cc.actor_name AS ActorName,
+    cc.role_note AS RoleNote,
+    cd.company_count AS CompanyCount,
+    cd.company_names AS CompanyNames
+FROM 
+    MovieInfoCTE mi
+LEFT JOIN 
+    RecursiveCTE cc ON mi.movie_id = cc.movie_id
+LEFT JOIN 
+    CompanyDetails cd ON mi.movie_id = cd.movie_id
+WHERE 
+    mi.keyword_count > 1
+ORDER BY 
+    mi.movie_id, cc.actor_order;
+
+

@@ -1,0 +1,41 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.movie_id,
+           mt.title,
+           mt.production_year,
+           0 AS level
+    FROM aka_title AS mt
+    WHERE mt.production_year = 2023
+    
+    UNION ALL
+    
+    SELECT m.movie_id,
+           m.title,
+           m.production_year,
+           h.level + 1
+    FROM movie_link AS ml
+    JOIN movie_hierarchy AS h ON ml.linked_movie_id = h.movie_id
+    JOIN aka_title AS m ON ml.movie_id = m.movie_id
+)
+, actor_completion AS (
+    SELECT ci.movie_id,
+           COUNT(DISTINCT ci.person_id) AS total_actors,
+           STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM cast_info AS ci
+    JOIN aka_name AS ak ON ci.person_id = ak.person_id
+    GROUP BY ci.movie_id
+)
+SELECT mh.title,
+       mh.production_year,
+       COALESCE(ac.total_actors, 0) AS total_actors,
+       COALESCE(ac.actor_names, 'No Actors') AS actor_names,
+       (SELECT COUNT(DISTINCT mk.keyword) 
+        FROM movie_keyword AS mk 
+        WHERE mk.movie_id = mh.movie_id) AS total_keywords,
+       DENSE_RANK() OVER (ORDER BY mh.production_year DESC) AS rank_by_year
+FROM movie_hierarchy AS mh
+LEFT JOIN actor_completion AS ac ON mh.movie_id = ac.movie_id
+WHERE mh.level = 0
+GROUP BY mh.title, mh.production_year, ac.total_actors, ac.actor_names
+ORDER BY mh.production_year DESC, rank_by_year
+LIMIT 50;

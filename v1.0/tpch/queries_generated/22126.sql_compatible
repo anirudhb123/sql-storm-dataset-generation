@@ -1,0 +1,41 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_acctbal,
+           CASE 
+               WHEN s.s_acctbal IS NULL THEN 'N/A'
+               WHEN s.s_acctbal > 10000 THEN 'Premium'
+               ELSE 'Standard'
+           END AS supplier_category
+    FROM supplier s
+), 
+AggregatedOrders AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1995-01-01'
+    GROUP BY o.o_custkey
+), 
+NationsSummary AS (
+    SELECT n.n_nationkey, n.n_name, 
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count, 
+           SUM(COALESCE(s.s_acctbal, 0)) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT ns.n_name, ns.supplier_count, ns.total_acctbal, 
+       COALESCE(ra.rank_acctbal, 'No Suppliers') AS supplier_rank,
+       ra.supplier_category,
+       CASE 
+          WHEN ns.total_acctbal = 0 THEN 'No Revenue'
+          WHEN ns.total_acctbal > 50000 THEN 'High Revenue'
+          WHEN EXISTS (SELECT 1 FROM AggregatedOrders ao 
+                       WHERE ao.o_custkey = ns.n_nationkey 
+                       AND ao.total_revenue > 100000) THEN 'Significant Revenue'
+          ELSE 'Low Revenue'
+       END AS revenue_category
+FROM NationsSummary ns
+LEFT JOIN RankedSuppliers ra ON ns.n_nationkey = ra.s_nationkey
+ORDER BY ns.total_acctbal DESC NULLS LAST, ns.n_name;

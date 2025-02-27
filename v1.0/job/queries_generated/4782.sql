@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM 
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+ActorMovieCounts AS (
+    SELECT 
+        ca.person_id,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ca ON ci.person_id = ca.person_id
+    GROUP BY 
+        ca.person_id
+),
+LatestActor AS (
+    SELECT 
+        ca.person_id,
+        ca.name,
+        bm.title,
+        bm.rank
+    FROM 
+        aka_name ca
+    JOIN 
+        cast_info c ON ca.person_id = c.person_id
+    JOIN 
+        RankedMovies bm ON c.movie_id = bm.movie_id
+    WHERE 
+        bm.rank = 1
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mi.info AS movie_notes
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+)
+SELECT 
+    ma.name AS actor_name,
+    lm.title AS latest_movie_title,
+    lm.production_year AS latest_movie_year,
+    COALESCE(amc.movie_count, 0) AS total_movies_played,
+    mi.movie_notes
+FROM 
+    LatestActor lm
+JOIN 
+    ActorMovieCounts amc ON lm.person_id = amc.person_id
+LEFT JOIN 
+    MovieInfo mi ON lm.movie_id = mi.movie_id
+WHERE 
+    lm.title IS NOT NULL
+ORDER BY 
+    latest_movie_year DESC, actor_name;

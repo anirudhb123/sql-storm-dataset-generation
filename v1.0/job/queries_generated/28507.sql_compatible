@@ -1,0 +1,46 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(*) AS actor_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM title t
+    JOIN cast_info ci ON t.id = ci.movie_id
+    JOIN aka_name a ON ci.person_id = a.person_id
+    GROUP BY t.title, t.production_year
+), movie_info_enriched AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.actor_count,
+        rm.actor_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies
+    FROM ranked_movies rm
+    LEFT JOIN movie_keyword mk ON rm.title = (SELECT t.title FROM title t WHERE t.id = mk.movie_id)
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_companies mc ON rm.title = (SELECT t.title FROM title t WHERE t.id = mc.movie_id)
+    LEFT JOIN company_name co ON mc.company_id = co.id
+    GROUP BY rm.title, rm.production_year, rm.actor_count, rm.actor_names
+), filtered_movies AS (
+    SELECT 
+        title, 
+        production_year, 
+        actor_count,
+        actor_names,
+        keywords,
+        companies
+    FROM movie_info_enriched
+    WHERE actor_count > 5 
+    AND production_year BETWEEN 2000 AND 2020
+)
+SELECT 
+    title, 
+    production_year, 
+    actor_count, 
+    actor_names,
+    keywords,
+    companies
+FROM filtered_movies
+ORDER BY production_year DESC, actor_count DESC;

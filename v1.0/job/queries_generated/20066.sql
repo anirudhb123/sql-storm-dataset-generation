@@ -1,0 +1,75 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank,
+        COUNT(DISTINCT k.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Drama%')
+), 
+ActorInfo AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        c.movie_id,
+        r.role,
+        COUNT(*) OVER (PARTITION BY a.id) AS total_roles
+    FROM 
+        aka_name a
+    INNER JOIN 
+        cast_info c ON a.person_id = c.person_id
+    INNER JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        a.name IS NOT NULL
+        AND a.name NOT LIKE '%[0-9]%'
+), 
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    ai.actor_id,
+    ai.name AS actor_name,
+    ai.role,
+    ci.company_name,
+    ci.company_type,
+    rm.keyword_count,
+    CASE 
+        WHEN ai.total_roles > 5 THEN 'Frequent Actor'
+        WHEN ai.total_roles IS NULL THEN 'Unknown Role Count'
+        ELSE 'Occasional Actor'
+    END AS actor_frequency
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorInfo ai ON rm.movie_id = ai.movie_id
+LEFT JOIN 
+    CompanyInfo ci ON rm.movie_id = ci.movie_id
+WHERE 
+    rm.year_rank <= 3
+    AND (rm.keyword_count IS NULL OR rm.keyword_count > 3)
+ORDER BY 
+    rm.production_year DESC,
+    ai.name ASC NULLS LAST;
+

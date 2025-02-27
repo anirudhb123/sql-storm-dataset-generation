@@ -1,0 +1,54 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title AS movie_title,
+        t.production_year,
+        m.name AS company_name,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.movie_id = mc.movie_id
+    JOIN 
+        company_name m ON mc.company_id = m.id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+        AND (k.keyword ILIKE '%drama%' OR k.keyword ILIKE '%action%')
+), 
+aggregated_info AS (
+    SELECT 
+        r.movie_title,
+        r.production_year,
+        STRING_AGG(DISTINCT r.company_name, ', ') AS companies,
+        STRING_AGG(DISTINCT r.keyword, ', ') AS keywords
+    FROM 
+        ranked_titles r
+    WHERE 
+        r.rn = 1
+    GROUP BY 
+        r.movie_title, r.production_year
+)
+SELECT 
+    a.name AS actor_name,
+    a.imdb_index AS actor_index,
+    a.id AS actor_id,
+    ai.movie_title,
+    ai.production_year,
+    ai.companies,
+    ai.keywords
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.id = ci.person_id
+JOIN 
+    aggregated_info ai ON ci.movie_id = ai.title_id
+WHERE 
+    a.name ILIKE '%John%'
+ORDER BY 
+    ai.production_year DESC, actor_name;

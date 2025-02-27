@@ -1,0 +1,38 @@
+WITH TopUsers AS (
+    SELECT u.Id, u.DisplayName, u.Reputation, 
+           ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+    WHERE u.Reputation > 0
+),
+ActivePosts AS (
+    SELECT p.OwnerUserId, p.Id, p.Title, p.Score, 
+           COUNT(c.Id) AS CommentCount, 
+           SUM(v.VoteTypeId = 2) AS UpVotes,
+           SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.OwnerUserId, p.Id
+),
+PostTags AS (
+    SELECT p.Id AS PostId, 
+           STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    JOIN UNNEST(string_to_array(p.Tags, '><')) AS tag_name ON TRUE
+    JOIN Tags t ON t.TagName = tag_name
+    GROUP BY p.Id
+)
+SELECT tu.DisplayName AS UserName, 
+       tu.Reputation AS UserReputation, 
+       COUNT(ap.Id) AS ActivePostCount, 
+       SUM(ap.UpVotes) AS TotalUpVotes,
+       SUM(ap.DownVotes) AS TotalDownVotes,
+       STRING_AGG(DISTINCT pt.Tags, '; ') AS AllTags
+FROM TopUsers tu
+JOIN ActivePosts ap ON tu.Id = ap.OwnerUserId
+JOIN PostTags pt ON ap.Id = pt.PostId
+GROUP BY tu.Id, tu.DisplayName, tu.Reputation
+HAVING COUNT(ap.Id) > 5
+ORDER BY UserRank
+LIMIT 10;

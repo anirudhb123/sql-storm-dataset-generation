@@ -1,0 +1,65 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+),
+cast_with_roles AS (
+    SELECT 
+        c.movie_id,
+        ak.name AS actor_name,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(array_agg(DISTINCT cwr.actor_name) FILTER (WHERE cwr.actor_rank <= 3), ARRAY[]::text) AS top_actors,
+    COUNT(DISTINCT cwr.actor_name) AS total_actor_count,
+    COUNT(DISTINCT kw.keyword) AS total_keywords,
+    AVG(CASE 
+        WHEN mi.info IS NOT NULL THEN LENGTH(mi.info)
+        ELSE NULL
+    END) AS avg_info_length,
+    STRING_AGG(DISTINCT mi.note, ', ') AS info_notes
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_with_roles cwr ON mh.movie_id = cwr.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+ORDER BY 
+    mh.production_year DESC, mh.title ASC;

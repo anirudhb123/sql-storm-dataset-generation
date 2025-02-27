@@ -1,0 +1,66 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        d.d_year,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        RANK() OVER (PARTITION BY d.d_year ORDER BY SUM(ws.ws_net_paid) DESC) AS rank_sales
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS d ON ws.ws_ship_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2015 AND 2020
+    GROUP BY 
+        ws.web_site_sk, d.d_year
+), high_sales_web AS (
+    SELECT 
+        w.w_warehouse_id,
+        COUNT(DISTINCT rs.web_site_sk) AS distinct_sites,
+        AVG(rs.total_net_paid) AS avg_net_paid
+    FROM 
+        ranked_sales AS rs
+    JOIN 
+        warehouse AS w ON rs.web_site_sk % 10 = w.w_warehouse_sk % 10
+    GROUP BY 
+        w.w_warehouse_id
+    HAVING 
+        COUNT(DISTINCT rs.web_site_sk) > 5
+), combined_sales AS (
+    SELECT 
+        hs.web_site_sk,
+        hs.distinct_sites,
+        hs.avg_net_paid,
+        COALESCE(ws_ext_sales_price, 0) AS adjusted_sales
+    FROM 
+        high_sales_web AS hs
+    LEFT JOIN (
+        SELECT 
+            ws.web_site_sk,
+            SUM(cs.cs_ext_sales_price) AS ws_ext_sales_price
+        FROM 
+            catalog_sales AS cs
+        JOIN 
+            web_sales AS ws ON cs.cs_order_number = ws.ws_order_number
+        GROUP BY 
+            ws.web_site_sk
+    ) AS ws ON hs.web_site_sk = ws.web_site_sk
+)
+SELECT 
+    cs.web_site_sk,
+    cs.distinct_sites,
+    cs.avg_net_paid,
+    cs.adjusted_sales,
+    CASE
+        WHEN cs.adjusted_sales > 10000 THEN 'High Performer'
+        WHEN cs.adjusted_sales IS NULL THEN 'Data Not Available'
+        ELSE 'Regular Performer'
+    END AS performance_category,
+    RANK() OVER (ORDER BY cs.avg_net_paid DESC) AS rank_avg_net_paid
+FROM 
+    combined_sales AS cs
+WHERE 
+    cs.avg_net_paid IS NOT NULL
+ORDER BY 
+    cs.avg_net_paid DESC
+LIMIT 10;

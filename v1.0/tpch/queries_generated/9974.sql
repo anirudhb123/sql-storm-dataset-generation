@@ -1,0 +1,51 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS TotalOrders,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    rd.r_name AS Region,
+    COUNT(DISTINCT c.c_custkey) AS NumberOfCustomers,
+    COUNT(DISTINCT o.o_orderkey) AS NumberOfOrders,
+    SUM(ps.TotalSupplyCost) AS TotalSuppliedCost,
+    SUM(co.TotalSpent) AS TotalRevenue
+FROM 
+    region rd
+JOIN 
+    nation n ON n.n_regionkey = rd.r_regionkey
+JOIN 
+    supplier s ON s.s_nationkey = n.n_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    CustomerOrders co ON c.c_custkey = co.c_custkey
+GROUP BY 
+    rd.r_name
+ORDER BY 
+    TotalRevenue DESC
+LIMIT 10;

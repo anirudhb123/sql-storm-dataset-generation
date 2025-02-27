@@ -1,0 +1,34 @@
+
+SELECT 
+    t.title AS movie_title,
+    ak.name AS actor_name,
+    c.type AS company_type,
+    r.role AS role_description,
+    COUNT(DISTINCT kc.keyword) AS total_keywords
+FROM 
+    title t
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type c ON mc.company_type_id = c.id
+JOIN 
+    role_type r ON ci.role_id = r.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+WHERE 
+    t.production_year >= 2000 
+    AND ak.name IS NOT NULL 
+    AND ci.nr_order < 5 
+GROUP BY 
+    t.title, ak.name, c.type, r.role
+ORDER BY 
+    total_keywords DESC, movie_title ASC
+LIMIT 100;

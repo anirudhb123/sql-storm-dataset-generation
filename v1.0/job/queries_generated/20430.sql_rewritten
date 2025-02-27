@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year = (SELECT MAX(production_year) FROM aka_title)
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id, 
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title linked ON linked.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = linked.id
+    WHERE 
+        mh.level < 3 
+)
+
+SELECT 
+    coalesce(aka.name, char.name) AS Actor_Name,
+    title.title AS Movie_Title,
+    title.production_year,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS Keywords,
+    COUNT(DISTINCT cc.movie_id) AS Total_Movies,
+    AVG(CAST(EXTRACT(YEAR FROM cast('2024-10-01' as date)) - title.production_year AS FLOAT)) AS Avg_Age_of_Movies,
+    ROW_NUMBER() OVER (PARTITION BY aka.name ORDER BY COUNT(DISTINCT cc.movie_id) DESC) AS Actor_Rank
+FROM 
+    cast_info cc
+JOIN 
+    aka_name aka ON cc.person_id = aka.person_id
+JOIN 
+    aka_title title ON cc.movie_id = title.id
+LEFT JOIN 
+    movie_keyword mk ON title.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    char_name char ON aka.name = char.name
+JOIN 
+    MovieHierarchy mh ON title.id = mh.movie_id
+WHERE 
+    title.production_year IS NOT NULL 
+    AND title.title NOT LIKE '%unknown%'
+    AND aka.name_pcode_cf IS NOT NULL
+    AND char.name_pcode_nf IS NULL
+GROUP BY 
+    aka.name, char.name, title.title, title.production_year
+HAVING 
+    COUNT(DISTINCT cc.movie_id) > 5 
+ORDER BY 
+    Movie_Title, Avg_Age_of_Movies DESC
+LIMIT 50 OFFSET 10;

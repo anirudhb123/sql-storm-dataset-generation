@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS ViewRank,
+        COUNT(DISTINCT v.Id) OVER (PARTITION BY p.Id) AS VoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.ViewRank,
+        rp.VoteCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        CASE 
+            WHEN rp.VoteCount > 0 THEN ROUND((100.0 * rp.UpVoteCount / rp.VoteCount), 2)
+            ELSE NULL
+        END AS UpVotePercentage
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ViewRank <= 5
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN pht.Id = 10 THEN ph.CreationDate END) AS FirstClosedDate,
+        MAX(CASE WHEN pht.Id = 11 THEN ph.CreationDate END) AS FirstReopenedDate,
+        COUNT(CASE WHEN pht.Id = 10 THEN 1 END) AS CloseCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.UpVotePercentage,
+    COALESCE(pbi.FirstClosedDate, 'Never Closed') AS FirstClosedDate,
+    COALESCE(pbi.FirstReopenedDate, 'Never Reopened') AS FirstReopenedDate,
+    pbi.CloseCount
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistoryInfo pbi ON fp.PostId = pbi.PostId
+ORDER BY 
+    fp.UpVotePercentage DESC NULLS LAST
+LIMIT 10;

@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           mt.production_year,
+           0 AS level
+    FROM aka_title mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT ml.linked_movie_id,
+           at.title,
+           at.production_year,
+           mh.level + 1
+    FROM movie_link ml
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+)
+
+, CastWithRank AS (
+    SELECT ci.movie_id, 
+           ak.name AS actor_name,
+           DENSE_RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+)
+
+, MovieKeywords AS (
+    SELECT mk.movie_id,
+           STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+
+SELECT mh.movie_id,
+       mh.title,
+       mh.production_year,
+       COALESCE(c.actor_name, 'No Cast') AS actor_name,
+       COALESCE(c.actor_rank, 0) AS actor_rank,
+       COALESCE(mk.keywords, 'No Keywords') AS keywords,
+       COUNT(mk.keyword_id) AS keyword_count
+FROM MovieHierarchy mh
+LEFT JOIN CastWithRank c ON mh.movie_id = c.movie_id
+LEFT JOIN MovieKeywords mk ON mh.movie_id = mk.movie_id
+WHERE mh.level = 0
+GROUP BY mh.movie_id, mh.title, mh.production_year, c.actor_name, c.actor_rank, mk.keywords
+ORDER BY mh.production_year DESC, mh.title ASC;
+
+-- Additional benchmarking through the use of complex predicates
+SELECT mh.movie_id,
+       mh.title,
+       mh.production_year,
+       COUNT(DISTINCT c.person_id) AS unique_actors,
+       SUM(CASE WHEN mi.info_type_id IS NOT NULL THEN 1 ELSE 0 END) AS info_count
+FROM MovieHierarchy mh
+LEFT JOIN cast_info c ON mh.movie_id = c.movie_id
+LEFT JOIN movie_info mi ON mh.movie_id = mi.movie_id
+WHERE (mh.production_year BETWEEN 1990 AND 2020)
+AND (mh.title LIKE '%The%' OR mh.title LIKE '%A%')
+GROUP BY mh.movie_id, mh.title, mh.production_year
+ORDER BY unique_actors DESC, info_count DESC;
+

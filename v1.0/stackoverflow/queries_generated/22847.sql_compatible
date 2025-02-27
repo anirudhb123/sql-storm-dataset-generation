@@ -1,0 +1,69 @@
+
+WITH UserReputationCTE AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        CASE 
+            WHEN U.Reputation IS NULL THEN 'Unknown'
+            WHEN U.Reputation > 1000 THEN 'High Reputation'
+            WHEN U.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+            ELSE 'Low Reputation'
+        END AS ReputationCategory
+    FROM Users U
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+    HAVING COUNT(DISTINCT P.Id) > 5
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        STRING_AGG(B.Name, ', ') AS BadgeNames,
+        COUNT(B.Id) AS BadgeCount
+    FROM Badges B
+    GROUP BY B.UserId
+),
+ActivePosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        P.LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.LastActivityDate DESC) AS RN
+    FROM Posts P
+    WHERE P.LastActivityDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS ClosedPostId,
+        PH.Comment,
+        PH.CreationDate AS ClosureDate
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE PH.PostHistoryTypeId = 10 AND P.ClosedDate IS NOT NULL
+)
+SELECT 
+    U.DisplayName,
+    U.LastAccessDate,
+    UR.ReputationCategory,
+    COALESCE(T.PostCount, 0) AS PostCount,
+    COALESCE(UB.BadgeNames, '') AS BadgeNames,
+    COALESCE(SUM(CASE WHEN CP.ClosedPostId IS NOT NULL THEN 1 END), 0) AS ClosedPostCount,
+    CASE 
+        WHEN UR.Reputation IS NOT NULL AND COALESCE(T.PostCount, 0) > 10 THEN 'Highly Active'
+        WHEN UR.Reputation IS NULL OR COALESCE(UB.BadgeCount, 0) = 0 THEN 'No Activity'
+        ELSE 'Moderately Active'
+    END AS ActivityLevel
+FROM Users U
+LEFT JOIN UserReputationCTE UR ON U.Id = UR.UserId
+LEFT JOIN TopUsers T ON U.Id = T.UserId
+LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN ActivePosts AP ON U.Id = AP.OwnerUserId
+LEFT JOIN ClosedPosts CP ON AP.Id = CP.ClosedPostId
+GROUP BY U.DisplayName, U.LastAccessDate, UR.ReputationCategory, T.PostCount, UB.BadgeNames, UR.Reputation
+ORDER BY ActivityLevel DESC, UR.Reputation DESC NULLS LAST;

@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk, ws.web_name
+),
+TopWebsites AS (
+    SELECT 
+        web_site_sk, 
+        web_name
+    FROM 
+        RankedSales 
+    WHERE 
+        rank_profit <= 5
+),
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk AS customer_sk,
+        COUNT(DISTINCT cr.order_number) AS return_count,
+        SUM(cr.return_amount) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+)
+SELECT 
+    w.web_name,
+    COALESCE(c.return_count, 0) AS return_count,
+    COALESCE(c.total_return_amount, 0) AS total_return_amount,
+    s.total_quantity,
+    s.total_profit
+FROM 
+    TopWebsites w
+LEFT JOIN 
+    CustomerReturns c ON c.customer_sk = (
+        SELECT 
+            ws.ws_bill_customer_sk 
+        FROM 
+            web_sales ws 
+        WHERE 
+            ws.ws_web_site_sk = w.web_site_sk 
+        FETCH FIRST 1 ROWS ONLY
+    )
+JOIN 
+    RankedSales s ON w.web_site_sk = s.web_site_sk
+ORDER BY 
+    s.total_profit DESC, 
+    w.web_name;

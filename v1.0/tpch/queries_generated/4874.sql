@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+TotalSales AS (
+    SELECT 
+        l.l_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01' AND l.l_shipdate < DATE '2024-01-01'
+    GROUP BY 
+        l.l_suppkey
+),
+SupplierRevenue AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        COALESCE(ts.total_revenue, 0) AS total_revenue,
+        COALESCE(ts.total_revenue / NULLIF(s.s_acctbal, 0), 0) AS revenue_ratio
+    FROM 
+        RankedSuppliers rs
+    LEFT JOIN 
+        TotalSales ts ON rs.s_suppkey = ts.l_suppkey
+)
+SELECT 
+    sr.s_name,
+    sr.total_revenue,
+    sr.revenue_ratio,
+    n.n_name AS nation_name,
+    p.p_name AS popular_part_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders
+FROM 
+    SupplierRevenue sr
+JOIN 
+    supplier s ON sr.s_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    lineitem l ON l.l_suppkey = sr.s_suppkey
+LEFT JOIN 
+    part p ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    sr.total_revenue > 10000
+GROUP BY 
+    sr.s_name, sr.total_revenue, sr.revenue_ratio, n.n_name, p.p_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    sr.revenue_ratio DESC, sr.total_revenue DESC
+LIMIT 10;

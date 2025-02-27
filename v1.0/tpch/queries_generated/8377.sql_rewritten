@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 1000
+),
+OrderValues AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+QualifiedOrders AS (
+    SELECT 
+        o.order_value,
+        DENSE_RANK() OVER (ORDER BY o.order_value DESC) AS order_rank
+    FROM 
+        OrderValues o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-10-01'
+)
+SELECT 
+    r.region_name,
+    s.s_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(p.total_value) AS total_part_value,
+    AVG(q.order_value) AS avg_order_value
+FROM 
+    RankedSuppliers s
+JOIN 
+    nation n ON s.nation = n.n_name
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    HighValueParts p ON p.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey LIMIT 1)
+JOIN 
+    QualifiedOrders q ON q.order_value > 500
+GROUP BY 
+    r.region_name, s.s_name
+ORDER BY 
+    r.region_name, order_count DESC;

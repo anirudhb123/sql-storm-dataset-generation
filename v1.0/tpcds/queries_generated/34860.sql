@@ -1,0 +1,76 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id, 
+        s.total_net_profit,
+        s.total_orders
+    FROM 
+        item i
+    JOIN 
+        SalesCTE s ON i.i_item_sk = s.ws_item_sk
+    WHERE 
+        s.rank <= 10
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        MAX(ws.net_paid) AS max_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_purchases
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+),
+ReturnStats AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    ti.i_item_id,
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_purchase_estimate,
+    ci.max_spent,
+    ci.total_purchases,
+    rs.total_returns,
+    rs.total_return_amt
+FROM 
+    TopItems ti
+JOIN 
+    CustomerInfo ci ON ci.c_customer_id = (
+        SELECT c.c_customer_id 
+        FROM customer c 
+        WHERE c.c_customer_sk = ci.c_customer_sk
+    )
+LEFT JOIN 
+    ReturnStats rs ON ti.ws_item_sk = rs.sr_item_sk
+WHERE 
+    (ci.cd_gender IS NOT NULL OR ci.cd_marital_status IS NOT NULL)
+    AND (rs.total_returns IS NULL OR rs.total_returns > 0)
+ORDER BY 
+    ti.total_net_profit DESC, ci.max_spent DESC;

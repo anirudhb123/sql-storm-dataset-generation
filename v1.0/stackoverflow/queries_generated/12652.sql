@@ -1,0 +1,62 @@
+-- Performance benchmarking query for analyzing posts, users, and votes in the StackOverflow schema
+
+WITH PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        COALESCE(u.Reputation, 0) AS OwnerReputation,
+        COALESCE(u.DisplayName, '[Community]') AS OwnerDisplayName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        p.Id, u.Reputation, u.DisplayName
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.PostTypeId,
+    pm.CreationDate,
+    pm.Score,
+    pm.ViewCount,
+    pm.CommentCount,
+    pm.VoteCount,
+    pm.OwnerReputation,
+    pm.OwnerDisplayName,
+    um.UserId AS PostOwnerId,
+    um.Reputation AS PostOwnerReputation,
+    um.PostsCount,
+    um.QuestionsCount,
+    um.AnswersCount
+FROM 
+    PostMetrics pm
+JOIN 
+    UserMetrics um ON pm.OwnerDisplayName = um.UserId
+ORDER BY 
+    pm.Score DESC, pm.ViewCount DESC;

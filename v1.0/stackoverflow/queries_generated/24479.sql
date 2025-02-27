@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+        AND p.PostTypeId IN (1, 2) -- Considering only Questions and Answers
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryWithTags AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(ph.Text::text, ','))::int)  -- Extracting Tag Ids from Text
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Looking for posts that were closed
+    GROUP BY 
+        ph.PostId, ph.UserId, ph.CreationDate, ph.Comment
+)
+SELECT 
+    up.UserId,
+    COALESCE(up.Reputation, 0) AS UserReputation,
+    up.BadgeCount,
+    up.GoldBadges,
+    up.SilverBadges,
+    up.BronzeBadges,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    pht.Tags,
+    pht.CloseReason,
+    CASE 
+        WHEN rp.Rank = 1 THEN 'Top Post'
+        WHEN rp.Rank <= 5 THEN 'Top 5 Post'
+        ELSE 'Other Post' 
+    END AS PostCategory
+FROM 
+    UserReputation up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostHistoryWithTags pht ON rp.PostId = pht.PostId
+WHERE 
+    (up.Reputation > 1000 OR rp.ViewCount > 100)
+    AND (pht.CloseReason IS NOT NULL OR rp.Score > 0)
+ORDER BY 
+    up.Reputation DESC, rp.ViewCount DESC NULLS LAST
+LIMIT 100;

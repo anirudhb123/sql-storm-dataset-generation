@@ -1,0 +1,84 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId IN (1, 2) THEN 1 ELSE 0 END) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(DISTINCT CASE WHEN b.Id IS NOT NULL THEN b.Id END) AS BadgeCount,
+        AVG(EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - u.CreationDate))) AS AvgAccountAge
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        Upvotes,
+        Downvotes,
+        BadgeCount,
+        AvgAccountAge,
+        RANK() OVER (ORDER BY PostCount DESC, Upvotes DESC) AS UserRank
+    FROM 
+        UserActivity
+    WHERE 
+        AvgAccountAge < 31557600 
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(v.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownvotes,
+        RANK() OVER (ORDER BY COUNT(p.Id) DESC) AS TagRank
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        t.TagName
+),
+UserTags AS (
+    SELECT 
+        u.DisplayName,
+        STRING_AGG(t.TagName, ', ') AS UserTags
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    JOIN 
+        Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        u.DisplayName
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.PostCount,
+    tu.Upvotes,
+    tu.Downvotes,
+    tu.BadgeCount,
+    pt.TagName,
+    pt.PostCount AS TagPostCount,
+    pt.TotalUpvotes AS TagUpvotes,
+    pt.TotalDownvotes AS TagDownvotes,
+    ut.UserTags
+FROM 
+    TopUsers tu
+JOIN 
+    PopularTags pt ON pt.TagRank <= 10
+JOIN 
+    UserTags ut ON ut.DisplayName = tu.DisplayName
+ORDER BY 
+    tu.UserRank, pt.PostCount DESC;

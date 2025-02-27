@@ -1,0 +1,34 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(ci.id) AS cast_count,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.id) DESC) AS rank_within_year
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY 
+        t.title, t.production_year
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    COALESCE(NULLIF(rm.cast_count, 0), 'No cast information') AS cast_count,
+    ak.name AS actor_name,
+    ak.imdb_index AS actor_imdb_index
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    cast_info ci ON rm.title = (SELECT t.title FROM aka_title t WHERE t.id = ci.movie_id)
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+WHERE 
+    rm.rank_within_year <= 5
+    AND rm.production_year >= 2000
+ORDER BY 
+    rm.production_year DESC, rm.cast_count DESC;

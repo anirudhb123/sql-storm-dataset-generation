@@ -1,0 +1,62 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 10
+),
+ActorDetails AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        c.movie_id,
+        r.role
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        a.name IS NOT NULL
+),
+MovieCompany AS (
+    SELECT 
+        m.movie_id,
+        GROUP_CONCAT(DISTINCT co.name) as companies
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name co ON m.company_id = co.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    ad.name AS actor_name,
+    ad.role,
+    mc.companies
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    ActorDetails ad ON tm.title = ad.movie_id
+LEFT JOIN 
+    MovieCompany mc ON tm.movie_id = mc.movie_id
+WHERE 
+    mc.companies IS NOT NULL
+ORDER BY 
+    tm.production_year DESC, 
+    ad.name;

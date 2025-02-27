@@ -1,0 +1,35 @@
+-- Performance Benchmarking SQL Query
+
+-- Retrieving statistics for posts, users, and their interactions 
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    P.CreationDate AS PostCreationDate,
+    P.ViewCount,
+    P.Score,
+    U.Id AS UserId,
+    U.DisplayName AS UserDisplayName,
+    U.Reputation,
+    U.CreationDate AS UserCreationDate,
+    COUNT(C.Comment) AS CommentCount,
+    COALESCE(AVG(V.BountyAmount), 0) AS AverageBountyAmount,
+    COUNT(DISTINCT B.Id) AS BadgeCount,
+    COUNT(DISTINCT PH.Id) AS PostHistoryCount
+FROM 
+    Posts AS P
+JOIN 
+    Users AS U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    Comments AS C ON P.Id = C.PostId
+LEFT JOIN 
+    Votes AS V ON P.Id = V.PostId AND V.VoteTypeId = 8 -- Counting only BountyStart votes
+LEFT JOIN 
+    Badges AS B ON U.Id = B.UserId
+LEFT JOIN 
+    PostHistory AS PH ON P.Id = PH.PostId
+WHERE 
+    P.CreationDate >= '2023-01-01 00:00:00' -- Filter for posts created in 2023
+GROUP BY 
+    P.Id, U.Id
+ORDER BY 
+    P.CreationDate DESC;

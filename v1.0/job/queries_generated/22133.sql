@@ -1,0 +1,91 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        aka_title mt 
+    INNER JOIN 
+        movie_link ml ON mt.id = ml.linked_movie_id
+    INNER JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+actor_roles AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        c.role_id,
+        ct.kind AS role_type,
+        ROW_NUMBER() OVER(PARTITION BY a.id ORDER BY c.nr_order) AS role_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        comp_cast_type ct ON c.person_role_id = ct.id
+),
+top_roles AS (
+    SELECT 
+        actor_id,
+        name,
+        role_rank,
+        role_type
+    FROM 
+        actor_roles
+    WHERE 
+        role_rank <= 3
+),
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COALESCE(ci.country_code, 'Unknown') AS country_code
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        company_name ci ON ci.id = mc.company_id
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    ar.name AS actor_name,
+    ar.role_type,
+    COUNT(DISTINCT ci.company_name) AS total_companies,
+    CASE 
+        WHEN COUNT(DISTINCT ci.company_name) > 5 THEN 'Large Production'
+        WHEN COUNT(DISTINCT ci.company_name) >= 3 THEN 'Medium Production'
+        ELSE 'Small Production'
+    END AS production_scale,
+    STRING_AGG(DISTINCT ci.company_name, ', ') AS company_list
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    top_roles ar ON ci.person_id = ar.actor_id
+LEFT JOIN 
+    company_info ci ON mh.movie_id = ci.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, ar.name, ar.role_type
+HAVING 
+    COUNT(DISTINCT ci.company_name) > 0
+ORDER BY 
+    mh.production_year DESC, total_companies DESC, movie_title;

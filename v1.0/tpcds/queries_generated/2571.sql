@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_order_number,
+        c.c_first_name,
+        c.c_last_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        ws.ws_ship_date_sk BETWEEN 2451545 AND 2451549  -- Example date range using Julian date
+),
+TotalSales AS (
+    SELECT 
+        r.c_first_name,
+        r.c_last_name,
+        SUM(r.ws_sales_price * r.ws_quantity) AS total_spent
+    FROM 
+        RankedSales r
+    WHERE 
+        r.sales_rank <= 5
+    GROUP BY 
+        r.c_first_name, r.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        ts.c_first_name,
+        ts.c_last_name,
+        ts.total_spent,
+        RANK() OVER (ORDER BY ts.total_spent DESC) AS customer_rank
+    FROM 
+        TotalSales ts
+)
+SELECT 
+    tc.c_first_name,
+    tc.c_last_name,
+    COALESCE(tc.total_spent, 0) AS total_spent,
+    (SELECT COUNT(*) FROM customer_demo cd WHERE cd.cd_credit_rating = 'Good') AS good_credit_count,
+    (SELECT COUNT(*) FROM customer_demographics cd WHERE cd.cd_marital_status = 'M') AS married_count
+FROM 
+    TopCustomers tc
+FULL OUTER JOIN 
+    customer_demographics cd ON tc.total_spent > cd.cd_purchase_estimate
+WHERE 
+    tc.customer_rank <= 10 OR tc.customer_rank IS NULL
+ORDER BY 
+    total_spent DESC NULLS LAST;

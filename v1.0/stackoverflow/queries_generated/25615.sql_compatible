@@ -1,0 +1,53 @@
+
+WITH ProcessedTags AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Views,
+        p.Score,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        STRING_AGG(t.TagName, ', ' ORDER BY t.TagName) AS CombinedTags,
+        COUNT(c.Id) AS TotalComments
+    FROM
+        Posts p
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        UNNEST(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS tag_name ON TRUE
+    JOIN
+        Tags t ON t.TagName = tag_name
+    LEFT JOIN
+        Comments c ON c.PostId = p.Id
+    WHERE
+        p.CreationDate >= '2023-01-01' 
+        AND p.PostTypeId IN (1, 2) 
+    GROUP BY
+        p.Id, p.Title, p.Views, p.Score, p.OwnerUserId, u.DisplayName
+),
+RankedPosts AS (
+    SELECT
+        *,
+        RANK() OVER (ORDER BY Views DESC, Score DESC) AS Rank
+    FROM
+        ProcessedTags
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Views,
+    rp.Score,
+    rp.OwnerDisplayName,
+    rp.CombinedTags,
+    rp.TotalComments,
+    CASE 
+        WHEN rp.Rank <= 10 THEN 'Top Posts'
+        WHEN rp.Rank BETWEEN 11 AND 50 THEN 'Popular Posts'
+        ELSE 'Other Posts'
+    END AS Category
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Rank <= 100 
+ORDER BY 
+    rp.Rank;

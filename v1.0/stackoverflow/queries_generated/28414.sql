@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int[])
+    WHERE 
+        p.PostTypeId = 1  -- Focus on questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        v.PostId
+),
+PostMetrics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        COALESCE(rv.VoteCount, 0) AS RecentVoteCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentVotes rv ON rp.PostId = rv.PostId
+)
+SELECT 
+    pm.*,
+    CASE 
+        WHEN pm.RecentVoteCount > 10 THEN 'Hot'
+        WHEN pm.RecentVoteCount BETWEEN 5 AND 10 THEN 'Trending'
+        ELSE 'New'
+    END AS PostStatus
+FROM 
+    PostMetrics pm
+ORDER BY 
+    pm.CreationDate DESC
+LIMIT 20;

@@ -1,0 +1,26 @@
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    ct.kind AS company_type,
+    COUNT(DISTINCT mc.company_id) AS total_companies,
+    AVG(mi.info) AS average_rating
+FROM 
+    title t
+JOIN 
+    cast_info ci ON t.id = ci.movie_id
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info='rating')
+WHERE 
+    t.production_year > 2000
+GROUP BY 
+    t.title, a.name, ct.kind
+HAVING 
+    total_companies > 5
+ORDER BY 
+    average_rating DESC, movie_title ASC;

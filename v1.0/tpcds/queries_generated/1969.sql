@@ -1,0 +1,66 @@
+
+WITH ItemSales AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_sales_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales_amount
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_id
+),
+CustomerReturns AS (
+    SELECT 
+        sr.sr_item_sk,
+        SUM(sr.sr_return_quantity) AS total_returned_quantity,
+        SUM(sr.sr_return_amt_inc_tax) AS total_returned_amount
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_item_sk
+),
+SalesSummary AS (
+    SELECT 
+        is.i_item_id,
+        COALESCE(is.total_sales_quantity, 0) AS sales_quantity,
+        COALESCE(is.total_sales_amount, 0) AS sales_amount,
+        COALESCE(cr.total_returned_quantity, 0) AS returned_quantity,
+        COALESCE(cr.total_returned_amount, 0) AS returned_amount,
+        (COALESCE(is.total_sales_amount, 0) - COALESCE(cr.total_returned_amount, 0)) AS net_sales_amount,
+        CASE 
+            WHEN COALESCE(is.total_sales_quantity, 0) > 0 
+            THEN (COALESCE(cr.total_returned_quantity, 0) * 100.0 / COALESCE(is.total_sales_quantity, 1))
+            ELSE 0 
+        END AS return_rate_percentage
+    FROM 
+        ItemSales is
+    LEFT JOIN 
+        CustomerReturns cr ON is.i_item_sk = cr.sr_item_sk
+),
+RankedSales AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY net_sales_amount DESC) AS sales_rank
+    FROM 
+        SalesSummary
+)
+SELECT 
+    rs.i_item_id,
+    rs.sales_quantity,
+    rs.sales_amount,
+    rs.returned_quantity,
+    rs.returned_amount,
+    rs.net_sales_amount,
+    rs.return_rate_percentage
+FROM 
+    RankedSales rs
+WHERE 
+    rs.sales_rank <= 10 
+    AND rs.return_rate_percentage < 15
+ORDER BY 
+    rs.net_sales_amount DESC;

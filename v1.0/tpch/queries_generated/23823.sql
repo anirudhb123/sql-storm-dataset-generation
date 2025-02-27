@@ -1,0 +1,77 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey 
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s 
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+),
+PartSupplierInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        p.p_retailprice,
+        ps.ps_availqty,
+        COALESCE(NULLIF(p.p_comment, ''), 'No Comment') AS part_comment
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+ExcessivelyDiscounted AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_discount > 0.5
+    GROUP BY 
+        l.l_orderkey
+)
+
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    r.c_name,
+    COALESCE(ps.p_name, 'Unknown Part') AS item_name,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    CASE 
+        WHEN h.s_suppkey IS NOT NULL THEN 'Quality Supplier' 
+        ELSE 'Regular Supplier' 
+    END AS supplier_quality,
+    e.net_revenue
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    PartSupplierInfo ps ON r.o_orderkey = (SELECT l.l_orderkey FROM lineitem l WHERE l.l_orderkey = r.o_orderkey LIMIT 1)
+LEFT JOIN 
+    HighValueSuppliers h ON h.s_suppkey = ps.ps_suppkey 
+LEFT JOIN 
+    ExcessivelyDiscounted e ON e.l_orderkey = r.o_orderkey
+WHERE 
+    r.order_rank <= 5 
+    AND r.o_orderdate >= '2023-01-01' 
+    AND COALESCE(h.s_acctbal, 0) < 1000
+ORDER BY 
+    r.o_orderdate DESC, 
+    r.o_totalprice DESC;

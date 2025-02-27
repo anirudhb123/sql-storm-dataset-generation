@@ -1,0 +1,43 @@
+WITH RecursivePartSuppliers AS (
+    SELECT ps_partkey, ps_suppkey, ps_availqty, ps_supplycost
+    FROM partsupp
+    WHERE ps_availqty > 100
+    UNION ALL
+    SELECT p.ps_partkey, p.ps_suppkey, p.ps_availqty, p.ps_supplycost
+    FROM partsupp p
+    INNER JOIN RecursivePartSuppliers r ON p.ps_partkey = r.ps_partkey
+    WHERE p.ps_supplycost < r.ps_supplycost
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as status_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderstatus IN ('O', 'F')
+), SupplierSummary AS (
+    SELECT s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_name
+)
+
+SELECT DISTINCT 
+    r.r_name, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    COUNT(* ) FILTER (WHERE l.l_returnflag = 'R') AS returned_items,
+    COUNT(DISTINCT CASE WHEN so.total_cost IS NULL THEN NULL ELSE so.s_name END) AS active_suppliers
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN (SELECT * FROM SupplierSummary WHERE total_cost > 10000) so ON so.s_name = s.s_name
+JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN RankedOrders ro ON c.c_custkey = ro.o_orderkey
+WHERE r.r_name IS NOT NULL 
+AND (s.s_acctbal IS NULL OR s.s_acctbal > 2000) 
+AND l.l_shipmode IN ('AIR', 'TRUCK')
+AND (l.l_quantity BETWEEN 1 AND 10 OR l.l_discount IS NOT NULL)
+GROUP BY r.r_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000
+ORDER BY total_sales DESC 
+LIMIT 10 OFFSET 5;

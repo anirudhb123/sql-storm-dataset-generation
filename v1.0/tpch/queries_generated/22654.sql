@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+), TopSuppliers AS (
+    SELECT 
+        r.r_name AS region_name, 
+        ns.n_name AS nation_name,
+        rs.s_name,
+        rs.total_supply_cost
+    FROM RankedSuppliers rs
+    JOIN nation ns ON rs.s_nationkey = ns.n_nationkey
+    JOIN region r ON ns.n_regionkey = r.r_regionkey
+    WHERE rs.rank <= 3
+), CustomersWithHighOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) IS NOT NULL AND COUNT(o.o_orderkey) > 5
+), CustomerSupplierInteraction AS (
+    SELECT 
+        cw.c_custkey, 
+        cw.c_name, 
+        ts.s_name, 
+        ts.total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY cw.c_custkey ORDER BY ts.total_supply_cost DESC) AS supplier_rank
+    FROM CustomersWithHighOrders cw
+    JOIN lineitem l ON cw.c_custkey = l.l_orderkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN supplier ts ON ps.ps_suppkey = ts.s_suppkey
+), FinalResults AS (
+    SELECT 
+        c.cust_key,
+        c.c_name,
+        s.s_name,
+        s.total_supply_cost,
+        CASE 
+            WHEN s.total_supply_cost > 1000 THEN 'High Cost'
+            WHEN s.total_supply_cost IS NULL THEN 'Unknown'
+            ELSE 'Moderate Cost'
+        END AS cost_category,
+        CASE 
+            WHEN c.order_count > 10 THEN TRUE
+            ELSE FALSE
+        END AS frequent_customer
+    FROM CustomersWithHighOrders c
+    JOIN CustomerSupplierInteraction s ON c.c_custkey = s.c_custkey
+    WHERE s.supplier_rank = 1
+)
+SELECT
+    r.region_name,
+    COUNT(DISTINCT f.cust_key) AS unique_customers,
+    SUM(CASE WHEN f.frequent_customer THEN 1 ELSE 0 END) AS frequent_customers,
+    AVG(f.total_supply_cost) AS avg_supply_cost
+FROM FinalResults f
+JOIN TopSuppliers ts ON f.s_name = ts.s_name
+JOIN nation n ON ts.nation_name = n.n_name
+JOIN region r ON n.n_regionkey = r.r_regionkey
+GROUP BY r.region_name
+ORDER BY unique_customers DESC;

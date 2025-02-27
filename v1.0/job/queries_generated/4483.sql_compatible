@@ -1,0 +1,62 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        ca.person_id,
+        ca.movie_id,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY ca.person_id ORDER BY ca.nr_order) AS role_rank
+    FROM 
+        cast_info ca
+    JOIN 
+        role_type r ON ca.role_id = r.id
+),
+CompanyDetails AS (
+    SELECT 
+        m.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT m.movie_id) AS movie_count
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+    GROUP BY 
+        m.movie_id, c.name, ct.kind
+)
+SELECT 
+    a.person_id,
+    a.role_name,
+    rt.title,
+    rt.production_year,
+    cd.company_name,
+    cd.company_type,
+    COALESCE(cd.movie_count, 0) AS total_movies,
+    COUNT(DISTINCT cd.movie_id) OVER (PARTITION BY a.person_id) AS total_companies,
+    CASE 
+        WHEN rt.title IS NULL THEN 'Title Missing'
+        ELSE 'Title Present'
+    END AS title_status
+FROM 
+    ActorRoles a
+LEFT JOIN 
+    RankedTitles rt ON a.movie_id = rt.title_id
+LEFT JOIN 
+    CompanyDetails cd ON a.movie_id = cd.movie_id
+WHERE 
+    a.role_rank = 1
+    AND (rt.production_year >= 2000 OR rt.production_year IS NULL)
+ORDER BY 
+    a.person_id, rt.production_year DESC;

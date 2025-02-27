@@ -1,0 +1,52 @@
+
+WITH FilteredTitles AS (
+    SELECT 
+        a.id AS title_id,
+        a.title,
+        a.production_year,
+        a.kind_id,
+        a.imdb_index
+    FROM aka_title a
+    WHERE a.production_year >= 2000
+      AND LOWER(a.title) LIKE '%adventure%'
+), 
+FilteredCompanies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    WHERE ct.kind IN ('Distributor', 'Production')
+), 
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    JOIN role_type rt ON ci.role_id = rt.id
+), 
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        ARRAY_AGG(DISTINCT mi.info) AS movie_infos
+    FROM movie_info mi
+    GROUP BY mi.movie_id
+)
+SELECT 
+    ft.title,
+    ft.production_year,
+    COUNT(DISTINCT fc.company_name) AS total_companies,
+    ARRAY_AGG(DISTINCT cd.actor_name) AS cast_names,
+    COALESCE(mi.movie_infos, ARRAY[]::VARCHAR[]) AS movie_info_data
+FROM FilteredTitles ft
+LEFT JOIN FilteredCompanies fc ON ft.title_id = fc.movie_id
+LEFT JOIN CastDetails cd ON ft.title_id = cd.movie_id
+LEFT JOIN MovieInfo mi ON ft.title_id = mi.movie_id
+GROUP BY ft.title, ft.production_year
+ORDER BY ft.production_year DESC,
+         total_companies DESC,
+         ft.title;

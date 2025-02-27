@@ -1,0 +1,46 @@
+
+WITH customer_age AS (
+    SELECT 
+        c.c_customer_sk,
+        (EXTRACT(YEAR FROM CURRENT_DATE) - c.c_birth_year) AS age,
+        c.c_first_name,
+        c.c_last_name
+    FROM customer c
+),
+customer_address_enriched AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_street_name || ' ' || ca.ca_street_type || ', ' || ca.ca_city || ', ' || ca.ca_state || ' ' || ca.ca_zip AS full_address,
+        ca.ca_country
+    FROM customer_address ca
+),
+high_purchase_customers AS (
+    SELECT 
+        cd.cd_demo_sk,
+        SUM(cg.cd_purchase_estimate) AS total_estimate
+    FROM customer_demographics cd
+    JOIN customer_age ca ON cd.cd_demo_sk = ca.c_customer_sk
+    GROUP BY cd.cd_demo_sk
+    HAVING SUM(cg.cd_purchase_estimate) > 1000
+),
+customer_info AS (
+    SELECT 
+        ca.c_customer_sk,
+        ca.c_first_name,
+        ca.c_last_name,
+        co.full_address,
+        ca.age,
+        hg.total_estimate
+    FROM customer_age ca
+    JOIN customer_address_enriched co ON ca.c_customer_sk = co.ca_address_sk
+    JOIN high_purchase_customers hg ON ca.c_customer_sk = hg.cd_demo_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.full_address,
+    ci.age,
+    ci.total_estimate
+FROM customer_info ci
+WHERE ci.age BETWEEN 30 AND 50
+ORDER BY ci.total_estimate DESC;

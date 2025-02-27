@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS num_cast,
+        RANK() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+MoviesWithKeywords AS (
+    SELECT 
+        rk.movie_id,
+        rk.title,
+        rk.production_year,
+        rk.num_cast,
+        COALESCE(STRING_AGG(mk.keyword, ', '), 'No Keywords') AS all_keywords
+    FROM 
+        RankedMovies rk
+    LEFT JOIN 
+        movie_keyword mk ON rk.movie_id = mk.movie_id
+    GROUP BY 
+        rk.movie_id, rk.title, rk.production_year, rk.num_cast
+),
+TopMovies AS (
+    SELECT 
+        mwk.*,
+        ROW_NUMBER() OVER (ORDER BY num_cast DESC, production_year ASC) AS top_rank
+    FROM 
+        MoviesWithKeywords mwk
+    WHERE 
+        mwk.num_cast > 0
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.num_cast,
+    tm.all_keywords,
+    COALESCE((
+        SELECT 
+            COUNT(DISTINCT mc.company_id)
+        FROM 
+            movie_companies mc
+        WHERE 
+            mc.movie_id = tm.movie_id
+            AND mc.company_type_id IN (SELECT id FROM company_type WHERE kind = 'Distributor')
+    ), 0) AS distributor_count,
+    CASE 
+        WHEN tm.top_rank <= 10 THEN 'Top Ten'
+        WHEN tm.top_rank BETWEEN 11 AND 20 THEN 'Top Twenty'
+        ELSE 'Others'
+    END AS rank_category
+FROM 
+    TopMovies tm
+WHERE 
+    tm.all_keywords NOT LIKE '%Drama%' 
+    AND tm.production_year IS NOT NULL
+    AND (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = tm.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Release Date')) > 0
+ORDER BY 
+    num_cast DESC,
+    production_year DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

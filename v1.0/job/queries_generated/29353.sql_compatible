@@ -1,0 +1,53 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        c.id AS cast_info_id,
+        n.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY ci.nr_order) AS actor_order
+    FROM 
+        aka_title a 
+    JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.id = ci.movie_id
+    JOIN 
+        aka_name n ON ci.person_id = n.person_id
+    WHERE 
+        a.production_year BETWEEN 2000 AND 2023
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+CombinedResults AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.actor_name,
+        rm.actor_order,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON rm.cast_info_id = mk.movie_id
+)
+SELECT 
+    movie_title,
+    production_year,
+    STRING_AGG(actor_name, ', ' ORDER BY actor_order) AS cast,
+    keywords
+FROM 
+    CombinedResults
+GROUP BY 
+    movie_title, production_year, keywords
+ORDER BY 
+    production_year DESC, movie_title;

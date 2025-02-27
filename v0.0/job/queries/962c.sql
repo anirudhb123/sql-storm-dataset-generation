@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND it.id < 54 AND t.production_year > 1991 AND mi.note IN ('(Festival de La Rochelle: Rétrospective Emilio Fernandez)', '(Krok Animation Festival)', '(New Way Media Film Festival)', '(PCA #10420)', '(Super 8 mm segments)', '(Wendland Shorts)', 'J Van Voorhees', 'Pleasing Pictures, LLC', 'Tornasol Films', 'blackout-film.com');

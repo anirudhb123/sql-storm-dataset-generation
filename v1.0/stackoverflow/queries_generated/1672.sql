@@ -1,0 +1,45 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(V.BountyAmount) AS TotalBounty,
+        RANK() OVER (ORDER BY COUNT(V.Id) DESC) AS VoteRank
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON T.Id = P.Tags::text[]
+    GROUP BY T.TagName
+    HAVING COUNT(P.Id) > 10
+)
+SELECT 
+    U.DisplayName,
+    U.TotalVotes,
+    U.Upvotes,
+    U.Downvotes,
+    U.TotalBounty,
+    PHS.EditCount,
+    PHS.CloseReopenCount,
+    PT.TagName,
+    PT.PostCount
+FROM UserVoteSummary U
+LEFT JOIN PostHistoryStats PHS ON U.UserId = (SELECT OwnerUserId FROM Posts WHERE Id IN (SELECT PostId FROM PostHistory WHERE UserId = U.UserId LIMIT 1))
+LEFT JOIN PopularTags PT ON PT.PostCount = (SELECT MAX(PostCount) FROM PopularTags)
+WHERE U.VoteRank <= 10
+ORDER BY U.TotalVotes DESC, PT.PostCount DESC;

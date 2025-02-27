@@ -1,0 +1,58 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        DENSE_RANK() OVER (PARTITION BY EXTRACT(YEAR FROM DATE '2024-10-01') - t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS year_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+RecentMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.year_rank = 1
+    AND rm.production_year >= (EXTRACT(YEAR FROM DATE '2024-10-01') - 10)
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    rm.cast_count,
+    (SELECT COUNT(DISTINCT ci.person_id) 
+        FROM cast_info ci 
+        WHERE ci.movie_id = rm.movie_id AND ci.note IS NULL) AS unnamed_cast_count,
+    (SELECT SUM(CASE WHEN pi.info_type_id = 1 THEN 1 ELSE 0 END) 
+        FROM person_info pi 
+        WHERE pi.person_id IN (SELECT DISTINCT person_id FROM cast_info WHERE movie_id = rm.movie_id)
+    ) AS total_awards
+FROM 
+    RecentMovies rm
+LEFT JOIN 
+    MovieKeywords mk ON rm.movie_id = mk.movie_id
+ORDER BY 
+    rm.production_year DESC, rm.cast_count DESC
+FETCH FIRST 10 ROWS ONLY;

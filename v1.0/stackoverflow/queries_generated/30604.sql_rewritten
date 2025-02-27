@@ -1,0 +1,43 @@
+WITH Recursive_Posts AS (
+    
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.AcceptedAnswerId, 
+        0 AS Depth
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId, 
+        a.Title, 
+        a.OwnerUserId, 
+        a.AcceptedAnswerId, 
+        rp.Depth + 1
+    FROM Posts a
+    JOIN Recursive_Posts rp ON a.ParentId = rp.PostId
+)
+SELECT 
+    u.DisplayName AS UserName,
+    p.Title AS QuestionTitle,
+    pv.VoteCount AS QuestionVoteCount,
+    COALESCE(SUM(a.Score), 0) AS TotalAnswerScore,
+    MAX(a.Score) AS BestAnswerScore,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(DISTINCT l.Id) AS LinkedPostsCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount 
+FROM Posts p
+JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN Recursive_Posts r ON r.PostId = p.Id 
+LEFT JOIN Posts a ON a.ParentId = p.Id 
+LEFT JOIN Comments c ON c.PostId = p.Id 
+LEFT JOIN PostLinks l ON l.PostId = p.Id 
+LEFT JOIN Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) 
+WHERE p.PostTypeId = 1 
+GROUP BY u.DisplayName, p.Title, pv.VoteCount
+HAVING COUNT(DISTINCT a.Id) > 0 
+ORDER BY QuestionVoteCount DESC, TotalAnswerScore DESC;

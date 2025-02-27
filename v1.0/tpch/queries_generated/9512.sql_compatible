@@ -1,0 +1,72 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rnk
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.total_revenue
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.rnk <= 10
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.total_revenue,
+    co.c_name AS customer_name,
+    sd.s_name AS supplier_name,
+    sd.total_supply_cost,
+    co.total_orders,
+    co.total_spent
+FROM 
+    TopOrders to
+JOIN 
+    CustomerOrders co ON co.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = to.o_orderkey)
+JOIN 
+    lineitem l ON to.o_orderkey = l.l_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier sd ON ps.ps_suppkey = sd.s_suppkey
+ORDER BY 
+    to.total_revenue DESC, co.total_spent DESC;

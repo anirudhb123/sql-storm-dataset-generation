@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_order_number DESC) AS rank_order
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+),
+AggregateSales AS (
+    SELECT 
+        r.web_site_sk,
+        COUNT(r.ws_order_number) as total_orders,
+        SUM(r.ws_sales_price) as total_sales,
+        AVG(r.ws_sales_price) as avg_sales_price
+    FROM 
+        RankedSales r
+    WHERE 
+        r.rank_order <= 10
+    GROUP BY 
+        r.web_site_sk
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        MAX(d.d_year) AS last_purchase_year,
+        COUNT(DISTINCT dc.ddemo_sk) AS demographics_count,
+        SUM(CASE WHEN cs.total_orders IS NULL THEN 0 ELSE cs.total_orders END) AS total_orders_reported
+    FROM
+        customer c 
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN date_dim d ON c.c_first_sales_date_sk = d.d_date_sk
+    LEFT JOIN AggregateSales cs ON c.c_customer_sk = cs.web_site_sk -- Assuming customer_sk can relate
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    ca.ca_country,
+    COUNT(DISTINCT cs.c_customer_sk) AS customer_count,
+    SUM(cs.total_orders_reported) AS total_orders_by_country,
+    AVG(cs.average_sales) AS avg_sales_per_customer
+FROM 
+    CustomerStats cs
+JOIN 
+    customer_address ca ON cs.c_customer_sk = ca.ca_address_sk
+LEFT JOIN 
+    warehouse w ON (wc.w_warehouse_sk = ca.ca_address_sk OR w.w_zip = ca.ca_zip) -- Testing bizarre join condition
+WHERE 
+    ca.ca_country IS NOT NULL
+GROUP BY 
+    ca.ca_country
+HAVING 
+    COUNT(DISTINCT cs.c_customer_sk) > 5
+    OR EXISTS (SELECT 1 FROM customer_demographics WHERE cd_credit_rating = 'Poor' AND cd_demo_sk = cs.demographics_count) -- Obscure EXISTS
+ORDER BY 
+    total_orders_by_country DESC
+LIMIT 50;

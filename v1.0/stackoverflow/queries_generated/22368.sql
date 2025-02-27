@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+AverageUserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        u.Id
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(ph.Comment, '; ') AS CloseComments,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.ViewRank,
+    rp.CommentCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    COALESCE(up.AvgReputation, 0) AS AverageUserReputation,
+    cp.CloseComments,
+    cp.LastClosedDate,
+    CASE 
+        WHEN rp.UpVoteCount > rp.DownVoteCount THEN 'Popular'
+        WHEN rp.UpVoteCount < rp.DownVoteCount THEN 'Controversial'
+        ELSE 'Neutral'
+    END AS PostSentiment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    AverageUserReputation up ON rp.OwnerUserId = up.UserId
+LEFT JOIN 
+    ClosedPostDetails cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.ViewRank <= 5 -- Top 5 viewed posts per user
+ORDER BY 
+    rp.ViewCount DESC, 
+    rp.CreationDate DESC;

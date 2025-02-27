@@ -1,0 +1,31 @@
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    s.s_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    r.r_name AS supplier_region,
+    CONCAT(p.p_name, ' supplied by ', s.s_name, ' from ', r.r_name, ' has a total revenue of $', 
+           FORMAT(SUM(l.l_extendedprice * (1 - l.l_discount)), 2), 
+           ' from ', COUNT(DISTINCT o.o_orderkey), ' orders.') AS report
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2023-10-01'
+GROUP BY 
+    p.p_partkey, p.p_name, s.s_name, r.r_name
+ORDER BY 
+    revenue DESC
+LIMIT 10;

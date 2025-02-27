@@ -1,0 +1,73 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(NULLIF(p.Body, ''), '[No body provided]') AS Body,
+        1 AS Level,
+        OwnerUserId,
+        p.AcceptedAnswerId
+    FROM Posts p
+    WHERE p.PostTypeId = 1  -- Only Questions
+    UNION ALL
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.Score,
+        a.ViewCount,
+        COALESCE(NULLIF(a.Body, ''), '[No body provided]') AS Body,
+        r.Level + 1 AS Level,
+        a.OwnerUserId,
+        a.AcceptedAnswerId
+    FROM Posts a
+    INNER JOIN RecursivePostCTE r ON a.ParentId = r.PostId
+),
+RankedPosts AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Body,
+        p.Level,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM RecursivePostCTE p
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.PostId) AS PostCount,
+        SUM(p.Score) AS TotalScore
+    FROM Users u
+    LEFT JOIN RankedPosts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+    HAVING COUNT(DISTINCT p.PostId) > 0
+),
+VoteSummary AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotesCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.OwnerUserId
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.PostCount,
+    u.TotalScore,
+    COALESCE(v.UpVotesCount, 0) AS TotalUpVotes,
+    COALESCE(v.DownVotesCount, 0) AS TotalDownVotes
+FROM TopUsers u
+LEFT JOIN VoteSummary v ON u.UserId = v.OwnerUserId
+WHERE u.Reputation > 100
+ORDER BY u.TotalScore DESC, u.PostCount DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,70 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 5 THEN 1 ELSE 0 END), 0) AS TotalFavorites,
+        COALESCE(COUNT(DISTINCT C.Id), 0) AS TotalComments,
+        COALESCE(COUNT(DISTINCT P.Id), 0) AS TotalPosts,
+        AVG(P.Score) AS AvgPostScore
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY U.Id
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.Body,
+        P.AcceptedAnswerId,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.Score > 0
+    GROUP BY P.Id
+),
+TopPosts AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.CreationDate,
+        PD.Score,
+        PD.ViewCount,
+        PD.Body
+    FROM PostDetails PD
+    WHERE PD.PostRank <= 5
+),
+UserScores AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.TotalUpVotes - UA.TotalDownVotes AS NetVotes,
+        UA.TotalFavorites,
+        UA.TotalPosts,
+        CASE 
+            WHEN UA.TotalPosts > 0 THEN AVG(PD.Score) 
+            ELSE 0 
+        END AS AvgPostScore
+    FROM UserActivity UA
+    LEFT JOIN TopPosts PD ON UA.UserId = PD.OwnerUserId
+    GROUP BY UA.UserId
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.NetVotes,
+    US.TotalFavorites,
+    US.TotalPosts,
+    US.AvgPostScore,
+    COALESCE(TP.Title, 'No Posts') AS TopPostTitle,
+    COALESCE(TP.ViewCount, 0) AS TopPostViewCount
+FROM UserScores US
+LEFT JOIN TopPosts TP ON US.UserId = TP.OwnerUserId
+ORDER BY US.NetVotes DESC, US.TotalFavorites DESC, US.TotalPosts DESC;

@@ -1,0 +1,67 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+active_actors AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS active_movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.person_id, a.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+subquery_join AS (
+    SELECT 
+        m.movie_id,
+        m.movie_title,
+        COALESCE(ak.name, 'Unknown Actor') AS actor_name,
+        COALESCE(p.info, 'No Info Available') AS person_info,
+        m.production_year
+    FROM 
+        ranked_movies m
+    LEFT JOIN 
+        cast_info c ON m.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN 
+        person_info p ON ak.person_id = p.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'bio')
+    WHERE 
+        m.rank <= 10
+)
+SELECT 
+    sj.movie_title,
+    sj.actor_name,
+    sj.production_year,
+    COUNT(*) OVER (PARTITION BY sj.movie_title) AS actor_count,
+    STRING_AGG(DISTINCT mkw.keyword, ', ') AS movie_keywords,
+    CASE 
+        WHEN sj.actor_name LIKE '%Smith%' THEN 'Featured' 
+        ELSE 'Regular' 
+    END AS actor_status
+FROM 
+    subquery_join sj
+LEFT JOIN 
+    movie_keyword mkw ON sj.movie_id = mkw.movie_id
+WHERE 
+    sj.production_year > 1990
+    AND sj.actor_name IS NOT NULL
+GROUP BY 
+    sj.movie_title, sj.actor_name, sj.production_year
+ORDER BY 
+    sj.production_year DESC, actor_count DESC;

@@ -1,0 +1,88 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON at.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE 
+        mh.depth < 3
+),
+TopRatedMovies AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        AVG(COALESCE(mi.rating, 0)) AS average_rating
+    FROM 
+        complete_cast mc
+    JOIN 
+        aka_title mt ON mt.id = mc.movie_id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = mt.id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = mt.id
+    GROUP BY 
+        mt.movie_id
+    HAVING 
+        AVG(COALESCE(mi.rating, 0)) > 7 AND COUNT(DISTINCT ci.person_id) > 5
+),
+ActorAwardCounts AS (
+    SELECT 
+        ak.person_id,
+        COUNT(aaw.id) AS num_awards
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        actor_awards aaw ON aaw.person_id = ci.person_id
+    GROUP BY 
+        ak.person_id
+),
+MoviesWithAwards AS (
+    SELECT 
+        m.movie_id,
+        m.movie_title,
+        ac.num_awards
+    FROM 
+        TopRatedMovies m
+    JOIN 
+        ActorAwardCounts ac ON ac.num_awards > 0
+),
+RankedMovies AS (
+    SELECT 
+        mw.movie_id,
+        mw.movie_title,
+        mw.num_awards,
+        ROW_NUMBER() OVER (PARTITION BY mw.num_awards ORDER BY mw.num_awards DESC) AS rank
+    FROM 
+        MoviesWithAwards mw
+)
+
+SELECT 
+    rm.movie_id,
+    rm.movie_title,
+    rm.num_awards,
+    rm.rank
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    rm.num_awards DESC, rm.movie_title ASC;

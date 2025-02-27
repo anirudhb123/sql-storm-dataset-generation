@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.AnswerCount,
+        u.DisplayName AS Owner,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS RankByViews,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS RankByRecent
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.PostTypeId = 1 -- Only Questions
+        AND p.ViewCount > 0
+),
+
+FilteredPosts AS (
+    SELECT
+        rp.*,
+        ARRAY_AGG(DISTINCT c.Text ORDER BY c.CreationDate) AS Comments,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM
+        RankedPosts rp
+    LEFT JOIN
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN
+        Badges b ON b.UserId = (SELECT u.Id FROM Users u WHERE u.DisplayName = rp.Owner LIMIT 1)
+    WHERE
+        rp.RankByViews <= 5
+    GROUP BY
+        rp.PostId, rp.Title, rp.ViewCount, rp.CreationDate, rp.AnswerCount, rp.Owner
+),
+
+FinalReports AS (
+    SELECT
+        fp.PostId,
+        fp.Title,
+        fp.ViewCount,
+        fp.CreationDate,
+        fp.Owner,
+        fp.Comments,
+        fp.BadgeCount,
+        CASE
+            WHEN fp.BadgeCount > 5 THEN 'Active Contributor'
+            WHEN fp.BadgeCount BETWEEN 1 AND 5 THEN 'Contributor'
+            ELSE 'New User'
+        END AS UserStatus
+    FROM
+        FilteredPosts fp
+)
+
+SELECT
+    fr.PostId,
+    fr.Title,
+    fr.ViewCount,
+    fr.CreationDate,
+    fr.Owner,
+    ARRAY_LENGTH(fr.Comments, 1) AS CommentCount,
+    fr.UserStatus
+FROM
+    FinalReports fr
+ORDER BY
+    fr.ViewCount DESC, fr.CreationDate DESC;

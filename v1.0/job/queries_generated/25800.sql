@@ -1,0 +1,65 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT c.kind, ', ') AS company_types,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type c ON mc.company_type_id = c.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY 
+        t.id
+),
+Top10Movies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.keywords,
+        md.company_types,
+        md.cast_count
+    FROM 
+        MovieDetails md
+    ORDER BY 
+        md.cast_count DESC, 
+        md.production_year DESC
+    LIMIT 10
+)
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    tm.keywords,
+    tm.company_types,
+    tm.cast_count,
+    ph.gender AS director_gender,
+    CONCAT(p.first_name, ' ', p.last_name) AS director_name
+FROM 
+    Top10Movies tm
+LEFT JOIN 
+    movie_companies mc ON tm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    person_info pi ON cn.imdb_id = pi.person_id
+LEFT JOIN 
+    role_type rt ON pi.info_type_id = rt.id
+LEFT JOIN 
+    aka_name p ON pi.person_id = p.person_id
+WHERE 
+    rt.role = 'director'
+ORDER BY 
+    tm.cast_count DESC;

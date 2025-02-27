@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        Id,
+        Title,
+        CreationDate,
+        OwnerDisplayName,
+        Score,
+        ViewCount
+    FROM 
+        RankedPosts
+    WHERE 
+        RankScore <= 5
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpvoteCount, 
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownvoteCount 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    ps.CommentCount,
+    ps.UpvoteCount,
+    ps.DownvoteCount,
+    CASE 
+        WHEN ps.UpvoteCount > ps.DownvoteCount THEN 'Positive'
+        WHEN ps.UpvoteCount < ps.DownvoteCount THEN 'Negative'
+        ELSE 'Neutral'
+    END AS Sentiment,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        PostHistory ph 
+     WHERE 
+        ph.PostId = tp.Id 
+        AND ph.PostHistoryTypeId IN (10, 11) 
+    ) AS ClosureHistory,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostStats ps ON tp.Id = ps.Id
+LEFT JOIN 
+    UNNEST(STRING_TO_ARRAY((SELECT Tags FROM Posts WHERE Id = tp.Id), ',')) AS t(TagName) ON t.TagName IS NOT NULL
+GROUP BY 
+    tp.Title, tp.OwnerDisplayName, tp.CreationDate, ps.CommentCount, ps.UpvoteCount, ps.DownvoteCount
+ORDER BY 
+    tp.CreationDate DESC;

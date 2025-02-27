@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) as rank_profit
+    FROM web_sales
+    WHERE ws_net_profit IS NOT NULL
+),
+ReturnStats AS (
+    SELECT
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+ProfitMargins AS (
+    SELECT
+        i_item_sk,
+        (SUM(ws_net_profit) / NULLIF(SUM(ws_sales_price), 0)) * 100 AS profit_margin
+    FROM web_sales
+    JOIN item ON ws_item_sk = i_item_sk
+    GROUP BY i_item_sk
+),
+DateMetrics AS (
+    SELECT
+        d_year,
+        d_month_seq,
+        SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    JOIN date_dim ON ws_sold_date_sk = d_date_sk
+    WHERE d_year BETWEEN 2022 AND 2023
+    GROUP BY d_year, d_month_seq
+)
+SELECT
+    ca.city,
+    SUM(dr.total_profit) AS monthly_profits,
+    MAX(ra.total_return_amt) AS max_return_amount,
+    AVG(p.profit_margin) AS average_profit_margin,
+    COUNT(DISTINCT cs.cs_order_number) AS total_catalog_sales,
+    COUNT(DISTINCT ss.ss_ticket_number) AS total_store_sales,
+    STRING_AGG(DISTINCT i.i_item_desc, ', ') AS item_descriptions
+FROM customer_address ca
+LEFT JOIN (SELECT
+               d_year, 
+               d_month_seq, 
+               SUM(total_profit) AS total_profit 
+           FROM DateMetrics 
+           GROUP BY d_year, d_month_seq) dr ON 1 = CASE WHEN MONTH(CURRENT_DATE) = dr.d_month_seq THEN 1 ELSE 0 END
+LEFT JOIN ReturnStats ra ON ra.sr_item_sk = dr.d_year
+LEFT JOIN ProfitMargins p ON p.i_item_sk = ra.sr_item_sk
+LEFT JOIN catalog_sales cs ON cs.cs_item_sk = ra.sr_item_sk
+LEFT JOIN store_sales ss ON ss.ss_item_sk = ra.sr_item_sk
+WHERE ca.ca_city IS NOT NULL
+  AND (EXISTS (SELECT 1 FROM RankedSales rs WHERE rs.ws_item_sk = ra.sr_item_sk AND rs.rank_profit = 1) OR p.profit_margin IS NULL)
+GROUP BY ca.city
+HAVING SUM(dr.total_profit) > 0
+   OR MAX(ra.total_return_amt) > (SELECT AVG(total_return_amt) FROM ReturnStats)
+ORDER BY monthly_profits DESC;

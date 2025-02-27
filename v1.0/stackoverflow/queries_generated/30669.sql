@@ -1,0 +1,75 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+UserPostStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS Questions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS Answers,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastModified,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title AS PostTitle,
+    u.DisplayName AS AuthorName,
+    ups.TotalPosts,
+    ups.Questions,
+    ups.Answers,
+    ups.TotalScore,
+    ups.AvgViewCount,
+    COALESCE(ph.LastModified, 'No Changes') AS LastModified,
+    ph.CloseCount,
+    rph.Level AS HierarchyLevel
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserPostStatistics ups ON u.Id = ups.UserId
+LEFT JOIN 
+    PostHistoryAggregates ph ON p.Id = ph.PostId
+LEFT JOIN 
+    RecursivePostHierarchy rph ON p.Id = rph.PostId
+WHERE 
+    ups.TotalScore > 50
+AND 
+    (ups.Questions > 5 OR ups.Answers > 5)
+ORDER BY 
+    ups.TotalScore DESC, p.Title ASC;

@@ -1,0 +1,57 @@
+WITH actor_movie AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year AS year,
+        c.kind AS role_type
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    JOIN 
+        role_type c ON ci.role_id = c.id
+),
+keyword_movie AS (
+    SELECT 
+        m.id AS movie_id,
+        GROUP_CONCAT(k.keyword) AS keyword_list
+    FROM 
+        movie_keyword mkw
+    JOIN 
+        keyword k ON mkw.keyword_id = k.id
+    JOIN 
+        title m ON mkw.movie_id = m.id
+    GROUP BY 
+        m.id
+),
+company_movie AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT co.name) AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    am.actor_name,
+    am.movie_title,
+    am.year,
+    am.role_type,
+    km.keyword_list,
+    cm.companies
+FROM 
+    actor_movie am
+LEFT JOIN 
+    keyword_movie km ON am.movie_title = (SELECT title FROM title WHERE id = am.movie_title ORDER BY id LIMIT 1)
+LEFT JOIN 
+    company_movie cm ON am.movie_title = (SELECT title FROM title WHERE id = cm.movie_id ORDER BY id LIMIT 1)
+WHERE 
+    am.year BETWEEN 1990 AND 2023
+ORDER BY 
+    am.year DESC, am.actor_name;
+

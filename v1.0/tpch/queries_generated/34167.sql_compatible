@@ -1,0 +1,33 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS depth
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.depth + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    AVG(ps.ps_supplycost) AS avg_supply_cost,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned_qty,
+    ARRAY_AGG(DISTINCT CONCAT(s.s_name, ': ', CAST(s.s_acctbal AS VARCHAR)) ORDER BY s.s_acctbal DESC) AS supplier_info,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank,
+    CASE 
+        WHEN AVG(s.s_acctbal) IS NULL THEN 'No Suppliers'
+        ELSE 'Has Suppliers'
+    END AS supplier_status
+FROM part p
+LEFT OUTER JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+GROUP BY p.p_partkey, p.p_name, p.p_partkey, p.p_name
+HAVING COUNT(ps.ps_suppkey) > 1 
+AND AVG(ps.ps_supplycost) < (SELECT AVG(ps_supplycost) FROM partsupp)
+ORDER BY rank;

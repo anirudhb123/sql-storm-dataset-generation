@@ -1,0 +1,65 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN P.AnswerCount ELSE 0 END) AS QuestionsAnswered,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(CASE WHEN P.ViewCount > 1000 THEN 1 ELSE 0 END) AS PopularPostsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PopularTags AS (
+    SELECT 
+        TRIM(REGEXP_REPLACE(T.TagName, '<[^>]*>', '', 'g')) AS CleanTag,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        CleanTag
+    HAVING 
+        COUNT(P.Id) > 5
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.UserId) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.BadgeCount,
+    US.QuestionsAnswered,
+    US.AnswersGiven,
+    US.PopularPostsCount,
+    PT.CleanTag,
+    RPH.EditCount,
+    RPH.LastEditDate 
+FROM 
+    UserStats US
+LEFT JOIN 
+    PopularTags PT ON PT.PostCount > 5
+LEFT JOIN 
+    RecentPostHistory RPH ON RPH.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = US.UserId)
+ORDER BY 
+    US.Reputation DESC, 
+    US.BadgeCount DESC,
+    US.PopularPostsCount DESC;

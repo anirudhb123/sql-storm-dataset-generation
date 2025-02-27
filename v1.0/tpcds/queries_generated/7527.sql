@@ -1,0 +1,62 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        cd.cd_dep_employed_count,
+        cd.cd_dep_college_count,
+        ca.ca_city, 
+        ca.ca_state,
+        DATE_PART('year', CURRENT_DATE) - c.c_birth_year AS age
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers,
+        SUM(ws.ws_quantity) AS total_quantity,
+        EXTRACT(YEAR FROM d.d_date) as sales_year
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY ws.ws_order_number, sales_year
+),
+top_products AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY i.i_item_id, i.i_item_desc
+    ORDER BY total_profit DESC
+    LIMIT 10
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.ca_city,
+    ci.ca_state,
+    sd.total_profit,
+    sd.unique_customers,
+    sd.total_quantity,
+    tp.i_item_id,
+    tp.i_item_desc,
+    tp.total_sold,
+    tp.total_profit AS item_total_profit
+FROM customer_info ci
+JOIN sales_data sd ON ci.c_customer_id = sd.ws_order_number
+JOIN top_products tp ON ci.c_customer_id = tp.i_item_id
+WHERE ci.age > 30 AND ci.cd_gender = 'F' AND ci.cd_marital_status = 'M'
+ORDER BY item_total_profit DESC;

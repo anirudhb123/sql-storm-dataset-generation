@@ -1,0 +1,54 @@
+
+WITH RECURSIVE Supplier_CTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sc.level + 1
+    FROM supplier s
+    JOIN Supplier_CTE sc ON s.s_suppkey = sc.s_suppkey
+    WHERE sc.level < 5
+),
+LineItem_Info AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, l.l_extendedprice,
+           l.l_discount, l.l_tax,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS rn
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+),
+Customer_Sales AS (
+    SELECT c.c_custkey, c.c_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATEADD(year, -1, '1998-10-01')
+    GROUP BY c.c_custkey, c.c_name
+),
+Frequent_Part AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail_qty,
+           MIN(p.p_retailprice) AS min_price
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_availqty) > 100
+),
+Final_Output AS (
+    SELECT s.s_name, cs.c_name, cs.total_sales, f.total_avail_qty, f.min_price
+    FROM Supplier_CTE s
+    LEFT JOIN Customer_Sales cs ON s.s_suppkey = (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10)
+        FETCH FIRST 1 ROW ONLY
+    )
+    LEFT JOIN Frequent_Part f ON f.ps_partkey IN (
+        SELECT l.l_partkey FROM LineItem_Info l WHERE l.l_quantity > 50
+    )
+)
+SELECT DISTINCT f.s_name, f.c_name, 
+       COALESCE(f.total_sales, 0) AS total_sales,
+       COALESCE(f.total_avail_qty, 0) AS total_avail_qty,
+       COALESCE(f.min_price, 0) AS min_price
+FROM Final_Output f
+WHERE f.total_sales > 10000 OR f.total_avail_qty < 20
+ORDER BY f.total_sales DESC, f.min_price ASC;

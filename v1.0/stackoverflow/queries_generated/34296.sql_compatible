@@ -1,0 +1,64 @@
+
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS TagUsage
+    FROM 
+        Tags 
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(*) > 1
+),
+UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        hp.CreationDate AS CloseDate,
+        hp.UserDisplayName AS ClosedBy
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory hp ON p.Id = hp.PostId
+    WHERE 
+        hp.PostHistoryTypeId = 10
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    us.UpVotes,
+    us.DownVotes,
+    th.TagName AS PopularTag,
+    COUNT(DISTINCT cp.PostId) AS ClosedPostCount,
+    AVG(DATE_PART('epoch', cp.CloseDate) - DATE_PART('epoch', p.CreationDate)) AS AvgClosureDuration
+FROM 
+    UserVoteSummary us
+JOIN 
+    Users u ON us.UserId = u.Id
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    ClosedPosts cp ON cp.PostId = p.Id
+JOIN 
+    RecursiveTagHierarchy th ON th.TagUsage > 5
+WHERE 
+    u.Reputation >= 100
+GROUP BY 
+    u.Id, u.DisplayName, th.TagName
+ORDER BY 
+    AvgClosureDuration DESC,
+    UserName;

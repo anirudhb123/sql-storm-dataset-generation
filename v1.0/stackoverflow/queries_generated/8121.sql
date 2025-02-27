@@ -1,0 +1,52 @@
+WITH RecentUserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagPostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = p.Tags::int[]
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagPostCount DESC
+    LIMIT 5
+)
+SELECT 
+    rus.DisplayName,
+    rus.PostCount,
+    rus.QuestionCount,
+    rus.AnswerCount,
+    rus.TotalUpVotes,
+    rus.TotalDownVotes,
+    pt.TagName,
+    pt.TagPostCount
+FROM 
+    RecentUserStats rus
+CROSS JOIN 
+    PopularTags pt
+WHERE 
+    rus.PostCount > 0
+ORDER BY 
+    rus.TotalUpVotes DESC, rus.PostCount DESC
+LIMIT 10;

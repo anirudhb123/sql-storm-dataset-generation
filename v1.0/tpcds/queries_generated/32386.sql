@@ -1,0 +1,85 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        c_current_cdemo_sk AS demo_sk,
+        1 AS level
+    FROM 
+        customer
+    WHERE 
+        c_first_shipto_date_sk IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        s.ss_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_current_cdemo_sk,
+        sh.level + 1
+    FROM 
+        store_sales s
+    JOIN 
+        customer c ON s.ss_customer_sk = c.c_customer_sk
+    JOIN 
+        sales_hierarchy sh ON c.c_current_cdemo_sk = sh.demo_sk
+    WHERE 
+        sh.level < 5
+),
+sales_data AS (
+    SELECT 
+        sh.c_customer_sk,
+        sh.c_first_name,
+        sh.c_last_name,
+        sh.level,
+        SUM(ss_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS transactions
+    FROM 
+        sales_hierarchy sh
+    LEFT JOIN 
+        store_sales s ON sh.c_customer_sk = s.ss_customer_sk
+    GROUP BY 
+        sh.c_customer_sk, sh.c_first_name, sh.c_last_name, sh.level
+),
+top_sales AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY level ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        sales_data
+),
+gender_stats AS (
+    SELECT 
+        cd_gender,
+        AVG(total_sales) AS avg_sales,
+        COUNT(DISTINCT c_customer_sk) AS customer_count
+    FROM 
+        top_sales
+    JOIN 
+        customer_demographics cd ON top_sales.c_customer_sk = cd.cd_demo_sk 
+    WHERE 
+        sales_rank <= 10
+    GROUP BY 
+        cd_gender
+)
+SELECT 
+    g.cd_gender,
+    g.avg_sales,
+    g.customer_count,
+    COALESCE(GREATEST(g.avg_sales, 0), 0) AS non_negative_avg_sales,
+    CASE 
+        WHEN g.customer_count > 50 THEN 'High Engagement'
+        WHEN g.customer_count BETWEEN 20 AND 50 THEN 'Medium Engagement'
+        ELSE 'Low Engagement'
+    END AS engagement_level,
+    STRING_AGG(DISTINCT CONCAT_WS(', ', cs.c_first_name, cs.c_last_name)) AS top_customers
+FROM 
+    gender_stats g
+LEFT JOIN 
+    customer cs ON g.customer_count = cs.c_customer_sk
+GROUP BY 
+    g.cd_gender, g.avg_sales, g.customer_count
+ORDER BY 
+    g.cd_gender;

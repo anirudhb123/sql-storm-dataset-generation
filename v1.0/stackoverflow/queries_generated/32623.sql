@@ -1,0 +1,66 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        CreationDate,
+        DisplayName,
+        CAST(Reputation AS DECIMAL(10, 2)) AS ReputationScore
+    FROM Users
+    WHERE Reputation > 0
+    
+    UNION ALL
+    
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.CreationDate,
+        u.DisplayName,
+        CAST(u.Reputation AS DECIMAL(10, 2)) + ur.ReputationScore
+    FROM Users u
+    INNER JOIN UserReputation ur ON u.Id <> ur.Id AND u.Reputation > 0
+    WHERE ur.ReputationScore < 1000
+), 
+
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (4, 5) THEN 1 ELSE 0 END) AS TitleEditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT CloseReasons.Name, ', ') AS ClosedReasons
+    FROM PostHistory ph
+    LEFT JOIN CloseReasonTypes CloseReasons ON ph.Comment::int = CloseReasons.Id AND ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+),
+
+UserBadgeSummary AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM Badges b
+    GROUP BY b.UserId
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ur.ReputationScore,
+    u.CreationDate,
+    COALESCE(s.EditCount, 0) AS TotalEdits,
+    COALESCE(s.TitleEditCount, 0) AS TitleEditCount,
+    COALESCE(s.LastEditDate, 'Never') AS LastEditDate,
+    COALESCE(b.BadgeCount, 0) AS TotalBadges,
+    COALESCE(b.GoldCount, 0) AS GoldBadges,
+    COALESCE(b.SilverCount, 0) AS SilverBadges,
+    COALESCE(b.BronzeCount, 0) AS BronzeBadges,
+    COALESCE(s.ClosedReasons, 'None') AS ClosedReasons
+FROM Users u
+LEFT JOIN UserReputation ur ON u.Id = ur.Id
+LEFT JOIN PostHistorySummary s ON s.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+LEFT JOIN UserBadgeSummary b ON b.UserId = u.Id
+WHERE u.Reputation > (SELECT AVG(Reputation) FROM Users)
+ORDER BY u.Reputation DESC
+LIMIT 50;

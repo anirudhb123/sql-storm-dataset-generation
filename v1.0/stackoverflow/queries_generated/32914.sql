@@ -1,0 +1,86 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+UserBadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+HighScorePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0
+)
+SELECT 
+    ph.PostId,
+    ph.Title AS PostTitle,
+    th.TagName,
+    ts.PostCount AS TagsPostCount,
+    ts.TotalViews AS TagTotalViews,
+    ub.UserId AS BadgeUserId,
+    ub.BadgeCount AS UserBadgeCount,
+    ub.AvgReputation AS UserAvgReputation,
+    hsp.Title AS HighScorePostTitle,
+    hsp.Score AS HighScorePostScore
+FROM 
+    PostHierarchy ph
+LEFT JOIN 
+    PostLinks pl ON pl.PostId = ph.PostId
+LEFT JOIN 
+    Tags th ON th.Id = pl.RelatedPostId
+LEFT JOIN 
+    TagStats ts ON ts.TagName = th.TagName
+LEFT JOIN 
+    UserBadgeStats ub ON ub.UserId = ph.PostId 
+LEFT JOIN 
+    HighScorePosts hsp ON hsp.PostId = ph.PostId 
+WHERE 
+    ph.Level = 1 
+    AND ts.PostCount > 10
+ORDER BY 
+    ph.PostId,
+    ts.TotalViews DESC;

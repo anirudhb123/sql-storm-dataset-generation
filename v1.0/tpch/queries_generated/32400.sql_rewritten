@@ -1,0 +1,53 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, l.l_partkey, l.l_quantity, l.l_discount, 
+           l.l_extendedprice, l.l_tax, l.l_returnflag, l.l_linestatus,
+           1 AS level
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, l.l_partkey, l.l_quantity * 1.1, 
+           l.l_discount * 0.9, l.l_extendedprice * (1 - l.l_discount) AS extended_price, 
+           l.l_tax, l.l_returnflag, l.l_linestatus, 
+           level + 1
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.level < 5
+),
+
+AvailableSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           p.p_name, p.p_brand
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+),
+
+NationSupplier AS (
+    SELECT n.n_name, s.s_name, s.s_acctbal, s.s_comment,
+           ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+
+TotalOrderStats AS (
+    SELECT oh.o_orderkey, SUM(oh.l_extendedprice) AS total_sales,
+           COUNT(DISTINCT oh.l_partkey) AS total_parts,
+           AVG(oh.l_discount) AS average_discount
+    FROM OrderHierarchy oh
+    GROUP BY oh.o_orderkey
+)
+
+SELECT ns.n_name, ns.s_name, ns.s_acctbal, 
+       COALESCE(ts.total_sales, 0) AS total_sales,
+       COALESCE(ts.total_parts, 0) AS total_parts,
+       COALESCE(ts.average_discount, 0) AS average_discount
+FROM NationSupplier ns
+LEFT JOIN TotalOrderStats ts ON ns.n_name = 'UNITED STATES'
+WHERE ns.rank = 1
+ORDER BY ns.n_name, total_sales DESC
+LIMIT 10;

@@ -1,0 +1,68 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        1 AS HistoryLevel
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (1, 2, 3)  -- Initial title, body, or tags for questions
+    
+    UNION ALL
+
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        rph.HistoryLevel + 1
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        RecursivePostHistory rph ON rph.PostId = ph.PostId
+    WHERE 
+        ph.CreationDate > rph.CreationDate
+        AND rph.HistoryLevel < 100  -- Limit for recursion
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.OwnerDisplayName,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpvoteCount,  -- Upvotes
+    COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownvoteCount,  -- Downvotes
+    AVG(u.Reputation) AS AverageUserReputation,
+    MAX(rph.CreationDate) AS LastHistoryUpdate,
+    (SELECT COUNT(*) FROM Posts sub WHERE sub.ParentId = p.Id AND sub.PostTypeId = 2) AS NumberOfAnswers,  -- Subquery for counting answers
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    Posts p
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    RecursivePostHistory rph ON p.Id = rph.PostId
+LEFT JOIN 
+    Tags t ON t.Id = ANY(STRING_TO_ARRAY(p.Tags, '><'))::int[]  -- Assuming Tags are delimited by '><'
+WHERE 
+    p.ViewCount > 100
+    AND p.CreationDate >= NOW() - INTERVAL '1 year'
+GROUP BY 
+    p.Id, p.Title, p.OwnerDisplayName
+HAVING 
+    COUNT(DISTINCT c.Id) > 5  -- Only posts with more than 5 comments
+ORDER BY 
+    UpvoteCount DESC, LastHistoryUpdate DESC;
+
+-- This query combines several constructs to simulate a performance benchmark scenario in a complex Stack Overflow data structure:
+-- - Recursive CTE to find history levels of posts
+-- - Aggregations using COUNT, AVG, and STRING_AGG
+-- - Filtering and grouping using HAVING and WHERE
+-- - Joins across multiple tables including Users, Comments, Votes, and Tags

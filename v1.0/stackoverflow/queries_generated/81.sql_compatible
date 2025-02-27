@@ -1,0 +1,44 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS DownVoteCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '3 months')
+),
+AggregateVotes AS (
+    SELECT
+        PostId,
+        (UpVoteCount - DownVoteCount) AS NetVotes,
+        CASE
+            WHEN (UpVoteCount - DownVoteCount) > 0 THEN 'Positive'
+            WHEN (UpVoteCount - DownVoteCount) < 0 THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteSentiment
+    FROM RankedPosts
+    WHERE rn = 1
+),
+ClosedPosts AS (
+    SELECT
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+)
+SELECT
+    ap.PostId,
+    ap.Title,
+    ap.NetVotes,
+    ap.VoteSentiment,
+    COALESCE(cp.CloseCount, 0) AS CloseCount
+FROM AggregateVotes ap
+LEFT JOIN ClosedPosts cp ON ap.PostId = cp.PostId
+ORDER BY ap.NetVotes DESC, CloseCount ASC
+LIMIT 10;

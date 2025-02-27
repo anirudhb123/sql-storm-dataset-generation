@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+), 
+HighValueParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        ps.ps_supplycost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > 100 AND ps.ps_supplycost < 50
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS total_orders, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_name AS region_name, 
+    n.n_name AS nation_name, 
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    SUM(co.total_spent) AS total_spending,
+    AVG(co.total_orders) AS avg_orders_per_customer,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned_quantity,
+    MAX(ps.ps_supplycost) AS max_supply_cost,
+    MIN(HP.p_retailprice) AS min_high_value_part_price
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    CustomerOrders co ON c.c_custkey = co.c_custkey
+LEFT JOIN 
+    lineitem l ON c.c_custkey = l.l_orderkey  -- Wrong join for illustration
+LEFT JOIN 
+    HighValueParts HP ON l.l_partkey = HP.p_partkey
+JOIN 
+    RankedSuppliers rs ON c.c_nationkey = rs.s_suppkey
+WHERE 
+    rs.rn <= 5
+GROUP BY 
+    r.r_name, n.n_name
+HAVING 
+    SUM(CASE WHEN co.total_orders IS NULL THEN 1 ELSE 0 END) > 0  -- Checking for NULL orders
+ORDER BY 
+    total_spending DESC;

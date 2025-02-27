@@ -1,0 +1,86 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2024-01-01'
+),
+AggregatedSupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_customer_spend
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(l.l_linenumber) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_tax,
+        CASE 
+            WHEN l.l_discount > 0 THEN 'Discounted'
+            ELSE 'Regular'
+        END AS price_category
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2023-05-01' AND DATE '2023-12-31'
+        AND l.l_tax IS NOT NULL
+)
+SELECT 
+    co.c_name,
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.o_totalprice,
+    lf.line_count,
+    lf.total_line_value,
+    asc.total_supply_cost,
+    CASE 
+        WHEN asc.total_supply_cost IS NULL THEN 'No Supply Cost'
+        ELSE 'Has Supply Cost'
+    END AS supply_cost_status
+FROM 
+    CustomerOrders co
+JOIN 
+    RankedOrders ro ON co.total_customer_spend > 5000
+LEFT JOIN 
+    LineItemSummary lf ON ro.o_orderkey = lf.l_orderkey
+LEFT JOIN 
+    AggregatedSupplierCost asc ON lf.l_orderkey IN (SELECT l.l_orderkey FROM FilteredLineItems l)
+WHERE 
+    co.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_acctbal IS NOT NULL)
+ORDER BY 
+    ro.o_orderdate DESC, co.total_customer_spend DESC;

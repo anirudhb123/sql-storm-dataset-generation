@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        id AS movie_id,
+        title,
+        production_year,
+        NULL::integer AS parent_id,
+        0 AS depth
+    FROM 
+        aka_title
+    WHERE 
+        episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        a.id,
+        a.title,
+        a.production_year,
+        a.episode_of_id AS parent_id,
+        mh.depth + 1
+    FROM 
+        aka_title a
+    JOIN 
+        MovieHierarchy mh ON a.episode_of_id = mh.movie_id
+),
+RecentMovies AS (
+    SELECT 
+        id,
+        title,
+        production_year,
+        md5sum
+    FROM 
+        aka_title
+    WHERE 
+        production_year >= 2020
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(rd.total_cast, 0) AS total_cast,
+    COALESCE(rd.cast_names, 'No Cast') AS cast_names,
+    CASE 
+        WHEN mh.production_year IS NULL THEN 'Unknown Year'
+        WHEN mh.production_year < 2000 THEN 'Classic'
+        WHEN mh.production_year BETWEEN 2000 AND 2022 THEN 'Modern'
+        ELSE 'Future'
+    END AS era,
+    CASE 
+        WHEN mh.depth IS NULL THEN 'No Episodes'
+        WHEN mh.depth = 0 THEN 'Main Movie'
+        ELSE 'Episode Level ' || mh.depth
+    END AS movie_type
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastDetails rd ON mh.movie_id = rd.movie_id
+WHERE 
+    mh.movie_id IN (SELECT movie_id FROM RecentMovies)
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title ASC;

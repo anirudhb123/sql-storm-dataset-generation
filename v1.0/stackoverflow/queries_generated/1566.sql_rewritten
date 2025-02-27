@@ -1,0 +1,86 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.CommentCount,
+        COALESCE(cp.LastClosedDate, 'Never Closed') AS LastClosedDate,
+        CASE 
+            WHEN ps.UpVotes - ps.DownVotes > 0 THEN 'Positive'
+            WHEN ps.UpVotes - ps.DownVotes < 0 THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteStatus
+    FROM 
+        PostStats ps
+    LEFT JOIN 
+        ClosedPosts cp ON ps.PostId = cp.PostId
+    WHERE 
+        ps.rn = 1  
+    ORDER BY 
+        ps.UpVotes DESC
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.CommentCount,
+    tp.LastClosedDate,
+    tp.VoteStatus
+FROM 
+    TopPosts tp
+WHERE 
+    tp.LastClosedDate IS NULL OR tp.LastClosedDate = 'Never Closed'
+UNION 
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.CommentCount,
+    tp.LastClosedDate,
+    tp.VoteStatus
+FROM 
+    TopPosts tp
+WHERE 
+    tp.LastClosedDate IS NOT NULL AND tp.LastClosedDate != 'Never Closed'
+ORDER BY 
+    CASE 
+        WHEN tp.VoteStatus = 'Positive' THEN 1
+        WHEN tp.VoteStatus = 'Negative' THEN 2
+        ELSE 3
+    END, 
+    tp.UpVotes DESC;

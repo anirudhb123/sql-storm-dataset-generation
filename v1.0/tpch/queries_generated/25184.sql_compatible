@@ -1,0 +1,66 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        SUM(ps.ps_availqty) AS total_available,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY SUM(ps.ps_availqty) DESC) AS type_rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_name, p.p_brand, p.p_type
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_name,
+        c.c_mktsegment,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_name, c.c_mktsegment
+),
+PartSupplierDetails AS (
+    SELECT 
+        s.s_name,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        ps.ps_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp)
+)
+SELECT 
+    r.r_name AS region,
+    COUNT(DISTINCT ns.n_nationkey) AS nation_count,
+    STRING_AGG(DISTINCT CONCAT(cp.c_name, ' (', cp.c_mktsegment, ')'), '; ') AS customers,
+    SUM(psd.ps_supplycost) AS total_supply_cost,
+    JSON_AGG(DISTINCT JSON_BUILD_OBJECT('part', rp.p_name, 'brand', rp.p_brand, 'availability', rp.total_available)) AS parts
+FROM 
+    region r
+JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    CustomerSummary cp ON ns.n_nationkey = cp.total_orders
+LEFT JOIN 
+    PartSupplierDetails psd ON r.r_regionkey = psd.p_brand
+LEFT JOIN 
+    RankedParts rp ON psd.p_name = rp.p_name
+WHERE 
+    rp.type_rank <= 5
+GROUP BY 
+    r.r_name
+ORDER BY 
+    region;

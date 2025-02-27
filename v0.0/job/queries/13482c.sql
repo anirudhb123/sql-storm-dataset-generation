@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS movie_budget, min(mi_idx.info) AS movie_votes, min(t.title) AS movie_title
+FROM cast_info AS ci, info_type AS it1, info_type AS it2, movie_info AS mi, movie_info_idx AS mi_idx, name AS n, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND t.id = ci.movie_id AND ci.movie_id = mi.movie_id AND ci.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id AND n.id = ci.person_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id
+AND n.md5sum IN ('15147e2b146b89dce3588b9b8ae0747b', '2904a972ce890bfc6a1e5f2d1ab730f4', '52646bcf9247d0c8bf1354b063959de1', '6082138c179209e8cd071c3d1ce6a6c1', '7baf747130a3dd8d01f443a567fdca8f', '8b6e30449def10861f02bc366c61f20f', 'c43f979c70162f0ef380b5da0874990b', 'eaaa26a36a6fd03aa5991ecac36d09f2', 'ef5a35278a6726bfc766a6843cce1e82') AND t.title < 'O Aleijadinho';

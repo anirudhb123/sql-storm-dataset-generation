@@ -1,0 +1,80 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rank_within_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND t.title IS NOT NULL
+),
+CompanyCount AS (
+    SELECT 
+        mc.movie_id, 
+        COUNT(DISTINCT c.name) AS num_companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+),
+GenreKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords  
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MovieName AS (
+    SELECT 
+        a.name, 
+        a.person_id, 
+        c.movie_id
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title c ON ci.movie_id = c.id
+    WHERE 
+        a.name IS NOT NULL
+)
+SELECT 
+    m.movie_id, 
+    m.title, 
+    m.production_year, 
+    COALESCE(g.keywords, 'No Keywords') AS keywords,
+    COALESCE(cc.num_companies, 0) AS num_companies,
+    COUNT(DISTINCT mn.person_id) AS num_cast_members,
+    AVG(CASE WHEN mn.name IS NOT NULL THEN 1 ELSE 0 END) AS percent_cast_with_name
+FROM 
+    RankedMovies m
+LEFT JOIN 
+    GenreKeywords g ON m.movie_id = g.movie_id
+LEFT JOIN 
+    CompanyCount cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    MovieName mn ON m.movie_id = mn.movie_id
+WHERE 
+    m.production_year = (
+        SELECT 
+            MAX(production_year) 
+        FROM 
+            RankedMovies 
+        WHERE 
+            rank_within_year < 5
+    )
+GROUP BY 
+    m.movie_id, m.title, m.production_year, g.keywords, cc.num_companies
+HAVING 
+    COUNT(DISTINCT mn.person_id) > 0
+ORDER BY 
+    m.production_year DESC, m.movie_id;

@@ -1,0 +1,80 @@
+WITH RecursiveBadgeCount AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+), 
+UserPostStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.AcknowledgedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS TotalAcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+PostVoteStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId IN (6, 10) THEN 1 ELSE 0 END) AS CloseVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+), 
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        p.Title,
+        ph.Comment,
+        RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS Rank
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) -- Considering close, reopen, and delete actions
+)
+SELECT 
+    up.UserId, 
+    up.DisplayName,
+    COALESCE(rb.BadgeCount, 0) AS TotalBadges,
+    up.TotalPosts,
+    up.TotalQuestions,
+    up.TotalAnswers,
+    up.TotalAcceptedAnswers,
+    SUM(ps.UpVotes) AS TotalUpVotes,
+    SUM(ps.DownVotes) AS TotalDownVotes,
+    SUM(ps.CloseVotes) AS TotalCloseVotes,
+    STRING_AGG(rp.Title, ', ') AS RecentPostTitles,
+    MAX(rp.CreationDate) AS LastActivity
+FROM 
+    UserPostStatistics up
+LEFT JOIN 
+    RecursiveBadgeCount rb ON up.UserId = rb.UserId
+LEFT JOIN 
+    PostVoteStatistics ps ON up.UserId = ps.PostId
+LEFT JOIN 
+    RecentPostHistory rp ON up.TotalPosts > 0 -- Join to get recent post title
+GROUP BY 
+    up.UserId, 
+    up.DisplayName
+HAVING 
+    COUNT(DISTINCT up.TotalQuestions) > 5 -- Filter to include users with more than 5 questions
+ORDER BY 
+    up.TotalPosts DESC, 
+    up.DisplayName;

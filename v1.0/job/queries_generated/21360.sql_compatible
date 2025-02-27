@@ -1,0 +1,65 @@
+
+WITH RECURSIVE movie_ranked AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(ci.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(ci.id) DESC) AS rank
+    FROM 
+        aka_title mt
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+movie_companies_info AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+title_keyword AS (
+    SELECT 
+        mt.id AS movie_id,
+        STRING_AGG(kw.keyword, ', ') AS keywords
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        mt.id
+)
+
+SELECT 
+    m.title,
+    m.production_year,
+    m.cast_count,
+    COALESCE(mci.company_names, 'Unknown') AS companies,
+    COALESCE(mci.company_types, 'N/A') AS company_types,
+    COALESCE(tk.keywords, 'No keywords') AS keywords,
+    CASE 
+        WHEN m.production_year < 2000 THEN 'Classic'
+        WHEN m.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era
+FROM 
+    movie_ranked m
+LEFT JOIN movie_companies_info mci ON m.id = mci.movie_id
+LEFT JOIN title_keyword tk ON m.id = tk.movie_id
+WHERE 
+    m.cast_count > 5 AND
+    m.production_year IS NOT NULL AND 
+    (m.production_year <> 2023 OR m.production_year IS NULL)
+ORDER BY 
+    m.production_year DESC,
+    m.cast_count DESC;

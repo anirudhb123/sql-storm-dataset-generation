@@ -1,0 +1,48 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title AS movie_title,
+        at.production_year,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY at.id ORDER BY ak.name) AS actor_rank
+    FROM 
+        aka_title at
+    JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        at.production_year BETWEEN 2000 AND 2023
+),
+KeywordsWithCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        movie_info mi ON mk.movie_id = mi.movie_id
+    GROUP BY 
+        mk.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.actor_name,
+        kw.keyword_count,
+        ROW_NUMBER() OVER (ORDER BY kw.keyword_count DESC, rm.production_year DESC) AS movie_rank
+    FROM 
+        RankedMovies rm
+    JOIN 
+        KeywordsWithCounts kw ON rm.movie_title = kw.movie_id
+)
+SELECT 
+    *
+FROM 
+    FilteredMovies
+WHERE 
+    movie_rank <= 10
+ORDER BY 
+    keyword_count DESC, production_year DESC;
+
+This SQL query provides a comprehensive benchmarking of string processing by fetching the top 10 movies released between 2000 and 2023. It ranks movies based on the count of associated keywords and displays relevant details about the movie title, production year, and actor names.

@@ -1,0 +1,66 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS year_rank
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+), ActorCount AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+), MovieRating AS (
+    SELECT 
+        mc.movie_id,
+        AVG(mv.rating) AS average_rating
+    FROM 
+        movie_info mv
+    JOIN 
+        movie_companies mc ON mv.movie_id = mc.movie_id
+    WHERE 
+        mv.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        mc.movie_id
+), MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ac.actor_count,
+        COALESCE(mr.average_rating, 0) AS average_rating
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorCount ac ON rm.movie_id = ac.movie_id
+    LEFT JOIN 
+        MovieRating mr ON rm.movie_id = mr.movie_id
+    WHERE 
+        (rm.title ILIKE '%adventure%' OR rm.title ILIKE '%action%')
+        AND rm.year_rank <= 5
+)
+
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_count,
+    md.average_rating,
+    CASE 
+        WHEN md.average_rating > 7 THEN 'Highly Rated'
+        WHEN md.average_rating = 0 AND md.actor_count IS NULL THEN 'Unknown'
+        ELSE 'Moderate'
+    END AS rating_category
+FROM 
+    MovieDetails md
+WHERE 
+    md.actor_count > 0
+ORDER BY 
+    md.average_rating DESC,
+    md.actor_count DESC;

@@ -1,0 +1,94 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankByUser
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '1 year' AND
+        p.Score IS NOT NULL
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges 
+        WHERE 
+            Date >= CURRENT_DATE - INTERVAL '1 year'
+        GROUP BY 
+            UserId
+    ) b ON u.Id = b.UserId
+    WHERE 
+        RankByUser <= 5
+),
+CommentsSummary AS (
+    SELECT 
+        c.PostId,
+        COUNT(*) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostDetailedInfo AS (
+    SELECT 
+        tp.*,
+        cs.CommentCount,
+        cs.LastCommentDate
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        CommentsSummary cs ON tp.PostId = cs.PostId
+),
+PostsWithHistory AS (
+    SELECT 
+        pdi.*,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryCreationDate,
+        ph.Comment AS CloseReason
+    FROM 
+        PostDetailedInfo pdi
+    LEFT JOIN 
+        PostHistory ph ON pdi.PostId = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+        OR (ph.PostHistoryTypeId = 12 AND ph.AcceptedAnswerId IS NOT NULL)
+)
+SELECT 
+    pwi.PostId,
+    pwi.Title,
+    pwi.Score,
+    pwi.ViewCount,
+    pwi.OwnerDisplayName,
+    pwi.BadgeCount,
+    pwi.CommentCount,
+    pwi.LastCommentDate,
+    CASE 
+        WHEN pwi.CloseReason IS NOT NULL THEN 'Closed: ' || pwi.CloseReason 
+        ELSE 'Open' 
+    END AS PostStatus,
+    LEAD(pwi.Score) OVER (ORDER BY pwi.CreationDate) AS NextPostScore
+FROM 
+    PostsWithHistory pwi
+WHERE 
+    pwi.BadgeCount >= 1 
+    OR pwi.PostStatus LIKE 'Closed%'
+ORDER BY 
+    pwi.Score DESC, 
+    pwi.CreationDate DESC;

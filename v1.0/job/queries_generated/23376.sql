@@ -1,0 +1,70 @@
+WITH ranked_titles AS (
+    SELECT
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.person_id) DESC) AS title_rank,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM
+        aka_title a
+    LEFT JOIN
+        cast_info c ON a.movie_id = c.movie_id
+    GROUP BY
+        a.title, a.production_year
+),
+actor_counts AS (
+    SELECT
+        ak.name,
+        COUNT(DISTINCT c.movie_id) AS movies_count,
+        SUM(CASE WHEN m.production_year < 2000 THEN 1 ELSE 0 END) AS pre_2000_count
+    FROM
+        aka_name ak
+    JOIN
+        cast_info c ON ak.person_id = c.person_id
+    JOIN
+        aka_title m ON c.movie_id = m.movie_id
+    GROUP BY
+        ak.name
+),
+filtered_titles AS (
+    SELECT
+        r.title,
+        r.production_year,
+        r.cast_count
+    FROM
+        ranked_titles r
+    WHERE
+        r.title_rank <= 5
+),
+unusual_join AS (
+    SELECT
+        ct.kind,
+        COUNT(mc.company_id) AS total_movies,
+        SUM(CASE WHEN mc.note IS NULL THEN 1 ELSE 0 END) AS null_notes_count
+    FROM
+        company_type ct
+    LEFT JOIN
+        movie_companies mc ON ct.id = mc.company_type_id
+    GROUP BY
+        ct.kind
+)
+SELECT
+    a.name AS actor_name,
+    ac.movies_count,
+    ac.pre_2000_count,
+    ft.title,
+    ft.production_year,
+    ft.cast_count,
+    uj.kind AS company_kind,
+    uj.total_movies,
+    uj.null_notes_count
+FROM
+    actor_counts ac
+JOIN
+    filtered_titles ft ON ac.movies_count > ft.cast_count
+LEFT JOIN
+    unusual_join uj ON ac.movies_count < uj.total_movies
+WHERE
+    acmovies_count IS NOT NULL
+    AND (uj.total_movies IS NULL OR uj.null_notes_count > 0)
+ORDER BY
+    ac.movies_count DESC, ft.production_year ASC;

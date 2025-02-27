@@ -1,0 +1,59 @@
+
+WITH ranked_sales AS (
+    SELECT ws.web_site_sk,
+           ws.ws_order_number,
+           ws.ws_sales_price,
+           ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS rank_price,
+           RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS rank_price2,
+           AVG(ws.ws_sales_price) OVER (PARTITION BY ws.web_site_sk) AS avg_sales_price
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+top_sales AS (
+    SELECT r.web_site_sk,
+           COUNT(r.ws_order_number) AS total_orders,
+           SUM(r.ws_sales_price) AS total_revenue,
+           r.rank_price,
+           r.rank_price2,
+           r.avg_sales_price
+    FROM ranked_sales r
+    WHERE r.rank_price <= 5
+    GROUP BY r.web_site_sk, r.rank_price, r.rank_price2, r.avg_sales_price
+),
+customer_metrics AS (
+    SELECT c.c_customer_sk,
+           COUNT(DISTINCT w.ws_order_number) AS total_orders,
+           SUM(w.ws_sales_price) AS total_spent,
+           STRING_AGG(DISTINCT c.c_email_address) AS email_addresses,
+           CASE 
+               WHEN COUNT(DISTINCT w.ws_order_number) > 10 THEN 'Frequent'
+               WHEN SUM(w.ws_sales_price) > 1000 THEN 'Big Spender'
+               ELSE 'Occasional'
+           END AS customer_type
+    FROM customer c
+    LEFT JOIN web_sales w ON c.c_customer_sk = w.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+sales_summary AS (
+    SELECT t.web_site_sk,
+           SUM(tm.total_orders) AS total_orders,
+           SUM(tm.total_revenue) AS total_revenue,
+           MAX(tm.avg_sales_price) AS max_avg_sales_price,
+           AVG(COALESCE(cm.total_spent, 0)) AS avg_customer_spent,
+           COUNT(DISTINCT cm.c_customer_sk) AS unique_customers
+    FROM top_sales t
+    LEFT JOIN customer_metrics cm ON t.web_site_sk = cm.c_customer_sk
+    GROUP BY t.web_site_sk
+)
+SELECT s.web_site_sk,
+       s.total_orders,
+       s.total_revenue,
+       s.max_avg_sales_price,
+       s.avg_customer_spent,
+       CASE 
+           WHEN s.unique_customers IS NULL THEN 'No Customers'
+           ELSE 'Customer Base Present'
+       END AS customer_status
+FROM sales_summary s
+ORDER BY s.total_revenue DESC, s.total_orders DESC
+FETCH FIRST 10 ROWS ONLY;

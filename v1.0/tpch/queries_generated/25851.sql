@@ -1,0 +1,31 @@
+WITH supplier_info AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS nation_name, r.r_name AS region_name,
+           SUBSTRING(s.s_address, 1, CHARINDEX(',', s.s_address) - 1) AS city,
+           LEN(s.s_comment) AS comment_length
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+part_supplier_stats AS (
+    SELECT ps.ps_partkey, COUNT(*) AS supplier_count, 
+           SUM(ps.ps_availqty) AS total_available_qty, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+customer_order_stats AS (
+    SELECT o.o_orderkey, c.c_name, COUNT(*) AS line_item_count,
+           SUM(l.l_extendedprice) AS total_order_value
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, c.c_name
+)
+SELECT si.s_name, si.nation_name, si.region_name, 
+       ps.supplier_count, ps.total_available_qty,
+       ps.avg_supply_cost, cos.line_item_count, cos.total_order_value
+FROM supplier_info si
+JOIN part_supplier_stats ps ON si.s_suppkey = ps.ps_partkey
+JOIN customer_order_stats cos ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p)
+WHERE si.comment_length > 50
+ORDER BY si.region_name, total_order_value DESC;

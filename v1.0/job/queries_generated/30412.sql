@@ -1,0 +1,62 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id, 
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 1
+),
+MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        STRING_AGG(a.name, ', ') AS actors,
+        k.keyword AS keyword,
+        COALESCE(ca.kind, 'Unknown') AS company_type
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN 
+        company_type ca ON mc.company_type_id = ca.id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year, ca.kind
+),
+PerformanceBenchmark AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.actors,
+        md.keyword,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY COUNT(md.actors) DESC) AS rank,
+        COUNT(md.actors) OVER (PARTITION BY md.production_year) AS total_actors
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    pb.movie_title,
+    pb.production_year,
+    pb.actors,
+    pb.keyword,
+    pb.rank
+FROM 
+    PerformanceBenchmark pb
+WHERE 
+    pb.rank <= 5
+ORDER BY 
+    pb.production_year DESC, 
+    pb.rank;
+

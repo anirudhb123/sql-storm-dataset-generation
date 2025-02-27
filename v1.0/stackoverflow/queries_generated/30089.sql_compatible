@@ -1,0 +1,55 @@
+
+WITH RECURSIVE UserReputationScores AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.Location,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        0 AS Level
+    FROM Users U
+    WHERE U.Reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation + COALESCE(SUM(CASE WHEN V.VoteTypeId IN (2, 5) THEN 1 ELSE -1 END), 0) AS Reputation,
+        U.CreationDate,
+        U.Location,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        Level + 1
+    FROM Users U
+    JOIN Votes V ON U.Id = V.UserId
+    JOIN UserReputationScores UR ON UR.UserId = V.PostId
+    WHERE Level < 10
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COUNT(DISTINCT P.Id) AS PostCount,
+    SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositivePostCount,
+    SUM(COALESCE(C.CommentCount, 0)) AS TotalComments,
+    AVG(CASE WHEN P.LastActivityDate IS NOT NULL THEN DATEDIFF('2024-10-01 12:34:56', P.LastActivityDate) END) AS AvgDaysSinceLastActivity,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS UserTags
+FROM Users U
+LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN Comments C ON P.Id = C.PostId
+LEFT JOIN LATERAL (
+    SELECT 
+        TRIM(SUBSTRING(tag FROM 2 FOR LENGTH(tag) - 2)) AS TagName
+    FROM unnest(string_to_array(P.Tags, '><')) AS tag
+) AS T ON TRUE
+WHERE U.Reputation > 1000
+GROUP BY U.DisplayName, U.Reputation
+HAVING COUNT(DISTINCT P.Id) > 5
+ORDER BY U.Reputation DESC
+LIMIT 50
+OFFSET 10;

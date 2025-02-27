@@ -1,0 +1,34 @@
+WITH UserBadgeCounts AS (
+    SELECT UserId, COUNT(*) AS BadgeCount
+    FROM Badges 
+    GROUP BY UserId
+),
+PostScores AS (
+    SELECT p.Id, p.OwnerUserId, p.Score, p.CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+           SUM(p.ViewCount) OVER (PARTITION BY p.OwnerUserId) AS TotalViewCount
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT DISTINCT u.Id, u.DisplayName, u.Reputation, ub.BadgeCount, 
+           COALESCE(ps.TotalViewCount, 0) AS TotalViewCount
+    FROM Users u
+    LEFT JOIN UserBadgeCounts ub ON u.Id = ub.UserId
+    LEFT JOIN PostScores ps ON u.Id = ps.OwnerUserId
+    WHERE u.Reputation > (SELECT AVG(Reputation) FROM Users) 
+    ORDER BY u.Reputation DESC
+    LIMIT 10
+)
+SELECT u.DisplayName, u.Reputation, u.BadgeCount, 
+       CASE WHEN u.BadgeCount > 5 THEN 'Elite' 
+            WHEN u.BadgeCount BETWEEN 3 AND 5 THEN 'Moderate' 
+            ELSE 'Novice' END AS BadgeLevel,
+       COALESCE(TotalViewCount, 0) AS TotalViewCount,
+       (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = u.Id) AS PostCount
+FROM TopUsers u
+LEFT JOIN Comments c ON c.UserId = u.Id
+WHERE c.CreationDate >= NOW() - INTERVAL '6 months'
+GROUP BY u.DisplayName, u.Reputation, u.BadgeCount, TotalViewCount
+HAVING COUNT(c.Id) > 1
+ORDER BY u.Reputation DESC;

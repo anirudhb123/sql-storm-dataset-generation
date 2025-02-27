@@ -1,0 +1,36 @@
+
+WITH RankedPosts AS (
+    SELECT p.Id, 
+           p.Title, 
+           p.CreationDate, 
+           p.Score, 
+           p.ViewCount, 
+           COALESCE(v.UpVotes, 0) AS UpVotes, 
+           COALESCE(v.DownVotes, 0) AS DownVotes,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank,
+           RANK() OVER (ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT UserId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+               SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM Votes
+        GROUP BY UserId
+    ) v ON u.Id = v.UserId
+)
+SELECT p.Title, 
+       p.CreationDate,
+       p.Score,
+       p.ViewCount,
+       p.UpVotes,
+       p.DownVotes,
+       CASE WHEN p.UserRank = 1 THEN 'Top Post' ELSE 'Regular Post' END AS PostType,
+       CASE WHEN p.RecentRank <= 10 THEN 'Recent Hot Post' ELSE NULL END AS HotPostIndicator
+FROM RankedPosts p
+WHERE p.Score > 0 
+  AND (p.ViewCount > 100 OR (p.UpVotes - p.DownVotes) > 5)
+  AND (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) > 3
+  AND (EXISTS (SELECT 1 FROM Badges b WHERE b.UserId = p.OwnerUserId AND b.Class = 1))
+  AND (NOT EXISTS (SELECT 1 FROM PostHistory ph WHERE ph.PostId = p.Id AND ph.PostHistoryTypeId IN (10, 12) AND ph.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '6 months'))
+ORDER BY p.Score DESC, p.CreationDate ASC
+LIMIT 50;

@@ -1,0 +1,56 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ci.c_customer_id,
+        DATEADD(day, s.s_promo_sold, DATEADD(year, -1, d.d_date)) AS previous_year_date,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_order_number) AS sales_rank
+    FROM 
+        web_sales ws
+        JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+        LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+        JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+        LEFT JOIN (SELECT p.promo_id, SUM(ws.ws_sales_price) AS s_promo_sold 
+                   FROM web_sales ws 
+                   JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk 
+                   GROUP BY p.promo_id) s ON p.p_promo_id = s.promo_id
+    WHERE 
+        d.d_year = 2023 AND 
+        (cd.cd_gender = 'F' OR cd.cd_marital_status = 'M') AND
+        p.p_discount_active = 'Y'
+),
+AggregatedSales AS (
+    SELECT 
+        web_site_sk,
+        COUNT(*) AS total_orders,
+        SUM(ws_sales_price) AS total_sales,
+        AVG(ws_net_profit) AS avg_net_profit,
+        MAX(ws_quantity) AS max_quantity
+    FROM 
+        SalesData
+    GROUP BY 
+        web_site_sk
+)
+SELECT 
+    a.web_site_sk,
+    COALESCE(a.total_orders, 0) AS total_orders,
+    COALESCE(a.total_sales, 0) AS total_sales,
+    COALESCE(a.avg_net_profit, 0) AS avg_net_profit,
+    COALESCE(a.max_quantity, 0) AS max_quantity,
+    w.w_warehouse_name,
+    w.w_city,
+    w.w_state
+FROM 
+    AggregatedSales a
+FULL OUTER JOIN warehouse w ON a.web_site_sk = w.w_warehouse_sk
+WHERE 
+    (a.total_sales IS NULL OR a.total_sales > 1000) AND
+    w.w_state IS NOT NULL
+ORDER BY 
+    a.total_orders DESC,
+    a.avg_net_profit DESC;

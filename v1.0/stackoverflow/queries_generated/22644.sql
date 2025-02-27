@@ -1,0 +1,81 @@
+WITH UserVoteStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName AS UserName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        AVG(COALESCE(p.Score, 0)) AS AvgPostScore,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id AND v.PostId = p.Id
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    WHERE u.Reputation > 0 -- Only consider users with positive reputation
+    GROUP BY u.Id
+),
+RankedUsers AS (
+    SELECT
+        UserId,
+        UserName,
+        UpVotes,
+        DownVotes,
+        PostCount,
+        AvgPostScore,
+        BadgeCount,
+        RANK() OVER (ORDER BY UpVotes - DownVotes DESC, AvgPostScore DESC) AS UserRank
+    FROM UserVoteStats
+),
+RecentPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        p.ViewCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(MAX(ph.CreationDate), '1970-01-01'::timestamp) AS LastEditDate
+    FROM Posts p
+    JOIN Users u ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN PostHistory ph ON ph.PostId = p.Id
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY p.Id, u.DisplayName
+),
+ConsolidatedData AS (
+    SELECT 
+        ru.UserId,
+        ru.UserName,
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate AS PostCreationDate,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.LastEditDate,
+        ru.UserRank,
+        CASE 
+            WHEN rp.ViewCount >= 100 THEN 'Popular'
+            WHEN rp.ViewCount BETWEEN 50 AND 99 THEN 'Moderately Popular'
+            ELSE 'Less Popular'
+        END AS PopularityRank
+    FROM RankedUsers ru
+    LEFT JOIN RecentPosts rp ON ru.UserId = rp.OwnerUserId
+)
+SELECT 
+    cd.UserName,
+    COUNT(cd.PostId) AS TotalPosts,
+    SUM(CASE WHEN cd.PopularityRank = 'Popular' THEN 1 ELSE 0 END) AS PopularPosts,
+    SUM(CASE WHEN cd.PopularityRank = 'Moderately Popular' THEN 1 ELSE 0 END) AS ModeratelyPopularPosts,
+    SUM(CASE WHEN cd.PopularityRank = 'Less Popular' THEN 1 ELSE 0 END) AS LessPopularPosts,
+    AVG(cd.ViewCount) AS AvgViewCount,
+    MAX(cd.ViewCount) AS MaxViewCount,
+    MIN(cd.ViewCount) AS MinViewCount
+FROM ConsolidatedData cd
+GROUP BY cd.UserName
+HAVING COUNT(cd.PostId) > 5 -- Only include users with more than 5 posts
+ORDER BY TotalPosts DESC, MAX(cd.ViewCount) DESC
+LIMIT 10;
+
+-- This query uses Common Table Expressions (CTEs) to classify users based on their voting behavior, 
+-- joins them with their recent posts, ranks them, and aggregates various metrics to provide insights 
+-- about active users and the popularity of their posts over the last month.

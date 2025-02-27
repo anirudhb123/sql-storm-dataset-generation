@@ -1,0 +1,71 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierPart AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplyvalue
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 5000
+),
+CustomerData AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(o.o_totalprice), 0) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+FilteredNation AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE n.n_name NOT LIKE '%land%' 
+    GROUP BY n.n_nationkey, n.n_name
+),
+FinalReport AS (
+    SELECT 
+        p.p_name,
+        r.r_name,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+        FIRST_VALUE(c.total_spent) OVER (PARTITION BY p.p_partkey ORDER BY c.total_spent DESC) AS top_customer_spend
+    FROM lineitem li
+    JOIN RankedOrders o ON li.l_orderkey = o.o_orderkey
+    JOIN SupplierPart ps ON li.l_partkey = ps.ps_partkey
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = ps.ps_suppkey))
+    LEFT JOIN CustomerData c ON c.c_custkey = o.o_custkey
+    WHERE li.l_shipdate <= DATE '1998-10-01' AND li.l_returnflag = 'N'
+    GROUP BY p.p_name, r.r_name
+    HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) > 20000
+)
+SELECT 
+    f.p_name,
+    f.r_name,
+    f.total_revenue,
+    CASE 
+        WHEN f.top_customer_spend IS NULL THEN 'No Orders'
+        ELSE CAST(f.top_customer_spend AS VARCHAR)
+    END AS top_customer_spend,
+    COALESCE(SUM(n.supplier_count), 0) AS total_suppliers
+FROM FinalReport f
+LEFT JOIN FilteredNation n ON n.n_nationkey = (SELECT n.n_regionkey FROM nation WHERE n.n_name = 'Some Region')
+GROUP BY f.p_name, f.r_name, f.total_revenue, f.top_customer_spend
+ORDER BY f.total_revenue DESC;

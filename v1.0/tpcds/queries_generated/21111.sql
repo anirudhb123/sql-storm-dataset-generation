@@ -1,0 +1,69 @@
+
+WITH recent_sales AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        MIN(ws_sold_date_sk) AS first_sale_date
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk >= (SELECT MAX(ws_sold_date_sk) - 30 FROM web_sales)
+    GROUP BY
+        ws_item_sk
+),
+high_value_items AS (
+    SELECT
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        r.r_reason_desc,
+        ROW_NUMBER() OVER (PARTITION BY i.i_item_sk ORDER BY SUM(sr_return_amt) DESC NULLS LAST) AS return_rank
+    FROM
+        item i
+    LEFT JOIN store_returns sr ON sr.sr_item_sk = i.i_item_sk
+    LEFT JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    GROUP BY
+        i.i_item_sk, i.i_item_desc, i.i_current_price, r.r_reason_desc
+    HAVING
+        SUM(sr_return_amount) IS NOT NULL AND COUNT(sr.returning_customer_sk) > 5
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        d.d_year,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY c.c_birth_year) AS demo_rank
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN date_dim d ON d.d_date_sk = c.c_first_sales_date_sk
+    WHERE
+        (cd.cd_marital_status = 'M' OR cd.cd_marital_status IS NULL)
+        AND cd.cd_purchase_estimate > (SELECT AVG(cd_purchase_estimate) FROM customer_demographics)
+)
+SELECT
+    c.c_first_name,
+    c.c_last_name,
+    ci.total_quantity,
+    ci.total_net_paid,
+    hvi.i_item_desc,
+    hvi.i_current_price,
+    AVG(hvi.i_current_price) OVER (PARTITION BY hvi.i_item_sk ORDER BY hvi.return_rank DESC) AS avg_current_price,
+    CASE
+        WHEN ci.order_count > 10 THEN 'Frequent Buyer'
+        ELSE 'Infrequent Buyer'
+    END AS customer_status
+FROM
+    recent_sales ci
+JOIN customer_info c ON ci.ws_item_sk = c.c_customer_sk
+JOIN high_value_items hvi ON hvi.i_item_sk = ci.ws_item_sk
+WHERE
+    ci.first_sale_date >= (SELECT MIN(d_date) FROM date_dim WHERE d_year = (SELECT MIN(d_year) FROM date_dim))
+    AND (hvi.i_current_price BETWEEN 20 AND 100)
+ORDER BY
+    ci.total_net_paid DESC NULLS LAST
+FETCH FIRST 50 ROWS ONLY;

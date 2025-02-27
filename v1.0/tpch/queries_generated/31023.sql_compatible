@@ -1,0 +1,45 @@
+
+WITH RECURSIVE PartSupplier AS (
+    SELECT ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS rn
+    FROM partsupp
+    WHERE ps_availqty > 0
+),
+OrderDetails AS (
+    SELECT o_orderkey, SUM(l_extendedprice * (1 - l_discount)) AS total_price,
+           COUNT(DISTINCT l_partkey) AS total_parts
+    FROM lineitem
+    JOIN orders ON lineitem.l_orderkey = orders.o_orderkey
+    WHERE orders.o_orderdate >= DATE '1997-01-01' AND orders.o_orderdate < DATE '1998-01-01'
+    GROUP BY o_orderkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost 
+    FROM supplier s
+    JOIN PartSupplier ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty >= 10
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost) > 1000
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 5000
+),
+SupplierMetrics AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(DISTINCT ps.ps_partkey) AS parts_supplied,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT c.c_name, co.order_count, co.total_spent, ts.total_supply_cost,
+       sm.parts_supplied, sm.avg_supply_cost
+FROM CustomerOrders co
+JOIN TopSuppliers ts ON co.order_count > 5
+LEFT JOIN SupplierMetrics sm ON ts.s_suppkey = sm.s_suppkey
+WHERE co.total_spent > 10000 AND (sm.avg_supply_cost IS NULL OR sm.avg_supply_cost < 50.00)
+ORDER BY co.total_spent DESC, ts.total_supply_cost DESC;

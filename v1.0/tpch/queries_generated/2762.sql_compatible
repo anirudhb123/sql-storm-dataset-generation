@@ -1,0 +1,56 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+PartSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    ps.p_partkey,
+    ps.total_sales,
+    ss.s_name AS top_supplier,
+    ss.s_acctbal AS supplier_balance,
+    COALESCE(ps.order_count, 0) AS order_count
+FROM 
+    RankedSuppliers ss
+FULL OUTER JOIN 
+    PartSales ps ON ss.s_suppkey = (
+        SELECT 
+            ps1.ps_suppkey 
+        FROM 
+            partsupp ps1 
+        WHERE 
+            ps1.ps_partkey = ps.p_partkey 
+        ORDER BY 
+            ps1.ps_supplycost ASC 
+        LIMIT 1
+    )
+JOIN 
+    nation n ON ss.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    (ss.rank = 1 OR ss.rank IS NULL)
+    AND (ps.total_sales IS NOT NULL AND ps.total_sales > 1000)
+ORDER BY 
+    r.r_name, n.n_name, ps.total_sales DESC;

@@ -1,0 +1,28 @@
+SELECT 
+    CONCAT(p.p_name, ' - ', s.s_name) AS ProductSupplier,
+    SUM(l.l_quantity) AS TotalQuantity,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS AverageRevenue,
+    COUNT(DISTINCT c.c_custkey) AS UniqueCustomers,
+    LEFT(r.r_name, 10) AS RegionShortName
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+AND 
+    s.s_acctbal > 0
+GROUP BY 
+    p.p_name, s.s_name, r.r_name
+ORDER BY 
+    TotalQuantity DESC, AverageRevenue DESC;

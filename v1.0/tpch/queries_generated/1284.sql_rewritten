@@ -1,0 +1,69 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+NationStats AS (
+    SELECT 
+        n.n_name,
+        COUNT(s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name
+),
+OrderLineDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+        AVG(l.l_quantity) AS avg_quantity,
+        MAX(l.l_tax) AS max_tax
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    co.c_custkey,
+    co.c_name,
+    co.total_spent,
+    co.order_count,
+    ps.total_supply_cost,
+    ns.n_name,
+    ns.supplier_count,
+    ns.total_acctbal,
+    od.total_lineitem_value,
+    od.avg_quantity,
+    od.max_tax
+FROM 
+    CustomerOrders co
+JOIN 
+    SupplierParts ps ON co.c_custkey = (SELECT TOP 1 o.o_custkey FROM orders o WHERE o.o_orderkey = od.o_orderkey);

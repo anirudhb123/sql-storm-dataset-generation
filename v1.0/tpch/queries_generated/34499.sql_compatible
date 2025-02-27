@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey AS suppkey, s_name AS suppname, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_suppkey = (SELECT MIN(s_suppkey) FROM supplier)  
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey  
+),
+OrderDetails AS (
+    SELECT 
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1997-01-01'  
+    GROUP BY o.o_custkey
+),
+RegionalSales AS (
+    SELECT 
+        n.n_nationkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM lineitem l
+    JOIN supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_nationkey, n.n_regionkey
+)
+SELECT
+    p.p_name,
+    ROUND(AVG(ps.ps_supplycost) * 1.1, 2) AS avg_cost,  
+    COALESCE(r.total_sales, 0) AS total_sales_by_region,
+    COALESCE(od.total_spent, 0) AS total_spent_by_customer,
+    sh.level AS supplier_level
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN RegionalSales r ON r.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'NATION_NAME')
+LEFT JOIN OrderDetails od ON od.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name = 'CUSTOMER_NAME')
+LEFT JOIN SupplierHierarchy sh ON sh.suppkey = ps.ps_suppkey
+WHERE p.p_size >= 5  
+      AND p.p_retailprice BETWEEN 10 AND 100  
+      AND sh.level IS NOT NULL
+GROUP BY p.p_name, r.total_sales, od.total_spent, sh.level
+HAVING SUM(ps.ps_availqty) > 100  
+ORDER BY total_sales_by_region DESC, avg_cost ASC;

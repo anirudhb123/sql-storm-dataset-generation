@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_supplycost, 0 AS Level
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_supplycost + sc.ps_supplycost, sc.Level + 1
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN SupplyChain sc ON ps.ps_partkey = sc.ps_partkey
+    WHERE ps.ps_availqty > 0 AND sc.Level < 5
+),
+TotalSales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS OrderCount, SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderstatus, cs.OrderCount, cs.TotalSpent, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY cs.TotalSpent DESC) AS RN
+    FROM orders o
+    JOIN CustomerOrders cs ON o.o_custkey = cs.c_custkey
+),
+FinalMetrics AS (
+    SELECT COUNT(DISTINCT o.o_orderkey) AS TotalOrders,
+           AVG(cs.TotalSpent) AS AverageSpent,
+           SUM(CASE WHEN o.o_orderstatus = 'F' THEN 1 ELSE 0 END) AS CompletedOrders,
+           SUM(CASE WHEN o.o_orderstatus = 'P' THEN 1 ELSE 0 END) AS PendingOrders
+    FROM orders o
+    JOIN CustomerOrders cs ON o.o_custkey = cs.c_custkey
+)
+SELECT rc.r_name, total.TotalOrders, total.AverageSpent, 
+       fi.CompletedOrders, fi.PendingOrders, 
+       JSON_AGG(JSON_BUILD_OBJECT('SuppName', sc.s_name, 'SupplyCost', sc.ps_supplycost)) AS SupplierDetails
+FROM region rc
+LEFT JOIN nation n ON rc.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplyChain sc ON s.s_suppkey = sc.s_suppkey
+CROSS JOIN FinalMetrics fi
+CROSS JOIN (SELECT COUNT(*) AS TotalOrders, AVG(TotalSpent) AS AverageSpent FROM TotalSales) total
+GROUP BY rc.r_name, total.TotalOrders, total.AverageSpent, fi.CompletedOrders, fi.PendingOrders
+ORDER BY total.TotalOrders DESC;

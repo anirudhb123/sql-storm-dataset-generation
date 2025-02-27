@@ -1,0 +1,67 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT an.name) AS aliases,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        aka_name an ON t.id = an.person_id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+keyword_summary AS (
+    SELECT 
+        movie_id,
+        COUNT(*) AS total_keywords
+    FROM 
+        movie_keyword
+    GROUP BY 
+        movie_id
+),
+cast_summary AS (
+    SELECT 
+        movie_id,
+        ARRAY_AGG(DISTINCT p.name ORDER BY p.name) AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    GROUP BY 
+        movie_id
+),
+final_benchmark AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.aliases,
+        rm.cast_count,
+        ks.total_keywords,
+        cs.cast_names
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        keyword_summary ks ON rm.movie_id = ks.movie_id
+    LEFT JOIN 
+        cast_summary cs ON rm.movie_id = cs.movie_id
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    aliases,
+    cast_count,
+    COALESCE(total_keywords, 0) AS total_keywords,
+    cast_names
+FROM 
+    final_benchmark
+ORDER BY 
+    production_year DESC, cast_count DESC;

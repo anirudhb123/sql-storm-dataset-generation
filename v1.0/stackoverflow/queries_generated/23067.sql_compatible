@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+), 
+PostVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotesCount,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+RecentClosePosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        h.Name AS HistoryTypeName
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes h ON ph.PostHistoryTypeId = h.Id
+    WHERE 
+        h.Name LIKE '%Closed%'
+        AND ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+), 
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        AVG(p.ViewCount) AS AvgViews,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativeScoreCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ','))
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    up.Title,
+    u.DisplayName AS OwnerDisplayName,
+    up.CreationDate,
+    pv.UpVotesCount,
+    pv.DownVotesCount,
+    CASE 
+        WHEN cp.PostId IS NOT NULL THEN 'Closed Recently' 
+        ELSE 'Open' 
+    END AS PostStatus,
+    ts.TagName,
+    ts.PostCount,
+    ts.AvgViews,
+    ts.NegativeScoreCount,
+    COALESCE(ts.PostCount, 0) AS EffectivePostCount
+FROM 
+    RankedPosts up
+JOIN 
+    Users u ON up.OwnerUserId = u.Id
+LEFT JOIN 
+    PostVotes pv ON up.PostId = pv.PostId
+LEFT JOIN 
+    RecentClosePosts cp ON up.PostId = cp.PostId
+LEFT JOIN 
+    TagStatistics ts ON up.PostId = ts.PostCount
+WHERE 
+    up.OwnerPostRank <= 5
+ORDER BY 
+    up.CreationDate DESC, 
+    pv.UpVotesCount DESC 
+LIMIT 100
+OFFSET 0;

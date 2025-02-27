@@ -1,0 +1,50 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        1 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id 
+    WHERE 
+        c.movie_id = (SELECT m.id FROM title m WHERE m.title = 'Inception' LIMIT 1)
+    
+    UNION ALL
+    
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        ah.level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        ActorHierarchy ah ON c.movie_id = (SELECT m.id FROM title m WHERE m.title LIKE '%' || ah.actor_name || '%')
+)
+SELECT 
+    a.actor_name,
+    COUNT(DISTINCT c.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT t.title, ', ') AS titles_worked_in,
+    MAX(m.production_year) AS last_worked_year,
+    CASE 
+        WHEN AVG(CASE WHEN m.production_year IS NOT NULL THEN m.production_year ELSE NULL END) IS NULL 
+        THEN 'No Movies' 
+        ELSE AVG(m.production_year)::text 
+    END AS avg_production_year
+FROM 
+    ActorHierarchy a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    aka_title t ON c.movie_id = t.id
+LEFT JOIN 
+    title m ON c.movie_id = m.id
+GROUP BY 
+    a.actor_name
+ORDER BY 
+    movie_count DESC
+LIMIT 10;
+
+This query first constructs a recursive Common Table Expression (CTE) to gather the hierarchy of actors working on a specified movie ("Inception" in this case). It then aggregates movie data, including the number of movies each actor participated in, the titles they've worked in, and the last production year. Finally, it computes the average production year with logic to handle NULL scenarios, all while ordering results based on the movie count and limiting the output to the top 10 actors.

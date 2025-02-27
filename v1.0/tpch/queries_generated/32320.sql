@@ -1,0 +1,40 @@
+WITH RECURSIVE supply_chain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT ps.ps_suppkey, s.s_name, s.s_acctbal, sc.depth + 1
+    FROM partsupp ps
+    JOIN supply_chain sc ON ps.ps_suppkey = sc.s_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE sc.depth < 5
+),
+nation_details AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name AS region_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+customer_summary AS (
+    SELECT c.c_nationkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_nationkey
+),
+max_order_per_customer AS (
+    SELECT c.c_nationkey, MAX(o.o_totalprice) AS max_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_nationkey
+)
+SELECT nd.n_name, nd.region_name, cs.order_count, cs.total_spent,
+       mp.max_order_value, 
+       AVG(COALESCE(ss.s_acctbal, 0)) AS avg_acctbal,
+       STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+FROM nation_details nd
+JOIN customer_summary cs ON nd.n_nationkey = cs.c_nationkey
+LEFT JOIN supply_chain ss ON nd.n_nationkey = ss.s_suppkey
+LEFT JOIN max_order_per_customer mp ON nd.n_nationkey = mp.c_nationkey
+GROUP BY nd.n_name, nd.region_name, cs.order_count, cs.total_spent, mp.max_order_value
+HAVING cs.order_count > 10 AND AVG(COALESCE(ss.s_acctbal, 0)) < 20000
+ORDER BY total_spent DESC, cs.order_count ASC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

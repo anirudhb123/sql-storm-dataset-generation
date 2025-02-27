@@ -1,0 +1,28 @@
+SELECT 
+    p.p_name AS part_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(ps.ps_supplycost) AS average_supply_cost,
+    MAX(ps.ps_supplycost) AS max_supply_cost,
+    MIN(ps.ps_supplycost) AS min_supply_cost,
+    SUBSTRING(p.p_comment, 1, 10) AS short_comment,
+    r.r_name AS region_name
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size > 10 AND 
+    p.p_retailprice BETWEEN 50.00 AND 500.00
+GROUP BY 
+    p.p_name, r.r_name
+HAVING 
+    COUNT(DISTINCT ps.ps_suppkey) > 5
+ORDER BY 
+    total_available_quantity DESC, part_name ASC;

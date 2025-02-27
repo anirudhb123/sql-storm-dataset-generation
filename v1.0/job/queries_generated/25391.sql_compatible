@@ -1,0 +1,62 @@
+
+WITH movie_title_actors AS (
+    SELECT 
+        t.title AS movie_title,
+        a.name AS actor_name,
+        t.production_year
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        LOWER(t.title) LIKE '%adventure%' 
+        AND t.production_year BETWEEN 2000 AND 2023
+),
+actor_keyword_data AS (
+    SELECT 
+        a.name AS actor_name,
+        k.keyword AS keyword
+    FROM 
+        aka_name a
+    JOIN 
+        movie_keyword mk ON a.person_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.gender = 'F'
+),
+movie_info_data AS (
+    SELECT 
+        t.title AS movie_title,
+        mi.info AS movie_info
+    FROM 
+        title t
+    JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    WHERE 
+        mi.note LIKE '%box office%'
+)
+
+SELECT 
+    mta.movie_title,
+    mta.actor_name,
+    mta.production_year,
+    akd.keyword,
+    mid.movie_info
+FROM 
+    movie_title_actors mta
+LEFT JOIN 
+    actor_keyword_data akd ON mta.actor_name = akd.actor_name
+LEFT JOIN 
+    movie_info_data mid ON mta.movie_title = mid.movie_title
+GROUP BY 
+    mta.movie_title,
+    mta.actor_name,
+    mta.production_year,
+    akd.keyword,
+    mid.movie_info
+ORDER BY 
+    mta.production_year DESC, 
+    mta.actor_name;

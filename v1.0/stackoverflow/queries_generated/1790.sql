@@ -1,0 +1,87 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate AS PostCreationDate,
+        COALESCE(
+            COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2), 0
+        ) AS Upvotes,
+        COALESCE(
+            COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3), 0
+        ) AS Downvotes,
+        COALESCE(
+            COUNT(c.Id), 0
+        ) AS CommentCount,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 
+            ELSE 0 
+        END AS HasAcceptedAnswer
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId 
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id
+),
+FilteredUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation IS NULL THEN 'No Reputation'
+            WHEN u.Reputation < 100 THEN 'Low Reputation'
+            ELSE 'High Reputation'
+        END AS ReputationCategory
+    FROM 
+        Users u 
+    WHERE 
+        u.Id IN (SELECT DISTINCT OwnerUserId FROM Posts WHERE OwnerUserId IS NOT NULL)
+),
+RankedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.Upvotes,
+        ps.Downvotes,
+        ps.CommentCount,
+        ps.RelatedPostCount,
+        ps.HasAcceptedAnswer,
+        ROW_NUMBER() OVER (ORDER BY ps.Upvotes - ps.Downvotes DESC) AS PostRank
+    FROM 
+        PostStats ps
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Upvotes,
+    rp.Downvotes,
+    rp.CommentCount,
+    rp.RelatedPostCount,
+    rp.HasAcceptedAnswer,
+    u.DisplayName,
+    u.Reputation,
+    u.ReputationCategory
+FROM 
+    RankedPosts rp
+JOIN 
+    Posts p ON rp.PostId = p.Id
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+WHERE 
+    rp.PostRank <= 10 
+    AND p.ViewCount > (
+        SELECT 
+            AVG(ViewCount) 
+            FROM Posts 
+            WHERE PostTypeId = 1
+        )
+ORDER BY 
+    rp.Upvotes - rp.Downvotes DESC;

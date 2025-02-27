@@ -1,0 +1,85 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        NULL::integer AS parent_movie_id,
+        0 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.episode_of_id IS NULL  
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title AS movie_title,
+        e.episode_of_id AS parent_movie_id,
+        h.level + 1
+    FROM 
+        aka_title AS e
+    INNER JOIN 
+        movie_hierarchy AS h ON e.episode_of_id = h.movie_id
+),
+cast_with_roles AS (
+    SELECT 
+        c.movie_id,
+        p.name AS person_name,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+    FROM 
+        cast_info AS c
+    INNER JOIN 
+        aka_name AS p ON c.person_id = p.person_id
+    INNER JOIN 
+        role_type AS r ON c.role_id = r.id
+),
+movie_info_details AS (
+    SELECT 
+        m.id AS movie_id,
+        COALESCE(mi.info, 'No Info') AS movie_info,
+        CASE 
+            WHEN mi.note IS NOT NULL THEN mi.note
+            ELSE 'No Note' 
+        END AS info_note
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        movie_info AS mi ON m.id = mi.movie_id
+),
+final_output AS (
+    SELECT 
+        h.movie_id,
+        h.movie_title,
+        h.parent_movie_id,
+        h.level,
+        cwr.person_name,
+        cwr.role_name,
+        mid.movie_info,
+        mid.info_note
+    FROM 
+        movie_hierarchy AS h
+    LEFT JOIN 
+        cast_with_roles AS cwr ON h.movie_id = cwr.movie_id
+    LEFT JOIN 
+        movie_info_details AS mid ON h.movie_id = mid.movie_id
+)
+SELECT 
+    f.movie_title,
+    f.person_name,
+    f.role_name,
+    f.movie_info,
+    f.info_note,
+    CASE 
+        WHEN f.person_name IS NULL THEN 'No Cast Info'
+        ELSE 'Has Cast Info'
+    END AS cast_info_status,
+    COUNT(*) OVER (PARTITION BY f.movie_id) AS total_roles,
+    ROW_NUMBER() OVER (PARTITION BY f.movie_id ORDER BY f.role_name) AS role_sequence
+FROM 
+    final_output AS f
+WHERE 
+    f.level = 0  
+ORDER BY 
+    f.movie_title, 
+    f.role_sequence;

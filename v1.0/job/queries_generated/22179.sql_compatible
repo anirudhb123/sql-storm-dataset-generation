@@ -1,0 +1,84 @@
+
+WITH RECURSIVE title_years AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+
+actor_roles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        COALESCE(rt.role, 'Unknown') AS role,
+        COUNT(*) OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        role_type rt ON c.role_id = rt.id
+    WHERE 
+        a.name IS NOT NULL
+), 
+
+movie_company_info AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        COUNT(DISTINCT mci.company_type_id) AS company_types_count
+    FROM 
+        movie_companies mci
+    JOIN 
+        company_name cn ON mci.company_id = cn.id
+    JOIN 
+        title m ON m.id = mci.movie_id
+    GROUP BY 
+        m.movie_id
+),
+
+highest_grossing AS (
+    SELECT 
+        t.production_year,
+        t.title,
+        MAX(movie_info.info::numeric) AS highest_gross
+    FROM 
+        title t
+    JOIN 
+        movie_info ON t.id = movie_info.movie_id
+    WHERE 
+        movie_info.info_type_id = (SELECT id FROM info_type WHERE info = 'Gross')
+    GROUP BY 
+        t.production_year, t.title
+)
+
+SELECT 
+    DISTINCT COALESCE(tt.title, 'Untitled') || ' (' || COALESCE(CAST(tt.production_year AS TEXT), 'Unknown Year') || ')' AS movie_details,
+    ar.actor_name,
+    ar.role,
+    mci.companies,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         movie_keyword mk 
+     WHERE 
+         mk.movie_id = tt.title_id) AS keyword_count,
+    hg.highest_gross 
+FROM 
+    title_years tt
+LEFT JOIN 
+    actor_roles ar ON tt.title_id = ar.movie_id
+LEFT JOIN 
+    movie_company_info mci ON tt.title_id = mci.movie_id
+LEFT JOIN 
+    highest_gross hg ON tt.production_year = hg.production_year
+WHERE 
+    (ar.actor_name IS NOT NULL OR mci.companies IS NOT NULL)
+    AND (mci.company_types_count > 0 OR hg.highest_gross IS NOT NULL)
+ORDER BY 
+    tt.production_year DESC, hg.highest_gross DESC, ar.actor_name;

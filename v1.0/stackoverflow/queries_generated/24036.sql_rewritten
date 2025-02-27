@@ -1,0 +1,81 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 END), 0) AS TotalQuestions,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 END), 0) AS TotalAnswers
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON v.UserId = u.Id AND v.PostId = p.Id
+    WHERE u.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '5 years'
+    GROUP BY u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalUpVotes,
+        TotalDownVotes,
+        TotalPosts,
+        TotalComments,
+        TotalQuestions,
+        TotalAnswers,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserActivity
+    HAVING TotalPosts > 10 
+),
+QuestionDetails AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        p.ViewCount,
+        cnt.TotalAnswers,
+        ph.CreationDate AS LastEditDate,
+        COALESCE(((p.AcceptedAnswerId IS NOT NULL)::int), 0) AS HasAcceptedAnswer,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsArray
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 4
+    LEFT JOIN UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS t(TagName) ON TRUE
+    LEFT JOIN (SELECT ParentId, COUNT(Id) AS TotalAnswers FROM Posts WHERE PostTypeId = 2 GROUP BY ParentId) cnt ON cnt.ParentId = p.Id
+    WHERE p.PostTypeId = 1 AND p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title, p.ViewCount, cnt.TotalAnswers, ph.CreationDate
+),
+UserPostStats AS (
+    SELECT 
+        u.DisplayName,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(CASE WHEN p.Score IS NOT NULL AND p.Score > 0 THEN p.Score END), 0) AS TotalPositiveScores,
+        COALESCE(AVG(p.ViewCount), 0) AS AvgPostViews,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsContributed
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS t(TagName) ON TRUE
+    WHERE u.LastAccessDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY u.DisplayName
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    td.Title AS LastEditedQuestion,
+    td.ViewCount AS QuestionViews,
+    td.TotalComments AS QuestionComments,
+    td.LastEditDate,
+    ups.TotalViews AS UserTotalViews,
+    ups.TotalPositiveScores AS UserTotalPositiveScores,
+    ups.AvgPostViews AS UserAvgPostViews,
+    ups.TagsContributed AS TagsByUserContributions
+FROM TopUsers tu
+LEFT JOIN QuestionDetails td ON tu.UserId = td.QuestionId
+LEFT JOIN UserPostStats ups ON tu.DisplayName = ups.DisplayName
+WHERE tu.ReputationRank <= 10
+ORDER BY tu.Reputation DESC, td.ViewCount DESC;

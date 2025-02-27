@@ -1,0 +1,28 @@
+WITH TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY TotalSupplyCost DESC
+    LIMIT 10
+),
+RecentOrders AS (
+    SELECT o.o_custkey, o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY o.o_custkey, o.o_orderkey, o.o_orderdate
+),
+CustomerSegments AS (
+    SELECT c.c_nationkey, c.c_mktsegment, SUM(ro.TotalRevenue) AS SegmentRevenue
+    FROM customer c
+    JOIN RecentOrders ro ON c.c_custkey = ro.o_custkey
+    GROUP BY c.c_nationkey, c.c_mktsegment
+)
+SELECT r.r_name, cs.c_mktsegment, SUM(cs.SegmentRevenue) AS MarketSegmentRevenue
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN CustomerSegments cs ON n.n_nationkey = cs.c_nationkey
+WHERE r.r_name IN (SELECT DISTINCT n.r_name FROM nation n JOIN supplier s ON n.n_nationkey = s.s_nationkey WHERE s.s_suppkey IN (SELECT s_suppkey FROM TopSuppliers))
+GROUP BY r.r_name, cs.c_mktsegment
+ORDER BY r.r_name, MarketSegmentRevenue DESC;

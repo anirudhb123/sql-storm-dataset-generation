@@ -1,0 +1,70 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        SUBSTRING(c.c_email_address, POSITION('@' IN c.c_email_address) + 1) AS email_domain,
+        LENGTH(c.c_email_address) AS email_length
+    FROM 
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.bill_customer_sk,
+        COUNT(ws.ws_order_number) AS order_count,
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.bill_customer_sk
+),
+return_summary AS (
+    SELECT 
+        wr.returning_customer_sk,
+        COUNT(wr.wr_order_number) AS return_count,
+        SUM(wr.wr_return_amt) AS total_returns
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk
+)
+SELECT 
+    ci.full_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_education_status,
+    ci.cd_purchase_estimate,
+    ci.cd_credit_rating,
+    ci.cd_dep_count,
+    ci.ca_city,
+    ci.ca_state,
+    ci.ca_country,
+    COALESCE(ss.order_count, 0) AS order_count,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(rs.return_count, 0) AS return_count,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    ci.email_domain,
+    ci.email_length
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_summary ss ON ci.c_customer_sk = ss.bill_customer_sk
+LEFT JOIN 
+    return_summary rs ON ci.c_customer_sk = rs.returning_customer_sk
+WHERE 
+    ci.cd_gender = 'F' 
+    AND ci.cd_purchase_estimate > 1000
+ORDER BY 
+    ci.email_length DESC, 
+    ci.full_name;

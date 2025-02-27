@@ -1,0 +1,21 @@
+SELECT 
+    t.title,
+    ak.name AS aka_name,
+    c.note AS character_note,
+    ci.note AS cast_info_note,
+    mk.keyword AS movie_keyword,
+    ci.nr_order
+FROM 
+    title t
+JOIN 
+    aka_title ak ON t.id = ak.movie_id
+JOIN 
+    cast_info ci ON t.id = ci.movie_id
+JOIN 
+    name n ON ci.person_id = n.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+WHERE 
+    t.production_year >= 2000
+ORDER BY 
+    t.title, ci.nr_order;

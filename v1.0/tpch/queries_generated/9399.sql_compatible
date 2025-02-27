@@ -1,0 +1,58 @@
+
+WITH customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+supplier_parts AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+part_summary AS (
+    SELECT p.p_partkey, p.p_name, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+region_summary AS (
+    SELECT r.r_regionkey, r.r_name, SUM(o.o_totalprice) AS total_region_sales
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY r.r_regionkey, r.r_name
+)
+SELECT 
+    co.c_custkey,
+    co.c_name,
+    co.total_spent,
+    sp.total_supply_cost,
+    ps.supplier_count,
+    rs.total_region_sales
+FROM
+    customer_orders co
+LEFT JOIN
+    supplier_parts sp ON co.c_custkey = (SELECT c.c_custkey 
+                                          FROM customer c 
+                                          WHERE c.c_nationkey IN 
+                                              (SELECT n.n_nationkey 
+                                               FROM nation n 
+                                               WHERE n.n_regionkey = 
+                                                   (SELECT r.r_regionkey 
+                                                    FROM region r 
+                                                    WHERE r.r_name = 'ASIA'))) 
+                                         LIMIT 1) 
+LEFT JOIN
+    part_summary ps ON ps.supplier_count > 2 
+LEFT JOIN
+    region_summary rs ON rs.r_regionkey = (SELECT n.n_regionkey 
+                                            FROM nation n 
+                                            WHERE n.n_nationkey = 
+                                                (SELECT c.c_nationkey 
+                                                 FROM customer c 
+                                                 WHERE c.c_custkey = co.c_custkey)
+                                            LIMIT 1)
+ORDER BY co.total_spent DESC, sp.total_supply_cost DESC;

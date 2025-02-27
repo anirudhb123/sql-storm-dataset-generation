@@ -1,0 +1,71 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs_bill_customer_sk AS customer_id,
+        SUM(cs_net_profit) AS total_profit,
+        COUNT(cs_order_number) AS total_orders,
+        1 AS level
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_bill_customer_sk
+    UNION ALL
+    SELECT 
+        s.ss_customer_sk,
+        SUM(s.ss_net_profit) + SUM(c.total_profit),
+        COUNT(s.ss_ticket_number) + c.total_orders,
+        level + 1
+    FROM 
+        store_sales s
+    JOIN 
+        sales_hierarchy c ON s.ss_customer_sk = c.customer_id
+    GROUP BY 
+        s.ss_customer_sk, c.total_profit, c.total_orders, level
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_id, 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS web_profit,
+        COALESCE(SUM(ss.ss_net_profit), 0) AS store_profit,
+        COALESCE(SUM(cs.total_profit), 0) AS catalog_profit,
+        COUNT(DISTINCT cs.cs_order_number) AS total_catalog_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+),
+final_stats AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.cd_gender,
+        cs.cd_marital_status,
+        cs.web_profit + cs.store_profit + cs.catalog_profit AS total_profit,
+        DENSE_RANK() OVER (ORDER BY cs.web_profit + cs.store_profit + cs.catalog_profit DESC) AS profit_rank
+    FROM 
+        customer_stats cs
+)
+SELECT 
+    f.c_customer_id,
+    f.cd_gender,
+    f.cd_marital_status,
+    f.total_profit,
+    f.profit_rank,
+    (SELECT COUNT(*) 
+     FROM customer 
+     WHERE c_current_cdemo_sk IS NULL) AS null_demo_count
+FROM 
+    final_stats f
+WHERE 
+    f.profit_rank <= 10
+ORDER BY 
+    f.total_profit DESC;

@@ -1,0 +1,81 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    HAVING 
+        SUM(ws_net_paid) > 100  -- Only include sales over $100
+),
+Return_Summary AS (
+    SELECT 
+        wr_item_sk, 
+        COUNT(*) AS total_returns,
+        SUM(wr_return_amt) AS total_return_amount
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_item_sk
+),
+Customer_Stats AS (
+    SELECT 
+        cu.c_customer_sk,
+        DEMO.cd_gender,
+        DEMO.cd_marital_status,
+        ROUND(AVG(ws.net_profit), 2) AS avg_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        customer cu ON ws.ws_bill_customer_sk = cu.c_customer_sk
+    JOIN 
+        customer_demographics DEMO ON cu.c_current_cdemo_sk = DEMO.cd_demo_sk
+    GROUP BY 
+        cu.c_customer_sk, DEMO.cd_gender, DEMO.cd_marital_status
+),
+Item_Stats AS (
+    SELECT 
+        i.i_item_sk, 
+        i.i_item_desc, 
+        ISNULL(SUM(cr_return_quantity), 0) AS total_returns,
+        ISNULL(SUM(cr_return_amount), 0) AS total_return_amount
+    FROM 
+        item i
+    LEFT JOIN 
+        catalog_returns cr ON i.i_item_sk = cr.cr_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_desc
+)
+SELECT 
+    S.item_sk,
+    S.total_quantity,
+    S.total_sales,
+    R.total_returns,
+    R.total_return_amount,
+    C.avg_profit,
+    C.total_orders
+FROM 
+    (SELECT 
+        item_sk,
+        SUM(total_quantity) as total_quantity,
+        SUM(total_sales) as total_sales
+     FROM 
+        Sales_CTE
+     GROUP BY item_sk) S
+LEFT JOIN 
+    Return_Summary R ON S.item_sk = R.wr_item_sk
+LEFT JOIN 
+    Customer_Stats C ON S.item_sk = C.c_customer_sk
+WHERE 
+    (R.total_returns IS NULL OR R.total_return_amount < 500) 
+    AND C.total_orders > 10
+ORDER BY 
+    S.total_sales DESC,
+    S.total_quantity ASC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

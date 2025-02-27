@@ -1,0 +1,72 @@
+WITH RECURSIVE UserHierarchy AS (
+    
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        Location,
+        1 AS Level
+    FROM Users
+    WHERE Reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.Location,
+        uh.Level + 1
+    FROM Users u
+    JOIN UserHierarchy uh ON u.Id = uh.Id
+    WHERE u.Reputation < 1000
+),
+PostDetails AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate AS PostCreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate > cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY p.Id, u.DisplayName, u.Reputation
+),
+TopPosts AS (
+    
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.ViewCount,
+        pd.CommentCount,
+        pd.Upvotes,
+        pd.Downvotes,
+        (pd.Upvotes - pd.Downvotes) AS Score,
+        ROW_NUMBER() OVER (ORDER BY (pd.Upvotes - pd.Downvotes) DESC) AS Rank
+    FROM PostDetails pd
+    WHERE (pd.Upvotes - pd.Downvotes) > (SELECT AVG(Upvotes - Downvotes) FROM PostDetails)
+)
+SELECT 
+    tp.Title,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.Upvotes,
+    tp.Downvotes,
+    tp.Score,
+    uh.DisplayName AS UserDisplayName,
+    uh.Reputation AS UserReputation
+FROM TopPosts tp
+LEFT JOIN UserHierarchy uh ON tp.Upvotes >= 10
+WHERE tp.Rank <= 10
+ORDER BY tp.Score DESC
+OPTION (RECOMPILE);

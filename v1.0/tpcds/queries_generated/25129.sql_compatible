@@ -1,0 +1,53 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        a.ca_city,
+        CONCAT(a.ca_street_number, ' ', a.ca_street_name, ' ', a.ca_street_type) AS full_address,
+        a.ca_state,
+        a.ca_zip,
+        a.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.net_paid) AS total_sales,
+        COUNT(ws.order_number) AS total_orders
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.bill_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        ci.full_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.full_address,
+        cs.total_sales,
+        cs.total_orders
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        SalesSummary cs ON ci.c_customer_id = cs.bill_customer_sk
+)
+SELECT 
+    fr.*,
+    CASE 
+        WHEN fr.total_sales IS NULL THEN 'No Sales'
+        WHEN fr.total_sales > 1000 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_category
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.total_sales DESC, fr.full_name;

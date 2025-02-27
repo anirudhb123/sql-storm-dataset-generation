@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COALESCE(SUM(v.BountyAmount) FILTER (WHERE v.VoteTypeId = 8), 0) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+
+PostMetrics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.TotalBounty,
+        us.Reputation AS UserReputation,
+        us.PostCount,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges,
+        us.LastBadgeDate,
+        CASE 
+            WHEN rp.Score IS NULL THEN 'No Score'
+            WHEN rp.Score >= 100 THEN 'Highly Rated'
+            WHEN rp.Score BETWEEN 50 AND 99 THEN 'Moderately Rated'
+            ELSE 'Low Rated'
+        END AS PostRating
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserStatistics us ON rp.PostId = us.UserId
+)
+
+SELECT 
+    pm.*,
+    CASE 
+        WHEN pm.LastBadgeDate IS NULL THEN 'No Badges'
+        ELSE TO_CHAR(pm.LastBadgeDate, 'YYYY-MM-DD HH24:MI:SS')
+    END AS LastBadgeDateFormatted
+FROM 
+    PostMetrics pm
+WHERE 
+    pm.UserReputation > 500
+ORDER BY 
+    pm.Score DESC, pm.TotalBounty DESC
+LIMIT 10;

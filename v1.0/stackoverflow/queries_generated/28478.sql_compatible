@@ -1,0 +1,90 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.UpVotes > 0 THEN p.UpVotes ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN p.DownVotes > 0 THEN p.DownVotes ELSE 0 END) AS TotalDownVotes,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagStatistics AS (
+    SELECT 
+        TRIM(UNNEST(SPLIT_PART(Tags, '><', GENERATE_SERIES(1, array_length(string_to_array(Tags, '><'), 1)))) ) ) AS TagName, 
+        COUNT(*) AS TagCount 
+    FROM 
+        Posts 
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        TagName
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS HistoryCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedPosts,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenedPosts,
+        AVG(EXTRACT(EPOCH FROM (ph.CreationDate - p.CreationDate))) AS AvgEditDuration
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    GROUP BY 
+        ph.UserId
+),
+FinalReport AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalPosts,
+        ua.TotalQuestions,
+        ua.TotalAnswers,
+        ua.TotalBadges,
+        ua.TotalUpVotes,
+        ua.TotalDownVotes,
+        pt.TagName,
+        pt.TagCount,
+        ph.HistoryCount,
+        ph.ClosedPosts,
+        ph.ReopenedPosts,
+        ph.AvgEditDuration
+    FROM 
+        UserActivity ua
+    LEFT JOIN 
+        TagStatistics pt ON TRUE
+    LEFT JOIN 
+        PostHistoryAnalysis ph ON ua.UserId = ph.UserId
+)
+
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalQuestions,
+    TotalAnswers,
+    TotalBadges,
+    TotalUpVotes,
+    TotalDownVotes,
+    TagName,
+    TagCount,
+    HistoryCount,
+    ClosedPosts,
+    ReopenedPosts,
+    AvgEditDuration
+FROM 
+    FinalReport
+WHERE 
+    TotalPosts > 0 
+ORDER BY 
+    TotalUpVotes DESC, TotalPosts DESC;

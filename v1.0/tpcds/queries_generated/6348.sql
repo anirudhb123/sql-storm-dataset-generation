@@ -1,0 +1,44 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        wd.d_month_seq,
+        wd.d_year
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS wd ON ws.ws_sold_date_sk = wd.d_date_sk
+    GROUP BY 
+        ws.ws_item_sk, wd.d_month_seq, wd.d_year
+), ranked_sales AS (
+    SELECT 
+        item.i_item_id,
+        sd.total_sales,
+        sd.avg_profit,
+        sd.total_orders,
+        ROW_NUMBER() OVER (PARTITION BY sd.d_year ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM 
+        sales_data AS sd
+    JOIN 
+        item AS item ON sd.ws_item_sk = item.i_item_sk
+)
+SELECT 
+    rs.item_id,
+    rs.total_sales,
+    rs.avg_profit,
+    rs.total_orders,
+    rs.sales_rank,
+    CASE 
+        WHEN rs.sales_rank <= 10 THEN 'Top 10'
+        WHEN rs.sales_rank <= 50 THEN 'Top 50'
+        ELSE 'Other'
+    END AS sales_category
+FROM 
+    ranked_sales AS rs
+WHERE 
+    rs.sales_rank <= 100
+ORDER BY 
+    rs.sales_rank;

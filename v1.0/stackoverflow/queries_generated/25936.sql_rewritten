@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerName,
+        p.CreationDate,
+        p.LastActivityDate,
+        COUNT(a.Id) AS AnswerCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, '><')) AS t(TagName) ON TRUE
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, u.DisplayName, p.CreationDate, p.LastActivityDate
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        ARRAY_AGG(DISTINCT b.Name) AS BadgeNames,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 
+    GROUP BY 
+        b.UserId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS EditDate,
+        ph.Comment,
+        ph.Text
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerName,
+    rp.CreationDate,
+    rp.LastActivityDate,
+    rp.AnswerCount,
+    rp.Tags,
+    ub.BadgeNames,
+    ub.BadgeCount,
+    ph.EditDate,
+    ph.UserDisplayName AS EditorName,
+    ph.Comment,
+    ph.Text AS EditDetails
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN 
+    PostHistoryDetails ph ON rp.PostId = ph.PostId
+WHERE 
+    rp.UserPostRank = 1 
+ORDER BY 
+    rp.LastActivityDate DESC, 
+    ub.BadgeCount DESC;

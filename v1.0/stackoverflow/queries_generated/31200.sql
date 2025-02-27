@@ -1,0 +1,64 @@
+WITH RecursivePostHierarchy AS (
+    -- CTE to recursively find all child posts of a given post
+    SELECT Id, Title, ParentId, 0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL  -- Start with root posts (which have no parent)
+
+    UNION ALL
+
+    SELECT p.Id, p.Title, p.ParentId, r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostVoteStats AS (
+    -- Aggregate the score, upvotes, and downvotes for each post
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(Id) AS TotalVotes
+    FROM Votes
+    GROUP BY PostId
+),
+UserBadges AS (
+    -- Get the count of badges earned by users for reputation purposes
+    SELECT 
+        UserId,
+        COUNT(Id) AS BadgeCount
+    FROM Badges
+    GROUP BY UserId
+),
+PostRecentActivities AS (
+    -- CTE to find the most recent activity on posts, including edits and closures
+    SELECT 
+        p.Id AS PostId,
+        MAX(COALESCE(p.LastActivityDate, ph.CreationDate)) AS RecentActivityDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11, 12) THEN ph.CreationDate END) AS CloseReopenDate
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.Body,
+    r.Level AS HierarchyLevel,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    COALESCE(bs.BadgeCount, 0) AS UserBadgeCount,
+    ra.RecentActivityDate,
+    ra.CloseReopenDate,
+    CASE 
+        WHEN ra.CloseReopenDate IS NOT NULL THEN 'Closed/Reopened'
+        ELSE 'Active'
+    END AS PostStatus
+FROM Posts p
+LEFT JOIN RecursivePostHierarchy r ON p.Id = r.Id
+LEFT JOIN PostVoteStats vs ON p.Id = vs.PostId
+LEFT JOIN UserBadges bs ON p.OwnerUserId = bs.UserId
+LEFT JOIN PostRecentActivities ra ON p.Id = ra.PostId
+WHERE p.CreationDate >= NOW() - INTERVAL '1 year'  -- Analyzing posts from the last year
+AND (r.Level IS NULL OR r.Level < 3)  -- Limit hierarchy levels
+ORDER BY p.CreationDate DESC
+LIMIT 100;

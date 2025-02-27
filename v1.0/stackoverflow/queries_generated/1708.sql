@@ -1,0 +1,43 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        AVG(u.Reputation) AS AvgReputation,
+        DENSE_RANK() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    WHERE u.CreationDate < NOW() - INTERVAL '1 year'
+    GROUP BY u.Id
+),
+TopUsers AS (
+    SELECT UserId, PostCount, TotalBounty, AvgReputation
+    FROM UserActivity
+    WHERE UserRank <= 10
+),
+UserBadges AS (
+    SELECT 
+        ub.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeList
+    FROM Badges ub
+    JOIN Users u ON ub.UserId = u.Id
+    GROUP BY ub.UserId
+)
+SELECT 
+    tu.UserId,
+    u.DisplayName,
+    tu.PostCount,
+    COALESCE(ub.BadgeList, 'No badges') AS BadgeList,
+    tu.TotalBounty,
+    ROUND(tu.AvgReputation, 2) AS AvgReputation,
+    CASE 
+        WHEN tu.TotalBounty IS NULL THEN 'No bounty awarded'
+        ELSE 'Bounty exists'
+    END AS BountyStatus,
+    (SELECT COUNT(*) FROM Comments c WHERE c.UserId = tu.UserId) AS CommentCount,
+    RANK() OVER (ORDER BY tu.TotalBounty DESC) AS BountyRank
+FROM TopUsers tu
+JOIN Users u ON tu.UserId = u.Id
+LEFT JOIN UserBadges ub ON tu.UserId = ub.UserId
+ORDER BY tu.PostCount DESC, tu.TotalBounty DESC;

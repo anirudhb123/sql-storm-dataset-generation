@@ -1,0 +1,76 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p2.ParentId = ph.PostId
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserBadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ph.PostId,
+    ph.Title,
+    ph.Level,
+    pvs.VoteCount,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    ubs.UserId,
+    ubs.TotalBadges,
+    ubs.GoldBadges,
+    ubs.SilverBadges,
+    ubs.BronzeBadges,
+    (SELECT COUNT(*) 
+     FROM Comments c 
+     WHERE c.PostId = ph.PostId) AS CommentCount
+FROM 
+    RecursivePostHierarchy ph
+LEFT JOIN 
+    PostVoteStats pvs ON ph.PostId = pvs.PostId
+LEFT JOIN 
+    Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = ph.PostId)
+LEFT JOIN 
+    UserBadgeStats ubs ON u.Id = ubs.UserId
+WHERE 
+    ph.Level <= 3  
+ORDER BY 
+    ph.Level, 
+    pvs.VoteCount DESC;

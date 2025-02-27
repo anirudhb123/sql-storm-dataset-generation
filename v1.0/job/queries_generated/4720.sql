@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.person_id,
+        t.title,
+        COUNT(ci.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY COUNT(ci.id) DESC) AS rn
+    FROM
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    GROUP BY 
+        a.person_id, t.title
+),
+TopMovies AS (
+    SELECT 
+        person_id,
+        title,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 5
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    p.name AS actor_name,
+    tm.title AS movie_title,
+    tm.cast_count,
+    ci.company_name,
+    ci.company_type
+FROM 
+    aka_name p
+LEFT JOIN 
+    TopMovies tm ON p.person_id = tm.person_id
+LEFT JOIN 
+    CompanyInfo ci ON tm.movie_id = ci.movie_id
+WHERE 
+    (ci.company_name IS NOT NULL OR ci.company_type IS NOT NULL)
+ORDER BY 
+    p.name, tm.cast_count DESC;

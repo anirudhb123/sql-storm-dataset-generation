@@ -1,0 +1,46 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title AS movie_title, 
+           COALESCE(mk.keyword, 'No keywords') AS keyword,
+           COALESCE(c.name, 'Unknown Company') AS company_name,
+           COALESCE(NULLIF(m.production_year, 0), 'Unknown Year') AS production_year,
+           ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY c.name) AS rank
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN company_name c ON mc.company_id = c.id
+    WHERE m.production_year >= 2000
+    UNION ALL
+    SELECT mh.movie_id, mh.movie_title, 
+           COALESCE(mk.keyword, 'No keywords') AS keyword,
+           COALESCE(c.name, 'Unknown Company') AS company_name,
+           mh.production_year,
+           ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY c.name) AS rank
+    FROM movie_hierarchy mh
+    LEFT JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    LEFT JOIN aka_title m ON ml.linked_movie_id = m.id
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN company_name c ON mc.company_id = c.id
+    WHERE mh.rank <= 3 
+)
+SELECT movie_title, MAX(production_year) AS latest_year,
+       STRING_AGG(DISTINCT keyword, ', ') AS all_keywords,
+       GROUP_CONCAT(DISTINCT company_name) AS companies
+FROM movie_hierarchy
+GROUP BY movie_title
+HAVING COUNT(DISTINCT movie_id) > 1
+ORDER BY latest_year DESC
+LIMIT 10
+OFFSET 0;
+
+This SQL query constructs a recursive Common Table Expression (CTE) to create a hierarchy of movies, their keywords, and associated companies. 
+
+Key aspects of the query:
+
+- The CTE `movie_hierarchy` recursively joins the `aka_title`, `movie_keyword`, and `movie_companies` tables to create a list that includes all movies produced from the year 2000 onward.
+- It uses the `COALESCE` function to manage NULL values for keywords and company names, providing defaults where necessary.
+- Keyword aggregation is done using `STRING_AGG`, and company names are concatenated with `GROUP_CONCAT`, ensuring a comprehensive list of attributes for each movie.
+- The `HAVING` clause filters to include only movies with more than one unique ID.
+- The output is ordered by the most recent production year and limited to the top 10 results.
+
+This query leverages multiple complex SQL features, including window functions, string aggregation, and recursive CTEs, all while handling NULL values and edge cases.

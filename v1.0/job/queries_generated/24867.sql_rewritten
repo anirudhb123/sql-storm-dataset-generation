@@ -1,0 +1,55 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level,
+        NULL AS parent_id
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL AND mt.kind_id IN (1, 2)  
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        at.production_year,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_id
+    FROM movie_link ml
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+    JOIN movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+, actor_movie_count AS (
+    SELECT 
+        ci.person_id, 
+        COUNT(DISTINCT ci.movie_id) AS total_movies
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    GROUP BY ci.person_id
+)
+, gender_role_info AS (
+    SELECT 
+        na.gender,
+        rt.role,
+        COUNT(DISTINCT ci.movie_id) AS role_count
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    JOIN role_type rt ON ci.role_id = rt.id
+    JOIN name na ON an.id = na.id
+    GROUP BY na.gender, rt.role
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS num_actors,
+    SUM(ac.total_movies) AS total_actor_movies,
+    STRING_AGG(DISTINCT CONCAT(na.name, ' (', gr.role, ' - ', gr.role_count, ')'), ', ') AS actor_roles
+FROM movie_hierarchy mh
+LEFT JOIN cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN actor_movie_count ac ON ci.person_id = ac.person_id
+LEFT JOIN gender_role_info gr ON ac.person_id = gr.gender
+LEFT JOIN aka_name na ON ci.person_id = na.person_id
+GROUP BY mh.movie_id, mh.movie_title, mh.production_year
+HAVING COUNT(DISTINCT ci.person_id) > 10
+ORDER BY num_actors DESC, total_actor_movies DESC;

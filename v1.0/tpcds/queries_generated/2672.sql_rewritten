@@ -1,0 +1,64 @@
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank,
+        STRING_AGG(DISTINCT i_brand, ', ') AS brands_purchased
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2459655 AND 2459657 
+    GROUP BY 
+        ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        r.ws_bill_customer_sk,
+        r.total_sales,
+        r.brands_purchased
+    FROM 
+        RankedSales r
+    WHERE 
+        r.sales_rank <= 10
+),
+SalesWithDemographics AS (
+    SELECT 
+        tc.ws_bill_customer_sk,
+        tc.total_sales,
+        tc.brands_purchased,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM 
+        TopCustomers tc
+    LEFT JOIN 
+        customer_demographics cd ON tc.ws_bill_customer_sk = cd.cd_demo_sk
+)
+SELECT 
+    sd.ws_bill_customer_sk,
+    COALESCE(SUM(ss.ss_net_profit), 0) AS total_store_profit,
+    COALESCE(SUM(cr.cr_return_amount), 0) AS total_catalog_returns,
+    sd.total_sales,
+    sd.brands_purchased,
+    sd.cd_gender,
+    sd.cd_marital_status,
+    DISTINCT sd.cd_purchase_estimate
+FROM 
+    SalesWithDemographics sd
+LEFT JOIN 
+    store_sales ss ON sd.ws_bill_customer_sk = ss.ss_customer_sk
+LEFT JOIN 
+    catalog_returns cr ON sd.ws_bill_customer_sk = cr.cr_returning_customer_sk
+GROUP BY 
+    sd.ws_bill_customer_sk,
+    sd.total_sales,
+    sd.brands_purchased,
+    sd.cd_gender,
+    sd.cd_marital_status,
+    sd.cd_purchase_estimate
+HAVING 
+    COALESCE(SUM(ss.ss_net_profit), 0) > 0 OR COUNT(cr.cr_return_id) > 5 
+ORDER BY 
+    total_sales DESC;

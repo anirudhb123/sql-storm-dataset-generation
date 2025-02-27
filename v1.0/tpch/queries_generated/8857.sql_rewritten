@@ -1,0 +1,33 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+), CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '1996-01-01'
+), RegionSummary AS (
+    SELECT r.r_regionkey, r.r_name, COUNT(n.n_nationkey) AS NationCount
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_regionkey, r.r_name
+)
+SELECT 
+    cd.c_custkey,
+    cd.c_name,
+    sd.s_suppkey,
+    sd.s_name,
+    rs.r_name,
+    SUM(ld.l_extendedprice * (1 - ld.l_discount)) AS Revenue,
+    COUNT(DISTINCT o.o_orderkey) AS OrderCount,
+    RANK() OVER (PARTITION BY rs.r_regionkey ORDER BY SUM(ld.l_extendedprice * (1 - ld.l_discount)) DESC) AS RevenueRank
+FROM CustomerOrders cd
+JOIN lineitem ld ON cd.o_orderkey = ld.l_orderkey
+JOIN SupplierDetails sd ON ld.l_suppkey = sd.s_suppkey
+JOIN nation n ON cd.c_nationkey = n.n_nationkey
+JOIN region rs ON n.n_regionkey = rs.r_regionkey
+GROUP BY cd.c_custkey, cd.c_name, sd.s_suppkey, sd.s_name, rs.r_regionkey, rs.r_name
+HAVING SUM(ld.l_extendedprice * (1 - ld.l_discount)) > 5000
+ORDER BY rs.r_regionkey, RevenueRank;

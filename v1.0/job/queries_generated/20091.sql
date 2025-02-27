@@ -1,0 +1,88 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.id) DESC) AS rank
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY
+        t.id, t.title, t.production_year, t.kind_id
+),
+TitleWithTopCast AS (
+    SELECT
+        rm.title_id,
+        rm.title,
+        COUNT(ci.id) AS cast_count
+    FROM
+        RankedMovies rm
+    LEFT JOIN
+        cast_info ci ON rm.title_id = ci.movie_id
+    WHERE
+        rm.rank = 1
+    GROUP BY
+        rm.title_id, rm.title
+),
+MovieInfoWithNulls AS (
+    SELECT
+        t.title_id,
+        t.title,
+        COALESCE(mii.info, 'No info available') AS movie_info,
+        mii.note
+    FROM
+        TitleWithTopCast t
+    LEFT JOIN 
+        movie_info_idx mii ON t.title_id = mii.movie_id 
+    WHERE
+        t.cast_count >= (
+            SELECT 
+                AVG(cast_count) 
+            FROM 
+                TitleWithTopCast
+            WHERE
+                cast_count IS NOT NULL
+        )
+),
+FinalResult AS (
+    SELECT
+        mi.title,
+        mi.movie_info,
+        mi.note,
+        kt.kind AS kind_type,
+        COALESCE(ki.keyword, 'General') AS keywords,
+        CASE
+            WHEN mi.movie_info LIKE '%banned%' THEN 'Contains banned info'
+            ELSE 'Safe'
+        END AS info_status,
+        SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY mi.title ORDER BY mi.title ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS total_role_count
+    FROM
+        MovieInfoWithNulls mi
+    LEFT JOIN
+        movie_keyword mk ON mi.title_id = mk.movie_id
+    LEFT JOIN
+        keyword ki ON mk.keyword_id = ki.id
+    LEFT JOIN
+        kind_type kt ON mi.title_id = kt.id
+    LEFT JOIN
+        cast_info ci ON mi.title_id = ci.movie_id
+)
+SELECT 
+    title,
+    movie_info,
+    note,
+    kind_type,
+    keywords,
+    info_status,
+    total_role_count,
+    (SELECT COUNT(*) FROM movie_info mi2 WHERE mi2.info_type_id = mi.title_id AND mi2.info IS NOT NULL) AS derived_info_count
+FROM 
+    FinalResult
+WHERE 
+    info_status = 'Safe'
+ORDER BY 
+    production_year DESC NULLS LAST, title;

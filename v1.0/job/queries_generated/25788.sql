@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+PopularMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_count,
+        actor_names,
+        DENSE_RANK() OVER (ORDER BY cast_count DESC) AS rank
+    FROM 
+        RankedMovies
+)
+SELECT 
+    pm.movie_id,
+    pm.title,
+    pm.production_year,
+    pm.cast_count,
+    pm.actor_names,
+    m.id AS company_id,
+    cn.name AS company_name,
+    ct.kind AS company_type
+FROM 
+    PopularMovies pm
+JOIN 
+    movie_companies mc ON pm.movie_id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    pm.rank <= 10
+ORDER BY 
+    pm.cast_count DESC;

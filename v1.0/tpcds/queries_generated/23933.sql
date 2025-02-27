@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS rank_sales
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL 
+        AND ws_quantity > 0
+),
+CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT wr_return_number) AS total_returns,
+        SUM(wr_return_amt) AS total_return_amt,
+        AVG(CASE 
+            WHEN wr_return_amt IS NULL THEN 0 
+            ELSE wr_return_amt 
+        END) AS avg_return_amt
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+SalesSummary AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        SUM(ws.net_paid) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.c_customer_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cr.total_returns
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.total_returns,
+    cs.total_spent,
+    RANK() OVER (ORDER BY cs.total_spent DESC) AS spend_rank,
+    CASE 
+        WHEN cs.total_spent > 500 THEN 'High Spender'
+        WHEN cs.total_spent BETWEEN 250 AND 500 THEN 'Medium Spender'
+        ELSE 'Low Spender'
+    END AS spender_category,
+    (SELECT AVG(sales_price) FROM RankedSales WHERE rank_sales = 1) AS avg_high_price
+FROM 
+    SalesSummary cs
+WHERE 
+    cs.total_returns IS NOT NULL
+    OR cs.total_spent IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC
+LIMIT 50
+OFFSET 10;

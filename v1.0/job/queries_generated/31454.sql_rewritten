@@ -1,0 +1,82 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        1 AS level,
+        CAST(a.name AS TEXT) AS actor_name
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        ci.nr_order = 1
+    
+    UNION ALL
+    
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        ah.level + 1,
+        CAST(a.name AS TEXT) AS actor_name
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        actor_hierarchy ah ON ci.movie_id = ah.movie_id
+    WHERE 
+        ah.level < 5 
+),
+movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        m.name AS production_company,
+        mct.kind AS company_type,
+        ka.keyword AS movie_keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY mct.kind) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name m ON mc.company_id = m.id
+    LEFT JOIN 
+        company_type mct ON mc.company_type_id = mct.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword ka ON mk.keyword_id = ka.id
+    WHERE 
+        t.production_year >= 2000
+),
+info_aggregate AS (
+    SELECT 
+        pi.person_id,
+        STRING_AGG(DISTINCT pi.info, ', ') AS all_infos
+    FROM 
+        person_info pi
+    GROUP BY 
+        pi.person_id
+)
+SELECT 
+    ah.actor_name,
+    md.title AS movie_title,
+    md.production_year,
+    md.production_company,
+    md.company_type,
+    md.movie_keyword,
+    ia.all_infos
+FROM 
+    actor_hierarchy ah
+JOIN 
+    movie_details md ON ah.movie_id = md.movie_id
+LEFT JOIN 
+    info_aggregate ia ON ah.person_id = ia.person_id
+WHERE 
+    md.movie_keyword IS NOT NULL
+ORDER BY 
+    md.production_year DESC,
+    ah.level,
+    ah.actor_name;

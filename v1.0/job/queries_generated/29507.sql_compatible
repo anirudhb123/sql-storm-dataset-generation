@@ -1,0 +1,72 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rank
+    FROM 
+        aka_title at
+    JOIN 
+        cast_info ci ON ci.movie_id = at.movie_id
+    JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+TopTitles AS (
+    SELECT 
+        title,
+        production_year,
+        actor_name
+    FROM 
+        RankedTitles
+    WHERE 
+        rank <= 5
+),
+KeywordCount AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        movie_info mi ON mi.movie_id = mk.movie_id
+    JOIN 
+        title mt ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.movie_id
+),
+MovieInfoNotes AS (
+    SELECT 
+        mt.title,
+        STRING_AGG(DISTINCT mi.note, ', ') AS notes
+    FROM 
+        title mt
+    JOIN 
+        movie_info mi ON mi.movie_id = mt.id
+    GROUP BY 
+        mt.title
+)
+SELECT 
+    tt.title,
+    tt.production_year,
+    tt.actor_name,
+    kc.keyword_count,
+    MIN(mn.notes) AS combined_notes
+FROM 
+    TopTitles tt
+LEFT JOIN 
+    KeywordCount kc ON kc.movie_id = tt.movie_id
+LEFT JOIN 
+    MovieInfoNotes mn ON mn.title = tt.title
+WHERE 
+    tt.actor_name LIKE '%John%'  
+GROUP BY 
+    tt.title, 
+    tt.production_year, 
+    tt.actor_name, 
+    kc.keyword_count
+ORDER BY 
+    tt.production_year DESC, 
+    kc.keyword_count DESC;

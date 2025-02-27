@@ -1,0 +1,58 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_ship_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(ws.ws_quantity) AS total_quantity,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    GROUP BY ws.ws_ship_date_sk, ws.ws_item_sk
+),
+top_items AS (
+    SELECT 
+        ss.ss_item_sk,
+        SUM(ss.ss_sales_price) AS total_sales
+    FROM store_sales ss
+    GROUP BY ss.ss_item_sk
+    ORDER BY total_sales DESC
+    LIMIT 10
+),
+merged_data AS (
+    SELECT 
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.ca_city,
+        ci.ca_state,
+        ts.total_sales,
+        ts.total_quantity,
+        ss.order_count
+    FROM customer_info ci
+    INNER JOIN sales_summary ss ON ci.c_customer_sk = ss.ws_bill_customer_sk
+    INNER JOIN top_items ts ON ss.ws_item_sk = ts.ss_item_sk
+)
+SELECT 
+    m.c_first_name,
+    m.c_last_name,
+    m.ca_city,
+    m.ca_state,
+    COALESCE(m.total_sales, 0) AS total_sales,
+    COALESCE(m.total_quantity, 0) AS total_quantity,
+    m.order_count,
+    ROW_NUMBER() OVER (PARTITION BY m.ca_state ORDER BY m.total_sales DESC) AS sales_rank
+FROM merged_data m
+WHERE m.total_quantity > 0
+ORDER BY m.ca_state, m.total_sales DESC;

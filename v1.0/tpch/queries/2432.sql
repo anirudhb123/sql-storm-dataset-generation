@@ -1,0 +1,40 @@
+
+WITH SupplierTotalCost AS (
+    SELECT ps_suppkey, SUM(ps_supplycost * ps_availqty) AS total_supply_cost
+    FROM partsupp
+    GROUP BY ps_suppkey
+),
+HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, stc.total_supply_cost
+    FROM supplier s
+    JOIN SupplierTotalCost stc ON s.s_suppkey = stc.ps_suppkey
+    WHERE stc.total_supply_cost > (
+        SELECT AVG(total_supply_cost) FROM SupplierTotalCost
+    )
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_order_value,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '1997-01-01'
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name,
+    COALESCE(st.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(cus.c_name, 'No Customer') AS customer_name,
+    SUM(li.l_quantity) AS total_quantity,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM lineitem li
+LEFT JOIN part p ON li.l_partkey = p.p_partkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN HighValueSuppliers st ON ps.ps_suppkey = st.s_suppkey
+LEFT JOIN orders o ON li.l_orderkey = o.o_orderkey
+LEFT JOIN CustomerOrderSummary cus ON o.o_custkey = cus.c_custkey
+WHERE li.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY ps.ps_partkey, p.p_name, st.s_name, cus.c_name
+HAVING SUM(li.l_quantity) > 100
+ORDER BY total_revenue DESC NULLS LAST;

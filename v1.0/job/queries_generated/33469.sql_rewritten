@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieChain AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        1 AS depth
+    FROM 
+        title t
+    JOIN 
+        aka_title at ON at.movie_id = t.id
+    WHERE 
+        t.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id,
+        t.title,
+        t.production_year,
+        mc.depth + 1
+    FROM 
+        movie_link mc
+    JOIN 
+        title t ON t.id = mc.linked_movie_id
+    JOIN 
+        MovieChain m ON mc.movie_id = m.movie_id
+    WHERE 
+        m.depth < 3  
+)
+
+SELECT 
+    m.movie_title,
+    m.production_year,
+    COALESCE(c.name, 'Unknown') AS director_name,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    SUM(CASE WHEN pi.info_type_id = 1 THEN 1 ELSE 0 END) AS has_biography,
+    DENSE_RANK() OVER (PARTITION BY m.production_year ORDER BY m.movie_title) AS ranking,
+    AVG(CASE WHEN pi.info IS NULL THEN 1 ELSE 0 END) AS null_biography_ratio
+FROM 
+    MovieChain m
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = m.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id AND ci.nr_order = 1
+LEFT JOIN 
+    aka_name c ON c.person_id = ci.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.movie_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN 
+    person_info pi ON pi.person_id = c.person_id
+WHERE 
+    m.depth = 1 
+GROUP BY 
+    m.movie_title, m.production_year, c.name
+HAVING 
+    COUNT(DISTINCT k.keyword) > 5
+ORDER BY 
+    m.production_year DESC, ranking;

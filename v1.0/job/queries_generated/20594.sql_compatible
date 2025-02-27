@@ -1,0 +1,53 @@
+
+WITH RECURSIVE movie_series AS (
+    SELECT t.id AS movie_id, t.title, 
+           t.production_year, 
+           COALESCE(t.season_nr, 0) AS season_nr, 
+           COALESCE(t.episode_nr, 0) AS episode_nr,
+           RANK() OVER (PARTITION BY t.season_nr ORDER BY t.episode_nr) AS episode_rank
+    FROM aka_title t
+    WHERE t.kind_id = (SELECT id FROM kind_type WHERE kind = 'tv series')
+),
+cast_details AS (
+    SELECT c.id AS cast_id, 
+           a.name AS actor_name, 
+           t.title, 
+           t.production_year,
+           ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS role_order
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN aka_title t ON c.movie_id = t.id
+),
+movie_info_extended AS (
+    SELECT m.id AS movie_id, 
+           m.title, 
+           COALESCE(GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword), 'No Keywords') AS keywords,
+           COUNT(i.id) AS info_count,
+           AVG(LENGTH(i.info)) AS avg_info_length
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id 
+    LEFT JOIN keyword k ON mk.keyword_id = k.id 
+    LEFT JOIN movie_info i ON m.id = i.movie_id
+    WHERE m.production_year > 2000
+    GROUP BY m.id, m.title
+)
+SELECT ms.movie_id,
+       ms.title,
+       ms.production_year,
+       ms.season_nr,
+       ms.episode_nr,
+       CASE 
+           WHEN ms.episode_rank IS NULL THEN 'Standalone Movie'
+           ELSE 'Part of Series'
+       END AS series_status,
+       COALESCE(cd.actor_name, 'No Cast') AS main_actor,
+       m.keywords,
+       m.info_count,
+       m.avg_info_length
+FROM movie_series ms
+FULL OUTER JOIN cast_details cd ON ms.movie_id = cd.movie_id
+FULL OUTER JOIN movie_info_extended m ON ms.movie_id = m.movie_id
+WHERE (ms.season_nr = 0 OR ms.season_nr IS NULL)
+  AND (cd.role_order = 1 OR cd.role_order IS NULL)
+ORDER BY ms.production_year DESC, 
+         ms.title ASC;

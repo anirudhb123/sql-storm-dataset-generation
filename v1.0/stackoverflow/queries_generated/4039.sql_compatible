@@ -1,0 +1,55 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId AND V.VoteTypeId IN (8, 9) 
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.UserDisplayName,
+        PH.CreationDate,
+        PH.Comment,
+        PH.PostHistoryTypeId,
+        COUNT(*) OVER (PARTITION BY PH.PostId) AS CloseActionCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (10, 11) 
+),
+TaggedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM Posts P
+    JOIN Tags T ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY P.Id, P.Title
+)
+SELECT 
+    US.DisplayName,
+    US.Reputation,
+    US.TotalBounties,
+    US.PostCount,
+    US.CommentCount,
+    COALESCE(CP.CloseActionCount, 0) AS CloseActionCount,
+    TP.Title,
+    TP.Tags,
+    CASE 
+        WHEN US.ReputationRank <= 10 THEN 'Top Contributor'
+        WHEN US.Reputation > 1000 THEN 'Moderate Contributor'
+        ELSE 'New Contributor' 
+    END AS ContributorLevel
+FROM UserStatistics US
+LEFT JOIN ClosedPosts CP ON US.UserId = CP.UserId
+LEFT JOIN TaggedPosts TP ON US.UserId = TP.OwnerUserId
+WHERE US.Reputation > 100
+ORDER BY US.Reputation DESC, US.DisplayName ASC;

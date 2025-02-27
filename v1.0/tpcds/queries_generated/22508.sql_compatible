@@ -1,0 +1,53 @@
+
+WITH RankedReturns AS (
+    SELECT
+        sr.sr_item_sk,
+        sr.sr_return_quantity,
+        sr.sr_customer_sk,
+        sr.sr_returned_date_sk,
+        RANK() OVER (PARTITION BY sr.sr_item_sk ORDER BY sr.sr_return_quantity DESC) AS ReturnRank
+    FROM store_returns sr
+    WHERE sr.sr_return_quantity IS NOT NULL
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid) AS TotalSpent
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_net_paid_inc_tax > 100
+    GROUP BY c.c_customer_sk
+    HAVING SUM(ws.ws_net_paid) > 1000
+),
+FrequentItemReturns AS (
+    SELECT
+        rr.sr_item_sk,
+        COUNT(rr.sr_item_sk) AS ReturnCount
+    FROM RankedReturns rr
+    WHERE rr.ReturnRank <= 5
+    GROUP BY rr.sr_item_sk
+)
+SELECT
+    i.i_item_id,
+    i.i_item_desc,
+    iv.inv_quantity_on_hand,
+    s.s_store_name,
+    CASE
+        WHEN hic.TotalSpent IS NOT NULL THEN 'Premium'
+        ELSE 'Regular'
+    END AS CustomerCategory,
+    COALESCE(fir.ReturnCount, 0) AS FrequentReturnCount,
+    SUM(COALESCE(ws.ws_net_paid, 0)) AS IncomeFromSales
+FROM item i
+LEFT JOIN inventory iv ON i.i_item_sk = iv.inv_item_sk
+LEFT JOIN store s ON iv.inv_warehouse_sk = s.s_store_sk
+LEFT JOIN HighValueCustomers hic ON hic.c_customer_sk IN (
+    SELECT DISTINCT sr.sr_customer_sk FROM store_returns sr
+)
+LEFT JOIN FrequentItemReturns fir ON fir.sr_item_sk = i.i_item_sk
+JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk AND ws.ws_sold_date_sk = iv.inv_date_sk
+WHERE iv.inv_quantity_on_hand - COALESCE(
+    (SELECT SUM(sr_return_quantity) FROM store_returns sr WHERE sr.sr_item_sk = i.i_item_sk AND sr.sr_returned_date_sk = iv.inv_date_sk),
+    0) > 0
+GROUP BY i.i_item_id, i.i_item_desc, iv.inv_quantity_on_hand, s.s_store_name, hic.TotalSpent, COALESCE(fir.ReturnCount, 0)
+ORDER BY IncomeFromSales DESC, FrequentReturnCount DESC;

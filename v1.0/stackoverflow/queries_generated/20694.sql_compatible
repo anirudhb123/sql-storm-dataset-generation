@@ -1,0 +1,102 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        CASE 
+            WHEN COUNT(v.Id) = 0 THEN 'No Votes'
+            ELSE CONCAT(CAST(SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS VARCHAR), ' Upvotes, ', 
+                        CAST(SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS VARCHAR), ' Downvotes')
+        END AS VoteSummary
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    LEFT JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><') AS tag_arr ON true
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_arr
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+ApprovedAnswers AS (
+    SELECT 
+        p.Id AS AnswerId,
+        p.ParentId,
+        p.OwnerUserId,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        COALESCE((SELECT AVG(v.BountyAmount) 
+                  FROM Votes v 
+                  WHERE v.PostId = p.Id 
+                  AND v.VoteTypeId IN (8, 9)), 0) AS AverageBounty
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 2 AND p.Score > 0
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(ph.Id) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 10, 11)
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+FinalResults AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.ViewCount,
+        r.Score,
+        r.Tags,
+        r.VoteSummary,
+        COALESCE(pa.AverageBounty, 0) AS AverageBounty,
+        COALESCE(ph.HistoryCount, 0) AS EditCount,
+        COALESCE(ph.LastEditDate, DATE '1970-01-01') AS LastEdit
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        ApprovedAnswers pa ON r.PostId = pa.ParentId
+    LEFT JOIN 
+        PostHistories ph ON r.PostId = ph.PostId
+    WHERE 
+        r.rn = 1
+    ORDER BY 
+        r.Score DESC, r.ViewCount DESC
+)
+SELECT 
+    *,
+    CASE 
+        WHEN Score IS NULL THEN 'Unscored'
+        ELSE 'Evaluated'
+    END AS EvaluationState,
+    CASE 
+        WHEN AverageBounty > 50 THEN 'High Bounty'
+        WHEN AverageBounty BETWEEN 20 AND 50 THEN 'Moderate Bounty'
+        ELSE 'No Significant Bounty'
+    END AS BountyCategory
+FROM 
+    FinalResults
+WHERE 
+    (EditCount > 2 OR LastEdit > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days')
+    AND Tags IS NOT NULL
+ORDER BY 
+    AverageBounty DESC, EditCount DESC;

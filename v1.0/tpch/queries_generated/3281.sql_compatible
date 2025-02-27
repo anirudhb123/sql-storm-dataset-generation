@@ -1,0 +1,57 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS Rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_retailprice > 100.00
+),
+TotalOrders AS (
+    SELECT 
+        o.o_custkey,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_custkey
+),
+CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+)
+SELECT 
+    cn.nation_name,
+    COUNT(DISTINCT cn.c_custkey) AS customer_count,
+    SUM(CASE WHEN rs.Rank = 1 THEN rs.s_acctbal ELSE 0 END) AS top_supplier_account_balance,
+    SUM(to.TotalSpent) AS total_spent
+FROM 
+    CustomerNation cn
+LEFT JOIN 
+    TotalOrders to ON cn.c_custkey = to.o_custkey
+LEFT JOIN 
+    RankedSuppliers rs ON rs.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        JOIN part p ON ps.ps_partkey = p.p_partkey 
+        WHERE p.p_container IS NOT NULL
+    )
+WHERE 
+    cn.nation_name IS NOT NULL
+GROUP BY 
+    cn.nation_name
+ORDER BY 
+    customer_count DESC;

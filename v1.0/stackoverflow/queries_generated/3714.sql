@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        COUNT(c.Id) AS CommentCount, 
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankWithinUser
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+TopPosters AS (
+    SELECT 
+        OwnerUserId, 
+        COUNT(*) AS PostCount, 
+        RANK() OVER (ORDER BY COUNT(*) DESC) AS PosterRank
+    FROM 
+        Posts
+    WHERE 
+        CreationDate >= NOW() - INTERVAL '1 YEAR'
+    GROUP BY 
+        OwnerUserId
+)
+SELECT 
+    u.Id AS UserId, 
+    u.DisplayName, 
+    tp.PostCount, 
+    rp.CommentCount, 
+    rp.UpVotes, 
+    rp.DownVotes 
+FROM 
+    Users u
+LEFT JOIN 
+    TopPosters tp ON u.Id = tp.OwnerUserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+WHERE 
+    tp.PostCount > 5 
+    AND (rp.CommentCount IS NULL OR rp.CommentCount > 0)
+    AND (rp.UpVotes - rp.DownVotes) > 10
+ORDER BY 
+    tp.PostCount DESC, 
+    rp.CommentCount DESC 
+LIMIT 10;

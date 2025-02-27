@@ -1,0 +1,46 @@
+
+WITH RECURSIVE Sales_Totals AS (
+    SELECT ss_store_sk,
+           SUM(ss_net_paid) AS total_sales,
+           COUNT(ss_ticket_number) AS total_transactions,
+           ROW_NUMBER() OVER (ORDER BY SUM(ss_net_paid) DESC) AS rank
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN 2459606 AND 2459630 -- Example date range
+    GROUP BY ss_store_sk
+),
+High_Spend_Customers AS (
+    SELECT c_customer_sk,
+           c_first_name,
+           c_last_name,
+           cd_gender,
+           cd_marital_status,
+           cd_purchase_estimate,
+           SUM(ws_net_paid) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE cd_purchase_estimate > 1000
+    GROUP BY c_customer_sk, c_first_name, c_last_name, cd_gender, cd_marital_status, cd_purchase_estimate
+),
+Store_Shipment AS (
+    SELECT ss_store_sk,
+           SUM(ss_ext_ship_cost) AS total_ship_cost,
+           AVG(ss_net_paid_inc_ship_tax) AS avg_net_paid_inc_ship_tax
+    FROM store_sales
+    GROUP BY ss_store_sk
+)
+
+SELECT s.s_store_id,
+       st.total_sales,
+       st.total_transactions,
+       hcc.total_spent,
+       s_sales.total_ship_cost,
+       s_sales.avg_net_paid_inc_ship_tax,
+       COALESCE(hcc.cd_gender, 'Unknown') AS customer_gender,
+       COALESCE(hcc.cd_marital_status, 'Unknown') AS marital_status
+FROM Sales_Totals st
+JOIN store s ON st.ss_store_sk = s.s_store_sk
+LEFT JOIN High_Spend_Customers hcc ON st.ss_store_sk = (SELECT ss_store_sk FROM store_sales WHERE ss_customer_sk = hcc.c_customer_sk LIMIT 1)
+LEFT JOIN Store_Shipment s_sales ON st.ss_store_sk = s_sales.ss_store_sk
+WHERE st.rank <= 10
+ORDER BY st.total_sales DESC;

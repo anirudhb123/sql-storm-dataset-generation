@@ -1,0 +1,75 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS row_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.n_nationkey = n.n_nationkey
+), HighValueParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name,
+        p.p_retailprice
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (
+            SELECT AVG(p_retailprice) 
+            FROM part 
+            WHERE p_size IS NOT NULL AND p_size > 0
+        )
+), OrdersWithLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+), SupplierPartStats AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_availqty) AS total_avail_qty, 
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+)
+
+SELECT 
+    r.r_name AS region_name,
+    COALESCE(SUM(HighValue.p_retailprice), 0) AS total_retail_value,
+    COUNT(DISTINCT O.o_orderkey) AS total_orders,
+    COUNT(DISTINCT RANKED.s_suppkey) FILTER (WHERE RANKED.rank_acctbal <= 3) AS top_supplier_count,
+    MAX(O.total_sales) OVER () AS highest_order_value,
+    STRING_AGG(DISTINCT S.s_name, ', ') WITHIN GROUP (ORDER BY S.s_acctbal DESC) AS supplier_names
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier S ON S.n_nationkey = n.n_nationkey
+LEFT JOIN 
+    RankedSuppliers RANKED ON S.s_suppkey = RANKED.s_suppkey AND RANKED.row_acctbal <= 5
+LEFT JOIN 
+    HighValueParts HighValue ON HighValue.p_partkey = S.s_suppkey
+LEFT JOIN 
+    OrdersWithLineItems O ON O.o_orderkey = S.s_suppkey
+LEFT JOIN 
+    SupplierPartStats SPS ON SPS.ps_suppkey = S.s_suppkey
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(COALESCE(O.total_sales, 0)) > 5000 AND COUNT(DISTINCT S.s_suppkey) > 1
+ORDER BY 
+    total_retail_value DESC, region_name ASC;

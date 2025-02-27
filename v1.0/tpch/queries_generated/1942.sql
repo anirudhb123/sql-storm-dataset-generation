@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue, 
+        COUNT(*) AS total_line_items
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+),
+QualifiedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        ls.total_revenue,
+        ls.total_line_items
+    FROM 
+        orders o
+    JOIN 
+        LineItemSummary ls ON o.o_orderkey = ls.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        o.o_totalprice > 10000 AND 
+        o.o_shippriority = 1 AND 
+        o.o_orderdate >= '2021-01-01'
+)
+SELECT 
+    n.n_name, 
+    COUNT(DISTINCT qo.o_orderkey) AS total_orders,
+    SUM(qo.total_revenue) AS region_revenue,
+    SUM(s.s_acctbal) AS total_supplier_balance
+FROM 
+    QualifiedOrders qo
+JOIN 
+    customer c ON qo.o_custkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    RankedSuppliers rs ON c.c_nationkey = rs.s_nationkey AND rs.rank <= 3
+GROUP BY 
+    n.n_name
+ORDER BY 
+    region_revenue DESC, total_orders DESC
+WITH ROLLUP;

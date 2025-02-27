@@ -1,0 +1,61 @@
+
+WITH actor_movie_counts AS (
+    SELECT 
+        a.person_id, 
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    GROUP BY 
+        a.person_id
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 3
+),
+actor_info AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(DISTINCT pi.info_id) AS info_count
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        person_info pi ON a.person_id = pi.person_id
+    GROUP BY 
+        a.person_id, a.name
+),
+movie_details AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        STRING_AGG(DISTINCT k.keyword ORDER BY k.keyword) AS keywords
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+)
+SELECT 
+    ac.person_id,
+    an.name,
+    ac.movie_count,
+    ai.info_count,
+    md.title,
+    md.production_year,
+    md.keywords
+FROM 
+    actor_movie_counts ac
+JOIN 
+    aka_name an ON ac.person_id = an.person_id
+JOIN 
+    actor_info ai ON ac.person_id = ai.person_id
+JOIN 
+    movie_details md ON ac.movie_count > 3 
+ORDER BY 
+    ac.movie_count DESC, ai.info_count DESC;

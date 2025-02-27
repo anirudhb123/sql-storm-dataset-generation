@@ -1,0 +1,47 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT Id, Reputation, CreationDate, DisplayName, 
+           ROW_NUMBER() OVER (PARTITION BY Id ORDER BY CreationDate DESC) as row_num
+    FROM Users
+), 
+PostStats AS (
+    SELECT p.Id AS PostId, 
+           p.OwnerUserId, 
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+           COUNT(c.Id) AS CommentCount,
+           COUNT(ph.Id) AS EditCount,
+           MAX(p.CreationDate) AS LastPostDate
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY p.Id, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT ur.DisplayName, ur.Reputation,
+           p.OwnerUserId,
+           SUM(ps.UpVotes) - SUM(ps.DownVotes) AS NetVotes,
+           ROW_NUMBER() OVER (ORDER BY SUM(ps.UpVotes) - SUM(ps.DownVotes) DESC) AS UserRank
+    FROM PostStats ps
+    JOIN Users ur ON ps.OwnerUserId = ur.Id
+    GROUP BY ur.Id, ur.DisplayName, ur.Reputation
+)
+
+SELECT pu.DisplayName AS UserName, 
+       pu.Reputation AS UserReputation,
+       COALESCE(SUM(ps.UpVotes), 0) AS TotalUpVotes,
+       COALESCE(SUM(ps.DownVotes), 0) AS TotalDownVotes,
+       CASE 
+           WHEN EXISTS (SELECT 1 FROM Badges b WHERE b.UserId = pu.Id AND b.Class = 1) THEN 'Gold'
+           WHEN EXISTS (SELECT 1 FROM Badges b WHERE b.UserId = pu.Id AND b.Class = 2) THEN 'Silver'
+           WHEN EXISTS (SELECT 1 FROM Badges b WHERE b.UserId = pu.Id AND b.Class = 3) THEN 'Bronze'
+           ELSE 'No Badge'
+       END AS BadgeStatus,
+       COUNT(DISTINCT ps.PostId) AS PostCount,
+       MAX(ps.LastPostDate) AS MostRecentPostDate
+FROM TopUsers pu
+LEFT JOIN PostStats ps ON pu.OwnerUserId = ps.OwnerUserId
+GROUP BY pu.DisplayName, pu.Reputation, pu.UserRank
+HAVING COUNT(DISTINCT ps.PostId) > 0
+ORDER BY UserRank;

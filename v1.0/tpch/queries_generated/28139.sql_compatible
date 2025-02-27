@@ -1,0 +1,73 @@
+
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        s.s_acctbal,
+        CONCAT(s.s_name, ' from ', s.s_address, ', ', n.n_name, ', ', r.r_name) AS full_info
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PartInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        CONCAT(p.p_name, ' (', p.p_mfgr, ')') AS part_full_name
+    FROM 
+        part p
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_name AS customer_name,
+        CONCAT(c.c_name, ' on ', o.o_orderdate) AS order_info
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_returnflag,
+        pi.part_full_name,
+        sd.full_info AS supplier_info
+    FROM 
+        lineitem l
+    JOIN 
+        PartInfo pi ON l.l_partkey = pi.p_partkey
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        SupplierDetails sd ON ps.ps_suppkey = sd.s_suppkey
+)
+SELECT 
+    oi.order_info,
+    l.supplier_info,
+    COUNT(l.l_partkey) AS total_parts,
+    SUM(l.l_extendedprice) AS total_revenue,
+    AVG(l.l_discount) AS avg_discount,
+    STRING_AGG(DISTINCT l.part_full_name, ', ') AS unique_parts
+FROM 
+    OrderDetails oi
+JOIN 
+    LineItemDetails l ON oi.o_orderkey = l.l_orderkey
+GROUP BY 
+    oi.order_info, l.supplier_info
+ORDER BY 
+    total_revenue DESC;

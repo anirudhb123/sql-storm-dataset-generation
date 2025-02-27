@@ -1,0 +1,30 @@
+-- Performance benchmarking SQL query for StackOverflow schema 
+-- Retrieve top 10 users by reputation along with their post counts and average score of their posts
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore
+    FROM
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.PostCount,
+    ups.AverageScore,
+    u.Reputation
+FROM 
+    UserPostStats ups
+JOIN 
+    Users u ON ups.UserId = u.Id
+ORDER BY 
+    u.Reputation DESC
+LIMIT 10;

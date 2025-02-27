@@ -1,0 +1,75 @@
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderCount AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+NationSummary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(s.s_acctbal) AS total_account_balance
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+PartPrice AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_size > 20 THEN p.p_retailprice * 0.9
+            ELSE p.p_retailprice
+        END AS adjusted_price
+    FROM 
+        part p
+)
+SELECT 
+    ns.n_name,
+    ss.s_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(ps.ps_supplycost) AS total_cost,
+    MAX(pp.adjusted_price) AS max_part_price,
+    COALESCE(coc.order_count, 0) AS customer_order_count
+FROM 
+    NationSummary ns
+LEFT JOIN 
+    SupplierSummary ss ON ns.n_nationkey = ss.s_suppkey
+LEFT JOIN 
+    supplier s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    CustomerOrderCount coc ON coc.c_custkey = s.s_suppkey
+LEFT JOIN 
+    PartPrice pp ON pp.p_partkey = ps.ps_partkey
+WHERE 
+    ns.total_account_balance > 1000
+    AND ss.total_parts > 5
+GROUP BY 
+    ns.n_name, ss.s_name
+ORDER BY 
+    total_cost DESC, max_part_price ASC
+LIMIT 10;

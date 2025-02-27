@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS movie_budget, min(mi_idx.info) AS movie_votes, min(t.title) AS movie_title
+FROM cast_info AS ci, info_type AS it1, info_type AS it2, movie_info AS mi, movie_info_idx AS mi_idx, name AS n, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND t.id = ci.movie_id AND ci.movie_id = mi.movie_id AND ci.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id AND n.id = ci.person_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id
+AND mi.note IN ('(Hargreaves watches Tug Wilson visit Susie Farmer in Wilton Avenue)', '(Indianapolis, Indiana)', '(Kortrijk)', '(Mark and Jeremy have a drink with Sarah)', '(Neuchatel Museum of Ethnography)', '(PCA #16612)', '(hotel where Tony Grey gives a computer course)', '(one of the bombing runs)', 'CongoBongo', 'Kenny Austin');

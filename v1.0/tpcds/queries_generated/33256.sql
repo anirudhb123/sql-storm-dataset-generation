@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        total_quantity + ss_quantity,
+        total_sales + ss_ext_sales_price
+    FROM 
+        SalesCTE
+    JOIN 
+        store_sales ON SalesCTE.ws_item_sk = store_sales.ss_item_sk
+    WHERE 
+        store_sales.ss_sold_date_sk = SalesCTE.ws_sold_date_sk + 1
+)
+SELECT 
+    d.d_date AS sale_date,
+    item.i_item_id,
+    item.i_item_desc,
+    SUM(COALESCE(SalesCTE.total_quantity, 0)) AS total_quantity_sold,
+    SUM(COALESCE(SalesCTE.total_sales, 0)) AS total_sales_amount,
+    COUNT(DISTINCT web_page.wp_web_page_id) AS web_page_count,
+    COUNT(DISTINCT store.s_store_id) AS store_count
+FROM 
+    date_dim d
+LEFT JOIN 
+    SalesCTE ON d.d_date_sk = SalesCTE.ws_sold_date_sk
+LEFT JOIN 
+    item ON SalesCTE.ws_item_sk = item.i_item_sk
+LEFT JOIN 
+    web_sales ON SalesCTE.ws_item_sk = web_sales.ws_item_sk AND d.d_date_sk = web_sales.ws_sold_date_sk
+LEFT JOIN 
+    web_page ON web_sales.ws_web_page_sk = web_page.wp_web_page_sk
+LEFT JOIN 
+    store ON web_sales.ws_store_sk = store.s_store_sk
+WHERE 
+    d.d_year = 2023 
+    AND (item.i_current_price IS NOT NULL OR item.i_current_price != 0)
+GROUP BY 
+    d.d_date, item.i_item_id, item.i_item_desc
+HAVING 
+    total_quantity_sold > 100
+ORDER BY 
+    total_sales_amount DESC
+LIMIT 50;

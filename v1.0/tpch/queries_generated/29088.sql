@@ -1,0 +1,50 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS ranking
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > 10000
+), 
+TopSuppliers AS (
+    SELECT 
+        r.r_name,
+        COUNT(rs.s_suppkey) AS supplier_count,
+        SUM(rs.s_acctbal) AS total_acctbal
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        RankedSuppliers rs ON n.n_nationkey = rs.s_suppkey
+    WHERE 
+        rs.ranking <= 3
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    r.r_name AS RegionName,
+    COUNT(DISTINCT ps.ps_partkey) AS PartCount,
+    SUM(ps.ps_supplycost) AS TotalSupplyCost,
+    MAX(ps.ps_comment) AS LongestComment
+FROM 
+    partsupp ps
+JOIN 
+    TopSuppliers ts ON ps.ps_suppkey = ts.s_suppkey
+JOIN 
+    supplier s ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    ps.ps_availqty > 50
+GROUP BY 
+    r.r_name
+ORDER BY 
+    TotalSupplyCost DESC, RegionName;

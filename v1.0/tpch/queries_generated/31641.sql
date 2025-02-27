@@ -1,0 +1,38 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_orderdate, o.o_totalprice, o.o_shippriority,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate) AS rn
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+    UNION ALL
+    SELECT oh.o_orderkey, o.o_orderstatus, o.o_orderdate, o.o_totalprice, o.o_shippriority,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate) AS rn
+    FROM OrderHierarchy oh
+    JOIN orders o ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderdate > (SELECT MAX(o_orderdate) FROM orders WHERE o_orderkey = oh.o_orderkey) -- ensure the order date is later
+),
+RegionSummary AS (
+    SELECT r.r_name, SUM(o.o_totalprice) AS total_revenue,
+           COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+    GROUP BY r.r_name
+),
+AverageShipPriority AS (
+    SELECT o.o_shippriority, AVG(o.o_totalprice) AS average_order_value
+    FROM orders o
+    GROUP BY o.o_shippriority
+)
+SELECT rh.o_orderkey, rh.o_orderstatus, rh.o_orderdate, rh.o_totalprice, rh.o_shippriority,
+       COALESCE(rs.total_revenue, 0) AS region_revenue,
+       COALESCE(asp.average_order_value, 0) AS avg_price_by_priority
+FROM OrderHierarchy rh
+LEFT JOIN RegionSummary rs ON rs.r_name = (SELECT r_name FROM region WHERE r_regionkey = (SELECT n_regionkey FROM nation WHERE n_nationkey = (SELECT c_nationkey FROM customer WHERE c_custkey = rh.o_custkey)))
+LEFT JOIN AverageShipPriority asp ON asp.o_shippriority = rh.o_shippriority
+WHERE rh.o_totalprice > (SELECT AVG(o_totalprice) FROM orders) -- only high-value orders
+ORDER BY rh.o_orderdate DESC, rh.o_orderkey;

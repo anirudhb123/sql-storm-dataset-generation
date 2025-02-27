@@ -1,0 +1,86 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Only Questions
+
+    UNION ALL
+
+    SELECT 
+        A.Id,
+        A.Title,
+        A.CreationDate,
+        A.Score,
+        A.ViewCount,
+        A.OwnerUserId,
+        R.Level + 1
+    FROM 
+        Posts A
+    JOIN 
+        RecursivePostCTE R ON A.ParentId = R.Id
+    WHERE 
+        A.PostTypeId = 2 -- Only Answers
+),
+UserVotes AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostMetrics AS (
+    SELECT 
+        R.Title,
+        R.CreationDate,
+        R.Score,
+        R.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        U.TotalVotes,
+        U.UpVotes,
+        U.DownVotes,
+        R.Level
+    FROM 
+        RecursivePostCTE R
+    JOIN 
+        Users U ON R.OwnerUserId = U.Id
+    ORDER BY 
+        R.CreationDate DESC
+)
+SELECT 
+    PM.Title,
+    PM.CreationDate,
+    PM.Score,
+    PM.ViewCount,
+    PM.OwnerDisplayName,
+    PM.TotalVotes,
+    PM.UpVotes,
+    PM.DownVotes,
+    PM.Level,
+    (PM.Score + COALESCE(PM.UpVotes, 0) - COALESCE(PM.DownVotes, 0)) AS EngagementScore
+FROM 
+    PostMetrics PM
+WHERE 
+    PM.Score > 10
+    AND PM.Level <= 2
+    AND PM.CreationDate >= '2022-01-01' -- Only recent posts
+ORDER BY 
+    EngagementScore DESC
+LIMIT 50;
+
+-- This query will benchmark performance against selected posts scored above 10 
+-- and those with a direct maximum response level of 2 from their parent questions.

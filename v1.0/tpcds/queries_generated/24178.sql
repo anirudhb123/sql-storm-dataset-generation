@@ -1,0 +1,80 @@
+
+WITH RECURSIVE demographic_stats AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS gender_rank
+    FROM customer_demographics
+    WHERE cd_purchase_estimate IS NOT NULL
+),
+address_count AS (
+    SELECT 
+        ca_city,
+        COUNT(DISTINCT ca_address_sk) AS address_count
+    FROM customer_address
+    GROUP BY ca_city
+),
+sales_calculation AS (
+    SELECT 
+        ws_sold_date_sk,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_quantity) AS total_quantity,
+        DENSE_RANK() OVER (ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_sold_date_sk
+),
+item_sales AS (
+    SELECT 
+        i_item_sk, 
+        SUM(ws_ext_sales_price) AS total_item_sales,
+        COUNT(ws_order_number) AS sales_count
+    FROM web_sales
+    JOIN item ON ws_item_sk = i_item_sk
+    GROUP BY i_item_sk
+),
+city_sales AS (
+    SELECT 
+        ca_city,
+        SUM(total_sales) AS city_total_sales,
+        AVG(total_quantity) AS avg_quantity_per_order
+    FROM address_count
+    LEFT JOIN sales_calculation ON sales_calculation.ws_sold_date_sk = CURRENT_DATE
+    GROUP BY ca_city
+),
+final_output AS (
+    SELECT 
+        ds.cd_gender,
+        ds.cd_marital_status,
+        ds.cd_education_status,
+        ds.cd_purchase_estimate,
+        ac.address_count,
+        cs.city_total_sales,
+        cs.avg_quantity_per_order
+    FROM demographic_stats ds
+    LEFT JOIN address_count ac ON ds.cd_demo_sk = ac.address_count
+    LEFT JOIN city_sales cs ON ac.ca_city = cs.ca_city
+)
+
+SELECT 
+    fo.cd_gender,
+    fo.cd_marital_status,
+    fo.cd_education_status,
+    fo.cd_purchase_estimate,
+    fo.address_count,
+    fo.city_total_sales,
+    fo.avg_quantity_per_order,
+    CASE 
+        WHEN fo.city_total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END AS sales_status,
+    COALESCE(NULLIF(fo.cd_purchase_estimate, 0), (SELECT MAX(cd_purchase_estimate) FROM customer_demographics)) AS adjusted_purchase_estimate
+FROM final_output fo
+WHERE fo.cd_gender = 'F'
+AND fo.cd_marital_status = 'M'
+ORDER BY fo.cd_purchase_estimate DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

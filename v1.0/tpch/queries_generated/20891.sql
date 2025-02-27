@@ -1,0 +1,56 @@
+WITH RecursiveSupplier AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 0 AS level 
+    FROM supplier 
+    WHERE s_acctbal > 1000 
+
+    UNION ALL 
+
+    SELECT ps.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey, rs.level + 1 
+    FROM partsupp ps 
+    JOIN RecursiveSupplier rs ON ps.ps_suppkey = rs.s_suppkey 
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey 
+    WHERE rs.level < 5 AND s.s_acctbal IS NOT NULL
+), 
+TopProducts AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue 
+    FROM part p 
+    JOIN lineitem l ON l.l_partkey = p.p_partkey 
+    GROUP BY p.p_partkey, p.p_name 
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000 
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal 
+    FROM customer c 
+    WHERE c.c_acctbal > (
+        SELECT AVG(c2.c_acctbal) 
+        FROM customer c2 
+        WHERE c2.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = 2)
+    )
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderstatus, o.o_orderpriority 
+    FROM orders o 
+    WHERE o.o_totalprice > 500 
+    AND o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+),
+RankedSuppliers AS (
+    SELECT rs.s_suppkey, rs.s_name, rs.s_acctbal, DENSE_RANK() OVER (ORDER BY rs.s_acctbal DESC) AS rnk 
+    FROM RecursiveSupplier rs 
+    WHERE rs.level = 0
+),
+AggregatedLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice) AS total_line_value 
+    FROM lineitem l 
+    GROUP BY l.l_orderkey 
+)
+SELECT DISTINCT c.c_name, p.p_name, o.o_orderkey, ol.total_line_value 
+FROM HighValueCustomers c 
+JOIN FilteredOrders o ON c.c_custkey = o.o_custkey 
+LEFT JOIN AggregatedLineItems ol ON o.o_orderkey = ol.l_orderkey 
+JOIN TopProducts p ON ol.total_line_value = p.total_revenue 
+JOIN RankedSuppliers rs ON rs.s_acctbal BETWEEN 1000 AND 5000 
+WHERE c.c_custkey IS NOT NULL 
+AND o.o_orderstatus NOT IN ('F', 'O') 
+ORDER BY c.c_name, p.p_name, o.o_orderkey 
+OFFSET 10 ROWS 
+FETCH NEXT 15 ROWS ONLY;

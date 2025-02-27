@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(A.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY P.Tags ORDER BY P.CreationDate DESC) AS TagRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Posts A ON P.Id = A.ParentId
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 -- Only consider Questions
+    GROUP BY 
+        P.Id, U.DisplayName, P.Title, P.Body, P.CreationDate
+),
+TagStatistics AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(SUBSTRING(P.Tags FROM 2 FOR LENGTH(P.Tags)-2), '><'))) ) AS Tag,
+        COUNT(*) AS PostCount,
+        AVG(EXTRACT(epoch FROM (CURRENT_TIMESTAMP - P.CreationDate)) / 3600) AS AvgHoursSinceCreation
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        TRIM(UNNEST(string_to_array(SUBSTRING(P.Tags FROM 2 FOR LENGTH(P.Tags)-2), '><')))
+),
+FinalResults AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.OwnerDisplayName,
+        RP.CommentCount,
+        RP.AnswerCount,
+        TS.Tag, 
+        TS.PostCount,
+        TS.AvgHoursSinceCreation
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        TagStatistics TS ON TS.Tag = ANY(string_to_array(SUBSTRING(RP.Body from 2 for LENGTH(RP.Body)-2), '><'))
+    WHERE 
+        RP.TagRank = 1 -- Select the latest post for each unique tag
+)
+SELECT 
+    FR.PostId,
+    FR.Title,
+    FR.OwnerDisplayName,
+    FR.CommentCount,
+    FR.AnswerCount,
+    FR.Tag,
+    FR.PostCount,
+    FR.AvgHoursSinceCreation
+FROM 
+    FinalResults FR
+ORDER BY 
+    FR.PostCount DESC, 
+    FR.CommentCount DESC;
+
+This SQL query performs comprehensive string processing by breaking down tags from posts and combining data about posts, comments, and statistics derived from the tags associated with the posts. It ranks them based on when they were created to provide insights into how discussions evolve regarding particular tags in the Stack Overflow environment.

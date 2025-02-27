@@ -1,0 +1,55 @@
+WITH RECURSIVE region_supplier AS (
+    SELECT s.s_suppkey, s.s_name, r.r_name, s.s_acctbal
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE s.s_acctbal IS NOT NULL
+  
+    UNION ALL
+  
+    SELECT s.s_suppkey, s.s_name, r.r_name, s.s_acctbal + 1000
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN region_supplier rs ON s.s_suppkey = rs.s_suppkey
+    WHERE rs.s_acctbal < 50000
+),
+
+part_supplier AS (
+    SELECT ps.ps_partkey, p.p_name, p.p_retailprice, p.p_comment, 
+           ps.ps_availqty, ps.ps_supplycost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice)
+        FROM part p2
+    )
+),
+
+order_summary AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY o.o_orderkey) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS item_count,
+           COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS return_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate < '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_totalprice
+)
+
+SELECT rs.r_name,
+       COUNT(DISTINCT ps.ps_partkey) AS part_count,
+       SUM(ps.ps_availqty) AS total_avail_qty,
+       AVG(CASE WHEN os.item_count > 5 THEN os.total_revenue ELSE NULL END) AS avg_high_revenue,
+       MIN(NULLIF(s.s_acctbal, 0)) AS min_non_zero_acctbal
+FROM region_supplier rs
+LEFT JOIN part_supplier ps ON rs.s_suppkey = ps.ps_partkey
+LEFT JOIN order_summary os ON ps.ps_partkey = os.o_orderkey
+GROUP BY rs.r_name
+HAVING COUNT(DISTINCT ps.ps_partkey) > 0
+   AND SUM(ps.ps_availqty) > (
+       SELECT AVG(ps2.ps_availqty)
+       FROM part_supplier ps2
+   )
+ORDER BY r_name
+LIMIT 10 OFFSET 5;

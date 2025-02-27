@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2400 AND 2450
+    GROUP BY ws_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returns,
+        COUNT(DISTINCT wr_order_number) AS unique_return_orders
+    FROM web_returns
+    WHERE wr_returned_date_sk IS NOT NULL
+    GROUP BY wr_item_sk
+),
+ItemDetails AS (
+    SELECT 
+        i_item_sk,
+        i_item_desc,
+        i_brand,
+        i_current_price,
+        COALESCE(NULLIF(i_color, ''), 'Unknown') AS item_color,
+        CASE 
+            WHEN i_current_price > 50 THEN 'High-End'
+            WHEN i_current_price BETWEEN 20 AND 50 THEN 'Mid-Range'
+            ELSE 'Budget'
+        END AS price_segment
+    FROM item
+)
+SELECT 
+    d.d_date AS sales_date,
+    COALESCE(cd.cd_gender, 'Unknown') AS customer_gender,
+    id.i_item_desc,
+    id.item_color,
+    id.price_segment,
+    COALESCE(rs.total_orders, 0) AS total_orders,
+    COALESCE(rs.total_sales, 0) AS total_sales,
+    COALESCE(cr.total_returns, 0) AS total_returns,
+    COALESCE(cr.unique_return_orders, 0) AS unique_return_orders,
+    CASE 
+        WHEN COALESCE(rs.total_sales, 0) > 0 THEN (COALESCE(cr.total_returns, 0) * 100.0 / COALESCE(rs.total_sales, 1))
+        ELSE 0.0 
+    END AS return_rate
+FROM date_dim d
+LEFT JOIN RankedSales rs ON d.d_date_sk = rs.ws_item_sk
+LEFT JOIN CustomerReturns cr ON rs.ws_item_sk = cr.wr_item_sk
+JOIN ItemDetails id ON rs.ws_item_sk = id.i_item_sk
+LEFT JOIN customer_demographics cd ON cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_customer_sk = rs.ws_bill_customer_sk)
+WHERE d.d_week_seq = (SELECT MAX(d_week_seq) FROM date_dim WHERE d_year = 2023)
+  AND (id.price_segment = 'High-End' OR id.price_segment = 'Mid-Range')
+ORDER BY return_rate DESC, total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

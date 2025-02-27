@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+SELECT 
+    p.name AS actor_name,
+    mt.title AS movie_title,
+    COALESCE(CAST(mv.production_year AS TEXT), 'Unknown') AS production_year,
+    mh.level AS hierarchy_level,
+    COUNT(c.id) OVER (PARTITION BY mt.id) AS total_cast_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COALESCE(COUNT(mci.id) FILTER (WHERE mci.note IS NOT NULL), 0) AS note_count
+FROM 
+    cast_info c
+JOIN 
+    aka_name p ON c.person_id = p.person_id
+JOIN 
+    aka_title mt ON c.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON mt.id = mi.movie_id
+LEFT JOIN 
+    movie_info_idx mci ON mt.id = mci.movie_id AND mci.info_type_id IN (SELECT id FROM info_type WHERE info = 'rating')
+LEFT JOIN 
+    MovieHierarchy mh ON mt.id = mh.movie_id
+WHERE 
+    mt.production_year IS NOT NULL OR mt.production_year IS NULL
+GROUP BY 
+    actor_name, movie_title, mv.production_year, mh.level
+ORDER BY 
+    actor_name, production_year DESC, hierarchy_level;

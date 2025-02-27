@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(b.Class) AS BadgePoints,
+        SUM(v.BountyAmount) AS BountyPoints,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LatestEditDate,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS EditTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year' -- Edits made in the last year
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.Score,
+    u.DisplayName AS OwnerName,
+    u.Reputation AS OwnerReputation,
+    up.BadgePoints,
+    up.BountyPoints,
+    rph.EditCount,
+    rph.EditTypes,
+    CASE 
+        WHEN rph.LatestEditDate IS NOT NULL 
+        THEN 'Edited' 
+        ELSE 'Not Edited' 
+    END AS EditStatus
+FROM 
+    RankedPosts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserReputation up ON u.Id = up.UserId
+LEFT JOIN 
+    RecentPostHistory rph ON p.Id = rph.PostId
+WHERE 
+    p.Score > 0
+    AND u.Reputation > 100
+ORDER BY 
+    p.Score DESC, p.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        at.production_year,
+        mh.level + 1 AS level
+    FROM movie_link ml
+    JOIN aka_title at ON ml.movie_id = at.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+cast_performance AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS cast_count,
+        AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_order
+    FROM cast_info ci
+    GROUP BY ci.movie_id
+),
+genre_performance AS (
+    SELECT 
+        mt.id AS movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS genre_count
+    FROM aka_title mt
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY mt.id
+),
+production_company AS (
+    SELECT 
+        mc.movie_id,
+        ARRAY_AGG(DISTINCT cn.name ORDER BY cn.name DESC) AS companies
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY mc.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    COALESCE(cp.cast_count, 0) AS total_cast,
+    COALESCE(cp.avg_order, 0.0) AS average_order,
+    COALESCE(gp.genre_count, 0) AS genre_associations,
+    COALESCE(pc.companies, '{}') AS production_companies,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC, mh.movie_title ASC) AS ranking
+FROM movie_hierarchy mh
+LEFT JOIN cast_performance cp ON mh.movie_id = cp.movie_id
+LEFT JOIN genre_performance gp ON mh.movie_id = gp.movie_id
+LEFT JOIN production_company pc ON mh.movie_id = pc.movie_id
+WHERE mh.level <= (SELECT MAX(level) FROM movie_hierarchy)
+ORDER BY mh.production_year DESC, mh.movie_title ASC
+LIMIT 100;

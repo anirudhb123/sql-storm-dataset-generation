@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomersWithLargeOrders AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(DISTINCT o.o_orderkey) AS order_count, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+),
+PartPriceDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        CASE 
+            WHEN p.p_retailprice > 100 THEN 'Expensive'
+            WHEN p.p_retailprice BETWEEN 50 AND 100 THEN 'Moderately Priced'
+            ELSE 'Cheap'
+        END AS price_category
+    FROM 
+        part p
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name, 
+    ps.ps_suppkey,
+    s.s_name,
+    ps.ps_availqty,
+    ps.ps_supplycost,
+    rp.total_supply_cost,
+    c.total_spent,
+    p.price_category,
+    CASE 
+        WHEN (c.order_count > 1 AND rp.rn = 1) THEN 'High-Demand Supplier'
+        ELSE 'Regular Supplier'
+    END AS supplier_type
+FROM 
+    partsupp ps
+JOIN 
+    RankedSuppliers rp ON ps.ps_suppkey = rp.s_suppkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    PartPriceDetails p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    CustomersWithLargeOrders c ON s.s_nationkey = c.c_nationkey
+WHERE 
+    (PS_AvailQty * ps_supplycost) / NULLIF(ps.ps_supplycost, 0) > 0
+ORDER BY 
+    total_spent DESC NULLS LAST, 
+    total_supply_cost ASC;

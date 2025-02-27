@@ -1,0 +1,55 @@
+
+WITH RECURSIVE ProductSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+), 
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        CASE 
+            WHEN o.o_orderdate >= DATEADD(DAY, -30, '1998-10-01') THEN 'Recent'
+            ELSE 'Old'
+        END AS order_age
+    FROM 
+        orders o
+), 
+TotalSupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    ps.p_partkey,
+    ps.p_name,
+    COALESCE(r.total_sales, 0) AS total_sales,
+    t.total_supply_cost,
+    o.o_totalprice,
+    o.order_age
+FROM 
+    part ps
+LEFT JOIN 
+    ProductSales r ON ps.p_partkey = r.p_partkey AND r.sales_rank = 1
+LEFT JOIN 
+    TotalSupplierCost t ON ps.p_partkey = t.ps_partkey
+LEFT JOIN 
+    RecentOrders o ON o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = ps.p_partkey)
+WHERE 
+    (t.total_supply_cost IS NOT NULL OR COALESCE(r.total_sales, 0) > 1000)
+ORDER BY 
+    total_sales DESC, total_supply_cost ASC
+LIMIT 50;

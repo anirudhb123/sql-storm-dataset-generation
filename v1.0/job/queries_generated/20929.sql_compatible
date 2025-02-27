@@ -1,0 +1,77 @@
+
+WITH RecursiveCasts AS (
+    SELECT 
+        ci.id AS cast_id,
+        ci.person_id,
+        ci.movie_id,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        m.name AS company_name,
+        STRING_AGG(DISTINCT CONCAT(a.name, ' as ', rt.role), ', ') AS cast_summary
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.movie_id
+    LEFT JOIN 
+        company_name m ON m.id = mc.company_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.movie_id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    LEFT JOIN 
+        RecursiveCasts rc ON rc.movie_id = t.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.movie_id
+    LEFT JOIN 
+        role_type rt ON rt.id = ci.role_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year, m.name
+),
+TitleAndRoleCounts AS (
+    SELECT 
+        title, 
+        production_year, 
+        COUNT(*) AS role_count, 
+        ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC) AS rank
+    FROM 
+        MovieDetails
+    GROUP BY 
+        title, production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.keywords,
+    md.company_name,
+    md.cast_summary,
+    trc.role_count,
+    CASE 
+        WHEN trc.role_count > 5 THEN 'High Role Count'
+        ELSE 'Normal Role Count' 
+    END AS role_count_category,
+    COALESCE(NULLIF(md.company_name, ''), 'Unknown Company') AS final_company_name
+FROM 
+    MovieDetails md
+JOIN 
+    TitleAndRoleCounts trc ON md.title = trc.title AND md.production_year = trc.production_year
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = (SELECT movie_id FROM aka_title WHERE title = md.title LIMIT 1) 
+        AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Awards')
+    )
+ORDER BY 
+    md.production_year DESC,
+    trc.role_count DESC
+LIMIT 10;

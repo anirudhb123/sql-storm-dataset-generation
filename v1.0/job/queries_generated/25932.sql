@@ -1,0 +1,57 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year, 
+        array_agg(DISTINCT k.keyword) AS keywords,
+        array_agg(DISTINCT c.kind) AS company_types,
+        COUNT(DISTINCT cc.person_id) AS cast_count
+    FROM title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN company_type c ON mc.company_type_id = c.id
+    LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+    GROUP BY t.id
+),
+person_details AS (
+    SELECT 
+        a.id AS person_id, 
+        a.name AS actor_name, 
+        a.imdb_index, 
+        COUNT(DISTINCT ci.movie_id) AS movie_count, 
+        STRING_AGG(DISTINCT r.role ORDER BY r.role) AS roles
+    FROM aka_name a
+    LEFT JOIN cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN role_type r ON ci.role_id = r.id
+    GROUP BY a.id
+),
+benchmark_results AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.keywords,
+        md.company_types,
+        md.cast_count,
+        pd.actor_name,
+        pd.movie_count,
+        pd.roles
+    FROM movie_details md
+    JOIN cast_info ci ON md.movie_id = ci.movie_id
+    JOIN person_details pd ON ci.person_id = pd.person_id
+)
+SELECT 
+    movie_id, 
+    title, 
+    production_year, 
+    keywords, 
+    company_types, 
+    cast_count,
+    actor_name, 
+    movie_count, 
+    roles
+FROM benchmark_results
+WHERE production_year >= 2000
+ORDER BY production_year DESC, cast_count DESC
+LIMIT 50;

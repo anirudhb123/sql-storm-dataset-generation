@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY U.Reputation ORDER BY P.Score DESC) AS RankScore,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 WHEN V.VoteTypeId = 3 THEN -1 ELSE 0 END) AS VoteScore
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, U.DisplayName, U.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS ClosedDate,
+        CT.Name AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CT ON CAST(PH.Comment AS INTEGER) = CT.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+),
+TopPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.OwnerDisplayName,
+        RP.RankScore,
+        COALESCE(CP.ClosedDate, 'No Close') AS ClosedDate,
+        COALESCE(CP.CloseReason, 'N/A') AS CloseReason,
+        RP.CommentCount,
+        RP.VoteScore
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        ClosedPosts CP ON RP.PostId = CP.PostId
+    WHERE 
+        RP.RankScore <= 5
+)
+SELECT 
+    TP.PostId,
+    TP.Title,
+    TP.OwnerDisplayName,
+    TP.ClosedDate,
+    TP.CloseReason,
+    (TP.RankScore * 0.5 + COALESCE(TP.CommentCount, 0) * 0.3 + TP.VoteScore * 0.2) AS FinalScore
+FROM 
+    TopPosts TP
+ORDER BY 
+    FinalScore DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Summary' AS PostId,
+    'Total Posts Processed' AS Title,
+    COUNT(*) AS OwnerDisplayName,
+    NULL AS ClosedDate,
+    NULL AS CloseReason,
+    NULL AS FinalScore
+FROM 
+    Posts
+WHERE 
+    CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year';

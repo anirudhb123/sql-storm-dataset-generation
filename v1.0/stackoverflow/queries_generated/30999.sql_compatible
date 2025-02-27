@@ -1,0 +1,79 @@
+
+WITH RECURSIVE CommentHierarchy AS (
+    SELECT 
+        c.Id,
+        c.PostId,
+        c.Score,
+        c.Text,
+        c.CreationDate,
+        c.UserDisplayName,
+        c.UserId,
+        0 AS Level
+    FROM 
+        Comments c
+    WHERE 
+        c.PostId = (SELECT MIN(Id) FROM Posts WHERE PostTypeId = 1) 
+    
+    UNION ALL
+
+    SELECT 
+        c.Id,
+        c.PostId,
+        c.Score,
+        c.Text,
+        c.CreationDate,
+        c.UserDisplayName,
+        c.UserId,
+        ch.Level + 1 AS Level
+    FROM 
+        Comments c
+    INNER JOIN 
+        CommentHierarchy ch ON c.PostId = ch.PostId AND c.CreationDate > ch.CreationDate 
+),
+
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+
+SELECT 
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    p.ViewCount,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation,
+    COALESCE(ub.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(ub.HighestBadgeClass, 0) AS HighestBadgeClass,
+    COUNT(c.Id) AS CommentCount,
+    MAX(ch.Level) AS MaxCommentLevel,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    CommentHierarchy ch ON ch.PostId = p.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::text[])
+WHERE 
+    p.PostTypeId = 1 
+GROUP BY 
+    p.Title, p.CreationDate, p.ViewCount, u.DisplayName, u.Reputation, ub.BadgeCount, ub.HighestBadgeClass
+HAVING 
+    COUNT(DISTINCT c.Id) > 5 
+ORDER BY 
+    p.CreationDate DESC;

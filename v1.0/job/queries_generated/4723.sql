@@ -1,0 +1,69 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        c.movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(a1.id, 0) AS co_actor_id,
+        COALESCE(a1.name, 'No co-actors') AS co_actor_name
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        title t ON c.movie_id = t.id
+    LEFT JOIN 
+        cast_info c1 ON c.movie_id = c1.movie_id AND c.person_id <> c1.person_id
+    LEFT JOIN 
+        aka_name a1 ON c1.person_id = a1.person_id
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    t.title,
+    t.production_year,
+    a.actor_name,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY a.actor_name) AS actor_rank,
+    COALESCE(SUM(CASE WHEN bc.note IS NOT NULL THEN 1 ELSE 0 END), 0) AS note_count
+FROM 
+    RankedTitles t
+JOIN 
+    ActorMovies a ON t.title_id = a.movie_id
+LEFT JOIN 
+    movie_info mi ON a.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_info_idx mii ON mi.movie_id = mii.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON a.movie_id = mk.movie_id
+LEFT JOIN 
+    (SELECT movie_id, COUNT(note) AS note FROM complete_cast GROUP BY movie_id) AS bc ON a.movie_id = bc.movie_id
+WHERE 
+    t.rank <= 3
+GROUP BY 
+    t.title, t.production_year, a.actor_name, mk.keywords
+ORDER BY 
+    t.production_year DESC, actor_rank;

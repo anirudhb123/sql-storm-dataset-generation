@@ -1,0 +1,49 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- Base case: Start from the first movie
+    SELECT m.id AS movie_id, m.title, m.production_year, 1 AS level 
+    FROM aka_title m
+    WHERE m.kind_id = 1 -- let's consider only movies
+
+    UNION ALL
+
+    -- Recursive case: Get related movies
+    SELECT ml.linked_movie_id, m.title, m.production_year, mh.level + 1
+    FROM movie_link ml
+    JOIN title m ON ml.linked_movie_id = m.id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    a.id AS aka_id,
+    a.name AS actor_name,
+    t.title AS movie_title,
+    mh.level AS movie_level,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    STRING_AGG(DISTINCT mki.keyword, ', ') AS keywords,
+    (SELECT AVG(r.person_role_id) 
+     FROM cast_info r 
+     WHERE r.movie_id = t.id) AS avg_role_id,
+    CASE WHEN COUNT(DISTINCT mi.info) IS NOT NULL THEN 'Has Info' ELSE 'No Info' END AS info_status
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    MovieHierarchy mh ON t.id = mh.movie_id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword mki ON mk.keyword_id = mki.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+WHERE 
+    a.name IS NOT NULL AND (mh.level <= 2)
+GROUP BY 
+    a.id, a.name, t.title, mh.level
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY 
+    a.id, mh.level DESC;

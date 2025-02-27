@@ -1,0 +1,48 @@
+
+WITH movie_data AS (
+    SELECT 
+        t.title AS movie_title,
+        ak.name AS actor_name,
+        p.gender AS actor_gender,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+        c.kind AS cast_kind,
+        m.production_year
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        name p ON ak.person_id = p.imdb_id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    JOIN 
+        comp_cast_type c ON ci.person_role_id = c.id
+    JOIN 
+        movie m ON t.id = m.id  -- Added missing join to movie table
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        t.title, ak.name, p.gender, c.kind, m.production_year
+)
+SELECT 
+    md.movie_title,
+    md.actor_name,
+    md.actor_gender,
+    md.keywords,
+    md.cast_kind,
+    md.production_year,
+    COUNT(*) OVER (PARTITION BY md.production_year) AS total_movies_per_year
+FROM 
+    movie_data md
+ORDER BY 
+    md.production_year DESC, md.movie_title;

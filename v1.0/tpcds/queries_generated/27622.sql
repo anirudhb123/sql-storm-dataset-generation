@@ -1,0 +1,64 @@
+
+WITH CombinedCustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        CONCAT(cd.cd_dependency_count, ' dependents') AS dependency_info,
+        SUBSTRING(c.c_email_address, CHARINDEX('@', c.c_email_address) + 1, LEN(c.c_email_address)) AS email_domain
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesInfo AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.bill_customer_sk
+),
+FinalBenchmark AS (
+    SELECT 
+        c.customer_name,
+        c.ca_city,
+        c.ca_state,
+        c.cd_gender,
+        c.cd_marital_status,
+        s.total_sales,
+        s.total_orders,
+        CASE 
+            WHEN s.total_sales > 1000 THEN 'High Value'
+            WHEN s.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value' 
+        END AS customer_value_segment
+    FROM 
+        CombinedCustomerInfo c
+    LEFT JOIN 
+        SalesInfo s ON c.c_customer_id = s.bill_customer_sk
+)
+SELECT 
+    customer_name,
+    ca_city,
+    ca_state,
+    cd_gender,
+    cd_marital_status,
+    total_sales,
+    total_orders,
+    customer_value_segment
+FROM 
+    FinalBenchmark
+WHERE 
+    cd_gender = 'F' 
+    AND customer_value_segment = 'High Value'
+ORDER BY 
+    total_sales DESC;

@@ -1,0 +1,54 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    co.name AS company_name,
+    COUNT(DISTINCT mc.movie_id) AS total_movies,
+    SUM(CASE WHEN k.keyword IS NOT NULL THEN 1 ELSE 0 END) AS movies_with_keywords,
+    AVG(mh.level) AS avg_level_in_hierarchy
+FROM 
+    movie_companies mc
+INNER JOIN 
+    company_name co ON mc.company_id = co.id
+INNER JOIN 
+    movie_info mi ON mc.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mc.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_hierarchy mh ON mc.movie_id = mh.movie_id
+WHERE 
+    co.country_code IS NOT NULL
+    AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'genre') 
+    AND (mi.info IS NOT NULL OR mi.note IS NOT NULL) 
+GROUP BY 
+    co.name
+HAVING 
+    COUNT(DISTINCT mc.movie_id) > 50 
+ORDER BY 
+    total_movies DESC
+LIMIT 10;

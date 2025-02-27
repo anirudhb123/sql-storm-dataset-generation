@@ -1,0 +1,54 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        AVG(s.s_acctbal) AS avg_acct_balance
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(l.l_linenumber) AS total_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+), NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    ns.n_name AS nation_name,
+    ns.region_name,
+    COALESCE(SUM(ss.total_supply_cost), 0) AS total_supply_cost,
+    COALESCE(AVG(ss.avg_acct_balance), 0) AS avg_supplier_acct_balance,
+    MIN(od.total_price) AS min_order_value,
+    MAX(od.total_items) AS max_order_items,
+    COUNT(DISTINCT ss.s_suppkey) AS supplier_count
+FROM 
+    NationRegion ns
+LEFT JOIN 
+    SupplierStats ss ON ns.n_nationkey = ss.s_nationkey
+LEFT JOIN 
+    OrderDetails od ON ns.n_nationkey = od.o_orderkey
+GROUP BY 
+    ns.n_name, ns.region_name
+HAVING 
+    COALESCE(SUM(ss.total_supply_cost), 0) > 1000
+ORDER BY 
+    nation_name, region_name;

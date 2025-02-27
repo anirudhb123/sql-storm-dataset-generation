@@ -1,0 +1,48 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+),
+TagStats AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts
+    FROM Tags T
+    LEFT JOIN Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::int[]) 
+    GROUP BY T.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditedDate
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.PostCount,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.PositiveScorePosts,
+    T.TagId,
+    T.TagName,
+    T.PostCount AS TagPostCount,
+    T.PositiveScorePosts AS TagPositiveScorePosts,
+    PHS.EditCount,
+    PHS.LastEditedDate
+FROM UserStats U
+JOIN TagStats T ON T.PostCount > 0
+LEFT JOIN PostHistoryStats PHS ON PHS.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.UserId)
+ORDER BY U.Reputation DESC, U.PostCount DESC, T.PostCount DESC;

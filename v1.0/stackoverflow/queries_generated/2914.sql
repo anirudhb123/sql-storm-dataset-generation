@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND p.Score > 0
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        MAX(p.CreationDate) AS LastPostDate,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.PostCount,
+        us.TotalBadges,
+        ROW_NUMBER() OVER (ORDER BY us.Reputation DESC, us.PostCount DESC) AS UserRank
+    FROM 
+        UserStatistics us
+    WHERE 
+        us.Reputation > 1000
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.PostCount,
+    p.Title AS TopPostTitle,
+    p.ViewCount,
+    p.Score,
+    CASE 
+        WHEN tu.LastPostDate IS NULL THEN 'No Posts Yet' 
+        ELSE 'Active' 
+    END AS ActivityStatus,
+    COALESCE(badgeInfo.BadgeCount, 0) AS BadgeCount
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    RankedPosts p ON tu.UserId = p.OwnerUserId AND p.PostRank = 1
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+) badgeInfo ON tu.UserId = badgeInfo.UserId
+WHERE 
+    tu.UserRank <= 10
+ORDER BY 
+    tu.Reputation DESC, tu.PostCount DESC;

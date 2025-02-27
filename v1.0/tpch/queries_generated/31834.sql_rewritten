@@ -1,0 +1,41 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS depth
+    FROM nation
+    WHERE n_regionkey = (SELECT r_regionkey FROM region WHERE r_name = 'ASIA')
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.depth + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+supplier_details AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           (SELECT COUNT(*) FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey) AS total_parts,
+           COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_sales
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1996-01-01' AND o.o_orderdate <= '1996-12-31'
+),
+final_report AS (
+    SELECT nh.n_name, sd.s_name, sd.total_parts, sd.total_sales, os.o_totalprice
+    FROM nation_hierarchy nh
+    LEFT JOIN supplier_details sd ON nh.n_nationkey = sd.s_suppkey
+    LEFT JOIN order_summary os ON sd.total_sales > os.o_totalprice
+)
+SELECT r.n_name, 
+       COALESCE(r.total_parts, 0) AS parts_count, 
+       SUM(r.total_sales) AS total_revenue,
+       COUNT(DISTINCT r.o_totalprice) AS unique_order_count
+FROM final_report r
+GROUP BY r.n_name
+HAVING SUM(r.total_sales) > 1000000
+ORDER BY parts_count DESC, total_revenue DESC;

@@ -1,0 +1,59 @@
+
+WITH AddressData AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM customer_address
+),
+Demographics AS (
+    SELECT 
+        cd_demo_sk,
+        CASE 
+            WHEN cd_gender = 'F' THEN 'Female' 
+            ELSE 'Male' 
+        END AS gender_desc,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate
+    FROM customer_demographics
+),
+CustomerData AS (
+    SELECT 
+        c_customer_id,
+        c_first_name,
+        c_last_name,
+        c_birth_day,
+        c_birth_month,
+        c_birth_year,
+        cd_demo_sk,
+        ca_address_id
+    FROM customer
+    JOIN Demographics ON c_current_cdemo_sk = cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_net_paid_inc_tax) AS total_sales
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+)
+SELECT 
+    cd.c_customer_id,
+    CONCAT(cd.c_first_name, ' ', cd.c_last_name) AS full_name,
+    ad.full_address,
+    ad.ca_city,
+    ad.ca_state,
+    ad.ca_zip,
+    sd.total_sales,
+    CASE 
+        WHEN sd.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Active Customer'
+    END AS customer_status
+FROM CustomerData cd
+JOIN AddressData ad ON cd.ca_address_id = ad.ca_address_id
+LEFT JOIN SalesData sd ON cd.c_customer_sk = sd.customer_sk
+WHERE ad.ca_state = 'CA'
+ORDER BY sd.total_sales DESC NULLS LAST;

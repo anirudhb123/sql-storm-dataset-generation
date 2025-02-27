@@ -1,0 +1,87 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS HistoryCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount
+),
+
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+TopPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.ViewCount,
+        pd.UpVotes - pd.DownVotes AS NetVotes,
+        ROW_NUMBER() OVER (ORDER BY pd.ViewCount DESC) AS Rank
+    FROM 
+        PostDetails pd
+    WHERE 
+        pd.ViewCount > 0
+)
+
+SELECT 
+    tp.Title,
+    tp.ViewCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.NetVotes,
+    us.DisplayName AS TopUser,
+    us.BadgeCount,
+    us.AvgReputation
+FROM 
+    TopPosts tp
+CROSS JOIN 
+    (SELECT 
+         UserId, DisplayName, BadgeCount, AvgReputation 
+     FROM 
+         UserStatistics 
+     ORDER BY 
+         BadgeCount DESC 
+     LIMIT 1) us
+WHERE 
+    tp.Rank <= 10
+UNION ALL
+SELECT 
+    'Overall' AS Title,
+    SUM(ViewCount) AS TotalViews,
+    SUM(UpVotes) AS TotalUpVotes,
+    SUM(DownVotes) AS TotalDownVotes,
+    SUM(UpVotes) - SUM(DownVotes) AS NetVotes,
+    NULL AS TopUser,
+    NULL AS BadgeCount,
+    NULL AS AvgReputation
+FROM 
+    PostDetails
+ORDER BY 
+    NetVotes DESC NULLS LAST;

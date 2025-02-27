@@ -1,0 +1,59 @@
+
+WITH sales_summary AS (
+    SELECT
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_quantity) AS total_quantity
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk BETWEEN 10000 AND 10050 -- Example date range
+),
+customer_info AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+ranked_customers AS (
+    SELECT
+        ci.c_customer_id,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        ci.ca_city,
+        ci.ca_state,
+        ci.ca_country,
+        ss.total_sales,
+        ss.total_orders,
+        ss.total_quantity,
+        RANK() OVER (PARTITION BY ci.cd_gender ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM
+        customer_info ci
+    JOIN
+        sales_summary ss ON ci.c_customer_id = ss.c_customer_id
+)
+SELECT
+    rc.cd_gender,
+    rc.ca_city,
+    rc.total_sales,
+    rc.total_orders,
+    rc.total_quantity,
+    rc.sales_rank
+FROM
+    ranked_customers rc
+WHERE
+    rc.sales_rank <= 10
+ORDER BY
+    rc.cd_gender,
+    rc.total_sales DESC;

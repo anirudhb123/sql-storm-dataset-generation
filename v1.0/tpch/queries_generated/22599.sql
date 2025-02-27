@@ -1,0 +1,64 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) as rn
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 10 AND 20 
+        AND p.p_retailprice IS NOT NULL
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS num_parts,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) as rank_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderAnalysis AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1995-01-01' AND '1996-12-31'
+        AND l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+)
+SELECT 
+    r.p_partkey,
+    r.p_name,
+    r.p_brand,
+    COALESCE(s.total_supplycost, 0) AS total_supplycost,
+    a.total_lineitem_value,
+    COUNT(DISTINCT a.o_orderkey) AS num_orders,
+    MAX(CASE WHEN s.num_parts > 5 THEN 'High Supplier Diversity' ELSE 'Low Supplier Diversity' END) AS supplier_diversity,
+    AVG(NULLIF(a.total_lineitem_value, 0)) OVER () AS avg_order_value
+FROM 
+    RankedParts r
+LEFT JOIN 
+    SupplierSummary s ON r.p_partkey = s.s_suppkey
+LEFT JOIN 
+    OrderAnalysis a ON r.p_partkey = a.o_orderkey
+GROUP BY 
+    r.p_partkey, r.p_name, r.p_brand, a.total_lineitem_value
+HAVING 
+    SUM(a.total_lineitem_value) IS NOT NULL
+ORDER BY 
+    r.p_retailprice DESC, num_orders ASC
+LIMIT 100;

@@ -1,0 +1,64 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+), 
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), 
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value,
+        MIN(o.o_orderdate) AS first_order_date,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.custkey
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(sa.total_available_qty, 0) AS total_available_qty,
+    COALESCE(cd.total_spent, 0) AS total_spent,
+    cd.avg_order_value,
+    CASE 
+        WHEN cd.total_orders = 0 THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status,
+    COUNT(DISTINCT cd.c_custkey) OVER (PARTITION BY p.p_partkey) AS interested_customers
+FROM 
+    RankedParts p
+LEFT JOIN 
+    SupplierAvailability sa ON p.p_partkey = sa.ps_partkey
+LEFT JOIN 
+    CustomerOrderDetails cd ON p.p_partkey IN (
+        SELECT l.l_partkey 
+        FROM lineitem l 
+        WHERE l.l_orderkey IN (
+            SELECT o.o_orderkey 
+            FROM orders o
+            WHERE o.o_orderstatus = 'F'
+        )
+    )
+WHERE 
+    p.price_rank <= 5
+    AND (p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_type = p.p_type) OR p.p_retailprice IS NULL)
+ORDER BY 
+    p.p_retailprice DESC, cd.total_spent ASC
+FETCH FIRST 10 ROWS ONLY;

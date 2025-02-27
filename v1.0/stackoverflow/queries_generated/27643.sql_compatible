@@ -1,0 +1,78 @@
+
+WITH TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        STRING_SPLIT(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '>') AS tag
+        ON tag.value IS NOT NULL
+    JOIN 
+        Tags t ON t.TagName = TRIM(tag.value)
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName AS UserDisplayName,
+        COUNT(p.Id) AS QuestionsAsked,
+        COUNT(DISTINCT pa.Id) AS AnswersGiven
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id AND p.PostTypeId = 1 
+    LEFT JOIN 
+        Posts pa ON pa.ParentId = p.Id AND pa.PostTypeId = 2 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostMetrics AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.ViewCount,
+        ua.UserDisplayName,
+        ua.QuestionsAsked,
+        ua.AnswersGiven
+    FROM 
+        TaggedPosts tp
+    JOIN 
+        Posts p ON p.Id = tp.PostId
+    JOIN 
+        UserActivity ua ON ua.UserId = p.OwnerUserId
+),
+RecentCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+        AND ph.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+)
+SELECT 
+    pm.Title,
+    pm.CreationDate,
+    pm.ViewCount,
+    pm.UserDisplayName,
+    pm.QuestionsAsked,
+    pm.AnswersGiven,
+    rc.CloseReason
+FROM 
+    PostMetrics pm
+LEFT JOIN 
+    RecentCloseReasons rc ON pm.PostId = rc.PostId
+WHERE 
+    pm.ViewCount > 100 
+ORDER BY 
+    pm.ViewCount DESC, pm.CreationDate DESC;

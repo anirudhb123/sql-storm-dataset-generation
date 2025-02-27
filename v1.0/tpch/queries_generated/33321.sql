@@ -1,0 +1,41 @@
+WITH RECURSIVE order_summaries AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           c.c_name,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS rev_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_name
+),
+ranked_orders AS (
+    SELECT os.o_orderkey, os.o_orderdate, os.total_revenue, os.c_name
+    FROM order_summaries os
+    WHERE os.rev_rank <= 5  -- Top 5 orders per nation
+),
+parts_with_supplier AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_brand, 
+           s.s_name,
+           ps.ps_supplycost, 
+           ps.ps_availqty,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS cost_rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT o.o_orderkey,
+       o.o_orderdate,
+       o.total_revenue,
+       p.p_name,
+       ps.s_name,
+       ps.ps_supplycost
+FROM ranked_orders o
+LEFT OUTER JOIN parts_with_supplier ps ON o.o_orderkey = ps.p_partkey
+WHERE ps.cost_rank = 1
+ORDER BY o.o_orderdate DESC, o.total_revenue DESC
+LIMIT 10;

@@ -1,0 +1,66 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment, 1 AS level
+    FROM supplier 
+    WHERE s_acctbal > 5000  -- Top level suppliers with high account balance
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal <= sh.s_acctbal  -- Next level suppliers with lower or equal acct balance
+),
+order_summary AS (
+    SELECT 
+        o.o_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+lineitem_summary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value,
+        SUM(l.l_discount) AS total_discount,
+        COUNT(*) AS line_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+nation_supplier_counts AS (
+    SELECT 
+        n.n_nationkey,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey
+)
+SELECT 
+    r.r_name,
+    ns.supplier_count,
+    os.order_count,
+    os.total_spent,
+    os.avg_order_value,
+    lh.total_line_value,
+    lh.total_discount,
+    sh.level AS hierarchy_level,
+    CASE 
+        WHEN os.total_spent IS NULL THEN 'No Orders'
+        WHEN os.total_spent < 1000 THEN 'Low Spender'
+        ELSE 'High Spender'
+    END AS customer_type
+FROM region r
+LEFT JOIN nation_supplier_counts ns ON r.r_regionkey = ns.n_nationkey
+LEFT JOIN order_summary os ON os.o_custkey IN (
+    SELECT c.c_custkey
+    FROM customer c
+    WHERE c.c_nationkey = ns.n_nationkey
+)
+LEFT JOIN lineitem_summary lh ON lh.l_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_custkey = os.o_custkey
+)
+LEFT JOIN supplier_hierarchy sh ON sh.s_nationkey = ns.n_nationkey
+ORDER BY r.r_name, customer_type;

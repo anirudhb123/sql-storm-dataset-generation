@@ -1,0 +1,56 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE ch.level < 5
+),
+region_nation AS (
+    SELECT r.r_name, n.n_name
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+),
+part_supplier AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate > DATE '1996-01-01'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    ch.c_name AS customer_name,
+    rn.r_name AS region_name,
+    ps.p_name AS part_name,
+    ps.total_avail AS available_qty,
+    os.total_sales AS total_sales,
+    DENSE_RANK() OVER (PARTITION BY rn.r_name ORDER BY os.total_sales DESC) AS sales_rank,
+    CASE 
+        WHEN os.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sales_status
+FROM customer_hierarchy ch
+JOIN region_nation rn ON ch.c_nationkey = rn.n_name
+LEFT JOIN part_supplier ps ON ps.p_partkey IN (
+    SELECT ps_partkey 
+    FROM partsupp 
+    WHERE ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = ch.c_nationkey)
+)
+LEFT JOIN order_summary os ON os.o_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o
+    WHERE o.o_custkey = ch.c_custkey
+)
+WHERE 
+    rn.r_name LIKE '%North%' 
+    AND (ch.level = 0 OR ch.c_custkey IS NOT NULL)
+ORDER BY customer_name, total_sales DESC;

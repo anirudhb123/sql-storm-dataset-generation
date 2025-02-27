@@ -1,0 +1,88 @@
+WITH RECURSIVE cast_hierarchy AS (
+    -- Base case: Select all movies and their direct casts
+    SELECT 
+        ct.movie_id,
+        ca.person_id,
+        1 AS level
+    FROM 
+        cast_info ca
+    JOIN 
+        title ct ON ca.movie_id = ct.id
+
+    UNION ALL
+
+    -- Recursive step: Select movies with casts where the cast members appeared in other movies
+    SELECT 
+        ct.movie_id,
+        ca.person_id,
+        ch.level + 1
+    FROM 
+        cast_hierarchy ch
+    JOIN 
+        cast_info ca ON ch.person_id = ca.person_id
+    JOIN 
+        title ct ON ca.movie_id = ct.id
+    WHERE 
+        ch.movie_id <> ct.id -- Exclude movies from the same level
+),
+
+-- CTE to calculate conspectus of movie titles per year 
+title_year_summary AS (
+    SELECT 
+        production_year,
+        COUNT(*) AS total_titles,
+        STRING_AGG(title, ', ') AS movie_titles
+    FROM 
+        title
+    GROUP BY 
+        production_year
+),
+
+-- CTE to get average roles per cast member per movie in the cast hierarchy 
+average_roles AS (
+    SELECT 
+        movie_id,
+        AVG(role_count) AS avg_roles
+    FROM (
+        SELECT 
+            movie_id,
+            person_id,
+            COUNT(*) AS role_count
+        FROM 
+            cast_info
+        GROUP BY 
+            movie_id, person_id
+    ) AS roles_per_movie
+    GROUP BY 
+        movie_id
+)
+
+-- Final selection with filtering, joins, window functions, and unusual NULL handling
+SELECT 
+    tt.production_year,
+    ttl.total_titles,
+    ttl.movie_titles,
+    ac.movie_id,
+    ac.person_id,
+    ac.level,
+    COALESCE(ar.avg_roles, 0) AS average_roles,
+    CASE 
+        WHEN ac.level = 1 THEN 'Direct Cast'
+        WHEN ac.level > 1 AND ac.level < 3 THEN 'Indirect Cast'
+        ELSE 'Extended Cast'
+    END AS cast_category
+FROM 
+    cast_hierarchy ac
+JOIN 
+    title_year_summary ttl ON ac.movie_id = ttl.production_year
+LEFT JOIN 
+    average_roles ar ON ac.movie_id = ar.movie_id
+JOIN 
+    aka_title at ON ac.movie_id = at.movie_id
+WHERE 
+    at.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'feature%%')
+    AND at.production_year IS NOT NULL
+ORDER BY 
+    ttl.production_year DESC, 
+    COALESCE(ar.avg_roles, 0) DESC,
+    ac.person_id;

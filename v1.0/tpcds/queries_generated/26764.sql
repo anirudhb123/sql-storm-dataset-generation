@@ -1,0 +1,45 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        d.d_date,
+        a.ca_city,
+        a.ca_state
+    FROM customer c
+    JOIN customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+    JOIN date_dim d ON d.d_date_sk = c.c_first_sales_date_sk
+    WHERE c.c_current_cdemo_sk IS NOT NULL
+),
+sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        c.c_customer_id,
+        RANK() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM web_sales ws
+    JOIN customer_info c ON ws.ws_bill_customer_sk = c.c_customer_id
+),
+top_sales AS (
+    SELECT 
+        s_order_number,
+        s_item_sk,
+        s_sales_price,
+        s_net_profit
+    FROM sales_data
+    WHERE price_rank <= 5
+)
+SELECT 
+    COUNT(DISTINCT c.c_customer_id) AS customer_count,
+    AVG(ts.s_net_profit) AS avg_net_profit,
+    STRING_AGG(DISTINCT CONCAT(c.c_first_name, ' ', c.c_last_name), '; ') AS top_customers,
+    COUNT(ts.s_item_sk) AS total_items
+FROM top_sales ts
+JOIN customer_info c ON ts.s_order_number = c.c_customer_id
+WHERE ts.s_net_profit > 0
+GROUP BY ts.s_order_number
+ORDER BY customer_count DESC, avg_net_profit DESC;

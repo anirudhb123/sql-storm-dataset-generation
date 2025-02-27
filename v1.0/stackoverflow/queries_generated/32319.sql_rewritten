@@ -1,0 +1,85 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        CAST(1 AS INT) AS ReputationLevel,
+        CASE 
+            WHEN U.Reputation >= 10000 THEN 'Gold'
+            WHEN U.Reputation >= 5000 THEN 'Silver'
+            ELSE 'Bronze'
+        END AS BadgeLevel
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 0
+
+    UNION ALL
+
+    SELECT 
+        U.Id,
+        U.Reputation,
+        UR.ReputationLevel + 1,
+        UR.BadgeLevel
+    FROM 
+        Users U
+    INNER JOIN 
+        UserReputationCTE UR ON U.Reputation > UR.Reputation
+    WHERE 
+        UR.ReputationLevel < 3 /* restrict to only Gold, Silver, and Bronze */
+),
+
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.OwnerUserId
+),
+
+PostRevisions AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        PH.CreationDate,
+        PH.Comment,
+        PH.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS RevisionRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (1, 4, 24) /* Initial Title, Edit Title, Suggested Edit Applied */
+)
+
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(UR.BadgeLevel, 'No Badge') AS BadgeLevel,
+    P.PostId,
+    P.TotalScore,
+    P.UpVotes - P.DownVotes AS NetVotes,
+    R.RevisionRank,
+    COALESCE(R.Comment, 'No Comment') AS LastRevisionComment,
+    P.CommentCount
+FROM 
+    Users U
+LEFT JOIN 
+    UserReputationCTE UR ON U.Id = UR.UserId
+LEFT JOIN 
+    PostStats P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    PostRevisions R ON P.PostId = R.PostId AND R.RevisionRank = 1
+WHERE 
+    U.Reputation > 100
+ORDER BY 
+    U.Reputation DESC, P.TotalScore DESC;

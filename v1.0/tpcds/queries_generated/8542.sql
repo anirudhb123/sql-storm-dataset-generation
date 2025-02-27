@@ -1,0 +1,42 @@
+
+WITH sales_summary AS (
+    SELECT 
+        c.c_customer_id,
+        ca.ca_city,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_order_value
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 AND 
+        ca.ca_state IN ('CA', 'NY') 
+    GROUP BY 
+        c.c_customer_id, ca.ca_city
+),
+top_customers AS (
+    SELECT 
+        c_customer_id, 
+        total_sales, 
+        total_orders, 
+        avg_order_value,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        sales_summary
+)
+SELECT 
+    customer_id,
+    city,
+    total_sales,
+    total_orders,
+    avg_order_value
+FROM 
+    top_customers
+WHERE 
+    sales_rank <= 10;

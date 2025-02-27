@@ -1,0 +1,79 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        Level + 1
+    FROM Posts p
+    INNER JOIN Posts parent ON p.ParentId = parent.Id
+    WHERE parent.PostTypeId = 1  
+),
+
+VoteSummary AS (
+    SELECT
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 9) THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM Votes v
+    GROUP BY v.PostId
+),
+
+PostTags AS (
+    SELECT
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN (
+        SELECT UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS tagList
+        ) AS tagList ON TRUE
+    LEFT JOIN Tags t ON t.TagName = tagList.tagList
+    GROUP BY p.Id
+),
+
+ClosedQuestions AS (
+    SELECT
+        ph.PostId,
+        COUNT(ph.Id) AS CloseCount
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+),
+
+FinalResults AS (
+    SELECT
+        rph.PostId,
+        rph.Title,
+        rph.CreationDate,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.TotalVotes,
+        pt.Tags,
+        COALESCE(cq.CloseCount, 0) AS CloseCount,
+        ROW_NUMBER() OVER (PARTITION BY rph.PostId ORDER BY rph.CreationDate DESC) AS rn
+    FROM RecursivePostHierarchy rph
+    LEFT JOIN VoteSummary ps ON rph.PostId = ps.PostId
+    LEFT JOIN PostTags pt ON rph.PostId = pt.PostId
+    LEFT JOIN ClosedQuestions cq ON rph.PostId = cq.PostId
+)
+
+SELECT *
+FROM FinalResults
+WHERE rn = 1
+ORDER BY CreationDate DESC
+FETCH FIRST 10 ROWS ONLY;

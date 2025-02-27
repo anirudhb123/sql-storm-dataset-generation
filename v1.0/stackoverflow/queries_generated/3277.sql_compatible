@@ -1,0 +1,46 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id, 
+        Reputation, 
+        LastAccessDate 
+    FROM Users 
+    WHERE Reputation > 1000
+),
+PopularPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate, 
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rank,
+        p.OwnerUserId
+    FROM Posts p
+    JOIN UserReputation ur ON p.OwnerUserId = ur.Id
+    WHERE p.Score > 10
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        ph.CreationDate,
+        ph.Comment 
+    FROM PostHistory ph 
+    JOIN CloseReasonTypes crt ON ph.Comment = CAST(crt.Id AS VARCHAR)
+    WHERE ph.PostHistoryTypeId = 10 
+      AND ph.CreationDate > DATEADD(year, -1, '2024-10-01')
+)
+SELECT 
+    pp.Title AS PopularPostTitle,
+    pp.Score AS PopularPostScore,
+    pp.ViewCount AS PopularPostViews,
+    ur.DisplayName AS UserName,
+    ur.Reputation AS UserReputation,
+    cp.CreationDate AS ClosedDate,
+    cp.Comment AS CloseReason
+FROM PopularPosts pp
+LEFT JOIN Users ur ON pp.OwnerUserId = ur.Id
+LEFT JOIN ClosedPosts cp ON pp.Id = cp.PostId
+WHERE pp.rank = 1 
+  AND (cp.CreationDate IS NOT NULL OR pp.CreationDate < DATEADD(month, -6, '2024-10-01'))
+ORDER BY pp.Score DESC, ur.Reputation DESC;

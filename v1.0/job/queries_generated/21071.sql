@@ -1,0 +1,95 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        c.movie_id, 
+        a.name AS actor_name, 
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+),
+MaxRoles AS (
+    SELECT 
+        movie_id, 
+        COUNT(*) AS total_roles
+    FROM 
+        cast_info
+    GROUP BY 
+        movie_id
+    HAVING 
+        COUNT(*) > 3
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mi.info AS movie_info,
+        (SELECT COUNT(DISTINCT mk.keyword) 
+         FROM movie_keyword mk 
+         WHERE mk.movie_id = m.id) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = 1
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name || ' (' || ct.kind || ')') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.movie_info,
+    ci.companies,
+    rc.actor_name,
+    rc.actor_rank,
+    COALESCE(k.keyword_count, 0) AS keywords_count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    CompanyInfo ci ON md.movie_id = ci.movie_id
+LEFT JOIN 
+    RecursiveCTE rc ON md.movie_id = rc.movie_id
+LEFT JOIN 
+    MaxRoles mr ON md.movie_id = mr.movie_id
+LEFT JOIN 
+    LATERAL (SELECT DISTINCT keyword FROM movie_keyword mk 
+              JOIN keyword k ON mk.keyword_id = k.id 
+              WHERE mk.movie_id = md.movie_id) k 
+ON true
+WHERE 
+    md.production_year IS NOT NULL
+    AND (mr.total_roles IS NULL OR mr.total_roles > 5)
+ORDER BY 
+    md.production_year DESC, 
+    rc.actor_rank;
+
+### Explanation
+
+1. **RecursiveCTE**: This common table expression retrieves all actors for each movie, adding a rank based on their names.
+  
+2. **MaxRoles**: This section counts the number of roles for each movie and filters to only show movies with more than 3 roles.
+
+3. **MovieDetails**: Here, we gather details about each movie including its keywords count through a correlated subquery.
+
+4. **CompanyInfo**: This aggregates company information associated with each movie in a formatted string.
+
+5. **Final Selection**: The main SELECT statement combines these CTEs and filters out productions without a year and ensures movies have either null or more than 5 roles. It orders results by production year and actor rank. 
+
+6. **LATERAL Join**: The use of a LATERAL join to fetch unique keywords per movie allows for complex keyword association logic.
+
+7. **COALESCE**: This is used to manage potential NULL results from keyword counts, ensuring they show as `0` when applicable.
+
+This query employs various advanced SQL constructs and logic, showcasing a deep understanding of complex SQL queries, suitable for performance benchmarking in an intricate dataset.

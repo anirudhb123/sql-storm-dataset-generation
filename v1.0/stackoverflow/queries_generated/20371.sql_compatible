@@ -1,0 +1,98 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS RepRank
+    FROM 
+        Users U
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Score,
+        COUNT(C.Id) AS CommentCount,
+        RANK() OVER (ORDER BY P.Score DESC, P.CreationDate ASC) AS ScoreRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.Score > 0
+    GROUP BY 
+        P.Id, P.Score, P.CreationDate
+),
+MergedResults AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        UB.BadgeCount,
+        UB.GoldBadges,
+        UB.SilverBadges,
+        UB.BronzeBadges,
+        PP.PostId,
+        PP.Score,
+        PP.CommentCount,
+        PP.ScoreRank
+    FROM 
+        UserReputation U
+    LEFT JOIN 
+        UserBadges UB ON U.UserId = UB.UserId
+    LEFT JOIN 
+        PopularPosts PP ON U.UserId = (SELECT P.OwnerUserId FROM Posts P WHERE P.Id = PP.PostId)
+    WHERE 
+        U.Reputation >= 1000
+),
+PostHistoryAggregates AS (
+    SELECT 
+        PH.PostId,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.CreationDate END) AS LastClosed,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 11 THEN PH.CreationDate END) AS LastReopened
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+),
+FinalResults AS (
+    SELECT 
+        MR.DisplayName,
+        MR.Reputation,
+        MR.BadgeCount,
+        MR.GoldBadges,
+        MR.SilverBadges,
+        MR.BronzeBadges,
+        PR.PostId,
+        COALESCE(PR.Score, 0) AS Score,
+        COALESCE(PR.CommentCount, 0) AS CommentCount,
+        PR.ScoreRank,
+        COALESCE(PHA.LastClosed, 'Never') AS LastClosed,
+        COALESCE(PHA.LastReopened, 'Never') AS LastReopened
+    FROM 
+        MergedResults MR
+    LEFT JOIN 
+        PostHistoryAggregates PHA ON MR.PostId = PHA.PostId
+    LEFT JOIN 
+        (SELECT DISTINCT P.Id AS PostId FROM Posts P WHERE P.OwnerUserId IS NOT NULL) AS P ON MR.PostId = P.PostId
+)
+SELECT 
+    *
+FROM 
+    FinalResults
+WHERE 
+    LastClosed IS NULL OR LastReopened IS NULL
+ORDER BY 
+    Reputation DESC, Score DESC
+LIMIT 10;

@@ -1,0 +1,75 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS UserRank
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        u.Reputation > 50
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+PostsWithTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        t.TagName,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    GROUP BY 
+        p.Id, p.Title, p.Body, t.TagName
+)
+SELECT 
+    r.UserId,
+    r.DisplayName,
+    r.Reputation,
+    r.PostCount,
+    r.QuestionCount,
+    r.AnswerCount,
+    r.UpVoteCount,
+    r.DownVoteCount,
+    tt.TagName,
+    pwt.PostId,
+    pwt.Title,
+    pwt.Body,
+    pwt.CommentCount
+FROM 
+    RankedUsers r
+JOIN 
+    TopTags tt ON r.PostCount > (SELECT AVG(PostCount) FROM RankedUsers)
+JOIN 
+    PostsWithTags pwt ON pwt.TagName = tt.TagName
+ORDER BY 
+    r.UserRank, tt.PostCount DESC, pwt.CommentCount DESC;

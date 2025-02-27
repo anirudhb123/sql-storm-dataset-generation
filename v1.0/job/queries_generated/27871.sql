@@ -1,0 +1,59 @@
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        GROUP_CONCAT(DISTINCT c.name) AS cast_names,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT comp.name) AS companies
+    FROM 
+        title m
+    JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name comp ON mc.company_id = comp.id
+    GROUP BY 
+        m.id
+),
+info_aggregation AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        STRING_AGG(DISTINCT pi.info, '; ') AS personal_info,
+        COUNT(DISTINCT ci.person_id) AS total_cast
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        complete_cast cc ON md.movie_id = cc.movie_id
+    LEFT JOIN 
+        person_info pi ON cc.subject_id = pi.person_id
+    GROUP BY 
+        md.movie_id, md.title, md.production_year
+)
+SELECT 
+    ia.movie_id,
+    ia.title,
+    ia.production_year,
+    ia.personal_info,
+    ia.total_cast,
+    md.cast_names,
+    md.keywords,
+    md.companies,
+    kt.kind AS kind_name
+FROM 
+    info_aggregation ia
+JOIN 
+    kind_type kt ON ia.kind_id = kt.id
+ORDER BY 
+    ia.production_year DESC, 
+    ia.total_cast DESC;

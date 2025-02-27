@@ -1,0 +1,25 @@
+
+SELECT 
+    p.p_name, 
+    CONCAT(SUBSTRING(p.p_mfgr, 1, 5), '...', SUBSTRING(p.p_mfgr, LENGTH(p.p_mfgr) - 2, 3)) AS mfgr_short, 
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count, 
+    AVG(ps.ps_supplycost) AS avg_supply_cost,
+    SUM(l.l_quantity) AS total_quantity,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    MAX(CASE WHEN l.l_returnflag = 'Y' THEN l.l_quantity ELSE 0 END) AS returned_quantity,
+    MIN(l.l_discount) AS min_discount,
+    MAX(l.l_discount) AS max_discount
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+GROUP BY 
+    p.p_name, 
+    CONCAT(SUBSTRING(p.p_mfgr, 1, 5), '...', SUBSTRING(p.p_mfgr, LENGTH(p.p_mfgr) - 2, 3))
+HAVING 
+    total_quantity > 100
+ORDER BY 
+    total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

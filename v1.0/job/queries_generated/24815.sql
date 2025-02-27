@@ -1,0 +1,105 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        NULL::text AS parent_title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        mh.title AS parent_title,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_hierarchy mh ON m.episode_of_id = mh.movie_id
+),
+cast_roles AS (
+    SELECT 
+        c.movie_id, 
+        c.person_id, 
+        r.role, 
+        CASE 
+            WHEN rn.nr_order IS NOT NULL THEN rn.nr_order
+            ELSE 99
+        END AS role_order
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    LEFT JOIN 
+        (SELECT person_id, movie_id, nr_order FROM cast_info WHERE nr_order IS NOT NULL) rn ON c.person_id = rn.person_id AND c.movie_id = rn.movie_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT CONCAT(cn.name, ' (', ct.kind, ')'), ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.parent_title,
+    COALESCE(kw.keywords, 'No keywords') AS keywords,
+    COALESCE(cr.roles, 'No cast') AS roles,
+    COALESCE(ci.companies, 'No companies') AS companies
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    (SELECT 
+        c.movie_id, 
+        STRING_AGG(DISTINCT CONCAT(p.name, ' as ', cr.role), ', ' ORDER BY cr.role_order) AS roles 
+    FROM 
+        cast_roles cr
+    JOIN 
+        aka_name p ON cr.person_id = p.person_id
+    GROUP BY 
+        c.movie_id
+    ) cr ON mh.movie_id = cr.movie_id
+LEFT JOIN 
+    movie_keywords kw ON mh.movie_id = kw.movie_id
+LEFT JOIN 
+    company_info ci ON mh.movie_id = ci.movie_id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2023 
+    AND mh.level < 3
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title;
+
+This SQL query performs a structured analysis by establishing a recursive common table expression (CTE) to obtain a hierarchy of movies and their episode relationships. It collects roles for each movie, aggregates keywords, and gathers company information.
+
+- It incorporates **JOINs**; both inner and outer joins to combine data from various related tables, emphasizing diverse role handling and company details.
+- The use of **window functions** with an order clause enables specific ordering of roles.
+- **Aggregation** is performed with `STRING_AGG` to compile data points into a concatenated list for easier readability in the output.
+- It evaluates **NULL values** with `COALESCE`, providing default text when no records are found based on specified conditions.
+- A **recursive CTE** allows for exploring relationships where a title may serve as an episode in another title, capturing series structures.
+- The filtering criteria include a range of years and restrict levels to prevent overly nested results, which showcases the potential breadth of episode duration or recursion.
+
+This thorough approach ensures complex data intersections are highlighted, accounting for various film industry aspects with clarity while leveraging SQL's capabilities in handling hierarchical and relational data.

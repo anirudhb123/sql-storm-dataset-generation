@@ -1,0 +1,70 @@
+WITH RecursivePostStack AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.OwnerUserId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostStack r ON p.ParentId = r.PostId
+), AnswerStatistics AS (
+    SELECT 
+        r.PostId,
+        COUNT(*) AS AnswerCount,
+        AVG(COALESCE(Score, 0)) AS AvgAnswerScore
+    FROM Posts p
+    INNER JOIN RecursivePostStack r ON p.ParentId = r.PostId
+    WHERE p.PostTypeId = 2 
+    GROUP BY r.PostId
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.Reputation
+), PostHistoryAggregate AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(ph.CreationDate) AS LatestEdit,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount, 
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 24 THEN 1 END) AS EditCount
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Level,
+    COALESCE(a.AnswerCount, 0) AS TotalAnswers,
+    COALESCE(a.AvgAnswerScore, 0) AS AverageAnswerScore,
+    ph.LatestEdit,
+    ph.CloseCount,
+    ph.EditCount,
+    u.Reputation,
+    u.BadgeCount
+FROM RecursivePostStack ps
+LEFT JOIN AnswerStatistics a ON ps.PostId = a.PostId
+LEFT JOIN PostHistoryAggregate ph ON ps.PostId = ph.PostId
+LEFT JOIN UserReputation u ON ps.OwnerUserId = u.UserId
+WHERE ps.Level = 1 
+ORDER BY ps.CreationDate DESC, ph.EditCount DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

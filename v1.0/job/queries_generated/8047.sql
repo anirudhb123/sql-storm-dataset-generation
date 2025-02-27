@@ -1,0 +1,33 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS cast_type,
+    co.name AS company_name,
+    g.kind AS genre,
+    COUNT(DISTINCT kw.keyword) AS keyword_count,
+    AVG(mi.rating) AS average_rating
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name co ON mc.company_id = co.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+JOIN 
+    kind_type g ON t.kind_id = g.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+GROUP BY 
+    a.name, t.title, c.kind, co.name, g.kind
+HAVING 
+    AVG(mi.rating) > 7.0
+ORDER BY 
+    keyword_count DESC, average_rating DESC
+LIMIT 50;

@@ -1,0 +1,83 @@
+
+WITH RecursivePosts AS (
+    
+    SELECT 
+        Id,
+        PostTypeId,
+        AcceptedAnswerId,
+        ParentId,
+        Score,
+        CreationDate,
+        OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.Id
+),
+PostVotes AS (
+    
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId IN (2, 4) THEN 1 END) AS UpvoteCount,  
+        COUNT(CASE WHEN v.VoteTypeId IN (3, 12) THEN 1 END) AS DownvoteCount  
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+TopUsers AS (
+    
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(u.Reputation) AS TotalReputation,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5  
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.PostTypeId,
+    rp.Score AS PostScore,
+    COALESCE(pv.UpvoteCount, 0) AS Upvotes,
+    COALESCE(pv.DownvoteCount, 0) AS Downvotes,
+    tu.DisplayName AS TopUser,
+    tu.TotalReputation AS UserReputation,
+    rp.CreationDate,
+    rp.Level AS PostLevel
+FROM 
+    RecursivePosts rp
+LEFT JOIN 
+    PostVotes pv ON rp.Id = pv.PostId
+JOIN 
+    TopUsers tu ON rp.OwnerUserId = tu.Id
+WHERE 
+    rp.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')  
+AND 
+    (rp.Score > 10 OR rp.Level = 0)  
+ORDER BY 
+    rp.Score DESC, 
+    tu.TotalReputation DESC;

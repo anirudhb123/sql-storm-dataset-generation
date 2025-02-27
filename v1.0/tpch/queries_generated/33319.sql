@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)  -- Starting point for hierarchy
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3  -- Limiting level for hierarchy
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_availqty,
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+OrderSummary AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_revenue
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY o.o_custkey
+),
+RegionNation AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+)
+SELECT ps.ps_partkey, 
+       p.p_name,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned,
+       COALESCE(MAX(sh.s_acctbal), 0) AS max_supplier_acctbal,
+       rn.r_name AS region_name
+FROM part p
+JOIN PartSupplier ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+JOIN RegionNation rn ON sh.s_nationkey = rn.n_nationkey
+WHERE (p.p_size > 12 OR p.p_retailprice < 100) 
+  AND (o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL)
+GROUP BY ps.ps_partkey, p.p_name, rn.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_returned DESC, max_supplier_acctbal DESC;

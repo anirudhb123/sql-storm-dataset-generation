@@ -1,0 +1,88 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '3 months'
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgesCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+
+PostVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    ur.Reputation,
+    COALESCE(up.UpVotes, 0) - COALESCE(dp.DownVotes, 0) AS NetVotes,
+    cp.LastClosedDate,
+    cp.CloseCount,
+    CASE 
+        WHEN rp.PostTypeId = 1 THEN 'Question' 
+        WHEN rp.PostTypeId = 2 THEN 'Answer' 
+        ELSE 'Other' 
+    END AS PostType,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RecentPosts rp
+JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+LEFT JOIN 
+    PostVotes up ON rp.PostId = up.PostId
+LEFT JOIN 
+    PostVotes dp ON rp.PostId = dp.PostId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    Tags t ON t.WikiPostId = rp.PostId
+WHERE 
+    rp.UserPostRank = 1
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, ur.Reputation, cp.LastClosedDate, cp.CloseCount, rp.PostTypeId
+ORDER BY 
+    ur.Reputation DESC, NetVotes DESC
+LIMIT 100;

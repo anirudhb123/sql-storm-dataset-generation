@@ -1,0 +1,80 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        Tags.TagName, 
+        COUNT(Posts.Id) AS PostCount
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = Posts.Tags::int[]
+    GROUP BY 
+        Tags.TagName
+), 
+UserBadgeCounts AS (
+    SELECT 
+        UserId, 
+        COUNT(Name) AS BadgeCount,
+        MAX(Date) AS LastBadgeDate
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+), 
+PostVoteDetails AS (
+    SELECT 
+        Posts.Id AS PostId,
+        SUM(CASE WHEN VoteTypes.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypes.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(Votes.Id) AS TotalVotes
+    FROM 
+        Posts
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    LEFT JOIN 
+        VoteTypes ON Votes.VoteTypeId = VoteTypes.Id
+    GROUP BY 
+        Posts.Id
+), 
+UserPostStatistics AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS PostsCreated,
+        COALESCE(SUM(PostVoteDetails.UpVotes) - SUM(PostVoteDetails.DownVotes), 0) AS Score,
+        COALESCE(MAX(PostVoteDetails.TotalVotes), 0) AS TotalVotes
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        PostVoteDetails ON Posts.Id = PostVoteDetails.PostId
+    GROUP BY 
+        Users.Id
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.Views,
+    U.BadgeCounts, 
+    COALESCE(TC.PostCount, 0) AS TagCount,
+    UPS.PostsCreated,
+    UPS.Score,
+    UPS.TotalVotes
+FROM 
+    Users U
+LEFT JOIN 
+    UserBadgeCounts UBC ON U.Id = UBC.UserId
+LEFT JOIN 
+    RecursiveTagCounts TC ON TC.TagName IN (SELECT unnest(STRING_TO_ARRAY(Posts.Tags, '><')) FROM Posts WHERE Posts.OwnerUserId = U.Id)
+LEFT JOIN 
+    UserPostStatistics UPS ON U.Id = UPS.UserId
+WHERE 
+    U.Reputation > 1000
+  AND 
+    EXISTS (SELECT 1 FROM Posts WHERE Posts.OwnerUserId = U.Id AND Posts.CreationDate > NOW() - INTERVAL '1 year')
+ORDER BY 
+    UPS.Score DESC,
+    U.DisplayName ASC
+FETCH FIRST 100 ROWS ONLY;
+
+

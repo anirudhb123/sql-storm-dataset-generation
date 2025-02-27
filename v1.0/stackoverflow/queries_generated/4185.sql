@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= NOW() - INTERVAL '1 month'
+),
+TopPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON rp.Id = v.PostId AND v.VoteTypeId = 8 /* BountyStart */
+    WHERE 
+        rp.Rank <= 5
+    GROUP BY 
+        rp.Id, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(CASE WHEN p.AnnouncementId IS NULL THEN 1 ELSE 0 END) AS NonAnnouncementPosts,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.PostsCount,
+    us.NonAnnouncementPosts,
+    us.GoldBadges,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.TotalBounty
+FROM 
+    UserStats us
+JOIN 
+    TopPosts tp ON us.UserId = tp.OwnerUserId
+WHERE 
+    us.GoldBadges > 0
+ORDER BY 
+    us.PostsCount DESC, tp.TotalBounty DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

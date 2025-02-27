@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 0 
+            ELSE p.p_retailprice * 1.1 
+        END AS adjusted_price
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+),
+TotalOrderValue AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierNation AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    H.p_partkey,
+    H.p_name,
+    COALESCE(S.s_name, 'Unknown Supplier') AS supplier_name,
+    T.total_value AS order_total,
+    R.s_acctbal AS supplier_balance,
+    S.n_name AS nation,
+    ROW_NUMBER() OVER (PARTITION BY H.p_partkey ORDER BY T.total_value DESC) AS order_rank
+FROM 
+    HighValueParts H
+LEFT JOIN 
+    partsupp ps ON H.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers R ON ps.ps_suppkey = R.s_suppkey AND R.rnk = 1
+LEFT JOIN 
+    TotalOrderValue T ON ps.ps_partkey = T.o_orderkey
+LEFT JOIN 
+    SupplierNation S ON R.s_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = S.supplier_count)
+WHERE 
+    (R.s_acctbal > 1000 OR H.adjusted_price <= 500)
+    AND (S.supplier_count IS NOT NULL OR H.p_comment NOT LIKE '%obsolete%')
+ORDER BY 
+    H.adjusted_price DESC, 
+    R.s_acctbal DESC, 
+    order_rank;

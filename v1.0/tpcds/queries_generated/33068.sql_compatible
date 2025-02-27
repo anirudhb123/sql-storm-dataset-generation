@@ -1,0 +1,56 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws.web_site_id, 
+        ws_sold_date_sk, 
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws 
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk 
+    GROUP BY 
+        ws.web_site_id, ws_sold_date_sk
+), top_sites AS (
+    SELECT 
+        web_site_id, 
+        total_net_profit
+    FROM sales_cte
+    WHERE profit_rank <= 5
+), date_range AS (
+    SELECT 
+        d_date_id, 
+        d_year, 
+        d_month_seq
+    FROM 
+        date_dim
+    WHERE 
+        d_date BETWEEN '2023-01-01' AND '2023-12-31'
+), item_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        AVG(ws.ws_net_paid) AS average_price,
+        MAX(ws.ws_net_profit) AS max_profit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    d.d_year,
+    ts.web_site_id,
+    COALESCE(is.total_quantity_sold, 0) AS total_quantity,
+    COALESCE(is.average_price, 0.00) AS average_price,
+    COALESCE(is.max_profit, 0.00) AS max_profit,
+    ts.total_net_profit
+FROM 
+    date_range d
+LEFT JOIN 
+    top_sites ts ON ts.web_site_id = (SELECT web_site_id FROM top_sites ORDER BY total_net_profit DESC LIMIT 1)
+LEFT JOIN 
+    item_summary is ON is.ws_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_sold_date_sk = d.d_date_id)
+WHERE 
+    d.d_year = 2023
+ORDER BY 
+    d.d_year, ts.total_net_profit DESC;

@@ -1,0 +1,71 @@
+
+WITH TopItems AS (
+    SELECT
+        i.i_item_sk,
+        i.i_item_id,
+        SUM(ws.ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.ws_net_profit) DESC) AS item_rank
+    FROM
+        item i
+    JOIN
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY
+        i.i_item_sk, i.i_item_id
+),
+CustomerReturns AS (
+    SELECT
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_return_quantity
+    FROM
+        store_returns
+    GROUP BY
+        sr_returning_customer_sk
+),
+ReturnedCustomers AS (
+    SELECT
+        cr.returning_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        COALESCE(cr.total_return_quantity, 0) AS total_return_quantity
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        CustomerReturns cr ON c.c_customer_sk = cr.returning_customer_sk
+),
+WarehouseProfit AS (
+    SELECT
+        w.w_warehouse_id,
+        SUM(ws.ws_net_profit) AS total_warehouse_profit
+    FROM
+        warehouse w
+    JOIN
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY
+        w.w_warehouse_id
+)
+SELECT
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.cd_gender,
+    rc.cd_marital_status,
+    rc.cd_credit_rating,
+    rc.total_return_quantity,
+    ti.total_profit,
+    wp.total_warehouse_profit
+FROM
+    ReturnedCustomers rc
+FULL OUTER JOIN
+    TopItems ti ON rc.c_customer_sk = ti.i_item_sk
+LEFT JOIN
+    WarehouseProfit wp ON wp.w_warehouse_id = 'WH_001'
+WHERE
+    (rc.total_return_quantity > 10 OR ti.total_profit IS NULL)
+    AND rc.cd_gender = 'F'
+ORDER BY
+    rc.total_return_quantity DESC,
+    ti.total_profit DESC;

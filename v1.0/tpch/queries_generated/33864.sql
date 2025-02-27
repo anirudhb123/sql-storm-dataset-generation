@@ -1,0 +1,64 @@
+WITH RECURSIVE region_sales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        1 AS level
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate >= '2023-01-01'
+    GROUP BY r.r_name
+
+    UNION ALL
+
+    SELECT 
+        concat('Sub-', rs.region_name) AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        rs.level + 1
+    FROM region_sales rs
+    JOIN nation n ON rs.region_name = n.n_name
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate >= '2023-01-01'
+    GROUP BY rs.region_name
+)
+
+SELECT 
+    r.region_name,
+    COALESCE(SUM(rs.total_sales), 0) AS total_sales,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(l.l_discount) AS average_discount,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY l.l_extendedprice) AS median_extendedprice
+FROM region r
+LEFT JOIN region_sales rs ON r.r_name = rs.region_name
+LEFT JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+WHERE r.r_name IS NOT NULL
+GROUP BY r.region_name
+ORDER BY total_sales DESC
+LIMIT 10;
+
+SELECT
+    r_name,
+    SUM(CASE WHEN total_sales > 10000 THEN total_sales END) AS high_sales,
+    SUM(CASE WHEN total_sales <= 10000 THEN total_sales END) AS low_sales
+FROM (
+    SELECT DISTINCT r.r_name, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY r.r_name
+) AS sales_data
+GROUP BY r_name;

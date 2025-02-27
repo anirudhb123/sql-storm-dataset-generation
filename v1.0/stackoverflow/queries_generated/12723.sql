@@ -1,0 +1,29 @@
+-- Performance benchmarking query to assess the number of posts, comments, and votes by user reputation category
+WITH UserReputation AS (
+    SELECT 
+        CASE 
+            WHEN Reputation >= 10000 THEN 'High Reputation'
+            WHEN Reputation >= 1000 THEN 'Medium Reputation'
+            ELSE 'Low Reputation'
+        END AS ReputationCategory,
+        COUNT(DISTINCT U.Id) AS UserCount,
+        SUM(P.Score) AS TotalPostScore,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT V.Id) AS TotalVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY ReputationCategory
+)
+
+SELECT 
+    ReputationCategory,
+    UserCount,
+    TotalPostScore,
+    TotalPosts,
+    TotalComments,
+    TotalVotes
+FROM UserReputation
+ORDER BY UserCount DESC;

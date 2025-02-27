@@ -1,0 +1,65 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+aggregated_demographics AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        MAX(cd_dep_count) AS max_dependents,
+        MIN(cd_dep_college_count) AS min_college_count
+    FROM customer_demographics
+    GROUP BY cd_gender, cd_marital_status
+),
+customer_cc AS (
+    SELECT 
+        c.c_customer_id,
+        ca.ca_city,
+        cc.cc_name,
+        COUNT(DISTINCT ss_ticket_number) AS return_count,
+        COALESCE(SUM(CASE WHEN sr_return_amt < 0 THEN sr_return_amt ELSE 0 END), 0) AS total_return_amount
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN call_center cc ON c.c_current_hdemo_sk = cc.cc_call_center_sk
+    WHERE ca.ca_city IS NOT NULL
+    GROUP BY c.c_customer_id, ca.ca_city, cc.cc_name
+),
+final_report AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(sd.total_profit) AS combined_profit,
+        AVG(ad.avg_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(DISTINCT cc.c_customer_id) AS distinct_customers,
+        COALESCE(SUM(cc.return_count), 0) AS total_returns
+    FROM sales_data sd
+    JOIN aggregated_demographics ad ON ad.avg_purchase_estimate > 1000
+    LEFT JOIN customer_cc cc ON cc.return_count > 0
+    LEFT JOIN customer_demographics cd ON sd.ws_bill_customer_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender IS NOT NULL AND 
+          (cd.cd_marital_status = 'M' OR cd.cd_marital_status = 'S')
+    GROUP BY cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    fr.cd_gender,
+    fr.cd_marital_status,
+    fr.combined_profit,
+    fr.avg_purchase_estimate,
+    fr.distinct_customers,
+    fr.total_returns,
+    CASE 
+        WHEN fr.combined_profit IS NULL THEN 'No Profit'
+        WHEN fr.combined_profit > 10000 THEN 'High Profit'
+        ELSE 'Low/Medium Profit'
+    END AS profit_category,
+    GREATER_THAN(FLOOR(fr.combined_profit / 1000), 10) AS is_high_profit
+FROM final_report fr
+ORDER BY fr.combined_profit DESC NULLS LAST;

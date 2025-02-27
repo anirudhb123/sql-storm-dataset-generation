@@ -1,0 +1,65 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY k.keyword) AS keyword_rank
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+),
+actor_roles AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        rt.role,
+        COUNT(ci.id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        a.name LIKE '%Smith%'
+    GROUP BY 
+        ci.movie_id, a.name, rt.role
+),
+movies_with_info AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        info.info AS additional_info
+    FROM 
+        ranked_movies m
+    LEFT JOIN 
+        movie_info info ON m.movie_id = info.movie_id
+    WHERE 
+        info.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+)
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    m.keyword,
+    MAX(ar.actor_name) AS leading_actor,
+    MAX(ar.role) AS leading_role,
+    MAX(ar.role_count) AS total_roles,
+    MAX(m.additional_info) AS box_office_info,
+    COUNT(DISTINCT ar.actor_name) AS total_actors
+FROM 
+    movies_with_info m
+LEFT JOIN 
+    actor_roles ar ON m.movie_id = ar.movie_id
+WHERE 
+    m.keyword_rank = 1
+GROUP BY 
+    m.movie_id, m.title, m.production_year, m.keyword
+ORDER BY 
+    m.production_year DESC, m.title;

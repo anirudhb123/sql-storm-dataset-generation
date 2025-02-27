@@ -1,0 +1,56 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year = 2023  
+    
+    UNION ALL
+    
+    SELECT 
+        linked.movie_id,
+        linked.title,
+        linked.production_year,
+        h.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title linked ON ml.linked_movie_id = linked.id
+    JOIN 
+        MovieHierarchy h ON ml.movie_id = h.movie_id
+)
+
+SELECT 
+    mh.title AS main_movie,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    SUM(CASE WHEN ci.nr_order IS NOT NULL THEN 1 ELSE 0 END) AS ordered_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS known_actors,
+    MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office') 
+             THEN mi.info END) AS box_office_collection,
+    AVG(NULLIF(k.keyword, '')) AS avg_keywords
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 5 
+ORDER BY 
+    mh.production_year DESC, total_cast DESC;

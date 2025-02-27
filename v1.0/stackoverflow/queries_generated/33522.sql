@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CURRENT_TIMESTAMP) -- Posts created in the last year
+),
+PostScoreSummary AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerDisplayName,
+        CASE 
+            WHEN Score > 100 THEN 'High Scoring'
+            WHEN Score BETWEEN 50 AND 100 THEN 'Medium Scoring'
+            ELSE 'Low Scoring'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5 -- Top 5 posts per type based on score
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        pht.Name AS HistoryType,
+        ph.UserDisplayName,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= DATEADD(month, -6, CURRENT_TIMESTAMP) -- Historical actions in the last 6 months
+)
+SELECT 
+    s.PostId,
+    s.Title,
+    s.CreationDate,
+    s.Score,
+    s.ViewCount,
+    s.OwnerDisplayName,
+    s.ScoreCategory,
+    STRING_AGG(CONCAT(h.HistoryType, ' by ', h.UserDisplayName, ' on ', FORMAT(h.HistoryDate, 'yyyy-MM-dd')), '; ') AS HistoryUpdates
+FROM 
+    PostScoreSummary s
+LEFT JOIN 
+    PostHistoryDetails h ON s.PostId = h.PostId
+GROUP BY 
+    s.PostId, s.Title, s.CreationDate, s.Score, s.ViewCount, s.OwnerDisplayName, s.ScoreCategory
+ORDER BY 
+    s.Score DESC;

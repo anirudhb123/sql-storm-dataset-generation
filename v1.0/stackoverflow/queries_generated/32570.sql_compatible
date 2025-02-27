@@ -1,0 +1,79 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.AcceptedAnswerId,
+        cte.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE cte ON p.ParentId = cte.PostId
+    WHERE 
+        p.PostTypeId = 2  
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.Level,
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2), 0) AS UpvoteCount
+    FROM 
+        RecursivePostCTE rp
+),
+PopularPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.Score,
+        pd.Level,
+        pd.CommentCount,
+        pd.UpvoteCount,
+        ROW_NUMBER() OVER (PARTITION BY pd.Level ORDER BY pd.Score DESC, pd.CreationDate ASC) AS RowNum
+    FROM 
+        PostDetails pd
+    WHERE 
+        pd.Score > 10 
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.Score,
+    pp.CommentCount,
+    pp.UpvoteCount,
+    CASE 
+        WHEN pp.Level = 1 THEN 'Question' 
+        ELSE 'Answer' 
+    END AS PostType,
+    CASE 
+        WHEN pp.UpvoteCount > 5 THEN 'Trending'
+        ELSE 'Regular'
+    END AS PopularityStatus
+FROM 
+    PopularPosts pp
+WHERE 
+    pp.RowNum <= 5 
+ORDER BY 
+    pp.Level, 
+    pp.Score DESC;

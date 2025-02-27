@@ -1,0 +1,106 @@
+WITH RecursivePostHierarchy AS (
+    -- Recursive CTE to gather all posts and their related answers
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        CreationDate,
+        AnswerCount,
+        Score,
+        OwnerUserId,
+        0 AS Depth
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Start with Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.AnswerCount,
+        p.Score,
+        p.OwnerUserId,
+        Depth + 1 AS Depth
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+
+-- CTE to calculate user engagement metrics using window functions
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(COALESCE(c.Score, 0)) AS CommentsScore,
+        SUM(COALESCE(v.VoteTypeId, 0)) AS TotalVotes,
+        RANK() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS PostRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+ClosedPostDetails AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        ph.Comment AS CloseReason,
+        ph.UserDisplayName AS ClosedBy,
+        ph.CreationDate AS ClosedDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+)
+
+SELECT 
+    r.Title AS QuestionTitle,
+    r.PostId AS QuestionId,
+    COUNT(DISTINCT a.PostId) AS AnswerCount,
+    u.DisplayName AS Owner,
+    u.TotalPosts,
+    u.TotalComments,
+    u.CommentsScore,
+    u.TotalVotes,
+    CASE 
+        WHEN cp.ClosedBy IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    cp.CloseReason,
+    cp.ClosedDate
+FROM 
+    RecursivePostHierarchy r
+LEFT JOIN 
+    Posts a ON r.PostId = a.ParentId -- Join to get answers
+LEFT JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    ClosedPostDetails cp ON r.PostId = cp.Id
+WHERE 
+    r.Depth = 0 -- Ensure we are only looking at questions
+AND 
+    (r.AnswerCount > 0 OR r.Score >= 10) -- Filter based on engagement
+GROUP BY 
+    r.Title, r.PostId, u.DisplayName, 
+    u.TotalPosts, u.TotalComments,
+    u.CommentsScore, u.TotalVotes,
+    cp.CloseReason, cp.ClosedBy, cp.ClosedDate
+ORDER BY 
+    r.Score DESC, u.TotalVotes DESC
+LIMIT 100; -- Limit for performance benchmarking

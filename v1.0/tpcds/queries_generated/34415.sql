@@ -1,0 +1,78 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        cs_item_sk,
+        SUM(cs_sales_price) AS total_sales,
+        COUNT(cs_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY SUM(cs_sales_price) DESC) AS rank
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_item_sk
+    HAVING 
+        SUM(cs_sales_price) > 1000
+),
+ReturnData AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_amt) AS total_returns
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+CustomerReturnRate AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(SUM(CASE WHEN sr_item_sk IS NOT NULL THEN 1 ELSE 0 END), 0) AS returns_count,
+        COUNT(DISTINCT sr_item_sk) AS distinct_returned_items
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+TopProducts AS (
+    SELECT 
+        sd.cs_item_sk,
+        sd.total_sales,
+        rd.total_returns,
+        COALESCE(SUM(crr.distinct_returned_items), 0) AS total_distinct_returns,
+        (sd.total_sales - COALESCE(rd.total_returns, 0)) AS net_sales
+    FROM 
+        SalesData sd
+    LEFT JOIN 
+        ReturnData rd ON sd.cs_item_sk = rd.sr_item_sk
+    LEFT JOIN 
+        CustomerReturnRate crr ON crr.c_customer_id IN (
+            SELECT 
+                c.c_customer_id 
+            FROM 
+                customer c
+            JOIN 
+                store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+            WHERE 
+                ss.ss_item_sk = sd.cs_item_sk
+        )
+    GROUP BY 
+        sd.cs_item_sk, sd.total_sales, rd.total_returns
+    HAVING 
+        net_sales > 500
+)
+SELECT 
+    tp.cs_item_sk,
+    tp.total_sales,
+    tp.total_returns,
+    tp.total_distinct_returns,
+    tp.net_sales,
+    CASE 
+        WHEN tp.total_sales > 10000 THEN 'High'
+        WHEN tp.total_sales BETWEEN 5000 AND 10000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM 
+    TopProducts tp
+ORDER BY 
+    tp.net_sales DESC
+LIMIT 10;

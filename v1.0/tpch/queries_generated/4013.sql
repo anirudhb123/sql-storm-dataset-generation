@@ -1,0 +1,76 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rnk
+    FROM 
+        supplier s
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT rs.s_suppkey) AS num_suppliers,
+        SUM(rs.s_acctbal) AS total_acctbal
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        RankedSuppliers rs ON n.n_nationkey = rs.s_nationkey
+    WHERE 
+        rs.rnk <= 5
+    GROUP BY 
+        r.r_name
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighSpenders AS (
+    SELECT 
+        cust.c_custkey,
+        cust.c_name,
+        cust.total_spent,
+        cust.avg_order_value
+    FROM 
+        CustomerOrderSummary cust
+    WHERE 
+        cust.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderSummary)
+),
+FinalReport AS (
+    SELECT 
+        ts.r_name,
+        hs.c_name,
+        hs.total_spent,
+        ts.total_acctbal
+    FROM 
+        TopSuppliers ts
+    FULL OUTER JOIN 
+        HighSpenders hs ON ts.num_suppliers > 0
+)
+SELECT 
+    fr.r_name,
+    fr.c_name,
+    fr.total_spent,
+    COALESCE(fr.total_acctbal, 0) AS total_acctbal,
+    CASE 
+        WHEN fr.total_acctbal IS NULL THEN 'No suppliers in region' 
+        ELSE 'Suppliers exist in region' 
+    END AS supplier_status
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.total_spent DESC, fr.r_name;

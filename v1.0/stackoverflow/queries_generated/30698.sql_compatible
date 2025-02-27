@@ -1,0 +1,106 @@
+
+WITH RecursivePosts AS (
+    SELECT 
+        Id,
+        PostTypeId,
+        AcceptedAnswerId,
+        ParentId,
+        CreationDate,
+        OwnerUserId,
+        Score,
+        ViewCount,
+        AnswerCount,
+        CommentCount,
+        Body,
+        Title,
+        LastActivityDate,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Body,
+        p.Title,
+        p.LastActivityDate,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalBounty,
+        TotalBadges,
+        TotalViews,
+        TotalScore,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC, TotalBounty DESC) AS Rank
+    FROM 
+        UserStats
+)
+
+SELECT 
+    rp.Title AS PostTitle,
+    rp.CreationDate AS PostCreationDate,
+    rp.OwnerUserId,
+    u.DisplayName AS OwnerDisplayName,
+    p.Title AS ParentPost,
+    us.Reputation,
+    us.TotalViews,
+    us.TotalBounty,
+    us.TotalBadges,
+    us.TotalScore,
+    CASE 
+        WHEN rp.Score >= 10 THEN 'High Score'
+        WHEN rp.Score BETWEEN 5 AND 9 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    RecursivePosts rp
+LEFT JOIN 
+    Posts p ON rp.ParentId = p.Id
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserStats us ON rp.OwnerUserId = us.UserId
+WHERE 
+    rp.Level = 1 AND 
+    (rp.Title LIKE '%SQL%' OR rp.Body LIKE '%SQL%') 
+ORDER BY 
+    rp.CreationDate DESC
+FETCH FIRST 10 ROWS ONLY;

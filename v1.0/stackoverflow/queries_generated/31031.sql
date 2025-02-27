@@ -1,0 +1,91 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL  -- Starting from root posts
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostScores AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  -- Bounty start and close votes
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score
+),
+PostsWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ph.Id AS PostId,
+    ph.Title,
+    ps.Score AS PostScore,
+    ps.TotalBounty,
+    ps.CommentCount,
+    ph.Level AS HierarchyLevel,
+    ub.DisplayName AS UserDisplayName,
+    ub.BadgeCount,
+    ub.AverageReputation,
+    CASE 
+        WHEN ps.CommentCount IS NULL THEN 'No comments' 
+        ELSE 'Has comments' 
+    END AS CommentStatus,
+    COALESCE(STRING_AGG(DISTINCT t.TagName, ', '), 'No tags') AS Tags
+FROM 
+    RecursivePostHierarchy ph
+LEFT JOIN 
+    PostScores ps ON ph.Id = ps.Id
+LEFT JOIN 
+    Users u ON ps.UserId = u.Id
+LEFT JOIN 
+    PostsWithBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            t.TagName 
+        FROM 
+            unnest(string_to_array(p.Tags, ',')) AS tag 
+        JOIN 
+            Tags t ON t.TagName = tag
+        WHERE 
+            p.Id = ph.Id
+    ) AS t ON TRUE
+GROUP BY 
+    ph.Id, ph.Title, ps.Score, ps.TotalBounty, ps.CommentCount, ph.Level, ub.DisplayName, ub.BadgeCount, ub.AverageReputation
+ORDER BY 
+    PostScore DESC, HierarchyLevel;

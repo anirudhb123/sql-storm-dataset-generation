@@ -1,0 +1,91 @@
+WITH RecursiveTags AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        0 AS Level
+    FROM 
+        Tags
+    WHERE 
+        Count > 0
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        rt.Level + 1
+    FROM 
+        Tags t
+    INNER JOIN 
+        RecursiveTags rt ON t.Id = rt.Id -- Recursive join condition can be adjusted based on tag relationships
+    WHERE 
+        rt.Level < 5
+),
+UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(ph.ClosedCount, 0) AS ClosedCount,
+        COALESCE(ph.CommentsCount, 0) AS CommentsCount,
+        UPPER(SUBSTRING(p.Title, 1, 1)) + LOWER(SUBSTRING(p.Title, 2)) AS FormattedTitle -- Example string manipulation
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS ClosedCount
+        FROM 
+            PostHistory
+        WHERE 
+            PostHistoryTypeId = 10
+        GROUP BY 
+            PostId
+    ) ph ON p.Id = ph.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentsCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+)
+SELECT 
+    p.PostId, 
+    p.Title,
+    p.FormattedTitle,
+    p.Score,
+    ps.ClosedCount,
+    ps.CommentsCount,
+    uvs.TotalVotes,
+    uvs.UpVotes,
+    uvs.DownVotes,
+    rt.TagName AS RelatedTag
+FROM 
+    PostStats ps
+JOIN 
+    UserVoteSummary uvs ON uvs.TotalVotes > 0 -- Only including users who voted
+LEFT JOIN 
+    RecursiveTags rt ON rt.Count > 5 -- Including tags with high count
+ORDER BY 
+    ps.Score DESC, ps.CommentsCount DESC,
+    COALESCE(uvs.TotalVotes, 0) DESC
+LIMIT 100;

@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rnk
+    FROM 
+        aka_title a
+    JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+ActorsByMovie AS (
+    SELECT 
+        cm.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        cast_info cm
+    JOIN 
+        aka_name a ON cm.person_id = a.person_id
+    GROUP BY 
+        cm.movie_id
+),
+MoviesWithKeyword AS (
+    SELECT 
+        mt.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    WHERE 
+        k.keyword ILIKE '%thriller%'
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    abm.actor_count,
+    abm.actor_names,
+    COALESCE(mk.keyword, 'No Keywords') AS keyword
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorsByMovie abm ON rm.id = abm.movie_id
+LEFT JOIN 
+    MoviesWithKeyword mk ON rm.id = mk.movie_id
+WHERE 
+    rm.rnk <= 5
+ORDER BY 
+    rm.production_year DESC, rm.title;

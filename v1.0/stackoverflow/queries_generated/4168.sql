@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        AVG(p.Score) AS AvgScore,
+        AVG(COALESCE(NULLIF(p.ViewCount, 0), NULL)) AS AvgViews
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(rp.Title, 'No Posts') AS TopPost,
+    COALESCE(rp.Score, 0) AS TopPostScore,
+    ps.TotalPosts,
+    ps.AvgScore,
+    ps.AvgViews,
+    CONCAT('Gold: ', COALESCE(ur.GoldBadges, 0), ', Silver: ', COALESCE(ur.SilverBadges, 0), ', Bronze: ', COALESCE(ur.BronzeBadges, 0)) AS BadgeSummary
+FROM 
+    Users u
+LEFT JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN 
+    PostStatistics ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.Rank = 1
+WHERE 
+    u.Reputation > 500
+ORDER BY 
+    u.Reputation DESC
+LIMIT 10;

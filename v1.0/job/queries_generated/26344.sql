@@ -1,0 +1,62 @@
+WITH movie_data AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        c.kind AS company_type,
+        a.name AS actor_name,
+        p.gender,
+        COUNT(DISTINCT c.id) AS company_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_list,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keyword_list
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    JOIN 
+        company_name c ON c.id = mc.company_id
+    JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    JOIN 
+        aka_name a ON a.person_id = ci.person_id
+    JOIN 
+        name n ON n.id = a.person_id
+    JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    LEFT JOIN 
+        person_info pi ON pi.person_id = a.person_id
+    LEFT JOIN 
+        role_type r ON r.id = ci.role_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword, c.kind, a.name, p.gender
+),
+ranked_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        company_count,
+        actor_list,
+        keyword_list,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY company_count DESC) AS rank
+    FROM 
+        movie_data
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.company_count,
+    rm.actor_list,
+    rm.keyword_list
+FROM 
+    ranked_movies rm
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    rm.production_year DESC, rm.rank;

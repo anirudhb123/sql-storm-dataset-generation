@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT p.Id, 
+           p.Title, 
+           p.Score, 
+           p.CreationDate, 
+           p.OwnerUserId, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+           COALESCE(CAST(SUM(v.BountyAmount) FILTER(WHERE v.VoteTypeId = 8) OVER (PARTITION BY p.Id) AS INT), 0) AS TotalBounty
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+      AND p.Score > 0
+),
+UserReputation AS (
+    SELECT u.Id, 
+           u.Reputation, 
+           u.DisplayName, 
+           u.Location,
+           COUNT(DISTINCT p.Id) AS PostCount,
+           SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId 
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.Reputation, u.DisplayName, u.Location
+),
+ClosedPostHistory AS (
+    SELECT ph.PostId,
+           ph.UserId,
+           ph.CreationDate,
+           ph.Comment,
+           ARRAY_AGG(pt.Name) AS PostHistoryTypeNames
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE pt.Name IN ('Post Closed', 'Post Reopened')
+    GROUP BY ph.PostId, ph.UserId, ph.CreationDate, ph.Comment
+)
+SELECT rp.Title,
+       rp.Score,
+       rp.CreationDate,
+       u.DisplayName,
+       u.Location,
+       u.PostCount,
+       u.TotalBadges,
+       COALESCE(cph.Comment, 'No Closure Comments') AS ClosureComments,
+       STRING_AGG(DISTINCT cph.PostHistoryTypeNames) AS PostHistoryInfo,
+       CASE 
+           WHEN rp.TotalBounty > 0 THEN 'Has Bounty'
+           ELSE 'No Bounty'
+       END AS BountyStatus
+FROM RankedPosts rp
+JOIN UserReputation u ON rp.OwnerUserId = u.Id
+LEFT JOIN ClosedPostHistory cph ON rp.Id = cph.PostId
+WHERE rp.rn = 1
+GROUP BY rp.Title, rp.Score, rp.CreationDate, u.DisplayName, u.Location, 
+         u.PostCount, u.TotalBadges, cph.Comment
+ORDER BY rp.Score DESC, rp.CreationDate DESC
+LIMIT 100;

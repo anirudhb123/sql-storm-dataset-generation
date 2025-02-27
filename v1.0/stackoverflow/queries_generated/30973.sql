@@ -1,0 +1,105 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        1 AS Level,
+        P.OwnerUserId,
+        P.CreationDate
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Starting with questions
+    UNION ALL
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        Level + 1,
+        P.OwnerUserId,
+        P.CreationDate
+    FROM 
+        Posts P
+    INNER JOIN RecursivePostHierarchy RPH 
+        ON P.ParentId = RPH.PostId
+    WHERE 
+        P.PostTypeId = 2 -- Joining to answers
+),
+UserRankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY COUNT(V.VoteTypeId) DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId IN (1, 2) -- Questions and Answers
+    GROUP BY 
+        P.Id, P.Title, P.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+CombinedData AS (
+    SELECT 
+        U.DisplayName,
+        RP.PostId,
+        RP.Title,
+        RP.ViewCount,
+        RP.Score,
+        UBP.Upvotes,
+        UBP.Downvotes,
+        UB.BadgeCount,
+        UB.BadgeNames,
+        CASE 
+            WHEN RP.OwnerUserId IS NOT NULL THEN 
+                CASE 
+                    WHEN UBP.Upvotes > UBP.Downvotes THEN 'Positive'
+                    WHEN UBP.Upvotes < UBP.Downvotes THEN 'Negative'
+                    ELSE 'Neutral'
+                END
+            ELSE 'No owner'
+        END AS PostSentiment,
+        RP.Level
+    FROM 
+        RecursivePostHierarchy RP
+    JOIN 
+        Users U ON RP.OwnerUserId = U.Id
+    LEFT JOIN 
+        UserRankedPosts UBP ON RP.PostId = UBP.PostId
+    LEFT JOIN 
+        UserBadges UB ON U.Id = UB.UserId
+)
+SELECT 
+    CD.DisplayName,
+    CD.Title,
+    CD.ViewCount,
+    CD.Score,
+    CD.Upvotes,
+    CD.Downvotes,
+    CD.BadgeCount,
+    CD.BadgeNames,
+    CD.PostSentiment,
+    CD.Level
+FROM 
+    CombinedData CD
+WHERE 
+    CD.Level <= 2 -- Filtering for the top-level and first-level responses
+ORDER BY 
+    CD.Score DESC, CD.ViewCount DESC;

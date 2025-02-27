@@ -1,0 +1,58 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 1 AS level
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.level + 1
+    FROM customer c
+    INNER JOIN CustomerHierarchy ch ON c.c_custkey = ch.c_custkey
+    WHERE ch.level < 5
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+    HAVING total_sales > 5000
+),
+NationStats AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count, SUM(s.s_acctbal) AS total_balance
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+TopParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > 200
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_availqty) > 100
+),
+WindowedOrders AS (
+    SELECT o.o_custkey, o.o_orderkey, o.o_orderdate, RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+)
+
+SELECT 
+    ch.c_name AS customer_name,
+    TOPP.p_name AS top_part_name,
+    n.n_name AS nation_name,
+    os.total_sales AS order_total,
+    CASE 
+        WHEN os.order_total IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status,
+    SUM(ns.total_balance) AS total_nation_balance
+FROM CustomerHierarchy ch
+LEFT JOIN WindowedOrders os ON ch.c_custkey = os.o_custkey
+LEFT JOIN TopParts TOPP ON os.o_orderkey = os.o_orderkey
+LEFT JOIN NationStats ns ON ch.c_custkey = ns.n_nationkey
+WHERE ch.level = 1
+GROUP BY ch.c_name, TOPP.p_name, n.n_name, os.total_sales
+HAVING SUM(ns.total_balance) IS NOT NULL
+ORDER BY customer_name, total_sales DESC
+LIMIT 100;

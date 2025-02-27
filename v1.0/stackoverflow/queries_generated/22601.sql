@@ -1,0 +1,79 @@
+WITH UserInteractions AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT p.Id) AS AnswerCount,
+        COUNT(DISTINCT ph.Id) AS HistoryCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 2
+    LEFT JOIN 
+        PostHistory ph ON u.Id = ph.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        ROW_NUMBER() OVER (ORDER BY TotalViews DESC) AS Rank
+    FROM 
+        TagStatistics
+    WHERE 
+        TotalViews > 0
+),
+Engagement AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        i.Upvotes - i.Downvotes AS NetVotes,
+        t.TagName,
+        t.PostCount,
+        t.TotalViews,
+        RANK() OVER (PARTITION BY t.TagName ORDER BY i.AnswerCount DESC, i.HistoryCount DESC) AS EngagementRank
+    FROM 
+        UserInteractions i
+    JOIN 
+        TopTags t ON i.AnswerCount > 0
+)
+SELECT 
+    e.UserId,
+    e.DisplayName,
+    e.NetVotes,
+    e.TagName,
+    e.PostCount,
+    e.TotalViews,
+    CASE 
+        WHEN e.EngagementRank = 1 THEN 'Top Contributor'
+        ELSE 'Contributor'
+    END AS ContributorLevel
+FROM 
+    Engagement e
+WHERE 
+    e.NetVotes > 0
+ORDER BY 
+    e.TagName, e.NetVotes DESC;
+
+WITH v AS (
+    SELECT COUNT(*) AS total_votes
+    FROM Votes
+)
+SELECT * FROM v;

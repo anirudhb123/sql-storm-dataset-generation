@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(NULLIF(UPPER(SUBSTRING(p.Body, 1, 100)), ''), 'No Content') AS Preview,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpvoteCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year' AND
+        p.Score > 0
+), 
+
+ClosedPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        ph.CreationDate AS CloseDate,
+        p.OwnerUserId,
+        ph.Comment,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY ph.CreationDate DESC) AS CloseRank
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+)
+
+SELECT 
+    rp.Title AS PostTitle,
+    rp.Preview,
+    rp.ViewCount AS PostViews,
+    rp.Score AS PostScore,
+    (rp.UpvoteCount - rp.DownvoteCount) AS NetVotes,
+    cp.CloseDate,
+    cp.Comment AS CloseReason,
+    ts.TagName,
+    ts.PostCount,
+    ts.PositiveScoreCount,
+    CASE 
+        WHEN cp.CloseDate IS NOT NULL THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus,
+    CASE 
+        WHEN cp.CloseRank = 1 THEN 'Most Recent Closure'
+        ELSE 'Other'
+    END AS ClosureType
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.Id
+LEFT JOIN 
+    TagStats ts ON rp.Tags LIKE '%' || ts.TagName || '%'
+WHERE 
+    rp.PostRank = 1
+GROUP BY 
+    rp.Title, rp.Preview, rp.ViewCount, rp.Score, rp.UpvoteCount, rp.DownvoteCount, cp.CloseDate, cp.Comment, ts.TagName, ts.PostCount, ts.PositiveScoreCount, cp.CloseRank
+ORDER BY 
+    rp.ViewCount DESC, rp.Score DESC
+LIMIT 100
+OFFSET 10;

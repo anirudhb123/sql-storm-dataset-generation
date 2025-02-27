@@ -1,0 +1,74 @@
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(Posts.AnswerCount, 0)) AS TotalAnswers,
+        SUM(COALESCE(Posts.Score, 0)) AS TotalScore
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '><')::int[])  -- Assuming Tags are stored in a specific way in the Posts table
+    GROUP BY 
+        Tags.TagName
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(U.UpVotes) AS TotalUpVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(COALESCE(P.Score, 0)) AS TotalPostScore
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+    ORDER BY 
+        TotalUpVotes DESC
+    LIMIT 10
+),
+ActivePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(C.Id) AS CommentCount,
+        MAX(V.CreationDate) AS LastVoteDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate
+    HAVING 
+        COUNT(C.Id) > 10
+)
+SELECT 
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews,
+    TS.TotalAnswers,
+    TS.TotalScore,
+    TU.DisplayName AS ActiveUser,
+    TU.TotalUpVotes,
+    TU.TotalPosts,
+    TU.TotalPostScore,
+    AP.Title AS ActivePostTitle,
+    AP.CommentCount,
+    AP.LastVoteDate
+FROM 
+    TagStatistics TS
+LEFT JOIN 
+    TopUsers TU ON TU.TotalPosts > 5
+LEFT JOIN 
+    ActivePosts AP ON AP.CommentCount > 10
+ORDER BY 
+    TS.TotalViews DESC, TS.PostCount DESC;

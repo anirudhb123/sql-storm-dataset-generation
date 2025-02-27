@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs.sales_price AS top_sales_price,
+        cs.sales_price AS base_sales_price,
+        cs.cs_order_number,
+        cs.cs_quantity,
+        cs.cs_net_profit,
+        0 AS level
+    FROM catalog_sales cs
+    WHERE cs.sold_date_sk = (SELECT MAX(sold_date_sk) FROM catalog_sales)
+    UNION ALL
+    SELECT 
+        cs.sales_price,
+        sh.base_sales_price,
+        cs.cs_order_number,
+        cs.cs_quantity,
+        cs.cs_net_profit + sh.cs_net_profit,
+        level + 1
+    FROM catalog_sales cs
+    JOIN sales_hierarchy sh ON cs.cs_order_number = sh.cs_order_number AND cs.cs_quantity < sh.cs_quantity
+    WHERE level < 5
+), address_counts AS (
+    SELECT
+        ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY ca_state
+), sales_per_state AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ca.ca_state
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE ws.ws_sold_date_sk = (
+        SELECT MAX(ws2.ws_sold_date_sk) 
+        FROM web_sales ws2
+    )
+    GROUP BY ib.ib_income_band_sk, ca.ca_state
+)
+SELECT 
+    d.d_day_name,
+    d.d_year,
+    sh.top_sales_price,
+    sh.base_sales_price,
+    COUNT(DISTINCT sh.cs_order_number) AS order_count,
+    MAX(sh.cs_net_profit) AS max_profit,
+    SUM(ac.customer_count) AS state_customer_count,
+    sp.total_net_profit
+FROM date_dim d
+LEFT JOIN sales_hierarchy sh ON d.d_date_sk = sh.cs_order_number
+LEFT JOIN address_counts ac ON d.d_year = 2023 AND ac.ca_state IS NOT NULL
+LEFT JOIN sales_per_state sp ON d.d_year = sp.ib_income_band_sk
+WHERE d.d_dow IN (1, 2) -- Monday and Tuesday
+GROUP BY d.d_day_name, d.d_year, sh.top_sales_price, sh.base_sales_price, sp.total_net_profit
+ORDER BY d.d_year, order_count DESC;

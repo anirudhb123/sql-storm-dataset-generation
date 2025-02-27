@@ -1,0 +1,61 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN '1995-01-01' AND '1996-12-31'
+), 
+TopNations AS (
+    SELECT 
+        n.n_name,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_name
+    ORDER BY 
+        total_acctbal DESC
+    LIMIT 5
+), 
+PartSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_availqty) > 1000
+)
+SELECT 
+    r.r_name AS region,
+    t.n_name AS nation,
+    COUNT(DISTINCT lo.o_orderkey) AS num_orders,
+    SUM(lo.o_totalprice) AS total_revenue,
+    SUM(ps.total_availqty) AS total_available_quantity,
+    AVG(ps.avg_supplycost) AS avg_supply_cost
+FROM 
+    RankedOrders lo
+JOIN 
+    customer c ON lo.o_orderkey = c.c_custkey
+JOIN 
+    TopNations t ON c.c_nationkey = t.n_name
+JOIN 
+    PartSuppliers ps ON ps.ps_partkey = lo.l_orderkey
+JOIN 
+    region r ON t.n_nationkey = r.r_regionkey
+WHERE 
+    lo.order_rank <= 10
+GROUP BY 
+    r.r_name, t.n_name
+ORDER BY 
+    total_revenue DESC;

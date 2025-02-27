@@ -1,0 +1,69 @@
+WITH movie_actors AS (
+    SELECT 
+        c.movie_id,
+        a.person_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER(PARTITION BY c.movie_id ORDER BY a.name) AS actor_rank,
+        CASE WHEN COUNT(*) OVER(PARTITION BY c.movie_id) > 3 THEN 'Ensemble' ELSE 'Lead' END AS role_type
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+),
+movie_info_ext AS (
+    SELECT 
+        m.movie_id,
+        GROUP_CONCAT(m.info) AS movie_details,
+        COALESCE(MAX(i.info_type_id), 0) AS last_info_type_id
+    FROM 
+        movie_info m
+    LEFT JOIN 
+        movie_info_idx i ON m.movie_id = i.movie_id
+    GROUP BY 
+        m.movie_id
+),
+keyword_count AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+extended_movies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(mk.keyword_count, 0) AS keyword_count,
+        m.movie_details,
+        COALESCE(ma.role_type, 'Unknown') AS role_type,
+        COALESCE(NULLIF(ma.actor_rank, 1), 0) AS supporting_actor_rank
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info_ext m ON t.id = m.movie_id
+    LEFT JOIN 
+        movie_actors ma ON t.id = ma.movie_id
+    LEFT JOIN 
+        keyword_count mk ON t.id = mk.movie_id
+    WHERE 
+        (t.production_year > 2000 OR t.production_year IS NULL)
+        AND (ma.actor_rank IS NULL OR ma.actor_rank < 3 OR ma.role_type = 'Lead')
+)
+SELECT 
+    em.title,
+    em.production_year,
+    em.keyword_count,
+    em.movie_details,
+    CASE 
+        WHEN em.supporting_actor_rank > 0 THEN 'Supportive Cast' 
+        ELSE 'Main Cast' 
+    END AS cast_description
+FROM 
+    extended_movies em
+WHERE 
+    (em.keyword_count > 1 OR em.movie_details IS NOT NULL)
+ORDER BY 
+    em.production_year DESC, em.title;

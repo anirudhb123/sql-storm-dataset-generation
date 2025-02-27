@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        t.kind AS movie_kind,
+        m.production_year,
+        COUNT(ci.id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM 
+        title m
+    JOIN 
+        aka_title ak ON ak.movie_id = m.id
+    JOIN 
+        cast_info ci ON ci.movie_id = m.id
+    JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    JOIN 
+        keyword kw ON kw.id = mk.keyword_id
+    JOIN 
+        kind_type t ON t.id = m.kind_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id, m.title, t.kind, m.production_year
+),
+TopRanked AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        movie_kind,
+        production_year,
+        cast_count,
+        aka_names,
+        keywords,
+        RANK() OVER (ORDER BY cast_count DESC) AS rank
+    FROM 
+        RankedMovies
+)
+SELECT 
+    tr.movie_id,
+    tr.movie_title,
+    tr.movie_kind,
+    tr.production_year,
+    tr.cast_count,
+    tr.aka_names,
+    tr.keywords
+FROM 
+    TopRanked tr
+WHERE 
+    tr.rank <= 10
+ORDER BY 
+    tr.cast_count DESC;
+
+This SQL query extracts the top 10 movies produced since 2000, ranked by the number of cast members, while providing additional details such as alternate names (aka names) and keywords associated with each movie. It utilizes Common Table Expressions (CTEs) to simplify the aggregation and ranking process, ultimately returning a comprehensive view of the most significant films based on their casting statistics and associated metadata.

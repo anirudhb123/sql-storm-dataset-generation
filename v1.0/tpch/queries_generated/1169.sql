@@ -1,0 +1,63 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    n.n_name,
+    COALESCE(ss.s_name, 'No Supplier') AS supplier_name,
+    COUNT(DISTINCT co.c_custkey) AS customer_count,
+    SUM(co.total_spent) AS total_customer_spending,
+    SUM(os.net_revenue) AS total_order_revenue,
+    CASE 
+        WHEN SUM(ss.total_available) IS NULL THEN 0
+        ELSE SUM(ss.total_available)
+    END AS total_available_qty
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+LEFT JOIN 
+    CustomerOrders co ON co.total_orders > 0
+LEFT JOIN 
+    OrderDetails os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey))
+GROUP BY 
+    n.n_name, ss.s_name
+ORDER BY 
+    total_order_revenue DESC;

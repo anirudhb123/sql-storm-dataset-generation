@@ -1,0 +1,51 @@
+WITH RECURSIVE nation_sums AS (
+    SELECT n.n_nationkey, 
+           n.n_name, 
+           SUM(s.s_acctbal) AS total_acctbal,
+           RANK() OVER (ORDER BY SUM(s.s_acctbal) DESC) AS rank
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING SUM(s.s_acctbal) > 1000
+), 
+order_summary AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+    GROUP BY c.c_custkey, c.c_name
+), 
+part_ranks AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+), 
+lineitem_summary AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+           COUNT(*) AS item_count,
+           AVG(l.l_tax) AS avg_tax
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT ns.n_name,
+       os.order_count,
+       os.total_spent,
+       ps.p_name,
+       ps.price_rank,
+       ls.revenue,
+       ls.item_count,
+       CASE 
+           WHEN ls.avg_tax IS NULL THEN 'No tax data'
+           ELSE CAST(ls.avg_tax AS CHAR)
+       END AS average_tax
+FROM nation_sums ns
+LEFT JOIN order_summary os ON ns.n_nationkey = os.c_custkey
+LEFT JOIN part_ranks ps ON ps.price_rank <= 5
+LEFT JOIN lineitem_summary ls ON ls.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = os.c_custkey)
+WHERE ns.rank <= 10
+ORDER BY ns.n_name, os.total_spent DESC;

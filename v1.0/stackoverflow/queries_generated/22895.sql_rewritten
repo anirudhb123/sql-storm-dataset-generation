@@ -1,0 +1,79 @@
+WITH PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT v.UserId) AS TotalVoters
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.PostTypeId
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS ClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostWithHistory AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        COALESCE(vs.Upvotes, 0) AS Upvotes,
+        COALESCE(vs.Downvotes, 0) AS Downvotes,
+        COALESCE(ch.ClosedDate, '[Not Closed]') AS ClosedDate,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY vs.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteStats vs ON p.Id = vs.PostId
+    LEFT JOIN 
+        ClosedPostHistory ch ON p.Id = ch.PostId
+    LEFT JOIN 
+        PostComments pc ON p.Id = pc.PostId
+    WHERE 
+        p.PostTypeId = 1 OR p.PostTypeId = 2
+),
+RankedPosts AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY Upvotes DESC, Downvotes ASC, CommentCount DESC) AS PostRank
+    FROM 
+        PostWithHistory
+)
+SELECT 
+    Title,
+    ViewCount,
+    CreationDate,
+    Upvotes,
+    Downvotes,
+    ClosedDate,
+    CommentCount,
+    PostRank
+FROM 
+    RankedPosts
+WHERE 
+    rn <= 10 
+    AND (ClosedDate <> '[Not Closed]' OR Locked = 0) 
+ORDER BY 
+    PostRank, CreationDate DESC;

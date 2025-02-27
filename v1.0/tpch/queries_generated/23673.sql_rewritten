@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank_within_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierOrderStatistics AS (
+    SELECT 
+        s.s_suppkey, 
+        COUNT(l.l_orderkey) AS lineitem_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        supplier s
+    JOIN 
+        lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    r.s_suppkey AS supplier_key, 
+    r.s_name AS supplier_name,
+    co.c_custkey AS customer_key, 
+    co.c_name AS customer_name,
+    co.order_count,
+    co.avg_order_value,
+    ss.lineitem_count,
+    ss.total_revenue,
+    CASE 
+        WHEN ss.last_ship_date IS NOT NULL THEN DATEDIFF(cast('1998-10-01' as date), ss.last_ship_date) 
+        ELSE NULL 
+    END AS days_since_last_ship,
+    CASE 
+        WHEN co.total_spent > 1000 THEN 'High Value Customer' 
+        WHEN co.total_spent IS NULL THEN 'No Orders' 
+        ELSE 'Regular Customer' 
+    END AS customer_segment,
+    COALESCE(r.total_cost, 0) AS total_supplier_cost
+FROM 
+    RankedSuppliers r
+FULL OUTER JOIN 
+    CustomerOrders co ON r.s_suppkey = co.c_custkey
+JOIN 
+    SupplierOrderStatistics ss ON ss.s_suppkey = r.s_suppkey
+WHERE 
+    (ss.total_revenue > 5000 OR r.total_cost > 2000)
+    AND (days_since_last_ship IS NULL OR days_since_last_ship < 30)
+ORDER BY 
+    r.total_cost DESC NULLS LAST,
+    co.total_spent DESC NULLS FIRST;

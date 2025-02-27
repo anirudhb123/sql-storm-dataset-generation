@@ -1,0 +1,82 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        ca.ca_city IS NOT NULL AND 
+        c.c_first_name IS NOT NULL AND 
+        c.c_last_name IS NOT NULL
+),
+ProductInfo AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        i.i_category,
+        i.i_brand
+    FROM 
+        item i
+    WHERE 
+        i.i_current_price > 0
+),
+SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+DetailedReport AS (
+    SELECT 
+        ci.full_name,
+        ci.ca_city,
+        ci.ca_state,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        ci.cd_purchase_estimate,
+        pi.i_item_desc,
+        pi.i_current_price,
+        ss.total_profit,
+        ss.order_count
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        SalesSummary ss ON ci.c_customer_id = ss.ws_bill_customer_sk
+    LEFT JOIN 
+        ProductInfo pi ON ss.order_count > 0
+)
+SELECT 
+    full_name,
+    ca_city,
+    ca_state,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    cd_purchase_estimate,
+    i_item_desc,
+    i_current_price,
+    total_profit,
+    order_count
+FROM 
+    DetailedReport
+ORDER BY 
+    total_profit DESC, 
+    order_count DESC
+LIMIT 100;

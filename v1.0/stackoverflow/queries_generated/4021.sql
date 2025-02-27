@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+), BadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 -- Gold badges only
+    GROUP BY 
+        b.UserId
+), ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.UserId AS CloserId,
+        ph.CreationDate AS CloseDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CreationDate,
+    rp.CommentCount,
+    COALESCE(bc.BadgeCount, 0) AS GoldBadgeCount,
+    cp.CloseDate
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    BadgeCounts bc ON rp.OwnerUserId = bc.UserId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.Id
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.ViewCount DESC
+LIMIT 50;

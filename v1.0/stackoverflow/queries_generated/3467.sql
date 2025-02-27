@@ -1,0 +1,69 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY U.Id
+),
+TopPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank
+    FROM Posts P
+    WHERE P.Score > 0
+),
+ClosedPostDetails AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS CloseCount,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.PostId
+),
+HighlyActiveUsers AS (
+    SELECT 
+        US.UserId,
+        US.DisplayName,
+        US.Reputation,
+        US.UpVotes,
+        US.DownVotes,
+        US.PostCount,
+        US.CommentCount,
+        RANK() OVER (ORDER BY US.Reputation DESC) AS ReputationRank
+    FROM UserStats US
+    WHERE US.Reputation > 1000
+),
+FinalResult AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        U.UpVotes,
+        U.DownVotes,
+        COALESCE(TP.Rank, 0) AS TopPostRank,
+        COALESCE(CPD.CloseCount, 0) AS ClosedPosts
+    FROM HighlyActiveUsers U
+    LEFT JOIN TopPosts TP ON U.UserId = TP.OwnerUserId
+    LEFT JOIN ClosedPostDetails CPD ON TP.Id = CPD.PostId
+)
+SELECT 
+    F.DisplayName,
+    F.Reputation,
+    F.UpVotes,
+    F.DownVotes,
+    F.TopPostRank,
+    F.ClosedPosts
+FROM FinalResult F
+WHERE F.ReputationRank <= 10
+ORDER BY F.Reputation DESC, F.TopPostRank ASC;

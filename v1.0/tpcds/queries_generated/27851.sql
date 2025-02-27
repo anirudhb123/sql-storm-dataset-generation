@@ -1,0 +1,47 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca.city, 
+        ca.state, 
+        CONCAT(ca.street_number, ' ', ca.street_name, ' ', ca.street_type) AS full_address,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    WHERE ca.city LIKE 'San%' OR ca.city LIKE 'Los%'
+    GROUP BY ca.city, ca.state, ca.street_number, ca.street_name, ca.street_type
+),
+DemographicDetails AS (
+    SELECT 
+        cd.gender, 
+        cd.education_status, 
+        SUM(cd.purchase_estimate) AS total_purchase_estimate
+    FROM customer_demographics cd
+    JOIN customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.gender IN ('M', 'F')
+    GROUP BY cd.gender, cd.education_status
+),
+WebSalesSummary AS (
+    SELECT 
+        d.d_year, 
+        SUM(ws.ws_sales_price) AS total_sales, 
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_year
+)
+SELECT 
+    ad.city, 
+    ad.state, 
+    ad.full_address, 
+    ad.customer_count, 
+    dd.gender, 
+    dd.education_status, 
+    dd.total_purchase_estimate, 
+    ws.d_year, 
+    ws.total_sales, 
+    ws.total_profit
+FROM AddressDetails ad
+CROSS JOIN DemographicDetails dd
+CROSS JOIN WebSalesSummary ws
+WHERE ad.customer_count > 5 AND dd.total_purchase_estimate > 1000 AND ws.total_profit > 5000
+ORDER BY ad.city, dd.education_status, ws.d_year DESC;

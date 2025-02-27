@@ -1,0 +1,58 @@
+WITH RECURSIVE related_movies AS (
+    SELECT DISTINCT
+        m1.id AS movie_id,
+        m1.title,
+        CASE
+            WHEN m1.production_year IS NULL THEN 'Unknown Year'
+            ELSE m1.production_year::text
+        END AS production_year,
+        string_agg(DISTINCT t.keyword, ', ') AS keywords,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM
+        aka_title m1
+    LEFT JOIN movie_keyword mk ON m1.id = mk.movie_id
+    LEFT JOIN keyword t ON mk.keyword_id = t.id
+    LEFT JOIN complete_cast cc ON m1.id = cc.movie_id
+    LEFT JOIN cast_info c ON cc.subject_id = c.person_id
+    WHERE
+        m1.production_year > 2000 OR (m1.production_year IS NULL AND (EXISTS (
+            SELECT 1 FROM movie_info mi WHERE mi.movie_id = m1.id AND mi.info_type_id = 1
+        )))
+    GROUP BY
+        m1.id, m1.title, m1.production_year
+    HAVING
+        COUNT(DISTINCT CASE WHEN c.note IS NOT NULL THEN c.person_id END) > 5
+),
+ranked_movies AS (
+    SELECT
+        movie_id,
+        title,
+        production_year,
+        keywords,
+        cast_count,
+        ROW_NUMBER() OVER (ORDER BY cast_count DESC, production_year ASC NULLS LAST) AS rank
+    FROM
+        related_movies
+)
+SELECT
+    r.movie_id,
+    r.title,
+    r.production_year,
+    COALESCE(r.keywords, 'No Keywords') AS keywords,
+    r.cast_count,
+    CASE
+        WHEN r.rank <= 10 THEN 'Top 10 Movies'
+        ELSE 'Other Movies'
+    END AS movie_category,
+    t.name AS company_name,
+    COALESCE(cn.name, 'Independent') AS company_type
+FROM
+    ranked_movies r
+LEFT JOIN movie_companies mc ON r.movie_id = mc.movie_id
+LEFT JOIN company_name cn ON mc.company_id = cn.id
+LEFT JOIN company_type t ON mc.company_type_id = t.id
+WHERE
+    (r.cast_count > 10 OR r.production_year = 'Unknown Year')
+    AND (LOWER(r.keywords) LIKE '%action%' OR r.keywords IS NULL)
+ORDER BY
+    r.rank, r.title;

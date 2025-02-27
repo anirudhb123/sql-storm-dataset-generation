@@ -1,0 +1,94 @@
+WITH RecursivePostData AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.Score,
+        a.ViewCount,
+        a.Tags,
+        a.ParentId,
+        rp.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostData rp ON a.ParentId = rp.PostId
+    WHERE 
+        a.PostTypeId = 2 -- Answers only
+),
+RankedPosts AS (
+    SELECT 
+        rpd.PostId,
+        rpd.Title,
+        rpd.CreationDate,
+        rpd.Score,
+        rpd.ViewCount,
+        rpd.Tags,
+        rpd.Level,
+        ROW_NUMBER() OVER (PARTITION BY rpd.Level ORDER BY rpd.Score DESC) AS Rank
+    FROM 
+        RecursivePostData rpd
+),
+PostComments AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+BadgeSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.Score,
+    pp.ViewCount,
+    pc.CommentCount,
+    br.BadgeCount,
+    br.GoldBadges,
+    br.SilverBadges,
+    br.BronzeBadges
+FROM 
+    RankedPosts pp
+LEFT JOIN 
+    PostComments pc ON pp.PostId = pc.PostId
+LEFT JOIN 
+    BadgeSummary br ON pp.PostId IN (
+        SELECT DISTINCT p.Id FROM Posts p WHERE p.OwnerUserId = br.UserId
+    )
+WHERE 
+    pp.Rank <= 5 -- Top 5 posts by score for each level
+ORDER BY 
+    pp.Level, pp.Score DESC;

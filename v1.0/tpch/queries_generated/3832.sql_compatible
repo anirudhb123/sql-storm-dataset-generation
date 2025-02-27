@@ -1,0 +1,67 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order,
+        c.c_mktsegment
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        COALESCE(S.total_avail_qty, 0) AS available_qty,
+        COALESCE(S.total_supply_cost, 0) AS supply_cost
+    FROM part p
+    LEFT JOIN SupplierStats S ON p.p_partkey = S.ps_partkey
+)
+SELECT 
+    P.p_partkey,
+    P.p_name,
+    P.p_brand,
+    P.p_retailprice,
+    O.o_orderkey,
+    O.o_orderdate,
+    O.o_totalprice,
+    R.rank_order,
+    CASE 
+        WHEN P.available_qty > 100 THEN 'In Stock' 
+        ELSE 'Low Stock' 
+    END AS stock_status,
+    STRING_AGG(DISTINCT N.n_name, ', ') AS supplier_nations
+FROM PartDetails P
+LEFT JOIN lineitem L ON P.p_partkey = L.l_partkey
+LEFT JOIN orders O ON L.l_orderkey = O.o_orderkey
+LEFT JOIN supplier S ON L.l_suppkey = S.s_suppkey
+LEFT JOIN nation N ON S.s_nationkey = N.n_nationkey
+JOIN RankedOrders R ON O.o_orderkey = R.o_orderkey
+WHERE 
+    (O.o_totalprice > 500 OR P.p_retailprice < 20)
+    AND (O.o_orderstatus IN ('O', 'P'))
+GROUP BY 
+    P.p_partkey,
+    P.p_name,
+    P.p_brand,
+    P.p_retailprice,
+    O.o_orderkey,
+    O.o_orderdate,
+    O.o_totalprice,
+    R.rank_order
+ORDER BY 
+    O.o_orderdate DESC, 
+    O.o_totalprice DESC;

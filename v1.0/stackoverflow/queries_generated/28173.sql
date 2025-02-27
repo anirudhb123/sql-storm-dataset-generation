@@ -1,0 +1,78 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+PostInformation AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        SUM(v.VoteTypeId = 1) AS AcceptedByOriginatorVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.OwnerUserId
+), 
+CombinedData AS (
+    SELECT 
+        pi.PostId,
+        pi.Title,
+        pi.Body,
+        pi.CreationDate,
+        pi.CommentCount,
+        pi.UpVotes,
+        pi.DownVotes,
+        pi.AcceptedByOriginatorVotes,
+        ubc.UserId,
+        ubc.DisplayName,
+        ubc.BadgeCount,
+        ubc.GoldCount,
+        ubc.SilverCount,
+        ubc.BronzeCount
+    FROM 
+        PostInformation pi
+    JOIN 
+        UserBadgeCounts ubc ON pi.OwnerUserId = ubc.UserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    PostId,
+    Title,
+    CreationDate,
+    CommentCount,
+    UpVotes,
+    DownVotes,
+    AcceptedByOriginatorVotes,
+    BadgeCount,
+    GoldCount,
+    SilverCount,
+    BronzeCount
+FROM 
+    CombinedData
+WHERE 
+    BadgeCount > 0
+ORDER BY 
+    BadgeCount DESC, UpVotes DESC, CommentCount DESC;

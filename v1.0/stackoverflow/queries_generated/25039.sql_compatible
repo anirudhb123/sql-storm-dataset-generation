@@ -1,0 +1,55 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year' 
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+TagStatistics AS (
+    SELECT 
+        t.Tag,
+        COUNT(DISTINCT rp.PostId) AS PostCount,
+        AVG(rp.ViewCount) AS AvgViews,
+        COUNT(DISTINCT rp.PostId) FILTER (WHERE rp.ViewCount > 1000) AS HighTrafficPostCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PopularTags t ON rp.Tags LIKE '%' || t.Tag || '%'
+    GROUP BY 
+        t.Tag
+)
+SELECT 
+    ts.Tag,
+    ts.PostCount,
+    ts.AvgViews,
+    ts.HighTrafficPostCount,
+    CASE 
+        WHEN ts.PostCount < 10 THEN 'Low Activity'
+        WHEN ts.PostCount >= 10 AND ts.PostCount <= 50 THEN 'Medium Activity'
+        ELSE 'High Activity'
+    END AS ActivityLevel
+FROM 
+    TagStatistics ts
+ORDER BY 
+    ts.AvgViews DESC, ts.PostCount DESC;

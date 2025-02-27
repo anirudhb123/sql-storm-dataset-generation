@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_order_number DESC) AS rn
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year > (SELECT MAX(c_birth_year) FROM customer WHERE c_current_cdemo_sk IS NOT NULL)
+), 
+AddressRanking AS (
+    SELECT 
+        ca.ca_county,
+        COUNT(c.c_customer_sk) AS customer_count,
+        RANK() OVER (ORDER BY COUNT(c.c_customer_sk) DESC) AS rank
+    FROM 
+        customer_address ca
+    LEFT JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        ca.ca_county
+), 
+SalesSummary AS (
+    SELECT 
+        s.ss_store_sk,
+        SUM(s.ss_net_profit) AS total_net_profit,
+        MAX(s.ss_sales_price) AS max_sales_price,
+        MIN(s.ss_sales_price) AS min_sales_price
+    FROM 
+        store_sales s
+    WHERE 
+        s.ss_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        s.ss_store_sk
+)
+SELECT 
+    s.web_site_id,
+    s.ws_order_number,
+    s.ws_sales_price,
+    s.ws_quantity,
+    a.ca_county,
+    a.customer_count,
+    ss.total_net_profit,
+    ss.max_sales_price,
+    ss.min_sales_price
+FROM 
+    SalesCTE s
+JOIN 
+    AddressRanking a ON a.rank <= 5
+JOIN 
+    SalesSummary ss ON ss.ss_store_sk IN (
+        SELECT s_store_sk FROM store WHERE s_manager IS NOT NULL
+    )
+WHERE 
+    s.ws_sales_price > (SELECT AVG(ws_sales_price) FROM web_sales)
+ORDER BY 
+    a.customer_count DESC, 
+    s.ws_sales_price DESC
+LIMIT 50;

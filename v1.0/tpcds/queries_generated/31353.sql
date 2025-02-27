@@ -1,0 +1,77 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_quantity, 
+        ws_net_profit, 
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_quantity > 0
+),
+AggregateSales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_net_profit) AS total_profit, 
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+HighProfitItems AS (
+    SELECT 
+        i.i_item_sk, 
+        i.i_item_desc, 
+        COALESCE(as.total_profit, 0) AS total_profit, 
+        as.order_count
+    FROM 
+        item i
+    LEFT JOIN 
+        AggregateSales as ON i.i_item_sk = as.ws_item_sk
+    WHERE 
+        COALESCE(as.total_profit, 0) > 10000
+),
+TopStores AS (
+    SELECT 
+        s.s_store_sk, 
+        s.s_store_name, 
+        SUM(ss_net_profit) AS store_profit
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.s_store_sk = s.s_store_sk
+    GROUP BY 
+        s.s_store_sk, s.s_store_name
+    HAVING 
+        SUM(ss_net_profit) > 50000
+),
+FinalResults AS (
+    SELECT 
+        h.i_item_desc, 
+        h.total_profit, 
+        s.store_name, 
+        s.store_profit
+    FROM 
+        HighProfitItems h
+    JOIN 
+        TopStores s ON h.total_profit > s.store_profit
+)
+
+SELECT 
+    f.i_item_desc, 
+    f.total_profit AS item_profit, 
+    f.store_name, 
+    f.store_profit, 
+    CASE 
+        WHEN f.total_profit IS NULL THEN 'No Profit'
+        ELSE 'Profitable'
+    END AS profit_status
+FROM 
+    FinalResults f
+ORDER BY 
+    f.total_profit DESC, 
+    f.store_profit DESC;

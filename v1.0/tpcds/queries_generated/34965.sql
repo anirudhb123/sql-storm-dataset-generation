@@ -1,0 +1,70 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_ext_sales_price) DESC) AS sales_rank
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN 2458593 AND 2458600 
+    GROUP BY ss_store_sk
+), rank_summary AS (
+    SELECT 
+        s_store_sk,
+        total_sales,
+        total_transactions,
+        sales_rank,
+        CASE 
+            WHEN sales_rank = 1 THEN 'Top Store'
+            WHEN sales_rank <= 5 THEN 'Top 5 Store'
+            ELSE 'Other Store'
+        END AS store_category
+    FROM sales_summary
+), customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(cd.cd_dep_count, 0) AS dependent_count
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), combined AS (
+    SELECT 
+        r.ss_store_sk,
+        r.total_sales,
+        r.total_transactions,
+        r.store_category,
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.dependent_count,
+        DENSE_RANK() OVER (PARTITION BY r.store_category ORDER BY r.total_sales DESC) AS category_sales_rank
+    FROM rank_summary r
+    JOIN customer_info ci ON ci.c_customer_sk IN (
+        SELECT DISTINCT ss_customer_sk 
+        FROM store_sales 
+        WHERE ss_store_sk = r.ss_store_sk
+    )
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    c.cd_gender,
+    c.cd_marital_status,
+    s.store_category,
+    s.total_sales,
+    s.total_transactions,
+    s.category_sales_rank,
+    CASE 
+        WHEN s.total_sales >= 100000 THEN 'High Value'
+        WHEN s.total_sales < 100000 AND s.total_sales >= 50000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM combined c
+JOIN rank_summary s ON c.ss_store_sk = s.ss_store_sk
+WHERE c.dependent_count IS NOT NULL
+ORDER BY s.total_sales DESC, c.c_last_name ASC;

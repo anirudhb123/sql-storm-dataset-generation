@@ -1,0 +1,57 @@
+WITH MovieDetails AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        a.id AS movie_id,
+        STRING_AGG(DISTINCT CONCAT(CONCAT(n.name, ' (', n.gender, ')'), ' [', r.role, ']'), ', ') AS cast_info
+    FROM 
+        aka_title a
+    JOIN 
+        cast_info c ON a.id = c.movie_id
+    JOIN 
+        aka_name n ON c.person_id = n.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        a.production_year BETWEEN 1990 AND 2020
+    GROUP BY 
+        a.id, a.title, a.production_year
+), 
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT CONCAT(cn.name, ' (', ct.kind, ')'), ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+KeywordDetails AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    COALESCE(cd.companies, 'No companies found') AS production_companies,
+    COALESCE(kw.keywords, 'No keywords found') AS movie_keywords,
+    md.cast_info
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    CompanyDetails cd ON md.movie_id = cd.movie_id
+LEFT JOIN 
+    KeywordDetails kw ON md.movie_id = kw.movie_id
+ORDER BY 
+    md.production_year DESC, md.movie_title;

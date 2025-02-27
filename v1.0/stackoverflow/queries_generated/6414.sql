@@ -1,0 +1,42 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(pf.FavCount, 0) AS FavoriteCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS RankPerType
+    FROM Posts p
+    INNER JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    INNER JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (SELECT PostId, COUNT(*) AS FavCount FROM Votes WHERE VoteTypeId = 5 GROUP BY PostId) pf ON pf.PostId = p.Id
+    WHERE p.CreationDate >= '2022-01-01'
+),
+PopularPosts AS (
+    SELECT 
+        Id,
+        Title,
+        OwnerDisplayName,
+        Score,
+        ViewCount,
+        FavoriteCount
+    FROM RankedPosts
+    WHERE RankPerType <= 10
+)
+SELECT 
+    pp.Title,
+    pp.OwnerDisplayName,
+    pp.Score,
+    pp.ViewCount,
+    pp.FavoriteCount,
+    CASE 
+        WHEN pp.FavoriteCount > 20 THEN 'Highly Favorited'
+        WHEN pp.FavoriteCount BETWEEN 10 AND 20 THEN 'Moderately Favorited'
+        ELSE 'Less Favorited'
+    END AS FavoritesCategory,
+    pt.Name AS PostType
+FROM PopularPosts pp
+JOIN PostTypes pt ON pp.PostTypeId = pt.Id
+ORDER BY pp.Score DESC, pp.ViewCount DESC;

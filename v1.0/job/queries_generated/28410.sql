@@ -1,0 +1,70 @@
+WITH ActorMovieCount AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.id, a.name
+),
+TopActors AS (
+    SELECT 
+        actor_id, 
+        actor_name
+    FROM 
+        ActorMovieCount
+    WHERE 
+        movie_count > 5
+    ORDER BY 
+        movie_count DESC
+    LIMIT 10
+),
+MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword AS movie_keyword,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        title t
+    JOIN 
+        movie_cast mc ON t.id = mc.movie_id
+    JOIN 
+        cast_info c ON mc.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.title, t.production_year, k.keyword
+),
+
+FinalReport AS (
+    SELECT 
+        a.actor_name,
+        m.movie_title,
+        m.production_year,
+        m.movie_keyword,
+        m.cast_count
+    FROM 
+        TopActors a
+    JOIN 
+        MovieDetails m ON m.cast_count > 5
+)
+
+SELECT 
+    actor_name, 
+    movie_title, 
+    production_year, 
+    movie_keyword, 
+    cast_count 
+FROM 
+    FinalReport
+ORDER BY 
+    actor_name, 
+    production_year DESC;

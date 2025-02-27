@@ -1,0 +1,57 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_country,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        'Income Band: ' || ib.ib_lower_bound || '-' || ib.ib_upper_bound AS income_band
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ad ON c.c_current_addr_sk = ad.ca_address_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        cd.cd_gender = 'F' 
+        AND cd.cd_marital_status = 'M'
+        AND ad.ca_city IS NOT NULL
+),
+sales_info AS (
+    SELECT 
+        ws_ship_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        SUM(ws_quantity) AS total_quantity,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk BETWEEN 2450000 AND 2451000
+    GROUP BY 
+        ws_ship_customer_sk
+)
+SELECT 
+    ci.full_name,
+    ci.ca_city,
+    ci.ca_state,
+    ci.ca_country,
+    ci.cd_gender,
+    s.total_profit,
+    s.total_quantity,
+    s.total_orders
+FROM 
+    customer_info ci
+JOIN 
+    sales_info s ON ci.c_customer_id = CAST(s.ws_ship_customer_sk AS CHAR(16))
+ORDER BY 
+    total_profit DESC
+LIMIT 10;

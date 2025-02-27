@@ -1,0 +1,86 @@
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Posts
+    INNER JOIN 
+        Tags ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[]) 
+    WHERE 
+        Posts.PostTypeId = 1 -- Considering only questions
+    GROUP BY 
+        Tags.TagName
+),
+UserReputation AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.Reputation,
+        COUNT(DISTINCT Posts.Id) AS QuestionsAnswered,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvotesReceived,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvotesReceived
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    WHERE 
+        Posts.PostTypeId = 2 -- Considering only answers
+    GROUP BY 
+        Users.Id, Users.Reputation
+),
+PostDetails AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.Body,
+        Posts.LastActivityDate,
+        Users.DisplayName AS Author,
+        PostCount.TagName,
+        PostCount.PostCount
+    FROM 
+        Posts
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN 
+        TagCounts PostCount ON PostCount.TagName = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><'))
+    WHERE 
+        Posts.PostTypeId = 1 -- Considering only questions
+),
+FinalBenchmark AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.Body,
+        PD.LastActivityDate,
+        PD.Author,
+        COALESCE(UC.UserId, 0) AS UserId,
+        UC.Reputation,
+        UC.QuestionsAnswered,
+        UC.UpvotesReceived,
+        UC.DownvotesReceived,
+        PD.TagName,
+        PD.PostCount
+    FROM 
+        PostDetails PD
+    LEFT JOIN 
+        UserReputation UC ON PD.Author = UC.UserId
+)
+
+SELECT 
+    FB.PostId,
+    FB.Title,
+    FB.Body,
+    FB.LastActivityDate,
+    FB.Author,
+    FB.Reputation,
+    FB.QuestionsAnswered,
+    FB.UpvotesReceived,
+    FB.DownvotesReceived,
+    FB.TagName,
+    FB.PostCount
+FROM 
+    FinalBenchmark FB
+ORDER BY 
+    FB.LastActivityDate DESC
+LIMIT 100; -- Limit the results to the top 100 most recent questions for benchmarking

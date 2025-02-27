@@ -1,0 +1,44 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, 1 AS level
+    FROM customer_address
+    WHERE ca_state IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, level + 1
+    FROM customer_address a
+    JOIN address_hierarchy ah ON a.ca_address_sk = ah.ca_address_sk
+    WHERE ah.level < 5  -- limiting the recursion depth
+),
+customer_metrics AS (
+    SELECT c.c_customer_sk,
+           COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+           SUM(cs.cs_net_profit) AS total_net_profit,
+           SUM(COALESCE(cr.cr_return_amount, 0)) AS total_returns,
+           SUM(CASE WHEN hd.hd_income_band_sk IS NOT NULL THEN 1 ELSE 0 END) AS has_income_info
+    FROM customer c
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    GROUP BY c.c_customer_sk
+),
+date_filter AS (
+    SELECT d_date_sk
+    FROM date_dim
+    WHERE d_date BETWEEN '2022-01-01' AND '2022-12-31'
+)
+SELECT DISTINCT ah.ca_city,
+                ah.ca_state,
+                COUNT(DISTINCT cm.c_customer_sk) AS customer_count,
+                AVG(cm.total_net_profit) AS avg_net_profit,
+                SUM(CASE WHEN cm.has_income_info > 0 THEN 1 ELSE 0 END) AS customers_with_income_info,
+                COUNT(DISTINCT dm.d_date_sk) AS active_days
+FROM address_hierarchy ah
+LEFT JOIN customer_metrics cm ON ah.ca_city = (SELECT MAX(c.ca_city) FROM customer c WHERE c.c_customer_sk = cm.c_customer_sk)
+LEFT JOIN date_filter dm ON dm.d_date_sk IN (SELECT DISTINCT ws.ws_sold_date_sk FROM web_sales ws WHERE ws.ws_ship_addr_sk = ah.ca_address_sk)
+WHERE ah.ca_country LIKE 'U%' AND cm.total_orders > 0
+GROUP BY ah.ca_city, ah.ca_state
+HAVING SUM(cm.total_returns) < (SELECT COUNT(*) FROM customer WHERE c_birth_month = 12)
+ORDER BY avg_net_profit DESC
+FETCH FIRST 100 ROWS ONLY;

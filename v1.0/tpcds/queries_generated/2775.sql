@@ -1,0 +1,60 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned_quantity,
+        SUM(cr_return_amt) AS total_returned_amount
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+SalesData AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY 
+        ws_bill_customer_sk
+),
+RevenueByCustomer AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SD.total_sales, 0) AS total_sales,
+        COALESCE(CR.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(CR.total_returned_amount, 0) AS total_returned_amount,
+        (COALESCE(SD.total_sales, 0) - COALESCE(CR.total_returned_amount, 0)) AS net_revenue
+    FROM 
+        customer c
+    LEFT JOIN 
+        SalesData SD ON c.c_customer_sk = SD.ws_bill_customer_sk
+    LEFT JOIN 
+        CustomerReturns CR ON c.c_customer_sk = CR.cr_returning_customer_sk
+)
+SELECT
+    rbc.c_customer_sk,
+    rbc.c_first_name,
+    rbc.c_last_name,
+    rbc.total_sales,
+    rbc.total_returned_quantity,
+    rbc.total_returned_amount,
+    rbc.net_revenue,
+    DENSE_RANK() OVER (ORDER BY rbc.net_revenue DESC) AS revenue_rank,
+    CASE 
+        WHEN rbc.net_revenue > 1000 THEN 'High Value'
+        WHEN rbc.net_revenue BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    RevenueByCustomer rbc
+WHERE 
+    rbc.net_revenue IS NOT NULL
+ORDER BY 
+    rbc.net_revenue DESC
+LIMIT 100;

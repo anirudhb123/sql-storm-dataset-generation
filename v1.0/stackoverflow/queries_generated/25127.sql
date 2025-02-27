@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2::smallint) AS UpVotes,
+        SUM(v.VoteTypeId = 3::smallint) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        ViewCount,
+        CommentCount,
+        UpVotes,
+        DownVotes,
+        (UpVotes - DownVotes) AS VoteBalance
+    FROM 
+        RankedPosts
+    WHERE 
+        rn = 1
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        ViewCount,
+        CommentCount,
+        VoteBalance,
+        RANK() OVER (ORDER BY VoteBalance DESC, ViewCount DESC) AS Rank
+    FROM 
+        PostStatistics
+)
+SELECT 
+    t.PostId,
+    t.Title,
+    t.OwnerDisplayName,
+    t.ViewCount,
+    t.CommentCount,
+    t.VoteBalance,
+    p.Body,
+    COALESCE(p.AcceptedAnswerId, 'No Accepted Answer') AS AcceptedAnswerStatus
+FROM 
+    TopPosts t
+LEFT JOIN 
+    Posts p ON t.PostId = p.Id
+WHERE 
+    t.Rank <= 10
+ORDER BY 
+    t.Rank;

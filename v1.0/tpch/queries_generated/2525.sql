@@ -1,0 +1,54 @@
+WITH RegionalStats AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(s.s_acctbal) AS total_supplier_balance
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_regionkey, r.r_name
+),
+CustomerStats AS (
+    SELECT 
+        c.c_nationkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_nationkey
+),
+PartStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+OrderLineStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        RANK() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rev_rank
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY l.l_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) IS NOT NULL
+)
+SELECT 
+    r.r_name AS region,
+    rs.nation_count,
+    rs.total_supplier_balance,
+    COALESCE(cs.total_orders, 0) AS total_orders,
+    COALESCE(cs.total_spent, 0) AS total_spent,
+    ps.total_available,
+    ps.avg_supply_cost,
+    ol.revenue,
+    ol.rev_rank
+FROM RegionalStats rs
+FULL OUTER JOIN CustomerStats cs ON rs.r_regionkey = cs.c_nationkey
+JOIN PartStats ps ON ps.ps_partkey = ol.l_orderkey
+LEFT JOIN OrderLineStats ol ON ol.l_orderkey = cs.total_orders
+ORDER BY rs.r_name, ol.rev_rank;

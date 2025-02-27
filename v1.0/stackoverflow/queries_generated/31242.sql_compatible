@@ -1,0 +1,84 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.AcceptedAnswerId,
+        P.CreationDate,
+        0 AS Level
+    FROM Posts P
+    WHERE P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.OwnerUserId,
+        P2.PostTypeId,
+        P2.AcceptedAnswerId,
+        P2.CreationDate,
+        Level + 1
+    FROM Posts P2
+    INNER JOIN Posts P ON P2.ParentId = P.Id
+    WHERE P.PostTypeId = 1  
+),
+
+PostVotes AS (
+    SELECT 
+        V.PostId,
+        V.VoteTypeId,
+        COUNT(*) AS VoteCount
+    FROM Votes V
+    WHERE V.VoteTypeId IN (2, 3)  
+    GROUP BY V.PostId, V.VoteTypeId
+),
+
+PostVoteSummary AS (
+    SELECT 
+        PV.PostId,
+        COALESCE(SUM(CASE WHEN PV.VoteTypeId = 2 THEN PV.VoteCount ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN PV.VoteTypeId = 3 THEN PV.VoteCount ELSE 0 END), 0) AS DownVotes
+    FROM PostVotes PV
+    GROUP BY PV.PostId
+),
+
+MostActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName
+    HAVING COUNT(DISTINCT P.Id) > 10  
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS HistoryCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+)
+
+SELECT 
+    RPH.PostId,
+    RPH.Title,
+    RPH.OwnerUserId,
+    COALESCE(PVS.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(PVS.DownVotes, 0) AS TotalDownVotes,
+    PH.HistoryCount AS EditHistoryCount,
+    PH.LastEditDate,
+    A.UserId AS MostActiveUserId,
+    A.DisplayName AS MostActiveUserName,
+    RPH.Level
+FROM RecursivePostHierarchy RPH
+LEFT JOIN PostVoteSummary PVS ON RPH.PostId = PVS.PostId
+LEFT JOIN PostHistoryDetails PH ON RPH.PostId = PH.PostId
+LEFT JOIN MostActiveUsers A ON A.UserId = RPH.OwnerUserId
+WHERE RPH.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'  
+ORDER BY RPH.Level, TotalUpVotes DESC;

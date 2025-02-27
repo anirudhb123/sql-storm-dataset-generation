@@ -1,0 +1,93 @@
+WITH RecursiveMoviePaths AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(m2.title, 'N/A') AS linked_title,
+        lm.link_type_id,
+        1 AS depth
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_link lm ON m.id = lm.movie_id
+    LEFT JOIN 
+        title m2 ON lm.linked_movie_id = m2.id
+    WHERE 
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id,
+        m.title,
+        COALESCE(m2.title, 'N/A'),
+        lm.link_type_id,
+        rmp.depth + 1
+    FROM 
+        RecursiveMoviePaths rmp
+    JOIN 
+        movie_link lm ON rmp.movie_id = lm.movie_id
+    JOIN 
+        title m ON lm.linked_movie_id = m.id
+    LEFT JOIN 
+        title m2 ON lm.linked_movie_id = m2.id
+    WHERE 
+        rmp.depth < 3 
+),
+CompanyRoleCounts AS (
+    SELECT 
+        mc.movie_id,
+        c.kind AS company_type,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        COUNT(DISTINCT ci.id) AS actors_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_type c ON mc.company_type_id = c.id
+    LEFT JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    GROUP BY 
+        mc.movie_id, c.kind
+),
+TitleInfo AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        COALESCE(ti.info, 'No info') AS movie_info,
+        k.keyword AS movie_keyword
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info ti ON t.id = ti.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    rmp.movie_id,
+    rmp.title,
+    rmp.linked_title,
+    crc.company_type,
+    crc.total_companies,
+    crc.actors_count,
+    ti.movie_info,
+    ti.movie_keyword,
+    ROW_NUMBER() OVER (PARTITION BY rmp.movie_id ORDER BY crc.total_companies DESC) AS company_rank,
+    CASE 
+        WHEN crc.actors_count > 5 THEN 'Large Cast'
+        WHEN crc.actors_count BETWEEN 2 AND 5 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size,
+    NULLIF(ti.movie_keyword, 'N/A') AS keyword_nullable,
+    COALESCE(NULLIF(ti.movie_keyword, 'N/A'), 'No Keywords') AS keyword_with_fallback
+FROM 
+    RecursiveMoviePaths rmp
+LEFT JOIN 
+    CompanyRoleCounts crc ON rmp.movie_id = crc.movie_id
+LEFT JOIN 
+    TitleInfo ti ON rmp.movie_id = ti.title_id
+WHERE 
+    (rmp.depth = 1 AND crc.total_companies IS NOT NULL)
+    OR (rmp.depth = 2 AND crc.total_companies IS NULL)
+ORDER BY 
+    rmp.movie_id, company_rank;

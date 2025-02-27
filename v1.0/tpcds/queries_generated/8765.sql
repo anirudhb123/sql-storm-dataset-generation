@@ -1,0 +1,52 @@
+
+WITH SalesAnalysis AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        d.d_year,
+        CASE 
+            WHEN cd.education_status IN ('PhD', 'Masters') THEN 'Higher Education'
+            WHEN cd.education_status IN ('Bachelors') THEN 'Undergraduate'
+            ELSE 'Other'
+        END AS education_level
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2020 AND 2022
+    GROUP BY 
+        c.c_customer_id, d.d_year, education_level
+),
+YearlyPerformance AS (
+    SELECT 
+        year,
+        education_level,
+        COUNT(DISTINCT c_customer_id) AS unique_customers,
+        SUM(total_sales) AS total_sales,
+        AVG(avg_net_profit) AS avg_net_profit,
+        COUNT(total_orders) AS total_orders
+    FROM 
+        SalesAnalysis
+    GROUP BY 
+        year, education_level
+)
+
+SELECT 
+    year,
+    education_level,
+    unique_customers,
+    total_sales,
+    avg_net_profit,
+    total_orders,
+    RANK() OVER (PARTITION BY year ORDER BY total_sales DESC) AS sales_rank
+FROM 
+    YearlyPerformance
+ORDER BY 
+    year, sales_rank;

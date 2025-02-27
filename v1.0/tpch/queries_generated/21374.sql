@@ -1,0 +1,62 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_size ORDER BY p.p_retailprice DESC) AS rank_desc,
+        COUNT(*) OVER (PARTITION BY p.p_size) AS total_size
+    FROM part p
+    WHERE p.p_size IS NOT NULL
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS num_orders
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+), 
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING AVG(ps.ps_supplycost) < 100.00
+), 
+OrdersWithLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_price,
+        COUNT(l.l_orderkey) AS line_item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+
+SELECT 
+    rp.p_name,
+    rp.p_retailprice,
+    co.c_name,
+    co.total_spent,
+    COUNT(DISTINCT o.ol_orderkey) AS total_orders, 
+    SUM(hl.avg_supply_cost) AS total_average_supply_cost,
+    MAX(total_lineitem_price) AS max_order_value
+FROM RankedParts rp
+LEFT JOIN CustomerOrders co ON co.num_orders > 3
+LEFT JOIN HighValueSuppliers hl ON hl.avg_supply_cost >= 50.00
+LEFT JOIN OrdersWithLineItems o ON o.total_lineitem_price > 1000.00
+WHERE rp.rank_desc <= 5
+GROUP BY rp.p_name, rp.p_retailprice, co.c_name, co.total_spent
+HAVING COALESCE(SUM(CASE WHEN hl.avg_supply_cost IS NULL THEN 0 ELSE hl.avg_supply_cost END), 0) > 0
+   AND MAX(total_lineitem_price) IS NOT NULL
+ORDER BY rp.p_partkey, co.c_name DESC;

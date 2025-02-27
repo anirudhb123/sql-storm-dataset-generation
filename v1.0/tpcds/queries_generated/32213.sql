@@ -1,0 +1,59 @@
+
+WITH RECURSIVE SalesSummary AS (
+    SELECT
+        ws.bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws.order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    GROUP BY
+        ws.bill_customer_sk
+),
+CustomerReturns AS (
+    SELECT
+        wr.returning_customer_sk,
+        SUM(wr.return_amt) AS total_returns,
+        COUNT(wr.order_number) AS return_count
+    FROM
+        web_returns wr
+    WHERE
+        wr.returning_customer_sk IS NOT NULL
+    GROUP BY
+        wr.returning_customer_sk
+),
+TotalSalesReturns AS (
+    SELECT
+        ss.bill_customer_sk,
+        ss.total_sales,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        ss.order_count,
+        ss.sales_rank
+    FROM
+        SalesSummary ss
+    LEFT JOIN
+        CustomerReturns cr ON ss.bill_customer_sk = cr.returning_customer_sk
+)
+SELECT
+    c.c_customer_id,
+    ca.ca_city,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    ts.total_returns,
+    ts.order_count,
+    CASE 
+        WHEN ts.total_sales > 1000 THEN 'High Value'
+        WHEN ts.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value
+FROM
+    customer c
+JOIN
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN
+    TotalSalesReturns ts ON c.c_customer_sk = ts.bill_customer_sk
+WHERE
+    ca.ca_state = 'CA' 
+    AND (ts.total_returns IS NULL OR ts.total_returns < 100)
+ORDER BY
+    ts.total_sales DESC, c.c_customer_id
+LIMIT 100;

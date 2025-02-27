@@ -1,0 +1,73 @@
+
+WITH RecursivePostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.LastActivityDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.CreationDate,
+        p2.Score,
+        p2.AnswerCount,
+        p2.ViewCount,
+        p2.OwnerUserId,
+        p2.LastActivityDate,
+        rps.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostStats rps ON p2.ParentId = rps.PostId
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.AnswerCount,
+    ps.ViewCount,
+    ps.LastActivityDate,
+    ub.UserId,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+FROM 
+    RecursivePostStats ps
+LEFT JOIN 
+    UserBadges ub ON ps.OwnerUserId = ub.UserId
+WHERE 
+    ps.ViewCount > 50  
+ORDER BY 
+    ps.Score DESC, 
+    ps.LastActivityDate DESC
+LIMIT 20;

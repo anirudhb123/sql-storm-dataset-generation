@@ -1,0 +1,83 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        mt.production_year,
+        COALESCE(a.name, 'Unknown') AS actor_name,
+        CAST(NULL AS INTEGER) AS parent_movie_id
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info c ON c.movie_id = mt.id
+    LEFT JOIN 
+        aka_name a ON a.person_id = c.person_id
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COALESCE(a.name, 'Unknown') AS actor_name,
+        m.movie_id AS parent_movie_id
+    FROM 
+        movie_link ml
+    INNER JOIN 
+        aka_title mt ON mt.id = ml.linked_movie_id
+    INNER JOIN 
+        movie_hierarchy m ON m.movie_id = ml.movie_id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = mt.id
+    LEFT JOIN 
+        aka_name a ON a.person_id = c.person_id
+)
+, ranked_movies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        actor_name,
+        parent_movie_id,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY movie_title) AS title_rank,
+        SUM(CASE WHEN actor_name IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY production_year) AS total_actors
+    FROM 
+        movie_hierarchy
+)
+SELECT 
+    r.movie_title,
+    r.production_year,
+    r.actor_name,
+    r.title_rank,
+    r.total_actors,
+    CASE
+        WHEN r.total_actors = 0 THEN 'No Actors' 
+        ELSE 'Featured Actors: ' || STRING_AGG(DISTINCT r.actor_name, ', ') 
+    END AS actor_list,
+    CASE 
+        WHEN r.parent_movie_id IS NOT NULL THEN 'Part of Series'
+        ELSE 'Standalone Movie'
+    END AS movie_type,
+    COALESCE(p.id, -1) AS info_id,
+    COALESCE(p.info, 'No Info Available') AS personal_info
+FROM 
+    ranked_movies r
+LEFT JOIN 
+    person_info p ON p.person_id = (SELECT MIN(person_id) 
+                                     FROM cast_info 
+                                     WHERE movie_id = r.movie_id)
+WHERE 
+    r.title_rank <= 5
+ORDER BY 
+    r.production_year DESC, r.title_rank
+LIMIT 100;
+
+This SQL query does the following:
+
+1. Uses a recursive CTE, `movie_hierarchy`, to create a hierarchy of movies, including linked movies.
+2. Aggregates actor names and ranks movies by title within each production year.
+3. Provides a count of total actors for each movie and determines if movies are standalone or part of a series.
+4. Joins with `person_info` to display additional information about the main actor.
+5. Introduces string manipulation with `STRING_AGG` and handles NULL logic with `COALESCE`.
+6. Filters the results to return only the top 5 movies per production year and limits the output to 100 records to facilitate performance benchmarking.

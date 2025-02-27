@@ -1,0 +1,79 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.Id END) AS UpVotes,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS DownVotes,
+        SUM(p.Score) AS TotalScore,
+        MAX(p.CreationDate) AS LatestPostDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.OwnerUserId
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.Id END) AS ClosureCount,
+        COUNT(DISTINCT ph.UserId) AS UserEditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        ur.ReputationRank
+    FROM UserReputation ur
+    WHERE ur.ReputationRank <= 10
+),
+PostDetails AS (
+    SELECT 
+        ps.PostId,
+        ps.TotalComments,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.TotalScore,
+        ph.ClosureCount,
+        ph.UserEditCount,
+        p.OwnerDisplayName,
+        p.Title,
+        CASE 
+            WHEN ph.UserEditCount > 5 THEN 'Highly Edited'
+            WHEN ph.ClosureCount > 0 THEN 'Closed'
+            ELSE 'Active'
+        END AS PostStatus
+    FROM PostSummary ps
+    JOIN PostHistoryAnalysis ph ON ps.PostId = ph.PostId
+    JOIN Posts p ON ps.PostId = p.Id
+)
+SELECT 
+    pd.PostId,
+    pd.OwnerDisplayName,
+    pd.Title,
+    pd.TotalComments,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.TotalScore,
+    pd.PostStatus,
+    CASE 
+        WHEN ur.UserId IS NOT NULL THEN 'Top Contributor'
+        ELSE 'Regular User'
+    END AS UserCategory
+FROM PostDetails pd
+LEFT JOIN TopUsers ur ON pd.OwnerUserId = ur.UserId
+WHERE pd.PostStatus = 'Closed' OR pd.UpVotes > 10
+ORDER BY pd.TotalScore DESC, pd.TotalComments DESC;
+
+-- The query combines various constructs like CTEs, outer joins,
+-- correlated subqueries, and complicated predicates to select posts with performance metrics,
+-- analyze history of edits and closures, and also categorize users based on reputation.

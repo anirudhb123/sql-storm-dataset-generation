@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rank_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS total_return_amt,
+        COUNT(wr_order_number) AS total_returns
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+BestSellingItems AS (
+    SELECT 
+        wi.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity
+    FROM 
+        web_sales ws
+    JOIN 
+        item wi ON ws.ws_item_sk = wi.i_item_sk
+    GROUP BY 
+        wi.i_item_id
+    HAVING 
+        SUM(ws.ws_quantity) > 1000
+)
+SELECT 
+    ca.ca_address_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    r.total_return_amt,
+    r.total_returns,
+    b.total_quantity,
+    s.store_name,
+    ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY r.total_return_amt DESC) AS return_rank
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    CustomerReturns r ON c.c_customer_sk = r.wr_returning_customer_sk
+JOIN 
+    store s ON s.s_store_sk = ws.ws_store_sk
+JOIN 
+    BestSellingItems b ON b.i_item_id = ws.ws_item_sk
+JOIN 
+    RankedSales rs ON rs.ws_order_number = ws.ws_order_number
+WHERE 
+    (cd.cd_purchase_estimate IS NOT NULL OR r.total_return_amt IS NOT NULL)
+    AND cd.cd_marital_status = 'M'
+    AND r.total_returns > 5
+ORDER BY 
+    return_rank, r.total_return_amt DESC;

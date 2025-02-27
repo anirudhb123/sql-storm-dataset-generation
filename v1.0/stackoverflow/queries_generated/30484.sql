@@ -1,0 +1,103 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT ans.Id) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Posts ans ON p.Id = ans.ParentId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        u.DisplayName AS OwnerDisplay,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY rp.Score DESC) AS Rank,
+        u.Reputation
+    FROM 
+        RecursivePosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.Level = 1
+),
+PostHistoryWithComments AS (
+    SELECT 
+        ph.PostId, 
+        ph.CreationDate,
+        ph.Comment, 
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Comments c ON ph.PostId = c.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Post closed or reopened
+    GROUP BY 
+        ph.PostId, ph.CreationDate, ph.Comment
+)
+SELECT 
+    p.Title AS PostTitle,
+    p.CreationDate,
+    phc.CreationDate AS HistoryDate,
+    phc.Comment AS HistoryComment,
+    us.DisplayName AS User,
+    us.TotalBounty,
+    us.BadgeCount,
+    pp.answercount AS AnswerCount,
+    pp.QuestionCount AS QuestionCount,
+    RANK() OVER (ORDER BY us.TotalBounty DESC) AS UserBountyRank
+FROM 
+    RankedPosts pp
+JOIN 
+    UserStats us ON pp.OwnerUserId = us.UserId
+JOIN 
+    PostHistoryWithComments phc ON pp.PostId = phc.PostId
+WHERE 
+    pp.Rank <= 5 -- Top 5 posts per user
+ORDER BY 
+    pp.Rank, us.TotalBounty DESC;

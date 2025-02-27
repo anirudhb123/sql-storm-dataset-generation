@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+    UNION ALL
+    SELECT
+        m.id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(AVG(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS avg_roles,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        COUNT(ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT c.name, ', ') AS cast_names
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+),
+RankedMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.avg_roles,
+        md.company_count,
+        md.keyword_count,
+        md.cast_count,
+        md.cast_names,
+        RANK() OVER (ORDER BY md.cast_count DESC, md.production_year ASC) AS rank_order
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    rm.rank_order,
+    rm.title,
+    rm.production_year,
+    rm.avg_roles,
+    rm.company_count,
+    rm.keyword_count,
+    rm.cast_count,
+    rm.cast_names
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rank_order <= 10
+ORDER BY 
+    rm.rank_order;
+

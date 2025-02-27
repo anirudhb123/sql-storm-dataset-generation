@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank <= 5
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(ci.company_name, 'No Company') AS company_name,
+    COALESCE(ci.company_type, 'Unknown Type') AS company_type,
+    CASE 
+        WHEN tm.production_year < 2000 THEN 'Classic'
+        WHEN tm.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era,
+    (SELECT COUNT(DISTINCT k.keyword) 
+     FROM movie_keyword mk 
+     JOIN keyword k ON mk.keyword_id = k.id 
+     WHERE mk.movie_id = tm.movie_id) AS keyword_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    CompanyInfo ci ON tm.movie_id = ci.movie_id
+ORDER BY 
+    tm.production_year DESC, 
+    tm.title;

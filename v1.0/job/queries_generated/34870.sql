@@ -1,0 +1,80 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        CASE 
+            WHEN mt.episode_of_id IS NOT NULL THEN TRUE 
+            ELSE FALSE 
+        END AS is_episode,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        CASE 
+            WHEN at.episode_of_id IS NOT NULL THEN TRUE 
+            ELSE FALSE 
+        END AS is_episode,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    mh.is_episode,
+    COALESCE(pk.keyword_list, 'None') AS keywords,
+    actors.actor_list,
+    ARRAY_AGG(DISTINCT cn.name) AS company_names
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    (SELECT 
+         mk.movie_id, 
+         STRING_AGG(DISTINCT k.keyword, ', ') AS keyword_list
+     FROM 
+         movie_keyword mk 
+     JOIN 
+         keyword k ON mk.keyword_id = k.id 
+     GROUP BY 
+         mk.movie_id) pk ON mh.movie_id = pk.movie_id
+LEFT JOIN 
+    (SELECT 
+         ci.movie_id, 
+         STRING_AGG(DISTINCT CONCAT(an.name, ' as ', rt.role), ', ') AS actor_list
+     FROM 
+         cast_info ci
+     JOIN 
+         aka_name an ON ci.person_id = an.person_id
+     JOIN 
+         role_type rt ON ci.role_id = rt.id 
+     GROUP BY 
+         ci.movie_id) actors ON mh.movie_id = actors.movie_id
+LEFT JOIN 
+    (SELECT 
+         mc.movie_id, 
+         STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+     FROM 
+         movie_companies mc 
+     JOIN 
+         company_name cn ON mc.company_id = cn.id 
+     GROUP BY 
+         mc.movie_id) cn ON mh.movie_id = cn.movie_id
+WHERE 
+    mh.is_episode = FALSE
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.is_episode, pk.keyword_list, actors.actor_list
+ORDER BY 
+    mh.production_year DESC, mh.title;

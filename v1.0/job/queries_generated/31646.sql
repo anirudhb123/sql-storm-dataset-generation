@@ -1,0 +1,75 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM
+        aka_title t
+    WHERE
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1 AS level
+    FROM
+        MovieHierarchy mh
+    JOIN
+        aka_title t ON t.episode_of_id = mh.movie_id
+),
+
+RankedMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(ci.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(ci.id) DESC) AS rank
+    FROM
+        MovieHierarchy mh
+    LEFT JOIN
+        cast_info ci ON ci.movie_id = mh.movie_id
+    GROUP BY
+        mh.movie_id, mh.title, mh.production_year
+),
+
+FilteredMovies AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count
+    FROM
+        RankedMovies rm
+    WHERE
+        rm.cast_count > (SELECT AVG(cast_count) FROM RankedMovies)
+)
+
+SELECT
+    f.title,
+    f.production_year,
+    COALESCE(cn.name, 'Unknown Company') AS company_name,
+    f.cast_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors
+FROM
+    FilteredMovies f
+LEFT JOIN
+    movie_companies mc ON mc.movie_id = f.movie_id
+LEFT JOIN
+    company_name cn ON cn.id = mc.company_id
+LEFT JOIN
+    cast_info ci ON ci.movie_id = f.movie_id
+LEFT JOIN
+    aka_name ak ON ak.person_id = ci.person_id
+WHERE
+    f.production_year IS NOT NULL
+GROUP BY
+    f.movie_id, f.title, f.production_year, cn.name
+HAVING
+    COUNT(ci.id) IS NOT NULL
+ORDER BY
+    f.production_year DESC, f.cast_count DESC;

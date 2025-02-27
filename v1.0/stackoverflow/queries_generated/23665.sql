@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+        AND p.CreationDate >= DATEADD(year, -1, GETDATE()) -- Within the last year
+),
+OpenQuestions AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Score,
+        CASE 
+            WHEN ph.CreationDate IS NULL THEN 'Open'
+            ELSE 'Closed'
+        END AS Status,
+        COALESCE(c.CommentCount, 0) AS Comments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        RankedPosts r
+        LEFT JOIN PostHistory ph ON r.PostId = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) -- Close and Reopen events
+        LEFT JOIN Comments c ON r.PostId = c.PostId
+        LEFT JOIN Votes v ON r.PostId = v.PostId
+    GROUP BY 
+        r.PostId, r.Title, r.Score, ph.CreationDate
+    HAVING 
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) > 0 -- Must have at least one upvote or downvote
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT r.PostId) AS ActiveQuestionCount,
+        AVG(r.Score) AS AverageScore
+    FROM 
+        Users u
+        LEFT JOIN Badges b ON u.Id = b.UserId
+        LEFT JOIN OpenQuestions r ON u.Id = r.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ua.UserId,
+    u.DisplayName,
+    ua.BadgeCount,
+    ua.ActiveQuestionCount,
+    ua.AverageScore,
+    op.Title,
+    op.Score,
+    op.Status,
+    CAST(op.ViewCount AS VARCHAR) || ' views' AS ViewsInfo,
+    CASE 
+        WHEN op.Comments > 0 THEN 'This question has comments.'
+        ELSE 'No comments yet.'
+    END AS CommentStatus
+FROM 
+    UserActivity ua
+JOIN 
+    Users u ON ua.UserId = u.Id
+LEFT JOIN 
+    OpenQuestions op ON u.Id = op.OwnerUserId
+WHERE 
+    ua.BadgeCount > 0 -- Only users with badges
+ORDER BY 
+    ua.ActiveQuestionCount DESC,
+    ua.AverageScore DESC
+LIMIT 50;
+

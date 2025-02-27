@@ -1,0 +1,64 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        c.c_email_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer AS c
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+), web_sales_info AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ci.full_name,
+        ci.c_email_address,
+        d.d_date AS sale_date,
+        d.d_month_seq
+    FROM 
+        web_sales AS ws
+    JOIN 
+        customer_info AS ci ON ws.ws_bill_customer_sk = ci.c_customer_id
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+), aggregated_sales AS (
+    SELECT 
+        full_name,
+        c_email_address,
+        SUM(ws_sales_price) AS total_spent,
+        SUM(ws_quantity) AS total_quantity,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        d_month_seq
+    FROM 
+        web_sales_info
+    GROUP BY 
+        full_name, c_email_address, d_month_seq
+)
+
+SELECT 
+    full_name,
+    c_email_address,
+    total_spent,
+    total_quantity,
+    total_orders,
+    CASE 
+        WHEN total_spent > 1000 THEN 'High Value'
+        WHEN total_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    aggregated_sales
+WHERE 
+    d_month_seq = (SELECT MAX(d_month_seq) FROM aggregated_sales)
+ORDER BY 
+    total_spent DESC
+LIMIT 10;

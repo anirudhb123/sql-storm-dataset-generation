@@ -1,0 +1,82 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+),
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        COALESCE(SUM(P.Score), 0) AS TotalScore,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS QuestionCount,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS AnswerCount
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(A.PostCount, 0) AS PostCount,
+        COALESCE(A.TotalScore, 0) AS TotalScore,
+        COALESCE(A.QuestionCount, 0) AS QuestionCount,
+        COALESCE(A.AnswerCount, 0) AS AnswerCount,
+        R.Rank
+    FROM 
+        Users U
+    LEFT JOIN PostStatistics A ON U.Id = A.OwnerUserId
+    LEFT JOIN UserReputation R ON U.Id = R.UserId
+),
+TopActiveUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.PostCount,
+        UA.TotalScore,
+        UA.QuestionCount,
+        UA.AnswerCount
+    FROM 
+        UserActivity UA
+    WHERE 
+        UA.PostCount > 10
+    ORDER BY 
+        UA.TotalScore DESC
+    LIMIT 10
+)
+SELECT 
+    T.UserId,
+    T.DisplayName,
+    T.PostCount,
+    T.TotalScore,
+    COALESCE(C.CommentCount, 0) AS TotalComments,
+    STUFF((SELECT 
+               ',' + C.UserDisplayName 
+           FROM 
+               Comments C 
+           WHERE 
+               C.UserId = T.UserId 
+           FOR XML PATH('')), 1, 1, '') AS CommentAuthors,
+    CASE 
+        WHEN T.AnswerCount = 0 THEN 'No Answers'
+        ELSE CAST(T.AnswerCount AS VARCHAR)
+    END AS AnswerCountString
+FROM 
+    TopActiveUsers T
+LEFT JOIN (
+    SELECT 
+        PostId,
+        COUNT(Id) AS CommentCount,
+        UserId
+    FROM 
+        Comments
+    GROUP BY 
+        PostId, UserId
+) C ON T.UserId = C.UserId
+ORDER BY 
+    T.TotalScore DESC, T.PostCount DESC;

@@ -1,0 +1,26 @@
+SELECT 
+    u.DisplayName AS User,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+    SUM(COALESCE(v.vote_count, 0)) AS TotalVotes,
+    AVG(u.Reputation) AS AvgUserReputation,
+    MAX(p.Score) AS MaxPostScore,
+    MIN(p.CreationDate) AS FirstPostDate,
+    MAX(p.LastActivityDate) AS LastPostActivity,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM 
+    Users u
+JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS vote_count FROM Votes GROUP BY PostId) v ON p.Id = v.PostId
+LEFT JOIN 
+    (SELECT PostId, STRING_AGG(TagName, ', ') AS TagName FROM Tags t JOIN 
+    (SELECT unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName, Id AS PostId FROM Posts) AS tagged_posts ON tagged_posts.TagName = t.TagName GROUP BY PostId) AS post_tags ON p.Id = post_tags.PostId
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 10 
+ORDER BY 
+    TotalVotes DESC, TotalPosts DESC;

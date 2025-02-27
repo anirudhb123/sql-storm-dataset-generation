@@ -1,0 +1,51 @@
+
+WITH RECURSIVE SalesSummary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+), 
+TopSales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        ss.total_quantity,
+        ss.total_profit,
+        ROW_NUMBER() OVER (ORDER BY ss.total_profit DESC) AS rank
+    FROM 
+        SalesSummary ss
+    JOIN 
+        item ON ss.ws_item_sk = item.i_item_sk
+    WHERE 
+        ss.rn = 1
+)
+SELECT 
+    t.item_id,
+    t.product_name,
+    COALESCE(t.total_quantity, 0) AS quantity_sold,
+    COALESCE(t.total_profit, 0) AS total_profit,
+    dc.d_date AS last_sale_date,
+    CASE WHEN t.total_profit IS NULL THEN 'No Sales' ELSE 'Sales Recorded' END AS sales_status
+FROM 
+    TopSales t
+LEFT JOIN 
+    (SELECT 
+         ws_item_sk, 
+         MAX(d_date) AS d_date 
+     FROM 
+         web_sales 
+     JOIN 
+         date_dim ON web_sales.ws_sold_date_sk = date_dim.d_date_sk 
+     GROUP BY 
+         ws_item_sk
+    ) dc ON t.ws_item_sk = dc.ws_item_sk
+WHERE 
+    t.rank <= 10
+ORDER BY 
+    total_profit DESC;

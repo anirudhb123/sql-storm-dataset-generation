@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, m.title, 0 AS level
+    FROM aka_title m
+    WHERE m.production_year >= 2000
+    UNION ALL
+    SELECT m.id, m.title, mh.level + 1
+    FROM aka_title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+ActorStats AS (
+    SELECT 
+        a.name AS actor_name, 
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(CASE 
+            WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget') 
+            THEN CAST(mi.info as INTEGER) END) AS avg_budget
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN movie_info mi ON ci.movie_id = mi.movie_id
+    GROUP BY a.name
+),
+TopActors AS (
+    SELECT 
+        actor_name, 
+        movie_count, 
+        avg_budget,
+        ROW_NUMBER() OVER (ORDER BY movie_count DESC, avg_budget DESC) AS rank
+    FROM ActorStats
+)
+SELECT 
+    mh.movie_id, 
+    mh.title, 
+    COALESCE(ta.actor_name, 'No Actors Found') AS top_actor, 
+    mh.level,
+    (SELECT COUNT(DISTINCT k.keyword) 
+     FROM movie_keyword mk 
+     JOIN keyword k ON mk.keyword_id = k.id 
+     WHERE mk.movie_id = mh.movie_id) AS keyword_count
+FROM MovieHierarchy mh
+LEFT JOIN TopActors ta ON ta.rank = 1
+WHERE mh.level <= 2
+ORDER BY mh.production_year DESC NULLS LAST, mh.title ASC;
+
+### Explanation:
+1. **Recursive CTE (MovieHierarchy)**: This retrieves movies from the year 2000 onward and builds a hierarchy of linked movies using a recursive relationship defined in the `movie_link` table.
+   
+2. **Aggregate CTE (ActorStats)**: This aggregates data for actors, counting the number of movies they appear in and calculating the average budget across their movies filtered by the `info_type_id` which represents budget.
+
+3. **Ranking CTE (TopActors)**: This ranks actors based on the number of movies and their average budget.
+
+4. **Main Query**: The final selection combines the movie hierarchy with the top actor by using a left join, while also counting keywords associated with each movie.
+
+5. **NULL Logic**: It appropriately handles cases where there are no actors found by using `COALESCE`.
+
+6. **Complexity**: The query utilizes multiple joins, aggregate functions, a recursive query, window functions for ranking, and complicated filtering conditions, making it suitable for performance benchmarking.

@@ -1,0 +1,58 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid_inc_tax) AS Total_Sales,
+        COUNT(ws.ws_order_number) AS Total_Orders
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        c_customer_id
+    FROM 
+        CustomerSales
+    WHERE 
+        Total_Sales > (SELECT AVG(Total_Sales) FROM CustomerSales)
+),
+ShippingModes AS (
+    SELECT 
+        sm.sm_ship_mode_id,
+        COUNT(ws.ws_order_number) AS Order_Count,
+        SUM(ws.ws_ext_ship_cost) AS Total_Shipping_Cost
+    FROM 
+        web_sales ws
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY 
+        sm.sm_ship_mode_id
+)
+SELECT 
+    hvc.c_customer_id,
+    sh.sm_type,
+    sm.Order_Count,
+    sm.Total_Shipping_Cost,
+    SUM(cs.cs_ext_sales_price) AS Total_Catalog_Sales,
+    SUM(ss.ss_ext_sales_price) AS Total_Store_Sales
+FROM 
+    HighValueCustomers hvc
+JOIN 
+    ShippingModes sm ON sm.Order_Count > 10
+LEFT JOIN 
+    catalog_sales cs ON hvc.c_customer_id = cs.cs_bill_customer_sk
+LEFT JOIN 
+    store_sales ss ON hvc.c_customer_id = ss.ss_customer_sk
+JOIN 
+    ship_mode sh ON sm.sm_ship_mode_id = sh.sm_ship_mode_id
+GROUP BY 
+    hvc.c_customer_id, sh.sm_type, sm.Order_Count, sm.Total_Shipping_Cost
+ORDER BY 
+    Total_Catalog_Sales DESC, Total_Store_Sales DESC;

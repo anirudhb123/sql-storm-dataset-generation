@@ -1,0 +1,78 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        SUM(ss_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_sales_price) DESC) AS sales_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ss_store_sk, ss_item_sk
+),
+filtered_sales AS (
+    SELECT 
+        r.ss_store_sk,
+        r.ss_item_sk,
+        r.total_sales,
+        COALESCE(dm.cd_gender, 'Unknown') AS gender,
+        COALESCE(dm.cd_marital_status, 'N') AS marital_status
+    FROM 
+        ranked_sales r
+    LEFT JOIN 
+        customer c ON r.ss_store_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics dm ON c.c_current_cdemo_sk = dm.cd_demo_sk
+    WHERE 
+        r.sales_rank <= 10
+),
+unique_addresses AS (
+    SELECT DISTINCT 
+        ca_address_sk, 
+        ca_state, 
+        ca_city 
+    FROM 
+        customer_address 
+    WHERE 
+        ca_country IS NULL OR ca_country = ''
+),
+promotion_summary AS (
+    SELECT 
+        p.p_promo_sk,
+        p.p_promo_name,
+        COUNT(*) AS usage_count,
+        SUM(ws_ext_sales_price) AS total_discounted_sales
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_sk, 
+        p.p_promo_name
+)
+SELECT 
+    s.ss_store_sk,
+    a.ca_state,
+    a.ca_city,
+    SUM(fs.total_sales) AS total_store_sales,
+    STRING_AGG(DISTINCT fs.gender) AS gender_distribution,
+    STRING_AGG(DISTINCT fs.marital_status) AS marital_distribution,
+    COALESCE(ps.total_discounted_sales, 0) AS total_promotion_sales
+FROM 
+    filtered_sales fs
+JOIN 
+    unique_addresses a ON fs.ss_store_sk = a.ca_address_sk
+LEFT JOIN 
+    promotion_summary ps ON fs.ss_item_sk = ps.p_promo_sk
+JOIN 
+    warehouse w ON fs.ss_store_sk = w.w_warehouse_sk
+GROUP BY 
+    s.ss_store_sk, a.ca_state, a.ca_city
+HAVING 
+    SUM(fs.total_sales) > (SELECT AVG(total_sales) FROM ranked_sales)
+ORDER BY 
+    total_store_sales DESC, 
+    a.ca_state ASC, 
+    a.ca_city ASC;

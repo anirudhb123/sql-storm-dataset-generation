@@ -1,0 +1,86 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '12 MONTH'
+),
+SupplierData AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+FilteredSuppliers AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name
+    FROM 
+        SupplierData sd
+    WHERE 
+        sd.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierData)
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+),
+FinalResults AS (
+    SELECT 
+        co.c_custkey,
+        co.order_count,
+        co.total_spent,
+        s.s_name,
+        CASE 
+            WHEN co.total_spent IS NULL THEN 'No Orders'
+            WHEN co.total_spent > 1000 THEN 'High Value'
+            ELSE 'Low Value'
+        END AS customer_value
+    FROM 
+        CustomerOrders co
+    LEFT JOIN 
+        FilteredSuppliers s ON co.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = co.order_count)
+)
+SELECT 
+    fr.c_custkey,
+    fr.order_count,
+    fr.total_spent,
+    fr.s_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders
+FROM 
+    FinalResults fr
+LEFT JOIN 
+    orders o ON o.o_custkey = fr.c_custkey
+LEFT JOIN 
+    lineitem l ON l.l_orderkey = o.o_orderkey
+WHERE 
+    (fr.customer_value = 'High Value' AND l.discount < 0.10) OR
+    (fr.customer_value = 'Low Value' AND l.discount IS NULL)
+GROUP BY 
+    fr.c_custkey, fr.order_count, fr.total_spent, fr.s_name
+ORDER BY 
+    fr.total_spent DESC, fr.c_custkey ASC
+LIMIT 50 OFFSET 0;

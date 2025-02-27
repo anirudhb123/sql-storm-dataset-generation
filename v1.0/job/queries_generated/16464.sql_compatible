@@ -1,0 +1,28 @@
+
+SELECT 
+    t.title, 
+    a.name, 
+    c.nr_order 
+FROM 
+    title AS t 
+JOIN 
+    movie_companies AS mc ON t.id = mc.movie_id 
+JOIN 
+    company_name AS cn ON mc.company_id = cn.id 
+JOIN 
+    cast_info AS ci ON t.id = ci.movie_id 
+JOIN 
+    aka_name AS a ON ci.person_id = a.person_id 
+JOIN 
+    (SELECT movie_id, COUNT(*) AS nr_order 
+     FROM cast_info 
+     GROUP BY movie_id) AS c ON t.id = c.movie_id 
+WHERE 
+    t.production_year > 2000 
+GROUP BY 
+    t.title, 
+    a.name, 
+    c.nr_order 
+ORDER BY 
+    t.production_year DESC, 
+    a.name;

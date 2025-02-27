@@ -1,0 +1,96 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE cte ON p.ParentId = cte.PostId
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    p.Id AS QuestionId,
+    p.Title AS QuestionTitle,
+    p.ViewCount AS QuestionViewCount,
+    p.Score AS QuestionScore,
+    u.DisplayName AS OwnerDisplayName,
+    ub.BadgeCount AS OwnerBadgeCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    COALESCE(cph.CloseCount, 0) AS PostClosedCount,
+    ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+    CASE 
+        WHEN p.CreationDate > NOW() - INTERVAL '7 days' THEN 'New post'
+        ELSE 'Old post'
+    END AS PostAgeCategory
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadgeCounts ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostVoteSummary ps ON p.Id = ps.PostId
+LEFT JOIN 
+    ClosedPostHistory cph ON p.Id = cph.PostId
+WHERE 
+    p.PostTypeId = 1
+    AND p.ViewCount > 100
+    AND p.Score > 10
+ORDER BY 
+    p.CreationDate DESC;

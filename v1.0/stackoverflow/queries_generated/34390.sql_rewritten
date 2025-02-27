@@ -1,0 +1,90 @@
+WITH RecursivePostCTE AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2  
+),
+UserAggregates AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId IN (1, 2) THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(b.Class = 1) AS GoldBadges,  
+        SUM(b.Class = 2) AS SilverBadges, 
+        SUM(b.Class = 3) AS BronzeBadges  
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+VoteStats AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    CONVERT(varchar, r.CreationDate, 120) AS CreationDate,
+    u.DisplayName AS UserName,
+    ua.TotalPosts,
+    ua.TotalQuestions,
+    ua.TotalAnswers,
+    ua.GoldBadges,
+    ua.SilverBadges,
+    ua.BronzeBadges,
+    vs.TotalUpvotes,
+    vs.TotalDownvotes,
+    RANK() OVER (PARTITION BY r.ParentId ORDER BY r.Score DESC) AS AnswerRank
+FROM 
+    RecursivePostCTE r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+JOIN 
+    UserAggregates ua ON u.Id = ua.UserId
+LEFT JOIN 
+    VoteStats vs ON r.PostId = vs.PostId
+WHERE 
+    r.Level = 1 
+ORDER BY 
+    r.Score DESC, 
+    r.CreationDate DESC;

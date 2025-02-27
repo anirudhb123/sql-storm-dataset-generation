@@ -1,0 +1,50 @@
+
+WITH RECURSIVE customer_returns AS (
+    SELECT
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returns,
+        COUNT(DISTINCT cr.order_number) AS return_count
+    FROM
+        catalog_returns cr
+    GROUP BY
+        cr.returning_customer_sk
+),
+customer_details AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        COALESCE(NULLIF(cd.cd_credit_rating, 'Unknown'), 'Not Rated') AS effective_credit_rating,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM
+        customer c
+        LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT
+    cd.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    COUNT(DISTINCT cr.total_returns) FILTER (WHERE cr.total_returns > 0) AS active_return_customers,
+    SUM(CASE WHEN cr.total_returns IS NOT NULL THEN cr.total_returns ELSE 0 END) AS total_item_returns,
+    AVG(CASE WHEN cr.total_returns IS NULL THEN NULL ELSE cr.total_returns END) AS average_returns_per_customer,
+    CASE 
+        WHEN cd.cd_marital_status = 'M' AND cd.cd_purchase_estimate > 5000 THEN 'Married High Spender'
+        WHEN cd.cd_marital_status = 'S' AND cd.cd_purchase_estimate <= 5000 THEN 'Single Low Spender'
+        ELSE 'Other'
+    END AS spending_category
+FROM
+    customer_details cd
+    LEFT JOIN customer_returns cr ON cd.c_customer_id = cr.returning_customer_sk
+WHERE
+    cd.rn = 1 AND
+    (cd.cd_purchase_estimate BETWEEN 1000 AND 10000 AND cd.ca_city IS NOT NULL)
+GROUP BY
+    cd.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+HAVING
+    COUNT(DISTINCT cr.return_count) >= 1 OR total_item_returns > 100
+ORDER BY
+    spending_category DESC, cd.cd_purchase_estimate DESC;

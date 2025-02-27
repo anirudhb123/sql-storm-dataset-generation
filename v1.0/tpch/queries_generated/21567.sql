@@ -1,0 +1,83 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CombinedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderstatus,
+        CASE 
+            WHEN o.o_orderstatus = 'F' THEN 'Finalized'
+            WHEN o.o_orderstatus IS NULL THEN 'Unknown'
+            ELSE 'Pending'
+        END AS status_description
+    FROM 
+        orders o
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(RO.total_revenue, 0) AS total_revenue,
+    COALESCE(SD.total_cost, 0) AS supplier_total_cost,
+    CD.o_orderstatus,
+    CD.status_description
+FROM 
+    customer c
+LEFT JOIN 
+    CombinedOrders CD ON c.c_custkey = CD.o_custkey
+LEFT JOIN 
+    RankedOrders RO ON CD.o_orderkey = RO.o_orderkey
+LEFT JOIN 
+    SupplierDetails SD ON c.c_custkey = SD.s_suppkey 
+WHERE 
+    (c.c_acctbal > 100.00 OR (c.c_acctbal IS NULL AND c.c_name LIKE '%LLC%'))
+    AND (CD.o_orderstatus IS NOT NULL OR RO.total_revenue > 5000.00)
+UNION ALL
+SELECT 
+    s.s_suppkey,
+    s.s_name,
+    NULL AS total_revenue,
+    SUM(PS.ps_supplycost) AS total_cost,
+    NULL AS o_orderstatus,
+    'Supplier Only' AS status_description
+FROM 
+    supplier s
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+WHERE 
+    ps.ps_availqty IS NULL OR ps.ps_supplycost <= 0
+GROUP BY 
+    s.s_suppkey, s.s_name
+HAVING 
+    COUNT(ps.ps_partkey) > 10
+ORDER BY 
+    total_revenue DESC NULLS LAST, total_cost DESC NULLS LAST;

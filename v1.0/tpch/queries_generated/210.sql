@@ -1,0 +1,76 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        DENSE_RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        suppliers s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.custkey
+),
+TopRegionPurchases AS (
+    SELECT 
+        n.n_nationkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_purchased
+    FROM 
+        lineitem l 
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    r.r_name AS region,
+    COUNT(DISTINCT cs.c_custkey) AS unique_customers,
+    SUM(cs.total_spent) AS total_revenue,
+    SUM(ps.total_supply_value) AS total_supplies,
+    AVG(pr.p_retailprice) AS average_price
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    CustomerOrders cs ON n.n_nationkey = cs.c_custkey
+LEFT JOIN 
+    SupplierStats ps ON ps.s_suppkey = (
+        SELECT TOP 1 ps_suppkey FROM partsupp WHERE ps_partkey IN (SELECT p_partkey FROM RankedParts WHERE price_rank = 1)
+    ) 
+LEFT JOIN 
+    RankedParts pr ON pr.p_partkey = (
+        SELECT p.p_partkey FROM part p ORDER BY p.p_retailprice DESC LIMIT 1
+    )
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(cs.total_spent) > 10000
+ORDER BY 
+    total_revenue DESC;

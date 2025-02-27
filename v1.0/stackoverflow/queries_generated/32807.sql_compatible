@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(b.Class, 0) AS BadgeClass,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId AND b.Class = 1 
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopQuestions AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        ua.UserId,
+        ua.DisplayName,
+        ua.VoteCount,
+        ua.UpvoteCount,
+        ua.DownvoteCount,
+        rp.BadgeClass
+    FROM 
+        RankedPosts rp
+    INNER JOIN 
+        UserActivity ua ON rp.OwnerUserId = ua.UserId
+    WHERE 
+        rp.rn <= 3 
+)
+SELECT 
+    tq.Title,
+    tq.Score,
+    tq.ViewCount,
+    tq.AnswerCount,
+    tq.CommentCount,
+    tq.DisplayName AS OwnerDisplayName,
+    tq.VoteCount,
+    tq.UpvoteCount,
+    tq.DownvoteCount,
+    COALESCE(tq.BadgeClass, 'No Badge') AS BadgeClass
+FROM 
+    TopQuestions tq
+ORDER BY 
+    tq.Score DESC, 
+    tq.ViewCount DESC
+LIMIT 10 OFFSET 0;

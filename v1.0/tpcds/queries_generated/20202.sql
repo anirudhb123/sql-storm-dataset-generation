@@ -1,0 +1,56 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT ws_sold_date_sk, 
+           ws_item_sk, 
+           ws_order_number,
+           ws_quantity,
+           ws_sales_price,
+           ws_net_profit,
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+),
+customer_data AS (
+    SELECT c.c_customer_sk, 
+           c_first_name, 
+           c_last_name, 
+           cd_gender, 
+           ct.county_sales
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN (
+        SELECT ca_county, 
+               SUM(ws_quantity) AS county_sales
+        FROM web_sales ws
+        JOIN customer_address ca ON ca.ca_address_sk = ws.ws_ship_addr_sk
+        GROUP BY ca_county
+    ) ct ON ct.county_sales > 100
+    WHERE c_current_addr_sk IS NOT NULL
+),
+nested_sales AS (
+    SELECT ws_item_sk, 
+           SUM(ws_quantity) AS total_quantity,
+           SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    GROUP BY ws_item_sk
+    HAVING SUM(ws_quantity) > 50
+)
+SELECT c.c_customer_sk,
+       CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+       sd.ws_item_sk,
+       sd.ws_quantity,
+       COALESCE(n.total_quantity, 0) AS total_quantity_sold,
+       n.total_profit AS total_profit_generated,
+       CASE 
+           WHEN n.total_quantity IS NOT NULL THEN 'Sold' 
+           ELSE 'Unsold' 
+       END AS sale_status
+FROM customer_data c
+JOIN sales_data sd ON c.c_customer_sk = sd.ws_order_number
+LEFT JOIN nested_sales n ON sd.ws_item_sk = n.ws_item_sk
+WHERE c.cd_gender = 'F' AND 
+      EXISTS (SELECT 1 
+              FROM store_sales ss 
+              WHERE ss.ss_item_sk = sd.ws_item_sk 
+              AND ss.ss_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = EXTRACT(YEAR FROM CURRENT_DATE)))
+ORDER BY c.c_customer_sk, n.total_profit_generated DESC;

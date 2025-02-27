@@ -1,0 +1,45 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN Posts.AnswerCount ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswersGiven,
+        STRING_AGG(DISTINCT Users.DisplayName, '; ') AS ActiveUsers,
+        STRING_AGG(DISTINCT Posts.Title, '; ') AS RelevantPostTitles
+    FROM 
+        Posts
+    JOIN 
+        UNNEST(string_to_array(Posts.Tags, '<>')) AS Tag ON Tag = Tags.TagName
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    WHERE 
+        Posts.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        Tags.TagName
+), 
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalAnswers,
+        TotalAnswersGiven,
+        ActiveUsers,
+        RelevantPostTitles,
+        DENSE_RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagCounts
+)
+SELECT 
+    TagName,
+    PostCount,
+    TotalAnswers,
+    TotalAnswersGiven,
+    ActiveUsers,
+    RelevantPostTitles
+FROM 
+    TopTags
+WHERE 
+    TagRank <= 10
+ORDER BY 
+    PostCount DESC;

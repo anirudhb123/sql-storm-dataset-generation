@@ -1,0 +1,48 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        COUNT(ps.ps_supplycost) AS supply_count,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+), CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal, 
+        o.o_orderkey, 
+        o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '1996-01-01'
+), NationAggregate AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        SUM(CASE WHEN ps.ps_supplycost < 100 THEN 1 ELSE 0 END) AS low_cost_parts,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT 
+    cs.c_name,
+    cs.o_totalprice,
+    rs.s_name,
+    na.n_name,
+    na.low_cost_parts,
+    na.total_supply_cost
+FROM CustomerOrders cs
+JOIN RankedSuppliers rs ON cs.o_orderkey IN (
+    SELECT l.l_orderkey 
+    FROM lineitem l 
+    WHERE l.l_suppkey = rs.s_suppkey
+)
+JOIN nation na ON rs.s_nationkey = na.n_nationkey
+WHERE rs.rank = 1 
+ORDER BY cs.o_totalprice DESC, na.low_cost_parts ASC
+LIMIT 10;

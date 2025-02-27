@@ -1,0 +1,40 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+TotalOrders AS (
+    SELECT o_custkey, SUM(o_totalprice) AS total_spent
+    FROM orders
+    GROUP BY o_custkey
+),
+CustomerRegion AS (
+    SELECT c.c_custkey, c.c_name, r.r_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    cr.c_name,
+    cr.r_name,
+    COUNT(DISTINCT lo.l_orderkey) AS total_orders,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue,
+    AVG(lo.l_discount) AS avg_discount,
+    MAX(lo.l_extendedprice) AS max_line_price,
+    MIN(lo.l_extendedprice) AS min_discounted_price
+FROM lineitem lo
+JOIN orders o ON lo.l_orderkey = o.o_orderkey
+JOIN TotalOrders to ON o.o_custkey = to.o_custkey
+JOIN CustomerRegion cr ON cr.c_custkey = o.o_custkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = cr.c_nationkey
+WHERE lo.l_shipdate >= DATE '1998-10-01' - INTERVAL '1 year'
+AND cr.r_name IS NOT NULL
+GROUP BY cr.c_name, cr.r_name
+HAVING COUNT(DISTINCT lo.l_orderkey) > 5
+ORDER BY total_revenue DESC;

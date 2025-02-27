@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) as order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+SupplierSummary AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+HighValueOrders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_totalprice,
+        r.o_orderdate,
+        s.s_suppkey,
+        ss.total_avail_qty,
+        ss.avg_supply_cost,
+        CASE 
+            WHEN ss.total_avail_qty IS NULL THEN 'No Supply'
+            ELSE 'Available'
+        END AS supply_status
+    FROM 
+        RankedOrders r
+    LEFT JOIN 
+        lineitem l ON r.o_orderkey = l.l_orderkey
+    LEFT JOIN 
+        SupplierSummary ss ON l.l_partkey = ss.ps_partkey AND l.l_suppkey = ss.ps_suppkey
+    WHERE 
+        r.order_rank = 1 AND r.o_totalprice > 1000
+)
+SELECT 
+    h.o_orderkey,
+    h.o_totalprice,
+    h.o_orderdate,
+    h.s_suppkey,
+    h.total_avail_qty,
+    h.avg_supply_cost,
+    h.supply_status,
+    COALESCE(n.n_name, 'Unknown') AS nation_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_sales
+FROM 
+    HighValueOrders h
+LEFT JOIN 
+    nation n ON h.s_suppkey = n.n_nationkey
+LEFT JOIN 
+    lineitem l ON h.o_orderkey = l.l_orderkey
+GROUP BY 
+    h.o_orderkey, h.o_totalprice, h.o_orderdate, h.s_suppkey, h.total_avail_qty, 
+    h.avg_supply_cost, h.supply_status, n.n_name
+HAVING 
+    COUNT(l.l_orderkey) > 0
+ORDER BY 
+    h.o_totalprice DESC;

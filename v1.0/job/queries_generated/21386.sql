@@ -1,0 +1,93 @@
+WITH MovieStatistics AS (
+    SELECT 
+        t.production_year,
+        COUNT(DISTINCT t.id) AS total_movies,
+        COUNT(c.id) FILTER (WHERE c.nr_order IS NOT NULL) AS casted_movies,
+        SUM(CASE WHEN t.production_year IS NOT NULL THEN 1 ELSE 0 END) AS valid_years,
+        AVG(t.season_nr) FILTER (WHERE t.kind_id = 2) AS avg_season_length
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.production_year
+),
+TopActors AS (
+    SELECT 
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS movies_featured
+    FROM 
+        aka_name a
+    INNER JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    WHERE 
+        a.name IS NOT NULL AND a.name <> ''
+    GROUP BY 
+        a.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 3
+    ORDER BY 
+        movies_featured DESC
+    LIMIT 10
+),
+KeywordDetails AS (
+    SELECT 
+        k.keyword,
+        COUNT(mk.movie_id) AS movie_count
+    FROM 
+        keyword k
+    LEFT JOIN 
+        movie_keyword mk ON k.id = mk.keyword_id
+    WHERE 
+        k.phonetic_code IS NOT NULL
+    GROUP BY 
+        k.keyword
+    ORDER BY 
+        movie_count DESC
+),
+CompanyInfo AS (
+    SELECT 
+        c.name AS company_name,
+        COUNT(mc.movie_id) AS total_movies,
+        MIN(t.production_year) AS earliest_movie_year
+    FROM 
+        company_name c
+    INNER JOIN 
+        movie_companies mc ON c.id = mc.company_id
+    INNER JOIN 
+        aka_title t ON mc.movie_id = t.id
+    GROUP BY 
+        c.name
+    HAVING 
+        COUNT(mc.movie_id) > 5
+)
+SELECT 
+    ms.production_year,
+    ms.total_movies,
+    ms.casted_movies,
+    ms.valid_years,
+    ms.avg_season_length,
+    ta.name AS top_actor,
+    ta.movies_featured,
+    kd.keyword,
+    kd.movie_count,
+    co.company_name,
+    co.total_movies,
+    co.earliest_movie_year
+FROM 
+    MovieStatistics ms
+FULL OUTER JOIN 
+    TopActors ta ON ms.total_movies > 10
+LEFT JOIN 
+    KeywordDetails kd ON ms.total_movies < (SELECT AVG(total_movies) FROM MovieStatistics)
+FULL JOIN 
+    CompanyInfo co ON co.total_movies > ms.casted_movies
+WHERE 
+    ms.valid_years > 0
+ORDER BY 
+    ms.production_year DESC, 
+    ta.movies_featured DESC NULLS LAST, 
+    kd.movie_count ASC, 
+    co.earliest_movie_year DESC NULLS FIRST
+LIMIT 
+    50 OFFSET 10;

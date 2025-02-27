@@ -1,0 +1,28 @@
+SELECT 
+    p.p_name, 
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(p.p_retailprice) AS avg_price,
+    SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT s.s_name ORDER BY s.s_name SEPARATOR ', '), ',', 3) AS top_suppliers
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    c.c_mktsegment = 'BUILDING' 
+    AND p.p_type LIKE '%Brass%'
+    AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    p.p_partkey
+HAVING 
+    total_quantity > 100
+ORDER BY 
+    total_quantity DESC;

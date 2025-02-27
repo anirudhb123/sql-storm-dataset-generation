@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS movie_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+PersonRoles AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS person_name,
+        rt.role AS role,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    INNER JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id, ak.name, rt.role
+),
+FilteredRoles AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN role_count > 1 THEN 'Ensemble Cast' 
+            ELSE 'Lead Cast' 
+        END AS cast_type
+    FROM 
+        PersonRoles
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    COALESCE(rm.production_year, 'Unknown') AS production_year,
+    MAX(fr.person_name) AS lead_actor,
+    COUNT(DISTINCT fr.cast_type) AS unique_cast_types,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    FilteredRoles fr ON rm.movie_id = fr.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON rm.movie_id = mk.movie_id
+WHERE 
+    rm.movie_rank <= 10
+GROUP BY 
+    rm.movie_id, rm.title, rm.production_year
+HAVING 
+    COUNT(fr.person_name) > 1 AND 
+    COALESCE(rm.production_year, 0) > 2000 -- Obscure clause, using COALESCE to handle possible NULL year
+ORDER BY 
+    rm.production_year DESC, 
+    COUNT(fr.cast_type) DESC, 
+    rm.title;

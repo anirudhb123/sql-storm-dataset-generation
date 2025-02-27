@@ -1,0 +1,40 @@
+WITH Benchmark AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        U.Reputation AS OwnerReputation,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN V.PostId IS NOT NULL THEN 1 END) AS VoteCount,
+        COUNT(CASE WHEN B.UserId IS NOT NULL THEN 1 END) AS BadgeCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        P.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, U.Reputation
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    ViewCount,
+    OwnerReputation,
+    CommentCount,
+    VoteCount,
+    BadgeCount,
+    (ViewCount * 1.0 / NULLIF(CommentCount, 0)) AS ViewsPerComment,
+    (VoteCount * 1.0 / NULLIF(CommentCount, 0)) AS VotesPerComment
+FROM 
+    Benchmark
+ORDER BY 
+    ViewCount DESC;

@@ -1,0 +1,64 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, 0 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT sp.ps_suppkey, s.s_name, sh.Level + 1
+    FROM partsupp sp
+    JOIN SupplierHierarchy sh ON sp.ps_partkey = sh.s_suppkey
+    JOIN supplier s ON sp.ps_suppkey = s.s_suppkey
+    WHERE sh.Level < 5
+),
+
+CustomerTotalSpend AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS TotalSpend
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+
+FrequentPurchasers AS (
+    SELECT c.c_custkey, c.c_name, ct.TotalSpend
+    FROM customer c
+    JOIN CustomerTotalSpend ct ON c.c_custkey = ct.c_custkey
+    WHERE ct.TotalSpend > (SELECT AVG(TotalSpend) FROM CustomerTotalSpend)
+),
+
+PartSupplierCounts AS (
+    SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS SupplierCount
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING COUNT(DISTINCT ps.ps_suppkey) > 5
+),
+
+OrderSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS RN
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+
+SELECT 
+    r.r_name, 
+    p.p_name, 
+    SUM(oi.TotalRevenue) AS TotalRevenue,
+    COUNT(DISTINCT f.c_custkey) AS CustomerCount,
+    COUNT(DISTINCT sh.s_suppkey) AS SupplierCount,
+    MAX(f.TotalSpend) AS MaxCustomerSpend,
+    CASE 
+        WHEN MAX(f.TotalSpend) IS NULL THEN 'No Purchases'
+        ELSE 'Purchases Exist'
+    END AS PurchaseStatus
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN OrderSummary oi ON p.p_partkey IN (SELECT DISTINCT ps.ps_partkey FROM PartSupplierCounts ps)
+LEFT JOIN FrequentPurchasers f ON s.s_nationkey = f.c_nationkey
+JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+GROUP BY r.r_name, p.p_name
+HAVING SUM(oi.TotalRevenue) IS NOT NULL
+ORDER BY TotalRevenue DESC;

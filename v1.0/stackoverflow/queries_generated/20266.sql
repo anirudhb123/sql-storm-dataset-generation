@@ -1,0 +1,80 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation,
+        U.CreationDate,
+        COALESCE(NULLIF(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0), 0) AS UpVotesTotal,
+        COALESCE(NULLIF(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0), 0) AS DownVotesTotal,
+        COUNT(DISTINCT P.Id) AS AnsweredQuestions,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT B.Id) AS BadgesCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 2
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 0
+    GROUP BY 
+        U.Id
+), 
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.UserId,
+        PH.CreationDate,
+        PT.Name AS PostHistoryType
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PT ON PH.PostHistoryTypeId = PT.Id
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.CreationDate,
+    U.UpVotesTotal,
+    U.DownVotesTotal,
+    U.AnsweredQuestions,
+    U.TotalScore,
+    U.BadgesCount,
+    RP.PostId,
+    RP.Title AS RecentPostTitle,
+    RP.CreationDate AS RecentPostDate,
+    PH.PostHistoryType,
+    PH.CreationDate AS HistoryCreationDate,
+    CASE 
+        WHEN (UPTIME < NOW() - INTERVAL '1 DAY') THEN 'Inactive' 
+        ELSE 'Active' 
+    END AS UserStatus
+FROM 
+    UserStatistics U
+LEFT JOIN 
+    RecentPosts RP ON U.UserId = RP.RecentPostRank
+LEFT JOIN 
+    PostHistoryDetails PH ON RP.PostId = PH.PostId
+WHERE 
+    U.BadgesCount > 0
+    AND PH.PostHistoryTypeId IN (10, 11, 12) -- Filtering based on specific History Types
+    AND (U.UpVotesTotal - U.DownVotesTotal) >= 10
+ORDER BY 
+    U.TotalScore DESC, 
+    RP.RecentPostDate DESC
+LIMIT 100;

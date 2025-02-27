@@ -1,0 +1,75 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    INNER JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.partkey,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    INNER JOIN 
+        (SELECT ps_partkey AS partkey FROM partsupp GROUP BY ps_partkey HAVING COUNT(*) > 1) AS p
+    ON 
+        rs.ps_partkey = p.partkey
+    WHERE 
+        rs.rank <= 3
+),
+TotalRevenue AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+CustomerRevenue AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(tr.total_revenue), 0) AS total_customer_revenue
+    FROM 
+        customer c
+    LEFT JOIN 
+        TotalRevenue tr ON c.c_custkey = o.o_custkey 
+    LEFT JOIN 
+        orders o ON tr.o_orderkey = o.o_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    c.c_name,
+    SUM(tr.total_revenue) AS total_revenue,
+    CASE 
+        WHEN SUM(tr.total_revenue) IS NULL THEN 'No Revenue'
+        WHEN SUM(tr.total_revenue) > 1000 THEN 'High Revenue'
+        ELSE 'Low Revenue' 
+    END AS revenue_category,
+    rs.s_name AS top_supplier,
+    rs.s_acctbal AS supplier_acctbal
+FROM 
+    CustomerRevenue cr
+LEFT JOIN 
+    TopSuppliers rs ON cr.c_custkey = rs.s_suppkey
+LEFT JOIN 
+    TotalRevenue tr ON cr.c_custkey = tr.o_orderkey
+WHERE 
+    cr.total_customer_revenue > 500
+GROUP BY 
+    c.c_name, rs.s_name, rs.s_acctbal
+HAVING 
+    COUNT(DISTINCT rs.s_suppkey) > 1
+ORDER BY 
+    total_revenue DESC;

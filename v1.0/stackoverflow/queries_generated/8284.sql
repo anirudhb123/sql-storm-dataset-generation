@@ -1,0 +1,49 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COALESCE(SUM(v.VoteTypeId = 2), 0) DESC, p.CreationDate DESC) AS OwnerRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' AND
+        p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.OwnerRank <= 5  -- Top 5 Posts per User
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Upvotes,
+    tp.Downvotes,
+    tp.CommentCount,
+    tp.OwnerDisplayName,
+    tp.OwnerReputation,
+    ROW_NUMBER() OVER (ORDER BY tp.Upvotes DESC, tp.CreationDate DESC) AS GlobalRank
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.GlobalRank;

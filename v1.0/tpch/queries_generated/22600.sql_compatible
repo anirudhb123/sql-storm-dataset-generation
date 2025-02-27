@@ -1,0 +1,77 @@
+
+WITH ranked_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (PARTITION BY sub.r_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s 
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region sub ON n.n_regionkey = sub.r_regionkey
+),
+popular_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity
+    FROM 
+        part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(l.l_quantity) > (SELECT AVG(total_quantity) 
+                             FROM (SELECT SUM(l2.l_quantity) AS total_quantity 
+                                   FROM lineitem l2 
+                                   GROUP BY l2.l_partkey) AS avg_query)
+),
+null_handling AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        CASE 
+            WHEN ps.ps_availqty IS NULL THEN 0
+            ELSE ps.ps_availqty 
+        END AS available_quantity,
+        COALESCE(ps.ps_supplycost, 0) AS supply_cost
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_availqty IS NOT NULL OR ps.ps_supplycost IS NOT NULL
+),
+final_selection AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.available_quantity,
+        ps.supply_cost,
+        p.p_size,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.supply_cost DESC) AS cheapest_supplier
+    FROM 
+        null_handling ps
+    JOIN popular_parts p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.total_quantity > 100 AND p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_container = 'BOX')
+)
+SELECT 
+    r.r_name AS region,
+    f.p_size,
+    SUM(f.supply_cost * f.available_quantity) AS total_cost,
+    COUNT(DISTINCT f.ps_partkey) AS number_of_parts
+FROM 
+    final_selection f
+JOIN 
+    ranked_suppliers rs ON f.ps_suppkey = rs.s_suppkey
+JOIN 
+    nation n ON rs.n_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE
+    rs.rank <= 3
+GROUP BY 
+    r.r_name, f.p_size
+HAVING 
+    COUNT(DISTINCT f.ps_partkey) > 5 OR MAX(f.available_quantity) IS NULL
+ORDER BY 
+    total_cost DESC, number_of_parts DESC;

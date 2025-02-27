@@ -1,0 +1,79 @@
+
+WITH TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS RN
+    FROM Users U
+    WHERE U.Reputation IS NOT NULL
+),
+RecentPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    WHERE P.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+PostData AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        COALESCE(V.TotalVotes, 0) AS TotalVotes,
+        U.DisplayName,
+        U.Reputation,
+        U.UserId
+    FROM RecentPosts RP
+    JOIN TopUsers U ON RP.OwnerUserId = U.UserId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS TotalVotes
+        FROM Votes 
+        WHERE VoteTypeId IN (2, 3) 
+        GROUP BY PostId
+    ) V ON RP.PostId = V.PostId
+    WHERE RP.PostRank = 1
+),
+PostHistoryData AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS HistoryCount,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedCount,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReOpenedCount
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+),
+UserPostStats AS (
+    SELECT 
+        PD.UserId,
+        PD.DisplayName,
+        PD.Reputation,
+        COUNT(PD.PostId) AS PostCount,
+        SUM(COALESCE(PD.TotalVotes, 0)) AS TotalVotes,
+        SUM(PD.Score) AS TotalScore
+    FROM PostData PD
+    GROUP BY PD.UserId, PD.DisplayName, PD.Reputation
+)
+SELECT 
+    PS.DisplayName,
+    PS.Reputation,
+    PS.PostCount,
+    PS.TotalVotes,
+    PS.TotalScore,
+    P.Score,
+    P.ViewCount,
+    PH.HistoryCount,
+    PH.ClosedCount,
+    PH.ReOpenedCount
+FROM UserPostStats PS
+JOIN PostHistoryData PH ON PS.UserId = PH.PostId
+JOIN PostData P ON PH.PostId = P.PostId
+WHERE PS.TotalScore > 1000
+ORDER BY PS.Reputation DESC, PS.TotalVotes DESC;

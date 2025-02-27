@@ -1,0 +1,47 @@
+
+WITH TopUsers AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        COUNT(DISTINCT A.Id) AS AnswerCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1  
+    LEFT JOIN Posts A ON U.Id = A.OwnerUserId AND A.PostTypeId = 2  
+    WHERE U.Reputation > 1000  
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+QuestionTags AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        UNNEST(SPLIT(SUBSTR(P.Tags, 2, LENGTH(P.Tags) - 2), '><')) AS TagName
+    FROM Posts P
+    WHERE P.PostTypeId = 1
+),
+PopularTags AS (
+    SELECT 
+        TagName, 
+        COUNT(*) AS TagCount
+    FROM QuestionTags
+    GROUP BY TagName
+    ORDER BY TagCount DESC
+    LIMIT 10  
+)
+SELECT 
+    U.DisplayName AS TopUser,
+    U.Reputation,
+    Q.Title AS QuestionTitle,
+    T.TagName,
+    COUNT(C.Id) AS CommentCount,
+    SUM(CASE WHEN V.CreationDate > Q.CreationDate THEN 1 ELSE 0 END) AS VotesAfterCreation
+FROM TopUsers U
+JOIN Posts Q ON U.UserId = Q.OwnerUserId AND Q.PostTypeId = 1  
+JOIN Comments C ON Q.Id = C.PostId
+JOIN QuestionTags QT ON Q.Id = QT.PostId
+JOIN PopularTags T ON QT.TagName = T.TagName
+LEFT JOIN Votes V ON Q.Id = V.PostId 
+WHERE U.QuestionCount > 5
+GROUP BY U.DisplayName, U.Reputation, Q.Title, T.TagName
+ORDER BY U.Reputation DESC, CommentCount DESC;

@@ -1,0 +1,24 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nationkey, COUNT(DISTINCT ps.ps_partkey) AS part_count,
+           STRING_AGG(DISTINCT p.p_name, '; ') AS part_names,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_address, s.nationkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(DISTINCT o.o_orderkey) AS order_count, 
+           STRING_AGG(DISTINCT o.o_orderpriority, ', ') AS order_priorities,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT sd.s_name AS supplier_name, sd.part_count, sd.part_names, 
+       co.c_name AS customer_name, co.order_count, co.total_spent,
+       DISTANCE(s.s_address, c.c_address) as address_distance
+FROM SupplierDetails sd
+JOIN CustomerOrders co ON sd.nationkey = co.nationkey
+WHERE sd.total_supply_cost > 10000 AND co.total_spent > 5000
+ORDER BY sd.part_count DESC, co.order_count DESC;

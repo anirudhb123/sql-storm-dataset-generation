@@ -1,0 +1,84 @@
+
+WITH UserScore AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        (COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) -
+         COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0)) AS NetVotes,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+HotQuestions AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        ROW_NUMBER() OVER (ORDER BY P.Score DESC) AS Ranking
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 AND 
+        P.Score > 10
+),
+CommonTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(*) AS UsageCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(*) > 5
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        PH.UserDisplayName
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.CreationDate BETWEEN TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days' 
+        AND TIMESTAMP '2024-10-01 12:34:56'
+)
+
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    COALESCE(US.NetVotes, 0) AS NetVotes,
+    COALESCE(US.PostCount, 0) AS PostCount,
+    HQ.Title AS HotQuestionTitle,
+    HQ.Score AS HotQuestionScore,
+    CT.TagName AS PopularTag,
+    CT.UsageCount AS PopularTagUsageCount,
+    RPH.PostHistoryTypeId, 
+    RPH.CreationDate AS RecentHistoryDate, 
+    RPH.UserDisplayName AS EditorName 
+FROM 
+    UserScore US
+FULL OUTER JOIN 
+    HotQuestions HQ ON US.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = HQ.Id)
+FULL OUTER JOIN 
+    CommonTags CT ON CT.TagName LIKE ANY(SELECT Tags FROM Posts WHERE OwnerUserId = US.UserId)
+LEFT JOIN 
+    RecentPostHistory RPH ON US.UserId = RPH.UserDisplayName
+WHERE 
+    US.Reputation IS NOT NULL OR HQ.Id IS NOT NULL OR CT.TagName IS NOT NULL
+ORDER BY 
+    COALESCE(US.Reputation, 0) DESC, 
+    COALESCE(HQ.Score, 0) DESC,
+    COALESCE(CT.UsageCount, 0) DESC
+LIMIT 50;

@@ -1,0 +1,67 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId
+),
+PostStats AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.VoteTypeId = 2, 0)) AS TotalUpvotes,
+        SUM(COALESCE(v.VoteTypeId = 3, 0)) AS TotalDownvotes,
+        AVG(p.Score) AS AvgScore,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(p.Tags, '<>')) AS TagName) AS t ON TRUE
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.DisplayName,
+    ps.TotalPosts,
+    ps.TotalUpvotes,
+    ps.TotalDownvotes,
+    ps.AvgScore,
+    COALESCE(ps.Tags, 'No Tags') AS Tags,
+    rpc.PostId AS RelatedPostId,
+    rcp.Title AS RelatedPostTitle
+FROM 
+    PostStats ps
+LEFT JOIN 
+    RecursivePostCTE rpc ON ps.TotalPosts > 5  -- filtering users with more than 5 posts
+LEFT JOIN 
+    Posts rcp ON rpc.AcceptedAnswerId = rcp.Id
+WHERE 
+    ps.TotalDownvotes < ps.TotalUpvotes
+ORDER BY 
+    ps.TotalPosts DESC,
+    ps.AvgScore DESC
+FETCH FIRST 10 ROWS ONLY;

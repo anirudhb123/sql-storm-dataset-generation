@@ -1,0 +1,57 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_value
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+WebSalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk, 
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+PromotionsAnalysis AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(ws.ws_order_number) AS promotional_sales_count,
+        SUM(ws.ws_net_paid) AS promotional_revenue
+    FROM 
+        promotion p
+    LEFT JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT c.c_customer_sk) AS active_customers,
+    COALESCE(SUM(cr.total_returns), 0) AS total_returns,
+    COALESCE(SUM(wss.total_net_profit), 0) AS total_net_profit,
+    COALESCE(SUM(pa.promotional_sales_count), 0) AS total_promotional_sales
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+LEFT JOIN 
+    WebSalesSummary wss ON c.c_customer_sk = wss.ws_bill_customer_sk
+LEFT JOIN 
+    PromotionsAnalysis pa ON c.c_customer_sk = pa.p.p_promo_id
+WHERE 
+    ca.ca_state IN ('NY', 'CA')
+    AND cr.total_returns > 5
+GROUP BY 
+    ca.ca_city, ca.ca_state
+ORDER BY 
+    active_customers DESC;

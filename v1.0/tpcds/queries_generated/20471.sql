@@ -1,0 +1,58 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        sr_return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS rn
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity IS NOT NULL
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        d.d_year,
+        COUNT(DISTINCT sr_ticket_number) AS return_count,
+        SUM(sr_return_amount) AS total_return_amt,
+        AVG(sr_return_quantity) AS avg_return_quantity,
+        COUNT(DISTINCT CASE WHEN sr_return_quantity > 0 THEN sr_ticket_number END) AS positive_returns
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year IS NOT NULL
+    GROUP BY 
+        c.c_customer_id, d.d_year
+),
+AggregateReturns AS (
+    SELECT 
+        d.d_year,
+        SUM(return_count) AS total_return_count,
+        SUM(return_count) FILTER (WHERE total_return_amt IS NOT NULL) AS returns_with_amt,
+        AVG(avg_return_quantity) AS avg_quantity_returned
+    FROM 
+        CustomerStats
+    GROUP BY 
+        d.d_year
+)
+SELECT 
+    ar.d_year,
+    ar.total_return_count,
+    ar.returns_with_amt,
+    COALESCE(ar.avg_quantity_returned, 0) AS avg_quantity_returned,
+    CASE 
+        WHEN ar.total_return_count > 0 THEN 
+            ROUND((ar.returns_with_amt::decimal / ar.total_return_count), 2)
+        ELSE NULL 
+    END AS avg_return_value
+FROM 
+    AggregateReturns ar
+JOIN 
+    (SELECT DISTINCT d_year FROM date_dim WHERE d_current_year = 'Y') current_year ON ar.d_year = current_year.d_year
+ORDER BY 
+    ar.d_year DESC;

@@ -1,0 +1,46 @@
+WITH name_keyword AS (
+    SELECT 
+        ak.name AS actor_name,
+        k.keyword AS movie_keyword,
+        t.title AS movie_title,
+        c.name AS company_name,
+        t.production_year,
+        k.phonetic_code AS keyword_phonetic
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    JOIN title t ON ci.movie_id = t.id
+    JOIN movie_keyword mk ON t.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN movie_companies mc ON t.id = mc.movie_id
+    JOIN company_name c ON mc.company_id = c.id
+    WHERE t.production_year BETWEEN 2000 AND 2023
+    AND ak.name IS NOT NULL
+    AND k.keyword IS NOT NULL
+),
+distinct_keywords AS (
+    SELECT DISTINCT 
+        actor_name, 
+        movie_keyword,
+        production_year,
+        COUNT(movie_title) OVER (PARTITION BY actor_name, movie_keyword ORDER BY production_year) AS movie_count
+    FROM name_keyword
+),
+actor_summary AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT movie_keyword) AS unique_keywords,
+        SUM(movie_count) AS total_movies,
+        STRING_AGG(DISTINCT movie_keyword, ', ') AS keywords_used
+    FROM distinct_keywords
+    GROUP BY actor_name
+)
+SELECT 
+    a.actor_name,
+    a.unique_keywords,
+    a.total_movies,
+    a.keywords_used
+FROM actor_summary a
+WHERE a.total_movies > 5
+ORDER BY a.unique_keywords DESC, a.total_movies DESC;
+
+This query performs a comprehensive analysis of actors (from the `aka_name` table) based on the movies they have appeared in, filtering by production year, aggregating unique keywords associated with those movies, and generating a summary for actors who have appeared in more than five distinct movies.

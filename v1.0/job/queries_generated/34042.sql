@@ -1,0 +1,83 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id, 
+        ca.role_id, 
+        1 AS level
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type ca ON ci.role_id = ca.id
+    WHERE 
+        ca.role = 'actor'
+    
+    UNION ALL
+    
+    SELECT 
+        ci.person_id, 
+        ca.role_id, 
+        ah.level + 1
+    FROM 
+        cast_info ci
+    JOIN 
+        ActorHierarchy ah ON ci.movie_id = ah.movie_id
+    JOIN 
+        role_type ca ON ci.role_id = ca.id
+    WHERE 
+        ca.role = 'actor'
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+CompanyCounts AS (
+    SELECT 
+        mc.movie_id, 
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year,
+        mk.keywords,
+        cc.company_count,
+        ROW_NUMBER() OVER (ORDER BY t.production_year DESC) AS rank
+    FROM 
+        title t 
+    LEFT JOIN 
+        MovieKeywords mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        CompanyCounts cc ON t.id = cc.movie_id
+)
+SELECT 
+    ah.person_id, 
+    a.name,
+    rm.title,
+    rm.production_year,
+    rm.keywords,
+    rm.company_count,
+    ah.level 
+FROM 
+    ActorHierarchy ah
+JOIN 
+    aka_name a ON ah.person_id = a.person_id
+JOIN 
+    complete_cast cc ON ah.movie_id = cc.movie_id
+RIGHT JOIN 
+    RankedMovies rm ON cc.movie_id = rm.id
+WHERE 
+    rm.rank <= 50
+    AND (rm.company_count IS NULL OR rm.company_count > 2)
+ORDER BY 
+    ah.level, 
+    rm.production_year DESC;

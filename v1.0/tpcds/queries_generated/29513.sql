@@ -1,0 +1,73 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer AS c
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_product_name,
+        i.i_item_desc,
+        i.i_current_price,
+        i.i_brand,
+        i.i_color
+    FROM 
+        item AS i
+    WHERE 
+        i.i_item_desc IS NOT NULL
+),
+SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        EXTRACT(YEAR FROM d.d_date) AS sale_year,
+        EXTRACT(MONTH FROM d.d_date) AS sale_month,
+        EXTRACT(DAY FROM d.d_date) AS sale_day
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk, sale_year, sale_month, sale_day
+)
+SELECT 
+    ci.full_name,
+    ci.ca_city,
+    ci.ca_state,
+    id.i_product_name,
+    id.i_current_price,
+    sd.sale_year,
+    sd.sale_month,
+    sd.sale_day,
+    sd.total_quantity,
+    sd.total_profit
+FROM 
+    CustomerInfo AS ci
+JOIN 
+    SalesData AS sd ON ci.c_customer_sk = sd.ws_bill_customer_sk
+JOIN 
+    ItemDetails AS id ON sd.ws_item_sk = id.i_item_sk
+WHERE 
+    ci.cd_gender = 'F' 
+    AND ci.cd_marital_status = 'M' 
+    AND sd.total_profit > 100
+ORDER BY 
+    sd.sale_year DESC, 
+    sd.sale_month DESC, 
+    sd.sale_day DESC;

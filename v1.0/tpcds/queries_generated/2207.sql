@@ -1,0 +1,62 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk, 
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        SUM(sr_return_quantity) AS total_return_quantity
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        cd.cd_credit_rating,
+        (SELECT COUNT(*) 
+         FROM household_demographics hd 
+         WHERE hd.hd_demo_sk = cd.cd_demo_sk AND hd.hd_income_band_sk IS NOT NULL) AS household_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+TotalSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+AggregatedData AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cr.total_returns,
+        cr.total_return_amount,
+        ts.total_sales,
+        ts.total_orders
+    FROM CustomerDemographics cd
+    LEFT JOIN CustomerReturns cr ON cd.c_customer_sk = cr.sr_customer_sk
+    LEFT JOIN TotalSales ts ON cd.c_customer_sk = ts.ws_bill_customer_sk
+)
+SELECT 
+    ad.c_customer_sk,
+    ad.cd_gender,
+    ad.cd_marital_status,
+    COALESCE(ad.total_returns, 0) AS total_returns,
+    COALESCE(ad.total_return_amount, 0) AS total_return_amount,
+    COALESCE(ad.total_sales, 0) AS total_sales,
+    COALESCE(ad.total_orders, 0) AS total_orders,
+    CASE 
+        WHEN ad.total_sales > 1000 THEN 'High Value'
+        WHEN ad.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM AggregatedData ad
+WHERE ad.cd_gender = 'F' 
+  AND ad.cd_marital_status = 'M'
+ORDER BY ad.total_sales DESC
+LIMIT 100;

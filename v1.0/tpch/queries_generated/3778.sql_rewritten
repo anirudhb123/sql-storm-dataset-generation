@@ -1,0 +1,63 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+),
+supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+high_value_customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal > 5000 THEN 'High'
+            WHEN c.c_acctbal BETWEEN 1000 AND 5000 THEN 'Medium'
+            ELSE 'Low'
+        END AS customer_segment
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    si.s_name AS supplier_name,
+    h.c_name AS customer_name,
+    h.customer_segment,
+    CASE 
+        WHEN r.o_orderstatus = 'F' THEN 'Fulfilled'
+        ELSE 'Pending'
+    END AS order_status_desc
+FROM 
+    ranked_orders r
+JOIN 
+    lineitem l ON r.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    supplier_info si ON l.l_suppkey = si.s_suppkey
+LEFT JOIN 
+    high_value_customers h ON r.o_custkey = h.c_custkey
+WHERE 
+    si.total_supply_cost > 10000 OR h.customer_segment = 'High'
+ORDER BY 
+    r.o_totalprice DESC, r.o_orderdate DESC;

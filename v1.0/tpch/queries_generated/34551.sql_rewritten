@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_nationkey, s_suppkey, s_name, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier
+    )
+    UNION ALL
+    SELECT s.n_nationkey, s.s_suppkey, s.s_name, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.supp_acctbal
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, 
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01' 
+      AND o.o_orderdate < '1998-01-01'
+),
+CustomerContribution AS (
+    SELECT c.c_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_contribution
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, cc.total_contribution
+    FROM customer c
+    JOIN CustomerContribution cc ON c.c_custkey = cc.c_custkey
+    WHERE cc.total_contribution > (SELECT AVG(total_contribution) FROM CustomerContribution)
+),
+FinalResults AS (
+    SELECT
+        sh.s_name AS supplier_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_value,
+        AVG(cc.total_contribution) AS average_customer_contribution,
+        MIN(l.l_shipdate) AS first_ship_date,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM SupplierHierarchy sh
+    LEFT JOIN lineitem l ON sh.s_suppkey = l.l_suppkey
+    LEFT JOIN RankedOrders o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN HighValueCustomers cc ON o.o_custkey = cc.c_custkey
+    GROUP BY sh.s_name
+)
+SELECT f.supplier_name, f.total_orders, f.total_value, f.average_customer_contribution,
+       f.first_ship_date, f.last_ship_date
+FROM FinalResults f
+WHERE f.total_value > (
+    SELECT AVG(total_value) FROM FinalResults
+)
+ORDER BY f.total_value DESC;

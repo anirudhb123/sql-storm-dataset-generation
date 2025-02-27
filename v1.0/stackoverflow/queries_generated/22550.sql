@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC NULLS LAST) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.UserId IS NOT NULL
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount
+), 
+
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(b.Class = 1), 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2), 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3), 0) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.Id END) AS TotalUpVotes,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.CreationDate < NOW() - INTERVAL '6 months'
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    ue.UserId,
+    ue.DisplayName,
+    ue.PostCount,
+    ue.GoldBadges,
+    ue.SilverBadges,
+    ue.BronzeBadges,
+    COALESCE(RP.PostId, 'No Posts Found') AS MostViewedPost,
+    COALESCE(RP.Title, 'N/A') AS PostTitle,
+    COALESCE(RP.ViewCount, 0) AS PostViewCount,
+    CASE 
+        WHEN RP.UserRank > 5 THEN 'Low Engagement'
+        WHEN RP.UserRank IS NOT NULL THEN 'High Engagement'
+        ELSE 'No Posts'
+    END AS EngagementLevel
+FROM 
+    UserEngagement ue
+LEFT JOIN 
+    (
+        SELECT PostId, Title, ViewCount, UserRank
+        FROM RankedPosts
+        WHERE UserRank = 1
+    ) RP ON ue.UserId = RP.PostId
+WHERE 
+    ue.PostCount > 0
+ORDER BY 
+    ue.PostCount DESC, 
+    ue.DisplayName;
+

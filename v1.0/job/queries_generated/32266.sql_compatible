@@ -1,0 +1,57 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        ARRAY[mt.title] AS path
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        path || at.title
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        mh.level < 10  
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    STRING_AGG(DISTINCT c.name) AS character_names,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY at.production_year DESC) AS movie_rank
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    char_name c ON c.id = ci.role_id
+WHERE 
+    at.production_year > 2000 
+    AND ak.name IS NOT NULL
+GROUP BY 
+    ak.name, at.title, at.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) >= 2
+ORDER BY 
+    ak.name, movie_rank;

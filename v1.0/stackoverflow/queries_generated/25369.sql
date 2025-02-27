@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND -- Only questions
+        p.CreationDate >= '2023-01-01' -- Posts created in 2023
+),
+TagsSplit AS (
+    SELECT 
+        PostId,
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only questions
+),
+PopularTags AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        TagsSplit
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(*) > 10 -- Only tags used in more than 10 posts
+),
+PostWithTags AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Body,
+        rp.CreationDate,
+        rp.Score,
+        rp.OwnerDisplayName,
+        STRING_AGG(pt.Tag, ', ') AS Tags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        TagsSplit pt ON rp.PostId = pt.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.ViewCount, rp.Body, rp.CreationDate, rp.Score, rp.OwnerDisplayName
+)
+SELECT 
+    pwt.PostId,
+    pwt.Title,
+    pwt.ViewCount,
+    pwt.Body,
+    pwt.CreationDate,
+    pwt.Score,
+    pwt.OwnerDisplayName,
+    pwt.Tags,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = pwt.PostId) AS CommentCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = pwt.PostId AND v.VoteTypeId = 2) AS UpVotes
+FROM 
+    PostWithTags pwt
+WHERE 
+    EXISTS (SELECT 1 FROM PopularTags pt WHERE pt.Tag = ANY(string_to_array(pwt.Tags, ', ')))
+ORDER BY 
+    pwt.ViewCount DESC, pwt.Score DESC
+LIMIT 10;

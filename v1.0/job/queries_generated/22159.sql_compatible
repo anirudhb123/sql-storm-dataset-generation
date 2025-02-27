@@ -1,0 +1,91 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS title_rank
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        ak.name AS actor_name,
+        ct.kind AS role_type,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        comp_cast_type ct ON ci.role_id = ct.id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        mt.movie_id
+),
+LeftJoinedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        cd.actor_name,
+        cd.role_type,
+        kw.keywords,
+        CASE 
+            WHEN cd.actor_name IS NULL THEN 'No Actor'
+            ELSE 'Has Actor'
+        END AS actor_status
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CastDetails cd ON rm.movie_id = cd.movie_id
+    LEFT JOIN 
+        MoviesWithKeywords kw ON rm.movie_id = kw.movie_id
+)
+SELECT 
+    lm.movie_id,
+    lm.title,
+    lm.production_year,
+    COALESCE(lm.actor_name, 'Unknown Actor') AS actor_name,
+    lm.role_type,
+    lm.keywords,
+    COUNT(DISTINCT ci.person_id) OVER (PARTITION BY lm.movie_id) AS distinct_actors_count,
+    CASE 
+        WHEN lm.actor_status = 'No Actor' THEN 'This movie has no actors associated.'
+        ELSE 'This movie has actors.'
+    END AS movie_actor_status,
+    NULLIF(lm.production_year, 2023) AS year_check,
+    CASE 
+        WHEN lm.production_year < 2000 THEN 'Classic Movie'
+        WHEN lm.production_year BETWEEN 2000 AND 2010 THEN 'Modern Movie'
+        ELSE 'Recent Movie'
+    END AS movie_age_category
+FROM 
+    LeftJoinedMovies lm
+WHERE 
+    lm.title LIKE '%Adventure%'
+    OR lm.keywords LIKE '%Action%'
+GROUP BY 
+    lm.movie_id, 
+    lm.title, 
+    lm.production_year,
+    lm.actor_name,
+    lm.role_type,
+    lm.keywords,
+    lm.actor_status
+ORDER BY 
+    lm.production_year DESC, 
+    lm.title ASC
+LIMIT 50;

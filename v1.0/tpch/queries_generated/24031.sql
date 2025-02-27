@@ -1,0 +1,71 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -12, CURRENT_DATE) 
+        AND o.o_orderstatus IN ('O', 'F', 'P')
+), SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT p.p_partkey) AS total_parts,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        SUM(CASE WHEN ps.ps_supplycost IS NULL THEN 0 ELSE ps.ps_supplycost END) AS net_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > 0 
+        AND s.s_nationkey IS NOT NULL
+    GROUP BY 
+        s.s_suppkey
+), OrderLineDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS distinct_parts_supplied,
+        MAX(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS has_returns,
+        SUM(l.l_quantity) AS total_quantity
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    COALESCE(S.count_part_keys, 0) AS supplier_part_count,
+    COALESCE(S.total_available_quantity, 0) AS supplier_available_quantity,
+    O.total_revenue AS order_revenue,
+    O.distinct_parts_supplied,
+    O.has_returns,
+    O.total_quantity,
+    R.r_name AS region_name,
+    R.r_comment AS region_comment
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    SupplierStats S ON S.total_parts > 10
+LEFT JOIN 
+    nation n ON n.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey = o.o_custkey)
+LEFT JOIN 
+    region R ON R.r_regionkey = n.n_regionkey
+JOIN 
+    OrderLineDetails O ON O.l_orderkey = o.o_orderkey
+WHERE 
+    o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders WHERE o_orderstatus = 'O')
+    AND o.o_orderdate BETWEEN '2023-01-01' AND CURRENT_DATE
+    AND (R.r_name IS NOT NULL OR R.r_comment IS NOT NULL)
+ORDER BY 
+    o.o_orderdate DESC, o.o_totalprice DESC
+FETCH FIRST 20 ROWS ONLY;

@@ -1,0 +1,81 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+CareerRoles AS (
+    SELECT 
+        ai.person_id,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        SUM(CASE WHEN r.role = 'Actor' THEN 1 ELSE 0 END) AS actor_count,
+        SUM(CASE WHEN r.role = 'Director' THEN 1 ELSE 0 END) AS director_count
+    FROM 
+        cast_info ai
+    JOIN 
+        role_type r ON ai.person_role_id = r.id
+    JOIN 
+        movie_link c ON ai.person_id = c.person_id  -- Adjusted based on assumed correct join
+    GROUP BY 
+        ai.person_id
+),
+MaxRoles AS (
+    SELECT 
+        person_id,
+        total_movies,
+        actor_count,
+        director_count,
+        ROW_NUMBER() OVER (PARTITION BY actor_count ORDER BY director_count DESC) AS rn
+    FROM 
+        CareerRoles
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    CONCAT(COALESCE(cn.name, 'Unknown'), ' (', CAST(cn.imdb_id AS VARCHAR), ')') AS company_details,
+    mr.actor_count,
+    mr.director_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    MaxRoles mr ON cn.imdb_id = mr.person_id
+WHERE 
+    mr.rn = 1 
+    AND mh.level = 1
+    AND (mh.title LIKE '%Action%' OR mh.title IS NULL)
+GROUP BY 
+    mh.title, 
+    mh.production_year, 
+    cn.name, 
+    cn.imdb_id, 
+    mr.actor_count, 
+    mr.director_count
+ORDER BY 
+    mh.production_year DESC, 
+    mr.actor_count DESC;

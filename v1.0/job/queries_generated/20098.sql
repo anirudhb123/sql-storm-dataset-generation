@@ -1,0 +1,86 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year) AS year_rank,
+        COUNT(cm.id) AS company_count,
+        STRING_AGG(DISTINCT c.name, ', ') AS company_names
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN 
+        company_name c ON c.id = mc.company_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopRankedMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        company_count,
+        company_names
+    FROM 
+        RankedMovies
+    WHERE 
+        year_rank <= 3
+),
+ActorSummary AS (
+    SELECT 
+        ka.person_id,
+        ka.name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        COALESCE(SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END), 0) AS notable_roles
+    FROM 
+        aka_name ka
+    LEFT JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    LEFT JOIN 
+        title t ON ci.movie_id = t.id
+    GROUP BY 
+        ka.person_id, ka.name
+),
+EmployeeAndMovieCount AS (
+    SELECT 
+        ka.name AS actor_name,
+        ARRAY_AGG(DISTINCT t.title) AS movies,
+        COUNT(DISTINCT t.id) AS total_movies
+    FROM 
+        aka_name ka
+    LEFT JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    LEFT JOIN 
+        title t ON ci.movie_id = t.id
+    GROUP BY 
+        ka.name
+)
+SELECT 
+    r.title AS movie_title,
+    r.production_year,
+    a.actor_name,
+    a.movie_count,
+    e.total_movies,
+    e.movies AS actor_movies,
+    r.company_count,
+    r.company_names,
+    CASE 
+        WHEN r.company_count IS NULL THEN 'Unknown'
+        ELSE r.company_count::TEXT
+    END AS company_count_info,
+    CONCAT_WS(', ', e.movies) AS star_cast_movies
+FROM 
+    TopRankedMovies r
+LEFT JOIN 
+    ActorSummary a ON EXISTS (
+        SELECT 1 FROM cast_info ci WHERE ci.movie_id = r.movie_id AND ci.person_id = a.person_id
+    )
+LEFT JOIN 
+    EmployeeAndMovieCount e ON a.name = e.actor_name
+WHERE 
+    r.company_count IS NOT NULL 
+    OR (e.total_movies > 5 AND r.company_count < 3)
+ORDER BY 
+    r.production_year DESC, 
+    a.movie_count DESC NULLS LAST;

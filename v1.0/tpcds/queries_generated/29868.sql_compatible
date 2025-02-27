@@ -1,0 +1,76 @@
+
+WITH AddressDetails AS (
+    SELECT
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT
+        c_customer_id,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_customer_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+),
+SalesDetails AS (
+    SELECT
+        ws_order_number,
+        ws_sales_price,
+        ws_quantity,
+        ws_ext_sales_price,
+        ws_ship_mode_sk,
+        w_warehouse_id,
+        sm_type
+    FROM 
+        web_sales
+    JOIN 
+        warehouse ON ws_warehouse_sk = w_warehouse_sk
+    JOIN 
+        ship_mode ON ws_ship_mode_sk = sm_ship_mode_sk
+),
+ReturnsDetails AS (
+    SELECT 
+        wr_order_number,
+        SUM(wr_return_quantity) AS total_returned_quantity,
+        SUM(wr_return_amt) AS total_returned_amt
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_order_number
+)
+SELECT 
+    cd.full_customer_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ad.full_address,
+    COALESCE(sd.ws_order_number, rd.wr_order_number) AS order_number,
+    COALESCE(sd.ws_sales_price, 0) AS sales_price,
+    COALESCE(rd.total_returned_quantity, 0) AS returned_quantity,
+    COALESCE(rd.total_returned_amt, 0) AS returned_amount,
+    sd.sm_type AS shipping_method
+FROM 
+    CustomerDetails cd
+JOIN 
+    AddressDetails ad ON cd.c_customer_id = ad.ca_address_id
+LEFT JOIN 
+    SalesDetails sd ON sd.ws_order_number = (
+        SELECT MAX(ws_order_number) 
+        FROM web_sales 
+        WHERE ws_bill_customer_sk = cd.c_customer_id
+    )
+LEFT JOIN 
+    ReturnsDetails rd ON rd.wr_order_number = sd.ws_order_number
+WHERE 
+    ad.ca_state IN ('NY', 'CA')
+ORDER BY 
+    ad.ca_city, cd.full_customer_name;

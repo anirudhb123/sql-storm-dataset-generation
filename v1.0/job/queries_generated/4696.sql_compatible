@@ -1,0 +1,56 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT kt.id FROM kind_type kt WHERE kt.kind IN ('movie', 'tv movie'))
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.year_rank <= 5
+),
+MovieAgg AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(DISTINCT cc.casting_id) AS total_cast,
+        COUNT(DISTINCT mc.company_id) AS total_companies
+    FROM 
+        TopMovies mt
+    LEFT JOIN 
+        complete_cast cc ON mt.movie_id = cc.movie_id
+    LEFT JOIN 
+        movie_companies mc ON mt.movie_id = mc.movie_id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    ma.total_cast,
+    ma.total_companies,
+    COALESCE(NULLIF(ma.total_companies, 0), -1) AS adjusted_companies
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieAgg ma ON tm.movie_id = ma.movie_id
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM cast_info ci 
+        WHERE ci.movie_id = tm.movie_id 
+        AND ci.note IS NULL
+    )
+ORDER BY 
+    tm.production_year DESC, 
+    ma.total_cast DESC;

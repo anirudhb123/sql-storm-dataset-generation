@@ -1,0 +1,64 @@
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        COUNT(DISTINCT PH.Id) AS PostHistoryCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON P.OwnerUserId = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.CreationDate AS UserCreationDate,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.CommentCount,
+    PS.BadgeCount AS PostOwnerBadgeCount,
+    US.UserId,
+    US.Reputation,
+    US.UserCreationDate,
+    US.PostCount AS UserPostCount,
+    US.BadgeCount AS UserBadgeCount,
+    PS.VoteCount,
+    PS.PostHistoryCount
+FROM 
+    PostStats PS
+JOIN 
+    Users U ON PS.PostOwnerId = U.Id
+JOIN 
+    UserStats US ON U.Id = US.UserId
+ORDER BY 
+    PS.ViewCount DESC
+LIMIT 100;

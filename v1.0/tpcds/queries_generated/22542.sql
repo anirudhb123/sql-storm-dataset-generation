@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss_store_sk, 
+        ss_item_sk, 
+        ss_sales_price, 
+        ss_quantity, 
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY ss_sales_price DESC) AS sales_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) - 30 FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+),
+SalesAggregates AS (
+    SELECT 
+        rs.ss_store_sk,
+        SUM(rs.ss_sales_price * rs.ss_quantity) AS total_revenue,
+        COUNT(DISTINCT rs.ss_item_sk) AS unique_items_sold,
+        AVG(rs.ss_sales_price) AS avg_sales_price
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.sales_rank <= 10
+    GROUP BY 
+        rs.ss_store_sk
+),
+StoreAddress AS (
+    SELECT 
+        s.s_store_sk, 
+        CONCAT_WS(', ', s.s_street_number, s.s_street_name, s.s_city, s.s_state, s.s_zip) AS full_address
+    FROM 
+        store s
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        COALESCE(NULLIF(cd.cd_credit_rating, 'N/A'), 'Unknown') AS credit_rating 
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    sa.ss_store_sk,
+    sa.total_revenue,
+    sa.unique_items_sold,
+    sa.avg_sales_price,
+    s.full_address,
+    cd.gender AS customer_gender,
+    cd.marital_status AS customer_marital_status,
+    cd.credit_rating
+FROM 
+    SalesAggregates sa
+JOIN 
+    StoreAddress s ON sa.ss_store_sk = s.s_store_sk
+LEFT JOIN 
+    (SELECT 
+         cd_gender,
+         cd_marital_status 
+     FROM 
+         CustomerDemographics 
+     WHERE 
+         cd_gender IS NOT NULL AND cd_marital_status IS NOT NULL
+    ) cd ON cd.cd_customer_sk = (SELECT c.c_customer_sk 
+                                 FROM customer c 
+                                 ORDER BY RANDOM() 
+                                 LIMIT 1)
+WHERE 
+    sa.total_revenue > (SELECT AVG(total_revenue) FROM SalesAggregates) 
+    AND s.full_address LIKE '%Best%'
+ORDER BY 
+    sa.unique_items_sold DESC
+FETCH FIRST 10 ROWS ONLY;

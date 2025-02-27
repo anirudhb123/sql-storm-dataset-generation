@@ -1,0 +1,89 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level 
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1 
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        at.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+), 
+CastCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS num_cast_members
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(cc.num_cast_members, 0) AS num_cast_members,
+        STRING_AGG(DISTINCT ci.company_name || ' (' || ci.company_type || ')', '; ') AS companies
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CastCounts cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        CompanyInfo ci ON mh.movie_id = ci.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.num_cast_members,
+    md.companies,
+    ROW_NUMBER() OVER (ORDER BY md.production_year DESC, md.title) AS rank
+FROM 
+    MovieDetails md
+WHERE 
+    md.num_cast_members > 3
+ORDER BY 
+    md.production_year DESC, 
+    md.title;
+
+This query performs an elaborate analysis of movies in the database. It involves:
+
+1. A recursive CTE (`MovieHierarchy`) to explore the hierarchy of movies linked together.
+2. A CTE (`CastCounts`) to calculate the number of distinct cast members for each movie.
+3. Another CTE (`CompanyInfo`) to gather company information related to each movie.
+4. Combine all these details in the `MovieDetails` CTE that generates a list of movies including:
+   - Title
+   - Production year
+   - Number of cast members
+   - List of companies associated with the movie
+5. Finally, it retrieves movies with more than three cast members, ranking them by production year and title in descending order.

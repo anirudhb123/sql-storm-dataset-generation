@@ -1,0 +1,59 @@
+
+WITH RegionSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        r.r_name
+),
+
+CustomerSegmentSales AS (
+    SELECT 
+        c.c_mktsegment,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_revenue
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'F' OR o.o_orderstatus IS NULL
+    GROUP BY 
+        c.c_mktsegment
+),
+
+SalesRank AS (
+    SELECT 
+        region_name,
+        total_sales,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        RegionSales
+)
+
+SELECT 
+    r.region_name,
+    COALESCE(cs.c_mktsegment, 'Unknown') AS marketing_segment,
+    COALESCE(cs.order_count, 0) AS order_count,
+    COALESCE(cs.total_revenue, 0.00) AS total_revenue,
+    sr.sales_rank
+FROM 
+    SalesRank sr
+LEFT JOIN 
+    CustomerSegmentSales cs ON sr.region_name = cs.c_mktsegment
+LEFT JOIN 
+    region r ON sr.region_name = r.r_name
+ORDER BY 
+    sr.sales_rank, marketing_segment;

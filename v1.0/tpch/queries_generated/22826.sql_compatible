@@ -1,0 +1,48 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o_orderkey,
+        c_nationkey,
+        o_orderstatus,
+        o_totalprice,
+        o_orderdate,
+        o_orderpriority,
+        1 AS depth
+    FROM orders
+    JOIN customer ON orders.o_custkey = customer.c_custkey
+    WHERE o_orderstatus = 'O'
+
+    UNION ALL
+
+    SELECT 
+        o.o_orderkey,
+        c.c_nationkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        oh.depth + 1
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderdate > DATE '1998-10-01' - INTERVAL '30 days'
+)
+
+SELECT 
+    p.p_name,
+    SUM(ps.ps_supplycost * l.l_quantity) AS total_supply_cost,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    CASE 
+        WHEN SUM(l.l_discount) > 1000 THEN 'High Discount'
+        ELSE 'Regular'
+    END AS discount_category,
+    COALESCE(n.n_name, 'Unknown') AS nation_name,
+    ROW_NUMBER() OVER (PARTITION BY p.p_name ORDER BY SUM(l.l_extendedprice) DESC) AS rank
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN lineitem l ON ps.ps_suppkey = l.l_suppkey
+LEFT JOIN nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT oh.o_orderkey FROM OrderHierarchy oh)))
+WHERE p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_availqty % 2 = 0)
+GROUP BY p.p_name, nation_name
+HAVING SUM(l.l_extendedprice) > (SELECT AVG(o.o_totalprice) FROM orders o WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1998-10-01')
+ORDER BY rank, total_supply_cost DESC

@@ -1,0 +1,59 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.PostTypeId,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AvgScore,
+        AVG(p.ViewCount) AS AvgViews
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'  
+    GROUP BY 
+        p.PostTypeId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+CombinedStats AS (
+    SELECT 
+        u.UserId,
+        ps.PostTypeId,
+        ps.PostCount,
+        ps.TotalScore,
+        us.TotalUpVotes,
+        us.TotalDownVotes,
+        us.BadgeCount
+    FROM 
+        PostStats ps
+    JOIN 
+        Users u ON u.Id IS NOT NULL  
+    JOIN 
+        UserStats us ON u.Id = us.UserId
+)
+
+SELECT 
+    PostTypeId,
+    SUM(PostCount) AS TotalPosts,
+    SUM(TotalScore) AS TotalScore,
+    SUM(TotalUpVotes) AS TotalUpVotes,
+    SUM(TotalDownVotes) AS TotalDownVotes,
+    AVG(BadgeCount) AS AvgBadges
+FROM 
+    CombinedStats
+GROUP BY 
+    PostTypeId
+ORDER BY 
+    TotalPosts DESC;

@@ -1,0 +1,62 @@
+WITH StringProcessingBenchmark AS (
+    SELECT 
+        post.Id AS PostId,
+        post.Title,
+        post.Body,
+        post.Tags,
+        user.DisplayName AS OwnerDisplayName,
+        user.Reputation,
+        LENGTH(post.Body) AS BodyLength,
+        LENGTH(post.Title) AS TitleLength,
+        ARRAY_LENGTH(string_to_array(substring(post.Tags, 2, length(post.Tags)-2), '><'), 1) AS TagCount,
+        COUNT(comment.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts post
+    JOIN 
+        Users user ON post.OwnerUserId = user.Id
+    LEFT JOIN 
+        Comments comment ON post.Id = comment.PostId
+    LEFT JOIN 
+        Votes v ON post.Id = v.PostId
+    WHERE 
+        post.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        post.Id, user.DisplayName, user.Reputation
+),
+BenchmarkResults AS (
+    SELECT 
+        PostId,
+        OwnerDisplayName,
+        Reputation,
+        BodyLength,
+        TitleLength,
+        TagCount,
+        CommentCount,
+        UpVotes,
+        DownVotes,
+        (BodyLength + TitleLength) / (NULLIF(TagCount, 0) + 1) AS LengthToTagRatio,
+        (UpVotes - DownVotes) AS NetVoteScore
+    FROM 
+        StringProcessingBenchmark
+)
+SELECT 
+    OwnerDisplayName,
+    COUNT(PostId) AS PostCount,
+    AVG(BodyLength) AS AvgBodyLength,
+    AVG(TitleLength) AS AvgTitleLength,
+    AVG(TagCount) AS AvgTagCount,
+    AVG(CommentCount) AS AvgCommentCount,
+    SUM(UpVotes) AS TotalUpVotes,
+    SUM(DownVotes) AS TotalDownVotes,
+    AVG(LengthToTagRatio) AS AvgLengthToTagRatio,
+    AVG(NetVoteScore) AS AvgNetVoteScore,
+    COUNT(DISTINCT PostId) FILTER (WHERE NetVoteScore > 0) AS PositiveNetPostCount
+FROM 
+    BenchmarkResults
+GROUP BY 
+    OwnerDisplayName
+ORDER BY 
+    PostCount DESC, AvgNetVoteScore DESC
+LIMIT 10;

@@ -1,0 +1,63 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank
+    FROM part p
+    WHERE p.p_size > 5
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        COALESCE(s.s_acctbal, 0) AS account_balance
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL OR s.s_comment LIKE '%important%'
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderstatus
+    FROM orders o
+    WHERE o.o_totalprice > (
+        SELECT AVG(o2.o_totalprice) * 1.2 
+        FROM orders o2
+    )
+),
+PartSupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_availqty) > 50
+)
+SELECT 
+    rp.p_partkey, 
+    rp.p_name, 
+    rp.p_retailprice,
+    si.s_name,
+    hv.o_orderkey,
+    hv.o_totalprice,
+    hv.o_orderstatus,
+    ps.total_available
+FROM RankedParts rp
+LEFT JOIN SupplierInfo si ON si.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey = rp.p_partkey
+)
+RIGHT JOIN HighValueOrders hv ON hv.o_orderkey IN (
+    SELECT l.l_orderkey 
+    FROM lineitem l 
+    WHERE l.l_partkey = rp.p_partkey
+)
+FULL OUTER JOIN PartSupplierAvailability ps ON ps.ps_partkey = rp.p_partkey
+WHERE 
+    (hv.o_orderstatus = 'F' OR hv.o_orderstatus IS NULL)
+    AND (rp.rank <= 3 OR rp.p_retailprice > 1000)
+ORDER BY 
+    rp.p_partkey ASC, 
+    si.account_balance DESC NULLS LAST;

@@ -1,0 +1,39 @@
+
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    ca.ca_state,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    SUM(ws.ws_net_paid) AS total_spent,
+    AVG(LENGTH(c.c_email_address)) AS avg_email_length,
+    MAX(LENGTH(ca.ca_street_name)) AS max_street_name_length,
+    MIN(LOWER(ct_ctg_name)) AS min_catalog_number
+FROM customer c
+JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+JOIN catalog_page cp ON ws.ws_web_page_sk = cp.cp_catalog_page_sk
+JOIN (SELECT 
+          cs_catalog_page_sk, 
+          COUNT(*) AS total_items, 
+          MIN(cp.catalog_number) AS min_catalog_number 
+      FROM catalog_sales 
+      JOIN catalog_page cp ON cs_catalog_page_sk = cp.cp_catalog_page_sk 
+      GROUP BY cs_catalog_page_sk) ct ON cp.cp_catalog_page_sk = ct.cs_catalog_page_sk
+GROUP BY 
+    c.c_customer_id, 
+    c.c_first_name, 
+    c.c_last_name, 
+    ca.ca_city, 
+    ca.ca_state, 
+    cd.cd_gender, 
+    cd.cd_marital_status
+HAVING 
+    total_orders > 5 AND 
+    total_spent > 1000
+ORDER BY 
+    total_spent DESC;

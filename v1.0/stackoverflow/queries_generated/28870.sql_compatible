@@ -1,0 +1,73 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName, 
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, LENGTH(Posts.Tags) - 2), '><'))::text[]
+        AND Posts.PostTypeId = 1 
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName, 
+        PostCount, 
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagCounts
+    WHERE 
+        PostCount > 0
+),
+UserBadges AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(Badges.Id) AS BadgeCount
+    FROM 
+        Users
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        BadgeCount,
+        RANK() OVER (ORDER BY BadgeCount DESC) AS UserRank
+    FROM 
+        UserBadges
+    WHERE 
+        BadgeCount > 0
+)
+SELECT 
+    tt.TagName,
+    tt.PostCount,
+    tu.DisplayName,
+    tu.BadgeCount,
+    tu.UserRank,
+    COUNT(DISTINCT ph.Id) AS HistoryCount,
+    ARRAY_AGG(DISTINCT ph.Comment) AS Comments
+FROM 
+    TopTags tt
+JOIN 
+    Posts p ON tt.TagName = ANY(string_to_array(substring(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))
+JOIN 
+    TopUsers tu ON p.OwnerUserId = tu.UserId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+WHERE 
+    tt.TagRank <= 10 AND tu.UserRank <= 10
+GROUP BY 
+    tt.TagName, 
+    tt.PostCount, 
+    tu.DisplayName, 
+    tu.BadgeCount, 
+    tu.UserRank
+ORDER BY 
+    tt.PostCount DESC, 
+    tu.BadgeCount DESC;

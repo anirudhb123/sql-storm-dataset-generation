@@ -1,0 +1,46 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        COUNT(ps.ps_partkey) AS parts_supplied,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+MostCostlyParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost) AS total_cost,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    ORDER BY 
+        total_cost DESC
+    LIMIT 10
+)
+SELECT 
+    rs.s_name AS supplier_name,
+    rs.nation_name,
+    mcp.p_name AS part_name,
+    mcp.total_cost,
+    mcp.total_available,
+    rs.parts_supplied
+FROM 
+    RankedSuppliers rs
+JOIN 
+    MostCostlyParts mcp ON rs.parts_supplied > 5
+WHERE 
+    rs.rank <= 5;

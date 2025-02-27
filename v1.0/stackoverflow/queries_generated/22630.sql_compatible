@@ -1,0 +1,70 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+TagUsage AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostUsageCount,
+        (SELECT COUNT(*) FROM Posts WHERE Tags LIKE CONCAT('%', T.TagName, '%')) AS TotalPostsWithTag,
+        NTILE(5) OVER (ORDER BY COUNT(DISTINCT P.Id) DESC) AS Rank
+    FROM Tags T
+    LEFT JOIN Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY T.TagName
+),
+CommentStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(C.Id) AS CommentCount,
+        COALESCE(AVG(LENGTH(C.Text)), 0) AS AverageCommentLength,
+        MAX(C.CreationDate) AS LastCommentDate
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        PostId,
+        COUNT(DISTINCT CASE WHEN PostHistoryTypeId IN (10, 11) THEN Id END) AS CloseOrReopenCount,
+        STRING_AGG(DISTINCT CASE WHEN PostHistoryTypeId = 5 THEN 'Edited' ELSE NULL END, ', ') AS EditDetails,
+        MAX(CreationDate) AS LastEdit
+    FROM PostHistory
+    GROUP BY PostId
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.CreationDate,
+    U.UpVotesCount,
+    U.DownVotesCount,
+    U.PostCount,
+    U.BadgeCount,
+    COALESCE(PHS.CloseOrReopenCount, 0) AS CloseOrReopenCount,
+    PHS.EditDetails,
+    COALESCE(CS.CommentCount, 0) AS TotalComments,
+    COALESCE(CS.AverageCommentLength, 0) AS AverageCommentLength,
+    COALESCE(CS.LastCommentDate, DATE '1970-01-01') AS LastCommentDate,
+    TG.TagName,
+    TG.PostUsageCount,
+    TG.TotalPostsWithTag,
+    TG.Rank
+FROM UserStatistics U
+LEFT JOIN PostHistorySummary PHS ON PHS.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.UserId)
+LEFT JOIN CommentStatistics CS ON CS.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.UserId)
+LEFT JOIN TagUsage TG ON TG.PostUsageCount > (SELECT AVG(PostUsageCount) FROM TagUsage)
+WHERE U.Reputation BETWEEN 100 AND 1000
+ORDER BY U.Reputation DESC, TG.PostUsageCount DESC;

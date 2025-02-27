@@ -1,0 +1,52 @@
+WITH UserPostStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY
+        u.Id
+),
+TopUsers AS (
+    SELECT
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalViews,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS UserRank
+    FROM
+        UserPostStats
+    WHERE
+        TotalPosts > 0
+)
+SELECT
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.TotalQuestions,
+    tu.TotalAnswers,
+    tu.TotalViews,
+    tu.TotalScore,
+    COUNT(b.Id) AS TotalBadges,
+    AVG(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptanceRate
+FROM
+    TopUsers tu
+LEFT JOIN
+    Badges b ON tu.UserId = b.UserId
+LEFT JOIN
+    Posts p ON tu.UserId = p.OwnerUserId AND p.PostTypeId = 1
+WHERE
+    tu.UserRank <= 10
+GROUP BY
+    tu.UserId, tu.DisplayName, tu.TotalPosts, tu.TotalQuestions, tu.TotalAnswers, tu.TotalViews, tu.TotalScore
+ORDER BY
+    tu.UserRank;

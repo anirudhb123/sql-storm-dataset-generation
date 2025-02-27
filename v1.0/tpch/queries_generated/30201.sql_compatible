@@ -1,0 +1,69 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_orderdate,
+        o_orderstatus,
+        o_totalprice,
+        1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O' 
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_orderstatus,
+        o.o_totalprice,
+        oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+CustomerStatus AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) IS NOT NULL
+),
+DiscountedSales AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS discounted_total
+    FROM lineitem l
+    WHERE l.l_discount > 0
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    COALESCE(cs.total_spent, 0) AS total_spent,
+    COUNT(oh.o_orderkey) AS open_orders_count,
+    COALESCE(s.total_avail_qty, 0) AS total_avail_qty,
+    COALESCE(s.avg_supply_cost, 0.00) AS avg_supply_cost,
+    COALESCE(ds.discounted_total, 0) AS discounted_total
+FROM CustomerStatus cs
+LEFT JOIN OrderHierarchy oh ON cs.c_custkey = oh.o_custkey
+LEFT JOIN SupplierStats s ON oh.o_orderkey IN (
+    SELECT l_orderkey 
+    FROM lineitem 
+    WHERE l_suppkey IN (SELECT ps_suppkey FROM partsupp)
+)
+LEFT JOIN DiscountedSales ds ON ds.l_orderkey = oh.o_orderkey
+WHERE COALESCE(cs.total_spent, 0) > 1000.00
+GROUP BY c.c_name, cs.total_spent, s.total_avail_qty, s.avg_supply_cost, ds.discounted_total
+ORDER BY cs.total_spent DESC, open_orders_count DESC
+LIMIT 10;

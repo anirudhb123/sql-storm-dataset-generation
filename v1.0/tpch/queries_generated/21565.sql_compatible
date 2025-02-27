@@ -1,0 +1,50 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1997-01-01'
+), 
+CustomerStats AS (
+    SELECT c.c_custkey, COUNT(DISTINCT o.o_orderkey) AS order_count, 
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey
+),
+LineItemSummaries AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           AVG(l.l_tax) AS avg_tax, 
+           COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS returns_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+PartSupplierAggregate AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supplycost,
+           MAX(CASE WHEN s.s_acctbal IS NOT NULL THEN s.s_acctbal ELSE 0 END) AS max_supply_acctbal
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty >= 100
+    GROUP BY ps.ps_partkey
+)
+SELECT
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    p.p_name AS part_name,
+    COALESCE(cs.order_count, 0) AS customer_order_count,
+    COALESCE(ls.total_sales, 0) AS lineitem_total_sales,
+    COALESCE(ps.total_supplycost, 0) - COALESCE(ps.max_supply_acctbal, 0) AS supply_profit_margin,
+    SUM(CASE WHEN oh.order_rank = 1 THEN 1 ELSE 0 END) AS new_customer_orders,
+    RANK() OVER (PARTITION BY n.n_name ORDER BY SUM(ls.total_sales) DESC) AS sales_rank
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN CustomerStats cs ON cs.c_custkey = s.s_nationkey  
+LEFT JOIN LineItemSummaries ls ON ls.l_orderkey = ps.ps_partkey  
+LEFT JOIN OrderHierarchy oh ON oh.o_custkey = s.s_nationkey  
+GROUP BY r.r_name, n.n_name, p.p_name, cs.order_count, ls.total_sales, ps.total_supplycost, ps.max_supply_acctbal
+HAVING COALESCE(cs.order_count, 0) > 5 OR SUM(ls.total_sales) > 5000
+ORDER BY sales_rank;

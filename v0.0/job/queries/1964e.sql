@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND k.phonetic_code IN ('C6436', 'M2354', 'M4652', 'P6312', 'T4535') AND t.episode_nr IS NOT NULL AND t.kind_id IN (0, 1, 2, 3, 4, 6, 7) AND ci.role_id IN (1, 11, 2, 3, 4, 6, 8, 9) AND n.name < 'Pirro, Ugo' AND n.md5sum < '275c8592aaa0a3f45eb081fc5d89587f';

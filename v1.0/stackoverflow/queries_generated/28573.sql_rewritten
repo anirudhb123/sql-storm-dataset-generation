@@ -1,0 +1,76 @@
+WITH TagStats AS (
+    SELECT
+        TRIM(unnest(string_to_array(Tags, '><'))) AS TagName,
+        COUNT(*) AS PostCount
+    FROM
+        Posts
+    WHERE
+        PostTypeId = 1 
+    GROUP BY
+        TagName
+),
+
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS QuestionsAsked,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoredQuestions,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativeScoredQuestions,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+
+PostHistoryStats AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount
+    FROM
+        PostHistory ph
+    WHERE
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY
+        ph.PostId, ph.PostHistoryTypeId
+),
+
+ClosedPostReasons AS (
+    SELECT
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN pr.Name END) AS CloseReason
+    FROM
+        PostHistory ph
+    JOIN
+        CloseReasonTypes pr ON ph.Comment::int = pr.Id
+    GROUP BY
+        ph.PostId
+)
+
+SELECT
+    ts.TagName,
+    ts.PostCount,
+    ua.UserId,
+    ua.DisplayName,
+    ua.QuestionsAsked,
+    ua.PositiveScoredQuestions,
+    ua.NegativeScoredQuestions,
+    ua.TotalBadges,
+    p.ChangeCount AS PostChangeCount,
+    c.CloseReason
+FROM
+    TagStats ts
+JOIN
+    UserActivity ua ON ua.QuestionsAsked > 0
+LEFT JOIN
+    PostHistoryStats p ON p.PostId IN (SELECT p.Id FROM Posts p WHERE Tags LIKE '%' || ts.TagName || '%')
+LEFT JOIN
+    ClosedPostReasons c ON c.PostId IN (SELECT p.Id FROM Posts p WHERE Tags LIKE '%' || ts.TagName || '%')
+ORDER BY
+    ts.PostCount DESC, ua.TotalBadges DESC;

@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws_item_sk, ws_order_number, ws_sales_price, 
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2400 AND 2405
+    UNION ALL
+    SELECT cs_item_sk, cs_order_number, cs_sales_price, 
+           ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY cs_order_number) AS rn
+    FROM catalog_sales
+    WHERE cs_sold_date_sk BETWEEN 2400 AND 2405
+),
+TotalReturns AS (
+    SELECT sr_item_sk, SUM(sr_return_quantity) AS total_returned
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+AggregatedSales AS (
+    SELECT item.i_item_sk,
+           SUM(COALESCE(ws.ws_sales_price, 0)) AS total_web_sales,
+           SUM(COALESCE(cs.cs_sales_price, 0)) AS total_catalog_sales,
+           COALESCE(tr.total_returned, 0) AS total_returns
+    FROM item
+    LEFT JOIN web_sales ws ON item.i_item_sk = ws.ws_item_sk
+    LEFT JOIN catalog_sales cs ON item.i_item_sk = cs.cs_item_sk
+    LEFT JOIN TotalReturns tr ON item.i_item_sk = tr.sr_item_sk
+    GROUP BY item.i_item_sk
+)
+SELECT i.i_item_sk, i.i_item_desc, 
+       ag.total_web_sales, ag.total_catalog_sales,
+       ag.total_returns,
+       (ag.total_web_sales + ag.total_catalog_sales - ag.total_returns) AS net_sales,
+       CASE 
+           WHEN (ag.total_web_sales + ag.total_catalog_sales - ag.total_returns) IS NULL 
+           THEN 'No Sales Data' 
+           ELSE 'Sales Data Available' 
+       END AS sales_data_status
+FROM item i
+JOIN AggregatedSales ag ON i.i_item_sk = ag.i_item_sk
+WHERE ag.net_sales > 0
+ORDER BY net_sales DESC
+LIMIT 20;

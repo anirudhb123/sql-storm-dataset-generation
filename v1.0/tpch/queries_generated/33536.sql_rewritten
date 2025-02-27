@@ -1,0 +1,68 @@
+WITH RECURSIVE RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        r.r_name
+),
+TopRegions AS (
+    SELECT region_name
+    FROM RegionalSales
+    WHERE sales_rank <= 3
+),
+lineitem_stats AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS total_lines,
+        MAX(l.l_extendedprice) AS max_price,
+        AVG(l.l_discount) AS avg_discount
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    CASE 
+        WHEN o.o_orderstatus = 'F' THEN 'Finalized'
+        WHEN o.o_orderstatus = 'P' THEN 'Pending'
+        ELSE 'Unknown' 
+    END AS order_status,
+    o.o_totalprice,
+    o.o_orderdate,
+    COALESCE(l.total_lines, 0) AS total_lines,
+    COALESCE(ls.max_price, 0) AS max_line_price,
+    COALESCE(ls.avg_discount, 0) AS average_discount,
+    r.region_name
+FROM 
+    customer c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem_stats ls ON o.o_orderkey = ls.l_orderkey
+LEFT JOIN 
+    TopRegions r ON r.region_name = (
+        SELECT TOP 1 region_name 
+        FROM topregions 
+        ORDER BY new_value * (1 - discount_value) DESC
+    )
+WHERE 
+    (o.o_totalprice > 1000 OR o.o_orderpriority LIKE 'High%')
+    AND (o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31' OR o.o_orderstatus IS NULL)
+ORDER BY 
+    o.o_totalprice DESC,
+    c.c_name;

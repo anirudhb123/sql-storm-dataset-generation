@@ -1,0 +1,46 @@
+
+WITH CustomerInfo AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, 
+           cd.cd_marital_status, ca.ca_city, ca.ca_state,
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_customer_sk) AS gender_rank
+    FROM customer c 
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE ca.ca_state IN ('CA', 'TX', 'NY')
+),
+
+SalesData AS (
+    SELECT ws.ws_ship_date_sk, ws.ws_quantity, 
+           SUM(ws.ws_ext_sales_price) AS total_sales,
+           COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    WHERE ws.ws_ship_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+                                  AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws.ws_ship_date_sk
+),
+
+ReturnsData AS (
+    SELECT wr.wr_item_sk, SUM(wr.wr_return_quantity) AS total_returns
+    FROM web_returns wr
+    GROUP BY wr.wr_item_sk
+),
+
+PromotionSummary AS (
+    SELECT p.p_promo_id, p.p_promo_name,
+           COUNT(cs.cs_order_number) AS promo_sales_count,
+           SUM(cs.cs_ext_sales_price) AS promo_total_sales
+    FROM promotion p 
+    JOIN catalog_sales cs ON p.p_promo_sk = cs.cs_promo_sk
+    GROUP BY p.p_promo_id, p.p_promo_name
+)
+
+SELECT ci.c_first_name, ci.c_last_name, ci.cd_gender, ci.ca_city, 
+       sd.total_sales, sd.order_count, 
+       COALESCE(rd.total_returns, 0) AS total_returns,
+       ps.promo_sales_count, ps.promo_total_sales
+FROM CustomerInfo ci
+LEFT JOIN SalesData sd ON ci.c_customer_sk = sd.ws_ship_date_sk
+LEFT JOIN ReturnsData rd ON ci.c_customer_sk = rd.wr_item_sk
+LEFT JOIN PromotionSummary ps ON rd.wr_item_sk = ps.p_promo_id
+WHERE ci.gender_rank = 1 AND (sd.total_sales IS NOT NULL OR ps.promo_sales_count IS NOT NULL)
+ORDER BY ci.ca_city, total_sales DESC;

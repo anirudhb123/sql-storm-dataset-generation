@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.title AS movie_id,
+        mm.title,
+        mm.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mm ON ml.linked_movie_id = mm.id
+    WHERE 
+        mh.level < 3  -- limit the depth of recursion
+)
+
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY a.name ORDER BY m.production_year DESC) AS rank,
+    COALESCE(ci.status_id, 'Unknown') AS status
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    MovieHierarchy m ON ci.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+WHERE 
+    a.name IS NOT NULL
+    AND m.production_year IS NOT NULL
+    AND (m.production_year > 2010 OR kc.keyword IS NULL)  -- complex predicate
+GROUP BY 
+    a.name, m.title, m.production_year, ci.status_id
+HAVING 
+    COUNT(DISTINCT kc.keyword) > 1
+ORDER BY 
+    keyword_count DESC, a.name;

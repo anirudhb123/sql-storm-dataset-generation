@@ -1,0 +1,81 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS TotalComments,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 year'
+),
+TopActiveUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.Reputation,
+        UA.TotalPosts,
+        UA.TotalAnswers,
+        UA.GoldBadges,
+        UA.SilverBadges,
+        UA.BronzeBadges,
+        PS.PostId,
+        PS.Title,
+        PS.Score,
+        PS.ViewCount,
+        PS.AnswerCount,
+        PS.TotalComments
+    FROM 
+        UserActivity UA
+    JOIN 
+        PostStatistics PS ON UA.UserId = PS.OwnerUserId
+    WHERE 
+        UA.TotalPosts > 10
+    ORDER BY 
+        UA.Reputation DESC
+    LIMIT 10
+)
+SELECT 
+    T.DisplayName,
+    T.TotalPosts,
+    T.TotalAnswers,
+    T.GoldBadges,
+    T.SilverBadges,
+    T.BronzeBadges,
+    COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+    STRING_AGG(DISTINCT PT.Name, ', ') AS PostTypeNames
+FROM 
+    TopActiveUsers T
+LEFT JOIN 
+    Votes V ON T.PostId = V.PostId AND V.VoteTypeId = 8  
+LEFT JOIN 
+    PostTypes PT ON PT.Id IN (SELECT PostTypeId FROM Posts WHERE OwnerUserId = T.UserId)
+GROUP BY 
+    T.UserId, T.DisplayName, T.TotalPosts, T.TotalAnswers, T.GoldBadges, T.SilverBadges, T.BronzeBadges
+ORDER BY 
+    T.TotalPosts DESC, T.Reputation DESC;

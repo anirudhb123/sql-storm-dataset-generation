@@ -1,0 +1,32 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey, c.c_name, c.c_acctbal, 1 AS level
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-10-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey, c.c_name, c.c_acctbal, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-10-01' AND oh.level < 5
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > 100
+),
+LargeOrders AS (
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, oh.c_name, oh.c_acctbal, COUNT(l.l_orderkey) AS item_count
+    FROM OrderHierarchy oh
+    LEFT JOIN lineitem l ON oh.o_orderkey = l.l_orderkey
+    GROUP BY oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, oh.c_name, oh.c_acctbal
+    HAVING COUNT(l.l_orderkey) > 10
+)
+SELECT l.o_orderkey, l.o_orderdate, l.o_totalprice, l.c_name, l.c_acctbal, p.ps_partkey, p.ps_availqty, p.ps_supplycost
+FROM LargeOrders l
+JOIN PartSupplier p ON l.o_totalprice > p.ps_supplycost
+ORDER BY l.o_orderdate DESC, l.o_totalprice DESC
+LIMIT 100;

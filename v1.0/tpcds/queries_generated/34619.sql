@@ -1,0 +1,67 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        s.s_store_sk, 
+        s.s_store_name, 
+        s.s_state,
+        s.s_market_desc,
+        COALESCE(SUM(ss.ss_net_profit), 0) AS total_net_profit
+    FROM 
+        store s 
+    LEFT JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.s_store_sk, s.s_store_name, s.s_state, s.s_market_desc
+
+    UNION ALL
+
+    SELECT 
+        sh.s_store_sk, 
+        sh.s_store_name, 
+        sh.s_state,
+        sh.s_market_desc,
+        sh.total_net_profit + COALESCE(SUM(ss2.ss_net_profit), 0) 
+    FROM 
+        SalesHierarchy sh
+    LEFT JOIN 
+        store_sales ss2 ON sh.s_store_sk = ss2.ss_store_sk
+    WHERE 
+        ss2.ss_net_profit < 1000  -- Filter to show only lower profit stores
+    GROUP BY 
+        sh.s_store_sk, sh.s_store_name, sh.s_state, sh.s_market_desc, sh.total_net_profit
+)
+
+SELECT 
+    ch.c_customer_id,
+    MAX(ch.total_net_profit) AS highest_net_profit,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    STRING_AGG(DISTINCT i.i_item_desc || ' (' || i.i_current_price || ')', ', ') AS purchased_items
+FROM 
+    customer ch
+JOIN 
+    web_sales ws ON ch.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    item i ON ws.ws_item_sk = i.i_item_sk
+JOIN 
+    (SELECT 
+         sh.s_store_name,
+         sh.total_net_profit
+     FROM 
+         SalesHierarchy sh
+     WHERE 
+         sh.total_net_profit > 0
+    ) AS profitable_store ON ws.ws_web_site_sk = profitable_store.s_store_name -- Filtering customers only from profitable stores
+WHERE 
+    ch.c_birth_year IS NOT NULL
+    AND (ch.c_birth_month BETWEEN 1 AND 6 OR ch.c_birth_day IS NULL)
+    AND i.i_current_price > (
+        SELECT 
+            AVG(i2.i_current_price) 
+        FROM 
+            item i2
+    ) 
+GROUP BY 
+    ch.c_customer_id
+ORDER BY 
+    highest_net_profit DESC 
+LIMIT 100;

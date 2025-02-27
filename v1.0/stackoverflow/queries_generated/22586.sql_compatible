@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score >= 0
+),
+MaxVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Votes v
+    WHERE 
+        v.VoteTypeId = 2 
+    GROUP BY 
+        v.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+),
+OpenQuestions AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(ma.VoteCount, 0) AS UpVoteCount,
+        COALESCE(cp.FirstClosedDate, NULL) AS FirstClosedDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        MaxVotes ma ON p.Id = ma.PostId
+    LEFT JOIN 
+        ClosedPosts cp ON p.Id = cp.PostId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score > (SELECT AVG(Score) FROM Posts WHERE PostTypeId = 1)
+)
+SELECT 
+    oq.QuestionId,
+    oq.Title,
+    EXTRACT(DAY FROM TIMESTAMP '2024-10-01 12:34:56' - oq.CreationDate) AS AgeInDays,
+    CASE 
+        WHEN oq.UpVoteCount IS NULL 
+            THEN 'No votes yet'
+        WHEN oq.UpVoteCount BETWEEN 1 AND 10 
+            THEN 'Low engagement'
+        WHEN oq.UpVoteCount BETWEEN 11 AND 50 
+            THEN 'Moderate engagement'
+        ELSE 'High engagement'
+    END AS EngagementLevel,
+    COALESCE(oq.FirstClosedDate, 'Not closed') AS Status,
+    CASE 
+        WHEN oq.FirstClosedDate IS NOT NULL 
+            THEN 'Closed on ' || TO_CHAR(oq.FirstClosedDate, 'YYYY-MM-DD')
+        ELSE NULL 
+    END AS ClosureInfo
+FROM 
+    OpenQuestions oq
+WHERE 
+    oq.UpVoteCount < (SELECT AVG(UpVoteCount) FROM OpenQuestions)
+ORDER BY 
+    oq.UpVoteCount DESC NULLS LAST;

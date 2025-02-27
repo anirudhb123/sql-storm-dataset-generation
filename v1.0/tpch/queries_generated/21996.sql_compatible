@@ -1,0 +1,74 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.partkey ORDER BY s.s_acctbal DESC) AS rn,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Unknown' 
+            ELSE 'Known' 
+        END AS account_status
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+), TotalLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS total_lines,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+), FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        CASE 
+            WHEN o.o_orderstatus IN ('F', 'X') THEN 'Finalized'
+            ELSE 'Pending' 
+        END AS order_status
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+), SupplierOrderSummary AS (
+    SELECT 
+        fo.o_orderkey,
+        rs.s_name,
+        rs.account_status,
+        COALESCE(t.total_lines, 0) AS total_lines,
+        COALESCE(t.total_value, 0) AS total_value
+    FROM 
+        RankedSuppliers rs
+    LEFT JOIN 
+        FilteredOrders fo ON rs.s_suppkey = fo.o_orderkey
+    LEFT JOIN 
+        TotalLineItems t ON fo.o_orderkey = t.l_orderkey
+    WHERE 
+        rs.rn = 1
+)
+SELECT 
+    so.o_orderkey,
+    so.s_name,
+    so.account_status,
+    so.total_lines,
+    so.total_value,
+    CASE 
+        WHEN so.total_value > 100000 THEN 'High Value'
+        WHEN so.total_value BETWEEN 50000 AND 100000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS value_category
+FROM 
+    SupplierOrderSummary so
+WHERE 
+    (so.s_name IS NOT NULL OR so.account_status = 'Unknown')
+    AND (so.total_lines > 0 OR so.total_value > 0)
+ORDER BY 
+    so.total_value DESC, 
+    so.o_orderkey;

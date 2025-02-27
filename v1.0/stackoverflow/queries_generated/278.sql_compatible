@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+),
+UsersWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    u.DisplayName,
+    COALESCE(u.BadgeCount, 0) AS BadgeCount,
+    COALESCE(u.GoldBadges, 0) AS GoldBadges,
+    COALESCE(u.SilverBadges, 0) AS SilverBadges,
+    COALESCE(u.BronzeBadges, 0) AS BronzeBadges,
+    rcp.ClosedDate,
+    rcp.CloseReason
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UsersWithBadges u ON rp.OwnerUserId = u.UserId
+LEFT JOIN 
+    RecentClosedPosts rcp ON rp.PostId = rcp.PostId
+WHERE 
+    (rp.RowNum = 1 OR rp.Score > 10) AND 
+    (u.BadgeCount IS NULL OR u.BadgeCount > 0)
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 100;

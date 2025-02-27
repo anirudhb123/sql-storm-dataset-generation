@@ -1,0 +1,42 @@
+
+WITH BenchmarkData AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.CommentCount > 0 THEN 1 ELSE 0 END) AS CommentedPostCount,
+        AVG(p.Score) AS AvgPostScore,
+        MAX(p.ViewCount) AS MaxViews,
+        MIN(p.CreationDate) AS FirstPostDate,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.Reputation
+)
+SELECT
+    UserId,
+    Reputation,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    CommentedPostCount,
+    AvgPostScore,
+    MaxViews,
+    FirstPostDate,
+    LastPostDate,
+    DATEDIFF(MAX(LastPostDate), MIN(FirstPostDate)) AS ActiveDays
+FROM BenchmarkData
+GROUP BY
+    UserId,
+    Reputation,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    CommentedPostCount,
+    AvgPostScore,
+    MaxViews,
+    FirstPostDate,
+    LastPostDate
+ORDER BY Reputation DESC, PostCount DESC;

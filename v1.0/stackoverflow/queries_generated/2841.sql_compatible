@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+MostActiveUsers AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS PostCount,
+        MAX(CreationDate) AS LastPostDate
+    FROM 
+        Posts
+    WHERE 
+        CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '6 months'
+    GROUP BY 
+        UserId
+    HAVING 
+        COUNT(*) > 5
+)
+
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    u.DisplayName AS Owner,
+    ur.TotalBadges,
+    ur.TotalBounty,
+    mu.PostCount,
+    mu.LastPostDate
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN 
+    MostActiveUsers mu ON u.Id = mu.UserId
+WHERE 
+    r.PostRank = 1
+    AND (ur.TotalBounty IS NULL OR ur.TotalBounty > 0)
+ORDER BY 
+    r.Score DESC, 
+    r.ViewCount DESC;

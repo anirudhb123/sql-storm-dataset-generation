@@ -1,0 +1,45 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS Total_Sales,
+        COUNT(DISTINCT ws.ws_order_number) AS Order_Count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2450000 AND 2450600 -- arbitrary date range in Julian
+    GROUP BY 
+        c.c_customer_id
+),
+TopCustomers AS (
+    SELECT 
+        c_customer_id,
+        Total_Sales,
+        Order_Count,
+        RANK() OVER (ORDER BY Total_Sales DESC) AS Sales_Rank
+    FROM 
+        CustomerSales
+),
+SalesByGender AS (
+    SELECT 
+        cd.cd_gender,
+        SUM(cs.Total_Sales) AS Gender_Sales,
+        AVG(cs.Order_Count) AS Avg_Orders
+    FROM 
+        TopCustomers cs
+    JOIN 
+        customer_demographics cd ON cs.c_customer_id = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    cd.cd_gender,
+    Gender_Sales,
+    Avg_Orders,
+    (Gender_Sales / SUM(Gender_Sales) OVER ()) * 100 AS Percentage_Contribution
+FROM 
+    SalesByGender cd
+ORDER BY 
+    Gender_Sales DESC;

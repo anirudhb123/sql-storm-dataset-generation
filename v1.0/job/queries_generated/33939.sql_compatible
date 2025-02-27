@@ -1,0 +1,60 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title, 
+        m.production_year, 
+        m.kind_id, 
+        1 AS depth
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title, 
+        m.production_year, 
+        m.kind_id, 
+        mh.depth + 1
+    FROM 
+        aka_title AS m
+    JOIN 
+        movie_link AS ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    k.keyword AS associated_keyword,
+    COUNT(ci.id) AS cast_count,
+    AVG(ci.nr_order) AS avg_cast_order,
+    STRING_AGG(n.name, ', ') AS all_cast_names,
+    COALESCE(cp.kind, 'Unknown') AS company_type,
+    SUM(CASE WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END) AS info_count
+FROM 
+    MovieHierarchy AS mh
+LEFT JOIN 
+    movie_keyword AS mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+LEFT JOIN 
+    complete_cast AS cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS ci ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_companies AS mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type AS cp ON mc.company_type_id = cp.id
+LEFT JOIN 
+    movie_info AS mi ON mh.movie_id = mi.movie_id
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year, k.keyword, cp.kind
+ORDER BY 
+    mh.production_year DESC, 
+    cast_count DESC
+LIMIT 100;

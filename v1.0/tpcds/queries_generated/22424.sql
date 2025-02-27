@@ -1,0 +1,56 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws.ws_item_sk
+), ItemAnalytics AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        COALESCE(r.r_reason_desc, 'No Reason') AS return_reason,
+        COALESCE(SUM(cr.cr_return_quantity), 0) AS total_catalg_returns,
+        COALESCE(SUM(sr.sr_return_quantity), 0) AS total_store_returns,
+        ra.rank
+    FROM item i
+    LEFT JOIN catalog_returns cr ON i.i_item_sk = cr.cr_item_sk
+    LEFT JOIN store_returns sr ON i.i_item_sk = sr.sr_item_sk
+    LEFT JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk OR sr.sr_reason_sk = r.r_reason_sk
+    LEFT JOIN RecursiveSales rs ON i.i_item_sk = rs.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_item_desc, r.r_reason_desc, ra.rank
+), SalesComparison AS (
+    SELECT 
+        ia.i_item_sk,
+        ia.i_item_desc,
+        ia.total_store_returns,
+        ia.total_catalg_returns,
+        ra.total_sales AS web_sales_total,
+        CASE 
+            WHEN ia.total_store_returns > ia.total_catalg_returns THEN 'Store Returns > Catalog Returns'
+            ELSE 'Catalog Returns >= Store Returns'
+        END AS return_comparison,
+        ROW_NUMBER() OVER (ORDER BY ia.total_store_returns DESC) AS store_return_rank,
+        ROW_NUMBER() OVER (ORDER BY ia.total_catalg_returns DESC) AS catalog_return_rank
+    FROM ItemAnalytics ia
+    JOIN RecursiveSales ra ON ia.i_item_sk = ra.ws_item_sk
+)
+
+SELECT 
+    sc.i_item_sk,
+    sc.i_item_desc,
+    sc.total_store_returns,
+    sc.total_catalg_returns,
+    sc.web_sales_total,
+    sc.return_comparison,
+    CASE 
+        WHEN sc.store_return_rank = 1 THEN 'Top Store Return Item'
+        WHEN sc.catalog_return_rank = 1 THEN 'Top Catalog Return Item'
+        ELSE 'Regular Item'
+    END AS return_category
+FROM SalesComparison sc
+WHERE sc.return_comparison = 'Store Returns > Catalog Returns' 
+AND sc.web_sales_total > (SELECT AVG(web_sales_total) FROM SalesComparison)
+ORDER BY sc.total_store_returns DESC, sc.total_catalg_returns ASC;

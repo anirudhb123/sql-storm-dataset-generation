@@ -1,0 +1,70 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank,
+        COUNT(t.id) OVER (PARTITION BY t.production_year) AS title_count
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoleCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT a.id) AS actor_count,
+        SUM(CASE WHEN a.gender = 'F' THEN 1 ELSE 0 END) AS female_actors,
+        SUM(CASE WHEN a.gender = 'M' THEN 1 ELSE 0 END) AS male_actors
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+),
+FinalResults AS (
+    SELECT 
+        tt.title,
+        tt.production_year,
+        ac.actor_count,
+        COALESCE(ac.female_actors, 0) AS female_actors,
+        COALESCE(ac.male_actors, 0) AS male_actors,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        RANK() OVER (ORDER BY tt.production_year, tt.title) AS year_title_rank
+    FROM 
+        RankedTitles tt
+    LEFT JOIN 
+        ActorRoleCounts ac ON tt.title_id = ac.movie_id
+    LEFT JOIN 
+        MoviesWithKeywords mk ON tt.title_id = mk.movie_id
+    WHERE 
+        tt.rank <= 3 AND (ac.actor_count IS NOT NULL OR mk.keywords IS NOT NULL)
+)
+SELECT 
+    title,
+    production_year,
+    actor_count,
+    female_actors,
+    male_actors,
+    keywords,
+    year_title_rank
+FROM 
+    FinalResults
+WHERE 
+    (female_actors >= male_actors OR keywords LIKE '%action%')
+ORDER BY 
+    production_year DESC, title;

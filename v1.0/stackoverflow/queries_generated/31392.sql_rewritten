@@ -1,0 +1,78 @@
+WITH RecursiveTopPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursiveTopPosts r ON p.ParentId = r.PostId
+),
+UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    p.PostId,
+    p.Title,
+    p.ViewCount,
+    COALESCE(u.DisplayName, 'Unknown User') AS BestVoter,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+    DENSE_RANK() OVER (ORDER BY p.Score DESC) AS PostRank,
+    ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+    RANK() OVER (ORDER BY p.Createdate) AS OverallPostRank,
+    CONCAT(u.FirstName, ' ', u.LastName) AS UserFullName,
+    CASE 
+        WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+        ELSE 'Not Accepted'
+    END AS AcceptanceStatus,
+    CASE 
+        WHEN u.Reputation IS NULL THEN 'Reputation not available'
+        ELSE CAST(u.Reputation AS VARCHAR)
+    END AS UserReputation
+FROM 
+    RecursiveTopPosts p
+LEFT JOIN 
+    Comments c ON c.PostId = p.PostId
+LEFT JOIN 
+    Users u ON p.AcceptedAnswerId = u.Id
+LEFT JOIN 
+    Votes v ON p.PostId = v.PostId
+GROUP BY 
+    p.PostId, p.Title, p.ViewCount, BestVoter
+HAVING 
+    COUNT(DISTINCT c.Id) > 0 
+    AND (SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - 
+         SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END)) > 5
+ORDER BY 
+    PostRank, UserPostRank;

@@ -1,0 +1,58 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, u.DisplayName
+),
+
+TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RecentPostRank <= 5
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    tp.AnswerCount,
+    pt.Name AS PostTypeName,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.Id IN (SELECT DISTINCT CAST(UNNEST(string_to_array(tp.Tags, '><')) AS int))) AS TagsList,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.PostId AND v.VoteTypeId = 2) AS Upvotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.PostId AND v.VoteTypeId = 3) AS Downvotes
+FROM 
+    TopPosts tp
+JOIN 
+    PostTypes pt ON tp.PostTypeId = pt.Id
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

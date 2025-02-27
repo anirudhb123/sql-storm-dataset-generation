@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.Body,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS Author,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RN
+    FROM 
+        Posts P
+    INNER JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 
+        AND P.Score > 0 
+),
+TopPostAuthors AS (
+    SELECT 
+        PostId,
+        Author,
+        COUNT(*) AS AuthorPostCount
+    FROM 
+        RankedPosts
+    WHERE 
+        RN = 1 
+    GROUP BY 
+        PostId, Author
+),
+TagSummary AS (
+    SELECT 
+        P.Id AS PostId, 
+        STRING_AGG(TRIM(T.Value), ', ') AS Tags 
+    FROM 
+        Posts P
+    JOIN 
+        LATERAL STRING_SPLIT(P.Tags, ',') AS T ON TRIM(T.Value) <> '' 
+    GROUP BY 
+        P.Id
+),
+VoteSummary AS (
+    SELECT 
+        PostId, 
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes, 
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.Body,
+    RP.CreationDate,
+    TS.Tags,
+    TPA.Author,
+    TPA.AuthorPostCount,
+    VS.Upvotes,
+    VS.Downvotes,
+    VS.TotalVotes
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    TagSummary TS ON RP.PostId = TS.PostId
+LEFT JOIN 
+    TopPostAuthors TPA ON RP.PostId = TPA.PostId
+LEFT JOIN 
+    VoteSummary VS ON RP.PostId = VS.PostId
+ORDER BY 
+    RP.CreationDate DESC
+LIMIT 50;

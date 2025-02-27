@@ -1,0 +1,82 @@
+WITH movie_years AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+),
+average_movies_per_year AS (
+    SELECT
+        production_year,
+        COUNT(*) AS total_movies,
+        AVG(length(title) - length(REPLACE(title, ' ', '')) + 1) AS avg_title_word_count
+    FROM
+        movie_years
+    GROUP BY
+        production_year
+),
+top_production_years AS (
+    SELECT
+        production_year,
+        RANK() OVER (ORDER BY total_movies DESC) AS ranking
+    FROM
+        average_movies_per_year
+    WHERE
+        total_movies > 5
+),
+cast_member_stats AS (
+    SELECT
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movies_count,
+        STRING_AGG(DISTINCT at.title, ', ') AS movies_list
+    FROM
+        cast_info ci
+    JOIN
+        aka_title at ON ci.movie_id = at.id
+    GROUP BY
+        ci.person_id
+),
+popular_actors AS (
+    SELECT
+        ac.name,
+        cms.movies_count,
+        cms.movies_list
+    FROM
+        cast_member_stats cms
+    JOIN
+        aka_name ac ON cms.person_id = ac.person_id
+    WHERE
+        cms.movies_count > 2 
+),
+final_benchmark AS (
+    SELECT
+        py.production_year,
+        COUNT(DISTINCT pa.name) AS actors_count,
+        AVG(py.avg_title_word_count) AS avg_title_words,
+        COALESCE(MIN(py.production_year), 0) AS min_year,
+        COALESCE(MAX(py.production_year), 0) AS max_year,
+        STRING_AGG(DISTINCT pa.movies_list, ' | ') AS actors_movies
+    FROM
+        top_production_years py
+    LEFT JOIN
+        popular_actors pa ON pa.movies_count > 0
+    GROUP BY
+        py.production_year
+)
+SELECT
+    *,
+    CASE
+        WHEN actors_count IS NULL OR actors_count = 0 THEN 'No actors available'
+        ELSE 'Actors present'
+    END AS actors_presence,
+    CASE
+        WHEN min_year = 0 AND max_year = 0 THEN 'No production years found'
+        ELSE 'Years available'
+    END AS year_availability
+FROM
+    final_benchmark
+ORDER BY
+    production_year DESC;

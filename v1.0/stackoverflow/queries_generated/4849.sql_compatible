@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        CASE 
+            WHEN rp.CommentCount > 0 THEN 'Has Comments'
+            ELSE 'No Comments'
+        END AS CommentStatus,
+        rp.OwnerPostRank,
+        rp.UpVoteCount,
+        rp.DownVoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.OwnerPostRank = 1 AND rp.UpVoteCount - rp.DownVoteCount > 10
+),
+PostHistoryData AS (
+    SELECT 
+        php.PostId,
+        STRING_AGG(DISTINCT pht.Name ORDER BY php.CreationDate DESC) AS RecentHistoryTypes
+    FROM 
+        PostHistory php
+    JOIN 
+        PostHistoryTypes pht ON php.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        php.PostId
+),
+FinalSelection AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.CreationDate,
+        fp.CommentStatus,
+        phd.RecentHistoryTypes
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        PostHistoryData phd ON fp.PostId = phd.PostId
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.CreationDate,
+    f.CommentStatus,
+    COALESCE(f.RecentHistoryTypes, 'No History') AS RecentHistoryTypes
+FROM 
+    FinalSelection f
+ORDER BY 
+    f.CreationDate DESC
+LIMIT 10;

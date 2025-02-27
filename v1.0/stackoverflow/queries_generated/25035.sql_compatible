@@ -1,0 +1,64 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(v.BountyAmount) AS TotalBounties,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+), 
+TopUsers AS (
+    SELECT 
+        ru.UserId,
+        ru.DisplayName,
+        ru.Reputation,
+        ru.TotalPosts,
+        ru.TotalBadges,
+        ru.TotalBounties
+    FROM 
+        RankedUsers ru
+    WHERE 
+        ru.UserRank <= 10
+), 
+UserStats AS (
+    SELECT 
+        tu.UserId,
+        tu.DisplayName,
+        tu.Reputation,
+        tu.TotalPosts,
+        tu.TotalBadges,
+        tu.TotalBounties,
+        STRING_AGG(DISTINCT CONCAT(p.Title, ' (', pt.Name, ')'), ', ') AS PostTitles
+    FROM 
+        TopUsers tu
+    JOIN 
+        Posts p ON tu.UserId = p.OwnerUserId
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        tu.UserId, tu.DisplayName, tu.Reputation, tu.TotalPosts, tu.TotalBadges, tu.TotalBounties
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.TotalPosts,
+    u.TotalBadges,
+    u.TotalBounties,
+    u.PostTitles
+FROM 
+    UserStats u
+ORDER BY 
+    u.Reputation DESC;

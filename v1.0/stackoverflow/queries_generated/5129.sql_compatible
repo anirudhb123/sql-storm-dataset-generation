@@ -1,0 +1,51 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Reputation ORDER BY p.Score DESC) AS RankByReputation
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByReputation <= 5 
+)
+SELECT 
+    t.PostId,
+    t.Title,
+    t.CreationDate,
+    t.Score,
+    t.ViewCount,
+    t.OwnerDisplayName,
+    t.CommentCount,
+    COALESCE((SELECT STRING_AGG(Tag.TagName, ', ') 
+               FROM Tags Tag 
+               WHERE Tag.Id IN (SELECT CAST(UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS INT)))
+              ), 'No Tags') AS Tags
+FROM 
+    TopPosts t
+JOIN 
+    Posts p ON t.PostId = p.Id
+ORDER BY 
+    t.CreationDate DESC;

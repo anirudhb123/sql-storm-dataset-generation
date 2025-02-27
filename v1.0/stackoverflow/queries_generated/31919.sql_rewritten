@@ -1,0 +1,79 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT Id, Reputation, CreationDate
+    FROM Users
+    WHERE Reputation >= 500
+    UNION ALL
+    SELECT u.Id, u.Reputation, u.CreationDate
+    FROM Users u
+    INNER JOIN UserReputationCTE ur ON ur.Id = u.AccountId
+    WHERE u.Reputation >= 500
+),
+EnhancedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COALESCE(COUNT(c.Id) FILTER (WHERE c.UserId IS NOT NULL), 0) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpvoteCount,
+        COALESCE(p.ViewCount / NULLIF(NULLIF(EXTRACT(EPOCH FROM cast('2024-10-01 12:34:56' as timestamp)) - EXTRACT(EPOCH FROM p.CreationDate), 0), 0), 1), 0) AS ViewRate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id
+),
+HighEngagementPosts AS (
+    SELECT 
+        ep.PostId,
+        ep.Title,
+        ep.ViewRate,
+        u.DisplayName AS OwnerDisplayName,
+        bp.Name AS Badges
+    FROM 
+        EnhancedPosts ep
+    JOIN 
+        Users u ON u.Id = ep.OwnerUserId
+    LEFT JOIN 
+        Badges bp ON bp.UserId = u.Id
+    WHERE 
+        ep.CommentCount > 10 AND ep.UpvoteCount > 5
+),
+PostHistoryAggregated AS (
+    SELECT 
+        PostId, 
+        COUNT(*) AS EditCount, 
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS EditComments,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph 
+    GROUP BY 
+        PostId
+)
+SELECT 
+    hep.Title,
+    hep.OwnerDisplayName,
+    hep.ViewRate,
+    pha.EditCount,
+    pha.EditComments,
+    pha.LastEditDate,
+    STRING_AGG(DISTINCT pt.Name || ' (' || pt.Id || ')', ', ') AS PostType
+FROM 
+    HighEngagementPosts hep
+LEFT JOIN 
+    PostTypes pt ON pt.Id IN (SELECT PostTypeId FROM Posts WHERE Id = hep.PostId)
+LEFT JOIN 
+    PostHistoryAggregated pha ON pha.PostId = hep.PostId
+WHERE 
+    (hep.ViewRate > 1 OR hep.CommentCount >= 5)
+GROUP BY 
+    hep.Title, hep.OwnerDisplayName, hep.ViewRate, pha.EditCount, pha.EditComments, pha.LastEditDate
+ORDER BY 
+    hep.ViewRate DESC, pha.EditCount DESC
+LIMIT 100;

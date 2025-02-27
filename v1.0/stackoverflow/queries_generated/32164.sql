@@ -1,0 +1,86 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        CreationDate, 
+        Score, 
+        OwnerUserId,
+        CAST(Title AS VARCHAR(MAX)) AS FullPath,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title,
+        p.ParentId, 
+        p.CreationDate, 
+        p.Score, 
+        p.OwnerUserId,
+        CAST(rph.FullPath + ' -> ' + p.Title AS VARCHAR(MAX)),
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+), 
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(v.BountyAmount) AS TotalBounties,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS TotalVotes,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId, 
+        MAX(ph.CreationDate) AS LastEditDate, 
+        STRING_AGG(DISTINCT pht.Name, ', ') AS EditTypes,
+        COUNT(ph.Id) AS EditCount
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rph.Id AS PostId,
+    rph.Title,
+    rph.CreationDate,
+    rph.Score,
+    rph.FullPath AS PostHierarchy,
+    u.DisplayName AS OwnerName,
+    u.TotalPosts,
+    u.TotalBounties,
+    u.TotalVotes,
+    u.AvgScore,
+    COALESCE(ph.LastEditDate, 'No Edits') AS LastEdited,
+    COALESCE(ph.EditTypes, 'No Edits Recorded') AS EditTypes,
+    COALESCE(ph.EditCount, 0) AS NumberOfEdits
+FROM 
+    RecursivePostHierarchy rph
+LEFT JOIN 
+    UserStats u ON rph.OwnerUserId = u.UserId
+LEFT JOIN 
+    PostHistoryDetails ph ON rph.Id = ph.PostId
+WHERE 
+    rph.Level <= 2 -- Limiting the depth of the post hierarchy
+ORDER BY 
+    rph.Score DESC, 
+    rph.CreationDate DESC;

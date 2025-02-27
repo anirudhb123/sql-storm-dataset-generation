@@ -1,0 +1,58 @@
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s_suppkey, s_name, s_acctbal, 1 AS Level
+    FROM supplier
+    WHERE s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, Level + 1
+    FROM supplier s
+    INNER JOIN SupplierCTE ct ON s.s_suppkey = ct.s_suppkey
+    WHERE s.s_acctbal > ct.s_acctbal * 1.1
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+        COUNT(DISTINCT o.o_custkey) AS UniqueCustomers
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY o.o_orderkey
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_supplycost,
+        SUM(ps.ps_availqty) AS TotalAvailable
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, ps.ps_supplycost
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS TotalSpent,
+        AVG(s.s_acctbal) AS AvgSupplierBalance
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN supplier s ON c.c_nationkey = s.s_nationkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    ps.p_partkey,
+    ps.p_name,
+    ps.ps_supplycost,
+    COALESCE(os.TotalRevenue, 0) AS TotalRevenue,
+    ci.TotalSpent,
+    ci.AvgSupplierBalance,
+    s.Name AS SupplierName
+FROM PartSupplier ps
+LEFT JOIN OrderSummary os ON ps.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = os.o_orderkey)
+LEFT JOIN CustomerInfo ci ON ci.c_custkey IN (
+    SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = ps.p_partkey)
+)
+LEFT JOIN SupplierCTE s ON s.s_suppkey = (SELECT TOP 1 ps_suppkey FROM partsupp WHERE ps_partkey = ps.p_partkey ORDER BY ps_supplycost DESC)
+WHERE ps.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp)
+ORDER BY TotalRevenue DESC, TotalSpent DESC
+LIMIT 100 OFFSET 0;

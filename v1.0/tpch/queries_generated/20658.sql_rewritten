@@ -1,0 +1,54 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = (SELECT n.n_nationkey
+                                                  FROM nation n
+                                                  WHERE n.n_nationkey IS NOT NULL
+                                                  ORDER BY n.n_regionkey
+                                                  LIMIT 1)
+    WHERE sh.level < 5
+),
+
+CurrentOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, c.c_mktsegment
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+      AND EXTRACT(YEAR FROM o.o_orderdate) = 1997
+),
+
+PartInfo AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           RANK() OVER (ORDER BY AVG(ps.ps_supplycost) DESC) AS price_rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+
+SELECT DISTINCT 
+    s.s_name AS supplier_name,
+    ch.c_mktsegment AS market_segment,
+    pi.p_name AS part_name,
+    pi.avg_supply_cost,
+    CASE 
+        WHEN pi.avg_supply_cost IS NULL THEN 'No Data'
+        ELSE CASE 
+            WHEN pi.avg_supply_cost > 100 THEN 'Expensive'
+            WHEN pi.avg_supply_cost BETWEEN 50 AND 100 THEN 'Moderate'
+            ELSE 'Cheap'
+        END
+    END AS cost_category
+FROM SupplierHierarchy sh
+LEFT JOIN CurrentOrders ch ON sh.s_nationkey = ch.o_orderkey
+LEFT JOIN PartInfo pi ON pi.price_rank <= 5
+WHERE sh.level = (SELECT MAX(level) FROM SupplierHierarchy)
+  AND (pi.p_name LIKE '%A%' OR pi.p_name IS NULL)
+ORDER BY sh.s_name, pi.avg_supply_cost DESC;

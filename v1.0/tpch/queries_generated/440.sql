@@ -1,0 +1,49 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        SUM(ros.total_revenue) AS total_revenue
+    FROM 
+        RankedOrders ros
+    JOIN 
+        customer c ON ros.c_name = c.c_name
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        ros.rn <= 10
+    GROUP BY 
+        r.r_name, n.n_name
+)
+SELECT 
+    region_name,
+    nation_name,
+    total_revenue,
+    CASE 
+        WHEN total_revenue IS NULL THEN 'No Revenue' 
+        ELSE FORMAT(total_revenue, 'C')
+    END AS formatted_revenue
+FROM 
+    TopCustomers
+ORDER BY 
+    total_revenue DESC
+LIMIT 20;

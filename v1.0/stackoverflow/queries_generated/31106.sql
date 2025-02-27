@@ -1,0 +1,72 @@
+WITH RECURSIVE UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.Score > 0
+    GROUP BY 
+        p.Id
+    ORDER BY 
+        p.Score DESC
+    LIMIT 50
+),
+BadgeCount AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    uvs.UserId,
+    uvs.DisplayName,
+    uvs.TotalVotes,
+    uvs.UpVotes AS UserUpVotes,
+    uvs.DownVotes AS UserDownVotes,
+    COALESCE(bc.TotalBadges, 0) AS TotalBadges,
+    COALESCE(bc.GoldBadges, 0) AS GoldBadges,
+    COALESCE(bc.SilverBadges, 0) AS SilverBadges,
+    COALESCE(bc.BronzeBadges, 0) AS BronzeBadges,
+    pp.PostId,
+    pp.Title AS PopularPostTitle,
+    pp.Score AS PopularPostScore,
+    pp.CommentCount AS PopularPostCommentCount,
+    pp.UpVotes AS PopularPostUpVotes,
+    pp.DownVotes AS PopularPostDownVotes
+FROM 
+    UserVoteStats uvs
+LEFT JOIN 
+    BadgeCount bc ON uvs.UserId = bc.UserId
+LEFT JOIN 
+    PopularPosts pp ON pp.UpVotes > uvs.UpVotes
+ORDER BY 
+    uvs.TotalVotes DESC, pp.Score DESC;

@@ -1,0 +1,37 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > 10000
+),
+PartSupplierDetails AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 50
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_nationkey
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= '1997-01-01'
+)
+SELECT 
+    pd.p_partkey,
+    pd.p_name,
+    COALESCE(SUM(ps.ps_availqty), 0) AS total_avail_qty,
+    COALESCE(SUM(ps.ps_supplycost), 0) AS total_supply_cost,
+    COUNT(DISTINCT od.o_orderkey) AS total_orders,
+    AVG(od.o_totalprice) AS avg_order_value,
+    stddev_pop(od.o_totalprice) AS stddev_order_value
+FROM 
+    part pd
+LEFT JOIN 
+    PartSupplierDetails ps ON pd.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    OrderDetails od ON ps.ps_suppkey IN (SELECT sd.s_suppkey FROM SupplierDetails sd)
+GROUP BY 
+    pd.p_partkey, pd.p_name
+HAVING 
+    total_orders > 5
+ORDER BY 
+    avg_order_value DESC;

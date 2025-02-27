@@ -1,0 +1,73 @@
+
+WITH actor_movies AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT t.title, ', ') AS movie_titles
+    FROM 
+        cast_info c
+    JOIN 
+        title t ON c.movie_id = t.id
+    GROUP BY 
+        c.person_id
+),
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+keyword_info AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ci.company_names,
+        ci.company_types,
+        ki.keywords
+    FROM 
+        title t
+    LEFT JOIN 
+        company_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        keyword_info ki ON t.id = ki.movie_id
+)
+SELECT 
+    am.person_id,
+    ak.name,
+    am.total_movies,
+    STRING_AGG(DISTINCT md.title, ', ') AS titles,
+    MAX(md.production_year) AS latest_production_year,
+    COUNT(DISTINCT md.movie_id) AS unique_movies,
+    STRING_AGG(DISTINCT md.company_names, ', ') AS associated_companies,
+    STRING_AGG(DISTINCT md.company_types, ', ') AS associated_company_types,
+    STRING_AGG(DISTINCT md.keywords, ', ') AS associated_keywords
+FROM 
+    actor_movies am
+JOIN 
+    aka_name ak ON am.person_id = ak.person_id
+JOIN 
+    movie_details md ON ak.movie_id = md.movie_id
+GROUP BY 
+    am.person_id, ak.name, am.total_movies
+ORDER BY 
+    unique_movies DESC, latest_production_year DESC;

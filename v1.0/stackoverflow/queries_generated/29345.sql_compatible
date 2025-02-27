@@ -1,0 +1,61 @@
+
+WITH PostTagCounts AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(DISTINCT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')))::text) AS TagCount
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1  
+    GROUP BY
+        p.Id
+),
+UserPostStats AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenedCount
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY
+        u.Id
+),
+UserRankings AS (
+    SELECT
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        ps.QuestionCount,
+        ps.TotalViews,
+        ps.TotalScore,
+        ps.ClosedCount,
+        ps.ReopenedCount,
+        ROW_NUMBER() OVER (ORDER BY ps.TotalScore DESC, ps.TotalViews DESC) AS Rank
+    FROM
+        Users u
+    JOIN
+        UserPostStats ps ON u.Id = ps.UserId
+)
+SELECT
+    ur.Rank,
+    ur.DisplayName,
+    ur.Reputation,
+    ur.QuestionCount,
+    ur.TotalViews,
+    ur.TotalScore,
+    pt.TagCount
+FROM
+    UserRankings ur
+LEFT JOIN
+    PostTagCounts pt ON ur.QuestionCount > 0 AND ur.QuestionCount = (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = ur.Id AND PostTypeId = 1)
+WHERE
+    ur.Rank <= 10  
+ORDER BY
+    ur.Rank;

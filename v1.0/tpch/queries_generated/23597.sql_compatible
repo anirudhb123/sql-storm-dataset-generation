@@ -1,0 +1,57 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name LIKE 'A%')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 10
+),
+PartSummary AS (
+    SELECT p.p_partkey, 
+           SUM(ps.ps_availqty) AS total_available_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           MAX(p.p_retailprice) AS max_price
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+CustomerSegmentation AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           CASE 
+               WHEN c.c_acctbal > 1000 THEN 'High Value' 
+               WHEN c.c_acctbal BETWEEN 500 AND 1000 THEN 'Medium Value' 
+               ELSE 'Low Value' 
+           END AS customer_category,
+           c.c_nationkey
+    FROM customer c
+    WHERE c.c_mktsegment IS NOT NULL
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, 
+           COUNT(DISTINCT l.l_linenumber) AS line_count, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    c.c_name,
+    SUM(COALESCE(os.total_value, 0)) AS total_order_value,
+    COUNT(DISTINCT os.o_orderkey) AS order_count,
+    CASE 
+        WHEN sc.level IS NOT NULL THEN 'Supplier Tiered'
+        ELSE 'No Supplier Tier' 
+    END AS supplier_status,
+    STRING_AGG(DISTINCT r.r_name, ', ') AS regions
+FROM CustomerSegmentation c
+LEFT JOIN OrderSummary os ON c.c_custkey = os.o_orderkey
+LEFT JOIN SupplierHierarchy sc ON c.c_nationkey = sc.s_nationkey
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+GROUP BY c.c_custkey, c.c_name, sc.level
+HAVING SUM(COALESCE(os.total_value, 0)) > 5000 OR COUNT(DISTINCT os.o_orderkey) > 10
+ORDER BY total_order_value DESC, c.c_name;

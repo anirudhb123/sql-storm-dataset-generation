@@ -1,0 +1,65 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mv.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_link ml ON m.id = ml.movie_id
+    LEFT JOIN 
+        aka_title mv ON ml.linked_movie_id = mv.id
+    WHERE 
+        mv.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mv.production_year,
+        h.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.movie_id
+    JOIN 
+        MovieHierarchy h ON ml.linked_movie_id = h.movie_id
+)
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    h.level,
+    COUNT(DISTINCT c.person_id) AS cast_count,
+    STRING_AGG(DISTINCT n.name, ', ') AS cast_names,
+    SUM(CASE WHEN ci.nr_order IS NULL THEN 0 ELSE 1 END) AS credited_cast_count,
+    AVG(EXTRACT(YEAR FROM DATE '2024-10-01') - h.production_year) AS age_of_movie
+FROM 
+    MovieHierarchy h
+LEFT JOIN 
+    complete_cast cc ON h.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    aka_name n ON c.person_id = n.person_id
+LEFT JOIN 
+    (SELECT 
+         movie_id, 
+         person_id, 
+         MAX(nr_order) AS max_order 
+     FROM 
+         cast_info 
+     WHERE 
+         note IS NOT NULL 
+     GROUP BY 
+         movie_id, person_id) ci ON c.movie_id = ci.movie_id AND c.person_id = ci.person_id
+GROUP BY 
+    h.movie_id, h.title, h.production_year, h.level
+HAVING 
+    COUNT(DISTINCT c.person_id) > 2 AND 
+    AVG(EXTRACT(YEAR FROM DATE '2024-10-01') - h.production_year) < 20 
+ORDER BY 
+    h.production_year DESC, h.level ASC;

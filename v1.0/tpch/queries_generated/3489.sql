@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal) 
+        FROM supplier s2 
+        WHERE s2.s_nationkey = s.s_nationkey
+    )
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS unique_customers,
+        COUNT(l.l_orderkey) AS total_items
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' 
+    AND l.l_shipdate <= DATE '2023-12-31'
+    GROUP BY o.o_orderkey
+), HighRevenueOrders AS (
+    SELECT 
+        od.o_orderkey,
+        od.total_revenue,
+        od.unique_customers,
+        od.total_items,
+        RANK() OVER (ORDER BY od.total_revenue DESC) AS revenue_rank
+    FROM OrderDetails od
+    WHERE od.total_revenue > 10000
+), SupplierParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_availqty) AS available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    JOIN RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+)
+SELECT 
+    np.n_name AS nation,
+    COUNT(DISTINCT h.o_orderkey) AS high_revenue_orders,
+    SUM(sp.available_qty) AS total_available_qty,
+    AVG(sp.avg_supply_cost) AS average_supply_cost
+FROM HighRevenueOrders h
+JOIN nation np ON np.n_nationkey = (
+    SELECT c.c_nationkey 
+    FROM customer c 
+    JOIN orders o ON c.c_custkey = o.o_custkey 
+    WHERE o.o_orderkey = h.o_orderkey
+    LIMIT 1
+)
+LEFT JOIN SupplierParts sp ON sp.ps_partkey IN (
+    SELECT l.l_partkey 
+    FROM lineitem l 
+    WHERE l.l_orderkey = h.o_orderkey
+)
+GROUP BY np.n_name
+ORDER BY total_available_qty DESC
+LIMIT 10;

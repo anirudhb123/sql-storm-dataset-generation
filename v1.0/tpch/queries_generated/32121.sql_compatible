@@ -1,0 +1,36 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON ps.ps_suppkey = sh.s_suppkey
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > 100.00 AND sh.level < 5
+),
+nation_sales AS (
+    SELECT n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN orders o ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON c.c_custkey = o.o_custkey
+    JOIN nation n ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_name
+),
+top_nations AS (
+    SELECT n.n_name, ns.total_sales,
+           RANK() OVER (ORDER BY ns.total_sales DESC) AS sales_rank
+    FROM nation_sales ns
+    JOIN nation n ON n.n_name = ns.n_name
+)
+SELECT s.s_name, s.s_nationkey, th.n_name, th.total_sales,
+       COALESCE(ROW_NUMBER() OVER (PARTITION BY th.n_name ORDER BY th.total_sales DESC), 0) AS rank_within_nation
+FROM supplier_hierarchy s
+LEFT JOIN top_nations th ON th.n_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+WHERE th.total_sales > 0
+  AND s.level < 3
+ORDER BY th.total_sales DESC, s.s_name
+FETCH FIRST 50 ROWS ONLY;

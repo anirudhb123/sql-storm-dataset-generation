@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) AND  -- Questions and Answers
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Post Closed
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        SUM(COALESCE(u.UpVotes, 0) - COALESCE(u.DownVotes, 0)) AS NetVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadgeCounts ub ON u.Id = ub.UserId
+    WHERE 
+        u.Reputation > 1000  -- Consider users with reasonable reputation
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        NetVotes DESC 
+    LIMIT 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.Reputation AS OwnerReputation,
+    COALESCE(cp.ClosedDate, 'Not Closed') AS ClosedDate,
+    COALESCE(cp.CloseReason, 'No Reason') AS CloseReason,
+    tu.DisplayName AS TopUser,
+    tu.BadgeCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+CROSS JOIN 
+    TopUsers tu
+WHERE 
+    rp.RecentPostRank = 1  -- Only the most recent post per user
+    AND (rp.Score IS NOT NULL OR rp.Title ILIKE '%?%')  -- Include questions with a score or those perceived as inquiries
+ORDER BY 
+    rp.CreationDate DESC,
+    rp.Score DESC
+FETCH FIRST 20 ROWS ONLY;

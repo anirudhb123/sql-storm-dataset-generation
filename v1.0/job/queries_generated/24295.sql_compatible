@@ -1,0 +1,80 @@
+
+WITH movie_revenue AS (
+    SELECT 
+        mt.movie_id,
+        SUM(mo.revenue) AS total_revenue
+    FROM 
+        movie_info mo
+    INNER JOIN 
+        aka_title mt ON mo.movie_id = mt.movie_id
+    WHERE 
+        mo.info_type_id = (SELECT id FROM info_type WHERE info = 'revenue')
+    GROUP BY 
+        mt.movie_id
+),
+actor_filmography AS (
+    SELECT 
+        ai.person_id,
+        COUNT(DISTINCT ai.movie_id) AS movies_count,
+        STRING_AGG(DISTINCT at.title, ', ') AS titles
+    FROM 
+        cast_info ai
+    JOIN 
+        aka_title at ON ai.movie_id = at.movie_id
+    WHERE 
+        ai.note IS NULL
+    GROUP BY 
+        ai.person_id
+),
+high_revenue_movies AS (
+    SELECT 
+        mt.id,
+        mt.title,
+        mr.total_revenue
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_revenue mr ON mt.movie_id = mr.movie_id
+    WHERE 
+        mr.total_revenue > (
+            SELECT 
+                AVG(total_revenue) FROM movie_revenue
+        )
+)
+
+SELECT 
+    nam.name AS actor_name,
+    COUNT(DISTINCT aa.movie_id) AS movie_count,
+    COALESCE(SUM(mr.total_revenue), 0) AS total_actor_revenue,
+    RANK() OVER (PARTITION BY aa.person_id ORDER BY COALESCE(SUM(mr.total_revenue), 0) DESC) AS revenue_rank,
+    STRING_AGG(DISTINCT h.title) FILTER (WHERE h.title IS NOT NULL) AS high_revenue_movie_titles
+FROM 
+    aka_name nam
+INNER JOIN 
+    cast_info aa ON nam.person_id = aa.person_id
+LEFT JOIN 
+    high_revenue_movies h ON aa.movie_id = h.id
+LEFT JOIN 
+    movie_revenue mr ON aa.movie_id = mr.movie_id
+WHERE 
+    nam.name IS NOT NULL
+    AND nam.name != 'Anonymous'
+GROUP BY 
+    nam.name, aa.person_id
+HAVING 
+    COUNT(DISTINCT aa.movie_id) >= 5
+    AND COUNT(DISTINCT aa.movie_id) < (
+        SELECT 
+            COUNT(DISTINCT ai.movie_id) 
+        FROM 
+            cast_info ai
+        GROUP BY 
+            ai.person_id
+        ORDER BY 
+            COUNT(DISTINCT ai.movie_id) DESC 
+        LIMIT 1 OFFSET 10
+    )
+ORDER BY 
+    revenue_rank, movie_count DESC
+OFFSET 0 ROWS 
+FETCH NEXT 20 ROWS ONLY;

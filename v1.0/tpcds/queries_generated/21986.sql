@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY c.c_birth_year ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_birth_year
+), 
+TopSales AS (
+    SELECT 
+        customer_id,
+        total_sales,
+        order_count 
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 10
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        COALESCE(hd.hd_buy_potential, 'UNKNOWN') AS buy_potential
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+)
+SELECT 
+    ts.customer_id,
+    ts.total_sales,
+    ts.order_count,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.buy_potential,
+    CASE 
+        WHEN ts.order_count = 0 THEN 'NO ORDERS'
+        WHEN ts.order_count > 0 AND ts.total_sales IS NULL THEN 'ZERO SALES'
+        ELSE 'ACTIVE CUSTOMER'
+    END AS customer_status,
+    RANK() OVER (ORDER BY ts.total_sales DESC) AS overall_rank
+FROM 
+    TopSales ts
+JOIN 
+    CustomerDetails cd ON ts.customer_id = cd.c_customer_id
+WHERE 
+    cd.buy_potential IN (SELECT DISTINCT hd_buy_potential FROM household_demographics WHERE hd_buy_potential IS NOT NULL)
+    OR cd.buy_potential IS NULL
+ORDER BY 
+    ts.total_sales DESC,
+    cd.cd_gender ASC;

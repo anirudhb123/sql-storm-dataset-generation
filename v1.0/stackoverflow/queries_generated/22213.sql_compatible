@@ -1,0 +1,86 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount ASC) AS RN
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year') 
+        AND p.Score IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        MIN(CASE WHEN pht.Name = 'Post Closed' THEN ph.CreationDate END) AS PostClosedDate,
+        MAX(CASE WHEN pht.Name = 'Post Reopened' THEN ph.CreationDate END) AS PostReopenedDate
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+),
+TopUsersWithPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(rb.BadgeCount, 0) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViewCount,
+        COUNT(DISTINCT CASE WHEN ph.PostClosedDate IS NOT NULL THEN p.Id END) AS ClosedPosts,
+        COUNT(DISTINCT CASE WHEN ph.PostReopenedDate IS NOT NULL THEN p.Id END) AS ReopenedPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        UserBadges rb ON u.Id = rb.UserId
+    LEFT JOIN 
+        PostHistories ph ON p.Id = ph.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(p.Id) > 0 AND AVG(p.Score) > 10
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.BadgeCount,
+    u.PostCount,
+    u.TotalScore,
+    u.AvgViewCount,
+    u.ClosedPosts,
+    u.ReopenedPosts,
+    rp.PostId AS TopPostId,
+    rp.Title AS TopPostTitle,
+    rp.CreationDate AS TopPostDate,
+    CASE 
+        WHEN rp.RN = 1 THEN 'Top Post'
+        ELSE 'Other Post'
+    END AS PostRanking
+FROM 
+    TopUsersWithPostStats u
+LEFT JOIN 
+    RankedPosts rp ON u.UserId = rp.OwnerUserId AND rp.RN = 1
+ORDER BY 
+    u.TotalScore DESC, u.PostCount ASC NULLS LAST;

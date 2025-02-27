@@ -1,0 +1,69 @@
+WITH RecursiveBadgeUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY b.Date DESC) AS BadgeRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+), LatestPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Body,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+), RankedVotes AS (
+    SELECT 
+        v.PostId,
+        v.VoteTypeId,
+        COUNT(v.Id) AS VoteCount,
+        DENSE_RANK() OVER (PARTITION BY v.PostId ORDER BY v.CreationDate DESC) AS VoteRank
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId, v.VoteTypeId
+), CombinedData AS (
+    SELECT 
+        u.DisplayName AS UserName,
+        p.Title AS PostTitle,
+        p.CreationDate AS PostDate,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(r.VoteCount, 0) AS PostVoteCount
+    FROM
+        RecursiveBadgeUsers u
+    LEFT JOIN 
+        LatestPosts p ON u.UserId = p.OwnerUserId AND p.PostRank = 1
+    LEFT JOIN 
+        (SELECT UserId, COUNT(*) AS BadgeCount FROM Badges GROUP BY UserId) b ON u.UserId = b.UserId
+    LEFT JOIN 
+        RankedVotes r ON p.PostId = r.PostId AND r.VoteRank = 1
+)
+SELECT 
+    UserName,
+    PostTitle,
+    PostDate,
+    BadgeCount,
+    PostVoteCount
+FROM 
+    CombinedData
+WHERE 
+    BadgeCount > 0
+ORDER BY 
+    PostVoteCount DESC, PostDate DESC;
+
+-- This complex query benchmarks the performance of aggregating user details, badge counts, and post statistics.
+-- It utilizes recursive common table expressions (CTEs), outer joins, window functions, and grouping operations. 

@@ -1,0 +1,37 @@
+-- Performance Benchmarking Query
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.Score,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) AS VoteCount,
+    SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes,
+    bh.Date AS BadgeDate,
+    GROUP_CONCAT(DISTINCT t.TagName) AS Tags
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    VoteTypes vt ON v.VoteTypeId = vt.Id
+LEFT JOIN 
+    Badges bh ON u.Id = bh.UserId
+LEFT JOIN 
+    PostsTags pt ON p.Id = pt.PostId
+LEFT JOIN 
+    Tags t ON pt.TagId = t.Id
+WHERE 
+    p.PostTypeId = 1 -- Only considering Questions
+GROUP BY 
+    p.Id, u.DisplayName, bh.Date
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100; -- Limit the results for benchmarking

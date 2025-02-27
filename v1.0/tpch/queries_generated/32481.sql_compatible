@@ -1,0 +1,73 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_availqty
+    FROM
+        part p
+    JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY
+        p.p_partkey, p.p_name
+    
+    UNION ALL
+
+    SELECT
+        sc.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty)
+    FROM
+        SupplyChain sc
+    JOIN
+        partsupp ps ON sc.p_partkey = ps.ps_partkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY
+        sc.p_partkey, p.p_name
+),
+CustomerInfo AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        n.n_name AS nation_name
+    FROM
+        customer c
+    JOIN
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+OrderSummary AS (
+    SELECT
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(l.l_orderkey) AS line_item_count
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY
+        o.o_orderkey, o.o_custkey
+)
+SELECT
+    ci.c_name,
+    ci.nation_name,
+    os.total_price,
+    os.line_item_count,
+    COALESCE(sc.total_availqty, 0) AS total_availqty
+FROM
+    CustomerInfo ci
+LEFT JOIN
+    OrderSummary os ON ci.c_custkey = os.o_custkey
+LEFT JOIN
+    (SELECT p.p_partkey, SUM(sc.total_availqty) AS total_availqty FROM SupplyChain sc GROUP BY p.p_partkey) sc ON os.o_orderkey = sc.p_partkey
+WHERE
+    (os.total_price IS NULL OR os.line_item_count > 5)
+ORDER BY
+    ci.nation_name, total_price DESC
+LIMIT 10;

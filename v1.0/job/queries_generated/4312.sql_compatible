@@ -1,0 +1,61 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY m.id) AS actor_count,
+        AVG(mi.info) OVER (PARTITION BY m.id) AS avg_rating
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating' LIMIT 1)
+    WHERE 
+        m.production_year >= 2000
+),
+TopRatedMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        actor_count,
+        avg_rating
+    FROM 
+        RankedMovies
+    WHERE 
+        avg_rating IS NOT NULL
+    ORDER BY 
+        avg_rating DESC 
+    LIMIT 10
+),
+ActorsInTopRated AS (
+    SELECT 
+        m.movie_id,
+        a.name AS actor_name,
+        RANK() OVER (PARTITION BY m.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        TopRatedMovies m
+    JOIN 
+        complete_cast cc ON m.movie_id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+)
+SELECT 
+    t.title,
+    t.production_year,
+    STRING_AGG(DISTINCT a.actor_name, ', ') AS actors,
+    t.avg_rating
+FROM 
+    TopRatedMovies t
+LEFT JOIN 
+    ActorsInTopRated a ON t.movie_id = a.movie_id
+GROUP BY 
+    t.movie_id, t.title, t.production_year, t.avg_rating
+ORDER BY 
+    t.avg_rating DESC;

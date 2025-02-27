@@ -1,0 +1,57 @@
+WITH RECURSIVE supplier_costs AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_supplycost, 0 AS cost_layer
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_supplycost IS NOT NULL
+    UNION ALL
+    SELECT sc.s_suppkey, sc.s_name, sc.ps_supplycost + ps.ps_supplycost, cost_layer + 1
+    FROM supplier_costs sc
+    JOIN partsupp ps ON sc.s_suppkey = ps.ps_suppkey
+    WHERE cost_layer < 2
+),
+recent_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'
+),
+denormalized_parts AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, p.p_retailprice, COALESCE(NULLIF(p.p_comment, ''), 'No comments available') AS processed_comment
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+aggregated_data AS (
+    SELECT 
+        r.r_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE l.l_shipdate <= CURRENT_DATE
+      AND l.l_returnflag = 'N'
+    GROUP BY r.r_name
+),
+filtered_suppliers AS (
+    SELECT s.s_name, s.s_acctbal, 
+           CASE 
+            WHEN s.s_acctbal > 1000 THEN 'High Balance'
+            WHEN s.s_acctbal BETWEEN 500 AND 1000 THEN 'Medium Balance'
+            ELSE 'Low Balance'
+           END AS balance_category
+    FROM supplier s
+    WHERE s.s_acctbal >= (SELECT AVG(s_acctbal) FROM supplier)
+)
+SELECT r.r_name, ad.revenue, ad.order_count, 
+       f.s_name AS supplier_name,
+       COALESCE(sc.ps_supplycost, 0) AS supplier_cost,
+       COUNT(DISTINCT ro.o_orderkey) FILTER (WHERE ro.rn = 1) AS recent_order_count
+FROM aggregated_data ad
+JOIN region r ON ad.r_name = r.r_name
+LEFT JOIN filtered_suppliers f ON f.s_name LIKE '%' || r.r_name || '%'
+LEFT JOIN supplier_costs sc ON f.s_name = sc.s_name
+LEFT JOIN recent_orders ro ON ro.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus <> 'C')
+WHERE ad.revenue > (SELECT AVG(revenue) FROM aggregated_data)
+GROUP BY r.r_name, ad.revenue, ad.order_count, f.s_name, sc.ps_supplycost
+ORDER BY ad.revenue DESC, r.r_name;

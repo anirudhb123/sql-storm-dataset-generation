@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+)
+
+, AnswerStats AS (
+    
+    SELECT 
+        rph.PostId AS QuestionId,
+        COUNT(*) AS AnswerCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveAnswers,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        RecursivePostHierarchy rph
+    JOIN 
+        Posts p ON rph.PostId = p.ParentId
+    WHERE 
+        p.PostTypeId = 2  
+    GROUP BY 
+        rph.PostId
+)
+
+, UserBadges AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT OUTER JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    q.Id AS QuestionId,
+    q.Title,
+    qs.AnswerCount,
+    qs.PositiveAnswers,
+    qs.AverageScore,
+    u.DisplayName AS UserName,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    COALESCE(qc.UserDisplayName, 'No Comments') AS LastCommentedUser,
+    COALESCE(MAX(c.CreationDate), NULL) AS LastCommentDate
+FROM 
+    Posts q
+LEFT JOIN 
+    AnswerStats qs ON q.Id = qs.QuestionId
+LEFT JOIN 
+    Users u ON q.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    Comments c ON q.Id = c.PostId
+LEFT JOIN 
+    (SELECT PostId, UserDisplayName, CreationDate FROM Comments WHERE CreationDate = (SELECT MAX(CreationDate) FROM Comments WHERE PostId = q.Id)) qc ON qc.PostId = q.Id
+WHERE 
+    q.PostTypeId = 1  
+GROUP BY 
+    q.Id, u.DisplayName, ub.BadgeCount, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges, qc.UserDisplayName
+ORDER BY 
+    qs.AnswerCount DESC NULLS LAST, 
+    q.CreationDate DESC 
+LIMIT 10;

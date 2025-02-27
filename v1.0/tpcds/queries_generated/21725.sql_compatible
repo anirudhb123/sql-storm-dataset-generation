@@ -1,0 +1,76 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        SUM(ss_quantity) AS total_sales,
+        RANK() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_quantity) DESC) AS rank_sales
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk, ss_item_sk
+),
+TotalReturns AS (
+    SELECT 
+        sr_store_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_store_sk
+),
+SalesReturns AS (
+    SELECT 
+        r.ss_store_sk,
+        r.ss_item_sk,
+        COALESCE(s.total_sales, 0) AS total_sales,
+        COALESCE(t.total_returns, 0) AS total_returns,
+        (COALESCE(s.total_sales, 0) - COALESCE(t.total_returns, 0)) AS net_sales
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        TotalReturns t ON r.ss_store_sk = t.sr_store_sk
+    LEFT JOIN 
+        store_sales s ON r.ss_store_sk = s.ss_store_sk AND r.ss_item_sk = s.ss_item_sk
+),
+LastYearSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS last_year_sales
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = (SELECT MAX(d_year) - 1 FROM date_dim))
+    GROUP BY 
+        ws_item_sk
+)
+SELECT 
+    sr.ss_store_sk,
+    sr.ss_item_sk,
+    sr.total_sales,
+    sr.total_returns,
+    sr.net_sales,
+    ly.last_year_sales,
+    CASE 
+        WHEN sr.net_sales > ly.last_year_sales THEN 'increase'
+        WHEN sr.net_sales < ly.last_year_sales THEN 'decrease'
+        ELSE 'no change'
+    END AS sales_trend,
+    STRING_AGG(DISTINCT CONCAT('Store ', sr.ss_store_sk, ' sold ', sr.total_sales, ' units of item ', sr.ss_item_sk) 
+                ORDER BY sr.ss_item_sk) AS sales_details
+FROM 
+    SalesReturns sr
+LEFT JOIN 
+    LastYearSales ly ON sr.ss_item_sk = ly.ws_item_sk
+WHERE 
+    (sr.net_sales IS NOT NULL AND sr.net_sales > 0) 
+    OR (ly.last_year_sales IS NULL)
+GROUP BY 
+    sr.ss_store_sk,
+    sr.ss_item_sk,
+    sr.total_sales,
+    sr.total_returns,
+    sr.net_sales,
+    ly.last_year_sales
+HAVING 
+    COUNT(DISTINCT sr.total_returns) <= (SELECT COUNT(*) FROM reason) * 0.1;

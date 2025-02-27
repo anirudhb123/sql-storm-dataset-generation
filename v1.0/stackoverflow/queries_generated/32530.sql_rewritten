@@ -1,0 +1,76 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.PostTypeId,
+        P.AcceptedAnswerId,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.Score,
+        CAST(0 AS INT) AS Depth
+    FROM Posts P
+    WHERE P.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        A.Id AS PostId,
+        A.OwnerUserId,
+        A.Title,
+        A.PostTypeId,
+        A.AcceptedAnswerId,
+        A.CreationDate,
+        A.LastActivityDate,
+        A.Score,
+        Depth + 1
+    FROM Posts A
+    INNER JOIN RecursivePostCTE Q ON Q.PostId = A.ParentId
+    WHERE A.PostTypeId = 2  
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+    FROM Votes 
+    GROUP BY PostId
+),
+UserBadgeCounts AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount
+    FROM Badges
+    GROUP BY UserId
+),
+LatestPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        B.BadgeCount,
+        COALESCE(V.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(V.DownVoteCount, 0) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RN
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN UserBadgeCounts B ON U.Id = B.UserId
+    LEFT JOIN PostVoteCounts V ON P.Id = V.PostId
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+) 
+
+SELECT 
+    LP.PostId,
+    LP.Title,
+    LP.CreationDate,
+    LP.Score,
+    LP.OwnerDisplayName,
+    LP.BadgeCount,
+    LP.UpVoteCount,
+    LP.DownVoteCount,
+    RP.Depth AS AnswerDepth
+FROM LatestPosts LP
+LEFT JOIN RecursivePostCTE RP ON LP.PostId = RP.PostId
+WHERE LP.RN = 1  
+ORDER BY LP.CreationDate DESC 
+LIMIT 100;

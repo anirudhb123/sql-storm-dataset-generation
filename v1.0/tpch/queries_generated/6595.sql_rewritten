@@ -1,0 +1,76 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_nationkey,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) as price_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+HighValueNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(o.o_totalprice) as total_sales,
+        COUNT(DISTINCT o.o_orderkey) as order_count
+    FROM 
+        RankedOrders ro
+    JOIN 
+        nation n ON ro.c_nationkey = n.n_nationkey
+    WHERE 
+        ro.price_rank <= 5
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+TopSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) as supplier_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1997-12-31'
+    GROUP BY 
+        ps.ps_suppkey, s.s_name
+    ORDER BY 
+        supplier_revenue DESC
+    LIMIT 10
+)
+SELECT 
+    rn.r_name,
+    hf.n_name,
+    hf.total_sales,
+    hf.order_count,
+    ts.s_name AS top_supplier,
+    ts.supplier_revenue
+FROM 
+    HighValueNations hf
+JOIN 
+    region rn ON hf.n_nationkey = rn.r_regionkey
+LEFT JOIN 
+    TopSuppliers ts ON ts.ps_suppkey = (
+        SELECT 
+            ps.ps_suppkey 
+        FROM 
+            partsupp ps
+        JOIN 
+            lineitem l ON ps.ps_partkey = l.l_partkey
+        WHERE 
+            l.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderkey = o.o_orderkey)
+        LIMIT 1
+    )
+WHERE 
+    hf.total_sales > 1000000
+ORDER BY 
+    hf.total_sales DESC;

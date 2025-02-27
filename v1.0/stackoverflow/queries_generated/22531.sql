@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankWithinType,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY p.Id) AS DownVoteCount,
+        ARRAY_AGG(DISTINCT tag.TagName) FILTER (WHERE tag.TagName IS NOT NULL) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tag(TagName) ON true
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT c.Reason) AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes c ON ph.Comment::INTEGER = c.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- closed, reopened
+    GROUP BY 
+        ph.PostId
+),
+VoteStatistics AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.RankWithinType,
+    COALESCE(cp.LastClosedDate, 'Never Closed') AS LastClosed,
+    COALESCE(cp.CloseReasons, 'No Close Reasons') AS CloseReasons,
+    COALESCE(vs.TotalUpvotes, 0) AS Upvotes,
+    COALESCE(vs.TotalDownvotes, 0) AS Downvotes,
+    CASE 
+        WHEN rp.UpVoteCount > rp.DownVoteCount THEN 'Positive' 
+        WHEN rp.UpVoteCount < rp.DownVoteCount THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS VoteSentiment,
+    rp.Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    VoteStatistics vs ON rp.PostId = vs.PostId
+WHERE 
+    EXISTS (SELECT 1 FROM Posts p WHERE p.Id = rp.PostId AND p.ViewCount > 1000)
+    AND (rp.RankWithinType <= 5 OR rp.Score > 50)
+ORDER BY 
+    rp.RankWithinType, rp.Score DESC;

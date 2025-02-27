@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS aka_id,
+        a.person_id,
+        a.name AS actor_name,
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        r.id AS role_id,
+        r.role,
+        c.id AS cast_info_id,
+        a.actor_name
+    FROM 
+        role_type r
+    JOIN 
+        cast_info c ON r.id = c.person_role_id
+    JOIN 
+        RankedMovies a ON c.person_id = a.person_id
+    WHERE 
+        a.rn = 1 -- Selecting only the latest movie per actor
+),
+MoviesKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        GROUP_CONCAT(k.keyword SEPARATOR ', ') AS keywords
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+),
+FinalResults AS (
+    SELECT 
+        a.actor_name,
+        m.title,
+        m.production_year,
+        k.keywords,
+        r.role AS role_played
+    FROM 
+        RankedMovies m
+    JOIN 
+        ActorRoles r ON m.actor_name = r.actor_name
+    JOIN 
+        MoviesKeywords k ON m.title = k.title
+    WHERE 
+        m.rn = 1
+)
+SELECT 
+    actor_name,
+    title,
+    production_year,
+    keywords,
+    role_played
+FROM 
+    FinalResults
+ORDER BY 
+    production_year DESC, actor_name;

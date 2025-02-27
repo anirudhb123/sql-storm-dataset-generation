@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year BETWEEN 2000 AND 2023
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        am.title,
+        am.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    INNER JOIN
+        aka_title am ON ml.linked_movie_id = am.id
+    INNER JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT
+    DISTINCT a.name AS actor_name,
+    ah.title AS movie_title,
+    ah.production_year,
+    ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY ah.production_year DESC) AS movies_ranked
+FROM
+    aka_name a
+JOIN
+    cast_info ci ON a.person_id = ci.person_id
+JOIN
+    complete_cast cc ON ci.movie_id = cc.movie_id
+JOIN
+    movie_companies mc ON cc.movie_id = mc.movie_id
+JOIN
+    movie_hierarchy ah ON cc.movie_id = ah.movie_id
+LEFT JOIN
+    movie_keyword mk ON ah.movie_id = mk.movie_id
+LEFT JOIN
+    keyword k ON mk.keyword_id = k.id
+WHERE
+    a.name IS NOT NULL
+    AND a.md5sum IS NOT NULL
+    AND mc.company_id IN (SELECT company_id FROM company_name WHERE country_code = 'USA')
+GROUP BY
+    a.id, ah.id, ah.title, ah.production_year
+HAVING
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY
+    ah.production_year DESC, a.name;

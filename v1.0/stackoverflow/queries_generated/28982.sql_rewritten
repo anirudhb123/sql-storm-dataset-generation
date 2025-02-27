@@ -1,0 +1,60 @@
+WITH RankedPostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)  
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Comment END) AS CloseComments,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.Comment END) AS ReopenComments,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 12 THEN ph.Comment END) AS DeleteComments
+    FROM 
+        RankedPostHistories ph
+    GROUP BY 
+        ph.PostId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate AS PostCreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Score,
+        COALESCE(cr.CloseComments, 'Not Closed') AS CloseReason,
+        COALESCE(cr.ReopenComments, 'Not Reopened') AS ReopenReason,
+        COALESCE(cr.DeleteComments, 'Not Deleted') AS DeleteReason
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        CloseReasons cr ON p.Id = cr.PostId
+    WHERE 
+        p.CreationDate >= '2021-01-01' 
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.OwnerDisplayName,
+    pd.PostCreationDate,
+    pd.ViewCount,
+    pd.AnswerCount,
+    pd.CommentCount,
+    pd.Score,
+    pd.CloseReason,
+    pd.ReopenReason,
+    pd.DeleteReason
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

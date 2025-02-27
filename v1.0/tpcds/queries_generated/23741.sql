@@ -1,0 +1,74 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_ship_date_sk,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) as SalesRank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_ship_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) AND
+                                   (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+RelevantReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+    HAVING 
+        SUM(sr_return_quantity) > 5
+),
+HighValueItems AS (
+    SELECT 
+        DISTINCT ir.i_item_id,
+        ir.i_current_price,
+        COALESCE(rt.total_returned, 0) AS total_returned_qty
+    FROM 
+        item ir
+    LEFT JOIN 
+        RelevantReturns rt ON ir.i_item_sk = rt.sr_item_sk
+    WHERE 
+        ir.i_current_price > 100
+        AND (rt.total_returned IS NULL OR rt.total_returned < 10)
+),
+SalesSummary AS (
+    SELECT 
+        rs.ws_order_number,
+        cv.c_customer_id,
+        SUM(rs.ws_quantity) AS total_quantity,
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS total_sales,
+        COUNT(DISTINCT rs.ws_item_sk) AS unique_items
+    FROM 
+        RankedSales rs
+    JOIN 
+        customer cv ON rs.ws_order_number = cv.c_customer_sk
+    WHERE 
+        rs.SalesRank = 1 
+        AND rs.ws_item_sk IN (SELECT i.i_item_sk FROM HighValueItems i)
+    GROUP BY 
+        rs.ws_order_number, cv.c_customer_id
+)
+SELECT 
+    ss.ws_order_number,
+    ss.c_customer_id,
+    ss.total_quantity,
+    ss.total_sales,
+    ss.unique_items,
+    CASE 
+        WHEN ss.total_sales > 1000 THEN 'High Value Order'
+        ELSE 'Standard Order'
+    END AS order_type,
+    COALESCE((SELECT AVG(total_sales) FROM SalesSummary), 0) as avg_sales,
+    CONCAT('Order ', ss.ws_order_number, ' contains ', ss.unique_items, ' unique items') AS order_desc
+FROM 
+    SalesSummary ss
+ORDER BY 
+    ss.total_sales DESC
+LIMIT 10;

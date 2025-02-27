@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number, 
+        ws.ws_item_sk, 
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price DESC) AS rn,
+        ws.ws_sales_price,
+        COALESCE(ws.ws_ext_sales_price, 0) - COALESCE(ws.ws_ext_discount_amt, 0) AS net_sales
+    FROM web_sales ws
+    WHERE ws.ws_sales_price > (SELECT AVG(ws2.ws_sales_price) FROM web_sales ws2)
+),
+FilteredSales AS (
+    SELECT 
+        rs.ws_order_number,
+        rs.ws_item_sk, 
+        rs.net_sales,
+        CASE 
+            WHEN rs.net_sales IS NULL THEN 'NO sale'
+            WHEN rs.net_sales > (SELECT AVG(net_sales) FROM RankedSales) THEN 'Above Average'
+            ELSE 'Below Average'
+        END AS sales_category
+    FROM RankedSales rs
+    WHERE rs.rn = 1
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id, 
+        COUNT(DISTINCT fs.ws_order_number) AS total_orders,
+        SUM(fs.net_sales) AS total_sales
+    FROM customer c
+    JOIN FilteredSales fs ON c.c_customer_sk = fs.ws_item_sk -- Assuming ws_item_sk is not directly linked just for complexity
+    GROUP BY c.c_customer_id
+    HAVING COUNT(DISTINCT fs.ws_order_number) > 5
+),
+IncomeStatistics AS (
+    SELECT 
+        id.ib_income_band_sk,
+        COUNT(tc.c_customer_id) AS customer_count,
+        AVG(tc.total_sales) AS avg_sales
+    FROM income_band id
+    LEFT JOIN TopCustomers tc ON id.ib_income_band_sk = (SELECT hd.hd_income_band_sk FROM household_demographics hd WHERE hd.hd_demo_sk = tc.c_customer_id) -- Assuming a linkage for conceptual purpose
+    GROUP BY id.ib_income_band_sk
+)
+SELECT 
+    ib.ib_income_band_sk,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    COALESCE(IncomeStatistics.customer_count, 0) AS customer_count,
+    COALESCE(IncomeStatistics.avg_sales, 0) AS avg_sales,
+    CASE 
+        WHEN IncomeStatistics.customer_count IS NULL THEN 'No Customers'
+        ELSE 
+            CASE 
+                WHEN IncomeStatistics.avg_sales > 1000 THEN 'High Value'
+                WHEN IncomeStatistics.avg_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+                ELSE 'Low Value'
+            END
+    END AS customer_value_category
+FROM income_band ib
+LEFT JOIN IncomeStatistics ON ib.ib_income_band_sk = IncomeStatistics.ib_income_band_sk
+ORDER BY ib.ib_income_band_sk;

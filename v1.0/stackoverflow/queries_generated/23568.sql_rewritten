@@ -1,0 +1,68 @@
+WITH ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, p.CreationDate, u.DisplayName
+),
+RecentAbandonments AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), p.LastActivityDate) AS DaysInactive,
+        COALESCE(c.ClosedDate, '9999-12-31') AS CloseDate,
+        CASE 
+            WHEN p.AnswerCount = 0 THEN 'No Answers'
+            WHEN p.AnswerCount > 1 THEN 'Multiple Answers'
+            ELSE 'Single Answer'
+        END AS AnswerStatus
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT Id, ClosedDate FROM Posts WHERE ClosedDate IS NOT NULL) c ON p.Id = c.Id
+    WHERE 
+        DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), p.LastActivityDate) > 30 
+)
+SELECT 
+    ap.PostId,
+    ap.Title,
+    ap.Score,
+    ap.ViewCount,
+    ap.CommentCount,
+    ap.UpVotes,
+    ap.DownVotes,
+    ra.DaysInactive,
+    ra.AnswerStatus,
+    CASE 
+        WHEN ra.CloseDate <= cast('2024-10-01 12:34:56' as timestamp) THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    ActivePosts ap
+JOIN 
+    RecentAbandonments ra ON ap.PostId = ra.PostId
+WHERE 
+    (ap.rn = 1 AND ap.Score > 0) 
+    OR (ra.AnswerStatus = 'No Answers' AND ra.DaysInactive > 60)
+ORDER BY 
+    ap.Score DESC, ra.DaysInactive ASC
+LIMIT 100;

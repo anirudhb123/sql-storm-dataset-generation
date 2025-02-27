@@ -1,0 +1,57 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS Downvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 10 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS Deletions,
+        COALESCE(SUM(c.Id) OVER (PARTITION BY p.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS Rank
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    WHERE
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 month'
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+
+TopPosts AS (
+    SELECT
+        Id,
+        Title,
+        CreationDate,
+        ViewCount,
+        Score,
+        Upvotes,
+        Downvotes,
+        Deletions,
+        CommentCount
+    FROM
+        RankedPosts
+    WHERE
+        Rank <= 10
+)
+
+SELECT
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.Upvotes,
+    tp.Downvotes,
+    tp.Deletions,
+    tp.CommentCount,
+    ROUND((CAST(tp.Upvotes AS decimal) / NULLIF(tp.Upvotes + tp.Downvotes, 0)) * 100, 2) AS UpvotePercentage
+FROM
+    TopPosts tp
+ORDER BY
+    tp.Score DESC, tp.ViewCount DESC;

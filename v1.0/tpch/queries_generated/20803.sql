@@ -1,0 +1,81 @@
+WITH RECURSIVE RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER(PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_price,
+        CASE 
+            WHEN o.o_totalprice > 1000 THEN 'High'
+            WHEN o.o_totalprice BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS price_category
+    FROM 
+        orders o
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+TopRegions AS (
+    SELECT 
+        n.n_nationkey,
+        SUM(o.o_totalprice) AS total_revenue
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    STRING_AGG(DISTINCT k.c_name ORDER BY k.c_name) AS customer_names,
+    T.total_revenue AS top_region_revenue,
+    CASE
+        WHEN T.total_revenue IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Exists'
+    END AS revenue_status
+FROM 
+    region r
+FULL OUTER JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+INNER JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    customer k ON o.o_custkey = k.c_custkey
+LEFT JOIN 
+    TopRegions T ON n.n_nationkey = T.n_nationkey
+WHERE 
+    l.l_shipdate IS NOT NULL 
+    AND (o.o_orderstatus = 'F' OR o.o_orderstatus IS NULL OR o.o_orderstatus LIKE 'O%')
+GROUP BY 
+    r.r_name, T.total_revenue
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_revenue DESC;

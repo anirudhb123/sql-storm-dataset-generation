@@ -1,0 +1,60 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PopularParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(li.l_quantity) AS total_sold
+    FROM 
+        lineitem li
+    JOIN 
+        part p ON li.l_partkey = p.p_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(li.l_quantity) > 1000
+)
+SELECT 
+    c.c_name AS CustomerName,
+    COALESCE(sp.s_name, 'No Supplier') AS SupplierName,
+    pp.p_name AS PartName,
+    pp.total_sold,
+    cs.total_orders,
+    cs.total_spent
+FROM 
+    CustomerOrders cs
+LEFT JOIN 
+    PopularParts pp ON cs.total_orders > 5
+LEFT JOIN 
+    RankedSuppliers sp ON pp.p_partkey = sp.s_suppkey AND sp.rank = 1
+WHERE 
+    cs.total_spent > 5000
+ORDER BY 
+    cs.total_spent DESC, pp.total_sold ASC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

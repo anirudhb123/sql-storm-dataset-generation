@@ -1,0 +1,54 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS SalesRank,
+        COALESCE(ws.ws_net_profit, 0) AS NetProfit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > (SELECT AVG(ws_inner.ws_sales_price) FROM web_sales ws_inner)
+),
+SalesSummary AS (
+    SELECT 
+        item.i_item_id, 
+        item.i_item_desc,
+        SUM(rs.ws_sales_price) AS TotalSales,
+        COUNT(rs.ws_order_number) AS OrderCount,
+        SUM(rs.NetProfit) AS TotalNetProfit
+    FROM 
+        RankedSales rs
+    JOIN 
+        item ON rs.ws_item_sk = item.i_item_sk
+    GROUP BY 
+        item.i_item_id, item.i_item_desc
+),
+DemographicInfo AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_id) AS CustomerCount,
+        SUM(sums.TotalNetProfit) AS TotalNetProfitByGender
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        SalesSummary sums ON (c.c_customer_sk = sums.ws_bill_customer_sk OR c.c_customer_sk = sums.ws_ship_customer_sk)
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    di.cd_gender,
+    di.CustomerCount,
+    di.TotalNetProfitByGender,
+    CASE 
+        WHEN di.TotalNetProfitByGender IS NULL THEN 'No Profit Data'
+        ELSE CAST(di.TotalNetProfitByGender AS VARCHAR) || ' USD'
+    END AS ProfitStatement
+FROM 
+    DemographicInfo di
+ORDER BY 
+    di.CustomerCount DESC, 
+    di.TotalNetProfitByGender ASC NULLS LAST;

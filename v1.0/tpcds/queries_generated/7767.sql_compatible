@@ -1,0 +1,61 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(sr.return_quantity) AS total_returned_items,
+        SUM(sr.return_amt_inc_tax) AS total_return_amount,
+        COUNT(DISTINCT sr.ticket_number) AS return_count
+    FROM 
+        customer c
+    JOIN 
+        store_returns sr ON c.c_customer_sk = sr.customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+
+StoreSales AS (
+    SELECT 
+        s.store_id,
+        SUM(ss.net_paid) AS total_sales_amount,
+        SUM(ss.quantity) AS total_items_sold
+    FROM 
+        store s
+    JOIN 
+        store_sales ss ON s.store_sk = ss.store_sk
+    GROUP BY 
+        s.store_id
+),
+
+Promotions AS (
+    SELECT 
+        p.promo_id,
+        COUNT(DISTINCT ws.order_number) AS promo_order_count,
+        SUM(ws.net_paid) AS promo_sales_amount
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.promo_sk = ws.promo_sk
+    GROUP BY 
+        p.promo_id
+)
+
+SELECT 
+    cr.c_customer_id,
+    ss.store_id,
+    pr.promo_id,
+    cr.total_returned_items,
+    cr.total_return_amount,
+    ss.total_sales_amount AS store_total_sales,
+    ss.total_items_sold AS store_total_items,
+    pr.promo_order_count,
+    pr.promo_sales_amount
+FROM 
+    CustomerReturns cr
+JOIN 
+    StoreSales ss ON cr.c_customer_id = ss.store_id 
+JOIN 
+    Promotions pr ON pr.promo_order_count > 100 
+ORDER BY 
+    cr.total_return_amount DESC,
+    ss.total_sales_amount DESC
+LIMIT 100;

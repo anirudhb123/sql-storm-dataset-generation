@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score > 0
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounties,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpvoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownvoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+HighScoringPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        us.UserId,
+        us.BadgeCount,
+        us.TotalBounties,
+        us.UpvoteCount,
+        us.DownvoteCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users us ON rp.OwnerUserId = us.Id
+    WHERE 
+        rp.RankByScore <= 3
+)
+SELECT 
+    hsp.Title,
+    hsp.CreationDate,
+    hsp.Score,
+    hsp.BadgeCount,
+    hsp.TotalBounties,
+    hsp.UpvoteCount,
+    hsp.DownvoteCount,
+    STRING_AGG(COALESCE(t.TagName, 'No Tags'), ', ') AS Tags
+FROM 
+    HighScoringPosts hsp
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            DISTINCT UNNEST(string_to_array(p.Tags, '<>'))::varchar AS TagName 
+        FROM 
+            Posts p 
+        WHERE 
+            p.Id = hsp.PostId
+    ) t ON true
+GROUP BY 
+    hsp.PostId, hsp.Title, hsp.CreationDate, hsp.Score,
+    hsp.BadgeCount, hsp.TotalBounties, hsp.UpvoteCount, hsp.DownvoteCount
+ORDER BY 
+    hsp.Score DESC, hsp.CreationDate DESC
+LIMIT 10;

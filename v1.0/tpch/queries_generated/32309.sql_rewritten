@@ -1,0 +1,46 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 1 AS hierarchy_level
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.hierarchy_level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_custkey
+),
+PriceSummary AS (
+    SELECT 
+        p.p_partkey,
+        SUM(pl.l_extendedprice * (1 - pl.l_discount)) AS total_price,
+        COUNT(DISTINCT pl.l_orderkey) AS order_count
+    FROM part p
+    JOIN lineitem pl ON p.p_partkey = pl.l_partkey
+    GROUP BY p.p_partkey
+),
+FilteredOrder AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        CASE 
+            WHEN o.o_totalprice > 1000 THEN 'High'
+            WHEN o.o_totalprice BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS price_category
+    FROM orders o
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+)
+SELECT 
+    ch.c_name,
+    ch.hierarchy_level,
+    ps.total_price,
+    fo.price_category,
+    (SELECT COUNT(*) 
+     FROM lineitem l 
+     WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O')) AS total_open_orders
+FROM CustomerHierarchy ch
+JOIN PriceSummary ps ON ch.c_custkey = ps.p_partkey
+LEFT JOIN FilteredOrder fo ON fo.o_orderkey = ps.p_partkey
+ORDER BY ch.hierarchy_level DESC, ps.total_price DESC
+LIMIT 100

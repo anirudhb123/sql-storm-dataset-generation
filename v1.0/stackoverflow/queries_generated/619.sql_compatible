@@ -1,0 +1,84 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(V.Id) AS TotalVotes,
+        AVG(CASE WHEN V.VoteTypeId IN (2, 3) THEN V.CreationDate END) AS AvgVoteDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+
+PostCloseStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerDisplayName,
+        PH.CreationDate AS CloseDate,
+        C.Name AS CloseReason,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId = 10
+    LEFT JOIN 
+        CloseReasonTypes C ON CAST(PH.Comment AS jsonb) ->> 'CloseReasonId'::int = C.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        PH.CreationDate IS NOT NULL
+    GROUP BY 
+        P.Id, P.Title, P.OwnerDisplayName, PH.CreationDate, C.Name
+),
+
+UserBadgeStats AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+
+SELECT 
+    U.DisplayName AS UserDisplayName,
+    U.Reputation,
+    U.Views,
+    U.LastAccessDate,
+    COALESCE(Uvs.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(Uvs.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(UBs.BadgeCount, 0) AS TotalBadges,
+    COALESCE(UBs.GoldBadges, 0) AS GoldBadges,
+    COALESCE(UBs.SilverBadges, 0) AS SilverBadges,
+    COALESCE(UBs.BronzeBadges, 0) AS BronzeBadges,
+    PC.CloseDate,
+    PC.Title AS ClosedPostTitle,
+    PC.CloseReason,
+    PC.UpVotes AS ClosePostUpVotes,
+    PC.DownVotes AS ClosePostDownVotes
+FROM 
+    Users U
+LEFT JOIN 
+    UserVoteStats Uvs ON U.Id = Uvs.UserId
+LEFT JOIN 
+    UserBadgeStats UBs ON U.Id = UBs.UserId
+LEFT JOIN 
+    PostCloseStats PC ON PC.OwnerDisplayName = U.DisplayName
+WHERE 
+    U.Reputation >= 1000
+ORDER BY 
+    U.Reputation DESC, 
+    COALESCE(Uvs.TotalVotes, 0) DESC;

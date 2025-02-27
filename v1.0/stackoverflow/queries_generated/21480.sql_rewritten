@@ -1,0 +1,71 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM Users
+), 
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    WHERE p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY p.Id
+    HAVING COUNT(c.Id) > 5 AND (SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END)) > 10
+), 
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserDisplayName,
+        PHT.Name AS HistoryType,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM PostHistory ph
+    JOIN PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    WHERE ph.CreationDate >= cast('2024-10-01' as date) - INTERVAL '6 months'
+), 
+TopUserBadges AS (
+    SELECT 
+        b.UserId,
+        b.Name,
+        COUNT(b.Id) AS BadgeCount,
+        RANK() OVER (PARTITION BY b.UserId ORDER BY COUNT(b.Id) DESC) AS BadgeRank
+    FROM Badges b
+    GROUP BY b.UserId, b.Name
+    HAVING COUNT(b.Id) > 1
+)
+
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName,
+    up.Reputation,
+    up.LastAccessDate,
+    pp.PostId,
+    pp.Title,
+    pp.Score,
+    pp.ViewCount,
+    ph.HistoryType,
+    ph.Comment,
+    ph.CreationDate AS HistoryDate,
+    tb.Name AS BadgeName,
+    tb.BadgeCount,
+    CASE 
+        WHEN pp.ViewCount IS NULL THEN 'No Views'
+        ELSE CAST(pp.ViewCount AS VARCHAR)
+    END AS ViewCountDisplay
+FROM Users up
+LEFT JOIN PopularPosts pp ON up.Id = pp.OwnerUserId
+LEFT JOIN PostHistories ph ON pp.PostId = ph.PostId AND ph.HistoryRank = 1 
+LEFT JOIN TopUserBadges tb ON up.Id = tb.UserId AND tb.BadgeRank <= 3
+WHERE pp.Score > 10 OR pp.CommentCount > 5
+ORDER BY up.Reputation DESC, pp.ViewCount DESC NULLS LAST;

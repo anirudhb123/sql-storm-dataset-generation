@@ -1,0 +1,53 @@
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.ViewCount > 100 THEN 1 ELSE 0 END) AS PopularPostCount,
+        SUM(CASE WHEN Posts.ViewCount <= 100 THEN 1 ELSE 0 END) AS LessPopularPostCount,
+        AVG(Posts.Score) AS AverageScore,
+        STRING_AGG(DISTINCT Users.DisplayName, ', ') AS ActiveUsers
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '>')::int[])
+    JOIN 
+        Users ON Users.Id = Posts.OwnerUserId
+    WHERE 
+        Posts.PostTypeId = 1 
+    GROUP BY 
+        Tags.TagName
+),
+RecentActivity AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.CreationDate,
+        Users.DisplayName AS Author,
+        Comments.Text AS LastComment
+    FROM 
+        Posts
+    LEFT JOIN 
+        Comments ON Comments.PostId = Posts.Id
+    LEFT JOIN 
+        Users ON Users.Id = Comments.UserId
+    WHERE 
+        Posts.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.PopularPostCount,
+    ts.LessPopularPostCount,
+    ts.AverageScore,
+    ts.ActiveUsers,
+    ra.PostId,
+    ra.Title,
+    ra.CreationDate,
+    ra.Author,
+    ra.LastComment
+FROM
+    TagStatistics ts
+LEFT JOIN 
+    RecentActivity ra ON ts.TagName = ANY(string_to_array(ra.Title, ' ')) 
+ORDER BY 
+    ts.PostCount DESC, ts.AverageScore DESC;

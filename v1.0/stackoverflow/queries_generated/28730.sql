@@ -1,0 +1,63 @@
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        COUNT(DISTINCT Comments.Id) AS CommentCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(Posts.Score) AS TotalScore
+    FROM Tags
+    LEFT JOIN Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '>'))
+    LEFT JOIN Comments ON Posts.Id = Comments.PostId
+    GROUP BY Tags.TagName
+),
+UserReputation AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        SUM(CASE WHEN Badges.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Badges.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Badges.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        SUM(Posts.ViewCount) AS UserTotalViews,
+        SUM(Posts.Score) AS UserTotalScore
+    FROM Users
+    LEFT JOIN Badges ON Users.Id = Badges.UserId
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY Users.Id
+),
+TopTags AS (
+    SELECT 
+        TagCounts.TagName, 
+        TagCounts.PostCount, 
+        TagCounts.CommentCount, 
+        TagCounts.TotalViews, 
+        TagCounts.TotalScore,
+        ROW_NUMBER() OVER (ORDER BY TagCounts.TotalScore DESC) AS TagRank
+    FROM TagCounts
+),
+TopUsers AS (
+    SELECT 
+        UserReputation.UserId,
+        UserReputation.DisplayName,
+        UserReputation.GoldBadges,
+        UserReputation.SilverBadges,
+        UserReputation.BronzeBadges,
+        UserReputation.UserTotalViews,
+        UserReputation.UserTotalScore,
+        ROW_NUMBER() OVER (ORDER BY UserReputation.UserTotalScore DESC) AS UserRank
+    FROM UserReputation
+)
+
+SELECT 
+    TopTags.TagName,
+    TopTags.PostCount,
+    TopTags.CommentCount,
+    TopTags.TotalViews,
+    TopTags.TotalScore,
+    TopUsers.DisplayName AS TopUser,
+    TopUsers.UserTotalScore AS TopUserScore,
+    TopUsers.GoldBadges,
+    TopUsers.SilverBadges,
+    TopUsers.BronzeBadges
+FROM TopTags
+JOIN TopUsers ON TopTags.TagRank = 1 AND TopUsers.UserRank <= 5
+ORDER BY TopTags.TotalScore DESC, TopUsers.UserTotalScore DESC;

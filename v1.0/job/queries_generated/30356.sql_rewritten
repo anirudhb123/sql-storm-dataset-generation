@@ -1,0 +1,53 @@
+WITH RECURSIVE RecursiveCTE AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        c.role_id,
+        1 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name ILIKE 'John%'
+
+    UNION ALL
+
+    SELECT 
+        cc.movie_id,
+        cc.person_id,
+        cc.role_id,
+        r.level + 1
+    FROM 
+        cast_info cc
+    JOIN 
+        RecursiveCTE r ON cc.movie_id = r.movie_id
+    WHERE 
+        cc.role_id IS NOT NULL  
+)
+
+SELECT 
+    t.title,
+    COUNT(DISTINCT c.person_id) AS num_cast_members,
+    SUM(CASE WHEN r.level > 1 THEN 1 ELSE 0 END) AS num_secondary_roles,
+    COALESCE(MAX(y.production_year), 'Unknown') AS last_known_year,
+    STRING_AGG(DISTINCT ca.name, ', ') AS cast_names 
+FROM 
+    title t
+LEFT JOIN 
+    cast_info c ON t.id = c.movie_id
+LEFT JOIN 
+    RecursiveCTE r ON t.id = r.movie_id
+LEFT JOIN 
+    aka_name ca ON c.person_id = ca.person_id
+LEFT JOIN 
+    aka_title y ON c.movie_id = y.movie_id
+WHERE 
+    t.production_year >= 2000 
+    AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'feature%') 
+GROUP BY 
+    t.id
+HAVING 
+    COUNT(DISTINCT c.person_id) >= 5
+ORDER BY 
+    num_cast_members DESC, last_known_year DESC;

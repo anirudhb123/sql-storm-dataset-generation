@@ -1,0 +1,63 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+), 
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(NULLIF(s.s_comment, ''), 'No Comments') AS formatted_comment
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+), 
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        LEAD(o.o_totalprice) OVER (ORDER BY o.o_orderdate) AS next_order_price
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        (o.o_totalprice - COALESCE(LEAD(o.o_totalprice) OVER (ORDER BY o.o_orderdate), 0)) > 100
+)
+SELECT 
+    p.p_name,
+    s.formatted_comment,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    COUNT(*) FILTER (WHERE l.l_returnflag = 'R') AS returns_count,
+    MAX(CASE WHEN r.r_name IS NOT NULL THEN r.r_name ELSE 'Unknown Region' END) AS region_name,
+    (SELECT COUNT(*) FROM nation n WHERE n.n_regionkey = r.r_regionkey) AS nation_count
+FROM 
+    RankedParts p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.rn <= 5 AND 
+    l.l_discount BETWEEN 0.05 AND 0.20
+GROUP BY 
+    p.p_name, s.formatted_comment
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 
+    (SELECT AVG(total_sales) FROM (SELECT SUM(l_extendedprice * (1 - l_discount)) AS total_sales FROM lineitem GROUP BY l_orderkey) AS sales_avg)
+ORDER BY 
+    total_sales DESC;

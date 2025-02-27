@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(u.LastAccessDate) AS LastAccess
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        c.Name AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        CloseReasonTypes c ON ph.Comment::jsonb ->> 'reason' = c.Id::text
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    rp.Title AS QuestionTitle,
+    rp.CreationDate AS QuestionDate,
+    rp.ViewCount,
+    ur.Reputation AS UserReputation,
+    COALESCE(ba.BadgeCount, 0) AS BadgeCount,
+    cp.ClosedDate,
+    cp.CloseReason
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN 
+    (SELECT UserId, COUNT(*) AS BadgeCount FROM Badges GROUP BY UserId) ba ON u.Id = ba.UserId
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.Id
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.CreationDate DESC;

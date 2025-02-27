@@ -1,0 +1,71 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(YEAR, -1, GETDATE()) -- Last year
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name,
+        SUM(o.o_totalprice) AS total_spend
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    LEFT OUTER JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, n.n_name
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers,
+        MIN(ps.ps_supplycost) AS min_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+)
+SELECT 
+    cn.n_name AS nation,
+    ps.p_name AS part_name,
+    ps.num_suppliers,
+    ps.min_supply_cost,
+    cs.total_spend,
+    ro.o_orderdate
+FROM 
+    PartSupplier ps
+JOIN 
+    CustomerNation cs ON cs.total_spend > 10000 -- Customers that spent over $10,000
+JOIN 
+    nation cn ON cs.n_name = cn.n_name
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey = ro.o_orderkey AND o.o_orderstatus = 'O' AND rn = 1)
+WHERE 
+    ps.min_supply_cost < (SELECT AVG(pss.ps_supplycost) FROM partsupp pss) -- Parts with below average supply cost
+ORDER BY 
+    cn.n_name, ps.part_name;

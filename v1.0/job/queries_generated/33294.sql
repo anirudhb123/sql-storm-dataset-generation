@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        COALESCE(t.season_nr, 0) AS season_num,
+        COALESCE(t.episode_nr, 0) AS episode_num,
+        m.production_year,
+        CAST(0 AS integer) AS level
+    FROM
+        aka_title AS m
+    LEFT JOIN
+        title AS t ON m.id = t.id
+    WHERE
+        m.production_year IS NOT NULL
+    UNION ALL
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.season_num,
+        mh.episode_num,
+        mh.production_year,
+        mh.level + 1
+    FROM
+        MovieHierarchy AS mh
+    INNER JOIN
+        movie_link AS ml ON mh.movie_id = ml.movie_id
+    WHERE
+        mh.level < 5
+)
+SELECT
+    ak.name AS actor_name,
+    m.title AS movie_title,
+    mh.season_num,
+    mh.episode_num,
+    COUNT(DISTINCT ca.movie_id) AS total_movies,
+    AVG(mo.production_year) AS avg_production_year,
+    STRING_AGG(DISTINCT kv.keyword, ', ') AS keywords,
+    SUM(CASE WHEN co.note IS NOT NULL THEN 1 ELSE 0 END) AS company_notes_count
+FROM
+    cast_info AS ca
+INNER JOIN
+    aka_name AS ak ON ca.person_id = ak.person_id
+INNER JOIN
+    movie_keyword AS mk ON ca.movie_id = mk.movie_id
+INNER JOIN
+    keyword AS kv ON mk.keyword_id = kv.id
+INNER JOIN
+    movie_companies AS mc ON ca.movie_id = mc.movie_id
+LEFT OUTER JOIN
+    company_name AS co ON mc.company_id = co.id
+LEFT JOIN
+    MovieHierarchy AS mh ON ca.movie_id = mh.movie_id
+LEFT JOIN
+    aka_title AS m ON ca.movie_id = m.movie_id
+WHERE
+    ak.name IS NOT NULL
+    AND m.production_year BETWEEN 2000 AND 2023
+GROUP BY
+    ak.name, m.title, mh.season_num, mh.episode_num
+HAVING
+    total_movies > 1
+ORDER BY
+    avg_production_year DESC, ak.name ASC;

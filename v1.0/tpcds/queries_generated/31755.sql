@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS sales_count,
+        DATE(d.d_date) AS sale_date
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_id, DATE(d.d_date)
+    HAVING 
+        SUM(ws.ws_ext_sales_price) > 1000
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(s.total_sales) OVER (PARTITION BY c.c_customer_id) AS total_sales
+    FROM 
+        sales_data s
+    JOIN 
+        customer c ON s.c_customer_id = c.c_customer_id
+    WHERE 
+        EXISTS (
+            SELECT 1 
+            FROM customer_demographics cd 
+            WHERE cd.cd_demo_sk = c.c_current_cdemo_sk 
+              AND cd.cd_gender = 'F'
+        )
+),
+promotion_data AS (
+    SELECT 
+        SUM(p.p_cost) AS total_promo_cost,
+        COUNT(DISTINCT p.p_promo_id) AS promo_count,
+        pu.pu_gender
+    FROM 
+        promotion p
+    LEFT JOIN 
+        household_demographics hd ON p.p_item_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        customer_demographics pu ON hd.hd_income_band_sk = pu.cd_demo_sk
+    GROUP BY 
+        pu.pu_gender
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_sales AS total_sales,
+    pd.total_promo_cost,
+    pd.promo_count
+FROM 
+    top_customers tc
+JOIN 
+    promotion_data pd ON pd.pu_gender = (
+        SELECT DISTINCT 
+            cd_gender 
+        FROM 
+            customer_demographics cd 
+        WHERE 
+            cd.cd_demo_sk = tc.c_current_cdemo_sk
+    )
+ORDER BY 
+    tc.total_sales DESC
+LIMIT 10;

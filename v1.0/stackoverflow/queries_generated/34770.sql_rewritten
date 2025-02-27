@@ -1,0 +1,73 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.OwnerUserId, 
+        P.CreationDate, 
+        P.Title, 
+        P.Score,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL  
+    
+    UNION ALL
+    
+    SELECT 
+        P.Id,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.Title,
+        P.Score,
+        Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostCTE R ON P.ParentId = R.PostId  
+),
+VoteAggregates AS (
+    SELECT 
+        PostId, 
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,  
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes  
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Class) AS MaxBadgeClass 
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    R.Level,
+    COALESCE(VA.UpVotes, 0) AS UpVotes,
+    COALESCE(VA.DownVotes, 0) AS DownVotes,
+    UB.BadgeCount,
+    UB.MaxBadgeClass
+FROM 
+    RecursivePostCTE P
+LEFT JOIN 
+    VoteAggregates VA ON P.PostId = VA.PostId
+LEFT JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+WHERE 
+    P.Score > 5  
+    AND (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.PostId) > 0  
+ORDER BY 
+    P.CreationDate DESC, 
+    UpVotes DESC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

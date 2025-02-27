@@ -1,0 +1,66 @@
+WITH KeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year,
+        ARRAY_AGG(DISTINCT c.name) AS cast_names,
+        kc.keyword_count
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        aka_title at ON m.id = at.movie_id
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN 
+        KeywordCounts kc ON m.id = kc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id, kc.keyword_count
+),
+FinalOutput AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.keyword_count,
+        md.cast_names,
+        CASE 
+            WHEN md.keyword_count > 5 THEN 'High'
+            WHEN md.keyword_count BETWEEN 3 AND 5 THEN 'Medium'
+            ELSE 'Low'
+        END AS keyword_density
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    fo.movie_id,
+    fo.title,
+    fo.production_year,
+    fo.keyword_count,
+    fo.cast_names,
+    fo.keyword_density
+FROM 
+    FinalOutput fo
+ORDER BY 
+    fo.keyword_density DESC, 
+    fo.production_year DESC;

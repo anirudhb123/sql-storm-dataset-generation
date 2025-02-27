@@ -1,0 +1,60 @@
+
+WITH MovieDetails AS (
+    SELECT
+        t.title AS movie_title,
+        t.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies,
+        STRING_AGG(DISTINCT pt.role, ', ') AS roles,
+        COUNT(DISTINCT ca.person_id) AS cast_count
+    FROM
+        title t
+    JOIN
+        aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN
+        company_name co ON mc.company_id = co.id
+    LEFT JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN
+        cast_info ca ON cc.subject_id = ca.person_id
+    LEFT JOIN
+        role_type pt ON ca.person_role_id = pt.id
+    WHERE
+        t.production_year >= 2000
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+RankedMovies AS (
+    SELECT
+        MD.movie_title,
+        MD.production_year,
+        MD.aka_names,
+        MD.keywords,
+        MD.companies,
+        MD.roles,
+        MD.cast_count,
+        RANK() OVER (ORDER BY MD.cast_count DESC) AS rank
+    FROM
+        MovieDetails MD
+)
+SELECT
+    R.movie_title,
+    R.production_year,
+    R.aka_names,
+    R.keywords,
+    R.companies,
+    R.roles,
+    R.cast_count
+FROM
+    RankedMovies R
+WHERE
+    R.rank <= 10
+ORDER BY
+    R.production_year DESC, R.cast_count DESC;

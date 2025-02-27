@@ -1,0 +1,51 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT
+        P.PostTypeId,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.Score) AS AvgScore
+    FROM 
+        Posts P
+    GROUP BY 
+        P.PostTypeId
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.TotalPosts,
+    US.TotalComments,
+    US.TotalBadges,
+    US.TotalBounty,
+    PS.PostTypeId,
+    PS.PostCount,
+    PS.TotalViews,
+    PS.TotalScore,
+    PS.AvgScore
+FROM 
+    UserStatistics US
+JOIN 
+    PostStatistics PS ON US.TotalPosts > 0
+ORDER BY 
+    US.TotalPosts DESC, PS.PostCount DESC;

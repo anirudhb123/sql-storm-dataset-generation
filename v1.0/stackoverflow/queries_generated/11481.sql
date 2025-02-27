@@ -1,0 +1,60 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(v.VoteTypeId = 2, 0)) AS UpVotes,
+        SUM(COALESCE(v.VoteTypeId = 3, 0)) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+PostStats AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(ph.Id), 0) AS EditHistoryCount,
+        COALESCE(SUM(pl.Id), 0) AS LinkCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+)
+
+SELECT 
+    us.UserId, 
+    us.DisplayName,
+    us.PostCount,
+    us.TotalViews,
+    us.TotalScore,
+    us.UpVotes,
+    us.DownVotes,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.CommentCount,
+    ps.EditHistoryCount,
+    ps.LinkCount
+FROM 
+    UserStats us
+JOIN 
+    PostStats ps ON us.UserId = ps.OwnerUserId
+ORDER BY 
+    us.TotalScore DESC, us.PostCount DESC
+LIMIT 100;

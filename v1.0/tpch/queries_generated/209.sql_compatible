@@ -1,0 +1,72 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name AS supplier_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+),
+OrderLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        l.l_shipmode
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_shipmode
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COALESCE(r.order_cnt, 0) AS recent_order_count,
+    COALESCE(sp.total_available_quantity, 0) AS available_qty,
+    COALESCE(sp.avg_supply_cost, 0) AS avg_cost,
+    COALESCE(ol.total_revenue, 0) AS order_revenue,
+    CASE 
+        WHEN COALESCE(r.order_cnt, 0) > 10 THEN 'High Demand'
+        WHEN COALESCE(r.order_cnt, 0) BETWEEN 5 AND 10 THEN 'Moderate Demand'
+        ELSE 'Low Demand'
+    END AS demand_category
+FROM 
+    part p
+FULL OUTER JOIN (
+    SELECT 
+        o.o_orderkey,
+        COUNT(*) AS order_cnt
+    FROM 
+        RankedOrders r
+    WHERE 
+        r.order_rank <= 5
+    GROUP BY 
+        r.o_orderkey
+) r ON p.p_partkey = r.o_orderkey
+LEFT JOIN 
+    SupplierPartDetails sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    OrderLineItems ol ON r.o_orderkey = ol.l_orderkey
+WHERE 
+    p.p_retailprice > 50.00
+    AND (sp.total_available_quantity IS NULL OR sp.total_available_quantity > 0)
+ORDER BY 
+    p.p_partkey, order_revenue DESC;

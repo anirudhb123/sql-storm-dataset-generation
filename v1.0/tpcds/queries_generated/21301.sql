@@ -1,0 +1,62 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        COALESCE(SUM(ws.ws_sales_price), 0) AS total_web_sales,
+        COALESCE(SUM(cs.cs_sales_price), 0) AS total_catalog_sales,
+        COALESCE(SUM(ss.ss_sales_price), 0) AS total_store_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY COALESCE(SUM(ws.ws_sales_price), 0) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id
+), 
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_web_sales,
+        cs.total_catalog_sales,
+        cs.total_store_sales,
+        CASE 
+            WHEN cs.total_web_sales > 0 AND cs.total_catalog_sales > 0 THEN 'Both'
+            WHEN cs.total_web_sales > 0 THEN 'Web Only'
+            WHEN cs.total_catalog_sales > 0 THEN 'Catalog Only'
+            ELSE 'Neither' 
+        END AS sales_type
+    FROM 
+        customer_sales cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.sales_rank <= 10
+)
+SELECT 
+    tc.c_customer_id,
+    tc.sales_type,
+    (SELECT 
+        COUNT(DISTINCT wr_returning_customer_sk) 
+    FROM 
+        web_returns wr 
+    WHERE 
+        wr_returned_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = CURRENT_DATE) 
+        AND wr_returning_customer_sk = tc.c_customer_id) AS web_returns_today,
+    (SELECT 
+        COUNT(DISTINCT sr_returning_customer_sk) 
+    FROM 
+        store_returns sr 
+    WHERE 
+        sr_returned_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = CURRENT_DATE) 
+        AND sr_returning_customer_sk = tc.c_customer_id) AS store_returns_today
+FROM 
+    top_customers tc
+WHERE 
+    (tc.total_web_sales + tc.total_catalog_sales + tc.total_store_sales) IS NOT NULL
+ORDER BY 
+    tc.total_web_sales DESC, tc.total_catalog_sales DESC;

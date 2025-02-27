@@ -1,0 +1,46 @@
+
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+SupplierStatistics AS (
+    SELECT s.nationkey, SUM(ps.ps_supplycost) AS total_supply_cost, 
+           AVG(s.s_acctbal) AS avg_acct_balance
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.nationkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS row_num
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           MAX(od.total_price) AS max_order_price
+    FROM customer c
+    LEFT JOIN OrderDetails o ON c.c_custkey = o.o_orderkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT r.r_name AS region, nh.n_name AS nation, 
+       COALESCE(ss.total_supply_cost, 0) AS total_supply_cost, 
+       COALESCE(cs.order_count, 0) AS order_count,
+       cs.max_order_price,
+       COUNT(DISTINCT od.o_orderkey) AS unique_orders,
+       ROUND(AVG(od.total_price), 2) AS avg_order_value
+FROM region r
+LEFT JOIN nation nh ON r.r_regionkey = nh.n_regionkey
+LEFT JOIN SupplierStatistics ss ON nh.n_nationkey = ss.nationkey
+LEFT JOIN CustomerOrders cs ON nh.n_nationkey = cs.c_custkey
+LEFT JOIN OrderDetails od ON cs.c_custkey = od.o_orderkey
+WHERE r.r_name LIKE 'A%' AND COALESCE(cs.order_count, 0) > 5
+GROUP BY r.r_name, nh.n_name, ss.total_supply_cost, cs.order_count, cs.max_order_price
+HAVING SUM(COALESCE(ss.total_supply_cost, 0)) > 50000
+ORDER BY r.r_name, nh.n_name;

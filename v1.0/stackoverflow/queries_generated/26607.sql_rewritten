@@ -1,0 +1,91 @@
+WITH TagStatistics AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(u.Reputation) AS AvgUserReputation,
+        STRING_AGG(DISTINCT u.DisplayName, ', ') AS UserContributors
+    FROM
+        Tags t
+    LEFT JOIN
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY
+        t.TagName
+),
+PostDetail AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ht.Name AS HistoryType,
+        ph.CreationDate AS HistoryDate,
+        COALESCE(COUNT(DISTINCT c.Id), 0) AS CommentCount,
+        COALESCE(MAX(v.CreationDate), p.LastActivityDate) AS LastActivity
+    FROM
+        Posts p
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        PostHistory ph ON ph.PostId = p.Id
+    LEFT JOIN
+        PostHistoryTypes ht ON ph.PostHistoryTypeId = ht.Id
+    LEFT JOIN
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN
+        Votes v ON v.PostId = p.Id
+    WHERE
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY
+        p.Id, u.DisplayName, ht.Name, ph.CreationDate
+),
+BenchmarkResults AS (
+    SELECT
+        ts.TagName,
+        ts.PostCount,
+        ts.QuestionCount,
+        ts.AnswerCount,
+        ts.AvgUserReputation,
+        ts.UserContributors,
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.ViewCount,
+        pd.Score,
+        pd.OwnerDisplayName,
+        pd.HistoryType,
+        pd.HistoryDate,
+        pd.CommentCount,
+        pd.LastActivity
+    FROM
+        TagStatistics ts
+    JOIN
+        PostDetail pd ON ts.TagName LIKE '%' || ANY(string_to_array(pd.Tags, ', ')) || '%'
+    ORDER BY
+        ts.PostCount DESC, ts.AvgUserReputation DESC
+)
+SELECT
+    TagName,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    AvgUserReputation,
+    UserContributors,
+    PostId,
+    Title,
+    CreationDate,
+    ViewCount,
+    Score,
+    OwnerDisplayName,
+    HistoryType,
+    HistoryDate,
+    CommentCount,
+    LastActivity
+FROM
+    BenchmarkResults
+LIMIT 100;

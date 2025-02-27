@@ -1,0 +1,51 @@
+WITH ActorMovieInfo AS (
+    SELECT
+        a.id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        r.role AS actor_role,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM
+        aka_name a
+    JOIN
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN
+        title t ON ci.movie_id = t.id
+    JOIN
+        role_type r ON ci.role_id = r.id
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        movie_companies mc ON t.id = mc.movie_id
+    WHERE
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY
+        a.id, a.name, t.title, t.production_year, r.role
+),
+RankedActors AS (
+    SELECT
+        *,
+        RANK() OVER (PARTITION BY production_year ORDER BY company_count DESC) AS rank_by_company_count
+    FROM
+        ActorMovieInfo
+)
+SELECT
+    actor_name,
+    movie_title,
+    production_year,
+    actor_role,
+    keywords,
+    company_count,
+    rank_by_company_count
+FROM
+    RankedActors
+WHERE
+    rank_by_company_count <= 5
+ORDER BY
+    production_year ASC, company_count DESC;
+
+This SQL query is designed to benchmark string processing while retrieving detailed information about actors and the movies they have been involved with from 2000 to 2023. It summarizes each actor's role along with the associated keywords and counts the number of companies involved in the production. Finally, it ranks this information per production year, focusing on the top 5 actors by the number of companies associated with their movies.

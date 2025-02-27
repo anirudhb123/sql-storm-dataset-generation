@@ -1,0 +1,74 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_sales_price,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS sales_rank
+    FROM 
+        web_sales
+), CombinedSales AS (
+    SELECT 
+        cs_order_number,
+        cs_item_sk,
+        cs_sales_price,
+        cs_net_profit
+    FROM 
+        catalog_sales
+    UNION ALL
+    SELECT 
+        ss_order_number,
+        ss_item_sk,
+        ss_sales_price,
+        ss_net_profit
+    FROM 
+        store_sales
+), TotalProfit AS (
+    SELECT 
+        item_sk,
+        SUM(net_profit) AS total_profit
+    FROM 
+        (SELECT ws_item_sk AS item_sk, ws_net_profit FROM web_sales
+         UNION ALL
+         SELECT cs_item_sk AS item_sk, cs_net_profit FROM CombinedSales) AS combined
+    GROUP BY 
+        item_sk
+), CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        d.d_year
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim d ON d.d_date_sk = c.c_first_sales_date_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    SUM(CASE WHEN cs_item_sk IS NOT NULL THEN cs_net_profit ELSE 0 END) AS total_catalog_profit,
+    SUM(CASE WHEN ss_item_sk IS NOT NULL THEN ss_net_profit ELSE 0 END) AS total_store_profit,
+    (SELECT SUM(total_profit) FROM TotalProfit AS tp WHERE tp.item_sk = cs_item_sk) AS total_item_profit,
+    ROW_NUMBER() OVER (PARTITION BY ci.c_customer_sk ORDER BY SUM(CASE WHEN cs_item_sk IS NOT NULL THEN cs_net_profit ELSE 0 END) DESC) AS customer_rank
+FROM 
+    CustomerInfo ci
+LEFT JOIN 
+    CombinedSales cs ON ci.c_customer_sk = cs.cs_bill_customer_sk
+LEFT JOIN 
+    store_sales ss ON ci.c_customer_sk = ss.ss_customer_sk
+WHERE 
+    ci.cd_marital_status = 'M' 
+    AND (ci.cd_credit_rating IS NULL OR ci.cd_credit_rating NOT IN ('Bad', 'Poor'))
+GROUP BY 
+    ci.c_customer_sk, ci.c_first_name, ci.c_last_name, ci.cd_gender
+ORDER BY 
+    total_catalog_profit DESC, customer_rank
+LIMIT 10;

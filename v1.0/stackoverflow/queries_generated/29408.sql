@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        pt.Name AS PostType,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Comments c
+            WHERE c.PostId = p.Id
+        ), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= '2023-01-01' -- Filter posts created in 2023
+        AND p.ViewCount > 100 -- Filter for popular posts
+),
+PostWithBadges AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.PostType,
+        rp.CommentCount,
+        CASE 
+            WHEN b.Class IS NOT NULL THEN STRING_AGG(b.Name, ', ') 
+            ELSE 'No Badges' 
+        END AS BadgesEarned
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Badges b ON rp.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = b.UserId)
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.CreationDate, rp.ViewCount, rp.OwnerDisplayName, rp.PostType, rp.CommentCount
+)
+SELECT 
+    pwb.PostId,
+    pwb.Title,
+    pwb.Body,
+    pwb.CreationDate,
+    pwb.ViewCount,
+    pwb.OwnerDisplayName,
+    pwb.PostType,
+    pwb.CommentCount,
+    pwb.BadgesEarned
+FROM 
+    PostWithBadges pwb
+WHERE 
+    pwb.Rank <= 5  -- Retrieve top 5 posts for each post type
+ORDER BY 
+    pwb.PostType, pwb.ViewCount DESC;

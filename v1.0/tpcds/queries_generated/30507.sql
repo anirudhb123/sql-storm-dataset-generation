@@ -1,0 +1,55 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_item_sk 
+    HAVING 
+        SUM(ws_quantity) > 100
+), 
+Customer_CTE AS (
+    SELECT 
+        c.c_customer_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band,
+        COUNT(DISTINCT s.s_store_sk) AS store_count,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_marital_status ORDER BY c.c_customer_sk) AS marital_order
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    LEFT JOIN 
+        store s ON s.s_city = c.c_city
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, hd.hd_income_band_sk
+)
+SELECT 
+    c.customer_id, 
+    cus.total_quantity,
+    cus.total_sales,
+    CASE 
+        WHEN cus.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sales_status,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.income_band,
+    cd.store_count
+FROM 
+    Sales_CTE cus
+JOIN 
+    item i ON i.i_item_sk = cus.ws_item_sk
+LEFT JOIN 
+    Customer_CTE cd ON cd.c_customer_sk = i.i_item_sk
+WHERE 
+    cd.store_count > 5
+    AND (cd.cd_gender = 'M' OR cd.cd_gender IS NULL)
+ORDER BY 
+    cus.total_sales DESC;

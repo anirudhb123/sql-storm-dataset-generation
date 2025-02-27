@@ -1,0 +1,91 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.phonetic_code,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.phonetic_code,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+),
+ranked_cast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank,
+        COUNT(*) OVER (PARTITION BY ci.movie_id) AS total_actors
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+),
+movie_info_summary AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        STRING_AGG(mi.info, '; ') AS movie_details,
+        COUNT(DISTINCT kc.keyword) AS keyword_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    LEFT JOIN 
+        movie_info mi ON mt.id = mi.movie_id
+    WHERE 
+        mt.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        mt.id, mt.title
+),
+movies_with_high_actor_count AS (
+    SELECT 
+        rm.movie_id,
+        rm.actor_name,
+        rm.actor_rank,
+        rm.total_actors,
+        mh.title,
+        mh.production_year
+    FROM 
+        ranked_cast rm
+    JOIN 
+        movie_hierarchy mh ON rm.movie_id = mh.movie_id
+    WHERE 
+        rm.total_actors > 10
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    COALESCE(mhs.movie_details, 'No details available') AS additional_details,
+    mwh.actor_name,
+    CASE 
+        WHEN mwh.actor_rank IS NULL THEN 'No rank assigned'
+        ELSE CAST(mwh.actor_rank AS VARCHAR)
+    END AS actor_rank,
+    mwh.total_actors,
+    mkw.keyword_count
+FROM 
+    movies_with_high_actor_count mwh
+LEFT JOIN 
+    movie_info_summary mkw ON mwh.movie_id = mkw.movie_id
+JOIN 
+    movie_hierarchy mh ON mwh.movie_id = mh.movie_id
+ORDER BY 
+    mh.production_year DESC, mwh.total_actors DESC, mwh.actor_rank NULLS LAST;

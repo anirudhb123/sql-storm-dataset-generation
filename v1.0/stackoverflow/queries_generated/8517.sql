@@ -1,0 +1,48 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.ViewCount > 100 THEN 1 ELSE 0 END) AS PopularPosts,
+        AVG(v.Score) AS AvgVoteScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE u.Reputation > 100
+    GROUP BY u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS Upvotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS Downvotes
+    FROM Posts p
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    ORDER BY p.CreationDate DESC
+)
+SELECT 
+    ua.UserId, 
+    ua.DisplayName, 
+    ua.TotalPosts, 
+    ua.TotalQuestions, 
+    ua.TotalAnswers, 
+    ua.PopularPosts,
+    ua.AvgVoteScore,
+    ps.PostId, 
+    ps.Title, 
+    ps.CreationDate, 
+    ps.ViewCount, 
+    ps.CommentCount, 
+    ps.Upvotes, 
+    ps.Downvotes
+FROM UserActivity ua
+JOIN PostStatistics ps ON ua.TotalPosts > 10
+WHERE ua.TotalAnswers > 5
+ORDER BY ua.TotalPosts DESC, ps.ViewCount DESC
+LIMIT 100;

@@ -1,0 +1,55 @@
+WITH RecursiveActors AS (
+    SELECT 
+        ca.person_id,
+        an.name AS actor_name,
+        COUNT(DISTINCT cc.movie_id) AS movie_count,
+        SUM(CASE WHEN tt.kind_id = 1 THEN 1 ELSE 0 END) AS feature_film_count
+    FROM 
+        cast_info ca
+    INNER JOIN 
+        aka_name an ON ca.person_id = an.person_id
+    LEFT JOIN 
+        complete_cast cc ON ca.movie_id = cc.movie_id
+    LEFT JOIN 
+        aka_title tt ON ca.movie_id = tt.movie_id
+    WHERE 
+        an.name IS NOT NULL AND 
+        tt.production_year IS NOT NULL
+    GROUP BY 
+        ca.person_id, an.name
+    HAVING 
+        COUNT(DISTINCT cc.movie_id) > 5
+),
+ActorRankings AS (
+    SELECT 
+        actor_name,
+        movie_count,
+        feature_film_count,
+        ROW_NUMBER() OVER (PARTITION BY feature_film_count ORDER BY movie_count DESC) AS rank,
+        COALESCE(NULLIF(LAG(movie_count) OVER (PARTITION BY feature_film_count ORDER BY movie_count DESC), 0), movie_count) AS prev_movie_count
+    FROM 
+        RecursiveActors
+)
+SELECT 
+    ar.actor_name,
+    ar.movie_count,
+    ar.feature_film_count,
+    ar.rank,
+    (ar.movie_count - COALESCE(ar.prev_movie_count, 0)) AS movie_count_diff,
+    CASE 
+        WHEN ar.movie_count > 20 THEN 'Highly Active'
+        WHEN ar.movie_count BETWEEN 11 AND 20 THEN 'Moderately Active'
+        ELSE 'Less Active'
+    END AS activity_level
+FROM 
+    ActorRankings ar
+JOIN 
+    char_name cn ON ar.actor_name LIKE CONCAT('%', cn.name, '%')
+WHERE 
+    ar.rank <= 10
+ORDER BY 
+    ar.feature_film_count DESC, 
+    ar.movie_count DESC;
+This SQL query effectively benchmarks the performance of casting actors by identifying the top active actors based on their movie involvement and filtering through a recursive common table expression (CTE). The query incorporates various SQL constructs including inner and outer joins, window functions, string matching with wildcards, and conditional logic, further contributing to its complexity. 
+
+The query segments actors into rankings based on their movie counts, determines their prior activity level (while handling NULL values), and categorizes them into distinct activity levels, all while providing a performance-focused result dataset.

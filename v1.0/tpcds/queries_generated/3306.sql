@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.ship_customer_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1950 AND 2000
+    GROUP BY 
+        ws.bill_customer_sk, ws.ship_customer_sk, ws.ws_item_sk
+),
+AggregateReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(wr_return_amt) AS total_return_amount
+    FROM 
+        web_returns
+    WHERE 
+        wr_return_quantity > 0
+    GROUP BY 
+        wr_returning_customer_sk
+),
+CustomerStatistics AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(SUM(rs.total_sales), 0) AS total_sales,
+        COALESCE(SUM(ar.total_returns), 0) AS total_returns,
+        COALESCE(SUM(ar.total_return_amount), 0) AS total_return_amount,
+        CASE 
+            WHEN COALESCE(SUM(ar.total_return_amount), 0) > 0 THEN ROUND(COALESCE(SUM(ar.total_return_amount), 0) / NULLIF(SUM(rs.total_sales), 0), 2)
+            ELSE 0 
+        END AS return_rate
+    FROM 
+        customer c
+    LEFT JOIN 
+        RankedSales rs ON c.c_customer_sk = rs.bill_customer_sk
+    LEFT JOIN 
+        AggregateReturns ar ON c.c_customer_sk = ar.wr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.total_sales,
+    cs.total_returns,
+    cs.total_return_amount,
+    cs.return_rate,
+    d.d_year,
+    d.d_month_seq,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders
+FROM 
+    CustomerStatistics cs
+JOIN 
+    date_dim d ON d.d_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date < CURRENT_DATE - INTERVAL '1 month')
+LEFT JOIN 
+    web_sales ws ON cs.bill_customer_sk = ws.ws_bill_customer_sk
+GROUP BY 
+    cs.c_customer_sk, cs.total_sales, cs.total_returns, cs.total_return_amount, cs.return_rate, d.d_year, d.d_month_seq
+ORDER BY 
+    cs.total_sales DESC, cs.return_rate DESC
+LIMIT 100;

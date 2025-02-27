@@ -1,0 +1,62 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        C.c_customer_sk,
+        C.c_first_name || ' ' || C.c_last_name AS full_name,
+        D.cd_gender,
+        D.cd_marital_status,
+        D.cd_education_status,
+        D.cd_purchase_estimate,
+        D.cd_credit_rating,
+        D.cd_dep_count,
+        D.cd_dep_employed_count,
+        D.cd_dep_college_count,
+        RANK() OVER (PARTITION BY D.cd_gender, D.cd_marital_status ORDER BY D.cd_purchase_estimate DESC) AS rank_by_purchase_estimate
+    FROM 
+        customer C
+    JOIN 
+        customer_demographics D ON C.c_current_cdemo_sk = D.cd_demo_sk
+),
+AddressStats AS (
+    SELECT 
+        CA.ca_state, 
+        COUNT(*) AS total_addresses,
+        STRING_AGG(CA.ca_city, ', ') AS cities_list,
+        AVG(CAST(CA.ca_gmt_offset AS decimal(5,2))) AS avg_gmt_offset
+    FROM 
+        customer_address CA
+    GROUP BY 
+        CA.ca_state
+),
+SalesData AS (
+    SELECT 
+        COALESCE(W.ws_web_page_sk, S.ss_store_sk) AS store_or_web,
+        SUM(W.ws_ext_sales_price) AS total_web_sales,
+        SUM(S.ss_ext_sales_price) AS total_store_sales
+    FROM 
+        web_sales W
+    FULL OUTER JOIN 
+        store_sales S ON W.ws_order_number = S.ss_ticket_number
+    GROUP BY 
+        COALESCE(W.ws_web_page_sk, S.ss_store_sk)
+)
+SELECT 
+    RC.full_name, 
+    RC.cd_gender, 
+    RC.cd_marital_status, 
+    RC.cd_purchase_estimate,
+    AS.total_addresses,
+    AS.cities_list,
+    AS.avg_gmt_offset,
+    SD.total_web_sales,
+    SD.total_store_sales
+FROM 
+    RankedCustomers RC
+JOIN 
+    AddressStats AS ON RC.c_customer_sk = AS.ca_state
+JOIN 
+    SalesData SD ON RC.c_customer_sk = SD.store_or_web
+WHERE 
+    RC.rank_by_purchase_estimate <= 10
+ORDER BY 
+    RC.cd_purchase_estimate DESC;

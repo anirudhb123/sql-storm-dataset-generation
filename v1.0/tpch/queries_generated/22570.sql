@@ -1,0 +1,98 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_mfgr, 
+        p.p_brand, 
+        p.p_type, 
+        p.p_size,
+        p.p_retailprice, 
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 0
+),
+
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS customer_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_brand, 
+    COALESCE(sd.total_supplycost, 0) AS supplycost,
+    cs.order_count,
+    cs.total_spent
+FROM 
+    RankedParts p
+FULL OUTER JOIN 
+    SupplierDetails sd ON p.p_partkey = sd.s_nationkey
+LEFT JOIN 
+    CustomerOrderStats cs ON cs.order_count > 0 AND cs.total_spent IS NOT NULL
+WHERE 
+    (p.rn = 1 OR sd.total_supplycost IS NULL)
+    AND (p.p_size BETWEEN 1 AND 100
+    OR p.p_type LIKE '%part%')
+    AND (sd.total_supplycost IS NOT NULL OR cs.total_spent IS NULL)
+ORDER BY 
+    p.p_partkey, 
+    cs.total_spent DESC
+LIMIT 100;
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderstatus,
+        CAST(o.o_orderkey AS VARCHAR(255)) AS path
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+    UNION ALL 
+    SELECT 
+        o2.o_orderkey, 
+        o2.o_orderstatus, 
+        CONCAT(oh.path, '->', o2.o_orderkey)
+    FROM 
+        orders o2
+    INNER JOIN 
+        OrderHierarchy oh ON o2.o_orderkey = oh.o_orderkey + 1
+)
+SELECT 
+    path,
+    COUNT(*) AS level_count
+FROM 
+    OrderHierarchy
+GROUP BY 
+    path
+HAVING 
+    COUNT(*) > 2
+ORDER BY 
+    level_count DESC;

@@ -1,0 +1,61 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (ORDER BY total_supply_cost DESC) AS rank
+    FROM 
+        SupplierStats s
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        RANK() OVER (ORDER BY total_spent DESC) AS rank
+    FROM 
+        CustomerOrders c
+)
+SELECT 
+    t_c.c_name AS Top_Customer,
+    t_s.s_name AS Top_Supplier,
+    t_c.order_count AS Customer_Orders,
+    t_c.total_spent AS Total_Spent,
+    s.total_supply_cost AS Supplier_Supply_Cost
+FROM 
+    TopCustomers t_c
+JOIN 
+    TopSuppliers t_s ON t_c.rank = 1 AND t_s.rank = 1
+JOIN 
+    SupplierStats s ON t_s.s_suppkey = s.s_suppkey
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM lineitem l 
+        JOIN orders o ON l.l_orderkey = o.o_orderkey 
+        WHERE o.o_custkey = t_c.c_custkey AND l.l_suppkey = t_s.s_suppkey
+    );

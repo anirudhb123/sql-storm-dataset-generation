@@ -1,0 +1,60 @@
+WITH actor_movies AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        a.name, t.title, t.production_year
+),
+company_staff AS (
+    SELECT 
+        c.name AS company_name,
+        COUNT(DISTINCT ci.person_id) AS total_staff 
+    FROM 
+        company_name c
+    JOIN 
+        movie_companies mc ON c.id = mc.company_id
+    JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    GROUP BY 
+        c.name
+),
+detailed_info AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        a.actor_name,
+        cs.company_name,
+        cs.total_staff,
+        a.keywords
+    FROM 
+        actor_movies a
+    JOIN 
+        movie_companies mc ON a.movie_title = (SELECT title FROM aka_title WHERE id = mc.movie_id)
+    JOIN 
+        company_staff cs ON mc.company_id = (SELECT id FROM company_name WHERE name = cs.company_name)
+    WHERE 
+        a.production_year >= 2000
+)
+SELECT 
+    title,
+    production_year,
+    actor_name,
+    company_name,
+    total_staff,
+    keywords
+FROM 
+    detailed_info
+ORDER BY 
+    production_year DESC, actor_name;

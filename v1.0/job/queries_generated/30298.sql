@@ -1,0 +1,78 @@
+WITH RECURSIVE MovieCTE AS (
+    -- Recursive CTE to get a chain of movie links
+    SELECT
+        ml.movie_id,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM
+        movie_link ml
+    WHERE
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'related')  -- Filtering for related movies
+        
+    UNION ALL
+    
+    SELECT
+        ml.movie_id,
+        ml.linked_movie_id,
+        mc.depth + 1
+    FROM
+        movie_link ml
+    INNER JOIN MovieCTE mc ON ml.movie_id = mc.linked_movie_id
+    WHERE
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'related')
+),
+TopMovies AS (
+    -- Getting the top 10 movies based on related connections
+    SELECT
+        ml.movie_id,
+        COUNT(*) AS related_count
+    FROM
+        MovieCTE ml
+    GROUP BY
+        ml.movie_id
+    ORDER BY
+        related_count DESC
+    LIMIT 10
+),
+MovieDetails AS (
+    -- Getting the details for top movies selected
+    SELECT
+        t.title,
+        t.production_year,
+        a.name AS director_name,
+        GROUP_CONCAT(DISTINCT kw.keyword ORDER BY kw.keyword) AS keywords,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office') THEN mi.info END) AS box_office_info
+    FROM
+        title t
+    LEFT JOIN
+        aka_title at ON t.id = at.movie_id
+    LEFT JOIN
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN
+        movie_info mi ON t.id = mi.movie_id
+    WHERE
+        t.id IN (SELECT movie_id FROM TopMovies)  -- Only focusing on the top movies
+    GROUP BY
+        t.id, a.name
+)
+SELECT
+    md.title,
+    md.production_year,
+    COALESCE(md.director_name, 'Unknown') AS director,
+    md.keywords,
+    md.actor_count,
+    CASE 
+        WHEN md.box_office_info IS NULL THEN 'Not Available'
+        ELSE md.box_office_info
+    END AS box_office
+FROM
+    MovieDetails md
+ORDER BY
+    md.production_year DESC;

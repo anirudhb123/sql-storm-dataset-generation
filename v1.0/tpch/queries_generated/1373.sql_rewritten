@@ -1,0 +1,64 @@
+WITH SupplierAggregates AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        c.c_nationkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND 
+        o.o_orderdate <= '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_nationkey
+), RankedOrders AS (
+    SELECT 
+        od.o_orderkey, 
+        od.o_orderdate, 
+        od.c_nationkey, 
+        od.total_price,
+        RANK() OVER (PARTITION BY od.c_nationkey ORDER BY od.total_price DESC) AS order_rank
+    FROM 
+        OrderDetails od
+)
+SELECT 
+    r.r_name, 
+    SUM(ra.total_price) AS summed_total_price,
+    COUNT(DISTINCT ro.o_orderkey) AS unique_order_count,
+    MAX(sa.avg_supply_cost) AS max_avg_supply_cost
+FROM 
+    RankedOrders ro
+JOIN 
+    nation n ON n.n_nationkey = ro.c_nationkey
+JOIN 
+    region r ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SupplierAggregates sa ON sa.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+        WHERE l.l_orderkey = ro.o_orderkey
+    )
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(ra.total_price) > 10000
+ORDER BY 
+    summed_total_price DESC
+LIMIT 10;

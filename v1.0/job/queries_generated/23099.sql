@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'Feature%')
+),
+TopRatedMovies AS (
+    SELECT 
+        m.*,
+        ci.person_role_id,
+        COUNT(DISTINCT rc.id) OVER (PARTITION BY m.movie_id) AS cast_count
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.movie_id
+    LEFT JOIN 
+        role_type rt ON rt.id = ci.role_id
+    LEFT JOIN 
+        (SELECT movie_id, AVG(CASE WHEN note IS NULL THEN 0 ELSE 1 END) AS rating_count 
+         FROM complete_cast GROUP BY movie_id) rc ON rc.movie_id = m.movie_id
+    WHERE 
+        m.year_rank <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+FinalResults AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        tm.cast_count,
+        CASE WHEN tm.cast_count > 5 THEN 'Star-Studded' ELSE 'Compact' END AS cast_type
+    FROM 
+        TopRatedMovies tm
+    LEFT JOIN 
+        MovieKeywords mk ON mk.movie_id = tm.movie_id
+)
+SELECT 
+    fr.*,
+    CASE 
+        WHEN fr.production_year IS NULL THEN 'Unknown Year' 
+        WHEN fr.cast_count IS NULL OR fr.cast_count = 0 THEN 'No Cast' 
+        ELSE 'Details Available' 
+    END AS status
+FROM 
+    FinalResults fr
+WHERE 
+    fr.production_year > 1990
+ORDER BY 
+    fr.production_year DESC, fr.cast_count DESC
+LIMIT 10;
+
+This SQL query performs a multi-step process to aggregate interesting data on movies, their casts, and associated keywords from the provided schema. It includes various constructs such as CTEs, joins, window functions, aggregated functions, and NULL checks to deliver a nuanced dataset for performance benchmarking.

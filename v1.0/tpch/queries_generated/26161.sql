@@ -1,0 +1,17 @@
+SELECT p.p_name, 
+       COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+       AVG(ps.ps_supplycost) AS average_supply_cost,
+       STRING_AGG(DISTINCT CONCAT('Supplier: ', s.s_name, ' (', s.s_address, ')'), '; ') AS supplier_details,
+       SUM(l.l_quantity) AS total_quantity_sold,
+       SUM(l.l_extendedprice) AS total_revenue,
+       CONCAT('Items sold: ', SUM(l.l_quantity), ', Revenue: $', FORMAT(SUM(l.l_extendedprice), 'N2')) AS sale_summary
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+WHERE o.o_orderstatus = 'O'
+  AND o.o_orderdate BETWEEN DATEADD(year, -1, GETDATE()) AND GETDATE()
+GROUP BY p.p_name
+HAVING COUNT(DISTINCT ps.s_suppkey) > 5
+ORDER BY total_revenue DESC;

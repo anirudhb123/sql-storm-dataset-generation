@@ -1,0 +1,39 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_custkey, c_name, c_acctbal, c_nationkey, 1 AS depth
+    FROM customer
+    WHERE c_acctbal IS NOT NULL
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, ch.depth + 1
+    FROM customer_hierarchy ch
+    JOIN customer c ON c.c_nationkey = ch.c_nationkey
+    WHERE c.custkey <> ch.c_custkey AND ch.depth < 5
+), 
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+), 
+average_prices AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+   ch.c_name, 
+   ch.depth, 
+   COUNT(DISTINCT ro.o_orderkey) AS total_orders, 
+   SUM(ro.o_totalprice) AS total_spent, 
+   COALESCE(MAX(ap.avg_supplycost), 0) AS max_avg_supplycost,
+   STRING_AGG(DISTINCT p.p_name, '; ') FILTER (WHERE p.p_size > 10) AS large_parts
+FROM customer_hierarchy ch
+LEFT JOIN ranked_orders ro ON ch.c_custkey = ro.o_custkey
+LEFT JOIN lineitem li ON li.l_orderkey = ro.o_orderkey
+LEFT JOIN partsupp ps ON li.l_partkey = ps.ps_partkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN average_prices ap ON p.p_partkey = ap.ps_partkey
+GROUP BY ch.c_name, ch.depth
+HAVING SUM(ro.o_totalprice) IS NOT NULL 
+   OR COUNT(ro.o_orderkey) = 0
+ORDER BY total_spent DESC, ch.depth ASC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

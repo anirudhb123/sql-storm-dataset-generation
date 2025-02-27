@@ -1,0 +1,55 @@
+
+WITH RECURSIVE demo_income AS (
+    SELECT cd_demo_sk,
+           CASE
+               WHEN cd_purchase_estimate IS NULL THEN 'Unknown'
+               WHEN cd_purchase_estimate < 100 THEN 'Low'
+               WHEN cd_purchase_estimate BETWEEN 100 AND 500 THEN 'Medium'
+               ELSE 'High'
+           END AS income_category
+    FROM customer_demographics
+), 
+item_sales AS (
+    SELECT ws_item_sk,
+           SUM(ws_quantity) AS total_quantity,
+           SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk
+), 
+returns_summary AS (
+    SELECT cr_item_sk,
+           SUM(cr_return_quantity) AS total_returns,
+           COUNT(DISTINCT cr_order_number) AS total_orders
+    FROM catalog_returns
+    GROUP BY cr_item_sk
+    HAVING SUM(cr_return_quantity) > 0
+), 
+sales_rank AS (
+    SELECT i.i_item_id,
+           i.i_product_name,
+           is.total_quantity,
+           is.total_profit,
+           ROW_NUMBER() OVER (PARTITION BY demo_income.income_category ORDER BY is.total_profit DESC) AS sales_rank
+    FROM item i
+    JOIN item_sales is ON i.i_item_sk = is.ws_item_sk
+    LEFT JOIN demo_income ON demo_income.cd_demo_sk =
+        (SELECT c_current_cdemo_sk FROM customer WHERE c_customer_sk = (SELECT MAX(s_ss_customer_sk) FROM store_sales WHERE ss_item_sk = i.i_item_sk))
+)
+SELECT sr.sales_rank,
+       sr.i_item_id,
+       sr.i_product_name,
+       COALESCE(rs.total_returns, 0) AS total_returns,
+       sr.total_quantity,
+       sr.total_profit,
+       CASE 
+           WHEN sr.total_profit > 5000 THEN 'High Value'
+           WHEN sr.total_profit BETWEEN 1000 AND 5000 THEN 'Moderate Value'
+           ELSE 'Low Value'
+       END AS value_category
+FROM sales_rank sr
+LEFT JOIN returns_summary rs ON sr.i_item_id = rs.cr_item_sk
+WHERE sr.sales_rank <= 10
+ORDER BY sr.sales_rank,
+         CASE WHEN sr.i_product_name IS NULL THEN 1 ELSE 0 END, 
+         sr.i_product_name;

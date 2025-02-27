@@ -1,0 +1,53 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+
+recent_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(month, -6, cast('1998-10-01' as date))
+),
+
+supplier_parts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, p.p_name HAVING SUM(ps.ps_availqty) > 100
+),
+
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY l.l_orderkey
+),
+
+final_report AS (
+    SELECT 
+        c.c_name AS customer_name,
+        COALESCE(SUM(ls.revenue), 0) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        s.s_name AS supplier_name,
+        sh.level AS supplier_level
+    FROM customer c
+    LEFT JOIN recent_orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem_summary ls ON o.o_orderkey = ls.l_orderkey
+    LEFT JOIN supplier_parts sp ON o.o_custkey = sp.ps_suppkey
+    LEFT JOIN supplier_hierarchy sh ON sp.ps_suppkey = sh.s_suppkey
+    LEFT JOIN supplier s ON sp.ps_suppkey = s.s_suppkey
+    WHERE sh.level IS NOT NULL
+    GROUP BY c.c_name, s.s_name, sh.level
+    HAVING total_revenue > 10000
+    ORDER BY total_revenue DESC
+)
+
+SELECT * FROM final_report;

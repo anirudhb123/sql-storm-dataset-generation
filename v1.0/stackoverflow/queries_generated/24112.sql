@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AcceptedAnswerId, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    p.PostId,
+    p.Title,
+    p.Score,
+    p.CommentCount,
+    COALESCE(cp.FirstClosedDate, 'No Closures') AS FirstClosedDate,
+    RANK() OVER (PARTITION BY u.UserId ORDER BY p.Score DESC) AS UserPostRank,
+    CASE 
+        WHEN p.AcceptedAnswerId IS NULL THEN 'No'
+        ELSE 'Yes'
+    END AS HasAcceptedAnswer,
+    (p.Upvotes - p.Downvotes) AS NetVotes,
+    CASE 
+        WHEN (p.ViewCount IS NULL OR p.ViewCount = 0) THEN 'Unseen Post'
+        ELSE 'Seen Post'
+    END AS PostVisibility
+FROM 
+    RankedPosts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    ClosedPosts cp ON p.PostId = cp.PostId
+WHERE 
+    p.RankByScore <= 10
+    AND EXISTS (
+        SELECT 1 
+        FROM TopUsers tu 
+        WHERE tu.UserId = u.Id AND tu.UserRank <= 5
+    )
+ORDER BY 
+    u.UserId, p.Score DESC;

@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerTotalOrders AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS order_count, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+FilteredRegions AS (
+    SELECT 
+        r.r_regionkey, 
+        r.r_name
+    FROM 
+        region r
+    WHERE 
+        r.r_comment IS NOT NULL AND LENGTH(r.r_comment) > 50
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    CASE 
+        WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000 THEN 'High Value Product'
+        ELSE 'Standard Product'
+    END AS product_value_category,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COALESCE(STRING_AGG(DISTINCT s.s_name, ', ' ORDER BY s.s_name), 'No Suppliers') AS supplier_names,
+    CONCAT('Region: ', fr.r_name, ' | Order Count: ', ct.order_count) AS region_order_info
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    RankedSuppliers s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN 
+    CustomerTotalOrders ct ON o.o_custkey = ct.c_custkey
+JOIN 
+    FilteredRegions fr ON fr.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey))
+GROUP BY 
+    p.p_partkey, p.p_name, fr.r_name, ct.order_count
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_orders DESC NULLS LAST, 
+    product_value_category ASC;

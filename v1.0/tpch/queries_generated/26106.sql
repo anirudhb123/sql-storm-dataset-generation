@@ -1,0 +1,26 @@
+SELECT 
+    p.p_brand,
+    SUM(CASE WHEN p.p_type LIKE '%brass%' THEN ps.ps_availqty ELSE 0 END) AS brass_available,
+    SUM(CASE WHEN p.p_type LIKE '%plastic%' THEN ps.ps_availqty ELSE 0 END) AS plastic_available,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    AVG(o.o_totalprice) AS avg_order_price,
+    STRING_AGG(DISTINCT n.n_name, ', ') AS nations_supplied
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON c.c_nationkey = s.s_nationkey
+JOIN 
+    orders o ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON n.n_nationkey = s.s_nationkey
+WHERE 
+    p.p_comment NOT LIKE '%fragile%'
+    AND o.o_orderdate >= DATE '2023-01-01'
+GROUP BY 
+    p.p_brand
+ORDER BY 
+    brass_available DESC, plastic_available DESC;

@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) OVER (PARTITION BY p.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= (CURRENT_DATE - INTERVAL '1 year')
+),
+ClosedComments AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseVotes,
+        MAX(CASE WHEN ph.Comment IS NOT NULL THEN ph.Comment ELSE 'No reason provided' END) AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)
+    GROUP BY 
+        ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadges,
+        SUM(v.BountyAmount) AS TotalBountySpent
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.RankScore,
+    rp.CommentCount,
+    COALESCE(cc.CloseVotes, 0) AS CloseVotes,
+    cc.CloseReason,
+    tu.DisplayName AS TopUserName,
+    tu.TotalBadges,
+    tu.TotalBountySpent
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedComments cc ON rp.PostId = cc.PostId
+LEFT JOIN 
+    (SELECT *, ROW_NUMBER() OVER (ORDER BY TotalBadges DESC) AS UserRank FROM TopUsers) tu ON tu.UserRank = 1
+WHERE 
+    rp.RankScore <= 10
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

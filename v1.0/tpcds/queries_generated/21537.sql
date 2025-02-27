@@ -1,0 +1,61 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, 
+           c_current_cdemo_sk, 1 AS level 
+    FROM customer 
+    WHERE c_first_name IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           c.c_current_cdemo_sk, 
+           ch.level + 1 
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+),
+sales_aggregation AS (
+    SELECT ws_ship_date_sk, 
+           SUM(ws_net_paid) AS total_sales,
+           COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_ship_date_sk
+),
+performance_metrics AS (
+    SELECT d.d_date, 
+           COALESCE(sa.total_sales, 0) AS total_sales, 
+           COALESCE(sa.order_count, 0) AS order_count,
+           RANK() OVER (ORDER BY COALESCE(sa.total_sales, 0) DESC) AS sales_rank,
+           ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY COALESCE(sa.order_count, 0) DESC) AS year_order_rank
+    FROM date_dim d
+    LEFT JOIN sales_aggregation sa ON d.d_date_sk = sa.ws_ship_date_sk
+    WHERE d.d_year = 2022
+),
+address_info AS (
+    SELECT DISTINCT ca.city, ca.state, ca.country,
+           MAX(CASE WHEN cd.cd_gender = 'F' THEN c.c_customer_sk END) AS first_female_customer,
+           COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY ca.city, ca.state, ca.country
+)
+SELECT pm.d_date, 
+       pm.total_sales, 
+       pm.order_count,
+       COALESCE(ai.customer_count, 0) AS total_customers,
+       RANK() OVER (PARTITION BY pm.sales_rank ORDER BY pm.d_date) AS date_rank,
+       CASE 
+           WHEN pm.total_sales > 10000 THEN 'High Performer'
+           WHEN pm.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Performer'
+           ELSE 'Low Performer' 
+       END AS performance_category,
+       CASE 
+           WHEN ai.city IS NULL THEN 'No Address'
+           ELSE CONCAT(ai.city, ', ', ai.state, ', ', ai.country) 
+       END AS location
+FROM performance_metrics pm
+LEFT JOIN address_info ai ON pm.total_sales = ai.customer_count
+WHERE pm.d_date > CURRENT_DATE - INTERVAL '30 days'
+  AND (pm.total_sales IS NOT NULL OR ai.total_customers IS NULL)
+ORDER BY pm.d_date DESC, pm.total_sales ASC
+LIMIT 100;

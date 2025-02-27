@@ -1,0 +1,76 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        RANK() OVER (PARTITION BY m.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_by_cast,
+        SUM(CASE WHEN k.keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_id, title, production_year, rank_by_cast, keyword_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_by_cast <= 5
+),
+ActorNames AS (
+    SELECT 
+        DISTINCT a.name 
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    WHERE 
+        c.note IS NULL OR c.note != 'Cameo'
+),
+FinalResults AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        tn.name AS actor_name,
+        tm.keyword_count
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        cast_info ci ON tm.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name tn ON ci.person_id = tn.person_id
+    WHERE 
+        tn.name IS NOT NULL
+    ORDER BY 
+        tm.production_year DESC, tm.keyword_count DESC
+)
+SELECT 
+    fr.title, 
+    fr.production_year, 
+    fr.actor_name, 
+    COALESCE(fr.keyword_count, 0) AS keyword_count
+FROM 
+    FinalResults fr
+WHERE 
+    EXISTS (
+        SELECT 
+            1 
+        FROM 
+            movie_info mi 
+        WHERE 
+            mi.movie_id = fr.movie_id 
+            AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'box office')
+            AND mi.note IS NOT NULL
+    )
+    AND fr.actor_name NOT LIKE '%Anonymous%'
+    AND fr.actor_name NOT LIKE '%Extra%'
+ORDER BY 
+    fr.production_year DESC, fr.keyword_count DESC;

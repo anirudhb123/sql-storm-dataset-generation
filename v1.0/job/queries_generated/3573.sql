@@ -1,0 +1,66 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS movie_rank
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        t.id
+),
+actor_count AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_actors
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+movie_info_full AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        COALESCE(ac.total_actors, 0) AS actor_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        actor_count ac ON rm.title_id = ac.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON rm.title_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        rm.movie_rank <= 5
+    GROUP BY 
+        rm.title, rm.production_year, ac.total_actors
+)
+SELECT 
+    mf.title,
+    mf.production_year,
+    mf.actor_count,
+    mf.keywords,
+    CASE 
+        WHEN mf.actor_count = 0 THEN 'No actors listed'
+        ELSE 'Actors are present'
+    END AS actor_presence
+FROM 
+    movie_info_full mf
+ORDER BY 
+    mf.production_year DESC, mf.actor_count DESC;

@@ -1,0 +1,50 @@
+WITH processed_addresses AS (
+    SELECT 
+        ca_address_sk, 
+        TRIM(CONCAT(SUBSTRING(ca_street_number, 1, 10), ' ', ca_street_name, ' ', ca_street_type)) AS full_address,
+        LOWER(ca_city) AS city_lower,
+        REGEXP_REPLACE(ca_zip, '[^0-9]', '') AS cleaned_zip
+    FROM 
+        customer_address
+),
+demo_summary AS (
+    SELECT 
+        cd_demo_sk,
+        COUNT(c_customer_sk) AS customer_count,
+        MAX(cd_purchase_estimate) AS max_purchase_estimate,
+        STRING_AGG(DISTINCT cd_gender) AS gender_distribution
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY 
+        cd_demo_sk
+),
+joined_data AS (
+    SELECT 
+        p.p_promo_name,
+        wa.full_address,
+        ds.customer_count,
+        ds.max_purchase_estimate,
+        ds.gender_distribution
+    FROM 
+        processed_addresses wa
+    LEFT JOIN 
+        demo_summary ds ON ds.customer_count > 0
+    LEFT JOIN 
+        promotion p ON p.p_promo_sk > 0
+    WHERE 
+        wa.cleaned_zip LIKE '123%' 
+)
+SELECT 
+    p.promo_name,
+    COUNT(*) AS count_promo,
+    AVG(customer_count) AS avg_customer_count,
+    SUM(max_purchase_estimate) AS total_purchase_estimate,
+    STRING_AGG(DISTINCT gender_distribution) AS all_genders
+FROM 
+    joined_data p
+GROUP BY 
+    p.promo_name
+ORDER BY 
+    total_purchase_estimate DESC;

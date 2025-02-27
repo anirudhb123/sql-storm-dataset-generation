@@ -1,0 +1,88 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(ci.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank_by_cast_size
+    FROM 
+        aka_title mt
+    JOIN 
+        complete_cast cc ON cc.movie_id = mt.id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = mt.id
+    GROUP BY 
+        mt.title, mt.production_year
+),
+SubqueryWithInfo AS (
+    SELECT 
+        c.id AS cast_id,
+        c.note AS cast_note,
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        mt.title AS movie_title,
+        mt.production_year AS movie_year,
+        COALESCE(mi.info, 'No Information') AS movie_info
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON ak.person_id = c.person_id
+    JOIN 
+        aka_title mt ON mt.id = c.movie_id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = mt.id
+    WHERE 
+        ak.name IS NOT NULL
+),
+UniqueKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords_list
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    sm.actor_name,
+    sm.movie_title,
+    sm.movie_year,
+    sm.movie_info,
+    COALESCE(uk.keywords_list, 'No Keywords') AS keywords,
+    rm.actor_count
+FROM 
+    SubqueryWithInfo sm
+LEFT JOIN 
+    UniqueKeywords uk ON sm.movie_title = uk.movie_id
+JOIN 
+    RankedMovies rm ON sm.movie_title = rm.title AND sm.movie_year = rm.production_year
+WHERE 
+    rm.rank_by_cast_size <= 5 
+ORDER BY 
+    sm.movie_year DESC, 
+    rm.actor_count DESC, 
+    sm.actor_name;
+
+### Explanation:
+- **CTEs (Common Table Expressions)**: 
+  - `RankedMovies` calculates the number of actors per movie and ranks them by production year and actor count.
+  - `SubqueryWithInfo` aggregates the necessary actor and movie information including handling NULLs with `COALESCE`.
+  - `UniqueKeywords` uses `STRING_AGG` to create a list of unique keywords for each movie.
+
+- **Outer Join**: 
+  - Uses LEFT JOINS to include all relevant records even if some information is missing (like `movie_info` and `keywords_list`).
+
+- **Window Function**: 
+  - `ROW_NUMBER()` is employed to rank movies by actor count per year.
+
+- **String Expressions**: 
+  - Constructed keyword lists from the `UniqueKeywords` CTE.
+
+- **NULL Logic**: 
+  - The `COALESCE` function is used multiple times to replace NULL values with informative messages.
+
+- **Complicated Predicates/Expressions**: 
+  - The WHERE clause in the outer query limits results to the top 5 movies by actor count.
+
+This SQL request is designed to output a performance benchmark that showcases the wealth of functionality available within SQL while also managing potential NULL values and aggregating data meaningfully.

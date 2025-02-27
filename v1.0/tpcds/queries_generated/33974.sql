@@ -1,0 +1,56 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT
+        ss.ss_store_sk,
+        ss.ss_sold_date_sk,
+        ss.ss_item_sk,
+        ss.ss_quantity,
+        ss.ss_sales_price,
+        1 AS level
+    FROM
+        store_sales ss
+    WHERE
+        ss.ss_sold_date_sk = (SELECT MAX(ss2.ss_sold_date_sk) FROM store_sales ss2)
+
+    UNION ALL
+
+    SELECT
+        sh.ss_store_sk,
+        sh.ss_sold_date_sk,
+        sh.ss_item_sk,
+        sh.ss_quantity + 1,
+        sh.ss_sales_price + (sh.ss_sales_price * 0.05),
+        level + 1
+    FROM
+        sales_hierarchy sh
+    WHERE
+        level < 3
+)
+SELECT 
+    ca.ca_city,
+    SUM(sh.ss_quantity) AS total_quantity,
+    AVG(sh.ss_sales_price) AS average_sales_price,
+    COUNT(DISTINCT sh.ss_item_sk) AS unique_items_sold,
+    MAX(sh.ss_sales_price) AS max_sales_price,
+    ROW_NUMBER() OVER (PARTITION BY ca.ca_city ORDER BY sum(sh.ss_quantity) DESC) as sales_rank,
+    COALESCE(abb.ib_lower_bound, 'Unknown') AS income_band
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    sales_hierarchy sh ON c.c_customer_sk = sh.ss_item_sk
+LEFT JOIN 
+    household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+LEFT JOIN 
+    income_band abb ON hd.hd_income_band_sk = abb.ib_income_band_sk
+WHERE 
+    (sh.ss_sales_price > 20.00 OR sh.ss_quantity > 5)
+    AND (ca.ca_state = 'CA' OR ca.ca_state IS NULL)
+GROUP BY 
+    ca.ca_city, abb.ib_lower_bound
+HAVING 
+    COUNT(DISTINCT sh.ss_item_sk) > 1
+ORDER BY 
+    total_quantity DESC
+LIMIT 10;

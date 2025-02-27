@@ -1,0 +1,79 @@
+
+WITH RECURSIVE MoviesCTE AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT cc.person_id) AS cast_count
+    FROM 
+        aka_title mt
+    JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    GROUP BY 
+        mt.title, mt.production_year
+    
+    UNION ALL
+    
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT cc.person_id) AS cast_count
+    FROM 
+        aka_title mt
+    JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code = 'USA'
+    GROUP BY 
+        mt.title, mt.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        title,
+        production_year,
+        cast_count
+    FROM 
+        MoviesCTE
+    WHERE 
+        production_year >= 2000
+    ORDER BY 
+        production_year DESC
+),
+RankedMovies AS (
+    SELECT 
+        title,
+        production_year,
+        cast_count,
+        RANK() OVER (PARTITION BY production_year ORDER BY cast_count DESC) AS rank
+    FROM 
+        FilteredMovies
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.cast_count,
+    CASE 
+        WHEN fm.cast_count IS NULL THEN 'No Cast'
+        ELSE CONCAT(fm.cast_count, ' Cast Members')
+    END AS cast_info,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        movie_keyword mk 
+     JOIN 
+        keyword k ON mk.keyword_id = k.id 
+     WHERE 
+        mk.movie_id = (
+            SELECT id FROM aka_title WHERE title = fm.title LIMIT 1
+        )
+     AND 
+        k.keyword LIKE '%action%') AS action_keyword_count
+FROM 
+    RankedMovies fm
+WHERE 
+    fm.rank <= 5
+ORDER BY 
+    fm.production_year DESC, fm.cast_count DESC;

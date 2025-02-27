@@ -1,0 +1,94 @@
+
+WITH UserEngagement AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyAmount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS EngagementRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+PostStatistics AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(AVG(c.Score), 0) AS AvgCommentScore,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        ROUND(COALESCE(MAX(v.CreationDate), '1970-01-01'::timestamp), 0) AS MostRecentActivity,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS TotalClosures,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypeNames,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount
+),
+CombinedEngagementData AS (
+    SELECT
+        ue.UserId,
+        ue.DisplayName,
+        ue.Reputation,
+        ue.TotalPosts,
+        ue.TotalQuestions,
+        ue.TotalAnswers,
+        ue.TotalBountyAmount,
+        ps.PostId,
+        ps.Title AS PostTitle,
+        ps.ViewCount,
+        ps.TotalComments,
+        ps.AvgCommentScore,
+        ps.MostRecentActivity,
+        ps.TotalClosures
+    FROM UserEngagement ue
+    JOIN PostStatistics ps ON ue.TotalPosts > 0 AND ps.TotalComments > 0
+),
+FinalReport AS (
+    SELECT
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalBountyAmount,
+        PostId,
+        PostTitle,
+        ViewCount,
+        TotalComments,
+        AvgCommentScore,
+        MostRecentActivity,
+        TotalClosures,
+        CASE
+            WHEN Reputation >= 1000 THEN 'Gold'
+            WHEN Reputation >= 500 THEN 'Silver'
+            ELSE 'Bronze'
+        END AS ReputationCategory,
+        (SELECT COUNT(*) FROM Badges b WHERE b.UserId = ue.UserId AND b.Class = 1) AS GoldBadgeCount
+    FROM CombinedEngagementData ue
+)
+SELECT
+    UserId,
+    DisplayName,
+    Reputation,
+    ReputationCategory,
+    SUM(TotalPosts) AS CumulativePostCount,
+    SUM(TotalQuestions) AS CumulativeQuestionCount,
+    SUM(TotalAnswers) AS CumulativeAnswerCount,
+    SUM(TotalBountyAmount) AS TotalBountiesEarned,
+    MAX(ViewCount) AS MaxPostViewCount,
+    COUNT(DISTINCT PostId) AS UniquePostCount,
+    SUM(TotalClosures) AS TotalPostClosures
+FROM FinalReport
+GROUP BY UserId, DisplayName, Reputation, ReputationCategory
+HAVING SUM(TotalPosts) > 10 AND SUM(TotalAnswers) > 5
+ORDER BY TotalBountiesEarned DESC, Reputation DESC;

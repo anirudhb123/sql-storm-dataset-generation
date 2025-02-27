@@ -1,0 +1,82 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.ParentId,
+        1 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.PostTypeId,
+        p2.ParentId,
+        r.Depth + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy r ON p2.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PopularQuestions AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        u.DisplayName AS Owner,
+        us.Reputation,
+        pvs.TotalUpvotes - pvs.TotalDownvotes AS NetVotes,
+        ph.Depth
+    FROM 
+        RecursivePostHierarchy ph
+    INNER JOIN 
+        Users u ON u.Id = ph.OwnerUserId
+    LEFT JOIN 
+        UserReputation us ON us.UserId = ph.OwnerUserId
+    LEFT JOIN 
+        PostVoteSummary pvs ON pvs.PostId = ph.PostId
+    WHERE 
+        ph.Depth = 1  
+)
+SELECT 
+    pq.PostId,
+    pq.Title,
+    pq.Owner,
+    pq.Reputation,
+    pq.NetVotes,
+    COALESCE(NULLIF(pq.Reputation, 0), 'No Reputation') AS ReputationStatus,
+    CASE 
+        WHEN pq.NetVotes > 0 THEN 'Popular'
+        WHEN pq.NetVotes < 0 THEN 'Unpopular'
+        ELSE 'Neutral'
+    END AS PopularityStatus
+FROM 
+    PopularQuestions pq
+ORDER BY 
+    pq.NetVotes DESC, pq.Reputation DESC
+LIMIT 10;

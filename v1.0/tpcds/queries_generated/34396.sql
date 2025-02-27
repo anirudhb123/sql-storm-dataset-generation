@@ -1,0 +1,48 @@
+
+WITH RECURSIVE CustomerCTE AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk
+    FROM customer
+    WHERE c_first_shipto_date_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk
+    FROM customer c
+    JOIN CustomerCTE cte ON c.c_current_cdemo_sk = cte.c_current_cdemo_sk
+    WHERE c.c_current_hdemo_sk IS NOT NULL
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM web_sales ws
+    LEFT JOIN customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+    GROUP BY ws.ws_item_sk, cd.cd_gender, cd.cd_marital_status
+),
+ReturnData AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        AVG(sr_return_amt_inc_tax) AS avg_return_amt
+    FROM store_returns
+    GROUP BY sr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(sd.total_quantity, 0) AS total_sold,
+    COALESCE(sd.total_sales, 0) AS total_sales,
+    COALESCE(rd.total_returns, 0) AS total_returns,
+    COALESCE(rd.avg_return_amt, 0) AS avg_return_amt,
+    cte.c_first_name,
+    cte.c_last_name,
+    ROW_NUMBER() OVER (PARTITION BY i.i_item_sk ORDER BY COALESCE(sd.total_sales, 0) DESC) AS item_sales_rank
+FROM item i
+LEFT JOIN SalesData sd ON i.i_item_sk = sd.ws_item_sk
+LEFT JOIN ReturnData rd ON i.i_item_sk = rd.sr_item_sk
+OUTER JOIN CustomerCTE cte ON sd.cd_gender = 'F' AND cte.c_customer_sk = sd.total_sales
+WHERE (sd.cd_marital_status IN ('S', 'M') OR sd.cd_gender IS NULL)
+AND (rd.total_returns IS NULL OR rd.total_returns < 100)
+ORDER BY total_sales DESC, total_returns ASC;

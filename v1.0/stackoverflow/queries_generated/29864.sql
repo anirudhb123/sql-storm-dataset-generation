@@ -1,0 +1,79 @@
+WITH PostData AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM
+        Posts p
+    LEFT JOIN
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    LEFT JOIN
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN
+        Votes v ON v.PostId = p.Id
+    WHERE
+        p.PostTypeId = 1 -- Filtering for Questions
+    GROUP BY
+        p.Id
+),
+UserStatistics AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON b.UserId = u.Id
+    GROUP BY
+        u.Id
+),
+TaggedPosts AS (
+    SELECT
+        pd.PostId,
+        pd.Title,
+        pd.Tags,
+        pd.TagList,
+        pd.OwnerUserId,
+        pd.AnswerCount,
+        pd.CommentCount,
+        pd.UpVotes,
+        pd.DownVotes,
+        us.DisplayName AS OwnerDisplayName,
+        us.Reputation AS OwnerReputation
+    FROM
+        PostData pd
+    JOIN
+        UserStatistics us ON pd.OwnerUserId = us.UserId
+    WHERE
+        pd.TagList LIKE '%sql%' -- Focusing on posts tagged with 'sql'
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.TagList,
+    tp.OwnerDisplayName,
+    tp.OwnerReputation,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    (EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - tp.CreationDate)) / 3600) AS AgeInHours,
+    (EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - tp.LastActivityDate)) / 60) AS LastActivityMinutes
+FROM 
+    TaggedPosts tp
+ORDER BY 
+    tp.UpVotes DESC,
+    tp.LastActivityDate DESC
+LIMIT 10;

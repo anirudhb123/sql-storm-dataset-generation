@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS budget, min(t.title) AS unsuccsessful_movie
+FROM company_name AS cn, company_type AS ct, info_type AS it1, info_type AS it2, movie_companies AS mc, movie_info AS mi, movie_info_idx AS mi_idx, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND mi.info_type_id = it1.id AND mi_idx.info_type_id = it2.id AND t.id = mc.movie_id AND ct.id = mc.company_type_id AND cn.id = mc.company_id AND mc.movie_id = mi.movie_id AND mc.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id
+AND mi_idx.info IN ('..0114100.', '.0.1301001', '.122.020.0', '0....00500', '0...151..0', '00..011111', '001222.0..', '01.01121.1') AND mc.movie_id > 1262910;

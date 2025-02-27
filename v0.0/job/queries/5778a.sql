@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id
+AND mi.info > 'Dr. Henry Wayne: Incredible! A secret cave - how splendid!::Zorro: I thought you might appreciate it.::Dr. Henry Wayne: Oh, I do, I do... Is that a laboratory I see?::Zorro: Exactly. I have great respect for scientific endeavor, Dr. Wayne, so long as it is used for progress and not suppression. You do have a certain inventive genius.::Dr. Henry Wayne: You really think so?::Zorro: The only proof of it will be what good you can do with it. Any fool can wreak havoc.' AND t.md5sum < 'd85c8f42b20054d95533c8e52c399f76';

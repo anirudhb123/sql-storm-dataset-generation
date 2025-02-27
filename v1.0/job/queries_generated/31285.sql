@@ -1,0 +1,55 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        a.name,
+        a.surname_pcode,
+        0 AS level
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        ci.movie_id = (SELECT id FROM aka_title WHERE title = 'Inception' LIMIT 1)
+
+    UNION ALL
+
+    SELECT 
+        ci.person_id,
+        a.name,
+        a.surname_pcode,
+        ah.level + 1
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        ActorHierarchy ah ON ci.movie_id = ah.person_id
+)
+SELECT 
+    a.name AS Actor_Name,
+    COUNT(DISTINCT mc.company_id) AS Production_Companies,
+    AVG(mi.production_year) AS Average_Production_Year,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS Associated_Keywords,
+    FIRST_VALUE(t.title) OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS Latest_Title
+FROM 
+    ActorHierarchy ah
+JOIN 
+    aka_name a ON ah.person_id = a.person_id
+LEFT JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN 
+    title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = ci.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = ci.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'release_year')
+GROUP BY 
+    a.id
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1 AND AVG(mi.production_year) > 2000
+ORDER BY 
+    Production_Companies DESC, Average_Production_Year DESC;

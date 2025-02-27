@@ -1,0 +1,61 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.movie_id,
+        a.id AS actor_id,
+        COALESCE(a.name, char.name) AS actor_name,
+        1 AS level
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    LEFT JOIN char_name char ON a.id = char.imdb_id
+
+    UNION ALL
+
+    SELECT 
+        mm.movie_id,
+        a.id AS actor_id,
+        COALESCE(a.name, char.name) AS actor_name,
+        level + 1
+    FROM movie_link ml
+    JOIN title mm ON ml.linked_movie_id = mm.id
+    JOIN cast_info c ON mm.id = c.movie_id
+    JOIN aka_name a ON c.person_id = a.person_id
+    LEFT JOIN char_name char ON a.id = char.imdb_id
+    JOIN ActorHierarchy ah ON ah.movie_id = ml.movie_id
+    WHERE ah.level < 2  -- Adjust level to limit recursion depth
+),
+MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.id) AS actor_count,
+        STRING_AGG(DISTINCT COALESCE(ah.actor_name, 'Unknown'), ', ') AS actors
+    FROM title t
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    LEFT JOIN ActorHierarchy ah ON ah.movie_id = t.id
+    GROUP BY t.id, t.title, t.production_year
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword m
+    JOIN keyword k ON m.keyword_id = k.id
+    GROUP BY m.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.actor_count,
+    COALESCE(mk.keywords, 'None') AS keywords,
+    md.actors
+FROM MovieDetails md
+LEFT JOIN MovieKeywords mk ON md.movie_id = mk.movie_id
+ORDER BY md.production_year DESC, md.actor_count DESC;
+
+This SQL query performs several tasks:
+1. It creates a recursive Common Table Expression (CTE) `ActorHierarchy` to explore actors connected through movies and recursively link them.
+2. It aggregates movie details in the `MovieDetails` CTE, capturing the title, production year, actors involved, and the count of distinct actors in each movie.
+3. It constructs a `MovieKeywords` CTE that collects keywords related to each movie.
+4. Finally, it selects combined movie information, joining the movie details and keywords, while providing NULL handling and ordering by production year and actor count.

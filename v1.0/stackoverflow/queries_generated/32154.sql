@@ -1,0 +1,60 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        1 AS Level
+    FROM Users
+    WHERE Reputation >= 1000
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.CreationDate,
+        cte.Level + 1
+    FROM Users u
+    JOIN UserReputationCTE cte ON u.Reputation >= cte.Reputation AND u.Id <> cte.UserId
+), 
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(p.Score) AS AvgScore,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Badges b
+    WHERE b.Class = 1 -- Only Gold Badges
+    GROUP BY b.UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    us.TotalPosts,
+    us.Questions,
+    us.Answers,
+    us.AvgScore,
+    us.AvgViewCount,
+    ub.TotalBadges,
+    ub.BadgeNames,
+    COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.UserId = u.Id), 0) AS TotalComments,
+    COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.UserId = u.Id AND v.BountyAmount IS NOT NULL), 0) AS TotalBountyVotes,
+    cte.Level AS ReputationLevel
+FROM Users u
+JOIN PostStatistics us ON u.Id = us.OwnerUserId
+LEFT JOIN UserBadges ub ON ub.UserId = u.Id
+LEFT JOIN UserReputationCTE cte ON u.Id = cte.UserId
+WHERE u.Reputation > 500
+ORDER BY u.Reputation DESC, us.TotalPosts DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

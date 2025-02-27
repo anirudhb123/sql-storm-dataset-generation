@@ -1,0 +1,54 @@
+
+WITH RecursiveActor AS (
+    SELECT c.id, a.person_id, a.name, t.title, t.production_year, c.nr_order,
+           ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN aka_title t ON c.movie_id = t.movie_id
+    WHERE t.production_year IS NOT NULL
+    AND t.production_year > 2000
+),
+
+TitleAgg AS (
+    SELECT t.id, 
+           t.title,
+           COUNT(DISTINCT CASE WHEN a.gender = 'M' THEN a.person_id END) AS male_actors,
+           COUNT(DISTINCT CASE WHEN a.gender = 'F' THEN a.person_id END) AS female_actors
+    FROM title t
+    LEFT JOIN cast_info c ON c.movie_id = t.id
+    LEFT JOIN aka_name a ON c.person_id = a.person_id
+    GROUP BY t.id, t.title
+),
+
+MoviesWithNotes AS (
+    SELECT t.id AS title_id,
+           t.title,
+           COALESCE(mi.info, 'No info') AS movie_info,
+           CASE WHEN COUNT(c.id) > 0 THEN 'Has Cast' ELSE 'No Cast' END AS cast_status
+    FROM title t
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Notes')
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    GROUP BY t.id, t.title, mi.info
+),
+
+FinalResults AS (
+    SELECT a.name AS actor_name,
+           t.title AS movie_title,
+           t.production_year AS year,
+           COALESCE(td.male_actors, 0) AS male_actor_count,
+           COALESCE(td.female_actors, 0) AS female_actor_count,
+           CASE WHEN COALESCE(td.male_actors, 0) > COALESCE(td.female_actors, 0) THEN 'More Males'
+                WHEN COALESCE(td.female_actors, 0) > COALESCE(td.male_actors, 0) THEN 'More Females'
+                ELSE 'Equal' END AS gender_ratio,
+           mn.movie_info,
+           mn.cast_status
+    FROM RecursiveActor a
+    JOIN TitleAgg td ON a.title = td.title
+    JOIN MoviesWithNotes mn ON a.title = mn.title
+    WHERE a.rn = 1
+)
+
+SELECT *
+FROM FinalResults
+WHERE (male_actor_count + female_actor_count) > 2
+ORDER BY year DESC, actor_name;

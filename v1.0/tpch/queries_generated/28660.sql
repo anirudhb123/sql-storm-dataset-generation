@@ -1,0 +1,49 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        STRING_AGG(DISTINCT o.o_orderstatus) AS order_statuses,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        c.custkey,
+        c.name,
+        c.order_count,
+        c.total_spent,
+        RANK() OVER (ORDER BY c.total_spent DESC) AS spending_rank
+    FROM 
+        CustomerOrders c
+)
+SELECT 
+    tc.custkey,
+    tc.name,
+    tc.order_count,
+    tc.total_spent,
+    tc.spending_rank,
+    COUNT(DISTINCT ps.ps_partkey) AS unique_parts_ordered,
+    AVG(l.l_extendedprice) AS avg_order_value,
+    STRING_AGG(DISTINCT p.p_name) AS part_names
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    orders o ON tc.custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+GROUP BY 
+    tc.custkey, tc.name, tc.order_count, tc.total_spent, tc.spending_rank
+HAVING 
+    tc.spending_rank <= 10
+ORDER BY 
+    tc.spending_rank;

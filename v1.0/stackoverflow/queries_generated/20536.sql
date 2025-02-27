@@ -1,0 +1,66 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) DESC) AS UpVoteRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON V.PostId = P.Id
+    GROUP BY 
+        U.Id
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(P.ViewCount) AS TotalViews,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS TagRank
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.UpVotes,
+    U.DownVotes,
+    COALESCE(RP.Title, 'No Posts') AS LatestPostTitle,
+    COALESCE(RP.CreationDate, 'N/A') AS LatestPostDate,
+    COALESCE(RP.Score, 0) AS LatestPostScore,
+    TT.TagName AS PopularTag,
+    TT.TotalPosts,
+    TT.TotalViews
+FROM 
+    UserVoteStats U
+LEFT JOIN 
+    RecentPosts RP ON U.UserId = RP.OwnerUserId AND RP.RecentPostRank = 1
+LEFT JOIN 
+    TopTags TT ON U.PostCount > 5 AND TT.TagRank = 1
+WHERE 
+    U.UpVotes > U.DownVotes
+ORDER BY 
+    U.UpVotes DESC NULLS LAST
+LIMIT 100;
+
+This SQL query combines multiple advanced features such as Common Table Expressions (CTEs) for modular organization of logic, window functions to rank and filter data, left joins for preserving records, and logical conditions for diverse filtering. It seeks to analyze user engagement with posts, identifying power users based on their voting behavior, reviewing their recent post activities, and connecting them to trending tags, all while cautiously handling potential NULL values.

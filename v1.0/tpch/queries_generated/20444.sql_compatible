@@ -1,0 +1,43 @@
+
+WITH RankedCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rnk
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+TopCustomers AS (
+    SELECT r.r_regionkey, r.r_name, nc.n_name AS nc_name, rc.c_name, rc.c_acctbal
+    FROM region r
+    JOIN nation nc ON r.r_regionkey = nc.n_regionkey
+    JOIN RankedCustomers rc ON nc.n_nationkey = rc.c_nationkey
+    WHERE rc.rnk <= 5
+),
+SupplyData AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           (ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+),
+OrderSummaries AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           AVG(l.l_quantity) AS avg_quantity, 
+           COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+)
+SELECT DISTINCT tc.r_name, tc.nc_name, tc.c_name, os.total_revenue,
+       COALESCE(sd.total_supply_value, 0) AS supplier_total_value,
+       (os.total_revenue - COALESCE(sd.total_supply_value, 0)) AS net_profit,
+       CASE 
+           WHEN os.total_revenue > 5000 THEN 'High Revenue'
+           WHEN os.total_revenue BETWEEN 1000 AND 5000 THEN 'Medium Revenue'
+           ELSE 'Low Revenue'
+       END AS revenue_category
+FROM TopCustomers tc
+LEFT JOIN SupplyData sd ON tc.c_custkey = sd.ps_suppkey
+JOIN OrderSummaries os ON tc.c_custkey = os.o_orderkey
+WHERE (sd.ps_availqty IS NULL OR sd.ps_availqty < 10)
+  AND (os.total_revenue - COALESCE(sd.total_supply_value, 0) IS NOT NULL OR tc.nc_name NOT LIKE '%land') 
+ORDER BY net_profit DESC, tc.r_name, tc.c_name;

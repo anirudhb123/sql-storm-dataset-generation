@@ -1,0 +1,72 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_list_price,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_sold_date_sk DESC) as rnk
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_date BETWEEN '2023-01-01' AND '2023-12-31')
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd_cd.gender,
+        cd_cd.marital_status,
+        cd_cd.education_status,
+        (SELECT COUNT(*)
+         FROM customer
+         WHERE c_birth_year = 1980 AND c_customer_sk = c.c_customer_sk) as birth_year_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd_cd ON c.c_current_cdemo_sk = cd_cd.cd_demo_sk
+    WHERE 
+        cd_cd.cd_purchase_estimate > (
+            SELECT AVG(cd_purchase_estimate)
+            FROM customer_demographics
+        )
+)
+SELECT 
+    ca.ca_city,
+    SUM(sd.ws_quantity) AS total_quantity_sold,
+    MAX(sd.ws_sales_price) AS highest_sales_price,
+    COUNT(DISTINCT cd.c_customer_sk) AS unique_customers,
+    AVG(COALESCE(cd.birth_year_count, 0)) AS avg_birth_year_counts
+FROM 
+    SalesData sd
+JOIN 
+    CustomerDemographics cd ON sd.ws_bill_customer_sk = cd.c_customer_sk
+LEFT OUTER JOIN 
+    customer_address ca ON ca.ca_address_sk = (SELECT c_current_addr_sk FROM customer WHERE c_customer_sk = sd.ws_bill_customer_sk)
+GROUP BY 
+    ca.ca_city
+HAVING 
+    SUM(sd.ws_quantity) > 100
+    AND MAX(sd.ws_sales_price) BETWEEN 20 AND 100
+ORDER BY 
+    total_quantity_sold DESC
+FETCH FIRST 10 ROWS ONLY
+UNION 
+SELECT 
+    'Out of Stock' AS ca_city,
+    COUNT(*) AS total_quantity_sold,
+    0 AS highest_sales_price,
+    NULL AS unique_customers,
+    NULL AS avg_birth_year_counts
+FROM 
+    store
+WHERE 
+    s_closed_date_sk IS NOT NULL 
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM inventory i 
+        WHERE i.inv_item_sk = ALL (SELECT ws_item_sk FROM web_sales WHERE ws_sales_price < 10)
+    )
+ORDER BY 
+    total_quantity_sold DESC;

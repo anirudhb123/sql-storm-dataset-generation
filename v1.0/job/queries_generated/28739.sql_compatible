@@ -1,0 +1,89 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        RANK() OVER (PARTITION BY at.production_year ORDER BY LENGTH(at.title) DESC) AS title_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year BETWEEN 1990 AND 2020
+),
+MovieDetails AS (
+    SELECT 
+        mt.title,
+        COUNT(mc.company_id) AS num_companies,
+        ARRAY_AGG(DISTINCT cn.name) AS companies_list
+    FROM 
+        movie_companies mc
+    JOIN 
+        title mt ON mc.movie_id = mt.id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mt.title
+),
+ActorDetails AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ak.name
+),
+KeywordDetails AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mt.title,
+    rd.production_year,
+    rd.title_rank,
+    md.num_companies,
+    md.companies_list,
+    ad.actor_name,
+    ad.movie_count,
+    kd.keywords
+FROM 
+    RankedTitles rd
+JOIN 
+    MovieDetails md ON rd.title = md.title
+LEFT JOIN 
+    ActorDetails ad ON ad.movie_count > 0 AND EXISTS (
+        SELECT 1 
+        FROM cast_info ci 
+        WHERE ci.movie_id IN (
+            SELECT movie_id 
+            FROM movie_info 
+            WHERE movie_id IN (
+                SELECT movie_id 
+                FROM movie_keyword 
+                WHERE movie_id IN (
+                    SELECT movie_id 
+                    FROM aka_title 
+                    WHERE title = rd.title
+                )
+            )
+        )
+    )
+LEFT JOIN 
+    KeywordDetails kd ON kd.movie_id IN (
+        SELECT movie_id 
+        FROM aka_title 
+        WHERE title = rd.title
+    )
+WHERE 
+    rd.title_rank <= 5
+ORDER BY 
+    rd.production_year DESC, 
+    rd.title_rank;

@@ -1,0 +1,100 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC, P.CreationDate ASC) AS Ranking
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Questions
+        AND P.Score IS NOT NULL
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(COALESCENCE(V.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        MAX(P.LastActivityDate) AS LastActivity
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1 -- Questions
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.Score,
+        P.Body,
+        (SELECT ARRAY_AGG(C.Tags) 
+         FROM (SELECT UNNEST(string_to_array(P.Tags, ',')) AS Tags) AS C) AS TagArray
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        MIN(PH.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        PH.PostId
+),
+PostAnalytics AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        COALESCE(CP.FirstClosedDate, 'Never Closed') AS ClosedStatus,
+        CONCAT_WS(' ', U.DisplayName, '(Reputation: ', U.Reputation, ')') AS UserInfo,
+        COUNT(D) AS Downvotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        ClosedPosts CP ON RP.PostId = CP.PostId
+    LEFT JOIN 
+        Users U ON RP.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON RP.PostId = V.PostId
+    LEFT JOIN 
+        Votes D ON RP.PostId = D.PostId AND D.VoteTypeId = 3 -- DownMod
+    WHERE 
+        RP.Ranking <= 5
+    GROUP BY 
+        RP.PostId, RP.Title, RP.CreationDate, UserInfo, CP.FirstClosedDate
+)
+SELECT 
+    PA.PostId,
+    PA.Title,
+    PA.CreationDate,
+    PA.ClosedStatus,
+    PA.UserInfo,
+    PA.UpVotes,
+    PA.Downvotes,
+    CASE 
+        WHEN PA.ClosedStatus = 'Never Closed' THEN 'Active'
+        ELSE 'Inactive'
+    END AS PostActiveStatus
+FROM 
+    PostAnalytics PA
+WHERE 
+    PA.UpVotes > 5 OR PA.Downvotes > 5
+ORDER BY 
+    PA.UpVotes DESC, PA.Downvotes ASC;

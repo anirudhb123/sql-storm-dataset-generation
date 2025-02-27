@@ -1,0 +1,45 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey <> sh.s_suppkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+high_value_customers AS (
+    SELECT c.c_custkey, c.c_name, total_spent
+    FROM customer_orders c
+    WHERE total_spent > (
+        SELECT AVG(total_spent) 
+        FROM customer_orders
+    )
+),
+lineitem_summary AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_partkey
+)
+SELECT p.p_name, 
+       p.p_container, 
+       p.p_brand,
+       COALESCE(SUM(ls.total_revenue), 0) AS total_revenue,
+       COALESCE(SUM(CASE WHEN c.c_nationkey IS NOT NULL THEN 1 ELSE 0 END), 0) AS customer_count,
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       RANK() OVER (PARTITION BY p.p_container ORDER BY SUM(ls.total_revenue) DESC) AS revenue_rank
+FROM part p
+LEFT JOIN lineitem_summary ls ON p.p_partkey = ls.l_partkey
+LEFT JOIN high_value_customers c ON c.c_custkey = ls.l_orderkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier_hierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+GROUP BY p.p_name, p.p_container, p.p_brand, p.p_partkey
+HAVING COALESCE(SUM(ls.total_revenue), 0) IS NOT NULL
+ORDER BY revenue_rank, total_revenue DESC;

@@ -1,0 +1,59 @@
+
+WITH CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierRegion AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        r.r_name AS region_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, r.r_name
+),
+CompositeReport AS (
+    SELECT 
+        cs.c_custkey,
+        cs.c_name,
+        cs.total_spent,
+        sr.region_name,
+        sr.total_supplycost
+    FROM 
+        CustomerSummary cs
+    JOIN 
+        SupplierRegion sr ON cs.total_spent > sr.total_supplycost
+)
+SELECT 
+    c.c_custkey AS custkey,
+    c.c_name,
+    c.total_spent,
+    r.region_name,
+    r.total_supplycost
+FROM 
+    CompositeReport c
+JOIN 
+    SupplierRegion r ON r.region_name = (SELECT r_name FROM SupplierRegion WHERE total_supplycost = (
+        SELECT MAX(total_supplycost) FROM SupplierRegion
+    ))
+WHERE 
+    c.total_spent > 1000
+ORDER BY 
+    c.total_spent DESC;

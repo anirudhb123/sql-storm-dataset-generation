@@ -1,0 +1,54 @@
+WITH SupplierParts AS (
+    SELECT
+        s.s_name,
+        p.p_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrders AS (
+    SELECT
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+ExpensiveParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice > 100 THEN 'Expensive'
+            ELSE 'Affordable'
+        END AS price_category
+    FROM part p
+),
+SupplierRanking AS (
+    SELECT
+        sp.s_name,
+        SUM(sp.ps_supplycost * sp.ps_availqty) AS total_cost,
+        RANK() OVER (ORDER BY SUM(sp.ps_supplycost * sp.ps_availqty) DESC) AS supplier_rank
+    FROM SupplierParts sp
+    WHERE sp.rn = 1
+    GROUP BY sp.s_name
+)
+SELECT
+    c.c_name AS customer_name,
+    o.o_orderkey AS order_key,
+    o.o_totalprice AS order_price,
+    e.p_name AS part_name,
+    e.price_category,
+    sr.supplier_rank
+FROM CustomerOrders o
+JOIN ExpensiveParts e ON e.p_retailprice > 50
+LEFT JOIN SupplierRanking sr ON sr.supplier_rank <= 5
+WHERE o.rn <= 3 AND (o.o_orderdate > CURRENT_DATE - INTERVAL '1 YEAR' OR (e.price_category = 'Expensive' AND sr.supplier_rank IS NOT NULL))
+ORDER BY o.o_orderkey DESC, sr.supplier_rank;

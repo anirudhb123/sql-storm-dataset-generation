@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS budget, min(t.title) AS unsuccsessful_movie
+FROM company_name AS cn, company_type AS ct, info_type AS it1, info_type AS it2, movie_companies AS mc, movie_info AS mi, movie_info_idx AS mi_idx, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND mi.info_type_id = it1.id AND mi_idx.info_type_id = it2.id AND t.id = mc.movie_id AND ct.id = mc.company_type_id AND cn.id = mc.company_id AND mc.movie_id = mi.movie_id AND mc.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id
+AND mc.id > 696378 AND mi.info < 'Joel: Uh, genocide has a "C" in it.' AND t.episode_of_id < 449464 AND cn.md5sum < 'f69e64be5a9668c193e2cd816586bf50' AND t.production_year IS NOT NULL;

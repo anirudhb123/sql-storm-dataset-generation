@@ -1,0 +1,79 @@
+WITH TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) -- BountyStart, BountyClose
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+), 
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        PT.Name AS PostType
+    FROM 
+        Posts P
+    JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 YEAR'
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        PS.PostId,
+        PS.Title,
+        PS.ViewCount,
+        PS.Score,
+        PS.PostType
+    FROM 
+        TopUsers U
+    JOIN 
+        Posts P ON U.UserId = P.OwnerUserId
+    JOIN 
+        PostStats PS ON P.Id = PS.PostId
+),
+FinalStats AS (
+    SELECT 
+        U.DisplayName,
+        COUNT(UP.PostId) AS PostsCreated,
+        AVG(UP.ViewCount) AS AvgViews,
+        AVG(UP.Score) AS AvgScore,
+        SUM(U.TotalBounty) AS TotalBounty
+    FROM 
+        TopUsers U
+    LEFT JOIN 
+        UserPostStats UP ON U.UserId = UP.UserId
+    GROUP BY 
+        U.DisplayName
+)
+SELECT 
+    F.DisplayName,
+    F.PostsCreated,
+    F.AvgViews,
+    F.AvgScore,
+    F.TotalBounty
+FROM 
+    FinalStats F
+WHERE 
+    F.PostsCreated > 0 
+ORDER BY 
+    F.TotalBounty DESC, 
+    F.AvgScore DESC
+LIMIT 10;

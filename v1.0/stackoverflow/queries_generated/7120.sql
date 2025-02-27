@@ -1,0 +1,81 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        COALESCE(STRING_AGG(DISTINCT t.TagName, ', '), 'No Tags') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(p.Tags, '><')) AS tag ON tag IS NOT NULL
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(BOTH '<>' FROM tag)
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+        AND p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AnswerCount
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(u.Reputation) AS TotalReputation,
+        AVG(u.ViewCount) AS AvgViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+FinalStats AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.ViewCount,
+        ps.Score,
+        ps.AnswerCount,
+        ps.TotalUpVotes,
+        ps.TotalDownVotes,
+        ps.Tags,
+        us.UserId,
+        us.DisplayName,
+        us.BadgeCount,
+        us.TotalReputation,
+        us.AvgViewCount
+    FROM 
+        PostStats ps
+    JOIN 
+        Users us ON ps.PostId = us.Id
+)
+
+SELECT 
+    f.PostId,
+    f.Title,
+    f.CreationDate,
+    f.ViewCount,
+    f.Score,
+    f.AnswerCount,
+    f.TotalUpVotes,
+    f.TotalDownVotes,
+    f.Tags,
+    f.DisplayName,
+    f.BadgeCount,
+    f.TotalReputation,
+    f.AvgViewCount
+FROM 
+    FinalStats f
+ORDER BY 
+    f.Score DESC, 
+    f.ViewCount DESC
+LIMIT 100;

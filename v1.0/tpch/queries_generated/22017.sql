@@ -1,0 +1,58 @@
+WITH RECURSIVE cust_orders AS (
+    SELECT 
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_name
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL
+    UNION ALL
+    SELECT 
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) + COALESCE(SUM(o2.o_totalprice), 0) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        orders o2 ON o.o_orderkey = o2.o_orderkey
+    GROUP BY 
+        c.c_name
+)
+SELECT 
+    p.p_name AS part_name,
+    COUNT(DISTINCT l.l_orderkey) AS order_freq,
+    MAX(l.l_extendedprice * (1 - l.l_discount)) AS max_revenue,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(l.l_quantity) AS avg_quantity,
+    (SELECT COUNT(DISTINCT ps.s_suppkey) 
+     FROM partsupp ps 
+     WHERE ps.ps_partkey = p.p_partkey) AS supplier_count,
+    CASE 
+        WHEN COUNT(DISTINCT l.o_orderkey) > 0 THEN 
+            'Orders exist' 
+        ELSE 
+            'No orders' 
+    END AS order_status,
+    ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY total_revenue DESC) AS revenue_rank,
+    RANK() OVER (ORDER BY p.p_retailprice DESC) AS price_rank,
+    NTILE(4) OVER (ORDER BY SUM(l.l_tax) DESC) AS tax_quartile
+FROM 
+    part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN cust_orders co ON co.order_count > 5
+WHERE 
+    p.p_retailprice > 50.00 
+    OR (p.p_size BETWEEN 10 AND 15 AND p.p_type LIKE '%Plastic%')
+GROUP BY 
+    p.p_name, p.p_type, p.p_retailprice
+HAVING 
+    SUM(l.l_discount) IS NOT NULL
+ORDER BY 
+    max_revenue DESC, total_revenue ASC;

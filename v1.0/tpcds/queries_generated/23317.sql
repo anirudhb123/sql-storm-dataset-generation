@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank_per_item
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL 
+        AND ws.ws_sold_date_sk BETWEEN 1000 AND 2000
+),
+FilteredReturns AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returned_quantity,
+        COUNT(DISTINCT cr.cr_returning_customer_sk) AS unique_returning_customers
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.cr_return_quantity > 0
+    GROUP BY 
+        cr.cr_item_sk
+),
+OuterJoinResults AS (
+    SELECT 
+        rs.ws_order_number,
+        rs.ws_item_sk,
+        rs.ws_sales_price,
+        COALESCE(fr.total_returned_quantity, 0) AS total_returned_quantity,
+        fr.unique_returning_customers,
+        CASE 
+            WHEN fr.total_returned_quantity IS NOT NULL THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        FilteredReturns fr ON rs.ws_item_sk = fr.cr_item_sk
+    WHERE 
+        rs.rank_per_item = 1
+),
+FinalResults AS (
+    SELECT 
+        o.*,
+        o.ws_sales_price * o.ws_quantity AS total_sales_value,
+        (SELECT AVG(ws_sales_price) FROM web_sales WHERE ws_item_sk = o.ws_item_sk) AS average_sales_price,
+        CASE 
+            WHEN o.total_returned_quantity > o.ws_quantity THEN 'Over Returned'
+            ELSE 'Normal Return'
+        END AS return_category
+    FROM 
+        OuterJoinResults o
+)
+SELECT 
+    f.*,
+    CONCAT('Order ', f.ws_order_number, ': Item ', f.ws_item_sk) AS order_item_description,
+    (SELECT COUNT(*) FROM customer WHERE c_current_cdemo_sk IS NULL) AS customers_without_demographics
+FROM 
+    FinalResults f
+WHERE 
+    f.total_sales_value > (SELECT AVG(total_sales_value) FROM FinalResults)
+ORDER BY 
+    f.total_sales_value DESC;

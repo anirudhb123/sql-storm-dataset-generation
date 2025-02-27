@@ -1,0 +1,72 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.title AS movie_title, 
+        m.production_year,
+        mc.company_id,
+        1 AS level
+    FROM 
+        aka_title m
+    JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_title, 
+        mh.production_year,
+        mc.company_id,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_companies mc ON mh.company_id = mc.company_id
+    WHERE 
+        mh.level < 3 -- Limiting to 3 levels of company associations
+),
+
+CompanyOverview AS (
+    SELECT 
+        cn.name AS company_name, 
+        COUNT(DISTINCT mh.movie_title) AS movie_count,
+        SUM(COALESCE(mi.info_type_id, 0)) AS total_info_types
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        company_name cn ON mh.company_id = cn.id
+    LEFT JOIN 
+        movie_info mi ON mh.movie_id = mi.movie_id
+    GROUP BY 
+        cn.name
+),
+
+RankedCompanies AS (
+    SELECT 
+        company_name,
+        movie_count,
+        total_info_types,
+        RANK() OVER (ORDER BY movie_count DESC) AS rank,
+        RANK() OVER (ORDER BY total_info_types DESC) AS info_rank
+    FROM 
+        CompanyOverview
+)
+
+SELECT 
+    rc.company_name, 
+    rc.movie_count, 
+    rc.total_info_types,
+    CASE 
+        WHEN rc.rank = 1 THEN 'Top Company'
+        ELSE 'Other'
+    END AS company_status
+FROM 
+    RankedCompanies rc
+WHERE 
+    rc.movie_count > 10 OR (rc.total_info_types > 5 AND rc.rank <= 5)
+ORDER BY 
+    rc.rank;
+
+-- Note: This complex query investigates movie companies associated with movies produced after 2000. 
+-- It builds a recursive CTE to explore company associations, aggregates movie counts and info types, 
+-- applies ranking, and filters the results with various predicates.

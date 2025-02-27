@@ -1,0 +1,69 @@
+
+WITH RECURSIVE CustomerRank AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           c.c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+    UNION ALL
+    SELECT cr.c_custkey,
+           cr.c_name,
+           cr.c_acctbal,
+           cr.rank
+    FROM CustomerRank cr
+    WHERE cr.rank < 3
+),
+PartCost AS (
+    SELECT ps.ps_partkey,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey,
+           o.o_totalprice,
+           o.o_orderdate,
+           o.o_custkey,
+           CASE 
+               WHEN o.o_orderstatus = 'O' THEN 'Open'
+               WHEN o.o_orderstatus = 'F' THEN 'Finished'
+               ELSE 'Others'
+           END AS order_status
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+           COUNT(DISTINCT l.l_suppkey) AS supplier_count,
+           FIRST_VALUE(l.l_shipmode) OVER (PARTITION BY l.l_orderkey ORDER BY l.l_receiptdate DESC) AS last_shipmode
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+NationDetails AS (
+    SELECT n.n_nationkey,
+           n.n_name,
+           ARRAY_AGG(DISTINCT s.s_name) AS suppliers
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT cr.c_name,
+       cr.rank,
+       fo.o_totalprice,
+       lsummary.net_revenue,
+       pd.total_cost,
+       nd.n_name,
+       CASE 
+           WHEN pd.total_cost IS NULL THEN 'No Cost Data'
+           ELSE 'Cost Data Present'
+       END AS cost_status
+FROM CustomerRank cr
+JOIN FilteredOrders fo ON cr.c_custkey = fo.o_custkey
+LEFT JOIN LineItemSummary lsummary ON fo.o_orderkey = lsummary.l_orderkey
+LEFT JOIN PartCost pd ON lsummary.l_orderkey IN (SELECT l_orderkey FROM lineitem)
+LEFT JOIN NationDetails nd ON cr.c_nationkey = nd.n_nationkey
+WHERE (lsummary.net_revenue > 1000 OR pd.total_cost IS NULL)
+  AND fo.o_orderdate BETWEEN DATE '1998-09-24' AND DATE '1998-10-01'
+ORDER BY cr.rank, fo.o_totalprice DESC NULLS LAST;

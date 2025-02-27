@@ -1,0 +1,54 @@
+
+WITH RECURSIVE cust_sales AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_id,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+    UNION ALL
+    SELECT 
+        cs_bill_customer_sk,
+        SUM(cs_ext_sales_price)
+    FROM catalog_sales
+    GROUP BY cs_bill_customer_sk
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_state,
+        ca.ca_city,
+        COALESCE(SUM(cs.total_sales), 0) AS total_sales
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN cust_sales cs ON c.c_customer_sk = cs.customer_id
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate, ca.ca_state, ca.ca_city
+),
+sales_summary AS (
+    SELECT 
+        cd.ca_state,
+        cd.ca_city,
+        COUNT(*) AS customer_count,
+        SUM(cd.total_sales) AS state_total_sales,
+        AVG(cd.total_sales) AS avg_sales_per_customer,
+        COUNT(CASE WHEN cd.cd_gender = 'M' THEN 1 END) AS male_customers,
+        COUNT(CASE WHEN cd.cd_gender = 'F' THEN 1 END) AS female_customers
+    FROM customer_details cd
+    GROUP BY cd.ca_state, cd.ca_city
+)
+SELECT 
+    ss.ca_state,
+    ss.ca_city,
+    ss.customer_count,
+    ss.state_total_sales,
+    ss.avg_sales_per_customer,
+    MAX(ss.male_customers) AS highest_male_count,
+    MAX(ss.female_customers) AS highest_female_count,
+    NULLIF(ss.state_total_sales, 0) / NULLIF(ss.customer_count, 0) AS sales_per_customer_ratio
+FROM sales_summary ss
+WHERE ss.state_total_sales > (SELECT AVG(state_total_sales) FROM sales_summary)
+ORDER BY ss.state_total_sales DESC
+LIMIT 10;

@@ -1,0 +1,49 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT ai.person_id, ak.name AS actor_name, 
+           ROW_NUMBER() OVER (PARTITION BY ai.person_id ORDER BY ai.id) AS role_order
+    FROM cast_info ai
+    JOIN aka_name ak ON ai.person_id = ak.person_id
+    WHERE ai.nr_order = 1  
+  UNION ALL
+    SELECT ai.person_id, ak.name,
+           ROW_NUMBER() OVER (PARTITION BY ai.person_id ORDER BY ai.id) AS role_order
+    FROM cast_info ai
+    JOIN aka_name ak ON ai.person_id = ak.person_id
+    JOIN actor_hierarchy ah ON ai.movie_id = (SELECT movie_id FROM cast_info WHERE person_id = ah.person_id LIMIT 1)
+    WHERE ai.nr_order > 1  
+),
+movie_details AS (
+    SELECT mt.title, mt.production_year, 
+           ARRAY_AGG(DISTINCT ak.name) AS actor_names,
+           COUNT(DISTINCT mc.company_id) AS company_count,
+           STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM aka_title mt
+    LEFT JOIN cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN movie_keyword mw ON mt.id = mw.movie_id
+    LEFT JOIN keyword kw ON mw.keyword_id = kw.id
+    LEFT JOIN aka_name ak ON ci.person_id = ak.person_id
+    WHERE mt.production_year >= 2000
+    GROUP BY mt.title, mt.production_year
+),
+movies_with_links AS (
+    SELECT md.title, md.production_year, 
+           ml.linked_movie_id, lt.link AS link_type
+    FROM movie_details md
+    LEFT JOIN movie_link ml ON md.title = (SELECT title FROM aka_title WHERE id = ml.movie_id)
+    LEFT JOIN link_type lt ON ml.link_type_id = lt.id
+)
+SELECT m.title AS movie_title,
+       m.production_year,
+       m.actor_names,
+       COALESCE(m.company_count, 0) AS total_companies,
+       STRING_AGG(DISTINCT l.link_type || ': ' || l.linked_movie_id, '; ') AS linked_movies,
+       COUNT(DISTINCT ch.person_id) AS total_actors,
+       ROW_NUMBER() OVER (ORDER BY m.production_year DESC) AS ranking
+FROM movie_details m
+LEFT JOIN movies_with_links l ON m.title = l.title AND m.production_year = l.production_year
+LEFT JOIN actor_hierarchy ch ON ch.person_id = ANY(m.actor_names)
+GROUP BY m.title, m.production_year, m.actor_names
+HAVING COUNT(DISTINCT ch.person_id) > 2  
+ORDER BY m.production_year DESC, ranking;

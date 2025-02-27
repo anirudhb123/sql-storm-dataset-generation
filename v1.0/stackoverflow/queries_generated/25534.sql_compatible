@@ -1,0 +1,66 @@
+
+WITH TagFrequency AS (
+    SELECT 
+        LOWER(TRIM(UNNEST(SPLIT_PART(Tags, '<', 2), '>'))) AS tag,
+        COUNT(*) AS total_posts
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        tag
+), 
+UserEngagement AS (
+    SELECT 
+        u.Id AS user_id,
+        u.DisplayName AS user_name,
+        COUNT(DISTINCT p.Id) AS total_questions,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS positive_questions,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS downvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        tag,
+        total_posts,
+        ROW_NUMBER() OVER (ORDER BY total_posts DESC) AS rank
+    FROM 
+        TagFrequency
+    WHERE 
+        total_posts > 5
+),
+UserEngagementSummary AS (
+    SELECT 
+        ue.user_id,
+        ue.user_name,
+        COUNT(DISTINCT ue.user_id) AS engaging_users,
+        SUM(ue.total_questions) AS total_engaging_questions,
+        SUM(ue.positive_questions) AS total_positive_questions
+    FROM 
+        UserEngagement ue
+    JOIN 
+        TopTags tt ON tt.tag = ANY(SPLIT_PART((SELECT STRING_AGG(Tags, ',') FROM Posts WHERE PostTypeId = 1), '<', 2))
+    GROUP BY 
+        ue.user_id, ue.user_name
+)
+SELECT 
+    ues.user_name,
+    ues.total_engaging_questions,
+    ues.total_positive_questions,
+    tt.tag AS popular_tag,
+    tt.total_posts
+FROM 
+    UserEngagementSummary ues
+JOIN 
+    TopTags tt ON ues.total_positive_questions > 0 AND tt.total_posts > 10
+ORDER BY 
+    ues.total_positive_questions DESC, tt.total_posts DESC
+LIMIT 10;

@@ -1,0 +1,39 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN SalesCTE s ON s.c_custkey = c.c_custkey
+    WHERE o.o_orderdate < CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name,
+           COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, ss.total_parts, ss.total_supply_cost,
+           RANK() OVER (ORDER BY ss.total_supply_cost DESC) AS rank
+    FROM supplier s
+    JOIN SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+    WHERE ss.total_parts > 5
+)
+SELECT c.c_name, COALESCE(SUM(s.total_spent), 0) AS total_spent,
+       COALESCE(s.total_spent / NULLIF(SUM(l.l_extendedprice), 0), 0) AS avg_spent_per_item,
+       t.rank
+FROM customer c
+LEFT JOIN SalesCTE s ON c.c_custkey = s.c_custkey
+LEFT JOIN lineitem l ON c.c_custkey = l.l_orderkey
+JOIN TopSuppliers t ON t.s_suppkey = l.l_suppkey
+WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+GROUP BY c.c_name, t.rank
+ORDER BY total_spent DESC, t.rank ASC;

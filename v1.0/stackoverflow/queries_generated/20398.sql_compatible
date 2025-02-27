@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    GROUP BY 
+        p.Id, p.Title, p.PostTypeId, p.CreationDate, p.OwnerUserId, U.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        clr.Name AS CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS CloseRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes clr ON CAST(ph.Comment AS INT) = clr.Id 
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.UpVoteCount,
+    COALESCE(cp.CloseDate, 'No Close Date') AS CloseDate,
+    COALESCE(cp.CloseReason, 'Not Applicable') AS CloseReason,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    CASE 
+        WHEN rp.UserRank = 1 THEN 'Most Recent Post'
+        ELSE 'Older Post'
+    END AS PostRank
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId AND cp.CloseRank = 1
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE 
+    rp.CommentCount > 0
+    AND (rp.UpVoteCount IS NOT NULL OR rp.OwnerUserId IS NULL) 
+ORDER BY 
+    rp.UpVoteCount DESC, 
+    rp.CreationDate DESC
+LIMIT 100;

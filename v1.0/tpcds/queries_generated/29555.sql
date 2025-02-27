@@ -1,0 +1,57 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_street_number || ' ' || ca.ca_street_name || ' ' || ca.ca_street_type AS full_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        CONCAT(c.c_birth_day, '/', c.c_birth_month, '/', c.c_birth_year) AS birth_date
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesStats AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        AVG(ws_net_paid) AS avg_order_value
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+CombinedInfo AS (
+    SELECT 
+        ci.full_name,
+        ci.full_address,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_purchase_estimate,
+        ci.cd_credit_rating,
+        ci.birth_date,
+        ss.total_sales,
+        ss.order_count,
+        ss.avg_order_value
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        SalesStats ss ON ci.c_customer_id = ss.ws_bill_customer_sk
+)
+SELECT 
+    CONCAT(cd_name, ' | ', full_name, ' | ', full_address, ' | ', cd_gender, ' | ', cd_marital_status, 
+        ' | ', cd_purchase_estimate, ' | ', cd_credit_rating, ' | ', birth_date, 
+        ' | ', COALESCE(total_sales, 0), ' | ', COALESCE(order_count, 0), ' | ', COALESCE(avg_order_value, 0)) AS benchmark_string
+FROM 
+    CombinedInfo
+WHERE 
+    cd_gender = 'M'
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

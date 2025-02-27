@@ -1,0 +1,98 @@
+WITH PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.AcceptedAnswerId,
+        COALESCE(UPV.Count, 0) AS UpVotesCount,
+        COALESCE(DWN.Count, 0) AS DownVotesCount,
+        COALESCE(COALESCE(CH.CommentCount, 0), 0) AS TotalComments,
+        COUNT(DISTINCT pl.RelatedPostId) AS TotalLinks,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS Count 
+        FROM 
+            Votes 
+        WHERE 
+            VoteTypeId = 2 
+        GROUP BY 
+            PostId
+    ) UPV ON p.Id = UPV.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS Count 
+        FROM 
+            Votes 
+        WHERE 
+            VoteTypeId = 3 
+        GROUP BY 
+            PostId
+    ) DWN ON p.Id = DWN.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) CH ON p.Id = CH.PostId
+    LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><') t ON TRUE
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.PostTypeId, p.OwnerUserId, p.CreationDate, p.Score, p.AcceptedAnswerId
+), RankedPosts AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY PostTypeId ORDER BY Score DESC) AS ScoreRank
+    FROM 
+        PostMetrics
+), TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        PostTypeId, 
+        OwnerUserId, 
+        CreationDate, 
+        Score, 
+        UpVotesCount, 
+        DownVotesCount, 
+        TotalComments, 
+        TotalLinks,
+        TagsList
+    FROM 
+        RankedPosts
+    WHERE 
+        ScoreRank <= 10
+)
+
+SELECT 
+    u.DisplayName AS OwnerDisplayName,
+    tp.Title,
+    tp.PostTypeId,
+    tp.CreationDate,
+    tp.Score,
+    tp.UpVotesCount,
+    tp.DownVotesCount,
+    tp.TotalComments,
+    tp.TotalLinks,
+    tp.TagsList
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+WHERE 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users)
+    AND tp.Score > (SELECT AVG(Score) FROM Posts)
+ORDER BY 
+    tp.CreationDate DESC;

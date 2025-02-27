@@ -1,0 +1,63 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000 -- Focusing on more recent movies
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title linked ON linked.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = m.id
+)
+SELECT 
+    m.title,
+    m.production_year,
+    COALESCE(cast_count.casting_count, 0) AS total_cast,
+    ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+    LEAD(m.production_year) OVER (ORDER BY m.production_year) AS next_year
+FROM 
+    movie_hierarchy m
+LEFT JOIN (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.id) AS casting_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+) cast_count ON cast_count.movie_id = m.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id IN (
+        SELECT 
+            ci.person_id 
+        FROM 
+            cast_info ci 
+        WHERE 
+            ci.movie_id = m.movie_id
+    )
+WHERE 
+    m.production_year IS NOT NULL -- Ensuring no NULL production years
+GROUP BY 
+    m.movie_id, m.title, m.production_year, cast_count.casting_count
+HAVING 
+    COUNT(DISTINCT ak.id) > 0 -- Ensure movies have at least one AKA name
+ORDER BY 
+    m.production_year DESC, 
+    total_cast DESC
+LIMIT 10;

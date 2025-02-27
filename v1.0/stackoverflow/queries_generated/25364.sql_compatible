@@ -1,0 +1,58 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore,
+        STRING_AGG(DISTINCT P.OwnerDisplayName, ', ') AS OwnerDisplayNames
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        T.TagName
+),
+BadgeStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(DISTINCT B.Name, ', ') AS Badges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        STRING_AGG(CONCAT(PH.UserDisplayName, ' on ', PH.CreationDate), ' | ') AS HistoryDetails
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId
+)
+SELECT 
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews,
+    TS.AverageScore,
+    TS.OwnerDisplayNames,
+    BS.UserId,
+    BS.BadgeCount,
+    BS.Badges,
+    PHD.HistoryDetails
+FROM 
+    TagStatistics TS
+JOIN 
+    BadgeStatistics BS ON TS.OwnerDisplayNames LIKE CONCAT('%', BS.UserId, '%')
+LEFT JOIN 
+    PostHistoryDetails PHD ON TS.PostCount > 5 
+ORDER BY 
+    TS.AverageScore DESC, 
+    TS.TotalViews DESC;

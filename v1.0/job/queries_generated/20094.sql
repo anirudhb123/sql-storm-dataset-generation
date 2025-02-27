@@ -1,0 +1,55 @@
+WITH RecursiveMovie AS (
+    SELECT m.id AS movie_id, m.title AS movie_title, m.production_year,
+           ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS rn,
+           COALESCE(mk.keyword, 'No Keyword') AS movie_keyword,
+           CASE 
+               WHEN m.production_year IS NULL THEN 'Unknown Year'
+               WHEN m.production_year < 2000 THEN 'Before 2000' 
+               ELSE 'After 2000' 
+           END AS production_range
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    WHERE m.title IS NOT NULL
+),
+FilteredCast AS (
+    SELECT c.movie_id, COUNT(DISTINCT c.person_id) AS cast_count,
+           STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM cast_info c
+    JOIN aka_name ak ON c.person_id = ak.person_id
+    WHERE ak.name IS NOT NULL 
+    GROUP BY c.movie_id
+),
+FilteredCompany AS (
+    SELECT mc.movie_id, COUNT(DISTINCT c.id) AS company_count,
+           STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    WHERE cn.country_code IS NOT NULL AND cn.country_code != ''
+    GROUP BY mc.movie_id
+),
+CompleteInfo AS (
+    SELECT rm.movie_id, rm.movie_title, rm.production_year, rm.production_range,
+           COALESCE(fc.cast_count, 0) AS total_cast,
+           COALESCE(fc.actor_names, 'No Cast') AS actor_names,
+           COALESCE(fcp.company_count, 0) AS total_companies,
+           COALESCE(fcp.company_names, 'No Companies') AS company_names
+    FROM RecursiveMovie rm
+    LEFT JOIN FilteredCast fc ON rm.movie_id = fc.movie_id
+    LEFT JOIN FilteredCompany fcp ON rm.movie_id = fcp.movie_id
+    WHERE rm.production_year IS NOT NULL
+),
+RankedMovies AS (
+    SELECT cm.*, 
+           RANK() OVER (ORDER BY total_cast DESC, production_year DESC) AS rank_by_cast,
+           ROW_NUMBER() OVER (PARTITION BY production_range ORDER BY total_companies ASC) AS row_num_by_company
+    FROM CompleteInfo cm
+)
+SELECT movie_title, production_year, total_cast, actor_names, total_companies, company_names,
+       CASE 
+           WHEN total_cast > 0 AND total_companies > 1 THEN 'High Performing Movie'
+           WHEN total_cast = 0 AND total_companies = 0 THEN 'Needs Improvement'
+           ELSE 'Standard Movie'
+       END AS performance_category
+FROM RankedMovies
+WHERE rank_by_cast <= 10 OR row_num_by_company = 1
+ORDER BY total_cast DESC, production_year ASC, movie_title;

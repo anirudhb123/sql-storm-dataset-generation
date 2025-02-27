@@ -1,0 +1,38 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS supplier_nation, 
+           CONCAT('Supplier: ', s.s_name, ', Nation: ', n.n_name) AS full_info
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+), 
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_type, 
+           CONCAT('Part: ', p.p_name, ', Brand: ', p.p_brand, ', Type: ', p.p_type) AS part_info
+    FROM part p
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           CONCAT('Order: ', o.o_orderkey, ', Customer: ', c.c_name, ', Date: ', o.o_orderdate) AS order_info
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+), 
+LineItemSummaries AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value,
+           COUNT(*) AS total_items,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    sd.full_info AS supplier_information,
+    pd.part_info AS part_information,
+    co.order_info AS customer_order_info,
+    lis.total_line_value AS total_order_value,
+    lis.total_items AS items_in_order,
+    lis.unique_parts AS distinct_parts_in_order
+FROM SupplierDetails sd
+JOIN partsupp ps ON sd.s_suppkey = ps.ps_suppkey
+JOIN PartDetails pd ON ps.ps_partkey = pd.p_partkey
+JOIN CustomerOrders co ON co.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = pd.p_partkey)
+JOIN LineItemSummaries lis ON co.o_orderkey = lis.l_orderkey
+WHERE sd.s_name LIKE 'Supplier%' AND co.o_orderdate >= '2022-01-01'
+ORDER BY total_order_value DESC;

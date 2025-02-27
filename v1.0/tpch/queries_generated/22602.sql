@@ -1,0 +1,62 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) as rn
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F') AND o.o_orderdate >= DATE '2022-01-01'
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_availqty) > 100
+),
+CustomerWithOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(o.o_totalprice), 0) AS total_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COUNT(o.o_orderkey) > 2
+),
+OrderDetails AS (
+    SELECT 
+        lo.l_orderkey,
+        lo.l_partkey,
+        lo.l_suppkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue
+    FROM lineitem lo
+    JOIN RankedOrders ro ON lo.l_orderkey = ro.o_orderkey
+    GROUP BY lo.l_orderkey, lo.l_partkey, lo.l_suppkey
+)
+SELECT 
+    c.c_name,
+    SUM(od.total_revenue) AS customer_revenue,
+    s.total_supply_cost,
+    CASE 
+        WHEN MAX(ro.o_orderdate) > CURRENT_DATE - INTERVAL '1 month' THEN 'Active'
+        ELSE 'Inactive'
+    END AS customer_status
+FROM CustomerWithOrders c
+JOIN OrderDetails od ON c.c_custkey = od.l_orderkey
+LEFT JOIN SupplierInfo s ON od.l_suppkey = s.s_suppkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+WHERE n.n_regionkey = (
+    SELECT r.r_regionkey
+    FROM region r
+    WHERE r.r_name = 'Europe'
+) OR n.n_name LIKE 'X%'
+GROUP BY c.c_name
+HAVING SUM(od.total_revenue) > (SELECT AVG(total_order_value) FROM CustomerWithOrders)
+   AND COUNT(s.s_suppkey) > 1
+ORDER BY customer_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

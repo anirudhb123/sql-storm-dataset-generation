@@ -1,0 +1,67 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId, 
+        ph.PostHistoryTypeId, 
+        ph.CreationDate, 
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn,
+        ph.Comment,
+        ph.UserId,
+        -- Generate an additional field that flags if the close reason is a legacy one
+        CASE 
+            WHEN ph.PostHistoryTypeId = 10 AND 
+                 CAST(ph.Comment AS INT) < 20 THEN 'Legacy Close' 
+            ELSE 'Regular Close' 
+        END AS CloseFlag
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13)
+),
+AggregatedHistory AS (
+    SELECT 
+        PostId, 
+        MAX(CreationDate) AS LastActionDate,
+        COUNT(*) AS ActionCount,
+        SUM(CASE WHEN CloseFlag = 'Legacy Close' THEN 1 ELSE 0 END) AS LegacyCloseCount
+    FROM 
+        RecursivePostHistory
+    GROUP BY 
+        PostId
+),
+TopPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.ViewCount, 
+        a.LastActionDate,
+        a.ActionCount,
+        a.LegacyCloseCount,
+        (SELECT STRING_AGG(t.TagName, ', ') 
+         FROM Tags t 
+         WHERE t.Id IN (SELECT UNNEST(string_to_array(p.Tags, '><')::int[]))) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        AggregatedHistory a ON p.Id = a.PostId
+    WHERE 
+        p.CreationDate >= now() - interval '1 year'
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.LastActionDate,
+    tp.ActionCount,
+    tp.LegacyCloseCount,
+    COALESCE(tp.Tags, 'No tags assigned') AS Tags,
+    CASE 
+        WHEN tp.LegacyCloseCount > 0 THEN 'Attention Needed' 
+        ELSE 'All Clear' 
+    END AS Status
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC
+LIMIT 100;

@@ -1,0 +1,49 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        ak.title,
+        ak.production_year,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title ak ON ml.linked_movie_id = ak.id
+    WHERE 
+        ak.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+)
+SELECT 
+    COALESCE(ak.name, 'Unknown Actor') AS actor_name,
+    COUNT(DISTINCT mh.movie_id) AS total_movies,
+    AVG(mh.depth) AS avg_depth,
+    STRING_AGG(DISTINCT ak.title, '; ') AS featured_movies
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+WHERE 
+    ci.nr_order = 1  
+    AND mh.movie_id IS NOT NULL
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 5  
+ORDER BY 
+    total_movies DESC
+LIMIT 10;

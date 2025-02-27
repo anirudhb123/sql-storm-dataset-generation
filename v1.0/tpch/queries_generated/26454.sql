@@ -1,0 +1,28 @@
+SELECT 
+    CONCAT('Part Name: ', p.p_name, ', Manufacturer: ', p.p_mfgr, ', Retail Price: $', FORMAT(p.p_retailprice, 2), 
+           ' - Comment: ', SUBSTRING(p.p_comment, 1, 20), '...') AS part_details,
+    r.r_name AS region_name,
+    COUNT(DISTINCT l.l_orderkey) AS total_orders,
+    SUM(l.l_quantity) AS total_quantity_sold,
+    AVG(l.l_extendedprice) AS average_price_per_line
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    p.p_size > 10 AND r.r_name LIKE 'S%'
+GROUP BY 
+    part_details, r.r_name
+ORDER BY 
+    total_orders DESC, total_quantity_sold DESC
+LIMIT 10;

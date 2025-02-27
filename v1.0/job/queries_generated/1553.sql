@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) as rank
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    GROUP BY 
+        t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.title, 
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 5
+),
+ActorInfo AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS num_movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON ci.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.name
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    ai.actor_name,
+    ai.num_movies,
+    COALESCE(ci.note, 'No Note') AS cast_note
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    cast_info ci ON ci.movie_id IN (SELECT movie_id FROM complete_cast WHERE movie_id = tm.title)
+INNER JOIN 
+    ActorInfo ai ON ai.num_movies > 10
+WHERE 
+    tm.production_year >= 2000
+EXCEPT 
+SELECT 
+    tm.title,
+    tm.production_year,
+    ai.actor_name,
+    ai.num_movies,
+    'No Note' AS cast_note
+FROM 
+    TopMovies tm
+JOIN 
+    ActorInfo ai ON ai.num_movies <= 10
+ORDER BY 
+    tm.production_year DESC, 
+    ai.num_movies DESC;

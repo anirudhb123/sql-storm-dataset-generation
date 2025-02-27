@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+        AND p.CreationDate > NOW() - INTERVAL '1 year'
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(c.CommentCount, 0)) AS TotalComments,
+        SUM(COALESCE(v.Score, 0)) AS TotalVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        ue.UserId,
+        ue.PostCount,
+        ue.TotalComments,
+        ue.TotalVotes,
+        ue.BadgeCount,
+        RANK() OVER (ORDER BY ue.PostCount DESC, ue.TotalVotes DESC) AS UserRank
+    FROM 
+        UserEngagement ue
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    tu.PostCount,
+    tu.TotalComments,
+    tu.TotalVotes,
+    tu.BadgeCount,
+    rp.Title AS LatestPostTitle,
+    rp.CreationDate AS LatestPostDate
+FROM 
+    Users u
+LEFT JOIN 
+    TopUsers tu ON u.Id = tu.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.Rank = 1
+WHERE 
+    tu.UserRank <= 10
+ORDER BY 
+    tu.PostCount DESC, tu.TotalVotes DESC;

@@ -1,0 +1,65 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.PostTypeId,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        AVG(P.ViewCount) AS AvgViewCount,
+        AVG(P.Score) AS AvgScore,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.PostTypeId
+),
+VoteStats AS (
+    SELECT 
+        V.VoteTypeId,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.VoteTypeId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.TotalPosts,
+    U.TotalBadges,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    P.PostTypeId,
+    P.TotalPosts AS PostsOfType,
+    P.AvgViewCount,
+    P.AvgScore,
+    P.TotalComments,
+    V.VoteTypeId,
+    V.TotalVotes
+FROM 
+    UserStats U
+JOIN 
+    PostStats P ON U.TotalPosts > 0  
+JOIN 
+    VoteStats V ON V.TotalVotes > 0  
+ORDER BY 
+    U.Reputation DESC, P.AvgViewCount DESC;

@@ -1,0 +1,75 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        ws_promo_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk, ws.web_name, ws_promo_sk
+), 
+Customer_Info AS (
+    SELECT 
+        c.c_customer_sk,
+        CASE 
+            WHEN cd_cd_demo_sk IS NOT NULL THEN cd_gender
+            ELSE 'N/A'
+        END AS gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+Recent_Sales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sold_date_sk,
+        ws.ws_ship_mode_sk,
+        ws.ws_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS sale_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_profit > 0
+), 
+Top_Items AS (
+    SELECT 
+        item.i_item_sk,
+        item.i_product_name,
+        SUM(rs.ws_net_profit) AS total_profit
+    FROM 
+        Recent_Sales rs
+    JOIN item ON rs.ws_item_sk = item.i_item_sk
+    WHERE 
+        rs.sale_rank <= 5
+    GROUP BY 
+        item.i_item_sk, item.i_product_name
+)
+SELECT 
+    ci.gender,
+    ci.cd_marital_status,
+    ci.cd_education_status,
+    ci.cd_purchase_estimate,
+    t_i.i_product_name,
+    t_i.total_profit,
+    sc.total_sales,
+    (SELECT COUNT(DISTINCT sr_ticket_number) 
+     FROM store_returns 
+     WHERE sr_return_quantity > 0 AND sr_item_sk = t_i.i_item_sk) AS return_count
+FROM 
+    Customer_Info ci
+JOIN 
+    Top_Items t_i ON ci.c_customer_sk = (CASE WHEN cd_dep_count IS NULL THEN ci.c_customer_sk ELSE ci.c_current_cdemo_sk END)
+JOIN 
+    Sales_CTE sc ON t_i.i_item_sk = sc.ws_promo_sk
+WHERE 
+    sc.sales_rank <= 10
+ORDER BY 
+    t_i.total_profit DESC, 
+    ci.cd_purchase_estimate ASC;

@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+        
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        at.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+)
+
+SELECT 
+    ak.name,
+    COUNT(DISTINCT mc.movie_id) AS total_movies,
+    AVG(COALESCE(mk_count.keyword_count, 0)) AS avg_keywords_per_movie,
+    STRING_AGG(DISTINCT CASE WHEN ck.kind IS NOT NULL THEN ck.kind END, ', ') AS company_kinds,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY COUNT(DISTINCT mc.movie_id) DESC) AS rank_by_movies
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+LEFT JOIN 
+    complete_cast cc ON ci.movie_id = cc.movie_id
+INNER JOIN 
+    movie_companies mc ON cc.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mc.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    company_type ck ON mc.company_type_id = ck.id
+LEFT JOIN 
+    (SELECT 
+         movie_id,
+         COUNT(keyword_id) AS keyword_count
+     FROM 
+         movie_keyword
+     GROUP BY 
+         movie_id) AS mk_count ON mc.movie_id = mk_count.movie_id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT mc.movie_id) > 5
+ORDER BY 
+    total_movies DESC
+LIMIT 10;

@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.PostTypeId = 1
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        ph.PostId, ph.UserId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        SUM(v.BountyAmount) AS TotalBounty,
+        AVG(v.CreationDate) AS AvgVoteDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.OwnerDisplayName,
+    r.CreationDate,
+    r.Score,
+    re.EditCount,
+    re.LastEditDate,
+    ua.TotalQuestions,
+    ua.TotalBounty
+FROM 
+    RankedPosts r
+LEFT JOIN 
+    RecentEdits re ON r.PostId = re.PostId
+LEFT JOIN 
+    UserActivity ua ON r.Rank = 1 AND ua.UserId = r.OwnerDisplayName
+WHERE 
+    r.Rank <= 5
+ORDER BY 
+    r.Score DESC, r.CreationDate DESC;

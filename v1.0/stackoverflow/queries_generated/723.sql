@@ -1,0 +1,66 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId, 
+        COUNT(*) AS BadgeCount, 
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AvgViewCount 
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= '2023-01-01'
+    GROUP BY 
+        P.OwnerUserId
+),
+ActiveUsers AS (
+    SELECT 
+        U.Id, 
+        U.DisplayName, 
+        COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+        COALESCE(PS.PostCount, 0) AS PostCount,
+        COALESCE(PS.TotalScore, 0) AS TotalScore,
+        COALESCE(PS.AvgViewCount, 0) AS AvgViewCount,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(PS.TotalScore, 0) DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserBadges UB ON U.Id = UB.UserId
+    LEFT JOIN 
+        PostStats PS ON U.Id = PS.OwnerUserId
+    WHERE 
+        U.Reputation > 1000 
+        AND (U.Location IS NOT NULL OR U.WebsiteUrl IS NOT NULL) 
+        AND (U.CreationDate < CURRENT_TIMESTAMP - INTERVAL '1 year')
+)
+SELECT 
+    A.UserId, 
+    A.DisplayName,
+    A.BadgeCount, 
+    A.PostCount, 
+    A.TotalScore, 
+    A.AvgViewCount,
+    CASE 
+        WHEN A.BadgeCount = 0 THEN 'No Badge'
+        WHEN A.BadgeCount > 5 THEN 'Veteran'
+        ELSE 'Novice'
+    END AS UserCategory
+FROM 
+    ActiveUsers A
+WHERE 
+    A.Rank <= 10
+ORDER BY 
+    A.TotalScore DESC;
+

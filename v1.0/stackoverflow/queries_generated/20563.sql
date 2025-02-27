@@ -1,0 +1,77 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 3) AS BronzeBadges,
+        DENSE_RANK() OVER (ORDER BY COUNT(B.Id) DESC) AS BadgeRank
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostData AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS PostRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.Id
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        P.Score,
+        P.Title,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS CloseRank
+    FROM PostHistory PH
+    JOIN Posts P ON PH.PostId = P.Id
+    WHERE PH.PostHistoryTypeId = 10     -- Posts that have been closed
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.LastAccessDate,
+        U.BadgeCount,
+        SUM(COALESCE(VoteTypeId = 2, 0)::int) AS UpVotes,
+        SUM(COALESCE(VoteTypeId = 3, 0)::int) AS DownVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id
+)
+
+SELECT 
+    UB.DisplayName,
+    UB.GoldBadges, 
+    UB.SilverBadges, 
+    UB.BronzeBadges,
+    PD.Title,
+    PD.Score,
+    PD.ViewCount,
+    PD.CommentCount,
+    UP.Reputation,
+    UP.UpVotes,
+    UP.DownVotes,
+    COALESCE(CP.Comment, 'Not Closed') AS ClosingComment,
+    CASE WHEN CP.CloseRank IS NOT NULL THEN 'Closed' ELSE 'Active' END AS PostStatus
+FROM UserBadges UB
+JOIN PostData PD ON UB.UserId = PD.OwnerUserId
+LEFT JOIN ClosedPosts CP ON PD.PostId = CP.PostId
+JOIN UserStats UP ON UB.UserId = UP.UserId
+WHERE 
+    (UB.BadgeRank <= 10 OR UP.Reputation > 1000)  -- Top Badges or High Reputation Users
+    AND PD.PostRank <= 5  -- Top 5 Posts of the User
+ORDER BY 
+    UB.BadgeRank, PD.Score DESC 
+FETCH FIRST 50 ROWS ONLY;
+
+-- The query outputs badge counts for users alongside post statistics.
+-- It highlights a joining of various tables with complex analytics across badge ranking, post scoring, and user activity metrics.

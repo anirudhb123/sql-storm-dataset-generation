@@ -1,0 +1,42 @@
+WITH RECURSIVE nation_supplier AS (
+    SELECT n.n_nationkey, n.n_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM nation_supplier ns
+    JOIN supplier s ON ns.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+part_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+customer_order_count AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+ranked_customers AS (
+    SELECT c.*, RANK() OVER (ORDER BY co.order_count DESC) AS rank
+    FROM customer c
+    JOIN customer_order_count co ON c.c_custkey = co.c_custkey
+)
+SELECT ns.n_name AS nation_name,
+       ps.p_name AS part_name,
+       ps.total_supplycost,
+       rc.c_name AS customer_name,
+       rc.order_count
+FROM nation_supplier ns
+FULL OUTER JOIN part_summary ps ON ns.s_suppkey = ps.p_partkey
+JOIN ranked_customers rc ON rc.c_custkey = ns.s_suppkey
+WHERE ps.total_supplycost > (SELECT AVG(total_supplycost) FROM part_summary)
+  AND rc.rank <= 10
+  AND ns.s_name IS NOT NULL
+ORDER BY ns.n_name, ps.total_supplycost DESC, rc.order_count DESC;

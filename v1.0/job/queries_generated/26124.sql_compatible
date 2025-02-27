@@ -1,0 +1,57 @@
+
+WITH movie_actors AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        r.role AS actor_role,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY a.name) AS actor_rank
+    FROM
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+),
+movie_keywords AS (
+    SELECT 
+        t.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id
+),
+movie_details AS (
+    SELECT 
+        ma.actor_name,
+        ma.movie_title,
+        ma.production_year,
+        ma.actor_role,
+        mk.keywords
+    FROM 
+        movie_actors ma
+    LEFT JOIN 
+        movie_keywords mk ON ma.movie_title = mk.movie_title
+)
+SELECT 
+    actor_name,
+    movie_title,
+    production_year,
+    actor_role,
+    keywords
+FROM 
+    movie_details
+WHERE 
+    actor_rank <= 3
+ORDER BY 
+    production_year DESC, 
+    actor_name;

@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.OwnerUserId, 
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(p.Score) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        ph.CreationDate,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+        AND ph.Comment IS NOT NULL
+),
+CombinedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CommentCount,
+        tu.DisplayName,
+        tu.Reputation,
+        cp.CreationDate AS ClosedDate,
+        cp.Comment AS CloseReason
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        TopUsers tu ON rp.OwnerUserId = tu.UserId
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+)
+SELECT 
+    cd.Title,
+    cd.Score,
+    cd.CommentCount,
+    cd.DisplayName,
+    cd.Reputation,
+    COALESCE(cd.ClosedDate, 'Not Closed') AS ClosedDate,
+    COALESCE(cd.CloseReason, 'N/A') AS CloseReason,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = cd.PostId AND v.VoteTypeId = 2) AS UpVoteCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = cd.PostId AND v.VoteTypeId = 3) AS DownVoteCount
+FROM 
+    CombinedData cd
+WHERE 
+    cd.Reputation IS NOT NULL
+ORDER BY 
+    cd.Score DESC, 
+    cd.CommentCount DESC
+FETCH FIRST 50 ROWS ONLY;

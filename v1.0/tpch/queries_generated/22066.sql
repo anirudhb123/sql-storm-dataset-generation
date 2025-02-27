@@ -1,0 +1,59 @@
+WITH RECURSIVE supplier_ranks AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+ranked_parts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+high_cost_parts AS (
+    SELECT p.p_partkey, p.p_name
+    FROM ranked_parts p
+    WHERE p.total_supply_cost > (SELECT AVG(total_supply_cost) FROM ranked_parts) 
+    AND NOT EXISTS (SELECT 1 FROM lineitem l WHERE l.l_partkey = p.p_partkey AND l.l_discount < 0.05)
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(DISTINCT o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_mktsegment = 'BUILDING'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+order_details AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_item_value
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+),
+final_report AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(co.order_count, 0) AS order_count,
+        COALESCE(co.total_spent, 0) AS total_spent,
+        CASE 
+            WHEN p.p_partkey IS NOT NULL THEN 'Yes'
+            ELSE 'No'
+        END AS has_high_cost_part,
+        SUM(COALESCE(od.total_line_item_value, 0)) AS total_order_value
+    FROM customer_orders co
+    FULL OUTER JOIN high_cost_parts p ON co.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT DISTINCT n.n_nationkey FROM nation n WHERE n.n_name = 'CANADA'))
+    LEFT JOIN order_details od ON co.order_count = od.o_orderkey
+    GROUP BY c.c_custkey, c.c_name, p.p_partkey
+)
+SELECT 
+    fr.c_custkey,
+    fr.c_name,
+    fr.order_count,
+    fr.total_spent,
+    fr.has_high_cost_part,
+    fr.total_order_value,
+    RANK() OVER (PARTITION BY fr.has_high_cost_part ORDER BY fr.total_order_value DESC) AS ranking
+FROM final_report fr
+WHERE fr.total_spent IS NOT NULL
+ORDER BY fr.has_high_cost_part, fr.total_order_value DESC, fr.c_name;

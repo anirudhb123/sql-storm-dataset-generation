@@ -1,0 +1,66 @@
+WITH RECURSIVE enhanced_cast AS (
+    SELECT 
+        c.id AS cast_id,
+        c.movie_id,
+        c.person_id,
+        c.note,
+        c.nr_order,
+        c.role_id,
+        1 AS level
+    FROM
+        cast_info c
+    WHERE
+        c.note IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        c.id AS cast_id,
+        c.movie_id,
+        c.person_id,
+        CONCAT(c.note, ' and more') AS note,
+        c.nr_order,
+        c.role_id,
+        ec.level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        enhanced_cast ec ON c.movie_id = ec.movie_id 
+    WHERE 
+        ec.level < 3  
+)
+
+SELECT 
+    t.title AS movie_title,
+    ak.name AS actor_name,
+    ek.level AS performance_level,
+    COUNT(DISTINCT ek.cast_id) OVER (PARTITION BY t.id) AS total_cast_count,
+    STRING_AGG(DISTINCT COALESCE(k.keyword, 'no keyword'), ', ') AS keywords,
+    STRING_AGG(DISTINCT c.kind) AS company_types,
+    FIRST_VALUE(ci.info) OVER (PARTITION BY t.id ORDER BY ci.info_type_id) AS first_info,
+    MAX(CASE WHEN ci.note IS NULL THEN 'No notes available' ELSE ci.note END) AS note_status
+FROM 
+    aka_title t
+LEFT JOIN 
+    aka_name ak ON ak.person_id IN (SELECT DISTINCT person_id FROM cast_info WHERE movie_id = t.movie_id)
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.movie_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = t.movie_id
+LEFT JOIN 
+    company_type c ON c.id = mc.company_type_id
+LEFT JOIN 
+    movie_info ci ON ci.movie_id = t.movie_id
+JOIN 
+    enhanced_cast ek ON ek.movie_id = t.movie_id
+WHERE 
+    t.production_year > 2000 
+    AND (ak.name LIKE 'A%' OR ak.name IS NULL)
+GROUP BY 
+    t.id, ak.name, ek.level
+HAVING 
+    COUNT(DISTINCT k.keyword) > 1 
+ORDER BY 
+    total_cast_count DESC, movie_title ASC;

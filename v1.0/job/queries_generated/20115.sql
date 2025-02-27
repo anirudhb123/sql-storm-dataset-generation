@@ -1,0 +1,70 @@
+WITH ranked_movies AS (
+    SELECT
+        mt.title AS movie_title,
+        mt.production_year,
+        ARRAY_AGG(DISTINCT cn.name) AS companies,
+        ROW_NUMBER() OVER (PARTITION BY mt.kind_id ORDER BY mt.production_year DESC) AS rn
+    FROM
+        aka_title mt
+    LEFT JOIN
+        movie_companies mc ON mc.movie_id = mt.id
+    LEFT JOIN
+        company_name cn ON cn.id = mc.company_id
+    WHERE
+        mt.production_year IS NOT NULL
+    GROUP BY
+        mt.id, mt.title, mt.production_year, mt.kind_id
+),
+recent_years AS (
+    SELECT DISTINCT
+        production_year
+    FROM
+        ranked_movies
+    WHERE
+        rn = 1
+),
+cast_stats AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        COUNT(DISTINCT ci.role_id) FILTER (WHERE ci.note IS NOT NULL) AS noted_roles
+    FROM
+        cast_info ci
+    GROUP BY
+        ci.movie_id
+),
+company_role_counts AS (
+    SELECT
+        mc.movie_id,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS roles_count
+    FROM
+        movie_companies mc
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN
+        cast_info ci ON ci.movie_id = mc.movie_id
+    GROUP BY
+        mc.movie_id, ct.kind
+)
+SELECT
+    rm.movie_title,
+    rm.production_year,
+    COALESCE(cs.cast_count, 0) AS total_cast,
+    COALESCE(cs.noted_roles, 0) AS noted_roles,
+    rys.production_year AS recent_year
+FROM
+    ranked_movies rm
+LEFT JOIN
+    cast_stats cs ON rm.id = cs.movie_id
+JOIN
+    recent_years rys ON rm.production_year = rys.production_year
+LEFT JOIN
+    company_role_counts crc ON rm.id = crc.movie_id
+WHERE
+    (rm.production_year BETWEEN 2000 AND 2023)
+    AND (COALESCE(crc.company_count, 0) > 1 OR crc.roles_count IS NULL)
+ORDER BY
+    rm.production_year DESC,
+    rm.movie_title;

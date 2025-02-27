@@ -1,0 +1,39 @@
+
+WITH RankedPromotions AS (
+    SELECT 
+        p.p_promo_name,
+        COUNT(ws.ws_order_number) AS total_sales,
+        SUM(ws.ws_ext_sales_price) AS total_revenue,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        ROW_NUMBER() OVER (ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    WHERE 
+        p.p_start_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND p.p_end_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        p.p_promo_name
+),
+StringProcessing AS (
+    SELECT 
+        rp.p_promo_name,
+        rp.total_sales,
+        rp.total_revenue,
+        rp.total_discount,
+        CONCAT('Promo: ', rp.p_promo_name, ' | Total Sales: ', rp.total_sales, ' | Total Revenue: $', FORMAT(rp.total_revenue, 2), ' | Total Discount: $', FORMAT(rp.total_discount, 2)) AS formatted_string
+    FROM 
+        RankedPromotions rp
+    WHERE 
+        rp.rank <= 10
+)
+SELECT 
+    SP.formatted_string,
+    LENGTH(SP.formatted_string) AS string_length,
+    REPLACE(SP.formatted_string, ' ', '') AS string_no_spaces,
+    CHAR_LENGTH(SP.formatted_string) AS char_length
+FROM 
+    StringProcessing SP
+ORDER BY 
+    SP.total_revenue DESC;

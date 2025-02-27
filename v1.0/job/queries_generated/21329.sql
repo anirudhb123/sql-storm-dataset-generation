@@ -1,0 +1,80 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+, cast_roles AS (
+    SELECT 
+        c.id AS cast_id,
+        a.name AS actor_name,
+        mt.title AS movie_title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.name ORDER BY mt.production_year) AS movie_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title mt ON c.movie_id = mt.id
+    WHERE 
+        a.name IS NOT NULL AND 
+        mt.production_year > 2000
+)
+, company_aggregate AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    mh.movie_id, 
+    mh.title, 
+    mh.production_year,
+    COALESCE(cr.actor_name, 'No Actors') AS actor_name,
+    COALESCE(ca.company_count, 0) AS company_count,
+    ra.gender AS actor_gender,
+    cr.movie_order,
+    CASE 
+        WHEN cr.movie_order IS NULL THEN 'Unknown Order'
+        ELSE 'Known Order'
+    END AS order_status
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_roles cr ON mh.movie_id = cr.movie_title
+LEFT JOIN 
+    company_aggregate ca ON mh.movie_id = ca.movie_id
+LEFT JOIN 
+    name ra ON ra.id = (SELECT person_id 
+                        FROM person_info pi 
+                        WHERE pi.info = 'gender' AND pi.person_id = cr.cast_id 
+                        LIMIT 1)
+ORDER BY 
+    mh.production_year DESC NULLS FIRST,
+    COALESCE(cr.movie_order, 999) ASC;

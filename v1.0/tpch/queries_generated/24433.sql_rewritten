@@ -1,0 +1,44 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rnk
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_name IN (SELECT DISTINCT n_name FROM nation WHERE n_regionkey IN (1, 2))
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, rnk
+    FROM top_suppliers ts
+    JOIN supplier s ON s.s_suppkey = ts.s_suppkey
+    WHERE ts.rnk < 5
+),
+order_stats AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_profit
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND l.l_discount NOT IN (0.0, NULL)
+    GROUP BY o.o_orderkey
+),
+part_supplier AS (
+    SELECT p.p_partkey, ps.ps_suppkey, p.p_retailprice
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_container IS NOT NULL)
+),
+supplier_part_counts AS (
+    SELECT ps.ps_suppkey, COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM part_supplier ps
+    GROUP BY ps.ps_suppkey
+),
+final_selection AS (
+    SELECT ts.s_name, ts.s_acctbal, osc.o_orderkey, osc.total_profit, spc.part_count
+    FROM top_suppliers ts
+    LEFT OUTER JOIN order_stats osc ON ts.s_suppkey = osc.o_orderkey
+    LEFT JOIN supplier_part_counts spc ON ts.s_suppkey = spc.ps_suppkey
+    WHERE (spc.part_count IS NULL OR spc.part_count > 1) 
+          AND (ts.s_acctbal IS NOT NULL OR ts.s_acctbal < 1000) 
+          AND ts.s_name LIKE '%Inc%'
+)
+SELECT f.s_name, COALESCE(SUM(f.total_profit), 0) AS total_profit, 
+       COUNT(DISTINCT f.o_orderkey) AS num_orders, AVG(f.part_count) AS avg_parts
+FROM final_selection f
+GROUP BY f.s_name
+HAVING total_profit > 10000
+ORDER BY total_profit DESC, f.s_name;

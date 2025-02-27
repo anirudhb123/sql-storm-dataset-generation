@@ -1,0 +1,90 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+TotalOrders AS (
+    SELECT 
+        o.o_custkey, 
+        COUNT(*) AS total_order_count
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY 
+        o.o_custkey
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_brand, 
+        p.p_retailprice
+    FROM 
+        part p
+    WHERE 
+        EXISTS (
+            SELECT 1 
+            FROM partsupp ps 
+            WHERE ps.ps_partkey = p.p_partkey 
+              AND ps.ps_availqty > 100
+        )
+),
+SelectedNation AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name 
+    FROM 
+        nation n
+    WHERE 
+        n.n_comment LIKE '%special%'
+)
+SELECT 
+    c.c_name,
+    COALESCE((
+        SELECT COUNT(*)
+        FROM orders o
+        WHERE o.o_custkey = c.c_custkey
+          AND o.o_totalprice > 1000
+    ), 0) AS high_value_order_count,
+    s.s_name AS supplier_name,
+    p.p_name AS part_name,
+    ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY p.p_retailprice DESC) AS price_rank
+FROM 
+    customer c
+LEFT JOIN 
+    TotalOrders to ON c.c_custkey = to.o_custkey
+JOIN 
+    lineitem li ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+JOIN 
+    HighValueParts p ON li.l_partkey = p.p_partkey
+LEFT JOIN 
+    RankedSuppliers s ON s.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = p.p_partkey 
+          AND ps.ps_availqty > 0
+    )
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM SelectedNation sn 
+        WHERE sn.n_nationkey = c.c_nationkey
+    )
+AND 
+    (c.c_acctbal IS NULL OR c.c_acctbal > 500.00)
+GROUP BY 
+    c.c_name, 
+    c.c_custkey, 
+    s.s_name, 
+    p.p_name
+ORDER BY 
+    c.c_custkey, 
+    high_value_order_count DESC, 
+    price_rank ASC;

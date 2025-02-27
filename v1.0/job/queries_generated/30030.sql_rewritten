@@ -1,0 +1,84 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        m.imdb_index,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        m.imdb_index,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title linked ON linked.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = linked.id
+    WHERE 
+        linked.production_year < mh.production_year 
+),
+cast_with_roles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT c.role_id::TEXT, ', ') AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type c ON ci.role_id = c.id
+    GROUP BY 
+        ci.movie_id
+),
+movies_info AS (
+    SELECT 
+        mh.movie_id, 
+        mh.title,
+        mh.production_year,
+        COALESCE(ci.actor_count, 0) AS actor_count,
+        COALESCE(ci.roles, 'None') AS roles,
+        COALESCE(ki.keywords, 'None') AS keywords
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_with_roles ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN (
+        SELECT 
+            mk.movie_id, 
+            STRING_AGG(k.keyword, ', ') AS keywords
+        FROM 
+            movie_keyword mk
+        JOIN 
+            keyword k ON mk.keyword_id = k.id
+        GROUP BY 
+            mk.movie_id
+    ) ki ON mh.movie_id = ki.movie_id
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    m.actor_count,
+    m.roles,
+    CASE 
+        WHEN m.actor_count > 5 THEN 'Ensemble Cast'
+        WHEN m.actor_count BETWEEN 3 AND 5 THEN 'Notable Cast'
+        ELSE 'Small Cast'
+    END AS cast_category,
+    m.keywords
+FROM 
+    movies_info m
+ORDER BY 
+    m.production_year DESC, 
+    m.actor_count DESC;

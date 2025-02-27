@@ -1,0 +1,56 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+AggregateCompanies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        mc.note IS NULL
+    GROUP BY 
+        mc.movie_id
+),
+TitleKeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    COALESCE(rm.production_year, 'Unknown') AS production_year,
+    COALESCE(ac.company_count, 0) AS company_count,
+    COALESCE(ac.company_names, '') AS company_names,
+    COALESCE(tkc.keyword_count, 0) AS keyword_count,
+    CASE WHEN rm.rank <= 3 THEN 'Top 3' ELSE 'Others' END AS movie_rank_category
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    AggregateCompanies ac ON rm.movie_id = ac.movie_id
+LEFT JOIN 
+    TitleKeywordCounts tkc ON rm.movie_id = tkc.movie_id
+ORDER BY 
+    rm.production_year DESC, 
+    rm.rank;

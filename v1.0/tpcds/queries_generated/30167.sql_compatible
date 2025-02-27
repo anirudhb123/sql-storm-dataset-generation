@@ -1,0 +1,40 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws.ws_sold_date_sk, 
+        ws.ws_item_sk, 
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM web_sales ws
+    GROUP BY ws.ws_sold_date_sk, ws.ws_item_sk
+    
+    UNION ALL
+    
+    SELECT 
+        prev_date.ws_sold_date_sk, 
+        prev_date.ws_item_sk, 
+        SUM(prev_date.total_quantity) + SUM(ws.ws_quantity) AS total_quantity,
+        SUM(prev_date.total_net_profit) + SUM(ws.ws_net_profit) AS total_net_profit
+    FROM sales_data prev_date
+    JOIN web_sales ws ON ws.ws_sold_date_sk < prev_date.ws_sold_date_sk
+    GROUP BY prev_date.ws_sold_date_sk, prev_date.ws_item_sk
+),
+top_sales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY sd.ws_item_sk ORDER BY sd.total_net_profit DESC) AS rank
+    FROM sales_data sd
+)
+SELECT 
+    ia.i_item_id,
+    ia.i_item_desc,
+    ts.total_quantity,
+    ts.total_net_profit
+FROM item ia
+JOIN top_sales ts ON ia.i_item_sk = ts.ws_item_sk
+WHERE ts.rank = 1
+AND ts.total_quantity > (SELECT AVG(total_quantity) FROM top_sales)
+ORDER BY ts.total_net_profit DESC
+FETCH FIRST 10 ROWS ONLY;

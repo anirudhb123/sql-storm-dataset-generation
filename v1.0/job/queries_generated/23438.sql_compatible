@@ -1,0 +1,62 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.id) AS year_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+),
+FilteredRankedMovies AS (
+    SELECT 
+        title_id,
+        title,
+        production_year,
+        year_rank,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        (production_year IS NOT NULL OR year_rank < 5) 
+        AND (cast_count > 2 OR cast_count IS NULL)
+),
+TitleWithActors AS (
+    SELECT 
+        f.title_id,
+        f.title,
+        f.production_year,
+        a.name AS actor_name,
+        COALESCE(c.kind, 'Unknown') AS role_type,
+        ROW_NUMBER() OVER (PARTITION BY f.title_id ORDER BY a.name) AS actor_rank
+    FROM 
+        FilteredRankedMovies f
+    JOIN 
+        cast_info ci ON f.title_id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        comp_cast_type c ON ci.role_id = c.id
+)
+SELECT 
+    t.title,
+    t.production_year,
+    STRING_AGG(DISTINCT a.actor_name || ' (' || COALESCE(a.role_type, 'No Role') || ')', ', ') AS actors,
+    AVG(COALESCE(m.info, 0)) AS avg_votes,
+    MAX(t.year_rank) AS max_year_rank,
+    MIN(t.cast_count) AS min_cast_count
+FROM 
+    FilteredRankedMovies t
+LEFT JOIN 
+    TitleWithActors a ON t.title_id = a.title_id
+LEFT JOIN 
+    movie_info m ON t.title_id = m.movie_id AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'Vote')
+GROUP BY 
+    t.title, t.production_year
+HAVING 
+    COUNT(DISTINCT a.actor_name) >= 3
+ORDER BY 
+    t.production_year DESC, max_year_rank ASC, min_cast_count ASC;

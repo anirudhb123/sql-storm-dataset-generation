@@ -1,0 +1,54 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        SUM(ws.ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.web_site_id, c.c_first_name, c.c_last_name
+),
+top_sales AS (
+    SELECT 
+        web_site_id, 
+        c_first_name, 
+        c_last_name, 
+        total_profit 
+    FROM 
+        ranked_sales 
+    WHERE 
+        profit_rank <= 10
+),
+customer_details AS (
+    SELECT 
+        c.customer_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status 
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+
+SELECT 
+    ts.web_site_id, 
+    ts.c_first_name, 
+    ts.c_last_name, 
+    ts.total_profit,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status
+FROM 
+    top_sales ts
+JOIN 
+    customer_details cd ON ts.web_site_id = cd.customer_sk;

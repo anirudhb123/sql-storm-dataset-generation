@@ -1,0 +1,95 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rn
+    FROM
+        web_sales ws
+    JOIN
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE
+        i.i_current_price > 0 AND
+        ws.ws_sales_price IS NOT NULL
+    GROUP BY
+        ws.ws_item_sk, ws.ws_order_number
+),
+CustomerReturns AS (
+    SELECT
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_return_qty,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM
+        store_returns
+    GROUP BY
+        sr_item_sk
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_customer_id,
+        SUM(ws.ws_net_paid_inc_tax) AS total_paid
+    FROM
+        customer c
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        c.c_preferred_cust_flag = 'Y'
+    GROUP BY
+        c.c_customer_id
+    HAVING
+        SUM(ws.ws_net_paid_inc_tax) > 10000
+),
+FinalSales AS (
+    SELECT
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        rs.total_quantity,
+        COALESCE(cr.total_return_qty, 0) AS total_return_qty,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        CASE
+            WHEN COALESCE(cr.total_return_qty, 0) > rs.total_quantity THEN 'EXCESS RETURNS'
+            ELSE 'NORMAL'
+        END AS return_status
+    FROM
+        RankedSales rs
+    LEFT JOIN
+        CustomerReturns cr ON rs.ws_item_sk = cr.sr_item_sk
+    WHERE
+        rs.rn = 1
+),
+SalesWithCustomerRank AS (
+    SELECT
+        fs.ws_item_sk,
+        fs.total_quantity,
+        fs.total_return_qty,
+        fs.total_return_amt,
+        CASE 
+            WHEN hvc.total_paid IS NOT NULL THEN 'HIGH VALUE CUSTOMER'
+            ELSE 'REGULAR CUSTOMER'
+        END AS customer_status,
+        AVG(fs.total_return_amt) OVER (PARTITION BY fs.return_status) AS avg_return_amt
+    FROM
+        FinalSales fs
+    LEFT JOIN
+        HighValueCustomers hvc ON hvc.c_customer_id IN (
+            SELECT c.c_customer_id 
+            FROM web_sales ws
+            JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+            WHERE ws.ws_item_sk = fs.ws_item_sk
+        )
+)
+SELECT
+    f.ws_item_sk,
+    f.total_quantity,
+    CONCAT('Returns: ', f.total_return_qty, 
+           ' - Return Amount: ', f.total_return_amt, 
+           ' - Customer Status: ', f.customer_status,
+           ' - Avg Return Amount: ', f.avg_return_amt) AS detailed_info
+FROM
+    SalesWithCustomerRank f
+WHERE
+    f.total_return_amt > (SELECT AVG(total_return_amt) FROM SalesWithCustomerRank)
+ORDER BY
+    f.ws_item_sk;

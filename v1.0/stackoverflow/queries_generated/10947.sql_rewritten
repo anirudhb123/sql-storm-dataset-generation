@@ -1,0 +1,63 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(ARRAY_AGG(DISTINCT t.TagName), '{}') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS TagArray
+    LEFT JOIN 
+        Tags t ON t.TagName = UNNEST(TagArray)
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.OwnerDisplayName,
+    ps.Tags,
+    us.UserId,
+    us.DisplayName AS UserDisplayName,
+    us.TotalPosts,
+    us.TotalQuestions,
+    us.TotalAnswers,
+    us.TotalBadges
+FROM 
+    PostStats ps
+JOIN 
+    UserStats us ON ps.OwnerDisplayName = us.DisplayName
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

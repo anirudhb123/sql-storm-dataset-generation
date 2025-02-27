@@ -1,0 +1,69 @@
+
+WITH RecursiveMovieData AS (
+    SELECT 
+        a.id AS aka_id,
+        a.person_id,
+        t.id AS title_id,
+        t.title,
+        COALESCE(t.production_year, 0) AS prod_year,
+        COALESCE(ci.role_id, 0) AS role_id,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        r.aka_id,
+        r.person_id,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        r.rn
+    FROM 
+        RecursiveMovieData r
+    WHERE 
+        r.rn < 3
+),
+FilteredMovieData AS (
+    SELECT 
+        *,
+        DENSE_RANK() OVER (PARTITION BY person_id ORDER BY prod_year DESC) AS dense_rank
+    FROM 
+        RecursiveMovieData
+    WHERE 
+        title IS NOT NULL
+)
+SELECT 
+    f.person_id,
+    f.title,
+    f.prod_year,
+    c.kind AS company_kind,
+    n.gender,
+    (SELECT COUNT(*) 
+     FROM movie_keyword mk 
+     WHERE mk.movie_id = f.title_id) AS keyword_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    FilteredMovieData f
+LEFT JOIN 
+    company_name c ON f.title_id = c.imdb_id
+LEFT JOIN 
+    name n ON f.person_id = n.imdb_id
+LEFT JOIN 
+    movie_keyword k ON f.title_id = k.movie_id
+WHERE 
+    f.dense_rank = 1
+    AND (f.prod_year BETWEEN 2000 AND 2023 OR f.prod_year IS NULL)
+GROUP BY 
+    f.person_id, f.title, f.prod_year, c.kind, n.gender
+HAVING 
+    COUNT(k.keyword) > 0
+ORDER BY 
+    f.prod_year DESC, f.title ASC
+LIMIT 10;

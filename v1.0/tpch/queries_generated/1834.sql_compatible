@@ -1,0 +1,57 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY SUM(ps.ps_supplycost) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_type
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        s.s_comment 
+    FROM 
+        RankedSuppliers s
+    WHERE 
+        s.supplier_rank = 1
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS orders_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    cs.c_name,
+    cs.total_spent,
+    COALESCE(ts.s_name, 'No Supplier') AS top_supplier,
+    COALESCE(ts.s_acctbal, 0) AS supplier_account_balance,
+    CASE 
+        WHEN cs.orders_count > 10 THEN 'Frequent Buyer'
+        ELSE 'Occasional Buyer' 
+    END AS customer_category
+FROM 
+    CustomerStats cs
+FULL OUTER JOIN 
+    TopSuppliers ts ON cs.c_custkey = ts.s_suppkey
+WHERE 
+    cs.total_spent > 500 OR ts.s_acctbal IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC NULLS LAST;

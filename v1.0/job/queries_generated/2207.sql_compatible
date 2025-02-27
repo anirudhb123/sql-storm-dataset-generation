@@ -1,0 +1,77 @@
+
+WITH RECURSIVE movie_ratings AS (
+    SELECT
+        title.id AS movie_id,
+        title.title,
+        COUNT(rating.id) AS rating_count,
+        AVG(rating.value) AS average_rating
+    FROM
+        title
+    LEFT JOIN
+        movie_info AS rating ON title.id = rating.movie_id AND rating.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY
+        title.id, title.title
+),
+company_movies AS (
+    SELECT
+        mc.movie_id,
+        cn.name AS company_name,
+        COUNT(mc.id) AS company_count
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY
+        mc.movie_id, cn.name
+),
+actor_movies AS (
+    SELECT
+        c.movie_id,
+        ak.name AS actor_name,
+        COUNT(c.id) AS role_count
+    FROM
+        cast_info c
+    JOIN
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY
+        c.movie_id, ak.name
+),
+filtered_movies AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        COALESCE(cr.company_name, 'Unknown') AS company_name,
+        COALESCE(am.actor_name, 'Unknown Actor') AS actor_name,
+        m.average_rating
+    FROM
+        movie_ratings m
+    LEFT JOIN
+        company_movies cr ON m.movie_id = cr.movie_id
+    LEFT JOIN
+        actor_movies am ON m.movie_id = am.movie_id
+    WHERE
+        m.average_rating IS NOT NULL AND m.average_rating > 7.0
+),
+final_report AS (
+    SELECT
+        f.movie_id,
+        f.title,
+        f.company_name,
+        f.actor_name,
+        f.average_rating,
+        COUNT(*) OVER (PARTITION BY f.movie_id) AS total_roles
+    FROM
+        filtered_movies f
+)
+SELECT
+    fr.movie_id,
+    fr.title,
+    fr.company_name,
+    fr.actor_name,
+    fr.average_rating,
+    fr.total_roles
+FROM
+    final_report fr
+ORDER BY
+    fr.average_rating DESC, fr.total_roles DESC
+LIMIT 50;

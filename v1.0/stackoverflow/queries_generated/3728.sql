@@ -1,0 +1,85 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(p.Score) AS AverageScore,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+QuestionStats AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        p.ViewCount,
+        pc.CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2)::int, 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3)::int, 0) AS Downvotes,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments pc ON p.Id = pc.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, pc.CommentCount
+),
+TopQuestions AS (
+    SELECT 
+        q.*,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        QuestionStats q
+    JOIN 
+        Users u ON q.QuestionId = u.Id
+    WHERE 
+        q.ViewRank <= 10
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Date > NOW() - INTERVAL '30 days'
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.AverageScore,
+    ups.TotalBounty,
+    tq.QuestionId,
+    tq.Title,
+    tq.ViewCount,
+    tq.CommentCount,
+    tq.Upvotes,
+    tq.Downvotes,
+    rb.BadgeCount
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    TopQuestions tq ON ups.UserId = tq.OwnerUserId
+LEFT JOIN 
+    RecentBadges rb ON ups.UserId = rb.UserId
+WHERE 
+    ups.TotalPosts > 0
+ORDER BY 
+    ups.TotalPosts DESC, ups.AverageScore DESC;

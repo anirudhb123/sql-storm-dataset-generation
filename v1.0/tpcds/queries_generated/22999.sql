@@ -1,0 +1,64 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT ca_address_sk, ca_address_id, ca_street_number, ca_street_name, 
+           ca_city, ca_state, 0 AS level 
+    FROM customer_address 
+    WHERE ca_city IS NOT NULL
+    UNION ALL
+    SELECT ca.ca_address_sk, CONCAT(ch.ca_street_number, ' ', ch.ca_street_name) AS ca_address_id,
+           ch.ca_street_number, ch.ca_street_name,
+           ch.ca_city, ch.ca_state, ah.level + 1 
+    FROM customer_address ch
+    JOIN AddressHierarchy ah ON ch.ca_address_id = ah.ca_address_id
+    WHERE ch.ca_city IS NOT NULL
+    AND ah.level < 3
+),
+AggregatedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year >= 2020
+    GROUP BY ws.web_site_sk
+),
+ItemRankings AS (
+    SELECT 
+        i.i_item_id,
+        RANK() OVER (PARTITION BY i.i_brand ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_id, i.i_brand
+    HAVING RANK() OVER (PARTITION BY i.i_brand ORDER BY SUM(ws.ws_ext_sales_price) DESC) <= 5
+),
+CombinedResults AS (
+    SELECT 
+        ah.ca_street_name AS address,
+        ah.ca_city AS city,
+        ah.ca_state AS state,
+        COALESCE(as.total_orders, 0) AS total_orders,
+        COALESCE(as.total_profit, 0) AS total_profit,
+        COUNT(ir.i_item_id) AS top_items_count
+    FROM AddressHierarchy ah
+    LEFT JOIN AggregatedSales as ON as.web_site_sk = (SELECT ws_web_site_sk FROM web_sales WHERE ws_ship_customer_sk IS NULL LIMIT 1) 
+    LEFT JOIN ItemRankings ir ON ir.total_sales > 100
+    GROUP BY ah.ca_street_name, ah.ca_city, ah.ca_state
+)
+SELECT 
+    cr.address,
+    cr.city,
+    cr.state,
+    cr.total_orders,
+    cr.total_profit,
+    CASE 
+        WHEN cr.total_profit IS NULL THEN 'No Profit Data'
+        WHEN cr.total_profit > 10000 THEN 'High Profit'
+        ELSE 'Moderate Profit'
+    END AS profit_category,
+    DENSE_RANK() OVER (ORDER BY cr.total_profit DESC) AS profitability_rank
+FROM CombinedResults cr
+WHERE cr.total_orders > 10
+ORDER BY cr.total_profit DESC NULLS LAST
+LIMIT 50;

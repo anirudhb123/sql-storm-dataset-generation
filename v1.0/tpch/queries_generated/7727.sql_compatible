@@ -1,0 +1,31 @@
+
+WITH SupplierCost AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+CustomerStatistics AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS total_orders, AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+NationDetails AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name AS region_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+PartSummary AS (
+    SELECT p.p_partkey, p.p_name, COUNT(ps.ps_suppkey) AS total_providers, AVG(p.p_retailprice) AS avg_retail_price
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT ns.n_name, ns.region_name, cs.total_orders, cs.avg_order_value, ps.total_providers, ps.avg_retail_price, sc.total_cost
+FROM NationDetails ns
+JOIN CustomerStatistics cs ON ns.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = cs.c_custkey)
+JOIN PartSummary ps ON ps.total_providers > 0
+JOIN SupplierCost sc ON sc.s_suppkey IN (SELECT ps_inner.ps_suppkey FROM partsupp ps_inner WHERE ps_inner.ps_partkey = ps.p_partkey)
+WHERE cs.total_orders > 10 AND sc.total_cost > 10000
+ORDER BY ns.region_name, cs.total_orders DESC, ps.avg_retail_price DESC;

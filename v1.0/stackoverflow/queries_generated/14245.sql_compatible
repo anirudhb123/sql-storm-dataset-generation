@@ -1,0 +1,46 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(V.BountyAmount) AS TotalBounty,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenCount 
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount
+)
+SELECT 
+    U.DisplayName,
+    US.PostCount,
+    US.TotalBounty,
+    US.TotalUpVotes,
+    US.TotalDownVotes,
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.ViewCount,
+    P.CommentCount,
+    P.CloseCount,
+    P.ReopenCount
+FROM UserStatistics US
+JOIN PostStatistics P ON US.UserId = P.OwnerUserId
+ORDER BY US.PostCount DESC, US.TotalUpVotes DESC;

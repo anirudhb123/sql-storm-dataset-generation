@@ -1,0 +1,55 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT
+        mm.id AS movie_id,
+        mm.title,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title mm ON ml.linked_movie_id = mm.id 
+)
+SELECT
+    ak.name AS aka_name,
+    at.title AS movie_title,
+    COALESCE(cast.name, 'Unknown') AS character_name,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    ARRAY_AGG(DISTINCT kw.keyword) AS keywords,
+    SUM(CASE WHEN mo.production_year < 2010 THEN 1 ELSE 0 END) AS pre_2010_count,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY at.production_year DESC) AS rank_by_recent
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+LEFT JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    char_name cast ON ci.role_id = cast.id
+RIGHT JOIN 
+    MovieHierarchy mh ON at.id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.name, at.title, cast.name, mh.level 
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1 AND
+    AVG(COALESCE(at.production_year, 0)) > 2005
+ORDER BY 
+    pre_2010_count DESC, rank_by_recent;

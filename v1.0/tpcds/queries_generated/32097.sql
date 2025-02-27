@@ -1,0 +1,39 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name,
+           (SELECT COUNT(DISTINCT sr_ticket_number) FROM store_returns
+            WHERE sr_customer_sk = c_customer_sk) AS returns_count
+    FROM customer
+    WHERE c_birth_year > 1980
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name,
+           (SELECT COUNT(DISTINCT sr_ticket_number) FROM store_returns
+            WHERE sr_customer_sk = c.c_customer_sk) AS returns_count
+    FROM customer c
+    JOIN sales_hierarchy sh ON c.c_current_addr_sk = sh.c_customer_sk
+)
+SELECT sh.c_customer_sk, sh.c_first_name, sh.c_last_name, 
+       SUM(ws_net_profit) AS total_profit,
+       COUNT(DISTINCT ws_order_number) AS total_orders,
+       AVG(ws_sales_price) AS avg_sales_price,
+       STRING_AGG(DISTINCT CONCAT_WS(' ', w.w_warehouse_name, w.w_city, w.w_state), '; ') AS warehouses,
+       COALESCE(SUM(CASE WHEN s.s_state = 'CA' THEN ws_net_profit ELSE NULL END), 0) AS profit_CA
+FROM sales_hierarchy sh
+JOIN web_sales ws ON sh.c_customer_sk = ws.ws_ship_customer_sk 
+LEFT JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+LEFT JOIN web_site web ON ws.ws_web_site_sk = web.web_site_sk
+LEFT JOIN store s ON ws.ws_ship_addr_sk = s.s_addr_sk
+WHERE sh.returns_count > 0
+  AND EXISTS (
+      SELECT 1
+      FROM web_page wp
+      WHERE wp.wp_customer_sk = sh.c_customer_sk
+        AND wp.wp_creation_date_sk > (SELECT MAX(d_date_sk) 
+                                        FROM date_dim 
+                                        WHERE d_year = 2023)
+  )
+GROUP BY sh.c_customer_sk, sh.c_first_name, sh.c_last_name
+ORDER BY total_profit DESC
+FETCH FIRST 10 ROWS ONLY;

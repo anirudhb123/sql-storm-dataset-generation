@@ -1,0 +1,48 @@
+
+WITH filtered_customers AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name,
+           cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL AND cd.cd_gender IS NOT NULL
+),
+item_sales AS (
+    SELECT ws.ws_item_sk, SUM(ws.ws_quantity) AS total_quantity_sold,
+           AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+high_value_items AS (
+    SELECT i.i_item_sk, i.i_item_desc, i.i_current_price
+    FROM item i
+    JOIN item_sales isales ON i.i_item_sk = isales.ws_item_sk
+    WHERE isales.total_quantity_sold > 100 AND isales.avg_net_profit > 50.00
+),
+customer_returns AS (
+    SELECT sr_customer_sk, COALESCE(SUM(sr_return_quantity), 0) AS total_returns
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+customer_data AS (
+    SELECT fc.c_customer_sk, fc.c_first_name, fc.c_last_name, 
+           cd.cd_gender, cd.cd_marital_status,
+           cr.total_returns,
+           CASE WHEN cr.total_returns > 0 THEN 'Returns Made' ELSE 'No Returns' END AS return_status
+    FROM filtered_customers fc
+    LEFT JOIN customer_returns cr ON fc.c_customer_sk = cr.sr_customer_sk
+)
+SELECT cd.c_customer_sk, 
+       CONCAT(cd.c_first_name, ' ', cd.c_last_name) AS customer_name,
+       cd.cd_gender,
+       cd.cd_marital_status,
+       eb.ib_lower_bound,
+       eb.ib_upper_bound,
+       hvi.i_item_desc,
+       hvi.i_current_price
+FROM customer_data cd
+LEFT JOIN household_demographics hd ON cd.c_customer_sk = hd.hd_demo_sk
+LEFT JOIN income_band eb ON hd.hd_income_band_sk = eb.ib_income_band_sk
+LEFT JOIN high_value_items hvi ON eb.ib_lower_bound < hvi.i_current_price AND hvi.i_current_price <= eb.ib_upper_bound
+WHERE cd.return_status = 'Returns Made'
+  AND (cd.cd_gender = 'F' OR cd.cd_marital_status != 'M')
+ORDER BY cd.c_customer_sk, hvi.i_item_desc DESC;

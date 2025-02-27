@@ -1,0 +1,72 @@
+
+WITH RegionalSales AS (
+    SELECT
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM
+        region r
+    LEFT JOIN
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN
+        lineitem l ON l.l_partkey = p.p_partkey
+    LEFT JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY
+        r.r_name
+),
+RankedSales AS (
+    SELECT
+        region_name,
+        total_sales,
+        order_count,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM
+        RegionalSales
+),
+CustomerOrderDetails AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS customer_order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+)
+SELECT
+    r.region_name,
+    r.total_sales,
+    r.order_count,
+    cs.c_custkey,
+    cs.c_name,
+    cs.customer_order_count,
+    cs.total_spent
+FROM
+    RankedSales r
+FULL OUTER JOIN
+    CustomerOrderDetails cs ON r.region_name = (
+        SELECT
+            CASE
+                WHEN cnt > 0 THEN 'North America'
+                ELSE 'Other'
+            END
+        FROM (
+            SELECT COUNT(*) AS cnt
+            FROM nation n
+            WHERE n.n_name = 'UNITED STATES'
+        ) AS region_count
+    )
+WHERE
+    r.total_sales IS NOT NULL OR cs.c_custkey IS NOT NULL
+ORDER BY
+    r.total_sales DESC NULLS LAST, cs.total_spent DESC NULLS LAST;

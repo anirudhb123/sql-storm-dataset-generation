@@ -1,0 +1,91 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, U.DisplayName
+),
+RecentBadges AS (
+    SELECT
+        U.Id AS UserId,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Badges B
+    JOIN 
+        Users U ON B.UserId = U.Id
+    WHERE 
+        B.Date > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY 
+        U.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        MIN(ph.CreationDate) AS ClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+),
+PostData AS (
+    SELECT 
+        rp.*,
+        rb.BadgeNames,
+        cp.ClosedDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentBadges rb ON rp.OwnerDisplayName = rb.UserId
+    LEFT JOIN 
+        ClosedPosts cp ON rp.Id = cp.PostId
+),
+FinalResult AS (
+    SELECT 
+        p.*,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Active'
+        END AS PostStatus,
+        COALESCE(ROUND(AVG(V.Score), 2), 0) AS AveragePostScore
+    FROM 
+        PostData p
+    LEFT JOIN 
+        Votes V ON V.PostId = p.Id AND V.VoteTypeId = 2 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerDisplayName, p.BadgeNames, p.ClosedDate
+)
+SELECT 
+    Id,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    OwnerDisplayName,
+    AnswerCount,
+    BadgeNames,
+    PostStatus,
+    AveragePostScore
+FROM 
+    FinalResult
+WHERE 
+    (PostStatus = 'Active' AND Score > 10) OR 
+    (PostStatus = 'Closed' AND AnswerCount > 5)
+ORDER BY 
+    CreationDate DESC;

@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Questions
+        AND p.CreationDate >= '2020-01-01' -- Questions created since 2020
+),
+
+ProcessedTags AS (
+    SELECT 
+        PostId,
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+),
+
+BestTags AS (
+    SELECT 
+        pt.Tag,
+        COUNT(*) AS PostCount,
+        SUM(rp.ViewCount) AS TotalViews,
+        SUM(rp.Score) AS TotalScore
+    FROM 
+        ProcessedTags pt
+    JOIN 
+        RankedPosts rp ON pt.PostId = rp.PostId
+    GROUP BY 
+        pt.Tag
+    HAVING 
+        COUNT(*) > 5 -- Only consider tags with more than 5 associated questions
+),
+
+TopTags AS (
+    SELECT 
+        Tag,
+        TotalViews,
+        TotalScore,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC) AS Rank
+    FROM 
+        BestTags
+)
+
+SELECT 
+    tt.Tag,
+    tt.TotalViews,
+    tt.TotalScore,
+    tt.Rank,
+    json_agg(json_build_object('PostId', rp.PostId, 'Title', rp.Title, 'OwnerDisplayName', rp.OwnerDisplayName, 'CreationDate', rp.CreationDate)) AS QuestionDetails
+FROM 
+    TopTags tt
+JOIN 
+    RankedPosts rp ON rp.Tags LIKE '%' || tt.Tag || '%'
+GROUP BY 
+    tt.Tag, tt.TotalViews, tt.TotalScore, tt.Rank
+ORDER BY 
+    tt.Rank;

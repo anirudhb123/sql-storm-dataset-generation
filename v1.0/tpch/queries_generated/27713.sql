@@ -1,0 +1,78 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        p.p_name LIKE '%steel%'
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.nationkey,
+        s.s_phone,
+        s.s_acctbal,
+        s.s_comment,
+        p.p_partkey
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        RankedParts p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > 5000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_address,
+        c.c_phone,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+),
+FinalBenchmark AS (
+    SELECT 
+        CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name) AS supplier_part_info,
+        c.c_name AS customer_name,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        SupplierInfo s
+    JOIN 
+        RankedParts p ON s.p_partkey = p.p_partkey
+    JOIN 
+        CustomerOrders o ON o.o_orderkey = s.p_partkey -- assuming relationship; adjust if needed
+)
+SELECT 
+    supplier_part_info,
+    customer_name,
+    o_orderdate,
+    o_totalprice,
+    price_rank
+FROM 
+    FinalBenchmark
+WHERE 
+    price_rank <= 10
+ORDER BY 
+    o_totalprice DESC;

@@ -1,0 +1,48 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        SUM(COALESCE(ws.ws_sales_price, 0) + COALESCE(cs.cs_sales_price, 0) + COALESCE(ss.ss_sales_price, 0)) AS total_sales,
+        EXTRACT(YEAR FROM d.d_date) AS sales_year,
+        d.d_month_seq AS sales_month
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk 
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk 
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk 
+    JOIN 
+        date_dim d ON d.d_date_sk = ws.ws_sold_date_sk OR d.d_date_sk = cs.cs_sold_date_sk OR d.d_date_sk = ss.ss_sold_date_sk 
+    WHERE 
+        d.d_year BETWEEN 2020 AND 2023
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, sales_year, sales_month
+),
+top_customers AS (
+    SELECT 
+        c_customer_sk, 
+        c_first_name, 
+        c_last_name, 
+        total_sales,
+        RANK() OVER (PARTITION BY sales_year, sales_month ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        customer_sales
+)
+SELECT 
+    c.c_first_name, 
+    c.c_last_name, 
+    tc.sales_year, 
+    tc.sales_month, 
+    tc.total_sales
+FROM 
+    top_customers tc
+JOIN 
+    customer c ON tc.c_customer_sk = c.c_customer_sk
+WHERE 
+    tc.sales_rank <= 10
+ORDER BY 
+    sales_year, sales_month, total_sales DESC;

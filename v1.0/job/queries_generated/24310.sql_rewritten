@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m 
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        mh.linked_movie_id AS movie_id,
+        a.title,
+        a.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+)
+
+SELECT 
+    akn.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COUNT(DISTINCT cc.person_id) AS total_cast,
+    SUM(CASE WHEN pi.info LIKE '%Oscar%' THEN 1 ELSE 0 END) AS oscar_winning_cast,
+    ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT cc.person_id) DESC) AS cast_rank,
+    COALESCE(NULLIF(ct.kind, ''), 'Unknown') AS company_type
+FROM 
+    aka_name akn
+JOIN 
+    cast_info cc ON akn.person_id = cc.person_id
+JOIN 
+    aka_title at ON cc.movie_id = at.id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    person_info pi ON cc.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Awards')
+WHERE 
+    at.production_year IS NOT NULL 
+    AND akn.name IS NOT NULL 
+    AND akn.name NOT ILIKE '%test%' 
+    AND akn.md5sum IS NOT NULL 
+GROUP BY 
+    akn.name, at.title, at.production_year, ct.kind
+HAVING 
+    SUM(CASE WHEN pi.info IS NULL THEN 1 ELSE 0 END) > 2
+    OR COUNT(DISTINCT cc.person_id) > 10
+ORDER BY 
+    cast_rank, oscar_winning_cast DESC;

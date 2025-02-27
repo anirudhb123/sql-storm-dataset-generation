@@ -1,0 +1,60 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS brand_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_brand
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, cast('1998-10-01' as date)) 
+        AND o.o_orderstatus = 'O'
+),
+LineItemsWithSuppliers AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        r.total_supply_cost
+    FROM 
+        lineitem l
+    JOIN 
+        RankedSuppliers r ON l.l_suppkey = r.s_suppkey
+)
+SELECT 
+    r.n_name AS nation_name,
+    SUM(li.l_extendedprice) AS total_revenue,
+    AVG(li.l_quantity) AS avg_quantity,
+    COUNT(DISTINCT ro.o_orderkey) AS total_orders,
+    MAX(rs.total_supply_cost) AS max_supply_cost
+FROM 
+    RecentOrders ro
+JOIN 
+    LineItemsWithSuppliers li ON ro.o_orderkey = li.l_orderkey
+JOIN 
+    supplier s ON li.l_suppkey = s.s_suppkey
+JOIN 
+    nation r ON s.s_nationkey = r.n_nationkey
+GROUP BY 
+    r.n_name
+HAVING 
+    SUM(li.l_extendedprice) > 10000
+ORDER BY 
+    total_revenue DESC;

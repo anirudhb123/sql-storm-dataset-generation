@@ -1,0 +1,67 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2024-01-01'
+),
+SupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * l.l_quantity) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        supplier s
+    JOIN 
+        lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+)
+SELECT 
+    RANK() OVER (ORDER BY TotalRevenue DESC) AS supplier_rank,
+    s.s_name,
+    s.total_revenue,
+    r.r_name AS region_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(o.o_totalprice) AS average_order_value
+FROM 
+    TopSuppliers s 
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    RankedOrders o ON o.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        JOIN customer c ON o.o_custkey = c.c_custkey 
+        WHERE c.c_nationkey = n.n_nationkey
+    )
+GROUP BY 
+    s.s_name, r.r_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    supplier_rank;

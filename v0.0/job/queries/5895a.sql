@@ -1,0 +1,4 @@
+SELECT min(cn.name) AS company_name, min(lt.link) AS link_type, min(t.title) AS german_follow_up
+FROM company_name AS cn, company_type AS ct, keyword AS k, link_type AS lt, movie_companies AS mc, movie_info AS mi, movie_keyword AS mk, movie_link AS ml, title AS t
+WHERE lt.id = ml.link_type_id AND ml.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_type_id = ct.id AND mc.company_id = cn.id AND mi.movie_id = t.id AND ml.movie_id = mk.movie_id AND ml.movie_id = mc.movie_id AND mk.movie_id = mc.movie_id AND ml.movie_id = mi.movie_id AND mk.movie_id = mi.movie_id AND mc.movie_id = mi.movie_id
+AND t.title LIKE '%in%' AND t.md5sum LIKE '%2%' AND k.phonetic_code IN ('B4313', 'B6561', 'F5163', 'M542', 'M6514', 'P421', 'T6146', 'V532') AND mk.movie_id < 526745;

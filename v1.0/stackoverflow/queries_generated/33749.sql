@@ -1,0 +1,45 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, CreationDate, Location,
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+    WHERE Reputation > 1000
+),
+RecentPosts AS (
+    SELECT Id, Title, OwnerUserId, Score, CreationDate,
+           (SELECT COUNT(*) FROM Comments WHERE PostId = P.Id) AS CommentCount
+    FROM Posts P
+    WHERE CreationDate > NOW() - INTERVAL '30 days'
+),
+PostStats AS (
+    SELECT P.Id AS PostID, P.Title, U.DisplayName AS Owner, P.Score, 
+           COALESCE(PH.EditCount, 0) AS EditCount, 
+           PH.LastEditDate,
+           COUNT(COALESCE(V.Id, NULL)) AS VoteCount
+    FROM RecentPosts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS EditCount, MAX(CreationDate) AS LastEditDate
+        FROM PostHistory
+        WHERE PostHistoryTypeId IN (4, 5)
+        GROUP BY PostId
+    ) PH ON P.Id = PH.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 2 -- Upvotes only
+    GROUP BY P.Id, P.Title, U.DisplayName, P.Score, PH.EditCount
+),
+RankedPosts AS (
+    SELECT PS.*, 
+           RANK() OVER (ORDER BY PS.Score DESC, PS.EditCount DESC) AS PostRank
+    FROM PostStats PS
+)
+SELECT RP.PostID, RP.Title, RP.Owner, RP.Score, RP.CommentCount,
+       RP.EditCount, RP.LastEditDate,
+       CASE 
+           WHEN RP.PostRank <= 10 THEN 'Top 10 Posts'
+           ELSE 'Other Posts'
+       END AS RankCategory,
+       CONCAT('Author: ', RP.Owner, ' | Score: ', RP.Score) AS PostDetails
+FROM RankedPosts RP
+WHERE RP.CommentCount > 5 OR RP.Score > 100
+ORDER BY RP.PostRank, RP.Score DESC;
+
+

@@ -1,0 +1,70 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IS NOT NULL
+), 
+TotalSales AS (
+    SELECT 
+        lo.o_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS TotalExtendedPrice
+    FROM 
+        lineitem li
+    JOIN 
+        orders lo ON li.l_orderkey = lo.o_orderkey
+    WHERE 
+        li.l_shipdate >= DATE('1997-01-01')
+    GROUP BY 
+        lo.o_orderkey
+),
+PartSuppliers AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    co.c_name,
+    COALESCE(ts.TotalExtendedPrice, 0) AS TotalSales,
+    COALESCE(ps.TotalSupplyCost, 0) AS TotalSupplyCost,
+    CASE 
+        WHEN COALESCE(ts.TotalExtendedPrice, 0) > COALESCE(ps.TotalSupplyCost, 0) THEN 'Profitable'
+        ELSE 'Less Profitable'
+    END AS Profitability
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    TotalSales ts ON co.o_orderkey = ts.o_orderkey
+LEFT JOIN 
+    PartSuppliers ps ON ps.p_partkey IN (
+        SELECT 
+            l.l_partkey 
+        FROM 
+            lineitem l 
+        WHERE 
+            l.l_orderkey = ts.o_orderkey
+        GROUP BY 
+            l.l_partkey
+    )
+WHERE 
+    co.OrderRank = 1
+ORDER BY 
+    TotalSales DESC, 
+    TotalSupplyCost ASC
+FETCH FIRST 100 ROWS ONLY;

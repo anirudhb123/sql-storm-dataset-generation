@@ -1,0 +1,59 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation,
+        r.r_name AS region,
+        CONCAT(s.s_name, ' from ', r.r_name) AS supplier_region,
+        LENGTH(s.s_comment) AS comment_length
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        CONCAT(p.p_brand, ' - ', p.p_type) AS composite_type,
+        UPPER(p.p_comment) AS upper_comment,
+        LENGTH(p.p_comment) AS comment_length
+    FROM 
+        part p
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(l.l_linenumber) AS line_count,
+        SUM(l.l_extendedprice) AS total_extended_price,
+        AVG(l.l_discount) AS average_discount,
+        MIN(l.l_tax) AS min_tax,
+        MAX(l.l_tax) AS max_tax
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    sd.supplier_region,
+    pd.composite_type,
+    ls.line_count,
+    ls.total_extended_price,
+    ls.average_discount,
+    ls.min_tax,
+    ls.max_tax
+FROM 
+    SupplierDetails sd
+JOIN 
+    PartDetails pd ON sd.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = pd.p_partkey LIMIT 1)
+JOIN 
+    LineItemSummary ls ON ls.l_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = sd.nation LIMIT 1) LIMIT 1)
+WHERE 
+    sd.comment_length > 50 AND
+    pd.comment_length < 100
+ORDER BY 
+    sd.supplier_region, pd.composite_type;

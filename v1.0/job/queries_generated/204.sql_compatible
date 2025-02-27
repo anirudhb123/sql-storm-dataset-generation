@@ -1,0 +1,70 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.kind_id ORDER BY a.production_year DESC) AS rn
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year >= 2000
+),
+GenreCounts AS (
+    SELECT 
+        kt.kind AS genre,
+        COUNT(*) AS movie_count
+    FROM 
+        aka_title at
+    JOIN 
+        kind_type kt ON at.kind_id = kt.id
+    GROUP BY 
+        kt.kind
+),
+ActorRoleCounts AS (
+    SELECT 
+        ci.person_id,
+        rt.role,
+        COUNT(DISTINCT ci.movie_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.person_id, rt.role
+),
+MaxRoleCount AS (
+    SELECT 
+        person_id,
+        MAX(role_count) AS max_role
+    FROM 
+        ActorRoleCounts
+    GROUP BY 
+        person_id
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    gc.genre,
+    ac.role,
+    COALESCE(ac.role_count, 0) AS role_count,
+    COALESCE(mr.max_role, 0) AS max_role_count
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    GenreCounts gc ON gc.movie_count > 1
+LEFT JOIN 
+    ActorRoleCounts ac ON ac.person_id IN (
+        SELECT 
+            ci.person_id 
+        FROM 
+            cast_info ci
+        WHERE 
+            ci.movie_id = rm.movie_id
+    )
+LEFT JOIN 
+    MaxRoleCount mr ON mr.person_id = ac.person_id
+WHERE 
+    rm.rn <= 5
+ORDER BY 
+    rm.production_year DESC, gc.genre;

@@ -1,0 +1,50 @@
+
+WITH customer_sales AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(COALESCE(ss.ss_net_paid, 0) + COALESCE(cs.cs_net_paid, 0) + COALESCE(ws.ws_net_paid, 0)) AS total_net_paid,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_sales_count,
+        COUNT(DISTINCT cs.cs_order_number) AS catalog_sales_count,
+        COUNT(DISTINCT ws.ws_order_number) AS web_sales_count
+    FROM customer c
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY c.c_customer_sk, c.c_customer_id
+),
+income_summary AS (
+    SELECT
+        hd.hd_demo_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(COALESCE(ca.ca_location_type, 'UNKNOWN') = 'SUBURBAN') AS suburban_customer_ratio
+    FROM household_demographics hd
+    LEFT JOIN customer c ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY hd.hd_demo_sk
+),
+ranked_sales AS (
+    SELECT
+        cs.c_customer_id,
+        cs.total_net_paid,
+        RANK() OVER (ORDER BY cs.total_net_paid DESC) AS sales_rank,
+        ROW_NUMBER() OVER (PARTITION BY income_summary.customer_count ORDER BY cs.total_net_paid DESC) AS row_num,
+        income_summary.customer_count
+    FROM customer_sales cs
+    JOIN income_summary ON cs.c_customer_sk = income_summary.hd_demo_sk
+)
+SELECT
+    rs.c_customer_id,
+    rs.total_net_paid,
+    rs.sales_rank,
+    rs.row_num,
+    CASE 
+        WHEN rs.total_net_paid IS NULL THEN 'No Purchases' 
+        WHEN rs.sales_rank <= 10 THEN 'Top Customer' 
+        ELSE 'Regular Customer' 
+    END AS customer_category
+FROM ranked_sales rs
+WHERE rs.customer_count > 5
+  AND (rs.total_net_paid IS NOT NULL OR rs.total_net_paid > 1000)
+ORDER BY rs.sales_rank, rs.customer_category DESC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

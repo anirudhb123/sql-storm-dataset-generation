@@ -1,0 +1,53 @@
+WITH TaggedPosts AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.Body, 
+           p.Tags, 
+           COUNT(a.Id) AS AnswerCount, 
+           COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.PostTypeId = 1 -- Only include questions
+    GROUP BY p.Id, p.Title, p.Body, p.Tags
+),
+UserActivity AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+           COUNT(DISTINCT c.Id) AS TotalComments
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT ph.PostId,
+           ph.UserId,
+           ph.Comment,
+           ph.CreationDate,
+           p.Title,
+           p.Body,
+           p.Tags
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11, 12) -- Closed, Reopened, or Deleted posts
+)
+SELECT tp.PostId,
+       tp.Title,
+       tp.Body,
+       tp.Tags,
+       ua.DisplayName AS UserName,
+       ua.UpVotes,
+       ua.DownVotes,
+       ua.TotalComments,
+       ph.Comment AS PostHistoryComment,
+       ph.CreationDate AS PostHistoryDate
+FROM TaggedPosts tp
+JOIN UserActivity ua ON tp.PostId IN (
+    SELECT PostId FROM Comments WHERE UserId = ua.UserId
+)
+LEFT JOIN PostHistoryDetails ph ON tp.PostId = ph.PostId
+WHERE tp.AnswerCount > 0 -- Only questions with answers
+ORDER BY tp.Tags, tp.AnswerCount DESC, ua.UpVotes DESC;

@@ -1,0 +1,48 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        AVG(vote.CreationDate) AS AvgVoteDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes vote ON p.Id = vote.PostId AND vote.VoteTypeId = 2 -- Upvotes
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > DATEADD(year, -2, GETDATE()) -- Posts from the last 2 years
+    GROUP BY 
+        p.Id, p.Title, p.Score, u.DisplayName, u.Reputation
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        ROW_NUMBER() OVER (ORDER BY rp.Score DESC, rp.CommentCount DESC) AS OverallRank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank = 1
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.CommentCount,
+    tp.AvgVoteDate,
+    tp.OwnerDisplayName,
+    tp.OwnerReputation,
+    tp.OverallRank
+FROM 
+    TopPosts tp
+WHERE 
+    tp.OverallRank <= 100
+ORDER BY 
+    tp.Score DESC, 
+    tp.CommentCount DESC;

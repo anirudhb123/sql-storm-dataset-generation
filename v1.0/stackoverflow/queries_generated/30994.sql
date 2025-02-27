@@ -1,0 +1,82 @@
+WITH RecursivePostDepth AS (
+    SELECT 
+        Id, 
+        ParentId, 
+        0 AS Depth
+    FROM 
+        Posts 
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id, 
+        p.ParentId, 
+        pd.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostDepth pd ON p.ParentId = pd.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadgeCount AS (
+    SELECT 
+        UserId, 
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(up.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(dn.DownVotes, 0) AS TotalDownVotes,
+        (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = u.Id) AS PostCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadgeCount b ON u.Id = b.UserId
+    LEFT JOIN 
+        PostVoteSummary up ON u.Id IN (SELECT OwnerUserId FROM Posts WHERE OwnerUserId IS NOT NULL)
+    LEFT JOIN 
+        PostVoteSummary dn ON u.Id IN (SELECT OwnerUserId FROM Posts WHERE OwnerUserId IS NOT NULL)
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.BadgeCount,
+    ua.TotalUpVotes,
+    ua.TotalDownVotes,
+    ua.PostCount,
+    ua.UserRank,
+    pp.Score,
+    pp.ViewCount,
+    pp.AnswerCount,
+    pp.CommentCount,
+    COALESCE(pd.Depth, 0) AS PostDepth
+FROM 
+    UserActivity ua
+JOIN 
+    Posts pp ON pp.OwnerUserId = ua.UserId
+LEFT JOIN 
+    RecursivePostDepth pd ON pp.Id = pd.Id
+WHERE 
+    pp.CreationDate >= NOW() - INTERVAL '1 year'
+ORDER BY 
+    ua.UserRank, pp.Score DESC;

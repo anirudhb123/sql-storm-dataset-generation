@@ -1,0 +1,65 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.ws_net_profit) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023) - 30 AND 
+                                   (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        ws.ws_item_sk
+), customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        NULLIF(cd.cd_credit_rating, 'Unknown') AS credit_rating
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000 
+        OR cd.cd_gender = 'F'
+), return_summary AS (
+    SELECT 
+        sr.ws_item_sk,
+        COUNT(DISTINCT sr.sr_ticket_number) AS return_count
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.ws_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    ss.total_quantity_sold,
+    ss.total_sales,
+    ss.total_discount,
+    ss.total_net_profit,
+    ci.c_first_name || ' ' || ci.c_last_name AS full_customer_name,
+    ci.cd_gender,
+    ci.credit_rating,
+    COALESCE(rs.return_count, 0) AS total_returns
+FROM 
+    sales_summary ss
+JOIN 
+    item i ON ss.ws_item_sk = i.i_item_sk
+JOIN 
+    customer_info ci ON ci.c_customer_sk = (SELECT ws.ws_ship_customer_sk FROM web_sales ws WHERE ws.ws_item_sk = i.i_item_sk LIMIT 1)
+LEFT JOIN 
+    return_summary rs ON rs.ws_item_sk = i.i_item_sk
+WHERE 
+    ss.sales_rank <= 10
+ORDER BY 
+    ss.total_net_profit DESC;

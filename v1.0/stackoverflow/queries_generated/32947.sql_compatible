@@ -1,0 +1,86 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+PostStats AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Score,  
+        MAX(p.CreationDate) AS LastActivityDate 
+    FROM 
+        PostHierarchy ph
+    LEFT JOIN 
+        Posts p ON p.Id = ph.PostId
+    LEFT JOIN 
+        Comments c ON c.PostId = ph.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = ph.PostId
+    GROUP BY 
+        ph.PostId, ph.Title
+),
+BadgesStats AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(ps.CommentCount) AS TotalComments,
+        SUM(ps.Score) AS TotalScore,
+        COUNT(DISTINCT ps.PostId) AS PostCount,
+        COALESCE(bs.BadgeCount, 0) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostStats ps ON ps.PostId = p.Id
+    LEFT JOIN 
+        BadgesStats bs ON bs.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalComments,
+    u.TotalScore,
+    u.PostCount,
+    u.BadgeCount,
+    CASE 
+        WHEN u.BadgeCount >= 10 THEN 'Gold'
+        WHEN u.BadgeCount >= 5 THEN 'Silver'
+        ELSE 'Bronze'
+    END AS BadgeTier,
+    ROW_NUMBER() OVER (ORDER BY u.TotalScore DESC, u.TotalComments DESC) AS Ranking
+FROM 
+    UserPostStats u
+ORDER BY 
+    u.TotalScore DESC, u.TotalComments DESC;

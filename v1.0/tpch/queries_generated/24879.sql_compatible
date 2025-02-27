@@ -1,0 +1,75 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        COUNT(ps.ps_suppkey) > 1
+)
+SELECT 
+    n.n_name,
+    p.p_name,
+    (SELECT 
+         AVG(s.s_acctbal) 
+     FROM 
+         supplier s 
+     WHERE 
+         s.s_nationkey = n.n_nationkey) AS avg_supplier_balance,
+    COALESCE(RS.s_name, '<No Supplier>') AS top_supplier,
+    CASE WHEN HP.total_value IS NOT NULL THEN 'High Value' ELSE 'Standard' END AS order_category,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    RankedSuppliers RS ON RS.rank = 1
+LEFT JOIN 
+    lineitem l ON l.l_suppkey = RS.s_suppkey 
+LEFT JOIN 
+    HighValueOrders HP ON l.l_orderkey = HP.o_orderkey 
+JOIN 
+    partsupp ps ON ps.ps_partkey = l.l_partkey
+JOIN 
+    SupplierParts SP ON SP.ps_partkey = ps.ps_partkey
+JOIN 
+    part p ON p.p_partkey = ps.ps_partkey
+WHERE 
+    n.n_name IS NOT NULL
+    AND (p.p_size BETWEEN 10 AND 20 OR p.p_name LIKE '%widget%')
+GROUP BY 
+    n.n_name, p.p_name, HP.total_value, RS.s_name
+ORDER BY 
+    n.n_name, p.p_name;

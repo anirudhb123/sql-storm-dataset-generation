@@ -1,0 +1,78 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year BETWEEN 1990 AND 2023
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+ranked_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        RANK() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS movie_rank
+    FROM 
+        movie_hierarchy mh
+),
+movie_with_approved_cast AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        cast_info ci ON rm.movie_id = ci.movie_id
+    WHERE 
+        ci.note IS NULL OR ci.note NOT LIKE '%uncredited%'
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+)
+SELECT 
+    mwac.title,
+    mwac.production_year,
+    mwac.cast_count,
+    COALESCE(NULLIF(mwac.cast_count, 0), 'No Cast Available') AS cast_count_display,
+    CASE 
+        WHEN mwac.cast_count > 10 THEN 'Large Cast'
+        WHEN mwac.cast_count BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size,
+    ARRAY_AGG(DISTINCT ak.name) AS associated_names,
+    (SELECT STRING_AGG(DISTINCT kw.keyword, ', ') 
+     FROM movie_keyword mk
+     JOIN keyword kw ON mk.keyword_id = kw.id
+     WHERE mk.movie_id = mwac.movie_id) AS keywords
+FROM 
+    movie_with_approved_cast mwac
+LEFT JOIN 
+    aka_name ak ON ak.person_id IN (
+      SELECT DISTINCT ci.person_id 
+      FROM cast_info ci 
+      WHERE ci.movie_id = mwac.movie_id
+    )
+WHERE 
+    mwac.movie_rank <= 10
+GROUP BY 
+    mwac.movie_id, mwac.title, mwac.production_year, mwac.cast_count
+ORDER BY 
+    mwac.production_year DESC, mwac.cast_count DESC
+LIMIT 50 OFFSET 0;

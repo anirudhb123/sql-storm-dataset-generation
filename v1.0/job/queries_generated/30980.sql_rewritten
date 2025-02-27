@@ -1,0 +1,60 @@
+WITH RECURSIVE movie_hierarchy AS (
+    
+    SELECT
+        m.movie_id,
+        m.title,
+        ml.linked_movie_id,
+        1 AS level
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_link ml ON m.movie_id = ml.movie_id
+
+    UNION ALL
+
+    SELECT
+        mh.movie_id,
+        m.title,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM
+        movie_hierarchy mh
+    JOIN
+        movie_link ml ON mh.linked_movie_id = ml.movie_id
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.movie_id
+)
+
+SELECT
+    a.person_id,
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COALESCE(COUNT(DISTINCT mh.linked_movie_id), 0) AS linked_movies_count,
+    STRING_AGG(DISTINCT c.kind || ': ' || co.name, ', ') AS company_details,
+    ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS row_num,
+    AVG( CASE WHEN mi.info_type_id = 1 THEN LENGTH(mi.info) END ) AS avg_length_info
+FROM
+    aka_name a
+INNER JOIN
+    cast_info ci ON a.person_id = ci.person_id
+INNER JOIN
+    aka_title t ON ci.movie_id = t.movie_id
+LEFT JOIN
+    movie_companies mc ON t.movie_id = mc.movie_id
+LEFT JOIN
+    company_name co ON mc.company_id = co.id
+LEFT JOIN
+    movie_info mi ON t.movie_id = mi.movie_id
+LEFT JOIN
+    movie_hierarchy mh ON t.movie_id = mh.movie_id
+WHERE
+    t.production_year BETWEEN 2000 AND 2023
+    AND (ci.note IS NULL OR ci.note <> 'cameo')
+GROUP BY
+    a.person_id, a.name, t.title, t.production_year
+HAVING
+    COUNT(DISTINCT t.id) > 1
+ORDER BY
+    a.person_id,
+    t.production_year DESC;

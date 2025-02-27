@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+    UNION ALL
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sp.s_acctbal, sh.level + 1
+    FROM supplier sp
+    JOIN SupplierHierarchy sh ON sp.s_nationkey = sh.s_nationkey
+    WHERE sp.s_acctbal < sh.s_acctbal
+),
+AggregatedOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue, COUNT(l.l_linenumber) AS line_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY o.o_orderkey
+),
+BestSuppliers AS (
+    SELECT DISTINCT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost) < 5000.00
+)
+SELECT
+    r.r_name AS Region,
+    n.n_name AS Nation,
+    s.s_name AS Supplier,
+    a.total_revenue AS Total_Revenue,
+    s_h.level AS Supplier_Level,
+    B.total_supply_cost AS Supplier_Cost
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy s_h ON s.s_suppkey = s_h.s_suppkey
+LEFT JOIN AggregatedOrders a ON s.s_suppkey = a.o_orderkey
+LEFT JOIN BestSuppliers B ON s.s_suppkey = B.s_suppkey
+WHERE (s_h.level IS NOT NULL AND a.total_revenue IS NOT NULL)
+OR (s_h.level IS NULL AND B.total_supply_cost IS NOT NULL)
+ORDER BY r.r_name, n.n_name, a.total_revenue DESC;

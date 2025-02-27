@@ -1,0 +1,32 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'UNITED STATES')
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_returned_value,
+    AVG(CASE WHEN l.l_shipmode = 'AIR' THEN l.l_quantity ELSE NULL END) AS avg_air_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    RANK() OVER (PARTITION BY p.p_type ORDER BY SUM(l.l_extendedprice) DESC) AS price_rank,
+    COALESCE(r.r_name, 'Unknown Region') AS region_name
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN supplier_hierarchy sh ON l.l_suppkey = sh.s_suppkey
+LEFT JOIN nation n ON sh.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size BETWEEN 1 AND 12 
+    AND l.l_shipdate >= DATE '2022-01-01' 
+    AND l.l_shipdate <= DATE '2022-12-31'
+GROUP BY p.p_partkey, p.p_name, r.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_returned_value DESC, price_rank ASC;

@@ -1,0 +1,27 @@
+WITH SupplierProfit AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_orders
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RegionNation AS (
+    SELECT r.r_name, n.n_name, SUM(c.c_acctbal) AS total_acctbal
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY r.r_name, n.n_name
+)
+SELECT rn.r_name, rn.n_name, cp.c_name AS highest_spending_customer, sp.s_name AS highest_profit_supplier,
+       MAX(cp.total_orders) AS max_order_total, MAX(sp.total_supply_cost) AS max_supply_cost,
+       COUNT(DISTINCT cp.c_custkey) AS unique_customers, COUNT(DISTINCT sp.s_suppkey) AS unique_suppliers
+FROM RegionNation rn
+JOIN CustomerOrders cp ON true
+JOIN SupplierProfit sp ON true
+GROUP BY rn.r_name, rn.n_name
+ORDER BY rn.r_name, rn.n_name;

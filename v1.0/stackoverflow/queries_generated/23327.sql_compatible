@@ -1,0 +1,92 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN p.Id END) AS AcceptedAnswers,
+        MAX(p.CreationDate) AS LastQuestionDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.CreationDate AS HistoryDate,
+        pt.Name AS PostHistoryType
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate > CURRENT_TIMESTAMP - INTERVAL '2 years'
+),
+ClosedQuestions AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistoryDetails ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.TotalQuestions,
+    u.AcceptedAnswers,
+    p.PostId,
+    p.Title,
+    p.UpVotes,
+    p.DownVotes,
+    COALESCE(c.CloseCount, 0) AS CloseCount,
+    CASE 
+        WHEN p.PostRank = 1 THEN 'Newest'
+        WHEN p.PostRank > 1 THEN 'Older'
+        ELSE 'Not Ranked'
+    END AS PostRankStatus,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.WikiPostId = p.Id) AS RelatedTags,
+    NULLIF((SELECT COUNT(*) 
+            FROM Comments c 
+            WHERE c.PostId = p.PostId 
+            AND c.UserId IS NOT NULL), 0) AS NonNullComments
+FROM 
+    UserStatistics u
+JOIN 
+    RankedPosts p ON u.UserId = p.OwnerUserId
+LEFT JOIN 
+    ClosedQuestions c ON p.PostId = c.PostId
+WHERE 
+    u.Reputation > 1000 
+ORDER BY 
+    u.Reputation DESC, p.UpVotes DESC
+LIMIT 50;

@@ -1,0 +1,84 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        m.id,
+        m.title,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM m.production_year) ORDER BY COUNT(DISTINCT c.person_id) DESC) AS year_rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    GROUP BY 
+        m.id, m.title
+),
+TopMovies AS (
+    SELECT 
+        id, 
+        title 
+    FROM 
+        RankedMovies 
+    WHERE 
+        year_rank <= 5
+),
+CompanyProducers AS (
+    SELECT  
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+KeywordStats AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    tm.title,
+    COALESCE(cp.company_name, 'Unknown') AS company_name,
+    COALESCE(ks.keyword_count, 0) AS keyword_count,
+    mh.level AS hierarchy_level
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    CompanyProducers cp ON tm.id = cp.movie_id
+LEFT JOIN 
+    KeywordStats ks ON tm.id = ks.movie_id
+LEFT JOIN 
+    MovieHierarchy mh ON tm.id = mh.movie_id
+ORDER BY 
+    tm.title;

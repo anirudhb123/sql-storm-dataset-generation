@@ -1,0 +1,52 @@
+
+WITH recursive item_sales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_sales_price) AS total_sales_price, 
+        AVG(ws_net_profit) AS avg_net_profit 
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        COUNT(DISTINCT cr.cr_order_number) AS return_count,
+        COUNT(DISTINCT sr.sr_ticket_number) AS store_return_count,
+        CASE 
+            WHEN COUNT(cr.cr_order_number) > 0 THEN 'Returner'
+            ELSE 'Non-returner'
+        END AS return_status
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        catalog_returns cr ON cr.cr_returning_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        store_returns sr ON sr.sr_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.return_status,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    COALESCE(is.total_sales_price, 0) AS total_sales,
+    ROUND(COALESCE(is.avg_net_profit, 0), 2) AS avg_net_profit,
+    DENSE_RANK() OVER (PARTITION BY ci.return_status ORDER BY COALESCE(is.total_sales_price, 0) DESC) AS sales_rank
+FROM 
+    customer_info ci
+LEFT JOIN 
+    item_sales is ON is.ws_item_sk = (SELECT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = ci.c_customer_sk ORDER BY ws_net_profit DESC LIMIT 1)
+WHERE 
+    (ci.cd_gender IS NOT NULL AND ci.cd_marital_status IS NOT NULL)
+    OR (ci.cd_gender IS NULL AND ci.cd_marital_status IS NULL)
+ORDER BY 
+    sales_rank, ci.c_customer_sk;

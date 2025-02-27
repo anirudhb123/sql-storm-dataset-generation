@@ -1,0 +1,71 @@
+WITH RankedOrders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_orderdate,
+        o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS rnk,
+        CASE 
+            WHEN o_totalprice BETWEEN 100.00 AND 500.00 THEN 'Medium'
+            WHEN o_totalprice > 500.00 THEN 'High'
+            ELSE 'Low'
+        END AS price_category
+    FROM orders
+), CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN RankedOrders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+), PartSupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS value_available,
+        SUM(ps.ps_availqty) AS total_available,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), OrderLineAggregates AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        SUM(l.l_quantity) AS total_quantity,
+        SUM(l.l_extendedprice) AS total_value,
+        AVG(l.l_discount) AS average_discount
+    FROM lineitem l
+    WHERE l.l_shipdate < CURRENT_DATE
+    GROUP BY l.l_orderkey, l.l_partkey
+)
+SELECT 
+    cs.c_name,
+    cs.total_orders,
+    cs.total_spent,
+    cs.last_order_date,
+    p.p_name,
+    ps.value_available,
+    ps.total_available,
+    ol.total_quantity,
+    ol.total_value,
+    ol.average_discount,
+    CASE 
+        WHEN cs.total_spent > 10000 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_rank
+FROM CustomerStats cs
+JOIN PartSupplierStats ps ON ps.ps_partkey IN (
+    SELECT 
+        l.l_partkey
+    FROM lineitem l
+    LEFT JOIN RankedOrders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderkey IS NOT NULL AND o.price_category = 'High'
+)
+LEFT JOIN part p ON p.p_partkey = ps.ps_partkey
+LEFT JOIN OrderLineAggregates ol ON ol.l_partkey = ps.ps_partkey
+WHERE cs.total_orders > 0
+ORDER BY cs.total_spent DESC, ol.total_value DESC
+FETCH FIRST 10 ROWS ONLY;
+

@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        c.linked_movie_id,
+        m.title,
+        m.production_year,
+        h.level + 1
+    FROM 
+        MovieHierarchy h
+    JOIN 
+        movie_link c ON h.movie_id = c.movie_id
+    JOIN 
+        aka_title m ON c.linked_movie_id = m.id
+    WHERE 
+        m.production_year >= 2000
+)
+
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS movies_count,
+    MIN(mh.production_year) AS first_movie_year,
+    MAX(mh.production_year) AS last_movie_year,
+    AVG(mh.production_year) AS avg_movie_year,
+    STRING_AGG(DISTINCT mh.title, ', ') AS all_movies,
+    CASE 
+        WHEN a.gender = 'M' THEN 'Male'
+        WHEN a.gender = 'F' THEN 'Female'
+        ELSE 'Unknown' 
+    END AS gender_description
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    MovieHierarchy mh ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    company_name co ON co.id = (
+        SELECT company_id 
+        FROM movie_companies mc 
+        WHERE mc.movie_id = c.movie_id 
+        ORDER BY mc.company_type_id 
+        LIMIT 1
+    )
+WHERE 
+    a.name IS NOT NULL 
+    AND a.name != '' 
+    AND mh.production_year IS NOT NULL 
+GROUP BY 
+    a.person_id, a.name, a.gender
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 5
+ORDER BY 
+    first_movie_year DESC;
+
+Explanation:
+1. **CTE (Common Table Expression)** `MovieHierarchy` is used to create a recursive structure to find movies linked to each other and their associated years.
+2. The main `SELECT` retrieves actors' names, counts their distinct movies, and checks the first and last production years.
+3. **STRING_AGG** collects all movies into a single string.
+4. A **LEFT JOIN** to `company_name` fetches the company details associated with the movie.
+5. A **HAVING** clause filters for actors that have appeared in more than 5 movies.
+6. **CASE** statement is used to provide a human-readable output for gender.
+7. The query orders the results based on the first movie year, providing a clear metric for the actor's timeline in the industry.

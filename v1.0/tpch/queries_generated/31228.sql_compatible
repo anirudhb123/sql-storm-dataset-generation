@@ -1,0 +1,46 @@
+
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 50000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, t.total_cost + SUM(ps.ps_supplycost * ps.ps_availqty)
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN TopSuppliers t ON s.s_suppkey <> t.s_suppkey
+    GROUP BY s.s_suppkey, s.s_name, t.total_cost
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS distinct_parts,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+CustomerRanked AS (
+    SELECT c.c_custkey, c.c_name, c.c_mktsegment, os.total_revenue, os.order_rank
+    FROM customer c
+    JOIN OrderSummary os ON c.c_custkey = os.o_custkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_mktsegment
+    FROM CustomerRanked c
+    WHERE c.order_rank <= 5
+)
+
+SELECT DISTINCT p.p_name,
+       COALESCE((SELECT SUM(l.l_quantity)
+                 FROM lineitem l
+                 JOIN orders o ON l.l_orderkey = o.o_orderkey
+                 WHERE l.l_partkey = p.p_partkey AND o.o_orderstatus = 'F'), 0) AS total_qty,
+       ts.total_cost,
+       rc.r_name
+FROM part p
+LEFT JOIN TopSuppliers ts ON ts.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN region rc ON rc.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = ts.s_suppkey))
+WHERE p.p_size BETWEEN 10 AND 20
+  AND (p.p_type LIKE '%metal%' OR p.p_type IS NULL)
+ORDER BY total_qty DESC, ts.total_cost DESC;

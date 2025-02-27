@@ -1,0 +1,44 @@
+WITH RECURSIVE region_sales AS (
+    SELECT r.r_regionkey, SUM(o.o_totalprice) AS total_sales
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY r.r_regionkey
+    UNION ALL
+    SELECT r.r_regionkey, SUM(o.o_totalprice) AS total_sales
+    FROM region r
+    JOIN region_sales rs ON r.r_regionkey = rs.r_regionkey
+    WHERE rs.total_sales IS NOT NULL
+    GROUP BY r.r_regionkey
+),
+aggregate_sales AS (
+    SELECT r.r_name, COALESCE(SUM(rs.total_sales), 0) AS total_sales
+    FROM region r
+    LEFT JOIN region_sales rs ON r.r_regionkey = rs.r_regionkey
+    GROUP BY r.r_name
+),
+ranked_sales AS (
+    SELECT r_name, total_sales,
+           RANK() OVER (ORDER BY total_sales DESC) AS sales_rank,
+           ROW_NUMBER() OVER (PARTITION BY CASE WHEN total_sales = 0 THEN 'zero' ELSE 'non-zero' END ORDER BY total_sales DESC) AS non_zero_rank
+    FROM aggregate_sales
+)
+SELECT r_name, total_sales, sales_rank, non_zero_rank,
+       EXISTS (
+           SELECT 1
+           FROM supplier s
+           WHERE s.s_acctbal IS NULL OR s.s_acctbal < 0
+       ) AS negative_balance,
+       (CASE 
+           WHEN total_sales IS NULL THEN 'Unknown Sales'
+           WHEN total_sales < 1000 THEN 'Low Sales'
+           WHEN total_sales BETWEEN 1000 AND 10000 THEN 'Moderate Sales'
+           ELSE 'High Sales'
+        END) AS sales_category
+FROM ranked_sales
+WHERE sales_rank <= 10 OR non_zero_rank <= 5
+ORDER BY total_sales DESC NULLS LAST;

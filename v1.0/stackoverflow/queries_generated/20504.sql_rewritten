@@ -1,0 +1,46 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Score,
+        MAX(U.CreationDate) AS LastActivity
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score AS PostScore,
+        COALESCE(PS.Upvotes, 0) AS PostUpvotes,
+        COALESCE(PS.Downvotes, 0) AS PostDownvotes,
+        COALESCE(PS.Score, 0) AS UserPostScore,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank,
+        P.Tags
+    FROM Posts P
+    LEFT JOIN UserVoteSummary PS ON P.OwnerUserId = PS.UserId
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    COUNT(DISTINCT P.PostId) AS TotalPosts,
+    COALESCE(AVG(P.PostScore), 0) AS AveragePostScore,
+    MAX(P.ViewCount) AS MaxViews,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TagsList
+FROM Users U
+LEFT JOIN PostSummary P ON U.Id = P.OwnerUserId
+LEFT JOIN LATERAL (
+    SELECT 
+        UTT.TagName
+    FROM Tags T
+    JOIN unnest(string_to_array(P.Tags, '><')) AS UTT(TagName) ON T.TagName = UTT.TagName
+) T ON TRUE
+WHERE U.Reputation > 100 AND (P.UserPostScore > 0 OR P.UserPostRank <= 5)
+GROUP BY U.Id, U.DisplayName
+HAVING COUNT(DISTINCT P.PostId) > 3
+ORDER BY AveragePostScore DESC, TotalPosts DESC
+LIMIT 10;

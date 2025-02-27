@@ -1,0 +1,61 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) as RevisionRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed and Reopened Posts
+), 
+UserReputationCTE AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT ph.PostId) FILTER (WHERE ph.PostHistoryTypeId = 11) AS ReopenedPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        RecursivePostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = p.ExcerptPostId
+    JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TotalBounties DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ur.TotalPosts,
+    ur.ReopenedPosts,
+    pt.TagName,
+    pt.TotalBounties
+FROM 
+    Users u
+JOIN 
+    UserReputationCTE ur ON u.Id = ur.UserId
+LEFT JOIN 
+    PopularTags pt ON ur.TotalPosts >= 10 -- Only include users with at least 10 posts
+WHERE 
+    (ur.ReOpenedPosts > 0 OR ur.Reputation > 1000) -- Users with either reopened posts or high reputation
+ORDER BY 
+    u.Reputation DESC, 
+    pt.TotalBounties DESC;

@@ -1,0 +1,75 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE 
+        mh.depth < 3
+),
+ActorRoleCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+),
+KeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(ac.actor_count, 0) AS total_actors,
+    COALESCE(ac.actor_names, 'N/A') AS actor_names,
+    COALESCE(kc.keyword_count, 0) AS total_keywords,
+    CASE 
+        WHEN mh.production_year >= 2000 THEN 'Modern Era'
+        WHEN mh.production_year BETWEEN 1990 AND 1999 THEN '90s Classics'
+        ELSE 'Old School Classics'
+    END AS movie_era
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    ActorRoleCounts ac ON mh.movie_id = ac.movie_id
+LEFT JOIN 
+    KeywordCounts kc ON mh.movie_id = kc.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, ac.actor_count, ac.actor_names, kc.keyword_count
+ORDER BY 
+    mh.production_year DESC, total_actors DESC
+LIMIT 50;

@@ -1,0 +1,40 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, c_nationkey, o_orderdate, o_totalprice, 1 AS level
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'F'
+    UNION ALL
+    SELECT o.o_orderkey, c.c_nationkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = (SELECT MAX(o1.o_orderkey) FROM orders o1 WHERE o1.o_orderkey < oh.o_orderkey)
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE oh.level < 5
+),
+PartSupplierCost AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * l.l_quantity) AS total_supply_cost
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_partkey
+),
+SupplierRegion AS (
+    SELECT DISTINCT s.s_suppkey, r.r_regionkey
+    FROM supplier s
+    LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+RankedParts AS (
+    SELECT p.p_partkey, p.p_name, ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rnk
+    FROM part p
+)
+SELECT oh.o_orderkey, oh.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+       COALESCE(NULLIF(SUM(ps.ps_availqty), 0), (SELECT AVG(ps.ps_availqty) FROM partsupp ps)) AS avg_avail_qty,
+       COUNT(DISTINCT sp.s_suppkey) AS unique_suppliers,
+       (SELECT COUNT(*) FROM RankedParts rp WHERE rp.rnk <= 10) AS top_parts_count
+FROM OrderHierarchy oh
+JOIN lineitem l ON oh.o_orderkey = l.l_orderkey
+LEFT JOIN PartSupplierCost ps ON l.l_partkey = ps.ps_partkey
+JOIN SupplierRegion sp ON sp.s_suppkey = l.l_suppkey
+WHERE oh.o_orderdate > (cast('1998-10-01' as date) - INTERVAL '1 year')
+GROUP BY oh.o_orderkey, oh.o_orderdate
+ORDER BY revenue DESC
+LIMIT 100;

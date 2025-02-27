@@ -1,0 +1,58 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation
+    FROM UserReputation
+    WHERE ReputationRank <= 10
+),
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(P.Score) AS AverageScore,
+        SUM(P.ViewCount) AS TotalViews
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+UserPostStats AS (
+    SELECT 
+        U.DisplayName,
+        COALESCE(PS.TotalPosts, 0) AS TotalPosts,
+        COALESCE(PS.TotalQuestions, 0) AS TotalQuestions,
+        COALESCE(PS.TotalAnswers, 0) AS TotalAnswers,
+        COALESCE(PS.AverageScore, 0) AS AverageScore,
+        COALESCE(PS.TotalViews, 0) AS TotalViews
+    FROM TopUsers U
+    LEFT JOIN PostStatistics PS ON U.UserId = PS.OwnerUserId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UPS.TotalPosts,
+    UPS.TotalQuestions,
+    UPS.TotalAnswers,
+    UPS.AverageScore,
+    UPS.TotalViews,
+    (SELECT COUNT(*) FROM Comments C WHERE C.UserId = U.UserId) AS TotalComments,
+    (SELECT COUNT(*) FROM Badges B WHERE B.UserId = U.UserId AND B.Class = 1) AS GoldBadges,
+    COALESCE(MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END), 0) AS ClosedPosts,
+    COALESCE(MAX(CASE WHEN PH.PostHistoryTypeId = 12 THEN 1 END), 0) AS DeletedPosts
+FROM UserReputation U
+LEFT JOIN UserPostStats UPS ON U.Id = UPS.DisplayName
+LEFT JOIN PostHistory PH ON PH.UserId = U.Id
+WHERE U.Reputation > 1000
+GROUP BY U.DisplayName, U.Reputation, UPS.TotalPosts, UPS.TotalQuestions, UPS.TotalAnswers, UPS.AverageScore, UPS.TotalViews
+ORDER BY U.Reputation DESC
+LIMIT 10;

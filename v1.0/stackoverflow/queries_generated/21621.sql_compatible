@@ -1,0 +1,76 @@
+
+WITH RecursiveVotes AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS TotalVotes,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.PostHistoryTypeId,
+        DENSE_RANK() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS HistoryRank,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Answered'
+            ELSE 'Unanswered'
+        END AS AnswerStatus,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, ph.PostHistoryTypeId
+),
+UltimateDetail AS (
+    SELECT 
+        pd.PostId, 
+        pd.Title,
+        pd.CreationDate,
+        pd.AnswerStatus,
+        r.TotalVotes,
+        r.UpVotes,
+        r.DownVotes,
+        pd.CommentCount,
+        CASE 
+            WHEN pd.HistoryRank = 1 THEN 'Recent'
+            ELSE 'Older'
+        END AS HistoryStatus,
+        CASE 
+            WHEN pd.CommentCount > 0 THEN 'Has Comments'
+            ELSE 'No Comments'
+        END AS CommentStatus
+    FROM PostDetails pd
+    LEFT JOIN RecursiveVotes r ON pd.PostId = r.PostId
+)
+SELECT 
+    ud.PostId,
+    ud.Title,
+    ud.CreationDate,
+    ud.AnswerStatus,
+    ud.TotalVotes,
+    ud.UpVotes,
+    ud.DownVotes,
+    ud.CommentCount,
+    ud.HistoryStatus,
+    ud.CommentStatus,
+    CASE 
+        WHEN ud.TotalVotes > 0 THEN 
+            (CAST(ud.UpVotes AS FLOAT) / ud.TotalVotes) * 100
+        ELSE 
+            NULL
+    END AS UpvotePercentage,
+    CASE 
+        WHEN ROW_NUMBER() OVER (ORDER BY ud.TotalVotes DESC) <= 10 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM UltimateDetail ud
+WHERE 
+    (ud.AnswerStatus = 'Unanswered' AND ud.CommentCount = 0)
+    OR (ud.CommentStatus = 'Has Comments' AND ud.UpVotes > ud.DownVotes)
+ORDER BY 
+    ud.CreationDate DESC,
+    ud.TotalVotes DESC;

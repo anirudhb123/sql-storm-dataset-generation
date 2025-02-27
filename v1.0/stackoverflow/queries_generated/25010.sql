@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(u.DisplayName, 'Community User') AS Author,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        CONCAT('[', STRING_AGG(t.TagName, ', '), ']') AS TagsList,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only considering Questions
+    GROUP BY 
+        p.Id, u.DisplayName, p.CreationDate, p.Score, p.ViewCount
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Author,
+        CreationDate,
+        Score,
+        ViewCount,
+        CommentCount,
+        TagsList
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank = 1 -- Getting the latest post for each user
+        AND Score > 0 -- Only including posts with a positive score
+)
+SELECT 
+    FP.PostId,
+    FP.Title,
+    FP.Author,
+    TO_CHAR(FP.CreationDate, 'YYYY-MM-DD HH24:MI:SS' ) AS FormattedCreationDate,
+    FP.Score,
+    FP.ViewCount,
+    FP.CommentCount,
+    FP.TagsList,
+    (
+        SELECT 
+            COUNT(*) 
+        FROM 
+            Votes v
+        WHERE 
+            v.PostId = FP.PostId AND v.VoteTypeId = 2 -- Upvotes
+    ) AS UpvoteCount,
+    (
+        SELECT 
+            COUNT(*) 
+        FROM 
+            Votes v
+        WHERE 
+            v.PostId = FP.PostId AND v.VoteTypeId = 3 -- Downvotes
+    ) AS DownvoteCount
+FROM 
+    FilteredPosts FP
+ORDER BY 
+    FP.Score DESC, FP.ViewCount DESC;

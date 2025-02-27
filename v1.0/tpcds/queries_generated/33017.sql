@@ -1,0 +1,65 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_profit,
+        COUNT(*) AS transaction_count,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_profit) DESC) AS rank
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk
+), 
+CustomerCTE AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_marital_status,
+        cd_gender,
+        COALESCE(hd_income_band_sk, 0) AS income_band_sk
+    FROM 
+        customer
+    LEFT JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    LEFT JOIN 
+        household_demographics ON hd_demo_sk = c_current_hdemo_sk
+), 
+DateCTE AS (
+    SELECT 
+        d_year,
+        d_month_seq,
+        SUM(ws_net_profit) AS monthly_profit
+    FROM 
+        web_sales
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    GROUP BY 
+        d_year, d_month_seq
+)
+SELECT 
+    ca_city,
+    SUM(start_month_profit) AS total_start_month_profit,
+    AVG(transaction_count) AS average_transaction_count_per_store,
+    MAX(d_year) AS latest_year
+FROM (
+    SELECT 
+        ca.ca_city, 
+        scte.total_profit AS start_month_profit, 
+        scte.transaction_count,
+        dcte.monthly_profit,
+        dcte.d_year
+    FROM 
+        customer_address ca
+    JOIN 
+        SalesCTE scte ON ca.ca_address_sk = (SELECT c_current_addr_sk FROM customer WHERE c_customer_sk = scte.ss_store_sk)
+    LEFT JOIN 
+        DateCTE dcte ON dcte.d_month_seq = DATE_PART('month', CURRENT_DATE)
+) AS aggregated_data
+GROUP BY 
+    ca_city
+HAVING 
+    SUM(start_month_profit) > 10000
+ORDER BY 
+    total_start_month_profit DESC
+LIMIT 10;

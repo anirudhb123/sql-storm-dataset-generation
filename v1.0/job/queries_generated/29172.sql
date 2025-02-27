@@ -1,0 +1,61 @@
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        GROUP_CONCAT(DISTINCT ak.name || ' (' || co.name || ')') AS actor_names,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        COALESCE(mi.info, 'No info') AS movie_info
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = m.id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = cc.movie_id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = c.person_id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = m.id
+    LEFT JOIN 
+        company_name co ON co.id = (SELECT mc.company_id 
+                                   FROM movie_companies mc 
+                                   WHERE mc.movie_id = m.id 
+                                   ORDER BY mc.company_id LIMIT 1)
+    GROUP BY 
+        m.id, mi.info
+),
+
+role_summary AS (
+    SELECT 
+        r.role,
+        COUNT(DISTINCT c.id) AS role_count
+    FROM 
+        role_type r
+    JOIN 
+        cast_info c ON c.role_id = r.id
+    GROUP BY 
+        r.role
+)
+
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.actor_names,
+    md.keywords,
+    md.actor_count,
+    md.movie_info,
+    rs.role,
+    rs.role_count
+FROM 
+    movie_details md
+LEFT JOIN 
+    role_summary rs ON md.actor_count > 0
+ORDER BY 
+    md.production_year DESC,
+    md.actor_count DESC;

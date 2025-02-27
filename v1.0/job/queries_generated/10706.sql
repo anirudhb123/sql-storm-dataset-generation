@@ -1,0 +1,26 @@
+-- Performance Benchmarking Query using JOINs on the Join Order Benchmark schema
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    ct.kind AS company_type,
+    c.name AS company_name,
+    m.production_year,
+    COUNT(mk.keyword_id) AS keyword_count
+FROM 
+    title t
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name c ON mc.company_id = c.id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    aka_name a ON cc.subject_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+GROUP BY 
+    t.title, a.name, ct.kind, c.name, m.production_year
+ORDER BY 
+    m.production_year DESC, movie_title;

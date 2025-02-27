@@ -1,0 +1,56 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_custkey, c.c_name, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal > (
+        SELECT AVG(c2.c_acctbal) 
+        FROM customer c2 
+        WHERE c2.c_nationkey = c.c_nationkey
+    )
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, ch.level + 1
+    FROM customer_hierarchy ch
+    JOIN customer c ON ch.c_custkey != c.c_custkey
+    WHERE SUBSTRING(c.c_name FROM 1 FOR strlen(ch.c_name)) = ch.c_name
+),
+supplier_part AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > (
+        SELECT AVG(ps2.ps_availqty) 
+        FROM partsupp ps2 
+        WHERE ps2.ps_partkey = ps.ps_partkey
+    )
+),
+monthly_sales AS (
+    SELECT EXTRACT(YEAR FROM o.o_orderdate) AS order_year, 
+           EXTRACT(MONTH FROM o.o_orderdate) AS order_month, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY order_year, order_month
+),
+nation_supplier AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+SELECT ch.c_name AS customer_name,
+       sp.p_name AS product_name,
+       ns.n_name AS nation_name,
+       ns.supplier_count,
+       ms.order_year,
+       ms.order_month,
+       ms.total_sales,
+       CASE 
+           WHEN ms.total_sales IS NULL THEN 'No sales'
+           ELSE 'Sales exist'
+       END AS sales_status
+FROM customer_hierarchy ch
+JOIN supplier_part sp ON ch.c_custkey = (SELECT MAX(ps.ps_suppkey) FROM supplier_part ps WHERE ps.ps_availqty > 0)
+CROSS JOIN nation_supplier ns
+LEFT JOIN monthly_sales ms ON ms.order_year = 1997 AND ms.order_month IN (SELECT DISTINCT EXTRACT(MONTH FROM o.o_orderdate) FROM orders o WHERE o.o_orderdate >= DATE '1997-01-01')
+ORDER BY ch.level, ns.supplier_count DESC, ms.total_sales DESC;

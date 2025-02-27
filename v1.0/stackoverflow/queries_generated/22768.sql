@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(uph.UpVotes, 0) AS UpVotes,
+        COALESCE(dph.DownVotes, 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        SUM(COALESCE(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END, 0)) AS UpVoteCount,
+        SUM(COALESCE(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END, 0)) AS DownVoteCount
+    FROM 
+        RankedPosts p
+    LEFT JOIN Users uph ON p.PostId = uph.Id 
+    LEFT JOIN Users dph ON p.PostId = dph.Id
+    LEFT JOIN Comments c ON p.PostId = c.PostId
+    LEFT JOIN Votes v ON p.PostId = v.PostId
+    WHERE 
+        p.rn <= 5 -- Get top 5 posts per type
+    GROUP BY 
+        p.PostId, p.Title, p.Score, p.ViewCount, uph.UpVotes, dph.DownVotes
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostComments AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+FinalOutput AS (
+    SELECT 
+        tp.Title,
+        tp.Score,
+        tp.UpVotes,
+        tp.DownVotes,
+        ub.BadgeCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        pc.CommentCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN UserBadges ub ON tp.OwnerUserId = ub.UserId
+    LEFT JOIN PostComments pc ON tp.PostId = pc.PostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN Score > 100 THEN 'Highly Voted'
+        WHEN Score > 50 THEN 'Moderately Voted'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel,
+    STRING_AGG(DISTINCT CASE WHEN p.Title IS NOT NULL THEN p.Title ELSE 'No Title' END, ', ') AS RelatedTitles
+FROM 
+    FinalOutput fo
+LEFT JOIN Posts p ON fo.PostId = p.Id
+GROUP BY 
+    fo.Title, fo.Score, fo.UpVotes, fo.DownVotes, fo.BadgeCount, fo.GoldBadges, fo.SilverBadges, fo.BronzeBadges, pc.CommentCount
+ORDER BY 
+    fo.Score DESC, fo.Title ASC
+LIMIT 50;

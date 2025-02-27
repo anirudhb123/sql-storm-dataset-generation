@@ -1,0 +1,74 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT Id, TagName, Count, 1 AS Level
+    FROM Tags
+    WHERE IsModeratorOnly = 0 
+
+    UNION ALL
+
+    SELECT t.Id, t.TagName, t.Count, r.Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy r ON t.ExcerptPostId = r.Id
+),
+
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        COUNT(ph.Id) AS CloseCount,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    INNER JOIN CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId, ph.CreationDate
+),
+
+UserBadgeStats AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges b
+    GROUP BY b.UserId
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    ups.PostCount,
+    ups.TotalScore,
+    ups.AvgScore,
+    COUNT(DISTINCT p.Id) AS ClosedPostCount,
+    COALESCE(ch.CloseCount, 0) AS TotalCloseCount,
+    COALESCE(ch.CloseReasons, 'No Close Reasons') AS CloseReasons,
+    ubs.BadgeCount,
+    ubs.GoldBadges,
+    ubs.SilverBadges,
+    ubs.BronzeBadges,
+    COUNT(DISTINCT th.Id) AS RelatedTagCount
+FROM Users u
+INNER JOIN UserPostStats ups ON u.Id = ups.UserId
+LEFT JOIN ClosedPostHistory ch ON ups.UserId = ch.PostId
+LEFT JOIN PostLinks pl ON pl.PostId IN (
+    SELECT Id FROM Posts WHERE OwnerUserId = ups.UserId
+)
+LEFT JOIN RecursiveTagHierarchy th ON th.Id = pl.RelatedPostId
+LEFT JOIN UserBadgeStats ubs ON ubs.UserId = u.Id
+WHERE ups.PostCount > 10 AND ups.AvgScore > 5
+GROUP BY 
+    u.DisplayName, ups.PostCount, ups.TotalScore, ups.AvgScore,
+    ch.CloseCount, ch.CloseReasons, ubs.BadgeCount,
+    ubs.GoldBadges, ubs.SilverBadges, ubs.BronzeBadges
+ORDER BY ups.TotalScore DESC, ups.PostCount DESC;

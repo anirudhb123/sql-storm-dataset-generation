@@ -1,0 +1,71 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        DENSE_RANK() OVER (PARTITION BY ws_ws_order_number ORDER BY ws_net_paid DESC) AS rank_order
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_month IS NOT NULL AND 
+        (c.c_birth_month BETWEEN 1 AND 12 OR c.c_birth_month IS NULL)
+),
+AggregateReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        AVG(sr_return_amt_inc_tax) AS avg_return_amt_inc_tax,
+        COUNT(sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+HighValueReturns AS (
+    SELECT 
+        ar.sr_item_sk,
+        ar.total_return_quantity,
+        ar.avg_return_amt_inc_tax,
+        ar.return_count
+    FROM 
+        AggregateReturns ar
+    WHERE 
+        ar.total_return_quantity > (SELECT AVG(total_return_quantity) FROM AggregateReturns)
+),
+FinalResults AS (
+    SELECT 
+        rs.ws_order_number,
+        rs.ws_quantity,
+        rs.ws_sales_price,
+        coalesce(hv.total_return_quantity, 0) AS total_return_quantity,
+        coalesce(hv.avg_return_amt_inc_tax, 0) AS avg_return_amt_inc_tax,
+        hv.return_count
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        HighValueReturns hv ON rs.ws_order_number = hv.sr_item_sk
+)
+SELECT 
+    fr.ws_order_number,
+    SUM(fr.ws_quantity) AS total_quantity,
+    SUM(fr.ws_sales_price) AS total_sales,
+    AVG(fr.avg_return_amt_inc_tax) AS avg_return_amount,
+    COUNT(CASE WHEN fr.total_return_quantity > 0 THEN 1 END) AS returns_count,
+    MAX(fr.return_count) AS max_return_count
+FROM 
+    FinalResults fr
+WHERE 
+    fr.ws_quantity IS NOT NULL AND 
+    fr.total_sales > 100 AND 
+    (fr.avg_return_amount IS NOT NULL OR fr.avg_return_amount IS NULL)
+GROUP BY 
+    fr.ws_order_number
+HAVING 
+    SUM(fr.ws_quantity) > 50
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

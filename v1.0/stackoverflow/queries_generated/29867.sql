@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY ARRAY_AGG(DISTINCT t.TagName) ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+        LEFT JOIN Comments c ON c.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank <= 5 -- Top 5 for each unique tag group
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.OwnerDisplayName,
+    fp.Tags
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.CreationDate DESC, 
+    fp.Score DESC
+LIMIT 100;

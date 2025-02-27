@@ -1,0 +1,60 @@
+WITH actor_counts AS (
+    SELECT 
+        ak.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.person_id
+),
+top_actors AS (
+    SELECT 
+        ac.person_id,
+        ac.movie_count,
+        an.name AS actor_name
+    FROM 
+        actor_counts ac
+    JOIN 
+        aka_name an ON ac.person_id = an.person_id
+    WHERE 
+        ac.movie_count >= (
+            SELECT 
+                AVG(movie_count) 
+            FROM 
+                actor_counts
+        )
+),
+movie_details AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(mc.company_id) AS company_count,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title at
+    JOIN 
+        movie_companies mc ON at.id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    GROUP BY 
+        at.id, at.title, at.production_year
+)
+SELECT 
+    ta.actor_name,
+    md.title,
+    md.production_year,
+    md.company_count,
+    md.keyword_count
+FROM 
+    top_actors ta
+JOIN 
+    cast_info ci ON ta.person_id = ci.person_id
+JOIN 
+    aka_title md ON ci.movie_id = md.id
+WHERE 
+    md.production_year >= 2000
+ORDER BY 
+    md.production_year DESC, 
+    ta.movie_count DESC;

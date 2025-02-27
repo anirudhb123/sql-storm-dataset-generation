@@ -1,0 +1,54 @@
+WITH RECURSIVE SuppliersHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal < (SELECT AVG(s_acctbal) FROM supplier WHERE s_nationkey IS NOT NULL)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SuppliersHierarchy sh ON s.s_nationkey = sh.s_nationkey AND s.s_acctbal < sh.s_acctbal
+),
+AggOrders AS (
+    SELECT o.o_custkey, 
+           COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent,
+           MAX(o.o_orderdate) AS last_order_date
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' AND 
+          o.o_orderdate < CURRENT_DATE - INTERVAL '1 month'
+    GROUP BY o.o_custkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey
+    FROM customer c
+    JOIN AggOrders ao ON c.c_custkey = ao.o_custkey
+    WHERE ao.total_spent > 10000
+),
+ProductSales AS (
+    SELECT ps.ps_partkey, 
+           SUM(l.l_quantity) AS total_quantity_sold,
+           AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_after_discount,
+           RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(l.l_quantity) DESC) AS sales_rank
+    FROM lineitem l
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_name, 
+    ph.total_quantity_sold, 
+    ph.avg_price_after_discount,
+    sh.level,
+    COUNT(DISTINCT c.c_custkey) AS total_high_value_customers,
+    SUM(CASE 
+            WHEN r.r_name IS NULL THEN 1 ELSE 0 
+        END) AS region_null_count,
+    STRING_AGG(DISTINCT r.r_name, ', ') AS regions
+FROM part p
+LEFT JOIN ProductSales ph ON p.p_partkey = ph.ps_partkey
+LEFT JOIN HighValueCustomers c ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name LIKE '%land%')
+LEFT JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = c.c_nationkey)
+LEFT JOIN SuppliersHierarchy sh ON sh.level > 0 
+WHERE p.p_retailprice IS NOT NULL
+GROUP BY p.p_name, ph.total_quantity_sold, ph.avg_price_after_discount, sh.level
+HAVING COUNT(DISTINCT c.c_custkey) > 0 OR sh.level IS NOT NULL
+ORDER BY ph.total_quantity_sold DESC, p.p_name ASC
+LIMIT 100;

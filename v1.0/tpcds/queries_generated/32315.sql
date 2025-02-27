@@ -1,0 +1,69 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        RANK() OVER (ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    JOIN
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 2451545 AND 2451879  -- Example date range
+    GROUP BY
+        ws.web_site_sk
+    
+    UNION ALL
+    
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        RANK() OVER (ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    JOIN
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    JOIN
+        SalesCTE s ON ws.ws_web_site_sk = s.web_site_sk
+    WHERE
+        s.total_sales < 1000000  -- Aggregate limit to continue recursion
+    GROUP BY
+        ws.web_site_sk
+),
+RankedSales AS (
+    SELECT
+        s.web_site_sk,
+        s.total_sales,
+        s.order_count,
+        ROW_NUMBER() OVER (PARTITION BY s.web_site_sk ORDER BY s.total_sales DESC) AS row_num
+    FROM
+        SalesCTE s
+)
+SELECT 
+    w.web_site_id,
+    w.web_name,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    COALESCE(s.order_count, 0) AS order_count,
+    CASE 
+        WHEN s.sales_rank <= 10 THEN 'Top Performer' 
+        ELSE 'Regular Performer' 
+    END AS performance_category
+FROM
+    web_site w
+LEFT JOIN
+    (SELECT 
+         web_site_sk, 
+         total_sales, 
+         order_count, 
+         sales_rank 
+     FROM 
+         RankedSales) s 
+ON 
+    w.web_site_sk = s.web_site_sk
+WHERE
+    w.web_country = 'USA'
+ORDER BY 
+    total_sales DESC
+LIMIT 20;

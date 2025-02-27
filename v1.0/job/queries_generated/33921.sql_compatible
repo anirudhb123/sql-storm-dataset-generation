@@ -1,0 +1,52 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mm.id AS movie_id,
+        mm.title,
+        mm.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mm ON ml.linked_movie_id = mm.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    COUNT(c.id) AS total_cast,
+    SUM(CASE WHEN ci.note IS NULL THEN 1 ELSE 0 END) AS null_notes,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    MAX(mh.level) AS max_hierarchy_level
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    aka_title m ON c.movie_id = m.id
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_hierarchy mh ON m.id = mh.movie_id
+WHERE 
+    m.production_year >= 2000 
+    AND (c.note IS NULL OR c.note <> 'redacted')
+GROUP BY 
+    a.name, m.title
+ORDER BY 
+    a.name, m.title;

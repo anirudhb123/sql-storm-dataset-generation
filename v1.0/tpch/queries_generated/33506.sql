@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 
+           1 AS level, NULL AS parent_s_suppkey
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+      
+    UNION ALL
+    
+    SELECT s2.s_suppkey, s2.s_name, s2.s_acctbal, s2.s_nationkey,
+           sh.level + 1 AS level, sh.s_suppkey AS parent_s_suppkey
+    FROM supplier s2
+    INNER JOIN SupplierHierarchy sh ON s2.s_nationkey = sh.s_nationkey
+    WHERE s2.s_acctbal > sh.s_acctbal
+),
+NationStats AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+OrderSummaries AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY o.o_orderkey
+),
+CustomerMetrics AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT n.n_name, ns.supplier_count, cm.c_name, cm.total_spent, o.total_revenue,
+       CASE WHEN o.revenue_rank <= 5 THEN 'Top Revenue' ELSE 'Other' END AS revenue_category,
+       sh.level, sh.parent_s_suppkey
+FROM NationStats ns
+JOIN CustomerMetrics cm ON ns.n_nationkey = cm.c_custkey
+LEFT JOIN OrderSummaries o ON cm.order_count > 10 AND o.total_revenue IS NOT NULL
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = ns.n_nationkey
+WHERE ns.supplier_count > 5 
+  AND cm.total_spent IS NOT NULL
+ORDER BY ns.supplier_count DESC, cm.total_spent DESC
+LIMIT 50;

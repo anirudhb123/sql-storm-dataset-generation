@@ -1,0 +1,57 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - p.CreationDate)), 0)) AS AverageResponseTime
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        TRIM(SUBSTRING(value FROM 2 FOR LENGTH(value) - 2)) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    CROSS JOIN LATERAL STRING_SPLIT(Tags, '>') 
+    GROUP BY 
+        TRIM(SUBSTRING(value FROM 2 FOR LENGTH(value) - 2))
+    ORDER BY 
+        TagCount DESC
+    LIMIT 5
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostCount,
+        ua.TotalViews,
+        ua.TotalScore,
+        ua.AverageResponseTime,
+        DENSE_RANK() OVER (ORDER BY ua.TotalScore DESC) AS Rank
+    FROM 
+        UserActivity ua
+    WHERE 
+        ua.PostCount > 10
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalViews,
+    tu.TotalScore,
+    tu.AverageResponseTime,
+    STRING_AGG(pt.Tag, ', ') AS PopularTags
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    PopularTags pt ON pt.TagCount IS NOT NULL
+GROUP BY 
+    tu.UserId, tu.DisplayName, tu.TotalViews, tu.TotalScore, tu.AverageResponseTime
+ORDER BY 
+    tu.Rank;

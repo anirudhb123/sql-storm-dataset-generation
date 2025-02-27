@@ -1,0 +1,62 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS purchase_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ss.ss_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_sales,
+        cs.purchase_count
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_id = c.c_customer_id
+    WHERE 
+        cs.sales_rank <= 10
+),
+ItemSales AS (
+    SELECT 
+        i.i_item_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales_web,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count_web
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_id
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        is.total_sales_web,
+        is.order_count_web,
+        RANK() OVER (ORDER BY is.total_sales_web DESC) AS item_rank
+    FROM 
+        ItemSales is
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_sales AS customer_total_sales,
+    tc.purchase_count AS customer_purchase_count,
+    ti.i_item_id,
+    ti.total_sales_web AS item_total_sales_web,
+    ti.order_count_web AS item_order_count_web
+FROM 
+    TopCustomers tc
+FULL OUTER JOIN 
+    TopItems ti ON tc.c_customer_id IS NOT NULL OR ti.i_item_id IS NOT NULL
+WHERE 
+    (tc.total_sales > 1000 OR ti.total_sales_web > 500)
+ORDER BY 
+    tc.customer_total_sales DESC, ti.item_total_sales_web DESC;

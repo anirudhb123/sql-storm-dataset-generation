@@ -1,0 +1,50 @@
+
+WITH CustomerSales AS (
+    SELECT
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM
+        customer c
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY
+        c.c_customer_id
+),
+SalesDemographics AS (
+    SELECT
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(cs_total.total_sales) AS total_sales,
+        COUNT(cs_total.order_count) AS total_orders
+    FROM
+        CustomerSales cs_total
+    JOIN
+        customer_demographics cd ON cs_total.c_customer_id = cd.cd_demo_sk
+    GROUP BY
+        cd.cd_gender, cd.cd_marital_status
+),
+SalesRanked AS (
+    SELECT
+        sd.cd_gender,
+        sd.cd_marital_status,
+        sd.total_sales,
+        sd.total_orders,
+        RANK() OVER (PARTITION BY sd.cd_gender ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM
+        SalesDemographics sd
+)
+SELECT
+    sr.cd_gender,
+    sr.cd_marital_status,
+    sr.total_sales,
+    sr.total_orders,
+    sr.sales_rank
+FROM
+    SalesRanked sr
+WHERE
+    sr.sales_rank <= 10
+ORDER BY
+    sr.cd_gender, sr.total_sales DESC;

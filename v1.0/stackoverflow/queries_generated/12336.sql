@@ -1,0 +1,34 @@
+-- Performance Benchmarking Query for StackOverflow Schema
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        pt.Name AS PostType,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(p.CreationDate) AS CreationDate,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, pt.Name
+)
+
+SELECT 
+    *,
+    DATEDIFF('second', CreationDate, LastEditDate) AS DurationInSeconds
+FROM 
+    PostStatistics
+ORDER BY 
+    DurationInSeconds DESC;

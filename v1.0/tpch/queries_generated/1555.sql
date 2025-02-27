@@ -1,0 +1,64 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+), SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), CustomerSpend AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_orderstatus,
+    ss.s_name,
+    cs.c_name,
+    cs.total_spent,
+    ss.total_available_quantity,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No purchases'
+        WHEN ss.total_available_quantity < 100 THEN 'Low stock'
+        ELSE 'Total Spend: ' || TO_CHAR(cs.total_spent, 'FM$9,999,999.00')
+    END AS purchase_analysis
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    SupplierStats ss ON ss.total_supply_cost > 5000
+LEFT JOIN 
+    CustomerSpend cs ON cs.total_spent > 1000
+WHERE 
+    r.order_rank = 1
+ORDER BY 
+    r.o_orderdate DESC, 
+    r.o_orderkey;

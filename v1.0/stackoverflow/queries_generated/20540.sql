@@ -1,0 +1,81 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        CASE 
+            WHEN LastAccessDate > CreationDate THEN 'Active User'
+            ELSE 'Inactive User'
+        END AS UserStatus,
+        ROW_NUMBER() OVER (PARTITION BY UserId ORDER BY CreationDate DESC) AS UserActivityRank
+    FROM Users
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate AS PostCreationDate,
+        P.ViewCount,
+        P.OwnerUserId,
+        P.Score AS PostScore,
+        U.DisplayName AS OwnerDisplayName,
+        P.LastActivityDate,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY P.Id, U.DisplayName
+),
+PostVoteSummary AS (
+    SELECT 
+        V.PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes V
+    GROUP BY V.PostId
+),
+ClosedPostHistory AS (
+    SELECT
+        PH.PostId,
+        COUNT(*) AS CloseCount,
+        MAX(PH.CreationDate) AS LastCloseDate,
+        STRING_AGG(DISTINCT CRT.Name, ', ') AS CloseReasons
+    FROM PostHistory PH
+    JOIN CloseReasonTypes CRT ON PH.Comment::int = CRT.Id
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.PostId
+),
+UserEngagement AS (
+    SELECT 
+        U.UserId,
+        U.Reputation AS UserReputation,
+        RP.CommentCount AS RecentCommentCount,
+        COALESCE(CPH.CloseCount, 0) AS CloseCount,
+        COALESCE(CPH.LastCloseDate, '1970-01-01'::timestamp) AS LastCloseDate,
+        COALESCE(CPH.CloseReasons, 'No close reasons') AS CloseReasons
+    FROM UserReputation U
+    LEFT JOIN RecentPosts RP ON U.UserId = RP.OwnerUserId
+    LEFT JOIN ClosedPostHistory CPH ON RP.PostId = CPH.PostId
+)
+SELECT 
+    U.DisplayName,
+    U.UserStatus,
+    U.UserActivityRank,
+    COALESCE(RP.Title, 'No Recent Posts') AS RecentPostTitle,
+    RP.PostCreationDate,
+    RP.ViewCount,
+    COALESCE(PVS.UpVotes, 0) AS UpVotes,
+    COALESCE(PVS.DownVotes, 0) AS DownVotes,
+    UE.RecentCommentCount,
+    UE.CloseCount,
+    UE.LastCloseDate,
+    UE.CloseReasons
+FROM Users U
+LEFT JOIN RecentPosts RP ON U.Id = RP.OwnerUserId
+LEFT JOIN PostVoteSummary PVS ON RP.PostId = PVS.PostId
+LEFT JOIN UserEngagement UE ON U.Id = UE.UserId
+WHERE U.Reputation > 100
+ORDER BY U.Reputation DESC, RP.PostCreationDate DESC
+LIMIT 100;

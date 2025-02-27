@@ -1,0 +1,60 @@
+
+WITH RECURSIVE Customer_Sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(ss.ss_net_paid), 0) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS transaction_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+Sales_Ranking AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_sales,
+        cs.transaction_count,
+        DENSE_RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        Customer_Sales cs
+),
+Address_Info AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer_address ca
+    WHERE 
+        ca.ca_city IS NOT NULL AND ca.ca_country = 'USA'
+)
+SELECT 
+    sr.c_customer_sk,
+    sr.c_first_name,
+    sr.c_last_name,
+    sr.total_sales,
+    sr.transaction_count,
+    ai.ca_city,
+    ai.ca_state,
+    CASE 
+        WHEN sr.total_sales = 0 THEN 'No Sales'
+        WHEN sr.sales_rank <= 10 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status,
+    COALESCE(ai.ca_city, 'Unknown') AS city_info
+FROM 
+    Sales_Ranking sr
+LEFT JOIN 
+    Address_Info ai ON sr.c_customer_sk = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_customer_sk = sr.c_customer_sk)
+WHERE 
+    sr.transaction_count > 5
+ORDER BY 
+    sr.total_sales DESC
+LIMIT 50;

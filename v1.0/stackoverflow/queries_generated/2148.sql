@@ -1,0 +1,65 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(DISTINCT p.Id) DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+), RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.Reputation,
+    ua.PostCount,
+    ua.UpVotes,
+    ua.DownVotes,
+    ua.BadgeCount,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score
+FROM UserActivity ua
+LEFT JOIN RankedPosts rp ON ua.UserId = rp.OwnerUserId
+WHERE ua.UserRank <= 5 
+AND (rp.PostRank = 1 OR rp.PostRank IS NULL) 
+ORDER BY ua.Reputation DESC, ua.PostCount DESC 
+LIMIT 50;
+
+UNION ALL
+
+SELECT 
+    NULL AS UserId,
+    'Aggregate Stats' AS DisplayName,
+    AVG(Reputation) AS Reputation,
+    SUM(PostCount) AS PostCount,
+    SUM(UpVotes) AS UpVotes,
+    SUM(DownVotes) AS DownVotes,
+    SUM(BadgeCount) AS BadgeCount,
+    NULL AS PostId,
+    NULL AS Title,
+    NULL AS CreationDate,
+    NULL AS ViewCount,
+    NULL AS Score
+FROM UserActivity;

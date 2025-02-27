@@ -1,0 +1,37 @@
+WITH RECURSIVE PartCTE AS (
+    SELECT p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_retailprice, 
+           CAST(p_comment AS varchar(200)) AS p_comment, 1 AS level
+    FROM part
+    WHERE p_size > 20
+
+    UNION ALL
+
+    SELECT p.partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type, p.p_size, p.p_retailprice, 
+           CONCAT(cte.p_comment, ' / More info') AS p_comment, cte.level + 1
+    FROM part p
+    JOIN PartCTE cte ON p.p_size = cte.level + 20
+)
+
+SELECT 
+    n.n_name AS nation_name, 
+    r.r_name AS region_name, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    ROUND(AVG(s.s_acctbal), 2) AS avg_supplier_balance,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ' (', p.p_brand, ')'), ', ') AS part_names
+FROM orders o
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+INNER JOIN supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN partsupp ps ON l.l_partkey = ps.ps_partkey AND s.s_suppkey = ps.ps_suppkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN PartCTE p ON l.l_partkey = p.p_partkey
+WHERE o.o_orderdate > '2023-01-01' 
+  AND l.l_shipdate IS NOT NULL
+  AND (n.n_name LIKE 'A%' OR n.n_name IS NULL) 
+  AND s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+GROUP BY n.n_name, r.r_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY total_sales DESC
+LIMIT 10;

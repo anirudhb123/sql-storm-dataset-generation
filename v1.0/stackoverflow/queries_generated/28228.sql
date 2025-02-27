@@ -1,0 +1,76 @@
+WITH ProcessedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        DATEDIFF(second, p.CreationDate, GETDATE()) / 3600.0 AS AgeInHours  -- Calculate post age in hours
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only fetching Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><'))) ) AS TagName, 
+        COUNT(*) AS PostCount
+    FROM 
+        ProcessedPosts
+    GROUP BY 
+        TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+BenchmarkResults AS (
+    SELECT 
+        pp.PostId,
+        pp.Title,
+        pp.OwnerDisplayName,
+        pp.CommentCount,
+        pp.UpVotes,
+        pp.DownVotes,
+        pp.AgeInHours,
+        COUNT(pt.TagName) AS AssociatedTagCount,
+        CASE 
+            WHEN pp.AgeInHours < 1 THEN 'Fresh'
+            WHEN pp.AgeInHours BETWEEN 1 AND 24 THEN 'New'
+            ELSE 'Old'
+        END AS AgeCategory
+    FROM 
+        ProcessedPosts pp
+    LEFT JOIN 
+        PopularTags pt ON POSITION(pt.TagName IN pp.Tags) > 0  -- Join Popular Tags
+    GROUP BY 
+        pp.PostId, pp.Title, pp.OwnerDisplayName, 
+        pp.CommentCount, pp.UpVotes, 
+        pp.DownVotes, pp.AgeInHours
+)
+
+SELECT 
+    PostId,
+    Title,
+    OwnerDisplayName,
+    CommentCount,
+    UpVotes,
+    DownVotes,
+    AgeInHours,
+    AssociatedTagCount,
+    AgeCategory
+FROM 
+    BenchmarkResults
+ORDER BY 
+    UpVotes DESC, AgeInHours ASC;  -- Order by most popular and newer posts

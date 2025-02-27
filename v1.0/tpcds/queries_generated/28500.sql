@@ -1,0 +1,50 @@
+
+WITH processed_addresses AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address,
+        LOWER(CONCAT(ca_city, ', ', ca_state, ' ', ca_zip)) AS normalized_location
+    FROM 
+        customer_address
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_education_status,
+        d.cd_purchase_estimate,
+        a.full_address,
+        a.normalized_location
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    JOIN 
+        processed_addresses a ON c.c_current_addr_sk = a.ca_address_sk
+),
+string_benchmark AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.full_address,
+        LENGTH(c.full_address) AS address_length,
+        CHAR_LENGTH(c.c_first_name) + CHAR_LENGTH(c.c_last_name) AS full_name_length,
+        SUBSTRING(c.normalized_location, 1, 10) AS location_substr,
+        REPLACE(UPPER(c.c_first_name), 'A', '@') AS modified_first_name
+    FROM 
+        customer_details c
+)
+SELECT 
+    COUNT(*) AS total_customers,
+    AVG(address_length) AS avg_address_length,
+    AVG(full_name_length) AS avg_full_name_length,
+    MAX(address_length) AS max_address_length,
+    MAX(full_name_length) AS max_full_name_length,
+    STRING_AGG(DISTINCT location_substr ORDER BY location_substr) AS distinct_location_substrings
+FROM 
+    string_benchmark;

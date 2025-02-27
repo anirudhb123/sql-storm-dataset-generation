@@ -1,0 +1,67 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ship_date_sk,
+        ws.web_site_sk,
+        ws.item_sk,
+        ws.order_number,
+        RANK() OVER (PARTITION BY ws.web_site_sk, ws.item_sk ORDER BY ws.sold_date_sk DESC) AS sales_rank,
+        SUM(ws.net_profit) OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ship_date_sk ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_profit
+    FROM web_sales ws
+    WHERE ws.sales_price > 0
+), 
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        SUM(ws.net_profit) AS total_spent,
+        MIN(COALESCE(d.d_date, '2023-10-01')) AS first_purchase_date, 
+        MAX(d.d_date) AS last_purchase_date,
+        MAX(d.d_date) - MIN(d.d_date) AS purchase_duration
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.bill_customer_sk
+    LEFT JOIN date_dim d ON ws.sold_date_sk = d.d_date_sk
+    GROUP BY c.c_customer_sk
+    HAVING COUNT(DISTINCT ws.order_number) > 0
+), 
+demographics AS (
+    SELECT 
+        h.hd_demo_sk,
+        h.hd_income_band_sk,
+        cd_cd.marital_status,
+        cd_cd.education_status,
+        CASE 
+            WHEN h.hd_vehicle_count IS NULL THEN 'No Vehicles'
+            ELSE 'Has Vehicles'
+        END AS vehicle_status
+    FROM household_demographics h
+    JOIN customer_demographics cd_cd ON h.hd_demo_sk = cd_cd.cd_demo_sk
+    WHERE cd_cd.education_status NOT LIKE '%None%'
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.total_orders,
+    cs.total_spent,
+    cs.first_purchase_date,
+    cs.last_purchase_date,
+    d.marital_status,
+    d.education_status,
+    d.vehicle_status,
+    COALESCE(rs.sales_rank, 0) AS sales_rank,
+    COALESCE(rs.cumulative_profit, 0) AS total_cumulative_profit,
+    CASE 
+        WHEN DATEDIFF(cs.last_purchase_date, cs.first_purchase_date) BETWEEN 0 AND 30 THEN 'New Customer'
+        WHEN DATEDIFF(cs.last_purchase_date, cs.first_purchase_date) BETWEEN 31 AND 90 THEN 'Returning Customer'
+        ELSE 'Loyal Customer'
+    END AS customer_type
+FROM customer_summary cs
+LEFT JOIN demographics d ON cs.c_customer_sk = d.hd_demo_sk
+LEFT JOIN ranked_sales rs ON cs.total_orders = rs.order_number AND rs.ship_date_sk = cs.last_purchase_date
+WHERE (cs.total_spent > 1000 OR EXISTS (
+    SELECT 1 
+    FROM store_returns sr 
+    WHERE sr.returning_customer_sk = cs.c_customer_sk 
+    AND sr.return_quantity > 0
+)) 
+AND d.hd_income_band_sk IS NOT NULL
+ORDER BY cs.total_spent DESC, cs.total_orders ASC;

@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        COALESCE(ci.person_role_id, 0) AS role_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        AVG(mi.info) FILTER (WHERE it.info = 'duration') AS avg_duration
+    FROM
+        RankedMovies m
+    LEFT JOIN
+        complete_cast cc ON m.movie_id = cc.movie_id
+    LEFT JOIN
+        cast_info ci ON cc.subject_id = ci.person_id AND ci.note IS NOT NULL
+    LEFT JOIN
+        movie_companies mc ON m.movie_id = mc.movie_id
+    LEFT JOIN
+        movie_info mi ON m.movie_id = mi.movie_id
+    LEFT JOIN
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY
+        m.movie_id, m.title
+)
+SELECT
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.role_id,
+    md.company_count,
+    md.avg_duration,
+    CASE
+        WHEN md.company_count > 10 THEN 'High Production'
+        WHEN md.company_count BETWEEN 5 AND 10 THEN 'Medium Production'
+        ELSE 'Low Production'
+    END AS production_level
+FROM
+    RankedMovies rm
+JOIN
+    MovieDetails md ON rm.movie_id = md.movie_id
+WHERE
+    md.role_id IS NOT NULL
+    AND md.avg_duration IS NOT NULL
+ORDER BY
+    rm.production_year DESC, md.title_rank
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY
+UNION ALL
+SELECT
+    NULL AS movie_id,
+    'Aggregate Total' AS title,
+    NULL AS production_year,
+    NULL AS role_id,
+    COUNT(*) AS company_count,
+    NULL AS avg_duration,
+    'Total Entries' AS production_level
+FROM
+    MovieDetails;

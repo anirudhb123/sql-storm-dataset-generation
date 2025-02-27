@@ -1,0 +1,45 @@
+WITH RECURSIVE supplier_summary AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           SUM(ps.ps_supplycost) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+region_summary AS (
+    SELECT r.r_name, 
+           COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_name
+),
+top_suppliers AS (
+    SELECT s.suppkey, 
+           ROW_NUMBER() OVER (ORDER BY total_supply_cost DESC) AS rn
+    FROM supplier_summary s
+),
+order_dates AS (
+    SELECT DISTINCT EXTRACT(YEAR FROM o.o_orderdate) AS order_year
+    FROM orders o
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, 
+           AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS returns_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT r.r_name,
+       ss.s_name, 
+       ls.avg_price,
+       ls.returns_count,
+       od.order_year
+FROM region_summary r
+FULL OUTER JOIN top_suppliers ss ON r.nation_count = ss.suppkey
+INNER JOIN lineitem_summary ls ON ss.suppkey = ls.l_orderkey
+FULL JOIN order_dates od ON od.order_year IS NOT NULL
+WHERE (ss.unique_parts IS NULL OR ss.unique_parts > 10)
+  AND (r.r_name NOT LIKE '%north%' OR ls.avg_price > 100)
+  AND (od.order_year IS NOT NULL)
+ORDER BY r.r_name, ss.total_supply_cost DESC NULLS LAST, ls.avg_price;

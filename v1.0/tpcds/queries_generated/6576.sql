@@ -1,0 +1,47 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_sold_date_sk,
+        d.d_year,
+        d.d_month_seq,
+        c.c_current_cdemo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        hd.hd_buy_potential,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        customer AS c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics AS hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE 
+        d.d_year = 2023
+        AND cd.cd_gender = 'F'
+    GROUP BY 
+        ws.ws_item_sk, ws.ws_sales_price, ws.ws_quantity, d.d_year, d.d_month_seq, 
+        c.c_current_cdemo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk, hd.hd_buy_potential
+)
+SELECT 
+    sd.ws_item_sk,
+    sd.total_quantity,
+    sd.total_sales,
+    d.d_month_seq
+FROM 
+    sales_data AS sd
+JOIN 
+    date_dim AS d ON sd.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    sd.total_sales > 1000
+ORDER BY 
+    sd.total_sales DESC
+LIMIT 10;

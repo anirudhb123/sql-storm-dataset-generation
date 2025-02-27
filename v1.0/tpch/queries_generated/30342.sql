@@ -1,0 +1,38 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+    ORDER BY total_cost DESC
+    LIMIT 10
+),
+high_value_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+nation_summary AS (
+    SELECT n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count,
+           SUM(o.o_totalprice) AS total_order_value
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_name
+)
+SELECT r.r_name, ns.customer_count, ns.total_order_value, ts.total_cost
+FROM region r
+JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN nation_summary ns ON n.n_name = ns.n_name
+LEFT JOIN top_suppliers ts ON n.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey = ts.s_suppkey LIMIT 1)
+WHERE ns.total_order_value IS NOT NULL
+ORDER BY r.r_name, ns.total_order_value DESC
+UNION ALL
+SELECT r.r_name, NULL, NULL, SUM(ps.ps_supplycost * ps.ps_availqty)
+FROM region r
+JOIN nation n ON n.n_regionkey = r.r_regionkey
+JOIN partsupp ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_retailprice > 50)
+GROUP BY r.r_name
+HAVING SUM(ps.ps_availqty) IS NOT NULL
+ORDER BY r.r_name;

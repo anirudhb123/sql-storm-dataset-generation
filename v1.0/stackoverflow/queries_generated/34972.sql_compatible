@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+        AND p.PostTypeId = 1
+), 
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    GROUP BY 
+        rp.PostId
+),
+RankedPostStats AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.OwnerDisplayName,
+        p.CreationDate,
+        ps.CommentCount,
+        p.ViewCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        (ps.UpVotes - ps.DownVotes) AS NetVotes,
+        RANK() OVER (ORDER BY (ps.UpVotes - ps.DownVotes) DESC, p.ViewCount DESC) AS NetRank
+    FROM 
+        RankedPosts p
+    JOIN 
+        PostStats ps ON p.PostId = ps.PostId
+)
+SELECT 
+    rps.PostId,
+    rps.Title,
+    rps.OwnerDisplayName,
+    rps.CreationDate,
+    rps.CommentCount,
+    rps.ViewCount,
+    rps.UpVotes,
+    rps.DownVotes,
+    rps.NetVotes,
+    rps.NetRank,
+    COALESCE(pht.Name, 'No History') AS PostHistoryType,
+    CASE 
+        WHEN rps.NetVotes > 0 THEN 'Popular'
+        WHEN rps.NetVotes < 0 THEN 'Controversial'
+        ELSE 'Neutral'
+    END AS PostStatus
+FROM 
+    RankedPostStats rps
+LEFT JOIN 
+    PostHistory ph ON rps.PostId = ph.PostId
+LEFT JOIN 
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id 
+WHERE 
+    rps.RowNum = 1
+ORDER BY 
+    rps.NetRank, rps.ViewCount DESC
+FETCH FIRST 100 ROWS ONLY;

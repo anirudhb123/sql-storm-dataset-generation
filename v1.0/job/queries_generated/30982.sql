@@ -1,0 +1,68 @@
+WITH RECURSIVE cte_movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS hierarchy_level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ch.hierarchy_level + 1
+    FROM 
+        aka_title m
+        JOIN cte_movie_hierarchy ch ON m.episode_of_id = ch.movie_id
+),
+movie_cast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+movie_info AS (
+    SELECT 
+        mi.movie_id,
+        MAX(CASE WHEN it.info = 'Synopsis' THEN mi.info END) AS synopsis,
+        MAX(CASE WHEN it.info = 'Rating' THEN mi.info END) AS rating
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    m.id AS movie_id,
+    m.title,
+    m.production_year,
+    COALESCE(mc.total_cast, 0) AS total_cast,
+    mc.cast_names,
+    COALESCE(mi.synopsis, 'No synopsis available') AS synopsis,
+    COALESCE(mi.rating, 'Not rated') AS rating,
+    ch.hierarchy_level
+FROM 
+    aka_title m
+LEFT JOIN 
+    movie_cast mc ON m.id = mc.movie_id
+LEFT JOIN 
+    movie_info mi ON m.id = mi.movie_id
+LEFT JOIN 
+    cte_movie_hierarchy ch ON m.id = ch.movie_id
+WHERE 
+    m.production_year >= 2000
+    AND (mc.total_cast IS NULL OR mc.total_cast > 5)
+ORDER BY 
+    m.production_year DESC,
+    ch.hierarchy_level,
+    m.title;

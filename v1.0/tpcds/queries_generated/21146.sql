@@ -1,0 +1,66 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_customer_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_customer_sk
+), 
+demo_data AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_credit_rating,
+        COALESCE(hd_income_band_sk, -1) AS income_band
+    FROM customer_demographics
+    LEFT JOIN household_demographics ON cd_demo_sk = hd_demo_sk
+), 
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(demo_data.cd_gender, 'O') AS gender,
+        demo_data.income_band,
+        ranked_sales.total_sales,
+        ranked_sales.order_count
+    FROM customer c
+    LEFT JOIN ranked_sales ON c.c_customer_sk = ranked_sales.ws_customer_sk
+    LEFT JOIN demo_data ON c.c_current_cdemo_sk = demo_data.cd_demo_sk
+),
+address_counts AS (
+    SELECT 
+        ca_state,
+        COUNT(ca_address_sk) AS address_count
+    FROM customer_address
+    GROUP BY ca_state
+),
+final_result AS (
+    SELECT 
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.gender,
+        ci.income_band,
+        ci.total_sales,
+        ci.order_count,
+        ac.address_count,
+        CASE 
+            WHEN ci.gender IS NULL THEN 'Unknown'
+            WHEN ci.gender = 'M' AND ci.total_sales > (SELECT AVG(total_sales) FROM customer_info) THEN 'High Spender Male'
+            WHEN ci.gender = 'F' AND ci.total_sales < (SELECT AVG(total_sales) FROM customer_info) THEN 'Low Spender Female'
+            ELSE 'Average Customer'
+        END AS customer_type
+    FROM customer_info ci
+    LEFT JOIN address_counts ac ON (ci.income_band = ac.address_count OR ci.income_band = -1)
+)
+SELECT 
+    *,
+    LEAD(total_sales) OVER (ORDER BY total_sales DESC) AS next_total_sales,
+    LAG(order_count) OVER (ORDER BY order_count DESC) AS previous_order_count
+FROM final_result
+WHERE (total_sales IS NOT NULL OR order_count > 0)
+ORDER BY total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

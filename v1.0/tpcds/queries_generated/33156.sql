@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) as sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), Refunds AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_refunded_quantity,
+        SUM(wr_return_amt_inc_tax) AS total_refunded_amount
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_item_sk
+), SalesWithRefunds AS (
+    SELECT 
+        s.ws_item_sk,
+        s.total_quantity,
+        s.total_sales,
+        COALESCE(r.total_refunded_quantity, 0) AS total_refunded_quantity,
+        COALESCE(r.total_refunded_amount, 0) AS total_refunded_amount,
+        s.total_sales - COALESCE(r.total_refunded_amount, 0) AS net_sales_after_refunds
+    FROM 
+        SalesCTE s
+    LEFT JOIN 
+        Refunds r ON s.ws_item_sk = r.wr_item_sk
+)
+SELECT 
+    it.i_item_id,
+    it.i_item_desc,
+    ss.total_quantity,
+    ss.total_sales,
+    ss.total_refunded_quantity,
+    ss.total_refunded_amount,
+    CASE 
+        WHEN ss.net_sales_after_refunds < 0 THEN 'Negative Profit'
+        WHEN ss.net_sales_after_refunds = 0 THEN 'Break Even'
+        ELSE 'Profit'
+    END AS profit_status
+FROM 
+    SalesWithRefunds ss
+JOIN 
+    item it ON ss.ws_item_sk = it.i_item_sk
+WHERE 
+    ss.sales_rank = 1
+ORDER BY 
+    ss.net_sales_after_refunds DESC,
+    ss.total_quantity DESC;

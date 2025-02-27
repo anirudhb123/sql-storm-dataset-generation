@@ -1,0 +1,60 @@
+
+WITH AddressDetails AS (
+    SELECT DISTINCT
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, COALESCE(CONCAT(' APT ', ca_suite_number), '')) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM customer_address
+),
+CustomerDetails AS (
+    SELECT
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        cd.cd_dep_employed_count,
+        cd.cd_dep_college_count,
+        ad.full_address
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN AddressDetails ad ON c.c_current_addr_sk = ad.ca_address_sk
+),
+DateDetails AS (
+    SELECT
+        d.d_date,
+        d.d_month_seq,
+        d.d_year,
+        d.d_day_name,
+        CASE 
+            WHEN d.d_weekend = '1' THEN 'Weekend'
+            ELSE 'Weekday'
+        END AS day_type
+    FROM date_dim d
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cd.cd_purchase_estimate,
+    cd.cd_credit_rating,
+    cd.full_address,
+    dd.d_date,
+    dd.d_day_name,
+    dd.day_type,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    SUM(ws.ws_sales_price) AS total_spent
+FROM CustomerDetails cd
+JOIN web_sales ws ON cd.c_customer_sk = ws.ws_bill_customer_sk
+JOIN DateDetails dd ON ws.ws_sold_date_sk = dd.d_date_sk
+WHERE dd.d_year = 2023 AND dd.d_month_seq BETWEEN 1 AND 6
+GROUP BY cd.c_first_name, cd.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, cd.cd_purchase_estimate, cd.cd_credit_rating, cd.full_address, dd.d_date, dd.d_day_name, dd.day_type
+ORDER BY total_spent DESC
+LIMIT 100;

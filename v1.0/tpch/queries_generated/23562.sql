@@ -1,0 +1,66 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_clerk,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') 
+        AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = o.o_orderstatus)
+), high_value_suppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) as total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        total_supply_cost > (SELECT AVG(ps2.ps_supplycost * ps2.ps_availqty) FROM partsupp ps2)
+), order_summary AS (
+    SELECT 
+        ro.o_orderkey,
+        COUNT(li.l_orderkey) AS item_count,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales,
+        FIRST_VALUE(li.l_returnflag) OVER (PARTITION BY ro.o_orderkey ORDER BY li.l_linenumber) AS first_return_flag
+    FROM 
+        ranked_orders ro
+    LEFT JOIN 
+        lineitem li ON ro.o_orderkey = li.l_orderkey
+    GROUP BY 
+        ro.o_orderkey
+)
+SELECT 
+    os.o_orderkey,
+    os.item_count,
+    os.total_sales,
+    hs.s_name,
+    CASE 
+        WHEN os.first_return_flag IS NULL THEN 'No Returns'
+        ELSE 'Returned'
+    END AS return_status
+FROM 
+    order_summary os
+LEFT JOIN 
+    high_value_suppliers hs ON os.o_orderkey IN (
+        SELECT 
+            DISTINCT l.l_orderkey 
+        FROM 
+            lineitem l 
+        WHERE 
+            l.l_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (
+                SELECT p.p_partkey FROM part p WHERE p.p_retailprice > 100.00
+            ))
+    )
+WHERE 
+    os.item_count > 0
+    AND os.total_sales > 500
+ORDER BY 
+    os.total_sales DESC, 
+    return_status ASC;

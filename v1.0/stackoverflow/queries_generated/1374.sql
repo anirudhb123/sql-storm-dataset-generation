@@ -1,0 +1,69 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalBounty,
+        TotalPosts,
+        TotalComments,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, TotalBounty DESC) AS Rank
+    FROM UserStats
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate > NOW() - INTERVAL '30 days'
+),
+PostDetail AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        RP.OwnerDisplayName,
+        CASE 
+            WHEN PH.PostId IS NOT NULL THEN 'Has History'
+            ELSE 'No History'
+        END AS HistoryStatus
+    FROM RecentPosts RP
+    LEFT JOIN PostHistory PH ON RP.PostId = PH.PostId
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.TotalBounty,
+    TU.TotalPosts,
+    TU.TotalComments,
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    PD.ViewCount,
+    PD.HistoryStatus
+FROM TopUsers TU
+JOIN PostDetail PD ON TU.UserId = PD.OwnerUserId
+WHERE TU.Rank <= 10
+ORDER BY TU.Reputation DESC, PD.CreationDate DESC

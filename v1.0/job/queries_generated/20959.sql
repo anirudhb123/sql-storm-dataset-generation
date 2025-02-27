@@ -1,0 +1,68 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.title AS MovieTitle,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY a.title) AS TitleRank
+    FROM aka_title a
+    JOIN title t ON a.movie_id = t.id
+    WHERE t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS MovieCount,
+        STRING_AGG(DISTINCT r.role, ', ') AS Roles
+    FROM cast_info c
+    JOIN role_type r ON c.role_id = r.id
+    GROUP BY c.person_id
+),
+CompanyMovieCount AS (
+    SELECT 
+        mc.company_id,
+        COUNT(DISTINCT mc.movie_id) AS MoviesProduced
+    FROM movie_companies mc
+    GROUP BY mc.company_id
+),
+EarliestProduction AS (
+    SELECT 
+        MIN(t.production_year) AS EarliestYear,
+        COUNT(*) AS TitleCount
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+    GROUP BY t.production_year
+),
+ActorsWithMoreThanThreeRoles AS (
+    SELECT 
+        a.person_id,
+        a.MovieCount,
+        a.Roles
+    FROM ActorRoles a
+    WHERE a.MovieCount > 3
+)
+SELECT 
+    r.MovieTitle,
+    r.production_year,
+    (CASE 
+        WHEN co.MoviesProduced > 5 THEN 'Established Company'
+        ELSE 'New Entrant'
+    END) AS CompanyStatus,
+    (SELECT COUNT(*)
+     FROM ActorsWithMoreThanThreeRoles ar
+     WHERE ar.person_id IN (SELECT c.person_id FROM cast_info c WHERE c.movie_id = t.id)) AS ActorsWithRolesCount,
+    (SELECT STRING_AGG(c.name, ', ') 
+     FROM company_name c 
+     JOIN movie_companies mc ON c.id = mc.company_id 
+     WHERE mc.movie_id = t.id) AS CompaniesInvolved
+FROM RankedTitles r
+LEFT JOIN CompanyMovieCount co ON co.company_id = (
+    SELECT company_id 
+    FROM movie_companies 
+    WHERE movie_id = (SELECT id FROM aka_title WHERE title = r.MovieTitle LIMIT 1)
+    LIMIT 1
+)
+JOIN title t ON t.production_year = r.production_year
+WHERE r.TitleRank = 1
+    AND EXISTS (SELECT 1 FROM EarliestProduction ep WHERE ep.TitleCount > 0)
+ORDER BY r.production_year DESC, r.MovieTitle;
+
+This SQL query encompasses multiple advanced constructs including Common Table Expressions (CTEs) for separation of different calculations, outer joins, correlated subqueries, string aggregation, and complicated predicates. It selects movie titles with rankings by production year, counts actors with more than three roles, and evaluates the status of film-producing companies based on the number of films produced, while handling potential NULL values gracefully. The final output is ordered by production year descending, providing a dynamic view into the dataset for performance benchmarking.

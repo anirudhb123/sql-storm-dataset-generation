@@ -1,0 +1,85 @@
+WITH UserReputation AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        BADGES_COUNT.BadgesCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBountyAmount
+    FROM
+        Users U
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgesCount 
+        FROM 
+            Badges 
+        GROUP BY UserId
+    ) BADGES_COUNT ON U.Id = BADGES_COUNT.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId AND V.CreationDate >= '2023-01-01'
+    GROUP BY U.Id, BADGES_COUNT.BadgesCount
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId AS UserId,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        SUM(P.Score) AS TotalScore,
+        SUM(P.ViewCount) AS TotalViews,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        P.CreationDate
+    FROM 
+        Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.Id, P.OwnerUserId, P.CreationDate
+),
+ClosedPostHistory AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS CloseReasonCount,
+        STRING_AGG(DISTINCT C.CloseReasonId::varchar, ', ') AS UniqueCloseReasons
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes C ON PH.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        PH.PostId
+),
+FinalResults AS (
+    SELECT 
+        UR.DisplayName,
+        UR.Reputation,
+        UR.BadgesCount,
+        UR.TotalBountyAmount,
+        PS.PostId,
+        PS.AnswerCount,
+        PS.TotalScore,
+        PS.TotalViews,
+        PS.CommentCount,
+        COALESCE(CPH.CloseReasonCount, 0) AS CloseReasonCount,
+        COALESCE(CPH.UniqueCloseReasons, 'None') AS UniqueCloseReasons
+    FROM 
+        UserReputation UR
+    JOIN 
+        PostStats PS ON UR.UserId = PS.UserId
+    LEFT JOIN 
+        ClosedPostHistory CPH ON PS.PostId = CPH.PostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN Reputation > 500 THEN 'Experienced'
+        WHEN Reputation BETWEEN 100 AND 500 THEN 'Intermediate'
+        ELSE 'Beginner'
+    END AS UserExperienceLevel,
+    ROUND((TotalScore::DECIMAL / NULLIF(TotalViews, 0) * 100), 2) AS ScoreToViewsRatio
+FROM 
+    FinalResults
+WHERE 
+    CloseReasonCount < 2
+ORDER BY 
+    TotalScore DESC NULLS LAST, 
+    Reputation DESC, 
+    UserExperienceLevel
+FETCH FIRST 20 ROWS ONLY;
+
+This elaborate query leverages Common Table Expressions (CTEs) to separate logic and facilitate readability while performing a performance benchmark on user contributions in relation to their post statistics. The use of string aggregation, conditional sums, `COALESCE` for null handling, and the calculation of derived metrics like `ScoreToViewsRatio` adds complexity. The final results are enriched with user classification based on their reputation, making it a rich dataset for performance comparison and analysis.

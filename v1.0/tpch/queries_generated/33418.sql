@@ -1,0 +1,42 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+
+    UNION ALL
+
+    SELECT o.o_orderkey, oh.o_custkey, o.o_orderdate, o.o_totalprice, level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate AND o.o_orderstatus = 'O'
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+TotalOrderValue AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY o.o_orderkey
+),
+RegionNation AS (
+    SELECT r.r_regionkey, r.r_name, n.n_name
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+)
+SELECT 
+    CONCAT('Cust: ', c.c_name, ', Region: ', rn.r_name) AS cust_region,
+    COALESCE(SUM(t.order_value), 0) AS total_order_value,
+    COALESCE(SUM(s.total_supply_cost), 0) AS total_supply_cost,
+    MAX(oh.level) AS max_order_level
+FROM customer c
+LEFT JOIN OrderHierarchy oh ON c.c_custkey = oh.o_custkey
+LEFT JOIN TotalOrderValue t ON oh.o_orderkey = t.o_orderkey
+LEFT JOIN SupplierInfo s ON s.s_nationkey = c.c_nationkey
+JOIN RegionNation rn ON c.c_nationkey = rn.n.n_nationkey
+GROUP BY c.c_custkey, rn.r_name
+HAVING COALESCE(SUM(t.order_value), 0) > 10000
+ORDER BY total_order_value DESC, max_order_level ASC;

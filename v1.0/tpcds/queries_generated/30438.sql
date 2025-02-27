@@ -1,0 +1,60 @@
+
+WITH RECURSIVE SalesSummary AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_sold_date_sk, ws_item_sk
+    
+    UNION ALL
+    
+    SELECT 
+        ss_sold_date_sk, 
+        ss_item_sk, 
+        SUM(ss_quantity) AS total_quantity,
+        SUM(ss_net_profit) AS total_profit
+    FROM store_sales
+    WHERE ss_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ss_sold_date_sk, ss_item_sk
+),
+ItemDetails AS (
+    SELECT 
+        i_item_id,
+        i_item_desc,
+        i_current_price,
+        i_brand
+    FROM item
+    WHERE i_rec_start_date <= CURRENT_DATE 
+      AND (i_rec_end_date IS NULL OR i_rec_end_date >= CURRENT_DATE)
+),
+AggregatedSales AS (
+    SELECT 
+        id.i_item_id,
+        id.i_item_desc,
+        id.i_current_price,
+        id.i_brand,
+        COALESCE(SUM(ss.total_quantity), 0) AS total_quantity,
+        COALESCE(SUM(ss.total_profit), 0) AS total_profit
+    FROM ItemDetails id
+    LEFT JOIN SalesSummary ss ON id.i_item_sk = ss.ws_item_sk
+    GROUP BY id.i_item_id, id.i_item_desc, id.i_current_price, id.i_brand
+),
+TopItems AS (
+    SELECT *, 
+           RANK() OVER (ORDER BY total_profit DESC) AS rank
+    FROM AggregatedSales
+)
+SELECT 
+    ti.i_item_id,
+    ti.i_item_desc,
+    ti.i_current_price,
+    ti.i_brand,
+    ti.total_quantity,
+    ti.total_profit,
+    NULLIF(ti.total_quantity, 0) * 100.0 / NULLIF(SUM(ti.total_quantity) OVER (), 0) AS profit_percentage
+FROM TopItems ti
+WHERE ti.rank <= 10
+ORDER BY ti.total_profit DESC;

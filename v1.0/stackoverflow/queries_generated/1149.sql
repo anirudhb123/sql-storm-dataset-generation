@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEdited,
+        STRING_AGG(ph.Comment, ', ') AS CommentsMade
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 6, 24) -- Title, Tags, or Edit applied
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.DisplayName,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    ub.BadgeCount,
+    ub.HighestBadgeClass,
+    COALESCE(phi.LastEdited, 'Never') AS LastEdited,
+    COALESCE(phi.CommentsMade, 'No comments') AS CommentsMade
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.PostId = up.Id
+LEFT JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+LEFT JOIN 
+    PostHistoryInfo phi ON rp.PostId = phi.PostId
+WHERE 
+    rp.rn = 1
+    AND rp.ViewCount > 100
+ORDER BY 
+    rp.ViewCount DESC
+LIMIT 10
+OFFSET 0;

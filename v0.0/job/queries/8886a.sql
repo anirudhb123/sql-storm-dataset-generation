@@ -1,0 +1,4 @@
+SELECT min(an.name) AS alternative_name, min(chn.name) AS voiced_character, min(n.name) AS voicing_actress, min(t.title) AS american_movie
+FROM aka_name AS an, char_name AS chn, cast_info AS ci, company_name AS cn, movie_companies AS mc, name AS n, role_type AS rt, title AS t
+WHERE ci.movie_id = t.id AND t.id = mc.movie_id AND ci.movie_id = mc.movie_id AND mc.company_id = cn.id AND ci.role_id = rt.id AND n.id = ci.person_id AND chn.id = ci.person_role_id AND an.person_id = n.id AND an.person_id = ci.person_id
+AND t.md5sum IN ('19408995c6e197bed3ccd936d129268a', '223d09c98cc2c450e2f183bb70c80df7', '374b1f82d3d0d54022cd395f2fec0aa7', '4b43f125fb48b494e19f465da9b0f539', '4c638c09521ad69ba433a53ec08d78ea', '7e70b2a6f072fef66e2b10c069bbeba4', '926425c191781bf24df3ec4b13289bdd', 'a0f2a14e298fb63cabf8f8481f0af59b', 'c967e5efd057434711500be82fb09da5', 'fba8316f8481b06399a67e64b761a50e') AND ci.id < 21136197 AND cn.name_pcode_nf IS NOT NULL;

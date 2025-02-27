@@ -1,0 +1,55 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS order_level
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, co.order_level + 1
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE o.o_orderdate < co.o_orderdate
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(CASE 
+            WHEN l.l_discount > 0.05 THEN l.l_extendedprice * (1 - l.l_discount) 
+            ELSE l.l_extendedprice 
+        END) AS total_revenue,
+    AVG(l.l_quantity) OVER (PARTITION BY l.l_returnflag ORDER BY l.l_orderkey ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS avg_quantity,
+    (SELECT COUNT(*) 
+     FROM partsupp ps 
+     WHERE ps.ps_availqty IS NOT NULL 
+     AND ps.ps_supplycost > 10.00) AS partsuppliers_above_cost
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    EXISTS (
+        SELECT 1 FROM CustomerOrders co
+        WHERE co.o_orderkey IN (
+            SELECT l.l_orderkey 
+            FROM lineitem l 
+            WHERE l.l_partkey = p.p_partkey 
+            GROUP BY l.l_orderkey 
+            HAVING SUM(l.l_quantity) > 50
+        )
+    )
+    AND p.p_retailprice IS NOT NULL
+GROUP BY 
+    p.p_partkey, p.p_name
+HAVING 
+    SUM(l.l_quantity) > 0
+ORDER BY 
+    total_revenue DESC, 
+    supplier_count ASC NULLS LAST;

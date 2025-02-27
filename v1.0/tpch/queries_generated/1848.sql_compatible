@@ -1,0 +1,63 @@
+
+WITH SupplierStats AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+HighValueOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY o.o_totalprice DESC) AS total_price_rank
+    FROM
+        orders o
+    WHERE
+        o.o_orderstatus = 'O'
+),
+CustomerOrderDetails AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        COALESCE(ho.total_price_rank, 0) AS order_value_rank,
+        s.s_name AS supplier_name
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN
+        HighValueOrders ho ON o.o_orderkey = ho.o_orderkey
+    LEFT JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    LEFT JOIN
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT
+    cd.c_custkey,
+    cd.c_name,
+    COUNT(DISTINCT cd.o_orderkey) AS total_orders,
+    SUM(CASE WHEN cd.order_value_rank <= 5 THEN 1 ELSE 0 END) AS high_value_order_count,
+    MAX(ps.ps_supplycost) AS max_supply_cost
+FROM
+    CustomerOrderDetails cd
+LEFT JOIN
+    supplier ps ON cd.supplier_name = ps.s_name
+GROUP BY
+    cd.c_custkey, cd.c_name
+HAVING
+    MAX(ps.ps_supplycost) IS NOT NULL AND COUNT(cd.o_orderkey) > 0
+ORDER BY
+    total_orders DESC,
+    high_value_order_count DESC
+LIMIT 10;

@@ -1,0 +1,59 @@
+
+WITH SupplierCost AS (
+    SELECT ps.supkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.supkey
+),
+CustomerTotalOrders AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, sc.total_supply_cost
+    FROM supplier s
+    JOIN SupplierCost sc ON s.s_suppkey = sc.supkey
+    WHERE s.s_acctbal IS NOT NULL
+    ORDER BY sc.total_supply_cost DESC
+    LIMIT 10
+),
+TopCustomers AS (
+    SELECT ct.c_custkey, ct.total_order_value
+    FROM CustomerTotalOrders ct
+    WHERE ct.total_order_value > (
+        SELECT AVG(total_order_value) 
+        FROM CustomerTotalOrders
+    )
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    nc.n_name AS customer_nation,
+    ns.n_name AS supplier_nation
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    part p ON l.l_partkey = p.p_partkey
+JOIN 
+    nation nc ON c.c_nationkey = nc.n_nationkey
+JOIN 
+    nation ns ON s.s_nationkey = ns.n_nationkey
+WHERE 
+    l.l_shipdate BETWEEN '1995-01-01' AND '1995-12-31'
+    AND p.p_brand IN (SELECT DISTINCT p_brand FROM part WHERE p_size >= 10)
+    AND s.s_suppkey IN (SELECT s_suppkey FROM TopSuppliers)
+    AND c.c_custkey IN (SELECT c_custkey FROM TopCustomers)
+GROUP BY 
+    p.p_partkey, p.p_name, nc.n_name, ns.n_name
+ORDER BY 
+    revenue DESC;

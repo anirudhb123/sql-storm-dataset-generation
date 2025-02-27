@@ -1,0 +1,63 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS noted_roles
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        person_info pi ON c.person_id = pi.person_id
+    LEFT JOIN 
+        info_type it ON pi.info_type_id = it.id
+    LEFT JOIN 
+        role_type rt ON c.role_id = rt.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id 
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+FilteredMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year, 
+        cast_count, 
+        rank, 
+        noted_roles,
+        (CASE 
+            WHEN noted_roles > 1 THEN 'Many noted roles'
+            WHEN noted_roles = 1 THEN 'Single noted role'
+            ELSE 'No noted roles'
+         END) AS role_description
+    FROM 
+        RankedMovies
+    WHERE 
+        production_year >= 2000
+        AND title IS NOT NULL
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.cast_count,
+    f.rank,
+    f.role_description,
+    COALESCE(NULLIF(m.info, ''), 'No additional info') AS movie_info
+FROM 
+    FilteredMovies f
+LEFT JOIN
+    movie_info m ON f.movie_id = m.movie_id AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot' LIMIT 1)
+WHERE 
+    f.rank <= 10
+ORDER BY 
+    f.production_year, f.rank DESC;

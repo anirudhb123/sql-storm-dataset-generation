@@ -1,0 +1,100 @@
+
+WITH RECURSIVE UserPostHierarchy AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    WHERE 
+        u.Reputation > 1000  
+    UNION ALL
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        uh.Level + 1 AS Level
+    FROM 
+        UserPostHierarchy uh
+    JOIN 
+        Posts p ON p.ParentId = uh.PostId
+    JOIN 
+        Users u ON u.Id = p.OwnerUserId
+)
+, PopularTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, '><')) AS TagName, 
+        COUNT(*) AS UsageCount
+    FROM 
+        Posts 
+    WHERE 
+        Tags IS NOT NULL
+    GROUP BY 
+        unnest(string_to_array(Tags, '><'))
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 10
+)
+, UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    WHERE 
+        u.Reputation > 500  
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    uph.UserId,
+    uph.DisplayName,
+    uph.PostId,
+    uph.Title,
+    uph.Score,
+    uph.CreationDate,
+    ut.TagName,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    COALESCE(aph.AnswerCount, 0) AS AnswerCount
+FROM 
+    UserPostHierarchy uph
+LEFT JOIN 
+    Posts p ON p.Id = uph.PostId 
+LEFT JOIN 
+    (SELECT 
+        PostId, 
+        COUNT(*) AS AnswerCount 
+     FROM 
+        Posts 
+     WHERE 
+        PostTypeId = 2 
+     GROUP BY 
+        PostId) aph ON aph.PostId = uph.PostId
+LEFT JOIN 
+    (SELECT 
+        u.Id AS UserId, 
+        unnest(string_to_array(p.Tags, '><')) AS TagName 
+     FROM 
+        Users u 
+     JOIN 
+        Posts p ON p.OwnerUserId = u.Id) ut ON ut.UserId = uph.UserId
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = uph.UserId
+WHERE 
+    ub.BadgeCount > 0 OR p.Title IS NOT NULL
+ORDER BY 
+    uph.CreationDate DESC
+LIMIT 50;

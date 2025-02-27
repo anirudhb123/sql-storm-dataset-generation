@@ -1,0 +1,62 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+), 
+item_details AS (
+    SELECT 
+        i_item_sk,
+        i_item_desc,
+        i_current_price,
+        COALESCE(NULLIF(i_color, ''), 'UNKNOWN') AS item_color
+    FROM 
+        item
+), 
+avg_sales AS (
+    SELECT
+        ws_item_sk,
+        AVG(total_net_paid) AS avg_net_paid
+    FROM 
+        sales_summary
+    GROUP BY 
+        ws_item_sk
+), 
+high_sales AS (
+    SELECT 
+        a.ws_item_sk,
+        a.total_quantity,
+        b.avg_net_paid
+    FROM 
+        sales_summary a
+    JOIN 
+        avg_sales b ON a.ws_item_sk = b.ws_item_sk
+    WHERE 
+        a.total_quantity > (SELECT AVG(total_quantity) FROM sales_summary)
+) 
+SELECT 
+    x.item_color, 
+    y.i_item_desc, 
+    z.total_quantity, 
+    z.total_net_paid,
+    CASE 
+        WHEN z.total_net_paid > 0 THEN 
+            ROUND((z.total_net_paid / NULLIF(z.total_quantity, 0)), 2)
+        ELSE 
+            'N/A'
+    END AS avg_price_per_item
+FROM 
+    item_details y
+LEFT JOIN 
+    high_sales z ON y.i_item_sk = z.ws_item_sk
+CROSS JOIN 
+    (SELECT DISTINCT item_color FROM item_details) x
+ORDER BY 
+    z.total_quantity DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

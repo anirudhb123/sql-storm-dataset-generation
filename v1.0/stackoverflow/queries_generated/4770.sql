@@ -1,0 +1,78 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        COUNT(DISTINCT P.Id) AS PostCount, 
+        SUM(V.BountyAmount) AS TotalBounty, 
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.CreationDate, 
+        P.Score, 
+        P.ViewCount, 
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+TopRankedUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation 
+    FROM 
+        UserStats 
+    WHERE 
+        ReputationRank <= 10
+),
+PostDetails AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        COALESCE(U.DisplayName, 'Anonymous') AS CommentOwner,
+        COALESCE(C.Text, '') AS LastComment
+    FROM 
+        RecentPosts RP
+    LEFT JOIN 
+        Comments C ON RP.PostId = C.PostId
+    LEFT JOIN 
+        Users U ON C.UserId = U.Id
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.ViewCount,
+    P.CommentOwner,
+    P.LastComment
+FROM 
+    TopRankedUsers U
+JOIN 
+    PostDetails P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, 
+    P.CreationDate DESC
+LIMIT 50;

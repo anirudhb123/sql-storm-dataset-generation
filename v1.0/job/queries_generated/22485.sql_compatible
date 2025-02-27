@@ -1,0 +1,75 @@
+
+WITH RecursiveActorHierarchy AS (
+    SELECT 
+        c1.person_id AS actor_id,
+        c1.movie_id AS movie_id,
+        1 AS depth
+    FROM 
+        cast_info c1
+    WHERE 
+        c1.role_id IS NOT NULL 
+    
+    UNION ALL
+    
+    SELECT 
+        c2.person_id,
+        c2.movie_id,
+        rh.depth + 1
+    FROM 
+        cast_info c2
+    INNER JOIN 
+        RecursiveActorHierarchy rh ON c2.movie_id = rh.movie_id
+    WHERE 
+        c2.person_id <> rh.actor_id 
+)
+
+, MovieRatings AS (
+    SELECT 
+        t.id AS movie_id,
+        AVG(CAST(p.info AS float)) AS average_rating
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        info_type it ON mi.info_type_id = it.id
+    LEFT JOIN 
+        person_info p ON p.person_id IN (SELECT DISTINCT person_id FROM cast_info WHERE movie_id = t.id)
+    WHERE 
+        it.info = 'rating' AND p.info IS NOT NULL
+    GROUP BY 
+        t.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    t.title AS movie_title,
+    m.average_rating,
+    CASE 
+        WHEN m.average_rating IS NULL THEN 'No Rating'
+        WHEN m.average_rating > 8 THEN 'Highly Rated'
+        WHEN m.average_rating BETWEEN 5 AND 8 THEN ' Moderately Rated'
+        ELSE 'Poorly Rated'
+    END AS rating_category,
+    COUNT(DISTINCT ca.actor_id) AS co_star_count,
+    STRING_AGG(DISTINCT cf.name, ', ') AS co_star_names
+FROM 
+    RecursiveActorHierarchy ca
+JOIN 
+    aka_name ak ON ca.actor_id = ak.person_id
+JOIN 
+    title t ON ca.movie_id = t.id
+LEFT JOIN 
+    MovieRatings m ON m.movie_id = ca.movie_id
+LEFT JOIN 
+    cast_info c ON c.movie_id = t.id AND c.person_id <> ca.actor_id 
+LEFT JOIN 
+    aka_name cf ON cf.person_id = c.person_id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.name, t.title, m.average_rating
+HAVING 
+    COUNT(DISTINCT ca.actor_id) > 1 
+ORDER BY 
+    m.average_rating DESC, ak.name;

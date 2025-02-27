@@ -1,0 +1,61 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS OrderLevel
+    FROM orders
+    WHERE o_orderstatus = 'F'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, o.o_custkey, o.o_orderdate, oh.o_totalprice + o.o_totalprice, oh.OrderLevel + 1
+    FROM OrderHierarchy oh
+    JOIN orders o ON oh.o_custkey = o.o_custkey AND oh.o_orderdate < o.o_orderdate
+    WHERE o.o_orderstatus = 'F'
+), 
+AvgOrderValue AS (
+    SELECT o_custkey, AVG(o_totalprice) AS AvgPrice
+    FROM orders
+    WHERE o_orderstatus IS NOT NULL
+    GROUP BY o_custkey
+),
+CustomerRanking AS (
+    SELECT c.c_custkey, c.c_name, AVG(COALESCE(o.o_totalprice, 0)) AS AvgTotalPrice,
+           RANK() OVER (ORDER BY AVG(COALESCE(o.o_totalprice, 0)) DESC) AS CustomerRank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey AND o.o_orderstatus NOT IN ('R')
+    GROUP BY c.c_custkey, c.c_name
+),
+ExpensiveParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(ps1.ps_supplycost) FROM partsupp ps1)
+),
+LoyalCustomers AS (
+    SELECT c.c_custkey, c.c_name
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_totalprice > (SELECT AVG(o1.o_totalprice) FROM orders o1 WHERE o1.o_orderdate < (DATE '1998-10-01' - INTERVAL '1 year'))
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COUNT(o.o_orderkey) > 5
+)
+SELECT DISTINCT c.c_name, r.r_name AS RegionName, l.l_shipmode, 
+       CASE 
+           WHEN l.l_returnflag = 'R' THEN 'Returned'
+           ELSE 'Not Returned' 
+       END AS ReturnStatus, 
+       COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS TotalRevenue,
+       COUNT(DISTINCT o.o_orderkey) OVER (PARTITION BY c.c_custkey) AS OrderCount,
+       RANK() OVER (PARTITION BY r.r_regionkey ORDER BY SUM(l.l_extendedprice) DESC) AS RevenueRank
+FROM lineitem l
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN ExpensiveParts ep ON l.l_partkey = ep.p_partkey
+JOIN LoyalCustomers lc ON c.c_custkey = lc.c_custkey
+WHERE l.l_shipdate BETWEEN (DATE '1998-10-01' - INTERVAL '3 month') AND DATE '1998-10-01'
+GROUP BY c.c_name, r.r_name, l.l_shipmode, l.l_returnflag
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) IS NOT NULL 
+   AND COUNT(DISTINCT o.o_orderkey) > 0
+ORDER BY TotalRevenue DESC, c.c_name ASC;

@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        AVG(v.BountyAmount) OVER (PARTITION BY p.Id) AS AvgBounty,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(p.ClosedDate, CURRENT_TIMESTAMP) - p.CreationDate AS Age
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  -- Only count BountyStart and BountyClose votes
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2)  -- Only Questions and Answers
+),
+PostHistoryAggregated AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(t.Name, ', ') AS HistoryTypes,
+        COUNT(*) AS TotalHistory
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes t ON ph.PostHistoryTypeId = t.Id
+    GROUP BY 
+        ph.PostId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.RankScore,
+        pga.HistoryTypes,
+        pga.TotalHistory,
+        CASE 
+            WHEN rp.AvgBounty IS NULL THEN 'No Bounty' 
+            ELSE ('Avg Bounty: ' || rp.AvgBounty) 
+        END AS BountyInfo,
+        CASE 
+            WHEN rp.Age < INTERVAL '1 day' THEN 'New' 
+            WHEN rp.Age < INTERVAL '30 days' THEN 'Recent' 
+            ELSE 'Old' 
+        END AS AgeCategory
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryAggregated pga ON rp.PostId = pga.PostId
+    WHERE 
+        rp.RankScore <= 5  -- Limit to top 5 per post type
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.HistoryTypes,
+    tp.TotalHistory,
+    tp.BountyInfo,
+    tp.AgeCategory,
+    COALESCE(u.Reputation, 0) AS UserReputation,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM Votes v WHERE v.PostId = tp.PostId AND v.UserId = 123) THEN 'User Upvoted'
+        ELSE 'User Not Upvoted'
+    END AS UserVoteStatus
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = tp.PostId LIMIT 1)
+WHERE 
+    tp.TotalHistory > 0
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

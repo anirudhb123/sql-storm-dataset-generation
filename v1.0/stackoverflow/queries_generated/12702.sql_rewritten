@@ -1,0 +1,62 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(V.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(V.VoteTypeId = 3) AS TotalDownVotes,
+        SUM(B.Id IS NOT NULL) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+)
+
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalPosts,
+    UA.TotalComments,
+    UA.TotalUpVotes,
+    UA.TotalDownVotes,
+    UA.TotalBadges,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.FavoriteCount,
+    PS.OwnerDisplayName
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    PostStats PS ON UA.UserId = PS.OwnerDisplayName
+ORDER BY 
+    UA.TotalPosts DESC, UA.TotalUpVotes DESC;

@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        SUM(COALESCE(v.BountyAmount, 0)) OVER (PARTITION BY p.Id) AS TotalBounty 
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+),
+PostDetails AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        COALESCE(rp.Score + rp.TotalBounty, 0) AS TotalScore,
+        CASE 
+            WHEN EXISTS (SELECT 1 FROM Badges b WHERE b.UserId = p.OwnerUserId AND b.Class = 1) THEN 'Gold'
+            WHEN EXISTS (SELECT 1 FROM Badges b WHERE b.UserId = p.OwnerUserId AND b.Class = 2) THEN 'Silver'
+            ELSE 'Bronze'
+        END AS BadgeLevel,
+        NULLIF((
+            SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+            FROM Tags t 
+            WHERE t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+        ), '') AS PostTags
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Posts p ON rp.Id = p.Id
+    WHERE 
+        rp.rn = 1 
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.TotalScore,
+    pd.BadgeLevel,
+    COALESCE(pd.PostTags, 'No Tags') AS PostTags,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = pd.PostId) AS CommentCount, 
+    COALESCE((SELECT SUM(FavoriteCount) FROM Posts fp WHERE fp.ParentId = pd.PostId), 0) AS RelatedPostsFavorites,
+    CASE 
+        WHEN pd.ViewCount > 1000 THEN 'High Traffic'
+        WHEN pd.ViewCount BETWEEN 500 AND 1000 THEN 'Medium Traffic'
+        ELSE 'Low Traffic'
+    END AS TrafficCategory
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    PostHistory ph ON pd.PostId = ph.PostId 
+WHERE 
+    ph.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - interval '30 days' 
+    OR ph.Id IS NULL
+ORDER BY 
+    pd.TotalScore DESC, 
+    pd.CreationDate ASC
+LIMIT 50;

@@ -1,0 +1,55 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2024-01-01'
+),
+CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+),
+SupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplier_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    coalesce(n.nation_name, 'Unknown') AS nation,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(o.o_totalprice) AS avg_order_price,
+    MAX(rc.total_supplier_cost) AS max_supplier_cost
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    CustomerNation n ON o.o_orderkey IN (
+        SELECT DISTINCT o_orderkey 
+        FROM lineitem li 
+        WHERE li.l_returnflag = 'N'
+    )
+LEFT JOIN 
+    SupplierCost rc ON rc.ps_partkey IN (
+        SELECT ps_partkey 
+        FROM lineitem li 
+        WHERE li.l_orderkey = o.o_orderkey
+    )
+WHERE 
+    o.price_rank <= 10
+GROUP BY 
+    n.nation_name
+ORDER BY 
+    total_orders DESC, avg_order_price DESC;

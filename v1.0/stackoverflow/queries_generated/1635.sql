@@ -1,0 +1,78 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(VB.BountyAmount, 0)) AS TotalBounties,
+        AVG(U.Reputation) AS AverageReputation
+    FROM 
+        Users U
+        LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+        LEFT JOIN Votes VB ON U.Id = VB.UserId AND VB.VoteTypeId IN (8, 9)
+    GROUP BY 
+        U.Id, U.DisplayName
+), 
+
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(C.CommentsCount, 0) AS CommentsCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn
+    FROM 
+        Posts P
+        LEFT JOIN (
+            SELECT PostId, COUNT(*) AS CommentsCount
+            FROM Comments
+            GROUP BY PostId
+        ) C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+)
+
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.PostCount,
+    UA.TotalViews,
+    UA.TotalBounties,
+    UA.AverageReputation,
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.CommentsCount
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    RecentPosts RP ON UA.UserId = RP.OwnerUserId AND RP.rn = 1
+WHERE 
+    UA.TotalViews > 1000
+ORDER BY 
+    UA.TotalBounties DESC,
+    UA.TotalViews DESC
+LIMIT 50
+
+UNION ALL
+
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.PostCount,
+    UA.TotalViews,
+    UA.TotalBounties,
+    UA.AverageReputation,
+    NULL AS PostId,
+    NULL AS Title,
+    NULL AS CreationDate,
+    NULL AS Score,
+    NULL AS CommentsCount
+FROM 
+    UserActivity UA
+WHERE 
+    UA.PostCount = 0
+ORDER BY 
+    UA.AverageReputation DESC;

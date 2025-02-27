@@ -1,0 +1,74 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        mt.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE 
+        mt.production_year > 2000
+),
+aggregated_movies AS (
+    SELECT 
+        movie_id,
+        COUNT(*) AS num_links,
+        MAX(production_year) AS latest_year
+    FROM 
+        movie_hierarchy
+    GROUP BY 
+        movie_id
+),
+cast_info_summary AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(*) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    COALESCE(c.total_cast, 0) AS total_cast,
+    COALESCE(c.cast_names, 'No Cast') AS cast_names,
+    m.latest_year,
+    m.num_links,
+    CASE 
+        WHEN m.num_links > 5 THEN 'Highly Linked'
+        WHEN m.num_links BETWEEN 2 AND 5 THEN 'Moderately Linked'
+        ELSE 'Sparsely Linked'
+    END AS link_category
+FROM 
+    aggregated_movies m
+LEFT JOIN 
+    cast_info_summary c ON m.movie_id = c.movie_id
+WHERE 
+    m.latest_year IS NOT NULL
+ORDER BY 
+    m.latest_year DESC, m.num_links DESC;

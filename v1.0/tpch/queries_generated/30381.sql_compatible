@@ -1,0 +1,46 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_nationkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+part_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+line_item_summary AS (
+    SELECT l.l_orderkey, COUNT(*) AS line_count, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1996-01-01' AND l.l_shipdate < DATE '1997-01-01'
+    GROUP BY l.l_orderkey
+),
+ranked_customers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           RANK() OVER (ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM customer c
+)
+SELECT rh.s_name, rh.s_acctbal, ps.p_name, ps.total_supply_cost, l.total_line_value, 
+       CASE 
+           WHEN rc.cust_rank IS NOT NULL THEN 'Ranked'
+           ELSE 'Unranked' 
+       END AS customer_status
+FROM supplier_hierarchy rh
+LEFT JOIN part_summary ps ON ps.supplier_count > 5
+LEFT JOIN line_item_summary l ON l.line_count > 10
+LEFT JOIN ranked_customers rc ON rh.s_nationkey = rc.c_custkey
+WHERE rh.level < 3
+ORDER BY rh.s_acctbal DESC, ps.total_supply_cost ASC;

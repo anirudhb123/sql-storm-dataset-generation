@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY COUNT(v.Id) DESC) AS Rank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN STRING_SPLIT(p.Tags, ',') AS st ON TRIM(st.value) IS NOT NULL
+    JOIN Tags t ON t.TagName = TRIM(st.value)
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+),
+
+RecentPostChanges AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate AS ChangeDate,
+        pht.Name AS ChangeType,
+        ph.UserDisplayName,
+        ph.Comment
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+
+FinalResults AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.VoteCount,
+        rp.Tags,
+        rpc.ChangeDate,
+        rpc.ChangeType,
+        rpc.UserDisplayName AS ChangeBy,
+        rpc.Comment AS ChangeComment
+    FROM RankedPosts rp
+    LEFT JOIN RecentPostChanges rpc ON rp.PostId = rpc.PostId
+)
+
+SELECT
+    PostId,
+    Title,
+    Body,
+    CreationDate,
+    OwnerDisplayName,
+    CommentCount,
+    VoteCount,
+    Tags,
+    ChangeDate,
+    ChangeType,
+    ChangeBy,
+    ChangeComment
+FROM FinalResults
+WHERE Rank <= 5
+ORDER BY CreationDate DESC;

@@ -1,0 +1,46 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+),
+SupplierAggregate AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_availqty, 
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+NationSupplier AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT COALESCE(n.n_name, 'Unknown') AS nation_name,
+       COALESCE(c.c_name, 'No Orders') AS customer_name,
+       oh.order_rank,
+       COALESCE(c.total_spent, 0) AS total_spent,
+       COALESCE(sa.total_availqty, 0) AS total_available_quantity,
+       COALESCE(sa.avg_supplycost, 0) AS average_supply_cost
+FROM OrderHierarchy oh
+FULL OUTER JOIN CustomerOrders c ON oh.o_custkey = c.c_custkey
+FULL OUTER JOIN SupplierAggregate sa ON sa.ps_partkey = 
+   (SELECT l.l_partkey 
+    FROM lineitem l 
+    WHERE l.l_orderkey = oh.o_orderkey 
+    LIMIT 1)
+FULL OUTER JOIN NationSupplier n ON n.n_nationkey = 
+   (SELECT s.s_nationkey 
+    FROM supplier s 
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+    WHERE ps.ps_partkey = sa.ps_partkey 
+    LIMIT 1)
+WHERE c.order_count > 0 OR sa.total_availqty IS NOT NULL
+ORDER BY n.n_name, c.customer_name, oh.order_rank;

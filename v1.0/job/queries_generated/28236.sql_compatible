@@ -1,0 +1,64 @@
+
+WITH name_counts AS (
+    SELECT 
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.name
+),
+movie_years AS (
+    SELECT 
+        m.title AS movie_title,
+        m.production_year,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.title, m.production_year
+),
+role_summary AS (
+    SELECT 
+        r.role AS role_name,
+        COUNT(DISTINCT ci.movie_id) AS role_movie_count
+    FROM 
+        role_type r
+    JOIN 
+        cast_info ci ON r.id = ci.role_id
+    GROUP BY 
+        r.role
+)
+SELECT 
+    n.name AS actor_name,
+    nc.movie_count AS total_movies,
+    m.movie_title,
+    m.production_year,
+    m.keyword_count,
+    r.role_name,
+    r.role_movie_count
+FROM 
+    name_counts nc
+JOIN 
+    aka_name n ON nc.name = n.name
+JOIN 
+    complete_cast cc ON n.person_id = cc.subject_id
+JOIN 
+    movie_years m ON cc.movie_id = m.movie_id
+JOIN 
+    role_summary r ON r.role_name = (
+        SELECT r2.role
+        FROM role_type r2 
+        JOIN cast_info ci2 ON ci2.role_id = r2.id 
+        WHERE ci2.movie_id = cc.movie_id AND ci2.person_id = n.person_id
+        LIMIT 1
+    )
+ORDER BY 
+    nc.movie_count DESC,
+    m.production_year DESC;

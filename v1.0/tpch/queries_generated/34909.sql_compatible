@@ -1,0 +1,45 @@
+
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS Level
+    FROM nation
+    WHERE n_nationkey IN (SELECT DISTINCT n_nationkey FROM supplier)
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.Level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_regionkey
+), 
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_avail_qty, 
+           COUNT(DISTINCT p.p_partkey) AS parts_count, 
+           AVG(s.s_acctbal) AS avg_acctbal
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name
+), 
+OrderStats AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT l.l_partkey) AS items_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+), 
+RankedOrders AS (
+    SELECT o_o_orderkey, o_custkey, total_sales, items_count,
+           RANK() OVER (PARTITION BY o_custkey ORDER BY total_sales DESC) AS sales_rank
+    FROM OrderStats
+)
+SELECT n.n_name AS nation, 
+       ss.s_name AS supplier_name,
+       COUNT(DISTINCT os.o_orderkey) AS total_orders,
+       SUM(os.total_sales) AS total_sales,
+       MAX(os.items_count) AS max_items_per_order,
+       STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM SupplierStats ss
+LEFT JOIN lineitem l ON ss.s_suppkey = l.l_suppkey
+LEFT JOIN RankedOrders os ON l.l_orderkey = os.o_orderkey
+JOIN nation n ON ss.s_suppkey IN (SELECT DISTINCT s.s_suppkey FROM supplier s WHERE s.s_nationkey = n.n_nationkey)
+WHERE os.sales_rank <= 10
+GROUP BY n.n_name, ss.s_name
+ORDER BY total_sales DESC, total_orders DESC
+LIMIT 100;

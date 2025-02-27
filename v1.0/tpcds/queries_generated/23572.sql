@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+        AND c.c_preferred_cust_flag = 'Y'
+),
+FilteredSales AS (
+    SELECT
+        r.ws_item_sk,
+        SUM(r.ws_ext_sales_price) AS total_sales_value,
+        COUNT(r.ws_order_number) AS order_count
+    FROM 
+        RankedSales r
+    WHERE 
+        r.price_rank = 1
+    GROUP BY 
+        r.ws_item_sk
+),
+SalesSummary AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        f.total_sales_value,
+        COALESCE(f.order_count, 0) AS order_count,
+        CASE 
+            WHEN f.total_sales_value IS NULL THEN 'No Sales'
+            WHEN f.total_sales_value < 100 THEN 'Low Sales'
+            ELSE 'High Sales' 
+        END AS sales_category
+    FROM 
+        item i
+    LEFT JOIN 
+        FilteredSales f ON i.i_item_sk = f.ws_item_sk
+)
+SELECT 
+    s.sales_category,
+    AVG(ss.total_sales_value) AS avg_sales_value,
+    SUM(ss.order_count) AS total_orders
+FROM 
+    SalesSummary ss
+JOIN 
+    store s ON ss.order_count > 0 AND s.s_store_sk IS NOT NULL
+WHERE 
+    s.s_city IS NOT NULL
+GROUP BY 
+    s.sales_category
+ORDER BY 
+    sales_category ASC
+UNION ALL
+SELECT 
+    'Total' AS sales_category,
+    AVG(ss.total_sales_value) AS avg_sales_value,
+    SUM(ss.order_count) AS total_orders
+FROM 
+    SalesSummary ss
+WHERE 
+    ss.total_sales_value IS NOT NULL;

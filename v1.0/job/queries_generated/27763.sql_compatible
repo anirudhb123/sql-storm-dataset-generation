@@ -1,0 +1,58 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        c.name AS company_name,
+        STRING_AGG(DISTINCT ak.name ORDER BY ak.name) AS aka_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT p.info, ', ') AS person_info
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.movie_id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        movie_keyword mk ON t.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        person_info p ON ci.person_id = p.person_id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year, c.name
+),
+MovieStatistics AS (
+    SELECT 
+        production_year,
+        COUNT(movie_id) AS total_movies,
+        COUNT(DISTINCT company_name) AS unique_companies,
+        AVG(LENGTH(title)) AS average_title_length,
+        STRING_AGG(DISTINCT aka_names, '; ') AS all_aka_names
+    FROM 
+        MovieDetails
+    GROUP BY 
+        production_year
+)
+SELECT 
+    ms.production_year,
+    ms.total_movies,
+    ms.unique_companies,
+    ms.average_title_length,
+    ms.all_aka_names,
+    CASE 
+        WHEN ms.total_movies < 10 THEN 'Low'
+        WHEN ms.total_movies BETWEEN 10 AND 30 THEN 'Medium'
+        ELSE 'High'
+    END AS movie_production_level
+FROM 
+    MovieStatistics ms
+ORDER BY 
+    ms.production_year DESC;

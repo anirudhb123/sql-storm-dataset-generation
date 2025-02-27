@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Posts AS answers
+            WHERE answers.ParentId = p.Id
+        ), 0) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY substring(p.Tags from 1 for 20) ORDER BY p.CreationDate DESC) AS RankWithinTag
+    FROM 
+        Posts AS p
+    WHERE 
+        p.PostTypeId = 1  -- Selecting only Questions
+),
+TagStatistics AS (
+    SELECT 
+        TRIM(REGEXP_REPLACE(p.Tags, '<[^>]+>', '')) AS TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Posts AS p
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        TRIM(REGEXP_REPLACE(p.Tags, '<[^>]+>', ''))
+),
+CombinedStats AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Tags,
+        r.CreationDate,
+        r.ViewCount,
+        r.AnswerCount,
+        t.TagName,
+        t.PostCount,
+        t.TotalViews,
+        t.AvgScore
+    FROM 
+        RankedPosts AS r
+    JOIN 
+        TagStatistics AS t ON string_to_array(r.Tags, '>')::varchar[] @> ARRAY[t.TagName] 
+    WHERE 
+        r.RankWithinTag = 1  -- Only the latest question per tag
+)
+SELECT 
+    cs.PostId,
+    cs.Title,
+    cs.TagName,
+    cs.CreationDate,
+    cs.ViewCount,
+    cs.AnswerCount,
+    cs.PostCount,
+    cs.TotalViews,
+    cs.AvgScore,
+    (cs.ViewCount * 1.0 / NULLIF(cs.PostCount, 0)) AS ViewsPerPost,
+    (cs.AvgScore * 1.0 / NULLIF(cs.PostCount, 0)) AS AvgScorePerPost
+FROM 
+    CombinedStats AS cs
+ORDER BY 
+    cs.TotalViews DESC
+LIMIT 100;  -- Top 100 posts by total views

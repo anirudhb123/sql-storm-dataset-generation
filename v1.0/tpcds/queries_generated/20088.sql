@@ -1,0 +1,45 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rn
+    FROM web_sales ws
+    WHERE ws.ws_sales_price > 0
+),
+customer_sales AS (
+    SELECT
+        c.c_customer_sk,
+        SUM(sd.ws_net_profit) AS total_profit,
+        COUNT(sd.ws_item_sk) AS total_items_sold
+    FROM customer c
+    JOIN sales_data sd ON c.c_customer_sk = sd.ws_item_sk
+    GROUP BY c.c_customer_sk
+),
+funnel_data AS (
+    SELECT
+        cd.cd_gender,
+        SUM(cs.total_profit) AS gender_profit,
+        COUNT(DISTINCT cs.c_customer_sk) AS gender_customer_count,
+        CASE 
+            WHEN SUM(cs.total_profit) IS NULL THEN 'No Sales'
+            WHEN SUM(cs.total_profit) = 0 THEN 'No Profit'
+            ELSE 'Profitable'
+        END AS profit_status
+    FROM customer_sales cs
+    LEFT JOIN customer_demographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender
+)
+SELECT
+    fd.cd_gender,
+    SUM(fd.gender_profit) AS total_profit,
+    SUM(fd.gender_customer_count) AS customer_count,
+    COUNT(DISTINCT fd.cd_gender) OVER () AS total_genders,
+    MAX(fd.profit_status) AS highest_profit_status
+FROM funnel_data fd
+WHERE fd.gender_profit > (SELECT AVG(f.gender_profit) FROM funnel_data f)
+GROUP BY fd.cd_gender
+HAVING SUM(fd.gender_customer_count) > 5 OR SUM(fd.gender_profit) IS NULL
+ORDER BY total_profit DESC NULLS LAST;

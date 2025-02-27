@@ -1,0 +1,82 @@
+WITH UserReputation AS (
+    SELECT 
+        Id, 
+        Reputation, 
+        CASE 
+            WHEN Reputation > 1000 THEN 'High'
+            WHEN Reputation BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationCategory
+    FROM Users
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotesCount,
+        COUNT(CASE WHEN V.VoteTypeId = 1 THEN 1 END) AS AcceptedByOriginatorCount,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.Id, P.Title, P.OwnerUserId
+),
+PostHistoryInfo AS (
+    SELECT 
+        PH.PostId,
+        HT.Name AS HistoryType,
+        COUNT(*) AS HistoryCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM PostHistory PH
+    JOIN PostHistoryTypes HT ON PH.PostHistoryTypeId = HT.Id
+    WHERE PH.Comment IS NULL -- only consider history without comments
+    GROUP BY PH.PostId, HT.Name
+),
+StatisticalAnalysis AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        UR.ReputationCategory,
+        PS.PostId,
+        PS.Title,
+        PS.UpVotesCount,
+        PS.DownVotesCount,
+        PH.LastEditDate,
+        COALESCE(SUM(CASE WHEN PHI.HistoryType = 'Initial Title' THEN PHI.HistoryCount ELSE 0 END), 0) AS InitialTitleEdits,
+        COALESCE(SUM(CASE WHEN PHI.HistoryType = 'Edit Title' THEN PHI.HistoryCount ELSE 0 END), 0) AS EditTitleCount
+    FROM UserReputation UR
+    JOIN Users U ON U.Reputation >= 0
+    LEFT JOIN PostStatistics PS ON U.Id = PS.OwnerUserId
+    LEFT JOIN PostHistoryInfo PHI ON PS.PostId = PHI.PostId
+    WHERE U.EmailHash IS NOT NULL OR U.Location IS NULL -- obscure logic involving Email Hash and Location
+    GROUP BY U.Id, U.DisplayName, UR.ReputationCategory, PS.PostId, PS.Title, PS.UpVotesCount, PS.DownVotesCount, PH.LastEditDate
+),
+PostSummary AS (
+    SELECT 
+        UserId,
+        COUNT(PostId) AS TotalPosts,
+        SUM(UpVotesCount) AS TotalUpVotes,
+        SUM(DownVotesCount) AS TotalDownVotes,
+        AVG(COALESCE(PostRank, 0)) AS AvgPostRank
+    FROM StatisticalAnalysis
+    GROUP BY UserId
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    PS.TotalPosts,
+    PS.TotalUpVotes,
+    PS.TotalDownVotes,
+    CASE 
+        WHEN PS.AvgPostRank > 0 THEN 'Active' 
+        ELSE 'Inactive' 
+    END AS UserStatus,
+    (SELECT COUNT(DISTINCT B.Id) FROM Badges B WHERE B.UserId = U.Id) AS BadgeCount
+FROM Users U
+JOIN PostSummary PS ON U.Id = PS.UserId
+ORDER BY UserStatus DESC, U.Reputation DESC, PS.TotalPosts DESC
+FETCH FIRST 10 ROWS ONLY; -- Limit to the top 10 based on the criteria

@@ -1,0 +1,48 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_age_group,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_age_group IS NOT NULL
+),
+CustomerLocation AS (
+    SELECT 
+        rc.c_customer_id,
+        rc.full_name,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        rc.cd_gender,
+        rc.cd_marital_status
+    FROM 
+        RankedCustomers rc
+    JOIN 
+        customer_address ca ON ca.ca_address_sk = rc.c_current_addr_sk
+    WHERE 
+        rc.rank <= 5
+)
+SELECT 
+    cl.full_name,
+    cl.ca_city,
+    cl.ca_state,
+    COUNT(*) AS purchase_count,
+    SUM(ws.ws_quantity) AS total_quantity,
+    AVG(ws.ws_net_paid) AS average_net_paid
+FROM 
+    CustomerLocation cl
+JOIN 
+    web_sales ws ON cl.c_customer_id = ws.ws_bill_customer_sk
+GROUP BY 
+    cl.full_name, cl.ca_city, cl.ca_state
+ORDER BY 
+    purchase_count DESC, average_net_paid DESC
+FETCH FIRST 10 ROWS ONLY;

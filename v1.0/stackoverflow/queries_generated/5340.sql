@@ -1,0 +1,45 @@
+WITH TopUsers AS (
+    SELECT Id, DisplayName, Reputation, 
+           RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+    WHERE Reputation > 1000
+),
+TopPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, 
+           COUNT(c.Id) AS CommentCount, 
+           COUNT(a.Id) AS AnswerCount,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Posts a ON p.Id = a.ParentId
+    WHERE p.PostTypeId = 1
+    GROUP BY p.Id
+),
+RecentPostHistory AS (
+    SELECT ph.PostId, ph.CreationDate, 
+           p.Title AS PostTitle, 
+           p.OwnerUserId, u.DisplayName AS OwnerDisplayName,
+           p.AcceptedAnswerId
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE ph.CreationDate > NOW() - INTERVAL '30 days'
+),
+AggregatedVotes AS (
+    SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+)
+SELECT u.DisplayName AS UserName, tp.Title AS PostTitle, 
+       tp.Score, tp.CommentCount, tp.AnswerCount, 
+       rph.CreationDate AS RecentEditDate,
+       a.UpVotes, a.DownVotes
+FROM TopUsers u
+JOIN TopPosts tp ON u.Id = tp.OwnerUserId
+JOIN RecentPostHistory rph ON tp.Id = rph.PostId
+JOIN AggregatedVotes a ON tp.Id = a.PostId
+WHERE u.ReputationRank <= 10 
+  AND tp.PostRank <= 5
+ORDER BY u.Reputation DESC, tp.Score DESC
+LIMIT 50;

@@ -1,0 +1,69 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MAX(ws.ws_sold_date_sk) AS last_order_date,
+        STRING_AGG(ws.ws_item_sk::text, ',') AS purchased_items
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+),
+WarehouseSales AS (
+    SELECT 
+        w.w_warehouse_name,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales,
+        COUNT(ss.ss_ticket_number) AS total_transactions
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        store_sales ss ON w.w_warehouse_sk = ss.ss_store_sk
+    WHERE 
+        w.w_warehouse_sq_ft > 5000
+    GROUP BY 
+        w.w_warehouse_name
+),
+CombinedSales AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_web_sales,
+        cs.order_count,
+        cs.last_order_date,
+        ws.w_warehouse_name,
+        ws.total_store_sales,
+        ws.total_transactions
+    FROM 
+        CustomerSales cs
+    JOIN 
+        WarehouseSales ws ON cs.total_web_sales > COALESCE(ws.total_store_sales, 0)
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(total_web_sales, 0) AS web_sales,
+    COALESCE(total_store_sales, 0) AS store_sales,
+    CASE 
+        WHEN total_web_sales > total_store_sales THEN 'Web Dominant'
+        WHEN total_web_sales < total_store_sales THEN 'Store Dominant'
+        ELSE 'Equal Sales'
+    END AS sales_dominance,
+    EXTRACT(YEAR FROM CURRENT_DATE) - EXTRACT(YEAR FROM DATE_TRUNC('year', last_order_date)) AS years_since_last_order
+FROM 
+    CustomerSales c
+FULL OUTER JOIN 
+    WarehouseSales ws ON c.total_web_sales > (SELECT AVG(total_web_sales) FROM CustomerSales)
+WHERE 
+    c.c_customer_id IS NOT NULL OR ws.w_warehouse_name IS NOT NULL
+ORDER BY 
+    years_since_last_order DESC, total_web_sales DESC;

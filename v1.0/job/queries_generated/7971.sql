@@ -1,0 +1,29 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS character_name,
+    m.production_year,
+    COUNT(DISTINCT kc.keyword) AS keyword_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.movie_id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    char_name c ON cc.subject_id = c.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+WHERE 
+    mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre')
+    AND mi.info ILIKE '%Drama%'
+GROUP BY 
+    a.name, t.title, c.kind, m.production_year
+ORDER BY 
+    m.production_year DESC, keyword_count DESC;

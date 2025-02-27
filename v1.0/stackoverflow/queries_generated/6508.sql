@@ -1,0 +1,43 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        u.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1 AND p.Score > 0
+),
+TopPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.AnswerCount,
+        rp.OwnerReputation
+    FROM RankedPosts rp
+    WHERE rp.Rank = 1
+),
+PostStatistics AS (
+    SELECT 
+        COUNT(*) AS TotalPosts,
+        AVG(ViewCount) AS AvgViewCount,
+        AVG(Score) AS AvgScore,
+        AVG(AnswerCount) AS AvgAnswerCount
+    FROM TopPosts
+)
+SELECT 
+    ps.TotalPosts,
+    ps.AvgViewCount,
+    ps.AvgScore,
+    ps.AvgAnswerCount,
+    COUNT(DISTINCT b.Id) AS TotalBadges
+FROM PostStatistics ps
+LEFT JOIN Badges b ON b.UserId IN (SELECT OwnerUserId FROM TopPosts)
+GROUP BY ps.TotalPosts, ps.AvgViewCount, ps.AvgScore, ps.AvgAnswerCount;

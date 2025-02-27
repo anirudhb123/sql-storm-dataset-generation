@@ -1,0 +1,42 @@
+WITH ranked_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rnk
+    FROM part p
+    WHERE p.p_size BETWEEN 1 AND 15
+),
+supplier_stats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+nation_n_orders AS (
+    SELECT 
+        n.n_nationkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey
+)
+SELECT 
+    r.r_name AS region,
+    p.p_name AS part_name,
+    ss.total_supply_cost AS supplier_total_cost,
+    nn.order_count AS orders_placed,
+    nn.total_order_value AS orders_total_value
+FROM ranked_parts p
+JOIN supplier_stats ss ON ss.total_supply_cost > (SELECT AVG(total_supply_cost) FROM supplier_stats) 
+LEFT JOIN nation n ON ss.s_suppkey = n.n_nationkey
+LEFT JOIN nation_n_orders nn ON n.n_nationkey = nn.n_nationkey
+WHERE p.rnk = 1 AND (n.n_nationkey IS NOT NULL OR ss.total_supply_cost IS NULL)
+ORDER BY region, part_name
+LIMIT 100
+OFFSET CASE WHEN (SELECT COUNT(*) FROM ranked_parts) > 100 THEN 10 ELSE 0 END;

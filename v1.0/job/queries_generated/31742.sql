@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.depth < 3
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY mh.kind_id ORDER BY mh.production_year DESC) AS rank_within_kind,
+    CASE 
+        WHEN mh.kind_id IS NULL THEN 'Unknown'
+        ELSE (SELECT kt.kind FROM kind_type kt WHERE kt.id = mh.kind_id)
+    END AS kind_description,
+    COALESCE(mi.info, 'N/A') AS movie_info
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.kind_id, mi.info
+HAVING 
+    COUNT(DISTINCT ak.name) > 2
+ORDER BY 
+    mh.production_year DESC, mh.title;

@@ -1,0 +1,48 @@
+
+WITH RECURSIVE last_holiday AS (
+    SELECT d_date_sk, d_date, d_holiday, d_year
+    FROM date_dim
+    WHERE d_holiday = 'Y' AND d_date < CURRENT_DATE
+    ORDER BY d_date DESC
+    LIMIT 1
+),
+customer_info AS (
+    SELECT c_customer_sk, 
+           CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+           cd_credit_rating, 
+           cd_gender,
+           cd_marital_status,
+           cd_dep_count,
+           cd_income_band_sk
+    FROM customer 
+    JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+),
+sales_summary AS (
+    SELECT ws_bill_customer_sk AS customer_id,
+           SUM(ws_ext_sales_price) AS total_sales,
+           COUNT(ws_order_number) AS order_count,
+           AVG(ws_ext_sales_price) AS avg_order_value
+    FROM web_sales
+    WHERE ws_sold_date_sk > (SELECT d_date_sk FROM last_holiday)
+    GROUP BY ws_bill_customer_sk
+)
+SELECT ci.full_name, 
+       ci.cd_credit_rating,
+       ci.cd_gender,
+       ss.total_sales,
+       ss.order_count,
+       ss.avg_order_value,
+       CASE 
+           WHEN ci.cd_marital_status = 'M' THEN 'Married'
+           ELSE 'Single'
+       END AS marital_status,
+       COALESCE(income_band.ib_lower_bound, 0) AS income_lower_bound,
+       COALESCE(income_band.ib_upper_bound, 0) AS income_upper_bound
+FROM customer_info ci
+LEFT JOIN sales_summary ss ON ci.c_customer_sk = ss.customer_id
+LEFT JOIN household_demographics hd ON ci.cd_income_band_sk = hd.hd_demo_sk
+LEFT JOIN income_band ON hd.hd_income_band_sk = income_band.ib_income_band_sk
+WHERE ss.total_sales IS NOT NULL
+   OR ci.cd_credit_rating IS NOT NULL
+ORDER BY ss.total_sales DESC, ci.full_name ASC
+LIMIT 100;

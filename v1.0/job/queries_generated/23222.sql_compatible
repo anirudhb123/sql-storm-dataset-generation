@@ -1,0 +1,47 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title AS movie_title,
+        mc.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mc.production_year ORDER BY mt.title) AS rank_by_title,
+        COUNT(*) OVER (PARTITION BY mc.production_year) AS total_movies
+    FROM aka_title mt
+    JOIN movie_companies mco ON mt.id = mco.movie_id
+    JOIN company_name cn ON mco.company_id = cn.id
+    JOIN kind_type kt ON mt.kind_id = kt.id
+    WHERE mt.production_year IS NOT NULL
+    AND cn.country_code IS NOT NULL
+    AND kt.kind NOT LIKE '%Other%'
+),
+
+CastDetails AS (
+    SELECT 
+        ak.name AS actor_name,
+        mt.title AS movie_title,
+        mc.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY ak.name) AS actor_rank,
+        SUM(CASE WHEN ci.note LIKE '%lead%' THEN 1 ELSE 0 END) OVER (PARTITION BY mt.id) AS lead_roles_count
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    JOIN aka_title mt ON ci.movie_id = mt.id
+    JOIN movie_companies mc ON mt.id = mc.movie_id
+)
+
+SELECT 
+    RM.movie_title,
+    RM.production_year,
+    RM.rank_by_title,
+    RM.total_movies,
+    CD.actor_name,
+    CD.actor_rank,
+    CD.lead_roles_count,
+    (CASE 
+        WHEN CD.lead_roles_count > 0 THEN 'Lead Actor'
+        ELSE 'Supporting Actor'
+     END) AS role_type,
+    COALESCE(CD.movie_title, 'Unknown Title') AS actual_movie_title
+FROM RankedMovies RM
+LEFT JOIN CastDetails CD ON RM.movie_title = CD.movie_title AND RM.production_year = CD.production_year
+WHERE RM.rank_by_title <= 5
+ORDER BY RM.production_year DESC, RM.rank_by_title ASC
+FETCH FIRST 50 ROWS ONLY;

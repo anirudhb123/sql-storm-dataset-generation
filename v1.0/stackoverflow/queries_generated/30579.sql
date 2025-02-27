@@ -1,0 +1,97 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+        AND p.Score > 0
+),
+
+RecentPostHistory AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RecentHistoryRank
+    FROM
+        PostHistory ph
+    WHERE
+        ph.CreationDate >= DATEADD(MONTH, -3, GETDATE())
+),
+
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Location,
+        (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = u.Id) AS PostCount,
+        (SELECT COUNT(*) FROM Comments c WHERE c.UserId = u.Id) AS CommentCount
+    FROM
+        Users u
+    WHERE
+        u.Reputation > 1000
+),
+
+PopularTags AS (
+    SELECT
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM
+        Tags t
+    LEFT JOIN
+        Posts pt ON pt.Tags LIKE '%' + t.TagName + '%'
+    GROUP BY
+        t.TagName
+    HAVING
+        COUNT(pt.PostId) > 50
+),
+
+CombinedResults AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.Score,
+        u.DisplayName AS AuthorName,
+        u.Reputation AS AuthorReputation,
+        u.Location AS AuthorLocation,
+        CASE
+            WHEN pht.PostHistoryTypeId IS NOT NULL THEN 'Edited'
+            ELSE 'Original'
+        END AS PostStatus,
+        STRING_AGG(DISTINCT pt.TagName, ', ') AS Tags
+    FROM
+        RankedPosts rp
+    JOIN
+        Users u ON rp.PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = u.Id)
+    LEFT JOIN
+        RecentPostHistory pht ON rp.PostId = pht.PostId AND pht.RecentHistoryRank = 1
+    LEFT JOIN
+        PopularTags pt ON pt.PostCount > 0
+    GROUP BY
+        rp.PostId, rp.Title, rp.ViewCount, rp.CreationDate, rp.Score, u.DisplayName, u.Reputation, u.Location
+)
+
+SELECT
+    *,
+    CASE
+        WHEN AuthorReputation >= 5000 THEN 'Expert'
+        WHEN AuthorReputation BETWEEN 1000 AND 4999 THEN 'Intermediate'
+        ELSE 'Novice'
+    END AS UserLevel
+FROM
+    CombinedResults
+WHERE
+    ViewCount > 1000
+ORDER BY
+    Score DESC, ViewCount DESC;

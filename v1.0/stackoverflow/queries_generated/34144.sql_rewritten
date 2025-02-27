@@ -1,0 +1,101 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        CreationDate, 
+        Score, 
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        p.CreationDate, 
+        p.Score, 
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(p.Id) AS PostCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        PostCount, 
+        CommentCount, 
+        TotalBounty, 
+        GoldBadges,
+        RANK() OVER (ORDER BY PostCount DESC) AS PostRank
+    FROM 
+        UserActivity
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    ph.Level AS PostLevel,
+    tu.DisplayName AS TopContributor,
+    tu.PostCount,
+    tu.CommentCount,
+    tu.TotalBounty,
+    tu.GoldBadges,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+FROM 
+    Posts p
+LEFT JOIN 
+    RecursivePostHierarchy ph ON p.Id = ph.Id
+LEFT JOIN 
+    Comments c ON c.PostId = p.Id
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id
+LEFT JOIN 
+    TopUsers tu ON p.OwnerUserId = tu.UserId
+WHERE 
+    p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+GROUP BY 
+    p.Id, 
+    p.Title, 
+    p.CreationDate, 
+    p.Score, 
+    ph.Level,
+    tu.DisplayName, 
+    tu.PostCount, 
+    tu.CommentCount, 
+    tu.TotalBounty, 
+    tu.GoldBadges
+ORDER BY 
+    p.Score DESC,
+    TotalComments DESC
+LIMIT 100;

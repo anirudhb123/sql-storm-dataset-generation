@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS CreatorDisplayName,
+        u.Reputation AS CreatorReputation,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.ViewCount DESC) AS ViewRank,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(p.Tags, '>') AS tag ON TRUE
+    LEFT JOIN 
+        Tags t ON tag::text = t.TagName
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation, p.Title, p.Body, p.CreationDate, p.ViewCount, pt.Name
+),
+OverallStats AS (
+    SELECT 
+        COUNT(*) AS TotalPosts,
+        AVG(ViewCount) AS AvgViewCount,
+        MAX(CreatorReputation) AS HighestReputation
+    FROM 
+        RankedPosts
+),
+UserPostStats AS (
+    SELECT 
+        CreatorDisplayName,
+        COUNT(PostId) AS PostsCreated,
+        AVG(ViewCount) AS AvgViews,
+        MAX(CreatorReputation) AS MaxReputation
+    FROM 
+        RankedPosts
+    GROUP BY 
+        CreatorDisplayName
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Body,
+    r.ViewCount,
+    r.TagsList,
+    ups.PostsCreated,
+    ups.AvgViews,
+    os.TotalPosts,
+    os.AvgViewCount,
+    os.HighestReputation
+FROM 
+    RankedPosts r
+JOIN 
+    UserPostStats ups ON r.CreatorDisplayName = ups.CreatorDisplayName
+CROSS JOIN 
+    OverallStats os
+WHERE 
+    r.ViewRank <= 5
+ORDER BY 
+    r.ViewCount DESC;

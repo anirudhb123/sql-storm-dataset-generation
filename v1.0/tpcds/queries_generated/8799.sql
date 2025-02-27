@@ -1,0 +1,54 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_min_age,
+        cd.cd_max_age,
+        SUM(ss.ss_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS number_of_transactions
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        cd.cd_marital_status = 'M'
+    GROUP BY 
+        c.c_customer_id, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_min_age, 
+        cd.cd_max_age
+),
+AgeBands AS (
+    SELECT 
+        customer_id,
+        CASE 
+            WHEN cd.cd_min_age < 25 THEN 'Under 25'
+            WHEN cd.cd_min_age BETWEEN 25 AND 34 THEN '25-34'
+            WHEN cd.cd_min_age BETWEEN 35 AND 44 THEN '35-44'
+            WHEN cd.cd_min_age BETWEEN 45 AND 54 THEN '45-54'
+            WHEN cd.cd_min_age >= 55 THEN '55 and above'
+            ELSE 'Unknown'
+        END AS age_band,
+        SUM(total_sales) AS total_sales_by_band,
+        COUNT(DISTINCT number_of_transactions) AS total_transactions_by_band
+    FROM 
+        CustomerStats
+    JOIN 
+        customer_demographics cd ON CustomerStats.c_customer_id = cd.cd_demo_sk
+    GROUP BY 
+        age_band
+)
+SELECT 
+    age_band,
+    total_sales_by_band,
+    total_transactions_by_band,
+    RANK() OVER (ORDER BY total_sales_by_band DESC) AS sales_rank
+FROM 
+    AgeBands
+ORDER BY 
+    sales_rank;

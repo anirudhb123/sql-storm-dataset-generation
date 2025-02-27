@@ -1,0 +1,96 @@
+WITH RecursivePostHistory AS (
+    SELECT
+        p.Id as PostId,
+        p.Title,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn
+    FROM
+        Posts p
+    JOIN
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE
+        ph.PostHistoryTypeId IN (10, 11, 12) -- Close, Reopen, Delete events
+),
+UserActivity AS (
+    SELECT
+        u.Id as UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        COUNT(com.Id) AS CommentsCount,
+        SUM(v.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownvotes
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Comments com ON p.Id = com.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    GROUP BY
+        u.Id
+),
+PostAnalytics AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(u.DisplayName, 'Community User') AS Owner,
+        COUNT( DISTINCT c.Id) AS CommentsCount,
+        AVG(pg.body_length) AS AvgBodyLength,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN
+        (SELECT 
+            ph.PostId, 
+            LENGTH(ph.Text) AS body_length 
+         FROM 
+            PostHistory ph
+         WHERE 
+            ph.PostHistoryTypeId = 5) pg ON p.Id = pg.PostId
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY
+        p.Id, Owner
+)
+SELECT
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostsCreated,
+    ua.TotalBounties,
+    ua.CommentsCount,
+    ua.TotalUpvotes,
+    ua.TotalDownvotes,
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.Score,
+    pa.ViewCount,
+    pa.CommentsCount,
+    pa.AvgBodyLength,
+    pa.CloseCount,
+    pa.ReopenCount,
+    (SELECT COUNT(*) FROM RecursivePostHistory rph WHERE rph.PostId = pa.PostId) AS RevisionCount
+FROM
+    UserActivity ua
+LEFT JOIN 
+    PostAnalytics pa ON ua.UserId = pa.OwnerUserId
+WHERE
+    ua.PostsCreated > 0
+ORDER BY
+    ua.TotalBounties DESC, pa.Score DESC
+LIMIT 100;

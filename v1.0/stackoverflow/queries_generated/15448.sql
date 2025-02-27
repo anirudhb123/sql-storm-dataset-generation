@@ -1,0 +1,22 @@
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS OwnerName,
+    v.VoteTypeId,
+    COUNT(c.Id) AS CommentCount
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+WHERE 
+    p.PostTypeId = 1  -- only Questions
+GROUP BY 
+    p.Id, u.DisplayName, v.VoteTypeId
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 10;

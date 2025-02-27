@@ -1,0 +1,37 @@
+
+WITH String_Benchmark AS (
+    SELECT 
+        ca_address_id, 
+        ca_street_name,
+        ca_city,
+        CONCAT(ca_street_name, ', ', ca_city) AS full_address,
+        LENGTH(ca_street_name) AS street_name_length,
+        LENGTH(ca_city) AS city_length,
+        LENGTH(CONCAT(ca_street_name, ', ', ca_city)) AS full_address_length,
+        UPPER(ca_street_name) AS street_name_upper,
+        LOWER(ca_city) AS city_lower
+    FROM 
+        customer_address
+    WHERE 
+        ca_state = 'CA' 
+),
+Aggregated_Benchmarks AS (
+    SELECT 
+        AVG(street_name_length) AS avg_street_name_length,
+        AVG(city_length) AS avg_city_length,
+        AVG(full_address_length) AS avg_full_address_length
+    FROM 
+        String_Benchmark
+)
+SELECT 
+    avg_street_name_length,
+    avg_city_length,
+    avg_full_address_length,
+    MAX(full_address) AS longest_full_address,
+    MIN(full_address) AS shortest_full_address
+FROM 
+    Aggregated_Benchmarks
+GROUP BY 
+    avg_street_name_length,
+    avg_city_length,
+    avg_full_address_length;

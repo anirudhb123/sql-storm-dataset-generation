@@ -1,0 +1,67 @@
+WITH ranked_movies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        SUM(CASE WHEN c.nr_order IS NOT NULL THEN 1 ELSE 0 END) AS cast_with_order,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        title t
+    LEFT JOIN
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN
+        aka_title ak ON ak.movie_id = t.id
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        t.production_year >= 2000 AND t.production_year <= 2023
+    GROUP BY
+        t.id
+),
+ranked_cast AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT p.info, ', ') AS person_info
+    FROM
+        cast_info c
+    JOIN
+        person_info p ON c.person_id = p.person_id
+    GROUP BY
+        c.movie_id
+),
+final_benchmark AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        rc.total_cast,
+        rm.cast_with_order,
+        rm.aka_names,
+        rm.keywords,
+        COALESCE(rc.person_info, 'No additional info') AS person_info
+    FROM
+        ranked_movies rm
+    LEFT JOIN
+        ranked_cast rc ON rm.movie_id = rc.movie_id
+)
+
+SELECT
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.cast_count,
+    f.total_cast,
+    f.cast_with_order,
+    f.aka_names,
+    f.keywords,
+    f.person_info
+FROM
+    final_benchmark f
+ORDER BY
+    f.production_year DESC, f.cast_count DESC;

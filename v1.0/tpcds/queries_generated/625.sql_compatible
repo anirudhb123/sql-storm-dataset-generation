@@ -1,0 +1,53 @@
+
+WITH customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_web_orders,
+        SUM(ws.ws_sales_price) AS total_web_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_store_orders,
+        SUM(ss.ss_sales_price) AS total_store_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_current_cdemo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+), ranked_customers AS (
+    SELECT 
+        cs.*,
+        ROW_NUMBER() OVER (PARTITION BY cs.cd_income_band_sk ORDER BY cs.total_web_sales DESC) AS rank_web_sales,
+        ROW_NUMBER() OVER (PARTITION BY cs.cd_income_band_sk ORDER BY cs.total_store_sales DESC) AS rank_store_sales
+    FROM 
+        customer_summary cs
+)
+SELECT 
+    r.c_customer_sk,
+    r.cd_gender,
+    r.cd_marital_status,
+    r.cd_income_band_sk,
+    r.total_web_orders,
+    r.total_web_sales,
+    r.total_store_orders,
+    r.total_store_sales,
+    CASE 
+        WHEN r.rank_web_sales <= 5 THEN 'Top Web Customer'
+        ELSE 'Other Web Customer'
+    END AS web_sales_status,
+    CASE 
+        WHEN r.rank_store_sales <= 5 THEN 'Top Store Customer'
+        ELSE 'Other Store Customer'
+    END AS store_sales_status
+FROM 
+    ranked_customers r
+WHERE 
+    r.total_web_sales IS NOT NULL OR r.total_store_sales IS NOT NULL
+ORDER BY 
+    r.cd_income_band_sk, r.total_web_sales DESC, r.total_store_sales DESC;

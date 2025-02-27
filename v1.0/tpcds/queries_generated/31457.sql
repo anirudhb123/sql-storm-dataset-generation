@@ -1,0 +1,49 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT ws_bill_customer_sk AS customer_id,
+           SUM(ws_ext_sales_price) AS total_sales,
+           1 AS level
+    FROM web_sales
+    WHERE ws_sold_date_sk = (SELECT d_date_sk FROM date_dim WHERE d_date = CURRENT_DATE)
+    GROUP BY ws_bill_customer_sk
+
+    UNION ALL
+
+    SELECT wh.customer_id,
+           SUM(ws_ext_sales_price) AS total_sales,
+           level + 1
+    FROM web_sales ws
+    JOIN SalesHierarchy wh ON ws.ws_bill_customer_sk = wh.customer_id
+    GROUP BY wh.customer_id
+),
+AddressWithReturns AS (
+    SELECT ca.ca_address_sk,
+           ca.ca_city,
+           ca.ca_state,
+           COUNT(sr_item_sk) AS total_returns
+    FROM customer_address ca
+    LEFT JOIN store_returns sr ON ca.ca_address_sk = sr.sr_addr_sk
+    GROUP BY ca.ca_address_sk, ca.ca_city, ca.ca_state
+),
+CustomerDemographics AS (
+    SELECT cd.cd_demo_sk,
+           cd.cd_gender,
+           cd.cd_marital_status,
+           AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics cd
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+)
+SELECT ch.customer_id,
+       ch.total_sales,
+       COALESCE(ar.total_returns, 0) AS returns,
+       cd.avg_purchase_estimate,
+       cd.cd_gender,
+       cd.cd_marital_status
+FROM SalesHierarchy ch
+LEFT JOIN AddressWithReturns ar ON ch.customer_id = ar.ca_address_sk
+JOIN CustomerDemographics cd ON cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_customer_sk = ch.customer_id)
+WHERE ch.total_sales > (
+    SELECT AVG(total_sales) FROM SalesHierarchy
+)
+ORDER BY ch.total_sales DESC
+LIMIT 100;

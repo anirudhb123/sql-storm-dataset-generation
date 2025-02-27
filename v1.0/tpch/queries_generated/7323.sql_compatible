@@ -1,0 +1,71 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_type,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_type
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+HighValueCustomers AS (
+    SELECT 
+        cust.c_custkey AS custkey,
+        cust.c_name,
+        cust.total_spent
+    FROM 
+        CustomerOrders cust
+    WHERE 
+        cust.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+),
+PartSupplierCount AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    rp.p_partkey,
+    rp.p_name,
+    rp.p_type,
+    hp.c_name AS high_value_customer,
+    hp.total_spent AS customer_spent,
+    ps.supplier_count,
+    rp.total_available_qty,
+    rp.total_cost
+FROM 
+    RankedParts rp
+JOIN 
+    PartSupplierCount ps ON rp.p_partkey = ps.p_partkey
+LEFT JOIN 
+    HighValueCustomers hp ON hp.total_spent > 10000
+ORDER BY 
+    rp.total_cost DESC, ps.supplier_count DESC;

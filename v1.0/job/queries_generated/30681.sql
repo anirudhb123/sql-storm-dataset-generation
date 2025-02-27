@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        COALESCE(mt.title, 'No Title') AS title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 -- Starting point for recent movies
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        COALESCE(at.title, 'No Title') AS title,
+        at.production_year,
+        mh.level + 1 AS level
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.title,
+    mh.production_year,
+    CAST(COALESCE(mf.info, 'No Info') AS text) AS movie_info,
+    STRING_AGG(DISTINCT a.name, ', ') AS actors,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS rank_within_year,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS note_count
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_info mf ON mh.movie_id = mf.movie_id AND mf.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id 
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+WHERE 
+    mh.level <= 3                          -- Limiting to the top 3 levels of the hierarchy
+    AND mh.production_year IS NOT NULL
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mf.info
+ORDER BY 
+    mh.production_year DESC, 
+    rank_within_year ASC
+LIMIT 50; -- Limit to top 50 results

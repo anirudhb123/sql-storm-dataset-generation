@@ -1,0 +1,96 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        p2.CreationDate,
+        p2.Score,
+        p2.ViewCount,
+        p2.OwnerUserId,
+        p2.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursiveCTE r ON r.PostId = p2.ParentId
+    WHERE 
+        p2.PostTypeId = 2  
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        MAX(u.Reputation) AS MaxReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.OwnerUserId AS PostOwnerId,
+    u.DisplayName AS PostOwnerName,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.TotalVotes,
+    CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Yes' ELSE 'No' END AS HasAcceptedAnswer,
+    r.PostId,
+    r.Title AS RecursiveTitle,
+    r.CreationDate AS RecursiveCreationDate,
+    r.Score AS RecursiveScore,
+    r.ViewCount AS RecursiveViewCount,
+    r.OwnerUserId AS RecursiveOwnerUserId,
+    r.AcceptedAnswerId AS RecursiveAcceptedAnswerId,
+    r.Level
+FROM 
+    RecursiveCTE r
+JOIN 
+    Posts p ON r.PostId = p.Id
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+JOIN 
+    PostVoteSummary ps ON p.Id = ps.PostId
+ORDER BY 
+    p.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

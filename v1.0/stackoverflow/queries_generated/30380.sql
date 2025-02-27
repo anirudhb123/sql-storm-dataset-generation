@@ -1,0 +1,72 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL  -- Starting from top-level questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePosts rp ON p.ParentId = rp.Id  -- Linking answers to questions
+),
+UserReputation AS (
+    SELECT 
+        u.Id,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE 
+                WHEN b.Class = 1 THEN 3
+                WHEN b.Class = 2 THEN 2
+                ELSE 1 
+            END) AS BadgeScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostScoreAnalysis AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.Score,
+        ur.Reputation AS UserReputation,
+        ur.BadgeCount,
+        ur.BadgeScore,
+        ROW_NUMBER() OVER (PARTITION BY ur.Id ORDER BY rp.Score DESC) AS Rn
+    FROM 
+        RecursivePosts rp
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.Id
+)
+SELECT 
+    psa.PostId,
+    psa.Title,
+    psa.Score,
+    COALESCE(psa.UserReputation, 0) AS UserReputation,
+    COALESCE(psa.BadgeCount, 0) AS BadgeCount,
+    SUM(psa.Score) OVER (PARTITION BY psa.UserReputation ORDER BY psa.Score DESC) AS CumulativeScore,
+    CASE 
+        WHEN psa.Score > 100 THEN 'High Score'
+        WHEN psa.Score BETWEEN 50 AND 100 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    PostScoreAnalysis psa
+WHERE 
+    psa.Rn <= 5  -- Top 5 answers per user
+ORDER BY 
+    psa.Score DESC;

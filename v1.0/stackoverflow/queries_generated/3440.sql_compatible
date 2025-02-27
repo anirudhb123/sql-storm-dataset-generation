@@ -1,0 +1,76 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(COALESCE(VoteTypes.vote_count, 0)) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS vote_count 
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) AS VoteTypes ON P.Id = VoteTypes.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+TopUsers AS (
+    SELECT 
+        U.*,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        UserStats U
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        P.Score,
+        P.ViewCount,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, U.DisplayName, P.Score, P.ViewCount
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.QuestionCount,
+    U.AnswerCount,
+    R.PostId,
+    R.Title,
+    R.CreationDate,
+    R.Score,
+    R.ViewCount,
+    R.CommentCount,
+    RANK() OVER (ORDER BY R.Score DESC) AS PostRank
+FROM 
+    TopUsers U
+JOIN 
+    RecentPosts R ON U.UserId = R.OwnerUserId
+WHERE 
+    U.Rank <= 10
+ORDER BY 
+    U.Reputation DESC, 
+    R.Score DESC;

@@ -1,0 +1,89 @@
+
+WITH sales_summary AS (
+    SELECT 
+        s.s_store_id, 
+        s.s_store_name, 
+        SUM(ss_ext_sales_price) AS total_sales,
+        AVG(ss_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ss_ticket_number) AS transaction_count
+    FROM 
+        store_sales 
+    JOIN 
+        store s ON s.s_store_sk = ss_store_sk
+    GROUP BY 
+        s.s_store_id, s.s_store_name
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_id, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        COUNT(DISTINCT ss_ticket_number) AS purchase_count, 
+        SUM(ss_ext_sales_price) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        store_sales ss ON ss.ss_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+),
+date_summary AS (
+    SELECT 
+        d.d_date_id,
+        SUM(ws_ext_sales_price) AS total_web_sales,
+        COUNT(ws_order_number) AS web_order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_date_id
+),
+high_value_customers AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_spent,
+        cs.purchase_count,
+        ROW_NUMBER() OVER (ORDER BY cs.total_spent DESC) AS customer_rank
+    FROM 
+        customer_summary cs
+    WHERE 
+        cs.total_spent > (SELECT AVG(total_spent) FROM customer_summary)
+),
+outer_joined_sales AS (
+    SELECT 
+        ss.s_store_sk,
+        ss.ss_ticket_number,
+        COALESCE(ss.ss_ext_sales_price, 0) AS sales_price,
+        COALESCE(s.total_sales, 0) AS total_store_sales
+    FROM 
+        store_sales ss
+    LEFT JOIN 
+        sales_summary s ON ss.ss_store_sk = s.s_store_id
+)
+SELECT 
+    d.d_date_id,
+    COALESCE(s.total_sales, 0) AS store_total_sales,
+    COALESCE(c.purchase_count, 0) AS customer_purchase_count,
+    COALESCE(c.total_spent, 0) AS customer_total_spent,
+    SUM(o.sales_price * CASE WHEN c.purchase_count > 5 THEN 0.9 ELSE 1 END) AS adjusted_sales,
+    SUM(o.total_store_sales) AS total_sales_by_store
+FROM 
+    date_summary d
+LEFT JOIN 
+    sales_summary s ON d.total_web_sales > s.total_sales
+LEFT JOIN 
+    customer_summary c ON d.web_order_count = c.purchase_count
+LEFT JOIN 
+    outer_joined_sales o ON o.ss_ticket_number IN (SELECT DISTINCT ss_ticket_number FROM outer_joined_sales)
+WHERE 
+    c.total_spent IS NULL OR c.purchase_count IS NULL
+GROUP BY 
+    d.d_date_id, s.total_sales, c.purchase_count, c.total_spent
+ORDER BY 
+    d.d_date_id DESC, adjusted_sales DESC
+LIMIT 100
+OFFSET 50
+```

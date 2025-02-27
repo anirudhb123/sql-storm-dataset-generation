@@ -1,0 +1,67 @@
+
+WITH RankedMovies AS (
+    SELECT
+        at.title,
+        at.production_year,
+        COUNT(cc.movie_id) OVER (PARTITION BY at.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC, at.title) AS rank_per_year,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY at.id) AS notes_count,
+        at.movie_id
+    FROM
+        aka_title at
+    LEFT JOIN
+        cast_info ci ON ci.movie_id = at.movie_id
+    WHERE
+        at.production_year IS NOT NULL
+        AND at.production_year BETWEEN 2000 AND 2020
+),
+GenresMovies AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(DISTINCT gt.kind, ', ') AS genres
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON k.id = mk.keyword_id
+    JOIN
+        kind_type gt ON gt.id = k.id 
+    GROUP BY
+        mk.movie_id
+),
+MovieCompanies AS (
+    SELECT
+        mc.movie_id,
+        COUNT(DISTINCT co.name) AS company_count
+    FROM
+        movie_companies mc
+    JOIN
+        company_name co ON co.id = mc.company_id
+    GROUP BY
+        mc.movie_id
+)
+SELECT 
+    rm.title, 
+    rm.production_year,
+    rm.cast_count,
+    rm.rank_per_year,
+    rm.notes_count,
+    gm.genres,
+    COALESCE(cmp.company_count, 0) AS company_count,
+    CASE 
+        WHEN rm.cast_count > 10 AND rm.notes_count = 0 THEN 'High Cast, No Notes' 
+        WHEN rm.notes_count > 5 THEN 'Many Notes'
+        ELSE 'Standard'
+    END AS movie_category
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    GenresMovies gm ON rm.movie_id = gm.movie_id
+LEFT JOIN 
+    MovieCompanies cmp ON rm.movie_id = cmp.movie_id
+WHERE
+    (CAST(rm.production_year AS VARCHAR) LIKE '20%' OR rm.cast_count < 5)
+    AND rm.production_year IS NOT NULL
+ORDER BY 
+    rm.production_year, 
+    rm.cast_count DESC, 
+    rm.title;

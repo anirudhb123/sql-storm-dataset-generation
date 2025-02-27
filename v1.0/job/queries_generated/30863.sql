@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        NULL::integer AS parent_movie_id
+    FROM title m
+    WHERE m.production_year >= 2000  -- Start from movies after 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        t.title,
+        t.production_year,
+        mh.movie_id
+    FROM movie_link ml
+    INNER JOIN title t ON ml.linked_movie_id = t.id
+    INNER JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies,
+        AVG(mi.info::numeric) AS avg_rating
+    FROM MovieHierarchy mh
+    LEFT JOIN cast_info ci ON ci.movie_id = mh.movie_id
+    LEFT JOIN aka_name ak ON ak.person_id = ci.person_id
+    LEFT JOIN movie_companies mc ON mc.movie_id = mh.movie_id
+    LEFT JOIN company_name co ON co.id = mc.company_id
+    LEFT JOIN movie_info mi ON mi.movie_id = mh.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY mh.movie_id, mh.title, mh.production_year
+),
+RankedMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.total_cast,
+        md.actors,
+        md.companies,
+        md.avg_rating,
+        RANK() OVER (PARTITION BY md.production_year ORDER BY md.avg_rating DESC) AS rank_within_year
+    FROM MovieDetails md
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.total_cast,
+    rm.actors,
+    rm.companies,
+    COALESCE(rm.avg_rating, 'N/A') AS avg_rating,
+    CASE 
+        WHEN rm.rank_within_year = 1 THEN 'Top'
+        ELSE 'Not Top'
+    END AS ranking_status
+FROM RankedMovies rm
+WHERE rm.production_year BETWEEN 2005 AND 2020
+AND rm.total_cast > 5
+ORDER BY rm.production_year DESC, rm.avg_rating DESC;

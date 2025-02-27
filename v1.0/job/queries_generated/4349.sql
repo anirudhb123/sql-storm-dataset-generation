@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        title.title AS movie_title,
+        title.production_year,
+        COUNT(cast_info.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY title.production_year ORDER BY COUNT(cast_info.id) DESC) AS rank_per_year
+    FROM 
+        title
+    LEFT JOIN 
+        cast_info ON title.id = cast_info.movie_id
+    GROUP BY 
+        title.title, title.production_year
+),
+HighestCastMovies AS (
+    SELECT 
+        *
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_per_year = 1
+),
+ActorRoles AS (
+    SELECT 
+        aka_name.name,
+        role_type.role,
+        COUNT(cast_info.id) AS role_count
+    FROM 
+        aka_name
+    JOIN 
+        cast_info ON aka_name.person_id = cast_info.person_id
+    JOIN 
+        role_type ON cast_info.role_id = role_type.id
+    GROUP BY 
+        aka_name.name, role_type.role
+    HAVING 
+        COUNT(cast_info.id) > 2
+)
+SELECT 
+    hcm.movie_title,
+    hcm.production_year,
+    COALESCE(a.name, 'Unknown Actor') AS actor_name,
+    COALESCE(a.role, 'Unknown Role') AS actor_role,
+    a.role_count,
+    CASE 
+        WHEN hcm.cast_count IS NULL THEN 'No cast available'
+        ELSE 'Cast available'
+    END AS cast_availability,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+FROM 
+    HighestCastMovies hcm
+LEFT JOIN 
+    ActorRoles a ON hcm.cast_count = a.role_count
+LEFT JOIN 
+    movie_keyword mwk ON hcm.movie_id = mwk.movie_id
+LEFT JOIN 
+    keyword kw ON mwk.keyword_id = kw.id
+GROUP BY 
+    hcm.movie_title, hcm.production_year, a.name, a.role, a.role_count
+ORDER BY 
+    hcm.production_year DESC, hcm.movie_title;

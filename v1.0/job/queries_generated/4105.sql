@@ -1,0 +1,51 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT cc.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+    FROM 
+        aka_title ak 
+        JOIN title t ON ak.movie_id = t.id
+        LEFT JOIN cast_info cc ON t.id = cc.movie_id
+    GROUP BY 
+        t.id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        MAX(CASE WHEN ct.kind = 'Distributor' THEN cn.name END) AS distributor
+    FROM 
+        movie_companies mc
+        JOIN company_name cn ON mc.company_id = cn.id
+        JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        MAX(CASE WHEN it.info = 'Synopsis' THEN mi.info END) AS synopsis
+    FROM 
+        movie_info mi
+        JOIN info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(md.cast_count, 0) AS total_cast,
+    COALESCE(cd.companies, 'No Companies') AS companies,
+    COALESCE(mi.synopsis, 'No Synopsis Available') AS movie_synopsis,
+    RANK() OVER (PARTITION BY md.production_year ORDER BY md.cast_count DESC) AS rank_by_cast
+FROM 
+    MovieDetails md
+    LEFT JOIN CompanyDetails cd ON md.title = cd.title
+    LEFT JOIN MovieInfo mi ON md.title = mi.title
+WHERE 
+    md.production_year >= 2000
+    AND (md.cast_count IS NULL OR md.cast_count > 5)
+ORDER BY 
+    md.production_year DESC, rank_by_cast;

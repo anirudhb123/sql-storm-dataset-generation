@@ -1,0 +1,47 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+FilteredParts AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           p.p_mfgr,
+           p.p_retailprice,
+           (CASE 
+               WHEN p.p_size > 20 THEN 'Large'
+               WHEN p.p_size BETWEEN 10 AND 20 THEN 'Medium'
+               ELSE 'Small'
+            END) AS size_category
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL
+),
+TopSuppliers AS (
+    SELECT ss.s_suppkey, ss.s_name, ps.ps_partkey, ps.ps_availqty
+    FROM RankedSuppliers ss
+    JOIN partsupp ps ON ss.s_suppkey = ps.ps_suppkey
+    WHERE ss.rn <= 3
+),
+OrdersWithLineItems AS (
+    SELECT o.o_orderkey,
+           SUM(l.l_quantity * (l.l_extendedprice - l.l_discount)) AS order_value,
+           COUNT(l.l_orderkey) AS item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2020-01-01'
+    GROUP BY o.o_orderkey
+)
+SELECT DISTINCT 'Supplier: ' || t.s_name || 
+                ', Part: ' || fp.p_name || 
+                ', Value: ' || COALESCE(owl.order_value, 0) || 
+                CASE 
+                    WHEN fp.size_category = 'Large' THEN ' - Needs Attention'
+                    ELSE ''
+                END AS report_note
+FROM TopSuppliers t
+LEFT JOIN FilteredParts fp ON t.ps_partkey = fp.p_partkey
+LEFT JOIN OrdersWithLineItems owl ON owl.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')) LIMIT 1) LIMIT 1) LIMIT 1)
+WHERE (fp.p_retailprice BETWEEN 50 AND 150 OR fp.p_mfgr LIKE '%ACME%')
+  AND (owl.order_value IS NULL OR owl.order_value > 1000)
+ORDER BY t.s_name, fp.p_name;

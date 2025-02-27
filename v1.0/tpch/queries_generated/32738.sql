@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+), TopSuppliers AS (
+    SELECT s.suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY s.suppkey, s.s_name
+    HAVING total_cost > 5000
+), RegionSales AS (
+    SELECT r.r_name, SUM(o.o_totalprice) AS total_sales
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY r.r_name
+), DiscountedLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS discounted_total
+    FROM lineitem l
+    WHERE l.l_discount IS NOT NULL
+    GROUP BY l.l_orderkey, l.l_partkey
+)
+SELECT
+    r.r_name,
+    COALESCE(rs.total_sales, 0) AS total_sales,
+    th.total_cost AS total_supplier_cost,
+    COUNT(DISTINCT sh.s_suppkey) AS number_of_suppliers,
+    AVG(dl.discounted_total) AS avg_discounted_line_total
+FROM RegionSales rs
+FULL OUTER JOIN TopSuppliers th ON rs.r_name = th.suppkey
+FULL OUTER JOIN SupplierHierarchy sh ON th.suppkey = sh.s_suppkey
+LEFT JOIN DiscountedLineItems dl ON th.suppkey = dl.l_partkey
+GROUP BY r.r_name, th.total_cost
+ORDER BY total_sales DESC, avg_discounted_line_total DESC
+LIMIT 10;

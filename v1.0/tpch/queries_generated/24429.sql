@@ -1,0 +1,72 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    WHERE p.p_size BETWEEN 1 AND 20 AND p.p_retailprice IS NOT NULL
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+FilteredSupply AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_availqty) > 100
+)
+SELECT 
+    p.p_name,
+    ss.s_name,
+    co.c_name,
+    co.order_count,
+    co.total_spent,
+    rp.p_retailprice,
+    COALESCE(ss.total_supply_cost, 0) AS supplier_cost,
+    CASE 
+        WHEN rp.rn <= 3 THEN 'Top 3'
+        ELSE 'Other'
+    END AS part_rank,
+    CASE 
+        WHEN co.total_spent IS NULL THEN 'No Orders'
+        ELSE 'Customer Active'
+    END AS customer_status
+FROM RankedParts rp
+LEFT JOIN SupplierSummary ss ON rp.p_partkey IN (SELECT ps.ps_partkey FROM FilteredSupply ps WHERE ps.total_avail_qty > 50)
+LEFT JOIN CustomerOrders co ON co.order_count > (SELECT AVG(order_count) FROM CustomerOrders)
+WHERE rp.rn <= 10
+UNION ALL
+SELECT 
+    NULL AS p_name,
+    NULL AS s_name,
+    co.c_name,
+    co.order_count,
+    co.total_spent,
+    NULL AS retailprice,
+    NULL AS supplier_cost,
+    'Ignored' AS part_rank,
+    'Customer Active' AS customer_status
+FROM CustomerOrders co
+WHERE co.order_count < 1
+ORDER BY 4 DESC, 2 ASC NULLS LAST;

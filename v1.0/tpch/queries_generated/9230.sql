@@ -1,0 +1,37 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           o.o_totalprice, 
+           o.o_orderstatus, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierCosts AS (
+    SELECT ps.ps_partkey, 
+           ps.ps_suppkey, 
+           SUM(ps.ps_supplycost * l.l_quantity) AS TotalSupplyCost
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+CustomerSpend AS (
+    SELECT c.c_custkey, 
+           SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT c.c_custkey) AS Customers,
+       SUM(cs.TotalSpent) AS TotalRevenue,
+       SUM(sc.TotalSupplyCost) AS TotalSupplyCosts
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN SupplierCosts sc ON s.s_suppkey = sc.ps_suppkey
+JOIN CustomerSpend cs ON cs.TotalSpent > 0
+JOIN customer c ON s.s_nationkey = c.c_nationkey
+WHERE sc.TotalSupplyCost > 1000
+GROUP BY r.r_name
+ORDER BY TotalRevenue DESC, Customers DESC;

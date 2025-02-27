@@ -1,0 +1,79 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(c.movie_id) AS cast_count,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.movie_id) DESC) AS year_rank
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        cast_info AS c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        year_rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COALESCE(GROUP_CONCAT(DISTINCT c.name ORDER BY c.name), 'No Cast') AS actors,
+        COALESCE(GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword), 'No Keywords') AS keywords
+    FROM 
+        TopMovies AS m
+    LEFT JOIN 
+        cast_info AS ci ON m.title = (SELECT title FROM aka_title WHERE id = ci.movie_id)
+    LEFT JOIN 
+        aka_name AS c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword AS mk ON mk.movie_id = (SELECT id FROM aka_title WHERE title = m.title)
+    LEFT JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.title, m.production_year
+),
+MovieStats AS (
+    SELECT 
+        title,
+        production_year,
+        actors,
+        keywords,
+        CASE 
+            WHEN production_year < 2000 THEN 'Classic'
+            WHEN production_year BETWEEN 2000 AND 2020 THEN 'Modern'
+            ELSE 'Recent'
+        END AS movie_category
+    FROM 
+        MovieDetails
+)
+SELECT 
+    ms.title,
+    ms.production_year,
+    ms.actors,
+    ms.keywords,
+    ms.movie_category,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM movie_info WHERE movie_id = (SELECT id FROM aka_title WHERE title = ms.title) AND info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')) 
+        THEN 'Box Office Info Available' 
+        ELSE 'Box Office Info Not Available' 
+    END AS box_office_info,
+    NULLIF(LENGTH(ms.actors), 0) AS actors_length,
+    NULLIF(LENGTH(ms.keywords), 0) AS keywords_length
+FROM 
+    MovieStats AS ms
+WHERE 
+    ms.actors IS NOT NULL 
+    AND (ms.production_year >= 2023 OR ms.production_year < 2000)
+ORDER BY 
+    ms.production_year DESC, 
+    ms.title ASC;

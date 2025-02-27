@@ -1,0 +1,59 @@
+
+WITH customer_totals AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        MAX(d.d_date) AS last_purchase_date
+    FROM 
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        c.*,
+        ct.total_sales,
+        ct.order_count,
+        ct.last_purchase_date,
+        RANK() OVER (ORDER BY ct.total_sales DESC) AS sales_rank
+    FROM 
+        customer_totals ct
+    JOIN customer c ON ct.c_customer_sk = c.c_customer_sk
+    WHERE 
+        ct.total_sales IS NOT NULL AND ct.total_sales > (
+            SELECT AVG(total_sales)
+            FROM customer_totals
+            WHERE total_sales IS NOT NULL
+        )
+),
+promotion_stats AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT ws.ws_order_number) AS promo_usage,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        promotion p
+    LEFT JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_sales,
+    tc.order_count,
+    tc.last_purchase_date,
+    ps.promo_usage,
+    ps.avg_net_profit
+FROM 
+    top_customers tc
+LEFT JOIN promotion_stats ps ON tc.c_customer_id = (SELECT c.c_customer_id FROM customer c WHERE c.c_customer_sk = tc.c_customer_sk)
+WHERE 
+    (tc.order_count > 5 AND ps.promo_usage > 0) 
+    OR (tc.total_sales IS NULL AND ps.promo_usage IS NULL)
+ORDER BY 
+    tc.sales_rank, ps.avg_net_profit DESC
+LIMIT 10;

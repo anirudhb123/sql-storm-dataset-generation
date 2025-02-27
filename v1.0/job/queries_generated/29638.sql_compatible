@@ -1,0 +1,58 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_within_year
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+    HAVING 
+        COUNT(DISTINCT c.person_id) > 0
+),
+
+TopMovies AS (
+    SELECT 
+        rm.* 
+    FROM 
+        RankedMovies rm 
+    WHERE 
+        rm.rank_within_year <= 5
+)
+
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    tm.keywords,
+    COALESCE(n.name, 'Unknown') AS director_name,
+    COALESCE(ct.kind, 'N/A') AS company_type,
+    COUNT(DISTINCT mc.company_id) AS company_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_companies mc ON tm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    complete_cast cc ON tm.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    aka_name n ON ci.person_id = n.person_id
+WHERE 
+    tm.production_year BETWEEN 1980 AND 2000
+GROUP BY 
+    tm.movie_id, tm.title, tm.production_year, n.name, ct.kind
+ORDER BY 
+    tm.production_year DESC, company_count DESC;

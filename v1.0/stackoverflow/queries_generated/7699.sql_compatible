@@ -1,0 +1,50 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(B.Class, 0)) AS TotalBadges,
+        AVG(COALESCE(P.Score, 0)) AS AveragePostScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+),
+RecentCloseReasons AS (
+    SELECT 
+        C.Id AS CloseReasonId,
+        C.Name AS CloseReason,
+        COUNT(PH.Id) AS CloseCount
+    FROM CloseReasonTypes C
+    JOIN PostHistory PH ON CAST(PH.Comment AS jsonb)->>'CloseReasonId' = CAST(C.Id AS text)
+    GROUP BY C.Id, C.Name
+    ORDER BY CloseCount DESC
+    LIMIT 5
+)
+SELECT 
+    UR.UserId,
+    UR.DisplayName,
+    UR.Reputation,
+    UR.PostCount,
+    UR.TotalBadges,
+    UR.AveragePostScore,
+    PT.TagName AS PopularTag,
+    RCR.CloseReason AS RecentCloseReason,
+    RCR.CloseCount AS RecentCloseCount
+FROM UserReputation UR
+CROSS JOIN PopularTags PT
+CROSS JOIN RecentCloseReasons RCR
+WHERE UR.Reputation > 1000 
+ORDER BY UR.Reputation DESC, UR.PostCount DESC, UR.AveragePostScore DESC;

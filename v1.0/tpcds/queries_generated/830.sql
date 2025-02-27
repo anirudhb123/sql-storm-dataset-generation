@@ -1,0 +1,63 @@
+
+WITH Latest_Web_Sales AS (
+    SELECT 
+        ws_item_sk,
+        ws_bill_customer_sk,
+        MAX(ws_sold_date_sk) AS latest_date
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk, ws_bill_customer_sk
+),
+Detailed_Web_Sales AS (
+    SELECT 
+        ws.*,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_sales_price) OVER (PARTITION BY ws_bill_customer_sk) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        Latest_Web_Sales lws ON ws.ws_item_sk = lws.ws_item_sk 
+        AND ws.ws_bill_customer_sk = lws.ws_bill_customer_sk 
+        AND ws.ws_sold_date_sk = lws.latest_date
+),
+Filtered_Sales AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN total_spent > 500 THEN 'High Value'
+            WHEN total_spent BETWEEN 200 AND 500 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value_segment
+    FROM 
+        Detailed_Web_Sales
+    WHERE 
+        cd.cd_gender = 'F' AND 
+        ca.ca_state IS NOT NULL
+)
+SELECT 
+    DISTINCT ws_item_sk,
+    COUNT(*) AS purchase_count,
+    customer_value_segment,
+    MAX(ws_sales_price) AS max_price,
+    MIN(ws_sales_price) AS min_price,
+    AVG(ws_sales_price) AS avg_price,
+    STRING_AGG(DISTINCT ca_city, ', ') AS cities
+FROM 
+    Filtered_Sales
+GROUP BY 
+    ws_item_sk, customer_value_segment
+HAVING 
+    COUNT(*) > 3
+ORDER BY 
+    purchase_count DESC, customer_value_segment;

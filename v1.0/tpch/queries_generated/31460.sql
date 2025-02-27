@@ -1,0 +1,39 @@
+WITH RECURSIVE SupplierHiearchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHiearchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           RANK() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+TotalSales AS (
+    SELECT l.l_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    GROUP BY l.l_suppkey
+),
+TopSuppliers AS (
+    SELECT rs.*, ts.total_sales
+    FROM RankedSuppliers rs
+    LEFT JOIN TotalSales ts ON rs.s_suppkey = ts.l_suppkey
+    WHERE rs.supplier_rank <= 5
+)
+SELECT ps.p_partkey, p.p_name, ts.s_name, COALESCE(ts.total_sales, 0) AS total_sales,
+       CASE 
+           WHEN ts.total_sales IS NULL THEN 'No Sales'
+           ELSE 'Sales Present'
+       END AS sales_status
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN TopSuppliers ts ON ps.ps_suppkey = ts.s_suppkey
+WHERE p.p_size > (SELECT AVG(p_size) FROM part)
+ORDER BY total_sales DESC, p.p_partkey;

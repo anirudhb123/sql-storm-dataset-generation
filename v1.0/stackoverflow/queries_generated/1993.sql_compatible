@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS RankScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 YEAR)
+),
+PostMetrics AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.ViewCount,
+        r.Score,
+        r.AnswerCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        Votes v ON r.PostId = v.PostId
+    GROUP BY 
+        r.PostId, r.Title, r.ViewCount, r.Score, r.AnswerCount
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId, ph.UserId
+),
+PostRanks AS (
+    SELECT 
+        pm.*,
+        p.UserId AS OwnerUserId,
+        CASE 
+            WHEN COALESCE(phd.EditCount, 0) > 5 THEN 'Highly Edited' 
+            ELSE 'Initially Created' 
+        END AS EditCategory
+    FROM 
+        PostMetrics pm
+    LEFT JOIN 
+        Posts p ON pm.PostId = p.Id
+    LEFT JOIN 
+        PostHistoryDetails phd ON pm.PostId = phd.PostId
+)
+SELECT 
+    pr.Title,
+    pr.ViewCount,
+    pr.Score,
+    pr.AnswerCount,
+    pr.UpVotes,
+    pr.DownVotes,
+    pr.EditCategory,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = pr.PostId) AS CommentCount
+FROM 
+    PostRanks pr
+WHERE 
+    pr.RankScore <= 10
+ORDER BY 
+    pr.EditCategory DESC, 
+    pr.Score DESC;

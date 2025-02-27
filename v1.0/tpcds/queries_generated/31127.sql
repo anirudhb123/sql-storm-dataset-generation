@@ -1,0 +1,45 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT ws_customer_sk, SUM(ws_net_profit) AS total_sales, 
+           ROW_NUMBER() OVER (PARTITION BY ws_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_customer_sk
+    HAVING SUM(ws_net_profit) > 0
+    UNION ALL
+    SELECT sh.ws_customer_sk, 
+           sh.total_sales + sh2.total_sales,
+           ROW_NUMBER() OVER (PARTITION BY sh.ws_customer_sk ORDER BY sh.total_sales + sh2.total_sales DESC) 
+    FROM SalesHierarchy sh
+    JOIN SalesHierarchy sh2 ON sh.rank = sh2.rank
+    WHERE sh.ws_customer_sk != sh2.ws_customer_sk
+),
+CustomerIncome AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name,
+           coalesce(hd.hd_income_band_sk, 0) AS income_band,
+           cd.cd_gender, cd.cd_marital_status
+    FROM customer c
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT sh.ws_customer_sk, sh.total_sales,
+           ci.c_first_name, ci.c_last_name, ci.income_band,
+           ci.cd_gender, ci.cd_marital_status
+    FROM SalesHierarchy sh
+    JOIN CustomerIncome ci ON sh.ws_customer_sk = ci.c_customer_sk
+),
+FilteredSales AS (
+    SELECT *,
+           CASE 
+               WHEN total_sales >= 1000 THEN 'High'
+               WHEN total_sales BETWEEN 500 AND 999 THEN 'Medium'
+               ELSE 'Low'
+           END AS sales_category
+    FROM SalesData
+)
+SELECT fs.c_first_name, fs.c_last_name, fs.total_sales, fs.sales_category, fs.cd_gender, fs.cd_marital_status
+FROM FilteredSales fs
+WHERE fs.income_band IS NOT NULL
+AND fs.sales_category = 'High'
+ORDER BY fs.total_sales DESC
+LIMIT 10;

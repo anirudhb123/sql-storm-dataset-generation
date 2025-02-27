@@ -1,0 +1,51 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) as rn
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 1 AND 1000
+),
+TotalSales AS (
+    SELECT 
+        rs.ws_order_number,
+        SUM(rs.ws_net_profit) AS total_net_profit,
+        COUNT(rs.ws_item_sk) AS items_sold
+    FROM RankedSales rs
+    WHERE rs.rn <= 3
+    GROUP BY rs.ws_order_number
+),
+TopOrders AS (
+    SELECT 
+        ts.ws_order_number,
+        ts.total_net_profit,
+        ts.items_sold,
+        DENSE_RANK() OVER (ORDER BY ts.total_net_profit DESC) AS order_rank
+    FROM TotalSales ts
+)
+SELECT 
+    coalesce(c.c_first_name, 'Unknown') AS customer_first_name,
+    coalesce(c.c_last_name, 'Unknown') AS customer_last_name,
+    to_char(dd.d_date, 'YYYY-MM-DD') AS sale_date,
+    to_char(ts.total_net_profit, 'FM$9,999.99') AS total_profit,
+    ts.items_sold
+FROM TopOrders ts
+JOIN customer c ON c.c_customer_sk = (
+    SELECT ws.ws_bill_customer_sk 
+    FROM web_sales ws 
+    WHERE ws.ws_order_number = ts.ws_order_number 
+    LIMIT 1  
+)
+JOIN date_dim dd ON dd.d_date_sk = (
+    SELECT ws.ws_sold_date_sk 
+    FROM web_sales ws 
+    WHERE ws.ws_order_number = ts.ws_order_number 
+    LIMIT 1
+)
+WHERE ts.order_rank <= 10
+  AND c.c_birth_year IS NOT NULL
+  AND (c.c_preferred_cust_flag = 'Y' OR c.c_email_address IS NOT NULL) 
+ORDER BY ts.total_net_profit DESC, c.c_last_name ASC;

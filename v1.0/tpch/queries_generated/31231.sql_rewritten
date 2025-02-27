@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.nationkey = sh.nationkey
+    WHERE sh.level < 5
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_purchases,
+        COUNT(o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rn
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+PartsAvailability AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        p.p_retailprice * SUM(ps.ps_availqty) AS total_value
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT 
+    ch.c_custkey,
+    ch.c_name,
+    ch.total_purchases,
+    ch.order_count,
+    pa.p_partkey,
+    pa.p_name,
+    pa.total_avail_qty,
+    pa.total_value,
+    COALESCE(sh.level, 0) AS supplier_level,
+    CASE 
+        WHEN ch.total_purchases > 10000 THEN 'High Value Customer'
+        WHEN ch.total_purchases IS NULL THEN 'No Purchases'
+        ELSE 'Regular Customer'
+    END AS customer_status
+FROM CustomerPurchases ch
+LEFT JOIN PartsAvailability pa ON ch.total_purchases > pa.total_value
+LEFT JOIN SupplierHierarchy sh ON ch.cust_nationkey = sh.nationkey
+WHERE (ch.order_count > 5 OR pa.total_avail_qty > 100)
+ORDER BY ch.total_purchases DESC, pa.total_value DESC;

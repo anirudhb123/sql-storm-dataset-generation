@@ -1,0 +1,69 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        (SELECT AVG(ps.ps_supplycost) 
+         FROM partsupp ps 
+         WHERE ps.ps_partkey = p.p_partkey) AS avg_supply_cost
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 100
+),
+
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 50000
+)
+
+SELECT 
+    COALESCE(co.c_name, 'Unknown Customer') AS customer_name,
+    hvp.p_name AS high_value_part,
+    hs.s_name AS top_supplier,
+    hs.s_acctbal AS supplier_balance,
+    COALESCE(RANK() OVER (PARTITION BY co.c_custkey ORDER BY co.total_orders DESC), 0) AS order_rank,
+    CASE 
+        WHEN co.total_orders = 0 THEN 'No Orders'
+        ELSE CONCAT('Total Orders: ', co.total_orders)
+    END AS orders_description,
+    CASE 
+        WHEN hvp.p_retailprice IS NULL THEN 'Price Unavailable'
+        ELSE CONCAT('Retail Price: $', CAST(hvp.p_retailprice AS VARCHAR))
+    END AS retail_price_info
+FROM 
+    HighValueParts hvp
+LEFT JOIN 
+    RankedSuppliers hs ON hs.rn = 1 
+LEFT JOIN 
+    CustomerOrders co ON co.total_orders > 0
+WHERE 
+    hvp.avg_supply_cost IS NOT NULL
+ORDER BY 
+    hvp.p_retailprice DESC, customer_name;

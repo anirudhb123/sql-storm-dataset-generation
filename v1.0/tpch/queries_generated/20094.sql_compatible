@@ -1,0 +1,59 @@
+
+WITH recursive_order_summary AS (
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts,
+           RANK() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+supplier_part_summary AS (
+    SELECT ps.ps_partkey,
+           SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost,
+           COUNT(s.s_suppkey) AS supplier_count
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+combined_summary AS (
+    SELECT ros.o_orderkey,
+           ros.total_revenue,
+           ros.unique_parts,
+           sps.total_supply_cost,
+           sps.supplier_count,
+           CASE 
+               WHEN ros.total_revenue >= (SELECT AVG(total_revenue) FROM recursive_order_summary) 
+               THEN 'Above Average'
+               ELSE 'Below Average' 
+           END AS revenue_comparison
+    FROM recursive_order_summary ros
+    LEFT JOIN supplier_part_summary sps ON sps.ps_partkey = (SELECT ps.ps_partkey
+                                                              FROM partsupp ps
+                                                              WHERE ps.ps_suppkey IN (SELECT s.s_suppkey
+                                                                                      FROM supplier s
+                                                                                      WHERE s.s_nationkey IN (SELECT n.n_nationkey 
+                                                                                                               FROM nation n 
+                                                                                                               WHERE n.n_regionkey = (SELECT r.r_regionkey 
+                                                                                                                                      FROM region r 
+                                                                                                                                      WHERE r.r_name = 'ASIA')))
+                                                              LIMIT 1)
+    )
+)
+SELECT cs.o_orderkey,
+       cs.total_revenue,
+       cs.unique_parts,
+       COALESCE(cs.total_supply_cost, 0) AS supply_cost,
+       COALESCE(cs.supplier_count, 0) AS supplier_count,
+       CASE 
+           WHEN cs.supplier_count = 0 THEN 'No Suppliers'
+           WHEN cs.supplier_count < 5 THEN 'Few Suppliers'
+           ELSE 'Many Suppliers' 
+       END AS supplier_category,
+       STRING_AGG(CASE WHEN l.l_returnflag = 'R' THEN 'Returned' ELSE 'Not Returned' END, ', ') AS return_status
+FROM combined_summary cs
+LEFT JOIN lineitem l ON l.l_orderkey = cs.o_orderkey
+GROUP BY cs.o_orderkey, cs.total_revenue, cs.unique_parts, cs.total_supply_cost, cs.supplier_count
+ORDER BY cs.total_revenue DESC, cs.o_orderkey
+LIMIT 100;

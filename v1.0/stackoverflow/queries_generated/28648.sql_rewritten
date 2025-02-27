@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        p.OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - interval '1 year' 
+),
+MostPopularTags AS (
+    SELECT 
+        unnest(string_to_array(p.Tags, '<>')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        mt.TagName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        MostPopularTags mt ON rp.TagRank = 1
+)
+SELECT 
+    pd.Title,
+    pd.ViewCount,
+    pd.AnswerCount,
+    pd.CreationDate,
+    pd.OwnerDisplayName,
+    STRING_AGG(mt.TagName, ', ') AS PopularTags
+FROM 
+    PostDetails pd
+JOIN 
+    Posts p ON pd.PostId = p.Id
+LEFT JOIN 
+    string_to_array(p.Tags, '<>') AS mt(TagName) ON true
+GROUP BY 
+    pd.PostId
+ORDER BY 
+    pd.ViewCount DESC
+LIMIT 
+    5;

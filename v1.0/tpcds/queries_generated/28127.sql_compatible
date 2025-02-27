@@ -1,0 +1,49 @@
+
+WITH Address_City AS (
+    SELECT 
+        ca_city, 
+        COUNT(DISTINCT ca_address_id) AS address_count,
+        AVG(LENGTH(ca_street_name)) AS avg_street_name_length,
+        SUM(CASE WHEN ca_street_type LIKE 'St%' THEN 1 ELSE 0 END) AS st_street_count
+    FROM customer_address
+    GROUP BY ca_city
+), 
+Customer_Demo AS (
+    SELECT 
+        cd.gender,
+        SUM(cd.purchase_estimate) AS total_purchase_estimate,
+        AVG(cd.dep_count) AS avg_dependent_count
+    FROM customer_demographics cd
+    GROUP BY cd.gender
+), 
+Total_Sales AS (
+    SELECT 
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM web_sales
+)
+SELECT 
+    ac.ca_city,
+    ac.address_count,
+    ac.avg_street_name_length,
+    cd.gender,
+    cd.total_purchase_estimate,
+    cd.avg_dependent_count,
+    ts.total_sales,
+    ts.total_orders,
+    CONCAT(ac.ca_city, ' ', cd.gender) AS city_gender,
+    UPPER(cd.gender) AS gender_upper
+FROM Address_City ac
+JOIN Customer_Demo cd ON ac.address_count > 0
+CROSS JOIN Total_Sales ts
+WHERE ac.address_count > 10
+GROUP BY 
+    ac.ca_city,
+    ac.address_count,
+    ac.avg_street_name_length,
+    cd.gender,
+    cd.total_purchase_estimate,
+    cd.avg_dependent_count,
+    ts.total_sales,
+    ts.total_orders
+ORDER BY ac.address_count DESC, cd.total_purchase_estimate DESC;

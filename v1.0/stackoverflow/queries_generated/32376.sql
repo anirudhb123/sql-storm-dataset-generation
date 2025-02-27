@@ -1,0 +1,63 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Start from questions
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        a.CreationDate,
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts q ON a.ParentId = q.Id
+    WHERE 
+        q.PostTypeId = 1  -- Ensure we're still within questions
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    COUNT(DISTINCT rp.PostId) AS QuestionCount,
+    COUNT(DISTINCT a.PostId) AS AnswerCount,
+    COALESCE(SUM(CASE WHEN d.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+    AVG(COALESCE(p.Score, 0)) AS AvgPostScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed,
+    COUNT(b.Id) AS BadgeCount,
+    COUNT(DISTINCT ph.PostId) AS PostHistoriesCount
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    RecursivePostHierarchy rp ON p.Id = rp.PostId
+LEFT JOIN 
+    Posts a ON p.Id = a.ParentId
+LEFT JOIN 
+    Votes d ON p.Id = d.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    LATERAL (
+        SELECT unnest(string_to_array(p.Tags, '><')) AS TagName
+    ) t ON TRUE
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+WHERE 
+    p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT rp.PostId) > 5  -- Only include users with more than 5 questions
+ORDER BY 
+    QuestionCount DESC, AvgPostScore DESC;

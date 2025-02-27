@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate > '2022-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+PartSupplierStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers,
+        AVG(ps.ps_supplycost) AS avg_supplycost,
+        MAX(ps.ps_availqty) AS max_availqty
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name,
+    p.p_name,
+    ps.unique_suppliers,
+    ps.avg_supplycost,
+    COALESCE(c.total_spent, 0) AS total_spent,
+    s.s_name AS supplier,
+    s.s_acctbal
+FROM 
+    region r
+LEFT JOIN 
+    part p ON r.r_regionkey = p.p_partkey % (SELECT COUNT(*) FROM part)
+LEFT JOIN 
+    PartSupplierStats ps ON ps.p_partkey = p.p_partkey
+LEFT JOIN 
+    RankedSuppliers s ON s.rank = 1 AND s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN 
+    HighValueCustomers c ON c.c_custkey IN (SELECT o.o_custkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE l.l_partkey = p.p_partkey)
+WHERE 
+    ps.avg_supplycost IS NOT NULL
+ORDER BY 
+    r.r_name, ps.unique_suppliers DESC, total_spent DESC;

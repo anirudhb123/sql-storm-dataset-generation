@@ -1,0 +1,62 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON at.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    p.id AS person_id,
+    p.name AS person_name,
+    ak.name AS aka_name,
+    ARRAY_AGG(DISTINCT cmt.title) AS all_movies,
+    COUNT(DISTINCT cmt.id) AS movie_count,
+    SUM(CASE WHEN cmt.production_year > 2000 THEN 1 ELSE 0 END) AS count_after_2000,
+    MAX(PRODUCT(mh.level)) AS max_hierarchy_level,
+    STRING_AGG(DISTINCT COALESCE(k.keyword, 'No keyword'), ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY p.id ORDER BY COUNT(DISTINCT cmt.id) DESC) AS rn
+FROM 
+    name p
+LEFT JOIN 
+    aka_name ak ON p.id = ak.person_id
+LEFT JOIN 
+    cast_info ci ON p.id = ci.person_id
+LEFT JOIN 
+    aka_title cmt ON ci.movie_id = cmt.id
+LEFT JOIN 
+    movie_keyword mk ON cmt.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = cmt.id
+WHERE 
+    p.gender IS NOT NULL AND 
+    ak.name IS NOT NULL
+GROUP BY 
+    p.id, p.name, ak.name
+HAVING 
+    COUNT(DISTINCT cmt.id) > 5 AND 
+    MAX(mh.level) > 1
+ORDER BY 
+    movie_count DESC, 
+    person_name
+LIMIT 10;

@@ -1,0 +1,64 @@
+WITH UserVotes AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN p.ViewCount IS NULL THEN 0 ELSE p.ViewCount END), 0) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON v.PostId = p.Id
+    GROUP BY 
+        u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        COALESCE(SUM(c.Score), 0) AS TotalComments,
+        COALESCE(NULLIF(SUM(CASE WHEN p.Score IS NULL THEN 0 ELSE p.Score END), 0), 0) AS PostScore,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+UserPostDetails AS (
+    SELECT 
+        u.DisplayName,
+        uv.TotalUpVotes,
+        uv.TotalDownVotes,
+        uv.TotalPosts,
+        uv.TotalViews,
+        ps.Title,
+        ps.TotalComments,
+        ps.PostScore,
+        ps.PostRank
+    FROM 
+        UserVotes uv
+    JOIN 
+        Users u ON uv.UserId = u.Id
+    LEFT JOIN 
+        PostStatistics ps ON ps.OwnerUserId = u.Id 
+    WHERE 
+        uv.TotalPosts > 0
+)
+SELECT 
+    u.DisplayName,
+    CONCAT('Total Upvotes: ', u.TotalUpVotes, ', Total Downvotes: ', u.TotalDownVotes, 
+           CASE WHEN u.TotalPosts > 5 THEN ' (an active contributor)' ELSE ' (newbie)' END) AS ActivityStatus,
+    ARRAY_AGG(ROW(u.Title, u.TotalComments, u.PostScore, u.PostRank)) AS PostDetails
+FROM 
+    UserPostDetails u
+GROUP BY 
+    u.DisplayName, u.TotalUpVotes, u.TotalDownVotes
+HAVING 
+    u.TotalViews > ALL (SELECT TotalViews FROM UserVotes WHERE TotalPosts > 1)
+ORDER BY 
+    u.TotalUpVotes - u.TotalDownVotes DESC;

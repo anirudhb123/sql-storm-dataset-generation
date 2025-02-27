@@ -1,0 +1,61 @@
+WITH PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_name AS supplier_name,
+        s.s_address,
+        s.s_nationkey,
+        CONCAT(p.p_name, ' - ', s.s_name) AS combined_info
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+RegionNation AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name AS nation_name,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+CustomerOrderInfo AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        CONCAT(c.c_name, ' ordered on ', DATE_FORMAT(o.o_orderdate, '%Y-%m-%d'), ' with total price ', o.o_totalprice) AS order_summary
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+)
+SELECT 
+    psi.p_partkey,
+    psi.p_name,
+    psi.supplier_name,
+    psi.s_address,
+    rn.nation_name,
+    rn.region_name,
+    coi.c_custkey,
+    coi.c_name,
+    coi.o_orderkey,
+    coi.order_summary,
+    COUNT(*) OVER (PARTITION BY psi.p_partkey) AS total_orders
+FROM 
+    PartSupplierInfo psi
+JOIN 
+    RegionNation rn ON psi.s_nationkey = rn.n_nationkey
+JOIN 
+    CustomerOrderInfo coi ON psi.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_supplycost < 50.00)
+WHERE 
+    CHAR_LENGTH(psi.combined_info) > 30
+ORDER BY 
+    total_orders DESC, psi.p_name;

@@ -1,0 +1,35 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, CAST(s_name AS varchar(200)) AS path
+    FROM supplier
+    WHERE s_acctbal > 10000  -- Start with suppliers with acct balance above a threshold
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, CONCAT(sh.path, ' -> ', s.s_name)
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+),
+customer_stats AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+nation_summary AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(s.s_suppkey) AS supplier_count, SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+       COALESCE(cs.order_count, 0) AS customer_order_count,
+       COALESCE(cs.total_spent, 0.00) AS total_spent,
+       ns.supplier_count, ns.total_acctbal, 
+       sh.path AS supplier_hierarchy_path
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier_hierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN customer_stats cs ON p.p_partkey = cs.c_custkey
+LEFT JOIN nation_summary ns ON sh.s_nationkey = ns.n_nationkey
+WHERE p.p_retailprice BETWEEN 10.00 AND 200.00
+AND (ns.supplier_count IS NULL OR ns.supplier_count >= 5)
+ORDER BY p.p_partkey ASC
+FETCH FIRST 100 ROWS ONLY;

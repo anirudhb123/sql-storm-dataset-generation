@@ -1,0 +1,107 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank,
+        COUNT(B.Id) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 3) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.OwnerUserId,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        P.Id
+),
+
+PostMetrics AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.ViewCount,
+        RP.Score,
+        RP.CommentCount,
+        U.DisplayName AS OwnerDisplayName,
+        UR.Reputation AS OwnerReputation,
+        UR.ReputationRank
+    FROM 
+        RecentPosts RP
+    JOIN 
+        Users U ON RP.OwnerUserId = U.Id
+    JOIN 
+        UserReputation UR ON U.Id = UR.UserId
+),
+
+ClosedPosts AS (
+    SELECT DISTINCT 
+        PH.PostId
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10 
+),
+
+TopPosts AS (
+    SELECT 
+        PM.*,
+        CASE WHEN CP.PostId IS NOT NULL THEN 'Closed' ELSE 'Open' END AS PostStatus
+    FROM 
+        PostMetrics PM
+    LEFT JOIN 
+        ClosedPosts CP ON PM.PostId = CP.PostId
+)
+
+SELECT 
+    TP.Title,
+    TP.OwnerDisplayName,
+    TP.OwnerReputation,
+    CASE 
+        WHEN TP.ViewCount IS NULL THEN 'No Views' 
+        ELSE TO_CHAR(TP.ViewCount, 'FM999,999,999') || ' Views' 
+    END AS FormattedViews,
+    CASE 
+        WHEN TP.CommentCount > 0 THEN 'Comments Available' 
+        ELSE 'No Comments Yet' 
+    END AS CommentsStatus,
+    TP.PostStatus,
+    TO_CHAR(TP.CreationDate, 'DD Mon YYYY HH12:MI AM') AS FormattedCreationDate,
+    COALESCE(UPD.UserDisplayName, 'No Editor') AS LastEditor
+FROM 
+    TopPosts TP
+LEFT JOIN 
+    (SELECT 
+         P.Id AS PostId,
+         U.DisplayName AS UserDisplayName
+     FROM 
+         Posts P
+     JOIN 
+         Users U ON P.LastEditorUserId = U.Id) UPD ON TP.PostId = UPD.PostId
+WHERE 
+    (TP.OwnerReputation > 1000 OR TP.ViewCount > 100)
+    AND TP.CommentCount < 5
+ORDER BY 
+    TP.Score DESC, 
+    TP.CreationDate DESC
+LIMIT 10;

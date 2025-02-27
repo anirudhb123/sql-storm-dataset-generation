@@ -1,0 +1,99 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(u.Reputation) AS Reputation
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COALESCE(v.VoteCount, 0) AS VoteCount,
+        COALESCE(l.LinkCount, 0) AS LinkCount
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(*) AS AnswerCount
+        FROM Posts
+        WHERE PostTypeId = 2
+        GROUP BY ParentId
+    ) a ON p.Id = a.ParentId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS LinkCount
+        FROM PostLinks
+        GROUP BY PostId
+    ) l ON p.Id = l.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.CommentCount,
+    ps.AnswerCount,
+    ps.VoteCount,
+    ps.LinkCount,
+    COALESCE(ph.HistoryCount, 0) AS HistoryChanges,
+    ph.HistoryTypes,
+    up.UserId,
+    up.TotalScore,
+    up.BadgeCount,
+    up.Reputation
+FROM PostStatistics ps
+LEFT JOIN PostHistoryDetails ph ON ps.Id = ph.PostId
+LEFT JOIN UserReputation up ON ps.PostId IN (SELECT ParentId FROM Posts WHERE Id = ps.PostId)
+WHERE ps.CreationDate >= '2023-01-01'
+ORDER BY ps.CreationDate DESC, up.Reputation DESC;
+

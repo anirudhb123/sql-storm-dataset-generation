@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL::integer AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        movie_link ml
+    INNER JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    INNER JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.level,
+    mh.title,
+    mh.production_year,
+    COUNT(cc.person_id) AS total_cast,
+    string_agg(DISTINCT an.name, ', ') AS actor_names,
+    CASE 
+        WHEN COUNT(cc.person_id) > 10 THEN 'Large Cast'
+        ELSE 'Small Cast'
+    END AS cast_size
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name an ON ci.person_id = an.person_id
+WHERE 
+    mh.production_year IS NOT NULL
+GROUP BY 
+    mh.level, mh.title, mh.production_year
+ORDER BY 
+    mh.level, total_cast DESC NULLS LAST;
+
+This SQL query achieves a few things:
+1. It constructs a recursive CTE named `MovieHierarchy` to build a hierarchy of movies linked by specific criteria (in this case, produced after the year 2000).
+2. It then selects data from this hierarchy, aggregating actor names and counting the total number of cast members for each movie.
+3. The use of a `CASE` statement categorizes each movie's cast size.
+4. The results are grouped by movie attributes and ordered by hierarchy level and the number of cast members, showcasing a combination of various SQL constructs.

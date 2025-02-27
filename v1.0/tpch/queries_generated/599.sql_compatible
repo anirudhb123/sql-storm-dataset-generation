@@ -1,0 +1,76 @@
+
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+), 
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        DENSE_RANK() OVER (PARTITION BY o.o_status ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS status_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_status
+), 
+CustomerRegions AS (
+    SELECT 
+        c.c_custkey,
+        n.n_regionkey,
+        r.r_name AS region_name,
+        SUM(o.total_order_value) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        OrderSummary o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, n.n_regionkey, r.r_name
+)
+SELECT 
+    p.p_name,
+    COALESCE(cs.total_spent, 0) AS total_customer_spent,
+    ss.total_supply_cost,
+    ss.unique_parts,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No Orders'
+        WHEN ss.total_supply_cost IS NULL THEN 'Supplier Not Found'
+        ELSE 'Data Available'
+    END AS availability_status
+FROM 
+    part p
+LEFT JOIN 
+    SupplierSummary ss ON p.p_partkey = (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_suppkey = (
+            SELECT s.s_suppkey 
+            FROM supplier s 
+            WHERE s.s_name LIKE 'Supplier%' 
+            LIMIT 1
+        ) 
+        LIMIT 1
+    )
+LEFT JOIN 
+    CustomerRegions cs ON cs.region_name = 'ASIA'
+WHERE 
+    (p.p_retailprice > 10.00 AND p.p_size <= 30) 
+    OR 
+    (p.p_container IS NOT NULL AND p.p_comment IS NOT NULL)
+ORDER BY 
+    total_customer_spent DESC, 
+    ss.total_supply_cost ASC;

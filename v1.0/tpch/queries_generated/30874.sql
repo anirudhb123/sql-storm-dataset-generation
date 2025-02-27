@@ -1,0 +1,56 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+TopNations AS (
+    SELECT n.n_name, SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+    HAVING SUM(s.s_acctbal) > 500000
+),
+PartSupplierStats AS (
+    SELECT p.p_partkey, COUNT(ps.ps_suppkey) AS supplier_count, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+    HAVING AVG(ps.ps_supplycost) > (
+        SELECT AVG(ps2.ps_supplycost) * 0.75
+        FROM partsupp ps2
+    )
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS net_revenue
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    ph.supp_name,
+    ph.nation,
+    ph.supp_level,
+    ps.supplier_count,
+    ps.avg_supplycost,
+    od.o_orderkey,
+    od.net_revenue
+FROM (
+    SELECT sh.supp_name, n.n_name AS nation, sh.level AS supp_level
+    FROM SupplierHierarchy sh
+    JOIN nation n ON sh.s_nationkey = n.n_nationkey
+) ph
+JOIN PartSupplierStats ps ON ps.p_partkey IN (
+    SELECT ps2.ps_partkey
+    FROM partsupp ps2
+    WHERE ps2.ps_suppkey = ph.supp_name
+)
+FULL OUTER JOIN OrderDetails od ON od.o_orderkey = ps.supplier_count
+WHERE ph.supp_level <= 3
+ORDER BY od.net_revenue DESC NULLS LAST
+LIMIT 100;

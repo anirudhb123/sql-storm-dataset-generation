@@ -1,0 +1,77 @@
+WITH MovieRanked AS (
+    SELECT 
+        mt.title, 
+        mt.production_year, 
+        COUNT(DISTINCT ci.person_id) AS num_cast_members,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.movie_id = ci.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        MovieRanked 
+    WHERE 
+        rank <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        mt.title, 
+        k.keyword 
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_keyword mk ON mt.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+KeywordStats AS (
+    SELECT 
+        keyword, 
+        COUNT(DISTINCT title) AS keyword_count
+    FROM 
+        MovieKeywords
+    GROUP BY 
+        keyword
+    HAVING 
+        COUNT(DISTINCT title) > 1
+),
+ActorInfo AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movies_played
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.name
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(string_agg(DISTINCT mk.keyword, ', '), 'No keywords') AS keywords,
+    COALESCE(ai.actor_name, 'Unknown Actor') AS actor_name,
+    ai.movies_played,
+    CASE 
+        WHEN ai.movies_played IS NULL THEN 'No Films' 
+        ELSE 'Has Films' 
+    END AS film_status
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieKeywords mk ON tm.title = mk.title
+LEFT JOIN 
+    ActorInfo ai ON mk.title IN 
+    (SELECT title FROM MovieKeywords WHERE keyword IN 
+     (SELECT keyword FROM KeywordStats WHERE keyword_count > 2))
+GROUP BY 
+    tm.title, tm.production_year, ai.actor_name, ai.movies_played
+ORDER BY 
+    tm.production_year DESC, tm.title;

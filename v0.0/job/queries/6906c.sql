@@ -1,0 +1,4 @@
+SELECT min(an.name) AS alternative_name, min(chn.name) AS voiced_character, min(n.name) AS voicing_actress, min(t.title) AS american_movie
+FROM aka_name AS an, char_name AS chn, cast_info AS ci, company_name AS cn, movie_companies AS mc, name AS n, role_type AS rt, title AS t
+WHERE ci.movie_id = t.id AND t.id = mc.movie_id AND ci.movie_id = mc.movie_id AND mc.company_id = cn.id AND ci.role_id = rt.id AND n.id = ci.person_id AND chn.id = ci.person_role_id AND an.person_id = n.id AND an.person_id = ci.person_id
+AND cn.id < 187229 AND ci.note > '(as Rep. Eleanor Holmes Norton)' AND rt.id < 2 AND chn.name_pcode_nf < 'I6453' AND mc.movie_id IN (1370219, 1420248, 1651079, 1766988, 1820879, 1962081, 1964669, 1970539, 2191917, 82156);

@@ -1,0 +1,40 @@
+WITH supplier_info AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+), 
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+), 
+line_item_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS sales
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+), 
+sales_rank AS (
+    SELECT orderkey, sales,
+           RANK() OVER (ORDER BY sales DESC) AS sales_rank
+    FROM line_item_summary
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    ci.c_name AS customer_name,
+    si.s_name AS supplier_name,
+    SUM(ls.sales) AS total_sales,
+    COUNT(DISTINCT ls.orderkey) AS total_orders,
+    COALESCE(si.avg_supplycost, 0) AS avg_supply_cost
+FROM region r
+JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN supplier_info si ON si.s_nationkey = n.n_nationkey
+LEFT JOIN customer_orders ci ON ci.total_spent > (SELECT AVG(total_spent) FROM customer_orders)
+LEFT JOIN sales_rank ls ON ci.c_custkey = ls.orderkey
+WHERE si.s_suppkey IS NOT NULL OR n.n_name IS NULL
+GROUP BY r.r_name, n.n_name, ci.c_name, si.s_name
+ORDER BY total_sales DESC, region, nation;

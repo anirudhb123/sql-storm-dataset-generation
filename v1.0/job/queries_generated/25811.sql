@@ -1,0 +1,76 @@
+WITH RecursiveTitle AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        kt.kind AS title_kind,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        title t
+    JOIN 
+        aka_title at ON t.id = at.movie_id
+    JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    JOIN 
+        kind_type kt ON t.kind_id = kt.id
+    GROUP BY 
+        t.id, t.title, t.production_year, kt.kind
+),
+FilteredTitles AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        rt.title_kind,
+        rt.actor_count
+    FROM 
+        RecursiveTitle rt
+    WHERE 
+        rt.actor_count > 5 AND rt.production_year BETWEEN 2000 AND 2020
+),
+TitleKeywords AS (
+    SELECT 
+        ft.title_id,
+        ft.title,
+        GROUP_CONCAT(kw.keyword) AS keywords
+    FROM 
+        FilteredTitles ft
+    JOIN 
+        movie_keyword mk ON ft.title_id = mk.movie_id
+    JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        ft.title_id, ft.title
+),
+CompleteInformation AS (
+    SELECT 
+        ft.title,
+        ft.production_year,
+        ft.title_kind,
+        tk.keywords
+    FROM 
+        FilteredTitles ft
+    LEFT JOIN 
+        TitleKeywords tk ON ft.title_id = tk.title_id
+)
+SELECT 
+    ci.person_id,
+    a.name AS actor_name,
+    ci.note AS role_note,
+    ci.nr_order,
+    ci.role_id,
+    ci.movie_id,
+    ti.title AS film_title,
+    ti.production_year,
+    ti.title_kind,
+    ti.keywords
+FROM 
+    cast_info ci
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    CompleteInformation ti ON ci.movie_id = ti.title_id
+WHERE 
+    a.name LIKE 'A%'
+ORDER BY 
+    ti.production_year DESC, a.name;

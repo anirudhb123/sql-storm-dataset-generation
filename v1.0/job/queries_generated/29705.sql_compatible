@@ -1,0 +1,55 @@
+
+WITH movie_data AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(DISTINCT ak.name ORDER BY ak.name) as aka_names,
+        STRING_AGG(DISTINCT p.info ORDER BY p.info_type_id) as person_info,
+        STRING_AGG(DISTINCT k.keyword ORDER BY k.keyword) as keywords
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        aka_name AS ak ON ak.person_id IN (SELECT person_id FROM cast_info WHERE movie_id = m.id)
+    LEFT JOIN 
+        movie_keyword AS mk ON mk.movie_id = m.id
+    LEFT JOIN 
+        keyword AS k ON k.id = mk.keyword_id
+    LEFT JOIN 
+        complete_cast AS cc ON cc.movie_id = m.id
+    LEFT JOIN 
+        person_info AS p ON p.person_id IN (SELECT person_id FROM cast_info WHERE movie_id = m.id)
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+company_data AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        STRING_AGG(DISTINCT CONCAT(c.name, ' (', ct.kind, ')'), ', ') AS companies
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        company_name AS c ON c.id = mc.company_id
+    JOIN 
+        company_type AS ct ON ct.id = mc.company_type_id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.aka_names,
+    md.person_info,
+    md.keywords,
+    COALESCE(cd.companies, 'No companies listed') AS companies
+FROM 
+    movie_data AS md
+LEFT JOIN 
+    company_data AS cd ON cd.movie_id = md.movie_id
+ORDER BY 
+    md.production_year DESC, md.title;

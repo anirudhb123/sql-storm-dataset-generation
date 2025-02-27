@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND mk.movie_id > 1306946 AND cn.name_pcode_sf IS NOT NULL AND n.name_pcode_cf IN ('B6435', 'D2325', 'F5152', 'L4616', 'M1323', 'M4232', 'M4242', 'M4525', 'T4245', 'T625') AND t.production_year < 1918 AND k.keyword > 'greeks-in-turkey';

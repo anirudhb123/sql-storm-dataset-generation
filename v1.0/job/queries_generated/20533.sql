@@ -1,0 +1,80 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.id DESC) AS rank_per_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+cast_with_roles AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        r.role,
+        ci.nr_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+),
+movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(mi.info, '; ') AS info_aggregated
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+),
+company_movie_summary AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        COUNT(DISTINCT mc.company_type_id) AS unique_company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    cw.actor_name,
+    cw.role,
+    cw.nr_order,
+    mi.info_aggregated,
+    cms.companies,
+    cms.unique_company_types,
+    CASE 
+        WHEN ml.linked_movie_id IS NULL THEN 'No linked movie'
+        ELSE (SELECT t.title FROM aka_title t WHERE t.id = ml.linked_movie_id)
+    END AS linked_movie_title,
+    CASE 
+        WHEN mc.movie_id IS NOT NULL THEN 'Has associated company'
+        ELSE 'No associated company'
+    END AS company_presence
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    cast_with_roles cw ON rm.movie_id = cw.movie_id
+LEFT JOIN 
+    movie_info_details mi ON rm.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_link ml ON rm.movie_id = ml.movie_id
+LEFT JOIN 
+    company_movie_summary cms ON rm.movie_id = cms.movie_id
+WHERE 
+    (rm.rank_per_year = 1 OR cw.nr_order < 3)
+    AND (rm.production_year BETWEEN 2000 AND 2023)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.movie_id
+FETCH FIRST 100 ROWS ONLY;

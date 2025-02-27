@@ -1,0 +1,28 @@
+
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.s_suppkey) AS num_suppliers,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(ps.ps_supplycost) AS average_supply_cost,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names,
+    STRING_AGG(DISTINCT CONCAT(s.s_address, ' (', s.s_phone, ')'), '; ') AS supplier_contact_info,
+    MAX(o.o_orderdate) AS last_order_date
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    p.p_name LIKE '%widget%'
+    AND o.o_orderstatus = 'O'
+    AND o.o_orderdate >= DATE '1998-10-01' - INTERVAL '1 year'
+GROUP BY 
+    p.p_name
+ORDER BY 
+    total_available_quantity DESC
+LIMIT 10;

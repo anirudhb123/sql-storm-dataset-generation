@@ -1,0 +1,47 @@
+WITH RankedMovies AS (
+    SELECT 
+        T.id AS movie_id,
+        T.title,
+        T.production_year,
+        COUNT(CAST.id) AS cast_count,
+        STRING_AGG(DISTINCT AN.name, ', ') AS actors_list
+    FROM 
+        aka_title T
+    LEFT JOIN 
+        cast_info CAST ON T.id = CAST.movie_id
+    LEFT JOIN 
+        aka_name AN ON CAST.person_id = AN.person_id
+    WHERE 
+        T.production_year >= 2000 -- Focus on movies produced from 2000 onwards
+    GROUP BY 
+        T.id, T.title, T.production_year
+), FilteredMovies AS (
+    SELECT 
+        RM.movie_id,
+        RM.title,
+        RM.production_year,
+        RM.cast_count,
+        RM.actors_list
+    FROM 
+        RankedMovies RM
+    WHERE 
+        RM.cast_count > 5 -- Only consider movies with more than 5 cast members
+)
+SELECT 
+    FM.movie_id,
+    FM.title,
+    FM.production_year,
+    FM.cast_count,
+    FM.actors_list,
+    COALESCE(GROUP_CONCAT(K.keyword ORDER BY K.keyword), 'No Keywords') AS keywords
+FROM 
+    FilteredMovies FM
+LEFT JOIN 
+    movie_keyword MK ON FM.movie_id = MK.movie_id
+LEFT JOIN 
+    keyword K ON MK.keyword_id = K.id
+GROUP BY 
+    FM.movie_id, FM.title, FM.production_year, FM.cast_count, FM.actors_list
+ORDER BY 
+    FM.production_year DESC,
+    FM.cast_count DESC;

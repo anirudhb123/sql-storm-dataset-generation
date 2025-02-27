@@ -1,0 +1,68 @@
+
+WITH SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        o.o_orderdate,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') 
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+NationSummary AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_account_balance
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    r.r_name AS region,
+    ns.n_name AS nation,
+    sp.s_name AS supplier_name,
+    sp.total_available_qty,
+    sp.total_supply_value,
+    od.total_order_value,
+    od.item_count,
+    CASE 
+        WHEN od.item_count IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status,
+    ns.supplier_count,
+    ns.total_account_balance
+FROM 
+    region r
+LEFT JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    SupplierParts sp ON ns.n_nationkey = sp.s_suppkey
+LEFT JOIN 
+    OrderDetails od ON sp.s_suppkey = od.o_orderkey
+WHERE 
+    (sp.total_available_qty IS NOT NULL OR od.total_order_value IS NOT NULL)
+    AND (ns.total_account_balance > 1000 OR ns.supplier_count > 5)
+ORDER BY 
+    r.r_name, ns.n_name, sp.total_supply_value DESC;

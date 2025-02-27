@@ -1,0 +1,69 @@
+
+WITH AddressComponents AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        ac.full_address,
+        ac.ca_city,
+        ac.ca_state,
+        ac.ca_zip,
+        ac.ca_country
+    FROM 
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN AddressComponents ac ON c.c_current_addr_sk = ac.ca_address_sk
+),
+PurchaseSummary AS (
+    SELECT 
+        cs.cs_bill_customer_sk,
+        SUM(cs.cs_net_paid_inc_tax) AS total_spent,
+        COUNT(cs.cs_order_number) AS total_orders,
+        MAX(cs.cs_sold_date_sk) AS last_purchase_date
+    FROM 
+        catalog_sales cs
+    GROUP BY 
+        cs.cs_bill_customer_sk
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cd.cd_purchase_estimate,
+    cd.cd_credit_rating,
+    ac.full_address,
+    ac.ca_city,
+    ac.ca_state,
+    ac.ca_zip,
+    ac.ca_country,
+    COALESCE(ps.total_spent, 0) AS total_spent,
+    COALESCE(ps.total_orders, 0) AS total_orders,
+    ps.last_purchase_date
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    PurchaseSummary ps ON cd.c_customer_sk = ps.cs_bill_customer_sk
+ORDER BY 
+    total_spent DESC,
+    cd.c_last_name,
+    cd.c_first_name
+LIMIT 100;

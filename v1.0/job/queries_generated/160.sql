@@ -1,0 +1,58 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+actor_movie_cte AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        c.movie_id,
+        r.role
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    a.name AS actor_name,
+    ci.company_name,
+    ci.company_type,
+    COALESCE(k.keyword, 'No Keywords') AS keyword,
+    COUNT(DISTINCT am.movie_id) OVER (PARTITION BY rt.title_id) AS total_movies_per_title
+FROM 
+    ranked_titles rt
+LEFT JOIN 
+    actor_movie_cte a ON a.movie_id IN (
+        SELECT movie_id FROM cast_info ci WHERE ci.role_id = a.actor_id
+    )
+LEFT JOIN 
+    company_info ci ON ci.movie_id = rt.title_id
+LEFT JOIN 
+    movie_keyword k ON k.movie_id = rt.title_id
+WHERE 
+    rt.rank <= 5
+ORDER BY 
+    rt.production_year DESC, rt.title;

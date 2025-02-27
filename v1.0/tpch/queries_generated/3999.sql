@@ -1,0 +1,51 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rank_per_nation
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'F' 
+    AND o.o_orderdate >= DATE '2022-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+SalesSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+HighValueOrders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_orderdate,
+        r.o_totalprice,
+        s.total_sales,
+        s.unique_suppliers
+    FROM RankedOrders r
+    JOIN SalesSummary s ON r.o_orderkey = s.l_orderkey
+    WHERE r.rank_per_nation <= 5  -- Top 5 orders per nation
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    COALESCE(sp.total_available, 0) AS total_available_parts,
+    COALESCE(sp.total_supply_cost, 0) AS total_supply_cost
+FROM HighValueOrders o 
+LEFT JOIN SupplierParts sp ON o.o_orderkey = sp.p_partkey
+LEFT JOIN nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c JOIN orders o ON c.c_custkey = o.o_custkey WHERE o.o_orderkey = o.o_orderkey LIMIT 1)
+WHERE n.r_regionkey IS NULL OR n.n_comment IS NOT NULL
+ORDER BY o.o_orderdate DESC, o.o_totalprice DESC;

@@ -1,0 +1,84 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank_by_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_members
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    WHERE 
+        t.production_year IS NOT NULL 
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+GenreKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id
+),
+TopMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.total_cast,
+        rm.cast_members,
+        COALESCE(gk.keywords, 'No Genre') AS keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        GenreKeywords gk ON gk.movie_id = rm.id
+    WHERE 
+        rm.rank_by_cast <= 5
+),
+ComplicatedSubquery AS (
+    SELECT 
+        t.title,
+        COUNT(DISTINCT c.id) AS distinct_companies,
+        AVG(mci.cast_count) AS avg_cast_per_company
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN 
+        (SELECT 
+             movie_id, 
+             COUNT(person_id) AS cast_count
+         FROM 
+             cast_info 
+         GROUP BY 
+             movie_id) mci ON mci.movie_id = t.id
+    GROUP BY 
+        t.title
+    HAVING 
+        COUNT(DISTINCT mc.company_id) > 2
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.total_cast,
+    tm.cast_members,
+    tm.keywords,
+    cs.distinct_companies,
+    cs.avg_cast_per_company
+FROM 
+    TopMovies tm
+FULL OUTER JOIN 
+    ComplicatedSubquery cs ON tm.title = cs.title
+WHERE 
+    COALESCE(tm.total_cast, 0) > 0
+  AND 
+    cs.distinct_companies IS NOT NULL 
+ORDER BY 
+    tm.production_year DESC, 
+    tm.total_cast DESC;

@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(ue.Reputation, 0) AS UserReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users ue ON p.OwnerUserId = ue.Id
+    WHERE 
+        p.CreationDate >= (SELECT MAX(CreationDate) - INTERVAL '1 year' FROM Posts)
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        CASE 
+            WHEN rp.UserReputation > 1000 THEN 'High Reputation User'
+            WHEN rp.UserReputation BETWEEN 500 AND 1000 THEN 'Medium Reputation User'
+            ELSE 'Low Reputation User'
+        END AS ReputationCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Score > 5 
+        AND rp.ViewCount > 100 
+        AND rp.rn <= 3
+),
+
+PostVotes AS (
+    SELECT 
+        pv.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        Posts pv ON v.PostId = pv.Id
+    WHERE 
+        pv.CreationDate >= (SELECT MAX(CreationDate) - INTERVAL '1 year' FROM Posts)
+    GROUP BY 
+        pv.PostId
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.ReputationCategory,
+    fp.UserReputation,
+    pv.UpVotes,
+    pv.DownVotes,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.CreationDate,
+    CASE 
+        WHEN fp.ViewCount > 500 THEN 'Popular'
+        ELSE 'Normal'
+    END AS ViewStatus,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostLinks pl ON fp.PostId = pl.PostId
+LEFT JOIN 
+    Posts rp ON pl.RelatedPostId = rp.Id
+LEFT JOIN 
+    Tags t ON t.Id = ANY(string_to_array(rp.Tags, ',')::int[])
+LEFT JOIN 
+    PostVotes pv ON fp.PostId = pv.PostId
+GROUP BY 
+    fp.PostId, fp.Title, fp.ReputationCategory, fp.UserReputation, 
+    pv.UpVotes, pv.DownVotes, fp.CreationDate, fp.Score, fp.ViewCount
+ORDER BY 
+    fp.Score DESC, fp.CreationDate DESC
+LIMIT 10;

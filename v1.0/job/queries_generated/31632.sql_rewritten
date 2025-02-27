@@ -1,0 +1,72 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'feature')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        mh.depth < 3  
+),
+AggregatedCast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(*) AS total_cast,
+        STRING_AGG(DISTINCT an.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        ci.movie_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        GROUP_CONCAT(mk.keyword SEPARATOR ', ') AS keywords
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    ac.total_cast,
+    ac.cast_names,
+    mwk.keywords,
+    COALESCE(att.name, 'Unknown') AS genre,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY ac.total_cast DESC) AS rank
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    AggregatedCast ac ON mh.movie_id = ac.movie_id
+LEFT JOIN 
+    MoviesWithKeywords mwk ON mh.movie_id = mwk.movie_id
+LEFT JOIN 
+    kind_type att ON mh.movie_id = att.id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    mh.production_year DESC, 
+    ac.total_cast DESC;

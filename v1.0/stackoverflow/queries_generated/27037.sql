@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Body,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        p.Score,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY c.CreationDate DESC) AS LatestCommentRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.ViewCount, p.AnswerCount, p.CreationDate, p.Score, p.Tags
+),
+TagCounts AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')))::varchar) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        Tag
+),
+PostComments AS (
+    SELECT 
+        p.Id AS PostId,
+        c.Text AS CommentText,
+        c.CreationDate AS CommentDate,
+        u.DisplayName AS Commenter
+    FROM 
+        Posts p
+    JOIN 
+        Comments c ON p.Id = c.PostId
+    JOIN 
+        Users u ON c.UserId = u.Id
+)
+
+SELECT 
+    rp.Id AS PostID,
+    rp.Title,
+    rp.Body,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CreationDate,
+    rp.Score,
+    rp.Tags,
+    rp.CommentCount,
+    tc.TagCount AS TotalTags,
+    pc.CommentText,
+    pc.CommentDate,
+    pc.Commenter
+FROM 
+    RankedPosts rp
+JOIN 
+    TagCounts tc ON tc.Tag = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><'))
+LEFT JOIN 
+    PostComments pc ON pc.PostId = rp.Id AND rp.LatestCommentRank = 1
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 50;

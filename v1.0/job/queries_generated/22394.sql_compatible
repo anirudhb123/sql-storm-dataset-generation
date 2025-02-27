@@ -1,0 +1,55 @@
+
+WITH RecursiveMovieCTE AS (
+    SELECT m.id AS movie_id, m.title AS movie_title, 
+           ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+           ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY m.production_year DESC) AS rn
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE m.production_year IS NOT NULL
+    GROUP BY m.id, m.title
+),
+RankedMovies AS (
+    SELECT movie_id, movie_title, keywords,
+           RANK() OVER (ORDER BY ARRAY_LENGTH(keywords) DESC, movie_title ASC) AS rank
+    FROM RecursiveMovieCTE
+),
+FilteredMovies AS (
+    SELECT movie_id, movie_title, keywords, rank
+    FROM RankedMovies
+    WHERE rank <= 10
+),
+ActorRoles AS (
+    SELECT ai.person_id, 
+           ak.name AS actor_name,
+           r.role AS actor_role,
+           c.nr_order,
+           c.movie_id
+    FROM cast_info c 
+    JOIN aka_name ak ON ak.person_id = c.person_id
+    JOIN role_type r ON r.id = c.role_id
+    WHERE c.movie_id IN (SELECT movie_id FROM FilteredMovies) 
+      AND ak.name IS NOT NULL
+),
+FinalOutput AS (
+    SELECT fm.movie_id, fm.movie_title, fm.keywords, 
+           ARRAY_AGG(ar.actor_name || ' (' || ar.actor_role || ')' ORDER BY ar.nr_order) AS actors
+    FROM FilteredMovies fm
+    LEFT JOIN ActorRoles ar ON fm.movie_id = ar.movie_id
+    GROUP BY fm.movie_id, fm.movie_title, fm.keywords
+)
+SELECT movie_id, 
+       movie_title,
+       COALESCE(ARRAY_TO_STRING(keywords, ', '), 'No keywords') AS keywords,
+       COALESCE(ARRAY_TO_STRING(actors, ', '), 'No actors available') AS actors,
+       CASE 
+           WHEN movie_title IS NULL OR movie_title = '' THEN 'Untitled Movie' 
+           ELSE movie_title 
+           END AS final_title,
+       CASE 
+           WHEN EXISTS (SELECT 1 FROM aka_title WHERE title = fm.movie_title AND production_year < 2000) 
+           THEN 'This movie is from a vintage era.' 
+           ELSE NULL 
+           END AS vintage_notice
+FROM FinalOutput fm
+ORDER BY fm.movie_title;

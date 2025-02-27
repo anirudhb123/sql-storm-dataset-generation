@@ -1,0 +1,48 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        SUM(ws.ws_sales_price * ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_order_number) AS cumulative_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+),
+ProductReturns AS (
+    SELECT
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returns
+    FROM catalog_returns cr
+    GROUP BY cr.cr_item_sk
+),
+ReturnRate AS (
+    SELECT 
+        s.ws_item_sk,
+        COALESCE(r.total_returns, 0) AS total_returns,
+        SUM(s.ws_quantity) AS total_sold,
+        CASE 
+            WHEN SUM(s.ws_quantity) > 0 THEN COALESCE(r.total_returns, 0) * 1.0 / SUM(s.ws_quantity)
+            ELSE NULL 
+        END AS return_rate
+    FROM RankedSales s
+    LEFT JOIN ProductReturns r ON s.ws_item_sk = r.cr_item_sk
+    GROUP BY s.ws_item_sk, r.total_returns
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    rr.total_returns,
+    rr.total_sold,
+    rr.return_rate,
+    CASE 
+        WHEN rr.return_rate IS NOT NULL AND rr.return_rate > 0.05 THEN 'High Return Rate'
+        WHEN rr.return_rate IS NOT NULL THEN 'Normal Return Rate'
+        ELSE 'No Sales'
+    END AS return_rate_category
+FROM ReturnRate rr
+JOIN item i ON rr.ws_item_sk = i.i_item_sk
+WHERE rr.return_rate_category = 'High Return Rate'
+ORDER BY rr.return_rate DESC;

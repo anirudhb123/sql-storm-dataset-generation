@@ -1,0 +1,37 @@
+-- Performance Benchmarking Query
+
+-- This query aims to retrieve statistics that can be used for performance benchmarking
+-- including user activity, post types, and vote counts over a specific timeframe.
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    COUNT(DISTINCT b.Id) AS TotalBadges,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+    SUM(CASE WHEN v.VoteTypeId = 1 THEN 1 ELSE 0 END) AS TotalAcceptedAnswers,
+    COUNT(DISTINCT t.Id) AS TotalTags,
+    AVG(u.Reputation) OVER () AS AverageReputation,
+    MAX(p.CreationDate) AS LastPostDate,
+    MIN(p.CreationDate) AS FirstPostDate
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    (SELECT DISTINCT unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag FROM Posts) t ON TRUE
+WHERE 
+    p.CreationDate >= '2023-01-01' AND p.CreationDate < '2023-12-31'
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+ORDER BY 
+    TotalPosts DESC, TotalUpVotes DESC;

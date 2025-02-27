@@ -1,0 +1,41 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.TagCount ORDER BY p.Score DESC) AS Rank,
+        p.Tags,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    CROSS JOIN (
+        SELECT 
+            p.Id,
+            ARRAY_LENGTH(string_to_array(p.Tags, '>'), 1) AS TagCount
+        FROM 
+            Posts p
+    ) AS TagCountSubquery ON p.Id = TagCountSubquery.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, u.DisplayName, p.Tags, TagCount.TagCount
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.OwnerDisplayName,
+    rp.CommentCount
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

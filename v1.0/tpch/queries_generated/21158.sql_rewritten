@@ -1,0 +1,55 @@
+WITH RankedPart AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        DENSE_RANK() OVER (PARTITION BY p.p_type ORDER BY SUM(ps.ps_supplycost) DESC) AS rank_by_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_order_value,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(DAY, -30, GETDATE())
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    n.n_name,
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+    COALESCE(MAX(rp.p_name), 'No Parts Available') AS expensive_part,
+    COUNT(DISTINCT ro.o_orderkey) AS number_of_recent_orders
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    RankedPart rp ON ps.ps_partkey = rp.p_partkey AND rp.rank_by_cost = 1
+LEFT JOIN 
+    RecentOrders ro ON s.s_suppkey = ro.o_orderkey
+WHERE 
+    n.n_name IS NOT NULL
+    AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+    AND (rp.total_avail_qty IS NULL OR rp.total_avail_qty > 10) 
+GROUP BY 
+    n.n_name
+ORDER BY 
+    total_supply_cost DESC
+FETCH FIRST 10 ROWS ONLY;

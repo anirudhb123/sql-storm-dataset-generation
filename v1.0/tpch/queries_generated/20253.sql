@@ -1,0 +1,56 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey AND s.s_suppkey <> sh.s_suppkey
+    WHERE sh.Level < 3
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, SUM(ps.ps_availqty) AS TotalAvailable
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 'High Value' AS CustType
+    FROM customer c
+    WHERE c.c_acctbal > 5000
+),
+AllDetails AS (
+    SELECT 
+        ph.p_partkey,
+        ph.TotalAvailable,
+        c.TotalSpent,
+        sh.Level,
+        COALESCE(c.CustType, 'Standard') AS CustomerType
+    FROM PartDetails ph
+    LEFT JOIN CustomerOrders c ON ph.p_partkey % 5 = c.c_custkey % 5
+    LEFT JOIN SupplierHierarchy sh ON sh.Level <= 2 AND sh.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey IS NOT NULL)
+)
+SELECT
+    d.p_partkey,
+    d.TotalAvailable,
+    d.TotalSpent,
+    d.CustomerType,
+    CASE 
+        WHEN d.TotalAvailable IS NULL THEN 'No Stock'
+        WHEN d.TotalSpent IS NULL THEN 'No Sales'
+        ELSE 'Available'
+    END AS Status,
+    (d.TotalSpent / NULLIF(d.TotalAvailable, 0)) AS RevenuePerUnit
+FROM AllDetails d
+WHERE d.TotalAvailable IS NOT NULL OR d.TotalSpent IS NOT NULL
+ORDER BY d.p_partkey
+FETCH FIRST 100 ROWS ONLY;

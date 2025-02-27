@@ -1,0 +1,86 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COALESCE(SUM(v.UserId IS NOT NULL), 0) AS TotalVotes,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Posts that were closed
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.ViewCount,
+    r.CreationDate AS QuestionDate,
+    r.Score,
+    u.DisplayName AS Owner,
+    u.Reputation AS OwnerReputation,
+    COALESCE(ur.TotalVotes, 0) AS TotalVotesByOwner,
+    COALESCE(b.BadgeCount, 0) AS OwnerBadgeCount,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = r.PostId) AS CommentCount,
+    COALESCE(c.CreationDate, 'No Closure') AS ClosureDate,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.WikiPostId = r.PostId) AS Tags,
+    r.Level
+FROM 
+    RecursivePostHierarchy r
+LEFT JOIN 
+    UserStats u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    ClosedPosts c ON r.PostId = c.PostId
+LEFT JOIN 
+    UserStats ur ON u.Id = ur.Id
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+WHERE 
+    r.ViewCount > 1000  -- Filter for popular questions
+ORDER BY 
+    r.Score DESC, r.ViewCount DESC;
+

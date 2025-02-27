@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostMetrics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        COALESCE(AVG(v.BountyAmount), 0) AS AverageBounty,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.OwnerDisplayName
+)
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.CreationDate,
+    pm.Score,
+    pm.ViewCount,
+    pm.OwnerDisplayName,
+    pm.AverageBounty,
+    pm.CommentCount,
+    pm.Upvotes,
+    pm.Downvotes,
+    CASE 
+        WHEN pm.Score > 50 THEN 'High Score'
+        WHEN pm.Score BETWEEN 20 AND 50 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    PostMetrics pm
+WHERE 
+    pm.CommentCount > 5
+ORDER BY 
+    pm.ViewCount DESC, 
+    pm.Upvotes DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    NULL AS PostId,
+    'Total Upvotes' AS Title,
+    NULL AS CreationDate,
+    NULL AS Score,
+    NULL AS ViewCount,
+    NULL AS OwnerDisplayName,
+    NULL AS AverageBounty,
+    NULL AS CommentCount,
+    SUM(Upvotes) AS Upvotes,
+    NULL AS Downvotes
+FROM 
+    PostMetrics
+WHERE 
+    Upvotes IS NOT NULL;

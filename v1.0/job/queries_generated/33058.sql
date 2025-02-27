@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        ml.linked_movie.title,
+        ml.linked_movie.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title linked_movie ON ml.linked_movie_id = linked_movie.id
+)
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT ch.movie_id) AS total_roles,
+    STRING_AGG(DISTINCT CONCAT(mh.title, ' (', mh.production_year, ')') ORDER BY mh.production_year) AS movies,
+    AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_role_order,
+    MAX(CASE WHEN ci.note IS NOT NULL THEN ci.note ELSE 'No Notes' END) AS last_role_note,
+    COUNT(DISTINCT CASE WHEN mki.keyword IS NOT NULL THEN mki.keyword END) AS unique_keywords
+FROM 
+    aka_name a
+LEFT JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN 
+    complete_cast cc ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    movie_keyword mki ON cc.movie_id = mki.movie_id
+LEFT JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+WHERE 
+    a.name IS NOT NULL 
+    AND a.name != ''
+    AND a.id IN (
+        SELECT 
+            person_id 
+        FROM 
+            person_info 
+        WHERE 
+            info_type_id = (SELECT id FROM info_type WHERE info = 'Age')
+            AND info::integer > 30
+    )
+GROUP BY 
+    a.name
+ORDER BY 
+    total_roles DESC 
+LIMIT 10;

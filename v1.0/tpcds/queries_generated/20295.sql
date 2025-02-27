@@ -1,0 +1,41 @@
+
+WITH RecursivePromo AS (
+    SELECT p.p_promo_sk, p.p_promo_id, p.p_discount_active, p.p_start_date_sk,
+           ROW_NUMBER() OVER (PARTITION BY p.p_promo_id ORDER BY p.p_start_date_sk) AS promo_rank
+    FROM promotion p
+    WHERE p.p_discount_active = 'Y'
+),
+CustomerStats AS (
+    SELECT cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, 
+           COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+           COUNT(DISTINCT ws.ws_order_number) AS total_web_sales,
+           SUM(ws.ws_net_paid_inc_tax) AS total_net_paid
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+SalesSummary AS (
+    SELECT sd.d_year, sd.d_month_seq, SUM(ws.ws_quantity) AS total_quantity,
+           SUM(ws.ws_net_paid_inc_tax) AS total_revenue,
+           SUM(ws.ws_list_price * ws.ws_quantity) AS gross_sales
+    FROM date_dim sd
+    JOIN web_sales ws ON sd.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY sd.d_year, sd.d_month_seq
+)
+SELECT ca.ca_city, ca.ca_state, cs.customer_count,
+       COALESCE(ss.total_quantity, 0) AS total_quantity,
+       COALESCE(ss.total_revenue, 0) AS total_revenue,
+       MAX(r.r_reason_desc) AS last_return_reason
+FROM customer_address ca
+LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN CustomerStats cs ON cs.cd_demo_sk = c.c_current_cdemo_sk
+LEFT JOIN store_returns sr ON sr.sr_customer_sk = c.c_customer_sk
+LEFT JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+LEFT JOIN SalesSummary ss ON ss.d_year = YEAR(CURRENT_DATE) AND ss.d_month_seq = MONTH(CURRENT_DATE)
+WHERE (ca.ca_state IS NOT NULL AND ca.ca_city IS NOT NULL)
+  AND (cs.customer_count > 0 OR ss.total_revenue > 1000)
+GROUP BY ca.ca_city, ca.ca_state, cs.customer_count
+HAVING COUNT(DISTINCT sr.sr_returned_date_sk) >= 1
+   OR EXISTS (SELECT 1 FROM RecursivePromo rp WHERE rp.p_promo_id = COALESCE(rp.p_promo_id, 'UNKNOWN'))
+ORDER BY ca.ca_city, ca.ca_state;

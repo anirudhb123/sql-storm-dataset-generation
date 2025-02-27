@@ -1,0 +1,85 @@
+WITH RecursivePostTree AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        pt.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostTree pt ON p.ParentId = pt.Id
+),
+UserVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 4 THEN 1 END) AS OffensiveVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.Views) AS TotalViews,
+        RANK() OVER (ORDER BY SUM(u.Views) DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 10
+)
+SELECT 
+    pt.Title,
+    pt.CreationDate,
+    COALESCE(uv.UpVotes, 0) AS UpVotes,
+    COALESCE(uv.DownVotes, 0) AS DownVotes,
+    COALESCE(uv.OffensiveVotes, 0) AS OffensiveVotes,
+    COUNT(c.Id) AS CommentCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    UsersRanking.UserRank AS PostUserRank
+FROM 
+    Posts pt
+LEFT JOIN 
+    UserVotes uv ON pt.Id = uv.PostId
+LEFT JOIN 
+    Comments c ON pt.Id = c.PostId
+LEFT JOIN 
+    Tags t ON t.ExcerptPostId = pt.Id
+LEFT JOIN 
+    (SELECT 
+         p.Id,
+         RANK() OVER (ORDER BY COUNT(v.Id) DESC) AS UserRank
+     FROM 
+         Posts p
+     LEFT JOIN 
+         Votes v ON p.Id = v.PostId
+     WHERE 
+         p.OwnerUserId IS NOT NULL
+     GROUP BY 
+         p.Id) AS UsersRanking ON pt.OwnerUserId = UsersRanking.Id
+WHERE 
+    pt.CreationDate >= NOW() - INTERVAL '1 YEAR'
+GROUP BY 
+    pt.Id, pt.Title, pt.CreationDate, UsersRanking.UserRank
+ORDER BY 
+    pt.CreationDate DESC;

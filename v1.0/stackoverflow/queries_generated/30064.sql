@@ -1,0 +1,76 @@
+WITH RecursivePostHierarchy AS (
+    -- Base case: Select all questions
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.AcceptedAnswerId,
+        P.CreationDate,
+        P.LastActivityDate,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Questions
+
+    UNION ALL
+
+    -- Recursive case: Select answers that reference questions
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.AcceptedAnswerId,
+        P.CreationDate,
+        P.LastActivityDate,
+        Level + 1
+    FROM 
+        Posts P
+    JOIN RecursivePostHierarchy R ON P.ParentId = R.PostId
+    WHERE 
+        P.PostTypeId = 2 -- Answers
+),
+PostVoteSummary AS (
+    SELECT
+        V.PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.PostId
+),
+PostHistoryDetails AS (
+    SELECT
+        PH.PostId,
+        STRING_AGG(CONCAT(PH.CreationDate, ' ', PH.Comment), '; ') AS ChangeHistory
+    FROM
+        PostHistory PH
+    WHERE
+        PH.PostHistoryTypeId IN (4, 5, 10) -- Edits and close events
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    PH.PostId,
+    PH.Title,
+    U.DisplayName AS OwnerDisplayName,
+    PH.CreationDate AS QuestionDate,
+    PH.LastActivityDate,
+    COALESCE(PVS.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(PVS.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(PHD.ChangeHistory, 'No changes recorded') AS ChangeHistory,
+    COUNT(*) OVER (PARTITION BY PH.PostId) AS AnswerCount,
+    PH.Level
+FROM 
+    RecursivePostHierarchy PH
+LEFT JOIN 
+    Users U ON PH.OwnerUserId = U.Id
+LEFT JOIN 
+    PostVoteSummary PVS ON PVS.PostId = PH.PostId
+LEFT JOIN 
+    PostHistoryDetails PHD ON PHD.PostId = PH.PostId
+WHERE
+    PH.Level = 0 -- Only include questions in the final result
+ORDER BY 
+    PH.CreationDate DESC;

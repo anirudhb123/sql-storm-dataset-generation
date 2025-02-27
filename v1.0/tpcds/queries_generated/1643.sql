@@ -1,0 +1,53 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rank_profit
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 2451545 AND 2451550
+),
+aggregated_data AS (
+    SELECT
+        ca.ca_city,
+        COUNT(DISTINCT c.c_customer_id) AS total_customers,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM
+        customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        ca.ca_city
+    HAVING
+        COUNT(DISTINCT c.c_customer_id) > 10
+),
+customer_demographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS demo_rank
+    FROM customer_demographics cd
+)
+SELECT
+    ad.ca_city,
+    ad.total_customers,
+    ad.total_net_profit,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate
+FROM
+    aggregated_data ad
+JOIN customer c ON ad.total_customers = (SELECT COUNT(DISTINCT c2.c_customer_id) FROM customer c2 WHERE c2.c_current_addr_sk = ca.ca_address_sk)
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE
+    EXISTS (SELECT 1 FROM ranked_sales rs WHERE rs.ws_order_number = c.c_customer_sk)
+ORDER BY
+    total_net_profit DESC,
+    total_customers ASC;

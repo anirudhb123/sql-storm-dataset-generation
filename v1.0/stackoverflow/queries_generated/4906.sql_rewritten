@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(c.Id) DESC) AS RankPerUser
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        Id,
+        Title,
+        CommentCount,
+        UpVotes,
+        DownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        RankPerUser <= 3
+),
+PostDetails AS (
+    SELECT 
+        tp.*,
+        COALESCE(b.Name, 'No Badge') AS TopBadge,
+        SUM(b.Class = 1 OR b.Class = 2) AS TotalTopBadges
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Badges b ON tp.OwnerUserId = b.UserId
+    GROUP BY 
+        tp.Id, b.Name
+)
+SELECT 
+    pd.Title,
+    pd.CommentCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.TopBadge,
+    pd.TotalTopBadges,
+    CASE 
+        WHEN pd.UpVotes > pd.DownVotes THEN 'Positive'
+        WHEN pd.UpVotes < pd.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS Sentiment,
+    (SELECT AVG(v2.BountyAmount)
+     FROM Votes v2
+     WHERE v2.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = pd.OwnerUserId)
+     AND v2.BountyAmount IS NOT NULL) AS AvgBounty
+FROM 
+    PostDetails pd 
+ORDER BY 
+    pd.CommentCount DESC, pd.UpVotes DESC
+LIMIT 10;

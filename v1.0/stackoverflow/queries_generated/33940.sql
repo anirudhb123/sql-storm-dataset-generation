@@ -1,0 +1,80 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        CAST(0 AS INT) AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Selecting only Questions
+    UNION ALL
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        a.CreationDate,
+        Depth + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostCTE r ON a.ParentId = r.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(Name, ', ') AS Badges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+PostHistoryDetail AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenedDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    u.DisplayName AS OwnerDisplayName,
+    r.CreationDate AS QuestionDate,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    pvs.TotalVotes,
+    COALESCE(phd.ClosedDate, 'Not Closed') AS LastClosedDate,
+    COALESCE(phd.ReopenedDate, 'Not Reopened') AS LastReopenedDate,
+    ub.BadgeCount,
+    ub.Badges
+FROM 
+    RecursivePostCTE r
+LEFT JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    PostVoteSummary pvs ON r.PostId = pvs.PostId
+LEFT JOIN 
+    PostHistoryDetail phd ON r.PostId = phd.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    r.Depth = 0  -- Restricting to top-level questions (not answers)
+ORDER BY 
+    r.CreationDate DESC;

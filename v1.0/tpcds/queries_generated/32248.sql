@@ -1,0 +1,75 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_id,
+        SUM(ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+), 
+Demographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        SUM(i.i_current_price) AS total_item_value
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+), 
+SalesSummary AS (
+    SELECT 
+        d.customer_id, 
+        d.total_sales, 
+        dem.cd_gender,
+        dem.cd_marital_status,
+        dem.cd_purchase_estimate,
+        RANK() OVER (PARTITION BY dem.cd_gender ORDER BY d.total_sales DESC) AS gender_sales_rank
+    FROM 
+        SalesCTE d
+    JOIN
+        Demographics dem ON d.customer_id = dem.c_customer_sk
+),
+RecentSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid_inc_tax) AS total_paid,
+        COUNT(*) AS sales_count
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_dow = 0) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    r.customer_id,
+    SUM(r.total_paid) AS recent_total_paid,
+    MAX(s.total_sales) AS max_total_sales,
+    AVG(s.total_sales) AS avg_total_sales,
+    CASE 
+        WHEN s.gender_sales_rank <= 5 THEN 'Top Sales'
+        ELSE 'Other Sales'
+    END AS sales_category
+FROM 
+    RecentSales r
+LEFT JOIN 
+    SalesSummary s ON r.ws_bill_customer_sk = s.customer_id
+GROUP BY 
+    r.customer_id
+HAVING 
+    SUM(r.total_paid) > 500
+ORDER BY 
+    recent_total_paid DESC
+LIMIT 10;

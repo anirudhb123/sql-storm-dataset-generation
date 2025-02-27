@@ -1,0 +1,74 @@
+WITH SupplierPartData AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ps.ps_comment
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 50
+), CustomerOrderData AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_nationkey,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        o.o_orderpriority
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+), NationData AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        n.n_regionkey
+    FROM 
+        nation n
+), RegionData AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name
+    FROM 
+        region r
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    p.p_name AS part_name,
+    SUM(l.l_quantity) AS total_quantity,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM 
+    lineitem l
+JOIN 
+    CustomerOrderData co ON l.l_orderkey = co.o_orderkey
+JOIN 
+    SupplierPartData sp ON sp.p_partkey = l.l_partkey AND sp.s_suppkey = l.l_suppkey
+JOIN 
+    NationData n ON sp.s_nationkey = n.n_nationkey
+JOIN 
+    RegionData r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1997-12-31'
+GROUP BY 
+    r.r_name, n.n_name, sp.s_name, p.p_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS actor_rank
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        c.country_code = 'USA' 
+        AND t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.title, t.production_year, a.name
+), MovieActors AS (
+    SELECT 
+        movie_title,
+        production_year,
+        actor_name,
+        actor_rank
+    FROM 
+        RankedMovies
+    WHERE 
+        actor_rank <= 5  
+), MovieKeywordCounts AS (
+    SELECT 
+        kw.keyword,
+        COUNT(mk.movie_id) AS movie_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        kw.keyword
+), MoviesWithKeywords AS (
+    SELECT 
+        ma.movie_title,
+        ma.production_year,
+        ma.actor_name,
+        mk.keyword,
+        kwc.movie_count
+    FROM 
+        MovieActors ma
+    LEFT JOIN 
+        movie_keyword mk ON ma.movie_title IN (SELECT m.title FROM title m WHERE m.production_year = ma.production_year)
+    LEFT JOIN 
+        MovieKeywordCounts kwc ON mk.keyword_id IN (SELECT k.id FROM keyword k WHERE k.keyword = kwc.keyword)
+)
+SELECT 
+    production_year,
+    actor_name,
+    STRING_AGG(movie_title, ', ') AS movies,
+    STRING_AGG(DISTINCT keyword, ', ') AS keywords,
+    SUM(movie_count) AS total_movies_with_keywords
+FROM 
+    MoviesWithKeywords
+GROUP BY 
+    production_year, actor_name
+ORDER BY 
+    production_year DESC, total_movies_with_keywords DESC;

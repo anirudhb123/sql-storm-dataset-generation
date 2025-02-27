@@ -1,0 +1,73 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostSummary AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostsCount,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AverageViews,
+        MAX(P.CreationDate) AS LatestPostDate
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate > NOW() - INTERVAL '1 YEAR'
+    GROUP BY 
+        P.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.UserDisplayName,
+        CH.Name AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CH ON PH.Comment::int = CH.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.BadgeCount,
+    U.TotalBounties,
+    P.PostsCount,
+    P.TotalScore,
+    P.AverageViews,
+    P.LatestPostDate,
+    COALESCE(CP.CloseReason, 'No Closed Posts') AS LastCloseReason 
+FROM 
+    UserStats U
+LEFT JOIN 
+    PostSummary P ON U.UserId = P.OwnerUserId
+LEFT JOIN 
+    (SELECT 
+         CP.UserDisplayName, 
+         MAX(CP.CreationDate) AS LastClose 
+     FROM 
+         ClosedPosts CP 
+     GROUP BY 
+         CP.UserDisplayName) CP ON U.DisplayName = CP.UserDisplayName
+WHERE 
+    U.Rank <= 10
+ORDER BY 
+    U.Reputation DESC, 
+    U.BadgeCount DESC, 
+    U.TotalBounties DESC;

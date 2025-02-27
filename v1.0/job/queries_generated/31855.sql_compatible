@@ -1,0 +1,87 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.depth + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.depth < 3
+),
+
+most_frequent_actors AS (
+    SELECT 
+        ci.person_id,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+    HAVING 
+        COUNT(ci.movie_id) > 5
+    ORDER BY 
+        movie_count DESC
+    LIMIT 10
+),
+
+actor_names AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        a.person_id
+    FROM 
+        aka_name a
+    JOIN 
+        most_frequent_actors mfa ON a.person_id = mfa.person_id
+),
+
+movie_companies AS (
+    SELECT 
+        mc.movie_id,
+        JSON_AGG(JSON_BUILD_OBJECT('company_id', mc.company_id, 'company_type_id', mc.company_type_id)) AS companies
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT ac.actor_id) AS total_actors,
+    ARRAY_AGG(DISTINCT an.actor_name) AS actor_names,
+    COALESCE(mC.companies, '[]') AS companies
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    actor_names an ON ci.person_id = an.person_id
+LEFT JOIN 
+    movie_companies mC ON mh.movie_id = mC.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+ORDER BY 
+    mh.production_year DESC, total_actors DESC
+LIMIT 20;

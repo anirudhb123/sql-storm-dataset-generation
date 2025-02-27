@@ -1,0 +1,59 @@
+WITH PostAggregates AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.ViewCount, 
+        COUNT(pc.Id) AS CommentCount, 
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes, 
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes, 
+        AVG(u.Reputation) AS AvgUserReputation,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments pc ON p.Id = pc.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, '><')) AS t(TagName) ON TRUE
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId, 
+        MIN(ph.CreationDate) AS FirstEditDate, 
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseVotes,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenVotes
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    pa.PostId, 
+    pa.Title, 
+    pa.Score, 
+    pa.ViewCount, 
+    pa.CommentCount, 
+    pa.UpVotes, 
+    pa.DownVotes, 
+    pa.AvgUserReputation, 
+    pa.Tags, 
+    COALESCE(ps.FirstEditDate, 'No edits') AS FirstEditDate,
+    COALESCE(ps.CloseVotes, 0) AS CloseVotes,
+    COALESCE(ps.ReopenVotes, 0) AS ReopenVotes
+FROM 
+    PostAggregates pa
+LEFT JOIN 
+    PostHistorySummary ps ON pa.PostId = ps.PostId
+ORDER BY 
+    pa.Score DESC, pa.ViewCount DESC
+LIMIT 100;

@@ -1,0 +1,39 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        aka_title at
+    JOIN 
+        complete_cast cc ON at.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        at.id
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        actor_count,
+        ROW_NUMBER() OVER (ORDER BY actor_count DESC) AS rank
+    FROM 
+        RankedMovies
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    mi.info
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_info mi ON tm.title = mi.info 
+WHERE 
+    tm.rank <= 10 AND 
+    mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Plot') 
+ORDER BY 
+    tm.actor_count DESC;

@@ -1,0 +1,53 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mv.title AS movie_title,
+    mv.production_year,
+    COUNT(DISTINCT keyword.keyword) AS keyword_count,
+    AVG(CASE WHEN ci.note IS NULL THEN 0 ELSE 1 END) AS has_note_percentage,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY mv.production_year DESC) AS actor_movie_rank
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mv ON ci.movie_id = mv.movie_id
+LEFT JOIN 
+    movie_keyword mb ON mv.movie_id = mb.movie_id
+LEFT JOIN 
+    keyword ON mb.keyword_id = keyword.id
+WHERE 
+    ak.name IS NOT NULL
+    AND mv.production_year >= 2000
+GROUP BY 
+    ak.person_id, ak.name, mv.title, mv.production_year
+HAVING 
+    keyword_count > 2
+ORDER BY 
+    actor_movie_rank, mv.production_year DESC;
+

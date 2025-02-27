@@ -1,0 +1,52 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounties,
+        AVG(P.Score) AS AvgScore,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9)
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        PostCount, 
+        Questions, 
+        Answers, 
+        TotalBounties, 
+        AvgScore,
+        Rank
+    FROM 
+        UserPostStats
+    WHERE 
+        PostCount > 0
+)
+SELECT 
+    TU.DisplayName,
+    TU.PostCount,
+    TU.Questions,
+    TU.Answers,
+    COALESCE(NULLIF(TU.TotalBounties, 0), 'No Bounties') AS TotalBounties,
+    ROUND(TU.AvgScore, 2) AS AvgScore,
+    CASE 
+        WHEN TU.Rank <= 10 THEN 'Top Contributor'
+        WHEN TU.Rank <= 25 THEN 'Regular Contributor'
+        ELSE 'New Contributor'
+    END AS ContributionStatus
+FROM 
+    TopUsers TU
+WHERE 
+    TU.Rank <= 50
+ORDER BY 
+    TU.Rank;

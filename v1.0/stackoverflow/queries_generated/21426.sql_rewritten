@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    WHERE
+        p.ViewCount > 0
+    GROUP BY
+        p.Id, p.OwnerUserId, p.Title, p.CreationDate, p.Score
+),
+PostWithComments AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        COUNT(c.Id) AS CommentCount,
+        MAX(CASE WHEN c.CreationDate IS NOT NULL THEN c.CreationDate END) AS LastCommentDate
+    FROM
+        RankedPosts rp
+    LEFT JOIN
+        Comments c ON rp.PostId = c.PostId
+    GROUP BY
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score
+),
+FilteredPosts AS (
+    SELECT
+        pwc.*,
+        CASE
+            WHEN LastCommentDate IS NULL THEN 'No comments yet'
+            WHEN LastCommentDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 'Last comment was too long ago'
+            ELSE 'Recently commented'
+        END AS CommentStatus,
+        CASE
+            WHEN Score >= 0 THEN 'Positive'
+            ELSE 'Negative'
+        END AS ScoreType
+    FROM
+        PostWithComments pwc
+    WHERE
+        Score > 10 OR CommentCount > 5
+),
+PostHistoryDetails AS (
+    SELECT
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastHistoryChange,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM
+        PostHistory ph
+    JOIN
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY
+        ph.PostId
+)
+SELECT
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.CommentCount,
+    fp.CommentStatus,
+    fp.ScoreType,
+    COALESCE(phd.LastHistoryChange, 'No history changes') AS LastHistoryChange,
+    COALESCE(phd.HistoryTypes, 'No history types recorded') AS HistoryTypes,
+    (SELECT COUNT(*) FROM Posts p2 WHERE p2.AnswerCount >= 1 AND p2.Id = fp.PostId) AS HasAcceptedAnswers,
+    (SELECT AVG(v.BountyAmount) FROM Votes v WHERE v.PostId = fp.PostId AND v.VoteTypeId = 9) AS AverageBounty
+FROM
+    FilteredPosts fp
+LEFT JOIN
+    PostHistoryDetails phd ON fp.PostId = phd.PostId
+ORDER BY
+    fp.Score DESC, fp.CommentCount DESC
+LIMIT 100;

@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.kind_id ORDER BY a.production_year DESC) AS rn,
+        COUNT(DISTINCT ac.person_id) OVER (PARTITION BY a.id) AS total_cast
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info ac ON a.id = ac.movie_id
+    WHERE 
+        a.production_year BETWEEN 2000 AND 2023
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.total_cast
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rn <= 5
+),
+CompanySummary AS (
+    SELECT 
+        m.movie_id,
+        c.name AS company_name,
+        COUNT(DISTINCT m.id) AS movie_count 
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    GROUP BY 
+        m.movie_id, c.name
+),
+KeywordSummary AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.total_cast,
+    cs.company_name,
+    ks.keywords
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    CompanySummary cs ON fm.production_year = (SELECT MAX(cs1.movie_count) FROM CompanySummary cs1 WHERE cs1.movie_id = fm.movie_id)
+LEFT JOIN 
+    KeywordSummary ks ON fm.title = (SELECT km.title FROM movie_keyword mk1 JOIN aka_title km ON mk1.movie_id = km.id WHERE km.title = fm.title LIMIT 1)
+ORDER BY 
+    fm.production_year DESC,
+    fm.total_cast DESC;

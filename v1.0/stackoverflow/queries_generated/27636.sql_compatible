@@ -1,0 +1,92 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Tags,
+        p.Score,
+        p.ViewCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Body, p.Tags, p.Score, p.ViewCount
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS UsageCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    JOIN 
+        RankedPosts pt ON pt.PostId = p.Id
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 10
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativeScorePosts,
+        SUM(r.CommentCount) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        RankedPosts r ON r.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(p.Id) > 0 
+),
+FinalStats AS (
+    SELECT 
+        ups.UserId,
+        ups.DisplayName,
+        ups.TotalPosts,
+        ups.PositiveScorePosts,
+        ups.NegativeScorePosts,
+        ups.TotalComments,
+        ARRAY_AGG(DISTINCT pt.TagName) AS TagsUsed
+    FROM 
+        UserPostStats ups
+    JOIN 
+        Posts p ON p.OwnerUserId = ups.UserId
+    JOIN 
+        PopularTags pt ON p.Tags LIKE CONCAT('%', pt.TagName, '%')
+    GROUP BY 
+        ups.UserId, ups.DisplayName
+)
+
+SELECT 
+    fs.UserId,
+    fs.DisplayName,
+    fs.TotalPosts,
+    fs.PositiveScorePosts,
+    fs.NegativeScorePosts,
+    fs.TotalComments,
+    fs.TagsUsed,
+    RANK() OVER (ORDER BY fs.TotalPosts DESC) AS PostRank
+FROM 
+    FinalStats fs
+ORDER BY 
+    fs.TotalPosts DESC, fs.DisplayName;

@@ -1,0 +1,96 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        ph.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserVoteStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE -1 END ELSE 0 END) AS VoteBalance
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.CreationDate,
+        COUNT(DISTINCT ph.Title) AS EditCount,
+        MIN(CASE WHEN ph.CreationDate < (NOW() - INTERVAL '30 days') THEN ph.CreationDate END) AS LastClosed,
+        MAX(CASE WHEN ph.CreationDate >= (NOW() - INTERVAL '30 days') THEN ph.CreationDate END) AS RecentlyClosed
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 12) -- Closed and Deleted/Undeleted
+    GROUP BY 
+        ph.PostId, ph.Title, ph.CreationDate
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(c.Id) AS CommentsCount,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews
+    FROM 
+        Users u
+    JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ph.PostId,
+    ph.Title AS PostTitle,
+    ph.CreationDate AS PostCreationDate,
+    uvs.DisplayName AS UserName,
+    uvs.Upvotes,
+    uvs.Downvotes,
+    uvs.VoteBalance,
+    cp.EditCount,
+    cp.LastClosed,
+    cp.RecentlyClosed,
+    mau.TotalViews AS UserTotalViews,
+    mau.CommentsCount AS UserCommentsCount
+FROM 
+    PostHierarchy ph
+JOIN 
+    UserVoteStatistics uvs ON uvs.UserId = ph.PostId
+LEFT JOIN 
+    ClosedPosts cp ON cp.PostId = ph.PostId
+JOIN 
+    MostActiveUsers mau ON mau.Id = uvs.UserId
+WHERE 
+    ph.Level <= 3  -- Limit to a max depth of 3 in the hierarchy
+ORDER BY 
+    cp.LastClosed DESC NULLS LAST, 
+    uvs.VoteBalance DESC,
+    ph.PostTitle ASC;

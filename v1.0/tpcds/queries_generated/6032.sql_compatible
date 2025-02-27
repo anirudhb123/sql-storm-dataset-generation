@@ -1,0 +1,31 @@
+
+SELECT 
+    ca.city AS customer_city, 
+    COUNT(DISTINCT c.c_customer_sk) AS customer_count, 
+    SUM(ws.net_profit) AS total_profit,
+    AVG(cd.purchase_estimate) AS avg_purchase_estimate,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    DATE_FORMAT(d.d_date, '%Y-%m') AS sales_month
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    promotion p ON ws.ws_promo_sk = p.p_promo_sk
+WHERE 
+    d.d_year = 2023 
+    AND d.d_moy IN (5, 6) 
+    AND cd.cd_gender = 'F' 
+GROUP BY 
+    ca.city, d.d_year, d.d_moy, ws.net_profit, cd.purchase_estimate
+HAVING 
+    COUNT(DISTINCT c.c_customer_sk) > 10
+ORDER BY 
+    total_profit DESC, customer_count DESC
+LIMIT 100;

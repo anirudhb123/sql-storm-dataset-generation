@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        pt.Name AS PostType,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+), 
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 10
+), 
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        p.Title,
+        ph.UserDisplayName AS Editor,
+        ph.CreationDate AS EditDate,
+        pht.Name AS ChangeType,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName, 
+    rp.PostType,
+    rp.CommentCount,
+    rp.ViewCount,
+    rp.CreationDate,
+    pt.TagName,
+    phs.Editor,
+    phs.EditDate,
+    phs.ChangeType,
+    phs.Comment,
+    pvs.TotalViews AS TagTotalViews
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PopularTags pt ON rp.Title LIKE CONCAT('%', pt.TagName, '%')
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+LEFT JOIN 
+    (SELECT 
+         pt.TagName, 
+         SUM(pt.TotalViews) AS TotalViews 
+     FROM 
+         PopularTags pt 
+     GROUP BY 
+         pt.TagName) pvs ON pt.TagName = pvs.TagName
+WHERE 
+    rp.ViewRank <= 5
+ORDER BY 
+    rp.ViewCount DESC, 
+    rp.CreationDate DESC;

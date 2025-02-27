@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_paid DESC) AS rank_sales
+    FROM web_sales ws
+    INNER JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_preferred_cust_flag = 'Y'
+    AND ws.ws_ship_date_sk IS NOT NULL
+), 
+ReturnsSummary AS (
+    SELECT 
+        wr.wr_web_page_sk, 
+        SUM(wr.wr_return_quantity) AS total_returned, 
+        SUM(wr.wr_return_amt) AS total_return_amount
+    FROM web_returns wr
+    WHERE wr.wr_returned_date_sk IN (
+        SELECT d.d_date_sk 
+        FROM date_dim d 
+        WHERE d.d_year = 2023 AND d.d_qoy = 1
+    )
+    GROUP BY wr.wr_web_page_sk
+),
+InventoryDetails AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM inventory inv
+    LEFT JOIN item i ON inv.inv_item_sk = i.i_item_sk
+    WHERE i.i_rec_end_date IS NULL
+    GROUP BY inv.inv_item_sk
+)
+SELECT 
+    rs.ws_order_number,
+    rs.ws_net_paid,
+    rs.web_site_sk,
+    COALESCE(rs.rank_sales, 0) AS sales_rank,
+    COALESCE(rs.web_site_sk, 'N/A') AS web_site_info,
+    inv.total_quantity,
+    CASE 
+        WHEN inv.total_quantity IS NULL THEN 'Out of Stock'
+        WHEN inv.total_quantity < 10 THEN 'Low Stock'
+        ELSE 'In Stock'
+    END AS inventory_status,
+    r.total_returned,
+    r.total_return_amount
+FROM RankedSales rs
+FULL OUTER JOIN ReturnsSummary r ON rs.web_site_sk = r.wr_web_page_sk
+FULL OUTER JOIN InventoryDetails inv ON rs.web_site_sk = inv.inv_item_sk
+WHERE r.total_returned > 10 OR inv.total_quantity < 5
+ORDER BY rs.ws_net_paid DESC, r.total_return_amount DESC;

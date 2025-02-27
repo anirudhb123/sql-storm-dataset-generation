@@ -1,0 +1,46 @@
+WITH movie_details AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+        COUNT(DISTINCT kc.keyword) AS keyword_count
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON ci.movie_id = cc.movie_id
+    JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON kc.id = mk.keyword_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+ranked_movies AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.actor_names,
+        md.keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.keyword_count DESC) AS rank_in_year
+    FROM 
+        movie_details md
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.actor_names,
+    COALESCE(NULLIF(rm.keyword_count, 0), 'No Keywords') AS keyword_information,
+    CASE 
+        WHEN rm.rank_in_year <= 3 THEN 'Top Movie'
+        ELSE 'Standard Movie'
+    END AS movie_category
+FROM 
+    ranked_movies rm
+WHERE 
+    rm.production_year IS NOT NULL
+ORDER BY 
+    rm.production_year DESC, rm.rank_in_year;

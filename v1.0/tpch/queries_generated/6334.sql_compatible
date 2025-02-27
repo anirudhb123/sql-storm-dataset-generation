@@ -1,0 +1,48 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, n.n_regionkey
+), 
+TopRegions AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        SUM(rs.total_supply_value) AS total_value_per_region
+    FROM 
+        region r
+    JOIN 
+        RankedSuppliers rs ON r.r_regionkey = (SELECT DISTINCT n.n_regionkey FROM nation n WHERE n.n_nationkey IN (SELECT DISTINCT s.s_nationkey FROM supplier s WHERE s.s_suppkey = rs.s_suppkey))
+    WHERE 
+        rs.supplier_rank <= 5
+    GROUP BY 
+        r.r_regionkey, r.r_name
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT s.s_suppkey) AS number_of_suppliers,
+    SUM(CASE WHEN o.o_orderstatus = 'F' THEN 1 ELSE 0 END) AS completed_orders,
+    AVG(c.c_acctbal) AS avg_customer_balance
+FROM 
+    TopRegions r
+JOIN 
+    supplier s ON r.r_regionkey = (SELECT DISTINCT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_value_per_region DESC;

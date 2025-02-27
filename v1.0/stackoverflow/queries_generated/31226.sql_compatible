@@ -1,0 +1,54 @@
+
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, CreationDate, LastAccessDate, 0 AS Level
+    FROM Users
+    WHERE Reputation > 1000
+    UNION ALL
+    SELECT u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.LastAccessDate, uh.Level + 1
+    FROM Users u
+    JOIN UserHierarchy uh ON u.Id = uh.Id
+    WHERE u.Reputation > 1000
+),
+PostVoting AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 10 THEN 1 ELSE 0 END), 0) AS DeletedVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY p.Id
+),
+PostClosure AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY ph.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    uh.Level AS UserLevel,
+    p.Id AS PostId,
+    p.Title,
+    pv.UpVotes,
+    pv.DownVotes,
+    pc.CloseCount,
+    pc.ReopenCount,
+    CASE 
+        WHEN pc.CloseCount > 0 THEN 'Closed'
+        WHEN pc.ReopenCount > 0 THEN 'Reopened'
+        ELSE 'Active'
+    END AS PostStatus
+FROM Users u
+JOIN UserHierarchy uh ON u.Id = uh.Id
+JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN PostVoting pv ON p.Id = pv.PostId
+LEFT JOIN PostClosure pc ON p.Id = pc.PostId
+WHERE u.Reputation > 1000
+ORDER BY u.Reputation DESC, pv.UpVotes DESC
+LIMIT 10;

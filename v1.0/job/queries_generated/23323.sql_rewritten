@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT
+        at.id AS movie_id,
+        at.title,
+        COALESCE(mk.keyword, 'Unknown') AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY at.id ORDER BY at.production_year DESC) AS rn,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY at.id) AS total_cast,
+        SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY at.id) AS credited_cast
+    FROM
+        aka_title at
+    LEFT JOIN
+        movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN
+        cast_info ci ON at.id = ci.movie_id
+    WHERE
+        at.production_year IS NOT NULL AND
+        (at.production_year > 2000 OR at.title LIKE '%Blockbuster%')
+),
+MovieInfo AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.keyword,
+        rm.total_cast,
+        rm.credited_cast,
+        CASE 
+            WHEN rm.total_cast = 0 THEN 'No Cast Information' 
+            ELSE CAST(rm.credited_cast * 100.0 / rm.total_cast AS VARCHAR) || '%' 
+        END AS credit_ratio
+    FROM
+        RankedMovies rm
+    WHERE
+        rm.rn = 1
+),
+FilteredMovies AS (
+    SELECT 
+        mi.movie_id,
+        mi.title,
+        mi.keyword,
+        mi.credit_ratio,
+        CASE 
+            WHEN mi.credit_ratio = 'No Cast Information' THEN 'N/A' 
+            ELSE mi.credit_ratio 
+        END AS display_credit_ratio
+    FROM 
+        MovieInfo mi
+    WHERE 
+        mi.keyword NOT IN ('Unknown', 'Generic') AND
+        (mi.total_cast > 5 OR mi.credited_cast < 5)
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.keyword,
+    f.display_credit_ratio
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    movie_info mi ON f.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+WHERE 
+    mi.info IS NULL 
+ORDER BY 
+    f.title ASC;

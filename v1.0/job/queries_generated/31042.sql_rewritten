@@ -1,0 +1,78 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::integer AS parent_movie_id,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000
+
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.movie_id,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        title m ON ml.linked_movie_id = m.id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    MIN(n.info) AS earliest_info,
+    ROW_NUMBER() OVER(PARTITION BY ak.person_id ORDER BY at.production_year DESC) AS recent_movie_rank,
+    SUM(
+        CASE WHEN p.gender = 'M' THEN 1 ELSE 0 END
+    ) AS male_actor_count,
+    CASE
+        WHEN ak.name IS NULL THEN 'Unknown Actor'
+        ELSE ak.name
+    END AS display_actor_name
+FROM
+    aka_name ak
+JOIN
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN
+    movie_companies mc ON ci.movie_id = mc.movie_id
+JOIN
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN
+    info_type it ON it.id = (
+        SELECT
+            PI.info_type_id
+        FROM
+            person_info PI
+        WHERE
+            PI.person_id = ak.person_id
+        ORDER BY
+            PI.id ASC
+        LIMIT 1
+    )
+LEFT JOIN
+    (SELECT
+         * 
+     FROM
+         person_info
+     WHERE 
+         note IS NOT NULL
+     ) p ON p.person_id = ak.person_id
+WHERE
+    at.production_year >= 2000
+    AND mc.company_type_id IN (SELECT id FROM company_type WHERE kind = 'Production')
+GROUP BY
+    ak.name, at.title, at.production_year
+ORDER BY
+    recent_movie_rank, at.production_year DESC
+OFFSET 0 LIMIT 10;

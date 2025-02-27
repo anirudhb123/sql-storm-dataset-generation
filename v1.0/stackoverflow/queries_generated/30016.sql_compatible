@@ -1,0 +1,68 @@
+
+WITH RecursivePostInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ViewCount,
+        a.Title AS AcceptedAnswerTitle,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    WHERE 
+        p.PostTypeId = 1  
+),
+PostActivity AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(DISTINCT ph.UserId) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        ROW_NUMBER() OVER (ORDER BY SUM(u.Reputation) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    pi.PostId,
+    pi.Title,
+    pi.Score,
+    pi.ViewCount,
+    COALESCE(pa.EditCount, 0) AS TotalEdits,
+    pa.LastEditDate,
+    tu.UserId AS TopUserId,
+    tu.DisplayName AS TopUserName,
+    tu.TotalBounty,
+    tu.TotalUpVotes
+FROM 
+    RecursivePostInfo pi
+LEFT JOIN 
+    PostActivity pa ON pi.PostId = pa.PostId
+LEFT JOIN 
+    TopUsers tu ON pi.OwnerUserId = tu.UserId
+WHERE 
+    pi.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'  
+ORDER BY 
+    pi.Score DESC,
+    pi.ViewCount DESC
+LIMIT 10;

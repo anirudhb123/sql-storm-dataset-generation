@@ -1,0 +1,99 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        P2.Id,
+        P2.Title,
+        P2.OwnerUserId,
+        P2.CreationDate,
+        P2.ParentId,
+        Level + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostHierarchy R ON P2.ParentId = R.PostId
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.DisplayName,
+        RANK() OVER(ORDER BY U.Reputation DESC) AS RankInReputation
+    FROM 
+        Users U
+),
+PostVotes AS (
+    SELECT 
+        V.PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.PostId
+),
+PostStats AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(PV.UpVotes, 0) AS UpVotes,
+        COALESCE(PV.DownVotes, 0) AS DownVotes,
+        COALESCE(PV.TotalVotes, 0) AS TotalVotes,
+        PH.ParentId,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount
+    FROM 
+        RecursivePostHierarchy RP
+    LEFT JOIN 
+        PostVotes PV ON RP.PostId = PV.PostId
+    JOIN 
+        Users U ON RP.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON RP.PostId = C.PostId
+    LEFT JOIN 
+        Posts PH ON RP.ParentId = PH.Id
+    GROUP BY 
+        RP.PostId, RP.Title, RP.CreationDate, RP.OwnerUserId, U.DisplayName, PV.UpVotes, PV.DownVotes, PV.TotalVotes, PH.ParentId
+),
+PostRankings AS (
+    SELECT 
+        PS.*, 
+        UserReputation.RankInReputation,
+        ROW_NUMBER() OVER (PARTITION BY PS.ParentId ORDER BY PS.UpVotes DESC, PS.CreationDate DESC) AS RankInParent
+    FROM 
+        PostStats PS
+    JOIN 
+        UserReputation ON PS.OwnerUserId = UserReputation.UserId
+)
+
+SELECT 
+    PR.PostId,
+    PR.Title,
+    PR.OwnerDisplayName,
+    PR.UpVotes,
+    PR.DownVotes,
+    PR.TotalVotes,
+    PR.CommentCount,
+    PR.RankInReputation,
+    PR.RankInParent
+FROM 
+    PostRankings PR
+WHERE 
+    PR.RankInParent <= 5
+ORDER BY 
+    PR.ParentId, PR.RankInParent;

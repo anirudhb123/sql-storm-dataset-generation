@@ -1,0 +1,44 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_net_profit,
+        ROW_NUMBER() OVER(PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (
+        SELECT MAX(d_date_sk) 
+        FROM date_dim 
+        WHERE d_year = 2023 AND d_moy = 10
+    )
+),
+RankedSales AS (
+    SELECT 
+        s_store_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM web_sales
+    JOIN store ON store.s_store_sk = web_sales.ws_store_sk
+    WHERE store.s_state IN ('CA', 'NY')
+    GROUP BY s_store_sk, ws_item_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    SUM(ws.ws_ext_sales_price) AS total_sales,
+    AVG(ws.ws_net_profit) AS avg_profit,
+    (SELECT COUNT(DISTINCT ws_inner.ws_order_number) 
+     FROM web_sales ws_inner 
+     WHERE ws_inner.ws_bill_customer_sk = c.c_customer_sk) AS order_count,
+    RANK() OVER (ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+FROM customer c
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN SalesCTE sc ON ws.ws_item_sk = sc.ws_item_sk AND sc.rn <= 5
+WHERE c.c_birth_month = 4 AND c.c_birth_day BETWEEN 10 AND 20
+GROUP BY c.c_customer_id, c.c_first_name, c.c_last_name
+HAVING SUM(ws.ws_ext_sales_price) > 1000
+ORDER BY total_sales DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

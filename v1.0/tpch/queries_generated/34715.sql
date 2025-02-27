@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 500 AND sh.level < 10
+),
+RankedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank
+    FROM part p
+    WHERE p.p_size BETWEEN 1 AND 100
+),
+TotalSales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' 
+      AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY o.o_orderkey
+),
+NationSales AS (
+    SELECT n.n_nationkey, n.n_name, SUM(ts.total_sales) AS nation_sales
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN TotalSales ts ON o.o_orderkey = ts.o_orderkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT sh.s_name, p.p_name, p.p_retailprice, ns.nation_sales
+FROM SupplierHierarchy sh
+LEFT JOIN RankedParts p ON p.rank <= 5
+LEFT JOIN NationSales ns ON sh.s_nationkey = ns.n_nationkey
+WHERE ns.nation_sales IS NOT NULL
+ORDER BY ns.nation_sales DESC, p.p_retailprice ASC
+LIMIT 20;

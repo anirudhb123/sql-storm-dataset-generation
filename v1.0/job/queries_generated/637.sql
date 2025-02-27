@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2020
+), ActorCounts AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+), MoviesWithActors AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(ac.actor_count, 0) AS actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorCounts ac ON rm.movie_id = ac.movie_id
+), FilteredMovies AS (
+    SELECT 
+        m.*,
+        CASE 
+            WHEN m.actor_count > 10 THEN 'Blockbuster'
+            WHEN m.actor_count BETWEEN 5 AND 10 THEN 'Moderate'
+            ELSE 'Indie'
+        END AS movie_category
+    FROM 
+        MoviesWithActors m
+)
+SELECT 
+    f.*,
+    (SELECT 
+         GROUP_CONCAT(DISTINCT a.name ORDER BY a.name SEPARATOR ', ') 
+     FROM 
+         aka_name a 
+     JOIN 
+         cast_info ci ON a.person_id = ci.person_id 
+     WHERE 
+         ci.movie_id = f.movie_id) AS actor_names
+FROM 
+    FilteredMovies f
+WHERE 
+    f.movie_category = 'Blockbuster'
+ORDER BY 
+    f.production_year DESC, 
+    f.title;

@@ -1,0 +1,70 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        AVG(ps.ps_availqty) AS avg_avail_qty
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(DISTINCT l.l_partkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+HighRevenueOrders AS (
+    SELECT 
+        od.o_orderkey,
+        od.o_orderdate,
+        od.net_revenue,
+        ROW_NUMBER() OVER (ORDER BY od.net_revenue DESC) AS revenue_rank
+    FROM 
+        OrderDetails od
+    WHERE 
+        od.net_revenue > (
+            SELECT AVG(net_revenue) FROM OrderDetails
+        )
+)
+SELECT 
+    s.s_name,
+    ss.total_parts,
+    ss.total_supply_cost,
+    s.s_acctbal,
+    o.o_orderkey,
+    o.net_revenue,
+    o.o_orderdate
+FROM 
+    SupplierStats ss
+LEFT JOIN 
+    supplier s ON ss.s_suppkey = s.s_suppkey
+LEFT JOIN 
+    HighRevenueOrders o ON o.o_orderkey IN (
+        SELECT 
+            l.l_orderkey 
+        FROM 
+            lineitem l
+        WHERE 
+            l.l_suppkey = s.s_suppkey
+    )
+WHERE 
+    ss.avg_avail_qty IS NOT NULL
+ORDER BY 
+    ss.total_supply_cost DESC, 
+    o.net_revenue DESC NULLS LAST;

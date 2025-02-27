@@ -1,0 +1,25 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title, 
+    t.production_year, 
+    COUNT(DISTINCT c.person_id) AS co_stars_count,
+    STRING_AGG(DISTINCT c.role_id::TEXT, ', ') AS role_ids,
+    (SELECT STRING_AGG(DISTINCT k.keyword, ', ') 
+     FROM movie_keyword mk
+     JOIN keyword k ON mk.keyword_id = k.id
+     WHERE mk.movie_id = t.id) AS keywords
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    aka_title t ON c.movie_id = t.movie_id
+WHERE 
+    a.name IS NOT NULL
+    AND t.production_year >= 2000
+    AND t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+GROUP BY 
+    a.name, t.title, t.production_year
+ORDER BY 
+    a.name, t.production_year DESC;
+

@@ -1,0 +1,56 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        c.c_nationkey, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+),
+TopOrders AS (
+    SELECT 
+        r.o_orderkey, 
+        r.o_orderdate, 
+        r.o_totalprice, 
+        r.c_nationkey
+    FROM 
+        RankedOrders r
+    WHERE 
+        r.OrderRank <= 10
+),
+OrderDetails AS (
+    SELECT 
+        lo.l_orderkey, 
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS Revenue, 
+        SUM(lo.l_quantity) AS TotalQuantity, 
+        AVG(lo.l_tax) AS AvgTax
+    FROM 
+        lineitem lo
+    JOIN 
+        TopOrders to ON lo.l_orderkey = to.o_orderkey
+    GROUP BY 
+        lo.l_orderkey
+)
+SELECT 
+    to.o_orderkey, 
+    to.o_orderdate, 
+    od.Revenue, 
+    od.TotalQuantity, 
+    od.AvgTax, 
+    n.n_name AS Nation
+FROM 
+    TopOrders to
+JOIN 
+    OrderDetails od ON to.o_orderkey = od.l_orderkey
+JOIN 
+    supplier s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_brand = (SELECT DISTINCT p2.p_brand FROM part p2 WHERE p2.p_partkey = (SELECT MIN(p3.p_partkey) FROM part p3 WHERE p3.p_size = 15)) AND p.p_size >= 10))
+    )
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+ORDER BY 
+    to.o_orderdate, od.Revenue DESC;

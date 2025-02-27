@@ -1,0 +1,55 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.ss_item_sk,
+        SUM(cs.ss_quantity) AS total_quantity,
+        SUM(cs.ss_net_paid) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        store_sales cs ON c.c_customer_sk = cs.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name
+),
+top_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_quantity,
+        cs.total_sales,
+        DENSE_RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        customer_sales cs
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_quantity,
+    tc.total_sales,
+    d.d_year,
+    COUNT(ws.ws_order_number) AS web_order_count,
+    AVG(ws.ws_net_profit) AS avg_web_profit
+FROM 
+    top_customers tc
+LEFT JOIN 
+    web_sales ws ON tc.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    tc.sales_rank <= 10
+GROUP BY 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_quantity,
+    tc.total_sales,
+    d.d_year
+ORDER BY 
+    tc.total_sales DESC;

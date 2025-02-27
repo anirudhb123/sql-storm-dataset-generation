@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        SUM(b.Class = 1) AS GoldBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        SUM(u.UpVotes) - SUM(u.DownVotes) > 100
+),
+PostLinksSummary AS (
+    SELECT 
+        pl.PostId,
+        COUNT(pl.RelatedPostId) AS RelatedPostCount
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+)
+SELECT 
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    CASE 
+        WHEN p.AuthorizedUserId IS NOT NULL THEN 'Yes'
+        ELSE 'No'
+    END AS IsAuthorized,
+    tu.DisplayName AS TopUser,
+    tu.TotalUpVotes,
+    tu.TotalDownVotes,
+    tu.GoldBadges,
+    pls.RelatedPostCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.Id AND v.VoteTypeId IN (2, 3)) AS VoteCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users p ON rp.OwnerUserId = p.Id
+LEFT JOIN 
+    TopUsers tu ON tu.TotalPosts > 5
+LEFT JOIN 
+    PostLinksSummary pls ON pls.PostId = rp.Id
+WHERE 
+    rp.Rank <= 10
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

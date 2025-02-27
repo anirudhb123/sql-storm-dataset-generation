@@ -1,0 +1,65 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id
+), TagStatistics AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalTagViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON POSITION(t.TagName IN p.Tags) > 0
+    GROUP BY 
+        t.Id
+), RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ua.DisplayName,
+    ua.QuestionCount,
+    ua.TotalViews,
+    ua.UpVoteCount,
+    ua.DownVoteCount,
+    ua.CommentCount,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalTagViews,
+    COALESCE(rph.LastEditDate, 'No Edits') AS LastEditDate
+FROM 
+    UserActivity ua
+FULL OUTER JOIN 
+    TagStatistics ts ON ua.QuestionCount > 0
+LEFT JOIN 
+    RecentPostHistory rph ON ua.UserId = rph.PostId
+WHERE 
+    ua.TotalViews IS NOT NULL
+ORDER BY 
+    ua.TotalViews DESC, 
+    ua.UpVoteCount DESC
+LIMIT 100;

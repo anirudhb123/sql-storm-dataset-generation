@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+top_sales AS (
+    SELECT 
+        sd.c_custkey,
+        sd.c_name,
+        sd.total_sales,
+        sd.sales_rank,
+        n.n_regionkey,
+        r.r_name AS region_name
+    FROM 
+        sales_data sd
+    JOIN 
+        nation n ON n.n_nationkey = (SELECT DISTINCT c.c_nationkey FROM customer c WHERE c.c_custkey = sd.c_custkey)
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        sd.sales_rank <= 5
+)
+SELECT 
+    ts.region_name,
+    COUNT(ts.c_custkey) AS customer_count,
+    SUM(ts.total_sales) AS total_sales_per_region,
+    MAX(ts.total_sales) AS max_sale,
+    MIN(ts.total_sales) AS min_sale,
+    AVG(ts.total_sales) AS avg_sale
+FROM 
+    top_sales ts
+GROUP BY 
+    ts.region_name
+ORDER BY 
+    total_sales_per_region DESC
+UNION ALL
+SELECT 
+    'Total' AS region_name,
+    COUNT(c.c_custkey) AS customer_count,
+    SUM(cl.l_extendedprice * (1 - cl.l_discount)) AS total_sales_per_region,
+    NULL AS max_sale,
+    NULL AS min_sale,
+    NULL AS avg_sale
+FROM 
+    customer c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem cl ON o.o_orderkey = cl.l_orderkey
+WHERE 
+    c.c_acctbal IS NOT NULL AND
+    cl.l_shipdate IS NOT NULL
+ORDER BY 
+    total_sales_per_region DESC;

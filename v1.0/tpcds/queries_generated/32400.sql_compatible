@@ -1,0 +1,68 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        cs_store_sk,
+        SUM(cs_sales_price) AS total_sales,
+        1 AS level
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk = (SELECT MAX(cs_sold_date_sk) FROM catalog_sales)
+    GROUP BY 
+        cs_store_sk
+    UNION ALL
+    SELECT 
+        cs.cs_store_sk,
+        sh.total_sales + SUM(cs.cs_sales_price) AS total_sales,
+        sh.level + 1
+    FROM 
+        catalog_sales cs
+    JOIN 
+        SalesHierarchy sh ON cs.cs_store_sk = sh.cs_store_sk
+    WHERE 
+        cs.cs_sold_date_sk < (SELECT MAX(cs_sold_date_sk) FROM catalog_sales)
+    GROUP BY 
+        cs.cs_store_sk, sh.total_sales, sh.level
+),
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+AggregateReturns AS (
+    SELECT 
+        cr.sr_item_sk AS cs_item_sk,
+        COALESCE(cr.total_returns, 0) / NULLIF(SUM(cs.cs_sales_price), 0) * 100 AS return_rate
+    FROM 
+        CustomerReturns cr
+    RIGHT JOIN 
+        catalog_sales cs ON cr.sr_item_sk = cs.cs_item_sk
+    GROUP BY 
+        cr.sr_item_sk
+),
+RankedSales AS (
+    SELECT 
+        sales.cs_store_sk,
+        sales.total_sales,
+        RANK() OVER (PARTITION BY sales.cs_store_sk ORDER BY sales.total_sales DESC) AS sales_rank
+    FROM 
+        SalesHierarchy sales
+)
+SELECT 
+    r.cs_store_sk,
+    r.total_sales,
+    a.return_rate,
+    r.sales_rank
+FROM 
+    RankedSales r
+JOIN 
+    AggregateReturns a ON r.cs_store_sk = a.cs_item_sk
+WHERE 
+    a.return_rate > 10
+ORDER BY 
+    r.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

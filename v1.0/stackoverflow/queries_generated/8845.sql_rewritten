@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, cast('2024-10-01 12:34:56' as timestamp))
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+TopRankedPosts AS (
+    SELECT 
+        r.PostId, 
+        r.Title, 
+        r.CreationDate, 
+        r.Score, 
+        r.CommentCount, 
+        r.UpVotes, 
+        r.DownVotes
+    FROM 
+        RankedPosts r
+    WHERE 
+        r.Rank <= 10
+)
+SELECT 
+    u.DisplayName, 
+    u.Reputation, 
+    u.AccountId, 
+    tr.PostId, 
+    tr.Title, 
+    tr.CreationDate, 
+    tr.Score, 
+    tr.CommentCount, 
+    tr.UpVotes, 
+    tr.DownVotes
+FROM 
+    TopRankedPosts tr
+JOIN 
+    Users u ON tr.PostId = u.Id
+ORDER BY 
+    tr.Score DESC, 
+    tr.CommentCount DESC;

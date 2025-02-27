@@ -1,0 +1,28 @@
+SELECT 
+    CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ', Price: $', FORMAT(ps.ps_supplycost, 2), ', Region: ', r.r_name) AS detailed_info,
+    SUM(l.l_quantity) AS total_quantity,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+FROM 
+    supplier AS s
+JOIN 
+    partsupp AS ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part AS p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem AS l ON p.p_partkey = l.l_partkey
+JOIN 
+    customer AS c ON c.c_custkey = l.l_orderkey
+JOIN 
+    nation AS n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region AS r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    s.s_acctbal > 1000 AND 
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    s.s_name, p.p_name, ps.ps_supplycost, r.r_name
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    net_revenue DESC
+LIMIT 10;

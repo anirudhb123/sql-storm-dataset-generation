@@ -1,0 +1,39 @@
+
+WITH TotalSales AS (
+    SELECT 
+        ws.bill_customer_sk, 
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    GROUP BY ws.bill_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_credit_rating, 
+        cd.cd_purchase_estimate
+    FROM customer_demographics cd
+)
+SELECT 
+    ca.ca_city, 
+    ca.ca_state, 
+    COUNT(DISTINCT cs.c_customer_sk) AS customer_count,
+    AVG(ts.total_sales) AS avg_sales,
+    MAX(ts.total_sales) AS max_sales,
+    MIN(ts.total_sales) AS min_sales,
+    STRING_AGG(DISTINCT cd.cd_gender) AS genders,
+    CASE 
+        WHEN AVG(ts.total_sales) IS NULL THEN 'No Sales'
+        ELSE 'Sales Recorded' 
+    END AS sales_status
+FROM customer_address ca
+LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN TotalSales ts ON c.c_customer_sk = ts.bill_customer_sk
+LEFT JOIN CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE ca.ca_state IN ('CA', 'NY') 
+    AND (cd.cd_marital_status IS NULL OR cd.cd_marital_status = 'S' OR cd.cd_marital_status = 'M')
+GROUP BY ca.ca_city, ca.ca_state
+HAVING COUNT(DISTINCT cs.c_customer_sk) > 5
+ORDER BY avg_sales DESC;

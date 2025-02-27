@@ -1,0 +1,82 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.orderkey,
+        o.custkey,
+        o.totalprice,
+        o.orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.custkey ORDER BY o.orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.orderstatus <> 'F' 
+        AND o.orderdate >= DATEADD(YEAR, -2, CAST('1998-10-01' AS DATE))
+),
+SupplierCosts AS (
+    SELECT 
+        ps.partkey,
+        ps.suppkey,
+        SUM(ps_supplycost * ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.partkey, ps.suppkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        COALESCE(rd.total_supply_cost, 0) AS total_supply_cost
+    FROM 
+        part p
+    LEFT JOIN SupplierCosts rd ON p.p_partkey = rd.partkey
+),
+CustomerSegment AS (
+    SELECT 
+        c.custkey,
+        CASE 
+            WHEN c.acctbal > 5000 THEN 'Premium' 
+            WHEN c.acctbal BETWEEN 1000 AND 5000 THEN 'Standard' 
+            ELSE 'Basic' 
+        END AS customer_segment,
+        COUNT(o.orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN orders o ON c.custkey = o.custkey
+    GROUP BY 
+        c.custkey, c.acctbal
+)
+SELECT 
+    cd.custkey,
+    cd.customer_segment,
+    SUM(pd.total_supply_cost) AS total_cost,
+    COUNT(DISTINCT ro.orderkey) AS total_orders,
+    AVG(pd.p_retailprice) AS avg_price
+FROM 
+    CustomerSegment cd
+JOIN 
+    RankedOrders ro ON cd.custkey = ro.custkey
+JOIN 
+    lineitem li ON ro.orderkey = li.orderkey
+JOIN 
+    PartDetails pd ON li.partkey = pd.p_partkey
+WHERE 
+    cd.customer_segment IN ('Premium', 'Standard') 
+    AND pd.total_supply_cost > 0 
+    AND (
+        EXISTS (
+            SELECT 1
+            FROM supplier s 
+            WHERE s.s_suppkey = li.suppkey 
+            AND s.s_acctbal IS NOT NULL
+        ) 
+        OR pd.p_brand NOT IN ('BrandX', 'BrandY')
+    )
+GROUP BY 
+    cd.custkey, cd.customer_segment
+HAVING 
+    COUNT(DISTINCT ro.orderkey) > 5
+ORDER BY 
+    total_cost DESC;

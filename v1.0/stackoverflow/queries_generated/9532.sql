@@ -1,0 +1,63 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(P.Score) AS AvgScore,
+        AVG(P.ViewCount) AS AvgViewCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 0
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        COUNT(DISTINCT P.Id) AS TotalPosts
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON T.Id = ANY (string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><')::int[])
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        TotalPosts DESC
+    LIMIT 10
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        MAX(B.Class) AS HighestBadge
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+)
+SELECT 
+    us.DisplayName,
+    us.TotalPosts,
+    us.TotalQuestions,
+    us.TotalAnswers,
+    us.AvgScore,
+    us.AvgViewCount,
+    tb.TagName,
+    ub.BadgeCount,
+    ub.HighestBadge
+FROM 
+    UserStats us
+JOIN 
+    UserBadges ub ON us.UserId = ub.UserId
+JOIN 
+    TopTags tb ON tb.TotalPosts > 0
+ORDER BY 
+    us.TotalPosts DESC, ub.BadgeCount DESC
+LIMIT 50; 

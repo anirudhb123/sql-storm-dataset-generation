@@ -1,0 +1,66 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrdersWithDiscounts AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount_discounted,
+        o.o_orderdate,
+        o.o_orderstatus
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1995-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_orderstatus
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_parts,
+        ss.total_supply_cost
+    FROM 
+        SupplierStats ss
+    WHERE 
+        ss.rn <= 3
+)
+SELECT 
+    t.s_name,
+    t.total_parts,
+    COALESCE(o.total_amount_discounted, 0) AS total_sales,
+    CASE 
+        WHEN t.total_supply_cost > 0 THEN ROUND((COALESCE(o.total_amount_discounted, 0) / t.total_supply_cost) * 100, 2)
+        ELSE NULL
+    END AS sales_to_supply_cost_ratio
+FROM 
+    TopSuppliers t
+LEFT JOIN 
+    OrdersWithDiscounts o ON t.s_suppkey = (
+        SELECT 
+            ps.ps_suppkey 
+        FROM 
+            partsupp ps 
+        JOIN 
+            part p ON ps.ps_partkey = p.p_partkey
+        WHERE 
+            p.p_brand = 'BrandX'
+        ORDER BY 
+            ps.ps_supplycost * ps.ps_availqty DESC
+        LIMIT 1
+    )
+ORDER BY 
+    sales_to_supply_cost_ratio DESC;

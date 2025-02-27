@@ -1,0 +1,71 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS movie_keyword,
+        1 AS level
+    FROM 
+        aka_title m
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        lm.linked_movie_id,
+        lm.linked_movie_id AS movie_title,
+        lm.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS movie_keyword,
+        mh.level + 1
+    FROM 
+        movie_link lm
+    JOIN 
+        movie_hierarchy mh ON lm.movie_id = mh.movie_id
+    LEFT JOIN
+        movie_keyword mk ON lm.linked_movie_id = mk.movie_id
+),
+
+top_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        mh.movie_keyword,
+        ROW_NUMBER() OVER (PARTITION BY mh.movie_keyword ORDER BY mh.production_year DESC) AS rn
+    FROM 
+        movie_hierarchy mh
+),
+
+actor_details AS (
+    SELECT 
+        a.id AS actor_id,
+        an.name AS actor_name,
+        ci.movie_id,
+        ci.nm_order,
+        ROW_NUMBER() OVER (PARTITION BY an.id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+)
+
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    tm.movie_keyword,
+    STRING_AGG(DISTINCT ad.actor_name, ', ') AS actors
+FROM 
+    top_movies tm
+LEFT JOIN 
+    actor_details ad ON tm.movie_id = ad.movie_id
+WHERE 
+    tm.rn <= 5 
+GROUP BY 
+    tm.movie_title, tm.production_year, tm.movie_keyword
+ORDER BY 
+    tm.production_year DESC, 
+    tm.movie_keyword;

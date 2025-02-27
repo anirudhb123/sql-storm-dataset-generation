@@ -1,0 +1,87 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(v.Upvotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+),
+PostWithBadges AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.UpVotes,
+        rp.DownVotes,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Badges b ON b.UserId = rp.OwnerUserId
+    WHERE 
+        rp.rn <= 5 
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.UpVotes, rp.DownVotes
+),
+ClosePostCount AS (
+    SELECT 
+        PostId, 
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory
+    WHERE 
+        PostHistoryTypeId = 10 
+    GROUP BY 
+        PostId
+),
+FinalCTE AS (
+    SELECT 
+        pwb.PostId,
+        pwb.Title,
+        pwb.CreationDate,
+        pwb.ViewCount,
+        pwb.Score,
+        pwb.UpVotes,
+        pwb.DownVotes,
+        COALESCE(cpc.CloseCount, 0) AS CloseCount,
+        CASE 
+            WHEN pwb.BadgeCount > 0 THEN 'Has Badges'
+            ELSE 'No Badges'
+        END AS BadgeStatus
+    FROM 
+        PostWithBadges pwb
+    LEFT JOIN 
+        ClosePostCount cpc ON pwb.PostId = cpc.PostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN CloseCount > 0 AND UpVotes > DownVotes THEN 'Potentially Valuable Topic'
+        WHEN CloseCount = 0 AND UpVotes = DownVotes THEN 'Neutral Engagement'
+        WHEN CloseCount = 0 AND UpVotes < DownVotes THEN 'Needs Attention'
+        ELSE 'Closed'
+    END AS EngagementStatus,
+    CONCAT('Title: ', Title, ' | Status: ', BadgeStatus) AS PostSummary
+FROM 
+    FinalCTE
+ORDER BY 
+    Score DESC, CreationDate DESC
+LIMIT 10;

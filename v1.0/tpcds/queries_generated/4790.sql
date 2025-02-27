@@ -1,0 +1,44 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.ext_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_year BETWEEN 1970 AND 1990
+    GROUP BY ws.bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        r.bill_customer_sk,
+        r.total_sales,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.web_page_sk) AS page_count
+    FROM RankedSales r
+    JOIN customer_demographics cd ON r.bill_customer_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON r.bill_customer_sk = ws.bill_customer_sk
+    WHERE r.sales_rank = 1
+    GROUP BY r.bill_customer_sk, r.total_sales, cd.cd_gender, cd.cd_marital_status
+),
+ReturnMetrics AS (
+    SELECT 
+        sr.returning_customer_sk,
+        SUM(sr.return_amt) AS total_returns,
+        COUNT(sr.return_quantity) AS total_return_items,
+        AVG(sr.return_ship_cost) AS avg_return_ship_cost
+    FROM store_returns sr
+    GROUP BY sr.returning_customer_sk
+)
+SELECT 
+    tc.bill_customer_sk,
+    tc.total_sales,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    COALESCE(rm.total_returns, 0) AS total_returns,
+    COALESCE(rm.total_return_items, 0) AS total_return_items,
+    COALESCE(rm.avg_return_ship_cost, 0) AS avg_return_ship_cost
+FROM TopCustomers tc
+LEFT JOIN ReturnMetrics rm ON tc.bill_customer_sk = rm.returning_customer_sk
+ORDER BY total_sales DESC, tc.bill_customer_sk;

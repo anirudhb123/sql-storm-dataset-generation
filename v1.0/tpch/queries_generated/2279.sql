@@ -1,0 +1,55 @@
+WITH NationSummary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(s.s_acctbal) AS total_acct_bal,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+OrderAggregate AS (
+    SELECT 
+        o.o_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY 
+        o.o_custkey
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    ns.n_name,
+    ns.total_acct_bal,
+    oa.total_spent,
+    spd.total_available,
+    spd.avg_supply_cost
+FROM 
+    NationSummary ns
+LEFT JOIN 
+    OrderAggregate oa ON ns.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = oa.o_custkey)
+LEFT JOIN 
+    SupplierPartDetails spd ON spd.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = oa.o_custkey))
+WHERE 
+    ns.total_acct_bal IS NOT NULL
+ORDER BY 
+    ns.total_acct_bal DESC, oa.total_spent DESC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

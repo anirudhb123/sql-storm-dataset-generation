@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, ',')) AS t(TagName) ON TRUE
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.OwnerUserId, p.CreationDate
+),
+PostVoteData AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11, 12)) AS CloseOpenCount,
+        MAX(ph.CreationDate) AS LastModification
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rv.UpVotes,
+        rv.DownVotes,
+        COALESCE(phs.CloseOpenCount, 0) AS CloseOpenCount,
+        COUNT(DISTINCT ph.UserDisplayName) FILTER (WHERE ph.UserDisplayName IS NOT NULL) AS EditorCount,
+        rp.Rank,
+        rp.CreationDate,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostVoteData rv ON rp.PostId = rv.PostId
+    LEFT JOIN 
+        PostHistory ph ON rp.PostId = ph.PostId
+    LEFT JOIN 
+        PostHistoryStats phs ON rp.PostId = phs.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score, rv.UpVotes, rv.DownVotes, phs.CloseOpenCount, rp.Rank, rp.CreationDate, rp.Tags
+)
+SELECT 
+    *,
+    CASE 
+        WHEN CloseOpenCount > 0 THEN 'Closed/Open'
+        WHEN UpVotes > DownVotes THEN 'Positive Feedback'
+        ELSE 'Negative or Neutral Feedback'
+    END AS FeedbackCategory,
+    CASE 
+        WHEN Tags IS NULL OR Tags = '' THEN 'No Tags'
+        ELSE Tags
+    END AS ProcessedTags
+FROM 
+    FinalResults
+WHERE 
+    Rank = 1
+ORDER BY 
+    Score DESC, CreationDate DESC
+FETCH FIRST 10 ROWS ONLY;

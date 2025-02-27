@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1
+    FROM 
+        aka_title e
+    INNER JOIN 
+        MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        ARRAY_AGG(DISTINCT ka.name) AS aka_names,
+        MAX(CASE WHEN p.gender = 'F' THEN ka.name END) AS female_cast_lead,
+        COUNT(DISTINCT c.id) AS cast_size,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        MovieHierarchy m
+    LEFT JOIN 
+        cast_info c ON m.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name ka ON c.person_id = ka.person_id
+    LEFT JOIN 
+        movie_keyword k ON m.movie_id = k.movie_id
+    GROUP BY 
+        m.movie_id, m.title, m.production_year
+),
+DetailedMovies AS (
+    SELECT 
+        md.*,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.cast_size DESC) AS rank_in_year
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    dm.title,
+    dm.production_year,
+    dm.cast_size,
+    dm.aka_names,
+    dm.female_cast_lead,
+    CASE 
+        WHEN dm.female_cast_lead IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS has_female_lead,
+    CASE 
+        WHEN dm.rank_in_year <= 5 THEN 'Top 5' 
+        ELSE NULL 
+    END AS top_performer
+FROM 
+    DetailedMovies dm
+WHERE 
+    (dm.keyword_count > 0 OR dm.cast_size > 10)
+ORDER BY 
+    dm.production_year DESC,
+    dm.cast_size DESC NULLS LAST;

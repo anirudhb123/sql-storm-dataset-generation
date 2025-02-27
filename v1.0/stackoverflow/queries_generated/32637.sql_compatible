@@ -1,0 +1,59 @@
+
+WITH RecursiveUserReputation AS (
+    SELECT Id, Reputation, CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY Id ORDER BY Reputation DESC) AS UserRank
+    FROM Users
+    WHERE Reputation IS NOT NULL
+),
+RecentPosts AS (
+    SELECT P.Id AS PostId, P.Title, P.CreationDate AS PostDate, U.DisplayName,
+           COALESCE(PCV.votes, 0) AS votes
+    FROM Posts P
+    INNER JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS votes 
+        FROM Votes 
+        WHERE VoteTypeId = 2  
+        GROUP BY PostId
+    ) PCV ON P.Id = PCV.PostId
+    WHERE P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+FrequentBadges AS (
+    SELECT U.Id AS UserId, B.Name AS BadgeName, COUNT(*) AS BadgeCount
+    FROM Badges B
+    INNER JOIN Users U ON B.UserId = U.Id
+    WHERE B.Date >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY U.Id, B.Name
+    HAVING COUNT(*) > 1
+),
+ClosedPostReasons AS (
+    SELECT PH.PostId, COUNT(*) AS CloseCount, STRING_AGG(DISTINCT CR.Name, ', ') AS Reasons
+    FROM PostHistory PH
+    INNER JOIN CloseReasonTypes CR ON PH.Comment = CR.Id
+    WHERE PH.PostHistoryTypeId = 10  
+    GROUP BY PH.PostId
+),
+UserPosts AS (
+    SELECT U.Id AS UserId, COUNT(P.Id) AS TotalPosts,
+           SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+           SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+)
+SELECT U.Id, U.DisplayName, U.Reputation, 
+       COALESCE(FB.BadgeCount, 0) AS FrequentBadges,
+       COALESCE(UP.TotalPosts, 0) AS TotalPosts,
+       COALESCE(UP.Questions, 0) AS Questions,
+       COALESCE(UP.Answers, 0) AS Answers,
+       RP.PostId, RP.Title, RP.PostDate,
+       RP.votes, CP.Reasons AS ClosedReasons,
+       RUR.UserRank
+FROM Users U
+LEFT JOIN FrequentBadges FB ON U.Id = FB.UserId
+LEFT JOIN UserPosts UP ON U.Id = UP.UserId
+LEFT JOIN RecentPosts RP ON U.Id = RP.OwnerUserId
+LEFT JOIN ClosedPostReasons CP ON RP.PostId = CP.PostId
+LEFT JOIN RecursiveUserReputation RUR ON U.Id = RUR.Id
+WHERE U.Reputation > 1000
+ORDER BY U.Reputation DESC;

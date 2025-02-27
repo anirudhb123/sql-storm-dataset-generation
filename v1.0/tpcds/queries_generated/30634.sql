@@ -1,0 +1,40 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_net_profit) DESC) AS sales_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        s_store_sk
+)
+
+SELECT 
+    ca.city,
+    ca.state,
+    SUM(total_net_profit) AS total_store_net_profit,
+    AVG(total_transactions) AS avg_transactions_per_store,
+    MAX(total_net_profit) AS max_net_profit,
+    MIN(total_net_profit) AS min_net_profit,
+    COALESCE(SUM(CASE WHEN cd_marital_status = 'M' THEN total_net_profit ELSE 0 END), 0) AS total_married_net_profit,
+    COALESCE(SUM(CASE WHEN cd_marital_status = 'S' THEN total_net_profit ELSE 0 END), 0) AS total_single_net_profit
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    sales_summary ss ON ca.ca_address_sk = ss.s_store_sk
+WHERE 
+    ca.country = 'USA'
+GROUP BY 
+    ca.city, ca.state
+HAVING 
+    SUM(total_net_profit) > 100000
+ORDER BY 
+    city, state;

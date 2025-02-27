@@ -1,0 +1,65 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        u.Reputation > 0
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+RankedUsers AS (
+    SELECT 
+        us.*,
+        RANK() OVER (ORDER BY us.Reputation DESC, us.TotalPosts DESC) AS ReputationRank,
+        DENSE_RANK() OVER (ORDER BY us.TotalBounty DESC) AS BountyRank
+    FROM 
+        UserStats us
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+)
+SELECT 
+    ru.UserId,
+    ru.DisplayName,
+    ru.Reputation,
+    ru.TotalPosts,
+    ru.QuestionCount,
+    ru.AnswerCount,
+    ru.TotalBounty,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score
+FROM 
+    RankedUsers ru
+LEFT JOIN 
+    RecentPosts rp ON ru.UserId = rp.OwnerUserId AND rp.RecentPostRank = 1
+WHERE 
+    ru.ReputationRank <= 50 
+    AND (rp.ViewCount IS NULL OR rp.ViewCount > 100)
+ORDER BY 
+    ru.Reputation DESC, 
+    ru.TotalBounty DESC;

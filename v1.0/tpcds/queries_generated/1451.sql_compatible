@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk, ws.ws_order_number, ws.ws_sold_date_sk
+),
+TopSales AS (
+    SELECT *
+    FROM RankedSales
+    WHERE rank <= 5
+),
+CustomerDetail AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        hd.hd_buy_potential
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+SalesWithCustomer AS (
+    SELECT 
+        ts.ws_order_number,
+        ts.total_quantity,
+        ts.total_net_paid,
+        cd.c_customer_id,
+        cd.cd_gender,
+        cd.hd_buy_potential
+    FROM 
+        TopSales ts
+    JOIN web_sales ws ON ts.ws_order_number = ws.ws_order_number
+    JOIN CustomerDetail cd ON ws.ws_bill_customer_sk = cd.c_customer_id
+)
+SELECT 
+    MAX(total_net_paid) AS max_net_paid,
+    AVG(total_net_paid) AS avg_net_paid,
+    COUNT(DISTINCT c_customer_id) AS unique_customers,
+    SUM(CASE WHEN cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+    SUM(CASE WHEN hd_buy_potential = 'Low' THEN 1 ELSE 0 END) AS low_buy_potential_count
+FROM 
+    SalesWithCustomer
+WHERE 
+    total_quantity > 0
+GROUP BY 
+    total_quantity, max_net_paid, avg_net_paid
+ORDER BY 
+    max_net_paid DESC
+FETCH FIRST 10 ROWS ONLY;

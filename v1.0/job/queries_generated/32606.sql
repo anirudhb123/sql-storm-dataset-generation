@@ -1,0 +1,66 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT c.person_id, 
+           c.movie_id, 
+           a.name, 
+           1 AS level
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    WHERE c.role_id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT c.person_id, 
+           c.movie_id, 
+           a.name, 
+           ah.level + 1
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN ActorHierarchy ah ON c.movie_id = ah.movie_id
+    WHERE c.role_id IS NOT NULL AND ah.level < 5  -- Limits depth of recursion
+),
+MovieTitles AS (
+    SELECT t.id AS movie_id,
+           t.title,
+           t.production_year,
+           COUNT(c.id) AS cast_count
+    FROM title t
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    GROUP BY t.id, t.title, t.production_year
+),
+CompanyDetails AS (
+    SELECT mc.movie_id,
+           ct.kind AS company_type,
+           cn.name AS company_name,
+           COUNT(mc.id) AS company_count
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id, ct.kind, cn.name
+),
+KeywordStats AS (
+    SELECT mk.movie_id,
+           STRING_AGG(k.keyword, ', ') AS keywords_string,
+           COUNT(mk.id) AS keyword_count
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+SELECT mt.movie_id,
+       mt.title,
+       mt.production_year,
+       COALESCE(ah.level, 0) AS actor_levels,
+       COALESCE(cd.company_count, 0) AS company_count,
+       COALESCE(ks.keywords_string, 'No Keywords') AS keywords,
+       EXISTS (
+           SELECT 1 
+           FROM movie_info mi 
+           WHERE mi.movie_id = mt.movie_id 
+             AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'box office')
+       ) AS has_box_office_info,
+       RANK() OVER (PARTITION BY mt.production_year ORDER BY mt.cast_count DESC) AS rank_within_year
+FROM MovieTitles mt
+LEFT JOIN ActorHierarchy ah ON mt.movie_id = ah.movie_id
+LEFT JOIN CompanyDetails cd ON mt.movie_id = cd.movie_id
+LEFT JOIN KeywordStats ks ON mt.movie_id = ks.movie_id
+ORDER BY mt.production_year DESC, rank_within_year
+LIMIT 100;

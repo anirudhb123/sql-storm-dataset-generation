@@ -1,0 +1,59 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal > (
+        SELECT AVG(c_acctbal)
+        FROM customer
+    )
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE ch.level < 2
+),
+SalesSummary AS (
+    SELECT 
+        l.l_shipparty AS ship_party,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE l.l_shipdate >= '1997-01-01' AND l.l_shipdate < '1998-01-01'
+    GROUP BY l.l_shipparty
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+PartSupplierCount AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT 
+    p.p_name, 
+    p.p_brand, 
+    p.p_type, 
+    COALESCE(HVC.total_spent, 0) AS high_value_customer_spent,
+    COALESCE(SC.supplier_count, 0) AS supplier_count,
+    S.total_sales AS total_sales,
+    SUM(CASE WHEN C.level > 0 THEN 1 ELSE 0 END) AS hierarchy_level_count
+FROM part p
+LEFT JOIN HighValueCustomers HVC ON p.p_partkey = HVC.c_custkey
+LEFT JOIN PartSupplierCount SC ON p.p_partkey = SC.p_partkey
+LEFT JOIN SalesSummary S ON p.p_partkey = S.ship_party
+LEFT JOIN CustomerHierarchy C ON 1 = 1
+WHERE p.p_retailprice BETWEEN 20.00 AND 200.00
+GROUP BY p.p_name, p.p_brand, p.p_type, HVC.total_spent, SC.supplier_count, S.total_sales
+ORDER BY total_sales DESC NULLS LAST
+LIMIT 100;

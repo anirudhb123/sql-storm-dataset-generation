@@ -1,0 +1,49 @@
+-- Performance Benchmarking Query
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        SUM(coalesce(ph.Id, 0)) AS PostHistoryCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        u.Id
+),
+TagStatistics AS (
+    SELECT
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(pt.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostCount,
+    ua.UpVotes,
+    ua.DownVotes,
+    ua.PostHistoryCount,
+    ts.TagId,
+    ts.TagName,
+    ts.PostCount AS TagPostCount
+FROM 
+    UserActivity ua
+JOIN 
+    TagStatistics ts ON ua.PostCount > 0
+ORDER BY 
+    ua.PostCount DESC, ua.UpVotes DESC;

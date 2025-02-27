@@ -1,0 +1,59 @@
+WITH RECURSIVE top_customers AS (
+    SELECT c_custkey, c_name, c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c_nationkey ORDER BY c_acctbal DESC) AS rank
+    FROM customer
+    WHERE c_acctbal IS NOT NULL
+),
+high_value_parts AS (
+    SELECT p_partkey, p_name, p_brand,
+           COUNT(l.l_orderkey) AS order_count,
+           SUM(l.l_quantity) AS total_quantity,
+           CASE 
+               WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000 THEN 'High Value'
+               ELSE 'Low Value'
+           END AS part_value_category
+    FROM part p
+    LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+    GROUP BY p_partkey, p_name, p_brand
+),
+supplier_overview AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS nation_name,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           (SELECT COUNT(*) 
+            FROM partsupp ps2 
+            WHERE ps2.ps_suppkey = s.s_suppkey AND ps2.ps_availqty > 0) AS active_parts
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+),
+complex_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+)
+SELECT 
+    c.c_name, 
+    c.c_acctbal, 
+    r.r_name AS region_name,
+    hp.p_name, 
+    hp.order_count, 
+    hp.part_value_category, 
+    so.s_name AS supplier_name,
+    so.total_supply_cost,
+    CASE 
+        WHEN co.total_order_value IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status
+FROM customer c
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN top_customers tc ON c.c_custkey = tc.c_custkey
+LEFT JOIN high_value_parts hp ON hp.order_count >= 5
+LEFT JOIN supplier_overview so ON so.nation_name = n.n_name
+LEFT JOIN complex_orders co ON co.o_custkey = c.c_custkey
+WHERE tc.rank <= 3 AND r.r_name IS NOT NULL
+ORDER BY c.c_acctbal DESC, hp.total_quantity DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

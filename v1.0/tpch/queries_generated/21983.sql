@@ -1,0 +1,60 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+), 
+CriticalParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(ps_supplycost * ps_availqty) FROM partsupp ps)
+), 
+NationSummary AS (
+    SELECT 
+        n.n_nationkey, 
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        MAX(c.c_acctbal) AS highest_customer_acctbal
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        customer c ON c.c_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_nationkey
+)
+
+SELECT 
+    r.r_name,
+    ns.supplier_count,
+    ns.highest_customer_acctbal,
+    cp.p_name,
+    cp.total_supply_cost,
+    COALESCE(RANK() OVER (PARTITION BY r.r_regionkey ORDER BY cp.total_supply_cost DESC), 0) AS part_rank
+FROM 
+    region r
+LEFT JOIN 
+    NationSummary ns ON r.r_regionkey = ns.n_nationkey
+JOIN 
+    CriticalParts cp ON cp.p_partkey = CASE 
+        WHEN ns.highest_customer_acctbal IS NULL THEN cp.p_partkey 
+        ELSE (SELECT TOP 1 cp2.p_partkey FROM CriticalParts cp2 WHERE cp2.total_supply_cost < cp.total_supply_cost ORDER BY cp2.total_supply_cost DESC)
+    END
+WHERE 
+    (ns.supplier_count > 1 OR ns.highest_customer_acctbal IS NOT NULL) 
+    AND r.r_name NOT LIKE '%a%'
+ORDER BY 
+    r.r_name, part_rank
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

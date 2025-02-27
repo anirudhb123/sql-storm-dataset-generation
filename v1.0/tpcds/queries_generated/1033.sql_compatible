@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        RANK() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price DESC) AS SalesRank,
+        COALESCE(SUM(sr.sr_return_quantity) OVER (PARTITION BY ws.ws_order_number), 0) AS TotalReturns,
+        COALESCE(SUM(cr.cr_return_quantity) OVER (PARTITION BY ws.ws_order_number), 0) AS CatalogReturns
+    FROM web_sales ws
+    LEFT JOIN store_returns sr ON ws.ws_order_number = sr.sr_ticket_number
+    LEFT JOIN catalog_returns cr ON ws.ws_order_number = cr.cr_order_number
+    WHERE 
+        ws.ws_sales_price > 0
+        AND ws.ws_quantity > 0
+),
+BestSellingItems AS (
+    SELECT 
+        rs.ws_item_sk,
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS TotalSales,
+        COUNT(DISTINCT rs.ws_order_number) AS UniqueOrders
+    FROM RankedSales rs
+    WHERE rs.SalesRank = 1
+    GROUP BY rs.ws_item_sk
+),
+ItemDemographics AS (
+    SELECT 
+        i.i_item_id,
+        i.i_brand,
+        id.ib_lower_bound,
+        id.ib_upper_bound,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM item i
+    JOIN income_band id ON i.i_item_sk = id.ib_income_band_sk
+    JOIN customer_demographics cd ON i.i_item_sk = cd.cd_demo_sk
+)
+SELECT 
+    ibi.i_item_id,
+    ibi.i_brand,
+    ibi.ib_lower_bound,
+    ibi.ib_upper_bound,
+    SUM(bsi.TotalSales) AS TotalSales,
+    AVG(bsi.UniqueOrders) AS AvgOrdersPerItem,
+    AVG(CASE WHEN cd.cd_gender = 'M' THEN cd.cd_purchase_estimate END) AS AvgMalePurchaseEstimate,
+    AVG(CASE WHEN cd.cd_gender = 'F' THEN cd.cd_purchase_estimate END) AS AvgFemalePurchaseEstimate
+FROM BestSellingItems bsi
+JOIN ItemDemographics ibi ON bsi.ws_item_sk = ibi.i_item_sk
+GROUP BY 
+    ibi.i_item_id, 
+    ibi.i_brand, 
+    ibi.ib_lower_bound, 
+    ibi.ib_upper_bound
+HAVING 
+    SUM(bsi.TotalSales) > 10000 AND 
+    AVG(bsi.UniqueOrders) > 2
+ORDER BY 
+    TotalSales DESC;

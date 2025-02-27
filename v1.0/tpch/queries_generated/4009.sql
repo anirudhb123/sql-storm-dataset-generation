@@ -1,0 +1,67 @@
+WITH SupplierOrderStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= '2022-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_revenue,
+        ss.order_count
+    FROM 
+        SupplierOrderStats ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+    WHERE 
+        ss.revenue_rank <= 5
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate BETWEEN '2022-01-01' AND '2023-10-31'
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    ts.s_suppkey,
+    ts.s_name,
+    tos.total_spent,
+    CASE 
+        WHEN tos.total_spent IS NULL THEN 'No Orders'
+        ELSE tos.total_spent
+    END AS customer_spending,
+    RANK() OVER (ORDER BY ts.total_revenue DESC) AS supplier_rank,
+    CASE 
+        WHEN ts.order_count > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS supplier_status
+FROM 
+    TopSuppliers ts
+LEFT JOIN 
+    CustomerOrderStats tos ON ts.s_suppkey = tos.c_custkey
+ORDER BY 
+    ts.total_revenue DESC, ts.s_name;

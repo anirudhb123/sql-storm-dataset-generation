@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.TagCount,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        (SELECT COUNT(DISTINCT c.Id) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+PostTags AS (
+    SELECT 
+        fp.PostId,
+        STRING_AGG(TRIM(SUBSTRING(t.TagName, 1, 35)), ', ') AS Tags
+    FROM 
+        FilteredPosts fp
+    JOIN 
+        UNNEST(string_to_array(substring(fp.Tags, 2, length(fp.Tags)-2), '><')) AS tag_name 
+        ON true
+    JOIN 
+        Tags t ON TRIM(tag_name) = t.TagName
+    GROUP BY 
+        fp.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.AnswerCount,
+    fp.CommentCount,
+    pt.Name AS PostType,
+    fp.OwnerDisplayName,
+    pt.Id AS PostTypeId,
+    pt.Name AS PostType,
+    pt.Id AS PostTypeId,
+    pt.Name AS PostType,
+    pt.Id AS PostTypeId,
+    pt.Name AS PostType,
+    pt.Id AS PostTypeId,
+    COALESCE(pt.Name, 'Unknown') AS PostType,
+    pt.Name AS PostType,
+    pt.Id AS PostTypeId
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostTags pt ON fp.PostId = pt.PostId
+ORDER BY 
+    fp.Score DESC;

@@ -1,0 +1,57 @@
+WITH RECURSIVE SupplierRank AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS rank_level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sr.rank_level + 1
+    FROM supplier s
+    JOIN SupplierRank sr ON s.s_acctbal > sr.s_acctbal
+),
+AggregatedLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+NationRevenue AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        SUM(al.total_revenue) AS nation_revenue
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN AggregatedLineItems al ON l.l_orderkey = al.l_orderkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    SUM(nr.nation_revenue) AS total_nation_revenue,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(cr.total_spent) AS average_customer_spent,
+    sr.rank_level AS supplier_rank
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN NationRevenue nr ON n.n_nationkey = nr.n_nationkey
+LEFT JOIN CustomerOrders cr ON nr.nation_revenue IS NOT NULL
+JOIN SupplierRank sr ON sr.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 100
+)
+GROUP BY r.r_name, n.n_name, sr.rank_level
+ORDER BY total_nation_revenue DESC, customer_count ASC;

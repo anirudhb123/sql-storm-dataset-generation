@@ -1,0 +1,67 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1996-01-01'
+),
+high_value_orders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice
+    FROM 
+        ranked_orders ro
+    WHERE 
+        ro.price_rank <= 5
+),
+supplier_part_lines AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        SUM(l.l_quantity) AS total_quantity
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        s.s_acctbal > 1000.00
+    GROUP BY 
+        ps.ps_partkey, s.s_suppkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COALESCE(hvo.o_orderkey, 'No Order') AS order_key,
+    COALESCE(hvo.o_orderdate, '1970-01-01') AS order_date,
+    COALESCE(hvo.o_totalprice, 0.00) AS total_order_price,
+    sp.total_quantity
+FROM 
+    part p
+LEFT JOIN 
+    high_value_orders hvo ON p.p_partkey = ANY (
+        SELECT 
+            line.l_partkey
+        FROM 
+            lineitem line
+        JOIN 
+            orders ord ON line.l_orderkey = ord.o_orderkey
+        WHERE 
+            ord.o_orderdate BETWEEN DATE '1995-01-01' AND DATE '1996-01-01')
+LEFT JOIN 
+    supplier_part_lines sp ON sp.ps_partkey = p.p_partkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+ORDER BY 
+    total_order_price DESC,
+    p.p_name ASC;

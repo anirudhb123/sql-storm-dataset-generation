@@ -1,0 +1,71 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COUNT(DISTINCT m.id) AS company_count,
+        STRING_AGG(DISTINCT c.name, ', ') AS companies
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        t.title, t.production_year, t.kind_id
+),
+MovieGenres AS (
+    SELECT 
+        t.title,
+        k.keyword AS genre,
+        t.production_year
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+DirectorMovies AS (
+    SELECT 
+        a.name AS director_name,
+        t.title,
+        t.production_year
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    WHERE 
+        ci.person_role_id = (SELECT id FROM role_type WHERE role = 'Director')
+),
+FinalBenchmark AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.company_count,
+        rm.companies,
+        STRING_AGG(DISTINCT mg.genre, ', ') AS genres,
+        STRING_AGG(DISTINCT dm.director_name, ', ') AS directors
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieGenres mg ON rm.title = mg.title AND rm.production_year = mg.production_year
+    LEFT JOIN 
+        DirectorMovies dm ON rm.title = dm.title AND rm.production_year = dm.production_year
+    GROUP BY 
+        rm.title, rm.production_year, rm.company_count, rm.companies
+)
+SELECT 
+    title,
+    production_year,
+    company_count,
+    companies,
+    genres,
+    directors
+FROM 
+    FinalBenchmark
+ORDER BY 
+    production_year DESC, company_count DESC;

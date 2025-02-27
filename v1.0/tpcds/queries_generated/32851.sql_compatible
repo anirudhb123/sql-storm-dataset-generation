@@ -1,0 +1,42 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_birth_month, c_birth_year,
+           NULL AS parent_customer_sk
+    FROM customer
+    WHERE c_birth_month BETWEEN 1 AND 6
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_birth_month, c.c_birth_year,
+           ch.c_customer_sk
+    FROM customer_hierarchy ch
+    JOIN customer c ON ch.c_customer_sk <> c.c_customer_sk AND c.c_birth_year = ch.c_birth_year
+)
+
+SELECT 
+    ca.city AS customer_city,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    SUM(CASE WHEN cd.cd_gender = 'M' THEN 1 ELSE 0 END) AS male_customers,
+    SUM(CASE WHEN cd.cd_marital_status = 'S' THEN 1 ELSE 0 END) AS single_customers,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    (SELECT DISTINCT cs_ship_customer_sk
+     FROM catalog_sales
+     WHERE cs_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    ) sales ON sales.cs_ship_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    customer_hierarchy ch ON ch.c_customer_sk = c.c_customer_sk
+GROUP BY 
+    ca.city, c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_birth_month, c.c_birth_year, 
+    cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+HAVING 
+    COUNT(DISTINCT c.c_customer_sk) > 100
+ORDER BY 
+    avg_purchase DESC
+LIMIT 10;

@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk, 
+        ws.item_sk, 
+        ws_quantity,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws_ext_sales_price DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE
+        ws.bill_customer_sk IS NOT NULL
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd_income_band_sk IS NOT NULL
+),
+TopItems AS (
+    SELECT 
+        rs.bill_customer_sk,
+        rs.item_sk,
+        SUM(rs.ws_quantity) AS total_quantity,
+        AVG(rs.ws_ext_sales_price) AS avg_price
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rn <= 5
+    GROUP BY 
+        rs.bill_customer_sk, rs.item_sk
+),
+CustomerIncome AS (
+    SELECT 
+        c.c_customer_sk,
+        CASE 
+            WHEN ib.ib_income_band_sk IS NULL THEN 'Unknown'
+            WHEN ib.ib_lower_bound <= 10000 THEN 'Low Income'
+            WHEN ib.ib_lower_bound > 10000 AND ib.ib_upper_bound < 50000 THEN 'Middle Income'
+            ELSE 'High Income'
+        END AS income_range
+    FROM 
+        customer c
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT 
+    ci.income_range, 
+    ti.item_sk, 
+    SUM(ti.total_quantity) AS total_item_sales,
+    AVG(ti.avg_price) AS avg_item_price
+FROM 
+    TopItems ti
+JOIN 
+    CustomerIncome ci ON ti.bill_customer_sk = ci.c_customer_sk
+GROUP BY 
+    ci.income_range, ti.item_sk
+ORDER BY 
+    ci.income_range, total_item_sales DESC;

@@ -1,0 +1,47 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id AS customer_id,
+        d.d_year AS sales_year,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY d.d_year ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2020 AND 2022
+    GROUP BY 
+        c.c_customer_id, d.d_year
+),
+TopCustomers AS (
+    SELECT 
+        customer_id, sales_year, total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 10
+)
+SELECT 
+    tc.customer_id,
+    tc.sales_year,
+    tc.total_sales,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ca.ca_city,
+    s.s_store_name
+FROM 
+    TopCustomers tc
+JOIN 
+    customer_demographics cd ON tc.customer_id = cd.c_customer_id
+JOIN 
+    customer_address ca ON cd.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    store s ON s.s_store_sk IN (
+        SELECT ss.sr_store_sk FROM store_sales ss WHERE ss.ss_customer_sk = tc.customer_id
+    )
+ORDER BY 
+    tc.sales_year, tc.total_sales DESC;

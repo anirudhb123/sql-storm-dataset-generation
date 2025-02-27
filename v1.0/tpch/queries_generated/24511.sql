@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sc.level + 1
+    FROM supplier s
+    JOIN SupplyChain sc ON s.s_nationkey = (SELECT n.n_nationkey 
+                                            FROM nation n 
+                                            WHERE n.n_name LIKE 'A%' 
+                                            LIMIT 1)
+    WHERE sc.level < 5
+), 
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, COALESCE(SUM(ps.ps_availqty), 0) AS total_available
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+),
+HighValueOrders AS (
+    SELECT DISTINCT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F') AND l.l_discount BETWEEN 0.1 AND 0.5
+    GROUP BY o.o_orderkey
+    HAVING total_value > 1000
+)
+SELECT pd.p_name,
+       pd.p_retailprice,
+       pd.total_available,
+       COALESCE(SUM(hvo.total_value), 0) AS high_value_order_total,
+       CASE 
+           WHEN pd.total_available IS NULL THEN 'Unavailable'
+           WHEN pd.total_available < 50 THEN 'Low Stock'
+           ELSE 'In Stock'
+       END AS stock_status,
+       ROW_NUMBER() OVER (PARTITION BY pd.p_name ORDER BY pd.p_retailprice DESC) AS pricing_rank,
+       LEAD(pd.p_retailprice) OVER (ORDER BY pd.p_retailprice) AS next_higher_price
+FROM PartDetails pd
+LEFT JOIN HighValueOrders hvo ON pd.p_partkey IN (SELECT ps.ps_partkey 
+                                                   FROM partsupp ps 
+                                                   WHERE ps.ps_supplycost < 300) 
+GROUP BY pd.p_name, pd.p_retailprice, pd.total_available
+ORDER BY stock_status, high_value_order_total DESC, pd.p_retailprice ASC;
+
+SELECT * FROM SupplyChain WHERE level > 0
+UNION ALL
+SELECT DISTINCT s.s_suppkey, s.s_name, s.s_acctbal 
+FROM supplier s
+WHERE s.s_nationkey IS NULL
+ORDER BY s_suppkey;

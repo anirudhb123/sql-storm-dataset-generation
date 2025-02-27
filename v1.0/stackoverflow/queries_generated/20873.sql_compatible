@@ -1,0 +1,67 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostHistoryTypeId,
+        ph.PostId,
+        ph.CreationDate,
+        p.Title,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RN
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+PostDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 24 THEN ph.CreationDate END) AS LastEditApplied,
+        COUNT(DISTINCT v.UserId) AS TotalVoters
+    FROM 
+        RecursivePostHistory ph
+    LEFT JOIN 
+        Votes v ON ph.PostId = v.PostId    
+    GROUP BY 
+        ph.PostId
+),
+PostAnalysis AS (
+    SELECT 
+        pd.PostId,
+        pd.CloseReopenCount,
+        pd.LastEditApplied,
+        COALESCE(u.DisplayName, 'Unknown') AS LastEditor,
+        p.Body,
+        p.ViewCount,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT STRING_AGG(DISTINCT t.TagName, ', ') FROM Tags t WHERE t.Id IN (SELECT CAST(UNNEST(string_to_array(p.Tags, '><')) AS INTEGER))) AS TagList
+    FROM 
+        PostDetails pd
+    JOIN 
+        Posts p ON pd.PostId = p.Id
+    LEFT JOIN 
+        Users u ON p.LastEditorUserId = u.Id
+)
+SELECT 
+    pa.PostId,
+    pa.CloseReopenCount,
+    pa.LastEditApplied,
+    pa.LastEditor,
+    pa.ViewCount,
+    pa.CommentCount,
+    CASE 
+        WHEN pa.ViewCount > 1000 THEN 'High Traffic'
+        WHEN pa.ViewCount BETWEEN 500 AND 1000 THEN 'Medium Traffic'
+        ELSE 'Low Traffic' 
+    END AS TrafficCategory,
+    pa.TagList
+FROM 
+    PostAnalysis pa
+WHERE 
+    pa.LastEditApplied IS NOT NULL
+ORDER BY 
+    pa.CloseReopenCount DESC, pa.ViewCount DESC
+LIMIT 10;

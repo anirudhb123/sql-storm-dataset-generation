@@ -1,0 +1,53 @@
+WITH RecursivePostHierarchy AS (
+    SELECT p.Id, p.Title, p.PostTypeId, p.AcceptedAnswerId, p.ParentId,
+           1 AS Level, 
+           (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount
+    FROM Posts p
+    WHERE p.ParentId IS NULL -- Start with questions
+    UNION ALL
+    SELECT p.Id, p.Title, p.PostTypeId, p.AcceptedAnswerId, p.ParentId,
+           rp.Level + 1, 
+           (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rp ON rp.Id = p.ParentId
+),
+PostVotes AS (
+    SELECT p.Id, 
+           COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes, -- Upvotes
+           COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes  -- Downvotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+PostSummary AS (
+    SELECT rp.Id,
+           rp.Title,
+           rp.Level,
+           COALESCE(b.Name, 'No Badge') AS Badge,
+           pv.UpVotes,
+           pv.DownVotes,
+           (pv.UpVotes - pv.DownVotes) AS NetVotes
+    FROM RecursivePostHierarchy rp
+    LEFT JOIN (
+        SELECT UserId, 
+               STRING_AGG(Name, ', ') AS Name
+        FROM Badges 
+        GROUP BY UserId
+    ) b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = rp.Id) -- Get badge names by owner
+    LEFT JOIN PostVotes pv ON pv.Id = rp.Id
+)
+SELECT ps.*, 
+       CASE 
+           WHEN ps.NetVotes > 0 THEN 'Popular'
+           WHEN ps.NetVotes < 0 THEN 'Unpopular'
+           ELSE 'Neutral'
+       END AS Popularity
+FROM PostSummary ps
+ORDER BY ps.Level, ps.NetVotes DESC
+LIMIT 100;
+
+-- NOTE: The given query constructs an elaborate performance benchmarking scenario
+-- by combining a recursive CTE for post hierarchy, summarization of vote counts,
+-- and leveraging various SQL constructs. This query generates a hierarchy of posts,
+-- calculates upvotes and downvotes, and assigns popularity statuses,
+-- which can create interesting performance variations when executed.

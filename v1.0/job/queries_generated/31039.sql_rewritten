@@ -1,0 +1,36 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, 
+           t.title,
+           t.production_year,
+           0 AS level
+    FROM aka_title t
+    JOIN movie_companies mc ON t.id = mc.movie_id
+    WHERE mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Production')
+    
+    UNION ALL
+    
+    SELECT t.id AS movie_id, 
+           t.title,
+           t.production_year,
+           mh.level + 1
+    FROM aka_title t
+    JOIN movie_link ml ON t.id = ml.movie_id
+    JOIN MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+)
+
+SELECT 
+    m.title AS Movie_Title,
+    m.production_year AS Production_Year,
+    COUNT(c.person_id) AS Cast_Count,
+    AVG(p.info) AS Average_Age,
+    STRING_AGG(DISTINCT a.name, ', ') AS Actors,
+    MAX(mh.level) AS Max_Link_Level
+FROM MovieHierarchy mh
+JOIN cast_info c ON mh.movie_id = c.movie_id
+JOIN person_info p ON c.person_id = p.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'age')
+JOIN aka_name a ON c.person_id = a.person_id
+WHERE mh.production_year > 2000 
+  AND a.name IS NOT NULL
+GROUP BY m.title, m.production_year
+HAVING COUNT(c.person_id) > 5
+ORDER BY Production_Year DESC;

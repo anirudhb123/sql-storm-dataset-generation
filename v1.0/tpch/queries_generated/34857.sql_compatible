@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SupplyCostCTE AS (
+    SELECT ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, 1 AS level
+    FROM partsupp
+    WHERE ps_availqty > 0
+
+    UNION ALL
+
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty - cte.ps_availqty, ps.ps_supplycost, cte.level + 1
+    FROM partsupp ps
+    JOIN SupplyCostCTE cte ON ps.ps_partkey = cte.ps_partkey
+    WHERE ps.ps_suppkey != cte.ps_suppkey AND ps.ps_availqty > cte.ps_availqty
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1996-01-01'
+    GROUP BY o.o_orderkey
+),
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    SUM(sp.ps_availqty) AS total_available_quantity,
+    COALESCE(SUM(osc.total_sales), 0) AS total_sales,
+    RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank,
+    CASE 
+        WHEN SUM(sp.ps_availqty) > 100 THEN 'High Availability'
+        WHEN SUM(sp.ps_availqty) BETWEEN 50 AND 100 THEN 'Medium Availability'
+        ELSE 'Low Availability'
+    END AS availability_status,
+    nr.r_name AS region_name
+FROM part p
+LEFT JOIN partsupp sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN OrderSummary osc ON p.p_partkey = osc.o_orderkey
+LEFT JOIN NationRegion nr ON sp.ps_suppkey IN (SELECT s.s_nationkey FROM supplier s WHERE s.s_nationkey = nr.n_nationkey)
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_brand, 
+    p.p_retailprice, 
+    nr.r_name
+HAVING SUM(sp.ps_availqty) IS NOT NULL
+ORDER BY total_available_quantity DESC, p.p_name;

@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.ViewCount > 100
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserId,
+        ph.UserDisplayName
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TagCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id IN (SELECT unnest(string_to_array(p.Tags, '>'))::int)
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 5
+)
+SELECT 
+    us.DisplayName,
+    us.TotalPosts,
+    us.PositivePosts,
+    us.NegativePosts,
+    COALESCE(SUM(CASE WHEN cp.PostId IS NOT NULL THEN 1 END), 0) AS ClosedPostsCount,
+    STRING_AGG(DISTINCT tt.TagName, ', ') AS TopTags,
+    COUNT(rp.Id) AS RecentPostsCount,
+    MAX(rp.CreationDate) AS LastPostDate
+FROM 
+    UserStatistics us
+LEFT JOIN 
+    ClosedPosts cp ON us.UserId = cp.UserId
+LEFT JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId AND rp.rn <= 5
+LEFT JOIN 
+    TopTags tt ON tt.TagCount > 0
+GROUP BY 
+    us.UserId, us.DisplayName
+HAVING 
+    us.TotalPosts > 10
+ORDER BY 
+    us.TotalPosts DESC, us.PositivePosts DESC;

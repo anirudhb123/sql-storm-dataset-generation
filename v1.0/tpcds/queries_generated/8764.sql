@@ -1,0 +1,49 @@
+
+WITH sales_summary AS (
+    SELECT 
+        cd.gender,
+        hd.hd_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(ws.ws_net_profit) AS total_profit,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_net_paid) AS avg_net_paid
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+        AND dd.d_moy IN (1, 2, 3) -- First quarter
+    GROUP BY 
+        cd.gender, hd.hd_income_band_sk
+), ranked_sales AS (
+    SELECT 
+        gender,
+        hd_income_band_sk,
+        customer_count,
+        total_profit,
+        total_quantity,
+        avg_net_paid,
+        RANK() OVER (PARTITION BY gender ORDER BY total_profit DESC) AS profit_rank
+    FROM 
+        sales_summary
+)
+SELECT 
+    rs.gender,
+    rs.hd_income_band_sk,
+    rs.customer_count,
+    rs.total_profit,
+    rs.total_quantity,
+    rs.avg_net_paid
+FROM 
+    ranked_sales rs
+WHERE 
+    rs.profit_rank <= 3 -- Top 3 income bands by profit for each gender
+ORDER BY 
+    rs.gender, rs.total_profit DESC;

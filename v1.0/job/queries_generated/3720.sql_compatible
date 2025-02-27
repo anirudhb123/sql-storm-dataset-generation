@@ -1,0 +1,43 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY kc.id) AS rank
+    FROM aka_title mt
+    JOIN movie_keyword mk ON mt.id = mk.movie_id
+    JOIN keyword kc ON mk.keyword_id = kc.id
+    WHERE mt.production_year IS NOT NULL
+),
+FilteredCast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM cast_info ci
+    GROUP BY ci.movie_id
+),
+DetailedMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        fc.actor_count,
+        COALESCE(i.info, 'No Info') AS movie_info
+    FROM RankedMovies rm
+    LEFT JOIN FilteredCast fc ON rm.id = fc.movie_id
+    LEFT JOIN movie_info i ON rm.id = i.movie_id AND i.info_type_id = (SELECT id FROM info_type WHERE info = 'Tagline') 
+    WHERE rm.rank <= 5
+)
+SELECT 
+    dm.title,
+    dm.production_year,
+    dm.actor_count,
+    dm.movie_info,
+    CASE 
+        WHEN dm.actor_count > 10 THEN 'Large Cast'
+        WHEN dm.actor_count BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM DetailedMovies dm
+WHERE dm.actor_count IS NOT NULL
+ORDER BY dm.production_year DESC, dm.actor_count DESC
+LIMIT 10;

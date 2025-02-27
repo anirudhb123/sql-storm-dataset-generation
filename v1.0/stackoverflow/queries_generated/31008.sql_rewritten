@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS Author,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE()) 
+        AND p.Score > 0
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName, p.Score
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(CASE WHEN pht.Name LIKE 'Edit%' THEN 'Edited: ' + ph.Text ELSE NULL END, ', ') AS EditHistory,
+        STRING_AGG(CASE WHEN pht.Name = 'Post Closed' THEN 'Closed: ' + ph.Text ELSE NULL END, ', ') AS ClosureHistory
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.CreationDate >= DATEADD(year, -3, GETDATE())
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ModerationSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.Author,
+    rp.RankScore,
+    rp.CommentCount,
+    COALESCE(ph.EditHistory, 'No Edits') AS EditHistory,
+    COALESCE(ph.ClosureHistory, 'Not Closed') AS ClosureHistory,
+    au.DisplayName AS ActiveUser,
+    au.BadgeCount,
+    au.TotalViews,
+    ms.CloseCount,
+    ms.ReopenCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryInfo ph ON rp.Id = ph.PostId
+LEFT JOIN 
+    ActiveUsers au ON rp.Author = au.DisplayName
+LEFT JOIN 
+    ModerationSummary ms ON rp.Id = ms.PostId
+WHERE 
+    rp.RankScore <= 3  
+ORDER BY 
+    rp.CreationDate DESC;

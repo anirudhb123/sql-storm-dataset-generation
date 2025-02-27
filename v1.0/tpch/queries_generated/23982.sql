@@ -1,0 +1,79 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN '1995-01-01' AND '1996-12-31'
+),
+FilteredLineItems AS (
+    SELECT 
+        li.l_orderkey,
+        li.l_partkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS NetRevenue,
+        COUNT(*) AS TotalItems,
+        AVG(li.l_quantity) AS AvgQuantity
+    FROM 
+        lineitem li
+    WHERE 
+        li.l_shipdate >= '1996-01-01'
+        AND li.l_returnflag = 'N'
+    GROUP BY 
+        li.l_orderkey, li.l_partkey
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+AggregatedResults AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT c.c_custkey) AS TotalCustomers,
+        SUM(fli.NetRevenue) AS TotalNetRevenue,
+        COUNT(DISTINCT CASE WHEN fli.AvgQuantity > 10 THEN fli.l_partkey END) AS HighVolumeParts
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        FilteredLineItems fli ON c.c_custkey = fli.l_orderkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    ar.r_name,
+    ar.TotalCustomers,
+    ar.TotalNetRevenue,
+    CASE 
+        WHEN ar.TotalNetRevenue IS NULL THEN 'No Sales'
+        ELSE CONCAT('Sales of ', CAST(ar.TotalNetRevenue AS CHAR(20)), ' recorded')
+    END AS RevenueStatus,
+    EXISTS (
+        SELECT 1 
+        FROM SupplierDetails sd 
+        WHERE sd.SupplierRank = 1 
+        AND sd.ps_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l WHERE l.l_orderkey = ar.o_orderkey)
+    ) AS HasTopSupplier
+FROM 
+    AggregatedResults ar
+WHERE 
+    ar.TotalCustomers > 0
+    AND (ar.TotalNetRevenue > 100000 OR ar.TotalNetRevenue IS NULL)
+ORDER BY 
+    ar.TotalNetRevenue DESC NULLS LAST;

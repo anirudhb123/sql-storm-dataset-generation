@@ -1,0 +1,39 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COUNT(o.o_orderkey) > 5
+),
+nation_summary AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count, SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+lineitem_stats AS (
+    SELECT l.l_shipmode, COUNT(*) AS total_items, AVG(l.l_discount) AS avg_discount
+    FROM lineitem l
+    GROUP BY l.l_shipmode
+)
+SELECT n.n_name, 
+       ns.supplier_count, 
+       ns.total_acctbal, 
+       COALESCE(co.order_count, 0) AS customer_order_count, 
+       COALESCE(co.total_spent, 0) AS total_spent, 
+       ts.total_cost AS top_supplier_cost,
+       ls.total_items, 
+       ls.avg_discount
+FROM nation_summary ns
+LEFT JOIN customer_orders co ON ns.supplier_count > 20
+LEFT JOIN top_suppliers ts ON ns.supplier_count < 10
+INNER JOIN lineitem_stats ls ON ts.s_suppkey IS NOT NULL 
+WHERE ns.total_acctbal IS NOT NULL
+ORDER BY ns.n_name, top_supplier_cost DESC;

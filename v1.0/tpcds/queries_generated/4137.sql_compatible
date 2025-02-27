@@ -1,0 +1,68 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(sr.sr_return_quantity, 0) + COALESCE(cr.cr_return_quantity, 0) + COALESCE(wr.wr_return_quantity, 0)) AS total_returns,
+        COUNT(DISTINCT sr.sr_ticket_number) AS store_return_count,
+        COUNT(DISTINCT cr.cr_order_number) AS catalog_return_count,
+        COUNT(DISTINCT wr.wr_order_number) AS web_return_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_marital_status = 'M'
+),
+IncomeRanges AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        CASE 
+            WHEN ib.ib_lower_bound < 30000 THEN 'Low'
+            WHEN ib.ib_upper_bound BETWEEN 30000 AND 60000 THEN 'Medium'
+            ELSE 'High'
+        END AS income_category
+    FROM 
+        income_band ib
+),
+RankedCustomers AS (
+    SELECT 
+        cr.c_customer_id,
+        cr.total_returns,
+        cd.cd_gender,
+        ir.income_category,
+        ROW_NUMBER() OVER (PARTITION BY ir.income_category ORDER BY cr.total_returns DESC) AS rank
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        CustomerDemographics cd ON cr.c_customer_id = cd.cd_demo_sk
+    JOIN 
+        IncomeRanges ir ON cd.cd_income_band_sk = ir.ib_income_band_sk
+)
+SELECT 
+    rc.c_customer_id,
+    rc.total_returns,
+    rc.cd_gender,
+    rc.income_category
+FROM 
+    RankedCustomers rc
+WHERE 
+    rc.rank <= 5
+ORDER BY 
+    rc.income_category, rc.total_returns DESC;

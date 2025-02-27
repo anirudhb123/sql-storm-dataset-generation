@@ -1,0 +1,79 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS profit_rank
+    FROM web_sales
+),
+HighProfitItems AS (
+    SELECT 
+        r.ws_item_sk,
+        r.ws_order_number,
+        r.ws_net_profit
+    FROM RankedSales r
+    WHERE r.profit_rank = 1
+),
+StoreSalesAggregation AS (
+    SELECT 
+        s.ss_store_sk,
+        SUM(s.ss_net_profit) AS total_net_profit,
+        COUNT(DISTINCT s.ss_ticket_number) AS total_orders
+    FROM store_sales s
+    GROUP BY s.ss_store_sk
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        MAX(d.d_year) AS last_purchase_year,
+        COUNT(DISTINCT cs.cs_order_number) AS total_catalog_sales
+    FROM customer c
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+    GROUP BY c.c_customer_sk
+),
+ProfitableStores AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        sa.total_net_profit,
+        cs.total_orders,
+        cs.total_catalog_sales,
+        COALESCE(cs.total_catalog_sales, 0) - COALESCE(sa.total_orders, 0) AS sales_difference
+    FROM store s
+    LEFT JOIN StoreSalesAggregation sa ON s.s_store_sk = sa.ss_store_sk
+    LEFT JOIN CustomerStats cs ON cs.c_customer_sk = (
+        SELECT 
+            c.c_customer_sk
+        FROM customer c
+        WHERE c.c_seen IS NOT NULL
+        ORDER BY c.c_birth_year DESC
+        LIMIT 1
+    ) 
+    WHERE s.s_state = 'CA'
+)
+SELECT 
+    p.ws_item_sk,
+    SUM(p.ws_net_profit) AS total_profit,
+    COUNT(DISTINCT p.ws_order_number) AS total_orders,
+    ps.s_store_name,
+    ps.total_net_profit,
+    ps.sales_difference
+FROM HighProfitItems p
+JOIN ProfitableStores ps ON p.ws_item_sk IN (
+    SELECT ii.i_item_sk
+    FROM item ii
+    WHERE ii.i_current_price > (
+        SELECT AVG(ii2.i_current_price)
+        FROM item ii2 
+        WHERE ii2.i_brand_id = ii.i_brand_id
+    )
+)
+GROUP BY 
+    p.ws_item_sk,
+    ps.s_store_name,
+    ps.total_net_profit,
+    ps.sales_difference
+HAVING SUM(p.ws_net_profit) > 10000
+ORDER BY total_profit DESC, ps.sales_difference ASC;

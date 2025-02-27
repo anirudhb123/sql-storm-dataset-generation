@@ -1,0 +1,43 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT cc.subject_id) AS total_cast,
+        AVG(CASE WHEN cc.status_id = 1 THEN 1 ELSE NULL END) AS average_main_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS all_aka_names
+    FROM 
+        title t
+    LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN aka_title ak ON t.id = ak.movie_id
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY 
+        t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.total_cast,
+        md.average_main_cast,
+        md.all_aka_names,
+        ROW_NUMBER() OVER (ORDER BY md.total_cast DESC) AS rn
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.total_cast,
+    COALESCE(tm.average_main_cast, 0) AS average_main_cast,
+    tm.all_aka_names
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rn <= 10
+    AND (tm.production_year >= 2000 OR tm.all_aka_names IS NOT NULL)
+ORDER BY 
+    tm.production_year DESC, 
+    tm.total_cast DESC;

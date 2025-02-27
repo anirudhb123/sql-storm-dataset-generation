@@ -1,0 +1,86 @@
+WITH movie_characteristics AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS aka_name,
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword AS movie_keyword,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CASE WHEN c.nr_order IS NULL THEN 0 ELSE c.nr_order END) AS avg_order_position
+    FROM 
+        aka_name a
+    INNER JOIN aka_title t ON a.id = t.id
+    LEFT JOIN cast_info c ON t.movie_id = c.movie_id
+    LEFT JOIN movie_keyword mk ON t.movie_id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND a.name IS NOT NULL 
+    GROUP BY 
+        a.id, a.name, t.title, t.production_year, k.keyword
+),
+recent_movies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        RANK() OVER (PARTITION BY production_year ORDER BY cast_count DESC) AS rank_within_year
+    FROM 
+        movie_characteristics
+    WHERE 
+        production_year >= (SELECT MAX(production_year) - 5 FROM aka_title)
+),
+distinct_keywords AS (
+    SELECT 
+        DISTINCT keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+company_stats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        ARRAY_AGG(DISTINCT cn.name) AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+final_results AS (
+    SELECT 
+        r.movie_title,
+        r.production_year,
+        r.rank_within_year,
+        cs.company_count,
+        cs.companies,
+        dkw.keyword
+    FROM 
+        recent_movies r
+    LEFT JOIN 
+        company_stats cs ON r.movie_title = (SELECT m.title FROM aka_title m WHERE m.movie_id = cs.movie_id)
+    LEFT JOIN 
+        distinct_keywords dkw ON dkw.keyword IN (
+            SELECT DISTINCT k.keyword
+            FROM movie_keyword mk
+            JOIN keyword k ON mk.keyword_id = k.id
+            WHERE mk.movie_id = cs.movie_id
+        )
+    WHERE 
+        r.rank_within_year = 1
+        OR cs.company_count > 3
+)
+SELECT 
+    *,
+    CASE 
+        WHEN company_count IS NULL THEN 'No Companies'
+        ELSE 'Companies Present: ' || array_to_string(companies, ', ')
+    END AS company_info,
+    COALESCE(keyword, 'No Keywords') AS effective_keyword
+FROM 
+    final_results
+ORDER BY 
+    production_year DESC, rank_within_year;
+This SQL query demonstrates detailed data manipulations and aggregations across various tables while leveraging CTEs to build upon filters and rankings. It integrates outer joins, sets operators, and utilizes string expressions, while managing null cases with COALESCE and case logic.

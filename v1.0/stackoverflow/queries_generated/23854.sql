@@ -1,0 +1,86 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesTotal,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesTotal,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 8 THEN V.BountyAmount ELSE 0 END), 0) AS TotalBountyAmount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        MAX(PH.CreationDate) FILTER (WHERE PH.PostHistoryTypeId = 10) AS ClosestCloseDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id
+),
+PostWithStats AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CommentCount,
+        PS.UpVotes,
+        PS.DownVotes,
+        PS.ClosestCloseDate,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation,
+        U.CreationDate AS OwnerCreationDate,
+        U.LastAccessDate AS OwnerLastAccessDate,
+        (
+            SELECT COUNT(*)
+            FROM Badges B
+            WHERE B.UserId = PS.OwnerUserId
+              AND B.Class = 1  -- Gold badges
+        ) AS GoldBadges,
+        (
+            SELECT COUNT(*)
+            FROM Badges B
+            WHERE B.UserId = PS.OwnerUserId
+              AND B.Class = 2  -- Silver badges
+        ) AS SilverBadges
+    FROM 
+        PostStats PS
+    LEFT JOIN 
+        Users U ON PS.OwnerUserId = U.Id
+),
+RankedPosts AS (
+    SELECT 
+        PWS.*,
+        RANK() OVER (PARTITION BY PWS.OwnerUserId ORDER BY PWS.CommentCount DESC) AS OwnerPostRank,
+        RANK() OVER (ORDER BY PWS.UpVotes - PWS.DownVotes DESC) AS GlobalPostRank
+    FROM 
+        PostWithStats PWS
+)
+SELECT 
+    R.*,
+    COALESCE(UVS.UpVotesTotal, 0) AS OwnerTotalUpVotes,
+    COALESCE(UVS.DownVotesTotal, 0) AS OwnerTotalDownVotes,
+    COALESCE(UVS.TotalBountyAmount, 0) AS OwnerTotalBounty
+FROM 
+    RankedPosts R
+LEFT JOIN 
+    UserVoteStats UVS ON R.OwnerUserId = UVS.UserId
+WHERE 
+    R.CommentCount > 0
+    AND (R.ClosestCloseDate IS NULL OR R.ClosestCloseDate < NOW() - INTERVAL '1 month')
+    AND (R.UpVotes IS NOT NULL OR R.DownVotes IS NOT NULL)
+ORDER BY 
+    R.GlobalPostRank, R.OwnerPostRank;

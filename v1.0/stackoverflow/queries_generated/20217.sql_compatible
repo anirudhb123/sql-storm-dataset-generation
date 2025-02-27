@@ -1,0 +1,86 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank,
+        COALESCE((SELECT COUNT(DISTINCT Comment.Id) 
+                  FROM Comments AS Comment 
+                  WHERE Comment.PostId = p.Id), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) 
+                  FROM Votes AS Vote 
+                  WHERE Vote.PostId = p.Id AND Vote.VoteTypeId = 2), 0) AS UpvoteCount,
+        COALESCE((SELECT COUNT(*) 
+                  FROM Votes AS Vote 
+                  WHERE Vote.PostId = p.Id AND Vote.VoteTypeId = 3), 0) AS DownvoteCount,
+        COALESCE((SELECT SUM(B.Reputation) 
+                  FROM Users AS U 
+                  JOIN Badges AS B ON U.Id = B.UserId 
+                  WHERE U.Id = p.OwnerUserId AND B.Class = 1), 0) AS GoldBadgesCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+),
+CommentsSummary AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS TotalComments,
+        SUM(CASE WHEN Score > 0 THEN 1 ELSE 0 END) AS PositiveComments,
+        SUM(CASE WHEN Score < 0 THEN 1 ELSE 0 END) AS NegativeComments
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        COUNT(DISTINCT b.Id) AS BadgesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    cs.TotalComments,
+    cs.PositiveComments,
+    cs.NegativeComments,
+    ua.PostsCreated,
+    ua.BadgesReceived,
+    rp.GoldBadgesCount,
+    CASE 
+        WHEN rp.PostRank = 1 THEN 'Top Post'
+        WHEN rp.PostRank <= 5 THEN 'High Performing'
+        ELSE 'Standard Post' 
+    END AS PostCategory
+FROM 
+    Users up
+JOIN 
+    RankedPosts rp ON up.Id = rp.OwnerUserId
+LEFT JOIN 
+    CommentsSummary cs ON rp.PostId = cs.PostId
+LEFT JOIN 
+    UserActivity ua ON up.Id = ua.UserId
+WHERE 
+    up.Reputation > 1000
+    AND rp.CommentCount > 0 
+    AND (rp.UpvoteCount - rp.DownvoteCount) > 10
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

@@ -1,0 +1,56 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS order_level
+    FROM orders
+    WHERE o_orderdate >= '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, oh.order_level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+), TotalSpent AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey, c.c_name
+), SupplierStats AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+), HighValueSuppliers AS (
+    SELECT s.s_suppkey
+    FROM SupplierStats
+    WHERE total_supplycost > (
+        SELECT AVG(total_supplycost) FROM SupplierStats
+    )
+), RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(month, -3, CURRENT_DATE)
+)
+SELECT DISTINCT p.p_partkey, p.p_name, 
+                COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+                COUNT(DISTINCT lo.o_orderkey) AS number_of_orders,
+                COUNT(DISTINCT lo.o_custkey) AS customer_count,
+                CASE 
+                    WHEN ts.total_spent IS NULL THEN 'New Customer'
+                    WHEN ts.total_spent > 10000 THEN 'High Roller'
+                    ELSE 'Regular'
+                END AS customer_type
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders lo ON l.l_orderkey = lo.o_orderkey
+LEFT JOIN TotalSpent ts ON lo.o_custkey = ts.c_custkey
+LEFT JOIN RecentOrders ro ON lo.o_orderkey = ro.o_orderkey
+WHERE l.l_shipdate BETWEEN '2023-01-01' AND CURRENT_DATE
+AND (p.p_size > 10 OR p.p_retailprice < 50)
+AND p.p_partkey IN (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM HighValueSuppliers s)
+)
+GROUP BY p.p_partkey, p.p_name, ts.total_spent
+ORDER BY total_revenue DESC;

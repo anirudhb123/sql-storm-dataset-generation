@@ -1,0 +1,52 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        ad.full_address,
+        ad.ca_city,
+        ad.ca_state
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        AddressDetails ad ON c.c_current_addr_sk = ad.ca_address_sk
+)
+SELECT 
+    full_name,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    CONCAT('Estimated Purchase: $', FORMAT(cd_purchase_estimate, 2)) AS purchase_estimate,
+    cd_credit_rating,
+    cd_dep_count,
+    full_address,
+    ca_city,
+    ca_state
+FROM 
+    CustomerDetails
+WHERE 
+    cd_gender = 'F'
+    AND cd_marital_status = 'M'
+    AND cd_dep_count > 0
+ORDER BY 
+    cd_purchase_estimate DESC
+LIMIT 50;

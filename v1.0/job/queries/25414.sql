@@ -1,0 +1,45 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        STRING_AGG(CONCAT(a.name, ' (', r.role, ')') ORDER BY ci.nr_order) AS cast,
+        STRING_AGG(DISTINCT k.keyword) AS keywords
+    FROM
+        title m
+        JOIN cast_info ci ON m.id = ci.movie_id
+        JOIN aka_name a ON ci.person_id = a.person_id
+        JOIN role_type r ON ci.person_role_id = r.id
+        LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+        LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE
+        m.production_year >= 2000
+    GROUP BY
+        m.id, m.title, m.production_year
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+        JOIN company_name c ON mc.company_id = c.id
+        JOIN company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.cast,
+    md.keywords,
+    cd.company_name,
+    cd.company_type
+FROM 
+    MovieDetails md
+LEFT JOIN CompanyDetails cd ON md.movie_id = cd.movie_id
+WHERE 
+    md.cast LIKE '%Smith%' 
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_title ASC;

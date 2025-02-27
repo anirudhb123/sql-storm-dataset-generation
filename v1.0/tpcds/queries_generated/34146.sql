@@ -1,0 +1,74 @@
+
+WITH RECURSIVE SalesSummary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        ss.total_sales,
+        ss.total_orders,
+        ss.sales_rank
+    FROM SalesSummary ss
+    JOIN item ON ss.ws_item_sk = item.i_item_sk
+    WHERE ss.sales_rank <= 10
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+ReturnsSummary AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returns,
+        SUM(cr_return_amount) AS total_returned_amount
+    FROM catalog_returns
+    GROUP BY cr_item_sk
+),
+FinalReport AS (
+    SELECT 
+        ti.i_item_id,
+        ti.i_item_desc,
+        ti.total_sales,
+        ti.total_orders,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        COALESCE(rs.total_returned_amount, 0) AS total_returned_amount,
+        ROUND((ti.total_sales - COALESCE(rs.total_returned_amount, 0)), 2) AS net_sales
+    FROM TopItems ti
+    LEFT JOIN ReturnsSummary rs ON ti.i_item_id = rs.cr_item_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    fr.i_item_id,
+    fr.i_item_desc,
+    fr.total_sales,
+    fr.total_orders,
+    fr.total_returns,
+    fr.total_returned_amount,
+    fr.net_sales
+FROM FinalReport fr
+JOIN CustomerInfo ci ON fr.i_item_id IN (
+    SELECT ws_item_sk 
+    FROM web_sales 
+    WHERE ws_bill_customer_sk = ci.c_customer_sk
+)
+ORDER BY fr.net_sales DESC, ci.c_last_name, ci.c_first_name;

@@ -1,0 +1,72 @@
+
+WITH RecursiveTitleCounts AS (
+    SELECT 
+        t.id AS title_id,
+        COUNT(ci.id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.movie_id = ci.movie_id
+    GROUP BY 
+        t.id
+),
+TitleProductionYear AS (
+    SELECT 
+        t.id AS title_id,
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM 
+        aka_title t
+),
+RoleStats AS (
+    SELECT 
+        ct.kind AS role_kind, 
+        COUNT(ci.id) AS kind_role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY 
+        ct.kind
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    COALESCE(tc.cast_count, 0) AS total_cast,
+    COALESCE(ts.production_year, 'Unknown') AS year_of_release,
+    rs.role_kind,
+    rs.kind_role_count,
+    CASE 
+        WHEN ts.year_rank IS NULL THEN 'Not Ranked'
+        WHEN ts.year_rank < 5 THEN 'Top 5'
+        ELSE 'Below Top 5'
+    END AS production_rank
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.movie_id
+LEFT JOIN 
+    RecursiveTitleCounts tc ON t.id = tc.title_id
+LEFT JOIN 
+    TitleProductionYear ts ON t.id = ts.title_id
+LEFT JOIN 
+    RoleStats rs ON ci.person_role_id = (SELECT MIN(id) FROM comp_cast_type) 
+WHERE 
+    a.name IS NOT NULL 
+    AND t.production_year IS NOT NULL 
+    AND (EXISTS (SELECT 1 FROM movie_info mi WHERE mi.movie_id = t.movie_id AND mi.info LIKE '%Oscar%') 
+         OR rs.kind_role_count > 0)
+GROUP BY 
+    a.name, 
+    t.title, 
+    tc.cast_count, 
+    ts.production_year, 
+    rs.role_kind, 
+    rs.kind_role_count, 
+    ts.year_rank 
+ORDER BY 
+    total_cast DESC, 
+    movie_title ASC;

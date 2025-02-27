@@ -1,0 +1,77 @@
+WITH RECURSIVE UserContributions AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId IN (10, 11, 12, 13) THEN 1 ELSE 0 END) AS TotalClosedPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryWithReason AS (
+    SELECT 
+        ph.PostId,
+        MIN(CASE WHEN pht.Name = 'Post Closed' THEN ph.CreationDate END) AS FirstClosedDate,
+        STRING_AGG(DISTINCT ctr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    LEFT JOIN 
+        CloseReasonTypes ctr ON ph.Comment::int = ctr.Id 
+    GROUP BY 
+        ph.PostId
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        t.Count,
+        ROW_NUMBER() OVER (ORDER BY t.Count DESC) AS PopularityRank
+    FROM 
+        Tags t
+    WHERE 
+        t.Count > 5 -- Only tags with more than 5 occurrences
+),
+UserVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+)
+SELECT 
+    uc.UserId,
+    uc.DisplayName,
+    uc.TotalPosts,
+    uc.TotalQuestions,
+    uc.TotalAnswers,
+    COALESCE(uc.TotalClosedPosts, 0) AS TotalClosedPosts,
+    COALESCE(pw.FirstClosedDate, 'N/A') AS FirstClosedDate,
+    pw.CloseReasons,
+    pt.TagName AS MostPopularTag,
+    vt.VoteCount,
+    vt.UpVotes,
+    vt.DownVotes
+FROM 
+    UserContributions uc
+LEFT JOIN 
+    PostHistoryWithReason pw ON uc.TotalPosts > 0
+LEFT JOIN 
+    (SELECT TagName FROM PopularTags WHERE PopularityRank = 1) pt ON TRUE
+LEFT JOIN 
+    UserVotes vt ON uc.UserId = vt.UserId
+WHERE 
+    uc.TotalPosts > 10
+ORDER BY 
+    uc.TotalPosts DESC;

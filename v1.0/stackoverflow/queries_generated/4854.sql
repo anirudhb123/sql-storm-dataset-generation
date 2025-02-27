@@ -1,0 +1,59 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalViews,
+        RANK() OVER (ORDER BY TotalViews DESC) AS ViewRank
+    FROM 
+        UserActivity
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.UserId, 
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- title, body, tags edits
+    GROUP BY 
+        ph.UserId
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.TotalViews,
+    tu.ViewRank,
+    COALESCE(rph.EditCount, 0) AS TotalEdits,
+    rph.LastEditDate,
+    CASE 
+        WHEN tu.PostCount = 0 THEN 'No Posts'
+        ELSE 
+            FORMAT(COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.UserId = tu.UserId), 0), 'N0')
+    END AS CommentCount
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    RecentPostHistory rph ON tu.UserId = rph.UserId
+WHERE 
+    tu.ViewRank <= 10
+ORDER BY 
+    tu.ViewRank;

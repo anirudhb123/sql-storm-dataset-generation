@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        Tags t ON t.Id = p.ExcerptPostId
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Body, u.DisplayName
+),
+MostPopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Body,
+        rp.OwnerDisplayName,
+        rp.AnswerCount,
+        rp.Tags,
+        (COALESCE(rp.AnswerCount, 0) + COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0)) AS PopularityScore
+    FROM 
+        RankedPosts rp
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON rp.PostId = v.PostId
+),
+TopQuestions AS (
+    SELECT 
+        mpp.PostId,
+        mpp.Title,
+        mpp.CreationDate,
+        mpp.Body,
+        mpp.OwnerDisplayName,
+        mpp.AnswerCount,
+        mpp.Tags,
+        mpp.PopularityScore,
+        ROW_NUMBER() OVER (ORDER BY mpp.PopularityScore DESC) AS Rank
+    FROM 
+        MostPopularPosts mpp
+)
+SELECT 
+    tq.Rank,
+    tq.Title,
+    tq.OwnerDisplayName,
+    tq.CreationDate,
+    tq.AnswerCount,
+    tq.Tags,
+    tq.PopularityScore,
+    REPLACE(REPLACE(tq.Body, '<p>', ''), '</p>', '') AS FormattedBody  -- Basic string processing to clean up HTML
+FROM 
+    TopQuestions tq
+WHERE 
+    tq.Rank <= 10  -- Top 10 questions based on popularity
+ORDER BY 
+    tq.PopularityScore DESC;

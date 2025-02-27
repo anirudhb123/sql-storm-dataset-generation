@@ -1,0 +1,61 @@
+
+WITH sales_summary AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        AVG(ws_net_paid) AS avg_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM
+        web_sales
+    GROUP BY
+        ws_bill_customer_sk
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        d.d_date,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        cs.total_sales,
+        cs.order_count,
+        cs.avg_net_paid
+    FROM
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN sales_summary cs ON c.c_customer_sk = cs.ws_bill_customer_sk
+    JOIN date_dim d ON d.d_date_id = DATE_FORMAT(NOW(), '%Y%m%d') 
+    WHERE
+        (cd.cd_gender = 'F' OR cd.cd_marital_status = 'M') AND
+        (ca.ca_state = 'CA' OR ca.ca_state IS NULL)
+)
+
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.ca_city,
+    ci.ca_state,
+    COALESCE(ci.total_sales, 0) AS total_sales,
+    COALESCE(ci.order_count, 0) AS order_count,
+    ci.avg_net_paid,
+    CASE 
+        WHEN ci.total_sales IS NULL THEN 'No Sales'
+        WHEN ci.total_sales > 10000 THEN 'High Value'
+        WHEN ci.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS sales_category,
+    RANK() OVER (ORDER BY COALESCE(ci.total_sales, 0) DESC) AS rank
+FROM 
+    customer_info ci
+WHERE 
+    ci.sales_rank <= 10
+ORDER BY 
+    ci.total_sales DESC
+LIMIT 5;

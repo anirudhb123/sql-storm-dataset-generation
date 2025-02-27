@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+        AND a.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%')
+), MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(k.keyword, 'No Keyword') AS keyword,
+        p.info AS director_info,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        person_info p ON ci.person_id = p.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'director')
+    WHERE 
+        m.year_rank <= 5
+    GROUP BY 
+        m.id, m.title, k.keyword, p.info
+), FilteredMovies AS (
+    SELECT 
+        md.movie_id, 
+        md.title, 
+        md.keyword, 
+        md.director_info,
+        md.cast_count,
+        RANK() OVER (ORDER BY md.cast_count DESC) AS cast_rank
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.cast_count > 0
+)
+
+SELECT 
+    f.movie_id, 
+    f.title, 
+    f.keyword,
+    COALESCE(f.director_info, 'Director Info Not Available') AS director_info,
+    f.cast_count,
+    CASE 
+        WHEN f.cast_rank <= 3 THEN 'Top Movie'
+        ELSE 'Regular Movie'
+    END AS movie_rating
+FROM 
+    FilteredMovies f
+WHERE 
+    f.keyword IS NOT NULL
+ORDER BY 
+    f.cast_rank;

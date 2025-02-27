@@ -1,0 +1,62 @@
+
+WITH customer_sales AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY c.c_current_addr_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM
+        customer c
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_id, c.c_first_name, c.c_last_name, c.c_current_addr_sk
+),
+top_customers AS (
+    SELECT
+        cs.c_customer_id,
+        cs.c_first_name || ' ' || cs.c_last_name AS full_name,
+        cs.total_sales,
+        cs.order_count
+    FROM
+        customer_sales cs
+    WHERE
+        cs.sales_rank <= 10
+)
+SELECT
+    tc.full_name,
+    COALESCE(ta.total_address_count, 0) AS address_count,
+    COALESCE(si.total_invoice_count, 0) AS invoice_count,
+    CASE 
+        WHEN tc.total_sales > 1000 THEN 'High value customer'
+        ELSE 'Regular customer'
+    END AS customer_type
+FROM
+    top_customers tc
+LEFT JOIN (
+    SELECT
+        c.c_current_addr_sk,
+        COUNT(*) AS total_address_count
+    FROM
+        customer c
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY
+        c.c_current_addr_sk
+) ta ON tc.c_customer_id = ta.c_current_addr_sk
+LEFT JOIN (
+    SELECT
+        c.c_customer_id,
+        COUNT(DISTINCT i.i_item_id) AS total_invoice_count
+    FROM
+        customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY
+        c.c_customer_id
+) si ON tc.c_customer_id = si.c_customer_id
+WHERE
+    tc.total_sales > 1000 OR tc.order_count > 5
+ORDER BY
+    tc.total_sales DESC;

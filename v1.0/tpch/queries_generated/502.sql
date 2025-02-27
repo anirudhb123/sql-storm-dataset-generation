@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS Rank,
+        n.n_name AS Nation
+    FROM 
+        supplier s 
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        CASE 
+            WHEN o.o_orderstatus = 'F' THEN 1 
+            ELSE 0 
+        END AS IsFinalized,
+        EXTRACT(YEAR FROM o.o_orderdate) AS OrderYear
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN '2021-01-01' AND '2021-12-31'
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+        COUNT(l.l_orderkey) AS LineItemCount,
+        AVG(l.l_quantity) AS AvgQuantity
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_totalprice,
+    fs.Nation,
+    rs.s_name AS SupplierName,
+    ls.TotalRevenue,
+    ls.LineItemCount,
+    ls.AvgQuantity,
+    CASE 
+        WHEN ls.TotalRevenue IS NULL THEN 'No Revenue' 
+        ELSE 'Revenue Generated' 
+    END AS RevenueStatus
+FROM 
+    FilteredOrders o
+LEFT JOIN 
+    RankedSuppliers rs ON o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+LEFT JOIN 
+    LineItemSummary ls ON o.o_orderkey = ls.l_orderkey
+JOIN 
+    nation fs ON rs.Nation = fs.n_name
+WHERE 
+    o.o_totalprice > 1000
+  AND 
+    (ls.LineItemCount > 0 OR ls.TotalRevenue IS NOT NULL)
+ORDER BY 
+    o.o_totalprice DESC, 
+    rs.Rank;

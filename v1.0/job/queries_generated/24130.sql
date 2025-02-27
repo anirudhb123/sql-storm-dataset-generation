@@ -1,0 +1,73 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::integer AS parent_id,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT
+        m.id,
+        m.title,
+        m.production_year,
+        mh.movie_id,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.id
+)
+, cast_details AS (
+    SELECT
+        c.movie_id,
+        ak.name AS actor_name,
+        r.role AS role_type,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY ak.name) AS actor_order
+    FROM
+        cast_info c
+    JOIN
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN
+        role_type r ON c.role_id = r.id
+)
+SELECT
+    mh.title,
+    mh.production_year,
+    comma_separated_actors,
+    CASE 
+        WHEN mh.level > 1 THEN 'Part of a series'
+        ELSE 'Standalone'
+    END AS movie_type,
+    COALESCE(SUM(CASE WHEN ci.note LIKE '%lead%' THEN 1 ELSE 0 END), 0) AS lead_actor_count
+FROM
+    movie_hierarchy mh
+LEFT JOIN
+    cast_details ci ON mh.movie_id = ci.movie_id
+LEFT JOIN
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN
+    (
+        SELECT
+            movie_id,
+            STRING_AGG(keyword, ', ') AS keywords
+        FROM
+            keyword k
+        JOIN
+            movie_keyword mk ON k.id = mk.keyword_id
+        GROUP BY
+            movie_id
+    ) AS k ON mh.movie_id = k.movie_id
+GROUP BY
+    mh.movie_id, mh.title, mh.production_year, mh.level
+ORDER BY
+    mh.production_year DESC,
+    mh.title
+HAVING
+    COUNT(ci.actor_name) > 0 AND
+    STRING_AGG(DISTINCT ci.actor_name, ', ') IS NOT NULL;

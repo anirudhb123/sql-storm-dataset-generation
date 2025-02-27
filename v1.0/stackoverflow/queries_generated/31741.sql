@@ -1,0 +1,116 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.CreationDate,
+        1 AS Level
+    FROM 
+        Users u
+
+    UNION ALL
+
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.CreationDate,
+        Level + 1 AS Level
+    FROM 
+        Users u
+    JOIN 
+        UserReputationCTE ur ON ur.UserId = u.Id
+    WHERE 
+        ur.Reputation < u.Reputation
+),
+
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(comments.CommentCount, 0) AS TotalComments,
+        COALESCE(votes.VoteCount, 0) AS TotalVotes,
+        COALESCE(votes.UpVotes, 0) AS UpVotes,
+        COALESCE(votes.DownVotes, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) AS comments ON p.Id = comments.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) AS votes ON p.Id = votes.PostId
+),
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+
+FinalResults AS (
+    SELECT 
+        pm.PostId,
+        pm.Title,
+        pm.ViewCount,
+        pm.TotalComments,
+        pm.TotalVotes,
+        pm.UpVotes,
+        pm.DownVotes,
+        COALESCE(cp.CloseCount, 0) AS CloseCount,
+        u.DisplayName,
+        u.Reputation
+    FROM 
+        PostMetrics pm
+    JOIN 
+        Users u ON pm.OwnerUserId = u.Id
+    LEFT JOIN 
+        ClosedPosts cp ON pm.PostId = cp.PostId
+)
+
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.ViewCount,
+    fr.TotalComments,
+    fr.TotalVotes,
+    fr.UpVotes,
+    fr.DownVotes,
+    fr.CloseCount,
+    fr.DisplayName,
+    fr.Reputation,
+    CASE 
+        WHEN fr.TotalVotes > 100 THEN 'High Engagement'
+        WHEN fr.TotalVotes BETWEEN 50 AND 100 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM 
+    FinalResults fr
+WHERE 
+    fr.CloseCount = 0
+ORDER BY 
+    fr.ViewCount DESC,
+    fr.TotalVotes DESC;
+
+-- This query retrieves posts excluding closed ones and ranks users by their reputation,
+-- includes metrics for votes and comments, and classifies posts based on engagement levels.

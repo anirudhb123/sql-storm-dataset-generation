@@ -1,0 +1,48 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        COALESCE(bi.production_year, 0) AS production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    LEFT JOIN
+        aka_title bi ON mt.episode_of_id = bi.id
+
+    UNION ALL
+
+    SELECT
+        mt.id AS movie_id,
+        CONCAT(mt.title, ' (Episode of ', COALESCE(bi.title, 'Unknown'), ')') AS title,
+        COALESCE(bi.production_year, 0) AS production_year,
+        mh.level + 1
+    FROM
+        aka_title mt
+    INNER JOIN
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+)
+
+SELECT
+    ak.person_id,
+    ak.name AS actor_name,
+    COUNT(DISTINCT mc.movie_id) AS total_movies,
+    AVG(CASE WHEN mt.production_year > 1990 THEN 1 ELSE NULL END) AS post_1990_movies,
+    STRING_AGG(DISTINCT mt.title, ', ') AS featured_movies
+FROM
+    aka_name ak
+INNER JOIN
+    cast_info ci ON ak.person_id = ci.person_id
+INNER JOIN
+    movie_companies mc ON ci.movie_id = mc.movie_id
+INNER JOIN
+    movie_hierarchy mt ON ci.movie_id = mt.movie_id
+WHERE
+    ak.name IS NOT NULL
+    AND mc.company_type_id BETWEEN 1 AND 3
+GROUP BY
+    ak.person_id, ak.name
+HAVING
+    COUNT(DISTINCT mc.movie_id) > 10
+ORDER BY
+    total_movies DESC, actor_name;

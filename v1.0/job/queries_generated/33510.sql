@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+MovieCast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        ak.md5sum AS actor_md5,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(DISTINCT ki.keyword, ', ') AS keywords,
+        COUNT(DISTINCT mc.company_id) AS production_companies
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        aka_title m ON mh.movie_id = m.id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    mc.actor_name,
+    mc.actor_md5,
+    mi.keywords,
+    mi.production_companies,
+    mh.level
+FROM 
+    MovieHierarchy mh
+JOIN 
+    MovieCast mc ON mh.movie_id = mc.movie_id
+JOIN 
+    MovieInfo mi ON mh.movie_id = mi.movie_id
+WHERE 
+    mh.level <= 2
+ORDER BY 
+    mh.production_year DESC, mh.title, mc.actor_rank;
+
+This SQL query encompasses various SQL constructs to achieve comprehensive performance benchmarking by querying the movie hierarchy along with their casts, keywords, and production companies. It uses common table expressions (CTEs), recursive CTEs, window functions, outer joins, and string aggregation functions, along with filters to create an intricate dataset for analysis.

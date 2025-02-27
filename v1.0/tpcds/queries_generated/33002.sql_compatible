@@ -1,0 +1,79 @@
+
+WITH RECURSIVE sales_path AS (
+    SELECT
+        s_store_sk,
+        ss_item_sk,
+        ss_ticket_number,
+        1 AS level
+    FROM
+        store_sales
+    WHERE
+        ss_net_profit > 0
+    UNION ALL
+    SELECT
+        sp.s_store_sk,
+        ss.ss_item_sk,
+        ss.ss_ticket_number,
+        sp.level + 1
+    FROM
+        sales_path sp
+    JOIN
+        store_sales ss ON sp.ss_item_sk = ss.ss_item_sk
+    WHERE
+        ss.ss_net_profit < sp.level * 10 
+        AND sp.level < 5
+),
+total_sales AS (
+    SELECT 
+        s_store_sk,
+        COUNT(*) AS total_sales_count,
+        SUM(ss_net_paid_inc_tax) AS total_sales_amount
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN 2400 AND 2500
+    GROUP BY 
+        s_store_sk
+),
+customer_demos AS (
+    SELECT
+        cd_demo_sk,
+        MAX(cd_purchase_estimate) AS max_estimate
+    FROM
+        customer_demographics
+    WHERE
+        cd_gender = 'F'
+    GROUP BY
+        cd_demo_sk
+),
+joined_sales AS (
+    SELECT
+        s.store_id,
+        sales.total_sales_count,
+        sales.total_sales_amount,
+        demos.max_estimate,
+        DENSE_RANK() OVER (PARTITION BY sales.s_store_sk ORDER BY sales.total_sales_amount DESC) AS sales_rank
+    FROM
+        total_sales sales
+    JOIN
+        store s ON sales.s_store_sk = s.s_store_sk
+    LEFT JOIN 
+        customer_demos demos ON demos.cd_demo_sk = s.s_manager_id
+)
+
+SELECT 
+    js.store_id,
+    js.total_sales_count,
+    js.total_sales_amount,
+    COALESCE(js.max_estimate, 0) AS max_estimate,
+    CASE 
+        WHEN js.sales_rank <= 5 THEN 'Top Store'
+        ELSE 'Regular Store' 
+    END AS store_type
+FROM 
+    joined_sales js
+WHERE 
+    js.total_sales_amount > (SELECT AVG(total_sales_amount) FROM total_sales)
+ORDER BY 
+    js.total_sales_amount DESC
+LIMIT 10;

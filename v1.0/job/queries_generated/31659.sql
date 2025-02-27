@@ -1,0 +1,85 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = 1 -- Assume kind_id = 1 for feature films
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        mh.level < 5 -- Limit to 5 levels of linked movies
+),
+cast_details AS (
+    SELECT 
+        ca.movie_id,
+        p.name AS actor_name,
+        p.gender,
+        COUNT(*) OVER (PARTITION BY ca.movie_id) AS actor_count
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name p ON ca.person_id = p.person_id
+    WHERE 
+        p.name IS NOT NULL
+),
+movie_info_details AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(mi.info, '; ') AS movie_info
+    FROM 
+        movie_info mi
+    JOIN 
+        aka_title m ON mi.movie_id = m.id
+    GROUP BY 
+        m.movie_id
+),
+combined_results AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        cd.actor_name,
+        cd.gender,
+        cd.actor_count,
+        mid.movie_info
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_details cd ON mh.movie_id = cd.movie_id
+    LEFT JOIN 
+        movie_info_details mid ON mh.movie_id = mid.movie_id
+)
+SELECT 
+    cr.movie_id,
+    cr.title,
+    cr.production_year,
+    COALESCE(cr.actor_name, 'Unknown Actor') AS actor_name,
+    cr.gender AS actor_gender,
+    cr.actor_count,
+    COALESCE(cr.movie_info, 'No additional info provided') AS movie_info,
+    CASE 
+        WHEN cr.actor_count > 5 THEN 'Ensemble Cast'
+        ELSE 'Small Cast'
+    END AS cast_type
+FROM 
+    combined_results cr
+ORDER BY 
+    cr.production_year DESC, 
+    cr.actor_count DESC 
+LIMIT 100;

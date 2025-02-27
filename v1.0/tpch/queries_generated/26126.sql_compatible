@@ -1,0 +1,48 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_phone, s.s_acctbal, s.s_comment, 
+           CAST(s.s_name AS CHAR(255)) AS full_name, 
+           CAST(s.s_address AS CHAR(255)) AS full_address
+    FROM supplier s
+    UNION ALL
+    SELECT sp.suppkey, sp.name, CONCAT(sp.address, ' / ', sh.full_address), sp.nationkey, 
+           sp.phone, sp.acctbal, CONCAT(sp.comment, ' | ', sh.s_comment), 
+           CONCAT(sp.name, ' -> ', sh.full_name), 
+           CONCAT(sp.address, ' / ', sh.full_address)
+    FROM supplier sp
+    JOIN SupplierHierarchy sh ON sp.s_nationkey = sh.s_nationkey AND sp.s_suppkey <> sh.s_suppkey
+),
+StringProcessing AS (
+    SELECT 
+        p.p_name AS part_name,
+        s.s_name AS supplier_name,
+        COALESCE(REGEXP_REPLACE(p.p_comment, '[^A-Za-z0-9 ]', ''), '') AS clean_comment,
+        LENGTH(p.p_name) AS name_length,
+        LENGTH(s.s_name) AS supplier_length,
+        UPPER(p.p_comment) AS upper_comment,
+        LOWER(p.p_name) AS lower_name
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE LENGTH(p.p_comment) > 0
+)
+SELECT 
+    sp.part_name,
+    sp.supplier_name,
+    sp.clean_comment,
+    sp.name_length,
+    sp.supplier_length,
+    sp.upper_comment,
+    sp.lower_name,
+    COUNT(*) OVER (PARTITION BY sp.part_name) AS supplier_count
+FROM StringProcessing sp
+GROUP BY 
+    sp.part_name,
+    sp.supplier_name,
+    sp.clean_comment,
+    sp.name_length,
+    sp.supplier_length,
+    sp.upper_comment,
+    sp.lower_name
+ORDER BY sp.name_length DESC, sp.supplier_length DESC
+LIMIT 100;

@@ -1,0 +1,51 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        c.c_gender,
+        i.i_category,
+        d.d_year,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2021 AND 2022
+    GROUP BY 
+        ws.ws_sales_price, ws.ws_net_profit, c.c_gender, i.i_category, d.d_year
+),
+TopCategories AS (
+    SELECT 
+        i_category,
+        SUM(total_quantity) AS total_quantity,
+        AVG(avg_sales_price) AS avg_sales_price,
+        SUM(total_net_profit) AS total_net_profit
+    FROM 
+        SalesSummary
+    GROUP BY 
+        i_category
+    ORDER BY 
+        total_net_profit DESC
+    LIMIT 10
+)
+SELECT 
+    tc.i_category,
+    tc.total_quantity,
+    tc.avg_sales_price,
+    tc.total_net_profit,
+    c.cd_marital_status,
+    c.cd_education_status
+FROM 
+    TopCategories tc
+JOIN 
+    customer_demographics c ON c.cd_demo_sk IN (SELECT c_current_cdemo_sk FROM customer WHERE c_first_name IS NOT NULL)
+ORDER BY 
+    tc.total_net_profit DESC;

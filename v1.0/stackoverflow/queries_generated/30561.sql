@@ -1,0 +1,99 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount,
+        SUM(pt.ViewCount) AS TotalViews,
+        AVG(pt.Score) AS AverageScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts pt ON pt.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+),
+BadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+HighScoringUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(bc.TotalBadges, 0) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        BadgeCounts bc ON u.Id = bc.UserId
+    WHERE 
+        u.Reputation > 5000
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        pht.Name AS HistoryTypeName,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= CURRENT_DATE - INTERVAL '6 months'
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.OwnerDisplayName,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AverageScore,
+    hsu.UserId,
+    hsu.DisplayName AS HighScoringUser,
+    hsu.Reputation,
+    hsu.BadgeCount,
+    phd.CreationDate AS LastHistoryDate,
+    phd.HistoryTypeName,
+    phd.UserDisplayName AS EditorDisplayName,
+    phd.Comment AS EditComment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagStats ts ON ts.PostCount > 10
+LEFT JOIN 
+    HighScoringUsers hsu ON hsu.UserId = rp.OwnerDisplayName
+LEFT JOIN 
+    PostHistoryDetails phd ON phd.PostId = rp.PostId AND phd.HistoryRank = 1
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.CreationDate DESC, ts.TotalViews DESC;

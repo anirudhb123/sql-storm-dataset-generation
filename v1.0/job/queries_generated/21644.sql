@@ -1,0 +1,67 @@
+WITH RECURSIVE related_movies AS (
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS level
+    FROM title m
+    WHERE m.production_year >= 2000
+    UNION ALL
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        rm.level + 1
+    FROM title t
+    JOIN movie_link ml ON ml.linked_movie_id = t.id
+    JOIN related_movies rm ON ml.movie_id = rm.id
+    WHERE rm.level < 3
+),
+actor_info AS (
+    SELECT 
+        p.id AS person_id,
+        ak.name AS actor_name,
+        COUNT(ci.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT ti.title, ', ') AS movies_list
+    FROM aka_name ak
+    JOIN cast_info ci ON ci.person_id = ak.person_id
+    JOIN related_movies ti ON ti.id = ci.movie_id
+    JOIN name n ON n.id = ak.person_id
+    WHERE n.gender = 'F'
+    GROUP BY p.id, ak.name
+    HAVING COUNT(ci.movie_id) > 5
+),
+movie_rating AS (
+    SELECT 
+        m.id AS movie_id,
+        AVG(CASE 
+                WHEN moi.info_type_id IS NULL THEN 0
+                ELSE CAST(moi.info AS FLOAT) 
+            END) AS average_rating
+    FROM title m
+    LEFT JOIN movie_info_idx moi ON m.id = moi.movie_id AND moi.info_type_id = (
+        SELECT id FROM info_type WHERE info = 'rating'
+    )
+    GROUP BY m.id
+)
+SELECT 
+    ai.actor_name,
+    ai.total_movies,
+    ai.movies_list,
+    mr.average_rating,
+    COUNT(DISTINCT mk.keyword) AS unique_keywords,
+    CASE 
+        WHEN mr.average_rating IS NULL THEN 'No Rating'
+        WHEN mr.average_rating >= 7 THEN 'Highly Rated'
+        ELSE 'Rated Below 7'
+    END AS rating_category
+FROM actor_info ai
+LEFT JOIN movie_companies mc ON mc.movie_id IN (SELECT id FROM related_movies)
+LEFT JOIN movie_keyword mk ON mk.movie_id IN (SELECT id FROM related_movies)
+LEFT JOIN movie_rating mr ON mr.movie_id IN (SELECT id FROM related_movies)
+WHERE ai.movies_list NOT ILIKE '%horror%'
+GROUP BY ai.actor_name, ai.total_movies, ai.movies_list, mr.average_rating
+ORDER BY ai.total_movies DESC, mr.average_rating DESC
+LIMIT 10;

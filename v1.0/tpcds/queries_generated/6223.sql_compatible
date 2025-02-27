@@ -1,0 +1,47 @@
+
+WITH sales_summary AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(ss_ext_sales_price, 0) + COALESCE(cs_ext_sales_price, 0) + COALESCE(ws_ext_sales_price, 0)) AS total_sales,
+        AVG(COALESCE(ss_ext_sales_price, 0) + COALESCE(cs_ext_sales_price, 0) + COALESCE(ws_ext_sales_price, 0)) AS avg_sales,
+        COUNT(DISTINCT ss_ticket_number) AS store_sales_count,
+        COUNT(DISTINCT cs_order_number) AS catalog_sales_count,
+        COUNT(DISTINCT ws_order_number) AS web_sales_count
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        store_sales AS s ON c.c_customer_sk = s.ss_customer_sk
+    LEFT JOIN 
+        catalog_sales AS cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year >= 1980
+    GROUP BY 
+        c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id AS customer_id,
+        ss.total_sales,
+        ss.avg_sales,
+        ss.store_sales_count,
+        ss.catalog_sales_count,
+        ss.web_sales_count,
+        RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM 
+        sales_summary AS ss
+)
+SELECT 
+    customer_id,
+    total_sales,
+    avg_sales,
+    store_sales_count,
+    catalog_sales_count,
+    web_sales_count
+FROM 
+    top_customers
+WHERE 
+    sales_rank <= 10
+ORDER BY 
+    total_sales DESC;

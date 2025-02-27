@@ -1,0 +1,81 @@
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(SUM(ci.nr_order), 0) AS total_cast_roles,
+        COUNT(DISTINCT ci.person_id) AS unique_cast_members
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.movie_id = ci.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+KeywordCTE AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+TitleInfoCTE AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.total_cast_roles,
+        m.unique_cast_members,
+        k.keywords,
+        CASE 
+            WHEN m.total_cast_roles = 0 THEN 'No Cast'
+            WHEN m.unique_cast_members > 5 THEN 'Ensemble Cast'
+            ELSE 'Few Cast'
+        END AS cast_description
+    FROM 
+        MovieCTE m
+    LEFT JOIN 
+        KeywordCTE k ON m.movie_id = k.movie_id
+),
+ActorMovies AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movies
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    GROUP BY 
+        ci.person_id
+),
+RankedTitles AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY cast_description ORDER BY unique_cast_members DESC) AS rank
+    FROM 
+        TitleInfoCTE
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rt.total_cast_roles,
+    rt.unique_cast_members,
+    rt.keywords,
+    rt.cast_description,
+    am.movie_count,
+    am.movies
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    ActorMovies am ON rt.unique_cast_members = am.movie_count
+WHERE 
+    rt.rank <= 10  -- Limit to top 10 entries per cast description
+    AND (rt.total_cast_roles IS NOT NULL OR am.movie_count IS NOT NULL)
+ORDER BY 
+    rt.production_year DESC, rt.unique_cast_members ASC;

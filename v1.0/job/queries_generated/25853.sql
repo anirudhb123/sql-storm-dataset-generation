@@ -1,0 +1,75 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY a.production_year DESC) AS ranking
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.production_year >= 2000
+),
+ActorInfo AS (
+    SELECT 
+        p.name AS actor_name,
+        c.movie_id,
+        r.role AS role_name
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        c.nr_order = 1
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT a.actor_name) AS total_actors,
+        STRING_AGG(DISTINCT a.actor_name, ', ') AS actor_list
+    FROM 
+        aka_title m
+    JOIN 
+        ActorInfo a ON m.id = a.movie_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+KeywordStats AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT k.keyword) AS total_keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_info mi ON mk.movie_id = mi.movie_id
+    WHERE 
+        mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Awards')
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.total_actors,
+    md.actor_list,
+    COALESCE(ks.total_keywords, 0) AS total_keywords,
+    rk.keyword
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    KeywordStats ks ON md.movie_id = ks.movie_id
+LEFT JOIN 
+    RankedMovies rk ON md.movie_id = rk.id AND rk.ranking = 1
+ORDER BY 
+    md.production_year DESC, md.total_actors DESC;

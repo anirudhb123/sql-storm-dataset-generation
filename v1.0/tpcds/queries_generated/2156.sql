@@ -1,0 +1,53 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        COUNT(sr.ticket_number) AS total_returns,
+        SUM(sr.sr_return_amt_inc_tax) AS total_returned_amt,
+        SUM(CASE WHEN sr.sr_return_quantity > 0 THEN sr.sr_return_quantity ELSE 0 END) AS total_returned_qty,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY COUNT(sr.ticket_number) DESC) AS gender_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_current_cdemo_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+),
+return_summary AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.total_returns,
+        ci.total_returned_amt,
+        ci.total_returned_qty,
+        (SELECT AVG(total_returned_amt) FROM customer_info WHERE gender_rank = 1) AS avg_returned_amt_top_gender
+    FROM 
+        customer_info ci
+    WHERE 
+        ci.total_returns > 0
+)
+SELECT 
+    rs.c_customer_sk,
+    rs.c_first_name,
+    rs.c_last_name,
+    rs.total_returns,
+    rs.total_returned_amt,
+    rs.total_returned_qty,
+    COALESCE(CASE 
+        WHEN rs.total_returned_amt > rs.avg_returned_amt_top_gender THEN 'Above Average'
+        ELSE 'Below Average'
+    END, 'No Returns') AS return_status
+FROM 
+    return_summary rs
+ORDER BY 
+    rs.total_returned_amt DESC
+LIMIT 10;

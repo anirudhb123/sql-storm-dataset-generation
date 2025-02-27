@@ -1,0 +1,66 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+),
+DetailedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_returnflag,
+        l.l_linestatus,
+        (l.l_extendedprice * (1 - l.l_discount)) AS net_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+)
+SELECT 
+    c.c_name,
+    SUM(d.net_price) AS total_sales,
+    SUM(d.net_price) / NULLIF(COUNT(d.l_orderkey), 0) AS average_order_value,
+    r.r_name,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    COUNT(DISTINCT co.c_custkey) AS unique_customers
+FROM 
+    DetailedLineItems d
+JOIN 
+    CustomerOrders co ON d.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+LEFT JOIN 
+    RankedSuppliers s ON d.l_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey AND s.rank = 1)
+JOIN 
+    nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = co.c_custkey)
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+GROUP BY 
+    c.c_name, r.r_name, s.s_name
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

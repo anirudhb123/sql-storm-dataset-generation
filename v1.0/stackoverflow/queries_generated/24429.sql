@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.CreationDate,
+           p.Score,
+           U.Reputation,
+           ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+           COALESCE(pt.Name, 'Unknown') AS PostTypeName,
+           ARRAY_AGG(DISTINCT SUBSTRING(tag.TagName, 1, 10)) AS ShortTags
+    FROM Posts p
+    LEFT JOIN Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN UNNEST(SPLIT_SUBSTRING(p.Tags, '<>')) AS tag(TagName) ON TRUE
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, U.Reputation, pt.Name
+),
+ClosedPosts AS (
+    SELECT ph.PostId,
+           ph.CreationDate AS CloseDate,
+           ph.UserId,
+           ph.Comment,
+           ph.Text
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11) -- Closed and Reopened posts
+),
+UserStats AS (
+    SELECT U.Id AS UserId,
+           COUNT(DISTINCT p.Id) AS PostCount,
+           SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Posts p ON U.Id = p.OwnerUserId
+    LEFT JOIN Votes V ON p.Id = V.PostId AND V.VoteTypeId IN (9, 10) -- BountyClose and Deletion
+    GROUP BY U.Id
+),
+CombinedStats AS (
+    SELECT rp.PostId,
+           rp.Title,
+           rp.CreationDate,
+           rp.Score,
+           rp.PostTypeName,
+           rp.ShortTags,
+           cp.CloseDate,
+           us.PostCount,
+           us.TotalBounty
+    FROM RankedPosts rp
+    LEFT JOIN ClosedPosts cp ON rp.PostId = cp.PostId
+    LEFT JOIN UserStats us ON rp.Score > 10 AND us.UserId = rp.PostId -- Arbitrary correlation for bizarre logic
+)
+SELECT *,
+        CASE 
+            WHEN CloseDate IS NOT NULL THEN 'Closed'
+            ELSE 'Active'
+        END AS PostStatus,
+        CASE 
+            WHEN PostCount IS NULL THEN 'No Posts'
+            ELSE CONCAT(PostCount, ' Posts')
+        END AS UserPostSummary
+FROM CombinedStats
+WHERE COALESCE(Score, 0) > 5 -- Filter for significant scores
+ORDER BY Score DESC, CreationDate DESC NULLS LAST
+LIMIT 50;

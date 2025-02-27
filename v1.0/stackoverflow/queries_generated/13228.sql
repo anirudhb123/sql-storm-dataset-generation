@@ -1,0 +1,37 @@
+-- Performance Benchmark Query
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) AS VoteCount,
+    COUNT(b.Id) AS BadgeCount,
+    DATEDIFF(CURRENT_TIMESTAMP, p.CreationDate) AS AgeInDays,
+    u.Reputation AS OwnerReputation,
+    u.DisplayName AS OwnerDisplayName,
+    GROUP_CONCAT(DISTINCT pt.Name) AS PostType,
+    GROUP_CONCAT(DISTINCT lt.Name) AS LinkType
+FROM 
+    Posts p
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id 
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id 
+LEFT JOIN 
+    PostLinks pl ON p.Id = pl.PostId 
+LEFT JOIN 
+    LinkTypes lt ON pl.LinkTypeId = lt.Id 
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId 
+WHERE 
+    p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.Reputation, u.DisplayName
+ORDER BY 
+    p.CreationDate DESC;

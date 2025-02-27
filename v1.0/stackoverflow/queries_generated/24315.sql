@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        p.AcceptedAnswerId,
+        COALESCE(AVG(vote.Score), 0) AS AverageScore,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes vote ON p.Id = vote.PostId AND vote.VoteTypeId = 2 -- Upvotes
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+InactiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.LastAccessDate,
+        DATEDIFF(day, u.LastAccessDate, CURRENT_TIMESTAMP) AS DaysSinceActive
+    FROM 
+        Users u
+    WHERE 
+        u.LastAccessDate < CURRENT_TIMESTAMP - INTERVAL '90 days'
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstEditDate,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Id END) AS CloseCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.Id END) AS ReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    r.AverageScore,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    ph.FirstEditDate,
+    ph.CloseCount,
+    ph.ReopenCount,
+    iu.DisplayName AS InactiveUserName,
+    iu.DaysSinceActive
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostHistoryDetails ph ON r.Id = ph.PostId
+LEFT JOIN 
+    InactiveUsers iu ON u.Id = iu.Id
+WHERE 
+    r.PostRank = 1
+    AND (ub.BadgeCount > 1 OR iu.Id IS NOT NULL)
+ORDER BY 
+    r.Score DESC, r.ViewCount DESC;

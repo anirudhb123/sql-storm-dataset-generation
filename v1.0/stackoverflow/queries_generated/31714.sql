@@ -1,0 +1,98 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+
+MostActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Users u
+    JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(v.Id) > 50
+),
+
+PostHistoryChanges AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS ChangeRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13)
+),
+
+PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.TagName) AS TagCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        string_to_array(p.Tags, ',') AS TagArray ON true
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(BOTH ' ' FROM TagArray)
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    u.DisplayName AS OwnerDisplayName,
+    rph.Level AS HierarchyLevel,
+    pct.TagCount,
+    MAX(phc.CreationDate) AS MostRecentHistoryDate,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+    u2.DisplayName AS MostActiveUser,
+    mau.VoteCount
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    RecursivePostHierarchy rph ON p.Id = rph.PostId
+LEFT JOIN 
+    PostHistoryChanges phc ON p.Id = phc.PostId AND phc.ChangeRank = 1
+LEFT JOIN 
+    PostTagCounts pct ON p.Id = pct.PostId
+LEFT JOIN 
+    MostActiveUsers mau ON TRUE
+LEFT JOIN 
+    Users u2 ON mau.Id = u2.Id
+WHERE 
+    pct.TagCount > 5
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, p.ViewCount, u.DisplayName, rph.Level, pct.TagCount, u2.DisplayName, mau.VoteCount
+ORDER BY 
+    p.ViewCount DESC,
+    HierarchyLevel ASC;

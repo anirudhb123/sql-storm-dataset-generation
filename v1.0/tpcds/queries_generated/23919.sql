@@ -1,0 +1,54 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        cs.customer_sk,
+        COUNT(DISTINCT sr.returned_date_sk) AS total_returns,
+        SUM(sr.return_amt) AS total_return_amount,
+        ROW_NUMBER() OVER (PARTITION BY cs.customer_sk ORDER BY COUNT(sr.returned_date_sk) DESC) AS rn
+    FROM 
+        store_returns sr 
+    JOIN 
+        customer cs ON sr.customer_sk = cs.c_customer_sk
+    GROUP BY 
+        cs.customer_sk
+),
+HighReturnCustomers AS (
+    SELECT
+        rr.customer_sk,
+        rr.total_returns,
+        rr.total_return_amount
+    FROM 
+        RankedReturns rr
+    WHERE 
+        rr.total_returns > (SELECT AVG(total_returns) FROM RankedReturns)
+),
+TopPromo AS (
+    SELECT 
+        p.promo_sk,
+        p.promo_name,
+        SUM(ws.net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        promotion p ON ws.promo_sk = p.p_promo_sk
+    GROUP BY 
+        p.promo_sk, p.promo_name
+    ORDER BY 
+        total_profit DESC
+    LIMIT 10
+)
+SELECT 
+    hrc.customer_sk,
+    hrc.total_returns,
+    hrc.total_return_amount,
+    tp.promo_name,
+    tp.total_profit
+FROM 
+    HighReturnCustomers hrc
+LEFT JOIN 
+    TopPromo tp ON hrc.total_returns < (SELECT MAX(total_returns) FROM HighReturnCustomers)
+WHERE 
+    hrc.total_return_amount IS NOT NULL
+ORDER BY 
+    hrc.total_return_amount DESC
+```

@@ -1,0 +1,110 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        Score,
+        OwnerUserId,
+        0 AS Depth
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ph.Depth + 1
+    FROM 
+        Posts AS p
+    INNER JOIN 
+        RecursivePostHierarchy AS ph ON p.ParentId = ph.Id
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Users AS u
+    LEFT JOIN 
+        Posts AS p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostScoreAnalysis AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        CASE 
+            WHEN p.Score > 10 THEN 'High Score'
+            WHEN p.Score BETWEEN 1 AND 10 THEN 'Medium Score'
+            WHEN p.Score = 0 THEN 'Neutral'
+            ELSE 'Negative'
+        END AS ScoreCategory
+    FROM 
+        Posts AS p
+    JOIN 
+        Users AS u ON p.OwnerUserId = u.Id
+),
+TopBadges AS (
+    SELECT 
+        b.UserId,
+        b.Name,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId, b.Name
+),
+RankedBadges AS (
+    SELECT 
+        tb.UserId,
+        tb.Name,
+        tb.BadgeCount,
+        RANK() OVER (PARTITION BY tb.UserId ORDER BY tb.BadgeCount DESC) AS BadgeRank
+    FROM 
+        TopBadges tb
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    ups.PostCount,
+    ups.PositivePosts,
+    ups.NegativePosts,
+    ups.AverageScore,
+    pb.PostId,
+    pb.Title AS PostTitle,
+    pb.Score,
+    pb.ScoreCategory,
+    rb.Name AS BadgeName,
+    rb.BadgeCount,
+    rb.BadgeRank
+FROM 
+    Users u
+LEFT JOIN 
+    UserPostStats ups ON u.Id = ups.UserId
+LEFT JOIN 
+    PostScoreAnalysis pb ON u.Id = pb.OwnerUserId
+LEFT JOIN 
+    RankedBadges rb ON u.Id = rb.UserId AND rb.BadgeRank = 1
+WHERE 
+    rb.BadgeCount > 0 OR pb.ScoreCategory IS NOT NULL
+ORDER BY 
+    ups.PostCount DESC, 
+    u.Reputation DESC, 
+    pb.Score DESC;

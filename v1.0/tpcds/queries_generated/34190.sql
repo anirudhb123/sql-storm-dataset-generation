@@ -1,0 +1,74 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws.order_number,
+        ws.item_sk,
+        ws.sales_price,
+        ws.quantity,
+        ws_ext_sales_price,
+        ws_ext_tax,
+        0 AS recursion_level
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_sold_date_sk = (SELECT max(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    
+    UNION ALL
+    
+    SELECT 
+        cs.order_number,
+        cs.item_sk,
+        cs.sales_price,
+        cs.quantity,
+        cs_ext_sales_price,
+        cs_ext_tax,
+        recursion_level + 1
+    FROM 
+        catalog_sales cs
+    JOIN 
+        SalesData sd ON cs.item_sk = sd.item_sk
+    WHERE 
+        cs.order_number <> sd.order_number
+    AND 
+        recursion_level < 5
+),
+AggregateSales AS (
+    SELECT 
+        item_sk, 
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT order_number) AS order_count
+    FROM 
+        SalesData
+    GROUP BY 
+        item_sk
+),
+TopItems AS (
+    SELECT 
+        item_sk,
+        total_sales,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        AggregateSales
+)
+SELECT 
+    i_i.item_id,
+    i_i.item_desc,
+    ti.total_sales,
+    ti.order_count,
+    COALESCE(CAST(cd.gender AS VARCHAR), 'Unknown') AS avg_gender,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers
+FROM 
+    TopItems ti 
+JOIN 
+    item i_i ON ti.item_sk = i_i.i_item_sk
+LEFT JOIN 
+    customer c ON c.c_customer_sk IN (SELECT DISTINCT ws_bill_customer_sk FROM web_sales ws WHERE ws.item_sk = ti.item_sk)
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    ti.sales_rank <= 10
+GROUP BY 
+    i_i.item_id, i_i.item_desc, ti.total_sales, ti.order_count, cd.gender
+ORDER BY 
+    ti.total_sales DESC, i_i.item_id
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,47 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        AVG(pi.info_type_id) AS average_info_type_id
+    FROM 
+        aka_title a
+    JOIN 
+        complete_cast cc ON a.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        movie_info mi ON a.movie_id = mi.movie_id
+    LEFT JOIN 
+        person_info pi ON c.person_id = pi.person_id
+    GROUP BY 
+        a.title, a.production_year
+), 
+FilteredMovies AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY actor_count DESC) AS rank
+    FROM 
+        RankedMovies
+    WHERE 
+        actor_count > 10
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.actor_count,
+    fm.average_info_type_id,
+    COALESCE(NULLIF(fm.average_info_type_id, 0), 1) AS safe_average_info
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = fm.movie_id
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM movie_info_idx mii 
+        WHERE mii.movie_id = fm.movie_id 
+        AND mii.info LIKE '%Award%'
+    )
+ORDER BY 
+    fm.production_year DESC, fm.actor_count DESC;

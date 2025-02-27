@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COALESCE(AVG(ci.nr_order), 0) AS average_cast_order,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COALESCE(AVG(ci.nr_order), 0) DESC) AS rn
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        cast_info AS ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+HighlightedTitles AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rn <= 5
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ak.name ORDER BY ak.name SEPARATOR ', ') AS actor_names
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        cast_info AS ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name AS ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+)
+SELECT 
+    md.title, 
+    md.production_year, 
+    md.actor_names
+FROM 
+    MovieDetails AS md
+JOIN 
+    HighlightedTitles AS ht ON md.title = ht.title AND md.production_year = ht.production_year
+WHERE 
+    NOT EXISTS (
+        SELECT 1 
+        FROM movie_info AS mi 
+        WHERE mi.movie_id = md.id 
+        AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Critics' OR info = 'Audience')
+        AND mi.info IS NULL
+    )
+ORDER BY 
+    md.production_year DESC, md.title;

@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2  -- Upvotes only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstCloseDate,
+        STRING_AGG(DISTINCT c.Comment, '; ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    LEFT JOIN 
+        Comments c ON ph.PostId = c.PostId AND ph.PostHistoryTypeId = 10
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    COALESCE(cpd.FirstCloseDate, 'No Closures') AS FirstCloseDate,
+    COALESCE(cpd.CloseReasons, 'N/A') AS CloseReasons,
+    ub.BadgeCount
+FROM 
+    Users u
+JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    ClosedPostDetails cpd ON rp.PostId = cpd.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    rp.rn = 1 AND 
+    (u.Reputation > 500 OR ub.BadgeCount > 0)  -- Filter for active users with badges or high reputation
+ORDER BY 
+    rp.Score DESC, 
+    u.Reputation ASC;

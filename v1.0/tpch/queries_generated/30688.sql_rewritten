@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000  
+    UNION ALL
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sp.s_acctbal, sh.level + 1
+    FROM supplier sp
+    JOIN SupplierHierarchy sh ON sp.s_nationkey = sh.s_nationkey AND sp.s_acctbal < sh.s_acctbal
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, 
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate) AS order_rank
+    FROM orders o
+),
+NoteworthyParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_size, p.p_retailprice,
+           CASE 
+               WHEN p.p_size > 100 THEN 'Large'
+               ELSE 'Small'
+           END AS size_category
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierPartInfo AS (
+    SELECT ps.ps_partkey, s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_name
+)
+SELECT p.p_name, p.p_retailprice, s.s_name, c.c_name, co.total_spent, soh.level AS supplier_level
+FROM NoteworthyParts p
+JOIN SupplierPartInfo sp ON p.p_partkey = sp.ps_partkey
+JOIN CustomerOrders co ON cu.c_custkey = o.o_custkey
+JOIN SupplierHierarchy soh ON sp.s_suppkey = soh.s_suppkey
+LEFT JOIN nation n ON cu.c_nationkey = n.n_nationkey
+WHERE p.p_retailprice > (SELECT AVG(p_sub.p_retailprice) FROM part p_sub)
+  AND co.total_spent > 500
+ORDER BY p.p_retailprice DESC, co.total_spent DESC;

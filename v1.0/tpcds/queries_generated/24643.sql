@@ -1,0 +1,82 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_sales_price,
+        ws.ws_order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS rnk
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > (SELECT AVG(ws2.ws_sales_price) 
+                              FROM web_sales ws2
+                              WHERE ws2.ws_ship_date_sk IS NOT NULL)
+),
+SalesAnalysis AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MAX(ws.ws_sales_price) AS max_sales_price
+    FROM 
+        web_sales ws
+    JOIN 
+        RankedSales r ON ws.ws_order_number = r.ws_order_number
+    WHERE 
+        r.rnk <= 5
+    GROUP BY 
+        ws.web_site_sk
+),
+CustomerDemos AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        cd.cd_gender IS NOT NULL OR ib.ib_lower_bound IS NOT NULL
+),
+FinalAnalysis AS (
+    SELECT 
+        sa.web_site_sk,
+        sa.total_sales,
+        sa.order_count,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.ib_lower_bound,
+        cd.ib_upper_bound,
+        CASE 
+            WHEN cd.ib_lower_bound IS NULL THEN 'Unknown'
+            WHEN sa.total_sales IS NULL THEN 'No Sales'
+            ELSE 'Known Sales'
+        END AS sales_status
+    FROM 
+        SalesAnalysis sa
+    LEFT JOIN 
+        CustomerDemos cd ON sa.web_site_sk = cd.cd_demo_sk
+)
+SELECT 
+    fax.web_site_sk,
+    SUM(fax.total_sales) AS aggregated_sales,
+    AVG(fax.total_sales) AS avg_sales,
+    COUNT(CASE WHEN fax.sales_status = 'Known Sales' THEN 1 END) AS known_sales_count,
+    MAX(fax.order_count) AS max_orders,
+    STRING_AGG(fax.cd_gender || ' - ' || fax.cd_marital_status, '; ') AS gender_marital_info
+FROM 
+    FinalAnalysis fax
+WHERE 
+    fax.total_sales > 1000
+GROUP BY 
+    fax.web_site_sk
+HAVING 
+    COUNT(fax.sales_status) > 3
+ORDER BY 
+    aggregated_sales DESC
+LIMIT 10;

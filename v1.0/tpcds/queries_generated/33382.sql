@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_trends AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        DATE(dd.d_date) AS sales_date
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY 
+        ws.web_site_sk, DATE(dd.d_date)
+    UNION ALL
+    SELECT 
+        st.web_site_sk,
+        st.total_sales * 1.1 AS total_sales,
+        DATE(DATE_ADD(st.sales_date, INTERVAL 1 DAY)) AS sales_date
+    FROM 
+        sales_trends AS st
+    WHERE 
+        st.sales_date < CURRENT_DATE
+),
+ranked_sales AS (
+    SELECT 
+        ad.ca_state,
+        SUM(st.total_sales) AS total_sales,
+        COUNT(DISTINCT st.web_site_sk) AS site_count,
+        RANK() OVER (PARTITION BY ad.ca_state ORDER BY SUM(st.total_sales) DESC) AS sales_rank
+    FROM 
+        sales_trends AS st
+    JOIN 
+        customer AS c ON c.c_current_addr_sk = ad.ca_address_sk
+    JOIN 
+        customer_address AS ad ON c.c_current_addr_sk = ad.ca_address_sk
+    GROUP BY 
+        ad.ca_state
+),
+promotions AS (
+    SELECT 
+        p.p_promo_name,
+        SUM(ws.ws_ext_sales_price) AS promo_sales
+    FROM 
+        web_sales AS ws
+    JOIN 
+        promotion AS p ON ws.ws_promo_sk = p.p_promo_sk
+    GROUP BY 
+        p.p_promo_name
+)
+SELECT 
+    rs.ca_state,
+    rs.total_sales,
+    rs.site_count,
+    COALESCE(pr.promo_sales, 0) AS promo_sales,
+    CASE 
+        WHEN rs.total_sales >= 10000 THEN 'High Performer'
+        WHEN rs.total_sales >= 5000 THEN 'Medium Performer'
+        ELSE 'Low Performer' 
+    END AS performance_category
+FROM 
+    ranked_sales AS rs
+LEFT JOIN 
+    promotions AS pr ON rs.sales_rank = 1
+WHERE 
+    rs.site_count > 5
+ORDER BY 
+    rs.total_sales DESC
+LIMIT 10;

@@ -1,0 +1,49 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(V.BountyAmount) AS TotalBounty,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 WHEN V.VoteTypeId = 3 THEN -1 ELSE 0 END) AS NetVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    WHERE U.Reputation >= 1000
+    GROUP BY U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UA.*,
+        RANK() OVER (ORDER BY UA.TotalPosts DESC) AS PostRank,
+        RANK() OVER (ORDER BY UA.TotalComments DESC) AS CommentRank,
+        RANK() OVER (ORDER BY UA.NetVotes DESC) AS VoteRank
+    FROM UserActivity UA
+)
+SELECT 
+    U.DisplayName, 
+    U.TotalPosts, 
+    U.TotalComments, 
+    U.TotalBadges, 
+    U.TotalBounty, 
+    U.NetVotes,
+    CASE 
+        WHEN U.PostRank <= 10 THEN 'Top 10 Posts'
+        ELSE 'Other'
+    END AS PostCategory,
+    CASE 
+        WHEN U.CommentRank <= 10 THEN 'Top 10 Comments'
+        ELSE 'Other'
+    END AS CommentCategory,
+    CASE 
+        WHEN U.VoteRank <= 10 THEN 'Top 10 Votes'
+        ELSE 'Other'
+    END AS VoteCategory
+FROM TopUsers U
+WHERE U.TotalBadges > 0
+ORDER BY U.TotalPosts DESC, U.TotalComments DESC
+LIMIT 50;

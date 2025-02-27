@@ -1,0 +1,45 @@
+WITH RankedActors AS (
+    SELECT 
+        ak.name AS actor_name,
+        ti.title AS movie_title,
+        ti.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ti.id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title ti ON ci.movie_id = ti.id
+),
+ActorMovieCount AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT production_year) AS movie_count
+    FROM 
+        RankedActors
+    GROUP BY 
+        actor_name
+)
+SELECT 
+    amc.actor_name,
+    amc.movie_count,
+    mn.name AS main_actor_name,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    COUNT(DISTINCT mc.company_id) AS company_count
+FROM 
+    ActorMovieCount amc
+JOIN 
+    cast_info ci ON amc.actor_name = (SELECT ak.name FROM aka_name ak WHERE ak.person_id = ci.person_id LIMIT 1)
+JOIN 
+    movie_keyword mk ON ci.movie_id = mk.movie_id
+JOIN 
+    movie_companies mc ON ci.movie_id = mc.movie_id
+JOIN 
+    name mn ON mn.id = ci.person_id
+WHERE 
+    amc.movie_count > 5
+GROUP BY 
+    amc.actor_name, mn.name
+ORDER BY 
+    amc.movie_count DESC, keyword_count DESC
+LIMIT 10;

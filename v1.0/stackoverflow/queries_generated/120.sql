@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL 
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        COUNT(DISTINCT up.PostId) AS UpvotedPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.VoteTypeId = 2
+    LEFT JOIN 
+        Posts up ON v.PostId = up.Id
+    GROUP BY 
+        u.Id
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        DENSE_RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 6) 
+        AND ph.CreationDate >= NOW() - INTERVAL '1 month'
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    rp.Title,
+    rp.Score,
+    rp.CommentCount,
+    tu.GoldBadges,
+    tu.SilverBadges,
+    tu.BronzeBadges,
+    re.UserDisplayName AS LastEditUser,
+    re.Comment AS LastEditComment,
+    re.CreationDate AS LastEditDate
+FROM 
+    TopUsers tu
+JOIN 
+    Users u ON tu.UserId = u.Id
+JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    RecentEdits re ON rp.PostId = re.PostId AND re.EditRank = 1
+WHERE 
+    tu.UpvotedPosts > 5
+ORDER BY 
+    u.Reputation DESC, 
+    rp.CommentCount DESC, 
+    rp.Score DESC
+LIMIT 100;

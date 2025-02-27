@@ -1,0 +1,48 @@
+WITH Customer_orders AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        AVG(ws.ws_net_paid_inc_tax) AS avg_order_value
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year >= 1980 
+        AND c.c_birth_country = 'USA'
+        AND ws.ws_sold_date_sk BETWEEN 2458000 AND 2458100 
+    GROUP BY 
+        c.c_customer_id
+),
+Demographic_info AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(co.total_spent) AS total_spent_by_gender_marital
+    FROM 
+        Customer_orders co
+    JOIN 
+        customer_demographics cd ON co.c_customer_id = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+),
+Top_spenders AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        total_spent_by_gender_marital,
+        RANK() OVER (PARTITION BY cd_gender ORDER BY total_spent_by_gender_marital DESC) AS rank_within_gender
+    FROM 
+        Demographic_info
+)
+SELECT 
+    cd_gender, 
+    cd_marital_status, 
+    total_spent_by_gender_marital
+FROM 
+    Top_spenders
+WHERE 
+    rank_within_gender <= 5
+ORDER BY 
+    cd_gender, total_spent_by_gender_marital DESC;

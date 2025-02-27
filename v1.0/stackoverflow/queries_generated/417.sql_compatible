@@ -1,0 +1,55 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+
+RecentVotes AS (
+    SELECT 
+        V.PostId,
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes V
+    WHERE 
+        V.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '30 days'
+    GROUP BY 
+        V.PostId
+),
+
+TopPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        COALESCE(RV.VoteCount, 0) AS RecentVoteCount,
+        RANK() OVER (ORDER BY P.Score DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        RecentVotes RV ON P.Id = RV.PostId
+    WHERE 
+        P.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '90 days'
+)
+
+SELECT 
+    UR.DisplayName,
+    UR.Reputation,
+    UR.ReputationRank,
+    TP.Title,
+    TP.Score,
+    TP.RecentVoteCount
+FROM 
+    UserReputation UR
+JOIN 
+    TopPosts TP ON UR.UserId = TP.OwnerUserId
+WHERE 
+    UR.Reputation > 1000 AND 
+    TP.RecentVoteCount > 5
+ORDER BY 
+    UR.Reputation DESC,
+    TP.RecentVoteCount DESC;

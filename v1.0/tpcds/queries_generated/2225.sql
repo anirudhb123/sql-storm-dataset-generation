@@ -1,0 +1,51 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS unique_orders
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    LEFT JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        wp.wp_creation_date_sk > (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+        AND (c.c_preferred_cust_flag = 'Y' OR c.c_birth_country IS NULL)
+    GROUP BY 
+        ws.web_site_sk
+),
+InventoryData AS (
+    SELECT 
+        inv.inv_warehouse_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM 
+        inventory inv
+    WHERE 
+        inv_date_sk = (SELECT MAX(inv_date_sk) FROM inventory)
+    GROUP BY 
+        inv.inv_warehouse_sk
+)
+SELECT 
+    sd.web_site_sk,
+    id.inv_warehouse_sk,
+    sd.total_quantity,
+    sd.total_net_profit,
+    id.total_quantity_on_hand,
+    CASE 
+        WHEN id.total_quantity_on_hand > 0 THEN 
+            ROUND((sd.total_net_profit / id.total_quantity_on_hand), 2)
+        ELSE 
+            NULL 
+    END AS profit_per_item
+FROM 
+    SalesData sd
+FULL OUTER JOIN 
+    InventoryData id ON sd.web_site_sk = id.inv_warehouse_sk
+WHERE 
+    sd.total_quantity > 100
+ORDER BY 
+    profit_per_item DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

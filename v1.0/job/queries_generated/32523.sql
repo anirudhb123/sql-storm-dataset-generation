@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000 -- Start from the year 2000
+
+    UNION ALL
+
+    SELECT 
+        mm.id AS movie_id,
+        mm.title,
+        mm.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mm ON ml.linked_movie_id = mm.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT ch.movie_id) AS movie_count,
+    AVG(COALESCE(m.production_year, 0)) AS avg_production_year,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    RANK() OVER (PARTITION BY a.person_id ORDER BY COUNT(DISTINCT ch.movie_id) DESC) AS rank
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    complete_cast ch ON c.movie_id = ch.movie_id 
+JOIN 
+    MovieHierarchy m ON ch.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    name a ON ak.person_id = a.imdb_id
+WHERE 
+    a.gender = 'M'
+GROUP BY 
+    ak.name, a.person_id
+HAVING 
+    COUNT(DISTINCT ch.movie_id) > 2 
+ORDER BY 
+    avg_production_year DESC, actor_name
+LIMIT 100;
+
+This query employs a recursive CTE to build a hierarchy of movies linked through the `movie_link` table, filtering to start from movies produced after 1999. It joins this hierarchy with other tables to find the number of movies each actor has appeared in, calculating their average production year and aggregating all the keywords associated with their movies. It filters for male actors with more than two movies, ranks them by the number of movies, and returns a limited set of results sorted by average production year descending and actor name.

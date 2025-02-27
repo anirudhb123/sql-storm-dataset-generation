@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        COALESCE(
+            (SELECT COUNT(*)
+             FROM Comments c
+             WHERE c.PostId = p.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= DATEADD(year, -1, GETDATE()) -- Posts created in the last year
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(V.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(V.VoteTypeId = 3) AS TotalDownvotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(b.Id) AS TotalBadges,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes V ON V.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+ClosedPostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT c.Name, ', ') AS CloseReason
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) -- Only closed and reopened
+    LEFT JOIN 
+        CloseReasonTypes c ON c.Id = CAST(ph.Comment AS INT)
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName,
+    ua.TotalPosts,
+    ua.TotalBadges,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    ph.LastClosedDate,
+    ph.CloseReason,
+    ROW_NUMBER() OVER (ORDER BY ua.TotalPosts DESC) AS RankBasedOnPosts,
+    CASE 
+        WHEN ua.LastPostDate = DATEADD(day, -1, GETDATE()) THEN 'Active'
+        ELSE 'Inactive'
+    END AS ActivityStatus
+FROM 
+    UserActivity ua
+JOIN 
+    RankedPosts rp ON ua.UserId = rp.OwnerUserId
+LEFT JOIN 
+    ClosedPostHistory ph ON rp.PostId = ph.PostId
+WHERE 
+    rp.RowNum = 1 -- Get only the latest post per user
+    AND ua.TotalPosts > 0 -- Users with posted content
+ORDER BY 
+    ua.TotalUpvotes - ua.TotalDownvotes DESC, -- Order by net votes
+    rp.Score DESC; -- then by post score

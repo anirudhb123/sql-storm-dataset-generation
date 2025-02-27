@@ -1,0 +1,85 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalUpVotes,
+        TotalDownVotes,
+        TotalPosts,
+        TotalComments,
+        RANK() OVER (ORDER BY TotalUpVotes DESC) AS UpVoteRank,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS PostRank
+    FROM 
+        UserStats
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS PostRank,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate
+),
+FinalResult AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.TotalUpVotes,
+        U.TotalDownVotes,
+        P.PostId,
+        P.Title,
+        P.CommentCount,
+        P.CloseCount,
+        COALESCE(NULLIF(P.CreationDate, NULL), 'No Date') AS CreationDate
+    FROM 
+        TopUsers U
+    LEFT JOIN 
+        PostAnalytics P ON U.UserId = P.OwnerUserId
+    WHERE 
+        (U.UpVoteRank <= 10 OR U.PostRank <= 10)
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalUpVotes,
+    TotalDownVotes,
+    PostId,
+    Title,
+    CommentCount,
+    CloseCount,
+    CreationDate
+FROM 
+    FinalResult
+WHERE 
+    CreationDate <> 'No Date'
+ORDER BY 
+    TotalUpVotes DESC, TotalPosts DESC;

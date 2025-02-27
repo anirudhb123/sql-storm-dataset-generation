@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '90 days'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.OwnerUserId
+),
+TopRatedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.OwnerUserId,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        (COALESCE(u.Reputation, 0) + COALESCE(b.Count, 0) * 50) AS AdjustedReputation
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS Count 
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > (
+            SELECT AVG(Reputation) FROM Users
+        )
+)
+SELECT 
+    tr.PostId,
+    tr.Title,
+    tr.Score,
+    u.DisplayName AS OwnerDisplayName,
+    u.AdjustedReputation,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = tr.PostId AND v.VoteTypeId = 2) AS UpvoteCount,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.Id IN (SELECT UNNEST(STRING_TO_ARRAY(p.TAGS, '><')::int[]))) AS TagNames
+FROM 
+    TopRatedPosts tr
+JOIN 
+    Users u ON tr.OwnerUserId = u.Id
+WHERE 
+    u.Location IS NOT NULL
+    AND u.LastAccessDate > CURRENT_DATE - INTERVAL '180 days'
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM Posts p 
+        WHERE p.OwnerUserId = tr.OwnerUserId 
+        AND p.PostTypeId = 1 
+        AND p.AcceptedAnswerId IS NULL
+    )
+ORDER BY 
+    tr.Score DESC, 
+    AdjustedReputation DESC;

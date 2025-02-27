@@ -1,0 +1,65 @@
+
+WITH RECURSIVE AddressCTE AS (
+    SELECT ca_address_sk, ca_city, ca_state, 
+           ROW_NUMBER() OVER (PARTITION BY ca_city, ca_state ORDER BY ca_address_sk) AS city_rank
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+), FilteredSales AS (
+    SELECT ws_ship_date_sk, ws_item_sk, 
+           SUM(ws_quantity) AS total_quantity, 
+           SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 20220101 AND 20221231
+    GROUP BY ws_ship_date_sk, ws_item_sk
+), CustomerDemo AS (
+    SELECT cd_demo_sk, cd_gender, cd_marital_status, 
+           CASE 
+               WHEN cd_purchase_estimate IS NULL THEN 'Unknown' 
+               ELSE 'Known' 
+           END AS purchase_estimate_status
+    FROM customer_demographics
+    WHERE cd_gender IN ('M', 'F')
+), AggregatedReturns AS (
+    SELECT sr_item_sk, COUNT(sr_ticket_number) AS return_count, 
+           SUM(sr_return_amt) AS total_return
+    FROM store_returns
+    GROUP BY sr_item_sk
+), CombinedData AS (
+    SELECT 
+        ws.ws_item_sk, 
+        COALESCE(ws.total_quantity, 0) AS total_quantity, 
+        COALESCE(ws.total_profit, 0) AS total_profit, 
+        COALESCE(cr.return_count, 0) AS return_count,
+        COALESCE(cr.total_return, 0) AS total_return,
+        CASE 
+            WHEN wd.address IS NULL THEN 'Non-Local'
+            ELSE wd.address 
+        END AS delivery_type
+    FROM FilteredSales ws
+    FULL OUTER JOIN AggregatedReturns cr ON ws.ws_item_sk = cr.sr_item_sk
+    LEFT JOIN (
+        SELECT CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS address, 
+               ca_city, ca_state
+        FROM AddressCTE
+        WHERE city_rank = 1
+    ) wd ON wd.city = 'Los Angeles' AND wd.state = 'CA'
+)
+SELECT 
+    cd.cd_demo_sk,
+    cd.cd_gender,
+    cd.purchase_estimate_status,
+    cd.cd_marital_status,
+    cd.total_quantity,
+    cd.total_profit,
+    cd.return_count,
+    cd.total_return,
+    CASE 
+        WHEN cd.total_quantity > 0 THEN 'Active' 
+        ELSE 'Inactive' 
+    END AS sales_status
+FROM CombinedData cd
+JOIN CustomerDemo demo ON cd.ws_item_sk = demo.cd_demo_sk
+WHERE (total_profit - total_return) > 1000 
+  AND (demo.cd_gender = 'M' OR demo.cd_marital_status = 'S')
+ORDER BY sales_status DESC, total_profit DESC
+FETCH FIRST 100 ROWS ONLY;

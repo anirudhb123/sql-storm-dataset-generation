@@ -1,0 +1,49 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk, 1 AS level
+    FROM customer
+    WHERE c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+),
+CustomerReturns AS (
+    SELECT 
+        cr_returned_date_sk,
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_return_quantity,
+        SUM(cr_return_amount) AS total_return_amount,
+        COUNT(DISTINCT cr_order_number) AS total_orders
+    FROM catalog_returns
+    GROUP BY cr_returned_date_sk, cr_item_sk
+),
+SalesSummary AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold_quantity,
+        SUM(ws_net_paid) AS total_sold_amount,
+        AVG(ws_net_paid) AS avg_selling_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    cc.c_first_name,
+    cc.c_last_name,
+    ch.level,
+    COALESCE(SUM(cr.total_return_quantity), 0) AS total_return_quantity,
+    COALESCE(SUM(cs.total_sold_quantity), 0) AS total_sold_quantity,
+    COALESCE(SUM(cs.total_sold_amount), 0) AS total_sold_amount,
+    AVG(ss.avg_selling_price) AS avg_selling_price,
+    RANK() OVER (PARTITION BY ca.ca_state ORDER BY SUM(cs.total_sold_quantity) DESC) AS state_rank
+FROM customer_address ca
+LEFT JOIN customer cc ON ca.ca_address_sk = cc.c_current_addr_sk
+LEFT JOIN CustomerHierarchy ch ON cc.c_current_cdemo_sk = ch.c_current_cdemo_sk
+LEFT JOIN CustomerReturns cr ON cr.cr_returned_date_sk = CURRENT_DATE
+LEFT JOIN SalesSummary cs ON cs.ws_item_sk = cr.cr_item_sk
+GROUP BY ca.ca_city, ca.ca_state, cc.c_first_name, cc.c_last_name, ch.level
+HAVING AVG(ss.avg_selling_price) > 100.00 
+ORDER BY state_rank, ca.ca_city;

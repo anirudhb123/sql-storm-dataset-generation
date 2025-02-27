@@ -1,0 +1,72 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+    HAVING
+        SUM(ws_quantity) > 10
+    UNION ALL
+    SELECT
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_sales_price) AS total_sales
+    FROM
+        catalog_sales
+    WHERE
+        cs_item_sk IN (SELECT ws_item_sk FROM SalesCTE)
+    GROUP BY
+        cs_item_sk
+),
+CustomerInfo AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_marital_status ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+TopCustomers AS (
+    SELECT
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_marital_status,
+        ci.cd_purchase_estimate
+    FROM
+        CustomerInfo ci
+    WHERE
+        ci.rn <= 5
+)
+SELECT
+    cu.c_first_name,
+    cu.c_last_name,
+    cu.cd_marital_status,
+    inv.inv_quantity_on_hand,
+    COALESCE(ss.total_quantity, 0) AS total_web_sales,
+    COALESCE(cs.total_quantity, 0) AS total_catalog_sales,
+    (COALESCE(ss.total_quantity, 0) + COALESCE(cs.total_quantity, 0)) AS total_sales_volume
+FROM
+    TopCustomers cu
+FULL OUTER JOIN
+    SalesCTE ss ON cu.c_customer_sk = ss.ws_item_sk
+FULL OUTER JOIN
+    SalesCTE cs ON cu.c_customer_sk = cs.cs_item_sk
+LEFT JOIN
+    inventory inv ON inv.inv_item_sk = COALESCE(ss.ws_item_sk, cs.cs_item_sk)
+WHERE
+    (cu.cd_marital_status IS NOT NULL OR cu.cd_purchase_estimate > 1000)
+    AND (inv.inv_quantity_on_hand IS NOT NULL AND inv.inv_quantity_on_hand > 5)
+ORDER BY
+    total_sales_volume DESC
+FETCH FIRST 50 ROWS ONLY;

@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS Owner,
+        p.CreationDate,
+        p.Body,
+        ARRAY_AGG(t.TagName) AS Tags,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS t(t) ON TRUE
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Owner,
+        CreationDate,
+        Body,
+        Tags,
+        Score,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank <= 5  -- Only select the 5 most recent posts per user
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Owner,
+        CreationDate,
+        Body,
+        Tags,
+        Score,
+        CommentCount,
+        RANK() OVER (ORDER BY Score DESC, CreationDate DESC) AS OverallRank
+    FROM 
+        FilteredPosts
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.Owner,
+    pp.CreationDate,
+    pp.Body,
+    pp.Tags,
+    pp.Score,
+    pp.CommentCount,
+    pp.OverallRank,
+    CASE 
+        WHEN pp.OverallRank <= 10 THEN 'Top 10 Posts'
+        ELSE 'Other Posts'
+    END AS PostCategory
+FROM 
+    TopPosts pp
+WHERE 
+    pp.CommentCount > 0  -- Only include posts with comments
+ORDER BY 
+    pp.OverallRank;

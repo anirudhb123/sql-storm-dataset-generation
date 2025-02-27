@@ -1,0 +1,67 @@
+
+WITH PostTagStats AS (
+    SELECT 
+        P.Id AS PostID,
+        P.Title,
+        P.CreationDate,
+        P.OwnerDisplayName,
+        P.ViewCount,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        LATERAL UNNEST(string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><')) AS T(TagName) ON TRUE
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.OwnerDisplayName, P.ViewCount
+),
+PostEditHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.UserDisplayName,
+        PH.CreationDate AS EditDate,
+        PH.Comment,
+        PH.Text
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+),
+VoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS PositiveVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS NegativeVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+SELECT 
+    PTS.PostID,
+    PTS.Title,
+    PTS.CreationDate,
+    PTS.OwnerDisplayName,
+    PTS.ViewCount,
+    PTS.UpVotes,
+    PTS.DownVotes,
+    PTS.Tags,
+    COUNT(E.EditDate) AS EditCount,
+    COALESCE(VC.PositiveVotes, 0) AS TotalUpVotes,
+    COALESCE(VC.NegativeVotes, 0) AS TotalDownVotes,
+    STRING_AGG(DISTINCT E.UserDisplayName || ' edited on ' || E.EditDate, '; ') AS EditDetails
+FROM 
+    PostTagStats PTS
+LEFT JOIN 
+    PostEditHistory E ON PTS.PostID = E.PostId
+LEFT JOIN 
+    VoteCounts VC ON PTS.PostID = VC.PostId
+GROUP BY 
+    PTS.PostID, PTS.Title, PTS.CreationDate, PTS.OwnerDisplayName, PTS.ViewCount, PTS.UpVotes, PTS.DownVotes, PTS.Tags
+ORDER BY 
+    PTS.ViewCount DESC;

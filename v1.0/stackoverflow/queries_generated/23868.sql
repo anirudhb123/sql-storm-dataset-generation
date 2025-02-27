@@ -1,0 +1,77 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate
+), 
+HotQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COUNT(*) OVER (PARTITION BY p.Id) AS ViewCountPerPost
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 10
+), 
+NestedVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS TotalVotes,
+        COUNT(DISTINCT v.UserId) AS VoterCount
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.CreationDate,
+    us.UpVotes,
+    us.DownVotes,
+    us.PostCount,
+    us.CommentCount,
+    us.UserRank,
+    hq.Title AS HotQuestionTitle,
+    hq.Score AS HotQuestionScore,
+    hq.ViewCount AS HotQuestionViews,
+    nv.TotalVotes AS VoteCount,
+    nv.VoterCount AS UniqueVoterCount,
+    CASE 
+        WHEN us.Reputation IS NULL THEN 'No Reputation Available'
+        ELSE 'Reputation Available'
+    END AS ReputationStatus
+FROM 
+    UserStatistics us
+LEFT JOIN 
+    HotQuestions hq ON us.UserId IN (SELECT OwnerUserId FROM Posts WHERE Id = hq.PostId)
+LEFT JOIN 
+    NestedVotes nv ON hq.PostId = nv.PostId
+WHERE
+    (us.Reputation > 1000 OR us.CreationDate <= NOW() - INTERVAL '1 year')
+    AND (us.UpVotes > 5 OR us.DownVotes < 3)
+ORDER BY 
+    us.UserRank, hq.Score DESC
+LIMIT 50;
+

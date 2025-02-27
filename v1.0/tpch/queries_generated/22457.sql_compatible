@@ -1,0 +1,77 @@
+
+WITH RECURSIVE price_history AS (
+    SELECT
+        ps_partkey,
+        ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS rank
+    FROM
+        partsupp
+    WHERE
+        ps_supplycost IS NOT NULL
+),
+top_suppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(NULLIF(s.s_comment, ''), 'No Comments') AS supplier_comment
+    FROM
+        supplier s
+    WHERE
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+),
+nation_order_summary AS (
+    SELECT
+        n.n_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_revenue,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM
+        nation n
+    JOIN
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        n.n_name
+),
+lineitem_summary AS (
+    SELECT
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales
+    FROM
+        lineitem l
+    WHERE
+        l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY
+        l.l_orderkey
+)
+SELECT
+    n.n_name,
+    ns.total_orders,
+    ns.total_revenue,
+    ns.avg_order_value,
+    COALESCE(ps.ps_supplycost, 0) AS max_supply_cost,
+    ts.s_name AS supplier_name,
+    ts.s_acctbal AS supplier_balance,
+    ls.net_sales,
+    CASE 
+        WHEN ns.total_orders > 100 THEN 'High Volume'
+        WHEN ns.total_orders BETWEEN 50 AND 100 THEN 'Medium Volume'
+        ELSE 'Low Volume'
+    END AS order_volume_category
+FROM
+    nation_order_summary ns
+LEFT JOIN
+    nation n ON ns.n_name = n.n_name
+LEFT JOIN
+    price_history ps ON ns.n_name = (SELECT n2.n_name FROM nation n2 WHERE n2.n_nationkey IN (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ls.l_orderkey)))
+LEFT JOIN
+    top_suppliers ts ON ts.s_suppkey = (SELECT ps.s_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = ls.l_orderkey LIMIT 1))
+FULL OUTER JOIN
+    lineitem_summary ls ON ns.total_orders = ls.l_orderkey
+WHERE
+    ns.total_revenue IS NOT NULL OR ts.s_name IS NOT NULL
+ORDER BY
+    ns.total_revenue DESC, ts.s_acctbal DESC
+LIMIT 100;

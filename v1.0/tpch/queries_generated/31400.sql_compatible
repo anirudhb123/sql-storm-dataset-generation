@@ -1,0 +1,42 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, 1 AS level
+    FROM customer
+    WHERE c_acctbal > 0
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE ch.level < 5
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_available_qty, COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+PartInformation AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, p.p_size,
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank,
+           COALESCE(SUM(l.l_quantity), 0) AS total_quantity_sold
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice, p.p_size
+),
+NationPerformance AS (
+    SELECT n.n_nationkey, n.n_name, AVG(s.s_acctbal) AS avg_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT ch.c_name, ch.level, ns.n_name, ps.total_available_qty, pi.p_name,
+       pi.p_retailprice, pi.total_quantity_sold
+FROM CustomerHierarchy ch
+LEFT JOIN NationPerformance ns ON ch.c_nationkey = ns.n_nationkey
+LEFT JOIN SupplierStats ps ON ns.n_nationkey = ps.s_suppkey
+LEFT JOIN PartInformation pi ON pi.price_rank <= 3
+WHERE ch.level < 4
+AND (pi.total_quantity_sold IS NOT NULL OR pi.total_quantity_sold > 0)
+ORDER BY ch.level, ns.avg_acctbal DESC NULLS LAST;

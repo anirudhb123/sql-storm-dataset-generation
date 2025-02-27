@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_ws.web_site_id,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_web_site_sk ORDER BY ws.ws_net_paid DESC) AS SalesRank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site ws_ws ON ws.ws_web_site_sk = ws_ws.web_site_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1000 AND 2000
+),
+TotalSales AS (
+    SELECT 
+        s.s_store_id,
+        SUM(ss.ss_net_paid) AS TotalStoreSales
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY 
+        s.s_store_id
+),
+CustomerReturns AS (
+    SELECT 
+        sr_store_sk,
+        COUNT(*) AS TotalReturns,
+        SUM(sr_return_amt) AS TotalReturnAmount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_store_sk
+),
+TopWebsites AS (
+    SELECT 
+        web_site_id,
+        SUM(ws_net_paid) AS TotalSales
+    FROM 
+        web_sales
+    GROUP BY 
+        web_site_id
+    ORDER BY 
+        TotalSales DESC
+    LIMIT 5
+)
+
+SELECT 
+    ws.web_site_id,
+    COALESCE(ts.TotalStoreSales, 0) AS TotalStoreSales,
+    COALESCE(cr.TotalReturns, 0) AS TotalReturns,
+    COALESCE(cr.TotalReturnAmount, 0) AS TotalReturnAmount,
+    RANK() OVER (ORDER BY SUM(ws.ws_net_paid) DESC) AS WebSalesRank
+FROM 
+    web_sales ws
+LEFT JOIN 
+    TotalSales ts ON ws.ws_ship_addr_sk = ts.s_store_id 
+LEFT JOIN 
+    CustomerReturns cr ON ws.ws_ship_addr_sk = cr.sr_store_sk 
+JOIN 
+    TopWebsites tw ON ws.web_site_id = tw.web_site_id
+GROUP BY 
+    ws.web_site_id, ts.TotalStoreSales, cr.TotalReturns, cr.TotalReturnAmount
+ORDER BY 
+    WebSalesRank, TotalStoreSales DESC;

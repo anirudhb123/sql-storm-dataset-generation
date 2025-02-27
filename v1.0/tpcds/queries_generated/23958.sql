@@ -1,0 +1,80 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        cr.returned_date_sk,
+        cr.returning_customer_sk,
+        COUNT(cr.return_quantity) AS total_returns,
+        SUM(cr.return_amount) AS total_return_amount,
+        RANK() OVER (PARTITION BY cr.returning_customer_sk ORDER BY SUM(cr.return_amount) DESC) AS return_rank
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returned_date_sk,
+        cr.returning_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(SUM(sr_net_loss), 0) AS total_net_loss,
+        COUNT(DISTINCT CASE WHEN sr_reason_sk IS NOT NULL THEN sr_item_sk END) AS distinct_items_returned,
+        MAX(ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY COUNT(cr.return_quantity) DESC)) AS item_frequency
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN RankedReturns rr ON c.c_customer_sk = rr.returning_customer_sk
+    GROUP BY 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status
+    HAVING 
+        total_net_loss > 1000 OR item_frequency > 1
+),
+FinalAnalytics AS (
+    SELECT 
+        hvc.c_customer_sk,
+        hvc.c_first_name,
+        hvc.c_last_name,
+        hvc.cd_gender,
+        hvc.cd_marital_status,
+        hvc.total_net_loss,
+        hvc.distinct_items_returned,
+        COALESCE(DENSE_RANK() OVER (ORDER BY hvc.total_net_loss DESC), 0) AS customer_rank,
+        (SELECT 
+            COUNT(*) 
+         FROM 
+            store s 
+         WHERE 
+            s.s_state = 'CA' AND s.s_closed_date_sk IS NULL) AS active_stores_CA
+    FROM 
+        HighValueCustomers hvc
+)
+SELECT 
+    fa.*,
+    (SELECT 
+        SUM(ws_net_profit) 
+     FROM 
+        web_sales 
+     WHERE 
+        ws_bill_customer_sk = fa.c_customer_sk AND 
+        ws_sales_price > (SELECT MAX(ws_sales_price)
+                          FROM web_sales
+                          WHERE ws_sold_date_sk = DATE(2023-10-01)) 
+    ) AS additional_profit
+FROM 
+    FinalAnalytics fa
+WHERE 
+    fa.total_net_loss IS NOT NULL AND 
+    fa.total_net_loss IN (SELECT DISTINCT hr.total_return_amount 
+                          FROM RankedReturns hr 
+                          WHERE hr.return_rank = 1) 
+ORDER BY 
+    fa.customer_rank DESC, 
+    fa.c_last_name ASC
+FETCH FIRST 50 ROWS ONLY;

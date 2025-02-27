@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '> <'))::VARCHAR[]) AS t(TagName)
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.OwnerUserId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    us.DisplayName,
+    us.TotalPosts,
+    us.TotalAnswers,
+    us.Reputation,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    rp.PostId,
+    rp.Title,
+    rp.Tags,
+    rp.CommentCount,
+    rp.AnswerCount
+FROM 
+    UserStats us
+JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId
+WHERE 
+    rp.UserPostRank <= 5 -- Top 5 recent posts per user
+ORDER BY 
+    us.Reputation DESC, rp.CommentCount DESC
+LIMIT 100; -- Limit to top 100 users based on reputation

@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.ViewCount DESC) AS RankByViews,
+        COUNT(c.Id) AS CommentCount,
+        json_agg(b.Name) AS BadgeNames
+    FROM 
+        Posts p
+    LEFT JOIN 
+        VoteTypes vt ON vt.Id = v.VoteTypeId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    JOIN 
+        PostTypes pt ON pt.Id = p.PostTypeId
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, pt.Name, p.CreationDate, p.ViewCount
+), FilteredPosts AS (
+    SELECT 
+        rp.PostID,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.CommentCount,
+        rp.RankByViews,
+        CASE 
+            WHEN (rp.UpVotes - rp.DownVotes) > 10 THEN 'Highly Active'
+            WHEN (rp.UpVotes - rp.DownVotes) BETWEEN 1 AND 10 THEN 'Moderately Active'
+            ELSE 'Low Activity'
+        END AS ActivityLevel
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByViews <= 5
+)
+SELECT 
+    fp.*,
+    CASE 
+        WHEN fp.CommentCount > 0 THEN 'Comments available'
+        ELSE 'No comments yet'
+    END AS CommentsStatus,
+    CASE 
+        WHEN fp.ViewCount IS NULL THEN 'Views are currently unavailable'
+        ELSE 'Total Views: ' || COALESCE(fp.ViewCount::text, '0')
+    END AS ViewCountInfo
+FROM 
+    FilteredPosts fp
+OUTER JOIN 
+    Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = fp.PostID)
+WHERE 
+    COALESCE(u.Reputation, 0) > 100
+ORDER BY 
+    fp.ViewCount DESC, fp.CreationDate DESC;

@@ -1,0 +1,52 @@
+
+WITH RECURSIVE Customer_Purchases AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COUNT(ss.ticket_number) AS total_purchases,
+        SUM(ss.net_paid_inc_tax) AS total_spent
+    FROM customer c
+    JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING COUNT(ss.ticket_number) > 5
+),
+Sales_Per_Store AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        SUM(ss.net_profit) AS store_profit,
+        COUNT(ss.ticket_number) AS total_sales
+    FROM store s
+    JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY s.s_store_sk, s.s_store_name
+),
+Combined_Data AS (
+    SELECT 
+        cp.c_customer_sk,
+        cp.c_first_name,
+        cp.c_last_name,
+        sp.s_store_sk,
+        sp.s_store_name,
+        cp.total_purchases,
+        cp.total_spent,
+        sp.store_profit,
+        sp.total_sales,
+        ROW_NUMBER() OVER (PARTITION BY cp.c_customer_sk ORDER BY cp.total_spent DESC) AS customer_rank
+    FROM Customer_Purchases cp
+    LEFT JOIN Sales_Per_Store sp ON cp.total_spent > 1000
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    sd.s_store_name,
+    cd.total_spent,
+    sd.store_profit,
+    cd.customer_rank
+FROM Combined_Data cd
+JOIN store s ON cd.s_store_sk = s.s_store_sk
+JOIN (
+    SELECT DISTINCT s_store_name FROM Sales_Per_Store WHERE store_profit > 5000
+) sd ON cd.s_store_name = sd.s_store_name
+WHERE cd.customer_rank = 1
+ORDER BY cd.total_spent DESC;

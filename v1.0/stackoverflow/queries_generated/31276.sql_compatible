@@ -1,0 +1,81 @@
+
+WITH RecursivePostCTE AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.CreationDate, 
+           p.Score, 
+           p.ViewCount, 
+           p.OwnerUserId, 
+           1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT a.Id AS PostId, 
+           a.Title, 
+           a.CreationDate, 
+           a.Score, 
+           a.ViewCount, 
+           a.OwnerUserId, 
+           Level + 1
+    FROM Posts a
+    INNER JOIN RecursivePostCTE r ON r.PostId = a.ParentId
+    WHERE a.PostTypeId = 2  
+),
+
+PostActivity AS (
+    SELECT r.PostId, 
+           COUNT(c.Id) AS CommentCount, 
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM RecursivePostCTE r
+    LEFT JOIN Comments c ON r.PostId = c.PostId
+    LEFT JOIN Votes v ON r.PostId = v.PostId
+    GROUP BY r.PostId
+),
+
+PostWithTags AS (
+    SELECT r.PostId, 
+           r.Title, 
+           p.CreationDate,
+           p.ViewCount, 
+           pa.CommentCount, 
+           pa.UpVoteCount,
+           pa.DownVoteCount,
+           STRING_AGG(t.TagName, ', ') AS Tags
+    FROM RecursivePostCTE r
+    JOIN PostActivity pa ON r.PostId = pa.PostId
+    LEFT JOIN Posts p ON r.PostId = p.Id
+    LEFT JOIN Tags t ON t.ExcerptPostId = r.PostId 
+    GROUP BY r.PostId, r.Title, p.CreationDate, p.ViewCount, pa.CommentCount, pa.UpVoteCount, pa.DownVoteCount
+),
+
+FinalResults AS (
+    SELECT pt.PostId, 
+           pt.Title, 
+           pt.CommentCount, 
+           pt.UpVoteCount, 
+           pt.DownVoteCount,
+           pt.Tags,
+           pt.ViewCount,
+           NTILE(5) OVER (ORDER BY pt.Score DESC) AS ScoreRank, 
+           ROW_NUMBER() OVER (PARTITION BY pt.OwnerUserId ORDER BY pt.ViewCount DESC) AS OwnerRank
+    FROM PostWithTags pt
+)
+
+SELECT fr.PostId, 
+       fr.Title, 
+       fr.CommentCount, 
+       fr.UpVoteCount, 
+       fr.DownVoteCount,
+       fr.Tags,
+       fr.ViewCount,
+       fr.ScoreRank,
+       fr.OwnerRank,
+       u.DisplayName AS OwnerName, 
+       u.Reputation AS OwnerReputation
+FROM FinalResults fr
+JOIN Users u ON fr.OwnerUserId = u.Id
+WHERE u.Reputation >= 1000 
+ORDER BY fr.ScoreRank, fr.OwnerRank;

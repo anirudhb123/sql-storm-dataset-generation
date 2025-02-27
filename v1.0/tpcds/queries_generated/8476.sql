@@ -1,0 +1,56 @@
+
+WITH CustomerSummary AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE cd.cd_gender = 'F'
+    GROUP BY
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating
+),
+DateFiltered AS (
+    SELECT
+        ds.d_date_sk,
+        ds.d_date
+    FROM date_dim ds
+    WHERE ds.d_year = 2023 AND ds.d_month = 10
+),
+WarehouseSummary AS (
+    SELECT
+        wh.w_warehouse_sk,
+        wh.w_warehouse_name,
+        SUM(cs.cs_ext_sales_price) AS total_catalog_sales
+    FROM warehouse wh
+    JOIN catalog_sales cs ON wh.w_warehouse_sk = cs.cs_warehouse_sk
+    JOIN DateFiltered df ON cs.cs_sold_date_sk = df.d_date_sk
+    GROUP BY
+        wh.w_warehouse_sk,
+        wh.w_warehouse_name
+)
+SELECT
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.total_quantity,
+    cs.total_spent,
+    cs.order_count,
+    ws.total_catalog_sales,
+    (cs.total_spent / NULLIF(cs.order_count, 0)) AS avg_spent_per_order
+FROM CustomerSummary cs
+JOIN WarehouseSummary ws ON cs.c_customer_sk = ws.w_warehouse_sk
+ORDER BY cs.total_spent DESC
+LIMIT 100;

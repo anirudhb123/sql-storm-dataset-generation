@@ -1,0 +1,55 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        s.total_sales,
+        DENSE_RANK() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        SalesCTE s ON c.c_custkey = s.c_custkey
+    WHERE 
+        s.order_rank = 1
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    COUNT(DISTINCT tc.c_custkey) AS num_top_customers,
+    SUM(ps.ps_availqty) AS total_available_parts,
+    MAX(tc.total_sales) AS max_sales
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    TopCustomers tc ON s.s_nationkey = tc.c_custkey
+WHERE 
+    tc.sales_rank <= 10
+GROUP BY 
+    r.r_name, n.n_name
+HAVING 
+    SUM(ps.ps_availqty) > (SELECT AVG(ps_availqty) FROM partsupp)
+ORDER BY 
+    region, nation;

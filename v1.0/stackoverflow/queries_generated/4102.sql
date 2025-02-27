@@ -1,0 +1,85 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, c.CommentCount
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        b.UserId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ps.PostCount, 0) AS PostCount,
+        COALESCE(rb.BadgeCount, 0) AS RecentBadgeCount,
+        COALESCE(rb.BadgeNames, 'None') AS RecentBadges
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId,
+            COUNT(Id) AS PostCount
+        FROM 
+            Posts
+        WHERE 
+            CreationDate >= NOW() - INTERVAL '1 year'
+        GROUP BY 
+            OwnerUserId
+    ) ps ON u.Id = ps.OwnerUserId
+    LEFT JOIN RecentBadges rb ON u.Id = rb.UserId
+)
+SELECT 
+    pos.PostId,
+    pos.Title,
+    pos.ViewCount,
+    pos.Score,
+    pos.CommentCount,
+    pos.VoteCount,
+    pos.Upvotes,
+    pos.Downvotes,
+    ups.DisplayName AS OwnerName,
+    ups.Reputation AS OwnerReputation,
+    ups.PostCount AS OwnerPostCount,
+    ups.RecentBadgeCount,
+    ups.RecentBadges
+FROM 
+    PostStats pos
+LEFT JOIN 
+    UserPostStats ups ON pos.PostId IN (
+        SELECT 
+            CASE 
+                WHEN p.ParentId IS NULL THEN p.OwnerUserId 
+                ELSE p.ParentId 
+            END 
+        FROM Posts p WHERE p.Id = pos.PostId
+    )
+WHERE 
+    pos.Rank <= 10
+ORDER BY 
+    pos.Score DESC, pos.ViewCount DESC;

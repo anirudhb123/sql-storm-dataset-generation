@@ -1,0 +1,83 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        a.id AS actor_id, 
+        a.name AS actor_name, 
+        c.movie_id,
+        0 AS depth
+    FROM 
+        aka_name a
+        JOIN cast_info c ON a.person_id = c.person_id
+    WHERE 
+        a.name IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        c.movie_id,
+        ah.depth + 1
+    FROM 
+        aka_name a
+        JOIN cast_info c ON a.person_id = c.person_id
+        JOIN ActorHierarchy ah ON c.movie_id = ah.movie_id
+    WHERE 
+        a.name IS NOT NULL AND ah.depth < 3 
+),
+MovieStats AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        title t
+        LEFT JOIN cast_info ci ON t.id = ci.movie_id
+        LEFT JOIN aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, 
+        t.title, 
+        t.production_year
+),
+TopMovies AS (
+    SELECT 
+        ms.title_id,
+        ms.title,
+        ms.production_year,
+        ms.actor_count,
+        ms.actor_names,
+        ROW_NUMBER() OVER (ORDER BY ms.actor_count DESC) AS rank
+    FROM 
+        MovieStats ms
+    WHERE 
+        ms.actor_count > 1
+)
+SELECT 
+    tm.title AS movie_title,
+    tm.production_year,
+    tm.actor_count,
+    tm.actor_names,
+    COALESCE(g.kind, 'Unknown') AS genre,
+    gm.name AS company_name,
+    COUNT(mk.keyword) AS keyword_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_companies mc ON tm.title_id = mc.movie_id
+LEFT JOIN 
+    company_name gm ON mc.company_id = gm.id
+LEFT JOIN 
+    movie_keyword mk ON tm.title_id = mk.movie_id
+LEFT JOIN 
+    kind_type g ON tm.actor_count = g.id
+WHERE 
+    tm.rank <= 10
+GROUP BY 
+    tm.title, tm.production_year, tm.actor_count, tm.actor_names, g.kind, gm.name
+ORDER BY 
+    tm.actor_count DESC, 
+    tm.title;

@@ -1,0 +1,83 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        CAST(o.o_comment AS varchar(255)) AS order_comment,
+        1 AS order_level
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+
+    UNION ALL
+
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        CONCAT(oh.order_comment, ' -> ', o.o_comment) AS order_comment,
+        oh.order_level + 1
+    FROM 
+        orders o
+    JOIN 
+        OrderHierarchy oh ON o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name = 'CustomerName')
+    WHERE 
+        o.o_orderkey > oh.o_orderkey
+),
+
+HighestSellingParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey,
+        p.p_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(total_sales) FROM (
+                            SELECT 
+                                SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+                            FROM 
+                                lineitem 
+                            GROUP BY 
+                                l_partkey) AS avg_sales)
+)
+
+SELECT 
+    r.r_name,
+    n.n_name,
+    s.s_name,
+    COUNT(DISTINCT o.o_orderkey) AS num_orders,
+    SUM(COALESCE(ps.ps_availqty, 0)) AS total_available_qty,
+    ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    OrderHierarchy oh ON o.o_orderkey = l.l_orderkey
+WHERE 
+    n.n_name IS NOT NULL 
+    AND s.s_acctbal > (SELECT AVG(s_a.s_acctbal) FROM supplier s_a) 
+    AND EXISTS (SELECT 1 FROM HighestSellingParts hsp WHERE hsp.p_partkey = ps.ps_partkey)
+GROUP BY 
+    r.r_name,
+    n.n_name,
+    s.s_name,
+    r.r_regionkey
+ORDER BY 
+    rank, total_available_qty DESC;

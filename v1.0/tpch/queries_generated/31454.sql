@@ -1,0 +1,44 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name LIKE 'A%')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+part_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+orders_summary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(o.o_totalprice) AS total_revenue
+    FROM orders o
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+           COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT n.n_name AS nation, 
+       COUNT(DISTINCT c.c_custkey) AS customer_count,
+       COALESCE(SUM(oss.total_revenue), 0) AS total_revenue,
+       SUM(CASE WHEN ps.total_available IS NULL THEN 0 ELSE ps.total_available END) AS total_available_parts,
+       MAX(ls.net_revenue) AS max_net_revenue
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN orders_summary oss ON o.o_orderkey = oss.o_orderkey
+LEFT JOIN part_summary ps ON ps.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+LEFT JOIN lineitem_summary ls ON o.o_orderkey = ls.l_orderkey
+WHERE n.r_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')
+GROUP BY n.n_name
+ORDER BY customer_count DESC, total_revenue DESC
+LIMIT 10;

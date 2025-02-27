@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        s.s_suppkey,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS Rank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > 1000.00
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+        COUNT(DISTINCT l.l_orderkey) AS TotalLineItems
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierPerformance AS (
+    SELECT 
+        r.r_name AS Region,
+        n.n_name AS Nation,
+        COUNT(DISTINCT rs.s_suppkey) AS UniqueSuppliers,
+        SUM(rs.s_acctbal) AS TotalAccountBalance,
+        AVG(rs.s_acctbal) AS AverageAccountBalance
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        supplier s ON rs.s_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.Rank <= 5
+    GROUP BY 
+        r.r_name, n.n_name
+)
+SELECT 
+    sp.Region,
+    sp.Nation,
+    sp.UniqueSuppliers,
+    sp.TotalAccountBalance,
+    os.TotalRevenue,
+    os.TotalLineItems
+FROM 
+    SupplierPerformance sp
+LEFT JOIN 
+    OrderSummary os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE l.l_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10))
+WHERE 
+    sp.TotalAccountBalance NULLIF(sp.TotalAccountBalance, 0) IS NOT NULL
+ORDER BY 
+    sp.Region, sp.Nation;

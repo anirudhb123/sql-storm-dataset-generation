@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        pt.Name AS PostTypeName,
+        COALESCE(bt.Name, 'No Badge') AS TopBadge
+    FROM RankedPosts rp
+    LEFT JOIN PostTypes pt ON rp.PostTypeId = pt.Id
+    LEFT JOIN Badges b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId LIMIT 1)
+    LEFT JOIN BadgeTypes bt ON b.Id = bt.Id
+    WHERE rp.rn <= 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.PostTypeName,
+    tp.TopBadge,
+    CASE 
+        WHEN tp.Score < 10 THEN 'Low Score'
+        WHEN tp.Score BETWEEN 10 AND 50 THEN 'Medium Score'
+        ELSE 'High Score'
+    END AS ScoreCategory
+FROM TopPosts tp
+ORDER BY tp.CreationDate DESC;
+
+SELECT 
+    p.Id,
+    p.Title,
+    COUNT(v.Id) AS VoteCount
+FROM Posts p
+LEFT JOIN Votes v ON p.Id = v.PostId
+WHERE p.ViewCount > 100
+GROUP BY p.Id, p.Title
+HAVING COUNT(v.Id) > 5
+ORDER BY VoteCount DESC
+LIMIT 10;

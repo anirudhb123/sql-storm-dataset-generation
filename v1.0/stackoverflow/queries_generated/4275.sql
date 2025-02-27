@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        p.Score,
+        p.ViewCount,
+        COUNT(CASE WHEN c.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, U.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        DISTINCT ph.PostId,
+        ph.CreationDate,
+        CT.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes CT ON ph.Comment::int = CT.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        CASE 
+            WHEN U.Reputation > 1000 THEN 'High'
+            WHEN U.Reputation BETWEEN 100 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationLevel
+    FROM 
+        Users U
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    COALESCE(cp.CloseReason, 'Active') AS PostStatus,
+    ur.ReputationLevel
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+WHERE 
+    rp.PostRank = 1
+ORDER BY 
+    rp.Score DESC NULLS LAST, 
+    rp.ViewCount DESC;

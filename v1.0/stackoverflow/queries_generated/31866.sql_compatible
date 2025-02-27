@@ -1,0 +1,62 @@
+
+WITH RecursiveTagHierarchy AS (
+    SELECT Id, TagName, Count, ExcerptPostId, WikiPostId
+    FROM Tags
+    WHERE IsModeratorOnly = 0  
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy rth ON t.Id = rth.Id
+    WHERE t.IsRequired = 0  
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE u.Reputation > 1000  
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+PostScores AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(ue.TotalUpVotes, 0) AS UpVoteCount,
+        COALESCE(ue.TotalDownVotes, 0) AS DownVoteCount,
+        (p.Score + COALESCE(ue.TotalUpVotes, 0) - COALESCE(ue.TotalDownVotes, 0)) AS NetScore,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN UserEngagement ue ON p.OwnerUserId = ue.UserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::text[])  
+    GROUP BY p.Id, p.Title, p.OwnerUserId
+),
+RankedPosts AS (
+    SELECT 
+        ps.*,
+        RANK() OVER (ORDER BY ps.NetScore DESC) AS Rank,
+        ROW_NUMBER() OVER (PARTITION BY ps.OwnerUserId ORDER BY ps.NetScore DESC) AS UserRank
+    FROM PostScores ps
+)
+
+SELECT 
+    r.DisplayName,
+    COUNT(r.PostId) AS TotalPosts,
+    SUM(r.UpVoteCount) AS TotalUpVotes,
+    SUM(r.DownVoteCount) AS TotalDownVotes,
+    AVG(r.NetScore) AS AverageScore,
+    STRING_AGG(r.Tags, '; ') AS AllTags,
+    SUM(CASE WHEN r.UserRank = 1 THEN 1 ELSE 0 END) AS TopRankedPosts
+FROM RankedPosts r
+GROUP BY r.DisplayName
+HAVING COUNT(r.PostId) > 5  
+ORDER BY AverageScore DESC;

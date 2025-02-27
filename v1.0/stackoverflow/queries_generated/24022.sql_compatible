@@ -1,0 +1,101 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY U.Id ORDER BY COALESCE(SUM(V.BountyAmount), 0) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalBounty,
+        UserRank
+    FROM 
+        UserActivity
+    WHERE 
+        UserRank <= 10
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(C.Id) AS TotalComments,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        DENSE_RANK() OVER (ORDER BY P.Score DESC) AS PopularityRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+    GROUP BY 
+        P.Id, P.Title
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        COALESCE(MAX(PH.CreationDate), P.MostRecentAction) AS LastClosedDate,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN 'Closed' END) AS CloseStatus
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title
+),
+FinalReport AS (
+    SELECT 
+        U.DisplayName,
+        T.TotalBounty,
+        P.Title AS PostTitle,
+        S.TotalComments,
+        S.UpVotes,
+        S.DownVotes,
+        C.LastClosedDate,
+        C.CloseStatus
+    FROM 
+        TopUsers T
+    JOIN 
+        UserActivity U ON T.UserId = U.UserId
+    JOIN 
+        PostStatistics S ON U.UserId = S.PostId
+    LEFT JOIN 
+        ClosedPosts C ON S.PostId = C.Id
+)
+SELECT 
+    *,
+    CASE 
+        WHEN TotalComments = 0 THEN 'No Comments'
+        WHEN TotalComments < 10 THEN 'Few Comments'
+        ELSE 'Many Comments'
+    END AS CommentCategory,
+    CASE 
+        WHEN UpVotes > DownVotes THEN 'Positive Engagement'
+        WHEN UpVotes < DownVotes THEN 'Negative Engagement'
+        ELSE 'Neutral'
+    END AS EngagementStatus,
+    (SELECT COUNT(*) FROM Posts WHERE ClosedDate IS NOT NULL) AS TotalClosedPosts
+FROM 
+    FinalReport
+WHERE 
+    LastClosedDate IS NOT NULL OR TotalBounty > 100
+ORDER BY 
+    TotalBounty DESC, TotalComments DESC;

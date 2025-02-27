@@ -1,0 +1,48 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rnk
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+OrderValueDetails AS (
+    SELECT lo.l_orderkey,
+           SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS order_value,
+           CASE 
+               WHEN SUM(lo.l_extendedprice * (1 - lo.l_discount)) > 1000 THEN 'High'
+               WHEN SUM(lo.l_extendedprice * (1 - lo.l_discount)) BETWEEN 500 AND 1000 THEN 'Medium'
+               ELSE 'Low'
+           END AS value_category
+    FROM lineitem lo
+    GROUP BY lo.l_orderkey
+)
+SELECT c.c_name,
+       coalesce(HV.total_value, 0) AS total_value_supplied,
+       coalesce(co.total_spent, 0) AS total_spent_by_customer,
+       o.o_orderdate,
+       ov.value_category
+FROM CustomerOrderSummary co
+JOIN HighValueSuppliers HV ON co.c_custkey = HV.s_suppkey
+RIGHT JOIN RankedOrders o ON co.c_custkey = o.o_orderkey
+LEFT JOIN OrderValueDetails ov ON ov.l_orderkey = o.o_orderkey
+WHERE HV.total_value IS NOT NULL OR co.total_spent > 0
+ORDER BY co.total_spent DESC, o.o_orderdate;

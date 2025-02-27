@@ -1,0 +1,95 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE
+        p.CreationDate >= '2022-01-01' AND
+        p.Score >= 10
+),
+UserDetails AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)
+    WHERE 
+        p.CreationDate >= '2021-01-01'
+    GROUP BY 
+        p.Id
+),
+UserPosts AS (
+    SELECT 
+        pd.PostId,
+        ud.DisplayName,
+        ud.Reputation,
+        pd.CommentCount,
+        pd.TotalBounties,
+        COALESCE(rp.Score, 0) AS PostScore,
+        COALESCE(rp.PostTitle, '(No Title)') AS PostTitle
+    FROM 
+        PostStats pd
+    JOIN 
+        Posts p ON p.Id = pd.PostId
+    LEFT JOIN 
+        UserDetails ud ON p.OwnerUserId = ud.UserId
+    LEFT JOIN 
+        RankedPosts rp ON p.Id = rp.PostId
+    WHERE 
+        pd.CommentCount > 0 OR pd.TotalBounties > 0
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    up.CommentCount,
+    up.TotalBounties,
+    up.PostScore,
+    up.PostTitle,
+    CASE 
+        WHEN up.Reputation < 100 THEN 'Newbie' 
+        WHEN up.Reputation BETWEEN 100 AND 1000 THEN 'Intermediate' 
+        ELSE 'Expert' 
+    END AS UserLevel,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 
+            FROM Votes v 
+            WHERE v.PostId = up.PostId AND v.UserId = up.UserId AND v.VoteTypeId = 2
+        ) THEN 'Has Upvotes'
+        ELSE 'No Upvotes'
+    END AS VotingStatus
+FROM 
+    UserPosts up
+WHERE 
+    up.CommentCount > 1 
+    AND (up.PostScore >= 10 OR up.TotalBounties > 0)
+ORDER BY 
+    up.Reputation DESC, 
+    up.CommentCount DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

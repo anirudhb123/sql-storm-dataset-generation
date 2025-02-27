@@ -1,0 +1,72 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        1 AS level
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > 5000.00
+
+    UNION ALL
+
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ch.level + 1
+    FROM 
+        customer c
+    JOIN 
+        CustomerHierarchy ch ON c.c_custkey = ch.c_custkey 
+    WHERE 
+        ch.level < 5
+),
+PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, cast('1998-10-01' as date)())
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    ch.c_name,
+    ch.c_acctbal,
+    p.p_name,
+    p.total_available,
+    p.avg_supply_cost,
+    ro.total_order_value,
+    ro.lineitem_count
+FROM 
+    CustomerHierarchy ch
+LEFT JOIN 
+    PartSupplierInfo p ON ch.c_custkey = p.p_partkey 
+LEFT JOIN 
+    RecentOrders ro ON ch.c_custkey = ro.o_orderkey
+WHERE 
+    (p.total_available > 1000 OR p.avg_supply_cost IS NULL)
+    AND (ro.total_order_value IS NOT NULL AND ro.lineitem_count > 1)
+ORDER BY 
+    ch.c_acctbal DESC, ro.total_order_value DESC;

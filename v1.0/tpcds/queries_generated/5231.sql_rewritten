@@ -1,0 +1,43 @@
+WITH RankedSales AS (
+    SELECT 
+        ss.s_store_sk,
+        s.s_store_name,
+        SUM(ss.ss_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY s.s_store_sk ORDER BY SUM(ss.ss_sales_price) DESC) AS sales_rank
+    FROM 
+        store_sales ss
+        JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN 2459606 AND 2459650 
+    GROUP BY 
+        ss.s_store_sk, s.s_store_name
+), 
+CustomerStats AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        web_sales ws
+        JOIN customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2459606 AND 2459650
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    r.s_store_name,
+    r.total_sales,
+    cs.cd_gender,
+    cs.customer_count,
+    cs.total_quantity,
+    cs.avg_net_profit
+FROM 
+    RankedSales r
+JOIN 
+    CustomerStats cs ON r.sales_rank = 1 
+ORDER BY 
+    r.total_sales DESC, cs.customer_count DESC
+LIMIT 10;

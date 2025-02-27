@@ -1,0 +1,73 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+VoteStats AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LatestEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rph.PostId,
+    rph.Title AS QuestionTitle,
+    rph.PostTypeId,
+    COALESCE(vs.Upvotes, 0) AS Upvotes,
+    COALESCE(vs.Downvotes, 0) AS Downvotes,
+    COALESCE((vs.Upvotes - vs.Downvotes), 0) AS NetVotes,
+    COALESCE(re.LatestEditDate, 'Never') AS LastEdit,
+    COUNT(c.Id) AS CommentCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RecursivePostHierarchy rph
+LEFT JOIN 
+    VoteStats vs ON rph.PostId = vs.PostId
+LEFT JOIN 
+    RecentEdits re ON rph.PostId = re.PostId
+LEFT JOIN 
+    Comments c ON rph.PostId = c.PostId
+LEFT JOIN 
+    STRING_TO_ARRAY(rph.Tags, ',') AS TagIds ON TRUE 
+LEFT JOIN 
+    Tags t ON t.Id = ANY(TagIds)
+GROUP BY 
+    rph.PostId, rph.Title, rph.PostTypeId, vs.Upvotes, vs.Downvotes, re.LatestEditDate
+ORDER BY 
+    NetVotes DESC, rph.Level, rph.Title;

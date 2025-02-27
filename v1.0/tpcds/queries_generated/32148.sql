@@ -1,0 +1,77 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_profit) DESC) AS profit_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN 2459553 AND 2459581  -- Some date range
+    GROUP BY 
+        ss_store_sk
+), 
+top_stores AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        sh.total_profit
+    FROM 
+        store s
+    JOIN 
+        sales_hierarchy sh ON s.s_store_sk = sh.ss_store_sk
+    WHERE 
+        sh.profit_rank <= 10
+), 
+store_info AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        COUNT(DISTINCT sr.ticket_number) AS total_returns,
+        SUM(sr.return_amt) AS total_returned_amount
+    FROM 
+        top_stores ts
+    LEFT JOIN 
+        store_returns sr ON ts.s_store_sk = sr.s_store_sk
+    GROUP BY 
+        s_store_sk, s_store_name
+), 
+date_ranges AS (
+    SELECT 
+        d.d_date_sk,
+        d.d_date,
+        EXTRACT(YEAR FROM d.d_date) AS year
+    FROM 
+        date_dim d
+    WHERE 
+        d.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+), 
+sales_summary AS (
+    SELECT 
+        d.year,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_ranges d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.year
+)
+SELECT 
+    si.s_store_name,
+    si.total_returns,
+    si.total_returned_amount,
+    ss.total_sales,
+    ss.net_profit,
+    CASE 
+        WHEN si.total_returned_amount IS NULL THEN 'No Returns'
+        WHEN si.total_returned_amount > 1000 THEN 'High Return'
+        ELSE 'Low Return' 
+    END AS return_category
+FROM 
+    store_info si
+JOIN 
+    sales_summary ss ON ss.year = 2023
+ORDER BY 
+    si.total_returns DESC, ss.net_profit DESC;

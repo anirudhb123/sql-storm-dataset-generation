@@ -1,0 +1,80 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY t.kind_id) AS total_movies
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+DirectorCount AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS director_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        r.role LIKE 'Director%'
+    GROUP BY 
+        ci.movie_id
+), 
+MoviesWithDirectorCounts AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.kind_id,
+        COALESCE(dc.director_count, 0) AS director_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        DirectorCount dc ON rm.kind_id = dc.movie_id
+)
+SELECT 
+    mw.title,
+    mw.production_year,
+    mw.kind_id,
+    mw.director_count,
+    CASE 
+        WHEN mw.director_count IS NULL THEN 'No Director Info'
+        WHEN mw.director_count = 0 THEN 'No Directors'
+        WHEN mw.director_count > 1 THEN 'Multiple Directors'
+        ELSE 'Single Director'
+    END AS director_summary,
+    STRING_AGG(ka.name, ', ') AS aka_names
+FROM 
+    MoviesWithDirectorCounts mw
+LEFT JOIN 
+    aka_name ka ON ka.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = mw.kind_id) 
+GROUP BY 
+    mw.title, mw.production_year, mw.kind_id, mw.director_count
+HAVING 
+    mw.production_year >= 2000 AND mw.director_count > 0
+ORDER BY 
+    mw.production_year DESC, 
+    mw.title ASC
+LIMIT 10
+
+UNION ALL 
+
+SELECT 
+    NULL AS title,
+    NULL AS production_year,
+    NULL AS kind_id,
+    COUNT(DISTINCT ci.person_id) AS director_count,
+    'Total Directors' AS director_summary,
+    NULL AS aka_names
+FROM 
+    cast_info ci
+JOIN 
+    role_type r ON ci.role_id = r.id
+WHERE 
+    r.role LIKE 'Director%'
+    AND ci.movie_id IS NOT NULL
+ORDER BY 
+    director_count;

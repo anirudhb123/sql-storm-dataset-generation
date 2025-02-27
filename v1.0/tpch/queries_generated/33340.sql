@@ -1,0 +1,52 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice
+    FROM orders
+    WHERE o_orderdate >= '2023-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice
+    FROM orders o
+    JOIN order_hierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+supplier_aggregates AS (
+    SELECT ps.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.s_suppkey
+),
+lineitem_totals AS (
+    SELECT l.orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_extended_price
+    FROM lineitem l
+    GROUP BY l.orderkey
+),
+customer_analysis AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    c.c_name,
+    oh.o_orderkey,
+    oh.o_orderdate,
+    COALESCE(lt.total_extended_price, 0) AS total_lineitem_price,
+    COALESCE(sa.total_supply_cost, 0) AS total_supplier_cost,
+    ca.order_count,
+    ca.total_spent
+FROM 
+    order_hierarchy oh
+JOIN 
+    customer_analysis ca ON oh.o_custkey = ca.c_custkey
+LEFT JOIN 
+    lineitem_totals lt ON oh.o_orderkey = lt.orderkey
+LEFT JOIN 
+    supplier_aggregates sa ON sa.s_suppkey IN (
+        SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (
+            SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = oh.o_orderkey
+        )
+    )
+WHERE 
+    ca.total_spent > (SELECT AVG(total_spent) FROM customer_analysis)
+ORDER BY 
+    ca.total_spent DESC, 
+    oh.o_orderdate DESC
+LIMIT 100;

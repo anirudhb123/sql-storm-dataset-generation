@@ -1,0 +1,63 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS Rank,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u 
+        LEFT JOIN Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+),
+
+PostStatistics AS (
+    SELECT
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+
+ClosedPostsStats AS (
+    SELECT 
+        ph.UserId AS CloserUserId,
+        COUNT(ph.Id) AS CloseCount,
+        STRING_AGG(DISTINCT c.Comment, '; ') AS CloseComments
+    FROM 
+        PostHistory ph 
+        JOIN CloseReasonTypes crt ON ph.Comment = crt.Id::TEXT
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.UserId
+)
+
+SELECT 
+    ru.UserId,
+    ru.DisplayName,
+    ru.Reputation,
+    ru.Rank,
+    COALESCE(ps.PostCount, 0) AS PostCount,
+    COALESCE(ps.TotalViews, 0) AS TotalViews,
+    COALESCE(ps.AverageScore, 0) AS AverageScore,
+    COALESCE(cps.CloseCount, 0) AS CloseCount,
+    COALESCE(cps.CloseComments, 'No comments') AS CloseComments
+FROM 
+    RankedUsers ru
+LEFT JOIN 
+    PostStatistics ps ON ru.UserId = ps.OwnerUserId
+LEFT JOIN 
+    ClosedPostsStats cps ON ru.UserId = cps.CloserUserId
+WHERE 
+    ru.Reputation > 100 AND 
+    (COALESCE(ps.PostCount, 0) > 0 OR COALESCE(cps.CloseCount, 0) > 0)
+ORDER BY 
+    ru.Rank, ru.Reputation DESC;

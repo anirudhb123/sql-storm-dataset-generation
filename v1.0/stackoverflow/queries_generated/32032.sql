@@ -1,0 +1,50 @@
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY SUM(COALESCE(p.Score, 0)) DESC) AS Rank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE u.Reputation > 0
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        PostCount, 
+        TotalScore, 
+        UpVotes, 
+        DownVotes
+    FROM UserActivity
+    WHERE Rank <= 10
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN p.ViewCount > 100 THEN 1 ELSE 0 END) AS PopularityFlag,
+        AVG(DATEDIFF(COALESCE(LastActivityDate, CreationDate), CreationDate)) AS AverageTimeToRespond
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY p.Id, p.Title
+)
+SELECT 
+    tu.DisplayName,
+    tu.PostCount,
+    tu.TotalScore,
+    ps.Title AS PostTitle,
+    ps.CommentCount,
+    ps.PopularityFlag,
+    ps.AverageTimeToRespond
+FROM TopUsers tu
+INNER JOIN PostStatistics ps ON tu.UserId = ps.OwnerUserId
+ORDER BY tu.TotalScore DESC, ps.CommentCount DESC
+OPTION (RECOMPILE);

@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_cast AS (
+    SELECT 
+        c.id AS cast_id,
+        c.movie_id,
+        a.name AS person_name,
+        r.role AS role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS cast_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+movie_years AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        MAX(cast_order) AS max_cast_order
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_cast c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc 
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    m.title,
+    m.production_year,
+    COALESCE(mc.total_cast, 0) AS cast_count,
+    COALESCE(cd.total_companies, 0) AS company_count,
+    cd.company_names,
+    CASE 
+        WHEN mc.max_cast_order IS NULL THEN 'No cast'
+        ELSE 'Has cast' 
+    END AS cast_status
+FROM 
+    movie_years mc
+LEFT JOIN 
+    company_details cd ON mc.title_id = cd.movie_id
+LEFT JOIN 
+    title m ON mc.title_id = m.id;

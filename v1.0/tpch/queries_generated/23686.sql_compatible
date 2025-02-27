@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, s.s_suppkey, ps.ps_availqty, 
+           ps.ps_supplycost, ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > 1000
+),
+NameLength AS (
+    SELECT s.s_suppkey, LENGTH(s.s_name) AS name_length
+    FROM supplier s
+    WHERE LENGTH(s.s_name) > 5
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1995-01-01' AND o.o_orderstatus IN ('F', 'P')
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000
+)
+SELECT ph.p_partkey, ph.p_name, sh.s_name, sh.level,
+       COALESCE(SUM(h.order_total), 0) AS total_order_revenue,
+       CASE
+           WHEN nl.name_length <= 10 THEN 'Short Name'
+           WHEN nl.name_length BETWEEN 11 AND 20 THEN 'Medium Name'
+           ELSE 'Long Name'
+       END AS name_category
+FROM PartSupplier ph
+LEFT JOIN SupplierHierarchy sh ON ph.s_suppkey = sh.s_suppkey
+LEFT JOIN (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+) h ON h.o_orderkey = sh.s_suppkey
+LEFT JOIN NameLength nl ON nl.s_suppkey = ph.s_suppkey
+GROUP BY ph.p_partkey, ph.p_name, sh.s_name, sh.level, nl.name_length
+ORDER BY ph.p_partkey, sh.level DESC, total_order_revenue DESC;

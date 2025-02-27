@@ -1,0 +1,48 @@
+
+WITH RecursivePostChain AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title AS PostTitle, 
+        p.OwnerUserId, 
+        1 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.InnerPostId AS PostId, 
+        p.Title AS PostTitle, 
+        p.OwnerUserId, 
+        Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        Posts ans ON p.Id = ans.ParentId
+    WHERE 
+        ans.PostTypeId = 2  
+)
+
+SELECT 
+    up.DisplayName AS UserName,
+    COUNT(DISTINCT rp.PostId) AS TotalQuestions,
+    COUNT(rp.PostId) AS TotalAnswers,
+    AVG(EXTRACT(EPOCH FROM COALESCE(rp.ClosedDate, CURRENT_TIMESTAMP) - rp.CreationDate)) AS AvgTimeOpenInSeconds,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    ROW_NUMBER() OVER (ORDER BY COUNT(rp.PostId) DESC) AS Rank
+FROM 
+    RecursivePostChain rp
+LEFT JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+LEFT JOIN 
+    Tags t ON rp.PostTitle LIKE CONCAT('%', t.TagName, '%')
+WHERE 
+    rp.PostId IS NOT NULL
+GROUP BY 
+    up.DisplayName
+HAVING 
+    COUNT(DISTINCT rp.PostId) > 0 
+ORDER BY 
+    Rank;

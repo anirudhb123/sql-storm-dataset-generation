@@ -1,0 +1,61 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_availqty) DESC) AS rank_in_region
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_regionkey
+),
+HighValueSuppliers AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.total_available_quantity,
+        rs.total_supply_cost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        region r ON r.r_regionkey = rs.rank_in_region
+    WHERE 
+        rs.rank_in_region <= 5 AND rs.total_supply_cost > 50000
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(DISTINCT l.l_partkey) AS distinct_part_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    r.r_name AS region_name,
+    hs.s_name AS supplier_name,
+    od.o_orderkey,
+    od.total_order_value,
+    od.distinct_part_count
+FROM 
+    HighValueSuppliers hs
+JOIN 
+    OrderDetails od ON hs.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l WHERE l.l_orderkey = od.o_orderkey))
+JOIN 
+    region r ON hs.r_regionkey = r.r_regionkey
+ORDER BY 
+    r.r_name, hs.total_supply_cost DESC, od.total_order_value DESC;

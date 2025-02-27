@@ -1,0 +1,77 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY t.id) AS total_cast
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        r.role AS role_name,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id, r.role
+),
+ComplexMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(mk.keywords, 'No keywords') AS movie_keywords,
+        MAX(cr.role_count) AS max_role_count,
+        AVG(cr.role_count) AS avg_role_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        CastRoles cr ON rm.movie_id = cr.movie_id
+    WHERE 
+        rm.total_cast > 1
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+)
+
+SELECT 
+    cm.title,
+    cm.production_year,
+    cm.movie_keywords,
+    cm.max_role_count,
+    cm.avg_role_count,
+    CASE 
+        WHEN cm.avg_role_count IS NULL THEN 'No roles recorded'
+        WHEN cm.max_role_count > 10 THEN 'Ensemble cast'
+        ELSE 'Regular cast'
+    END AS cast_category,
+    (SELECT COUNT(*) FROM aka_title WHERE production_year = cm.production_year) AS movie_count_in_year
+FROM 
+    ComplexMovies cm
+WHERE 
+    cm.production_year > 2000
+ORDER BY 
+    cm.production_year DESC, cm.movie_keywords;

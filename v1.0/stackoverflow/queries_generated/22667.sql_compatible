@@ -1,0 +1,70 @@
+
+WITH UserVoteCounts AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId IN (2, 3)) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MIN(v.CreationDate) AS FirstVoteDate,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+), PostsSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseCount,
+        COUNT(DISTINCT ph.Id) FILTER (WHERE ph.PostHistoryTypeId = 11) AS ReopenCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id, p.Title, p.ViewCount
+), RankedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.TotalUpVotes,
+        ps.TotalDownVotes,
+        ps.CommentCount,
+        ps.CloseCount,
+        ps.ReopenCount,
+        RANK() OVER (ORDER BY (ps.TotalUpVotes - ps.TotalDownVotes) DESC, ps.ViewCount DESC) AS Rank
+    FROM PostsSummary ps
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.TotalUpVotes,
+    rp.TotalDownVotes,
+    rp.CommentCount,
+    rp.CloseCount,
+    rp.ReopenCount,
+    CASE
+        WHEN up.VoteCount IS NULL THEN 'No Votes'
+        WHEN up.VoteCount > 10 THEN 'Highly Active'
+        ELSE 'Moderately Active'
+    END AS UserActivity,
+    COALESCE(
+        (SELECT COUNT(*) FROM PostLinks pl WHERE pl.PostId = rp.PostId AND pl.LinkTypeId = 3), 
+        0
+    ) AS DuplicateLinks,
+    ARRAY_AGG(DISTINCT CASE 
+        WHEN t.Id IS NOT NULL THEN t.TagName 
+        END) AS Tags
+FROM UserVoteCounts up
+JOIN RankedPosts rp ON up.UserId = rp.PostId
+LEFT JOIN PostLinks pl ON rp.PostId = pl.RelatedPostId
+LEFT JOIN Tags t ON t.ExcerptPostId = rp.PostId
+GROUP BY up.UserId, up.DisplayName, rp.PostId, rp.Title, rp.ViewCount, rp.TotalUpVotes, rp.TotalDownVotes, rp.CommentCount, rp.CloseCount, rp.ReopenCount
+ORDER BY UserActivity DESC, rp.ViewCount DESC;

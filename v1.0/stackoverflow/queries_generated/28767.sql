@@ -1,0 +1,73 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'), 1) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        ue.UserId,
+        ue.DisplayName,
+        ue.PostCount,
+        ue.TotalViews,
+        ue.Upvotes,
+        ue.Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY ue.UserId ORDER BY rp.ViewCount DESC) AS PostRank
+    FROM 
+        RecentPosts rp
+    JOIN 
+        UserEngagement ue ON rp.OwnerUserId = ue.UserId
+)
+SELECT 
+    tp.UserId,
+    tp.DisplayName,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.TagCount,
+    tp.PostCount,
+    tp.TotalViews,
+    tp.Upvotes,
+    tp.Downvotes
+FROM 
+    TopPosts tp
+WHERE 
+    tp.PostRank = 1
+ORDER BY 
+    tp.TotalViews DESC, 
+    tp.Score DESC
+LIMIT 10;

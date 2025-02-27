@@ -1,0 +1,49 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    ns.n_name AS nation_name,
+    ss.s_name AS supplier_name,
+    COALESCE(od.order_total, 0) AS total_order_amount,
+    ss.total_supply_cost,
+    (ss.total_supply_cost / NULLIF(od.order_total, 0)) AS cost_to_order_ratio
+FROM 
+    nation ns
+LEFT JOIN 
+    supplier ss ON ns.n_nationkey = ss.s_nationkey
+LEFT JOIN 
+    OrderDetails od ON ss.s_suppkey = od.o_orderkey
+JOIN 
+    SupplierStats sss ON ss.s_suppkey = sss.s_suppkey
+WHERE 
+    ns.n_name IS NOT NULL
+    AND (ss.total_supply_cost > 10000 OR od.order_total IS NOT NULL)
+ORDER BY 
+    cost_to_order_ratio DESC
+FETCH FIRST 50 ROWS ONLY;

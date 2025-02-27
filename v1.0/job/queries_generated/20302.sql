@@ -1,0 +1,54 @@
+WITH RECURSIVE TitleHierarchy AS (
+    SELECT t.id AS title_id, t.title, t.production_year, NULL::integer AS parent_title_id
+    FROM title t
+    WHERE t.season_nr IS NULL  -- Top-level titles, i.e., movies
+
+    UNION ALL
+
+    SELECT e.id AS title_id, e.title, e.production_year, th.title_id AS parent_title_id
+    FROM title e
+    JOIN TitleHierarchy th ON e.episode_of_id = th.title_id  -- Join episodes to their parent series
+),
+MovieDetails AS (
+    SELECT DISTINCT
+        t.title AS movie_title,
+        t.production_year,
+        array_agg(DISTINCT c.role_id) AS roles,
+        COALESCE(STRING_AGG(DISTINCT a.name, ', '), 'Unknown') AS actors,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        COALESCE(MIN(m.utc_timestamp), 'No Date') AS earliest_release
+    FROM aka_title at
+    JOIN title t ON at.movie_id = t.id
+    LEFT JOIN cast_info c ON c.movie_id = t.id
+    LEFT JOIN aka_name a ON a.person_id = c.person_id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN LATERAL (
+        SELECT '2023-01-01'::timestamp as utc_timestamp -- Simulated date
+        UNION ALL SELECT NULL::timestamp
+    ) m ON TRUE
+    WHERE t.production_year > 2000
+    GROUP BY t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT movie_title, production_year, roles, actors, keyword_count, earliest_release
+    FROM MovieDetails
+    WHERE keyword_count > 0
+      AND roles IS NOT NULL
+)
+SELECT 
+    fm.movie_title,
+    fm.production_year,
+    COUNT(DISTINCT fm.actors) AS actor_count,
+    STRING_AGG(DISTINCT c.kind, ', ') FILTER (WHERE c.kind IS NOT NULL) AS company_types,
+    COUNT(DISTINCT t.title) FILTER (WHERE th.parent_title_id IS NOT NULL) AS episode_count,
+    CASE 
+        WHEN fm.earliest_release = 'No Date' THEN 'No Release'
+        ELSE fm.earliest_release::text
+    END AS release_info
+FROM FilteredMovies fm
+LEFT JOIN movie_companies mc ON mc.movie_id = (SELECT id FROM title WHERE title = fm.movie_title LIMIT 1)
+LEFT JOIN company_type c ON c.id = mc.company_type_id
+LEFT JOIN TitleHierarchy th ON th.title_id = (SELECT id FROM title WHERE title = fm.movie_title LIMIT 1)
+GROUP BY fm.movie_title, fm.production_year, fm.earliest_release
+ORDER BY fm.production_year DESC, actor_count DESC
+LIMIT 100;

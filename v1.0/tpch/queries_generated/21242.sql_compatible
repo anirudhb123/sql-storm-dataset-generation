@@ -1,0 +1,79 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'P')
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 50000
+), 
+AvailableParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+), 
+NotYetShipped AS (
+    SELECT 
+        l.l_orderkey, 
+        COUNT(*) AS not_shipped_lines
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate IS NULL 
+        AND l.l_commitdate IS NOT NULL
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.r_name, 
+    COUNT(DISTINCT c.c_custkey) AS high_value_cust_count, 
+    SUM(p.total_avail_qty) AS total_available_parts,
+    COALESCE(SUM(s.s_acctbal), 0) AS total_supplier_acctbal,
+    SUM(CASE WHEN n.n_regionkey = 1 THEN 1 ELSE 0 END) AS region_1_customers,
+    MAX(CASE WHEN ds.not_shipped_lines > 0 THEN ds.not_shipped_lines ELSE NULL END) AS max_not_shipped_lines
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    HighValueCustomers c ON c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'O')
+LEFT JOIN 
+    AvailableParts p ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN 
+    NotYetShipped ds ON ds.l_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_suppkey = s.s_suppkey)
+WHERE 
+    r.r_name IS NOT NULL 
+    AND (s.s_acctbal < 1000 OR p.total_avail_qty IS NOT NULL)
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    high_value_cust_count DESC, r.r_name
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,44 @@
+WITH RECURSIVE TagHierarchy AS (
+    SELECT Id, TagName, Count 
+    FROM Tags
+    WHERE IsRequired = 0
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count 
+    FROM Tags t
+    JOIN TagHierarchy th ON t.Id = th.Id
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    COUNT(c.Id) AS TotalComments,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    p.OwnerDisplayName,
+    MAX(ph.CreationDate) AS LastEditDate,
+    CASE 
+        WHEN ph.PostHistoryTypeId = 10 THEN 
+            (SELECT CLOSE_REASON.Name FROM CloseReasonTypes AS CLOSE_REASON WHERE CLOSE_REASON.Id = ph.Comment)
+        ELSE 
+            'Not Closed'
+    END AS CloseReason
+FROM 
+    Posts p
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    STRING_TO_ARRAY(SELECT Tags FROM Posts WHERE PostTypeId = 1, ', ') AS tag_list ON true
+LEFT JOIN 
+    Tags AS t ON t.TagName IN (SELECT unnest(tag_list))
+WHERE 
+    p.PostTypeId = 1 
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, p.OwnerDisplayName
+ORDER BY 
+    UpVotes DESC, TotalComments DESC;

@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        RANK() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    WHERE 
+        a.name IS NOT NULL
+),
+HighRatedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT k.id) AS keyword_count
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        t.id
+    HAVING 
+        COUNT(DISTINCT k.id) > 5
+),
+ActorsWithHighRatedMovies AS (
+    SELECT 
+        r.actor_id,
+        r.actor_name,
+        ARRAY_AGG(DISTINCT h.movie_title) AS high_rated_movies,
+        ARRAY_AGG(DISTINCT h.production_year) AS production_years
+    FROM 
+        RankedMovies r
+    JOIN 
+        HighRatedMovies h ON r.movie_title = h.title
+    WHERE 
+        r.year_rank <= 3
+    GROUP BY 
+        r.actor_id, r.actor_name
+)
+SELECT 
+    a.actor_id,
+    a.actor_name,
+    COALESCE(hm.high_rated_movies, '{}') AS high_rated_movies,
+    COALESCE(hm.production_years, '{}') AS production_years,
+    COALESCE(t.title || ' - ' || t.production_year, 'No Movies') AS latest_movie
+FROM 
+    aka_name a
+LEFT JOIN 
+    ActorsWithHighRatedMovies hm ON a.id = hm.actor_id
+LEFT JOIN 
+    title t ON t.id IN (SELECT movie_id FROM cast_info WHERE person_id = a.person_id ORDER BY t.production_year DESC LIMIT 1)
+WHERE 
+    a.name NOT LIKE '%Test%' 
+    AND a.id IS NOT NULL
+ORDER BY 
+    a.actor_name;

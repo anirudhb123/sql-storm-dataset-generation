@@ -1,0 +1,82 @@
+WITH RECURSIVE monthly_sales AS (
+    SELECT 
+        DATE_TRUNC('month', o_orderdate) AS sales_month,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY 
+        sales_month
+    UNION ALL
+    SELECT 
+        sales_month + INTERVAL '1 month',
+        (SELECT SUM(l_extendedprice * (1 - l_discount)) 
+         FROM orders o2 
+         JOIN lineitem l2 ON o2.o_orderkey = l2.l_orderkey 
+         WHERE DATE_TRUNC('month', o2.o_orderdate) = sales_month + INTERVAL '1 month'
+           AND o2.o_orderdate >= DATE '1996-01-01')
+    FROM 
+        monthly_sales
+    WHERE 
+        sales_month + INTERVAL '1 month' <= cast('1998-10-01' as date)
+),
+avg_nation_balance AS (
+    SELECT 
+        n.n_name AS nation_name,
+        AVG(s.s_acctbal) AS avg_balance
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name
+),
+max_avg_balance AS (
+    SELECT 
+        MAX(avg_balance) AS max_balance
+    FROM 
+        avg_nation_balance
+)
+
+SELECT 
+    p.p_name AS part_name,
+    p.p_brand AS part_brand,
+    COALESCE(sum(l.l_quantity), 0) AS total_quantity,
+    ms.sales_month,
+    ns.nation_name,
+    avg_ab.avg_balance
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    orders o ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    avg_nation_balance ns ON ns.nation_name = (
+        SELECT n.n_name 
+        FROM customer c 
+        JOIN nation n ON c.c_nationkey = n.n_nationkey 
+        WHERE c.c_custkey = o.o_custkey
+        LIMIT 1
+    )
+LEFT JOIN 
+    monthly_sales ms ON DATE_TRUNC('month', o.o_orderdate) = ms.sales_month
+LEFT JOIN 
+    max_avg_balance mab ON avg_ab.avg_balance = mab.max_balance
+GROUP BY 
+    p_name, p_brand, sales_month, ns.nation_name, avg_ab.avg_balance
+HAVING 
+    total_quantity > (
+        SELECT AVG(total_quantity) 
+        FROM (
+            SELECT SUM(l2.l_quantity) AS total_quantity
+            FROM lineitem l2
+            JOIN orders o2 ON o2.o_orderkey = l2.l_orderkey
+            GROUP BY o2.o_orderkey
+        ) AS avg_total
+    )
+ORDER BY 
+    sales_month DESC, total_quantity DESC;

@@ -1,0 +1,76 @@
+
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.CreationDate
+), 
+ActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalViews,
+        TotalScore,
+        DENSE_RANK() OVER (ORDER BY TotalViews DESC) AS Rank
+    FROM UserActivity
+    WHERE TotalViews > 0
+), 
+HighScoreUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalViews,
+        TotalScore
+    FROM ActiveUsers
+    WHERE TotalScore > 100
+), 
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        P.Score,
+        P.ViewCount,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+            ELSE 'Not Accepted'
+        END AS AnswerStatus
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate > (CURRENT_TIMESTAMP - INTERVAL '30 days')
+), 
+CommentSummary AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS TotalComments,
+        STRING_AGG(CASE WHEN UserId IS NOT NULL THEN UserDisplayName ELSE 'Anonymous' END, ', ') AS Commenters
+    FROM Comments
+    GROUP BY PostId
+)
+SELECT 
+    U.DisplayName AS ActiveUser,
+    U.Reputation,
+    U.TotalViews,
+    U.TotalScore,
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.OwnerDisplayName,
+    RP.Score,
+    RP.ViewCount,
+    RP.AnswerStatus,
+    COALESCE(CS.TotalComments, 0) AS TotalComments,
+    COALESCE(CS.Commenters, 'No Comments') AS Commenters
+FROM HighScoreUsers U
+JOIN RecentPosts RP ON U.UserId = RP.OwnerUserId
+LEFT JOIN CommentSummary CS ON RP.PostId = CS.PostId
+ORDER BY U.TotalViews DESC, RP.Score DESC;

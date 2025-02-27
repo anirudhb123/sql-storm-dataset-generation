@@ -1,0 +1,69 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+),
+SupplierAggregates AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+OrdersWithTotal AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+CustomerSegmentTotals AS (
+    SELECT 
+        c.c_mktsegment,
+        COUNT(DISTINCT o.o_orderkey) AS orders_count,
+        SUM(owt.order_total) AS segment_total
+    FROM 
+        customer c
+    JOIN 
+        OrdersWithTotal owt ON c.c_custkey = owt.o_custkey
+    GROUP BY 
+        c.c_mktsegment
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    ROUND(SUM(psa.total_supply_cost), 2) AS total_supply_cost,
+    ROUND(AVG(cst.segment_total), 2) AS avg_segment_total
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SupplierAggregates psa ON psa.ps_partkey IN (SELECT p_partkey FROM RankedParts WHERE price_rank = 1)
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    OrdersWithTotal owt ON owt.o_custkey = c.c_custkey
+LEFT JOIN 
+    CustomerSegmentTotals cst ON cst.c_mktsegment = c.c_mktsegment
+GROUP BY 
+    r.r_name, n.n_name
+HAVING 
+    SUM(psa.total_supply_cost) > 10000 OR AVG(cst.segment_total) IS NOT NULL
+ORDER BY 
+    total_supply_cost DESC, region_name, nation_name;

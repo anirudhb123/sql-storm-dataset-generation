@@ -1,0 +1,60 @@
+
+WITH recent_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.web_site_sk, ws.ws_sold_date_sk
+), 
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd 
+    ON 
+        c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+ranked_sales AS (
+    SELECT 
+        rs.web_site_sk,
+        rs.ws_sold_date_sk,
+        rs.total_quantity,
+        rs.total_net_profit,
+        RANK() OVER (PARTITION BY rs.web_site_sk ORDER BY rs.total_net_profit DESC) AS profit_rank
+    FROM 
+        recent_sales rs
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    SUM(rws.total_quantity) AS total_quantity_sold,
+    SUM(rws.total_net_profit) AS total_net_profit
+FROM 
+    customer_info ci
+LEFT JOIN 
+    ranked_sales rws 
+ON 
+    ci.c_customer_sk = rws.web_site_sk
+WHERE 
+    ci.cd_purchase_estimate > 0
+GROUP BY 
+    ci.c_first_name, ci.c_last_name, ci.cd_gender
+HAVING 
+    SUM(rws.total_net_profit) > 1000
+ORDER BY 
+    total_net_profit DESC
+LIMIT 10;

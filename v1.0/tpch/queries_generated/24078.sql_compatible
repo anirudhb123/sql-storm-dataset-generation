@@ -1,0 +1,55 @@
+
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IN (SELECT r_regionkey FROM region WHERE r_name LIKE '%East%')
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, h.level + 1
+    FROM nation n
+    JOIN NationHierarchy h ON n.n_regionkey = h.n_nationkey
+), 
+SupplierAggregate AS (
+    SELECT s_nationkey, COUNT(DISTINCT s_suppkey) AS total_suppliers, 
+           SUM(s_acctbal) AS total_balance, 
+           AVG(LENGTH(s_comment)) AS avg_comment_length
+    FROM supplier
+    GROUP BY s_nationkey
+), 
+PriceStats AS (
+    SELECT ps.partkey, 
+           MAX(ps_supplycost) AS max_supplycost,
+           MIN(ps_supplycost) AS min_supplycost, 
+           AVG(ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.partkey
+), 
+CustomerStats AS (
+    SELECT c_nationkey, 
+           COUNT(c_custkey) AS total_customers, 
+           SUM(COALESCE(c_acctbal, 0)) AS total_non_null_acct_balance,
+           STRING_AGG(c_comment, '; ') AS all_comments
+    FROM customer
+    GROUP BY c_nationkey
+)
+SELECT 
+    nh.n_name, 
+    sa.total_suppliers, 
+    sa.total_balance, 
+    cs.total_customers, 
+    cs.total_non_null_acct_balance,
+    ps.max_supplycost, 
+    ps.min_supplycost, 
+    ps.avg_supplycost,
+    ROW_NUMBER() OVER (PARTITION BY nh.n_name ORDER BY sa.total_balance DESC) AS rank,
+    COALESCE(NULLIF(sa.total_balance, 0), 'No Balance') AS balance_status,
+    CASE 
+        WHEN sa.total_suppliers > 10 THEN 'Established'
+        WHEN sa.total_suppliers BETWEEN 5 AND 10 THEN 'Moderate'
+        ELSE 'Emerging'
+    END AS supplier_category
+FROM NationHierarchy nh
+LEFT JOIN SupplierAggregate sa ON nh.n_nationkey = sa.s_nationkey
+LEFT JOIN CustomerStats cs ON nh.n_nationkey = cs.c_nationkey
+FULL OUTER JOIN PriceStats ps ON ps.partkey IN (SELECT p_partkey FROM part WHERE p_size > 5)
+WHERE rank <= 5 OR rank IS NULL
+ORDER BY nh.n_name, sa.total_balance DESC NULLS LAST;

@@ -1,0 +1,73 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        CASE 
+            WHEN cd.cd_dep_count IS NULL THEN 'No Dependents' 
+            ELSE CAST(cd.cd_dep_count AS VARCHAR) || ' Dependents' 
+        END AS dependent_info
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate >= 1000 OR cd.cd_credit_rating = 'Excellent'
+),
+SalesReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_ticket_number) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+    HAVING 
+        SUM(sr_return_amt_inc_tax) < 0
+),
+CombinedSales AS (
+    SELECT 
+        r.ws_item_sk,
+        COALESCE(s.return_count, 0) AS return_count,
+        COALESCE(s.total_return_amt, 0) AS total_return_amt,
+        r.total_sales
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        SalesReturns s ON r.ws_item_sk = s.sr_customer_sk
+)
+SELECT 
+    ci.c_customer_id,
+    cs.ws_item_sk,
+    cs.total_sales,
+    cs.return_count,
+    cs.total_return_amt,
+    CASE 
+        WHEN cs.total_sales IS NULL THEN 'No Sales Data'
+        WHEN cs.return_count > 0 THEN 'Has Returns'
+        ELSE 'Good Standing'
+    END AS sales_status
+FROM 
+    CustomerInfo ci
+JOIN 
+    CombinedSales cs ON ci.c_customer_id = cs.ws_item_sk
+WHERE 
+    ci.cd_gender = 'F' AND ci.cd_marital_status = 'M' 
+    AND (cs.total_sales > 2000 OR (cs.total_sales IS NULL AND ci.cd_purchase_estimate > 1500))
+ORDER BY 
+    ci.c_customer_id, cs.total_sales DESC
+LIMIT 100;

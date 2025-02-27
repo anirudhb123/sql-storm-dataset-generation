@@ -1,0 +1,82 @@
+
+WITH RECURSIVE CTE_SALES AS (
+    SELECT 
+        ss_store_sk, 
+        SUM(ss_net_paid) AS total_sales,
+        COUNT(ss_ticket_number) AS total_transactions
+    FROM 
+        store_sales 
+    GROUP BY 
+        ss_store_sk
+    UNION ALL
+    SELECT 
+        ss_store_sk, 
+        SUM(ss_net_paid) + CTE_SALES.total_sales,
+        COUNT(ss_ticket_number) + CTE_SALES.total_transactions
+    FROM 
+        store_sales 
+    JOIN 
+        CTE_SALES ON store_sales.ss_store_sk = CTE_SALES.ss_store_sk 
+    WHERE 
+        ss_sold_date_sk < (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ss_store_sk 
+), 
+CTE_CUSTOMER AS (
+    SELECT 
+        c_current_cdemo_sk, 
+        cd_gender, 
+        COUNT(c_customer_sk) AS num_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    WHERE 
+        cd_marital_status = 'M' 
+        AND cd_gender IS NOT NULL
+    GROUP BY 
+        c_current_cdemo_sk, cd_gender
+),
+CTE_SHIPS AS (
+    SELECT 
+        sm_ship_mode_id,
+        SUM(ws_net_paid_inc_tax) AS total_ship_revenue
+    FROM 
+        web_sales
+    LEFT JOIN 
+        ship_mode ON ws_ship_mode_sk = sm_ship_mode_sk
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        sm_ship_mode_id
+)
+SELECT 
+    CTE_SALES.ss_store_sk,
+    CTE_SALES.total_sales,
+    CTE_CUSTOMER.cd_gender,
+    CTE_CUSTOMER.num_customers,
+    CTE_CUSTOMER.avg_purchase_estimate,
+    CTE_SHIPS.sm_ship_mode_id,
+    CTE_SHIPS.total_ship_revenue,
+    COALESCE((SELECT COUNT(*) 
+              FROM store_returns 
+              WHERE sr_returned_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)), 0) AS total_returns
+FROM 
+    CTE_SALES
+JOIN 
+    CTE_CUSTOMER ON CTE_CUSTOMER.c_current_cdemo_sk IN (SELECT DISTINCT c_current_cdemo_sk FROM customer)
+LEFT JOIN 
+    CTE_SHIPS ON CTE_SHIPS.sm_ship_mode_id IN (SELECT DISTINCT sm_ship_mode_id FROM ship_mode)
+WHERE 
+    CTE_SALES.total_sales > 10000
+GROUP BY 
+    CTE_SALES.ss_store_sk,
+    CTE_SALES.total_sales,
+    CTE_CUSTOMER.cd_gender,
+    CTE_CUSTOMER.num_customers,
+    CTE_CUSTOMER.avg_purchase_estimate,
+    CTE_SHIPS.sm_ship_mode_id,
+    CTE_SHIPS.total_ship_revenue
+ORDER BY 
+    CTE_SALES.total_sales DESC;

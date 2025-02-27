@@ -1,0 +1,52 @@
+
+WITH movie_stats AS (
+    SELECT 
+        a.title,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS avg_roles,
+        SUM(CASE WHEN ci.note IS NOT NULL AND ci.note <> '' THEN 1 ELSE 0 END) AS filled_notes,
+        a.id
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    WHERE 
+        a.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        a.title, a.id
+),
+keyword_stats AS (
+    SELECT 
+        mw.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mw
+    JOIN 
+        keyword mk ON mw.keyword_id = mk.id
+    GROUP BY 
+        mw.movie_id
+)
+SELECT 
+    ms.title,
+    ms.cast_count,
+    ms.avg_roles,
+    ms.filled_notes,
+    COALESCE(ks.keyword_count, 0) AS keyword_count,
+    CASE 
+        WHEN ms.cast_count > 10 THEN 'Large'
+        WHEN ms.cast_count BETWEEN 5 AND 10 THEN 'Medium'
+        ELSE 'Small'
+    END AS cast_size,
+    ROW_NUMBER() OVER (ORDER BY ms.cast_count DESC) AS rank
+FROM 
+    movie_stats ms
+LEFT JOIN 
+    keyword_stats ks ON ms.id = ks.movie_id
+WHERE 
+    ms.filled_notes > 0
+ORDER BY 
+    ms.avg_roles DESC, 
+    ms.filled_notes DESC
+LIMIT 50;

@@ -1,0 +1,71 @@
+WITH ranked_titles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY at.production_year) AS year_count
+    FROM 
+        aka_title at
+),
+filtered_cast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        MAX(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_notes
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+company_stats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        SUM(CASE WHEN ct.kind LIKE 'Production%' THEN 1 ELSE 0 END) AS production_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+best_movies AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        fc.actor_count,
+        cs.company_count,
+        cs.production_count,
+        ROW_NUMBER() OVER (ORDER BY fc.actor_count DESC, rt.production_year ASC) AS best_ranking
+    FROM 
+        ranked_titles rt
+    JOIN 
+        filtered_cast fc ON rt.title = fc.movie_id
+    JOIN 
+        company_stats cs ON rt.title = cs.movie_id
+    WHERE 
+        rt.year_count > 1 AND 
+        fc.actor_count > 0 AND 
+        cs.company_count > 2 
+)
+SELECT 
+    bm.title,
+    bm.production_year,
+    bm.actor_count,
+    bm.company_count,
+    bm.production_count,
+    CASE 
+        WHEN bm.actor_count IS NULL THEN 'Actor data not found'
+        WHEN bm.company_count IS NULL THEN 'Company data not found'
+        ELSE 'Data available'
+    END AS data_status,
+    (SELECT STRING_AGG(a.name, ', ') 
+     FROM aka_name a 
+     WHERE a.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = (SELECT id FROM aka_title WHERE title = bm.title LIMIT 1))
+    ) AS actor_names
+FROM 
+    best_movies bm
+WHERE 
+    bm.best_ranking <= 10
+ORDER BY 
+    bm.actor_count DESC, bm.production_year ASC;

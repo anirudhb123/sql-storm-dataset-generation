@@ -1,0 +1,58 @@
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_id,
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws_net_profit) DESC) AS rank_profit
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2001 
+        AND dd.d_month_seq >= 1 
+        AND dd.d_month_seq <= 12
+    GROUP BY 
+        ws.web_site_id, ws_sold_date_sk
+),
+excluded_dates AS (
+    SELECT 
+        d_date_sk
+    FROM 
+        date_dim
+    WHERE 
+        d_dow IN (0, 6) 
+        AND d_year = 2001
+),
+final_sales AS (
+    SELECT 
+        web_site_id,
+        total_quantity,
+        total_profit,
+        RANK() OVER (ORDER BY total_profit DESC) AS final_rank
+    FROM 
+        ranked_sales
+    WHERE 
+        web_site_id NOT IN (SELECT web_site_id FROM web_site WHERE web_class IS NULL)
+        AND ws_sold_date_sk NOT IN (SELECT d_date_sk FROM excluded_dates)
+)
+SELECT 
+    ws.web_site_id,
+    ws.web_name,
+    COALESCE(fs.total_quantity, 0) AS quantity_sold,
+    COALESCE(fs.total_profit, 0) AS profit_generated,
+    GREATEST(COALESCE(fs.total_profit, 0) / NULLIF(fs.total_quantity, 0), 0) AS avg_profit_per_item,
+    CASE 
+        WHEN fs.final_rank IS NOT NULL THEN 'Ranked'
+        ELSE 'Unranked'
+    END AS rank_status
+FROM 
+    web_site ws
+LEFT JOIN 
+    final_sales fs ON ws.web_site_id = fs.web_site_id
+WHERE 
+    ws.web_country = 'USA'
+ORDER BY 
+    total_profit DESC, 
+    web_site_id;

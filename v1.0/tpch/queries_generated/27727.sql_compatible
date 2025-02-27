@@ -1,0 +1,31 @@
+
+WITH string_benchmark AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_name,
+        CONCAT('Supplier: ', s.s_name, ' - Part: ', p.p_name) AS benchmark_string,
+        LENGTH(CONCAT('Supplier: ', s.s_name, ' - Part: ', p.p_name)) AS string_length,
+        SUBSTRING_INDEX(p.p_comment, ' ', 5) AS truncated_comment,
+        REPLACE(p.p_comment, 'excellent', 'superior') AS modified_comment,
+        UPPER(REPLACE(s.s_name, 'Inc', 'Incorporated')) AS normalized_supplier_name,
+        CHAR_LENGTH(s.s_comment) AS supplier_comment_length
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        p.p_size > 10
+        AND s.s_acctbal > 5000
+)
+
+SELECT 
+    COUNT(*) AS total_benchmarks,
+    AVG(string_length) AS avg_string_length,
+    MAX(supplier_comment_length) AS max_supplier_comment_length
+FROM 
+    string_benchmark
+GROUP BY 
+    total_benchmarks;

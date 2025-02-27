@@ -1,0 +1,52 @@
+
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY
+        s.s_suppkey, s.s_name, s.s_acctbal, n.n_nationkey
+),
+
+CustomerOrderSummary AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+)
+
+SELECT
+    r.r_name AS region,
+    ns.n_name AS nation,
+    rs.s_name AS supplier_name,
+    rs.total_supply_cost,
+    cos.c_name AS customer_name,
+    cos.order_count,
+    cos.total_spent
+FROM
+    RankedSuppliers rs
+JOIN
+    nation ns ON rs.rank = 1
+JOIN
+    region r ON ns.n_regionkey = r.r_regionkey
+JOIN
+    CustomerOrderSummary cos ON cos.c_name IS NOT NULL
+WHERE
+    rs.total_supply_cost > 50000
+ORDER BY
+    r.r_name, ns.n_name, rs.total_supply_cost DESC;

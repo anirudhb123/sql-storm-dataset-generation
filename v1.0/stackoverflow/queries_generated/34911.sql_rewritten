@@ -1,0 +1,66 @@
+WITH RecursivePostHistory AS (
+    SELECT
+        ph.Id,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM
+        PostHistory ph
+    WHERE
+        ph.CreationDate >= DATEADD(year, -1, GETDATE())
+),
+PostAnalytics AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        MAX(v.CreationDate) AS LastVoteDate,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(p.CreationDate) AS PostCreationDate
+    FROM
+        Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY
+        p.Id, p.Title
+),
+ClosedPosts AS (
+    SELECT
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM
+        PostHistory ph
+    WHERE
+        ph.PostHistoryTypeId = 10 
+    GROUP BY
+        ph.PostId
+)
+SELECT
+    pa.PostId,
+    pa.Title,
+    pa.CommentCount,
+    pa.VoteCount,
+    pa.LastVoteDate,
+    pa.UpVotes,
+    pa.DownVotes,
+    cp.CloseCount,
+    (pa.UpVotes - pa.DownVotes) AS ScoreDifference,
+    CASE 
+        WHEN cp.CloseCount IS NOT NULL THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus,
+    (SELECT COUNT(*) FROM RecursivePostHistory rph WHERE rph.PostId = pa.PostId) AS RevisionCount
+FROM
+    PostAnalytics pa
+LEFT JOIN ClosedPosts cp ON pa.PostId = cp.PostId
+WHERE
+    ((pa.CommentCount > 5 AND pa.VoteCount > 10) OR cp.CloseCount IS NOT NULL)
+    AND pa.PostCreationDate >= '2023-01-01'
+ORDER BY
+    ScoreDifference DESC, pa.VoteCount DESC;

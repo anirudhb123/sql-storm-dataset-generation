@@ -1,0 +1,64 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighSpendingCustomers AS (
+    SELECT 
+        c.c_custkey AS custkey,
+        c.c_name AS name,
+        c.total_spent,
+        ROW_NUMBER() OVER (ORDER BY c.total_spent DESC) AS rn
+    FROM 
+        CustomerOrders c
+    WHERE 
+        c.total_spent > (
+            SELECT AVG(total_spent) FROM CustomerOrders
+        )
+)
+SELECT 
+    c.name AS c_name,
+    COUNT(DISTINCT ln.l_orderkey) AS order_count,
+    SUM(ln.l_extendedprice * (1 - ln.l_discount)) AS total_revenue,
+    COALESCE(MAX(s.s_name), 'No Supplier') AS top_supplier,
+    SUM(CASE WHEN ln.l_returnflag = 'R' THEN 1 ELSE 0 END) AS total_returns
+FROM 
+    lineitem ln
+LEFT JOIN 
+    HighSpendingCustomers c ON ln.l_orderkey IN (
+        SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.custkey
+    )
+LEFT JOIN 
+    RankedSuppliers s ON ln.l_suppkey = s.s_suppkey AND s.rnk = 1
+WHERE 
+    ln.l_shipdate >= '1997-01-01' AND ln.l_shipdate < '1997-12-31'
+GROUP BY 
+    c.custkey, c.name
+HAVING 
+    SUM(ln.l_extendedprice * (1 - ln.l_discount)) > 50000
+ORDER BY 
+    total_revenue DESC;

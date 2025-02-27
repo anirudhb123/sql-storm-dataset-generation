@@ -1,0 +1,46 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(V.BountyAmount) AS TotalBounty,
+        SUM(COALESCE(V.UserId > 0, 0)) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        STRING_AGG(DISTINCT U.DisplayName, ', ') AS Voters
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id
+    LEFT JOIN 
+        Users U ON U.Id = V.UserId
+    GROUP BY 
+        T.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalBounty,
+        TotalUpVotes,
+        TotalDownVotes,
+        Voters,
+        RANK() OVER (ORDER BY PostCount DESC, TotalBounty DESC) AS TagRank
+    FROM 
+        TagStatistics
+)
+SELECT 
+    TagName,
+    PostCount,
+    TotalBounty,
+    TotalUpVotes,
+    TotalDownVotes,
+    Voters
+FROM 
+    TopTags
+WHERE 
+    TagRank <= 10
+ORDER BY 
+    PostCount DESC;

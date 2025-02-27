@@ -1,0 +1,93 @@
+WITH RECURSIVE movies_parents AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mp.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS m ON ml.linked_movie_id = m.id
+    JOIN 
+        movies_parents AS mp ON ml.movie_id = mp.movie_id
+    WHERE 
+        mp.level < 3
+),
+movie_info_aggregate AS (
+    SELECT 
+        mi.movie_id,
+        ARRAY_AGG(DISTINCT mi.info) AS infos,
+        COUNT(DISTINCT mi.info_type_id) AS info_count
+    FROM 
+        movie_info AS mi
+    GROUP BY 
+        mi.movie_id
+),
+actor_roles AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        ci.movie_id,
+        rt.role,
+        ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info AS ci
+    JOIN 
+        aka_name AS ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type AS rt ON ci.role_id = rt.id
+),
+company_movie_info AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        company_name AS c ON mc.company_id = c.id
+    JOIN 
+        company_type AS ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    mp.movie_id,
+    mp.title,
+    mp.production_year,
+    (SELECT STRING_AGG( DISTINCT actor_name, ', ' ORDER BY role_order) 
+     FROM actor_roles ar WHERE ar.movie_id = mp.movie_id) AS actors,
+    (SELECT STRING_AGG(DISTINCT ci.name, ', ')
+     FROM company_movie_info ci 
+     WHERE ci.movie_id = mp.movie_id
+    ) AS companies,
+    (SELECT AVG(info_count)
+     FROM movie_info_aggregate mia
+     WHERE mia.movie_id = mp.movie_id) AS avg_info_count,
+    CASE 
+        WHEN mp.kind_id IS NULL THEN 'Unknown'
+        ELSE (SELECT kind FROM kind_type kt WHERE kt.id = mp.kind_id)
+    END AS movie_kind,
+    COUNT(DISTINCT mk.keyword) FILTER (WHERE mk.keyword IS NOT NULL) AS keyword_count
+FROM 
+    movies_parents mp
+LEFT JOIN 
+    movie_keyword mk ON mp.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_info_aggregate mia ON mp.movie_id = mia.movie_id
+GROUP BY 
+    mp.movie_id, mp.title, mp.production_year, mp.kind_id
+ORDER BY 
+    mp.production_year DESC, mp.title;

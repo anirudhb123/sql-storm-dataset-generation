@@ -1,0 +1,83 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) FILTER (WHERE B.Class = 1) AS GoldBadgeCount,
+        COUNT(B.Id) FILTER (WHERE B.Class = 2) AS SilverBadgeCount,
+        COUNT(B.Id) FILTER (WHERE B.Class = 3) AS BronzeBadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostRetention AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostsCount,
+        AVG(EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - P.CreationDate)) / 3600) AS AvgPostAgeInHours
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.OwnerUserId
+),
+VoteAggregates AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        PostId
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(PR.PostsCount, 0) AS PostsCount,
+        COALESCE(BC.GoldBadgeCount, 0) AS GoldBadgeCount,
+        COALESCE(BC.SilverBadgeCount, 0) AS SilverBadgeCount,
+        COALESCE(BC.BronzeBadgeCount, 0) AS BronzeBadgeCount,
+        SUM(VA.UpVotes) AS TotalUpVotes,
+        SUM(VA.DownVotes) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostRetention PR ON U.Id = PR.OwnerUserId
+    LEFT JOIN 
+        UserBadgeCounts BC ON U.Id = BC.UserId
+    LEFT JOIN 
+        VoteAggregates VA ON U.Id = (SELECT OwnerUserId FROM Posts WHERE Id = VA.PostId LIMIT 1)
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    UA.DisplayName,
+    UA.PostsCount,
+    UA.GoldBadgeCount,
+    UA.SilverBadgeCount,
+    UA.BronzeBadgeCount,
+    UA.TotalUpVotes,
+    UA.TotalDownVotes,
+    CASE 
+        WHEN UA.PostsCount > 50 THEN 'Highly Active'
+        WHEN UA.PostsCount BETWEEN 21 AND 50 THEN 'Moderately Active'
+        WHEN UA.PostsCount BETWEEN 1 AND 20 THEN 'Slightly Active'
+        ELSE 'Inactive'
+    END AS ActivityLevel,
+    CASE 
+        WHEN UA.TotalUpVotes > 100 THEN 'Popular Contributor'
+        ELSE 'Regular Contributor'
+    END AS ContributorLevel
+FROM 
+    UserActivity UA
+WHERE 
+    UA.DisplayName IS NOT NULL
+ORDER BY 
+    UA.PostsCount DESC, 
+    UA.TotalUpVotes DESC
+LIMIT 100;

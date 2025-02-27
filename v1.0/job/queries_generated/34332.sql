@@ -1,0 +1,81 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.depth,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.depth DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+),
+KeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(*) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+MovieActors AS (
+    SELECT 
+        ai.movie_id,
+        COUNT(DISTINCT ai.person_id) AS actor_count
+    FROM 
+        cast_info ai
+    GROUP BY 
+        ai.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    COALESCE(ka.actor_count, 0) AS actor_count,
+    COALESCE(kc.keyword_count, 0) AS keyword_count,
+    rm.depth
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieActors ka ON rm.movie_id = ka.movie_id
+LEFT JOIN 
+    KeywordCounts kc ON rm.movie_id = kc.movie_id
+WHERE 
+    rm.rank <= 5
+    AND rm.production_year >= 2000
+ORDER BY 
+    rm.production_year DESC, rm.depth, actor_count DESC;
+
+This query constructs several features: 
+
+1. A recursive CTE (`MovieHierarchy`) to build a hierarchy of movies based on links between them.
+2. A ranking system (`RankedMovies`) that assigns ranks to movies by production year and hierarchy depth.
+3. Aggregations on keywords and actor counts using separate CTEs (`KeywordCounts` and `MovieActors`).
+4. It combines these results with outer joins to gather all necessary information about the filtered movies.
+5. The result set is filtered to show only the top 5 entries within each year from 2000 onward, ordered by production year, depth, and actor count.

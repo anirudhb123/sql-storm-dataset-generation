@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rnk
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+MaxViews AS (
+    SELECT 
+        MAX(ViewCount) AS MaxViewCount
+    FROM 
+        Posts
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    us.DisplayName,
+    us.UpVotes,
+    us.DownVotes,
+    us.TotalPosts,
+    us.TotalBadges,
+    CASE 
+        WHEN rp.ViewCount = mv.MaxViewCount THEN 'Most Viewed'
+        ELSE 'Regular'
+    END AS ViewStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    UserStats us ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = us.UserId)
+CROSS JOIN 
+    MaxViews mv
+WHERE 
+    rp.rnk <= 10
+ORDER BY 
+    rp.CreationDate DESC, us.UpVotes DESC;

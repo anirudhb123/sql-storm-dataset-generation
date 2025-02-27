@@ -1,0 +1,60 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title, 
+        t.production_year, 
+        a.name AS actor_name, 
+        r.role AS role_name,
+        c.note AS cast_note,
+        m.name AS company_name, 
+        m.note AS company_note
+    FROM 
+        aka_title t 
+    JOIN 
+        cast_info c ON t.id = c.movie_id 
+    JOIN 
+        aka_name a ON c.person_id = a.person_id 
+    JOIN 
+        role_type r ON c.role_id = r.id 
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id 
+    JOIN 
+        company_name m ON mc.company_id = m.id 
+    WHERE 
+        t.production_year >= 2000 
+        AND a.name LIKE '%Smith%' 
+        AND r.role LIKE '%Lead%' 
+        AND m.country_code = 'USA'
+),
+RoleCounts AS (
+    SELECT 
+        actor_name,
+        COUNT(role_name) AS role_count
+    FROM 
+        MovieDetails
+    GROUP BY 
+        actor_name
+),
+MaxRoles AS (
+    SELECT 
+        actor_name, 
+        role_count 
+    FROM 
+        RoleCounts 
+    WHERE 
+        role_count = (SELECT MAX(role_count) FROM RoleCounts)
+)
+SELECT 
+    md.movie_title, 
+    md.production_year, 
+    md.actor_name, 
+    md.role_name, 
+    md.cast_note, 
+    mc.company_name, 
+    mc.company_note
+FROM 
+    MovieDetails md
+JOIN 
+    MaxRoles mr ON md.actor_name = mr.actor_name
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_title;

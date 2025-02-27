@@ -1,0 +1,77 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5
+), ranked_movies AS (
+    SELECT 
+        mh.movie_id, 
+        mh.title, 
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS rank_per_year
+    FROM 
+        movie_hierarchy mh
+), cast_with_roles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT CONCAT(n.name, ' as ', rt.role), ', ') AS full_cast
+    FROM 
+        cast_info ci
+    JOIN
+        name n ON ci.person_id = n.imdb_id
+    JOIN
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        ci.note IS NULL OR ci.note != 'extra' 
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    COALESCE(cwr.cast_count, 0) AS number_of_cast,
+    COALESCE(cwr.full_cast, 'No Cast') AS full_cast_list,
+    CASE 
+        WHEN rm.production_year < (SELECT AVG(production_year) FROM aka_title) THEN 'Older than average'
+        ELSE 'Newer than average'
+    END AS age_category,
+    JSON_BUILD_OBJECT(
+        'title', rm.title, 
+        'year', rm.production_year,
+        'cast_count', COALESCE(cwr.cast_count, 0),
+        'cast', COALESCE(cwr.full_cast, 'No Cast')
+    ) AS json_info
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    cast_with_roles cwr ON rm.movie_id = cwr.movie_id
+WHERE 
+    rm.rank_per_year <= 10
+GROUP BY 
+    rm.title, rm.production_year, cwr.cast_count, cwr.full_cast, rm.rank_per_year
+ORDER BY 
+    rm.production_year DESC, rm.title
+LIMIT 50;

@@ -1,0 +1,36 @@
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s_suppkey, s_name, s_acctbal, 
+           ROW_NUMBER() OVER (ORDER BY s_acctbal DESC) AS rank
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+),
+RecentOrders AS (
+    SELECT o_custkey, SUM(o_totalprice) AS total_spent
+    FROM orders
+    WHERE o_orderdate > (CURRENT_DATE - INTERVAL '1 year')
+    GROUP BY o_custkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, COALESCE(ro.total_spent, 0) AS total_spent
+    FROM customer c
+    LEFT JOIN RecentOrders ro ON c.c_custkey = ro.o_custkey
+    WHERE COALESCE(ro.total_spent, 0) > 10000
+)
+SELECT p.p_name, 
+       s.s_name AS supplier_name, 
+       COUNT(DISTINCT l.l_orderkey) AS order_count,
+       MAX(l.l_extendedprice * (1 - l.l_discount)) AS max_revenue
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN lineitem l ON ps.ps_partkey = l.l_partkey AND s.s_suppkey = l.l_suppkey
+JOIN HighValueCustomers hvc ON l.l_orderkey IN (
+    SELECT o_orderkey
+    FROM orders o
+    WHERE o.o_custkey = hvc.c_custkey
+)
+WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY p.p_name, s.s_name
+HAVING COUNT(DISTINCT l.l_orderkey) > 1
+ORDER BY max_revenue DESC
+LIMIT 10;

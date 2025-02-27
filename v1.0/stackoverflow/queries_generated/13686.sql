@@ -1,0 +1,60 @@
+-- Performance Benchmarking Query
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.LastEditDate,
+    us.UserId,
+    us.DisplayName AS UserName,
+    us.BadgeCount,
+    us.TotalUpVotes,
+    us.TotalDownVotes
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.UserId = u.Id
+JOIN 
+    UserStats us ON us.UserId = u.Id
+ORDER BY 
+    ps.CreationDate DESC
+LIMIT 100;

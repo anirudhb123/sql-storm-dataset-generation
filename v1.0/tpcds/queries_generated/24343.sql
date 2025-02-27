@@ -1,0 +1,63 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS Store_Returns_Count,
+        COUNT(DISTINCT wr_order_number) AS Web_Returns_Count,
+        SUM(COALESCE(sr_return_amt, 0) + COALESCE(wr_return_amt, 0)) AS Total_Return_Amount,
+        SUM(COALESCE(sr_return_quantity, 0) + COALESCE(wr_return_quantity, 0)) AS Total_Return_Quantity
+    FROM customer AS c
+    LEFT JOIN store_returns AS sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN web_returns AS wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY c.c_customer_sk
+),
+IncomeDistribution AS (
+    SELECT 
+        h.hd_income_band_sk,
+        SUM(CASE WHEN h.hd_buy_potential = 'Low' THEN 1 ELSE 0 END) AS Low_Buy_Potential,
+        AVG(d.d_year) AS Avg_Buy_Year
+    FROM household_demographics AS h
+    JOIN customer_demographics AS cd ON h.hd_demo_sk = cd.cd_demo_sk
+    JOIN date_dim AS d ON d.d_date_sk = cd.cd_purchase_estimate
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+    GROUP BY h.hd_income_band_sk
+),
+Most_Returned_Items AS (
+    SELECT 
+        sr.sr_item_sk,
+        COUNT(sr.sr_item_sk) AS Return_Count,
+        SUM(sr_return_amt_inc_tax) AS Total_Return_Amount
+    FROM store_returns AS sr
+    GROUP BY sr.sr_item_sk
+    HAVING COUNT(sr.sr_item_sk) > 10
+),
+FinalReport AS (
+    SELECT 
+        cr.c_customer_sk,
+        SUM(cr.Store_Returns_Count) AS Total_Store_Returns,
+        SUM(cr.Web_Returns_Count) AS Total_Web_Returns,
+        SUM(cr.Total_Return_Amount) AS Grand_Total_Return_Amount,
+        id.Low_Buy_Potential,
+        id.Avg_Buy_Year,
+        mri.Return_Count,
+        mri.Total_Return_Amount AS Item_Return_Sum
+    FROM CustomerReturns AS cr
+    JOIN IncomeDistribution AS id ON cr.c_customer_sk = id.hd_income_band_sk
+    LEFT JOIN Most_Returned_Items AS mri ON cr.c_customer_sk = mri.sr_item_sk
+    GROUP BY cr.c_customer_sk, id.Low_Buy_Potential, id.Avg_Buy_Year, mri.Return_Count, mri.Total_Return_Amount
+)
+SELECT 
+    f.c_customer_sk,
+    f.Total_Store_Returns,
+    f.Total_Web_Returns,
+    f.Grand_Total_Return_Amount,
+    COALESCE(f.Low_Buy_Potential, 'Not Specified') AS Buy_Potential_Classification,
+    CASE 
+        WHEN f.Avg_Buy_Year IS NULL THEN 'Data Not Available'
+        ELSE 'Data Available'
+    END AS Data_Status,
+    COALESCE(f.Item_Return_Sum, 0) AS Associated_Item_Returns
+FROM FinalReport AS f
+WHERE (f.Total_Store_Returns + f.Total_Web_Returns) > 5
+ORDER BY f.Grand_Total_Return_Amount DESC
+LIMIT 50;

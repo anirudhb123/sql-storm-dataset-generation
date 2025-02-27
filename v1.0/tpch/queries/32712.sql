@@ -1,0 +1,49 @@
+
+WITH RECURSIVE SupplyHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplyHierarchy sh ON s.s_nationkey = sh.s_suppkey
+    WHERE sh.level < 3
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+),
+SupplierPartInfo AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_availqty,
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+TotalLineItem AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM lineitem l
+    WHERE l.l_shipdate >= '1997-01-01' AND l.l_shipdate <= '1997-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+       COALESCE(SUM(SPI.total_availqty), 0) AS total_available,
+       COALESCE(SUM(TLI.total_price), 0) AS total_lineitem_value,
+       COUNT(DISTINCT RO.o_orderkey) AS total_orders,
+       RANK() OVER (ORDER BY p.p_retailprice DESC) AS rank_retailprice
+FROM part p
+LEFT JOIN SupplierPartInfo SPI ON p.p_partkey = SPI.ps_partkey
+LEFT JOIN TotalLineItem TLI ON TLI.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (
+    SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN (
+        SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey IN (
+            SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE '%West%'
+        )
+    )
+))
+LEFT JOIN RankedOrders RO ON RO.o_orderkey IN (
+    SELECT DISTINCT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey
+)
+GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+HAVING SUM(SPI.total_availqty) IS NOT NULL AND COALESCE(SUM(TLI.total_price), 0) > 10000
+ORDER BY rank_retailprice ASC;

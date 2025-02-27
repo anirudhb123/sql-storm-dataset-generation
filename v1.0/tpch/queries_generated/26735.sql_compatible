@@ -1,0 +1,36 @@
+
+SELECT 
+    p.p_name AS part_name,
+    s.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    o.o_orderkey AS order_id,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    COUNT(DISTINCT l.l_linenumber) AS lineitem_count,
+    AVG(p.p_retailprice) AS avg_part_price,
+    LENGTH(p.p_comment) AS comment_length,
+    CASE 
+        WHEN LENGTH(p.p_comment) > 20 THEN 'Long Comment' 
+        ELSE 'Short Comment' 
+    END AS comment_type
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    s.s_acctbal > 1000
+    AND c.c_mktsegment = 'BUILDING'
+GROUP BY 
+    p.p_name, s.s_name, c.c_name, o.o_orderkey, p.p_retailprice, p.p_comment
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000
+ORDER BY 
+    total_revenue DESC, comment_length ASC;

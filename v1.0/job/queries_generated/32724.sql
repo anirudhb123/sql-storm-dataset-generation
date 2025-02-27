@@ -1,0 +1,80 @@
+WITH RECURSIVE cast_hierarchy AS (
+    SELECT 
+        c.movie_id,
+        ca.name AS actor_name,
+        ca.id AS actor_id,
+        1 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ca ON c.person_id = ca.person_id
+    WHERE 
+        c.note IS NULL
+
+    UNION ALL
+    
+    SELECT 
+        c.movie_id,
+        ca.name AS actor_name,
+        ca.id AS actor_id,
+        ch.level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ca ON c.person_id = ca.person_id
+    JOIN 
+        cast_hierarchy ch ON c.movie_id = ch.movie_id
+    WHERE 
+        ch.level < 3 
+        AND c.note IS NULL
+),
+
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(m.info, ' | ') AS movie_infos
+    FROM 
+        movie_info mi
+    WHERE 
+        mi.note IS NOT NULL
+    GROUP BY 
+        mi.movie_id
+)
+
+SELECT 
+    t.title AS movie_title,
+    t.production_year,
+    mv.keywords,
+    mi.movie_infos,
+    COUNT(ch.actor_id) AS num_actors,
+    AVG(ch.level) AS avg_cast_level
+FROM 
+    title t
+LEFT JOIN 
+    movie_keywords mv ON t.id = mv.movie_id
+LEFT JOIN 
+    movie_info_details mi ON t.id = mi.movie_id
+LEFT JOIN 
+    cast_hierarchy ch ON t.id = ch.movie_id
+WHERE 
+    t.production_year > 2000
+GROUP BY 
+    t.id, mv.keywords, mi.movie_infos
+HAVING 
+    COUNT(ch.actor_id) > 1
+ORDER BY 
+    t.production_year DESC, num_actors DESC
+LIMIT 100;
+

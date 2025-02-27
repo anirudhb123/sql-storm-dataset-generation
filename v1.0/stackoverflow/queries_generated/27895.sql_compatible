@@ -1,0 +1,58 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswerCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Posts.Score) AS AverageScore
+    FROM Tags
+    LEFT JOIN Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::text[])
+    GROUP BY Tags.TagName
+),
+UserEngagement AS (
+    SELECT 
+        Users.DisplayName,
+        SUM(Posts.ViewCount) AS TotalPostViews,
+        SUM(Comments.Score) AS TotalCommentScore,
+        COUNT(DISTINCT Posts.Id) AS NumberOfPosts,
+        COUNT(DISTINCT Comments.Id) AS NumberOfComments
+    FROM Users 
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN Comments ON Posts.Id = Comments.PostId
+    GROUP BY Users.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        PH.PostHistoryTypeId,
+        PH.CreationDate AS ChangeDate,
+        PH.UserDisplayName AS ChangedBy,
+        PH.Comment AS ChangeComment
+    FROM Posts
+    JOIN PostHistory PH ON Posts.Id = PH.PostId
+    WHERE PH.PostHistoryTypeId IN (10, 11, 12) 
+)
+SELECT 
+    T.TagName,
+    T.PostCount,
+    T.AcceptedAnswerCount,
+    T.TotalViews,
+    T.AverageScore,
+    U.DisplayName,
+    U.TotalPostViews,
+    U.TotalCommentScore,
+    U.NumberOfPosts,
+    U.NumberOfComments,
+    P.Title,
+    P.ChangeDate,
+    P.ChangedBy,
+    P.ChangeComment
+FROM TagStatistics T
+JOIN UserEngagement U ON U.NumberOfPosts > 0
+LEFT JOIN PostHistoryDetails P ON P.PostId IN (
+    SELECT PL.PostId FROM PostLinks PL WHERE PL.LinkTypeId = 1 
+)
+ORDER BY T.TotalViews DESC, U.TotalPostViews DESC, T.AverageScore DESC
+LIMIT 50;

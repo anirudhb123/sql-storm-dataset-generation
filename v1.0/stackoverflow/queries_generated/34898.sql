@@ -1,0 +1,104 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostsCreated,
+        CommentsMade,
+        TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY PostsCreated DESC) AS UserRank
+    FROM 
+        UserEngagement
+    WHERE 
+        PostsCreated > 0 OR CommentsMade > 0
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserDisplayName,
+        p.Title,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS CloseRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+HighlightedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        pwc.ClosedPostCount,
+        COALESCE(ueng.PostsCreated, 0) AS UserPosts,
+        COALESCE(ueng.CommentsMade, 0) AS UserComments
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        (SELECT 
+            PostId, COUNT(*) AS ClosedPostCount 
+         FROM 
+            ClosedPosts 
+         WHERE 
+            CloseRank = 1 
+         GROUP BY 
+            PostId) pwc ON rp.PostId = pwc.PostId
+    LEFT JOIN 
+        UserEngagement ueng ON ueng.UserId = rp.OwnerUserId
+)
+SELECT 
+    hp.Title,
+    hp.CreationDate,
+    hp.Score,
+    hp.ViewCount,
+    hp.AnswerCount,
+    COALESCE(hp.ClosedPostCount, 0) AS ClosedCount,
+    ueng.DisplayName AS EngagedUser,
+    ueng.PostsCreated,
+    ueng.CommentsMade,
+    ueng.TotalBounty
+FROM 
+    HighlightedPosts hp
+LEFT JOIN 
+    ActiveUsers ueng ON hp.UserPosts > 0
+WHERE 
+    hp.ViewCount > 100
+ORDER BY 
+    hp.Score DESC, hp.ViewCount DESC;

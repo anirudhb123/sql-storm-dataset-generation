@@ -1,0 +1,85 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId, 
+        ph.UserId, 
+        ph.PostHistoryTypeId, 
+        ph.CreationDate, 
+        ph.RevisionGUID,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopActiveUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        TotalPosts + TotalComments + TotalBadges AS ActivityScore
+    FROM 
+        UserActivity
+    ORDER BY 
+        ActivityScore DESC
+    LIMIT 10
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ph.UserId AS LastEditorId,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS LastEditRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHistory ph ON p.Id = ph.PostId AND ph.rn = 1
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    CASE 
+        WHEN ph.PostHistoryTypeId = 10 THEN 'Closed'
+        WHEN ph.PostHistoryTypeId = 11 THEN 'Reopened'
+        ELSE 'Active'
+    END AS PostStatus,
+    COUNT(DISTINCT c.Id) OVER (PARTITION BY ps.PostId) AS CommentCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = ps.PostId AND v.VoteTypeId = 2) AS UpVoteCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = ps.PostId AND v.VoteTypeId = 3) AS DownVoteCount
+FROM 
+    TopActiveUsers us
+JOIN 
+    PostStats ps ON us.UserId = ps.LastEditorId
+LEFT JOIN 
+    PostHistory ph ON ps.PostId = ph.PostId
+LEFT JOIN 
+    Comments c ON ps.PostId = c.PostId
+WHERE 
+    ps.LastEditRank = 1
+ORDER BY 
+    us.ActivityScore DESC, ps.Score DESC;

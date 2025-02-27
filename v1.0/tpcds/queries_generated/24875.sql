@@ -1,0 +1,92 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_net_paid,
+        ws.ws_ext_sales_price,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_order_number) AS rn,
+        CASE 
+            WHEN ws.ws_net_paid < 0 THEN 'Refunded'
+            WHEN ws.ws_net_paid = 0 THEN 'No Charge'
+            ELSE 'Paid'
+        END AS payment_status
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+LatestReturns AS (
+    SELECT 
+        sr_return_quantity,
+        sr_return_amt,
+        sr_item_sk,
+        sr_ticket_number
+    FROM 
+        store_returns sr
+    WHERE 
+        sr_returned_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    UNION
+    SELECT 
+        wr_return_quantity,
+        wr_return_amt,
+        wr_item_sk,
+        wr_order_number
+    FROM 
+        web_returns wr
+    WHERE 
+        wr_returned_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+DetailedSales AS (
+    SELECT 
+        it.i_item_id,
+        it.i_item_desc,
+        s.ss_ticket_number,
+        s.ss_net_profit,
+        s.ss_ext_sales_price,
+        COALESCE(lr.sr_return_quantity, 0) AS return_quantity,
+        COALESCE(lr.sr_return_amt, 0) AS return_amount,
+        ROW_NUMBER() OVER (PARTITION BY it.i_item_sk ORDER BY s.ss_sold_date_sk DESC) AS item_rank
+    FROM 
+        store_sales s
+    JOIN 
+        item it ON s.ss_item_sk = it.i_item_sk
+    LEFT JOIN 
+        LatestReturns lr ON s.ss_item_sk = lr.sr_item_sk AND s.ss_ticket_number = lr.sr_ticket_number
+),
+AggregatedSales AS (
+    SELECT 
+        ds.i_item_id,
+        ds.i_item_desc,
+        SUM(ds.ss_net_profit) AS total_net_profit,
+        AVG(ds.ss_ext_sales_price) AS avg_sales_price,
+        SUM(ds.return_quantity) AS total_returned_qty,
+        SUM(ds.return_amount) AS total_returned_amt
+    FROM 
+        DetailedSales ds
+    WHERE 
+        ds.item_rank = 1
+    GROUP BY 
+        ds.i_item_id, ds.i_item_desc
+)
+SELECT 
+    cs.ca_city AS customer_city,
+    asales.i_item_id,
+    asales.i_item_desc,
+    asales.total_net_profit,
+    asales.avg_sales_price,
+    COUNT(CASE WHEN asales.total_returned_qty > 0 THEN 1 END) AS returns_count,
+    SUM(CASE WHEN asales.total_returned_qty > 0 THEN asales.total_returned_amt ELSE 0 END) AS total_return_value
+FROM 
+    AggregatedSales asales
+JOIN 
+    customer c ON c.c_customer_sk = (SELECT MAX(c_customer_sk) FROM customer)
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+GROUP BY 
+    cs.ca_city, asales.i_item_id, asales.i_item_desc
+HAVING 
+    SUM(asales.total_net_profit) > 0 AND AVG(asales.avg_sales_price) > 50
+ORDER BY 
+    customer_city, total_net_profit DESC;

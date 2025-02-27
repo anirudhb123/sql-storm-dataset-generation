@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreatedDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (CURRENT_DATE - INTERVAL '1 year') -- Posts created in the last year
+), 
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        COUNT(DISTINCT COALESCE(b.Name, 'No Badge')) AS BadgeCount,
+        AVG(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= (CURRENT_DATE - INTERVAL '6 months') -- History in the last 6 months
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+LatestPostHistory AS (
+    SELECT 
+        PostId,
+        MAX(CreationDate) AS LatestChange
+    FROM 
+        PostHistory
+    GROUP BY 
+        PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    us.DisplayName AS OwnerDisplayName,
+    us.QuestionsAsked,
+    us.BadgeCount,
+    us.AvgScore,
+    ph.HistoryCount,
+    COALESCE(lph.LatestChange, 'No Changes') AS LastChange
+FROM 
+    RankedPosts rp
+JOIN 
+    UserStatistics us ON rp.OwnerUserId = us.UserId
+LEFT JOIN 
+    PostHistoryAnalysis ph ON rp.PostId = ph.PostId
+LEFT JOIN 
+    LatestPostHistory lph ON rp.PostId = lph.PostId
+WHERE 
+    rp.rn <= 10 -- Top 10 posts per post type
+ORDER BY 
+    rp.Score DESC, rp.CreatedDate DESC;

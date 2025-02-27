@@ -1,0 +1,40 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+PartInfo AS (
+    SELECT p.p_partkey, p.p_name, AVG(l.l_discount) AS avg_discount,
+           COUNT(DISTINCT l.l_orderkey) AS num_orders
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY p.p_partkey, p.p_name
+),
+HighValueOrders AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey
+    HAVING SUM(o.o_totalprice) > 1000
+)
+SELECT cust.c_name, co.o_orderkey, co.o_orderdate, 
+       COALESCE(ps.total_supply_cost, 0) AS total_supply_cost,
+       pi.p_name, pi.avg_discount, pi.num_orders
+FROM CustomerOrders co
+JOIN HighValueOrders hv ON co.c_custkey = hv.c_custkey
+LEFT JOIN SupplierStats ps ON co.o_orderkey = ps.s_suppkey
+JOIN PartInfo pi ON co.o_orderkey = pi.p_partkey
+WHERE co.order_rank = 1
+ORDER BY co.o_orderdate DESC, pi.num_orders DESC;

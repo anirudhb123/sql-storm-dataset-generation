@@ -1,0 +1,88 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(m2.title, 'N/A') AS linked_movie_title,
+        COALESCE(m2.production_year, 'N/A') AS linked_movie_year,
+        1 AS level
+    FROM
+        aka_title AS m
+    LEFT JOIN movie_link AS ml ON m.id = ml.movie_id
+    LEFT JOIN aka_title AS m2 ON ml.linked_movie_id = m2.id
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(m2.title, 'N/A'),
+        COALESCE(m2.production_year, 'N/A'),
+        mh.level + 1
+    FROM
+        movie_hierarchy AS mh
+    LEFT JOIN movie_link AS ml ON mh.movie_id = ml.movie_id
+    LEFT JOIN aka_title AS m2 ON ml.linked_movie_id = m2.id
+    WHERE
+        m2.production_year IS NOT NULL AND mh.level < 3
+),
+
+actor_counts AS (
+    SELECT
+        ca.person_id,
+        COUNT(DISTINCT ca.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        cast_info AS ca
+    JOIN movie_keyword AS mk ON ca.movie_id = mk.movie_id
+    JOIN keyword AS k ON mk.keyword_id = k.id
+    WHERE
+        ca.nr_order IS NOT NULL
+    GROUP BY
+        ca.person_id
+),
+
+movie_details AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        a.total_movies,
+        a.keywords,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.id) AS rn
+    FROM
+        aka_title AS m
+    LEFT JOIN actor_counts AS a ON m.id = a.movie_id
+    WHERE
+        m.production_year >= 2000
+)
+
+SELECT
+    mh.movie_id,
+    mh.title AS original_title,
+    mh.production_year,
+    mh.linked_movie_title,
+    mh.linked_movie_year,
+    md.keywords,
+    md.total_movies,
+    CASE 
+        WHEN md.total_movies IS NULL THEN 'No actors'
+        ELSE 'Stars in ' || md.total_movies || ' movies'
+    END AS actor_summary,
+    CASE
+        WHEN mh.level = 1 THEN 'Direct Link'
+        WHEN mh.level = 2 THEN 'Indirect Link'
+        ELSE 'Outer Link'
+    END AS link_type
+FROM
+    movie_hierarchy AS mh
+LEFT JOIN movie_details AS md ON mh.movie_id = md.movie_id
+WHERE
+    mh.linked_movie_year IS NOT NULL
+ORDER BY
+    mh.production_year DESC, mh.title ASC
+LIMIT 50;
+

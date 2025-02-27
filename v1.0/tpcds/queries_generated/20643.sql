@@ -1,0 +1,45 @@
+
+WITH RECURSIVE customer_info AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, cd_demo_sk,
+           rd_inactive_date_sk, 1 AS lvl
+    FROM customer
+    LEFT JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    LEFT JOIN (SELECT cd_demo_sk, MAX(d_date_sk) AS rd_inactive_date_sk
+               FROM customer_demographics
+               WHERE cd_marital_status = 'D'
+               GROUP BY cd_demo_sk) AS temp ON cd_demo_sk = temp.cd_demo_sk
+
+    UNION ALL
+
+    SELECT c_customer_sk, c_first_name, c_last_name, cd_demo_sk,
+           rd_inactive_date_sk, lvl + 1
+    FROM customer_info
+    JOIN customer ON c_customer_sk = c_customer_sk
+    WHERE lvl < 3
+), inventory_summary AS (
+    SELECT inv_date_sk, inv_item_sk, SUM(inv_quantity_on_hand) AS total_on_hand
+    FROM inventory
+    GROUP BY inv_date_sk, inv_item_sk
+),
+sales_summary AS (
+    SELECT ws_item_sk, SUM(ws_sales_price) AS total_sales_price, COUNT(ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+combined_summary AS (
+    SELECT i.inv_item_sk, i.total_on_hand, s.total_sales_price, s.order_count,
+           CASE 
+               WHEN s.total_sales_price IS NULL THEN 'No Sales'
+               ELSE 'Sales Made'
+           END AS sales_status
+    FROM inventory_summary i
+    FULL OUTER JOIN sales_summary s ON i.inv_item_sk = s.ws_item_sk
+)
+SELECT ci.c_first_name, ci.c_last_name, cs.total_on_hand, cs.total_sales_price, cs.order_count, cs.sales_status,
+       ROW_NUMBER() OVER (PARTITION BY ci.cd_demo_sk ORDER BY cs.total_sales_price DESC) AS sales_rank
+FROM customer_info ci
+LEFT JOIN combined_summary cs ON ci.cd_demo_sk = cs.inv_item_sk
+WHERE COALESCE(cs.total_sales_price, 0) > (SELECT AVG(total_sales_price) FROM combined_summary WHERE total_sales_price IS NOT NULL)
+  AND cs.sales_status = 'Sales Made'
+  AND ci.lvl = 1
+ORDER BY ci.c_customer_sk;

@@ -1,0 +1,75 @@
+WITH UserActivity AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN P.Score <= 0 THEN 1 ELSE 0 END) AS NegativePosts
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) -- BountyStart, BountyClose
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+
+PostStatistics AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS Author,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        (SELECT SUM(V.VoteTypeId = 2) FROM Votes V WHERE V.PostId = P.Id) AS UpvoteCount,
+        (SELECT SUM(V.VoteTypeId = 3) FROM Votes V WHERE V.PostId = P.Id) AS DownvoteCount
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+)
+
+SELECT
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalPosts,
+    UA.TotalBounty,
+    UA.BadgeCount,
+    UA.PositivePosts,
+    UA.NegativePosts,
+    PS.Title,
+    PS.CommentCount,
+    PS.UpvoteCount,
+    PS.DownvoteCount,
+    (CASE
+        WHEN PS.Score > 0 THEN 'High'
+        WHEN PS.Score = 0 THEN 'Neutral'
+        ELSE 'Low'
+    END) AS PostScoreCategory
+FROM UserActivity UA
+LEFT JOIN PostStatistics PS ON PS.Author = UA.DisplayName
+WHERE (UA.TotalPosts > 5 OR UA.BadgeCount > 0)
+    AND (UA.TotalBounty > 0 OR UA.PositivePosts > 0)
+ORDER BY UA.TotalPosts DESC, UA.TotalBounty DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;
+
+-- Adding a string concatenation to showcase tags from posts as a string
+WITH TagsConcatenated AS (
+    SELECT
+        P.Id AS PostId,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM Posts P
+    LEFT JOIN LATERAL (
+        SELECT UNNEST(string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><')) AS TagName
+    ) T ON TRUE
+    GROUP BY P.Id
+)
+SELECT
+    PS.*,
+    TC.Tags
+FROM PostStatistics PS
+JOIN TagsConcatenated TC ON PS.PostId = TC.PostId
+WHERE PS.Score IS NOT NULL
+ORDER BY PS.Score DESC, PS.ViewCount DESC;
+

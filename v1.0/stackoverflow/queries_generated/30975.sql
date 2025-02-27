@@ -1,0 +1,77 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        CAST(NULL AS VARCHAR(40)) AS ParentPostTitle,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ph.Title AS ParentPostTitle,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.PostId
+),
+PostStats AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.Score,
+        ph.CreationDate,
+        ph.ViewCount,
+        ph.Level,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        RecursivePostHierarchy ph
+    LEFT JOIN 
+        Votes v ON ph.PostId = v.PostId AND v.VoteTypeId = 9 -- BountyClose
+    LEFT JOIN 
+        Comments c ON ph.PostId = c.PostId
+    GROUP BY 
+        ph.PostId, ph.Title, ph.Score, ph.CreationDate, ph.ViewCount, ph.Level
+),
+TopPosts AS (
+    SELECT 
+        ps.*,
+        RANK() OVER (PARTITION BY Level ORDER BY Score DESC) AS ScoreRank,
+        ROW_NUMBER() OVER (ORDER BY ViewCount DESC) AS ViewRank
+    FROM 
+        PostStats ps
+)
+SELECT 
+    t.Level,
+    t.Title,
+    t.Score,
+    t.CreationDate,
+    t.ViewCount,
+    t.TotalBounty,
+    t.CommentCount,
+    CASE 
+        WHEN t.ScoreRank <= 5 THEN 'Top Score'
+        WHEN t.ViewRank <= 5 THEN 'Top Viewed'
+        ELSE 'Regular'
+    END AS PostCategory
+FROM 
+    TopPosts t
+WHERE 
+    t.Score > 10 OR t.TotalBounty > 0
+ORDER BY 
+    t.Level, t.Score DESC, t.ViewCount DESC;

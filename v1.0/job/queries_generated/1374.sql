@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY RANDOM()) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastCounts AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+Genres AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    COALESCE(cc.actor_count, 0) AS total_actors,
+    g.keywords,
+    CASE 
+        WHEN cc.actor_count > 10 THEN 'Ensemble Cast'
+        ELSE 'Small Cast'
+    END AS cast_size,
+    COALESCE(NULLIF(rm.production_year, 2023), 'Year Unknown') AS production_info
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastCounts cc ON rm.movie_id = cc.movie_id
+LEFT JOIN 
+    Genres g ON rm.movie_id = g.movie_id
+WHERE 
+    rm.rank <= 5 
+ORDER BY 
+    rm.production_year DESC,
+    total_actors DESC
+LIMIT 50;

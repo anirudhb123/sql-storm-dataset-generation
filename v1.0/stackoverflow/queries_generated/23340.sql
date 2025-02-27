@@ -1,0 +1,114 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(v.PostId) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        COUNT(v.PostId) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVoteCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    JOIN 
+        LATERAL unnest(string_to_array(substr(p.Tags, 2, length(p.Tags) - 2), '><')) AS tag ON true
+    LEFT JOIN 
+        Tags t ON tag = t.TagName 
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.OwnerUserId, p.CreationDate
+),
+
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViewCount,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.LastAccessDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+
+PerformanceMetrics AS (
+    SELECT 
+        ups.UserId,
+        ups.TotalViewCount,
+        UserStats.PostCount,
+        UserStats.PositivePosts,
+        UserStats.NegativePosts,
+        RANK() OVER (ORDER BY ups.TotalViewCount DESC) AS ViewRank
+    FROM 
+        (SELECT 
+            UserId,
+            SUM(ViewCount) AS TotalViewCount
+        FROM 
+            RankedPosts
+        GROUP BY 
+            UserId) ups
+    JOIN 
+        UserStatistics UserStats ON ups.UserId = UserStats.UserId
+)
+
+SELECT 
+    PM.UserId,
+    u.DisplayName,
+    PM.TotalViewCount,
+    PM.PostCount,
+    PM.PositivePosts,
+    PM.NegativePosts,
+    PM.ViewRank,
+    PMT.RankByScore
+FROM 
+    PerformanceMetrics PM
+JOIN 
+    Users u ON PM.UserId = u.Id
+LEFT JOIN 
+    (SELECT 
+        PostId,
+        COUNT(h.Id) AS EditHistoryCount
+    FROM 
+        PostHistory h
+    WHERE 
+        h.PostHistoryTypeId IN (4, 5) -- Edit Title and Edit Body
+    GROUP BY 
+        PostId) PMT ON PM.PostCount = PMT.EditHistoryCount
+WHERE 
+    PM.PositivePosts > PM.NegativePosts
+    AND PM.PostCount > 3
+ORDER BY 
+    PM.ViewRank, PM.TotalViewCount DESC;
+
+WITH RECURSIVE KeywordTags AS (
+    SELECT 
+        t.TagName AS Tag 
+    FROM 
+        Tags t
+    WHERE 
+        t.IsRequired = 1 
+    UNION ALL
+    SELECT 
+        t.TagName 
+    FROM 
+        Tags t
+    JOIN 
+        KeywordTags kt ON t.Count >= (SELECT AVG(Count) FROM Tags)
+)
+SELECT DISTINCT 
+    kt.Tag 
+FROM 
+    KeywordTags kt
+WHERE 
+    NOT EXISTS (SELECT 1 FROM Posts p WHERE p.Tags LIKE '%' || kt.Tag || '%');

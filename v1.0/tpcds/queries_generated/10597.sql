@@ -1,0 +1,25 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_id
+)
+SELECT 
+    s.web_site_id,
+    s.total_sales,
+    s.total_orders,
+    s.total_sales / NULLIF(s.total_orders, 0) AS avg_sales_per_order
+FROM 
+    SalesSummary AS s
+ORDER BY 
+    s.total_sales DESC
+LIMIT 10;

@@ -1,0 +1,75 @@
+
+WITH TagInfo AS (
+    SELECT
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(Posts.AnswerCount) AS TotalAnswers
+    FROM
+        Tags
+    LEFT JOIN Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, LENGTH(Posts.Tags) - 2), '><')::text[])
+    GROUP BY
+        Tags.TagName
+),
+UserStatistics AS (
+    SELECT
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN Badges.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Badges.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Badges.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM
+        Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN Votes ON Posts.Id = Votes.PostId
+    LEFT JOIN Badges ON Users.Id = Badges.UserId
+    GROUP BY
+        Users.Id, Users.DisplayName
+),
+TopTags AS (
+    SELECT
+        TagInfo.TagName,
+        TagInfo.PostCount,
+        TagInfo.TotalViews,
+        TagInfo.TotalAnswers,
+        ROW_NUMBER() OVER (ORDER BY TagInfo.TotalViews DESC) AS Rank
+    FROM
+        TagInfo
+),
+TopUsers AS (
+    SELECT
+        UserStatistics.UserId,
+        UserStatistics.DisplayName,
+        UserStatistics.PostCount,
+        UserStatistics.Upvotes,
+        UserStatistics.Downvotes,
+        UserStatistics.GoldBadges,
+        UserStatistics.SilverBadges,
+        UserStatistics.BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY UserStatistics.Upvotes DESC) AS UserRank
+    FROM
+        UserStatistics
+)
+SELECT
+    T.TagName,
+    T.PostCount,
+    T.TotalViews,
+    T.TotalAnswers,
+    U.DisplayName AS TopUser,
+    U.Upvotes,
+    U.Downvotes,
+    U.GoldBadges,
+    U.SilverBadges,
+    U.BronzeBadges
+FROM
+    TopTags T
+JOIN
+    TopUsers U ON T.Rank = U.UserRank
+WHERE
+    T.PostCount > 10
+ORDER BY
+    T.TotalViews DESC,
+    U.Upvotes DESC;

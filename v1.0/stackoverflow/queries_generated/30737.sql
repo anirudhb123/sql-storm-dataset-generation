@@ -1,0 +1,73 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        LastAccessDate,
+        0 AS Level
+    FROM Users
+    WHERE Reputation > 1000 -- Starting point for users with high reputation
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        ur.Level + 1
+    FROM Users u
+    INNER JOIN UserReputation ur ON 
+        (ur.Reputation < u.Reputation AND ur.Level < 5) -- Recursive condition to level up based on reputation
+    WHERE u.Reputation > 500 -- Limiting user base for performance
+),
+RecentPosts AS (
+    SELECT 
+        p.Id as PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days' -- Focus on recent posts
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Votes v
+            WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2 -- Counting UpVotes
+        ), 0) AS UpVoteCount
+    FROM RecentPosts rp
+    LEFT JOIN Users u ON rp.OwnerUserId = u.Id
+    WHERE rp.RecentPostRank = 1 -- Only select the most recent post per user
+),
+PostMetadata AS (
+    SELECT 
+        fp.*,
+        COUNT(pc.Id) AS CommentCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount
+    FROM FilteredPosts fp
+    LEFT JOIN Comments pc ON fp.PostId = pc.PostId
+    LEFT JOIN PostHistory ph ON fp.PostId = ph.PostId
+    GROUP BY fp.PostId, fp.Title, fp.CreationDate, fp.OwnerUserId, fp.Score, fp.OwnerDisplayName, fp.UpVoteCount
+)
+SELECT 
+    pm.OwnerDisplayName,
+    pm.Title,
+    pm.CreationDate,
+    pm.Score,
+    pm.UpVoteCount,
+    pm.CommentCount,
+    pm.CloseCount,
+    ur.Reputation,
+    ur.Level AS UserLevel
+FROM PostMetadata pm
+JOIN UserReputation ur ON pm.OwnerUserId = ur.Id
+WHERE pm.Score > 10 -- Select posts with a score greater than 10
+ORDER BY ur.Reputation DESC, pm.Score DESC;

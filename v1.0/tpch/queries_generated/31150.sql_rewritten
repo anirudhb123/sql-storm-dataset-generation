@@ -1,0 +1,46 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (ORDER BY s.s_acctbal DESC) AS rank_order
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+recent_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATEADD(MONTH, -6, cast('1998-10-01' as date))
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+customer_region AS (
+    SELECT c.c_custkey, n.n_name AS nation_name, r.r_name AS region_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+suppliers_parts AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+),
+ranked_orders AS (
+    SELECT ro.*, 
+           DENSE_RANK() OVER (PARTITION BY ro.o_custkey ORDER BY ro.total_revenue DESC) AS revenue_rank
+    FROM recent_orders ro
+)
+
+SELECT c.c_name,
+       SUM(ro.total_revenue) AS total_spending,
+       COUNT(DISTINCT ro.o_orderkey) AS order_count,
+       COALESCE(SUM(ps.ps_supplycost), 0) AS total_supply_cost,
+       rg.rank_order,
+       cr.region_name
+FROM ranked_orders ro
+JOIN customer c ON ro.o_custkey = c.c_custkey
+LEFT JOIN customer_region cr ON cr.c_custkey = c.c_custkey
+LEFT JOIN suppliers_parts ps ON ps.ps_supplycost IN (SELECT ps_supplycost FROM suppliers_parts) 
+LEFT JOIN top_suppliers rg ON rg.s_suppkey IN (SELECT ps.s_suppkey FROM partsupp ps WHERE ps.ps_partkey = ps_partkey)
+WHERE c.c_acctbal IS NOT NULL AND ro.total_revenue > 1000
+GROUP BY c.c_name, rg.rank_order, cr.region_name
+HAVING COUNT(DISTINCT ro.o_orderkey) > 1
+ORDER BY total_spending DESC, c.c_name;

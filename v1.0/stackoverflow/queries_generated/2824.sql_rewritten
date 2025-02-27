@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostsWithUserInteraction AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.Score,
+        tp.ViewCount,
+        ue.UserId,
+        ue.DisplayName,
+        ue.CommentCount,
+        ue.TotalBounty
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        UserEngagement ue ON ue.UserId = tp.PostId 
+)
+SELECT 
+    pu.Title,
+    pu.Score,
+    pu.ViewCount,
+    COALESCE(ue.DisplayName, 'Anonymous') AS UserDisplayName,
+    pu.CommentCount,
+    pu.TotalBounty,
+    CASE 
+        WHEN pu.ViewCount > 1000 THEN 'High Traffic'
+        ELSE 'Moderate Traffic'
+    END AS TrafficStatus,
+    ARRAY(
+        SELECT 
+            DISTINCT tag.TagName 
+        FROM 
+            unnest(string_to_array((SELECT p.Tags FROM Posts p WHERE p.Id = pu.PostId), ',')) AS tag
+    ) AS TagsUsed
+FROM 
+    PostsWithUserInteraction pu
+ORDER BY 
+    pu.Score DESC, pu.ViewCount DESC
+LIMIT 50;

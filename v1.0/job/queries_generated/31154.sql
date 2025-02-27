@@ -1,0 +1,48 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        1 AS level
+    FROM title m
+    WHERE m.season_nr IS NULL -- Start with movies that are not part of seasons
+
+    UNION ALL
+
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        mh.level + 1
+    FROM title t
+    JOIN movie_link ml ON t.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+cast_summary AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM cast_info c
+    JOIN aka_name ak ON ak.person_id = c.person_id
+    GROUP BY c.movie_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    COALESCE(cs.actor_count, 0) AS total_actors,
+    COALESCE(cs.actor_names, 'No actors') AS actor_names,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    mh.level
+FROM movie_hierarchy mh
+LEFT JOIN cast_summary cs ON mh.movie_id = cs.movie_id
+LEFT JOIN movie_keywords mk ON mh.movie_id = mk.movie_id
+WHERE mh.level <= 3  -- Limit to a certain level of hierarchy
+ORDER BY mh.level, mh.movie_title
+LIMIT 100; -- Limit the results for performance benchmarking

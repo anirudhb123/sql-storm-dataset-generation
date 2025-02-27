@@ -1,0 +1,69 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cc_call_center_sk DESC) as rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        call_center cc ON c.c_current_addr_sk = cc.cc_call_center_sk
+    WHERE 
+        cd.cd_gender IN ('M', 'F')
+),
+aggregated_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        MAX(ws.ws_sold_date_sk) AS last_purchase_date
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+final_results AS (
+    SELECT 
+        rc.c_customer_sk,
+        rc.c_first_name,
+        rc.c_last_name,
+        rc.cd_gender,
+        rc.cd_marital_status,
+        rc.cd_education_status,
+        COALESCE(as.total_sales, 0) AS total_sales,
+        COALESCE(as.order_count, 0) AS order_count,
+        as.last_purchase_date
+    FROM 
+        ranked_customers rc
+    LEFT JOIN 
+        aggregated_sales as ON rc.c_customer_sk = as.c_customer_sk
+)
+SELECT 
+    fr.c_customer_sk,
+    fr.c_first_name,
+    fr.c_last_name,
+    fr.cd_gender,
+    fr.cd_marital_status,
+    fr.cd_education_status,
+    fr.total_sales,
+    fr.order_count,
+    fr.last_purchase_date,
+    CASE 
+        WHEN fr.total_sales > 1000 THEN 'High Value'
+        WHEN fr.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM 
+    final_results fr
+WHERE 
+    fr.rank = 1
+ORDER BY 
+    fr.total_sales DESC;

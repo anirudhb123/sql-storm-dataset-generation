@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankScore,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS RankDate
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+),
+TagDetails AS (
+    SELECT 
+        SUBSTRING(T.Tags, 2, LENGTH(T.Tags) - 2) AS Tags,
+        T.Id AS TagId,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags::TEXT LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.Id, T.Tags
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteUndeleteCount,
+        MAX(PH.CreationDate) AS LastModificationDate
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.ViewCount,
+    RP.OwnerDisplayName,
+    TD.Tags,
+    TD.PostCount,
+    PHS.CloseReopenCount,
+    PHS.DeleteUndeleteCount,
+    PHS.LastModificationDate,
+    CASE 
+        WHEN RP.RankScore = 1 THEN 'Top Post' 
+        ELSE NULL 
+    END AS Status,
+    CASE 
+        WHEN RP.RankDate = 1 AND RP.Score IS NOT NULL THEN 'Recently Created'
+        ELSE 'Older Post'
+    END AS AgeStatus
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    TagDetails TD ON RP.PostId IN (SELECT UNNEST(string_to_array(TD.Tags, '>,<')))
+LEFT JOIN 
+    PostHistorySummary PHS ON RP.PostId = PHS.PostId
+WHERE 
+    RP.Score > (SELECT AVG(Score) FROM Posts WHERE Score IS NOT NULL)
+    OR TD.PostCount > 10
+ORDER BY 
+    RP.Score DESC, RP.ViewCount DESC;
+
+-- Including a bizarre corner case: handling NULL titles 
+SELECT 
+    P.Id as PostId,
+    COALESCE(P.Title, 'Untitled Post') as Title,
+    COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) as CommentCount
+FROM 
+    Posts P
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+WHERE 
+    COALESCE(P.OwnerDisplayName, 'Anonymous') <> 'Anonymous' 
+    AND P.CreationDate < NOW() - INTERVAL '1 year'
+GROUP BY 
+    P.Id
+HAVING 
+    COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) > 0
+ORDER BY 
+    P.CreationDate DESC
+LIMIT 100;

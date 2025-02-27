@@ -1,0 +1,50 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT i_item_sk, i_item_id, i_item_desc, i_current_price, i_brand, 1 AS level
+    FROM item
+    WHERE i_rec_end_date IS NULL
+    UNION ALL
+    SELECT i.item_sk, i.i_item_id, i.i_item_desc, i.i_current_price, i.i_brand, ih.level + 1
+    FROM item i
+    JOIN item_hierarchy ih ON i.i_item_sk = ih.i_item_sk AND ih.level < 5 -- simulate depth limit
+),
+sales_summary AS (
+    SELECT cs.cs_item_sk,
+           SUM(cs.cs_quantity) AS total_sold,
+           SUM(cs.cs_net_paid) AS total_revenue,
+           COUNT(DISTINCT cs.cs_order_number) AS order_count
+    FROM catalog_sales cs
+    JOIN date_dim dd ON cs.cs_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023 AND dd.d_month_seq BETWEEN 1 AND 12
+    GROUP BY cs.cs_item_sk
+),
+customer_info AS (
+    SELECT c.c_customer_sk,
+           cd.cd_gender,
+           cd.cd_marital_status,
+           cd.cd_purchase_estimate
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT ih.i_item_id,
+       ih.i_item_desc,
+       ih.i_brand,
+       isnull(ss.total_sold, 0) AS total_sold,
+       isnull(ss.total_revenue, 0) AS total_revenue,
+       COUNT(DISTINCT ci.c_customer_sk) AS unique_customers,
+       MAX(CASE WHEN ci.cd_gender = 'F' THEN ci.cd_purchase_estimate END) AS max_female_estimate,
+       MAX(CASE WHEN ci.cd_gender = 'M' THEN ci.cd_purchase_estimate END) AS max_male_estimate
+FROM item_hierarchy ih
+LEFT JOIN sales_summary ss ON ih.i_item_sk = ss.cs_item_sk
+LEFT JOIN customer_info ci ON ci.c_customer_sk IN (
+    SELECT ss.ss_customer_sk
+    FROM store_sales ss
+    WHERE ss.ss_item_sk = ih.i_item_sk
+)
+GROUP BY ih.i_item_id, ih.i_item_desc, ih.i_brand
+HAVING total_revenue > (
+    SELECT AVG(total_revenue)
+    FROM sales_summary
+) * 1.5
+ORDER BY total_revenue DESC
+LIMIT 10;

@@ -1,0 +1,98 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        COUNT(DISTINCT p.Id) AS TotalPosts, 
+        SUM(CASE WHEN pt.Name = 'Answer' THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN pt.Name = 'Question' THEN 1 ELSE 0 END) AS TotalQuestions,
+        AVG(DATEDIFF(SECOND, p.CreationDate, COALESCE(p.LastActivityDate, p.CreationDate))) AS AvgResponseTime
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        TotalPosts, 
+        TotalAnswers, 
+        TotalQuestions, 
+        AvgResponseTime,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserStats
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        COALESCE(NULLIF(c.Text, ''), 'No Comments') AS LastComment,
+        COALESCE(CAST(STRING_AGG(DISTINCT t.TagName, ', ') AS VARCHAR), 'No Tags') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = p.Id
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AnswerCount
+),
+PostEngagement AS (
+    SELECT 
+        p.UserId,
+        COUNT(DISTINCT v.Id) AS TotalVotes,
+        COUNT(DISTINCT ph.Id) AS TotalPostHistory
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.UserId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    t.TotalPosts,
+    t.TotalAnswers,
+    t.TotalQuestions,
+    t.AvgResponseTime,
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.Score,
+    p.AnswerCount,
+    p.LastComment,
+    p.Tags,
+    e.TotalVotes,
+    e.TotalPostHistory
+FROM 
+    TopUsers u
+JOIN 
+    UserStats t ON u.UserId = t.UserId
+JOIN 
+    PostDetails p ON u.UserId = p.UserId
+JOIN 
+    PostEngagement e ON u.UserId = e.UserId
+WHERE 
+    u.ReputationRank <= 10
+ORDER BY 
+    u.Reputation DESC, p.ViewCount DESC;

@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND ct.id IN (1, 2, 3, 4) AND ct.kind IN ('distributors', 'miscellaneous companies', 'production companies', 'special effects companies') AND mc.note IN ('(1955) (Belgium) (theatrical)', '(198?) (USA) (VHS) (As "Poor White Trash Part II")', '(2007) (Romania) (TV) (re-release) (season 1) (original airing) (season 2)', '(2015) (Serbia) (TV)', '(as ABS-Filmproduktion Alf Brustellin Bernhard Sinkel)', '(as La Compagnie Eric Rohmer)', '(co-production) (as Cormoran)', '(co-production) (as RTBF, Télévision belge)', '(series for the BBC) (as Yellow Bird)');

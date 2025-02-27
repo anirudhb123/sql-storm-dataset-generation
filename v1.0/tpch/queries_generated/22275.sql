@@ -1,0 +1,59 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_nationkey = (SELECT MIN(n_nationkey) FROM nation)  -- starting from the nation with the lowest key
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_regionkey
+    WHERE nh.level < 10  -- limiting depth to 10 levels to avoid infinite recursion
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate, ROW_NUMBER() OVER(PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate BETWEEN '1995-01-01' AND '1996-12-31'
+),
+top_nations AS (
+    SELECT nh.n_nationkey, nh.n_name, SUM(o.o_totalprice) AS total_revenue
+    FROM nation_hierarchy nh
+    JOIN customer_orders o ON o.o_orderkey IN (
+        SELECT l.l_orderkey 
+        FROM lineitem l 
+        LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+        WHERE s.s_nationkey = nh.n_nationkey
+    )
+    GROUP BY nh.n_nationkey, nh.n_name
+),
+provoking_orders AS (
+    SELECT *
+    FROM customer_orders
+    WHERE order_rank = 1
+    AND o_totalprice > (
+        SELECT AVG(o_totalprice) 
+        FROM customer_orders
+        WHERE o_totalprice IS NOT NULL
+    )
+),
+joined_data AS (
+    SELECT o.c_custkey, o.c_name, SUM(o.o_totalprice) OVER (PARTITION BY o.c_custkey) AS total_spent,
+           STRING_AGG(DISTINCT p.p_name, ', ') FILTER (WHERE p.p_retailprice > 50) AS high_value_parts
+    FROM customer_orders o
+    LEFT JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY o.c_custkey, o.c_name
+)
+SELECT j.c_custkey, j.c_name, j.total_spent, j.high_value_parts
+FROM joined_data j
+LEFT JOIN region r ON j.c_custkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)
+WHERE j.total_spent IS NOT NULL
+AND EXISTS (
+    SELECT 1
+    FROM provoking_orders po
+    WHERE po.o_orderkey = j.c_custkey
+)
+ORDER BY j.total_spent DESC
+LIMIT 10;

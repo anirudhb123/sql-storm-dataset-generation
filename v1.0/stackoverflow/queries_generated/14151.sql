@@ -1,0 +1,60 @@
+-- Performance Benchmarking SQL Query
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT ParentId, COUNT(*) AS AnswerCount 
+         FROM Posts 
+         WHERE PostTypeId = 2 
+         GROUP BY ParentId) a ON p.Id = a.ParentId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount 
+         FROM Comments 
+         GROUP BY PostId) c ON p.Id = c.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadges,
+        AVG(u.Reputation) AS AvgReputation,
+        COUNT(DISTINCT v.PostId) AS VoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.AnswerCount,
+    ps.CommentCount,
+    us.UserId,
+    us.DisplayName,
+    us.TotalBadges,
+    us.AvgReputation,
+    us.VoteCount
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.OwnerUserId = u.Id
+JOIN 
+    UserStats us ON u.Id = us.UserId
+ORDER BY 
+    ps.CreationDate DESC
+LIMIT 100; -- Limit the results for performance

@@ -1,0 +1,45 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+TopSpenders AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        rc.c_name AS customer_name,
+        rc.total_spent
+    FROM RankedCustomers rc
+    JOIN nation n ON rc.c_custkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE rc.rank <= 5
+),
+FrequentSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY part_count DESC
+    LIMIT 10
+)
+SELECT 
+    ts.region_name,
+    ts.nation_name,
+    ts.customer_name,
+    ts.total_spent,
+    fs.s_name AS supplier_name,
+    fs.part_count,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ts.total_spent) OVER (PARTITION BY ts.region_name) AS median_spent,
+    COUNT(DISTINCT o.o_orderkey) OVER (PARTITION BY ts.nation_name) AS order_count
+FROM TopSpenders ts
+JOIN FrequentSuppliers fs ON ts.total_spent > fs.part_count
+JOIN orders o ON o.o_custkey = ts.customer_name
+ORDER BY ts.region_name, ts.total_spent DESC;

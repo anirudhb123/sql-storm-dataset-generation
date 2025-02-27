@@ -1,0 +1,66 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        t.Id AS TagId, 
+        t.TagName, 
+        t.Count, 
+        t.ExcerptPostId,
+        t.WikiPostId,
+        CAST(t.TagName AS varchar(max)) AS FullTagPath
+    FROM 
+        Tags t
+    WHERE 
+        t.IsModeratorOnly = 0
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS TagId, 
+        pt.TagName, 
+        pt.Count, 
+        pt.ExcerptPostId,
+        pt.WikiPostId,
+        CAST(CONCAT(r.FullTagPath, ' > ', pt.TagName) AS varchar(max)) AS FullTagPath
+    FROM 
+        Posts p
+    JOIN 
+        Tags pt ON pt.ExcerptPostId = p.Id
+    JOIN 
+        RecursiveTagHierarchy r ON r.TagId = pt.Id
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS PostCount,
+    SUM(p.Score) AS TotalScore,
+    AVG(
+        CASE 
+            WHEN p.ViewCount IS NOT NULL AND p.ViewCount > 0 THEN CAST(p.Score AS float) / p.ViewCount
+            ELSE 0 
+        END
+    ) AS AverageScorePerView,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags,
+    MAX(ph.CreationDate) AS LastPostEditDate
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5, 6) 
+LEFT JOIN 
+    PostLinks pl ON p.Id = pl.PostId 
+LEFT JOIN 
+    RecursiveTagHierarchy th ON th.TagId = pl.RelatedPostId
+LEFT JOIN 
+    Tags t ON th.TagId = t.Id
+WHERE 
+    u.Reputation > 1000
+    AND (u.LastAccessDate IS NULL OR u.LastAccessDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+HAVING 
+    COUNT(DISTINCT p.Id) > 5
+ORDER BY 
+    TotalScore DESC
+LIMIT 50;

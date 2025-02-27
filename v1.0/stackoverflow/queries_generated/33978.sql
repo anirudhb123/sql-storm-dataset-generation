@@ -1,0 +1,52 @@
+WITH RecursiveCTE AS (
+    SELECT P.Id AS PostId,
+           P.Title,
+           P.CreationDate,
+           P.Score,
+           P.ViewCount,
+           P.AcceptedAnswerId,
+           1 AS Level
+    FROM Posts P
+    WHERE P.PostTypeId = 1  -- Only questions
+    UNION ALL
+    SELECT P.Id AS PostId,
+           P.Title,
+           P.CreationDate,
+           P.Score + COALESCE(A.Score, 0) AS Score,
+           P.ViewCount + COALESCE(A.ViewCount, 0) AS ViewCount,
+           A.AcceptedAnswerId,
+           Level + 1
+    FROM Posts P
+    JOIN Posts A ON P.Id = A.ParentId  -- Join answers back to questions
+    WHERE A.PostTypeId = 2 -- Only answers
+),
+VotesHistory AS (
+    SELECT V.PostId,
+           COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+           COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Votes V
+    GROUP BY V.PostId
+),
+TagCounts AS (
+    SELECT T.TagName,
+           COUNT(P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'  -- Join tags to posts based on tag names
+    GROUP BY T.TagName
+)
+SELECT RCTE.PostId,
+       RCTE.Title,
+       RCTE.CreationDate,
+       RCTE.Score,
+       RCTE.ViewCount,
+       V.UpVotes,
+       V.DownVotes,
+       TC.TagName,
+       TC.PostCount
+FROM RecursiveCTE RCTE
+LEFT JOIN VotesHistory V ON RCTE.PostId = V.PostId
+LEFT JOIN TagCounts TC ON TC.PostCount > 0
+WHERE RCTE.Level = 1  -- Filter to only include top-level posts (questions)
+  AND (RCTE.Score > 10 OR RCTE.ViewCount > 100)  -- Complicated filter conditions
+ORDER BY RCTE.Score DESC, RCTE.ViewCount DESC
+LIMIT 100;  -- Limiting the output for performance benchmarking

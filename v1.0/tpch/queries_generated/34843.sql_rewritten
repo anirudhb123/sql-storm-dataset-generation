@@ -1,0 +1,53 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate
+    FROM CustomerOrders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderdate > co.o_orderdate
+), 
+
+OrderSummary AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        COUNT(DISTINCT co.o_orderkey) AS total_orders,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY co.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM CustomerOrders co
+    JOIN lineitem l ON co.o_orderkey = l.l_orderkey
+    GROUP BY co.c_custkey, co.c_name
+), 
+
+TopCustomers AS (
+    SELECT c.*, os.total_orders, os.total_revenue
+    FROM customer c
+    LEFT JOIN OrderSummary os ON c.c_custkey = os.c_custkey
+    WHERE os.revenue_rank IS NOT NULL
+    ORDER BY os.total_revenue DESC
+    LIMIT 10
+)
+
+SELECT 
+    c.c_custkey, 
+    c.c_name, 
+    COALESCE(c.c_acctbal, 0) AS account_balance,
+    COALESCE(rs.r_regions, 'N/A') AS regions_served,
+    CASE 
+        WHEN os.total_orders IS NULL THEN 'No Orders'
+        ELSE CONCAT('Orders: ', os.total_orders)
+    END AS order_info
+FROM customer c
+LEFT JOIN (
+    SELECT DISTINCT n.n_nationkey, COUNT(r.r_regionkey) OVER () AS r_regions 
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+) rs ON c.c_nationkey = rs.n_nationkey
+LEFT JOIN OrderSummary os ON c.c_custkey = os.c_custkey
+WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 100
+ORDER BY c.c_name DESC;

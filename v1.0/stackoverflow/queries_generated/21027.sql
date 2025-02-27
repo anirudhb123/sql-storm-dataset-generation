@@ -1,0 +1,53 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        DENSE_RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+), AnswerStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalAnswers,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM Posts p
+    WHERE p.PostTypeId = 2
+    GROUP BY p.OwnerUserId
+), PostHistoryDetails AS (
+    SELECT 
+        h.PostId,
+        h.PostHistoryTypeId,
+        h.UserId,
+        h.CreationDate,
+        ht.Name AS HistoryTypeName,
+        ROW_NUMBER() OVER (PARTITION BY h.PostId ORDER BY h.CreationDate DESC) AS RecentHistory
+    FROM PostHistory h
+    JOIN PostHistoryTypes ht ON h.PostHistoryTypeId = ht.Id
+), AnswerComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM Comments c
+    JOIN Posts p ON c.PostId = p.Id
+    WHERE p.PostTypeId = 2
+    GROUP BY c.PostId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ru.ReputationRank,
+    as.TotalAnswers,
+    as.AcceptedAnswers,
+    COALESCE(ac.CommentCount, 0) AS CommentCount,
+    ph.RecentHistory,
+    STRING_AGG(DISTINCT phd.HistoryTypeName, ', ') AS HistoryTypes
+FROM Users u
+JOIN RankedUsers ru ON u.Id = ru.Id
+LEFT JOIN AnswerStats as ON u.Id = as.OwnerUserId
+LEFT JOIN AnswerComments ac ON ac.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id AND p.PostTypeId = 2)
+LEFT JOIN PostHistoryDetails ph ON u.Id IN (SELECT phd.UserId FROM PostHistoryDetails phd WHERE phd.PostId = ph.PostId AND phd.RecentHistory = 1)
+WHERE ru.ReputationRank <= 10 -- Only top 10 users based on reputation
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation, ru.ReputationRank, as.TotalAnswers, as.AcceptedAnswers, ac.CommentCount, ph.RecentHistory
+HAVING COUNT(DISTINCT ph.PostId) > 0 -- Ensure that users have post history
+ORDER BY u.Reputation DESC;

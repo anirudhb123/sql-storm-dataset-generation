@@ -1,0 +1,46 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost, 0 AS Level
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 100
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost, sc.Level + 1
+    FROM SupplyChain sc
+    JOIN partsupp ps ON sc.ps_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE sc.Level < 2
+), 
+CustomerTotal AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY c.c_custkey
+),
+TopProducts AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= '1997-01-01' AND l.l_shipdate < '1997-12-31'
+    GROUP BY p.p_partkey, p.p_name
+    ORDER BY TotalSales DESC
+    LIMIT 5
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS UniqueCustomers,
+    COUNT(DISTINCT tp.p_partkey) AS TopProductCount,
+    SUM(sc.ps_availqty) AS TotalAvailableQuantity,
+    AVG(sc.ps_supplycost) AS AverageSupplyCost,
+    MAX(ct.TotalSpent) AS MaxCustomerSpending,
+    STRING_AGG(DISTINCT tp.p_name, ', ') AS TopProductNames
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplyChain sc ON s.s_suppkey = sc.s_suppkey
+LEFT JOIN CustomerTotal ct ON ct.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+LEFT JOIN TopProducts tp ON tp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+GROUP BY r.r_regionkey, r.r_name
+HAVING COUNT(DISTINCT s.s_suppkey) > 10 AND AVG(sc.ps_supplycost) IS NOT NULL
+ORDER BY UniqueCustomers DESC;

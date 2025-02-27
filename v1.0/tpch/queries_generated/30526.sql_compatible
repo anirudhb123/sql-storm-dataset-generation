@@ -1,0 +1,60 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        s.s_acctbal, 
+        1 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        s.s_acctbal, 
+        sh.depth + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+AggregatedSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    GROUP BY l.l_partkey
+),
+SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(as.total_sales) AS supplier_sales
+    FROM supplier s
+    LEFT JOIN AggregatedSales as ON s.s_suppkey = as.l_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (ORDER BY ss.supplier_sales DESC) AS rank
+    FROM SupplierSales ss
+    JOIN supplier s ON ss.s_suppkey = s.s_suppkey
+    WHERE ss.supplier_sales IS NOT NULL
+)
+SELECT 
+    r.r_name, 
+    COUNT(DISTINCT t.s_suppkey) AS top_supplier_count,
+    SUM(t.s_acctbal) FILTER (WHERE t.rank <= 10) AS total_top_supplier_acctbal,
+    STRING_AGG(DISTINCT t.s_name, ', ') AS top_supplier_names
+FROM region r
+LEFT JOIN TopSuppliers t ON t.s_nationkey = r.r_regionkey
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT t.s_suppkey) > 0
+ORDER BY r.r_name;

@@ -1,0 +1,64 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePostCount,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePostCount,
+        AVG(p.ViewCount) AS AverageViewCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.Reputation
+), 
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS IsClosed,
+        STRING_AGG(ph.Comment, '; ') AS AllComments
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.IsClosed,
+        ph.EditCount,
+        ps.PostTypeId,
+        ps.Title,
+        ps.CreationDate,
+        ps.Score,
+        ps.ViewCount,
+        ps.AcceptedAnswerId,
+        COALESCE(ps.CommunityOwnedDate, 'Not Community Owned') AS CommunityOwnership,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList
+    FROM Posts p
+    JOIN PostHistoryAggregates ph ON p.Id = ph.PostId
+    JOIN PostTypes ps ON p.PostTypeId = ps.Id
+    LEFT JOIN UNNEST(STRING_TO_ARRAY(p.Tags, '><')) AS tag(TagName) ON TRUE
+    GROUP BY p.Id, ph.IsClosed, ph.EditCount, ps.PostTypeId, ps.Title, ps.CreationDate, ps.Score, ps.ViewCount, ps.AcceptedAnswerId
+)
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.PostCount,
+    us.PositivePostCount,
+    us.NegativePostCount,
+    us.AverageViewCount,
+    cp.PostId,
+    cp.Title,
+    cp.EditCount,
+    cp.IsClosed,
+    cp.Score,
+    cp.ViewCount,
+    cp.CommunityOwnership,
+    cp.TagsList
+FROM UserStats us
+JOIN ClosedPosts cp ON cp.PostId IN (
+    SELECT p.Id 
+    FROM Posts p 
+    WHERE p.OwnerUserId = us.UserId AND cp.IsClosed = 1
+)
+WHERE us.Reputation > 1000
+ORDER BY us.Reputation DESC, cp.EditCount DESC;

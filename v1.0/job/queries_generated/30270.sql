@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year = 2020
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        at.production_year >= 2010
+)
+
+SELECT 
+    m.title AS Movie_Title,
+    m.production_year AS Production_Year,
+    ak.name AS Actor_Name,
+    COUNT(ck.id) AS Total_Characters,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS Keywords,
+    ARRAY_AGG(DISTINCT cn.name) FILTER (WHERE cn.country_code IS NOT NULL) AS Companies,
+    DENSE_RANK() OVER (PARTITION BY m.production_year ORDER BY ak.id) AS Actor_Rank
+FROM 
+    MovieHierarchy m
+LEFT JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    m.title IS NOT NULL
+    AND ak.name IS NOT NULL
+    AND m.production_year IS NOT NULL
+GROUP BY 
+    m.movie_id, ak.name
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 1 OR m.production_year > 2015
+ORDER BY 
+    m.production_year DESC, Total_Characters DESC;

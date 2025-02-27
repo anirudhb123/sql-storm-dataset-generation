@@ -1,0 +1,73 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2  -- Answers
+)
+
+SELECT 
+    u.DisplayName AS Author,
+    r.Title AS QuestionTitle,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    SUM(vote_counts.UpVotes) AS TotalUpVotes,
+    SUM(vote_counts.DownVotes) AS TotalDownVotes,
+    COALESCE(SUM(b.BadgeCount), 0) AS TotalBadges,
+    r.Level AS PostLevel,
+    r.CreationDate,
+    r.ViewCount,
+    CASE 
+        WHEN r.Level = 1 THEN 'Question'
+        ELSE 'Answer'
+    END AS PostType,
+    RANK() OVER (PARTITION BY r.OwnerUserId ORDER BY r.ViewCount DESC) AS RankByViews
+FROM 
+    RecursivePostCTE r
+LEFT JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON c.PostId = r.PostId
+LEFT JOIN 
+    (SELECT 
+         PostId, 
+         SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+         SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+     FROM 
+         Votes v
+         INNER JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+     GROUP BY PostId) vote_counts ON vote_counts.PostId = r.PostId
+LEFT JOIN 
+    (SELECT 
+         UserId, 
+         COUNT(*) AS BadgeCount 
+     FROM 
+         Badges 
+     GROUP BY UserId) b ON b.UserId = r.OwnerUserId
+GROUP BY 
+    u.DisplayName, r.Title, r.Level, r.CreationDate, r.ViewCount, r.OwnerUserId
+ORDER BY 
+    TotalUpVotes DESC, TotalDownVotes ASC, RankByViews;

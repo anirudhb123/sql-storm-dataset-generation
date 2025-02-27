@@ -1,0 +1,62 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title AS movie_title, 
+        t.production_year, 
+        GROUP_CONCAT(DISTINCT ak.name) AS akas, 
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords
+    FROM 
+        aka_title ak 
+    JOIN 
+        title t ON ak.movie_id = t.id 
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id 
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id 
+    GROUP BY 
+        t.id
+), CastDetails AS (
+    SELECT 
+        c.movie_id, 
+        COUNT(DISTINCT c.person_id) AS actor_count, 
+        GROUP_CONCAT(DISTINCT p.name) AS actors_list 
+    FROM 
+        cast_info c 
+    JOIN 
+        aka_name p ON c.person_id = p.person_id 
+    GROUP BY 
+        c.movie_id
+), CompanyDetails AS (
+    SELECT 
+        m.movie_id, 
+        GROUP_CONCAT(DISTINCT cn.name) AS companies, 
+        GROUP_CONCAT(DISTINCT ct.kind) AS company_types 
+    FROM 
+        movie_companies m 
+    JOIN 
+        company_name cn ON m.company_id = cn.id 
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id 
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    md.movie_id, 
+    md.movie_title, 
+    md.production_year, 
+    md.akas, 
+    cd.actor_count, 
+    cd.actors_list, 
+    co.companies, 
+    co.company_types 
+FROM 
+    MovieDetails md 
+LEFT JOIN 
+    CastDetails cd ON md.movie_id = cd.movie_id 
+LEFT JOIN 
+    CompanyDetails co ON md.movie_id = co.movie_id 
+WHERE 
+    md.production_year > 2000 
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_title;

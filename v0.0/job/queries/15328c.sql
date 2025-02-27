@@ -1,0 +1,4 @@
+SELECT min(an.name) AS cool_actor_pseudonym, min(t.title) AS series_named_after_char
+FROM aka_name AS an, cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE an.person_id = n.id AND n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND an.person_id = ci.person_id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND t.episode_of_id < 1269837 AND t.production_year IN (1888, 1898, 1932, 1944, 1952, 1953, 1963, 1983, 2007) AND n.name_pcode_nf IN ('B2364', 'F4613', 'G4241', 'H5653', 'T5636', 'W132', 'W3521', 'Y21') AND t.title < 'Aspectos de Cascais';

@@ -1,0 +1,39 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(P.ViewCount) AS AverageViews,
+        SUM(P.Score) AS TotalScore,
+        DENSE_RANK() OVER (ORDER BY SUM(P.Score) DESC) AS ScoreRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        MIN(PH.CreationDate) AS FirstClosedDate
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.PostId, PH.CreationDate
+)
+SELECT 
+    UPS.DisplayName,
+    UPS.TotalPosts,
+    UPS.Questions,
+    UPS.Answers,
+    UPS.AverageViews,
+    UPS.TotalScore,
+    COALESCE(CP.FirstClosedDate, 'No closed posts') AS FirstClosedDate,
+    CASE 
+        WHEN UPS.ScoreRank <= 3 THEN 'Top User'
+        ELSE 'Regular User'
+    END AS UserType
+FROM UserPostStats UPS
+LEFT JOIN ClosedPosts CP ON UPS.UserId = CP.PostId
+WHERE UPS.TotalPosts > 5
+ORDER BY UPS.TotalScore DESC, UPS.DisplayName ASC;

@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year,
+        COALESCE(CAST(SUM(ci.nr_order) AS FLOAT) / NULLIF(COUNT(DISTINCT ci.person_id), 0), 0) AS avg_cast_order,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, COUNT(ci.person_id) DESC) AS rank_per_year
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), FilteredMovies AS (
+    SELECT 
+        rm.title, 
+        rm.production_year,
+        rm.avg_cast_order,
+        rn.role as main_role
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        (SELECT 
+            ci.movie_id, 
+            rt.role 
+        FROM 
+            cast_info ci
+        JOIN 
+            role_type rt ON ci.role_id = rt.id 
+        WHERE 
+            rt.role ILIKE '%Lead%') rn ON rm.rank_per_year = rn.movie_id
+    WHERE 
+        rm.avg_cast_order > (SELECT AVG(avg_cast_order) FROM RankedMovies) 
+        AND rm.production_year IS NOT NULL
+    ORDER BY 
+        rm.production_year DESC
+)
+
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.avg_cast_order,
+    CASE 
+        WHEN fm.main_role IS NULL THEN 'Unknown Lead' 
+        ELSE fm.main_role 
+    END AS lead_role
+FROM 
+    FilteredMovies fm
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id IN (SELECT id FROM aka_title WHERE title = fm.title) 
+        AND mi.info LIKE '%Academy Award%'
+    )
+UNION ALL
+SELECT 
+    DISTINCT ct.name AS cast_name,
+    'N/A' AS production_year,
+    NULL AS avg_cast_order,
+    NULL AS lead_role
+FROM 
+    char_name ct
+WHERE 
+    ct.name IS NOT NULL 
+    AND ct.id IN (
+        SELECT ci.person_id 
+        FROM cast_info ci 
+        WHERE ci.movie_id IN (SELECT id FROM aka_title WHERE production_year < 1970)
+    )
+ORDER BY 
+    1, 2;

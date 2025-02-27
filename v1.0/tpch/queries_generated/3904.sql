@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_type
+),
+OrderAmounts AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+CustomerRegions AS (
+    SELECT 
+        c.c_custkey, 
+        r.r_regionkey, 
+        SUM(o.o_totalprice) AS customer_spending
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        c.c_custkey, r.r_regionkey
+)
+SELECT 
+    cr.r_regionkey, 
+    SUM(cr.customer_spending) AS total_spending,
+    MAX(rs.total_supply_cost) AS max_supply_cost,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+    ARRAY_AGG(rs.s_name) FILTER (WHERE rs.supplier_rank <= 3) AS top_suppliers
+FROM 
+    CustomerRegions cr
+LEFT JOIN 
+    RankedSuppliers rs ON cr.r_regionkey IN (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = rs.s_suppkey)
+GROUP BY 
+    cr.r_regionkey
+HAVING 
+    total_spending > 10000
+ORDER BY 
+    total_spending DESC;

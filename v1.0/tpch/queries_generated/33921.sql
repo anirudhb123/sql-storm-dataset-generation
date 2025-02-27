@@ -1,0 +1,38 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY c.c_custkey, c.c_name
+    UNION ALL
+    SELECT sc.custkey, sc.c_name, sc.total_spent
+    FROM SalesCTE sc
+    JOIN orders o ON o.o_custkey = sc.c_custkey
+    WHERE o.o_orderstatus = 'F'
+    AND sc.total_spent > 1000
+),
+MaxSpent AS (
+    SELECT c_nationkey, MAX(total_spent) AS max_spent
+    FROM SalesCTE
+    GROUP BY c_nationkey
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_retailprice, ps.ps_availqty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size > 20
+)
+SELECT n.n_name, 
+       COALESCE(SUM(sd.ps_availqty), 0) AS total_available,
+       COUNT(DISTINCT c.c_custkey) AS num_customers,
+       COUNT(DISTINCT sd.s_suppkey) AS num_suppliers,
+       AVG(sd.p_retailprice) AS avg_retail_price,
+       MAX(ms.max_spent) AS highest_spent
+FROM nation n
+LEFT JOIN SupplierDetails sd ON n.n_nationkey = sd.s_nationkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN MaxSpent ms ON c.c_nationkey = ms.c_nationkey
+GROUP BY n.n_name
+ORDER BY total_available DESC, highest_spent DESC
+LIMIT 10;

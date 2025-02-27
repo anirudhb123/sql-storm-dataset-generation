@@ -1,0 +1,68 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn,
+        CASE 
+            WHEN o.o_totalprice > 1000 THEN 'High'
+            WHEN o.o_totalprice BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS price_category
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(YEAR, -1, '1998-10-01'::date)
+),
+AggregateSupplier AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+    HAVING 
+        SUM(ps.ps_availqty) > 0
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_name,
+        r.r_name,
+        COALESCE(d.total_supplycost, 0) AS total_supplycost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        region r ON s.s_nationkey = r.r_regionkey
+    LEFT JOIN 
+        AggregateSupplier d ON s.s_suppkey = d.s_suppkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    s.s_name,
+    s.r_name,
+    o.price_category,
+    COUNT(li.l_orderkey) AS line_items_count,
+    AVG(li.l_extendedprice) AS avg_extended_price,
+    MAX(li.l_discount) AS max_discount
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    lineitem li ON o.o_orderkey = li.l_orderkey
+JOIN 
+    SupplierDetails s ON li.l_suppkey = s.s_suppkey
+WHERE 
+    (s.total_supplycost > 1000 OR o.price_category = 'High')
+AND 
+    o.o_orderdate BETWEEN '1996-01-01' AND '1998-10-01'
+GROUP BY 
+    o.o_orderkey, o.o_orderdate, s.s_name, s.r_name, o.price_category
+HAVING 
+    COUNT(li.l_orderkey) > 1
+ORDER BY 
+    o.o_orderdate DESC, s.s_name ASC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

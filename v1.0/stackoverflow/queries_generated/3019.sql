@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT p.Id AS PostId, 
+           p.OwnerUserId, 
+           p.Title, 
+           p.CreationDate, 
+           p.ViewCount, 
+           p.Score, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.PostTypeId = 1 AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT u.Id AS UserId,
+           COUNT(DISTINCT p.Id) AS TotalPosts,
+           COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+           SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+           SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+           SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+TopUsers AS (
+    SELECT us.UserId, 
+           us.TotalPosts, 
+           us.TotalBounty, 
+           us.GoldBadges, 
+           us.SilverBadges, 
+           us.BronzeBadges,
+           ROW_NUMBER() OVER (ORDER BY us.TotalBounty DESC, us.TotalPosts DESC) AS UserRank
+    FROM UserStats us
+    WHERE us.TotalPosts > 0
+)
+SELECT u.DisplayName, 
+       p.Title, 
+       CASE 
+           WHEN rp.PostRank = 1 THEN 'Latest' 
+           ELSE 'Earlier' 
+       END AS PostStatus,
+       ts.TotalBounty, 
+       ts.TotalPosts, 
+       ts.GoldBadges, 
+       ts.SilverBadges, 
+       ts.BronzeBadges
+FROM RankedPosts rp
+JOIN Users u ON rp.OwnerUserId = u.Id
+JOIN TopUsers ts ON u.Id = ts.UserId
+WHERE ts.UserRank <= 10
+ORDER BY ts.TotalBounty DESC, rp.CreationDate DESC;

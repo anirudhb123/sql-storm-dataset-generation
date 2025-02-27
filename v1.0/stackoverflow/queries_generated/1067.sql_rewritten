@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+PostVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadge
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    p.Title,
+    p.Score,
+    p.CommentCount,
+    COALESCE(v.UpVotes, 0) AS UpVotes,
+    COALESCE(v.DownVotes, 0) AS DownVotes,
+    ub.BadgeCount,
+    ub.HighestBadge
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    PostVotes v ON p.PostId = v.PostId
+LEFT JOIN 
+    UserBadges ub ON p.OwnerUserId = ub.UserId
+WHERE 
+    p.RN = 1
+ORDER BY 
+    p.Score DESC, p.CommentCount DESC
+LIMIT 100;

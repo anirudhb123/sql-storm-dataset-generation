@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, '2024-10-01')
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId
+),
+PostVoteCounts AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        pvc.UpVotes,
+        pvc.DownVotes,
+        ub.BadgeCount,
+        ub.HighestBadgeClass,
+        CASE
+            WHEN ur.Rank <= 5 THEN 'Top 5 Posts'
+            ELSE 'Other Posts'
+        END AS TopCategory
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostVoteCounts pvc ON rp.PostId = pvc.PostId
+    LEFT JOIN 
+        Users ur ON rp.OwnerUserId = ur.Id
+    LEFT JOIN 
+        UserBadges ub ON ur.Id = ub.UserId
+    WHERE 
+        rp.Rank <= 10 AND (ub.BadgeCount > 0 OR pvc.UpVotes > 0)
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.ViewCount,
+    pp.UpVotes,
+    pp.DownVotes,
+    pp.BadgeCount,
+    pp.HighestBadgeClass,
+    pp.TopCategory,
+    COALESCE(ROUND((pp.UpVotes::FLOAT / NULLIF(pp.UpVotes + pp.DownVotes, 0)) * 100, 2), 0) AS UpvotePercentage
+FROM 
+    PopularPosts pp
+ORDER BY 
+    pp.ViewCount DESC, pp.UpVotes DESC
+LIMIT 20;

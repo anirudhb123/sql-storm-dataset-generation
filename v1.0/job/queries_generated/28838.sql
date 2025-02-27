@@ -1,0 +1,53 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        c.name AS company_name,
+        k.keyword AS movie_keyword,
+        ARRAY_AGG(DISTINCT CONVERT(t.title USING utf8)) AS unique_titles
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000  -- Filtering for movies since the year 2000
+    GROUP BY 
+        t.title, t.production_year, c.name
+),
+CastAndRoleInfo AS (
+    SELECT 
+        t.id AS title_id,
+        c.person_role_id,
+        c.nr_order,
+        r.role AS role_name
+    FROM 
+        title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        r.role IS NOT NULL  -- Filtering to include only valid roles
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.company_name,
+    md.movie_keyword,
+    ca.role_name,
+    ca.nr_order,
+    COUNT(ca.person_role_id) AS total_roles
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    CastAndRoleInfo ca ON md.movie_title = ca.title_id
+GROUP BY 
+    md.movie_title, md.production_year, md.company_name, md.movie_keyword, ca.role_name, ca.nr_order
+ORDER BY 
+    md.production_year DESC, total_roles DESC;

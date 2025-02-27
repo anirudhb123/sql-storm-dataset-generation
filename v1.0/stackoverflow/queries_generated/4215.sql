@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Considering only questions
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.CreationDate, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        SUM(p.Score) > 0
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(p.Tags, ',')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        Tag
+    ORDER BY 
+        TagCount DESC
+    LIMIT 5
+)
+SELECT 
+    rus.DisplayName,
+    rp.Title,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.Rank,
+    COALESCE(ut.TotalViews, 0) AS UserTotalViews,
+    COALESCE(ut.TotalScore, 0) AS UserTotalScore,
+    pt.Tag AS PopularTag,
+    pt.TagCount
+FROM 
+    RankedPosts rp
+JOIN 
+    Users rus ON rp.OwnerUserId = rus.Id
+LEFT JOIN 
+    TopUsers ut ON rus.Id = ut.UserId
+CROSS JOIN 
+    PopularTags pt
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Rank, pt.TagCount DESC;

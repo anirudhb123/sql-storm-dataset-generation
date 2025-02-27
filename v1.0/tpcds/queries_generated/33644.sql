@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+top_items AS (
+    SELECT 
+        s.ws_item_sk,
+        i.i_item_desc,
+        s.total_quantity,
+        s.total_sales,
+        ROW_NUMBER() OVER (ORDER BY s.total_sales DESC) AS rank
+    FROM 
+        sales_summary s
+    JOIN 
+        item i ON s.ws_item_sk = i.i_item_sk
+    WHERE 
+        s.total_quantity > 100
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS customer_total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.customer_total_sales,
+        RANK() OVER (ORDER BY cs.customer_total_sales DESC) AS customer_rank
+    FROM 
+        customer_sales cs
+    JOIN 
+        customer c ON c.c_customer_id = cs.c_customer_id
+)
+
+SELECT 
+    i.i_item_desc,
+    ti.total_quantity,
+    ti.total_sales,
+    tc.customer_total_sales,
+    tc.order_count
+FROM 
+    top_items ti
+LEFT JOIN 
+    top_customers tc ON ti.total_sales > COALESCE(tc.customer_total_sales, 0)
+WHERE 
+    ti.rank <= 10;

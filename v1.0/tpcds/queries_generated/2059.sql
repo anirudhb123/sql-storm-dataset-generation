@@ -1,0 +1,64 @@
+
+WITH top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_spent,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk 
+                               FROM date_dim 
+                               WHERE d_year = 2023)
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+    HAVING 
+        SUM(ws.ws_ext_sales_price) > 1000
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        cd.cd_education_status, 
+        ca.ca_state
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+returns_avg AS (
+    SELECT 
+        sr_customer_sk, 
+        AVG(sr_return_amt) AS avg_return_amount
+    FROM 
+        store_returns 
+    GROUP BY 
+        sr_customer_sk
+)
+
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    r.avg_return_amount
+FROM 
+    top_customers tc
+LEFT JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_customer_id = tc.c_customer_id)
+LEFT JOIN 
+    returns_avg r ON r.sr_customer_sk = (SELECT sr_customer_sk FROM store_returns WHERE sr_customer_sk = tc.c_customer_id LIMIT 1)
+WHERE 
+    cd.ca_state IN ('CA', 'NY') 
+    AND (r.avg_return_amount IS NULL OR r.avg_return_amount < 50)
+ORDER BY 
+    total_spent DESC
+LIMIT 10;

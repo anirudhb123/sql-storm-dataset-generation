@@ -1,0 +1,84 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        c.c_custkey
+),
+MaxSales AS (
+    SELECT
+        MAX(total_sales) AS max_sales
+    FROM
+        SalesCTE
+),
+HighValueSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+    HAVING
+        SUM(ps.ps_supplycost) > (
+            SELECT AVG(total_supply_cost) 
+            FROM (
+                SELECT SUM(ps_supplycost) AS total_supply_cost
+                FROM partsupp
+                GROUP BY ps_suppkey
+            ) AS avg_cost
+        )
+)
+SELECT
+    p.p_partkey,
+    p.p_name,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    COALESCE(h.total_supply_cost, 0) AS total_supply_cost,
+    r.r_name AS region_name
+FROM
+    part p
+LEFT JOIN
+    SalesCTE s ON p.p_partkey = (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_suppkey IN (
+            SELECT s_suppkey 
+            FROM HighValueSuppliers
+        )
+    )
+LEFT JOIN
+    region r ON r.r_regionkey = (
+        SELECT n.n_regionkey 
+        FROM nation n 
+        JOIN supplier s ON n.n_nationkey = s.s_nationkey 
+        WHERE s.s_suppkey IN (
+            SELECT s_suppkey 
+            FROM HighValueSuppliers
+        )
+    )
+LEFT JOIN
+    HighValueSuppliers h ON h.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = p.p_partkey
+    )
+WHERE
+    (s.total_sales IS NOT NULL OR h.total_supply_cost IS NOT NULL)
+    AND p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice) 
+        FROM part p2
+    )
+ORDER BY
+    total_sales DESC, total_supply_cost DESC
+FETCH FIRST 100 ROWS ONLY;

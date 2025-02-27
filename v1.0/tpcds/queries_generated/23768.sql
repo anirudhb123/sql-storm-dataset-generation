@@ -1,0 +1,57 @@
+
+WITH ranked_customers AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+),
+top_customers AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name
+    FROM ranked_customers rc
+    WHERE rc.rank <= 5
+),
+customer_sales AS (
+    SELECT
+        c.c_customer_sk,
+        COALESCE(SUM(ss.ss_net_profit), 0) AS total_net_profit
+    FROM customer c
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk
+),
+sales_summary AS (
+    SELECT
+        c.customer_sk,
+        c.total_net_profit,
+        CASE 
+            WHEN c.total_net_profit = 0 THEN 'No Profit'
+            WHEN c.total_net_profit > 1000 THEN 'High Profit'
+            ELSE 'Moderate Profit' 
+        END AS profit_category
+    FROM customer_sales c
+)
+SELECT
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    ss.total_net_profit,
+    ss.profit_category,
+    STRING_AGG(DISTINCT CONCAT(d.d_day_name, ' ', d.d_date), ', ') AS purchase_dates
+FROM top_customers tc
+LEFT JOIN sales_summary ss ON tc.c_customer_sk = ss.customer_sk
+LEFT JOIN web_sales ws ON tc.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+WHERE d.d_year = 2023
+GROUP BY
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    ss.total_net_profit,
+    ss.profit_category
+HAVING SUM(ws.ws_quantity) IS NOT NULL
+ORDER BY ss.total_net_profit DESC, tc.c_last_name ASC;

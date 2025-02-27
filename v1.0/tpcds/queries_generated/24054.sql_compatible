@@ -1,0 +1,35 @@
+
+WITH RECURSIVE Sales_Analysis AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.net_profit,
+        COALESCE(SUM(cs.net_profit), 0) AS catalog_sales_profit,
+        COALESCE(SUM(ss.net_profit), 0) AS store_sales_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.sold_date_sk DESC) AS row_num
+    FROM web_sales ws
+    LEFT JOIN catalog_sales cs ON ws.ws_order_number = cs.cs_order_number
+    LEFT JOIN store_sales ss ON ws.ws_order_number = ss.ss_ticket_number
+    GROUP BY ws.web_site_sk, ws.net_profit
+),
+Recursive_CTE AS (
+    SELECT 
+        S.web_site_sk,
+        S.net_profit,
+        S.catalog_sales_profit,
+        S.store_sales_profit,
+        S.net_profit + S.catalog_sales_profit + S.store_sales_profit AS total_sales,
+        ROW_NUMBER() OVER (ORDER BY CASE WHEN (S.net_profit + S.catalog_sales_profit + S.store_sales_profit) IS NULL THEN 1 ELSE 0 END, total_sales DESC) AS rnk
+    FROM Sales_Analysis S
+)
+SELECT 
+    R.web_site_sk,
+    R.total_sales AS total_revenue,
+    CASE 
+        WHEN R.total_sales IS NULL THEN 'No Revenue'
+        WHEN R.total_sales < 1000 THEN 'Low Revenue'
+        WHEN R.total_sales BETWEEN 1000 AND 10000 THEN 'Medium Revenue'
+        ELSE 'High Revenue'
+    END AS revenue_category
+FROM Recursive_CTE R
+WHERE R.rnk <= 5
+ORDER BY R.total_sales DESC;

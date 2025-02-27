@@ -1,0 +1,63 @@
+
+WITH movie_years AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(mc.movie_id) AS num_companies,
+        ARRAY_AGG(DISTINCT cn.name ORDER BY cn.name) AS company_names,
+        COUNT(DISTINCT mk.keyword) AS num_keywords
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+cast_roles AS (
+    SELECT 
+        ci.movie_id,
+        rt.role,
+        COUNT(ci.person_id) AS num_cast
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.person_role_id = rt.id
+    GROUP BY 
+        ci.movie_id, rt.role
+),
+movie_details AS (
+    SELECT 
+        my.movie_id,
+        my.title,
+        my.production_year,
+        my.num_companies,
+        my.company_names,
+        my.num_keywords,
+        COALESCE(cr.role, 'Unknown') AS role,
+        COALESCE(cr.num_cast, 0) AS num_cast
+    FROM 
+        movie_years my
+    LEFT JOIN 
+        cast_roles cr ON my.movie_id = cr.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.num_companies,
+    CARDINALITY(md.company_names) AS distinct_company_count,
+    md.num_keywords,
+    md.role,
+    md.num_cast
+FROM 
+    movie_details md
+WHERE 
+    md.production_year >= 2000
+ORDER BY 
+    md.production_year DESC, 
+    md.num_companies DESC, 
+    md.title;

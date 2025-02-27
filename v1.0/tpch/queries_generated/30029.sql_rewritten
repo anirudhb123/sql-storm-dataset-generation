@@ -1,0 +1,43 @@
+WITH RECURSIVE MonthlySales AS (
+    SELECT 
+        EXTRACT(YEAR FROM o_orderdate) AS order_year,
+        EXTRACT(MONTH FROM o_orderdate) AS order_month,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY order_year, order_month
+    UNION ALL
+    SELECT 
+        order_year,
+        order_month + 1,
+        total_sales
+    FROM MonthlySales
+    WHERE order_month < 12
+),
+RegionSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS region_total_sales
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY r.r_name
+)
+SELECT 
+    r.region_name,
+    COALESCE(ms.total_sales, 0) AS monthly_sales,
+    rs.region_total_sales,
+    CASE 
+        WHEN rs.region_total_sales > 0 THEN 
+            (COALESCE(ms.total_sales, 0) / rs.region_total_sales) * 100 
+        ELSE 
+            NULL 
+    END AS sales_percentage
+FROM RegionSales rs
+LEFT JOIN MonthlySales ms ON rs.region_name = (SELECT n.r_name FROM nation n JOIN region r ON n.n_regionkey = r.r_regionkey WHERE n.n_nationkey = (SELECT s.n_nationkey FROM supplier s JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey JOIN part p ON ps.ps_partkey = p.p_partkey WHERE p.p_name LIKE '.*') LIMIT 1)
+WHERE rs.region_total_sales > 1000000
+ORDER BY r.region_name, ms.order_year, ms.order_month;

@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        c.kind AS company_type,
+        COUNT(DISTINCT mci.company_id) AS company_count,
+        COUNT(DISTINCT mki.keyword_id) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT mci.company_id) DESC) AS year_rank
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_type c ON mc.company_type_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        info_type it ON mi.info_type_id = it.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id 
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year, c.kind
+), YearlyCompanyCount AS (
+    SELECT 
+        production_year,
+        AVG(company_count) AS avg_company_count,
+        AVG(keyword_count) AS avg_keyword_count
+    FROM 
+        RankedMovies
+    GROUP BY 
+        production_year
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.company_count,
+    rm.keyword_count,
+    ycc.avg_company_count,
+    ycc.avg_keyword_count
+FROM 
+    RankedMovies rm
+JOIN 
+    YearlyCompanyCount ycc ON rm.production_year = ycc.production_year
+WHERE 
+    rm.year_rank <= 10
+ORDER BY 
+    rm.production_year DESC, rm.company_count DESC;

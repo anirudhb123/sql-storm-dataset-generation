@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_nationkey IS NOT NULL)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name LIKE 'M%')
+    WHERE sh.level < 3
+),
+PartSuppliers AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * (CASE WHEN ps.ps_availqty IS NULL THEN 0 ELSE ps.ps_availqty END)) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN DATEADD(MONTH, -3, cast('1998-10-01' as date)) AND cast('1998-10-01' as date)
+    AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2) 
+),
+QualifyingParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           CASE WHEN p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_type = 'ECONOMY') THEN 'Premium' 
+                ELSE 'Economy' END AS price_category
+    FROM part p
+    WHERE p.p_comment IS NOT NULL
+),
+FinalResults AS (
+    SELECT DISTINCT p.p_name, p.price_category, o.o_orderkey, o.o_totalprice,
+           s.s_name AS supplier_name, sh.level
+    FROM QualifyingParts p
+    JOIN lineitem l ON l.l_partkey = p.p_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN partsupp ps ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE o.o_orderstatus IN ('F', 'O') AND (sh.level IS NULL OR sh.level < 3)
+)
+SELECT f.p_name, SUM(f.o_totalprice) AS total_order_value, f.price_category, COUNT(DISTINCT f.o_orderkey) AS order_count,
+       SUM(COALESCE(f.level, 0)) AS total_supplier_levels
+FROM FinalResults f
+GROUP BY f.p_name, f.price_category
+HAVING SUM(f.o_totalprice) > 10000
+ORDER BY total_order_value DESC, f.p_name
+LIMIT 10;

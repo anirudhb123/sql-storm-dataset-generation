@@ -1,0 +1,57 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rn,
+        COUNT(DISTINCT c.person_id) AS num_cast_members
+    FROM 
+        aka_title a
+    JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.title, a.production_year
+),
+movie_info_with_keywords AS (
+    SELECT 
+        m.movie_id,
+        COALESCE(m.info, 'No info available') AS movie_info,
+        k.keyword
+    FROM 
+        movie_info m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    mv.title,
+    mv.production_year,
+    mi.movie_info,
+    mi.keyword,
+    mv.num_cast_members
+FROM 
+    ranked_movies mv
+LEFT JOIN 
+    movie_info_with_keywords mi ON mv.production_year = mi.movie_id
+WHERE 
+    mv.rn <= 10
+ORDER BY 
+    mv.production_year DESC,
+    mv.title ASC
+UNION ALL 
+SELECT 
+    'Total Movies' AS title,
+    NULL AS production_year,
+    NULL AS movie_info,
+    COUNT(*) AS keyword,
+    SUM(num_cast_members) AS num_cast_members
+FROM 
+    ranked_movies
+HAVING 
+    COUNT(*) > 0
+ORDER BY 
+    production_year NULLS LAST;

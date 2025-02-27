@@ -1,0 +1,56 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        BadgeCount,
+        RANK() OVER (ORDER BY BadgeCount DESC) AS Rank
+    FROM UserBadges
+    WHERE BadgeCount > 0
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.ViewCount DESC) AS PostRank
+    FROM Posts p
+    WHERE p.PostTypeId = 1 -- Only Questions
+),
+UserPostInteraction AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(v.VoteTypeId, 0) AS VoteType,
+        c.Comment AS PostComment
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.UserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId AND c.UserId = u.Id
+)
+SELECT 
+    tu.Rank AS UserRank,
+    tu.DisplayName AS TopUserName,
+    pp.Title AS PopularPostTitle,
+    pp.Score AS PopularPostScore,
+    pp.ViewCount AS PopularPostViews,
+    COALESCE(up.UserId, 0) AS InteractingUserId,
+    COALESCE(up.VoteType, 'No Vote') AS UserVoteType,
+    COALESCE(up.PostComment, 'No Comment') AS UserComment
+FROM TopUsers tu
+JOIN PopularPosts pp ON pp.PostRank <= 10
+LEFT JOIN UserPostInteraction up ON tu.UserId = up.UserId AND pp.PostId = up.PostId
+ORDER BY tu.Rank, pp.Score DESC;

@@ -1,0 +1,41 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey = (SELECT r_regionkey FROM region WHERE r_name = 'ASIA')
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    INNER JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+)
+SELECT
+    c.c_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(l.l_quantity) AS avg_quantity,
+    MAX(l.l_shipdate) AS last_ship_date,
+    MIN(s.s_acctbal) AS min_supplier_balance,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names,
+    ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+FROM
+    customer c
+LEFT JOIN
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+INNER JOIN
+    NationHierarchy nh ON c.c_nationkey = nh.n_nationkey
+WHERE
+    o.o_orderstatus = 'O'
+    AND l.l_shipdate >= DATEADD(year, -1, GETDATE())
+GROUP BY
+    c.c_name, c.c_nationkey
+HAVING
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY
+    total_revenue DESC;

@@ -1,0 +1,64 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        COUNT(DISTINCT CASE WHEN p.Tags IS NOT NULL THEN p.Tags END) AS TagCount,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagUsage AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.TagName) AS UsageCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        (SELECT TRIM(UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '> <')))::varchar) AS TagName
+         FROM Posts p
+         WHERE p.PostTypeId = 1) pt ON t.TagName = pt.TagName
+    GROUP BY 
+        t.TagName
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        MIN(ph.CreationDate) AS FirstEditDate,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(ph.Id) AS EditCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS ClosureCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.UserId
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.PostCount,
+    ups.QuestionCount,
+    ups.AnswerCount,
+    ups.TagCount,
+    ups.AverageReputation,
+    tu.TagName,
+    tu.UsageCount,
+    pha.FirstEditDate,
+    pha.LastEditDate,
+    pha.EditCount,
+    pha.ClosureCount
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    TagUsage tu ON ups.TagCount > 0
+LEFT JOIN 
+    PostHistoryAggregates pha ON ups.UserId = pha.UserId
+ORDER BY 
+    ups.PostCount DESC, ups.AverageReputation DESC;

@@ -1,0 +1,55 @@
+
+WITH RankedPosts AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.CreationDate,
+           p.Score,
+           u.Reputation,
+           ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+           p.OwnerUserId
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT ph.PostId,
+           MIN(ph.CreationDate) AS FirstClosedDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY ph.PostId
+),
+UserBadges AS (
+    SELECT u.Id AS UserId,
+           COUNT(b.Id) AS BadgeCount,
+           SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+           SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+           SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostComments AS (
+    SELECT c.PostId,
+           COUNT(c.Id) AS CommentCount
+    FROM Comments c
+    GROUP BY c.PostId
+)
+SELECT rp.PostId,
+       rp.Title,
+       COALESCE(cp.FirstClosedDate, 'Not Closed') AS FirstClosedDate,
+       rp.CreationDate,
+       rp.Score,
+       rp.Reputation,
+       ub.BadgeCount,
+       ub.GoldBadges,
+       ub.SilverBadges,
+       ub.BronzeBadges,
+       COALESCE(pc.CommentCount, 0) AS CommentCount
+FROM RankedPosts rp
+LEFT JOIN ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN PostComments pc ON rp.PostId = pc.PostId
+WHERE rp.Rank <= 10 
+  AND (ub.BadgeCount IS NULL OR ub.BadgeCount > 0) 
+ORDER BY rp.CreationDate DESC,
+         rp.Score DESC;

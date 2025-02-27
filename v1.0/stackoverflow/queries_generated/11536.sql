@@ -1,0 +1,60 @@
+-- Performance benchmarking query to analyze user activity and post interactions
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownVotes,
+        SUM(b.Class = 1) AS TotalGoldBadges,
+        SUM(b.Class = 2) AS TotalSilverBadges,
+        SUM(b.Class = 3) AS TotalBronzeBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        CASE 
+            WHEN p.PostTypeId = 1 THEN 'Question'
+            WHEN p.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostType,
+        COALESCE(uh.TotalPosts, 0) AS UserTotalPosts
+    FROM Posts p
+    LEFT JOIN UserActivity uh ON p.OwnerUserId = uh.UserId
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalPosts,
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.Score,
+    pa.ViewCount,
+    pa.AnswerCount,
+    pa.CommentCount,
+    pa.FavoriteCount,
+    ua.TotalUpVotes,
+    ua.TotalDownVotes,
+    ua.TotalGoldBadges,
+    ua.TotalSilverBadges,
+    ua.TotalBronzeBadges,
+    pa.PostType,
+    pa.UserTotalPosts
+FROM UserActivity ua
+JOIN PostStatistics pa ON ua.UserId = pa.OwnerUserId
+ORDER BY ua.TotalPosts DESC, pa.CreationDate DESC;

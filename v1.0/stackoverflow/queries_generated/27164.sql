@@ -1,0 +1,90 @@
+WITH UserVotes AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN vt.Name = 'AcceptedByOriginator' THEN 1 ELSE 0 END) AS AcceptedVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostAnalysis AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        string_agg(DISTINCT t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '> <')))::int) 
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.CreationDate, p.Score
+),
+TopUsers AS (
+    SELECT 
+        uv.UserId,
+        uv.DisplayName,
+        uv.TotalVotes,
+        uv.UpVotes,
+        uv.DownVotes,
+        uv.AcceptedVotes,
+        RANK() OVER (ORDER BY uv.TotalVotes DESC) AS VoteRank
+    FROM 
+        UserVotes uv
+    WHERE 
+        uv.TotalVotes > 0
+),
+TopPosts AS (
+    SELECT 
+        pa.PostId,
+        pa.Title,
+        pa.ViewCount,
+        pa.CreationDate,
+        pa.Score,
+        pa.CommentCount,
+        pa.AnswerCount,
+        pa.TagsList,
+        RANK() OVER (ORDER BY pa.Score DESC, pa.ViewCount DESC) AS PostRank
+    FROM 
+        PostAnalysis pa
+)
+SELECT 
+    tu.DisplayName AS TopUser,
+    tu.TotalVotes,
+    tu.UpVotes,
+    tu.DownVotes,
+    tu.AcceptedVotes,
+    tp.Title AS TopPostTitle,
+    tp.ViewCount,
+    tp.Score AS PostScore,
+    tp.CommentCount,
+    tp.AnswerCount,
+    tp.TagsList
+FROM 
+    TopUsers tu
+JOIN 
+    TopPosts tp ON tu.UserId IN (SELECT OwnerUserId FROM Posts WHERE PostTypeId = 1)
+WHERE 
+    tu.VoteRank <= 5 
+    AND tp.PostRank <= 10
+ORDER BY 
+    tu.TotalVotes DESC, 
+    tp.Score DESC;

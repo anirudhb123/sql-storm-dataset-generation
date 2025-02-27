@@ -1,0 +1,50 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(c.id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        cast_count,
+        aka_names,
+        keywords,
+        ROW_NUMBER() OVER (ORDER BY cast_count DESC, production_year ASC) AS ranking
+    FROM 
+        RankedMovies
+)
+SELECT 
+    f.movie_id,
+    f.movie_title,
+    f.production_year,
+    f.cast_count,
+    f.aka_names,
+    f.keywords
+FROM 
+    FilteredMovies f
+WHERE 
+    f.production_year >= 2000
+    AND f.cast_count > 5
+ORDER BY 
+    f.ranking
+LIMIT 10;
+
+This query benchmark string processing across multiple joins. It first ranks movies based on the number of cast members and their production year, aggregates alternate names (aka) and keywords for each movie into concatenated strings, filters out only those movies produced after the year 2000 with more than 5 cast members, and returns the top 10 ranked movies based on these criteria.

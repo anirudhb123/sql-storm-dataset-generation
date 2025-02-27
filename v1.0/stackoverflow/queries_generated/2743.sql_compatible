@@ -1,0 +1,57 @@
+
+WITH UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        COUNT(b.Id) AS TotalBadges,
+        RANK() OVER (ORDER BY SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE u.Reputation > 100
+    GROUP BY u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpvoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownvoteCount,
+        DENSE_RANK() OVER (ORDER BY p.Score DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+)
+SELECT 
+    um.UserId,
+    um.DisplayName,
+    um.TotalPosts,
+    um.TotalQuestions,
+    um.TotalAnswers,
+    um.TotalUpvotes,
+    um.TotalDownvotes,
+    um.TotalBadges,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score AS PostScore,
+    ps.CommentCount,
+    ps.UpvoteCount,
+    ps.DownvoteCount,
+    ps.PostRank,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     JOIN Posts p2 ON t.Id = ANY(STRING_TO_ARRAY(p2.Tags, ',')) 
+     WHERE p2.Id = ps.PostId) AS RelatedTags
+FROM UserMetrics um
+LEFT JOIN PostStatistics ps ON um.UserRank <= 10 AND um.UserId = ps.PostId
+WHERE um.TotalPosts > 5
+ORDER BY um.UserRank, ps.PostScore DESC;

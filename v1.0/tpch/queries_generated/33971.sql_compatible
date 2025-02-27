@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+),
+AggregatedPrices AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_name,
+        SUM(a.total_revenue) AS supplier_revenue
+    FROM SupplierHierarchy sh
+    JOIN supplier s ON sh.s_suppkey = s.s_suppkey
+    LEFT JOIN AggregatedPrices a ON s.s_suppkey = a.ps_partkey
+    GROUP BY s.s_name
+    ORDER BY supplier_revenue DESC
+    LIMIT 10
+)
+SELECT 
+    p_high_priced.p_name,
+    COALESCE(t.supplier_revenue, 0) AS revenue,
+    RANK() OVER(ORDER BY COALESCE(t.supplier_revenue, 0) DESC) AS revenue_rank
+FROM TopSuppliers t
+RIGHT JOIN (
+    SELECT p.p_partkey, p.p_name
+    FROM part p
+    WHERE p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice) 
+        FROM part p2
+    )
+) p_high_priced ON t.ps_partkey = p_high_priced.p_partkey
+ORDER BY revenue_rank;

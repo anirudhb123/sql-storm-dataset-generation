@@ -1,0 +1,70 @@
+-- Performance benchmarking query for Stack Overflow schema
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.Views, U.UpVotes, U.DownVotes
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        STRING_AGG(T.TagName, ',') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(P.Tags, ',')) AS T(TagName) ON TRUE
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.LastActivityDate, P.ViewCount, 
+        P.Score, P.AnswerCount, P.CommentCount, P.FavoriteCount
+)
+SELECT 
+    U.DisplayName AS UserDisplayName,
+    U.Reputation,
+    U.Views,
+    U.TotalPosts,
+    U.TotalComments,
+    U.TotalBadges,
+    U.QuestionsCount,
+    U.AnswersCount,
+    P.Title AS PostTitle,
+    P.CreationDate AS PostCreationDate,
+    P.ViewCount AS PostViewCount,
+    P.Score AS PostScore,
+    P.AnswerCount AS PostAnswerCount,
+    P.CommentCount AS PostCommentCount,
+    P.FavoriteCount AS PostFavoriteCount,
+    P.Tags AS PostTags
+FROM 
+    UserStatistics U
+JOIN 
+    PostStatistics P ON U.TotalPosts > 0
+ORDER BY 
+    U.Reputation DESC, P.ViewCount DESC
+LIMIT 100;

@@ -1,0 +1,57 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        t.imdb_index,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title AS t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+unique_persons AS (
+    SELECT 
+        DISTINCT c.person_id,
+        n.name AS person_name,
+        n.gender
+    FROM 
+        cast_info AS c
+    JOIN 
+        aka_name AS n ON c.person_id = n.person_id
+    WHERE 
+        n.name IS NOT NULL AND n.name <> ''
+),
+company_count AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        complete_cast AS m ON mc.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rp.person_name,
+    rp.gender,
+    cc.company_count,
+    kt.keyword
+FROM 
+    ranked_titles AS rt
+JOIN 
+    complete_cast AS cc ON rt.title_id = cc.movie_id
+JOIN 
+    unique_persons AS rp ON cc.person_id = rp.person_id
+LEFT JOIN 
+    movie_keyword AS mk ON rt.title_id = mk.movie_id
+LEFT JOIN 
+    keyword AS kt ON mk.keyword_id = kt.id
+WHERE 
+    rt.rank = 1 -- Get the latest title per kind
+ORDER BY 
+    rt.production_year DESC, rt.title;

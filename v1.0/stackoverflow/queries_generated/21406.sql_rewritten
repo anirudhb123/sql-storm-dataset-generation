@@ -1,0 +1,73 @@
+WITH RecursiveUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN p.Score ELSE 0 END) AS QuestionScore,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.LastAccessDate DESC) AS RN
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.LastAccessDate
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        MIN(ph.CreationDate) AS ClosedDate,
+        COUNT(DISTINCT ph.Id) AS HistoryCount,
+        STRING_AGG(DISTINCT ct.Name, ', ') AS CloseReasons
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        CloseReasonTypes ct ON ph.Comment::int = ct.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        p.Id, p.Title
+),
+ActiveUsers AS (
+    SELECT 
+        u.*,
+        ra.*
+    FROM 
+        Users u
+    JOIN 
+        RecursiveUserActivity ra ON u.Id = ra.UserId
+    WHERE 
+        ra.PostCount > 5 AND u.Reputation > 100 
+)
+SELECT 
+    au.DisplayName,
+    au.Reputation,
+    p.Title AS RecentClosedPost,
+    cp.ClosedDate,
+    cp.CloseReasons,
+    COALESCE(v.SomeVoteCount, 0) AS VoteCount,
+    ROW_NUMBER() OVER (PARTITION BY au.UserId ORDER BY cp.ClosedDate DESC) AS ClosedPostRank
+FROM 
+    ActiveUsers au
+LEFT JOIN 
+    ClosedPosts cp ON au.Id = cp.PostId
+LEFT JOIN (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS SomeVoteCount
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+) v ON cp.PostId = v.PostId
+WHERE 
+    cp.ClosedDate IS NOT NULL
+ORDER BY 
+    au.Reputation DESC, cp.ClosedDate DESC
+LIMIT 10;

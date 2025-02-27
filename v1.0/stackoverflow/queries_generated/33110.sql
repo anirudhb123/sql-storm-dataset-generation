@@ -1,0 +1,72 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        PH.Id,
+        P.Title,
+        PH.CreationDate,
+        PH.UserDisplayName,
+        PH.PostHistoryTypeId,
+        PH.Comment,
+        1 AS Level
+    FROM PostHistory PH
+    JOIN Posts P ON PH.PostId = P.Id
+    WHERE P.PostTypeId = 1  -- Only questions
+
+    UNION ALL
+
+    SELECT 
+        PH.Id,
+        RP.Title,
+        PH.CreationDate,
+        PH.UserDisplayName,
+        PH.PostHistoryTypeId,
+        PH.Comment,
+        Level + 1
+    FROM PostHistory PH
+    JOIN RecursivePostHistory RP ON PH.PostId = RP.Id
+    WHERE PH.CreationDate < RP.CreationDate
+),
+
+UserSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        AVG(U.Reputation) AS AvgReputation,
+        ROW_NUMBER() OVER (ORDER BY SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) DESC) AS Rank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS TotalUpvotes,
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS TotalDownvotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate BETWEEN '2020-01-01' AND '2023-12-31'
+    GROUP BY P.Id, P.Title
+)
+
+SELECT 
+    U.DisplayName AS UserName,
+    U.AvgReputation,
+    U.AnswerCount,
+    U.GoldBadgeCount,
+    P.Title AS PostTitle,
+    P.TotalBounty,
+    P.TotalUpvotes,
+    P.TotalDownvotes,
+    RP.UserDisplayName AS LastEditorName,
+    RP.CreationDate AS LastEditDate,
+    RP.Comment AS LastEditComment
+FROM UserSummary U
+JOIN PostStats P ON U.Rank <= 10  -- Top 10 users by answer count
+LEFT JOIN RecursivePostHistory RP ON P.PostId = RP.PostId
+WHERE RP.Level = (SELECT MAX(Level) FROM RecursivePostHistory WHERE PostId = P.PostId)  -- Most recent edit
+ORDER BY U.AvgReputation DESC, U.AnswerCount DESC;

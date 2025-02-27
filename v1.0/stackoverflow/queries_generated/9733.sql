@@ -1,0 +1,70 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(vote.Type) AS TotalVotes, 
+        COUNT(DISTINCT p.Id) AS TotalPosts, 
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes vote ON u.Id = vote.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount, 
+        COUNT(c.Id) AS CommentCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenedDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount
+),
+TopPosts AS (
+    SELECT 
+        pd.PostId, 
+        pd.Title, 
+        pd.ViewCount, 
+        pd.CommentCount, 
+        CASE 
+            WHEN pd.ClosedDate IS NOT NULL THEN 'Closed' 
+            WHEN pd.ReopenedDate IS NOT NULL THEN 'Reopened' 
+            ELSE 'Active' 
+        END AS PostStatus
+    FROM 
+        PostDetails pd
+    WHERE 
+        pd.ViewCount > 100
+)
+SELECT 
+    us.UserId, 
+    us.DisplayName, 
+    us.TotalVotes, 
+    us.TotalPosts, 
+    us.QuestionCount, 
+    us.AnswerCount, 
+    us.AvgReputation, 
+    tp.Title, 
+    tp.ViewCount, 
+    tp.CommentCount, 
+    tp.PostStatus
+FROM 
+    UserStats us
+JOIN 
+    TopPosts tp ON us.UserId = tp.UserId
+ORDER BY 
+    us.TotalVotes DESC, us.TotalPosts DESC;

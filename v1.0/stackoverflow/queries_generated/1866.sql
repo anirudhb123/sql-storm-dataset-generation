@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(p.Tags, '><')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+        AND p.ViewCount > 1000
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    STRING_AGG(DISTINCT pt.Name, ', ') AS PopularTags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerDisplayName = (
+        SELECT DisplayName FROM Users WHERE Id = ub.UserId LIMIT 1
+    )
+LEFT JOIN 
+    PopularTags pt ON pt.Tag = ANY(STRING_TO_ARRAY(rp.Tags, '><'))
+WHERE 
+    rp.PostRank <= 5
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.OwnerDisplayName, rp.Score, rp.ViewCount, rp.AnswerCount
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 50;

@@ -1,0 +1,54 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id, 
+        mt.title,
+        depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    SUM(ci.nr_order) AS total_cast_order,
+    ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY ak.name) AS actor_rank,
+    COALESCE(SUM(mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')), 0) AS box_office_info_exists
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    movie_info mi ON at.id = mi.movie_id
+JOIN 
+    MovieHierarchy mh ON mh.movie_id = at.id
+WHERE 
+    ci.note IS NULL
+AND 
+    at.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    ak.name, at.title, at.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 2
+ORDER BY 
+    total_cast_order DESC, at.production_year DESC;

@@ -1,0 +1,55 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    ua.UpVotes,
+    ua.DownVotes,
+    ua.CommentCount AS UserCommentCount,
+    ua.PostCount AS UserPostCount,
+    ps.PostId,
+    ps.CommentCount AS PostCommentCount,
+    ps.VoteCount AS PostVoteCount,
+    ps.UpVotes AS PostUpVotes,
+    ps.DownVotes AS PostDownVotes
+FROM 
+    Users u
+JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN 
+    PostStats ps ON u.Id = ps.OwnerUserId
+ORDER BY 
+    ua.UpVotes DESC, ua.DownVotes ASC;

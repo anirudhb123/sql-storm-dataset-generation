@@ -1,0 +1,45 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        ARRAY[mt.id] AS movie_path
+    FROM aka_title mt
+    WHERE mt.production_year = 2023  -- Start from movies produced in 2023
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        mh.movie_path || ml.linked_movie_id
+    FROM movie_link ml
+    JOIN aka_title lt ON ml.linked_movie_id = lt.id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COALESCE(CAST(AVG(CASE 
+        WHEN mr.note IS NOT NULL THEN 1 
+        ELSE 0 
+    END) AS FLOAT), 0) OVER (PARTITION BY mt.production_year) AS relevance_score,
+    COUNT(DISTINCT m.id) AS total_movies,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+FROM MovieHierarchy mh
+JOIN complete_cast cc ON mh.movie_id = cc.movie_id
+JOIN cast_info ci ON cc.subject_id = ci.person_id
+JOIN aka_name ak ON ci.person_id = ak.person_id
+JOIN aka_title at ON mh.movie_id = at.id
+LEFT JOIN movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN movie_info_idx mii ON mi.movie_id = mii.movie_id AND mi.info_type_id = mii.info_type_id
+LEFT JOIN movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN info_type it ON mi.info_type_id = it.id
+WHERE at.kind_id IN (SELECT id FROM kind_type WHERE kind = 'feature') 
+    AND ak.name IS NOT NULL
+GROUP BY ak.name, at.title, at.production_year
+ORDER BY relevance_score DESC, total_movies DESC;

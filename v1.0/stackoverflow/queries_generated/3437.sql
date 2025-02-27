@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only considering Questions
+),
+PostStatistics AS (
+    SELECT 
+        rp.OwnerDisplayName,
+        COUNT(rp.Id) AS PostCount,
+        AVG(rp.Score) AS AverageScore,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON rp.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- BountyStart and BountyClose
+    GROUP BY 
+        rp.OwnerDisplayName
+),
+TopUsers AS (
+    SELECT 
+        ps.OwnerDisplayName,
+        ps.PostCount,
+        ps.AverageScore,
+        ps.TotalBounties,
+        RANK() OVER (ORDER BY ps.PostCount DESC) AS UserRank
+    FROM 
+        PostStatistics ps
+)
+SELECT 
+    tu.OwnerDisplayName,
+    tu.PostCount,
+    tu.AverageScore,
+    tu.TotalBounties
+FROM 
+    TopUsers tu
+WHERE 
+    tu.UserRank <= 10 -- Top 10 users
+ORDER BY 
+    tu.TotalBounties DESC -- Ordering by total bounties given
+UNION ALL
+SELECT 
+    'Average' AS OwnerDisplayName,
+    AVG(ps.PostCount) AS PostCount,
+    AVG(ps.AverageScore) AS AverageScore,
+    SUM(ps.TotalBounties) AS TotalBounties
+FROM 
+    PostStatistics ps
+HAVING 
+    COUNT(ps.OwnerDisplayName) > 0; -- Include average statistics

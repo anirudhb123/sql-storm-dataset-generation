@@ -1,0 +1,50 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_ext_discount_amt) AS total_discount,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2458332 AND 2458350  -- Example date range
+    GROUP BY 
+        ws_item_sk
+), 
+TopSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        ROW_NUMBER() OVER (ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.total_quantity > 0
+), 
+Items AS (
+    SELECT 
+        i.i_item_id,
+        i.i_product_name,
+        i.i_current_price
+    FROM 
+        item i
+    INNER JOIN 
+        TopSales ts ON i.i_item_sk = ts.ws_item_sk
+    WHERE 
+        ts.sales_rank <= 10  -- Top 10 items by sales
+)
+SELECT 
+    i.i_item_id,
+    i.i_product_name,
+    i.i_current_price,
+    sd.total_quantity,
+    sd.total_sales,
+    sd.total_discount,
+    sd.total_orders
+FROM 
+    SalesData sd
+INNER JOIN 
+    Items i ON sd.ws_item_sk = i.i_item_sk
+ORDER BY 
+    sd.total_sales DESC;

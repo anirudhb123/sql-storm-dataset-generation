@@ -1,0 +1,88 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS level,
+        CAST(o.o_clerk AS VARCHAR(100)) AS hierarchy_path
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        oh.level + 1,
+        CONCAT(oh.hierarchy_path, ' -> ', o.o_clerk)
+    FROM 
+        orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND oh.level < 5
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+LineItemAnalysis AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate > DATEADD(year, -1, '1998-10-01')
+    GROUP BY 
+        l.l_partkey
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        r.r_name AS region_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, r.r_name
+)
+SELECT 
+    rl.o_orderkey AS orderkey,
+    rl.o_orderdate AS orderdate,
+    rl.o_totalprice AS totalprice,
+    COALESCE(cs.order_count, 0) AS customer_orders,
+    COALESCE(ss.total_cost, 0) AS supplier_cost,
+    COALESCE(la.total_revenue, 0) AS part_revenue,
+    cs.region_name
+FROM 
+    OrderHierarchy rl
+LEFT JOIN 
+    CustomerRegion cs ON rl.o_orderkey = cs.c_custkey
+LEFT JOIN 
+    SupplierStats ss ON ss.s_suppkey = rl.o_orderkey
+LEFT JOIN 
+    LineItemAnalysis la ON la.l_partkey = rl.o_orderkey
+WHERE 
+    rl.level = 1
+ORDER BY 
+    rl.o_orderdate DESC
+LIMIT 100;

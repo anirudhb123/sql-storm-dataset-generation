@@ -1,0 +1,75 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER(PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn
+    FROM 
+        title t
+    JOIN 
+        aka_title at ON t.id = at.movie_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+),
+TopMovies AS (
+    SELECT 
+        title_id,
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 10
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        c.name AS company_name,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        COUNT(DISTINCT pi.id) AS info_count
+    FROM 
+        TopMovies tm 
+    LEFT JOIN 
+        movie_companies mc ON tm.title_id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON tm.title_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON tm.title_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        movie_info mi ON tm.title_id = mi.movie_id
+    LEFT JOIN 
+        person_info pi ON ci.person_id = pi.person_id
+    GROUP BY 
+        tm.title, tm.production_year, c.name
+),
+FinalResults AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.company_name,
+        md.keywords,
+        md.cast_count,
+        md.info_count,
+        rt.role AS primary_role
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        role_type rt ON rt.id = (SELECT MIN(role_id) FROM cast_info c WHERE md.title = c.title)
+    ORDER BY 
+        md.production_year DESC, md.cast_count DESC 
+)
+SELECT 
+    *
+FROM 
+    FinalResults
+LIMIT 50;

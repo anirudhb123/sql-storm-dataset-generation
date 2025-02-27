@@ -1,0 +1,55 @@
+WITH actor_movie_info AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT ct.kind) AS company_types
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        a.id, a.name, t.title, t.production_year
+),
+comprehensive_report AS (
+    SELECT
+        ami.actor_id,
+        ami.actor_name,
+        ami.movie_title,
+        ami.production_year,
+        ami.keywords,
+        ami.company_types,
+        COUNT(DISTINCT t.id) OVER(PARTITION BY ami.actor_id) AS movie_count,
+        RANK() OVER(ORDER BY COUNT(DISTINCT t.id) DESC) AS actor_rank
+    FROM 
+        actor_movie_info ami
+    JOIN 
+        aka_title t ON ami.movie_title = t.title AND ami.production_year = t.production_year
+)
+SELECT 
+    actor_id,
+    actor_name,
+    movie_title,
+    production_year,
+    keywords,
+    company_types,
+    movie_count,
+    actor_rank
+FROM 
+    comprehensive_report
+WHERE 
+    movie_count > 1
+ORDER BY 
+    actor_rank;

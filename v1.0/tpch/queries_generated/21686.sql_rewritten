@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    INNER JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        COALESCE(SUM(ps.ps_availqty) FILTER (WHERE ps.ps_supplycost < 100), 0) AS low_cost_avail_qty,
+        COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+),
+OrdersWithDetails AS (
+    SELECT 
+        o.o_orderkey,
+        l.l_extendedprice,
+        l.l_discount,
+        p.p_name,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS item_num
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        part p ON l.l_partkey = p.p_partkey
+)
+
+SELECT 
+    r.r_name,
+    SUM(od.l_extendedprice * (1 - od.l_discount)) AS total_revenue,
+    (SELECT COUNT(DISTINCT c.c_custkey) FROM customer c WHERE c.c_nationkey = r.r_regionkey) AS total_customers,
+    STRING_AGG(DISTINCT TO_CHAR(s.s_name, 'FM99999999999999999999')) AS top_suppliers,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(CASE WHEN od.l_extendedprice > 500 THEN 1 ELSE 0 END) AS high_value_orders
+FROM 
+    RankedOrders ro
+LEFT JOIN 
+    region r ON (ro.o_orderdate IS NOT NULL) AND (ro.o_orderdate > cast('1998-10-01' as date) - INTERVAL '30 days')
+LEFT JOIN 
+    OrdersWithDetails od ON ro.o_orderkey = od.o_orderkey
+LEFT JOIN 
+    PartSupplierDetails psd ON EXISTS (
+        SELECT 1 
+        FROM TopSuppliers ts 
+        WHERE ts.s_suppkey = psd.ps_suppkey
+    )
+WHERE 
+    (ro.rn = 1 AND ro.o_orderdate < cast('1998-10-01' as date)) OR (ro.o_orderkey IS NULL)
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(od.l_extendedprice) > 1000
+ORDER BY 
+    total_revenue DESC NULLS LAST;

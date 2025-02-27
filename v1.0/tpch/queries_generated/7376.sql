@@ -1,0 +1,35 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+ActiveCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent 
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' 
+    GROUP BY c.c_custkey, c.c_name
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, COUNT(l.l_orderkey) AS lineitem_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+)
+SELECT 
+    r.s_name AS supplier_name,
+    r.total_supply_cost AS supplier_total_cost,
+    a.c_name AS customer_name,
+    a.total_spent AS customer_total_spent,
+    o.o_orderkey AS recent_order_id,
+    o.o_orderdate AS recent_order_date,
+    o.lineitem_count AS recent_order_lineitem_count
+FROM RankedSuppliers r
+JOIN ActiveCustomers a ON r.s_nationkey = a.c_nationkey
+JOIN RecentOrders o ON a.c_custkey = o.o_custkey
+WHERE r.supplier_rank <= 5 
+ORDER BY r.total_supply_cost DESC, a.total_spent DESC, o.o_orderdate DESC
+LIMIT 10;

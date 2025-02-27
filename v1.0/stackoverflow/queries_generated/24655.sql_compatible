@@ -1,0 +1,97 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount,
+        COALESCE(SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostActivity AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts,
+        SUM(CASE WHEN P.ClosedDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPosts
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+RecentEdits AS (
+    SELECT 
+        PH.UserId,
+        COUNT(*) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT PH.Comment, '; ') AS EditComments
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        PH.UserId
+),
+UserEngagement AS (
+    SELECT 
+        US.UserId,
+        US.DisplayName,
+        US.Reputation,
+        COALESCE(PA.TotalPosts, 0) AS TotalPosts,
+        COALESCE(RS.EditCount, 0) AS TotalEdits,
+        US.UpVotesCount,
+        US.DownVotesCount,
+        US.GoldBadges,
+        US.SilverBadges
+    FROM 
+        UserStats US
+    LEFT JOIN 
+        PostActivity PA ON US.UserId = PA.OwnerUserId
+    LEFT JOIN 
+        RecentEdits RS ON US.UserId = RS.UserId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.TotalPosts,
+    U.TotalEdits,
+    U.UpVotesCount,
+    U.DownVotesCount,
+    U.GoldBadges,
+    U.SilverBadges,
+    CASE 
+        WHEN U.Reputation >= 1000 THEN 'Expert'
+        WHEN U.Reputation >= 500 THEN 'Intermediate'
+        ELSE 'Beginner'
+    END AS UserLevel,
+    COALESCE(
+        NULLIF(
+            (SELECT STRING_AGG(T.TagName, ', ') FROM Tags T 
+             WHERE T.WikiPostId IS NOT NULL 
+             AND EXISTS (SELECT 1 FROM Posts P WHERE P.OwnerUserId = U.UserId AND P.Tags LIKE '%' || T.TagName || '%')),
+            ''),
+        'No Tags'
+    ) AS PopularTags,
+    COALESCE(RE.Rank, 'No Rank') AS RankBasedOnEdits
+FROM 
+    UserEngagement U
+LEFT JOIN (
+    SELECT UserId, 
+           RANK() OVER (ORDER BY COUNT(*) DESC) AS Rank
+    FROM PostHistory
+    WHERE PostHistoryTypeId IN (4, 5, 6)
+    GROUP BY UserId
+) RE ON U.UserId = RE.UserId
+WHERE 
+    U.TotalPosts > 10 
+ORDER BY 
+    U.Reputation DESC, U.TotalPosts DESC;

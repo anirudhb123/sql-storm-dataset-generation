@@ -1,0 +1,79 @@
+
+WITH RECURSIVE UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        P.Id AS PostId,
+        P.PostTypeId,
+        P.Score,
+        P.CreationDate,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) OVER (PARTITION BY U.Id) AS AnswerCount,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) OVER (PARTITION BY U.Id) AS QuestionCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 0
+),
+TagPostStats AS (
+    SELECT 
+        T.TagName,
+        P.Id AS PostId,
+        COUNT(*) AS TagCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || '<' || T.TagName || '>%'
+    GROUP BY 
+        T.TagName, P.Id
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        SUM(TagCount) AS TotalCount
+    FROM 
+        TagPostStats
+    GROUP BY 
+        TagName
+    HAVING 
+        SUM(TagCount) > 5 
+),
+ActiveUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        DATE_TRUNC('month', P.CreationDate) AS PostMonth
+    FROM 
+        Users U
+    INNER JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, DATE_TRUNC('month', P.CreationDate)
+    ORDER BY 
+        TotalPosts DESC
+    LIMIT 10
+)
+
+SELECT 
+    UP.DisplayName AS User,
+    UP.Reputation,
+    UP.QuestionCount,
+    UP.AnswerCount,
+    COALESCE(PT.TotalCount, 0) AS PopularTagCount,
+    AU.TotalPosts AS ActivePostCount,
+    AU.PostMonth
+FROM 
+    UserPostStats UP
+LEFT JOIN 
+    PopularTags PT ON PT.TagName IN (SELECT TRIM(UNNEST(SPLIT(P.Tags, '><'))) FROM Posts P WHERE P.OwnerUserId = UP.UserId)
+JOIN 
+    ActiveUsers AU ON AU.Id = UP.UserId
+WHERE 
+    UP.Reputation > 1000
+ORDER BY 
+    UP.Reputation DESC, 
+    PopularTagCount DESC, 
+    ActivePostCount DESC;

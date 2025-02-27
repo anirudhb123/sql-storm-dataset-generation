@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON t.Id = ANY(string_to_array(pt.Tags, '><')::int[])
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 10
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) > 10
+)
+SELECT 
+    up.DisplayName,
+    up.UpVotes,
+    up.DownVotes,
+    tp.TagName,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount
+FROM 
+    UserReputation up
+JOIN 
+    RankedPosts rp ON up.PostCount > 0
+JOIN 
+    TopTags tp ON tp.PostCount > 0
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    up.UpVotes DESC, rp.Score DESC;

@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) as year_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COALESCE(k.keyword, 'N/A') AS keyword,
+        cn.name AS company_name,
+        ci.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ci.nr_order) as company_order
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    WHERE 
+        t.production_year > 2000
+),
+AggregatedData AS (
+    SELECT 
+        md.title,
+        COUNT(mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT md.keyword, ', ') AS keywords,
+        MAX(md.production_year) AS latest_year
+    FROM 
+        MovieDetails md
+    GROUP BY 
+        md.title
+)
+SELECT 
+    ad.title,
+    ad.company_count,
+    ad.keywords,
+    ad.latest_year,
+    CASE 
+        WHEN ad.company_count = 0 THEN 'No Companies' 
+        ELSE 'Companies Present' 
+    END AS company_status,
+    (SELECT COUNT(*) FROM cast_info ca WHERE ca.movie_id = (SELECT id FROM title WHERE title = ad.title LIMIT 1)) AS actor_count
+FROM 
+    AggregatedData ad
+WHERE 
+    ad.latest_year = (SELECT MAX(production_year) FROM AggregatedData)
+ORDER BY 
+    ad.company_count DESC, 
+    ad.title ASC;

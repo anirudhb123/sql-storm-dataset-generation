@@ -1,0 +1,48 @@
+
+WITH RECURSIVE Supplier_Sales(s_suppkey, total_sales, rnk) AS (
+    SELECT ps.s_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           RANK() OVER (PARTITION BY ps.s_suppkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rnk
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey AND ps.ps_suppkey = l.l_suppkey
+    GROUP BY ps.s_suppkey
+),
+Sales_Per_Region AS (
+    SELECT n.r_regionkey, SUM(ss.total_sales) AS region_total_sales
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN Supplier_Sales ss ON s.s_suppkey = ss.s_suppkey
+    GROUP BY n.r_regionkey
+),
+Max_Sales AS (
+    SELECT r.r_regionkey, MAX(sp.region_total_sales) AS max_sales
+    FROM region r
+    LEFT JOIN Sales_Per_Region sp ON r.r_regionkey = sp.r_regionkey
+    GROUP BY r.r_regionkey
+),
+Final_Suppliers AS (
+    SELECT s.s_name, n.n_name, ss.total_sales
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN Supplier_Sales ss ON s.s_suppkey = ss.s_suppkey
+    JOIN Max_Sales ms ON s.s_suppkey = (
+        SELECT MAX(s2.s_suppkey)
+        FROM Supplier_Sales s2
+        WHERE s2.total_sales = ms.max_sales
+    )
+)
+SELECT fs.s_name, fs.n_name, fs.total_sales, 
+       CASE 
+           WHEN fs.total_sales IS NULL THEN 'No Sales'
+           ELSE CONCAT('Supplier Sales of ', fs.total_sales)
+       END AS sales_comment
+FROM Final_Suppliers fs
+WHERE fs.total_sales IS NOT NULL
+
+UNION ALL
+
+SELECT 'Total Overall Sales', r.r_name, COALESCE(MAX(sp.region_total_sales), 0), 
+       'Total sales across all regions'
+FROM region r
+LEFT JOIN Sales_Per_Region sp ON r.r_regionkey = sp.r_regionkey
+GROUP BY r.r_name
+ORDER BY COALESCE(MAX(sp.region_total_sales), 0) DESC, 'Total Overall Sales' ASC;

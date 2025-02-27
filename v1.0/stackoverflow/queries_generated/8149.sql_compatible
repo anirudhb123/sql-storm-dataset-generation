@@ -1,0 +1,68 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        UPPER(u.Location) AS Location,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.Location
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+PostHistoryAggregated AS (
+    SELECT 
+        ph.UserId,
+        COUNT(ph.Id) AS TotalEdits,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.UserId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.Location,
+    us.TotalPosts,
+    us.TotalComments,
+    us.TotalUpvotes,
+    us.TotalDownvotes,
+    pga.TotalEdits,
+    pga.LastEditDate,
+    pt.TagName AS PopularTag,
+    pt.PostCount
+FROM 
+    UserStatistics us
+LEFT JOIN 
+    PostHistoryAggregated pga ON us.UserId = pga.UserId
+JOIN 
+    PopularTags pt ON pt.PostCount > 5
+ORDER BY 
+    us.Reputation DESC,
+    us.TotalPosts DESC;

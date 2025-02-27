@@ -1,0 +1,77 @@
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN b.Id END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN b.Id END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN b.Id END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+UserVoteStats AS (
+    SELECT
+        v.UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+RankedUsers AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+        COALESCE(ps.TotalPosts, 0) AS TotalPosts,
+        COALESCE(ps.QuestionCount, 0) AS QuestionCount,
+        COALESCE(ps.AnswerCount, 0) AS AnswerCount,
+        COALESCE(uv.UpVotesCount, 0) AS UpVotesCount,
+        COALESCE(uv.DownVotesCount, 0) AS DownVotesCount,
+        @row_number := @row_number + 1 AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN 
+        PostStats ps ON u.Id = ps.OwnerUserId
+    LEFT JOIN 
+        UserVoteStats uv ON u.Id = uv.UserId,
+        (SELECT @row_number := 0) AS rn
+)
+SELECT 
+    DisplayName,
+    Reputation,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    TotalPosts,
+    QuestionCount,
+    AnswerCount,
+    UpVotesCount,
+    DownVotesCount,
+    UserRank
+FROM 
+    RankedUsers
+WHERE 
+    Reputation > 1000
+ORDER BY 
+    UserRank;

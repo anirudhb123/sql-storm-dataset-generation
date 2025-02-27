@@ -1,0 +1,49 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate) AS order_rank
+    FROM orders
+    WHERE o_orderstatus = 'O'
+),
+CustomerNations AS (
+    SELECT c.c_custkey, n.n_name, c.c_acctbal
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+),
+PartPricing AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_supplycost, MAX(p.p_retailprice) AS max_retailprice
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_partkey
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+           SUM(l.l_quantity) AS total_quantity, l.l_returnflag
+    FROM lineitem l
+    WHERE l.l_shipdate <= '2023-10-01' AND l.l_commitdate <= l.l_shipdate
+    GROUP BY l.l_orderkey, l.l_returnflag
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+NationStats AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(s.s_acctbal) AS total_balance
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+)
+SELECT p.p_name, pp.avg_supplycost, pp.max_retailprice, 
+       COALESCE(tc.total_spent, 0) AS total_spent_by_customers,
+       ns.supplier_count, ns.total_balance
+FROM part p
+JOIN PartPricing pp ON p.p_partkey = pp.ps_partkey
+LEFT JOIN TopCustomers tc ON tc.c_custkey IN (SELECT c.c_custkey FROM CustomerNations cn WHERE cn.n_name = 'FRANCE')
+LEFT JOIN NationStats ns ON ns.n_name = (SELECT n.n_name FROM customer c INNER JOIN nation n ON c.c_nationkey = n.n_nationkey WHERE c.c_custkey = tc.c_custkey LIMIT 1)
+WHERE p.p_size > 15 AND pp.avg_supplycost IS NOT NULL
+ORDER BY pp.max_retailprice DESC
+FETCH FIRST 10 ROWS ONLY;

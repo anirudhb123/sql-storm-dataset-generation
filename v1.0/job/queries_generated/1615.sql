@@ -1,0 +1,72 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    GROUP BY 
+        at.title, at.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        CASE 
+            WHEN rm.cast_count > 20 THEN 'Blockbuster'
+            WHEN rm.cast_count BETWEEN 10 AND 20 THEN 'Moderate'
+            ELSE 'Low'
+        END AS movie_type
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 10
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.cast_count,
+    fm.movie_type,
+    COALESCE(SUBSTRING(cn.name FROM '^[A-Z].*'), 'Unknown') AS highlighted_name
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    complete_cast cc ON fm.production_year = cc.movie_id
+LEFT JOIN 
+    char_name cn ON cc.subject_id = cn.id
+WHERE 
+    fm.cast_count IS NOT NULL
+ORDER BY 
+    fm.production_year DESC, fm.cast_count DESC
+LIMIT 5;
+
+WITH CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        SUM(CASE WHEN ct.kind = 'Production' THEN 1 ELSE 0 END) AS production_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    fm.title,
+    ci.companies,
+    ci.production_count
+FROM 
+    FilteredMovies fm
+JOIN 
+    CompanyInfo ci ON fm.title = ci.movie_id
+WHERE 
+    ci.production_count > 0
+ORDER BY 
+    fm.cast_count DESC;

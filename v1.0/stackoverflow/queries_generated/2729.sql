@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COALESCE((SELECT COUNT(*) 
+                  FROM Votes v 
+                  WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS TotalUpvotes
+    FROM 
+        Posts p
+    WHERE 
+        p.ViewCount > 100
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+RecentPostInteractions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS TotalComments,
+        SUM(CASE WHEN ph.Comment IS NOT NULL THEN 1 ELSE 0 END) AS TotalHistoryComments,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id AND ph.UserId IS NOT NULL
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalBadges,
+    u.TotalBounty,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.PostRank,
+    rpi.TotalComments,
+    rpi.TotalHistoryComments,
+    rpi.LastVoteDate,
+    CASE 
+        WHEN rp.TotalUpvotes > 0 THEN 'Popular' 
+        ELSE 'Less Popular' 
+    END AS Popularity
+FROM 
+    UserStats u
+JOIN 
+    RankedPosts rp ON u.UserId = rp.OwnerUserId
+LEFT JOIN 
+    RecentPostInteractions rpi ON rp.Id = rpi.PostId
+WHERE 
+    u.TotalPosts > 5
+ORDER BY 
+    u.TotalBadges DESC, 
+    rp.Score DESC;

@@ -1,0 +1,42 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id
+),
+TopTags AS (
+    SELECT 
+        TAG.Id,
+        TAG.TagName,
+        COUNT(P.Id) AS UsageCount
+    FROM Tags TAG
+    JOIN Posts P ON TAG.Id = ANY(string_to_array(P.Tags, ',')::int[])
+    GROUP BY TAG.Id
+    ORDER BY UsageCount DESC
+    LIMIT 5
+)
+SELECT 
+    US.DisplayName,
+    US.Reputation,
+    US.TotalPosts,
+    US.TotalQuestions,
+    US.TotalAnswers,
+    US.TotalUpvotes,
+    US.TotalDownvotes,
+    TT.TagName,
+    ROW_NUMBER() OVER (PARTITION BY US.UserId ORDER BY US.TotalPosts DESC) AS PostRank
+FROM UserStatistics US
+LEFT JOIN TopTags TT ON US.TotalPosts = (SELECT MAX(TotalPosts) FROM UserStatistics)
+WHERE US.Reputation > (
+    SELECT AVG(Reputation) FROM UserStatistics
+)
+ORDER BY US.Reputation DESC, TT.UsageCount DESC;

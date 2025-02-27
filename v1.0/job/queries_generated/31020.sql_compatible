@@ -1,0 +1,57 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level,
+        ARRAY[m.id] AS movie_path
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        mk.linked_movie_id,
+        lk.title,
+        mh.level + 1,
+        mh.movie_path || mk.linked_movie_id
+    FROM 
+        movie_link mk
+    JOIN 
+        aka_title lk ON mk.linked_movie_id = lk.id
+    JOIN 
+        MovieHierarchy mh ON mk.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.level,
+    COUNT(CASE WHEN c.role_id IS NOT NULL THEN 1 END) AS num_actors,
+    STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+    COUNT(DISTINCT kw.keyword) AS num_keywords,
+    AVG(CAST(mi.info AS NUMERIC)) AS avg_info_length,
+    COALESCE(cast_type.kind, 'Unknown') AS cast_type
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info c ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_name a ON a.person_id = c.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id
+LEFT JOIN 
+    comp_cast_type cast_type ON c.person_role_id = cast_type.id
+WHERE 
+    mh.level <= 2
+GROUP BY 
+    mh.movie_id, mh.title, mh.level, cast_type.kind
+HAVING 
+    COUNT(CASE WHEN c.role_id IS NOT NULL THEN 1 END) > 0
+ORDER BY 
+    mh.level DESC, num_actors DESC, mh.title;

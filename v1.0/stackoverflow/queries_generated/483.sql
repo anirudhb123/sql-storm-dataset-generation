@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+        AND p.PostTypeId = 1
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.UpVotes) AS TotalUpVotes,
+        SUM(p.DownVotes) AS TotalDownVotes,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(p.Id) > 5
+)
+SELECT 
+    ru.UserId,
+    ru.DisplayName,
+    ru.TotalUpVotes,
+    ru.TotalDownVotes,
+    ru.BadgeCount,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    COALESCE(CAST(ROUND(NULLIF(rp.Score, 0), 2) / NULLIF(rp.ViewCount, 0) * 100 AS DECIMAL(5,2)), 0) AS EngagementScore
+FROM 
+    TopUsers ru
+JOIN 
+    RankedPosts rp ON ru.UserId = rp.PostId
+WHERE 
+    ru.BadgeCount > 1 
+    OR rp.UserPostRank <= 3
+ORDER BY 
+    ru.TotalUpVotes DESC, 
+    rp.Score DESC
+LIMIT 50;

@@ -1,0 +1,52 @@
+WITH RecursivePostCTE AS (
+    SELECT p.Id, p.ParentId, p.Title, p.CreationDate, p.OwnerUserId, 
+           1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  -- Select only Questions
+    UNION ALL
+    SELECT a.Id, a.ParentId, a.Title, a.CreationDate, a.OwnerUserId, 
+           Level + 1
+    FROM Posts a
+    INNER JOIN RecursivePostCTE r ON a.ParentId = r.Id
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY t.TagName
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+)
+SELECT 
+    r.Id AS QuestionId,
+    r.Title AS QuestionTitle,
+    u.DisplayName AS OwnerName,
+    r.CreationDate AS QuestionCreatedAt,
+    COALESCE(b.GoldBadges, 0) AS GoldBadgeCount,
+    COALESCE(b.SilverBadges, 0) AS SilverBadgeCount,
+    COALESCE(b.BronzeBadges, 0) AS BronzeBadgeCount,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AverageScore
+FROM RecursivePostCTE r
+INNER JOIN Users u ON r.OwnerUserId = u.Id
+LEFT JOIN UserBadges b ON u.Id = b.UserId
+LEFT JOIN TagStats ts ON ts.PostCount > 0 -- Only include tags with posts
+WHERE 
+    r.Level = 1 -- Only direct questions
+    AND u.Reputation > 1000 -- Only high reputation users
+ORDER BY r.CreationDate DESC
+LIMIT 100;

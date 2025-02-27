@@ -1,0 +1,61 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey, ps.ps_partkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        r.r_name AS region_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    H.order_value,
+    S.s_name,
+    COALESCE(R.total_avail_qty, 0) AS available_quantity,
+    COALESCE(R.avg_supply_cost, 0) AS average_cost_per_unit,
+    CASE 
+        WHEN H.order_value > 20000 THEN 'High Value'
+        WHEN H.order_value <= 20000 AND H.order_value > 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS order_classification
+FROM 
+    HighValueOrders H
+LEFT JOIN 
+    RankedSuppliers R ON R.ps_suppkey IN (SELECT ps_suppkey FROM partsupp ps WHERE ps.ps_partkey 
+      IN (SELECT DISTINCT l.l_partkey FROM lineitem l WHERE l.l_orderkey = H.o_orderkey))
+LEFT JOIN 
+    SupplierDetails S ON R.ps_suppkey = S.s_suppkey
+WHERE 
+    R.rank = 1
+ORDER BY 
+    H.order_value DESC;

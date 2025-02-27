@@ -1,0 +1,77 @@
+
+WITH CustomerSummary AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        SUM(ss.ss_quantity) AS total_items_purchased,
+        SUM(ss.ss_net_paid) AS total_spent,
+        COUNT(DISTINCT ss.ss_ticket_number) AS transaction_count
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE
+        ss.ss_sold_date_sk BETWEEN 2022001 AND 2022300  -- Sales in the year 2022
+    GROUP BY
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+),
+IncomeBandSummary AS (
+    SELECT
+        cs.c_customer_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        SUM(cs.total_items_purchased) AS items_income_band,
+        SUM(cs.total_spent) AS amount_in_income_band
+    FROM
+        CustomerSummary cs
+    JOIN
+        household_demographics hd ON cs.c_customer_sk = hd.hd_demo_sk
+    JOIN
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY
+        cs.c_customer_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+),
+DateSummary AS (
+    SELECT
+        dd.d_date,
+        COUNT(DISTINCT cs.c_customer_sk) AS unique_customers,
+        SUM(cs.total_spent) AS total_revenue,
+        AVG(cs.total_spent) AS average_spent_per_customer
+    FROM
+        Date_dim dd
+    JOIN
+        store_sales ss ON dd.d_date_sk = ss.ss_sold_date_sk
+    JOIN
+        CustomerSummary cs ON ss.ss_customer_sk = cs.c_customer_sk
+    GROUP BY
+        dd.d_date
+)
+SELECT
+    ds.d_date,
+    ds.unique_customers,
+    ds.total_revenue,
+    ds.average_spent_per_customer,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    ib.items_income_band,
+    ib.amount_in_income_band
+FROM
+    DateSummary ds
+LEFT JOIN
+    IncomeBandSummary ib ON ds.d_date BETWEEN DATEADD(DAY, -30, GETDATE()) AND GETDATE()
+ORDER BY
+    ds.d_date DESC, ib.amount_in_income_band DESC
+LIMIT 100;

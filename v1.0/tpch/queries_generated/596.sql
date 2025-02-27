@@ -1,0 +1,57 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.n_nationkey
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_nationkey
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, GETDATE())
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS total_lines,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    n.n_name,
+    COALESCE(SUM(lis.total_lines), 0) AS total_lines,
+    COALESCE(SUM(lis.net_revenue), 0) AS total_revenue,
+    COALESCE(SUM(rs.total_cost), 0) AS total_supplier_cost
+FROM 
+    nation n
+LEFT JOIN 
+    RecentOrders ro ON n.n_nationkey = ro.c_nationkey
+LEFT JOIN 
+    LineItemSummary lis ON ro.o_orderkey = lis.l_orderkey
+LEFT JOIN 
+    RankedSuppliers rs ON n.n_nationkey = (SELECT ns.n_nationkey FROM supplier s2 JOIN nation ns ON s2.n_nationkey = ns.n_nationkey WHERE s2.s_suppkey = rs.s_suppkey)
+WHERE 
+    n.n_nationkey IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    COALESCE(SUM(lis.net_revenue), 0) > 10000
+ORDER BY 
+    total_revenue DESC;

@@ -1,0 +1,49 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+TopPostStats AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(rp.PostId) AS TotalPosts,
+        SUM(rp.Score) AS TotalScore,
+        AVG(rp.ViewCount) AS AvgViewCount,
+        AVG(rp.AnswerCount) AS AvgAnswerCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostTypes pt ON rp.PostTypeId = pt.Id
+    WHERE 
+        rp.Rank <= 5
+    GROUP BY 
+        pt.Name
+)
+SELECT 
+    ps.PostType,
+    ps.TotalPosts,
+    ps.TotalScore,
+    ps.AvgViewCount,
+    ps.AvgAnswerCount,
+    COALESCE(SUM(b.Class = 1)::int, 0) AS GoldBadges,
+    COALESCE(SUM(b.Class = 2)::int, 0) AS SilverBadges,
+    COALESCE(SUM(b.Class = 3)::int, 0) AS BronzeBadges
+FROM 
+    TopPostStats ps
+LEFT JOIN 
+    Posts p ON p.PostTypeId IN (SELECT Id FROM PostTypes WHERE Name = ps.PostType)
+LEFT JOIN 
+    Badges b ON b.UserId = p.OwnerUserId
+GROUP BY 
+    ps.PostType, ps.TotalPosts, ps.TotalScore, ps.AvgViewCount, ps.AvgAnswerCount
+ORDER BY 
+    ps.TotalScore DESC, ps.TotalPosts DESC;

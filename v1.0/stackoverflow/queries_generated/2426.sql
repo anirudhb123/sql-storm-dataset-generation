@@ -1,0 +1,67 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+), 
+PostSummary AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(P.Score) AS AverageScore,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.OwnerUserId
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        UReputation.Reputation,
+        UReputation.ReputationRank,
+        PS.TotalPosts,
+        PS.TotalQuestions,
+        PS.TotalAnswers,
+        PS.AverageScore,
+        PS.TotalUpVotes,
+        PS.TotalDownVotes
+    FROM Users U
+    JOIN UserReputation UReputation ON U.Id = UReputation.UserId
+    LEFT JOIN PostSummary PS ON U.Id = PS.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PH.CreationDate AS ClosedDate,
+        U.DisplayName AS ClosedBy,
+        PH.Comment AS CloseReason
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId = 10
+    JOIN Users U ON PH.UserId = U.Id
+)
+SELECT 
+    UPS.UserId,
+    UPS.DisplayName,
+    UPS.Reputation,
+    UPS.ReputationRank,
+    UPS.TotalPosts,
+    UPS.TotalQuestions,
+    UPS.TotalAnswers,
+    UPS.AverageScore,
+    UPS.TotalUpVotes,
+    UPS.TotalDownVotes,
+    COALESCE(CP.PostId, 0) AS ClosedPostId,
+    COALESCE(CP.Title, 'No closed posts') AS ClosedPostTitle,
+    COALESCE(CP.ClosedDate::date::text, 'N/A') AS ClosedDate,
+    COALESCE(CP.ClosedBy, 'N/A') AS ClosedBy,
+    COALESCE(CP.CloseReason, 'N/A') AS CloseReason
+FROM UserPostStats UPS
+LEFT JOIN ClosedPosts CP ON UPS.UserId = CP.ClosedBy
+ORDER BY UPS.Reputation DESC, UPS.TotalPosts DESC 
+FETCH FIRST 10 ROWS ONLY;

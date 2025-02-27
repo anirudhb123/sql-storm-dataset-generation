@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'FRANCE')
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_nationkey = sh.s_suppkey)
+),
+OrderSummary AS (
+    SELECT o.o_custkey,
+           COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent,
+           MAX(o.o_orderdate) AS last_order_date
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           ps.ps_availqty,
+           ps.ps_supplycost,
+           ps.ps_comment,
+           RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS cost_rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+),
+CustomerSpend AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COALESCE(os.total_spent, 0) AS total_spent,
+           COUNT(DISTINCT os.total_orders) AS order_count
+    FROM customer c
+    LEFT JOIN OrderSummary os ON c.c_custkey = os.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT c.c_name,
+       cs.total_spent,
+       ps.p_name,
+       ps.ps_supplycost,
+       (cs.total_spent / NULLIF(cs.order_count, 0)) AS avg_spent_per_order,
+       sh.level
+FROM CustomerSpend cs
+JOIN PartSupplierDetails ps ON ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+JOIN SupplierHierarchy sh ON cs.total_spent > (SELECT AVG(total_spent) FROM CustomerSpend)
+WHERE cs.order_count > 5
+ORDER BY cs.total_spent DESC, ps.ps_supplycost ASC
+LIMIT 10;

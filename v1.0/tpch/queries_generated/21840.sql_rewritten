@@ -1,0 +1,36 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost,
+           RANK() OVER (PARTITION BY s.n_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank_within_nation
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.n_nationkey
+), CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS num_orders,
+           SUM(o.o_totalprice) AS total_spent,
+           MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+), OrderLineItemDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+           COUNT(DISTINCT l.l_suppkey) AS unique_suppliers, 
+           AVG(l.l_quantity) AS avg_quantity
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+), SupplierRegion AS (
+    SELECT s.s_suppkey, n.n_nationkey, r.r_regionkey,
+           CASE WHEN r.r_name IN ('ASIA', 'EUROPE') THEN 'Big Market' ELSE 'Small Market' END AS market_size
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT cr.c_custkey, cr.c_name, co.num_orders, co.total_spent, co.last_order_date,
+       ol.revenue, ol.unique_suppliers, ol.avg_quantity,
+       sr.market_size, rs.total_supply_cost
+FROM CustomerOrderSummary co
+JOIN OrderLineItemDetails ol ON co.num_orders > 0 AND co.last_order_date > DATEADD(month, -6, cast('1998-10-01' as date))
+LEFT JOIN SupplierRegion sr ON ol.unique_suppliers > 1
+LEFT JOIN RankedSuppliers rs ON sr.r_regionkey IS NULL OR rs.rank_within_nation = 1
+WHERE co.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderSummary) OR sr.market_size = 'Big Market'
+ORDER BY co.num_orders DESC, ol.revenue DESC;

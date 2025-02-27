@@ -1,0 +1,54 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_regionkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.r_regionkey,
+        s.s_suppkey,
+        s.s_name,
+        s.total_supply_cost
+    FROM 
+        RankedSuppliers s
+    WHERE 
+        s.supplier_rank <= 5
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS total_lineitems,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2023-12-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    t.r_regionkey,
+    t.s_name,
+    COUNT(os.o_orderkey) AS total_orders,
+    SUM(os.total_revenue) AS total_revenue,
+    SUM(t.total_supply_cost) AS total_supply_cost
+FROM 
+    TopSuppliers t
+LEFT JOIN 
+    OrderSummary os ON t.s_suppkey = os.o_orderkey
+GROUP BY 
+    t.r_regionkey, t.s_name
+ORDER BY 
+    total_revenue DESC, total_orders DESC;

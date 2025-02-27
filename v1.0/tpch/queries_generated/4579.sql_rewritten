@@ -1,0 +1,54 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (ORDER BY ss.total_cost DESC) AS rank
+    FROM 
+        SupplierStats ss
+)
+SELECT 
+    od.o_orderkey,
+    od.o_orderdate,
+    ts.s_name AS top_supplier,
+    od.total_revenue,
+    (SELECT COUNT(*) 
+     FROM lineitem l 
+     WHERE l.l_orderkey = od.o_orderkey 
+     AND l.l_returnflag = 'R') AS return_line_count,
+    CASE 
+        WHEN od.total_revenue IS NULL THEN 'No Revenue'
+        ELSE CONCAT('Revenue: ', FORMAT(od.total_revenue, 2))
+    END AS revenue_display
+FROM 
+    OrderDetails od
+LEFT JOIN 
+    TopSuppliers ts ON ts.rank = 1
+WHERE 
+    od.o_orderdate > '1997-01-01'
+ORDER BY 
+    od.total_revenue DESC NULLS LAST;

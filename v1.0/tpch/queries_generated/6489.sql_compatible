@@ -1,0 +1,29 @@
+
+WITH RECURSIVE nation_supplier AS (
+    SELECT n.n_nationkey, n.n_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    UNION ALL
+    SELECT ns.n_nationkey, ns.n_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM nation_supplier ns
+    JOIN supplier s ON ns.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > 1000
+),
+part_supplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost, ns.s_name, ns.s_acctbal
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN nation_supplier ns ON ps.ps_suppkey = ns.s_suppkey
+)
+SELECT 
+    p.p_name AS part_name, 
+    SUM(ps.ps_availqty) AS total_available_quantity, 
+    AVG(ps.ps_supplycost) AS average_supply_cost,
+    COUNT(DISTINCT ns.s_suppkey) AS number_of_suppliers,
+    RANK() OVER (ORDER BY SUM(ps.ps_availqty) DESC) AS part_rank
+FROM part_supplier ps
+JOIN part p ON ps.p_partkey = p.p_partkey
+GROUP BY p.p_name
+HAVING AVG(ps.ps_supplycost) < 50.00
+ORDER BY total_available_quantity DESC
+LIMIT 10;

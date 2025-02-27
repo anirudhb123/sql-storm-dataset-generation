@@ -1,0 +1,95 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        1 AS Level
+    FROM 
+        Users
+    WHERE 
+        Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        u.Id,
+        u.Reputation,
+        ur.Level + 1
+    FROM 
+        Users u
+    JOIN 
+        UserReputation ur ON u.Reputation < ur.Reputation
+    WHERE 
+        ur.Level < 5
+),
+PostWithVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(v.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(v.DownVoteCount, 0) AS DownVoteCount,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, v.UpVoteCount, v.DownVoteCount
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate AS HistoryDate,
+        p.Title,
+        p.Body,
+        CONCAT(u.DisplayName, ' made changes on ', TO_CHAR(ph.CreationDate, 'MM/DD/YYYY')) AS ChangeDescription
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        Users u ON ph.UserId = u.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)
+),
+TopPosts AS (
+    SELECT 
+        pwv.PostId,
+        pwv.Title,
+        pwv.UpVoteCount - pwv.DownVoteCount AS NetVotes,
+        ROW_NUMBER() OVER (ORDER BY (pwv.UpVoteCount - pwv.DownVoteCount) DESC) AS Rank
+    FROM 
+        PostWithVotes pwv
+    WHERE 
+        pwv.CommentCount > 10
+)
+
+SELECT 
+    tp.Title,
+    tp.NetVotes,
+    u.Reputation AS UserReputation,
+    ph.ChangeDescription,
+    ph.HistoryDate
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistoryInfo ph ON tp.PostId = ph.PostId
+LEFT JOIN 
+    Users u ON ph.UserId = u.Id
+WHERE 
+    tp.Rank <= 10
+ORDER BY 
+    tp.NetVotes DESC, 
+    u.Reputation DESC;

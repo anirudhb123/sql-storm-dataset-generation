@@ -1,0 +1,73 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT p.Id AS PostId, p.Title, p.ParentId, 1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+    UNION ALL
+    SELECT p.Id, p.Title, p.ParentId, rp.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rp ON p.ParentId = rp.PostId
+    WHERE p.PostTypeId = 2 
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM Votes
+    GROUP BY PostId
+),
+ClosedPosts AS (
+    SELECT 
+        hp.PostId, 
+        hp.CreationDate, 
+        hp.UserDisplayName, 
+        hp.Comment, 
+        ROW_NUMBER() OVER (PARTITION BY hp.PostId ORDER BY hp.CreationDate DESC) AS CloseHistoryRank
+    FROM PostHistory hp
+    WHERE hp.PostHistoryTypeId = 10 
+),
+PopularTags AS (
+    SELECT 
+        t.TagName, 
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    WHERE p.PostTypeId = 1 
+    GROUP BY t.TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    COALESCE(pv.Upvotes, 0) AS Upvotes,
+    COALESCE(pv.Downvotes, 0) AS Downvotes,
+    cp.CreationDate AS ClosedDate,
+    cp.UserDisplayName AS ClosedBy,
+    cp.Comment AS CloseComment,
+    (SELECT STRING_AGG(DISTINCT pt.Name, ', ') 
+     FROM PostHistory ph
+     JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id 
+     WHERE ph.PostId = rp.PostId) AS HistoryTypes,
+    (SELECT STRING_AGG(DISTINCT tt.TagName, ', ') 
+     FROM Tags tt 
+     JOIN Posts pp ON pp.Tags LIKE CONCAT('%', tt.TagName, '%')
+     WHERE pp.Id = rp.PostId) AS AssociatedTags,
+    pt.PostId AS PopularPostId,
+    pt.TagName AS PopularTag
+FROM RecursivePostHierarchy rp
+LEFT JOIN PostVoteSummary pv ON pv.PostId = rp.PostId
+LEFT JOIN ClosedPosts cp ON cp.PostId = rp.PostId AND cp.CloseHistoryRank = 1
+LEFT JOIN PopularTags pt ON pt.PostCount >= 5
+GROUP BY 
+    rp.PostId,
+    rp.Title,
+    pv.Upvotes,
+    pv.Downvotes,
+    cp.CreationDate,
+    cp.UserDisplayName,
+    cp.Comment,
+    pt.PostId,
+    pt.TagName
+ORDER BY rp.Level, rp.PostId;

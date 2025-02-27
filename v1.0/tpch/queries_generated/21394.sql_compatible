@@ -1,0 +1,61 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+FilteredRegions AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+    HAVING 
+        COUNT(DISTINCT n.n_nationkey) > 5
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(rs.rank, 0) AS supplier_rank,
+    COALESCE(ps.avg_discount, 0) AS average_discount,
+    fr.r_name AS region_name,
+    (p.p_retailprice * SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END)) AS potential_revenue_loss,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    STRING_AGG(DISTINCT s.s_name, ', ') FILTER (WHERE rs.rank <= 3) AS top_suppliers
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    orders o ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+JOIN 
+    FilteredRegions fr ON fr.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT DISTINCT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey))
+WHERE 
+    p.p_size BETWEEN 10 AND 30
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, fr.r_name, rs.rank
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY 
+    potential_revenue_loss DESC, supplier_rank, region_name
+LIMIT 50;

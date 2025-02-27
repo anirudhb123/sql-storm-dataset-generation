@@ -1,0 +1,89 @@
+
+WITH RecursiveTagCounts AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        ExcerptPostId,
+        WikiPostId,
+        IsModeratorOnly,
+        IsRequired,
+        1 AS Level
+    FROM Tags
+    WHERE IsModeratorOnly = 0
+    
+    UNION ALL
+    
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        t.ExcerptPostId,
+        t.WikiPostId,
+        t.IsModeratorOnly,
+        t.IsRequired,
+        rc.Level + 1
+    FROM Tags t
+    JOIN RecursiveTagCounts rc ON t.Id = rc.ExcerptPostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.Reputation) AS TotalReputation,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        TotalReputation,
+        PostCount,
+        RANK() OVER (ORDER BY TotalReputation DESC) AS ReputationRank
+    FROM UserReputation
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(ph.Id) AS CloseReasonsCount,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) 
+    LEFT JOIN CloseReasonTypes cr ON ph.Comment = CAST(cr.Id AS CHAR)
+    WHERE p.ClosedDate IS NOT NULL
+    GROUP BY p.Id, p.Title, p.CreationDate
+),
+FinalResults AS (
+    SELECT 
+        u.DisplayName,
+        u.TotalReputation,
+        c.PostId,
+        c.Title,
+        c.CloseReasonsCount,
+        c.CloseReasons,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY c.PostId ORDER BY COUNT(v.Id) DESC) AS VoteRanking
+    FROM TopUsers u
+    JOIN ClosedPosts c ON u.UserId = c.PostId
+    LEFT JOIN Votes v ON c.PostId = v.PostId
+    GROUP BY u.DisplayName, u.TotalReputation, c.PostId, c.Title, c.CloseReasonsCount, c.CloseReasons
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalReputation,
+    PostId,
+    Title,
+    CloseReasonsCount,
+    CloseReasons,
+    VoteCount,
+    Upvotes,
+    Downvotes
+FROM FinalResults
+WHERE VoteCount > 0 
+ORDER BY TotalReputation DESC, CloseReasonsCount DESC, Upvotes DESC;

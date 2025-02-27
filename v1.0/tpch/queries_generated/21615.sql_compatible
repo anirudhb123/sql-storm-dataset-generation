@@ -1,0 +1,55 @@
+
+WITH RECURSIVE part_cte AS (
+    SELECT p_partkey, p_name, p_retailprice, p_size, p_mfgr
+    FROM part
+    WHERE p_size > 10
+
+    UNION ALL
+
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, p.p_size, p.p_mfgr
+    FROM part p
+    INNER JOIN part_cte pcte ON p.p_partkey = pcte.p_partkey + 1
+    WHERE p.p_size < 20
+),
+
+nation_with_supplier AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+
+order_stats AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+
+SELECT 
+    n.n_name,
+    ps.ps_partkey,
+    CASE 
+        WHEN ps.ps_availqty IS NULL THEN 'No Availability'
+        ELSE 'Available'
+    END AS availability_status,
+    COALESCE(MAX(a.total_revenue), 0) AS max_revenue,
+    ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY COALESCE(a.total_revenue, 0) DESC) AS revenue_rank,
+    STRING_AGG(DISTINCT CONCAT(pcte.p_name, ' (', pcte.p_mfgr, ')'), ', ') AS part_names
+FROM 
+    partsupp ps
+LEFT JOIN 
+    part_cte pcte ON ps.ps_partkey = pcte.p_partkey
+JOIN 
+    nation_with_supplier n ON n.supplier_count > 10
+LEFT JOIN 
+    order_stats a ON a.o_orderkey = ps.ps_partkey
+WHERE 
+    n.n_name IS NOT NULL
+GROUP BY 
+    n.n_nationkey, n.n_name, ps.ps_partkey
+HAVING 
+    MOD(BINARY_CHECKSUM(n.n_name), 2) = 0
+ORDER BY 
+    n.n_name, max_revenue DESC;

@@ -1,0 +1,55 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT n.name, ', ') AS actor_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name n ON ci.person_id = n.person_id
+    GROUP BY 
+        ci.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        m.movie_id,
+        MAX(mi.info) AS genre,
+        MIN(CASE WHEN it.info = 'budget' THEN mi.info ELSE NULL END) AS budget
+    FROM 
+        movie_info m
+    JOIN 
+        info_type it ON m.info_type_id = it.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    cd.cast_count,
+    cd.actor_names,
+    COALESCE(mi.genre, 'Unknown') AS genre,
+    COALESCE(mi.budget, 'Not Available') AS budget
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastDetails cd ON rm.movie_id = cd.movie_id
+LEFT JOIN 
+    MovieInfo mi ON rm.movie_id = mi.movie_id
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title ASC;

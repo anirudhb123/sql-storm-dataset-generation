@@ -1,0 +1,65 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk, 
+        ws.ws_item_sk, 
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ext_discount_amt,
+        (ws.ws_sales_price - ws.ws_ext_discount_amt) AS net_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS recent_sales_rank
+    FROM 
+        web_sales ws
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_buy_potential, 'Unknown') AS buy_potential,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status, hd.hd_buy_potential
+),
+AggregatedReturns AS (
+    SELECT 
+        COALESCE(SUM(wr_return_quantity), 0) AS total_web_returns,
+        COALESCE(SUM(cr_return_quantity), 0) AS total_catalog_returns,
+        COALESCE(wr_returning_customer_sk, cr.cr_returning_customer_sk) AS wr_returning_customer_sk
+    FROM 
+        web_returns wr
+    FULL OUTER JOIN 
+        catalog_returns cr ON wr.wr_returning_customer_sk = cr.cr_returning_customer_sk
+    GROUP BY 
+        COALESCE(wr_returning_customer_sk, cr.cr_returning_customer_sk)
+)
+SELECT 
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.buy_potential,
+    sd.ws_item_sk,
+    sd.net_sales_price,
+    sd.ws_quantity,
+    ar.total_web_returns,
+    ar.total_catalog_returns,
+    RANK() OVER (PARTITION BY ci.c_customer_id ORDER BY sd.net_sales_price DESC) AS sales_rank
+FROM 
+    CustomerInfo ci
+JOIN 
+    SalesData sd ON ci.total_orders > 0
+LEFT JOIN 
+    AggregatedReturns ar ON ci.c_customer_id = ar.wr_returning_customer_sk
+WHERE 
+    ci.cd_gender = 'F' 
+    AND (ar.total_web_returns > 0 OR ar.total_catalog_returns > 0)
+ORDER BY 
+    ci.c_customer_id, sales_rank;

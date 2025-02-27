@@ -1,0 +1,55 @@
+
+WITH RECURSIVE Price_CTE AS (
+    SELECT 
+        l_orderkey,
+        l_partkey,
+        l_quantity,
+        l_extendedprice,
+        l_discount,
+        l_extendedprice * (1 - l_discount) AS net_price,
+        ROW_NUMBER() OVER (PARTITION BY l_orderkey ORDER BY l_extendedprice DESC) AS rn
+    FROM lineitem
+    WHERE l_shipdate >= DATEADD(month, -3, '1998-10-01')
+),
+Supplier_Rank AS (
+    SELECT 
+        s_suppkey,
+        s_name,
+        SUM(ps_supplycost * ps_availqty) AS total_supply_cost,
+        DENSE_RANK() OVER (ORDER BY SUM(ps_supplycost * ps_availqty) DESC) AS rank
+    FROM partsupp
+    JOIN supplier ON partsupp.ps_suppkey = supplier.s_suppkey
+    GROUP BY s_suppkey, s_name
+),
+Customer_Summary AS (
+    SELECT 
+        c_custkey,
+        c_name,
+        AVG(c_acctbal) AS avg_acct_balance,
+        COUNT(DISTINCT o_orderkey) AS total_orders
+    FROM customer
+    LEFT JOIN orders ON customer.c_custkey = orders.o_custkey
+    GROUP BY c_custkey, c_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(p.p_container, 'UNKNOWN') AS container_type,
+    COALESCE(ps.total_supply_cost, 0) AS supply_cost,
+    cs.avg_acct_balance,
+    cs.total_orders,
+    COUNT(pc.l_orderkey) AS order_count,
+    SUM(pc.net_price) AS total_net_price,
+    MAX(pc.net_price) AS max_net_price_per_order,
+    CASE 
+        WHEN COUNT(pc.l_orderkey) > 10 THEN 'Frequent Buyer'
+        ELSE 'Occasional Buyer'
+    END AS buyer_category
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN Supplier_Rank sr ON ps.ps_suppkey = sr.s_suppkey AND sr.rank <= 5
+LEFT JOIN Price_CTE pc ON pc.l_partkey = p.p_partkey
+LEFT JOIN Customer_Summary cs ON cs.c_custkey IN (SELECT DISTINCT o_custkey FROM orders WHERE o_orderkey IN (SELECT l_orderkey FROM lineitem WHERE l_partkey = p.p_partkey))
+GROUP BY p.p_partkey, p.p_name, p.p_container, ps.total_supply_cost, cs.avg_acct_balance, cs.total_orders
+HAVING SUM(COALESCE(pc.net_price, 0)) > 1000 AND MAX(pc.net_price) IS NOT NULL
+ORDER BY total_net_price DESC;

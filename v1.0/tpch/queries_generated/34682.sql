@@ -1,0 +1,81 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierRanking AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+MaxSales AS (
+    SELECT 
+        o.o_custkey,
+        MAX(s.total_sales) AS max_sales
+    FROM 
+        SalesCTE s
+    JOIN 
+        orders o ON s.o_orderkey = o.o_orderkey
+    GROUP BY 
+        o.o_custkey
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS high_value
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        high_value > (SELECT AVG(high_value) FROM (
+            SELECT 
+                SUM(l_extendedprice * (1 - l_discount)) AS high_value
+            FROM 
+                lineitem
+            WHERE 
+                l_shipdate >= '2023-01-01'
+            GROUP BY 
+                l_partkey
+        ) AS subquery)
+)
+SELECT 
+    c.c_name,
+    n.n_name,
+    r.r_name,
+    AVG(COALESCE(m.max_sales, 0)) AS avg_max_sales,
+    COUNT(DISTINCT hvp.p_partkey) AS num_high_value_parts
+FROM 
+    customer c
+LEFT JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    MaxSales m ON c.c_custkey = m.o_custkey
+LEFT JOIN 
+    HighValueParts hvp ON hvp.high_value > 1000
+GROUP BY 
+    c.c_name, n.n_name, r.r_name
+HAVING 
+    AVG(COALESCE(m.max_sales, 0)) > 5000
+ORDER BY 
+    avg_max_sales DESC;

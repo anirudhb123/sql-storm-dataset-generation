@@ -1,0 +1,55 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws.sold_date_sk,
+        ws.item_sk,
+        SUM(ws.net_profit) AS total_profit,
+        COUNT(ws.order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.item_sk ORDER BY SUM(ws.net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        ws.sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+    GROUP BY 
+        ws.sold_date_sk, ws.item_sk
+),
+top_items AS (
+    SELECT 
+        item_sk,
+        total_profit,
+        order_count
+    FROM 
+        sales_summary
+    WHERE 
+        rank <= 10
+),
+return_summary AS (
+    SELECT 
+        cr.item_sk,
+        SUM(cr.return_amount) AS total_return_amount,
+        COUNT(cr.order_number) AS return_count
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.item_sk
+)
+SELECT 
+    ti.item_sk,
+    ti.total_profit,
+    ti.order_count,
+    COALESCE(rs.total_return_amount, 0) AS total_return_amount,
+    COALESCE(rs.return_count, 0) AS return_count,
+    (ti.total_profit - COALESCE(rs.total_return_amount, 0)) AS net_profit_after_returns,
+    CASE 
+        WHEN (ti.total_profit - COALESCE(rs.total_return_amount, 0)) < 0 
+        THEN 'Negative' 
+        ELSE 'Positive' 
+    END AS profit_status
+FROM 
+    top_items ti
+LEFT JOIN 
+    return_summary rs ON ti.item_sk = rs.item_sk
+ORDER BY 
+    net_profit_after_returns DESC;

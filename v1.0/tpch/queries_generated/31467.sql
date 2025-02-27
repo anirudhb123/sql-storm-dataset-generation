@@ -1,0 +1,73 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        s.s_nationkey, 
+        0 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 10000
+    UNION ALL
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        s.s_nationkey, 
+        sh.level + 1
+    FROM 
+        supplier s
+    JOIN 
+        SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE 
+        s.s_acctbal > sh.s_acctbal
+),
+PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        (ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+CustomerOrderAnalysis AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+)
+SELECT 
+    rh.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(p.part_total_cost) AS total_part_cost,
+    MAX(ol.total_spent) AS highest_spender,
+    MIN(CASE WHEN ol.total_orders > 5 THEN ol.c_name END) AS frequent_customer
+FROM 
+    region rh 
+LEFT JOIN 
+    nation n ON rh.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    PartSupplierDetails p ON p.ps_availqty > 50
+LEFT JOIN 
+    CustomerOrderAnalysis ol ON ol.c_custkey = c.c_custkey
+GROUP BY 
+    rh.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 0
+ORDER BY 
+    region_name;

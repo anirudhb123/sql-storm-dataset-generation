@@ -1,0 +1,95 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(COUNT(DISTINCT p.Id), 0) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        pc.CommentCount,
+        p.AcceptedAnswerId,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments pc ON p.Id = pc.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- Bounty Start or Close
+    WHERE 
+        p.CreationDate < NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, pc.CommentCount, p.AcceptedAnswerId
+),
+
+TopUsersWithHighestPostCount AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostCount,
+        RANK() OVER (ORDER BY ua.PostCount DESC) AS UserRank
+    FROM 
+        UserActivity ua
+    WHERE 
+        ua.PostCount > 0
+),
+
+FilteredPosts AS (
+    SELECT 
+        ps.*,
+        ROW_NUMBER() OVER (PARTITION BY ps.AcceptedAnswerId ORDER BY ps.ViewCount DESC) AS MostPopularAnswer
+    FROM 
+        PostStats ps
+    WHERE 
+        ps.TotalBounties > 0 
+        OR (ps.CommentCount IS NULL AND ps.ViewCount >= 100)
+)
+
+SELECT 
+    u.DisplayName,
+    u.PostCount,
+    p.Title AS PostTitle,
+    p.ViewCount,
+    COALESCE(rp.PostRank, 0) AS OwnerPostRank,
+    STRING_AGG(t.TagName, ', ') AS TagList
+FROM 
+    TopUsersWithHighestPostCount u
+JOIN 
+    FilteredPosts p ON u.UserId = p.AcceptedAnswerId
+LEFT JOIN 
+    Tags t ON p.Id = t.WikiPostId
+LEFT JOIN 
+    RankedPosts rp ON p.Id = rp.PostId
+WHERE 
+    u.UserRank <= 10
+GROUP BY 
+    u.UserId, u.DisplayName, u.PostCount, p.Title, p.ViewCount, rp.PostRank
+ORDER BY 
+    u.PostCount DESC, p.ViewCount DESC;

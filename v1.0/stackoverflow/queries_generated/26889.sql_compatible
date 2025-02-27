@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.Score,
+        ARRAY(SELECT TRIM(SPLIT_PART(P.Tags, '><', i)) FROM generate_series(1, array_length(string_to_array(P.Tags, '><'), 1)) AS i) AS TagsArray,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1  
+        AND P.CreationDate >= DATE_TRUNC('year', DATE '2024-10-01')  
+),
+
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+
+TopTags AS (
+    SELECT 
+        TRIM(SPLIT_PART(TAGS, '><', i)) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        RankedPosts
+    CROSS JOIN 
+        generate_series(1, array_length(TagsArray, 1)) AS i
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+
+SELECT 
+    RP.Title,
+    RP.Body,
+    RP.Score,
+    RP.CreationDate,
+    RP.OwnerDisplayName,
+    RP.OwnerReputation,
+    UA.TotalComments,
+    UA.TotalUpvotes,
+    UA.TotalDownvotes,
+    TT.TagName
+FROM 
+    RankedPosts RP
+JOIN 
+    UserActivity UA ON RP.OwnerUserId = UA.UserId
+JOIN 
+    TopTags TT ON TT.TagName = ANY(RP.TagsArray)
+WHERE 
+    RP.PostRank = 1  
+ORDER BY 
+    RP.Score DESC, RP.CreationDate DESC;

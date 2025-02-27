@@ -1,0 +1,61 @@
+WITH RecursiveFilmography AS (
+    SELECT 
+        ca.movie_id,
+        ka.person_id AS actor_id,
+        ka.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ca.movie_id ORDER BY ca.nr_order) AS role_order
+    FROM
+        cast_info ca
+    JOIN 
+        aka_name ka ON ca.person_id = ka.person_id
+),
+ExtendedFilmography AS (
+    SELECT 
+        rf.movie_id,
+        rf.actor_id,
+        rf.actor_name,
+        rf.role_order,
+        COALESCE(NULLIF((SELECT COUNT(*) FROM movie_companies mc WHERE mc.movie_id = rf.movie_id AND mc.company_type_id = 1), 0), 'Unknown Production Company') AS production_company,
+        COALESCE(NULLIF((SELECT AVG(mr.rating) FROM movie_rating mr WHERE mr.movie_id = rf.movie_id), 0), 'No Ratings') AS average_rating
+    FROM 
+        RecursiveFilmography rf
+),
+ActorMovieDetails AS (
+    SELECT 
+        ef.movie_id,
+        ef.actor_id,
+        ef.actor_name,
+        ef.role_order,
+        ef.production_company,
+        ef.average_rating,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM 
+        ExtendedFilmography ef
+    LEFT JOIN
+        movie_keyword mk ON ef.movie_id = mk.movie_id
+    GROUP BY 
+        ef.movie_id, ef.actor_id, ef.actor_name, ef.role_order, ef.production_company, ef.average_rating
+)
+SELECT 
+    am.actor_name,
+    am.movie_id,
+    title.title,
+    am.role_order,
+    am.production_company,
+    am.average_rating,
+    am.keyword_count,
+    am.keywords
+FROM 
+    ActorMovieDetails am
+JOIN 
+    title ON am.movie_id = title.id
+WHERE 
+    (am.average_rating IS NULL OR am.average_rating > 5)
+    AND am.role_order = 1 
+ORDER BY 
+    am.average_rating DESC NULLS LAST, 
+    am.actor_name;
+
+-- Additional consideration: If an actor has no keywords associated, they still appear, 
+-- so retaining roles with NULL logic.

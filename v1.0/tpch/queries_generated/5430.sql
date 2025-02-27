@@ -1,0 +1,62 @@
+WITH SupplierPartDetails AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        p.p_name AS part_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        p.p_retailprice
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+OrderSummary AS (
+    SELECT 
+        c.c_name AS customer_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01'
+    GROUP BY 
+        c.c_name, o.o_orderkey, o.o_orderdate
+),
+SupplierPerformance AS (
+    SELECT 
+        sp.supplier_name,
+        SUM(os.total_order_value) AS total_value_supplied,
+        COUNT(os.o_orderkey) AS order_count
+    FROM 
+        SupplierPartDetails sp
+    JOIN 
+        lineitem l ON sp.part_name = l.l_partkey
+    JOIN 
+        OrderSummary os ON l.l_orderkey = os.o_orderkey
+    GROUP BY 
+        sp.supplier_name
+)
+SELECT 
+    spp.supplier_name,
+    spp.total_value_supplied,
+    spp.order_count,
+    COUNT(DISTINCT p.p_partkey) AS unique_parts_supplied,
+    AVG(sp.ps_supplycost) AS avg_supply_cost
+FROM 
+    SupplierPerformance spp
+JOIN 
+    partsupp ps ON spp.supplier_name = ps.ps_partkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+GROUP BY 
+    spp.supplier_name, spp.total_value_supplied, spp.order_count
+ORDER BY 
+    spp.total_value_supplied DESC
+LIMIT 10;

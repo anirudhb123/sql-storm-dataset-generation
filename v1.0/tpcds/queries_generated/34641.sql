@@ -1,0 +1,63 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_addr_sk, 1 AS hierarchy_level
+    FROM customer
+    WHERE c_customer_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT c.customer_sk, c.c_first_name, c.c_last_name, c.c_current_addr_sk, ch.hierarchy_level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_current_hdemo_sk = ch.c_customer_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY ws.ws_item_sk
+),
+customer_info AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE ca.ca_city IS NOT NULL AND (cd.cd_marital_status IS NULL OR cd.cd_marital_status <> 'D')
+),
+inventory_check AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM inventory inv
+    GROUP BY inv.inv_item_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.ca_city,
+    ci.ca_state,
+    sss.total_quantity,
+    sss.total_net_profit,
+    sss.total_orders,
+    ic.total_inventory,
+    ch.hierarchy_level 
+FROM customer_info ci
+LEFT JOIN sales_summary sss ON ci.c_customer_id = (SELECT MAX(c.c_customer_id) FROM customer c WHERE c.c_current_cdemo_sk = ci.cd_demo_sk)
+LEFT JOIN inventory_check ic ON sss.ws_item_sk = ic.inv_item_sk
+LEFT JOIN customer_hierarchy ch ON ci.c_customer_id = ch.c_customer_sk
+WHERE (ci.gender_rank <= 10 OR ci.gender_rank IS NULL)
+AND (ic.total_inventory > 0 OR ic.total_inventory IS NULL)
+ORDER BY ci.ca_state, sss.total_net_profit DESC;

@@ -1,0 +1,55 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        1 AS level
+    FROM
+        title mt
+    JOIN
+        movie_link ml ON mt.id = ml.movie_id
+    WHERE
+        mt.production_year > 2000  -- Filter for more recent movies
+
+    UNION ALL
+
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM
+        movie_hierarchy mh
+    JOIN
+        movie_link ml ON mh.linked_movie_id = ml.movie_id
+)
+SELECT
+    ak.name AS actor_name,
+    COUNT(DISTINCT mh.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT mt.title, ', ') AS movie_titles,
+    MIN(mh.production_year) AS first_movie_year,
+    MAX(mh.production_year) AS last_movie_year,
+    SUM(CASE WHEN mt.production_year > 2010 THEN 1 ELSE 0 END) AS post_2010_movies,
+    AVG(DISTINCT (CASE
+        WHEN mt.production_year IS NOT NULL THEN mt.production_year
+    END)) AS avg_production_year
+FROM
+    aka_name ak
+JOIN
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+JOIN
+    title mt ON mh.movie_id = mt.id
+LEFT JOIN
+    complete_cast cc ON mh.movie_id = cc.movie_id
+WHERE
+    ak.name IS NOT NULL
+GROUP BY
+    ak.name
+HAVING
+    COUNT(DISTINCT mh.movie_id) > 5  -- Only actors with more than 5 movies
+ORDER BY
+    total_movies DESC, actor_name;

@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        RANK() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_paid DESC) AS rank,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_quantity DESC) AS dense_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > 0 
+        AND ws.ws_net_paid IS NOT NULL
+),
+TopSales AS (
+    SELECT 
+        ws_order_number,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid
+    FROM 
+        RankedSales
+    WHERE 
+        rank = 1 
+    GROUP BY 
+        ws_order_number
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        customer c 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status IS NOT NULL OR cd.cd_gender IN ('M', 'F')
+),
+SalesSummary AS (
+    SELECT 
+        sd.cc_call_center_sk,
+        SUM(ts.total_quantity) AS total_sales,
+        SUM(ts.total_net_paid) AS total_revenue
+    FROM 
+        TopSales ts
+    JOIN 
+        call_center cc ON ts.ws_order_number = cc.cc_call_center_id
+    GROUP BY 
+        cc.cc_call_center_sk
+)
+SELECT 
+    SUM(total_sales) AS grand_total_sales,
+    SUM(total_revenue) AS grand_total_revenue,
+    (SELECT COUNT(*) FROM CustomerDetails WHERE cd_gender IS NOT NULL) AS male_female_count,
+    (SELECT COUNT(*) FROM inventory iv WHERE iv.inv_quantity_on_hand < 10) AS low_stock_items
+FROM 
+    SalesSummary ss
+WHERE 
+    EXISTS (SELECT 1 FROM store s WHERE s.s_number_employees > 50 AND COALESCE(s.s_tax_precentage, 0) > 5)
+    AND NOT EXISTS (SELECT 1 
+                    FROM customer cu 
+                    WHERE cu.c_birth_day IS NOT NULL 
+                    AND (cu.c_birth_month - EXTRACT(MONTH FROM CURRENT_DATE) + 1) % 12 = 0);
+

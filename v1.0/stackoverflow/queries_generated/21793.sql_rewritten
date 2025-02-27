@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RankByDate,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        CASE WHEN rp.RankByDate = 1 THEN 'Newest' 
+             ELSE 'Older' 
+        END AS PostAge
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByDate <= 5 
+),
+TagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS TagPostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.Score,
+    pd.UpVoteCount,
+    pd.DownVoteCount,
+    ts.TagName,
+    ups.DisplayName AS Author,
+    ups.PostCount,
+    ups.TotalScore,
+    ups.GoldBadges,
+    ups.SilverBadges,
+    ups.BronzeBadges
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    TagStats ts ON pd.PostId IN (SELECT PostId FROM Posts WHERE Tags LIKE '%' || ts.TagName || '%')
+LEFT JOIN 
+    UserPostStats ups ON pd.PostId = (SELECT OwnerUserId FROM Posts WHERE Id = pd.PostId)
+ORDER BY 
+    pd.CreationDate DESC, 
+    pd.Score DESC
+LIMIT 50;

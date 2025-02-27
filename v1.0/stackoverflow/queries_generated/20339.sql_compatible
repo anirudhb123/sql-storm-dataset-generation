@@ -1,0 +1,64 @@
+
+WITH UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.Reputation
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReopenCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS LatestHistory
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+RankedPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        ud.UserId,
+        ud.Reputation,
+        pd.CommentCount,
+        pd.CloseCount,
+        pd.CloseReopenCount,
+        RANK() OVER (ORDER BY pd.CommentCount DESC, pd.CreationDate ASC) AS PopularityRank
+    FROM PostDetails pd
+    JOIN Users ud ON pd.OwnerUserId = ud.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.UserId,
+    rp.Reputation,
+    rp.CommentCount,
+    rp.CloseCount,
+    rp.CloseReopenCount,
+    CASE 
+        WHEN rp.PopularityRank <= 5 THEN 'Highly Engaged'
+        WHEN rp.CommentCount = 0 THEN 'No Engagement'
+        ELSE 'Moderately Engaged'
+    END AS EngagementLevel,
+    CONCAT(COALESCE(u.DisplayName, 'Unknown User'), ' has ', 
+        COALESCE(ud.TotalVotes, 0), ' total votes with ', 
+        COALESCE(ud.UpVotes, 0), ' upvotes and ', 
+        COALESCE(ud.DownVotes, 0), ' downvotes.') AS VoteStatistics
+FROM RankedPosts rp
+LEFT JOIN UserVoteSummary ud ON rp.UserId = ud.UserId
+WHERE rp.CloseCount < 2
+ORDER BY rp.CommentCount DESC, rp.CloseReopenCount DESC, rp.CreationDate DESC
+LIMIT 10 OFFSET 5;

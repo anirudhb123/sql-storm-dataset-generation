@@ -1,0 +1,71 @@
+
+WITH SupplierCost AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_name,
+        sc.total_supply_cost
+    FROM 
+        SupplierCost sc
+    JOIN 
+        supplier s ON s.s_suppkey = sc.s_suppkey
+    WHERE 
+        sc.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierCost)
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+FilteredOrders AS (
+    SELECT 
+        od.o_orderkey,
+        od.o_orderdate,
+        od.total_value
+    FROM 
+        OrderDetails od
+    JOIN 
+        TopSuppliers ts ON ts.s_name LIKE '%' || (SELECT s_name FROM supplier WHERE s_suppkey = l.l_suppkey)
+    WHERE 
+        od.total_value > 10000
+),
+FinalResults AS (
+    SELECT 
+        fo.o_orderkey,
+        fo.o_orderdate,
+        fo.total_value,
+        COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM 
+        FilteredOrders fo
+    JOIN 
+        lineitem l ON fo.o_orderkey = l.l_orderkey
+    GROUP BY 
+        fo.o_orderkey, fo.o_orderdate, fo.total_value
+)
+SELECT 
+    fr.o_orderkey,
+    fr.o_orderdate,
+    fr.total_value,
+    fr.part_count
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.total_value DESC
+FETCH FIRST 10 ROWS ONLY;

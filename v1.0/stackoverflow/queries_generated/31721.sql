@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenedDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(ps.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(ps.DownVotes, 0)) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts p ON u.Id = p.OwnerDisplayName
+    LEFT JOIN 
+        PostVoteSummary ps ON p.PostId = ps.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 10
+)
+
+SELECT 
+    tp.UserId,
+    tp.DisplayName,
+    tp.TotalViews,
+    tp.TotalUpVotes,
+    tp.TotalDownVotes,
+    tp.PostCount,
+    COUNT(DISTINCT phd.PostId) AS ClosedPostsCount,
+    COUNT(DISTINCT CASE WHEN phd.ReopenedDate IS NOT NULL THEN phd.PostId END) AS ReopenedPostsCount
+FROM 
+    TopUsers tp
+LEFT JOIN 
+    PostHistoryDetails phd ON tp.PostCount > 0
+GROUP BY 
+    tp.UserId, tp.DisplayName, tp.TotalViews, tp.TotalUpVotes, tp.TotalDownVotes, tp.PostCount
+ORDER BY 
+    tp.TotalViews DESC;

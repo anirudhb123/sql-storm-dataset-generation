@@ -1,0 +1,56 @@
+WITH UserReputation AS (
+    SELECT Id, Reputation,
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank,
+           COUNT(*) OVER () AS TotalUsers
+    FROM Users
+),
+PostStatistics AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.ViewCount, 
+           p.CreationDate,
+           COALESCE(a.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+           COALESCE(c.CommentCount, 0) AS CommentCount,
+           SUM(v.VoteTypeId = 2) AS UpVotes,
+           SUM(v.VoteTypeId = 3) AS DownVotes,
+           (SELECT COUNT(*)
+            FROM Comments 
+            WHERE PostId = p.Id) AS TotalComments
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.AcceptedAnswerId 
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.ViewCount, p.CreationDate, a.AcceptedAnswerId, c.CommentCount
+),
+TagAnalysis AS (
+    SELECT t.TagName, 
+           COUNT(DISTINCT p.Id) AS PostCount,
+           AVG(p.ViewCount) AS AvgViewCount,
+           SUM(CASE WHEN p.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' THEN 1 ELSE 0 END) AS OldPostsCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+),
+OuterJoinSample AS (
+    SELECT u.DisplayName, 
+           ur.Reputation,
+           ps.PostId, 
+           ps.Title, 
+           ps.ViewCount, 
+           ta.TagName
+    FROM UserReputation ur
+    LEFT JOIN PostStatistics ps ON ur.Rank = (SELECT MIN(Rank) FROM UserReputation WHERE Reputation < ur.Reputation)
+    LEFT JOIN Tags ta ON ps.Title LIKE '%' || ta.TagName || '%'
+    JOIN Users u ON ur.Id = u.Id
+    WHERE ur.TotalUsers > 1000
+)
+
+SELECT *,
+       CASE WHEN PostId IS NULL THEN 'No Published Posts' ELSE 'Has Published Posts' END AS PostStatus,
+       CASE WHEN CommentCount > 5 THEN 'Highly Discussed' ELSE 'Less Discussed' END AS DiscussionLevel
+FROM OuterJoinSample
+WHERE (ViewCount > 100 OR TagName IS NULL)
+ORDER BY ur.Reputation DESC, ps.ViewCount DESC;

@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    rk.role AS role,
+    COALESCE(p.info, 'N/A') AS person_info,
+    COUNT(mh.movie_id) OVER (PARTITION BY ak.name ORDER BY mt.production_year ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS total_movies_linked,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY mt.production_year DESC) AS recent_movie_rank
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    role_type rk ON ci.role_id = rk.id
+LEFT JOIN 
+    person_info p ON ak.person_id = p.person_id
+LEFT JOIN 
+    MovieHierarchy mh ON mt.id = mh.movie_id
+WHERE 
+    mt.production_year >= 2000
+    AND ak.name IS NOT NULL
+    AND ak.name NOT LIKE '%[unkown]%'
+ORDER BY 
+    ak.name ASC, mt.production_year DESC;
+
+This SQL query:
+1. Utilizes a **recursive CTE (MovieHierarchy)** to construct a hierarchy of movies based on linked relationships.
+2. Joins multiple tables to gather information about actors, roles, and movies.
+3. Implements **window functions** to get the count of linked movies per actor and assigns a rank based on the most recent movie.
+4. Includes **NULL handling** using `COALESCE` to ensure that information is displayed properly.
+5. Contains complicated predicates, including filtering for movies made after 2000 and excluding specific values in the actor's name.

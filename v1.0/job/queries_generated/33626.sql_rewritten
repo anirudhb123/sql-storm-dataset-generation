@@ -1,0 +1,38 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.id AS cast_id,
+        a.id AS person_id,
+        a.name AS actor_name,
+        m.title AS movie_title,
+        COALESCE(m.production_year, 0) AS production_year,
+        1 AS level
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN aka_title m ON c.movie_id = m.movie_id
+    WHERE m.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ca.id AS cast_id,
+        a.id AS person_id,
+        a.name AS actor_name,
+        m.title AS movie_title,
+        COALESCE(m.production_year, 0) AS production_year,
+        ah.level + 1
+    FROM cast_info ca
+    JOIN aka_name a ON ca.person_id = a.person_id
+    JOIN aka_title m ON ca.movie_id = m.movie_id
+    JOIN ActorHierarchy ah ON ca.movie_id = ah.movie_id AND ca.person_id <> ah.person_id
+)
+
+SELECT 
+    ah.actor_name,
+    COUNT(ah.cast_id) AS total_movies,
+    MAX(ah.production_year) AS most_recent_year,
+    STRING_AGG(DISTINCT ah.movie_title, '; ') AS movie_titles,
+    RANK() OVER (ORDER BY COUNT(ah.cast_id) DESC) AS actor_rank
+FROM ActorHierarchy ah
+GROUP BY ah.actor_name
+HAVING COUNT(ah.cast_id) > 5
+ORDER BY actor_rank;

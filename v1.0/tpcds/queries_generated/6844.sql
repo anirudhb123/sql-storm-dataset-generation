@@ -1,0 +1,56 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS num_customers,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) - 30 FROM date_dim d)  -- Last 30 days of sales
+    GROUP BY 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_income_band_sk
+),
+IncomeStats AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        SUM(cs.cs_net_profit) AS total_sales_profit
+    FROM 
+        catalog_sales cs
+    JOIN 
+        household_demographics hd ON cs.cs_bill_cdemo_sk = hd.hd_demo_sk
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        cs.cs_sold_date_sk >= (SELECT MAX(d.d_date_sk) - 30 FROM date_dim d)  -- Last 30 days of catalog sales
+    GROUP BY 
+        ib.ib_income_band_sk, 
+        ib.ib_lower_bound, 
+        ib.ib_upper_bound
+)
+SELECT 
+    cs.cd_gender,
+    cs.cd_marital_status,
+    is.ib_lower_bound,
+    is.ib_upper_bound,
+    cs.num_customers,
+    COALESCE(is.total_sales_profit, 0) AS total_sales_profit,
+    cs.total_net_profit
+FROM 
+    CustomerStats cs
+LEFT JOIN 
+    IncomeStats is ON cs.cd_income_band_sk = is.ib_income_band_sk
+ORDER BY 
+    cs.cd_gender, 
+    cs.cd_marital_status, 
+    is.ib_lower_bound;

@@ -1,0 +1,39 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        @row_number := IF(@prev_post_type = p.PostTypeId, @row_number + 1, 1) AS Rank,
+        @prev_post_type := p.PostTypeId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id,
+        (SELECT @row_number := 0, @prev_post_type := NULL) AS vars
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL 1 YEAR
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.CreationDate, p.PostTypeId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.TotalComments,
+    rp.UpVotes,
+    rp.DownVotes
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Rank <= 10
+ORDER BY 
+    rp.PostId;

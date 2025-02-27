@@ -1,0 +1,60 @@
+
+WITH Address_Info AS (
+    SELECT 
+        ca.cust_address_sk,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, 
+               COALESCE(CONCAT(' Suite ', ca.ca_suite_number), ''), ', ', 
+               ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip) AS full_address
+    FROM 
+        customer_address ca
+),
+Enhanced_Stats AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(c.c_customer_sk) AS total_customers,
+        SUM(cd.cd_dep_count) AS total_dependents,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+),
+Sales_Info AS (
+    SELECT 
+        ws.ws_ship_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_ship_date_sk
+),
+Final_Benchmark AS (
+    SELECT 
+        ei.cd_gender,
+        ei.cd_marital_status,
+        ai.full_address,
+        si.total_quantity,
+        si.total_sales
+    FROM 
+        Enhanced_Stats ei
+    LEFT JOIN 
+        Address_Info ai ON ei.total_customers > 0
+    LEFT JOIN 
+        Sales_Info si ON si.ws_ship_date_sk = CURRENT_DATE
+)
+SELECT 
+    fb.cd_gender,
+    fb.cd_marital_status,
+    fb.full_address,
+    fb.total_quantity,
+    fb.total_sales
+FROM 
+    Final_Benchmark fb
+WHERE 
+    fb.total_sales > 1000
+ORDER BY 
+    fb.total_sales DESC;

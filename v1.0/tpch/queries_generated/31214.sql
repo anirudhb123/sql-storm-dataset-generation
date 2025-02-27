@@ -1,0 +1,61 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        s.s_acctbal, 
+        1 AS level,
+        CAST(s.s_name AS VARCHAR(100)) AS hierarchy_path
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT 
+        s2.s_suppkey, 
+        s2.s_name, 
+        s2.s_nationkey, 
+        s2.s_acctbal, 
+        sh.level + 1,
+        CAST(CONCAT(sh.hierarchy_path, ' -> ', s2.s_name) AS VARCHAR(100))
+    FROM supplier s2
+    JOIN SupplierHierarchy sh ON s2.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+AggregatedData AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        AVG(l.l_quantity) AS average_quantity,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    a.p_name AS part_name,
+    a.total_supply_cost,
+    a.supplier_count,
+    o.total_price,
+    o.average_quantity,
+    COALESCE(NULLIF(o.rank, 0), 'Not Ranked') AS order_rank
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN AggregatedData a ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = a.p_partkey)
+JOIN OrderSummary o ON o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = a.p_partkey)
+WHERE s.s_acctbal IS NOT NULL
+ORDER BY r.r_name, n.n_name, total_supply_cost DESC;

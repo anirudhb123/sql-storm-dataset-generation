@@ -1,0 +1,83 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderpriority,
+        l.l_partkey,
+        l.l_orderkey AS parent_order,
+        l.l_discount,
+        l.l_extendedprice,
+        l.l_tax,
+        l.l_returnflag,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS rn
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT 
+        oh.o_orderkey,
+        oh.o_orderpriority,
+        l.l_partkey,
+        oh.l_orderkey AS parent_order,
+        l.l_discount,
+        l.l_extendedprice,
+        l.l_tax,
+        l.l_returnflag,
+        ROW_NUMBER() OVER (PARTITION BY oh.o_orderkey ORDER BY l.l_linenumber) AS rn
+    FROM 
+        OrderHierarchy oh
+    JOIN 
+        lineitem l ON oh.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'R' AND oh.rn = 1
+),
+SupplierAggregates AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        COUNT(DISTINCT s.s_suppkey) AS unique_suppliers
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '2022-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COALESCE(SA.total_supplycost, 0) AS total_supplycost,
+    COALESCE(CO.total_orders, 0) AS total_orders,
+    COALESCE(AVG(CO.total_spent), 0) AS avg_spent,
+    COUNT(oh.o_orderkey) AS total_related_orders
+FROM 
+    part p
+LEFT JOIN 
+    SupplierAggregates SA ON p.p_partkey = SA.ps_partkey
+LEFT JOIN 
+    CustomerOrders CO ON SA.unique_suppliers > 2
+LEFT JOIN 
+    OrderHierarchy oh ON p.p_partkey = oh.l_partkey
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand
+HAVING 
+    AVG(COALESCE(CO.total_spent, 0)) > 1000
+ORDER BY 
+    total_supplycost DESC, total_orders DESC;

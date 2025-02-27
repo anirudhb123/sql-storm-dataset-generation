@@ -1,0 +1,77 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, CURRENT_TIMESTAMP)
+),
+supplier_details AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > 10000
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+high_value_customers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal,
+        ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS value_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_mktsegment = 'BUILDING'
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    n.n_name, 
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    COALESCE(SUM(os.revenue), 0) AS total_revenue,
+    MAX(CASE WHEN hv.value_rank <= 10 THEN hv.c_acctbal ELSE NULL END) AS highest_cust_value,
+    MIN(s.total_supply_cost) AS min_supply_cost,
+    ARRAY_AGG(DISTINCT s.s_name) AS high_cost_suppliers
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    ranked_orders o ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = 
+        (SELECT p.p_partkey FROM part p WHERE p.p_size > 20 ORDER BY p.p_retailprice DESC LIMIT 1) 
+        ORDER BY ps.ps_supplycost ASC LIMIT 1)
+LEFT JOIN 
+    order_summary os ON o.o_orderkey = os.o_orderkey
+LEFT JOIN 
+    high_value_customers hv ON hv.c_custkey = o.o_custkey
+WHERE 
+    s.s_name IS NOT NULL 
+    AND n.n_name NOT LIKE '%land%'
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5 
+    OR EXISTS (SELECT 1 FROM supplier x WHERE x.s_acctbal < 1000 AND x.s_nationkey = n.n_nationkey)
+ORDER BY 
+    total_revenue DESC;

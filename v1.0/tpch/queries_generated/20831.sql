@@ -1,0 +1,68 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) as rn,
+        (SELECT COUNT(*)
+         FROM lineitem l
+         WHERE l.l_orderkey = o.o_orderkey 
+           AND l.l_discount > 0) as discount_count
+    FROM orders o
+    WHERE o.o_totalprice IS NOT NULL
+), SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_size,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_size IS NULL THEN 'Size Unknown'
+            ELSE 
+                CASE 
+                    WHEN p.p_retailprice < 100 THEN 'Low Price'
+                    WHEN p.p_retailprice BETWEEN 100 AND 500 THEN 'Medium Price'
+                    ELSE 'High Price'
+                END
+        END AS price_category
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL AND p.p_size < 100
+), LineItemStats AS (
+    SELECT 
+        l.l_partkey,
+        COUNT(*) AS lineitem_count,
+        AVG(l.l_discount) AS avg_discount,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM lineitem l
+    GROUP BY l.l_partkey
+)
+SELECT 
+    r.n_name AS nation_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(ld.lineitem_count) AS total_lineitems,
+    SUM(s.total_supply_value) AS total_supply_value,
+    MAX(lst.last_ship_date) AS latest_ship_date
+FROM nation r
+LEFT JOIN customer c ON c.c_nationkey = r.n_nationkey
+JOIN orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN RankedOrders ro ON ro.o_orderkey = o.o_orderkey
+JOIN LineItemStats lst ON lst.l_partkey = o.o_orderkey
+LEFT JOIN SupplierDetails s ON s.s_suppkey IN (
+    SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (
+        SELECT pp.p_partkey FROM FilteredParts pp
+    )
+)
+WHERE ro.discount_count > 0 OR s.total_supply_value IS NOT NULL
+GROUP BY r.n_name
+HAVING SUM(o.o_totalprice) > 5000
+ORDER BY r.n_name ASC, order_count DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

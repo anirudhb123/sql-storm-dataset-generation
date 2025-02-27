@@ -1,0 +1,65 @@
+
+WITH RECURSIVE MovieTree AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        CAST(NULL AS INTEGER) AS parent_movie_id,
+        0 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+    
+    UNION ALL
+
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        mt.movie_id AS parent_movie_id,
+        mt.level + 1
+    FROM 
+        aka_title t
+    JOIN 
+        movie_link ml ON t.id = ml.linked_movie_id
+    JOIN 
+        MovieTree mt ON ml.movie_id = mt.movie_id
+)
+SELECT
+    mv.title AS MovieTitle,
+    mv.production_year AS ProductionYear,
+    COALESCE(fa.name, 'Unknown') AS FirstActor,
+    COALESCE(pv.name, 'Unknown') AS ProducerName,
+    COUNT(DISTINCT kc.keyword) AS KeywordCount,
+    ROW_NUMBER() OVER (PARTITION BY mv.production_year ORDER BY mv.title) AS RankWithinYear,
+    CASE 
+        WHEN mv.production_year IS NULL THEN 'Year Not Specified'
+        ELSE CAST(mv.production_year AS VARCHAR)
+    END AS YearDescription
+FROM 
+    MovieTree mv
+LEFT JOIN 
+    complete_cast cc ON mv.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name fa ON ci.person_id = fa.person_id AND ci.nr_order = 1
+LEFT JOIN 
+    movie_companies mc ON mv.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name pv ON mc.company_id = pv.id AND pv.country_code IS NOT NULL
+LEFT JOIN 
+    movie_keyword mk ON mv.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+WHERE 
+    (mv.production_year BETWEEN 2000 AND 2022 OR mv.production_year IS NULL)
+AND 
+    (fa.name IS NOT NULL OR fa.name IS NULL)
+GROUP BY 
+    mv.movie_id, mv.title, mv.production_year, fa.name, pv.name
+HAVING 
+    COUNT(DISTINCT kc.keyword) > 0
+ORDER BY 
+    RankWithinYear, MovieTitle;

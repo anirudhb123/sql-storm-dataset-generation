@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(*) OVER (PARTITION BY p.PostTypeId) AS TotalPosts
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PostEngagement AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        (COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0)) AS NetVotes,
+        COALESCE(SUM(c.Id IS NOT NULL)::int, 0) AS CommentCount,
+        (SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId = rp.PostId AND ph.PostHistoryTypeId = 10) AS CloseCount
+    FROM
+        RankedPosts rp
+    LEFT JOIN
+        Votes v ON rp.PostId = v.PostId
+    LEFT JOIN
+        Comments c ON rp.PostId = c.PostId
+    GROUP BY
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score
+),
+PostStatistics AS (
+    SELECT
+        pe.PostId,
+        pe.Title,
+        pe.CreationDate,
+        pe.Score,
+        pe.NetVotes,
+        pe.CommentCount,
+        pe.CloseCount,
+        CASE
+            WHEN pe.CloseCount > 0 THEN 'Closed'
+            WHEN pe.NetVotes > 0 THEN 'Active'
+            ELSE 'Inactive'
+        END AS PostStatus,
+        ROUND(AVG(COALESCE(u.Reputation, 0)), 2) AS AvgUserReputation
+    FROM
+        PostEngagement pe
+    LEFT JOIN
+        Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = pe.PostId)
+    GROUP BY
+        pe.PostId, pe.Title, pe.CreationDate, pe.Score, pe.NetVotes, pe.CommentCount, pe.CloseCount
+)
+SELECT
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.NetVotes,
+    ps.CommentCount,
+    ps.CloseCount,
+    ps.PostStatus,
+    ps.AvgUserReputation,
+    CASE
+        WHEN ps.PostStatus = 'Closed' THEN 'N/A'
+        ELSE (SELECT COUNT(*) FROM PostLinks pl WHERE pl.PostId = ps.PostId)
+    END AS TotalLinks
+FROM
+    PostStatistics ps
+WHERE
+    ps.AvgUserReputation > (SELECT AVG(Reputation) FROM Users) 
+    AND ps.PostStatus = 'Active'
+ORDER BY
+    ps.Score DESC,
+    ps.ViewCount DESC
+LIMIT 100;
+

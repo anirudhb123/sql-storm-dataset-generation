@@ -1,0 +1,73 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AvgViews
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.OwnerUserId
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        UB.BadgeCount,
+        UB.GoldCount,
+        UB.SilverCount,
+        UB.BronzeCount,
+        PS.PostCount,
+        PS.TotalScore,
+        PS.AvgViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserBadges UB ON U.Id = UB.UserId
+    LEFT JOIN 
+        PostStats PS ON U.Id = PS.OwnerUserId
+),
+RankedUsers AS (
+    SELECT 
+        U.*,
+        RANK() OVER (ORDER BY COALESCE(PostCount, 0) DESC, COALESCE(TotalScore, 0) DESC) AS UserRank
+    FROM 
+        UserPostStats U
+)
+SELECT 
+    R.UserId,
+    R.DisplayName,
+    R.BadgeCount,
+    R.GoldCount,
+    R.SilverCount,
+    R.BronzeCount,
+    COALESCE(R.PostCount, 0) AS PostsCreated,
+    COALESCE(R.TotalScore, 0) AS Score,
+    COALESCE(R.AvgViews, 0) AS AvgViews,
+    CASE 
+        WHEN R.UserRank IS NULL THEN 'Unranked'
+        ELSE CAST(R.UserRank AS VARCHAR)
+    END AS RankingStatus
+FROM 
+    RankedUsers R
+WHERE 
+    R.BadgeCount > 0 OR R.PostCount > 0
+ORDER BY 
+    R.UserRank
+LIMIT 10;

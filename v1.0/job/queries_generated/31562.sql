@@ -1,0 +1,69 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        NULL::integer AS parent_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id, 
+        at.title, 
+        at.production_year, 
+        mh.movie_id AS parent_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    INNER JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    INNER JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+MovieInfoWithKeywords AS (
+    SELECT 
+        mh.movie_id, 
+        mh.title, 
+        mh.production_year, 
+        COUNT(mk.keyword_id) AS keyword_count,
+        ARRAY_AGG(DISTINCT mk.keyword) AS keywords
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+),
+TopMovies AS (
+    SELECT 
+        mib.movie_id, 
+        mib.title, 
+        mib.production_year,
+        mib.keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY mib.production_year ORDER BY mib.keyword_count DESC) AS rn
+    FROM 
+        MovieInfoWithKeywords mib
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    CASE 
+        WHEN tm.keyword_count IS NOT NULL THEN tm.keyword_count 
+        ELSE 0 
+    END AS total_keywords,
+    COALESCE(string_agg(k.keyword, ', '), 'No keywords') AS keywords
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_keyword mk ON tm.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    tm.rn <= 5
+GROUP BY 
+    tm.movie_id, tm.title, tm.production_year, tm.keyword_count
+ORDER BY 
+    tm.production_year DESC, total_keywords DESC;

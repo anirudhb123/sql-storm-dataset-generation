@@ -1,0 +1,61 @@
+
+WITH CustomerAddressDetails AS (
+    SELECT 
+        ca.ca_address_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country,
+        c.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+StringProcessingBenchmark AS (
+    SELECT 
+        ca.ca_address_id,
+        customer_name,
+        LENGTH(customer_name) AS name_length,
+        REGEXP_REPLACE(customer_name, '[^a-zA-Z]', '') AS cleaned_name,
+        UPPER(customer_name) AS uppercased_name,
+        LOWER(customer_name) AS lowercased_name,
+        REPLACE(customer_name, ' ', '-') AS hyphenated_name,
+        r.reason_desc,
+        LENGTH(r.reason_desc) AS reason_length
+    FROM 
+        CustomerAddressDetails ca
+    LEFT JOIN 
+        reason r ON r.r_reason_sk = (SELECT TOP 1 r_reason_sk FROM reason ORDER BY NEWID())
+),
+FinalBenchmark AS (
+    SELECT 
+        customer_name,
+        AVG(name_length) AS avg_name_length,
+        COUNT(DISTINCT cleaned_name) AS distinct_cleaned_names,
+        COUNT(DISTINCT uppercased_name) AS distinct_uppercased_names,
+        COUNT(DISTINCT lowercased_name) AS distinct_lowercased_names,
+        COUNT(DISTINCT hyphenated_name) AS distinct_hyphenated_names,
+        SUM(reason_length) AS total_reason_length
+    FROM 
+        StringProcessingBenchmark
+    GROUP BY 
+        customer_name
+)
+SELECT 
+    customer_name,
+    avg_name_length,
+    distinct_cleaned_names,
+    distinct_uppercased_names,
+    distinct_lowercased_names,
+    distinct_hyphenated_names,
+    total_reason_length
+FROM 
+    FinalBenchmark
+ORDER BY 
+    avg_name_length DESC
+LIMIT 10;

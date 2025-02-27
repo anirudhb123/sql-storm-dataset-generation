@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal) 
+        FROM supplier
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+), DateRange AS (
+    SELECT DISTINCT l_shipdate
+    FROM lineitem 
+    WHERE l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+), AggregatedSales AS (
+    SELECT p.p_partkey, 
+           p.p_name,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           RANK() OVER (PARTITION BY l.l_shipdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_sales
+    FROM lineitem l
+    JOIN part p ON l.l_partkey = p.p_partkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY p.p_partkey, p.p_name
+), TopSales AS (
+    SELECT part_name, total_sales
+    FROM AggregatedSales
+    WHERE rank_sales <= 10
+)
+SELECT 
+    sh.s_name,
+    sh.s_nationkey,
+    ts.part_name,
+    ts.total_sales
+FROM SupplierHierarchy sh
+LEFT JOIN TopSales ts 
+ON sh.s_nationkey = (
+    SELECT n.n_nationkey 
+    FROM nation n 
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_suppkey = sh.s_suppkey
+)
+WHERE ts.total_sales IS NOT NULL
+ORDER BY ts.total_sales DESC, sh.s_name;

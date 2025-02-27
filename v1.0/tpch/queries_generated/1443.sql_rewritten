@@ -1,0 +1,32 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment,
+           CAST(s.s_name AS VARCHAR(100)) AS supplier_chain
+    FROM supplier s
+    WHERE s.s_nationkey = 1  
+    UNION ALL
+    SELECT s1.s_suppkey, s1.s_name, s1.s_nationkey, s1.s_acctbal, s1.s_comment,
+           CONCAT(sha.supplier_chain, ' -> ', s1.s_name)
+    FROM supplier s1
+    JOIN SupplierHierarchy sha ON s1.s_nationkey = sha.s_nationkey
+    WHERE s1.s_suppkey <> sha.s_suppkey
+),
+SalesData AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+FilteredSales AS (
+    SELECT sd.o_orderkey, sd.o_orderdate, sd.revenue,
+           ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM sd.o_orderdate) ORDER BY sd.revenue DESC) AS rank
+    FROM SalesData sd
+    WHERE sd.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+)
+SELECT sh.supplier_chain, SUM(fs.revenue) AS total_revenue
+FROM SupplierHierarchy sh
+LEFT JOIN FilteredSales fs ON sh.s_suppkey = fs.o_orderkey
+WHERE sh.s_acctbal IS NOT NULL
+GROUP BY sh.supplier_chain
+HAVING SUM(fs.revenue) > 10000
+ORDER BY total_revenue DESC
+LIMIT 10;

@@ -1,0 +1,66 @@
+WITH RankedTitles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rnk
+    FROM
+        aka_title t
+    WHERE
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%')
+),
+ActorMovieCount AS (
+    SELECT
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM
+        cast_info c
+    GROUP BY
+        c.person_id
+),
+NullableKeywords AS (
+    SELECT
+        m.movie_id,
+        COALESCE(k.keyword, 'No Keywords') AS keyword
+    FROM
+        movie_keyword m
+    LEFT JOIN
+        keyword k ON m.keyword_id = k.id
+),
+MovieInfoDetailed AS (
+    SELECT
+        m.movie_id,
+        JSON_AGG(mi.info) AS movie_info_details
+    FROM
+        movie_info m
+    JOIN
+        movie_info_idx mi ON m.movie_id = mi.movie_id
+    GROUP BY
+        m.movie_id
+)
+SELECT
+    a.name AS actor_name,
+    rt.title AS movie_title,
+    rt.production_year,
+    ak.keyword,
+    (CASE 
+        WHEN amc.movie_count > 5 THEN 'Frequent Actor'
+        ELSE 'Occasional Actor' 
+    END) AS actor_frequent_type,
+    COALESCE(md.movie_info_details, 'No Additional Info') AS info_details
+FROM
+    aka_name a
+JOIN
+    cast_info c ON a.person_id = c.person_id
+JOIN
+    RankedTitles rt ON c.movie_id = rt.title_id
+LEFT JOIN
+    ActorMovieCount amc ON c.person_id = amc.person_id
+LEFT JOIN
+    NullableKeywords ak ON c.movie_id = ak.movie_id
+LEFT JOIN
+    MovieInfoDetailed md ON c.movie_id = md.movie_id
+WHERE
+    rt.rnk <= 3
+ORDER BY
+    rt.production_year DESC, actor_name, movie_title;

@@ -1,0 +1,49 @@
+-- Performance Benchmark Query
+
+-- This query retrieves post statistics and user details for performance benchmarking
+
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        u.Location AS OwnerLocation,
+        COUNT(c.Id) AS CommentCount,
+        AVG(v.BountyAmount) AS AverageBountyAmount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation, u.Location
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.AnswerCount,
+    ps.CommentCount AS TotalComments,
+    ps.FavoriteCount,
+    ps.OwnerDisplayName,
+    ps.OwnerReputation,
+    ps.OwnerLocation,
+    ps.AverageBountyAmount
+FROM 
+    PostStatistics ps
+ORDER BY 
+    ps.ViewCount DESC
+LIMIT 100; -- Limit to the top 100 posts by view count for benchmarking

@@ -1,0 +1,40 @@
+WITH RecentOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_nationkey
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATEADD(MONTH, -6, CURRENT_DATE)
+),
+SupplierAggregates AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_avail_qty,
+           COUNT(DISTINCT s.s_suppkey) AS num_suppliers
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+)
+SELECT p.p_name, 
+       p.p_retailprice, 
+       ra.total_recent_orders,
+       sa.total_avail_qty,
+       sa.num_suppliers,
+       COALESCE(n.n_name, 'Unknown') AS supplier_nation,
+       (SELECT AVG(l.l_extendedprice * (1 - l.l_discount))
+        FROM lineitem l 
+        WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM RecentOrders o)
+        AND l.l_partkey = p.p_partkey) AS average_revenue
+FROM part p
+LEFT JOIN (
+    SELECT ps.ps_partkey, COUNT(o.o_orderkey) AS total_recent_orders
+    FROM RecentOrders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    GROUP BY ps.ps_partkey
+) ra ON p.p_partkey = ra.ps_partkey
+LEFT JOIN SupplierAggregates sa ON p.p_partkey = sa.ps_partkey
+LEFT JOIN supplier s ON sa.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice)
+    FROM part p2
+    WHERE p2.p_size > 10
+)
+ORDER BY average_revenue DESC NULLS LAST, p.p_name;

@@ -1,0 +1,93 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+), cast_details AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.nr_order) AS role_count,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY COUNT(DISTINCT ci.nr_order) DESC) AS rnk
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id, ak.name
+), movie_info_with_keywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mt.id, mt.title
+), filtered_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mwi.keywords,
+        cd.actor_name,
+        cd.role_count
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_info_with_keywords mwi ON mh.movie_id = mwi.movie_id
+    LEFT JOIN 
+        cast_details cd ON mh.movie_id = cd.movie_id
+    WHERE 
+        mh.depth < 3 -- Limiting to a depth of 3 for the hierarchy
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.keywords,
+    f.actor_name,
+    f.role_count
+FROM 
+    filtered_movies f
+WHERE 
+    f.role_count = (SELECT MAX(role_count) FROM cast_details cd2 WHERE cd2.movie_id = f.movie_id)
+    AND f.actor_name IS NOT NULL
+ORDER BY 
+    f.production_year DESC
+LIMIT 50
+OFFSET 10;
+
+-- Additional measure of intrigue with NULL logic:
+SELECT 
+    f.title,
+    COALESCE(f.keywords, 'No Keywords') AS keywords,
+    CASE 
+        WHEN f.role_count IS NULL THEN 'No Roles'
+        ELSE f.actor_name
+    END AS actor_name
+FROM 
+    filtered_movies f
+WHERE 
+    f.actor_name IS NOT NULL OR f.keywords IS NULL;
+This SQL query incorporates recursive CTEs to build a movie hierarchy, aggregates and joins multiple related tables, applies window functions for ranking, and includes complex predicates regarding movie depth and role counts while handling NULL values thoughtfully.

@@ -1,0 +1,87 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(MAX(CASE WHEN pc.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS HasUpvote,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadgeCount,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadgeCount,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ARRAY_AGG(DISTINCT cr.Name) AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON cr.Id = CAST(ph.Comment AS INTEGER)
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+),
+EnhancedStats AS (
+    SELECT 
+        rp.*,
+        cp.CloseReasons
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+),
+FinalOutput AS (
+    SELECT 
+        e.*,
+        CASE 
+            WHEN e.RankScore = 1 THEN 'Top Post'
+            WHEN e.RankScore <= 5 THEN 'High Scorer'
+            WHEN e.RankScore IS NULL THEN 'No Score'
+            ELSE 'Regular'
+        END AS PostCategory,
+        CASE 
+            WHEN e.HasUpvote > 0 THEN 'Yes'
+            ELSE 'No'
+        END AS Upvoted,
+        (SELECT COUNT(*) FROM Posts AS sub WHERE sub.ParentId = e.PostId) AS AnswerCount,
+        (SELECT COUNT(*) FROM Comments AS sub WHERE sub.PostId = e.PostId) AS TotalComments
+    FROM 
+        EnhancedStats e
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.CreationDate,
+    f.Score,
+    f.CommentCount,
+    f.CloseReasons,
+    f.PostCategory,
+    f.Upvoted,
+    f.AnswerCount,
+    f.TotalComments,
+    STRING_AGG(DISTINCT COALESCE(f.CloseReasons, 'No Close Reasons'), ', ') AS CombinedCloseReasons
+FROM 
+    FinalOutput f
+GROUP BY 
+    f.PostId, f.Title, f.CreationDate, f.Score, f.CommentCount, f.CloseReasons, 
+    f.PostCategory, f.Upvoted, f.AnswerCount, f.TotalComments
+ORDER BY 
+    f.Score DESC, f.PostId
+LIMIT 100;

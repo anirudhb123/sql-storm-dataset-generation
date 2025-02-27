@@ -1,0 +1,83 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS title_rank,
+        COUNT(DISTINCT m.company_id) OVER (PARTITION BY a.id) AS company_count,
+        MAX(c.kind) AS highest_kind
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_companies m ON a.id = m.movie_id
+    LEFT JOIN 
+        company_type c ON m.company_type_id = c.id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+ActorMovies AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ' ORDER BY ak.name) AS actors
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        r.title_rank,
+        r.company_count,
+        r.highest_kind,
+        a.actor_count,
+        a.actors
+    FROM 
+        RankedMovies r
+    JOIN 
+        ActorMovies a ON r.movie_id = a.movie_id
+    WHERE 
+        a.actor_count > 5 
+        AND r.company_count >= 2
+        AND r.highest_kind IS NOT NULL
+        AND r.production_year BETWEEN 1990 AND 2020
+),
+HighRankedMovies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN title_rank IN (1, 2) THEN 'Top Title'
+            WHEN title_rank IN (3, 4) THEN 'Middle Title'
+            ELSE 'Other Title'
+        END AS title_category
+    FROM 
+        FilteredMovies
+)
+SELECT 
+    h.movie_id,
+    h.title, 
+    h.production_year,
+    h.actor_count,
+    h.actors,
+    h.title_category,
+    CASE 
+        WHEN MOD(h.production_year, 10) = 0 THEN 'Decade Milestone'
+        ELSE 'Regular Year'
+    END AS production_year_type,
+    COALESCE(NULLIF(h.actors, ''), 'Unknown Actors') AS actor_display
+FROM 
+    HighRankedMovies h
+WHERE 
+    h.production_year = 
+        (SELECT MAX(production_year) 
+         FROM HighRankedMovies 
+         WHERE title_category = 'Top Title')
+ORDER BY 
+    h.production_year DESC, 
+    h.title;

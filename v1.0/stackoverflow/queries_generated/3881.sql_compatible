@@ -1,0 +1,71 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(PH.RevisionCount, 0) AS RevisionCount,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS RevisionCount
+        FROM PostHistory
+        GROUP BY PostId
+    ) PH ON P.Id = PH.PostId
+    LEFT JOIN LATERAL string_to_array(P.Tags, ',') AS tag ON true
+    LEFT JOIN Tags T ON tag = T.TagName
+    GROUP BY P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM Users U
+    WHERE U.Reputation IS NOT NULL
+),
+ClosedPosts AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS CloseCount
+    FROM PostHistory
+    WHERE PostHistoryTypeId IN (10, 11) 
+    GROUP BY PostId
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.RevisionCount,
+    PS.Tags,
+    COALESCE(CP.CloseCount, 0) AS CloseCount,
+    UVS.DisplayName AS TopVoter,
+    UVS.UpVotes,
+    UVS.DownVotes
+FROM PostSummary PS
+LEFT JOIN ClosedPosts CP ON PS.PostId = CP.PostId
+JOIN UserVoteStats UVS ON UVS.VoteCount = (
+    SELECT MAX(VoteCount)
+    FROM UserVoteStats
+)
+WHERE PS.ViewCount > 100
+ORDER BY PS.Score DESC, PS.CreationDate DESC
+LIMIT 10;

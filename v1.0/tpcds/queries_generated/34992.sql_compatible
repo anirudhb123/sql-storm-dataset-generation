@@ -1,0 +1,85 @@
+
+WITH RECURSIVE SalesPerformance AS (
+    SELECT 
+        ws.web_site_id,
+        COUNT(ws.order_number) AS total_orders,
+        SUM(ws.net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk BETWEEN 20230101 AND 20231231 
+    GROUP BY 
+        ws.web_site_id
+), 
+MonthlySales AS (
+    SELECT 
+        dd.d_month_seq,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS monthly_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        dd.d_month_seq
+),
+CustomerReturns AS (
+    SELECT 
+        sr_cdemo_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_cdemo_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        COALESCE(cr.return_count, 0) AS return_count,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.sr_cdemo_sk
+    WHERE 
+        c.c_current_addr_sk IS NOT NULL
+    AND 
+        c.c_birth_year < 1980
+),
+OverallSales AS (
+    SELECT 
+        SUM(ws.net_profit) AS overall_profit,
+        AVG(ws.net_paid) AS average_net_paid
+    FROM 
+        web_sales ws
+)
+SELECT 
+    hp.web_site_id,
+    hp.total_orders,
+    hp.total_profit,
+    ms.monthly_sales,
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.return_count,
+    hvc.total_return_amt,
+    os.overall_profit,
+    os.average_net_paid
+FROM 
+    SalesPerformance hp
+JOIN 
+    MonthlySales ms ON hp.rank <= 10
+JOIN 
+    HighValueCustomers hvc ON hp.web_site_id = hvc.c_customer_sk
+CROSS JOIN 
+    OverallSales os
+ORDER BY 
+    hp.total_profit DESC, 
+    ms.monthly_sales DESC;

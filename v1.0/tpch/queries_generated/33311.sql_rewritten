@@ -1,0 +1,40 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN supplier sp ON sh.s_nationkey = sp.s_nationkey AND sp.s_acctbal < (SELECT AVG(s_acctbal) FROM supplier)
+)
+SELECT 
+    n.n_name, 
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(o.o_totalprice) AS avg_order_value,
+    MAX(LENGTH(p.p_comment)) AS max_comment_length,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned_quantity
+FROM 
+    customer c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    part p ON l.l_partkey = p.p_partkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    supplier_hierarchy sh ON n.n_nationkey = sh.s_nationkey
+WHERE 
+    o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    AND n.n_nationkey IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(l.l_extendedprice) > 10000
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

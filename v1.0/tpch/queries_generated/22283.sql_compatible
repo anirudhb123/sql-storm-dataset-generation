@@ -1,0 +1,56 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_nationkey = s.s_nationkey)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN supplier s ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+aggregated_sales AS (
+    SELECT 
+        c.c_nationkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_nationkey
+),
+supplier_sales AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey
+),
+ranked_suppliers AS (
+    SELECT 
+        sh.s_suppkey,
+        sh.s_name,
+        COALESCE(ss.supplier_sales, 0) AS sales,
+        RANK() OVER (ORDER BY COALESCE(ss.supplier_sales, 0) DESC) AS rnk
+    FROM supplier_hierarchy sh
+    LEFT JOIN supplier_sales ss ON sh.s_suppkey = ss.s_suppkey
+)
+SELECT 
+    n.n_name,
+    r.region_name,
+    ROUND(AVG(as.total_sales), 2) AS avg_sales,
+    COUNT(DISTINCT rs.s_suppkey) AS num_suppliers,
+    STRING_AGG(DISTINCT rs.s_name, ', ') AS suppliers_list
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN aggregated_sales as ON n.n_nationkey = as.c_nationkey
+JOIN ranked_suppliers rs ON n.n_nationkey = (SELECT sh2.s_nationkey FROM supplier_hierarchy sh2 WHERE sh2.s_suppkey = rs.s_suppkey)
+WHERE n.n_comment NOT LIKE '%deprecated%'
+AND as.total_sales > (SELECT AVG(total_sales) * 1.5 FROM aggregated_sales)
+AND rs.rnk <= 10
+GROUP BY n.n_name, r.region_name
+HAVING COUNT(DISTINCT rs.s_suppkey) > 0
+ORDER BY avg_sales DESC;

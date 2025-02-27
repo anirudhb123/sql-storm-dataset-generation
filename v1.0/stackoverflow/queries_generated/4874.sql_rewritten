@@ -1,0 +1,66 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY U.Location ORDER BY U.Reputation DESC) AS RankInLocation
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+), PopularPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ViewCount,
+        P.OwnerUserId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.OwnerUserId
+), PostStatistics AS (
+    SELECT 
+        PP.Id,
+        PP.Title,
+        PP.ViewCount,
+        PP.UpVotes,
+        PP.DownVotes,
+        PP.CommentCount,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        PopularPosts PP
+    JOIN 
+        Users U ON PP.OwnerUserId = U.Id
+), PostsWithRank AS (
+    SELECT 
+        PS.*,
+        R.RankInLocation
+    FROM 
+        PostStatistics PS
+    JOIN 
+        RankedUsers R ON PS.OwnerUserId = R.Id
+)
+
+SELECT 
+    PWR.Title,
+    PWR.ViewCount,
+    PWR.UpVotes,
+    PWR.DownVotes,
+    PWR.CommentCount,
+    PWR.OwnerDisplayName,
+    PWR.RankInLocation
+FROM 
+    PostsWithRank PWR
+WHERE 
+    PWR.RankInLocation <= 5
+ORDER BY 
+    PWR.UpVotes DESC, PWR.ViewCount DESC;

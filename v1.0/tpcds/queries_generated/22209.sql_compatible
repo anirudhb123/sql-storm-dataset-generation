@@ -1,0 +1,78 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_site_id,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL 
+        AND ws.ws_net_paid > 0 
+        AND ws.ws_ship_date_sk = (
+            SELECT MAX(ws2.ws_ship_date_sk) 
+            FROM web_sales ws2 
+            WHERE ws2.ws_web_site_sk = ws.ws_web_site_sk
+        )
+),
+AddressDetails AS (
+    SELECT 
+        ca.ca_address_sk,
+        CONCAT(ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip) AS full_address
+    FROM 
+        customer_address ca
+    WHERE 
+        ca.ca_city IS NOT NULL
+),
+CustomerMetrics AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_net_profit) AS average_net_profit,
+        COUNT(DISTINCT w.web_site_id) AS total_websites
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON (c.c_customer_sk = ws.ws_bill_customer_sk)
+    LEFT JOIN 
+        web_site w ON (ws.ws_web_site_sk = w.web_site_sk)
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender
+),
+FinalResults AS (
+    SELECT 
+        cm.c_customer_id,
+        cm.cd_gender,
+        cm.total_quantity,
+        cm.average_net_profit,
+        ad.full_address,
+        rs.sales_rank,
+        CASE 
+            WHEN cm.total_quantity IS NULL THEN 'No Products Purchased'
+            WHEN cm.total_quantity = 0 THEN 'Zero Purchases'
+            ELSE 'Active Customer'
+        END AS customer_status
+    FROM 
+        CustomerMetrics cm
+    LEFT JOIN 
+        AddressDetails ad ON ad.ca_address_sk = cm.c_current_addr_sk
+    LEFT JOIN 
+        RankedSales rs ON cm.total_websites = rs.web_site_sk
+)
+SELECT 
+    *
+FROM 
+    FinalResults
+WHERE 
+    (total_quantity > 10 OR sales_rank = 1)
+    AND (
+        cd_gender = 'F' OR 
+        (cd_gender = 'M' AND average_net_profit IS NOT NULL)
+    )
+ORDER BY 
+    average_net_profit DESC, total_quantity ASC;

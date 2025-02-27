@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_quantity) AS total_sales_quantity
+    FROM 
+        customer AS c
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        cd.cd_gender = 'F' 
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+    HAVING 
+        SUM(ws.ws_quantity) > 10
+    UNION ALL
+    SELECT 
+        sh.c_customer_sk,
+        sh.c_first_name,
+        sh.c_last_name,
+        sh.cd_gender,
+        sh.cd_marital_status,
+        SUM(ws.ws_quantity) + sh.total_sales_quantity
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        web_sales ws ON sh.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk > (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        sh.c_customer_sk, sh.c_first_name, sh.c_last_name, sh.cd_gender, sh.cd_marital_status
+    HAVING 
+        SUM(ws.ws_quantity) + sh.total_sales_quantity > 30
+),
+daily_sales AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.ws_ext_sales_price) AS total_revenue,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_date
+)
+SELECT 
+    s.c_first_name,
+    s.c_last_name,
+    s.cd_gender,
+    s.cd_marital_status,
+    d.d_date,
+    d.total_revenue,
+    d.order_count,
+    RANK() OVER (PARTITION BY s.cd_gender ORDER BY d.total_revenue DESC) AS revenue_rank
+FROM 
+    sales_hierarchy s
+JOIN 
+    daily_sales d ON d.d_date = CURRENT_DATE - INTERVAL '1 day'
+ORDER BY 
+    s.cd_gender, revenue_rank;

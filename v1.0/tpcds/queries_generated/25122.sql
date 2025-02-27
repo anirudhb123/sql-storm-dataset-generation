@@ -1,0 +1,32 @@
+
+WITH StringMetrics AS (
+    SELECT 
+        ca_address_sk,
+        LENGTH(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_city, ', ', ca_state, ' ', ca_zip)) AS total_length,
+        REGEXP_COUNT(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_city, ', ', ca_state, ' ', ca_zip), '[A-Z]') AS uppercase_count,
+        REGEXP_COUNT(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_city, ', ', ca_state, ' ', ca_zip), '[0-9]') AS digit_count,
+        REGEXP_COUNT(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_city, ', ', ca_state, ' ', ca_zip), '[^A-Za-z0-9 ]') AS special_char_count
+    FROM customer_address
+), GenderMetrics AS (
+    SELECT
+        cd_gender,
+        COUNT(*) AS count,
+        AVG(total_length) AS avg_length,
+        AVG(uppercase_count) AS avg_uppercase_count,
+        AVG(digit_count) AS avg_digit_count,
+        AVG(special_char_count) AS avg_special_char_count
+    FROM StringMetrics
+    JOIN customer ON customer.c_current_addr_sk = StringMetrics.ca_address_sk
+    JOIN customer_demographics ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    GROUP BY cd_gender
+)
+SELECT 
+    cd_gender,
+    count,
+    avg_length,
+    avg_uppercase_count,
+    avg_digit_count,
+    avg_special_char_count,
+    ROUND(avg_length * (SELECT COUNT(*) FROM customer)/count) AS adjusted_length
+FROM GenderMetrics
+ORDER BY cd_gender;

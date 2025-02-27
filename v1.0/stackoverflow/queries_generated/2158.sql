@@ -1,0 +1,88 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RankedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CommentCount,
+        ps.UpvoteCount,
+        ps.DownvoteCount,
+        ps.ViewCount,
+        ub.GoldBadges, 
+        ub.SilverBadges, 
+        ub.BronzeBadges,
+        ps.PostRank
+    FROM 
+        PostStats ps
+    JOIN 
+        Users u ON ps.PostId = u.Id
+    JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+)
+SELECT 
+    rp.Title,
+    rp.CommentCount,
+    rp.UpvoteCount,
+    rp.DownvoteCount,
+    rp.ViewCount,
+    COALESCE(rp.GoldBadges, 0) AS GoldBadges,
+    COALESCE(rp.SilverBadges, 0) AS SilverBadges,
+    COALESCE(rp.BronzeBadges, 0) AS BronzeBadges,
+    CASE 
+        WHEN rp.PostRank = 1 THEN 'Most Recent Post'
+        WHEN rp.PostRank <= 5 THEN 'Top 5 Posts'
+        ELSE 'Other Posts' 
+    END AS RankCategory
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.CommentCount > 0
+ORDER BY 
+    rp.UpvoteCount DESC, rp.CommentCount DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Summary' AS Title,
+    SUM(CommentCount) AS CommentCount,
+    SUM(UpvoteCount) AS UpvoteCount,
+    SUM(DownvoteCount) AS DownvoteCount,
+    SUM(ViewCount) AS ViewCount,
+    SUM(GoldBadges) AS GoldBadges,
+    SUM(SilverBadges) AS SilverBadges,
+    SUM(BronzeBadges) AS BronzeBadges,
+    NULL AS RankCategory
+FROM 
+    RankedPosts
+WHERE
+    PostRank <= 5;

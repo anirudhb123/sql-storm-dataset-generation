@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS Owner,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON t.Id = ANY(string_to_array(pt.Tags, '><'))
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 100
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        STRING_AGG(c.Text, ' | ') AS AllComments
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Owner,
+    r.Score,
+    r.CreationDate,
+    r.CommentCount,
+    r.UpVotes,
+    r.DownVotes,
+    pt.TagName,
+    pc.AllComments
+FROM 
+    RankedPosts r
+JOIN 
+    PopularTags pt ON r.PostId IN (SELECT PostId FROM Posts WHERE Tags LIKE '%' || pt.TagName || '%')
+LEFT JOIN 
+    PostComments pc ON r.PostId = pc.PostId
+WHERE 
+    r.PostRank <= 50 
+ORDER BY 
+    r.Score DESC, r.CreationDate DESC;

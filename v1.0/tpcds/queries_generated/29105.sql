@@ -1,0 +1,72 @@
+
+WITH Address_Concat AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+Customer_Demo AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating
+    FROM 
+        customer_demographics
+),
+Customer_Aggregated AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_purchase_estimate,
+        a.full_address,
+        a.ca_city,
+        a.ca_state,
+        a.ca_zip
+    FROM 
+        customer c
+    JOIN 
+        Customer_Demo d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    JOIN 
+        customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+),
+Sales_Analysis AS (
+    SELECT 
+        c.customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS average_sales_price
+    FROM 
+        web_sales ws
+    JOIN 
+        Customer_Aggregated c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.customer_id
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT ca.c_customer_sk) AS number_of_customers,
+    SUM(sa.total_sales) AS total_sales,
+    AVG(sa.average_sales_price) AS average_sales_price_per_order
+FROM 
+    Customer_Aggregated ca
+JOIN 
+    Sales_Analysis sa ON ca.c_customer_sk = sa.customer_id
+WHERE 
+    ca.cd_gender = 'F' 
+    AND ca.cd_marital_status = 'M'
+GROUP BY 
+    ca.ca_city, 
+    ca.ca_state
+ORDER BY 
+    total_sales DESC, 
+    number_of_customers DESC;

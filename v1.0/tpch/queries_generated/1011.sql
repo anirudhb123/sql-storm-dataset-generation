@@ -1,0 +1,72 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS Rank
+    FROM 
+        supplier s
+),
+
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS TotalSpent,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS CustomerRank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '2022-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS TotalAvailable
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(sp.TotalAvailable, 0) AS AvailableQuantity,
+    r.r_name AS RegionName,
+    CASE 
+        WHEN t.CustomerRank <= 5 THEN 'Top Customer'
+        ELSE 'Other Customer'
+    END AS CustomerCategory
+FROM 
+    part p
+LEFT JOIN 
+    SupplierParts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    supplier s ON sp.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    TopCustomers t ON s.s_suppkey IN (
+        SELECT 
+            ps.ps_suppkey 
+        FROM 
+            partsupp ps 
+        WHERE 
+            ps.ps_partkey = p.p_partkey
+        GROUP BY 
+            ps.ps_suppkey
+    )
+ORDER BY 
+    p.p_partkey
+LIMIT 100;
+

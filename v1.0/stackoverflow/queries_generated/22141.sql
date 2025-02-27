@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM Posts p
+    LEFT JOIN unnest(string_to_array(p.Tags, '>')) AS t(TagName) ON TRUE
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        MAX(u.LastAccessDate) AS LastAccessed
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    GROUP BY u.Id, u.Reputation
+),
+PostsWithHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryDate,
+        COUNT(ph.Id) AS EditCount
+    FROM Posts p
+    JOIN PostHistory ph ON ph.PostId = p.Id
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6)  -- Only counting edits to title, body, or tags
+    GROUP BY p.Id, ph.PostHistoryTypeId, ph.CreationDate
+),
+PostScoreAnalysis AS (
+    SELECT 
+        p.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        CASE 
+            WHEN SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) > 0
+            THEN 'Positive'
+            WHEN SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) < 0
+            THEN 'Negative'
+            ELSE 'Neutral'
+        END AS ScoreStatus
+    FROM Posts p
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    GROUP BY p.PostId
+)
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.TotalPosts,
+    us.AcceptedAnswers,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.ViewCount,
+    pp.Score,
+    pp.Rank,
+    ph.EditCount,
+    psa.UpVotes,
+    psa.DownVotes,
+    psa.ScoreStatus,
+    (CASE 
+        WHEN pp.Score IS NULL THEN 'No Score'
+        ELSE (CASE 
+            WHEN pp.Score > 100 THEN 'High Score' 
+            WHEN pp.Score BETWEEN 50 AND 100 THEN 'Medium Score' 
+            ELSE 'Low Score' 
+        END)
+    END) AS ScoreRange,
+    (SELECT STRING_AGG(DISTINCT tag, ', ') 
+     FROM unnest(pp.Tags) AS tag) AS TagList,
+    COALESCE(us.LastAccessed, p.CreationDate) AS LastActivity
+FROM UserStatistics us
+JOIN RankedPosts pp ON us.UserId = pp.OwnerUserId
+LEFT JOIN PostsWithHistory ph ON pp.PostId = ph.PostId
+LEFT JOIN PostScoreAnalysis psa ON pp.PostId = psa.PostId
+WHERE us.Reputation > 100
+ORDER BY us.Reputation DESC, pp.Score DESC, pp.Rank
+LIMIT 100;
+

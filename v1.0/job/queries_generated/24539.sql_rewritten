@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER(PARTITION BY t.production_year ORDER BY t.id) AS movie_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL AND 
+        t.production_year > 2000
+),
+ActorInfo AS (
+    SELECT 
+        a.id AS actor_id,
+        a.person_id,
+        ak.name AS actor_name,
+        ak.surname_pcode,
+        COUNT(ci.id) AS movie_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS associated_keywords
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        RankedMovies rm ON ci.movie_id = rm.title_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = ci.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        a.id, ak.name, ak.surname_pcode
+),
+MovieCompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.name) AS company_count,
+        STRING_AGG(DISTINCT c.name, '; ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    ai.actor_name,
+    ai.movie_count,
+    ai.associated_keywords,
+    mci.company_count,
+    mci.company_names,
+    CASE 
+        WHEN ai.movie_count > 5 THEN 'Prolific Actor'
+        ELSE 'Emerging Talent'
+    END AS actor_status,
+    CASE 
+        WHEN mci.company_count IS NULL THEN 'No Companies Involved'
+        ELSE 'Companies Involved'
+    END AS company_status
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorInfo ai ON rm.title_id = ai.movie_id
+LEFT JOIN 
+    MovieCompanyInfo mci ON rm.title_id = mci.movie_id
+WHERE 
+    (rm.production_year BETWEEN 2010 AND 2023 OR rm.production_year IS NULL) AND
+    (ai.associated_keywords IS NOT NULL OR ai.movie_count > 0)
+ORDER BY 
+    rm.production_year DESC, 
+    ai.movie_count DESC NULLS LAST;

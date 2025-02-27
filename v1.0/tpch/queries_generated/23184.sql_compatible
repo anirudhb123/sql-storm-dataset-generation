@@ -1,0 +1,50 @@
+
+WITH RECURSIVE RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+), HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice
+    FROM orders o
+    WHERE o.o_totalprice > (
+        SELECT AVG(o_totalprice) FROM orders
+    )
+), LineItemsWithDiscounts AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    p.p_name, 
+    COALESCE(SUM(sum_lineitem.total_price_after_discount), 0) AS total_lineitem_price,
+    s.s_name AS supplier_name,
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(sum_lineitem.total_price_after_discount) DESC) AS line_item_rank
+FROM part p
+LEFT JOIN LineItemsWithDiscounts sum_lineitem ON p.p_partkey = sum_lineitem.l_orderkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    (n.n_name IS NOT NULL OR s.s_name IS NOT NULL)
+    AND p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice < (SELECT MAX(p_retailprice) FROM part))
+    AND s.s_acctbal BETWEEN 
+        (SELECT MIN(s_acctbal) FROM supplier WHERE s_comment LIKE '%trusted%') 
+        AND 
+        (SELECT MAX(s_acctbal) FROM supplier WHERE s_comment LIKE '%trusted%')
+    AND EXISTS (
+        SELECT 1 FROM HighValueOrders hvo WHERE hvo.o_orderkey = sum_lineitem.l_orderkey
+    )
+GROUP BY p.p_partkey, p.p_name, s.s_name, r.r_name, n.n_name
+ORDER BY total_lineitem_price DESC, line_item_rank ASC
+LIMIT 10;

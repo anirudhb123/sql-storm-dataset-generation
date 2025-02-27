@@ -1,0 +1,55 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+HighValueCustomers AS (
+    SELECT c_custkey, c_name, c_acctbal, ROW_NUMBER() OVER (PARTITION BY c_mktsegment ORDER BY c_acctbal DESC) AS rn
+    FROM customer
+    WHERE c_acctbal IS NOT NULL
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+NationRevenue AS (
+    SELECT n.n_nationkey, SUM(os.total_revenue) AS total_nation_revenue
+    FROM nation n
+    LEFT JOIN (
+        SELECT os.orderkey, os.total_revenue, s.s_nationkey
+        FROM OrderSummary os
+        JOIN supplier s ON os.orderkey IN (
+            SELECT o.o_orderkey
+            FROM orders o 
+            WHERE o.o_custkey IN (
+                SELECT c.c_custkey
+                FROM HighValueCustomers c
+                WHERE c.rn <= 10
+            )
+        )
+    ) AS order_services ON n.n_nationkey = order_services.s_nationkey
+    GROUP BY n.n_nationkey
+)
+SELECT r.r_name, COALESCE(n.total_nation_revenue, 0) AS total_revenue, sh.level AS supplier_level
+FROM region r
+LEFT JOIN NationRevenue n ON r.r_regionkey = (
+    SELECT n.n_regionkey 
+    FROM nation n 
+    WHERE n.n_nationkey = n.n_nationkey
+    LIMIT 1
+)
+LEFT JOIN SupplierHierarchy sh ON r.r_regionkey IN (
+    SELECT DISTINCT s.s_nationkey 
+    FROM supplier s 
+    WHERE s.s_acctbal > 2000
+)
+ORDER BY r.r_name;

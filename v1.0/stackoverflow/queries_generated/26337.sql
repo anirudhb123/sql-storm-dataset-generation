@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerName,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Filtering for Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        COALESCE(NULLIF(STRING_AGG(t.TagName, ', ') FILTER (WHERE t.TagName IS NOT NULL), ''), 'No Tags') AS Tags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        LATERAL (SELECT tag.TagName FROM Posts p2
+                  JOIN unnest(string_to_array(p2.Tags, '><')) AS tag(TagName) 
+                  ON p2.Id = rp.PostId) AS t ON true
+    GROUP BY 
+        rp.PostId
+),
+PopularPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        Score,
+        OwnerName,
+        VoteCount,
+        Tags
+    FROM 
+        FilteredPosts
+    WHERE 
+        VoteCount > 5 -- Selecting posts with more than 5 votes
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.ViewCount,
+    pp.Score,
+    pp.OwnerName,
+    pp.VoteCount,
+    pp.Tags,
+    CASE 
+        WHEN pp.Score > 100 THEN 'Highly Upvoted'
+        WHEN pp.Score BETWEEN 50 AND 100 THEN 'Moderately Upvoted'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM 
+    PopularPosts pp
+ORDER BY 
+    pp.VoteCount DESC, 
+    pp.CreationDate DESC
+LIMIT 20; -- Limiting to the top 20 posts based on votes

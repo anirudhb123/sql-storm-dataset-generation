@@ -1,0 +1,75 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(r.role, 'Unknown Role') AS role,
+        m2.title AS linked_movie_title,
+        m2.production_year AS linked_production_year
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_link ml ON m.id = ml.movie_id
+    LEFT JOIN 
+        title m2 ON ml.linked_movie_id = m2.id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        m.production_year IS NOT NULL
+        AND m.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.role,
+        m2.title AS linked_movie_title,
+        m2.production_year AS linked_production_year
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        title m2 ON ml.linked_movie_id = m2.id
+)
+SELECT 
+    m.title AS original_movie,
+    MAX(mh.linked_movie_title) AS last_linked_movie,
+    COUNT(DISTINCT mh.linked_movie_title) AS total_linked_movies,
+    STRING_AGG(DISTINCT r.role, ', ') AS roles,
+    avg(m.production_year) AS avg_prod_year,
+    COUNT(DISTINCT c.person_id) FILTER (WHERE c.note IS NOT NULL) AS contributors_with_notes
+FROM 
+    title m
+LEFT JOIN 
+    movie_hierarchy mh ON m.id = mh.movie_id
+LEFT JOIN 
+    cast_info c ON m.id = c.movie_id
+LEFT JOIN 
+    role_type r ON c.role_id = r.id
+WHERE 
+    m.production_year IS NOT NULL
+    AND m.production_year IN (SELECT production_year FROM title WHERE production_year BETWEEN 2000 AND 2023)
+GROUP BY 
+    m.title
+HAVING 
+    COUNT(DISTINCT mh.linked_movie_title) > 5
+    AND AVG(mh.production_year) > 2010
+ORDER BY 
+    avg_prod_year DESC,
+    original_movie ASC;
+
+This SQL query aims to derive an elaborate benchmark of relationships between movies and their linked counterparts while incorporating multiple advanced SQL constructs:
+
+- **Common Table Expressions (CTE)**: Recursive CTE to capture the movie linkage hierarchy.
+- **Outer Joins**: To include movies even if no links exist.
+- **Aggregations and Window Functions**: To calculate averages and counts.
+- **String Expressions**: Using `STRING_AGG` to concatenate roles.
+- **Filtering Logic**: The use of filters within aggregates to derive additional insights.
+- **Complex Predicates**: Complexity in WHERE clauses regarding production years and HAVING clauses to restrict results based on benchmark criteria.
+
+This query serves as a benchmark to test performance on a diverse set of operations, including joins, aggregations, recursion, and string manipulations, making it a robust candidate for performance testing.

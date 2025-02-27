@@ -1,0 +1,76 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate > '1994-01-01'
+),
+PartSupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(CASE WHEN ps.ps_availqty IS NULL THEN 0 ELSE ps.ps_availqty END) AS total_avail,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_retailprice BETWEEN 10.00 AND 20.00
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer) 
+    GROUP BY 
+        c.c_custkey
+),
+MaxOrders AS (
+    SELECT 
+        co.c_custkey,
+        co.order_count,
+        co.total_spent,
+        MAX(co.total_spent) OVER () AS max_spent
+    FROM 
+        CustomerOrders co
+)
+SELECT 
+    n.n_name,
+    r.r_name,
+    p.p_name,
+    ps.total_avail,
+    m.order_count,
+    m.total_spent,
+    CASE 
+        WHEN m.total_spent > 0 THEN m.total_spent / m.order_count 
+        ELSE NULL 
+    END AS avg_spent_per_order
+FROM 
+    MaxOrders m
+JOIN 
+    customer c ON m.c_custkey = c.c_custkey
+LEFT JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+INNER JOIN 
+    PartSupplierStats ps ON ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM RankedOrders WHERE rank = 1))
+JOIN 
+    part p ON p.p_partkey = ps.ps_partkey
+WHERE 
+    p.p_size = (SELECT MAX(p2.p_size) FROM part p2 WHERE p2.p_container = p.p_container)
+    AND p.p_comment IS NOT NULL
+ORDER BY 
+    avg_spent_per_order DESC NULLS LAST;

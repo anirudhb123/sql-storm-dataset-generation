@@ -1,0 +1,78 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2 -- Grouping Answers under Questions
+),
+
+PostAggregation AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Level,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        RecursivePostHierarchy r
+    LEFT JOIN 
+        Comments c ON r.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON r.PostId = v.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = r.PostId -- Assuming badges are related to users
+    GROUP BY 
+        r.PostId, r.Title, r.Level
+),
+
+RankedPosts AS (
+    SELECT 
+        pa.PostId,
+        pa.Title,
+        pa.Level,
+        pa.CommentCount,
+        pa.UpVoteCount,
+        pa.DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY pa.Level ORDER BY pa.UpVoteCount DESC) AS Rank
+    FROM 
+        PostAggregation pa
+)
+
+SELECT 
+    rp.Level,
+    COUNT(*) AS PostCount,
+    COALESCE(AVG(rp.CommentCount), 0) AS AvgComments,
+    COALESCE(AVG(rp.UpVoteCount), 0) AS AvgUpVotes,
+    COALESCE(AVG(rp.DownVoteCount), 0) AS AvgDownVotes,
+    MAX(rp.Rank) AS HighestRank
+FROM 
+    RankedPosts rp
+GROUP BY 
+    rp.Level
+ORDER BY 
+    rp.Level;
+
+-- The query above performs a recursive query to build a hierarchy of posts,
+-- aggregates votes and comments, ranks them, and finally summarizes the results by post level.

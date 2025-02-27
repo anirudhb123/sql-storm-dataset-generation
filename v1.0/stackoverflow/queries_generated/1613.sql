@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        COUNT(c.Id) AS CommentCount, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(p.Score) AS TotalScore, 
+        DENSE_RANK() OVER (ORDER BY SUM(p.Score) DESC) AS UserRank
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000 
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ru.DisplayName,
+    ru.TotalScore,
+    rp.Title,
+    rp.CreationDate,
+    rp.CommentCount,
+    CASE 
+        WHEN rp.PostRank <= 3 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    TopUsers ru
+JOIN 
+    RankedPosts rp ON ru.UserId = rp.OwnerUserId
+LEFT JOIN 
+    Votes v ON rp.Id = v.PostId AND v.VoteTypeId = 2
+WHERE 
+    ru.UserRank <= 10 AND (SELECT COUNT(*) FROM Votes v2 WHERE v2.PostId = rp.Id) > 5
+ORDER BY 
+    ru.TotalScore DESC, 
+    rp.Score DESC
+LIMIT 50;

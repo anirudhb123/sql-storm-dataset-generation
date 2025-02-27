@@ -1,0 +1,4 @@
+SELECT min(an.name) AS cool_actor_pseudonym, min(t.title) AS series_named_after_char
+FROM aka_name AS an, cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE an.person_id = n.id AND n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND an.person_id = ci.person_id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND n.md5sum IN ('1ab3b05c58ef2abc2e2b8a11177de94d', '328add0fd413006633c297f6066df494', '32a87fd5140558569e71fdb003a72394', '606734651468772eef3257065ab2ca59', '9f651559f7fcd293563a519813e72cca', 'c1a53a9334b90ee4184ae76e68f8df13', 'e301e966b090e65b0c7c587d6633a9d0', 'fd7dae13da2e4edd8dbbcd05d020b6e3') AND ci.note > '(as Escamillo Fernandez)' AND an.name_pcode_cf < 'T3253' AND mc.company_type_id > 1;

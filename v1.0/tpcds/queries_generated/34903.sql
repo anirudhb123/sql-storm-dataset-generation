@@ -1,0 +1,68 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT
+        ss_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_net_profit) AS total_net_profit,
+        1 AS level
+    FROM
+        store_sales
+    GROUP BY
+        ss_store_sk, ss_sold_date_sk
+    UNION ALL
+    SELECT
+        sh.ss_store_sk,
+        sh.ss_sold_date_sk,
+        SUM(sh.ss_net_profit + COALESCE(s.total_net_profit, 0)) AS total_net_profit,
+        s.level + 1
+    FROM
+        store_sales sh
+    JOIN
+        sales_hierarchy s ON sh.ss_store_sk = s.ss_store_sk AND sh.ss_sold_date_sk > s.ss_sold_date_sk
+    GROUP BY
+        sh.ss_store_sk, sh.ss_sold_date_sk
+),
+ranked_sales AS (
+    SELECT
+        sh.ss_store_sk,
+        sh.ss_sold_date_sk,
+        sh.total_net_profit,
+        RANK() OVER (PARTITION BY sh.ss_store_sk ORDER BY sh.total_net_profit DESC) AS profit_rank
+    FROM
+        sales_hierarchy sh
+),
+retailer_summary AS (
+    SELECT
+        c.c_first_name,
+        c.c_last_name,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_paid) AS total_revenue,
+        AVG(ws_net_profit) AS avg_profit
+    FROM
+        web_sales ws
+    LEFT JOIN
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY
+        c.c_first_name, c.c_last_name
+    HAVING
+        total_orders > 10
+)
+SELECT
+    r.ss_store_sk,
+    r.ss_sold_date_sk,
+    r.total_net_profit,
+    r.profit_rank,
+    s.c_first_name,
+    s.c_last_name,
+    s.total_orders,
+    s.total_revenue,
+    s.avg_profit
+FROM
+    ranked_sales r
+FULL OUTER JOIN
+    retailer_summary s ON r.ss_store_sk = s.total_orders
+WHERE
+    (r.profit_rank <= 10 OR s.avg_profit IS NOT NULL)
+ORDER BY
+    r.ss_store_sk, s.total_revenue DESC
+LIMIT 100;

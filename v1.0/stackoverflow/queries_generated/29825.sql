@@ -1,0 +1,51 @@
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(DISTINCT p.Id) AS PostCount, 
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+EngagementScore AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        PostCount, 
+        QuestionCount, 
+        AnswerCount, 
+        CommentCount,
+        UpVoteCount,
+        DownVoteCount,
+        (QuestionCount * 2 + AnswerCount + CommentCount * 0.5 + UpVoteCount - DownVoteCount * 0.5) AS Score
+    FROM 
+        UserEngagement
+)
+SELECT 
+    UserId, 
+    DisplayName, 
+    PostCount, 
+    QuestionCount, 
+    AnswerCount, 
+    CommentCount,
+    UpVoteCount, 
+    DownVoteCount, 
+    Score
+FROM 
+    EngagementScore
+WHERE 
+    Score > 10
+ORDER BY 
+    Score DESC;

@@ -1,0 +1,111 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ph.Text,
+        1 AS Level
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+
+    UNION ALL 
+
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ph.Text,
+        Level + 1
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        RecursivePostHistory rph ON ph.PostId = rph.PostId 
+    WHERE 
+        ph.CreationDate < rph.CreationDate
+),
+AggregatedStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        AVG(VIEWS_VIEW_CNT) OVER (PARTITION BY p.OwnerUserId) AS AvgUserViews
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(ViewCount) AS VIEWS_VIEW_CNT
+        FROM 
+            Posts
+        GROUP BY 
+            PostId
+    ) as pv ON p.Id = pv.PostId
+    GROUP BY 
+        p.Id, p.OwnerUserId
+),
+PostDetails AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        a.PostHistoryTypeId,
+        rph.UserId,
+        rph.Comment,
+        rph.Text,
+        stats.CommentCount,
+        stats.UpVoteCount,
+        stats.DownVoteCount,
+        stats.AvgUserViews
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        RecursivePostHistory rph ON p.Id = rph.PostId
+    LEFT JOIN 
+        AggregatedStats stats ON p.Id = stats.PostId
+    LEFT JOIN 
+        PostHistory a ON p.Id = a.PostId 
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+FinalOutput AS (
+    SELECT *,
+        CASE 
+            WHEN UpVoteCount > DownVoteCount THEN 'Positive'
+            WHEN UpVoteCount < DownVoteCount THEN 'Negative'
+            ELSE 'Neutral'
+        END AS Sentiment,
+        (SELECT COUNT(*) FROM Badges b WHERE b.UserId = OwnerUserId) AS TotalBadges
+    FROM 
+        PostDetails
+)
+SELECT 
+    PostId,
+    Title,
+    OwnerDisplayName,
+    CreationDate,
+    Sentiment,
+    CommentCount,
+    UpVoteCount,
+    DownVoteCount,
+    AvgUserViews,
+    TotalBadges
+FROM 
+    FinalOutput
+WHERE 
+    (TotalBadges > 0 OR CommentCount > 5)
+ORDER BY 
+    CreationDate DESC;

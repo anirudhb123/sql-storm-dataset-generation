@@ -1,0 +1,46 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 1 AS level
+    FROM nation n
+    WHERE n.n_regionkey IN (SELECT r_regionkey FROM region WHERE r_name = 'ASIA')
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+SupplierStats AS (
+    SELECT s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost, COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+    GROUP BY s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_name, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spending
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_nationkey IN (SELECT n_nationkey FROM NationHierarchy)
+    GROUP BY c.c_name
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice) AS total_extended_price,
+           COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS return_count,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice) DESC) AS rn
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    cs.c_name AS customer_name,
+    COALESCE(cs.total_orders, 0) AS order_count,
+    COALESCE(cs.total_spending, 0) AS total_spending,
+    ss.s_name AS supplier_name,
+    ss.total_supply_cost,
+    ss.part_count,
+    li.total_extended_price AS order_extended_price,
+    li.return_count AS order_return_count
+FROM CustomerOrders cs
+FULL OUTER JOIN SupplierStats ss ON cs.total_orders > 0
+FULL OUTER JOIN LineItemSummary li ON li.rn = 1
+WHERE 
+    (ss.total_supply_cost IS NULL OR ss.total_supply_cost > 1000)
+    AND (li.order_extended_price IS NOT NULL OR li.order_extended_price < 5000)
+ORDER BY customer_name, supplier_name;

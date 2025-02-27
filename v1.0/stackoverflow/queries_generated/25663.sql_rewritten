@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS ViewRank,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' 
+        AND p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        ViewCount,
+        Score,
+        OwnerDisplayName,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        ViewRank <= 5 OR ScoreRank <= 5
+),
+CombinedTags AS (
+    SELECT 
+        pt.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts pt
+    JOIN 
+        UNNEST(string_to_array(SUBSTRING(pt.Tags, 2, LENGTH(pt.Tags) - 2), '><')) AS t(TagName)
+    WHERE 
+        pt.PostTypeId = 1 
+    GROUP BY 
+        pt.Id
+)
+SELECT 
+    t.Title,
+    t.OwnerDisplayName,
+    t.ViewCount,
+    t.Score,
+    t.CommentCount,
+    ct.Tags,
+    CASE 
+        WHEN t.Score >= 10 THEN 'High Score'
+        WHEN t.Score BETWEEN 5 AND 9 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    TopPosts t
+LEFT JOIN 
+    CombinedTags ct ON t.PostId = ct.PostId
+ORDER BY 
+    t.ViewCount DESC, t.Score DESC;

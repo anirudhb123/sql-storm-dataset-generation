@@ -1,0 +1,80 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_sold_date_sk,
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_ext_sales_price) AS total_sales
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_sold_date_sk, cs_item_sk
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        AVG(ws_net_profit) AS avg_net_profit,
+        MAX(ws_ext_sales_price) AS max_sales_price
+    FROM 
+        customer as c
+    LEFT JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        store_sales AS ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+inventory_data AS (
+    SELECT 
+        inv_date_sk,
+        inv_item_sk,
+        AVG(inv_quantity_on_hand) as avg_quantity_on_hand
+    FROM 
+        inventory
+    GROUP BY 
+        inv_date_sk, inv_item_sk
+),
+sales_summary AS (
+    SELECT 
+        d.d_date as sale_date,
+        cs.c_customer_sk,
+        cs.total_orders,
+        cs.avg_net_profit,
+        cs.max_sales_price,
+        inv.avg_quantity_on_hand,
+        s.total_quantity,
+        s.total_sales
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        customer_stats cs ON cs.total_orders > 0
+    LEFT JOIN 
+        inventory_data inv ON inv.inv_date_sk = d.d_date_sk
+    LEFT JOIN 
+        sales_cte s ON s.ws_sold_date_sk = d.d_date_sk
+)
+SELECT 
+    sale_date,
+    COUNT(DISTINCT c_customer_sk) AS number_of_customers,
+    AVG(max_sales_price) AS average_max_price,
+    SUM(total_sales) AS total_revenue
+FROM 
+    sales_summary
+WHERE 
+    avg_net_profit IS NOT NULL
+GROUP BY 
+    sale_date
+ORDER BY 
+    sale_date DESC
+LIMIT 100;

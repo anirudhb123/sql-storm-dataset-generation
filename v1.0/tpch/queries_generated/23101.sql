@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY ps.ps_supplycost ASC) AS supplier_rank,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        p.p_type
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+), FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_lines
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(year, -1, GETDATE())
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate
+), AveragePrice AS (
+    SELECT 
+        AVG(o.o_totalprice) AS avg_order_price,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        FilteredOrders o
+), NationDetails AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name,
+    nd.nation_count,
+    STRING_AGG(DISTINCT ss.s_name, ', ') AS supplier_names,
+    AVG(FLOOR(rps.ps_supplycost + COALESCE(rps.ps_availqty,0)) / NULLIF(rd.order_count, 0)) AS avg_cost_per_order
+FROM 
+    region r
+JOIN 
+    NationDetails nd ON r.r_regionkey = nd.n_nationkey
+LEFT JOIN 
+    RankedSuppliers rps ON rps.supplier_rank <= 3 AND rps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+LEFT JOIN 
+    AveragePrice rd ON rd.order_count > 0
+LEFT JOIN 
+    supplier ss ON ss.s_nationkey = nd.n_nationkey
+WHERE 
+    r.r_name NOT IN ('NORTH', 'SOUTH') AND
+    (ss.s_comment IS NULL OR ss.s_comment LIKE '%excellent%')
+GROUP BY 
+    r.r_name, nd.nation_count
+HAVING 
+    COUNT(DISTINCT ss.s_suppkey) > 5
+ORDER BY 
+    avg_cost_per_order DESC
+LIMIT 10;

@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        COALESCE(v.positive_votes, 0) AS UpVotes,
+        COALESCE(v.negative_votes, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS positive_votes,
+            COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS negative_votes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        ub.BadgeCount,
+        ub.BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    WHERE 
+        u.Reputation > (SELECT AVG(Reputation) FROM Users)
+)
+SELECT 
+    pu.DisplayName,
+    COUNT(DISTINCT rp.Id) AS PostCount,
+    SUM(rp.UpVotes) - SUM(rp.DownVotes) AS NetVotes,
+    SUM(rp.ViewCount) AS TotalViews,
+    MAX(rp.CreationDate) AS LatestPostDate,
+    tb.BadgeNames
+FROM 
+    RankedPosts rp
+JOIN 
+    TopUsers pu ON rp.OwnerUserId = pu.Id
+LEFT JOIN 
+    UserBadges tb ON pu.Id = tb.UserId
+WHERE 
+    rp.PostRank = 1
+GROUP BY 
+    pu.DisplayName, tb.BadgeNames
+HAVING 
+    SUM(rp.UpVotes) > SUM(rp.DownVotes)
+ORDER BY 
+    TotalViews DESC
+FETCH FIRST 10 ROWS ONLY;

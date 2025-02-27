@@ -1,0 +1,48 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+    UNION ALL
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        st.level + 1
+    FROM 
+        web_sales ws
+    JOIN 
+        SalesCTE st ON ws.ws_sold_date_sk = DATEADD(DAY, -1, st.ws_sold_date_sk)
+)
+SELECT 
+    ca.ca_state,
+    COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+    COUNT(DISTINCT ws.ws_item_sk) AS unique_items_sold,
+    SUM(ws.ws_quantity) AS total_quantity_sold,
+    SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales_value,
+    AVG(ws.ws_sales_price) AS avg_sales_price,
+    MAX(ws.ws_sales_price) - MIN(ws.ws_sales_price) AS price_range,
+    RANK() OVER (PARTITION BY ca.ca_state ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS state_sales_rank
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+WHERE 
+    ca.ca_state IS NOT NULL 
+    AND ws.ws_item_sk IN (SELECT ws_item_sk FROM SalesCTE WHERE level <= 5)
+GROUP BY 
+    ca.ca_state
+HAVING 
+    COUNT(DISTINCT c.c_customer_sk) > 10
+ORDER BY 
+    total_sales_value DESC;

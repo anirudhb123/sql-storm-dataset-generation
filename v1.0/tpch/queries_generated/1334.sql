@@ -1,0 +1,63 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2021-01-01' 
+        AND o.o_orderdate <= DATE '2023-12-31'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_revenue,
+        ss.total_orders,
+        ROW_NUMBER() OVER (ORDER BY ss.total_revenue DESC) AS revenue_rank
+    FROM 
+        SupplierSales ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+), HighVolumeSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        rs.total_revenue,
+        rs.total_orders
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        supplier s ON rs.s_suppkey = s.s_suppkey
+    WHERE 
+        rs.total_orders >= 50
+)
+SELECT 
+    hvs.s_suppkey,
+    hvs.s_name,
+    hvs.s_acctbal,
+    COALESCE((SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL), 0) AS avg_supplier_acctbal,
+    hvs.total_revenue,
+    hvs.total_orders,
+    CASE 
+        WHEN hvs.total_revenue > 100000 THEN 'High Revenue'
+        WHEN hvs.total_revenue BETWEEN 50000 AND 100000 THEN 'Medium Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_classification
+FROM 
+    HighVolumeSuppliers hvs
+LEFT JOIN 
+    region r ON EXISTS (SELECT 1 FROM nation n WHERE n.n_nationkey = hvs.s_nationkey AND n.n_regionkey = r.r_regionkey)
+ORDER BY 
+    hvs.total_revenue DESC
+LIMIT 10;

@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Body,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.PostTypeId IN (1, 2)  -- Considering only Questions and Answers
+),
+
+TagsWithCounts AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 10  -- Only consider tags with more than 10 posts
+),
+
+TopPosts AS (
+    SELECT 
+        r.Title,
+        r.OwnerDisplayName,
+        r.Score,
+        r.ViewCount,
+        t.TagName,
+        r.Rank
+    FROM 
+        RankedPosts r
+    JOIN 
+        Posts p ON r.PostId = p.Id
+    JOIN 
+        TagsWithCounts t ON t.TagName = ANY(string_to_array(p.Tags, ','))
+    WHERE 
+        r.Rank <= 5  -- Top 5 posts per type
+)
+
+SELECT 
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.Score,
+    tp.ViewCount,
+    tp.TagName,
+    COUNT(c.Id) AS CommentCount,
+    ARRAY_AGG(DISTINCT b.Name) AS Badges
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Comments c ON tp.PostId = c.PostId
+LEFT JOIN 
+    Badges b ON tp.OwnerDisplayName = b.UserId
+GROUP BY 
+    tp.Title, tp.OwnerDisplayName, tp.Score, tp.ViewCount, tp.TagName
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

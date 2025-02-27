@@ -1,0 +1,59 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        MAX(ps.ps_supplycost) AS max_supplycost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+    HAVING COUNT(DISTINCT ps.ps_partkey) > 10
+),
+LineitemStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity,
+        SUM(CASE WHEN l.l_returnflag = 'Y' THEN 1 ELSE 0 END) AS returns_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    n.n_name,
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(o.o_totalprice) AS avg_order_price,
+    SUM(ld.total_revenue) AS total_revenue, 
+    SUM(sd.part_count) AS total_suppliers,
+    STRING_AGG(DISTINCT s.s_name) AS supplier_names
+FROM nation n
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN RankedOrders ro ON o.o_orderkey = ro.o_orderkey AND ro.price_rank <= 10
+LEFT JOIN LineitemStats ld ON o.o_orderkey = ld.l_orderkey
+LEFT JOIN SupplierDetails sd ON sd.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey IN (
+        SELECT p.p_partkey 
+        FROM part p 
+        WHERE p.p_retailprice > 1000
+    )
+)
+WHERE o.o_orderstatus IN ('O', 'F') 
+AND (ld.avg_quantity IS NULL OR ld.avg_quantity > 50)
+GROUP BY n.n_name, r.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_orders DESC NULLS LAST;

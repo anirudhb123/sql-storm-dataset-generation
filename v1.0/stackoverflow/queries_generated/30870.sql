@@ -1,0 +1,90 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.OwnerUserId,
+        0 AS Level,
+        CAST(p.Title AS varchar(1000)) AS FullPath
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+
+    UNION ALL
+
+    SELECT 
+        a.Id,
+        a.Title,
+        a.CreationDate,
+        a.Body,
+        a.OwnerUserId,
+        Level + 1,
+        CAST(r.FullPath || ' -> ' || a.Title AS varchar(1000))
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts p ON a.ParentId = p.Id
+    INNER JOIN 
+        RecursiveCTE r ON p.Id = r.Id
+    WHERE 
+        a.PostTypeId = 2  -- Answers only
+),
+UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(u.UpVotes - u.DownVotes) AS VoteBalance,
+        MAX(u.Reputation) AS MaxReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(v.Id) AS TotalVotes,
+        AVG(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS AvgUpVotes,
+        AVG(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS AvgDownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    r.Id AS QuestionId,
+    r.Title AS QuestionTitle,
+    r.FullPath AS CompleteQuestionPath,
+    us.DisplayName AS UserDisplayName,
+    us.BadgeCount,
+    us.VoteBalance,
+    us.MaxReputation,
+    pvs.TotalVotes,
+    pvs.AvgUpVotes,
+    pvs.AvgDownVotes,
+    COUNT(c.Id) AS CommentCount
+FROM 
+    RecursiveCTE r
+JOIN 
+    Users us ON r.OwnerUserId = us.Id
+LEFT JOIN 
+    PostVoteStats pvs ON r.Id = pvs.PostId
+LEFT JOIN 
+    Comments c ON r.Id = c.PostId
+WHERE 
+    r.Level = 0  -- Fetching only the main question level
+GROUP BY 
+    r.Id, r.Title, us.DisplayName, us.BadgeCount, us.VoteBalance, us.MaxReputation, 
+    pvs.TotalVotes, pvs.AvgUpVotes, pvs.AvgDownVotes
+ORDER BY 
+    r.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY; -- Pagination for output
+

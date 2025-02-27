@@ -1,0 +1,75 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ad ON c.c_current_addr_sk = ad.ca_address_sk
+), SalesData AS (
+    SELECT
+        ws.ws_order_number,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_item_sk) AS item_count,
+        SUM(ws.ws_ext_discount_amt) AS total_discount
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_order_number
+), DetailedReport AS (
+    SELECT 
+        cd.c_customer_id,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.ca_city,
+        cd.ca_state,
+        cd.ca_country,
+        sd.total_sales,
+        sd.item_count,
+        sd.total_discount
+    FROM 
+        CustomerDetails cd
+    LEFT JOIN 
+        SalesData sd ON cd.c_customer_id = (
+            SELECT 
+                ws_bill_customer_sk 
+            FROM 
+                web_sales 
+            WHERE 
+                ws_order_number = (SELECT MAX(ws_order_number) FROM web_sales)
+        )
+)
+SELECT 
+    c_first_name,
+    c_last_name,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    total_sales,
+    item_count,
+    total_discount,
+    CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+    UPPER(ca_city) AS city_upper,
+    CONCAT(ca_state, ' - ', ca_country) AS location_info
+FROM 
+    DetailedReport
+WHERE 
+    total_sales > 1000
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

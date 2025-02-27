@@ -1,0 +1,67 @@
+WITH TagDetails AS (
+    SELECT
+        T.Id AS TagId,
+        T.TagName,
+        T.Count AS TagUsageCount,
+        P.Title AS ExamplePostTitle,
+        P.ViewCount AS ExamplePostViews,
+        P.AverageScore
+    FROM
+        Tags T
+        JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE
+        T.Count > 0
+    ORDER BY
+        TagUsageCount DESC
+    LIMIT 10
+),
+
+UserActivity AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(CASE WHEN P.PostTypeId = 2 THEN P.Score END, 0)) AS TotalAnswerScore,
+        SUM(COALESCE(CASE WHEN P.PostTypeId = 1 THEN P.AnswerCount END, 0)) AS TotalQuestionAnswers
+    FROM
+        Users U
+        JOIN Posts P ON P.OwnerUserId = U.Id
+    GROUP BY
+        U.Id
+    HAVING
+        PostCount > 0
+    ORDER BY
+        PostCount DESC
+    LIMIT 10
+),
+
+PostVoteStatistics AS (
+    SELECT
+        P.Id AS PostId,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM
+        Posts P
+        LEFT JOIN Votes V ON V.PostId = P.Id
+    GROUP BY
+        P.Id
+)
+
+SELECT
+    TD.TagId,
+    TD.TagName,
+    TD.TagUsageCount,
+    TD.ExamplePostTitle,
+    TD.ExamplePostViews,
+    UA.DisplayName AS TopUserDisplayName,
+    UA.PostCount AS UserPostCount,
+    UA.TotalAnswerScore,
+    UA.TotalQuestionAnswers,
+    PVS.TotalVotes AS PostTotalVotes,
+    PVS.UpVotes,
+    PVS.DownVotes
+FROM
+    TagDetails TD
+    LEFT JOIN UserActivity UA ON UA.PostCount = (SELECT MAX(PostCount) FROM UserActivity)
+    LEFT JOIN PostVoteStatistics PVS ON PVS.TotalVotes = (SELECT MAX(TotalVotes) FROM PostVoteStatistics);

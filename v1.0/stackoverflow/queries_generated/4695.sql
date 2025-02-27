@@ -1,0 +1,70 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+PopularPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        RANK() OVER (ORDER BY P.Score DESC) AS RankScore
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+    ORDER BY 
+        P.Score DESC
+),
+RecentVotes AS (
+    SELECT 
+        PostId, 
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes
+    WHERE 
+        CreationDate >= NOW() - INTERVAL '7 days'
+    GROUP BY 
+        PostId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    PS.Title AS PopularPostTitle,
+    PS.Score AS PopularPostScore,
+    PS.RankScore,
+    Us.TotalUpvotes,
+    Us.TotalDownvotes,
+    Us.TotalPosts,
+    Us.TotalComments,
+    R.VoteCount AS RecentVotesCount,
+    CASE 
+        WHEN Us.Reputation IS NULL THEN 'No Reputation'
+        ELSE CONCAT('Reputation: ', Us.Reputation)
+    END AS ReputationLabel
+FROM 
+    UserStats Us
+LEFT JOIN 
+    PopularPosts PS ON Us.UserId = PS.Id
+LEFT JOIN 
+    RecentVotes R ON PS.Id = R.PostId
+WHERE 
+    Us.Reputation > 1000 OR Us.TotalPosts > 5
+ORDER BY 
+    Us.Reputation DESC, 
+    PopularPostScore DESC;

@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE
+        mh.level < 3  -- Limit to a maximum hierarchy level of 3
+)
+
+SELECT 
+    mn.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(ct.id) AS total_cast,
+    ARRAY_AGG(DISTINCT cct.kind) AS company_types,
+    SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END) AS info_count,  -- Assuming info_type_id 1 is for notable data
+    ROW_NUMBER() OVER (PARTITION BY mn.id ORDER BY mt.production_year DESC) AS row_num
+FROM 
+    movie_hierarchy mh
+JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+JOIN 
+    aka_name mn ON ci.person_id = mn.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    company_type cct ON mc.company_type_id = cct.id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id
+GROUP BY 
+    mn.id, mn.name, mt.title, mt.production_year
+HAVING 
+    COUNT(ct.id) > 1 
+ORDER BY 
+    actor_name, production_year DESC
+LIMIT 50;

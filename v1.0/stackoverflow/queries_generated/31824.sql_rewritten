@@ -1,0 +1,84 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation AS Reputation,
+        1 AS Depth
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation >= 1000
+    UNION ALL
+    SELECT 
+        U.Id,
+        U.Reputation,
+        UR.Depth + 1
+    FROM 
+        Users U
+    JOIN 
+        UserReputationCTE UR ON U.Id = UR.UserId
+    WHERE 
+        U.Reputation >= 1000 * UR.Depth
+),
+RankedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY P.OwnerUserId) AS UpVotesCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY P.OwnerUserId) AS DownVotesCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostsWithCommentCounts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        COALESCE(C.CmtCount, 0) AS CommentsCount
+    FROM 
+        RankedPosts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CmtCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) C ON P.Id = C.PostId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    PWC.Title,
+    PWC.CommentsCount,
+    PWC.UpVotesCount,
+    PWC.DownVotesCount,
+    R.Rank
+FROM 
+    Users U
+JOIN 
+    UserReputationCTE UR ON U.Id = UR.UserId
+JOIN 
+    PostsWithCommentCounts PWC ON U.Id = PWC.OwnerUserId
+JOIN 
+    (
+        SELECT 
+            OwnerUserId, 
+            MAX(Rank) AS MaxRank 
+        FROM 
+            RankedPosts 
+        GROUP BY 
+            OwnerUserId
+    ) R ON PWC.OwnerUserId = R.OwnerUserId
+WHERE 
+    U.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '5 years'
+ORDER BY 
+    UR.Reputation DESC, 
+    PWC.CommentsCount DESC;

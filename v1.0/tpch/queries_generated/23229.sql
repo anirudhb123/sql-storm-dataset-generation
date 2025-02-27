@@ -1,0 +1,47 @@
+WITH RECURSIVE region_info AS (
+    SELECT r_regionkey, r_name, r_comment
+    FROM region
+    WHERE r_regionkey IS NOT NULL
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, CONCAT(ri.r_comment, ' | ', r.r_comment)
+    FROM region_info ri
+    JOIN region r ON r.r_regionkey <> ri.r_regionkey AND LENGTH(ri.r_name) < LENGTH(r.r_name)
+),
+customer_info AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) as rn
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+supplier_part AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty,
+           (ps.ps_supplycost * ps.ps_availqty - CASE WHEN ps.ps_availqty > 100 THEN 100 ELSE 0 END) AS adjusted_cost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost) as part_rank
+    FROM partsupp ps
+    WHERE ps.ps_availqty IS NOT NULL
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS part_count,
+           MAX(l.l_tax) AS max_tax
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey
+)
+SELECT ri.r_name, ci.c_name,
+       SUM(COALESCE(os.total_revenue, 0)) AS aggregated_revenue,
+       COUNT(DISTINCT sp.ps_partkey) FILTER (WHERE sp.part_rank = 1) AS best_supplied_parts,
+       CASE WHEN SUM(ci.c_acctbal) IS NULL THEN 'Funding required' 
+            ELSE 'Sufficient Funds' END AS funding_status,
+       SUBSTRING(ri.r_comment, 1, 25) AS brief_comment
+FROM region_info ri
+LEFT JOIN customer_info ci ON ci.rn < 5
+LEFT JOIN supplier_part sp ON sp.ps_partkey IN (SELECT p.p_partkey 
+                                                 FROM part p 
+                                                 WHERE p.p_retailprice > 20.00 AND p.p_size <= 30)
+FULL OUTER JOIN order_summary os ON os.total_revenue IS NOT NULL
+WHERE ci.c_acctbal > 100.00
+GROUP BY ri.r_name, ci.c_name
+HAVING MAX(os.max_tax) < 0.2
+ORDER BY aggregated_revenue DESC, brief_comment;

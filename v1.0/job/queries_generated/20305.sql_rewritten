@@ -1,0 +1,100 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::INTEGER AS parent_movie_id,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT
+        m.id,
+        m.title,
+        m.production_year,
+        mh.movie_id,
+        mh.level + 1
+    FROM
+        aka_title m
+    JOIN
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+CastRoles AS (
+    SELECT
+        ci.movie_id,
+        ct.kind AS role_kind,
+        COUNT(ci.id) AS role_count,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY COUNT(ci.id) DESC) as role_ranking
+    FROM
+        cast_info ci
+    JOIN
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY
+        ci.movie_id, ct.kind
+),
+MostFrequentActors AS (
+    SELECT
+        ci.movie_id,
+        ak.name AS actor_name,
+        COUNT(*) AS appearances
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY
+        ci.movie_id, ak.name
+    HAVING
+        COUNT(*) > 1
+),
+MoviesWithKeywords AS (
+    SELECT
+        mt.id AS movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM
+        aka_title mt
+    LEFT JOIN
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY
+        mt.id
+)
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    COALESCE(FAM.actor_name, 'Unknown Actor') AS top_actor,
+    COALESCE(role.role_kind, 'No Role') AS top_role
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    MoviesWithKeywords mk ON mh.movie_id = mk.movie_id
+LEFT JOIN
+    (SELECT
+        m.movie_id,
+        ma.actor_name,
+        roles.role_kind,
+        roles.role_count
+    FROM
+        (
+            SELECT
+                movie_id,
+                actor_name,
+                ROW_NUMBER() OVER (PARTITION BY movie_id ORDER BY appearances DESC) AS rn
+            FROM
+                MostFrequentActors
+        ) AS m
+    JOIN
+        CastRoles roles ON m.movie_id = roles.movie_id
+    WHERE
+        rn = 1) AS FAM ON mh.movie_id = FAM.movie_id
+LEFT JOIN
+    CastRoles role ON mh.movie_id = role.movie_id AND role.role_ranking = 1
+WHERE
+    mh.production_year > 2000
+ORDER BY
+    mh.production_year DESC, mh.title ASC
+LIMIT 100;

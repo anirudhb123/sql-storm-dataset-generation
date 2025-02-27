@@ -1,0 +1,79 @@
+
+WITH RECURSIVE SalesWithReturns AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(COALESCE(sr.sr_return_amt, 0)) AS total_returns,
+        SUM(ws.ws_quantity) AS total_quantity
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        store_returns sr ON ws.ws_order_number = sr.sr_ticket_number 
+    GROUP BY 
+        ws.web_site_sk
+
+    UNION ALL
+
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) + total_sales AS total_sales,
+        SUM(COALESCE(sr.sr_return_amt, 0)) + total_returns AS total_returns,
+        SUM(ws.ws_quantity) + total_quantity AS total_quantity
+    FROM 
+        web_sales ws
+    JOIN 
+        SalesWithReturns s ON ws.web_site_sk = s.web_site_sk
+    LEFT JOIN 
+        store_returns sr ON ws.ws_order_number = sr.sr_ticket_number 
+    WHERE 
+        ws.ws_sold_date_sk > (SELECT MAX(ws_sold_date_sk) FROM web_sales) - 30
+    GROUP BY 
+        ws.web_site_sk
+),
+CustomerPurchaseInsights AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS purchase_count,
+        AVG(ws.ws_net_paid) AS avg_spent,
+        MAX(ws.ws_net_profit) AS max_profit,
+        SUM(ws.ws_quantity) AS total_items
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+MonthlySales AS (
+    SELECT 
+        EXTRACT(YEAR FROM d.d_date) AS sales_year,
+        EXTRACT(MONTH FROM d.d_date) AS sales_month,
+        SUM(COALESCE(ws.ws_ext_sales_price, 0)) AS monthly_sales
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        sales_year, sales_month
+)
+SELECT 
+    w.w_warehouse_id,
+    w.w_warehouse_name,
+    COALESCE(swr.total_sales, 0) AS total_warehouse_sales,
+    COALESCE(swr.total_returns, 0) AS total_warehouse_returns,
+    cp.purchase_count,
+    cp.avg_spent,
+    ms.monthly_sales
+FROM 
+    warehouse w
+LEFT JOIN 
+    SalesWithReturns swr ON w.w_warehouse_sk = (SELECT MIN(ws.ws_warehouse_sk) FROM web_sales ws WHERE ws.ws_sold_date_sk = swr.web_site_sk)
+LEFT JOIN 
+    CustomerPurchaseInsights cp ON w.w_warehouse_sk = cp.c_customer_sk
+LEFT JOIN 
+    MonthlySales ms ON EXTRACT(YEAR FROM CURRENT_DATE) = ms.sales_year AND EXTRACT(MONTH FROM CURRENT_DATE) = ms.sales_month
+WHERE 
+    w.w_warehouse_sq_ft > 10000
+ORDER BY 
+    total_warehouse_sales DESC, purchase_count DESC
+LIMIT 10;

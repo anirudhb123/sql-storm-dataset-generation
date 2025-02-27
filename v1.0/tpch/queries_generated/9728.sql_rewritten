@@ -1,0 +1,43 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        DENSE_RANK() OVER (PARTITION BY l.l_suppkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, l.l_suppkey
+), top_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        r.r_name AS region
+    FROM 
+        supplier s 
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.s_acctbal > 1000
+)
+SELECT 
+    ts.s_suppkey,
+    ts.s_name,
+    ts.region,
+    COUNT(ro.o_orderkey) AS total_orders,
+    SUM(ro.total_revenue) AS total_revenue
+FROM 
+    top_suppliers ts 
+LEFT JOIN 
+    ranked_orders ro ON ts.s_suppkey = ro.l_suppkey AND ro.revenue_rank <= 10
+GROUP BY 
+    ts.s_suppkey, ts.s_name, ts.region
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

@@ -1,0 +1,112 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.AcceptedAnswerId,
+        P.CreationDate,
+        CAST(P.Title AS VARCHAR(8000)) AS PostPath,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        A.Id AS PostId,
+        A.Title,
+        A.OwnerUserId,
+        A.PostTypeId,
+        A.AcceptedAnswerId,
+        A.CreationDate,
+        CAST(RPH.PostPath || ' -> ' || A.Title AS VARCHAR(8000)),
+        RPH.Level + 1
+    FROM 
+        Posts A
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON A.ParentId = RPH.PostId
+    WHERE 
+        A.PostTypeId = 2 
+),
+
+UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBountyAmount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        COALESCE(PH.CommentCount, 0) AS TotalComments,
+        COALESCE(VoteStats.VoteCount, 0) AS TotalVotes,
+        COALESCE(VoteStats.TotalBountyAmount, 0) AS TotalBounties,
+        RPH.PostPath,
+        RPH.Level
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(Id) AS CommentCount
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) PH ON P.Id = PH.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(Id) AS VoteCount,
+            SUM(BountyAmount) AS TotalBountyAmount
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) VoteStats ON P.Id = VoteStats.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy RPH ON P.Id = RPH.PostId
+)
+
+SELECT 
+    U.DisplayName,
+    COUNT(DISTINCT PS.PostId) AS NumberOfPosts,
+    SUM(PS.ViewCount) AS TotalViews,
+    SUM(PS.TotalComments) AS TotalComments,
+    SUM(PS.TotalVotes) AS TotalVotes,
+    SUM(PS.TotalBounties) AS TotalBountyAmount,
+    AVG(PS.ViewCount * PS.TotalVotes) AS AverageEngagementPerView,
+    MAX(PS.CreationDate) AS LastPostDate
+FROM 
+    Users U
+JOIN 
+    Posts PS ON U.Id = PS.OwnerUserId
+JOIN 
+    UserEngagement UE ON U.Id = UE.UserId
+WHERE 
+    PS.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 year' 
+GROUP BY 
+    U.Id, U.DisplayName
+HAVING 
+    SUM(PS.ViewCount) > 1000  
+ORDER BY 
+    TotalViews DESC

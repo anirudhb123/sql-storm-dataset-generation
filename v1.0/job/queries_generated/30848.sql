@@ -1,0 +1,53 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        0 AS level
+    FROM 
+        title m
+    WHERE 
+        m.kind_id = 1  -- assuming '1' represents a movie kind
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        h.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy h ON ml.movie_id = h.movie_id
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    WHERE 
+        h.level < 5  -- limiting the depth to prevent excessive recursion
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    COUNT(DISTINCT c.person_id) AS num_cast_members,
+    STRING_AGG(DISTINCT m.title, ', ') FILTER (WHERE m.production_year > 2000) AS recent_movies,
+    SUM(CASE 
+            WHEN COALESCE(p.info, '') = '' THEN 1 
+            ELSE 0 
+        END) AS missing_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN 
+    person_info p ON a.person_id = p.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography') 
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+GROUP BY 
+    a.id, t.id
+ORDER BY 
+    num_cast_members DESC, actor_name ASC;

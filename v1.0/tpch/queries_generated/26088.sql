@@ -1,0 +1,36 @@
+WITH CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS recent_order
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+),
+RecentHighValueOrders AS (
+    SELECT co.c_custkey, co.c_name, co.o_orderkey, co.o_totalprice, co.o_orderdate
+    FROM CustomerOrders co
+    WHERE co.recent_order = 1 AND co.o_totalprice > 10000
+),
+PartSuppliers AS (
+    SELECT ps.ps_partkey, p.p_name, s.s_name, SUM(ps.ps_availqty) AS total_availqty
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, p.p_name, s.s_name
+),
+CombinedResults AS (
+    SELECT r.r_name AS region_name, r.r_comment AS region_comment, 
+           n.n_name AS nation_name, 
+           c.c_name AS customer_name, co.o_orderkey, 
+           phv.o_totalprice AS order_total, 
+           ps_part.p_name AS part_name, ps.part_sup.s_name AS supplier_name, 
+           ps.total_availqty
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN RecentHighValueOrders co ON c.c_custkey = co.c_custkey
+    JOIN PartSuppliers ps ON ps.total_availqty > 0
+)
+SELECT DISTINCT region_name, nation_name, customer_name, order_total, 
+       COUNT(part_name) AS num_parts, SUM(total_availqty) AS total_available_quantity
+FROM CombinedResults
+GROUP BY region_name, nation_name, customer_name, order_total
+ORDER BY region_name, nation_name, order_total DESC;

@@ -1,0 +1,74 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2024-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+CustomerParticipation AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(os.total_price) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        OrderSummary os ON c.c_custkey = os.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    cs.c_custkey,
+    cs.c_name,
+    COALESCE(cs.total_orders, 0) AS total_orders,
+    COALESCE(cs.total_spent, 0) AS total_spent,
+    ss.total_available,
+    ss.avg_supply_cost
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    CustomerParticipation cs ON c.c_custkey = cs.c_custkey
+LEFT JOIN 
+    SupplierStats ss ON ss.s_suppkey IN (
+        SELECT 
+            ps.ps_suppkey 
+        FROM 
+            partsupp ps 
+        JOIN 
+            lineitem l ON ps.ps_partkey = l.l_partkey
+        WHERE 
+            l.l_orderkey IN (
+                SELECT 
+                    o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey
+            )
+    )
+ORDER BY 
+    r.r_name, n.n_name, cs.c_name;

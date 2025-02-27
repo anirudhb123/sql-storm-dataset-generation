@@ -1,0 +1,63 @@
+
+WITH RECURSIVE TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATEADD(year, -1, CURRENT_TIMESTAMP) OR o.o_orderkey IS NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supply_value,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+LineItemRanking AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_extendedprice * (1 - l.l_discount) AS net_price,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS line_rank
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+)
+SELECT 
+    tc.c_name,
+    ss.s_name,
+    COUNT(DISTINCT li.l_orderkey) AS orders_count,
+    SUM(li.net_price) AS total_sales,
+    MAX(tc.total_spent) AS max_spent,
+    MIN(ss.supply_value) AS min_supply_value
+FROM 
+    TopCustomers tc
+FULL OUTER JOIN 
+    SupplierStats ss ON ss.part_count > 5
+JOIN 
+    LineItemRanking li ON li.line_rank = 1
+WHERE 
+    ss.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_availqty > 100) OR ss.part_count > 10
+GROUP BY 
+    tc.c_name, ss.s_name
+ORDER BY 
+    total_sales DESC, max_spent ASC;

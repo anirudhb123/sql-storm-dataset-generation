@@ -1,0 +1,38 @@
+
+WITH UserReputation AS (
+    SELECT Id, Reputation, 
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+           AVG(Reputation) OVER () AS AvgReputation
+    FROM Users
+),
+PopularPosts AS (
+    SELECT Id, Title, Score, ViewCount,
+           OwnerUserId,
+           (SELECT COUNT(*) FROM Comments WHERE PostId = Posts.Id) AS CommentCount
+    FROM Posts
+    WHERE ViewCount > (SELECT AVG(ViewCount) FROM Posts)
+),
+PostHistorySummary AS (
+    SELECT PostId, COUNT(*) AS EditCount,
+           MAX(CASE WHEN PostHistoryTypeId IN (4, 24) THEN 1 ELSE 0 END) AS HasEditTitle,
+           MAX(CASE WHEN PostHistoryTypeId IN (5, 24) THEN 1 ELSE 0 END) AS HasEditBody
+    FROM PostHistory
+    GROUP BY PostId
+),
+RankedPosts AS (
+    SELECT p.Id, p.Title, p.Score, ph.EditCount, u.DisplayName, u.Location,
+           ROW_NUMBER() OVER (PARTITION BY u.Location ORDER BY p.Score DESC) AS PostRankByLocation
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN PostHistorySummary ph ON p.Id = ph.PostId
+    WHERE u.Location IS NOT NULL
+)
+SELECT r.PostRankByLocation, r.Title, r.Score, u.Reputation, r.EditCount,
+       CASE WHEN ph.HasEditTitle = 1 THEN 'Edited Title' ELSE 'No Edited Title' END AS TitleStatus,
+       CASE WHEN ph.HasEditBody = 1 THEN 'Edited Body' ELSE 'No Edited Body' END AS BodyStatus
+FROM RankedPosts r
+JOIN UserReputation u ON r.OwnerUserId = u.Id
+JOIN PostHistorySummary ph ON r.Id = ph.PostId
+WHERE u.Reputation > (SELECT AvgReputation FROM UserReputation)
+  AND r.PostRankByLocation <= 5
+ORDER BY u.Reputation DESC, r.Score DESC;

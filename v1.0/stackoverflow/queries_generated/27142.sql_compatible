@@ -1,0 +1,73 @@
+
+WITH TagOccurrences AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags FROM 2 FOR length(Tags) - 2), '> <')) AS Tag,
+        PostId
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+),
+TagCounts AS (
+    SELECT 
+        Tag, 
+        COUNT(*) AS OccurrenceCount
+    FROM 
+        TagOccurrences
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag, 
+        OccurrenceCount,
+        ROW_NUMBER() OVER (ORDER BY OccurrenceCount DESC) AS Rank
+    FROM 
+        TagCounts
+    WHERE 
+        OccurrenceCount > 1  
+),
+RelevantPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        t.Tag
+    FROM 
+        Posts p
+    JOIN 
+        TagOccurrences t ON p.Id = t.PostId
+    WHERE 
+        t.Tag IN (SELECT Tag FROM TopTags WHERE Rank <= 10)  
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM 
+        Users u
+    JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    u.DisplayName AS PostOwner,
+    SUM(CASE WHEN rp.Tag IS NOT NULL THEN 1 ELSE 0 END) AS TagCount,
+    COALESCE(ur.TotalBounties, 0) AS TotalBounties
+FROM 
+    RelevantPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, u.DisplayName
+ORDER BY 
+    TagCount DESC, rp.CreationDate DESC
+LIMIT 100;

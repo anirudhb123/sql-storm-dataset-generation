@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+    AND 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+),
+
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        COUNT(*) AS TotalQuestions,
+        SUM(CASE WHEN Score > 0 THEN 1 ELSE 0 END) AS TotalPositiveScores,
+        SUM(ViewCount) AS TotalViews
+    FROM 
+        RankedPosts
+    GROUP BY 
+        Tag
+),
+
+TopTags AS (
+    SELECT 
+        Tag,
+        TotalQuestions,
+        TotalPositiveScores,
+        TotalViews,
+        RANK() OVER (ORDER BY TotalQuestions DESC) AS TagRank
+    FROM 
+        TagStatistics
+    WHERE 
+        TotalQuestions > 10 
+)
+
+SELECT 
+    tt.Tag,
+    tt.TotalQuestions,
+    tt.TotalPositiveScores,
+    tt.TotalViews,
+    COALESCE(AVG(rp.Score), 0) AS AverageScore
+FROM 
+    TopTags tt
+LEFT JOIN 
+    RankedPosts rp ON EXISTS (
+        SELECT 1 FROM Posts p
+        WHERE p.Tags LIKE CONCAT('%', tt.Tag, '%')
+        AND p.PostTypeId = 1
+    )
+GROUP BY 
+    tt.Tag, tt.TotalQuestions, tt.TotalPositiveScores, tt.TotalViews
+ORDER BY 
+    tt.TagRank
+LIMIT 10;

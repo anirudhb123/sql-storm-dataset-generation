@@ -1,0 +1,58 @@
+WITH RecursiveMovieCounts AS (
+    SELECT 
+        c.movie_id, 
+        COUNT(*) AS cast_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+
+TopMovies AS (
+    SELECT 
+        m.id, 
+        m.title, 
+        m.production_year,
+        rc.cast_count,
+        ROW_NUMBER() OVER (ORDER BY rc.cast_count DESC) AS rn
+    FROM 
+        aka_title m
+    JOIN 
+        RecursiveMovieCounts rc ON m.id = rc.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+        AND m.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+        AND rc.cast_count > 5
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    ak.name AS top_actor,
+    GROUP_CONCAT(DISTINCT kw.keyword ORDER BY kw.keyword SEPARATOR ', ') AS keywords,
+    COALESCE(mic.info, 'No info available') AS additional_info,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_companies mc ON tm.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    cast_info ci ON tm.id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id 
+LEFT JOIN 
+    movie_keyword mk ON tm.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mic ON tm.id = mic.movie_id AND mic.info_type_id = (SELECT id FROM info_type WHERE info = 'summary' LIMIT 1)
+WHERE 
+    rn <= 10
+GROUP BY 
+    tm.id, tm.title, tm.production_year, ak.name, mic.info
+HAVING 
+    COUNT(DISTINCT cn.name) > 1
+ORDER BY 
+    tm.production_year DESC, tm.title ASC;

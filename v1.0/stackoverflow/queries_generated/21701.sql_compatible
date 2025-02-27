@@ -1,0 +1,94 @@
+
+WITH ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(voteCount.UpVotes, 0) - COALESCE(voteCount.DownVotes, 0) AS NetVotes,
+        p.OwnerUserId,
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+            COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) voteCount ON p.Id = voteCount.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        DENSE_RANK() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+),
+
+PostWithBadges AS (
+    SELECT 
+        ap.PostId,
+        ap.Title,
+        ap.Score,
+        ap.CreationDate,
+        ap.NetVotes,
+        u.DisplayName,
+        u.Reputation,
+        bad.Name AS BadgeName,
+        COUNT(CASE WHEN bad.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN bad.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN bad.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        ActivePosts ap
+    JOIN 
+        Users u ON ap.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges bad ON u.Id = bad.UserId
+    GROUP BY 
+        ap.PostId, ap.Title, ap.Score, ap.CreationDate, ap.NetVotes, u.DisplayName, u.Reputation
+)
+
+SELECT 
+    p.BadgeName,
+    p.Title,
+    p.Score,
+    p.CreationDate,
+    p.NetVotes,
+    ur.Rank,
+    CASE
+        WHEN p.GoldBadges > 0 THEN 'Gold'
+        WHEN p.SilverBadges > 0 THEN 'Silver'
+        WHEN p.BronzeBadges > 0 THEN 'Bronze'
+        ELSE 'No Badge'
+    END AS BadgeLevel,
+    CASE 
+        WHEN p.NetVotes IS NOT NULL THEN 
+            CASE 
+                WHEN p.NetVotes > 10 THEN 'Highly Voted'
+                WHEN p.NetVotes BETWEEN 1 AND 10 THEN 'Moderately Voted'
+                ELSE 'Not Voted'
+            END
+        ELSE 'Unknown'
+    END AS VoteCategory
+FROM 
+    PostWithBadges p
+JOIN 
+    UserReputation ur ON p.OwnerUserId = ur.UserId
+WHERE 
+    (p.NetVotes IS NOT NULL AND p.NetVotes > 0) 
+    OR p.GoldBadges > 0
+ORDER BY 
+    ur.Rank, p.CreationDate DESC
+FETCH FIRST 10 ROWS ONLY;

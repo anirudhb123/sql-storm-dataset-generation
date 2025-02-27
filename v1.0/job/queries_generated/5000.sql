@@ -1,0 +1,58 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title a
+    JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.title, a.production_year
+), 
+MovieAwards AS (
+    SELECT 
+        m.title,
+        COUNT(mo.id) AS award_count
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id 
+    LEFT JOIN 
+        info_type it ON mi.info_type_id = it.id AND it.info like '%Award%'
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY 
+        m.title
+), 
+MovieDetails AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.actor_count,
+        ma.award_count,
+        (CASE 
+            WHEN ma.award_count IS NULL THEN 'No Awards'
+            ELSE 'Awarded'
+         END) AS award_status
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieAwards ma ON rm.title = ma.title
+)
+
+SELECT 
+    title,
+    production_year,
+    actor_count,
+    award_count,
+    award_status
+FROM 
+    MovieDetails
+WHERE 
+    (actor_count > 5 AND award_count > 0) OR 
+    (production_year = 2020 AND award_count IS NULL)
+ORDER BY 
+    production_year DESC, 
+    actor_count DESC;

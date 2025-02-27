@@ -1,0 +1,75 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(s.s_comment, 'No comment') AS adjusted_comment
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+),
+UnusualParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ROW_NUMBER() OVER (ORDER BY ps.ps_availqty DESC) AS rn
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_availqty < (SELECT AVG(ps2.ps_availqty) FROM partsupp ps2 WHERE ps2.ps_supplycost > 0)
+)
+SELECT 
+    np.p_partkey,
+    np.p_name,
+    np.p_retailprice,
+    si.s_name,
+    co.order_count,
+    co.total_spent,
+    CASE 
+        WHEN np.price_rank <= 3 THEN 'High Value'
+        ELSE 'Regular Value'
+    END AS value_category,
+    CASE 
+        WHEN np.p_retailprice IS NULL THEN 'Unknown Price'
+        ELSE CONCAT('Price: $', CAST(np.p_retailprice AS VARCHAR))
+    END AS price_display,
+    us.ps_availqty AS unusual_availqty
+FROM 
+    RankedParts np
+LEFT JOIN 
+    SupplierInfo si ON np.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = si.s_suppkey)
+JOIN 
+    CustomerOrders co ON co.order_count > 10
+FULL OUTER JOIN 
+    UnusualParts us ON np.p_partkey = us.ps_partkey
+WHERE 
+    np.price_rank <= 10 OR us.rn IS NOT NULL
+ORDER BY 
+    np.p_retailprice DESC NULLS LAST, 
+    us.ps_availqty DESC NULLS LAST
+OFFSET 0 ROWS FETCH NEXT 20 ROWS ONLY;

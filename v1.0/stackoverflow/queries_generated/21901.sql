@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+
+PostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(CASE WHEN p.ViewCount IS NULL THEN 0 ELSE p.ViewCount END) AS TotalViews,
+        AVG(NULLIF(p.ViewCount, 0)) AS AvgViewsPerPost
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+ActiveBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        b.UserId
+),
+
+RecentActivities AS (
+    SELECT 
+        ph.UserId,
+        MAX(ph.CreationDate) AS LastActivityDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13)
+    GROUP BY 
+        ph.UserId
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    ps.TotalPosts,
+    ps.TotalScore,
+    ps.TotalViews,
+    ps.AvgViewsPerPost,
+    ab.BadgeCount,
+    ab.BadgeNames,
+    ra.LastActivityDate,
+    CASE 
+        WHEN ra.LastActivityDate IS NULL THEN 'Inactive'
+        ELSE 'Active'
+    END AS UserStatus,
+    ARRAY_AGG(DISTINCT rp.Title) FILTER (WHERE rp.Rank <= 5) AS TopPosts
+FROM 
+    Users u
+LEFT JOIN 
+    PostStats ps ON u.Id = ps.UserId
+LEFT JOIN 
+    ActiveBadges ab ON u.Id = ab.UserId
+LEFT JOIN 
+    RecentActivities ra ON u.Id = ra.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+GROUP BY 
+    u.Id, u.DisplayName, ps.TotalPosts, ps.TotalScore, ps.TotalViews, ps.AvgViewsPerPost, ab.BadgeCount, ab.BadgeNames, ra.LastActivityDate
+ORDER BY 
+    ps.TotalScore DESC NULLS LAST, ps.TotalPosts DESC;

@@ -1,0 +1,56 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierRevenue AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+NationRevenue AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        SUM(srv.supplier_cost) AS national_revenue
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        SupplierRevenue srv ON s.s_suppkey = srv.s_suppkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name AS region_name, 
+    nr.n_name AS nation_name, 
+    SUM(nr.national_revenue) AS total_national_revenue, 
+    COUNT(DISTINCT ro.o_orderkey) AS order_count
+FROM 
+    region r
+JOIN 
+    nation nr ON r.r_regionkey = nr.n_regionkey
+JOIN 
+    NationRevenue nrev ON nr.n_nationkey = nrev.n_nationkey
+JOIN 
+    RankedOrders ro ON ro.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    r.r_name, nr.n_name
+ORDER BY 
+    total_national_revenue DESC, region_name, nation_name;

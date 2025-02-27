@@ -1,0 +1,62 @@
+WITH movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        c.role_id,
+        a.name AS actor_name,
+        p.info AS actor_info,
+        k.keyword
+    FROM 
+        title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        person_info p ON a.person_id = p.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+        AND k.keyword IS NOT NULL
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+final_output AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.actor_name,
+        md.actor_info,
+        cd.company_name,
+        cd.company_type
+    FROM 
+        movie_details md
+    JOIN 
+        company_details cd ON md.title = cd.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    actor_name,
+    actor_info,
+    company_name,
+    company_type
+FROM 
+    final_output
+ORDER BY 
+    production_year DESC, title;

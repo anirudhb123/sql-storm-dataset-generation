@@ -1,0 +1,50 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        c.c_name,
+        c.c_acctbal,
+        DENSE_RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN '2020-01-01' AND '2021-01-01'
+      AND 
+        o.o_orderstatus IN ('F', 'P')
+),
+TopCustomers AS (
+    SELECT 
+        r.r_name AS region,
+        n.n_name AS nation,
+        o.c_name AS customer_name,
+        o.o_totalprice,
+        o.o_orderdate
+    FROM 
+        RankedOrders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.rnk <= 10
+)
+SELECT 
+    region,
+    nation,
+    COUNT(*) AS num_orders,
+    SUM(o_totalprice) AS total_revenue,
+    AVG(o_totalprice) AS avg_order_value,
+    MIN(o_orderdate) AS first_order_date,
+    MAX(o_orderdate) AS last_order_date
+FROM 
+    TopCustomers
+GROUP BY 
+    region, nation
+ORDER BY 
+    total_revenue DESC;

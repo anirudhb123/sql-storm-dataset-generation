@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+),
+RankedClosedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.DisplayName,
+        rp.RankScore,
+        cp.LastClosedDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+)
+SELECT 
+    rcp.PostId,
+    rcp.Title,
+    rcp.CreationDate,
+    rcp.Score,
+    rcp.ViewCount,
+    rcp.DisplayName,
+    rcp.RankScore,
+    COALESCE(rcp.LastClosedDate::date, 'No Closure') AS LastClosureDate,
+    CASE 
+        WHEN rcp.LastClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    (CASE 
+        WHEN rcp.RankScore BETWEEN 1 AND 5 THEN 'Top Posts'
+        ELSE 'Other Posts'
+    END) AS PostCategory
+FROM 
+    RankedClosedPosts rcp
+WHERE 
+    rcp.RankScore <= 10
+ORDER BY 
+    rcp.Score DESC, rcp.ViewCount DESC;

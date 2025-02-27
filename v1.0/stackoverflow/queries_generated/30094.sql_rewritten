@@ -1,0 +1,83 @@
+WITH RecursivePostHierarchy AS (
+    SELECT p.Id, p.Title, p.ParentId, 1 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+    UNION ALL
+    SELECT p2.Id, p2.Title, p2.ParentId, r.Level + 1
+    FROM Posts p2
+    INNER JOIN RecursivePostHierarchy r ON p2.ParentId = r.Id
+), 
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        AVG(u.Reputation) AS AverageReputation
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    WHERE u.Reputation > 0
+    GROUP BY u.Id
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS HistoryCount,
+        STRING_AGG(DISTINCT phishing.UserDisplayName, ', ') AS EditedBy,
+        MAX(ph.CreationDate) AS LastEditedDate
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN Users phishing ON ph.UserId = phishing.Id
+    GROUP BY p.Id
+), 
+TagsAnalysis AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(t.Count) AS TotalUses
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(p.ClosedDate, '9999-12-31') AS ClosedDate,
+        COALESCE(ph.HistoryCount, 0) AS HistoryCount,
+        COALESCE(ph.EditedBy, 'None') AS EditedBy,
+        COALESCE(ph.LastEditedDate, 'Never') AS LastEditedDate,
+        COALESCE(ti.TotalPosts, 0) AS TotalPosts,
+        COALESCE(ti.TotalScore, 0) AS TotalScore,
+        COALESCE(ti.TotalBounties, 0) AS TotalBounties,
+        COALESCE(ti.AverageReputation, 0) AS AverageReputation
+    FROM Posts p
+    LEFT JOIN PostHistoryAnalysis ph ON p.Id = ph.PostId
+    LEFT JOIN UserStatistics ti ON p.OwnerUserId = ti.UserId
+    WHERE p.Score > 0
+    ORDER BY p.CreationDate DESC
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.ViewCount,
+    pd.AnswerCount,
+    pd.CommentCount,
+    pd.ClosedDate,
+    pd.HistoryCount,
+    pd.EditedBy,
+    pd.LastEditedDate,
+    ht.TagName,
+    ht.PostCount,
+    ht.TotalUses
+FROM PostDetails pd
+LEFT JOIN TagsAnalysis ht ON pd.PostId = ht.PostId
+WHERE ht.TotalUses > 10
+OR pd.AnswerCount > 5
+ORDER BY pd.ViewCount DESC, pd.LastEditedDate DESC;

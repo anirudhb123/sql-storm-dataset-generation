@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_link ml ON t.id = ml.movie_id
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    WHERE 
+        t.kind_id = 1  -- Assuming kind_id = 1 represents a specific movie type, e.g., 'Feature Film'
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        t.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    JOIN 
+        aka_title t ON m.id = t.id
+    WHERE 
+        t.kind_id = 1
+),
+CastSummary AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT an.name, ', ') AS actor_names
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        ci.movie_id
+),
+TitleInfo AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        m.production_year,
+        COALESCE(cs.total_cast, 0) AS total_cast,
+        cs.actor_names
+    FROM 
+        title t
+    JOIN 
+        aka_title m ON t.id = m.movie_id
+    LEFT JOIN 
+        CastSummary cs ON t.id = cs.movie_id
+)
+SELECT 
+    ti.title,
+    ti.production_year,
+    ti.total_cast,
+    ti.actor_names,
+    mh.level AS link_depth
+FROM 
+    TitleInfo ti
+LEFT JOIN 
+    MovieHierarchy mh ON ti.movie_id = mh.movie_id
+WHERE 
+    ti.production_year >= 2000
+    AND (ti.total_cast > 0 OR ti.actor_names IS NULL)
+ORDER BY 
+    ti.production_year DESC, ti.title;

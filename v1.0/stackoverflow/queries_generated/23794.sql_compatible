@@ -1,0 +1,94 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT P.Id) AS AnsweredQuestions,
+        COUNT(DISTINCT B.Id) AS BadgesEarned,
+        SUM(CASE WHEN P.CreationDate <= U.LastAccessDate THEN 1 ELSE 0 END) AS QuestionsAnsweredBeforeLastVisit,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY COUNT(DISTINCT P.Id) DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id AND V.VoteTypeId IN (8, 9)  
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id AND P.PostTypeId = 1  
+    LEFT JOIN 
+        Badges B ON B.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        TotalBounties, 
+        AnsweredQuestions, 
+        BadgesEarned, 
+        QuestionsAnsweredBeforeLastVisit,
+        Rank 
+    FROM 
+        UserStats
+    WHERE 
+        Rank <= 10  
+),
+
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(C.CommentId) AS TotalComments,
+        AVG(Vs.Score) AS AverageScore,
+        P.CreationDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        (SELECT Id AS CommentId, PostId, Score FROM Comments) C ON C.PostId = P.Id
+    LEFT JOIN 
+        (SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS Score FROM Votes GROUP BY PostId) Vs ON Vs.PostId = P.Id
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate
+),
+
+UserPostDetails AS (
+    SELECT 
+        U.DisplayName AS UserDisplayName,
+        P.Title AS PostTitle,
+        PS.TotalComments,
+        PS.AverageScore,
+        C.CreationDate AS CommentDate,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY C.CreationDate DESC) AS CommentRank
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    JOIN 
+        PostSummary PS ON PS.PostId = P.Id
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    WHERE 
+        P.PostTypeId = 1
+)
+
+SELECT 
+    U.UserId, 
+    U.DisplayName, 
+    U.TotalBounties, 
+    U.AnsweredQuestions, 
+    COALESCE(UPD.PostTitle, 'No Posts') AS LastPostTitle,
+    COALESCE(UPD.TotalComments, 0) AS CommentsOnLastPost,
+    COALESCE(UPD.AverageScore, 0.0) AS AvgScoreOnLastPost,
+    CASE 
+        WHEN UPD.CommentRank IS NULL THEN 'No Comments' 
+        ELSE TO_CHAR(UPD.CommentDate, 'YYYY-MM-DD HH24:MI:SS') 
+    END AS LastCommentDate
+FROM 
+    TopUsers U
+LEFT JOIN 
+    UserPostDetails UPD ON U.DisplayName = UPD.UserDisplayName AND UPD.CommentRank = 1
+ORDER BY 
+    U.TotalBounties DESC, U.AnsweredQuestions DESC;

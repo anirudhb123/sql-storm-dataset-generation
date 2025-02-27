@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = CURRENT_DATE)
+),
+ReturnStats AS (
+    SELECT 
+        sr.store_sk,
+        SUM(sr.return_quantity) AS total_returned,
+        COUNT(sr.ticket_number) AS return_count
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.store_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(CASE WHEN ws.ws_bill_cdemo_sk IS NOT NULL THEN ws.ws_sales_price END) AS total_spent
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        web_sales ws ON cd.cd_demo_sk = ws.ws_bill_cdemo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+SalesOverview AS (
+    SELECT 
+        r.web_site_sk,
+        rd.store_sk,
+        COUNT(r.ws_order_number) AS total_orders,
+        SUM(r.ws_sales_price) AS total_sales,
+        SUM(r.ws_quantity) AS total_quantity_sold
+    FROM 
+        RankedSales r
+    INNER JOIN 
+        ReturnStats rd ON r.ws_order_number = rd.store_sk
+    GROUP BY 
+        r.web_site_sk, rd.store_sk
+)
+SELECT 
+    c.cd_gender,
+    c.cd_marital_status,
+    SUM(s.total_sales) AS sales_totals,
+    COUNT(DISTINCT s.total_orders) AS unique_orders,
+    SUM(COALESCE(r.total_returned, 0)) AS total_returns,
+    MAX(s.total_quantity_sold) OVER (PARTITION BY c.cd_gender ORDER BY SUM(s.total_sales) DESC) AS max_quantity_sold_per_gender
+FROM 
+    CustomerDemographics c
+LEFT JOIN 
+    SalesOverview s ON c.cd_demo_sk = s.web_site_sk
+LEFT JOIN 
+    ReturnStats r ON s.store_sk = r.store_sk
+WHERE 
+    (c.cd_gender IS NOT NULL OR c.cd_marital_status IS NOT NULL)
+    AND (c.cd_marital_status IN ('M', 'S') OR c.cd_gender = 'F')
+GROUP BY 
+    c.cd_gender, c.cd_marital_status
+HAVING 
+    SUM(s.total_sales) > (SELECT AVG(total_sales) FROM SalesOverview) 
+    OR COUNT(DISTINCT s.total_orders) > (SELECT COUNT(*) FROM web_sales) * 0.1
+ORDER BY 
+    sales_totals DESC,
+    unique_orders ASC;

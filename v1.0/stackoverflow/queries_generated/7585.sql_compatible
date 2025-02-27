@@ -1,0 +1,58 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        AnswerCount,
+        GoldBadges,
+        SilverBadges,
+        BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, PostCount DESC) AS UserRank
+    FROM 
+        RankedUsers
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.Reputation,
+    tu.PostCount,
+    tu.AnswerCount,
+    tu.GoldBadges,
+    tu.SilverBadges,
+    tu.BronzeBadges,
+    ARRAY_AGG(DISTINCT t.TagName) AS UserTags
+FROM 
+    TopUsers tu
+JOIN 
+    Posts p ON tu.UserId = p.OwnerUserId
+JOIN 
+    (SELECT UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS TagName FROM Posts p) AS tag_array ON TRUE
+JOIN 
+    Tags t ON t.TagName = TRIM(BOTH '[]' FROM tag_array.TagName)
+WHERE 
+    tu.UserRank <= 10
+GROUP BY 
+    tu.UserId, tu.DisplayName, tu.Reputation, tu.PostCount, tu.AnswerCount, tu.GoldBadges, tu.SilverBadges, tu.BronzeBadges
+ORDER BY 
+    tu.UserRank;

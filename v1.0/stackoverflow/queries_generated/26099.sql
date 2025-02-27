@@ -1,0 +1,83 @@
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(Posts.AnswerCount) AS TotalAnswers,
+        AVG(Posts.Score) AS AverageScore
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '><')::int[])
+    GROUP BY 
+        Tags.TagName
+),
+UserBadges AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(Badges.Id) AS BadgeCount,
+        SUM(CASE WHEN Badges.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Badges.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Badges.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.Id
+),
+ActivePosts AS (
+    SELECT 
+        Posts.Id,
+        Posts.Title,
+        Posts.OwnerUserId,
+        Posts.CreationDate,
+        Posts.Score,
+        COALESCE(Users.DisplayName, 'Community User') AS OwnerDisplayName,
+        COALESCE(COUNT(Comments.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes
+    FROM 
+        Posts
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    WHERE 
+        Posts.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        Posts.Id, Users.DisplayName
+),
+Benchmark AS (
+    SELECT 
+        TagStats.TagName,
+        TagStats.PostCount,
+        TagStats.TotalViews,
+        TagStats.TotalAnswers,
+        TagStats.AverageScore,
+        UserBadges.DisplayName,
+        UserBadges.BadgeCount,
+        UserBadges.GoldBadges,
+        UserBadges.SilverBadges,
+        UserBadges.BronzeBadges,
+        ActivePosts.CommentCount,
+        ActivePosts.UpVotes
+    FROM 
+        TagStats
+    JOIN 
+        UserBadges ON TagStats PostCount > 0
+    JOIN 
+        ActivePosts ON ActivePosts.Score > 0
+    ORDER BY 
+        TagStats.PostCount DESC, 
+        TagStats.TotalViews DESC
+)
+SELECT 
+    *
+FROM 
+    Benchmark
+WHERE 
+    BadgeCount > 0
+LIMIT 100;

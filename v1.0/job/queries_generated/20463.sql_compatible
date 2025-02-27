@@ -1,0 +1,48 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        1 AS depth
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title, 
+        m.production_year,
+        mh.depth + 1
+    FROM movie_link ml
+    INNER JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    INNER JOIN aka_title m ON ml.linked_movie_id = m.id
+    WHERE mh.depth < 5  
+)
+
+SELECT 
+    mk.keyword AS Movie_Keyword,
+    a.name AS Actor_Name,
+    at.title AS Actor_Title,
+    ROUND(AVG(mh.production_year)::DECIMAL, 2) AS Avg_Production_Year,
+    COUNT(DISTINCT mh.movie_id) AS Total_Movies,
+    STRING_AGG(DISTINCT CASE WHEN mp.note IS NOT NULL THEN mp.note ELSE 'No Note' END, ', ') AS Movie_Notes
+FROM
+    aka_name a
+LEFT JOIN cast_info c ON a.person_id = c.person_id
+LEFT JOIN aka_title at ON c.movie_id = at.id
+LEFT JOIN MovieHierarchy mh ON at.id = mh.movie_id
+LEFT JOIN movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN movie_info mp ON mh.movie_id = mp.movie_id AND mp.info_type_id IN (SELECT id FROM info_type WHERE info = 'Plot')
+WHERE
+    a.name IS NOT NULL 
+    AND at.production_year BETWEEN 1990 AND 2023
+    AND a.md5sum IS NOT NULL
+GROUP BY 
+    mk.keyword, a.name, at.title
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 3
+ORDER BY 
+    Avg_Production_Year DESC
+LIMIT 50;

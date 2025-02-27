@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND p.Score > 0
+),
+PopularTags AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(p.Tags, '>'))) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(*) > 10
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        pt.Name AS PostTypeName,
+        ut.BadgeCount,
+        pt2.PostCount AS PopularTagsCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostTypes pt ON pt.Id = (SELECT p.PostTypeId FROM Posts p WHERE p.Id = rp.PostId)
+    LEFT JOIN 
+        UserBadges ut ON ut.UserId = rp.OwnerUserId
+    LEFT JOIN 
+        PopularTags pt2 ON pt2.Tag IN (SELECT UNNEST(string_to_array(rp.Tags, '>')))
+    WHERE 
+        rp.Rank <= 5
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    OwnerDisplayName,
+    PostTypeName,
+    BadgeCount,
+    PopularTagsCount
+FROM 
+    FinalResults
+ORDER BY 
+    Score DESC, CreationDate DESC
+LIMIT 10;

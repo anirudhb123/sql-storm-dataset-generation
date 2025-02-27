@@ -1,0 +1,52 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_comment, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL AND s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 5
+),
+
+avg_order_value AS (
+    SELECT o.o_custkey, AVG(o.o_totalprice) AS avg_total
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+
+max_discount AS (
+    SELECT MAX(l.l_discount) AS max_disc
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATEADD(MONTH, -1, cast('1998-10-01' as date))
+),
+
+high_value_suppliers AS (
+    SELECT ps.ps_suppkey, SUM(ps.ps_availqty) AS total_avail
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+    HAVING SUM(ps.ps_availqty) > 1000
+)
+SELECT COALESCE(n.n_name, 'Unknown') AS nation_name,
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+FROM lineitem l
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+FULL OUTER JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN high_value_suppliers hvs ON hvs.ps_suppkey = l.l_suppkey
+WHERE l.l_returnflag = 'N'
+AND l.l_shipdate = (
+    SELECT MAX(l_shipdate)
+    FROM lineitem
+    WHERE l_shipinstruct = 'DELIVER IN PERSON'
+)
+GROUP BY n.n_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > (
+    SELECT COALESCE(AVG(avg_total), 0) FROM avg_order_value
+)
+OR NULLIF(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) IS NULL
+ORDER BY total_revenue DESC;

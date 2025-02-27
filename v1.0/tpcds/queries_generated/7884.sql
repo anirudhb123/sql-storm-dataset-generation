@@ -1,0 +1,53 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_store_sk,
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        COUNT(sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_store_sk, sr_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(COALESCE(sr.total_returned, 0)) AS total_item_returns,
+        AVG(sr.return_count) AS avg_returns_per_item
+    FROM 
+        customer c
+    LEFT JOIN 
+        RankedReturns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk
+)
+SELECT 
+    c.c_customer_id,
+    SUM(sd.total_sold) AS total_sold_items,
+    SUM(cr.total_item_returns) AS total_returns,
+    (SUM(cr.avg_returns_per_item) / NULLIF(SUM(sd.order_count), 0)) AS average_returns_percentage,
+    EXTRACT(YEAR FROM d.d_date) AS sales_year
+FROM 
+    CustomerReturns cr
+JOIN 
+    SalesData sd ON cr.c_customer_sk = sd.ws_bill_customer_sk
+JOIN 
+    date_dim d ON sd.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    d.d_year = 2023
+GROUP BY 
+    c.c_customer_id, d.d_year
+ORDER BY 
+    total_sold_items DESC, total_returns DESC;

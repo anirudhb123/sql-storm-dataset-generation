@@ -1,0 +1,75 @@
+
+WITH UserStatistics AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpvoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownvoteCount,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    GROUP BY
+        u.Id, u.DisplayName, u.Reputation
+),
+RecentPostActivity AS (
+    SELECT
+        p.OwnerUserId,
+        COUNT(*) AS RecentPostsCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+    GROUP BY
+        p.OwnerUserId
+),
+PostDetails AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - p.CreationDate)) / 3600 AS AgeInHours,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        COALESCE(ph.Comment, 'No action taken') AS LastPostAction,
+        UPPER(p.Title) AS UppercaseTitle
+    FROM
+        Posts p
+    LEFT JOIN
+        PostHistory ph ON p.Id = ph.PostId
+        AND ph.CreationDate = (SELECT MAX(CreationDate) FROM PostHistory WHERE PostId = p.Id)
+)
+SELECT
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.UpvoteCount,
+    us.DownvoteCount,
+    us.PostCount,
+    r.RecentPostsCount,
+    r.LastPostDate,
+    pd.PostId,
+    pd.Title,
+    pd.ViewCount,
+    pd.AgeInHours,
+    pd.CommentCount,
+    pd.LastPostAction,
+    pd.UppercaseTitle
+FROM
+    UserStatistics us
+LEFT JOIN
+    RecentPostActivity r ON us.UserId = r.OwnerUserId
+LEFT JOIN
+    PostDetails pd ON us.UserId = pd.OwnerUserId
+WHERE
+    us.Reputation > 1000
+    AND (pd.ViewCount > (SELECT AVG(ViewCount) FROM Posts) OR pd.CommentCount > 10)
+ORDER BY
+    us.Reputation DESC,
+    pd.AgeInHours DESC
+LIMIT 100;

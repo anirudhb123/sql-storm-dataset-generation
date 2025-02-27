@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COALESCE(CAST(ca.nr_order AS INTEGER), 999) AS order_number,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY COALESCE(ca.nr_order, 999)) AS rw,
+        COUNT(*) OVER (PARTITION BY t.id) AS total_cast
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ca ON t.id = ca.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+DistinctCompanies AS (
+    SELECT 
+        DISTINCT mc.movie_id,
+        cn.name AS company_name
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.name IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        d.company_name,
+        rm.order_number,
+        rm.total_cast,
+        CASE 
+            WHEN rm.order_number < 5 THEN 'Small Cast'
+            WHEN rm.order_number BETWEEN 5 AND 15 THEN 'Medium Cast'
+            ELSE 'Large Cast'
+        END AS cast_size
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        DistinctCompanies d ON rm.title = d.company_name
+    WHERE 
+        rm.total_cast > 0 AND 
+        (d.company_name IS NOT NULL OR rm.production_year > 2000)
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.cast_size,
+    STRING_AGG(DISTINCT f.company_name, ', ') AS company_names,
+    COUNT(DISTINCT f.order_number) AS unique_order_numbers,
+    COUNT(*) FILTER (WHERE f.production_year < 2010) AS pre_2010_count,
+    SUM(f.order_number) OVER (PARTITION BY f.production_year) AS total_order_numbers
+FROM 
+    FilteredMovies f
+GROUP BY 
+    f.title, f.production_year, f.cast_size
+HAVING 
+    COUNT(DISTINCT f.company_name) > 1 OR 
+    SUM(f.order_number) > 100
+ORDER BY 
+    f.production_year DESC, 
+    f.title
+LIMIT 100;

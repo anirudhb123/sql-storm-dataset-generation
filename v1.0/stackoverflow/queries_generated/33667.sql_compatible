@@ -1,0 +1,70 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT
+        P.Id AS PostId,
+        P.ParentId AS ParentPostId,
+        P.Title,
+        P.CreationDate,
+        1 AS Level
+    FROM Posts P
+    WHERE P.ParentId IS NULL
+    UNION ALL
+    SELECT
+        P.Id AS PostId,
+        P.ParentId,
+        P.Title,
+        P.CreationDate,
+        Level + 1
+    FROM Posts P
+    INNER JOIN RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+PostVoteStats AS (
+    SELECT
+        P.Id AS PostId,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 2) AS UpVotes,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 3) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId = 8 THEN V.BountyAmount ELSE 0 END) AS TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY V.CreationDate DESC) AS LatestVote
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+),
+PostsWithBadges AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT
+    RPH.PostId,
+    RPH.Title,
+    RPH.CreationDate,
+    PVS.UpVotes,
+    PVS.DownVotes,
+    PVS.TotalBounty,
+    PVS.LatestVote,
+    U.DisplayName AS OwnerDisplayName,
+    U.Reputation,
+    U.CreationDate AS UserCreationDate,
+    PB.BadgeCount,
+    PB.GoldBadges,
+    PB.SilverBadges,
+    PB.BronzeBadges,
+    CASE 
+        WHEN PVS.UpVotes > PVS.DownVotes THEN 'Positive' 
+        WHEN PVS.UpVotes < PVS.DownVotes THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS PostVoteSentiment,
+    COALESCE(P.Status, 'Active') AS PostStatus
+FROM RecursivePostHierarchy RPH
+LEFT JOIN PostVoteStats PVS ON RPH.PostId = PVS.PostId
+JOIN Users U ON RPH.PostId = U.Id
+LEFT JOIN PostsWithBadges PB ON U.Id = PB.UserId
+LEFT JOIN (SELECT Id, 'Closed' AS Status FROM Posts WHERE ClosedDate IS NOT NULL) P ON P.Id = RPH.PostId
+ORDER BY RPH.CreationDate DESC;

@@ -1,0 +1,72 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id, 
+        a.title,
+        a.production_year,
+        COALESCE(ROUND(AVG(p.info), 2), 0) AS average_rating,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COALESCE(ROUND(AVG(p.info), 2), 0) DESC) AS year_rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_info m ON a.movie_id = m.movie_id 
+    LEFT JOIN 
+        person_info p ON m.movie_id = p.person_id 
+    WHERE 
+        a.production_year IS NOT NULL
+        AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'rating' LIMIT 1)
+    GROUP BY 
+        a.id, a.title, a.production_year
+    HAVING AVG(p.info) IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year, 
+        average_rating 
+    FROM 
+        RankedMovies 
+    WHERE 
+        year_rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        t.movie_id,
+        t.title, 
+        t.production_year, 
+        t.average_rating,
+        COUNT(c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        TopMovies t
+    LEFT JOIN 
+        complete_cast cc ON t.movie_id = cc.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.imdb_id
+    GROUP BY 
+        t.movie_id, t.title, t.production_year, t.average_rating
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.average_rating,
+    md.cast_count,
+    md.companies,
+    (CASE 
+        WHEN md.average_rating > 8 THEN 'Highly Rated'
+        WHEN md.average_rating BETWEEN 5 AND 8 THEN 'Moderately Rated'
+        ELSE 'Low Rated'
+    END) AS rating_category
+FROM 
+    MovieDetails md
+WHERE 
+    md.cast_count > 0
+ORDER BY 
+    md.average_rating DESC, 
+    md.title ASC
+LIMIT 10;
+
+-- Ensures edge cases are covered with checks against NULL values and shows complex logic with subqueries 
+-- and joins to gather detailed insights across different tables, showcasing an elaborate SQL construct.

@@ -1,0 +1,43 @@
+
+WITH RankedReturns AS (
+    SELECT sr.item_sk, 
+           sr.return_quantity, 
+           sr.return_amt, 
+           sr.return_tax, 
+           ROW_NUMBER() OVER (PARTITION BY sr.item_sk ORDER BY sr.returned_date_sk DESC) AS rnk
+    FROM store_returns sr
+    WHERE sr.return_quantity > (
+        SELECT AVG(sr2.return_quantity) 
+        FROM store_returns sr2 
+        WHERE sr2.item_sk = sr.item_sk
+    )
+), DetailedReturns AS (
+    SELECT r.*, 
+           COALESCE(i.i_item_desc, 'Unknown Item') AS item_description,
+           SM.sm_carrier,
+           SM.sm_code,
+           D.d_date
+    FROM RankedReturns r
+    LEFT JOIN item i ON r.item_sk = i.i_item_sk
+    LEFT JOIN store_sales ss ON r.item_sk = ss.ss_item_sk
+    LEFT JOIN ship_mode SM ON ss.ss_ship_mode_sk = SM.sm_ship_mode_sk
+    LEFT JOIN date_dim D ON r.returned_date_sk = D.d_date_sk
+    WHERE D.d_holiday = 'Y' OR D.d_weekend = 'Y'
+)
+SELECT dr.item_description,
+       SUM(dr.return_quantity) AS total_returned_quantity,
+       SUM(dr.return_amt) AS total_returned_amount,
+       SUM(dr.return_tax) AS total_returned_tax,
+       MAX(dr.sm_carrier) AS featured_carrier
+FROM DetailedReturns dr
+WHERE dr.rnk <= 10
+GROUP BY dr.item_description
+HAVING SUM(dr.return_quantity) > (
+    SELECT COALESCE(AVG(return_quantity), 0) 
+    FROM store_returns 
+    WHERE item_sk IN (
+        SELECT item_sk FROM store_returns GROUP BY item_sk HAVING COUNT(*) > 1
+    )
+)
+ORDER BY total_returned_quantity DESC
+FETCH FIRST 5 ROWS ONLY;

@@ -1,0 +1,75 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL 
+
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+TopMovies AS (
+    SELECT 
+        mh.movie_id, 
+        mh.movie_title, 
+        mh.production_year, 
+        mh.kind_id,
+        COUNT(DISTINCT ci.person_id) AS total_actors,
+        MAX(mh.level) AS max_level
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    GROUP BY 
+        mh.movie_id, mh.movie_title, mh.production_year, mh.kind_id
+)
+
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    kt.kind AS genre,
+    COALESCE(SUM(mi.info IS NOT NULL AND mi.info LIKE '%award%') OVER (PARTITION BY tm.movie_id), 0) AS award_count,
+    STRING_AGG(DISTINCT ak.name, ', ') FILTER (WHERE ak.name IS NOT NULL) AS actors,
+    CASE 
+        WHEN tm.production_year < 1920 THEN 'Classic'
+        WHEN tm.production_year BETWEEN 1920 AND 1960 THEN 'Golden Age'
+        WHEN tm.production_year > 1960 THEN 'Modern'
+        ELSE 'Unknown Era'
+    END AS movie_era,
+    ROW_NUMBER() OVER (ORDER BY tm.max_level DESC, tm.total_actors DESC) AS popularity_rank
+FROM 
+    TopMovies tm
+JOIN 
+    kind_type kt ON tm.kind_id = kt.id
+LEFT JOIN 
+    movie_info mi ON tm.movie_id = mi.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Awards')
+LEFT JOIN 
+    cast_info ci ON tm.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+WHERE 
+    tm.total_actors > 0
+GROUP BY 
+    tm.movie_id, tm.movie_title, tm.production_year, kt.kind, tm.max_level
+HAVING 
+    COUNT(DISTINCT ak.name) > 5
+ORDER BY 
+    popularity_rank, movie_era, tm.production_year DESC;

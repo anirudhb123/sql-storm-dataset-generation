@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier 
+        WHERE s_nationkey IS NOT NULL
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_acctbal < sh.s_acctbal
+)
+SELECT
+    n.n_name AS Nation,
+    p.p_name AS Part,
+    SUM(l.l_quantity) AS Total_Quantity,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS Average_Selling_Price,
+    COUNT(DISTINCT o.o_orderkey) AS Total_Orders,
+    MAX(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE NULL END) AS Max_Returned_Quantity,
+    COUNT(DISTINCT CASE WHEN l.l_shipdate > '2023-01-01' THEN o.o_orderkey END) AS Orders_Shipped_After_2023,
+    STRING_AGG(DISTINCT sh.s_name, ', ') AS Supplier_Names
+FROM lineitem l
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey AND l.l_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+WHERE l.l_shipdate BETWEEN '2022-01-01' AND '2023-12-31'
+GROUP BY n.n_name, p.p_name
+HAVING SUM(l.l_quantity) > (
+    SELECT AVG(l2.l_quantity)
+    FROM lineitem l2
+    WHERE l2.l_orderkey IN (
+        SELECT o2.o_orderkey
+        FROM orders o2
+        WHERE o2.o_orderstatus = 'F'
+    )
+)
+ORDER BY Total_Quantity DESC, Average_Selling_Price ASC;

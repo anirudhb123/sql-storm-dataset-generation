@@ -1,0 +1,57 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+),
+SupplierQuantity AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey
+),
+CustomerRegions AS (
+    SELECT 
+        c.c_custkey,
+        n.n_regionkey,
+        r.r_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    o.o_orderkey,
+    c.c_name,
+    s.s_name,
+    COALESCE(SQ.total_avail_qty, 0) AS total_avail_quantity,
+    COALESCE(SQ.avg_supply_cost, 0.00) AS average_supply_cost,
+    R.r_name AS customer_region,
+    RANK() OVER (PARTITION BY R.r_name ORDER BY o.o_totalprice DESC) AS price_rank
+FROM 
+    RankedOrders o
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    CustomerRegions R ON R.c_custkey = o.o_custkey
+LEFT JOIN 
+    SupplierQuantity SQ ON s.s_suppkey = SQ.ps_suppkey
+WHERE 
+    o.o_orderstatus = 'O' 
+    AND (o.o_totalprice > 1000 OR SQ.total_avail_qty IS NULL)
+ORDER BY 
+    customer_region, price_rank;

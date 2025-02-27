@@ -1,0 +1,61 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        ca.ca_zip,
+        ca.ca_street_name,
+        ca.ca_street_number
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesInfo AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        ws.ws_sold_date_sk,
+        DATE(d.d_date) AS sold_date
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+),
+CustomerSales AS (
+    SELECT
+        cd.full_name,
+        cd.ca_city,
+        cd.ca_state,
+        cd.ca_country,
+        COUNT(DISTINCT si.ws_order_number) AS total_orders,
+        SUM(si.ws_sales_price) AS total_sales,
+        SUM(si.ws_net_paid) AS total_net_paid
+    FROM 
+        CustomerDetails cd
+    LEFT JOIN 
+        SalesInfo si ON cd.c_customer_id = si.ws_order_number
+    GROUP BY 
+        cd.full_name, cd.ca_city, cd.ca_state, cd.ca_country
+)
+
+SELECT
+    *,
+    CASE 
+        WHEN total_sales > 5000 THEN 'High Value Customer'
+        WHEN total_sales BETWEEN 1000 AND 5000 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_value_category
+FROM 
+    CustomerSales
+ORDER BY 
+    total_sales DESC;

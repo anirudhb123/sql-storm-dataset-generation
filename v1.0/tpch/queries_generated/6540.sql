@@ -1,0 +1,35 @@
+WITH RegionData AS (
+    SELECT r.r_name AS region_name, COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_name
+),
+SupplierData AS (
+    SELECT s.s_nationkey, SUM(s.s_acctbal) AS total_acctbal
+    FROM supplier s
+    GROUP BY s.s_nationkey
+),
+PartSupplierData AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_availqty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+OrderSummary AS (
+    SELECT c.c_nationkey, SUM(o.o_totalprice) AS total_order_value
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_nationkey
+)
+
+SELECT 
+    rd.region_name, 
+    rd.nation_count, 
+    COALESCE(sd.total_acctbal, 0) AS total_supplier_acctbal,
+    COALESCE(psd.total_availqty, 0) AS total_parts_avail_qty,
+    COALESCE(os.total_order_value, 0) AS total_order_value
+FROM RegionData rd
+LEFT JOIN SupplierData sd ON sd.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name = rd.region_name))
+LEFT JOIN PartSupplierData psd ON psd.ps_partkey IN (SELECT p.p_partkey FROM part p)
+LEFT JOIN OrderSummary os ON os.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name = rd.region_name))
+ORDER BY rd.region_name;

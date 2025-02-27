@@ -1,0 +1,78 @@
+
+WITH supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUBSTRING(s.s_address, 1, 20) AS short_address,
+        s.s_phone,
+        s.s_acctbal,
+        LENGTH(s.s_comment) AS comment_length
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+customer_info AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_nationkey,
+        RIGHT(c.c_address, 30) AS address_tail,
+        c.c_phone,
+        c.c_acctbal,
+        CHAR_LENGTH(c.c_comment) AS comment_size
+    FROM 
+        customer c
+    WHERE 
+        c.c_mktsegment = 'BUILDING'
+),
+part_info AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        CONCAT(p.p_brand, ' - ', p.p_type) AS brand_and_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p_retailprice) FROM part)
+),
+final_report AS (
+    SELECT 
+        si.s_name AS supplier_name,
+        ci.c_name AS customer_name,
+        pi.p_name AS part_name,
+        pi.brand_and_type,
+        si.short_address,
+        ci.address_tail,
+        si.s_acctbal AS supplier_acctbal,
+        ci.c_acctbal AS customer_acctbal
+    FROM 
+        supplier_info si
+    JOIN 
+        partsupp ps ON si.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part_info pi ON ps.ps_partkey = pi.p_partkey
+    JOIN 
+        customer_info ci ON ci.c_nationkey = si.s_nationkey
+    WHERE 
+        si.comment_length > 50 
+        AND ci.comment_size < 100
+)
+SELECT 
+    supplier_name,
+    customer_name,
+    part_name,
+    brand_and_type,
+    short_address,
+    address_tail,
+    supplier_acctbal,
+    customer_acctbal
+FROM 
+    final_report
+ORDER BY 
+    supplier_name, customer_name, part_name;

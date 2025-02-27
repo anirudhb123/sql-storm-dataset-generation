@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(v.Id) DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, u.DisplayName
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        ARRAY_AGG(b.Name) AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Date > (CURRENT_TIMESTAMP - INTERVAL '1 year')
+    GROUP BY 
+        b.UserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id, 
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(rb.BadgeNames, '{}') AS RecentBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        RecentBadges rb ON u.Id = rb.UserId
+    WHERE 
+        u.Reputation > (SELECT AVG(Reputation) FROM Users) 
+    ORDER BY 
+        u.Reputation DESC
+    LIMIT 10
+)
+SELECT 
+    tp.DisplayName,
+    tp.Reputation,
+    p.Title,
+    p.CreationDate,
+    p.UpVotes,
+    p.DownVotes,
+    tp.RecentBadges,
+    CASE 
+        WHEN tp.Reputation IS NULL THEN 'No reputation'
+        WHEN tp.Reputation < 1000 THEN 'Newbie'
+        ELSE 'Experienced User'
+    END AS UserCategory
+FROM 
+    TopUsers tp
+JOIN 
+    RankedPosts p ON tp.Id = p.OwnerUserId
+WHERE 
+    p.PostRank <= 5
+ORDER BY 
+    tp.Reputation DESC, 
+    p.UpVotes DESC;

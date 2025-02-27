@@ -1,0 +1,80 @@
+WITH movie_performance AS (
+    SELECT
+        t.title,
+        t.production_year,
+        CASE
+            WHEN COALESCE(k.keyword, '') = '' THEN 'No Keywords'
+            ELSE k.keyword 
+        END AS keywords,
+        COUNT(c.person_id) AS cast_count,
+        AVG(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS is_actor_ratio,
+        SUM(
+            CASE
+                WHEN ci.nr_order IS NOT NULL AND ci.nr_order = 1 THEN 1
+                ELSE 0 
+            END
+        ) AS leading_roles,
+        ROW_NUMBER() OVER(PARTITION BY t.id ORDER BY t.production_year DESC) AS role_rank
+    FROM
+        title t
+    LEFT JOIN movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN keyword k ON k.id = mk.keyword_id
+    LEFT JOIN cast_info ci ON ci.movie_id = t.id
+    LEFT JOIN aka_name an ON an.person_id = ci.person_id
+    WHERE
+        t.production_year IS NOT NULL
+        AND t.kind_id IN (
+            SELECT id FROM kind_type WHERE kind IN ('movie', 'feature')
+        )
+    GROUP BY 
+        t.id, t.title, t.production_year, keywords
+),
+company_performance AS (
+    SELECT
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        COUNT(DISTINCT mc.company_id) AS unique_companies
+    FROM
+        movie_companies mc
+    LEFT JOIN company_name cn ON cn.id = mc.company_id
+    GROUP BY
+        mc.movie_id
+),
+final_selection AS (
+    SELECT
+        mp.title,
+        mp.production_year,
+        mp.keywords,
+        mp.cast_count,
+        mp.is_actor_ratio,
+        mp.leading_roles,
+        cp.companies,
+        cp.unique_companies
+    FROM
+        movie_performance mp
+    LEFT JOIN company_performance cp ON cp.movie_id = mp.id
+    WHERE
+        mp.leading_roles > 0
+        AND mp.is_actor_ratio > 0.5
+)
+SELECT
+    title,
+    production_year,
+    keywords,
+    cast_count,
+    CASE 
+        WHEN unique_companies > 5 THEN 'Diverse Production'
+        ELSE 'Niche Production' 
+    END AS production_type,
+    leading_roles
+FROM
+    final_selection
+WHERE
+    production_year BETWEEN (
+        SELECT MAX(production_year) FROM title
+    ) - 10 AND (
+        SELECT MIN(production_year) FROM title WHERE production_year IS NOT NULL
+    )
+ORDER BY
+    production_year DESC, cast_count DESC
+LIMIT 100;

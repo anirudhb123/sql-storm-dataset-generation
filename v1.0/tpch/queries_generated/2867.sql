@@ -1,0 +1,65 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= (CURRENT_DATE - INTERVAL '1 year')
+),
+SupplierPartStats AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyValue,
+        COUNT(DISTINCT s.s_suppkey) AS UniqueSuppliers,
+        STRING_AGG(DISTINCT s.s_name, ', ') AS SupplierNames
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice, 
+        COUNT(DISTINCT l.l_orderkey) AS LineItemCount
+    FROM 
+        RankedOrders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.OrderRank <= 10
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(s.TotalSupplyValue, 0) AS TotalSupplyValue,
+    COALESCE(h.LineItemCount, 0) AS RelatedLineItemCount,
+    CASE
+        WHEN s.UniqueSuppliers IS NULL THEN 'No Suppliers'
+        ELSE s.SupplierNames
+    END AS SupplierDetails,
+    r.r_name,
+    COUNT(DISTINCT n.n_nationkey) AS TotalNations
+FROM 
+    part p
+LEFT JOIN 
+    SupplierPartStats s ON p.p_partkey = s.ps_partkey
+LEFT JOIN 
+    nation n ON n.n_nationkey = (SELECT DISTINCT c.c_nationkey FROM customer c WHERE c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)))
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    HighValueOrders h ON h.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)
+WHERE 
+    p.p_retailprice > 100.00
+GROUP BY 
+    p.p_partkey, p.p_name, s.TotalSupplyValue, h.LineItemCount, s.UniqueSuppliers, s.SupplierNames, r.r_name
+ORDER BY 
+    TotalSupplyValue DESC, RelatedLineItemCount DESC;

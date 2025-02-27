@@ -1,0 +1,23 @@
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    COUNT(DISTINCT P.Id) AS NumberOfPosts,
+    SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS NumberOfQuestions,
+    SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS NumberOfAnswers,
+    AVG(P.ViewCount) AS AverageViewCount,
+    SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS NumberOfBadges,
+    AVG(V.CreationDate) AS AverageVoteTime
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    Badges B ON U.Id = B.UserId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+GROUP BY 
+    U.Id
+ORDER BY 
+    U.Reputation DESC
+LIMIT 100;

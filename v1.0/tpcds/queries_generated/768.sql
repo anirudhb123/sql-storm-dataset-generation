@@ -1,0 +1,59 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned,
+        SUM(cr_return_amount) AS total_returned_amount
+    FROM catalog_returns
+    GROUP BY cr_returning_customer_sk
+), 
+SalesPerformance AS (
+    SELECT 
+        ws_bill_customer_sk, 
+        SUM(ws_quantity) AS total_sales_quantity, 
+        SUM(ws_net_profit) AS total_net_profit
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+Demographics AS (
+    SELECT 
+        c.c_customer_id, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+AggregatedInfo AS (
+    SELECT 
+        d.c_customer_id,
+        COALESCE(sp.total_sales_quantity, 0) AS sales_quantity,
+        COALESCE(cr.total_returned, 0) AS return_quantity,
+        COALESCE(cr.total_returned_amount, 0) AS return_amount,
+        COUNT(DISTINCT d.cd_credit_rating) AS credit_rating_count,
+        MAX(d.cd_purchase_estimate) AS max_purchase_estimate
+    FROM Demographics d
+    LEFT JOIN SalesPerformance sp ON d.c_customer_id = sp.ws_bill_customer_sk
+    LEFT JOIN CustomerReturns cr ON d.c_customer_id = cr.cr_returning_customer_sk
+    GROUP BY d.c_customer_id
+)
+SELECT 
+    a.c_customer_id,
+    a.sales_quantity,
+    a.return_quantity,
+    a.return_amount,
+    a.credit_rating_count,
+    a.max_purchase_estimate,
+    CASE 
+        WHEN a.sales_quantity - a.return_quantity < 0 THEN 'Negative Net Sales'
+        WHEN a.sales_quantity = 0 THEN 'No Sales'
+        ELSE 'Positive Net Sales'
+    END AS sales_status,
+    CONCAT('Customer ID: ', a.c_customer_id, ' has had ', a.sales_quantity, 
+           ' sales and ', a.return_quantity, ' returns, resulting in a net of ', 
+           (a.sales_quantity - a.return_quantity), ' items.')
+FROM AggregatedInfo a
+WHERE a.max_purchase_estimate >= (SELECT AVG(cd_purchase_estimate) FROM customer_demographics)
+ORDER BY a.return_amount DESC
+FETCH FIRST 10 ROWS ONLY;

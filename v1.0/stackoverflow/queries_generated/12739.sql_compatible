@@ -1,0 +1,44 @@
+
+WITH UserPostCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        PostCount
+    FROM 
+        UserPostCounts
+    WHERE 
+        PostCount > 0
+    ORDER BY 
+        Reputation DESC, PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    COALESCE(AVG(V.Score), 0) AS AveragePostScore,
+    COALESCE(COUNT(V.CreationDate), 0) AS TotalVotes
+FROM 
+    TopUsers U
+LEFT JOIN 
+    Posts P ON U.UserId = P.OwnerUserId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+GROUP BY 
+    U.DisplayName, U.Reputation, U.PostCount
+ORDER BY 
+    U.Reputation DESC;

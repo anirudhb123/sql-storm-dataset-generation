@@ -1,0 +1,44 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        CAST(NULL AS INTEGER) AS parent_id,
+        1 AS depth
+    FROM title t
+    WHERE t.production_year >= 2000 -- starting with movies from 2000 onwards
+    UNION ALL
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        mh.movie_id AS parent_id,
+        mh.depth + 1
+    FROM movie_link m
+    JOIN title t ON m.linked_movie_id = t.id
+    JOIN MovieHierarchy mh ON m.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.kind_id,
+    ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    AVG(p.info_type_id) AS avg_person_info_type,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rn,
+    MAX(ai.info) FILTER (WHERE it.info LIKE '%award%') AS best_award_info -- Using filter with NULL logic
+FROM MovieHierarchy mh
+LEFT JOIN aka_title ak ON mh.movie_id = ak.movie_id
+LEFT JOIN movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN person_info p ON p.person_id IN (SELECT person_id FROM cast_info WHERE movie_id = mh.movie_id)
+LEFT JOIN movie_info mi ON mi.movie_id = mh.movie_id
+LEFT JOIN info_type it ON it.id = mi.info_type_id
+LEFT JOIN complete_cast cc ON cc.movie_id = mh.movie_id
+WHERE mh.depth <= 2
+  AND mh.production_year IS NOT NULL
+GROUP BY mh.movie_id, mh.title, mh.production_year, mh.kind_id
+HAVING COUNT(DISTINCT mc.company_id) > 3 -- Only movies with more than 3 companies
+ORDER BY mh.production_year DESC, rn;

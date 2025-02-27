@@ -1,0 +1,59 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        COUNT(wr_return_quantity) AS total_returns,
+        SUM(wr_return_amt) AS total_return_amount,
+        SUM(wr_return_tax) AS total_return_tax,
+        1 AS level
+    FROM 
+        web_returns 
+    WHERE 
+        wr_returning_customer_sk IS NOT NULL
+    GROUP BY 
+        wr_returning_customer_sk
+    
+    UNION ALL
+
+    SELECT 
+        wr_returning_customer_sk,
+        cr.return_quantity + cr.total_returns,
+        cr.return_amount + cr.total_return_amount,
+        cr.return_tax + cr.total_return_tax,
+        level + 1
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        web_returns wr ON cr.wr_returning_customer_sk = wr.returning_customer_sk 
+    WHERE 
+        level < 5
+)
+
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    c.c_birth_year,
+    COALESCE(cd.cd_gender, 'U') AS gender,
+    COUNT(DISTINCT wr.wr_order_number) AS total_orders,
+    SUM(wr.wr_return_amt) AS total_return_amt,
+    MAX(wr.wr_return_quantity) AS max_return_quantity,
+    STRING_AGG(DISTINCT wr.wr_reason_sk::text, ', ') AS return_reasons,
+    ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(wr.wr_return_amt) DESC) AS return_rank
+FROM 
+    customer c
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+LEFT JOIN 
+    CustomerReturns cr ON c.c_customer_sk = cr.wr_returning_customer_sk
+WHERE 
+    wr.wr_returned_date_sk IS NOT NULL
+GROUP BY 
+    c.c_customer_id, c.c_first_name, c.c_last_name, c.c_birth_year, cd.cd_gender
+HAVING 
+    SUM(wr.wr_return_amt) > (SELECT AVG(wr_return_amt) FROM web_returns)
+ORDER BY 
+    total_return_amt DESC
+LIMIT 10;

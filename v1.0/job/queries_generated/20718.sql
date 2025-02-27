@@ -1,0 +1,72 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) as rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorMovies AS (
+    SELECT 
+        c.person_id,
+        ct.role,
+        t.title,
+        t.production_year
+    FROM 
+        cast_info c
+    JOIN 
+        role_type ct ON c.role_id = ct.id
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    WHERE 
+        ct.role LIKE '%actor%' AND
+        c.note IS NULL -- Considering only roles without additional notes
+),
+CompanyTitles AS (
+    SELECT 
+        m.movie_id,
+        GROUP_CONCAT(DISTINCT co.name ORDER BY co.name) AS companies
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name co ON m.company_id = co.id
+    GROUP BY 
+        m.movie_id
+),
+TitleKeywords AS (
+    SELECT 
+        mk.movie_id,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    a.person_id,
+    r.title AS title,
+    r.production_year,
+    COALESCE(c.companies, 'No Companies') AS companies,
+    COALESCE(tk.keywords, 'No Keywords') AS keywords,
+    RANK() OVER (PARTITION BY r.production_year ORDER BY a.person_id) AS actor_rank
+FROM 
+    ActorMovies a
+JOIN 
+    RankedTitles r ON a.title = r.title AND a.production_year = r.production_year
+LEFT JOIN 
+    CompanyTitles c ON c.movie_id = a.movie_id
+LEFT JOIN 
+    TitleKeywords tk ON tk.movie_id = a.movie_id
+WHERE 
+    r.rn <= 10 -- Limit to the latest 10 titles for each year
+    AND a.title IS NOT NULL
+    AND (c.companies IS NOT NULL OR c.companies = 'No Companies')
+ORDER BY 
+    r.production_year DESC, 
+    actor_rank, 
+    a.person_id;

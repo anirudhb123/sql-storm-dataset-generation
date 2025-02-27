@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(pc.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments pc ON p.Id = pc.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.Score
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        MAX(u.CreationDate) AS LastAccountCreationDate
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate AS HistoryDate,
+        pt.Name AS ChangeType,
+        ph.Comment,
+        ph.Text
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostVoteStatistics AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    ur.Reputation,
+    COALESCE(pvs.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(pvs.DownVotes, 0) AS TotalDownVotes,
+    CASE 
+        WHEN rp.CommentCount IS NULL THEN 'No Comments' 
+        WHEN rp.CommentCount > 5 THEN 'Popular'
+        ELSE 'Few Comments' 
+    END AS CommentStatus,
+    STRING_AGG(DISTINCT CONCAT(ph.ChangeType, ' by ', u.DisplayName, ' at ', ph.HistoryDate), '; ') AS ChangeLog
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+JOIN 
+    UserReputation ur ON ur.UserId = u.Id
+LEFT JOIN 
+    PostVoteStatistics pvs ON pvs.PostId = rp.PostId
+LEFT JOIN 
+    PostHistoryDetails ph ON ph.PostId = rp.PostId
+WHERE 
+    rp.Rank <= 3 
+    AND (rp.Score >= 5 OR rp.CreationDate >= NOW() - INTERVAL '1 month')
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, u.DisplayName, ur.Reputation
+ORDER BY 
+    ur.Reputation DESC, rp.Score DESC;

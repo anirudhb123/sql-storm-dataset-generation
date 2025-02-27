@@ -1,0 +1,66 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        COUNT(DISTINCT sr.ticket_number) AS total_store_returns,
+        COALESCE(SUM(sr.return_amt), 0) AS total_return_amount,
+        COUNT(DISTINCT cr.order_number) AS total_catalog_returns,
+        COALESCE(SUM(cr.return_amount), 0) AS total_catalog_return_amount
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    GROUP BY c.c_customer_sk, c.c_customer_id
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        SUM(COALESCE(cr.return_quantity, 0)) AS total_returned_items,
+        AVG(COALESCE(cr.return_amt_inc_tax, 0)) AS avg_return_amount
+    FROM customer_demographics cd
+    LEFT JOIN catalog_returns cr ON cd.cd_demo_sk = cr.cr_refunded_cdemo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+WarehouseInventory AS (
+    SELECT 
+        w.w_warehouse_sk,
+        w.w_warehouse_id,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM warehouse w
+    JOIN inventory inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    GROUP BY w.w_warehouse_sk, w.w_warehouse_id
+),
+RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS rank_sales
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+)
+SELECT 
+    cr.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cr.total_store_returns,
+    cr.total_return_amount,
+    cr.total_catalog_returns,
+    cr.total_catalog_return_amount,
+    wi.total_inventory,
+    rs.total_sales_price,
+    CASE 
+        WHEN cd.avg_return_amount IS NULL THEN 'No Returns'
+        WHEN cd.avg_return_amount > 100 THEN 'High Returner'
+        ELSE 'Regular Returner'
+    END AS returner_category
+FROM CustomerReturns cr
+JOIN CustomerDemographics cd ON cr.c_customer_sk = cd.cd_demo_sk
+LEFT JOIN WarehouseInventory wi ON (wi.total_inventory > 0 OR wi.total_inventory IS NULL)
+LEFT JOIN RankedSales rs ON rs.ws_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = cr.c_customer_sk)
+WHERE (cd.cd_gender = 'F' AND cr.total_catalog_return_amount > 0)
+   OR (cd.cd_gender = 'M' AND cr.total_store_returns > 5)
+ORDER BY cr.total_return_amount DESC, cd.cd_gender ASC;

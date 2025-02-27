@@ -1,0 +1,58 @@
+WITH movie_details AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        ak.name AS actor_name,
+        r.role AS actor_role,
+        g.kind AS genre
+    FROM 
+        title t
+    JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        kind_type g ON t.kind_id = g.id
+    WHERE 
+        t.production_year >= 2000
+        AND k.keyword ILIKE '%action%'
+        AND ak.name IS NOT NULL
+),
+actor_aggregates AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT movie_title) AS movie_count,
+        STRING_AGG(DISTINCT movie_title, ', ') AS movies_list,
+        MAX(production_year) AS last_movie_year
+    FROM 
+        movie_details
+    GROUP BY 
+        actor_name
+),
+selected_actors AS (
+    SELECT 
+        actor_name,
+        movie_count,
+        movies_list,
+        last_movie_year
+    FROM 
+        actor_aggregates
+    WHERE 
+        movie_count > 5
+        AND last_movie_year > 2018
+)
+SELECT 
+    actor_name,
+    movie_count,
+    movies_list
+FROM 
+    selected_actors
+ORDER BY 
+    movie_count DESC, 
+    actor_name;

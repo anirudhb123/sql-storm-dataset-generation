@@ -1,0 +1,47 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+RegionSales AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(ss.total_sales) AS regional_sales
+    FROM 
+        nation n
+    LEFT JOIN 
+        SupplierSales ss ON n.n_nationkey = ss.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name AS region_name,
+    COALESCE(rs.regional_sales, 0) AS total_region_sales,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    (SELECT AVG(total_sales) FROM SupplierSales) AS avg_supplier_sales
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    RegionSales rs ON n.n_name = rs.nation_name
+GROUP BY 
+    r.r_regionkey, r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 0
+ORDER BY 
+    total_region_sales DESC, region_name ASC;

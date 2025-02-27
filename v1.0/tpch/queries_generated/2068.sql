@@ -1,0 +1,40 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        DENSE_RANK() OVER (PARTITION BY p.p_type ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    ns.n_name AS nation_name,
+    SUM(ps.ps_availqty * (p.p_retailprice - ps.ps_supplycost)) AS profit_margin,
+    COUNT(DISTINCT cs.c_custkey) AS customer_count,
+    rs.s_name AS top_supplier,
+    rs.total_supply_cost
+FROM nation ns
+JOIN region r ON ns.n_regionkey = r.r_regionkey
+LEFT JOIN supplier s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN CustomerOrderSummary cs ON cs.c_custkey = s.s_nationkey
+JOIN RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+WHERE p.p_size > 10
+AND (rs.supplier_rank <= 3 OR ns.n_name LIKE '%land%')
+GROUP BY ns.n_name, rs.s_name, rs.total_supply_cost
+HAVING SUM(ps.ps_availqty * (p.p_retailprice - ps.ps_supplycost)) IS NOT NULL
+ORDER BY profit_margin DESC, customer_count DESC;

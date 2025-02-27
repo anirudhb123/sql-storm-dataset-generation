@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY o.o_orderkey) AS total_value,
+        DENSE_RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS OrderValueRank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS CustomerRank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+)
+SELECT 
+    r.s_suppkey,
+    r.s_name,
+    COALESCE(tc.total_spent, 0) AS customer_spending,
+    COALESCE(hvo.total_value, 0) AS order_total_value,
+    CASE 
+        WHEN r.SupplierRank < 5 THEN 'Top Supplier'
+        ELSE 'Regular Supplier'
+    END AS Supplier_Category
+FROM 
+    RankedSuppliers r
+LEFT JOIN 
+    HighValueOrders hvo ON r.s_suppkey IN (SELECT DISTINCT ps.ps_suppkey FROM partsupp ps JOIN lineitem l ON ps.ps_partkey = l.l_partkey)
+LEFT JOIN 
+    TopCustomers tc ON tc.CustomerRank <= 10 
+WHERE 
+    r.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+AND 
+    r.s_name LIKE '%Inc%'
+ORDER BY 
+    customer_spending DESC, r.s_name ASC;

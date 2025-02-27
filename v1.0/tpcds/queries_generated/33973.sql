@@ -1,0 +1,56 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk, 1 AS level
+    FROM customer
+    WHERE c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk, h.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy h ON c.c_current_cdemo_sk = h.c_current_cdemo_sk
+),
+SalesStats AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY c.c_customer_sk
+),
+DemographicStats AS (
+    SELECT 
+        cd.cd_marital_status,
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cs.cs_net_profit) AS avg_profit
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    WHERE cd.cd_gender IS NOT NULL
+    GROUP BY cd.cd_marital_status, cd.cd_gender
+),
+ReturnStats AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_amt) AS total_return_amount,
+        COUNT(sr_ticket_number) AS return_count
+    FROM store_returns
+    GROUP BY sr_returning_customer_sk
+)
+SELECT 
+    ch.c_first_name,
+    ch.c_last_name,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(ss.total_orders, 0) AS total_orders,
+    ds.customer_count,
+    ds.avg_profit,
+    COALESCE(rs.total_return_amount, 0) AS total_return_amount,
+    COALESCE(rs.return_count, 0) AS return_count,
+    ROW_NUMBER() OVER (PARTITION BY ds.cd_marital_status ORDER BY ss.total_sales DESC) AS rank
+FROM CustomerHierarchy ch
+LEFT JOIN SalesStats ss ON ch.c_customer_sk = ss.c_customer_sk
+LEFT JOIN DemographicStats ds ON ch.c_current_cdemo_sk = ds.cd_demo_sk
+LEFT JOIN ReturnStats rs ON ch.c_customer_sk = rs.sr_returning_customer_sk
+WHERE (ds.avg_profit > 1000 OR ds.customer_count > 10)
+ORDER BY total_sales DESC, rank
+LIMIT 100;

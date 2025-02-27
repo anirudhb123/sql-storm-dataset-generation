@@ -1,0 +1,58 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        SUM(v.CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(v.CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostInformation AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        pt.Name AS PostType,
+        p.Score,
+        p.ViewCount,
+        LEAD(p.CreationDate) OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate) AS NextPostDate,
+        DATEDIFF(day, p.CreationDate, LEAD(p.CreationDate) OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate)) AS DaysBetweenPosts
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+)
+SELECT 
+    u.DisplayName,
+    ua.PostCount,
+    ua.CommentCount,
+    ua.TotalBounty,
+    ua.UpVotes,
+    ua.DownVotes,
+    pi.PostId,
+    pi.PostType,
+    pi.Score,
+    pi.ViewCount,
+    pi.NextPostDate,
+    pi.DaysBetweenPosts
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    PostInformation pi ON ua.UserId = pi.OwnerUserId
+WHERE 
+    ua.PostCount > 0
+ORDER BY 
+    ua.TotalBounty DESC, ua.UpVotes DESC, ua.CommentCount DESC
+LIMIT 100;

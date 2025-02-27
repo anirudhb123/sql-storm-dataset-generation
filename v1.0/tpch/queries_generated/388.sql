@@ -1,0 +1,88 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighSpenders AS (
+    SELECT 
+        c.custkey,
+        c.name,
+        c.total_spent
+    FROM 
+        CustomerOrders c
+    WHERE 
+        c.rank <= 10
+),
+ProductDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+SupplierPerformance AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(DISTINCT o.o_orderkey) AS orders_fulfilled
+    FROM 
+        supplier s
+    JOIN 
+        lineitem l ON s.s_suppkey = l.l_suppkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+SalesAnalysis AS (
+    SELECT
+        SUM(co.total_spent) AS total_revenue,
+        COUNT(DISTINCT cp.custkey) AS unique_customers,
+        AVG(cp.total_spent) AS avg_spent_per_customer
+    FROM 
+        HighSpenders cp
+)
+SELECT
+    pa.p_name,
+    pa.total_available,
+    pa.avg_cost,
+    sp.revenue AS supplier_revenue,
+    sa.total_revenue,
+    sa.unique_customers,
+    sa.avg_spent_per_customer
+FROM 
+    ProductDetails pa
+JOIN 
+    SupplierPerformance sp ON sp.orders_fulfilled > 0
+CROSS JOIN 
+    SalesAnalysis sa
+WHERE 
+    pa.avg_cost < (SELECT AVG(p2.avg_cost) FROM (
+        SELECT 
+            AVG(ps.ps_supplycost) AS avg_cost
+        FROM 
+            part p2
+        JOIN 
+            partsupp ps ON p2.p_partkey = ps.ps_partkey
+        GROUP BY 
+            p2.p_partkey
+    ) p2)
+ORDER BY 
+    sp.revenue DESC, pa.total_available DESC
+LIMIT 50;

@@ -1,0 +1,80 @@
+WITH actor_movie_count AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.id, a.name
+    HAVING 
+        COUNT(ci.movie_id) > 5 -- Actors with more than 5 movies
+),
+popular_genres AS (
+    SELECT 
+        kt.kind AS genre,
+        COUNT(mk.movie_id) AS movie_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        kind_type kt ON k.phonetic_code = kt.id
+    GROUP BY 
+        kt.kind
+    HAVING 
+        COUNT(mk.movie_id) > 10 -- Genres with more than 10 movies
+),
+recent_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        ARRAY_AGG(DISTINCT comp.name) AS companies
+    FROM 
+        aka_title m
+    JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    JOIN 
+        company_name comp ON mc.company_id = comp.id
+    WHERE 
+        m.production_year >= 2020
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+actor_details AS (
+    SELECT 
+        am.actor_id,
+        am.actor_name,
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        pg.genre,
+        rm.companies
+    FROM 
+        actor_movie_count am
+    JOIN 
+        cast_info ci ON am.actor_id = ci.person_id
+    JOIN 
+        recent_movies rm ON ci.movie_id = rm.movie_id
+    JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    JOIN 
+        kind_type kt ON mk.keyword_id = kt.id
+    JOIN 
+        popular_genres pg ON kt.kind = pg.genre
+)
+SELECT 
+    ad.actor_name,
+    COUNT(DISTINCT ad.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT ad.genre, ', ') AS genres,
+    STRING_AGG(DISTINCT ad.companies::text, ', ') AS production_companies
+FROM 
+    actor_details ad
+GROUP BY 
+    ad.actor_name
+ORDER BY 
+    total_movies DESC
+LIMIT 10; -- Top 10 actors with their movie details

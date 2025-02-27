@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS depth
+    FROM supplier
+    WHERE s_acctbal > 1000.00
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.depth + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 500.00 AND sh.depth < 5
+),
+CustomerTotal AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+RankedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.total_supply_cost,
+           RANK() OVER (ORDER BY ps.total_supply_cost DESC) AS rank
+    FROM part p
+    JOIN PartSupplier ps ON p.p_partkey = ps.ps_partkey
+),
+NationCustomer AS (
+    SELECT n.n_name, COUNT(c.c_custkey) AS customer_count
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_name
+)
+SELECT n.n_name, nc.customer_count, rp.p_name, rp.p_retailprice, rp.total_supply_cost,
+       COALESCE(sh.s_name, 'No Supplier') AS supplier_name, sh.depth, ct.total_spent
+FROM NationCustomer nc
+LEFT JOIN RankedParts rp ON rp.rank <= 5
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = nc.n.n_nationkey
+LEFT JOIN CustomerTotal ct ON ct.c_custkey = sh.s_suppkey
+WHERE (nc.customer_count > 10 OR sh.s_name IS NOT NULL)
+  AND (rp.p_retailprice > 50.00 OR sh.s_acctbal IS NOT NULL)
+  AND sh.s_nationkey IS NOT NULL
+ORDER BY nc.customer_count DESC, rp.total_supply_cost DESC, sh.depth;

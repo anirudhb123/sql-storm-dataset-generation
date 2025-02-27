@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+),
+UserVoteStats AS (
+    SELECT
+        v.UserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM
+        Votes v
+    JOIN
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY
+        v.UserId
+),
+TopContributors AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(vs.VoteCount, 0) AS TotalVotes,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(vs.VoteCount, 0) DESC) AS Rank
+    FROM
+        Users u
+    LEFT JOIN
+        UserVoteStats vs ON u.Id = vs.UserId
+    WHERE
+        u.Reputation > 1000
+),
+PostHistoryDetails AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        pht.Name AS HistoryType,
+        ph.UserDisplayName AS Editor,
+        ph.Comment,
+        ph.Text AS NewValue
+    FROM
+        PostHistory ph
+    JOIN
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE
+        ph.CreationDate >= NOW() - INTERVAL '6 months'
+        AND pht.Id IN (4, 5, 10) -- Edit Title, Edit Body, Post Closed
+)
+SELECT
+    p.Title,
+    up.DisplayName AS OwnerDisplayName,
+    p.Score,
+    p.ViewCount,
+    p.CreationDate,
+    COALESCE(h.HistoryDate, NULL) AS LastEditDate,
+    COALESCE(h.HistoryType, 'Never Edited') AS LastEditType,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    SUM(CASE WHEN b.UserId IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount,
+    ROW_NUMBER() OVER (PARTITION BY up.UserId ORDER BY p.CreationDate DESC) AS PostRank
+FROM
+    RankedPosts p
+JOIN
+    Users up ON p.OwnerUserId = up.Id
+LEFT JOIN
+    Comments c ON p.Id = c.PostId
+LEFT JOIN
+    Badges b ON b.UserId = p.OwnerUserId
+LEFT JOIN
+    PostHistoryDetails h ON p.Id = h.PostId
+WHERE
+    p.Score > 10
+    AND (p.ViewCount IS NULL OR p.ViewCount > 100)
+GROUP BY
+    p.Id, up.DisplayName, p.Score, p.ViewCount, p.CreationDate, h.HistoryDate, h.HistoryType
+ORDER BY
+    p.Score DESC,
+    up.DisplayName ASC;

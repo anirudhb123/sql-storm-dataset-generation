@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-10-01') AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-10-31')
+    GROUP BY 
+        ws_item_sk
+), 
+CustomerIncome AS (
+    SELECT 
+        c.c_customer_sk,
+        d.cd_demo_sk,
+        h.hd_income_band_sk,
+        h.hd_buy_potential,
+        COALESCE(h.hd_dep_count, 0) AS dep_count,
+        COALESCE(h.hd_vehicle_count, 0) AS vehicle_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    LEFT JOIN 
+        household_demographics h ON d.cd_demo_sk = h.hd_demo_sk
+), 
+ItemSales AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        COALESCE(s.total_quantity, 0) AS quantity_sold,
+        COALESCE(s.total_sales, 0) AS sales_amount
+    FROM 
+        item i
+    LEFT JOIN 
+        RankedSales s ON i.i_item_sk = s.ws_item_sk AND s.rank = 1
+)
+SELECT 
+    c.c_customer_id,
+    ci.hd_buy_potential,
+    i.i_item_desc,
+    i.quantity_sold,
+    i.sales_amount,
+    c.dep_count,
+    c.vehicle_count,
+    CASE 
+        WHEN i.sales_amount >= 1000 THEN 'High Value'
+        WHEN i.sales_amount >= 500 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS value_category
+FROM 
+    CustomerIncome c
+JOIN 
+    ItemSales i ON c.c_customer_sk = i.i_item_id
+WHERE 
+    c.hd_income_band_sk IS NOT NULL
+ORDER BY 
+    c.dep_count DESC, 
+    i.sales_amount DESC
+LIMIT 100;

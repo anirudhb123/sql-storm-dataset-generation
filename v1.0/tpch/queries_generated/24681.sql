@@ -1,0 +1,87 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1996-01-01' 
+        AND o.o_orderdate < '1997-01-01'
+), 
+supplier_parts AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 1000
+), 
+high_value_customers AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) > (
+            SELECT AVG(o2.o_totalprice)
+            FROM orders o2
+        )
+), 
+order_products AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_price,
+        l.l_returnflag,
+        l.l_linestatus
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_returnflag, l.l_linestatus
+)
+SELECT 
+    r.o_orderkey,
+    COALESCE(SUM(op.total_line_price), 0) AS total_order_value,
+    COALESCE(SUM(sp.total_supply_cost), 0) AS total_supply_cost,
+    COUNT(DISTINCT hvc.c_custkey) AS high_value_customer_count,
+    CASE 
+        WHEN r.price_rank = 1 THEN 'Top Order'
+        ELSE 'Regular Order'
+    END AS order_priority
+FROM 
+    ranked_orders r
+LEFT JOIN 
+    order_products op ON r.o_orderkey = op.l_orderkey
+LEFT JOIN 
+    supplier_parts sp ON sp.ps_partkey = (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_availqty = (
+            SELECT MAX(ps2.ps_availqty) 
+            FROM partsupp ps2 
+            WHERE ps2.ps_partkey = sp.ps_partkey
+        )
+        LIMIT 1
+    )
+LEFT JOIN 
+    high_value_customers hvc ON r.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey = hvc.c_custkey
+    )
+GROUP BY 
+    r.o_orderkey, r.price_rank
+ORDER BY 
+    r.o_orderkey;

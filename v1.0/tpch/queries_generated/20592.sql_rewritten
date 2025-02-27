@@ -1,0 +1,89 @@
+WITH ranked_orders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM
+        orders AS o
+    WHERE
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+filtered_parts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(ps.ps_availqty), 0) AS total_available
+    FROM
+        part AS p
+    LEFT JOIN
+        partsupp AS ps ON p.p_partkey = ps.ps_partkey
+    WHERE
+        p.p_retailprice > (
+            SELECT 
+                AVG(p2.p_retailprice) 
+            FROM 
+                part AS p2 
+            WHERE 
+                p2.p_size IS NOT NULL
+        )
+    GROUP BY
+        p.p_partkey, p.p_name
+),
+supplier_stats AS (
+    SELECT
+        s.s_suppkey,
+        MAX(s.s_acctbal) AS max_acctbal,
+        SUM(s.s_acctbal) OVER (PARTITION BY s.s_nationkey) AS nation_total_acctbal
+    FROM supplier AS s
+    GROUP BY
+        s.s_suppkey
+),
+customer_orders AS (
+    SELECT
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer AS c
+    LEFT JOIN
+        orders AS o ON c.c_custkey = o.o_custkey
+    WHERE
+        c.c_mktsegment IN (SELECT DISTINCT c_mktsegment FROM customer WHERE c_acctbal IS NOT NULL)
+    GROUP BY
+        c.c_custkey
+)
+SELECT
+    c.c_custkey,
+    COUNT(DISTINCT lo.l_orderkey) AS total_lines,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_line_revenue,
+    p.p_name,
+    ps.total_available,
+    COALESCE(ss.max_acctbal, 0) AS max_supplier_acctbal,
+    CASE 
+        WHEN o.o_orderstatus IS NOT NULL THEN o.o_orderstatus 
+        ELSE 'UNKNOWN' 
+    END AS order_status
+FROM
+    lineitem AS lo
+JOIN
+    ranked_orders AS o ON lo.l_orderkey = o.o_orderkey
+JOIN
+    filtered_parts AS p ON lo.l_partkey = p.p_partkey
+JOIN
+    supplier_stats AS ss ON lo.l_suppkey = ss.s_suppkey
+JOIN
+    customer_orders AS c ON o.o_orderkey IN (SELECT o2.o_orderkey FROM orders AS o2 WHERE o2.o_custkey = c.c_custkey)
+LEFT JOIN
+    region AS r ON (r.r_regionkey IS NULL OR r.r_regionkey = pg_catalog.random() % 5)
+WHERE
+    p.total_available > 10
+GROUP BY
+    c.c_custkey, p.p_name, ps.total_available, ss.max_acctbal, o.o_orderstatus
+HAVING
+    EXISTS (
+        SELECT 1
+        FROM customer AS c2
+        WHERE c2.c_custkey = c.c_custkey AND c2.c_acctbal > 50.00
+    )
+ORDER BY
+    total_line_revenue DESC, c.c_custkey ASC;

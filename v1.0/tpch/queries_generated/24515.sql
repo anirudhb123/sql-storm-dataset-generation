@@ -1,0 +1,64 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5 AND s.s_suppkey <> sh.s_suppkey
+),
+PartSummary AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           SUM(ps.ps_availqty) AS Total_Available,
+           AVG(ps.ps_supplycost) AS Avg_Supply_Cost,
+           COUNT(ps.ps_suppkey) AS Supplier_Count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CustomerOrderCounts AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COUNT(o.o_orderkey) AS Order_Count,
+           SUM(o.o_totalprice) AS Total_Spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT ccc.c_custkey,
+           ccc.c_name,
+           ccc.Total_Spent / NULLIF(ccc.Order_Count, 0) AS Avg_Spending_Per_Order
+    FROM CustomerOrderCounts ccc
+    WHERE ccc.Total_Spent > 5000
+),
+RegionPartPrices AS (
+    SELECT r.r_name, 
+           p.p_brand, 
+           AVG(p.p_retailprice) AS Avg_Retail_Price,
+           COUNT(DISTINCT ps.ps_partkey) AS Part_Count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY r.r_name, p.p_brand
+)
+SELECT rh.s_name AS Supplier_Name,
+       rh.level AS Supplier_Level,
+       ps.p_name AS Part_Name,
+       ps.Total_Available,
+       ps.Avg_Supply_Cost,
+       hvc.c_name AS High_Value_Customer,
+       hvc.Avg_Spending_Per_Order,
+       rpp.Avg_Retail_Price,
+       rpp.Part_Count
+FROM SupplierHierarchy rh
+FULL OUTER JOIN PartSummary ps ON rh.s_suppkey = ps.p_partkey
+FULL OUTER JOIN HighValueCustomers hvc ON hvc.c_custkey = rh.s_nationkey
+FULL OUTER JOIN RegionPartPrices rpp ON rh.s_nationkey = rpp.r_name
+WHERE (ps.Total_Available IS NULL OR ps.Total_Available > 100) 
+  AND (hvc.Avg_Spending_Per_Order IS NOT NULL OR rpp.Part_Count > 0)
+ORDER BY rh.level, hvc.Avg_Spending_Per_Order DESC NULLS LAST;

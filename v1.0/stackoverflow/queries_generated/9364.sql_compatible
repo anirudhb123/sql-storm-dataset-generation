@@ -1,0 +1,51 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        p.AnswerCount,
+        p.CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate ASC) AS CreationRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.AnswerCount,
+        rp.CommentCount,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS TotalComments,
+        (SELECT STRING_AGG(t.TagName, ', ') FROM Tags t WHERE t.WikiPostId = rp.PostId) AS Tags,
+        hp.CreationDate AS LastEditDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistory hp ON rp.PostId = hp.PostId
+    WHERE 
+        hp.CreationDate = (SELECT MAX(CreationDate) FROM PostHistory WHERE PostId = rp.PostId)
+)
+SELECT 
+    pd.*,
+    CASE 
+        WHEN pd.ScoreRank = 1 THEN 'Top Performing Post'
+        WHEN pd.CommentCount > 10 THEN 'Highly Engaging Post'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

@@ -1,0 +1,72 @@
+
+WITH TagData AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        STRING_AGG(DISTINCT p.Title, ', ') AS PostTitles
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+VoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    td.TagName,
+    td.PostCount,
+    td.PostTitles,
+    ur.DisplayName AS TopUser,
+    ur.Reputation AS UserReputation,
+    ur.TotalPosts AS PostsCount,
+    ur.TotalQuestions,
+    ur.TotalAnswers,
+    vs.UpVotes,
+    vs.DownVotes,
+    vs.TotalVotes
+FROM 
+    TagData td
+JOIN 
+    UserReputation ur ON ur.TotalPosts = (
+        SELECT MAX(TotalPosts) 
+        FROM UserReputation
+    )
+LEFT JOIN 
+    VoteSummary vs ON vs.PostId IN (
+        SELECT p.Id 
+        FROM Posts p 
+        WHERE p.Tags LIKE '%' || td.TagName || '%'
+        ORDER BY p.Score DESC
+        LIMIT 1
+    )
+ORDER BY 
+    td.PostCount DESC
+LIMIT 10;

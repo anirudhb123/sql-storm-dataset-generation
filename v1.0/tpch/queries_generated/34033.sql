@@ -1,0 +1,57 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+order_summary AS (
+    SELECT o.cust_name, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_totalprice > 0
+    GROUP BY o.o_custkey, c.c_name
+),
+lineitem_stats AS (
+    SELECT l.l_orderkey,
+           COUNT(DISTINCT l.l_linenumber) AS num_items,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT n.n_name,
+       COALESCE(s.total_value, 0) AS total_supply_cost,
+       COALESCE(o.total_spent, 0) AS customer_spent,
+       ls.num_items,
+       ls.total_amount
+FROM region r
+LEFT JOIN nation_hierarchy nh ON r.r_regionkey = nh.n_regionkey
+LEFT JOIN supplier_summary s ON s.s_suppkey IN (
+     SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (
+       SELECT p.p_partkey FROM part p WHERE p.p_size > 20 AND p.p_retailprice < 100.00
+     )
+)
+LEFT JOIN order_summary o ON o.cust_name = (
+    SELECT c.c_name 
+    FROM customer c
+    WHERE c.c_nationkey = nh.n_nationkey
+    LIMIT 1
+)
+LEFT JOIN lineitem_stats ls ON ls.l_orderkey = (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_orderstatus = 'O' 
+    ORDER BY o.o_orderdate DESC 
+    LIMIT 1
+)
+WHERE r.r_name IS NOT NULL
+ORDER BY total_supply_cost DESC, customer_spent ASC;

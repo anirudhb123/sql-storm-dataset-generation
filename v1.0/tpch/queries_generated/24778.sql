@@ -1,0 +1,67 @@
+WITH RECURSIVE Supplier_Rank AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        DENSE_RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS acct_rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+Cost_Range AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+High_Value_Customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(sr.s_name, 'Unknown Supplier') AS supplier_name,
+    CASE 
+        WHEN cvc.cust_rank <= 5 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status,
+    CASE 
+        WHEN COALESCE(cr.total_cost, 0) BETWEEN 1000 AND 5000 THEN 'Mid Range Cost'
+        ELSE 'Other Cost Range'
+    END AS cost_category,
+    COUNT(DISTINCT lr.l_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    STRING_AGG(DISTINCT CONCAT(l.l_shipmode, ': ', l.l_quantity) ORDER BY l.l_shipdate) AS delivery_details
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    Supplier_Rank sr ON ps.ps_suppkey = sr.s_suppkey AND sr.acct_rank = 1
+LEFT JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN 
+    High_Value_Customers cvc ON l.l_orderkey = cvc.c_custkey
+LEFT JOIN 
+    Cost_Range cr ON p.p_partkey = cr.ps_partkey
+WHERE 
+    p.p_size IS NOT NULL AND
+    (p.p_comment LIKE '%special%' OR p.p_comment IS NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, sr.s_name, cvc.cust_rank, cr.total_cost
+HAVING 
+    SUM(l.l_quantity) > 10
+ORDER BY 
+    total_revenue DESC;

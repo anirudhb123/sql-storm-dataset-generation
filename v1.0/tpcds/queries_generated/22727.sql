@@ -1,0 +1,69 @@
+
+WITH RECURSIVE Sales_Summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS row_num
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+High_Profit_Customers AS (
+    SELECT 
+        customer_sk,
+        total_profit
+    FROM 
+        Sales_Summary
+    WHERE 
+        total_profit IS NOT NULL AND row_num <= 10
+),
+Low_Sales_Customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_order_number IS NULL 
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+Combined_Sales AS (
+    SELECT 
+        hp.c_customer_sk,
+        hp.total_profit,
+        ls.order_count
+    FROM 
+        High_Profit_Customers hp
+    FULL OUTER JOIN 
+        Low_Sales_Customers ls ON hp.customer_sk = ls.c_customer_sk
+)
+SELECT 
+    COALESCE(hp.c_customer_sk, ls.c_customer_sk) AS customer_sk,
+    COALESCE(hp.total_profit, 0) AS total_profit,
+    COALESCE(ls.order_count, 0) AS order_count,
+    CASE 
+        WHEN hp.total_profit IS NOT NULL AND ls.order_count IS NULL THEN 'High Profit, No Orders'
+        WHEN hp.total_profit IS NULL AND ls.order_count IS NOT NULL THEN 'Low Profit, Many Orders'
+        WHEN hp.total_profit IS NOT NULL AND ls.order_count IS NOT NULL THEN 'Balanced Customer'
+        ELSE 'Unknown'
+    END AS customer_category
+FROM 
+    Combined_Sales
+WHERE 
+    (hp.total_profit IS NOT NULL OR ls.order_count IS NOT NULL)
+ORDER BY 
+    total_profit DESC, order_count ASC;

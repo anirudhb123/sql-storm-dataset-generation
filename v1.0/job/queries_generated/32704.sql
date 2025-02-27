@@ -1,0 +1,53 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS hierarchy_level,
+        ARRAY[mt.title] AS movie_path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.hierarchy_level + 1,
+        mh.movie_path || mt.title
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mt.production_year >= 2000
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.hierarchy_level,
+    mh.movie_path,
+    COUNT(DISTINCT cc.person_id) OVER (PARTITION BY mh.movie_id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') FILTER (WHERE ak.name IS NOT NULL) AS actor_names,
+    MAX(CASE WHEN pi.info_type_id = 1 THEN pi.info END) AS birth_date,
+    COALESCE(MAX(CASE WHEN pi.info_type_id = 2 THEN pi.info END), 'Unknown') AS death_date
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    person_info pi ON ak.person_id = pi.person_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.hierarchy_level, mh.movie_path
+ORDER BY 
+    mh.hierarchy_level DESC, mh.production_year ASC;

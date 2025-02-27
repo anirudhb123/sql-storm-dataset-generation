@@ -1,0 +1,63 @@
+-- Performance benchmarking SQL query
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT a.Id) AS TotalAnswers,
+        SUM(COALESCE(v.Score, 0)) AS TotalVotes,
+        SUM(COALESCE(b.Id, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.CommentCount,
+        COUNT(c.Id) AS TotalComments,
+        SUM(COALESCE(ph.Id, 0)) AS TotalHistoryChanges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.CommentCount
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalPosts,
+    us.TotalAnswers,
+    us.TotalVotes,
+    us.TotalBadges,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.TotalComments,
+    ps.TotalHistoryChanges
+FROM 
+    UserStats us
+JOIN 
+    PostStats ps ON us.UserId = ps.PostId
+ORDER BY 
+    us.TotalPosts DESC, ps.ViewCount DESC;

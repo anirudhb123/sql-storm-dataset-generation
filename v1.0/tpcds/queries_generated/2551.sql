@@ -1,0 +1,61 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent,
+        AVG(ws.ws_net_paid) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+), 
+HighSpenders AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_orders,
+        cs.total_spent,
+        cs.avg_order_value,
+        RANK() OVER (ORDER BY cs.total_spent DESC) AS rank
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.total_spent > (SELECT AVG(total_spent) FROM CustomerSales)
+)
+SELECT 
+    h.c_first_name,
+    h.c_last_name,
+    h.total_orders,
+    h.total_spent,
+    h.avg_order_value,
+    CASE 
+        WHEN h.rank <= 10 THEN 'Top 10 Percent' 
+        ELSE 'Other' 
+    END AS customer_category
+FROM 
+    HighSpenders h
+LEFT JOIN 
+    customer_demographics cd ON h.c_customer_sk = cd.cd_demo_sk
+WHERE 
+    cd.cd_marital_status IS NOT NULL
+    AND (cd.cd_gender = 'F' OR cd.cd_gender IS NULL)
+ORDER BY 
+    h.total_spent DESC
+LIMIT 20
+UNION ALL
+SELECT 
+    'Aggregate' AS c_first_name,
+    'Stats' AS c_last_name,
+    COUNT(*) AS total_orders,
+    SUM(total_spent) AS total_spent,
+    AVG(avg_order_value) AS avg_order_value
+FROM 
+    HighSpenders
+WHERE 
+    total_orders > 1;

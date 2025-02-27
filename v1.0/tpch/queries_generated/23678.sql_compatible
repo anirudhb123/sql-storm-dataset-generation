@@ -1,0 +1,42 @@
+
+WITH RankedParts AS (
+    SELECT p.partkey, p.name AS p_name, p.mfgr, p.brand, p.type, p.size, p.retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.brand ORDER BY p.retailprice DESC) AS rank
+    FROM part p
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, COUNT(DISTINCT ps.ps_partkey) AS part_count,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+           AVG(l.l_tax) AS avg_tax,
+           COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS return_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice
+)
+SELECT rp.p_name, rp.brand, ss.part_count, ss.total_supply_value,
+       od.total_order_value, od.avg_tax, od.return_count
+FROM RankedParts rp
+LEFT JOIN SupplierStats ss ON rp.partkey = ss.s_suppkey
+LEFT JOIN OrderDetails od ON rp.partkey = od.o_orderkey
+WHERE (ss.part_count IS NULL OR ss.part_count > 5) 
+  AND (od.total_order_value > 1000 OR od.avg_tax IS NULL)
+  AND rp.rank <= 10
+ORDER BY rp.brand, rp.retailprice DESC
+LIMIT 50
+UNION ALL
+SELECT 'Not Available' AS p_name, 'Globex Corp' AS brand, 
+       COUNT(*) AS part_count, SUM(COALESCE(ss.total_supply_value, 0)) AS total_supply_value,
+       SUM(COALESCE(od.total_order_value, 0)) AS total_order_value,
+       AVG(COALESCE(od.avg_tax, 0)) AS avg_tax, 
+       SUM(CASE WHEN od.return_count > 0 THEN 1 ELSE 0 END) AS return_count
+FROM SupplierStats ss
+FULL OUTER JOIN OrderDetails od ON ss.s_suppkey = od.o_orderkey
+WHERE ss.part_count <= 3
+GROUP BY ss.part_count
+ORDER BY part_count DESC;

@@ -1,0 +1,54 @@
+WITH ranked_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_availqty) AS total_availqty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty) DESC) AS rank_by_availability
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+top_suppliers AS (
+    SELECT 
+        s.r_name,
+        t.s_name,
+        t.total_availqty,
+        t.total_supplycost
+    FROM 
+        ranked_suppliers t 
+    JOIN 
+        nation s ON t.s_nationkey = s.n_nationkey
+    WHERE 
+        t.rank_by_availability <= 5
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    ts.r_name,
+    ts.s_name,
+    ts.total_availqty,
+    ts.total_supplycost,
+    co.c_name,
+    co.total_spent
+FROM 
+    top_suppliers ts
+JOIN 
+    customer_orders co ON ts.total_supplycost > co.total_spent
+ORDER BY 
+    ts.r_name, ts.total_availqty DESC, co.total_spent DESC
+LIMIT 100;

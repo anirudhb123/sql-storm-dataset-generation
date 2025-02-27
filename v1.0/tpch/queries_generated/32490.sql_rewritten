@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+AveragePrices AS (
+    SELECT ps_partkey, AVG(ps_supplycost) AS avg_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+SalesData AS (
+    SELECT
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(l.l_shipdate) AS last_purchase_date
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= (cast('1998-10-01' as date) - INTERVAL '1 year')
+    GROUP BY c.c_custkey
+),
+QualifiedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name
+    FROM supplier s
+    LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.s_suppkey IS NULL OR sh.level > 1
+)
+SELECT
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    avgp.avg_cost,
+    COALESCE(sd.total_spent, 0) AS customer_total_spent,
+    COUNT(DISTINCT qs.s_suppkey) AS qualified_supplier_count,
+    RANK() OVER (PARTITION BY p.p_partkey ORDER BY avgp.avg_cost DESC) AS price_rank
+FROM part p
+JOIN AveragePrices avgp ON p.p_partkey = avgp.ps_partkey
+LEFT JOIN SalesData sd ON p.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey IN (SELECT s_suppkey FROM qualifiedsuppliers))
+LEFT JOIN QualifiedSuppliers qs ON p.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey = qs.s_suppkey)
+GROUP BY p.p_partkey, p.p_name, p.p_mfgr, avgp.avg_cost, sd.total_spent
+HAVING avgp.avg_cost > 50 AND customer_total_spent > 1000
+ORDER BY price_rank, p.p_name;

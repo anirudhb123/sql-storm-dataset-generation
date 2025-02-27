@@ -1,0 +1,68 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ca.person_id,
+        ca.movie_id,
+        1 AS level
+    FROM 
+        cast_info ca
+    WHERE 
+        ca.role_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ca.person_id,
+        ca.movie_id,
+        ah.level + 1
+    FROM 
+        cast_info ca
+    INNER JOIN 
+        actor_hierarchy ah ON ca.movie_id = ah.movie_id
+    WHERE 
+        ca.person_id <> ah.person_id
+)
+
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    COUNT(DISTINCT co.name) AS company_count,
+    AVG(CASE WHEN mi.info_type_id = 1 THEN LENGTH(mi.info) END) AS avg_plot_length,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    LISTAGG(di.name, ', ') WITHIN GROUP (ORDER BY di.name) AS directors,
+    SUM(CASE 
+            WHEN c.nr_order IS NULL THEN 1 
+            ELSE 0 
+        END) AS undirected_actors
+FROM 
+    aka_title t
+JOIN 
+    cast_info c ON t.movie_id = c.movie_id
+JOIN 
+    aka_name a ON a.person_id = c.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = t.movie_id
+LEFT JOIN 
+    company_name co ON co.id = mc.company_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = t.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.movie_id
+LEFT JOIN 
+    keyword kw ON kw.id = mk.keyword_id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = t.movie_id
+LEFT JOIN 
+    person_info pi ON pi.person_id = c.person_id
+LEFT JOIN 
+    role_type rt ON rt.id = c.role_id
+LEFT JOIN 
+    name di ON di.imdb_id = pi.info_type_id  -- get director names
+WHERE 
+    t.production_year >= 2000
+    AND t.kind_id IN (1, 2)  -- assuming 1 is 'Movie' and 2 is 'TV Series'
+GROUP BY 
+    t.title, a.name
+HAVING 
+    COUNT(DISTINCT c.person_id) > 5
+ORDER BY 
+    company_count DESC, avg_plot_length DESC;

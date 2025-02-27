@@ -1,0 +1,51 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 
+           SUM(o.o_totalprice) AS total_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+), 
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+), 
+OrderDetails AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, 
+           l.l_extendedprice, (l.l_discount * l.l_extendedprice) AS discount_value
+    FROM lineitem l
+    WHERE l.l_shipdate > l.l_commitdate
+), 
+TopOrders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, SUM(od.l_extendedprice) AS total_price,
+           COUNT(DISTINCT od.l_partkey) AS number_of_parts
+    FROM orders o
+    JOIN OrderDetails od ON o.o_orderkey = od.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus
+    HAVING SUM(od.l_extendedprice) > 1000
+)
+SELECT c.c_name, r.r_name, ps.p_name, COUNT(DISTINCT od.l_orderkey) AS total_orders,
+       MAX(s.s_acctbal) AS highest_supplier_balance, AVG(p.ps_supplycost) AS average_supply_cost
+FROM CustomerOrders c
+JOIN RankedSuppliers s ON c.c_nationkey = s.s_nationkey AND s.rank = 1
+LEFT JOIN nation r ON c.c_nationkey = r.n_nationkey
+JOIN PartSupplierInfo p ON s.s_suppkey = p.ps_suppkey
+JOIN TopOrders od ON od.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    INTERSECT
+    SELECT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+)
+GROUP BY c.c_name, r.r_name, ps.p_name
+ORDER BY total_orders DESC, highest_supplier_balance DESC
+FETCH FIRST 10 ROWS ONLY;

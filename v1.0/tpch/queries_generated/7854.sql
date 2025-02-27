@@ -1,0 +1,51 @@
+WITH RegionalSales AS (
+    SELECT 
+        R.r_name AS region, 
+        SUM(L.l_extendedprice * (1 - L.l_discount)) AS total_sales 
+    FROM 
+        region R 
+    JOIN 
+        nation N ON R.r_regionkey = N.n_regionkey 
+    JOIN 
+        supplier S ON N.n_nationkey = S.s_nationkey 
+    JOIN 
+        partsupp PS ON S.s_suppkey = PS.ps_suppkey 
+    JOIN 
+        part P ON PS.ps_partkey = P.p_partkey 
+    JOIN 
+        lineitem L ON P.p_partkey = L.l_partkey 
+    JOIN 
+        orders O ON L.l_orderkey = O.o_orderkey 
+    WHERE 
+        O.o_orderdate >= DATE '1995-01-01' 
+        AND O.o_orderdate < DATE '1996-01-01' 
+    GROUP BY 
+        R.r_name
+), 
+CustomerSales AS (
+    SELECT 
+        C.c_name AS customer_name, 
+        SUM(L.l_extendedprice * (1 - L.l_discount)) AS total_purchase 
+    FROM 
+        customer C 
+    JOIN 
+        orders O ON C.c_custkey = O.o_custkey 
+    JOIN 
+        lineitem L ON O.o_orderkey = L.l_orderkey 
+    WHERE 
+        O.o_orderdate >= DATE '1995-01-01' 
+        AND O.o_orderdate < DATE '1996-01-01' 
+    GROUP BY 
+        C.c_name
+) 
+SELECT 
+    RS.region, 
+    COALESCE(CS.customer_name, 'No Purchases') AS customer_name, 
+    RS.total_sales, 
+    CS.total_purchase
+FROM 
+    RegionalSales RS 
+LEFT JOIN 
+    CustomerSales CS ON RS.region = (SELECT R.r_name FROM region R WHERE R.r_regionkey = (SELECT N.n_regionkey FROM nation N JOIN supplier S ON N.n_nationkey = S.s_nationkey WHERE S.s_suppkey IN (SELECT PS.ps_suppkey FROM partsupp PS JOIN part P ON PS.ps_partkey = P.p_partkey WHERE P.p_partkey IN (SELECT L.l_partkey FROM lineitem L JOIN orders O ON L.l_orderkey = O.o_orderkey WHERE O.o_orderdate >= DATE '1995-01-01' AND O.o_orderdate < DATE '1996-01-01'))))
+ORDER BY 
+    RS.region, CS.total_purchase DESC;

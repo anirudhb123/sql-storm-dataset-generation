@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC NULLS LAST) AS RankScore
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate > NOW() - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = P.Tags::int[]
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(*) > 10
+),
+PostsWithTags AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Tags T ON POSITION(T.TagName IN P.Tags) > 0
+    GROUP BY 
+        P.Id
+),
+PostHistories AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        PH.CreationDate,
+        HT.Name AS HistoryType,
+        PH.Comment AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes HT ON PH.PostHistoryTypeId = HT.Id
+    WHERE 
+        HT.Name LIKE '%Close%'
+),
+PostVoteStats AS (
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId 
+    GROUP BY 
+        P.Id
+)
+
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.OwnerDisplayName,
+    COALESCE(SUM(PVS.UpVotes - PVS.DownVotes), 0) AS NetVotes,
+    W.Tags,
+    PH.CloseReason,
+    CASE 
+        WHEN RP.RankScore = 1 THEN 'Top Post'
+        WHEN RP.RankScore IS NULL THEN 'Not Ranked'
+        ELSE 'Ranked'
+    END AS RankStatus
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    PostsWithTags W ON RP.PostId = W.PostId
+LEFT JOIN 
+    PostVoteStats PVS ON RP.PostId = PVS.PostId
+LEFT JOIN 
+    PostHistories PH ON RP.PostId = PH.PostId
+WHERE 
+    RP.RankScore <= 5 
+    OR (PH.CloseReason IS NOT NULL AND PH.UserId IS NOT NULL)
+GROUP BY 
+    RP.PostId, RP.Title, RP.CreationDate, RP.Score, RP.OwnerDisplayName, W.Tags, PH.CloseReason, RP.RankScore
+ORDER BY 
+    RP.CreationDate DESC, RP.Score DESC;

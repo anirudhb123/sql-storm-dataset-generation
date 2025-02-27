@@ -1,0 +1,56 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        ca_city,
+        CONCAT(cd_gender, ' - ', cd_marital_status, ' - ', cd_education_status) AS demographic_info,
+        COUNT(DISTINCT c_customer_sk) AS customer_count,
+        SUM(cd_purchase_estimate) AS total_purchase_estimate
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        ca_city, cd_gender, cd_marital_status, cd_education_status
+),
+SalesStats AS (
+    SELECT 
+        DATE(d.d_date) AS sale_date,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_ext_discount_amt) AS total_discount
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        DATE(d.d_date)
+),
+CombinedStats AS (
+    SELECT 
+        cs.ca_city,
+        cs.demographic_info,
+        cs.customer_count,
+        ss.sale_date,
+        ss.total_sales,
+        ss.total_discount,
+        (ss.total_sales - ss.total_discount) AS net_sales
+    FROM 
+        CustomerStats cs
+    LEFT JOIN 
+        SalesStats ss ON cs.ca_city = (SELECT ca.ca_city FROM customer_address ca JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk WHERE c.c_customer_sk = cs.customer_count)
+)
+SELECT 
+    ca.ca_city,
+    AVG(net_sales) AS average_net_sales,
+    COUNT(DISTINCT customer_count) AS unique_customers,
+    MAX(total_sales) AS max_sales
+FROM 
+    CombinedStats
+JOIN 
+    customer_address ca ON ca.ca_city = CombinedStats.ca_city
+GROUP BY 
+    ca.ca_city
+ORDER BY 
+    average_net_sales DESC
+LIMIT 10;

@@ -1,0 +1,49 @@
+
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+OrderedCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+AggregateParts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_quantity, AVG(ps.ps_supplycost) AS avg_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+SupplierPerformance AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(DISTINCT ps.ps_partkey) AS part_count,
+           SUM(ps.ps_supplycost * ap.total_quantity) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.s_suppkey
+    JOIN AggregateParts ap ON ps.ps_partkey = ap.ps_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, sp.total_supplycost,
+           ROW_NUMBER() OVER (ORDER BY sp.total_supplycost DESC) AS supplier_rank
+    FROM supplier s
+    JOIN SupplierPerformance sp ON s.s_suppkey = sp.s_suppkey
+)
+SELECT nh.n_name AS nation_name, oc.c_name AS customer_name, oc.total_spent,
+       CASE WHEN oc.rank <= 5 THEN 'Top Customer' ELSE 'Regular Customer' END AS customer_status,
+       ts.s_name AS supplier_name, ts.total_supplycost
+FROM NationHierarchy nh
+JOIN OrderedCustomers oc ON nh.n_nationkey = oc.c_nationkey
+LEFT JOIN TopSuppliers ts ON ts.total_supplycost = (
+    SELECT MAX(total_supplycost) 
+    FROM TopSuppliers 
+    WHERE total_supplycost < ts.total_supplycost
+)
+WHERE nh.level < 2
+ORDER BY nh.n_name, oc.total_spent DESC, ts.total_supplycost DESC;

@@ -1,0 +1,62 @@
+WITH RecursiveHierarchy AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        NULL AS linked_title,
+        1 AS level
+    FROM 
+        aka_title 
+    WHERE 
+        production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mt.movie_id,
+        mt.title,
+        mt.production_year,
+        CONCAT(rh.title, ' -> ', mt.title) AS linked_title,
+        rh.level + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = mt.movie_id
+    JOIN 
+        RecursiveHierarchy rh ON ml.movie_id = rh.movie_id
+)
+
+SELECT 
+    rh.movie_id,
+    rh.title,
+    rh.production_year,
+    rh.linked_title,
+    COUNT(*) OVER (PARTITION BY rh.movie_id) AS total_links,
+    AVG(CASE 
+            WHEN ct.kind IS NULL THEN 0 
+            ELSE 1 
+        END) OVER (PARTITION BY rh.movie_id) AS avg_company_type_presence,
+    STRING_AGG(DISTINCT cn.name, ', ') FILTER (WHERE cn.country_code IS NOT NULL) AS company_names,
+    COALESCE(MIN(pi.info), 'No Info Available') AS min_info 
+FROM 
+    RecursiveHierarchy rh
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = rh.movie_id
+LEFT JOIN 
+    company_name cn ON cn.id = mc.company_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = rh.movie_id
+LEFT JOIN 
+    person_info pi ON pi.person_id = cc.subject_id
+WHERE 
+    rh.production_year IS NOT NULL
+    AND (rh.level <= 3 OR rh.level IS NULL)
+GROUP BY 
+    rh.movie_id, rh.title, rh.production_year, rh.linked_title
+HAVING 
+    COUNT(DISTINCT cc.subject_id) FILTER(WHERE cc.status_id IS NOT NULL) > 5
+ORDER BY 
+    total_links DESC NULLS LAST, 
+    rh.production_year DESC;

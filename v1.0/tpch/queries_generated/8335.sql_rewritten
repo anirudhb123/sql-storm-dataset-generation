@@ -1,0 +1,32 @@
+WITH TotalSupplierCost AS (
+    SELECT ps.suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM partsupp ps
+    GROUP BY ps.suppkey
+),
+HighestCostSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, tc.TotalCost
+    FROM supplier s
+    JOIN TotalSupplierCost tc ON s.s_suppkey = tc.suppkey
+    ORDER BY tc.TotalCost DESC
+    LIMIT 10
+),
+CustomerOrderDetails AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalOrderValue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+RecentHighValueOrders AS (
+    SELECT cust.c_custkey, cust.c_name, COUNT(ord.o_orderkey) AS OrderCount, SUM(ord.TotalOrderValue) AS TotalSpent
+    FROM CustomerOrderDetails ord
+    JOIN customer cust ON ord.c_custkey = cust.c_custkey
+    WHERE ord.o_orderdate >= DATEADD(month, -6, cast('1998-10-01' as date))
+    GROUP BY cust.c_custkey, cust.c_name
+    ORDER BY TotalSpent DESC
+    LIMIT 10
+)
+SELECT rhs.c_name, rhs.TotalSpent, hsc.s_name, hsc.TotalCost
+FROM RecentHighValueOrders rhs
+JOIN HighestCostSuppliers hsc ON rhs.c_custkey = hsc.s_suppkey
+ORDER BY rhs.TotalSpent DESC, hsc.TotalCost DESC;

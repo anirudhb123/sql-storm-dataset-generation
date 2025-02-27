@@ -1,0 +1,52 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_ext_sales_price,
+        ws.ws_sales_price,
+        1 AS level,
+        (ws.ws_ext_sales_price - ws.ws_sales_price) AS discount,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws_created_at DESC) as rn
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year > 1980
+        
+    UNION ALL
+    
+    SELECT 
+        cs.cs_item_sk,
+        cs.cs_order_number,
+        cs.cs_ext_sales_price,
+        cs.cs_sales_price,
+        level + 1,
+        (cs.cs_ext_sales_price - cs.cs_sales_price) AS discount,
+        ROW_NUMBER() OVER (PARTITION BY cs.cs_item_sk ORDER BY cs.cs_sold_date_sk DESC)
+    FROM 
+        catalog_sales cs
+    JOIN 
+        customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year <= 1980 AND 
+        cs.cs_ship_mode_sk IN (SELECT sm_ship_mode_sk FROM ship_mode WHERE sm_code = 'GROUND')
+)
+SELECT 
+    item.i_item_id,
+    SUM(CASE WHEN sh.discount > 0 THEN sh.discount ELSE 0 END) AS total_discounts,
+    COUNT(DISTINCT sh.ws_order_number) AS total_sales_orders,
+    AVG(sh.ws_ext_sales_price) AS avg_sales_price,
+    MAX(sh.level) AS max_level
+FROM 
+    sales_hierarchy sh
+JOIN 
+    item i ON sh.ws_item_sk = i.i_item_sk
+GROUP BY 
+    item.i_item_id
+HAVING 
+    total_sales_orders > 5
+ORDER BY 
+    total_discounts DESC
+LIMIT 100;

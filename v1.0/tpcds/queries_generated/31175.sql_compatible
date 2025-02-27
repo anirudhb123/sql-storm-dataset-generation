@@ -1,0 +1,72 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+RankedSales AS (
+    SELECT 
+        sales.ws_sold_date_sk,
+        sales.ws_item_sk,
+        SUM(sales.ws_quantity) AS total_quantity,
+        SUM(sales.ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (ORDER BY SUM(sales.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        SalesCTE sales
+    GROUP BY 
+        sales.ws_sold_date_sk, sales.ws_item_sk
+),
+TopSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.total_quantity,
+        rs.total_sales,
+        ROW_NUMBER() OVER (PARTITION BY rs.ws_item_sk ORDER BY rs.sales_rank) AS final_rank
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.sales_rank <= 10
+),
+JoinedData AS (
+    SELECT 
+        cs.ws_item_sk AS item_sk,
+        cs.total_quantity,
+        cs.total_sales,
+        i.i_item_desc,
+        i.i_current_price,
+        i.i_brand,
+        i.category,
+        ROW_NUMBER() OVER (PARTITION BY cs.ws_item_sk ORDER BY cs.total_sales DESC) AS desc_rank
+    FROM 
+        TopSales cs
+    LEFT JOIN 
+        item i ON cs.ws_item_sk = i.i_item_sk
+)
+SELECT
+    jd.item_sk,
+    jd.total_quantity,
+    jd.total_sales,
+    jd.i_item_desc,
+    jd.i_current_price,
+    jd.i_brand,
+    CASE 
+        WHEN jd.total_sales < 10000 THEN 'Low Sales'
+        WHEN jd.total_sales BETWEEN 10000 AND 50000 THEN 'Medium Sales'
+        ELSE 'High Sales'
+    END AS sales_category,
+    COALESCE(jd.category, 'Unknown') AS item_category
+FROM 
+    JoinedData jd
+WHERE 
+    jd.final_rank = 1
+ORDER BY 
+    jd.total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

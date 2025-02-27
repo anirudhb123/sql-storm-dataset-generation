@@ -1,0 +1,77 @@
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(COALESCE(Posts.Score, 0)) AS TotalScore
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    WHERE 
+        Posts.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        Tags.TagName
+),
+UserActivity AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS QuestionsAsked,
+        COUNT(DISTINCT Comments.Id) AS CommentsMade,
+        SUM(Votes.VoteTypeId = 2) AS UpvotesReceived,
+        SUM(Votes.VoteTypeId = 3) AS DownvotesReceived
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Comments ON Users.Id = Comments.UserId
+    LEFT JOIN 
+        Votes ON Votes.UserId = Users.Id AND Votes.PostId IN (SELECT Id FROM Posts WHERE PostTypeId = 1)
+    GROUP BY 
+        Users.Id
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        TotalScore,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC) as Rank
+    FROM 
+        TagCounts
+),
+UserPostActivity AS (
+    SELECT 
+        UserActivity.DisplayName,
+        TagCounts.TagName,
+        UserActivity.QuestionsAsked,
+        UserActivity.CommentsMade,
+        UserActivity.UpvotesReceived,
+        UserActivity.DownvotesReceived,
+        COALESCE(TopTags.PostCount, 0) AS PostsRelatedToTag
+    FROM 
+        UserActivity
+    LEFT JOIN 
+        TopTags ON True
+)
+SELECT 
+    UserActivity.DisplayName,
+    TagCounts.TagName,
+    UserActivity.QuestionsAsked,
+    UserActivity.CommentsMade,
+    UserActivity.UpvotesReceived,
+    UserActivity.DownvotesReceived,
+    COALESCE(TopTags.PostCount, 0) AS PostsRelatedToTag
+FROM 
+    UserPostActivity
+JOIN 
+    UserActivity ON UserActivity.UserId = UserActivity.UserId
+JOIN 
+    TagCounts ON True
+WHERE 
+    UserActivity.CommentsMade > 5 AND UserActivity.QuestionsAsked > 3
+ORDER BY 
+    UpvotesReceived DESC, TotalScore DESC
+LIMIT 10;

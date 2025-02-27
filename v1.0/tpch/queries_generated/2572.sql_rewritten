@@ -1,0 +1,66 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON l.l_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.acctbal,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        SupplierSales s
+    WHERE 
+        s.total_sales > 1000000
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    COUNT(DISTINCT ro.o_orderkey) AS recent_order_count,
+    SUM(ro.order_total) AS total_recent_sales,
+    CASE 
+        WHEN SUM(ro.order_total) IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sale_status
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+LEFT JOIN 
+    RecentOrders ro ON rs.s_suppkey = ro.o_custkey
+GROUP BY 
+    r.r_name, s.s_name
+HAVING 
+    COUNT(DISTINCT ro.o_orderkey) > 0 OR rs.s_suppkey IS NULL
+ORDER BY 
+    r.r_name, recent_order_count DESC;

@@ -1,0 +1,108 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        Posts a ON p.ParentId = a.Id
+    WHERE 
+        a.PostTypeId = 1
+),
+
+UserVotes AS (
+    SELECT 
+        v.UserId, 
+        COUNT(v.Id) AS TotalVotes, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    INNER JOIN 
+        Posts p ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        v.UserId
+),
+
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COALESCE(uv.TotalVotes, 0) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserVotes uv ON u.Id = uv.UserId
+    WHERE 
+        u.Reputation > 100 
+),
+
+PostsAndTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(p.Tags, '><')) AS tag ON true
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(BOTH '<>' FROM tag)
+    GROUP BY 
+        p.Id
+),
+
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+)
+
+SELECT 
+    p.Title AS QuestionTitle,
+    p.ViewCount AS QuestionViews,
+    u.DisplayName AS UserOwner,
+    up.TotalVotes AS UserTotalVotes,
+    tags.Tags AS RelatedTags,
+    cp.UserDisplayName AS ClosedBy,
+    cp.CreationDate AS ClosedDate,
+    cp.Comment AS CloseReason
+FROM 
+    PostsAndTags tags
+JOIN 
+    Posts p ON tags.PostId = p.Id
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    TopUsers up ON u.Id = up.UserId
+LEFT JOIN 
+    ClosedPosts cp ON p.Id = cp.PostId
+WHERE 
+    (p.ClosedDate IS NOT NULL OR cp.PostId IS NOT NULL) 
+ORDER BY 
+    p.ViewCount DESC
+LIMIT 50;

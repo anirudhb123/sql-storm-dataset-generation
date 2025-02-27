@@ -1,0 +1,30 @@
+
+SELECT 
+    CONCAT('Part: ', p.p_name, ' | Manufacturer: ', p.p_mfgr, ' | Region: ', r.r_name, 
+           ' | Supplier: ', s.s_name, ' | Customer: ', c.c_name, 
+           ' | Order Date: ', CAST(o.o_orderdate AS VARCHAR), 
+           ' | Total Price: $', FORMAT(o.o_totalprice, 2)) AS benchmark_info
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_name LIKE '%widget%'
+    AND o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+GROUP BY 
+    p.p_name, p.p_mfgr, r.r_name, s.s_name, c.c_name, o.o_orderdate, o.o_totalprice
+ORDER BY 
+    o.o_orderdate DESC
+LIMIT 100;

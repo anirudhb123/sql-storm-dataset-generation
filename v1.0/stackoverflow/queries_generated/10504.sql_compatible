@@ -1,0 +1,60 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        SUM(COALESCE(P.Views, 0)) AS TotalViews,
+        SUM(COALESCE(P.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(P.DownVotes, 0)) AS TotalDownVotes,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        PH.PostHistoryTypeId,
+        PH.CreationDate AS HistoryDate,
+        P.OwnerUserId
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.CreationDate >= '2023-01-01' 
+)
+SELECT 
+    U.DisplayName,
+    U.PostCount,
+    U.TotalScore,
+    U.TotalViews,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    U.BadgeCount,
+    COUNT(DISTINCT PS.PostId) AS TotalPosts,
+    SUM(COALESCE(PS.ViewCount, 0)) AS TotalPostViews,
+    SUM(COALESCE(PS.AnswerCount, 0)) AS TotalAnswers,
+    SUM(COALESCE(PS.CommentCount, 0)) AS TotalComments,
+    COUNT(DISTINCT PS.PostHistoryTypeId) AS UniquePostHistoryTypes,
+    COUNT(PS.PostId) AS TotalPostHistoryEntries
+FROM 
+    UserStats U
+LEFT JOIN 
+    PostStats PS ON U.UserId = PS.OwnerUserId
+GROUP BY 
+    U.UserId, U.DisplayName, U.PostCount, U.TotalScore, U.TotalViews, U.TotalUpVotes, U.TotalDownVotes, U.BadgeCount
+ORDER BY 
+    U.TotalScore DESC;

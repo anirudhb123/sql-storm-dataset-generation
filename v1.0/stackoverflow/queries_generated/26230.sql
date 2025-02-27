@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        SUBSTRING(p.Body FROM 1 FOR 100) || '...' AS ShortenedBody,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentsCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id
+), 
+UsersWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    rp.PostId,
+    rp.Title,
+    rp.ShortenedBody,
+    rp.CreationDate,
+    rp.CommentsCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    uwb.BadgeCount
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+JOIN 
+    UsersWithBadges uwb ON u.Id = uwb.UserId
+WHERE 
+    rp.PostRank = 1  -- Select most recent post per user
+ORDER BY 
+    uwb.BadgeCount DESC,
+    rp.CreationDate DESC
+LIMIT 50;

@@ -1,0 +1,65 @@
+
+WITH RankedPromotions AS (
+    SELECT 
+        p.p_promo_id,
+        p.p_promo_name,
+        COUNT(ws.ws_order_number) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY p.p_promo_id ORDER BY COUNT(ws.ws_order_number) DESC) AS promo_rank
+    FROM 
+        promotion p
+    LEFT JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_id, p.p_promo_name
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        FLOOR(cd.cd_purchase_estimate / 1000) AS income_band
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+SalesWithWindow AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales_price,
+        COUNT(ws.ws_order_number) AS total_orders,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+    SUM(COALESCE(ws.ws_sales_price, 0)) AS total_web_sales,
+    COALESCE(RP.promo_rank, 0) AS promo_rank,
+    CASE 
+        WHEN COUNT(DISTINCT c.c_customer_sk) > 100 THEN 'High'
+        WHEN COUNT(DISTINCT c.c_customer_sk) BETWEEN 50 AND 100 THEN 'Medium'
+        ELSE 'Low' 
+    END AS customer_segment
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    RankedPromotions RP ON ws.ws_promo_sk = RP.p_promo_id
+GROUP BY 
+    ca.ca_city, ca.ca_state, RP.promo_rank
+HAVING 
+    total_web_sales > (SELECT AVG(total_sales_price) 
+                        FROM SalesWithWindow 
+                        WHERE sales_rank = 1) 
+    OR COUNT(DISTINCT c.c_customer_sk) IS NULL
+ORDER BY 
+    total_web_sales DESC, ca.ca_city ASC;

@@ -1,0 +1,92 @@
+WITH RankedMovies AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COALESCE(mci.note, 'Unknown') DESC, mt.title) AS rank,
+        COUNT(*) OVER (PARTITION BY mt.production_year) AS total_movies
+    FROM
+        aka_title mt
+    LEFT JOIN
+        movie_info mi ON mt.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating' LIMIT 1)
+    LEFT JOIN
+        movie_companies mco ON mt.id = mco.movie_id
+    LEFT JOIN
+        company_name c ON mco.company_id = c.id
+    LEFT JOIN
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN
+        aka_name an ON cc.subject_id = an.person_id
+    LEFT JOIN
+        role_type rt ON cc.role_id = rt.id
+    LEFT JOIN
+        cast_info ci ON cc.movie_id = ci.movie_id AND cc.subject_id = ci.person_id
+    LEFT JOIN
+        comp_cast_type cct ON ci.person_role_id = cct.id
+    WHERE
+        mt.production_year IS NOT NULL
+        AND c.country_code IS NULL
+        AND (ci.note LIKE '%main%' OR ci.note IS NULL)
+),
+MovieStats AS (
+    SELECT
+        movie_id,
+        title,
+        production_year,
+        rank,
+        total_movies,
+        CASE 
+            WHEN rank <= 3 THEN 'Top 3'
+            WHEN rank IS NULL THEN 'Unknown'
+            ELSE 'Other'
+        END AS category
+    FROM
+        RankedMovies
+),
+FinalStats AS (
+    SELECT
+        ms.movie_id,
+        ms.title,
+        ms.production_year,
+        ms.rank,
+        ms.total_movies,
+        ms.category,
+        COUNT(DISTINCT an.id) AS actor_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        MovieStats ms
+    LEFT JOIN
+        complete_cast cc ON ms.movie_id = cc.movie_id
+    LEFT JOIN
+        aka_name an ON cc.subject_id = an.person_id
+    LEFT JOIN
+        movie_keyword mk ON ms.movie_id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        ms.movie_id, ms.title, ms.production_year, ms.rank, ms.total_movies, ms.category
+)
+SELECT
+    fs.movie_id,
+    fs.title,
+    fs.production_year,
+    fs.rank,
+    fs.total_movies,
+    fs.category,
+    COALESCE(fs.actor_count, 0) AS actor_count,
+    CASE 
+        WHEN fs.keywords IS NULL THEN 'No keywords'
+        ELSE fs.keywords
+    END AS keywords
+FROM
+    FinalStats fs
+WHERE
+    fs.production_year >= 2000
+ORDER BY
+    fs.production_year DESC,
+    fs.rank ASC,
+    fs.title;

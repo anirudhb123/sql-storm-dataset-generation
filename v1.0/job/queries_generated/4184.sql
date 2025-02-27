@@ -1,0 +1,54 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.name AS ActorName,
+        t.title AS MovieTitle,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS Rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        MovieTitle,
+        production_year,
+        COUNT(ActorName) AS ActorCount
+    FROM 
+        RankedTitles
+    WHERE 
+        Rank <= 5
+    GROUP BY 
+        MovieTitle, production_year
+    HAVING 
+        COUNT(ActorName) > 2
+)
+SELECT 
+    fm.MovieTitle,
+    fm.production_year,
+    fm.ActorCount,
+    COALESCE(k.keyword, 'No Keyword') AS MovieKeyword
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_keyword mk ON fm.MovieTitle = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    fm.ActorCount > 3 
+ORDER BY 
+    fm.production_year DESC, 
+    fm.ActorCount DESC
+LIMIT 10;
+
+-- Subquery to gather additional info
+SELECT 
+    mi.info
+FROM 
+    movie_info mi
+WHERE 
+    mi.movie_id IN (SELECT movie_id FROM aka_title WHERE title ILIKE '%Avengers%');

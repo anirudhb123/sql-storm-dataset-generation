@@ -1,0 +1,65 @@
+
+WITH RECURSIVE revenue_summary AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_net_paid) AS total_revenue,
+        COUNT(DISTINCT ss_ticket_number) AS total_sales,
+        RANK() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_net_paid) DESC) AS revenue_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk IN (
+            SELECT d_date_sk 
+            FROM date_dim 
+            WHERE d_year = 2023
+        )
+    GROUP BY 
+        s_store_sk
+),
+customer_return_analysis AS (
+    SELECT 
+        sr_store_sk,
+        COUNT(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount,
+        SUM(sr_return_quantity * sr_return_amt) AS return_value
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk IN (
+            SELECT d_date_sk 
+            FROM date_dim 
+            WHERE d_year = 2023
+        )
+    GROUP BY 
+        sr_store_sk
+),
+combined_data AS (
+    SELECT 
+        r.s_store_sk,
+        r.total_revenue,
+        r.total_sales,
+        COALESCE(c.total_returns, 0) AS total_returns,
+        COALESCE(c.total_return_amount, 0) AS total_return_amount,
+        CASE 
+            WHEN r.total_sales = 0 THEN 0 
+            ELSE (COALESCE(c.total_return_amount, 0) / r.total_revenue) * 100 
+        END AS return_percentage
+    FROM 
+        revenue_summary r
+    LEFT JOIN 
+        customer_return_analysis c ON r.s_store_sk = c.sr_store_sk
+)
+SELECT 
+    cd.*, 
+    COALESCE(cd.total_sales, 0) AS sales_count,
+    CASE
+        WHEN cd.return_percentage > 20 THEN 'High Return Rate'
+        ELSE 'Normal Return Rate'
+    END AS return_rate_status
+FROM 
+    combined_data cd
+WHERE 
+    cd.total_revenue > 100000
+ORDER BY 
+    cd.total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

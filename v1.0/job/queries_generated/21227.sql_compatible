@@ -1,0 +1,95 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        DENSE_RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_within_year
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.title, t.production_year
+),
+ActorDetails AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COALESCE(NULLIF(ci.note, ''), 'No Note') AS note,
+        COUNT(DISTINCT ca.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT CONCAT(ak.name, ' ', ak.production_year), '; ') AS movies
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN 
+        aka_title ak ON ci.movie_id = ak.id
+    LEFT JOIN 
+        RankedMovies rm ON ak.title = rm.title AND ak.production_year = rm.production_year
+    WHERE 
+        rm.actor_count > 1 
+    GROUP BY 
+        a.id, a.name, ci.note
+),
+MovieAwards AS (
+    SELECT 
+        m.title,
+        COUNT(*) FILTER (WHERE i.info_type_id IN (SELECT id FROM info_type WHERE info = 'Oscar')) AS oscar_count,
+        COUNT(*) AS total_info
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info i ON m.id = i.movie_id
+    GROUP BY 
+        m.title
+),
+RelevantTitles AS (
+    SELECT 
+        DISTINCT title,
+        production_year
+    FROM 
+        aka_title
+    WHERE 
+        production_year >= 2000
+        AND LOWER(title) LIKE '%love%' 
+),
+FinalResults AS (
+    SELECT 
+        ad.actor_id,
+        ad.name,
+        ad.note,
+        ad.total_movies,
+        ad.movies,
+        ma.title AS award_movie,
+        ma.oscar_count
+    FROM 
+        ActorDetails ad
+    LEFT JOIN 
+        MovieAwards ma ON ad.movies LIKE '%' || ma.title || '%'
+    WHERE 
+        ad.total_movies > 5
+)
+SELECT 
+    fr.actor_id,
+    fr.name,
+    COALESCE(fr.note, 'No additional info') AS actor_note,
+    fr.total_movies,
+    fr.movies,
+    fr.award_movie,
+    CASE  
+        WHEN fr.oscar_count IS NULL THEN 'No Awards'
+        ELSE CONCAT(fr.oscar_count, ' Oscars')
+    END AS award_info
+FROM 
+    FinalResults fr
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM RelevantTitles rt 
+        WHERE 
+            rt.title = ANY(STRING_TO_ARRAY(fr.movies, '; '))
+    )
+ORDER BY 
+    fr.total_movies DESC,
+    fr.award_movie ASC;

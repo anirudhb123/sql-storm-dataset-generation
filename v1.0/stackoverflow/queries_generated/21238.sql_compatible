@@ -1,0 +1,90 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(v.Id) AS TotalVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostRankings AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (ORDER BY COUNT(c.Id) DESC) AS PopularityRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(DAY, -30, CAST('2024-10-01' AS DATE))
+    GROUP BY 
+        p.Id, p.Title
+),
+MergedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS PostHistoryTypes,
+        MAX(ph.CreationDate) AS LastActivity
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate > '2023-01-01' 
+    GROUP BY 
+        ph.PostId
+),
+TopPosts AS (
+    SELECT 
+        pr.Id AS PostId,
+        pr.Title,
+        pr.CommentCount,
+        pr.PopularityRank,
+        COALESCE(mph.PostHistoryTypes, 'No Activity') AS PostHistoryDetails
+    FROM 
+        PostRankings pr
+    LEFT JOIN 
+        MergedPostHistory mph ON pr.Id = mph.PostId
+    WHERE 
+        pr.PopularityRank <= 10
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.CreationDate,
+    u.LastAccessDate,
+    COALESCE(vs.Upvotes, 0) AS TotalUpvotes,
+    COALESCE(vs.Downvotes, 0) AS TotalDownvotes,
+    tp.PostId,
+    tp.Title AS TopPostTitle,
+    tp.CommentCount AS TopPostComments,
+    tp.PopularityRank,
+    tp.PostHistoryDetails,
+    CASE 
+        WHEN vs.TotalVotes = 0 THEN NULL
+        ELSE ROUND((COALESCE(vs.Upvotes, 0) / NULLIF(vs.TotalVotes, 0)::float) * 100, 2)
+    END AS UpvotePercentage
+FROM 
+    Users u
+LEFT JOIN 
+    UserVoteStats vs ON u.Id = vs.UserId
+LEFT JOIN 
+    TopPosts tp ON u.Id = tp.PostId
+WHERE 
+    u.Reputation > 1000 
+ORDER BY 
+    UpvotePercentage DESC NULLS LAST, 
+    u.Reputation DESC, 
+    tp.PopularityRank;

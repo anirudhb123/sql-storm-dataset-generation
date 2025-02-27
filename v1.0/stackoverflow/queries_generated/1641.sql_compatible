@@ -1,0 +1,78 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViews,
+        DENSE_RANK() OVER (ORDER BY SUM(p.Score) DESC) AS ScoreRank
+    FROM 
+        Users u
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+ClosedPosts AS (
+    SELECT 
+        h.PostId,
+        h.UserDisplayName,
+        h.CreationDate,
+        ct.Name AS CloseReason
+    FROM 
+        PostHistory h
+        JOIN CloseReasonTypes ct ON CAST(h.Comment AS INT) = ct.Id
+    WHERE 
+        h.PostHistoryTypeId = 10
+), 
+PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(c.TotalClosed, 0) AS TotalClosed,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        CASE 
+            WHEN COALESCE(c.TotalClosed, 0) > 0 THEN 'Closed'
+            ELSE 'Active'
+        END AS PostStatus
+    FROM 
+        Posts p
+        LEFT JOIN (
+            SELECT 
+                PostId, 
+                COUNT(*) AS TotalClosed 
+            FROM 
+                ClosedPosts 
+            GROUP BY 
+                PostId
+        ) c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, c.TotalClosed
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    up.TotalPosts,
+    up.TotalQuestions,
+    up.TotalAnswers,
+    up.TotalScore,
+    up.AvgViews,
+    pa.PostId,
+    pa.Title,
+    pa.ViewCount,
+    pa.TotalClosed,
+    pa.TotalBounty,
+    pa.PostStatus
+FROM 
+    UserPostStats up
+    JOIN Users u ON up.UserId = u.Id
+    JOIN PostAnalytics pa ON u.Id = pa.PostId
+WHERE 
+    up.ScoreRank <= 10
+ORDER BY 
+    up.TotalScore DESC, pa.ViewCount DESC
+LIMIT 100;

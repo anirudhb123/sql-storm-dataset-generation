@@ -1,0 +1,56 @@
+
+WITH TagsArray AS (
+    SELECT 
+        Id,
+        UNNEST(SPLIT(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><')) AS Tag
+    FROM Posts
+    WHERE PostTypeId = 1  
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 1  
+    GROUP BY p.Id, p.Title
+),
+TagEngagement AS (
+    SELECT 
+        ta.Id AS TagId,
+        ta.Tag,
+        COUNT(DISTINCT pe.PostId) AS RelatedQuestionCount,
+        SUM(pe.UpVotes) AS TotalUpVotes,
+        SUM(pe.DownVotes) AS TotalDownVotes
+    FROM TagsArray ta
+    JOIN PostEngagement pe ON pe.Title ILIKE '%' || ta.Tag || '%'
+    GROUP BY ta.Id, ta.Tag
+)
+SELECT 
+    te.Tag AS TagName,
+    te.RelatedQuestionCount,
+    te.TotalUpVotes,
+    te.TotalDownVotes,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+FROM TagEngagement te
+JOIN Users u ON u.Id IN (SELECT DISTINCT OwnerUserId FROM Posts WHERE Title ILIKE '%' || te.Tag || '%')
+JOIN UserBadges ub ON u.Id = ub.UserId
+ORDER BY te.TotalUpVotes DESC, te.Tag ASC;

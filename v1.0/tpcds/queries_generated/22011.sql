@@ -1,0 +1,74 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_ext_discount_amt) AS total_discount,
+        MAX(ws_net_profit) AS max_profit,
+        CURRENT_DATE - DATEADD(day, -1 * MIN(DISTINCT d.d_year), CURRENT_DATE) AS days_since_start
+    FROM 
+        web_sales ws 
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws_item_sk
+),
+top_items AS (
+    SELECT 
+        si.i_item_id,
+        ss.total_quantity,
+        ss.total_sales,
+        ss.order_count,
+        ss.total_discount,
+        ss.max_profit,
+        ROW_NUMBER() OVER (PARTITION BY ss.days_since_start ORDER BY ss.total_sales DESC) AS rank
+    FROM 
+        sales_summary ss
+    JOIN 
+        item si ON ss.ws_item_sk = si.i_item_sk
+    WHERE 
+        ss.total_sales IS NOT NULL
+),
+customer_activity AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ws.ws_order_number) AS active_orders,
+        SUM(ws.ws_quantity) AS total_items_purchased,
+        AVG(ws.ws_sales_price) AS avg_item_price
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    ti.i_item_id,
+    ca.c_customer_id,
+    ca.active_orders,
+    ca.total_items_purchased,
+    ca.avg_item_price,
+    ti.total_quantity,
+    ti.total_sales,
+    ti.total_discount,
+    ti.max_profit
+FROM 
+    top_items ti
+FULL OUTER JOIN 
+    customer_activity ca ON ti.rank <= 5
+WHERE 
+    (ca.total_items_purchased IS NOT NULL OR ti.total_sales > 100) 
+    AND NOT EXISTS (
+        SELECT 
+            1 
+        FROM 
+            store_returns sr 
+        WHERE 
+            sr.sr_item_sk = ti.ws_item_sk
+            AND sr.sr_return_quantity > 0
+    )
+ORDER BY 
+    ti.total_sales DESC NULLS LAST, 
+    ca.active_orders DESC;

@@ -1,0 +1,73 @@
+WITH PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Including only Questions
+),
+TaggedPostCounts AS (
+    SELECT 
+        Tag,
+        COUNT(PostId) AS PostCount
+    FROM 
+        PostTags
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        PostCount
+    FROM 
+        TaggedPostCounts
+    WHERE 
+        PostCount > (SELECT AVG(PostCount) FROM TaggedPostCounts)
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS AnswerCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 2 -- Including only Answers
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        Reputation,
+        AnswerCount
+    FROM 
+        UserReputation
+    WHERE 
+        AnswerCount > 0
+    ORDER BY 
+        Reputation DESC
+    LIMIT 5
+)
+SELECT 
+    t.Tag,
+    t.PostCount,
+    u.UserId,
+    u.Reputation,
+    u.AnswerCount
+FROM 
+    TopTags t
+JOIN 
+    PostTags pt ON t.Tag = pt.Tag
+JOIN 
+    Users u ON pt.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+WHERE 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users)
+ORDER BY 
+    t.PostCount DESC, u.Reputation DESC;

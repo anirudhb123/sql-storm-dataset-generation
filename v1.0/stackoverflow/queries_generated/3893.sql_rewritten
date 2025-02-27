@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        SUM(CASE WHEN c.UserId IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+PostClosure as (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.CommentCount,
+    COALESCE(pc.LastCloseDate, 'Never Closed') AS LastCloseDate,
+    CASE 
+        WHEN rp.Rank <= 5 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostRankCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostClosure pc ON rp.PostId = pc.PostId
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

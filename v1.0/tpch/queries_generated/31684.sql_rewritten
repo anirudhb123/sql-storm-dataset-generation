@@ -1,0 +1,56 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 50000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.level * 10000
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, 
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-12-31'
+), PartSupplierStats AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), CustomerSummary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    p.p_name,
+    ps.total_avail_qty,
+    cs.order_count,
+    cs.total_spent,
+    CASE
+        WHEN cs.total_spent IS NULL THEN 'No Orders'
+        WHEN cs.order_count > 10 THEN 'Frequent Buyer'
+        ELSE 'Occasional Buyer'
+    END AS buyer_type,
+    sh.level
+FROM part p
+JOIN PartSupplierStats ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN CustomerSummary cs ON cs.c_custkey IN (
+    SELECT o.o_custkey
+    FROM orders o
+    INNER JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_discount BETWEEN 0.05 AND 0.10
+)
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = (
+    SELECT n.n_nationkey
+    FROM nation n
+    WHERE n.n_name = 'USA'
+)
+WHERE ps.avg_supply_cost > (
+    SELECT AVG(ps2.ps_supplycost)
+    FROM partsupp ps2
+)
+ORDER BY ps.total_avail_qty DESC, p.p_name
+LIMIT 50;

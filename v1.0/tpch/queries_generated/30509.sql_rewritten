@@ -1,0 +1,65 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+),
+OrderSummary AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY o.o_custkey
+),
+CustomerRanked AS (
+    SELECT c.c_custkey, c.c_name, os.total_spent,
+           RANK() OVER (ORDER BY os.total_spent DESC) AS rank
+    FROM customer c
+    LEFT JOIN OrderSummary os ON c.c_custkey = os.o_custkey
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, COUNT(ps.ps_partkey) AS part_count, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+FinalReport AS (
+    SELECT c.c_name, sr.hierarchy_level, cr.total_spent, ss.part_count, ss.total_supply_cost
+    FROM CustomerRanked cr
+    LEFT JOIN SupplierHierarchy sr ON sr.s_nationkey = (SELECT n.n_nationkey 
+                                                         FROM nation n 
+                                                         WHERE n.n_name = 
+                                                                (SELECT c.c_name 
+                                                                 FROM customer c 
+                                                                 WHERE c.c_custkey = cr.c_custkey
+                                                                )
+                                                        )
+    LEFT JOIN SupplierStats ss ON ss.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT DISTINCT l.l_partkey 
+            FROM lineitem l 
+            WHERE l.l_orderkey IN (
+                SELECT o.o_orderkey 
+                FROM orders o 
+                WHERE o.o_custkey = cr.c_custkey
+            )
+        )
+        LIMIT 1
+    )
+)
+
+SELECT DISTINCT fr.c_name, 
+       COALESCE(fr.hierarchy_level, -1) AS hierarchy_level, 
+       COALESCE(fr.total_spent, 0) AS total_spent, 
+       COALESCE(fr.part_count, 0) AS part_count, 
+       COALESCE(fr.total_supply_cost, 0) AS total_supply_cost
+FROM FinalReport fr
+ORDER BY fr.total_spent DESC, fr.c_name;

@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2  
+    LEFT JOIN 
+        Tags t ON POSITION(t.TagName IN p.Tags) > 0  
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.VoteCount,
+        rp.TagList
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.UserPostRank <= 5  
+),
+PostDetails AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.Body,
+        fp.CreationDate,
+        fp.ViewCount,
+        fp.CommentCount,
+        fp.VoteCount,
+        fp.TagList,
+        u.DisplayName AS Author,
+        u.Reputation AS AuthorReputation
+    FROM 
+        FilteredPosts fp
+    JOIN 
+        Users u ON fp.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+)
+SELECT 
+    pd.Title,
+    pd.Body,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.CommentCount,
+    pd.VoteCount,
+    pd.TagList,
+    pd.Author,
+    pd.AuthorReputation,
+    (SELECT AVG(Reputation) FROM Users) AS AverageReputation,
+    (SELECT COUNT(*) FROM Posts WHERE CreationDate >= DATEADD(year, -1, GETDATE())) AS PostsLastYear
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.VoteCount DESC, pd.ViewCount DESC;

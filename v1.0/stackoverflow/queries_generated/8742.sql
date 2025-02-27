@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Owner,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year' 
+        AND p.ViewCount > 100
+),
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId, 
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Date > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        b.UserId
+),
+TopContributors AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadgeCounts ub ON u.Id = ub.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, ub.BadgeCount
+    HAVING 
+        SUM(p.Score) IS NOT NULL AND SUM(p.Score) > 0
+)
+SELECT 
+    rp.PostId, 
+    rp.Title,
+    rp.CreationDate,
+    rp.Owner,
+    rp.Score,
+    rp.ViewCount,
+    tc.DisplayName AS TopContributor,
+    tc.TotalScore,
+    tc.BadgeCount
+FROM 
+    RankedPosts rp
+JOIN 
+    TopContributors tc ON rp.Owner = tc.DisplayName
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.PostTypeId, rp.Rank;

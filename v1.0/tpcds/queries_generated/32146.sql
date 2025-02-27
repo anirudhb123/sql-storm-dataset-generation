@@ -1,0 +1,55 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        MIN(ws_sold_date_sk) AS first_sale_date,
+        MAX(ws_sold_date_sk) AS last_sale_date,
+        DATEDIFF(MAX(ws_sold_date_sk), MIN(ws_sold_date_sk)) AS sales_duration
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+top_sales AS (
+    SELECT 
+        ss_item_sk,
+        SUM(ss_quantity) AS total_store_quantity,
+        SUM(ss_sales_price) AS total_store_sales
+    FROM store_sales
+    GROUP BY ss_item_sk
+),
+combined_sales AS (
+    SELECT 
+        s.ws_item_sk,
+        COALESCE(ss.total_quantity, 0) AS web_quantity,
+        COALESCE(ss.total_sales, 0) AS web_sales,
+        COALESCE(ts.total_store_quantity, 0) AS store_quantity,
+        COALESCE(ts.total_store_sales, 0) AS store_sales,
+        s.first_sale_date,
+        s.last_sale_date,
+        s.sales_duration
+    FROM sales_summary s
+    LEFT JOIN top_sales ts ON s.ws_item_sk = ts.ss_item_sk
+),
+final_report AS (
+    SELECT 
+        c.c_customer_id,
+        ca.ca_city,
+        COALESCE(cs.web_sales + cs.store_sales, 0) as total_sales_value,
+        DENSE_RANK() OVER (PARTITION BY ca.ca_city ORDER BY total_sales_value DESC) as sales_rank
+    FROM combined_sales cs
+    JOIN customer c ON c.c_customer_sk IN (
+        SELECT ws_bill_customer_sk
+        FROM web_sales 
+        WHERE ws_item_sk = cs.ws_item_sk
+    )
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    city, 
+    SUM(total_sales_value) AS city_sales_total,
+    AVG(sales_rank) AS average_sales_rank
+FROM final_report
+GROUP BY city
+HAVING AVG(sales_rank) < 3
+ORDER BY city_sales_total DESC;

@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(NULLIF(cast_info.nr_order, 0), 999) AS cast_order,
+        CASE 
+            WHEN c.role_id IS NOT NULL THEN rt.role 
+            ELSE 'UNKNOWN' 
+        END AS role_description
+    FROM
+        aka_title mt
+    LEFT JOIN 
+        cast_info ON mt.id = cast_info.movie_id
+    LEFT JOIN 
+        role_type rt ON cast_info.role_id = rt.id
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.cast_order,
+        mh.role_description
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    WHERE 
+        ml.link_type_id = 1  -- Assuming '1' is a valid link type indicating sequels
+),
+AggregatedMovieStats AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        COUNT(DISTINCT ci.person_id) AS total_cast_count,
+        STRING_AGG(DISTINCT aka.name, ', ') AS known_aliases,
+        MAX(mk.keyword) AS featured_keyword
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name aka ON ci.person_id = aka.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title
+),
+RankedMovies AS (
+    SELECT 
+        ams.*, 
+        RANK() OVER (ORDER BY total_cast_count DESC) AS cast_rank,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY total_cast_count DESC) AS yearly_rank
+    FROM 
+        AggregatedMovieStats ams
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.total_cast_count,
+    rm.known_aliases,
+    rm.cast_rank,
+    rm.yearly_rank,
+    CASE 
+        WHEN rm.cast_rank <= 5 THEN 'Top Cast'
+        WHEN rm.yearly_rank <= 3 THEN 'Top Yearly'
+        ELSE 'Average'
+    END AS performance_category
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.production_year = (SELECT MAX(production_year) FROM title)
+ORDER BY 
+    rm.cast_rank;

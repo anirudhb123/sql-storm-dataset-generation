@@ -1,0 +1,48 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COUNT(a.Id) AS AnswerCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND p.PostTypeId = 1 
+    JOIN 
+        Tags t ON t.Id IN (SELECT value FROM UNNEST(string_to_array(p.Tags, '<>')) AS value) 
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= DATE '2024-10-01' - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.AnswerCount,
+    rp.Tags,
+    ur.Reputation,
+    ur.UserRank
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+WHERE 
+    rp.AnswerCount > 5 
+ORDER BY 
+    rp.AnswerCount DESC, 
+    ur.Reputation DESC
+LIMIT 10;

@@ -1,0 +1,86 @@
+WITH ranked_movies AS (
+    SELECT
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank,
+        COUNT(DISTINCT c.id) OVER (PARTITION BY at.id) AS total_cast
+    FROM 
+        aka_title at 
+    JOIN 
+        movie_companies mc ON at.id = mc.movie_id
+    LEFT JOIN 
+        cast_info c ON at.id = c.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+        AND at.title IS NOT NULL
+        AND at.title <> ' ' -- Avoid empty titles
+),
+
+movies_with_keywords AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        k.keyword
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword IS NOT NULL -- Exclude NULL keywords
+),
+
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name) AS companies
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+
+cast_summary AS (
+    SELECT 
+        rm.movie_id,
+        SUM(c.nr_order) AS total_roles,
+        COUNT(DISTINCT c.person_id) AS unique_actors
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        cast_info c ON rm.movie_id = c.movie_id
+    GROUP BY 
+        rm.movie_id
+)
+
+SELECT 
+    mwk.movie_id,
+    mwk.title,
+    mwk.production_year,
+    mwk.keyword,
+    cd.companies,
+    cs.total_roles,
+    cs.unique_actors,
+    CASE 
+        WHEN cs.total_roles IS NULL THEN 'No Roles'
+        WHEN cs.unique_actors = 0 THEN 'No Unique Actors'
+        ELSE 'Has Roles'
+    END AS role_info
+FROM 
+    movies_with_keywords mwk
+LEFT JOIN 
+    company_details cd ON mwk.movie_id = cd.movie_id
+LEFT JOIN 
+    cast_summary cs ON mwk.movie_id = cs.movie_id
+WHERE 
+    mwk.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    mwk.production_year DESC, 
+    mwk.title ASC
+LIMIT 50;
+

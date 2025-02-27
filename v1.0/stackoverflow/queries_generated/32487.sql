@@ -1,0 +1,83 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(NULLIF(p.AcceptedAnswerId, -1), 0) AS AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Selecting only questions
+    UNION ALL
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.Score,
+        COALESCE(NULLIF(a.AcceptedAnswerId, -1), 0) AS AcceptedAnswerId,
+        rc.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursiveCTE rc ON a.ParentId = rc.PostId
+    WHERE 
+        a.PostTypeId = 2  -- Selecting only answers
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  -- BountyStart votes
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,  -- Total edits for each post
+        MAX(ph.CreationDate) AS LastEdited
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  -- Edits only
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    um.UserId,
+    um.DisplayName,
+    um.Reputation,
+    um.TotalPosts,
+    um.TotalAnswers,
+    um.TotalQuestions,
+    um.TotalBounty,
+    COALESCE(ps.EditCount, 0) AS EditCount,
+    COALESCE(ps.LastEdited, 'No edits') AS LastEdited,
+    rc.PostId AS RelatedAnswerId,
+    rc.Title AS RelatedAnswerTitle,
+    rc.Score AS RelatedAnswerScore
+FROM 
+    UserMetrics um
+LEFT JOIN 
+    PostHistorySummary ps ON um.UserId IN (
+        SELECT DISTINCT OwnerUserId 
+        FROM Posts
+        WHERE Id IN (SELECT DISTINCT PostId FROM RecursiveCTE)
+    )
+LEFT JOIN 
+    RecursiveCTE rc ON rc.AcceptedAnswerId = ps.PostId
+WHERE 
+    um.Reputation > 1000  -- Users with reputation greater than 1000
+ORDER BY 
+    um.Reputation DESC, 
+    um.TotalPosts DESC;

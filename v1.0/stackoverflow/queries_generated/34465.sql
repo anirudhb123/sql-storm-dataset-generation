@@ -1,0 +1,63 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only consider questions
+    
+    UNION ALL
+    
+    SELECT 
+        a.Id,
+        a.Title,
+        a.Body,
+        a.CreationDate,
+        a.OwnerUserId,
+        a.Score,
+        a.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts q ON a.ParentId = q.Id 
+    WHERE 
+        q.PostTypeId = 1  -- Join back to the questions
+)
+
+SELECT 
+    r.PostId,
+    r.Title AS QuestionTitle,
+    r.Body AS QuestionBody,
+    r.CreationDate AS QuestionCreationDate,
+    u.DisplayName AS QuestionOwner,
+    COALESCE(a.Title, 'No accepted answer') AS AcceptedAnswerTitle,
+    r.Level AS AnswerLevel,
+    COUNT(c.Id) AS CommentCount,
+    SUM(v.BountyAmount) AS TotalBounties
+FROM 
+    RecursiveCTE r
+LEFT JOIN 
+    Posts a ON r.AcceptedAnswerId = a.Id
+LEFT JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON r.PostId = c.PostId
+LEFT JOIN 
+    Votes v ON r.PostId = v.PostId AND v.VoteTypeId = 8  -- BountyStart
+WHERE 
+    r.Score >= 0  -- Only consider posts with a non-negative score
+GROUP BY 
+    r.PostId, r.Title, r.Body, r.CreationDate, u.DisplayName, a.Title, r.Level
+HAVING 
+    COUNT(c.Id) > 1  -- Only include questions with more than one comment
+ORDER BY 
+    r.CreationDate DESC, 
+    r.Score DESC;

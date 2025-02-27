@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Views,
+        p.Score,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.Views DESC) AS RankByViews
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate >= NOW() - INTERVAL '1 year' -- Posts from the last year
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate,
+        Views, 
+        Score,
+        OwnerDisplayName
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByViews <= 10 -- Top 10 posts per tag
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostWithVoteCounts AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.Views,
+        tp.Score,
+        tp.OwnerDisplayName,
+        COALESCE(pvc.UpVotes, 0) AS UpVotes,
+        COALESCE(pvc.DownVotes, 0) AS DownVotes
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostVoteCounts pvc ON tp.PostId = pvc.PostId
+),
+CommentCounts AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS NumberOfComments
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+)
+SELECT 
+    pwvc.PostId,
+    pwvc.Title,
+    pwvc.CreationDate,
+    pwvc.Views,
+    pwvc.Score,
+    pwvc.OwnerDisplayName,
+    pwvc.UpVotes,
+    pwvc.DownVotes,
+    COALESCE(cc.NumberOfComments, 0) AS NumberOfComments
+FROM 
+    PostWithVoteCounts pwvc
+LEFT JOIN 
+    CommentCounts cc ON pwvc.PostId = cc.PostId
+ORDER BY 
+    pwvc.Views DESC, 
+    pwvc.Score DESC;

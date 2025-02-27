@@ -1,0 +1,88 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        1 AS Level 
+    FROM 
+        Posts 
+    WHERE 
+        PostTypeId = 2 
+    UNION ALL
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        ph.Level + 1 
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.Id
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN voteType.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN voteType.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentsCount,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionsAsked,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswersPosted
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes voteType ON u.Id = voteType.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.Body,
+    u.DisplayName AS Owner,
+    ue.UpVotesCount,
+    ue.DownVotesCount,
+    ue.CommentsCount,
+    COUNT(DISTINCT ph.UserId) AS UniquePostHistoryUsers,
+    COUNT(DISTINCT rph.UserId) AS RecentUsersEngaged,
+    ARRAY_AGG(DISTINCT rph.Comment) FILTER (WHERE rph.rn = 1) AS RecentChanges,
+    CASE 
+        WHEN p.AcceptedAnswerId IS NOT NULL THEN 
+            (SELECT Title FROM Posts WHERE Id = p.AcceptedAnswerId)
+        ELSE 
+            NULL
+    END AS AcceptedAnswerTitle,
+    ph.Level AS HierarchyLevel
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserEngagement ue ON u.Id = ue.UserId
+LEFT JOIN 
+    PostHierarchy ph ON ph.Id = p.Id
+LEFT JOIN 
+    RecentPostHistory rph ON p.Id = rph.PostId 
+GROUP BY 
+    p.Id, p.Title, p.Body, u.DisplayName, ue.UpVotesCount, ue.DownVotesCount, ue.CommentsCount, p.AcceptedAnswerId, ph.Level
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

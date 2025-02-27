@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes,
+        COALESCE(zh.LatestEditDate, p.LastEditDate) AS LatestEditDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS EditVersion,
+        pt.Name AS PostType
+    FROM
+        Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT
+            PostId,
+            MAX(CreationDate) AS LatestEditDate
+        FROM
+            PostHistory
+        WHERE
+            PostHistoryTypeId IN (4, 5, 6) -- Title, Body, Tags editions
+        GROUP BY
+            PostId
+    ) zh ON p.Id = zh.PostId
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+),
+FilteredPosts AS (
+    SELECT
+        rp.*,
+        CASE
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN (SELECT Title FROM Posts WHERE Id = p.AcceptedAnswerId)
+            ELSE 'No Accepted Answer'
+        END AS AcceptedAnswerTitle
+    FROM
+        RankedPosts rp
+    LEFT JOIN Posts p ON rp.PostId = p.Id
+    WHERE
+        rp.UpVotes > rp.DownVotes AND
+        rp.PostType = 'Question' AND
+        p.OwnerUserId IS NOT NULL
+)
+SELECT
+    fp.PostId,
+    fp.Title,
+    TO_CHAR(fp.CreationDate, 'YYYY-MM-DD HH24:MI:SS') AS CreationDate,
+    fp.Score,
+    fp.UpVotes,
+    fp.DownVotes,
+    fp.AcceptedAnswerTitle,
+    CASE WHEN fp.EditVersion = 1 THEN 'Never Edited' ELSE 'Edited ' || (fp.EditVersion - 1) || ' times' END AS EditDescription,
+    CASE
+        WHEN p.ClosedDate IS NOT NULL THEN 'Closed on ' || TO_CHAR(p.ClosedDate, 'YYYY-MM-DD HH24:MI:SS')
+        ELSE 'Open'
+    END AS Status
+FROM
+    FilteredPosts fp
+LEFT JOIN Posts p ON fp.PostId = p.Id
+WHERE
+    (UPPER(fp.Title) LIKE '%ERROR%' OR UPPER(fp.Title) LIKE '%BUG%')
+    AND fp.OwnerUserId IN (
+        SELECT UserId FROM Badges b
+        WHERE b.Class = 1 -- Gold badges
+        GROUP BY UserId HAVING COUNT(*) > 1
+    )
+ORDER BY
+    fp.Score DESC, 
+    fp.CreationDate DESC
+FETCH FIRST 10 ROWS ONLY;

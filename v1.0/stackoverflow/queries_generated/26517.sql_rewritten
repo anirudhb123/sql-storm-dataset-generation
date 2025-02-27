@@ -1,0 +1,48 @@
+WITH RecursiveTagCounts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Tags AS TagList,
+        array_length(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'), 1) AS TagCount,
+        p.Title,
+        p.CreationDate
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT
+        p.Id,
+        p.Tags,
+        rc.TagCount + array_length(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'), 1),
+        p.Title,
+        p.CreationDate
+    FROM
+        Posts p
+    JOIN
+        RecursiveTagCounts rc ON rc.PostId = p.Id
+    WHERE
+        p.PostTypeId = 1
+)
+SELECT
+    u.DisplayName AS UserName,
+    COUNT(b.Id) AS BadgeCount,
+    SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews,
+    AVG(r.TagCount) AS AvgTagsPerPost,
+    MIN(p.CreationDate) AS FirstPostDate,
+    MAX(p.CreationDate) AS LastPostDate
+FROM
+    Users u
+JOIN
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN
+    Badges b ON u.Id = b.UserId
+JOIN
+    RecursiveTagCounts r ON p.Id = r.PostId
+WHERE
+    u.Reputation > 1000  
+GROUP BY
+    u.DisplayName
+ORDER BY
+    AvgTagsPerPost DESC, TotalViews DESC;

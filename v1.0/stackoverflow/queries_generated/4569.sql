@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+HighScoringPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.CommentCount,
+        CASE 
+            WHEN rp.Score >= 100 THEN 'High'
+            WHEN rp.Score >= 50 THEN 'Medium'
+            ELSE 'Low'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Score IS NOT NULL
+        AND rp.rn = 1
+),
+PostDetails AS (
+    SELECT 
+        hsp.*,
+        u.DisplayName AS OwnerDisplayName,
+        b.Name AS BadgeName,
+        ph.CreationDate AS LastModificationDate,
+        ph.Comment AS EditComment
+    FROM 
+        HighScoringPosts hsp
+    JOIN 
+        Users u ON u.Id = hsp.OwnerUserId
+    LEFT JOIN 
+        Badges b ON b.UserId = hsp.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = hsp.Id
+        AND ph.CreationDate = (SELECT MAX(CreationDate) FROM PostHistory WHERE PostId = hsp.Id)
+),
+FinalResults AS (
+    SELECT 
+        pd.*,
+        COALESCE(pht.Name, 'No History') AS LastPostHistoryType
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        PostHistoryTypes pht ON pht.Id = pd.PostHistoryTypeId
+)
+
+SELECT 
+    Title,
+    ViewCount,
+    Score,
+    UpVotes,
+    DownVotes,
+    CommentCount,
+    OwnerDisplayName,
+    BadgeName,
+    LastModificationDate,
+    LastPostHistoryType,
+    CONVERT(VARCHAR, CreationDate, 120) AS FormattedCreationDate
+FROM 
+    FinalResults
+WHERE 
+    ScoreCategory = 'High'
+ORDER BY 
+    Score DESC, ViewCount DESC;

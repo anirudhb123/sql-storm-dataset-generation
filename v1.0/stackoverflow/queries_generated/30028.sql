@@ -1,0 +1,102 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1 AS Level
+    FROM 
+        Posts p
+    JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserActivePosts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS ActivePostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(p.Score, 0)) OVER (PARTITION BY u.Id) AS AverageScore,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS UserTags
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(p.Tags, '>')) AS TagName) t ON true
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+RecentClosures AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS CloseDate,
+        cr.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+        AND ph.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PostAnalysis AS (
+    SELECT 
+        p.Title,
+        ph.Level,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(results.UserId, 0) AS UserId,
+        COALESCE(results.ActivePostCount, 0) AS ActivePostCount,
+        COALESCE(userPosts.TotalViews, 0) AS TotalViews
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHierarchy ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            UserId, 
+            ActivePostCount 
+         FROM 
+            UserActivePosts 
+         WHERE 
+            ActivePostCount > 5) results ON p.Id = results.PostId
+    LEFT JOIN 
+        UserActivePosts userPosts ON p.OwnerUserId = userPosts.UserId
+    GROUP BY 
+        p.Title, ph.Level, results.UserId, userPosts.TotalViews
+)
+SELECT 
+    pa.Title,
+    pa.Level,
+    pa.CommentCount,
+    COALESCE(rc.CloseDate, 'No Closures') AS RecentClosureDate,
+    COALESCE(rc.CloseReason, 'N/A') AS ClosureReason,
+    ua.UserId,
+    ua.ActivePostCount,
+    pa.TotalViews
+FROM 
+    PostAnalysis pa
+LEFT JOIN 
+    RecentClosures rc ON pa.Title = rc.PostId::text
+LEFT JOIN 
+    UserActivePosts ua ON pa.UserId = ua.UserId
+WHERE 
+    pa.CommentCount > 0
+ORDER BY 
+    pa.Level DESC, 
+    pa.CommentCount DESC;

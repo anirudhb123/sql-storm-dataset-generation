@@ -1,0 +1,49 @@
+WITH TagCounts AS (
+    SELECT
+        TRIM(SUBSTRING(t.TagName FROM '^\s*<([^>]+)>\s*$')) AS TagName,
+        COUNT(p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE t.TagName IS NOT NULL
+    GROUP BY t.TagName
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS BadgeScore,
+        SUM(v.BountyAmount) as TotalBounty
+    FROM Users u
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id
+),
+PostStatistics AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(pc.PostCount, 0) AS RelatedPostCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostNumber
+    FROM Posts p
+    LEFT JOIN TagCounts pc ON p.Tags LIKE '%' || pc.TagName || '%'
+    WHERE p.PostTypeId = 1 -- Only questions
+)
+SELECT
+    us.UserId,
+    us.DisplayName,
+    us.BadgeScore,
+    us.TotalBounty,
+    ps.PostId,
+    ps.Title,
+    ps.ViewCount,
+    ps.Score,
+    ps.RelatedPostCount,
+    ps.RecentPostNumber
+FROM UserReputation us
+JOIN PostStatistics ps ON us.UserId = ps.OwnerUserId
+WHERE us.BadgeScore >= 5 -- Filtering based on cumulative badge score
+  AND ps.RelatedPostCount > 0 -- Ensuring the post has related posts
+ORDER BY us.BadgeScore DESC, ps.Score DESC
+LIMIT 10;

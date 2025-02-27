@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM
+        supplier s
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueParts AS (
+    SELECT
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM
+        partsupp ps
+    GROUP BY
+        ps.ps_partkey
+    HAVING
+        total_supply_cost > 10000
+),
+CustomerOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        o.o_orderstatus,
+        o.o_orderdate
+    FROM
+        orders o
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE
+        o.o_orderdate >= '2023-01-01'
+        AND o.o_orderstatus = 'F'
+)
+SELECT
+    p.p_name,
+    p.p_brand,
+    r.r_name AS region_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count
+FROM
+    part p
+JOIN
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN
+    orders co ON l.l_orderkey = co.o_orderkey
+JOIN
+    RankedSuppliers rs ON rs.rank <= 5
+LEFT JOIN
+    partsupp ps ON ps.ps_partkey = p.p_partkey
+LEFT JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN
+    region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+WHERE
+    p.p_retailprice > 20.00
+GROUP BY
+    p.p_name, p.p_brand, r.r_name, s.s_name
+ORDER BY
+    revenue DESC;

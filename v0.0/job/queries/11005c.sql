@@ -1,0 +1,4 @@
+SELECT min(an.name) AS cool_actor_pseudonym, min(t.title) AS series_named_after_char
+FROM aka_name AS an, cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE an.person_id = n.id AND n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND an.person_id = ci.person_id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND ci.id > 23674441 AND an.name_pcode_cf LIKE '%5%' AND k.phonetic_code < 'T1354' AND ci.nr_order IS NOT NULL AND mk.keyword_id IN (113988, 121587, 50911, 77293, 78918) AND mc.note < '(2008) (USA) (DVD) (Charlie Chan Collection, Vol. 4)';

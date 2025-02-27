@@ -1,0 +1,59 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+PartStats AS (
+    SELECT p.p_partkey, p.p_name, 
+           COALESCE(SUM(ps.ps_availqty), 0) AS total_avail, 
+           COALESCE(SUM(ps.ps_supplycost), 0) AS total_cost,
+           AVG(l.l_extendedprice) OVER(PARTITION BY p.p_partkey) AS avg_price,
+           ROW_NUMBER() OVER(ORDER BY COALESCE(SUM(ps.ps_availqty), 0) DESC) AS rank
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, 
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING COUNT(DISTINCT o.o_orderkey) > 0
+),
+FinalResults AS (
+    SELECT ps.p_partkey, ps.p_name, ps.total_avail, ps.total_cost, ps.avg_price,
+           ps.rank, ts.s_name AS top_supplier, ts.order_count,
+           rh.r_name AS region_name, rh.r_comment
+    FROM PartStats ps
+    LEFT JOIN TopSuppliers ts ON ts.order_count > 10
+    LEFT JOIN nation n ON n.n_nationkey = (
+        SELECT s.n_nationkey 
+        FROM supplier s 
+        WHERE s.s_suppkey = ts.s_suppkey
+    )
+    LEFT JOIN region rh ON n.n_regionkey = rh.r_regionkey
+    WHERE ps.total_avail > 100
+)
+SELECT DISTINCT fr.*, 
+       CASE 
+           WHEN fr.total_cost > 10000 THEN 'High cost' 
+           ELSE 'Low cost' 
+       END AS cost_category
+FROM FinalResults fr
+WHERE fr.avg_price IS NOT NULL
+ORDER BY fr.rank, fr.total_avail DESC
+LIMIT 50;

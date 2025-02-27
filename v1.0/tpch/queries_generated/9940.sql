@@ -1,0 +1,53 @@
+WITH RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY 
+        r.r_name
+), PartSupplier AS (
+    SELECT 
+        p.p_name AS part_name,
+        s.s_name AS supplier_name,
+        ps.ps_supplycost AS supply_cost,
+        ps.ps_availqty AS available_quantity
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+), TopRegions AS (
+    SELECT 
+        region_name,
+        total_sales,
+        DENSE_RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        RegionalSales
+)
+SELECT 
+    t.region_name,
+    t.total_sales,
+    p.part_name,
+    p.supplier_name,
+    p.supply_cost,
+    p.available_quantity
+FROM 
+    TopRegions t
+JOIN 
+    PartSupplier p ON p.available_quantity > 100
+WHERE 
+    t.sales_rank <= 5
+ORDER BY 
+    t.total_sales DESC, p.supply_cost ASC;

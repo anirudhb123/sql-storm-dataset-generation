@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number DESC) AS rn
+    FROM web_sales
+    GROUP BY ws_item_sk
+), customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+), return_info AS (
+    SELECT 
+        wr_returning_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(wr_return_amt) AS total_return_amount,
+        SUM(wr_return_tax) AS total_return_tax
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+), demographic_info AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_demographics cd
+    LEFT JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender
+)
+SELECT
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    COALESCE(cs.total_sales, 0) AS total_sales,
+    COALESCE(cs.order_count, 0) AS order_count,
+    COALESCE(ri.total_returns, 0) AS total_returns,
+    COALESCE(ri.total_return_amount, 0) AS total_return_amount,
+    COALESCE(ri.total_return_tax, 0) AS total_return_tax,
+    di.customer_count AS demographic_customer_count,
+    MAX(sc.total_sales) AS max_sales_from_web,
+    MIN(sc.total_sales) AS min_sales_from_web
+FROM customer_sales cs
+LEFT JOIN return_info ri ON cs.c_customer_sk = ri.wr_returning_customer_sk
+LEFT JOIN demographic_info di ON cs.c_customer_sk = di.cd_demo_sk
+LEFT JOIN sales_cte sc ON cs.c_customer_sk = sc.ws_item_sk
+WHERE cs.total_sales > 1000
+GROUP BY 
+    cs.c_customer_sk, 
+    cs.c_first_name, 
+    cs.c_last_name, 
+    ri.total_returns, 
+    ri.total_return_amount, 
+    ri.total_return_tax, 
+    di.customer_count
+HAVING COUNT(cs.order_count) > 5
+ORDER BY total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

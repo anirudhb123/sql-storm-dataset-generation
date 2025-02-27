@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        1 AS level
+    FROM title mt
+    LEFT JOIN movie_link ml ON mt.id = ml.movie_id
+    WHERE mt.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM MovieHierarchy mh
+    JOIN movie_link ml ON mh.linked_movie_id = ml.movie_id
+    JOIN title mt ON ml.linked_movie_id = mt.id
+    WHERE mt.production_year > 2000
+),
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(mh.linked_movie_id) AS linked_movie_count
+    FROM MovieHierarchy mh
+    GROUP BY mh.movie_id, mh.title, mh.production_year
+    HAVING COUNT(mh.linked_movie_id) > 5
+),
+ActorRoles AS (
+    SELECT 
+        ci.person_id,
+        c.role AS role_name,
+        count(*) AS movie_count,
+        SUM(CASE WHEN mt.production_year >= 2010 THEN 1 ELSE 0 END) AS movies_since_2010
+    FROM cast_info ci
+    JOIN role_type c ON ci.role_id = c.id
+    JOIN aka_title at ON ci.movie_id = at.movie_id
+    JOIN TopMovies tm ON at.movie_id = tm.movie_id
+    GROUP BY ci.person_id, c.role
+),
+RankedActors AS (
+    SELECT 
+        ar.person_id,
+        ar.role_name,
+        ar.movie_count,
+        ar.movies_since_2010,
+        RANK() OVER (PARTITION BY ar.role_name ORDER BY ar.movie_count DESC) AS rank
+    FROM ActorRoles ar
+)
+SELECT 
+    ak.name AS actor_name,
+    ra.role_name,
+    ra.movie_count,
+    ra.movies_since_2010
+FROM RankedActors ra
+JOIN aka_name ak ON ra.person_id = ak.person_id
+WHERE ra.rank <= 3
+ORDER BY ra.role_name, ra.movie_count DESC;

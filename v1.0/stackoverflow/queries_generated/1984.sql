@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerPostRank,
+        COUNT(v.Id) OVER (PARTITION BY p.Id) AS VoteCount,
+        (SELECT COUNT(c.Id) 
+         FROM Comments c 
+         WHERE c.PostId = p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 -- Upvotes
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+
+HighScoringPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.Score,
+        ub.UserId,
+        ub.BadgeCount,
+        ub.BadgeNames
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    WHERE 
+        rp.OwnerPostRank = 1 AND 
+        (ub.BadgeCount > 0 OR rp.VoteCount >= 10)
+)
+
+SELECT 
+    hsp.Title,
+    hsp.Score,
+    hsp.BadgeCount,
+    hsp.BadgeNames,
+    CASE 
+        WHEN hsp.BadgeCount IS NULL THEN 'No badges'
+        ELSE hsp.BadgeNames
+    END AS Badge_Info
+FROM 
+    HighScoringPosts hsp
+ORDER BY 
+    hsp.Score DESC, 
+    hsp.BadgeCount DESC;

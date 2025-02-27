@@ -1,0 +1,59 @@
+WITH PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+), RankedPosts AS (
+    SELECT 
+        pa.*,
+        CASE 
+            WHEN pa.CommentCount > 50 THEN 'High Engagement'
+            WHEN pa.CommentCount BETWEEN 20 AND 50 THEN 'Moderate Engagement'
+            ELSE 'Low Engagement'
+        END AS EngagementLevel
+    FROM 
+        PostAnalytics pa
+    WHERE 
+        EXISTS (SELECT 1 FROM Users u WHERE pa.OwnerUserId = u.Id AND u.Reputation > 1000)
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.CommentCount,
+    rp.BadgeCount,
+    rp.EngagementLevel,
+    pht.Name AS PostHistoryType
+FROM 
+    RankedPosts rp
+FULL OUTER JOIN 
+    PostHistory ph ON rp.PostId = ph.PostId
+LEFT JOIN 
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+WHERE 
+    rp.RowNum <= 5
+    OR rp.RowNum IS NULL -- This condition allows retrieval of posts with no history
+ORDER BY 
+    rp.CreationDate DESC 
+LIMIT 100;

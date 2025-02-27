@@ -1,0 +1,85 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerInfo AS (
+    SELECT 
+        c_customer_sk,
+        CONCAT(c_salutation, ' ', c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_birth_day,
+        cd_birth_month,
+        cd_birth_year
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesDetails AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ws_ship_mode_sk,
+        ws_promo_sk
+    FROM 
+        web_sales
+    UNION ALL
+    SELECT 
+        cs_sold_date_sk,
+        cs_quantity,
+        cs_sales_price,
+        cs_ext_sales_price,
+        cs_ship_mode_sk,
+        cs_promo_sk
+    FROM 
+        catalog_sales
+    UNION ALL
+    SELECT 
+        ss_sold_date_sk,
+        ss_quantity,
+        ss_sales_price,
+        ss_ext_sales_price,
+        ss_ship_mode_sk,
+        ss_promo_sk
+    FROM 
+        store_sales
+)
+SELECT 
+    ci.full_name,
+    ad.full_address,
+    ad.ca_city,
+    ad.ca_state,
+    ad.ca_zip,
+    ad.ca_country,
+    SUM(sd.ws_quantity) AS total_quantity_sold,
+    SUM(sd.ws_ext_sales_price) AS total_sales_amount,
+    COUNT(DISTINCT sd.ws_ship_mode_sk) AS unique_shipping_methods,
+    COUNT(DISTINCT sd.ws_promo_sk) AS unique_promotions,
+    DATE_PART('year', CURRENT_DATE) - MIN(ci.cd_birth_year) AS customer_age
+FROM 
+    CustomerInfo ci
+JOIN 
+    AddressDetails ad ON ci.c_customer_sk = ad.ca_address_sk
+JOIN 
+    SalesDetails sd ON ci.c_customer_sk = sd.ws_bill_customer_sk 
+WHERE 
+    ci.cd_gender = 'F' 
+    AND ci.cd_marital_status = 'M' 
+GROUP BY 
+    ci.full_name, ad.full_address, ad.ca_city, ad.ca_state, ad.ca_zip, ad.ca_country
+ORDER BY 
+    total_sales_amount DESC
+LIMIT 100;

@@ -1,0 +1,71 @@
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.id) AS rn
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+), ActorRoleCTE AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role_name,
+        ci.nr_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+), CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+), YearlyStats AS (
+    SELECT 
+        production_year,
+        COUNT(DISTINCT movie_id) AS total_movies,
+        COUNT(DISTINCT actor_name) AS total_actors,
+        AVG(rn) AS avg_role_order
+    FROM 
+        RecursiveMovieCTE rmt
+    LEFT JOIN 
+        ActorRoleCTE arc ON rmt.movie_id = arc.movie_id
+    GROUP BY 
+        rmt.production_year
+)
+SELECT 
+    ys.production_year,
+    ys.total_movies,
+    ys.total_actors,
+    ys.avg_role_order,
+    ci.company_name,
+    ci.company_type
+FROM 
+    YearlyStats ys
+LEFT JOIN 
+    CompanyInfo ci ON ci.movie_id IN (
+        SELECT 
+            movie_id 
+        FROM 
+            movie_companies 
+        WHERE 
+            movie_id IN (
+                SELECT movie_id 
+                FROM aka_title WHERE production_year = ys.production_year
+            )
+    )
+ORDER BY 
+    ys.production_year DESC, 
+    ys.total_movies DESC;

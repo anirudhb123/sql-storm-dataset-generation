@@ -1,0 +1,90 @@
+WITH TagFrequency AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagFrequency
+    WHERE 
+        PostCount > 0
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    WHERE 
+        u.Reputation >= 1000
+    GROUP BY 
+        u.Id
+),
+
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        Questions,
+        Answers,
+        AvgViews,
+        ROW_NUMBER() OVER (ORDER BY TotalPosts DESC) AS UserRank
+    FROM 
+        UserActivity
+    WHERE 
+        TotalPosts > 0
+),
+
+RecentPostUpdates AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastUpdate,
+        COUNT(ph.Id) AS UpdateCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 10)
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    tt.TagName,
+    tt.PostCount AS TagUsageCount,
+    tu.DisplayName AS TopUserName,
+    tu.TotalPosts AS UserPostCount,
+    tu.AvgViews AS UserAverageViews,
+    rpu.LastUpdate AS RecentPostUpdateDate,
+    rpu.UpdateCount AS TotalPostUpdates
+FROM 
+    TopTags tt
+JOIN 
+    TopUsers tu ON tu.UserRank <= 10
+LEFT JOIN 
+    RecentPostUpdates rpu ON rpu.PostId IN (
+        SELECT p.Id 
+        FROM Posts p 
+        WHERE p.Tags LIKE '%' || tt.TagName || '%'
+    )
+ORDER BY 
+    tt.PostCount DESC, 
+    tu.TotalPosts DESC;

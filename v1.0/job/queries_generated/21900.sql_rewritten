@@ -1,0 +1,58 @@
+WITH Recursive MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+        
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+)
+
+SELECT 
+    COALESCE(actor.name, 'Unknown Actor') AS actor_name,
+    COUNT(DISTINCT DISTINCT cc.movie_id) AS movie_count,
+    MAX(mh.production_year) AS latest_movie_year,
+    ARRAY_AGG(DISTINCT k.keyword) FILTER (WHERE k.keyword IS NOT NULL) AS keywords,
+    AVG(CASE 
+            WHEN ci.nr_order IS NULL THEN 0 
+            ELSE ci.nr_order 
+        END) AS avg_order,
+    ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY COUNT(DISTINCT c.movie_id) DESC) AS actor_rank
+FROM 
+    aka_name a
+LEFT JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN 
+    complete_cast cc ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    MovieHierarchy mh ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = cc.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    a.name IS NOT NULL
+GROUP BY 
+    a.person_id, actor_name
+HAVING 
+    COUNT(DISTINCT cc.movie_id) > 5 
+    AND MAX(mh.production_year) <= EXTRACT(YEAR FROM cast('2024-10-01' as date)) 
+ORDER BY 
+    actor_rank
+FETCH FIRST 10 ROWS ONLY;

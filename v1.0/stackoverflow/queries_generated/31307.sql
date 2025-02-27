@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- We're only interested in Questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.AcceptedAnswerId, p.OwnerUserId
+),
+PostScoreCTE AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        COALESCE(aa.VoteCount, 0) AS AcceptedAnswerVoteCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN (
+        SELECT 
+            p.AcceptedAnswerId,
+            COUNT(v.Id) AS VoteCount
+        FROM 
+            Posts p
+        JOIN Votes v ON p.AcceptedAnswerId = v.PostId AND v.VoteTypeId = 2 -- Upvotes
+        GROUP BY p.AcceptedAnswerId
+    ) aa ON rp.PostId = aa.AcceptedAnswerId
+),
+PostHistoryCTE AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+FinalResults AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.Score,
+        ps.CommentCount,
+        ph.LastEditDate,
+        DATEDIFF(CURRENT_TIMESTAMP, ps.CreationDate) AS DaysSinceCreation,
+        CASE 
+            WHEN ps.AcceptedAnswerVoteCount > 0 THEN 'Has Accepted Answer'
+            ELSE 'No Accepted Answer'
+        END AS AcceptanceStatus
+    FROM 
+        PostScoreCTE ps
+    LEFT JOIN 
+        PostHistoryCTE ph ON ps.PostId = ph.PostId
+)
+SELECT 
+    PostId,
+    Title,
+    Score,
+    CommentCount,
+    LastEditDate,
+    DaysSinceCreation,
+    AcceptanceStatus
+FROM 
+    FinalResults
+WHERE 
+    DaysSinceCreation BETWEEN 30 AND 365 -- Filter for posts created within the last year
+ORDER BY 
+    Score DESC, CommentCount DESC;

@@ -1,0 +1,84 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS depth
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        oh.depth + 1
+    FROM 
+        orders o
+    JOIN 
+        OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+),
+SupplierPart AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+CustomerOrder AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 0 
+        AND o.o_orderdate >= '1997-01-01'
+)
+SELECT 
+    co.c_custkey,
+    co.c_name,
+    oh.depth,
+    COALESCE(SP.total_cost, 0) AS total_part_cost,
+    SUM(co.o_totalprice) OVER (PARTITION BY co.c_custkey ORDER BY co.o_orderdate ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_spending
+FROM 
+    CustomerOrder co
+LEFT JOIN 
+    SupplierPart SP ON SP.p_partkey IN (
+        SELECT l.l_partkey 
+        FROM lineitem l 
+        WHERE l.l_orderkey = co.o_orderkey
+    )
+JOIN 
+    region r ON r.r_regionkey = (
+        SELECT n.n_regionkey 
+        FROM nation n 
+        JOIN supplier s ON n.n_nationkey = s.s_nationkey 
+        WHERE s.s_suppkey IN (
+            SELECT ps.ps_suppkey 
+            FROM partsupp ps 
+            WHERE ps.ps_partkey IN (
+                SELECT p.p_partkey 
+                FROM part p
+            )
+        )
+    )
+WHERE 
+    r.r_name = 'ASIA'
+GROUP BY 
+    co.c_custkey, co.c_name, oh.depth, SP.total_cost
+ORDER BY 
+    co.c_custkey, cumulative_spending DESC;

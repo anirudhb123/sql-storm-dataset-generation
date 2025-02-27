@@ -1,0 +1,60 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+), 
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS total_orders, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        COUNT(ps.ps_suppkey) AS num_suppliers, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    n.n_name AS nation_name,
+    p.p_name AS part_name,
+    COALESCE(p.total_supplycost, 0) AS total_supplycost,
+    COALESCE(cs.total_spent, 0) AS total_spent_by_customers,
+    COUNT(rs.s_suppkey) FILTER (WHERE rs.rn <= 3) AS top_suppliers_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM 
+    nation n 
+LEFT JOIN 
+    RankedSuppliers rs ON n.n_nationkey = rs.s_nationkey
+LEFT JOIN 
+    PartSupplierDetails p ON rs.s_suppkey = p.p_partkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    CustomerOrderSummary cs ON cs.total_orders > 5
+WHERE 
+    n.n_name IS NOT NULL AND 
+    (p.total_supplycost IS NOT NULL OR cs.total_spent IS NOT NULL)
+GROUP BY 
+    n.n_name, p.p_name, p.total_supplycost, cs.total_spent
+ORDER BY 
+    total_revenue DESC, n.n_name, p.p_name;

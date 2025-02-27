@@ -1,0 +1,102 @@
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(c.id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+    HAVING 
+        COUNT(c.id) > 0
+),
+TitleRanked AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.cast_count,
+        RANK() OVER (PARTITION BY m.production_year ORDER BY m.cast_count DESC) AS cast_rank
+    FROM 
+        RecursiveMovieCTE m
+),
+InfrequentRoleCTE AS (
+    SELECT
+        ci.role_id,
+        COUNT(*) AS role_frequency
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.role_id
+    HAVING 
+        COUNT(*) >= 1 AND COUNT(*) <= 5   
+),
+TopDirectors AS (
+    SELECT 
+        cn.name AS director_name,
+        COUNT(mc.movie_id) AS directed_movies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        ct.kind = 'Director'
+    GROUP BY 
+        cn.name
+    ORDER BY 
+        directed_movies DESC
+    LIMIT 10
+),
+InfrequentRoles AS (
+    SELECT 
+        ir.role_id,
+        ir.role_frequency,
+        rt.role
+    FROM 
+        InfrequentRoleCTE ir
+    JOIN 
+        role_type rt ON ir.role_id = rt.id
+),
+MoviesWithInfrequentRoles AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        tr.cast_rank,
+        ir.role
+    FROM 
+        TitleRanked tr
+    JOIN 
+        cast_info ci ON tr.movie_id = ci.movie_id
+    JOIN 
+        InfrequentRoles ir ON ir.role_id = ci.role_id
+    WHERE 
+        tr.cast_rank <= 5   
+)
+SELECT 
+    mwir.title AS movie_title,
+    mwir.production_year,
+    mwir.cast_rank,
+    ir.role AS infrequent_role,
+    (SELECT STRING_AGG(DISTINCT ak.name, ', ') 
+     FROM aka_name ak 
+     WHERE ak.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = mwir.movie_id)
+    ) AS cast_members,
+    (SELECT COUNT(DISTINCT kw.keyword) 
+     FROM movie_keyword mk 
+     JOIN keyword kw ON mk.keyword_id = kw.id 
+     WHERE mk.movie_id = mwir.movie_id) AS keyword_count,
+    (SELECT m.linked_movie_id 
+     FROM movie_link m 
+     WHERE m.movie_id = mwir.movie_id
+     LIMIT 1 OFFSET 0) AS linked_movie
+FROM 
+    MoviesWithInfrequentRoles mwir
+ORDER BY 
+    mwir.production_year DESC, 
+    mwir.cast_rank ASC;

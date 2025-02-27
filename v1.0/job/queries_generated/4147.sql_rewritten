@@ -1,0 +1,41 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM aka_title a
+    WHERE a.production_year IS NOT NULL
+    AND a.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%')
+),
+Directors AS (
+    SELECT 
+        c.movie_id,
+        ak.name AS director_name
+    FROM cast_info c
+    JOIN aka_name ak ON c.person_id = ak.person_id
+    WHERE c.role_id = (SELECT id FROM role_type WHERE role = 'director')
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    d.director_name,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    CASE 
+        WHEN rm.year_rank <= 5 THEN 'Top 5 in Year'
+        ELSE 'Other'
+    END AS ranking_category
+FROM RankedMovies rm
+LEFT JOIN Directors d ON rm.id = d.movie_id
+LEFT JOIN MovieKeywords mk ON rm.id = mk.movie_id
+WHERE rm.production_year >= 2000
+AND (rm.kind_id = 1 OR rm.kind_id = 2)  
+ORDER BY rm.production_year DESC, rm.title;

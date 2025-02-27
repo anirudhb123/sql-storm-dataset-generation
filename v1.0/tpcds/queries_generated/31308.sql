@@ -1,0 +1,62 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        SUM(ws_net_profit) > 0
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        SUM(cs_net_profit) AS total_profit,
+        COUNT(cs_order_number) AS order_count
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        cs_item_sk
+    HAVING 
+        SUM(cs_net_profit) > 0
+),
+RankedSales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        COALESCE(SalesCTE.total_profit, 0) AS total_profit,
+        COALESCE(SalesCTE.order_count, 0) AS order_count,
+        RANK() OVER (ORDER BY COALESCE(SalesCTE.total_profit, 0) DESC) AS profit_rank
+    FROM 
+        item
+    LEFT JOIN 
+        SalesCTE ON item.i_item_sk = SalesCTE.ws_item_sk OR item.i_item_sk = SalesCTE.cs_item_sk
+),
+TopSales AS (
+    SELECT 
+        *
+    FROM 
+        RankedSales
+    WHERE 
+        profit_rank <= 10
+)
+SELECT 
+    ts.i_item_id,
+    ts.i_product_name,
+    ts.total_profit,
+    ts.order_count,
+    CASE 
+        WHEN ts.total_profit IS NULL THEN 'No Sales'
+        WHEN ts.total_profit > 10000 THEN 'High Seller'
+        ELSE 'Standard Seller'
+    END AS sales_category
+FROM 
+    TopSales ts
+ORDER BY 
+    ts.total_profit DESC;

@@ -1,0 +1,69 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY c.c_birth_year, c.c_birth_month, c.c_birth_day) AS rn
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+AggregatedData AS (
+    SELECT 
+        city,
+        state,
+        gender,
+        marital_status,
+        COUNT(*) AS customer_count,
+        AVG(purchase_estimate) AS avg_purchase,
+        MIN(purchase_estimate) AS min_purchase,
+        MAX(purchase_estimate) AS max_purchase
+    FROM (
+        SELECT 
+            ca.ca_city AS city,
+            ca.ca_state AS state,
+            cd.cd_gender AS gender,
+            cd.cd_marital_status AS marital_status,
+            cd.cd_purchase_estimate AS purchase_estimate
+        FROM 
+            CustomerInfo ci
+        WHERE 
+            ci.rn = 1
+    ) AS FilteredCustomers
+    GROUP BY 
+        city, state, gender, marital_status
+),
+FormattedReport AS (
+    SELECT 
+        CONCAT(city, ', ', state) AS location,
+        gender,
+        marital_status,
+        customer_count,
+        CONCAT('$', CAST(avg_purchase AS TEXT)) AS avg_purchase_str,
+        CONCAT('$', CAST(min_purchase AS TEXT)) AS min_purchase_str,
+        CONCAT('$', CAST(max_purchase AS TEXT)) AS max_purchase_str
+    FROM 
+        AggregatedData
+)
+SELECT 
+    location,
+    gender,
+    marital_status,
+    customer_count,
+    avg_purchase_str,
+    min_purchase_str,
+    max_purchase_str
+FROM 
+    FormattedReport
+ORDER BY 
+    location, gender, marital_status;

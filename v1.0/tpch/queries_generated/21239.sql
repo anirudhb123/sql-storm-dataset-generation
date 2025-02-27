@@ -1,0 +1,62 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(l.l_discount) AS avg_discount,
+        STRING_AGG(DISTINCT l.l_shipmode, ', ') AS ship_modes
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+BottomThreeParts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        DENSE_RANK() OVER (ORDER BY p.p_retailprice ASC) AS price_rank
+    FROM part p
+)
+SELECT 
+    cu.c_custkey,
+    cu.total_spent,
+    cu.order_count,
+    COALESCE(s.s_name, 'Unknown') AS supplier_name,
+    COALESCE(s.s_acctbal, 0) AS supplier_balance,
+    DISTINCT p.p_name,
+    CASE 
+        WHEN p.p_retailprice IS NULL THEN 'No Price'
+        WHEN p.p_retailprice < (SELECT AVG(p2.p_retailprice) FROM part p2) THEN 'Below Average'
+        ELSE 'Above Average'
+    END AS price_comparison,
+    STRING_AGG(su.ship_modes, '; ') AS aggregated_ship_modes,
+    CASE 
+        WHEN cu.order_count = 0 THEN NULL
+        ELSE CAST((cu.total_spent - SUM(sup.avg_supply_cost) OVER ()) AS DECIMAL(12, 2))
+    END AS profit_margin
+FROM CustomerPurchases cu
+LEFT JOIN RankedSuppliers s ON s.rnk = 1 
+LEFT JOIN SupplierPartDetails sup ON s.s_suppkey = sup.ps_suppkey
+LEFT JOIN BottomThreeParts p ON sup.ps_partkey = p.p_partkey AND p.price_rank <= 3
+GROUP BY cu.c_custkey, cu.total_spent, cu.order_count, s.s_name, s.s_acctbal, p.p_name, p.p_retailprice
+ORDER BY cu.total_spent DESC, s.s_acctbal ASC
+FETCH FIRST 10 ROWS ONLY;

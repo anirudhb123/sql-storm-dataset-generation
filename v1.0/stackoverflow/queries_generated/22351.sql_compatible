@@ -1,0 +1,81 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.UpVotes,
+        u.DownVotes,
+        DENSE_RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > (SELECT AVG(Reputation) FROM Users WHERE Reputation IS NOT NULL)
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        STRING_AGG(DISTINCT p.Title, '; ') AS SampleTitles
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, '><'))
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 10
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate,
+        ph.Comment AS CloseReason,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        p.Id, p.Title, ph.Comment
+    HAVING 
+        COUNT(ph.Id) > 1
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    ur.DisplayName,
+    ur.Reputation,
+    ur.ReputationRank,
+    ARRAY_AGG(DISTINCT pt.TagName) AS PopularTags,
+    ub.TotalBadges,
+    ub.HighestBadgeClass,
+    COUNT(DISTINCT cp.PostId) AS ClosedPostCount,
+    SUM(CASE WHEN cp.LastCloseDate > (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month') THEN 1 ELSE 0 END) AS RecentClosedPosts,
+    STRING_AGG(DISTINCT pp.SampleTitles, '| ') AS SamplePostTitles
+FROM 
+    UserReputation ur
+LEFT JOIN 
+    UserBadges ub ON ur.UserId = ub.UserId
+LEFT JOIN 
+    PopularTags pp ON pp.PostCount >= 10 
+LEFT JOIN 
+    ClosedPosts cp ON ur.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = cp.PostId)
+WHERE 
+    ur.ReputationRank <= 100 
+GROUP BY 
+    ur.UserId, ur.DisplayName, ur.Reputation, ur.ReputationRank, ub.TotalBadges, ub.HighestBadgeClass
+ORDER BY 
+    ur.Reputation DESC;

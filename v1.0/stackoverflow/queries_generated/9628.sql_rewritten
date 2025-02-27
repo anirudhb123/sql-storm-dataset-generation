@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+), UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.OwnerUserId IS NOT NULL THEN 1 ELSE 0 END) AS PostsCreated,
+        SUM(CASE WHEN v.UserId IS NOT NULL THEN 1 ELSE 0 END) AS VotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id AND v.VoteTypeId IN (2, 3) 
+    GROUP BY 
+        u.Id
+), TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostsCreated,
+        VotesReceived,
+        ROW_NUMBER() OVER (ORDER BY PostsCreated DESC, VotesReceived DESC) AS UserRank
+    FROM 
+        UserActivity
+    WHERE 
+        PostsCreated > 0
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.ViewCount,
+    r.CreationDate,
+    r.AnswerCount,
+    r.CommentCount,
+    u.DisplayName AS MostActiveUser
+FROM 
+    RankedPosts r
+JOIN 
+    TopUsers u ON r.OwnerUserId = u.UserId
+WHERE 
+    r.Rank <= 5
+ORDER BY 
+    r.ViewCount DESC, r.AnswerCount DESC;

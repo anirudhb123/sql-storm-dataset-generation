@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS RN,
+        COUNT(*) OVER (PARTITION BY P.OwnerUserId) AS TotalPosts
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastClosedDate,
+        STRING_AGG(CONCAT(PH.UserDisplayName, ': ', PH.Comment), '; ') AS ClosureComments
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        PH.PostId
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        US.UserId, 
+        US.DisplayName,
+        US.Reputation,
+        US.Views,
+        US.QuestionCount,
+        US.AnswerCount,
+        RANK() OVER (ORDER BY US.Reputation DESC, US.Views DESC) AS UserRank
+    FROM 
+        UserStats US
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.Views,
+    COALESCE(CP.LastClosedDate, 'No closures') AS LastPostClosedDate,
+    COALESCE(CP.ClosureComments, 'None') AS ClosureComments,
+    RP.Title AS HighestScorePostTitle,
+    RP.Score AS HighestScore,
+    RP.TotalPosts AS TotalPostsOwned
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    ClosedPosts CP ON TU.UserId = CP.PostId
+LEFT JOIN 
+    RankedPosts RP ON TU.UserId = RP.OwnerUserId AND RP.RN = 1
+WHERE 
+    TU.UserRank <= 10
+ORDER BY 
+    TU.UserRank, TU.Reputation DESC;

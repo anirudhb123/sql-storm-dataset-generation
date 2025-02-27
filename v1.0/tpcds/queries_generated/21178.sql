@@ -1,0 +1,75 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_net_paid_inc_tax,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (
+        SELECT d_date_sk 
+        FROM date_dim 
+        WHERE d_year = 2023 AND d_moy BETWEEN 1 AND 6
+    )
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        cs_order_number,
+        cs_quantity,
+        cs_net_paid_inc_tax,
+        cs_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY cs_order_number) + (SELECT MAX(rn) FROM sales_data)
+    FROM catalog_sales
+    WHERE cs_sold_date_sk IN (
+        SELECT d_date_sk 
+        FROM date_dim 
+        WHERE d_year = 2023 AND d_moy BETWEEN 1 AND 6
+    )
+),
+total_sales AS (
+    SELECT 
+        sd.ws_item_sk,
+        SUM(sd.ws_quantity) AS total_quantity,
+        SUM(sd.ws_net_paid_inc_tax) AS total_net_paid
+    FROM sales_data sd
+    GROUP BY sd.ws_item_sk
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(s.ss_quantity) AS total_quantity,
+        MAX(d.d_year) AS latest_year,
+        MAX(sd.ws_net_profit) AS highest_net_profit
+    FROM customer c
+    JOIN store_sales s ON c.c_customer_sk = s.ss_customer_sk
+    LEFT JOIN sales_data sd ON c.c_customer_sk = sd.ws_order_number  -- Only correlating sales with web vs store
+    JOIN date_dim d ON s.ss_sold_date_sk = d.d_date_sk
+    WHERE c.c_birth_year IS NOT NULL AND c.c_first_shipto_date_sk IS NOT NULL
+    GROUP BY c.c_customer_sk
+)
+SELECT 
+    ca.ca_city, 
+    SUM(ts.total_quantity) AS city_total_quantity,
+    AVG(cd.highest_net_profit) AS avg_customer_net_profit,
+    COUNT(DISTINCT ts.ws_item_sk) AS unique_items_sold,
+    CASE 
+        WHEN AVG(cd.highest_net_profit) IS NULL THEN 'No Profit Data'
+        ELSE 'Profit Data Available'
+    END AS profit_data_status
+FROM total_sales ts
+JOIN customer_data cd ON ts.ws_item_sk IN (
+    SELECT DISTINCT cs_item_sk 
+    FROM catalog_sales
+    WHERE cs_sold_date_sk IN (
+        SELECT d_date_sk 
+        FROM date_dim 
+        WHERE d_year = 2023
+    )
+)
+JOIN customer_address ca ON cd.c_customer_sk = ca.ca_address_sk
+GROUP BY ca.ca_city
+HAVING SUM(ts.total_quantity) > 1000 OR AVG(cd.highest_net_profit) IS NOT NULL
+ORDER BY city_total_quantity DESC, ca.ca_city
+LIMIT 10;

@@ -1,0 +1,70 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        sum(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        (SELECT count(*) FROM partsupp ps2 WHERE ps2.ps_suppkey = s.s_suppkey) AS parts_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total,
+        o.o_orderdate,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        os.order_total, 
+        os.o_orderdate, 
+        os.item_count
+    FROM 
+        customer c
+    JOIN 
+        OrderSummary os ON c.c_custkey = os.o_custkey
+),
+TopSuppliers AS (
+    SELECT 
+        ss.s_suppkey, 
+        ss.s_name, 
+        ss.total_cost, 
+        ss.parts_count,
+        ROW_NUMBER() OVER (ORDER BY ss.total_cost DESC) AS rank
+    FROM 
+        SupplierStats ss
+)
+SELECT 
+    cu.c_custkey, 
+    cu.c_name, 
+    cu.order_total, 
+    cu.o_orderdate, 
+    ts.s_suppkey, 
+    ts.s_name, 
+    ts.total_cost
+FROM 
+    CustomerOrders cu
+JOIN 
+    lineitem l ON cu.o_orderkey = l.l_orderkey
+JOIN 
+    TopSuppliers ts ON l.l_suppkey = ts.s_suppkey
+WHERE 
+    ts.rank <= 10
+ORDER BY 
+    cu.order_total DESC, 
+    ts.total_cost DESC;

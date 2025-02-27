@@ -1,0 +1,69 @@
+WITH ranked_titles AS (
+    SELECT
+        a.id AS aka_id,
+        a.name AS aka_name,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rank
+    FROM
+        aka_name a 
+    JOIN
+        aka_title t ON a.id = t.id
+    WHERE
+        t.production_year IS NOT NULL
+),
+company_roles AS (
+    SELECT
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM
+        movie_companies mc
+    JOIN
+        company_name c ON mc.company_id = c.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN
+        cast_info ci ON mc.movie_id = ci.movie_id
+    GROUP BY
+        mc.movie_id, c.name, ct.kind
+),
+movies_with_keywords AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        mk.keyword,
+        mk.phonetic_code,
+        COALESCE(NULLIF(mk.keyword, ''), 'No Keywords') AS keyword_display
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+)
+SELECT
+    rt.aka_name,
+    rt.title,
+    rt.production_year,
+    cr.company_name,
+    cr.company_type,
+    cr.cast_count,
+    mwk.keyword_display
+FROM
+    ranked_titles rt
+LEFT JOIN
+    company_roles cr ON rt.aka_id = cr.movie_id
+LEFT JOIN
+    movies_with_keywords mwk ON rt.id = mwk.movie_id
+WHERE
+    rt.rank = 1
+    AND (cr.cast_count > 3 OR cr.company_type IS NULL)
+ORDER BY
+    rt.production_year DESC,
+    rt.aka_name ASC
+LIMIT 100 OFFSET 0;
+
+-- Get the top 3 companies involved in movies that have been released, where person has an aka_name
+-- and show only those with a substantial cast presence or with NULL company types
+-- Avoid duplicates of people names where multiple roles exist in different companies for the same movie
+

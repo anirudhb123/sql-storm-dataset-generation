@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS DATETIME) - DATEADD(YEAR, 1, 0)
+    AND 
+        p.Score > 0
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostComments AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS CommentCount
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+)
+SELECT 
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    pv.UpVotes,
+    pv.DownVotes,
+    pc.CommentCount,
+    CASE 
+        WHEN pv.UpVotes IS NOT NULL AND pv.DownVotes IS NOT NULL 
+        THEN (pv.UpVotes - pv.DownVotes) 
+        ELSE NULL 
+    END AS NetVotes,
+    CASE 
+        WHEN rp.Rank <= 10 THEN 'Top 10' 
+        ELSE 'Other' 
+    END AS RankingCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteCounts pv ON rp.PostId = pv.PostId
+LEFT JOIN 
+    PostComments pc ON rp.PostId = pc.PostId
+WHERE 
+    rp.Rank <= 20
+ORDER BY 
+    rp.Rank;

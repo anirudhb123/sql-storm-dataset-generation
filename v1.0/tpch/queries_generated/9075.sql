@@ -1,0 +1,53 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+LargeOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        COUNT(l.l_orderkey) AS total_line_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_totalprice > 10000
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate
+)
+SELECT 
+    r.nation_name,
+    COUNT(DISTINCT r.s_suppkey) AS supplier_count,
+    SUM(lo.o_totalprice) AS total_large_order_value,
+    SUM(r.total_avail_qty) AS total_available_quantity,
+    MAX(lo.o_orderdate) AS last_large_order_date
+FROM 
+    RankedSuppliers r
+JOIN 
+    LargeOrders lo ON r.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+        WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F')
+    )
+WHERE 
+    r.rank <= 3
+GROUP BY 
+    r.nation_name
+ORDER BY 
+    total_large_order_value DESC;

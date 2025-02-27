@@ -1,0 +1,40 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.UpVotes > p.DownVotes THEN 1 ELSE 0 END) AS PositiveVotes,
+        SUM(CASE WHEN p.UpVotes < p.DownVotes THEN 1 ELSE 0 END) AS NegativeVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.Reputation
+),
+BadgeStats AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS TotalBadges,
+        SUM(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges
+    GROUP BY UserId
+)
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.TotalPosts,
+    us.Questions,
+    us.Answers,
+    u.LastAccessDate,
+    bs.TotalBadges,
+    bs.GoldBadges,
+    bs.SilverBadges,
+    bs.BronzeBadges
+FROM UserStats us
+JOIN BadgeStats bs ON us.UserId = bs.UserId
+JOIN Users u ON us.UserId = u.Id
+WHERE us.TotalPosts > 10  -- Filter for users with more than 10 posts
+ORDER BY us.Reputation DESC, us.TotalPosts DESC;  -- Order by Reputation and Total Posts

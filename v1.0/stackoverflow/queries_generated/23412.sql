@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate ASC) AS Ranking
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PopularTags AS (
+    SELECT 
+        TRIM(REGEXP_REPLACE(UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><')), '[<>]', '', 'g')) AS TagName,
+        COUNT(p.Id) AS TagUsage
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(p.Id) > 10
+),
+ClosingPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT ctr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        CloseReasonTypes ctr ON ph.Comment::int = ctr.Id 
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.UserId,
+    up.Reputation,
+    up.BadgeCount,
+    up.GoldBadges,
+    up.SilverBadges,
+    up.BronzeBadges,
+    STRING_AGG(DISTINCT CONCAT(pt.Name, ' (Usage: ', pt.TagUsage, ')'), ', ') AS PopularTags,
+    STRING_AGG(DISTINCT CONCAT('Post ID: ', cp.PostId, ' Closed on: ', cp.LastClosedDate, ' Reasons: ', COALESCE(cp.CloseReasons, 'N/A')), '; ') AS ClosedPosts
+FROM 
+    UserReputation up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId AND rp.Ranking <= 5
+LEFT JOIN 
+    PopularTags pt ON pt.TagName IN (
+        SELECT 
+            TRIM(REGEXP_REPLACE(UNNEST(string_to_array(SUBSTRING(rp.Tags, 2, LENGTH(rp.Tags) - 2), '><')), '[<>]', '', 'g')) AS TagName
+    )
+LEFT JOIN 
+    ClosingPostHistory cp ON cp.PostId IN (SELECT rp.PostId FROM RankedPosts rp WHERE rp.OwnerUserId = up.UserId)
+WHERE 
+    up.Reputation > (SELECT AVG(Reputation) FROM Users)
+GROUP BY 
+    up.UserId, up.Reputation, up.BadgeCount, up.GoldBadges, up.SilverBadges, up.BronzeBadges
+ORDER BY 
+    up.Reputation DESC 
+LIMIT 10;
+

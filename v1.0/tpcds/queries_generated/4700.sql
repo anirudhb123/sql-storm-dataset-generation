@@ -1,0 +1,56 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_sk, 
+        ws.web_name,
+        DATE(d.d_date) AS sales_date,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rank_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws.web_site_sk, ws.web_name, DATE(d.d_date)
+),
+top_sales AS (
+    SELECT 
+        sales.web_site_sk, 
+        sales.web_name,
+        sales.sales_date,
+        sales.total_quantity,
+        sales.total_sales,
+        sales.total_orders
+    FROM 
+        sales_summary sales
+    WHERE 
+        sales.rank_sales <= 5
+),
+inventory_status AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(i.inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM 
+        inventory i
+    GROUP BY 
+        i.i_item_sk
+)
+SELECT 
+    ts.web_name,
+    ts.sales_date,
+    ts.total_quantity,
+    ts.total_sales,
+    ts.total_orders,
+    COALESCE(is.total_quantity_on_hand, 0) AS quantity_on_hand,
+    CASE 
+        WHEN is.total_quantity_on_hand < 1 THEN 'Out of Stock'
+        ELSE 'In Stock'
+    END AS stock_status
+FROM 
+    top_sales ts
+LEFT JOIN 
+    inventory_status is ON ts.web_site_sk = is.i_item_sk
+ORDER BY 
+    ts.total_sales DESC, ts.sales_date DESC;

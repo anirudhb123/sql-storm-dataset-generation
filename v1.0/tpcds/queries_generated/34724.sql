@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT ss_store_sk, 
+           ss_sold_date_sk, 
+           SUM(ss_ext_sales_price) AS total_sales,
+           1 AS level
+    FROM store_sales
+    WHERE ss_sold_date_sk = (
+        SELECT MAX(ss.sold_date_sk) 
+        FROM store_sales ss 
+        WHERE ss.sold_date_sk <= CURRENT_DATE
+    )
+    GROUP BY ss_store_sk, ss_sold_date_sk
+
+    UNION ALL
+
+    SELECT sh.ss_store_sk, 
+           ss.sold_date_sk, 
+           SUM(ss.ss_ext_sales_price) AS total_sales,
+           sh.level + 1
+    FROM sales_hierarchy sh
+    JOIN store_sales ss ON sh.ss_store_sk = ss.ss_store_sk 
+    WHERE sh.level < 5
+    GROUP BY sh.ss_store_sk, ss.sold_date_sk
+),
+customer_info AS (
+    SELECT c.c_customer_sk,
+           cd.cd_gender,
+           cd.cd_marital_status,
+           cd.cd_purchase_estimate,
+           CASE
+               WHEN cd.cd_purchase_estimate < 1000 THEN 'Low'
+               WHEN cd.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium'
+               ELSE 'High'
+           END AS purchase_band
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+date_sales AS (
+    SELECT d.d_date, 
+           SUM(COALESCE(ws.ws_ext_sales_price, 0)) AS web_sales,
+           SUM(COALESCE(cs.cs_ext_sales_price, 0)) AS catalog_sales,
+           SUM(COALESCE(ss.ss_ext_sales_price, 0)) AS store_sales
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    LEFT JOIN store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    GROUP BY d.d_date
+)
+SELECT
+    ci.cd_gender,
+    ci.cd_marital_status,
+    dh.total_sales,
+    ds.web_sales,
+    ds.catalog_sales,
+    ds.store_sales,
+    ds.web_sales + ds.catalog_sales + ds.store_sales AS total_sales_per_date,
+    COUNT(DISTINCT ci.c_customer_sk) AS customer_count
+FROM customer_info ci
+JOIN sales_hierarchy sh ON ci.c_customer_sk IN (
+    SELECT sr_customer_sk FROM store_returns 
+    WHERE sr_returned_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_date BETWEEN CURRENT_DATE - INTERVAL '30 days' AND CURRENT_DATE)
+) 
+LEFT JOIN date_sales ds ON ds.d_date = CURRENT_DATE
+JOIN (SELECT DISTINCT store_sk, total_sales FROM sales_hierarchy) dh ON dh.ss_store_sk = sh.ss_store_sk
+WHERE ci.cd_gender IS NOT NULL AND ci.cd_marital_status IS NOT NULL
+GROUP BY ci.cd_gender, ci.cd_marital_status, dh.total_sales, ds.web_sales, ds.catalog_sales, ds.store_sales
+ORDER BY total_sales_per_date DESC, customer_count DESC
+LIMIT 100;

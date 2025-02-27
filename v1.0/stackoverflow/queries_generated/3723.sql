@@ -1,0 +1,65 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AvgViewCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        PostCount,
+        QuestionsCount,
+        AnswersCount,
+        TotalScore,
+        AvgViewCount,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC) AS Rank
+    FROM 
+        UserPostStats
+    WHERE 
+        PostCount > 0
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerName,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 month'
+)
+SELECT 
+    TU.DisplayName,
+    TU.PostCount,
+    TU.QuestionsCount,
+    TU.AnswersCount,
+    TU.TotalScore,
+    TU.AvgViewCount,
+    COALESCE(RP.Title, 'No Recent Posts') AS RecentPostTitle,
+    COALESCE(RP.CreationDate, 'N/A') AS RecentPostDate,
+    COALESCE(RP.Score, 0) AS RecentPostScore,
+    TU.Rank
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    RecentPosts RP ON TU.UserId = RP.OwnerName AND RP.RecentRank = 1
+WHERE 
+    TU.Rank <= 10
+ORDER BY 
+    TU.Rank;

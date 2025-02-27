@@ -1,0 +1,63 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+NationSales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(ss.total_sales) AS nation_sales
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        SupplierSales ss ON s.s_suppkey = ss.s_suppkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+TopNations AS (
+    SELECT 
+        n.n_name,
+        n.nation_sales,
+        RANK() OVER (ORDER BY n.nation_sales DESC) AS sales_rank
+    FROM 
+        NationSales n
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(ts.nation_sales, 0) AS total_sales_by_nation,
+    CASE 
+        WHEN ts.sales_rank IS NULL THEN 'Not in Top'
+        WHEN ts.sales_rank <= 5 THEN 'Top 5'
+        ELSE 'Lower Rank'
+    END AS ranking_category
+FROM 
+    part p
+LEFT JOIN 
+    TopNations ts ON ts.n_nationkey = (
+        SELECT 
+            s.s_nationkey 
+        FROM 
+            supplier s 
+        JOIN 
+            partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+        WHERE 
+            ps.ps_partkey = p.p_partkey 
+        LIMIT 1
+    )
+WHERE 
+    p.p_retailprice > (SELECT AVG(p_retailprice) FROM part)
+ORDER BY 
+    total_sales_by_nation DESC, p.p_partkey;

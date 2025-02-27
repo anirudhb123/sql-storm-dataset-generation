@@ -1,0 +1,79 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE rp ON p.ParentId = rp.PostId
+),
+
+AggregatedPosts AS (
+    SELECT 
+        rp.OwnerUserId,
+        COUNT(rp.PostId) AS NumberOfPosts,
+        SUM(rp.Score) AS TotalScore,
+        MIN(rp.CreationDate) AS EarliestPostDate,
+        MAX(rp.CreationDate) AS LatestPostDate
+    FROM 
+        RecursivePostCTE rp
+    GROUP BY 
+        rp.OwnerUserId
+),
+
+UserInfo AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        a.NumberOfPosts,
+        a.TotalScore,
+        a.EarliestPostDate,
+        a.LatestPostDate, 
+        DATEDIFF('minute', a.EarliestPostDate, CURRENT_TIMESTAMP) AS PostAgeInMinutes,
+        CASE 
+            WHEN a.NumberOfPosts > 10 THEN 'High Contributor'
+            WHEN a.NumberOfPosts BETWEEN 5 AND 10 THEN 'Medium Contributor'
+            ELSE 'Low Contributor'
+        END AS ContributorLevel
+    FROM 
+        Users u
+    LEFT JOIN 
+        AggregatedPosts a ON u.Id = a.OwnerUserId
+)
+
+SELECT 
+    ui.UserId,
+    ui.DisplayName,
+    ui.Reputation,
+    COALESCE(ui.TotalScore, 0) AS TotalScore,
+    COALESCE(ui.NumberOfPosts, 0) AS NumberOfPosts,
+    COALESCE(ui.PostAgeInMinutes, 0) AS PostAgeInMinutes,
+    ui.ContributorLevel
+FROM 
+    UserInfo ui
+WHERE 
+    ui.Reputation > 1000 AND
+    (ui.TotalScore IS NULL OR ui.TotalScore > 50)
+ORDER BY 
+    ui.TotalScore DESC,
+    ui.Reputation DESC;
+

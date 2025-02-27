@@ -1,0 +1,80 @@
+WITH RecursiveMovieStats AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT c.person_id) AS num_cast_members,
+        SUM(m.movie_id IS NOT NULL) AS num_movies_with_info,
+        AVG(COALESCE(m.info, '0'))::numeric AS avg_info_length,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        movie_info m ON t.id = m.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id
+), 
+MovieDetails AS (
+    SELECT 
+        ms.movie_id,
+        ms.title,
+        ms.num_cast_members,
+        ms.num_movies_with_info,
+        ms.avg_info_length,
+        CASE 
+            WHEN ms.num_cast_members > 10 THEN 'Blockbuster'
+            WHEN ms.num_cast_members BETWEEN 5 AND 10 THEN 'Midrange'
+            ELSE 'Small Indie'
+        END AS movie_size,
+        CASE 
+            WHEN ms.num_movies_with_info = 0 THEN 'No Info Available'
+            ELSE 'Info Found'
+        END AS info_status
+    FROM 
+        RecursiveMovieStats ms
+    WHERE 
+        ms.rn = 1
+),
+TitleKeywordInfo AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mt
+    JOIN 
+        keyword k ON mt.keyword_id = k.id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.num_cast_members,
+    md.movie_size,
+    md.info_status,
+    COALESCE(tki.keywords, 'No Keywords') AS keywords,
+    CASE 
+        WHEN INSTR(md.title, ' ') > 0 THEN SUBSTRING(md.title FROM 1 FOR INSTR(md.title, ' ') - 1)
+        ELSE md.title
+    END AS first_word_title,
+    LENGTH(md.title) AS title_length,
+    CASE 
+        WHEN md.num_movies_with_info IS NULL THEN 'Not Applicable'
+        ELSE CAST(md.num_movies_with_info AS TEXT)
+    END AS num_movies_with_info,
+    COALESCE(md.avg_info_length, 'N/A') AS average_info_length,
+    CASE 
+        WHEN NULLIF(md.avg_info_length, 0) IS NULL THEN 'Empty Info Length'
+        ELSE NULLIF(md.avg_info_length, 0)::TEXT
+    END AS safe_avg_info_length
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    TitleKeywordInfo tki ON md.movie_id = tki.movie_id
+ORDER BY 
+    md.num_cast_members DESC, 
+    md.title;
+

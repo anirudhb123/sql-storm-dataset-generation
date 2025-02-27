@@ -1,0 +1,32 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER(PARTITION BY o.o_custkey ORDER BY o.o_orderdate) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+),
+SupplierStats AS (
+    SELECT ps.ps_partkey, s.s_nationkey,
+           SUM(ps.ps_availqty) AS total_available,
+           AVG(s.s_acctbal) AS avg_supplier_balance
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_nationkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           RANK() OVER(ORDER BY c.c_acctbal DESC) AS customer_rank
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+)
+SELECT r.r_name, COUNT(DISTINCT oh.o_orderkey) AS total_orders,
+       SUM(ls.l_extendedprice * (1 - ls.l_discount)) AS total_revenue,
+       MAX(s.avg_supplier_balance) AS max_supplier_balance
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN lineitem ls ON s.s_suppkey = ls.l_suppkey
+JOIN OrderHierarchy oh ON oh.o_custkey IN (SELECT c.c_custkey FROM HighValueCustomers c)
+WHERE ls.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT oh.o_orderkey) > 5
+ORDER BY total_revenue DESC

@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS AnswerCount FROM Posts WHERE PostTypeId = 2 GROUP BY PostId) a ON p.Id = a.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM Votes 
+         GROUP BY PostId) v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank = 1
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    us.DisplayName,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    fp.PostId,
+    fp.Title,
+    fp.AnswerCount,
+    fp.CommentCount,
+    fp.UpVotes,
+    fp.DownVotes
+FROM 
+    UserStats us
+JOIN 
+    FilteredPosts fp ON us.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = fp.PostId)
+ORDER BY 
+    us.GoldBadges DESC, us.SilverBadges DESC, us.BronzeBadges DESC, fp.UpVotes DESC;
+
+This query benchmarks string processing by extracting extensive string data from the `Posts` table while aggregating statistics from related tables (`Comments`, `Votes`, and `Badges`). It identifies the most recent questions per user, accompanied by their associated statistics, while ranking users by their badge counts. The combination uses a common table expression (CTE) to streamline querying and enhance readability.

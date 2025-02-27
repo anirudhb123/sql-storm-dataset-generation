@@ -1,0 +1,65 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.n_nationkey,
+        s.s_name,
+        s.total_available_quantity,
+        s.total_supply_cost
+    FROM 
+        SupplierStats s
+    WHERE 
+        s.rn <= 5
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        c.total_orders, 
+        c.total_spent,
+        RANK() OVER (ORDER BY c.total_spent DESC) AS rank
+    FROM 
+        CustomerOrderSummary c
+    WHERE 
+        c.total_spent > 10000
+)
+SELECT 
+    t.n_nationkey,
+    SUM(t.total_supply_cost) AS total_supply_cost_by_nation,
+    COUNT(DISTINCT h.c_custkey) AS high_value_customers_count,
+    AVG(h.total_spent) AS avg_high_value_spent
+FROM 
+    TopSuppliers t
+LEFT JOIN 
+    HighValueCustomers h ON t.n_nationkey = h.c_nationkey
+GROUP BY 
+    t.n_nationkey
+ORDER BY 
+    total_supply_cost_by_nation DESC
+FETCH FIRST 10 ROWS ONLY;

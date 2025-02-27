@@ -1,0 +1,76 @@
+WITH Recursive ActorMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        c.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS movie_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        c.nr_order = 1
+), 
+FilteredMovies AS (
+    SELECT 
+        am.actor_id,
+        am.actor_name,
+        am.movie_id,
+        am.movie_rank
+    FROM 
+        ActorMovies am
+    WHERE 
+        am.movie_rank <= 5
+), 
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id, 
+        co.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mc.id) AS num_companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, co.name, ct.kind
+), 
+CriticallyAcclaimed AS (
+    SELECT 
+        fm.actor_id,
+        fm.actor_name,
+        COUNT(DISTINCT km.keyword) AS keyword_count,
+        STRING_AGG(DISTINCT km.keyword, ', ') AS keywords
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        movie_keyword mk ON fm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword km ON mk.keyword_id = km.id
+    WHERE 
+        fm.actor_id IS NOT NULL
+    GROUP BY 
+        fm.actor_id, fm.actor_name
+)
+SELECT 
+    ca.actor_name,
+    COUNT(DISTINCT cm.movie_id) AS company_movie_count,
+    COALESCE(SUM(CASE WHEN cm.num_companies > 0 THEN cm.num_companies ELSE NULL END), 0) AS total_companies,
+    CASE 
+        WHEN ca.keyword_count > 3 THEN 'Highly Acclaimed'
+        WHEN ca.keyword_count BETWEEN 1 AND 3 THEN 'Moderately Acclaimed'
+        ELSE 'Not Acclaimed'
+    END AS acclaim_status,
+    (SELECT AVG(production_year) FROM aka_title WHERE id IN (SELECT movie_id FROM cast_info WHERE person_id = ca.actor_id)) AS average_production_year
+FROM 
+    CriticallyAcclaimed ca
+LEFT JOIN 
+    CompanyMovies cm ON ca.actor_id = cm.movie_id
+GROUP BY 
+    ca.actor_name, ca.keyword_count
+ORDER BY 
+    company_movie_count DESC, total_companies DESC;

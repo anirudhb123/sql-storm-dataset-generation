@@ -1,0 +1,61 @@
+WITH SupplierPartStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS available_parts,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSalesStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    JOIN 
+        part p ON l.l_partkey = p.p_partkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    sp.s_name,
+    sp.available_parts,
+    sp.total_available_quantity,
+    sp.average_supply_cost,
+    co.total_orders,
+    co.total_spent,
+    ps.p_name,
+    ps.total_sales
+FROM 
+    SupplierPartStats sp
+JOIN 
+    CustomerOrderStats co ON sp.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 20) LIMIT 1)
+JOIN 
+    PartSalesStats ps ON ps.total_sales > 10000
+ORDER BY 
+    sp.average_supply_cost DESC, 
+    co.total_spent DESC;

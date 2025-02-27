@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT t.id AS movie_id, 
+           t.title, 
+           0 AS depth
+    FROM aka_title t
+    WHERE t.production_year IS NOT NULL
+    UNION ALL
+    SELECT t.id, 
+           t.title, 
+           mh.depth + 1
+    FROM aka_title t
+    INNER JOIN MovieHierarchy mh ON t.episode_of_id = mh.movie_id
+), 
+TitleInfo AS (
+    SELECT m.id AS movie_id,
+           m.title,
+           COALESCE(mc.note, 'No production note') AS production_note,
+           STRING_AGG(DISTINCT CONCAT(k.keyword, ': ', COALESCE(mi.info, 'No info')), ', ') AS keyword_info,
+           RANK() OVER (PARTITION BY m.id ORDER BY k.keyword) AS keyword_rank
+    FROM aka_title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_companies mc ON m.id = mc.movie_id AND mc.note IS NOT NULL
+    GROUP BY m.id, m.title, mc.note
+), 
+CastRoleCounts AS (
+    SELECT c.movie_id, 
+           COUNT(DISTINCT c.person_id) AS total_cast,
+           COUNT(DISTINCT CASE WHEN r.role LIKE 'Lead%' THEN c.person_id END) AS lead_cast
+    FROM cast_info c
+    INNER JOIN role_type r ON c.role_id = r.id
+    GROUP BY c.movie_id
+), 
+EpisodeDetails AS (
+    SELECT mh.movie_id, 
+           mh.title, 
+           mh.depth,
+           COUNT(DISTINCT c.person_id) AS episode_cast_count
+    FROM MovieHierarchy mh
+    LEFT JOIN cast_info c ON mh.movie_id = c.movie_id
+    GROUP BY mh.movie_id, mh.title, mh.depth
+)
+SELECT ti.movie_id,
+       ti.title,
+       ti.production_note,
+       ti.keyword_info,
+       crc.total_cast,
+       crc.lead_cast,
+       ed.episode_cast_count,
+       CASE 
+           WHEN ti.keyword_rank = 1 THEN 'Top rated keyword'
+           ELSE 'Standard keyword'
+       END AS keyword_status,
+       COALESCE(ed.episode_cast_count, 0) AS episode_participants,
+       ed.depth
+FROM TitleInfo ti
+LEFT JOIN CastRoleCounts crc ON ti.movie_id = crc.movie_id
+LEFT JOIN EpisodeDetails ed ON ti.movie_id = ed.movie_id
+WHERE ti.production_note NOT LIKE '%draft%'
+  AND (crc.total_cast > 5 OR ti.keyword_info IS NOT NULL)
+ORDER BY ti.title, 
+         episode_participants DESC NULLS LAST,
+         ti.movie_id;

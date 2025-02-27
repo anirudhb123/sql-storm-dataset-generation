@@ -1,0 +1,58 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        w.web_country = 'USA' 
+        AND ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.web_site_id, ws.ws_sold_date_sk
+),
+TopSales AS (
+    SELECT 
+        web_site_id,
+        ws_sold_date_sk,
+        total_sales,
+        net_profit,
+        order_count
+    FROM 
+        SalesData
+    WHERE 
+        sales_rank <= 5
+),
+ReturnStats AS (
+    SELECT 
+        wr.wr_web_page_sk,
+        SUM(wr.wr_return_amt) AS total_returns,
+        SUM(wr.wr_return_quantity) AS return_quantity,
+        COUNT(DISTINCT wr.wr_order_number) AS return_count
+    FROM 
+        web_returns wr
+    JOIN 
+        web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    GROUP BY 
+        wr.wr_web_page_sk
+)
+SELECT 
+    ts.web_site_id,
+    COUNT(ts.order_count) AS top_sales_orders,
+    SUM(ts.total_sales) AS total_sales_amount,
+    COALESCE(SUM(rs.total_returns), 0) AS total_returns,
+    COALESCE(SUM(rs.return_quantity), 0) AS total_return_items
+FROM 
+    TopSales ts
+LEFT JOIN 
+    ReturnStats rs ON ts.web_site_id = (SELECT web_site_id FROM web_sales WHERE ws_order_number = ts.order_count) -- Correlated subquery
+GROUP BY 
+    ts.web_site_id
+ORDER BY 
+    total_sales_amount DESC;

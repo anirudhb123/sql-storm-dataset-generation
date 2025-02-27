@@ -1,0 +1,64 @@
+
+WITH RankedReturns AS (
+    SELECT
+        wr_item_sk,
+        wr_order_number,
+        wr_return_quantity,
+        wr_return_amt,
+        wr_return_tax,
+        ROW_NUMBER() OVER (PARTITION BY wr_customer_sk ORDER BY wr_returned_date_sk DESC) AS rn
+    FROM
+        web_returns
+),
+HighValueReturns AS (
+    SELECT
+        wr_item_sk,
+        SUM(wr_return_amt) AS total_return_amt
+    FROM
+        RankedReturns
+    WHERE
+        rn = 1
+    GROUP BY
+        wr_item_sk
+    HAVING
+        SUM(wr_return_amt) > 1000
+),
+CustomerInfo AS (
+    SELECT
+        c.c_customer_id,
+        d.d_year,
+        d.d_month_seq,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT wr_item_sk) AS return_count,
+        SUM(wr_return_amt) AS total_return_amt
+    FROM
+        customer c
+    JOIN
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN
+        date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
+    GROUP BY
+        c.c_customer_id, d.d_year, d.d_month_seq, cd.cd_gender, cd.cd_marital_status
+)
+SELECT
+    ci.c_customer_id,
+    ci.d_year,
+    ci.d_month_seq,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.return_count,
+    ci.total_return_amt,
+    HVR.total_return_amt AS high_value_return_amt
+FROM
+    CustomerInfo ci
+LEFT JOIN
+    HighValueReturns HVR ON ci.c_customer_id = (SELECT wr_returning_customer_sk FROM web_returns WHERE wr_item_sk = HVR.wr_item_sk LIMIT 1)
+WHERE
+    ci.total_return_amt > 500
+    AND ci.cd_gender IS NOT NULL
+ORDER BY
+    ci.total_return_amt DESC
+FETCH FIRST 100 ROWS ONLY;

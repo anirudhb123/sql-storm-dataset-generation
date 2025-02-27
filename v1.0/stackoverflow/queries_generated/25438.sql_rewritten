@@ -1,0 +1,68 @@
+WITH ranked_posts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        COALESCE(ah.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    LEFT JOIN 
+        Posts ah ON ah.AcceptedAnswerId = p.Id AND p.PostTypeId = 1
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, u.DisplayName, ah.AcceptedAnswerId
+),
+filtered_posts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Body,
+        rp.Tags,
+        rp.OwnerDisplayName,
+        rp.Score,
+        rp.AcceptedAnswerId,
+        rp.CommentCount,
+        rp.BadgeCount
+    FROM 
+        ranked_posts rp
+    WHERE 
+        rp.PostRank = 1 AND  
+        rp.CommentCount > 0 AND  
+        rp.BadgeCount >= 1  
+)
+SELECT
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Body,
+    fp.OwnerDisplayName,
+    fp.Score,
+    fp.AcceptedAnswerId,
+    fp.CommentCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList 
+FROM 
+    filtered_posts fp
+LEFT JOIN 
+    STRING_TO_ARRAY(fp.Tags, ',') AS tag_array ON TRUE
+LEFT JOIN 
+    Tags t ON t.TagName = TRIM(both ' ' from tag_array)
+GROUP BY 
+    fp.PostId, fp.Title, fp.CreationDate, fp.Body, fp.OwnerDisplayName, fp.Score, fp.AcceptedAnswerId, fp.CommentCount
+ORDER BY 
+    fp.CreationDate DESC
+LIMIT 10;

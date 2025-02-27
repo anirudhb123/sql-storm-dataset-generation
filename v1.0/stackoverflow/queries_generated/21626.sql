@@ -1,0 +1,100 @@
+WITH PostVoteStatistics AS (
+    SELECT
+        p.Id AS PostId,
+        p.PostTypeId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId IN (10, 12) THEN 1 ELSE 0 END), 0) AS DeletionCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.PostTypeId
+),
+UserStatistics AS (
+    SELECT
+        u.Id AS UserId,
+        COALESCE(badgeCount, 0) AS TotalBadges,
+        COALESCE(totalPosts, 0) AS TotalPosts,
+        COALESCE(totalVotes, 0) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS badgeCount
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) b ON u.Id = b.UserId
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId,
+            COUNT(*) AS totalPosts
+        FROM 
+            Posts
+        GROUP BY 
+            OwnerUserId
+    ) p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS totalVotes
+        FROM 
+            Votes
+        GROUP BY 
+            UserId
+    ) v ON u.Id = v.UserId
+),
+EnhancedPostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        pv.UpVoteCount,
+        pv.DownVoteCount,
+        pv.DeletionCount,
+        u.TotalBadges,
+        u.TotalPosts,
+        (COALESCE(pv.UpVoteCount, 0) - COALESCE(pv.DownVoteCount, 0)) AS NetVotes,
+        CASE 
+            WHEN p.PostTypeId = 1 THEN 'Question'
+            WHEN p.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostCategory
+    FROM 
+        Posts p
+    JOIN 
+        PostVoteStatistics pv ON p.Id = pv.PostId
+    LEFT JOIN 
+        UserStatistics u ON p.OwnerUserId = u.UserId
+)
+SELECT 
+    eps.PostId,
+    eps.Title,
+    eps.Score,
+    eps.UpVoteCount,
+    eps.DownVoteCount,
+    eps.DeletionCount,
+    eps.TotalBadges,
+    eps.TotalPosts,
+    eps.NetVotes,
+    eps.PostCategory,
+    CASE 
+        WHEN eps.NetVotes > 0 THEN 'Positive'
+        WHEN eps.NetVotes < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM 
+    EnhancedPostStats eps
+WHERE 
+    (eps.Score > 5 OR eps.TotalPosts < 5)
+    AND (eps.UpVoteCount > 10 OR eps.DownVoteCount = 0)
+ORDER BY 
+    eps.NetVotes DESC, eps.Score DESC
+FETCH FIRST 10 ROWS ONLY;
+
+-- This query combines various features such as CTEs, outer joins for aggregating votes and user statistics,
+-- complex conditions in the WHERE clause, and categorization logic for posts and vote sentiment.

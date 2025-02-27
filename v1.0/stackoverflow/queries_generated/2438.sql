@@ -1,0 +1,48 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        COALESCE(AVG(DATEDIFF(SECOND, p.CreationDate, p.LastActivityDate)), 0) AS AvgActiveDuration
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostsCount
+    FROM Tags t
+    JOIN Posts p ON t.Id = p.Tags::int -- Assumes there's a mechanism to extract tag Ids
+    GROUP BY t.TagName
+    HAVING COUNT(DISTINCT p.Id) > 10
+),
+RankedUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        ROW_NUMBER() OVER (ORDER BY us.Reputation DESC) AS UserRank
+    FROM UserStats us
+)
+SELECT 
+    ru.DisplayName,
+    ru.Reputation,
+    tt.TagName,
+    tt.PostsCount,
+    CASE 
+        WHEN ru.Reputation >= 1000 THEN 'Gold Badge'
+        WHEN ru.Reputation >= 500 THEN 'Silver Badge'
+        ELSE 'Bronze Badge'
+    END AS BadgeType,
+    COALESCE((SELECT MAX(b.Class) 
+              FROM Badges b 
+              WHERE b.UserId = ru.UserId 
+                AND b.Class IN (1,2,3)), 0) AS HighestBadge
+FROM RankedUsers ru
+JOIN TopTags tt ON ru.UserId IN (SELECT DISTINCT p.OwnerUserId FROM Posts p WHERE p.Tags LIKE '%' || tt.TagName || '%')
+WHERE ru.UserRank <= 50
+ORDER BY ru.Reputation DESC, tt.PostsCount DESC;

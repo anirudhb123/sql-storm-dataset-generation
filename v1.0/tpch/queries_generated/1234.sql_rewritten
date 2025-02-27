@@ -1,0 +1,56 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), PriceStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_size > 10
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+), OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    s.s_name,
+    ps.p_name,
+    ps.p_retailprice,
+    COALESCE(os.total_revenue, 0) AS revenue,
+    s.total_available,
+    s.avg_supply_cost
+FROM 
+    SupplierStats s
+JOIN 
+    PriceStats ps ON s.total_available > 50
+LEFT JOIN 
+    OrderSummary os ON ps.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey = s.s_suppkey)
+WHERE 
+    s.avg_supply_cost < (SELECT AVG(avg_supply_cost) FROM SupplierStats)
+ORDER BY 
+    revenue DESC, s.s_name;

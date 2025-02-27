@@ -1,0 +1,55 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER(PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_orderstatus
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        s.s_nationkey
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    SUM(LO.total_revenue) AS total_order_revenue,
+    SUM(SD.total_supply_cost) AS total_supply_cost,
+    CASE 
+        WHEN SUM(LO.total_revenue) IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Recorded'
+    END AS revenue_status
+FROM 
+    RankedOrders LO
+FULL OUTER JOIN 
+    SupplierDetails SD ON LO.o_orderkey = SD.s_suppkey 
+JOIN 
+    nation n ON n.n_nationkey = SD.s_nationkey
+JOIN 
+    region r ON r.r_regionkey = n.n_regionkey
+WHERE 
+    (LO.order_rank <= 10 OR SD.total_supply_cost IS NOT NULL)
+GROUP BY 
+    r.r_name, n.n_name, s.s_name
+HAVING 
+    SUM(LO.total_revenue) > 10000 OR SUM(SD.total_supply_cost) > 5000
+ORDER BY 
+    total_order_revenue DESC, total_supply_cost DESC;

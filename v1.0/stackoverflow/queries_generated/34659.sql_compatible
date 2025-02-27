@@ -1,0 +1,77 @@
+
+WITH RecursivePostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2)  
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(p.Score) AS TotalScore,
+        STRING_AGG(DISTINCT b.Name, ', ') AS Badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+    GROUP BY 
+        ph.PostId
+),
+FinalPostStats AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        u.Reputation,
+        u.PostsCount,
+        u.TotalScore,
+        u.Badges,
+        cp.FirstClosedDate,
+        cp.CloseCount
+    FROM 
+        RecursivePostStats ps
+    JOIN 
+        UserReputation u ON ps.OwnerUserId = u.UserId
+    LEFT JOIN 
+        ClosedPosts cp ON ps.PostId = cp.PostId
+)
+SELECT 
+    fps.PostId,
+    fps.Title,
+    fps.Reputation,
+    fps.PostsCount,
+    fps.TotalScore,
+    fps.Badges,
+    COALESCE(fps.FirstClosedDate, 'No Closure') AS FirstClosedDate,
+    COALESCE(fps.CloseCount, 0) AS CloseCount,
+    DENSE_RANK() OVER (ORDER BY fps.TotalScore DESC) AS ScoreRank
+FROM 
+    FinalPostStats fps
+WHERE 
+    fps.Reputation > 1000  
+ORDER BY 
+    ScoreRank, fps.TotalScore DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

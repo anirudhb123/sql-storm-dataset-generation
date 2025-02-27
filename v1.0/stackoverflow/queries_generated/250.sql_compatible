@@ -1,0 +1,91 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankByScore
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 month'
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostInteractions AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    UP.DisplayName,
+    RP.PostId,
+    RP.Title,
+    RP.Score,
+    RP.ViewCount,
+    UP.CommentCount AS UserComments,
+    UP.Upvotes,
+    UP.Downvotes,
+    PI.TotalComments AS PostComments,
+    PI.TotalUpvotes AS PostUpvotes,
+    PI.TotalDownvotes AS PostDownvotes
+FROM 
+    RankedPosts RP
+JOIN 
+    UserActivity UP ON RP.PostId = UP.UserId
+JOIN 
+    PostInteractions PI ON RP.PostId = PI.PostId
+WHERE 
+    RP.RankByScore <= 5
+ORDER BY 
+    RP.Score DESC, UserComments DESC
+LIMIT 50
+UNION ALL
+SELECT 
+    'TOTALS' AS UserName,
+    NULL AS PostId,
+    NULL AS Title,
+    SUM(RP.Score) AS TotalScore,
+    SUM(RP.ViewCount) AS TotalViews,
+    NULL,
+    SUM(UP.Upvotes) AS TotalUserUpvotes,
+    SUM(UP.Downvotes) AS TotalUserDownvotes,
+    SUM(PI.TotalComments) AS TotalPostComments,
+    SUM(PI.TotalUpvotes) AS TotalPostUpvotes,
+    SUM(PI.TotalDownvotes) AS TotalPostDownvotes
+FROM 
+    RankedPosts RP
+JOIN 
+    UserActivity UP ON RP.PostId = UP.UserId
+JOIN 
+    PostInteractions PI ON RP.PostId = PI.PostId
+WHERE 
+    RP.RankByScore <= 5;

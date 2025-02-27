@@ -1,0 +1,57 @@
+
+WITH RecursiveHierarchy AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_customer_id, 
+        ca.ca_address_id, 
+        ca.ca_city, 
+        SUM(COALESCE(ss.ss_net_profit, 0)) AS total_sales,
+        MAX(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_customer,
+        DENSE_RANK() OVER (PARTITION BY ca.ca_city ORDER BY SUM(ss.ss_net_profit) DESC) AS city_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk AND ss.ss_sold_date_sk BETWEEN 1 AND 365
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id, ca.ca_address_id, ca.ca_city
+),
+AggregatedSales AS (
+    SELECT 
+        ca.ca_city AS city, 
+        SUM(total_sales) AS total_city_sales, 
+        COUNT(female_customer) AS female_count 
+    FROM 
+        RecursiveHierarchy
+    GROUP BY 
+        ca.ca_city
+)
+SELECT 
+    a.city, 
+    a.total_city_sales, 
+    RANK() OVER (ORDER BY a.total_city_sales DESC) AS sales_rank,
+    CASE 
+        WHEN a.female_count > 0 THEN 'Yes' 
+        ELSE 'No' 
+    END AS has_females
+FROM 
+    AggregatedSales a
+WHERE 
+    a.total_city_sales IS NOT NULL
+
+UNION ALL
+
+SELECT 
+    'Total' AS city, 
+    SUM(a.total_city_sales) AS total_city_sales, 
+    NULL AS female_count, 
+    NULL AS has_females
+FROM 
+    AggregatedSales a
+HAVING 
+    SUM(a.total_city_sales) > 1000000
+ORDER BY 
+    sales_rank ASC NULLS LAST;

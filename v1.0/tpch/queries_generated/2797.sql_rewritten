@@ -1,0 +1,63 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > 1000
+),
+OrderLineDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_partkey) AS line_item_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        ps.ps_supplycost,
+        ps.ps_availqty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+),
+TopSuppliers AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM SupplierDetails sd
+    JOIN PartSupplier ps ON sd.s_suppkey = ps.ps_suppkey
+    GROUP BY sd.s_suppkey, sd.s_name
+    ORDER BY total_supply_cost DESC
+    LIMIT 5
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderstatus,
+    ro.o_totalprice,
+    ro.o_orderdate,
+    ol.total_revenue,
+    ol.line_item_count,
+    ts.s_name AS top_supplier_name,
+    ts.total_supply_cost,
+    COALESCE(ts.total_supply_cost, 0) - COALESCE(ol.total_revenue, 0) AS profit_margin
+FROM RankedOrders ro
+LEFT JOIN OrderLineDetails ol ON ro.o_orderkey = ol.l_orderkey
+LEFT JOIN TopSuppliers ts ON ol.line_item_count > 0 AND ol.total_revenue > 0
+WHERE ro.order_rank <= 10 AND (ro.o_orderstatus = 'O' OR ro.o_orderstatus = 'F')
+ORDER BY ro.o_orderdate DESC, profit_margin ASC;

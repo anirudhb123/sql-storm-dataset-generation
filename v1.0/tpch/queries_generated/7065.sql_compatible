@@ -1,0 +1,71 @@
+
+WITH OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS unique_customers,
+        AVG(o.o_totalprice) AS avg_order_value,
+        MIN(l.l_shipdate) AS first_ship_date,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierPerformance AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(l.l_quantity) AS total_quantity_supplied,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(ps.ps_supplycost * l.l_quantity) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS orders_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    os.o_orderkey,
+    os.total_revenue,
+    os.unique_customers,
+    os.avg_order_value,
+    sp.total_quantity_supplied,
+    sp.total_orders,
+    sp.total_supply_cost,
+    co.c_custkey AS custkey,
+    co.c_name,
+    co.orders_count,
+    co.total_spent
+FROM 
+    OrderSummary os
+JOIN 
+    SupplierPerformance sp ON sp.total_orders > 1
+JOIN 
+    CustomerOrders co ON co.orders_count > 1
+ORDER BY 
+    os.total_revenue DESC, co.total_spent DESC
+LIMIT 100;

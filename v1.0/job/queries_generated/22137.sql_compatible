@@ -1,0 +1,68 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        t.title,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC, t.title) AS rank,
+        COUNT(DISTINCT c.person_id) AS total_cast_members
+    FROM 
+        aka_title t
+    JOIN 
+        title a ON a.id = t.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.movie_id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.movie_id
+    GROUP BY 
+        a.id, t.title, a.production_year
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.keywords,
+        rm.rank,
+        rm.total_cast_members,
+        (SELECT STRING_AGG(DISTINCT CONCAT(n.name, '(', ct.kind, ')'), ', ') 
+         FROM cast_info ci
+         JOIN aka_name n ON n.person_id = ci.person_id
+         JOIN comp_cast_type ct ON ct.id = ci.person_role_id
+         WHERE ci.movie_id = rm.movie_id) AS cast_details,
+        (SELECT COUNT(*)
+         FROM movie_info mi
+         WHERE mi.movie_id = rm.movie_id
+         AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'box office')) AS has_box_office
+    FROM 
+        RankedMovies rm
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    COALESCE(md.keywords, ARRAY[]::TEXT[]) AS keywords,
+    md.rank,
+    md.total_cast_members,
+    MD1.cast_details,
+    CASE 
+        WHEN md.has_box_office > 0 THEN 'YES' 
+        ELSE 'NO' 
+    END AS box_office_info,
+    CASE 
+        WHEN md.total_cast_members IS NULL THEN 'NO CAST'
+        WHEN md.total_cast_members = 0 THEN 'NO CAST'
+        ELSE 'CAST AVAILABLE'
+    END AS cast_availability
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    (SELECT DISTINCT movie_id, STRING_AGG(DISTINCT l.link, '; ') AS linked_movies
+     FROM movie_link l
+     WHERE l.linked_movie_id IS NOT NULL
+     GROUP BY movie_id) MD1 ON MD1.movie_id = md.movie_id
+WHERE 
+    md.rank = 1
+ORDER BY 
+    md.movie_id DESC
+LIMIT 100;

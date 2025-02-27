@@ -1,0 +1,70 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Tags,
+        u.DisplayName AS Author,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Posts a WHERE a.ParentId = p.Id) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tag ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.CreationDate > DATE_SUB(CURRENT_DATE, INTERVAL 30 DAY)
+        AND p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Tags
+), 
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+AverageEngagement AS (
+    SELECT 
+        AVG(CommentCount) AS AvgComments,
+        AVG(AnswerCount) AS AvgAnswers,
+        AVG(ViewCount) AS AvgViews
+    FROM 
+        RecentPosts
+)
+SELECT 
+    u.DisplayName,
+    ua.QuestionsAsked,
+    ua.TotalViews,
+    ua.UpVotes,
+    ua.DownVotes,
+    COALESCE(ae.AvgComments, 0) AS AvgComments,
+    COALESCE(ae.AvgAnswers, 0) AS AvgAnswers,
+    rp.TagList
+FROM 
+    UserActivity ua
+JOIN 
+    RecentPosts rp ON ua.QuestionsAsked > 0
+LEFT JOIN 
+    AverageEngagement ae ON TRUE
+ORDER BY 
+    ua.QuestionsAsked DESC, 
+    ua.TotalViews DESC;

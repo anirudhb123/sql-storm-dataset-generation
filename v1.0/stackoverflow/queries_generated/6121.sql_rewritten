@@ -1,0 +1,55 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews
+    FROM Tags T
+    JOIN Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::int[])
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY T.TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(PH.Id) AS EditCount
+    FROM Users U
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN PostHistory PH ON U.Id = PH.UserId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    RU.UserId,
+    RU.DisplayName,
+    RU.Reputation,
+    RU.ReputationRank,
+    RU.TotalUpvotes,
+    RU.TotalDownvotes,
+    RU.TotalPosts,
+    PT.TagName,
+    PT.PostCount,
+    PT.TotalViews,
+    UA.CommentCount,
+    UA.EditCount
+FROM RankedUsers RU
+JOIN PopularTags PT ON TRUE
+JOIN UserActivity UA ON RU.UserId = UA.UserId
+WHERE RU.TotalPosts > 5
+ORDER BY RU.ReputationRank, PT.TotalViews DESC;

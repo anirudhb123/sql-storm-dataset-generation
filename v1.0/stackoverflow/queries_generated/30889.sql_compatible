@@ -1,0 +1,89 @@
+
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        1 AS Level
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000  
+    UNION ALL
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        URC.Level + 1
+    FROM 
+        UserReputationCTE URC
+    JOIN 
+        Users U ON U.Reputation > URC.Reputation  
+    WHERE 
+        URC.Level < 5  
+), PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 2) AS UpVotes,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 3) AS DownVotes,
+        P.CreationDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 YEAR'  
+    GROUP BY 
+        P.Id, P.CreationDate
+), UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        COALESCE(SUM(PS.CommentCount), 0) AS TotalComments,
+        COALESCE(SUM(PS.UpVotes), 0) AS TotalUpVotes,
+        COALESCE(SUM(PS.DownVotes), 0) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        PostStatistics PS ON P.Id = PS.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+), RankedUsers AS (
+    SELECT 
+        U.*,
+        UPS.PostCount,
+        UPS.TotalComments,
+        UPS.TotalUpVotes,
+        UPS.TotalDownVotes,
+        RANK() OVER (ORDER BY UPS.TotalUpVotes DESC, UPS.TotalDownVotes ASC) AS UserRank
+    FROM 
+        Users U
+    JOIN 
+        UserPostStats UPS ON U.Id = UPS.UserId
+)
+
+SELECT 
+    RU.DisplayName,
+    RU.Reputation,
+    RU.PostCount,
+    RU.TotalComments,
+    RU.TotalUpVotes,
+    RU.TotalDownVotes,
+    RU.UserRank,
+    URC.Level AS ReputationLevel
+FROM 
+    RankedUsers RU
+JOIN 
+    UserReputationCTE URC ON RU.Id = URC.UserId
+WHERE 
+    RU.PostCount > 10  
+    AND RU.UserRank <= 50  
+ORDER BY 
+    URC.Level DESC,  
+    RU.UserRank;

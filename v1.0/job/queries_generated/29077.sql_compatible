@@ -1,0 +1,66 @@
+
+WITH MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        k.keyword AS movie_keyword,
+        STRING_AGG(c.name, ', ') AS companies_involved,
+        STRING_AGG(p.name, ', ') AS cast_members
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info cinfo ON cc.subject_id = cinfo.person_id
+    LEFT JOIN 
+        aka_name c ON c.id = cinfo.person_id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name p ON mc.company_id = p.id
+    WHERE 
+        m.production_year > 2000
+    GROUP BY 
+        m.id, m.title, m.production_year, k.keyword
+),
+RoleCount AS (
+    SELECT 
+        ca.movie_id,
+        COUNT(DISTINCT ca.person_id) AS role_count
+    FROM 
+        cast_info ca
+    GROUP BY 
+        ca.movie_id
+),
+FinalBenchmark AS (
+    SELECT 
+        m.movie_id,
+        m.movie_title,
+        m.production_year,
+        m.movie_keyword,
+        m.companies_involved,
+        m.cast_members,
+        rc.role_count
+    FROM 
+        MovieInfo m
+    LEFT JOIN 
+        RoleCount rc ON m.movie_id = rc.movie_id
+)
+SELECT 
+    fb.movie_id,
+    fb.movie_title,
+    fb.production_year,
+    fb.movie_keyword,
+    fb.companies_involved,
+    fb.cast_members,
+    fb.role_count
+FROM 
+    FinalBenchmark fb
+ORDER BY 
+    fb.production_year DESC, 
+    fb.role_count DESC;

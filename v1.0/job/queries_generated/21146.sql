@@ -1,0 +1,76 @@
+WITH movie_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        k.keyword,
+        COUNT(k.keyword) OVER (PARTITION BY m.id) AS keyword_count,
+        CASE 
+            WHEN m.production_year IS NULL THEN 'Unknown Year'
+            ELSE CAST(m.production_year AS text)
+        END AS production_year_str
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+), cast_info_ranked AS (
+    SELECT 
+        c.movie_id,
+        ca.person_id,
+        ca.role_id,
+        ca.nr_order,
+        RANK() OVER (PARTITION BY c.movie_id ORDER BY ca.nr_order) AS cast_rank
+    FROM 
+        cast_info ca
+    JOIN 
+        complete_cast c ON ca.movie_id = c.movie_id
+), top_directors AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ROW_NUMBER() OVER (ORDER BY COUNT(mc.company_id) DESC) AS director_rank
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id, cn.name
+), movie_details AS (
+    SELECT 
+        mwk.movie_id,
+        mwk.title,
+        mwk.keyword,
+        mwk.production_year_str,
+        cir.person_id,
+        cir.role_id,
+        cir.cast_rank,
+        td.company_name,
+        td.director_rank
+    FROM 
+        movie_with_keywords mwk
+    LEFT JOIN 
+        cast_info_ranked cir ON mwk.movie_id = cir.movie_id
+    LEFT JOIN 
+        top_directors td ON mwk.movie_id = td.movie_id
+)
+
+SELECT 
+    md.title AS movie_title,
+    COALESCE(md.keyword, 'No Keywords') AS movie_keyword,
+    COALESCE(md.production_year_str, 'N/A') AS release_year,
+    ARRAY_AGG(DISTINCT CONCAT('Role: ', rt.role, ' - Actor ID: ', md.person_id)) AS cast_details,
+    COUNT(DISTINCT md.person_id) AS total_cast,
+    MAX(md.cast_rank) AS max_cast_rank,
+    AVG(md.director_rank) AS average_director_rank
+FROM 
+    movie_details md
+LEFT JOIN 
+    role_type rt ON md.role_id = rt.id
+WHERE 
+    (md.director_rank IS NULL OR md.director_rank <= 10) 
+    AND (YEAR(CURRENT_DATE) - COALESCE(md.production_year_str::integer, 0) < 20)
+GROUP BY 
+    md.title, md.keyword, md.production_year_str
+ORDER BY 
+    total_cast DESC, average_director_rank ASC;

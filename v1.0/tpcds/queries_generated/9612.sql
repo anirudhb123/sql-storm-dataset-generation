@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.web_site_id,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+    GROUP BY
+        ws.web_site_sk, ws.web_site_id
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_state,
+        RANK() OVER (PARTITION BY ca.ca_state ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM
+        customer_demographics cd
+    JOIN
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    JOIN
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT
+    rs.web_site_id,
+    MAX(rs.total_sales) AS max_sales,
+    COUNT(DISTINCT cd.cd_demo_sk) AS unique_customers,
+    COUNT(CASE WHEN cd.cd_gender = 'F' THEN 1 END) AS female_customers,
+    COUNT(CASE WHEN cd.cd_gender = 'M' THEN 1 END) AS male_customers
+FROM
+    RankedSales rs
+JOIN
+    web_page wp ON rs.web_site_sk = wp.wp_web_page_sk
+JOIN
+    CustomerDemographics cd ON wp.wp_customer_sk = cd.cd_demo_sk
+WHERE
+    rs.sales_rank = 1
+GROUP BY
+    rs.web_site_id
+ORDER BY
+    max_sales DESC
+LIMIT 10;

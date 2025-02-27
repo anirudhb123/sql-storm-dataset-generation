@@ -1,0 +1,49 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS Author,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        p.PostTypeId = 1 AND
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        (SELECT SUM(Score) FROM Votes v WHERE v.PostId = rp.PostId) AS TotalVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.Author,
+    tp.CommentCount,
+    tp.BadgeCount,
+    tp.TotalVotes
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, 
+    tp.ViewCount DESC;

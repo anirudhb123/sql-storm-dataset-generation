@@ -1,0 +1,60 @@
+
+WITH RECURSIVE UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.PostTypeId,
+        COUNT(C.Id) AS CommentCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBountyAmount,
+        MAX(P.ViewCount) AS MaxViewCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9)  
+    GROUP BY P.Id, P.OwnerUserId, P.PostTypeId
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(PS.CommentCount) AS TotalComments,
+        SUM(PS.TotalBountyAmount) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN PostSummary PS ON P.Id = PS.PostId
+    GROUP BY U.Id, U.DisplayName
+)
+
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    UB.BadgeCount,
+    UB.GoldBadges,
+    UB.SilverBadges,
+    UB.BronzeBadges,
+    UPS.QuestionCount,
+    UPS.AnswerCount,
+    UPS.TotalComments,
+    UPS.TotalBounty,
+    (UPS.QuestionCount * 10 + UPS.AnswerCount * 5) AS EngagementScore,
+    CASE
+        WHEN UPS.TotalBounty > 0 THEN 'Active Bounty'
+        ELSE 'No Active Bounty'
+    END AS BountyStatus
+FROM UserBadges UB
+JOIN UserPostStats UPS ON UB.UserId = UPS.UserId
+ORDER BY EngagementScore DESC, UPS.TotalBounty DESC
+LIMIT 100;

@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_site_id,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk, ws.web_site_id
+),
+DailySales AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.ws_net_paid) AS daily_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_count,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_date
+),
+TopSales AS (
+    SELECT 
+        web_site_id,
+        CASE 
+            WHEN COUNT(DISTINCT ws_order_number) IS NULL THEN 'No sales'
+            WHEN COUNT(DISTINCT ws_order_number) < 10 THEN 'Low Activity'
+            ELSE 'High Activity'
+        END AS activity_status
+    FROM 
+        web_sales
+    GROUP BY 
+        web_site_id
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    ca.ca_city,
+    SUM(ser.ws_net_paid_inc_ship_tax) AS total_spent,
+    DENSE_RANK() OVER (ORDER BY SUM(ser.ws_net_paid_inc_ship_tax) DESC) AS spending_rank,
+    (SELECT COUNT(*) FROM store_returns sr WHERE sr.sr_customer_sk = cs.c_customer_sk) AS returns_count,
+    COALESCE(t.activity_status, 'Unknown') AS site_activity
+FROM 
+    customer cs
+JOIN 
+    customer_address ca ON cs.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ser ON cs.c_customer_sk = ser.ws_ship_customer_sk 
+LEFT JOIN 
+    TopSales t ON ser.ws_web_site_sk = t.web_site_id
+WHERE 
+    ca.ca_city IS NOT NULL 
+    AND ca.ca_country = 'USA'
+    AND (cs.c_birth_year < 1980 OR (cs.c_birth_year = 1980 AND cs.c_birth_month < 10))
+GROUP BY 
+    cs.c_first_name, 
+    cs.c_last_name, 
+    ca.ca_city, 
+    t.activity_status
+HAVING 
+    SUM(ser.ws_net_paid_inc_tax) > (SELECT AVG(total_sales) FROM RankedSales)
+ORDER BY 
+    spending_rank
+LIMIT 100;

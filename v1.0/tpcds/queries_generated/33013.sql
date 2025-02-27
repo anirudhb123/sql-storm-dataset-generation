@@ -1,0 +1,80 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+),
+top_sales AS (
+    SELECT
+        sd.ws_item_sk,
+        i.i_item_desc,
+        sd.total_quantity,
+        sd.total_profit,
+        ROW_NUMBER() OVER (ORDER BY sd.total_profit DESC) AS top_rank
+    FROM
+        sales_data sd
+    JOIN
+        item i ON sd.ws_item_sk = i.i_item_sk
+    WHERE
+        sd.rank <= 10
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            ELSE CASE 
+                WHEN cd.cd_purchase_estimate > 1000 THEN 'High Value' 
+                ELSE 'Regular'
+            END
+        END AS customer_value
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT
+        t.ws_sold_date_sk,
+        DATE(d.d_date) AS sale_date,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_net_paid) AS total_sales,
+        AVG(ws_net_profit) AS average_profit
+    FROM
+        web_sales ws
+    JOIN
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY
+        t.ws_sold_date_sk, d.d_date
+)
+SELECT 
+    s.item_sk,
+    s.item_desc,
+    c.c_first_name,
+    c.c_last_name,
+    c.customer_value,
+    ss.sale_date,
+    ss.total_orders,
+    ss.total_sales,
+    ss.average_profit
+FROM 
+    top_sales s
+LEFT JOIN 
+    customer_info c ON c.c_customer_sk IN (SELECT DISTINCT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = s.ws_item_sk)
+JOIN 
+    sales_summary ss ON ss.sale_date = CURRENT_DATE - INTERVAL '1 day'
+WHERE 
+    c.cd_gender IS NOT NULL
+ORDER BY 
+    ss.total_sales DESC 
+LIMIT 10;

@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        title m 
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.depth + 1
+    FROM 
+        title e 
+    JOIN 
+        movie_link ml ON e.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT c.person_id) AS actor_count,
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = m.id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre')) AS genre_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    MAX(mh.depth) AS max_depth
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    aka_title at ON c.movie_id = at.movie_id
+JOIN 
+    title m ON at.movie_id = m.id
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    MovieHierarchy mh ON mh.movie_id = m.id
+WHERE 
+    ak.name IS NOT NULL
+    AND m.production_year BETWEEN 2000 AND 2023
+    AND (c.note IS NULL OR c.note != 'Cameo')
+GROUP BY 
+    ak.name, m.title, m.production_year
+ORDER BY 
+    actor_count DESC, m.production_year DESC;

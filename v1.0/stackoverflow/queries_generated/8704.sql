@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.Id END) AS UpVoteCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 year' 
+        AND p.PostTypeId = 1  -- Only considering questions
+    GROUP BY 
+        p.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(rp.Score) AS TotalScore,
+        SUM(rp.ViewCount) AS TotalViews,
+        SUM(rp.CommentCount) AS TotalComments,
+        COUNT(DISTINCT rp.PostId) AS TotalPosts,
+        AVG(rp.UserPostRank) AS AvgPostRank
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalScore,
+    us.TotalViews,
+    us.TotalComments,
+    us.TotalPosts,
+    us.AvgPostRank
+FROM 
+    UserStats us
+WHERE 
+    us.TotalPosts > 5
+ORDER BY 
+    us.TotalScore DESC, us.TotalViews DESC;

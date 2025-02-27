@@ -1,0 +1,70 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_net_paid) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM 
+        store_sales
+    GROUP BY 
+        s_store_sk
+),
+recent_customers AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name || ' ' || c_last_name AS customer_name,
+        cd_gender,
+        cd_marital_status,
+        cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_first_shipto_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = CURRENT_DATE - INTERVAL '30 DAY')
+),
+sales_summary AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws_net_paid) AS total_web_sales,
+        AVG(ws_net_paid) AS avg_web_sales,
+        COUNT(ws.order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        recent_customers rc ON ws.bill_customer_sk = rc.c_customer_sk
+    GROUP BY 
+        ws.bill_customer_sk
+),
+store_info AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        w.w_warehouse_name,
+        COALESCE(rc.total_web_sales, 0) AS total_web_sales
+    FROM 
+        store s
+    LEFT JOIN 
+        warehouse w ON s.s_store_sk = w.w_warehouse_sk
+    LEFT JOIN 
+        sales_summary rc ON s.s_store_sk = rc.bill_customer_sk
+)
+SELECT 
+    si.s_store_name,
+    si.warehouse_name,
+    si.total_web_sales,
+    rs.total_sales,
+    CASE 
+        WHEN rs.sales_rank = 1 THEN 'Top Store'
+        WHEN rs.sales_rank <= 5 THEN 'Top 5 Store'
+        ELSE 'Other'
+    END AS store_category
+FROM 
+    store_info si
+JOIN 
+    ranked_sales rs ON si.s_store_sk = rs.s_store_sk
+WHERE 
+    si.total_web_sales > (SELECT AVG(total_web_sales) FROM sales_summary) 
+    OR rs.total_sales > 10000
+ORDER BY 
+    si.total_web_sales DESC, rs.total_sales DESC;

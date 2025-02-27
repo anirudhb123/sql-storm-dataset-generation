@@ -1,0 +1,65 @@
+-- Performance Benchmarking SQL Query
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(V.CreationDate IS NOT NULL) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        P.Tags,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, P.AnswerCount, P.CommentCount, P.FavoriteCount, P.Tags
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.PostCount,
+    U.BadgeCount,
+    U.VoteCount,
+    U.UpVotes AS UserUpVotes,
+    U.DownVotes AS UserDownVotes,
+    P.Title AS PostTitle,
+    P.Score AS PostScore,
+    P.ViewCount AS PostViews,
+    P.AnswerCount AS PostAnswers,
+    P.CommentCount AS PostComments,
+    P.FavoriteCount AS PostFavorites,
+    P.UpVotes AS PostUpVotes,
+    P.DownVotes AS PostDownVotes
+FROM 
+    UserStatistics U
+JOIN 
+    PostStatistics P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, P.Score DESC;

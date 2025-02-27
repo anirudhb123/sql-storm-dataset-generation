@@ -1,0 +1,91 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s_name,
+        s_acctbal,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY s_acctbal DESC) AS rank,
+        n.n_nationkey
+    FROM 
+        supplier s 
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s_acctbal IS NOT NULL
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_availqty) > 0 AND 
+        TRIM(p.p_comment) != ''
+),
+SupplierOrders AS (
+    SELECT DISTINCT 
+        o.o_orderkey,
+        l.l_extendedprice,
+        c.c_name,
+        n.n_name,
+        l.l_discount,
+        l.l_returnflag,
+        l.l_linestatus,
+        CASE 
+            WHEN l.l_discount > 0.1 THEN 'Discounted'
+            ELSE 'Regular'
+        END AS Price_Category
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1995-01-01' AND DATE '1995-12-31'
+),
+FinalBenchmark AS (
+    SELECT 
+        r.r_name AS Region,
+        COUNT(DISTINCT so.o_orderkey) AS Total_Orders,
+        AVG(so.l_extendedprice) AS Avg_Price,
+        SUM(CASE WHEN so.l_returnflag = 'R' THEN so.l_extendedprice ELSE 0 END) AS Total_Returned,
+        COUNT(DISTINCT ps.p_partkey) AS Unique_Parts_Supplied,
+        STRING_AGG(DISTINCT CONCAT_WS(':', s.s_name, CAST(s.s_acctbal AS VARCHAR)), ', ') AS Supplier_Info
+    FROM 
+        SupplierOrders so
+    LEFT JOIN 
+        RankedSuppliers s ON so.c_name = s.s_name
+    LEFT JOIN 
+        region r ON r.r_regionkey = so.n_nationkey
+    LEFT JOIN 
+        FilteredParts ps ON so.o_orderkey = ps.p_partkey
+    WHERE 
+        r.r_name IS NOT NULL
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    Region,
+    Total_Orders,
+    Avg_Price,
+    Total_Returned,
+    Unique_Parts_Supplied,
+    CASE 
+        WHEN Total_Orders IS NULL THEN 'No Orders'
+        ELSE 'Orders Exist'
+    END AS Orders_Status
+FROM 
+    FinalBenchmark
+WHERE 
+    Avg_Price IS NOT NULL
+ORDER BY 
+    Total_Orders DESC NULLS LAST;

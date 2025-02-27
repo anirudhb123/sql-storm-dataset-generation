@@ -1,0 +1,92 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Selecting only questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 END) AS TitleOrBodyEdits,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT b.Id) AS BadgesCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    rph.Title AS QuestionTitle,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.UpvoteCount,
+    ps.DownvoteCount,
+    pvs.EditCount,
+    pvs.TitleOrBodyEdits,
+    pvs.CloseReopenCount,
+    ua.DisplayName AS UserDisplayName,
+    ua.TotalViews,
+    ua.PostsCount,
+    ua.BadgesCount
+FROM 
+    RecursivePostHierarchy rph
+LEFT JOIN 
+    PostStatistics ps ON rph.Id = ps.PostId
+LEFT JOIN 
+    PostHistoryStats pvs ON rph.Id = pvs.PostId
+LEFT JOIN 
+    Users u ON rph.Id = u.Id -- Assuming we need user information related to the post owner
+LEFT JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+ORDER BY 
+    ps.VoteCount DESC, ps.CommentCount DESC;

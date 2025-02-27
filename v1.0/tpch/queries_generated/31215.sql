@@ -1,0 +1,46 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal > 0
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.hierarchy_level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON ps.ps_suppkey = sh.s_suppkey
+    JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0 AND sh.hierarchy_level < 5
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_totalprice DESC) AS order_rank,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY o.o_orderkey) AS net_sales
+    FROM orders o
+    JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2023-07-01'
+),
+customer_summary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    cs.c_name AS customer_name,
+    cs.total_spent,
+    oe.o_totalprice AS order_total,
+    oe.order_rank,
+    oe.net_sales
+FROM region r
+JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN ranked_orders oe ON oe.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderstatus = 'O')
+LEFT JOIN customer_summary cs ON cs.total_spent > 10000
+WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+ORDER BY r.r_name, n.n_name, cs.total_spent DESC
+LIMIT 50;

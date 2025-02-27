@@ -1,0 +1,59 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount,
+        AVG(DATEDIFF(CURDATE(), u.CreationDate)) AS AvgAccountAgeDays
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        CommentCount,
+        UpVoteCount,
+        DownVoteCount,
+        BadgeCount,
+        AvgAccountAgeDays,
+        RANK() OVER (ORDER BY PostCount DESC) AS PostRank,
+        RANK() OVER (ORDER BY UpVoteCount DESC) AS UpVoteRank
+    FROM 
+        UserActivity
+)
+SELECT 
+    UserId, 
+    DisplayName,
+    Reputation,
+    PostCount,
+    CommentCount,
+    UpVoteCount,
+    DownVoteCount,
+    BadgeCount,
+    AvgAccountAgeDays,
+    PostRank,
+    UpVoteRank
+FROM 
+    TopActiveUsers
+WHERE 
+    PostRank <= 10 OR UpVoteRank <= 10
+ORDER BY 
+    PostRank, 
+    UpVoteRank;

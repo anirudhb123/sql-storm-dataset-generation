@@ -1,0 +1,76 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+TopSuppliers AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name,
+        sd.s_acctbal,
+        sd.total_supply_cost
+    FROM 
+        SupplierDetails sd
+    WHERE 
+        sd.rank <= 3
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        COUNT(l.l_orderkey) AS total_lineitems,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS orders_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    c.c_name,
+    c.orders_count,
+    c.total_spent,
+    ts.s_name AS top_supplier,
+    ts.total_supply_cost,
+    os.total_value,
+    os.total_lineitems,
+    COALESCE(os.total_lineitems, 0) AS line_items_status,
+    CASE 
+        WHEN os.total_value > 1000 THEN 'High Value'
+        ELSE 'Low Value'
+    END AS value_category
+FROM 
+    CustomerOrders c
+LEFT JOIN 
+    OrderStats os ON os.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = c.c_custkey)
+LEFT JOIN 
+    TopSuppliers ts ON ts.s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_partkey IN (SELECT l_partkey FROM lineitem WHERE l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = c.c_custkey)))
+WHERE 
+    c.total_spent IS NOT NULL
+ORDER BY 
+    c.orders_count DESC, 
+    ts.total_supply_cost DESC;

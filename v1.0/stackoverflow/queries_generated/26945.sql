@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        RANK() OVER (ORDER BY COUNT(c.Id) DESC) AS CommentRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.OwnerUserId,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.AnswerCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.CommentRank <= 10 -- Top 10 most commented questions
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.CreationDate,
+    tp.OwnerUserId,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    tp.AnswerCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+    COALESCE((
+        SELECT 
+            SUM(b.Class)
+        FROM 
+            Badges b
+        WHERE 
+            b.UserId = tp.OwnerUserId
+    ), 0) AS TotalBadgeClass,
+    (SELECT 
+        COUNT(*)
+     FROM 
+        PostHistory ph
+     WHERE 
+        ph.PostId = tp.PostId AND ph.PostHistoryTypeId IN (10, 11, 12, 13)
+    ) AS ActionCount
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Tags t ON tp.PostId = ANY(string_to_array(SUBSTRING(tp.Body FROM '<tag_start>' FOR '<tag_end>'), ','))
+GROUP BY 
+    tp.PostId, tp.Title, tp.Body, tp.CreationDate, tp.OwnerUserId, tp.OwnerDisplayName, tp.CommentCount, tp.AnswerCount, tp.UpVotes, tp.DownVotes
+ORDER BY 
+    tp.CommentCount DESC;

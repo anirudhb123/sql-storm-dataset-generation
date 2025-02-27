@@ -1,0 +1,51 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        1 AS order_level,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_mktsegment
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT 
+        oh.o_orderkey,
+        oh.order_level + 1,
+        oh.o_totalprice,
+        oh.o_orderdate,
+        oh.c_mktsegment
+    FROM 
+        OrderHierarchy oh
+    JOIN 
+        lineitem li ON oh.o_orderkey = li.l_orderkey
+)
+SELECT 
+    p.p_name,
+    ps.ps_availqty,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+    AVG(o.o_totalprice) AS avg_order_value,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    COUNT(DISTINCT CASE WHEN li.l_returnflag = 'R' THEN li.l_orderkey END) AS returned_orders,
+    DENSE_RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(li.l_extendedprice * (1 - li.l_discount)) DESC) AS revenue_rank
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    lineitem li ON ps.ps_suppkey = li.l_suppkey
+LEFT JOIN 
+    OrderHierarchy o ON li.l_orderkey = o.o_orderkey
+WHERE 
+    p.p_retailprice > 10.00 
+    AND (ps.ps_availqty IS NULL OR ps.ps_availqty > 0)
+GROUP BY 
+    p.p_name, ps.ps_availqty
+HAVING 
+    SUM(li.l_extendedprice * (1 - li.l_discount)) > 1000
+ORDER BY 
+    total_revenue DESC, revenue_rank
+LIMIT 50;

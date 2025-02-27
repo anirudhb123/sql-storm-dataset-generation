@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+        AND p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName, p.OwnerUserId
+),
+MostActiveUsers AS (
+    SELECT 
+        OwnerDisplayName,
+        COUNT(PostId) AS TotalPosts,
+        SUM(CommentCount) AS TotalComments
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank <= 5  
+    GROUP BY 
+        OwnerDisplayName
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = CAST(SUBSTRING(STRING_AGG(p.Tags, ','), 2, LENGTH(STRING_AGG(p.Tags, ',')) - 2) AS INTEGER)
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    mau.OwnerDisplayName,
+    mau.TotalPosts,
+    mau.TotalComments,
+    tt.TagName,
+    tt.PostCount
+FROM 
+    MostActiveUsers mau
+CROSS JOIN 
+    TopTags tt
+ORDER BY 
+    mau.TotalPosts DESC, mau.TotalComments DESC;

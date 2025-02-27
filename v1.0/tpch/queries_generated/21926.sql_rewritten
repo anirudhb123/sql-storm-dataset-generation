@@ -1,0 +1,54 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM supplier s
+), 
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_lineitem) AS total_items,
+        MIN(o.o_orderdate) AS first_order_date,
+        MAX(l.l_shipdate) AS latest_ship_date
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+SupplierWithComments AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        TRIM(CONCAT(ps.ps_comment, ' - ', sur.s_name)) AS supplier_comment
+    FROM partsupp ps
+    LEFT JOIN RankedSuppliers sur ON ps.ps_suppkey = sur.s_suppkey
+    WHERE sur.rank_acctbal <= 3 OR sur.rank_acctbal IS NULL
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name,
+    COALESCE(SUM(os.total_revenue), 0) AS total_revenue,
+    MAX(swc.supplier_comment) AS max_supplier_comment,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COUNT(*) FILTER (WHERE MAX(swc.ps_availqty) IS NULL) AS null_avail_qty_count
+FROM part p
+LEFT JOIN SupplierWithComments swc ON swc.ps_partkey = p.p_partkey
+LEFT JOIN OrderSummary os ON os.o_custkey IN (
+    SELECT c.c_custkey
+    FROM customer c
+    WHERE c.c_nationkey = (
+        SELECT n.n_nationkey 
+        FROM nation n 
+        WHERE n.n_name = 'USA'
+    )
+) 
+GROUP BY p.p_partkey, p.p_name
+HAVING COALESCE(SUM(os.total_revenue), 0) > 10000 AND MAX(swc.ps_supplycost) > 500
+ORDER BY total_revenue DESC, p.p_name ASC
+LIMIT 10;

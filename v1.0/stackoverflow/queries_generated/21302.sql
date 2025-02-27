@@ -1,0 +1,81 @@
+WITH MostActiveUsers AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM
+        Users U
+    LEFT JOIN
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY
+        U.Id, U.DisplayName
+    HAVING
+        COUNT(P.Id) >= 10
+),
+RecentPosts AS (
+    SELECT
+        PostId,
+        MAX(CreationDate) AS LatestEdit,
+        ROW_NUMBER() OVER (PARTITION BY PostId ORDER BY CreationDate DESC) AS rn
+    FROM
+        PostHistory
+    WHERE
+        PostHistoryTypeId IN (4, 5, 6)  -- Edit Title, Body, Tags
+    GROUP BY
+        PostId
+),
+PostDetails AS (
+    SELECT
+        P.Id,
+        P.Title,
+        P.Body,
+        U.DisplayName AS OwnerName,
+        COALESCE(CAST(NULLIF(P.ClosedDate, '1970-01-01 00:00:00') AS TIMESTAMP), '2000-01-01 00:00:00') AS CloseDate,
+        PH.LatestEdit,
+        PH.rn,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY PH.LatestEdit DESC) AS LatestEditRank
+    FROM
+        Posts P
+    JOIN
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN
+        RecentPosts PH ON P.Id = PH.PostId
+)
+SELECT
+    new.OwnerName,
+    new.Title,
+    new.Body,
+    COALESCE(old.OwnerName, 'No previous author') AS PreviousAuthor,
+    new.CloseDate,
+    new.LatestEdit,
+    CASE
+        WHEN new.LatestEdit IS NOT NULL AND new.LatestEditRank = 1 THEN 'Edited Recently'
+        ELSE 'No Recent Edits'
+    END AS EditStatus,
+    COUNT(DISTINCT C.Id) AS CommentCount,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+FROM
+    PostDetails new
+LEFT JOIN
+    PostLinks PL ON new.Id = PL.PostId
+LEFT JOIN
+    Posts old ON PL.RelatedPostId = old.Id
+LEFT JOIN
+    Comments C ON new.Id = C.PostId
+LEFT JOIN
+    LATERAL (
+        SELECT
+            unnest(string_to_array(P.Tags, ',')) AS TagName
+        FROM
+            Posts P
+        WHERE
+            P.Id = new.Id
+    ) T ON TRUE
+WHERE
+    new.CloseDate IS NULL
+GROUP BY
+    new.OwnerName, new.Title, new.Body, old.OwnerName, new.CloseDate, new.LatestEdit, new.LatestEditRank
+ORDER BY
+    COUNT(DISTINCT C.Id) DESC, new.Title;

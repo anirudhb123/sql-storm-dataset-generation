@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+RecentBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        b.Name AS BadgeName,
+        b.Class,
+        b.Date
+    FROM 
+        Badges b
+    JOIN 
+        Users u ON u.Id = b.UserId
+    WHERE 
+        b.Date >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year') 
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS HistoryCount,
+        STRING_AGG(pht.Name, ', ') AS HistoryTypes,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+TopUserPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        ra.UserId,
+        ra.BadgeName,
+        ra.Class,
+        ph.LastEditDate,
+        ph.HistoryCount,
+        ph.HistoryTypes
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON u.Id = rp.OwnerUserId
+    JOIN 
+        RecentBadges ra ON ra.UserId = u.Id
+    JOIN 
+        PostHistoryAnalysis ph ON ph.PostId = rp.PostId
+    WHERE 
+        rp.Rank = 1 
+)
+SELECT 
+    u.DisplayName AS UserName,
+    MAX(tp.Title) AS TopPostTitle,
+    SUM(tp.ViewCount) AS TotalViews,
+    SUM(tp.Score) AS TotalScore,
+    STRING_AGG(DISTINCT tp.BadgeName, ', ') AS Badges,
+    STRING_AGG(DISTINCT tp.HistoryTypes, '; ') AS PostHistoryTypes,
+    MIN(tp.LastEditDate) AS FirstEditDate,
+    COUNT(tp.PostId) AS TotalPostsEdited
+FROM 
+    TopUserPosts tp
+JOIN 
+    Users u ON u.Id = tp.UserId
+GROUP BY 
+    u.Id
+ORDER BY 
+    TotalScore DESC, TotalViews DESC
+LIMIT 10;

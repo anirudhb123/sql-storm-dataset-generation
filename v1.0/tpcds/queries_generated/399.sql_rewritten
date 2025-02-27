@@ -1,0 +1,76 @@
+WITH SalesData AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM
+        web_sales AS ws
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 2450000 AND 2450600  
+    GROUP BY
+        ws.ws_item_sk
+),
+TopSellingItems AS (
+    SELECT
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_net_paid
+    FROM
+        SalesData sd
+    WHERE
+        sd.sales_rank <= 10  
+),
+CustomerInfo AS (
+    SELECT
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM
+        customer AS c
+    JOIN
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        ws.ws_item_sk IN (SELECT ws_item_sk FROM TopSellingItems)
+    GROUP BY
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+    HAVING
+        SUM(ws.ws_net_paid) > 500  
+),
+StorePerformance AS (
+    SELECT
+        s.s_store_sk,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_sales_count
+    FROM
+        store_sales AS ss
+    JOIN
+        store AS s ON ss.ss_store_sk = s.s_store_sk
+    WHERE
+        ss.ss_sold_date_sk BETWEEN 2450000 AND 2450600  
+    GROUP BY
+        s.s_store_sk
+)
+SELECT
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ti.total_quantity,
+    ti.total_net_paid,
+    sp.total_net_profit,
+    sp.total_sales_count
+FROM
+    CustomerInfo ci
+JOIN
+    TopSellingItems ti ON ti.ws_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = ci.c_customer_sk)
+LEFT JOIN
+    StorePerformance sp ON sp.total_net_profit > 0
+WHERE
+    ci.cd_gender IS NOT NULL AND
+    ci.cd_marital_status IS NOT NULL
+ORDER BY
+    ti.total_net_paid DESC, sp.total_net_profit DESC
+LIMIT 100;

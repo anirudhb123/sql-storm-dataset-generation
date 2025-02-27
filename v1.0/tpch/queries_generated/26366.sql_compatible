@@ -1,0 +1,39 @@
+
+WITH SupplierDetails AS (
+    SELECT s.s_name, s.s_address, n.n_name AS nation, 
+           CONCAT(s.s_name, ' from ', s.s_address, ', ', n.n_name) AS full_details
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_container, 
+           CONCAT(p.p_name, ' - ', p.p_brand, ' [', p.p_container, ']') AS detailed_description
+    FROM part p
+),
+OrderSummary AS (
+    SELECT c.c_name AS customer_name, o.o_orderkey, o.o_totalprice, 
+           o.o_orderdate, o.o_orderstatus,
+           CONCAT(c.c_name, ' ordered (Total: ', o.o_totalprice, ' on ', o.o_orderdate, ')') AS order_info
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+)
+SELECT 
+    pd.detailed_description AS part_info,
+    sd.full_details AS supplier_info,
+    os.order_info AS customer_order_info
+FROM 
+    PartDetails pd
+JOIN 
+    partsupp ps ON pd.p_partkey = ps.ps_partkey
+JOIN 
+    SupplierDetails sd ON ps.ps_suppkey = sd.s_name
+JOIN 
+    lineitem li ON ps.ps_partkey = li.l_partkey
+JOIN 
+    OrderSummary os ON li.l_orderkey = os.o_orderkey
+WHERE 
+    pd.p_brand LIKE 'Brand#%'
+  AND 
+    os.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+ORDER BY 
+    os.o_totalprice DESC;

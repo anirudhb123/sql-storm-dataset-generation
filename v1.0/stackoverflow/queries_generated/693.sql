@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate ASC) AS rnk
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostWithMostComments AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+    HAVING 
+        COUNT(c.Id) > 5
+)
+SELECT 
+    u.DisplayName,
+    ub.TotalBadges,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    rp.Title AS TopPostTitle,
+    rp.Score AS TopPostScore,
+    rp.ViewCount AS TopPostViews,
+    pmc.CommentCount AS MostCommentedPostCount
+FROM 
+    Users u
+INNER JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.rnk = 1
+LEFT JOIN 
+    PostWithMostComments pmc ON pmc.PostId = rp.Id
+WHERE 
+    u.Reputation > 100
+ORDER BY 
+    ub.TotalBadges DESC, 
+    u.Reputation DESC;

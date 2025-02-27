@@ -1,0 +1,50 @@
+
+WITH SalesData AS (
+    SELECT
+        ws.web_site_id,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_ext_sales_price,
+        ws.ws_ext_tax,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM
+        web_sales ws
+    JOIN
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 2459536 AND 2459539  -- Example date range
+),
+CustomerReturns AS (
+    SELECT
+        wr.wr_order_number,
+        SUM(wr.wr_return_quantity) AS total_returned,
+        SUM(wr.wr_return_amt) AS total_return_amt
+    FROM
+        web_returns wr
+    WHERE
+        wr.wr_returned_date_sk BETWEEN 2459536 AND 2459539  -- Corresponding date range
+    GROUP BY
+        wr.wr_order_number
+)
+SELECT
+    sd.web_site_id,
+    sd.ws_order_number,
+    sd.ws_quantity,
+    sd.ws_ext_sales_price,
+    sd.ws_ext_tax,
+    sd.ws_net_profit,
+    COALESCE(cr.total_returned, 0) AS total_returned,
+    COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+    CASE 
+        WHEN cr.total_returned > 0 THEN 'Returned'
+        ELSE 'Not Returned'
+    END AS return_status
+FROM
+    SalesData sd
+LEFT JOIN
+    CustomerReturns cr ON sd.ws_order_number = cr.wr_order_number
+WHERE
+    sd.rn <= 5  -- Top 5 profitable orders per website
+ORDER BY
+    sd.web_site_id, sd.ws_net_profit DESC;

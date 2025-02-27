@@ -1,0 +1,46 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        COALESCE(aka.name, 'Unknown') AS primary_actor,
+        t.kind_id,
+        0 AS level
+    FROM title t
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    LEFT JOIN aka_name aka ON c.person_id = aka.person_id
+    WHERE t.production_year BETWEEN 2000 AND 2020
+    UNION ALL
+    SELECT 
+        mk.linked_movie_id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COALESCE(aka.name, 'Unknown') AS primary_actor,
+        mt.kind_id,
+        level + 1
+    FROM movie_link mk
+    JOIN title mt ON mk.linked_movie_id = mt.id
+    LEFT JOIN cast_info c ON mt.id = c.movie_id
+    LEFT JOIN aka_name aka ON c.person_id = aka.person_id
+    JOIN movie_hierarchy mh ON mh.movie_id = mk.movie_id
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    mh.primary_actor,
+    kind.kind AS movie_kind,
+    COUNT(mh.movie_id) OVER (PARTITION BY mh.primary_actor) AS actor_movie_count,
+    STRING_AGG(DISTINCT COALESCE(info.info, 'No Info'), ', ') AS movie_info,
+    (SELECT COUNT(DISTINCT mk.linked_movie_id) FROM movie_link mk WHERE mk.movie_id = mh.movie_id) AS linked_movies_count
+FROM movie_hierarchy mh
+LEFT JOIN kind_type kind ON mh.kind_id = kind.id
+LEFT JOIN movie_info info ON mh.movie_id = info.movie_id
+WHERE mh.level = 0 
+GROUP BY 
+    mh.movie_title,
+    mh.production_year,
+    mh.primary_actor,
+    kind.kind
+ORDER BY 
+    mh.production_year DESC,
+    actor_movie_count DESC;

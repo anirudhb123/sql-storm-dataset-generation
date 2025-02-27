@@ -1,0 +1,58 @@
+WITH RECURSIVE OrderCTE AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus, o.o_custkey, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) as OrderRank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplierCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalLineItemPrice, 
+           COUNT(*) AS LineItemCount, 
+           COUNT(CASE WHEN l.l_linestatus = 'F' THEN 1 END) AS FulfilledCount
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    o.o_orderkey, 
+    o.o_orderdate, 
+    COALESCE(SUM(LOS.TotalLineItemPrice), 0) AS TotalPrice,
+    COALESCE(SUM(SC.TotalSupplierCost), 0) AS SupplierCost,
+    CASE 
+        WHEN o.o_orderstatus = 'F' THEN 'Complete'
+        WHEN o.o_orderstatus = 'P' THEN 'Pending'
+        ELSE 'Unknown'
+    END AS OrderStatus,
+    ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS TotalOrdersByCustomer,
+    r.r_name AS RegionName
+FROM OrderCTE o
+LEFT JOIN LineItemSummary LOS ON o.o_orderkey = LOS.l_orderkey
+LEFT JOIN SupplierCTE SC ON o.o_custkey IN (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_nationkey = (
+            SELECT n.n_nationkey 
+            FROM nation n 
+            JOIN region r ON n.n_regionkey = r.r_regionkey 
+            WHERE r.r_name = 'ASIA'
+        )
+    )
+JOIN region r ON r.r_regionkey = (
+      SELECT n.n_regionkey
+      FROM nation n
+      WHERE n.n_nationkey = (
+          SELECT c.c_nationkey
+          FROM customer c
+          WHERE c.c_custkey = o.o_custkey
+      )
+)
+WHERE LOS.LineItemCount > 0
+GROUP BY o.o_orderkey, o.o_orderdate, o.o_orderstatus, o.o_custkey, r.r_name
+ORDER BY o.o_orderdate DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,65 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name
+    FROM 
+        SupplierDetails sd
+    WHERE 
+        sd.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierDetails)
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_linenumber) AS line_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate <= CURRENT_DATE
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    ls.total_revenue,
+    ls.line_count,
+    ts.s_name AS supplier_name,
+    CASE 
+        WHEN o.o_totalprice > 10000 THEN 'High Value Order'
+        ELSE 'Regular Order'
+    END AS order_category
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    LineItemSummary ls ON o.o_orderkey = ls.l_orderkey
+LEFT JOIN 
+    TopSuppliers ts ON o.o_orderkey IN (SELECT DISTINCT l.l_orderkey FROM lineitem l WHERE l.l_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps))
+WHERE 
+    o.order_rank <= 10 OR ts.s_suppkey IS NOT NULL
+ORDER BY 
+    o.o_orderdate DESC, o.o_orderkey;

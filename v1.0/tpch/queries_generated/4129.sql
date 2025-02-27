@@ -1,0 +1,72 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    s.s_name,
+    c.customer_summary.c_custkey,
+    c.customer_summary.total_orders,
+    c.customer_summary.total_spent,
+    p.part_supplier.p_partkey,
+    p.part_supplier.supplier_count,
+    p.part_supplier.avg_supply_cost,
+    l.total_lineitem_value,
+    l.last_ship_date
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    RankedSuppliers s ON n.n_nationkey = s.s_nationkey AND s.supplier_rank <= 3
+JOIN 
+    CustomerOrderSummary c ON c.total_orders > 0
+JOIN 
+    PartSupplier p ON p.supplier_count > 0
+LEFT JOIN 
+    LineItemSummary l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+WHERE 
+    (s.s_name IS NOT NULL OR p.avg_supply_cost IS NOT NULL)
+ORDER BY 
+    r.r_name, n.n_name, c.total_spent DESC;

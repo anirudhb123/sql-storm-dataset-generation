@@ -1,0 +1,105 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2  
+),
+
+PostStatistics AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(a.Id) AS AnswerCount,
+        MAX(a.Score) AS HighestAnswerScore,
+        MIN(a.CreationDate) AS FirstAnswerDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId  
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId
+),
+
+UserActivity AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN b.UserId IS NOT NULL THEN 1 ELSE 0 END) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostHistoryActivity AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.UserId) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 24)  
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.AnswerCount,
+    ps.HighestAnswerScore,
+    u.DisplayName AS PostOwner,
+    u.TotalPosts AS OwnerTotalPosts,
+    u.TotalAnswers AS OwnerTotalAnswers,
+    u.TotalBadges AS OwnerTotalBadges,
+    COALESCE(SUM(pha.EditCount), 0) AS TotalEdits,
+    COALESCE(MAX(pha.LastEditDate), 'No Edits') AS LastEdit,
+    CASE 
+        WHEN ps.FirstAnswerDate IS NOT NULL THEN DATEDIFF('2024-10-01 12:34:56', ps.FirstAnswerDate) 
+        ELSE NULL 
+    END AS DaysUntilFirstAnswer
+FROM 
+    PostStatistics ps
+JOIN 
+    UserActivity u ON ps.OwnerUserId = u.UserId
+LEFT JOIN 
+    PostHistoryActivity pha ON ps.PostId = pha.PostId
+GROUP BY 
+    ps.PostId, ps.Title, u.DisplayName, u.TotalPosts, u.TotalAnswers, u.TotalBadges, ps.FirstAnswerDate
+ORDER BY 
+    ps.AnswerCount DESC, ps.HighestAnswerScore DESC;

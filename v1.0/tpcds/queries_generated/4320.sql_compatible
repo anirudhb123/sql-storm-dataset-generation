@@ -1,0 +1,55 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(ws.ws_net_paid, 0) + COALESCE(cs.cs_net_paid, 0) + COALESCE(ss.ss_net_paid, 0)) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS online_orders,
+        COUNT(DISTINCT cs.cs_order_number) AS catalog_orders,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_orders,
+        COUNT(DISTINCT wb.web_page_sk) AS web_visits
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN web_page wb ON ws.ws_web_page_sk = wb.wp_web_page_sk OR 
+                             cs.cs_call_center_sk IN (SELECT cc.cc_call_center_sk FROM call_center cc WHERE cc.cc_closed_date_sk IS NULL)
+    WHERE c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY c.c_customer_id
+),
+TopCustomers AS (
+    SELECT 
+        c_customer_id,
+        total_spent,
+        RANK() OVER (ORDER BY total_spent DESC) AS rank
+    FROM CustomerSales
+),
+RankedDemographics AS (
+    SELECT 
+        xid.c_customer_id,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_education_status,
+        d.cd_purchase_estimate
+    FROM TopCustomers xid
+    JOIN customer_demographics d ON xid.c_customer_id = d.cd_demo_sk
+    WHERE rank <= 10
+)
+SELECT 
+    r.c_customer_id,
+    r.cd_gender,
+    r.cd_marital_status,
+    r.cd_education_status,
+    r.cd_purchase_estimate,
+    COALESCE(i.total_value_of_inventory, 0) AS total_value_of_inventory
+FROM RankedDemographics r
+LEFT JOIN (
+    SELECT 
+        cust.c_customer_id,
+        SUM(inv.inv_quantity_on_hand * i.i_current_price) AS total_value_of_inventory
+    FROM inventory inv
+    JOIN item i ON inv.inv_item_sk = i.i_item_sk
+    JOIN customer cust ON inv.inv_warehouse_sk = cust.c_current_addr_sk
+    GROUP BY cust.c_customer_id
+) i ON r.c_customer_id = i.c_customer_id
+WHERE r.cd_purchase_estimate > 5000 OR i.total_value_of_inventory IS NULL
+ORDER BY total_value_of_inventory DESC;

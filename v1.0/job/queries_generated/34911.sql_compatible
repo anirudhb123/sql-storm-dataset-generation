@@ -1,0 +1,53 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(cast_info.nr_order, 0) AS nr_order
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    LEFT JOIN 
+        title t ON ml.linked_movie_id = t.id
+    LEFT JOIN 
+        cast_info ON t.id = cast_info.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(ci.nr_order, 0) AS nr_order
+    FROM 
+        title t
+    JOIN 
+        movie_link ml ON t.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    h.title AS original_movie,
+    h.production_year AS original_year,
+    MAX(h.nr_order) AS max_order,
+    COUNT(DISTINCT ml.linked_movie_id) AS related_movies_count,
+    STRING_AGG(DISTINCT mt.title, ', ') AS related_movie_titles
+FROM 
+    movie_hierarchy h
+LEFT JOIN 
+    movie_link ml ON h.movie_id = ml.movie_id
+LEFT JOIN 
+    aka_title mt ON ml.linked_movie_id = mt.id
+WHERE 
+    h.production_year >= 2000
+GROUP BY 
+    h.movie_id, h.title, h.production_year
+HAVING 
+    MAX(h.nr_order) > 0
+ORDER BY 
+    original_year DESC, max_order DESC
+LIMIT 10

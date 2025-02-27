@@ -1,0 +1,84 @@
+WITH PostUserDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        u.Location,
+        u.UpVotes,
+        u.DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2), 0) AS UpVotesCount,
+        COALESCE(COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3), 0) AS DownVotesCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation, u.Location, u.UpVotes, u.DownVotes
+),
+TopUsers AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        COUNT(DISTINCT PostId) AS TotalPosts,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes
+    FROM 
+        Users 
+    GROUP BY 
+        Id, DisplayName, Reputation
+    ORDER BY 
+        TotalPosts DESC
+    LIMIT 10
+),
+PostStatistics AS (
+    SELECT 
+        pud.PostId,
+        pud.Title,
+        pud.OwnerDisplayName,
+        pud.OwnerReputation,
+        pud.Location,
+        pud.CommentCount,
+        pud.UpVotesCount,
+        pud.DownVotesCount,
+        CASE 
+            WHEN pud.UpVotesCount > pud.DownVotesCount THEN 'Positive'
+            WHEN pud.UpVotesCount < pud.DownVotesCount THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteSentiment
+    FROM 
+        PostUserDetails pud
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.OwnerDisplayName,
+    ps.OwnerReputation,
+    ps.Location,
+    ps.CommentCount,
+    ps.UpVotesCount,
+    ps.DownVotesCount,
+    ps.VoteSentiment,
+    tu.DisplayName AS TopUserName,
+    tu.Reputation AS TopUserReputation,
+    tu.TotalPosts,
+    tu.TotalUpVotes,
+    tu.TotalDownVotes
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    TopUsers tu ON ps.OwnerDisplayName = tu.DisplayName
+ORDER BY 
+    ps.OwnerReputation DESC, ps.CommentCount DESC
+LIMIT 50;

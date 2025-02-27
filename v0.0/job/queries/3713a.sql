@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND n.md5sum IN ('4c3a5231f4e60e28a41ed49f35d0f079', '5677ea43b1ae9211aae2297a2ce2f026', 'a2ec2cc752666563468f36e8cb04b076', 'bfdfda17e1a3fb517a8aa7bac684a999', 'cd98839a14ae074c3bf4f0e751e6689a') AND mc.note > '(1947) (Philippines) (theatrical)' AND cn.name_pcode_nf > 'D4614';

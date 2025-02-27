@@ -1,0 +1,50 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_nationkey = 1  -- starting point, adjust as needed
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_regionkey
+),
+AvgSupplierCost AS (
+    SELECT ps_partkey, AVG(ps_supplycost) AS avg_supplycost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+),
+CustomerExcess AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+)
+SELECT 
+    p.p_name,
+    p.p_mfgr,
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity,
+    COALESCE(ROUND(SUM(l.l_extendedprice * (1 - l.l_discount)), 2), 0) AS total_revenue,
+    r_name,
+    nh.level,
+    CASE 
+        WHEN c.c_custkey IS NULL THEN 'No Customer'
+        ELSE c.c_name 
+    END AS customer_name,
+    p.p_comment
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN region r ON s.s_nationkey = r.r_regionkey
+LEFT JOIN CustomerExcess c ON c.c_custkey = (SELECT o.o_custkey
+                                                FROM orders o
+                                                WHERE o.o_orderkey = l.l_orderkey
+                                                LIMIT 1)
+LEFT JOIN NationHierarchy nh ON nh.n_nationkey = s.s_nationkey
+WHERE p.p_size > 10 
+    AND (p.p_retailprice - (SELECT AVG(ps_supplycost) FROM AvgSupplierCost) > 0)
+GROUP BY p.p_partkey, p.p_name, p.p_mfgr, r.r_name, nh.level, c.c_custkey
+ORDER BY total_revenue DESC 
+LIMIT 100;

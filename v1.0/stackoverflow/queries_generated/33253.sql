@@ -1,0 +1,82 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with questions
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.PostTypeId,
+        a.ParentId,
+        r.Level + 1 AS Level
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy r ON a.ParentId = r.PostId
+    WHERE 
+        a.PostTypeId = 2  -- Only answers
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(v.VoteTypeId = 2) AS UpVotes, -- Total Upvotes
+        SUM(v.VoteTypeId = 3) AS DownVotes -- Total Downvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalQuestions,
+    u.TotalAnswers,
+    u.UpVotes,
+    u.DownVotes,
+    STRING_AGG(DISTINCT tt.TagName, ', ') AS TopTags,
+    COALESCE(ph.Title, 'No Accepted Answer') AS AcceptedAnswerTitle,
+    ph.Level AS AnswerLevel
+FROM 
+    UserPostStats u
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.UserId AND p.AcceptedAnswerId IS NOT NULL
+LEFT JOIN 
+    RecursivePostHierarchy ph ON ph.PostId = p.AcceptedAnswerId
+LEFT JOIN 
+    TopTags tt ON tt.PostCount > 0
+GROUP BY 
+    u.UserId, ph.Title, ph.Level
+ORDER BY 
+    u.TotalPosts DESC, 
+    u.UpVotes DESC;

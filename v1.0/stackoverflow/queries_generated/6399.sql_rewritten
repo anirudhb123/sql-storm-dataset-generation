@@ -1,0 +1,88 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Upvotes, 
+        Downvotes, 
+        TotalPosts, 
+        TotalComments, 
+        TotalBadges,
+        RANK() OVER (ORDER BY Upvotes - Downvotes DESC) AS Rank
+    FROM 
+        UserVoteStats
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS Author,
+        t.TagName AS Tag,
+        COALESCE(ah.AcceptedCount, 0) AS AcceptedAnswerCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN (
+        SELECT 
+            AcceptedAnswerId AS PostId,
+            COUNT(*) AS AcceptedCount
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 1  
+        GROUP BY 
+            AcceptedAnswerId
+    ) ah ON p.Id = ah.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+FinalStats AS (
+    SELECT 
+        pu.UserId,
+        pu.DisplayName,
+        COUNT(ps.PostId) AS PostsCreated,
+        SUM(ps.ViewCount) AS TotalViews,
+        SUM(ps.Score) AS TotalScore,
+        MAX(ps.CreationDate) AS LastPostDate
+    FROM 
+        TopUsers pu
+    LEFT JOIN 
+        PostStats ps ON pu.UserId = ps.Author
+    GROUP BY 
+        pu.UserId, pu.DisplayName
+)
+SELECT 
+    *,
+    RANK() OVER (ORDER BY PostsCreated DESC, TotalViews DESC) AS PostRank
+FROM 
+    FinalStats
+ORDER BY 
+    PostRank
+LIMIT 10;

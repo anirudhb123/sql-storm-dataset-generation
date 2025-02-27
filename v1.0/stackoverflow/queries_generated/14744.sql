@@ -1,0 +1,56 @@
+-- Performance Benchmarking Query
+WITH UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN VT.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN VT.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN VoteTypes VT ON V.VoteTypeId = VT.Id
+    GROUP BY U.Id, U.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COUNT(C.Id) AS CommentCount,
+        P.CreationDate
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.Id, P.Title, P.Score, P.ViewCount, P.CreationDate
+),
+TopActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+    ORDER BY PostCount DESC
+    LIMIT 5
+)
+SELECT 
+    UVC.UserId,
+    UVC.DisplayName,
+    UVC.VoteCount,
+    UVC.UpvoteCount,
+    UVC.DownvoteCount,
+    PP.PostId,
+    PP.Title,
+    PP.Score,
+    PP.ViewCount,
+    PP.CommentCount,
+    ToU.UserId AS ActiveUserId,
+    ToU.DisplayName AS ActiveUserName,
+    ToU.Reputation,
+    ToU.PostCount
+FROM UserVoteCounts UVC
+CROSS JOIN PopularPosts PP
+CROSS JOIN TopActiveUsers ToU
+ORDER BY UVC.VoteCount DESC, PP.ViewCount DESC, ToU.PostCount DESC;

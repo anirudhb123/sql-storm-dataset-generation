@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(t.TagCount, 0) AS TagCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS OwnerRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(*) AS AnswerCount
+        FROM 
+            Posts 
+        WHERE 
+            PostTypeId = 2 
+        GROUP BY 
+            ParentId
+    ) a ON p.Id = a.ParentId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(DISTINCT tag.TagName) AS TagCount
+        FROM 
+            Posts p
+        CROSS JOIN LATERAL 
+            unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag(TagName)
+        GROUP BY 
+            PostId
+    ) t ON p.Id = t.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.LastActivityDate,
+    rp.OwnerDisplayName,
+    rp.AnswerCount,
+    rp.CommentCount,
+    rp.TagCount,
+    (SELECT STRING_AGG(DISTINCT pt.Name, ', ')
+     FROM PostTypes pt 
+     JOIN Posts sub ON sub.PostTypeId = pt.Id 
+     WHERE sub.Id = rp.PostId) AS PostTypeNames,
+    (SELECT STRING_AGG(DISTINCT ph.Comment, '; ')
+     FROM PostHistory ph
+     WHERE ph.PostId = rp.PostId) AS EditComments
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.OwnerRank = 1
+ORDER BY 
+    rp.LastActivityDate DESC
+FETCH FIRST 10 ROWS ONLY;

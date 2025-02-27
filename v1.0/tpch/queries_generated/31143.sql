@@ -1,0 +1,59 @@
+WITH RECURSIVE PriceHierarchy AS (
+    SELECT p_partkey, p_name, p_retailprice AS base_price, p_retailprice AS final_price, 1 AS level
+    FROM part
+    UNION ALL
+    SELECT ph.p_partkey, ph.p_name, ph.final_price * 0.9 AS base_price, ph.final_price * 0.9 AS final_price, ph.level + 1
+    FROM PriceHierarchy ph
+    JOIN part p ON ph.p_partkey = p.p_partkey
+    WHERE ph.level < 5
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+SupplierPartInfo AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+RegionSales AS (
+    SELECT r.r_regionkey, SUM(co.total_sales) AS total_sales_region
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN CustomerOrders co ON c.c_custkey = co.c_custkey
+    GROUP BY r.r_regionkey
+),
+DwellingData AS (
+    SELECT COUNT(DISTINCT s.s_suppkey) AS total_suppliers, AVG(s.s_acctbal) AS avg_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) OR s.s_comment IS NOT NULL
+)
+SELECT 
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    MAX(ps.total_available) AS max_avail_quantity,
+    AVG(r.total_sales_region) AS avg_sales_per_region,
+    AVG(d.avg_acctbal) AS average_account_balance,
+    (SELECT SUM(base_price) FROM PriceHierarchy) AS total_final_prices
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    SupplierPartInfo ps ON co.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = ps.ps_partkey)
+LEFT JOIN 
+    RegionSales r ON co.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+CROSS JOIN 
+    DwellingData d
+WHERE 
+    co.total_sales > 1000
+AND 
+    co.o_orderdate IS NOT NULL
+AND 
+    co.o_orderdate = (SELECT MAX(o_orderdate) FROM orders)
+GROUP BY 
+    d.total_suppliers
+ORDER BY 
+    total_customers DESC
+LIMIT 10;

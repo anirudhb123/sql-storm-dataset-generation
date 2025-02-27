@@ -1,0 +1,59 @@
+WITH TagFrequency AS (
+    SELECT
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS Frequency
+    FROM
+        Posts
+    WHERE
+        PostTypeId = 1  -- Only consider questions
+    GROUP BY
+        Tag
+),
+TopTags AS (
+    SELECT
+        Tag,
+        Frequency,
+        ROW_NUMBER() OVER (ORDER BY Frequency DESC) AS Rank
+    FROM
+        TagFrequency
+    WHERE 
+        Frequency >= 10  -- Consider tags with at least 10 occurrences
+),
+PostDetails AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        t.Tag
+    FROM
+        Posts p
+    JOIN TopTags tt ON tt.Tag = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))
+    JOIN Users u ON p.OwnerUserId = u.Id
+),
+MostActiveUsers AS (
+    SELECT
+        OwnerDisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM
+        PostDetails p
+    GROUP BY
+        OwnerDisplayName
+    ORDER BY
+        PostCount DESC
+    LIMIT 5
+)
+SELECT
+    mu.OwnerDisplayName,
+    mu.PostCount,
+    mu.TotalViews,
+    STRING_AGG(DISTINCT pd.Tag, ', ') AS AssociatedTags
+FROM
+    MostActiveUsers mu
+JOIN PostDetails pd ON mu.OwnerDisplayName = pd.OwnerDisplayName
+GROUP BY
+    mu.OwnerDisplayName, mu.PostCount, mu.TotalViews
+ORDER BY
+    mu.PostCount DESC;

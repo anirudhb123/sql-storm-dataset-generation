@@ -1,0 +1,60 @@
+
+WITH customer_full_name AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(TRIM(c.c_first_name), ' ', TRIM(c.c_last_name)) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        CONCAT(TRIM(ca.ca_street_number), ' ', TRIM(ca.ca_street_name), ' ', TRIM(ca.ca_street_type), 
+               CASE WHEN ca.ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', TRIM(ca.ca_suite_number)) END, 
+               ', ', TRIM(ca.ca_city), ', ', TRIM(ca.ca_state), ' ', TRIM(ca.ca_zip)) AS full_address
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+gender_distribution AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS gender_count
+    FROM 
+        customer_full_name
+    GROUP BY 
+        cd_gender
+),
+marital_distribution AS (
+    SELECT 
+        cd_marital_status,
+        COUNT(*) AS marital_count
+    FROM 
+        customer_full_name
+    GROUP BY 
+        cd_marital_status
+),
+education_distribution AS (
+    SELECT 
+        cd_education_status,
+        COUNT(*) AS education_count
+    FROM 
+        customer_full_name
+    GROUP BY 
+        cd_education_status
+)
+SELECT 
+    gd.cd_gender,
+    gd.gender_count,
+    md.cd_marital_status,
+    md.marital_count,
+    ed.cd_education_status,
+    ed.education_count
+FROM 
+    gender_distribution gd
+FULL OUTER JOIN 
+    marital_distribution md ON gd.cd_gender = md.cd_gender
+FULL OUTER JOIN 
+    education_distribution ed ON gd.cd_gender = ed.cd_gender
+ORDER BY 
+    gd.gender_count DESC, md.marital_count DESC, ed.education_count DESC;

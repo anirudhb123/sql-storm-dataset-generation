@@ -1,0 +1,94 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        ARRAY[m.title] AS title_chain,
+        0 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        mh.title_chain || m.title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE 
+        mh.depth < 5
+),
+title_keyword AS (
+    SELECT 
+        at.title AS movie_title,
+        k.keyword AS keyword,
+        COUNT(mk.id) AS keyword_count
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        at.title, k.keyword
+),
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(c.movie_id) AS movies_count,
+        STRING_AGG(DISTINCT at.title, ', ') AS titles
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    LEFT JOIN 
+        aka_title at ON c.movie_id = at.id
+    GROUP BY 
+        ak.name
+),
+movie_info AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        MAX(CASE WHEN mi.info_type_id = 1 THEN mi.info END) AS release_date,
+        COUNT(DISTINCT mk.keyword_id) AS total_keywords
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_info mi ON at.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    GROUP BY 
+        at.id, at.title
+)
+SELECT 
+    mh.title_chain[ARRAY_LENGTH(mh.title_chain, 1)] AS latest_movie_title,
+    mh.depth,
+    ti.movie_title, 
+    ti.keyword,
+    ti.keyword_count,
+    ai.actor_name,
+    ai.movies_count,
+    ai.titles,
+    CASE 
+        WHEN mi.release_date IS NOT NULL THEN 'Released' 
+        ELSE 'Not Released' 
+    END AS release_status
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    title_keyword ti ON mh.title_chain[ARRAY_LENGTH(mh.title_chain, 1)] = ti.movie_title
+LEFT JOIN 
+    actor_info ai ON ti.movie_title = ANY(STRING_TO_ARRAY(ai.titles, ', ')) 
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+WHERE 
+    COALESCE(ti.keyword_count, 0) > 2
+ORDER BY 
+    mh.depth, ti.keyword_count DESC;

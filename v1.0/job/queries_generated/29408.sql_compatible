@@ -1,0 +1,64 @@
+
+WITH MovieStats AS (
+    SELECT
+        a.id AS movie_id,
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        COUNT(DISTINCT k.keyword) AS total_keywords
+    FROM
+        aka_title a
+    LEFT JOIN
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        cast_info c ON a.id = c.movie_id
+    GROUP BY
+        a.id, a.title, a.production_year
+),
+TopGenres AS (
+    SELECT
+        a.id AS movie_id,
+        at.kind_id,
+        COUNT(at.kind_id) AS genre_count
+    FROM
+        aka_title a
+    JOIN
+        kind_type at ON a.kind_id = at.id
+    GROUP BY
+        a.id, at.kind_id
+    ORDER BY
+        genre_count DESC
+    LIMIT 3
+),
+DirectorStats AS (
+    SELECT
+        c.movie_id,
+        STRING_AGG(p.name, ', ') AS directors
+    FROM
+        cast_info c
+    JOIN
+        aka_name p ON c.person_id = p.person_id
+    WHERE
+        c.person_role_id IN (SELECT id FROM role_type WHERE role = 'Director')
+    GROUP BY
+        c.movie_id
+)
+SELECT
+    ms.movie_id,
+    ms.movie_title,
+    ms.production_year,
+    ms.total_cast,
+    ms.total_keywords,
+    tg.kind_id AS genre_id,
+    ds.directors
+FROM
+    MovieStats ms
+LEFT JOIN
+    TopGenres tg ON ms.movie_id = tg.movie_id
+LEFT JOIN
+    DirectorStats ds ON ms.movie_id = ds.movie_id
+ORDER BY
+    ms.production_year DESC,
+    ms.movie_title;

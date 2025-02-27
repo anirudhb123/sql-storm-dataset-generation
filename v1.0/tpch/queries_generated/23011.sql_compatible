@@ -1,0 +1,72 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        n.n_name
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY 
+        c.c_custkey, n.n_name
+),
+PartSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CombinedData AS (
+    SELECT 
+        c.c_custkey, 
+        c.total_spent, 
+        ps.total_available,
+        ps.total_cost,
+        rs.s_name AS top_supplier_name
+    FROM 
+        CustomerOrders c
+    LEFT JOIN 
+        PartSuppliers ps ON c.c_custkey = MOD(ps.ps_partkey, c.c_custkey + 1)
+    LEFT JOIN 
+        RankedSuppliers rs ON c.n_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = c.n_nationkey AND rank = 1)
+    WHERE 
+        c.total_spent > 1000 OR (c.total_spent IS NULL AND ps.total_available IS NULL)
+)
+SELECT 
+    COALESCE(top_supplier_name, 'No Supplier') AS Supplier_Name,
+    SUM(total_spent) AS Total_Spent,
+    COUNT(DISTINCT cust.c_custkey) AS Customer_Count,
+    MAX(total_available) AS Max_Available,
+    AVG(total_cost) AS Avg_Cost
+FROM 
+    CombinedData
+JOIN 
+    customer cust ON cust.c_custkey = CombinedData.c_custkey
+GROUP BY 
+    top_supplier_name
+HAVING 
+    SUM(total_spent) > 5000 OR COUNT(DISTINCT cust.c_custkey) < 5
+ORDER BY 
+    Total_Spent DESC, Customer_Count ASC
+LIMIT 10;

@@ -1,0 +1,62 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS NumberOfPosts,
+        COUNT(DISTINCT C.Id) AS NumberOfComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY COUNT(P.Id) DESC) AS UserPostRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    WHERE U.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY U.Id, U.Reputation
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.AnswerCount,
+        P.CommentCount,
+        PT.Name AS PostType,
+        PH.Comment AS LastEditComment,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5, 6)
+    JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    GROUP BY P.Id, P.Title, P.CreationDate, P.AnswerCount, P.CommentCount, PT.Name, PH.Comment
+),
+UserRankings AS (
+    SELECT 
+        U.UserId,
+        U.Reputation,
+        U.NumberOfPosts,
+        U.NumberOfComments,
+        U.UpVotes,
+        U.DownVotes,
+        RANK() OVER (ORDER BY U.NumberOfPosts DESC, U.Reputation DESC) AS ActivityRank
+    FROM UserActivity U
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation AS UserReputation,
+    P.PostId,
+    P.Title AS PostTitle,
+    P.PostType,
+    COALESCE(P.LastEditComment, 'No edits made') AS LastEditComment,
+    COALESCE(P.LastEditDate, 'No edits made') AS LastEditDate,
+    R.ActivityRank,
+    CASE 
+        WHEN P.AnswerCount > 0 THEN 'Active Question'
+        WHEN P.CommentCount > 5 THEN 'Highly Discussed'
+        ELSE 'Regular Post'
+    END AS PostActivityStatus
+FROM Users U
+JOIN UserRankings R ON U.Id = R.UserId
+LEFT JOIN PostDetails P ON U.Id = P.OwnerUserId
+WHERE U.Reputation IS NOT NULL
+ORDER BY R.ActivityRank, P.LastEditDate DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

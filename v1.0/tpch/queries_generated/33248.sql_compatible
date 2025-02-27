@@ -1,0 +1,72 @@
+
+WITH RECURSIVE PriceRank AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        RANK() OVER (ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS nation_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+SupplierAvailability AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    cr.c_name,
+    pr.p_name,
+    ra.total_available,
+    ra.total_cost,
+    cr.total_spent,
+    cr.order_count,
+    CASE 
+        WHEN cr.nation_rank <= 5 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_segment
+FROM 
+    CustomerOrderSummary cr
+LEFT JOIN 
+    lineitem l ON l.l_orderkey IN (
+        SELECT o.o_orderkey
+        FROM orders o
+        WHERE o.o_custkey = cr.c_custkey
+    )
+JOIN 
+    part pr ON l.l_partkey = pr.p_partkey
+LEFT JOIN 
+    SupplierAvailability ra ON ra.s_suppkey IN (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        WHERE ps.ps_partkey = pr.p_partkey
+    )
+WHERE 
+    ra.total_available IS NOT NULL
+    OR 
+    ra.total_cost > 1000
+ORDER BY 
+    cr.total_spent DESC, 
+    pr.p_name;

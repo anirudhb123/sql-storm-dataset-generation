@@ -1,0 +1,69 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ss_store_sk, 
+        SUM(ss_quantity) AS total_sales
+    FROM 
+        store_sales 
+    WHERE 
+        ss_sold_date_sk BETWEEN 2451962 AND 2451997 -- Example date range
+    GROUP BY 
+        ss_store_sk
+    
+    UNION ALL
+    
+    SELECT 
+        s_store_sk, 
+        SUM(ws_quantity) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        store s ON ws.ws_store_sk = s.s_store_sk
+    WHERE 
+        ws_sold_date_sk BETWEEN 2451962 AND 2451997 -- Same date range
+    GROUP BY 
+        s_store_sk
+), 
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk, 
+        cd.cd_demo_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        c.c_first_name || ' ' || c.c_last_name AS full_name
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+SalesSummary AS (
+    SELECT 
+        ci.full_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_purchase_estimate,
+        s.total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ci.cd_gender ORDER BY s.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerInfo ci
+    JOIN 
+        SalesCTE s ON ci.c_customer_sk = s.ss_store_sk
+)
+SELECT 
+    ss.full_name,
+    ss.cd_gender,
+    ss.cd_marital_status,
+    ss.cd_purchase_estimate,
+    ss.total_sales,
+    CASE 
+        WHEN ss.sales_rank <= 10 THEN 'Top 10'
+        ELSE 'Others'
+    END AS sales_category
+FROM 
+    SalesSummary ss
+WHERE 
+    ss.cd_purchase_estimate IS NOT NULL
+ORDER BY 
+    ss.cd_gender, 
+    ss.sales_rank;

@@ -1,0 +1,64 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id,
+        a.Title,
+        a.OwnerUserId,
+        a.CreationDate,
+        ph.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts q ON a.ParentId = q.Id
+    INNER JOIN 
+        PostHierarchy ph ON q.Id = ph.PostId
+)
+SELECT 
+    ph.PostId,
+    ph.Title,
+    u.DisplayName AS Author,
+    ph.Level,
+    ph.CreationDate,
+    COALESCE(COUNT(DISTINCT c.Id), 0) AS CommentCount,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+    AVG(COALESCE(v.BountyAmount, 0)) OVER (PARTITION BY ph.PostId) AS AvgBountyAmount,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+    CASE 
+        WHEN ph.Level > 0 THEN 'Child Post'
+        ELSE 'Top Level'
+    END AS PostType,
+    (SELECT COUNT(*) FROM Votes v2 WHERE v2.PostId = ph.PostId AND v2.VoteTypeId = 2) AS UpVotes,
+    (SELECT COUNT(*) FROM Votes v2 WHERE v2.PostId = ph.PostId AND v2.VoteTypeId = 3) AS DownVotes
+FROM 
+    PostHierarchy ph
+LEFT JOIN 
+    Users u ON ph.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON ph.PostId = c.PostId
+LEFT JOIN 
+    Votes v ON ph.PostId = v.PostId AND v.VoteTypeId IN (8, 9) 
+LEFT JOIN 
+    Posts p ON ph.PostId = p.Id
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS TagArray
+    ) AS tags ON TRUE
+LEFT JOIN 
+    Tags t ON t.TagName = ANY(tags.TagArray)
+GROUP BY 
+    ph.PostId, ph.Title, u.DisplayName, ph.Level, ph.CreationDate
+ORDER BY 
+    ph.CreationDate DESC;

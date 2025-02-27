@@ -1,0 +1,69 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(*) AS sales_count,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_bill_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+ItemSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        MAX(ws.ws_sales_price) AS max_sales_price,
+        MIN(ws.ws_sales_price) AS min_sales_price,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT cs.ws_bill_customer_sk) AS unique_customers,
+    SUM(cs.total_sales) AS total_revenue,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+    CASE 
+        WHEN AVG(cd.cd_purchase_estimate) IS NULL THEN 'No Data'
+        WHEN AVG(cd.cd_purchase_estimate) < 1000 THEN 'Low Spend'
+        WHEN AVG(cd.cd_purchase_estimate) BETWEEN 1000 AND 5000 THEN 'Medium Spend'
+        ELSE 'High Spend'
+    END AS spending_category,
+    i.max_sales_price,
+    i.min_sales_price,
+    SUM(CASE WHEN i.total_quantity_sold > 10 THEN 1 ELSE 0 END) AS highly_sold_items
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    RecursiveSales cs ON c.c_customer_sk = cs.ws_bill_customer_sk
+LEFT JOIN 
+    CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+INNER JOIN 
+    ItemSales i ON cs.ws_bill_customer_sk = i.ws_item_sk
+WHERE 
+    ca.ca_state IN ('CA', 'TX', 'NY') 
+    AND cd.cd_marital_status IS NOT NULL 
+    AND cs.sales_rank <= 5
+GROUP BY 
+    ca.ca_city, ca.ca_state, i.max_sales_price, i.min_sales_price
+ORDER BY 
+    total_revenue DESC;

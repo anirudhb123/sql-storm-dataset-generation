@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.OwnerUserId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativeScorePosts
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+RecentActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY COUNT(p.Id) DESC) AS ActivityRank
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    us.TotalPosts,
+    us.PositiveScorePosts,
+    us.NegativeScorePosts,
+    ra.PostId,
+    ra.Title,
+    ra.Score,
+    ra.CreationDate,
+    ra.CommentCount,
+    rau.ActivityRank
+FROM 
+    RecentActiveUsers rau
+JOIN 
+    UserStats us ON rau.UserId = us.UserId
+LEFT JOIN 
+    RankedPosts ra ON us.UserId = ra.OwnerUserId
+WHERE 
+    ra.UserPostRank <= 5
+ORDER BY 
+    rau.ActivityRank, us.TotalPosts DESC;

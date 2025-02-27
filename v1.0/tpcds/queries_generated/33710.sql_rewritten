@@ -1,0 +1,78 @@
+WITH RECURSIVE sales_data AS (
+    SELECT
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_order_number DESC) AS rn
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 20220101 AND 20221231
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT
+        sd.ws_item_sk,
+        SUM(sd.ws_quantity) AS total_quantity,
+        SUM(sd.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT sd.ws_order_number) AS total_orders
+    FROM
+        sales_data sd
+    GROUP BY
+        sd.ws_item_sk
+)
+SELECT
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_purchase_estimate,
+    ss.total_quantity,
+    ss.total_sales,
+    CASE
+        WHEN ss.total_sales > 1000 THEN 'High Value'
+        WHEN ss.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM
+    customer_info ci
+LEFT JOIN sales_summary ss ON ci.c_customer_sk = ss.ws_item_sk 
+WHERE
+    ci.cd_gender IS NOT NULL
+    AND ss.total_orders > 5
+    AND ss.total_sales IS NOT NULL
+ORDER BY
+    ss.total_sales DESC
+FETCH FIRST 10 ROWS ONLY
+UNION ALL
+SELECT
+    'Unknown' AS c_first_name,
+    'Unknown' AS c_last_name,
+    'N/A' AS cd_gender,
+    'N/A' AS cd_marital_status,
+    0 AS cd_purchase_estimate,
+    COALESCE(SUM(ss.total_quantity), 0) AS total_quantity,
+    COALESCE(SUM(ss.total_sales), 0) AS total_sales,
+    'N/A' AS customer_value_segment
+FROM
+    sales_summary ss
+WHERE
+    ss.total_sales IS NULL
+GROUP BY
+    ss.ws_item_sk
+ORDER BY
+    total_sales DESC;

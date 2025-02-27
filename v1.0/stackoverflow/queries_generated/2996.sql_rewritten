@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE p.PostTypeId = 1
+    GROUP BY u.Id, u.DisplayName
+    HAVING COUNT(p.Id) > 5
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Badges b
+    GROUP BY b.UserId
+),
+ClosePostCounts AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS ClosedPostCount
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.UserId
+),
+CombinedStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(u.TotalViews, 0) AS TotalViews,
+        COALESCE(u.PostCount, 0) AS PostCount,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(c.ClosedPostCount, 0) AS ClosedPostCount
+    FROM TopUsers u
+    LEFT JOIN UserBadges b ON u.UserId = b.UserId
+    LEFT JOIN ClosePostCounts c ON u.UserId = c.UserId
+)
+SELECT 
+    cs.UserId,
+    cs.DisplayName,
+    cs.TotalViews,
+    cs.PostCount,
+    cs.BadgeCount,
+    cs.ClosedPostCount,
+    r.Title,
+    r.ViewCount,
+    r.Score
+FROM CombinedStats cs
+LEFT JOIN RankedPosts r ON cs.UserId = r.OwnerUserId AND r.rn <= 3
+ORDER BY cs.TotalViews DESC, cs.PostCount DESC, cs.BadgeCount DESC;

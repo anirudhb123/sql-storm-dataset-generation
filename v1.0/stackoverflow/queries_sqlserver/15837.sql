@@ -1,0 +1,19 @@
+
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    p.Title AS PostTitle,
+    ph.CreationDate AS HistoryCreationDate,
+    p.Score AS PostScore
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+WHERE 
+    ph.PostHistoryTypeId = 4 
+GROUP BY 
+    u.DisplayName, p.Title, ph.CreationDate, p.Score
+ORDER BY 
+    ph.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

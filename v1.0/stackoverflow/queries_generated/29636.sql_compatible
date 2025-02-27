@@ -1,0 +1,69 @@
+
+WITH TagDetails AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.ViewCount > 1000 THEN 1 ELSE 0 END) AS PopularPosts,
+        ARRAY_AGG(DISTINCT P.OwnerDisplayName) AS Owners,
+        STRING_AGG(DISTINCT P.Title, '; ') AS Titles
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE 
+        T.IsModeratorOnly = 0
+    GROUP BY 
+        T.TagName
+), Metrics AS (
+    SELECT 
+        U.DisplayName,
+        SUM(B.Class) AS TotalGold,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS TotalSilver,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS TotalBronze,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        MAX(U.CreationDate) AS AccountAge
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.DisplayName
+), PopularTags AS (
+    SELECT 
+        TagName, 
+        PostCount, 
+        PopularPosts, 
+        Owners, 
+        Titles,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagDetails
+)
+
+SELECT 
+    M.DisplayName,
+    M.TotalGold,
+    M.TotalSilver,
+    M.TotalBronze,
+    M.TotalUpVotes,
+    M.TotalDownVotes,
+    M.TotalPosts,
+    M.AccountAge,
+    PT.TagName,
+    PT.PostCount,
+    PT.PopularPosts,
+    PT.Owners,
+    PT.Titles
+FROM 
+    Metrics M
+JOIN 
+    PopularTags PT ON PT.Rank <= 10
+ORDER BY 
+    M.TotalUpVotes DESC, 
+    M.TotalPosts DESC;

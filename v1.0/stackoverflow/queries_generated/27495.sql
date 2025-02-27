@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        u.DisplayName AS OwnerName,
+        p.CreationDate,
+        p.LastActivityDate,
+        COALESCE(ph.CreationDate, p.LastActivityDate) AS LastEditOrActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COALESCE(ph.CreationDate, p.LastActivityDate) DESC) AS EditRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')))
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5, 6) -- Edits
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, u.DisplayName, p.CreationDate, p.LastActivityDate, ph.CreationDate
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 100 -- Only users with significant reputation
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+Benchmark AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Tags,
+        r.OwnerName,
+        r.CreationDate,
+        r.LastEditOrActivityDate,
+        u.UserId,
+        u.DisplayName AS UserDisplayName,
+        u.QuestionsAsked,
+        u.CommentsMade,
+        u.UpVotesReceived,
+        u.DownVotesReceived
+    FROM 
+        RankedPosts r
+    JOIN 
+        UserActivity u ON r.OwnerName = u.DisplayName
+    WHERE 
+        r.EditRank <= 5 -- Top 5 recent edits per user
+)
+SELECT 
+    PostId,
+    Title,
+    Tags,
+    OwnerName,
+    CreationDate,
+    LastEditOrActivityDate,
+    UserId,
+    UserDisplayName,
+    QuestionsAsked,
+    CommentsMade,
+    UpVotesReceived,
+    DownVotesReceived
+FROM 
+    Benchmark
+ORDER BY 
+    CreationDate DESC, UpVotesReceived DESC;

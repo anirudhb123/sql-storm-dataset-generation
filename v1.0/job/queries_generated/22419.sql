@@ -1,0 +1,69 @@
+WITH RecursiveMovieCTE AS (
+    SELECT mv.id AS movie_id,
+           mv.title,
+           mv.production_year,
+           1 AS depth
+    FROM aka_title mv
+    WHERE mv.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT mv.id AS movie_id,
+           mv.title,
+           mv.production_year,
+           depth + 1
+    FROM movie_link ml
+    JOIN RecursiveMovieCTE mv ON ml.movie_id = mv.movie_id
+    WHERE ml.linked_movie_id IS NOT NULL
+          AND depth < 5
+),
+ActorRoles AS (
+    SELECT DISTINCT ca.person_id,
+                    coalesce(kn.keyword, 'Unknown') AS keyword,
+                    ca.role_id,
+                    ROW_NUMBER() OVER (PARTITION BY ca.person_id ORDER BY count(*) DESC) AS role_rank
+    FROM cast_info ca
+    LEFT JOIN movie_keyword mk ON ca.movie_id = mk.movie_id
+    LEFT JOIN keyword kn ON mk.keyword_id = kn.id 
+    GROUP BY ca.person_id, keyword, ca.role_id
+),
+FilteredActors AS (
+    SELECT DISTINCT person_id,
+                    role_id,
+                    keyword
+    FROM ActorRoles
+    WHERE role_rank = 1
+    AND keyword IS NOT NULL
+),
+MovieGenres AS (
+    SELECT mv.movie_id,
+           COUNT(DISTINCT mt.kind_id) AS genre_count
+    FROM movie_companies mc
+    JOIN aka_title mv ON mc.movie_id = mv.id
+    JOIN kind_type mt ON mv.kind_id = mt.id
+    GROUP BY mv.movie_id
+),
+MoviesWithInfo AS (
+    SELECT mv.movie_id,
+           mv.title,
+           mv.production_year,
+           COALESCE(mg.genre_count, 0) AS genre_count,
+           ROW_NUMBER() OVER (PARTITION BY mv.production_year ORDER BY mv.title) AS title_rank
+    FROM RecursiveMovieCTE mv
+    LEFT JOIN MovieGenres mg ON mv.movie_id = mg.movie_id
+)
+SELECT mwi.title,
+       mwi.production_year,
+       fa.keyword,
+       CASE 
+           WHEN mwi.genre_count > 2 THEN 'Diverse'
+           WHEN mwi.genre_count BETWEEN 1 AND 2 THEN 'Limited'
+           ELSE 'Unknown'
+       END AS genre_diversity,
+       COUNT(DISTINCT fa.person_id) AS actor_count,
+       SUM(CASE WHEN fa.role_id IS NULL THEN 1 ELSE 0 END) AS null_roles
+FROM MoviesWithInfo mwi
+LEFT JOIN FilteredActors fa ON mwi.movie_id = fa.person_id
+GROUP BY mwi.title, mwi.production_year, fa.keyword, genre_diversity
+HAVING COUNT(DISTINCT fa.person_id) > 0
+ORDER BY mwi.production_year DESC, mwi.title ASC;

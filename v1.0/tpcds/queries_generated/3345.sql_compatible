@@ -1,0 +1,59 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+inventory_status AS (
+    SELECT 
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory
+    GROUP BY 
+        inv_item_sk
+),
+best_selling_items AS (
+    SELECT 
+        ss.ws_item_sk,
+        ss.total_quantity,
+        ss.total_sales,
+        is.total_inventory
+    FROM 
+        sales_summary ss
+    LEFT JOIN 
+        inventory_status is ON ss.ws_item_sk = is.inv_item_sk
+    WHERE 
+        ss.sales_rank <= 10
+),
+item_details AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price
+    FROM 
+        item i
+)
+SELECT 
+    bsi.ws_item_sk,
+    id.i_item_desc,
+    bsi.total_quantity,
+    bsi.total_sales,
+    COALESCE(bsi.total_inventory, 0) AS total_inventory,
+    COALESCE(bsi.total_inventory, 0) AS available_inventory,
+    CASE 
+        WHEN bsi.total_quantity = 0 THEN NULL 
+        ELSE (bsi.total_sales / bsi.total_quantity) 
+    END AS avg_price_per_item
+FROM 
+    best_selling_items bsi
+JOIN 
+    item_details id ON bsi.ws_item_sk = id.i_item_sk
+ORDER BY 
+    bsi.total_sales DESC;

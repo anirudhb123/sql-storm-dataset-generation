@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.Level < 3
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, COUNT(li.l_orderkey) AS TotalItems, SUM(li.l_extendedprice * (1 - li.l_discount)) AS TotalRevenue
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+PartSupplier AS (
+    SELECT p.p_partkey, SUM(ps.ps_availqty) AS TotalAvailable
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT 
+    r.r_name AS Region, 
+    n.n_name AS Nation, 
+    sh.s_name AS Supplier,
+    os.TotalRevenue,
+    ps.TotalAvailable,
+    RANK() OVER (PARTITION BY r.r_name ORDER BY os.TotalRevenue DESC) AS RevenueRank
+FROM region r
+JOIN nation n ON n.n_regionkey = r.r_regionkey
+JOIN SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+LEFT JOIN OrderSummary os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE EXISTS (
+        SELECT 1 
+        FROM lineitem li 
+        WHERE li.l_orderkey = o.o_orderkey AND li.l_returnflag = 'N'))
+LEFT JOIN PartSupplier ps ON ps.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost < (SELECT AVG(ps.ps_supplycost) FROM partsupp))
+WHERE n.n_comment IS NOT NULL
+ORDER BY r.r_name, os.TotalRevenue DESC;

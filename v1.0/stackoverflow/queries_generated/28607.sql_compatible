@@ -1,0 +1,63 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(Posts.Score, 0)) AS TotalScore
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::text[])
+    GROUP BY 
+        Tags.TagName
+), 
+UserStats AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS TotalPosts,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+PostHistoryAnalytics AS (
+    SELECT 
+        Posts.Id AS PostId,
+        COUNT(CASE WHEN PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseActions,
+        MAX(CASE WHEN PostHistoryTypeId = 24 THEN CreationDate END) AS LastEditDate 
+    FROM 
+        Posts
+    LEFT JOIN 
+        PostHistory ON Posts.Id = PostHistory.PostId
+    GROUP BY 
+        Posts.Id
+)
+SELECT 
+    tc.TagName,
+    tc.PostCount,
+    tc.TotalViews,
+    tc.TotalScore,
+    us.DisplayName AS TopUser,
+    us.TotalPosts,
+    us.UpVotesReceived,
+    us.DownVotesReceived,
+    pha.CloseActions,
+    pha.LastEditDate
+FROM 
+    TagCounts tc
+JOIN 
+    UserStats us ON us.TotalPosts = (SELECT MAX(TotalPosts) FROM UserStats) 
+JOIN 
+    PostHistoryAnalytics pha ON pha.PostId = (SELECT MIN(PostId) FROM Posts WHERE Tags ILIKE '%' || tc.TagName || '%') 
+WHERE 
+    tc.PostCount > 0
+ORDER BY 
+    tc.TotalScore DESC, tc.TotalViews DESC;

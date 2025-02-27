@@ -1,0 +1,69 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), RankedSuppliers AS (
+    SELECT 
+        ss.s_suppkey,
+        ss.s_name,
+        ss.total_supply_cost,
+        ss.part_count,
+        ROW_NUMBER() OVER (ORDER BY ss.total_supply_cost DESC) AS supply_rank
+    FROM 
+        SupplierStats ss
+), CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), NationwideStatistics AS (
+    SELECT 
+        n.n_name,
+        SUM(o.o_totalprice) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    rs.s_name,
+    rs.total_supply_cost,
+    rs.part_count,
+    cos.c_name,
+    cos.order_count,
+    cos.total_spent,
+    ns.total_sales,
+    ns.total_orders
+FROM 
+    RankedSuppliers rs
+FULL OUTER JOIN 
+    CustomerOrderSummary cos ON rs.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p GROUP BY p.p_partkey) LIMIT 1)
+LEFT JOIN 
+    NationwideStatistics ns ON ns.total_sales > 100000
+WHERE 
+    rs.total_supply_cost IS NOT NULL OR cos.total_spent IS NOT NULL
+ORDER BY 
+    rs.total_supply_cost DESC, cos.total_spent DESC;

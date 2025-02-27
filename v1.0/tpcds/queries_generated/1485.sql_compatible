@@ -1,0 +1,64 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.sold_date_sk,
+        ws.web_site_sk,
+        COUNT(ws.order_number) AS total_orders,
+        SUM(ws.net_profit) AS total_profit,
+        COUNT(DISTINCT ws.bill_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+        AND ws.net_profit > 0
+    GROUP BY 
+        ws.sold_date_sk, ws.web_site_sk
+),
+inventory_summary AS (
+    SELECT 
+        inv.inv_item_sk, 
+        SUM(inv.inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM 
+        inventory inv
+    WHERE 
+        inv.inv_date_sk = (SELECT MAX(inv2.inv_date_sk) FROM inventory inv2)
+    GROUP BY 
+        inv.inv_item_sk
+),
+return_summary AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returns,
+        SUM(cr_return_amt) AS total_return_amt
+    FROM 
+        catalog_returns
+    WHERE 
+        cr_returned_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY 
+        cr_item_sk
+)
+SELECT 
+    ss.sold_date_sk,
+    ss.web_site_sk,
+    ss.total_orders,
+    ss.total_profit,
+    ss.unique_customers,
+    COALESCE(inv.total_quantity_on_hand, 0) AS total_inventory,
+    COALESCE(rt.total_returns, 0) AS total_returns,
+    COALESCE(rt.total_return_amt, 0) AS total_return_amt,
+    CASE 
+        WHEN ss.total_orders > 0 THEN (ss.total_profit / NULLIF(ss.total_orders, 0))
+        ELSE 0 
+    END AS avg_profit_per_order
+FROM 
+    sales_summary ss
+LEFT JOIN 
+    inventory_summary inv ON ss.web_site_sk = inv.inv_item_sk
+LEFT JOIN 
+    return_summary rt ON rt.cr_item_sk = ss.web_site_sk
+WHERE 
+    ss.total_orders > 5
+ORDER BY 
+    ss.sold_date_sk DESC, 
+    ss.total_profit DESC
+FETCH FIRST 50 ROWS ONLY;

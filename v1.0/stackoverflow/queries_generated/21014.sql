@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreatedDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankByViews,
+        RANK() OVER (ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.RankByViews,
+        rp.RankByScore,
+        u.Reputation AS UserReputation,
+        COALESCE((
+            SELECT COUNT(*) 
+            FROM Votes v 
+            WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2
+        ), 0) AS UpVotes,
+        COALESCE((
+            SELECT COUNT(*) 
+            FROM Votes v 
+            WHERE v.PostId = rp.PostId AND v.VoteTypeId = 3
+        ), 0) AS DownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    WHERE 
+        rp.RankByViews <= 10 OR rp.RankByScore <= 10
+),
+AggregatedResults AS (
+    SELECT 
+        COUNT(*) AS TotalPosts,
+        AVG(UserReputation) AS AverageReputation,
+        SUM(ViewCount) AS TotalViews,
+        SUM(Score) AS TotalScore,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes
+    FROM 
+        FilteredPosts
+)
+SELECT 
+    ar.*,
+    (ar.TotalUpVotes - ar.TotalDownVotes) AS NetVotes,
+    CASE
+        WHEN ar.TotalPosts = 0 THEN NULL
+        ELSE (ar.TotalViews / ar.TotalPosts) 
+    END AS AverageViewsPerPost
+FROM 
+    AggregatedResults ar
+WHERE 
+    ar.TotalPosts > 0
+ORDER BY 
+    AverageReputation DESC
+LIMIT 5;

@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.Tags,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS ScoreRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE
+        P.PostTypeId = 1 
+),
+
+TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%' -- Note: `LIKE` with wildcard can be incompatible; consider using a more optimized method if available.
+    GROUP BY 
+        T.TagName
+),
+
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Class) AS HighestBadgeClass
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.ViewCount,
+    RP.Score,
+    RP.OwnerDisplayName,
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews,
+    TS.AverageScore,
+    UB.BadgeCount,
+    UB.HighestBadgeClass
+FROM 
+    RankedPosts RP
+JOIN 
+    TagStatistics TS ON RP.Tags LIKE '%' || TS.TagName || '%'
+JOIN 
+    UserBadges UB ON RP.OwnerUserId = UB.UserId
+WHERE 
+    RP.ScoreRank = 1 
+ORDER BY 
+    TS.TotalViews DESC,
+    TS.AverageScore DESC;

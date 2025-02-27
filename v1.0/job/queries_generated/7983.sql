@@ -1,0 +1,35 @@
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    c.kind AS cast_type,
+    c.nr_order AS role_order,
+    k.keyword AS movie_keyword,
+    m.info AS additional_info,
+    co.name AS company_name,
+    p.info AS person_info
+FROM 
+    title t
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_info m ON t.id = m.movie_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name co ON mc.company_id = co.id
+JOIN 
+    person_info p ON c.person_id = p.person_id
+WHERE 
+    t.production_year >= 2000
+    AND k.keyword LIKE '%action%'
+ORDER BY 
+    t.production_year DESC, 
+    a.name ASC;

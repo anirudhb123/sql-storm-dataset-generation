@@ -1,0 +1,102 @@
+
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        DisplayName,
+        LastAccessDate,
+        1 AS Level
+    FROM Users
+    WHERE Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        U.Id,
+        U.Reputation,
+        U.CreationDate,
+        U.DisplayName,
+        U.LastAccessDate,
+        UR.Level + 1
+    FROM Users U
+    JOIN UserReputationCTE UR ON U.Id = UR.UserId
+    WHERE U.Reputation > 1000
+),
+PostsWithComments AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.AnswerCount,
+        P.ViewCount,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,  
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes  
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= (DATE '2024-10-01' - INTERVAL '1 year')
+    GROUP BY P.Id, P.Title, P.CreationDate, P.Score, P.AnswerCount, P.ViewCount
+),
+RankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        AnswerCount,
+        ViewCount,
+        CommentCount,
+        Upvotes,
+        Downvotes,
+        RANK() OVER (ORDER BY Score DESC, ViewCount DESC) AS PostRank
+    FROM PostsWithComments
+),
+UserBadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+QualifiedUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        UB.BadgeCount,
+        UR.Level
+    FROM Users U
+    LEFT JOIN UserBadgeCounts UB ON U.Id = UB.UserId
+    JOIN UserReputationCTE UR ON U.Id = UR.UserId
+),
+FinalResult AS (
+    SELECT 
+        Q.UserId,
+        Q.DisplayName,
+        Q.Reputation,
+        Q.BadgeCount,
+        PP.PostId,
+        PP.Title,
+        PP.CreationDate,
+        PP.Score,
+        PP.CommentCount
+    FROM QualifiedUsers Q
+    JOIN RankedPosts PP ON Q.Reputation > 2000 AND Q.Level > 1
+)
+
+SELECT 
+    FR.DisplayName,
+    FR.Reputation,
+    FR.BadgeCount,
+    FR.Title AS PostTitle,
+    FR.CreationDate AS PostCreationDate,
+    FR.Score AS PostScore,
+    FR.CommentCount AS PostCommentCount
+FROM FinalResult FR
+ORDER BY FR.Reputation DESC, FR.BadgeCount DESC
+LIMIT 10;

@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 1000 AND sh.level < 5
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    WHERE o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+),
+AggregateLineItem AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(SUM(ps.ps_availqty), 0) AS total_available,
+    COALESCE(SUM(ali.net_revenue), 0) AS total_revenue,
+    sh.level AS supplier_level,
+    COUNT(DISTINCT ro.o_orderkey) AS order_count,
+    COUNT(DISTINCT CASE WHEN ro.rank <= 10 THEN ro.o_orderkey END) AS top_orders
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN AggregateLineItem ali ON ali.l_orderkey IN (
+    SELECT l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey
+)
+JOIN RankedOrders ro ON ro.o_orderkey IN (
+    SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey
+)
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = (
+    SELECT s_nationkey FROM supplier s WHERE s.s_suppkey = ps.ps_suppkey
+)
+WHERE p.p_size BETWEEN 20 AND 50
+GROUP BY p.p_partkey, p.p_name, sh.level
+ORDER BY total_revenue DESC, total_available ASC;

@@ -1,0 +1,90 @@
+WITH CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.total_spent,
+        RANK() OVER (ORDER BY c.total_spent DESC) AS rank
+    FROM 
+        CustomerOrderSummary c
+    WHERE 
+        c.total_orders > 5
+),
+PartSupplyDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+SupplierPartInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        COALESCE(pp.total_available, 0) AS total_available,
+        COALESCE(pp.total_supply_cost, 0) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN 
+        PartSupplyDetails pp ON ps.ps_partkey = pp.ps_partkey
+)
+SELECT 
+    cu.c_name AS customer_name,
+    cu.total_spent,
+    p.p_name AS part_name,
+    p.p_brand,
+    s.s_name AS supplier_name,
+    spi.total_available,
+    spi.total_supply_cost,
+    (CASE 
+        WHEN spi.total_available > 100 THEN 'High Stock' 
+        WHEN spi.total_available BETWEEN 50 AND 100 THEN 'Medium Stock'
+        ELSE 'Low Stock'
+    END) AS stock_status,
+    (SELECT 
+        COUNT(*) 
+    FROM 
+        lineitem l 
+    WHERE 
+        l.l_partkey = p.p_partkey AND 
+        l.l_shipdate > '2023-01-01' 
+    ) AS recent_sales_count
+FROM 
+    TopCustomers cu
+JOIN 
+    orders o ON cu.c_custkey = o.o_custkey
+JOIN 
+    lineitem li ON o.o_orderkey = li.l_orderkey
+JOIN 
+    SupplierPartInfo spi ON li.l_partkey = spi.p_partkey
+JOIN 
+    part p ON li.l_partkey = p.p_partkey
+WHERE 
+    cu.rank <= 10 AND 
+    o.o_orderdate BETWEEN '2022-01-01' AND '2023-12-31'
+ORDER BY 
+    cu.total_spent DESC, 
+    p.p_name;

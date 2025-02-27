@@ -1,0 +1,86 @@
+WITH RECURSIVE SupplierCTE AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        1 AS Level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        Level + 1
+    FROM 
+        supplier s
+    INNER JOIN SupplierCTE cte ON s.s_nationkey = cte.s_nationkey 
+    WHERE 
+        s.s_acctbal > 1000 AND Level < 3
+),
+RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate > cast('1998-10-01' as date) - INTERVAL '1 year'
+),
+PartSupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+VendorStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice - l.l_discount) AS TotalRevenue,
+        AVG(s.s_acctbal) AS AvgAcctBal
+    FROM 
+        supplier s
+    LEFT JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(v.TotalRevenue, 0) AS TotalRevenue,
+    COALESCE(p_cost.TotalCost, 0) AS TotalCost,
+    r.n_name AS Nation,
+    r.r_comment,
+    CASE 
+        WHEN v.AvgAcctBal IS NULL THEN 'Unknown'
+        WHEN v.AvgAcctBal > 2000 THEN 'High Balance'
+        ELSE 'Low Balance'
+    END AS BalanceCategory
+FROM 
+    part p
+LEFT JOIN PartSupplierCost p_cost ON p.p_partkey = p_cost.ps_partkey
+LEFT JOIN VendorStats v ON p.p_partkey = v.s_suppkey
+JOIN nation r ON r.n_nationkey = v.s_nationkey
+WHERE 
+    p.p_size = (SELECT MAX(p2.p_size) FROM part p2)
+    OR EXISTS (
+        SELECT 1 FROM lineitem l 
+        WHERE l.l_partkey = p.p_partkey AND l.l_quantity > (
+            SELECT AVG(l2.l_quantity) FROM lineitem l2 WHERE l2.l_partkey = p.p_partkey
+        )
+    )
+ORDER BY 
+    TotalRevenue DESC,
+    TotalCost ASC
+FETCH FIRST 100 ROWS ONLY;

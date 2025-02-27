@@ -1,0 +1,56 @@
+WITH RECURSIVE SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_mktsegment,
+           RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS total_price_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= '2023-01-01'
+),
+NationsWithComments AS (
+    SELECT n.n_name, n.n_comment, r.r_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+PartAnalysis AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, 
+           CASE 
+               WHEN p.p_size IS NULL THEN 'Unknown Size'
+               ELSE CONCAT('Size: ', p.p_size)
+           END AS size_description,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, size_description
+)
+SELECT np.n_name AS nation_name, 
+       np.n_comment AS nation_comment, 
+       rp.r_name AS region_name, 
+       sp.s_name AS supplier_name, 
+       pa.p_name AS part_name, 
+       pa.total_avail_qty AS available_quantity, 
+       os.o_orderkey, 
+       os.o_totalprice, 
+       os.o_orderdate, 
+       os.c_mktsegment
+FROM NationsWithComments np
+FULL OUTER JOIN SupplierParts sp ON np.n_name = (
+    SELECT n.n_name
+    FROM nation n
+    WHERE n.n_nationkey = sp.s_suppkey
+)
+JOIN PartAnalysis pa ON pa.p_partkey = (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_suppkey = sp.s_suppkey 
+    ORDER BY ps.ps_supplycost DESC 
+    LIMIT 1
+)
+LEFT JOIN OrderSummary os ON os.o_orderdate = CURRENT_DATE
+WHERE pa.avg_supply_cost IS NOT NULL
+  AND (np.n_comment LIKE '%quality%' OR np.n_comment IS NULL)
+ORDER BY os.o_totalprice DESC, np.n_name;

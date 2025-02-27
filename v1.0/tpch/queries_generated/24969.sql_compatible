@@ -1,0 +1,74 @@
+
+WITH RegionCounts AS (
+    SELECT r_name, COUNT(DISTINCT n_nationkey) AS nation_count
+    FROM region
+    JOIN nation ON region.r_regionkey = nation.n_regionkey
+    GROUP BY r_name
+),
+SupplierStats AS (
+    SELECT s_nationkey, 
+           SUM(s_acctbal) AS total_acctbal, 
+           AVG(s_acctbal) AS avg_acctbal,
+           MAX(s_acctbal) AS max_acctbal
+    FROM supplier
+    GROUP BY s_nationkey
+),
+ProductCosts AS (
+    SELECT ps_partkey,
+           SUM(ps_supplycost * ps_availqty) AS total_supplycost,
+           COUNT(DISTINCT ps_suppkey) AS supp_count
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+OrderStats AS (
+    SELECT o_custkey,
+           COUNT(o_orderkey) AS order_count,
+           SUM(o_totalprice) AS total_spent,
+           AVG(o_totalprice) AS avg_spent
+    FROM orders
+    GROUP BY o_custkey
+),
+HighValueCustomers AS (
+    SELECT c_custkey, c_name, c_nationkey
+    FROM customer
+    WHERE c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+),
+RichSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) + 1000
+),
+MaxLineItemByOrder AS (
+    SELECT l_orderkey, MAX(l_extendedprice) AS max_price
+    FROM lineitem
+    GROUP BY l_orderkey
+),
+FinalResult AS (
+    SELECT rc.r_name, 
+           rc.nation_count, 
+           ss.total_acctbal, 
+           ss.avg_acctbal, 
+           ss.max_acctbal, 
+           pc.total_supplycost, 
+           osc.order_count, 
+           osc.total_spent,
+           osc.avg_spent,
+           hvc.c_name,
+           rs.s_name,
+           ml.max_price
+    FROM RegionCounts rc
+    JOIN SupplierStats ss ON ss.s_nationkey = (SELECT n_nationkey FROM nation WHERE n_regionkey = (SELECT r_regionkey FROM region WHERE r_name = rc.r_name))
+    JOIN ProductCosts pc ON pc.ps_partkey IN (SELECT ps_partkey FROM partsupp)
+    JOIN OrderStats osc ON osc.o_custkey IN (SELECT c_custkey FROM HighValueCustomers)
+    LEFT JOIN RichSuppliers rs ON rs.s_nationkey = ss.s_nationkey
+    LEFT JOIN MaxLineItemByOrder ml ON ml.l_orderkey IN (SELECT l_orderkey FROM lineitem)
+    WHERE rc.nation_count > 1
+      AND ss.total_acctbal > (SELECT AVG(total_acctbal) FROM SupplierStats)
+      AND pc.total_supplycost IS NOT NULL
+      AND osc.total_spent IS NOT NULL
+      AND rs.s_name IS NOT NULL
+      AND ml.max_price IS NOT NULL
+)
+SELECT * 
+FROM FinalResult
+ORDER BY rc.r_name, ss.total_acctbal DESC;

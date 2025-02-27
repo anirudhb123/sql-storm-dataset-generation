@@ -1,0 +1,61 @@
+
+WITH RECURSIVE category_hierarchy AS (
+    SELECT i_item_sk, i_item_desc, i_category_id, i_brand, 1 AS depth
+    FROM item
+    WHERE i_item_sk IS NOT NULL
+    UNION ALL
+    SELECT i.item_sk, i.i_item_desc, i.i_category_id, c.i_brand, depth + 1
+    FROM item i
+    INNER JOIN category_hierarchy c ON i.i_category_id = c.i_category_id
+    WHERE depth < 5
+),
+customer_data AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band_id,
+        hd.hd_buy_potential,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY cd.cd_purchase_estimate DESC) AS rnk
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+sales_summary AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        AVG(ws.ws_sales_price) AS average_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 2500 AND 2600
+    GROUP BY ws.web_site_sk
+),
+recent_promotions AS (
+    SELECT
+        p.p_promo_sk,
+        p.p_promo_name,
+        COUNT(ws.ws_order_number) AS promo_usage
+    FROM promotion p
+    LEFT JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    WHERE p.p_start_date_sk < 2400 AND p.p_end_date_sk > 2300
+    GROUP BY p.p_promo_sk, p.p_promo_name
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.c_first_name,
+    cd.c_last_name,
+    SUM(ss.total_sales) AS total_sales,
+    SUM(CASE WHEN cd.income_band_id IS NOT NULL THEN 1 ELSE 0 END) AS customers_in_income_band,
+    AVG(ss.average_sales) AS avg_sales_per_order,
+    COUNT(rp.promo_usage) AS promotions_used
+FROM customer_data cd
+LEFT JOIN sales_summary ss ON cd.c_customer_sk = ss.web_site_sk
+LEFT JOIN recent_promotions rp ON rp.promo_usage > 0
+WHERE cd.rnk = 1 AND (cd.cd_gender = 'F' OR cd.cd_marital_status = 'S')
+GROUP BY cd.c_customer_sk, cd.c_first_name, cd.c_last_name
+ORDER BY total_sales DESC
+LIMIT 10;

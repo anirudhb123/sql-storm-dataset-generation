@@ -1,0 +1,67 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.web_site_id,
+        sum(ws.net_paid) AS total_sales,
+        count(distinct ws.order_number) AS total_orders,
+        avg(ws.net_profit) AS avg_profit,
+        d.year,
+        d.month,
+        d.week
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.sold_date_sk = d.date_sk
+    WHERE 
+        d.year BETWEEN 2021 AND 2023
+    GROUP BY 
+        ws.web_site_id, d.year, d.month, d.week
+), 
+customer_data AS (
+    SELECT 
+        c.customer_id,
+        cd.gender,
+        cd.marital_status,
+        cd.education_status,
+        cd.credit_rating,
+        cd.dep_count,
+        cd.dep_employed_count,
+        cd.dep_college_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.demo_sk
+), 
+address_data AS (
+    SELECT 
+        ca.address_id,
+        ca.city,
+        ca.state,
+        ca.country,
+        COUNT(DISTINCT c.customer_sk) AS customer_count
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON c.current_addr_sk = ca.address_sk
+    GROUP BY 
+        ca.address_id, ca.city, ca.state, ca.country
+)
+SELECT 
+    sd.web_site_id,
+    sd.total_sales,
+    sd.total_orders,
+    sd.avg_profit,
+    cd.gender,
+    cd.marital_status,
+    ad.city,
+    ad.state,
+    ad.country,
+    ad.customer_count
+FROM 
+    sales_data sd
+JOIN 
+    customer_data cd ON cd.customer_id IN (SELECT DISTINCT ws.bill_customer_sk FROM web_sales ws WHERE ws.web_site_sk IN (SELECT web_site_sk FROM web_site))
+JOIN 
+    address_data ad ON ad.customer_count > 100
+ORDER BY 
+    sd.total_sales DESC, cd.gender;

@@ -1,0 +1,72 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        ws_sold_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk, ws_sold_date_sk
+),
+Sales_Performance AS (
+    SELECT 
+        sc.ws_item_sk,
+        MAX(sc.total_quantity) AS max_quantity,
+        AVG(sc.total_net_profit) AS avg_net_profit,
+        d.d_date AS sales_date
+    FROM 
+        Sales_CTE sc
+    JOIN 
+        date_dim d ON d.d_date_sk = sc.ws_sold_date_sk
+    WHERE 
+        sc.rn = 1
+    GROUP BY 
+        sc.ws_item_sk, d.d_date
+),
+Customer_Segments AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ss.net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+),
+Combined_Results AS (
+    SELECT 
+        sp.ws_item_sk,
+        cs.cd_gender,
+        cs.cd_marital_status,
+        sp.max_quantity,
+        sp.avg_net_profit,
+        cs.total_spent
+    FROM 
+        Sales_Performance sp
+    LEFT JOIN 
+        Customer_Segments cs ON sp.ws_item_sk = (SELECT MAX(ws_item_sk) FROM web_sales WHERE ws_net_profit > 0)
+)
+
+SELECT 
+    cr.cd_gender,
+    cr.cd_marital_status,
+    COUNT(*) AS customer_count,
+    AVG(cr.total_spent) AS avg_total_spent,
+    COALESCE(SUM(cr.max_quantity), 0) AS total_quantity_sold,
+    (SELECT COUNT(*) FROM store WHERE s_state = 'CA') AS store_count
+FROM 
+    Combined_Results cr
+WHERE 
+    cr.total_spent IS NOT NULL
+GROUP BY 
+    cr.cd_gender, cr.cd_marital_status
+ORDER BY 
+    avg_total_spent DESC;

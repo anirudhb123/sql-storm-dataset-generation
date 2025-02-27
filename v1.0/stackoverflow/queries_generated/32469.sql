@@ -1,0 +1,84 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.OwnerUserId,
+        0 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL  -- Start with top-level posts
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.OwnerUserId,
+        Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id AND v.VoteTypeId IN (8, 9)  -- Bounty start and close votes
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes,
+        COALESCE(SUM(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(ph.Id), 0) AS EditCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id 
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id 
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id AND ph.PostHistoryTypeId IN (4, 5)  -- Title and body edits
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    u.DisplayName AS Owner,
+    u.Reputation,
+    u.TotalBounty,
+    ps.Upvotes,
+    ps.Downvotes,
+    ps.CommentCount,
+    ps.EditCount,
+    r.Depth
+FROM 
+    RecursivePostHierarchy r
+JOIN 
+    Posts p ON r.PostId = p.Id
+JOIN 
+    UserReputation u ON p.OwnerUserId = u.UserId
+JOIN 
+    PostStatistics ps ON r.PostId = ps.PostId
+WHERE 
+    r.Depth < 3  -- Limit to a specific depth for performance
+ORDER BY 
+    ps.Upvotes DESC, ps.CommentCount DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;  -- Pagination
+

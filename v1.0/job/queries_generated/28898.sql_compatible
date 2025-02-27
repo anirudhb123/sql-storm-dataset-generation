@@ -1,0 +1,65 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        at.title AS movie_title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        AVG(pl.rank) AS avg_rating
+    FROM 
+        aka_title at
+    JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    LEFT JOIN 
+        (
+            SELECT 
+                movie_id,
+                AVG(rating) AS rank
+            FROM 
+                movie_info mi
+            WHERE 
+                mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+            GROUP BY 
+                movie_id
+        ) pl ON at.movie_id = pl.movie_id
+    GROUP BY 
+        at.movie_id, at.title, at.production_year
+),
+HighRatedMovies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        total_cast,
+        avg_rating
+    FROM 
+        RankedTitles
+    WHERE 
+        avg_rating IS NOT NULL AND avg_rating > 7.0
+),
+MostFrequentActors AS (
+    SELECT 
+        n.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count
+    FROM 
+        name n
+    JOIN 
+        cast_info ci ON n.imdb_id = ci.person_id
+    WHERE 
+        n.gender = 'M' 
+    GROUP BY 
+        n.imdb_id, n.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) >= 5
+)
+SELECT 
+    h.movie_title,
+    h.production_year,
+    h.total_cast,
+    h.avg_rating,
+    a.actor_name,
+    a.movies_count
+FROM 
+    HighRatedMovies h
+JOIN 
+    MostFrequentActors a ON h.total_cast = a.movies_count
+ORDER BY 
+    h.avg_rating DESC, a.movies_count DESC;

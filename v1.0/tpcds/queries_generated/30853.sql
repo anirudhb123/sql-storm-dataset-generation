@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 20220101 AND 20221231
+    UNION ALL
+    SELECT 
+        cs_sold_date_sk,
+        cs_item_sk,
+        cs_quantity,
+        cs_ext_sales_price
+    FROM catalog_sales
+    WHERE cs_sold_date_sk BETWEEN 20220101 AND 20221231
+), AggregatedSales AS (
+    SELECT 
+        item.i_item_sk,
+        item.i_item_id,
+        SUM(cte.ws_quantity + COALESCE(cte.cs_quantity, 0)) AS total_quantity,
+        SUM(cte.ws_ext_sales_price + COALESCE(cte.cs_ext_sales_price, 0)) AS total_sales
+    FROM item
+        LEFT JOIN SalesCTE cte ON item.i_item_sk = cte.ws_item_sk OR item.i_item_sk = cte.cs_item_sk
+    GROUP BY item.i_item_sk, item.i_item_id
+), TopSales AS (
+    SELECT 
+        i_item_id, 
+        total_quantity, 
+        total_sales,
+        DENSE_RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM AggregatedSales
+)
+SELECT 
+    ts.i_item_id,
+    ts.total_quantity,
+    ts.total_sales,
+    (CASE 
+        WHEN ts.sales_rank <= 10 THEN 'Top Seller'
+        WHEN ts.sales_rank BETWEEN 11 AND 50 THEN 'Average Seller'
+        ELSE 'Low Seller' 
+    END) AS seller_category
+FROM TopSales ts
+WHERE ts.total_sales > 1000
+ORDER BY ts.total_sales DESC;

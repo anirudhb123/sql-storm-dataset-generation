@@ -1,0 +1,67 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+demographic_summary AS (
+    SELECT 
+        cd_gender, 
+        COUNT(DISTINCT c_customer_sk) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics 
+    JOIN 
+        customer ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    GROUP BY 
+        cd_gender
+),
+warehouse_inventory AS (
+    SELECT 
+        inv_warehouse_sk, 
+        SUM(inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory 
+    GROUP BY 
+        inv_warehouse_sk
+),
+sales_by_gender AS (
+    SELECT 
+        ss_sold_date_sk, 
+        SUM(total_sales) AS sales_by_gender,
+        SUM(total_profit) AS profit_by_gender,
+        CASE 
+            WHEN cd_gender = 'M' THEN 'Male' 
+            WHEN cd_gender = 'F' THEN 'Female' 
+            ELSE 'Other' 
+        END AS gender_category
+    FROM 
+        sales_summary
+    JOIN 
+        customer ON customer.c_first_shipto_date_sk = sales_summary.ws_sold_date_sk
+    JOIN 
+        customer_demographics ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    GROUP BY 
+        ss_sold_date_sk, gender_category
+)
+SELECT 
+    ws_sold_date_sk,
+    gender_category,
+    sales_by_gender,
+    profit_by_gender,
+    total_inventory
+FROM 
+    sales_by_gender 
+JOIN 
+    warehouse_inventory ON warehouse_inventory.inv_warehouse_sk = 1 -- assuming a specific warehouse otherwise you can group and join accordingly
+ORDER BY 
+    ws_sold_date_sk, gender_category;

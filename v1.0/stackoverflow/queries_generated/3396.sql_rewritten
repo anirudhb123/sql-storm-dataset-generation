@@ -1,0 +1,77 @@
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        COUNT(C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.PostTypeId
+)
+SELECT 
+    PST.PostId,
+    PST.Title,
+    PST.PostTypeId,
+    PST.TotalComments,
+    PST.TotalUpVotes,
+    PST.TotalDownVotes,
+    CASE 
+        WHEN PST.TotalUpVotes - PST.TotalDownVotes > 0 THEN 'Positive' 
+        WHEN PST.TotalUpVotes - PST.TotalDownVotes < 0 THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS VoteSentiment,
+    CASE 
+        WHEN PST.PostRank <= 10 THEN 'Top 10 Posts' 
+        ELSE 'Other Posts' 
+    END AS RankCategory
+FROM 
+    PostStats PST
+JOIN 
+    (SELECT 
+        * 
+     FROM 
+        Users 
+     WHERE 
+        Reputation > 1000) U ON U.Id = PST.PostId
+WHERE 
+    PST.TotalComments > 5
+ORDER BY 
+    PST.TotalUpVotes DESC
+LIMIT 50
+UNION
+SELECT 
+    PL.RelatedPostId AS PostId,
+    P.Title,
+    P.PostTypeId,
+    COUNT(C.Id) AS TotalComments,
+    SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+    SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+    'Related Post' AS VoteSentiment,
+    'N/A' AS RankCategory
+FROM 
+    PostLinks PL
+JOIN 
+    Posts P ON PL.RelatedPostId = P.Id
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+WHERE 
+    PL.LinkTypeId = 1 AND P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+GROUP BY 
+    PL.RelatedPostId, P.Title, P.PostTypeId
+HAVING 
+    COUNT(C.Id) >= 3
+ORDER BY 
+    TotalUpVotes DESC
+LIMIT 50;

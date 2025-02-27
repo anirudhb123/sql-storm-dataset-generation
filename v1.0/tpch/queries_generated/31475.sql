@@ -1,0 +1,39 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, CAST(s.s_name AS varchar(255)) AS hierarchy_path
+    FROM supplier s
+    WHERE s.s_suppkey = 1  -- Base case, starting supplier
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, CAST(CONCAT(sh.hierarchy_path, ' -> ', s.s_name) AS varchar(255))
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey <> sh.s_suppkey  -- Prevent self-join
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSuppliers AS (
+    SELECT p.p_partkey, p.p_name, COUNT(ps.ps_suppkey) AS supplier_count, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT nh.n_nationkey) AS nation_count,
+    SUM(co.total_spent) AS total_customer_orders,
+    AVG(ps.supplier_count) AS avg_supplier_per_part,
+    STRING_AGG(DISTINCT sh.hierarchy_path, ', ') AS supplier_hierarchy_paths
+FROM region r
+LEFT JOIN nation nh ON r.r_regionkey = nh.n_regionkey
+LEFT JOIN CustomerOrders co ON co.order_count > 0
+LEFT JOIN PartSuppliers ps ON ps.supplier_count >= 1
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = nh.n_nationkey
+WHERE r.r_comment IS NOT NULL
+GROUP BY r.r_name
+HAVING SUM(co.total_spent) > 10000.00
+ORDER BY total_customer_orders DESC, r.r_name ASC;

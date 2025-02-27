@@ -1,0 +1,49 @@
+WITH RECURSIVE UserBadgeCounts AS (
+    SELECT u.Id AS UserId, 
+           COUNT(b.Id) AS BadgeCount,
+           SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+           SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+           SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStats AS (
+    SELECT p.OwnerUserId,
+           COUNT(DISTINCT p.Id) AS PostCount,
+           SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+           SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+           SUM(p.Score) AS TotalScore,
+           AVG(p.ViewCount) AS AvgViews
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+LatestEdits AS (
+    SELECT p.Id AS PostId,
+           ph.UserId AS EditorId,
+           ph.CreationDate AS EditDate,
+           ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId IN (4, 5) 
+)
+SELECT u.DisplayName,
+       u.Reputation,
+       COALESCE(badge.BadgeCount, 0) AS TotalBadges,
+       COALESCE(ps.PostCount, 0) AS TotalPosts,
+       COALESCE(ps.Questions, 0) AS TotalQuestions,
+       COALESCE(ps.Answers, 0) AS TotalAnswers,
+       COALESCE(ps.TotalScore, 0) AS TotalScore,
+       COALESCE(ps.AvgViews, 0) AS AverageViews,
+       le.EditorId AS LastEditorId,
+       le.EditDate AS LastEditDate
+FROM Users u
+LEFT JOIN UserBadgeCounts badge ON u.Id = badge.UserId
+LEFT JOIN PostStats ps ON u.Id = ps.OwnerUserId
+LEFT JOIN (
+    SELECT PostId, EditorId, EditDate
+    FROM LatestEdits
+    WHERE rn = 1
+) le ON le.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+WHERE u.Reputation > 100 
+ORDER BY TotalPosts DESC, TotalBadges DESC;

@@ -1,0 +1,55 @@
+
+WITH aggregated_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        SUM(ws_quantity) AS total_quantity,
+        COUNT(ws_order_number) AS order_count
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 10000 AND 11000
+    GROUP BY ws_item_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        AS.total_sales,
+        AS.total_quantity,
+        AS.order_count
+    FROM aggregated_sales AS AS
+    JOIN customer_info ci ON ci.cd_demo_sk = AS.ws_item_sk
+    JOIN household_demographics hd ON hd.hd_demo_sk = ci.cd_demo_sk
+    JOIN income_band ib ON ib.ib_income_band_sk = hd.hd_income_band_sk
+)
+SELECT 
+    c.customer_sk,
+    c.first_name,
+    c.last_name,
+    c.gender,
+    c.marital_status,
+    SUM(ss.total_sales) AS grand_total_sales,
+    AVG(ss.total_quantity) AS average_quantity_per_order,
+    COUNT(ss.order_count) AS total_orders
+FROM sales_summary ss
+JOIN customer_info c ON ss.c_customer_sk = c.c_customer_sk
+GROUP BY c.customer_sk, c.first_name, c.last_name, c.gender, c.marital_status
+HAVING SUM(ss.total_sales) > 10000
+ORDER BY grand_total_sales DESC
+LIMIT 100;

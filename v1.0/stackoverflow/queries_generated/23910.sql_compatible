@@ -1,0 +1,85 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR) 
+        AND p.Score > 0
+),
+RecentUserActivities AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT c.Id) AS CommentsMade
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    WHERE 
+        u.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 2 YEAR)
+    GROUP BY 
+        u.Id
+),
+UserAchievements AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS TotalBadges,
+        STRING_AGG(b.Name, ', ' ORDER BY b.Date DESC) AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    ra.PostId,
+    ra.Title,
+    ra.CreationDate,
+    ra.Score,
+    ra.ViewCount,
+    ra.Tags,
+    ra.PostRank,
+    ua.PostsCreated,
+    ua.TotalUpVotes,
+    ua.TotalDownVotes,
+    ua.CommentsMade,
+    COALESCE(ua.PostsCreated, 0) * 1.0 / NULLIF(COALESCE(ua.TotalUpVotes, 0), 0) AS PostsPerUpVote,
+    COALESCE(ua.TotalUpVotes, 0) - COALESCE(ua.TotalDownVotes, 0) AS NetVotes,
+    COALESCE(ua.UserId, 0) AS EffectiveUser, 
+    CONCAT('Badges: ', COALESCE(badge.BadgeNames, 'No badges')) AS UserBadges
+FROM 
+    RankedPosts ra
+INNER JOIN 
+    Users u ON ra.PostId IN (
+        SELECT 
+            PostId
+        FROM 
+            Posts
+        WHERE 
+            OwnerUserId = u.Id
+    )
+LEFT JOIN 
+    RecentUserActivities ua ON u.Id = ua.UserId
+LEFT JOIN 
+    UserAchievements badge ON u.Id = badge.UserId
+WHERE 
+    ra.PostRank <= 5
+ORDER BY 
+    ra.Score DESC, 
+    ra.ViewCount DESC, 
+    u.Reputation DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

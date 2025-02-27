@@ -1,0 +1,77 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank_year
+    FROM 
+        aka_title AS t
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+CastCount AS (
+    SELECT 
+        c.movie_id,
+        COUNT(c.person_id) AS total_cast,
+        COUNT(DISTINCT CASE WHEN c.role_id IS NOT NULL THEN c.person_id END) AS distinct_roles
+    FROM 
+        cast_info AS c
+    GROUP BY 
+        c.movie_id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword AS mk
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+ComplexJoin AS (
+    SELECT 
+        r.title_id,
+        r.title,
+        r.production_year,
+        COALESCE(cc.total_cast, 0) AS total_cast,
+        COALESCE(mk.keywords, 'None') AS keywords,
+        CASE 
+            WHEN cc.total_cast IS NOT NULL THEN 'Has Cast' 
+            ELSE 'No Cast' 
+        END AS cast_status,
+        r.rank_year
+    FROM 
+        RankedMovies AS r
+    LEFT JOIN 
+        CastCount AS cc ON r.title_id = cc.movie_id
+    LEFT JOIN 
+        MovieKeywords AS mk ON r.title_id = mk.movie_id
+)
+SELECT 
+    c.joke AS humorous_note,
+    cj.title,
+    cj.production_year,
+    cj.total_cast,
+    cj.keywords,
+    cj.cast_status
+FROM 
+    ComplexJoin AS cj
+LEFT JOIN 
+    (SELECT 
+         DISTINCT ON (name) 
+         name, 
+         'Why did the database administrator break up with their partner? Because they had too many NULL values!' AS joke
+     FROM 
+         aka_name 
+     WHERE 
+         name IS NOT NULL
+     ORDER BY 
+         name) AS c ON cj.title_id % 5 = 0
+WHERE 
+    cj.rank_year <= 10
+ORDER BY 
+    cj.production_year DESC, cj.title;

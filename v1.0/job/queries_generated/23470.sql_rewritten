@@ -1,0 +1,58 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        title.imdb_index,
+        NULL AS linked_movie_id,
+        1 AS level
+    FROM title
+    WHERE title.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mt.linked_movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        t.imdb_index,
+        mt.linked_movie_id,
+        rh.level + 1
+    FROM movie_link mt
+    JOIN title t ON mt.linked_movie_id = t.id
+    JOIN RecursiveMovieHierarchy rh ON mt.movie_id = rh.movie_id
+)
+
+SELECT 
+    COALESCE(n.name, 'Unknown Actor') AS actor_name,
+    t.title AS movie_title,
+    MAX(t.production_year) AS latest_production_year,
+    CASE
+        WHEN MAX(t.production_year) IS NULL THEN 'N/A'
+        ELSE CONCAT(CAST(MAX(t.production_year) AS TEXT), ' (latest)')
+    END AS production_year_info,
+    COUNT(DISTINCT rh.linked_movie_id) AS total_linked_movies,
+    SUM(CASE WHEN k.keyword = 'Action' THEN 1 ELSE 0 END) AS action_movie_count,
+    ROW_NUMBER() OVER (PARTITION BY n.name ORDER BY MAX(t.production_year) DESC) AS actor_rank
+FROM 
+    cast_info c
+LEFT JOIN 
+    aka_name n ON c.person_id = n.person_id
+JOIN 
+    RecursiveMovieHierarchy rh ON c.movie_id = rh.movie_id
+JOIN 
+    title t ON rh.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%movie%')
+    AND (n.name IS NOT NULL OR n.surname_pcode IS NULL)
+GROUP BY 
+    n.name, t.title
+HAVING 
+    COUNT(DISTINCT rh.linked_movie_id) > 1
+ORDER BY 
+    actor_rank DESC, latest_production_year DESC
+LIMIT 10 OFFSET 5;

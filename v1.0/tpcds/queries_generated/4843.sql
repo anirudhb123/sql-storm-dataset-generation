@@ -1,0 +1,77 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_sold_date_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+top_items AS (
+    SELECT 
+        wsd.d_date,
+        wsd.ws_item_sk,
+        total_quantity,
+        total_sales,
+        sales_rank
+    FROM 
+        sales_summary ss
+    JOIN 
+        date_dim wsd ON ss.ws_sold_date_sk = wsd.d_date_sk
+    WHERE 
+        ss.sales_rank <= 5
+),
+return_metrics AS (
+    SELECT 
+        wr_item_sk,
+        COUNT(wr_return_number) AS total_returns,
+        SUM(wr_return_amt) AS total_return_amount
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_item_sk
+),
+item_details AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        COALESCE(r.total_returns, 0) AS total_returns,
+        COALESCE(r.total_return_amount, 0) AS total_return_amount
+    FROM 
+        item i
+    LEFT JOIN 
+        return_metrics r ON i.i_item_sk = r.wr_item_sk
+),
+final_summary AS (
+    SELECT 
+        t.d_date,
+        i.i_item_desc,
+        t.total_quantity,
+        t.total_sales,
+        i.total_returns,
+        i.total_return_amount,
+        CASE 
+            WHEN i.total_return_amount > 0 THEN (i.total_return_amount / t.total_sales) * 100 
+            ELSE NULL 
+        END AS return_percentage
+    FROM 
+        top_items t
+    JOIN 
+        item_details i ON t.ws_item_sk = i.i_item_sk
+)
+SELECT 
+    f.d_date,
+    f.i_item_desc,
+    f.total_quantity,
+    f.total_sales,
+    f.total_returns,
+    f.total_return_amount,
+    f.return_percentage
+FROM 
+    final_summary f
+ORDER BY 
+    f.total_sales DESC, f.d_date DESC;

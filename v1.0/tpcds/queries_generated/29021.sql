@@ -1,0 +1,64 @@
+
+WITH CustomerFullInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name || ' ' || c.c_last_name AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+PromotionsSummary AS (
+    SELECT 
+        p.p_promo_id,
+        p.p_promo_name,
+        COUNT(cr.cr_order_number) AS total_returns,
+        SUM(cr.cr_return_amount) AS total_return_amount,
+        SUM(cr.cr_return_tax) AS total_return_tax
+    FROM 
+        promotion p
+    LEFT JOIN 
+        catalog_returns cr ON p.p_promo_sk = cr.cr_item_sk
+    GROUP BY 
+        p.p_promo_id, p.p_promo_name
+),
+CityAnalytics AS (
+    SELECT 
+        ca.ca_city,
+        COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(DISTINCT p.p_promo_id) AS unique_promotions
+    FROM 
+        CustomerFullInfo c
+    JOIN 
+        customer_demographics cd ON c.c_customer_sk = cd.cd_demo_sk
+    JOIN 
+        PromotionsSummary p ON 1 = 1 -- Cross join for full analytics
+    GROUP BY 
+        ca.ca_city
+)
+SELECT 
+    ca.ca_city,
+    SUM(ca.avg_purchase_estimate) AS total_avg_purchase,
+    COUNT(DISTINCT ca.unique_customers) AS total_unique_customers,
+    SUM(pa.total_returns) AS total_returns,
+    SUM(pa.total_return_amount) AS total_return_amount,
+    SUM(pa.total_return_tax) AS total_return_tax
+FROM 
+    CityAnalytics ca
+JOIN 
+    PromotionsSummary pa ON ca.unique_promotions = pa.total_returns -- Elaboration on relationship
+GROUP BY 
+    ca.ca_city
+ORDER BY 
+    total_avg_purchase DESC
+LIMIT 10;

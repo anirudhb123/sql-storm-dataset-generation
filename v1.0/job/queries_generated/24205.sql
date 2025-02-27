@@ -1,0 +1,63 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        COALESCE(c.comp_cast_type, 'Unknown') AS cast_type,
+        ROW_NUMBER() OVER(PARTITION BY t.id ORDER BY p.total_movies DESC) AS rn,
+        COUNT(DISTINCT mc.company_id) OVER(PARTITION BY t.id) AS company_count,
+        SUM(CASE WHEN mn.keyword IS NULL THEN 1 ELSE 0 END) OVER(PARTITION BY t.id) AS null_keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            COUNT(*) AS total_movies 
+         FROM 
+            movie_companies 
+         GROUP BY 
+            movie_id) p ON t.id = p.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword mn ON mk.keyword_id = mn.id
+    LEFT JOIN 
+        comp_cast_type c ON ci.role_id = c.id
+    WHERE 
+        t.production_year >= 2000 OR a.name IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        title,
+        production_year,
+        actor_name,
+        cast_type,
+        company_count,
+        null_keyword_count
+    FROM 
+        MovieDetails
+    WHERE 
+        rn = 1 AND 
+        (company_count > 2 OR null_keyword_count > 0)
+)
+SELECT 
+    COALESCE(title, 'No Title') AS title,
+    production_year,
+    actor_name,
+    cast_type,
+    CASE 
+        WHEN company_count IS NULL THEN 'No Companies'
+        WHEN company_count > 5 THEN 'Multiple Companies'
+        ELSE 'Few Companies'
+    END AS company_info
+FROM 
+    FilteredMovies
+ORDER BY 
+    production_year DESC, title
+LIMIT 10;

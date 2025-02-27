@@ -1,0 +1,24 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, r.r_name, ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY s.s_suppkey, s.s_name, r.r_name
+)
+SELECT t.r_name AS Region, COUNT(*) AS SupplierCount, AVG(rs.TotalCost) AS AvgCost
+FROM (
+    SELECT ts.r_name, ts.s_suppkey, ts.s_name, rs.TotalCost
+    FROM TopSuppliers ts
+    JOIN RankedSuppliers rs ON ts.s_suppkey = rs.s_suppkey
+    WHERE ts.rn <= 3
+) t
+GROUP BY t.r_name
+ORDER BY SupplierCount DESC, AvgCost DESC;

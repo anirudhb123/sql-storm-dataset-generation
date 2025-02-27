@@ -1,0 +1,46 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM Users U
+    WHERE U.Reputation > 1000
+),
+RecentPostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END), 0) AS PositivePosts,
+        COALESCE(SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END), 0) AS NegativePosts,
+        AVG(P.ViewCount) AS AvgViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostOrder
+    FROM Posts P
+    WHERE P.CreationDate >= current_date - interval '30 days'
+    GROUP BY P.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        STRING_AGG(B.Name, ', ') AS BadgeNames,
+        COUNT(B.Id) AS BadgeCount
+    FROM Badges B
+    GROUP BY B.UserId
+)
+SELECT 
+    RU.DisplayName,
+    RU.Reputation,
+    RU.UserRank,
+    RPS.TotalPosts,
+    RPS.PositivePosts,
+    RPS.NegativePosts,
+    RPS.AvgViewCount,
+    UB.BadgeNames,
+    UB.BadgeCount
+FROM RankedUsers RU
+LEFT JOIN RecentPostStats RPS ON RU.UserId = RPS.OwnerUserId AND RPS.PostOrder = 1
+LEFT JOIN UserBadges UB ON RU.UserId = UB.UserId
+WHERE RU.UserRank <= 10
+ORDER BY RU.UserRank, RPS.TotalPosts DESC NULLS LAST, UB.BadgeCount DESC NULLS LAST;
+
+-- Ensure that NULL logic correctly prioritizes the ranking based on post count and badges.

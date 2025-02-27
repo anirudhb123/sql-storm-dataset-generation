@@ -1,0 +1,67 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        s.s_acctbal,
+        DENSE_RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+), CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+), HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        co.total_orders,
+        co.total_spent
+    FROM 
+        customer c
+    JOIN 
+        CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE 
+        co.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+)
+SELECT 
+    p.p_name, 
+    p.p_brand, 
+    p.p_type,
+    COALESCE((
+        SELECT 
+            MAX(s.s_acctbal) 
+        FROM 
+            RankedSuppliers rs 
+        WHERE 
+            rs.ps_partkey = p.p_partkey AND rs.supplier_rank = 1
+    ), 0) AS max_supplier_acctbal,
+    COUNT(DISTINCT l.l_orderkey) AS order_count,
+    AVG(l.l_extendedprice) AS avg_price
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+WHERE 
+    p.p_retailprice > 50 
+    AND EXISTS (
+        SELECT 1 
+        FROM HighValueCustomers hvc 
+        WHERE hvc.c_custkey = l.l_orderkey
+    )
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_type
+HAVING 
+    AVG(l.l_extendedprice) > 100
+ORDER BY 
+    max_supplier_acctbal DESC, avg_price ASC;

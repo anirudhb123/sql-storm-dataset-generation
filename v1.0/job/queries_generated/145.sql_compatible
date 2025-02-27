@@ -1,0 +1,52 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        RANK() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS movie_rank
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN aka_title t ON ci.movie_id = t.movie_id
+    WHERE t.production_year IS NOT NULL
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        COUNT(*) AS total_movies
+    FROM RankedMovies
+    WHERE movie_rank <= 5
+    GROUP BY actor_name
+    HAVING COUNT(*) > 2
+),
+MovieInfo AS (
+    SELECT 
+        m.movie_id,
+        m.info,
+        it.info AS info_type
+    FROM movie_info m
+    JOIN info_type it ON m.info_type_id = it.id
+    WHERE m.info IS NOT NULL
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    ta.actor_name,
+    COUNT(DISTINCT rm.movie_title) AS num_movies,
+    STRING_AGG(DISTINCT cm.company_name, ', ') AS companies_involved,
+    ARRAY_AGG(DISTINCT mi.info) AS additional_info,
+    MAX(rm.production_year) AS latest_movie_year
+FROM TopActors ta
+LEFT JOIN RankedMovies rm ON ta.actor_name = rm.actor_name
+LEFT JOIN CompanyMovies cm ON rm.movie_id = cm.movie_id
+LEFT JOIN MovieInfo mi ON rm.movie_id = mi.movie_id
+GROUP BY ta.actor_name
+ORDER BY num_movies DESC
+LIMIT 10;

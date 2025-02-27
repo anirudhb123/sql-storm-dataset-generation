@@ -1,0 +1,62 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id as PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) as Rnk,
+        p.OwnerUserId
+    FROM Posts p
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT 
+        u.Id as UserId,
+        u.DisplayName,
+        SUM(COALESCE(p.ViewCount, 0)) as TotalViews,
+        COUNT(DISTINCT p.Id) as PostedCount,
+        AVG(COALESCE(v.BountyAmount, 0)) as AvgBountyAmount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9 
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment,
+        ph.CreationDate AS CloseDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) as CloseRnk
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10 
+),
+CombinedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        ua.DisplayName,
+        ua.TotalViews,
+        ua.PostedCount,
+        ua.AvgBountyAmount,
+        cp.CloseDate,
+        cp.Comment
+    FROM RankedPosts rp
+    LEFT JOIN UserActivity ua ON rp.OwnerUserId = ua.UserId
+    LEFT JOIN ClosedPosts cp ON rp.PostId = cp.PostId AND cp.CloseRnk = 1
+    WHERE rp.Rnk <= 5
+)
+SELECT 
+    cd.PostId,
+    cd.Title,
+    cd.DisplayName,
+    cd.TotalViews,
+    cd.PostedCount,
+    cd.AvgBountyAmount,
+    COALESCE(cd.CloseDate, 'Not Closed') AS CloseDate,
+    COALESCE(cd.Comment, 'No comments') AS CloseComment
+FROM CombinedData cd
+ORDER BY cd.TotalViews DESC
+LIMIT 10;

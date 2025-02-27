@@ -1,0 +1,62 @@
+WITH RecursiveSupplier AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        r.r_name,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Unknown'
+            ELSE CAST(s.s_acctbal AS VARCHAR) 
+        END AS account_balance,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE s.s_acctbal > 
+        (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_acctbal IS NOT NULL)
+),
+EligibleParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_availqty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_availqty) > 10
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING COUNT(o.o_orderkey) > 5
+),
+PartRanking AS (
+    SELECT 
+        ep.p_partkey,
+        ep.p_name,
+        ep.total_availqty,
+        ep.total_cost,
+        DENSE_RANK() OVER (ORDER BY ep.total_cost DESC) AS cost_rank
+    FROM EligibleParts ep
+)
+SELECT 
+    r.s_suppkey,
+    r.s_name,
+    r.r_name,
+    COALESCE(pr.p_name, 'No Part') AS part_name,
+    pr.total_availqty,
+    pr.total_cost,
+    cs.total_orders,
+    cs.total_spent,
+    cs.last_order_date
+FROM RecursiveSupplier r
+FULL OUTER JOIN PartRanking pr ON r.s_suppkey = pr.p_partkey 
+LEFT JOIN CustomerOrderSummary cs ON cs.total_orders >= 10 
+WHERE r.rank <= 5 OR r.s_suppkey IS NULL
+ORDER BY r.r_name, pr.total_cost DESC;

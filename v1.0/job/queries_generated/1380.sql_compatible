@@ -1,0 +1,69 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rn
+    FROM 
+        title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+DirectorInfo AS (
+    SELECT 
+        t.id AS title_id,
+        k.keyword AS director_keyword
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword LIKE '%director%'
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+FinalResults AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        COALESCE(rm.production_year, 'Unknown') AS production_year,
+        COALESCE(cd.company_names, 'No Companies') AS companies,
+        COALESCE(di.director_keyword, 'Unknown Director') AS director,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyDetails cd ON rm.title_id = cd.movie_id
+    LEFT JOIN 
+        DirectorInfo di ON rm.title_id = di.title_id
+)
+SELECT 
+    *,
+    CASE 
+        WHEN cast_count = 0 THEN 'No cast information available'
+        WHEN cast_count < 5 THEN 'Few cast members'
+        ELSE 'Many cast members'
+    END AS cast_status
+FROM 
+    FinalResults
+WHERE 
+    production_year >= 2000
+ORDER BY 
+    production_year DESC, cast_count DESC;

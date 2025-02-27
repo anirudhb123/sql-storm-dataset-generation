@@ -1,0 +1,93 @@
+
+WITH PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, u.DisplayName, p.CreationDate, p.OwnerUserId, p.Score
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+),
+AcceptedAnswers AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.AcceptedAnswerId,
+        a.Title AS AcceptedAnswerTitle,
+        a.CreationDate AS AcceptedAnswerDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.OwnerDisplayName,
+    COALESCE(cph.FirstClosedDate, 'No Closure') AS FirstClosedDate,
+    COALESCE(aa.AcceptedAnswerTitle, 'No Accepted Answer') AS AcceptedAnswerTitle,
+    u.BadgeCount AS UserBadgeCount,
+    u.GoldBadges,
+    u.SilverBadges,
+    u.BronzeBadges,
+    pm.CommentCount,
+    pm.UpVotes,
+    pm.DownVotes,
+    pm.PostRank
+FROM 
+    PostMetrics pm
+LEFT JOIN 
+    ClosedPostHistory cph ON pm.PostId = cph.PostId
+LEFT JOIN 
+    AcceptedAnswers aa ON pm.PostId = aa.QuestionId
+LEFT JOIN 
+    UserBadges u ON pm.OwnerDisplayName = u.UserId
+WHERE 
+    (pm.CommentCount > 0 OR pm.UpVotes > 0)
+    AND (pm.DownVotes < pm.UpVotes)
+    AND (
+        pm.CreationDate > DATE_SUB(CURRENT_DATE, INTERVAL 365 DAY) 
+        OR pm.PostRank <= 5
+    )
+ORDER BY 
+    pm.PostRank;

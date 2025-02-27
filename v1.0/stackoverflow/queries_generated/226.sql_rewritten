@@ -1,0 +1,41 @@
+WITH UserReputation AS (
+    SELECT Id, Reputation, 
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank 
+    FROM Users 
+    WHERE Reputation IS NOT NULL
+),
+PostStats AS (
+    SELECT P.Id AS PostId, 
+           P.OwnerUserId, 
+           COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+           COUNT(CASE WHEN V.Id IS NOT NULL AND V.VoteTypeId = 2 THEN 1 END) AS UpvoteCount,
+           COUNT(CASE WHEN V.Id IS NOT NULL AND V.VoteTypeId = 3 THEN 1 END) AS DownvoteCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate > cast('2024-10-01' as date) - INTERVAL '365 days'
+    GROUP BY P.Id, P.OwnerUserId
+),
+PostHistoryStats AS (
+    SELECT PH.PostId,
+           MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.CreationDate END) AS LastClosedDate,
+           MAX(CASE WHEN PH.PostHistoryTypeId = 11 THEN PH.CreationDate END) AS LastReopenedDate
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+)
+SELECT U.DisplayName, 
+       U.Reputation, 
+       PS.PostId, 
+       PS.CommentCount, 
+       PS.UpvoteCount, 
+       PS.DownvoteCount,
+       COALESCE(PHS.LastClosedDate, 'Never Closed') AS LastClosed,
+       COALESCE(PHS.LastReopenedDate, 'Never Reopened') AS LastReopened,
+       UR.ReputationRank
+FROM Users U
+JOIN PostStats PS ON U.Id = PS.OwnerUserId
+JOIN UserReputation UR ON U.Id = UR.Id
+LEFT JOIN PostHistoryStats PHS ON PS.PostId = PHS.PostId
+WHERE U.Reputation > (SELECT AVG(Reputation) FROM Users WHERE Reputation IS NOT NULL) 
+  AND PS.CommentCount > 5
+ORDER BY PS.UpvoteCount DESC, PS.CommentCount DESC;

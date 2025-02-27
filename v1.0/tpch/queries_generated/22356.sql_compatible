@@ -1,0 +1,66 @@
+
+WITH RECURSIVE supplier_rank AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        SUM(ps.ps_supplycost) AS total_cost, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        o.o_orderstatus,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_price,
+        MAX(o.o_orderdate) AS last_order_date,
+        CASE 
+            WHEN SUM(li.l_extendedprice * (1 - li.l_discount)) > 0 THEN 'High Value' 
+            ELSE 'Low Value' 
+        END AS value_category
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY 
+        o.o_orderkey, c.c_custkey, o.o_orderstatus
+)
+SELECT 
+    p.p_name,
+    r.r_name,
+    COALESCE(sr.total_cost, 0) AS total_supplier_cost,
+    os.value_category,
+    (SELECT COUNT(*) 
+     FROM orders o1 
+     WHERE o1.o_orderstatus = 'F' AND 
+           o1.o_orderkey IN (SELECT o2.o_orderkey FROM lineitem li1 JOIN orders o2 ON li1.l_orderkey = o2.o_orderkey WHERE li1.l_returnflag = 'R')
+    ) AS returned_orders_count,
+    COUNT(DISTINCT o.o_orderkey) OVER (PARTITION BY r.r_regionkey) AS order_count_region,
+    STRING_AGG(DISTINCT s.s_name || ': ' || CAST(sr.total_cost AS VARCHAR), ', ') AS supplier_details
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    supplier_rank sr ON s.s_suppkey = sr.s_suppkey
+JOIN 
+    order_summary os ON sr.s_nationkey = os.c_custkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_container IS NOT NULL)
+    AND r.r_name IS NOT NULL
+GROUP BY 
+    p.p_name, r.r_name, sr.total_cost, os.value_category;

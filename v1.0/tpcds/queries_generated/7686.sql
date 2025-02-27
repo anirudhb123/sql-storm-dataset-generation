@@ -1,0 +1,66 @@
+
+WITH aggregated_sales AS (
+    SELECT
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+    GROUP BY
+        ws.ws_sold_date_sk
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_credit_rating,
+        ca.ca_city,
+        ca.ca_state
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+sales_by_customer AS (
+    SELECT
+        ci.c_customer_sk,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        ci.cd_credit_rating,
+        ci.ca_city,
+        ci.ca_state,
+        SUM(as.total_sales) AS total_sales,
+        SUM(as.total_orders) AS total_orders,
+        AVG(as.avg_net_profit) AS avg_net_profit
+    FROM
+        customer_info ci
+    JOIN
+        aggregated_sales as ON ci.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        ci.c_customer_sk, ci.cd_gender, ci.cd_marital_status, ci.cd_education_status,
+        ci.cd_credit_rating, ci.ca_city, ci.ca_state
+)
+SELECT
+    sbc.ca_city,
+    sbc.ca_state,
+    COUNT(DISTINCT sbc.c_customer_sk) AS customer_count,
+    SUM(sbc.total_sales) AS total_country_sales,
+    AVG(sbc.avg_net_profit) AS average_net_profit,
+    MAX(sbc.total_orders) AS max_orders_in_a_city
+FROM
+    sales_by_customer sbc
+GROUP BY
+    sbc.ca_city, sbc.ca_state
+ORDER BY
+    total_country_sales DESC
+LIMIT 10;

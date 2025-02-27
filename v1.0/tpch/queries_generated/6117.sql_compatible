@@ -1,0 +1,52 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (ORDER BY total_supply_cost DESC) AS rank
+    FROM 
+        RankedSuppliers s
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        c.c_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        orders o 
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -12, DATE('1998-10-01'))
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name
+)
+SELECT 
+    T.s_name AS supplier_name,
+    R.c_name AS customer_name,
+    R.o_orderkey,
+    R.revenue,
+    R.o_orderdate
+FROM 
+    TopSuppliers T
+JOIN 
+    RecentOrders R ON T.s_suppkey = R.o_orderkey
+WHERE 
+    T.rank <= 5
+ORDER BY 
+    R.revenue DESC;

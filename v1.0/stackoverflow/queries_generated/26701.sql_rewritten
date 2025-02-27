@@ -1,0 +1,74 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerName,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(AVG(v.vote_type_id), 'No Votes') AS AverageVoteType
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days' 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostID,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        ph.UserDisplayName AS ClosedBy,
+        cr.Name AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    AND 
+        ph.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days' 
+),
+FilteredPosts AS (
+    SELECT DISTINCT 
+        pd.PostId,
+        pd.Title,
+        pd.Body,
+        pd.Tags,
+        pd.OwnerName,
+        pd.AnswerCount,
+        pd.CommentCount,
+        cp.ClosedPostID,
+        cp.ClosedBy,
+        cp.ClosedDate,
+        cp.CloseReason
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        ClosedPosts cp ON pd.PostId = cp.ClosedPostID
+)
+SELECT 
+    fp.Title,
+    fp.OwnerName,
+    fp.AnswerCount,
+    fp.CommentCount,
+    fp.ClosedBy,
+    fp.ClosedDate,
+    fp.CloseReason
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.AnswerCount DESC,
+    fp.CommentCount DESC;

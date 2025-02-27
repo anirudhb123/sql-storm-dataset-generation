@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_nationkey AS nationkey, s_suppkey AS suppkey, s_name AS suppname, 
+           s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) -- Base case
+
+    UNION ALL
+
+    SELECT s.n_nationkey, s.s_suppkey, s.s_name, 
+           s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.nationkey
+    WHERE s.s_acctbal > sh.acctbal -- Recursive case
+),
+TotalOrderValue AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+RankedCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           RANK() OVER (ORDER BY SUM(t.total_value) DESC) AS rank
+    FROM customer c
+    LEFT JOIN TotalOrderValue t ON c.c_custkey = t.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+ActiveSuppliers AS (
+    SELECT DISTINCT s.s_nationkey, s.s_suppkey, s.s_name
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice < 100 -- Filter for specific price
+),
+FinalResults AS (
+    SELECT r.r_name, 
+           COUNT(DISTINCT sh.suppkey) AS supplier_count,
+           SUM(c.c_acctbal) AS total_customer_value
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN ActiveSuppliers s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN RankedCustomers c ON c.rank <= 5 -- Top 5 customers
+    LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.suppkey
+    GROUP BY r.r_name
+)
+SELECT r_name,
+       supplier_count,
+       total_customer_value,
+       COALESCE(total_customer_value / NULLIF(supplier_count, 0), 0) AS avg_value_per_supplier
+FROM FinalResults
+ORDER BY avg_value_per_supplier DESC;

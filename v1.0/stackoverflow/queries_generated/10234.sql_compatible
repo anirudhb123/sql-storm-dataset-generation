@@ -1,0 +1,65 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.CreationDate >= '2020-01-01'
+    GROUP BY 
+        U.Id, U.Reputation, U.CreationDate, U.LastAccessDate
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.CommentCount,
+        P.AnswerCount,
+        P.FavoriteCount,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts P
+    INNER JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= '2020-01-01'
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.PostCount,
+    U.BadgeCount,
+    U.UpVoteCount,
+    U.DownVoteCount,
+    P.PostId,
+    P.Title,
+    P.CreationDate AS PostCreationDate,
+    P.Score AS PostScore,
+    P.ViewCount AS PostViewCount,
+    P.CommentCount AS PostCommentCount,
+    P.AnswerCount AS PostAnswerCount,
+    P.FavoriteCount AS PostFavoriteCount,
+    P.OwnerDisplayName
+FROM 
+    UserStats U
+LEFT JOIN 
+    PostStats P ON U.UserId = P.OwnerDisplayName
+ORDER BY 
+    U.Reputation DESC, P.Score DESC
+LIMIT 100;

@@ -1,0 +1,81 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id AS actor_id,
+        c.movie_id,
+        1 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        title t ON c.movie_id = t.id
+    WHERE 
+        t.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        c.person_id,
+        ch.movie_id,
+        level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        ActorHierarchy ch ON c.movie_id = ch.movie_id
+    WHERE 
+        c.person_id <> ch.actor_id
+),
+FilmmakerStats AS (
+    SELECT 
+        a.actor_id,
+        COUNT(DISTINCT a.movie_id) AS total_movies,
+        MAX(t.production_year) AS latest_movie_year
+    FROM 
+        ActorHierarchy a
+    JOIN 
+        title t ON a.movie_id = t.id
+    GROUP BY 
+        a.actor_id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT co.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+),
+KeywordInfo AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    t.title,
+    f.total_movies,
+    f.latest_movie_year,
+    ci.company_names,
+    ci.company_count,
+    ki.keywords
+FROM 
+    title t
+LEFT JOIN 
+    FilmmakerStats f ON t.id IN (SELECT movie_id FROM cast_info WHERE person_id = f.actor_id)
+LEFT JOIN 
+    CompanyInfo ci ON t.id = ci.movie_id
+LEFT JOIN 
+    KeywordInfo ki ON t.id = ki.movie_id
+WHERE 
+    f.total_movies > 3 OR ci.company_count > 2
+ORDER BY 
+    f.latest_movie_year DESC NULLS LAST, 
+    t.title;

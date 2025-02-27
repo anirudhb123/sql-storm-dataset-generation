@@ -1,0 +1,68 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS status_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate > (CURRENT_DATE - INTERVAL '1 year')
+),
+SelectedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        COALESCE(NULLIF(c.c_comment, ''), 'No comment') AS sanitized_comment
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal >= ALL (SELECT ps.ps_supplycost FROM partsupp ps WHERE ps.ps_availqty > 0)
+),
+DetailedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_discount,
+        l.l_tax,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS line_rank
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N' AND l.l_shipdate <= CURRENT_DATE
+)
+SELECT 
+    s.s_name,
+    p.p_name,
+    SUM(d.l_quantity * (1 - d.l_discount)) AS total_revenue,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    MAX(o.o_totalprice) AS max_order_total,
+    COUNT(DISTINCT CASE WHEN r.r_name IS NULL THEN 'Unknown Region' ELSE r.r_name END) AS region_count
+FROM 
+    DetailedLineItems d
+JOIN 
+    parts p ON d.l_partkey = p.p_partkey
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    RankedOrders o ON d.l_orderkey = o.o_orderkey
+JOIN 
+    SelectedCustomers c ON o.o_custkey = c.c_custkey
+WHERE 
+    o.status_rank = 1 
+    AND (p.p_retailprice IS NOT NULL OR c.c_acctbal > 1000)
+GROUP BY 
+    s.s_name, p.p_name
+HAVING 
+    SUM(d.l_quantity * (1 - d.l_discount)) > 1000
+    AND COUNT(DISTINCT c.c_custkey) < 5
+ORDER BY 
+    total_revenue DESC, unique_customers ASC;

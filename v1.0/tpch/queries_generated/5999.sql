@@ -1,0 +1,68 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND 
+        o.o_orderdate < DATE '2022-12-31'
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_container,
+        SUM(ps.ps_availqty) AS total_available_qty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_container
+),
+CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2022-05-01' AND DATE '2022-05-31' AND 
+        l.l_returnflag = 'N'
+)
+SELECT 
+    cn.nation_name,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    SUM(pl.l_extendedprice) AS total_revenue,
+    AVG(pd.total_available_qty) AS avg_part_avail_qty
+FROM 
+    RankedOrders co
+JOIN 
+    FilteredLineItems pl ON co.o_orderkey = pl.l_orderkey
+JOIN 
+    CustomerNation cn ON co.o_custkey = cn.c_custkey
+JOIN 
+    PartDetails pd ON pl.l_partkey = pd.p_partkey
+WHERE 
+    co.rn <= 10
+GROUP BY 
+    cn.nation_name
+ORDER BY 
+    total_revenue DESC;

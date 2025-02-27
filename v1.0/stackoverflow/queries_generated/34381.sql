@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPostsByUser,
+        COALESCE(u.DisplayName, 'Unknown') AS UserName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        TRIM(BOTH '<>' FROM UNNEST(string_to_array(p.Tags, '><'))) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        TRIM(BOTH '<>' FROM UNNEST(string_to_array(p.Tags, '><')))
+    HAVING 
+        COUNT(*) > 10
+),
+PostVoteCounts AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    rp.UserName,
+    rp.ScoreRank,
+    rp.TotalPostsByUser,
+    COALESCE(pt.UpVotes, 0) AS PostUpVotes,
+    COALESCE(pt.DownVotes, 0) AS PostDownVotes,
+    json_agg(DISTINCT pt2.TagName) AS AssociatedTags,
+    CASE 
+        WHEN rp.Score > 100 THEN 'Hot'
+        WHEN rp.Score BETWEEN 50 AND 100 THEN 'Warm'
+        ELSE 'Cold'
+    END AS PostTemperament
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteCounts pt ON rp.PostId = pt.PostId
+LEFT JOIN 
+    Posts p ON rpm.PostId = p.Id
+LEFT JOIN 
+    PopularTags pt2 ON pt2.TagName = ANY(string_to_array(rp.Tags, '><'))
+WHERE 
+    rp.ScoreRank = 1  -- Only the top post for each user
+GROUP BY 
+    rp.PostId, rp.Title, rp.Score, rp.CreationDate, rp.UserName, 
+    rp.ScoreRank, rp.TotalPostsByUser
+ORDER BY 
+    rp.Score DESC
+LIMIT 100;

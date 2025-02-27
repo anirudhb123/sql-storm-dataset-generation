@@ -1,0 +1,81 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        m.company_id,
+        1 AS level
+    FROM 
+        movie_companies m
+    JOIN 
+        aka_title t ON m.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mc.movie_id,
+        t.title,
+        t.production_year,
+        mc.company_id,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    JOIN 
+        aka_title t ON mc.movie_id = t.movie_id
+)
+, title_stats AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        AVG(mh.level) AS average_level,
+        STRING_AGG(DISTINCT c.name, ', ') AS cast_members
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_hierarchy mh ON t.id = mh.movie_id
+    GROUP BY 
+        t.id, t.title
+)
+SELECT 
+    ts.title,
+    ts.company_count,
+    ts.average_level,
+    COALESCE(ts.cast_members, 'No cast found') AS cast_members,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    CASE 
+        WHEN ts.average_level IS NULL THEN 'Unknown level'
+        WHEN ts.average_level > 3 THEN 'Deeply nested'
+        ELSE 'Shallow'
+    END AS hierarchy_depth,
+    MAX(CASE 
+        WHEN mi.info_type_id IS NULL THEN 'No additional info'
+        ELSE mi.info
+    END) AS additional_info
+FROM 
+    title_stats ts
+LEFT JOIN 
+    movie_keyword mk ON ts.title_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON ts.title_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type LIMIT 1)
+GROUP BY 
+    ts.title, ts.company_count, ts.average_level
+HAVING 
+    COUNT(DISTINCT k.keyword) < 5
+ORDER BY 
+    ts.company_count DESC, 
+    ts.average_level ASC
+LIMIT 10 OFFSET 5;

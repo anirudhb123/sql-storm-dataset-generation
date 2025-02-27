@@ -1,0 +1,77 @@
+
+WITH RECURSIVE revenue_data AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_paid) AS total_revenue,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+high_value_customers AS (
+    SELECT 
+        c_customer_sk,
+        SUM(ws_net_paid) AS customer_revenue,
+        COUNT(ws_order_number) AS customer_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c_customer_sk
+    HAVING 
+        customer_revenue > 10000
+),
+state_address AS (
+    SELECT 
+        ca_state,
+        COUNT(DISTINCT ca_address_sk) AS address_count
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+),
+final_report AS (
+    SELECT 
+        r.ca_state,
+        COALESCE(SUM(rd.total_revenue), 0) AS state_revenue,
+        COALESCE(COUNT(DISTINCT hv.c_customer_sk), 0) AS high_value_cust_count,
+        COALESCE(SUM(rd.order_count), 0) AS total_orders,
+        sa.address_count
+    FROM 
+        state_address sa
+    LEFT JOIN 
+        revenue_data rd ON rd.ws_item_sk IN (
+            SELECT i_item_sk 
+            FROM item 
+            WHERE i_brand_id IN (
+                SELECT DISTINCT i_brand_id 
+                FROM item 
+                WHERE i_current_price > 50
+            )
+        )
+    LEFT JOIN 
+        high_value_customers hv ON hv.customer_revenue > 0
+    LEFT JOIN 
+        customer_address r ON r.ca_state = sa.ca_state
+    GROUP BY 
+        r.ca_state, sa.address_count
+)
+SELECT 
+    *,
+    CASE 
+        WHEN state_revenue = 0 THEN 'No Revenue'
+        ELSE CONCAT('Total Revenue: $', ROUND(state_revenue, 2))
+    END AS revenue_status,
+    CASE 
+        WHEN high_value_cust_count > 10 THEN 'Many High Value Customers'
+        ELSE 'Few High Value Customers'
+    END AS customer_status
+FROM 
+    final_report
+WHERE 
+    address_count >= 5
+ORDER BY 
+    state_revenue DESC, high_value_cust_count ASC;

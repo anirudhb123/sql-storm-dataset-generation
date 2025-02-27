@@ -1,0 +1,75 @@
+
+WITH RECURSIVE item_tree AS (
+    SELECT 
+        i_item_sk, 
+        i_item_desc, 
+        i_current_price, 
+        0 AS level
+    FROM item
+    WHERE i_rec_start_date <= CURRENT_DATE AND (i_rec_end_date IS NULL OR i_rec_end_date >= CURRENT_DATE)
+    
+    UNION ALL
+    
+    SELECT 
+        i.item_sk,
+        CONCAT(it.i_item_desc, ' > ', i.i_item_desc),
+        i.i_current_price,
+        it.level + 1
+    FROM item_tree it
+    JOIN item i ON it.i_item_sk = i.i_item_sk 
+    WHERE i_rec_start_date <= CURRENT_DATE AND (i_rec_end_date IS NULL OR i_rec_end_date >= CURRENT_DATE)
+    AND it.level < 3
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_sold_date_sk, 
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    GROUP BY ws.ws_sold_date_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_store_purchases
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+),
+average_sales AS (
+    SELECT 
+        d.d_date_sk,
+        AVG(ss.total_profit) AS avg_profit,
+        MAX(ss.total_quantity) AS max_quantity
+    FROM date_dim d
+    JOIN sales_summary ss ON d.d_date_sk = ss.ws_sold_date_sk
+    GROUP BY d.d_date_sk
+),
+final_summary AS (
+    SELECT 
+        ci.cd_gender, 
+        ci.cd_marital_status,
+        dt.d_day_name,
+        av.avg_profit,
+        av.max_quantity,
+        it.i_item_desc,
+        ROW_NUMBER() OVER (PARTITION BY ci.cd_gender ORDER BY av.avg_profit DESC) AS rank
+    FROM customer_info ci
+    JOIN average_sales av ON ci.c_customer_sk = av.d_date_sk
+    JOIN date_dim dt ON av.d_date_sk = dt.d_date_sk
+    JOIN item_tree it ON it.i_item_sk = ci.c_customer_sk
+)
+SELECT 
+    fs.cd_gender, 
+    fs.cd_marital_status, 
+    fs.d_day_name,
+    fs.avg_profit,
+    fs.max_quantity,
+    fs.i_item_desc
+FROM final_summary fs
+WHERE fs.rank <= 5
+ORDER BY fs.cd_gender, fs.avg_profit DESC;

@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        pt.Name AS PostTypeName,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN p2.OwnerUserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Posts p2 ON p.Id = p2.ParentId 
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, u.DisplayName, pt.Name
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        (UpVotes - DownVotes) AS NetVotes
+    FROM 
+        RankedPosts rp 
+    WHERE 
+        (CommentCount >= 5 OR AnswerCount >= 3)
+        AND NetVotes > 0
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.OwnerDisplayName,
+    fp.CreationDate,
+    fp.CommentCount,
+    fp.AnswerCount,
+    fp.NetVotes,
+    STRING_AGG(distinct t.TagName, ', ') AS Tags
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    LATERAL unnest(STRING_TO_ARRAY(fp.Tags, ',')) AS tag ON TRUE
+LEFT JOIN 
+    Tags t ON TRIM(tag) = t.TagName
+GROUP BY 
+    fp.PostId, fp.Title, fp.OwnerDisplayName, fp.CreationDate, fp.CommentCount, fp.AnswerCount, fp.NetVotes 
+ORDER BY 
+    fp.NetVotes DESC, 
+    fp.CreationDate DESC
+LIMIT 10;

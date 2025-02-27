@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal,
+           CAST(s_name AS varchar(100)) AS supplier_path
+    FROM supplier
+    WHERE s_acctbal > 10000 -- Starting point for recursion
+    
+    UNION ALL
+    
+    SELECT p.suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CAST(CONCAT(h.supplier_path, ' -> ', s.s_name) AS varchar(100))
+    FROM partsupp p
+    JOIN supplier s ON p.ps_suppkey = s.s_suppkey
+    JOIN SupplierHierarchy h ON p.ps_partkey = h.s_suppkey
+)
+
+SELECT c.c_nationkey, n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       COUNT(o.o_orderkey) AS total_orders,
+       MAX(l.l_shipdate) AS last_ship_date,
+       COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN l.l_orderkey END) AS returned_orders,
+       ROW_NUMBER() OVER(PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice) DESC) AS order_rank
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2023-12-31'
+GROUP BY c.c_nationkey, n.n_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000000
+ORDER BY total_revenue DESC
+FETCH FIRST 10 ROWS ONLY
+UNION ALL
+SELECT r.r_regionkey, r.r_name, NULL AS total_revenue,
+       NULL AS total_orders,
+       NULL AS last_ship_date,
+       NULL AS returned_orders
+FROM region r
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE c.c_nationkey = r.r_regionkey
+);

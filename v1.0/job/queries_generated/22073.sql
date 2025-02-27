@@ -1,0 +1,75 @@
+WITH MovieTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rank_year
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        r.role,
+        COUNT(*) OVER (PARTITION BY ci.person_id) AS total_roles,
+        RANK() OVER (PARTITION BY ci.person_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        role_type r ON ci.role_id = r.id
+), 
+CompanyFilmography AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+
+SELECT 
+    mt.title,
+    mt.production_year,
+    a.full_name AS actor_name,
+    ar.role,
+    ar.total_roles,
+    cf.company_name,
+    cf.company_type,
+    CASE 
+        WHEN mt.rank_year = 1 THEN 'Top Movie of Year'
+        ELSE 'Regular Movie'
+    END AS movie_category,
+    COALESCE(NULLIF(SUBSTRING(mt.title FROM '[[:punct:]]'), ''), 'No Special Character') AS special_char_check,
+    COUNT(DISTINCT af.id) FILTER (WHERE af.gender = 'F') OVER() AS female_actors_total,
+    COUNT(DISTINCT af.id) FILTER (WHERE af.gender IS NULL OR af.gender = '') OVER() AS unspecified_gender_total
+FROM 
+    MovieTitles mt
+LEFT JOIN 
+    ActorRoles ar ON mt.title_id = ar.movie_id
+LEFT JOIN 
+    aka_name an ON ar.person_id = an.person_id
+LEFT JOIN 
+    char_name cn ON an.name = cn.name
+LEFT JOIN 
+    CompanyFilmography cf ON mt.title_id = cf.movie_id
+LEFT JOIN 
+    name af ON ar.person_id = af.imdb_id
+WHERE 
+    ar.role_rank <= 5 -- Get only the top 5 roles (if any)
+AND 
+    (cf.company_type = 'Distributor' OR cf.company_type IS NULL)
+ORDER BY 
+    mt.production_year DESC, 
+    mt.title;

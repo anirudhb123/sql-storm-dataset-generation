@@ -1,0 +1,89 @@
+
+WITH RecursivePostTree AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        0 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostTree r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2 
+),
+AggregatedPostStats AS (
+    SELECT 
+        p.PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        RecursivePostTree p
+    LEFT JOIN 
+        Comments c ON p.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON p.PostId = v.PostId
+    GROUP BY 
+        p.PostId
+),
+PostHistoryStats AS (
+    SELECT
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstEditDate,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    u.DisplayName AS OwnerDisplayName,
+    ps.CommentCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    EXTRACT(EPOCH FROM (COALESCE(he.LastEditDate, '1970-01-01'::timestamp) - p.CreationDate)) AS TimeSinceCreation,
+    he.FirstEditDate,
+    he.LastEditDate,
+    he.EditCount,
+    CASE 
+        WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS HasAcceptedAnswer
+FROM 
+    RecursivePostTree p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    AggregatedPostStats ps ON p.PostId = ps.PostId
+LEFT JOIN 
+    PostHistoryStats he ON p.PostId = he.PostId
+WHERE 
+    (COALESCE(ps.UpVoteCount, 0) - COALESCE(ps.DownVoteCount, 0) > 5)  
+    AND (COALESCE(he.EditCount, 0) > 3 OR he.FirstEditDate IS NOT NULL)
+ORDER BY 
+    TimeSinceCreation DESC
+LIMIT 10;

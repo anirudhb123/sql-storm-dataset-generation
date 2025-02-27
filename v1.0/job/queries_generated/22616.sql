@@ -1,0 +1,83 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(c.id) OVER (PARTITION BY t.id) AS cast_count,
+        COALESCE(NULLIF(t.season_nr, 0), 'N/A') AS season_info
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+),
+HighRatedMovies AS (
+    SELECT 
+        ct.movie_id,
+        COUNT(ct.id) AS high_rated_count
+    FROM 
+        complete_cast ct
+    INNER JOIN 
+        movie_info mi ON ct.movie_id = mi.movie_id
+    WHERE 
+        mi.info LIKE '%high%rating%'
+    GROUP BY 
+        ct.movie_id
+),
+CompaniesWithMultipleRoles AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT co.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    INNER JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+    HAVING 
+        COUNT(DISTINCT mc.company_id) > 1
+),
+MoviesWithVariedCompanyRoles AS (
+    SELECT 
+        mw.movie_id,
+        COUNT(DISTINCT ct.kind) AS role_kinds_count
+    FROM 
+        movie_companies mw
+    INNER JOIN 
+        company_type ct ON mw.company_type_id = ct.id
+    GROUP BY 
+        mw.movie_id
+    HAVING 
+        COUNT(DISTINCT ct.kind) > 1
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rt.title_rank,
+    rt.cast_count,
+    hc.high_rated_count,
+    cmp.company_count,
+    cmp.company_names,
+    mv.role_kinds_count,
+    CASE 
+        WHEN mv.role_kinds_count IS NOT NULL THEN 'Diverse Roles'
+        ELSE 'Single Role'
+    END AS role_diversity,
+    CASE 
+        WHEN rt.cast_count > 5 THEN 'Ensemble Cast' 
+        ELSE 'Minimal Cast'
+    END AS cast_size
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    HighRatedMovies hc ON rt.title_id = hc.movie_id
+LEFT JOIN 
+    CompaniesWithMultipleRoles cmp ON rt.title_id = cmp.movie_id
+LEFT JOIN 
+    MoviesWithVariedCompanyRoles mv ON rt.title_id = mv.movie_id
+WHERE 
+    (rt.production_year >= 2000 AND rt.title_rank <= 10) OR rt.season_info = 'N/A'
+ORDER BY 
+    rt.production_year DESC, 
+    rt.title_rank;

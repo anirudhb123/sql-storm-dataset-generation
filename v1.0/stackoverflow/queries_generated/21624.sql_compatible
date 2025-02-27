@@ -1,0 +1,86 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentsCount,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+), RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostsCount,
+        UpVotes,
+        DownVotes,
+        CommentsCount,
+        GoldBadges,
+        SilverBadges,
+        BronzeBadges,
+        RANK() OVER (ORDER BY PostsCount DESC, UpVotes - DownVotes DESC) AS UserRank
+    FROM UserActivity
+), RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS MostRecentEditDate,
+        MIN(ph.CreationDate) AS FirstEditDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS PostHistoryTypes
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+), ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.AuthorizedUserId
+    FROM Posts p
+    WHERE p.ClosedDate IS NOT NULL
+), ComplicatedAggregate AS (
+    SELECT 
+        UserId,
+        COUNT(DISTINCT PostId) AS UniquePosts,
+        SUM(LENGTH(c.Text)) AS CommentsLength,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM Votes v
+    JOIN Posts p ON v.PostId = p.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY UserId
+)
+SELECT 
+    ru.DisplayName,
+    ru.PostsCount,
+    ru.UpVotes,
+    ru.DownVotes,
+    ru.CommentsCount,
+    ru.GoldBadges,
+    ru.SilverBadges,
+    ru.BronzeBadges,
+    rph.MostRecentEditDate,
+    rph.FirstEditDate,
+    rph.PostHistoryTypes,
+    cp.Title AS ClosedPostTitle,
+    ca.UniquePosts AS UniqueUserPosts,
+    ca.CommentsLength AS TotalCommentsLength,
+    ca.TotalBounty AS TotalBountyAmount,
+    CASE 
+        WHEN ru.UpVotes - ru.DownVotes > 10 THEN 'Highly Active' 
+        WHEN ru.UpVotes - ru.DownVotes BETWEEN 1 AND 10 THEN 'Moderately Active'
+        ELSE 'Less Active' 
+    END AS ActivityLevel,
+    (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = ru.UserId AND p.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year') AS RecentPostCount
+FROM RankedUsers ru
+LEFT JOIN RecentPostHistory rph ON ru.UserId = rph.OwnerUserId
+LEFT JOIN ClosedPosts cp ON cp.AuthorizedUserId = ru.UserId
+LEFT JOIN ComplicatedAggregate ca ON ca.UserId = ru.UserId
+WHERE ru.UserRank <= 10
+ORDER BY ru.UserRank;

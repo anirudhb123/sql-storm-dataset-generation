@@ -1,0 +1,45 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk, 
+        cs.cs_item_sk, 
+        SUM(cs.cs_quantity) AS total_quantity, 
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(cs.cs_sales_price) DESC) AS rank
+    FROM web_sales ws
+    JOIN catalog_sales cs ON ws.ws_item_sk = cs.cs_item_sk
+    GROUP BY ws.web_site_sk, cs.cs_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        COALESCE(sr.returning_customer_sk, wr.wr_returning_customer_sk) AS returning_customer_sk,
+        SUM(wr.wr_return_quantity) AS total_web_quantity,
+        SUM(sr.sr_return_quantity) AS total_store_quantity
+    FROM web_returns wr
+    FULL OUTER JOIN store_returns sr ON wr.wr_returning_customer_sk = sr.sr_returning_customer_sk
+    GROUP BY COALESCE(sr.returning_customer_sk, wr.wr_returning_customer_sk)
+),
+AddressDetails AS (
+    SELECT 
+        ca.ca_address_sk, 
+        ca.ca_city, 
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY ca.ca_address_sk, ca.ca_city, ca.ca_state
+)
+SELECT 
+    ad.ca_city,
+    ad.ca_state,
+    COALESCE(cr.total_store_quantity, 0) AS total_store_returns,
+    COALESCE(cr.total_web_quantity, 0) AS total_web_returns,
+    SUM(rs.total_quantity) AS total_sales,
+    ROUND(SUM(ws.ws_net_profit) / NULLIF(SUM(ws.ws_quantity), 0), 2) AS avg_profit_per_item
+FROM AddressDetails ad
+LEFT JOIN CustomerReturns cr ON ad.customer_count = cr.returning_customer_sk
+LEFT JOIN RankedSales rs ON ad.ca_city = rs.rank
+LEFT JOIN web_sales ws ON rs.cs_item_sk = ws.ws_item_sk
+GROUP BY ad.ca_city, ad.ca_state, cr.total_store_quantity, cr.total_web_quantity
+HAVING COUNT(DISTINCT cr.total_web_quantity) > 0 OR SUM(ws.ws_quantity) > 100
+ORDER BY total_sales DESC
+LIMIT 10;

@@ -1,0 +1,99 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year) AS rank_per_year
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorMovieCount AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        c.person_id
+),
+HighestRatedActors AS (
+    SELECT 
+        a.person_id,
+        ak.name,
+        COALESCE(amc.movie_count, 0) AS movie_count,
+        RANK() OVER (ORDER BY COALESCE(amc.movie_count, 0) DESC) AS actor_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info a ON ak.person_id = a.person_id
+    LEFT JOIN 
+        ActorMovieCount amc ON ak.person_id = amc.person_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        k.keyword
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        DISTINCT m.movie_id, 
+        m.title,
+        COALESCE(SUM(CASE WHEN ak.gender = 'F' THEN 1 ELSE 0 END), 0) AS female_actors,
+        COALESCE(SUM(CASE WHEN ak.gender = 'M' THEN 1 ELSE 0 END), 0) AS male_actors
+    FROM 
+        MoviesWithKeywords m
+    LEFT JOIN 
+        cast_info c ON m.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        m.movie_id, m.title
+    HAVING 
+        COUNT(DISTINCT c.person_id) > 1
+        AND COALESCE(SUM(CASE WHEN ak.gender IN ('M', 'F') THEN 1 ELSE 0 END), 0) >= 2
+)
+SELECT 
+    DISTINCT h.name AS actor_name,
+    f.title AS movie_title,
+    COALESCE(f.female_actors, 0) AS female_roles,
+    COALESCE(f.male_actors, 0) AS male_roles,
+    hm.production_year,
+    f.movie_id,
+    f.title,
+    a.movie_count
+FROM 
+    FilteredMovies f
+JOIN 
+    HighestRatedActors h ON f.movie_id IN (
+        SELECT 
+            c.movie_id 
+        FROM 
+            cast_info c
+        WHERE 
+            c.person_id = h.person_id
+    )
+JOIN 
+    RankedMovies hm ON f.movie_id = hm.title_id
+LEFT JOIN 
+    ActorMovieCount a ON h.person_id = a.person_id
+WHERE 
+    h.actor_rank <= 10
+    AND hm.rank_per_year = 1
+ORDER BY 
+    hm.production_year DESC, 
+    f.title;

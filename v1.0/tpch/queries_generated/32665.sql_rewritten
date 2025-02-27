@@ -1,0 +1,40 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, c_acctbal, 0 AS level
+    FROM customer
+    WHERE c_custkey = (SELECT MIN(c_custkey) FROM customer)
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_custkey <> ch.c_custkey
+),
+SupplierPartInfo AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+AggregatedSales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT l.l_orderkey) AS total_orders
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY o.o_orderkey
+)
+SELECT rh.r_name, 
+       COUNT(DISTINCT ch.c_custkey) AS total_customers,
+       COUNT(DISTINCT si.s_suppkey) AS total_suppliers,
+       AVG(asi.total_sales) AS avg_sales_per_order,
+       AVG(si.ps_availqty) AS avg_avail_qty
+FROM region rh
+LEFT JOIN nation n ON rh.r_regionkey = n.n_regionkey
+LEFT JOIN CustomerHierarchy ch ON n.n_nationkey = ch.c_nationkey
+LEFT JOIN SupplierPartInfo si ON n.n_nationkey = (SELECT n2.n_nationkey FROM supplier s2 JOIN nation n2 ON s2.s_nationkey = n2.n_nationkey WHERE si.s_suppkey = s2.s_suppkey)
+LEFT JOIN AggregatedSales asi ON ch.c_custkey = (SELECT c2.c_custkey FROM orders o2 JOIN lineitem l2 ON o2.o_orderkey = l2.l_orderkey WHERE o2.o_custkey = ch.c_custkey)
+WHERE rh.r_name IS NOT NULL
+GROUP BY rh.r_name
+ORDER BY total_customers DESC, avg_sales_per_order DESC;

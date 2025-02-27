@@ -1,0 +1,65 @@
+
+WITH RankedLineItems AS (
+    SELECT 
+        l.*, 
+        ROW_NUMBER() OVER (PARTITION BY l_orderkey ORDER BY l_extendedprice DESC) AS rn
+    FROM 
+        lineitem l
+    WHERE 
+        l_returnflag = 'N'
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierPartCost AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+
+SELECT 
+    c.c_name, 
+    c.total_spent, 
+    CASE 
+        WHEN c.total_spent < 1000 THEN 'Low'
+        WHEN c.total_spent BETWEEN 1000 AND 5000 THEN 'Medium'
+        ELSE 'High'
+    END AS spending_category,
+    COALESCE(s.total_supply_cost, 0) AS supplier_part_cost
+FROM 
+    CustomerOrders c
+LEFT JOIN 
+    SupplierPartCost s ON s.s_suppkey IN (
+        SELECT DISTINCT ps.ps_suppkey
+        FROM partsupp ps
+        JOIN supplier su ON ps.ps_suppkey = su.s_suppkey
+        WHERE ps.ps_availqty > 0
+    )
+JOIN 
+    RankedLineItems rli ON rli.l_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey = c.c_custkey
+    )
+WHERE 
+    rli.rn = 1
+ORDER BY 
+    c.total_spent DESC;

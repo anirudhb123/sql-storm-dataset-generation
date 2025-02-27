@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        1 AS level
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_date = CURRENT_DATE - INTERVAL '30' DAY)
+    GROUP BY 
+        ws_item_sk
+    
+    UNION ALL
+    
+    SELECT 
+        c.cs_item_sk,
+        SUM(c.cs_quantity) AS total_quantity,
+        SUM(c.cs_sales_price) AS total_sales,
+        s.level + 1
+    FROM 
+        catalog_sales c
+    JOIN 
+        sales_summary s ON c.cs_item_sk = s.ws_item_sk
+    GROUP BY 
+        c.cs_item_sk, s.level
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk,
+        SUM(s.total_sales) AS total_sales_last_month
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        sales_summary s ON c.c_customer_sk = s.ws_item_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000 
+        AND (hd.hd_income_band_sk IS NULL OR hd.hd_income_band_sk > 5)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, hd.hd_income_band_sk
+)
+SELECT 
+    cd.full_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(cd.total_sales_last_month, 0) AS total_sales_last_month,
+    ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.total_sales_last_month DESC) AS sales_rank
+FROM 
+    customer_details cd
+WHERE 
+    cd.total_sales_last_month IS NOT NULL
+ORDER BY 
+    cd.total_sales_last_month DESC
+FETCH FIRST 10 ROWS ONLY;

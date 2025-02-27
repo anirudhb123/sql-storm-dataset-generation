@@ -1,0 +1,86 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rank_order
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        CASE 
+            WHEN o.o_totalprice > 10000 THEN 'High' 
+            ELSE 'Regular' 
+        END AS price_category
+    FROM 
+        orders o
+    WHERE 
+        EXTRACT(YEAR FROM o.o_orderdate) = 1996
+),
+PartInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(ps.ps_availqty, 0) AS available_qty
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 0
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.s_suppkey,
+    r.s_name,
+    r.s_acctbal,
+    pi.p_name,
+    pi.p_retailprice,
+    HVO.o_orderkey,
+    HVO.o_totalprice,
+    HVO.price_category,
+    cs.order_count,
+    cs.total_spent
+FROM 
+    RankedSuppliers r
+JOIN 
+    PartInfo pi ON r.s_suppkey = pi.p_partkey
+LEFT JOIN 
+    HighValueOrders HVO ON HVO.o_orderkey = (SELECT o.o_orderkey 
+                                              FROM orders o 
+                                              WHERE o.o_orderkey = HVO.o_orderkey 
+                                              AND o.o_orderstatus = 'O'
+                                              ORDER BY o.o_orderdate DESC 
+                                              LIMIT 1)
+LEFT JOIN 
+    CustomerStats cs ON pi.p_partkey = cs.c_custkey
+WHERE 
+    r.rank_order = 1
+    AND (pi.available_qty IS NULL OR pi.available_qty > 5)
+    AND NOT EXISTS (SELECT 1 
+                    FROM lineitem l 
+                    WHERE l.l_partkey = pi.p_partkey 
+                    AND l.l_returnflag = 'R')
+ORDER BY 
+    r.s_suppkey, 
+    HVO.o_totalprice DESC;

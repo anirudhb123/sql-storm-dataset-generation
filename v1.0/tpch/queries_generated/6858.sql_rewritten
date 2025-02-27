@@ -1,0 +1,61 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY DATE_TRUNC('month', o.o_orderdate) ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'F' AND 
+        o.o_orderdate >= DATE '1996-01-01' AND 
+        o.o_orderdate < DATE '1997-01-01'
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.order_rank <= 5
+),
+CustomerSpending AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_custkey,
+        cs.c_name,
+        cs.total_spent
+    FROM 
+        CustomerSpending cs
+    ORDER BY 
+        cs.total_spent DESC
+    LIMIT 10
+)
+SELECT 
+    tc.c_name,
+    TO_CHAR(to_char(TO_DATE(EXTRACT(YEAR FROM to.o_orderdate) || '-' || EXTRACT(MONTH FROM to.o_orderdate) || '-01', 'YYYY-MM-DD'), 'YYYY-MM-DD'), 'Mon-YYYY') AS order_month,
+    COUNT(DISTINCT to.o_orderkey) AS total_orders,
+    SUM(to.o_totalprice) AS total_revenue
+FROM 
+    TopOrders to
+JOIN 
+    TopCustomers tc ON to.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = tc.c_custkey)
+GROUP BY 
+    tc.c_name, order_month
+ORDER BY 
+    total_revenue DESC, tc.c_name;

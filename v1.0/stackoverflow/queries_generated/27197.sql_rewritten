@@ -1,0 +1,70 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(V.CreationDate IS NOT NULL) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 5
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId AS CloserId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10 
+    GROUP BY 
+        PH.PostId, PH.UserId
+),
+TopClosers AS (
+    SELECT 
+        CloserId,
+        COUNT(PostId) AS TotalClosed
+    FROM 
+        ClosedPosts
+    GROUP BY 
+        CloserId
+    ORDER BY 
+        TotalClosed DESC
+    LIMIT 5
+)
+SELECT 
+    UA.DisplayName AS UserDisplayName,
+    UA.TotalPosts,
+    UA.TotalComments,
+    UA.TotalVotes,
+    PT.TagName AS PopularTag,
+    TC.TotalClosed AS TotalClosedByUser
+FROM 
+    UserActivity UA
+JOIN 
+    PopularTags PT ON UA.TotalPosts > 10
+LEFT JOIN 
+    TopClosers TC ON UA.UserId = TC.CloserId
+ORDER BY 
+    UA.TotalPosts DESC, UA.TotalComments DESC;

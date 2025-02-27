@@ -1,0 +1,64 @@
+WITH SupplierRevenue AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighRevenueSuppliers AS (
+    SELECT 
+        sr.s_suppkey,
+        sr.s_name,
+        sr.total_revenue
+    FROM 
+        SupplierRevenue sr
+    WHERE 
+        sr.total_revenue > (
+            SELECT 
+                AVG(total_revenue) 
+            FROM 
+                SupplierRevenue
+        )
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    COALESCE(hs.s_name, 'No Supplier') AS high_revenue_supplier,
+    COALESCE(co.c_name, 'No Customer') AS customer_name,
+    COUNT(DISTINCT co.c_custkey) AS customer_count,
+    SUM(co.total_spent) AS total_spent_by_customers,
+    SUM(hs.total_revenue) AS total_revenue_by_suppliers
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+FULL OUTER JOIN 
+    HighRevenueSuppliers hs ON n.n_nationkey = (SELECT s_nationkey FROM supplier s WHERE s.s_suppkey = hs.s_suppkey)
+FULL OUTER JOIN 
+    CustomerOrders co ON n.n_nationkey = co.c_nationkey
+WHERE 
+    (co.order_count > 5 OR hs.total_revenue IS NOT NULL)
+GROUP BY 
+    n.n_name, r.r_name, hs.s_name, co.c_name
+ORDER BY 
+    total_spent_by_customers DESC, total_revenue_by_suppliers DESC;

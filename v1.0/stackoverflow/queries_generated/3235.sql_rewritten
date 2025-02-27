@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        ub.UserId,
+        ub.BadgeCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.Id = u.Id
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.AnswerCount,
+    pd.BadgeCount,
+    COALESCE(pd.GoldBadges, 0) AS GoldBadges,
+    COALESCE(pd.SilverBadges, 0) AS SilverBadges,
+    COALESCE(pd.BronzeBadges, 0) AS BronzeBadges,
+    (
+        SELECT 
+            COUNT(*)
+        FROM 
+            Comments c
+        WHERE 
+            c.PostId = pd.PostId
+    ) AS CommentCount,
+    (
+        SELECT 
+            STRING_AGG(t.TagName, ', ') 
+        FROM 
+            Posts p 
+        JOIN 
+            Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int[])
+                                WHERE p.Id = pd.PostId)
+    ) AS Tags
+FROM 
+    PostDetails pd
+WHERE 
+    pd.Rank <= 3 
+ORDER BY 
+    pd.ViewCount DESC, pd.CreationDate ASC;

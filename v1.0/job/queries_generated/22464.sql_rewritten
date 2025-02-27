@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           mt.production_year, 
+           0 AS level
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           mt.production_year, 
+           mh.level + 1
+    FROM movie_link ml
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE mh.level < 5  
+),
+ActorRoles AS (
+    SELECT ci.movie_id, 
+           ak.name, 
+           ct.kind AS role
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN role_type ct ON ci.role_id = ct.id
+    WHERE ak.name IS NOT NULL
+),
+MovieKeywords AS (
+    SELECT mk.movie_id, 
+           k.keyword
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    WHERE k.keyword ILIKE '%action%' OR k.keyword ILIKE '%drama%'
+),
+AggregatedInfo AS (
+    SELECT mv.movie_id,
+           STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+           COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM MovieHierarchy mv
+    LEFT JOIN ActorRoles ak ON mv.movie_id = ak.movie_id
+    LEFT JOIN MovieKeywords mk ON mv.movie_id = mk.movie_id
+    GROUP BY mv.movie_id
+),
+FinalResults AS (
+    SELECT mv.title,
+           mv.production_year,
+           ai.actors,
+           ai.keyword_count,
+           ROW_NUMBER() OVER (PARTITION BY mv.production_year ORDER BY ai.keyword_count DESC) AS rank
+    FROM AggregatedInfo ai
+    JOIN aka_title mv ON ai.movie_id = mv.id
+    WHERE mv.production_year > 2000
+)
+
+SELECT *
+FROM FinalResults
+WHERE rank <= 3 OR actors IS NULL 
+ORDER BY production_year DESC, keyword_count DESC;

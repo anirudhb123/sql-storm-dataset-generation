@@ -1,0 +1,67 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as order_rank
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierStats AS (
+    SELECT
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey
+),
+TopItems AS (
+    SELECT
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM
+        lineitem l
+    JOIN
+        RankedOrders ro ON l.l_orderkey = ro.o_orderkey
+    WHERE
+        l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY
+        l.l_partkey
+),
+FinalResult AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        COALESCE(ts.total_revenue, 0) AS revenue,
+        COALESCE(ss.total_available_qty, 0) AS total_available,
+        COALESCE(ss.total_supply_cost, 0) AS total_supply_cost
+    FROM
+        part p
+    LEFT JOIN
+        TopItems ts ON p.p_partkey = ts.l_partkey
+    LEFT JOIN
+        SupplierStats ss ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ss.s_suppkey)
+)
+SELECT
+    fr.p_partkey,
+    fr.p_name,
+    fr.revenue,
+    fr.total_available,
+    fr.total_supply_cost
+FROM
+    FinalResult fr
+WHERE
+    fr.revenue > (
+        SELECT AVG(revenue) FROM FinalResult
+    ) AND fr.total_available < (
+        SELECT MAX(total_available) FROM SupplierStats
+    )
+ORDER BY
+    fr.revenue DESC;

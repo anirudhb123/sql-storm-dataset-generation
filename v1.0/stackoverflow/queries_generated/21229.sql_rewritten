@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.CreationDate, 
+        P.ViewCount, 
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS PostRank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY P.Id) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY P.Id) AS Downvotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' 
+        AND P.ViewCount > 100
+),
+TopPosts AS (
+    SELECT 
+        RP.PostId, 
+        RP.Title, 
+        RP.ViewCount, 
+        RP.Score,
+        RP.PostRank,
+        CASE 
+            WHEN RP.Upvotes > RP.Downvotes THEN 'Positive'
+            WHEN RP.Upvotes < RP.Downvotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteSentiment
+    FROM 
+        RankedPosts RP
+    WHERE 
+        RP.PostRank <= 5
+),
+PostWithHistory AS (
+    SELECT 
+        T.Title,
+        H.PostHistoryTypeId,
+        H.CreationDate AS HistoryDate,
+        H.UserDisplayName,
+        H.Comment,
+        H.Text
+    FROM 
+        TopPosts T
+    LEFT JOIN 
+        PostHistory H ON T.PostId = H.PostId
+    WHERE 
+        H.CreationDate BETWEEN T.CreationDate AND cast('2024-10-01 12:34:56' as timestamp)
+)
+SELECT 
+    PWH.Title,
+    PWH.PostHistoryTypeId,
+    COALESCE(PWH.HistoryDate, 'No History') AS HistoryDate,
+    COALESCE(PWH.UserDisplayName, 'Unknown User') AS User,
+    COALESCE(PWH.Comment, 'No Comment') AS Comment,
+    COALESCE(PWH.Text, 'No Changes') AS Changes,
+    TP.VoteSentiment
+FROM 
+    PostWithHistory PWH
+JOIN 
+    TopPosts TP ON PWH.Title = TP.Title
+ORDER BY 
+    TP.Score DESC,
+    PWH.HistoryDate DESC NULLS LAST;

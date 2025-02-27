@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.title AS movie_title,
+        m.production_year,
+        k.keyword AS movie_keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY m.production_year DESC) AS rank,
+        COALESCE(cast_info.nr_order, 0) AS role_order
+    FROM title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN cast_info ON m.id = cast_info.movie_id
+    WHERE m.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.movie_keyword,
+        rm.role_order
+    FROM RankedMovies rm
+    WHERE rm.rank = 1
+    AND rm.movie_keyword IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1
+        FROM cast_info ci
+        WHERE ci.movie_id = (SELECT id FROM title WHERE title = rm.movie_title LIMIT 1)
+        AND ci.person_id IS NULL
+    )
+),
+AggregateKeywords AS (
+    SELECT 
+        f.movie_title,
+        STRING_AGG(f.movie_keyword, ', ') AS aggregated_keywords
+    FROM FilteredMovies f
+    GROUP BY f.movie_title
+)
+SELECT 
+    a.name AS actor_name,
+    f.movie_title,
+    f.production_year,
+    ak.aggregated_keywords,
+    COALESCE(cmp.kind, 'N/A') AS company_type,
+    CASE 
+        WHEN COUNT(cmp.id) OVER (PARTITION BY f.movie_title) > 1 THEN 'Multiple Companies'
+        ELSE 'Single Company'
+    END AS company_status
+FROM aka_name a
+JOIN cast_info ci ON a.person_id = ci.person_id
+JOIN FilteredMovies f ON ci.movie_id = (SELECT id FROM title WHERE title = f.movie_title LIMIT 1)
+LEFT JOIN movie_companies mc ON mc.movie_id = f.movie_id
+LEFT JOIN company_type cmp ON mc.company_type_id = cmp.id
+JOIN AggregateKeywords ak ON ak.movie_title = f.movie_title
+WHERE a.name IS NOT NULL
+AND NOT EXISTS (
+    SELECT 1
+    FROM person_info pi
+    WHERE pi.person_id = a.person_id AND pi.info LIKE '%Unknown%'
+)
+ORDER BY f.production_year DESC, a.name;

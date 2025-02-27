@@ -1,0 +1,61 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS order_sequence
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, c.c_custkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+)
+SELECT 
+    ns.n_name AS nation,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(os.order_total) AS avg_order_total,
+    SUM(ss.total_supply_cost) AS total_supply_costs,
+    COALESCE(MAX(ss.part_count), 0) AS max_parts_per_supplier
+FROM 
+    nation ns
+LEFT JOIN 
+    customer c ON c.c_nationkey = ns.n_nationkey
+LEFT JOIN 
+    orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    OrderDetails os ON os.o_orderkey = o.o_orderkey
+LEFT JOIN 
+    SupplierStats ss ON ss.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT l.l_partkey 
+            FROM lineitem l 
+            WHERE l.l_orderkey = o.o_orderkey
+        )
+        LIMIT 1
+    )
+GROUP BY 
+    ns.n_name
+ORDER BY 
+    total_orders DESC, 
+    avg_order_total DESC;

@@ -1,0 +1,79 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS OrderRank,
+        c.c_nationkey
+    FROM 
+        orders AS o
+    JOIN 
+        customer AS c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'P')
+),
+HighValueSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyValue
+    FROM 
+        partsupp AS ps
+    GROUP BY 
+        ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+PartNations AS (
+    SELECT 
+        p.p_partkey,
+        n.n_nationkey,
+        n.n_name,
+        (SELECT COUNT(*) FROM partsupp WHERE ps_partkey = p.p_partkey) AS SupplierCount
+    FROM 
+        part AS p
+    LEFT JOIN 
+        supplier AS s ON p.p_partkey = s.s_suppkey
+    LEFT JOIN 
+        nation AS n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        p.p_retailprice IS NOT NULL
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS NetRevenue
+    FROM 
+        lineitem AS l
+    WHERE 
+        l.l_returnflag = 'N' 
+        AND l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    pn.p_name,
+    COALESCE(SUM(pli.NetRevenue), 0) AS TotalNetRevenue,
+    COUNT(DISTINCT ps.ps_suppkey) AS UniqueSuppliers,
+    rn.n_name AS SupplierNation,
+    CASE 
+        WHEN MAX(rk.OrderRank) IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS OrderStatus
+FROM 
+    PartNations pn
+LEFT JOIN 
+    FilteredLineItems pli ON pn.p_partkey = pli.l_orderkey
+LEFT JOIN 
+    HighValueSuppliers ps ON ps.ps_suppkey = pn.n_nationkey
+LEFT JOIN 
+    RankedOrders rk ON rk.o_orderkey = pli.l_orderkey
+LEFT JOIN 
+    nation rn ON pn.n_nationkey = rn.n_nationkey
+WHERE 
+    pn.SupplierCount > 0
+GROUP BY 
+    pn.p_name, rn.n_name
+HAVING 
+    SUM(pli.NetRevenue) > (SELECT AVG(TotalSupplyValue) FROM HighValueSuppliers)
+ORDER BY 
+    TotalNetRevenue DESC, pn.p_name ASC;

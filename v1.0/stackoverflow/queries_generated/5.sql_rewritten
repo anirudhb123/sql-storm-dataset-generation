@@ -1,0 +1,75 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId, 
+        ps.Title,
+        ps.CreationDate,
+        ps.ViewCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.CommentCount,
+        ps.BadgeCount,
+        ps.UserPostRank
+    FROM 
+        PostStats ps
+    WHERE 
+        ps.UserPostRank <= 5
+),
+PostRankings AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.UpVotes,
+        p.DownVotes,
+        p.CommentCount,
+        RANK() OVER (ORDER BY p.UpVotes DESC, p.ViewCount DESC) AS RankByPopularity
+    FROM 
+        TopPosts p
+)
+SELECT 
+    pr.PostId,
+    pr.Title,
+    pr.CreationDate,
+    pr.ViewCount,
+    pr.UpVotes,
+    pr.DownVotes,
+    pr.CommentCount,
+    pr.RankByPopularity,
+    CASE 
+        WHEN pr.RankByPopularity <= 5 THEN 'Top Post'
+        ELSE 'Other' 
+    END AS PostCategory,
+    COUNT(DISTINCT u.Id) FILTER (WHERE u.Reputation > 100) AS ActiveUserCount
+FROM 
+    PostRankings pr
+LEFT JOIN 
+    Users u ON pr.UserPostRank = u.Id
+GROUP BY 
+    pr.PostId, pr.Title, pr.CreationDate, pr.ViewCount, pr.UpVotes, pr.DownVotes, pr.CommentCount, pr.RankByPopularity
+ORDER BY 
+    pr.RankByPopularity;

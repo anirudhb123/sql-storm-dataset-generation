@@ -1,0 +1,99 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.CreationDate,
+        P.PostTypeId,
+        P.AcceptedAnswerId,
+        P.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.CreationDate,
+        P.PostTypeId,
+        P.AcceptedAnswerId,
+        P.OwnerUserId,
+        RP.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostCTE RP ON P.ParentId = RP.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        PostId,
+        MAX(CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory
+    WHERE 
+        PostHistoryTypeId = 10
+    GROUP BY 
+        PostId
+)
+
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.ViewCount,
+    RP.Score,
+    RP.CreationDate,
+    PST.Name AS PostType,
+    COALESCE(PVS.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(PVS.DownVotes, 0) AS TotalDownVotes,
+    UR.Reputation AS UserReputation,
+    UR.BadgeCount,
+    CP.LastClosedDate
+FROM 
+    RecursivePostCTE RP
+LEFT JOIN 
+    PostVoteSummary PVS ON RP.PostId = PVS.PostId
+LEFT JOIN 
+    PostTypes PST ON RP.PostTypeId = PST.Id
+LEFT JOIN 
+    Users U ON RP.OwnerUserId = U.Id
+LEFT JOIN 
+    UserReputation UR ON U.Id = UR.UserId
+LEFT JOIN 
+    ClosedPosts CP ON RP.PostId = CP.PostId
+WHERE 
+    RP.Score > (SELECT AVG(Score) FROM Posts WHERE PostTypeId = 1) 
+    AND RP.ViewCount > 1000
+    AND (RP.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' OR RP.Level < 2)
+ORDER BY 
+    RP.Score DESC, 
+    RP.ViewCount DESC
+FETCH FIRST 50 ROWS ONLY;

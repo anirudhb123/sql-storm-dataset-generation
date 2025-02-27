@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ss.store_sk,
+        SUM(ss.net_profit) AS total_net_profit,
+        COUNT(ss.ticket_number) AS total_sales,
+        MAX(ss.sold_date_sk) AS last_sales_date
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ss.store_sk
+    HAVING 
+        SUM(ss.net_profit) > 10000
+    UNION ALL
+    SELECT 
+        ss.store_sk,
+        SUM(ss.net_profit) + rc.total_net_profit,
+        COUNT(ss.ticket_number) + rc.total_sales,
+        GREATEST(MAX(ss.sold_date_sk), rc.last_sales_date)
+    FROM 
+        store_sales ss
+    JOIN 
+        sales_cte rc ON ss.store_sk = rc.store_sk
+    WHERE 
+        ss.sold_date_sk < rc.last_sales_date
+    GROUP BY 
+        ss.store_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY c.c_last_name) AS rn
+    FROM
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE
+        ca.ca_country = 'USA'
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    si.store_sk,
+    si.total_net_profit,
+    si.total_sales,
+    si.last_sales_date
+FROM 
+    customer_info ci
+JOIN 
+    sales_cte si ON ci.rn = si.store_sk
+WHERE 
+    (ci.cd_marital_status = 'M' OR ci.cd_gender = 'F')
+    AND si.total_sales > 5
+ORDER BY 
+    si.total_net_profit DESC;

@@ -1,0 +1,98 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, '2024-10-01')
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END), 0) AS PositivePosts,
+        COALESCE(SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END), 0) AS NegativePosts,
+        COALESCE(SUM(CASE WHEN p.Score = 0 THEN 1 ELSE 0 END), 0) AS NeutralPosts,
+        AVG(p.ViewCount) AS AvgViews,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) 
+    WHERE 
+        p.CreationDate >= DATEADD(MONTH, -6, '2024-10-01')
+    GROUP BY 
+        p.Id, p.Title
+),
+SubscriptionStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS SubscribedPosts,
+        COUNT(DISTINCT t.Id) AS TagCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    ups.TotalPosts,
+    ups.PositivePosts,
+    ups.NegativePosts,
+    ups.NeutralPosts,
+    ups.AvgViews,
+    ups.TotalBadges,
+    COUNT(rp.Id) AS RankedPostCount,
+    COALESCE(PP.VoteCount, 0) AS PopularPostVotes,
+    ss.SubscribedPosts,
+    ss.TagCount
+FROM 
+    Users u
+LEFT JOIN 
+    UserPostStats ups ON u.Id = ups.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    PopularPosts PP ON rp.Id = PP.Id
+LEFT JOIN 
+    SubscriptionStats ss ON u.Id = ss.UserId
+GROUP BY 
+    u.DisplayName, 
+    ups.TotalPosts, 
+    ups.PositivePosts, 
+    ups.NegativePosts, 
+    ups.NeutralPosts, 
+    ups.AvgViews, 
+    ups.TotalBadges, 
+    ss.SubscribedPosts, 
+    ss.TagCount
+HAVING 
+    ups.TotalPosts > 0 AND ups.AvgViews IS NOT NULL
+ORDER BY 
+    ups.TotalPosts DESC, PopularPostVotes DESC
+LIMIT 100;

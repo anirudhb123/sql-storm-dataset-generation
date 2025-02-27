@@ -1,0 +1,62 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_totalprice > (
+        SELECT AVG(o2.o_totalprice)
+        FROM orders o2
+        WHERE o2.o_orderdate >= '1997-01-01'
+    )
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_account
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal < (SELECT MAX(s2.s_acctbal) FROM supplier s2 WHERE s2.s_comment IS NOT NULL)
+),
+AvailableParts AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        COALESCE(SUM(ps.ps_availqty), 0) AS safe_availqty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+    HAVING SUM(ps.ps_availqty) > 1 OR COUNT(ps.ps_suppkey) IS NULL
+)
+SELECT 
+    r.r_name,
+    COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+    p.p_name,
+    COUNT(DISTINCT lo.l_orderkey) AS total_orders,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue,
+    SUM(CASE 
+            WHEN lo.l_returnflag = 'R' THEN 1 
+            ELSE 0 
+        END) AS returned_items,
+    (SELECT COUNT(*) 
+     FROM lineitem li 
+     WHERE li.l_orderkey IN (SELECT o.o_orderkey FROM RankedOrders o WHERE o.rn = 1)
+       AND li.l_partkey = p.p_partkey) AS item_count
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN lineitem lo ON c.c_custkey = lo.l_orderkey
+JOIN AvailableParts p ON p.p_partkey = lo.l_partkey
+JOIN SupplierDetails sd ON sd.s_nationkey = n.n_nationkey
+WHERE r.r_name LIKE '%.%' 
+  AND (lo.l_shipmode IS NULL OR lo.l_shipmode IN ('AIR', 'TRUCK'))
+GROUP BY r.r_name, p.p_name, c.c_name
+HAVING SUM(lo.l_extendedprice) >= (
+      SELECT AVG(o.o_totalprice) 
+      FROM orders o 
+      WHERE o.o_orderdate >= '1996-01-01') 
+   AND COUNT(DISTINCT r.r_regionkey) < 3
+ORDER BY total_revenue DESC;

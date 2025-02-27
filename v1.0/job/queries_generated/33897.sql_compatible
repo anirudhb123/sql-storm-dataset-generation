@@ -1,0 +1,61 @@
+
+WITH RECURSIVE actor_movies AS (
+    SELECT
+        c.person_id,
+        a.name AS actor_name,
+        t.title,
+        ROW_NUMBER() OVER(PARTITION BY c.person_id ORDER BY t.production_year DESC) AS movie_rank,
+        c.movie_id
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    JOIN
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE
+        t.production_year IS NOT NULL
+),
+company_contributions AS (
+    SELECT
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM
+        movie_companies mc
+    JOIN
+        company_name co ON mc.company_id = co.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY
+        mc.movie_id, co.name, ct.kind
+),
+movie_keywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+)
+SELECT
+    am.actor_name,
+    am.title,
+    am.movie_rank,
+    cc.company_name,
+    cc.company_type,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    COUNT(DISTINCT am.title) OVER(PARTITION BY am.actor_name) AS total_movies
+FROM
+    actor_movies am
+LEFT JOIN
+    company_contributions cc ON am.movie_id = cc.movie_id
+LEFT JOIN
+    movie_keywords mk ON am.movie_id = mk.movie_id
+WHERE
+    am.movie_rank <= 5
+ORDER BY
+    am.actor_name, am.movie_rank;

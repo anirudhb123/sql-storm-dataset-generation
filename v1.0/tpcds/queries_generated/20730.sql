@@ -1,0 +1,91 @@
+
+WITH RankedItems AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_brand,
+        i.i_category,
+        ROW_NUMBER() OVER (PARTITION BY i.i_category ORDER BY i.i_current_price DESC NULLS LAST) AS rn,
+        i.i_current_price,
+        COALESCE(i.i_current_price / NULLIF(i.i_wholesale_cost, 0), 0) AS profit_margin
+    FROM 
+        item i
+    WHERE 
+        i.i_rec_start_date <= CURRENT_DATE AND 
+        (i.i_rec_end_date IS NULL OR i.i_rec_end_date > CURRENT_DATE)
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        CASE 
+            WHEN SUM(ws.ws_net_profit) IS NULL THEN 0
+            ELSE SUM(ws.ws_net_profit) / NULLIF(COUNT(DISTINCT ws.ws_order_number), 0)
+        END AS avg_profit_per_order
+    FROM 
+        customer c 
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+    GROUP BY 
+        c.c_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        cp.c_customer_sk,
+        cp.total_quantity,
+        cp.total_profit,
+        cp.order_count,
+        cp.avg_profit_per_order
+    FROM 
+        CustomerPurchases cp
+    WHERE 
+        cp.total_profit > (SELECT AVG(total_profit) FROM CustomerPurchases)
+),
+AggregatedData AS (
+    SELECT 
+        i.i_item_id,
+        SUM(ss.ss_quantity) AS store_quantity,
+        SUM(ws.ws_quantity) AS web_quantity,
+        SUM(cs.cs_quantity) AS catalog_quantity,
+        COALESCE(SUM(ss.ss_quantity), 0) + COALESCE(SUM(ws.ws_quantity), 0) + COALESCE(SUM(cs.cs_quantity), 0) AS total_sales_quantity
+    FROM 
+        RankedItems i
+    LEFT JOIN 
+        store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+    GROUP BY 
+        i.i_item_id
+    HAVING 
+        total_sales_quantity > 0
+)
+SELECT 
+    DISTINCT hvc.c_customer_sk,
+    a.i_item_id,
+    a.total_sales_quantity,
+    hvc.avg_profit_per_order,
+    CASE 
+        WHEN hvc.total_quantity > 100 THEN 'High Volume'
+        WHEN hvc.total_quantity BETWEEN 50 AND 100 THEN 'Medium Volume'
+        ELSE 'Low Volume'
+    END AS purchase_volume_category,
+    CASE 
+        WHEN a.total_sales_quantity IS NULL THEN 'No Sales'
+        WHEN a.total_sales_quantity BETWEEN 1 AND 50 THEN 'Low Sales'
+        ELSE 'High Sales'
+    END AS sales_performance_category
+FROM 
+    HighValueCustomers hvc
+CROSS JOIN 
+    AggregatedData a
+WHERE 
+    hvc.order_count > 5 AND 
+    (hvc.total_profit IS NOT NULL OR a.total_sales_quantity IS NOT NULL)
+ORDER BY 
+    hvc.total_profit DESC, 
+    a.total_sales_quantity ASC 
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

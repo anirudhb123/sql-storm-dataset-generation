@@ -1,0 +1,45 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        AVG(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - U.LastAccessDate))) AS AvgTimeSinceLastAccess
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        PostCount, 
+        CommentCount, 
+        UpVotes, 
+        DownVotes,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserStats
+)
+SELECT 
+    T.UserId,
+    T.DisplayName,
+    T.Reputation,
+    T.PostCount,
+    T.CommentCount,
+    T.UpVotes,
+    T.DownVotes,
+    TH.Name AS TagName,
+    COUNT(TH.Id) AS TagCount
+FROM TopUsers T
+JOIN Posts P ON T.UserId = P.OwnerUserId
+JOIN Tags TH ON P.Tags LIKE '%' || TH.TagName || '%'
+GROUP BY T.UserId, T.DisplayName, T.Reputation, T.PostCount, T.CommentCount, T.UpVotes, T.DownVotes, TH.Name
+HAVING T.Reputation >= 1000
+ORDER BY T.Reputation DESC, TagCount DESC;

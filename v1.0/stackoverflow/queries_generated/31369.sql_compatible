@@ -1,0 +1,74 @@
+
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.Reputation, 
+        0 AS Level
+    FROM Users U
+    WHERE U.Reputation > 0
+
+    UNION ALL
+
+    SELECT 
+        U.Id AS UserId, 
+        U.Reputation, 
+        UR.Level + 1
+    FROM Users U
+    INNER JOIN UserReputationCTE UR ON U.Id = UR.UserId
+    WHERE U.Reputation > 0 AND UR.Level < 5
+),
+PostDetail AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COALESCE(NULLIF(P.AcceptedAnswerId, -1), 0) AS AcceptedAnswerId,
+        ARRAY_AGG(DISTINCT T.TagName) AS TagsArray
+    FROM Posts P
+    LEFT JOIN Comments C ON C.PostId = P.Id
+    LEFT JOIN Tags T ON T.Id = ANY(string_to_array(P.Tags, ',')::text[])
+    GROUP BY P.Id, P.Title, P.Score, P.ViewCount, P.CreationDate, P.AcceptedAnswerId
+),
+VoteSummary AS (
+    SELECT 
+        V.PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM Votes V
+    GROUP BY V.PostId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    P.PostId,
+    P.Title,
+    P.Score,
+    P.ViewCount,
+    P.CommentCount,
+    COALESCE(V.UpVotes, 0) AS UpVotes,
+    COALESCE(V.DownVotes, 0) AS DownVotes,
+    P.TagsArray,
+    PR.UserId AS HighestReputationUserId,
+    UR.Reputation AS HighestReputation
+FROM Users U
+INNER JOIN PostDetail P ON U.Id = P.AcceptedAnswerId
+LEFT JOIN VoteSummary V ON P.PostId = V.PostId
+LEFT JOIN (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        MAX(U.Reputation) AS Reputation 
+    FROM Posts P
+    INNER JOIN Users U ON P.OwnerUserId = U.Id
+    GROUP BY P.Id, P.OwnerUserId
+    ORDER BY MAX(U.Reputation) DESC
+    LIMIT 1
+) PR ON P.PostId = PR.PostId
+LEFT JOIN UserReputationCTE UR ON PR.OwnerUserId = UR.UserId
+WHERE U.Reputation > (SELECT AVG(Reputation) FROM Users)
+ORDER BY U.Reputation DESC, P.Score DESC
+LIMIT 100;

@@ -1,0 +1,69 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        c.customer_id,
+        C.c_current_cdemo_sk,
+        COUNT(DISTINCT wr.order_number) AS web_return_count,
+        SUM(wr.return_amt) AS total_web_return_amt,
+        SUM(wr.return_tax) AS total_web_return_tax
+    FROM
+        customer c
+    LEFT JOIN
+        web_returns wr ON c.c_customer_sk = wr.returning_customer_sk
+    GROUP BY
+        c.customer_id, c.c_current_cdemo_sk
+),
+WarehouseSales AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.net_profit) AS total_profit,
+        COUNT(DISTINCT ws.order_number) AS order_count
+    FROM
+        web_sales ws
+    GROUP BY
+        ws.web_site_sk
+),
+ReturnAnalysis AS (
+    SELECT
+        cr.customer_id,
+        cr.c_current_cdemo_sk,
+        COALESCE(r.total_web_return_amt, 0) AS total_web_return_amt,
+        COALESCE(r.web_return_count, 0) AS web_return_count,
+        ws.total_profit,
+        ws.order_count
+    FROM
+        CustomerReturns cr
+    LEFT JOIN
+        WarehouseSales ws ON cr.c_current_cdemo_sk = ws.web_site_sk
+    LEFT JOIN
+        (SELECT customer_id,
+                SUM(total_web_return_amt) AS total_web_return_amt,
+                SUM(web_return_count) AS total_web_return_count
+         FROM
+             CustomerReturns
+         GROUP BY
+             customer_id) r ON cr.customer_id = r.customer_id
+)
+SELECT
+    ra.customer_id,
+    ra.c_current_cdemo_sk,
+    ra.total_web_return_amt,
+    ra.web_return_count,
+    ra.total_profit,
+    ra.order_count,
+    CASE 
+        WHEN ra.web_return_count > 0 THEN ra.total_web_return_amt / ra.web_return_count
+        ELSE NULL 
+    END AS avg_return_amt,
+    CASE
+        WHEN ra.total_profit IS NOT NULL AND ra.total_profit > 0 
+            THEN (ra.total_web_return_amt / ra.total_profit) * 100 
+            ELSE NULL 
+    END AS return_percentage_of_profit
+FROM
+    ReturnAnalysis ra
+WHERE
+    ra.total_profit IS NOT NULL
+    AND (ra.web_return_count > 5 OR ra.total_profit > 1000)
+ORDER BY
+    return_percentage_of_profit DESC;

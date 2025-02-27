@@ -1,0 +1,77 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000.00
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS TotalSpent,
+        COUNT(o.o_orderkey) AS OrderCount
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+SupplierDetails AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS SupplierCount,
+        SUM(ps.ps_supplycost) AS TotalSupplyCost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name
+)
+
+SELECT 
+    c.c_name AS CustomerName,
+    coalesce(r.Region, 'Unknown') AS Region,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS TotalRevenue,
+    COUNT(DISTINCT o.o_orderkey) AS TotalOrders,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS SupplierNames,
+    CASE 
+        WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000 THEN 'High Spender' 
+        ELSE 'Regular Spender' 
+    END AS CustomerType,
+    sd.TotalSupplyCost
+FROM 
+    customer c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    RankedSuppliers rs ON l.l_suppkey = rs.s_suppkey
+LEFT JOIN 
+    SupplierDetails sd ON sd.Region = (
+        SELECT r.r_name
+        FROM nation n
+        JOIN region r ON n.n_regionkey = r.r_regionkey
+        WHERE n.n_nationkey = c.c_nationkey
+    )
+GROUP BY 
+    c.c_name, r.Region, sd.TotalSupplyCost
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) IS NOT NULL
+ORDER BY 
+    TotalRevenue DESC;

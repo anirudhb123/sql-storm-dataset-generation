@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs_bill_customer_sk,
+        SUM(cs_net_profit) AS total_net_profit,
+        1 AS level
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY 
+        cs_bill_customer_sk
+    
+    UNION ALL
+    
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.net_profit) + sh.total_net_profit,
+        level + 1
+    FROM 
+        web_sales ws
+    JOIN 
+        sales_hierarchy sh ON ws.bill_customer_sk = sh.cs_bill_customer_sk
+    WHERE 
+        ws_sold_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY 
+        ws.bill_customer_sk, sh.total_net_profit, level
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        sh.total_net_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        sales_hierarchy sh ON c.c_customer_sk = sh.cs_bill_customer_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT ci.c_customer_id) AS total_customers,
+    AVG(COALESCE(ci.total_net_profit, 0)) AS avg_net_profit
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    customer_info ci ON ci.c_customer_id = c.c_customer_id
+WHERE 
+    (ci.cd_gender = 'F' OR CEIL(ci.total_net_profit) > 1000)
+GROUP BY 
+    ca.ca_city, ca.ca_state
+HAVING 
+    COUNT(DISTINCT ci.c_customer_id) > 10
+ORDER BY 
+    avg_net_profit DESC
+FETCH FIRST 10 ROWS ONLY;

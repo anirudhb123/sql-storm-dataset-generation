@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_availqty) AS total_availqty,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    ps.total_availqty,
+    ps.supplier_count,
+    ps.avg_supplycost,
+    COALESCE(os.order_total_price, 0) AS order_total_price,
+    CASE 
+        WHEN ps.total_availqty > 1000 THEN 'High Availability' 
+        ELSE 'Low Availability' 
+    END AS availability_status,
+    CONCAT('Part ', p.p_name, ' has ', ps.total_availqty, ' available.') AS availability_message,
+    rs.s_name AS top_supplier
+FROM 
+    PartStats ps
+LEFT JOIN 
+    RankedSuppliers rs ON ps.supplier_count = rs.rn AND ps.p_partkey IN (
+        SELECT DISTINCT l.l_partkey 
+        FROM lineitem l
+        JOIN orders o ON l.l_orderkey = o.o_orderkey
+        WHERE o.o_orderstatus = 'F'
+    )
+LEFT JOIN 
+    OrderSummary os ON os.o_orderkey = (SELECT o.o_orderkey 
+                                         FROM orders o 
+                                         WHERE o.o_custkey = (SELECT c.c_custkey 
+                                                              FROM customer c 
+                                                              WHERE c.c_nationkey = rs.s_nationkey LIMIT 1)
+                                         ORDER BY o.o_orderdate DESC LIMIT 1)
+ORDER BY 
+    CASE 
+        WHEN ps.avg_supplycost IS NULL THEN 1 
+        ELSE 0 
+    END, ps.avg_supplycost DESC;

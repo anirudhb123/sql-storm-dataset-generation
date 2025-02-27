@@ -1,0 +1,74 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank_price
+    FROM 
+        part p
+),
+SupplierSales AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON l.l_partkey = ps.ps_partkey
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerProfit AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_revenue,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    rp.p_name AS part_name,
+    rp.p_retailprice,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    cp.total_revenue,
+    cp.order_count,
+    cp.avg_order_value
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RankedParts rp ON s.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = rp.p_partkey
+    )
+LEFT JOIN 
+    SupplierSales ss ON rp.p_partkey = ss.ps_partkey
+LEFT JOIN 
+    CustomerProfit cp ON s.s_suppkey = (
+        SELECT l.l_suppkey 
+        FROM lineitem l 
+        JOIN orders o ON l.l_orderkey = o.o_orderkey 
+        WHERE o.o_custkey IN (
+            SELECT c.c_custkey 
+            FROM customer c 
+            WHERE c.cacctbal > 1000
+        )
+        LIMIT 1
+    )
+WHERE 
+    rp.rank_price <= 5
+ORDER BY 
+    region_name, nation_name, supplier_name, part_name;

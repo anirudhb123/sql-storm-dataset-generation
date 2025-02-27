@@ -1,0 +1,79 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.OwnerUserId IS NOT NULL THEN 1 ELSE 0 END) AS PostCount,
+        SUM(CASE WHEN c.UserId IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        SUM(CASE WHEN v.UserId IS NOT NULL THEN 1 ELSE 0 END) AS VoteCount,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        t.TagName
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.Score > 10 -- focusing on popular posts
+    GROUP BY 
+        p.Id, u.DisplayName
+    ORDER BY 
+        p.Score DESC
+    LIMIT 10
+)
+
+SELECT 
+    ua.DisplayName AS ActiveUser,
+    ua.PostCount,
+    ua.CommentCount,
+    ua.VoteCount,
+    ua.AverageReputation,
+    ts.TagName,
+    ts.PostCount AS TagPostCount,
+    ts.TotalViews,
+    ts.AverageScore,
+    pp.Title AS PopularPostTitle,
+    pp.ViewCount AS PopularPostViews,
+    pp.Score AS PopularPostScore,
+    pp.CreationDate AS PopularPostDate
+FROM 
+    UserActivity ua
+CROSS JOIN 
+    TagStatistics ts
+CROSS JOIN 
+    PopularPosts pp
+ORDER BY 
+    ua.PostCount DESC, ts.PostCount DESC, pp.ViewCount DESC;

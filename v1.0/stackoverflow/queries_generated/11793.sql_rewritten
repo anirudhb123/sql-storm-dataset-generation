@@ -1,0 +1,39 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(vote.Score) AS TotalVoteScore,
+        AVG(vh.RevisionCount) AS AverageRevisionCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            COUNT(Id) AS RevisionCount
+        FROM 
+            PostHistory
+        GROUP BY 
+            PostId) vh ON vh.PostId = p.Id
+    LEFT JOIN 
+        Votes vote ON vote.PostId = p.Id
+    GROUP BY 
+        p.Id, p.PostTypeId
+)
+
+SELECT 
+    pt.Name AS PostType,
+    COUNT(ps.PostId) AS PostCount,
+    SUM(ps.CommentCount) AS TotalComments,
+    SUM(ps.TotalVoteScore) AS OverallVoteScore,
+    AVG(ps.AverageRevisionCount) AS AvgRevisionsPerPost
+FROM 
+    PostStats ps
+JOIN 
+    PostTypes pt ON pt.Id = ps.PostTypeId
+GROUP BY 
+    pt.Name
+ORDER BY 
+    PostCount DESC;

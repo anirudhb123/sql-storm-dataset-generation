@@ -1,0 +1,58 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT wr.wr_order_number) AS web_return_count,
+        COUNT(DISTINCT sr.sr_ticket_number) AS store_return_count
+    FROM customer AS c
+    LEFT JOIN web_returns AS wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    LEFT JOIN store_returns AS sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_ship_date_sk,
+        SUM(ws.ws_net_profit) AS total_web_profit,
+        SUM(ss.ss_net_profit) AS total_store_profit
+    FROM web_sales AS ws
+    JOIN store_sales AS ss ON ws.ws_item_sk = ss.ss_item_sk
+    GROUP BY ws.ws_ship_date_sk
+),
+IncomeBandData AS (
+    SELECT 
+        h.hd_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(h.hd_dep_count) AS avg_dependencies
+    FROM household_demographics AS h
+    JOIN customer AS c ON h.hd_demo_sk = c.c_current_hdemo_sk
+    GROUP BY h.hd_income_band_sk
+),
+FinalReport AS (
+    SELECT 
+        cb.ca_country,
+        COUNT(DISTINCT c.c_customer_sk) AS active_customers,
+        SUM(cr.return_amount) AS total_returned_amount,
+        CASE 
+            WHEN ab.customer_count IS NOT NULL THEN ab.customer_count 
+            ELSE 0 
+        END AS income_band_customer_count,
+        AVG(sd.total_web_profit) AS avg_web_profit,
+        AVG(sd.total_store_profit) AS avg_store_profit
+    FROM customer_address AS cb
+    LEFT JOIN customer AS c ON cb.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN CustomerReturns AS cr ON c.c_customer_sk = cr.c_customer_sk
+    LEFT JOIN IncomeBandData AS ab ON c.c_current_hdemo_sk = ab.hd_demo_sk
+    LEFT JOIN SalesData AS sd ON sd.ws_ship_date_sk = c.c_first_sales_date_sk
+    WHERE cb.ca_country IS NOT NULL
+    GROUP BY cb.ca_country
+)
+SELECT 
+    fr.ca_country,
+    fr.active_customers,
+    fr.total_returned_amount,
+    fr.income_band_customer_count,
+    COALESCE(fr.avg_web_profit, 0) AS avg_web_profit,
+    COALESCE(fr.avg_store_profit, 0) AS avg_store_profit
+FROM FinalReport AS fr
+WHERE fr.active_customers > 10
+ORDER BY fr.active_customers DESC, fr.total_returned_amount DESC;

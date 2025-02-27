@@ -1,0 +1,54 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE NULL END) AS UpVotesCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE NULL END) AS DownVotesCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER(PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.Body,
+    ps.UserId,
+    ups.DisplayName AS UserDisplayName,
+    ups.UpVotesCount,
+    ups.DownVotesCount,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+    COALESCE(MAX(ph.CreationDate), 'No history') AS LastHistoryDate,
+    STRING_AGG(pt.Name, ', ') AS PostTypesList
+FROM 
+    Posts p
+JOIN 
+    Users ps ON p.OwnerUserId = ps.Id
+JOIN 
+    UserVoteStats ups ON ps.Id = ups.UserId
+LEFT JOIN 
+    RecentPostHistory ph ON p.Id = ph.PostId AND ph.rn = 1
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+WHERE 
+    p.ViewCount > 1000
+GROUP BY 
+    p.Id, p.Title, p.Body, ps.UserId, ups.DisplayName, ups.UpVotesCount, ups.DownVotesCount
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 50;

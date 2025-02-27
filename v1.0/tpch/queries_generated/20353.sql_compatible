@@ -1,0 +1,73 @@
+
+WITH RegionalSupplierSales AS (
+    SELECT 
+        r.r_name,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        r.r_name IS NOT NULL 
+        AND s.s_acctbal IS NOT NULL 
+        AND o.o_orderstatus NOT IN ('F', 'O')
+    GROUP BY 
+        r.r_name, s.s_name
+), SalesComparison AS (
+    SELECT 
+        r_name,
+        total_sales,
+        order_count,
+        MAX(CASE WHEN sales_rank = 1 THEN total_sales END) OVER (PARTITION BY r_name) AS max_sales_in_region
+    FROM 
+        RegionalSupplierSales
+)
+SELECT 
+    r_name,
+    total_sales,
+    order_count,
+    COALESCE(total_sales, 0) - COALESCE(max_sales_in_region, 0) AS sales_difference,
+    CASE 
+        WHEN total_sales IS NULL THEN 'No sales'
+        WHEN total_sales < 0 THEN 'Negative sales'
+        ELSE 'Positive sales'
+    END AS sales_classification
+FROM 
+    SalesComparison
+WHERE 
+    total_sales IS NOT NULL
+    AND order_count > 2
+ORDER BY 
+    r_name ASC, sales_difference DESC
+LIMIT 100 OFFSET (SELECT COUNT(*) FROM region) / 2
+UNION ALL
+SELECT 
+    r.r_name,
+    0 AS total_sales,
+    0 AS order_count,
+    0 AS sales_difference,
+    'No sales' AS sales_classification
+FROM 
+    region r
+WHERE 
+    r.r_name NOT IN (SELECT DISTINCT r_name FROM SalesComparison)
+AND EXISTS (
+    SELECT 1
+    FROM supplier s 
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)
+)
+ORDER BY 
+    r_name;

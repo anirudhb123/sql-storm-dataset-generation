@@ -1,0 +1,62 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+),
+HighValueOrders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_orderdate,
+        r.o_totalprice,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_lineitem_value
+    FROM 
+        RankedOrders r
+    LEFT JOIN 
+        lineitem l ON r.o_orderkey = l.l_orderkey
+    WHERE 
+        r.rn <= 10 
+    GROUP BY 
+        r.o_orderkey, r.o_orderdate, r.o_totalprice
+),
+SupplierAnalytics AS (
+    SELECT 
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name, s.s_acctbal
+)
+SELECT 
+    C.c_name, 
+    C.c_address, 
+    COALESCE(H.total_lineitem_value, 0) AS total_order_value,
+    S.s_name AS supplier_name,
+    S.total_available_qty,
+    S.avg_supply_cost
+FROM 
+    customer C
+LEFT JOIN 
+    HighValueOrders H ON C.c_custkey = (
+        SELECT o.o_custkey 
+        FROM orders o 
+        WHERE o.o_orderkey = H.o_orderkey
+    )
+LEFT JOIN 
+    SupplierAnalytics S ON S.s_acctbal > C.c_acctbal
+WHERE 
+    C.c_mktsegment = 'BUILDING' 
+    AND (H.total_lineitem_value > 10000 OR H.total_order_value IS NULL)
+ORDER BY 
+    C.c_name ASC, 
+    total_order_value DESC;

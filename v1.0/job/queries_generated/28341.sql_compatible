@@ -1,0 +1,60 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS title_id,
+        a.title,
+        a.production_year,
+        a.kind_id,
+        RANK() OVER (PARTITION BY a.kind_id ORDER BY a.production_year DESC) AS year_rank
+    FROM aka_title a
+    WHERE a.production_year IS NOT NULL
+),
+PopularKeywords AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id, k.keyword
+    HAVING COUNT(mk.keyword_id) > 5
+),
+TopCast AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        COUNT(c.role_id) AS role_count,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY COUNT(c.role_id) DESC) AS cast_rank
+    FROM cast_info c
+    GROUP BY c.movie_id, c.person_id
+)
+SELECT 
+    rm.title_id,
+    rm.title,
+    rm.production_year,
+    pk.keyword,
+    cc.kind,
+    pc.info AS person_info,
+    rt.role AS role,
+    tk.cast_rank
+FROM RankedMovies rm
+JOIN PopularKeywords pk ON rm.title_id = pk.movie_id
+JOIN movie_info mi ON rm.title_id = mi.movie_id
+JOIN info_type it ON mi.info_type_id = it.id AND it.info = 'Box Office'
+JOIN company_type ct ON mi.info_type_id = ct.id 
+JOIN movie_companies mc ON rm.title_id = mc.movie_id
+JOIN comp_cast_type cc ON mc.company_type_id = cc.id
+LEFT JOIN TopCast tk ON rm.title_id = tk.movie_id
+LEFT JOIN person_info pc ON tk.person_id = pc.person_id
+LEFT JOIN role_type rt ON tk.role_id = rt.id
+WHERE rm.year_rank <= 5 
+GROUP BY 
+    rm.title_id,
+    rm.title,
+    rm.production_year,
+    pk.keyword,
+    cc.kind,
+    pc.info,
+    rt.role,
+    tk.cast_rank
+ORDER BY rm.production_year DESC, pk.keyword_count DESC, tk.cast_rank;

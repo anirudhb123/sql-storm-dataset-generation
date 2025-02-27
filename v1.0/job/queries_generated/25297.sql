@@ -1,0 +1,66 @@
+WITH movie_statistics AS (
+    SELECT
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        ARRAY_AGG(DISTINCT ak.name) AS cast_names,
+        ARRAY_AGG(DISTINCT kw.keyword) AS keywords,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS note_count
+    FROM
+        aka_title a
+    JOIN
+        complete_cast cc ON a.id = cc.movie_id
+    JOIN
+        cast_info c ON cc.subject_id = c.id
+    JOIN
+        aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN
+        keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN
+        movie_info mi ON a.id = mi.movie_id
+    GROUP BY
+        a.id, a.title, a.production_year
+),
+role_distribution AS (
+    SELECT
+        r.role AS role_name,
+        COUNT(ci.id) AS role_count
+    FROM
+        role_type r
+    JOIN
+        cast_info ci ON r.id = ci.role_id
+    GROUP BY
+        r.role
+),
+company_distribution AS (
+    SELECT
+        cn.name AS company_name,
+        COUNT(mc.id) AS movies_produced
+    FROM
+        company_name cn
+    JOIN
+        movie_companies mc ON cn.id = mc.company_id
+    GROUP BY
+        cn.name
+)
+SELECT
+    ms.movie_title,
+    ms.production_year,
+    ms.total_cast,
+    ms.cast_names,
+    ms.keywords,
+    ms.note_count,
+    rd.role_name,
+    rd.role_count,
+    cd.company_name,
+    cd.movies_produced
+FROM
+    movie_statistics ms
+LEFT JOIN
+    role_distribution rd ON ms.total_cast > 10  -- Only movies with a large cast to show role distribution
+LEFT JOIN
+    company_distribution cd ON cd.movies_produced > 5  -- Filter for companies with notable production records
+ORDER BY
+    ms.production_year DESC, ms.total_cast DESC, cd.movies_produced DESC;

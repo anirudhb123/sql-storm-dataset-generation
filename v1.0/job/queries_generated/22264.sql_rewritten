@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_related AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        tc.kind as company_kind,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS cast_with_notes,
+        ARRAY_AGG(DISTINCT a.name) AS aka_names,
+        MAX(m.production_year) OVER (PARTITION BY m.id) AS max_year
+    FROM 
+        aka_title t
+    JOIN 
+        title m ON t.movie_id = m.id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type tc ON mc.company_type_id = tc.id
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        m.production_year IS NOT NULL
+    GROUP BY 
+        m.id, t.title, tc.kind
+    HAVING 
+        COUNT(DISTINCT a.name) > 2 OR MAX(m.production_year) >= 2000
+),
+enhanced_movie_related AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN max_year < 1990 THEN 'Classic'
+            WHEN max_year BETWEEN 1990 AND 2000 THEN '90s Icon'
+            WHEN max_year BETWEEN 2001 AND 2010 THEN 'New Millennium Hit'
+            ELSE 'Contemporary Smash'
+        END AS movie_age_category,
+        ROW_NUMBER() OVER (PARTITION BY company_kind ORDER BY max_year DESC) AS rn
+    FROM 
+        movie_related
+)
+SELECT 
+    emr.movie_id,
+    emr.title,
+    emr.company_kind,
+    emr.keywords,
+    emr.cast_with_notes,
+    emr.aka_names,
+    emr.movie_age_category
+FROM 
+    enhanced_movie_related emr
+WHERE 
+    emr.rn <= 3
+ORDER BY 
+    emr.company_kind, emr.max_year DESC;

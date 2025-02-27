@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        ws.ws_sold_date_sk,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_paid DESC) AS SalesRank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_paid > (SELECT AVG(ws2.ws_net_paid) 
+                           FROM web_sales ws2 
+                           WHERE ws2.ws_item_sk = ws.ws_item_sk)
+),
+HighVolumeCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ws.ws_order_number) AS OrderCount,
+        SUM(ws.ws_quantity) AS TotalQuantity
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year IS NOT NULL
+    GROUP BY 
+        c.c_customer_id
+    HAVING 
+        SUM(ws.ws_quantity) > 100
+),
+StoreSalesSummary AS (
+    SELECT 
+        ss.ss_store_sk,
+        SUM(ss.ss_net_paid) AS TotalStoreSales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS TransactionCount
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.ss_sold_date_sk IN (SELECT d.d_date_sk 
+                                FROM date_dim d 
+                                WHERE d.d_date BETWEEN '2023-01-01' AND '2023-12-31')
+    GROUP BY 
+        ss.ss_store_sk
+)
+SELECT 
+    R.ws_item_sk,
+    R.ws_order_number,
+    R.ws_quantity,
+    R.ws_net_paid,
+    C.c_customer_id,
+    H.OrderCount,
+    H.TotalQuantity,
+    S.ss_store_sk,
+    S.TotalStoreSales,
+    S.TransactionCount
+FROM 
+    RankedSales R
+LEFT JOIN 
+    HighVolumeCustomers H ON R.ws_order_number IN (SELECT ws.ws_order_number 
+                                                    FROM web_sales ws 
+                                                    WHERE ws.ws_item_sk = R.ws_item_sk)
+LEFT JOIN 
+    StoreSalesSummary S ON R.ws_item_sk IN (SELECT cs.cs_item_sk 
+                                            FROM catalog_sales cs 
+                                            WHERE cs.cs_order_number = R.ws_order_number)
+JOIN 
+    customer C ON C.c_customer_sk IS NOT NULL
+WHERE 
+    R.SalesRank = 1
+    AND (S.TotalStoreSales IS NULL OR S.TotalStoreSales > 5000)
+ORDER BY 
+    R.ws_net_paid DESC, 
+    H.TotalQuantity DESC;

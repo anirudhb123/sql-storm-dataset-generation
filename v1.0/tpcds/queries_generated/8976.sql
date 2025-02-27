@@ -1,0 +1,57 @@
+
+WITH demographic_sales AS (
+    SELECT
+        cd.gender,
+        cd.marital_status,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM
+        web_sales ws
+    JOIN customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+        AND dd.d_moy BETWEEN 1 AND 6
+    GROUP BY
+        cd.gender,
+        cd.marital_status
+),
+inventory_summary AS (
+    SELECT
+        i.i_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM
+        inventory inv
+    JOIN item i ON inv.inv_item_sk = i.i_item_sk
+    GROUP BY
+        i.i_item_sk
+),
+top_items AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 20230101 AND 20230630
+    GROUP BY
+        ws.ws_item_sk
+    ORDER BY
+        total_sold DESC
+    LIMIT 10
+)
+
+SELECT
+    ds.gender,
+    ds.marital_status,
+    ds.total_sales,
+    ds.order_count,
+    ti.total_sold,
+    is.total_quantity
+FROM
+    demographic_sales ds
+JOIN top_items ti ON ds.ws_item_sk = ti.ws_item_sk
+JOIN inventory_summary is ON ti.ws_item_sk = is.i_item_sk
+ORDER BY
+    ds.total_sales DESC;

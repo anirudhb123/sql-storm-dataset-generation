@@ -1,0 +1,68 @@
+
+WITH sales_summary AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year >= 2022 AND d.d_year <= 2023)
+    GROUP BY
+        ws.ws_item_sk
+),
+inventory_summary AS (
+    SELECT
+        inv.inv_item_sk,
+        AVG(inv.inv_quantity_on_hand) AS avg_quantity_on_hand,
+        MAX(inv.inv_quantity_on_hand) AS max_quantity_on_hand
+    FROM
+        inventory inv
+    GROUP BY
+        inv.inv_item_sk
+),
+combined_data AS (
+    SELECT
+        ss.ws_item_sk,
+        ss.total_quantity_sold,
+        ss.total_sales,
+        is.avg_quantity_on_hand,
+        is.max_quantity_on_hand,
+        CASE 
+            WHEN is.avg_quantity_on_hand IS NULL THEN 'No Inventory Data'
+            WHEN ss.total_sales > is.avg_quantity_on_hand THEN 'Above Average'
+            ELSE 'Below Average'
+        END AS sales_performance
+    FROM
+        sales_summary ss
+    LEFT JOIN
+        inventory_summary is ON ss.ws_item_sk = is.inv_item_sk
+)
+SELECT
+    c.c_customer_id,
+    SUM(cd.cd_credit_rating) AS total_credit_score,
+    MIN(cd.cd_marital_status) AS marital_status,
+    SUM(cd.cd_dep_count) FILTER (WHERE cd.cd_gender = 'F') AS female_dependents,
+    COALESCE(MAX(cd.cd_dep_college_count), 0) AS max_college_dependents,
+    d.d_day_name,
+    cd.total_quantity_sold,
+    cd.sales_performance
+FROM
+    customer c
+JOIN
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN
+    combined_data cd ON cd.ws_item_sk IN (SELECT inv_inv_item_sk FROM inventory)
+JOIN
+    date_dim d ON d.d_date_sk IN (SELECT MIN(dt.d_date_sk) FROM date_dim dt WHERE dt.d_current_month = 'Y')
+GROUP BY
+    c.c_customer_id,
+    d.d_day_name,
+    cd.total_quantity_sold,
+    cd.sales_performance
+HAVING
+    COUNT(*) > (SELECT COUNT(*) * 0.25 FROM customer_demographics)
+ORDER BY
+    total_credit_score DESC,
+    female_dependents DESC;

@@ -1,0 +1,66 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank_per_region
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        pt.p_type
+    FROM 
+        partsupp ps
+    JOIN 
+        part pt ON ps.ps_partkey = pt.p_partkey
+    GROUP BY 
+        ps.ps_partkey, pt.p_type
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        COUNT(o.o_orderkey) > 0
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT r.regionkey) AS total_nations,
+    SUM(COALESCE(c.total_spent, 0)) AS total_customer_spending,
+    MAX(pt.p_size) AS max_part_size,
+    STRING_AGG(DISTINCT s.s_name || '|' || s.s_acctbal, ', ') AS top_suppliers,
+    MAX(CASE WHEN sa.total_avail_qty IS NULL THEN 'N/A' ELSE sa.total_avail_qty END) AS max_avail_qty,
+    ROUND(AVG(CASE WHEN rank_per_region <= 3 THEN s_acctbal END), 2) AS avg_top_supplier_acctbal
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = c.c_custkey
+LEFT JOIN 
+    RankedSuppliers s ON n.n_regionkey = s.rank_per_region
+INNER JOIN 
+    SupplierAvailability sa ON sa.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10)
+WHERE 
+    c.c_acctbal IS NOT NULL OR c.c_mktsegment <> 'PUBLIC'
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT n.n_nationkey) > 1
+ORDER BY 
+    total_nations DESC, total_customer_spending DESC;

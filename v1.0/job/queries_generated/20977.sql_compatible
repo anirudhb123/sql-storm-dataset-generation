@@ -1,0 +1,77 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS titles_per_year
+    FROM 
+        aka_title t
+),
+ActorInMovies AS (
+    SELECT 
+        ka.person_id,
+        ka.name,
+        ka.name_pcode_cf,
+        c.movie_id,
+        t.title,
+        COALESCE(m.info, 'No Info Available') AS movie_info,
+        CASE 
+            WHEN t.production_year IS NULL THEN 'Unknown Year' 
+            ELSE CONCAT('Year: ', t.production_year) 
+        END AS year_info
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info c ON ka.person_id = c.person_id
+    JOIN 
+        aka_title t ON t.id = c.movie_id
+    LEFT JOIN 
+        movie_info m ON m.movie_id = t.id AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+),
+MoviesWithActors AS (
+    SELECT 
+        at.person_id,
+        at.name,
+        at.title,
+        at.production_year,
+        at.movie_info,
+        MAX(CASE WHEN at.title IS NOT NULL THEN at.production_year ELSE NULL END) OVER (PARTITION BY at.person_id) AS last_movie_year,
+        SUM(CASE WHEN at.title IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY at.person_id) AS total_movies,
+        COALESCE(ROW_NUMBER() OVER (PARTITION BY at.person_id ORDER BY at.title), 0) AS movie_rank
+    FROM 
+        ActorInMovies at
+),
+DistinctMovies AS (
+    SELECT DISTINCT 
+        production_year
+    FROM 
+        aka_title
+    WHERE 
+        production_year IS NOT NULL
+)
+SELECT 
+    ma.name,
+    ma.production_year,
+    ma.title,
+    ma.movie_info,
+    ma.last_movie_year,
+    ma.total_movies,
+    dt.production_year AS distinct_years,
+    CASE 
+        WHEN ma.movie_rank > 1 THEN 'Appeared in multiple movies'
+        ELSE 'Only appeared in one movie'
+    END AS movie_status,
+    CASE 
+        WHEN ma.title IS NULL THEN 'N/A'
+        ELSE ma.title
+    END AS final_title
+FROM 
+    MoviesWithActors ma
+LEFT JOIN 
+    DistinctMovies dt ON ma.production_year = dt.production_year
+WHERE 
+    (ma.total_movies > 1 OR ma.last_movie_year < 2010) 
+    AND (ma.production_year IS NULL OR ma.production_year > 1950)
+ORDER BY 
+    ma.name, ma.production_year DESC;

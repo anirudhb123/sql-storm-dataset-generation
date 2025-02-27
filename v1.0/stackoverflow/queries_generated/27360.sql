@@ -1,0 +1,45 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS RankByScore,
+        STRING_AGG(CONCAT(U.DisplayName, ' (', p.Title, ')'), '; ') WITHIN GROUP (ORDER BY U.DisplayName) AS UserContributions
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Tags, p.Title, p.CreationDate, p.ViewCount, p.Score, U.DisplayName
+),
+TagStatistics AS (
+    SELECT 
+        Tags,
+        COUNT(*) AS QuestionCount,
+        SUM(ViewCount) AS TotalViews,
+        AVG(Score) AS AvgScore
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByScore <= 5 -- only top 5 questions per tag
+    GROUP BY 
+        Tags
+)
+SELECT 
+    ts.Tags,
+    ts.QuestionCount,
+    ts.TotalViews,
+    ts.AvgScore,
+    rp.UserContributions
+FROM 
+    TagStatistics ts
+LEFT JOIN 
+    (SELECT DISTINCT Tags, UserContributions FROM RankedPosts) rp ON ts.Tags = rp.Tags
+ORDER BY 
+    ts.AvgScore DESC, ts.TotalViews DESC;

@@ -1,0 +1,50 @@
+
+WITH RECURSIVE RankedOrders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice,
+           RANK() OVER (PARTITION BY o_custkey ORDER BY o_totalprice DESC) AS rank
+    FROM orders
+),
+SupplierPartCost AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerDetails AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           COALESCE(NULLIF(c.c_comment, ''), 'No comments') AS comment_status
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+ProcessLineItems AS (
+    SELECT l.*, 
+           CASE 
+               WHEN l_discount > 0.2 THEN 'High Discount'
+               WHEN l_discount BETWEEN 0.1 AND 0.2 THEN 'Medium Discount'
+               ELSE 'No Discount' 
+           END AS discount_category,
+           LEAD(l_extendedprice) OVER (PARTITION BY l_orderkey ORDER BY l_linenumber) AS next_price
+    FROM lineitem l
+),
+NationRegionJoin AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT c.c_name, 
+       SUM(COALESCE(l.l_extendedprice, 0) * (1 - l.l_discount)) AS total_revenue,
+       COUNT(DISTINCT o.o_orderkey) AS orders_count,
+       l.discount_category,
+       CASE 
+           WHEN SUM(COALESCE(l.l_extendedprice, 0)) > 10000 THEN 'High Revenue Customer'
+           ELSE 'Regular Customer' 
+       END AS customer_type,
+       (SELECT COUNT(*) FROM SupplierPartCost spc WHERE spc.total_cost > 5000) AS high_cost_parts
+FROM CustomerDetails c
+JOIN RankedOrders o ON c.c_custkey = o.o_custkey
+LEFT JOIN ProcessLineItems l ON o.o_orderkey = l.l_orderkey
+INNER JOIN NationRegionJoin nr ON c.c_nationkey = nr.n_nationkey
+WHERE nr.r_name IS NOT NULL
+GROUP BY c.c_name, l.discount_category
+HAVING SUM(COALESCE(l.l_extendedprice, 0)) > 1000
+ORDER BY total_revenue DESC
+LIMIT 10 OFFSET 2;

@@ -1,0 +1,50 @@
+
+WITH RECURSIVE date_series AS (
+    SELECT MIN(d_date) AS d_date
+    FROM date_dim
+    UNION ALL
+    SELECT DATE_ADD(d_date, INTERVAL 1 DAY)
+    FROM date_series
+    WHERE d_date < (SELECT MAX(d_date) FROM date_dim)
+),
+customer_summary AS (
+    SELECT 
+        c_customer_sk,
+        SUM(COALESCE(NULLIF(ws_net_profit, 0), 0)) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        COUNT(DISTINCT c_current_addr_sk) AS unique_addresses
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c_customer_sk
+),
+income_bracket AS (
+    SELECT 
+        cd_demo_sk,
+        CASE 
+            WHEN cd_purchase_estimate < 50000 THEN 'Low'
+            WHEN cd_purchase_estimate BETWEEN 50000 AND 100000 THEN 'Medium'
+            ELSE 'High'
+        END AS income_group
+    FROM customer_demographics 
+    WHERE cd_purchase_estimate IS NOT NULL
+),
+daily_sales AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.ws_net_paid) AS daily_revenue
+    FROM date_dim d
+    JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_date
+)
+SELECT 
+    ds.d_date,
+    COALESCE(cs.total_profit, 0) AS customer_profit,
+    COALESCE(isb.income_group, 'Unknown') AS income_group,
+    ds.daily_revenue
+FROM date_series ds
+LEFT JOIN customer_summary cs ON cs.c_customer_sk IN (SELECT c_customer_sk FROM customer)
+LEFT JOIN income_bracket isb ON isb.cd_demo_sk IN (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_current_cdemo_sk IS NOT NULL)
+LEFT JOIN daily_sales dsales ON ds.d_date = dsales.d_date
+WHERE ds.d_date = CURDATE() OR ds.d_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+ORDER BY ds.d_date DESC
+LIMIT 100;

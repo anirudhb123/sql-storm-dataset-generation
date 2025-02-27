@@ -1,0 +1,55 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS actor_name,
+        t.id AS title_id,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+),
+FilteredTitles AS (
+    SELECT 
+        actor_name,
+        movie_title,
+        production_year
+    FROM 
+        RankedTitles
+    WHERE 
+        rn = 1 
+),
+DistinctTitles AS (
+    SELECT DISTINCT 
+        movie_title,
+        production_year
+    FROM 
+        FilteredTitles
+),
+CountedTitles AS (
+    SELECT 
+        production_year,
+        COUNT(*) AS title_count
+    FROM 
+        DistinctTitles
+    GROUP BY 
+        production_year
+)
+SELECT 
+    ct.production_year,
+    ct.title_count,
+    g.kind AS genre
+FROM 
+    CountedTitles ct
+LEFT JOIN 
+    movie_info mi ON ct.production_year = mi.info
+LEFT JOIN 
+    kind_type g ON mi.info_type_id = g.id
+WHERE 
+    ct.title_count > 5 
+ORDER BY 
+    ct.production_year DESC;

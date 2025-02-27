@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM
+        Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Posts a ON p.Id = a.ParentId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE
+        p.PostTypeId = 1  -- Considering only Questions
+    GROUP BY
+        p.Id, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.AnswerCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM
+        RankedPosts rp
+    WHERE
+        rp.rn <= 10  -- Limit to latest 10 questions
+)
+SELECT
+    fp.Title,
+    fp.ViewCount,
+    fp.CommentCount,
+    fp.AnswerCount,
+    fp.UpVotes,
+    fp.DownVotes,
+    CASE
+        WHEN fp.UpVotes > fp.DownVotes THEN 'Positive'
+        WHEN fp.DownVotes > fp.UpVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS Sentiment,
+    CONCAT(fp.OwnerDisplayName, ' - Posted on: ', TO_CHAR(fp.CreationDate, 'YYYY-MM-DD HH24:MI:SS')) AS AuthorInfo
+FROM
+    FilteredPosts fp
+ORDER BY
+    fp.CreationDate DESC;

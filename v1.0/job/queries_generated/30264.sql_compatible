@@ -1,0 +1,71 @@
+
+WITH RECURSIVE ActorMovies AS (
+    SELECT
+        c.person_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM
+        cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    GROUP BY
+        c.person_id, a.name
+),
+
+MovieInfo AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        COALESCE(SUM(CASE WHEN mi.info_type_id = it.id THEN 1 ELSE 0 END), 0) AS info_count
+    FROM
+        aka_title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN info_type it ON mi.info_type_id = it.id
+    GROUP BY
+        m.id, m.title
+),
+
+TopActors AS (
+    SELECT
+        actor_name,
+        movie_count,
+        RANK() OVER (ORDER BY movie_count DESC) AS rank
+    FROM
+        ActorMovies
+    WHERE
+        movie_count > 5
+),
+
+CharNames AS (
+    SELECT
+        c.name AS char_name,
+        k.keyword AS keyword
+    FROM
+        char_name c
+    INNER JOIN movie_keyword mk ON c.imdb_id = mk.keyword_id
+    INNER JOIN keyword k ON mk.keyword_id = k.id
+)
+
+SELECT
+    t.title,
+    t.production_year,
+    ta.actor_name,
+    mi.info_count,
+    STRING_AGG(DISTINCT cn.char_name, ', ') AS character_names,
+    CASE 
+        WHEN mi.info_count >= 10 THEN 'Extensive Information'
+        WHEN mi.info_count BETWEEN 5 AND 9 THEN 'Moderate Information'
+        ELSE 'Minimal Information'
+    END AS info_level
+FROM
+    aka_title t
+LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+LEFT JOIN TopActors ta ON cc.subject_id = ta.actor_name
+LEFT JOIN MovieInfo mi ON t.id = mi.movie_id
+LEFT JOIN CharNames cn ON cn.keyword = t.title
+WHERE
+    t.production_year IS NOT NULL
+    AND t.production_year > 2000
+GROUP BY
+    t.title, t.production_year, ta.actor_name, mi.info_count
+ORDER BY
+    mi.info_count DESC, t.title;

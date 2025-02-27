@@ -1,0 +1,57 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey
+),
+SupplierPart AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    GROUP BY 
+        s.s_suppkey
+),
+TopCustomers AS (
+    SELECT 
+        r.r_name,
+        c.c_name,
+        sales.total_sales,
+        sales.sales_rank
+    FROM 
+        SalesCTE sales
+    JOIN 
+        nation n ON sales.c_custkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        sales.sales_rank <= 10
+)
+SELECT 
+    tc.r_name,
+    tc.c_name,
+    COALESCE(sp.avg_supply_cost, 0) AS avg_supply_cost,
+    CASE 
+        WHEN tc.total_sales IS NULL THEN 'No Sales'
+        ELSE CAST(tc.total_sales AS VARCHAR)
+    END AS sales_info
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    SupplierPart sp ON tc.c_name IN (SELECT DISTINCT c.c_name FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'Canada'))
+ORDER BY 
+    tc.r_name, tc.total_sales DESC;

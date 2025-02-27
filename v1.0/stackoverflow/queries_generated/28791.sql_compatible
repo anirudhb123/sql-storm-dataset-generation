@@ -1,0 +1,63 @@
+
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.TagName) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::text[])
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 5
+),
+PostEditHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5)
+)
+SELECT 
+    t.DisplayName AS TopUser,
+    t.Reputation,
+    P.Id AS PostId,
+    P.Title,
+    tc.TagCount,
+    COUNT(e.EditRank) AS TotalEdits,
+    MAX(e.CreationDate) AS LastEditDate,
+    SUM(CASE WHEN e.Comment IS NOT NULL THEN 1 ELSE 0 END) AS CommentsOnEdits
+FROM 
+    TopUsers t
+JOIN 
+    Posts P ON t.UserId = P.OwnerUserId
+JOIN 
+    PostTagCounts tc ON tc.PostId = P.Id
+LEFT JOIN 
+    PostEditHistory e ON e.PostId = P.Id
+GROUP BY 
+    t.DisplayName, t.Reputation, P.Id, P.Title, tc.TagCount
+ORDER BY 
+    t.Reputation DESC, TotalEdits DESC;

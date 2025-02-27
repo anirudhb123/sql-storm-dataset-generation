@@ -1,0 +1,81 @@
+WITH RECURSIVE movie_hierarchy AS (
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1
+    FROM 
+        aka_title AS e
+    JOIN 
+        movie_hierarchy AS mh ON e.episode_of_id = mh.movie_id
+),
+
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_order,
+        COALESCE(ci.note, 'No notes available') AS notes
+    FROM 
+        cast_info AS ci
+    JOIN 
+        aka_name AS ak ON ci.person_id = ak.person_id
+),
+
+movie_summary AS (
+    SELECT 
+        m.production_year,
+        COUNT(DISTINCT m.id) AS total_movies,
+        AVG(mr.rating) AS average_rating
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        movie_info AS mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    LEFT JOIN 
+        (SELECT movie_id, CAST(info AS numeric) AS rating FROM movie_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'rating')) AS mr
+    ON 
+        m.id = mr.movie_id
+    GROUP BY 
+        m.production_year
+)
+
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    cd.actor_name,
+    cd.notes,
+    ms.total_movies,
+    ms.average_rating,
+    CASE 
+        WHEN ms.average_rating IS NOT NULL THEN 
+            CASE 
+                WHEN ms.average_rating > 7 THEN 'Highly Rated'
+                WHEN ms.average_rating BETWEEN 5 AND 7 THEN 'Moderately Rated'
+                ELSE 'Low Rated'
+            END
+        ELSE 
+            'No Rating Available'
+    END AS rating_category
+FROM 
+    movie_hierarchy AS mh
+LEFT JOIN 
+    cast_details AS cd ON mh.movie_id = cd.movie_id
+LEFT JOIN 
+    movie_summary AS ms ON mh.production_year = ms.production_year
+ORDER BY 
+    mh.production_year DESC, cd.actor_order;

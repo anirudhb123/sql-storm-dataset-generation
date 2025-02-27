@@ -1,0 +1,89 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY SUM(COALESCE(p.ViewCount, 0)) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        TotalViews,
+        Upvotes,
+        Downvotes
+    FROM 
+        UserActivity
+    WHERE 
+        Rank <= 10
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        pt.Name AS PostType,
+        ph.UserDisplayName AS LastEditor,
+        ph.CreationDate AS LastEditDate,
+        ph.Comment AS EditComment,
+        COALESCE(p.AcceptedAnswerId IS NOT NULL, 'No') AS IsAccepted
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.Score > 0
+    AND 
+        ph.PostHistoryTypeId IN (4, 5) 
+    ORDER BY 
+        p.CreationDate DESC
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    pu.PostId,
+    pu.Title,
+    pu.CreationDate,
+    pu.PostType,
+    pu.LastEditor,
+    pu.LastEditDate,
+    pu.EditComment,
+    pu.IsAccepted,
+    CASE 
+        WHEN pu.IsAccepted = 'Yes' THEN 'This post has an accepted answer.'
+        ELSE 'This post does not have an accepted answer.'
+    END AS AcceptanceStatus,
+    STRING_AGG(DISTINCT ph.Comment, '; ') AS HistoryComments
+FROM 
+    TopUsers tu
+JOIN 
+    PostDetails pu ON tu.UserId = pu.LastEditor
+LEFT JOIN 
+    PostHistory ph ON pu.PostId = ph.PostId
+WHERE 
+    pu.LastEditDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+GROUP BY 
+    tu.DisplayName, tu.Reputation, pu.PostId, pu.Title, pu.CreationDate, 
+    pu.PostType, pu.LastEditor, pu.LastEditDate, pu.EditComment, pu.IsAccepted
+HAVING 
+    tu.Reputation BETWEEN 1000 AND 5000 
+ORDER BY 
+    tu.Reputation DESC, pu.CreationDate DESC;

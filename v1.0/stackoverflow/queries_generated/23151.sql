@@ -1,0 +1,90 @@
+WITH BasePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+      AND 
+        p.ViewCount IS NOT NULL
+),
+
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        vt.Name AS VoteType,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId, vt.Name
+),
+
+PostDetails AS (
+    SELECT 
+        bp.PostId,
+        bp.Title,
+        bp.CreationDate,
+        bp.ViewCount,
+        bp.Score,
+        bp.OwnerDisplayName,
+        bp.PostTypeId,
+        bp.AcceptedAnswerId,
+        rv.VoteCount AS UpvoteCount,
+        COALESCE((SELECT COUNT(*) 
+                  FROM Comments c 
+                  WHERE c.PostId = bp.PostId), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) 
+                  FROM Badges b 
+                  WHERE b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = bp.PostId)), 0) AS BadgeCount
+    FROM 
+        BasePosts bp
+    LEFT JOIN 
+        RecentVotes rv ON bp.PostId = rv.PostId
+),
+
+FinalReport AS (
+    SELECT 
+        pd.*,
+        CASE 
+            WHEN pd.PostTypeId = 1 THEN 'Question'
+            WHEN pd.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostType,
+        CASE 
+            WHEN pd.Score >= 10 THEN 'High Score'
+            WHEN pd.Score BETWEEN 5 AND 9 THEN 'Medium Score'
+            ELSE 'Low Score'
+        END AS ScoreCategory
+    FROM 
+        PostDetails pd
+)
+
+SELECT 
+    fr.*,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    FinalReport fr
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            DISTINCT unnest(string_to_array((SELECT Tags FROM Posts WHERE Id = fr.PostId), '><')) AS TagName
+    ) t ON TRUE
+GROUP BY 
+    fr.PostId, fr.Title, fr.CreationDate, fr.ViewCount, fr.Score, fr.OwnerDisplayName, fr.PostTypeId, fr.AcceptedAnswerId, fr.UpvoteCount, fr.CommentCount, fr.BadgeCount, fr.PostType, fr.ScoreCategory
+ORDER BY 
+    fr.ViewCount DESC,
+    fr.CreationDate DESC
+LIMIT 100;

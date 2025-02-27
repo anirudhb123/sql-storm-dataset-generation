@@ -1,0 +1,66 @@
+WITH TagInfo AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        COUNT(p.Id) AS PostCount,
+        STRING_AGG(DISTINCT p.Tags, ', ') AS AssociatedTags
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName, p.OwnerUserId, p.Title, p.CreationDate
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id AND v.CreationDate >= '2022-01-01'  -- only counting recent votes
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.PostHistoryTypeId,
+        COUNT(ph.Id) AS HistoryCount,
+        STRING_AGG(ph.Comment, '; ') AS Comments
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    GROUP BY 
+        p.Id, ph.PostHistoryTypeId
+)
+SELECT 
+    ti.TagName,
+    ti.PostCount,
+    u.DisplayName,
+    u.Reputation,
+    u.BadgeCount,
+    u.TotalBounties,
+    pha.PostId,
+    pha.HistoryCount,
+    pha.Comments
+FROM 
+    TagInfo ti
+JOIN 
+    UserReputation u ON u.UserId = ti.OwnerUserId
+JOIN 
+    PostHistoryAnalysis pha ON pha.PostId IN (SELECT Id FROM Posts p WHERE p.Tags LIKE '%' || ti.TagName || '%')
+WHERE 
+    ti.PostCount > 0
+ORDER BY 
+    ti.PostCount DESC, 
+    u.Reputation DESC;

@@ -1,0 +1,20 @@
+WITH RECURSIVE supply_chain AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal > 1000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN supply_chain sc ON s.s_suppkey <> sc.s_suppkey AND ps.ps_availqty < sc.ps_availqty
+)
+SELECT sc.s_suppkey, sc.s_name, SUM(sc.ps_supplycost) AS total_supply_cost
+FROM supply_chain sc
+GROUP BY sc.s_suppkey, sc.s_name
+ORDER BY total_supply_cost DESC
+LIMIT 10;

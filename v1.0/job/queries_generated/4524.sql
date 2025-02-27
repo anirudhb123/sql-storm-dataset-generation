@@ -1,0 +1,55 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title AS a
+    LEFT JOIN 
+        cast_info AS c ON a.id = c.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+top_movies AS (
+    SELECT 
+        r.title, 
+        r.production_year, 
+        r.cast_count 
+    FROM 
+        ranked_movies AS r
+    WHERE 
+        r.rank <= 5
+),
+movie_details AS (
+    SELECT
+        m.title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        ARRAY_AGG(DISTINCT ci.role_id) FILTER (WHERE ci.role_id IS NOT NULL) AS roles
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        movie_keyword AS mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        cast_info AS ci ON m.id = ci.movie_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.title, m.production_year
+)
+SELECT 
+    tm.title, 
+    tm.production_year, 
+    tm.cast_count, 
+    md.keyword AS movie_keyword, 
+    CASE 
+        WHEN ARRAY_LENGTH(md.roles, 1) > 0 THEN 'Has Roles' 
+        ELSE 'No Roles' 
+    END AS role_status
+FROM 
+    top_movies AS tm
+JOIN 
+    movie_details AS md ON tm.title = md.title AND tm.production_year = md.production_year
+ORDER BY 
+    tm.production_year DESC, tm.cast_count DESC;

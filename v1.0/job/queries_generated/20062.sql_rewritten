@@ -1,0 +1,79 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        at.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS YearRank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+DistinctActors AS (
+    SELECT 
+        DISTINCT ak.name AS actor_name,
+        ak.id AS actor_id
+    FROM 
+        aka_name ak
+    INNER JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        mt.movie_id
+),
+CompanyMovieDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_type_id) AS company_type_count
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+FinalSummary AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        d.actor_name,
+        kw.keywords,
+        cm.company_names,
+        cm.company_type_count,
+        ROW_NUMBER() OVER (ORDER BY at.production_year DESC) AS MovieRank
+    FROM 
+        RankedTitles at
+    LEFT JOIN 
+        DistinctActors d ON EXISTS (SELECT 1 FROM cast_info ci WHERE ci.movie_id IN (SELECT mt.id FROM aka_title mt WHERE mt.production_year = at.production_year) AND ci.person_id = d.actor_id)
+    LEFT JOIN 
+        MoviesWithKeywords kw ON kw.movie_id = at.id
+    LEFT JOIN 
+        CompanyMovieDetails cm ON cm.movie_id = at.id
+    WHERE 
+        at.YearRank <= 5 
+)
+SELECT 
+    movieRank,
+    title,
+    production_year,
+    COALESCE(actor_name, 'Unknown Actor') AS actor_name,
+    COALESCE(keywords, 'No Keywords') AS keywords,
+    COALESCE(company_names, 'No Companies') AS company_names,
+    COALESCE(company_type_count, 0) AS company_type_count
+FROM 
+    FinalSummary
+WHERE 
+    (production_year IS NOT NULL AND production_year > 2000)
+ORDER BY 
+    production_year DESC, MovieRank;

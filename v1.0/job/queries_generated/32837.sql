@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::integer AS parent_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.movie_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    COUNT(DISTINCT ci.person_id) AS num_cast_members,
+    STRING_AGG(DISTINCT ak.name, ', ') AS cast_names,
+    COALESCE(PHONE_NUMBERS.phone_numbers, 'No Phone Numbers') AS phone_numbers,
+    CASE 
+        WHEN mh.production_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END AS movie_type
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN LATERAL 
+    (SELECT 
+        ARRAY_AGG(DISTINCT pi.info) AS phone_numbers
+     FROM 
+        person_info pi 
+     WHERE 
+        pi.info_type_id = (SELECT id FROM info_type WHERE info = 'phone')) AS PHONE_NUMBERS ON TRUE
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level, PHONE_NUMBERS.phone_numbers
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY 
+    mh.production_year DESC, mh.level ASC;

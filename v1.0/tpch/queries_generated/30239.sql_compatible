@@ -1,0 +1,38 @@
+
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY total_cost DESC
+    LIMIT 5
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1998-10-01' - INTERVAL '3 months'
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+),
+NationsWithComments AS (
+    SELECT n.n_nationkey, n.n_name, n.n_comment
+    FROM nation n
+    WHERE n.n_comment IS NOT NULL
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    c.c_name AS customer_name,
+    o.o_orderkey,
+    o.o_orderdate,
+    r2.total_revenue,
+    COALESCE(ts.total_cost, 0) AS supplier_cost
+FROM region r
+JOIN NationsWithComments n ON n.n_nationkey = r.r_regionkey
+JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN RecentOrders r2 ON r2.o_custkey = c.c_custkey
+LEFT JOIN TopSuppliers ts ON ts.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps JOIN lineitem l ON ps.ps_partkey = l.l_partkey WHERE l.l_orderkey = r2.o_orderkey)
+WHERE r.r_name LIKE 'N%' 
+  AND (c.c_acctbal > 1000 OR ts.total_cost IS NULL)
+ORDER BY region_name, nation_name, customer_name;

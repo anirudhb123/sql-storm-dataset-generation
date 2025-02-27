@@ -1,0 +1,30 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT rs.s_suppkey, rs.s_name, rs.total_supply_value, RANK() OVER (ORDER BY rs.total_supply_value DESC) AS rnk
+    FROM RankedSuppliers rs
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT co.c_custkey, co.c_name, co.total_order_value, RANK() OVER (ORDER BY co.total_order_value DESC) AS rnk
+    FROM CustomerOrders co
+),
+FinalReport AS (
+    SELECT ts.s_suppkey, ts.s_name, ts.total_supply_value, tc.c_custkey, tc.c_name, tc.total_order_value
+    FROM TopSuppliers ts
+    JOIN TopCustomers tc ON ts.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'GERMANY')
+    WHERE ts.rnk <= 10 AND tc.rnk <= 10
+)
+SELECT f.s_name, f.total_supply_value, f.c_name, f.total_order_value
+FROM FinalReport f
+ORDER BY f.total_supply_value DESC, f.total_order_value DESC;

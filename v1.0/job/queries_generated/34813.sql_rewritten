@@ -1,0 +1,50 @@
+WITH RECURSIVE movie_hierarchy AS (
+    
+    SELECT ml.movie_id, ml.linked_movie_id, 1 AS level
+    FROM movie_link ml
+    WHERE ml.movie_id = (SELECT id FROM title WHERE title = 'Inception')
+
+    UNION ALL
+
+    SELECT ml.movie_id, ml.linked_movie_id, mh.level + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.linked_movie_id
+),
+top_companies AS (
+    
+    SELECT mc.company_id, c.name, COUNT(mc.movie_id) AS production_count
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    GROUP BY mc.company_id, c.name
+    ORDER BY production_count DESC
+    LIMIT 5
+),
+cast_summary AS (
+    
+    SELECT m.id AS movie_id, 
+           COUNT(ci.person_id) AS total_cast,
+           STRING_AGG(DISTINCT a.name, ', ') AS actors
+    FROM movie_hierarchy mh
+    JOIN cast_info ci ON ci.movie_id = mh.movie_id
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN title m ON m.id = mh.movie_id
+    GROUP BY m.id
+)
+
+SELECT t.title, 
+       t.production_year,
+       t.kind_id,
+       th.production_count AS top_producer_count,
+       cs.total_cast,
+       cs.actors,
+       COALESCE(mi.info, 'No additional info') AS movie_info,
+       CASE WHEN tk.id IS NOT NULL THEN 'Has Keywords' ELSE 'No Keywords' END AS keyword_info
+FROM title t
+LEFT JOIN top_companies th ON t.id = th.company_id
+LEFT JOIN cast_summary cs ON t.id = cs.movie_id
+LEFT JOIN movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN keyword tk ON mk.keyword_id = tk.id
+WHERE t.production_year >= 2000
+ORDER BY t.production_year DESC, t.title ASC
+LIMIT 10;

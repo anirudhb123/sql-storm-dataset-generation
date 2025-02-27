@@ -1,0 +1,56 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT pt.Name) AS PostTypes,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') tags ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tags
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.Body, p.CreationDate
+),
+RankedPosts AS (
+    SELECT 
+        pd.*,
+        ROW_NUMBER() OVER (ORDER BY pd.UpVotes - pd.DownVotes DESC) AS Rank
+    FROM 
+        PostDetails pd
+)
+SELECT 
+    PostId,
+    Title,
+    Author,
+    UpVotes,
+    DownVotes,
+    CommentCount,
+    Tags,
+    Rank
+FROM 
+    RankedPosts
+WHERE 
+    Rank <= 10
+ORDER BY 
+    Rank;

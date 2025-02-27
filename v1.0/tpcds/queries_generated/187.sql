@@ -1,0 +1,61 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+returns_summary AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt) AS total_returned
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+),
+ranking_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_spent,
+        cs.total_orders,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        COALESCE(rs.total_returned, 0) AS total_returned,
+        (cs.total_spent - COALESCE(rs.total_returned, 0)) AS net_spending
+    FROM 
+        customer_sales cs
+    LEFT JOIN 
+        returns_summary rs ON cs.c_customer_sk = rs.sr_returning_customer_sk
+)
+SELECT 
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.total_spent,
+    rc.total_orders,
+    rc.total_returns,
+    rc.total_returned,
+    rc.net_spending,
+    CASE 
+        WHEN rc.net_spending > 1000 THEN 'High Value'
+        WHEN rc.net_spending BETWEEN 500 AND 1000 THEN 'Moderate Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    ranking_customers rc
+WHERE 
+    rc.sales_rank <= 10
+ORDER BY 
+    rc.net_spending DESC
+LIMIT 10;

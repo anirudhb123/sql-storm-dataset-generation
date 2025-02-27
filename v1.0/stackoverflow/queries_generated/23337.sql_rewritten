@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RN,
+        SUM(v.BountyAmount) FILTER (WHERE v.VoteTypeId = 8) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+
+PostHistoryFiltered AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT CONCAT(ph.UserDisplayName, ': ', ph.Comment)) AS UserComments,
+        MAX(ph.CreationDate) AS LastModifiedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) 
+    GROUP BY 
+        ph.PostId
+),
+
+UserRanking AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBountyEarned
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.VoteTypeId in (2) 
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.CommentCount,
+    ph.UserComments,
+    ph.LastModifiedDate,
+    COALESCE(ur.UserId, -1) AS TopUserId,
+    COALESCE(ur.DisplayName, 'No Top User') AS TopUserDisplayName,
+    COALESCE(ur.BadgeCount, 0) AS BadgeCount,
+    ur.TotalBountyEarned,
+    CASE 
+        WHEN rp.Score > 10 AND rp.TotalBounty > 0 THEN 'Highly Engaging Post'
+        WHEN rp.CommentCount > 5 THEN 'Active Discussion'
+        ELSE 'Needs More Attention'
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryFiltered ph ON rp.PostId = ph.PostId
+LEFT JOIN 
+    UserRanking ur ON rp.PostId = ur.UserId 
+WHERE 
+    rp.RN <= 5
+ORDER BY 
+    rp.CreationDate DESC;

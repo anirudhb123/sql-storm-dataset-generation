@@ -1,0 +1,53 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales
+    FROM web_sales
+    GROUP BY ws_sold_date_sk
+    UNION ALL
+    SELECT 
+        s.ws_sold_date_sk,
+        SUM(s.ws_quantity) AS total_quantity,
+        SUM(s.ws_sales_price) AS total_sales
+    FROM store_sales s
+    JOIN sales_summary ss ON s.ss_ticket_number = ss.ws_sold_date_sk
+    GROUP BY s.ws_sold_date_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        CASE 
+            WHEN cd.cd_marital_status IS NULL THEN 'Unknown'
+            ELSE cd.cd_marital_status 
+        END AS marital_status
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_data AS (
+    SELECT 
+        ss.ws_sold_date_sk,
+        si.ws_bill_customer_sk,
+        SUM(si.ws_net_profit) OVER (PARTITION BY si.ws_bill_customer_sk ORDER BY si.ws_sold_date_sk) AS cumulative_profit,
+        RANK() OVER (PARTITION BY si.ws_bill_customer_sk ORDER BY SUM(si.ws_sales_price) DESC) AS sales_rank
+    FROM web_sales si
+    JOIN sales_summary ss ON si.ws_sold_date_sk = ss.ws_sold_date_sk
+    GROUP BY ss.ws_sold_date_sk, si.ws_bill_customer_sk
+)
+SELECT 
+    ci.full_name,
+    ci.cd_gender,
+    ci.marital_status,
+    sd.ws_sold_date_sk,
+    sd.cumulative_profit,
+    sd.sales_rank
+FROM customer_info ci
+JOIN sales_data sd ON ci.c_customer_sk = sd.ws_bill_customer_sk
+WHERE 
+    (ci.cd_gender = 'F' AND sd.cumulative_profit > (SELECT AVG(cumulative_profit) FROM sales_data))
+    OR (ci.marital_status = 'M' AND sd.cumulative_profit <= (SELECT COALESCE(MAX(cumulative_profit), 0) FROM sales_data WHERE sales_rank <= 10))
+ORDER BY sd.cumulative_profit DESC
+LIMIT 100;

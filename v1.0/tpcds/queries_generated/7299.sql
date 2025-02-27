@@ -1,0 +1,57 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        MAX(ws.ws_sales_price) AS max_sales_price,
+        MIN(ws.ws_sales_price) AS min_sales_price,
+        d.d_year,
+        CASE
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        income_band ib ON cd.cd_purchase_estimate BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, d.d_year, gender, ib.ib_lower_bound, ib.ib_upper_bound
+),
+RankedSales AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY d_year ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        SalesSummary
+)
+SELECT 
+    rs.c_customer_id, 
+    rs.c_first_name, 
+    rs.c_last_name, 
+    rs.total_sales, 
+    rs.order_count, 
+    rs.avg_sales_price, 
+    rs.max_sales_price, 
+    rs.min_sales_price, 
+    rs.year, 
+    rs.gender,
+    CONCAT('[', rs.ib_lower_bound, ' - ', rs.ib_upper_bound, ']') AS income_band
+FROM 
+    RankedSales rs
+WHERE 
+    rs.sales_rank <= 10
+ORDER BY 
+    rs.year, rs.total_sales DESC;

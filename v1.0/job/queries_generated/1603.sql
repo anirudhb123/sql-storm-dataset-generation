@@ -1,0 +1,47 @@
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS rank_year,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY m.id) AS cast_count
+    FROM 
+        aka_title m
+    JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+recent_movies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year, 
+        rank_year, 
+        cast_count
+    FROM 
+        ranked_movies
+    WHERE 
+        production_year >= (SELECT MAX(production_year) - 10 FROM aka_title)
+)
+SELECT 
+    R.*,
+    COALESCE(ki.keyword, 'No Keywords') AS keyword,
+    COUNT(*) OVER() AS total_movies
+FROM 
+    recent_movies R
+LEFT JOIN 
+    movie_keyword mk ON R.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword ki ON mk.keyword_id = ki.id
+WHERE 
+    R.cast_count > (SELECT AVG(cast_count) FROM ranked_movies)
+ORDER BY 
+    R.production_year DESC, R.rank_year
+LIMIT 100;

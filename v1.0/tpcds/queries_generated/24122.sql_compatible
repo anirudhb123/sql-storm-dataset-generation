@@ -1,0 +1,50 @@
+
+WITH CustomerPurchases AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           SUM(COALESCE(ws.ws_net_profit, 0) + COALESCE(cs.cs_net_profit, 0) + COALESCE(ss.ss_net_profit, 0)) AS total_profit
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cp.total_profit,
+           DENSE_RANK() OVER (ORDER BY cp.total_profit DESC) AS customer_rank
+    FROM CustomerPurchases cp
+    JOIN customer c ON cp.c_customer_sk = c.c_customer_sk
+    WHERE cp.total_profit > 1000
+),
+SelectedCustomer AS (
+    SELECT tc.c_customer_sk, 
+           tc.c_first_name, 
+           tc.c_last_name, 
+           tc.total_profit
+    FROM TopCustomers tc
+    WHERE tc.customer_rank = 1
+),
+CustomerDetails AS (
+    SELECT c.c_customer_id,
+           ca.ca_city,
+           ca.ca_state,
+           c.c_email_address,
+           COALESCE(SUBSTRING_INDEX(c.c_email_address, '@', -1), 'N/A') AS domain,
+           RANK() OVER (PARTITION BY ca.ca_state ORDER BY c.c_birth_month, c.c_birth_day) AS birthday_rank
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN SelectedCustomer sc ON sc.c_customer_sk = c.c_customer_sk
+)
+SELECT cd.c_customer_id, 
+       cd.ca_city, 
+       cd.ca_state, 
+       cd.domain, 
+       cd.birthday_rank AS rank_by_birthday,
+       CASE WHEN cd.birthday_rank IS NULL THEN 'No Birthdays' 
+            WHEN cd.birthday_rank % 2 = 0 THEN 'Even Birthday Rank' 
+            ELSE 'Odd Birthday Rank' END AS birthday_comment
+FROM CustomerDetails cd
+WHERE cd.ca_state IN (SELECT DISTINCT ca_state FROM customer_address WHERE ca_country = 'USA')
+  AND (cd.domain NOT LIKE '%example.com' OR cd.domain IS NULL)
+ORDER BY cd.birthday_rank;

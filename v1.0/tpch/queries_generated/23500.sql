@@ -1,0 +1,59 @@
+WITH RecursiveNation AS (
+    SELECT n_nationkey, n_name, n_regionkey, n_comment, 0 AS level
+    FROM nation
+    WHERE n_nationkey = 1
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, n.n_comment, rn.level + 1
+    FROM nation n
+    JOIN RecursiveNation rn ON n.n_regionkey = rn.n_nationkey
+),
+AvailableParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+),
+MaxPriceBySize AS (
+    SELECT p_size, MAX(p_retailprice) AS max_price
+    FROM part
+    GROUP BY p_size
+),
+FilteredSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(total_cost) FROM (
+        SELECT SUM(ps_supplycost * ps_availqty) AS total_cost
+        FROM partsupp ps
+        GROUP BY ps_suppkey) AS T)
+),
+CustomerOrderDetails AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS num_orders,
+           SUM(ol.l_extendedprice * (1 - ol.l_discount)) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem ol ON o.o_orderkey = ol.l_orderkey
+    WHERE ol.l_returnflag = 'N' OR ol.l_returnflag IS NULL
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(ol.l_extendedprice * (1 - ol.l_discount)) > 1000
+),
+FinalSelection AS (
+    SELECT cn.n_name, AVG(cod.total_spent) AS avg_spent, 
+           COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers,
+           COUNT(DISTINCT ap.p_partkey) AS available_parts
+    FROM RecursiveNation cn
+    JOIN CustomerOrderDetails cod ON cn.n_nationkey = cod.c_custkey
+    LEFT JOIN FilteredSuppliers fs ON fs.s_suppkey = cod.c_custkey
+    LEFT JOIN AvailableParts ap ON ap.p_partkey = fs.s_suppkey
+    GROUP BY cn.n_name
+)
+SELECT f.n_name, f.avg_spent, f.num_suppliers, f.available_parts,
+       CASE WHEN f.available_parts > 10 THEN 'Plentiful' 
+            WHEN f.available_parts BETWEEN 5 AND 10 THEN 'Moderate' 
+            ELSE 'Scarce' END AS availability_status
+FROM FinalSelection f
+WHERE f.avg_spent > (SELECT AVG(avg_spent) FROM FinalSelection)
+ORDER BY f.available_parts DESC, f.avg_spent DESC
+LIMIT 100;

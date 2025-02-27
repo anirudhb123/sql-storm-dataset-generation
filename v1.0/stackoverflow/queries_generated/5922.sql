@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 -- Upvotes only
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+TopUserPosts AS (
+    SELECT 
+        rp.OwnerUserId,
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.VoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT t.UserId) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        TopUserPosts t ON u.Id = t.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalBadges,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    COUNT(DISTINCT t.PostId) AS TopPostsCount
+FROM 
+    UserStatistics us
+LEFT JOIN 
+    TopUserPosts t ON us.UserId = t.OwnerUserId
+GROUP BY 
+    us.UserId, us.DisplayName, us.Reputation, us.TotalBadges, us.GoldBadges, us.SilverBadges, us.BronzeBadges
+ORDER BY 
+    us.Reputation DESC, TopPostsCount DESC
+LIMIT 10;

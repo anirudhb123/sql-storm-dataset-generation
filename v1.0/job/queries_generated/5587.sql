@@ -1,0 +1,37 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        AVG(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS female_ratio
+    FROM title t
+    JOIN complete_cast cc ON t.id = cc.movie_id
+    JOIN cast_info ci ON ci.movie_id = cc.movie_id
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN name p ON p.id = a.person_id
+    WHERE t.production_year BETWEEN 2000 AND 2023
+    GROUP BY t.id, t.title, t.production_year
+),
+top_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        actor_count,
+        female_ratio,
+        RANK() OVER (ORDER BY actor_count DESC, female_ratio DESC) AS rank
+    FROM ranked_movies
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    tm.female_ratio,
+    GROUP_CONCAT(DISTINCT cn.name ORDER BY cn.name) AS company_names
+FROM top_movies tm
+JOIN movie_companies mc ON tm.movie_id = mc.movie_id
+JOIN company_name cn ON mc.company_id = cn.id
+WHERE tm.rank <= 10
+GROUP BY tm.movie_id, tm.title, tm.production_year, tm.actor_count, tm.female_ratio
+ORDER BY tm.actor_count DESC;

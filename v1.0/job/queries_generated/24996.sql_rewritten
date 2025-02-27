@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS year_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY a.id) AS total_cast
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+ActorCounts AS (
+    SELECT 
+        ak.person_id,
+        COUNT(DISTINCT mc.movie_id) AS movie_count,
+        MAX(ak.name) AS actor_name
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    JOIN 
+        movie_companies mc ON c.movie_id = mc.movie_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.person_id
+    HAVING 
+        COUNT(DISTINCT mc.movie_id) > 3
+),
+Filtered_Movies AS (
+    SELECT 
+        mv.title,
+        mv.production_year,
+        COALESCE(c.total_cast, 0) AS total_cast,
+        COUNT(DISTINCT a.actor_name) AS featured_actors
+    FROM 
+        RankedMovies mv
+    LEFT JOIN 
+        ActorCounts a ON mv.movie_id = a.movie_count
+    LEFT JOIN 
+        (SELECT 
+            DISTINCT movie_id, COUNT(DISTINCT person_id) AS total_cast
+         FROM 
+            cast_info 
+         GROUP BY 
+            movie_id) c ON mv.movie_id = c.movie_id
+    GROUP BY 
+        mv.title, mv.production_year, c.total_cast
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.total_cast,
+    CASE 
+        WHEN f.featured_actors IS NULL THEN 'No Featured Actors'
+        WHEN f.featured_actors = 0 THEN 'No Actors'
+        ELSE f.featured_actors::text || ' Featured Actors'
+    END AS featured_actor_status,
+    CASE 
+        WHEN f.total_cast = 0 THEN 'No Cast'
+        ELSE 'Casts Present'
+    END AS cast_presence
+FROM 
+    Filtered_Movies f
+WHERE 
+    f.production_year BETWEEN 1960 AND 2020
+ORDER BY 
+    f.production_year DESC, f.title;

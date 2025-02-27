@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+),
+AggregatedSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2022-12-31'
+    GROUP BY l.l_partkey
+),
+RichCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        RANK() OVER (ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal > 10000
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    ps.ps_supplycost,
+    CASE 
+        WHEN a.total_revenue IS NULL THEN 'No Sales'
+        ELSE FORMAT(a.total_revenue, 'C')
+    END AS revenue,
+    COALESCE(rc.order_count, 0) AS total_orders,
+    sh.level
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN AggregatedSales a ON p.p_partkey = a.l_partkey
+LEFT JOIN RichCustomers rc ON rc.c_custkey = (
+    SELECT o.o_custkey
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_partkey = p.p_partkey
+    ORDER BY o.o_orderdate DESC
+    LIMIT 1
+)
+LEFT JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+WHERE p.p_size > 10 AND (p.p_brand LIKE 'BrandA%' OR p.p_brand IS NULL)
+ORDER BY a.total_revenue DESC NULLS LAST, p.p_partkey;

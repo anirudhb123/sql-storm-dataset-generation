@@ -1,0 +1,61 @@
+WITH TagCounts AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><'))) AS TagName,
+        COUNT(*) AS TagFrequency
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        TagFrequency,
+        ROW_NUMBER() OVER (ORDER BY TagFrequency DESC) AS Rank
+    FROM 
+        TagCounts
+    WHERE 
+        TagFrequency > 5 
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.AnswerCount,
+        P.ViewCount,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        T.TagName
+    FROM 
+        Posts P
+        JOIN Users U ON P.OwnerUserId = U.Id
+        JOIN TopTags TT ON TT.TagName = ANY(STRING_TO_ARRAY(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '><'))
+    WHERE 
+        P.PostTypeId = 1 
+),
+PostsWithComments AS (
+    SELECT 
+        PS.*,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount
+    FROM 
+        PostStatistics PS
+        LEFT JOIN Comments C ON PS.PostId = C.PostId
+    GROUP BY 
+        PS.PostId, PS.Title, PS.AnswerCount, PS.ViewCount, PS.CreationDate, PS.OwnerDisplayName, PS.TagName
+)
+SELECT 
+    PostId,
+    Title,
+    AnswerCount,
+    ViewCount,
+    CreationDate,
+    OwnerDisplayName,
+    TagName,
+    CommentCount
+FROM 
+    PostsWithComments
+ORDER BY 
+    ViewCount DESC, AnswerCount DESC
+LIMIT 10;

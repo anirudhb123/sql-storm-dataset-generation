@@ -1,0 +1,47 @@
+
+WITH sales_data AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        SUM(ss_quantity) AS total_quantity,
+        SUM(ss_ext_sales_price) AS total_sales,
+        AVG(ss_sales_price) AS avg_sales_price
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY ss_store_sk, ss_item_sk
+),
+inventory_data AS (
+    SELECT 
+        inv_w.warehouse_sk,
+        inv.inv_item_sk, 
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM inventory inv 
+    JOIN warehouse inv_w ON inv.inv_warehouse_sk = inv_w.warehouse_sk
+    GROUP BY inv_w.warehouse_sk, inv.inv_item_sk
+),
+returns_data AS (
+    SELECT 
+        sr_store_sk,
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amount
+    FROM store_returns
+    WHERE sr_returned_date_sk > 2000
+    GROUP BY sr_store_sk, sr_item_sk
+)
+SELECT 
+    s.ss_store_sk,
+    i.total_inventory,
+    COALESCE(s.total_quantity, 0) AS total_sold,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    i.total_inventory - COALESCE(s.total_quantity, 0) + COALESCE(r.total_returns, 0) AS available_inventory,
+    CASE 
+        WHEN COALESCE(s.total_sales, 0) > 0 THEN (COALESCE(s.total_sales, 0) / NULLIF(i.total_inventory, 0)) 
+        ELSE 0 
+    END AS sales_per_inventory
+FROM sales_data s
+FULL OUTER JOIN inventory_data i ON s.ss_item_sk = i.inv_item_sk 
+FULL OUTER JOIN returns_data r ON s.ss_store_sk = r.sr_store_sk AND s.ss_item_sk = r.sr_item_sk
+WHERE (available_inventory > 0 OR total_sold > 0 OR total_returns > 0)
+ORDER BY total_sales DESC, available_inventory ASC;

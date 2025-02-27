@@ -1,0 +1,49 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT s_store_sk, s_store_name, s_sales_price, 1 AS level
+    FROM store_sales
+    WHERE ss_sold_date_sk = (SELECT MAX(ss_sold_date_sk) FROM store_sales)
+    UNION ALL
+    SELECT sh.s_store_sk, st.s_store_name, sh.s_sales_price * 1.1 AS s_sales_price, sh.level + 1
+    FROM sales_hierarchy sh
+    JOIN store st ON sh.s_store_sk = st.s_store_sk
+    WHERE sh.level < 3
+), 
+total_sales AS (
+    SELECT s_store_sk, SUM(ss_net_paid) AS total_net_paid
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) 
+                                AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY s_store_sk
+),
+top_stores AS (
+    SELECT s_store_sk, s_store_name
+    FROM store
+    WHERE s_state = 'NY'
+    ORDER BY s_number_employees DESC
+    LIMIT 5
+),
+customer_info AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status,
+           cd.cd_purchase_estimate, ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT th.s_store_name AS Store, 
+       SUM(ws.ws_ext_sales_price) AS Total_Web_Sales,
+       COUNT(DISTINCT ci.c_customer_sk) AS Unique_Customers,
+       MAX(ci.cd_purchase_estimate) AS Max_Purchase_Estimate,
+       MIN(ci.cd_purchase_estimate) AS Min_Purchase_Estimate,
+       ROUND(AVG(NULLIF(ws.ws_ext_sales_price, 0)), 2) AS Avg_Sales_Price,
+       COUNT(DISTINCT ws.ws_order_number) AS Total_Orders,
+       (SELECT COUNT(DISTINCT wr.wr_order_number) 
+        FROM web_returns wr 
+        JOIN web_sales ws2 ON wr.wr_item_sk = ws2.ws_item_sk 
+        WHERE wr.wr_returned_date_sk = ws.ws_sold_date_sk
+          AND ws2.ws_web_site_sk IN (SELECT ws.web_site_sk FROM web_site ws WHERE ws.web_mkt_id = 1)) AS Return_Count
+FROM web_sales ws 
+JOIN top_stores th ON ws.ws_warehouse_sk = th.s_store_sk 
+LEFT JOIN customer_info ci ON ci.c_customer_sk = ws.ws_bill_customer_sk 
+GROUP BY th.s_store_name
+HAVING SUM(ws.ws_ext_sales_price) > 10000
+ORDER BY Total_Web_Sales DESC;

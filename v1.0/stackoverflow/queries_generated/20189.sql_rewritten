@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '365 days'
+        AND P.Score > 0
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(COALESCE(B.Class, 0)) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostHistoryWithVotes AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+),
+FinalStats AS (
+    SELECT 
+        R.PostId,
+        R.Title,
+        R.CreationDate,
+        R.Score,
+        R.ViewCount,
+        UA.UserId,
+        UA.UpVotes,
+        UA.DownVotes,
+        PH.EditCount,
+        PH.LastEditDate,
+        PH.CloseCount
+    FROM 
+        RankedPosts R
+    JOIN 
+        UserActivity UA ON UA.UserId = R.PostId 
+    JOIN 
+        PostHistoryWithVotes PH ON PH.PostId = R.PostId
+    WHERE 
+        R.Rank <= 10
+)
+SELECT 
+    FS.PostId,
+    FS.Title,
+    FS.CreationDate,
+    FS.Score,
+    FS.ViewCount,
+    COALESCE(FS.UpVotes - FS.DownVotes, 0) AS NetVotes,
+    CASE 
+        WHEN FS.CloseCount > 0 THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus,
+    CASE 
+        WHEN FS.LastEditDate IS NULL THEN 'Never Edited'
+        ELSE CONCAT('Last Edited: ', TO_CHAR(FS.LastEditDate, 'YYYY-MM-DD HH24:MI:SS'))
+    END AS LastEditInfo
+FROM 
+    FinalStats FS
+ORDER BY 
+    FS.Score DESC, FS.ViewCount DESC;

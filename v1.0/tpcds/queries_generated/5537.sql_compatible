@@ -1,0 +1,52 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER(PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws 
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk, ws.ws_sold_date_sk
+),
+TopWebSites AS (
+    SELECT 
+        w.web_site_id,
+        r.total_quantity,
+        r.total_sales
+    FROM 
+        RankedSales r
+    JOIN 
+        web_site w ON r.web_site_sk = w.web_site_sk
+    WHERE 
+        r.sales_rank <= 5
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(tws.total_sales) AS total_revenue
+    FROM 
+        TopWebSites tws
+    JOIN 
+        customer c ON c.c_customer_sk = tws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    cd_gender,
+    customer_count,
+    total_revenue,
+    (total_revenue / NULLIF(customer_count, 0)) AS avg_revenue_per_customer
+FROM 
+    CustomerDemographics
+ORDER BY 
+    total_revenue DESC;

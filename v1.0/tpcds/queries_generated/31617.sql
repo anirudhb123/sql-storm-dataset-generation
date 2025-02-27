@@ -1,0 +1,58 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT i_item_sk, i_item_id, i_item_desc, i_brand, i_category, 
+           1 AS level
+    FROM item
+    WHERE i_item_sk IN (SELECT cs_item_sk FROM catalog_sales)
+    
+    UNION ALL
+    
+    SELECT i.i_item_sk, i.i_item_id, i.i_item_desc, i.i_brand, i.i_category,
+           ih.level + 1
+    FROM item i
+    JOIN item_hierarchy ih ON i.i_item_sk = ih.i_item_sk
+    WHERE ih.level < 5
+),
+sales_over_time AS (
+    SELECT 
+        d.d_date AS sale_date,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY d.d_month_seq ORDER BY SUM(ws.ws_sales_price) DESC) AS monthly_rank
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_date
+),
+customer_salutations AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(CAST(hd.hd_income_band_sk AS VARCHAR), 'Unknown') AS income_band,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_last_name) AS gender_rank
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+)
+SELECT 
+    c.full_name,
+    c.cd_gender,
+    o.sale_date,
+    o.total_sales,
+    o.order_count,
+    CASE 
+        WHEN o.total_sales > 1000 THEN 'High Value'
+        WHEN o.total_sales BETWEEN 500 AND 1000 THEN 'Mid Value'
+        ELSE 'Low Value'
+    END AS customer_value,
+    i.brand AS item_brand,
+    i.item_desc,
+    item_h.level
+FROM customer_salutations c
+INNER JOIN sales_over_time o ON c.c_customer_sk = o.c_customer_sk
+INNER JOIN item_hierarchy i ON i.i_item_sk = o.ws_item_sk
+LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk 
+WHERE c.gender_rank <= 10
+AND (c.income_band IS NOT NULL OR i.brand IS NOT NULL)
+ORDER BY o.total_sales DESC, c.full_name;

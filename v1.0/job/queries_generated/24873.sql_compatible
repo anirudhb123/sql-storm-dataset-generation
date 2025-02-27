@@ -1,0 +1,69 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        CAST(NULL AS VARCHAR) AS parent_movie,
+        1 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.title AS parent_movie,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN aka_title AS at ON ml.linked_movie_id = at.id
+    JOIN MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.parent_movie,
+    mh.level,
+    COALESCE(ca.name, 'Unknown') AS actor_name,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    AVG(mv_info.info_length) AS average_info_length,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+    COUNT(DISTINCT cc.role_id) AS role_count
+FROM 
+    MovieHierarchy AS mh
+LEFT JOIN 
+    cast_info AS cc ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_name AS ca ON cc.person_id = ca.person_id
+LEFT JOIN 
+    movie_keyword AS mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_companies AS mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name AS cn ON mc.company_id = cn.id
+LEFT JOIN 
+    (SELECT 
+         movie_id,
+         info,
+         LENGTH(info) AS info_length
+     FROM 
+         movie_info
+     WHERE 
+         info IS NOT NULL
+    ) AS mv_info ON mh.movie_id = mv_info.movie_id
+WHERE 
+    mh.production_year >= 2000
+    AND (mh.title LIKE '%adventure%' OR mh.title LIKE '%fantasy%')
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.parent_movie, mh.level, ca.name
+HAVING 
+    COUNT(DISTINCT cc.role_id) > 1
+ORDER BY 
+    mh.production_year DESC, keyword_count DESC, actor_name;

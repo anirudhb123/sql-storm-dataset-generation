@@ -1,0 +1,65 @@
+WITH TagStats AS (
+    SELECT
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><'))) AS Tag,
+        COUNT(*) AS PostCount
+    FROM
+        Posts
+    WHERE
+        PostTypeId = 1 
+    GROUP BY
+        Tag
+),
+
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+
+PostStats AS (
+    SELECT
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(uc.BadgeCount, 0) AS UserBadgeCount,
+        COALESCE(uc.GoldBadges, 0) AS GoldCount,
+        COALESCE(uc.SilverBadges, 0) AS SilverCount,
+        COALESCE(uc.BronzeBadges, 0) AS BronzeCount,
+        ARRAY_AGG(DISTINCT ts.Tag) AS Tags
+    FROM
+        Posts p
+    LEFT JOIN
+        UserBadges uc ON p.OwnerUserId = uc.UserId
+    LEFT JOIN
+        TagStats ts ON ts.PostCount > 0
+    GROUP BY
+        p.Id, p.OwnerUserId, p.Title, p.ViewCount, uc.BadgeCount, uc.GoldBadges, uc.SilverBadges, uc.BronzeBadges
+)
+
+SELECT
+    ps.PostId,
+    ps.Title,
+    ps.ViewCount,
+    ps.UserBadgeCount,
+    ps.GoldCount,
+    ps.SilverCount,
+    ps.BronzeCount,
+    STRING_AGG(DISTINCT ps.Tags, ', ') AS PostTags
+FROM
+    PostStats ps
+GROUP BY
+    ps.PostId, ps.Title, ps.ViewCount, ps.UserBadgeCount, ps.GoldCount, ps.SilverCount, ps.BronzeCount
+ORDER BY
+    ps.ViewCount DESC
+LIMIT 10;

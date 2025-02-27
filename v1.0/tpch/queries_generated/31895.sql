@@ -1,0 +1,46 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 1 AS level
+    FROM customer c
+    WHERE c.c_acctbal > 10000
+    UNION ALL
+    SELECT ch.c_custkey, ch.c_name, ch.c_nationkey, ch.level + 1
+    FROM customer ch
+    JOIN orders o ON ch.c_custkey = o.o_custkey
+    JOIN CustomerHierarchy chier ON o.o_custkey = chier.c_custkey
+    WHERE o.o_totalprice > 500
+),
+MaxSupplierCost AS (
+    SELECT ps.ps_partkey, MAX(ps.ps_supplycost) AS max_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+PartSupplierDetails AS (
+    SELECT p.p_name, p.p_brand, p.p_mfgr, ps.ps_availqty, msc.max_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN MaxSupplierCost msc ON ps.ps_partkey = msc.ps_partkey
+    WHERE ps.ps_availqty > 50 AND msc.max_cost IS NOT NULL
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT c.c_custkey) AS customer_count,
+       SUM(os.total_sales) AS total_sales,
+       STRING_AGG(DISTINCT p.p_name, ', ') AS products_offered,
+       AVG(os.total_sales) OVER (PARTITION BY r.r_name) AS avg_sales,
+       psd.l_shipmode,
+       COALESCE(MAX(psd.max_cost), 0) AS adjusted_supplier_cost
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN OrderSummary os ON c.c_custkey = os.o_orderkey
+LEFT JOIN PartSupplierDetails psd ON psd.p_brand = 'BrandX'
+LEFT JOIN lineitem l ON os.o_orderkey = l.l_orderkey
+WHERE c.c_acctbal > 0
+GROUP BY r.r_name, psd.l_shipmode
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY total_sales DESC;

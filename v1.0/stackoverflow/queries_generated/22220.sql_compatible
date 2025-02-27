@@ -1,0 +1,98 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesReceived,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesReceived,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        AVG(CASE WHEN P.Score IS NOT NULL THEN P.Score ELSE 0 END) AS AveragePostScore,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS TotalAnswers
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id
+    WHERE 
+        U.Reputation > 0
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        UpVotesReceived,
+        DownVotesReceived,
+        TotalPosts,
+        AveragePostScore,
+        RANK() OVER (ORDER BY UpVotesReceived DESC) AS UpVoteRank
+    FROM 
+        UserVoteStats
+),
+HighScorePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS PostRank
+    FROM 
+        Posts P
+    INNER JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.Score IS NOT NULL AND P.Score >= 10
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        PH.UserDisplayName,
+        PH.Comment,
+        PH.Text,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS RecentActivity
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11, 12) 
+),
+CombinedResults AS (
+    SELECT 
+        U.DisplayName AS UserDisplayName,
+        UP.UpVotesReceived,
+        UP.DownVotesReceived,
+        HP.Title AS HighScorePost,
+        HP.Score AS PostScore,
+        PH.RecentActivity,
+        PH.Comment AS RecentComment,
+        PH.CreationDate AS RecentActivityDate
+    FROM 
+        TopUsers UP
+    LEFT JOIN 
+        HighScorePosts HP ON UP.UserId = HP.OwnerUserId
+    LEFT JOIN 
+        PostHistoryDetails PH ON HP.PostId = PH.PostId AND PH.RecentActivity <= 5
+)
+SELECT 
+    UserDisplayName,
+    UpVotesReceived,
+    DownVotesReceived,
+    COUNT(HighScorePost) AS TotalHighScorePosts,
+    MAX(PostScore) AS MaxPostScore,
+    STRING_AGG(DISTINCT RecentComment, '; ') AS RecentComments,
+    COUNT(CASE WHEN RecentActivity IS NOT NULL THEN 1 END) AS TotalRecentActivities
+FROM 
+    CombinedResults
+GROUP BY 
+    UserDisplayName, UpVotesReceived, DownVotesReceived
+HAVING 
+    COUNT(HighScorePost) >= 2 
+ORDER BY 
+    UpVotesReceived DESC, TotalHighScorePosts DESC;

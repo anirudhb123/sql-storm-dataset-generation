@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        u.Reputation > 1000
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagUsage
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 10
+),
+PostScores AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        SUM(CASE 
+            WHEN v.VoteTypeId = 2 THEN 1 
+            WHEN v.VoteTypeId = 3 THEN -1 
+            ELSE 0 
+        END) AS NetScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    rp.Title AS PostTitle,
+    rp.CreationDate,
+    rp.Score AS OriginalScore,
+    ps.NetScore,
+    pt.TagName
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostScores ps ON rp.Id = ps.Id
+LEFT JOIN 
+    PostLinks pl ON rp.Id = pl.PostId
+LEFT JOIN 
+    PopularTags pt ON pl.RelatedPostId = pt.PostId
+WHERE 
+    rp.UserPostRank <= 5
+ORDER BY 
+    ps.NetScore DESC, rp.CreationDate DESC
+LIMIT 50;

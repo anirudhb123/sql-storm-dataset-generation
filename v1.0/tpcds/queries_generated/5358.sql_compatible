@@ -1,0 +1,42 @@
+
+WITH SalesData AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS total_orders,
+        DATEDIFF(CURRENT_DATE, MIN(d.d_date)) AS days_since_first_purchase
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        cd.cd_gender = 'F'
+        AND cd.cd_marital_status = 'M'
+        AND d.d_year = 2023
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+),
+AnnualMetrics AS (
+    SELECT 
+        COUNT(DISTINCT c_customer_id) AS female_customers,
+        AVG(total_spent) AS avg_spent,
+        AVG(total_orders) AS avg_orders,
+        MAX(days_since_first_purchase) AS max_days_since_first_purchase
+    FROM 
+        SalesData
+)
+SELECT 
+    *,
+    CASE 
+        WHEN avg_spent > 1000 THEN 'High Value'
+        WHEN avg_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM 
+    AnnualMetrics;

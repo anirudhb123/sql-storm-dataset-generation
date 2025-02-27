@@ -1,0 +1,77 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+ActorMovieInfo AS (
+    SELECT
+        a.name AS actor_name,
+        mt.title AS movie_title,
+        mt.production_year AS year,
+        COALESCE(GROUP_CONCAT(DISTINCT k.keyword), 'No keywords') AS keywords,
+        COALESCE(SUM(ci.nr_order), 0) AS total_roles,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS noted_roles
+    FROM
+        aka_name a
+    JOIN
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN
+        aka_title mt ON ci.movie_id = mt.id
+    LEFT JOIN
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        a.name, mt.title, mt.production_year
+),
+HighRatedMovies AS (
+    SELECT
+        movie_id,
+        AVG(r.rating) AS avg_rating
+    FROM
+        ratings r  
+    WHERE
+        r.rating IS NOT NULL
+    GROUP BY
+        movie_id
+)
+SELECT
+    ami.actor_name,
+    ami.movie_title,
+    ami.year,
+    hr.avg_rating,
+    ami.total_roles,
+    ami.noted_roles
+FROM
+    ActorMovieInfo ami
+LEFT JOIN
+    HighRatedMovies hr ON ami.movie_title = (SELECT title FROM aka_title WHERE id = hr.movie_id)
+WHERE 
+    hr.avg_rating >= 8.0
+ORDER BY
+    ami.year DESC,
+    hr.avg_rating DESC,
+    ami.total_roles DESC
+LIMIT 50;

@@ -1,0 +1,56 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s1.s_acctbal)
+        FROM supplier s1
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.hierarchy_level < 3
+),
+TotalOrders AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS total_orders
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COALESCE(to.total_orders, 0) AS total_orders, 
+           CASE 
+               WHEN to.total_orders > 10 THEN 'High'
+               WHEN to.total_orders BETWEEN 5 AND 10 THEN 'Medium'
+               ELSE 'Low' 
+           END AS order_segment
+    FROM customer c
+    LEFT JOIN TotalOrders to ON c.c_custkey = to.o_custkey
+),
+AggregatedSupplierData AS (
+    SELECT p.p_brand, SUM(ps.ps_availqty) AS total_available_qty, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY p.p_brand
+)
+SELECT 
+    ci.cust_info,
+    sh.s_name,
+    ad.total_available_qty,
+    ad.avg_supply_cost,
+    ci.order_segment
+FROM (
+    SELECT c.c_custkey AS cust_key, CONCAT(c.c_name, ' - ', n.n_name) AS cust_info
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+) ci
+LEFT JOIN SupplierHierarchy sh ON ci.cust_key = sh.s_nationkey
+JOIN AggregatedSupplierData ad ON ad.p_brand = 
+    (SELECT p_brand 
+     FROM part 
+     WHERE p_partkey = (SELECT ps_partkey 
+                        FROM partsupp 
+                        WHERE ps_suppkey = sh.s_suppkey 
+                        ORDER BY ps_supplycost DESC 
+                        LIMIT 1))
+WHERE ad.total_available_qty IS NOT NULL
+ORDER BY ci.cust_info, sh.s_name;

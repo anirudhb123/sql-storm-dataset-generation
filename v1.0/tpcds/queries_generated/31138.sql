@@ -1,0 +1,53 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk, 0 AS Level
+    FROM customer c
+    WHERE c.c_preferred_cust_flag = 'Y'
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk, ch.Level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_current_cdemo_sk
+    WHERE ch.Level < 3
+),
+SalesAnalysis AS (
+    SELECT 
+        SUM(ws.ws_net_paid_inc_tax) AS Total_Sales,
+        COUNT(DISTINCT ws.ws_order_number) AS Total_Orders,
+        cd.cd_gender,
+        ca.ca_state
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY cd.cd_gender, ca.ca_state
+),
+ReturnAnalysis AS (
+    SELECT 
+        COALESCE(SUM(sr_return_amt_inc_tax), 0) AS Total_Returned,
+        sr_customer_sk,
+        sr_store_sk
+    FROM store_returns sr
+    GROUP BY sr_customer_sk, sr_store_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        sa.Total_Sales,
+        ra.Total_Returned,
+        sa.cd_gender,
+        sa.ca_state,
+        COALESCE(ra.Total_Returned, 0) AS Final_Total_Sales
+    FROM SalesAnalysis sa
+    LEFT JOIN ReturnAnalysis ra ON sa.Total_Orders = ra.sr_customer_sk
+)
+SELECT 
+    ch.c_first_name,
+    ch.c_last_name,
+    sw.Final_Total_Sales,
+    sw.cd_gender,
+    sw.ca_state
+FROM CustomerHierarchy ch
+JOIN SalesWithReturns sw ON ch.c_current_cdemo_sk = sw.cd_gender
+WHERE sw.Final_Total_Sales > 1000
+ORDER BY sw.Final_Total_Sales DESC;

@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        0 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        level + 1
+    FROM
+        aka_title m
+    JOIN
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT
+    mh.title AS Movie_Title,
+    mh.production_year AS Production_Year,
+    ct.kind AS Movie_Kind,
+    COALESCE(aka.name, 'Unknown') AS Actor_Name,
+    COUNT(DISTINCT c.person_id) AS Actor_Count,
+    ARRAY_AGG(DISTINCT mk.keyword ORDER BY mk.keyword) AS Movie_Keywords,
+    SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS Cast_With_Note,
+    MIN(mh.level) AS Min_Hierarchy_Level
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    cast_info c ON mh.movie_id = c.movie_id
+LEFT JOIN
+    aka_name aka ON c.person_id = aka.person_id
+LEFT JOIN
+    kind_type ct ON mh.kind_id = ct.id
+LEFT JOIN
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+WHERE
+    mh.production_year IS NOT NULL
+    AND (mh.title ILIKE '%action%' OR mh.title ILIKE '%drama%')
+GROUP BY
+    mh.title, mh.production_year, ct.kind, aka.name
+HAVING
+    COUNT(DISTINCT c.person_id) > 1
+ORDER BY
+    Production_Year DESC,
+    Actor_Count DESC;

@@ -1,0 +1,29 @@
+-- Performance Benchmarking Query
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+)
+
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalPosts,
+    UA.TotalComments,
+    UA.TotalBadges,
+    UA.TotalBounty,
+    U.Reputation,
+    U.CreationDate
+FROM UserActivity UA
+JOIN Users U ON UA.UserId = U.Id
+ORDER BY UA.TotalPosts DESC, UA.TotalComments DESC;

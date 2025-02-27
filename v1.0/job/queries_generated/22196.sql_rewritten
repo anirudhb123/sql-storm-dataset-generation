@@ -1,0 +1,39 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, 0 AS depth
+    FROM aka_title m
+    WHERE m.production_year = 2021
+    UNION ALL
+    SELECT m.id, m.title, mh.depth + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON mh.movie_id = ml.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+    WHERE mh.depth < 3
+),
+top_movies AS (
+    SELECT mt.id, mt.title, COUNT(DISTINCT cc.person_id) AS cast_count,
+           STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+           SUM(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Duration') 
+                    THEN CAST(mi.info AS integer) ELSE 0 END) AS total_duration
+    FROM aka_title mt
+    JOIN complete_cast cc ON cc.movie_id = mt.id
+    LEFT JOIN cast_info cin ON cin.movie_id = mt.id
+    LEFT JOIN aka_name a ON a.person_id = cin.person_id
+    LEFT JOIN movie_info mi ON mi.movie_id = mt.id
+    WHERE mt.production_year = 2021
+    GROUP BY mt.id
+),
+movie_summary AS (
+    SELECT th.title, th.cast_count, th.actor_names, mh.depth, th.total_duration,
+           ROW_NUMBER() OVER (PARTITION BY th.cast_count ORDER BY th.total_duration DESC) AS rn,
+           RANK() OVER (ORDER BY th.total_duration DESC) AS movie_rank
+    FROM top_movies th
+    LEFT JOIN movie_hierarchy mh ON th.id = mh.movie_id
+)
+SELECT title, cast_count, actor_names, depth, total_duration, 
+       CASE WHEN movie_rank <= 5 THEN 'Top Ranked' ELSE 'Others' END AS ranking_category,
+       CASE WHEN depth IS NULL THEN 'Not Linked' ELSE 'Linked' END AS linkage_status
+FROM movie_summary
+WHERE cast_count > 0
+AND (depth IS NULL OR depth >= 1)
+ORDER BY total_duration DESC, cast_count DESC
+LIMIT 10;

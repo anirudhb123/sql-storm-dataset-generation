@@ -1,0 +1,68 @@
+
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM
+        supplier s
+    INNER JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderstatus
+),
+PartStatistics AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM
+        part p
+    LEFT JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY
+        p.p_partkey, p.p_name
+)
+SELECT
+    cs.c_name AS customer_name,
+    cs.o_orderkey,
+    ps.p_name AS part_name,
+    ps.avg_supply_cost,
+    ps.supplier_count,
+    COUNT(*) FILTER (WHERE cs.total_order_value > 1000) AS high_value_order_count,
+    RANK() OVER (PARTITION BY cs.c_custkey ORDER BY cs.total_order_value DESC) AS order_rank
+FROM
+    CustomerOrders cs
+JOIN
+    lineitem l ON cs.o_orderkey = l.l_orderkey
+JOIN
+    PartStatistics ps ON l.l_partkey = ps.p_partkey
+LEFT JOIN
+    RankedSuppliers rs ON l.l_suppkey = rs.s_suppkey AND rs.rank = 1
+WHERE
+    cs.o_orderstatus = 'O'
+    AND ps.supplier_count > 0
+    AND ps.avg_supply_cost IS NOT NULL
+GROUP BY
+    cs.c_name, cs.o_orderkey, ps.p_name, ps.avg_supply_cost, ps.supplier_count
+ORDER BY
+    customer_name, part_name;

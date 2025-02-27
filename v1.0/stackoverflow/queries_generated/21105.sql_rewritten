@@ -1,0 +1,91 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId IN (2, 8) THEN v.Id END) AS UpVotes,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS DownVotes,
+        COUNT(DISTINCT ph.Id) AS EditCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id AND ph.PostHistoryTypeId IN (4, 5, 6) 
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, c.CommentCount
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostWithUserStats AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CommentCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.EditCount,
+        ur.Reputation,
+        ur.BadgeCount,
+        ur.ReputationRank,
+        ROW_NUMBER() OVER (PARTITION BY ur.UserId ORDER BY ps.CommentCount DESC) AS PostRank
+    FROM 
+        PostStats ps
+    JOIN 
+        Users u ON u.Id = ps.OwnerUserId
+    JOIN 
+        UserReputation ur ON ur.UserId = u.Id
+),
+FinalStats AS (
+    SELECT 
+        pws.*,
+        COALESCE(NULLIF(pws.UpVotes, 0), NULL) AS AdjustedUpVotes,
+        COALESCE(NULLIF(pws.DownVotes, 0), NULL) AS AdjustedDownVotes,
+        CASE 
+            WHEN pws.CommentCount > 10 THEN 'Highly Engaged'
+            WHEN pws.CommentCount BETWEEN 1 AND 10 THEN 'Some Engagement'
+            ELSE 'No Engagement'
+        END AS EngagementLevel
+    FROM 
+        PostWithUserStats pws
+)
+SELECT 
+    fs.PostId,
+    fs.Title,
+    fs.CommentCount,
+    fs.UpVotes,
+    fs.AdjustedUpVotes,
+    fs.DownVotes,
+    fs.AdjustedDownVotes,
+    fs.EditCount,
+    fs.Reputation,
+    fs.BadgeCount,
+    fs.ReputationRank,
+    fs.EngagementLevel,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+        FROM Tags t
+        INNER JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+        WHERE p.Id = fs.PostId) AS Tags
+FROM 
+    FinalStats fs
+WHERE 
+    fs.PostRank <= 5
+ORDER BY 
+    fs.Reputation DESC, 
+    fs.CommentCount DESC;

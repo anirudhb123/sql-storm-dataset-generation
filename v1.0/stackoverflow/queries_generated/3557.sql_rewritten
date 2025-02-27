@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(v.Id) AS VoteCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.ViewCount, p.PostTypeId
+),
+TopPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Rank,
+        COALESCE(bp.Name, 'No Badge') AS TopBadge
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Badges bp ON rp.Rank = 1 AND bp.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = rp.Id)
+    WHERE 
+        rp.Rank <= 5
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    tp.Title,
+    tp.Score,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.TopBadge,
+    COUNT(DISTINCT cp.PostId) AS ClosedCount,
+    AVG(COALESCE(DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), cp.FirstClosedDate), 0)) AS AvgDaysClosed
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    ClosedPosts cp ON tp.Id = cp.PostId
+GROUP BY 
+    tp.Title, tp.Score, tp.CreationDate, tp.ViewCount, tp.TopBadge
+HAVING 
+    AVG(COALESCE(DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), cp.FirstClosedDate), 0)) > 0
+ORDER BY 
+    tp.Score DESC;

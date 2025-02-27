@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE()) 
+        AND p.ViewCount > 100
+    GROUP BY 
+        p.Id, p.Title, p.Tags, p.CreationDate, p.Score
+),
+PopularTags AS (
+    SELECT
+        UNNEST(string_to_array(Tags, ', ')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(*) > 10
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS BadgePoints,
+        SUM(u.Reputation) AS TotalReputation,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Tags,
+    rp.CreationDate,
+    rp.Score,
+    rp.CommentCount,
+    rp.VoteCount,
+    pt.TagName,
+    ur.DisplayName,
+    ur.TotalReputation,
+    ur.BadgePoints
+FROM 
+    RankedPosts rp
+JOIN 
+    PopularTags pt ON rp.Tags LIKE '%' || pt.TagName || '%'
+JOIN 
+    UserReputation ur ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ur.UserId)
+WHERE 
+    rp.Rank <= 10
+ORDER BY 
+    rp.Score DESC, 
+    rp.CommentCount DESC, 
+    ur.TotalReputation DESC;

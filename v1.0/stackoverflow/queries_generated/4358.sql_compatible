@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) OVER (PARTITION BY p.Id) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+FinalResults AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges,
+        us.PostCount,
+        us.TotalScore,
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        UserStats us
+    LEFT JOIN 
+        RankedPosts rp ON us.UserId = rp.OwnerUserId 
+    WHERE 
+        rp.rn = 1
+)
+SELECT 
+    fr.*,
+    CASE 
+        WHEN fr.CommentCount IS NULL THEN 'No comments yet'
+        WHEN fr.CommentCount > 5 THEN 'Highly discussed'
+        ELSE 'Some discussion'
+    END AS DiscussionStatus,
+    COALESCE((SELECT MAX(c.CreationDate) FROM Comments c WHERE c.PostId = fr.PostId), 'No comments yet') AS LastCommentDate
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.TotalScore DESC, fr.PostCount DESC
+LIMIT 100;

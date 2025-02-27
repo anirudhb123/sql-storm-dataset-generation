@@ -1,0 +1,62 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSuppliers AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    cs.c_name,
+    ss.s_name,
+    ps.p_name,
+    css.total_spent,
+    sss.total_supply_value,
+    ps.supplier_count,
+    ROW_NUMBER() OVER (PARTITION BY cs.c_custkey ORDER BY css.total_spent DESC) AS rank
+FROM 
+    CustomerOrders css
+JOIN 
+    SupplierStats sss ON css.total_spent > sss.avg_acctbal
+JOIN 
+    PartSuppliers ps ON ps.supplier_count > 2
+LEFT JOIN 
+    nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = css.c_custkey)
+WHERE 
+    n.n_name IS NOT NULL
+ORDER BY 
+    css.total_spent DESC, sss.total_supply_value DESC
+LIMIT 100;

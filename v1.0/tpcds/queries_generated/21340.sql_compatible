@@ -1,0 +1,53 @@
+
+WITH RecursiveCustomerCTE AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_birth_year,
+           ROW_NUMBER() OVER (PARTITION BY c_birth_year ORDER BY c_last_name) AS rn
+    FROM customer
+    WHERE c_birth_year IS NOT NULL
+),
+CustomerIncome AS (
+    SELECT cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate,
+           CASE
+               WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+               WHEN cd.cd_purchase_estimate < 1000 THEN 'Low'
+               WHEN cd.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium'
+               ELSE 'High'
+           END AS purchase_category,
+           ci.ib_income_band_sk
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ci ON hd.hd_income_band_sk = ci.ib_income_band_sk
+),
+SalesSummary AS (
+    SELECT ws_bill_customer_sk, SUM(ws_net_profit) AS total_net_profit, COUNT(ws_order_number) AS total_orders
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+MaxSales AS (
+    SELECT ws_bill_customer_sk,
+           MAX(total_net_profit) AS max_net_profit
+    FROM SalesSummary
+    GROUP BY ws_bill_customer_sk
+),
+FinalReport AS (
+    SELECT c.c_first_name, c.c_last_name, cc.purchase_category, cs.total_net_profit, cs.total_orders
+    FROM RecursiveCustomerCTE c
+    LEFT JOIN CustomerIncome cc ON c.rn = 1 AND c.c_customer_sk = cc.cd_demo_sk
+    LEFT JOIN SalesSummary cs ON c.c_customer_sk = cs.ws_bill_customer_sk
+    JOIN MaxSales maxs ON cs.ws_bill_customer_sk = maxs.ws_bill_customer_sk
+    WHERE cs.total_net_profit = maxs.max_net_profit
+)
+
+SELECT 
+    CONCAT(fr.c_first_name, ' ', fr.c_last_name) AS full_name,
+    fr.purchase_category,
+    COALESCE(fr.total_net_profit, 0) AS net_profit,
+    COALESCE(fr.total_orders, 0) AS order_count,
+    CASE 
+        WHEN fr.total_net_profit IS NULL THEN 'No Profit'
+        WHEN fr.total_net_profit <= 0 THEN 'Break-even'
+        ELSE 'Positive Profit'
+    END AS profit_status
+FROM FinalReport fr
+ORDER BY fr.purchase_category, fr.net_profit DESC
+LIMIT 50 OFFSET 10;

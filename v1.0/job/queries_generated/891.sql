@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+CompanyCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        ac.actor_count,
+        cc.company_count,
+        COALESCE(ac.actor_count, 0) AS actor_count_not_null,
+        COALESCE(cc.company_count, 0) AS company_count_not_null
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorCounts ac ON rm.movie_id = ac.movie_id
+    LEFT JOIN 
+        CompanyCounts cc ON rm.movie_id = cc.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_count,
+    md.company_count,
+    MD5(md.title || md.production_year) AS title_md5,
+    CASE 
+        WHEN md.actor_count > 10 THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS popularity_category
+FROM 
+    MovieDetails md
+WHERE 
+    md.year_rank <= 5
+ORDER BY 
+    md.production_year DESC, md.actor_count DESC
+LIMIT 10;

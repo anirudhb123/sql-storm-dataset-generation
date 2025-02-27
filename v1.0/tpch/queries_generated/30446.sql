@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000 -- High balance suppliers
+
+    UNION ALL
+
+    SELECT supp.s_suppkey, supp.s_name, supp.s_nationkey, sh.level + 1
+    FROM supplier supp
+    INNER JOIN SupplierHierarchy sh ON supp.s_nationkey = sh.s_nationkey
+    WHERE supp.s_acctbal < sh.level * 5000
+),
+PartStatistics AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        AVG(ps.ps_availqty) AS average_avail_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    n.n_name,
+    p.p_name,
+    ps.average_avail_qty,
+    ps.total_supply_cost,
+    co.total_spent,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY co.total_spent DESC) AS customer_rank,
+    CASE 
+        WHEN co.total_spent IS NULL THEN 'No Orders'
+        WHEN co.total_spent < 2000 THEN 'Low Value Customer'
+        ELSE 'Valued Customer'
+    END AS customer_status
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN PartStatistics ps ON ps.average_avail_qty > 50
+LEFT JOIN CustomerOrders co ON n.n_nationkey = co.c_custkey
+WHERE n.n_name IS NOT NULL
+ORDER BY n.n_name, ps.total_supply_cost DESC;

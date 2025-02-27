@@ -1,0 +1,70 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(coalesce(p.ViewCount, 0)) AS TotalViews,
+        SUM(case when b.Class = 1 then 1 else 0 end) AS GoldBadges,
+        SUM(case when b.Class = 2 then 1 else 0 end) AS SilverBadges,
+        SUM(case when b.Class = 3 then 1 else 0 end) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostScores AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        UserId,
+        SUM(CASE WHEN ps.ScoreRank <= 5 THEN ps.Score ELSE 0 END) AS TopPostScore,
+        COUNT(DISTINCT ps.PostId) AS TopPostsCount
+    FROM 
+        UserActivity ua
+    INNER JOIN 
+        Posts p ON ua.UserId = p.OwnerUserId 
+    INNER JOIN 
+        PostScores ps ON p.Id = ps.PostId
+    GROUP BY 
+        UserId
+)
+SELECT 
+    ua.DisplayName,
+    ua.Reputation,
+    ua.PostCount,
+    ua.QuestionCount,
+    ua.AnswerCount,
+    ua.TotalViews,
+    tp.TopPostScore,
+    tp.TopPostsCount,
+    COALESCE(NULLIF(ua.GoldBadges, 0), 'No Gold Badge') AS GoldBadges,
+    COALESCE(NULLIF(ua.SilverBadges, 0), 'No Silver Badge') AS SilverBadges,
+    COALESCE(NULLIF(ua.BronzeBadges, 0), 'No Bronze Badge') AS BronzeBadges
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    TopPosts tp ON ua.UserId = tp.UserId
+WHERE 
+    ua.PostCount > 10
+ORDER BY 
+    ua.Reputation DESC, 
+    TopPostScore DESC;

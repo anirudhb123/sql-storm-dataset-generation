@@ -1,0 +1,77 @@
+
+WITH CTE_Supplier AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+),
+CTE_SumLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '1995-01-01' 
+        AND l.l_shipdate < DATE '1996-01-01'
+    GROUP BY 
+        l.l_orderkey
+),
+CTE_CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        r.r_name AS region_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, r.r_name
+),
+FilteredProducts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(p.p_retailprice * ps.ps_availqty) AS total_avail_value
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice IS NOT NULL 
+        AND p.p_size IS NOT NULL 
+        AND p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size = p.p_size)
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    r.region_name,
+    COUNT(DISTINCT cs.c_custkey) AS total_customers,
+    SUM(CASE WHEN cs.order_count > 5 THEN 1 ELSE 0 END) AS high_order_customers,
+    AVG(p.total_avail_value) AS avg_product_value,
+    s.s_name AS top_supplier,
+    s.s_acctbal
+FROM 
+    CTE_CustomerRegion cs
+LEFT JOIN 
+    region r ON cs.region_name = r.r_name
+INNER JOIN 
+    CTE_Supplier s ON s.rnk = 1
+JOIN 
+    FilteredProducts p ON p.total_avail_value > 10000
+WHERE 
+    r.region_name IS NOT NULL
+GROUP BY 
+    r.region_name, s.s_name, s.s_acctbal
+HAVING 
+    AVG(p.total_avail_value) > 5000
+ORDER BY 
+    total_customers DESC, high_order_customers ASC, r.region_name;

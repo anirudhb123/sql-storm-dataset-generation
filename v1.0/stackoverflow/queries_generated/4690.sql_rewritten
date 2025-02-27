@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) as rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation, 
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TagsWithCounts AS (
+    SELECT 
+        t.TagName, 
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Tags t 
+    JOIN 
+        Posts p ON t.ExcerptPostId = p.Id 
+    GROUP BY 
+        t.TagName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        ph.UserId AS CloserUserId, 
+        ph.CreationDate AS ClosureDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+UserDetails AS (
+    SELECT 
+        u.DisplayName, 
+        u.Reputation, 
+        COALESCE(rc.rn, 0) AS RecentPostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rc ON u.Id = rc.OwnerUserId
+)
+SELECT 
+    ud.DisplayName,
+    ud.Reputation,
+    COALESCE(badge.BadgeCount, 0) AS BadgeCount,
+    tc.TagName,
+    tc.TotalViews,
+    cp.ClosureDate,
+    CASE 
+        WHEN cp.PostId IS NOT NULL THEN 'Closed' 
+        ELSE 'Active' 
+    END AS PostStatus,
+    COUNT(DISTINCT cp.PostId) OVER (PARTITION BY ud.DisplayName) AS ClosedPostCount
+FROM 
+    UserDetails ud
+LEFT JOIN 
+    UserReputation badge ON ud.UserId = badge.UserId
+LEFT JOIN 
+    TagsWithCounts tc ON tc.TagName = ANY(string_to_array(ud.RecentPostTags, ','))
+LEFT JOIN 
+    ClosedPosts cp ON cp.CloserUserId = ud.UserId
+WHERE 
+    ud.Reputation > 1000
+ORDER BY 
+    ud.Reputation DESC, ud.DisplayName
+LIMIT 100;

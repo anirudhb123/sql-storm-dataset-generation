@@ -1,0 +1,45 @@
+
+WITH CustomerData AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        ca.ca_zip,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_city ORDER BY c.c_last_name, c.c_first_name) AS rn
+    FROM 
+        customer c
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+RankedCustomers AS (
+    SELECT * FROM CustomerData WHERE rn <= 10
+),
+AggregatedData AS (
+    SELECT 
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_id) AS num_customers,
+        STRING_AGG(c.c_first_name || ' ' || c.c_last_name, ', ') AS customer_names,
+        STRING_AGG(DISTINCT cd.cd_gender, ', ') AS genders,
+        STRING_AGG(DISTINCT cd.cd_marital_status, ', ') AS marital_statuses
+    FROM 
+        RankedCustomers rc
+        JOIN customer_demographics cd ON rc.c_customer_id = cd.cd_demo_sk
+        JOIN customer_address ca ON rc.ca_city = ca.ca_city
+    GROUP BY 
+        ca.ca_state
+)
+SELECT
+    state,
+    num_customers,
+    customer_names,
+    genders,
+    marital_statuses
+FROM 
+    AggregatedData
+ORDER BY 
+    num_customers DESC;

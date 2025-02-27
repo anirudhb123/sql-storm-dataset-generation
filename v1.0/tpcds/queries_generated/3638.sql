@@ -1,0 +1,53 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(wr.wr_return_quantity) AS total_web_returns,
+        SUM(sr.sr_return_quantity) AS total_store_returns
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_income_band_sk
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT 
+    cr.c_first_name,
+    cr.c_last_name,
+    cr.total_web_returns,
+    cr.total_store_returns,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    CASE 
+        WHEN cr.total_web_returns IS NULL AND cr.total_store_returns IS NULL THEN 'No Returns'
+        ELSE 'Returns Exist'
+    END AS return_status,
+    COALESCE(ROUND(((cr.total_web_returns + cr.total_store_returns) * 100.0) / NULLIF((SELECT SUM(cs_quantity) FROM catalog_sales), 0), 2), 2), 0) AS return_percentage,
+    ROW_NUMBER() OVER (PARTITION BY cd.ib_income_band_sk ORDER BY cr.total_web_returns DESC) AS rank_within_income_band
+FROM 
+    CustomerReturns cr
+JOIN 
+    CustomerDemographics cd ON cr.c_customer_sk = cd.cd_demo_sk
+WHERE 
+    cd.cd_gender = 'F' AND
+    (cd.cd_marital_status = 'M' OR cd.cd_marital_status IS NULL)
+ORDER BY 
+    return_percentage DESC
+LIMIT 50;

@@ -1,0 +1,65 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorMovies AS (
+    SELECT 
+        ca.person_id, 
+        a.name AS actor_name, 
+        COUNT(DISTINCT ca.movie_id) AS movie_count
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name a ON ca.person_id = a.person_id
+    GROUP BY 
+        ca.person_id, a.name
+    HAVING 
+        COUNT(DISTINCT ca.movie_id) > 5
+),
+MovieDetails AS (
+    SELECT 
+        mt.movie_id, 
+        mt.title, 
+        COALESCE(mk.keyword, 'N/A') AS keyword, 
+        mt.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON mt.movie_id = mc.movie_id
+    WHERE 
+        mt.production_year >= 2000
+    GROUP BY 
+        mt.movie_id, mt.title, mk.keyword, mt.production_year
+)
+SELECT 
+    dt.title_id, 
+    dt.title, 
+    dt.production_year, 
+    COUNT(DISTINCT am.actor_name) AS actor_count,
+    STRING_AGG(DISTINCT md.keyword, ', ') AS keywords,
+    MAX(mc.company_count) AS total_companies
+FROM 
+    RankedTitles dt
+LEFT JOIN 
+    MovieDetails md ON dt.title = md.title
+LEFT JOIN 
+    ActorMovies am ON md.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = am.person_id)
+LEFT JOIN 
+    (SELECT movie_id, COUNT(DISTINCT company_id) AS company_count FROM movie_companies GROUP BY movie_id) mc 
+    ON md.movie_id = mc.movie_id
+WHERE 
+    dt.rn = 1
+GROUP BY 
+    dt.title_id, dt.title, dt.production_year
+ORDER BY 
+    dt.production_year DESC;

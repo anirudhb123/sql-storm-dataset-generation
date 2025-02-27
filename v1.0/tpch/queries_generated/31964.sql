@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_availqty, p.p_partkey, p.p_name
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_availqty, p.p_partkey, p.p_name
+    FROM SupplyChain sc
+    JOIN partsupp ps ON ps.ps_supplycost < (SELECT AVG(ps2.ps_supplycost) FROM partsupp ps2 WHERE ps2.ps_partkey = sc.p_partkey)
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_name
+),
+HighValueSuppliers AS (
+    SELECT DISTINCT s.s_suppkey, s.s_name
+    FROM supplier s
+    JOIN SupplyChain sc ON s.s_suppkey = sc.s_suppkey
+    WHERE sc.ps_availqty < 1000
+),
+RecentHighValueOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS rnk
+    FROM CustomerOrders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.total_value > 5000
+)
+SELECT 
+    r.r_name,
+    SUM(o.total_value) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    AVG(s.s_acctbal) AS avg_supplier_acctbal
+FROM region r
+LEFT JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN RecentHighValueOrders o ON c.c_custkey = o.o_orderkey
+LEFT JOIN HighValueSuppliers s ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = (SELECT MAX(p.p_partkey) FROM part p WHERE p.p_name LIKE '%widget%') LIMIT 1)
+GROUP BY r.r_name
+HAVING SUM(o.total_value) IS NOT NULL
+ORDER BY total_revenue DESC;

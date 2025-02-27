@@ -1,0 +1,87 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+PersonRoleCounts AS (
+    SELECT 
+        ci.person_id,
+        COUNT(*) AS role_count,
+        STRING_AGG(DISTINCT rt.role, ', ') AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.person_id
+),
+CompleteMovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mi.info, 'No Info Available') AS movie_info,
+        CAST(CASE 
+            WHEN COUNT(mk.keyword) > 0 THEN TRUE 
+            ELSE FALSE 
+        END AS BOOLEAN) AS has_keywords
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY 
+        m.id, mi.info
+)
+SELECT 
+    pt.title,
+    pt.production_year,
+    CASE 
+        WHEN pr.role_count IS NULL THEN 'Unknown Actor'
+        ELSE STRING_AGG(DISTINCT pr.roles, ', ')
+    END AS roles,
+    CASE 
+        WHEN p.gender IS NULL THEN 'Gender Unknown'
+        ELSE p.gender
+    END AS actor_gender,
+    c.name AS company_name,
+    cm.kind AS company_kind,
+    c.country_code,
+    CASE 
+        WHEN c.country_code IS NULL THEN 'Not Specified'
+        ELSE c.country_code
+    END AS company_country,
+    c.name_pcode_nf,
+    cm.note AS company_note,
+    c.id AS company_id,
+    m.movie_info,
+    m.has_keywords,
+    RANK() OVER (PARTITION BY pt.production_year ORDER BY pt.title) AS title_rank
+FROM 
+    RankedTitles pt
+LEFT JOIN 
+    PersonRoleCounts pr ON pr.person_id = (
+        SELECT DISTINCT ci.person_id
+        FROM cast_info ci
+        WHERE ci.movie_id = pt.title_id
+        LIMIT 1
+    )
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = pt.title_id
+LEFT JOIN 
+    company_name c ON c.id = mc.company_id
+LEFT JOIN 
+    company_type cm ON cm.id = mc.company_type_id
+LEFT JOIN 
+    CompleteMovieInfo m ON m.movie_id = pt.title_id
+WHERE 
+    pt.rn <= 5  -- Limit to top 5 titles per year
+ORDER BY 
+    pt.production_year DESC, title_rank;

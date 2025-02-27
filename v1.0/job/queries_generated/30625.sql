@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(ml.linked_movie_id, NULL) AS linked_movie_id,
+        1 AS level
+    FROM title m
+    LEFT JOIN movie_link ml ON m.id = ml.movie_id
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(ml.linked_movie_id, NULL) AS linked_movie_id,
+        mh.level + 1 AS level
+    FROM title m
+    JOIN movie_link ml ON m.id = ml.movie_id
+    JOIN MovieHierarchy mh ON mh.linked_movie_id = m.id
+),
+AggregateCast AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM cast_info c
+    JOIN aka_name ak ON c.person_id = ak.person_id
+    GROUP BY c.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(ac.cast_count, 0) AS total_cast,
+    CASE 
+        WHEN mh.level = 1 THEN 'Original Movie'
+        ELSE 'Linked Movie Level ' || mh.level
+    END AS movie_category,
+    CASE 
+        WHEN mh.production_year IS NULL THEN 'Year Unknown'
+        WHEN mh.production_year < 2000 THEN 'Before 2000'
+        ELSE 'After 2000'
+    END AS movie_age_group,
+    ac.actor_names
+FROM MovieHierarchy mh
+LEFT JOIN AggregateCast ac ON mh.movie_id = ac.movie_id
+WHERE mh.level <= 3
+ORDER BY mh.production_year DESC NULLS LAST, total_cast DESC;
+
+This SQL query generates a performance benchmark involving a recursive Common Table Expression (CTE) named `MovieHierarchy`, which retrieves movies and their linked relationships up to a defined depth. It also includes an `AggregateCast` CTE to calculate the total number of unique cast members and aggregate their names for each movie. The final selection organizes the results based on the movie's production year and cast count, while incorporating complicated conditional logic and string manipulations to classify the movies properly. The use of outer joins and COALESCE handles potential NULL values effectively.

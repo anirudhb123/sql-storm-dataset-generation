@@ -1,0 +1,49 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        c.person_id,
+        a.name AS actor_name,
+        1 AS level
+    FROM
+        aka_title mt
+    JOIN
+        cast_info c ON mt.id = c.movie_id
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        NULL AS person_id,
+        NULL AS actor_name,
+        mh.level + 1
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+)
+SELECT
+    mh.movie_id,
+    mh.title,
+    COALESCE(mh.actor_name, 'Not Available') AS actor_name,
+    COUNT(CASE WHEN mh.actor_name IS NOT NULL THEN 1 END) OVER (PARTITION BY mh.movie_id) AS total_cast,
+    SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY mh.movie_id) AS notes_count,
+    STRING_AGG(DISTINCT c.note, '; ') AS notes_details
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    cast_info c ON mh.person_id = c.person_id
+GROUP BY
+    mh.movie_id, mh.title, mh.actor_name
+HAVING
+    COUNT(CASE WHEN mh.actor_name IS NOT NULL THEN 1 END) OVER (PARTITION BY mh.movie_id) > 2
+ORDER BY
+    mh.title ASC,
+    total_cast DESC;

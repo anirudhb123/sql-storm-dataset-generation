@@ -1,0 +1,74 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        Id,
+        Body,
+        CreationDate,
+        OwnerUserId,
+        Score,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursiveCTE r ON p.ParentId = r.Id
+),
+RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        AVG(v.VoteTypeId = 2) AS UpVotePercentage, -- Upvote are denoted as `2`
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(c.Id) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > (CURRENT_TIMESTAMP - INTERVAL '30 days')
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass -- Determine the highest badge class earned by users
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    up.DisplayName AS UserName,
+    r.Title,
+    r.CommentCount,
+    r.UpVotePercentage,
+    r.DownVotes,
+    ub.BadgeCount,
+    ub.HighestBadgeClass
+FROM 
+    RankedPosts r
+JOIN 
+    Users up ON r.OwnerUserId = up.Id
+LEFT JOIN 
+    UserBadges ub ON r.OwnerUserId = ub.UserId
+WHERE 
+    r.Rank <= 5 -- Get top 5 posts per user
+ORDER BY 
+    r.CommentCount DESC,
+    r.UpVotePercentage DESC
+OPTION (RECOMPILE);

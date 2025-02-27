@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+),
+HighValueCust AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+ItemizedSales AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_item_sales,
+        COUNT(DISTINCT l.l_partkey) AS item_count
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY l.l_orderkey
+),
+AggregatedSales AS (
+    SELECT 
+        h.c_custkey,
+        SUM(is.total_item_sales) AS total_sales,
+        SUM(h.order_count) AS total_orders
+    FROM HighValueCust h
+    JOIN ItemizedSales is ON h.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = is.l_orderkey)
+    GROUP BY h.c_custkey
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(a.total_sales) AS total_revenue,
+    AVG(a.total_orders) AS avg_orders_per_customer,
+    CASE 
+        WHEN SUM(a.total_sales) IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sales_status
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN AggregatedSales a ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_brand = 'Brand#23'))
+WHERE r.r_comment IS NOT NULL AND SUBSTRING(n.n_comment, 1, 4) NOT LIKE '%test%'
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT s.s_suppkey) > 0
+ORDER BY total_revenue DESC NULLS LAST;

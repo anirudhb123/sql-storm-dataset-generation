@@ -1,0 +1,30 @@
+WITH ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_nationkey, 
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+),
+top_orders AS (
+    SELECT ro.o_orderkey, ro.o_orderdate, ro.o_totalprice, ro.c_nationkey
+    FROM ranked_orders ro
+    WHERE ro.rank <= 10
+),
+order_line_items AS (
+    SELECT lo.l_orderkey, SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS revenue, 
+           COUNT(DISTINCT lo.l_linenumber) AS item_count
+    FROM lineitem lo
+    INNER JOIN top_orders to ON lo.l_orderkey = to.o_orderkey
+    GROUP BY lo.l_orderkey
+)
+SELECT 
+    n.n_name AS nation, 
+    COUNT(DISTINCT o.ol_orderkey) AS total_orders, 
+    SUM(o.revenue) AS total_revenue, 
+    AVG(o.item_count) AS avg_items_per_order
+FROM order_line_items o
+JOIN customer c ON o.l_orderkey = c.c_custkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+GROUP BY n.n_name
+ORDER BY total_revenue DESC
+LIMIT 5;

@@ -1,0 +1,64 @@
+WITH MovieStats AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors,
+        COUNT(DISTINCT mc.company_id) AS production_companies,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title m
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id 
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+RatedMovies AS (
+    SELECT 
+        ms.movie_id,
+        ms.movie_title,
+        ms.production_year,
+        ms.total_cast,
+        ms.actors,
+        ms.production_companies,
+        ms.keywords,
+        COALESCE((SELECT AVG(r.rating) 
+                  FROM movie_info mi 
+                  JOIN info_type it ON mi.info_type_id = it.id 
+                  WHERE it.info = 'rating' AND mi.movie_id = ms.movie_id), 0) AS average_rating
+    FROM 
+        MovieStats ms
+)
+SELECT 
+    rm.movie_id,
+    rm.movie_title,
+    rm.production_year,
+    rm.total_cast,
+    rm.actors,
+    rm.production_companies,
+    rm.keywords,
+    rm.average_rating,
+    CASE 
+        WHEN rm.average_rating > 8 THEN 'Excellent'
+        WHEN rm.average_rating BETWEEN 6 AND 8 THEN 'Good'
+        WHEN rm.average_rating BETWEEN 4 AND 6 THEN 'Average'
+        ELSE 'Poor' 
+    END AS rating_category
+FROM 
+    RatedMovies rm
+WHERE 
+    rm.production_year >= 2000
+ORDER BY 
+    rm.average_rating DESC, 
+    rm.total_cast DESC;

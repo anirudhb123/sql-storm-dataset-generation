@@ -1,0 +1,60 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        CTE_Customer.c_name AS customer_name,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    JOIN 
+        customer CTE_Customer ON o.o_custkey = CTE_Customer.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CombinedMetrics AS (
+    SELECT 
+        r.r_name AS region_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        COALESCE(AVG(o.r_order_total), 0) AS avg_order_value,
+        COALESCE(SUM(s.total_available), 0) AS total_available_parts,
+        COALESCE(AVG(s.avg_supply_cost), 0) AS avg_supplier_cost
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        (SELECT DISTINCT o.o_orderkey, o.o_totalprice AS r_order_total, o.o_custkey 
+         FROM RankedOrders o 
+         WHERE o.o_orderstatus = 'O') AS o ON n.n_nationkey = o.o_custkey
+    LEFT JOIN 
+        SupplierSummary s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps)
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    region_name,
+    total_orders,
+    avg_order_value,
+    total_available_parts,
+    avg_supplier_cost
+FROM 
+    CombinedMetrics
+WHERE 
+    total_orders > 0
+ORDER BY 
+    avg_order_value DESC, total_available_parts ASC;

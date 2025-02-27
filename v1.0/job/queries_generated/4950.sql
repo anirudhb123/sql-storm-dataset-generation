@@ -1,0 +1,54 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT CAST(ci.person_id AS INTEGER)) AS actor_count,
+        DENSE_RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS year_rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info ci ON a.movie_id = ci.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.title, a.production_year
+),
+top_ranked_movies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        ranked_movies 
+    WHERE 
+        year_rank <= 5
+),
+movies_with_keywords AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        top_ranked_movies tm
+    LEFT JOIN 
+        movie_keyword mk ON tm.title = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        tm.title, tm.production_year
+)
+SELECT 
+    m.title,
+    m.production_year,
+    COALESCE(m.keywords, 'No keywords available') AS keywords,
+    CASE 
+        WHEN m.production_year < 2000 THEN 'Classic'
+        WHEN m.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era,
+    (SELECT COUNT(DISTINCT ci.person_id)
+     FROM cast_info ci 
+     WHERE ci.movie_id IN (SELECT title FROM top_ranked_movies)) AS total_actors_count
+FROM 
+    movies_with_keywords m
+ORDER BY 
+    m.production_year DESC, m.title;

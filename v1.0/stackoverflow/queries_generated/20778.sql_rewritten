@@ -1,0 +1,79 @@
+WITH LatestPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - interval '1 year'
+),
+UserPerformance AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE 
+            WHEN v.VoteTypeId = 2 THEN 1
+            ELSE 0 END) AS UpVotesCount,
+        SUM(CASE 
+            WHEN v.VoteTypeId = 3 THEN 1
+            ELSE 0 END) AS DownVotesCount,
+        COUNT(DISTINCT p.Id) AS PostsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstChange,
+        MAX(ph.CreationDate) AS LastChange,
+        COUNT(DISTINCT ph.UserId) AS EditorsCount,
+        COUNT(*) FILTER (WHERE ph.Comment IS NOT NULL) AS CommentsCount,
+        JSON_AGG(DISTINCT ph.Comment) AS ChangeComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    lp.PostId,
+    lp.Title,
+    lp.Body,
+    lp.ViewCount,
+    up.UpVotesCount,
+    up.DownVotesCount,
+    up.PostsCount,
+    pha.FirstChange,
+    pha.LastChange,
+    pha.EditorsCount,
+    COALESCE(pha.CommentsCount, 0) AS CommentsOnEdits,
+    CASE 
+        WHEN up.PostsCount > 10 THEN 'Highly Active' 
+        WHEN up.PostsCount BETWEEN 5 AND 10 THEN 'Moderately Active' 
+        ELSE 'Less Active' 
+    END AS UserActivityLevel,
+    COALESCE(pha.ChangeComments, '[]') AS EditComments
+FROM 
+    LatestPosts lp
+LEFT JOIN 
+    UserPerformance up ON lp.PostId = up.UserId
+LEFT JOIN 
+    PostHistoryAnalysis pha ON lp.PostId = pha.PostId
+WHERE 
+    lp.RN = 1 
+ORDER BY 
+    lp.ViewCount DESC
+LIMIT 100
+OFFSET 0;

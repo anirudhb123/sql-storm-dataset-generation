@@ -1,0 +1,29 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) AS rnk
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(co.total_order_value) AS total_spent
+    FROM CustomerOrders co
+    JOIN customer c ON co.c_custkey = c.c_custkey
+    GROUP BY c.c_custkey, c.c_name
+    ORDER BY total_spent DESC
+    LIMIT 10
+)
+SELECT p.p_name, COUNT(DISTINCT l.l_orderkey) AS total_orders, AVG(s.s_acctbal) AS avg_supplier_acctbal
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN RankedSuppliers rs ON l.l_suppkey = rs.s_suppkey AND rs.rnk = 1
+JOIN TopCustomers tc ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = tc.c_custkey)
+GROUP BY p.p_name
+ORDER BY total_orders DESC, avg_supplier_acctbal DESC;

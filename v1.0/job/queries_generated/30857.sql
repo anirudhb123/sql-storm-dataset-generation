@@ -1,0 +1,92 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+ActorDetails AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        AVG(y.production_year) AS avg_movie_year
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        aka_title y ON c.movie_id = y.id
+    GROUP BY 
+        a.id, ak.name
+),
+MovieKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(kw.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        m.id
+),
+CompleteInformation AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        ah.actor_name,
+        ah.total_movies,
+        ah.avg_movie_year
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        MovieKeywords mk ON m.id = mk.movie_id
+    JOIN 
+        ActorDetails ah ON m.id IN (
+            SELECT movie_id FROM cast_info WHERE person_id IN (
+                SELECT person_id FROM aka_name WHERE name = ah.actor_name
+            )
+        )
+)
+SELECT 
+    ci.movie_id,
+    ci.title,
+    ci.production_year,
+    ci.keywords,
+    ci.actor_name,
+    ci.total_movies,
+    ci.avg_movie_year,
+    ROW_NUMBER() OVER (PARTITION BY ci.actor_name ORDER BY ci.production_year DESC) AS rank_by_year,
+    NULLIF(NULLIF(ci.production_year, 2022), 2021) AS year_comparison,
+    CASE 
+        WHEN ci.production_year >= 2020 THEN 'Recent'
+        WHEN ci.production_year < 2020 AND ci.production_year >= 2010 THEN 'Moderate'
+        ELSE 'Old'
+    END AS movie_age_category
+FROM 
+    CompleteInformation ci
+WHERE 
+    ci.actor_name IS NOT NULL
+ORDER BY 
+    ci.production_year DESC, ci.actor_name;

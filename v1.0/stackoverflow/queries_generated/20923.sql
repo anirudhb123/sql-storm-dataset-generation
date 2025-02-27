@@ -1,0 +1,80 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        Reputation,
+        PostCount,
+        UpVotes,
+        DownVotes,
+        RANK() OVER (ORDER BY Reputation DESC, PostCount DESC) AS UserRank
+    FROM UserReputation
+),
+PopularTags AS (
+    SELECT 
+        t.TagName, 
+        COUNT(DISTINCT p.Id) AS TagUsageCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+    HAVING COUNT(DISTINCT p.Id) > 10
+),
+ClosedPostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.UserId AS CloserUserId,
+        ph.CreationDate AS ClosureDate,
+        ph.Comment AS CloseReason,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 -- Post Closed
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, ph.UserId, ph.CreationDate, ph.Comment
+),
+FinalReport AS (
+    SELECT 
+        tu.UserId,
+        tu.Reputation,
+        tu.PostCount,
+        pt.TagName,
+        cps.PostId,
+        cps.ClosureDate,
+        cps.CloseReason,
+        cps.CommentCount,
+        cps.UpVotes AS ClosureUpVotes,
+        cps.DownVotes AS ClosureDownVotes
+    FROM TopUsers tu
+    JOIN PopularTags pt ON pt.TagUsageCount > 10
+    LEFT JOIN ClosedPostStats cps ON cps.CloserUserId = tu.UserId
+    WHERE tu.UserRank <= 100
+)
+SELECT 
+    UserId,
+    Reputation,
+    PostCount,
+    TagName,
+    PostId,
+    ClosureDate,
+    CloseReason,
+    CommentCount,
+    ClosureUpVotes,
+    ClosureDownVotes,
+    CASE 
+        WHEN ClosureDownVotes > ClosureUpVotes THEN 'More Downvotes than Upvotes'
+        ELSE 'More or Equal Upvotes'
+    END AS VoteAnalysis
+FROM FinalReport
+ORDER BY Reputation DESC, PostCount DESC, TagName;

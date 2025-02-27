@@ -1,0 +1,83 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        AVG(vote_value) AS AvgVoteForPost
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT PostId, 
+                CASE 
+                    WHEN VoteTypeId = 2 THEN 1 
+                    WHEN VoteTypeId = 3 THEN -1 
+                    ELSE 0 
+                END AS vote_value
+         FROM Votes) v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId, 
+        ps.Title,
+        ps.CommentCount,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        ps.AvgVoteForPost,
+        ROW_NUMBER() OVER (PARTITION BY ps.CommentCount ORDER BY ps.UpVoteCount DESC) AS RankWithinComments
+    FROM 
+        PostStats ps
+)
+SELECT 
+    ph.Id AS HierarchyPostId,
+    ph.Title AS HierarchyPostTitle,
+    tp.Title AS TopPostTitle,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    tp.AvgVoteForPost,
+    CASE 
+        WHEN tp.UpVoteCount IS NULL THEN 'No Votes'
+        WHEN tp.DownVoteCount IS NULL THEN 'All Up Votes'
+        ELSE 'Mixed Votes'
+    END AS VoteDescription,
+    NULLIF(tp.CommentCount, 0) AS NonZeroCommentCount
+FROM 
+    RecursivePostHierarchy ph
+LEFT JOIN 
+    TopPosts tp ON ph.Id = tp.PostId
+WHERE 
+    ph.Level = 1 
+    OR tp.UpVoteCount > 10
+ORDER BY 
+    ph.CreationDate DESC, tp.UpVoteCount DESC;

@@ -1,0 +1,57 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2400 AND 2500
+    GROUP BY ws_sold_date_sk, ws_item_sk
+), 
+TopProducts AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        sales.total_quantity,
+        sales.total_net_paid,
+        sales.rank
+    FROM SalesData sales
+    JOIN item ON sales.ws_item_sk = item.i_item_sk
+    WHERE sales.rank <= 10
+),
+CustomerSegment AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        CASE 
+            WHEN cd_purchase_estimate < 1000 THEN 'Low'
+            WHEN cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium'
+            ELSE 'High'
+        END AS purchase_band
+    FROM customer_demographics
+)
+SELECT 
+    ts.i_item_id,
+    ts.i_item_desc,
+    ts.total_quantity,
+    ts.total_net_paid,
+    cs.purchase_band,
+    COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+    COALESCE(MAX(c.c_birth_year), 'Unknown') AS max_birth_year
+FROM TopProducts ts
+LEFT JOIN web_sales ws ON ts.ws_item_sk = ws.ws_item_sk
+LEFT JOIN CustomerSegment cs ON ws.ws_bill_cdemo_sk = cs.cd_demo_sk
+LEFT JOIN customer c ON c.c_customer_sk = ws.ws_bill_customer_sk
+WHERE 
+    cs.purchase_band IS NOT NULL
+GROUP BY 
+    ts.i_item_id, 
+    ts.i_item_desc,
+    ts.total_quantity,
+    ts.total_net_paid,
+    cs.purchase_band
+ORDER BY 
+    ts.total_net_paid DESC,
+    ts.total_quantity ASC;

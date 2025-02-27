@@ -1,0 +1,69 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rnk
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > 5000
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+NationDetails AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    INNER JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    co.c_name AS customer_name,
+    ss.s_name AS supplier_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    nd.region_name,
+    MAX(co.o_orderdate) AS last_order_date,
+    COALESCE(NULLIF(ss.total_available_qty, 0), 'N/A') AS availability_status,
+    CASE 
+        WHEN ss.avg_supply_cost IS NULL THEN 'no supplier'
+        WHEN ss.avg_supply_cost > 100 THEN 'costly supplier'
+        ELSE 'affordable supplier'
+    END AS supplier_cost_status
+FROM 
+    CustomerOrders co
+JOIN 
+    lineitem l ON co.o_orderkey = l.l_orderkey
+JOIN 
+    SupplierStats ss ON l.l_suppkey = ss.s_suppkey
+JOIN 
+    NationDetails nd ON co.c_custkey = nd.n_nationkey
+WHERE 
+    l.l_shipdate >= COALESCE(MAX(co.o_orderdate), CURRENT_DATE - INTERVAL '30 days')
+GROUP BY 
+    co.c_name, ss.s_name, nd.region_name
+HAVING 
+    total_revenue > 10000
+ORDER BY 
+    total_revenue DESC;

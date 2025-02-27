@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.OwnerDisplayName,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY tp.PostId), 0) AS TotalUpvotes,
+    COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY tp.PostId), 0) AS TotalDownvotes,
+    COALESCE(STRING_AGG(c.Text, ' | ') FILTER (WHERE c.Text IS NOT NULL), 'No Comments') AS CommentsSummary
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    UserBadges ub ON tp.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = ub.UserId)
+LEFT JOIN 
+    Votes v ON tp.PostId = v.PostId
+LEFT JOIN 
+    Comments c ON tp.PostId = c.PostId
+WHERE 
+    tp.Score > 10
+GROUP BY 
+    tp.PostId, tp.Title, tp.Score, tp.ViewCount, tp.OwnerDisplayName, ub.BadgeCount, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

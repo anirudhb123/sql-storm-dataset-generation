@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales, COUNT(l.l_quantity) AS total_items
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+FilteredPartSupp AS (
+    SELECT ps.ps_partkey, COUNT(ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING COUNT(ps.ps_suppkey) > 1
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    SUM(od.total_sales) AS total_sales,
+    p.p_retailprice,
+    COUNT(DISTINCT sh.s_suppkey) AS total_suppliers,
+    CASE 
+        WHEN COUNT(od.o_orderkey) > 0 THEN 'Y'
+        ELSE 'N'
+    END AS has_orders,
+    MAX(od.total_items) OVER (PARTITION BY p.p_partkey) AS max_items_per_order
+FROM part p
+LEFT JOIN OrderDetails od ON p.p_partkey = od.o_orderkey
+LEFT JOIN FilteredPartSupp fps ON p.p_partkey = fps.ps_partkey
+LEFT JOIN SupplierHierarchy sh ON p.p_partkey = sh.s_suppkey
+WHERE p.p_size IS NOT NULL 
+  AND p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+HAVING total_sales > 10000
+ORDER BY total_sales DESC, p.p_name
+LIMIT 10;

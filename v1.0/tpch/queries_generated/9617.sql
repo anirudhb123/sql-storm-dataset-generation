@@ -1,0 +1,37 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        DENSE_RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey, n.n_regionkey
+),
+RegionalCustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        c.c_nationkey,
+        SUM(o.o_totalprice) AS total_order_value,
+        n.n_regionkey
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey, n.n_regionkey
+)
+SELECT 
+    rs.n_regionkey,
+    rs.s_suppkey,
+    rs.s_name,
+    rs.total_supply_cost,
+    rco.c_custkey,
+    rco.c_name,
+    rco.total_order_value
+FROM RankedSuppliers rs
+JOIN RegionalCustomerOrders rco ON rs.n_nationkey = rco.n_nationkey
+WHERE rs.supplier_rank <= 5
+ORDER BY rs.n_regionkey, rs.total_supply_cost DESC, rco.total_order_value DESC;

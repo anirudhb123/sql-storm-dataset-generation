@@ -1,0 +1,71 @@
+WITH RECURSIVE movie_translations AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS original_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY m.production_year DESC) AS translation_order
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.movie_id
+    JOIN 
+        title m ON m.id = t.movie_id
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%')
+),
+cast_aggregates AS (
+    SELECT 
+        c.movie_id,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        COUNT(DISTINCT p.info) AS awards_count
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = c.person_id
+    LEFT JOIN 
+        person_info p ON p.person_id = c.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'award')
+    GROUP BY 
+        c.movie_id
+),
+movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ca.actors,
+        ca.actor_count,
+        COALESCE(ka.keyword, 'N/A') AS keywords,
+        mt.original_title,
+        mt.translation_order
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_aggregates ca ON ca.movie_id = t.id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword ka ON ka.id = mk.keyword_id
+    LEFT JOIN 
+        movie_translations mt ON mt.movie_id = t.id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actors,
+    md.actor_count,
+    COUNT(DISTINCT mv.id) AS related_movies,
+    STRING_AGG(DISTINCT mt.original_title, '; ') AS translations,
+    MAX(md.translation_order) AS max_translation_order,
+    COALESCE(NULLIF(md.keywords, 'N/A'), 'No Keywords Available') AS final_keywords
+FROM 
+    movie_details md
+LEFT JOIN 
+    movie_link ml ON ml.movie_id = md.movie_id
+LEFT JOIN 
+    title mv ON mv.id = ml.linked_movie_id
+GROUP BY 
+    md.title, md.production_year, md.actors, md.actor_count
+HAVING 
+    COUNT(DISTINCT mv.id) > 2
+ORDER BY 
+    md.production_year DESC, md.actor_count DESC;

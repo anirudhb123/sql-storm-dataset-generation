@@ -1,0 +1,57 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        TotalViews,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM 
+        UserPostStats
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        C.REASON AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes C ON ph.Comment = CAST(C.Id AS VARCHAR)
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    tu.DisplayName,
+    tu.PostCount,
+    tu.TotalViews,
+    tu.TotalScore,
+    COALESCE(c.CloseReason, 'No Closures') AS LastCloseReason,
+    COUNT(DISTINCT cp.PostId) AS ClosedPostCount
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    ClosedPostHistory cp ON tu.UserId = cp.UserId
+GROUP BY 
+    tu.UserId, tu.DisplayName, tu.PostCount, tu.TotalViews, tu.TotalScore, c.CloseReason
+HAVING 
+    SUM(CASE WHEN cp.PostId IS NOT NULL THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    tu.ScoreRank; 

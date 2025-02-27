@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        AVG(CASE WHEN m.info_type_id IS NOT NULL THEN 1 ELSE 0 END) AS has_info
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = a.id
+    LEFT JOIN 
+        movie_info m ON a.id = m.movie_id AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'summary')
+    GROUP BY 
+        a.id, a.title, a.production_year
+), MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.name) AS company_count,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+), MoviesWithInfo AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.actor_count,
+        mc.company_count,
+        mc.companies,
+        ROW_NUMBER() OVER (PARTITION BY rm.production_year ORDER BY rm.actor_count DESC) AS rank_by_actors,
+        ROW_NUMBER() OVER (PARTITION BY rm.production_year ORDER BY mc.company_count DESC) AS rank_by_companies
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieCompanies mc ON rm.title = mc.movie_id
+)
+SELECT 
+    mwi.title,
+    mwi.production_year,
+    mwi.actor_count,
+    mwi.company_count,
+    CASE 
+        WHEN mwi.actor_count IS NULL THEN 'No Actors'
+        ELSE 'Has Actors'
+    END AS actor_status,
+    COALESCE(mwi.companies, 'No Companies') AS company_list
+FROM 
+    MoviesWithInfo mwi
+WHERE 
+    (mwi.actor_count > 0 OR mwi.company_count IS NULL)
+    AND mwi.rank_by_actors <= 5
+ORDER BY 
+    mwi.production_year DESC, 
+    mwi.actor_count DESC;

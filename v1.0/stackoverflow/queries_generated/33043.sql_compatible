@@ -1,0 +1,86 @@
+
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.ViewCount,
+        a.Score,
+        a.ParentId,
+        rp.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePosts rp ON a.ParentId = rp.PostId
+    WHERE 
+        a.PostTypeId = 2  
+),
+AggregatedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY rp.PostId ORDER BY rp.CreationDate DESC) AS RowNum
+    FROM 
+        RecursivePosts rp
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = rp.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate
+),
+FinalResults AS (
+    SELECT 
+        a.PostId,
+        a.Title,
+        a.CreationDate,
+        a.UpVotes,
+        a.DownVotes,
+        a.CommentCount,
+        a.BadgeCount,
+        CASE 
+            WHEN a.UpVotes - a.DownVotes > 10 THEN 'Hot Post'
+            WHEN a.CommentCount > 5 THEN 'Discussion Starter'
+            ELSE 'Regular Post'
+        END AS PostCategory
+    FROM 
+        AggregatedData a
+    WHERE 
+        a.RowNum = 1  
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.CreationDate,
+    f.UpVotes,
+    f.DownVotes,
+    f.CommentCount,
+    f.BadgeCount,
+    f.PostCategory
+FROM 
+    FinalResults f
+ORDER BY 
+    f.UpVotes DESC, f.CommentCount DESC
+LIMIT 10;

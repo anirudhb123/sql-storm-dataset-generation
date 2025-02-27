@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.CreationDate, u.DisplayName
+),
+
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        MIN(ph.CreationDate) AS FirstChangeDate,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        t.Count,
+        ARRAY_AGG(DISTINCT p.Title) AS RelatedPosts
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName, t.Count
+    ORDER BY 
+        t.Count DESC
+    LIMIT 5
+)
+
+SELECT 
+    rp.Id,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.VoteCount,
+    phs.ChangeCount,
+    phs.FirstChangeDate,
+    phs.LastChangeDate,
+    pt.TagName,
+    pt.Count,
+    pt.RelatedPosts
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistorySummary phs ON rp.Id = phs.PostId
+LEFT JOIN 
+    PopularTags pt ON rp.Id IN (SELECT UNNEST(string_to_array(rp.Tags, ',')))
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.ViewCount DESC, rp.CreationDate DESC;

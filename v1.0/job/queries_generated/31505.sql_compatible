@@ -1,0 +1,57 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        1 AS level,
+        title.title,
+        title.production_year
+    FROM 
+        aka_title AS title
+    JOIN 
+        movie_link AS ml ON title.id = ml.movie_id
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'is sequel of')
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mh.level + 1,
+        title.title,
+        title.production_year
+    FROM 
+        MovieHierarchy AS mh
+    JOIN 
+        movie_link AS ml ON mh.movie_id = ml.linked_movie_id
+    JOIN 
+        aka_title AS title ON ml.movie_id = title.id
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'is sequel of')
+)
+
+SELECT 
+    mv.title AS Original_Movie,
+    mv.production_year AS Original_Year,
+    COALESCE(mh.title, 'No Sequel') AS Sequel_Title,
+    COALESCE(mh.production_year, 'N/A') AS Sequel_Year,
+    COUNT(cast.id) AS Total_Cast,
+    STRING_AGG(DISTINCT aka.name, ', ') AS Cast_Names,
+    SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS Named_Roles
+FROM 
+    aka_title AS mv
+LEFT JOIN 
+    MovieHierarchy mh ON mv.id = mh.movie_id
+LEFT JOIN 
+    complete_cast cc ON mv.id = cc.movie_id
+LEFT JOIN 
+    cast_info cast ON cc.subject_id = cast.id
+LEFT JOIN 
+    aka_name aka ON cast.person_id = aka.person_id
+LEFT JOIN 
+    role_type rt ON cast.role_id = rt.id
+WHERE 
+    mv.production_year >= 2000
+GROUP BY 
+    mv.title, mv.production_year, mh.title, mh.production_year
+ORDER BY 
+    mv.production_year DESC;

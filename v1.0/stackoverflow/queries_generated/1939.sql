@@ -1,0 +1,60 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyAmount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- Bounty start/close
+    GROUP BY p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+PostHistoryStats AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount,
+        ARRAY_AGG(DISTINCT ph.PostHistoryTypeId) AS HistoryTypes
+    FROM PostHistory ph
+    GROUP BY ph.PostId, ph.PostHistoryTypeId
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        UserCount = COUNT(DISTINCT ps.PostId),
+        AvgReputation = AVG(ur.Reputation)
+    FROM UserReputation ur
+    JOIN Posts ps ON ur.UserId = ps.OwnerUserId
+    GROUP BY ur.UserId
+    HAVING COUNT(DISTINCT ps.PostId) > 5
+)
+SELECT 
+    p.Title,
+    ps.CommentCount,
+    ps.TotalBountyAmount,
+    uh.UserId,
+    uh.UserCount,
+    uh.AvgReputation,
+    ph.HistoryTypes,
+    oh.ReputationRank
+FROM PostStatistics ps
+JOIN Posts p ON p.Id = ps.PostId
+LEFT JOIN PostHistoryStats ph ON ph.PostId = ps.PostId
+JOIN TopUsers uh ON uh.UserId = p.OwnerUserId
+JOIN UserReputation oh ON oh.UserId = p.OwnerUserId
+WHERE 
+    ps.CommentCount > 0
+    AND (p.LastEditDate IS NULL OR p.LastEditDate < NOW() - INTERVAL '1 month')
+ORDER BY 
+    ps.TotalBountyAmount DESC,
+    ps.CommentCount DESC
+LIMIT 10;

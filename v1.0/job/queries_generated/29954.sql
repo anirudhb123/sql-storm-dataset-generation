@@ -1,0 +1,45 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS MovieTitle,
+        t.production_year AS ProductionYear,
+        k.keyword AS Keyword,
+        COALESCE(cast.id, 0) AS CastID,
+        a.name AS ActorName,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY a.name) AS ActorRank
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info cast ON t.id = cast.movie_id
+    LEFT JOIN 
+        aka_name a ON cast.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000
+        AND k.keyword IS NOT NULL
+),
+AggregatedData AS (
+    SELECT 
+        MovieTitle,
+        ProductionYear,
+        STRING_AGG(ActorName, ', ') AS Actors,
+        STRING_AGG(DISTINCT Keyword, ', ') AS Keywords
+    FROM 
+        RankedMovies
+    WHERE 
+        ActorRank <= 3
+    GROUP BY 
+        MovieTitle, ProductionYear
+)
+SELECT 
+    MovieTitle,
+    ProductionYear,
+    Actors,
+    Keywords,
+    COUNT(*) OVER () AS TotalMovies
+FROM 
+    AggregatedData
+ORDER BY 
+    ProductionYear DESC, MovieTitle;

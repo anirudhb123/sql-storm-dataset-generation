@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.UserRank <= 5
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.DisplayName,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    ub.BadgeCount,
+    CASE 
+        WHEN tp.CreationDate < NOW() - INTERVAL '1 year' THEN 'Older Post'
+        ELSE 'Recent Post' 
+    END AS PostAge,
+    COALESCE(NULLIF(tp.CommentCount, 0), 'No Comments') AS CommentsInfo
+FROM 
+    Users up
+JOIN 
+    TopPosts tp ON up.Id = tp.PostId
+JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+ORDER BY 
+    tp.Score DESC, 
+    tp.ViewCount DESC;

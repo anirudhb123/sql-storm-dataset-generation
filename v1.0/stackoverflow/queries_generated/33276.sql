@@ -1,0 +1,79 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.Score, 0) AS Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.Score, 0) AS Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE cte ON p.ParentId = cte.PostId
+),
+
+RankedPosts AS (
+    SELECT 
+        r.*,
+        RANK() OVER (PARTITION BY r.OwnerUserId ORDER BY r.Score DESC, r.CreationDate DESC) AS RankScore
+    FROM 
+        RecursivePostCTE r
+),
+
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1  -- Gold badges only
+    GROUP BY 
+        b.UserId
+),
+
+UserViews AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(COALESCE(u.Views, 0)) AS TotalViews
+    FROM 
+        Users u
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    ub.BadgeCount,
+    uv.TotalViews,
+    pp.RankScore
+FROM 
+    RankedPosts pp
+LEFT JOIN 
+    UserBadges ub ON pp.OwnerUserId = ub.UserId
+LEFT JOIN 
+    UserViews uv ON pp.OwnerUserId = uv.UserId
+WHERE 
+    pp.RankScore <= 5  -- Top 5 posts per user
+    AND pp.ViewCount > 100  -- Only consider posts with more than 100 views
+    AND pp.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 month'  -- Posts created in the last month
+ORDER BY 
+    pp.OwnerUserId, pp.RankScore;

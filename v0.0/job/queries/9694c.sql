@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS movie_budget, min(mi_idx.info) AS movie_votes, min(n.name) AS male_writer, min(t.title) AS violent_movie_title
+FROM cast_info AS ci, info_type AS it1, info_type AS it2, keyword AS k, movie_info AS mi, movie_info_idx AS mi_idx, movie_keyword AS mk, name AS n, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND t.id = ci.movie_id AND t.id = mk.movie_id AND ci.movie_id = mi.movie_id AND ci.movie_id = mi_idx.movie_id AND ci.movie_id = mk.movie_id AND mi.movie_id = mi_idx.movie_id AND mi.movie_id = mk.movie_id AND mi_idx.movie_id = mk.movie_id AND n.id = ci.person_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id AND k.id = mk.keyword_id
+AND t.id < 264766 AND mk.id < 1829493 AND ci.nr_order IN (1025, 103, 1047, 1203, 15002, 1990, 252, 378, 5, 827) AND t.imdb_index IN ('I', 'II', 'IV', 'IX', 'X', 'XIV', 'XV', 'XVII', 'XVIII') AND mi.info_type_id < 11 AND n.md5sum > '6f3db7dc9403ef461b795ca9dba43817';

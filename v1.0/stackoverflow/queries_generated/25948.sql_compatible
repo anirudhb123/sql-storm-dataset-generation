@@ -1,0 +1,69 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.OwnerUserId,
+        p.CreationDate,
+        pt.Name AS PostType,
+        STRING_AGG(tag.TagName, ', ') AS Tags,
+        p.AnswerCount,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS UserRank
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        LATERAL UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS tag(TagName) ON TRUE
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.OwnerUserId, p.CreationDate, pt.Name, u.DisplayName, p.AnswerCount, p.ViewCount
+), PopularityMetrics AS (
+    SELECT 
+        PostId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    GROUP BY 
+        PostId
+), FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.PostType,
+        rp.Tags,
+        pm.CommentCount,
+        pm.UpVotes,
+        pm.DownVotes,
+        (rp.AnswerCount + pm.CommentCount) AS EngagementScore,
+        rp.ViewCount,
+        rp.UserRank
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PopularityMetrics pm ON rp.PostId = pm.PostId
+)
+SELECT 
+    *,
+    RANK() OVER (ORDER BY EngagementScore DESC, ViewCount DESC) AS EngagementRank
+FROM 
+    FinalResults
+WHERE 
+    UserRank = 1
+ORDER BY 
+    EngagementRank
+LIMIT 10;

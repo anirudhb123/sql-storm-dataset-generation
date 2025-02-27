@@ -1,0 +1,97 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT
+        ca.person_id AS actor_id,
+        ca.movie_id,
+        1 AS level
+    FROM
+        cast_info ca
+    WHERE
+        ca.role_id IN (SELECT id FROM role_type WHERE role = 'Actor')
+    
+    UNION ALL
+    
+    SELECT
+        ca.person_id AS actor_id,
+        ca.movie_id,
+        ah.level + 1
+    FROM
+        cast_info ca
+    INNER JOIN ActorHierarchy ah ON ca.movie_id = ah.movie_id
+    WHERE
+        ca.role_id IN (SELECT id FROM role_type WHERE role = 'Supporting Actor')
+),
+
+RankedMovies AS (
+    SELECT 
+        ak.name AS actor_name,
+        mv.title AS movie_title,
+        mv.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY mv.production_year DESC) AS rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title mv ON ci.movie_id = mv.movie_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+
+CompanyInfo AS (
+    SELECT
+        cb.company_id,
+        cb.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COALESCE(ct.kind, 'Unknown') AS company_type_full
+    FROM
+        movie_companies cb
+    JOIN 
+        company_name cn ON cb.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON cb.company_type_id = ct.id
+),
+
+MovieMetrics AS (
+    SELECT
+        mv.id AS movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_actors,
+        COUNT(DISTINCT mkw.keyword_id) AS total_keywords,
+        COUNT(DISTINCT ci.role_id) FILTER (WHERE rt.role = 'Actor') AS lead_actors
+    FROM 
+        aka_title mv
+    LEFT JOIN 
+        cast_info ci ON mv.id = ci.movie_id
+    LEFT JOIN 
+        movie_keyword mkw ON mv.id = mkw.movie_id
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        mv.id
+)
+
+SELECT 
+    ah.actor_id,
+    rm.actor_name,
+    rm.movie_title,
+    rm.production_year,
+    cm.company_name,
+    COALESCE(cm.company_type, 'Not Available') AS company_type,
+    mm.total_actors,
+    mm.total_keywords,
+    mm.lead_actors
+FROM 
+    ActorHierarchy ah
+INNER JOIN 
+    RankedMovies rm ON ah.actor_id = rm.actor_name
+LEFT JOIN 
+    CompanyInfo cm ON ah.movie_id = cm.movie_id
+JOIN 
+    MovieMetrics mm ON rm.movie_title = mm.movie_id
+WHERE 
+    rm.rank <= 5
+AND 
+    mm.total_actors > 10
+ORDER BY 
+    ah.actor_id, rm.production_year DESC;

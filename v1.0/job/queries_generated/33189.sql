@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.kind_id = 1  -- Assuming '1' represents 'movie'
+    
+    UNION ALL 
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    m.title AS base_movie_title,
+    m.production_year AS base_movie_year,
+    mh.title AS linked_movie_title,
+    mh.production_year AS linked_movie_year,
+    ci.role_id,
+    COUNT(ci.person_id) AS actor_count, 
+    COUNT(DISTINCT c.name) AS unique_actor_names,
+    STRING_AGG(DISTINCT c.name, ', ') AS actor_names,
+    SUM(CASE WHEN c.gender = 'F' THEN 1 ELSE 0 END) AS female_count,
+    SUM(CASE WHEN c.gender = 'M' THEN 1 ELSE 0 END) AS male_count
+FROM 
+    MovieHierarchy AS m
+LEFT JOIN 
+    complete_cast AS cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name AS c ON ci.person_id = c.person_id
+LEFT JOIN 
+    MovieHierarchy AS mh ON ci.movie_id = mh.movie_id AND m.level = mh.level - 1
+WHERE 
+    m.production_year >= 2000
+GROUP BY 
+    m.title, m.production_year, mh.title, mh.production_year, ci.role_id
+HAVING 
+    COUNT(ci.person_id) > 0 
+ORDER BY 
+    m.production_year DESC, actor_count DESC
+LIMIT 50;

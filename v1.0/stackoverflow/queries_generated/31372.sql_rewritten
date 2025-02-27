@@ -1,0 +1,93 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Votes v
+    GROUP BY v.UserId
+),
+PostMetrics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(NULLIF(ph.AnswerCount, 0), 0) AS AnswerCount,
+        COALESCE(NULLIF(cm.CommentCount, 0), 0) AS CommentCount,
+        COALESCE(NULLIF(b.BadgeCount, 0), 0) AS BadgeCount,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(*) AS AnswerCount
+        FROM Posts
+        WHERE PostTypeId = 2  
+        GROUP BY ParentId
+    ) ph ON p.Id = ph.ParentId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) cm ON p.Id = cm.PostId
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount
+        FROM Badges
+        GROUP BY UserId
+    ) b ON p.OwnerUserId = b.UserId
+    LEFT JOIN UserVotes v ON p.OwnerUserId = v.UserId
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6, 24)  
+    GROUP BY ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    pm.AnswerCount,
+    pm.CommentCount,
+    pm.BadgeCount,
+    pm.UpVotes,
+    pm.DownVotes,
+    phs.EditCount,
+    phs.LastEditDate,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ')
+     FROM Tags t
+     WHERE t.WikiPostId = p.Id) AS Tags
+FROM Posts p
+LEFT JOIN PostMetrics pm ON p.Id = pm.Id
+LEFT JOIN PostHistoryStats phs ON p.Id = phs.PostId
+LEFT JOIN RecursivePostHierarchy r ON p.Id = r.PostId 
+WHERE p.PostTypeId = 1  
+ORDER BY p.CreationDate DESC, pm.AnswerCount DESC;

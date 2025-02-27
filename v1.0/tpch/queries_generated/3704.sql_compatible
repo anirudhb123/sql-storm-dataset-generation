@@ -1,0 +1,59 @@
+
+WITH NationSupplier AS (
+    SELECT 
+        n.n_name AS nation_name,
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        n.n_name, s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rnk
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_name AS cust_name,
+        c.total_orders,
+        c.total_spent,
+        n.n_name AS nation_name
+    FROM 
+        CustomerOrders c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.rnk <= 5
+)
+SELECT 
+    ns.nation_name,
+    ns.s_name,
+    ns.total_supply_cost,
+    tc.cust_name,
+    tc.total_orders,
+    tc.total_spent
+FROM 
+    NationSupplier ns
+FULL OUTER JOIN 
+    TopCustomers tc ON ns.nation_name = tc.nation_name
+WHERE 
+    (tc.total_spent IS NOT NULL OR ns.total_supply_cost IS NOT NULL)
+ORDER BY 
+    ns.total_supply_cost DESC, 
+    tc.total_spent DESC;

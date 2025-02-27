@@ -1,0 +1,53 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.CreationDate, 
+        CAST(p.Title AS VARCHAR(255)) AS FullTitle,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        a.CreationDate,
+        CONCAT(r.FullTitle, ' -> ', a.Title) AS FullTitle,
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy r ON a.ParentId = r.PostId
+)
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    COUNT(DISTINCT p.Id) AS TotalQuestions,
+    COUNT(DISTINCT a.Id) AS TotalAnswers,
+    SUM(COALESCE(a.Score, 0)) AS TotalAnswerScore,
+    SUM(COALESCE(v.CreationDate, 0)) AS TotalVotes,
+    MAX(p.CreationDate) AS LatestQuestionDate,
+    STRING_AGG(DISTINCT r.FullTitle, '; ') AS RelatedQuestionsHierarchy
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1  
+LEFT JOIN 
+    Posts a ON a.ParentId = p.Id  
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id  
+LEFT JOIN 
+    RecursivePostHierarchy r ON r.PostId = p.Id
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 5  
+ORDER BY 
+    TotalAnswerScore DESC, UserDisplayName ASC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

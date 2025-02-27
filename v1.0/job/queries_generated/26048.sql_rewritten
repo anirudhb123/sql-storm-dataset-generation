@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        title.title,
+        title.production_year,
+        COUNT(cast_info.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY title.production_year ORDER BY COUNT(cast_info.id) DESC) AS rank
+    FROM 
+        title
+    JOIN 
+        movie_companies ON title.id = movie_companies.movie_id
+    JOIN 
+        cast_info ON title.id = cast_info.movie_id
+    GROUP BY 
+        title.title, title.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank <= 5  
+),
+MovieKeywords AS (
+    SELECT 
+        title.title,
+        keyword.keyword
+    FROM 
+        TopMovies
+    JOIN 
+        movie_keyword ON TopMovies.title = movie_keyword.movie_id
+    JOIN 
+        keyword ON movie_keyword.keyword_id = keyword.id
+),
+MergedData AS (
+    SELECT 
+        mk.title, 
+        mk.keyword, 
+        ak.name AS aka_name, 
+        co.name AS company_name
+    FROM 
+        MovieKeywords mk
+    LEFT JOIN 
+        aka_title ak ON mk.title = ak.title
+    LEFT JOIN 
+        movie_companies mc ON ak.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id 
+)
+SELECT 
+    title, 
+    STRING_AGG(DISTINCT keyword, ', ') AS keywords, 
+    STRING_AGG(DISTINCT aka_name, ', ') AS alternate_names,
+    STRING_AGG(DISTINCT company_name, ', ') AS production_companies
+FROM 
+    MergedData
+GROUP BY 
+    title
+ORDER BY 
+    title;

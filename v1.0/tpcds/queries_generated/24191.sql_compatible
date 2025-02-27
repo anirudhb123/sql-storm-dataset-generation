@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT ws_ship_date_sk, ws_item_sk, ws_quantity, ws_ext_sales_price,
+           RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_ship_date_sk DESC) as date_rank
+    FROM web_sales
+    WHERE ws_ship_date_sk IN (
+        SELECT d_date_sk
+        FROM date_dim
+        WHERE d_year = 2023 AND d_moy IN (1, 2, 3)
+    )
+),
+InventoryData AS (
+    SELECT inv_item_sk, SUM(inv_quantity_on_hand) AS total_inventory
+    FROM inventory
+    GROUP BY inv_item_sk
+),
+CustomerReturns AS (
+    SELECT wr_item_sk, SUM(wr_return_quantity) AS total_returns
+    FROM web_returns
+    GROUP BY wr_item_sk
+),
+SalesSummary AS (
+    SELECT sd.ws_item_sk,
+           COALESCE(SUM(sd.ws_quantity), 0) AS total_sales,
+           COALESCE(SUM(sd.ws_ext_sales_price), 0) AS total_revenue,
+           COALESCE(ir.total_inventory, 0) AS total_inventory,
+           COALESCE(cr.total_returns, 0) AS total_returns
+    FROM SalesData sd
+    LEFT JOIN InventoryData ir ON sd.ws_item_sk = ir.inv_item_sk
+    LEFT JOIN CustomerReturns cr ON sd.ws_item_sk = cr.wr_item_sk
+    GROUP BY sd.ws_item_sk
+)
+SELECT s.ws_item_sk,
+       s.total_sales,
+       s.total_revenue,
+       s.total_inventory,
+       s.total_returns,
+       CASE 
+           WHEN s.total_inventory = 0 THEN 'Out of Stock'
+           WHEN s.total_sales > s.total_inventory THEN 'Sales Exceeded Inventory'
+           ELSE 'In Stock' 
+       END AS stock_status,
+       NULLIF(s.total_revenue / NULLIF(s.total_sales, 0), 0) AS avg_sale_price,
+       CASE 
+           WHEN s.total_returns > 0 THEN 
+               (SELECT COUNT(DISTINCT wr_order_number) 
+                FROM web_returns 
+                WHERE wr_item_sk = s.ws_item_sk) 
+           ELSE 
+               NULL 
+       END AS return_order_count
+FROM SalesSummary s
+ORDER BY s.total_revenue DESC
+LIMIT 100;

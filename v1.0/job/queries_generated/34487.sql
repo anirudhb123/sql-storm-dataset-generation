@@ -1,0 +1,77 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link mc
+    JOIN 
+        aka_title m ON mc.linked_movie_id = m.movie_id
+    JOIN 
+        movie_hierarchy mh ON mc.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5
+),
+
+cast_activity AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS all_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.person_id
+),
+
+movie_details AS (
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        kt.kind AS movie_kind,
+        COALESCE(cast_ac.movie_count, 0) AS cast_count,
+        COALESCE(cast_ac.all_names, 'No Cast') AS cast_names
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        kind_type kt ON m.kind_id = kt.id
+    LEFT JOIN 
+        cast_activity cast_ac ON m.movie_id = cast_ac.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+)
+
+SELECT 
+    mv.title AS Movie_Title,
+    mv.production_year AS Production_Year,
+    mv.movie_kind AS Kind,
+    mv.cast_count AS Number_of_Cast,
+    mv.cast_names AS Cast_Names,
+    mh.level AS Hierarchy_Level
+FROM 
+    movie_details mv
+JOIN 
+    movie_hierarchy mh ON mv.id = mh.movie_id
+WHERE 
+    mv.cast_count > 0
+ORDER BY 
+    mv.production_year DESC, 
+    mv.title ASC;
+
+This query incorporates several advanced SQL constructs. First, it creates a recursive common table expression (CTE) for `movie_hierarchy` to trace movie links up to a specified level. It then builds a second CTE `cast_activity`, which aggregates cast data, counting distinct movies each person has appeared in and concatenating their names. The third CTE `movie_details` retrieves essential details from `aka_title` and joins it with `kind_type` and `cast_activity`, utilizing left joins to include all movies regardless of whether they have cast details. Finally, the query selects various attributes from the resulting data set, filtering for movies with cast members. The ordering is done by production year and title for clear benchmarking insights.

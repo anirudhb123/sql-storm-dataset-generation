@@ -1,0 +1,31 @@
+WITH RECURSIVE part_tree AS (
+    SELECT p_partkey, p_name, 
+           ARRAY[p_name] AS names_path 
+    FROM part 
+    WHERE p_name LIKE 'Rubber%' 
+    UNION ALL 
+    SELECT p.ps_partkey, 
+           p2.p_name, 
+           names_path || p2.p_name 
+    FROM part p2 
+    JOIN partsupp p ON p.ps_partkey = p2.p_partkey 
+    JOIN part_tree pt ON pt.p_partkey = p.ps_partkey 
+    WHERE p2.p_name IS NOT NULL 
+), 
+string_benchmark AS (
+    SELECT pt.p_partkey, 
+           pt.p_name, 
+           pt.names_path, 
+           LENGTH(pt.p_name) AS name_length, 
+           PG_NARGS(pt.names_path) AS path_depth 
+    FROM part_tree pt
+)
+SELECT sb.p_partkey, 
+       sb.p_name, 
+       sb.name_length, 
+       sb.path_depth, 
+       CONCAT_WS(' -> ', sb.names_path) AS full_path 
+FROM string_benchmark sb 
+WHERE sb.name_length > 10 
+ORDER BY sb.path_depth DESC, sb.name_length DESC 
+LIMIT 100;

@@ -1,0 +1,87 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        0 AS level,
+        CAST(t.title AS VARCHAR(255)) AS path
+    FROM
+        aka_title t
+    WHERE 
+        t.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || t.title AS VARCHAR(255))
+    FROM
+        aka_title t
+    JOIN MovieHierarchy mh ON t.episode_of_id = mh.movie_id
+),
+ActorMovieCount AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.person_id
+),
+TopActors AS (
+    SELECT 
+        a.name,
+        amc.movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        ActorMovieCount amc ON a.person_id = amc.person_id
+    WHERE 
+        amc.movie_count > 5
+),
+MoviesWithKeywords AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    mh.path,
+    tw.name AS top_actor,
+    mwk.keywords
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    MoviesWithKeywords mwk ON mh.movie_id = mwk.movie_id
+LEFT JOIN 
+    TopActors tw ON mwk.movie_id IN (
+        SELECT m.movie_id 
+        FROM cast_info m 
+        WHERE m.role_id IN (
+            SELECT r.id 
+            FROM role_type r 
+            WHERE r.role LIKE '%lead%'
+        )
+        AND m.person_id IN (
+            SELECT a.person_id 
+            FROM aka_name a 
+            WHERE a.surname_pcode IS NOT NULL
+        )
+    )
+ORDER BY 
+    mh.production_year DESC, mh.level;

@@ -1,0 +1,72 @@
+WITH UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(vt.VoteTypeId IN (2)), 0) AS UpVotesReceived,  
+        COALESCE(SUM(vt.VoteTypeId IN (3)), 0) AS DownVotesReceived,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        COUNT(DISTINCT c.Id) AS CommentsMade
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes vt ON vt.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+ActiveQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Tags,
+        u.DisplayName AS OwnerName,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(SUM(vt.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(vt.VoteTypeId = 3), 0) AS TotalDownVotes
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes vt ON vt.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.LastActivityDate >= NOW() - INTERVAL '30 days' -- Active questions within the last 30 days
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Tags, u.DisplayName
+),
+TopActiveUsers AS (
+    SELECT 
+        um.UserId,
+        um.DisplayName,
+        SUM(um.UpVotesReceived) AS TotalUpVotes,
+        SUM(um.PostsCreated) AS TotalPosts,
+        COUNT(DISTINCT aq.PostId) AS ActiveQuestionsCount
+    FROM 
+        UserMetrics um 
+    JOIN 
+        ActiveQuestions aq ON um.UserId = aq.OwnerName
+    GROUP BY 
+        um.UserId, um.DisplayName
+)
+
+SELECT 
+    u.DisplayName AS TopUser,
+    u.TotalUpVotes,
+    u.TotalPosts,
+    u.ActiveQuestionsCount
+FROM 
+    TopActiveUsers u
+ORDER BY 
+    u.TotalUpVotes DESC, u.TotalPosts DESC
+LIMIT 10;

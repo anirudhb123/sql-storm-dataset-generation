@@ -1,0 +1,50 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS SaleRank
+    FROM web_sales ws
+    WHERE ws.ws_quantity > 0
+),
+HighProfitItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        SUM(rs.ws_net_profit) AS total_profit
+    FROM RankedSales rs
+    JOIN item i ON rs.ws_item_sk = i.i_item_sk
+    WHERE rs.SaleRank <= 10
+    GROUP BY i.i_item_id, i.i_item_desc
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        COUNT(rs.ws_order_number) AS total_orders,
+        SUM(rs.ws_net_profit) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN RankedSales rs ON c.c_customer_sk = rs.ws_bill_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender
+)
+SELECT 
+    cs.c_customer_id,
+    cs.cd_gender,
+    cs.total_orders,
+    cs.total_spent,
+    CASE 
+        WHEN cs.total_spent IS NULL OR cs.total_orders IS NULL THEN 'No Purchases'
+        ELSE 'Active Customer'
+    END AS customer_status,
+    hpi.i_item_id,
+    hpi.i_item_desc,
+    hpi.total_profit
+FROM CustomerStats cs
+LEFT JOIN HighProfitItems hpi ON cs.total_spent > 1000
+WHERE cs.total_orders > 0
+ORDER BY cs.total_spent DESC, hpi.total_profit DESC
+FETCH FIRST 50 ROWS ONLY;

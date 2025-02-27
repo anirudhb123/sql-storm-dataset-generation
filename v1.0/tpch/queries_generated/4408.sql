@@ -1,0 +1,60 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supply_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        r.r_name,
+        total_avail_qty,
+        total_supply_cost
+    FROM 
+        SupplierStats s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        supply_rank <= 3
+)
+SELECT 
+    c.c_name,
+    c.total_spent,
+    COALESCE(s.s_name, 'No Supplier') AS top_supplier,
+    c.order_count,
+    CASE 
+        WHEN c.total_spent IS NULL THEN 'No Purchases'
+        ELSE 'Active Customer'
+    END AS customer_status
+FROM 
+    CustomerPurchases c
+LEFT JOIN 
+    TopSuppliers s ON c.c_custkey = (SELECT TOP 1 c2.c_custkey FROM CustomerPurchases c2 WHERE c2.total_spent = c.total_spent ORDER BY c2.order_count DESC)
+ORDER BY 
+    c.total_spent DESC, c.c_name;

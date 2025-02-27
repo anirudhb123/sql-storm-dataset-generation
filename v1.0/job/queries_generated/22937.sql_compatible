@@ -1,0 +1,70 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ak.name AS actor_name,
+        rk.role AS role,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY ak.name) AS actor_order,
+        COUNT(*) OVER (PARTITION BY mt.id) AS actor_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        role_type rk ON ci.role_id = rk.id
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    WHERE 
+        mt.production_year BETWEEN 2000 AND 2023
+        AND (mt.kind_id IN (1, 2, 3) OR mt.title LIKE '%Action%')
+),
+KeywordAggr AS (
+    SELECT 
+        movie_id,
+        STRING_AGG(keyword, ', ') AS keywords
+    FROM 
+        MovieDetails
+    GROUP BY 
+        movie_id
+),
+ActorRanked AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN actor_order = 1 THEN 'Lead Actor'
+            WHEN actor_order <= 3 THEN 'Supporting Actor'
+            ELSE 'Minor Role'
+        END AS actor_rank
+    FROM 
+        MovieDetails
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    COALESCE(ka.keywords, 'No Keywords Associated') AS keywords,
+    STRING_AGG(DISTINCT ar.actor_name || ' (' || ar.actor_rank || ')', ', ') AS actors_list,
+    COUNT(DISTINCT ar.actor_name) AS distinct_actor_count,
+    CASE 
+        WHEN COUNT(DISTINCT ar.actor_name) > 5 THEN 'Ensemble Cast'
+        WHEN COUNT(DISTINCT ar.actor_name) < 1 THEN 'No cast information'
+        ELSE 'Standard Cast'
+    END AS cast_size_category
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    KeywordAggr ka ON md.movie_id = ka.movie_id
+LEFT JOIN 
+    ActorRanked ar ON md.movie_id = ar.movie_id
+GROUP BY 
+    md.movie_id, md.title, md.production_year, ka.keywords
+HAVING 
+    COUNT(DISTINCT ar.actor_name) > 0
+ORDER BY 
+    md.production_year DESC, md.title
+LIMIT 50;

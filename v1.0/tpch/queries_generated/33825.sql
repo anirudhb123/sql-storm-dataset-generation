@@ -1,0 +1,31 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 5000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty < 100 AND sh.level < 5
+)
+
+SELECT 
+    c.c_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(l.l_quantity) AS avg_quantity,
+    ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank,
+    RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) ASC) AS total_revenue_rank
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN supplier_hierarchy sh ON l.l_suppkey = sh.s_suppkey
+WHERE l.l_shipdate >= '2023-01-01'
+AND (l.l_returnflag = 'N' OR l.l_linestatus = 'O')
+GROUP BY c.c_name, c.c_nationkey
+HAVING AVG(l.l_discount) < 0.05
+ORDER BY total_revenue DESC, revenue_rank
+LIMIT 10;

@@ -1,0 +1,80 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(COUNT(DISTINCT P.Id), 0) AS PostsCount,
+        COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS ClosedPostsCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY U.Id, U.DisplayName
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges B
+    GROUP BY B.UserId
+),
+CombinedUserStats AS (
+    SELECT 
+        UA.UserId, 
+        UA.DisplayName,
+        UA.Upvotes,
+        UA.Downvotes,
+        UA.PostsCount,
+        UA.ClosedPostsCount,
+        COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+        COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+        COALESCE(UB.BronzeBadges, 0) AS BronzeBadges
+    FROM UserActivity UA
+    LEFT JOIN UserBadges UB ON UA.UserId = UB.UserId
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        (Upvotes - Downvotes) AS NetVotes,
+        (PostsCount + GoldBadges * 10 + SilverBadges * 5 + BronzeBadges) AS Score,
+        ROW_NUMBER() OVER (ORDER BY (Upvotes - Downvotes) DESC, Score DESC) AS Rank
+    FROM CombinedUserStats
+),
+MostActivePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(C) AS CommentCount,
+        FIRST_VALUE(U.DisplayName) OVER (PARTITION BY P.Id ORDER BY C.CreationDate DESC) AS LastCommenter
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Users U ON C.UserId = U.Id
+    WHERE P.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+    GROUP BY P.Id, P.Title
+),
+FinalResult AS (
+    SELECT 
+        TU.DisplayName,
+        TU.NetVotes,
+        TU.Score,
+        COALESCE(MAP.CommentCount, 0) AS ActivePostCount,
+        MAP.LastCommenter
+    FROM TopUsers TU
+    LEFT JOIN MostActivePosts MAP ON TU.UserId = MAP.PostId
+    WHERE TU.Score > 50 
+)
+SELECT 
+    *,
+    CASE 
+        WHEN Score >= 100 THEN 'Gold Contributor' 
+        WHEN Score >= 50 THEN 'Silver Contributor' 
+        ELSE 'Regular Contributor' 
+    END AS ContributorLevel
+FROM FinalResult
+ORDER BY Score DESC, NetVotes DESC
+LIMIT 10;

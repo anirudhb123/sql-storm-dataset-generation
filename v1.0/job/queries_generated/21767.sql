@@ -1,0 +1,71 @@
+WITH Recursive Actors AS (
+    SELECT 
+        ak.name AS actor_name,
+        c.movie_id,
+        t.title,
+        c.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_sequence
+    FROM aka_name ak
+    JOIN cast_info c ON ak.person_id = c.person_id
+    JOIN aka_title t ON c.movie_id = t.movie_id
+    WHERE ak.name IS NOT NULL
+    AND t.production_year >= 2000
+    AND (t.kind_id IS NULL OR t.kind_id NOT IN (SELECT id FROM kind_type WHERE kind LIKE 'Short%'))
+), 
+MovieRatings AS (
+    SELECT 
+        m.movie_id,
+        AVG(r.rating) AS average_rating
+    FROM movie_info m
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            CASE 
+                WHEN COUNT(*) > 0 THEN AVG(rating) 
+                ELSE NULL 
+            END AS rating
+        FROM movie_info_idx 
+        WHERE info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%Rating%')
+        GROUP BY movie_id
+    ) r ON m.movie_id = r.movie_id
+    GROUP BY m.movie_id
+), 
+GenreCount AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS genre_count
+    FROM movie_keyword mk
+    JOIN aka_title m ON mk.movie_id = m.id
+    WHERE mk.keyword_id IS NOT NULL
+    GROUP BY m.movie_id
+)
+SELECT 
+    a.actor_name,
+    a.title,
+    COALESCE(mr.average_rating, 0) AS avg_rating,
+    gc.genre_count,
+    CASE 
+        WHEN gc.genre_count = 0 THEN 'No Genre'
+        WHEN gc.genre_count BETWEEN 1 AND 3 THEN 'Few Genres'
+        ELSE 'Many Genres'
+    END AS genre_category,
+    STRING_AGG(DISTINCT ak.surname_pcode, ', ') WITHIN GROUP (ORDER BY ak.surname_pcode) AS unique_surname_codes
+FROM Actors a
+LEFT JOIN MovieRatings mr ON a.movie_id = mr.movie_id
+LEFT JOIN GenreCount gc ON a.movie_id = gc.movie_id
+LEFT JOIN aka_name ak ON a.actor_name = ak.name
+WHERE NOT EXISTS (
+    SELECT 1 
+    FROM movie_companies mc 
+    WHERE mc.movie_id = a.movie_id AND mc.company_id IS NULL
+)
+GROUP BY 
+    a.actor_name,
+    a.title,
+    mr.average_rating,
+    gc.genre_count
+HAVING 
+    COALESCE(mr.average_rating, 0) > 5.0
+ORDER BY 
+    gc.genre_count DESC,
+    a.actor_sequence;

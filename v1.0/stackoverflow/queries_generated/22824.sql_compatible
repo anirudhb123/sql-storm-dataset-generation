@@ -1,0 +1,102 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScores
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CAST('2024-10-01' AS DATE))
+        AND p.Score IS NOT NULL
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankScores <= 10
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpvotesReceived,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownvotesReceived,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryWithComments AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        p.Title,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Posts p ON ph.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        ph.CreationDate >= DATEADD(month, -1, CAST('2024-10-01' AS DATE))
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId, ph.CreationDate, ph.UserId, ph.Comment, p.Title
+),
+FinalResults AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        us.UserId,
+        us.DisplayName,
+        us.UpvotesReceived,
+        us.DownvotesReceived,
+        ph.CommentCount,
+        ph.CreationDate AS LastHistoryUpdate
+    FROM 
+        TopPosts tp
+    JOIN 
+        Users us ON tp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = us.UserId)
+    LEFT JOIN 
+        PostHistoryWithComments ph ON tp.PostId = ph.PostId
+    ORDER BY 
+        tp.Score DESC, us.UpvotesReceived - us.DownvotesReceived DESC
+)
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.DisplayName AS PostOwner,
+    fr.UpvotesReceived,
+    fr.DownvotesReceived,
+    fr.CommentCount,
+    fr.LastHistoryUpdate,
+    CASE 
+        WHEN fr.CommentCount = 0 THEN 'No comments'
+        ELSE 'Comments available'
+    END AS CommentStatus,
+    CASE 
+        WHEN fr.UpvotesReceived > 5 THEN 'Popular'
+        WHEN fr.DownvotesReceived > 5 THEN 'Needs improvement'
+        ELSE 'Moderate popularity'
+    END AS PopularityStatus
+FROM 
+    FinalResults fr
+WHERE 
+    (fr.CommentCount = 0 OR fr.UpvotesReceived IS NOT NULL)
+ORDER BY 
+    fr.LastHistoryUpdate DESC, fr.Score DESC;

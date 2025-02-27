@@ -1,0 +1,43 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        o.o_orderkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        c_name,
+        total_revenue,
+        order_count,
+        RANK() OVER (ORDER BY total_revenue DESC) AS revenue_rank
+    FROM 
+        RankedOrders
+)
+SELECT 
+    c.c_name,
+    SUM(l.l_extendedprice) AS total_spent,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(l.l_discount) AS average_discount
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    TopCustomers tc ON tc.c_name = o.o_custkey
+WHERE 
+    tc.revenue_rank <= 10
+GROUP BY 
+    c.c_name
+ORDER BY 
+    total_spent DESC;

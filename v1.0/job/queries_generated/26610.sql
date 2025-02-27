@@ -1,0 +1,55 @@
+WITH ActorFilmography AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ak.kind_id AS movie_kind,
+        COUNT(c.id) AS role_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    JOIN 
+        kind_type ak ON t.kind_id = ak.id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.name, t.title, t.production_year, ak.kind_id
+), 
+
+ActorKeywords AS (
+    SELECT 
+        a.name AS actor_name,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        movie_keyword mk ON c.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        a.name
+)
+
+SELECT 
+    af.actor_name,
+    af.movie_title,
+    af.production_year,
+    ak.keywords,
+    af.role_count,
+    k.kind AS movie_kind
+FROM 
+    ActorFilmography af
+JOIN 
+    ActorKeywords ak ON af.actor_name = ak.actor_name
+JOIN 
+    kind_type k ON af.movie_kind = k.id
+WHERE 
+    af.production_year >= 2000
+ORDER BY 
+    af.role_count DESC, 
+    af.production_year DESC;

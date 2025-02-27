@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rn
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk
+),
+FilteredSales AS (
+    SELECT 
+        sd.web_site_sk,
+        sd.total_sales,
+        sd.order_count,
+        COALESCE(sm.sm_type, 'N/A') AS shipping_method,
+        CASE 
+            WHEN sd.total_sales > 100000 THEN 'High'
+            WHEN sd.total_sales BETWEEN 50000 AND 100000 THEN 'Medium'
+            ELSE 'Low'
+        END AS sales_category
+    FROM 
+        SalesData sd
+    LEFT JOIN 
+        ship_mode sm ON sd.web_site_sk = sm.sm_ship_mode_sk
+    WHERE 
+        sd.rn = 1
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS customer_total_sales
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    fs.web_site_sk,
+    fs.total_sales,
+    fs.order_count,
+    fs.shipping_method,
+    fs.sales_category,
+    CASE 
+        WHEN cs.customer_total_sales IS NOT NULL THEN cs.customer_total_sales
+        ELSE 0
+    END AS total_customer_sales
+FROM 
+    FilteredSales fs
+LEFT JOIN 
+    CustomerSales cs ON fs.web_site_sk = cs.c_customer_id
+WHERE 
+    fs.total_sales IS NOT NULL
+ORDER BY 
+    fs.total_sales DESC
+LIMIT 100;

@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rank_net_paid
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2463000 AND 2463005
+    GROUP BY 
+        ws_item_sk
+),
+HighValueSales AS (
+    SELECT 
+        s.ss_item_sk,
+        ss_store_sk,
+        ss_ticket_number,
+        (CASE 
+            WHEN SUM(ss_net_paid) IS NULL THEN 0 
+            ELSE SUM(ss_net_paid) END) AS store_net_paid
+    FROM 
+        store_sales s
+    LEFT JOIN 
+        RankedSales r ON s.ss_item_sk = r.ws_item_sk
+    WHERE 
+        r.rank_net_paid = 1 OR r.ws_item_sk IS NULL
+    GROUP BY 
+        s.ss_item_sk, ss_store_sk, ss_ticket_number
+    HAVING 
+        store_net_paid > 100.00
+),
+FinalResults AS (
+    SELECT 
+        c.c_customer_id,
+        ca.ca_city,
+        ca.ca_state,
+        SUM(hvs.store_net_paid) AS total_store_net_paid,
+        COUNT(DISTINCT hvs.ss_ticket_number) AS unique_tickets
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        HighValueSales hvs ON c.c_customer_sk = hvs.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id, ca.ca_city, ca.ca_state
+)
+SELECT 
+    fr.c_customer_id,
+    fr.ca_city,
+    fr.ca_state,
+    fr.total_store_net_paid,
+    fr.unique_tickets,
+    CASE 
+        WHEN fr.total_store_net_paid IS NULL THEN 'No Sales'
+        WHEN fr.unique_tickets = 0 THEN 'No Unique Tickets'
+        ELSE 'Sales Exist' 
+    END AS sales_status
+FROM 
+    FinalResults fr
+WHERE 
+    (fr.total_store_net_paid > (SELECT AVG(total_net_paid) FROM RankedSales) OR 
+    fr.unique_tickets < 2)
+ORDER BY 
+    fr.total_store_net_paid DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;
+```

@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND mc.note IN ('(1952) (USA) (TV) (edited version) (syndicated)', '(1969) (UK) (TV) (ITV)', '(1970-2005) (USA) (TV)', '(1979-1980) (Japan) (TV) (broadcaster)', '(2006) (worldwide) (all media) (except Germany, Austria, Switzerland)');

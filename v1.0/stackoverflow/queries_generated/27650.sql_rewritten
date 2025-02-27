@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.OwnerUserId,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY tag_value ORDER BY p.CreationDate DESC) AS Rank
+    FROM
+        Posts p,
+        LATERAL unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tag_value
+    WHERE
+        p.PostTypeId = 1 
+        AND p.Score > 0 
+),
+
+UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM
+        Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY
+        u.Id
+),
+
+TopTags AS (
+    SELECT
+        tag_value AS Tag,
+        COUNT(*) AS PostCount
+    FROM
+        RankedPosts
+    WHERE
+        Rank <= 10
+    GROUP BY
+        tag_value
+    ORDER BY
+        PostCount DESC
+),
+
+PopularPosts AS (
+    SELECT
+        rp.*,
+        us.DisplayName AS OwnerName,
+        us.BadgeCount,
+        us.TotalBounties,
+        tt.Tag
+    FROM
+        RankedPosts rp
+    JOIN UserStats us ON rp.OwnerUserId = us.UserId
+    JOIN TopTags tt ON tt.Tag = ANY (string_to_array(substring(rp.Tags, 2, length(rp.Tags) - 2), '><'))
+)
+
+SELECT
+    pp.PostId,
+    pp.Title,
+    pp.Body,
+    pp.OwnerName,
+    pp.Score,
+    pp.ViewCount,
+    pp.AnswerCount,
+    pp.CommentCount,
+    pp.Tag,
+    pp.BadgeCount,
+    pp.TotalBounties
+FROM
+    PopularPosts pp
+WHERE
+    pp.Rank <= 5 
+ORDER BY
+    pp.Tag,
+    pp.Score DESC;

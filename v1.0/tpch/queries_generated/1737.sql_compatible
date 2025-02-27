@@ -1,0 +1,63 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(SUM(l.l_quantity), 0) AS total_sold
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey 
+    WHERE 
+        p.p_retailprice > 1000
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+    HAVING 
+        COALESCE(SUM(l.l_quantity), 0) > 50
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    s.s_name,
+    pp.p_name,
+    pp.total_sold,
+    RANK() OVER (PARTITION BY pp.p_partkey ORDER BY o.o_totalprice DESC) AS product_rank
+FROM 
+    RankedOrders o
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    HighValueParts pp ON l.l_partkey = pp.p_partkey
+JOIN 
+    SupplierDetails s ON l.l_suppkey = s.s_suppkey
+WHERE 
+    o.o_orderstatus IN ('F', 'P') 
+    AND pp.total_sold IS NOT NULL
+ORDER BY 
+    o.o_orderdate DESC,
+    pp.total_sold DESC;

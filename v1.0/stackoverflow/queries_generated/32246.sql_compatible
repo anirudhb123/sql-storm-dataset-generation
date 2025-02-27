@@ -1,0 +1,50 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT p.Id, p.Title, p.ParentId, 0 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT p2.Id, p2.Title, p2.ParentId, ph.Level + 1
+    FROM Posts p2
+    INNER JOIN PostHierarchy ph ON p2.ParentId = ph.Id
+),
+UserEngagement AS (
+    SELECT u.Id AS UserId, 
+           COUNT(DISTINCT p.Id) AS PostsCount,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+           AVG(v.BountyAmount) AS AvgBounty
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+RecentPostEdits AS (
+    SELECT ph.PostId, 
+           ph.UserId, 
+           p.Title, 
+           p.CreationDate,
+           ph.CreationDate AS EditDate,
+           ROW_NUMBER() OVER(PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    INNER JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.PostHistoryTypeId IN (4, 5)  
+)
+SELECT u.DisplayName,
+       ue.PostsCount,
+       ue.UpVotesCount,
+       ue.DownVotesCount,
+       COALESCE(b.Name, 'No Badge') AS BadgeName,
+       ph.Title AS ParentPostTitle,
+       rpe.Title AS RecentEditTitle,
+       rpe.EditDate
+FROM UserEngagement ue
+INNER JOIN Users u ON ue.UserId = u.Id
+LEFT JOIN Badges b ON u.Id = b.UserId AND b.Class = 1  
+LEFT JOIN PostHierarchy ph ON u.Id IN (SELECT OwnerUserId FROM Posts WHERE Id = ph.Id)
+LEFT JOIN RecentPostEdits rpe ON ue.PostsCount > 0 AND rpe.UserId = u.Id AND rpe.rn = 1
+WHERE ue.PostsCount > 10
+AND (ue.UpVotesCount - ue.DownVotesCount) > 5
+ORDER BY ue.UpVotesCount DESC, ue.PostsCount DESC;

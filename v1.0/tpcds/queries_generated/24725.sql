@@ -1,0 +1,74 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_net_paid,
+        DENSE_RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+customer_with_locations AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(c.c_birth_country, 'Unknown') AS birth_country,
+        ca.ca_city,
+        CONCAT_WS(', ', ca.ca_street_number, ca.ca_street_name, ca.ca_zip) AS full_address
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+return_statistics AS (
+    SELECT 
+        sr_customer_sk, 
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+    GROUP BY 
+        sr_customer_sk
+),
+gross_sales AS (
+    SELECT 
+        ss_customer_sk,
+        SUM(ss_net_paid) AS gross_net_sales
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_customer_sk
+)
+SELECT 
+    cwl.c_customer_sk,
+    cwl.birth_country,
+    cwl.ca_city,
+    cwl.full_address,
+    COALESCE(rs.sales_rank, 0) AS rank_by_sales,
+    COALESCE(rs.total_net_paid, 0) AS total_sales,
+    COALESCE(rs_total.total_returns, 0) AS total_returns,
+    COALESCE(rs_total.total_return_amt, 0.00) AS total_return_amount,
+    COALESCE(gs.gross_net_sales, 0.00) AS total_gross_sales,
+    (COALESCE(rs.total_net_paid, 0.00) - COALESCE(rs_total.total_return_amt, 0.00)) AS net_profit,
+    CASE 
+        WHEN COALESCE(rs.total_net_paid, 0) = 0 THEN NULL
+        ELSE (COALESCE(rs_total.total_return_amt, 0.00) / COALESCE(rs.total_net_paid, 0.00)) * 100
+    END AS return_rate_percent
+FROM 
+    customer_with_locations cwl
+LEFT JOIN 
+    ranked_sales rs ON cwl.c_customer_sk = rs.ws_bill_customer_sk
+LEFT JOIN 
+    return_statistics rs_total ON cwl.c_customer_sk = rs_total.sr_customer_sk
+LEFT JOIN 
+    gross_sales gs ON cwl.c_customer_sk = gs.ss_customer_sk
+WHERE 
+    (cwl.messaging_service_status IS NULL OR cwl.messaging_service_status = 'active')
+    AND (cwl.birth_country != 'Unknown' OR cwl.birth_country IS NULL)
+ORDER BY 
+    birth_country ASC,
+    total_sales DESC,
+    net_profit DESC
+LIMIT 100;

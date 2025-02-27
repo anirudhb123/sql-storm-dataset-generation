@@ -1,0 +1,85 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2)  
+),
+TrendingPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerDisplayName,
+        DENSE_RANK() OVER (ORDER BY ViewCount DESC) AS TrendingRank
+    FROM 
+        RankedPosts
+    LIMIT 10
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(*) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+FinalResults AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.OwnerDisplayName,
+        tp.Score,
+        tp.ViewCount,
+        pc.CommentCount,
+        pha.HistoryCount,
+        pha.LastEdited,
+        CASE 
+            WHEN tp.Rank <= 5 THEN 'Top Post'
+            ELSE 'Regular Post'
+        END AS PostCategory
+    FROM 
+        TrendingPosts tp
+    LEFT JOIN 
+        PostComments pc ON tp.PostId = pc.PostId
+    LEFT JOIN 
+        PostHistoryAggregates pha ON tp.PostId = pha.PostId
+)
+
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.OwnerDisplayName,
+    fr.Score,
+    fr.ViewCount,
+    COALESCE(fr.CommentCount, 0) AS CommentCount,
+    COALESCE(fr.HistoryCount, 0) AS HistoryCount,
+    fr.LastEdited,
+    fr.PostCategory
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.ViewCount DESC, fr.Score DESC;

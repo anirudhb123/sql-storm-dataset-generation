@@ -1,0 +1,100 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS PostRank,
+        ts.TagName
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Tags ts ON ts.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))::int)
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    WHERE 
+        rp.PostRank <= 5  -- Top 5 posts per type
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score, rp.ViewCount
+),
+ClosedPostCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Post Closed
+    GROUP BY 
+        ph.PostId
+),
+CombinedData AS (
+    SELECT 
+        pp.PostId,
+        pp.Title,
+        pp.Score,
+        pp.ViewCount,
+        pp.CommentCount,
+        pp.LastVoteDate,
+        COALESCE(cpc.CloseCount, 0) AS CloseCount
+    FROM 
+        PopularPosts pp
+    LEFT JOIN 
+        ClosedPostCounts cpc ON pp.PostId = cpc.PostId
+),
+FinalOutput AS (
+    SELECT 
+        *,
+        CASE
+            WHEN CloseCount > 0 THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus,
+        CASE
+            WHEN ViewCount >= 1000 THEN 'Highly Viewed'
+            WHEN ViewCount BETWEEN 500 AND 999 THEN 'Moderately Viewed'
+            ELSE 'Low Engagement'
+        END AS EngagementLevel,
+        CASE
+            WHEN Score IS NULL OR Score < 0 THEN 'Negative Score'
+            ELSE 'Positive Score'
+        END AS ScoreStatus
+    FROM 
+        CombinedData
+)
+SELECT 
+    PostId,
+    Title,
+    Score,
+    ViewCount,
+    CommentCount,
+    LastVoteDate,
+    PostStatus,
+    EngagementLevel,
+    ScoreStatus
+FROM 
+    FinalOutput
+WHERE 
+    (PostStatus = 'Open' AND EngagementLevel <> 'Low Engagement')
+    OR (PostStatus = 'Closed' AND (ScoreStatus = 'Negative Score' OR CommentCount > 5))
+ORDER BY 
+    Score DESC, ViewCount DESC
+LIMIT 50;
+

@@ -1,0 +1,78 @@
+
+WITH RECURSIVE CTE_NationSales AS (
+    SELECT 
+        n.n_name,
+        SUM(CASE WHEN o.o_orderstatus = 'F' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(year, -1, CAST('1998-10-01' AS DATE)) 
+        AND o.o_orderdate <= CAST('1998-10-01' AS DATE)
+    GROUP BY 
+        n.n_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) IS NOT NULL
+    UNION ALL
+    SELECT 
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        nation n
+    LEFT JOIN (
+        SELECT 
+            n.n_nationkey,
+            COUNT(DISTINCT o.o_orderkey) AS order_count
+        FROM 
+            nation n
+        LEFT JOIN 
+            supplier s ON n.n_nationkey = s.s_nationkey
+        LEFT JOIN 
+            partsupp ps ON s.s_suppkey = ps.ps_suppkey
+        LEFT JOIN 
+            part p ON ps.ps_partkey = p.p_partkey
+        LEFT JOIN 
+            lineitem l ON p.p_partkey = l.l_partkey
+        LEFT JOIN 
+            orders o ON l.l_orderkey = o.o_orderkey
+        WHERE 
+            o.o_orderstatus IN ('O', 'F') 
+            AND l.l_returnflag = 'N'
+        GROUP BY 
+            n.n_nationkey
+    ) AS A ON n.n_nationkey = A.n_nationkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    n.n_name,
+    COALESCE(CTE.total_sales, 0) AS total_sales,
+    COALESCE(CTE.order_count, 0) AS order_count,
+    CTE.rank
+FROM 
+    nation n
+LEFT JOIN 
+    CTE_NationSales CTE ON n.n_name = CTE.n_name
+WHERE 
+    CTE.rank <= (SELECT COUNT(*) / 10 FROM CTE_NationSales)
+ORDER BY 
+    total_sales DESC,
+    n.n_name ASC
+LIMIT 10;

@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerName,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 -- Selecting only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+), RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS EditDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- This means title, body, or tags were edited
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerName,
+    rp.Score,
+    rp.ViewCount,
+    rp.CreationDate,
+    rp.TagList,
+    re.UserDisplayName AS LastEditedBy,
+    re.EditDate AS LastEditDate,
+    re.Comment AS EditComment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentEdits re ON rp.PostId = re.PostId AND re.EditRank = 1
+WHERE 
+    rp.RankByScore <= 5 -- Limiting to top 5 questions per author based on score
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

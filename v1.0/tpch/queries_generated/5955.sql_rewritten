@@ -1,0 +1,42 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 0 AS depth
+    FROM nation n
+    WHERE n.n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.depth + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+part_summary AS (
+    SELECT p.p_partkey, 
+           p.p_name,
+           SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+top_suppliers AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY part_count DESC
+    LIMIT 5
+)
+SELECT rh.n_name AS nation_name,
+       ps.p_name AS part_name,
+       ps.total_available,
+       ps.avg_supply_cost,
+       ts.s_name AS supplier_name
+FROM part_summary ps
+JOIN lineitem l ON ps.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN supplier s ON l.l_suppkey = s.s_suppkey
+JOIN nation_hierarchy rh ON c.c_nationkey = rh.n_nationkey
+JOIN top_suppliers ts ON s.s_suppkey = ts.s_suppkey
+WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+ORDER BY rh.n_name, ps.total_available DESC;

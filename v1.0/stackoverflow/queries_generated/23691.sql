@@ -1,0 +1,97 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    WHERE
+        p.PostTypeId = 1 -- Focus on Questions
+),
+ClosedPosts AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text::jsonb AS CloseDetails,
+        pt.Name AS PostHistoryType
+    FROM
+        PostHistory ph
+    JOIN
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE
+        pt.Name = 'Post Closed' AND ph.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        COUNT(b.Id) AS BadgeCount
+    FROM
+        Badges b
+    GROUP BY
+        b.UserId
+),
+TopUsers AS (
+    SELECT
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ub.BadgeCount, 0) AS TotalBadges
+    FROM
+        Users u
+    LEFT JOIN
+        UserBadges ub ON u.Id = ub.UserId
+    WHERE
+        u.Reputation > 1000
+),
+AggregateData AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CommentCount,
+        cp.UserDisplayName AS ClosedBy,
+        cp.CreationDate AS ClosedDate,
+        ta.TagName,
+        tu.DisplayName AS TopUser,
+        tu.TotalBadges
+    FROM
+        RankedPosts rp
+    LEFT JOIN
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    LEFT JOIN
+        Posts p ON rp.PostId = p.Id
+    LEFT JOIN
+        Tags ta ON ta.ExcerptPostId = p.Id
+    LEFT JOIN
+        TopUsers tu ON rp.CommentCount > 5 -- A condition to include users with significant engagement
+)
+SELECT
+    ad.PostId,
+    ad.Title,
+    ad.CommentCount,
+    ad.ClosedBy,
+    ad.ClosedDate,
+    ad.TagName,
+    ad.TopUser,
+    ad.TotalBadges,
+    CASE
+        WHEN ad.ClosedBy IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    STRING_AGG(DISTINCT CASE 
+        WHEN ad.TagName IS NOT NULL THEN ad.TagName 
+        ELSE 'No Tag' END, '; ') AS TagsList
+FROM
+    AggregateData ad
+GROUP BY
+    ad.PostId, ad.Title, ad.CommentCount, ad.ClosedBy, ad.ClosedDate, ad.TopUser, ad.TotalBadges
+ORDER BY
+    ad.CommentCount DESC, ad.ClosedDate DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

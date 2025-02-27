@@ -1,0 +1,55 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title AS movie_title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    COALESCE(mh.depth, 0) AS hierarchy_depth,
+    COUNT(DISTINCT mc.company_id) AS production_company_count,
+    SUM(CASE WHEN mo.info = 'Awards' THEN 1 ELSE 0 END) AS awards_count,
+    STRING_AGG(DISTINCT CONCAT(kw.keyword, ' (', kw.id, ')'), ', ') AS keywords
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    movie_info mo ON at.id = mo.movie_id AND mo.info_type_id = (SELECT id FROM info_type WHERE info = 'Awards')
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    MovieHierarchy mh ON at.id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL AND 
+    ak.name <> '' AND 
+    (ak.md5sum IS NULL OR ak.md5sum <> '')  
+GROUP BY 
+    ak.id, ak.name, at.id, mh.depth
+ORDER BY 
+    awards_count DESC, production_company_count DESC, actor_name;

@@ -1,0 +1,64 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+        LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS AuthorName,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+        JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN LATERAL UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName) ON TRUE
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, u.DisplayName
+    ORDER BY 
+        p.CreationDate DESC
+    LIMIT 5
+)
+SELECT 
+    ub.DisplayName AS UserName,
+    ub.BadgeCount, 
+    ub.GoldBadges, 
+    ub.SilverBadges, 
+    ub.BronzeBadges,
+    pt.TagName,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate,
+    rp.AuthorName,
+    rp.Tags
+FROM 
+    UserBadges ub
+    CROSS JOIN PopularTags pt
+    LEFT JOIN RecentPosts rp ON TRUE
+ORDER BY 
+    ub.BadgeCount DESC, pt.PostCount DESC, rp.CreationDate DESC;

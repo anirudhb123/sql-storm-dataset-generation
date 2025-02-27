@@ -1,0 +1,63 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+),
+SupplierPartPricing AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_supplycost,
+        ps.ps_availqty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+)
+SELECT 
+    COALESCE(cp.nation_name, 'Unknown') AS supplier_nation,
+    COUNT(DISTINCT so.o_orderkey) AS total_orders,
+    SUM(sp.ps_supplycost * sp.ps_availqty) AS total_inventory_value,
+    AVG(so.o_totalprice) AS average_order_value,
+    MAX(so.o_totalprice) AS max_order_value
+FROM 
+    SupplierPartPricing sp
+LEFT JOIN 
+    RankedOrders so ON sp.p_partkey IN (
+        SELECT l.l_partkey 
+        FROM lineitem l 
+        WHERE l.l_orderkey = so.o_orderkey
+    )
+LEFT JOIN 
+    CustomerNation cp ON sp.s_suppkey = cp.c_custkey
+WHERE 
+    sp.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+GROUP BY 
+    cp.nation_name
+ORDER BY 
+    total_orders DESC, 
+    total_inventory_value DESC
+FETCH FIRST 10 ROWS ONLY;

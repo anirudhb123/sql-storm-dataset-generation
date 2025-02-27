@@ -1,0 +1,75 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS status_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+TotalSales AS (
+    SELECT 
+        p.p_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        p.p_partkey
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        AVG(s.s_acctbal) AS avg_acctbal,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name,
+        sd.avg_acctbal,
+        sd.part_count,
+        CASE 
+            WHEN sd.avg_acctbal IS NULL THEN 'No Account Balance' 
+            ELSE 'Account Balance Exists' 
+        END AS balance_status
+    FROM 
+        SupplierDetails sd
+    WHERE 
+        sd.avg_acctbal > 100000
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    CASE 
+        WHEN r.o_orderstatus = 'F' THEN 'Finalized' 
+        ELSE 'Pending'
+    END AS order_status,
+    COALESCE(ts.total_sales, 0) AS total_sales_per_part,
+    hvs.s_name,
+    hvs.balance_status
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    TotalSales ts ON r.o_orderkey = (SELECT l.l_orderkey FROM lineitem l WHERE l.l_orderkey = r.o_orderkey LIMIT 1)
+LEFT JOIN 
+    HighValueSuppliers hvs ON hvs.s_suppkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = r.o_orderkey)
+WHERE 
+    hvs.part_count IS NOT NULL OR r.o_orderstatus = 'F'
+ORDER BY 
+    r.o_orderdate DESC, r.o_totalprice DESC;

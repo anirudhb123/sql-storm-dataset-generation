@@ -1,0 +1,84 @@
+WITH RECURSIVE supplier_part_count AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL
+    GROUP BY 
+        c.c_custkey
+),
+lineitem_summary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(*) AS line_count,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_discount DESC) AS line_rank
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+nation_analysis AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS unique_suppliers,
+        SUM(s.s_acctbal) FILTER (WHERE s.s_acctbal IS NOT NULL) AS total_account_balance
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+final_analysis AS (
+    SELECT 
+        n.n_name,
+        n.unique_suppliers,
+        n.total_account_balance,
+        cs.order_count,
+        cs.total_spent,
+        sp.part_count
+    FROM 
+        nation_analysis n
+    LEFT JOIN 
+        customer_order_summary cs ON n.n_nationkey = cs.c_custkey
+    LEFT JOIN 
+        supplier_part_count sp ON n.unique_suppliers = sp.part_count
+)
+SELECT 
+    f.n_name,
+    COALESCE(f.total_spent, 0) AS total_spent,
+    COALESCE(f.order_count, 0) AS order_count,
+    f.unique_suppliers,
+    f.total_account_balance,
+    COALESCE(sp.part_count, 0) AS supplier_part_count,
+    CASE 
+        WHEN f.total_account_balance IS NULL THEN 'No Balance'
+        ELSE 'Has Balance'
+    END AS account_status
+FROM 
+    final_analysis f
+FULL OUTER JOIN 
+    supplier_part_count sp ON f.unique_suppliers = sp.part_count
+WHERE 
+    f.total_spent IS NULL OR f.total_spent > 
+    (SELECT AVG(total_spent) FROM customer_order_summary)
+ORDER BY 
+    f.n_name ASC NULLS LAST;

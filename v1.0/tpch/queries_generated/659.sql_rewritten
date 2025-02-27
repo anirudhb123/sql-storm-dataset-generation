@@ -1,0 +1,93 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderstatus, 
+        o.o_totalprice, 
+        o.o_orderdate, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o 
+    WHERE 
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '6 months'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_availqty) AS total_avail_qty, 
+        MIN(ps.ps_supplycost) AS min_supply_cost
+    FROM 
+        partsupp ps 
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey 
+    WHERE 
+        s.s_acctbal > 1000 
+    GROUP BY 
+        ps.ps_partkey, 
+        ps.ps_suppkey
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey, 
+        n.n_name AS nation_name, 
+        r.r_name AS region_name, 
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c 
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey 
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey 
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY 
+        c.c_custkey, 
+        n.n_name, 
+        r.r_name
+),
+PartSupplierMax AS (
+    SELECT 
+        ps.ps_partkey, 
+        MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM 
+        partsupp ps 
+    GROUP BY 
+        ps.ps_partkey
+)
+
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_retailprice, 
+    r.total_avail_qty, 
+    r.min_supply_cost, 
+    MAX(s.max_supply_cost) AS overall_max_cost,
+    cr.region_name,
+    cr.order_count
+FROM 
+    part p
+LEFT JOIN 
+    SupplierParts r ON p.p_partkey = r.ps_partkey
+LEFT JOIN 
+    PartSupplierMax s ON p.p_partkey = s.ps_partkey
+JOIN 
+    CustomerRegion cr ON cr.order_count > 0
+WHERE 
+    COALESCE(r.total_avail_qty, 0) > 0 
+    AND p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+    OR EXISTS (
+        SELECT 1
+        FROM lineitem l
+        WHERE l.l_partkey = p.p_partkey 
+        AND l.l_shipdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    )
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_retailprice, 
+    r.total_avail_qty, 
+    r.min_supply_cost, 
+    cr.region_name, 
+    cr.order_count
+ORDER BY 
+    p.p_partkey;

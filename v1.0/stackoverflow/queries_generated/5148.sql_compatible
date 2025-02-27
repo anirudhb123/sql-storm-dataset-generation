@@ -1,0 +1,80 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON t.Id IN (SELECT CAST(UNNEST(string_to_array(pt.Tags, ',')) AS int))
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+CombinedData AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.TotalPosts,
+        us.TotalQuestions,
+        us.TotalAnswers,
+        us.TotalViews,
+        us.TotalScore,
+        th.PostCount,
+        phc.EditCount,
+        phc.LastEditDate
+    FROM 
+        UserStats us
+    LEFT JOIN 
+        (SELECT TagName, PostCount FROM TopTags) th ON true
+    LEFT JOIN 
+        PostHistoryCounts phc ON us.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = phc.PostId LIMIT 1)
+)
+SELECT 
+    cd.UserId,
+    cd.DisplayName,
+    cd.TotalPosts,
+    cd.TotalQuestions,
+    cd.TotalAnswers,
+    cd.TotalViews,
+    cd.TotalScore,
+    STRING_AGG(DISTINCT th.TagName, ', ') AS TopTags,
+    cd.EditCount,
+    cd.LastEditDate
+FROM 
+    CombinedData cd
+LEFT JOIN 
+    TopTags th ON true
+GROUP BY 
+    cd.UserId, cd.DisplayName, cd.TotalPosts, cd.TotalQuestions, cd.TotalAnswers, cd.TotalViews, cd.TotalScore, cd.EditCount, cd.LastEditDate
+ORDER BY 
+    cd.TotalScore DESC
+LIMIT 20;

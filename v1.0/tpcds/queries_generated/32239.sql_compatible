@@ -1,0 +1,48 @@
+
+WITH RECURSIVE date_sales AS (
+    SELECT d.d_date_sk, d.d_date, SUM(ws.ws_net_paid) AS total_sales
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_date_sk, d.d_date
+    UNION ALL
+    SELECT d.d_date_sk, d.d_date, SUM(cs.cs_net_paid)
+    FROM date_dim d
+    LEFT JOIN catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    GROUP BY d.d_date_sk, d.d_date
+),
+cust_returned AS (
+    SELECT sr_customer_sk, SUM(sr_return_amt) AS total_return_amt
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+cust_demo AS (
+    SELECT cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, 
+           COALESCE(hd.hd_income_band_sk, 0) AS income_band_sk
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+sales_ranked AS (
+    SELECT ws.ws_item_sk, ws.ws_order_number, 
+           RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank_profit,
+           DENSE_RANK() OVER (ORDER BY ws.ws_ext_sales_price DESC) AS rank_price
+    FROM web_sales ws
+)
+SELECT 
+    d.d_date,
+    COALESCE(rs.total_sales, 0) AS web_total_sales,
+    COALESCE(currency_format(cr.total_return_amt), '$0.00') AS total_return_amount,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    AVG(ws.ws_net_paid) AS avg_order_value,
+    COUNT(DISTINCT s.s_store_id) AS total_stores
+FROM date_dim d
+LEFT JOIN date_sales rs ON d.d_date_sk = rs.d_date_sk
+LEFT JOIN cust_returned cr ON cr.sr_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN cust_demo cd ON cd.cd_demo_sk = ws.ws_bill_cdemo_sk
+LEFT JOIN sales_ranked sr ON sr.ws_item_sk = d.d_date_sk
+LEFT JOIN store s ON s.s_store_sk = ws.ws_warehouse_sk
+WHERE d.d_dow IN (1, 2, 3, 4, 5) 
+AND (rs.total_sales IS NOT NULL OR cr.total_return_amt IS NOT NULL)
+GROUP BY d.d_date, cd.cd_gender, cd.cd_marital_status, rs.total_sales, cr.total_return_amt
+ORDER BY d.d_date DESC, web_total_sales DESC;

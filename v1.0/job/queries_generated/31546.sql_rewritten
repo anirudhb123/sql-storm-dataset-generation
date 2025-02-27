@@ -1,0 +1,98 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id IS NOT NULL
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5  
+),
+
+movie_info_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mk.keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY mk.keyword) AS keyword_rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+),
+
+cast_with_participants AS (
+    SELECT 
+        a.id AS person_id,
+        a.name AS actor_name,
+        c.movie_id,
+        c.nr_order,
+        r.role AS role_name
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+),
+
+final_movie_analysis AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        GROUP_CONCAT(DISTINCT ca.actor_name) AS actor_names,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        SUM(CASE WHEN mk.keyword IS NOT NULL THEN 1 ELSE 0 END) AS non_null_keyword_count,
+        AVG(mk.keyword_rank) AS avg_keyword_rank,
+        CASE 
+            WHEN mh.level = 1 THEN 'Root Movie'
+            WHEN mh.level <= 3 THEN 'Intermediate Movie'
+            ELSE 'Related Movie'
+        END AS movie_level
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_info_with_keywords mk ON mh.movie_id = mk.movie_id
+    LEFT JOIN 
+        cast_with_participants ca ON mh.movie_id = ca.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.level
+)
+
+SELECT 
+    fa.movie_id,
+    fa.title,
+    fa.production_year,
+    fa.actor_names,
+    fa.keyword_count,
+    fa.non_null_keyword_count,
+    fa.avg_keyword_rank,
+    fa.movie_level
+FROM 
+    final_movie_analysis fa
+WHERE 
+    fa.keyword_count > 0
+ORDER BY 
+    fa.production_year DESC,
+    fa.keyword_count DESC;

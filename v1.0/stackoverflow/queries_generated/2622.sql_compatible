@@ -1,0 +1,52 @@
+
+WITH UserReputation AS (
+    SELECT Id, Reputation,
+           RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostStats AS (
+    SELECT p.Id, 
+           p.Title, 
+           p.CreationDate, 
+           p.ViewCount, 
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+           COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount
+),
+ClosedPosts AS (
+    SELECT ph.PostId, 
+           COUNT(*) AS CloseCount 
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+),
+PostRankings AS (
+    SELECT ps.Id,
+           ps.Title,
+           ps.ViewCount,
+           ps.UpVotes,
+           ps.DownVotes,
+           ps.CommentCount,
+           COALESCE(cp.CloseCount, 0) AS CloseCount,
+           RANK() OVER (PARTITION BY ps.ViewCount ORDER BY (ps.UpVotes - ps.DownVotes) DESC) AS VoteRank
+    FROM PostStats ps
+    LEFT JOIN ClosedPosts cp ON ps.Id = cp.PostId
+)
+SELECT ur.DisplayName, 
+       ub.Reputation,
+       pr.Title,
+       pr.ViewCount,
+       pr.UpVotes,
+       pr.DownVotes,
+       pr.CommentCount,
+       pr.CloseCount,
+       pr.VoteRank
+FROM UserReputation ur
+INNER JOIN (SELECT u.Id, u.Reputation FROM Users u WHERE ur.ReputationRank <= 50) ub ON ur.Id = ub.Id
+JOIN PostRankings pr ON ub.Id = pr.Id
+WHERE pr.CloseCount > 0
+ORDER BY ub.Reputation DESC, pr.VoteRank;

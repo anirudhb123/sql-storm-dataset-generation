@@ -1,0 +1,78 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk, 
+        ws_web_site_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_net_paid) AS total_net_paid
+    FROM web_sales
+    GROUP BY ws_item_sk, ws_web_site_sk
+), 
+ranked_sales AS (
+    SELECT 
+        sd.ws_item_sk, 
+        sd.ws_web_site_sk, 
+        sd.total_quantity,
+        sd.total_net_paid,
+        RANK() OVER (PARTITION BY sd.ws_item_sk ORDER BY sd.total_net_paid DESC) AS rank
+    FROM sales_data sd
+), 
+top_items AS (
+    SELECT 
+        rs.ws_item_sk, 
+        rs.total_quantity, 
+        rs.total_net_paid
+    FROM ranked_sales rs
+    WHERE rs.rank = 1
+), 
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk, 
+        COUNT(DISTINCT ws.ws_order_number) AS order_count, 
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM web_sales ws
+    JOIN customer c ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_sales_price > 50.00
+    GROUP BY c.c_customer_sk
+), 
+customer_ranked AS (
+    SELECT 
+        cs.c_customer_sk, 
+        cs.order_count, 
+        cs.total_spent,
+        RANK() OVER (ORDER BY cs.total_spent DESC) AS customer_rank
+    FROM customer_stats cs
+), 
+popular_reasons AS (
+    SELECT 
+        r.r_reason_desc, 
+        COUNT(*) AS reason_count
+    FROM store_returns sr
+    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    GROUP BY r.r_reason_desc
+    ORDER BY reason_count DESC
+    LIMIT 5
+), 
+sales_summary AS (
+    SELECT 
+        ti.ws_item_sk, 
+        ti.total_quantity, 
+        ti.total_net_paid, 
+        cr.c_customer_sk, 
+        cr.order_count, 
+        cr.total_spent,
+        pr.r_reason_desc
+    FROM top_items ti
+    LEFT JOIN customer_ranked cr ON cr.order_count > 2
+    LEFT JOIN popular_reasons pr ON pr.reason_count > 2
+)
+SELECT 
+    ss.ws_item_sk,
+    ss.total_quantity,
+    ss.total_net_paid,
+    COALESCE(ss.c_customer_sk, 'No Customer') AS customer_sk,
+    COALESCE(ss.order_count, 0) AS order_count,
+    COALESCE(ss.total_spent, 0) AS total_spent,
+    COALESCE(ss.r_reason_desc, 'No Reason') AS reason_description
+FROM sales_summary ss
+ORDER BY ss.total_net_paid DESC, customer_sk;

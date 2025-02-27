@@ -1,0 +1,45 @@
+WITH RECURSIVE ordered_customers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) as rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+), 
+high_value_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_supplycost, 
+           SUM(ps.ps_availqty) OVER (PARTITION BY ps.ps_suppkey) as total_availqty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_supplycost > 100.00
+), 
+recent_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice,
+           RANK() OVER (ORDER BY o.o_orderdate DESC) as recent_rank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F') -- Open and Filled
+), 
+line_item_summary AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_price,
+           COUNT(*) AS item_count
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN CURRENT_DATE - INTERVAL '30 days' AND CURRENT_DATE
+    GROUP BY l.l_orderkey
+)
+SELECT c.c_name, lv.s_name, 
+       COALESCE(ls.net_price, 0) AS total_net_price, 
+       hv.total_availqty, 
+       rc.rank
+FROM ordered_customers rc
+FULL OUTER JOIN recent_orders ro ON rc.c_custkey = ro.o_custkey
+LEFT JOIN line_item_summary ls ON ro.o_orderkey = ls.l_orderkey
+JOIN high_value_suppliers hv ON hv.ps_supplycost = (
+    SELECT MIN(ps.ps_supplycost)
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 50
+      AND ps.ps_suppkey = hv.s_suppkey
+)
+JOIN supplier lv ON lv.s_suppkey = hv.s_suppkey
+WHERE rc.rank <= 5
+  AND (ls.net_price IS NULL OR ls.item_count > 2)
+ORDER BY total_net_price DESC, rc.c_name
+LIMIT 15;

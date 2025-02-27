@@ -1,0 +1,62 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        d.d_date AS last_review_date,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Mr. ' || c.c_first_name
+            WHEN cd.cd_gender = 'F' THEN 'Ms. ' || c.c_first_name
+            ELSE c.c_first_name
+        END AS salutation,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+        LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+        LEFT JOIN date_dim d ON c.c_last_review_date_sk = d.d_date_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(*) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+DemographicsWithSales AS (
+    SELECT 
+        cd.full_name,
+        cd.salutation,
+        cd.ca_city,
+        cd.ca_state,
+        cd.ca_country,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        COALESCE(ss.total_orders, 0) AS total_orders
+    FROM 
+        CustomerDetails cd
+        LEFT JOIN SalesSummary ss ON cd.c_customer_id = ss.ws_bill_customer_sk
+)
+SELECT 
+    CONCAT(salutation, ' ', full_name) AS Customer_Name,
+    total_sales,
+    total_orders,
+    ca_city,
+    ca_state,
+    ca_country,
+    cd_purchase_estimate,
+    cd_credit_rating
+FROM 
+    DemographicsWithSales
+WHERE 
+    total_sales > 1000
+ORDER BY 
+    total_sales DESC;

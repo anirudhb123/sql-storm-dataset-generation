@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_quantity DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+), 
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(cd.cd_gender, 'N/A') AS gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) OVER (PARTITION BY cd.cd_marital_status) AS total_customers
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+ReturnStatistics AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    rs.sales_rank,
+    SUM(COALESCE(ws.ws_quantity, 0) - COALESCE(rs.ws_quantity, 0)) AS net_sales,
+    cd.gender,
+    cd.total_customers,
+    r.total_returned_quantity,
+    r.total_return_amount
+FROM 
+    item i
+LEFT JOIN RankedSales rs ON i.i_item_sk = rs.ws_item_sk 
+LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk 
+LEFT JOIN CustomerDetails cd ON ws.ws_bill_customer_sk = cd.c_customer_sk 
+LEFT JOIN ReturnStatistics r ON i.i_item_sk = r.sr_item_sk
+WHERE 
+    i.i_current_price > 10.00 
+    AND (cd.cd_marital_status IS NULL OR cd.cd_marital_status = 'M') 
+GROUP BY 
+    i.i_item_sk, i.i_item_id, i.i_item_desc, rs.sales_rank, cd.gender, cd.total_customers, r.total_returned_quantity, r.total_return_amount
+ORDER BY 
+    net_sales DESC
+LIMIT 50;

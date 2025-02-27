@@ -1,0 +1,58 @@
+WITH StringProcessingBenchmark AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        P.Title,
+        P.Body,
+        TAGS.split_tags AS TagsArray,
+        PH.UserDisplayName AS EditorDisplayName,
+        PH.CreationDate AS HistoryCreationDate,
+        PH.Text AS EditSummary,
+        PH.Comment AS CloseReason,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 24 THEN 1 END) AS SuggestedEditCount
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            string_agg(tag, ', ') AS split_tags
+        FROM (
+            SELECT 
+                P.Id AS PostId, 
+                TRIM(UNNEST(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><'))) ) AS tag
+            FROM 
+                Posts P
+        ) AS Tags
+        GROUP BY 
+            PostId
+    ) AS TAGS ON P.Id = TAGS.PostId
+    WHERE 
+        P.PostTypeId = 1 /* Questions only */
+    GROUP BY 
+        U.Id, U.DisplayName, P.Title, P.Body, TAGS.split_tags, PH.UserDisplayName, PH.CreationDate, PH.Text, PH.Comment
+    ORDER BY 
+        U.Reputation DESC
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Title,
+    Body,
+    TagsArray,
+    EditorDisplayName,
+    HistoryCreationDate,
+    EditSummary,
+    CloseReason,
+    CloseReopenCount,
+    SuggestedEditCount
+FROM 
+    StringProcessingBenchmark
+WHERE 
+    CloseReopenCount > 0 OR SuggestedEditCount > 0
+ORDER BY 
+    CloseReopenCount DESC, SuggestedEditCount DESC;

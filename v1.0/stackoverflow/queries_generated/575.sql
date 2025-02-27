@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+HighScoringComments AS (
+    SELECT 
+        c.Id AS CommentId,
+        c.Text,
+        c.PostId,
+        c.CreationDate,
+        c.Score,
+        ROW_NUMBER() OVER (PARTITION BY c.PostId ORDER BY c.Score DESC) AS CommentRank
+    FROM 
+        Comments c
+    WHERE 
+        c.Score > 0
+)
+SELECT 
+    up.DisplayName AS UserName,
+    rp.Title AS PostTitle,
+    rp.CreationDate AS PostDate,
+    rp.Score AS PostScore,
+    us.TotalBadges,
+    us.TotalPosts,
+    us.TotalBounties,
+    CASE 
+        WHEN rp.Rank <= 5 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory,
+    STRING_AGG(DISTINCT c.Text, '; ') AS TopComments
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+JOIN 
+    UserStats us ON up.Id = us.UserId
+LEFT JOIN 
+    HighScoringComments c ON rp.PostId = c.PostId AND c.CommentRank <= 3
+GROUP BY 
+    up.DisplayName, rp.Title, rp.CreationDate, rp.Score, us.TotalBadges, us.TotalPosts, us.TotalBounties
+ORDER BY 
+    rp.Score DESC
+LIMIT 100;

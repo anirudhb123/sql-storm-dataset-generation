@@ -1,0 +1,98 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        AVG(v.BountyAmount) AS AverageBounty,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.PostTypeId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostFinalStats AS (
+    SELECT 
+        ps.Id,
+        ps.Title,
+        ps.CommentCount,
+        ps.AverageBounty,
+        ps.TotalBounty,
+        ps.TotalVotes,
+        p.OwnerUserId,
+        ub.DisplayName AS OwnerDisplayName,
+        u.BadgeCount,
+        u.GoldBadges,
+        u.SilverBadges,
+        u.BronzeBadges
+    FROM 
+        PostStats ps
+    LEFT JOIN 
+        UserBadges u ON ps.OwnerUserId = u.UserId
+    LEFT JOIN 
+        Users ub ON ps.OwnerUserId = ub.Id
+)
+SELECT 
+    pfs.Id,
+    pfs.Title,
+    pfs.CommentCount,
+    COALESCE(pfs.AverageBounty, 0) AS AverageBounty,
+    COALESCE(pfs.TotalBounty, 0) AS TotalBounty,
+    pfs.TotalVotes,
+    pfs.OwnerDisplayName,
+    pfs.BadgeCount,
+    pfs.GoldBadges,
+    pfs.SilverBadges,
+    pfs.BronzeBadges,
+    ph.Level AS PostLevel
+FROM 
+    PostFinalStats pfs
+LEFT JOIN 
+    RecursivePostHierarchy ph ON pfs.Id = ph.Id
+WHERE 
+    pfs.CommentCount > 0
+ORDER BY 
+    pfs.TotalVotes DESC, pfs.CommentCount DESC;

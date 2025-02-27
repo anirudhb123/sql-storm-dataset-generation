@@ -1,0 +1,47 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_addr_sk, 0 AS level
+    FROM customer
+    WHERE c_customer_sk = (SELECT MIN(c_customer_sk) FROM customer)
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_addr_sk, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_addr_sk = ch.c_current_addr_sk
+    WHERE ch.level < 5
+),
+MonthlySales AS (
+    SELECT 
+        EXTRACT(YEAR FROM d.d_date) AS sales_year,
+        EXTRACT(MONTH FROM d.d_date) AS sales_month,
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY sales_year, sales_month
+),
+TopDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(*) AS customer_count
+    FROM customer_demographics cd
+    LEFT JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_gender
+    ORDER BY customer_count DESC
+)
+
+SELECT 
+    ch.c_first_name,
+    ch.c_last_name,
+    ca.ca_city,
+    (SELECT COUNT(*) FROM MonthlySales ms WHERE ms.sales_year = 2023 AND ms.sales_month = 10) AS total_sales_this_month,
+    td.cd_gender,
+    td.customer_count,
+    COALESCE(NULLIF(tm.total_sales, 0), 'No Sales') AS sales_data
+FROM CustomerHierarchy ch
+LEFT JOIN customer_address ca ON ch.c_current_addr_sk = ca.ca_address_sk
+JOIN TopDemographics td ON td.cd_gender IS NOT NULL
+LEFT JOIN (SELECT sales_year, sales_month, total_sales FROM MonthlySales WHERE sales_year = 2022) tm ON 1=1
+WHERE ca.ca_city IS NOT NULL 
+ORDER BY ch.c_first_name, ch.c_last_name
+LIMIT 100;

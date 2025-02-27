@@ -1,0 +1,81 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.AnswerCount,
+        p.Score,
+        p.OwnerUserId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.CreationDate,
+        p2.AnswerCount,
+        p2.Score,
+        p2.OwnerUserId,
+        rp.Level + 1
+    FROM Posts p2
+    INNER JOIN RecursivePostCTE rp ON p2.ParentId = rp.Id
+),
+
+PostVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM Votes v
+    GROUP BY v.PostId
+),
+
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Badges b
+    WHERE b.Class = 1 
+    GROUP BY b.UserId
+    HAVING COUNT(*) > 2
+),
+
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(*) AS EditCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.AnswerCount,
+    rp.Score,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    COALESCE(vs.TotalVotes, 0) AS TotalVotes,
+    COALESCE(badge.BadgeCount, 0) AS GoldBadgeCount,
+    badge.BadgeNames,
+    COALESCE(phs.EditCount, 0) AS TotalEdits,
+    phs.LastEditDate,
+    phs.CloseCount,
+    CASE 
+        WHEN rp.Score > 0 THEN 'Positive Score'
+        WHEN rp.Score < 0 THEN 'Negative Score'
+        ELSE 'Neutral Score'
+    END AS ScoreCategory
+FROM RecursivePostCTE rp
+LEFT JOIN PostVotes vs ON rp.Id = vs.PostId
+LEFT JOIN UserBadges badge ON rp.OwnerUserId = badge.UserId
+LEFT JOIN PostHistoryStats phs ON rp.Id = phs.PostId
+ORDER BY rp.CreationDate DESC, rp.Score DESC;

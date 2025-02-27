@@ -1,0 +1,67 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        person_info.info AS actor_info,
+        0 AS depth
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    JOIN 
+        person_info ON ci.person_id = person_info.person_id
+    WHERE 
+        person_info.info_type_id = (SELECT id FROM info_type WHERE info = 'birth_year')
+        AND an.name IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ci.person_id,
+        person_info.info AS actor_info,
+        depth + 1
+    FROM 
+        cast_info ci
+    JOIN 
+        ActorHierarchy ah ON ci.movie_id = (
+            SELECT movie_id 
+            FROM movie_info mi 
+            WHERE mi.info_type_id = (SELECT id FROM info_type WHERE info = 'related_movie')
+            AND mi.info IS NOT NULL LIMIT 1)
+    JOIN 
+        person_info ON ci.person_id = person_info.person_id
+    WHERE 
+        person_info.info_type_id = (SELECT id FROM info_type WHERE info = 'birth_year')
+)
+
+SELECT 
+    a.name AS Actor_Name,
+    at.title AS Movie_Title,
+    at.production_year AS Production_Year,
+    COUNT(DISTINCT mc.company_id) AS Company_Count,
+    AVG(CASE 
+            WHEN mi.info IS NOT NULL THEN LENGTH(mi.info)
+            ELSE NULL
+        END) AS Avg_Info_Length,
+    ROW_NUMBER() OVER (PARTITION BY a.name ORDER BY at.production_year DESC) AS Row_Num,
+    CASE 
+        WHEN COUNT(DISTINCT mc.company_id) = 0 THEN 'No Companies'
+        ELSE 'Has Companies'
+    END AS Company_Status
+FROM 
+    ActorHierarchy ah
+JOIN 
+    cast_info ci ON ah.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.movie_id
+LEFT JOIN 
+    movie_companies mc ON at.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_info mi ON at.movie_id = mi.movie_id
+WHERE 
+    at.production_year >= 2000
+GROUP BY 
+    a.name, at.title, at.production_year
+HAVING 
+    AVG(COALESCE(LENGTH(mi.info), 0)) > 5
+ORDER BY 
+    Actor_Name, Production_Year DESC;

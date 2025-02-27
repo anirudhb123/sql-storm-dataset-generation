@@ -1,0 +1,82 @@
+WITH RecursivePostChain AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.CreationDate,
+        p2.Score,
+        p2.ViewCount,
+        p2.OwnerUserId,
+        p2.AcceptedAnswerId,
+        rc.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        Posts p ON p2.ParentId = p.Id
+    INNER JOIN 
+        RecursivePostChain rc ON rc.PostId = p.Id
+)
+, PostVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+)
+, UserBadges AS (
+    SELECT
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Badges b
+    GROUP BY
+        b.UserId
+)
+SELECT 
+    rc.PostId,
+    rc.Title,
+    rc.CreationDate,
+    rc.Score,
+    rc.ViewCount,
+    pv.UpVotes,
+    pv.DownVotes,
+    ub.BadgeCount,
+    ub.Badges,
+    CASE 
+        WHEN rc.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+        ELSE 'Not Accepted'
+    END AS AnswerStatus,
+    DENSE_RANK() OVER (PARTITION BY rc.OwnerUserId ORDER BY rc.Score DESC) AS UserRank
+FROM 
+    RecursivePostChain rc
+LEFT JOIN 
+    PostVotes pv ON rc.PostId = pv.PostId
+LEFT JOIN 
+    UserBadges ub ON rc.OwnerUserId = ub.UserId
+WHERE 
+    rc.Level <= 2
+    AND rc.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+ORDER BY 
+    rc.Score DESC, rc.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

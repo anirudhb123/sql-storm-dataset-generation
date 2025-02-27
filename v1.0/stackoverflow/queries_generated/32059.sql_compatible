@@ -1,0 +1,69 @@
+
+WITH RecursiveUserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY U.CreationDate DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+RecentPostEdits AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId,
+        PH.CreationDate,
+        PH.UserDisplayName,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+),
+PostWithRecentEdit AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        R.UserDisplayName AS LastEditor,
+        R.CreationDate AS LastEditDate,
+        R.Comment AS EditComment
+    FROM 
+        Posts P
+    LEFT JOIN 
+        RecentPostEdits R ON P.Id = R.PostId AND R.EditRank = 1
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.TotalScore,
+    P.Title AS RecentPostTitle,
+    P.CreationDate AS PostCreationDate,
+    P.LastEditor,
+    P.LastEditDate,
+    COALESCE(P.EditComment, 'No edits yet') AS EditComment,
+    COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+    COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes
+FROM 
+    RecursiveUserActivity U
+LEFT JOIN 
+    PostWithRecentEdit P ON U.UserId = P.LastEditor
+LEFT JOIN 
+    Votes V ON P.PostId = V.PostId
+WHERE 
+    U.Reputation > 1000 
+    AND U.PostCount > 5
+GROUP BY 
+    U.UserId, U.DisplayName, U.Reputation, U.PostCount, U.TotalScore, P.Title, P.CreationDate, P.LastEditor, P.LastEditDate, P.EditComment
+ORDER BY 
+    U.Reputation DESC, U.PostCount DESC;

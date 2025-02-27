@@ -1,0 +1,48 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS level
+    FROM orders
+    WHERE o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+CustomerSpend AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spend
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT cs.c_custkey, cs.c_name, cs.total_spend,
+           RANK() OVER (ORDER BY cs.total_spend DESC) AS spend_rank
+    FROM CustomerSpend cs
+    WHERE cs.total_spend > 1000
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, AVG(ps.ps_supplycost) AS avg_supply_cost,
+           SUM(ps.ps_availqty) AS total_available
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+PartsWithComments AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, p.p_comment,
+           COALESCE(SUM(l.l_discount * l.l_extendedprice) OVER (PARTITION BY p.p_partkey), 0) AS total_discount
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice, p.p_comment
+)
+SELECT th.c_name, th.total_spend, ps.s_name, si.avg_supply_cost, p.p_name, p.total_discount
+FROM TopCustomers th
+LEFT JOIN orders o ON th.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN SupplierInfo si ON ps.ps_suppkey = si.s_suppkey
+JOIN PartsWithComments p ON l.l_partkey = p.p_partkey
+WHERE p.p_retailprice IS NOT NULL AND si.avg_supply_cost < 50.00
+ORDER BY th.total_spend DESC, p.total_discount DESC;

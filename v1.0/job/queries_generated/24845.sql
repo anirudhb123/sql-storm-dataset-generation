@@ -1,0 +1,69 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id DESC) AS rank_per_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredActors AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        AVG(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS average_with_note -- Calculate average "with note"
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    WHERE 
+        a.name IS NOT NULL AND a.name <> ''
+    GROUP BY 
+        a.person_id, a.name
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id 
+)
+SELECT 
+    m.title,
+    m.production_year,
+    a.name AS actor_name,
+    f.total_movies,
+    f.average_with_note,
+    c.company_names,
+    c.company_types
+FROM 
+    RankedMovies m
+LEFT JOIN 
+    FilteredActors f ON f.total_movies > 5 
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = m.movie_id
+LEFT JOIN 
+    aka_name a ON a.person_id = ci.person_id
+LEFT JOIN 
+    CompanyMovies c ON c.movie_id = m.movie_id
+WHERE 
+    m.rank_per_year <= 3
+ORDER BY 
+    m.production_year DESC, 
+    f.total_movies DESC NULLS LAST, 
+    m.title;
+
+-- This query provides a complex and elaborate combination of CTEs, outer joins,
+-- window functions, and aggregations. It fetches the top 3 movies per year,
+-- filters actors with more than 5 movies, lists companies involved in those movies,
+-- and computes averages involve nullable calculations in an intricate SQL construct.

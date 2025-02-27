@@ -1,0 +1,92 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(c.Id) AS TotalComments,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS TotalCloseVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostOrder,
+        DENSE_RANK() OVER (ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  -- Bounty Start and Close
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+UserPostSummary AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.TotalPosts,
+        us.TotalQuestions,
+        us.TotalAnswers,
+        pa.PostId,
+        pa.Title,
+        pa.CreationDate,
+        pa.TotalBounty,
+        pa.TotalComments,
+        pa.TotalCloseVotes,
+        pa.PostOrder,
+        pa.ViewRank
+    FROM 
+        UserStatistics us
+    JOIN 
+        PostActivity pa ON us.UserId = pa.PostId
+)
+SELECT 
+    ups.DisplayName,
+    ups.Reputation,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.Title,
+    ups.TotalBounty,
+    ups.TotalComments,
+    ups.TotalCloseVotes,
+    CASE 
+        WHEN ups.Reputation >= 1000 THEN 'Experienced'
+        ELSE 'Novice'
+    END AS UserTier,
+    CASE 
+        WHEN ups.TotalCloseVotes > 0 THEN 'Has Been Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = ups.UserId) AS UserPostCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM 
+    UserPostSummary ups
+LEFT JOIN 
+    UNNEST(string_to_array((SELECT p.Tags FROM Posts p WHERE p.Id = ups.PostId), ',')) AS t(TagName) ON t.TagName IS NOT NULL
+GROUP BY 
+    ups.DisplayName, ups.Reputation, ups.TotalPosts, ups.TotalQuestions, ups.TotalAnswers, 
+    ups.Title, ups.TotalBounty, ups.TotalComments, ups.TotalCloseVotes
+ORDER BY 
+    ups.Reputation DESC, ups.TotalPosts DESC
+LIMIT 100;

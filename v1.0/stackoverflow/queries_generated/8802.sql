@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.ViewCount > 100
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        u.Id
+),
+PostInteractions AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(c.Score) AS TotalCommentScore,
+        COUNT(distinct v.UserId) AS UniqueVoters,
+        COUNT(distinct c.Id) AS TotalComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.CommentCount,
+    au.DisplayName AS ActiveUser,
+    au.BadgeCount,
+    au.TotalBounty,
+    pi.TotalCommentScore,
+    pi.UniqueVoters,
+    pi.TotalComments
+FROM 
+    RankedPosts rp
+JOIN 
+    ActiveUsers au ON au.UserId = rp.PostId -- Assuming Active Users are directly linked to Posts as Owners
+JOIN 
+    PostInteractions pi ON pi.PostId = rp.PostId
+WHERE 
+    rp.Rank <= 10
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

@@ -1,0 +1,54 @@
+WITH RecursiveTagAssociations AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title AS PostTitle, 
+        T.TagName,
+        1 AS Level
+    FROM 
+        Posts P
+    JOIN 
+        Tags T ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE 
+        P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.Title AS PostTitle,
+        T.TagName,
+        Level + 1
+    FROM 
+        Posts P
+    JOIN 
+        RecursiveTagAssociations RTA ON P.ParentId = RTA.PostId
+    JOIN 
+        Tags T ON P.Tags LIKE '%' || T.TagName || '%'
+)
+SELECT 
+    U.DisplayName,
+    COUNT(DISTINCT P.Id) AS TotalPosts,
+    AVG(P.Score) AS AverageScore,
+    SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS AssociatedTags,
+    MAX(P.LastActivityDate) AS LastActive,
+    MAX(COALESCE(B.Name, 'No Badge')) AS HighestBadge,
+    COUNT(DISTINCT V.Id) AS TotalVotes
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    Badges B ON U.Id = B.UserId
+LEFT JOIN 
+    RecursiveTagAssociations RTA ON P.Id = RTA.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+GROUP BY 
+    U.Id
+HAVING 
+    COUNT(DISTINCT P.Id) > 5  
+ORDER BY 
+    AverageScore DESC, 
+    U.DisplayName
+LIMIT 10;

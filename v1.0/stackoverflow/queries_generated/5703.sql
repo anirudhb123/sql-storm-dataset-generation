@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerDisplayName,
+        CommentCount,
+        VoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        RowNum <= 10
+)
+SELECT 
+    tp.*,
+    pt.Name AS PostType,
+    u.Reputation,
+    COALESCE(SUM(b.Class = 1)::int, 0) AS GoldBadges,
+    COALESCE(SUM(b.Class = 2)::int, 0) AS SilverBadges,
+    COALESCE(SUM(b.Class = 3)::int, 0) AS BronzeBadges
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostTypes pt ON tp.PostId = pt.Id
+LEFT JOIN 
+    Badges b ON tp.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = b.UserId)
+GROUP BY 
+    tp.PostId, pt.Name, u.Reputation
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

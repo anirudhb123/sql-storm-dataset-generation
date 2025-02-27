@@ -1,0 +1,68 @@
+
+WITH TagCounts AS (
+    SELECT 
+        UNNEST(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagCounts
+    WHERE 
+        PostCount > 1 
+),
+SelectedTags AS (
+    SELECT 
+        TagName
+    FROM 
+        TopTags
+    WHERE 
+        Rank <= 10 
+),
+TagPostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        ARRAY(SELECT DISTINCT t.TagName FROM TagCounts t WHERE t.TagName NOT IN (SELECT TagName FROM SelectedTags)) AS OtherTags
+    FROM 
+        Posts p
+    WHERE 
+        EXISTS (
+            SELECT 1 
+            FROM UNNEST(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS tag 
+            WHERE tag IN (SELECT TagName FROM SelectedTags)
+        )
+        AND p.PostTypeId = 1 
+)
+SELECT 
+    tpd.PostId,
+    tpd.Title,
+    tpd.CreationDate,
+    tpd.Score,
+    tpd.AnswerCount,
+    tpd.ViewCount,
+    STRING_AGG(t.Name, ', ') AS AssociatedTags,
+    tpd.OtherTags
+FROM 
+    TagPostDetails tpd
+LEFT JOIN 
+    UNNEST(string_to_array(SUBSTRING(tpd.Tags FROM 2 FOR LENGTH(tpd.Tags) - 2), '><')) AS Tag ON TRUE
+LEFT JOIN 
+    tags t ON t.TagName = Tag
+GROUP BY 
+    tpd.PostId, tpd.Title, tpd.CreationDate, tpd.Score, tpd.AnswerCount, tpd.ViewCount, tpd.OtherTags
+ORDER BY 
+    tpd.Score DESC, tpd.ViewCount DESC;

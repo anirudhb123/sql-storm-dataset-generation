@@ -1,0 +1,48 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderpriority, 
+        c.c_name AS customer_name,
+        RANK() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+), 
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey, 
+        ro.o_orderdate, 
+        ro.o_totalprice, 
+        ro.customer_name
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.order_rank <= 10
+), 
+OrderDetails AS (
+    SELECT 
+        to.o_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales,
+        COUNT(li.l_orderkey) AS total_lineitems
+    FROM 
+        TopOrders to
+    JOIN 
+        lineitem li ON to.o_orderkey = li.l_orderkey
+    GROUP BY 
+        to.o_orderkey
+)
+SELECT 
+    to.o_orderkey, 
+    to.o_orderdate, 
+    to.customer_name, 
+    od.total_sales,
+    od.total_lineitems
+FROM 
+    TopOrders to
+JOIN 
+    OrderDetails od ON to.o_orderkey = od.o_orderkey
+ORDER BY 
+    od.total_sales DESC;

@@ -1,0 +1,54 @@
+
+WITH sales_summary AS (
+    SELECT
+        ws.web_site_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid_inc_tax) AS avg_order_value,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk IN (
+            SELECT d_date_sk
+            FROM date_dim
+            WHERE d_year = 2023 AND d_month_seq BETWEEN 1 AND 12
+        )
+    GROUP BY
+        ws.web_site_id
+),
+top_websites AS (
+    SELECT
+        web_site_id,
+        total_sales,
+        total_orders,
+        avg_order_value
+    FROM
+        sales_summary
+    WHERE
+        rank <= 5
+)
+SELECT
+    tw.web_site_id,
+    tw.total_sales,
+    tw.total_orders,
+    tw.avg_order_value,
+    (SELECT COUNT(DISTINCT c_customer_sk) 
+     FROM web_sales ws
+     WHERE ws.ws_web_site_sk = (
+         SELECT web_site_sk FROM web_site WHERE web_site_id = tw.web_site_id
+     ) AND ws.ws_net_paid_inc_tax > 100) AS high_value_customers,
+    COALESCE(
+        (SELECT COUNT(*) 
+         FROM store_sales ss 
+         WHERE ss.ss_sold_date_sk IN (
+             SELECT d_date_sk FROM date_dim WHERE d_year = 2023
+         ) AND ss.ss_item_sk IN (
+             SELECT i_item_sk FROM item WHERE i_current_price > 100
+         )
+        ), 0
+    ) AS related_store_sales
+FROM
+    top_websites tw
+ORDER BY
+    tw.total_sales DESC;

@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        COUNT(c.Id) AS CommentCount, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(p.Score) AS TotalScore 
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '5 years'
+    GROUP BY 
+        u.Id
+),
+UserBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(*) FILTER (WHERE b.Class = 1) AS GoldBadges, 
+        COUNT(*) FILTER (WHERE b.Class = 2) AS SilverBadges, 
+        COUNT(*) FILTER (WHERE b.Class = 3) AS BronzeBadges 
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName, 
+    u.TotalScore, 
+    ub.GoldBadges, 
+    ub.SilverBadges, 
+    ub.BronzeBadges, 
+    rp.PostId, 
+    rp.Title, 
+    rp.CreationDate, 
+    rp.Score, 
+    rp.ViewCount, 
+    rp.CommentCount, 
+    rp.UpVotes, 
+    rp.DownVotes
+FROM 
+    TopUsers u
+LEFT JOIN 
+    UserBadges ub ON u.UserId = ub.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.UserId = rp.OwnerUserId 
+WHERE 
+    rp.Rank <= 5 
+ORDER BY 
+    u.TotalScore DESC, 
+    rp.Score DESC
+LIMIT 50;

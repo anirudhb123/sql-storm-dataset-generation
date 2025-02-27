@@ -1,0 +1,70 @@
+WITH RevenueBySupplier AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderCounts AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name,
+        RANK() OVER (ORDER BY rb.total_revenue DESC) AS revenue_rank,
+        rb.*
+    FROM 
+        RevenueBySupplier rb
+    JOIN 
+        supplier s ON rb.s_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        toc.order_count,
+        ts.s_name AS top_supplier,
+        ts.total_revenue
+    FROM 
+        CustomerOrderCounts toc
+    JOIN 
+        customer c ON toc.c_custkey = c.c_custkey
+    JOIN 
+        TopSuppliers ts ON c.c_custkey = toc.c_custkey
+    WHERE 
+        ts.revenue_rank <= 10
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    SUM(c.c_acctbal) AS total_account_balance,
+    AVG(c.order_count) AS avg_order_count,
+    COUNT(DISTINCT ts.top_supplier) AS number_of_top_suppliers
+FROM 
+    CustomerOrderDetails c
+GROUP BY 
+    c.c_custkey, c.c_name
+HAVING 
+    SUM(c.c_acctbal) > 1000
+ORDER BY 
+    total_account_balance DESC;

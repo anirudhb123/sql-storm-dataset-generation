@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp 
+    WHERE 
+        rp.Rank <= 10
+),
+PostStats AS (
+    SELECT 
+        tp.PostID,
+        tp.Title,
+        tp.OwnerDisplayName,
+        tp.Score,
+        tp.ViewCount,
+        tp.CommentCount,
+        pt.Name AS PostTypeName,
+        COUNT(ph.Id) AS EditHistoryCount,
+        SUM(CASE WHEN pv.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN pv.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostTypes pt ON tp.PostTypeId = pt.Id
+    LEFT JOIN 
+        PostHistory ph ON tp.PostID = ph.PostId
+    LEFT JOIN 
+        Votes pv ON tp.PostID = pv.PostId
+    GROUP BY 
+        tp.PostID, tp.Title, tp.OwnerDisplayName, tp.Score, tp.ViewCount, tp.CommentCount, pt.Name
+)
+SELECT 
+    ps.PostID,
+    ps.Title,
+    ps.OwnerDisplayName,
+    ps.Score,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.PostTypeName,
+    ps.EditHistoryCount,
+    ps.UpVotes,
+    ps.DownVotes
+FROM 
+    PostStats ps
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

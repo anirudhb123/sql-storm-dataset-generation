@@ -1,0 +1,62 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_amount) AS total_returned_amount,
+        COUNT(DISTINCT cr_order_number) AS return_count
+    FROM catalog_returns
+    WHERE cr_return_quantity > 0
+    GROUP BY cr_returning_customer_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws_ship_customer_sk,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS sales_count
+    FROM web_sales
+    WHERE ws_sales_price > 0
+    GROUP BY ws_ship_customer_sk
+),
+Customer Demographics AS (
+    SELECT 
+        c.customer_sk,
+        cd_gender,
+        CASE 
+            WHEN cd_marital_status = 'M' THEN 'Married'
+            WHEN cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Unknown'
+        END AS marital_status,
+        cd_purchase_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+IncomeBands AS (
+    SELECT 
+        ib_income_band_sk,
+        ib_lower_bound,
+        ib_upper_bound,
+        CASE 
+            WHEN ib_lower_bound < 0 THEN 'Negative'
+            ELSE 'Positive'
+        END AS income_status
+    FROM income_band
+)
+SELECT 
+    cd.customer_sk,
+    cd.gender,
+    cd.marital_status,
+    COALESCE(SUM(CASE WHEN cs.total_sales IS NOT NULL THEN cs.total_sales ELSE 0 END), 0) AS total_sales,
+    COALESCE(SUM(cr.total_returned_amount), 0) AS total_returns,
+    CASE 
+        WHEN SUM(COALESCE(cs.total_sales, 0) - COALESCE(cr.total_returned_amount, 0)) < 0 THEN 'Net Loss'
+        WHEN SUM(COALESCE(cs.total_sales, 0) - COALESCE(cr.total_returned_amount, 0)) = 0 THEN 'Break Even'
+        ELSE 'Net Profit'
+    END AS financial_status,
+    ib.income_status
+FROM CustomerDemographics cd
+LEFT JOIN SalesSummary cs ON cd.customer_sk = cs.ws_ship_customer_sk
+LEFT JOIN CustomerReturns cr ON cd.customer_sk = cr.cr_returning_customer_sk
+LEFT JOIN IncomeBands ib ON cd.cd_purchase_estimate BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound
+GROUP BY cd.customer_sk, cd.gender, cd.marital_status, ib.income_status
+HAVING COUNT(DISTINCT cs.sales_count) > 1
+ORDER BY financial_status DESC, total_sales DESC;

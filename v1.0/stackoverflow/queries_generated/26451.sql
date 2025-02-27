@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(p.Tags, '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 -- Filter for Questions only
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.AnswerCount, 
+        p.CommentCount, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN pht.Name = 'Initial Title' THEN ph.CreationDate END) AS InitialTitleDate,
+        MAX(CASE WHEN pht.Name = 'Initial Body' THEN ph.CreationDate END) AS InitialBodyDate,
+        MAX(CASE WHEN pht.Name = 'Edit Title' THEN ph.CreationDate END) AS LastEditTitleDate,
+        MAX(CASE WHEN pht.Name = 'Edit Body' THEN ph.CreationDate END) AS LastEditBodyDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(*) AS TagUsage
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(p.Tags, '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagUsage DESC
+    LIMIT 10
+)
+SELECT 
+    rp.PostId, 
+    rp.Title AS QuestionTitle, 
+    rp.Body AS QuestionBody, 
+    rp.CreationDate AS QuestionDate, 
+    rp.ViewCount, 
+    rp.AnswerCount, 
+    rp.CommentCount,
+    pd.InitialTitleDate,
+    pd.InitialBodyDate,
+    pd.LastEditTitleDate,
+    pd.LastEditBodyDate,
+    rp.Tags,
+    rp.OwnerDisplayName,
+    pt.TagName AS PopularTag,
+    pt.TagUsage
+FROM 
+    RankedPosts rp
+JOIN 
+    PostHistoryDetails pd ON rp.PostId = pd.PostId
+JOIN 
+    PopularTags pt ON pt.TagName = ANY(string_to_array(rp.Tags, ', '))
+WHERE 
+    rp.PostRank <= 3 -- Only consider the last 3 posts for each user
+ORDER BY 
+    rp.OwnerDisplayName, rp.CreationDate DESC;

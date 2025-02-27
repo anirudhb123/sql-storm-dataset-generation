@@ -1,0 +1,59 @@
+WITH RecursiveTitleYear AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year) AS year_rnk
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+AkaNameCasting AS (
+    SELECT 
+        a.id AS aka_id,
+        a.person_id,
+        a.name,
+        c.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY c.nr_order) AS role_order,
+        COALESCE(c.note, 'No Note') AS casting_note
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+),
+CompanyAggregates AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count,
+        LISTAGG(DISTINCT cn.name, ', ') WITHIN GROUP (ORDER BY cn.name) AS company_names
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY mc.movie_id
+),
+MoviesWithKeyword AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM title t
+    JOIN movie_keyword mk ON t.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY t.id
+)
+SELECT 
+    rty.year_rnk,
+    rty.production_year,
+    rty.title,
+    akc.name AS actor_name,
+    akc.casting_note,
+    ca.company_count,
+    ca.company_names,
+    mwk.keywords,
+    CASE 
+        WHEN ca.company_count > 5 THEN 'Major Production'
+        WHEN ca.company_count BETWEEN 3 AND 5 THEN 'Moderate Production'
+        ELSE 'Independent Production'
+    END AS production_type
+FROM RecursiveTitleYear rty
+LEFT JOIN AkaNameCasting akc ON rty.title_id = akc.movie_id
+LEFT JOIN CompanyAggregates ca ON rty.title_id = ca.movie_id
+LEFT JOIN MoviesWithKeyword mwk ON rty.title_id = mwk.title_id
+WHERE akc.role_order IS NULL OR akc.role_order <= 3 
+ORDER BY rty.production_year DESC, rty.year_rnk;

@@ -1,0 +1,62 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) 
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        P.LastActivityDate,
+        COALESCE(DATEDIFF(MINUTE, P.CreationDate, P.LastActivityDate), 0) AS ActiveDurationMinutes
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate > DATEADD(YEAR, -1, GETDATE())  
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.BadgeCount,
+    U.TotalViews,
+    U.TotalScore,
+    U.TotalPosts,
+    U.TotalBounty,
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.ViewCount,
+    P.AnswerCount,
+    P.CommentCount,
+    P.FavoriteCount,
+    P.LastActivityDate,
+    P.ActiveDurationMinutes
+FROM 
+    UserStats U
+JOIN 
+    PostStats P ON P.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.UserId)
+ORDER BY 
+    U.Reputation DESC, P.ViewCount DESC;

@@ -1,0 +1,65 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        CAST(0 AS INT) AS Level,
+        p.Score
+    FROM
+        Posts AS p
+    WHERE
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT
+        a.Id,
+        a.Title,
+        a.OwnerUserId,
+        a.CreationDate,
+        a.AcceptedAnswerId,
+        Level + 1,
+        a.Score
+    FROM
+        Posts AS a
+    INNER JOIN Posts AS q ON a.ParentId = q.Id
+    WHERE
+        q.PostTypeId = 1 
+)
+
+SELECT
+    u.DisplayName AS UserDisplayName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS QuestionCount,
+    COUNT(DISTINCT a.Id) AS AnswerCount,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    SUM(COALESCE(b.Class, 0)) AS TotalBadgeClass,
+    MAX(p.CreationDate) AS LastQuestionDate,
+    AVG(p.Score) AS AverageQuestionScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    (SELECT COUNT(*)
+     FROM Votes v
+     WHERE v.PostId IN (SELECT PostId FROM RecursivePostHierarchy)
+       AND v.VoteTypeId = 2) AS TotalUpvotes,
+    (SELECT COUNT(*)
+     FROM Votes v
+     WHERE v.PostId IN (SELECT PostId FROM RecursivePostHierarchy)
+       AND v.VoteTypeId = 3) AS TotalDownvotes
+FROM
+    Users u
+LEFT JOIN Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+LEFT JOIN Posts a ON p.Id = a.ParentId 
+LEFT JOIN Comments c ON c.PostId = p.Id
+LEFT JOIN Badges b ON u.Id = b.UserId
+LEFT JOIN Tags t ON t.Id IN (SELECT UNNEST(string_to_array(p.Tags, ','))) 
+WHERE
+    u.Reputation >= 1000
+GROUP BY
+    u.Id, u.DisplayName, u.Reputation
+HAVING
+    COUNT(DISTINCT p.Id) > 0 AND COUNT(DISTINCT a.Id) > 0
+ORDER BY
+    LastQuestionDate DESC, UserDisplayName
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

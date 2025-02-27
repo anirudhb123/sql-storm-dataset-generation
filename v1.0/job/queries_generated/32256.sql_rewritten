@@ -1,0 +1,34 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT ci.person_id, 
+           COUNT(DISTINCT ci.movie_id) AS movie_count,
+           ARRAY_AGG(DISTINCT t.title) AS movies
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    JOIN aka_title at ON ci.movie_id = at.movie_id
+    WHERE an.name IS NOT NULL AND at.production_year IS NOT NULL
+    GROUP BY ci.person_id
+), AvgMovies AS (
+    SELECT AVG(movie_count) AS avg_movies
+    FROM ActorHierarchy
+), RankedActors AS (
+    SELECT ah.person_id,
+           ah.movie_count,
+           ah.movies,
+           RANK() OVER (ORDER BY ah.movie_count DESC) AS rank
+    FROM ActorHierarchy ah
+    WHERE ah.movie_count > (SELECT avg_movies FROM AvgMovies)
+)
+SELECT a.id AS actor_id,
+       an.name AS actor_name,
+       ra.movie_count,
+       ra.movies,
+       COALESCE(STRING_AGG(DISTINCT k.keyword, ', '), 'No Keywords') AS keywords,
+       COALESCE(ci.note, 'No Note') AS role_note
+FROM RankedActors ra
+JOIN aka_name an ON ra.person_id = an.person_id
+LEFT JOIN movie_keyword mk ON ra.movies && (SELECT ARRAY_AGG(m.id) FROM aka_title m WHERE m.title = ANY(ra.movies))
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+LEFT JOIN cast_info ci ON ra.person_id = ci.person_id AND ci.movie_id = ANY(ra.movies)
+WHERE an.name NOT LIKE '%Unknown%'
+GROUP BY a.id, an.name, ra.movie_count, ra.movies, ci.note
+ORDER BY ra.movie_count DESC, an.name;

@@ -1,0 +1,53 @@
+WITH SupplierPartCounts AS (
+    SELECT ps.ps_suppkey, COUNT(ps.ps_partkey) AS part_count
+    FROM partsupp AS ps
+    GROUP BY ps.ps_suppkey
+),
+CustomerSegmentTotals AS (
+    SELECT c.c_mktsegment, SUM(o.o_totalprice) AS segment_total
+    FROM customer AS c
+    JOIN orders AS o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_mktsegment
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount,
+           AVG(l.l_quantity) AS avg_quantity
+    FROM lineitem AS l
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY l.l_orderkey
+),
+NationSupplier AS (
+    SELECT n.n_name, s.s_suppkey, s.s_acctbal
+    FROM nation AS n
+    LEFT JOIN supplier AS s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+)
+SELECT 
+    pt.p_name,
+    r.r_name AS region_name,
+    ns.n_name AS nation_name,
+    sp.part_count,
+    cst.segment_total,
+    lis.total_price_after_discount,
+    lis.avg_quantity,
+    rn.rn
+  
+FROM part AS pt
+JOIN region AS r ON r.r_regionkey = (SELECT n.n_regionkey
+                                      FROM nation AS n
+                                      WHERE n.n_nationkey = (SELECT MIN(s.s_nationkey)
+                                                              FROM supplier AS s
+                                                              WHERE s.s_acctbal = (SELECT MAX(s1.s_acctbal)
+                                                                                   FROM supplier AS s1)))
+LEFT JOIN SupplierPartCounts AS sp ON pt.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sp.ps_suppkey)
+LEFT JOIN CustomerSegmentTotals AS cst ON cst.c_mktsegment = 'BUILDING' 
+LEFT JOIN LineItemSummary AS lis ON lis.l_orderkey = (SELECT o.o_orderkey
+                                                       FROM orders o
+                                                       WHERE o.o_orderstatus = 'F'
+                                                       ORDER BY o.o_orderdate DESC
+                                                       LIMIT 1)
+LEFT JOIN NationSupplier AS ns ON ns.s_suppkey = sp.ps_suppkey
+JOIN (SELECT ROW_NUMBER() OVER (ORDER BY part_count DESC) AS rn, ps_suppkey
+      FROM SupplierPartCounts) AS rn ON ns.s_suppkey = rn.ps_suppkey
+WHERE pt.p_retailprice > 100.00
+ORDER BY ns.n_name, pt.p_name;

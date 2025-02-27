@@ -1,0 +1,53 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        MAX(ws.ws_sold_date_sk) AS last_purchase_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+        AND ws.ws_sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_date = (CURRENT_DATE - INTERVAL '1 year') LIMIT 1)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+HighValueCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_sales,
+        cs.order_count,
+        cs.last_purchase_date
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.total_sales > (
+            SELECT AVG(total_sales) FROM CustomerSales
+        )
+)
+SELECT 
+    hvc.c_customer_sk,
+    hvc.c_first_name || ' ' || hvc.c_last_name AS full_name,
+    hvc.total_sales,
+    hvc.order_count,
+    CASE
+        WHEN hvc.order_count > 5 THEN 'Frequent Buyer'
+        ELSE 'Occasional Buyer'
+    END AS customer_type,
+    CASE 
+        WHEN hvc.last_purchase_date IS NULL THEN 'No Purchases'
+        ELSE (SELECT d_date FROM date_dim WHERE d_date_sk = hvc.last_purchase_date)
+    END AS last_purchase_date
+FROM 
+    HighValueCustomers hvc
+ORDER BY 
+    hvc.total_sales DESC
+LIMIT 10;

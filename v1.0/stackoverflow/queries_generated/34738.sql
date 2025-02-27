@@ -1,0 +1,81 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        h.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy h ON p.ParentId = h.PostId
+), 
+
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        COUNT(DISTINCT CASE WHEN b.UserId IS NOT NULL THEN b.UserId END) AS BadgeCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(c.Id) DESC) AS RankByComments,
+        MAX(p.CreationDate) AS LastActivity
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.OwnerUserId
+),
+
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    ps.PostId,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.BadgeCount,
+    ph.LastEditDate,
+    ph.CloseCount,
+    COALESCE(p.Title, 'Untitled') AS Title,
+    CASE 
+        WHEN ps.RankByComments <= 3 THEN 'Top Commenter'
+        ELSE 'Regular User'
+    END AS UserStatus
+FROM 
+    PostStats ps
+LEFT JOIN 
+    PostHistoryStats ph ON ps.PostId = ph.PostId
+LEFT JOIN 
+    Posts p ON ps.PostId = p.Id
+WHERE 
+    COALESCE(ps.CommentCount, 0) > 0
+ORDER BY 
+    ps.CommentCount DESC, ps.UpVotes DESC;

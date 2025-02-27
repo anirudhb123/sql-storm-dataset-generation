@@ -1,0 +1,93 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownvotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - 
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS NetScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+
+TagStats AS (
+    SELECT 
+        g.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(CASE WHEN p.ViewCount > 1000 THEN 1 ELSE 0 END, 0)) AS PopularityTag,
+        COUNT(DISTINCT b.UserId) AS BadgeCount
+    FROM 
+        Tags g
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', g.TagName, '%')
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    GROUP BY 
+        g.TagName
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT rp.PostId) AS RecentPostsCount,
+    SUM(ue.TotalUpvotes) AS TotalUserUpvotes,
+    SUM(ue.TotalDownvotes) AS TotalUserDownvotes,
+    SUM(CASE WHEN cp.ClosedDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPostsCount,
+    ts.TagName,
+    ts.PostCount,
+    ts.PopularityTag,
+    ts.BadgeCount,
+    CASE
+        WHEN SUM(ue.NetScore) > 0 THEN 'Positive'
+        WHEN SUM(ue.NetScore) < 0 THEN 'Negative'
+        ELSE 'Neutral' 
+    END AS UserEngagementStatus
+FROM 
+    Users u
+LEFT JOIN 
+    RecentPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    UserEngagement ue ON u.Id = ue.UserId
+LEFT JOIN 
+    ClosedPosts cp ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = cp.PostId) 
+LEFT JOIN 
+    TagStats ts ON ts.TagName IN (SELECT unnest(string_to_array(p.Tags, '>')) FROM Posts p WHERE p.OwnerUserId = u.Id)
+WHERE 
+    u.Reputation > 100
+GROUP BY 
+    u.Id, ts.TagName
+HAVING 
+    COUNT(DISTINCT rp.PostId) > 0 OR SUM(ue.TotalUpvotes) < 10
+ORDER BY 
+    u.Reputation DESC, ts.PostCount DESC
+LIMIT 50 OFFSET 10;

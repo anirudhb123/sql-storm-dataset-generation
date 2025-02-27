@@ -1,0 +1,74 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS rn,
+        COUNT(*) OVER (PARTITION BY m.production_year) AS year_count
+    FROM title m
+    WHERE m.production_year IS NOT NULL
+),
+ActorsMovies AS (
+    SELECT 
+        p.id AS actor_id,
+        a.name AS actor_name,
+        c.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY p.id ORDER BY c.nr_order) AS actor_movie_order
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    JOIN person_info p ON a.person_id = p.person_id
+    WHERE p.id IS NOT NULL
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS all_keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        COUNT(DISTINCT cn.id) AS company_count
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY mc.movie_id
+),
+Filtered AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        am.actor_id,
+        am.actor_name,
+        mk.all_keywords,
+        cd.companies,
+        cd.company_count
+    FROM RankedMovies rm
+    LEFT JOIN ActorsMovies am ON rm.movie_id = am.movie_id
+    LEFT JOIN MovieKeywords mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN CompanyDetails cd ON rm.movie_id = cd.movie_id
+),
+FinalResults AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN year_count > 10 THEN 'Many movies released in this year'
+            ELSE 'Fewer movies released in this year'
+        END AS release_year_comment,
+        COALESCE(NULLIF(companies, ''), 'No companies listed') AS company_info
+    FROM Filtered
+)
+SELECT 
+    fr.movie_title,
+    fr.actor_name,
+    fr.production_year,
+    fr.release_year_comment,
+    fr.all_keywords,
+    fr.company_info
+FROM FinalResults fr
+WHERE fr.movie_title IS NOT NULL
+  AND (fr.actor_name IS NOT NULL OR fr.all_keywords IS NOT NULL)
+ORDER BY fr.production_year DESC, fr.movie_title;

@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        h.level + 1 AS level
+    FROM 
+        aka_title e
+    INNER JOIN 
+        MovieHierarchy h ON e.episode_of_id = h.movie_id
+),
+RankedMovies AS (
+    
+    SELECT 
+        h.movie_id,
+        h.title,
+        h.production_year,
+        h.level,
+        RANK() OVER (PARTITION BY h.level ORDER BY h.production_year DESC, h.title) AS rank
+    FROM 
+        MovieHierarchy h
+)
+SELECT 
+    COALESCE(ak.name, 'Unknown') AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    m.level,
+    r.rank,
+    COUNT(k.id) AS keyword_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    RankedMovies m
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = m.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = cc.subject_id
+LEFT JOIN 
+    movie_keyword k ON k.movie_id = m.movie_id
+WHERE 
+    m.level = 0 
+GROUP BY 
+    ak.name, m.title, m.production_year, m.level, r.rank
+HAVING 
+    COUNT(k.id) > 1 
+ORDER BY 
+    m.production_year DESC, m.title, r.rank;

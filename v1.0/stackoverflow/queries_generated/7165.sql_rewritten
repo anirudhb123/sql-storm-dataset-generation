@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= '2023-01-01' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerDisplayName,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank <= 5 
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    pt.Name AS PostTypeName,
+    COUNT(v.Id) AS VoteCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostTypes pt ON tp.PostTypeId = pt.Id
+LEFT JOIN 
+    Votes v ON tp.PostId = v.PostId
+LEFT JOIN 
+    UNNEST(string_to_array((SELECT Tags FROM Posts WHERE Id = tp.PostId), ',')) AS t(TagName)
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, tp.Score, tp.ViewCount, tp.OwnerDisplayName, tp.CommentCount, pt.Name
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

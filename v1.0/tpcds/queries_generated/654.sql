@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT
+        s_store_sk,
+        ss_item_sk,
+        SUM(ss_net_paid) AS total_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_net_paid) DESC) AS rank
+    FROM
+        store_sales
+    WHERE
+        ss_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY
+        s_store_sk, ss_item_sk
+),
+TopSales AS (
+    SELECT
+        r.s_store_sk,
+        r.ss_item_sk,
+        r.total_net_paid,
+        ROW_NUMBER() OVER (ORDER BY r.total_net_paid DESC) AS overall_rank
+    FROM
+        RankedSales r
+    WHERE
+        r.rank <= 5
+),
+CustomerInfo AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM
+        customer c
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        cd.cd_gender = 'F' AND
+        cd.cd_marital_status = 'M'
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+)
+SELECT
+    ti.s_store_sk,
+    ti.ss_item_sk,
+    ti.total_net_paid,
+    ci.c_customer_sk,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.total_spent
+FROM
+    TopSales ti
+JOIN CustomerInfo ci ON ti.s_store_sk IN (
+    SELECT s.s_store_sk
+    FROM store s
+    WHERE s.s_number_employees > (
+        SELECT AVG(s2.s_number_employees)
+        FROM store s2
+    )
+)
+ORDER BY
+    ti.total_net_paid DESC, ci.total_spent DESC
+LIMIT 10;

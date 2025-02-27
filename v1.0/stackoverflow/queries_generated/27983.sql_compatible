@@ -1,0 +1,55 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY COUNT(a.Id) DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= DATE_SUB(DATE '2024-10-01', INTERVAL 1 YEAR) 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerDisplayName, p.Tags, p.ViewCount
+), 
+TopRankedPosts AS (
+    SELECT 
+        rp.*,
+        ROW_NUMBER() OVER (ORDER BY AnswerCount DESC, UpVotes DESC) AS OverallRank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank = 1 
+)
+SELECT 
+    trp.PostId,
+    trp.Title,
+    trp.CreationDate,
+    trp.OwnerDisplayName,
+    trp.AnswerCount,
+    trp.UpVotes,
+    trp.DownVotes,
+    t.TagName
+FROM 
+    TopRankedPosts trp
+JOIN 
+    (
+        SELECT 
+            TRIM(BOTH '<>' FROM unnest(string_to_array(tr.Tags, '>'))) AS TagName, 
+            tr.PostId
+        FROM 
+            TopRankedPosts tr
+    ) AS t ON trp.PostId = t.PostId
+GROUP BY 
+    trp.PostId, trp.Title, trp.CreationDate, trp.OwnerDisplayName, trp.AnswerCount, trp.UpVotes, trp.DownVotes, t.TagName
+ORDER BY 
+    trp.OverallRank;

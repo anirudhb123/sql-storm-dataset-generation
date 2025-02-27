@@ -1,0 +1,122 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        p2.CreationDate,
+        p2.ParentId,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy r ON p2.ParentId = r.PostId
+),
+
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+),
+
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    JOIN 
+        PostLinks pl ON pl.RelatedPostId = p.Id
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 5
+),
+
+ActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        u.LastAccessDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        u.Id
+),
+
+FinalReport AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        u.DisplayName AS OwnerName,
+        COALESCE(r.Upvotes, 0) AS TotalUpvotes,
+        COALESCE(r.Downvotes, 0) AS TotalDownvotes,
+        COALESCE(r.CommentCount, 0) AS CommentCount,
+        th.TagName,
+        ah.TotalUpvotes AS UserUpvotes,
+        ah.TotalDownvotes AS UserDownvotes
+    FROM 
+        RecentPosts r
+    LEFT JOIN 
+        Users u ON r.OwnerUserId = u.Id
+    LEFT JOIN 
+        PopularTags th ON r.Id = th.TagCount
+    LEFT JOIN 
+        ActiveUsers ah ON u.Id = ah.Id
+    WHERE 
+        r.rn = 1  
+    ORDER BY 
+        r.CreationDate DESC
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.OwnerName,
+    fp.TotalUpvotes,
+    fp.TotalDownvotes,
+    fp.CommentCount,
+    fp.TagName,
+    fp.UserUpvotes,
+    fp.UserDownvotes
+FROM 
+    FinalReport fp
+ORDER BY 
+    fp.TotalUpvotes DESC, 
+    fp.CreationDate DESC;

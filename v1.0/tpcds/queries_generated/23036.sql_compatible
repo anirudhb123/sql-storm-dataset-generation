@@ -1,0 +1,68 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rank_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (
+            SELECT MAX(d.d_date_sk) 
+            FROM date_dim d
+            WHERE d.d_date BETWEEN '2023-10-01' AND '2023-10-31'
+        )
+),
+low_profit_items AS (
+    SELECT
+        cs.cs_item_sk,
+        cs.net_profit AS cs_net_profit,
+        ws.ws_net_profit
+    FROM 
+        catalog_sales cs
+    LEFT JOIN 
+        web_sales ws ON cs.cs_item_sk = ws.ws_item_sk
+    WHERE 
+        cs.net_profit < (
+            SELECT AVG(rs.ws_net_profit) 
+            FROM ranked_sales rs 
+            WHERE rs.web_site_sk = cs.cs_site_sk
+        )
+),
+all_items AS (
+    SELECT
+        i.i_item_id,
+        COALESCE(lp.cs_net_profit, 0) AS catalog_profit,
+        COALESCE(ws.ws_net_profit, 0) AS web_profit,
+        COALESCE(lp.cs_net_profit, 0) + COALESCE(ws.ws_net_profit, 0) AS total_profit
+    FROM 
+        item i
+    LEFT JOIN 
+        low_profit_items lp ON i.i_item_sk = lp.cs_item_sk
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    WHERE 
+        i.i_current_price > 20 
+        AND i.i_current_price < 100
+)
+SELECT 
+    a.i_item_id,
+    a.catalog_profit,
+    a.web_profit,
+    a.total_profit,
+    CASE 
+        WHEN total_profit IS NULL THEN 'No Profit'
+        WHEN total_profit = 0 THEN 'Break Even'
+        WHEN total_profit < 0 THEN 'Loss'
+        ELSE 'Profit'
+    END AS profit_status
+FROM 
+    all_items a
+WHERE 
+    (a.total_profit IS NOT NULL OR a.total_profit < 0)
+    AND (a.web_profit > 50 OR a.catalog_profit > 50)
+ORDER BY 
+    a.total_profit DESC
+LIMIT 100;

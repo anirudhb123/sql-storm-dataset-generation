@@ -1,0 +1,90 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.PostTypeId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.Rank,
+        rp.CommentCount,
+        rp.Upvotes,
+        rp.Downvotes,
+        CASE 
+            WHEN rp.ViewCount > 1000 THEN 'High'
+            ELSE 'Low'
+        END AS ViewStatus
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+AggregateStats AS (
+    SELECT 
+        CASE 
+            WHEN AVG(Score) > 50 THEN 'Expert'
+            WHEN AVG(Score) BETWEEN 20 AND 50 THEN 'Intermediate'
+            ELSE 'Beginner'
+        END AS ExpertiseLevel,
+        COUNT(*) AS PostsCount,
+        SUM(CommentCount) AS TotalComments,
+        SUM(Upvotes) AS TotalUpvotes,
+        SUM(Downvotes) AS TotalDownvotes
+    FROM 
+        FilteredPosts
+)
+SELECT 
+    f.Title,
+    f.CreationDate,
+    f.Score,
+    f.ViewCount,
+    a.ExpertiseLevel,
+    f.CommentCount,
+    f.Upvotes,
+    f.Downvotes,
+    COALESCE(NULLIF(f.Upvotes - f.Downvotes, 0), 'No Votes') AS VoteDifference
+FROM 
+    FilteredPosts f
+CROSS JOIN 
+    AggregateStats a
+WHERE 
+    f.ViewStatus = 'High'
+ORDER BY 
+    f.Score DESC, f.CreationDate ASC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY
+UNION ALL
+SELECT 
+    'Statistics Summary' AS Title,
+    NULL AS CreationDate,
+    NULL AS Score,
+    NULL AS ViewCount,
+    a.ExpertiseLevel,
+    a.PostsCount,
+    a.TotalUpvotes,
+    a.TotalDownvotes,
+    NULL AS VoteDifference
+FROM 
+    AggregateStats a;

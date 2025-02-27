@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(v.TotalVotes, 0) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        AVG(pv.VoteScore) OVER (PARTITION BY p.Id) AS AvgVoteScore
+    FROM Posts p
+    LEFT JOIN (
+        SELECT
+            PostId,
+            COUNT(*) AS TotalVotes,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM Votes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE -1 END) AS VoteScore
+        FROM Votes
+        GROUP BY PostId
+    ) pv ON p.Id = pv.PostId
+),
+UserBadgeCounts AS (
+    SELECT
+        UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS GoldBadge,
+        MAX(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS SilverBadge,
+        MAX(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS BronzeBadge
+    FROM Badges
+    GROUP BY UserId
+),
+TopUsers AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        uc.BadgeCount,
+        uc.GoldBadge,
+        uc.SilverBadge,
+        uc.BronzeBadge,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN UserBadgeCounts uc ON u.Id = uc.UserId
+    WHERE u.Reputation IS NOT NULL
+)
+SELECT
+    tp.Id AS PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.VoteCount,
+    ub.DisplayName AS UserName,
+    ub.Reputation AS UserReputation,
+    ub.BadgeCount,
+    COALESCE(tp.AvgVoteScore, 0) AS AverageVoteScore,
+    CASE WHEN ub.GoldBadge = 1 THEN 'Gold'
+         WHEN ub.SilverBadge = 1 THEN 'Silver'
+         WHEN ub.BronzeBadge = 1 THEN 'Bronze'
+         ELSE 'No Badge' END AS UserBadge
+FROM RankedPosts tp
+JOIN Users ub ON tp.OwnerUserId = ub.Id
+WHERE tp.PostRank = 1
+ORDER BY tp.Score DESC, VoteCount DESC
+LIMIT 100;

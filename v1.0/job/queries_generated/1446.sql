@@ -1,0 +1,56 @@
+WITH MovieStats AS (
+    SELECT 
+        a.title,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(mi.info_length) AS avg_info_length
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        movie_info mi ON a.id = mi.movie_id
+    GROUP BY 
+        a.title
+),
+KeywordStats AS (
+    SELECT 
+        a.title,
+        STRING_AGG(k.keyword, ', ') AS keywords,
+        SUM(CASE WHEN k.keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        a.title
+),
+FinalStats AS (
+    SELECT 
+        ms.title,
+        ms.cast_count,
+        ms.avg_info_length,
+        ks.keywords,
+        ks.keyword_count
+    FROM 
+        MovieStats ms
+    JOIN 
+        KeywordStats ks ON ms.title = ks.title
+)
+SELECT 
+    title,
+    cast_count,
+    avg_info_length,
+    COALESCE(keywords, 'No keywords') AS keywords,
+    keyword_count
+FROM 
+    FinalStats
+WHERE 
+    cast_count > (
+        SELECT AVG(cast_count) FROM MovieStats
+    )
+ORDER BY 
+    avg_info_length DESC NULLS LAST;

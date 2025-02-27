@@ -1,0 +1,34 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > 50000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal * 1.1
+), OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate <= '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+), SupplierAggregation AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    COALESCE(SUM(od.total_revenue), 0) AS total_order_revenue,
+    COALESCE(SUM(sa.total_cost), 0) AS total_supplier_cost,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY COALESCE(SUM(od.total_revenue), 0) DESC) AS revenue_rank
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN OrderDetails od ON c.c_custkey = od.o_orderkey
+LEFT JOIN SupplierAggregation sa ON n.n_nationkey = sa.s_nationkey
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY total_order_revenue DESC, nation_name ASC;

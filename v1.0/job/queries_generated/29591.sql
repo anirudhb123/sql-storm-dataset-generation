@@ -1,0 +1,37 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COUNT(DISTINCT cc.person_id) AS co_starring_count,
+    GROUP_CONCAT(DISTINCT c.name ORDER BY c.name) AS co_stars,
+    MAX(mci.note) AS movie_note
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    complete_cast cc ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    name c ON cc.subject_id = c.id
+LEFT JOIN 
+    movie_info mci ON t.id = mci.movie_id AND mci.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis' LIMIT 1)
+WHERE 
+    a.name IS NOT NULL 
+  AND 
+    t.production_year IS NOT NULL 
+GROUP BY 
+    a.name, 
+    t.title, 
+    t.production_year
+HAVING 
+    COUNT(DISTINCT cc.person_id) > 0
+ORDER BY 
+    t.production_year DESC, 
+    a.name ASC;

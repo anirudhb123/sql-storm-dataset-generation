@@ -1,0 +1,76 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        EXTRACT(EPOCH FROM(p.LastActivityDate - p.CreationDate)) AS ActiveDuration,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankInType
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '2 years'
+        AND p.Score IS NOT NULL
+),
+BadgeStats AS (
+    SELECT 
+        ub.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    JOIN 
+        Users ub ON b.UserId = ub.Id
+    GROUP BY 
+        ub.UserId
+),
+PostWithBadges AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerUserId,
+        COALESCE(bs.BadgeCount, 0) AS TotalBadges,
+        COALESCE(bs.GoldBadges, 0) AS GoldBadges,
+        COALESCE(bs.SilverBadges, 0) AS SilverBadges,
+        COALESCE(bs.BronzeBadges, 0) AS BronzeBadges,
+        rp.ActiveDuration
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        BadgeStats bs ON rp.OwnerUserId = bs.UserId
+    WHERE 
+        rp.RankInType = 1
+),
+AggregatedResults AS (
+    SELECT 
+        TotalBadges,
+        AVG(ActiveDuration) AS AvgActiveDuration,
+        SUM(GoldBadges) AS TotalGoldBadges,
+        SUM(SilverBadges) AS TotalSilverBadges,
+        SUM(BronzeBadges) AS TotalBronzeBadges
+    FROM 
+        PostWithBadges
+    GROUP BY 
+        TotalBadges
+)
+SELECT 
+    ar.TotalBadges,
+    ar.AvgActiveDuration,
+    ar.TotalGoldBadges,
+    ar.TotalSilverBadges,
+    ar.TotalBronzeBadges,
+    COUNT(DISTINCT p.PostId) AS PostCount,
+    STRING_AGG(CAST(p.PostId AS VARCHAR), ', ') AS PostIds,
+    MAX(CASE WHEN p.LastEditDate IS NULL THEN 'Not Edited' ELSE 'Edited' END) AS EditStatus
+FROM 
+    PostWithBadges p
+JOIN 
+    AggregatedResults ar ON p.TotalBadges = ar.TotalBadges
+GROUP BY 
+    ar.TotalBadges, ar.AvgActiveDuration, ar.TotalGoldBadges, ar.TotalSilverBadges, ar.TotalBronzeBadges
+ORDER BY 
+    ar.TotalBadges DESC;

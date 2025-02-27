@@ -1,0 +1,80 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        mt.title, 
+        0 AS depth
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    JOIN 
+        title m ON m.id = ml.linked_movie_id
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id, 
+        mt.title,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON mt.id = ml.linked_movie_id
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+MovieStats AS (
+    SELECT 
+        m.id AS movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT cn.name, ', ') AS cast_names
+    FROM 
+        title m
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        aka_name cn ON c.person_id = cn.person_id
+    GROUP BY 
+        m.id
+),
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        ms.total_cast,
+        ms.cast_names,
+        ROW_NUMBER() OVER (PARTITION BY ms.total_cast ORDER BY mh.depth) AS rank
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        MovieStats ms ON mh.movie_id = ms.movie_id
+    WHERE 
+        ms.total_cast > 5
+)
+SELECT 
+    fm.title,
+    fm.total_cast,
+    fm.cast_names,
+    COALESCE(mk.keyword, 'No Keywords') AS keywords,
+    CASE
+        WHEN fm.total_cast >= 10 THEN 'Popular'
+        ELSE 'Average'
+    END AS popularity_status
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_keyword mk ON fm.movie_id = mk.movie_id
+ORDER BY 
+    fm.rank, fm.title;
+
+### Explanation:
+1. **Recursive CTE (MovieHierarchy)**: This part constructs a hierarchy of movies, allowing for identification of linked movies recursively.
+2. **Aggregate CTE (MovieStats)**: This calculates statistics about each movie, specifically the total cast and names.
+3. **FilteredMovies CTE**: Filters for movies that have more than 5 cast members, also ranking them based on their depth in the hierarchy.
+4. **Final SELECT**: Compiles and orders information about the movies including their titles, total cast, cast names, keywords associated with each movie, and assigns a popularity status based on the number of cast members. Uses `COALESCE` to handle the case where there are no keywords present.

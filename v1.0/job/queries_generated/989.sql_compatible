@@ -1,0 +1,46 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rn,
+        COUNT(ci.id) OVER (PARTITION BY at.id) AS cast_count
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        complete_cast cc ON at.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    WHERE 
+        at.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 5
+)
+SELECT 
+    tm.title AS Movie_Title,
+    tm.production_year AS Production_Year,
+    COALESCE(SUM(CASE WHEN mi.info = 'Box Office' THEN 1 ELSE 0 END), 0) AS Box_Office_Info,
+    STRING_AGG(DISTINCT ak.name, ', ') AS Actor_Names
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_info mi ON tm.title = mi.movie_title 
+LEFT JOIN 
+    movie_keyword mk ON tm.title = mk.movie_id
+LEFT JOIN 
+    aka_name ak ON mk.keyword_id = ak.person_id
+GROUP BY 
+    tm.title, 
+    tm.production_year
+HAVING 
+    COUNT(DISTINCT ak.name) > 0
+ORDER BY 
+    tm.production_year DESC;

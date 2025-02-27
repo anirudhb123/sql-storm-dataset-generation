@@ -1,0 +1,65 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+TotalSales AS (
+    SELECT 
+        l.l_suppkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= '1995-01-01' 
+        AND o.o_orderstatus = 'F' 
+    GROUP BY 
+        l.l_suppkey
+),
+FilteredSuppliers AS (
+    SELECT 
+        rs.s_suppkey, 
+        rs.s_name, 
+        rs.s_acctbal, 
+        ts.total_revenue
+    FROM 
+        RankedSuppliers rs
+    LEFT JOIN 
+        TotalSales ts ON rs.s_suppkey = ts.l_suppkey
+    WHERE 
+        rs.rank <= 3
+)
+SELECT 
+    f.s_name, 
+    f.s_acctbal, 
+    COALESCE(f.total_revenue, 0) AS revenue,
+    CASE 
+        WHEN f.total_revenue IS NULL THEN 'No Sales'
+        ELSE 'Sales Made'
+    END AS sales_status
+FROM 
+    FilteredSuppliers f
+ORDER BY 
+    f.s_acctbal DESC, 
+    revenue ASC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Grand Total' AS s_name, 
+    SUM(f.s_acctbal) AS total_acctbal, 
+    SUM(f.total_revenue) AS total_revenue
+FROM 
+    FilteredSuppliers f
+HAVING 
+    SUM(f.total_revenue) IS NOT NULL
+    OR COUNT(*) = 0

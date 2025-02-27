@@ -1,0 +1,47 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(c.person_id) AS actor_count,
+        AVG(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS female_ratio,
+        RANK() OVER (ORDER BY COUNT(c.person_id) DESC) AS rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info c ON mt.id = c.movie_id
+    LEFT JOIN 
+        aka_name p ON c.person_id = p.person_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        actor_count,
+        female_ratio,
+        rank
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 10
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    tm.female_ratio,
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id IN (SELECT mt.id FROM aka_title mt WHERE mt.title = tm.title)
+     AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'box office')) AS box_office_count
+FROM 
+    TopMovies tm
+WHERE 
+    tm.actor_count > 0
+ORDER BY 
+    tm.female_ratio DESC
+FETCH FIRST 5 ROWS ONLY;

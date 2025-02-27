@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.PostTypeId
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= DATEADD(month, -6, GETDATE())
+    GROUP BY 
+        b.UserId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        p.OwnerDisplayName,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) -- Considering closed, reopened, and deleted posts
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rb.TotalBadges,
+        rb.BadgeNames,
+        pDetail.Comment AS PostHistoryComment
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentBadges rb ON rb.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+    LEFT JOIN 
+        PostHistoryDetails pDetail ON pDetail.PostId = rp.PostId
+    WHERE 
+        rp.ScoreRank <= 10 
+        AND (rp.CommentCount > 0 OR rb.TotalBadges IS NOT NULL)
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.CreationDate,
+    f.Score,
+    f.ViewCount,
+    COALESCE(f.BadgeNames, 'No Badges') AS BadgeNames,
+    COALESCE(f.PostHistoryComment, 'No history comment available') AS PostHistoryComment
+FROM 
+    FinalResults f
+ORDER BY 
+    f.Score DESC, f.ViewCount DESC;

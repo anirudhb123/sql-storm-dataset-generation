@@ -1,0 +1,73 @@
+WITH RegionSupplier AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name AS region_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE 
+        r.r_name IS NOT NULL
+    GROUP BY 
+        r.r_regionkey, r.r_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate
+),
+SuppliersWithAvgCost AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CombinedResults AS (
+    SELECT 
+        r.region_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        COALESCE(s.avg_supplycost, 0) AS supplier_avg_cost,
+        o.total_sales
+    FROM 
+        RegionSupplier r
+    JOIN 
+        OrderDetails o ON r.supplier_count > 0
+    LEFT JOIN 
+        SuppliersWithAvgCost s ON o.o_custkey = r.r_regionkey
+    WHERE 
+        o.total_sales > (SELECT AVG(total_sales) FROM OrderDetails)
+)
+SELECT 
+    region_name,
+    COUNT(o_orderkey) AS order_count,
+    SUM(o_totalprice) AS total_revenue,
+    AVG(supplier_avg_cost) AS overall_avg_cost
+FROM 
+    CombinedResults
+GROUP BY 
+    region_name
+HAVING 
+    total_revenue > 10000 AND
+    COUNT(o_orderkey) > 5 OR
+    supplier_avg_cost IS NULL
+ORDER BY 
+    total_revenue DESC, region_name ASC;

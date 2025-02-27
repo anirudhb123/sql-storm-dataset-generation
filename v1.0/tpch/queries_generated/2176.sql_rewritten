@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' 
+        AND o.o_orderdate < '1998-01-01'
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS total_items,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate <= cast('1998-10-01' as date) 
+        AND l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.o_totalprice,
+    li.total_items,
+    li.total_revenue,
+    si.s_name AS supplier_name,
+    si.nation_name
+FROM 
+    RankedOrders ro
+LEFT JOIN 
+    LineItemStats li ON ro.o_orderkey = li.l_orderkey
+JOIN 
+    partsupp ps ON li.total_items > 0 AND li.total_revenue >= 1000
+JOIN 
+    supplier si ON ps.ps_suppkey = si.s_suppkey
+WHERE 
+    ro.rank <= 10 
+    AND si.nation_name IS NOT NULL
+ORDER BY 
+    ro.o_totalprice DESC, 
+    li.total_revenue ASC;

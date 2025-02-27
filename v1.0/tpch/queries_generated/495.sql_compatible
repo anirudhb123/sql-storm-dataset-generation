@@ -1,0 +1,47 @@
+
+WITH SupplierAverage AS (
+    SELECT
+        s_nationkey,
+        AVG(s_acctbal) AS avg_acctbal
+    FROM supplier
+    GROUP BY s_nationkey
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COALESCE(co.total_orders, 0) AS total_orders,
+        COALESCE(co.total_spent, 0) AS total_spent
+    FROM customer c
+    LEFT JOIN CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE COALESCE(co.total_spent, 0) > 10000
+),
+NationAvgSpend AS (
+    SELECT
+        n.n_nationkey,
+        AVG(c.total_spent) AS avg_cust_spent
+    FROM nation n
+    JOIN HighValueCustomers hvc ON n.n_nationkey = hvc.c_custkey
+    GROUP BY n.n_nationkey
+)
+SELECT
+    r.r_name AS region_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    SUM(COALESCE(SA.avg_acctbal, 0)) AS total_supplier_acctbal,
+    SUM(COALESCE(NAS.avg_cust_spent, 0)) AS total_customer_spent
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierAverage SA ON n.n_nationkey = SA.s_nationkey
+LEFT JOIN NationAvgSpend NAS ON n.n_nationkey = NAS.n_nationkey
+GROUP BY r.r_name
+ORDER BY total_customer_spent DESC
+LIMIT 10;

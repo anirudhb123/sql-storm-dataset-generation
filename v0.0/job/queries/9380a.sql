@@ -1,0 +1,4 @@
+SELECT min(a1.name) AS writer_pseudo_name, min(t.title) AS movie_title
+FROM aka_name AS a1, cast_info AS ci, company_name AS cn, movie_companies AS mc, name AS n1, role_type AS rt, title AS t
+WHERE a1.person_id = n1.id AND n1.id = ci.person_id AND ci.movie_id = t.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.role_id = rt.id AND a1.person_id = ci.person_id AND ci.movie_id = mc.movie_id
+AND cn.name_pcode_sf < 'V1651' AND cn.md5sum IN ('008419f0109521b79935172ec752135b', '44736883d09bd02a00b3de6e6e240fae', '7b74d939a1819d2f9ea235a8e9d4cc50', 'a316f516918e16e83a9306da782281c7', 'a9250ee5e1488c2b626718e0643efa47', 'e3a7ccd46d83b6ce4241b36e084fb8e3');

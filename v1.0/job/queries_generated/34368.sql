@@ -1,0 +1,105 @@
+WITH RECURSIVE MovieCTE AS (
+    -- CTE to retrieve all movies along with their cast and production year
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        c.person_id,
+        a.name AS actor_name,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000
+    UNION ALL
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        c.person_id,
+        a.name AS actor_name,
+        m.level + 1
+    FROM 
+        MovieCTE m
+    JOIN 
+        complete_cast cc ON m.movie_id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        m.level < 3  -- Limit depth to 2
+),
+ActorRank AS (
+    -- Ranking actors by the number of movies they have appeared in
+    SELECT 
+        a.person_id,
+        a.actor_name,
+        COUNT(m.movie_id) AS movie_count,
+        RANK() OVER (ORDER BY COUNT(m.movie_id) DESC) AS actor_rank
+    FROM 
+        MovieCTE m
+    JOIN 
+        aka_name a ON m.person_id = a.person_id
+    GROUP BY 
+        a.person_id, a.actor_name
+),
+TopActors AS (
+    -- Getting top 10 actors based on movie count
+    SELECT 
+        person_id,
+        actor_name
+    FROM 
+        ActorRank
+    WHERE 
+        actor_rank <= 10
+)
+SELECT 
+    t.title,
+    t.production_year,
+    a.actor_name,
+    mcc.company_name,
+    (SELECT COUNT(DISTINCT kc.keyword) 
+     FROM movie_keyword mk 
+     JOIN keyword kc ON mk.keyword_id = kc.id 
+     WHERE mk.movie_id = t.id) AS keyword_count,
+    COALESCE(ci.note, 'No Note') AS cast_note
+FROM 
+    aka_title t
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info c ON cc.subject_id = c.id
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+LEFT JOIN 
+    (SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name) AS company_name
+     FROM 
+        movie_companies mc
+     JOIN 
+        company_name cn ON mc.company_id = cn.id
+     GROUP BY 
+        mc.movie_id) mcc ON t.id = mcc.movie_id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = 1  -- assuming info_type ID 1 for a specific piece of info
+LEFT JOIN 
+    (SELECT 
+        ci.movie_id,
+        ci.note
+     FROM 
+        cast_info ci
+     WHERE 
+        ci.note IS NOT NULL) ci ON t.id = ci.movie_id
+WHERE 
+    a.person_id IN (SELECT person_id FROM TopActors)
+ORDER BY 
+    t.production_year DESC, 
+    a.actor_name;

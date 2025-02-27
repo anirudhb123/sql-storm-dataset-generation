@@ -1,0 +1,72 @@
+
+WITH recursive sales_cte AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+),
+store_sales_summary AS (
+    SELECT
+        ss_item_sk,
+        COUNT(DISTINCT ss_ticket_number) AS total_sales,
+        SUM(ss_ext_sales_price) AS total_sales_price
+    FROM
+        store_sales
+    GROUP BY
+        ss_item_sk
+),
+combined_sales AS (
+    SELECT
+        s.ws_item_sk,
+        COALESCE(c.total_quantity, 0) AS web_total_quantity,
+        COALESCE(c.total_profit, 0) AS web_total_profit,
+        COALESCE(ss.total_sales, 0) AS store_total_sales,
+        COALESCE(ss.total_sales_price, 0) AS store_total_sales_price
+    FROM
+        sales_cte s
+    FULL OUTER JOIN store_sales_summary ss ON s.ws_item_sk = ss.ss_item_sk
+),
+highest_profit_items AS (
+    SELECT 
+        ws_item_sk,
+        web_total_quantity,
+        web_total_profit,
+        RANK() OVER (ORDER BY web_total_profit DESC) AS profit_rank
+    FROM 
+        combined_sales
+),
+high_profit_customers AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(s.ws_net_profit) AS total_customer_profit
+    FROM 
+        customer c
+    JOIN 
+        web_sales s ON c.c_customer_sk = s.ws_bill_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_id
+    HAVING 
+        total_customer_profit > (SELECT AVG(total_customer_profit) FROM (SELECT SUM(ws_net_profit) AS total_customer_profit FROM web_sales GROUP BY ws_bill_customer_sk) AS avg_profit)
+)
+SELECT 
+    hpi.ws_item_sk,
+    hpi.web_total_quantity,
+    hpi.web_total_profit,
+    hpi.profit_rank,
+    hpc.c_customer_id,
+    hpc.total_customer_profit
+FROM 
+    highest_profit_items hpi
+JOIN 
+    high_profit_customers hpc ON hpi.web_total_profit > (0.5 * hpi.web_total_profit)  -- Comparing to half of the highest profit
+WHERE 
+    hpi.profit_rank <= 10
+ORDER BY 
+    hpi.web_total_profit DESC;

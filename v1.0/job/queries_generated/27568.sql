@@ -1,0 +1,61 @@
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        r.role AS primary_role,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY COUNT(c.person_id) DESC) AS rank
+    FROM 
+        title m
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        m.id, m.title, m.production_year, r.role
+), 
+top_movies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        primary_role,
+        cast_count
+    FROM 
+        ranked_movies
+    WHERE 
+        rank = 1
+)
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    ak.name AS aka_name,
+    ak.imdb_index,
+    c.name AS company_name,
+    ct.kind AS company_type,
+    k.keyword AS associated_keyword,
+    p.info AS person_info
+FROM 
+    top_movies tm
+LEFT JOIN 
+    aka_title ak ON tm.movie_id = ak.movie_id
+LEFT JOIN 
+    movie_companies mc ON tm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_keyword mk ON tm.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    complete_cast cc ON tm.movie_id = cc.movie_id
+LEFT JOIN 
+    person_info p ON cc.subject_id = p.person_id
+WHERE 
+    tm.production_year >= 2000
+ORDER BY 
+    tm.production_year DESC,
+    tm.movie_title ASC;

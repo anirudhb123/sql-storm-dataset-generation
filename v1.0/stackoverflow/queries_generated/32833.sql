@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (CURRENT_TIMESTAMP - INTERVAL '1 year') 
+        AND p.Score > 0
+),
+PostAnalytics AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.RankScore,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes, 
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes,
+        COALESCE(SUM(CASE WHEN c.PostId IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.RankScore
+),
+PopularPosts AS (
+    SELECT 
+        pa.PostId,
+        pa.Title,
+        pa.RankScore,
+        pa.Upvotes,
+        pa.Downvotes,
+        pa.CommentCount,
+        (pa.Upvotes - pa.Downvotes) AS NetScore
+    FROM 
+        PostAnalytics pa
+    WHERE 
+        pa.RankScore <= 5
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserDisplayName
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+        AND ph.CreationDate >= (CURRENT_TIMESTAMP - INTERVAL '6 months')
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    COALESCE(cp.CreationDate, '2023-01-01 00:00:00'::timestamp) AS ClosedDate,
+    pp.Upvotes,
+    pp.Downvotes,
+    pp.NetScore,
+    COUNT(DISTINCT cp.Comment) AS CloseComments,
+    STRING_AGG(DISTINCT cp.UserDisplayName, ', ') AS ClosedByUsers
+FROM 
+    PopularPosts pp
+LEFT JOIN 
+    ClosedPosts cp ON pp.PostId = cp.PostId
+GROUP BY 
+    pp.PostId, pp.Title, pp.Upvotes, pp.Downvotes, pp.NetScore, ClosedDate
+ORDER BY 
+    pp.NetScore DESC, pp.Title ASC;

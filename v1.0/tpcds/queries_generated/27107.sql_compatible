@@ -1,0 +1,56 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM customer_address
+),
+DemographicsDetails AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        cd_dep_count,
+        cd_dep_employed_count,
+        cd_dep_college_count
+    FROM customer_demographics
+),
+AddressCount AS (
+    SELECT
+        COUNT(*) AS address_count,
+        ca_state
+    FROM customer_address
+    GROUP BY ca_state
+),
+CustomerDetails AS (
+    SELECT
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ad.full_address,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_purchase_estimate,
+        ac.address_count
+    FROM customer c
+    JOIN AddressDetails ad ON c.c_current_addr_sk = ad.ca_address_id
+    JOIN DemographicsDetails d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    JOIN AddressCount ac ON ad.ca_state = ac.ca_state
+)
+SELECT 
+    full_name,
+    full_address,
+    cd_gender,
+    cd_marital_status,
+    cd_purchase_estimate,
+    address_count
+FROM CustomerDetails
+WHERE cd_purchase_estimate > (
+    SELECT AVG(cd_purchase_estimate) FROM DemographicsDetails
+)
+ORDER BY cd_purchase_estimate DESC;

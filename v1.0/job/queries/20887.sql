@@ -1,0 +1,64 @@
+
+WITH RecursiveActor AS (
+    SELECT
+        ai.person_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ai.person_id ORDER BY ai.nr_order) AS role_order
+    FROM 
+        cast_info ai
+    JOIN 
+        aka_name ak ON ai.person_id = ak.person_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+
+PopularMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    WHERE 
+        mt.production_year >= 2000
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+    HAVING 
+        COUNT(DISTINCT mc.company_id) > 3
+),
+
+ActorRoles AS (
+    SELECT 
+        ra.actor_name,
+        pm.title,
+        pm.production_year,
+        ra.role_order
+    FROM 
+        RecursiveActor ra
+    JOIN 
+        cast_info ci ON ra.person_id = ci.person_id
+    JOIN 
+        aka_title pm ON ci.movie_id = pm.id
+    WHERE 
+        ra.role_order = 1 AND pm.production_year BETWEEN 2000 AND 2023
+)
+
+SELECT 
+    ar.actor_name,
+    ar.title AS movie_title,
+    COALESCE(pm.company_count, 0) AS companies_involved,
+    CASE WHEN ar.production_year IS NULL THEN 'Unknown Year' 
+         ELSE CAST(ar.production_year AS VARCHAR) 
+    END AS year_of_release
+FROM 
+    ActorRoles ar
+LEFT JOIN 
+    PopularMovies pm ON ar.title = pm.title AND ar.production_year = pm.production_year
+WHERE 
+    ar.title IS NOT NULL
+ORDER BY 
+    ar.actor_name, year_of_release DESC
+LIMIT 50;

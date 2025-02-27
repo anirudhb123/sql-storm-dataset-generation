@@ -1,0 +1,52 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        COALESCE(SUM(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END), 0) AS AcceptedAnswers,
+        AVG(U.Reputation) AS AvgReputation
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        COUNT(H.Id) AS CloseCount
+    FROM Posts P
+    LEFT JOIN PostHistory H ON P.Id = H.PostId AND H.PostHistoryTypeId = 10
+    GROUP BY P.Id, P.OwnerUserId
+),
+RankedPosts AS (
+    SELECT 
+        ps.UserId, 
+        ps.TotalPosts,
+        ps.TotalQuestions,
+        ps.TotalAnswers,
+        ps.AcceptedAnswers,
+        ps.AvgReputation,
+        COALESCE(cp.CloseCount, 0) AS CloseCount,
+        ROW_NUMBER() OVER (ORDER BY ps.TotalPosts DESC, ps.AvgReputation DESC) AS Rank
+    FROM UserPostStats ps
+    LEFT JOIN ClosedPosts cp ON ps.UserId = cp.OwnerUserId
+)
+SELECT 
+    rp.Rank,
+    rp.UserId,
+    rp.DisplayName,
+    rp.TotalPosts,
+    rp.TotalQuestions,
+    rp.TotalAnswers,
+    rp.AcceptedAnswers,
+    rp.AvgReputation,
+    CASE 
+        WHEN rp.CloseCount > 0 THEN 'Yes' 
+        ELSE 'No' 
+    END AS HasClosedPosts
+FROM RankedPosts rp
+WHERE rp.TotalPosts > 0
+ORDER BY rp.Rank;

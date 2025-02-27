@@ -1,0 +1,33 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment,
+           0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment,
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+)
+
+SELECT p.p_partkey, p.p_name, p.p_type, p.p_retailprice,
+       COALESCE(SH.s_acctbal, 0) AS supplier_balance,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+       AVG(li.l_discount) AS avg_discount
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN SupplierHierarchy SH ON s.s_suppkey = SH.s_suppkey
+LEFT JOIN lineitem li ON li.l_partkey = p.p_partkey
+LEFT JOIN orders o ON li.l_orderkey = o.o_orderkey
+WHERE p.p_size IN (SELECT DISTINCT ps_size FROM part WHERE p_retailprice > 500)
+      AND (s.s_acctbal IS NULL OR s.s_acctbal > 1000)
+GROUP BY p.p_partkey, p.p_name, p.p_type, p.p_retailprice, SH.s_acctbal
+HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) > 10000
+ORDER BY total_revenue DESC, order_count DESC
+FETCH FIRST 10 ROWS ONLY;

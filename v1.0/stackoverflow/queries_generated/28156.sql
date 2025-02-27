@@ -1,0 +1,61 @@
+WITH PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+), UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(b.Class) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), TagStats AS (
+    SELECT 
+        pt.Tag,
+        COUNT(*) AS QuestionCount,
+        AVG(ups.UpVotes) AS AvgUpVotes,
+        AVG(dns.DownVotes) AS AvgDownVotes
+    FROM 
+        PostTags pt
+    JOIN 
+        Posts p ON pt.PostId = p.Id
+    JOIN 
+        Users ups ON p.OwnerUserId = ups.Id
+    JOIN 
+        Users dns ON p.OwnerUserId = dns.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        pt.Tag
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.PostCount,
+    u.TotalScore,
+    u.CommentCount,
+    u.TotalBadges,
+    t.Tag,
+    t.QuestionCount,
+    t.AvgUpVotes,
+    t.AvgDownVotes
+FROM 
+    UserPostStats u
+JOIN 
+    TagStats t ON u.PostCount > 0  -- Join only if the user has posts
+ORDER BY 
+    u.Reputation DESC, t.QuestionCount DESC;

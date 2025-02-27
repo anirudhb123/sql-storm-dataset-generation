@@ -1,0 +1,57 @@
+WITH RECURSIVE top_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+    ORDER BY total_spent DESC
+    LIMIT 10
+),
+active_parts AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_quantity) AS total_ordered
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY p.p_partkey, p.p_name
+    ORDER BY total_ordered DESC
+),
+supplier_analysis AS (
+    SELECT s.s_suppkey, s.s_name, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING AVG(ps.ps_supplycost) IS NOT NULL
+),
+nations_with_comment AS (
+    SELECT n.n_name, CASE WHEN n.n_comment IS NULL THEN 'No Comment' ELSE n.n_comment END AS adjusted_comment
+    FROM nation n
+    WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE 'Asia%')
+),
+quantify_orders AS (
+    SELECT o.o_orderkey, count(*) AS item_count, SUM(l.l_extendedprice) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+comparison AS (
+    SELECT 
+        c.c_name AS customer_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        COALESCE(SUM(l.l_extendedprice), 0) AS total_spent,
+        nt.adjusted_comment
+    FROM top_customers c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN nations_with_comment nt ON nt.n_name = (
+        SELECT n.n_name 
+        FROM nation n 
+        WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = c.c_custkey)
+    )
+    GROUP BY c.c_custkey, c.c_name, nt.adjusted_comment
+)
+SELECT DISTINCT ap.p_name, sa.avg_supplycost, co.order_count, co.total_spent
+FROM active_parts ap
+JOIN supplier_analysis sa ON ap.total_ordered > sa.avg_supplycost
+JOIN quantify_orders co ON co.total_price / NULLIF(co.item_count, 0) < ap.total_ordered
+WHERE co.total_price IS NOT NULL
+ORDER BY sa.avg_supplycost DESC, ap.total_ordered DESC;

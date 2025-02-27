@@ -1,0 +1,46 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM orders o
+    WHERE o.o_orderdate >= '1996-01-01' 
+      AND o.o_orderstatus IN ('F', 'P')
+),
+total_sales AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    n.n_name, 
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS total_supply_cost,
+    AVG(CASE WHEN r.region_total > 0 THEN r.region_total END) AS avg_total_sales,
+    COUNT(DISTINCT so.s_suppkey) AS total_suppliers
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN total_sales ts ON ts.l_orderkey IN (SELECT o.o_orderkey FROM ranked_orders o WHERE o.rank_order <= 10)
+LEFT JOIN partsupp ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10)
+LEFT JOIN supplier_hierarchy so ON so.s_nationkey = n.n_nationkey
+CROSS JOIN (
+    SELECT n.n_nationkey, SUM(l.l_extendedprice) AS region_total
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE l.l_returnflag = 'R'
+    GROUP BY n.n_nationkey
+) r
+GROUP BY n.n_nationkey
+ORDER BY customer_count DESC, total_supply_cost DESC
+LIMIT 100;

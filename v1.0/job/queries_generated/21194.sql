@@ -1,0 +1,68 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(DISTINCT ca.person_id) AS num_cast_members,
+        AVG(CASE WHEN ca.role_id IS NOT NULL THEN 1 ELSE 0 END) OVER(PARTITION BY mt.id) AS avg_role_assigned,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ca.person_id) DESC) AS rn
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ca ON mt.id = ca.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+NullActorCount AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        COALESCE(SUM(CASE WHEN ca.person_id IS NULL THEN 1 ELSE 0 END), 0) AS null_actor_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ca ON mt.id = ca.movie_id
+    GROUP BY 
+        mt.id, mt.title
+),
+TopRatedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        COUNT(co.id) AS company_count,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mt.id, mt.title
+    HAVING 
+        COUNT(co.id) > 2
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.num_cast_members,
+    rm.avg_role_assigned,
+    nac.null_actor_count,
+    tr.company_count,
+    tr.company_types
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    NullActorCount nac ON rm.movie_title = nac.movie_title
+JOIN 
+    TopRatedMovies tr ON rm.movie_title = tr.movie_title
+WHERE 
+    rm.rn <= 5 
+    AND (nac.null_actor_count > 0 OR rm.num_cast_members > tr.company_count)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.num_cast_members DESC;
+

@@ -1,0 +1,79 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) THEN 'High'
+            ELSE 'Low'
+        END AS value_segment
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+),
+SupplierPartQtys AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey,
+        ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_availqty) > 0
+),
+CustomerOrderInfo AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL AND SUM(o.o_totalprice) > 5000
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT n.n_nationkey) AS total_nations,
+    COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+    AVG(cp.total_spent) AS avg_customer_spent,
+    SUM(CASE WHEN hp.value_segment = 'High' THEN hp.p_retailprice ELSE 0 END) AS high_value_retail_price,
+    SUM(COALESCE(spq.total_avail_qty, 0)) AS total_available_qty
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    HighValueParts hp ON hp.p_partkey IN (SELECT p.p_partkey FROM part p)
+FULL OUTER JOIN 
+    CustomerOrderInfo cp ON s.s_suppkey = cp.c_custkey -- Correlate suppliers with customer orders (bizarre correlation)
+LEFT JOIN 
+    SupplierPartQtys spq ON s.s_suppkey = spq.ps_suppkey
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(CASE WHEN s.s_acctbal IS NULL THEN 1 ELSE 0 END) < 5 -- Corner case with NULL logic
+ORDER BY 
+    r.r_name;

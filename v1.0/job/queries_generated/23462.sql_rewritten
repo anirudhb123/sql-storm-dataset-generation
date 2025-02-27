@@ -1,0 +1,78 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+MovieGenre AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(DISTINCT kw.keyword) AS keyword_count
+    FROM 
+        movie_keyword mt
+    JOIN 
+        keyword kw ON mt.keyword_id = kw.id
+    GROUP BY 
+        mt.movie_id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(mci.id) AS num_movies_by_company
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, co.name, ct.kind
+)
+SELECT 
+    m.title,
+    m.production_year,
+    cd.actor_name,
+    cd.role_name,
+    COALESCE(k.keyword_count, 0) AS total_keywords,
+    COALESCE(cp.num_movies_by_company, 0) AS movies_by_company,
+    CASE 
+        WHEN cp.num_movies_by_company IS NULL THEN 'No movies produced by this company'
+        ELSE 'Movies produced by company are listed'
+    END AS company_note,
+    CASE 
+        WHEN m.production_year = (SELECT MAX(production_year) FROM title) THEN 'Latest Release'
+        ELSE NULL
+    END AS release_status
+FROM 
+    RankedMovies m
+LEFT JOIN 
+    CastDetails cd ON m.title_id = cd.movie_id AND cd.actor_order <= 3  
+LEFT JOIN 
+    MovieGenre k ON m.title_id = k.movie_id
+LEFT JOIN 
+    CompanyDetails cp ON m.title_id = cp.movie_id
+WHERE 
+    m.rn <= 10  
+ORDER BY 
+    m.production_year DESC, m.title;

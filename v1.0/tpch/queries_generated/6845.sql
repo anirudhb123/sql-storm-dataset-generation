@@ -1,0 +1,43 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank_within_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+SELECT 
+    rs.nation_name,
+    rs.s_name,
+    rs.total_supply_cost,
+    hvo.o_orderkey,
+    hvo.total_order_value,
+    hvo.o_orderdate
+FROM 
+    RankedSuppliers rs
+JOIN 
+    HighValueOrders hvo ON rs.rank_within_nation <= 3
+ORDER BY 
+    rs.nation_name, rs.total_supply_cost DESC, hvo.total_order_value DESC;

@@ -1,0 +1,57 @@
+WITH MovieStats AS (
+    SELECT 
+        ak.title AS aka_title,
+        t.title AS original_title,
+        COALESCE(m.production_year, 0) AS production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT p.name, ', ') AS cast_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        aka_name p ON c.person_id = p.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    GROUP BY 
+        ak.title, t.title, m.production_year
+),
+RankedMovies AS (
+    SELECT 
+        aka_title,
+        original_title,
+        production_year,
+        cast_count,
+        cast_names,
+        keywords,
+        RANK() OVER (ORDER BY production_year DESC, cast_count DESC) AS movie_rank
+    FROM 
+        MovieStats
+)
+SELECT 
+    movie_rank,
+    aka_title,
+    original_title,
+    production_year,
+    cast_count,
+    cast_names,
+    keywords
+FROM 
+    RankedMovies
+WHERE 
+    movie_rank <= 10
+ORDER BY 
+    movie_rank;
+
+This query aims to benchmark string processing by aggregating movie data, counting casts, and joining various related tables. It produces a list of top movies by rank while showcasing the alias titles, original titles, production years, cast counts, cast names, and associated keywords.

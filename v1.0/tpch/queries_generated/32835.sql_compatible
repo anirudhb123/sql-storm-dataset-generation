@@ -1,0 +1,48 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_acctbal, 0 AS level
+    FROM customer
+    WHERE c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_custkey = ch.c_custkey
+    WHERE ch.level < 3
+), PartSupplierStats AS (
+    SELECT p.p_partkey, 
+           SUM(ps.ps_availqty) AS total_avail_qty, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+), LineItemStats AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           RANK() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT ch.c_name, 
+       ch.c_acctbal, 
+       p.p_name, 
+       p.avg_supply_cost, 
+       COALESCE(l.total_revenue, 0) AS total_order_revenue,
+       CASE 
+           WHEN ch.c_acctbal > 5000 THEN 'High Value'
+           WHEN ch.c_acctbal BETWEEN 3000 AND 5000 THEN 'Medium Value'
+           ELSE 'Low Value'
+       END AS customer_value_segment
+FROM CustomerHierarchy ch
+LEFT JOIN PartSupplierStats p ON p.p_partkey IN (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey 
+    WHERE s.s_acctbal > 500
+)
+LEFT JOIN LineItemStats l ON l.l_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_orderstatus = 'O'
+)
+WHERE p.total_avail_qty IS NOT NULL
+ORDER BY ch.c_acctbal DESC, total_order_revenue DESC;

@@ -1,0 +1,51 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_mktsegment
+), 
+TopOrders AS (
+    SELECT 
+        o_orderkey, 
+        o_orderdate, 
+        total_revenue
+    FROM 
+        RankedOrders
+    WHERE 
+        revenue_rank <= 10
+)
+SELECT 
+    p.p_name,
+    SUM(ps.ps_supplycost * l.l_quantity) AS total_supply_cost,
+    r.r_name AS region_name
+FROM 
+    TopOrders TO
+JOIN 
+    lineitem l ON TO.o_orderkey = l.l_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey AND l.l_suppkey = ps.ps_suppkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_retailprice IS NOT NULL 
+    AND p.p_size IN (SELECT DISTINCT p_size FROM part)
+GROUP BY 
+    p.p_name, r.r_name
+ORDER BY 
+    total_supply_cost DESC;

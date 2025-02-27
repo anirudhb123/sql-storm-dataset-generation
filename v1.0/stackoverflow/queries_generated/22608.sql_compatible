@@ -1,0 +1,80 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId IN (2, 3) THEN v.UserId END) AS UniqueVoterCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.CreationDate
+),
+PostHistoryAggregated AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 10, 11) 
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+TopPosts AS (
+    SELECT 
+        pa.PostId,
+        pa.OwnerUserId,
+        u.DisplayName,
+        u.Reputation,
+        (pa.UpVotes - pa.DownVotes) AS NetScore,
+        pa.CommentCount,
+        pa.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY pa.OwnerUserId ORDER BY (pa.UpVotes - pa.DownVotes) DESC) as PostRank
+    FROM 
+        PostActivity pa
+    JOIN 
+        Users u ON pa.OwnerUserId = u.Id
+    WHERE 
+        u.Reputation > (SELECT AVG(Reputation) FROM Users) 
+)
+SELECT 
+    p.Id AS PostId,
+    pt.Name AS PostType,
+    COALESCE(MAX(pha.ChangeCount), 0) AS TotalChanges,
+    COALESCE(MAX(pha.ChangeCount), 0) AS EditCount,
+    COALESCE(MAX(pha.LastChangeDate), 'No Changes') AS LastChange,
+    u.DisplayName AS PostOwner,
+    u.Reputation AS OwnerReputation,
+    COUNT(*) FILTER (WHERE pa.NetScore > 0) AS PositiveScoredPosts,
+    COUNT(*) FILTER (WHERE pa.CommentCount > 0) AS CommentedPosts
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Posts p ON tp.PostId = p.Id
+LEFT JOIN 
+    PostHistoryAggregated pha ON p.Id = pha.PostId
+LEFT JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+GROUP BY 
+    p.Id, pt.Name, u.Id, u.Reputation
+HAVING 
+    COUNT(*) = COUNT(pa.CommentCount) OR COUNT(*) = COUNT(v.VoteTypeId) 
+ORDER BY 
+    OwnerReputation DESC, TotalChanges DESC;

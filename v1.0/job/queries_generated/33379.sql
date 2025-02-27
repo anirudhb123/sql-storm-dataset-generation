@@ -1,0 +1,77 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000  -- Consider movies produced from the year 2000 onwards
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+        JOIN aka_title at ON ml.linked_movie_id = at.id
+        JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        at.production_year >= 2000  -- Continue with the same condition
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.depth DESC) AS rank_by_depth,
+        COUNT(*) OVER (PARTITION BY mh.production_year) AS total_links
+    FROM 
+        MovieHierarchy mh
+),
+CrossJoined AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mr.rank_by_depth, 0) AS rank_by_depth,
+        mr.total_links,
+        cc.kind AS company_kind,
+        ca.name AS cast_name,
+        ca.nr_order,
+        CASE 
+            WHEN mr.rank_by_depth IS NULL THEN 'Not Ranked'
+            ELSE 'Ranked'
+        END AS rank_status
+    FROM 
+        RankedMovies m
+        LEFT JOIN movie_companies mc ON m.movie_id = mc.movie_id
+        LEFT JOIN company_type cc ON mc.company_type_id = cc.id
+        LEFT JOIN cast_info ca ON m.movie_id = ca.movie_id
+)
+
+SELECT 
+    c.movie_id,
+    c.title,
+    c.production_year,
+    c.rank_by_depth,
+    c.total_links,
+    STRING_AGG(DISTINCT c.cast_name, ', ') AS cast_members,
+    c.company_kind,
+    c.rank_status
+FROM 
+    CrossJoined c
+WHERE 
+    c.production_year IS NOT NULL 
+    AND (c.company_kind IS NOT NULL OR c.rank_by_depth > 0)  -- Filter for movies with companies or ranked
+GROUP BY 
+    c.movie_id, c.title, c.production_year, c.rank_by_depth, c.total_links, c.company_kind, c.rank_status
+HAVING 
+    COUNT(DISTINCT c.cast_name) > 1  -- Ensure we only take movies with more than one cast member
+ORDER BY 
+    c.production_year DESC, 
+    c.rank_by_depth DESC;

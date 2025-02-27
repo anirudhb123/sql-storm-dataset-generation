@@ -1,0 +1,51 @@
+
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(p.ps_supplycost * p.ps_availqty) AS TotalCost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(p.ps_supplycost * p.ps_availqty) DESC) AS SupplierRank
+    FROM supplier s
+    JOIN partsupp p ON s.s_suppkey = p.ps_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        EXTRACT(YEAR FROM o.o_orderdate) AS OrderYear,
+        COUNT(l.l_orderkey) AS LineItemCount
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey, EXTRACT(YEAR FROM o.o_orderdate)
+),
+FinalSummary AS (
+    SELECT 
+        r.r_name,
+        SUM(ss.TotalCost) AS TotalSupplierCost,
+        AVG(ro.LineItemCount) AS AvgLineItemCount
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN SupplierSummary ss ON ss.s_suppkey IN (
+        SELECT s.s_suppkey 
+        FROM supplier s 
+        WHERE s.s_nationkey = n.n_nationkey 
+        AND ss.SupplierRank <= 5
+    )
+    LEFT JOIN RecentOrders ro ON n.n_nationkey = ro.o_custkey
+    GROUP BY r.r_name
+)
+SELECT 
+    f.r_name,
+    f.TotalSupplierCost,
+    f.AvgLineItemCount,
+    CASE 
+        WHEN f.TotalSupplierCost IS NULL THEN 'Supplier cost not available'
+        ELSE FORMAT(f.TotalSupplierCost, 'C')
+    END AS FormattedSupplierCost,
+    COALESCE(f.AvgLineItemCount, 0) AS TotalLineItems
+FROM FinalSummary f
+WHERE f.TotalSupplierCost > (SELECT AVG(TotalCost) FROM SupplierSummary)
+ORDER BY f.TotalSupplierCost DESC;

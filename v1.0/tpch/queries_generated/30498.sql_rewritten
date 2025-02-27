@@ -1,0 +1,36 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment, CAST(s_suppkey AS VARCHAR) AS hierarchy_path
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT ps.ps_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, 
+           CONCAT(hierarchy_path, ' -> ', ps.ps_suppkey)
+    FROM SupplierHierarchy h
+    JOIN partsupp ps ON ps.ps_suppkey = h.s_suppkey
+    JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+)
+SELECT
+    p.p_name,
+    COUNT(DISTINCT l.l_orderkey) AS order_count,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_sales,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_count,
+    r.r_name
+FROM part p
+JOIN lineitem l ON l.l_partkey = p.p_partkey
+JOIN orders o ON o.o_orderkey = l.l_orderkey
+JOIN customer c ON c.c_custkey = o.o_custkey
+LEFT JOIN nation n ON n.n_nationkey = c.c_nationkey
+LEFT JOIN region r ON r.r_regionkey = n.n_regionkey
+WHERE p.p_size BETWEEN 10 AND 25
+AND l.l_shipdate > (cast('1998-10-01' as date) - INTERVAL '1 year')
+AND EXISTS (
+    SELECT 1
+    FROM SupplierHierarchy sh
+    WHERE sh.s_nationkey = n.n_nationkey 
+    AND sh.s_acctbal > 5000
+)
+GROUP BY p.p_name, r.r_name
+HAVING COUNT(DISTINCT l.l_orderkey) > 5
+ORDER BY avg_sales DESC, p.p_name;

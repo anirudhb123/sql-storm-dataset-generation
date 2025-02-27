@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(b.Count, 0) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS Count 
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) b ON u.Id = b.UserId
+),
+PostEngagement AS (
+    SELECT 
+        ps.OwnerUserId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts ps
+    LEFT JOIN 
+        Comments c ON ps.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON ps.Id = v.PostId
+    GROUP BY 
+        ps.OwnerUserId
+)
+SELECT 
+    ur.DisplayName,
+    ur.Reputation,
+    ur.BadgeCount,
+    rp.Title,
+    rp.Score AS PostScore,
+    rp.ViewCount,
+    rp.AnswerCount,
+    pe.CommentCount,
+    pe.VoteCount,
+    pe.UpVotes,
+    pe.DownVotes
+FROM 
+    UserReputation ur
+JOIN 
+    RankedPosts rp ON ur.UserId = rp.Id
+JOIN 
+    PostEngagement pe ON rp.OwnerUserId = pe.OwnerUserId
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    ur.Reputation DESC, rp.Score DESC
+LIMIT 100
+UNION ALL
+SELECT 
+    'Total' AS DisplayName,
+    SUM(ur.Reputation) AS Reputation,
+    SUM(ur.BadgeCount) AS BadgeCount,
+    NULL AS Title,
+    NULL AS PostScore,
+    NULL AS ViewCount,
+    NULL AS AnswerCount,
+    SUM(pe.CommentCount) AS CommentCount,
+    SUM(pe.VoteCount) AS VoteCount,
+    SUM(pe.UpVotes) AS UpVotes,
+    SUM(pe.DownVotes) AS DownVotes
+FROM 
+    UserReputation ur
+JOIN 
+    RankedPosts rp ON ur.UserId = rp.Id
+JOIN 
+    PostEngagement pe ON rp.OwnerUserId = pe.OwnerUserId;

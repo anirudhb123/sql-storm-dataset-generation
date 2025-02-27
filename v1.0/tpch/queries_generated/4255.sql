@@ -1,0 +1,63 @@
+WITH ranked_suppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+part_price_summary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        AVG(p.p_retailprice) AS avg_retail_price
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    c.c_name,
+    p.ps_partkey,
+    p.p_name,
+    ps.total_supply_cost,
+    ps.avg_retail_price,
+    s.s_name AS supplier_name,
+    cs.order_count,
+    cs.total_spent,
+    RANK() OVER (PARTITION BY c.c_custkey ORDER BY cs.total_spent DESC) AS customer_spending_rank
+FROM 
+    customer_order_summary cs
+JOIN 
+    ranked_suppliers p ON cs.c_custkey = p.ps_suppkey
+JOIN 
+    part_price_summary ps ON p.ps_partkey = ps.p_partkey
+LEFT JOIN 
+    supplier s ON p.ps_suppkey = s.s_suppkey
+WHERE 
+    ps.total_supply_cost > (SELECT AVG(total_supply_cost) FROM part_price_summary)
+    AND cs.order_count > 5
+ORDER BY 
+    cs.total_spent DESC;

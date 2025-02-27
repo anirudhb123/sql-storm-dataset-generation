@@ -1,0 +1,46 @@
+
+WITH RECURSIVE cust_order_summary AS (
+    SELECT c.c_custkey, c.c_name, 
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+supplier_details AS (
+    SELECT s.s_suppkey, s.s_name, 
+           COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS total_supply_cost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+part_revenue AS (
+    SELECT p.p_partkey, p.p_name, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY p.p_partkey, p.p_name
+),
+ranked_parts AS (
+    SELECT p.p_partkey, p.p_name, r.revenue,
+           RANK() OVER (ORDER BY r.revenue DESC) AS revenue_rank
+    FROM part_revenue r
+)
+SELECT c.c_name, c.total_spent, s.s_name, sd.total_supply_cost, rp.p_name, rp.revenue
+FROM cust_order_summary c
+LEFT JOIN supplier_details s ON c.total_spent > s.total_supply_cost
+JOIN ranked_parts rp ON rp.revenue_rank <= 10
+WHERE c.total_spent IS NOT NULL
+AND (s.total_supply_cost IS NULL OR s.total_supply_cost < 10000)
+ORDER BY c.total_spent DESC, rp.revenue DESC
+UNION ALL
+SELECT 'Unknown' AS c_name, 0 AS total_spent, s.s_name, 
+       SUM(sd.total_supply_cost) AS total_supply_cost, 
+       'N/A' AS p_name, 0 AS revenue
+FROM supplier_details sd
+WHERE sd.total_supply_cost IS NOT NULL
+GROUP BY s.s_name
+HAVING SUM(sd.total_supply_cost) > 50000
+ORDER BY total_supply_cost DESC
+LIMIT 5;

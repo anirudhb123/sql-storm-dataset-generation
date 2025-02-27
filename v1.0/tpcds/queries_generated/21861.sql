@@ -1,0 +1,92 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+highest_purchasers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_purchase_estimate
+    FROM 
+        customer_info c
+    WHERE 
+        c.gender_rank = 1
+),
+date_range AS (
+    SELECT 
+        d.d_date_sk,
+        d.d_date
+    FROM 
+        date_dim d
+    WHERE 
+        d.d_date BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+),
+store_sales_data AS (
+    SELECT 
+        ss.ss_sold_date_sk,
+        SUM(ss.ss_quantity) AS total_quantity,
+        SUM(ss.ss_net_profit) AS total_profit
+    FROM 
+        store_sales ss
+    JOIN 
+        date_range dr ON ss.ss_sold_date_sk = dr.d_date_sk
+    GROUP BY 
+        ss.ss_sold_date_sk
+),
+sales_summary AS (
+    SELECT 
+        dr.d_date,
+        COALESCE(ssd.total_quantity, 0) AS total_sales_quantity,
+        COALESCE(ssd.total_profit, 0) AS total_sales_profit
+    FROM 
+        date_range dr
+    LEFT JOIN 
+        store_sales_data ssd ON dr.d_date_sk = ssd.ss_sold_date_sk
+),
+final_report AS (
+    SELECT 
+        h.c_first_name,
+        h.c_last_name,
+        h.cd_gender,
+        COALESCE(ss.total_sales_quantity, 0) AS total_quantity,
+        COALESCE(ss.total_sales_profit, 0) AS total_profit,
+        CASE 
+            WHEN ss.total_profit < 0 THEN 'Negative Profit'
+            WHEN ss.total_profit = 0 THEN 'No Profit'
+            ELSE 'Positive Profit'
+        END AS profit_status
+    FROM 
+        highest_purchasers h
+    LEFT JOIN 
+        sales_summary ss ON 1 = 1 -- Cartesian join to include all customers with sales summary
+)
+SELECT 
+    f.c_first_name,
+    f.c_last_name,
+    f.cd_gender,
+    f.total_quantity,
+    f.total_profit,
+    f.profit_status
+FROM 
+    final_report f
+WHERE 
+    f.total_quantity > (SELECT AVG(total_quantity) FROM sales_summary)
+ORDER BY 
+    f.total_profit DESC
+LIMIT 10;

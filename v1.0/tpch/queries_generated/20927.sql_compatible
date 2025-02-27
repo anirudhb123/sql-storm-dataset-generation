@@ -1,0 +1,69 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1997-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(NULLIF(s.s_comment, ''), 'No comment') AS EffectiveComment,
+        COUNT(DISTINCT ps.ps_partkey) AS TotalPartsSupplied
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS TotalSpent,
+        COUNT(o.o_orderkey) AS TotalOrders,
+        CASE 
+            WHEN SUM(o.o_totalprice) > 5000 THEN 'High Roller'
+            WHEN SUM(o.o_totalprice) IS NULL THEN 'Unknown'
+            ELSE 'Regular'
+        END AS CustomerType
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        MAX(s.s_acctbal) AS MaxSupplierAcctBal
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    COALESCE(cs.CustomerType, 'Unknown') AS CustomerGroup,
+    COUNT(ro.o_orderkey) AS NumberOfOrders,
+    AVG(COALESCE(ps.TotalSupplyCost, 0)) AS AvgSupplyCostPerPart,
+    STRING_AGG(DISTINCT s.EffectiveComment, '; ') AS SupplierComments,
+    SUM(CASE 
+            WHEN l.l_returnflag = 'R' THEN l.l_quantity
+            ELSE 0 
+        END) AS TotalReturnedQuantity,
+    ROW_NUMBER() OVER (PARTITION BY COALESCE(cs.CustomerType, 'Unknown') ORDER BY COUNT(ro.o_orderkey) DESC) AS CustomerRank
+FROM RankedOrders ro
+LEFT JOIN CustomerSummary cs ON cs.TotalSpent > 1000
+LEFT JOIN lineitem l ON ro.o_orderkey = l.l_orderkey
+LEFT JOIN PartSupplierInfo ps ON ps.p_partkey IN (
+    SELECT ps_partkey
+    FROM partsupp
+    WHERE ps_availqty > 0
+)
+LEFT JOIN SupplierDetails s ON ps.MaxSupplierAcctBal = s.s_acctbal
+GROUP BY cs.CustomerType
+HAVING COUNT(ro.o_orderkey) > 5 OR cs.CustomerType IS NULL
+ORDER BY CustomerGroup, NumberOfOrders DESC;

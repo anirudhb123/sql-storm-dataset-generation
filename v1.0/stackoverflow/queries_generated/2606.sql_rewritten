@@ -1,0 +1,48 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.LastActivityDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentActivity,
+        AVG(v.Score) AS AverageScore,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+), 
+TopUsers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY TotalViews DESC) AS ViewRank,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS PostRank
+    FROM 
+        UserPostStats
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.TotalQuestions,
+    tu.TotalAnswers,
+    tu.RecentActivity,
+    tu.AverageScore,
+    tu.TotalViews,
+    CASE 
+        WHEN tu.ViewRank <= 10 THEN 'Top 10 by Views'
+        ELSE 'Other'
+    END AS ViewCategory,
+    COALESCE(NULLIF(tu.AverageScore, 0), 'No Votes') AS AdjustedScore
+FROM 
+    TopUsers tu
+WHERE 
+    tu.TotalPosts > 0
+    AND tu.RecentActivity > 5
+ORDER BY 
+    tu.PostRank, 
+    tu.ViewRank;

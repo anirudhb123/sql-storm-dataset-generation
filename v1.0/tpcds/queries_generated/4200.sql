@@ -1,0 +1,57 @@
+
+WITH SalesData AS (
+    SELECT 
+        cs.cs_item_sk,
+        SUM(cs.cs_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT cs.cs_order_number) AS total_orders
+    FROM 
+        catalog_sales AS cs
+    WHERE 
+        cs.cs_sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY 
+        cs.cs_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        s.total_sales,
+        ROW_NUMBER() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM 
+        item AS i
+    JOIN 
+        SalesData AS s ON i.i_item_sk = s.cs_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL
+)
+SELECT 
+    t.i_item_id,
+    t.total_sales,
+    CASE 
+        WHEN d.d_dow IN (6, 7) THEN 'Weekend'
+        ELSE 'Weekday'
+    END AS sales_day_type,
+    COALESCE(w.w_warehouse_name, 'Unknown') AS warehouse
+FROM 
+    TopItems AS t
+LEFT JOIN 
+    web_sales AS ws ON t.i_item_id = ws.ws_item_sk
+LEFT JOIN 
+    warehouse AS w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+JOIN 
+    date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    t.sales_rank <= 10
+ORDER BY 
+    t.total_sales DESC
+UNION ALL
+SELECT 
+    i.i_item_id,
+    0 AS total_sales,
+    'No Sales Data' AS sales_day_type,
+    'Unknown' AS warehouse
+FROM 
+    item AS i
+WHERE 
+    i.i_item_sk NOT IN (SELECT cs_item_sk FROM catalog_sales)
+ORDER BY 
+    total_sales DESC;

@@ -1,0 +1,34 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+TotalOrderAmount AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal
+    FROM customer c
+    JOIN TotalOrderAmount toa ON c.c_custkey = toa.o_custkey
+    WHERE toa.total_amount > 100000
+)
+SELECT n.n_name, 
+       COUNT(DISTINCT sh.s_suppkey) AS total_suppliers,
+       AVG(sh.s_acctbal) AS avg_supplier_balance,
+       COUNT(DISTINCT hvc.c_custkey) AS high_value_customers_count
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN HighValueCustomers hvc ON n.n_nationkey = hvc.c_nationkey
+GROUP BY n.n_name
+ORDER BY total_suppliers DESC, avg_supplier_balance DESC;

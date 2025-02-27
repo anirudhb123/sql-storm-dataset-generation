@@ -1,0 +1,35 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost) > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, ts.total_supply_cost + ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN top_suppliers ts ON s.s_suppkey = ts.s_suppkey
+),
+order_totals AS (
+    SELECT o.o_orderkey, o.o_totalprice, c.c_mktsegment,
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= '1997-01-01'
+),
+supplier_summary AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(s.s_acctbal) AS total_account_balance,
+           AVG(s.s_acctbal) AS average_account_balance
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+)
+SELECT r.r_name, ss.supplier_count, ss.total_account_balance, ss.average_account_balance,
+       ot.o_orderkey, ot.o_totalprice, ot.c_mktsegment
+FROM region r
+LEFT JOIN supplier_summary ss ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE ss.supplier_count > 0)
+LEFT JOIN order_totals ot ON ot.rn = 1
+WHERE ss.total_account_balance IS NOT NULL
+  AND EXISTS (SELECT 1 FROM top_suppliers ts WHERE ts.total_supply_cost > 2000)
+ORDER BY r.r_name, ss.supplier_count DESC, ot.o_totalprice DESC;

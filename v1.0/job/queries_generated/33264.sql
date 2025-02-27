@@ -1,0 +1,52 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        c.person_id AS actor_id, 
+        a.name AS actor_name, 
+        c.movie_id, 
+        1 AS depth
+    FROM 
+        cast_info c 
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        c.person_id, 
+        a.name, 
+        c.movie_id, 
+        h.depth + 1
+    FROM 
+        cast_info c 
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        actor_hierarchy h ON c.movie_id = h.movie_id
+    WHERE 
+        h.depth < 3  -- Limit the recursion to 3 levels
+)
+SELECT 
+    a.actor_name,
+    COUNT(DISTINCT c.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT t.title, ', ') AS movies,
+    AVG(CASE WHEN m.production_year IS NOT NULL THEN m.production_year ELSE NULL END) AS avg_production_year,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (ORDER BY movie_count DESC) AS rank
+FROM 
+    actor_hierarchy a
+LEFT JOIN 
+    movie_keyword k ON a.movie_id = k.movie_id
+LEFT JOIN 
+    aka_title t ON a.movie_id = t.movie_id
+LEFT JOIN 
+    title m ON a.movie_id = m.id
+WHERE 
+    a.actor_name IS NOT NULL
+GROUP BY 
+    a.actor_name
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 5
+ORDER BY 
+    movie_count DESC;

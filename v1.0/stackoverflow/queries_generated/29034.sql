@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.Body,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS RankByScore,
+        ARRAY_AGG(DISTINCT u.DisplayName) AS AuthorNames,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Considering only questions
+    GROUP BY 
+        p.Id, p.Title, p.Tags, p.CreationDate, p.Body, p.Score
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.CreationDate,
+        rp.Body,
+        rp.Score,
+        rp.AuthorNames,
+        rp.CommentCount,
+        rp.VoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByScore <= 3 -- Selecting top 3 posts per tag
+),
+FinalResults AS (
+    SELECT 
+        fp.*,
+        pt.Name AS PostType,
+        STRING_AGG(DISTINCT bt.Name, ', ') AS UserBadges
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        PostTypes pt ON fp.Score >= 0
+    LEFT JOIN 
+        Badges bt ON bt.UserId = ANY (SELECT UNNEST(string_to_array(fp.AuthorNames, ', '))) -- User badges aggregated
+    GROUP BY 
+        fp.PostId, fp.Title, fp.Tags, fp.CreationDate, fp.Body, fp.Score
+)
+SELECT 
+    PostId,
+    Title,
+    Tags,
+    CreationDate,
+    Body,
+    Score,
+    AuthorNames,
+    CommentCount,
+    VoteCount,
+    PostType,
+    UserBadges
+FROM 
+    FinalResults
+ORDER BY 
+    CreationDate DESC;

@@ -1,0 +1,48 @@
+-- Performance Benchmarking Query
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.Score, p.ViewCount, p.CreationDate
+)
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalComments,
+    us.UpVotes AS UserUpVotes,
+    us.DownVotes AS UserDownVotes,
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.UpVotes AS PostUpVotes,
+    ps.DownVotes AS PostDownVotes
+FROM UserStatistics us
+JOIN PostStatistics ps ON us.UserId = ps.OwnerUserId
+ORDER BY us.Reputation DESC, ps.Score DESC
+LIMIT 100;

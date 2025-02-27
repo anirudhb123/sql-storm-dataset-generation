@@ -1,0 +1,38 @@
+
+SELECT 
+    ak.name AS ak_name,
+    at.title AS movie_title,
+    ci.nr_order AS cast_order,
+    cp.kind AS company_type,
+    mk.keyword AS movie_keyword,
+    ti.info AS movie_info
+FROM 
+    ak_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.movie_id
+JOIN 
+    movie_companies mc ON at.movie_id = mc.movie_id
+JOIN 
+    company_type cp ON mc.company_type_id = cp.id
+JOIN 
+    movie_keyword mk ON at.movie_id = mk.movie_id
+JOIN 
+    movie_info mi ON at.movie_id = mi.movie_id
+JOIN 
+    info_type ti ON mi.info_type_id = ti.id
+WHERE 
+    at.production_year BETWEEN 2000 AND 2023
+    AND cp.kind = 'Production'
+GROUP BY 
+    ak.name, 
+    at.title, 
+    ci.nr_order, 
+    cp.kind, 
+    mk.keyword, 
+    ti.info
+ORDER BY 
+    at.production_year DESC, 
+    ak.name, 
+    ci.nr_order;

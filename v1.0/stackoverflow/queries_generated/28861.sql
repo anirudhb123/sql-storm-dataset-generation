@@ -1,0 +1,73 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN P.ViewCount > 1000 THEN 1 ELSE 0 END) AS HighViewCountPosts,
+        ARRAY_AGG(DISTINCT substring(P.Tags FROM 2 FOR length(P.Tags) - 2)) AS UniqueTags
+    FROM 
+        Users AS U
+    INNER JOIN 
+        Posts AS P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        HighViewCountPosts,
+        UniqueTags,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS RankByPosts
+    FROM 
+        UserPostStats
+),
+TopQuestions AS (
+    SELECT 
+        P.Id AS QuestionId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        U.DisplayName AS Author,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM 
+        Posts AS P
+    INNER JOIN 
+        Users AS U ON P.OwnerUserId = U.Id
+    INNER JOIN 
+        Tags AS T ON T.Id = ANY(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')::int[])
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, U.DisplayName
+    ORDER BY 
+        P.ViewCount DESC
+    LIMIT 10
+)
+SELECT 
+    SU.UserId,
+    SU.DisplayName,
+    SU.TotalPosts,
+    SU.TotalQuestions,
+    SU.TotalAnswers,
+    SU.HighViewCountPosts,
+    SU.UniqueTags,
+    TQ.QuestionId,
+    TQ.Title AS QuestionTitle,
+    TQ.ViewCount AS QuestionViewCount,
+    TQ.CreationDate AS QuestionCreationDate,
+    TQ.Tags AS QuestionTags
+FROM 
+    TopUsers AS SU
+LEFT JOIN 
+    TopQuestions AS TQ ON SU.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = TQ.QuestionId LIMIT 1)
+WHERE 
+    SU.RankByPosts <= 5
+ORDER BY 
+    SU.RankByPosts,
+    TQ.ViewCount DESC;

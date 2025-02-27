@@ -1,0 +1,87 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS total_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+PriceInfo AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount,
+        COUNT(DISTINCT l.l_partkey) AS item_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        l.l_orderkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        p.p_name,
+        pi.total_price_after_discount
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        PriceInfo pi ON o.o_orderkey = pi.l_orderkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        part p ON l.l_partkey = p.p_partkey
+    WHERE 
+        pi.total_price_after_discount > 1000
+),
+FinalResult AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(hv.total_price_after_discount, 0) AS total_order_value,
+        ss.total_available_qty,
+        ss.avg_supply_cost,
+        ss.total_parts
+    FROM 
+        SupplierStats ss
+    LEFT JOIN 
+        HighValueOrders hv ON ss.s_suppkey = hv.o_orderkey
+    ORDER BY 
+        total_order_value DESC
+)
+SELECT 
+    f.s_suppkey,
+    f.s_name,
+    f.total_order_value,
+    f.total_available_qty,
+    f.avg_supply_cost,
+    f.total_parts
+FROM 
+    FinalResult f
+WHERE 
+    f.total_order_value IS NOT NULL
+UNION ALL
+SELECT 
+    ss.s_suppkey,
+    ss.s_name,
+    0 AS total_order_value,
+    ss.total_available_qty,
+    ss.avg_supply_cost,
+    ss.total_parts
+FROM 
+    SupplierStats ss
+WHERE 
+    ss.total_parts > 0
+ORDER BY 
+    total_order_value DESC, total_available_qty DESC;

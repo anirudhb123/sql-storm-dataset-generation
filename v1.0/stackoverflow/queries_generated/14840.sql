@@ -1,0 +1,58 @@
+-- Performance Benchmarking Query
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    us.UserId,
+    us.DisplayName AS UserDisplayName,
+    us.BadgeCount,
+    us.TotalUpVotes,
+    us.TotalDownVotes
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.CommentCount > 0 -- Ensure posts have comments
+JOIN 
+    UserStats us ON u.Id = ps.PostId -- Match posts to user who commented
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

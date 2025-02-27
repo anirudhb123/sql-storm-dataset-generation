@@ -1,0 +1,39 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, n.n_name AS nation, 
+           RANK() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_acctbal, r.r_name
+    FROM RankedSuppliers s
+    JOIN region r ON r.r_regionkey = (
+        SELECT n.n_regionkey 
+        FROM nation n 
+        WHERE n.n_name = s.nation
+        FETCH FIRST 1 ROW ONLY) 
+    WHERE s.rank <= 3
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_container,
+           ps.ps_supplycost, ps.ps_availqty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_container LIKE 'SM%'
+),
+FinalReport AS (
+    SELECT t.s_name AS supplier_name, t.s_address AS supplier_address,
+           d.p_name AS part_name, d.p_brand AS part_brand, 
+           d.ps_supplycost, d.ps_availqty,
+           COUNT(ol.l_orderkey) AS total_orders
+    FROM TopSuppliers t
+    JOIN lineitem ol ON t.s_suppkey = ol.l_suppkey
+    JOIN PartDetails d ON ol.l_partkey = d.p_partkey
+    GROUP BY t.s_name, t.s_address, d.p_name, d.p_brand, d.ps_supplycost, d.ps_availqty
+)
+SELECT supplier_name, supplier_address, part_name, part_brand, 
+       ps_supplycost, ps_availqty, total_orders
+FROM FinalReport
+WHERE total_orders > 0
+ORDER BY supplier_name, part_name;

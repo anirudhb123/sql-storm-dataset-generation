@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        at.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY at.kind_id ORDER BY at.production_year DESC) AS rn,
+        COALESCE(ki.keyword, 'Unknown') AS keyword,
+        ARRAY_AGG(DISTINCT cn.name) AS company_names
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    LEFT JOIN 
+        movie_companies mc ON at.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        at.production_year IS NOT NULL 
+        AND (at.note IS NULL OR at.note <> 'Banned')
+    GROUP BY 
+        at.id, at.title, at.production_year, at.kind_id
+),
+
+RecentMovies AS (
+    SELECT 
+        title,
+        production_year,
+        kind_id,
+        keyword,
+        company_names
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 5
+),
+
+CombinedInfo AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.keyword,
+        ci.info AS person_info
+    FROM 
+        RecentMovies rm
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = rm.id
+    LEFT JOIN 
+        person_info ci ON ci.person_id = cc.subject_id
+    WHERE 
+        ci.info IS NOT NULL 
+        OR EXISTS (SELECT 1 FROM aka_name an WHERE an.person_id = ci.person_id AND an.md5sum IS NOT NULL)
+)
+
+SELECT 
+    ci.title,
+    ci.production_year,
+    ci.keyword,
+    STRING_AGG(DISTINCT ci.person_info, ', ') AS contributors
+FROM 
+    CombinedInfo ci
+GROUP BY 
+    ci.title, ci.production_year, ci.keyword
+ORDER BY 
+    ci.production_year DESC, ci.keyword;

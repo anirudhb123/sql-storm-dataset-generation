@@ -1,0 +1,51 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_nationkey,
+           ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           (p.p_retailprice * 0.1) AS high_value_discount
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL AND p.p_retailprice > 500
+),
+SupplierPartConnections AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, pp.high_value_discount
+    FROM partsupp ps
+    JOIN HighValueParts pp ON ps.ps_partkey = pp.p_partkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderstatus, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate < '1998-10-01' AND l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+),
+SupplierComparison AS (
+    SELECT r.r_name, COUNT(DISTINCT ss.s_suppkey) AS supplier_count
+    FROM RankedSuppliers ss
+    JOIN nation nn ON ss.s_nationkey = nn.n_nationkey
+    JOIN region r ON nn.n_regionkey = r.r_regionkey
+    GROUP BY r.r_name
+),
+FinalResults AS (
+    SELECT od.o_orderkey, 
+           od.total_revenue, 
+           COALESCE(sp.ps_availqty, 0) AS available_quantity, 
+           ROW_NUMBER() OVER (ORDER BY od.total_revenue DESC) AS revenue_rank
+    FROM OrderDetails od
+    LEFT JOIN SupplierPartConnections sp ON od.o_orderkey = sp.ps_partkey
+    WHERE od.total_revenue > 10000
+)
+SELECT fr.o_orderkey, fr.total_revenue, fr.available_quantity, 
+       CASE 
+           WHEN fr.available_quantity > 0 THEN 'Available' 
+           ELSE 'Not Available' 
+       END AS availability_status
+FROM FinalResults fr
+WHERE fr.revenue_rank <= 10
+ORDER BY fr.total_revenue DESC;

@@ -1,0 +1,53 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        ROW_NUMBER() OVER(PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+), 
+OrdersTotal AS (
+    SELECT 
+        o.o_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_custkey
+), 
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal
+    FROM 
+        SupplierDetails s
+    WHERE 
+        s.rank <= 5
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(ot.total_spent, 0) AS total_spent,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+FROM 
+    customer c
+LEFT JOIN 
+    OrdersTotal ot ON c.c_custkey = ot.o_custkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey))
+LEFT JOIN 
+    TopSuppliers s ON ps.ps_suppkey = s.s_suppkey
+GROUP BY 
+    c.c_custkey, c.c_name
+HAVING 
+    COALESCE(ot.total_spent, 0) > 10000
+ORDER BY 
+    total_spent DESC;

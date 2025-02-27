@@ -1,0 +1,97 @@
+WITH RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RN
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+        AND P.PostTypeId = 1
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        SUM(P.ViewCount) AS TotalViews,
+        COUNT(DISTINCT P.Id) AS TotalPosts
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id
+    WHERE 
+        U.Reputation > 1000 -- active users
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostHistoryAgg AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId,
+        JSON_AGG(PH.Comment) AS EditComments,
+        COUNT(*) FILTER (WHERE PH.PostHistoryTypeId IN (10, 11, 12)) AS CloseActions
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        PH.UserId, PH.PostId
+),
+TrendingPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.ViewCount,
+        (RP.Score + COALESCE(PHA.CloseActions, 0)) AS EngagementScore,
+        COALESCE(U.DisplayName, 'Unknown') AS OwnerDisplayName,
+        ROW_NUMBER() OVER (ORDER BY (RP.Score + COALESCE(PHA.CloseActions, 0)) DESC) AS TrendRank
+    FROM 
+        RecentPosts RP
+    LEFT JOIN 
+        PostHistoryAgg PHA ON RP.PostId = PHA.PostId
+    LEFT JOIN 
+        Users U ON RP.OwnerUserId = U.Id
+)
+SELECT 
+    TP.PostId,
+    TP.Title,
+    TP.ViewCount,
+    TP.EngagementScore,
+    TP.TrendRank,
+    US.Upvotes,
+    US.Downvotes,
+    US.TotalViews AS UserTotalViews,
+    US.TotalPosts AS UserTotalPosts,
+    CASE 
+        WHEN COALESCE(US.TotalPosts, 0) > 0 THEN (TP.ViewCount::float / US.TotalPosts) 
+        ELSE NULL 
+    END AS ViewsPerPost,
+    CASE 
+        WHEN PHA.EditComments IS NOT NULL THEN 
+            ARRAY_TO_STRING(PHA.EditComments::text[], ', ') 
+        ELSE 
+            'No edits made'
+    END AS EditComments
+FROM 
+    TrendingPosts TP
+LEFT JOIN 
+    UserStats US ON TP.OwnerDisplayName = US.DisplayName
+LEFT JOIN 
+    PostHistoryAgg PHA ON TP.PostId = PHA.PostId
+WHERE 
+    TP.TrendRank <= 10
+ORDER BY 
+    TP.EngagementScore DESC;
+
+This SQL query employs various constructs like Common Table Expressions (CTEs), window functions, outer joins, and aggregation functions to calculate and present a comprehensive overview of trending posts, their authors' statistics, and any editing actions related to the posts, while handling potential NULL values and ensuring performance benchmarking. The use of interesting logic, like calculating the average views per post for users, adds an extra layer of complexity.

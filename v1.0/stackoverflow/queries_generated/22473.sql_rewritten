@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+),
+HighScoringPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        CASE 
+            WHEN rp.UpVoteCount - rp.DownVoteCount > 0 THEN 'Positive'
+            WHEN rp.UpVoteCount - rp.DownVoteCount < 0 THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteSentiment
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1 
+),
+UserWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+FinalResult AS (
+    SELECT 
+        hsp.PostId,
+        hsp.Title,
+        hsp.Score,
+        hsp.UpVoteCount,
+        hsp.DownVoteCount,
+        hsp.VoteSentiment,
+        u.BadgeCount,
+        u.BadgeNames
+    FROM 
+        HighScoringPosts hsp
+    LEFT JOIN 
+        UserWithBadges u ON hsp.PostId IN (
+            SELECT 
+                p.Id
+            FROM 
+                Posts p
+            WHERE 
+                p.OwnerUserId = u.UserId
+        )
+    WHERE 
+        hsp.Score > 10 OR u.BadgeCount > 5 
+)
+SELECT 
+    *,
+    COALESCE(NULLIF(BadgeCount, 0), 0) AS ValidBadgeCount,
+    CONCAT('Post ', Title, ' has a ', VoteSentiment, ' sentiment with ', COALESCE(BadgeCount, 0), ' badges awarded.')
+FROM 
+    FinalResult
+WHERE 
+    (Score > 20 OR UpVoteCount > DownVoteCount) 
+ORDER BY 
+    Score DESC, UpVoteCount DESC;

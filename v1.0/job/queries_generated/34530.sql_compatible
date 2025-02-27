@@ -1,0 +1,49 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    WHERE 
+        mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Production')
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id, 
+        t.title, 
+        t.production_year,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+)
+SELECT 
+    ak.name AS actor_name,
+    COUNT(mh.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT mh.title, ', ') AS titles,
+    MIN(mh.production_year) AS first_movie_year,
+    MAX(mh.production_year) AS last_movie_year
+FROM 
+    movie_hierarchy mh
+JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(mh.movie_id) > 5  
+ORDER BY 
+    movie_count DESC
+LIMIT 10;

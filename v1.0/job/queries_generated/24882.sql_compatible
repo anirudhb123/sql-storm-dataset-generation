@@ -1,0 +1,67 @@
+
+WITH 
+  RankedTitles AS (
+    SELECT 
+      at.title,
+      at.production_year,
+      RANK() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank
+    FROM 
+      aka_title at
+    WHERE 
+      at.production_year IS NOT NULL
+  ),
+  ActorWithTitles AS (
+    SELECT 
+      ak.name AS actor_name,
+      rt.title,
+      rt.production_year,
+      ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY rt.production_year DESC) AS year_rank
+    FROM 
+      aka_name ak
+    JOIN 
+      cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+      aka_title at ON ci.movie_id = at.movie_id
+    JOIN 
+      RankedTitles rt ON at.title = rt.title -- Fixed: Join on title instead of id
+  ),
+  MovieGenres AS (
+    SELECT 
+      at.id AS movie_id,
+      STRING_AGG(DISTINCT kt.keyword, ', ') AS genres
+    FROM 
+      aka_title at
+    LEFT JOIN 
+      movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN 
+      keyword kt ON mk.keyword_id = kt.id
+    GROUP BY 
+      at.id
+  )
+SELECT 
+  awt.actor_name,
+  awt.title,
+  awt.production_year,
+  COALESCE(mg.genres, 'No Genre') AS genres,
+  CASE 
+    WHEN awt.year_rank = 1 THEN 'Latest'
+    WHEN awt.year_rank <= 5 THEN 'Recent'
+    ELSE 'Older'
+  END AS release_category,
+  COUNT(DISTINCT ci.movie_id) AS total_movies,
+  STRING_AGG(DISTINCT ci.note, '; ') AS all_notes
+FROM 
+  ActorWithTitles awt
+LEFT JOIN 
+  complete_cast cc ON awt.title = cc.movie_id
+LEFT JOIN 
+  MovieGenres mg ON awt.title = mg.movie_id
+LEFT JOIN 
+  cast_info ci ON awt.title = ci.movie_id 
+WHERE 
+  awt.year_rank <= 10   -- Fixed: Updated condition from title_rank to year_rank
+  AND awt.actor_name IS NOT NULL
+GROUP BY 
+  awt.actor_name, awt.title, awt.production_year, mg.genres, awt.year_rank
+ORDER BY 
+  awt.production_year DESC, total_movies DESC;

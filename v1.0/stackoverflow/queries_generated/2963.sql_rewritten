@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(uStats.BadgeCount, 0) AS BadgeCount,
+        COALESCE(uStats.TotalBounty, 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserStats uStats ON u.Id = uStats.UserId
+    WHERE 
+        u.Reputation > 1000
+)
+SELECT 
+    au.DisplayName,
+    COUNT(rp.PostId) AS PostCount,
+    SUM(rp.Score) AS TotalScore,
+    SUM(rp.ViewCount) AS TotalViews,
+    AVG(rp.Score) AS AvgScore,
+    MAX(rp.CreationDate) AS LastActive,
+    CASE WHEN SUM(uStats.TotalBounty) > 0 THEN 'Bounty Hunter' ELSE 'Regular User' END AS UserType
+FROM 
+    ActiveUsers au
+LEFT JOIN 
+    RankedPosts rp ON au.UserId = rp.OwnerUserId
+LEFT JOIN 
+    UserStats uStats ON au.UserId = uStats.UserId
+GROUP BY 
+    au.DisplayName
+HAVING 
+    COUNT(rp.PostId) > 5
+ORDER BY 
+    TotalScore DESC, PostCount DESC
+LIMIT 10;

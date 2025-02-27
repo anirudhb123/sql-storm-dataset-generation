@@ -1,0 +1,53 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1  -- Feature films
+    UNION ALL
+    SELECT 
+        mt2.id AS movie_id,
+        mt2.title AS movie_title,
+        mt2.production_year,
+        mh.level + 1
+    FROM 
+        aka_title mt2
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt3 ON ml.linked_movie_id = mt3.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = mt3.id
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS cast_with_notes_ratio,
+    ARRAY_AGG(DISTINCT an.name) FILTER (WHERE an.name IS NOT NULL) AS alias_names,
+    SUM(CASE WHEN ci.role_id IS NULL THEN 1 ELSE 0 END) AS no_role_count,
+    COALESCE(ct.kind, 'Unknown') AS company_type
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name an ON an.person_id = ci.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    company_type ct ON ct.id = mc.company_type_id
+GROUP BY 
+    mh.movie_title, 
+    mh.production_year, 
+    ct.kind
+ORDER BY 
+    mh.production_year DESC, 
+    total_cast DESC
+LIMIT 100;

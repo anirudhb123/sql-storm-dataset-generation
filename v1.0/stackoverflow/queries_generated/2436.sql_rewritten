@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.AnswerCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 10
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        CASE 
+            WHEN u.Reputation IS NULL THEN 'No Reputation'
+            WHEN u.Reputation > 1000 THEN 'High Reputation'
+            ELSE 'Low Reputation'
+        END AS ReputationStatus
+    FROM 
+        Users u
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    p.Title,
+    u.DisplayName,
+    u.Reputation,
+    uc.ReputationStatus,
+    pp.CommentCount,
+    pp.LastCommentDate,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+FROM 
+    RankedPosts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+JOIN 
+    UserReputation uc ON u.Id = uc.UserId
+LEFT JOIN 
+    PostComments pp ON p.PostId = pp.PostId
+LEFT JOIN 
+    Votes v ON p.PostId = v.PostId AND v.VoteTypeId = 8 
+WHERE 
+    p.Rank = 1
+GROUP BY 
+    p.Title, u.DisplayName, u.Reputation, uc.ReputationStatus, pp.CommentCount, pp.LastCommentDate
+ORDER BY 
+    TotalBounty DESC, p.Score DESC;

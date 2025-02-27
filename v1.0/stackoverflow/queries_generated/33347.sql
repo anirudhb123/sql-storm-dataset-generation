@@ -1,0 +1,70 @@
+WITH RecursivePosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.OwnerUserId,
+        1 AS Level
+    FROM Posts P
+    WHERE P.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.OwnerUserId,
+        Level + 1
+    FROM Posts P
+    INNER JOIN RecursivePosts RP ON RP.PostId = P.ParentId
+),
+PostStatistics AS (
+    SELECT
+        RP.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(RP.Score) AS TotalScore,
+        AVG(RP.ViewCount) AS AverageViews,
+        RANK() OVER (ORDER BY SUM(RP.Score) DESC) AS ScoreRank
+    FROM RecursivePosts RP
+    GROUP BY RP.OwnerUserId
+),
+UserBadges AS (
+    SELECT
+        U.Id AS UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+VoteStatistics AS (
+    SELECT
+        P.OwnerUserId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.OwnerUserId
+)
+SELECT
+    U.Id AS UserId,
+    U.DisplayName,
+    COALESCE(Ps.TotalPosts, 0) AS TotalPosts,
+    COALESCE(Ps.TotalScore, 0) AS TotalScore,
+    COALESCE(Ps.AverageViews, 0) AS AverageViews,
+    COALESCE(Ub.BadgeCount, 0) AS BadgeCount,
+    COALESCE(Ub.BadgeNames, 'No badges') AS BadgeNames,
+    COALESCE(Vs.UpVotes, 0) AS UpVotes,
+    COALESCE(Vs.DownVotes, 0) AS DownVotes
+FROM Users U
+LEFT JOIN PostStatistics Ps ON U.Id = Ps.OwnerUserId
+LEFT JOIN UserBadges Ub ON U.Id = Ub.UserId
+LEFT JOIN VoteStatistics Vs ON U.Id = Vs.OwnerUserId
+WHERE COALESCE(Ps.TotalPosts, 0) > 1
+ORDER BY Ps.TotalScore DESC, UpVotes DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,58 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        cr.cr_reason_sk,
+        COUNT(*) AS total_returns,
+        SUM(cr_return_amount) AS total_return_amount,
+        ROW_NUMBER() OVER (PARTITION BY cr.returning_customer_sk ORDER BY SUM(cr_return_amount) DESC) AS rn
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk, cr.cr_reason_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws.ws_ship_customer_sk,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        AVG(ws.ws_net_profit) AS avg_profit,
+        MAX(ws.ws_quantity) AS max_quantity_ordered
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_ship_date_sk IS NOT NULL
+    GROUP BY 
+        ws.ws_ship_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(rs.total_returns, 0) AS total_catalog_returns,
+        ss.total_spent,
+        ss.avg_profit,
+        ss.max_quantity_ordered
+    FROM 
+        customer c
+        LEFT JOIN RankedReturns rs ON c.c_customer_sk = rs.returning_customer_sk AND rs.rn = 1
+        LEFT JOIN SalesSummary ss ON c.c_customer_sk = ss.ws_ship_customer_sk
+    WHERE 
+        c.c_birth_year > 1970 AND c.c_preferred_cust_flag = 'Y'
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_catalog_returns,
+    tc.total_spent,
+    tc.avg_profit,
+    CASE 
+        WHEN tc.total_catalog_returns IS NULL THEN 'No Returns'
+        WHEN tc.total_catalog_returns > 5 THEN 'Frequent Returner'
+        ELSE 'Occasional Returner'
+    END AS returner_status,
+    'Customer ' || tc.c_customer_id || ' (' || COALESCE(tc.total_spent::VARCHAR, '0') || ' spent)' AS customer_summary
+FROM 
+    TopCustomers tc
+WHERE 
+    tc.total_spent IS NOT NULL
+ORDER BY 
+    tc.total_spent DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL AS parent_movie_id,
+        0 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.movie_id AS parent_movie_id,
+        mh.depth + 1 AS depth
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    kh.keyword,
+    COUNT(DISTINCT a.id) AS actor_count,
+    MAX(mh.production_year) AS latest_movie_year,
+    AVG(CASE WHEN ai.gender = 'F' THEN 1 ELSE 0 END) AS female_actor_ratio,
+    STRING_AGG(DISTINCT at.title, ', ') AS titles_with_keyword
+FROM 
+    movie_keyword mk
+JOIN 
+    keyword kh ON mk.keyword_id = kh.id
+JOIN 
+    aka_title at ON mk.movie_id = at.id
+JOIN 
+    complete_cast cc ON at.id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birth date')
+LEFT JOIN 
+    MovieHierarchy mh ON at.id = mh.movie_id
+WHERE 
+    kh.keyword IS NOT NULL
+    AND mh.depth < 3
+    AND (pi.info IS NOT NULL OR pi.info IS NULL)
+GROUP BY 
+    kh.keyword
+HAVING 
+    COUNT(DISTINCT a.id) > 5
+ORDER BY 
+    actor_count DESC;

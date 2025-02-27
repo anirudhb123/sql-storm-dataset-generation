@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COUNT(a.Id) AS AnswerCount,
+        COALESCE(SUM(vt.Score), 0) AS TotalScore,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        VoteTypes vt ON vt.Id = v.VoteTypeId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopenedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation,
+    r.AnswerCount,
+    r.TotalScore,
+    COALESCE(p.LastClosedDate, 'Never') AS LastClosed,
+    p.CloseCount,
+    COALESCE(p.LastReopenedDate, 'Never') AS LastReopened,
+    p.ReopenCount,
+    u.ReputationRank,
+    CASE
+        WHEN r.AnswerCount > 5 THEN 'Expert'
+        WHEN r.AnswerCount BETWEEN 3 AND 5 THEN 'Moderate'
+        ELSE 'Novice'
+    END AS EngagementLevel
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    PostHistoryInfo p ON r.PostId = p.PostId
+WHERE 
+    r.UserPostRank <= 5
+ORDER BY 
+    r.TotalScore DESC, r.CreationDate ASC
+LIMIT 10;
+

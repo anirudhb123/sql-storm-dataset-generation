@@ -1,0 +1,102 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(p.Score, 0)) AS TotalPostScore,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        MAX(u.Reputation) AS MaxReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 10) AS TotalCloseVotes,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 11) AS TotalReopenVotes,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 12) AS TotalDeleteVotes,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11, 12)) AS TotalPostHistoryCount,
+        MAX(ph.CreationDate) AS LastActionDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+RankedUserStats AS (
+    SELECT 
+        UserId,
+        TotalPostScore,
+        TotalCommentScore,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalBadges,
+        MaxReputation,
+        RANK() OVER (ORDER BY TotalPostScore DESC) AS ScoreRank
+    FROM 
+        UserPostStats
+),
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        pi.TotalCloseVotes,
+        pi.TotalReopenVotes,
+        pi.TotalDeleteVotes,
+        pi.LastActionDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    JOIN 
+        PostHistoryInfo pi ON p.Id = pi.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+FilteredUsers AS (
+    SELECT 
+        u.DisplayName,
+        ur.ScoreRank,
+        a.PostId,
+        a.Title,
+        a.TotalCloseVotes,
+        a.TotalReopenVotes,
+        a.TotalDeleteVotes
+    FROM 
+        RankedUserStats ur
+    JOIN 
+        ActivePosts a ON ur.UserId = a.OwnerUserId
+    JOIN 
+        Users u ON ur.UserId = u.Id
+    WHERE 
+        ur.MaxReputation > 1000 AND ur.TotalPosts > 5
+)
+SELECT 
+    fu.DisplayName,
+    fu.ScoreRank,
+    STRING_AGG(a.Title, ', ') AS RecentPosts,
+    SUM(a.TotalCloseVotes) AS TotalCloseVotes,
+    SUM(a.TotalReopenVotes) AS TotalReopenVotes,
+    SUM(a.TotalDeleteVotes) AS TotalDeleteVotes,
+    COUNT(*) AS PostsCount
+FROM 
+    FilteredUsers fu
+JOIN 
+    ActivePosts a ON fu.PostId = a.PostId
+GROUP BY 
+    fu.DisplayName, fu.ScoreRank
+HAVING 
+    COUNT(*) >= 3
+ORDER BY 
+    TotalCloseVotes DESC, ScoreRank ASC;

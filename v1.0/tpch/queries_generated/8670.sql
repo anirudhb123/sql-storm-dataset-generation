@@ -1,0 +1,39 @@
+WITH nation_summary AS (
+    SELECT n.n_name AS nation_name,
+           SUM(s.s_acctbal) AS total_account_balance,
+           COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_name
+),
+part_supplier AS (
+    SELECT p.p_name AS part_name, 
+           ps.ps_supplycost AS supply_cost,
+           ps.ps_availqty AS available_quantity, 
+           ps.ps_comment AS part_comment,
+           s.s_name AS supplier_name
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+order_summary AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT ns.nation_name, 
+       ns.total_account_balance, 
+       ns.customer_count, 
+       ps.part_name, 
+       ps.supply_cost, 
+       ps.available_quantity, 
+       os.total_revenue
+FROM nation_summary ns
+JOIN part_supplier ps ON ns.nation_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = (SELECT DISTINCT c.c_nationkey FROM customer c WHERE c.c_custkey = ps.supplier_name LIMIT 1))
+JOIN order_summary os ON os.o_orderkey = (SELECT o.o_orderkey FROM orders o ORDER BY o.o_orderdate DESC LIMIT 1)
+ORDER BY ns.total_account_balance DESC, os.total_revenue DESC;

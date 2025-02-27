@@ -1,0 +1,112 @@
+
+WITH RECURSIVE parts_with_recursive AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice,
+        p.p_comment,
+        0 AS level
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 100.00
+
+    UNION ALL
+
+    SELECT 
+        p.p_partkey,
+        CONCAT(p.p_name, ' (discounted)') AS p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice * 0.9 AS p_retailprice,
+        p.p_comment,
+        pr.level + 1
+    FROM 
+        part p
+    JOIN 
+        parts_with_recursive pr ON p.p_brand = pr.p_brand
+    WHERE 
+        p.p_retailprice < pr.p_retailprice
+),
+supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        MAX(s.s_acctbal) AS max_acctbal,
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_comment IS NOT NULL
+    GROUP BY 
+        s.s_suppkey
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey
+),
+high_value_customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        co.total_spent,
+        co.order_count
+    FROM 
+        customer c
+    JOIN 
+        customer_orders co ON c.c_custkey = co.c_custkey
+    WHERE 
+        co.total_spent > (SELECT AVG(total_spent) FROM customer_orders)
+),
+lineitem_stats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+        COUNT(l.l_linenumber) AS total_items
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    DISTINCT pr.p_name,
+    pr.p_brand,
+    pr.level,
+    s.max_acctbal,
+    c.c_name,
+    li.total_lineitem_value,
+    CASE 
+        WHEN li.total_lineitem_value IS NULL THEN 'NO SALES'
+        ELSE 'SALES DATA AVAILABLE'
+    END AS sales_status
+FROM 
+    parts_with_recursive pr
+LEFT JOIN 
+    supplier_info s ON pr.p_brand = s.s_suppkey
+JOIN 
+    high_value_customers c ON s.supplier_count > 1
+LEFT JOIN 
+    lineitem_stats li ON li.l_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey LIMIT 1)
+WHERE 
+    pr.p_retailprice IS NOT NULL
+    AND (s.max_acctbal IS NULL OR c.c_acctbal > 500.00)
+ORDER BY 
+    pr.p_brand, pr.p_name DESC;

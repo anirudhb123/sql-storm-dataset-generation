@@ -1,0 +1,77 @@
+WITH RecursiveMovieInfo AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COALESCE(mo.note, 'No Note') AS movie_note,
+        COALESCE(ci.note, 'No Cast Info') AS cast_note,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_info mo ON t.id = mo.movie_id AND mo.info_type_id IN (SELECT id FROM info_type WHERE info = 'Tagline')
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.production_year >= 2000
+),
+AverageCastRole AS (
+    SELECT 
+        movie_id,
+        AVG(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS avg_roles,
+        COUNT(*) AS total_cast
+    FROM 
+        cast_info ci
+    GROUP BY 
+        movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title,
+        rm.movie_note,
+        ac.avg_roles,
+        ac.total_cast
+    FROM 
+        RecursiveMovieInfo rm
+    JOIN 
+        AverageCastRole ac ON rm.movie_id = ac.movie_id
+    WHERE 
+        ac.avg_roles > 0 
+        AND rm.rn <= 10
+),
+FinalOutput AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.movie_note,
+        fm.avg_roles,
+        fm.total_cast,
+        (CASE 
+            WHEN fm.total_cast > 5 THEN 'Ensemble' 
+            WHEN fm.total_cast BETWEEN 1 AND 5 THEN 'Small Cast' 
+            ELSE 'Info Missing' 
+        END) AS cast_size_category,
+        (SELECT STRING_AGG(DISTINCT cn.name, ', ') 
+         FROM company_name cn 
+         JOIN movie_companies mc ON cn.id = mc.company_id 
+         WHERE mc.movie_id = fm.movie_id) AS production_companies
+    FROM 
+        FilteredMovies fm
+    ORDER BY 
+        fm.production_year DESC NULLS LAST, 
+        fm.movie_note ASC
+)
+SELECT 
+    *,
+    (SELECT COUNT(*) FROM title t WHERE t.production_year = fo.movie_year AND t.id <> fo.movie_id) AS competing_titles_count
+FROM 
+    FinalOutput fo
+WHERE 
+    (fo.movie_note IS NOT NULL AND fo.movie_note <> 'No Note')
+    OR fo.total_cast > 0
+ORDER BY 
+    fo.avg_roles DESC, 
+    fo.total_cast DESC;

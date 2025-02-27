@@ -1,0 +1,71 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_date.d_date AS sales_date,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim ws_date ON ws.ws_sold_date_sk = ws_date.d_date_sk
+    GROUP BY 
+        ws_date.d_date, ws.ws_item_sk
+),
+loss_data AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_net_loss) AS total_loss
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.cr_item_sk
+),
+return_data AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_return_qty,
+        SUM(wr.wr_net_loss) AS total_return_loss
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+),
+sales_analysis AS (
+    SELECT 
+        sd.sales_date,
+        sd.ws_item_sk,
+        COALESCE(SUM(ld.total_loss), 0) AS total_loss,
+        COALESCE(SUM(rd.total_return_qty), 0) AS total_return_qty,
+        COALESCE(SUM(rd.total_return_loss), 0) AS total_return_loss,
+        sd.total_quantity,
+        sd.total_profit
+    FROM 
+        sales_data sd
+    LEFT JOIN 
+        loss_data ld ON sd.ws_item_sk = ld.cr_item_sk
+    LEFT JOIN 
+        return_data rd ON sd.ws_item_sk = rd.wr_item_sk
+    GROUP BY 
+        sd.sales_date, sd.ws_item_sk, sd.total_quantity, sd.total_profit
+)
+SELECT 
+    TO_CHAR(sales_date, 'YYYY-MM-DD') AS formatted_date,
+    ws_item_sk,
+    total_quantity,
+    total_profit,
+    total_loss,
+    total_return_qty,
+    total_return_loss,
+    CASE 
+        WHEN total_profit > 0 THEN 'Profitable' 
+        WHEN total_loss > total_profit THEN 'Loss'
+        ELSE 'Break Even'
+    END AS financial_status
+FROM 
+    sales_analysis
+WHERE 
+    total_quantity > 100 OR total_return_qty > 0
+ORDER BY 
+    sales_date DESC, total_profit DESC;

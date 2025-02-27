@@ -1,0 +1,44 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+SupplierStats AS (
+    SELECT ps.ps_partkey, 
+           s.s_suppkey,
+           SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_suppkey
+)
+SELECT p.p_partkey, 
+       p.p_name, 
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       COALESCE(SUM(os.total_price), 0) AS total_order_value,
+       COALESCE(SS.total_available, 0) AS total_available_quantity,
+       SS.avg_supply_cost AS average_supply_cost,
+       CASE 
+           WHEN COUNT(DISTINCT o.o_orderkey) > 0 THEN 'Yes' 
+           ELSE 'No' 
+       END AS is_ordered,
+       ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY COUNT(DISTINCT o.o_orderkey) DESC) AS order_rank
+FROM part p
+LEFT JOIN OrderDetails os ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM SupplierHierarchy s))
+LEFT JOIN orders o ON o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)
+LEFT JOIN SupplierStats SS ON SS.ps_partkey = p.p_partkey
+GROUP BY p.p_partkey, p.p_name, SS.total_available, SS.avg_supply_cost
+HAVING COALESCE(SUM(os.total_price), 0) > 1000
+ORDER BY total_order_value DESC, order_rank ASC;

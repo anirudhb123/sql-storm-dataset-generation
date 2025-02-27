@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT
+        a.title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) as year_rank,
+        COUNT(c.id) OVER (PARTITION BY a.id) as cast_count
+    FROM
+        aka_title a
+    LEFT JOIN cast_info c ON a.id = c.movie_id
+    WHERE
+        (a.production_year IS NOT NULL OR a.production_year IS NOT NULL)
+        AND a.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Drama%')
+),
+FilteredMovies AS (
+    SELECT
+        rm.title,
+        rm.production_year,
+        COALESCE(rm.cast_count, 0) AS cast_count,
+        (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = rm.id AND mi.note IS NOT NULL) AS info_count,
+        (SELECT STRING_AGG(mk.keyword, ', ') FROM movie_keyword mk WHERE mk.movie_id = rm.id) AS keywords
+    FROM
+        RankedMovies rm
+    WHERE
+        rm.year_rank < 5
+),
+CompanyDetails AS (
+    SELECT
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        CASE
+            WHEN ct.kind LIKE '%Production%' THEN 'Production'
+            WHEN ct.kind LIKE '%Distribution%' THEN 'Distribution'
+            ELSE 'Other'
+        END AS company_category
+    FROM
+        movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+)
+SELECT
+    fm.title,
+    fm.production_year,
+    fm.cast_count,
+    COALESCE(cd.company_name, 'N/A') AS company_name,
+    COALESCE(cd.company_type, 'N/A') AS company_type,
+    fm.keywords,
+    fm.info_count
+FROM
+    FilteredMovies fm
+LEFT JOIN CompanyDetails cd ON fm.id = cd.movie_id
+WHERE
+    fm.production_year BETWEEN 2000 AND 2023
+    AND fm.cast_count > 0
+ORDER BY
+    fm.production_year DESC,
+    fm.cast_count DESC
+LIMIT 100;

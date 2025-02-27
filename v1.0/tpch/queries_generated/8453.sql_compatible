@@ -1,0 +1,42 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_quantity,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_name,
+        s.total_quantity,
+        s.total_cost,
+        RANK() OVER (ORDER BY s.total_cost DESC) AS rank
+    FROM 
+        SupplierStats s
+)
+SELECT 
+    c.c_name AS customer_name,
+    o.o_orderkey,
+    o.o_orderdate,
+    ts.s_name AS top_supplier,
+    ts.total_quantity AS supplier_quantity,
+    ts.total_cost AS supplier_cost
+FROM 
+    customer c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    (SELECT * FROM TopSuppliers WHERE rank <= 10) ts ON l.l_suppkey = ts.s_suppkey
+WHERE 
+    o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+ORDER BY 
+    o.o_orderdate, ts.total_cost DESC;

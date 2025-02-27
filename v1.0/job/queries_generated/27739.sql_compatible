@@ -1,0 +1,72 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS title_id,
+        a.title AS movie_title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY LENGTH(a.title) DESC) AS rank_by_length
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year >= 2000
+),
+Top10LongestTitles AS (
+    SELECT 
+        title_id,
+        movie_title,
+        production_year,
+        kind_id
+    FROM 
+        RankedTitles
+    WHERE 
+        rank_by_length <= 10
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        p.name AS person_name,
+        r.role AS person_role
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+MovieDetails AS (
+    SELECT 
+        t.title_id AS movie_id,
+        t.movie_title,
+        COUNT(c.person_name) AS cast_count
+    FROM 
+        Top10LongestTitles t
+    LEFT JOIN 
+        CastDetails c ON t.title_id = c.movie_id
+    GROUP BY 
+        t.title_id, t.movie_title
+)
+SELECT 
+    m.movie_title,
+    m.production_year,
+    m.cast_count,
+    k.keyword AS movie_keyword,
+    STRING_AGG(c.note, ', ') AS production_notes
+FROM 
+    MovieDetails m
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON m.movie_id = mi.movie_id
+LEFT JOIN 
+    info_type it ON mi.info_type_id = it.id
+LEFT JOIN 
+    movie_info_idx mii ON m.movie_id = mii.movie_id
+WHERE 
+    (k.keyword IS NOT NULL OR it.info IS NOT NULL)
+GROUP BY 
+    m.movie_title, m.production_year, m.cast_count, k.keyword
+ORDER BY 
+    m.cast_count DESC, m.production_year DESC;

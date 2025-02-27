@@ -1,0 +1,54 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+),
+NationOrderSummary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    n.n_name,
+    COALESCE(r.rn, 0) AS supplier_rank,
+    ns.total_orders,
+    ns.total_revenue,
+    CASE 
+        WHEN ns.total_revenue IS NULL THEN 'No Revenue'
+        WHEN ns.total_revenue > 10000 THEN 'High Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM 
+    nation n
+LEFT JOIN 
+    RankedSuppliers r ON n.n_nationkey = r.s_nationkey AND r.rn <= 3
+JOIN 
+    NationOrderSummary ns ON ns.n_nationkey = n.n_nationkey
+WHERE 
+    n.n_regionkey IS NOT NULL 
+    AND EXISTS (SELECT 1 FROM supplier s2 WHERE s2.s_nationkey = n.n_nationkey AND s2.s_acctbal IS NOT NULL)
+ORDER BY 
+    ns.total_revenue DESC NULLS LAST,
+    n.n_name ASC;

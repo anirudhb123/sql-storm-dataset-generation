@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(NULLIF(p.OwnerUserId, -1), 0) AS ActualOwnerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+PostStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT post.PostId) AS QuestionsAsked,
+        SUM(post.Score) AS TotalScore,
+        AVG(post.ViewCount) AS AverageViewCount
+    FROM 
+        Users u
+    JOIN 
+        Votes v ON u.Id = v.UserId
+    JOIN 
+        Posts post ON v.PostId = post.Id AND v.VoteTypeId = 2  
+    LEFT JOIN 
+        RankedPosts up ON post.Id = up.PostId
+    WHERE 
+        up.Rank = 1
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionsAsked,
+        TotalScore,
+        AverageViewCount,
+        RANK() OVER (ORDER BY TotalScore DESC, QuestionsAsked DESC) AS UserRank
+    FROM 
+        PostStatistics
+)
+SELECT 
+    tu.DisplayName,
+    tu.QuestionsAsked,
+    tu.TotalScore,
+    tu.AverageViewCount,
+    COALESCE(b.BadgeCount, 0) AS BadgeCount
+FROM 
+    TopUsers tu
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+) b ON tu.UserId = b.UserId
+WHERE 
+    tu.UserRank <= 10
+ORDER BY 
+    tu.UserRank;

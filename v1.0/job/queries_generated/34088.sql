@@ -1,0 +1,54 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ll.movie_id,
+        m.title,
+        m.production_year,
+        h.level + 1
+    FROM 
+        movie_link ll
+    JOIN 
+        aka_title m ON ll.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy h ON h.movie_id = ll.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(SUM(CASE WHEN ci.nr_order IS NOT NULL THEN 1 ELSE 0 END), 0) AS cast_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    MAX(mo.info) AS movie_info,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mo ON mh.movie_id = mo.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+WHERE 
+    mo.note IS NULL -- Ensuring we only consider movies without additional notes
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 1
+ORDER BY 
+    mh.production_year DESC,
+    cast_count DESC;
+
+This query creates a recursive common table expression (CTE) to traverse movie links and gather movies produced after 2000. It counts the number of distinct actors per movie, aggregates their names, retrieves additional movie information where available, counts keywords attached to the movies, and filters out movies with specific notes. The results are grouped by the movie and ordered by production year and actor count.

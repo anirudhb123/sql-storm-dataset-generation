@@ -1,0 +1,85 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.Id
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        v.VoteTypeId,
+        v.UserId,
+        ROW_NUMBER() OVER (PARTITION BY v.PostId ORDER BY v.CreationDate DESC) AS VoteRank
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days' 
+),
+UserWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostVoteScores AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) - 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Score
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    ph.Title,
+    ph.CreationDate,
+    ph.Level,
+    COALESCE(pvs.Score, 0) AS VoteScore,
+    rw.BadgeCount AS UserBadgeCount,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    MAX(us.DisplayName) AS RecentVoter
+FROM 
+    PostHierarchy ph
+LEFT JOIN 
+    PostVoteScores pvs ON ph.Id = pvs.PostId
+LEFT JOIN 
+    RecentVotes rv ON rv.PostId = ph.Id AND rv.VoteRank = 1
+LEFT JOIN 
+    Users us ON us.Id = rv.UserId
+LEFT JOIN 
+    Comments c ON c.PostId = ph.Id
+LEFT JOIN 
+    UserWithBadges rw ON rw.UserId = us.Id
+GROUP BY 
+    ph.Id, ph.Title, ph.CreationDate, ph.Level, rw.BadgeCount
+ORDER BY 
+    VoteScore DESC, ph.CreationDate ASC
+LIMIT 10;

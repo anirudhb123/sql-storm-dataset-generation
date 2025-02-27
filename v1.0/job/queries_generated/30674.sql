@@ -1,0 +1,68 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mi.info, 'No Info') AS additional_info,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY mi.info_type_id) AS info_rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    GROUP_CONCAT(DISTINCT ci.person_role_id || ':' || a.name) AS cast_info,
+    GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    COALESCE(mi.additional_info, 'N/A') AS additional_info,
+    mh.level
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    MovieInfo mi ON mh.movie_id = mi.movie_id AND mi.info_rank = 1
+WHERE 
+    mh.production_year > 2000
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mi.additional_info, mh.level
+HAVING 
+    COUNT(DISTINCT ci.person_role_id) > 1
+ORDER BY 
+    mh.production_year DESC, mh.title;

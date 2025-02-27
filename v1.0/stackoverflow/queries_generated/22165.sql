@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Tags,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Considering only Questions
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 100 -- Only consider users with positive reputation
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment,
+        MAX(ph.CreationDate) AS LastCloseDate,
+        STRING_AGG(ct.Name, ', ') AS ReasonComments
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        CloseReasonTypes ct ON ph.Comment::INTEGER = ct.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Only closed and reopened posts
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    us.PostCount,
+    us.TotalScore,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate AS QuestionDate,
+    rp.Score AS QuestionScore,
+    rp.AnswerCount,
+    cp.LastCloseDate,
+    cp.ReasonComments
+FROM 
+    UserStats us
+LEFT JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId
+LEFT JOIN 
+    ClosedPostDetails cp ON rp.PostId = cp.PostId
+WHERE
+    us.TotalScore > 50 -- Only users with significant total score
+    AND (cp.LastCloseDate IS NULL OR cp.LastCloseDate < NOW() - INTERVAL '30 days') -- Filter open questions or questions closed a long time ago
+ORDER BY 
+    us.Reputation DESC, 
+    us.TotalScore DESC,
+    rp.Score DESC;

@@ -1,0 +1,80 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws_ext_sales_price,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_ext_sales_price DESC) as rank_sales
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+customer_with_returns AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(SUM(sr_return_quantity), 0) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+warehouse_info AS (
+    SELECT 
+        w.w_warehouse_sk,
+        w.w_warehouse_name,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_sales_price) AS total_sales_amount
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_sk, w.w_warehouse_name
+),
+item_sales_stats AS (
+    SELECT 
+        i.i_item_id,
+        SUM(CASE WHEN cs.cs_quantity IS NULL THEN 0 ELSE cs.cs_quantity END) AS total_catalog_sales,
+        SUM(CASE WHEN ss.ss_quantity IS NULL THEN 0 ELSE ss.ss_quantity END) AS total_store_sales,
+        i.i_current_price,
+        CASE 
+            WHEN SUM(cs.cs_quantity) IS NULL THEN 'N/A' 
+            ELSE 'Available' 
+        END AS availability_status
+    FROM 
+        item i
+    LEFT JOIN 
+        catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+    LEFT JOIN 
+        store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    GROUP BY 
+        i.i_item_id, i.i_current_price
+)
+SELECT 
+    w.w_warehouse_name,
+    cc.c_customer_id,
+    COUNT(DISTINCT rs.ws_order_number) FILTER (WHERE rs.rank_sales <= 5) AS top_sales_orders,
+    SUM(iss.total_catalog_sales) AS total_catalog_sales,
+    SUM(iss.total_store_sales) AS total_store_sales,
+    MAX(iss.availability_status) AS overall_availability,
+    COUNT(DISTINCT cw.return_count) AS unique_returning_customers
+FROM 
+    ranked_sales rs
+JOIN 
+    warehouse_info w ON rs.web_site_sk = w.w_warehouse_sk
+JOIN 
+    customer_with_returns cw ON cw.total_returns > 0
+JOIN 
+    item_sales_stats iss ON rs.ws_order_number = iss.i_item_id
+GROUP BY 
+    w.w_warehouse_name, cc.c_customer_id
+HAVING 
+    SUM(iss.total_store_sales) > (SELECT AVG(total_sales_amount) FROM warehouse_info)
+ORDER BY 
+    unique_returning_customers DESC, total_catalog_sales DESC
+LIMIT 100;

@@ -1,0 +1,62 @@
+
+WITH SupplierCosts AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_nationkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        o.o_orderkey, c.c_nationkey
+),
+RevenueByNation AS (
+    SELECT 
+        n.n_nationkey,
+        SUM(os.total_revenue) AS nation_revenue
+    FROM 
+        OrderSummary os
+    JOIN 
+        nation n ON os.c_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    r.r_name,
+    rb.nation_revenue,
+    sc.total_supply_cost
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    RevenueByNation rb ON n.n_nationkey = rb.n_nationkey
+JOIN 
+    SupplierCosts sc ON n.n_nationkey = (
+        SELECT 
+            s.nationkey
+        FROM 
+            supplier s
+        WHERE 
+            s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps)
+        LIMIT 1
+    )
+ORDER BY 
+    rb.nation_revenue DESC, sc.total_supply_cost ASC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Considering only questions
+),
+PostWithAnswers AS (
+    SELECT 
+        rp.Id AS QuestionId,
+        rp.Title,
+        (SELECT COUNT(*) FROM Posts a WHERE a.ParentId = rp.Id) AS AnswerCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.Id AND v.VoteTypeId = 2), 0) AS UpVoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > (SELECT AVG(Reputation) FROM Users)
+),
+RecentActivity AS (
+    SELECT 
+        p.Id,
+        COUNT(c.Id) AS CommentCount,
+        MAX(p.LastActivityDate) AS MostRecentActivity
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    p.Title,
+    p.AnswerCount,
+    p.UpVoteCount,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation,
+    r.CommentCount,
+    r.MostRecentActivity
+FROM 
+    PostWithAnswers p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    RecentActivity r ON p.QuestionId = r.Id
+WHERE 
+    u.Id IN (SELECT UserId FROM UserReputation)
+ORDER BY 
+    p.AnswerCount DESC, p.UpVoteCount DESC;

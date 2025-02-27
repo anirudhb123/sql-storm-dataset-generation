@@ -1,0 +1,45 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON ps.ps_suppkey = sh.s_suppkey
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > 50 AND sh.level < 5
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(s.s_acctbal) AS avg_supplier_balance,
+    MAX(l.l_shipdate) AS last_ship_date
+FROM 
+    customer c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT OUTER JOIN 
+    supplier_hierarchy sh ON sh.s_suppkey = s.s_suppkey
+WHERE 
+    l.l_shipdate >= DATE '1997-01-01' AND 
+    (r.r_name LIKE '%West%' OR r.r_name IS NULL)
+GROUP BY 
+    n.n_name, r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 10 OR
+    AVG(s.s_acctbal) IS NOT NULL
+ORDER BY 
+    nation_name, region_name DESC;

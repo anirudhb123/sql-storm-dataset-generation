@@ -1,0 +1,62 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ParentId, 
+        p.CreationDate, 
+        1 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        p.CreationDate, 
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostScores AS (
+    SELECT 
+        Posts.Id,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS NetScore,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY Posts.OwnerUserId ORDER BY COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) DESC) AS RowAsc
+    FROM Posts
+    LEFT JOIN Votes v ON Posts.Id = v.PostId
+    LEFT JOIN Comments c ON Posts.Id = c.PostId
+    LEFT JOIN Badges b ON Posts.OwnerUserId = b.UserId
+    GROUP BY Posts.Id, Posts.OwnerUserId
+),
+UserPostSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(ps.NetScore) AS TotalScore,
+        AVG(ps.CommentCount) AS AvgComments,
+        COUNT(DISTINCT ps.Id) AS TotalPosts
+    FROM Users u
+    LEFT JOIN PostScores ps ON u.Id = ps.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalScore,
+    ups.AvgComments,
+    ups.TotalPosts,
+    COALESCE(STRING_AGG(DISTINCT pt.Name, ', '), 'No Post Type') AS PostTypesAssociated,
+    ph.Level AS PostHierarchyLevel
+FROM UserPostSummary ups
+LEFT JOIN Posts p ON ups.UserId = p.OwnerUserId
+LEFT JOIN PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN RecursivePostHierarchy ph ON p.Id = ph.PostId
+WHERE ups.TotalScore > 10
+GROUP BY ups.UserId, ups.DisplayName, ph.Level
+HAVING COUNT(DISTINCT p.Id) > 5
+ORDER BY ups.TotalScore DESC;

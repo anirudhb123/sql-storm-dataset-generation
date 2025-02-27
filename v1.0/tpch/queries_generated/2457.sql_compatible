@@ -1,0 +1,63 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerCredit AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS orders_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(sc.total_supplycost, 0) AS total_supplycost,
+    COALESCE(rn.o_orderdate, DATE '1900-01-01') AS last_order_date,
+    cc.total_spent,
+    cc.orders_count
+FROM 
+    part p
+LEFT JOIN 
+    SupplierCosts sc ON p.p_partkey = sc.ps_partkey
+LEFT JOIN 
+    RankedOrders rn ON rn.o_orderkey IN (SELECT o.o_orderkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE l.l_partkey = p.p_partkey)
+LEFT JOIN 
+    CustomerCredit cc ON cc.c_custkey = (SELECT c.c_custkey FROM customer c JOIN orders o ON c.c_custkey = o.o_custkey WHERE o.o_orderkey = rn.o_orderkey LIMIT 1)
+WHERE 
+    p.p_size = (SELECT MAX(p2.p_size) FROM part p2)
+GROUP BY 
+    p.p_partkey,
+    p.p_name,
+    sc.total_supplycost,
+    rn.o_orderdate,
+    cc.total_spent,
+    cc.orders_count
+ORDER BY 
+    total_supplycost DESC,
+    last_order_date ASC;

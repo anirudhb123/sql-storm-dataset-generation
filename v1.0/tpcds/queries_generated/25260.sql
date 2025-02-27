@@ -1,0 +1,54 @@
+
+WITH FilteredCustomer AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CD.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        ca.ca_city LIKE '%Springfield%' AND 
+        (cd.cd_gender = 'M' OR cd.cd_gender = 'F')
+),
+AggregatedSales AS (
+    SELECT 
+        c_customer_sk,
+        SUM(ss_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions
+    FROM 
+        store_sales ss
+    JOIN 
+        FilteredCustomer fc ON ss.ss_customer_sk = fc.c_customer_sk
+    GROUP BY 
+        c_customer_sk
+)
+SELECT 
+    fc.full_name,
+    fc.ca_city,
+    fc.ca_state,
+    fc.cd_gender,
+    fc.cd_marital_status,
+    fc.cd_purchase_estimate,
+    fc.cd_credit_rating,
+    COALESCE(as.total_sales, 0) AS total_sales,
+    COALESCE(as.total_transactions, 0) AS total_transactions,
+    CASE 
+        WHEN COALESCE(as.total_sales, 0) > 5000 THEN 'High Value'
+        WHEN COALESCE(as.total_sales, 0) BETWEEN 1000 AND 5000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS customer_value_category
+FROM 
+    FilteredCustomer fc
+LEFT JOIN 
+    AggregatedSales as ON fc.c_customer_sk = as.c_customer_sk
+ORDER BY 
+    total_sales DESC, fc.full_name;

@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) 
+    WHERE 
+        p.CreationDate > DATE '2024-10-01' - INTERVAL '1 year' AND 
+        (p.Score IS NOT NULL OR p.ViewCount > 10) 
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, p.OwnerUserId, p.CreationDate
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(b.Class, 0) AS BadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        (SELECT UserId, MIN(Class) AS Class
+         FROM Badges
+         WHERE Class IN (1, 2) 
+         GROUP BY UserId) b ON u.Id = b.UserId
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.UpVoteCount,
+    CASE
+        WHEN rp.UserPostRank = 1 THEN 'Most Recent Post'
+        ELSE 'Older Post'
+    END AS PostStatus,
+    CASE 
+        WHEN rp.CommentCount > 5 THEN 'Highly Discussed'
+        WHEN rp.CommentCount BETWEEN 3 AND 5 THEN 'Moderately Discussed'
+        ELSE 'Less Discussed'
+    END AS DiscussionLevel
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation up ON rp.OwnerUserId = up.UserId
+WHERE 
+    up.Reputation > 100 AND 
+    (up.BadgeClass = 1 OR up.BadgeClass IS NULL)
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

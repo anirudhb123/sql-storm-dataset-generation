@@ -1,0 +1,54 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS Rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        COUNT(DISTINCT o.o_orderkey) AS TotalOrders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+)
+SELECT 
+    rs.s_name AS SupplierName,
+    r.n_name AS NationName,
+    COUNT(DISTINCT li.l_orderkey) AS OrdersCount,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS TotalRevenue,
+    AVG(hvc.TotalOrders) AS AvgOrdersPerHighValueCustomer
+FROM 
+    RankedSuppliers rs
+JOIN 
+    supplier s ON rs.s_suppkey = s.s_suppkey
+JOIN 
+    nation r ON s.s_nationkey = r.n_nationkey
+JOIN 
+    partsupp ps ON rs.s_suppkey = ps.ps_suppkey
+JOIN 
+    lineitem li ON ps.ps_partkey = li.l_partkey
+LEFT JOIN 
+    HighValueCustomers hvc ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = hvc.c_custkey)
+WHERE 
+    rs.Rank <= 3
+GROUP BY 
+    rs.s_name, r.n_name, hvc.TotalOrders
+ORDER BY 
+    TotalRevenue DESC, OrdersCount DESC;

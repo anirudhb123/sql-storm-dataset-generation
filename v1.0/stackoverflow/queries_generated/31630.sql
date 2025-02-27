@@ -1,0 +1,76 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        0 AS Level
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 0
+
+    UNION ALL
+
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        Level + 1
+    FROM 
+        Users U
+    INNER JOIN 
+        Votes V ON U.Id = V.UserId
+    INNER JOIN 
+        Posts P ON V.PostId = P.Id
+    WHERE 
+        V.VoteTypeId = 2 -- Upvote
+        AND U.Reputation > 0
+        AND Level < 3 -- Limit to 3 levels for the recursive query
+)
+
+, PostViewCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts P
+)
+
+, UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS Badges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.Level,
+    COALESCE(B.BadgeCount, 0) AS BadgeCount,
+    COALESCE(B.Badges, 'No Badges') AS Badges,
+    P.Title,
+    P.ViewCount,
+    PC.ViewRank
+FROM 
+    UserReputation U
+LEFT JOIN 
+    UserBadges B ON U.UserId = B.UserId
+LEFT JOIN 
+    PostViewCounts PC ON PC.ViewRank <= 10 -- Get top 10 posts by view count
+JOIN 
+    Posts P ON P.OwnerUserId = U.UserId
+WHERE 
+    P.CreationDate > DATEADD(year, -1, GETDATE()) -- Posts created in the last year
+ORDER BY 
+    U.Reputation DESC, PC.ViewCount DESC;

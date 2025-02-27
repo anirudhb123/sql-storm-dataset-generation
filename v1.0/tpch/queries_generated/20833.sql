@@ -1,0 +1,49 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 100.00
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 10
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F') AND o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders) 
+),
+average_lineitem AS (
+    SELECT l_orderkey, AVG(l_extendedprice) AS avg_price
+    FROM lineitem
+    GROUP BY l_orderkey
+),
+filtered_parts AS (
+    SELECT p.p_partkey, COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+    HAVING COUNT(DISTINCT ps.ps_suppkey) > 5
+),
+advanced_query AS (
+    SELECT co.c_custkey, co.c_name, co.o_orderkey, co.o_totalprice, l.l_returnflag,
+           CASE 
+               WHEN l.l_discount = 0 THEN 'No Discount'
+               WHEN l.l_discount BETWEEN 0.01 AND 0.10 THEN 'Low Discount'
+               ELSE 'High Discount'
+           END AS discount_category,
+           SUM(CASE WHEN l.l_tax IS NULL THEN 1 ELSE 0 END) OVER (PARTITION BY co.o_orderkey) AS null_tax_count
+    FROM customer_orders co
+    JOIN lineitem l ON co.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag IN ('R', 'A')
+)
+SELECT DISTINCT sh.s_name, sh.s_acctbal, p.p_name, fq.c_custkey, fq.discount_category
+FROM supplier_hierarchy sh
+JOIN filtered_parts p ON sh.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN advanced_query fq ON fq.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = fq.c_custkey AND o.o_orderdate < CURRENT_DATE - INTERVAL '1 year' LIMIT 1)
+WHERE sh.level > 0 AND p.p_size BETWEEN 1 AND 100 AND fq.discount_category IS NOT NULL
+ORDER BY sh.s_acctbal DESC, p.p_name ASC;

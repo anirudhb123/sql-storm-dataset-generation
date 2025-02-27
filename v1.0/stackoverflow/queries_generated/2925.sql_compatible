@@ -1,0 +1,82 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS UpvoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        RankedPosts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+MostActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalViews,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM 
+        UserStats
+    WHERE 
+        BadgeCount > 0
+)
+SELECT 
+    mu.DisplayName,
+    MAX(p.Title) AS MostRecentPost,
+    SUM(p.Score) AS TotalScore,
+    SUM(p.ViewCount) AS TotalViews,
+    COALESCE(b.Count, 0) AS TagCount,
+    CASE 
+        WHEN MAX(p.Score) IS NULL THEN 'No Posts'
+        WHEN MAX(p.Score) > 10 THEN 'High Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM 
+    MostActiveUsers mu
+LEFT JOIN 
+    Posts p ON mu.UserId = p.OwnerUserId
+LEFT JOIN 
+    Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+LEFT JOIN 
+    (
+        SELECT 
+            p.Id,
+            COUNT(DISTINCT t.Id) AS Count
+        FROM 
+            Posts p
+        JOIN 
+            Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+        GROUP BY 
+            p.Id
+    ) b ON p.Id = b.Id
+WHERE 
+    mu.ScoreRank <= 10
+GROUP BY 
+    mu.DisplayName, b.Count
+ORDER BY 
+    TotalScore DESC, TotalViews DESC;

@@ -1,0 +1,82 @@
+
+WITH RankedStores AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        ROW_NUMBER() OVER (PARTITION BY s_state ORDER BY s_sales_price DESC) AS store_rank
+    FROM (
+        SELECT 
+            ss_store_sk,
+            MAX(ss_sales_price) AS s_sales_price,
+            s_state
+        FROM 
+            store_sales ss
+        JOIN 
+            store s ON ss.ss_store_sk = s.s_store_sk
+        GROUP BY 
+            ss_store_sk, s_state
+    ) AS state_sales
+),
+TopStores AS (
+    SELECT 
+        s_store_sk,
+        s_store_name 
+    FROM 
+        RankedStores 
+    WHERE 
+        store_rank <= 3
+),
+DiscountedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        TopStores ts ON ws.ws_ship_addr_sk = ts.s_store_sk
+    WHERE 
+        ws.ws_sales_price < 100
+    GROUP BY 
+        ws.web_site_sk
+),
+StoreDetails WITH RECURSIVE AS (
+    SELECT 
+        *,
+        0 AS level 
+    FROM 
+        store 
+    WHERE 
+        s_country = 'USA'
+    UNION ALL
+    SELECT 
+        s.*,
+        level + 1
+    FROM 
+        store_details sd
+    JOIN 
+        store s ON sd.s_city = s.s_city AND sd.s_state = s.s_state
+    WHERE 
+        level < 5
+)
+SELECT 
+    c.c_customer_id,
+    COUNT(DISTINCT sr_ticket_number) AS total_returns,
+    SUM(CASE WHEN sr_return_quantity IS NULL THEN 0 ELSE sr_return_quantity END) AS total_returned_quantity,
+    STRING_AGG(DISTINCT ca_street_name || ' ' || ca_street_number, ', ') AS addresses,
+    DENSE_RANK() OVER (ORDER BY SUM(total_net_profit) DESC) AS rank_by_profit
+FROM 
+    customer c
+LEFT JOIN 
+    store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    DiscountedSales ds ON c.c_current_addr_sk = ds.web_site_sk
+GROUP BY 
+    c.c_customer_id
+HAVING 
+    COUNT(sr_ticket_number) > 0 
+    AND (NULLIF(SUM(sr_return_tax), 0) IS NOT NULL OR total_returned_quantity > 0)
+ORDER BY 
+    rank_by_profit DESC
+LIMIT 100;

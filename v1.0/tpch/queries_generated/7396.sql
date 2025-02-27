@@ -1,0 +1,58 @@
+WITH RECURSIVE ProductSuppliers AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        s.s_suppkey,
+        s.s_name,
+        p.ps_supplycost
+    FROM
+        part p
+    JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE
+        p.p_size > 10
+
+    UNION ALL
+
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        s.s_suppkey,
+        s.s_name,
+        p.ps_supplycost
+    FROM
+        ProductSuppliers ps
+    JOIN
+        part p ON ps.p_partkey = p.p_partkey
+    JOIN
+        partsupp psup ON p.p_partkey = psup.ps_partkey
+    JOIN
+        supplier s ON psup.ps_suppkey = s.s_suppkey
+    WHERE
+        s.s_acctbal > 500 AND
+        ps.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp)
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    AVG(ps.ps_supplycost) AS avg_supply_cost,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM
+    ProductSuppliers ps
+JOIN
+    supplier s ON ps.s_suppkey = s.s_suppkey
+JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN
+    lineitem l ON ps.p_partkey = l.l_partkey
+WHERE 
+    l.l_shipdate >= DATE '2023-01-01' 
+    AND l.l_shipdate < DATE '2024-01-01'
+GROUP BY 
+    n.n_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND p.Score > 0
+),
+UserVoteStats AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+),
+PostCommentCounts AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS HistoryCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.DisplayName,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    COALESCE(pc.CommentCount, 0) AS CommentCount,
+    COALESCE(phc.HistoryCount, 0) AS HistoryCount,
+    COALESCE(uvs.TotalVotes, 0) AS TotalVotes,
+    COALESCE(uvs.UpVotes, 0) AS UpVotes,
+    COALESCE(uvs.DownVotes, 0) AS DownVotes
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON up.Id = rp.OwnerUserId
+LEFT JOIN 
+    PostCommentCounts pc ON rp.PostId = pc.PostId
+LEFT JOIN 
+    PostHistoryCounts phc ON rp.PostId = phc.PostId
+LEFT JOIN 
+    UserVoteStats uvs ON up.Id = uvs.UserId
+WHERE 
+    rp.UserPostRank = 1 AND rp.Score > (SELECT AVG(Score) FROM Posts WHERE PostTypeId = 1)
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 10;

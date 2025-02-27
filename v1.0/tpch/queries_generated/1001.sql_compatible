@@ -1,0 +1,64 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COALESCE(sp.supplier_count, 0) AS supplier_count,
+    COALESCE(sp.avg_supply_cost, 0.00) AS avg_supply_cost,
+    STRING_AGG(DISTINCT n.n_name, ', ') AS nations_supplied,
+    CASE 
+        WHEN o.revenue_rank <= 10 THEN 'Top Revenue'
+        WHEN o.revenue_rank IS NULL THEN 'No Revenue' 
+        ELSE 'Other Revenue' 
+    END AS revenue_status
+FROM 
+    part p
+LEFT JOIN 
+    SupplierParts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    RankedOrders o ON o.o_orderkey = (
+        SELECT 
+            o2.o_orderkey 
+        FROM 
+            orders o2 
+        JOIN 
+            lineitem l2 ON o2.o_orderkey = l2.l_orderkey 
+        WHERE 
+            l2.l_partkey = p.p_partkey 
+        GROUP BY 
+            o2.o_orderkey
+        ORDER BY 
+            SUM(l2.l_extendedprice * (1 - l2.l_discount)) DESC 
+        LIMIT 1
+    )
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, o.revenue_rank
+ORDER BY 
+    supplier_count DESC, avg_supply_cost ASC;

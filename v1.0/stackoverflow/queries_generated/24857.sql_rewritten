@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 10
+    AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation IS NOT NULL
+    GROUP BY 
+        u.Id
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        string_agg(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag_name ON true
+    JOIN 
+        Tags t ON t.TagName = tag_name
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.PostCount,
+    rp.Title AS LatestPostTitle,
+    rp.CreationDate,
+    rp.Score,
+    pt.Tags,
+    CASE 
+        WHEN u.Reputation > 1000 THEN 'High Reputation User'
+        WHEN u.Reputation >= 500 THEN 'Medium Reputation User'
+        ELSE 'Low Reputation User' 
+    END AS UserCategory,
+    CASE 
+        WHEN rp.PostRank = 1 THEN 'Latest Post'
+        ELSE null 
+    END AS RankStatus
+FROM 
+    UserReputation u
+LEFT JOIN 
+    RankedPosts rp ON u.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostTags pt ON rp.PostId = pt.PostId
+WHERE 
+    u.PostCount >= 5
+ORDER BY 
+    u.Reputation DESC,
+    rp.CreationDate DESC
+LIMIT 10;

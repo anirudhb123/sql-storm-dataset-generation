@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Owner,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS OwnerRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName,
+        pht.Name AS ActionType,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate > NOW() - INTERVAL '30 days'
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        DENSE_RANK() OVER (ORDER BY SUM(COALESCE(v.BountyAmount, 0)) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.VoteTypeId = 9 -- BountyClose
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate AS PostDate,
+    rp.Owner,
+    rp.AnswerCount,
+    rph.UserDisplayName AS RecentEditor,
+    rph.HistoryDate,
+    rph.ActionType,
+    tu.DisplayName AS TopUser,
+    tu.TotalBounties
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentPostHistory rph ON rp.PostId = rph.PostId AND rph.HistoryRank = 1 
+LEFT JOIN 
+    TopUsers tu ON rp.OwnerRank = tu.UserRank
+WHERE 
+    rp.AnswerCount > 0 
+    AND (rp.CreationDate < NOW() - INTERVAL '1 year' OR rp.AnswerCount > 5)
+ORDER BY 
+    rp.CreationDate DESC, tu.TotalBounties DESC
+LIMIT 50;

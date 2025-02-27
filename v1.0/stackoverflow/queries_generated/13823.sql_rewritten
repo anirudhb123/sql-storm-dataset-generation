@@ -1,0 +1,55 @@
+WITH PostAggregates AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        MAX(v.CreationDate) AS LastVoteDate,
+        AVG(v.CreationDate) AS AvgVoteDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.PostTypeId
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    pa.CommentCount,
+    pa.AnswerCount,
+    pa.LastVoteDate,
+    pa.AvgVoteDate,
+    ue.TotalUpVotes,
+    ue.TotalDownVotes,
+    ue.BadgeCount
+FROM 
+    Posts p
+JOIN 
+    PostAggregates pa ON p.Id = pa.PostId
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+JOIN 
+    UserEngagement ue ON u.Id = ue.UserId
+WHERE 
+    p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+ORDER BY 
+    pa.CommentCount DESC, 
+    pa.AnswerCount DESC;

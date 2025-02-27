@@ -1,0 +1,56 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 0 AS level
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL AND mt.title IS NOT NULL
+    UNION ALL
+    SELECT mt.id, mt.title, mt.production_year, mh.level + 1
+    FROM movie_hierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE mh.level < 5  
+),
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        COUNT(ci.id) OVER(PARTITION BY ci.movie_id) AS actor_count,
+        ROW_NUMBER() OVER(PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+),
+title_with_genres AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        kt.keyword AS genre
+    FROM aka_title at
+    LEFT JOIN movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN keyword kt ON mk.keyword_id = kt.id
+),
+unique_title_genders AS (
+    SELECT 
+        t.id,
+        COUNT(DISTINCT n.gender) AS unique_genders_count
+    FROM title t
+    LEFT JOIN name n ON t.imdb_id = n.imdb_id
+    GROUP BY t.id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT cd.actor_name) AS total_actors,
+    SUM(COALESCE(cd.actor_count, 0)) AS total_parts,
+    STRING_AGG(DISTINCT tg.genre, ', ') AS genres,
+    utg.unique_genders_count,
+    CASE 
+        WHEN utg.unique_genders_count > 1 THEN 'Multiple Genders'
+        ELSE 'Single Gender'
+    END AS gender_diversity
+FROM movie_hierarchy mh
+LEFT JOIN cast_details cd ON mh.movie_id = cd.movie_id
+LEFT JOIN title_with_genres tg ON mh.movie_id = tg.title_id
+LEFT JOIN unique_title_genders utg ON mh.movie_id = utg.id
+GROUP BY mh.title, mh.production_year, utg.unique_genders_count
+HAVING SUM(COALESCE(cd.actor_count, 0)) > 0
+ORDER BY mh.production_year DESC, mh.title ASC;

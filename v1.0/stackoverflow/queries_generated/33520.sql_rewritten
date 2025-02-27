@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS RankByScore,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS TotalComments,
+        COALESCE(MAX(v.CreationDate), p.CreationDate) AS LatestActivity
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 50 
+),
+PostData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.TotalComments,
+        rp.RankByScore,
+        pt.TagName,
+        tm.TagCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PopularTags pt ON rp.PostId = pt.PostId
+),
+FinalSelection AS (
+    SELECT 
+        pd.*,
+        ROW_NUMBER() OVER (PARTITION BY pd.TagName ORDER BY pd.Score DESC) AS TagRank
+    FROM 
+        PostData pd
+)
+SELECT 
+    fs.PostId,
+    fs.Title,
+    fs.Score,
+    fs.TotalComments,
+    fs.TagName,
+    fs.TagCount,
+    CASE 
+        WHEN fs.RankByScore = 1 THEN 'Top Post' 
+        WHEN fs.TagRank <= 5 THEN 'Popular Tag Post'
+        ELSE 'Overridden' 
+    END AS Status,
+    DENSE_RANK() OVER (ORDER BY fs.Score DESC) AS OverallRank
+FROM 
+    FinalSelection fs
+WHERE 
+    fs.TagCount > 0 AND
+    fs.Status != 'Overridden'
+ORDER BY 
+    fs.Score DESC, 
+    fs.TotalComments DESC;

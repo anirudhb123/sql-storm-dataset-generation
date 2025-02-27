@@ -1,0 +1,81 @@
+
+WITH ProcessedTags AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(*) AS PostCount,
+        STRING_AGG(DISTINCT CAST(PostId AS TEXT), ', ') AS AssociatedPosts
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName
+), PopularUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+), RecentActivity AS (
+    SELECT 
+        post.Title,
+        post.Body,
+        post.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN 'Closed'
+            WHEN ph.PostHistoryTypeId = 11 THEN 'Reopened'
+            ELSE 'Active'
+        END AS PostStatus,
+        STRING_AGG(DISTINCT ph.Comment, ', ') AS HistoryComments
+    FROM 
+        Posts post
+    LEFT JOIN 
+        Comments c ON c.PostId = post.Id
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = post.Id
+    WHERE 
+        post.LastActivityDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days'
+    GROUP BY 
+        post.Title, post.Body, post.CreationDate
+)
+SELECT 
+    pt.TagId,
+    pt.TagName,
+    pt.PostCount,
+    pt.AssociatedPosts,
+    pu.UserId,
+    pu.DisplayName,
+    pu.TotalPosts,
+    pu.Questions,
+    pu.Answers,
+    pu.TotalUpVotes,
+    pu.TotalDownVotes,
+    ra.Title,
+    ra.Body,
+    ra.CreationDate,
+    ra.CommentCount,
+    ra.PostStatus,
+    ra.HistoryComments
+FROM 
+    ProcessedTags pt
+JOIN 
+    PopularUsers pu ON pt.PostCount > 10
+JOIN 
+    RecentActivity ra ON ra.CommentCount > 0
+ORDER BY 
+    pt.PostCount DESC, pu.TotalUpVotes DESC;

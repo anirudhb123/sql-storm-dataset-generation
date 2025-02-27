@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS Level
+    FROM supplier s
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_nationkey
+),
+RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as PriceRank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+),
+AggregateLineItem AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+        COUNT(DISTINCT l.l_partkey) AS UniqueParts,
+        MAX(l.l_tax) AS MaxTax,
+        AVG(l.l_quantity) AS AvgQuantity
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        n.n_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > 5000
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+)
+SELECT 
+    n.n_name AS Nation,
+    COALESCE(SUM(ali.TotalRevenue), 0) AS TotalRevenue,
+    COUNT(DISTINCT so.o_orderkey) AS TotalOrders,
+    AVG(sh.Level) AS AvgSupplierLevel,
+    COUNT(DISTINCT fs.s_suppkey) AS TotalSuppliers
+FROM nation n
+LEFT JOIN AggregateLineItem ali ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ali.l_orderkey))
+LEFT JOIN RankedOrders so ON so.o_orderkey = ali.l_orderkey
+LEFT JOIN FilteredSuppliers fs ON fs.n_name = n.n_name
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name
+ORDER BY TotalRevenue DESC;

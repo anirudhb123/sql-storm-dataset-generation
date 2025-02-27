@@ -1,0 +1,49 @@
+
+WITH MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM title m
+    JOIN movie_info mi ON m.id = mi.movie_id
+    JOIN movie_keyword mk ON m.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN movie_companies mc ON m.id = mc.movie_id
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN cast_info ci ON m.id = ci.movie_id
+    JOIN aka_name a ON ci.person_id = a.person_id
+    WHERE m.production_year >= 2000
+    GROUP BY m.id, m.title, m.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        actor_names,
+        keywords
+    FROM MovieInfo
+    WHERE keywords LIKE '%Action%'
+)
+
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.actor_names,
+    COUNT(DISTINCT ci.person_id) AS total_cast_count,
+    COUNT(DISTINCT c.id) AS total_companies
+FROM FilteredMovies fm
+JOIN cast_info ci ON fm.movie_id = ci.movie_id
+JOIN movie_companies mc ON fm.movie_id = mc.movie_id
+JOIN company_name c ON mc.company_id = c.id
+GROUP BY 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.actor_names
+ORDER BY 
+    fm.production_year DESC,
+    total_cast_count DESC;

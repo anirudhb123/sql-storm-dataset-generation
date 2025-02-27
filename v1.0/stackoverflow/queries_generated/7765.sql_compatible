@@ -1,0 +1,49 @@
+
+WITH UserVotes AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostVoteDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year' 
+    GROUP BY p.Id, p.Title, p.OwnerUserId
+),
+TopPosts AS (
+    SELECT 
+        pvd.PostId,
+        pvd.Title,
+        pvd.VoteCount,
+        pvd.Upvotes,
+        pvd.Downvotes,
+        pvd.LastVoteDate,
+        ROW_NUMBER() OVER (ORDER BY pvd.VoteCount DESC) AS Rank
+    FROM PostVoteDetails pvd
+    WHERE pvd.VoteCount > 0
+)
+SELECT 
+    tp.Title,
+    tp.VoteCount,
+    tp.Upvotes,
+    tp.Downvotes,
+    u.DisplayName AS PostOwner,
+    tp.LastVoteDate
+FROM TopPosts tp
+JOIN Users u ON tp.OwnerUserId = u.Id
+WHERE tp.Rank <= 10
+ORDER BY tp.VoteCount DESC;

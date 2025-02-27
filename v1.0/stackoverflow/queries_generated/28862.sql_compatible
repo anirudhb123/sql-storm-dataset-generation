@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS TagRank,
+        COUNT(c.Id) AS CommentCount,
+        AVG(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS AvgUpVotes
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2
+    WHERE 
+        p.PostTypeId = 1  
+        AND p.CreationDate >= DATEADD(year, -1, CURRENT_TIMESTAMP)  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.AvgUpVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank = 1  
+    ORDER BY 
+        rp.AvgUpVotes DESC  
+    OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY  
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.Tags,
+    fp.CreationDate,
+    fp.OwnerDisplayName,
+    fp.CommentCount,
+    fp.AvgUpVotes
+FROM 
+    FilteredPosts fp
+JOIN 
+    Tags t ON t.TagName IN (SELECT unnest(string_to_array(fp.Tags, '>')))  
+WHERE 
+    t.Count > 100  
+ORDER BY 
+    fp.CreationDate DESC;

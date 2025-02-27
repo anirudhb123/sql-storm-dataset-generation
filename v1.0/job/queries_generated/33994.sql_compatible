@@ -1,0 +1,90 @@
+
+WITH RECURSIVE CompanyHierarchy AS (
+    SELECT 
+        mc.movie_id, 
+        cn.name AS company_name, 
+        ct.kind AS company_type,
+        1 AS level
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        ct.kind = 'Production'
+    
+    UNION ALL
+    
+    SELECT 
+        mc.movie_id, 
+        cn.name AS company_name, 
+        ct.kind AS company_type,
+        ch.level + 1 AS level
+    FROM 
+        movie_companies mc
+    JOIN 
+        CompanyHierarchy ch ON mc.movie_id = ch.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        ch.level < 5  
+),
+ActorMovies AS (
+    SELECT 
+        ci.movie_id, 
+        ak.name AS actor_name,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+),
+MovieDetails AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        KEYWORD_LIST.keywords,
+        COALESCE(AVG(CASE WHEN mi.info_type_id = 1 THEN CAST(mi.info AS NUMERIC) END), 0) AS avg_rating
+    FROM 
+        aka_title mt
+    LEFT JOIN
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        movie_info mi ON mt.id = mi.movie_id
+    LEFT JOIN 
+        (SELECT 
+            mk.movie_id, STRING_AGG(k.keyword, ', ') AS keywords 
+         FROM 
+            movie_keyword mk JOIN keyword k ON mk.keyword_id = k.id
+         GROUP BY 
+            mk.movie_id) AS KEYWORD_LIST ON mt.id = KEYWORD_LIST.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    ch.company_name,
+    ch.company_type,
+    am.actor_name,
+    am.actor_rank,
+    md.avg_rating
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    CompanyHierarchy ch ON md.movie_id = ch.movie_id
+LEFT JOIN 
+    ActorMovies am ON md.movie_id = am.movie_id
+WHERE 
+    md.production_year >= 2000 
+ORDER BY 
+    md.production_year DESC,
+    md.title,
+    ch.level,
+    am.actor_rank;

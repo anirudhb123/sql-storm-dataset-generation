@@ -1,0 +1,55 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank,
+        MAX(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS HasUpVote
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE 
+        p.CreationDate >= DATE_SUB(TIMESTAMP '2024-10-01 12:34:56', INTERVAL 1 YEAR)
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.CreationDate, p.PostTypeId
+),
+RecentPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.Rank,
+        rp.HasUpVote,
+        ph.Type 
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistory ph ON rp.PostId = ph.PostId AND ph.CreationDate >= DATE_SUB(TIMESTAMP '2024-10-01 12:34:56', INTERVAL 1 MONTH)
+    WHERE 
+        rp.Rank <= 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.CreationDate,
+    COALESCE(COUNT(DISTINCT c.Id), 0) AS CommentCount,
+    CASE 
+        WHEN rp.HasUpVote = 1 THEN 'Yes'
+        ELSE 'No'
+    END AS UpVoted,
+    STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypeName
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    Comments c ON rp.PostId = c.PostId
+JOIN 
+    PostTypes pt ON rp.PostId = pt.Id
+GROUP BY 
+    rp.PostId, rp.Title, rp.ViewCount, rp.CreationDate, rp.Rank, rp.HasUpVote
+ORDER BY 
+    rp.ViewCount DESC;

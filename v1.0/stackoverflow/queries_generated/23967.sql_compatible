@@ -1,0 +1,91 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId, 
+        Reputation, 
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+), 
+
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 1) THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseCount,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 ELSE 0 END), 0) AS DeleteCount,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    GROUP BY 
+        p.Id, p.OwnerUserId
+),
+
+UserPostCount AS (
+    SELECT 
+        OwnerUserId, 
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Posts p
+    GROUP BY 
+        OwnerUserId
+), 
+
+ClosedPosts AS (
+    SELECT 
+        DISTINCT p.Id AS ClosedPostId,
+        ph.CreationDate AS ClosedDateTime,
+        ph.UserDisplayName AS ClosedBy
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    upc.TotalPosts,
+    upc.QuestionCount,
+    upc.AnswerCount,
+    ps.PostId,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    CASE 
+        WHEN ps.CloseCount > 0 THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus,
+    cp.ClosedDateTime,
+    cp.ClosedBy,
+    COUNT(DISTINCT ps.PostId) OVER (PARTITION BY u.Id) AS TotalParticipatedPosts,
+    ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY ps.UpVotes DESC) AS UserPostRank
+FROM 
+    UserReputation u
+LEFT JOIN 
+    UserPostCount upc ON u.UserId = upc.OwnerUserId
+LEFT JOIN 
+    PostStatistics ps ON ps.OwnerUserId = u.UserId
+LEFT JOIN 
+    ClosedPosts cp ON ps.PostId = cp.ClosedPostId
+WHERE 
+    u.Reputation > 100 
+    AND ps.CommentCount > 0 
+    AND (ps.LastVoteDate IS NULL OR ps.LastVoteDate > '2024-10-01 12:34:56'::timestamp - INTERVAL '30 days')
+ORDER BY 
+    u.Reputation DESC, 
+    ps.UpVotes DESC;

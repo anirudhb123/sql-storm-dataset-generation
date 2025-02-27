@@ -1,0 +1,59 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title ASC) AS title_rank,
+        COUNT(DISTINCT mc.company_id) OVER (PARTITION BY mt.id) AS company_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+),
+ActorsInMovies AS (
+    SELECT 
+        ka.person_id,
+        ka.name,
+        COUNT(DISTINCT c.movies_id) AS movie_count,
+        AVG(CASE WHEN c.note IS NULL THEN 0 ELSE 1 END) AS has_note
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info c ON ka.person_id = c.person_id
+    GROUP BY 
+        ka.person_id, ka.name
+),
+TopActors AS (
+    SELECT 
+        actor.name,
+        actor.movie_count,
+        rm.production_year
+    FROM 
+        ActorsInMovies actor
+    JOIN 
+        RankedMovies rm ON actor.movie_count >= 3
+    WHERE 
+        actor.has_note = 1
+)
+SELECT 
+    ta.name,
+    ta.movie_count,
+    ta.production_year,
+    COALESCE(rm.title, 'Unknown Title') AS movie_title,
+    COALESCE(ct.kind, 'No Company') AS company_type,
+    (SELECT COUNT(DISTINCT mk.keyword_id)
+     FROM movie_keyword mk 
+     WHERE mk.movie_id = rm.movie_id) AS keyword_count
+FROM 
+    TopActors ta
+LEFT JOIN 
+    RankedMovies rm ON ta.movie_count = rm.company_count
+LEFT JOIN 
+    movie_companies mc ON rm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    ta.production_year IS NOT NULL
+ORDER BY 
+    ta.movie_count DESC, ta.name ASC;

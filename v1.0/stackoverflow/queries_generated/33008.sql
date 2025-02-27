@@ -1,0 +1,102 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        DisplayName, 
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COALESCE(uc.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(dc.DownVoteCount, 0) AS DownVoteCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 1 THEN v.Id END) AS AcceptedCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(Id) AS UpVoteCount
+        FROM Votes
+        WHERE VoteTypeId = 2
+        GROUP BY PostId
+    ) uc ON p.Id = uc.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(Id) AS DownVoteCount
+        FROM Votes
+        WHERE VoteTypeId = 3
+        GROUP BY PostId
+    ) dc ON p.Id = dc.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(Id) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.AcceptedAnswerId = v.PostId AND v.VoteTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, uc.UpVoteCount, dc.DownVoteCount, c.CommentCount
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        p.Title AS PostTitle,
+        PHT.Name AS ActionType
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year' 
+)
+SELECT 
+    ps.Id AS PostId,
+    ps.Title AS PostTitle,
+    ps.CreationDate,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    ps.CommentCount,
+    u.DisplayName AS UserName,
+    u.Reputation,
+    u.ReputationRank,
+    COALESCE(SUM(CASE WHEN ph.ActionType = 'Post Closed' THEN 1 ELSE 0 END), 0) AS ClosedCount,
+    COALESCE(SUM(CASE WHEN ph.ActionType = 'Post Reopened' THEN 1 ELSE 0 END), 0) AS ReopenedCount
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    UserReputation u ON ps.Id = u.UserId
+LEFT JOIN 
+    PostHistoryData ph ON ps.Id = ph.PostId
+GROUP BY 
+    ps.Id, ps.Title, ps.CreationDate, ps.UpVoteCount, 
+    ps.DownVoteCount, ps.CommentCount, u.DisplayName, u.Reputation, u.ReputationRank
+ORDER BY 
+    ps.CreationDate DESC;

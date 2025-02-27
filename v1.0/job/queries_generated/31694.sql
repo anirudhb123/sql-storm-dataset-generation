@@ -1,0 +1,53 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- Base case: start with all movies
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+
+    -- Recursive case: join with linked movies (to get a hierarchy)
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt2.title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt2 ON ml.linked_movie_id = mt2.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    h.title AS movie_title,
+    h.level AS hierarchy_level,
+    COUNT(DISTINCT ca.person_id) AS total_cast,
+    STRING_AGG(DISTINCT DISTINCT cn.name, ', ') AS cast_names,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS notes_count,
+    MAX(CASE WHEN mi.info_type_id = 1 THEN mi.info END) AS genre,
+    MIN(COALESCE(mk.keyword, 'N/A')) AS first_keyword -- With NULL logic
+FROM 
+    movie_hierarchy h
+LEFT JOIN 
+    complete_cast cc ON h.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ca ON cc.subject_id = ca.person_id
+LEFT JOIN 
+    name cn ON ca.person_id = cn.imdb_id
+LEFT JOIN 
+    title t ON h.movie_id = t.id
+LEFT JOIN 
+    movie_info mi ON h.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON h.movie_id = mk.movie_id
+GROUP BY 
+    h.title, h.level
+ORDER BY 
+    h.level, total_cast DESC
+LIMIT 100;

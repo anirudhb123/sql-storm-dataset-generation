@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ws_net_paid,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rank,
+        DENSE_RANK() OVER (ORDER BY ws_sales_price) AS dense_rank
+    FROM web_sales 
+    WHERE ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date BETWEEN '2023-01-01' AND '2023-01-31')
+),
+HighProfitSales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        COALESCE(RS.ws_net_paid, 0) AS total_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY item.i_item_id ORDER BY COALESCE(RS.ws_net_paid, 0) DESC) AS item_rank,
+        SUM(CASE WHEN RS.ws_net_profit > 100 THEN RS.ws_net_profit ELSE 0 END) AS high_profit_sum
+    FROM item
+    LEFT JOIN RankedSales RS ON item.i_item_sk = RS.ws_item_sk
+    GROUP BY item.i_item_id, item.i_item_desc
+    HAVING SUM(CASE WHEN RS.ws_net_profit IS NULL THEN 1 ELSE 0 END) < 5
+),
+FinalOutput AS (
+    SELECT 
+        HPS.i_item_id,
+        HPS.i_item_desc,
+        HPS.total_net_paid,
+        HPS.high_profit_sum,
+        CASE 
+            WHEN HPS.total_net_paid > 1000 THEN 'High Value'
+            WHEN HPS.total_net_paid IS NULL THEN 'No Sales'
+            ELSE 'Moderate Value'
+        END AS value_category
+    FROM HighProfitSales HPS
+)
+SELECT 
+    F.i_item_id,
+    F.i_item_desc,
+    F.total_net_paid,
+    F.high_profit_sum,
+    F.value_category,
+    SM.sm_type AS shipping_method
+FROM FinalOutput F
+LEFT JOIN ship_mode SM ON F.value_category = SM.sm_code
+WHERE 
+    (F.total_net_paid IS NOT NULL OR F.high_profit_sum > 0)
+    AND F.high_profit_sum <= (SELECT AVG(high_profit_sum) FROM HighProfitSales)
+UNION ALL
+SELECT 
+    NULL AS i_item_id,
+    NULL AS i_item_desc,
+    NULL AS total_net_paid,
+    NULL AS high_profit_sum,
+    'No Data' AS value_category,
+    NULL AS shipping_method
+WHERE NOT EXISTS (SELECT 1 FROM FinalOutput)
+ORDER BY total_net_paid DESC NULLS LAST;

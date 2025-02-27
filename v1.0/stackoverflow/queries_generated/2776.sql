@@ -1,0 +1,64 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN P.Score IS NOT NULL THEN P.Score ELSE 0 END) AS TotalScore,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS ActivityRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalScore
+    FROM 
+        UserActivity
+    WHERE 
+        ActivityRank <= 10
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        PH.Comment AS CloseReason
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId = 10
+)
+SELECT 
+    TU.DisplayName,
+    TU.TotalPosts,
+    TU.TotalQuestions,
+    TU.TotalAnswers,
+    TU.TotalScore,
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.ViewCount,
+    COALESCE(PD.CloseReason, 'Not Closed') AS CloseReason
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    PostDetails PD ON TU.UserId = PD.OwnerDisplayName
+WHERE 
+    (TU.TotalQuestions > 5 AND PD.ViewCount > 100) OR (TU.TotalAnswers > 10)
+ORDER BY 
+    TU.TotalScore DESC, PD.CreationDate DESC;
+

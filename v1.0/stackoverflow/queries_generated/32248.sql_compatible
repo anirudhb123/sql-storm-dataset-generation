@@ -1,0 +1,67 @@
+
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation, 
+        1 AS Level
+    FROM Users u
+    WHERE u.Reputation >= 1000
+
+    UNION ALL
+
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation,
+        ur.Level + 1
+    FROM Users u
+    INNER JOIN UserReputation ur ON u.Reputation < ur.Reputation
+    WHERE ur.Level < 5 
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS ClosedPosts
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= DATEADD(year, -1, CURRENT_TIMESTAMP)
+    GROUP BY p.Id, p.OwnerUserId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        ur.Reputation,
+        ps.CommentCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.ClosedPosts,
+        RANK() OVER (ORDER BY ur.Reputation DESC) AS ReputationRank
+    FROM Users u
+    INNER JOIN UserReputation ur ON u.Id = ur.UserId
+    LEFT JOIN PostStats ps ON u.Id = ps.OwnerUserId
+    WHERE ur.Level >= 1
+)
+SELECT 
+    au.UserId,
+    au.DisplayName,
+    au.Reputation,
+    au.CommentCount,
+    au.UpVotes,
+    au.DownVotes,
+    au.ClosedPosts,
+    COALESCE(au.CommentCount + au.UpVotes - au.DownVotes, 0) AS EngagementScore,
+    CASE 
+        WHEN au.ReputationRank <= 10 THEN 'Top Contributor' 
+        ELSE 'Regular Contributor' 
+    END AS ContributorType
+FROM ActiveUsers au
+WHERE au.CommentCount > 10 
+AND (au.UpVotes - au.DownVotes) > 5
+ORDER BY EngagementScore DESC, au.Reputation DESC
+LIMIT 50 OFFSET 0;

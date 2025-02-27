@@ -1,0 +1,69 @@
+
+WITH RECURSIVE related_movies AS (
+    SELECT
+        m1.id AS movie_id,
+        m1.title AS movie_title,
+        1 AS depth
+    FROM
+        title m1
+    WHERE
+        m1.production_year >= 2000
+    UNION ALL
+    SELECT
+        m2.id,
+        m2.title,
+        rm.depth + 1
+    FROM
+        title m2
+    JOIN
+        movie_link ml ON ml.linked_movie_id = m2.id
+    JOIN
+        related_movies rm ON ml.movie_id = rm.movie_id
+    WHERE
+        rm.depth < 3
+),
+movie_details AS (
+    SELECT
+        m.title AS movie_title,
+        m.production_year,
+        STRING_AGG(DISTINCT c.name, ', ') AS cast_names,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+        COALESCE(SUM(CASE WHEN mci.note IS NOT NULL THEN 1 ELSE 0 END), 0) AS company_count
+    FROM
+        related_movies rm
+    JOIN
+        title m ON m.id = rm.movie_id
+    LEFT JOIN
+        cast_info ci ON ci.movie_id = rm.movie_id
+    LEFT JOIN
+        aka_name a ON a.person_id = ci.person_id
+    LEFT JOIN
+        movie_keyword kw ON kw.movie_id = rm.movie_id
+    LEFT JOIN
+        movie_companies mci ON mci.movie_id = rm.movie_id
+    GROUP BY
+        m.title, m.production_year
+),
+ranked_movies AS (
+    SELECT
+        md.movie_title,
+        md.production_year,
+        md.cast_names,
+        md.keywords,
+        md.company_count,
+        ROW_NUMBER() OVER (ORDER BY md.production_year DESC, md.company_count DESC) AS rn
+    FROM
+        movie_details md
+)
+SELECT
+    rm.movie_title,
+    rm.production_year,
+    rm.cast_names,
+    rm.keywords,
+    rm.company_count
+FROM
+    ranked_movies rm
+WHERE
+    rm.rn <= 10
+ORDER BY
+    rm.production_year DESC;

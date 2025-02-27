@@ -1,0 +1,77 @@
+
+WITH RECURSIVE PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswer,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(pc.CommentCount, 0) AS Comments,
+        COALESCE(b.Reputation, 0) AS UserReputation,
+        DENSE_RANK() OVER (ORDER BY COALESCE(p.Score, 0) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount 
+         FROM Comments 
+         GROUP BY PostId) pc ON pc.PostId = p.Id
+    LEFT JOIN 
+        Users b ON b.Id = p.OwnerUserId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.PostTypeId, p.AcceptedAnswerId, b.Reputation
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        MAX(ph.CreationDate) AS LastUpdated
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate BETWEEN DATE('2024-10-01') - INTERVAL '1 year' AND DATE('2024-10-01')
+    GROUP BY 
+        ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        STRING_AGG(Name, ', ') AS BadgeNames,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    WHERE 
+        Class = 1 
+    GROUP BY 
+        UserId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.Comments,
+    COALESCE(pih.HistoryTypes, 'No History') AS PostHistory,
+    COALESCE(pb.BadgeNames, 'No Badges') AS UserBadges,
+    ps.UserReputation,
+    ps.Rank
+FROM 
+    PostStats ps
+LEFT JOIN 
+    PostHistoryInfo pih ON ps.PostId = pih.PostId
+LEFT JOIN 
+    Users u ON ps.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges pb ON pb.UserId = u.Id
+WHERE 
+    ps.UpVotes > ps.DownVotes 
+    AND (ps.UserReputation IS NOT NULL AND ps.UserReputation >= 50)
+ORDER BY 
+    ps.Rank
+LIMIT 100 OFFSET 0;

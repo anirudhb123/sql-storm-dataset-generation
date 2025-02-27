@@ -1,0 +1,32 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank,
+        n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+),
+HighValueNations AS (
+    SELECT 
+        n.n_name, 
+        AVG(SUM(ps.ps_supplycost * ps.ps_availqty)) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+    HAVING AVG(SUM(ps.ps_supplycost * ps.ps_availqty)) > 100000
+)
+SELECT 
+    r.r_name AS region_name,
+    rn.nation_name,
+    rs.s_name,
+    rs.total_supply_cost
+FROM RankedSuppliers rs
+JOIN HighValueNations rn ON rs.nation_name = rn.n_name
+JOIN region r ON n.r_regionkey = (SELECT r_regionkey FROM nation WHERE n_name = rs.nation_name)
+WHERE rs.rank <= 3
+ORDER BY r.r_name, rs.total_supply_cost DESC;

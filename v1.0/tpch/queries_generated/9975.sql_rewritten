@@ -1,0 +1,37 @@
+WITH RankedParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '1996-01-01'
+    GROUP BY c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, co.total_spent
+    FROM customer c
+    JOIN CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE co.total_spent > 10000
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(DISTINCT ps.ps_partkey) AS part_count, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    p.p_name, 
+    rp.total_avail_qty, 
+    hvc.c_name, 
+    hvc.total_spent, 
+    ss.s_name, 
+    ss.part_count, 
+    ss.total_supply_cost
+FROM RankedParts rp
+JOIN HighValueCustomers hvc ON rp.total_avail_qty > 500 
+JOIN SupplierStats ss ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty > 100)
+ORDER BY rp.total_avail_qty DESC, hvc.total_spent DESC;

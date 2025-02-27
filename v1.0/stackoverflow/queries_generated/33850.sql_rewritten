@@ -1,0 +1,82 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+    UNION ALL
+    SELECT
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(v.CreationDate IS NULL AND p.OwnerUserId IS NOT NULL) AS DownVotedPosts
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 3 
+    GROUP BY u.Id, u.DisplayName
+),
+UserBadges AS (
+    SELECT
+        b.UserId,
+        b.Class,
+        COUNT(b.Id) AS BadgeCount
+    FROM Badges b
+    WHERE b.Class IN (1, 2, 3)  
+    GROUP BY b.UserId, b.Class
+),
+PostStatistics AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        ph.Level AS PostLevel,
+        COALESCE(v.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(v.DownVoteCount, 0) AS DownVoteCount,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN RecursivePostHierarchy ph ON p.Id = ph.PostId
+    LEFT JOIN (
+        SELECT
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= '2023-01-01' 
+    GROUP BY p.Id, p.Title, ph.Level, v.UpVoteCount, v.DownVoteCount
+),
+FinalOutput AS (
+    SELECT
+        ua.DisplayName,
+        ua.TotalPosts,
+        ua.DownVotedPosts,
+        SUM(CASE WHEN ub.Class = 1 THEN ub.BadgeCount ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN ub.Class = 2 THEN ub.BadgeCount ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN ub.Class = 3 THEN ub.BadgeCount ELSE 0 END) AS BronzeBadges,
+        ps.PostId,
+        ps.PostTitle,
+        ps.PostLevel,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        ps.CommentCount
+    FROM UserActivity ua
+    LEFT JOIN UserBadges ub ON ua.UserId = ub.UserId
+    LEFT JOIN PostStatistics ps ON ua.UserId = ps.OwnerUserId
+    GROUP BY
+        ua.DisplayName, ua.TotalPosts, ua.DownVotedPosts, ps.PostId, ps.PostTitle, ps.PostLevel, ps.UpVoteCount, ps.DownVoteCount, ps.CommentCount
+)
+SELECT *
+FROM FinalOutput
+ORDER BY TotalPosts DESC, DisplayName;

@@ -1,0 +1,56 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           1 AS level, 
+           CAST(s.s_name AS varchar(255)) AS path
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           sh.level + 1,
+           CAST(CONCAT(sh.path, ' -> ', s.s_name) AS varchar(255))
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+MonthlySales AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        DATE_TRUNC('month', o.o_orderdate) AS sales_month
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, sales_month
+),
+RegionTotal AS (
+    SELECT 
+        r.r_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY r.r_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING SUM(o.o_totalprice) > 50000
+)
+SELECT 
+    r.r_name AS region,
+    sh.s_name AS supplier_name,
+    tc.c_name AS customer_name,
+    ms.total_sales,
+    rt.total_cost,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY ms.total_sales DESC) AS sales_rank
+FROM RegionTotal rt
+LEFT JOIN SupplierHierarchy sh ON rt.total_cost > sh.s_acctbal
+FULL OUTER JOIN MonthlySales ms ON ms.o_orderkey = sh.s_suppkey
+INNER JOIN TopCustomers tc ON ms.o_orderkey = tc.c_custkey
+WHERE tc.total_spent IS NOT NULL AND ms.total_sales IS NOT NULL
+ORDER BY region, sales_rank;

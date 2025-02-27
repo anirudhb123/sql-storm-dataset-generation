@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id, 
+        m.title, 
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    CONCAT(n.name, ' as ', c.role_id) AS actor_role,
+    COUNT(DISTINCT mc.movie_id) AS num_movies,
+    AVG(m.production_year) AS avg_production_year,
+    STRING_AGG(DISTINCT mt.keyword, ', ') AS associated_keywords,
+    ROW_NUMBER() OVER (PARTITION BY n.id ORDER BY COUNT(DISTINCT mc.movie_id) DESC) AS row_num
+FROM 
+    aka_name n
+JOIN 
+    cast_info c ON n.person_id = c.person_id
+JOIN 
+    complete_cast cc ON c.movie_id = cc.movie_id
+JOIN 
+    MovieHierarchy m ON cc.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword mt ON mk.keyword_id = mt.id
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+WHERE 
+    n.name IS NOT NULL 
+    AND c.nr_order IS NOT NULL
+GROUP BY 
+    n.id, c.role_id
+HAVING 
+    COUNT(DISTINCT mc.movie_id) > 1
+    AND AVG(m.production_year) < 2023
+ORDER BY 
+    actor_role
+LIMIT 100;

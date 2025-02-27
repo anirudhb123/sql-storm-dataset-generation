@@ -1,0 +1,91 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws.bill_customer_sk,
+        ws.ship_date_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.ext_sales_price) DESC) AS rnk
+    FROM
+        web_sales ws
+    JOIN
+        customer c ON ws.bill_customer_sk = c.customer_sk
+    WHERE
+        c.birth_year IS NOT NULL AND
+        (EXTRACT(YEAR FROM CURRENT_DATE) - c.birth_year) BETWEEN 18 AND 75
+    GROUP BY
+        ws.bill_customer_sk, ws.ship_date_sk
+),
+top_customers AS (
+    SELECT
+        bill_customer_sk,
+        total_sales,
+        order_count
+    FROM
+        ranked_sales
+    WHERE
+        rnk = 1
+),
+customer_gender AS (
+    SELECT
+        c.c_customer_sk,
+        cd.cd_gender
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT
+        tc.bill_customer_sk,
+        SUM(tc.total_sales) AS total_sales,
+        SUM(tc.order_count) AS total_orders,
+        cg.cd_gender
+    FROM
+        top_customers tc
+    JOIN
+        customer_gender cg ON tc.bill_customer_sk = cg.c_customer_sk
+    GROUP BY
+        tc.bill_customer_sk, cg.cd_gender
+)
+SELECT
+    ss.bill_customer_sk,
+    ss.total_sales,
+    ss.total_orders,
+    ss.cd_gender,
+    COALESCE(NULLIF(ss.total_sales, 0), 0) AS cleaned_sales,
+    CASE
+        WHEN ss.cd_gender IS NULL THEN 'Unknown'
+        ELSE ss.cd_gender
+    END AS gender_category
+FROM
+    sales_summary ss
+WHERE
+    ss.total_orders > (
+        SELECT AVG(total_orders)
+        FROM sales_summary
+    )
+ORDER BY
+    cleaned_sales DESC
+LIMIT 100;
+
+-- Return total sales where gender is 'M' or birth_year is NULL in customer demographics
+UNION ALL
+
+SELECT
+    c.c_customer_sk,
+    SUM(ws.ext_sales_price) AS total_sales,
+    COUNT(ws.order_number) AS total_orders,
+    cd.cd_gender
+FROM
+    web_sales ws
+JOIN
+    customer c ON ws.bill_customer_sk = c.c_customer_sk
+JOIN
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE
+    (cd.cd_gender = 'M' OR c.birth_year IS NULL)
+GROUP BY
+    c.c_customer_sk, cd.cd_gender
+HAVING
+    SUM(ws.ext_sales_price) > 1000;

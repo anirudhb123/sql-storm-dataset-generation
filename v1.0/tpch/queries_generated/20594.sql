@@ -1,0 +1,84 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank,
+        COUNT(*) OVER (PARTITION BY s.s_nationkey) AS total_suppliers
+    FROM 
+        supplier s
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 0
+            ELSE p.p_retailprice * 1.15  -- Applying a markup for performance testing
+        END AS adjusted_price
+    FROM 
+        part p
+    WHERE 
+        p.p_size > 10
+),
+CustomerOrders AS (
+    SELECT
+        o.o_orderkey,
+        c.c_custkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, c.c_custkey, o.o_orderstatus
+),
+AggregatedData AS (
+    SELECT 
+        c.c_custkey,
+        SUM(co.total_price) AS total_spent,
+        COUNT(co.o_orderkey) AS total_orders,
+        AVG(co.line_count) AS avg_lines_per_order
+    FROM 
+        CustomerOrders co
+    JOIN 
+        customer c ON co.c_custkey = c.c_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_name,
+    SUM(fd.adjusted_price) AS total_adjusted_price,
+    AVG(ad.total_spent) AS avg_spent_per_cust,
+    MAX(ss.s_acctbal) AS max_supplier_balance,
+    COUNT(DISTINCT supp.s_suppkey) AS active_suppliers
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    RankedSuppliers ss ON n.n_nationkey = ss.s_nationkey AND ss.rank <= 3
+LEFT JOIN 
+    FilteredParts fd ON fd.p_partkey IN (
+        SELECT p.p_partkey FROM partsupp p
+        WHERE p.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp) 
+        AND p.ps_availqty > 0
+    )
+LEFT JOIN 
+    AggregatedData ad ON n.n_nationkey = ad.c_custkey
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(fd.p_partkey) > 5 OR MAX(ss.s_acctbal) IS NULL
+ORDER BY 
+    total_adjusted_price DESC;

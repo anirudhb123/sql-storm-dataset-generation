@@ -1,0 +1,4 @@
+SELECT min(a1.name) AS writer_pseudo_name, min(t.title) AS movie_title
+FROM aka_name AS a1, cast_info AS ci, company_name AS cn, movie_companies AS mc, name AS n1, role_type AS rt, title AS t
+WHERE a1.person_id = n1.id AND n1.id = ci.person_id AND ci.movie_id = t.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.role_id = rt.id AND a1.person_id = ci.person_id AND ci.movie_id = mc.movie_id
+AND ci.id < 30257863 AND mc.movie_id > 1890060 AND a1.name_pcode_nf IN ('E2613', 'E435', 'F413', 'G6413', 'H1635', 'M2621', 'N3215', 'S1453', 'T2426') AND ci.nr_order IS NOT NULL AND ci.role_id < 4 AND n1.surname_pcode > 'B46' AND n1.id > 806137;

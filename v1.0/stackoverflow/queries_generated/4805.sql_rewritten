@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        U.DisplayName AS OwnerName,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY p.Id) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+), ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.CreationDate AS CloseDate,
+        ph.UserDisplayName AS CloserName
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+), Summary AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        RP.OwnerName,
+        RP.ScoreRank,
+        COALESCE(CP.CloseDate, 'No Close Date') AS CloseDate,
+        COALESCE(CP.CloserName, 'N/A') AS CloserName,
+        (RP.UpVoteCount - RP.DownVoteCount) AS NetVotes
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        ClosedPosts CP ON RP.PostId = CP.Id
+)
+SELECT 
+    *,
+    CASE 
+        WHEN NetVotes > 0 THEN 'Positive'
+        WHEN NetVotes < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM 
+    Summary
+WHERE 
+    ScoreRank = 1
+ORDER BY 
+    CreationDate DESC
+LIMIT 10;

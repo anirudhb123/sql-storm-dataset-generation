@@ -1,0 +1,106 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        aka_title m
+    JOIN
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+
+RankedActors AS (
+    SELECT
+        ci.person_id,
+        ak.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        DENSE_RANK() OVER (PARTITION BY ak.surname_pcode ORDER BY COUNT(DISTINCT ci.movie_id) DESC) AS actor_rank
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY
+        ci.person_id, ak.name, ak.surname_pcode
+    HAVING
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+
+TopMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_actors
+    FROM
+        MovieHierarchy mh
+    LEFT JOIN
+        cast_info ci ON mh.movie_id = ci.movie_id
+    GROUP BY
+        mh.movie_id, mh.title, mh.production_year
+    HAVING
+        COUNT(DISTINCT ci.person_id) > 10
+),
+
+CompanyInfo AS (
+    SELECT
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+),
+
+ActorMovies AS (
+    SELECT
+        DISTINCT ak.name AS actor_name,
+        mt.title AS movie_title,
+        mt.production_year,
+        cc.kind AS cast_type
+    FROM
+        aka_name ak
+    JOIN
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN
+        aka_title mt ON ci.movie_id = mt.id
+    LEFT JOIN
+        comp_cast_type cc ON ci.person_role_id = cc.id
+)
+
+SELECT
+    th.movie_id,
+    th.title AS movie_title,
+    th.production_year,
+    COALESCE(c.company_name, 'Unknown') AS production_company,
+    COALESCE(c.company_type, 'N/A') AS company_type,
+    ra.name AS actor_name,
+    ra.movie_count AS actor_movies_count
+FROM
+    TopMovies th
+LEFT JOIN
+    CompanyInfo c ON th.movie_id = c.movie_id
+JOIN
+    RankedActors ra ON ra.actor_rank <= 3
+WHERE
+    th.production_year IS NOT NULL AND th.production_year > 2010
+ORDER BY
+    th.production_year DESC, ra.movie_count DESC;

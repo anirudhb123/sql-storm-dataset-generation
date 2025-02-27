@@ -1,0 +1,77 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT
+        s_store_sk,
+        COUNT(ss.ticket_number) AS total_sales,
+        SUM(ss.ext_sales_price) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss.ext_sales_price) DESC) AS rank
+    FROM
+        store_sales ss
+    GROUP BY
+        s_store_sk
+),
+top_stores AS (
+    SELECT
+        store.s_store_id,
+        store.s_store_name,
+        sales.total_sales,
+        sales.total_revenue
+    FROM
+        store store
+    LEFT JOIN
+        sales_summary sales ON store.s_store_sk = sales.s_store_sk
+    WHERE
+        sales.rank <= 5 OR sales.rank IS NULL
+),
+customer_data AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(SUM(ws.ws_ext_sales_price), 0) AS total_web_sales,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY COALESCE(SUM(ws.ws_ext_sales_price), 0) DESC) AS sales_rank
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+),
+high_value_customers AS (
+    SELECT
+        cd.c_customer_id,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM
+        customer_data cd
+    WHERE
+        cd.total_web_sales > (SELECT AVG(total_web_sales) FROM customer_data)
+)
+SELECT
+    ts.s_store_id,
+    ts.s_store_name,
+    hvc.c_customer_id,
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    hvc.cd_purchase_estimate,
+    CASE 
+        WHEN hvc.cd_purchase_estimate IS NULL THEN 'No Estimate'
+        ELSE CONCAT('Estimated Purchase: $', CAST(hvc.cd_purchase_estimate AS VARCHAR))
+    END AS purchase_estimate_display
+FROM
+    top_stores ts
+CROSS JOIN
+    high_value_customers hvc
+ORDER BY 
+    ts.total_revenue DESC, 
+    hvc.cd_purchase_estimate DESC;

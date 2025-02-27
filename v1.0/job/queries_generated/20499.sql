@@ -1,0 +1,72 @@
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(cm.company_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopRankedMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank = 1
+),
+ActorsInTopMovies AS (
+    SELECT 
+        ak.name, 
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        TopRankedMovies tr ON ci.movie_id = tr.movie_id
+    GROUP BY 
+        ak.name
+),
+MovieKeywordInfo AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    COALESCE(aki.movie_count, 0) AS total_movies,
+    COALESCE(mki.keywords, 'No Keywords') AS keywords,
+    tt.title AS title,
+    tt.production_year AS year
+FROM 
+    aka_name ak
+LEFT JOIN 
+    ActorsInTopMovies aki ON ak.name = aki.name
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id IN (SELECT movie_id FROM TopRankedMovies)
+LEFT JOIN 
+    keyword k ON k.phonetic_code LIKE 'A%'  -- Unusual phonetic search as a twist
+LEFT JOIN 
+    MovieKeywordInfo mki ON mc.movie_id = mki.movie_id 
+LEFT JOIN 
+    aka_title tt ON mc.movie_id = tt.id 
+WHERE 
+    aki.movie_count IS NULL OR aki.movie_count > 2
+ORDER BY 
+    total_movies DESC, 
+    actor_name ASC;

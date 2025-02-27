@@ -1,0 +1,22 @@
+WITH RECURSIVE string_benchmark AS (
+    SELECT p.p_partkey, p.p_name, LENGTH(p.p_name) AS name_length, 
+           SUBSTRING(p.p_name FROM 1 FOR 5) AS name_substring, 
+           REPLACE(p.p_comment, ' reduces ', '') AS modified_comment
+    FROM part p
+    WHERE p.p_size BETWEEN 1 AND 10
+      
+    UNION ALL
+    
+    SELECT ps.ps_partkey, CONCAT(sb.name_substring, ' - ', p.p_name) AS p_name,
+           LENGTH(CONCAT(sb.name_substring, ' - ', p.p_name)) AS name_length, 
+           SUBSTRING(CONCAT(sb.name_substring, ' - ', p.p_name) FROM 1 FOR 5) AS name_substring, 
+           REPLACE(p.p_comment, ' reduces ', '') AS modified_comment
+    FROM partsupp ps
+    JOIN string_benchmark sb ON ps.ps_partkey = sb.p_partkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+)
+SELECT COUNT(DISTINCT p_name) AS unique_names, 
+       AVG(name_length) AS avg_name_length, 
+       COUNT(modified_comment) AS total_modified_comments
+FROM string_benchmark;

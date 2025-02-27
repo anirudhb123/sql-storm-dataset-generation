@@ -1,0 +1,43 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        COUNT(DISTINCT C.Id) AS CommentsMade,
+        COUNT(DISTINCT PH.Id) AS EditsMade,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived,
+        DENSE_RANK() OVER (ORDER BY SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) DESC) AS RankByUpVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        PostHistory PH ON U.Id = PH.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.QuestionsAsked,
+    UA.AnswersGiven,
+    UA.CommentsMade,
+    UA.EditsMade,
+    UA.UpVotesReceived,
+    UA.DownVotesReceived,
+    UA.RankByUpVotes
+FROM 
+    UserActivity UA
+WHERE 
+    UA.QuestionsAsked > 0 
+    AND UA.AnswersGiven > 0
+    AND UA.CommentsMade > 0
+ORDER BY 
+    UA.RankByUpVotes;

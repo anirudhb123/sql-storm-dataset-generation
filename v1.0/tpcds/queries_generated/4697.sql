@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_profit DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk BETWEEN 2450000 AND 2450500
+), 
+CustomerIncome AS (
+    SELECT 
+        cd.cd_demo_sk,
+        CASE 
+            WHEN ib.ib_income_band_sk IS NOT NULL THEN 
+                (ib.ib_lower_bound + ib.ib_upper_bound) / 2 
+            ELSE 
+                NULL 
+        END AS average_income
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+), 
+SalesWithIncome AS (
+    SELECT 
+        rs.web_site_sk,
+        rs.net_profit,
+        ci.average_income
+    FROM 
+        RankedSales rs
+    INNER JOIN 
+        CustomerIncome ci ON rs.web_site_sk = ci.cd_demo_sk
+    WHERE 
+        ci.average_income IS NOT NULL
+)
+SELECT 
+    s.website_sk,
+    SUM(s.net_profit) AS total_profit,
+    AVG(s.average_income) AS avg_income,
+    COUNT(s.web_site_sk) AS sales_count
+FROM 
+    SalesWithIncome s
+GROUP BY 
+    s.web_site_sk
+HAVING 
+    total_profit > 10000
+ORDER BY 
+    total_profit DESC
+LIMIT 10;

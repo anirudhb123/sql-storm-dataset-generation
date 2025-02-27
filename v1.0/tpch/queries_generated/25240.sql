@@ -1,0 +1,37 @@
+SELECT
+    p.p_partkey,
+    p.p_name,
+    s.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(l.l_extendedprice) AS avg_price,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    CONCAT('Part: ', p.p_name, ' (', p.p_container, ') - Supplier: ', s.s_name, ' - Customer: ', c.c_name) AS part_supplier_customer_info,
+    CASE 
+        WHEN AVG(l.l_extendedprice) > 100 THEN 'High Value Part'
+        ELSE 'Standard Part'
+    END AS part_value_category,
+    STRING_AGG(DISTINCT CONCAT_WS(' ', n.n_name, r.r_name), ', ') AS regions_involved
+FROM
+    part p
+JOIN
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN
+    customer c ON o.o_custkey = c.c_custkey
+JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE
+    l.l_shipdate >= DATE '2023-01-01'
+    AND l.l_shipdate < DATE '2024-01-01'
+GROUP BY
+    p.p_partkey, p.p_name, s.s_name, c.c_name
+ORDER BY
+    total_quantity DESC, p.p_name;

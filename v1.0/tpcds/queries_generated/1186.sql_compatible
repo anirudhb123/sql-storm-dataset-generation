@@ -1,0 +1,74 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+HighestSales AS (
+    SELECT 
+        R.ws_item_sk,
+        R.total_quantity,
+        R.total_net_profit
+    FROM 
+        RankedSales R
+    WHERE 
+        R.profit_rank = 1
+),
+CustomerDetails AS (
+    SELECT 
+        C.c_customer_id,
+        C.c_first_name,
+        C.c_last_name,
+        D.cd_gender,
+        D.cd_marital_status,
+        A.ca_city,
+        A.ca_state,
+        A.ca_country
+    FROM 
+        customer C
+    JOIN 
+        customer_demographics D ON C.c_current_cdemo_sk = D.cd_demo_sk
+    LEFT JOIN 
+        customer_address A ON C.c_current_addr_sk = A.ca_address_sk
+),
+SalesWithCustomer AS (
+    SELECT 
+        H.ws_item_sk,
+        H.total_quantity,
+        H.total_net_profit,
+        C.c_customer_id,
+        C.c_first_name,
+        C.c_last_name,
+        C.ca_city,
+        C.ca_state,
+        C.ca_country
+    FROM 
+        HighestSales H
+    JOIN 
+        web_sales W ON H.ws_item_sk = W.ws_item_sk
+    JOIN 
+        CustomerDetails C ON W.ws_bill_customer_sk = C.c_customer_id
+)
+SELECT 
+    S.ws_item_sk,
+    MAX(S.total_quantity) AS max_quantity,
+    MIN(S.total_net_profit) AS min_net_profit,
+    COUNT(DISTINCT S.c_customer_id) AS unique_customers,
+    STRING_AGG(DISTINCT CONCAT(S.c_first_name, ' ', S.c_last_name), ', ') AS customer_names
+FROM 
+    SalesWithCustomer S
+WHERE 
+    S.total_net_profit > 0
+GROUP BY 
+    S.ws_item_sk
+HAVING 
+    MAX(S.total_quantity) > (SELECT AVG(total_quantity) FROM RankedSales)
+ORDER BY 
+    min_net_profit DESC, max_quantity DESC;

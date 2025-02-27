@@ -1,0 +1,92 @@
+
+WITH RECURSIVE recursive_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        CAST(NULL AS DECIMAL(12, 2)) AS running_total,
+        1 AS level
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus <> 'F'
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ro.running_total + o.o_totalprice,
+        ro.level + 1
+    FROM 
+        recursive_orders ro
+    JOIN 
+        orders o ON ro.o_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' AND ro.level < 5
+),
+potential_part AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        CASE 
+            WHEN ps.ps_supplycost IS NULL THEN 'Unknown'
+            ELSE CAST(ps.ps_supplycost * 1.1 AS DECIMAL(12, 2))
+        END AS inflated_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+),
+filtered_supplier AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(CASE WHEN l.l_shipmode = 'AIR' THEN l.l_extendedprice ELSE 0 END) AS air_total,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL 
+        AND s.s_acctbal > (SELECT SUM(s2.s_acctbal) / COUNT(*) FROM supplier s2 WHERE s2.s_acctbal IS NOT NULL)
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+final_result AS (
+    SELECT 
+        pp.p_partkey,
+        pp.p_name,
+        COALESCE(fs.s_name, 'No Supplier') AS supplier_name,
+        pp.inflated_cost,
+        SUM(fs.air_total) AS total_air_sales,
+        COUNT(fs.order_count) AS total_orders
+    FROM 
+        potential_part pp
+    LEFT JOIN 
+        filtered_supplier fs ON pp.p_partkey = fs.s_suppkey
+    GROUP BY 
+        pp.p_partkey, pp.p_name, fs.s_name, pp.inflated_cost
+)
+
+SELECT 
+    fr.p_partkey,
+    fr.p_name,
+    fr.supplier_name,
+    fr.inflated_cost,
+    fr.total_air_sales,
+    fr.total_orders
+FROM 
+    final_result fr
+WHERE 
+    fr.total_air_sales > (SELECT AVG(total_air_sales) FROM final_result)
+ORDER BY 
+    fr.inflated_cost DESC
+LIMIT 10 OFFSET 5;

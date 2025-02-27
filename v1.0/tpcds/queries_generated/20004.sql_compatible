@@ -1,0 +1,54 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_paid DESC) AS rn
+    FROM web_sales ws
+    WHERE ws.ws_net_paid > (
+        SELECT AVG(ws2.ws_net_paid)
+        FROM web_sales ws2
+        WHERE ws2.ws_item_sk = ws.ws_item_sk
+    )
+),
+HighValueReturns AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_amount) AS total_return_amount
+    FROM catalog_returns cr
+    GROUP BY cr.cr_item_sk
+    HAVING SUM(cr.cr_return_amount) > 1000
+),
+CustomerAddress AS (
+    SELECT 
+        ca.ca_address_sk, 
+        ca.ca_city, 
+        ca.ca_state, 
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY ca.ca_address_sk, ca.ca_city, ca.ca_state
+),
+JoinSalesReturns AS (
+    SELECT 
+        COALESCE(rs.ws_item_sk, hvr.cr_item_sk) AS item_sk,
+        COALESCE(rs.ws_quantity, 0) AS sold_quantity,
+        COALESCE(hvr.total_return_amount, 0) AS return_amount
+    FROM RankedSales rs
+    FULL OUTER JOIN HighValueReturns hvr ON rs.ws_item_sk = hvr.cr_item_sk
+)
+SELECT 
+    c.ca_city AS city,
+    c.ca_state AS state,
+    SUM(j.sold_quantity) AS total_sold,
+    SUM(j.return_amount) AS total_return,
+    SUM(j.sold_quantity) - SUM(j.return_amount) AS net_value
+FROM CustomerAddress c
+JOIN JoinSalesReturns j ON c.customer_count > 0
+WHERE c.customer_count IS NOT NULL
+GROUP BY c.ca_city, c.ca_state
+HAVING SUM(j.sold_quantity) > 50
+ORDER BY net_value DESC
+LIMIT 10;

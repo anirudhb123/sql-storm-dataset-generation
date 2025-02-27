@@ -1,0 +1,75 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+),
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS credited_roles,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM cast_info ci
+    INNER JOIN aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY ci.movie_id
+),
+movies_with_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ct.kind AS company_type,
+        rd.total_cast,
+        rd.credited_roles,
+        rd.actor_names,
+        COALESCE(ti.info, 'N/A') AS additional_info
+    FROM title t
+    LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN cast_details rd ON t.id = rd.movie_id
+    LEFT JOIN movie_info ti ON t.id = ti.movie_id
+    WHERE t.production_year IS NOT NULL 
+        AND (rt.title_rank <= 5 OR rd.total_cast > 5)  
+),
+final_output AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.company_type,
+        md.total_cast,
+        md.credited_roles,
+        md.actor_names,
+        COALESCE(md.additional_info, 'No Info') AS additional_info,
+        CASE 
+            WHEN md.credited_roles = 0 THEN 'No credited roles' 
+            ELSE 'Has credited roles' 
+        END AS role_status,
+        CASE 
+            WHEN md.total_cast IS NULL THEN 'Unknown cast count' 
+            ELSE 'Known cast count'
+        END AS cast_status 
+    FROM movies_with_details md
+    WHERE md.production_year > 1990
+    ORDER BY md.production_year DESC, md.title ASC
+)
+SELECT 
+    F.title,
+    F.production_year,
+    F.company_type,
+    F.total_cast,
+    F.credited_roles,
+    F.actor_names,
+    F.additional_info,
+    F.role_status,
+    F.cast_status
+FROM final_output F
+WHERE F.title IS NOT NULL
+    AND (F.company_type IS NOT NULL OR F.credited_roles > 5)
+ORDER BY F.production_year DESC, F.total_cast DESC
+LIMIT 100;

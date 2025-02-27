@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS budget, min(t.title) AS unsuccsessful_movie
+FROM company_name AS cn, company_type AS ct, info_type AS it1, info_type AS it2, movie_companies AS mc, movie_info AS mi, movie_info_idx AS mi_idx, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND mi.info_type_id = it1.id AND mi_idx.info_type_id = it2.id AND t.id = mc.movie_id AND ct.id = mc.company_type_id AND cn.id = mc.company_id AND mc.movie_id = mi.movie_id AND mc.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id
+AND cn.name_pcode_sf IN ('A6214', 'E2614', 'H1216', 'H125', 'H4326', 'N6251', 'S4241', 'W2421', 'X1252') AND mi.note < '(certificate #45697)';

@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        -1 AS parent_id,
+        0 AS level
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        mc.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.movie_id AS parent_id,
+        mh.level + 1 AS level
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        title mt ON ml.linked_movie_id = mt.id
+    WHERE 
+        (mh.level < 5 OR (mh.level = 5 AND mt.production_year IS NULL)) 
+)
+SELECT 
+    ak.name AS actor_name,
+    tt.title AS title,
+    tt.production_year,
+    COALESCE(GROUP_CONCAT(DISTINCT k.keyword), 'No Keywords') AS keywords,
+    COUNT(DISTINCT cc.id) AS total_cast,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS noted_cast,
+    COUNT(DISTINCT CASE WHEN ci.note IS NOT NULL THEN ci.person_id ELSE NULL END) AS noted_unique_cast,
+    COUNT(DISTINCT CASE WHEN ci.note IS NULL THEN ci.person_id ELSE NULL END) AS unnamed_cast
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    aka_title tt ON mh.movie_id = tt.id
+WHERE 
+    tt.production_year <= 2020
+    AND (ak.name IS NOT NULL OR ak.name <> '') 
+    AND (ci.note IS NULL OR ci.note <> 'Cameo')
+GROUP BY 
+    ak.name, tt.title, tt.production_year
+HAVING 
+    total_cast > 1 AND 
+    (COUNT(DISTINCT CASE WHEN ci.note IS NULL THEN ci.person_id ELSE NULL END) > 0 OR
+    COUNT(DISTINCT ci.id) FILTER (WHERE ci.nr_order > 0) > 3)
+ORDER BY 
+    tt.production_year DESC, total_cast DESC;

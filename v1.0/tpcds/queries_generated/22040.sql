@@ -1,0 +1,54 @@
+
+WITH RECURSIVE HighValueReturns AS (
+    SELECT
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returned,
+        SUM(cr_return_amount) AS total_returned_amount
+    FROM
+        catalog_returns
+    GROUP BY
+        cr_item_sk
+    HAVING
+        SUM(cr_return_quantity) > 100
+),
+CustomerReturns AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(sr_return_quantity), 0) AS total_store_returns,
+        COALESCE(SUM(wr_return_quantity), 0) AS total_web_returns,
+        COALESCE(SUM(hr.total_returned), 0) AS total_high_value_returns
+    FROM
+        customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.s_customer_sk
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.w_returning_customer_sk
+    LEFT JOIN HighValueReturns hr ON hr.cr_item_sk = sr.sr_item_sk OR hr.cr_item_sk = wr.wr_item_sk
+    GROUP BY
+        c.c_customer_id, c.c_first_name, c.c_last_name
+),
+RankedCustomers AS (
+    SELECT
+        *,
+        DENSE_RANK() OVER (ORDER BY total_high_value_returns DESC) AS customer_rank
+    FROM
+        CustomerReturns
+)
+SELECT
+    rc.c_customer_id,
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.total_store_returns,
+    rc.total_web_returns,
+    rc.total_high_value_returns,
+    CASE
+        WHEN rc.total_high_value_returns NULL THEN 'No high value returns'
+        WHEN rc.total_high_value_returns > 0 THEN 'Frequent high returner'
+        ELSE 'Infrequent returner'
+    END AS return_status
+FROM
+    RankedCustomers rc
+WHERE
+    rc.customer_rank <= 10
+ORDER BY
+    rc.total_high_value_returns DESC, rc.c_last_name, rc.c_first_name;

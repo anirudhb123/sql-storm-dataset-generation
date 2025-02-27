@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sold_date_sk DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+MostPopularItems AS (
+    SELECT 
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_id
+    HAVING 
+        SUM(ws.ws_quantity) > 100
+),
+StoreAndReturns AS (
+    SELECT 
+        s.s_store_id,
+        COUNT(sr.sr_ticket_number) AS total_returns,
+        SUM(sr.sr_return_amt) AS total_return_amount
+    FROM 
+        store s
+    LEFT JOIN 
+        store_returns sr ON s.s_store_sk = sr.s_store_sk
+    GROUP BY 
+        s.s_store_id
+)
+SELECT 
+    ca.ca_city,
+    COUNT(DISTINCT c.c_customer_id) AS total_customers,
+    COALESCE(SUM(ir.total_return_amount), 0) AS total_return_amount,
+    COALESCE(MAX(rs.ws_sales_price), 0) AS highest_sales_price,
+    AVG(CASE WHEN rd.sales_rank = 1 THEN rd.ws_quantity END) AS avg_top_sales_quantity,
+    STRING_AGG(DISTINCT mpi.i_item_id, ', ') AS popular_items
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    StoreAndReturns ir ON ir.s_store_id = c.c_customer_id
+LEFT JOIN 
+    RankedSales rd ON rd.web_site_sk = c.c_current_addr_sk
+LEFT JOIN 
+    MostPopularItems mpi ON mpi.total_quantity > 50
+WHERE 
+    ca.ca_state = 'CA'
+    AND c.c_birth_year IS NOT NULL
+GROUP BY 
+    ca.ca_city
+HAVING 
+    COUNT(DISTINCT c.c_customer_id) > 10
+ORDER BY 
+    total_customers DESC;

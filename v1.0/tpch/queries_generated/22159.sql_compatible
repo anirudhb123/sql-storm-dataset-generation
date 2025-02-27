@@ -1,0 +1,87 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS order_rank,
+        cn.n_name
+    FROM 
+        orders o 
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation cn ON c.c_nationkey = cn.n_nationkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+),
+TopOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.n_name
+    FROM 
+        RankedOrders o 
+    WHERE 
+        o.order_rank <= 5
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps 
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_supplycost) > 1000
+),
+TotalRevenue AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_partkey
+),
+FilteredRevenues AS (
+    SELECT 
+        tr.l_partkey,
+        COALESCE(tr.total_revenue, 0) AS revenue_value
+    FROM 
+        TotalRevenue tr
+    WHERE 
+        tr.total_revenue > 50000
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(fc.revenue_value, 0) AS calculated_revenue,
+    COALESCE(sc.total_supply_cost, 0) AS supplier_cost,
+    (COALESCE(fc.revenue_value, 0) - COALESCE(sc.total_supply_cost, 0)) AS profit_margin
+FROM 
+    part p 
+LEFT JOIN 
+    FilteredRevenues fc ON p.p_partkey = fc.l_partkey
+LEFT JOIN 
+    SupplierCosts sc ON p.p_partkey = sc.ps_partkey
+JOIN 
+    TopOrders to ON to.o_orderkey IN (
+        SELECT 
+            l.l_orderkey
+        FROM 
+            lineitem l 
+        WHERE 
+            l.l_partkey = p.p_partkey
+    )
+WHERE 
+    p.p_size IS NOT NULL 
+    AND p.p_retailprice BETWEEN 100.00 AND 500.00
+ORDER BY 
+    profit_margin DESC, 
+    p.p_name ASC
+LIMIT 10;

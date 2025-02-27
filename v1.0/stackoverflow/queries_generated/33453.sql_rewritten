@@ -1,0 +1,79 @@
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        1 AS ActivityLevel
+    FROM Users u
+    WHERE u.Reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        ua.ActivityLevel + 1
+    FROM Users u
+    INNER JOIN UserActivity ua ON u.Id = u.Id
+    WHERE u.Reputation < (SELECT AVG(Reputation) FROM Users) AND ua.ActivityLevel < 5
+),
+
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        LEAD(p.CreationDate) OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate) AS NextPostDate
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+
+PostVoteSummary AS (
+    SELECT 
+        PostId, 
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+
+PostTagSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN LATERAL (
+        SELECT DISTINCT unnest(string_to_array(p.Tags, '>')) AS TagName
+    ) T ON TRUE
+    GROUP BY p.Id
+)
+
+SELECT 
+    u.DisplayName,
+    ua.ActivityLevel,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(ps.UpVotes) AS TotalUpVotes,
+    SUM(ps.DownVotes) AS TotalDownVotes,
+    STRING_AGG(DISTINCT t.Tags, '; ') AS TagsUsed,
+    p.Title,
+    p.CreationDate,
+    (EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - p.CreationDate)) / 3600) AS HoursSinceCreated,
+    (CASE 
+        WHEN p.Score < 0 THEN 'Negative' 
+        WHEN p.Score > 0 THEN 'Positive' 
+        ELSE 'Neutral' 
+     END) AS ScoreCategory
+FROM Users u
+JOIN UserActivity ua ON u.Id = ua.Id
+LEFT JOIN RecentPosts p ON u.Id = p.OwnerUserId
+LEFT JOIN PostVoteSummary ps ON p.Id = ps.PostId
+LEFT JOIN PostTagSummary t ON p.Id = t.PostId
+GROUP BY u.DisplayName, ua.ActivityLevel, p.Title, p.CreationDate
+ORDER BY TotalPosts DESC, Reputation DESC
+LIMIT 50;

@@ -1,0 +1,75 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        SUM(ws_quantity) > 0
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        CASE 
+            WHEN cd.cd_purchase_estimate > 10000 THEN 'High Value'
+            WHEN cd.cd_purchase_estimate BETWEEN 5000 AND 10000 THEN 'Medium Value'
+            ELSE 'Low Value' 
+        END AS customer_value
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+date_range AS (
+    SELECT 
+        d.d_date,
+        d.d_year,
+        COUNT(ws_order_number) AS order_count,
+        SUM(ws_ext_sales_price) AS total_sales_value
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_date, d.d_year
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    dr.d_year,
+    dr.order_count,
+    dr.total_sales_value,
+    sd.total_quantity,
+    sd.total_sales,
+    COALESCE(sm.sm_type, 'Unknown') AS shipping_method
+FROM 
+    customer_stats cs
+JOIN 
+    date_range dr ON YEAR('2002-10-01') - dr.d_year <= 5
+LEFT JOIN 
+    sales_data sd ON cs.c_customer_sk = sd.ws_item_sk
+LEFT JOIN 
+    ship_mode sm ON sm.sm_ship_mode_sk = (
+        SELECT 
+            ws_ship_mode_sk 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_bill_customer_sk = cs.c_customer_sk 
+        LIMIT 1
+    )
+WHERE 
+    cs.cd_marital_status = 'M'
+ORDER BY 
+    dr.d_year, cs.c_last_name, cs.c_first_name;

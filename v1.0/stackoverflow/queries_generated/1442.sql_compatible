@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score > 0
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 5 THEN 1 ELSE 0 END), 0) AS Favorites
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId, 
+        p.Title, 
+        ph.CreationDate, 
+        ph.UserId AS EditorId, 
+        ph.UserDisplayName AS EditorName,
+        ph.Comment, 
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id 
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)  
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    r.AnswerCount,
+    u.DisplayName AS Owner,
+    e.EditorName,
+    COUNT(DISTINCT e.EditorId) AS EditCount,
+    COALESCE(SUM(CASE WHEN h.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseActions,
+    COALESCE(SUM(CASE WHEN h.PostHistoryTypeId = 11 THEN 1 ELSE 0 END), 0) AS ReopenActions,
+    COALESCE(SUM(CASE WHEN h.PostHistoryTypeId = 12 THEN 1 ELSE 0 END), 0) AS DeleteActions
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    PostHistories h ON r.PostId = h.PostId
+LEFT JOIN 
+    UserEngagement e ON r.PostId = e.UserId
+WHERE 
+    r.Rank = 1
+GROUP BY 
+    r.PostId, r.Title, r.CreationDate, r.Score, r.ViewCount, r.AnswerCount, u.DisplayName, e.EditorName
+ORDER BY 
+    r.Score DESC, r.ViewCount DESC
+LIMIT 100;

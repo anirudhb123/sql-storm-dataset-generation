@@ -1,0 +1,76 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC, p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) AS Upvotes,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 3) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year') 
+        AND (p.OwnerUserId IS NOT NULL AND p.OwnerUserId <> -1)
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId
+),
+
+PostStats AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title,
+        (rp.Score + COALESCE(rp.Upvotes, 0) - COALESCE(rp.Downvotes, 0)) AS EngagementScore,
+        rp.Rank,
+        CASE WHEN rp.Rank = 1 THEN 'Most Viewed' ELSE 'Other' END AS PostRankCategory
+    FROM 
+        RankedPosts rp
+),
+
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(ps.EngagementScore) AS TotalEngagementScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    JOIN 
+        PostStats ps ON p.Id = ps.PostId
+    WHERE 
+        u.CreationDate >= (CAST('2024-10-01' AS DATE) - INTERVAL '5 years') 
+        AND u.Reputation > (SELECT AVG(Reputation) FROM Users)
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    ue.UserId,
+    ue.DisplayName,
+    COALESCE(ue.TotalEngagementScore, 0) AS TotalEngagement,
+    CASE 
+        WHEN ue.TotalEngagementScore IS NULL THEN 'No Engagement Yet'
+        WHEN ue.TotalEngagementScore = 0 THEN 'Low Engagement'
+        WHEN ue.TotalEngagementScore > 0 AND ue.TotalEngagementScore < 100 THEN 'Moderate Engagement'
+        ELSE 'High Engagement'
+    END AS EngagementLevel,
+    JSON_AGG(ps.Title) AS TopPosts
+FROM 
+    UserEngagement ue
+LEFT JOIN 
+    PostStats ps ON ue.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = ps.PostId)
+GROUP BY 
+    ue.UserId, ue.DisplayName
+HAVING 
+    COUNT(ps.PostId) > 0
+ORDER BY 
+    TotalEngagement DESC
+LIMIT 10;

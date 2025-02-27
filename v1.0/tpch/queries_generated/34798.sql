@@ -1,0 +1,72 @@
+WITH recursive CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS spend_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+), 
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+    HAVING 
+        COUNT(DISTINCT ps.ps_partkey) > 0
+),
+HighValueNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(o.o_totalprice) AS total_orders_value
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        n.n_nationkey, n.n_name
+    HAVING 
+        SUM(o.o_totalprice) > 100000
+)
+
+SELECT 
+    P.p_partkey,
+    P.p_name,
+    P.p_mfgr,
+    P.p_brand,
+    COALESCE(P.p_container, 'UNKNOWN') AS p_container,
+    SUM(L.l_extendedprice * (1 - L.l_discount)) AS revenue,
+    S.total_parts AS total_supp_parts,
+    COALESCE(H.total_orders_value, 0) AS high_value_nation_order_value
+FROM 
+    part P
+LEFT JOIN 
+    lineitem L ON P.p_partkey = L.l_partkey
+LEFT JOIN 
+    SupplierParts S ON S.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = P.p_partkey)
+LEFT JOIN 
+    HighValueNations H ON EXISTS (SELECT 1 FROM customer C WHERE C.c_nationkey = H.n_nationkey AND C.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = L.l_orderkey))
+WHERE 
+    P.p_size BETWEEN 1 AND 40
+AND 
+    (P.p_retailprice IS NOT NULL OR P.p_comment IS NOT NULL)
+GROUP BY 
+    P.p_partkey, P.p_name, P.p_mfgr, P.p_brand, P.p_container, S.total_parts, H.total_orders_value
+ORDER BY 
+    revenue DESC, H.total_orders_value DESC;

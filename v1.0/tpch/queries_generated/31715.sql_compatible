@@ -1,0 +1,78 @@
+
+WITH RecursiveSupplierCTE AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CAST(NULL AS VARCHAR) AS parent_s_name,
+        1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    UNION ALL
+    SELECT 
+        p.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CONCAT(r.parent_s_name, ' -> ', s.s_name) AS parent_s_name,
+        r.level + 1
+    FROM RecursiveSupplierCTE r
+    JOIN partsupp p ON r.s_suppkey = p.ps_suppkey
+    JOIN supplier s ON p.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > 0
+),
+TotalSales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31'
+    GROUP BY c.c_custkey
+),
+PartSales AS (
+    SELECT 
+        p.p_partkey,
+        SUM(l.l_quantity) AS total_quantity,
+        MAX(l.l_extendedprice) AS max_price,
+        AVG(l.l_discount) AS avg_discount
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey
+),
+RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        ts.total_spent,
+        RANK() OVER (ORDER BY ts.total_spent DESC) AS customer_rank
+    FROM customer c
+    JOIN TotalSales ts ON c.c_custkey = ts.c_custkey
+),
+SupplierRegions AS (
+    SELECT 
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY n.n_name, r.r_name
+)
+SELECT 
+    r.region_name,
+    r.nation_name,
+    sr.parent_s_name,
+    sr.level,
+    rc.c_name,
+    rc.total_spent,
+    rc.customer_rank,
+    ps.total_quantity,
+    ps.max_price,
+    ps.avg_discount
+FROM SupplierRegions r
+LEFT JOIN RecursiveSupplierCTE sr ON r.supplier_count > 0
+LEFT JOIN RankedCustomers rc ON rc.customer_rank <= 10
+JOIN PartSales ps ON ps.total_quantity > 100
+WHERE ps.avg_discount IS NOT NULL
+ORDER BY r.region_name, rc.total_spent DESC;

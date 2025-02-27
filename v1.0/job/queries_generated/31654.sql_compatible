@@ -1,0 +1,53 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL AND mt.kind_id = 1 
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON at.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    STRING_AGG(DISTINCT an.name, ', ') AS actors,
+    AVG(CASE WHEN mi.info LIKE '%budget%' THEN CAST(mi.info AS VARCHAR) END) AS avg_budget,
+    MAX(CASE WHEN mi.info LIKE '%gross%' THEN CAST(mi.info AS VARCHAR) END) AS max_gross
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name an ON ci.person_id = an.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+WHERE 
+    mh.level <= 2
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 5 AND (AVG(CASE WHEN mi.info LIKE '%budget%' THEN CAST(mi.info AS VARCHAR) END) IS NOT NULL OR MAX(CASE WHEN mi.info LIKE '%gross%' THEN CAST(mi.info AS VARCHAR) END) IS NOT NULL)
+ORDER BY 
+    mh.production_year DESC, total_cast DESC;

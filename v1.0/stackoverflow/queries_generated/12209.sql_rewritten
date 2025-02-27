@@ -1,0 +1,27 @@
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation AS OwnerReputation,
+    COUNT(v.Id) AS VoteCount,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    STRING_TO_ARRAY(p.Tags, ',') tag_array
+LEFT JOIN 
+    Tags t ON t.TagName = tag_array 
+WHERE 
+    p.Score > 0
+GROUP BY 
+    p.Id, u.DisplayName, u.Reputation
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

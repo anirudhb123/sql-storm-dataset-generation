@@ -1,0 +1,64 @@
+
+WITH movie_cast AS (
+    SELECT 
+        c.movie_id,
+        STRING_AGG(DISTINCT a.name ORDER BY a.name) AS cast_names,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        SUM(CASE WHEN r.role_id IS NOT NULL THEN 1 ELSE 0 END) AS lead_roles
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+),
+high_rated_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mi.info AS rating,
+        COALESCE(mi.note, 'No additional notes') AS rating_note
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    WHERE 
+        mi.info IS NOT NULL AND mi.info != ''
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    h.title,
+    h.rating,
+    h.rating_note,
+    mc.cast_names,
+    mc.cast_count,
+    mc.lead_roles,
+    CASE
+        WHEN CAST(h.rating AS float) > 8.0 THEN 'High Rating'
+        WHEN CAST(h.rating AS float) BETWEEN 6.0 AND 8.0 THEN 'Medium Rating'
+        ELSE 'Low Rating'
+    END AS rating_category,
+    mk.keywords
+FROM 
+    high_rated_movies h
+JOIN 
+    movie_cast mc ON h.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keywords mk ON h.movie_id = mk.movie_id
+WHERE 
+    h.rating_note NOT LIKE '%duplicate%'
+ORDER BY 
+    CAST(h.rating AS float) DESC, mc.cast_count DESC 
+LIMIT 100;

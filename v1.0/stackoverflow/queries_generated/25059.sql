@@ -1,0 +1,64 @@
+WITH PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount,
+        COUNT(DISTINCT h.Id) AS EditCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory h ON p.Id = h.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only include Questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.LastActivityDate
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        SUM(pv.ViewCount) AS TotalViews,
+        SUM(pa.UpVoteCount) AS TotalUpVotes,
+        SUM(pa.DownVoteCount) AS TotalDownVotes,
+        SUM(pa.CommentCount) AS TotalComments,
+        COUNT(DISTINCT pa.PostId) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        PostActivity pa ON pa.PostId = u.Id
+    LEFT JOIN 
+        Posts pv ON u.Id = pv.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ue.UserId,
+    ue.DisplayName,
+    ue.TotalBadges,
+    ue.TotalViews,
+    ue.TotalUpVotes,
+    ue.TotalDownVotes,
+    ue.TotalComments,
+    ue.TotalPosts,
+    (ue.TotalUpVotes::float / NULLIF(ue.TotalPosts, 0)) AS AverageUpVotesPerPost,
+    (ue.TotalDownVotes::float / NULLIF(ue.TotalPosts, 0)) AS AverageDownVotesPerPost
+FROM 
+    UserEngagement ue
+WHERE 
+    ue.TotalPosts > 0
+ORDER BY 
+    ue.TotalUpVotes DESC, ue.TotalComments DESC;

@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank,
+        MAX(v.CreationDate) OVER (PARTITION BY p.Id) AS LastVoteDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        pht.Name AS HistoryType,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RecentAction
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        pht.Name IN ('Post Closed', 'Post Reopened')
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CommentCount,
+    rp.UserRank,
+    CASE 
+        WHEN rph.RecentAction = 1 THEN 'Recently Closed'
+        WHEN rph.RecentAction = 2 THEN 'Recently Reopened'
+        ELSE 'No Recent Actions'
+    END AS RecentActionStatus,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    CASE 
+        WHEN ub.BadgeCount IS NULL OR ub.BadgeCount = 0 THEN 'No Badges'
+        ELSE 'Has Badges'
+    END AS BadgeStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentPostHistory rph ON rp.Id = rph.PostId AND rph.RecentAction = 1
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE 
+    rp.ViewCount > 100 AND 
+    rp.AnswerCount > 0
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;

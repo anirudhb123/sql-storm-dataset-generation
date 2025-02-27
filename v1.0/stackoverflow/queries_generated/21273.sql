@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.PostTypeId, p.Score
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation IS NULL THEN 'No Reputation'
+            WHEN u.Reputation < 100 THEN 'Low Reputation'
+            WHEN u.Reputation BETWEEN 100 AND 1000 THEN 'Moderate Reputation'
+            ELSE 'High Reputation' 
+        END AS ReputationLevel
+    FROM 
+        Users u
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    ur.ReputationLevel,
+    COALESCE(NULLIF(rp.CommentCount, 0), -1) AS EffectiveCommentCount,
+    CASE 
+        WHEN rp.PostTypeId = 1 AND rp.Score > 0 THEN 'Question with Positive Score'
+        WHEN rp.PostTypeId = 2 THEN 'Answer'
+        ELSE 'Other Post Type' 
+    END AS PostTypeDescription,
+    EXISTS (
+        SELECT 1
+        FROM Votes v 
+        WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2 -- Upvote
+    ) AS HasUpvotes,
+    ARRAY_AGG(DISTINCT t.TagName) AS AssociatedTags,
+    COUNT(DISTINCT bh.Id) FILTER (WHERE bh.Date > NOW() - INTERVAL '30 days') AS RecentBadges
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserReputation ur ON ur.UserId = rp.PostId
+LEFT JOIN 
+    Tags t ON t.WikiPostId IS NOT NULL AND t.WikiPostId = rp.PostId
+LEFT JOIN 
+    Badges bh ON bh.UserId = ur.UserId
+WHERE 
+    rp.rn <= 10
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, ur.ReputationLevel
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 100
+OFFSET 0;

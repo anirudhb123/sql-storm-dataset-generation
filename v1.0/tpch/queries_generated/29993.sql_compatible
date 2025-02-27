@@ -1,0 +1,55 @@
+
+WITH SupplierParts AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        p.p_name AS part_name,
+        CONCAT(s.s_address, ' (', s.s_nationkey, ')') AS supplier_info,
+        p.p_retailprice
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+NationParts AS (
+    SELECT 
+        n.n_name AS nation_name,
+        sp.supplier_name,
+        sp.part_name,
+        sp.supplier_info,
+        sp.p_retailprice
+    FROM 
+        SupplierParts sp
+    JOIN 
+        supplier s ON sp.supplier_name = s.s_name
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        np.nation_name,
+        np.part_name,
+        np.supplier_info,
+        np.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY np.nation_name ORDER BY np.p_retailprice DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        NationParts np ON l.l_partkey = np.part_name
+)
+SELECT 
+    nation_name,
+    part_name,
+    supplier_info,
+    p_retailprice,
+    rank
+FROM 
+    OrderDetails
+WHERE 
+    rank <= 5
+ORDER BY 
+    nation_name, rank;

@@ -1,0 +1,94 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.PostTypeId,
+        0 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.Body,
+        a.CreationDate,
+        a.ViewCount,
+        a.Score,
+        a.PostTypeId,
+        Depth + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostCTE rp ON a.ParentId = rp.PostId
+),
+EnhancedPostData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.Depth,
+        COALESCE((SELECT AVG(sub.Score) 
+                   FROM Posts sub 
+                   WHERE sub.ParentId = rp.PostId), 0) AS AvgChildScore,
+        CASE 
+            WHEN rp.Depth = 0 THEN 'Top Level Question'
+            WHEN rp.Depth = 1 THEN 'First Level Answer'
+            ELSE 'Sub-Level Answer'
+        END AS PostLevel,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        RecursivePostCTE rp
+    LEFT JOIN 
+        PostsTags pt ON rp.PostId = pt.PostId
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.CreationDate, rp.ViewCount, rp.Score, rp.Depth
+),
+FilteredPosts AS (
+    SELECT 
+        ep.PostId,
+        ep.Title,
+        ep.Body,
+        ep.CreationDate,
+        ep.ViewCount,
+        ep.Score,
+        ep.Depth,
+        ep.AvgChildScore,
+        ep.PostLevel,
+        ep.Tags
+    FROM 
+        EnhancedPostData ep
+    WHERE 
+        ep.Score >= 10 AND ep.Depth < 2  
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.Depth,
+    fp.AvgChildScore,
+    fp.PostLevel,
+    fp.Tags,
+    CASE 
+        WHEN fp.AvgChildScore IS NULL THEN 'No Answers Yet'
+        WHEN fp.AvgChildScore >= 5 THEN 'Popular Answers'
+        ELSE 'Average Answers'
+    END AS AnswerPopularity
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.Score DESC, fp.CreationDate DESC;

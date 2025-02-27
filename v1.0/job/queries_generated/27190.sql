@@ -1,0 +1,60 @@
+WITH ranked_titles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT m.id) AS company_count,
+        ARRAY_AGG(DISTINCT cn.name) AS company_names,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT m.id) DESC) AS rank
+    FROM 
+        aka_title at
+    JOIN 
+        movie_companies mc ON at.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        movie_info mi ON at.id = mi.movie_id
+    WHERE 
+        mi.info LIKE '%Award%' -- filter movies associated with any award info
+    GROUP BY 
+        at.title, at.production_year
+),
+
+top_ranked AS (
+    SELECT *
+    FROM ranked_titles
+    WHERE rank <= 5
+),
+
+combined_info AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COALESCE(sub_genre.keyword, 'N/A') AS sub_genre,
+        COALESCE(p.role, 'Unspecified') AS cast_role,
+        COALESCE(c.name, 'Unknown') AS cast_name
+    FROM 
+        top_ranked t
+    LEFT JOIN 
+        movie_keyword mk ON t.title = mk.movie_id
+    LEFT JOIN 
+        keyword sub_genre ON mk.keyword_id = sub_genre.id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    LEFT JOIN 
+        role_type p ON ci.role_id = p.id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+)
+
+SELECT 
+    ti.title,
+    ti.production_year,
+    ti.sub_genre,
+    ti.cast_role,
+    ti.cast_name,
+    COUNT(DISTINCT ti.cast_name) OVER (PARTITION BY ti.title) AS unique_cast_count
+FROM 
+    combined_info ti
+ORDER BY 
+    ti.production_year DESC, 
+    unique_cast_count DESC;

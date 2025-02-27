@@ -1,0 +1,67 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+AggregatedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        AVG(l.l_extendedprice) AS avg_price,
+        SUM(l.l_discount) AS total_discount,
+        SUM(l.l_tax) AS total_tax
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1997-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    cs.c_name AS customer_name,
+    ss.s_name AS supplier_name,
+    ss.total_available,
+    ss.part_count,
+    cs.total_spent,
+    al.avg_price,
+    al.total_discount, 
+    al.total_tax
+FROM 
+    CustomerOrders cs
+LEFT JOIN 
+    SupplierStats ss ON ss.part_count > 5
+LEFT JOIN 
+    AggregatedLineItems al ON al.l_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey = cs.c_custkey
+    )
+WHERE 
+    cs.order_count > 10 
+    AND ss.total_available IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC, 
+    ss.total_available DESC
+FETCH FIRST 100 ROWS ONLY;

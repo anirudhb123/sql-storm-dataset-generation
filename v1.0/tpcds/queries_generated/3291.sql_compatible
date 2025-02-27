@@ -1,0 +1,83 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_bill_customer_sk, 
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk, 
+        ws_bill_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk, 
+        cd_gender, 
+        cd_marital_status, 
+        cd_income_band_sk 
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_credit_rating = 'High'
+),
+IncomeBands AS (
+    SELECT 
+        ib_income_band_sk, 
+        ib_lower_bound, 
+        ib_upper_bound 
+    FROM 
+        income_band
+    WHERE 
+        ib_upper_bound > 50000
+),
+FrequentCustomers AS (
+    SELECT 
+        ws_bill_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS freq_order_count
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk IS NOT NULL
+    GROUP BY 
+        ws_bill_customer_sk
+    HAVING 
+        COUNT(DISTINCT ws_order_number) > 5
+)
+SELECT 
+    C.c_customer_id, 
+    C.c_first_name, 
+    C.c_last_name, 
+    CD.cd_gender, 
+    SUM(RS.total_sales) AS total_sales,
+    F.freq_order_count,
+    CASE 
+        WHEN CD.cd_income_band_sk IS NULL THEN 'Unknown'
+        ELSE CAST(IB.ib_income_band_sk AS VARCHAR)
+    END AS income_band
+FROM 
+    customer C
+LEFT JOIN 
+    customer_demographics CD ON C.c_current_cdemo_sk = CD.cd_demo_sk
+LEFT JOIN 
+    RankedSales RS ON C.c_customer_sk = RS.ws_bill_customer_sk
+LEFT JOIN 
+    CustomerDemographics CDemo ON CD.cd_demo_sk = CDemo.cd_demo_sk
+LEFT JOIN 
+    IncomeBands IB ON CDemo.cd_income_band_sk = IB.ib_income_band_sk
+LEFT JOIN 
+    FrequentCustomers F ON C.c_customer_sk = F.ws_bill_customer_sk
+WHERE 
+    RS.sales_rank = 1
+GROUP BY 
+    C.c_customer_id, 
+    C.c_first_name, 
+    C.c_last_name, 
+    CD.cd_gender, 
+    F.freq_order_count, 
+    IB.ib_income_band_sk
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

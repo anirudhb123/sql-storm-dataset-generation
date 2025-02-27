@@ -1,0 +1,75 @@
+
+WITH RECURSIVE
+    yearly_sales AS (
+        SELECT 
+            d.d_year AS year,
+            SUM(ws.ws_ext_sales_price) AS total_sales
+        FROM 
+            date_dim d
+        JOIN 
+            web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+        GROUP BY 
+            d.d_year
+        UNION ALL
+        SELECT 
+            d.d_year AS year,
+            SUM(cs.cs_ext_sales_price) AS total_sales
+        FROM 
+            date_dim d
+        JOIN 
+            catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+        GROUP BY 
+            d.d_year
+    ),
+    detailed_customer_info AS (
+        SELECT 
+            c.c_customer_sk,
+            c.c_first_name || ' ' || c.c_last_name AS full_name,
+            cd.cd_gender,
+            cd.cd_income_band_sk,
+            COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+            SUM(ws.ws_sales_price) AS total_spent
+        FROM 
+            customer c
+        JOIN 
+            customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN 
+            web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+        GROUP BY 
+            c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_income_band_sk
+    ),
+    customer_returns AS (
+        SELECT 
+            sr_returning_customer_sk AS customer_sk,
+            COUNT(sr_ticket_number) AS return_count,
+            SUM(sr_return_amt_inc_tax) AS total_returned
+        FROM 
+            store_returns
+        GROUP BY 
+            sr_returning_customer_sk
+    )
+SELECT 
+    dci.full_name,
+    dci.cd_gender,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    dci.total_orders,
+    dci.total_spent,
+    COALESCE(cr.return_count, 0) AS return_count,
+    COALESCE(cr.total_returned, 0) AS total_returned,
+    (dci.total_spent - COALESCE(cr.total_returned, 0)) AS net_spent,
+    ys.year,
+    ys.total_sales AS year_sales,
+    ROW_NUMBER() OVER (PARTITION BY ys.year ORDER BY dci.total_spent DESC) AS rank
+FROM 
+    detailed_customer_info dci
+LEFT JOIN 
+    customer_returns cr ON dci.c_customer_sk = cr.customer_sk
+LEFT JOIN 
+    income_band ib ON dci.cd_income_band_sk = ib.ib_income_band_sk
+JOIN 
+    yearly_sales ys ON ys.year = EXTRACT(YEAR FROM CURRENT_DATE)
+WHERE 
+    dci.total_spent > (SELECT AVG(total_spent) FROM detailed_customer_info)
+ORDER BY 
+    ys.year, dci.total_spent DESC;

@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS TotalDownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserId,
+        DENSE_RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS CloseRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+CombinedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        COALESCE(cp.Comment, 'No close reason') AS CloseComment
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId AND cp.CloseRank = 1
+)
+SELECT 
+    cd.PostId,
+    cd.Title,
+    cd.Score,
+    cd.CreationDate,
+    cd.UpVoteCount,
+    cd.DownVoteCount,
+    cd.CloseComment,
+    CASE 
+        WHEN cd.UpVoteCount IS NULL THEN 'No upvotes'
+        WHEN cd.UpVoteCount > cd.DownVoteCount THEN 'Positive score'
+        WHEN cd.UpVoteCount < cd.DownVoteCount THEN 'Negative score'
+        ELSE 'Neutral score'
+    END AS ScoreClassification,
+    json_agg(DISTINCT tag.TagName) AS RelatedTags
+FROM 
+    CombinedData cd
+LEFT JOIN 
+    Posts p ON cd.PostId = p.Id
+LEFT JOIN 
+    unnest(string_to_array(p.Tags, ',')) AS tag(TagName) ON TRUE
+WHERE 
+    cd.CreationDate > (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+GROUP BY 
+    cd.PostId, cd.Title, cd.Score, cd.CreationDate, cd.UpVoteCount, cd.DownVoteCount, cd.CloseComment
+HAVING 
+    cd.Score IS NOT NULL AND cd.Score <> 0
+ORDER BY 
+    cd.Score DESC, cd.CreationDate ASC
+LIMIT 50;

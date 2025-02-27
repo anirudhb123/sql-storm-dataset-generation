@@ -1,0 +1,72 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+), TotalLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(l.l_linenumber) AS total_items,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+), SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > 0
+), PartSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_type,
+    COALESCE(SUM(tli.total_revenue), 0) AS total_order_revenue,
+    COALESCE(SUM(ps.total_supply_cost), 0) AS total_supply_cost,
+    COUNT(DISTINCT so.o_orderkey) AS unique_orders,
+    MAX(sd.nation_name) AS supplier_nation,
+    CASE 
+        WHEN AVG(sd.s_acctbal) IS NULL THEN 'No Suppliers'
+        ELSE CAST(AVG(sd.s_acctbal) AS VARCHAR)
+    END AS average_supplier_balance
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    TotalLineItems tli ON ps.ps_partkey = tli.l_orderkey
+LEFT JOIN 
+    RankedOrders so ON tli.l_orderkey = so.o_orderkey
+LEFT JOIN 
+    SupplierDetails sd ON ps.ps_suppkey = sd.s_suppkey
+WHERE 
+    p.p_retailprice > 100
+GROUP BY 
+    p.p_name, p.p_brand, p.p_type
+HAVING 
+    COUNT(DISTINCT so.o_orderkey) > 5
+ORDER BY 
+    total_order_revenue DESC;

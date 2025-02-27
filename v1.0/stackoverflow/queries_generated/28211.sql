@@ -1,0 +1,77 @@
+WITH TagCounts AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagCounts
+),
+PopularPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ARRAY_AGG(DISTINCT t.Tag) AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        LATERAL unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS t(Tag) ON TRUE
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+        AND EXISTS (
+            SELECT 1
+            FROM TopTags tt
+            WHERE tt.Tag = t.Tag AND tt.Rank <= 5  -- Getting Top 5 tags
+        )
+    GROUP BY 
+        p.Id
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(*) AS PostCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        u.Id
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    pp.Title AS PopularPostTitle,
+    pp.Score AS PopularPostScore,
+    pp.ViewCount AS PopularPostViewCount,
+    pp.CreationDate AS PopularPostCreationDate,
+    au.DisplayName AS ActiveUserName,
+    au.PostCount AS ActiveUserPostCount,
+    au.TotalScore AS ActiveUserTotalScore,
+    t.Tag AS PopularTag
+FROM 
+    PopularPosts pp
+JOIN 
+    MostActiveUsers au ON pp.CreationDate >= au.CreationDate 
+CROSS JOIN 
+    (SELECT DISTINCT Tag FROM TopTags WHERE Rank <= 5) t
+ORDER BY 
+    pp.Score DESC, 
+    au.TotalScore DESC;

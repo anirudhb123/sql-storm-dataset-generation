@@ -1,0 +1,50 @@
+
+WITH AddressData AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, COALESCE(CONCAT(' Suite ', ca_suite_number), '')) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerData AS (
+    SELECT 
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+PromotionData AS (
+    SELECT 
+        p.promo_id,
+        p.p_promo_name,
+        p.p_discount_active
+    FROM 
+        promotion p
+    WHERE 
+        p.p_discount_active = 'Y'
+)
+SELECT 
+    CONCAT(cd.full_name, ' from ', ad.ca_city, ', ', ad.ca_state) AS customer_location,
+    STRING_AGG(DISTINCT pd.p_promo_name, ', ') AS active_promotions
+FROM 
+    CustomerData cd
+JOIN 
+    AddressData ad ON cd.ca_city = ad.ca_city AND cd.ca_state = ad.ca_state
+LEFT JOIN 
+    PromotionData pd ON cd.cd_purchase_estimate > 1000 
+GROUP BY 
+    cd.full_name, ad.ca_city, ad.ca_state
+ORDER BY 
+    customer_location;

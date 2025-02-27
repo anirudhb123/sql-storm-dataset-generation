@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rev_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+FilteredOrders AS (
+    SELECT os.o_orderkey, os.total_revenue, CASE WHEN os.rev_rank = 1 THEN 'Top Revenue' ELSE 'Other' END AS revenue_category
+    FROM OrderSummary os
+    WHERE os.total_revenue IS NOT NULL
+)
+SELECT ph.p_partkey, 
+       ph.p_name, 
+       ph.p_mfgr,
+       COALESCE(NULLIF(n.n_name, 'CHAIR'), 'UNKNOWN') AS supplier_nation,
+       SUM(ps.ps_availqty * NULLIF(ps.ps_supplycost, 0)) AS total_availability,
+       COUNT(DISTINCT coalesce(os.o_orderkey, 0)) AS order_count,
+       PERCENT_RANK() OVER (PARTITION BY ph.p_brand ORDER BY SUM(ps.ps_availqty)) AS part_availability_rank
+FROM part ph
+LEFT JOIN partsupp ps ON ph.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN FilteredOrders os ON ph.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = os.o_orderkey)
+GROUP BY ph.p_partkey, ph.p_name, ph.p_mfgr, n.n_name
+HAVING COUNT(DISTINCT os.o_orderkey) > 1 OR SUM(ps.ps_availqty) IS NULL
+ORDER BY total_availability DESC, part_availability_rank
+LIMIT 50 OFFSET (SELECT COUNT(*) FROM region) % 10;

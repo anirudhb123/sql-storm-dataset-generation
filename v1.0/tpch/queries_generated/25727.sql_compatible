@@ -1,0 +1,43 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 1000
+)
+SELECT 
+    s.s_name AS supplier_name,
+    p.p_name AS part_name,
+    rp.rank,
+    hv.total_value
+FROM 
+    RankedSuppliers rp
+JOIN 
+    supplier s ON s.s_suppkey = rp.s_suppkey
+JOIN 
+    lineitem l ON s.s_suppkey = l.l_suppkey
+JOIN 
+    HighValueParts hv ON l.l_partkey = hv.p_partkey
+WHERE 
+    rp.rank <= 5
+ORDER BY 
+    rp.rank, hv.total_value DESC;

@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+),
+ReturnStats AS (
+    SELECT 
+        wr.web_site_sk,
+        COUNT(DISTINCT wr.returning_customer_sk) AS unique_returns,
+        SUM(wr.return_amt) AS total_returned_amount
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.web_site_sk
+),
+OverallStats AS (
+    SELECT 
+        s.s_store_sk,
+        SUM(ws.net_profit) AS total_profit,
+        AVG(ws.net_paid_inc_tax) AS avg_net_paid,
+        COUNT(DISTINCT ws.bill_customer_sk) AS unique_customers
+    FROM 
+        store_sales ss
+    LEFT JOIN 
+        web_sales ws ON ss.ss_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        store s ON ss.ss_store_sk = s.s_store_sk
+    GROUP BY 
+        s.s_store_sk
+)
+SELECT 
+    r.web_site_sk,
+    r.unique_returns,
+    r.total_returned_amount,
+    o.total_profit,
+    o.avg_net_paid,
+    o.unique_customers
+FROM 
+    ReturnStats r
+FULL OUTER JOIN 
+    OverallStats o ON r.web_site_sk = o.s_store_sk
+WHERE 
+    (r.unique_returns IS NOT NULL AND r.total_returned_amount > 500) 
+    OR 
+    (o.total_profit > 1000 AND o.unique_customers > 50)
+ORDER BY 
+    COALESCE(o.total_profit, 0) DESC, 
+    COALESCE(r.total_returned_amount, 0) DESC;

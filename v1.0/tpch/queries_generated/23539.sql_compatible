@@ -1,0 +1,99 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        DENSE_RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 5000
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE('1998-10-01') - INTERVAL '1 YEAR'
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name,
+        COALESCE(COUNT(oo.o_orderkey), 0) AS orders_count,
+        SUM(oo.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        RecentOrders oo ON c.c_custkey = oo.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, n.n_name
+),
+PartsWithSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        s.s_name,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS supplier_rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    cd.c_custkey,
+    cd.c_name,
+    cd.nation_name,
+    COUNT(DISTINCT ro.o_orderkey) AS count_recent_orders,
+    AVG(CASE 
+        WHEN cd.orders_count > 10 THEN p.total_value * 0.10 
+        ELSE p.total_value 
+    END) AS avg_discounted_value,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ':', ps.s_name) ORDER BY p.p_partkey) AS part_supplier_info
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    HighValueParts p ON p.p_partkey IN (
+        SELECT 
+            pwi.p_partkey 
+        FROM 
+            PartsWithSupplierInfo pwi 
+        WHERE 
+            pwi.supplier_rank = 1
+    )
+LEFT JOIN 
+    PartsWithSupplierInfo ps ON p.p_partkey = ps.p_partkey
+LEFT JOIN 
+    RecentOrders ro ON cd.c_custkey = ro.o_custkey
+WHERE 
+    cd.total_spent IS NOT NULL
+GROUP BY 
+    cd.c_custkey, cd.c_name, cd.nation_name
+HAVING 
+    COUNT(DISTINCT ro.o_orderkey) > 2
+ORDER BY 
+    avg_discounted_value DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

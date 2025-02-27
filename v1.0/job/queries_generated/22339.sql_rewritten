@@ -1,0 +1,95 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS rank
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ak.name) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count,
+        COALESCE(GROUP_CONCAT(DISTINCT co.name), 'None') AS companies
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+),
+
+FinalResults AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ar.actor_name,
+        ar.role,
+        ar.actor_rank,
+        mk.keywords,
+        cm.company_count,
+        cm.companies,
+        CASE 
+            WHEN cm.company_count IS NULL THEN 'No Companies'
+            WHEN cm.company_count > 3 THEN 'Many Companies'
+            ELSE 'Few Companies'
+        END AS company_description
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorRoles ar ON rm.movie_id = ar.movie_id AND ar.actor_rank <= 3
+    LEFT JOIN 
+        MovieKeywords mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        CompanyMovies cm ON rm.movie_id = cm.movie_id
+)
+
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    COALESCE(f.actor_name, 'Unknown Actor') AS actor_name,
+    COALESCE(f.role, 'Unknown Role') AS role,
+    f.keywords,
+    f.company_count,
+    f.companies,
+    f.company_description
+FROM 
+    FinalResults f
+WHERE 
+    f.production_year BETWEEN 2000 AND 2020
+    AND (f.company_count > 0 OR f.keywords IS NOT NULL)
+ORDER BY 
+    f.production_year DESC,
+    f.title ASC;

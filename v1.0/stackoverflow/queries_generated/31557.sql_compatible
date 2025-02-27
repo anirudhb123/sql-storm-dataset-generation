@@ -1,0 +1,83 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000 
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        LATERAL string_to_array(p.Tags, ',') AS tag_arr ON true
+    JOIN 
+        Tags t ON t.TagName = TRIM(tag_arr)
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rph.PostId,
+    rph.Title,
+    u.DisplayName AS Owner,
+    u.Reputation AS OwnerReputation,
+    COALESCE(rv.VoteCount, 0) AS TotalVotes,
+    pt.Tags,
+    rph.Level,
+    COUNT(ch.PostId) AS ChildPostCount
+FROM 
+    RecursivePostHierarchy rph
+LEFT JOIN 
+    Users u ON rph.OwnerUserId = u.Id
+LEFT JOIN 
+    RecentVotes rv ON rph.PostId = rv.PostId
+LEFT JOIN 
+    PostTags pt ON rph.PostId = pt.PostId
+LEFT JOIN 
+    Posts ch ON rph.PostId = ch.ParentId
+WHERE 
+    rph.Level <= 2 
+GROUP BY 
+    rph.PostId, rph.Title, u.DisplayName, u.Reputation, pv.VoteCount, pt.Tags, rph.Level
+ORDER BY 
+    rph.Level, u.Reputation DESC;

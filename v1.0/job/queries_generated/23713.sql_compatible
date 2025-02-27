@@ -1,0 +1,58 @@
+
+WITH RECURSIVE company_movies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER(PARTITION BY mc.movie_id ORDER BY c.name) AS rn
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id 
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+actor_titles AS (
+    SELECT 
+        ca.movie_id,
+        aa.name AS actor_name,
+        COUNT(*) OVER(PARTITION BY ca.movie_id) AS actor_count
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name aa ON ca.person_id = aa.person_id
+),
+title_info AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        CASE WHEN t.production_year IS NULL THEN 'Unknown' ELSE CAST(t.production_year AS VARCHAR) END AS year_label
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+)
+SELECT 
+    ti.title,
+    co.company_name,
+    co.company_type,
+    at.actor_name,
+    at.actor_count,
+    ti.year_label
+FROM 
+    title_info ti
+LEFT JOIN 
+    company_movies co ON ti.title_id = co.movie_id AND co.rn = 1
+JOIN 
+    actor_titles at ON ti.title_id = at.movie_id
+WHERE 
+    ti.keyword LIKE '%Drama%'
+    AND EXISTS (SELECT 1 FROM movie_info mi WHERE mi.movie_id = ti.title_id AND mi.info LIKE '%Oscar%')
+    AND (ti.production_year >= 2000 OR ti.year_label = 'Unknown')
+GROUP BY 
+    ti.title, co.company_name, co.company_type, at.actor_name, at.actor_count, ti.year_label
+ORDER BY 
+    ti.production_year DESC NULLS LAST, at.actor_name
+LIMIT 100;

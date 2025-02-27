@@ -1,0 +1,71 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT Id, ParentId, Title, Score, CreationDate, 1 AS Level
+    FROM Posts
+    WHERE PostTypeId = 1  
+    UNION ALL
+    SELECT p.Id, p.ParentId, p.Title, p.Score, p.CreationDate, Level + 1
+    FROM Posts p
+    JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+    WHERE p.PostTypeId = 2  
+),
+RankedPosts AS (
+    
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY rp.ParentId ORDER BY rp.Score DESC) AS Rank
+    FROM RecursivePostHierarchy rp
+),
+BadgeCounts AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+VoteSummary AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.Score AS PostScore,
+    p.CreationDate,
+    RANK() OVER (ORDER BY p.Score DESC) AS GlobalRank,
+    b.UserId AS OwnerUserId,
+    uc.DisplayName AS OwnerDisplayName,
+    bc.BadgeCount,
+    COALESCE(vs.Upvotes, 0) AS TotalUpvotes,
+    COALESCE(vs.Downvotes, 0) AS TotalDownvotes,
+    COUNT(c.Id) AS CommentCount,
+    MAX(p.LastActivityDate) AS LastActivity,
+    CASE 
+        WHEN p.ClosedDate IS NOT NULL THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus
+FROM Posts p
+LEFT JOIN Users uc ON p.OwnerUserId = uc.Id
+LEFT JOIN BadgeCounts bc ON uc.Id = bc.UserId
+LEFT JOIN VoteSummary vs ON p.Id = vs.PostId
+LEFT JOIN Comments c ON p.Id = c.PostId
+WHERE p.CreationDate >= '2023-01-01'
+GROUP BY 
+    p.Id, p.Title, p.Score, p.CreationDate, 
+    uc.Id, uc.DisplayName, bc.BadgeCount, 
+    vs.Upvotes, vs.Downvotes
+HAVING COUNT(c.Id) > 0
+ORDER BY PostScore DESC, GlobalRank
+LIMIT 50;

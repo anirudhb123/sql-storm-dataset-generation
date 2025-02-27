@@ -1,0 +1,60 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS rank
+    FROM
+        aka_name a
+    INNER JOIN
+        cast_info c ON a.person_id = c.person_id
+    INNER JOIN
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE
+        t.production_year IS NOT NULL
+),
+FilteredTitles AS (
+    SELECT 
+        actor_name,
+        movie_title,
+        production_year,
+        CASE 
+            WHEN production_year < 2000 THEN 'Old Film'
+            WHEN production_year >= 2000 AND production_year <= 2010 THEN 'Recent Film'
+            ELSE 'New Film'
+        END AS film_category
+    FROM 
+        RankedTitles
+    WHERE
+        rank <= 3
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT k.keyword ORDER BY k.keyword) AS keywords,
+        STRING_AGG(DISTINCT it.info ORDER BY it.info DESC) AS additional_info
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    JOIN
+        movie_info mi ON mi.movie_id = mk.movie_id
+    JOIN
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    ft.actor_name,
+    ft.movie_title,
+    ft.production_year,
+    ft.film_category,
+    COALESCE(mi.keywords, 'No keywords') AS keywords,
+    COALESCE(mi.additional_info, 'No additional info') AS additional_info
+FROM 
+    FilteredTitles ft
+LEFT JOIN 
+    MovieInfo mi ON ft.movie_title = (SELECT title FROM aka_title WHERE id = (SELECT movie_id FROM cast_info WHERE person_id = (SELECT person_id FROM aka_name WHERE name = ft.actor_name LIMIT 1) LIMIT 1))
+ORDER BY 
+    ft.actor_name ASC, ft.production_year DESC;

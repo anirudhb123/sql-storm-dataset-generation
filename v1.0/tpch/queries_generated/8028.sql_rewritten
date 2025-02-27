@@ -1,0 +1,57 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           c.c_nationkey,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+),
+TopOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           n.n_name,
+           n.n_regionkey
+    FROM RankedOrders o
+    JOIN nation n ON o.c_nationkey = n.n_nationkey
+    WHERE o.order_rank <= 5
+),
+SupplierParts AS (
+    SELECT ps.ps_partkey,
+           ps.ps_suppkey,
+           ps.ps_availqty,
+           s.s_name,
+           p.p_brand,
+           p.p_type
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 50
+),
+OrderLineItems AS (
+    SELECT l.l_orderkey,
+           l.l_partkey,
+           l.l_quantity,
+           l.l_extendedprice,
+           l.l_discount,
+           l.l_tax,
+           l.l_shipdate,
+           l.l_linestatus
+    FROM lineitem l
+    JOIN TopOrders o ON l.l_orderkey = o.o_orderkey
+)
+SELECT o.o_orderkey,
+       o.o_orderdate,
+       o.o_totalprice,
+       n.n_name,
+       SUM(pl.l_extendedprice) AS total_line_item_revenue,
+       COUNT(DISTINCT sp.ps_suppkey) AS unique_suppliers,
+       AVG(sp.ps_availqty) AS avg_available_quantity
+FROM TopOrders o
+JOIN OrderLineItems pl ON o.o_orderkey = pl.l_orderkey
+JOIN SupplierParts sp ON pl.l_partkey = sp.ps_partkey
+JOIN nation n ON o.n_nationkey = n.n_nationkey
+GROUP BY o.o_orderkey, o.o_orderdate, o.o_totalprice, n.n_name
+ORDER BY total_line_item_revenue DESC, o.o_orderdate ASC;

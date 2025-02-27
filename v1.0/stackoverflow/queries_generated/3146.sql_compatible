@@ -1,0 +1,57 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        MAX(p.CreationDate) AS LastActivity
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 0
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        LastActivity,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM 
+        UserActivity
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.PostCount,
+    tu.QuestionCount,
+    tu.AnswerCount,
+    DATEDIFF(CAST('2024-10-01 12:34:56' AS TIMESTAMP), tu.LastActivity) AS DaysSinceLastActivity,
+    CASE 
+        WHEN tu.Reputation >= 1000 THEN 'Gold User'
+        WHEN tu.Reputation BETWEEN 500 AND 999 THEN 'Silver User'
+        ELSE 'Bronze User'
+    END AS UserTier,
+    COALESCE((SELECT 
+                SUM(v.BountyAmount) 
+              FROM 
+                Votes v 
+              WHERE 
+                v.UserId = tu.UserId 
+                AND v.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = tu.UserId)), 0) AS TotalBounties
+FROM 
+    TopUsers tu
+WHERE 
+    tu.Rank <= 10
+ORDER BY 
+    tu.Reputation DESC;

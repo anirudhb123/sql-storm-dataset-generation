@@ -1,0 +1,66 @@
+
+WITH PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        U.Reputation AS OwnerReputation,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(V.UpVotes, 0) AS UpVotes,
+        COALESCE(V.DownVotes, 0) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+),
+UserMetrics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(CASE WHEN V.Id IS NOT NULL THEN 1 END) AS VoteCount
+    FROM 
+        Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+)
+SELECT 
+    PM.PostId,
+    PM.Title,
+    PM.ViewCount,
+    PM.Score,
+    PM.UpVotes,
+    PM.DownVotes,
+    U.Id AS OwnerUserId,
+    PM.OwnerDisplayName,
+    UM.Reputation AS OwnerReputation,
+    UM.BadgeCount,
+    UM.PostCount,
+    UM.VoteCount
+FROM 
+    PostMetrics PM
+JOIN 
+    UserMetrics UM ON PM.OwnerDisplayName = UM.DisplayName
+JOIN 
+    Users U ON PM.OwnerDisplayName = U.DisplayName
+ORDER BY 
+    PM.CreationDate DESC
+LIMIT 100;

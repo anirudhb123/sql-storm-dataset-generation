@@ -1,0 +1,99 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        P.OwnerUserId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.ParentId,
+        P.OwnerUserId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        RP.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy RP ON P.ParentId = RP.PostId
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostVotes AS (
+    SELECT 
+        V.PostId,
+        V.VoteTypeId,
+        COUNT(V.Id) AS VoteCount
+    FROM 
+        Votes V
+    GROUP BY 
+        V.PostId, V.VoteTypeId
+),
+ValidatedPosts AS (
+    SELECT 
+        P.Id,
+        P.OwnerUserId,
+        P.Title,
+        P.Score,
+        PH.PotentialScore,
+        PH.OwnerDisplayName,
+        COALESCE(SUM(PV.VoteCount), 0) AS TotalVotes,
+        COALESCE(UB.GoldBadges, 0) AS GoldBadges
+    FROM 
+        Posts P
+    LEFT JOIN 
+        RecursivePostHierarchy PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        PostVotes PV ON P.Id = PV.PostId AND PV.VoteTypeId IN (2, 3) 
+    LEFT JOIN 
+        UserBadges UB ON P.OwnerUserId = UB.UserId
+    GROUP BY 
+        P.Id, P.OwnerUserId, P.Title, P.Score, PH.PotentialScore, PH.OwnerDisplayName
+)
+SELECT 
+    VP.PostId,
+    VP.Title,
+    VP.Score,
+    VP.TotalVotes,
+    VP.GoldBadges,
+    (VP.Score + VP.TotalVotes) AS AggregateScore,
+    CASE 
+        WHEN VP.GoldBadges > 0 THEN 'Gold Badge Holder'
+        WHEN VP.TotalVotes < 0 THEN 'Negative Votes'
+        ELSE 'Neutral'
+    END AS PostStatus,
+    ARRAY_AGG(PT.Name) AS PostTypeNames
+FROM 
+    ValidatedPosts VP
+LEFT JOIN 
+    PostTypes PT ON PT.Id = (SELECT P.PostTypeId FROM Posts P WHERE P.Id = VP.PostId)
+WHERE 
+    VP.Score >= 0
+GROUP BY 
+    VP.PostId, VP.Title, VP.Score, VP.TotalVotes, VP.GoldBadges
+ORDER BY 
+    AggregateScore DESC, VP.Score DESC
+LIMIT 100;

@@ -1,0 +1,52 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN supplier s ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+customer_region AS (
+    SELECT c.c_custkey, c.c_name, r.r_name, c.c_acctbal
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+part_supp_metrics AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_availqty) AS total_availqty,
+           AVG(ps.ps_supplycost) AS avg_supplycost,
+           COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+order_statistics AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_orderkey) AS line_item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    r.r_name AS region,
+    p.p_name AS part_name,
+    ps.total_availqty,
+    ps.avg_supplycost,
+    os.total_revenue,
+    sh.level AS supplier_level
+FROM customer_region c
+JOIN part_supp_metrics ps ON ps.ps_partkey = (SELECT ps_partkey FROM partsupp WHERE ps_supplycost = (SELECT MIN(ps_supplycost) FROM partsupp))
+LEFT JOIN orders o ON o.o_orderkey = (SELECT MIN(o_orderkey) FROM orders)
+LEFT JOIN order_statistics os ON os.o_orderkey = o.o_orderkey
+JOIN supplier_hierarchy sh ON sh.s_suppkey IN (SELECT s_suppkey FROM supplier WHERE s_nationkey = (SELECT n_nationkey FROM nation WHERE n_name LIKE '%A%'))
+JOIN part p ON p.p_partkey = ps.ps_partkey
+WHERE ps.total_availqty IS NOT NULL
+AND os.total_revenue > COALESCE(
+    (SELECT MAX(total_revenue) FROM order_statistics WHERE line_item_count > 5),
+    0
+)
+ORDER BY sh.level DESC, os.total_revenue DESC;

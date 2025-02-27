@@ -1,0 +1,57 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.Reputation IS NULL THEN 1 ELSE 0 END) AS PostsWithoutReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        DisplayName, 
+        TotalPosts, 
+        TotalQuestions, 
+        TotalAnswers,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS UserRank
+    FROM 
+        UserPostStats
+    WHERE 
+        TotalPosts > 5
+),
+RecentComments AS (
+    SELECT 
+        c.UserId,
+        COUNT(c.Id) AS TotalComments,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.UserId
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.TotalQuestions,
+    tu.TotalAnswers,
+    COALESCE(rc.TotalComments, 0) AS TotalComments,
+    rc.LastCommentDate,
+    CASE 
+        WHEN tu.TotalPosts > 50 THEN 'Expert'
+        WHEN tu.TotalPosts BETWEEN 20 AND 50 THEN 'Intermediate'
+        ELSE 'Novice'
+    END AS UserLevel
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    RecentComments rc ON tu.UserId = rc.UserId
+WHERE 
+    rc.LastCommentDate >= (NOW() - INTERVAL '1 year')
+ORDER BY 
+    tu.UserRank;

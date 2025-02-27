@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS AuthorName,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, '><')) AS t(TagName) ON TRUE
+    WHERE 
+        p.PostTypeId = 1 -- Consider only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+), FilteredPosts AS (
+    SELECT 
+        rp.*,
+        COUNT(DISTINCT bh.Id) AS HistoryCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistory bh ON bh.PostId = rp.PostID
+    WHERE 
+        rp.Rank <= 5 -- top 5 recent questions
+    GROUP BY 
+        rp.PostID, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.AuthorName
+)
+SELECT 
+    fp.PostID,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.AuthorName,
+    fp.CommentCount,
+    fp.HistoryCount,
+    string_agg(DISTINCT tag.TagName, ', ') AS AggregatedTags
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    unnest(fp.Tags) AS tag(TagName) ON TRUE
+GROUP BY 
+    fp.PostID, fp.Title, fp.CreationDate, fp.Score, fp.ViewCount, fp.AuthorName, fp.CommentCount, fp.HistoryCount
+ORDER BY 
+    fp.CreationDate DESC;

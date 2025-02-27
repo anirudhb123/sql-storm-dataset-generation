@@ -1,0 +1,47 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title, 
+        at.production_year, 
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        at.title, at.production_year
+),
+MovieGenres AS (
+    SELECT 
+        mt.movie_id, 
+        STRING_AGG(kt.keyword, ', ') AS genres
+    FROM 
+        movie_keyword mt
+    JOIN 
+        keyword kt ON mt.keyword_id = kt.id
+    GROUP BY 
+        mt.movie_id
+)
+
+SELECT 
+    rm.title, 
+    rm.production_year, 
+    rm.actor_count, 
+    mg.genres,
+    CASE 
+        WHEN rm.rank = 1 THEN 'Most Popular'
+        WHEN rm.rank = 2 THEN 'Second Most Popular'
+        ELSE 'Other'
+    END AS popularity_rank
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieGenres mg ON rm.id = mg.movie_id
+WHERE 
+    rm.production_year BETWEEN 2000 AND 2023
+    AND rm.actor_count IS NOT NULL
+ORDER BY 
+    rm.production_year ASC, rm.actor_count DESC;

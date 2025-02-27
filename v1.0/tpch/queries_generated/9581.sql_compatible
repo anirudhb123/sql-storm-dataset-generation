@@ -1,0 +1,54 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS PriceRank
+    FROM 
+        part p
+), 
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        s.s_acctbal,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+), 
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(li.l_orderkey) AS LineItemCount,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS TotalRevenue,
+        AVG(s.s_acctbal) AS AvgSupplierAcctBal
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    JOIN 
+        SupplierDetails sd ON li.l_partkey = sd.ps_partkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    rp.p_name,
+    rp.p_retailprice,
+    os.LineItemCount,
+    os.TotalRevenue,
+    os.AvgSupplierAcctBal
+FROM 
+    RankedParts rp
+JOIN 
+    SupplierDetails sd ON rp.p_partkey = sd.ps_partkey AND sd.SupplierRank = 1
+JOIN 
+    OrderSummary os ON os.LineItemCount > 5
+WHERE 
+    rp.PriceRank <= 10
+ORDER BY 
+    rp.p_retailprice DESC, os.TotalRevenue DESC;

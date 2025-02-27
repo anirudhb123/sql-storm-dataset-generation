@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, sh.s_name, sh.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+CTE_PartDetails AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_retailprice, 
+           p.p_mfgr, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rn,
+           CASE 
+               WHEN MOD(p.p_size, 2) = 0 THEN 'Even'
+               WHEN MOD(p.p_size, 2) = 1 THEN 'Odd'
+               ELSE NULL
+           END AS size_type
+    FROM part p
+    WHERE p.p_comment IS NOT NULL
+),
+OrderStats AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 20000
+)
+SELECT n.n_name, 
+       COUNT(DISTINCT c.c_custkey) AS total_customers,
+       SUM(ps.ps_availqty) AS total_available_qty,
+       AVG(od.total_sales) AS avg_sales,
+       MAX(CASE WHEN pd.size_type = 'Even' THEN pd.p_retailprice ELSE NULL END) AS max_even_price,
+       STRING_AGG(DISTINCT COALESCE(pd.p_name, 'Unknown Part')) AS part_names,
+       COUNT(DISTINCT sh.s_name) FILTER (WHERE sh.level = 4) AS level_4_suppliers
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN partsupp ps ON ps.ps_suppkey = (SELECT MIN(ps1.ps_suppkey) FROM partsupp ps1 WHERE ps1.ps_partkey IN (SELECT p.p_partkey FROM CTE_PartDetails p WHERE p.rn = 1))
+LEFT JOIN OrderStats od ON c.c_custkey = od.o_orderkey
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN CTE_PartDetails pd ON pd.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = od.o_orderkey)
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name
+HAVING COUNT(c.c_custkey) > 5
+   AND MAX(pd.p_retailprice) > (SELECT AVG(p.p_retailprice) FROM part p)
+ORDER BY total_customers DESC, avg_sales ASC;

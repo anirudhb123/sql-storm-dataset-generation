@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        PHT.Name AS PostHistoryTypeName,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT PH.Id) AS EditCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON p.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON p.Id = PH.PostId
+    LEFT JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    GROUP BY 
+        p.Id, PHT.Name, U.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Body, 
+        Tags, 
+        CreationDate, 
+        OwnerDisplayName, 
+        CommentCount, 
+        EditCount
+    FROM 
+        RankedPosts
+    WHERE 
+        EditRank = 1 
+        AND CommentCount > 0 
+)
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY CreationDate DESC) AS Rank,
+    PostId,
+    Title,
+    LEFT(Body, 150) AS ShortBody,
+    Tags,
+    OwnerDisplayName,
+    CommentCount,
+    EditCount,
+    CONCAT('https://stackoverflow.com/posts/', PostId) AS PostUrl
+FROM 
+    FilteredPosts
+ORDER BY 
+    CreationDate DESC
+LIMIT 10;

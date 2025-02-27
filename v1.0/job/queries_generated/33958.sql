@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS level,
+        ARRAY[mt.id] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        mh.level + 1,
+        path || ml.linked_movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+SELECT 
+    h.movie_id,
+    h.movie_title,
+    h.level,
+    COUNT(DISTINCT ca.person_id) AS cast_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS cast_names,
+    CASE 
+        WHEN h.level > 2 THEN 'High' 
+        ELSE 'Low' 
+    END AS hierarchy_level,
+    AVG(mv.production_year) OVER (PARTITION BY h.level) AS avg_production_year,
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = h.movie_id
+     AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget')) AS budget_info_count
+FROM 
+    movie_hierarchy h
+LEFT JOIN 
+    complete_cast cc ON h.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ca ON cc.subject_id = ca.person_id
+LEFT JOIN 
+    aka_name ak ON ca.person_id = ak.person_id
+LEFT JOIN 
+    aka_title mv ON h.movie_id = mv.id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    h.movie_id, h.movie_title, h.level
+ORDER BY 
+    h.level, cast_count DESC
+LIMIT 100;

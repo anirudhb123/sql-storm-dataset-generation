@@ -1,0 +1,57 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS rank_title
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        c.movie_id,
+        k.keyword,
+        MAX(CASE WHEN r.role = 'Lead' THEN 'Lead' WHEN r.role = 'Supporting' THEN 'Supporting' ELSE 'Other' END) AS role_type
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.person_role_id = r.id
+    JOIN 
+        movie_keyword k ON c.movie_id = k.movie_id
+    GROUP BY 
+        c.movie_id, k.keyword
+),
+CompanyAssociations AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    ar.keyword,
+    ar.role_type,
+    ca.company_names,
+    ca.company_types
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorRoles ar ON rm.movie_id = ar.movie_id
+LEFT JOIN 
+    CompanyAssociations ca ON rm.movie_id = ca.movie_id
+WHERE 
+    rm.rank_title <= 5
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title;

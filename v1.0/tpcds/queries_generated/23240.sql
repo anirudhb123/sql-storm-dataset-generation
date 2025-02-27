@@ -1,0 +1,83 @@
+
+WITH RecursiveIncomeBands AS (
+    SELECT ib_income_band_sk, 
+           ib_lower_bound, 
+           ib_upper_bound, 
+           1 AS level
+    FROM income_band
+    WHERE ib_income_band_sk = 1
+    UNION ALL
+    SELECT ib.ib_income_band_sk, 
+           ib.ib_lower_bound, 
+           ib.ib_upper_bound, 
+           rib.level + 1
+    FROM income_band ib
+    INNER JOIN RecursiveIncomeBands rib ON ib_income_band_sk = rib.ib_income_band_sk + 1
+),
+DateAnalysis AS (
+    SELECT d_year, 
+           COUNT(DISTINCT d_date) AS total_days
+    FROM date_dim
+    WHERE d_year IS NOT NULL
+    GROUP BY d_year
+),
+CustomerDetails AS (
+    SELECT c.c_customer_id, 
+           c.c_first_name, 
+           c.c_last_name, 
+           cd.cd_gender,
+           ROW_NUMBER() OVER(PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c.c_current_addr_sk IS NOT NULL
+),
+CustomerRankings AS (
+    SELECT c.*, 
+           CASE 
+               WHEN cd.cd_marital_status = 'M' THEN 'Married' 
+               ELSE 'Single' 
+           END AS marital_status_group
+    FROM CustomerDetails c
+    JOIN customer_demographics cd ON c.c_customer_id = cd.cd_demo_sk
+    WHERE rank <= 10
+),
+ShipModeReturns AS (
+    SELECT sm.sm_ship_mode_id, 
+           COALESCE(SUM(sr_return_quantity), 0) AS total_returns
+    FROM ship_mode sm
+    LEFT JOIN store_returns sr ON sm.sm_ship_mode_sk = sr.sr_reason_sk
+    GROUP BY sm.sm_ship_mode_id
+    HAVING SUM(sr_return_quantity) IS NOT NULL
+),
+CombinedSales AS (
+    SELECT ws.ws_item_sk, 
+           SUM(ws.ws_quantity) AS total_sold, 
+           SUM(ws.ws_net_profit) AS total_profit,
+           CASE 
+               WHEN SUM(ws.ws_net_profit) IS NULL OR SUM(ws.ws_net_profit) < 0 THEN 'Loss'
+               ELSE 'Profit'
+           END AS profit_status
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IS NOT NULL
+    GROUP BY ws.ws_item_sk
+),
+FinalBenchmark AS (
+    SELECT cd.c_first_name, 
+           cd.c_last_name, 
+           ib.ib_income_band_sk, 
+           ib.ib_lower_bound, 
+           ib.ib_upper_bound, 
+           COUNT(DISTINCT dd.d_year) AS years_active,
+           SUM(cs.total_sold) AS total_sales
+    FROM CustomerRankings cd
+    LEFT JOIN RecursiveIncomeBands ib ON cd.c_first_name IS NOT NULL  -- Unusual join condition
+    LEFT JOIN CombinedSales cs ON cd.c_customer_id = cs.ws_item_sk
+    JOIN DateAnalysis dd ON dd.total_days > 365
+    GROUP BY cd.c_first_name, cd.c_last_name, ib.ib_income_band_sk, 
+             ib.ib_lower_bound, ib.ib_upper_bound
+)
+SELECT * 
+FROM FinalBenchmark
+WHERE total_sales IS NOT NULL
+ORDER BY total_sales DESC
+LIMIT 25;

@@ -1,0 +1,73 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus, 1 AS depth
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'P')
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus, oh.depth + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderstatus IN ('O', 'P')
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, 
+           SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+PartStats AS (
+    SELECT p.p_partkey,
+           p.p_brand,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           MAX(ps.ps_availqty) AS max_avail_qty,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE p.p_size > 10
+    GROUP BY p.p_partkey, p.p_brand
+),
+OrderRevenue AS (
+    SELECT oh.o_orderkey,
+           oh.o_orderdate,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_revenue
+    FROM OrderHierarchy oh
+    JOIN lineitem l ON oh.o_orderkey = l.l_orderkey
+    GROUP BY oh.o_orderkey, oh.o_orderdate
+),
+CombinedStats AS (
+    SELECT ps.p_partkey,
+           ps.supplier_count,
+           ps.max_avail_qty,
+           COALESCE(pr.total_revenue, 0) AS total_revenue,
+           COALESCE(or.order_revenue, 0) AS order_revenue
+    FROM PartStats ps
+    LEFT JOIN (
+        SELECT p.p_partkey,
+               SUM(l.l_extendedprice) AS total_revenue
+        FROM part p
+        JOIN lineitem l ON p.p_partkey = l.l_partkey
+        GROUP BY p.p_partkey
+    ) pr ON ps.p_partkey = pr.p_partkey
+    LEFT JOIN OrderRevenue or ON ps.p_partkey = or.o_orderkey
+)
+SELECT cs.p_partkey,
+       cs.supplier_count,
+       cs.max_avail_qty,
+       cs.total_revenue,
+       cs.order_revenue,
+       CASE 
+           WHEN cs.order_revenue > 10000 THEN 'High Revenue'
+           WHEN cs.order_revenue BETWEEN 5000 AND 10000 THEN 'Medium Revenue'
+           ELSE 'Low Revenue' 
+       END AS revenue_category,
+       CASE 
+           WHEN cs.supplier_count > 5 THEN 'Multiple Suppliers'
+           ELSE 'Single Supplier' 
+       END AS supplier_status
+FROM CombinedStats cs
+WHERE cs.max_avail_qty IS NOT NULL
+ORDER BY cs.order_revenue DESC
+LIMIT 10;

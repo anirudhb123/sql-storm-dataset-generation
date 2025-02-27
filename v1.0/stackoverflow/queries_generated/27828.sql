@@ -1,0 +1,70 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Body,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS t(TagName)
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+    ORDER BY 
+        p.ViewCount DESC
+    LIMIT 10
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        MAX(ph.CreationDate) AS LastUpdated
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.BadgeCount,
+    up.BadgeNames,
+    tp.Title,
+    tp.Body,
+    tp.ViewCount,
+    tp.OwnerDisplayName,
+    phd.HistoryTypes,
+    phd.LastUpdated
+FROM 
+    UserBadges up
+CROSS JOIN 
+    TopPosts tp
+LEFT JOIN 
+    PostHistoryDetails phd ON tp.Id = phd.PostId
+WHERE 
+    up.BadgeCount > 5
+ORDER BY 
+    up.BadgeCount DESC, tp.ViewCount DESC;

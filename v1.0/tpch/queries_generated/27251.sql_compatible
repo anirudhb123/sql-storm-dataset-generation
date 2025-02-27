@@ -1,0 +1,37 @@
+
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, n.n_name AS nation_name, 
+           CASE 
+               WHEN s.s_acctbal < 1000 THEN 'Low'
+               WHEN s.s_acctbal BETWEEN 1000 AND 10000 THEN 'Medium'
+               ELSE 'High'
+           END AS acctbal_category
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_size, p.p_retailprice,
+           LEFT(p.p_comment, 10) AS short_comment
+    FROM part p
+    WHERE p.p_retailprice > 50.00
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate,
+           DATEDIFF(CAST('1998-10-01' AS DATE), o.o_orderdate) AS days_since_order,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+FinalBenchmark AS (
+    SELECT sd.s_name, sd.acctbal_category, pd.p_name, od.total_order_value,
+           od.days_since_order
+    FROM SupplierDetails sd
+    JOIN partsupp ps ON sd.s_suppkey = ps.ps_suppkey
+    JOIN PartDetails pd ON ps.ps_partkey = pd.p_partkey
+    JOIN OrderDetails od ON sd.s_suppkey = od.o_custkey 
+    WHERE od.days_since_order < 30
+    ORDER BY sd.acctbal_category DESC, od.total_order_value DESC
+)
+SELECT * FROM FinalBenchmark
+LIMIT 100;

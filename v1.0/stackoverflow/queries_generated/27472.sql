@@ -1,0 +1,55 @@
+WITH RecentQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        (SELECT COUNT(*) 
+         FROM Votes v 
+         WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.PostTypeId = 1 AND p.CreationDate >= NOW() - INTERVAL '30 days'  -- Questions created in the last 30 days
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.Tags, u.DisplayName
+),
+
+TopTags AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag
+    FROM Posts
+    WHERE PostTypeId = 1
+),
+
+TagStatistics AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS QuestionCount,
+        AVG(Score) AS AverageScore,
+        SUM(ViewCount) AS TotalViews
+    FROM (SELECT DISTINCT PostId, Tag FROM RecentQuestions
+          CROSS JOIN TopTags) AS tags
+    GROUP BY Tag
+)
+
+SELECT 
+    rq.PostId,
+    rq.Title,
+    rq.CreationDate,
+    rq.Score,
+    rq.ViewCount,
+    rq.OwnerDisplayName,
+    rq.CommentCount,
+    rq.UpVoteCount,
+    ts.Tag AS MostPopularTag,
+    ts.QuestionCount,
+    ts.AverageScore,
+    ts.TotalViews
+FROM RecentQuestions rq
+LEFT JOIN TagStatistics ts ON ts.Tag = ANY(string_to_array(substring(rq.Tags, 2, length(rq.Tags) - 2), '><'))
+ORDER BY rq.Score DESC, rq.ViewCount DESC
+LIMIT 10;

@@ -1,0 +1,47 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        0 AS Level,
+        U.DisplayName
+    FROM Users U
+    WHERE U.Reputation >= 1000
+
+    UNION ALL
+
+    SELECT 
+        U.Id,
+        U.Reputation,
+        UR.Level + 1,
+        U.DisplayName
+    FROM Users U
+    INNER JOIN UserReputationCTE UR ON U.Reputation > UR.Reputation AND U.Id <> UR.UserId
+)
+
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(B.Score, 0) AS BadgeScore,
+    COUNT(P.Id) AS PostCount,
+    SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+    SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+    COUNT(DISTINCT C.Id) AS CommentCount,
+    RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+FROM Users U
+LEFT JOIN Badges B ON U.Id = B.UserId
+LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN Comments C ON P.Id = C.PostId
+JOIN LinkTypes LT ON LT.Id = 1
+LEFT JOIN PostLinks PL ON PL.PostId = P.Id AND PL.LinkTypeId = LT.Id
+JOIN UserReputationCTE UR ON U.Id = UR.UserId
+WHERE B.Class = 1 OR B.Class = 2
+GROUP BY U.Id, U.DisplayName, U.Reputation, BadgeScore
+HAVING COUNT(P.Id) > 10
+ORDER BY U.Reputation DESC, PostCount DESC
+LIMIT 100;
+
+-- Performance Benchmarking Query: 
+-- This query aggregates user data, calculates post-level metrics, joins badge information, 
+-- and ranks users based on their reputation while also filtering down to specific criteria 
+-- and utilizing recursive CTE to handle user reputation hierarchy.

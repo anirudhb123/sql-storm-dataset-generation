@@ -1,0 +1,46 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           mt.production_year, 
+           NULL::integer AS parent_movie_id, 
+           0 AS depth
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT mt.id, 
+           mt.title, 
+           mt.production_year, 
+           mh.movie_id, 
+           mh.depth + 1
+    FROM movie_link ml
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+)
+
+SELECT 
+    COUNT(DISTINCT mh.movie_id) AS total_movies,
+    AVG(movies_depth.depth) AS average_depth,
+    COALESCE(cast_count.cast_count, 0) AS cast_info_count,
+    GROUP_CONCAT(DISTINCT ak.name) AS actors_names,
+    MAX(mh.production_year) AS latest_production_year,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    CASE WHEN MAX(mh.production_year) < 2020 
+         THEN 'Older Movie' 
+         ELSE 'Recent Movie' 
+    END AS movie_age_category
+FROM MovieHierarchy mh
+LEFT JOIN cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN (
+    SELECT movie_id, COUNT(*) AS cast_count
+    FROM cast_info
+    GROUP BY movie_id
+) AS cast_count ON mh.movie_id = cast_count.movie_id
+WHERE mh.depth = (
+    SELECT MAX(depth) FROM MovieHierarchy
+)
+GROUP BY movie_age_category
+ORDER BY total_movies DESC;

@@ -1,0 +1,97 @@
+WITH RecursiveTopMovies AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(cc.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(cc.id) DESC) AS rn
+    FROM
+        aka_title mt
+    LEFT JOIN
+        complete_cast cc ON mt.id = cc.movie_id
+    WHERE
+        mt.production_year IS NOT NULL
+    GROUP BY
+        mt.id, mt.title, mt.production_year
+),
+TopGenreMovies AS (
+    SELECT
+        mt.movie_id,
+        mt.title,
+        mt.production_year,
+        km.keyword,
+        ROW_NUMBER() OVER (PARTITION BY km.keyword ORDER BY mt.production_year DESC) AS genre_rank
+    FROM
+        movie_keyword mk
+    JOIN
+        aka_title mt ON mk.movie_id = mt.id
+    JOIN
+        keyword km ON mk.keyword_id = km.id
+    WHERE
+        km.keyword IS NOT NULL
+),
+MovieDetails AS (
+    SELECT
+        tm.movie_id,
+        tm.title,
+        tm.production_year,
+        COALESCE(CG.kind, 'Unknown') AS genre,
+        tm.cast_count
+    FROM
+        RecursiveTopMovies tm
+    LEFT JOIN
+        kind_type CG ON tm.movie_id = CG.id
+    WHERE
+        tm.rn <= 5
+),
+PersonStats AS (
+    SELECT
+        p.name AS person_name,
+        COUNT(DISTINCT cc.movie_id) AS movie_count,
+        AVG(mo.production_year) AS avg_production_year,
+        COUNT(DISTINCT mt.id) AS genre_count
+    FROM
+        aka_name p
+    JOIN
+        cast_info cc ON p.person_id = cc.person_id
+    JOIN
+        aka_title mt ON cc.movie_id = mt.id
+    JOIN
+        movie_keyword mk ON mt.id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        p.name
+)
+SELECT
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.genre,
+    ps.person_name,
+    ps.movie_count,
+    ps.avg_production_year,
+    ps.genre_count
+FROM
+    MovieDetails md
+JOIN
+    PersonStats ps ON ps.movie_count > 5
+LEFT JOIN
+    (SELECT
+        person_id,
+        COUNT(*) AS popular_roles
+     FROM
+        cast_info
+     GROUP BY
+        person_id
+     HAVING
+        COUNT(*) > 3) popular_casters ON ps.person_id = popular_casters.person_id
+WHERE
+    md.production_year >= 2000
+ORDER BY
+    md.production_year DESC, 
+    md.title ASC,
+    ps.movie_count DESC
+LIMIT 50;
+
+This SQL query performs a complex analysis involving recursive Common Table Expressions (CTEs) that filter movies based on their cast count and production year while grouping results. It also explores genre associations through keywords and aggregates person statistics based on their movie involvement. The end result is a comprehensive view combining both movie details and associated actors' statistics, ensuring a rich dataset suitable for performance benchmarking.

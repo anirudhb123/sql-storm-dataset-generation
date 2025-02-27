@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mcl.linked_movie_id,
+        1 AS level
+    FROM title mt
+    LEFT JOIN movie_link mcl ON mt.id = mcl.movie_id
+    WHERE mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        mt.title,
+        mt.production_year,
+        mcl.linked_movie_id,
+        mh.level + 1
+    FROM MovieHierarchy mh
+    JOIN movie_link mcl ON mh.linked_movie_id = mcl.movie_id
+    JOIN title mt ON mcl.linked_movie_id = mt.id
+)
+
+SELECT 
+    m.id AS movie_id,
+    m.title,
+    m.production_year,
+    COALESCE(cast.MemberCount, 0) AS TotalCast,
+    COALESCE(kw.KeywordCount, 0) AS TotalKeywords,
+    STRING_AGG(DISTINCT cn.name, ', ' ORDER BY cn.name NULLS LAST) as CompaniesInvolved,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS yearly_rank
+FROM title m
+LEFT JOIN (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS MemberCount
+    FROM cast_info ci
+    GROUP BY ci.movie_id
+) cast ON m.id = cast.movie_id
+LEFT JOIN (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS KeywordCount
+    FROM movie_keyword mk
+    GROUP BY mk.movie_id
+) kw ON m.id = kw.movie_id
+LEFT JOIN movie_companies mc ON mc.movie_id = m.id
+LEFT JOIN company_name cn ON cn.id = mc.company_id
+WHERE 
+    (m.production_year < 2000 OR m.production_year IS NULL)
+    AND (
+        EXISTS (SELECT 1 FROM aka_title a WHERE a.movie_id = m.id AND a.title ILIKE '%adventure%')
+        OR 
+        EXISTS (SELECT 1 FROM movie_info mi WHERE mi.movie_id = m.id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot') AND mi.info NOT LIKE '%boring%')
+    )
+GROUP BY m.id, m.title, m.production_year, cast.MemberCount, kw.KeywordCount
+HAVING 
+    COUNT(DISTINCT ci.id) > 5
+    AND MAX(cn.country_code) IS NOT NULL
+ORDER BY yearly_rank, TotalCast DESC, m.title
+LIMIT 10;

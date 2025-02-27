@@ -1,0 +1,73 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword,
+        CTE_Persons.role,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ca.nr_order) AS role_order
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ca ON cc.subject_id = ca.person_id
+    JOIN 
+        role_type CTE_Persons ON ca.role_id = CTE_Persons.id
+    WHERE 
+        t.production_year IS NOT NULL AND 
+        t.production_year > 2000
+),
+
+TopMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        MovieDetails m
+    JOIN 
+        cast_info c ON m.title = c.note  
+    GROUP BY 
+        m.title, m.production_year
+    HAVING 
+        COUNT(DISTINCT mk.keyword) >= 5
+),
+
+RankedMovies AS (
+    SELECT 
+        title,
+        production_year,
+        keyword_count,
+        cast_count,
+        RANK() OVER (ORDER BY cast_count DESC, keyword_count DESC) AS movie_rank
+    FROM 
+        TopMovies
+    WHERE 
+        keyword_count <= 10 AND                           
+        production_year IS NOT DISTINCT FROM 2021         
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.keyword_count,
+    rm.cast_count,
+    COALESCE(SUM(CASE WHEN c.note IS NULL THEN 1 ELSE 0 END), 0) AS null_notes_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS collected_keywords
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    movie_keyword mk ON rm.title = mk.movie_id  
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    cast_info c ON c.movie_id = rm.title  
+GROUP BY 
+    rm.title, rm.production_year, rm.keyword_count, rm.cast_count
+ORDER BY 
+    rm.movie_rank;

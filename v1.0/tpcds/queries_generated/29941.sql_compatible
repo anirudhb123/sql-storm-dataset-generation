@@ -1,0 +1,67 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM customer_address
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        cd_dep_count,
+        cd_dep_employed_count,
+        cd_dep_college_count
+    FROM customer_demographics
+),
+AggregatedData AS (
+    SELECT 
+        ad.full_address,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_zip,
+        ad.ca_country,
+        cd.cd_gender,
+        COALESCE(cd.cd_marital_status, 'Unknown') AS marital_status,
+        COUNT(cd.cd_demo_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM AddressDetails ad
+    LEFT JOIN CustomerDemographics cd ON ad.ca_city = 'San Francisco' 
+    GROUP BY 
+        ad.full_address,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_zip,
+        ad.ca_country,
+        cd.cd_gender
+)
+SELECT 
+    full_address,
+    ca_city,
+    ca_state,
+    ca_zip,
+    ca_country,
+    cd_gender,
+    marital_status,
+    customer_count,
+    avg_purchase_estimate,
+    STRING_AGG(marital_status, ', ') AS marital_status_distribution
+FROM AggregatedData
+GROUP BY 
+    full_address,
+    ca_city,
+    ca_state,
+    ca_zip,
+    ca_country,
+    cd_gender,
+    marital_status,
+    customer_count,
+    avg_purchase_estimate
+ORDER BY customer_count DESC
+LIMIT 10;

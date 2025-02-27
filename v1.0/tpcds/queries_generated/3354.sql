@@ -1,0 +1,54 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+TopSales AS (
+    SELECT 
+        rs.ws_order_number,
+        SUM(rs.ws_quantity) AS total_quantity,
+        SUM(rs.ws_net_profit) AS total_net_profit
+    FROM RankedSales rs
+    WHERE rs.rn <= 3
+    GROUP BY rs.ws_order_number
+),
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_income_band_sk
+    FROM customer_demographics cd
+)
+SELECT 
+    c.c_customer_id,
+    cd.cd_gender,
+    SUM(ts.total_quantity) AS total_sales_quantity,
+    COALESCE(SUM(cr.total_return_quantity), 0) AS total_return_quantity,
+    SUM(ts.total_net_profit) AS total_net_profit,
+    CASE 
+        WHEN SUM(ts.total_net_profit) > 1000 THEN 'High Value'
+        WHEN SUM(ts.total_net_profit) BETWEEN 500 AND 1000 THEN 'Moderate Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM customer c
+LEFT JOIN TopSales ts ON c.c_customer_sk = ts.ws_order_number
+LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+LEFT JOIN CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+GROUP BY c.c_customer_id, cd.cd_gender
+HAVING SUM(ts.total_net_profit) > 0 OR COALESCE(SUM(cr.total_return_quantity), 0) > 0
+ORDER BY total_net_profit DESC, c.c_customer_id
+LIMIT 100;

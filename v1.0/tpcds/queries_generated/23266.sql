@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price DESC) AS rnk,
+        COALESCE(ws.ws_sales_price * ws.ws_quantity, 0) AS total_price
+    FROM web_sales ws
+    WHERE ws.ws_ship_date_sk BETWEEN 1 AND 100
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(COALESCE(ws.ws_quantity, 0)) AS total_quantity,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+HighestSale AS (
+    SELECT 
+        ws_total.ws_order_number,
+        ws_total.total_price,
+        ROW_NUMBER() OVER (ORDER BY ws_total.total_price DESC) AS sale_rank
+    FROM (SELECT ws_order_number, SUM(total_price) AS total_price FROM RankedSales GROUP BY ws_order_number) ws_total
+),
+CustomerReturnStats AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(cr_return_amount) AS total_return_amount,
+        COUNT(DISTINCT cr_order_number) AS total_returns
+    FROM catalog_returns
+    GROUP BY sr_returning_customer_sk
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.total_quantity,
+    cs.avg_sales_price,
+    COALESCE(crs.total_return_amount, 0) AS total_return_amount,
+    COALESCE(crs.total_returns, 0) AS total_returns,
+    hs.total_price AS highest_order_value
+FROM CustomerStats cs
+LEFT JOIN CustomerReturnStats crs ON cs.c_customer_sk = crs.sr_returning_customer_sk
+LEFT JOIN HighestSale hs ON hs.sale_rank = 1 
+WHERE cs.total_orders > 5 
+  AND ((cs.cd_gender = 'F' AND cs.total_quantity > 100) OR (cs.cd_gender = 'M' AND cs.total_quantity <= 100))
+ORDER BY hs.total_price DESC, cs.total_quantity DESC;

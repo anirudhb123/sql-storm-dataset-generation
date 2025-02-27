@@ -1,0 +1,72 @@
+WITH RECURSIVE region_suppliers AS (
+    SELECT 
+        r.r_regionkey, 
+        r.r_name, 
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM 
+        region r 
+    LEFT JOIN 
+        nation n ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        supplier s ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+), ranked_orders AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank,
+        c.c_nationkey
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    GROUP BY 
+        o.o_orderkey, c.c_nationkey
+), total_aggregated AS (
+    SELECT 
+        n.n_name,
+        SUM(COALESCE(rs.supplier_count, 0)) AS total_suppliers,
+        SUM(CASE WHEN ro.order_rank <= 10 THEN ro.total_price ELSE 0 END) AS top_prices
+    FROM 
+        nation n 
+    LEFT JOIN 
+        region_suppliers rs ON n.n_regionkey = rs.r_regionkey
+    LEFT JOIN 
+        ranked_orders ro ON ro.c_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    n.n_name, 
+    total_suppliers, 
+    top_prices,
+    SUBSTRING(n.n_name FROM 1 FOR 5) AS short_name,
+    CASE 
+        WHEN total_suppliers IS NULL THEN 'No suppliers'
+        WHEN total_suppliers > 100 THEN 'Many suppliers'
+        ELSE 'Few suppliers' 
+    END AS supplier_status
+FROM 
+    nation n 
+JOIN 
+    total_aggregated ta ON n.n_name = ta.n_name
+UNION ALL
+SELECT 
+    'Unknown' AS n_name,
+    COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+    SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS top_prices
+FROM 
+    supplier s
+LEFT JOIN 
+    orders o ON s.s_suppkey = o.o_custkey
+WHERE 
+    s.s_acctbal IS NULL OR s.s_acctbal < 1000
+GROUP BY 
+    s.s_suppkey
+ORDER BY 
+    total_suppliers DESC NULLS LAST;

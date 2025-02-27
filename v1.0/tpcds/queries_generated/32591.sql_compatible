@@ -1,0 +1,77 @@
+
+WITH RECURSIVE sales_rank AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_order_number,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_ext_sales_price DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_sold_date_sk BETWEEN 2451545 AND 2451550
+    UNION ALL
+    SELECT 
+        s.web_site_sk,
+        s_order_number,
+        s_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY s.web_site_sk ORDER BY s_ext_sales_price DESC) AS rank
+    FROM  
+        store_sales s
+    WHERE 
+        ss_sold_date_sk BETWEEN 2451545 AND 2451550
+),
+top_sales AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS total_return_amt,
+        COUNT(*) AS total_returns,
+        COALESCE(COUNT(DISTINCT wr_order_number), 0) AS unique_orders
+    FROM 
+        web_returns
+    WHERE 
+        wr_returned_date_sk >= 2451545
+    GROUP BY 
+        wr_returning_customer_sk
+    HAVING 
+        SUM(wr_return_amt) > 100
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CASE 
+            WHEN cd_gender = 'M' THEN 'Male'
+            WHEN cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender,
+        cd_marital_status,
+        d.d_year AS current_year,
+        COUNT(*) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        date_dim d ON c.c_first_sales_date_sk = d.d_date_sk
+    GROUP BY 
+        c.c_customer_id, cd_gender, cd_marital_status, d.d_year
+)
+SELECT 
+    ci.c_customer_id,
+    ci.gender,
+    ci.cd_marital_status AS marital_status,
+    sr.rank,
+    ts.total_return_amt,
+    ts.total_returns,
+    ts.unique_orders
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_rank sr ON ci.order_count = sr.rank
+LEFT JOIN 
+    top_sales ts ON ci.c_customer_id = ts.wr_returning_customer_sk
+WHERE 
+    (ts.total_return_amt IS NOT NULL OR ci.order_count > 5)
+ORDER BY 
+    ci.gender, 
+    ts.total_return_amt DESC
+LIMIT 100;

@@ -1,0 +1,78 @@
+
+WITH UserPostStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AverageViewCount,
+        SUM(P.CommentCount) AS TotalComments,
+        SUM(P.FavoriteCount) AS TotalFavorites
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalScore,
+        AverageViewCount,
+        TotalComments,
+        TotalFavorites,
+        RANK() OVER (ORDER BY TotalScore DESC, TotalPosts DESC) AS Rank
+    FROM 
+        UserPostStatistics
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(T.TagName) AS Tags
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    JOIN 
+        Tags T ON T.ExcerptPostId = P.Id
+    GROUP BY 
+        P.Id, U.DisplayName
+)
+SELECT 
+    TU.Rank,
+    TU.DisplayName,
+    TU.TotalPosts,
+    TU.TotalQuestions,
+    TU.TotalAnswers,
+    TU.TotalScore,
+    TU.AverageViewCount,
+    TU.TotalComments,
+    TU.TotalFavorites,
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.LastActivityDate,
+    PD.ViewCount,
+    PD.Score,
+    PD.Tags
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    PostDetails PD ON TU.UserId = PD.OwnerDisplayName
+WHERE 
+    TU.Rank <= 10
+ORDER BY 
+    TU.Rank, PD.LastActivityDate DESC;

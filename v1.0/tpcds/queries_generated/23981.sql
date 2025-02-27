@@ -1,0 +1,50 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_order_number,
+        ws.ws_ship_date_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_net_profit DESC) AS rank_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > 0
+)
+SELECT 
+    ws.web_site_id,
+    SUM(COALESCE(sr.return_quantity, 0)) AS total_returned_quantity,
+    SUM(ws.ws_quantity) AS total_sold_quantity,
+    SUM(ws.ws_net_profit) AS total_net_profit,
+    AVG(NULLIF(rank_profit, 0)) AS avg_rank_profit,
+    CASE 
+        WHEN SUM(ws.ws_quantity) > 0 THEN 'Profit' 
+        WHEN SUM(ws.ws_quantity) = 0 AND SUM(sr.return_quantity) > 0 THEN 'Loss'
+        ELSE 'Neutral'
+     END AS sale_status,
+    STUFF(
+        (SELECT 
+            ',' + i.i_item_desc 
+         FROM 
+            item i 
+         JOIN 
+            web_sales ws2 ON ws2.ws_item_sk = i.i_item_sk 
+         WHERE 
+            ws2.ws_web_site_sk = ws.web_site_id 
+         FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, '') AS item_descriptions
+FROM 
+    ranked_sales rs
+LEFT JOIN 
+    store_returns sr ON rs.ws_order_number = sr.sr_ticket_number
+LEFT JOIN 
+    web_sales ws ON rs.ws_order_number = ws.ws_order_number
+GROUP BY 
+    rs.web_site_id
+HAVING 
+    SUM(ws.ws_net_profit) IS NOT NULL AND 
+    SUM(ws.ws_quantity) > 10
+ORDER BY 
+    total_net_profit DESC
+OFFSET 5 ROWS 
+FETCH NEXT 10 ROWS ONLY;

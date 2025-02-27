@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN pht.Name = 'Post Closed' THEN ph.CreationDate END) AS LastClosedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 24 THEN 1 END) AS SuggestedEdits,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseVotes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName,
+    up.Reputation,
+    COALESCE(up.QuestionCount, 0) AS QuestionCount,
+    COALESCE(pv.TotalBadgeClass, 0) AS BadgeClassSum,
+    COALESCE(rp.PostId, 0) AS HighestScoringPostId,
+    COALESCE(rp.Title, 'No Questions') AS HighestScoringPostTitle,
+    COALESCE(rp.Score, 0) AS HighestScore,
+    COALESCE(pdd.LastClosedDate, 'Never Closed') AS LastClosedDate,
+    COALESCE(pdd.SuggestedEdits, 0) AS SuggestedEdits,
+    COALESCE(pdd.CloseVotes, 0) AS CloseVotes
+FROM 
+    Users up
+LEFT JOIN 
+    UserReputation pv ON up.Id = pv.UserId
+LEFT JOIN 
+    RankedPosts rp ON up.Id = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN 
+    PostHistoryDetails pdd ON rp.PostId = pdd.PostId
+WHERE 
+    up.Reputation > 1000 
+ORDER BY 
+    up.Reputation DESC, 
+    HighestScore DESC
+LIMIT 50;

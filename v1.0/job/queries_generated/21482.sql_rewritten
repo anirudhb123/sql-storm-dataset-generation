@@ -1,0 +1,54 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        K.name_pcode_nf,
+        COUNT(DISTINCT c.id) AS cast_count,
+        COALESCE(SUM(CASE WHEN m.info_type_id = 1 THEN 1 ELSE 0 END), 0) AS award_count
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        movie_keyword AS mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast AS cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info AS c ON cc.subject_id = c.id
+    LEFT JOIN 
+        movie_info AS m ON t.id = m.movie_id 
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword, K.name_pcode_nf
+),
+RankedMovies AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY production_year ORDER BY cast_count DESC) AS cast_rank
+    FROM 
+        MovieDetails
+)
+SELECT 
+    rm.title_id,
+    rm.title,
+    rm.production_year,
+    rm.keyword,
+    rm.cast_count,
+    rm.award_count,
+    CASE 
+        WHEN rm.cast_count IS NULL THEN 'Unknown'
+        WHEN rm.cast_count = 0 THEN 'No Cast'
+        ELSE 'Cast Present' 
+    END AS cast_status,
+    CASE 
+        WHEN rm.award_count > 0 THEN 'Award Winning'
+        ELSE 'Not Award Winning' 
+    END AS award_status
+FROM 
+    RankedMovies AS rm
+WHERE 
+    rm.cast_rank <= 5
+    AND (rm.production_year BETWEEN 2000 AND 2010 OR rm.production_year IS NULL)
+ORDER BY 
+    rm.production_year, rm.cast_count DESC;

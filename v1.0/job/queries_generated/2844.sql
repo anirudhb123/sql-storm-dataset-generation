@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        at.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title at
+    JOIN 
+        movie_keyword mk ON mk.movie_id = at.id
+    JOIN 
+        movie_info mi ON mi.movie_id = at.id
+    JOIN 
+        complete_cast cc ON cc.movie_id = at.id
+    JOIN 
+        cast_info c ON c.movie_id = at.id
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    WHERE 
+        at.production_year IS NOT NULL 
+        AND mk.keyword_id IN (SELECT id FROM keyword WHERE keyword LIKE '%thriller%')
+    GROUP BY 
+        a.title, at.production_year
+),
+ActorDetails AS (
+    SELECT 
+        a.name AS actor_name, 
+        at.title AS movie_title, 
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY a.name) AS actor_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title at ON c.movie_id = at.id
+    WHERE 
+        a.name IS NOT NULL
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.actor_count,
+    ad.actor_name,
+    ad.actor_rank
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorDetails ad ON rm.title = ad.movie_title AND rm.production_year = ad.production_year
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    rm.production_year DESC, rm.actor_count DESC, ad.actor_rank
+LIMIT 100;

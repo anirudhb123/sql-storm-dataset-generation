@@ -1,0 +1,43 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_nationkey,
+           p.p_partkey,
+           ps.ps_availqty,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty IS NOT NULL
+    UNION ALL
+    SELECT sh.s_suppkey,
+           sh.s_name,
+           sh.s_nationkey,
+           sh.p_partkey,
+           (sh.ps_availqty * 0.8) AS ps_availqty,
+           sh.rank
+    FROM supplier_hierarchy sh
+    WHERE sh.rank < 5
+),
+customer_order AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           o.o_orderkey,
+           o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate > (CURRENT_DATE - INTERVAL '1 year')
+)
+SELECT CASE WHEN sh.s_name IS NULL THEN 'Unknown Supplier' ELSE sh.s_name END AS supplier_name,
+       COALESCE(SUM(co.o_totalprice), 0) AS total_order_value,
+       COUNT(DISTINCT sh.p_partkey) AS unique_parts_supplied,
+       AVG(sh.ps_availqty) FILTER (WHERE sh.ps_availqty < 100) AS avg_avail_qty_low,
+       MAX(sh.ps_availqty) AS max_avail_qty,
+       SUM(CASE WHEN co.order_rank IS NOT NULL THEN 1 ELSE 0 END) AS orders_count
+FROM supplier_hierarchy sh
+FULL OUTER JOIN customer_order co ON sh.s_nationkey = co.c_custkey
+WHERE sh.rank <= 5 OR co.order_rank <= 3
+GROUP BY GROUPING SETS ((sh.s_name), (NULL))
+HAVING total_order_value > (SELECT AVG(o.o_totalprice) FROM orders o WHERE o.o_orderstatus = 'O')
+ORDER BY total_order_value DESC;

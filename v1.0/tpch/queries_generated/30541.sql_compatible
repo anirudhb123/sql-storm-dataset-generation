@@ -1,0 +1,93 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        0 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 0
+    UNION ALL
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        sh.level + 1
+    FROM 
+        supplier s
+    JOIN 
+        supplier_hierarchy sh ON s.s_nationkey = sh.s_suppkey 
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+total_ordered AS (
+    SELECT 
+        o.custkey, 
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        orders o
+    GROUP BY 
+        o.custkey
+),
+avg_spent AS (
+    SELECT 
+        custkey, 
+        AVG(total_spent) AS avg_spent
+    FROM 
+        total_ordered
+    GROUP BY 
+        custkey
+),
+filtered_suppliers AS (
+    SELECT 
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 5000
+),
+ranked_customers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal, 
+        RANK() OVER (ORDER BY c.c_acctbal DESC) AS rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_mktsegment = 'BUILDING'
+)
+SELECT 
+    p.p_name,
+    r.r_name,
+    sh.s_name,
+    rc.c_name,
+    rc.rank,
+    COALESCE(fs.total_supply_cost, 0) AS supply_cost,
+    CASE 
+        WHEN rc.rank < 5 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status
+FROM 
+    part p
+LEFT JOIN 
+    nation r ON p.p_mfgr = r.n_nationkey
+JOIN 
+    supplier_hierarchy sh ON sh.s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name LIKE '%USA%')
+JOIN 
+    ranked_customers rc ON rc.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = (SELECT MIN(o2.o_orderkey) FROM orders o2 WHERE o2.o_custkey = rc.c_custkey))
+LEFT JOIN 
+    filtered_suppliers fs ON fs.s_name LIKE CONCAT('%', SUBSTRING(p.p_comment, 1, 5), '%')
+WHERE 
+    sh.level = (SELECT MAX(level) FROM supplier_hierarchy)
+ORDER BY 
+    supply_cost DESC, 
+    rc.rank;

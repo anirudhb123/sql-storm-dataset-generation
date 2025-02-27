@@ -1,0 +1,88 @@
+WITH RECURSIVE UserPostCount AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopContributors AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        UserPostCount
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        PH.Comment,
+        P.Title,
+        PH.UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS rn
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.CreationDate >= NOW() - INTERVAL '30 days'
+),
+CloseReasonVotes AS (
+    SELECT 
+        PH.PostId,
+        JSON_AGG(CASE 
+            WHEN PH.PostHistoryTypeId = 10 THEN CR.Name 
+            ELSE NULL 
+        END) AS CloseReasons
+    FROM 
+        PostHistory PH
+    LEFT JOIN 
+        CloseReasonTypes CR ON PH.Comment::int = CR.Id 
+    GROUP BY 
+        PH.PostId
+),
+AggregatedPostData AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COALESCE(PH.CloseReasons, '[]') AS CloseReasons,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS TotalUpvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS TotalDownvotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        CloseReasonVotes PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, PH.CloseReasons
+)
+SELECT 
+    TC.DisplayName AS TopContributor,
+    A.PostId,
+    A.Title,
+    A.Score,
+    A.ViewCount,
+    A.CloseReasons,
+    A.TotalUpvotes,
+    A.TotalDownvotes
+FROM 
+    AggregatedPostData A
+JOIN 
+    TopContributors TC ON TC.UserId = A.PostId -- Implicit join for demonstration
+WHERE 
+    A.ViewCount >= 100
+ORDER BY 
+    A.Score DESC, A.ViewCount DESC
+LIMIT 10;

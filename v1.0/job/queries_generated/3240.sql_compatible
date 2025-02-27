@@ -1,0 +1,69 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank_year
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+TopRatedMovies AS (
+    SELECT 
+        rc.title_id,
+        mc.company_id,
+        COUNT(DISTINCT c.id) AS cast_count
+    FROM 
+        RankedMovies rc
+    LEFT JOIN 
+        complete_cast cc ON rc.title_id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        movie_companies mc ON rc.title_id = mc.movie_id
+    GROUP BY 
+        rc.title_id, mc.company_id
+    HAVING 
+        COUNT(DISTINCT c.id) > 2
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    COUNT(DISTINCT c.id) AS cast_count,
+    CASE 
+        WHEN tm.cast_count IS NULL THEN 'Unknown'
+        WHEN tm.cast_count > 10 THEN 'Popular'
+        ELSE 'Niche'
+    END AS movie_category
+FROM 
+    TopRatedMovies tm
+LEFT JOIN 
+    MovieKeywords mk ON tm.title_id = mk.movie_id
+LEFT JOIN 
+    complete_cast cc ON tm.title_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+WHERE 
+    tm.rank_year <= 5
+GROUP BY 
+    tm.title, 
+    tm.production_year, 
+    mk.keywords, 
+    tm.cast_count
+ORDER BY 
+    tm.production_year DESC, 
+    COUNT(DISTINCT c.id) DESC;

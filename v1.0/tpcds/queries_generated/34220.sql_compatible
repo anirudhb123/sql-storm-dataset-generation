@@ -1,0 +1,77 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_net_profit,
+        1 AS Level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim) - 30
+
+    UNION ALL
+
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        s.Level + 1
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        SalesCTE s ON ws.ws_order_number = s.ws_order_number
+    WHERE 
+        s.Level < 5
+),
+
+AggregatedSales AS (
+    SELECT 
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS Total_Quantity_Sold,
+        SUM(ws.ws_net_profit) AS Total_Net_Profit
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_id
+),
+
+FilteredCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' AND (hd.hd_income_band_sk IS NOT NULL OR hd.hd_dep_count > 2)
+)
+
+SELECT 
+    f.c_customer_sk,
+    SUM(a.Total_Quantity_Sold) AS Customer_Total_Quantity,
+    SUM(a.Total_Net_Profit) AS Customer_Total_Net_Profit,
+    ROW_NUMBER() OVER (PARTITION BY f.hd_income_band_sk ORDER BY SUM(a.Total_Net_Profit) DESC) AS Rank
+FROM 
+    FilteredCustomers f
+JOIN 
+    AggregatedSales a ON f.c_customer_sk = a.i_item_id
+WHERE 
+    f.hd_income_band_sk IS NOT NULL
+GROUP BY 
+    f.c_customer_sk, f.hd_income_band_sk
+HAVING 
+    SUM(a.Total_Net_Profit) > 1000
+ORDER BY 
+    Rank;

@@ -1,0 +1,66 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_supplycost < 100)
+), FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(NULLIF(s.s_address, ''), 'Unknown Address') AS s_address,
+        COUNT(ps.ps_partkey) AS total_parts
+    FROM 
+        supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_address
+    HAVING 
+        COUNT(ps.ps_partkey) > (SELECT AVG(total) FROM (SELECT COUNT(*) AS total FROM partsupp GROUP BY ps.ps_partkey) AS avg_count)
+), OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS unique_customers
+    FROM 
+        orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > (
+            SELECT 
+                AVG(total_revenue) 
+            FROM (
+                SELECT 
+                    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+                FROM 
+                    orders o
+                JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+                GROUP BY 
+                    o.o_orderkey
+            ) AS revenues
+        )
+)
+SELECT 
+    rp.p_name,
+    fs.s_name,
+    os.total_revenue,
+    RANK() OVER (PARTITION BY fs.total_parts ORDER BY os.total_revenue DESC) AS revenue_rank
+FROM 
+    RankedParts rp
+JOIN FilteredSuppliers fs ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = fs.s_suppkey)
+JOIN OrderStats os ON os.unique_customers > 10
+WHERE 
+    ((rp.p_retailprice > 50 AND fs.total_parts < 100) OR (rp.p_retailprice <= 50 AND fs.total_parts >= 100))
+    AND rp.rn <= 5
+ORDER BY 
+    os.total_revenue DESC,
+    fs.s_name ASC
+LIMIT 50;

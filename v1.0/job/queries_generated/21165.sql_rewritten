@@ -1,0 +1,45 @@
+WITH RECURSIVE MovieRoles AS (
+    SELECT 
+        ci.movie_id,
+        ci.role_id,
+        COUNT(ci.person_id) AS role_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id, ci.role_id
+),
+MoviesWithInfo AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(ki.keyword, 'No Keywords') AS keyword,
+        (SELECT STRING_AGG(mk.keyword, ', ') 
+         FROM movie_keyword mk 
+         WHERE mk.movie_id = mt.id) AS all_keywords,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY mt.production_year DESC) AS rn
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword ki ON mt.id = ki.movie_id
+)
+SELECT 
+    mw.movie_id,
+    mw.title,
+    mw.production_year,
+    mw.keyword,
+    mw.all_keywords,
+    mr.role_count AS num_roles
+FROM 
+    MoviesWithInfo mw
+LEFT JOIN 
+    MovieRoles mr ON mw.movie_id = mr.movie_id
+WHERE 
+    mw.production_year >= 2000
+    AND mw.title NOT LIKE '%Untitled%'
+    AND mr.role_count IS NULL
+    OR (mr.role_count > 1 AND mw.keyword != 'No Keywords')
+ORDER BY 
+    mw.production_year DESC,
+    mw.title
+LIMIT 100;

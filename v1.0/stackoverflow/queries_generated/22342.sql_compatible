@@ -1,0 +1,67 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.Views,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount,
+        COUNT(DISTINCT B.Id) AS BadgesCount,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        AVG(COALESCE(P.Score, 0)) AS AvgPostScore,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY U.Reputation DESC) AS UserRank
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.CreationDate, U.Views
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.UserId,
+        PH.Comment AS CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS CloseEventRank
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10
+),
+UserClosures AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        COUNT(DISTINCT CP.PostId) AS ClosedPostsCount,
+        COALESCE(SUM(CASE WHEN CP.CloseEventRank = 1 THEN 1 ELSE 0 END), 0) AS MostRecentClosure
+    FROM UserStats U
+    LEFT JOIN ClosedPosts CP ON U.UserId = CP.UserId
+    GROUP BY U.UserId, U.DisplayName
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.Views,
+    U.UpVotesCount,
+    U.DownVotesCount,
+    U.BadgesCount,
+    U.PostsCount,
+    U.AvgPostScore,
+    COALESCE(UC.ClosedPostsCount, 0) AS ClosedPostsCount,
+    CASE 
+        WHEN UC.ClosedPostsCount > 0 THEN 
+            CONCAT('User has closed ', UC.ClosedPostsCount, ' posts.')
+        ELSE 
+            'User has not closed any posts.'
+    END AS ClosureRemark,
+    CASE 
+        WHEN U.UserRank = 1 THEN 'Top User'
+        WHEN U.Reputation < 100 THEN 'New User'
+        ELSE 'Regular User'
+    END AS UserCategory
+FROM UserStats U
+LEFT JOIN UserClosures UC ON U.UserId = UC.UserId
+WHERE U.Reputation > 50
+ORDER BY U.Reputation DESC, U.Views DESC
+FETCH FIRST 100 ROWS ONLY;

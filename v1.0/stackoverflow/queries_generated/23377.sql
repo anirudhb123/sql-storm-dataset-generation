@@ -1,0 +1,83 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        COALESCE(SUM(P.Score), 0) AS TotalScore,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        STRING_AGG(B.Name, ', ') AS BadgeNames,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+UserActivity AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        US.QuestionCount,
+        US.AnswerCount,
+        US.TotalScore,
+        COALESCE(UB.BadgeNames, 'None') AS Badges,
+        COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY U.LifetimeViews DESC) AS ViewRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostStats US ON U.Id = US.OwnerUserId
+    LEFT JOIN 
+        UserBadges UB ON U.Id = UB.UserId
+)
+SELECT 
+    UA.DisplayName,
+    UA.Reputation,
+    UA.QuestionCount,
+    UA.AnswerCount,
+    UA.TotalScore,
+    UA.Badges,
+    UA.BadgeCount,
+    UA.UserRank,
+    UA.ViewRank,
+    NULLIF(UA.Reputation - (SELECT MAX(Reputation) FROM UserReputation WHERE ReputationRank > 10), 0) AS ReputationGap,
+    CASE 
+        WHEN UA.BadgeCount > 5 THEN 'Highly Decorated'
+        WHEN UA.BadgeCount BETWEEN 3 AND 5 THEN 'Moderately Decorated'
+        ELSE 'Novice'
+    END AS BadgeStatus,
+    CASE 
+        WHEN UA.Reputation > (SELECT AVG(Reputation) FROM Users) THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS ReputationStatus,
+    (SELECT COUNT(DISTINCT PH.Id)
+     FROM PostHistory PH 
+     WHERE PH.UserId = U.Id) AS HistoryEntryCount
+FROM 
+    UserActivity UA
+WHERE 
+    UA.Reputation > (SELECT AVG(Reputation) FROM Users)
+ORDER BY 
+    UA.Reputation DESC
+FETCH FIRST 50 ROWS ONLY;

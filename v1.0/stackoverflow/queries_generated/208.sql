@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 3) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Comments C
+    GROUP BY 
+        C.PostId
+),
+RecentTagQuestions AS (
+    SELECT 
+        P.Id AS QuestionId,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    INNER JOIN 
+        Tags T ON T.ExcerptPostId = P.Id
+    WHERE 
+        P.PostTypeId = 1 AND P.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    U.DisplayName,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.ViewCount,
+    UB.GoldBadges,
+    UB.SilverBadges,
+    UB.BronzeBadges,
+    COALESCE(PC.CommentCount, 0) AS TotalComments,
+    RTQ.Tags
+FROM 
+    RankedPosts RP
+JOIN 
+    Users U ON RP.OwnerUserId = U.Id
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN 
+    PostComments PC ON RP.PostId = PC.PostId
+LEFT JOIN 
+    RecentTagQuestions RTQ ON RP.PostId = RTQ.QuestionId
+WHERE 
+    RP.PostRank <= 5
+ORDER BY 
+    RP.Score DESC
+LIMIT 100;

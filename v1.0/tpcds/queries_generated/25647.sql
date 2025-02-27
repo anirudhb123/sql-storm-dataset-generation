@@ -1,0 +1,51 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id, 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        c.c_email_address,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address 
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        d.d_date,
+        CONCAT(w.w_street_number, ' ', w.w_street_name, ' ', w.w_street_type) AS warehouse_address
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+),
+AggregatedSales AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.full_name,
+        ci.ca_city,
+        ci.ca_state,
+        SUM(sd.ws_sales_price * sd.ws_quantity) AS total_spent,
+        COUNT(DISTINCT sd.ws_order_number) AS total_orders,
+        COUNT(DISTINCT sd.ws_item_sk) AS unique_items
+    FROM CustomerInfo ci
+    JOIN SalesData sd ON ci.c_customer_id = sd.ws_bill_customer_sk
+    GROUP BY ci.c_customer_id, ci.full_name, ci.ca_city, ci.ca_state
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_spent > 1000 THEN 'VIP'
+        WHEN total_spent BETWEEN 500 AND 1000 THEN 'Regular'
+        ELSE 'New'
+    END AS customer_status
+FROM AggregatedSales
+ORDER BY total_spent DESC
+LIMIT 10;

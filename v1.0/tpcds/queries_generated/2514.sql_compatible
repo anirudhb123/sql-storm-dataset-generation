@@ -1,0 +1,59 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk, 
+        sr_item_sk, 
+        sr_return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS rn
+    FROM store_returns
+),
+SalesSummary AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        SUM(ws_net_paid) AS total_revenue
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+CustomerAgeGroups AS (
+    SELECT 
+        c.c_customer_sk,
+        CASE 
+            WHEN (EXTRACT(YEAR FROM DATE '2002-10-01') - c.c_birth_year) < 25 THEN 'Under 25'
+            WHEN (EXTRACT(YEAR FROM DATE '2002-10-01') - c.c_birth_year) BETWEEN 25 AND 34 THEN '25-34'
+            WHEN (EXTRACT(YEAR FROM DATE '2002-10-01') - c.c_birth_year) BETWEEN 35 AND 44 THEN '35-44'
+            WHEN (EXTRACT(YEAR FROM DATE '2002-10-01') - c.c_birth_year) BETWEEN 45 AND 54 THEN '45-54'
+            ELSE '55 and above'
+        END AS age_group
+    FROM customer c
+),
+TopItems AS (
+    SELECT 
+        sr.item_sk,
+        COALESCE(SUM(sr.return_quantity), 0) AS total_returns,
+        COALESCE(ss.total_sold, 0) AS total_sold,
+        COALESCE(ss.total_revenue, 0) AS total_revenue,
+        SUM(CASE WHEN cr.return_quantity IS NOT NULL THEN 1 ELSE 0 END) AS catalog_returns_count
+    FROM RankedReturns sr
+    LEFT JOIN SalesSummary ss ON sr.sr_item_sk = ss.ws_item_sk
+    LEFT JOIN catalog_returns cr ON sr.item_sk = cr.cr_item_sk
+    GROUP BY sr.item_sk
+)
+SELECT 
+    ti.item_sk,
+    ti.total_returns,
+    ti.total_sold,
+    ti.total_revenue,
+    CASE 
+        WHEN ti.total_returns > 0 THEN ROUND((CAST(ti.total_returns AS DECIMAL) / NULLIF(ti.total_sold, 0)) * 100, 2)
+        ELSE 0
+    END AS return_rate,
+    COUNT(DISTINCT cag.c_customer_sk) AS unique_customers,
+    AVG(EXTRACT(YEAR FROM DATE '2002-10-01') - c.c_birth_year) AS avg_age
+FROM TopItems ti
+LEFT JOIN CustomerAgeGroups cag ON ti.item_sk = cag.c_customer_sk
+LEFT JOIN customer c ON cag.c_customer_sk = c.c_customer_sk
+WHERE ti.total_sold > 0
+GROUP BY ti.item_sk, ti.total_returns, ti.total_sold, ti.total_revenue
+HAVING AVG(EXTRACT(YEAR FROM DATE '2002-10-01') - c.c_birth_year) IS NOT NULL
+ORDER BY return_rate DESC;

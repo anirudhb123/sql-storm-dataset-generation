@@ -1,0 +1,33 @@
+WITH regional_supplier AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey, r.r_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+part_avail AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+lineitem_summary AS (
+    SELECT l.l_partkey, SUM(l.l_quantity) AS total_quantity, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           ROW_NUMBER() OVER (PARTITION BY l.l_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM lineitem l
+    GROUP BY l.l_partkey
+)
+SELECT r.r_name AS region_name, n.n_name AS nation_name, s.s_name AS supplier_name,
+       p.p_name AS part_name, 
+       COALESCE(pa.total_avail, 0) AS available_quantity,
+       COALESCE(ls.total_quantity, 0) AS sold_quantity,
+       COALESCE(ls.total_revenue, 0) AS total_revenue,
+       CASE 
+           WHEN COALESCE(ls.total_quantity, 0) = 0 THEN 'No Sales'
+           ELSE 'Sales Exist'
+       END AS sales_status
+FROM regional_supplier s
+JOIN part p ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN part_avail pa ON p.p_partkey = pa.ps_partkey
+LEFT JOIN lineitem_summary ls ON p.p_partkey = ls.l_partkey AND ls.rn = 1
+WHERE COALESCE(pa.total_avail, 0) > 0 OR COALESCE(ls.total_quantity, 0) > 0
+ORDER BY r.r_name, n.n_name, s.s_name, p.p_name;

@@ -1,0 +1,81 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title ASC) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredActors AS (
+    SELECT 
+        a.id AS actor_id,
+        n.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        name n ON a.person_id = n.imdb_id
+    LEFT JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.id, n.name
+    HAVING 
+        COUNT(ci.movie_id) > 5
+),
+PopularMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        cn.kind AS company_type,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_companies mc ON rm.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.imdb_id AND cn.country_code IS NOT NULL
+    LEFT JOIN 
+        cast_info ci ON rm.movie_id = ci.movie_id
+    WHERE 
+        cn.name IS NOT NULL
+    GROUP BY 
+        rm.movie_id, rm.title, cn.kind
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 10
+),
+BizarreLogic AS (
+    SELECT 
+        pm.movie_id,
+        pm.title,
+        pm.actor_count,
+        CASE 
+            WHEN pm.actor_count > 15 THEN 'Highly Casted'
+            WHEN pm.actor_count BETWEEN 10 AND 15 THEN 'Moderately Casted'
+            ELSE 'Lightly Casted'
+        END AS cast_category
+    FROM 
+        PopularMovies pm
+)
+SELECT 
+    bl.movie_id,
+    bl.title,
+    bl.actor_count,
+    bl.cast_category,
+    COALESCE(n.name, 'Unknown') AS leading_actor
+FROM 
+    BizarreLogic bl
+LEFT JOIN 
+    cast_info ci ON bl.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    name n ON a.person_id = n.imdb_id
+WHERE 
+    bl.actor_count IS NOT NULL
+ORDER BY 
+    bl.movie_id, bl.title DESC
+LIMIT 50;

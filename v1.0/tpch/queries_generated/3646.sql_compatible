@@ -1,0 +1,64 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        o.o_orderkey, 
+        o.o_totalprice, 
+        o.o_orderdate, 
+        DENSE_RANK() OVER (ORDER BY o.o_totalprice DESC) AS totalprice_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_value
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+)
+SELECT 
+    p.p_name, 
+    r.r_name, 
+    COALESCE(s.rank, 0) AS supplier_rank, 
+    COUNT(DISTINCT co.o_orderkey) AS number_of_orders,
+    SUM(COALESCE(sp.total_supply_value, 0)) AS total_supply_value,
+    ROUND(SUM(COALESCE(l.l_discount, 0)) / NULLIF(COUNT(l.l_orderkey), 0), 2) AS avg_discount
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedSuppliers s ON s.s_suppkey = l.l_suppkey
+LEFT JOIN 
+    CustomerOrders co ON co.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierParts sp ON sp.ps_partkey = p.p_partkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size >= 10 AND 
+    (s.s_acctbal IS NOT NULL OR co.o_totalprice > 1000)
+GROUP BY 
+    p.p_name, r.r_name, s.rank
+HAVING 
+    COUNT(co.o_orderkey) > 5
+ORDER BY 
+    number_of_orders DESC, total_supply_value DESC;

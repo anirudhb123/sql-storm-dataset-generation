@@ -1,0 +1,76 @@
+
+WITH RECURSIVE TitleCTE AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredAka AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        ak.md5sum,
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY ak.name) AS name_rank
+    FROM 
+        aka_name ak
+    WHERE 
+        ak.name IS NOT NULL
+),
+AggMovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(mi.info, ', ' ORDER BY mi.info) AS combined_info,
+        COUNT(mi.info) AS info_count
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+),
+FinalResults AS (
+    SELECT
+        t.title,
+        t.production_year,
+        ak.name AS actor_name,
+        am.combined_info,
+        am.info_count,
+        ct.kind AS company_type
+    FROM 
+        TitleCTE t
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.title_id
+    LEFT JOIN 
+        FilteredAka ak ON ak.person_id = ci.person_id AND ak.name_rank = 1
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.title_id
+    LEFT JOIN 
+        company_type ct ON ct.id = mc.company_type_id
+    LEFT JOIN 
+        AggMovieInfo am ON am.movie_id = t.title_id
+    WHERE 
+        (t.production_year < 2000)
+        OR (ct.kind IS NULL)
+)
+SELECT
+    title,
+    production_year,
+    actor_name,
+    combined_info,
+    info_count,
+    CASE 
+        WHEN company_type IS NULL THEN 'No company type'
+        ELSE company_type
+    END AS resolved_company_type,
+    COALESCE(NULLIF(info_count, 0), 'No information') AS info_status
+FROM 
+    FinalResults
+WHERE 
+    TRIM(actor_name) <> ''
+ORDER BY 
+    production_year DESC, 
+    title DESC;

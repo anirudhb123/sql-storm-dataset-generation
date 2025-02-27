@@ -1,0 +1,72 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > 1000.00
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 5000.00
+),
+TopLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        l.l_partkey, 
+        l.l_quantity, 
+        l.l_extendedprice, 
+        l.l_discount, 
+        l.l_tax,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS line_item_rank
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_discount BETWEEN 0.05 AND 0.15
+)
+SELECT 
+    p.p_name, 
+    r.r_name, 
+    COALESCE(SUM(CASE WHEN tl.line_item_rank = 1 THEN tl.l_extendedprice ELSE 0 END), 0) AS top_extended_price,
+    COUNT(DISTINCT c.c_custkey) AS high_value_customer_count,
+    AVG(s.s_acctbal) AS average_supplier_balance
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    TopLineItems tl ON p.p_partkey = tl.l_partkey
+LEFT JOIN 
+    HighValueCustomers c ON c.c_custkey IN (
+        SELECT o.o_custkey 
+        FROM orders o
+        WHERE o.o_orderkey = tl.l_orderkey
+    )
+GROUP BY 
+    p.p_name, r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 3
+ORDER BY 
+    top_extended_price DESC, 
+    average_supplier_balance DESC;

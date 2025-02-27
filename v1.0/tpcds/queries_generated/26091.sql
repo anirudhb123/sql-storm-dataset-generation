@@ -1,0 +1,49 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca.city AS city_name,
+        CONCAT(ca.street_number, ' ', ca.street_name, ' ', ca.street_type) AS full_address,
+        COUNT(DISTINCT c.customer_sk) AS num_customers
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.address_sk = c.current_addr_sk
+    GROUP BY 
+        ca.city, full_address
+), DemographicStats AS (
+    SELECT 
+        cd.education_status,
+        COUNT(DISTINCT cd.demo_sk) AS demo_count,
+        AVG(cd.purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics cd
+    GROUP BY 
+        cd.education_status
+), SalesData AS (
+    SELECT 
+        SUM(ws.ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        AVG(ws.net_profit) AS avg_net_profit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk
+)
+SELECT 
+    ai.city_name,
+    ai.full_address,
+    ai.num_customers,
+    ds.education_status,
+    ds.demo_count,
+    ds.avg_purchase_estimate,
+    sd.total_sales,
+    sd.total_orders,
+    sd.avg_net_profit
+FROM 
+    AddressInfo ai
+JOIN 
+    DemographicStats ds ON ai.num_customers > ds.demo_count
+JOIN 
+    SalesData sd ON sd.total_orders > 100
+ORDER BY 
+    ai.num_customers DESC, ds.demo_count ASC;

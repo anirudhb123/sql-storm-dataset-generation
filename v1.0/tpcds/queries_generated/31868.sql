@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_sales_price) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_sales_price) DESC) AS rank
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN 2451195 AND 2451198
+    GROUP BY ss_store_sk
+),
+customer_groups AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        IF(cd.cd_purchase_estimate IS NULL, 0, cd.cd_purchase_estimate) AS purchase_estimate,
+        COUNT(DISTINCT c.c_customer_id) OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_group_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+item_analysis AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        SUM(ws.ws_quantity) AS total_quantity_sold
+    FROM item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_item_desc
+    HAVING SUM(ws.ws_quantity) > 0
+),
+combined_summary AS (
+    SELECT 
+        ss.ss_store_sk,
+        ss.total_sales,
+        ss.total_transactions,
+        cg.cd_gender,
+        cg.cd_marital_status,
+        ia.i_item_desc,
+        ia.total_quantity_sold,
+        ROW_NUMBER() OVER (PARTITION BY ss.ss_store_sk ORDER BY ss.total_sales DESC) AS store_sales_rank
+    FROM sales_summary ss
+    LEFT JOIN customer_groups cg ON cg.c_customer_sk = ss.ss_store_sk
+    LEFT JOIN item_analysis ia ON ia.i_item_sk = ss.ss_item_sk
+)
+SELECT 
+    cs.ss_store_sk,
+    cs.total_sales,
+    cs.total_transactions,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    COALESCE(cs.i_item_desc, 'No Items Sold') AS item_description,
+    cs.total_quantity_sold,
+    CASE
+        WHEN cs.total_sales > 1000 THEN 'High Sales'
+        WHEN cs.total_sales BETWEEN 500 AND 1000 THEN 'Medium Sales'
+        ELSE 'Low Sales'
+    END AS sales_category
+FROM combined_summary cs
+WHERE cs.store_sales_rank <= 5
+ORDER BY cs.total_sales DESC;

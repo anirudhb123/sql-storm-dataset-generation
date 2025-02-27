@@ -1,0 +1,74 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+), 
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(ps.ps_availqty, 0) AS available_quantity,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_revenue
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+), 
+MonthlyRevenue AS (
+    SELECT 
+        DATE_TRUNC('month', o.o_orderdate) AS month,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS monthly_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        DATE_TRUNC('month', o.o_orderdate)
+), 
+NationalRevenue AS (
+    SELECT 
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS national_revenue
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    r.r_name AS region_name,
+    COALESCE(m.monthly_revenue, 0) AS revenue_per_month,
+    COALESCE(SD.supplier_revenue, 0) AS revenue_per_supplier,
+    COALESCE(NR.national_revenue, 0) AS revenue_per_nation
+FROM 
+    (SELECT DISTINCT r_name FROM region) r
+LEFT JOIN 
+    MonthlyRevenue m ON true
+LEFT JOIN 
+    SupplierDetails SD ON true
+LEFT JOIN 
+    NationalRevenue NR ON true
+ORDER BY 
+    r.region_name, m.monthly_revenue DESC
+FETCH FIRST 100 ROWS ONLY;

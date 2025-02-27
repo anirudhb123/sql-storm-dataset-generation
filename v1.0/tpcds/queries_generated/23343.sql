@@ -1,0 +1,89 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS rank_price
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+),
+FilteredReturns AS (
+    SELECT 
+        wr_order_number,
+        SUM(wr_return_quantity) AS total_returned,
+        COUNT(wr_item_sk) AS return_count
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_order_number
+    HAVING 
+        SUM(wr_return_quantity) > 1
+),
+CustomerQuery AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        MAX(sa.ca_country) AS country,
+        SUM(cs.ws_sales_price) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        customer_address sa ON c.c_current_addr_sk = sa.ca_address_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+    HAVING 
+        SUM(ws.ws_sales_price) > (SELECT AVG(ws_ext_sales_price) FROM web_sales) 
+    OR 
+        STRING_AGG(cd.cd_marital_status, '') LIKE '%S%'
+),
+FinalResults AS (
+    SELECT 
+        cq.c_customer_id,
+        rq.ws_order_number,
+        rq.ws_sales_price,
+        fr.total_returned,
+        fr.return_count,
+        cq.total_spent,
+        CASE 
+            WHEN cq.cd_gender = 'M' THEN 'Male'
+            WHEN cq.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other' 
+        END AS gender_text,
+        CASE 
+            WHEN cq.cd_marital_status IS NULL THEN 'Unknown'
+            ELSE cq.cd_marital_status 
+        END AS marital_status_text
+    FROM 
+        CustomerQuery cq
+    LEFT JOIN 
+        RankedSales rq ON cq.c_customer_id = rq.web_site_sk
+    LEFT JOIN 
+        FilteredReturns fr ON rq.ws_order_number = fr.wr_order_number
+)
+
+SELECT 
+    f.c_customer_id,
+    ROUND(f.total_spent, 2) AS total_spent,
+    COUNT(DISTINCT f.ws_order_number) AS total_orders,
+    f.gender_text,
+    f.marital_status_text,
+    COALESCE(f.total_returned, 0) AS total_returns,
+    COALESCE(f.return_count, 0) AS unique_return_count
+FROM 
+    FinalResults f
+WHERE 
+    f.total_spent > 1000
+AND 
+    f.gender_text IS NOT NULL
+ORDER BY 
+    f.total_spent DESC
+FETCH FIRST 10 ROWS ONLY;

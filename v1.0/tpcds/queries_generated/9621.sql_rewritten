@@ -1,0 +1,60 @@
+WITH SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        dd.d_year,
+        dd.d_month_seq,
+        dd.d_dow,
+        s.s_store_name
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    JOIN 
+        store s ON s.s_store_sk = ws.ws_warehouse_sk
+    WHERE 
+        dd.d_year = 2000 AND 
+        dd.d_month_seq IN (1, 2, 3) 
+),
+AggregatedSales AS (
+    SELECT 
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        SalesData
+    GROUP BY 
+        ca.ca_city, 
+        ca.ca_state, 
+        cd.cd_gender
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    cd.cd_gender,
+    total_quantity,
+    total_sales,
+    total_orders,
+    RANK() OVER (PARTITION BY ca.ca_city, ca.ca_state ORDER BY total_sales DESC) AS sales_rank
+FROM 
+    AggregatedSales
+ORDER BY 
+    ca.ca_state, 
+    total_sales DESC
+LIMIT 100;

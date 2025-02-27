@@ -1,0 +1,73 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+date_info AS (
+    SELECT 
+        d.d_date_sk,
+        d.d_year,
+        d.d_month_seq,
+        CASE 
+            WHEN d.d_holiday = 'Y' THEN 'Holiday'
+            ELSE 'Regular'
+        END AS date_type
+    FROM 
+        date_dim d 
+    WHERE 
+        d.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+),
+sales_info AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk
+),
+promo_summary AS (
+    SELECT 
+        ps.p_promo_sk,
+        ps.p_promo_name,
+        SUM(cs.cs_ext_sales_price) AS total_promo_sales
+    FROM 
+        promotion ps
+    JOIN 
+        catalog_sales cs ON ps.p_promo_sk = cs.cs_promo_sk
+    GROUP BY 
+        ps.p_promo_sk, ps.p_promo_name
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    di.d_year,
+    di.date_type,
+    si.total_quantity,
+    si.total_sales,
+    ps.total_promo_sales
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_info si ON si.ws_item_sk IN (SELECT DISTINCT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = ci.c_customer_sk) 
+LEFT JOIN 
+    date_info di ON di.d_date_sk = si.ws_sold_date_sk
+LEFT JOIN 
+    promo_summary ps ON (ps.total_promo_sales IS NOT NULL AND (ci.rank <= 5 OR ci.cd_marital_status = 'S'))
+WHERE 
+    ci.rank <= 10
+ORDER BY 
+    ci.cd_gender, di.d_year DESC, si.total_sales DESC;

@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        COALESCE(mo.production_year, 0) AS production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    LEFT JOIN 
+        aka_title mo ON ml.linked_movie_id = mo.id
+
+    UNION ALL
+
+    SELECT 
+        mo.id AS movie_id,
+        mo.title,
+        COALESCE(mo.production_year, 0) AS production_year,
+        mh.depth + 1 AS depth
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mo ON ml.linked_movie_id = mo.id
+    WHERE 
+        mh.depth < 5
+),
+MovieCast AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.id) AS roles_count
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id, a.name
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        MAX(CASE WHEN mi.info_type_id = 1 THEN mi.info END) AS synopsis,
+        MAX(CASE WHEN mi.info_type_id = 2 THEN mi.info END) AS awards
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.depth,
+    COALESCE(mc.actor_name, 'Unknown') AS actor_name,
+    COALESCE(mc.roles_count, 0) AS roles_count,
+    mi.synopsis,
+    mi.awards,
+    IFNULL(mh.production_year, 'Unknown Year') AS production_year
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    MovieCast mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    MovieInfo mi ON mh.movie_id = mi.movie_id
+ORDER BY 
+    mh.depth, mh.title;

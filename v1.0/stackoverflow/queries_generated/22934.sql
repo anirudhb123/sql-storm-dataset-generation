@@ -1,0 +1,78 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.Reputation, 
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8 -- BountyStart
+    GROUP BY 
+        U.Id, U.Reputation
+), 
+RankedUsers AS (
+    SELECT 
+        UserId, 
+        Reputation, 
+        QuestionCount, 
+        AnswerCount, 
+        TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY Reputation ORDER BY QuestionCount DESC, AnswerCount DESC) AS UserRank
+    FROM 
+        UserReputation
+),
+RecentBadges AS (
+    SELECT 
+        B.UserId, 
+        B.Name, 
+        B.Class,
+        ROW_NUMBER() OVER (PARTITION BY B.UserId ORDER BY B.Date DESC) AS BadgeRank
+    FROM 
+        Badges B
+    WHERE 
+        B.Date >= NOW() - INTERVAL '1 year'
+),
+QualifiedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        R.Reputation,
+        R.QuestionCount,
+        R.AnswerCount,
+        R.TotalBounty,
+        COALESCE(RB.Name, 'No Recent Badge') AS RecentBadge,
+        R.UserRank
+    FROM 
+        Users U
+    JOIN 
+        RankedUsers R ON U.Id = R.UserId
+    LEFT JOIN 
+        RecentBadges RB ON U.Id = RB.UserId AND RB.BadgeRank = 1
+    WHERE 
+        R.UserRank <= 5 AND R.TotalBounty > 0
+)
+SELECT 
+    QU.UserId,
+    QU.DisplayName,
+    QU.Reputation,
+    QU.QuestionCount,
+    QU.AnswerCount,
+    QU.TotalBounty,
+    QU.RecentBadge,
+    CASE WHEN QU.QuestionCount > QU.AnswerCount THEN 'Questions Dominant' 
+         WHEN QU.AnswerCount > QU.QuestionCount THEN 'Answers Dominant' 
+         ELSE 'Balanced' END AS ActivityProfile,
+    (SELECT STRING_AGG(T.TagName, ', ') 
+     FROM Tags T 
+     JOIN Posts P ON T.Id = P.TagId 
+     WHERE P.OwnerUserId = QU.UserId) AS Tags
+FROM 
+    QualifiedUsers QU
+ORDER BY 
+    QU.Reputation DESC, 
+    QU.QuestionCount DESC;
+

@@ -1,0 +1,80 @@
+
+WITH RankedTitles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS title_rank
+    FROM
+        title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+CompanyMovies AS (
+    SELECT
+        mc.movie_id,
+        c.name AS company_name,
+        c.country_code,
+        ct.kind AS company_type
+    FROM
+        movie_companies mc
+    JOIN
+        company_name c ON mc.company_id = c.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+),
+ActorCharacter AS (
+    SELECT
+        c.id AS cast_id,
+        a.name AS actor_name,
+        r.role AS actor_role,
+        t.title AS movie_title,
+        t.production_year
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    JOIN
+        title t ON c.movie_id = t.id
+    JOIN
+        role_type r ON c.role_id = r.id
+),
+FilteredMovies AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(k.keyword) AS num_keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+    HAVING 
+        COUNT(k.keyword) > 3
+)
+SELECT
+    a.actor_name,
+    a.movie_title,
+    a.production_year,
+    c.company_name,
+    c.country_code,
+    c.company_type,
+    r.title_rank,
+    f.num_keywords
+FROM
+    ActorCharacter a
+LEFT JOIN
+    CompanyMovies c ON a.movie_title = c.movie_id
+LEFT JOIN
+    RankedTitles r ON a.movie_title = r.title_id
+LEFT JOIN
+    FilteredMovies f ON a.movie_title = f.movie_id
+WHERE
+    a.actor_role IS NOT NULL
+    AND a.actor_name IS NOT NULL
+    AND ((c.country_code IS NULL OR c.country_code != 'USA') OR (c.company_type = 'Distributor'))
+ORDER BY
+    a.actor_name ASC,
+    a.production_year DESC,
+    r.title_rank
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

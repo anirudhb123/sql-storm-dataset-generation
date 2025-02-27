@@ -1,0 +1,48 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' 
+        AND cd.cd_marital_status = 'M'
+        AND cd.cd_purchase_estimate > 500
+    GROUP BY 
+        ws.web_site_sk, ws.ws_order_number
+),
+Promotions AS (
+    SELECT 
+        p.p_promo_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS promotion_orders,
+        SUM(ws.ws_net_paid_inc_tax) AS total_promo_sales
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_sk
+)
+SELECT 
+    ra.web_site_sk,
+    ra.sales_rank,
+    ra.total_quantity,
+    ra.total_sales,
+    pr.promotion_orders,
+    pr.total_promo_sales
+FROM 
+    RankedSales ra
+LEFT JOIN 
+    Promotions pr ON ra.web_site_sk = pr.p_promo_sk
+WHERE 
+    ra.sales_rank <= 10
+ORDER BY 
+    ra.total_sales DESC, ra.web_site_sk;

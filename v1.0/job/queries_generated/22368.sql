@@ -1,0 +1,56 @@
+WITH Recursive_CTE AS (
+    SELECT a.name AS actor_name, 
+           t.title AS movie_title, 
+           t.production_year,
+           ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS recent_movie
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN aka_title t ON ci.movie_id = t.movie_id
+    WHERE t.production_year IS NOT NULL
+),
+Movie_Collective AS (
+    SELECT m.id AS movie_id,
+           m.title,
+           COALESCE(SUM(CASE WHEN ci.nr_order IS NOT NULL THEN 1 ELSE 0 END), 0) AS actor_count,
+           COUNT(DISTINCT mk.keyword) AS keyword_count,
+           MAX(CASE WHEN ci.person_role_id IS NULL THEN 'Unknown' ELSE c.role END) AS primary_role
+    FROM aka_title m
+    LEFT JOIN cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN role_type c ON ci.role_id = c.id
+    GROUP BY m.id
+),
+Keyword_Summary AS (
+    SELECT k.keyword,
+           COUNT(m.movie_id) AS occurrence
+    FROM keyword k
+    JOIN movie_keyword mk ON k.id = mk.keyword_id
+    JOIN aka_title m ON mk.movie_id = m.id
+    GROUP BY k.keyword
+    HAVING COUNT(m.movie_id) > 5
+),
+Selected_Actors AS (
+    SELECT ac.actor_name, 
+           ROW_NUMBER() OVER (ORDER BY COUNT(m.movie_id) DESC) AS actor_rank
+    FROM cast_info ci
+    JOIN aka_name ac ON ci.person_id = ac.person_id
+    JOIN aka_title m ON ci.movie_id = m.movie_id
+    GROUP BY ac.actor_name
+    HAVING COUNT(m.movie_id) > 3
+)
+SELECT DISTINCT
+    rc.actor_name,
+    mc.title,
+    mc.production_year,
+    mc.actor_count,
+    K.keyword,
+    KS.occurrence AS keyword_usage,
+    sa.actor_rank
+FROM Recursive_CTE rc
+JOIN Movie_Collective mc ON rc.movie_title = mc.title
+JOIN Keyword_Summary K ON mc.keyword_count = K.occurrence
+LEFT JOIN Selected_Actors sa ON rc.actor_name = sa.actor_name
+WHERE mc.actor_count > 1
+  AND mc.production_year BETWEEN 2000 AND 2020
+  AND K.keyword IS NOT NULL
+ORDER BY rc.actor_name, mc.production_year DESC;

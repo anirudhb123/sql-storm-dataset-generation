@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+TotalSales AS (
+    SELECT 
+        rs.ws_order_number,
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS total_sales,
+        COUNT(*) AS total_items
+    FROM 
+        RankedSales rs
+    GROUP BY 
+        rs.ws_order_number
+    HAVING 
+        COUNT(*) > 1
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_income_band_sk
+)
+SELECT 
+    cs.c_customer_id,
+    cs.cd_gender,
+    cs.cd_income_band_sk,
+    cs.order_count,
+    cs.total_profit,
+    ts.total_sales,
+    ts.total_items
+FROM 
+    CustomerStats cs
+JOIN 
+    TotalSales ts ON cs.order_count = ts.total_items
+WHERE 
+    (cs.cd_income_band_sk IS NULL OR cs.cd_income_band_sk IN (SELECT ib_income_band_sk FROM income_band WHERE ib_lower_bound <= 50000)) 
+    AND cs.total_profit > 1000
+ORDER BY 
+    cs.total_profit DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

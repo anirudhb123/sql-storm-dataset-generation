@@ -1,0 +1,69 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM t.production_year) ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        COUNT(c.id) AS num_cast_members,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON ak.person_id = c.person_id
+    GROUP BY 
+        c.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        cd.num_cast_members,
+        cd.cast_names
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CastDetails cd ON rm.movie_id = cd.movie_id
+    WHERE 
+        rm.year_rank <= 3
+        AND (cd.num_cast_members IS NULL OR cd.num_cast_members >= 5)
+),
+TitleWithKeyword AS (
+    SELECT 
+        ft.movie_id,
+        ft.title,
+        ft.production_year,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        FilteredMovies ft
+    LEFT JOIN 
+        movie_keyword mk ON ft.movie_id = mk.movie_id
+    GROUP BY 
+        ft.movie_id, ft.title, ft.production_year
+)
+SELECT 
+    t.movie_id,
+    t.title,
+    t.production_year,
+    COALESCE(t.keyword_count, 0) AS keyword_count,
+    CASE
+        WHEN t.keyword_count >= 2 THEN 'Popular'
+        WHEN t.keyword_count = 1 THEN 'Moderate'
+        ELSE 'Unpopular'
+    END AS popularity
+FROM 
+    TitleWithKeyword t
+WHERE 
+    t.title LIKE '%Mystery%' 
+    OR (t.title ILIKE '%Adventure%' AND t.production_year < 2000)
+ORDER BY 
+    t.production_year DESC,
+    keyword_count DESC;

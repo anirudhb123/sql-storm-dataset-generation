@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopCommentedPosts AS (
+    SELECT 
+        PostId,
+        COUNT(c.Id) AS TotalComments
+    FROM 
+        Comments c
+    GROUP BY 
+        PostId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        tcp.TotalComments
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TopCommentedPosts tcp ON rp.PostId = tcp.PostId
+    WHERE 
+        rp.Rank <= 3
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.CommentCount,
+    tp.TotalComments,
+    us.TotalScore,
+    us.PostCount
+FROM 
+    TopPosts tp
+JOIN 
+    Users up ON tp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = up.Id)
+JOIN 
+    UserScores us ON up.Id = us.UserId
+ORDER BY 
+    us.TotalScore DESC, tp.Score DESC;

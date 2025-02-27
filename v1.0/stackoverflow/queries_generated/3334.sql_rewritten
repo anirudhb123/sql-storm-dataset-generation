@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.Id END) AS Upvotes,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS Downvotes,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS TotalEditHistory,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 24) 
+    GROUP BY 
+        ph.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND p.Id IN (
+            SELECT DISTINCT ph.PostId 
+            FROM PostHistory ph 
+            WHERE ph.PostHistoryTypeId = 10 
+        )
+)
+SELECT 
+    u.DisplayName,
+    rp.PostId,
+    rp.Title AS QuestionTitle,
+    rp.CreationDate,
+    rp.Score,
+    ups.Upvotes,
+    ups.Downvotes,
+    ups.TotalVotes,
+    phs.TotalEditHistory,
+    phs.LastEdited,
+    CASE 
+        WHEN cp.PostId IS NOT NULL THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserVoteSummary ups ON u.Id = ups.UserId
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.UserPostRank <= 5 
+ORDER BY 
+    u.DisplayName, rp.CreationDate;

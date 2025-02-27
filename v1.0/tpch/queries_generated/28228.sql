@@ -1,0 +1,25 @@
+SELECT 
+    p.p_name, 
+    p.p_brand, 
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    SUM(l.l_quantity) AS total_quantity_sold,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_net_price,
+    STRING_AGG(DISTINCT CONCAT(c.c_name, ': ', o.o_orderstatus), '; ') AS customer_orders,
+    RANK() OVER (PARTITION BY p.p_type ORDER BY total_quantity_sold DESC) AS rank_within_type
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_type
+HAVING 
+    COUNT(DISTINCT ps.s_suppkey) > 5 
+    AND AVG(l.l_extendedprice * (1 - l.l_discount)) > 100
+ORDER BY 
+    rank_within_type, total_quantity_sold DESC;

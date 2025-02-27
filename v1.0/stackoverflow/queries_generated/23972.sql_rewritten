@@ -1,0 +1,73 @@
+WITH RecentUserActivities AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        MAX(ph.CreationDate) AS LastActivityDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        PostHistory ph ON u.Id = ph.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+RankedUsers AS (
+    SELECT 
+        *,
+        DENSE_RANK() OVER (ORDER BY TotalPosts DESC, TotalUpVotes DESC) AS PostRank,
+        DENSE_RANK() OVER (ORDER BY TotalComments DESC, LastActivityDate DESC) AS CommentRank
+    FROM 
+        RecentUserActivities
+),
+
+FilteredUsers AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN LastActivityDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR' THEN 'Inactive'
+            WHEN TotalPosts = 0 THEN 'New User'
+            ELSE 'Active User'
+        END AS UserStatus
+    FROM 
+        RankedUsers
+)
+
+SELECT 
+    fu.UserId,
+    fu.DisplayName,
+    fu.TotalPosts,
+    fu.TotalComments,
+    fu.TotalUpVotes,
+    fu.TotalDownVotes,
+    fu.TotalBadges,
+    fu.UserStatus,
+    COALESCE(NULLIF(fu.LastActivityDate, '0001-01-01'::timestamp), cast('2024-10-01 12:34:56' as timestamp)) AS LastActivity, 
+    (
+        SELECT ARRAY_AGG( DISTINCT pt.Name )
+        FROM PostTypes pt
+        INNER JOIN Posts p ON pt.Id = p.PostTypeId
+        WHERE p.OwnerUserId = fu.UserId
+    ) AS AssociatedPostTypes 
+FROM 
+    FilteredUsers fu
+WHERE 
+    fu.TotalPosts > 5 AND
+    fu.TotalUpVotes > fu.TotalDownVotes
+ORDER BY 
+    fu.UserStatus, 
+    fu.PostRank,
+    fu.CommentRank DESC
+LIMIT 10;

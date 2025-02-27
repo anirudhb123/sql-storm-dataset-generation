@@ -1,0 +1,72 @@
+
+WITH CustomerOrderStats AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+SupplierPartStats AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_cost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+PartOrderDetails AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM
+        part p
+    JOIN
+        lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE
+        o.o_orderstatus = 'O'
+    GROUP BY
+        p.p_partkey, p.p_name
+),
+RankedParts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        total_revenue,
+        ROW_NUMBER() OVER (ORDER BY total_revenue DESC) AS revenue_rank
+    FROM
+        PartOrderDetails p
+    WHERE
+        total_revenue > (SELECT AVG(total_revenue) FROM PartOrderDetails)
+)
+SELECT
+    c.c_name,
+    cs.order_count,
+    cs.total_spent,
+    rp.p_name,
+    rp.total_revenue,
+    COALESCE(s.avg_cost, 0) AS average_cost_per_supplier
+FROM
+    CustomerOrderStats cs
+JOIN
+    RankedParts rp ON cs.order_count > 5
+LEFT JOIN
+    SupplierPartStats s ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+WHERE
+    cs.total_spent IS NOT NULL
+ORDER BY
+    cs.total_spent DESC, rp.total_revenue DESC
+FETCH FIRST 100 ROWS ONLY;

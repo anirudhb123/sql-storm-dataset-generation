@@ -1,0 +1,64 @@
+
+WITH UserVotes AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotesCount,
+        SUM(CASE WHEN V.VoteTypeId = 8 THEN V.BountyAmount ELSE 0 END) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.CreationDate,
+        P.Score,
+        COALESCE(CNT.CommentCount, 0) AS CommentCount,
+        COALESCE(UP.UpVotesCount, 0) AS UpVotesCount,
+        COALESCE(DN.DownVotesCount, 0) AS DownVotesCount,
+        COALESCE(BT.TotalBounty, 0) AS TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY P.CreationDate DESC) AS Rank
+    FROM Posts P
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) CNT ON P.Id = CNT.PostId
+    LEFT JOIN UserVotes UP ON P.OwnerUserId = UP.UserId
+    LEFT JOIN UserVotes DN ON P.OwnerUserId = DN.UserId
+    LEFT JOIN (
+        SELECT PostId, SUM(BountyAmount) AS TotalBounty
+        FROM Votes 
+        WHERE VoteTypeId = 8
+        GROUP BY PostId
+    ) BT ON P.Id = BT.PostId
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.CommentCount,
+    PS.UpVotesCount,
+    PS.DownVotesCount,
+    PS.TotalBounty,
+    (CASE 
+        WHEN PS.PostTypeId = 1 THEN 'Question'
+        WHEN PS.PostTypeId = 2 THEN 'Answer'
+        ELSE 'Other'
+     END) AS PostType,
+    (SELECT STRING_AGG(T.TagName, ', ')
+     FROM Tags T
+     JOIN Posts P2 ON T.Id = ANY(string_to_array(P2.Tags, '>'))
+     WHERE P2.Id = PS.PostId) AS Tags
+FROM PostStats PS
+WHERE (PS.CommentCount > 5
+AND PS.TotalBounty > 0)
+OR (PS.UpVotesCount - PS.DownVotesCount > 10)
+ORDER BY PS.Rank
+LIMIT 100;

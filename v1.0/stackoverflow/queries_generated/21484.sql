@@ -1,0 +1,104 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+        AND p.CreationDate > (CURRENT_DATE - INTERVAL '1 year')
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT CASE WHEN b.Class = 1 THEN b.Id END) AS GoldBadges,
+        COUNT(DISTINCT CASE WHEN b.Class = 2 THEN b.Id END) AS SilverBadges,
+        COUNT(DISTINCT CASE WHEN b.Class = 3 THEN b.Id END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        COALESCE(ur.Reputation, 0) AS UserReputation,
+        ur.GoldBadges,
+        ur.SilverBadges,
+        ur.BronzeBadges
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseReasonCounts
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed and Reopened
+    GROUP BY 
+        ph.PostId
+),
+FinalStatistics AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.Score,
+        ps.ViewCount,
+        ps.AnswerCount,
+        ps.UserReputation,
+        ps.GoldBadges,
+        ps.SilverBadges,
+        ps.BronzeBadges,
+        COALESCE(cp.CloseReasonCounts, 0) AS CloseReasons
+    FROM 
+        PostStatistics ps
+    LEFT JOIN 
+        ClosedPosts cp ON ps.PostId = cp.PostId
+    WHERE 
+        ps.UserReputation >= (SELECT AVG(Reputation) FROM Users) OR ps.AnswerCount > 3
+)
+SELECT 
+    *,
+    CASE 
+        WHEN CloseReasons > 0 THEN 'Has been closed or reopened'
+        ELSE 'Active'
+    END AS Status,
+    CASE 
+        WHEN UserReputation > 1000 THEN 'High Reputation'
+        WHEN UserReputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationLevel,
+    STRING_AGG(DISTINCT nt.Name, ', ') AS NotableTags
+FROM 
+    FinalStatistics fs
+LEFT JOIN 
+    (SELECT DISTINCT
+        p.Id AS PostId,
+        TRIM(BOTH '<>' FROM unnest(string_to_array(p.Tags, '>'))) AS Name
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL) nt ON fs.PostId = nt.PostId
+GROUP BY 
+    fs.PostId, fs.Title, fs.CreationDate, fs.Score, fs.ViewCount, fs.AnswerCount, 
+    fs.UserReputation, fs.GoldBadges, fs.SilverBadges, fs.BronzeBadges, fs.CloseReasons
+ORDER BY 
+    fs.Score DESC, fs.ViewCount DESC;

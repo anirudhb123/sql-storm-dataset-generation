@@ -1,0 +1,42 @@
+WITH MovieRoles AS (
+    SELECT 
+        ct.name AS role_name,
+        mi.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    JOIN 
+        movie_info mi ON ci.movie_id = mi.movie_id
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+    GROUP BY 
+        ct.name, mi.movie_id
+),
+TopMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        mr.actor_count,
+        ROW_NUMBER() OVER (ORDER BY mr.actor_count DESC) AS rank
+    FROM 
+        aka_title m
+    JOIN 
+        MovieRoles mr ON m.id = mr.movie_id
+    WHERE 
+        m.production_year >= 2000
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    COALESCE(mk.keyword, 'No Keywords') AS keyword
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = tm.movie_id
+WHERE 
+    tm.rank <= 10 OR tm.actor_count IS NULL
+ORDER BY 
+    tm.actor_count DESC, tm.production_year DESC;

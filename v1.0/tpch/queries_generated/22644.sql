@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+SupplierPartStats AS (
+    SELECT 
+        ps.ps_partkey, 
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_availqty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+OrderLineStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(l.l_orderkey) AS line_item_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ss.s_name AS supplier_name,
+    rss.r_name AS region_name,
+    os.total_revenue,
+    os.avg_quantity,
+    sps.total_availqty,
+    COALESCE(sps.supplier_count, 0) AS supplier_count,
+    CASE 
+        WHEN os.avg_quantity > 100 THEN 'High Volume' 
+        WHEN os.avg_quantity BETWEEN 50 AND 100 THEN 'Medium Volume' 
+        ELSE 'Low Volume' 
+    END AS order_volume_category
+FROM 
+    part p
+LEFT JOIN 
+    SupplierPartStats sps ON p.p_partkey = sps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rss ON sps.supplier_count > 0 AND 
+    rss.rn <= 5 AND 
+    rss.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name LIKE 'A%')
+LEFT JOIN 
+    OrderLineStats os ON os.l_orderkey IN (
+        SELECT 
+            o.o_orderkey 
+        FROM 
+            orders o 
+        WHERE 
+            o.o_totalprice > p.p_retailprice
+    )
+WHERE 
+    p.p_size IS NOT NULL 
+    AND (p.p_comment <> '' OR p.p_comment IS NULL)
+ORDER BY 
+    order_volume_category, 
+    p.p_partkey;

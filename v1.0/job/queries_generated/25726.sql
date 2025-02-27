@@ -1,0 +1,26 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COALESCE(SUM(mci.note::int), 0) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY a.production_year DESC) AS rank
+    FROM aka_title a
+    JOIN cast_info ci ON a.id = ci.movie_id
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN movie_companies mci ON a.id = mci.movie_id
+    LEFT JOIN movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE a.production_year >= 2000  -- Focusing on movies from the year 2000 onwards
+    GROUP BY a.id, a.title, a.production_year
+)
+SELECT 
+    movie_title,
+    production_year,
+    actor_names,
+    keywords,
+    company_count
+FROM RankedMovies
+WHERE rank <= 5  -- Fetching only the top 5 ranked movies
+ORDER BY production_year DESC, movie_title;

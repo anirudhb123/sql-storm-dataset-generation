@@ -1,0 +1,73 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rnk
+    FROM 
+        orders o
+),
+TopOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM 
+        RankedOrders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.rnk <= 10
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+NationRevenue AS (
+    SELECT 
+        n.n_nationkey,
+        SUM(to.total_revenue) AS nation_revenue
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        TopOrders to ON o.o_orderkey = to.o_orderkey
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(n.nation_revenue, 0) AS revenue,
+    COALESCE(ss.total_supplycost, 0) AS supplier_cost,
+    ss.unique_parts AS unique_parts_count,
+    CASE 
+        WHEN COALESCE(n.nation_revenue, 0) > COALESCE(ss.total_supplycost, 0) THEN 'Revenue Greater'
+        ELSE 'Cost Greater or Equal'
+    END AS comparison
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    NationRevenue n ON n.n_nationkey = n.n_nationkey
+LEFT JOIN 
+    SupplierStats ss ON ss.s_suppkey = (SELECT ps.ps_suppkey 
+                                          FROM partsupp ps 
+                                          WHERE ps.ps_partkey = (SELECT MIN(p.p_partkey) 
+                                                                  FROM part p))
+                                          LIMIT 1)
+ORDER BY 
+    revenue DESC, 
+    supplier_cost ASC;

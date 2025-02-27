@@ -1,0 +1,89 @@
+WITH TagCounts AS (
+    SELECT
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM
+        Tags t
+    JOIN
+        Posts p ON p.Tags ILIKE '%' || t.TagName || '%'
+    GROUP BY
+        t.TagName
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT po.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN vo.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vo.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM
+        Users u
+    LEFT JOIN
+        Posts po ON po.OwnerUserId = u.Id
+    LEFT JOIN
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN
+        Votes vo ON vo.UserId = u.Id
+    GROUP BY
+        u.Id
+),
+PostHistorySummary AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM
+        Posts p
+    LEFT JOIN
+        PostHistory ph ON ph.PostId = p.Id AND ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY
+        p.Id
+),
+TopTags AS (
+    SELECT
+        TagName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        TotalViews,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalViews DESC) AS RankByViews,
+        RANK() OVER (ORDER BY TotalScore DESC) AS RankByScore
+    FROM
+        TagCounts
+)
+SELECT
+    ut.DisplayName AS TopUser,
+    ut.PostCount,
+    ut.CommentCount,
+    ut.UpVotes,
+    ut.DownVotes,
+    tt.TagName,
+    tt.PostCount AS TagPostCount,
+    tt.QuestionCount,
+    tt.AnswerCount,
+    tt.TotalViews,
+    tt.TotalScore,
+    p.Title AS RecentlyEditedPost,
+    p.LastEditDate
+FROM
+    UserActivity ut
+JOIN
+    TopTags tt ON ut.PostCount > 0
+JOIN
+    PostHistorySummary p ON p.PostId IN (SELECT Id FROM Posts ORDER BY LastActivityDate DESC LIMIT 1)
+WHERE
+    tt.RankByViews <= 5 
+    OR tt.RankByScore <= 5 
+ORDER BY
+    ut.PostCount DESC,
+    tt.TotalViews DESC, 
+    p.LastEditDate DESC;

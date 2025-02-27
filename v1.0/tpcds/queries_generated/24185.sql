@@ -1,0 +1,101 @@
+
+WITH Customer_CTE AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name,
+        c.c_last_name,
+        c.c_birth_year,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        (cd.cd_gender IS NOT NULL OR c.c_birth_year IS NOT NULL)
+), 
+Item_Sales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        Customer_CTE cc ON ws.ws_bill_customer_sk = cc.c_customer_sk
+    GROUP BY 
+        ws.ws_item_sk
+), 
+Sales_Analysis AS (
+    SELECT 
+        is.ws_item_sk, 
+        is.total_quantity, 
+        is.total_net_profit,
+        COALESCE(RANK() OVER (ORDER BY is.total_net_profit DESC), 0) AS profit_rank,
+        CASE 
+            WHEN is.total_quantity > 100 THEN 'High Volume'
+            WHEN is.total_quantity BETWEEN 50 AND 100 THEN 'Medium Volume'
+            ELSE 'Low Volume'
+        END AS volume_category
+    FROM 
+        Item_Sales is 
+    WHERE 
+        is.total_net_profit IS NOT NULL
+), 
+Odd_Item_Performance AS (
+    SELECT 
+        sa.ws_item_sk,
+        sa.total_quantity,
+        sa.total_net_profit,
+        sa.profit_rank,
+        sa.volume_category,
+        ROW_NUMBER() OVER (PARTITION BY sa.volume_category ORDER BY sa.total_net_profit DESC) as rn
+    FROM 
+        Sales_Analysis sa
+    WHERE 
+        MOD(sa.ws_item_sk, 2) = 1 -- bizarre condition for odd item SK
+)
+SELECT 
+    o.ws_item_sk,
+    o.total_quantity,
+    o.total_net_profit,
+    o.volume_category
+FROM 
+    Odd_Item_Performance o
+WHERE 
+    o.rn <= 5
+ORDER BY 
+    o.volume_category, o.total_net_profit DESC;
+
+WITH RECURSIVE Sankey AS (
+    SELECT 
+        1 AS level, 
+        i_item_sk AS item_sk, 
+        total_net_profit AS value 
+    FROM 
+        Item_Sales
+    WHERE 
+        total_net_profit IS NOT NULL
+    UNION ALL
+    SELECT 
+        s.level + 1, 
+        i.item_sk, 
+        SUM(s.value * 0.8) AS value -- bizarre weighting in hypothetical scenarios
+    FROM 
+        Odd_Item_Performance i
+    JOIN 
+        Sankey s ON i.ws_item_sk = s.item_sk
+    GROUP BY 
+        i.item_sk, s.level
+)
+SELECT 
+    level, 
+    SUM(value) AS total_value
+FROM 
+    Sankey
+GROUP BY 
+    level
+HAVING 
+    level < 5
+ORDER BY 
+    level;

@@ -1,0 +1,50 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, n_comment, 0 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, n.n_comment, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+customer_order_data AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000.00
+),
+supplier_part_data AS (
+    SELECT s.s_suppkey, s.s_nationkey, p.p_partkey, p.p_retailprice, 
+           COALESCE(ps.ps_availqty, 0) AS ps_availqty_fallback
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_brand LIKE 'Brand#%'
+),
+aggregated_prices AS (
+    SELECT np.n_name AS nation_name, AVG(sp.p_retailprice) AS avg_retail_price
+    FROM supplier_part_data sp
+    JOIN nation_hierarchy np ON sp.s_nationkey = np.n_nationkey
+    GROUP BY np.n_name
+)
+SELECT co.c_name, co.o_orderkey, co.o_totalprice, 
+       CASE 
+           WHEN op.avg_retail_price IS NULL THEN 'N/A'
+           ELSE CAST(op.avg_retail_price AS VARCHAR)
+       END AS average_supplier_price,
+       ROW_NUMBER() OVER (PARTITION BY co.o_orderkey ORDER BY co.o_totalprice DESC) AS price_rank
+FROM customer_order_data co
+LEFT JOIN aggregated_prices op ON co.c_custkey = (
+    SELECT c.c_custkey 
+    FROM customer c 
+    WHERE c.c_nationkey = (
+        SELECT n.n_nationkey 
+        FROM nation n 
+        WHERE n.n_name LIKE '%land'
+        LIMIT 1
+    )
+)
+WHERE co.order_rank <= 5
+ORDER BY co.o_orderdate DESC, price_rank;

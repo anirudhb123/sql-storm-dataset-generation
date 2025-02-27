@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND  -- Only questions
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 YEAR' -- Last year
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        u.DisplayName AS OwnerDisplayName,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.Rank <= 3  -- Top 3 questions per tag
+),
+TagInfo AS (
+    SELECT 
+        t.TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))::int[]
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(*) > 5  -- Only include tags with more than 5 questions
+)
+
+SELECT 
+    ti.TagName,
+    ti.PostCount,
+    trp.Title,
+    trp.OwnerDisplayName,
+    trp.CreationDate,
+    trp.ViewCount,
+    trp.Score
+FROM 
+    TagInfo ti
+JOIN 
+    TopRankedPosts trp ON trp.PostId IN (
+        SELECT PostId
+        FROM Posts 
+        WHERE Tags LIKE '%' || ti.TagName || '%'
+    )
+ORDER BY 
+    ti.TagName, 
+    trp.Score DESC;

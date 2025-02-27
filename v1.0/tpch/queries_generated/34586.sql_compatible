@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+NationsWithComments AS (
+    SELECT n.n_name, n.n_comment, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE n.n_comment IS NOT NULL
+    GROUP BY n.n_name, n.n_comment
+)
+SELECT rh.r_name AS region_name, 
+       n.n_name AS nation_name,
+       nwc.supplier_count,
+       ro.o_orderkey,
+       ro.total_sales,
+       CASE 
+           WHEN ro.total_sales IS NULL THEN 'No Sales'
+           ELSE CASE 
+               WHEN ro.total_sales > 10000 THEN 'High Sales'
+               ELSE 'Low Sales'
+           END
+       END AS sales_category
+FROM region rh
+LEFT JOIN nation n ON rh.r_regionkey = n.n_regionkey
+LEFT JOIN NationsWithComments nwc ON n.n_nationkey = nwc.n_nationkey
+LEFT JOIN RankedOrders ro ON nwc.supplier_count > 5
+ORDER BY rh.r_name, n.n_name, ro.total_sales DESC
+LIMIT 100 OFFSET 50;

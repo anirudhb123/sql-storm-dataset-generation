@@ -1,0 +1,72 @@
+WITH RecentPostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 ELSE 0 END), 0) AS Score
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '><')) AS TagName
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+),
+TagCounts AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS TagUsageCount
+    FROM 
+        TopTags
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagUsageCount DESC
+    LIMIT 10
+),
+TopPostsWithTags AS (
+    SELECT 
+        rps.PostId,
+        rps.Title,
+        rps.OwnerDisplayName,
+        rps.ViewCount,
+        rps.CommentCount,
+        rps.Score,
+        array_agg(DISTINCT tt.TagName) AS AssociatedTags
+    FROM 
+        RecentPostStats rps
+    JOIN 
+        TopTags tt ON rps.PostId IN (SELECT PostId FROM Posts WHERE Tags LIKE '%' || tt.TagName || '%')
+    GROUP BY 
+        rps.PostId, rps.Title, rps.OwnerDisplayName, rps.ViewCount, rps.CommentCount, rps.Score
+)
+SELECT 
+    tpt.PostId,
+    tpt.Title,
+    tpt.OwnerDisplayName,
+    tpt.ViewCount,
+    tpt.CommentCount,
+    tpt.Score,
+    tpt.AssociatedTags,
+    ROW_NUMBER() OVER (ORDER BY tpt.Score DESC) AS Rank
+FROM 
+    TopPostsWithTags tpt
+ORDER BY 
+    tpt.Score DESC
+LIMIT 20;

@@ -1,0 +1,89 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        Id,
+        PostTypeId,
+        ParentId,
+        CreationDate,
+        Score,
+        OwnerUserId,
+        Title,
+        Tags,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.PostTypeId,
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        p.Title,
+        p.Tags,
+        rp.Level + 1
+    FROM 
+        Posts p
+    JOIN RecursivePostCTE rp ON p.ParentId = rp.Id
+),
+
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+
+UserBadgeCount AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.AnswerCount,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    COALESCE(bc.BadgeCount, 0) AS UserBadges,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    AVG(rp.Score) AS AverageChildScore,
+    COUNT(DISTINCT c.Id) AS CommentCount
+FROM 
+    Posts p
+LEFT JOIN 
+    PostVoteSummary vs ON p.Id = vs.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadgeCount bc ON u.Id = bc.UserId
+LEFT JOIN 
+    Tags t ON t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '>><<')::text[])
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    RecursivePostCTE rp ON p.Id = rp.ParentId
+WHERE 
+    p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year' 
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, p.ViewCount, p.AnswerCount, bc.BadgeCount, rp.Score
+HAVING 
+    SUM(rp.Level) > 0 
+ORDER BY 
+    p.ViewCount DESC
+LIMIT 100;

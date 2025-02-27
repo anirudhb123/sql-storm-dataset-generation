@@ -1,0 +1,63 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rn,
+        COALESCE(wp.wp_access_date_sk, wd.d_date_sk) AS access_date_sk
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    LEFT JOIN 
+        date_dim wd ON ws.ws_sold_date_sk = wd.d_date_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2022)
+),
+TopItems AS (
+    SELECT 
+        sd.ws_item_sk,
+        SUM(sd.ws_net_profit) AS total_profit,
+        SUM(sd.ws_quantity) AS total_quantity,
+        SUM(sd.ws_sales_price) AS total_sales
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.rn = 1
+    GROUP BY 
+        sd.ws_item_sk
+    HAVING 
+        SUM(sd.ws_quantity) > 100
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        ti.total_profit,
+        ti.total_quantity,
+        ti.total_sales
+    FROM 
+        TopItems ti
+    JOIN 
+        item i ON ti.ws_item_sk = i.i_item_sk
+)
+SELECT 
+    id.i_item_id,
+    id.i_item_desc,
+    id.total_profit,
+    id.total_quantity,
+    id.total_sales,
+    CASE 
+        WHEN id.total_profit > 10000 THEN 'High Profit'
+        WHEN id.total_profit BETWEEN 5000 AND 10000 THEN 'Medium Profit'
+        ELSE 'Low Profit'
+    END AS profit_category,
+    CONCAT('Total Sales: $', TO_CHAR(id.total_sales, 'FM999,999,999.00')) AS sales_message
+FROM 
+    ItemDetails id
+ORDER BY 
+    id.total_profit DESC
+LIMIT 10;

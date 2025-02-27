@@ -1,0 +1,60 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        DENSE_RANK() OVER (PARTITION BY ws_order_number ORDER BY ws_sales_price DESC) AS price_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 AND  (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+high_value_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_spent
+    FROM 
+        customer_summary cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.total_spent > (SELECT AVG(total_spent) FROM customer_summary)
+)
+SELECT 
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.total_spent,
+    (SELECT COUNT(*) FROM sales_data sd WHERE sd.ws_order_number IN (SELECT ws_order_number FROM web_sales ws WHERE ws.ws_bill_customer_sk = hvc.c_customer_sk)) AS orders_count,
+    COALESCE((SELECT SUM(sr_return_quantity) FROM store_returns sr WHERE sr.sr_customer_sk = hvc.c_customer_sk), 0) AS total_returns,
+    ROUND((SUM(sd.ws_sales_price * sd.ws_quantity) - COALESCE(SUM(sr_return_amount), 0)), 2) AS net_revenue
+FROM 
+    high_value_customers hvc
+LEFT JOIN 
+    sales_data sd ON hvc.c_customer_sk = sd.ws_item_sk
+LEFT JOIN 
+    store_returns sr ON hvc.c_customer_sk = sr.sr_customer_sk
+GROUP BY 
+    hvc.c_first_name, hvc.c_last_name, hvc.total_spent
+ORDER BY 
+    net_revenue DESC
+LIMIT 10;

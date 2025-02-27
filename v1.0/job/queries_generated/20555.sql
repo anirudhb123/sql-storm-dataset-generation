@@ -1,0 +1,84 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS depth
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT
+        mk.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.depth + 1
+    FROM
+        movie_link mk
+    JOIN
+        aka_title at ON mk.linked_movie_id = at.id
+    JOIN
+        MovieHierarchy mh ON mk.movie_id = mh.movie_id
+)
+, CastWithNulls AS (
+    SELECT
+        ci.movie_id,
+        COUNT(ci.id) AS total_cast,
+        COUNT(CASE WHEN ci.person_id IS NULL THEN 1 END) AS null_person_ids,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM
+        cast_info ci
+    LEFT JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY
+        ci.movie_id
+)
+, MoviesWithKeywords AS (
+    SELECT
+        m.title,
+        k.keyword,
+        m.production_year,
+        ROW_NUMBER() OVER(PARTITION BY m.id ORDER BY k.keyword) AS keyword_rank
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT
+    mh.title,
+    mh.production_year,
+    ch.total_cast,
+    ch.null_person_ids,
+    CASE
+        WHEN ch.total_cast > 10 THEN 'Ensemble Cast'
+        WHEN ch.total_cast BETWEEN 5 AND 10 THEN 'Moderate Cast'
+        ELSE 'Minimal Cast'
+    END AS cast_category,
+    ARRAY_AGG(DISTINCT kw.keyword ORDER BY kw.keyword) AS keywords,
+    ARRAY_AGG(DISTINCT CASE 
+        WHEN kw.keyword IS NULL 
+        THEN 'No Keywords' 
+        ELSE kw.keyword 
+    END) AS non_null_keywords
+FROM
+    MovieHierarchy mh
+JOIN
+    CastWithNulls ch ON mh.movie_id = ch.movie_id
+LEFT JOIN
+    MoviesWithKeywords kw ON mh.movie_id = kw.movie_id
+WHERE
+    mh.depth = 1 AND
+    (mh.production_year IS NOT NULL OR mh.kind_id IS NULL)
+GROUP BY
+    mh.title, mh.production_year, ch.total_cast, ch.null_person_ids
+HAVING
+    COUNT(DISTINCT ch.total_cast) > 0
+ORDER BY
+    mh.production_year DESC, mh.title;

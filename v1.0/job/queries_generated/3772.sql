@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        DENSE_RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    GROUP BY 
+        a.title, a.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year, 
+        actor_count 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank <= 5
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id, 
+        cn.name AS company_name, 
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+MovieDetails AS (
+    SELECT 
+        tm.title, 
+        tm.production_year, 
+        ci.company_name, 
+        ci.company_type
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        CompanyInfo ci ON tm.title = ci.movie_id
+)
+SELECT 
+    md.title, 
+    md.production_year, 
+    COALESCE(md.company_name, 'Unknown') AS company_name,
+    COALESCE(md.company_type, 'Not Specified') AS company_type,
+    CONCAT('Produced by: ', COALESCE(md.company_name, 'No Info')) AS production_info,
+    CASE 
+        WHEN md.production_year IS NULL THEN 'Year not available'
+        ELSE 'Year: ' || md.production_year::TEXT
+    END AS year_info
+FROM 
+    MovieDetails md
+ORDER BY 
+    md.production_year DESC, 
+    md.title ASC;

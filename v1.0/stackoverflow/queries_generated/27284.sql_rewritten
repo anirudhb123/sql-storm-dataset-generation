@@ -1,0 +1,66 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalAnswers,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS TotalQuestions,
+        COALESCE(SUM(vt.Reputation), 0) AS TotalVotes,
+        SUM(CASE 
+                WHEN b.Class = 1 THEN 3 
+                WHEN b.Class = 2 THEN 2 
+                WHEN b.Class = 3 THEN 1 
+                ELSE 0
+            END) AS TotalBadgePoints
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(ph.Id) AS EditCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.UserId END) AS CloseReopenCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN ph.UserId END) AS DeleteUndeleteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months' 
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName,
+    ups.PostCount,
+    ups.TotalScore,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.TotalVotes,
+    ups.TotalBadgePoints,
+    p.Title,
+    phs.EditCount,
+    phs.CloseReopenCount,
+    phs.DeleteUndeleteCount
+FROM 
+    UserPostStats ups
+JOIN 
+    Posts p ON ups.UserId = p.OwnerUserId
+JOIN 
+    PostHistoryStats phs ON p.Id = phs.PostId
+WHERE 
+    ups.TotalScore > 0 
+ORDER BY 
+    ups.TotalScore DESC,
+    ups.TotalBadgePoints DESC
+LIMIT 10;

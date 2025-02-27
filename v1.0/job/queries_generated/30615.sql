@@ -1,0 +1,86 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keywords,
+        1 AS level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    WHERE 
+        m.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        ml.linked_movie_id,
+        m2.production_year,
+        COALESCE(mk2.keyword, 'No Keywords'),
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m2 ON ml.linked_movie_id = m2.id
+    LEFT JOIN 
+        movie_keyword mk2 ON m2.id = mk2.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    count(DISTINCT mc.company_id) AS total_companies,
+    ROW_NUMBER() OVER (PARTITION BY a.name ORDER BY m.production_year DESC) AS rn
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title m ON ci.movie_id = m.id
+LEFT JOIN 
+    movie_companies mc ON m.id = mc.movie_id
+WHERE 
+    a.name IS NOT NULL
+    AND m.production_year IS NOT NULL
+    AND m.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tv series'))
+GROUP BY 
+    a.name, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    rn, m.production_year DESC;
+
+-- Generate a summary of movies including average rating per movie excluding NULL ratings
+WITH movie_ratings AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        AVG(COALESCE(r.rating, 0)) AS avg_rating
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    LEFT JOIN 
+        (SELECT movie_id,CAST(info AS FLOAT) AS rating 
+         FROM movie_info 
+         WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'rating')) r 
+    ON m.id = r.movie_id
+    GROUP BY m.id, m.title
+)
+SELECT 
+    movie_id,
+    title,
+    avg_rating
+FROM 
+    movie_ratings
+WHERE 
+    avg_rating >= (
+        SELECT 
+            AVG(avg_rating) 
+        FROM 
+            movie_ratings
+    )
+ORDER BY 
+    avg_rating DESC;

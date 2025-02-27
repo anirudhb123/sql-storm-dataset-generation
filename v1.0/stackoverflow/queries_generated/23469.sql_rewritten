@@ -1,0 +1,75 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CASE 
+            WHEN Reputation IS NULL THEN 'No Reputation'
+            WHEN Reputation BETWEEN 0 AND 100 THEN 'Low Reputation'
+            WHEN Reputation BETWEEN 101 AND 1000 THEN 'Medium Reputation'
+            ELSE 'High Reputation'
+        END AS ReputationLevel
+    FROM Users
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        ur.ReputationLevel,
+        SUM(v1.VoteTypeId = 2) AS UpVotes,
+        SUM(v1.VoteTypeId = 3) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM RecentPosts rp
+    JOIN UserReputation ur ON rp.OwnerUserId = ur.UserId
+    LEFT JOIN Votes v1 ON v1.PostId = rp.PostId
+    LEFT JOIN Comments c ON c.PostId = rp.PostId
+    LEFT JOIN PostHistory ph ON ph.PostId = rp.PostId
+    WHERE rp.RecentPostRank = 1
+    GROUP BY rp.PostId, rp.Title, ur.ReputationLevel
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS Reason
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10  
+)
+
+SELECT 
+    pd.Title,
+    pd.ReputationLevel,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.CommentCount,
+    cp.ClosedDate,
+    cp.Reason,
+    (COALESCE(pd.UpVotes, 0) - COALESCE(pd.DownVotes, 0)) AS VoteBalance,
+    CASE 
+        WHEN pd.CommentCount > 0 THEN 'Has Comments'
+        ELSE 'No Comments'
+    END AS CommentStatus,
+    CASE 
+        WHEN pd.LastEditDate IS NULL OR pd.LastEditDate < pd.CreationDate THEN 'Not Edited'
+        ELSE 'Edited'
+    END AS EditStatus,
+    CASE 
+        WHEN cp.ClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM PostDetails pd
+LEFT JOIN ClosedPosts cp ON pd.PostId = cp.PostId
+WHERE pd.ReputationLevel = 'High Reputation'
+ORDER BY pd.UpVotes DESC NULLS LAST, pd.Score DESC, pd.Title;

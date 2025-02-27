@@ -1,0 +1,84 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+VoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    u.UserId,
+    u.Reputation,
+    v.UpVotes,
+    v.DownVotes,
+    COALESCE(v.UpVotes - v.DownVotes, 0) AS Score,
+    r.Level AS PostLevel,
+    COUNT(DISTINCT ph.Id) AS PostHistoryCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Posts p
+LEFT JOIN 
+    UserReputation u ON p.OwnerUserId = u.UserId
+LEFT JOIN 
+    VoteCounts v ON p.Id = v.PostId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%') 
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.PostId
+WHERE 
+    p.CreationDate >= '2023-01-01'  
+GROUP BY 
+    p.Id, u.UserId, u.Reputation, v.UpVotes, v.DownVotes, r.Level
+HAVING 
+    COUNT(DISTINCT ph.Id) > 2  
+ORDER BY 
+    Score DESC, 
+    u.Reputation DESC
+LIMIT 100;

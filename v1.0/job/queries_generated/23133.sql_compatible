@@ -1,0 +1,87 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(c.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS rank_per_year
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.title, t.production_year
+),
+high_cast_movies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        ranked_movies 
+    WHERE 
+        rank_per_year <= 3
+),
+actors_info AS (
+    SELECT 
+        a.name AS actor_name,
+        a.id AS actor_id,
+        r.kind AS role_kind,
+        mv.title AS movie_title,
+        mv.production_year
+    FROM 
+        aka_name a
+    INNER JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    INNER JOIN 
+        role_type r ON ci.role_id = r.id
+    INNER JOIN 
+        aka_title mv ON ci.movie_id = mv.id
+    WHERE 
+        mv.production_year > 2000
+),
+filtered_movies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        ARRAY_AGG(DISTINCT kw.keyword) AS keywords,
+        COUNT(DISTINCT c.id) AS total_cast,
+        (SELECT AVG(CAST(mo.info AS NUMERIC)) FROM movie_info mo WHERE mo.movie_id = m.id AND mo.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')) AS avg_rating
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+    HAVING 
+        (SELECT AVG(CAST(mo.info AS NUMERIC)) FROM movie_info mo WHERE mo.movie_id = m.id AND mo.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')) > 7.0 OR total_cast >= 10 
+),
+final_selection AS (
+    SELECT 
+        f.title,
+        f.production_year,
+        f.keywords,
+        f.total_cast,
+        COALESCE(a.actor_name, 'Unknown Actor') AS leading_actor
+    FROM 
+        filtered_movies f
+    LEFT JOIN 
+        actors_info a ON f.title = a.movie_title AND f.production_year = a.production_year
+)
+
+SELECT 
+    fs.title,
+    fs.production_year,
+    fs.keywords,
+    fs.total_cast,
+    fs.leading_actor
+FROM 
+    final_selection fs
+WHERE 
+    fs.leading_actor IS NOT NULL
+ORDER BY 
+    fs.production_year DESC, 
+    fs.total_cast DESC;

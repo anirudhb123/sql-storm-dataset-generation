@@ -1,0 +1,86 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS TotalComments,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        p.Id, p.Title
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        COUNT(ph.Id) AS CloseCount
+    FROM 
+        PostHistory ph 
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.TotalComments,
+    pm.UpVotes,
+    pm.DownVotes,
+    COALESCE(cp.CloseCount, 0) AS CloseCount,
+    u.BadgeCount,
+    u.Reputation,
+    COALESCE(r.Level, 0) AS PostLevel
+FROM 
+    PostMetrics pm
+LEFT JOIN 
+    UserReputation u ON pm.PostId = u.UserId
+LEFT JOIN 
+    ClosedPosts cp ON pm.PostId = cp.PostId
+LEFT JOIN 
+    RecursivePostHierarchy r ON pm.PostId = r.PostId
+ORDER BY 
+    pm.UpVotes DESC, 
+    pm.TotalComments DESC, 
+    pm.Title;

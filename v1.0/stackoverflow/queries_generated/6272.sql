@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AcknowledgedAnswerId,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate
+    FROM RankedPosts rp
+    WHERE rp.Rank <= 5
+),
+PostComments AS (
+    SELECT 
+        pc.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM Comments c
+    JOIN Posts pc ON c.PostId = pc.Id
+    GROUP BY pc.PostId
+),
+FinalOutput AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.OwnerDisplayName,
+        tp.Score,
+        tp.ViewCount,
+        pc.CommentCount,
+        tp.CreationDate
+    FROM TopPosts tp
+    LEFT JOIN PostComments pc ON tp.PostId = pc.PostId
+)
+SELECT 
+    fo.PostId,
+    fo.Title,
+    fo.OwnerDisplayName,
+    fo.Score,
+    fo.ViewCount,
+    COALESCE(fo.CommentCount, 0) AS CommentCount,
+    fo.CreationDate
+FROM FinalOutput fo
+ORDER BY fo.Score DESC, fo.ViewCount DESC;

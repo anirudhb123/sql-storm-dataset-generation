@@ -1,0 +1,59 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY U.Location ORDER BY U.Reputation DESC) AS RankInLocation
+    FROM Users U
+    WHERE U.Reputation > 1000
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.OwnerUserId, 
+        P.CreationDate, 
+        P.Score,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentRank
+    FROM Posts P
+    WHERE P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId, 
+        PH.CreationDate AS ClosedDate, 
+        C.Name AS CloseReason
+    FROM PostHistory PH
+    JOIN CloseReasonTypes C ON PH.Comment::int = C.Id
+    WHERE PH.PostHistoryTypeId = 10
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(DISTINCT P.Id) AS PostCount, 
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(V.VoteTypeId = 2::smallint), 0) AS UpVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 2
+    WHERE U.Reputation > 5000
+    GROUP BY U.Id
+)
+SELECT 
+    RU.UserId, 
+    RU.DisplayName,
+    UPS.PostCount,
+    UPS.TotalBounty,
+    UPS.UpVotes,
+    RP.PostId,
+    RP.Title AS RecentPostTitle,
+    RP.CreationDate AS RecentPostDate,
+    CPT.ClosedDate,
+    CPT.CloseReason
+FROM RankedUsers RU
+LEFT JOIN UserPostStats UPS ON RU.UserId = UPS.UserId
+LEFT JOIN RecentPosts RP ON RU.UserId = RP.OwnerUserId AND RP.RecentRank = 1
+LEFT JOIN ClosedPosts CPT ON RP.PostId = CPT.PostId
+WHERE RU.RankInLocation <= 3
+ORDER BY RU.Location, RU.Reputation DESC, UPS.PostCount DESC;

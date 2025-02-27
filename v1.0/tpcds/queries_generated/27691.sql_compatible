@@ -1,0 +1,54 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        c.c_email_address,
+        CASE 
+            WHEN cd.cd_purchase_estimate > 1000 THEN 'High Value'
+            WHEN cd.cd_purchase_estimate BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value_category
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesDetails AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    GROUP BY ws.ws_bill_customer_sk
+),
+BenchmarkResults AS (
+    SELECT 
+        cd.full_name,
+        cd.ca_city,
+        cd.ca_state,
+        cd.ca_country,
+        cd.c_email_address,
+        cd.customer_value_category,
+        sd.total_sales,
+        sd.order_count,
+        LENGTH(cd.c_email_address) AS email_length,
+        LOWER(cd.c_email_address) AS email_lower,
+        UPPER(cd.c_email_address) AS email_upper
+    FROM CustomerDetails cd
+    LEFT JOIN SalesDetails sd ON cd.c_customer_id = sd.ws_bill_customer_sk
+)
+SELECT 
+    br.*,
+    CASE 
+        WHEN br.total_sales IS NULL THEN 'No Sales'
+        WHEN br.total_sales >= 10000 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_sales_category
+FROM BenchmarkResults br
+ORDER BY br.customer_value_category DESC, br.total_sales DESC;

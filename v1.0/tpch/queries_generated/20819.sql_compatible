@@ -1,0 +1,72 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank_per_brand
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+),
+ValidSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Unrated'
+            WHEN s.s_acctbal < 1000 THEN 'Low Balance'
+            WHEN s.s_acctbal BETWEEN 1000 AND 5000 THEN 'Medium Balance'
+            ELSE 'High Balance'
+        END AS balance_category
+    FROM 
+        supplier s
+    WHERE 
+        s.s_comment NOT LIKE '%test%'
+),
+PartSupplierInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost) AS lowest_cost_supplier
+    FROM 
+        partsupp ps
+)
+SELECT 
+    np.n_name,
+    COUNT(DISTINCT l.l_orderkey) AS order_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    AVG(s.s_acctbal) AS avg_high_balance,
+    COALESCE(MAX(p.p_size), 0) AS largest_part_size
+FROM 
+    lineitem l
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation np ON c.c_nationkey = np.n_nationkey
+LEFT JOIN 
+    RankedParts rp ON l.l_partkey = rp.p_partkey
+LEFT JOIN 
+    PartSupplierInfo psi ON l.l_partkey = psi.ps_partkey AND psi.lowest_cost_supplier = 1
+LEFT JOIN 
+    ValidSuppliers s ON psi.ps_suppkey = s.s_suppkey
+WHERE 
+    np.n_name IS NOT NULL
+    AND (l.l_discount IS NOT NULL OR l.l_discount < 0.05)
+    AND EXISTS (
+        SELECT 1
+        FROM ValidSuppliers vs
+        WHERE vs.s_suppkey = psi.ps_suppkey AND vs.balance_category = 'Medium Balance'
+    )
+GROUP BY 
+    np.n_name
+HAVING 
+    COUNT(DISTINCT l.l_orderkey) > 10
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

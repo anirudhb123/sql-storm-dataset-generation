@@ -1,0 +1,62 @@
+WITH RECURSIVE CustomerBalance AS (
+    SELECT 
+        c_custkey,
+        c_name,
+        c_acctbal,
+        c_mktsegment,
+        ROW_NUMBER() OVER (PARTITION BY c_mktsegment ORDER BY c_acctbal DESC) AS rn
+    FROM customer
+    WHERE c_acctbal IS NOT NULL
+    UNION ALL
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal + 100,  -- Increasing balance recursively for bizarre effect
+        c.c_mktsegment,
+        ROW_NUMBER() OVER (PARTITION BY c_mktsegment ORDER BY c.c_acctbal DESC)
+    FROM customer c
+    JOIN CustomerBalance cb ON c.custkey = cb.c_custkey
+    WHERE cb.rn < 3
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    AND (s.s_comment IS NULL OR LENGTH(s.s_comment) > 5)
+),
+PartSupplier AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING COUNT(DISTINCT ps.ps_suppkey) > 1
+),
+ComplexJoin AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT OUTER JOIN FilteredSuppliers fs ON fs.s_suppkey = l.l_suppkey
+    WHERE l.l_shipdate BETWEEN '2021-01-01' AND '2021-12-31'
+    AND (l.l_tax IS NOT NULL OR l.l_discount = 0)
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    cb.c_name,
+    cb.c_acctbal,
+    COUNT(DISTINCT cj.p_partkey) AS total_parts_sold,
+    SUM(CASE WHEN cj.total_price > 1000 THEN cj.total_price ELSE 0 END) AS high_value_sales,
+    MAX(CASE WHEN cj.total_price < 500 THEN 'Low' ELSE 'High' END) AS sales_category
+FROM CustomerBalance cb
+JOIN orders o ON cb.c_custkey = o.o_custkey
+JOIN ComplexJoin cj ON cj.total_price > 0
+GROUP BY cb.c_custkey, cb.c_name, cb.c_acctbal
+ORDER BY cb.c_acctbal DESC
+LIMIT 10;

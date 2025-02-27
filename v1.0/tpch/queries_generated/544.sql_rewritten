@@ -1,0 +1,54 @@
+WITH OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS segment_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_mktsegment
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_suppkey, s.s_name
+),
+DetailedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        COALESCE(pd.total_available, 0) AS available_qty,
+        COALESCE(pd.avg_supplycost, 0.00) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN SupplierDetails pd ON p.p_partkey = pd.ps_partkey
+)
+SELECT 
+    os.o_orderkey,
+    os.o_orderdate,
+    dp.p_name,
+    dp.p_brand,
+    dp.p_retailprice,
+    dp.available_qty,
+    dp.avg_supply_cost,
+    os.total_revenue,
+    os.unique_parts,
+    os.segment_rank
+FROM OrderSummary os
+JOIN DetailedParts dp ON os.o_orderkey IN (
+    SELECT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_partkey IN (SELECT dp.p_partkey FROM DetailedParts dp)
+)
+WHERE os.segment_rank <= 5
+ORDER BY os.o_orderdate DESC, os.total_revenue DESC;

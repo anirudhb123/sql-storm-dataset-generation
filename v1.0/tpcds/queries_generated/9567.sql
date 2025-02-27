@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk AS customer_id,
+        ws.item_sk,
+        ws.quantity,
+        ws.sales_price,
+        ws.sold_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws.sold_date_sk DESC) AS rn
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+),
+TopCustomers AS (
+    SELECT 
+        customer_id,
+        SUM(quantity) AS total_quantity,
+        SUM(sales_price * quantity) AS total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        rn <= 5
+    GROUP BY 
+        customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.gender,
+        cd.marital_status,
+        cd.education_status
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+),
+SalesWithDemographics AS (
+    SELECT 
+        tc.customer_id,
+        tc.total_quantity,
+        tc.total_sales,
+        cd.gender,
+        cd.marital_status,
+        cd.education_status
+    FROM 
+        TopCustomers tc
+    LEFT JOIN 
+        CustomerDemographics cd ON tc.customer_id = cd.cd_demo_sk
+)
+SELECT 
+    gender,
+    marital_status,
+    education_status,
+    COUNT(customer_id) AS num_customers,
+    SUM(total_quantity) AS total_quantity_sold,
+    SUM(total_sales) AS total_revenue
+FROM 
+    SalesWithDemographics
+GROUP BY 
+    gender, marital_status, education_status
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

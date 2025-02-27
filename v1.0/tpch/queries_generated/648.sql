@@ -1,0 +1,83 @@
+WITH ranked_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS unique_customers
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+high_value_orders AS (
+    SELECT 
+        o.o_orderkey,
+        os.total_revenue,
+        os.unique_customers,
+        ROW_NUMBER() OVER (ORDER BY os.total_revenue DESC) AS order_rank
+    FROM 
+        order_summary os
+    JOIN 
+        orders o ON os.o_orderkey = o.o_orderkey
+    WHERE 
+        os.total_revenue > 50000
+),
+supplier_partition AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        (SELECT COUNT(*) 
+         FROM partsupp ps_sub 
+         WHERE ps_sub.ps_supplycost < ps.ps_supplycost) AS lower_cost_count
+    FROM 
+        partsupp ps
+)
+SELECT 
+    p.p_name,
+    r.r_name,
+    hs.total_revenue AS high_order_revenue,
+    s.s_name AS supplier_name,
+    sp.lower_cost_count,
+    CASE 
+        WHEN hs.order_rank IS NOT NULL THEN 'High Value'
+        ELSE 'Regular'
+    END AS order_type
+FROM 
+    part p
+LEFT JOIN 
+    supplier_partition sp ON sp.ps_partkey = p.p_partkey
+LEFT JOIN 
+    ranked_suppliers s ON sp.ps_suppkey = s.s_suppkey AND s.rank <= 10
+LEFT JOIN 
+    region r ON s.s_nationkey = r.r_regionkey
+LEFT JOIN 
+    high_value_orders hs ON hs.o_orderkey IN (
+        SELECT 
+            o.o_orderkey
+        FROM 
+            orders o
+        JOIN 
+            lineitem l ON o.o_orderkey = l.l_orderkey
+        WHERE 
+            l.l_shipdate BETWEEN DATE '2023-06-01' AND DATE '2023-12-31'
+    )
+WHERE 
+    p.p_retailprice IS NOT NULL
+ORDER BY 
+    high_order_revenue DESC, 
+    s.s_name;

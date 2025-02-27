@@ -1,0 +1,75 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn,
+        o.o_totalprice,
+        o.o_orderdate
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        ps.ps_availqty,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 0 
+            ELSE s.s_acctbal 
+        END AS adjusted_acctbal
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > 100
+),
+DateRange AS (
+    SELECT
+        DATEADD(day, -30, cast('1998-10-01' as date)()) AS start_date,
+        cast('1998-10-01' as date)() AS end_date
+),
+HighValueOrders AS (
+    SELECT DISTINCT
+        r.r_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM RankedOrders ro
+    JOIN lineitem l ON ro.o_orderkey = l.l_orderkey
+    JOIN customer c ON ro.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE ro.o_orderdate BETWEEN (SELECT start_date FROM DateRange) AND (SELECT end_date FROM DateRange)
+    GROUP BY r.r_name
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+),
+NullHandling AS (
+    SELECT
+        sp.ps_partkey,
+        sp.s_name,
+        COALESCE(sp.adjusted_acctbal, 0) AS final_acct_balance
+    FROM SupplierParts sp
+    LEFT JOIN (
+        SELECT DISTINCT s_nationkey
+        FROM supplier
+        WHERE s_name LIKE 'S%'
+    ) AS sp_nation ON sp.suppkey = sp_nation.s_nationkey
+    WHERE sp.suppkey IS NOT NULL
+)
+SELECT 
+    hvo.r_name,
+    SUM(hvo.total_revenue) AS total_revenue,
+    nh.final_acct_balance
+FROM HighValueOrders hvo
+JOIN NullHandling nh ON hvo.r_name = nh.s_name
+GROUP BY hvo.r_name, nh.final_acct_balance
+ORDER BY total_revenue DESC, final_acct_balance ASC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY
+UNION
+SELECT
+    'N/A' AS r_name,
+    sum(l.l_extendedprice) AS total_revenue,
+    0 AS final_acct_balance 
+FROM lineitem l
+WHERE l.l_returnflag = 'R'
+AND l.l_linestatus IS NOT NULL
+GROUP BY l.l_returnflag 
+ORDER BY total_revenue DESC;

@@ -1,0 +1,79 @@
+WITH RECURSIVE FilmHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        mt.episode_of_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+    UNION ALL
+    SELECT 
+        m.id, 
+        m.title,
+        m.production_year,
+        fh.level + 1,
+        m.episode_of_id
+    FROM 
+        aka_title m
+    JOIN 
+        FilmHierarchy fh ON m.episode_of_id = fh.movie_id
+),
+ActorCounts AS (
+    SELECT 
+        ci.movie_id, 
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    JOIN 
+        FilmHierarchy fh ON ci.movie_id = fh.movie_id
+    GROUP BY 
+        ci.movie_id
+),
+RelatedMovies AS (
+    SELECT 
+        ml.movie_id, 
+        ml.linked_movie_id, 
+        lt.link AS relation_type
+    FROM 
+        movie_link ml
+    JOIN 
+        link_type lt ON ml.link_type_id = lt.id
+),
+MovieCompaniesInfo AS (
+    SELECT 
+        mc.movie_id, 
+        c.name AS company_name, 
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    fh.movie_id,
+    fh.title,
+    fh.production_year,
+    ac.actor_count,
+    STRING_AGG(DISTINCT r.relation_type, ', ') AS related_movies,
+    STRING_AGG(DISTINCT ci.company_name || ' (' || ci.company_type || ')', '; ') AS producing_companies
+FROM 
+    FilmHierarchy fh
+LEFT JOIN 
+    ActorCounts ac ON fh.movie_id = ac.movie_id
+LEFT JOIN 
+    RelatedMovies r ON fh.movie_id = r.movie_id
+LEFT JOIN 
+    MovieCompaniesInfo ci ON fh.movie_id = ci.movie_id
+WHERE 
+    fh.level = 1
+GROUP BY 
+    fh.movie_id, fh.title, fh.production_year, ac.actor_count
+HAVING 
+    COALESCE(ac.actor_count, 0) > 5 OR COALESCE(r.relation_type, '') <> ''
+ORDER BY 
+    fh.production_year DESC, fh.title ASC;

@@ -1,0 +1,66 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id DESC) AS rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS cast_count
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        complete_cast AS cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info AS c ON cc.subject_id = c.id
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND t.production_year IS NOT NULL
+),
+MovieKeywords AS (
+    SELECT 
+        t.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title AS t
+    JOIN 
+        movie_keyword AS mk ON t.id = mk.movie_id
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year > 2000
+    GROUP BY 
+        t.id
+),
+HighestRated AS (
+    SELECT 
+        movie_id, 
+        AVG(rating) AS avg_rating 
+    FROM 
+        movie_info 
+    WHERE 
+        info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        movie_id
+    HAVING 
+        AVG(rating) IS NOT NULL
+)
+SELECT 
+    r.title,
+    r.production_year,
+    COALESCE(hw.avg_rating, 0) AS average_rating,
+    mk.keywords,
+    r.cast_count,
+    CASE 
+        WHEN r.rank <= 5 THEN 'Top 5' 
+        ELSE 'Others' 
+    END AS movie_category
+FROM 
+    RankedMovies AS r
+LEFT JOIN 
+    HighestRated AS hw ON r.id = hw.movie_id
+LEFT JOIN 
+    MovieKeywords AS mk ON r.id = mk.movie_id
+WHERE 
+    r.cast_count > 0
+ORDER BY 
+    r.production_year DESC, 
+    hw.avg_rating DESC NULLS LAST;

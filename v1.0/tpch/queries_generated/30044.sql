@@ -1,0 +1,33 @@
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+    ORDER BY total_cost DESC
+    LIMIT 5
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_name, COUNT(l.l_orderkey) AS lineitem_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rng
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_name
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 500
+),
+SupplierOrders AS (
+    SELECT DISTINCT s.s_suppkey, s.s_name, o.o_orderkey, o.o_orderdate
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE ps.ps_availqty > 10 AND o.o_orderstatus = 'O'
+)
+SELECT od.o_orderkey, od.o_orderdate, od.c_name, od.lineitem_count,
+       od.total_price, ss.s_name AS supplier_name
+FROM OrderDetails od
+LEFT JOIN SupplierOrders ss ON od.o_orderkey = ss.o_orderkey
+WHERE od.rng <= 3
+ORDER BY od.total_price DESC, ss.s_name NULLS LAST;

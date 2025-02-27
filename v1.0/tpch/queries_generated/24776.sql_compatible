@@ -1,0 +1,70 @@
+
+WITH RECURSIVE SupplierOrders AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'P') 
+        AND l.l_shipdate BETWEEN DATE '1998-10-01' - INTERVAL '1 YEAR' AND DATE '1998-10-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerRanking AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        DENSE_RANK() OVER (ORDER BY COUNT(o.o_orderkey) DESC) AS customer_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    pr.total_spent,
+    cr.total_orders,
+    pr.order_rank,
+    cr.customer_rank,
+    (CASE 
+        WHEN pr.total_spent IS NULL THEN 'No Orders' 
+        ELSE 'Total spent: ' || CAST(pr.total_spent AS VARCHAR)
+    END) AS order_status,
+    (SELECT 
+        r.r_name 
+     FROM 
+        region r 
+     WHERE 
+        r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.n_nationkey) 
+     FETCH FIRST 1 ROW ONLY
+    ) AS supplier_region
+FROM 
+    part p
+LEFT JOIN 
+    SupplierOrders pr ON p.p_partkey = ANY (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = pr.s_suppkey)
+LEFT JOIN 
+    CustomerRanking cr ON cr.total_orders = (SELECT MAX(total_orders) FROM CustomerRanking)
+LEFT JOIN 
+    supplier s ON pr.s_suppkey = s.s_suppkey
+WHERE 
+    p.p_retailprice > 50.00
+    OR (p.p_retailprice IS NULL AND EXISTS (SELECT 1 FROM lineitem l WHERE l.l_partkey = p.p_partkey AND l.l_discount > 0.10))
+ORDER BY 
+    p.p_partkey DESC
+FETCH FIRST 100 ROWS ONLY;

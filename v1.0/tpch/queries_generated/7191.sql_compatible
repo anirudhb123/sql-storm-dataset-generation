@@ -1,0 +1,75 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        DENSE_RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    ORDER BY 
+        total_supply_cost DESC
+    LIMIT 10
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000000
+)
+SELECT 
+    r.r_name AS region,
+    rc.c_name AS customer_name,
+    p.p_name AS part_name,
+    ts.s_name AS supplier_name,
+    p.p_retailprice,
+    SUM(l.l_quantity) AS total_quantity,
+    SUM(l.l_extendedprice) AS total_revenue,
+    rc.total_spent,
+    ts.total_supply_cost
+FROM 
+    RankedCustomers rc
+JOIN 
+    orders o ON rc.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    HighValueParts p ON l.l_partkey = p.p_partkey
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier ts ON ps.ps_suppkey = ts.s_suppkey
+JOIN 
+    nation n ON ts.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+GROUP BY 
+    r.r_name, rc.c_name, p.p_name, ts.s_name, p.p_retailprice, rc.total_spent, ts.total_supply_cost
+ORDER BY 
+    rc.total_spent DESC, total_revenue DESC
+LIMIT 50;

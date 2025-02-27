@@ -1,0 +1,46 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 0 AS hierarchy_level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) AND sh.hierarchy_level < 3
+),
+PartStats AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_availqty) AS total_available_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CustomerOrderDetails AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           COUNT(o.o_orderkey) AS total_orders, 
+           SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT DISTINCT 
+    c.c_name,
+    ps.total_available_qty,
+    ps.avg_supply_cost,
+    COALESCE(oh.hierarchy_level, -1) AS supplier_hierarchy_level,
+    cod.total_orders,
+    cod.total_spent
+FROM PartStats ps
+LEFT JOIN SupplierHierarchy oh ON ps.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_supplycost = ps.avg_supply_cost)
+LEFT JOIN CustomerOrderDetails cod ON ps.p_partkey IN (SELECT l_partkey FROM lineitem WHERE l_orderkey IN 
+                     (SELECT o_orderkey FROM orders WHERE o_orderstatus = 'O'))
+WHERE ps.total_available_qty IS NOT NULL
+ORDER BY cod.total_spent DESC, ps.avg_supply_cost ASC
+LIMIT 100;

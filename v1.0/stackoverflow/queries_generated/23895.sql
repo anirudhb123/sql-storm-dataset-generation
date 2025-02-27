@@ -1,0 +1,98 @@
+WITH UserBadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT p.TagCount) AS UniqueTags
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+CombinedStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(ubs.TotalBadges, 0) AS TotalBadges,
+        COALESCE(ubs.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ubs.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ubs.BronzeBadges, 0) AS BronzeBadges,
+        COALESCE(ps.QuestionCount, 0) AS QuestionCount,
+        COALESCE(ps.AnswerCount, 0) AS AnswerCount,
+        COALESCE(ps.TotalViews, 0) AS TotalViews,
+        COALESCE(ps.UniqueTags, 0) AS UniqueTags,
+        u.Reputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadgeStats ubs ON u.Id = ubs.UserId
+    LEFT JOIN 
+        PostStats ps ON u.Id = ps.OwnerUserId
+),
+RankedUsers AS (
+    SELECT 
+        UserId, 
+        TotalBadges, 
+        GoldBadges, 
+        SilverBadges, 
+        BronzeBadges, 
+        QuestionCount, 
+        AnswerCount, 
+        TotalViews, 
+        UniqueTags, 
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+        RANK() OVER (ORDER BY TotalBadges DESC) AS BadgeRank
+    FROM 
+        CombinedStats
+),
+FilteredUsers AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN ReputationRank <= 10 THEN 'Top Reputation'
+            WHEN BadgeRank <= 10 THEN 'Top Badges'
+            ELSE 'Regular User'
+        END AS UserCategory
+    FROM 
+        RankedUsers
+)
+SELECT 
+    fu.UserId,
+    fu.TotalBadges,
+    fu.GoldBadges,
+    fu.SilverBadges,
+    fu.BronzeBadges,
+    fu.QuestionCount,
+    fu.AnswerCount,
+    fu.TotalViews,
+    fu.UniqueTags,
+    fu.Reputation,
+    fu.UserCategory,
+    CONCAT('User ID: ', fu.UserId, 
+           ', Reputation:', fu.Reputation, 
+           ', Badges:', fu.TotalBadges, 
+           ', Questions:', fu.QuestionCount, 
+           ', Answers:', fu.AnswerCount) AS Summary
+FROM 
+    FilteredUsers fu
+WHERE 
+    fu.Reputation IS NOT NULL
+    AND (fu.UserCategory = 'Top Reputation' OR fu.UserCategory = 'Top Badges')
+ORDER BY 
+    fu.UserCategory DESC, Reputation DESC;

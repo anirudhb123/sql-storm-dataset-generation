@@ -1,0 +1,76 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year < (YEAR(CURRENT_DATE) - 18)  -- Customers older than 18
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+high_value_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_spent,
+        cs.total_orders,
+        ROW_NUMBER() OVER (ORDER BY cs.total_spent DESC) AS rank
+    FROM 
+        customer_sales cs
+    WHERE 
+        cs.total_spent > (
+            SELECT AVG(total_spent) FROM customer_sales
+        )
+),
+customer_metrics AS (
+    SELECT 
+        hvc.c_first_name,
+        hvc.c_last_name,
+        hvc.total_spent,
+        hvc.total_orders,
+        CASE 
+            WHEN hvc.total_orders > 10 THEN 'Frequent'
+            WHEN hvc.total_orders BETWEEN 5 AND 10 THEN 'Occasional'
+            ELSE 'Rare'
+        END AS purchase_frequency
+    FROM 
+        high_value_customers hvc
+)
+SELECT 
+    cm.c_first_name,
+    cm.c_last_name,
+    cm.total_spent,
+    cm.purchase_frequency,
+    (SELECT COUNT(*) FROM store_returns sr WHERE sr.sr_customer_sk = cm.c_customer_sk) AS total_returns,
+    (SELECT COUNT(*) FROM catalog_sales cs WHERE cs.cs_bill_customer_sk = cm.c_customer_sk) AS total_catalog_sales
+FROM 
+    customer_metrics cm
+WHERE 
+    cm.total_spent > (SELECT SUM(total_spent) / COUNT(*) FROM high_value_customers)
+ORDER BY 
+    cm.total_spent DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'OVERALL TOTAL' AS c_first_name,
+    'SALES' AS c_last_name,
+    SUM(ws.ws_net_paid) AS total_spent,
+    NULL AS purchase_frequency
+FROM 
+    web_sales ws
+WHERE 
+    ws.ws_bill_customer_sk IS NOT NULL
+    AND ws.ws_sold_date_sk = (
+        SELECT MAX(d_date_sk) FROM date_dim dd WHERE dd.d_date = CURRENT_DATE()
+    )
+ORDER BY 
+    total_spent DESC
+LIMIT 1;

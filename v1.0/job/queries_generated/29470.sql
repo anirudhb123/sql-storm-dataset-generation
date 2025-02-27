@@ -1,0 +1,43 @@
+WITH ActorMovies AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ct.kind AS company_type,
+        m.id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+FilteredMovies AS (
+    SELECT 
+        actor_name,
+        movie_title,
+        production_year,
+        company_type
+    FROM 
+        ActorMovies
+    WHERE 
+        rn <= 5  -- Get top 5 movies by year for each actor
+)
+SELECT 
+    actor_name,
+    STRING_AGG(movie_title, ', ') AS movies_list,
+    COUNT(*) AS total_movies,
+    MIN(production_year) AS first_movie_year,
+    MAX(production_year) AS last_movie_year,
+    STRING_AGG(DISTINCT company_type, ', ') AS company_types
+FROM 
+    FilteredMovies
+GROUP BY 
+    actor_name
+ORDER BY 
+    total_movies DESC;

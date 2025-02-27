@@ -1,0 +1,47 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        c.role AS actor_role,
+        p.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY c.nr_order) AS role_rank
+    FROM 
+        aka_title a
+    JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    WHERE 
+        a.production_year > 2000
+), AggregatedData AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT title) AS movie_count
+    FROM 
+        RankedMovies
+    WHERE 
+        role_rank = 1
+    GROUP BY 
+        actor_name
+)
+SELECT 
+    ad.actor_name,
+    ad.movie_count,
+    co.name AS company_name,
+    ct.kind AS company_type
+FROM 
+    AggregatedData ad
+JOIN 
+    movie_companies mc ON ad.actor_name = mc.movie_id
+JOIN 
+    company_name co ON mc.company_id = co.id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    co.country_code = 'USA' 
+ORDER BY 
+    ad.movie_count DESC
+LIMIT 10;

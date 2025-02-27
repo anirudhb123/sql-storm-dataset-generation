@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        NULL AS parent_suppkey,
+        0 AS level,
+        s.s_acctbal
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT 
+        ps.ps_suppkey,
+        s.s_name,
+        sh.s_suppkey AS parent_suppkey,
+        sh.level + 1,
+        ps.ps_supplycost
+    FROM 
+        partsupp ps
+    JOIN 
+        SupplierHierarchy sh ON ps.ps_partkey = sh.s_suppkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty > 10
+)
+
+SELECT 
+    C.c_name,
+    COUNT(DISTINCT O.o_orderkey) AS order_count,
+    SUM(L.l_extendedprice * (1 - L.l_discount)) AS total_revenue,
+    SUM(CASE WHEN L.l_returnflag = 'R' THEN L.l_quantity ELSE 0 END) AS total_returned_quantity,
+    R.r_name,
+    CASE 
+        WHEN SUM(L.l_extendedprice * (1 - L.l_discount)) > 50000 THEN 'High Value Customer'
+        WHEN C.c_acctbal IS NULL OR C.c_acctbal < 100 THEN 'Low Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status
+FROM 
+    customer C
+LEFT JOIN 
+    orders O ON C.c_custkey = O.o_custkey
+LEFT JOIN 
+    lineitem L ON O.o_orderkey = L.l_orderkey
+JOIN 
+    nation N ON C.c_nationkey = N.n_nationkey
+JOIN 
+    region R ON N.n_regionkey = R.r_regionkey
+LEFT JOIN 
+    SupplierHierarchy SH ON SH.s_suppkey = L.l_suppkey
+WHERE 
+    O.o_orderstatus IN ('O', 'F') AND 
+    (C.c_acctbal IS NOT NULL OR C.c_mktsegment = 'AUTOMOBILE')
+GROUP BY 
+    C.c_name, R.r_name, C.c_acctbal
+HAVING 
+    COUNT(DISTINCT O.o_orderkey) > 5
+ORDER BY 
+    total_revenue DESC, customer_status ASC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

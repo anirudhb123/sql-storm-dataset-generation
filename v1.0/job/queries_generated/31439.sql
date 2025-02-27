@@ -1,0 +1,40 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id,
+           mt.title,
+           mt.production_year,
+           1 AS depth
+    FROM aka_title AS mt
+    WHERE mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT mt.id,
+           mt.title,
+           mt.production_year,
+           mh.depth + 1
+    FROM aka_title AS mt
+    JOIN movie_link AS ml ON mt.id = ml.linked_movie_id
+    JOIN MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+SELECT m.title AS "Movie Title",
+       m.production_year AS "Production Year",
+       a.name AS "Actor Name",
+       COALESCE(c.name, 'No Company') AS "Company Name",
+       COUNT(k.keyword) AS "Keyword Count",
+       SUM(CASE WHEN pc.id IS NOT NULL THEN 1 ELSE 0 END) AS "Person Info Count",
+       ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY a.name) AS rank
+FROM MovieHierarchy AS m
+JOIN cast_info AS ci ON ci.movie_id = m.movie_id
+JOIN aka_name AS a ON a.person_id = ci.person_id
+LEFT JOIN movie_companies AS mc ON mc.movie_id = m.movie_id
+LEFT JOIN company_name AS c ON c.id = mc.company_id
+LEFT JOIN movie_keyword AS mk ON mk.movie_id = m.movie_id
+LEFT JOIN keyword AS k ON k.id = mk.keyword_id
+LEFT JOIN person_info AS pi ON pi.person_id = a.person_id
+LEFT JOIN info_type AS it ON it.id = pi.info_type_id
+LEFT JOIN complete_cast AS cc ON cc.movie_id = m.movie_id AND cc.subject_id = a.id
+WHERE m.depth < 3 AND
+      (m.production_year IS NOT NULL OR m.title IS NOT NULL) AND
+      (c.country_code IS NOT NULL OR c.name IS NULL)
+GROUP BY m.movie_id, m.title, m.production_year, a.name, c.name
+ORDER BY m.production_year DESC, "Keyword Count" DESC;

@@ -1,0 +1,73 @@
+
+WITH RECURSIVE monthly_sales AS (
+    SELECT 
+        d.d_month_seq,
+        SUM(ws.ws_net_paid) AS sales_amount,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        d.d_month_seq
+    UNION ALL
+    SELECT 
+        d.d_month_seq,
+        SUM(cs.cs_net_paid) AS sales_amount,
+        COUNT(DISTINCT cs.cs_order_number) AS order_count
+    FROM 
+        date_dim d
+    JOIN 
+        catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        d.d_month_seq
+),
+address_info AS (
+    SELECT 
+        c.c_customer_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY COUNT(c.c_customer_sk) DESC) AS state_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        c.c_customer_sk, ca.ca_city, ca.ca_state
+),
+sales_summary AS (
+    SELECT 
+        d.d_month_seq,
+        COALESCE(SUM(ms.sales_amount), 0) AS total_sales,
+        COALESCE(SUM(ms.order_count), 0) AS total_orders,
+        COUNT(*) AS unique_customers,
+        COUNT(DISTINCT ai.c_customer_sk) AS customers_in_top_cities
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        monthly_sales ms ON d.d_month_seq = ms.d_month_seq
+    LEFT JOIN 
+        address_info ai ON ai.state_rank <= 5
+    GROUP BY 
+        d.d_month_seq
+)
+SELECT 
+    d.d_month_seq,
+    s.total_sales,
+    s.total_orders,
+    s.unique_customers,
+    s.customers_in_top_cities,
+    d.d_month_name,
+    (s.total_sales - LEAD(s.total_sales) OVER (ORDER BY d.d_month_seq)) AS sales_change
+FROM 
+    sales_summary s
+JOIN 
+    date_dim d ON s.d_month_seq = d.d_month_seq
+WHERE 
+    d.d_year = 2023
+ORDER BY 
+    d.d_month_seq;

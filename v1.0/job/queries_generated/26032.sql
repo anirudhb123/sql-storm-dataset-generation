@@ -1,0 +1,68 @@
+WITH NameStatistics AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT a.name) AS distinct_name_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS name_list
+    FROM 
+        aka_name a
+    GROUP BY 
+        a.person_id
+),
+MovieTitleStatistics AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT t.title) AS distinctive_movies_count,
+        STRING_AGG(DISTINCT t.title, '; ') AS movie_titles
+    FROM 
+        cast_info c
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    GROUP BY 
+        c.person_id
+),
+CompanyUsage AS (
+    SELECT 
+        mc.person_id,
+        COUNT(DISTINCT co.id) AS unique_company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        aka_title t ON mc.movie_id = t.id
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.person_id
+),
+AggregatedStatistics AS (
+    SELECT 
+        n.person_id,
+        NS.distinct_name_count,
+        NS.name_list,
+        MS.distinctive_movies_count,
+        MS.movie_titles,
+        CU.unique_company_count
+    FROM 
+        NameStatistics NS
+    JOIN 
+        MovieTitleStatistics MS ON NS.person_id = MS.person_id
+    JOIN 
+        CompanyUsage CU ON NS.person_id = CU.person_id
+)
+
+SELECT 
+    a.id AS person_id,
+    a.name AS person_name,
+    AS.distinct_name_count,
+    AS.name_list,
+    AS.distinctive_movies_count,
+    AS.movie_titles,
+    AS.unique_company_count
+FROM 
+    AggregatedStatistics AS
+JOIN 
+    aka_name a ON a.person_id = AS.person_id
+WHERE 
+    AS.distinctive_movies_count > 5 
+ORDER BY 
+    AS.unique_company_count DESC, 
+    AS.distinct_name_count DESC;

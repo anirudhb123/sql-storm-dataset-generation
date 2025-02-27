@@ -1,0 +1,23 @@
+WITH RecentPosts AS (
+    SELECT p.Id, p.Title, p.Score, p.CreationDate, p.TagCount, 
+           u.DisplayName AS OwnerDisplayName, 
+           COUNT(c.Id) AS CommentCount,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 DAYS'
+    GROUP BY p.Id, p.Title, p.Score, p.CreationDate, u.DisplayName
+),
+RankedPosts AS (
+    SELECT rp.*, 
+           ROW_NUMBER() OVER (ORDER BY rp.Score DESC, rp.CreationDate DESC) AS Rank
+    FROM RecentPosts rp
+)
+SELECT rp.OwnerDisplayName, rp.Title, rp.Score, rp.CreationDate, 
+       rp.CommentCount, rp.UpVotes, rp.DownVotes
+FROM RankedPosts rp
+WHERE rp.Rank <= 10
+ORDER BY rp.Rank;

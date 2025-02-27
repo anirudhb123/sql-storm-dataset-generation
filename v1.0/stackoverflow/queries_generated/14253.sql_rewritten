@@ -1,0 +1,68 @@
+WITH PostStats AS (
+    SELECT 
+        p.PostTypeId,
+        COUNT(*) AS TotalPosts,
+        COUNT(DISTINCT p.OwnerUserId) AS UniqueUsers,
+        COUNT(p.AcceptedAnswerId) AS AcceptedAnswers,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.CreationDate) AS AverageCreationDate
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2022-01-01' 
+    GROUP BY 
+        p.PostTypeId
+),
+VoteStats AS (
+    SELECT 
+        v.PostId,
+        COUNT(*) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    pt.Name AS PostType,
+    ps.TotalPosts,
+    ps.UniqueUsers,
+    ps.AcceptedAnswers,
+    ps.TotalScore,
+    ps.TotalViews,
+    vs.TotalVotes,
+    vs.UpVotes,
+    vs.DownVotes,
+    COUNT(DISTINCT us.UserId) AS ActiveUsers,
+    AVG(us.PostsCreated) AS AveragePostsPerUser,
+    SUM(us.TotalUpVotes) AS TotalUpVotes,
+    SUM(us.TotalDownVotes) AS TotalDownVotes
+FROM 
+    PostStats ps
+JOIN 
+    PostTypes pt ON ps.PostTypeId = pt.Id
+LEFT JOIN 
+    VoteStats vs ON ps.PostTypeId = vs.PostId
+LEFT JOIN 
+    UserStats us ON us.PostsCreated > 0
+GROUP BY 
+    pt.Name, ps.TotalPosts, ps.UniqueUsers, ps.AcceptedAnswers, ps.TotalScore, ps.TotalViews, vs.TotalVotes, vs.UpVotes, vs.DownVotes
+ORDER BY 
+    ps.TotalPosts DESC;

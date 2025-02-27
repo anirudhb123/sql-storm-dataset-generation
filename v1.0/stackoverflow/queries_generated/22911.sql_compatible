@@ -1,0 +1,77 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        pt.Name AS PostType,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    LEFT JOIN 
+        PostTypes pt ON pt.Id = p.PostTypeId
+    WHERE 
+        p.CreationDate >= '2022-01-01' 
+        AND (p.Score IS NOT NULL OR p.ViewCount > 100)
+        AND NOT EXISTS (
+            SELECT 1 FROM PostHistory ph 
+            WHERE ph.PostId = p.Id AND ph.PostHistoryTypeId IN (10, 12)
+        )
+    GROUP BY 
+        p.Id, pt.Name, p.OwnerUserId, p.CreationDate
+),
+RankedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.PostType,
+        ps.CommentCount,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        ps.BadgeCount,
+        ps.PostRank,
+        (CASE 
+            WHEN ps.PostRank <= 5 THEN 'Top 5 Posts'
+            WHEN ps.CommentCount > 10 THEN 'Highly Discussed'
+            ELSE 'Regular Activity'
+        END) AS ActivityLevel
+    FROM 
+        PostStats ps
+)
+SELECT 
+    u.DisplayName,
+    rp.PostId,
+    rp.PostType,
+    rp.CommentCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    rp.BadgeCount,
+    rp.ActivityLevel,
+    gt.TagName,
+    COALESCE(ph.Comment, 'No Comment') AS LastHistoryComment,
+    (SELECT COUNT(*) FROM Votes v WHERE v.UserId = u.Id AND v.PostId = rp.PostId AND v.VoteTypeId = 2) AS UserUpVotes
+FROM 
+    Users u
+JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    PostLinks pl ON pl.PostId = rp.PostId
+LEFT JOIN 
+    Tags gt ON gt.Id = pl.RelatedPostId 
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = rp.PostId 
+WHERE 
+    (u.Reputation > 1000 OR u.Views > 10000)
+    AND (rp.ActivityLevel = 'Top 5 Posts' OR rp.ActivityLevel = 'Highly Discussed')
+ORDER BY 
+    rp.UpVoteCount DESC, 
+    rp.CommentCount DESC, 
+    rp.BadgeCount DESC
+LIMIT 100;

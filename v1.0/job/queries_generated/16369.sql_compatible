@@ -1,0 +1,23 @@
+
+SELECT 
+    t.title, 
+    a.name AS actor_name, 
+    m.note AS company_note
+FROM 
+    title AS t
+JOIN 
+    cast_info AS ci ON t.id = ci.movie_id
+JOIN 
+    aka_name AS a ON ci.person_id = a.person_id
+JOIN 
+    movie_companies AS mc ON t.id = mc.movie_id
+JOIN 
+    company_name AS cn ON mc.company_id = cn.id
+WHERE 
+    t.production_year = 2023
+GROUP BY 
+    t.title, 
+    a.name, 
+    m.note
+ORDER BY 
+    t.title;

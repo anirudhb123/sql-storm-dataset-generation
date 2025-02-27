@@ -1,0 +1,38 @@
+
+SELECT 
+    w.warehouse_id,
+    COUNT(DISTINCT cs.order_number) AS total_sales,
+    SUM(cs.net_profit) AS total_net_profit,
+    AVG(ws.net_paid) AS average_web_sales_price,
+    COUNT(DISTINCT sr.return_ticket_number) AS total_returns,
+    AVG(sr.return_amt) AS average_return_amount,
+    cd.education_status,
+    cd.marital_status,
+    c.state AS customer_state
+FROM 
+    warehouse w
+JOIN 
+    store_sales ss ON w.warehouse_sk = ss.store_sk
+JOIN 
+    customer c ON ss.customer_sk = c.customer_sk
+JOIN 
+    customer_demographics cd ON c.current_cdemo_sk = cd.demo_sk
+JOIN 
+    inventory inv ON ss.item_sk = inv.item_sk
+JOIN 
+    catalog_sales cs ON ss.item_sk = cs.item_sk
+LEFT JOIN 
+    store_returns sr ON ss.ticket_number = sr.ticket_number
+JOIN 
+    web_sales ws ON ss.item_sk = ws.item_sk
+JOIN 
+    date_dim dd ON ss.sold_date_sk = dd.date_sk
+WHERE 
+    dd.year = 2023
+    AND w.warehouse_state IN ('CA', 'NY')
+    AND cd.purchase_estimate > 1000
+GROUP BY 
+    w.warehouse_id, cd.education_status, cd.marital_status, c.state
+ORDER BY 
+    total_net_profit DESC
+LIMIT 10;

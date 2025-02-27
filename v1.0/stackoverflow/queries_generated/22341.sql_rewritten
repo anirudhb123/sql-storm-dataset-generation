@@ -1,0 +1,103 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        COUNT(co.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS RecentRank,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpvoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments co ON p.Id = co.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '90 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.ScoreRank,
+        rp.RecentRank,
+        rp.UpvoteCount,
+        rp.DownvoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RecentRank <= 50 AND 
+        rp.ScoreRank <= 10 
+),
+TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(*) AS TagUsageCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%<', T.TagName, '>%)' 
+    GROUP BY 
+        T.TagName
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY 
+        ph.PostId, 
+        ph.PostHistoryTypeId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.CommentCount,
+    fp.UpvoteCount,
+    fp.DownvoteCount,
+    ts.TagName,
+    ts.TagUsageCount,
+    ts.TotalViews,
+    ph.PostHistoryTypeId,
+    ph.HistoryCount,
+    ph.LastChangeDate,
+    CASE 
+        WHEN fp.Score IS NULL THEN 'No Score' 
+        ELSE CASE 
+            WHEN fp.Score > 100 THEN 'High Score' 
+            WHEN fp.Score BETWEEN 50 AND 100 THEN 'Medium Score' 
+            ELSE 'Low Score' 
+        END 
+    END AS ScoreCategory,
+    CASE
+        WHEN ph.HistoryCount IS NULL THEN 'No History'
+        ELSE CONCAT(ph.HistoryCount, ' Changes')
+    END AS ChangeDetails
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    TagStatistics ts ON ts.TagUsageCount > 100
+LEFT JOIN 
+    PostHistoryAnalysis ph ON ph.PostId = fp.PostId
+WHERE 
+    fp.ViewCount > 0 
+ORDER BY 
+    fp.Score DESC, ts.TotalViews DESC;

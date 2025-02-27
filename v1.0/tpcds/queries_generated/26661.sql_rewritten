@@ -1,0 +1,64 @@
+WITH CustomerInfo AS (
+    SELECT 
+        C.c_customer_id,
+        C.c_first_name,
+        C.c_last_name,
+        CA.ca_city,
+        CA.ca_state,
+        C.c_email_address,
+        CD.cd_gender,
+        CD.cd_marital_status,
+        CD.cd_purchase_estimate,
+        HD.hd_buy_potential,
+        HD.hd_dep_count
+    FROM customer C
+    JOIN customer_address CA ON C.c_current_addr_sk = CA.ca_address_sk
+    JOIN customer_demographics CD ON C.c_current_cdemo_sk = CD.cd_demo_sk
+    JOIN household_demographics HD ON C.c_current_hdemo_sk = HD.hd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        WS.ws_order_number,
+        WS.ws_sales_price,
+        WS.ws_net_profit,
+        D.d_date,
+        W.w_warehouse_name
+    FROM web_sales WS
+    JOIN date_dim D ON WS.ws_sold_date_sk = D.d_date_sk
+    JOIN warehouse W ON WS.ws_warehouse_sk = W.w_warehouse_sk
+)
+SELECT 
+    CI.c_customer_id,
+    CI.c_first_name,
+    CI.c_last_name,
+    CI.ca_city,
+    CI.ca_state,
+    CI.c_email_address,
+    CI.cd_gender,
+    CI.cd_marital_status,
+    CI.cd_purchase_estimate,
+    CI.hd_buy_potential,
+    CI.hd_dep_count,
+    SUM(SD.ws_sales_price) AS total_sales,
+    SUM(SD.ws_net_profit) AS total_profit,
+    COUNT(DISTINCT SD.ws_order_number) AS order_count,
+    AVG(SD.ws_sales_price) AS avg_sales_price
+FROM CustomerInfo CI
+LEFT JOIN SalesData SD ON CI.c_customer_id = SD.ws_order_number  
+GROUP BY 
+    CI.c_customer_id, 
+    CI.c_first_name, 
+    CI.c_last_name, 
+    CI.ca_city, 
+    CI.ca_state, 
+    CI.c_email_address, 
+    CI.cd_gender, 
+    CI.cd_marital_status, 
+    CI.cd_purchase_estimate, 
+    CI.hd_buy_potential, 
+    CI.hd_dep_count
+HAVING 
+    SUM(SD.ws_sales_price) > 1000
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

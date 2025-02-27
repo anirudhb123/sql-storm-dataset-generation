@@ -1,0 +1,61 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 
+                                  AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws.web_site_sk, ws.web_name
+),
+Address_CTE AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY ca.ca_address_sk, ca.ca_city
+    HAVING COUNT(DISTINCT c.c_customer_sk) > 0
+),
+Sales_Data AS (
+    SELECT 
+        c.c_customer_sk,
+        d.d_date_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY c.c_customer_sk, d.d_date_sk
+)
+
+SELECT 
+    a.ca_city,
+    sC.total_sales AS web_site_sales,
+    a.customer_count,
+    COALESCE(total_sales_by_city.total_sales, 0) AS total_sales_by_city,
+    MAX(total_profit.net_profit) AS max_net_profit
+FROM Address_CTE a
+LEFT JOIN Sales_CTE sC ON a.customer_count > 50
+LEFT JOIN (
+    SELECT 
+        customer_address.ca_city,
+        SUM(SD.total_sales) AS total_sales
+    FROM Sales_Data SD
+    JOIN customer c ON SD.c_customer_sk = c.c_customer_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY customer_address.ca_city
+) total_sales_by_city ON a.ca_city = total_sales_by_city.ca_city 
+LEFT JOIN (
+    SELECT 
+        ws.ws_ship_addr_sk,
+        SUM(ws.ws_net_profit) AS net_profit
+    FROM web_sales ws
+    GROUP BY ws.ws_ship_addr_sk
+) total_profit ON a.ca_address_sk = total_profit.ws_ship_addr_sk
+WHERE a.customer_count > 10
+GROUP BY a.ca_city, sC.total_sales, a.customer_count, total_sales_by_city.total_sales
+ORDER BY web_site_sales DESC
+LIMIT 10;

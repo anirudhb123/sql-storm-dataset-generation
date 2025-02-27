@@ -1,0 +1,57 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score <= 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        AVG(u.Reputation) AS AvgReputation,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(AVG(c.Score), 0) AS AvgCommentScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days') 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+    HAVING 
+        COUNT(c.Id) > 5
+    ORDER BY 
+        p.ViewCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName,
+    u.PostCount,
+    u.PositivePosts,
+    u.NegativePosts,
+    pp.Title AS PopularPostTitle,
+    pp.CreationDate AS PopularPostDate,
+    pp.Score AS PopularPostScore,
+    pp.ViewCount AS PopularPostViews,
+    pp.AvgCommentScore
+FROM 
+    UserStats u
+LEFT JOIN 
+    PopularPosts pp ON u.Rank <= 5
+WHERE 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users WHERE Reputation IS NOT NULL)
+ORDER BY 
+    u.PostCount DESC, u.DisplayName;

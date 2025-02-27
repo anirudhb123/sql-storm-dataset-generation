@@ -1,0 +1,51 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_refund_customer_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        COUNT(DISTINCT sr_ticket_number) AS return_count,
+        RANK() OVER (PARTITION BY sr_refund_customer_sk ORDER BY SUM(sr_return_quantity) DESC) AS rnk
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_refund_customer_sk
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws_quantity) AS total_purchased,
+        AVG(ws_net_paid) AS avg_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        cp.c_customer_sk,
+        CASE 
+            WHEN cp.total_purchased IS NULL THEN 'No Purchases'
+            WHEN cp.avg_spent > 100 THEN 'High Roller'
+            ELSE 'Regular'
+        END AS customer_type,
+        COALESCE(rr.total_returned, 0) AS total_returns
+    FROM 
+        CustomerPurchases cp
+    LEFT JOIN 
+        RankedReturns rr ON cp.c_customer_sk = rr.refund_customer_sk
+)
+SELECT 
+    tc.customer_type,
+    COUNT(tc.c_customer_sk) AS customer_count,
+    AVG(tc.total_returns) AS avg_returns
+FROM 
+    TopCustomers tc
+WHERE 
+    tc.total_returns IS NOT NULL AND 
+    tc.total_returns > (SELECT AVG(total_returns) FROM TopCustomers WHERE total_returns IS NOT NULL)
+GROUP BY 
+    tc.customer_type
+ORDER BY 
+    customer_type DESC;

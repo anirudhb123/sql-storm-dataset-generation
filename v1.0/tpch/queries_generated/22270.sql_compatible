@@ -1,0 +1,63 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_extendedprice DESC) AS sales_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, c.c_custkey
+),
+NationSupplier AS (
+    SELECT 
+        n.n_nationkey,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(rs.total_sales, 0) AS total_sales,
+    ns.supplier_count,
+    (CASE 
+        WHEN rs.total_sales IS NULL THEN 'No sales'
+        WHEN rs.total_sales < 1000 THEN 'Low sales'
+        ELSE 'High sales'
+    END) AS sales_category,
+    CONCAT(p.p_name, ' - ', p.p_comment) AS product_description,
+    CONCAT('Region ', r.r_regionkey, ': ', r.r_name) AS region_info
+FROM 
+    part p
+LEFT JOIN 
+    RecursiveSales rs ON p.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n JOIN NationSupplier ns ON n.n_nationkey = ns.n_nationkey)))
+LEFT JOIN 
+    region r ON EXISTS (SELECT 1 FROM nation n WHERE n.n_nationkey IN (SELECT DISTINCT s.s_nationkey FROM supplier s WHERE s.s_suppkey = p.p_partkey))
+LEFT JOIN 
+    NationSupplier ns ON ns.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE EXISTS (SELECT 1 FROM supplier s WHERE s.s_nationkey = n.n_nationkey))
+WHERE 
+    (p.p_retailprice BETWEEN 100 AND 500 OR p.p_size IS NOT NULL)
+    AND (rs.total_sales IS NULL OR ns.supplier_count > 1)
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    ns.supplier_count, 
+    rs.total_sales, 
+    p.p_comment, 
+    r.r_regionkey, 
+    r.r_name
+ORDER BY 
+    total_sales DESC, 
+    sales_category ASC;

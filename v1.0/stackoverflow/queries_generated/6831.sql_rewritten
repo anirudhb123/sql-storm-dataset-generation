@@ -1,0 +1,59 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        COUNT(DISTINCT P.Id) AS PostCount, 
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9)  
+    GROUP BY 
+        U.Id
+),
+PopularTags AS (
+    SELECT 
+        T.TagName, 
+        COUNT(P.Id) AS TagPostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, '>')::int[])  
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        TagPostCount DESC
+    LIMIT 10
+),
+TopUsers AS (
+    SELECT 
+        U.DisplayName, 
+        U.Reputation
+    FROM 
+        UserReputation UR
+    JOIN 
+        Users U ON U.Id = UR.UserId
+    WHERE 
+        UR.PostCount > 10 AND 
+        UR.PositivePosts > UR.NegativePosts
+    ORDER BY 
+        UR.Reputation DESC
+    LIMIT 5
+)
+SELECT 
+    TU.DisplayName AS TopUser, 
+    TU.Reputation AS UserReputation, 
+    PT.TagName AS PopularTag, 
+    PT.TagPostCount AS PostsWithTag
+FROM 
+    TopUsers TU
+CROSS JOIN 
+    PopularTags PT
+ORDER BY 
+    TU.Reputation DESC, 
+    PT.TagPostCount DESC;

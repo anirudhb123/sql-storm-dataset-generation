@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') 
+        AND EXISTS (SELECT 1 FROM customer c WHERE c.c_custkey = o.o_custkey AND c.c_acctbal IS NOT NULL)
+),
+CustomerSegmentation AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        CASE 
+            WHEN c.c_acctbal < 500 THEN 'Low Value'
+            WHEN c.c_acctbal BETWEEN 500 AND 1500 THEN 'Medium Value'
+            ELSE 'High Value'
+        END AS value_segment
+    FROM 
+        customer c
+    WHERE 
+        c.c_address IS NOT NULL
+),
+SupplierMetrics AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey
+    HAVING 
+        COUNT(DISTINCT p.p_partkey) > 5
+)
+SELECT 
+    coalesce(o.o_orderkey, -1) AS order_key,
+    o.o_orderdate,
+    cs.c_name,
+    cs.value_segment,
+    COALESCE(sm.total_supply_value, 0) AS total_supply_value,
+    SUM(DISTINCT li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+FROM 
+    RankedOrders o
+FULL OUTER JOIN 
+    CustomerSegmentation cs ON cs.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem li ON li.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    SupplierMetrics sm ON sm.s_suppkey = li.l_suppkey
+WHERE 
+    o.o_orderdate BETWEEN CURRENT_DATE - INTERVAL '2 years' AND CURRENT_DATE
+    AND (sm.total_supply_value IS NOT NULL OR o.o_orderstatus = 'O')
+GROUP BY 
+    o.o_orderkey, o.o_orderdate, cs.c_name, cs.value_segment, sm.total_supply_value
+HAVING 
+    SUM(li.l_quantity) IS NULL OR SUM(li.l_quantity) > 100
+ORDER BY 
+    o.o_orderdate DESC NULLS LAST;

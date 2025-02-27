@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        1 AS level
+    FROM
+        aka_title
+    WHERE
+        episode_of_id IS NULL  -- Top-level movies
+
+    UNION ALL
+
+    SELECT 
+        a.movie_id,
+        a.title,
+        a.production_year,
+        mh.level + 1
+    FROM
+        aka_title a
+    JOIN
+        MovieHierarchy mh ON a.episode_of_id = mh.movie_id
+)
+
+SELECT
+    mh.title,
+    mh.production_year,
+    count(DISTINCT c.person_id) AS total_cast_members,
+    STRING_AGG(DISTINCT ak.name, ', ') AS cast_names,
+    CASE 
+        WHEN mh.level = 1 THEN 'Main Movie'
+        ELSE 'Episode'
+    END AS movie_type,
+    ROW_NUMBER() OVER(PARTITION BY mh.production_year ORDER BY count(DISTINCT c.person_id) DESC) AS rank,
+    AVG(COALESCE(ki.info::float, 0)) AS avg_keyword_rank,
+    MAX(COALESCE(d.title, 'Unknown')) AS linked_movie_title
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    cast_info c ON mh.movie_id = c.movie_id
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_link mlink ON mh.movie_id = mlink.movie_id
+LEFT JOIN 
+    aka_title d ON mlink.linked_movie_id = d.movie_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+LEFT JOIN
+    movie_info_idx ki ON ki.movie_id = mh.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level
+HAVING 
+    count(DISTINCT c.person_id) > 0
+ORDER BY 
+    mh.production_year DESC, total_cast_members DESC;
+

@@ -1,0 +1,62 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        h.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        movie_hierarchy AS h ON ml.movie_id = h.movie_id
+    JOIN 
+        aka_title AS m ON ml.linked_movie_id = m.id
+)
+SELECT 
+    t.title AS Main_Title,
+    t.production_year AS Main_Production_Year,
+    c.name AS Cast_Name,
+    ct.kind AS Comp_Cast_Type,
+    m.info AS Movie_Info,
+    COUNT(DISTINCT k.keyword) AS Keyword_Count,
+    SUM(CASE WHEN pi.info IS NULL THEN 1 ELSE 0 END) AS NULL_Info_Count,
+    ROW_NUMBER() OVER (PARTITION BY t.movie_id ORDER BY c.nr_order) AS Cast_Order,
+    MAX(CASE WHEN t.production_year < 2000 THEN 'Classic' ELSE 'Modern' END) AS Era
+FROM 
+    movie_hierarchy AS t
+LEFT JOIN 
+    complete_cast AS cc ON cc.movie_id = t.movie_id
+LEFT JOIN 
+    cast_info AS c ON c.movie_id = t.movie_id
+LEFT JOIN 
+    comp_cast_type AS ct ON c.person_role_id = ct.id
+LEFT JOIN 
+    movie_info AS m ON m.movie_id = t.movie_id
+LEFT JOIN 
+    movie_keyword AS mk ON mk.movie_id = t.movie_id
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info AS pi ON pi.person_id = c.person_id
+WHERE 
+    t.level < 3 
+    AND (c.note IS NULL OR c.note != 'cameo')
+GROUP BY 
+    t.movie_id, t.title, t.production_year, c.name, ct.kind, m.info
+ORDER BY 
+    t.production_year DESC, Keyword_Count DESC
+LIMIT 100;

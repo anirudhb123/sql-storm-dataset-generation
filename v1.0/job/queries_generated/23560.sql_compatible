@@ -1,0 +1,54 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        t.title, t.production_year
+),
+RankedMovies AS (
+    SELECT 
+        md.*,
+        RANK() OVER (PARTITION BY md.production_year ORDER BY md.cast_count DESC) AS rank_within_year
+    FROM 
+        MovieDetails md 
+),
+FilteredMovies AS (
+    SELECT 
+        fm.*,
+        (SELECT COUNT(*) FROM RankedMovies rm WHERE rm.production_year = fm.production_year AND rm.cast_count > 8) AS high_cast_count
+    FROM 
+        RankedMovies fm
+    WHERE 
+        fm.cast_count >= (SELECT AVG(cast_count) FROM RankedMovies) 
+        OR 
+        (fm.production_year BETWEEN 2000 AND 2010 AND fm.rank_within_year < 5)
+)
+SELECT 
+    fm.movie_title,
+    fm.production_year,
+    fm.cast_count,
+    CASE 
+        WHEN fm.high_cast_count > 0 THEN 'Highly populated year'
+        ELSE 'Few signatures'
+    END AS commentary,
+    STRING_AGG(DISTINCT ak.name, ', ') AS all_aka_names
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    aka_title at ON at.movie_id IN (SELECT movie_id FROM aka_title WHERE title = fm.movie_title)
+LEFT JOIN 
+    aka_name ak ON ak.person_id IN (SELECT DISTINCT person_id FROM cast_info WHERE movie_id = at.movie_id)
+GROUP BY 
+    fm.movie_title, fm.production_year, fm.cast_count, fm.high_cast_count
+ORDER BY 
+    fm.production_year DESC, fm.cast_count DESC
+LIMIT 100;

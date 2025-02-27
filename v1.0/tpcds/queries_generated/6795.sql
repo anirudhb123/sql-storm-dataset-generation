@@ -1,0 +1,70 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk AS returning_customer,
+        SUM(wr_return_quantity) AS total_returned_quantity,
+        SUM(wr_return_amt) AS total_return_amount
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating
+    FROM 
+        customer_demographics
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cr.total_returned_quantity,
+        cr.total_return_amount
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.returning_customer
+    LEFT JOIN 
+        CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.customer_id,
+        c.first_name,
+        c.last_name,
+        c.gender,
+        c.marital_status,
+        c.education_status,
+        c.total_returned_quantity,
+        c.total_return_amount,
+        CASE 
+            WHEN c.total_return_amount > 1000 THEN 'High'
+            WHEN c.total_return_amount BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS value_category
+    FROM 
+        CustomerData c
+    WHERE 
+        c.total_return_amount IS NOT NULL
+)
+SELECT 
+    hvc.value_category,
+    COUNT(*) AS customer_count,
+    AVG(hvc.total_returned_quantity) AS avg_returned_quantity,
+    SUM(hvc.total_return_amount) AS total_value_returned
+FROM 
+    HighValueCustomers hvc
+GROUP BY 
+    hvc.value_category
+ORDER BY 
+    hvc.value_category;

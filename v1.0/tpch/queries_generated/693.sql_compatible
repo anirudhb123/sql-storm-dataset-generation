@@ -1,0 +1,59 @@
+
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+NationSales AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    RANK() OVER (ORDER BY ss.total_available DESC) AS supplier_rank,
+    ss.s_name, 
+    ss.total_available,
+    ns.n_name,
+    ns.total_orders,
+    ns.total_sales,
+    CASE 
+        WHEN ns.total_orders IS NULL THEN 'No Sales'
+        ELSE CAST(ns.total_sales AS DECIMAL(12, 2))
+    END AS formatted_sales
+FROM 
+    SupplierSummary ss
+FULL OUTER JOIN 
+    NationSales ns ON ss.s_suppkey = (
+        SELECT MAX(ps.ps_suppkey) 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT p.p_partkey 
+            FROM part p 
+            WHERE p.p_name LIKE '%Widget%'
+        )
+    )
+ORDER BY 
+    supplier_rank, formatted_sales DESC;

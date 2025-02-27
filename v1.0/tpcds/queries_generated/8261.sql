@@ -1,0 +1,55 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01')
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    GROUP BY 
+        ws_bill_customer_sk
+), 
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        r.total_profit
+    FROM 
+        ranked_sales r
+    JOIN 
+        customer c ON r.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        r.profit_rank <= 10
+), 
+store_summary AS (
+    SELECT 
+        s.s_store_name,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_paid) AS total_revenue
+    FROM 
+        web_sales ws
+    JOIN 
+        store s ON ws.ws_store_sk = s.s_store_sk
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01')
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    GROUP BY 
+        s.s_store_name
+)
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    ss.s_store_name,
+    ss.total_orders,
+    ss.total_revenue
+FROM 
+    top_customers tc
+JOIN 
+    store_summary ss ON tc.total_profit = (SELECT MAX(total_profit) FROM top_customers)
+ORDER BY 
+    ss.total_revenue DESC;

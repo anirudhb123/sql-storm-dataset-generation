@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 5000 AND sh.level < 3
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_totalprice > 100
+),
+PartSupplyDetails AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+FrequentCustomers AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING COUNT(o.o_orderkey) > 5
+)
+SELECT 
+    sh.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    po.p_name AS part_name,
+    COALESCE(p.total_avail_qty, 0) AS available_quantity,
+    COALESCE(p.avg_supply_cost, 0.00) AS average_cost,
+    f.order_count,
+    cast('1998-10-01' as date) - c.o_orderdate AS days_since_order
+FROM CustomerOrders c
+LEFT JOIN PartSupplyDetails p ON c.o_orderkey = p.p_partkey
+JOIN SupplierHierarchy sh ON sh.s_nationkey = c.c_custkey
+JOIN FrequentCustomers f ON f.c_custkey = c.c_custkey
+WHERE sh.level > 0
+  AND (p.total_avail_qty IS NULL OR p.total_avail_qty > 50)
+  AND (f.order_count IS NOT NULL OR f.order_count > 0)
+ORDER BY days_since_order DESC, sh.s_name;

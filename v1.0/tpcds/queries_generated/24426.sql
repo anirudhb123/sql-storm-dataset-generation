@@ -1,0 +1,66 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(COALESCE(sr_return_quantity, 0)) AS total_returned,
+        COUNT(DISTINCT CASE WHEN sr_return_quantity IS NOT NULL THEN sr_ticket_number END) AS return_count
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+), 
+HighReturnCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cr.total_returned,
+        cr.return_count,
+        DENSE_RANK() OVER (ORDER BY cr.total_returned DESC) AS rank
+    FROM CustomerReturns cr
+    JOIN customer c ON cr.c_customer_sk = c.c_customer_sk
+    WHERE cr.total_returned > 0
+), 
+ReturnInfo AS (
+    SELECT 
+        hr.c_customer_sk,
+        hr.c_first_name,
+        hr.c_last_name,
+        hr.total_returned,
+        hr.return_count,
+        CASE 
+            WHEN hr.return_count > 5 THEN 'Frequent Returner'
+            WHEN hr.total_returned > 50 THEN 'High Value Returner'
+            ELSE 'Regular Returner'
+        END AS return_category
+    FROM HighReturnCustomers hr
+    WHERE hr.rank <= 10
+), 
+ReturnDetails AS (
+    SELECT 
+        ri.c_customer_sk,
+        ri.c_first_name,
+        ri.c_last_name,
+        ri.total_returned,
+        ri.return_category,
+        COALESCE(web.web_name, 'N/A') AS web_name,
+        (SELECT COUNT(*) FROM web_sales ws WHERE ws.ws_bill_customer_sk = ri.c_customer_sk) AS web_sales_count,
+        (SELECT SUM(ws.ws_net_profit) FROM web_sales ws WHERE ws.ws_bill_customer_sk = ri.c_customer_sk) AS total_web_profit
+    FROM ReturnInfo ri
+    LEFT JOIN web_site web ON web.web_site_sk = (SELECT MIN(ws.web_site_sk) FROM web_sales ws WHERE ws.ws_bill_customer_sk = ri.c_customer_sk)
+)
+SELECT 
+    rd.c_customer_sk,
+    rd.c_first_name,
+    rd.c_last_name,
+    rd.total_returned,
+    rd.return_category,
+    rd.web_name,
+    rd.web_sales_count,
+    rd.total_web_profit,
+    (SELECT LISTAGG(DISTINCT cs.cs_order_number) WITHIN GROUP (ORDER BY cs.cs_order_number) 
+     FROM catalog_sales cs 
+     WHERE cs.cs_bill_customer_sk = rd.c_customer_sk) AS catalog_order_numbers
+FROM ReturnDetails rd
+ORDER BY rd.total_returned DESC;

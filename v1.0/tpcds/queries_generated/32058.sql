@@ -1,0 +1,51 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk,
+           0 AS level
+    FROM customer c
+    WHERE c.c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk,
+           ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+),
+customer_avg_spent AS (
+    SELECT c.c_customer_sk, SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+           COUNT(ws.ws_order_number) AS total_orders,
+           AVG(ws.ws_net_paid) AS avg_net_paid
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+item_sales AS (
+    SELECT i.i_item_sk, SUM(ws.ws_quantity) AS total_quantity, 
+           SUM(ws.ws_sales_price) AS total_sales
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk
+),
+ship_mode_stats AS (
+    SELECT sm.sm_ship_mode_id, COUNT(ws.ws_order_number) AS order_count,
+           AVG(ws.ws_net_paid) AS avg_net_paid
+    FROM web_sales ws
+    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY sm.sm_ship_mode_id
+)
+SELECT ch.c_first_name || ' ' || ch.c_last_name AS customer_name,
+       COALESCE(cas.total_sales, 0) AS total_sales,
+       COALESCE(cas.avg_net_paid, 0) AS avg_net_paid,
+       sm_stat.order_count AS total_shipments,
+       si.total_quantity AS total_items_sold,
+       si.total_sales AS total_sales_from_items,
+       CASE 
+           WHEN cas.total_orders > 10 THEN 'Frequent Buyer'
+           WHEN cas.total_orders BETWEEN 5 AND 10 THEN 'Occasional Buyer'
+           ELSE 'New Buyer'
+       END AS customer_category
+FROM customer_hierarchy ch
+LEFT JOIN customer_avg_spent cas ON ch.c_customer_sk = cas.c_customer_sk
+LEFT JOIN item_sales si ON si.i_item_sk IN (SELECT ws.ws_item_sk FROM web_sales ws WHERE ws.ws_bill_customer_sk = ch.c_customer_sk)
+LEFT JOIN ship_mode_stats sm_stat ON sm_stat.order_count > 0
+WHERE ch.level = 0
+ORDER BY total_sales DESC, customer_name;

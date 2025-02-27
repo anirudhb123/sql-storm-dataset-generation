@@ -1,0 +1,76 @@
+-- Performance benchmarking query to retrieve user statistics and post statistics
+
+WITH UserStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        AVG(V.CreationDate) AS AverageVoteTime
+    FROM
+        Users U
+    LEFT JOIN
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN
+        Votes V ON P.Id = V.PostId
+    GROUP BY
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate, U.LastAccessDate, U.Views, U.UpVotes, U.DownVotes
+),
+PostStats AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        COUNT(CM.Id) AS CommentCount,
+        COUNT(V.Id) AS VoteCount,
+        (SELECT COUNT(*) FROM PostLinks PL WHERE PL.PostId = P.Id) AS LinkCount
+    FROM
+        Posts P
+    LEFT JOIN
+        Comments CM ON P.Id = CM.PostId
+    LEFT JOIN
+        Votes V ON P.Id = V.PostId
+    GROUP BY
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, P.AnswerCount, P.CommentCount, P.FavoriteCount
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.Views,
+    U.UpVotes,
+    U.DownVotes,
+    U.PostCount,
+    U.QuestionsAsked,
+    U.AnswersGiven,
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.ViewCount,
+    P.AnswerCount,
+    P.CommentCount,
+    P.FavoriteCount,
+    P.CommentCount AS TotalComments,
+    P.VoteCount AS TotalVotes,
+    P.LinkCount AS TotalLinks
+FROM 
+    UserStats U
+JOIN 
+    PostStats P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, 
+    P.Score DESC;

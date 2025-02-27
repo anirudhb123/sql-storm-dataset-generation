@@ -1,0 +1,97 @@
+
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        0 AS TotalVotes
+    FROM 
+        Users U
+    WHERE 
+        U.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    
+    UNION ALL
+    
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        UA.TotalVotes + COALESCE(V.VoteCount, 0)
+    FROM 
+        UserActivity UA
+    JOIN 
+        Users U ON U.Id = UA.UserId
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        WHERE 
+            CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+        GROUP BY 
+            UserId
+    ) V ON U.Id = V.UserId
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        COALESCE(V.UpVotes, 0) - COALESCE(V.DownVotes, 0) AS NetVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT PL.RelatedPostId) AS RelatedLinks
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostLinks PL ON P.Id = PL.PostId
+    GROUP BY 
+        P.Id, P.Title, P.OwnerUserId
+),
+UserPostActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        PS.PostId,
+        PS.Title,
+        PS.NetVotes,
+        PS.CommentCount,
+        PS.RelatedLinks,
+        ROW_NUMBER() OVER(PARTITION BY U.Id ORDER BY PS.NetVotes DESC) AS PostRank
+    FROM 
+        Users U
+    JOIN 
+        PostStats PS ON U.Id = PS.OwnerUserId
+    WHERE 
+        U.Reputation > 100
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.TotalVotes,
+    UPA.Title,
+    UPA.NetVotes,
+    UPA.CommentCount,
+    UPA.RelatedLinks
+FROM 
+    UserActivity U
+LEFT JOIN 
+    UserPostActivity UPA ON U.UserId = UPA.UserId
+WHERE 
+    U.TotalVotes > 10
+    AND UPA.PostRank <= 5
+ORDER BY 
+    U.Reputation DESC, U.TotalVotes DESC;

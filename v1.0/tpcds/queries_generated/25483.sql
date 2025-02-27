@@ -1,0 +1,64 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca.city AS address_city, 
+        ca.state AS address_state, 
+        CONCAT(ca.street_name, ' ', ca.street_type) AS full_address,
+        COUNT(c.customer_sk) AS customer_count
+    FROM customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        ca.city, 
+        ca.state, 
+        ca.street_name, 
+        ca.street_type
+),
+DemographicStats AS (
+    SELECT 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        SUM(cd.cd_dep_count) AS total_dependents,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics cd
+    GROUP BY 
+        cd.cd_gender, 
+        cd.cd_marital_status
+),
+SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    GROUP BY ws.web_site_id
+),
+FinalBenchmark AS (
+    SELECT 
+        ad.address_city,
+        ad.address_state,
+        ad.full_address,
+        ad.customer_count,
+        ds.cd_gender,
+        ds.cd_marital_status,
+        ds.total_dependents,
+        ds.avg_purchase_estimate,
+        sd.total_sales,
+        sd.total_profit
+    FROM AddressDetails ad
+    JOIN DemographicStats ds ON ad.customer_count > 0 -- Only if there are customers related to that address
+    JOIN SalesData sd ON ad.customer_count > 50 -- Arbitrary threshold for sales data
+)
+SELECT 
+    address_city, 
+    address_state, 
+    full_address, 
+    customer_count, 
+    cd_gender, 
+    cd_marital_status, 
+    total_dependents, 
+    avg_purchase_estimate, 
+    total_sales, 
+    total_profit
+FROM FinalBenchmark
+ORDER BY total_sales DESC, customer_count DESC
+LIMIT 100;

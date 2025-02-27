@@ -1,0 +1,57 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt,
+        DENSE_RANK() OVER (PARTITION BY sr_returning_customer_sk ORDER BY SUM(sr_return_amt_inc_tax) DESC) AS rank_return
+    FROM store_returns
+    GROUP BY sr_returning_customer_sk
+), CustomerIncome AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        COALESCE(SUM(ss.ss_net_profit), 0) AS total_profit
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, ib.ib_lower_bound, ib.ib_upper_bound
+), SalesStats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(ws.web_site_sk) AS web_sales_count,
+        SUM(ws.ws_net_profit) AS web_total_profit
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY c.c_customer_sk
+)
+
+SELECT 
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.ib_lower_bound,
+    ci.ib_upper_bound,
+    ci.total_profit,
+    COALESCE(rr.return_count, 0) AS return_count,
+    rr.total_return_amt,
+    ss.web_sales_count,
+    ss.web_total_profit,
+    CASE 
+        WHEN ci.total_profit > 10000 THEN 'High Value'
+        WHEN ci.total_profit BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM CustomerIncome ci
+LEFT JOIN RankedReturns rr ON ci.c_customer_sk = rr.returning_customer_sk
+LEFT JOIN SalesStats ss ON ci.c_customer_sk = ss.c_customer_sk
+WHERE 
+    (ci.cd_gender = 'F' OR ci.cd_marital_status = 'S')
+    AND (ci.total_profit:IS NOT NULL OR rr.return_count IS NOT NULL)
+ORDER BY customer_value_segment, ci.total_profit DESC
+LIMIT 50;

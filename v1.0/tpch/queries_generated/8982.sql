@@ -1,0 +1,33 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.Level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.Level < 3
+), FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, ps.ps_availqty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice * ps2.ps_supplycost) 
+                              FROM part p2
+                              JOIN partsupp ps2 ON p2.p_partkey = ps2.ps_partkey) 
+    AND ps.ps_availqty > 50
+), CustomerOrders AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY c.c_custkey
+    HAVING SUM(o.o_totalprice) > 2000.00
+)
+SELECT sh.s_name, fh.p_name, co.TotalSpent
+FROM SupplierHierarchy sh
+JOIN FilteredParts fh ON sh.s_nationkey = fh.p_brand
+JOIN CustomerOrders co ON co.c_custkey = (SELECT MIN(c.c_custkey) 
+                                               FROM customer c 
+                                               WHERE c.c_nationkey = sh.s_nationkey)
+ORDER BY co.TotalSpent DESC
+LIMIT 10;

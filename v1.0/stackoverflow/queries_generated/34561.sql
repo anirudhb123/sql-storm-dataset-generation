@@ -1,0 +1,67 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        0 AS Depth
+    FROM Posts p
+    WHERE p.PostTypeId = 1  -- Starting with Questions
+
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        Depth + 1
+    FROM Posts p
+    JOIN RecursivePostCTE r ON r.PostId = p.ParentId
+    WHERE p.PostTypeId = 2  -- Joining with Answers
+),
+PostStatistics AS (
+    SELECT 
+        p.PostId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpvoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownvoteCount,
+        MAX(b.Name) AS HighestBadge,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM RecursivePostCTE p
+    LEFT JOIN Comments c ON c.PostId = p.PostId
+    LEFT JOIN Votes v ON v.PostId = p.PostId
+    LEFT JOIN Badges b ON b.UserId = p.OwnerUserId
+    WHERE p.CreationDate > DATEADD(YEAR, -1, GETDATE())
+    GROUP BY p.PostId
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11)  -- Closed and Reopened posts
+)
+SELECT 
+    ps.PostId,
+    ps.CommentCount,
+    ps.UpvoteCount,
+    ps.DownvoteCount,
+    ps.HighestBadge,
+    rPT.Title AS QuestionTitle,
+    rPT.CreationDate AS QuestionDate,
+    rCH.UserDisplayName AS ClosedBy,
+    rCH.CreationDate AS ClosedDate
+FROM PostStatistics ps
+INNER JOIN RecursivePostCTE rPT ON rPT.PostId = ps.PostId
+LEFT JOIN ClosedPostHistory rCH ON rCH.PostId = ps.PostId AND rCH.HistoryRank = 1
+WHERE ps.RecentRank = 1
+ORDER BY ps.CommentCount DESC, ps.UpvoteCount DESC
+OPTION (MAXRECURSION 100);

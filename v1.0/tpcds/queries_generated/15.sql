@@ -1,0 +1,71 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws.web_site_sk,
+        d.d_year,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_paid) AS avg_net_paid,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws.web_site_sk, d.d_year
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+StoreStatistics AS (
+    SELECT 
+        s.s_store_sk,
+        COUNT(ss.ss_ticket_number) AS total_transactions,
+        SUM(ss.ss_net_profit) AS total_profit,
+        AVG(ss.ss_sales_price) AS avg_sales_price
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.ss_store_sk = s.s_store_sk
+    GROUP BY 
+        s.s_store_sk
+)
+SELECT 
+    s.web_site_sk,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    ss.s_store_sk,
+    ss.total_transactions,
+    ss.total_profit,
+    ss.avg_sales_price,
+    ss.total_profit / ss.total_transactions AS avg_profit_per_transaction,
+    COALESCE(b.total_sales, 0) AS total_sales_by_website,
+    CASE 
+        WHEN b.total_sales > 100000 THEN 'High'
+        WHEN b.total_sales BETWEEN 50000 AND 100000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM 
+    SalesSummary b
+JOIN 
+    CustomerDemographics cs ON b.web_site_sk = cs.cd_demo_sk
+LEFT JOIN 
+    StoreStatistics ss ON ss.s_store_sk = b.web_site_sk
+WHERE 
+    b.total_sales > 50000
+    AND (cs.ib_lower_bound IS NULL OR cs.ib_upper_bound > 20000)
+ORDER BY 
+    total_sales DESC, 
+    unique_customers DESC;

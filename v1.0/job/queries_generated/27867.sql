@@ -1,0 +1,51 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR ', ') AS cast_names,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword SEPARATOR ', ') AS keywords,
+        GROUP_CONCAT(DISTINCT co.name ORDER BY co.name SEPARATOR ', ') AS company_names,
+        GROUP_CONCAT(DISTINCT role.role ORDER BY role.role SEPARATOR ', ') AS role_types
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        role_type role ON ci.role_id = role.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.cast_names,
+    md.keywords,
+    md.company_names,
+    md.role_types,
+    CASE 
+        WHEN md.production_year < 2010 THEN 'Early'
+        WHEN md.production_year >= 2010 AND md.production_year < 2020 THEN 'Mid'
+        ELSE 'Recent'
+    END AS release_category
+FROM 
+    MovieDetails md
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_title;

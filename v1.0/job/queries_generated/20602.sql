@@ -1,0 +1,102 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorsWithRoles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        COUNT(c.person_id) AS role_count
+    FROM 
+        cast_info c
+    INNER JOIN 
+        aka_name a ON c.person_id = a.person_id
+    INNER JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id, a.name, r.role
+),
+MoviesWithCompanyDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COALESCE(m.note, 'No Notes') AS note
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+FinalResults AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        mc.company_name,
+        mc.company_type,
+        ar.actor_name,
+        ar.role_name,
+        ar.role_count,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM 
+        MoviesWithCompanyDetails mt
+    LEFT JOIN 
+        ActorsWithRoles ar ON mt.movie_id = ar.movie_id
+    LEFT JOIN 
+        MoviesWithKeywords mk ON mt.movie_id = mk.movie_id
+    GROUP BY 
+        mt.title, mt.production_year, mc.company_name, mc.company_type, ar.actor_name, ar.role_name
+)
+
+SELECT 
+    f.title,
+    f.production_year,
+    MAX(f.company_name) AS company_name,
+    MAX(f.company_type) AS company_type,
+    f.actor_name,
+    f.role_name,
+    f.role_count,
+    f.keywords
+FROM 
+    FinalResults f
+WHERE 
+    f.production_year >= (
+        SELECT 
+            MAX(production_year) 
+        FROM 
+            aka_title 
+        WHERE 
+            production_year IS NOT NULL
+    ) - 5
+GROUP BY 
+    f.title, f.production_year, f.actor_name, f.role_name, f.role_count
+HAVING 
+    COUNT(DISTINCT f.company_name) > 1
+ORDER BY 
+    f.production_year DESC, f.title
+OFFSET 10 ROWS
+FETCH NEXT 10 ROWS ONLY;
+
+-- This SQL query benchmarks performance using CTEs, window functions, complex joins, 
+-- and a variety of expressions while highlighting some peculiar semantic aspects of SQL.

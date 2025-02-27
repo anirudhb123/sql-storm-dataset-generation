@@ -1,0 +1,41 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales AS ws
+    WHERE 
+        ws.ws_sold_date_sk IN (
+            SELECT d.d_date_sk FROM date_dim d 
+            WHERE d.d_year = 2023 AND d.d_moy IN (1, 2, 3)
+        )
+    GROUP BY 
+        ws.web_site_sk, ws.ws_sold_date_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COALESCE(SUM(ws.total_quantity), 0) AS total_quantity_sold,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+    STRING_AGG(DISTINCT CONCAT(c.c_first_name, ' ', c.c_last_name) ORDER BY c.c_last_name) AS customer_names
+FROM 
+    customer_address AS ca
+LEFT JOIN 
+    customer AS c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    RankedSales AS rs ON rs.web_site_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales AS ws ON ws.ws_bill_customer_sk = c.c_customer_sk 
+WHERE 
+    ca.ca_country = 'USA' 
+    AND ca.ca_state IS NOT NULL 
+    AND (ws.ws_sold_date_sk IS NULL OR rs.sales_rank = 1)
+GROUP BY 
+    ca.ca_city, ca.ca_state
+HAVING 
+    SUM(ws.total_quantity) > CASE WHEN AVG(c.c_birth_year) > 1980 THEN 100 ELSE 50 END
+ORDER BY 
+    total_quantity_sold DESC, ca.ca_city ASC;

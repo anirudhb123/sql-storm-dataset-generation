@@ -1,0 +1,72 @@
+
+WITH RECURSIVE supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS average_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_nationkey
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS sales,
+        COUNT(l.l_orderkey) AS line_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+nation_overview AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(COALESCE(s.s_acctbal, 0)) AS total_acct_balance,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    n.n_name,
+    n.total_acct_balance,
+    COALESCE(s.part_count, 0) AS supplier_part_count,
+    n.supplier_count,
+    o.sales AS total_sales,
+    o.line_count,
+    n.supplier_names
+FROM 
+    nation_overview n
+LEFT JOIN 
+    supplier_summary s ON n.n_nationkey = s.s_nationkey AND s.rn = 1
+LEFT JOIN 
+    order_summary o ON o.o_custkey IN (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_nationkey = n.n_nationkey AND c.c_acctbal > 1000
+    )
+WHERE 
+    n.total_acct_balance < (SELECT AVG(total_acct_balance) FROM nation_overview)
+    AND EXISTS (
+        SELECT 1
+        FROM lineitem l
+        WHERE l.l_discount > 0.1 AND l.l_shipdate < DATE '1998-10-01'
+        GROUP BY l.l_orderkey
+        HAVING COUNT(DISTINCT l.l_orderkey) > 10
+    )
+ORDER BY 
+    n.n_name;

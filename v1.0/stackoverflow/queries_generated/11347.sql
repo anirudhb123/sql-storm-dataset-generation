@@ -1,0 +1,50 @@
+-- Performance Benchmarking SQL Query
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagPostCounts AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(pt.PostId) AS PostsCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts pt ON pt.Tags LIKE '%<' || t.TagName || '>%'
+    GROUP BY 
+        t.Id, t.TagName
+)
+
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalPosts,
+    us.TotalQuestions,
+    us.TotalAnswers,
+    us.TotalUpvotes,
+    us.TotalDownvotes,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = us.UserId) AS TotalBadges,
+    tc.TagId,
+    tc.TagName,
+    tc.PostsCount
+FROM 
+    UserPostStats us
+JOIN 
+    TagPostCounts tc ON us.TotalPosts > 0
+ORDER BY 
+    us.TotalPosts DESC, us.TotalUpvotes DESC;

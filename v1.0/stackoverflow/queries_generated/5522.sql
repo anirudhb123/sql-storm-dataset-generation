@@ -1,0 +1,66 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT 
+            PostId,
+            UNNEST(string_to_array(Tags, '><')) AS TagName
+         FROM 
+            Posts) t ON p.Id = t.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName, p.Score, p.ViewCount
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerDisplayName,
+        CommentCount,
+        LastEditDate,
+        VoteCount,
+        Tags,
+        ROW_NUMBER() OVER (ORDER BY Score DESC, ViewCount DESC) AS Rank
+    FROM 
+        PostStats
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    OwnerDisplayName,
+    CommentCount,
+    LastEditDate,
+    VoteCount,
+    Tags
+FROM 
+    TopPosts
+WHERE 
+    Rank <= 10
+ORDER BY 
+    Score DESC;

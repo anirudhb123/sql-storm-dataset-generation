@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (ORDER BY SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) DESC) AS VoteRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        pr.Name AS CloseReason
+    FROM 
+        PostHistory ph 
+    JOIN 
+        CloseReasonTypes pr ON ph.Comment::int = pr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    AND 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        cp.CreationDate AS ClosedDate,
+        cp.CloseReason
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.VoteRank <= 10
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CommentCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    CASE 
+        WHEN tp.ClosedDate IS NOT NULL THEN 'Closed on ' || to_char(tp.ClosedDate, 'YYYY-MM-DD HH24:MI:SS') || ' due to ' || tp.CloseReason
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.UpVotes DESC, tp.CommentCount DESC;

@@ -1,0 +1,65 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        COALESCE(e.title, 'N/A') AS episodic_title,
+        t.production_year,
+        mct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_order
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type mct ON mc.company_type_id = mct.id
+    LEFT JOIN 
+        aka_title e ON t.episode_of_id = e.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+PopularMovies AS (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        movie_id
+),
+MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.company_type,
+        mv.cast_count,
+        CASE 
+            WHEN mv.cast_count IS NULL THEN 'No cast info available'
+            WHEN mv.cast_count > 0 AND mv.cast_count <= 10 THEN 'Limited cast'
+            ELSE 'Rich cast'
+        END AS cast_info_category
+    FROM 
+        RecursiveMovieHierarchy mh
+    LEFT JOIN 
+        PopularMovies mv ON mh.movie_id = mv.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.company_type,
+    md.cast_info_category,
+    STRING_AGG(DISTINCT a.name, ', ') AS actors
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    cast_info ci ON md.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+WHERE 
+    md.production_year BETWEEN 1980 AND 1990
+    AND (md.company_type IS NOT NULL OR md.cast_info_category = 'Rich cast')
+GROUP BY 
+    md.movie_id, md.title, md.production_year, md.company_type, md.cast_info_category
+ORDER BY 
+    md.production_year, md.title_order;
+

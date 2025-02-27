@@ -1,0 +1,32 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT ws_item_sk, SUM(ws_quantity) AS total_quantity, SUM(ws_net_paid) AS total_sales, 1 AS level
+    FROM web_sales
+    GROUP BY ws_item_sk
+    UNION ALL
+    SELECT s.cs_item_sk, 
+           SUM(s.cs_quantity) + ss.total_quantity AS total_quantity, 
+           SUM(s.cs_net_paid) + ss.total_sales AS total_sales, 
+           ss.level + 1 AS level
+    FROM catalog_sales s
+    JOIN sales_summary ss ON s.cs_item_sk = ss.ws_item_sk
+    GROUP BY s.cs_item_sk, ss.total_quantity, ss.total_sales, ss.level
+)
+SELECT c.c_customer_id, 
+       COALESCE(SUM(ss.total_quantity), 0) AS total_sales_quantity, 
+       COALESCE(SUM(ss.total_sales), 0) AS total_sales_amount,
+       CASE 
+           WHEN cd_marital_status = 'M' THEN 'Married'
+           ELSE 'Single'
+       END AS marital_status,
+       CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name,
+       MAX(d.d_date) AS last_purchase_date
+FROM customer c
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN sales_summary ss ON ss.ws_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = c.c_customer_sk)
+LEFT JOIN date_dim d ON d.d_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales WHERE ws_bill_customer_sk = c.c_customer_sk)
+WHERE c.c_birth_year > 1980
+GROUP BY c.c_customer_id, cd_marital_status, c.c_first_name, c.c_last_name
+HAVING COALESCE(SUM(ss.total_sales), 0) > 5000
+ORDER BY total_sales_amount DESC
+FETCH FIRST 10 ROWS ONLY;

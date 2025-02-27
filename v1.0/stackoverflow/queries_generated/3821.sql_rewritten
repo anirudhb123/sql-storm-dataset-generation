@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+        AND p.Score > 0
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        SUM(COALESCE(v.VoteAmount, 0)) AS TotalVotes,
+        MAX(u.CreationDate) AS AccountAge
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        (SELECT 
+             PostId, SUM(BountyAmount) AS VoteAmount
+         FROM 
+             Votes
+         GROUP BY 
+             PostId) v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalQuestions,
+        TotalScore,
+        TotalBadges,
+        TotalVotes,
+        AccountAge,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC, TotalQuestions DESC) AS Rank
+    FROM 
+        UserStats
+    WHERE 
+        TotalQuestions > 0
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalQuestions,
+    tu.TotalScore,
+    tu.TotalBadges,
+    tu.TotalVotes,
+    CASE 
+        WHEN tu.AccountAge < INTERVAL '1 year' THEN 'Newbie'
+        WHEN tu.AccountAge < INTERVAL '5 years' THEN 'Regular'
+        ELSE 'Veteran'
+    END AS UserType
+FROM 
+    TopUsers tu
+WHERE 
+    tu.Rank <= 10
+ORDER BY 
+    tu.TotalScore DESC;

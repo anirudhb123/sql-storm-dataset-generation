@@ -1,0 +1,62 @@
+WITH RECURSIVE OrderAmounts AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount,
+        RANK() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rnk
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        o.o_orderkey
+),
+FrequentSuppliers AS (
+    SELECT
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS parts_count,
+        COALESCE(SUM(ps.ps_supplycost), 0) AS total_supply_cost
+    FROM
+        supplier s
+    LEFT JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_name
+    HAVING
+        COUNT(DISTINCT ps.ps_partkey) > 5
+),
+NationRank AS (
+    SELECT
+        n.n_nationkey,
+        n.n_name,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT s.s_suppkey) DESC) AS nation_rank
+    FROM
+        nation n
+    JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(FS.parts_count, 0) AS supplier_parts_count,
+    OA.total_amount,
+    NR.nation_rank,
+    CASE
+        WHEN p.p_retailprice IS NULL THEN 'Unknown Price'
+        ELSE CONCAT('Price: ', TO_CHAR(p.p_retailprice, 'FM999999999.00'))
+    END AS formatted_price
+FROM 
+    part p
+LEFT JOIN 
+    FrequentSuppliers FS ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_name = FS.s_name))
+LEFT JOIN 
+    OrderAmounts OA ON p.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus <> 'F'))
+LEFT JOIN 
+    NationRank NR ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps INNER JOIN supplier s ON ps.ps_suppkey = s.s_suppkey WHERE s.s_nationkey = NR.n_nationkey)
+WHERE 
+    p.p_size BETWEEN 10 AND 20
+    AND (p.p_comment LIKE '%Fragile%' OR p.p_retailprice IS NOT NULL)
+ORDER BY 
+    NR.nation_rank DESC, OA.total_amount DESC
+FETCH FIRST 50 ROWS ONLY;

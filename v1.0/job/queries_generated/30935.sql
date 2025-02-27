@@ -1,0 +1,63 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1  -- Assuming 1 represents "feature film"
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id, 
+        ch.title, 
+        ch.production_year, 
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title ch ON ml.linked_movie_id = ch.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT mk.keyword) AS number_of_keywords,
+    AVG(CASE WHEN mc.company_type_id IS NOT NULL THEN 1 ELSE 0 END) AS average_company_involvement,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY mt.production_year DESC) AS rn
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_title mt ON mh.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    movie_companies mc ON mt.id = mc.movie_id
+WHERE 
+    ak.name IS NOT NULL 
+    AND mt.production_year > 2000
+    AND EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = mt.id
+          AND mi.info_type_id IN (
+              SELECT id FROM info_type WHERE info = 'Box Office'
+          )
+          AND mi.info IS NOT NULL
+    )
+GROUP BY 
+    ak.id, mt.title, mt.production_year
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 5
+ORDER BY 
+    mt.production_year DESC, actor_name
+LIMIT 10;

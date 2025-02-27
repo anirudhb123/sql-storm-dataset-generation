@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+),
+MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(c.id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info c ON mh.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+),
+TopMovies AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY cast_count DESC) AS rank
+    FROM 
+        MovieDetails
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    tm.actors
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank <= 10
+    AND tm.production_year IS NOT NULL
+ORDER BY 
+    tm.production_year DESC;
+
+This SQL query performs several advanced operations using recursive CTEs to traverse a movie hierarchy based on links between movies, aggregates actor names, counts casts, and retrieves the top 10 movies with the most cast members, all while filtering out any movies without a production year.

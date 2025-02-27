@@ -1,0 +1,40 @@
+WITH RECURSIVE CTE_Supplier_Stats AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           RANK() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank_acctbal,
+           COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+CTE_Order_Summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_orderkey) AS lineitem_count, 
+           o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_custkey
+),
+CTE_Nation_CTE AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name, 
+           COUNT(s.s_suppkey) FILTER (WHERE ps.ps_availqty > 0) AS active_suppliers
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_nationkey, n.n_name, r.r_name
+)
+SELECT DISTINCT ns.n_name, ns.r_name, 
+       ss.s_name, ss.total_parts, 
+       os.total_revenue, os.lineitem_count
+FROM CTE_Nation_CTE ns
+JOIN CTE_Supplier_Stats ss ON ss.s_suppkey IN (SELECT s.s_suppkey 
+                                               FROM supplier s 
+                                               WHERE s.s_acctbal > 1000 
+                                               AND s.s_name LIKE 'A%')
+LEFT JOIN CTE_Order_Summary os ON os.lineitem_count >= (SELECT AVG(lineitem_count) 
+                                                         FROM CTE_Order_Summary 
+                                                         WHERE order_rank <= 5)
+WHERE ss.rank_acctbal <= 3 
+AND (os.total_revenue IS NULL OR os.total_revenue > 50000)
+ORDER BY ns.n_name, ss.total_parts DESC, os.total_revenue;

@@ -1,0 +1,92 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        COALESCE(u.DisplayName, 'Anonymous') AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.LastActivityDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.CreationDate < NOW() - INTERVAL '6 months'
+    GROUP BY 
+        u.Id
+),
+PostScoreAnalytics AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        COALESCE(tu.TotalUpVotes, 0) AS UserUpVotes,
+        COALESCE(AVG(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN p.Score END) OVER (PARTITION BY rp.OwnerDisplayName), 0) AS AvgAcceptedScore
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        TopUsers tu ON tu.UserId = rp.OwnerUserId
+)
+SELECT 
+    psa.PostId,
+    psa.Title,
+    psa.OwnerDisplayName,
+    psa.CreationDate,
+    psa.ViewCount,
+    psa.Score,
+    psa.CommentCount,
+    psa.UserUpVotes,
+    psa.AvgAcceptedScore,
+    CASE 
+        WHEN psa.Score > 0 THEN 'Positive'
+        WHEN psa.Score < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS ScoreStatus,
+    CASE 
+        WHEN psa.ViewCount IS NULL THEN 'View count not available'
+        ELSE 'View count is available: ' || psa.ViewCount::text
+    END AS ViewCountStatus,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1
+            FROM Badges b 
+            WHERE b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = psa.PostId) 
+            AND b.Class = 1
+        ) THEN 'Gold Badge Holder'
+        ELSE 'No Gold Badge'
+    END AS BadgeStatus
+FROM 
+    PostScoreAnalytics psa
+WHERE 
+    psa.CommentCount > 0
+ORDER BY 
+    psa.ViewCount DESC NULLS LAST
+LIMIT 50;

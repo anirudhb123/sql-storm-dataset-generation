@@ -1,0 +1,64 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+), 
+LineItemAnalytics AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_linenumber) AS item_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(s.s_name, 'NO SUPPLIER') AS supplier_name,
+    COALESCE(c.c_name, 'NO CUSTOMER') AS customer_name,
+    r.r_name AS region_name,
+    la.total_revenue,
+    la.item_count
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    orders o ON EXISTS (
+        SELECT 1 
+        FROM HighValueCustomers hvc 
+        WHERE hvc.c_custkey = o.o_custkey
+    )
+LEFT JOIN 
+    LineItemAnalytics la ON o.o_orderkey = la.l_orderkey
+WHERE 
+    (p.p_retailprice BETWEEN 100.00 AND 500.00 OR s.s_acctbal IS NULL)
+    AND (s.s_name LIKE '%Corp%' OR s.s_name IS NULL)
+ORDER BY 
+    la.total_revenue DESC NULLS LAST,
+    p.p_name, 
+    supplier_name;

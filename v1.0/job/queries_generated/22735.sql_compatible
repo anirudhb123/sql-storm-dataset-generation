@@ -1,0 +1,76 @@
+
+WITH RecursiveTitleCounts AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        COUNT(c.person_id) AS actor_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.id
+    GROUP BY 
+        t.id, t.title
+),
+TopTitles AS (
+    SELECT 
+        title_id,
+        title,
+        actor_count,
+        DENSE_RANK() OVER (ORDER BY actor_count DESC) AS title_rank
+    FROM 
+        RecursiveTitleCounts
+    WHERE 
+        actor_count > 0
+),
+FilteredTitles AS (
+    SELECT 
+        tt.title_id,
+        tt.title,
+        tt.actor_count
+    FROM 
+        TopTitles tt
+    WHERE 
+        tt.title_rank <= 5
+),
+CompanyTitles AS (
+    SELECT 
+        mt.movie_id AS title_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    INNER JOIN 
+        company_name cn ON mc.company_id = cn.id
+    INNER JOIN 
+        title mt ON mc.movie_id = mt.id
+    GROUP BY 
+        mt.movie_id
+),
+ActorInfo AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COALESCE(pi.info, 'No Info') AS additional_info
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        person_info pi ON a.person_id = pi.person_id
+)
+SELECT 
+    ft.title,
+    ft.actor_count,
+    ct.companies,
+    ai.name AS actor_name,
+    ai.additional_info
+FROM 
+    FilteredTitles ft
+LEFT JOIN 
+    CompanyTitles ct ON ft.title_id = ct.title_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = ft.title_id
+LEFT JOIN 
+    ActorInfo ai ON ci.person_id = ai.actor_id
+WHERE 
+    ft.actor_count > 2
+    AND (ai.additional_info IS NOT NULL OR ai.additional_info = 'No Info')
+ORDER BY 
+    ft.actor_count DESC, ft.title;

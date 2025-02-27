@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score > 10
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS NumberOfPosts
+    FROM 
+        Users u
+        JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation >= 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        ph.UserDisplayName AS ClosedBy
+    FROM 
+        Posts p
+        JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+FinalResults AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.Score,
+        r.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (ORDER BY r.Score DESC, r.ViewCount DESC) AS OverallRank
+    FROM 
+        RankedPosts r
+        JOIN Users u ON r.OwnerUserId = u.Id
+    WHERE 
+        r.Rank <= 3
+)
+
+SELECT 
+    f.PostId,
+    f.Title,
+    f.CreationDate,
+    f.Score,
+    f.ViewCount,
+    f.OwnerDisplayName,
+    COALESCE(cp.ClosedDate, 'Not Closed') AS ClosedStatus,
+    COALESCE(cp.ClosedBy, 'N/A') AS ClosedBy
+FROM 
+    FinalResults f
+LEFT JOIN 
+    ClosedPosts cp ON f.PostId = cp.Id
+WHERE 
+    f.OverallRank <= 10
+ORDER BY 
+    f.Score DESC, f.ViewCount DESC;

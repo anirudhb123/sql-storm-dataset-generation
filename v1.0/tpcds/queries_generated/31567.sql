@@ -1,0 +1,78 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (
+            SELECT MIN(d_date_sk)
+            FROM date_dim
+            WHERE d_year = 2023
+        )
+    GROUP BY ws_bill_customer_sk
+    UNION ALL
+    SELECT 
+        cs_bill_customer_sk,
+        SUM(cs_ext_sales_price)
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk >= (
+            SELECT MIN(d_date_sk)
+            FROM date_dim
+            WHERE d_year = 2023
+        )
+    GROUP BY cs_bill_customer_sk
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(sd.total_sales, 0) AS total_sales
+    FROM 
+        customer c
+    LEFT OUTER JOIN (
+        SELECT 
+            customer_sk,
+            SUM(total_sales) AS total_sales
+        FROM 
+            sales_data
+        GROUP BY customer_sk
+    ) sd ON c.c_customer_sk = sd.customer_sk
+),
+sales_summary AS (
+    SELECT 
+        c.c_customer_id,
+        NVL(c.total_sales, 0) AS sales,
+        cd.cd_gender,
+        CASE 
+            WHEN cd.cd_dep_count IS NULL THEN 'Unknown'
+            ELSE 
+                CASE 
+                    WHEN cd.cd_dep_count = 0 THEN 'Single'
+                    WHEN cd.cd_dep_count BETWEEN 1 AND 2 THEN 'Small Family'
+                    ELSE 'Large Family'
+                END 
+        END AS family_size,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY NVL(c.total_sales, 0) DESC) AS sales_rank
+    FROM 
+        customer_sales c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_customer_id = cd.cd_demo_sk
+)
+SELECT 
+    family_size,
+    COUNT(*) AS customer_count,
+    AVG(sales) AS average_sales
+FROM 
+    sales_summary
+GROUP BY 
+    family_size
+HAVING 
+    COUNT(*) > 2
+ORDER BY 
+    average_sales DESC;
+

@@ -1,0 +1,108 @@
+
+WITH RecursivePostChain AS (
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        1 AS Level,
+        P.Title
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        RPC.Level + 1,
+        P.Title
+    FROM 
+        Posts P
+    INNER JOIN
+        RecursivePostChain RPC ON P.ParentId = RPC.PostId
+    WHERE 
+        P.PostTypeId = 2
+),
+VotedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Score,
+        COALESCE(V.VoteTypeId, 0) AS VoteTypeId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN C.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentComments
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Score
+),
+PostBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) FILTER (WHERE B.Class = 1) AS GoldCount,
+        COUNT(*) FILTER (WHERE B.Class = 2) AS SilverCount,
+        COUNT(*) FILTER (WHERE B.Class = 3) AS BronzeCount
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(PB.GoldCount, 0) AS GoldBadges,
+        COALESCE(PB.SilverCount, 0) AS SilverBadges,
+        COALESCE(PB.BronzeCount, 0) AS BronzeBadges,
+        SUM(VP.Upvotes) AS TotalUpvotes,
+        SUM(VP.Downvotes) AS TotalDownvotes,
+        SUM(VP.CommentCount) AS TotalComments,
+        SUM(VP.RecentComments) AS TotalRecentComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostBadges PB ON U.Id = PB.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        VotedPosts VP ON P.Id = VP.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+FinalSummary AS (
+    SELECT 
+        UE.UserId,
+        UE.DisplayName,
+        UE.Reputation,
+        (UE.TotalUpvotes - UE.TotalDownvotes) AS NetVoteScore,
+        (UE.TotalComments - UE.TotalRecentComments) AS OlderComments,
+        (UE.GoldBadges + UE.SilverBadges + UE.BronzeBadges) AS TotalBadges
+    FROM 
+        UserEngagement UE
+)
+SELECT 
+    FS.DisplayName,
+    FS.Reputation,
+    FS.NetVoteScore,
+    FS.OlderComments,
+    FS.TotalBadges,
+    CASE 
+        WHEN FS.TotalBadges > 10 THEN 'Highly Engaged'
+        WHEN FS.TotalBadges BETWEEN 5 AND 10 THEN 'Moderately Engaged'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel,
+    RANK() OVER (ORDER BY FS.NetVoteScore DESC) AS Rank
+FROM 
+    FinalSummary FS
+ORDER BY 
+    FS.NetVoteScore DESC,
+    FS.TotalBadges DESC;

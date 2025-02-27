@@ -1,0 +1,71 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number DESC) AS rn
+    FROM web_sales
+    WHERE ws_ship_date_sk >= 2458849 -- Example date filter
+),
+AddressDetails AS (
+    SELECT
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM customer_address
+),
+Demographics AS (
+    SELECT
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            WHEN cd.cd_purchase_estimate < 1000 THEN 'Low'
+            WHEN cd.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium'
+            ELSE 'High'
+        END AS purchase_estimate_category
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+PromotionDetails AS (
+    SELECT
+        p.p_promo_sk,
+        p.p_promo_name,
+        SUM(p.p_cost) AS total_promo_cost
+    FROM promotion p
+    WHERE p.p_start_date_sk < 2458849 -- Example filter
+    GROUP BY p.p_promo_sk, p.p_promo_name
+),
+SalesSummary AS (
+    SELECT
+        s.rn,
+        s.ws_item_sk,
+        SUM(s.ws_sales_price) AS total_sales,
+        MAX(s.ws_ext_sales_price) AS max_ext_sales_price,
+        AVG(s.ws_sales_price) AS avg_sales_price
+    FROM SalesCTE s
+    WHERE s.rn <= 10
+    GROUP BY s.rn, s.ws_item_sk
+)
+SELECT
+    d.c_customer_sk,
+    a.full_address,
+    d.cd_gender,
+    d.purchase_estimate_category,
+    s.total_sales,
+    s.max_ext_sales_price,
+    s.avg_sales_price,
+    COALESCE(p.total_promo_cost, 0) AS total_promo_cost
+FROM Demographics d
+JOIN AddressDetails a ON d.c_customer_sk = a.ca_address_sk
+LEFT JOIN SalesSummary s ON d.c_customer_sk = s.ws_item_sk
+LEFT JOIN PromotionDetails p ON p.p_promo_sk = s.ws_item_sk
+WHERE d.cd_marital_status = 'M' AND d.cd_gender = 'F'
+ORDER BY total_sales DESC
+FETCH FIRST 50 ROWS ONLY;

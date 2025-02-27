@@ -1,0 +1,43 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(CASE WHEN p.LastActivityDate >= NOW() - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentActivityCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotesReceived,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.QuestionsCount,
+    ua.AnswersCount,
+    ua.RecentActivityCount,
+    ua.UpVotesReceived,
+    ua.DownVotesReceived,
+    (ua.UpVotesReceived - ua.DownVotesReceived) AS NetVotes,
+    CASE 
+        WHEN ua.TotalPosts >= 50 THEN 'Community Contributor'
+        WHEN ua.Reputation >= 5000 THEN 'Top Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorLevel
+FROM 
+    UserActivity ua
+WHERE 
+    ua.RecentActivityCount > 0
+ORDER BY 
+    NetVotes DESC, 
+    ua.TotalPosts DESC
+LIMIT 10;

@@ -1,0 +1,50 @@
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        AVG(Users.Reputation) AS AverageReputation,
+        SUM(Posts.ViewCount) AS TotalViews
+    FROM Tags
+    LEFT JOIN Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '><')::int[])
+    LEFT JOIN Users ON Posts.OwnerUserId = Users.Id
+    GROUP BY Tags.TagName
+),
+
+TopActiveUsers AS (
+    SELECT 
+        Users.DisplayName,
+        Users.Reputation,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews
+    FROM Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    WHERE Users.Reputation > 1000  -- Only consider users with significant reputation
+    GROUP BY Users.DisplayName, Users.Reputation
+    ORDER BY PostCount DESC
+    LIMIT 10
+),
+
+PostModificationStats AS (
+    SELECT 
+        PostHistory.PostId,
+        PostHistoryType.Name AS ActionType,
+        COUNT(PostHistory.Id) AS ActionCount
+    FROM PostHistory 
+    JOIN PostHistoryTypes AS PostHistoryType ON PostHistory.PostHistoryTypeId = PostHistoryType.Id
+    WHERE PostHistoryType.Name IN ('Edit Title', 'Edit Body', 'Edit Tags')
+    GROUP BY PostHistory.PostId, PostHistoryType.Name
+)
+
+SELECT 
+    T.TagName,
+    T.PostCount,
+    T.AverageReputation,
+    T.TotalViews,
+    U.DisplayName AS TopUser,
+    U.Reputation AS UserReputation,
+    P.ActionType,
+    P.ActionCount
+FROM TagStats T
+JOIN TopActiveUsers U ON T.AverageReputation < U.Reputation
+JOIN PostModificationStats P ON T.PostCount > P.ActionCount
+ORDER BY T.TotalViews DESC, T.PostCount DESC;

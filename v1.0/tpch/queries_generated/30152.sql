@@ -1,0 +1,52 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_custkey, 1 as level
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_custkey, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE oh.level < 5
+),
+SupplierSummary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           COUNT(ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, 
+           COALESCE(ss.total_avail_qty, 0) AS total_avail_qty,
+           COALESCE(ss.avg_supply_cost, 0) AS avg_supply_cost,
+           (CASE 
+                WHEN ss.supplier_count IS NULL THEN 'No Suppliers'
+                ELSE CONCAT('Suppliers: ', ss.supplier_count)
+            END) AS supplier_info
+    FROM part p
+    LEFT JOIN SupplierSummary ss ON p.p_partkey = ss.ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+)
+SELECT ph.p_partkey, ph.p_name, ph.total_avail_qty, ph.avg_supply_cost,
+       co.c_custkey, co.c_name, co.order_count, co.total_spent, co.spending_rank,
+       CASE 
+           WHEN co.total_spent IS NULL THEN 'No Orders' 
+           ELSE 'Has Orders' 
+       END AS order_status,
+       r.r_name AS region_name
+FROM PartDetails ph
+LEFT JOIN CustomerOrders co ON ph.p_partkey = co.c_custkey
+LEFT JOIN nation n ON co.c_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE ph.avg_supply_cost > (SELECT AVG(ps.ps_supplycost) FROM partsupp ps)
+  AND ph.total_avail_qty < (SELECT AVG(ps.ps_availqty) FROM partsupp ps)
+ORDER BY ph.p_partkey, co.total_spent DESC;

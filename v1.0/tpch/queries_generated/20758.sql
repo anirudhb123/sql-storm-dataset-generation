@@ -1,0 +1,34 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, CAST(s_name AS VARCHAR(100)) AS hierarchy_path
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL AND s_acctbal > 1000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, CONCAT(sh.hierarchy_path, ' -> ', s.s_name)
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey AND s.s_acctbal < sh.s_acctbal
+)
+SELECT 
+    p.p_name AS part_name,
+    p.p_brand AS part_brand,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    MAX(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS max_returned_quantity,
+    STDEV(l.l_extendedprice) OVER (PARTITION BY p.p_partkey) AS stddev_price,
+    ROW_NUMBER() OVER (ORDER BY total_revenue DESC) AS revenue_rank,
+    (SELECT COUNT(*)
+     FROM lineitem l2
+     WHERE l2.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F')) AS total_filled_orders,
+    sh.hierarchy_path
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey = l.l_suppkey
+WHERE (p.p_retailprice > 100 OR p.p_size < 10) 
+  AND (l.l_tax IS NULL OR l.l_tax < 0.2)
+  AND p.p_comment NOT LIKE '%obsolete%'
+GROUP BY p.p_partkey, p.p_name, p.p_brand, sh.hierarchy_path
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_revenue DESC
+LIMIT 10;

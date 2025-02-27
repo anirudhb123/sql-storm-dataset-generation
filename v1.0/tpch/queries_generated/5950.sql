@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        ROW_NUMBER() OVER(PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        rs.nation_name,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rank <= 5
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ps.ps_comment
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        li.l_quantity,
+        li.l_extendedprice,
+        li.l_discount,
+        li.l_tax
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+)
+SELECT 
+    td.nation_name,
+    pd.p_name,
+    SUM(od.l_extendedprice * (1 - od.l_discount)) AS revenue,
+    COUNT(DISTINCT od.o_orderkey) AS order_count
+FROM 
+    TopSuppliers td
+JOIN 
+    OrderDetails od ON td.s_suppkey = od.o_orderkey
+JOIN 
+    PartDetails pd ON od.l_orderkey = pd.p_partkey
+GROUP BY 
+    td.nation_name, pd.p_name
+ORDER BY 
+    revenue DESC, order_count DESC
+LIMIT 10;

@@ -1,0 +1,74 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        sr_return_tax,
+        sr_store_sk
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk BETWEEN (
+            SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+            AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+ItemSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        SUM(ws_net_paid) AS total_revenue
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (
+            SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+            AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+),
+StoreInfo AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_city,
+        s_state,
+        COUNT(DISTINCT sr_returned_date_sk) AS return_days_count
+    FROM 
+        store_returns AS sr
+    JOIN 
+        store AS s ON sr.sr_store_sk = s.s_store_sk
+    WHERE 
+        sr_returned_date_sk BETWEEN (
+            SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+            AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        s_store_sk, s_store_name, s_city, s_state
+)
+SELECT 
+    si.s_store_sk,
+    si.s_store_name,
+    si.s_city,
+    si.s_state,
+    SUM(cr.sr_return_quantity) AS total_returned,
+    SUM(cr.sr_return_amt) AS total_return_amount,
+    SUM(cr.sr_return_tax) AS total_return_tax,
+    is.total_sold,
+    is.total_revenue,
+    si.return_days_count,
+    CASE 
+        WHEN is.total_sold IS NOT NULL AND is.total_sold > 0 THEN 
+            (SUM(cr.sr_return_quantity) * 100.0 / is.total_sold)
+        ELSE 0 
+    END AS return_rate
+FROM 
+    CustomerReturns cr
+JOIN 
+    StoreInfo si ON cr.sr_store_sk = si.s_store_sk
+JOIN 
+    ItemSales is ON cr.sr_item_sk = is.ws_item_sk
+GROUP BY 
+    si.s_store_sk, si.s_store_name, si.s_city, si.s_state, is.total_sold, is.total_revenue, si.return_days_count
+ORDER BY 
+    return_rate DESC;

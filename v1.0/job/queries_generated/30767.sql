@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title AS mt
+    WHERE
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.movie_id = at.id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT
+    mh.title AS Movie_Title,
+    mh.production_year AS Production_Year,
+    ak.name AS Actor_Name,
+    ci.note AS Role_Note,
+    CASE WHEN ci.note IS NOT NULL THEN 'Has Note' ELSE 'No Note' END AS Note_Flag,
+    COUNT(DISTINCT mk.keyword) AS Keyword_Count,
+    COUNT(mh.movie_id) OVER (PARTITION BY mh.production_year) AS Yearly_Movie_Count,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS Keywords
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+WHERE
+    mh.level <= 2
+    AND (mh.production_year > 2000 OR mh.production_year IS NULL)
+GROUP BY
+    mh.movie_id, mh.title, mh.production_year, ak.name, ci.note
+ORDER BY
+    mh.production_year DESC, Movie_Title
+LIMIT 100;

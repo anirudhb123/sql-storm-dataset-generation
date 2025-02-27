@@ -1,0 +1,58 @@
+-- Performance benchmarking query for Stack Overflow schema
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.CommentCount,
+        p.AnswerCount,
+        COALESCE(u.DisplayName, 'Community') AS OwnerDisplayName,
+        COALESCE(pd.DisplayName, 'No Last Editor') AS LastEditorDisplayName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Users pd ON p.LastEditorUserId = pd.Id
+)
+SELECT 
+    us.UserId,
+    us.BadgeCount,
+    us.UpVotes,
+    us.DownVotes,
+    us.TotalViews,
+    us.PostCount,
+    pm.PostId,
+    pm.CreationDate,
+    pm.Score,
+    pm.ViewCount,
+    pm.CommentCount,
+    pm.AnswerCount,
+    pm.OwnerDisplayName,
+    pm.LastEditorDisplayName
+FROM 
+    UserStatistics us
+JOIN 
+    PostMetrics pm ON us.UserId = pm.OwnerUserId
+ORDER BY 
+    us.UserId, pm.CreationDate DESC;

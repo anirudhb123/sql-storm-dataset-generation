@@ -1,0 +1,74 @@
+WITH UserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        CASE 
+            WHEN Reputation > 1000 THEN 'High'
+            WHEN Reputation BETWEEN 500 AND 1000 THEN 'Medium'
+            WHEN Reputation < 500 THEN 'Low'
+            ELSE 'Unknown'
+        END AS ReputationCategory
+    FROM Users
+), 
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS TotalComments,
+        COUNT(DISTINCT V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.OwnerUserId
+),
+PostHistoryWithTags AS (
+    SELECT 
+        PH.PostId,
+        STRING_AGG(PH.Comment, ', ') AS HistoryComments,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS AssociatedTags
+    FROM PostHistory PH
+    LEFT JOIN Posts P ON PH.PostId = P.Id
+    LEFT JOIN STRING_TO_ARRAY(P.Tags, ',') AS T(TagName) ON T.TagName IS NOT NULL
+    GROUP BY PH.PostId
+),
+UserPostMetrics AS (
+    SELECT 
+        UR.Id AS UserId,
+        UR.ReputationCategory,
+        P.OwnerUserId,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT PH.PostId) AS TotalPostHistoryEntries,
+        MAX(PS.TotalComments) AS MaximumCommentsPerPost,
+        MAX(PS.TotalVotes) AS MaximumVotesPerPost,
+        COALESCE(SUM(PS.UpVotes - PS.DownVotes), 0) AS NetScore
+    FROM UserReputation UR
+    JOIN Posts P ON UR.Id = P.OwnerUserId
+    LEFT JOIN PostStatistics PS ON P.Id = PS.PostId
+    LEFT JOIN PostHistoryWithTags PH ON P.Id = PH.PostId 
+    GROUP BY UR.Id, UR.ReputationCategory, P.OwnerUserId
+)
+SELECT 
+    U.DisplayName,
+    U.Location,
+    U.EmailHash,
+    COALESCE(UM.TotalPosts, 0) AS TotalPosts,
+    COALESCE(UM.TotalPostHistoryEntries, 0) AS TotalPostHistoryEntries,
+    COALESCE(UM.MaximumCommentsPerPost, 0) AS MaximumCommentsPerPost,
+    COALESCE(UM.MaximumVotesPerPost, 0) AS MaximumVotesPerPost,
+    UM.NetScore,
+    CASE 
+        WHEN UM.TotalPosts > 0 THEN UM.NetScore / UM.TotalPosts
+        ELSE 0
+    END AS AverageScorePerPost,
+    PHH.HistoryComments,
+    PHH.AssociatedTags
+FROM Users U
+LEFT JOIN UserPostMetrics UM ON U.Id = UM.UserId
+LEFT JOIN PostHistoryWithTags PHH ON U.Id = PHH.PostId 
+WHERE U.Reputation > 0 
+ORDER BY U.Reputation DESC, AverageScorePerPost DESC
+FETCH FIRST 100 ROWS ONLY;
+

@@ -1,0 +1,62 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        u.DisplayName AS Author,
+        p.CreationDate,
+        p.ViewCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+        AND p.Score > 10  -- Popular if score is greater than 10
+    ORDER BY 
+        p.Score DESC
+    LIMIT 10
+),
+CommentStats AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.Score,
+    pp.ViewCount,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    cs.CommentCount,
+    cs.LastCommentDate
+FROM 
+    PopularPosts pp
+JOIN 
+    UserBadgeCounts ub ON pp.Author = ub.UserId
+LEFT JOIN 
+    CommentStats cs ON pp.PostId = cs.PostId
+ORDER BY 
+    pp.Score DESC, pp.ViewCount DESC;

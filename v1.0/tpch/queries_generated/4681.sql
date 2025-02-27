@@ -1,0 +1,76 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey, 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, o.o_orderkey
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        p.p_partkey, 
+        p.p_name
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(cod.total_revenue) AS total_revenue,
+    AVG(spd.p_partkey) AS average_part_key,
+    MAX(CASE WHEN cod.order_count > 5 THEN cod.c_custkey END) AS high_order_customer
+FROM 
+    RankedSuppliers s
+LEFT OUTER JOIN 
+    CustomerOrderDetails cod ON s.s_suppkey = cod.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    HighValueParts hvp ON hvp.ps_partkey = s.s_suppkey
+JOIN 
+    SupplierPartDetails spd ON s.s_suppkey = spd.s_suppkey
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT s.s_suppkey) > 1
+ORDER BY 
+    total_revenue DESC;

@@ -1,0 +1,72 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT m.id) AS company_count,
+        STRING_AGG(DISTINCT c.name, ', ') AS company_names
+    FROM 
+        aka_title a
+    JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        a.id
+),
+MovieKeywordStats AS (
+    SELECT
+        m.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        RankedMovies m ON mk.movie_id = m.movie_id
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+CompleteCastWithRoles AS (
+    SELECT 
+        ci.movie_id,
+        ct.kind AS role_name,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type ct ON ci.role_id = ct.id
+    GROUP BY 
+        ci.movie_id, ct.kind
+),
+FinalReport AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.company_count,
+        COALESCE(mks.keyword_count, 0) AS keyword_count,
+        COALESCE(mks.keywords, 'None') AS keywords,
+        COALESCE(cc.actor_count, 0) AS actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywordStats mks ON rm.movie_id = mks.movie_id
+    LEFT JOIN 
+        (SELECT movie_id, SUM(actor_count) AS actor_count
+         FROM CompleteCastWithRoles
+         GROUP BY movie_id) cc ON rm.movie_id = cc.movie_id
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    company_count,
+    keyword_count,
+    keywords,
+    actor_count
+FROM 
+    FinalReport
+ORDER BY 
+    production_year DESC, title;

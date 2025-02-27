@@ -1,0 +1,81 @@
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT m.id) AS company_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_name m ON mc.company_id = m.id
+    WHERE 
+        mt.production_year > 2000
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+RoleCTE AS (
+    SELECT 
+        CAST(person_id AS TEXT) AS person_id_str,
+        COUNT(DISTINCT ci.movie_id) AS role_movie_count,
+        pt.role AS role_name
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type pt ON ci.role_id = pt.id
+    GROUP BY 
+        person_id_str, role_name
+    HAVING 
+        COUNT(ci.movie_id) > 5
+),
+QualifiedNamedActors AS (
+    SELECT 
+        ak.name AS actor_name,
+        ak.person_id,
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY ak.name) AS actor_rank
+    FROM 
+        aka_name ak
+    WHERE 
+        ak.name_pcode_cf IS NOT NULL
+),
+MainQuery AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        rn.actor_name,
+        rc.role_name,
+        rc.role_movie_count,
+        mc.company_count
+    FROM 
+        MovieCTE mc
+    JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    JOIN 
+        QualifiedNamedActors rn ON ci.person_id = rn.person_id
+    JOIN 
+        RoleCTE rc ON rn.person_id_str = rc.person_id_str
+)
+SELECT 
+    *,
+    CASE 
+        WHEN production_year < 2010 THEN 'Pre-2010'
+        ELSE 'Post-2010'
+    END AS production_epoch,
+    COALESCE((SELECT AVG(mc2.company_count) 
+              FROM MovieCTE mc2 
+              WHERE mc2.production_year <= MainQuery.production_year), 0) AS avg_company_count_before,
+    CASE 
+        WHEN AVG(role_movie_count) OVER (PARTITION BY production_year) > 10 THEN 'Veteran'
+        ELSE 'Newcomer'
+    END AS actor_status
+FROM 
+    MainQuery
+LEFT JOIN 
+    movie_info mi ON mc.movie_id = mi.movie_id 
+WHERE 
+    mi.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%Awards%')
+ORDER BY 
+    mc.company_count DESC, 
+    rn.actor_name ASC
+LIMIT 100;

@@ -1,0 +1,58 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_sales,
+        1 AS level
+    FROM store_sales
+    WHERE ss_sold_date_sk >= (
+        SELECT d_date_sk 
+        FROM date_dim 
+        WHERE d_date = DATE '2002-10-01' - INTERVAL '1 year'
+    )
+    GROUP BY ss_store_sk
+
+    UNION ALL
+
+    SELECT 
+        s.s_store_sk,
+        sh.total_sales * 1.1 AS total_sales, 
+        level + 1
+    FROM sales_hierarchy sh
+    JOIN store s ON sh.ss_store_sk = s.s_store_sk
+    WHERE sh.level < 5
+)
+
+SELECT 
+    s.s_store_name,
+    s.s_city,
+    COALESCE(DATE(d.d_date), 'No Date') AS sale_date,
+    rh.total_sales,
+    RANK() OVER (PARTITION BY s.s_city ORDER BY rh.total_sales DESC) AS city_rank
+FROM sales_hierarchy rh
+JOIN store s ON rh.ss_store_sk = s.s_store_sk
+LEFT JOIN date_dim d ON d.d_date_sk = (
+    SELECT MAX(ws_sold_date_sk) 
+    FROM web_sales 
+    WHERE ws_ship_mode_sk = (
+        SELECT sm_ship_mode_sk 
+        FROM ship_mode 
+        WHERE sm_carrier = 'UPS'
+    ) 
+    AND ws_item_sk IN (
+        SELECT i_item_sk 
+        FROM item 
+        WHERE i_current_price > (
+            SELECT AVG(i_current_price) 
+            FROM item 
+            WHERE i_category_id IN (1, 2, 3)
+        )
+    )
+)
+WHERE rh.total_sales > (
+    SELECT AVG(total_sales) 
+    FROM sales_hierarchy
+)
+GROUP BY s.s_store_name, s.s_city, d.d_date, rh.total_sales
+ORDER BY city_rank, rh.total_sales DESC
+LIMIT 10;

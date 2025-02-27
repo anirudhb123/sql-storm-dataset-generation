@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.AnswerCount, 
+        p.CommentCount, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) as UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' 
+        AND p.PostTypeId = 1  
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(b.Class = 1) AS GoldBadges, 
+        SUM(b.Class = 2) AS SilverBadges, 
+        SUM(b.Class = 3) AS BronzeBadges, 
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    us.UserId, 
+    us.DisplayName, 
+    us.TotalPosts, 
+    us.TotalComments, 
+    us.GoldBadges, 
+    us.SilverBadges, 
+    us.BronzeBadges, 
+    COUNT(rp.PostId) AS TopPostCount
+FROM 
+    UserStats us
+LEFT JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId AND rp.UserPostRank <= 5
+GROUP BY 
+    us.UserId, us.DisplayName, us.TotalPosts, us.TotalComments, us.GoldBadges, us.SilverBadges, us.BronzeBadges
+ORDER BY 
+    TopPostCount DESC, us.TotalPosts DESC
+LIMIT 10;

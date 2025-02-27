@@ -1,0 +1,70 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ca.person_id) AS actor_count,
+        COUNT(DISTINCT co.id) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ca.person_id) DESC) AS rank_within_year
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ca ON t.id = ca.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        t.title, t.production_year
+),
+filtered_movies AS (
+    SELECT 
+        title, 
+        production_year, 
+        actor_count, 
+        company_count,
+        rank_within_year
+    FROM 
+        ranked_movies
+    WHERE 
+        actor_count > 0 
+        AND company_count > 0 
+        AND production_year IS NOT NULL 
+        AND rank_within_year <= 5
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.actor_count,
+    fm.company_count,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    CASE 
+        WHEN fm.production_year < 2000 THEN 'Classic'
+        WHEN fm.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS movie_era,
+    CASE 
+        WHEN fm.actor_count > 20 THEN 'Large Ensemble Cast'
+        WHEN fm.actor_count BETWEEN 10 AND 20 THEN 'Moderate Ensemble Cast'
+        ELSE 'Small Cast'
+    END AS cast_size,
+    (SELECT COUNT(*) FROM aka_name an WHERE an.person_id IN (SELECT DISTINCT ca.person_id FROM cast_info ca WHERE ca.movie_id = (SELECT id FROM aka_title WHERE title = fm.title LIMIT 1))) AS distinct_actor_names
+FROM 
+    filtered_movies fm
+LEFT JOIN 
+    movie_keywords mk ON fm.title = mk.movie_id
+ORDER BY 
+    fm.production_year DESC, 
+    fm.actor_count DESC;

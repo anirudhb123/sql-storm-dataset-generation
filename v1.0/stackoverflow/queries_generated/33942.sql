@@ -1,0 +1,50 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT Id, Title, AcceptedAnswerId, ParentId, 0 AS Level
+    FROM Posts
+    WHERE PostTypeId = 1 -- Start with questions
+
+    UNION ALL
+
+    SELECT p.Id, p.Title, p.AcceptedAnswerId, p.ParentId, ph.Level + 1
+    FROM Posts p
+    INNER JOIN PostHierarchy ph ON p.ParentId = ph.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(COALESCE(v.VoteTypeId = 2, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.VoteTypeId = 3, 0)) AS TotalDownVotes,
+        SUM(CASE WHEN v.VoteTypeId = 8 THEN v.BountyAmount ELSE 0 END) AS TotalBounties
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+RecentPostEdit AS (
+    SELECT
+        ph.PostId,
+        MAX(ph.CreationDate) AS RecentEditDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6) -- Edits for title, body, or tags
+    GROUP BY ph.PostId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalPosts,
+    us.TotalComments,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    us.TotalBounties,
+    COALESCE(rp.RecentEditDate, 'No Edits') AS MostRecentEdit,
+    COUNT(DISTINCT ph.Id) AS TotalAnswers,
+    MAX(ph.Level) AS MaxAnswerLevel
+FROM UserStats us
+LEFT JOIN RecentPostEdit rp ON us.UserId = rp.PostId
+LEFT JOIN PostHierarchy ph ON us.UserId = ph.OwnerUserId AND ph.PostTypeId = 2 -- Answers
+GROUP BY us.UserId, us.DisplayName, rp.RecentEditDate
+ORDER BY us.TotalPosts DESC, us.TotalUpVotes DESC;

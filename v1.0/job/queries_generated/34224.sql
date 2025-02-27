@@ -1,0 +1,81 @@
+WITH RECURSIVE actor_hierarchy AS (
+    -- Base case: Select all actors and their movies
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        MIN(at.production_year) AS earliest_movie,
+        MAX(at.production_year) AS latest_movie
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    GROUP BY 
+        ci.person_id, a.name
+
+    UNION ALL
+
+    -- Recursive case: Find actors who acted in movies with other actors
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        MIN(at.production_year) AS earliest_movie,
+        MAX(at.production_year) AS latest_movie
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    WHERE 
+        ci.movie_id IN (SELECT m.movie_id 
+                        FROM cast_info m 
+                        WHERE m.person_id IN (SELECT DISTINCT person_id 
+                                              FROM cast_info 
+                                              WHERE person_id = actor_hierarchy.person_id))
+    GROUP BY 
+        ci.person_id, a.name
+),
+ranked_actors AS (
+    SELECT 
+        actor_name,
+        total_movies,
+        earliest_movie,
+        latest_movie,
+        RANK() OVER (ORDER BY total_movies DESC) AS rank
+    FROM 
+        actor_hierarchy
+),
+movie_keywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    ra.actor_name,
+    ra.total_movies,
+    ra.earliest_movie,
+    ra.latest_movie,
+    ra.rank,
+    COALESCE(mk.keywords, 'No Keywords') as movie_keywords
+FROM 
+    ranked_actors ra
+LEFT JOIN 
+    movie_keywords mk ON mk.movie_id IN (SELECT DISTINCT movie_id 
+                                          FROM cast_info 
+                                          WHERE person_id = ra.person_id)
+WHERE 
+    ra.rank <= 10
+ORDER BY 
+    ra.rank;

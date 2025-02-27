@@ -1,0 +1,80 @@
+WITH RECURSIVE movie_cast AS (
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        a.name AS actor_name,
+        ci.nr_order,
+        1 AS depth
+    FROM 
+        aka_title m
+    JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    
+    SELECT 
+        mc.movie_id,
+        mc.title,
+        a.name AS actor_name,
+        ci.nr_order,
+        mc.depth + 1
+    FROM 
+        movie_cast mc
+    JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        ci.nr_order > mc.nr_order
+),
+
+ranked_movies AS (
+    SELECT 
+        title,
+        production_year,
+        COUNT(actor_name) AS actor_count,
+        RANK() OVER (PARTITION BY production_year ORDER BY COUNT(actor_name) DESC) AS rank
+    FROM 
+        movie_cast
+    GROUP BY 
+        title, production_year
+),
+
+movie_info_with_keywords AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.title ORDER BY k.keyword) AS keyword_rank
+    FROM 
+        ranked_movies m
+    JOIN 
+        movie_keyword mk ON m.title = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+
+SELECT 
+    i.title,
+    i.production_year,
+    i.keyword,
+    CASE 
+        WHEN i.keyword_rank IS NULL THEN 'No Keywords'
+        ELSE i.keyword
+    END AS keyword_or_default,
+    COALESCE(a.actor_count, 0) AS total_actors,
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = i.movie_id AND mi.note IS NOT NULL) AS info_with_notes
+FROM 
+    movie_info_with_keywords i
+LEFT JOIN 
+    ranked_movies a ON i.title = a.title AND i.production_year = a.production_year
+WHERE 
+    i.rank <= 5 OR i.rank IS NULL;

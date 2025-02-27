@@ -1,0 +1,45 @@
+WITH ranked_orders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice,
+           RANK() OVER (PARTITION BY o_orderstatus ORDER BY o_orderdate DESC) AS order_rank
+    FROM orders
+    WHERE o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+      AND o_orderdate >= DATEADD(month, -12, GETDATE())
+),
+supplier_part_stats AS (
+    SELECT ps_partkey, ps_suppkey, SUM(ps_availqty) AS total_availqty,
+           SUM(ps_supplycost) AS total_supplycost
+    FROM partsupp
+    GROUP BY ps_partkey, ps_suppkey
+),
+order_summary AS (
+    SELECT l_orderkey, SUM(l_extendedprice * (1 - l_discount)) AS total_revenue,
+           COUNT(DISTINCT l_partkey) AS unique_parts
+    FROM lineitem
+    GROUP BY l_orderkey
+),
+customer_order_counts AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count,
+           MAX(o.o_totalprice) AS max_order_price
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY c.c_custkey
+)
+SELECT r.o_orderkey, c.c_name, r.o_totalprice, s.total_availqty,
+       CASE
+           WHEN c.order_count = 0 THEN 'No Orders'
+           ELSE CAST((c.order_count * 1.0 / NULLIF(MAX(c.max_order_price), 0)) AS VARCHAR(20))
+       END AS order_to_price_ratio,
+       s.total_supplycost - r.o_totalprice AS cost_difference
+FROM ranked_orders r
+JOIN customer_order_counts c ON r.o_custkey = c.c_custkey
+LEFT JOIN (
+    SELECT ps.ps_partkey, ps.ps_suppkey, MIN(p.p_retailprice) AS min_retail_price
+    FROM supplier_part_stats ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size IS NOT NULL
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+) AS s ON (r.o_orderkey IN (SELECT DISTINCT l.l_orderkey FROM lineitem l WHERE l.l_suppkey = s.ps_suppkey))
+WHERE r.order_rank <= 10
+  AND s.min_retail_price IS NOT NULL
+ORDER BY r.o_orderkey, cost_difference DESC;

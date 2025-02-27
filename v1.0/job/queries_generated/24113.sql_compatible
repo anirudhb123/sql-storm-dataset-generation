@@ -1,0 +1,67 @@
+
+WITH ranked_movies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS movie_rank,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE
+        t.production_year IS NOT NULL
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+aggregated_roles AS (
+    SELECT
+        ci.movie_id,
+        rt.role AS role_type,
+        COUNT(ci.person_id) AS total_cast
+    FROM
+        cast_info ci
+    INNER JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY
+        ci.movie_id, rt.role
+),
+movie_info_with_keywords AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ARRAY_AGG(mk.keyword) AS keywords
+    FROM
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY
+        m.id, m.title, m.production_year
+)
+SELECT
+    r.movie_id,
+    r.title,
+    r.production_year,
+    COALESCE(ar.role_type, 'No Role') AS role_type,
+    COALESCE(ar.total_cast, 0) AS total_cast,
+    r.keyword_count,
+    CASE 
+        WHEN r.movie_rank <= 5 THEN 'Top 5'
+        ELSE 'Below Top 5'
+    END AS ranking_category,
+    STRING_AGG(mkw.keywords, ', ') AS keywords_list
+FROM
+    ranked_movies r
+LEFT JOIN 
+    aggregated_roles ar ON r.movie_id = ar.movie_id
+LEFT JOIN 
+    movie_info_with_keywords mkw ON r.movie_id = mkw.movie_id
+WHERE
+    r.production_year > 1990
+    AND (ar.total_cast IS NULL OR ar.total_cast > 0)
+GROUP BY
+    r.movie_id, r.title, r.production_year, ar.role_type, ar.total_cast, r.keyword_count, r.movie_rank
+ORDER BY
+    r.production_year DESC, r.movie_rank;

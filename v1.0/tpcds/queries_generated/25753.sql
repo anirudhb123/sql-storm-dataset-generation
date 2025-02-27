@@ -1,0 +1,64 @@
+
+WITH CombinedAddresses AS (
+    SELECT DISTINCT 
+        CONCAT(COALESCE(ca_street_number, ''), ' ', COALESCE(ca_suite_number, ''), ' ', COALESCE(ca_street_name, ''), ' ', COALESCE(ca_street_type, ''), ', ', 
+               COALESCE(ca_city, ''), ', ', COALESCE(ca_county, ''), ', ', COALESCE(ca_state, ''), ' ', COALESCE(ca_zip, ''), ', ', COALESCE(ca_country, '')) AS full_address
+    FROM 
+        customer_address
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cdEducation = LOWER(REPLACE(cd_education_status, ' ', '_')),
+        cd_purchase_estimate,
+        CONCAT(cd_gender, '|', cd_marital_status) AS gender_marital
+    FROM 
+        customer_demographics
+),
+DailySales AS (
+    SELECT 
+        d.d_date AS sale_date,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_date
+),
+TopCities AS (
+    SELECT 
+        ca_city,
+        COUNT(*) AS address_count
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city
+    ORDER BY 
+        address_count DESC
+    LIMIT 5
+)
+SELECT 
+    c.full_address,
+    cd.cd_demo_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ds.sale_date,
+    ds.total_sales,
+    ds.total_orders,
+    tc.ca_city
+FROM 
+    CombinedAddresses c
+JOIN 
+    CustomerDemographics cd ON cd.cd_demo_sk IN (SELECT c_current_cdemo_sk FROM customer WHERE c_current_addr_sk = c.ca_address_sk)
+JOIN 
+    DailySales ds ON ds.sale_date >= '2023-01-01' AND ds.sale_date <= '2023-12-31'
+JOIN 
+    TopCities tc ON c.full_address LIKE CONCAT('%', tc.ca_city, '%')
+WHERE 
+    cd.cd_purchase_estimate > 1000
+ORDER BY 
+    ds.total_sales DESC, c.full_address;

@@ -1,0 +1,93 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ss_sold_date_sk,
+        ss_item_sk,
+        SUM(ss_quantity) AS total_sold,
+        COUNT(*) AS total_transactions
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_sold_date_sk, ss_item_sk
+    HAVING 
+        SUM(ss_quantity) > 5
+
+    UNION ALL
+
+    SELECT 
+        ss.sold_date_sk,
+        ss.item_sk,
+        SUM(ss.quantity + cte.total_sold) AS total_sold,
+        COUNT(ss.ticket_number) + cte.total_transactions AS total_transactions
+    FROM 
+        store_sales ss
+    JOIN 
+        SalesCTE cte ON ss.item_sk = cte.ss_item_sk
+    WHERE 
+        ss.sold_date_sk = cte.ss_sold_date_sk + 1
+    GROUP BY 
+        ss.sold_date_sk, ss.item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        COUNT(cr.return_order_number) AS total_returns,
+        SUM(cr.return_amount) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        d.d_year,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_sales,
+        COALESCE(r.total_returns, 0) AS total_returns
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    LEFT JOIN 
+        CustomerReturns r ON r.returning_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_id, d.d_year
+),
+SalesSummary AS (
+    SELECT 
+        t.c_customer_id,
+        t.d_year,
+        SUM(t.total_sales) AS annual_sales,
+        SUM(t.total_returns) AS annual_returns
+    FROM 
+        TopCustomers t
+    GROUP BY 
+        t.c_customer_id, t.d_year
+),
+YearlyProfit AS (
+    SELECT 
+        y.c_customer_id,
+        y.d_year,
+        SUM(y.annual_sales) - SUM(y.annual_returns) AS net_profit,
+        RANK() OVER (PARTITION BY y.d_year ORDER BY SUM(y.annual_sales) - SUM(y.annual_returns) DESC) AS sales_rank
+    FROM 
+        SalesSummary y
+    GROUP BY 
+        y.c_customer_id, y.d_year
+)
+SELECT 
+    y.c_customer_id, 
+    y.d_year, 
+    y.net_profit, 
+    CASE 
+        WHEN y.net_profit IS NULL THEN 'No Sales'
+        ELSE 'Active Customer'
+    END AS customer_status
+FROM 
+    YearlyProfit y
+WHERE 
+    y.sales_rank <= 10
+ORDER BY 
+    y.d_year, y.net_profit DESC;

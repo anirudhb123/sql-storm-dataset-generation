@@ -1,0 +1,74 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyReceived,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart votes
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (1, 4, 6) THEN ph.CreationDate END) AS LastTitleChange,
+        ARRAY_AGG(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN cr.Name END) AS CloseReasons,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id AND ph.PostHistoryTypeId = 10
+    WHERE 
+        p.CreationDate < NOW() - INTERVAL '365 days' -- consider only posts older than a year
+    GROUP BY 
+        p.Id
+),
+ActivityRankedUsers AS (
+    SELECT 
+        ups.UserId,
+        ups.DisplayName,
+        ups.QuestionCount,
+        ups.AnswerCount,
+        ups.TotalBountyReceived,
+        ups.BadgeCount,
+        RANK() OVER (ORDER BY 
+            ups.QuestionCount DESC, 
+            ups.AnswerCount DESC, 
+            ups.TotalBountyReceived DESC
+        ) AS ActivityRank
+    FROM 
+        UserPostStats ups
+)
+SELECT 
+    ar.UserId,
+    ar.DisplayName,
+    ar.QuestionCount,
+    ar.AnswerCount,
+    ar.TotalBountyReceived,
+    ar.BadgeCount,
+    ph.PostId,
+    ph.LastTitleChange,
+    ph.CloseReasons,
+    ph.CloseCount
+FROM 
+    ActivityRankedUsers ar
+LEFT JOIN 
+    PostHistoryStats ph ON ar.UserId IN (
+        SELECT OwnerUserId FROM Posts WHERE OwnerUserId IS NOT NULL
+    )
+WHERE 
+    ar.ActivityRank <= 10 -- Top 10 active users
+ORDER BY 
+    ar.ActivityRank, 
+    ph.CloseCount DESC;

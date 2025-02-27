@@ -1,0 +1,55 @@
+
+WITH AddressData AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        UPPER(SUBSTRING(ca_street_name FROM 1 FOR 1)) || LOWER(SUBSTRING(ca_street_name FROM 2)) AS formatted_street_name,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address
+    FROM 
+        customer_address
+),
+CustomerStats AS (
+    SELECT 
+        cd_gender,
+        COUNT(c_customer_sk) AS customer_count,
+        AVG(cd_dep_count) AS avg_dependents,
+        STRING_AGG(DISTINCT ca_state || ': ' || ca_city, '; ') AS addresses
+    FROM 
+        customer 
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    JOIN 
+        AddressData ON c_current_addr_sk = ca_address_sk
+    GROUP BY 
+        cd_gender
+),
+SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws_quantity) AS total_sales,
+        SUM(ws_net_profit) AS total_profit,
+        STRING_AGG(DISTINCT CONCAT('Item ID: ', ws_item_sk, ' | Sold: ', ws_quantity), '; ') AS detailed_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site wr ON ws.ws_web_site_sk = wr.web_site_sk
+    GROUP BY 
+        ws.web_site_id
+)
+SELECT 
+    cs.cd_gender,
+    cs.customer_count,
+    cs.avg_dependents,
+    cs.addresses,
+    sd.web_site_id,
+    sd.total_sales,
+    sd.total_profit,
+    sd.detailed_sales
+FROM 
+    CustomerStats cs
+JOIN 
+    SalesData sd ON cs.customer_count > 100
+WHERE 
+    cs.avg_dependents > 2
+ORDER BY 
+    cs.customer_count DESC, sd.total_profit DESC;

@@ -1,0 +1,38 @@
+WITH RECURSIVE RankedSuppliers AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 
+           ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rank
+    FROM supplier
+), HighValueCustomers AS (
+    SELECT c_custkey, c_name, c_acctbal, c_nationkey
+    FROM customer
+    WHERE c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+), OrderSummary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey, o.o_custkey
+), SupplierDetails AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name, 
+           SUM(ps.ps_availqty) AS total_avail_qty, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, p.p_name
+)
+SELECT DISTINCT 
+    c.c_name AS customer_name,
+    s.s_name AS supplier_name,
+    os.total_revenue,
+    COALESCE(sd.total_avail_qty, 0) AS total_available_quantity,
+    COALESCE(sd.avg_supply_cost, 0) AS average_supply_cost,
+    CASE 
+        WHEN os.total_revenue > 100000 THEN 'High Value Order'
+        ELSE 'Regular Order'
+    END AS order_category
+FROM HighValueCustomers c
+LEFT JOIN OrderSummary os ON c.c_custkey = os.o_custkey
+LEFT JOIN RankedSuppliers s ON c.c_nationkey = s.s_nationkey AND s.rank <= 3
+LEFT JOIN SupplierDetails sd ON os.o_orderkey = (SELECT l.l_orderkey FROM lineitem l WHERE l.l_orderkey = os.o_orderkey LIMIT 1)
+WHERE os.total_revenue IS NOT NULL
+ORDER BY c.c_name, os.total_revenue DESC, s.s_name;

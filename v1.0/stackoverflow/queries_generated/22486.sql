@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COALESCE(NULLIF(p.Body, ''), '[No Content]') AS BodyContent
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserPostCounts AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePostCount
+    FROM 
+        Posts p
+    GROUP BY 
+        OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        upc.TotalPosts,
+        upc.PositivePostCount,
+        RANK() OVER (ORDER BY upc.TotalPosts DESC) AS UserRank
+    FROM 
+        Users u
+    JOIN 
+        UserPostCounts upc ON u.Id = upc.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastChangeDate,
+        STRING_AGG(ph.Comment, '; ') AS Comments,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '2 years'
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    pu.DisplayName AS PostOwner,
+    rp.Title AS PostTitle,
+    rp.CreationDate AS PostCreationDate,
+    rp.Score AS PostScore,
+    rp.ViewCount AS PostViews,
+    phd.LastChangeDate,
+    phd.Comments,
+    phd.CloseCount,
+    COALESCE(up.TotalPosts, 0) AS UserTotalPosts,
+    COALESCE(up.PositivePostCount, 0) AS UserPositivePosts,
+    CASE 
+        WHEN up.UserRank IS NOT NULL THEN 'Top User'
+        ELSE 'Regular User'
+    END AS UserStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TopUsers up ON rp.PostId IN (
+        SELECT PostId FROM Posts WHERE OwnerUserId = up.Id
+    )
+JOIN 
+    Users pu ON rp.OwnerUserId = pu.Id
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE 
+    rp.PostRank = 1 
+    AND (rp.Score > 0 OR phd.CloseCount IS NULL)
+ORDER BY 
+    PostViews DESC, PostScore DESC;

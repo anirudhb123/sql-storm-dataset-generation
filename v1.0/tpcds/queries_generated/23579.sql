@@ -1,0 +1,61 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+HighSellItems AS (
+    SELECT 
+        s.ws_item_sk,
+        i.i_item_desc,
+        s.total_quantity,
+        s.total_sales,
+        ROW_NUMBER() OVER (ORDER BY s.total_sales DESC) AS item_rank
+    FROM 
+        SalesCTE s
+    JOIN 
+        item i ON s.ws_item_sk = i.i_item_sk
+    WHERE 
+        s.total_sales > 1000.00
+),
+LatestSales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_date > (CURRENT_DATE - INTERVAL '30 days')
+    GROUP BY 
+        ws.web_site_id
+)
+SELECT 
+    COALESCE(hsi.i_item_desc, 'Unknown Item') AS item_description,
+    COALESCE(lws.web_site_id, 'No Sales Site') AS sale_site,
+    hsi.total_quantity,
+    hsi.total_sales,
+    lws.order_count,
+    lws.total_sales AS site_sales,
+    CASE 
+        WHEN lws.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Available'
+    END AS sales_availability
+FROM 
+    HighSellItems hsi
+FULL OUTER JOIN 
+    LatestSales lws ON hsi.ws_item_sk = lws.total_sales
+WHERE 
+    (hsi.total_quantity IS NOT NULL OR lws.total_sales IS NOT NULL)
+    AND (hsi.item_rank < 10 OR lws.sales_rank < 5)
+ORDER BY 
+    hsi.total_sales DESC NULLS LAST;

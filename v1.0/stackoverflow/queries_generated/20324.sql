@@ -1,0 +1,88 @@
+WITH RankedBadges AS (
+    SELECT 
+        b.UserId,
+        b.Name,
+        RANK() OVER (PARTITION BY b.UserId ORDER BY b.Date DESC) AS BadgeRank
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 -- Gold badges
+),
+UserPostStats AS (
+    SELECT
+        u.Id AS UserID,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViewCount,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        CASE 
+            WHEN COUNT(DISTINCT p.Id) > 0 THEN ROUND(SUM(p.Score * p.ViewCount) / COUNT(DISTINCT p.Id)::numeric, 2)
+            ELSE 0
+        END AS AverageScorePerPost
+    FROM
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY
+        u.Id
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= (CURRENT_TIMESTAMP - INTERVAL '30 days')
+),
+ClosedPostCount AS (
+    SELECT COUNT(DISTINCT ph.PostId) AS ClosedPostCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Closed posts 
+),
+SelectedPostData AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- Bounty Start, Bounty Close
+    WHERE 
+        p.CreationDate >= (CURRENT_TIMESTAMP - INTERVAL '1 year')
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.UserID,
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalViewCount,
+    u.TotalComments,
+    u.AverageScorePerPost,
+    rb.Name AS RecentBadge,
+    pp.TotalBounty,
+    COALESCE(pclosed.ClosedPostCount, 0) AS TotalClosedPosts,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    UserPostStats u
+LEFT JOIN RecentPostHistory rph ON rph.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.UserID)
+LEFT JOIN RankedBadges rb ON u.UserID = rb.UserId AND rb.BadgeRank = 1
+LEFT JOIN SelectedPostData pp ON pp.Id IN (SELECT Id FROM Posts WHERE OwnerUserId = u.UserID)
+LEFT JOIN ClosedPostCount pclosed ON TRUE
+LEFT JOIN Posts p ON u.UserID = p.OwnerUserId
+LEFT JOIN STRING_TO_ARRAY(p.Tags, ', ') AS TagArray
+LEFT JOIN Tags t ON t.TagName = TagArray
+GROUP BY 
+    u.UserID, rb.Name, pp.TotalBounty, pclosed.ClosedPostCount
+HAVING 
+    (u.TotalPosts > 5 AND u.AverageScorePerPost > 10) OR 
+    (u.TotalComments > 100 AND pp.TotalBounty > 0)
+ORDER BY 
+    u.TotalViewCount DESC, u.AverageScorePerPost DESC;

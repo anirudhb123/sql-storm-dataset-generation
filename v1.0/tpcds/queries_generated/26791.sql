@@ -1,0 +1,68 @@
+
+WITH processed_data AS (
+    SELECT 
+        ca_address_sk,
+        LOWER(ca_street_name) AS lower_street_name,
+        TRIM(ca_city) AS trimmed_city,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        REPLACE(ca_zip, '-', '') AS clean_zip,
+        LENGTH(ca_country) AS country_length
+    FROM 
+        customer_address
+),
+demographic_data AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        CONCAT(cd_gender, '-', cd_marital_status) AS gender_marital
+    FROM 
+        customer_demographics
+),
+date_info AS (
+    SELECT 
+        d_date_sk,
+        d_date,
+        d_day_name,
+        d_month_seq,
+        CASE 
+            WHEN d_dow IN (0, 6) THEN 'Weekend'
+            ELSE 'Weekday'
+        END AS day_type
+    FROM 
+        date_dim
+),
+benchmark AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        SUM(cs.cs_sales_price) AS total_sales,
+        AVG(LOWER(p.p_promo_name)) AS avg_promo_name_length,
+        AVG(d.country_length) AS avg_country_length
+    FROM 
+        promotion p
+    LEFT JOIN 
+        web_sales ws ON ws.ws_promo_sk = p.p_promo_sk
+    LEFT JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        processed_data d ON d.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN 
+        date_info di ON di.d_date_sk = ws.ws_sold_date_sk
+    WHERE 
+        di.day_type = 'Weekend'
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    b.p_promo_id,
+    b.customer_count,
+    b.total_sales,
+    b.avg_promo_name_length,
+    b.avg_country_length
+FROM 
+    benchmark b
+ORDER BY 
+    b.total_sales DESC;

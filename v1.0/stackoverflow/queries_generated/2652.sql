@@ -1,0 +1,59 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5, 6) -- Title, Body, Tags edits
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(CASE WHEN p.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalPosts,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalBadges,
+    rp.Title,
+    rp.CreationDate,
+    rp.CommentCount,
+    COALESCE(rp.LastEditDate, 'No edits') AS LastEditInfo
+FROM 
+    UserStats us
+LEFT JOIN 
+    RecentPosts rp ON us.UserId = rp.OwnerUserId AND rp.PostRank = 1
+WHERE 
+    us.TotalPosts > 0
+ORDER BY 
+    us.Reputation DESC,
+    us.TotalPosts DESC,
+    rp.CreationDate DESC
+LIMIT 50;
+
+-- This query constructs a report of users with their most recent post, total posts, total badges, and other relevant stats.

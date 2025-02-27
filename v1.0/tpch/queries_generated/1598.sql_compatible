@@ -1,0 +1,57 @@
+
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        co.c_custkey AS custkey,
+        co.c_name AS name,
+        co.total_spent,
+        co.order_count,
+        RANK() OVER (ORDER BY co.total_spent DESC) AS customer_rank
+    FROM 
+        CustomerOrders co
+)
+SELECT 
+    pc.p_partkey,
+    pc.p_name,
+    ps.ps_availqty,
+    ps.ps_supplycost,
+    COALESCE(c.name, 'No Orders') AS customer_name,
+    COALESCE(c.total_spent, 0) AS total_spent,
+    COALESCE(c.order_count, 0) AS order_count
+FROM 
+    part pc
+JOIN 
+    partsupp ps ON pc.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    (
+        SELECT 
+            tc.custkey, 
+            tc.name, 
+            tc.total_spent, 
+            tc.order_count 
+        FROM 
+            TopCustomers tc
+        WHERE 
+            tc.customer_rank <= 10
+    ) c ON EXISTS (
+        SELECT 1 
+        FROM lineitem l
+        JOIN orders o ON l.l_orderkey = o.o_orderkey
+        WHERE l.l_partkey = pc.p_partkey AND o.o_custkey = c.custkey
+    )
+WHERE 
+    ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+ORDER BY 
+    pc.p_partkey, COALESCE(c.total_spent, 0) DESC;

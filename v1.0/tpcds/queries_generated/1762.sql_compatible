@@ -1,0 +1,46 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_ext_discount_amt,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2000)
+),
+item_summary AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        SUM(rs.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT rs.web_site_sk) AS site_count,
+        AVG(rs.ws_ext_discount_amt) AS avg_discount
+    FROM item i
+    LEFT JOIN ranked_sales rs ON i.i_item_sk = rs.ws_item_sk
+    GROUP BY i.i_item_id, i.i_item_desc
+),
+high_value_items AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        s.total_sales,
+        s.site_count,
+        s.avg_discount
+    FROM item_summary s
+    JOIN item i ON s.i_item_id = i.i_item_id
+    WHERE s.total_sales > (SELECT AVG(total_sales) FROM item_summary)
+)
+SELECT 
+    hvi.i_item_id,
+    hvi.i_item_desc,
+    hvi.total_sales,
+    hvi.site_count,
+    COALESCE(hvi.avg_discount, 0) AS avg_discount,
+    CASE
+        WHEN hvi.site_count > 5 THEN 'High Seller'
+        WHEN hvi.site_count BETWEEN 3 AND 5 THEN 'Moderate Seller'
+        ELSE 'Low Seller'
+    END AS seller_category
+FROM high_value_items hvi
+ORDER BY hvi.total_sales DESC;

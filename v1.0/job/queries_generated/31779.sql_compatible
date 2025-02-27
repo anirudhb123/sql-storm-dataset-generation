@@ -1,0 +1,57 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM title t
+    WHERE t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM movie_link m
+    JOIN title t ON m.linked_movie_id = t.id
+    JOIN MovieHierarchy mh ON m.movie_id = mh.movie_id
+),
+
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM MovieHierarchy mh
+    JOIN complete_cast cc ON mh.movie_id = cc.movie_id
+    JOIN cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY mh.movie_id, mh.title, mh.production_year
+    ORDER BY cast_count DESC
+    LIMIT 10
+),
+
+ActorsWithAwards AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(DISTINCT a.id) AS awards_count
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN TopMovies tm ON ci.movie_id = tm.movie_id
+    WHERE a.name IS NOT NULL
+    GROUP BY a.name
+)
+
+SELECT 
+    tm.title AS movie_title,
+    tm.production_year,
+    COALESCE(SUM(aw.awards_count), 0) AS total_awards,
+    COUNT(DISTINCT ci.person_id) AS total_actors
+FROM TopMovies tm
+LEFT JOIN cast_info ci ON tm.movie_id = ci.movie_id
+LEFT JOIN ActorsWithAwards aw ON aw.actor_name = ci.actor_name
+GROUP BY tm.movie_id, tm.title, tm.production_year
+ORDER BY total_awards DESC, total_actors DESC;

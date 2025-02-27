@@ -1,0 +1,59 @@
+
+WITH Address_Analysis AS (
+    SELECT 
+        ca_state, 
+        COUNT(DISTINCT ca_address_id) AS unique_addresses,
+        STRING_AGG(ca_street_name, ', ') AS street_names,
+        STRING_AGG(DISTINCT ca_city, ', ') AS cities,
+        STRING_AGG(DISTINCT ca_county, ', ') AS counties
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+),
+Demographic_Summary AS (
+    SELECT 
+        cd_gender,
+        COUNT(DISTINCT c_customer_id) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        STRING_AGG(DISTINCT cd_marital_status, ', ') AS marital_status_list
+    FROM 
+        customer_demographics 
+    JOIN 
+        customer ON cd_demo_sk = c_current_cdemo_sk 
+    GROUP BY 
+        cd_gender
+),
+Sales_Statistics AS (
+    SELECT 
+        ws_ship_date_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        STRING_AGG(DISTINCT sm_type || ' (' || CAST(SUM(ws_quantity) AS VARCHAR) || ')', ', ') AS ship_mode_quantities
+    FROM 
+        web_sales
+    JOIN 
+        ship_mode ON ws_ship_mode_sk = sm_ship_mode_sk
+    GROUP BY 
+        ws_ship_date_sk
+)
+SELECT 
+    aa.ca_state,
+    aa.unique_addresses,
+    aa.street_names,
+    aa.cities,
+    aa.counties,
+    ds.cd_gender,
+    ds.customer_count,
+    ds.avg_purchase_estimate,
+    ds.marital_status_list,
+    ss.ws_ship_date_sk,
+    ss.total_net_profit,
+    ss.ship_mode_quantities
+FROM 
+    Address_Analysis aa
+CROSS JOIN 
+    Demographic_Summary ds
+CROSS JOIN 
+    Sales_Statistics ss
+ORDER BY 
+    aa.ca_state, ds.cd_gender, ss.ws_ship_date_sk;

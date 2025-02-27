@@ -1,0 +1,77 @@
+
+WITH ActorMovies AS (
+    SELECT 
+        ka.person_id,
+        COUNT(DISTINCT kt.id) AS movie_count,
+        ARRAY_AGG(DISTINCT kt.title) AS movie_titles,
+        STRING_AGG(DISTINCT kt.title, ', ') FILTER (WHERE kt.production_year IS NOT NULL) AS title_list,
+        MAX(kt.production_year) AS latest_movie_year,
+        MIN(kt.production_year) AS earliest_movie_year,
+        AVG(kt.production_year) FILTER (WHERE kt.production_year IS NOT NULL) AS avg_production_year
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    JOIN 
+        aka_title kt ON kt.movie_id = ci.movie_id
+    GROUP BY 
+        ka.person_id
+),
+TitleWithKeywords AS (
+    SELECT 
+        kt.id AS title_id,
+        kt.title,
+        kt.production_year,
+        ARRAY_AGG(k.keyword) AS keywords,
+        (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = kt.id) AS keyword_count
+    FROM 
+        aka_title kt
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = kt.id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    WHERE 
+        kt.production_year > 2000
+    GROUP BY 
+        kt.id, kt.title, kt.production_year
+),
+RecentMovies AS (
+    SELECT 
+        am.person_id,
+        ARRAY_AGG(DISTINCT tm.title ORDER BY tm.production_year DESC) AS recent_titles,
+        RANK() OVER (PARTITION BY am.person_id ORDER BY MAX(tm.production_year) DESC) AS rank_recent
+    FROM 
+        ActorMovies am
+    JOIN 
+        cast_info ci ON am.person_id = ci.person_id
+    JOIN 
+        aka_title tm ON tm.id = ci.movie_id
+    WHERE 
+        tm.production_year IS NOT NULL
+    GROUP BY 
+        am.person_id
+)
+SELECT 
+    COALESCE(ka.name, cn.name) AS actor_name,
+    am.movie_count,
+    am.latest_movie_year,
+    am.earliest_movie_year,
+    am.avg_production_year,
+    twk.keywords,
+    rm.recent_titles
+FROM 
+    ActorMovies am
+JOIN 
+    aka_name ka ON am.person_id = ka.person_id
+FULL OUTER JOIN 
+    company_name cn ON cn.imdb_id = (SELECT imdb_id FROM movie_companies WHERE movie_id = (SELECT movie_id FROM cast_info ci WHERE ci.person_id = am.person_id LIMIT 1))
+LEFT OUTER JOIN 
+    TitleWithKeywords twk ON twk.title_id IN (SELECT movie_id FROM cast_info WHERE person_id = am.person_id)
+LEFT JOIN 
+    RecentMovies rm ON rm.person_id = am.person_id
+WHERE 
+    (am.movie_count > 5 OR rm.recent_titles IS NOT NULL)
+    AND (twk.keywords IS NOT NULL AND (twk.keywords @> ARRAY['Action'] OR twk.keywords @> ARRAY['Drama']))
+ORDER BY 
+    am.avg_production_year DESC NULLS LAST,
+    actor_name;

@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation > 1000 THEN 'high'
+            WHEN u.Reputation BETWEEN 100 AND 1000 THEN 'medium'
+            ELSE 'low'
+        END AS ReputationTier
+    FROM 
+        Users u
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TagCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 5
+)
+SELECT 
+    up.DisplayName AS UserName,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    COALESCE(pc.CommentCount, 0) AS CommentCount,
+    ut.ReputationTier,
+    pt.TagCount
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+LEFT JOIN 
+    PostComments pc ON rp.PostId = pc.PostId
+LEFT JOIN 
+    UserReputation ut ON up.Id = ut.UserId
+LEFT JOIN 
+    PopularTags pt ON pt.TagName = ANY(string_to_array(substring(rp.Title, 2, length(rp.Title)-2), '><')::varchar[])
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;

@@ -1,0 +1,85 @@
+
+WITH RECURSIVE customer_returns AS (
+    SELECT
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returns,
+        COUNT(DISTINCT cr_order_number) AS distinct_orders
+    FROM
+        catalog_returns
+    GROUP BY
+        cr_returning_customer_sk
+),
+item_sales AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY
+        ws_item_sk
+),
+high_return_items AS (
+    SELECT
+        ir.ws_item_sk,
+        ir.total_profit,
+        ir.total_quantity,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        RANK() OVER (ORDER BY ir.total_profit DESC) AS profit_rank
+    FROM
+        item_sales ir
+    LEFT JOIN
+        customer_returns cr ON ir.ws_item_sk = cr.cr_returning_customer_sk
+    WHERE
+        ir.total_quantity > 10
+),
+final_selection AS (
+    SELECT
+        hi.ws_item_sk,
+        hi.total_profit,
+        hi.total_quantity,
+        hi.total_returns,
+        ROW_NUMBER() OVER (PARTITION BY hi.total_returns ORDER BY hi.total_profit DESC) AS row_num,
+        (hi.total_profit / NULLIF(hi.total_quantity, 0)) AS avg_profit_per_item
+    FROM
+        high_return_items hi
+    WHERE
+        hi.total_returns > 5
+)
+SELECT
+    fs.ws_item_sk,
+    fs.total_profit,
+    fs.total_quantity,
+    fs.total_returns,
+    fs.row_num,
+    fs.avg_profit_per_item
+FROM
+    final_selection fs
+WHERE
+    fs.avg_profit_per_item IS NOT NULL
+    AND fs.row_num <= 10
+ORDER BY
+    fs.total_profit DESC
+OFFSET 0 ROWS FETCH NEXT 20 ROWS ONLY
+
+UNION ALL
+
+SELECT
+    ws_item_sk,
+    SUM(ws_net_profit) AS total_profit,
+    COUNT(ws_quantity) AS total_quantity,
+    NULL AS total_returns,
+    NULL AS row_num,
+    NULL AS avg_profit_per_item
+FROM
+    web_sales
+WHERE
+    ws_sold_date_sk IS NULL OR ws_sold_time_sk IS NULL
+GROUP BY
+    ws_item_sk
+HAVING
+    COUNT(ws_quantity) > 0
+ORDER BY
+    total_profit DESC;

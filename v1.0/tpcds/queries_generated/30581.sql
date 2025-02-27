@@ -1,0 +1,78 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        1 AS level
+    FROM 
+        customer c
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        sh.level + 1
+    FROM 
+        customer c
+    INNER JOIN sales_hierarchy sh ON c.c_current_cdemo_sk = sh.c_customer_sk
+),
+daily_sales AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        d.d_date
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        sh.level,
+        COALESCE(SUM(ws.ws_ext_sales_price), 0) AS total_customer_sales
+    FROM 
+        sales_hierarchy sh
+    LEFT JOIN 
+        web_sales ws ON sh.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer c ON sh.c_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk, sh.level
+),
+detailed_sales AS (
+    SELECT 
+        ds.d_date,
+        ds.total_sales,
+        cs.total_customer_sales,
+        RANK() OVER (PARTITION BY ds.d_date ORDER BY ds.total_sales DESC) AS sales_rank
+    FROM 
+        daily_sales ds
+    JOIN 
+        customer_sales cs ON 1 = 1 -- Cartesian join to match each sales date to each customer
+)
+SELECT 
+    ds.d_date,
+    ds.total_sales,
+    ds.total_customer_sales,
+    ds.sales_rank,
+    CASE 
+        WHEN ds.total_customer_sales IS NULL THEN 'Inactive'
+        WHEN ds.total_customer_sales > 1000 THEN 'High Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    detailed_sales ds
+WHERE 
+    ds.sales_rank <= 10
+ORDER BY 
+    ds.d_date, ds.sales_rank;

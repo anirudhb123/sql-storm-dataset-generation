@@ -1,0 +1,86 @@
+WITH UserScore AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        DENSE_RANK() OVER (ORDER BY COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) - 
+                           COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        COALESCE(SUM(c.Score), 0) AS TotalCommentScore,
+        COUNT(DISTINCT p2.Id) AS RelatedPostsCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Id END) AS CloseVotesCount,
+        DENSE_RANK() OVER (ORDER BY COUNT(DISTINCT c.Id) DESC) AS PopularityRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN 
+        Posts p2 ON pl.RelatedPostId = p2.Id
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= '2020-01-01' AND 
+        (p.PostTypeId = 1 OR p.PostTypeId = 2) 
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.PostTypeId
+), UserPostRelation AS (
+    SELECT 
+        us.UserId, 
+        ps.PostId,
+        us.Score,
+        CASE 
+            WHEN up.UserId IS NOT NULL THEN 'Yes' 
+            ELSE 'No' 
+        END AS HasPostedAnswer
+    FROM 
+        UserScore us
+    LEFT JOIN 
+        Posts ps ON us.UserId = ps.OwnerUserId 
+    LEFT JOIN 
+        Posts p ON ps.ParentId = p.Id -- Answers to Questions
+    LEFT JOIN 
+        Users up ON up.Id = ps.OwnerUserId AND p.PostTypeId = 1 
+)
+SELECT 
+    ups.UserId, 
+    ups.DisplayName,
+    ups.Reputation, 
+    ups.UpVotes, 
+    ups.DownVotes, 
+    ups.BadgeCount,
+    ps.PostId,
+    ps.TotalCommentScore,
+    ps.RelatedPostsCount,
+    ps.CloseVotesCount,
+    ups.UserRank,
+    ps.PopularityRank,
+    upr.HasPostedAnswer
+FROM 
+    UserScore ups
+JOIN 
+    PostStats ps ON ups.UserId = ps.OwnerUserId
+LEFT JOIN 
+    UserPostRelation upr ON ups.UserId = upr.UserId AND ps.PostId = upr.PostId
+WHERE 
+    (ups.Reputation > 1000 OR ups.BadgeCount > 5) 
+    AND (ps.CloseVotesCount > 0 OR ps.PopularityRank <= 10)
+ORDER BY 
+    ups.UserRank, ps.PopularityRank DESC
+LIMIT 50;

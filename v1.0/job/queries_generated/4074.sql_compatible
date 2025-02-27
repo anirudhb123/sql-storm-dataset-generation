@@ -1,0 +1,58 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.id) AS rn
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+ActorMovieCounts AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        RankedMovies rm ON ci.movie_id = rm.movie_id
+    GROUP BY 
+        ci.person_id
+),
+TopActors AS (
+    SELECT 
+        pm.id AS person_id,
+        ak.name AS actor_name,
+        ac.movie_count
+    FROM 
+        ActorMovieCounts ac
+    JOIN 
+        aka_name ak ON ac.person_id = ak.person_id
+    JOIN 
+        person_info pm ON pm.person_id = ak.person_id
+    WHERE 
+        pm.info_type_id = (SELECT id FROM info_type WHERE info = 'birthdate') 
+)
+SELECT 
+    ta.actor_name,
+    COUNT(DISTINCT rm.movie_id) AS total_movies,
+    AVG(EXTRACT(EPOCH FROM (DATE '2024-10-01' - pm.info)) / (365.25 * 24 * 60 * 60)) AS avg_age,
+    STRING_AGG(DISTINCT m.title, ', ') AS movie_titles
+FROM 
+    TopActors ta
+JOIN 
+    movie_info mi ON mi.movie_id IS NOT NULL 
+JOIN 
+    RankedMovies rm ON rm.movie_id = mi.movie_id
+LEFT JOIN 
+    person_info pm ON pm.person_id = ta.person_id AND pm.info_type_id = (SELECT id FROM info_type WHERE info = 'birthdate')
+WHERE 
+    pm.note IS NULL OR pm.note != 'unknown'
+GROUP BY 
+    ta.actor_name, pm.info
+HAVING 
+    COUNT(DISTINCT rm.movie_id) > 5
+ORDER BY 
+    total_movies DESC;

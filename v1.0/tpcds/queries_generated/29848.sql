@@ -1,0 +1,38 @@
+
+WITH base_data AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        DEP.DEP_COUNT,
+        COALESCE(SUBSTRING_INDEX(SUBSTRING_INDEX(a.ca_street_name, ' ', 1), ' ', -1), '') AS street_prefix,
+        REPLACE(LOWER(a.ca_city), ' ', '-') AS city_slug,
+        DENSE_RANK() OVER (PARTITION BY a.ca_state ORDER BY a.ca_city) AS city_rank,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+    JOIN 
+        warehouse w ON a.ca_city = w.w_city
+    LEFT JOIN 
+        household_demographics DEP ON DEP.hd_demo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_gender = 'F'
+    GROUP BY 
+        c.c_customer_id, full_name, DEP.DEP_COUNT, street_prefix, city_slug
+)
+SELECT 
+    CONCAT(full_name, ' (', city_slug, ')') AS customer_info,
+    street_prefix,
+    city_rank,
+    total_profit
+FROM 
+    base_data
+WHERE 
+    total_profit > 1000
+ORDER BY 
+    city_rank ASC, total_profit DESC;

@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey
+),
+SummerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS summer_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1997-06-01' AND '1997-08-31'
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierRevenue AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        SUM(so.summer_revenue) AS total_revenue
+    FROM 
+        RankedSuppliers rs
+    LEFT JOIN 
+        SummerOrders so ON rs.s_suppkey = so.o_orderkey
+    GROUP BY 
+        rs.s_suppkey, rs.s_name
+)
+SELECT 
+    sr.s_name,
+    sr.total_cost AS total_supply_cost,
+    COALESCE(sr.total_revenue, 0) AS total_revenue,
+    (sr.total_revenue - sr.total_cost) AS profit
+FROM 
+    (SELECT 
+         s.s_name,
+         SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+     FROM 
+         supplier s
+     JOIN 
+         partsupp ps ON s.s_suppkey = ps.ps_suppkey
+     GROUP BY 
+         s.s_name) AS sr
+ORDER BY 
+    profit DESC
+LIMIT 10;

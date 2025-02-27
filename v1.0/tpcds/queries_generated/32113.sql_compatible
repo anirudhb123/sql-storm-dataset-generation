@@ -1,0 +1,51 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        1 AS level
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+    UNION ALL
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_ext_sales_price * 0.9) AS total_sales,
+        sh.level + 1
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        web_sales ws ON sh.ws_bill_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        ws.ws_bill_customer_sk, sh.level
+), ranked_sales AS (
+    SELECT 
+        c.c_customer_id,
+        sh.total_sales,
+        ROW_NUMBER() OVER (PARTITION BY sh.ws_bill_customer_sk ORDER BY sh.total_sales DESC) AS sales_rank
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        customer c ON sh.ws_bill_customer_sk = c.c_customer_sk
+)
+SELECT 
+    r.c_customer_id,
+    r.total_sales,
+    COALESCE(sm.sm_type, 'Unknown') AS ship_mode,
+    d.d_date AS sales_date,
+    CASE 
+        WHEN r.sales_rank = 1 THEN 'Highest Sales'
+        ELSE 'Regular'
+    END AS sales_status
+FROM 
+    ranked_sales r
+LEFT JOIN 
+    ship_mode sm ON r.sales_rank = sm.sm_ship_mode_sk
+JOIN 
+    date_dim d ON r.total_sales > 1000 AND d.d_year = 2023
+WHERE 
+    r.total_sales IS NOT NULL
+ORDER BY 
+    r.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

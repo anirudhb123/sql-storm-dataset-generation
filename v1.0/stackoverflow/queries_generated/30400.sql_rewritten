@@ -1,0 +1,89 @@
+WITH RecursivePostCTE AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        rp.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostCTE rp ON p.ParentId = rp.PostId
+    WHERE p.PostTypeId = 2  
+),
+RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id, p.Title, p.OwnerUserId, p.PostTypeId, p.CreationDate, u.Reputation
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Badges b
+    GROUP BY b.UserId
+),
+AggregatedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerUserId,
+        rp.PostTypeId,
+        rp.Level,
+        rp2.Reputation,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ub.BadgeNames, 'No Badges') AS BadgeNames,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM RecursivePostCTE rp
+    JOIN RankedPosts rp2 ON rp.OwnerUserId = rp2.OwnerUserId
+    LEFT JOIN Comments c ON rp.PostId = c.PostId
+    LEFT JOIN Votes v ON rp.PostId = v.PostId AND v.VoteTypeId = 8 
+    LEFT JOIN UserBadges ub ON rp.OwnerUserId = ub.UserId
+    GROUP BY rp.PostId, rp.Title, rp.OwnerUserId, rp.PostTypeId, rp.Level, rp2.Reputation, ub.BadgeCount, ub.BadgeNames
+),
+FinalResult AS (
+    SELECT 
+        ad.PostId,
+        ad.Title,
+        ad.OwnerUserId,
+        ad.Reputation,
+        ad.BadgeCount,
+        ad.BadgeNames,
+        ad.TotalComments,
+        ad.TotalBounty,
+        RANK() OVER (ORDER BY ad.TotalBounty DESC) AS BountyRank
+    FROM AggregatedData ad
+)
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.OwnerUserId,
+    fr.Reputation,
+    fr.BadgeCount,
+    fr.BadgeNames,
+    fr.TotalComments,
+    fr.TotalBounty,
+    fr.BountyRank
+FROM FinalResult fr
+WHERE fr.BountyRank <= 10  
+ORDER BY fr.TotalBounty DESC, fr.Reputation DESC;

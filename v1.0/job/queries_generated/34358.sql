@@ -1,0 +1,63 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS depth
+    FROM 
+        aka_title t 
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    JOIN 
+        company_name cn ON cn.id = mc.company_id
+    WHERE 
+        cn.country_code = 'USA' 
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        t.title,
+        t.production_year,
+        mh.depth + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title t ON t.id = ml.linked_movie_id
+)
+
+SELECT 
+    m.title,
+    m.production_year,
+    COUNT(DISTINCT c.person_id) AS actor_count,
+    MAX(COALESCE(pi.info, 'N/A')) AS latest_info,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    SUM(CASE 
+            WHEN pi.note IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS notes_count,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS rank
+FROM 
+    movie_hierarchy m
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = m.movie_id
+LEFT JOIN 
+    cast_info c ON c.movie_id = m.movie_id
+LEFT JOIN 
+    person_info pi ON pi.person_id = c.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.movie_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+WHERE 
+    m.depth <= 3
+    AND m.production_year IS NOT NULL
+GROUP BY 
+    m.movie_id, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT c.person_id) > 2
+ORDER BY 
+    m.production_year DESC, actor_count DESC
+LIMIT 10;

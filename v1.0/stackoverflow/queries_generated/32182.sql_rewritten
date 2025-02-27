@@ -1,0 +1,98 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        T.Id,
+        T.TagName,
+        T.Count,
+        T.ExcerptPostId,
+        T.WikiPostId,
+        T.IsModeratorOnly,
+        T.IsRequired,
+        0 AS Level
+    FROM 
+        Tags T
+    WHERE 
+        T.IsRequired = 1
+
+    UNION ALL
+
+    SELECT 
+        T.Id,
+        T.TagName,
+        T.Count,
+        T.ExcerptPostId,
+        T.WikiPostId,
+        T.IsModeratorOnly,
+        T.IsRequired,
+        RTH.Level + 1
+    FROM 
+        Tags T
+    INNER JOIN 
+        RecursiveTagHierarchy RTH ON RTH.Id = T.WikiPostId
+),
+FilteredPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        U.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS rn
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days' 
+        AND P.Score > 0
+),
+PostVotes AS (
+    SELECT 
+        V.PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.PostId
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId
+)
+SELECT 
+    FP.PostId,
+    FP.Title,
+    FP.Body,
+    FP.CreationDate,
+    U.DisplayName AS OwnerDisplayName,
+    U.Reputation,
+    COALESCE(PV.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(PV.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(PHS.HistoryCount, 0) AS TotalHistoryEntries,
+    STRING_AGG(T.TagName, ', ') AS Tags
+FROM 
+    FilteredPosts FP
+LEFT JOIN 
+    Users U ON FP.OwnerUserId = U.Id
+LEFT JOIN 
+    PostVotes PV ON FP.PostId = PV.PostId
+LEFT JOIN 
+    PostHistorySummary PHS ON FP.PostId = PHS.PostId
+LEFT JOIN 
+    Posts POST ON POST.Id = FP.PostId
+LEFT JOIN 
+    STRING_TO_ARRAY(POST.Tags, ',') AS TagList ON TRUE
+LEFT JOIN 
+    Tags T ON T.TagName IN (SELECT unnest(TagList))
+WHERE 
+    FP.rn <= 5
+GROUP BY 
+    FP.PostId, FP.Title, FP.Body, FP.CreationDate, U.DisplayName, U.Reputation, PV.UpVotes, PV.DownVotes, PHS.HistoryCount
+ORDER BY 
+    FP.CreationDate DESC;

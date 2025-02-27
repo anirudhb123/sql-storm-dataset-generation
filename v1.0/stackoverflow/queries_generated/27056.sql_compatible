@@ -1,0 +1,60 @@
+
+WITH UserBadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerName,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id IN (
+            SELECT UNNEST(string_to_array(SUBSTRING(p.Tags FROM 3 FOR LENGTH(p.Tags) - 4), '><'))
+        )
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, u.DisplayName
+    ORDER BY 
+        p.Score DESC
+    LIMIT 10
+)
+SELECT 
+    ub.DisplayName AS UserName,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    tq.Title AS TopQuestionTitle,
+    tq.Score AS QuestionScore,
+    tq.ViewCount AS QuestionViewCount,
+    tq.AnswerCount AS QuestionAnswerCount,
+    tq.Tags AS QuestionTags
+FROM 
+    UserBadgeStats ub
+JOIN 
+    TopQuestions tq ON ub.UserId = (
+        SELECT OwnerUserId FROM Posts WHERE Id = tq.PostId
+    )
+ORDER BY 
+    ub.BadgeCount DESC, tq.Score DESC;

@@ -1,0 +1,54 @@
+
+WITH UserReputation AS (
+    SELECT Id, DisplayName, Reputation,
+           RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+
+RecentPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.OwnerUserId,
+           EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - p.CreationDate)) AS AgeInSeconds,
+           CASE 
+               WHEN p.AcceptedAnswerId IS NOT NULL THEN 1
+               ELSE 0 
+           END AS HasAcceptedAnswer
+    FROM Posts p
+    WHERE p.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+),
+
+PostDetails AS (
+    SELECT rp.*, 
+           ur.DisplayName AS OwnerDisplayName,
+           COALESCE(pt.Name, 'Unknown') AS PostTypeName,
+           (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.Id) AS CommentCount,
+           (SELECT SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) 
+            FROM Votes v 
+            WHERE v.PostId = rp.Id) AS UpVoteCount,
+           (SELECT SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) 
+            FROM Votes v 
+            WHERE v.PostId = rp.Id) AS DownVoteCount
+    FROM RecentPosts rp
+    LEFT JOIN Users ur ON rp.OwnerUserId = ur.Id
+    LEFT JOIN PostTypes pt ON pt.Id = (SELECT PostTypeId FROM Posts WHERE Id = rp.Id)
+),
+
+TopPerformingPosts AS (
+    SELECT pd.*, 
+           UpVoteCount - DownVoteCount AS NetScore,
+           ROW_NUMBER() OVER (PARTITION BY HasAcceptedAnswer ORDER BY NetScore DESC) AS RankWithinGroup
+    FROM PostDetails pd
+)
+
+SELECT t.OwnerDisplayName, t.Title, t.CreationDate, t.NetScore, t.CommentCount,
+       CASE 
+           WHEN t.ReputationRank <= 10 THEN 'Top Contributor'
+           ELSE 'Contributor'
+       END AS ContributorStatus,
+       STRING_AGG(pht.Name, ', ') AS PostHistoryTypes
+FROM TopPerformingPosts t
+LEFT JOIN PostHistory ph ON ph.PostId = t.Id
+LEFT JOIN PostHistoryTypes pht ON pht.Id = ph.PostHistoryTypeId
+WHERE t.NetScore > 10 OR (t.NetScore <= 10 AND t.CommentCount > 5)
+GROUP BY t.OwnerDisplayName, t.Title, t.CreationDate, t.NetScore, t.CommentCount, t.ReputationRank
+HAVING COUNT(ph.Id) > 0
+ORDER BY t.NetScore DESC, t.CreationDate DESC;

@@ -1,0 +1,57 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_sk,
+        TRIM(ca_street_number) AS street_number,
+        TRIM(ca_street_name) AS street_name,
+        TRIM(ca_street_type) AS street_type,
+        TRIM(ca_city) AS city,
+        TRIM(ca_state) AS state,
+        TRIM(ca_country) AS country,
+        CONCAT(TRIM(ca_street_number), ' ', TRIM(ca_street_name), ' ', TRIM(ca_street_type), ', ', TRIM(ca_city), ', ', TRIM(ca_state), ' ', TRIM(ca_zip), ', ', TRIM(ca_country)) AS full_address
+    FROM 
+        customer_address
+    WHERE 
+        ca_city IS NOT NULL
+),
+DemographicDetails AS (
+    SELECT 
+        cd_demo_sk,
+        TRIM(cd_gender) AS gender,
+        TRIM(cd_marital_status) AS marital_status,
+        TRIM(cd_education_status) AS education_status,
+        cd_purchase_estimate,
+        CONCAT(
+            'Gender: ', TRIM(cd_gender), 
+            ', Marital Status: ', TRIM(cd_marital_status), 
+            ', Education: ', TRIM(cd_education_status)
+        ) AS demographic_summary
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_purchase_estimate > 1000
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    AD.full_address,
+    DD.demographic_summary,
+    SD.total_profit,
+    SD.order_count
+FROM 
+    AddressDetails AD
+JOIN 
+    DemographicDetails DD ON AD.ca_address_sk = (SELECT c_current_addr_sk FROM customer WHERE c_customer_id = (SELECT ws_bill_customer_sk FROM SalesData WHERE total_profit IS NOT NULL LIMIT 1))
+JOIN 
+    SalesData SD ON SD.ws_bill_customer_sk = (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk IN (SELECT i_item_sk FROM item WHERE i_category LIKE '%Electronics%') LIMIT 1)
+ORDER BY 
+    SD.total_profit DESC
+LIMIT 10;

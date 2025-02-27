@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        COUNT(answers.Id) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN c.Score IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts answers ON p.Id = answers.ParentId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.Score, p.CreationDate, p.ViewCount
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.Score,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank <= 5 
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.Tags,
+    fp.Score,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.AnswerCount,
+    fp.CommentCount,
+    u.Id AS UserId,
+    us.BadgeCount,
+    us.TotalUpVotes,
+    us.TotalDownVotes
+FROM 
+    FilteredPosts fp
+JOIN 
+    Users u ON fp.OwnerUserId = u.Id
+JOIN 
+    UserStats us ON u.Id = us.UserId
+ORDER BY 
+    fp.Score DESC, fp.ViewCount DESC;

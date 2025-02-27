@@ -1,0 +1,49 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        DENSE_RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_within_year
+    FROM 
+        aka_title a
+    JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+HighActorMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        actor_count > 5 AND rank_within_year <= 3
+),
+CompanyInfo AS (
+    SELECT 
+        m.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name co ON m.company_id = co.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+)
+SELECT 
+    ha.title,
+    ha.production_year,
+    ci.company_name,
+    ci.company_type,
+    (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = ha.id) AS keyword_count,
+    (SELECT AVG(info.length) FROM movie_info mi WHERE mi.movie_id = ha.id GROUP BY mi.movie_id) AS avg_info_length
+FROM 
+    HighActorMovies ha
+LEFT JOIN 
+    CompanyInfo ci ON ha.id = ci.movie_id
+WHERE 
+    ci.company_name IS NOT NULL OR ci.company_name IS NULL
+ORDER BY 
+    ha.production_year DESC, ha.title;

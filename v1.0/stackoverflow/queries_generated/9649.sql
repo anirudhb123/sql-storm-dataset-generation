@@ -1,0 +1,58 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CASE 
+            WHEN Reputation >= 1000 THEN 'High'
+            WHEN Reputation >= 500 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationLevel
+    FROM Users
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        MAX(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS HasUpvote,
+        MAX(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS HasDownvote,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    GROUP BY p.Id, p.Title, p.PostTypeId, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.OwnerDisplayName,
+        pd.CommentCount,
+        pd.VoteCount,
+        pd.HasUpvote,
+        pd.HasDownvote,
+        ur.ReputationLevel
+    FROM PostDetails pd
+    JOIN UserReputation ur ON pd.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = pd.OwnerUserId)
+    WHERE pd.RecentPostRank <= 5
+)
+SELECT 
+    tp.OwnerDisplayName,
+    tp.Title,
+    tp.CommentCount,
+    tp.VoteCount,
+    tp.ReputationLevel,
+    CASE 
+        WHEN tp.HasUpvote = 1 THEN 'Upvoted'
+        ELSE 'Not Upvoted'
+    END AS UpvoteStatus,
+    CASE 
+        WHEN tp.HasDownvote = 1 THEN 'Downvoted'
+        ELSE 'Not Downvoted'
+    END AS DownvoteStatus
+FROM TopPosts tp
+ORDER BY tp.ReputationLevel DESC, tp.VoteCount DESC;

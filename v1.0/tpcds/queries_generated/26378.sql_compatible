@@ -1,0 +1,88 @@
+
+WITH ProcessedAddresses AS (
+    SELECT 
+        ca_address_sk,
+        UPPER(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesDetails AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_ext_sales_price) AS total_sales_amount
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+MasterData AS (
+    SELECT
+        ca.full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country,
+        cd.full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        sd.total_quantity_sold,
+        sd.total_sales_amount
+    FROM 
+        ProcessedAddresses ca
+    JOIN 
+        CustomerDetails cd ON cd.c_customer_sk IN (
+            SELECT c_customer_sk 
+            FROM store_sales 
+            WHERE ss_item_sk IN (
+                SELECT ws_item_sk 
+                FROM SalesDetails
+            )
+        )
+    LEFT JOIN 
+        SalesDetails sd ON sd.ws_item_sk IN (
+            SELECT ws_item_sk 
+            FROM web_sales ws 
+            WHERE ws.ws_ship_addr_sk IN (
+                SELECT ca.ca_address_sk 
+                FROM ProcessedAddresses ca
+            )
+        )
+)
+SELECT 
+    full_address,
+    ca_city,
+    ca_state,
+    ca_zip,
+    ca_country,
+    full_name,
+    cd_gender,
+    cd_marital_status,
+    total_quantity_sold,
+    total_sales_amount
+FROM 
+    MasterData
+WHERE 
+    total_sales_amount > 1000
+ORDER BY 
+    total_quantity_sold DESC
+LIMIT 
+    100;

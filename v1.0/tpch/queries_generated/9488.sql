@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_mktsegment,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+),
+TopOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        o.o_orderpriority,
+        r.c_name,
+        r.c_mktsegment
+    FROM 
+        RankedOrders r
+    WHERE 
+        r.rnk <= 5
+),
+SupplierPartInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        s.s_name,
+        ps.ps_supplycost,
+        ps.ps_availqty
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    TOP 10 
+    t.o_orderkey,
+    t.o_orderdate,
+    t.o_totalprice,
+    t.c_name AS customer_name,
+    t.c_mktsegment AS market_segment,
+    spi.p_name AS part_name,
+    spi.s_name AS supplier_name,
+    spi.ps_supplycost,
+    spi.ps_availqty
+FROM 
+    TopOrders t
+JOIN 
+    lineitem l ON t.o_orderkey = l.l_orderkey
+JOIN 
+    SupplierPartInfo spi ON l.l_partkey = spi.ps_partkey
+WHERE 
+    l.l_quantity > 10
+ORDER BY 
+    t.o_totalprice DESC, 
+    spi.ps_availqty ASC;

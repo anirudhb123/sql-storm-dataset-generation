@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_sold_date_sk BETWEEN 2400 AND 2500
+    GROUP BY 
+        ws.web_site_sk, ws_sold_date_sk
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cd.cd_gender, 'Unknown') AS gender,
+        COALESCE(hd.hd_buy_potential, 'N/A') AS buy_potential
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_quantity) AS total_sales_quantity,
+        SUM(COALESCE(sr.return_quantity, 0)) AS total_return_quantity,
+        SUM(ws.ws_sales_price) AS total_net_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS unique_orders
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        store_returns sr ON ws.ws_order_number = sr.sr_ticket_number 
+    GROUP BY 
+        ws.web_site_sk, ws.ws_order_number
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    SUM(sws.total_sales_quantity - sws.total_return_quantity) AS net_sales,
+    COUNT(DISTINCT sws.ws_order_number) AS order_count,
+    CASE 
+        WHEN AVG(sws.total_net_sales) IS NULL THEN 'No Sales'
+        ELSE COALESCE(CAST(ROUND(AVG(sws.total_net_sales), 2) AS VARCHAR), 'No Data')
+    END AS avg_sales_per_order,
+    DATEADD(DAY, -1 * DATEDIFF(DAY, 0, GETDATE()), GETDATE()) AS report_date
+FROM 
+    CustomerData cs
+LEFT JOIN 
+    SalesWithReturns sws ON cs.c_customer_sk = sws.web_site_sk
+WHERE 
+    cs.gender IN ('M', 'F') OR cs.buy_potential != 'N/A' 
+GROUP BY 
+    cs.c_first_name, cs.c_last_name
+HAVING 
+    net_sales > 1000 OR COUNT(sws.ws_order_number) > 10
+ORDER BY 
+    net_sales DESC
+LIMIT 100;

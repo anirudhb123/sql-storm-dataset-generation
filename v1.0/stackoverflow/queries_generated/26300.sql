@@ -1,0 +1,85 @@
+WITH TagStats AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><'))) AS Tag, 
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        RANK() OVER(ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStats
+    WHERE 
+        PostCount > 10
+),
+DetailedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.AnswerCount,
+        p.ViewCount,
+        ARRAY_AGG(DISTINCT t.Tag) AS Tags,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        TagStats t ON TRIM(UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))) = t.Tag
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, u.DisplayName
+),
+PostHistoryCounts AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS EditCount,
+        COUNT(CASE WHEN PostHistoryTypeId IN (10, 11, 12) THEN 1 END) AS CloseReopenCount
+    FROM 
+        PostHistory
+    GROUP BY 
+        PostId
+),
+FinalStats AS (
+    SELECT 
+        dp.PostId,
+        dp.Title,
+        dp.CreationDate,
+        dp.OwnerDisplayName,
+        dp.Tags,
+        dp.AnswerCount,
+        dp.ViewCount,
+        COALESCE(ph.EditCount, 0) AS EditCount,
+        COALESCE(ph.CloseReopenCount, 0) AS CloseReopenCount
+    FROM 
+        DetailedPosts dp
+    LEFT JOIN 
+        PostHistoryCounts ph ON dp.PostId = ph.PostId
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.CreationDate,
+    f.OwnerDisplayName,
+    f.Tags,
+    f.AnswerCount,
+    f.ViewCount,
+    f.EditCount,
+    f.CloseReopenCount,
+    tt.TagRank
+FROM 
+    FinalStats f
+JOIN 
+    TopTags tt ON tt.Tag = ANY(f.Tags)
+ORDER BY 
+    tt.TagRank, f.ViewCount DESC;

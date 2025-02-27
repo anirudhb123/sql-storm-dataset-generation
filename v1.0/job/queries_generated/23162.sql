@@ -1,0 +1,105 @@
+WITH RecursiveTitleCTE AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        t.imdb_index,
+        1 AS recursion_level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    
+    UNION ALL
+    
+    SELECT
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mt.imdb_index,
+        r.recursion_level + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        RecursiveTitleCTE r ON mt.episode_of_id = r.title_id
+    WHERE 
+        r.recursion_level < 5
+),
+FilteredTitle AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        rt.kind_id
+    FROM 
+        RecursiveTitleCTE rt
+    WHERE 
+        rt.production_year IS NOT NULL
+        AND rt.kind_id IN (
+            SELECT kt.id 
+            FROM kind_type kt 
+            WHERE kt.kind NOT LIKE 'Documentary'
+        )
+),
+MovieStats AS (
+    SELECT 
+        f.title_id,
+        COUNT(c.id) AS cast_count,
+        COALESCE(AVG(c.nr_order), 0) AS avg_role_order
+    FROM 
+        FilteredTitle f
+    LEFT JOIN 
+        cast_info c ON f.title_id = c.movie_id
+    GROUP BY 
+        f.title_id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name SEPARATOR ', ') AS companies,
+        GROUP_CONCAT(DISTINCT ct.kind SEPARATOR ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+FinalOutput AS (
+    SELECT 
+        ft.title,
+        ft.production_year,
+        mt.cast_count,
+        mt.avg_role_order,
+        ci.companies,
+        ci.company_types
+    FROM 
+        FilteredTitle ft
+    JOIN 
+        MovieStats mt ON ft.title_id = mt.title_id
+    LEFT JOIN 
+        CompanyInfo ci ON ft.title_id = ci.movie_id
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.cast_count,
+    f.avg_role_order,
+    IFNULL(f.companies, 'No Companies') AS companies,
+    IFNULL(f.company_types, 'No Company Types') AS company_types,
+    CASE 
+        WHEN f.avg_role_order = 0 THEN 'No roles assigned'
+        WHEN f.cast_count > 20 THEN 'Large Cast'
+        ELSE 'Regular Cast'
+    END AS cast_size_category
+FROM 
+    FinalOutput f
+ORDER BY 
+    f.production_year DESC,
+    f.cast_count DESC
+LIMIT 100
+OFFSET 0;

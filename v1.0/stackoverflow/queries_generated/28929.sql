@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(UPVOTES.UpVoteCount, 0) AS UpVotes,
+        COALESCE(DOWNVOTES.DownVoteCount, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY COALESCE(UPVOTES.UpVoteCount, 0) - COALESCE(DOWNVOTES.DownVoteCount, 0) DESC) AS RankScore
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS UpVoteCount
+        FROM 
+            Votes
+        WHERE 
+            VoteTypeId = 2
+        GROUP BY 
+            PostId
+    ) AS UPVOTES ON P.Id = UPVOTES.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS DownVoteCount
+        FROM 
+            Votes
+        WHERE 
+            VoteTypeId = 3
+        GROUP BY 
+            PostId
+    ) AS DOWNVOTES ON P.Id = DOWNVOTES.PostId
+    WHERE 
+        P.PostTypeId = 1  -- Focus on Questions
+),
+
+TagCounts AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    GROUP BY 
+        t.TagName
+),
+
+PopularTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS PopularityRank
+    FROM 
+        TagCounts
+    WHERE 
+        PostCount > 1  -- At least 2 posts associated with each tag
+)
+
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.Body,
+    RP.CreationDate,
+    RP.ViewCount,
+    RP.UpVotes,
+    RP.DownVotes,
+    PT.TagName,
+    PT.PopularityRank
+FROM 
+    RankedPosts RP
+JOIN 
+    PopularTags PT ON RP.Tags LIKE CONCAT('%<', PT.TagName, '>%')
+WHERE 
+    RP.RankScore <= 10  -- Top 10 posts based on vote difference
+ORDER BY 
+    PT.PopularityRank, RP.ViewCount DESC
+LIMIT 50; -- Limit results to the top 50 entries

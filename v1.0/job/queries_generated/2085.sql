@@ -1,0 +1,50 @@
+WITH ranked_movies AS (
+    SELECT
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS cast_with_notes,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_within_year
+    FROM
+        aka_title t
+    LEFT JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN
+        role_type rt ON c.role_id = rt.id
+    LEFT JOIN
+        person_info pi ON c.person_id = pi.person_id
+    WHERE
+        t.production_year IS NOT NULL
+        AND t.production_year >= 2000
+        AND rt.role IN ('Actor', 'Actress')
+    GROUP BY
+        t.title, t.production_year
+),
+filtered_movies AS (
+    SELECT
+        title,
+        production_year,
+        actor_count,
+        cast_with_notes
+    FROM
+        ranked_movies
+    WHERE
+        rank_within_year <= 5
+)
+SELECT
+    f.title,
+    f.production_year,
+    f.actor_count,
+    COALESCE(NULLIF(f.cast_with_notes, 0), 'No notes') AS notes_status,
+    CASE 
+        WHEN f.actor_count > 10 THEN 'Large Cast'
+        WHEN f.actor_count BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM
+    filtered_movies f
+ORDER BY
+    f.production_year DESC, f.actor_count DESC
+LIMIT 10;

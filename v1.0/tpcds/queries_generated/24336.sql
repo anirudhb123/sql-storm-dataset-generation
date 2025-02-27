@@ -1,0 +1,51 @@
+
+WITH RECURSIVE CustomerRank AS (
+    SELECT c.c_customer_sk,
+           c.c_customer_id,
+           cd.cd_gender,
+           cd.cd_marital_status,
+           RANK() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year DESC) AS gender_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SelectedItems AS (
+    SELECT i.i_item_sk,
+           i.i_item_id,
+           i.i_current_price,
+           COALESCE(p.p_discount_active, 'N') AS discount_active
+    FROM item i
+    LEFT JOIN promotion p ON i.i_item_sk = p.p_item_sk AND p.p_start_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim)
+),
+FilteredSales AS (
+    SELECT ws.ws_item_sk,
+           SUM(ws.ws_sales_price) AS total_sales,
+           COUNT(DISTINCT ws.ws_order_number) AS number_of_orders
+    FROM web_sales ws
+    JOIN SelectedItems si ON ws.ws_item_sk = si.i_item_sk
+    GROUP BY ws.ws_item_sk
+    HAVING SUM(ws.ws_sales_price) > 1000
+       OR (COUNT(DISTINCT ws.ws_order_number) > 10 AND (SELECT MAX(1.0 / COUNT(*)) FROM web_sales w WHERE w.ws_item_sk = ws.ws_item_sk) < 0.1)
+),
+HighValueCustomers AS (
+    SELECT cr.c_customer_sk,
+           SUM(COALESCE(ws.ws_net_profit, 0)) AS total_profit
+    FROM customer cr
+    JOIN web_sales ws ON cr.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim)
+    GROUP BY cr.c_customer_sk
+    HAVING SUM(ws.ws_net_profit) > 500
+)
+SELECT c.c_customer_id,
+       cd.cd_gender,
+       cd.cd_marital_status,
+       r.gender_rank,
+       f.total_sales,
+       f.number_of_orders,
+       h.total_profit
+FROM CustomerRank r
+JOIN customer c ON r.c_customer_sk = c.c_customer_sk
+JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN FilteredSales f ON f.ws_item_sk IN (SELECT si.i_item_sk FROM SelectedItems si WHERE si.discount_active = 'Y')
+LEFT JOIN HighValueCustomers h ON c.c_customer_sk = h.c_customer_sk
+WHERE cd.cd_marital_status IN ('M', 'S') AND r.gender_rank < 5
+ORDER BY total_profit DESC NULLS LAST, total_sales DESC;

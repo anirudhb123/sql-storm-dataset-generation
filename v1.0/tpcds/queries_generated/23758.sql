@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s_sold_date_sk,
+        ss_item_sk,
+        SUM(ss_quantity) AS total_quantity,
+        SUM(ss_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ss_item_sk ORDER BY SUM(ss_net_profit) DESC) AS rank_profit
+    FROM store_sales
+    GROUP BY s_sold_date_sk, ss_item_sk
+),
+FilteredSales AS (
+    SELECT 
+        rs.sold_date_sk,
+        rs.ss_item_sk,
+        rs.total_quantity,
+        rs.total_net_profit,
+        CASE 
+            WHEN rs.total_net_profit IS NULL THEN 'No Profit'
+            WHEN rs.rank_profit = 1 THEN 'Top Seller'
+            ELSE 'Regular Seller'
+        END AS profit_status
+    FROM RankedSales rs
+    WHERE rs.total_quantity > (
+        SELECT AVG(total_quantity) 
+        FROM RankedSales
+    )
+),
+JoinedResults AS (
+    SELECT 
+        fs.sold_date_sk,
+        fs.ss_item_sk,
+        fs.total_quantity,
+        fs.total_net_profit,
+        fs.profit_status,
+        CASE 
+            WHEN fs.profit_status = 'Top Seller' THEN 'VIP Item'
+            ELSE 'Regular Item'
+        END AS item_status,
+        COALESCE(i.i_current_price, 0) AS current_price
+    FROM FilteredSales fs
+    LEFT JOIN item i ON fs.ss_item_sk = i.i_item_sk
+)
+SELECT 
+    date_dim.d_date AS sale_date,
+    wr_wr.return_quantity,
+    js.total_quantity,
+    js.total_net_profit,
+    js.current_price,
+    js.item_status,
+    COUNT(DISTINCT wr.order_number) AS total_web_returns
+FROM JoinedResults js
+JOIN web_returns wr ON js.ss_item_sk = wr.wr_item_sk
+JOIN date_dim ON date_dim.d_date_sk = js.sold_date_sk
+WHERE date_dim.d_year = 2023 
+  AND (js.total_net_profit > 100 OR js.current_price < 5) 
+  AND js.item_status = 'Regular Item'
+GROUP BY date_dim.d_date, js.total_quantity, js.total_net_profit, js.current_price, js.item_status
+ORDER BY sale_date DESC, js.total_net_profit DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,82 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS actor_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+movies_with_keywords AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        COALESCE(k.keywords, 'No Keywords') AS keywords
+    FROM 
+        ranked_movies m
+    LEFT JOIN (
+        SELECT 
+            mk.movie_id,
+            STRING_AGG(k.keyword, ', ') AS keywords
+        FROM 
+            movie_keyword mk
+        JOIN 
+            keyword k ON mk.keyword_id = k.id
+        GROUP BY 
+            mk.movie_id
+    ) k ON m.movie_id = k.movie_id
+),
+actors_with_movie_titles AS (
+    SELECT 
+        a.name,
+        m.title,
+        m.production_year
+    FROM 
+        aka_name a
+    INNER JOIN 
+        cast_info c ON a.person_id = c.person_id
+    INNER JOIN 
+        aka_title m ON c.movie_id = m.id
+    WHERE 
+        a.name IS NOT NULL
+),
+distinct_actors AS (
+    SELECT DISTINCT 
+        a.name, 
+        a.surname_pcode, 
+        CASE 
+            WHEN CHAR_LENGTH(a.name) < 5 THEN 'Short Name' 
+            ELSE 'Long Name' 
+        END AS name_length_category
+    FROM 
+        actors_with_movie_titles a
+)
+SELECT 
+    m.title,
+    m.keywords,
+    DISTINCT_ACTORS.name,
+    COUNT(DISTINCT c.movie_id) AS movie_count,
+    AVG(CASE 
+            WHEN m.production_year IS NULL THEN 0
+            ELSE EXTRACT(YEAR FROM cast('2024-10-01' as date)) - m.production_year
+        END) AS avg_year_difference
+FROM 
+    movies_with_keywords m
+LEFT JOIN 
+    cast_info c ON m.movie_id = c.movie_id
+LEFT JOIN 
+    distinct_actors ON c.person_id = distinct_actors.person_id
+WHERE 
+    (m.production_year < 2000 OR m.production_year IS NULL)
+    AND DISTINCT_ACTORS.name_length_category = 'Long Name'
+GROUP BY 
+    m.title, m.keywords, DISTINCT_ACTORS.name
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 3
+ORDER BY 
+    avg_year_difference DESC, movie_count DESC
+LIMIT 10;

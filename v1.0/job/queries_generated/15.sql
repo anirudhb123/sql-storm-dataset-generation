@@ -1,0 +1,79 @@
+WITH movie_summary AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        GROUP_CONCAT(DISTINCT cn.name) AS companies,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_companies mc ON at.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        complete_cast cc ON at.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    WHERE 
+        at.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.name
+),
+ranked_movies AS (
+    SELECT 
+        ms.title,
+        ms.production_year,
+        ms.companies,
+        ms.cast_count,
+        RANK() OVER (PARTITION BY ms.production_year ORDER BY ms.cast_count DESC) AS rank
+    FROM 
+        movie_summary ms
+)
+SELECT 
+    rm.production_year,
+    rm.title,
+    rm.companies,
+    rm.cast_count,
+    ai.actor_name,
+    ai.movie_count
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    actor_info ai ON rm.cast_count = ai.movie_count
+WHERE 
+    rm.rank <= 10
+UNION ALL
+SELECT 
+    NULL AS production_year,
+    NULL AS title,
+    NULL AS companies,
+    0 AS cast_count,
+    ak.name AS actor_name,
+    COUNT(DISTINCT ci.movie_id) AS movie_count
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+WHERE 
+    ak.name IS NULL OR ak.name = ''
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 5
+ORDER BY 
+    production_year DESC NULLS LAST, 
+    cast_count DESC, 
+    actor_name;

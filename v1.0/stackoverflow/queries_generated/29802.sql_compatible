@@ -1,0 +1,77 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.Tags,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.LastActivityDate DESC) AS ActivityRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 
+),
+EnhancedPosts AS (
+    SELECT 
+        RP.*,
+        (SELECT STRING_AGG(B.Name, ', ') 
+         FROM Badges B 
+         WHERE B.UserId = RP.OwnerUserId) AS BadgeNames,
+        COALESCE((SELECT AVG(P2.Score) 
+                  FROM Posts P2 
+                  WHERE P2.OwnerUserId = RP.OwnerUserId AND P2.PostTypeId = 2), 0) AS AvgAnswerScore
+    FROM 
+        RankedPosts RP
+    WHERE 
+        RP.ActivityRank = 1
+),
+PopularTags AS (
+    SELECT 
+        T.TagName, 
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%' 
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 5
+),
+TopTags AS (
+    SELECT 
+        TagName
+    FROM 
+        PopularTags 
+    ORDER BY 
+        PostCount DESC
+    LIMIT 5
+)
+SELECT 
+    EP.PostId,
+    EP.Title,
+    EP.OwnerDisplayName,
+    EP.Score,
+    EP.CreationDate,
+    EP.LastActivityDate,
+    EP.ViewCount,
+    EP.AnswerCount,
+    EP.CommentCount,
+    EP.BadgeNames,
+    EP.AvgAnswerScore,
+    PT.TagName
+FROM 
+    EnhancedPosts EP
+JOIN 
+    TopTags PT ON EP.Tags LIKE '%' || PT.TagName || '%'
+ORDER BY 
+    EP.Score DESC, 
+    EP.LastActivityDate DESC;

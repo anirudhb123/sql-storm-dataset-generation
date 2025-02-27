@@ -1,0 +1,90 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        0 AS Level,
+        CAST(T.TagName AS VARCHAR(255)) AS Path
+    FROM 
+        Tags T
+    WHERE 
+        T.IsModeratorOnly = 0   -- Start with non-moderator-only tags
+
+    UNION ALL
+
+    SELECT 
+        TL.RelatedPostId, 
+        T.TagName,
+        Level + 1,
+        CAST(R.Path + ' > ' + T.TagName AS VARCHAR(255))
+    FROM 
+        PostLinks PL
+    JOIN 
+        Tags T ON PL.RelatedPostId = T.Id
+    JOIN 
+        RecursiveTagHierarchy R ON PL.PostId = R.TagId
+),
+RecentPostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        MAX(P.LastActivityDate) AS LastActivityDate,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'  -- Filter for recent posts
+    GROUP BY 
+        P.Id, P.Title, P.OwnerUserId
+),
+UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN P.OwnerUserId = U.Id THEN 1 ELSE 0 END), 0) AS UserPostCount,
+        COALESCE(SUM(B.Class = 1), 0) AS GoldBadges,
+        COALESCE(SUM(B.Class = 2), 0) AS SilverBadges,
+        COALESCE(SUM(B.Class = 3), 0) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+    ORDER BY 
+        U.Reputation DESC
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.Reputation,
+    UA.UserPostCount,
+    UA.GoldBadges,
+    UA.SilverBadges,
+    UA.BronzeBadges,
+    RTA.Path AS RelatedTags,
+    RP.PostId,
+    RP.Title,
+    RP.LastActivityDate,
+    RP.CommentCount,
+    RP.UpVoteCount
+FROM 
+    UserStatistics UA
+JOIN 
+    RecentPostActivity RP ON UA.UserPostCount > 0
+LEFT JOIN 
+    RecursiveTagHierarchy RTA ON RP.PostId = RTA.TagId
+WHERE 
+    UA.Reputation >= 100  -- Filter for users with a reputation of 100 or more
+ORDER BY 
+    RP.LastActivityDate DESC, UA.Reputation DESC;
+
+

@@ -1,0 +1,39 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 
+           0 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+), 
+TotalOrderValue AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+CustomerRanked AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT sh.s_suppkey) AS total_suppliers,
+    AVG(COALESCE(c.c_acctbal, 0)) AS avg_acct_balance,
+    MAX(tv.total_value) AS max_order_value,
+    STRING_AGG(DISTINCT c.c_name, ', ') AS customer_names
+FROM nation n
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN TotalOrderValue tv ON tv.o_custkey IN (SELECT c.c_custkey FROM CustomerRanked c WHERE c.rank <= 5 AND c.c_custkey IS NOT NULL)
+LEFT JOIN CustomerRanked c ON c.c_nationkey = n.n_nationkey
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name
+ORDER BY total_suppliers DESC, avg_acct_balance ASC;

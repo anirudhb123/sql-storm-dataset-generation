@@ -1,0 +1,91 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) OVER (PARTITION BY p.Id, v.VoteTypeId) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) 
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(*) > 5
+),
+ActionHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        COUNT(*) AS Occurrences
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) 
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+    HAVING 
+        COUNT(*) >= 2
+),
+PostAnalysis AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CommentCount,
+        pt.Name AS PostType,
+        COALESCE(at.Occurrences, 0) AS ActionCount,
+        COUNT(ptt.Tag) AS PopularTagCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostTypes pt ON rp.PostTypeId = pt.Id
+    LEFT JOIN 
+        ActionHistory at ON rp.PostId = at.PostId
+    LEFT JOIN 
+        PopularTags ptt ON ptt.Tag IN (SELECT UNNEST(string_to_array(SUBSTRING(rp.Tags FROM 2 FOR LENGTH(rp.Tags) - 2), '><')))
+    WHERE 
+        rp.RankScore <= 10
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score, rp.CommentCount, pt.Name, at.Occurrences
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.Score,
+    pa.CommentCount,
+    pa.PostType,
+    pa.ActionCount,
+    pa.PopularTagCount,
+    CASE 
+        WHEN pa.ActionCount > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS PostStatus
+FROM 
+    PostAnalysis pa
+WHERE 
+    pa.Score > 5 AND 
+    pa.CommentCount > 2
+ORDER BY 
+    pa.Score DESC, pa.CommentCount DESC
+LIMIT 50;

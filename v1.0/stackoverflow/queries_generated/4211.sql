@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(NULLIF(p.ViewCount, 0), 1) AS AdjustedViewCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostMetrics AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        us.UserId,
+        us.Reputation,
+        us.BadgeCount,
+        rp.Score AS PostScore,
+        rp.AdjustedViewCount,
+        us.UpVotes,
+        us.DownVotes
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    JOIN 
+        UserStats us ON u.Id = us.UserId
+)
+SELECT 
+    pm.PostId, 
+    pm.Title, 
+    pm.Reputation,
+    pm.BadgeCount,
+    pm.PostScore,
+    pm.AdjustedViewCount,
+    pm.UpVotes - pm.DownVotes AS NetVoteScore,
+    CASE 
+        WHEN pm.PostScore > 0 THEN 'Popular' 
+        WHEN pm.PostScore = 0 THEN 'Neutral' 
+        ELSE 'Unpopular' 
+    END AS Popularity
+FROM 
+    PostMetrics pm
+WHERE 
+    pm.BadgeCount > 0
+  AND 
+    pm.AdjustedViewCount > (SELECT AVG(AdjustedViewCount) FROM PostMetrics)
+ORDER BY 
+    pm.PostScore DESC, pm.AdjustedViewCount ASC
+LIMIT 10
+UNION
+SELECT 
+    NULL AS PostId,
+    'Aggregate Statistics' AS Title,
+    NULL AS Reputation,
+    NULL AS BadgeCount,
+    AVG(PostScore) AS PostScore,
+    AVG(AdjustedViewCount) AS AdjustedViewCount,
+    SUM(UpVotes) - SUM(DownVotes) AS NetVoteScore,
+    NULL AS Popularity
+FROM 
+    PostMetrics;

@@ -1,0 +1,62 @@
+
+WITH RECURSIVE age_calculation AS (
+    SELECT c_customer_sk,
+           (YEAR(CURRENT_DATE) - c_birth_year) AS age
+    FROM customer
+    WHERE c_birth_year IS NOT NULL
+), detailed_demo AS (
+    SELECT cd_gender,
+           cd_marital_status,
+           cd_education_status,
+           COUNT(DISTINCT c_customer_sk) AS total_customers
+    FROM customer_demographics cd
+    JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd_gender, cd_marital_status, cd_education_status
+), sale_summary AS (
+    SELECT COALESCE(ss_store_sk, cs_call_center_sk) AS source
+    FROM store_sales ss
+    FULL OUTER JOIN catalog_sales cs ON ss.ss_item_sk = cs.cs_item_sk
+    WHERE ss.ss_sold_date_sk IS NOT NULL OR cs.cs_sold_date_sk IS NOT NULL
+), customer_activity AS (
+    SELECT ws.web_site_id,
+           SUM(ws.ws_sales_price) AS total_sales,
+           AVG(age) AS avg_age,
+           ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_sales_price) DESC) AS rank
+    FROM web_sales ws
+    LEFT JOIN age_calculation ac ON ws.ws_bill_customer_sk = ac.c_customer_sk
+    GROUP BY ws.web_site_id
+), final_analysis AS (
+    SELECT dd.cd_gender,
+           dd.cd_marital_status,
+           dd.cd_education_status,
+           da.total_customers,
+           ca.total_sales,
+           ca.avg_age,
+           CASE 
+               WHEN ca.rank = 1 THEN 'Top Performer'
+               ELSE 'Regular'
+           END AS performance_category
+    FROM detailed_demo dd
+    JOIN customer_activity ca ON 1 = 1
+), unusual_case AS (
+    SELECT DISTINCT 
+           f.cd_gender,
+           f.cd_marital_status,
+           ROUND(AVG(COALESCE(f.total_sales, 0)), 2) AS avg_sales,
+           (SELECT COUNT(*) 
+            FROM store_returns sr 
+            WHERE sr_store_sk IN (SELECT source FROM sale_summary)
+               AND sr_return_quantity > 0) AS total_returns
+    FROM final_analysis f
+    LEFT JOIN inventory inv ON inv.inv_quantity_on_hand <= 0 AND f.total_customers IS NOT NULL
+    GROUP BY f.cd_gender, f.cd_marital_status
+)
+SELECT *,
+       CASE 
+           WHEN total_returns > 100 THEN 'High Return Rate'
+           ELSE 'Normal Return Rate'
+       END AS return_rate
+FROM unusual_case
+WHERE cd_marital_status IN ('M', 'S')
+AND total_returns IS NOT NULL
+ORDER BY avg_sales DESC, cd_gender;

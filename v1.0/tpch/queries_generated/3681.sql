@@ -1,0 +1,54 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-10-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name
+),
+Countries AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+TopCustomers AS (
+    SELECT 
+        ro.*,
+        c.region_name
+    FROM 
+        RankedOrders ro
+    JOIN 
+        Countries c ON ro.o_custkey = c.n_nationkey
+    WHERE 
+        ro.revenue_rank <= 5
+)
+SELECT 
+    tc.o_orderkey,
+    tc.o_orderdate,
+    tc.c_name AS customer_name,
+    tc.revenue,
+    COALESCE(tc.region_name, 'Unknown') AS region
+FROM 
+    TopCustomers tc
+OUTER JOIN 
+    supplier s ON tc.o_orderkey = s.s_suppkey
+WHERE 
+    s.s_acctbal IS NULL OR s.s_acctbal < 1000
+ORDER BY 
+    tc.revenue DESC
+LIMIT 50;

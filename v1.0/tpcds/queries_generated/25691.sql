@@ -1,0 +1,79 @@
+
+WITH AddressParts AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+Demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        REPLACE(cd_credit_rating, ' ', '-') AS credit_rating,
+        CONCAT(cd_dep_count, ' dependents') AS dependency_count
+    FROM 
+        customer_demographics
+),
+SalesInfo AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_sales_price,
+        DATE_FORMAT(STR_TO_DATE(CONVERT(ws_order_number, CHAR), 'L%Y%m%d%H%i%s'), '%Y-%m-%d') AS order_date
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL
+),
+AggregateSales AS (
+    SELECT 
+        item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        SalesInfo
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        i_item_id,
+        i_item_desc,
+        total_quantity,
+        total_sales,
+        ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        AggregateSales
+    JOIN 
+        item ON item.i_item_sk = AggregateSales.item_sk
+    WHERE 
+        total_quantity > 100
+)
+SELECT 
+    a.full_address,
+    d.cd_gender,
+    d.cd_marital_status,
+    d.cd_education_status,
+    t.i_item_id,
+    t.i_item_desc,
+    t.total_sales,
+    t.sales_rank
+FROM 
+    AddressParts a
+JOIN 
+    Demographics d ON d.cd_demo_sk = a.ca_address_sk % (SELECT COUNT(*) FROM customer_demographics) 
+JOIN 
+    TopItems t ON t.total_sales > 1000
+ORDER BY 
+    t.sales_rank;

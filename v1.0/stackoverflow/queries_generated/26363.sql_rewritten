@@ -1,0 +1,79 @@
+WITH TagDetails AS (
+    SELECT 
+        Tags.Id AS TagId, 
+        Tags.TagName, 
+        Tags.Count AS UsageCount, 
+        COALESCE(COUNT(DISTINCT Posts.Id), 0) AS AssociatedPostCount
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '><')::int[])
+    GROUP BY 
+        Tags.Id, 
+        Tags.TagName, 
+        Tags.Count
+),
+UserDetails AS (
+    SELECT 
+        Users.Id AS UserId, 
+        Users.DisplayName, 
+        SUM(CASE WHEN Badges.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Badges.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Badges.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.Id, 
+        Users.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        Posts.Id AS PostId, 
+        Posts.Title, 
+        Posts.CreationDate, 
+        Users.DisplayName AS OwnerName, 
+        COUNT(DISTINCT Comments.Id) AS CommentCount,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        COUNT(DISTINCT CASE WHEN PostHistory.PostHistoryTypeId IN (10, 11) THEN PostHistory.Id END) AS CloseReopenCount
+    FROM 
+        Posts
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    LEFT JOIN 
+        PostHistory ON Posts.Id = PostHistory.PostId
+    WHERE 
+        Posts.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        Posts.Id, 
+        Posts.Title, 
+        Posts.CreationDate, 
+        Users.DisplayName
+)
+SELECT 
+    TagDetails.TagName,
+    TagDetails.UsageCount,
+    TagDetails.AssociatedPostCount,
+    UserDetails.DisplayName AS TopUser,
+    (UserDetails.GoldBadges + UserDetails.SilverBadges + UserDetails.BronzeBadges) AS TotalBadges,
+    PostSummary.Title,
+    PostSummary.CommentCount,
+    PostSummary.UpVoteCount,
+    PostSummary.DownVoteCount,
+    PostSummary.CloseReopenCount
+FROM 
+    TagDetails
+JOIN 
+    UserDetails ON UserDetails.UserId IN (SELECT OwnerUserId FROM Posts WHERE OwnerUserId IS NOT NULL ORDER BY Reputation DESC LIMIT 5)
+JOIN 
+    PostSummary ON True 
+ORDER BY 
+    TagDetails.UsageCount DESC, 
+    TotalBadges DESC
+LIMIT 10;

@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) -- considering only UpMod and DownMod
+    WHERE 
+        p.PostTypeId = 1 -- considering only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, u.DisplayName
+), 
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000 -- considering users with good reputation
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.VoteCount,
+        mau.DisplayName AS MostActiveUser,
+        mau.TotalViews,
+        mau.TotalBadges
+    FROM 
+        RankedPosts rp
+    JOIN 
+        MostActiveUsers mau ON rp.OwnerPostRank = 1 -- joining to get the most active user's info
+)
+
+SELECT 
+    pd.PostId, 
+    pd.Title, 
+    LEFT(pd.Body, 200) AS PreviewBody, -- Get a preview of the body
+    pd.CreationDate,
+    pd.ViewCount, 
+    pd.CommentCount, 
+    pd.VoteCount,
+    pd.MostActiveUser,
+    pd.TotalViews,
+    pd.TotalBadges,
+    ARRAY(SELECT DISTINCT tag.TagName 
+          FROM unnest(string_to_array(pd.Body, ' ')) AS tag 
+          WHERE tag != '' AND tag IS NOT NULL) AS ExtractedTags -- Extracting tags from body
+FROM 
+    PostDetails pd
+WHERE 
+    pd.ViewCount > 100 -- filter for popular posts
+ORDER BY 
+    pd.ViewCount DESC
+LIMIT 10; -- Limit to top 10 posts

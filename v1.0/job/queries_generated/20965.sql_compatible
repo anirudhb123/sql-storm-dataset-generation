@@ -1,0 +1,77 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+movie_cast AS (
+    SELECT 
+        c.movie_id,
+        STRING_AGG(DISTINCT CONCAT(a.name, ' (', r.role, ')')) AS cast_list,
+        COUNT(DISTINCT c.person_id) AS number_of_actors
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+filtered_movies AS (
+    SELECT 
+        tt.title_id,
+        tt.title,
+        tt.production_year,
+        COALESCE(mc.cast_list, 'No Cast') AS cast_list,
+        COALESCE(cd.company_names, 'Independent') AS companies,
+        COALESCE(cd.company_types, 'N/A') AS types,
+        CASE 
+            WHEN tt.production_year IS NOT NULL THEN 'Yes' 
+            ELSE 'No' 
+        END AS produced,
+        tt.title_rank
+    FROM 
+        ranked_titles tt
+    LEFT JOIN 
+        movie_cast mc ON tt.title_id = mc.movie_id
+    LEFT JOIN 
+        company_details cd ON tt.title_id = cd.movie_id
+    WHERE 
+        tt.title IS NOT NULL AND
+        (tt.title LIKE '%Adventure%' OR tt.production_year > 2000)
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.cast_list,
+    f.companies,
+    f.types,
+    f.produced
+FROM 
+    filtered_movies f
+WHERE 
+    f.title_rank <= 5 OR f.number_of_actors > 10
+ORDER BY 
+    f.production_year DESC, f.title
+FETCH FIRST 10 ROWS ONLY;

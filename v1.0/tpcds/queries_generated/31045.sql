@@ -1,0 +1,64 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        inv.inv_date_sk,
+        inv.inv_item_sk,
+        SUM(ws.quantity) AS total_quantity,
+        SUM(ws.net_paid) AS total_sales
+    FROM inventory inv
+    JOIN web_sales ws ON inv.inv_item_sk = ws.ws_item_sk
+    WHERE inv.inv_date_sk < (
+        SELECT MAX(ws_sold_date_sk) 
+        FROM web_sales
+    )
+    GROUP BY inv.inv_date_sk, inv.inv_item_sk
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_net_paid) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_income_band_sk
+),
+ranked_customers AS (
+    SELECT 
+        cs.*,
+        RANK() OVER (PARTITION BY cs.cd_income_band_sk ORDER BY cs.total_spent DESC) AS spend_rank
+    FROM customer_summary cs
+)
+SELECT 
+    r.customer_id,
+    r.first_name,
+    r.last_name,
+    r.gender,
+    r.income_band_sk,
+    r.order_count,
+    r.total_spent,
+    COALESCE(i.quantity_on_hand, 0) AS quantity_on_hand,
+    r.spend_rank
+FROM ranked_customers r
+LEFT JOIN (
+    SELECT 
+        ws_item_sk,
+        SUM(inv_quantity_on_hand) AS quantity_on_hand
+    FROM inventory
+    GROUP BY ws_item_sk
+) i ON r.c_customer_sk = i.ws_item_sk
+WHERE r.spend_rank <= 10
+ORDER BY r.total_spent DESC
+LIMIT 100;

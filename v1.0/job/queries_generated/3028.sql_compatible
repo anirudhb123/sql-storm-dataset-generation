@@ -1,0 +1,69 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS rn
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+CompanyCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count
+    FROM 
+        movie_companies mc
+    INNER JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        cr.role,
+        COUNT(ci.id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type cr ON ci.role_id = cr.id
+    GROUP BY 
+        ci.movie_id, cr.role
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT ci.note, '; ') AS cast_notes
+    FROM 
+        movie_keyword mk
+    LEFT JOIN 
+        movie_info mi ON mk.movie_id = mi.movie_id
+    LEFT JOIN 
+        cast_info ci ON mi.movie_id = ci.movie_id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    COALESCE(cc.company_count, 0) AS number_of_companies,
+    COALESCE(cr.role_count, 0) AS cast_role_count,
+    COALESCE(mi.keywords, 'N/A') AS keywords,
+    COALESCE(mi.cast_notes, 'No notes available') AS cast_notes
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CompanyCounts cc ON rm.movie_id = cc.movie_id
+LEFT JOIN 
+    CastRoles cr ON rm.movie_id = cr.movie_id
+LEFT JOIN 
+    MovieInfo mi ON rm.movie_id = mi.movie_id
+WHERE 
+    rm.rn <= 10
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title;

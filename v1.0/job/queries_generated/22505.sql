@@ -1,0 +1,72 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(c.person_id) AS cast_count,
+        DENSE_RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.person_id) DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+
+top_movies AS (
+    SELECT 
+        title,
+        production_year,
+        cast_count
+    FROM 
+        ranked_movies
+    WHERE 
+        rank <= 5
+),
+
+movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        STRING_AGG(DISTINCT COALESCE(cn.name, 'Unknown'), ', ') AS companies,
+        STRING_AGG(DISTINCT CONCAT_WS(' ', n.name, COALESCE(n.gender, 'N/A')), ', ') AS cast_names
+    FROM 
+        top_movies t
+    LEFT JOIN 
+        movie_keyword mk ON t.title = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.title = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        complete_cast cc ON t.title = cc.movie_id
+    LEFT JOIN 
+        aka_name n ON cc.subject_id = n.person_id
+    GROUP BY 
+        t.title, t.production_year
+)
+
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(md.cast_names, 'No Cast Available') AS cast_names,
+    COUNT(DISTINCT md.companies) AS unique_companies,
+    CASE 
+        WHEN md.production_year < 2000 THEN 'Classic'
+        WHEN md.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era,
+    CASE 
+        WHEN md.title ILIKE '%part%' THEN 'Part of a Series'
+        ELSE 'Standalone Film'
+    END AS film_type
+FROM 
+    movie_details md
+GROUP BY 
+    md.title, md.production_year
+ORDER BY 
+    md.production_year DESC, md.title;

@@ -1,0 +1,134 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_movies
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastInfoDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(ka.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ka ON ci.person_id = ka.person_id
+    GROUP BY 
+        ci.movie_id
+),
+MoviesWithCast AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(ca.actor_count, 0) AS actor_count,
+        COALESCE(ca.cast_names, 'No Cast') AS cast_names,
+        (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = rm.movie_id) AS keyword_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CastInfoDetails ca ON rm.movie_id = ca.movie_id
+),
+UniqueGenres AS (
+    SELECT 
+        DISTINCT mt.kind_id,
+        kt.kind AS genre
+    FROM 
+        movie_info mt
+    JOIN 
+        kind_type kt ON mt.info_type_id = kt.id
+),
+MoviesByGenre AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        u.genre,
+        m.actor_count,
+        m.cast_names,
+        m.keyword_count
+    FROM 
+        MoviesWithCast m
+    LEFT JOIN 
+        UniqueGenres u ON m.movie_id = u.movie_id
+)
+
+SELECT 
+    mbg.genre,
+    COUNT(mbg.movie_id) AS movie_count,
+    AVG(mbg.actor_count) AS avg_actor_count,
+    STRING_AGG(DISTINCT mbg.cast_names, '; ') AS all_cast_names,
+    MAX(mbg.production_year) AS latest_year
+FROM 
+    MoviesByGenre mbg
+GROUP BY 
+    mbg.genre
+HAVING 
+    COUNT(mbg.movie_id) > 0
+ORDER BY 
+    movie_count DESC,
+    genre;
+
+WITH movie_stats AS (
+    SELECT 
+        title,
+        MAX(production_year) AS latest_year,
+        SUM(keyword_count) AS total_keywords,
+        SUM(actor_count) AS total_actors
+    FROM 
+        MoviesByGenre
+    GROUP BY 
+        title
+    HAVING 
+        MAX(production_year) > 2000
+),
+FilteredMovieStats AS (
+    SELECT 
+        title,
+        latest_year,
+        total_keywords,
+        total_actors,
+        CASE 
+            WHEN total_actors = 0 THEN 'No Actors'
+            ELSE 'Has Actors'
+        END AS actor_presence
+    FROM 
+        movie_stats
+)
+
+SELECT 
+    title,
+    latest_year,
+    total_keywords,
+    actor_presence 
+FROM 
+    FilteredMovieStats
+WHERE 
+    total_keywords IS NOT NULL 
+ORDER BY 
+    total_keywords DESC, 
+    latest_year ASC;
+
+-- Additionally, let's create a simple NULL logic demonstration
+SELECT 
+    t.title,
+    COALESCE(NULLIF(t.production_year, 0), 'Unknown Year') AS production_year,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM movie_keyword mk WHERE mk.movie_id = t.id) 
+        THEN 'Has Keywords'
+        ELSE 'No Keywords'
+    END AS keyword_status
+FROM 
+    aka_title t
+LEFT JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+WHERE 
+    cc.status_id IS NULL 
+ORDER BY 
+    t.title;

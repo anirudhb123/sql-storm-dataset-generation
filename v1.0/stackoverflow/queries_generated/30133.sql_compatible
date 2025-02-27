@@ -1,0 +1,76 @@
+
+WITH RecursivePostCounts AS (
+    
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    GROUP BY 
+        OwnerUserId
+
+    UNION ALL
+
+    SELECT 
+        pl.RelatedPostId,
+        COUNT(*) + rp.PostCount
+    FROM 
+        PostLinks pl
+    JOIN 
+        RecursivePostCounts rp ON pl.PostId = rp.OwnerUserId
+    GROUP BY 
+        pl.RelatedPostId, rp.PostCount
+),
+
+UserReputationRank AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+
+TaggedPosts AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS t(TagName) ON t.TagName IS NOT NULL
+    WHERE 
+        p.CreationDate >= DATE '2024-10-01' - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.Body
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ur.ReputationRank,
+    COALESCE(rp.PostCount, 0) AS TotalPosts,
+    tp.PostId,
+    tp.Title,
+    tp.Tags,
+    tp.Body,
+    CASE 
+        WHEN tp.Body IS NULL THEN 'No content available'
+        ELSE LEFT(tp.Body, 100) || '...' 
+    END AS DisplayBody
+FROM 
+    Users u
+LEFT JOIN 
+    UserReputationRank ur ON u.Id = ur.UserId
+LEFT JOIN 
+    RecursivePostCounts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    TaggedPosts tp ON tp.PostId IN (SELECT PostId FROM PostLinks WHERE LinkTypeId = 1)
+WHERE 
+    u.Reputation > 100 
+ORDER BY 
+    ur.ReputationRank, u.DisplayName;

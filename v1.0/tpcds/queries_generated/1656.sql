@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > 0
+),
+RecentSales AS (
+    SELECT 
+        r.ws_item_sk,
+        r.ws_sales_price,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        SUM(ss.net_paid) AS total_store_sales,
+        COUNT(DISTINCT ss.ticket_number) AS store_transaction_count
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        store_sales ss ON r.ws_item_sk = ss.ss_item_sk AND r.ws_sold_date_sk = ss.ss_sold_date_sk
+    LEFT JOIN 
+        customer c ON ss.ss_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        r.rank <= 10
+    GROUP BY 
+        r.ws_item_sk, r.ws_sales_price, cd.cd_gender, cd.cd_income_band_sk
+)
+SELECT 
+    rs.ws_item_sk,
+    COUNT(DISTINCT rs.ws_sales_price) AS sales_price_count,
+    AVG(total_store_sales) AS avg_total_store_sales,
+    CASE 
+        WHEN cd_income_band_sk IS NULL THEN 'Unknown'
+        ELSE CAST(cd_income_band_sk AS VARCHAR)
+    END AS income_band,
+    COALESCE(MAX(rs.store_transaction_count), 0) AS max_transaction_count
+FROM 
+    RecentSales rs
+GROUP BY 
+    rs.ws_item_sk, cd_income_band_sk
+HAVING 
+    COUNT(DISTINCT rs.ws_sales_price) > 3
+ORDER BY 
+    avg_total_store_sales DESC
+LIMIT 50;

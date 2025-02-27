@@ -1,0 +1,51 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023 
+        AND cd.cd_gender = 'F' 
+        AND cd.cd_marital_status = 'M'
+    GROUP BY 
+        ws.web_site_id
+),
+PromotionStats AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_ext_discount_amt) AS total_discount
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    WHERE 
+        p.p_start_date_sk < (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+        AND p.p_end_date_sk > (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    sd.web_site_id,
+    sd.total_quantity,
+    sd.total_net_paid,
+    sd.avg_net_profit,
+    ps.order_count,
+    ps.total_discount
+FROM 
+    SalesData sd
+LEFT JOIN 
+    PromotionStats ps ON sd.web_site_id = ps.p_promo_id  -- Assuming web_site_id aligns with promotion_id for demo
+ORDER BY 
+    sd.total_net_paid DESC
+LIMIT 10;

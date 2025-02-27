@@ -1,0 +1,57 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, 1 AS Level
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+
+    UNION ALL
+
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, oh.Level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name = oh.c_name LIMIT 1)
+    WHERE o.o_orderstatus = 'O' AND oh.Level < 5
+),
+AggregatedSales AS (
+    SELECT 
+        l.l_returnflag,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+        COUNT(DISTINCT o.o_orderkey) AS OrderCount
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY l.l_returnflag
+),
+SupplierMetrics AS (
+    SELECT
+        s.s_suppkey,
+        MAX(s.s_acctbal) AS MaxAcctBal,
+        COUNT(DISTINCT ps.ps_partkey) AS TotalPartsSupplied,
+        AVG(ps.ps_supplycost) AS AvgSupplyCost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+)
+SELECT 
+    rh.o_orderkey,
+    rh.o_orderdate,
+    rh.c_name,
+    COALESCE(asales.TotalRevenue, 0) AS Revenue,
+    COALESCE(asales.OrderCount, 0) AS NumberOfOrders,
+    sm.MaxAcctBal,
+    sm.TotalPartsSupplied,
+    sm.AvgSupplyCost
+FROM OrderHierarchy rh
+LEFT JOIN AggregatedSales asales ON asales.l_returnflag = CASE 
+        WHEN rh.o_totalprice > 1000 THEN 'R'
+        ELSE 'N'
+    END
+FULL OUTER JOIN SupplierMetrics sm ON sm.TotalPartsSupplied > (
+        SELECT COUNT(*) FROM part WHERE p_retailprice IS NOT NULL
+    )
+WHERE (rh.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31' OR rh.o_orderkey IS NULL)
+   AND (sm.MaxAcctBal IS NULL OR sm.MaxAcctBal > 5000)
+   AND NOT EXISTS (
+        SELECT 1 
+        FROM lineitem l
+        WHERE l.l_discount BETWEEN 0.05 AND 0.15 AND l.l_returnflag = 'A'
+    )
+ORDER BY rh.o_orderdate DESC NULLS LAST;

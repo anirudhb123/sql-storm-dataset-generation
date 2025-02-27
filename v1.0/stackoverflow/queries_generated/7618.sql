@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3)  -- Only counting upvotes and downvotes
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(rp.Score) AS TotalScore,
+        COUNT(rp.Id) AS PostCount
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id
+    ORDER BY 
+        TotalScore DESC, PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalScore,
+    tu.PostCount,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.VoteCount,
+    rp.TotalBounty
+FROM 
+    TopUsers tu
+JOIN 
+    RankedPosts rp ON tu.UserId = rp.OwnerUserId
+WHERE 
+    rp.UserPostRank <= 3  -- Getting top 3 posts per user
+ORDER BY 
+    tu.TotalScore DESC, tu.DisplayName ASC, rp.Score DESC;

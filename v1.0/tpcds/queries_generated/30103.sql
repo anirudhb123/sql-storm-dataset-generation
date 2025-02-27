@@ -1,0 +1,72 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        1 AS level
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+
+    UNION ALL
+
+    SELECT 
+        ws_bill_customer_sk,
+        sh.total_profit + COALESCE(SUM(ws.net_profit), 0) AS total_profit,
+        sh.level + 1
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        sales_hierarchy sh ON ws.ws_bill_cdemo_sk = sh.ws_bill_customer_sk
+    GROUP BY 
+        ws_bill_customer_sk, sh.total_profit, sh.level
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_last_name,
+        c.c_first_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        a.ca_city,
+        a.ca_state,
+        a.ca_country,
+        ROW_NUMBER() OVER (PARTITION BY c.c_current_addr_sk ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+),
+top_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.cd_gender,
+        cs.cd_marital_status,
+        si.total_profit
+    FROM 
+        customer_summary cs
+    JOIN 
+        sales_hierarchy si ON cs.c_customer_sk = si.ws_bill_customer_sk
+    WHERE 
+        cs.rank <= 10
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    ISNULL(tc.total_profit, 0) AS total_sales_profit,
+    COALESCE((SELECT COUNT(*) FROM store_sales ss WHERE ss.ss_customer_sk = tc.c_customer_sk), 0) AS store_sales_count,
+    COALESCE((SELECT COUNT(*) FROM web_sales ws WHERE ws.ws_bill_customer_sk = tc.c_customer_sk), 0) AS web_sales_count
+FROM 
+    top_customers tc
+ORDER BY 
+    total_sales_profit DESC
+FETCH FIRST 20 ROWS ONLY

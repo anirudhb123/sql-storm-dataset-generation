@@ -1,0 +1,67 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk, 
+        SUM(sr_return_quantity) AS total_returned_quantity, 
+        COUNT(*) AS return_count,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_quantity) DESC) AS rnk
+    FROM 
+        store_returns 
+    GROUP BY 
+        sr_item_sk
+), 
+HighReturnItems AS (
+    SELECT 
+        rr.sr_item_sk, 
+        rr.total_returned_quantity, 
+        rr.return_count
+    FROM 
+        RankedReturns rr
+    WHERE 
+        rr.rnk = 1 AND rr.total_returned_quantity > 0
+), 
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk, 
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_ext_sales_price) AS total_sales 
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_bill_customer_sk IS NOT NULL 
+    GROUP BY 
+        ws.ws_item_sk
+), 
+ReturnSales AS (
+    SELECT 
+        s.sr_item_sk, 
+        (SELECT COALESCE(SUM(ws_total_sales), 0) 
+         FROM SalesData 
+         WHERE ws_item_sk = s.sr_item_sk) AS total_sales,
+        s.total_returned_quantity,
+        (SUM(s.total_returned_quantity) / NULLIF((SELECT SUM(ws_total_sold) 
+                                                  FROM SalesData 
+                                                  WHERE ws_item_sk = s.sr_item_sk), 0)) * 100 AS return_rate
+    FROM 
+        HighReturnItems s
+    LEFT JOIN 
+        SalesData sd ON s.sr_item_sk = sd.ws_item_sk
+    GROUP BY 
+        s.sr_item_sk, s.total_returned_quantity
+)
+SELECT 
+    r.sr_item_sk, 
+    r.total_sales, 
+    r.total_returned_quantity, 
+    r.return_rate, 
+    CASE WHEN r.return_rate > 50 THEN 'High Return'
+         WHEN r.return_rate BETWEEN 20 AND 50 THEN 'Moderate Return'
+         ELSE 'Low Return' END AS return_category
+FROM 
+    ReturnSales r
+WHERE 
+    r.return_rate IS NOT NULL
+    AND r.return_rate > 0
+ORDER BY 
+    r.return_rate DESC, r.total_sales DESC
+LIMIT 10;

@@ -1,0 +1,50 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    (SELECT COUNT(DISTINCT u.Id) 
+     FROM Votes v 
+     JOIN Users u ON v.UserId = u.Id 
+     WHERE v.PostId = tp.PostId) AS UniqueVoterCount,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.Id IN (SELECT UNNEST(string_to_array(tp.Tags, '><')::int[]))) AS AssociatedTags,
+    (SELECT COUNT(b.Id) 
+     FROM Badges b 
+     WHERE b.UserId IN (SELECT DISTINCT OwnerUserId FROM Posts WHERE Id = tp.PostId)) AS OwnerBadgeCount
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

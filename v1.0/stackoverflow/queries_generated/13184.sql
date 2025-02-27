@@ -1,0 +1,64 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        SUM(COALESCE(C.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(V.VoteTypeId = 2, 0)) AS UpVotes,
+        SUM(COALESCE(V.VoteTypeId = 3, 0)) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.LastActivityDate, P.AnswerCount, P.CommentCount, P.FavoriteCount
+)
+SELECT 
+    U.DisplayName,
+    U.PostCount,
+    U.TotalScore,
+    U.TotalViews,
+    U.UpVotes AS UserUpVotes,
+    U.DownVotes AS UserDownVotes,
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    P.LastActivityDate,
+    P.AnswerCount,
+    P.CommentCount,
+    P.FavoriteCount,
+    P.UpVotes AS PostUpVotes,
+    P.DownVotes AS PostDownVotes
+FROM 
+    UserStats U
+JOIN 
+    PostStats P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.TotalScore DESC, U.PostCount DESC;

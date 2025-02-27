@@ -1,0 +1,59 @@
+WITH RECURSIVE Order_Hierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS order_level,
+        o.o_clerk
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT 
+        oh.o_orderkey,
+        oh.o_orderdate,
+        oh.o_totalprice,
+        oh.order_level + 1,
+        oh.o_clerk
+    FROM orders oh
+    JOIN Order_Hierarchy ohier ON oh.o_orderkey = ohier.o_orderkey
+    WHERE oh.o_orderstatus = 'F'  
+),
+
+Customer_Spending AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+
+Supplier_Stats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    cs.c_name AS customer_name,
+    cs.total_spent,
+    ss.s_name AS supplier_name,
+    ss.part_count,
+    ss.total_supply_cost,
+    AVG(cs.total_spent) OVER (PARTITION BY r.r_name) AS avg_spent,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY cs.total_spent DESC) AS rank_spending
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN Customer_Spending cs ON n.n_nationkey = cs.c_nationkey
+LEFT JOIN Supplier_Stats ss ON ss.part_count > 10 
+ORDER BY region_name, total_spent DESC;

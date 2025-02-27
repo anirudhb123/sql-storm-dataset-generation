@@ -1,0 +1,44 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_dep_count,
+        cd.cd_income_band_sk,
+        hd.hd_income_band_sk,
+        1 AS level
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON hd.hd_demo_sk = cd.cd_demo_sk
+    WHERE cd.cd_marital_status = 'M'
+
+    UNION ALL
+
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_dep_count,
+        cd.cd_income_band_sk,
+        hd.hd_income_band_sk,
+        ch.level + 1
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN CustomerHierarchy ch ON ch.cd_income_band_sk = cd.cd_income_band_sk
+)
+SELECT 
+    c.c_customer_sk,
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name,
+    COALESCE(SUM(ws.ws_sales_price), 0) AS total_sales,
+    COUNT(DISTINCT ws.ws_order_number) AS order_count,
+    MAX(cd.cd_purchase_estimate) AS max_purchase_estimate,
+    AVG(ch.level) AS avg_level
+FROM customer c
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN CustomerHierarchy ch ON c.c_customer_sk = ch.c_customer_sk
+JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+GROUP BY c.c_customer_sk
+HAVING total_sales > 1000 AND order_count > 1
+ORDER BY total_sales DESC
+LIMIT 50;

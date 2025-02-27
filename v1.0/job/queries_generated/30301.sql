@@ -1,0 +1,65 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+SELECT 
+    ak.name AS actor_name,
+    t.title AS movie_title,
+    COUNT(mk.keyword) AS keyword_count,
+    AVG(pi.info_length) AS avg_info_length,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+    MAX(CASE WHEN c.note IS NOT NULL THEN c.note ELSE 'No Note' END) AS notes,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY COUNT(mk.keyword) DESC) AS rank
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN (
+    SELECT 
+        person_id, 
+        movie_id, 
+        LENGTH(info) AS info_length
+    FROM 
+        person_info
+) pi ON pi.person_id = c.person_id AND pi.movie_id = c.movie_id
+LEFT JOIN 
+    MovieHierarchy mh ON mh.movie_id = t.id
+WHERE 
+    t.production_year >= 2000 
+    AND ak.name IS NOT NULL
+    AND (mc.note IS NULL OR mc.note <> 'Special Thanks')
+GROUP BY 
+    ak.id, t.id
+HAVING 
+    COUNT(mk.keyword) > 5
+ORDER BY 
+    rank, keyword_count DESC;

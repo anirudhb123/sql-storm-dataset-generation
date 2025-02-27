@@ -1,0 +1,72 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) THEN 'High'
+            ELSE 'Low'
+        END AS price_category
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 10 AND 20
+),
+OrdersWithLineitems AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+NationSupplierCounts AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    hp.p_name,
+    ns.n_name,
+    ls.rank,
+    hp.price_category,
+    o.total_price,
+    COALESCE(nsc.supplier_count, 0) AS supplier_count
+FROM 
+    HighValueParts hp
+JOIN 
+    RankedSuppliers ls ON hp.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ls.s_suppkey ORDER BY ps.ps_supplycost DESC LIMIT 1)
+JOIN 
+    nation ns ON ns.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = ls.s_suppkey)
+LEFT JOIN 
+    OrdersWithLineitems o ON o.total_price > 10000 
+LEFT JOIN 
+    NationSupplierCounts nsc ON ns.n_nationkey = nsc.n_nationkey
+WHERE 
+    hp.p_retailprice IS NOT NULL
+    AND ns.n_name IS NOT NULL
+ORDER BY 
+    hp.price_category DESC, 
+    o.total_price ASC, 
+    ls.rank;

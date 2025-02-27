@@ -1,0 +1,57 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 1 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        AcceptedAnswers,
+        UpVotes,
+        DownVotes,
+        RANK() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM 
+        UserActivity
+)
+SELECT 
+    ru.UserId,
+    ru.DisplayName,
+    ru.Reputation,
+    ru.PostCount,
+    ru.QuestionCount,
+    ru.AnswerCount,
+    ru.AcceptedAnswers,
+    ru.UpVotes,
+    ru.DownVotes,
+    r.UserRank
+FROM 
+    RankedUsers ru
+JOIN 
+    Badges b ON ru.UserId = b.UserId
+WHERE 
+    b.Class = 1 -- Gold badges
+ORDER BY 
+    ru.Reputation DESC, ru.PostCount DESC
+LIMIT 10;

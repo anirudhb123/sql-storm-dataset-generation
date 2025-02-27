@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS EditTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalUpvotes,
+    us.TotalDownvotes,
+    us.TotalBadges,
+    us.TotalComments,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate AS QuestionDate,
+    rp.Score AS QuestionScore,
+    rp.ViewCount AS QuestionViews,
+    rp.AnswerCount AS QuestionAnswers,
+    phi.EditCount AS NumberOfEdits,
+    phi.LastEditDate,
+    phi.EditTypes
+FROM 
+    UserStats us
+LEFT JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostHistoryInfo phi ON rp.PostId = phi.PostId
+WHERE 
+    us.TotalUpvotes > 10 
+    AND rp.PostRank = 1 
+ORDER BY 
+    us.TotalUpvotes DESC, 
+    rp.Score DESC;

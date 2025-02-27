@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.level + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+ActorRoles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        rt.role,
+        ROW_NUMBER() OVER(PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    JOIN 
+        role_type rt ON rt.id = c.role_id
+),
+MovieRatings AS (
+    SELECT 
+        m.id AS movie_id,
+        AVG(m.info::float) AS average_rating
+    FROM 
+        movie_info m
+    WHERE 
+        m.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        m.id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    COALESCE(mr.average_rating, 0) AS average_rating,
+    STRING_AGG(DISTINCT ar.actor_name, ', ') AS actors,
+    COUNT(DISTINCT ar.role) AS unique_roles
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    MovieRatings mr ON mh.movie_id = mr.movie_id
+LEFT JOIN 
+    ActorRoles ar ON mh.movie_id = ar.movie_id
+WHERE 
+    mh.level = 1
+GROUP BY 
+    mh.id, mh.title, mh.production_year
+HAVING 
+    AVG(mr.average_rating) > 8 OR COUNT(DISTINCT ar.role) > 5
+ORDER BY 
+    average_rating DESC,
+    mh.production_year DESC
+LIMIT 10;

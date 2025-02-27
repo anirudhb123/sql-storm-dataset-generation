@@ -1,0 +1,60 @@
+WITH Recursive_Aka AS (
+    SELECT 
+        ak.person_id, 
+        ak.name AS aka_name,
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY ak.name) AS rn
+    FROM aka_name ak
+    WHERE ak.name IS NOT NULL
+),
+Movie_Info AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mi.info, 'No Info') AS movie_info,
+        COALESCE(kt.keyword, 'None') AS movie_keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY mit.info_type_id) AS seq
+    FROM aka_title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword kt ON mk.keyword_id = kt.id
+    WHERE m.production_year IS NOT NULL 
+      AND m.production_year > 1900 
+      AND m.production_year <= EXTRACT(YEAR FROM cast('2024-10-01' as date))
+),
+Company_Role AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        rr.role AS role,
+        RANK() OVER (PARTITION BY mc.movie_id ORDER BY rr.role) AS role_rank
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN comp_cast_type cc ON mc.company_type_id = cc.id
+    JOIN cast_info ci ON mc.movie_id = ci.movie_id
+    JOIN role_type rr ON ci.role_id = rr.id
+    WHERE c.country_code IS NOT NULL
+)
+SELECT 
+    aka.person_id,
+    aka.aka_name,
+    mi.title AS movie_title,
+    mi.movie_info,
+    COALESCE(c.role, 'Unknown Role') AS company_role,
+    c.company_name,
+    COUNT(c.role) OVER (PARTITION BY aka.person_id) AS total_roles_played,
+    FIRST_VALUE(mi.movie_keyword) OVER (PARTITION BY mi.movie_id ORDER BY mi.seq) AS first_keyword,
+    CASE 
+        WHEN COUNT(c.role) OVER (PARTITION BY aka.person_id) = 0 THEN 'No roles found'
+        ELSE 'Roles found'
+    END AS role_status
+FROM Recursive_Aka aka
+LEFT JOIN Movie_Info mi ON EXISTS (
+        SELECT 1 
+        FROM cast_info ci 
+        WHERE ci.person_id = aka.person_id 
+          AND ci.movie_id = mi.movie_id
+)
+LEFT JOIN Company_Role c ON mi.movie_id = c.movie_id
+WHERE 
+    aka.rn <= 5
+ORDER BY aka.person_id, mi.title;

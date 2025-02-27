@@ -1,0 +1,76 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL
+),
+PartSupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total,
+        COUNT(l.l_orderkey) AS line_item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N' AND o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey
+),
+FilteredOrders AS (
+    SELECT 
+        od.o_orderkey,
+        od.order_total,
+        od.line_item_count,
+        CASE 
+            WHEN od.order_total IS NULL THEN 'No Total'
+            WHEN od.line_item_count > 5 THEN 'Large Order'
+            ELSE 'Regular Order'
+        END AS order_category
+    FROM 
+        OrderDetails od
+    WHERE 
+        od.order_total > (SELECT AVG(order_total) FROM OrderDetails)
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    pr.total_supply_cost,
+    rc.c_name AS top_customer,
+    fo.order_category
+FROM 
+    part p
+LEFT JOIN 
+    PartSupplierCost pr ON p.p_partkey = pr.ps_partkey
+RIGHT JOIN 
+    RankedCustomers rc ON rc.c_custkey = (
+        SELECT c.c_custkey 
+        FROM RankedCustomers 
+        WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'INDIA') 
+        ORDER BY c.c_acctbal DESC 
+        LIMIT 1
+    )
+FULL OUTER JOIN 
+    FilteredOrders fo ON fo.o_orderkey = (SELECT MAX(o.o_orderkey) FROM orders)
+WHERE 
+    p.p_retailprice BETWEEN 100.00 AND 500.00
+    AND (p.p_comment IS NULL OR LENGTH(p.p_comment) > 10)
+ORDER BY 
+    p.p_partkey, top_customer DESC NULLS LAST;

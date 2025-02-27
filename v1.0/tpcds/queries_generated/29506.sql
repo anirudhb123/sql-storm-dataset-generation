@@ -1,0 +1,76 @@
+
+WITH address_analysis AS (
+    SELECT 
+        ca_address_sk,
+        ca_city,
+        ca_state,
+        lower(ca_street_name) AS normalized_street_name,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        LENGTH(ca_street_name) AS street_name_length,
+        REGEXP_REPLACE(ca_zip, '[^0-9]', '') AS cleaned_zip
+    FROM 
+        customer_address
+), customer_analysis AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        aa.full_address AS customer_address,
+        aa.street_name_length
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        address_analysis aa ON c.c_current_addr_sk = aa.ca_address_sk
+), sales_analysis AS (
+    SELECT 
+        cs.cs_customer_sk,
+        SUM(cs.cs_sales_price) AS total_sales,
+        COUNT(DISTINCT cs.cs_order_number) AS order_count
+    FROM 
+        catalog_sales cs
+    GROUP BY 
+        cs.cs_customer_sk
+), final_analysis AS (
+    SELECT 
+        ca.c_customer_sk,
+        ca.c_first_name,
+        ca.c_last_name,
+        ca.c_email_address,
+        ca.cd_gender,
+        ca.cd_marital_status,
+        sa.total_sales,
+        sa.order_count,
+        ca.street_name_length,
+        CASE 
+            WHEN LENGTH(ca.c_email_address) > 30 THEN 'Long Email'
+            ELSE 'Short Email'
+        END AS email_length_category
+    FROM 
+        customer_analysis ca
+    LEFT JOIN 
+        sales_analysis sa ON ca.c_customer_sk = sa.cs_customer_sk
+)
+SELECT 
+    fa.c_customer_sk, 
+    fa.c_first_name, 
+    fa.c_last_name, 
+    fa.c_email_address, 
+    fa.cd_gender, 
+    fa.cd_marital_status, 
+    COALESCE(fa.total_sales, 0) AS total_sales,
+    COALESCE(fa.order_count, 0) AS order_count,
+    fa.street_name_length,
+    fa.email_length_category
+FROM 
+    final_analysis fa
+WHERE 
+    fa.total_sales > 1000
+ORDER BY 
+    fa.total_sales DESC;

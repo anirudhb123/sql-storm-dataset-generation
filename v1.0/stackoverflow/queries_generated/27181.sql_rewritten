@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        COALESCE(users.DisplayName, 'Community User') AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users users ON p.OwnerUserId = users.Id
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::int[])
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+UserBadges AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.DisplayName
+    ORDER BY 
+        BadgeCount DESC
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Score,
+        rp.AnswerCount,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        pt.Name AS PostType,
+        CASE 
+            WHEN rp.Rank = 1 THEN 'Latest Post by User'
+            ELSE 'Older Post' 
+        END AS PostRank,
+        COALESCE(pb.BadgeCount, 0) AS UserBadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserBadges pb ON rp.OwnerDisplayName = pb.DisplayName
+    LEFT JOIN 
+        PostTypes pt ON EXISTS (SELECT 1 FROM Posts p WHERE p.Id = rp.PostId AND p.PostTypeId = pt.Id)
+),
+FinalOutput AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.Body,
+        pd.CreationDate,
+        pd.Score,
+        pd.AnswerCount,
+        pd.ViewCount,
+        pd.OwnerDisplayName,
+        pd.PostType,
+        pd.PostRank,
+        t.TagName
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        PopularTags t ON (SELECT 1) IS NOT NULL 
+)
+SELECT 
+    *
+FROM 
+    FinalOutput
+WHERE 
+    PostType = 'Question' AND 
+    Score > 0 
+ORDER BY 
+    CreationDate DESC, Score DESC;

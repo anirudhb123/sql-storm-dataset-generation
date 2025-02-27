@@ -1,0 +1,49 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.kind_id,
+        r.role,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY COUNT(ci.person_id) DESC) AS rn
+    FROM 
+        aka_title a 
+    JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        a.production_year >= 2000
+    GROUP BY 
+        a.id, a.title, a.production_year, a.kind_id, r.role
+),
+
+PopularTitles AS (
+    SELECT 
+        title,
+        production_year,
+        kind_id,
+        cast_count
+    FROM 
+        RankedTitles
+    WHERE 
+        rn = 1
+)
+
+SELECT 
+    pt.title,
+    pt.production_year,
+    kt.keyword,
+    kt.id AS keyword_id,
+    COUNT(mk.movie_id) AS keyword_count
+FROM 
+    PopularTitles pt
+JOIN 
+    movie_keyword mk ON pt.id = mk.movie_id
+JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+GROUP BY 
+    pt.title, pt.production_year, pt.kind_id, kt.keyword, kt.id
+ORDER BY 
+    keyword_count DESC, pt.production_year DESC;

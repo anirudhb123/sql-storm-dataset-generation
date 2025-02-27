@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM CURRENT_DATE) - t.production_year ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'feature%')
+),
+ActorSalary AS (
+    SELECT 
+        ci.person_id,
+        SUM(CASE 
+            WHEN ci.note IS NULL THEN 0 
+            ELSE COALESCE(NULLIF(LENGTH(ci.note), 0), 1) * (1 + RANK() OVER (PARTITION BY ci.person_id ORDER BY LENGTH(ci.note) DESC))
+        END) AS total_salary
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        ci.person_id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ' ORDER BY k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    m.movie_id, 
+    m.title,
+    m.production_year,
+    a.total_salary,
+    mk.keywords,
+    COUNT(DISTINCT c.id) AS cast_count,
+    STRING_AGG(DISTINCT an.name, ', ') AS actor_names
+FROM 
+    RankedMovies m
+LEFT JOIN 
+    ActorSalary a ON a.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = m.movie_id)
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = m.movie_id
+LEFT JOIN 
+    aka_name an ON ci.person_id = an.person_id
+LEFT JOIN 
+    MovieKeywords mk ON mk.movie_id = m.movie_id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = m.movie_id
+WHERE 
+    a.total_salary IS NOT NULL OR mk.keywords IS NOT NULL
+GROUP BY 
+    m.movie_id, m.title, m.production_year, a.total_salary, mk.keywords
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 2 OR a.total_salary > 1000
+ORDER BY 
+    m.production_year ASC, 
+    a.total_salary DESC NULLS LAST;
+This SQL query is designed for performance benchmarking, featuring a variety of SQL constructs, including Common Table Expressions (CTEs), window functions, outer joins, and complex predicates. It combines multiple tables to yield a comprehensive dataset for movies along with their associated actors, salaries, and keywords. The `HAVING` clause filters results based on actor count and salary thresholds, while `ORDER BY` maintains clarity in the output.

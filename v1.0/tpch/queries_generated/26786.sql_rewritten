@@ -1,0 +1,31 @@
+SELECT 
+    p.p_name,
+    s.s_name,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(l.l_discount) AS average_discount,
+    STRING_AGG(DISTINCT CONCAT(n.n_name, ' (', n.n_comment, ')'), '; ') AS nations_supplied,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_name LIKE '%steel%'
+    AND l.l_shipdate >= '1997-01-01'
+    AND l.l_shipdate < '1998-01-01'
+GROUP BY 
+    p.p_name, s.s_name
+HAVING 
+    total_available_quantity > 1000
+ORDER BY 
+    total_available_quantity DESC, average_discount ASC;

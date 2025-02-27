@@ -1,0 +1,76 @@
+
+WITH RECURSIVE hourly_sales AS (
+    SELECT 
+        o.o_orderkey,
+        l.l_quantity * (1 - l.l_discount) AS net_sales,
+        DATE_TRUNC('hour', l.l_shipdate) AS sales_hour
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+),
+cumulative_sales AS (
+    SELECT 
+        sales_hour,
+        SUM(net_sales) OVER (ORDER BY sales_hour) AS total_net_sales,
+        COUNT(DISTINCT o_orderkey) OVER (PARTITION BY sales_hour) AS num_orders
+    FROM 
+        hourly_sales
+),
+region_summary AS (
+    SELECT 
+        r.r_name,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        COUNT(DISTINCT s.s_suppkey) AS num_suppliers
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name
+),
+final_report AS (
+    SELECT 
+        r.r_name,
+        cs.sales_hour,
+        cs.total_net_sales,
+        rs.total_supplycost,
+        CASE 
+            WHEN rs.num_suppliers = 0 THEN 0 
+            ELSE cs.total_net_sales / rs.num_suppliers 
+        END AS avg_sales_per_supplier,
+        CASE 
+            WHEN cs.num_orders = 0 THEN NULL 
+            ELSE cs.total_net_sales / cs.num_orders 
+        END AS avg_order_value
+    FROM 
+        cumulative_sales cs
+    LEFT JOIN 
+        region_summary rs ON cs.sales_hour = DATE '1998-10-01'
+    LEFT JOIN 
+        region r ON r.r_name = 'ASIA'
+)
+SELECT 
+    r_name,
+    sales_hour,
+    total_net_sales,
+    total_supplycost,
+    avg_sales_per_supplier,
+    avg_order_value
+FROM 
+    final_report
+WHERE 
+    total_net_sales > (
+        SELECT 
+            AVG(total_net_sales) * 1.1 
+        FROM 
+            final_report
+    )
+ORDER BY 
+    sales_hour DESC, r_name;

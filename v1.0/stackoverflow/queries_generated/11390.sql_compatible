@@ -1,0 +1,57 @@
+
+WITH UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(pt.PostId) AS TagPostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::text[])
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    GROUP BY 
+        t.Id, t.TagName
+    ORDER BY 
+        TagPostCount DESC
+    LIMIT 10
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    upc.PostCount,
+    ub.BadgeCount,
+    pt.TagName,
+    pt.TagPostCount
+FROM 
+    Users u
+LEFT JOIN 
+    UserPostCounts upc ON u.Id = upc.UserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+CROSS JOIN 
+    PopularTags pt
+WHERE 
+    u.Reputation > 1000 
+ORDER BY 
+    u.Reputation DESC, 
+    upc.PostCount DESC;

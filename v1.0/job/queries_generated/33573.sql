@@ -1,0 +1,81 @@
+WITH RECURSIVE CompanyHierarchy AS (
+    SELECT 
+        mc.movie_id,
+        mc.company_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        1 AS level
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    
+    UNION ALL
+    
+    SELECT 
+        mc.movie_id,
+        mc.company_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        ch.level + 1
+    FROM 
+        CompanyHierarchy ch
+    JOIN 
+        movie_companies mc ON ch.movie_id = mc.movie_id 
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        ch.company_id <> mc.company_id
+),
+MovieInformation AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mk.keyword,
+        info.info AS movie_info
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        info_type info ON mi.info_type_id = info.id
+),
+TopMovies AS (
+    SELECT 
+        mi.movie_id,
+        mi.title,
+        COUNT(ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ca.name, ', ') AS cast_names
+    FROM 
+        MovieInformation mi
+    LEFT JOIN 
+        cast_info ci ON mi.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name ca ON ci.person_id = ca.person_id
+    GROUP BY 
+        mi.movie_id, mi.title
+    HAVING 
+        COUNT(ci.person_id) > 10
+)
+
+SELECT 
+    th.movie_id,
+    th.title,
+    th.total_cast,
+    COALESCE(ch.company_name, 'Unknown') AS producing_company,
+    ch.level AS company_level
+FROM 
+    TopMovies th
+LEFT JOIN 
+    CompanyHierarchy ch ON th.movie_id = ch.movie_id
+WHERE 
+    ch.company_type = 'Production'
+ORDER BY 
+    th.total_cast DESC, th.title
+LIMIT 50;

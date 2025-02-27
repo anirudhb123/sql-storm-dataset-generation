@@ -1,0 +1,49 @@
+WITH RECURSIVE ProfitCTE AS (
+    SELECT ss_item_sk, 
+           SUM(ss_net_profit) AS total_profit,
+           1 AS level
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN 2451545 AND 2452051 
+    GROUP BY ss_item_sk
+    UNION ALL
+    SELECT ss.item_sk, 
+           SUM(ss.ss_net_profit) + p.total_profit,
+           level + 1 
+    FROM store_sales ss
+    JOIN ProfitCTE p ON ss.ss_item_sk = p.ss_item_sk
+    WHERE p.level < 5 
+),
+ItemProfit AS (
+    SELECT i.i_item_id,
+           i.i_item_desc,
+           COALESCE(p.total_profit, 0) AS total_profit,
+           ROW_NUMBER() OVER (PARTITION BY i.i_item_id ORDER BY COALESCE(p.total_profit, 0) DESC) AS profit_rank
+    FROM item i
+    LEFT JOIN ProfitCTE p ON i.i_item_sk = p.ss_item_sk
+),
+MaxProR AS (
+    SELECT i_item_id,
+           i_item_desc,
+           total_profit,
+           profit_rank
+    FROM ItemProfit
+    WHERE profit_rank <= 5
+),
+CustomerReturns AS (
+    SELECT cr.cr_item_sk,
+           SUM(cr.cr_return_quantity) AS total_returned_quantity,
+           SUM(cr.cr_return_amount) AS total_returned_value
+    FROM catalog_returns cr
+    GROUP BY cr.cr_item_sk
+)  
+SELECT i.i_item_id,
+       i.i_item_desc,
+       mp.total_profit,
+       COALESCE(cr.total_returned_quantity, 0) AS total_returned_quantity,
+       COALESCE(cr.total_returned_value, 0) AS total_returned_value,
+       (mp.total_profit - COALESCE(cr.total_returned_value, 0)) AS net_profit_after_returns
+FROM MaxProR mp
+LEFT JOIN CustomerReturns cr ON mp.i_item_id = cr.cr_item_sk
+WHERE net_profit_after_returns > 0
+ORDER BY net_profit_after_returns DESC
+LIMIT 10;

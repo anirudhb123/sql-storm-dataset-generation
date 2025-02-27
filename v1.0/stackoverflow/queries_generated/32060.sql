@@ -1,0 +1,57 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.CreationDate, 
+        P.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  -- Starting with Questions
+    UNION ALL
+    SELECT 
+        A.Id AS PostId,
+        A.Title,
+        A.CreationDate,
+        A.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts A
+    INNER JOIN 
+        RecursivePostCTE PQ ON A.ParentId = PQ.PostId
+    WHERE 
+        A.PostTypeId = 2 -- Only Answers
+)
+SELECT 
+    U.DisplayName AS UserDisplayName, 
+    COUNT(DISTINCT PQ.PostId) AS QuestionCount,
+    COUNT(DISTINCT A.PostId) AS AnswerCount,
+    SUM(P.ViewCount) AS TotalViews,
+    AVG(VoteCount) AS AvgVotes,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+FROM 
+    RecursivePostCTE PQ
+LEFT JOIN 
+    Posts A ON PQ.PostId = A.ParentId
+LEFT JOIN 
+    Users U ON PQ.OwnerUserId = U.Id
+LEFT JOIN 
+    Votes V ON V.PostId = PQ.PostId
+LEFT JOIN 
+    Tags T ON T.ExcerptPostId = PQ.PostId
+LEFT JOIN 
+    Comments C ON C.PostId = PQ.PostId
+LEFT JOIN 
+    PostHistory PH ON PH.PostId = PQ.PostId
+LEFT JOIN 
+    PostLinks PL ON PL.PostId = PQ.PostId
+WHERE 
+    PQ.CreationDate BETWEEN '2020-01-01' AND '2023-12-31'
+    AND (C.CreationDate IS NULL OR C.CreationDate >= PQ.CreationDate)
+GROUP BY 
+    U.DisplayName
+HAVING 
+    AVG(VoteCount) > 5
+ORDER BY 
+    TotalViews DESC;

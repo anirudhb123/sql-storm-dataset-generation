@@ -1,0 +1,88 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        DENSE_RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        COALESCE(ps.ps_availqty, 0) AS avail_qty,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey 
+        AND l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, ps.ps_availqty
+    HAVING 
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) > 10000
+),
+PotentialCustoms AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_nationkey,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'Zero Balance'
+            WHEN c.c_acctbal < 0 THEN 'Negative Balance'
+            ELSE 'Positive Balance'
+        END AS balance_status,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS customer_rank
+    FROM 
+        customer c
+),
+Profitability AS (
+    SELECT 
+        r.r_name,
+        SUM(hv.total_revenue) AS total_profit,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        HighValueParts hv
+    INNER JOIN 
+        nation n ON hv.p_partkey = n.n_nationkey
+    INNER JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name
+    HAVING 
+        SUM(hv.total_revenue) > (SELECT AVG(total_profit) FROM (SELECT SUM(total_revenue) AS total_profit FROM HighValueParts GROUP BY p_partkey) AS sub_avg)
+),
+FinalSelection AS (
+    SELECT 
+        ps.s_name,
+        ps.s_nationkey,
+        pc.balance_status,
+        p.p_name,
+        COALESCE(rp.total_profit, 0) AS region_profit
+    FROM 
+        RankedSuppliers ps
+    JOIN 
+        PotentialCustoms pc ON ps.s_nationkey = pc.c_nationkey
+    LEFT JOIN 
+        Profitability rp ON ps.s_nationkey = rp.r_name
+    WHERE 
+        ps.rank <= 3
+)
+SELECT 
+    fs.s_name, 
+    fs.balance_status, 
+    fs.region_profit,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS parts
+FROM 
+    FinalSelection fs
+LEFT JOIN 
+    part p ON fs.s_nationkey = p.p_partkey 
+GROUP BY 
+    fs.s_name, fs.balance_status, fs.region_profit
+ORDER BY 
+    fs.region_profit DESC, fs.s_name;

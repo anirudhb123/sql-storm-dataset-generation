@@ -1,0 +1,105 @@
+WITH Recursive ActorHierarchy AS (
+    SELECT 
+        c.movie_id,
+        a.person_id,
+        a.name AS actor_name,
+        c.nr_order,
+        1 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        c.person_id,
+        a.name AS actor_name,
+        c.nr_order,
+        ah.level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        complete_cast m ON c.movie_id = m.movie_id
+    JOIN 
+        ActorHierarchy ah ON m.subject_id = ah.person_id
+    WHERE 
+        ah.level < 5
+    AND 
+        a.name IS NOT NULL
+),
+
+MovieRatings AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT m.movie_id) AS num_movies,
+        AVG(CASE WHEN r.rating IS NULL THEN 0 ELSE r.rating END) AS avg_rating
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_info m ON t.id = m.movie_id
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            AVG(rating) AS rating 
+         FROM 
+            movie_info 
+         WHERE 
+            info_type_id = (SELECT id FROM info_type WHERE info = 'rating') 
+         GROUP BY movie_id) r ON m.movie_id = r.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+
+ActorsWithParticipation AS (
+    SELECT 
+        ah.actor_name,
+        ah.movie_id,
+        m.title AS movie_title,
+        m.avg_rating,
+        ah.level,
+        ROW_NUMBER() OVER (PARTITION BY ah.actor_name ORDER BY m.avg_rating DESC) as actor_rank
+    FROM 
+        ActorHierarchy ah
+    JOIN 
+        MovieRatings m ON ah.movie_id = m.title_id
+    WHERE 
+        ah.level < 3  -- Filter to just immediate cast members
+)
+
+SELECT 
+    a.actor_name,
+    a.movie_title,
+    a.avg_rating,
+    COALESCE(a.actor_rank, 'Not Rated') AS rating_position,
+    CASE 
+        WHEN a.avg_rating IS NOT NULL THEN 
+            CASE 
+                WHEN a.avg_rating > 8 THEN 'Masterpiece'
+                WHEN a.avg_rating > 5 THEN 'Average'
+                ELSE 'Below Average'
+            END
+        ELSE 'No Rating Available'
+    END AS rating_quality,
+    STRING_AGG(DISTINCT kw.keyword, ', ') FILTER (WHERE kw.keyword IS NOT NULL) AS associated_keywords
+FROM 
+    ActorsWithParticipation a
+LEFT JOIN 
+    movie_keyword mk ON a.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+WHERE 
+    a.actor_rank = 1  -- Only top-rated movies for each actor
+GROUP BY 
+    a.actor_name, a.movie_title, a.avg_rating, a.actor_rank
+ORDER BY 
+    a.avg_rating DESC, 
+    a.actor_name ASC
+LIMIT 100;

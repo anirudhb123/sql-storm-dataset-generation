@@ -1,0 +1,64 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned_quantity,
+        COUNT(DISTINCT cr_order_number) AS return_order_count
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+CustomerSales AS (
+    SELECT 
+        ws_ship_customer_sk,
+        SUM(ws_quantity) AS total_sales_quantity,
+        SUM(ws_net_paid_inc_ship_tax) AS total_sales_amount
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_ship_customer_sk
+),
+CombinedSalesAndReturns AS (
+    SELECT 
+        cs.ws_ship_customer_sk,
+        COALESCE(cr.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(cs.total_sales_quantity, 0) AS total_sales_quantity,
+        cs.total_sales_amount
+    FROM 
+        CustomerSales cs
+    LEFT JOIN 
+        CustomerReturns cr ON cs.ws_ship_customer_sk = cr.cr_returning_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        ca.ca_city,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        SUM(csr.total_returned_quantity) AS total_returns,
+        SUM(csr.total_sales_quantity) AS total_sales,
+        SUM(CASE WHEN csr.total_sales_quantity > 0 THEN 1 ELSE 0 END) AS customers_with_sales,
+        AVG(s.ss_net_profit) AS avg_net_profit
+    FROM 
+        CombinedSalesAndReturns csr
+    JOIN 
+        customer c ON csr.ws_ship_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        store_sales s ON c.c_customer_sk = s.ss_customer_sk
+    GROUP BY 
+        ca.ca_city
+)
+SELECT 
+    ca.ca_city AS city,
+    customer_count,
+    total_returns,
+    total_sales,
+    customers_with_sales,
+    avg_net_profit
+FROM 
+    FinalReport
+WHERE 
+    total_sales > 10000
+ORDER BY 
+    avg_net_profit DESC;

@@ -1,0 +1,89 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COALESCE(pl.RelatedPostId, 0) AS RelatedPostId,
+        1 AS Level
+    FROM 
+        Tags t
+    LEFT JOIN 
+        PostLinks pl ON t.ExcerptPostId = pl.PostId
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        pl.RelatedPostId,
+        r.Level + 1
+    FROM 
+        Tags t
+    INNER JOIN 
+        PostLinks pl ON t.ExcerptPostId = pl.PostId
+    INNER JOIN 
+        RecursiveTagHierarchy r ON pl.RelatedPostId = r.TagId
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.PostCount,
+    u.CommentCount,
+    u.UpVotes,
+    u.DownVotes,
+    COALESCE(MAX(re.CreationDate), 'No Edits') AS LastEditDate,
+    STRING_AGG(DISTINCT rt.TagName, ', ') AS RelatedTags,
+    AVG(ph.UpVoteCount) AS AverageUpVotes,
+    AVG(ph.DownVoteCount) AS AverageDownVotes
+FROM 
+    UserActivity u
+LEFT JOIN 
+    RecentEdits re ON u.UserId = re.UserDisplayName
+LEFT JOIN 
+    RecursiveTagHierarchy rt ON rt.RelatedPostId = u.UserId
+LEFT JOIN (
+    SELECT 
+        p.Id,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+) ph ON ph.Id = u.PostCount
+GROUP BY 
+    u.UserId
+ORDER BY 
+    u.PostCount DESC
+LIMIT 10;

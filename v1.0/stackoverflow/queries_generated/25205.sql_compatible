@@ -1,0 +1,50 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        COUNT(DISTINCT Comments.Id) AS CommentCount,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        AVG(Users.Reputation) AS AverageUserReputation
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><'))
+    LEFT JOIN 
+        Comments ON Comments.PostId = Posts.Id
+    LEFT JOIN 
+        Votes ON Votes.PostId = Posts.Id
+    LEFT JOIN 
+        Users ON Users.Id = COALESCE(Posts.OwnerUserId, Comments.UserId)
+    WHERE 
+        Posts.PostTypeId = 1 
+    GROUP BY 
+        Tags.TagName
+),
+RankedTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        CommentCount,
+        UpVoteCount,
+        DownVoteCount,
+        AverageUserReputation,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStatistics
+)
+SELECT 
+    TagName,
+    PostCount,
+    CommentCount,
+    UpVoteCount,
+    DownVoteCount,
+    AverageUserReputation,
+    TagRank
+FROM 
+    RankedTags
+WHERE 
+    TagRank <= 10 
+ORDER BY 
+    PostCount DESC;

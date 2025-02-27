@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        0 AS depth,
+        m.production_year
+    FROM 
+        aka_title m
+    WHERE 
+        m.season_nr IS NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        CONCAT(h.movie_title, ' (Episode ', m.episode_nr, ')') AS movie_title,
+        h.depth + 1,
+        m.production_year
+    FROM 
+        aka_title m
+    JOIN 
+        MovieHierarchy h ON m.episode_of_id = h.movie_id
+)
+
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    COALESCE(GROUP_CONCAT(DISTINCT DISTINCT ak.name), 'No Cast') AS cast_names,
+    AVG(pi.info_type_id) AS avg_info_type, 
+    MIN(CASE WHEN i.info IS NOT NULL THEN i.info ELSE 'N/A' END) AS first_info,
+    string_agg(DISTINCT kw.keyword, ', ') FILTER (WHERE kw.keyword IS NOT NULL) AS keywords,
+    NTILE(4) OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT ci.person_id)) as cast_size_tier
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id
+WHERE 
+    mh.production_year IS NOT NULL
+GROUP BY 
+    mh.movie_title, mh.production_year
+ORDER BY 
+    mh.production_year DESC, total_cast DESC;

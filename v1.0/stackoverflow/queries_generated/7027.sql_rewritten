@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount, 
+        p.Score, 
+        p.AnswerCount, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) as UserPostRank 
+    FROM 
+        Posts p 
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        COALESCE(SUM(b.Class = 1)::int, 0) AS GoldBadges, 
+        COALESCE(SUM(b.Class = 2)::int, 0) AS SilverBadges, 
+        COALESCE(SUM(b.Class = 3)::int, 0) AS BronzeBadges 
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id 
+), PostStatistics AS (
+    SELECT 
+        p.OwnerUserId, 
+        COUNT(p.Id) AS TotalPosts, 
+        SUM(v.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownvotes 
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.OwnerUserId 
+)
+SELECT 
+    ur.DisplayName, 
+    ur.Reputation, 
+    ur.GoldBadges, 
+    ur.SilverBadges, 
+    ur.BronzeBadges, 
+    ps.TotalPosts, 
+    ps.TotalUpvotes, 
+    ps.TotalDownvotes, 
+    rp.PostId, 
+    rp.Title, 
+    rp.CreationDate, 
+    rp.ViewCount, 
+    rp.Score, 
+    rp.AnswerCount 
+FROM 
+    UserReputation ur 
+JOIN 
+    PostStatistics ps ON ur.UserId = ps.OwnerUserId 
+JOIN 
+    RankedPosts rp ON ur.UserId = rp.OwnerUserId AND rp.UserPostRank = 1 
+ORDER BY 
+    ur.Reputation DESC, 
+    rp.Score DESC;

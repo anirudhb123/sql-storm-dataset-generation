@@ -1,0 +1,62 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (ORDER BY TotalSupplyCost DESC) AS rn
+    FROM 
+        SupplierStats
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS OrderCount,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+NationPreferences AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT c.c_custkey) AS CustomerCount,
+        SUM(COALESCE(o.o_totalprice, 0)) AS TotalOrders
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    ns.n_name,
+    COUNT(DISTINCT ns.CustomerCount) AS UniqueCustomers,
+    MAX(ns.TotalOrders) AS HighestOrderValue,
+    COALESCE(ts.s_name, 'No Suppliers') AS SupplierName,
+    COALESCE(ts.TotalSupplyCost, 0) AS SupplierCost
+FROM 
+    NationPreferences ns
+FULL OUTER JOIN 
+    TopSuppliers ts ON ns.CustomerCount = (SELECT MAX(CustomerCount) FROM NationPreferences)
+GROUP BY 
+    ns.n_name, ts.s_name, ts.TotalSupplyCost
+HAVING 
+    MAX(ns.TotalOrders) IS NOT NULL
+ORDER BY 
+    UniqueCustomers DESC, SupplierCost DESC;

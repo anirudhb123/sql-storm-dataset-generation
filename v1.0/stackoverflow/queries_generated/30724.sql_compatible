@@ -1,0 +1,81 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS Questions,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS Answers,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(V.BountyAmount) AS TotalBounties
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate
+), TagsWithCounts AS (
+    SELECT 
+        T.TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::text[])
+    GROUP BY 
+        T.TagName
+), RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS rn
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+), PopularUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        RANK() OVER (ORDER BY SUM(LENGTH(P.Body) - LENGTH(REPLACE(P.Body, ' ', ''))) DESC) AS PopularityRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.TotalPosts,
+    U.Questions,
+    U.Answers,
+    U.TotalComments,
+    U.TotalBounties,
+    T.TagName,
+    T.PostCount,
+    R.PostHistoryTypeId,
+    R.CreationDate AS RecentChangeDate,
+    COALESCE(PU.PopularityRank, 'N/A') AS UserPopularityRank
+FROM 
+    UserStats U
+LEFT JOIN 
+    TagsWithCounts T ON U.TotalPosts > 10 AND T.PostCount > 5
+LEFT JOIN 
+    RecentPostHistory R ON U.UserId = R.PostId
+LEFT JOIN 
+    PopularUsers PU ON U.UserId = PU.UserId
+WHERE 
+    U.Reputation > 1000
+ORDER BY 
+    U.Reputation DESC, 
+    U.TotalPosts DESC, 
+    T.PostCount DESC;

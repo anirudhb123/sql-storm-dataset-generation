@@ -1,0 +1,103 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 4 THEN 1 ELSE 0 END) AS TotalTagWikis,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViewsPerPost
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 0
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalTagWikis,
+        AvgViewsPerPost,
+        RANK() OVER (ORDER BY TotalQuestions DESC, TotalAnswers DESC) AS UserRank
+    FROM 
+        UserPostStats
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId AS EditorUserId,
+        ph.CreationDate AS EditDate,
+        ph.Comment AS EditReason,
+        p.Title,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    GROUP BY 
+        ph.PostId, ph.UserId, ph.CreationDate, ph.Comment, p.Title
+),
+FilteredPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS Author,
+        p.LastActivityDate,
+        phd.CloseReopenCount,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Answered'
+            ELSE 'Open'
+        END AS Status
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostHistoryDetails phd ON p.Id = phd.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+)
+SELECT 
+    fu.PostId,
+    fu.Title,
+    fu.Author,
+    fu.LastActivityDate,
+    fu.Status,
+    tu.TotalQuestions,
+    tu.TotalAnswers,
+    COALESCE(ph.CloseReopenCount, 0) AS CloseReopenCount,
+    CASE 
+        WHEN tu.TotalAnswers > 0 THEN ROUND((tu.TotalQuestions::decimal / tu.TotalAnswers), 2)
+        ELSE NULL
+    END AS QuestionsToAnswersRatio
+FROM 
+    FilteredPosts fu
+JOIN 
+    TopUsers tu ON fu.Author = tu.DisplayName
+ORDER BY 
+    tu.UserRank, fu.LastActivityDate DESC;
+
+-- Additional measures to benchmark performance
+SELECT 
+    'Execution Time' AS Metric,
+    EXTRACT(EPOCH FROM (NOW() - pg_postgres_start_time())) AS DurationInSeconds
+UNION ALL
+SELECT 
+    'Total RAM Usage' AS Metric,
+    current_setting('shared_buffers') AS Value
+UNION ALL
+SELECT 
+    'Number of Active Connections' AS Metric,
+    count(*)::text
+FROM 
+    pg_stat_activity
+WHERE 
+    state = 'active';

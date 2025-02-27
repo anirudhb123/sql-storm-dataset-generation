@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast_members,
+        ARRAY_AGG(DISTINCT ak.name) AS aka_names
+    FROM 
+        aka_title ak
+    JOIN 
+        title m ON ak.movie_id = m.id
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    GROUP BY 
+        m.id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MoviesWithDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.total_cast_members,
+        rnk.keywords,
+        rnk.aka_names
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords rnk ON rm.movie_id = rnk.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.total_cast_members,
+    COALESCE(md.keywords, 'No keywords') AS movie_keywords,
+    COALESCE(md.aka_names, ARRAY['No aka names']) AS aka_names
+FROM 
+    MoviesWithDetails md
+WHERE 
+    md.total_cast_members > 5
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

@@ -1,0 +1,71 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        U.CreationDate, 
+        U.UpVotes, 
+        U.DownVotes, 
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount,
+        SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END) AS NegativeScoreCount,
+        AVG(P.Score) AS AvgScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+TopTags AS (
+    SELECT 
+        T.TagName, 
+        COUNT(P.Id) AS TagCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 10
+),
+RecentActivity AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName,
+        CASE 
+            WHEN P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 'Active' 
+            ELSE 'Inactive' 
+        END AS ActivityStatus,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE NULL END) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    US.UserId, 
+    US.DisplayName, 
+    US.Reputation, 
+    T.TagName, 
+    T.TagCount, 
+    RA.ActivityStatus,
+    RA.CommentCount,
+    US.PositiveScoreCount,
+    US.NegativeScoreCount,
+    US.AvgScore
+FROM 
+    UserStats US
+JOIN 
+    TopTags T ON US.PostCount > 5
+JOIN 
+    RecentActivity RA ON US.UserId = RA.UserId
+ORDER BY 
+    US.Reputation DESC, 
+    T.TagCount DESC
+FETCH FIRST 100 ROWS ONLY;

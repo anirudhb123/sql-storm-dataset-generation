@@ -1,0 +1,64 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+HighSpenders AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_spent,
+        cs.orders_count,
+        CASE 
+            WHEN cs.total_spent > 1000 THEN 'High Value'
+            ELSE 'Regular'
+        END AS customer_type
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.sales_rank <= 10
+),
+SalesSummary AS (
+    SELECT 
+        c.c_city,
+        SUM(hs.total_spent) AS city_total_sales,
+        AVG(hs.total_spent) AS city_avg_sales,
+        COUNT(DISTINCT hs.c_customer_sk) AS unique_customers
+    FROM 
+        HighSpenders hs
+    INNER JOIN 
+        customer_address ca ON hs.c_customer_sk = ca.ca_address_sk
+    GROUP BY 
+        c.c_city
+)
+SELECT 
+    ss.c_city,
+    ss.city_total_sales,
+    ss.city_avg_sales,
+    ss.unique_customers,
+    CASE 
+        WHEN ss.city_total_sales IS NULL THEN 'No Sales Data'
+        ELSE CONCAT('$', CAST(ss.city_avg_sales AS DECIMAL(10,2)))
+    END AS avg_spent_display
+FROM 
+    SalesSummary ss
+FULL OUTER JOIN 
+    store s ON s.s_store_sk = (SELECT TOP 1 s2.s_store_sk FROM store s2 WHERE s2.s_city = ss.c_city)
+WHERE 
+    ss.city_total_sales IS NOT NULL OR s.s_store_id IS NOT NULL
+ORDER BY 
+    ss.city_total_sales DESC NULLS LAST;

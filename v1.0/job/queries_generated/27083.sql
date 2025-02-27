@@ -1,0 +1,47 @@
+WITH movie_stats AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        ARRAY_AGG(DISTINCT cn.name) AS company_names
+    FROM 
+        aka_title a
+    JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        a.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+highest_actor_count AS (
+    SELECT 
+        title,
+        production_year,
+        actor_count,
+        ROW_NUMBER() OVER (ORDER BY actor_count DESC) AS rn
+    FROM 
+        movie_stats
+)
+SELECT 
+    hs.title,
+    hs.production_year,
+    hs.actor_count,
+    hs.keywords,
+    hs.company_names
+FROM 
+    highest_actor_count hs
+WHERE 
+    hs.rn <= 10
+ORDER BY 
+    hs.actor_count DESC;

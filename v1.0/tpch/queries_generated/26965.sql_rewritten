@@ -1,0 +1,31 @@
+SELECT 
+    CONCAT(s.s_name, ' (', p.p_name, ')') AS supplier_part,
+    SUM(lp.l_quantity) AS total_quantity,
+    AVG(lp.l_discount) AS average_discount,
+    MAX(lp.l_extendedprice) AS max_extended_price,
+    MIN(lp.l_tax) AS min_tax,
+    SUBSTRING_INDEX(p.p_comment, ' ', 3) AS part_comment_excerpt,
+    r.r_name AS region_name
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem lp ON p.p_partkey = lp.l_partkey
+JOIN 
+    customer c ON lp.l_orderkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    lp.l_returnflag = 'N' AND 
+    YEAR(lp.l_shipdate) = 1997
+GROUP BY 
+    supplier_part, region_name
+HAVING 
+    total_quantity > 100
+ORDER BY 
+    total_quantity DESC, average_discount ASC;

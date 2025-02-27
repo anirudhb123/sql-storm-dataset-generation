@@ -1,0 +1,78 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.item_sk,
+        sr.ticket_number,
+        ROW_NUMBER() OVER (PARTITION BY sr.item_sk ORDER BY sr.returned_date_sk DESC) AS rn,
+        COALESCE(sr.return_amt, 0) + COALESCE(sr.return_tax, 0) AS total_return_amt
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.return_quantity > 0
+), CTE_Sales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.item_sk,
+        SUM(ws.quantity) AS total_sold,
+        SUM(ws.net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk BETWEEN 
+        (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 AND 
+        (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.bill_customer_sk, ws.item_sk
+), CTE_Income AS (
+    SELECT 
+        hd.hd_demo_sk,
+        COUNT(DISTINCT hd.hd_income_band_sk) AS income_bands
+    FROM 
+        household_demographics hd
+    GROUP BY 
+        hd.hd_demo_sk
+), CTE_WebReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        wr.item_sk,
+        SUM(CASE WHEN wr.returned_date_sk IS NOT NULL THEN 1 ELSE 0 END) AS total_web_returns
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk, wr.item_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    COUNT(DISTINCT sr.ticket_number) AS total_store_returns,
+    SUM(r.total_return_amt) AS store_return_total,
+    SUM(ws.total_sold) AS total_sales,
+    COALESCE(wr.total_web_returns, 0) AS total_web_returns,
+    COALESCE(i.income_bands, 0) AS different_income_bands,
+    CASE 
+        WHEN SUM(ws.total_profit) > 0 THEN 'Profitable' 
+        ELSE 'Not Profitable' 
+    END AS profitability_status
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    RankedReturns r ON r.item_sk IN (SELECT ws.item_sk FROM web_sales ws WHERE ws.bill_customer_sk = c.c_customer_sk)
+LEFT JOIN 
+    CTE_Sales ws ON ws.bill_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    CTE_WebReturns wr ON wr.returning_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    CTE_Income i ON i.hd_demo_sk = c.c_current_hdemo_sk
+WHERE 
+    ca.ca_city IS NOT NULL
+GROUP BY 
+    c.c_customer_id, c.c_first_name, c.c_last_name, ca.ca_city, ws.total_profit, wr.total_web_returns, i.income_bands
+HAVING 
+    COUNT(DISTINCT sr.ticket_number) > 0 OR SUM(ws.total_profit) > 0
+ORDER BY 
+    profitability_status DESC, total_sales DESC;

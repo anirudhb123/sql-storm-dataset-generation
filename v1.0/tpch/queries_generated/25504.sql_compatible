@@ -1,0 +1,31 @@
+
+SELECT 
+    s.s_name AS supplier_name,
+    p.p_name AS part_name,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(s.s_acctbal) AS average_account_balance,
+    COUNT(DISTINCT c.c_custkey) AS distinct_customers,
+    STRING_AGG(DISTINCT n.n_name, ', ') AS nations_supplied,
+    (SELECT COUNT(*) 
+     FROM partsupp ps_sub 
+     WHERE ps_sub.ps_partkey = p.p_partkey) AS suppliers_for_part
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    customer c ON c.c_nationkey = s.s_nationkey
+JOIN 
+    nation n ON n.n_nationkey = s.s_nationkey
+WHERE 
+    s.s_acctbal > 0
+    AND p.p_size BETWEEN 10 AND 50
+GROUP BY 
+    s.s_name, p.p_name, s.s_acctbal
+HAVING 
+    SUM(ps.ps_availqty) > 1000
+ORDER BY 
+    total_available_quantity DESC, supplier_name
+LIMIT 10;

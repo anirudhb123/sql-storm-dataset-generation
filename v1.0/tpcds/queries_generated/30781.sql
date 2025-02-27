@@ -1,0 +1,68 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ss_item_sk,
+        SUM(ss_quantity) AS total_quantity,
+        SUM(ss_net_paid) AS total_net_paid
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN 2451545 AND 2451545 + 30  -- For a specific date range
+    GROUP BY ss_item_sk
+    UNION ALL
+    SELECT 
+        ss.item_sk,
+        SUM(ss.quantity) + cte.total_quantity,
+        SUM(ss.net_paid) + cte.total_net_paid
+    FROM store_sales ss
+    JOIN SalesCTE cte ON ss_item_sk = cte.ss_item_sk
+    WHERE ss.sold_date_sk = cte.sold_date_sk + 1
+    GROUP BY ss.item_sk
+),
+CustomerReturns AS (
+    SELECT
+        sr_item_sk,
+        COUNT(sr_returned_date_sk) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+SalesWithReturns AS (
+    SELECT
+        cte.ss_item_sk,
+        cte.total_quantity,
+        cte.total_net_paid,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt
+    FROM SalesCTE cte
+    LEFT JOIN CustomerReturns cr ON cte.ss_item_sk = cr.sr_item_sk
+),
+FinalSalesStats AS (
+    SELECT
+        sw.ss_item_sk,
+        sw.total_quantity,
+        sw.total_net_paid,
+        sw.total_returns,
+        sw.total_return_amt,
+        (sw.total_net_paid - sw.total_return_amt) AS net_sales,
+        (sw.total_quantity - sw.total_returns) AS net_quantity,
+        DENSE_RANK() OVER (ORDER BY (sw.total_net_paid - sw.total_return_amt) DESC) AS sales_rank,
+        CASE
+            WHEN sw.total_net_paid IS NULL THEN 'No Sales'
+            WHEN sw.total_net_paid > 1000 THEN 'High Roller'
+            WHEN sw.total_net_paid BETWEEN 500 AND 1000 THEN 'Moderate Buyer'
+            ELSE 'Low Spender'
+        END AS customer_category
+    FROM SalesWithReturns sw
+)
+SELECT 
+    fi.ss_item_sk,
+    fi.total_quantity,
+    fi.total_net_paid,
+    fi.total_returns,
+    fi.total_return_amt,
+    fi.net_sales,
+    fi.net_quantity,
+    fi.sales_rank,
+    fi.customer_category
+FROM FinalSalesStats fi
+WHERE fi.net_sales > 0
+ORDER BY fi.sales_rank;

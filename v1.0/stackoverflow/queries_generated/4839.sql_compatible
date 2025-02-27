@@ -1,0 +1,81 @@
+
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(DISTINCT P.Id) AS PostsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 100
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+), 
+PostScore AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        DENSE_RANK() OVER (ORDER BY P.Score DESC) AS ScoreRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 DAY'
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS CloseCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    GROUP BY 
+        PH.PostId
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT C.Id) AS CommentsMade,
+        SUM(COALESCE(PH.CloseCount, 0)) AS TotalClosedPosts
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        ClosedPosts PH ON PH.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id)
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UVs.Upvotes,
+    UVs.Downvotes,
+    UVs.PostsCount,
+    PS.Title,
+    PS.Score,
+    PS.ScoreRank,
+    UA.CommentsMade,
+    UA.TotalClosedPosts
+FROM 
+    UserVoteSummary UVs
+JOIN 
+    UserActivity UA ON UVs.UserId = UA.UserId
+JOIN 
+    PostScore PS ON PS.ScoreRank <= 10
+LEFT JOIN 
+    Badges B ON UVs.UserId = B.UserId AND B.Class = 1
+WHERE 
+    B.Id IS NULL
+ORDER BY 
+    UVs.Reputation DESC, PS.Score DESC;

@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000 
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        ma.title,
+        ma.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title ma ON ml.movie_id = ma.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT cm.company_id) AS company_count,
+    AVG(DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), pi.info)) AS average_days_since_info
+FROM 
+    movie_hierarchy m
+JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'notable_work' LIMIT 1)
+WHERE 
+    ak.name IS NOT NULL
+    AND m.production_year IS NOT NULL
+    AND m.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    ak.name, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) >= 1
+ORDER BY 
+    m.production_year DESC, company_count DESC
+LIMIT 50;

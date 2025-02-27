@@ -1,0 +1,80 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ps.ps_supplycost,
+        (p.p_retailprice - ps.ps_supplycost) AS profit_margin
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice IS NOT NULL AND 
+        ps.ps_supplycost IS NOT NULL AND 
+        (p.p_retailprice - ps.ps_supplycost) > 100
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL 
+        AND c.c_acctbal > 0
+    GROUP BY 
+        c.c_custkey
+),
+CalculatedDiscounts AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_discount,
+        CASE 
+            WHEN l.l_discount > 0.2 THEN 'High Discount'
+            WHEN l.l_discount = 0 THEN 'No Discount'
+            ELSE 'Standard Discount'
+        END AS discount_category
+    FROM 
+        lineitem l
+)
+SELECT 
+    p.p_name,
+    COALESCE(cs.total_spent, 0) AS total_spent_by_customers,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    COUNT(DISTINCT l.l_orderkey) AS order_count,
+    MAX(COALESCE(rs.rn, 0)) AS ranking_supplier
+FROM 
+    HighValueParts p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    CustomerOrders cs ON cs.c_custkey IN (
+        SELECT 
+            DISTINCT o.o_custkey 
+        FROM 
+            orders o 
+        WHERE 
+            o.o_orderstatus = 'F'
+    )
+LEFT JOIN 
+    RankedSuppliers rs ON l.l_suppkey = rs.s_suppkey
+GROUP BY 
+    p.p_name, cs.total_spent
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+ORDER BY 
+    total_sales DESC NULLS LAST;

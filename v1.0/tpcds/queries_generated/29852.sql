@@ -1,0 +1,49 @@
+
+WITH concatenated_strings AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CONCAT(wa.w_city, ', ', wa.w_state, ' ', wa.w_zip) AS full_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer c
+    JOIN 
+        customer_address wa ON c.c_current_addr_sk = wa.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+gender_marital_combinations AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        COUNT(*) AS count
+    FROM 
+        concatenated_strings
+    GROUP BY 
+        cd_gender, 
+        cd_marital_status
+),
+longest_full_name AS (
+    SELECT 
+        full_name,
+        LENGTH(full_name) AS name_length
+    FROM 
+        concatenated_strings
+    ORDER BY 
+        name_length DESC
+    LIMIT 1
+)
+SELECT 
+    gmc.cd_gender,
+    gmc.cd_marital_status,
+    gmc.count,
+    lfn.full_name AS longest_full_name,
+    lfn.name_length AS longest_name_length
+FROM 
+    gender_marital_combinations gmc
+CROSS JOIN 
+    longest_full_name lfn
+ORDER BY 
+    gmc.count DESC;

@@ -1,0 +1,53 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY ph.PostId
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS UsageCount
+    FROM Tags t
+    JOIN Posts p ON t.Id = ANY(STRING_TO_ARRAY(p.Tags, ',')::int[])
+    GROUP BY t.TagName
+    ORDER BY UsageCount DESC
+    LIMIT 5
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalPosts,
+    us.TotalQuestions,
+    us.TotalAnswers,
+    us.TotalBounty,
+    phs.EditCount,
+    phs.LastEditDate,
+    ARRAY_AGG(pt.TagName ORDER BY usageCount DESC) AS PopularTags,
+    CASE 
+        WHEN us.TotalPosts > 100 THEN 'Active Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorStatus
+FROM UserStats us
+LEFT JOIN PostHistoryStats phs ON us.UserId = phs.PostId
+LEFT JOIN PopularTags pt ON pt.UsageCount > 1
+WHERE us.Rank <= 10
+GROUP BY us.UserId, us.DisplayName, us.TotalPosts, us.TotalQuestions, us.TotalAnswers, us.TotalBounty, phs.EditCount, phs.LastEditDate
+ORDER BY us.TotalBounty DESC;

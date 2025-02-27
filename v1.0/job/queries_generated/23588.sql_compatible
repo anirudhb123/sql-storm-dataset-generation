@@ -1,0 +1,91 @@
+
+WITH movie_cast AS (
+    SELECT 
+        c.movie_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY c.movie_id) AS num_actors,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY ak.name) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+actor_movies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT mc.actor_name, ', ') AS actors_list,
+        MAX(mc.num_actors) AS total_actors
+    FROM 
+        movie_cast mc
+    GROUP BY 
+        mc.movie_id
+),
+movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COALESCE(director_ak.name, 'Unknown') AS director_name,
+        COALESCE(cd.name, 'No Company') AS company_name,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cd ON mc.company_id = cd.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        (SELECT 
+            movie_id,
+            STRING_AGG(DISTINCT ak.name, ', ') AS name
+         FROM 
+            complete_cast cc
+         JOIN 
+            aka_name ak ON cc.subject_id = ak.person_id
+         WHERE 
+            cc.status_id = (SELECT id FROM info_type WHERE info = 'director')
+         GROUP BY 
+            movie_id) director_ak ON t.id = director_ak.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year, director_name, company_name
+),
+final_result AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.director_name,
+        md.company_name,
+        md.keyword_count,
+        ac.actors_list,
+        CASE 
+            WHEN md.production_year > 2000 THEN 'Modern'
+            WHEN md.production_year BETWEEN 1980 AND 2000 THEN 'Classic'
+            ELSE 'Oldie'
+        END AS era,
+        COALESCE(ac.total_actors, 0) AS total_actors_in_movie
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        actor_movies ac ON md.movie_id = ac.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    director_name,
+    company_name,
+    keyword_count,
+    actors_list,
+    era,
+    total_actors_in_movie
+FROM 
+    final_result
+WHERE 
+    (keyword_count > 3 OR director_name LIKE '%Spielberg%')
+    AND (production_year IS NOT NULL OR company_name IS NULL)
+ORDER BY 
+    total_actors_in_movie DESC, production_year DESC;

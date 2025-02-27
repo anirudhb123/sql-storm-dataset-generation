@@ -1,0 +1,67 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name
+    FROM 
+        CustomerOrders co
+    JOIN 
+        customer c ON co.c_custkey = c.c_custkey
+    WHERE 
+        co.total_spent > (
+            SELECT 
+                AVG(total_spent) 
+            FROM 
+                CustomerOrders
+        )
+)
+SELECT 
+    n.n_name AS nation_name, 
+    COUNT(DISTINCT hvc.c_custkey) AS high_value_customer_count, 
+    SUM(ps.ps_supplycost * l.l_quantity) AS total_supply_cost,
+    MAX(r.rnk) AS max_rank
+FROM 
+    HighValueCustomers hvc
+JOIN 
+    customer c ON hvc.c_custkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN 
+    RankedSuppliers r ON r.s_suppkey = l.l_suppkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey = l.l_partkey AND ps.ps_suppkey = r.s_suppkey
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT hvc.c_custkey) > 0
+ORDER BY 
+    high_value_customer_count DESC;

@@ -1,0 +1,72 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s_suppkey, 
+        s_name, 
+        ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_availqty) AS total_available, 
+        AVG(ps.ps_supplycost) AS avg_cost
+    FROM 
+        part p 
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01' 
+        AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    COALESCE(SUM(p.total_available), 0) AS total_parts_available,
+    RANK() OVER (ORDER BY COALESCE(SUM(FLI.revenue), 0) DESC) AS revenue_rank,
+    AVG(RS.supplier_rank) AS avg_supplier_rank_per_customer
+FROM 
+    CustomerOrders c 
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    FilteredLineItems FLI ON o.o_orderkey = FLI.l_orderkey
+LEFT JOIN 
+    PartSupplierDetails p ON p.p_partkey IN (
+        SELECT ps.ps_partkey FROM partsupp ps 
+        WHERE ps.ps_suppkey IN (SELECT RS.s_suppkey FROM RankedSuppliers RS WHERE RS.supplier_rank = 1)
+    )
+LEFT JOIN 
+    RankedSuppliers RS ON RS.s_suppkey = o.o_custkey
+GROUP BY 
+    c.c_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    order_count DESC;

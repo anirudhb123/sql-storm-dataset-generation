@@ -1,0 +1,45 @@
+WITH RecentMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast
+    FROM 
+        aka_title mt
+    JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    WHERE 
+        mt.production_year > 2000
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 5
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order,
+        COUNT(*) OVER (PARTITION BY ci.movie_id) AS total_roles
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    STRING_AGG(cd.actor_name, ', ') AS actors,
+    rm.total_cast,
+    (SELECT AVG(total_roles) FROM CastDetails WHERE movie_id = rm.movie_id) AS avg_roles_per_movie
+FROM 
+    RecentMovies rm
+LEFT JOIN 
+    CastDetails cd ON rm.movie_id = cd.movie_id
+GROUP BY 
+    rm.movie_id, rm.movie_title, rm.production_year
+ORDER BY 
+    rm.production_year DESC, rm.movie_title;

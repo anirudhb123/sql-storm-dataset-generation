@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_preferred_cust_flag = 'Y' 
+        AND ws.ws_sales_price > (SELECT AVG(ws2.ws_sales_price) FROM web_sales ws2 WHERE ws2.ws_web_site_sk = ws.ws_web_site_sk)
+),
+TotalReturns AS (
+    SELECT 
+        SUM(sr.sr_return_quantity) AS total_returned_qty,
+        SUM(sr.sr_return_amt) AS total_returned_amt
+    FROM 
+        store_returns sr
+    JOIN 
+        customer c ON sr.sr_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year IS NOT NULL 
+        AND c.c_birth_month IS NOT NULL
+),
+TopItems AS (
+    SELECT 
+        r.ws_order_number,
+        r.ws_item_sk,
+        r.ws_quantity,
+        r.ws_net_profit,
+        COALESCE(i.i_item_desc, 'Unknown') AS item_desc,
+        DENSE_RANK() OVER (ORDER BY r.ws_net_profit DESC) AS rank
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        item i ON r.ws_item_sk = i.i_item_sk
+    WHERE 
+        r.rn = 1
+    HAVING 
+        r.ws_quantity > (SELECT AVG(ws_quantity) FROM web_sales)
+)
+SELECT 
+    ti.item_desc,
+    ti.ws_order_number,
+    ti.ws_quantity,
+    ti.ws_net_profit,
+    tr.total_returned_qty,
+    tr.total_returned_amt,
+    CASE 
+        WHEN tr.total_returned_qty > 0 THEN 'High Return' 
+        ELSE 'Low Return' 
+    END AS return_indicator
+FROM 
+    TopItems ti
+CROSS JOIN 
+    TotalReturns tr
+WHERE 
+    ti.rank <= 10
+ORDER BY 
+    ti.ws_net_profit DESC,
+    ti.ws_quantity ASC;

@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_net_paid,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_paid DESC) AS SalesRank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 90 FROM date_dim) 
+        AND ws.ws_net_paid IS NOT NULL
+),
+CombinedReturns AS (
+    SELECT 
+        wr.returning_customer_sk AS customer_id,
+        SUM(wr.wr_return_quantity) AS total_returned,
+        SUM(wr.wr_return_amt) AS total_return_amt,
+        SUM(wr.wr_return_tax) AS total_return_tax
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other' 
+        END AS gender,
+        COALESCE(cd.cd_marital_status, 'Unknown') AS marital_status,
+        COALESCE(rd.total_returned, 0) AS total_returns,
+        COALESCE(rd.total_return_amt, 0) AS total_return_amt
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        CombinedReturns rd ON c.c_customer_sk = rd.customer_id
+)
+SELECT 
+    cs.full_name,
+    cs.gender,
+    cs.marital_status,
+    cs.total_returns,
+    cs.total_return_amt,
+    rs.ws_net_paid,
+    CASE 
+        WHEN cs.total_return_amt > 0 THEN 'Returns made'
+        ELSE 'No returns'
+    END AS return_status,
+    RANK() OVER (ORDER BY COALESCE(cs.total_return_amt, 0) DESC) AS return_rank
+FROM 
+    CustomerStats cs
+LEFT JOIN 
+    RankedSales rs ON cs.c_customer_sk = rs.ws_item_sk
+WHERE 
+    (cs.total_returns > 0 OR cs.marital_status = 'Single')
+    AND (rs.SalesRank IS NULL OR rs.SalesRank <= 5)
+    AND (cs.total_return_amt IS NOT NULL OR cs.gender = 'Female')
+ORDER BY 
+    return_rank, cs.full_name;

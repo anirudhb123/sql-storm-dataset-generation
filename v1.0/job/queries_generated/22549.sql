@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_within_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorCounts AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+MovieInfoAggregates AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT inf.info, '; ') AS info_details
+    FROM 
+        movie_info mi
+    JOIN 
+        movie_keyword mk ON mi.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_info_idx inf ON mi.movie_id = inf.movie_id
+    GROUP BY 
+        mi.movie_id
+),
+NullHandledData AS (
+    SELECT 
+        m.movie_id, 
+        COALESCE(mi.keywords, 'N/A') AS keywords,
+        COALESCE(ac.actor_count, 0) AS total_actors,
+        CASE 
+            WHEN m.production_year IS NULL THEN 'Unknown Year' 
+            ELSE CAST(m.production_year AS TEXT) 
+        END AS production_year,
+        ROW_NUMBER() OVER (ORDER BY m.title) AS overall_rank
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        ActorCounts ac ON m.movie_id = ac.movie_id
+    LEFT JOIN 
+        MovieInfoAggregates mi ON m.movie_id = mi.movie_id
+)
+SELECT 
+    nd.production_year,
+    COUNT(*) AS movie_count,
+    AVG(nd.total_actors) AS avg_actors_per_movie,
+    STRING_AGG(DISTINCT nd.keywords, '; ') AS combined_keywords
+FROM 
+    NullHandledData nd
+WHERE 
+    nd.production_year <> 'Unknown Year'
+GROUP BY 
+    nd.production_year
+HAVING 
+    COUNT(*) > 5
+ORDER BY 
+    nd.production_year DESC;

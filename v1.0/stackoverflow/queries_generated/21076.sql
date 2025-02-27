@@ -1,0 +1,67 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        string_agg(t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    INNER JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '>')::int[])
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+)
+, UserScore AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        MIN(u.CreationDate) AS AccountCreated
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.TotalBounties,
+    u.TotalPosts,
+    u.TotalBadges,
+    u.AccountCreated,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.Tags,
+    CASE 
+        WHEN rp.RowNum = 1 THEN 'Most Recent'
+        ELSE 'Earlier Post'
+    END AS PostStatus
+FROM 
+    UserScore u
+LEFT OUTER JOIN 
+    RecentPosts rp ON u.UserId = rp.OwnerUserId
+WHERE 
+    (u.Reputation > 100 OR u.TotalPosts > 5) 
+    AND (rp.Score IS NOT NULL OR rp.ViewCount > 0)
+ORDER BY 
+    u.Reputation DESC, rp.CreationDate DESC
+LIMIT 50;
+

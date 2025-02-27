@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank,
+        COUNT(*) AS sales_count
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        sales.total_sales,
+        sales.sales_count
+    FROM 
+        RankedSales sales
+    JOIN 
+        item ON sales.ws_item_sk = item.i_item_sk
+    WHERE 
+        sales.rank <= 5
+),
+CustomerStats AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(hd.hd_vehicle_count) AS avg_vehicle_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    GROUP BY 
+        cd_cd_gender, cd_marital_status
+)
+SELECT 
+    ti.i_item_id,
+    ti.i_item_desc,
+    ti.total_sales,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.customer_count,
+    cs.avg_vehicle_count,
+    COALESCE((SELECT COUNT(*) FROM web_returns wr WHERE wr.wr_item_sk = ti.ws_item_sk), 0) AS return_count
+FROM 
+    TopItems ti
+CROSS JOIN 
+    CustomerStats cs
+ORDER BY 
+    ti.total_sales DESC, 
+    cs.cd_gender, 
+    cs.customer_count DESC
+LIMIT 100;

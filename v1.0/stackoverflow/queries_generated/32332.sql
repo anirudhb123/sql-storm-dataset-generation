@@ -1,0 +1,73 @@
+WITH RECURSIVE UserPostCount AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS PostCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+
+TopUsers AS (
+    SELECT 
+        UserId,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM UserPostCount
+    WHERE PostCount > 0
+),
+
+MostActiveUsers AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        t.PostCount,
+        CASE 
+            WHEN t.PostCount > 10 THEN 'Highly Active'
+            WHEN t.PostCount BETWEEN 5 AND 10 THEN 'Moderately Active'
+            ELSE 'Less Active'
+        END AS ActivityLevel
+    FROM TopUsers t
+    JOIN Users u ON t.UserId = u.Id
+    WHERE t.Rank <= 10
+),
+
+ClosedPostCounts AS (
+    SELECT 
+        ph.UserId,
+        COUNT(p.Id) AS ClosedPostCount
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY ph.UserId
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(c.ClosedPostCount, 0) AS ClosedPostCount,
+        COALESCE(a.ActivityLevel, 'No Activity') AS ActivityLevel
+    FROM Users u
+    LEFT JOIN ClosedPostCounts c ON u.Id = c.UserId
+    LEFT JOIN MostActiveUsers a ON u.Id = a.UserId
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.ClosedPostCount,
+    u.ActivityLevel,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(v.BountyAmount) AS TotalBountyAmount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+FROM UserStats u
+LEFT JOIN Posts p ON u.UserId = p.OwnerUserId
+LEFT JOIN Votes v ON p.Id = v.PostId
+LEFT JOIN (SELECT 
+               Id, 
+               STRING_AGG(TagName, ', ') AS TagName
+           FROM Tags 
+           GROUP BY Id) t ON p.Tags LIKE '%' || t.Id || '%'
+WHERE u.ActivityLevel IS NOT NULL
+GROUP BY u.DisplayName, u.Reputation, u.ClosedPostCount, u.ActivityLevel
+ORDER BY u.ClosedPostCount DESC, u.Reputation DESC;

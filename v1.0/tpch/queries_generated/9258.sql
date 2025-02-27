@@ -1,0 +1,45 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name
+    FROM RankedSuppliers s
+    WHERE s.total_supply_cost = (
+        SELECT MAX(total_supply_cost) FROM RankedSuppliers
+    )
+),
+HighVolumeOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_quantity) AS total_quantity
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+    HAVING SUM(l.l_quantity) > 100
+),
+CustomersWithHighValueOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_order_value
+    FROM customer c
+    JOIN HighVolumeOrders hvo ON c.c_custkey = hvo.o_custkey
+    JOIN orders o ON hvo.o_orderkey = o.o_orderkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING total_order_value > 5000
+)
+SELECT
+    DISTINCT cs.c_custkey,
+    cs.c_name,
+    ts.s_suppkey,
+    ts.s_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+FROM CustomersWithHighValueOrders cs
+JOIN lineitem l ON l.l_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_custkey = cs.c_custkey
+)
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN TopSuppliers ts ON ps.ps_suppkey = ts.s_suppkey
+GROUP BY cs.c_custkey, cs.c_name, ts.s_suppkey, ts.s_name
+ORDER BY revenue DESC
+LIMIT 10;

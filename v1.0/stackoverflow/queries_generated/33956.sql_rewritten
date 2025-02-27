@@ -1,0 +1,77 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT
+        T.Id,
+        T.TagName,
+        T.Count,
+        PT.Count AS ParentCount
+    FROM
+        Tags T
+    LEFT JOIN
+        Posts P ON T.ExcerptPostId = P.Id
+    LEFT JOIN
+        (
+            SELECT
+                TagName,
+                COUNT(*) AS Count
+            FROM
+                Tags
+            GROUP BY
+                TagName
+        ) PT ON PT.TagName = SUBSTRING_INDEX(T.TagName, ' ', 1)  
+    WHERE
+        PT.Count IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        T.Id,
+        T.TagName,
+        T.Count,
+        PT.Count AS ParentCount
+    FROM
+        Tags T
+    INNER JOIN
+        RecursiveTagHierarchy R ON R.TagName = SUBSTRING_INDEX(T.TagName, ' ', 1)
+)
+, LatestVotes AS (
+    SELECT
+        V.PostId,
+        V.VoteTypeId,
+        ROW_NUMBER() OVER (PARTITION BY V.PostId ORDER BY V.CreationDate DESC) AS rn
+    FROM
+        Votes V
+)
+, PostsWithLatestVotes AS (
+    SELECT
+        P.*,
+        LV.VoteTypeId
+    FROM
+        Posts P
+    LEFT JOIN
+        LatestVotes LV ON P.Id = LV.PostId AND LV.rn = 1
+)
+SELECT
+    P.Id AS PostId,
+    P.Title,
+    P.Score,
+    P.ViewCount,
+    P.CommentCount,
+    COALESCE(PV.VoteTypeId, 0) AS LatestVoteType,
+    T.TagName,
+    T.Count AS TagCount,
+    U.DisplayName AS OwnerDisplayName,
+    U.Reputation AS OwnerReputation
+FROM
+    PostsWithLatestVotes P
+LEFT JOIN
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN
+    RecursiveTagHierarchy T ON T.Id = P.Id
+WHERE
+    P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    AND (P.AcceptedAnswerId IS NULL OR P.AcceptedAnswerId NOT IN (SELECT Id FROM Posts WHERE PostTypeId = 2)) 
+    AND (T.TagName IS NOT NULL OR P.Tags IS NOT NULL)
+ORDER BY
+    P.Score DESC,
+    P.ViewCount DESC
+LIMIT 100;

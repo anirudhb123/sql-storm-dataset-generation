@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS PostRank
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.PostTypeId = 1  
+),
+TagStatistics AS (
+    SELECT
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM
+        Posts
+    WHERE
+        PostTypeId = 1
+    GROUP BY
+        Tag
+),
+PopularTags AS (
+    SELECT
+        Tag,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM
+        TagStatistics
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+)
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.Tags,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    pt.Tag,
+    pt.PostCount AS TagPostCount,
+    ub.BadgeCount
+FROM
+    RankedPosts rp
+JOIN
+    PopularTags pt ON rp.Tags LIKE '%' || pt.Tag || '%'
+JOIN
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE
+    rp.PostRank <= 5  
+ORDER BY
+    pt.PostCount DESC,
+    rp.CreationDate DESC;

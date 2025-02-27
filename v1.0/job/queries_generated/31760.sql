@@ -1,0 +1,39 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, 
+           mt.title,
+           1 AS level
+    FROM aka_title mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT ml.linked_movie_id,
+           at.title,
+           mh.level + 1
+    FROM movie_link ml
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mh.level,
+    COALESCE(CAST(COUNT(DISTINCT mk.keyword_id) AS INT), 0) AS keyword_count,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    mt.production_year,
+    CASE 
+        WHEN mt.production_year IS NULL THEN 'Unknown Year'
+        ELSE TO_CHAR(mt.production_year, 'YYYY')
+    END AS formatted_year,
+    RANK() OVER (PARTITION BY mh.level ORDER BY COUNT(DISTINCT mk.keyword_id) DESC) AS keyword_rank
+FROM aka_name ak
+JOIN cast_info ci ON ak.person_id = ci.person_id
+JOIN aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN movie_keyword mk ON MT.id = mk.movie_id
+LEFT JOIN MovieHierarchy mh ON mt.id = mh.movie_id
+WHERE ak.name IS NOT NULL
+  AND mh.level <= 3
+GROUP BY ak.name, mt.id, mt.title, mh.level, mt.production_year
+ORDER BY mh.level, keyword_count DESC, ak.name;
+This query utilizes a recursive Common Table Expression (CTE) to build a hierarchy of movies linked to each other. It aggregates movie keywords for actors, handles NULL values, ranks the results, and formats output for additional clarity.

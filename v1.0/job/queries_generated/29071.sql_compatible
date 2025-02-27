@@ -1,0 +1,73 @@
+
+WITH movie_actors AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        m.title AS movie_title,
+        m.production_year,
+        m.kind_id
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title m ON c.movie_id = m.movie_id
+),
+actor_movies AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT movie_id) AS movie_count
+    FROM 
+        movie_actors
+    GROUP BY 
+        actor_name
+    HAVING 
+        COUNT(DISTINCT movie_id) > 1
+),
+movie_keyword_info AS (
+    SELECT 
+        k.keyword,
+        m.title AS movie_title,
+        m.production_year,
+        COUNT(mk.movie_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title m ON mk.movie_id = m.movie_id
+    GROUP BY 
+        k.keyword, m.title, m.production_year
+),
+top_keywords AS (
+    SELECT 
+        keyword,
+        AVG(keyword_count) AS average_movies
+    FROM 
+        movie_keyword_info
+    GROUP BY 
+        keyword
+    ORDER BY 
+        average_movies DESC
+    LIMIT 10
+)
+
+SELECT 
+    a.actor_name,
+    COUNT(DISTINCT ma.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT m.movie_title, ', ') AS movies,
+    ARRAY_AGG(DISTINCT k.keyword) AS keywords_related
+FROM 
+    movie_actors ma
+JOIN 
+    actor_movies a ON ma.actor_name = a.actor_name
+LEFT JOIN 
+    movie_keyword mk ON ma.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+GROUP BY 
+    a.actor_name
+HAVING 
+    COUNT(DISTINCT ma.movie_id) > 2
+ORDER BY 
+    total_movies DESC;

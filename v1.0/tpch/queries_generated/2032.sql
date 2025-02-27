@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2023-01-01'
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_nationkey
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        AVG(l.l_quantity) AS avg_quantity,
+        STRING_AGG(l.l_shipmode, ', ') AS ship_modes
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01' OR l.l_returnflag = 'R'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(loss.net_revenue) AS total_revenue,
+    AVG(sup.total_supply_cost) AS avg_supply_cost,
+    STRING_AGG(DISTINCT l_stats.ship_modes, '; ') AS all_ship_modes
+FROM 
+    nation n
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderkey = c.c_custkey
+LEFT JOIN 
+    LineItemStats loss ON loss.l_orderkey = ro.o_orderkey
+LEFT JOIN 
+    SupplierSummary sup ON sup.s_nationkey = n.n_nationkey
+WHERE 
+    n.n_name IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5 OR AVG(sup.total_supply_cost) > 1000
+ORDER BY 
+    total_revenue DESC NULLS LAST;

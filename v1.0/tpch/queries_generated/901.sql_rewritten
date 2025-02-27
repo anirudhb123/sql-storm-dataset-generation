@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+), FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_orderdate
+), CustomerOrderCounts AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT fo.o_orderkey) AS order_count,
+        SUM(fo.total_order_value) AS sum_order_value
+    FROM customer c
+    LEFT JOIN FilteredOrders fo ON c.c_custkey = fo.o_orderkey
+    GROUP BY c.c_custkey, c.c_name
+), MaxOrderValue AS (
+    SELECT 
+        c.c_custkey,
+        MAX(co.sum_order_value) AS max_order_value
+    FROM CustomerOrderCounts co
+    JOIN customer c ON co.c_custkey = c.c_custkey
+    GROUP BY c.c_custkey 
+)
+
+SELECT 
+    r.r_name,
+    s.s_name,
+    COUNT(DISTINCT co.c_custkey) AS customer_count,
+    AVG(co.order_count) AS avg_orders_per_customer,
+    MAX(mov.max_order_value) AS highest_order_value,
+    CASE 
+        WHEN r.r_name IS NULL THEN 'No Region'
+        ELSE r.r_name
+    END AS region_desc
+FROM RankedSuppliers s
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN CustomerOrderCounts co ON s.s_nationkey = co.c_name  
+JOIN MaxOrderValue mov ON co.c_custkey = mov.c_custkey
+WHERE s.total_cost > (
+    SELECT AVG(total_cost)
+    FROM RankedSuppliers
+)
+GROUP BY r.r_name, s.s_name
+ORDER BY region_desc, customer_count DESC;

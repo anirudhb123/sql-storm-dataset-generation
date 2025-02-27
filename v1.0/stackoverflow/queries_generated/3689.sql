@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS total_posts
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(b.Class) AS HighestBadge
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT DISTINCT
+    up.OwnerDisplayName,
+    up.Title,
+    up.Score,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    ub.BadgeCount,
+    ub.HighestBadge,
+    CASE 
+        WHEN up.total_posts > 10 THEN 'Frequent Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorType
+FROM 
+    RankedPosts up
+LEFT JOIN 
+    PostVoteSummary pvs ON up.Id = pvs.PostId
+LEFT JOIN 
+    Users u ON up.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    up.rn = 1
+    AND (ub.BadgeCount IS NULL OR ub.BadgeCount > 0)
+ORDER BY 
+    up.Score DESC, 
+    up.CreationDate DESC
+LIMIT 100;

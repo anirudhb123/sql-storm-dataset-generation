@@ -1,0 +1,65 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+),
+CustomerBalance AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal > 1000
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 50000
+),
+DistinctSizeParts AS (
+    SELECT DISTINCT 
+        p.p_partkey,
+        p.p_size
+    FROM part p
+    WHERE p.p_size IS NOT NULL
+),
+FinalAggregatedData AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        AVG(cb.total_spent) AS avg_customer_spent,
+        MAX(hv.total_supply_cost) AS max_supply_cost,
+        SUM(DISTINCT COALESCE(dp.p_size, 0)) AS total_sizes
+    FROM region r 
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN CustomerBalance cb ON n.n_nationkey = cb.c_custkey
+    LEFT JOIN HighValueSuppliers hv ON hv.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM DistinctSizeParts p))
+    LEFT JOIN DistinctSizeParts dp ON dp.p_partkey = ANY(SELECT l.l_partkey FROM lineitem l WHERE l.l_quantity IS NOT NULL)
+    GROUP BY r.r_name
+)
+SELECT 
+    f.r_name,
+    f.nation_count,
+    f.avg_customer_spent,
+    f.max_supply_cost,
+    CASE 
+        WHEN f.total_sizes IS NULL THEN 'No Sizes'
+        WHEN f.total_sizes = 0 THEN 'Zero Size Parts'
+        ELSE 'Sizes Exist'
+    END AS size_status
+FROM FinalAggregatedData f
+ORDER BY f.nation_count DESC, f.avg_customer_spent DESC
+LIMIT 10;

@@ -1,0 +1,60 @@
+WITH MovieDetails AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS aka_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER(PARTITION BY t.id ORDER BY a.name) AS name_order
+    FROM 
+        aka_title a 
+    JOIN 
+        title t ON a.movie_id = t.id
+    WHERE 
+        t.production_year >= 2000
+),
+TopActors AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movies_count
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        MovieDetails md ON ci.movie_id = md.aka_id
+    GROUP BY 
+        ci.person_id
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) >= 5
+),
+ActorNames AS (
+    SELECT 
+        p.id AS person_id, 
+        p.name AS full_name,
+        COALESCE(NULLIF(a.name, ''), 'Unknown') AS aka_name,
+        p.gender
+    FROM 
+        name p
+    LEFT JOIN 
+        aka_name a ON p.id = a.person_id AND a.name IS NOT NULL
+)
+SELECT 
+    an.full_name,
+    an.aka_name,
+    an.gender,
+    md.movie_title,
+    md.production_year,
+    tc.movies_count,
+    CASE 
+        WHEN an.gender IS NULL THEN 'Gender Not Specified'
+        ELSE an.gender
+    END AS gender_status
+FROM 
+    TopActors tc
+JOIN 
+    ActorNames an ON tc.person_id = an.person_id
+LEFT JOIN 
+    MovieDetails md ON an.person_id = md.aka_id
+WHERE 
+    md.production_year IS NOT NULL
+ORDER BY 
+    tc.movies_count DESC, 
+    md.production_year DESC;

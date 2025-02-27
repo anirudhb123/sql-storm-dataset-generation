@@ -1,0 +1,64 @@
+WITH PostTagCounts AS (
+    SELECT 
+        Tags.TagName, 
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Posts 
+    JOIN 
+        Tags ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    WHERE 
+        Posts.CreationDate >= '2022-01-01'
+    GROUP BY 
+        Tags.TagName
+),
+PopularUsers AS (
+    SELECT 
+        Users.DisplayName,
+        SUM(Votes.VoteTypeId IN (2, 1)) AS UpVotesReceived,
+        COUNT(DISTINCT Posts.Id) AS PostsCreated
+    FROM 
+        Users
+    JOIN 
+        Posts ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN 
+        Votes ON Votes.PostId = Posts.Id
+    WHERE 
+        Users.CreationDate >= '2020-01-01'
+    GROUP BY 
+        Users.DisplayName
+    HAVING 
+        COUNT(DISTINCT Posts.Id) > 5
+),
+PostActivity AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        COUNT(Comments.Id) AS CommentCount,
+        COUNT(Votes.Id) AS VoteCount
+    FROM 
+        Posts
+    LEFT JOIN 
+        Comments ON Comments.PostId = Posts.Id
+    LEFT JOIN 
+        Votes ON Votes.PostId = Posts.Id
+    GROUP BY 
+        Posts.Id, Posts.Title
+)
+SELECT 
+    pt.TagName,
+    pt.PostCount,
+    pu.DisplayName AS TopUser,
+    pu.UpVotesReceived,
+    pu.PostsCreated,
+    pa.Title AS ActivePost,
+    pa.CommentCount,
+    pa.VoteCount
+FROM 
+    PostTagCounts pt
+JOIN 
+    PopularUsers pu ON pu.UpVotesReceived = (SELECT MAX(UpVotesReceived) FROM PopularUsers)
+JOIN 
+    PostActivity pa ON pa.VoteCount = (SELECT MAX(VoteCount) FROM PostActivity)
+ORDER BY 
+    pt.PostCount DESC
+LIMIT 10;

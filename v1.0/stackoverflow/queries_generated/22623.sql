@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS LatestPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Considering only Questions
+        AND p.CreationDate >= (NOW() - INTERVAL '1 year')
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownVotes,
+        COUNT(b.Id) AS TotalBadges,
+        AVG(EXTRACT(EPOCH FROM (NOW() - u.CreationDate))) / 3600 AS AccountAgeInHours
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+UserPostSummary AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        AVG(p.Score) AS AverageScore,
+        MAX(p.CreationDate) AS MostRecentPostDate,
+        MIN(p.CreationDate) AS EarliestPostDate
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    us.UserId,
+    COALESCE(us.TotalUpVotes, 0) AS UpVotes,
+    COALESCE(us.TotalDownVotes, 0) AS DownVotes,
+    us.TotalBadges,
+    ups.TotalPosts,
+    ups.AverageScore,
+    ups.MostRecentPostDate,
+    ups.EarliestPostDate,
+    rp.RankByScore,
+    Closed.CloseCount,
+    Closed.LastCloseDate,
+    CASE 
+        WHEN ups.TotalPosts > 10 THEN 'Active User'
+        WHEN ups.TotalPosts BETWEEN 1 AND 10 THEN 'Moderately Active User'
+        ELSE 'Inactive User'
+    END AS UserActivityLevel
+FROM 
+    UserStats us
+JOIN 
+    UserPostSummary ups ON us.UserId = ups.OwnerUserId
+LEFT JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId AND rp.LatestPostRank = 1
+LEFT JOIN 
+    ClosedPostDetails Closed ON Closed.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = us.UserId)
+WHERE 
+    us.TotalBadges > 0
+ORDER BY 
+    UserActivityLevel, us.TotalUpVotes DESC NULLS LAST;

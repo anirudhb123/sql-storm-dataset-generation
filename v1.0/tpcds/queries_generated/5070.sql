@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        cs.cs_sales_price,
+        cs.cs_net_paid,
+        wr.wr_return_amt,
+        wr.wr_net_loss,
+        ws.ws_item_sk,
+        cs.cs_item_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS ws_rank,
+        ROW_NUMBER() OVER (PARTITION BY cs.cs_item_sk ORDER BY cs.cs_sold_date_sk DESC) AS cs_rank
+    FROM 
+        web_sales ws
+    FULL OUTER JOIN 
+        catalog_sales cs ON ws.ws_item_sk = cs.cs_item_sk
+    LEFT JOIN 
+        web_returns wr ON ws.ws_item_sk = wr.wr_item_sk
+    WHERE 
+        (ws.ws_sold_date_sk BETWEEN 20220101 AND 20221231 OR cs.cs_sold_date_sk BETWEEN 20220101 AND 20221231)
+),
+AggregatedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_web_sales,
+        SUM(ws.ws_net_paid) AS total_web_net_paid,
+        SUM(cs.cs_sales_price) AS total_catalog_sales,
+        SUM(cs.cs_net_paid) AS total_catalog_net_paid,
+        SUM(wr.wr_return_amt) AS total_return_amt,
+        SUM(wr.wr_net_loss) AS total_return_loss
+    FROM 
+        RankedSales
+    WHERE 
+        ws_rank = 1 OR cs_rank = 1
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    AS.total_web_sales,
+    AS.total_web_net_paid,
+    AS.total_catalog_sales,
+    AS.total_catalog_net_paid,
+    AS.total_return_amt,
+    AS.total_return_loss
+FROM 
+    AggregatedSales AS
+JOIN 
+    item i ON i.i_item_sk = AS.ws_item_sk
+ORDER BY 
+    AS.total_web_net_paid DESC, AS.total_catalog_net_paid DESC;

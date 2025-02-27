@@ -1,0 +1,64 @@
+
+WITH YearlyCounts AS (
+    SELECT
+        A.production_year,
+        COUNT(DISTINCT C.person_id) AS actor_count,
+        COUNT(DISTINCT T.id) AS title_count
+    FROM
+        aka_title A
+    LEFT JOIN
+        cast_info C ON A.id = C.movie_id
+    LEFT JOIN
+        title T ON A.id = T.id
+    WHERE
+        A.production_year IS NOT NULL
+    GROUP BY
+        A.production_year
+),
+ActorDetails AS (
+    SELECT 
+        A.person_id,
+        A.name,
+        COUNT(DISTINCT CA.movie_id) AS movies_count,
+        SUM(CASE WHEN CA.nr_order IS NULL THEN 1 ELSE 0 END) AS unrated_roles_count
+    FROM 
+        aka_name A
+    LEFT JOIN 
+        cast_info CA ON A.person_id = CA.person_id
+    GROUP BY 
+        A.person_id, A.name
+),
+BizarreAssociations AS (
+    SELECT 
+        T.id AS title_id,
+        C.name AS company_name,
+        ROW_NUMBER() OVER (PARTITION BY T.id ORDER BY RANDOM()) AS random_company_order
+    FROM 
+        aka_title T
+    LEFT JOIN 
+        movie_companies MC ON T.id = MC.movie_id
+    LEFT JOIN 
+        company_name C ON MC.company_id = C.id
+    WHERE 
+        C.country_code IS NULL OR C.country_code = ''
+)
+SELECT 
+    Y.production_year,
+    Y.actor_count,
+    Y.title_count,
+    AD.name AS actor_name,
+    AD.movies_count,
+    AD.unrated_roles_count,
+    BA.company_name AS bizarre_company
+FROM 
+    YearlyCounts Y
+JOIN 
+    ActorDetails AD ON Y.actor_count > (SELECT AVG(actor_count) FROM YearlyCounts)
+LEFT JOIN 
+    BizarreAssociations BA ON BA.random_company_order IS NOT NULL
+WHERE 
+    (Y.actor_count > 0 AND Y.title_count > 0) 
+    OR (AD.unrated_roles_count IS NOT NULL OR AD.movies_count = 0) 
+ORDER BY 
+    Y.production_year DESC, 
+    AD.movies_count DESC;

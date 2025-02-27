@@ -1,0 +1,72 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+), CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+), TopCustomers AS (
+    SELECT 
+        cs.ws_bill_customer_sk,
+        cs.total_sales,
+        cd.c_customer_id,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.ca_city AS city,
+        COUNT(DISTINCT ws_order_number) AS unique_orders,
+        COUNT(CASE WHEN cd.cd_gender = 'M' THEN 1 END) AS male_orders,
+        COUNT(CASE WHEN cd.cd_gender = 'F' THEN 1 END) AS female_orders,
+        COALESCE(SUM(ws_ext_discount_amt), 0) AS total_discounts
+    FROM 
+        RecursiveSales cs
+    JOIN 
+        web_sales ws ON cs.ws_bill_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        CustomerDetails cd ON cd.c_customer_id = 
+           (SELECT c.c_customer_id FROM customer c WHERE c.c_customer_sk = ws.ws_bill_customer_sk LIMIT 1)
+    WHERE 
+        cs.sales_rank <= 10
+    GROUP BY 
+        cs.ws_bill_customer_sk, cd.c_customer_id, cd.c_first_name, cd.c_last_name, cd.ca_city
+)
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name, 
+    tc.c_last_name,
+    tc.city,
+    tc.total_sales,
+    tc.unique_orders,
+    (tc.total_sales / NULLIF(tc.unique_orders, 0)) AS avg_order_value,
+    CASE 
+        WHEN tc.total_discounts > 0 THEN 'Discounted Sales'
+        ELSE 'No Discounts'
+    END AS discount_status
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    store_sales ss ON ss.ss_customer_sk = tc.ws_bill_customer_sk
+WHERE 
+    tc.city LIKE '%York%'
+    OR EXISTS (SELECT 1 FROM store s WHERE s.s_city = tc.city AND s.s_state = 'NY')
+ORDER BY 
+    tc.total_sales DESC
+LIMIT 15;

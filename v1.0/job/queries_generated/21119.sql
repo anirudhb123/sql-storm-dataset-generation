@@ -1,0 +1,70 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        0 AS level,
+        CAST(mt.title AS VARCHAR(255)) AS path,
+        NULL AS parent_movie_id
+    FROM aka_title mt
+    WHERE mt.kind_id IN (1, 2)  -- Assuming 1 and 2 are for movies and series
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        level + 1,
+        CONCAT(parent.path, ' -> ', m.title) AS path,
+        parent.movie_id AS parent_movie_id
+    FROM aka_title m
+    JOIN MovieHierarchy parent ON m.episode_of_id = parent.movie_id
+    WHERE m.episode_of_id IS NOT NULL
+),
+ActorCount AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM cast_info ci
+    GROUP BY ci.movie_id
+),
+KeywordCount AS (
+    SELECT
+        mk.movie_id,
+        COUNT(k.id) AS keyword_count
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        mh.level,
+        mh.path,
+        COALESCE(ac.actor_count, 0) AS actor_count,
+        COALESCE(kc.keyword_count, 0) AS keyword_count
+    FROM MovieHierarchy mh
+    LEFT JOIN ActorCount ac ON mh.movie_id = ac.movie_id
+    LEFT JOIN KeywordCount kc ON mh.movie_id = kc.movie_id
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.level,
+    md.path,
+    md.actor_count,
+    md.keyword_count,
+    CASE 
+        WHEN md.actor_count > 5 THEN 'Popular'
+        WHEN md.actor_count BETWEEN 3 AND 5 THEN 'Moderate'
+        ELSE 'Less Popular'
+    END AS popularity,
+    CASE 
+        WHEN md.keyword_count IS NULL THEN 'No Keywords'
+        ELSE 'Has Keywords'
+    END AS keyword_status,
+    SUM(md.actor_count) OVER (PARTITION BY md.production_year ORDER BY md.level DESC) AS cumulative_actors_by_year
+FROM MovieDetails md
+WHERE (md.production_year > 2000 AND md.level = 0)  -- Only top-level movies after 2000
+ORDER BY md.production_year, md.movie_title;

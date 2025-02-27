@@ -1,0 +1,49 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT s_store_sk, s_store_name, s_manager, 1 AS level
+    FROM store
+    WHERE s_state = 'CA'
+    UNION ALL
+    SELECT s.s_store_sk, s.s_store_name, sh.s_manager, sh.level + 1
+    FROM store s
+    JOIN SalesHierarchy sh ON s.s_manager = sh.s_store_name
+),
+TopReturns AS (
+    SELECT sr.store_sk, COUNT(sr.return_quantity) AS total_returns
+    FROM store_returns sr
+    WHERE sr.return_quantity > 0
+    GROUP BY sr.store_sk
+),
+CustomerIncomeBands AS (
+    SELECT h.hd_income_band_sk, AVG(h.hd_vehicle_count) AS avg_vehicle_count
+    FROM household_demographics h
+    JOIN customer c ON h.hd_demo_sk = c.c_current_hdemo_sk
+    GROUP BY h.hd_income_band_sk
+),
+DateRange AS (
+    SELECT d.d_date_id, d.d_year
+    FROM date_dim d
+    WHERE d.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+),
+Sales AS (
+    SELECT ws.ws_item_sk, SUM(ws.ws_sales_price) AS total_sales
+    FROM web_sales ws
+    JOIN DateRange dr ON ws.ws_sold_date_sk = dr.d_date_id
+    GROUP BY ws.ws_item_sk
+)
+SELECT 
+    sh.s_store_name,
+    sh.s_manager,
+    t.total_returns,
+    ci.avg_vehicle_count,
+    s.total_sales,
+    CASE 
+        WHEN ci.avg_vehicle_count IS NULL THEN 'No Data'
+        ELSE CAST(ci.avg_vehicle_count AS VARCHAR)
+    END AS vehicle_info
+FROM SalesHierarchy sh
+LEFT JOIN TopReturns t ON sh.s_store_sk = t.store_sk
+LEFT JOIN CustomerIncomeBands ci ON sh.s_store_sk = ci.hd_income_band_sk
+LEFT JOIN Sales s ON sh.s_store_sk = s.ws_item_sk
+WHERE sh.level = 1
+ORDER BY s.total_sales DESC, t.total_returns DESC;

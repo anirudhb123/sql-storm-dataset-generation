@@ -1,0 +1,42 @@
+WITH RECURSIVE date_range AS (
+    SELECT MIN(o_orderdate) AS order_date
+    FROM orders
+    UNION ALL
+    SELECT DATEADD(DAY, 1, order_date)
+    FROM date_range
+    WHERE order_date < (SELECT MAX(o_orderdate) FROM orders)
+),
+supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+order_summary AS (
+    SELECT 
+        o.o_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY o.o_custkey
+)
+SELECT 
+    d.order_date,
+    COALESCE(SUM(os.total_spent), 0) AS total_order_spent,
+    COALESCE(SUM(ss.total_cost), 0) AS total_supplier_cost,
+    CASE 
+        WHEN COALESCE(SUM(os.total_spent), 0) > COALESCE(SUM(ss.total_cost), 0) THEN 'High Demand'
+        ELSE 'Low Demand'
+    END AS demand_category
+FROM date_range d
+LEFT JOIN order_summary os ON d.order_date = CAST(os.o_custkey AS DATE)
+LEFT JOIN supplier_summary ss ON d.order_date = CAST(ss.supplied_parts AS DATE)
+GROUP BY d.order_date
+ORDER BY d.order_date
+OPTION (MAXRECURSION 0);

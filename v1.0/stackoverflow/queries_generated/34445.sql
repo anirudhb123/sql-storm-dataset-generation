@@ -1,0 +1,100 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title AS PostTitle, 
+        P.ParentId, 
+        1 AS Level 
+    FROM 
+        Posts P 
+    WHERE 
+        P.PostTypeId = 1 -- Questions
+    
+    UNION ALL
+    
+    SELECT 
+        P.Id, 
+        P.Title, 
+        P.ParentId, 
+        PH.Level + 1 
+    FROM 
+        Posts P 
+    INNER JOIN 
+        RecursivePostHierarchy PH ON P.ParentId = PH.PostId 
+    WHERE 
+        P.PostTypeId = 2 -- Answers
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U 
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT PH.UserId) AS EditorCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title
+),
+RankedPosts AS (
+    SELECT 
+        PA.PostId,
+        PA.Title,
+        PA.CommentCount,
+        PA.EditorCount,
+        RANK() OVER (ORDER BY PA.CommentCount DESC, PA.EditorCount DESC) AS Rank
+    FROM 
+        PostActivity PA
+),
+TopUsers AS (
+    SELECT 
+        US.UserId,
+        US.DisplayName,
+        US.Reputation,
+        ROW_NUMBER() OVER (ORDER BY US.Reputation DESC) AS UserRank
+    FROM 
+        UserStats US
+)
+SELECT 
+    PH.PostId,
+    PH.PostTitle,
+    COALESCE(UP.UserId, 0) AS TopUserId,
+    COALESCE(UP.DisplayName, 'No Editor') AS TopUserDisplayName,
+    COALESCE(UP.Reputation, 0) AS TopUserReputation,
+    RP.Rank AS PostRank,
+    PH.Level AS PostLevel
+FROM 
+    RecursivePostHierarchy PH
+LEFT JOIN 
+    RankedPosts RP ON PH.PostId = RP.PostId
+LEFT JOIN 
+    (SELECT UserId, DisplayName, Reputation FROM TopUsers WHERE UserRank = 1) UP ON PH.PostId = (
+        SELECT P.Id 
+        FROM Posts P 
+        WHERE P.OwnerUserId = UP.UserId 
+        ORDER BY P.LastActivityDate DESC 
+        LIMIT 1
+    )
+WHERE 
+    PH.Level <= 2 -- Limit depth of hierarchy to 2
+ORDER BY 
+    PH.Level, RP.Rank;

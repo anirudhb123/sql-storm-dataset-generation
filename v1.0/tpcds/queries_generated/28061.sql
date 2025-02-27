@@ -1,0 +1,65 @@
+
+WITH customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COALESCE(REPLACE(c.c_email_address, '@', ' at '), 'no email') AS email_format
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+address_data AS (
+    SELECT 
+        ca.ca_address_sk,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, ', ', ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip) AS full_address
+    FROM 
+        customer_address ca
+),
+demographic_summary AS (
+    SELECT 
+        cd.c_customer_sk,
+        COUNT(CASE WHEN cd.cd_marital_status = 'M' THEN 1 END) AS married_count,
+        COUNT(CASE WHEN cd.cd_marital_status = 'S' THEN 1 END) AS single_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_data cd
+    GROUP BY 
+        cd.c_customer_sk
+),
+final_report AS (
+    SELECT 
+        c.full_name,
+        c.cd_gender,
+        a.full_address,
+        d.married_count,
+        d.single_count,
+        d.avg_purchase_estimate,
+        STRING_AGG(c.email_format, ', ') AS email_addresses
+    FROM 
+        customer_data c
+    JOIN 
+        address_data a ON c.c_customer_sk = c.c_customer_sk
+    JOIN 
+        demographic_summary d ON c.c_customer_sk = d.c_customer_sk
+    GROUP BY 
+        c.full_name, 
+        c.cd_gender, 
+        a.full_address, 
+        d.married_count, 
+        d.single_count, 
+        d.avg_purchase_estimate
+)
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY full_name) AS row_num,
+    *
+FROM 
+    final_report
+WHERE 
+    d_avg_purchase_estimate > 1000
+ORDER BY 
+    full_name
+LIMIT 100;

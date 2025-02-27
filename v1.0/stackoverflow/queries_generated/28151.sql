@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+UserReputation AS (
+    SELECT 
+        UserId,
+        SUM(Reputation) AS TotalReputation
+    FROM 
+        Users
+    GROUP BY 
+        UserId
+),
+ScoreDistribution AS (
+    SELECT 
+        Score,
+        COUNT(*) AS TotalPosts
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId IN (1, 2) -- Questions and Answers
+    GROUP BY 
+        Score
+)
+SELECT 
+    rp.OwnerDisplayName,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    ts.Tag,
+    ts.TagCount,
+    ur.TotalReputation,
+    sd.Score AS ScoreDistribution,
+    sd.TotalPosts AS PostsWithScore
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagStatistics ts ON rp.Tags LIKE '%' || ts.Tag || '%'
+LEFT JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+LEFT JOIN 
+    ScoreDistribution sd ON rp.Score = sd.Score
+WHERE 
+    rp.PostRank = 1 -- Fetching only the latest question for each user
+ORDER BY 
+    rp.CreationDate DESC 
+LIMIT 100;

@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rank,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY
+        p.Id, p.Title, p.Score, p.CreationDate, p.ViewCount, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM
+        Users u
+    LEFT JOIN
+        Votes v ON u.Id = v.UserId
+    GROUP BY
+        u.Id, u.Reputation, u.DisplayName
+),
+TopPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        ur.Reputation,
+        ur.DisplayName,
+        CASE 
+            WHEN rp.rank = 1 THEN 'Top Post'
+            WHEN rp.rank <= 5 THEN 'Top 5 Post'
+            ELSE 'Other Post'
+        END AS PostRank
+    FROM
+        RankedPosts rp
+    JOIN
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+    WHERE
+        ur.Reputation > 1000
+)
+SELECT
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.Reputation,
+    tp.DisplayName,
+    tp.PostRank
+FROM
+    TopPosts tp
+WHERE
+    tp.ViewCount > 100
+ORDER BY
+    tp.Score DESC, tp.ViewCount DESC
+LIMIT 10;
+
+SELECT
+    p.Id AS PostId,
+    STRING_AGG(t.TagName, ', ') AS TagsList
+FROM
+    Posts p
+JOIN 
+    Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+WHERE
+    p.Id IN (SELECT PostId FROM TopPosts)
+GROUP BY
+    p.Id;

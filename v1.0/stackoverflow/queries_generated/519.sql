@@ -1,0 +1,60 @@
+WITH PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 AND p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.ViewCount, p.AnswerCount
+),
+TopPosts AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY Score DESC) AS RankScore 
+    FROM 
+        PostMetrics
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.RankScore,
+    COALESCE(u.DisplayName, 'Anonymous') AS OwnerDisplayName,
+    COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+LEFT JOIN 
+    PostLinks pl ON tp.PostId = pl.PostId
+LEFT JOIN 
+    Posts p ON p.Id = tp.PostId
+LEFT JOIN 
+    LATERAL (SELECT UNNEST(string_to_array(p.Tags, ',')) AS TagName) t ON TRUE
+WHERE 
+    tp.RankScore <= 10
+GROUP BY 
+    tp.PostId, tp.Title, tp.Score, tp.ViewCount, tp.AnswerCount, 
+    tp.CommentCount, tp.UpVotes, tp.DownVotes, tp.RankScore, u.DisplayName
+ORDER BY 
+    tp.RankScore;

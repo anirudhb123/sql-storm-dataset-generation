@@ -1,0 +1,103 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.ViewCount,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > (
+            SELECT AVG(Reputation) FROM Users
+        )
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+UserPostMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(ps.PostCount, 0) AS PostCount,
+        COALESCE(ps.TotalViews, 0) AS TotalViews,
+        COALESCE(ps.TotalScore, 0) AS TotalScore,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        b.BadgeNames,
+        CASE 
+            WHEN COALESCE(ps.TotalViews, 0) > 1000 THEN 'High Engagement'
+            WHEN COALESCE(ps.TotalViews, 0) BETWEEN 100 AND 1000 THEN 'Moderate Engagement'
+            ELSE 'Low Engagement'
+        END AS EngagementLevel
+    FROM 
+        Users u
+    LEFT JOIN 
+        PostStatistics ps ON u.Id = ps.OwnerUserId
+    LEFT JOIN 
+        UserBadges b ON u.Id = b.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.UserDisplayName AS ClosedBy,
+        ph.CreationDate AS ClosedDate,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReason
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHistory ph ON ph.PostId = p.Id 
+    INNER JOIN 
+        CloseReasonTypes cr ON cr.Id = CAST(ph.Comment AS INTEGER)
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        p.Id, p.Title, ph.UserDisplayName, ph.CreationDate
+)
+SELECT 
+    upm.UserId,
+    upm.DisplayName,
+    upm.PostCount,
+    upm.TotalViews,
+    upm.TotalScore,
+    upm.BadgeCount,
+    upm.BadgeNames,
+    upm.EngagementLevel,
+    rp.ReputationRank,
+    cp.ClosedBy,
+    cp.ClosedDate,
+    cp.CloseReason
+FROM 
+    UserPostMetrics upm
+LEFT JOIN 
+    RankedUsers rp ON upm.UserId = rp.UserId
+LEFT JOIN 
+    ClosedPosts cp ON upm.UserId = cp.ClosedBy
+WHERE 
+    upm.PostCount > 0
+    AND (upm.BadgeCount > 1 OR rp.ReputationRank < 50) 
+ORDER BY 
+    upm.TotalScore DESC, 
+    upm.DisplayName ASC
+LIMIT 100;

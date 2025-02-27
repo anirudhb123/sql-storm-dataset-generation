@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        array_agg(DISTINCT k.keyword) AS keywords,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY m.production_year DESC) AS rn
+    FROM 
+        title AS m
+    LEFT JOIN 
+        movie_keyword AS mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id,
+        m.title,
+        m.production_year
+),
+SelectedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        rm.keywords
+    FROM 
+        RankedMovies AS rm
+    WHERE 
+        rm.rn = 1 
+)
+SELECT 
+    sm.movie_title,
+    sm.production_year,
+    coalesce(array_agg(DISTINCT c.name), '{}') AS cast_names,
+    coalesce(array_agg(DISTINCT cn.name), '{}') AS company_names,
+    count(DISTINCT mk.keyword_id) AS keyword_count
+FROM 
+    SelectedMovies AS sm
+LEFT JOIN 
+    cast_info AS ci ON sm.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name AS an ON ci.person_id = an.person_id
+LEFT JOIN 
+    name AS c ON an.person_id = c.imdb_id
+LEFT JOIN 
+    movie_companies AS mc ON sm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name AS cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_keyword AS mk ON sm.movie_id = mk.movie_id
+GROUP BY 
+    sm.movie_title,
+    sm.production_year
+ORDER BY 
+    sm.production_year DESC, 
+    sm.movie_title;

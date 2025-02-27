@@ -1,0 +1,73 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 'Unknown Price'
+            WHEN p.p_retailprice < 100 THEN 'Budget Part'
+            ELSE 'Premium Part'
+        END AS price_category
+    FROM 
+        part p
+    WHERE 
+        p.p_size >= 10 AND (p.p_container IS NOT NULL OR p.p_comment LIKE '%fragile%')
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(DISTINCT l.l_suppkey) AS distinct_suppliers
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' AND l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey
+),
+FilteredNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        n.n_comment
+    FROM 
+        nation n
+    WHERE 
+        EXISTS (SELECT 1 FROM region r WHERE r.r_regionkey = n.n_regionkey AND r.r_name = 'ASIA')
+)
+SELECT 
+    hp.p_name,
+    COALESCE(AVG(r.s_acctbal), 0) AS avg_supplier_balance,
+    o.total_revenue,
+    SUBSTRING(CAST(o.total_revenue AS VARCHAR), 1, 5) || 
+    CASE WHEN LENGTH(CAST(o.total_revenue AS VARCHAR)) > 5 THEN '...' END AS revenue_display,
+    fn.n_name AS nation_name,
+    hp.price_category,
+    ROW_NUMBER() OVER (PARTITION BY hp.price_category ORDER BY o.total_revenue DESC) AS revenue_rank
+FROM 
+    HighValueParts hp
+LEFT JOIN 
+    RankedSuppliers r ON r.rank = 1 AND hp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+JOIN 
+    OrderDetails o ON o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = hp.p_partkey)
+JOIN 
+    FilteredNations fn ON fn.n_nationkey = r.s_nationkey
+WHERE 
+    hp.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_type = hp.p_type)
+GROUP BY 
+    hp.p_name, o.total_revenue, fn.n_name, hp.price_category
+ORDER BY 
+    revenue_rank, avg_supplier_balance DESC;

@@ -1,0 +1,4 @@
+SELECT min(chn.name) AS character, min(t.title) AS russian_mov_with_actor_producer
+FROM char_name AS chn, cast_info AS ci, company_name AS cn, company_type AS ct, movie_companies AS mc, role_type AS rt, title AS t
+WHERE t.id = mc.movie_id AND t.id = ci.movie_id AND ci.movie_id = mc.movie_id AND chn.id = ci.person_role_id AND rt.id = ci.role_id AND cn.id = mc.company_id AND ct.id = mc.company_type_id
+AND chn.name_pcode_nf IS NOT NULL AND chn.surname_pcode > 'A1342' AND t.series_years IN ('1962-1981', '1967-1975', '1968-1987', '1970-1988', '1977-1992', '1986-1995', '1999-2008', '2004-2004');

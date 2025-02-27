@@ -1,0 +1,97 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankByViews
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation < 100 THEN 'Newbie'
+            WHEN u.Reputation BETWEEN 100 AND 1000 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS ReputationTier
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation IS NOT NULL
+),
+PostVoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        COUNT(DISTINCT v.UserId) AS UniqueVoters
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseReasonCount,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+FinalMetrics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        ur.ReputationTier,
+        COALESCE(pvc.UpVotes, 0) AS UpVotes,
+        COALESCE(pvc.DownVotes, 0) AS DownVotes,
+        COALESCE(pvc.UniqueVoters, 0) AS UniqueVoters,
+        COALESCE(cp.CloseReasonCount, 0) AS CloseReasonCount,
+        COALESCE(cp.CloseReasons, 'None') AS CloseReasons
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON u.Id = rp.OwnerUserId
+    JOIN 
+        UserReputation ur ON ur.UserId = u.Id
+    LEFT JOIN 
+        PostVoteCounts pvc ON pvc.PostId = rp.PostId
+    LEFT JOIN 
+        ClosedPosts cp ON cp.PostId = rp.PostId
+    WHERE 
+        rp.RankByViews <= 3
+)
+SELECT 
+    *,
+    CASE 
+        WHEN UpVotes > DownVotes THEN 'Positive'
+        WHEN UpVotes < DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment,
+    CASE 
+        WHEN CloseReasonCount > 0 THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus,
+    (SELECT COUNT(*) FROM Posts p2 WHERE p2.OwnerUserId = u.Id) AS TotalPostsByUser
+FROM 
+    FinalMetrics
+JOIN 
+    Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = FinalMetrics.PostId)
+ORDER BY 
+    rp.ViewCount DESC, ur.ReputationTier DESC;
+

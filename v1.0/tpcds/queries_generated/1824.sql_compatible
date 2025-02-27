@@ -1,0 +1,62 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        EXTRACT(YEAR FROM DATE '2002-10-01') - c.c_birth_year AS age,
+        cd.cd_purchase_estimate,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid_inc_tax) AS avg_order_value
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        CustomerStats cs ON ws.ws_bill_customer_sk = cs.c_customer_id
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+IncomeRanges AS (
+    SELECT 
+        ca.ca_address_sk,
+        COUNT(*) AS customer_count
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_address_sk
+)
+SELECT 
+    cs.c_customer_id,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.age,
+    COALESCE(sd.total_net_profit, 0) AS total_net_profit,
+    COALESCE(sd.total_orders, 0) AS total_orders,
+    CASE 
+        WHEN cs.purchase_rank <= 10 THEN 'Top Purchasers'
+        ELSE 'Other Customers'
+    END AS customer_segment,
+    ir.customer_count AS number_of_customers_in_address
+FROM 
+    CustomerStats cs
+LEFT JOIN 
+    SalesData sd ON cs.c_customer_id = sd.ws_bill_customer_sk
+LEFT JOIN 
+    IncomeRanges ir ON ir.ca_address_sk IN (SELECT ca.ca_address_sk FROM customer_address ca WHERE ca.ca_zip IS NOT NULL)
+WHERE 
+    cs.age BETWEEN 25 AND 40 
+    AND (cs.cd_marital_status = 'M' OR cs.cd_gender = 'F')
+ORDER BY 
+    total_net_profit DESC
+FETCH FIRST 100 ROWS ONLY;

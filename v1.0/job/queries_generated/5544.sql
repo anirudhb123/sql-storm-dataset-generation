@@ -1,0 +1,37 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.role_id,
+    GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword ASC) AS keywords,
+    COUNT(m.id) AS number_of_movies,
+    AVG(m.production_year) AS average_production_year
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+JOIN 
+    company_name cn ON mi.note = cn.name
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    a.name IS NOT NULL 
+    AND t.production_year >= 2000 
+    AND ct.kind LIKE 'Distributor%'
+GROUP BY 
+    a.name, t.title, ci.role_id
+HAVING 
+    COUNT(m.id) > 1
+ORDER BY 
+    average_production_year DESC, actor_name ASC;

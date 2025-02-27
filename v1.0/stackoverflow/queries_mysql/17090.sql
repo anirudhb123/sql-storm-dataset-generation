@@ -1,0 +1,22 @@
+
+SELECT 
+    Users.DisplayName,
+    Users.Reputation,
+    Posts.Title,
+    Posts.CreationDate,
+    Posts.Score
+FROM 
+    Posts
+JOIN 
+    Users ON Posts.OwnerUserId = Users.Id
+WHERE 
+    Posts.PostTypeId = 1  
+GROUP BY 
+    Users.DisplayName, 
+    Users.Reputation, 
+    Posts.Title, 
+    Posts.CreationDate, 
+    Posts.Score
+ORDER BY 
+    Posts.Score DESC
+LIMIT 10;

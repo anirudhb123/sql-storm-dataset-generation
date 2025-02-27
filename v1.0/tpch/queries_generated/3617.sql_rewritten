@@ -1,0 +1,61 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        SUM(l.l_discount) OVER (PARTITION BY o.o_orderkey) AS total_discounts
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND
+        o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+),
+NecessaryComponents AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        ps.ps_availqty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty < 100
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(ho.o_totalprice) AS total_value_orders,
+    AVG(nc.ps_supplycost * nc.ps_availqty) AS avg_supplycost,
+    COALESCE(MAX(rs.s_acctbal), 0) AS max_supplier_bal
+FROM 
+    nation n
+LEFT JOIN 
+    HighValueOrders ho ON n.n_nationkey = ho.o_orderkey % (SELECT COUNT(*) FROM nation)  
+LEFT JOIN 
+    NecessaryComponents nc ON nc.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty < 50)
+LEFT JOIN 
+    RankedSuppliers rs ON rs.rnk = 1 AND rs.s_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = n.n_nationkey)
+WHERE 
+    n.n_regionkey IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_value_orders DESC;

@@ -1,0 +1,33 @@
+SELECT 
+    ak.name AS aka_name,
+    t.title AS movie_title,
+    c.role_id,
+    p.gender,
+    co.name AS company_name,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    AVG(CASE WHEN mi.info_type_id = 1 THEN LENGTH(mi.info) END) AS avg_info_length
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name co ON mc.company_id = co.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    person_info pi ON ak.person_id = pi.person_id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2020 
+    AND pi.info_type_id = 2
+GROUP BY 
+    ak.name, t.title, c.role_id, p.gender, co.name
+ORDER BY 
+    keyword_count DESC, t.title;

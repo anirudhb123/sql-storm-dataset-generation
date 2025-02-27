@@ -1,0 +1,59 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(V.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(V.VoteTypeId = 3) AS TotalDownvotes,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    WHERE U.Reputation > 1000
+    GROUP BY U.Id, U.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (ORDER BY P.Score DESC, P.CreationDate DESC) AS Rank
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.PostTypeId = 1 
+    AND P.Score > 10
+    ORDER BY P.Score DESC, P.CreationDate DESC
+),
+StringProcessingBenchmark AS (
+    SELECT 
+        U.DisplayName,
+        U.TotalPosts,
+        U.TotalComments,
+        U.TotalUpvotes,
+        U.TotalDownvotes,
+        STRING_AGG(P.Title, '; ') AS TopPostTitles,
+        STRING_AGG(CONVERT(varchar, P.CreationDate, 120), '; ') AS TopPostCreationDates,
+        STRING_AGG(CONVERT(varchar, P.ViewCount), '; ') AS TopPostViewCounts
+    FROM UserActivity U
+    JOIN TopPosts P ON U.UserId = P.OwnerDisplayName
+    GROUP BY U.DisplayName, U.TotalPosts, U.TotalComments, U.TotalUpvotes, U.TotalDownvotes
+)
+SELECT 
+    DisplayName,
+    TotalPosts,
+    TotalComments,
+    TotalUpvotes,
+    TotalDownvotes,
+    TopPostTitles,
+    TopPostCreationDates,
+    TopPostViewCounts
+FROM StringProcessingBenchmark
+ORDER BY TotalPosts DESC, TotalUpvotes DESC;

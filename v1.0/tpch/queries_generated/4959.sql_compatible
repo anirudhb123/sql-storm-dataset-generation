@@ -1,0 +1,57 @@
+
+WITH CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+        JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+        LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+LineItemMetrics AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(l.l_linenumber) AS line_count,
+        MIN(l.l_shipdate) AS first_ship_date
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    c.total_spent,
+    s.s_name AS supplier_name,
+    sp.part_count,
+    lm.net_revenue AS total_revenue,
+    RANK() OVER (PARTITION BY c.c_custkey ORDER BY c.total_spent DESC) AS spending_rank
+FROM 
+    CustomerOrderSummary c
+    JOIN SupplierPartDetails sp ON c.total_spent > 1000
+    JOIN lineitem li ON li.l_orderkey IN (
+        SELECT lm.l_orderkey 
+        FROM LineItemMetrics lm 
+        WHERE lm.net_revenue > 500
+    )
+    LEFT JOIN supplier s ON s.s_suppkey = li.l_suppkey
+WHERE 
+    COALESCE(c.total_spent, 0) > 0 AND s.s_name IS NOT NULL
+ORDER BY 
+    c.total_spent DESC, s.s_name;

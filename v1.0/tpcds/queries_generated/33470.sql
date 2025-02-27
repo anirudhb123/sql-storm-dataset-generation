@@ -1,0 +1,74 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_item_sk
+),
+CustomerCTE AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name,
+        c.c_last_name,
+        COUNT(DISTINCT w.w_warehouse_sk) AS warehouse_count,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        hd.hd_income_band_sk,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        warehouse w ON w.w_warehouse_sk = w.w_warehouse_sk
+    LEFT JOIN 
+        household_demographics hd ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, 
+        cd.cd_education_status, cd.cd_purchase_estimate, hd.hd_income_band_sk
+),
+SalesDetails AS (
+    SELECT 
+        s.ss_item_sk, 
+        s.ss_quantity,
+        s.ss_net_profit,
+        d.d_date,
+        sm.sm_ship_mode_id,
+        s.ss_store_sk
+    FROM 
+        store_sales s
+    JOIN 
+        date_dim d ON s.ss_sold_date_sk = d.d_date_sk
+    JOIN 
+        ship_mode sm ON s.ss_item_sk = sm.sm_ship_mode_sk
+)
+SELECT 
+    cu.c_first_name,
+    cu.c_last_name,
+    sm.sm_carrier AS primary_shipping_method,
+    COALESCE(SUM(sd.ss_net_profit), 0) AS total_net_profit,
+    COALESCE(SUM(sd.ss_quantity), 0) AS total_quantity_sold,
+    CASE 
+        WHEN cu.warehouse_count > 1 THEN 'Multiple Warehouses'
+        ELSE 'Single Warehouse'
+    END AS warehouse_status
+FROM 
+    CustomerCTE cu
+LEFT JOIN 
+    SalesDetails sd ON cu.c_customer_sk = sd.ss_store_sk
+JOIN 
+    SalesCTE sct ON sct.ws_item_sk = sd.ss_item_sk
+WHERE 
+    cu.gender_rank <= 5 AND sct.sales_rank <= 10
+GROUP BY 
+    cu.c_first_name, cu.c_last_name, sm.sm_carrier
+ORDER BY 
+    total_net_profit DESC
+LIMIT 50;

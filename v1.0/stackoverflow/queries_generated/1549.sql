@@ -1,0 +1,74 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS VoteCount,
+        DENSE_RANK() OVER (ORDER BY COUNT(V.Id) DESC) AS VoteRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(NULLIF(P.ClosedDate, '1900-01-01'), 'Active') AS Status,
+        P.ViewCount,
+        COALESCE(PS.AcceptedAnswerId, 0) AS AcceptedAnswer,
+        (SELECT COUNT(C.Id) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts PS ON P.AcceptedAnswerId = PS.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+VoteDistribution AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS VoteUpCount,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS VoteDownCount
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+SELECT 
+    U.DisplayName,
+    U.TotalVotes,
+    U.UpVotes,
+    U.DownVotes,
+    PA.PostId,
+    PA.Title,
+    PA.CreationDate,
+    PA.Status,
+    PA.ViewCount,
+    PA.CommentCount,
+    V.VoteUpCount,
+    V.VoteDownCount,
+    CASE 
+        WHEN U.VoteRank <= 10 THEN 'Top Voter'
+        ELSE 'Regular Voter'
+    END AS VoterType,
+    CASE 
+        WHEN PA.Status = 'Active' THEN 'Currently Active Post'
+        ELSE 'Closed Post'
+    END AS PostStatus
+FROM 
+    UserVoteSummary U
+INNER JOIN 
+    PostActivity PA ON PA.AcceptedAnswer = U.UserId
+LEFT JOIN 
+    VoteDistribution V ON PA.PostId = V.PostId
+WHERE 
+    PA.ViewCount > 50 
+ORDER BY 
+    U.TotalVotes DESC, PA.ViewCount DESC;

@@ -1,0 +1,49 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal > 10000 THEN 'High'
+            WHEN c.c_acctbal BETWEEN 5000 AND 10000 THEN 'Medium'
+            ELSE 'Low'
+        END AS customer_tier
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT h.c_custkey) AS high_value_customers_count,
+    AVG(rd.o_totalprice) AS average_order_value,
+    SUM(sd.total_supply_cost) AS total_supplier_cost
+FROM HighValueCustomers h
+LEFT JOIN nation n ON h.c_nationkey = n.n_nationkey
+LEFT JOIN RankedOrders rd ON rd.o_orderkey IN (
+    SELECT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_discount > 0.05 AND l.l_returnflag = 'N'
+)
+LEFT JOIN SupplierDetails sd ON h.c_custkey = sd.s_nationkey
+GROUP BY n.n_name
+HAVING AVG(rd.o_totalprice) > (SELECT AVG(o.o_totalprice) FROM orders o WHERE o.o_orderstatus = 'O')
+ORDER BY high_value_customers_count DESC, nation_name;

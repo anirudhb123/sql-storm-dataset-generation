@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rn
+    FROM web_sales ws
+    WHERE ws.ws_ship_date_sk IS NOT NULL
+),
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returns,
+        COUNT(DISTINCT cr.return_order_number) AS unique_returns,
+        COALESCE(SUM(cr.return_amt), 0) AS total_return_amt,
+        CASE 
+            WHEN SUM(cr.return_quantity) > 10 THEN 'High Return' 
+            WHEN SUM(cr.return_quantity) BETWEEN 5 AND 10 THEN 'Moderate Return'
+            ELSE 'Low Return'
+        END AS return_category
+    FROM catalog_returns cr
+    GROUP BY cr.returning_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band,
+        COUNT(*) AS purchase_count,
+        SUM(COALESCE(cd.cd_purchase_estimate, 0)) AS total_purchase_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_marital_status IS NOT NULL
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band
+)
+SELECT 
+    cd.cd_demo_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cr.total_returns,
+    cr.unique_returns,
+    cr.total_return_amt,
+    CASE 
+        WHEN cd.total_purchase_estimate > 100000 THEN 'High Value Customer'
+        WHEN cd.total_purchase_estimate BETWEEN 50000 AND 100000 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_value_category,
+    rs.ws_item_sk,
+    rs.ws_order_number,
+    rs.ws_quantity,
+    rs.ws_sales_price
+FROM CustomerDemographics cd
+LEFT JOIN CustomerReturns cr ON cd.cd_demo_sk = cr.returning_customer_sk
+LEFT JOIN RankedSales rs ON rs.rn = 1
+WHERE 
+    cd.cd_income_band IS NOT NULL 
+    AND cd.cd_gender IN ('M', 'F')
+    AND cr.total_returns IS NOT NULL
+ORDER BY cd.cd_demo_sk, cr.total_return_amt DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

@@ -1,0 +1,50 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk, ws_item_sk
+),
+TopItems AS (
+    SELECT
+        r.ws_web_site_sk,
+        r.ws_item_sk,
+        r.total_sales
+    FROM 
+        RankedSales r
+    WHERE 
+        r.sales_rank <= 5
+),
+CustomerSales AS (
+    SELECT
+        c.c_customer_sk,
+        SUM(ws.ws_sales_price) AS customer_total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        TopItems ti ON ws.ws_item_sk = ti.ws_item_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT
+    c.c_first_name,
+    c.c_last_name,
+    cs.customer_total_sales
+FROM 
+    CustomerSales cs
+JOIN 
+    customer c ON cs.c_customer_sk = c.c_customer_sk
+ORDER BY 
+    cs.customer_total_sales DESC
+LIMIT 10;

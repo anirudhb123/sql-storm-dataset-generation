@@ -1,0 +1,68 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        (SELECT COUNT(*) FROM Posts P WHERE P.OwnerUserId = U.Id) AS PostCount,
+        (SELECT COUNT(*) FROM Comments C WHERE C.UserId = U.Id) AS CommentCount,
+        (SELECT SUM(VoteTypeId=2::smallint) FROM Votes V WHERE V.UserId = U.Id) AS UpVotes,
+        (SELECT SUM(VoteTypeId=3::smallint) FROM Votes V WHERE V.UserId = U.Id) AS DownVotes
+    FROM Users U
+    WHERE U.Reputation > 1000
+),
+TopBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Badges B
+    WHERE B.Class = 1 -- Gold badge only
+    GROUP BY B.UserId
+    HAVING COUNT(*) > 1
+),
+PostDetail AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.AnswerCount,
+        P.QuestionCount,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId IN (2, 6)) AS PositiveVotes,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId IN (3, 10)) AS NegativeVotes
+    FROM Posts P
+),
+PostsWithHistory AS (
+    SELECT 
+        PH.PostId,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 11 THEN PH.CreationDate END) AS ReopenedDate,
+        COUNT(PH.Id) AS HistoryCount
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.Reputation,
+    COALESCE(TB.BadgeCount, 0) AS GoldBadgeCount,
+    COALESCE(TB.BadgeNames, 'None') AS GoldBadges,
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    PD.AnswerCount,
+    PD.PositiveVotes,
+    PD.NegativeVotes,
+    COALESCE(PH.ClosedDate, PH.ReopenedDate) AS RecentStatusChange,
+    PH.HistoryCount
+FROM UserActivity UA
+LEFT JOIN TopBadges TB ON UA.UserId = TB.UserId
+CROSS JOIN PostDetail PD 
+FULL OUTER JOIN PostsWithHistory PH ON PD.PostId = PH.PostId
+WHERE UA.Reputation > (
+    SELECT AVG(Reputation) FROM Users
+) 
+AND (PD.Score IS NOT NULL OR PH.HistoryCount > 0)
+ORDER BY UA.Reputation DESC, PD.Score DESC
+LIMIT 10;

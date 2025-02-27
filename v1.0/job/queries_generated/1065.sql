@@ -1,0 +1,40 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_by_title,
+        COUNT(DISTINCT mc.company_id) OVER (PARTITION BY t.id) AS total_companies
+    FROM title t
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+),
+ActorDetails AS (
+    SELECT 
+        a.name AS actor_name,
+        c.movie_id,
+        COALESCE(SUM(CASE WHEN c.nr_order IS NOT NULL THEN 1 ELSE 0 END), 0) AS total_roles
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    GROUP BY a.name, c.movie_id
+),
+PopularMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ad.total_roles,
+        rm.rank_by_title,
+        rm.total_companies
+    FROM RankedMovies rm
+    JOIN ActorDetails ad ON rm.movie_id = ad.movie_id
+    WHERE rm.total_companies > 2
+)
+SELECT 
+    pm.title,
+    pm.production_year,
+    pm.total_roles,
+    pm.rank_by_title,
+    COALESCE(NULLIF(pm.total_roles, 0), 'No Roles Assigned') AS roles_description
+FROM PopularMovies pm
+WHERE pm.rank_by_title <= 3
+ORDER BY pm.production_year DESC, pm.rank_by_title ASC;

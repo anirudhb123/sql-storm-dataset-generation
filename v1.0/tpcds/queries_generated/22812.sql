@@ -1,0 +1,82 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        customer c
+        LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F'
+        AND EXISTS (
+            SELECT 1 
+            FROM store_sales ss 
+            WHERE ss.ss_customer_sk = c.c_customer_sk 
+            AND ss_ext_discount_amt IS NOT NULL
+        )
+),
+RecentReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        COUNT(DISTINCT cr_order_number) AS return_count,
+        SUM(cr_return_amt) AS total_returned
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+ReturnStats AS (
+    SELECT 
+        fc.c_customer_sk,
+        fc.c_first_name,
+        fc.c_last_name,
+        COALESCE(rr.return_count, 0) AS return_count,
+        COALESCE(rr.total_returned, 0) AS total_returned,
+        RANK() OVER (ORDER BY COALESCE(rr.total_returned, 0) DESC) AS return_rank
+    FROM 
+        FilteredCustomers fc
+        LEFT JOIN RecentReturns rr ON fc.c_customer_sk = rr.cr_returning_customer_sk
+)
+SELECT 
+    r.customer_name,
+    r.return_count,
+    r.total_returned,
+    a.total_sales
+FROM (
+    SELECT 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name,
+        r.return_count,
+        r.total_returned
+    FROM 
+        ReturnStats r
+        INNER JOIN FilteredCustomers c ON r.c_customer_sk = c.c_customer_sk
+    ORDER BY r.return_rank
+) AS r
+LEFT JOIN (
+    SELECT 
+        rs.ws_item_sk,
+        rs.total_sales
+    FROM 
+        RankedSales rs 
+    WHERE 
+        sales_rank = 1
+) AS a ON r.customer_name IS NOT NULL
+WHERE 
+    (r.total_returned / NULLIF(a.total_sales, 0)) > 0.1 
+    OR r.return_count > 3
+ORDER BY 
+    r.total_returned DESC, 
+    r.customer_name ASC;

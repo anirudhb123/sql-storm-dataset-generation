@@ -1,0 +1,71 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, CURRENT_DATE)
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey, 
+        s.s_name AS supplier_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+),
+CustomerSegment AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_mktsegment,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 0
+    GROUP BY 
+        c.c_custkey, c.c_mktsegment
+)
+SELECT 
+    p.p_name, 
+    p.p_brand, 
+    r.r_name, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COALESCE(sc.total_supply_cost, 0) AS total_supply_cost,
+    cs.c_mktsegment,
+    AVG(o.o_totalprice) AS avg_order_price
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedOrders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    region r ON p.p_partkey % 5 = r.r_regionkey
+LEFT JOIN 
+    SupplierCosts sc ON p.p_partkey = sc.ps_partkey
+JOIN 
+    CustomerSegment cs ON o.o_custkey = cs.c_custkey
+WHERE 
+    p.p_retailprice > 100
+    AND l.l_shipdate > o.o_orderdate
+GROUP BY 
+    p.p_name, 
+    p.p_brand, 
+    r.r_name, 
+    sc.total_supply_cost, 
+    cs.c_mktsegment
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000
+ORDER BY 
+    revenue DESC,
+    total_supply_cost DESC;

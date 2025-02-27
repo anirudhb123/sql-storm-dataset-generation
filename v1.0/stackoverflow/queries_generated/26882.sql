@@ -1,0 +1,70 @@
+WITH TaggedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN
+        Tags t ON t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::int[])
+    WHERE
+        p.PostTypeId = 1  -- Filtering only Questions
+    GROUP BY
+        p.Id
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        COUNT(DISTINCT b.Id) AS BadgesEarned
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Badges b ON b.UserId = u.Id
+    GROUP BY
+        u.Id
+),
+PostEngagement AS (
+    SELECT
+        tp.PostId,
+        tp.Title,
+        tp.TagList,
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostsCreated,
+        ua.BadgesEarned,
+        tp.CommentCount,
+        tp.UpVotes,
+        tp.DownVotes
+    FROM
+        TaggedPosts tp
+    JOIN
+        UserActivity ua ON ua.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = tp.PostId)
+)
+
+SELECT
+    pe.PostId,
+    pe.Title,
+    pe.TagList,
+    pe.CommentCount,
+    pe.UpVotes,
+    pe.DownVotes,
+    pe.DisplayName AS Owner,
+    pe.PostsCreated,
+    pe.BadgesEarned,
+    ROUND((pe.UpVotes::numeric / NULLIF(pe.CommentCount, 0)), 2) AS EngagementRatio
+FROM
+    PostEngagement pe
+ORDER BY
+    pe.UpVotes DESC, pe.CommentCount DESC;

@@ -1,0 +1,107 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.ParentId, 
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        a.Id AS PostId, 
+        a.Title, 
+        a.OwnerUserId, 
+        a.ParentId, 
+        rp.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN RecursivePostHierarchy rp ON a.ParentId = rp.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation,
+        u.Views,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+),
+PostsDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(u.DisplayName, 'Community') AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT TRIM(value) AS value FROM STRING_SPLIT(p.Tags, ',')) AS tagSplit ON 1=1
+    LEFT JOIN 
+        Tags t ON tagSplit.value = t.TagName
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP) 
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId, 
+        ur.DisplayName,
+        ur.Reputation, 
+        ur.Views,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        UserReputation ur
+    JOIN 
+        Posts p ON ur.UserId = p.OwnerUserId
+    GROUP BY 
+        ur.UserId, ur.DisplayName, ur.Reputation, ur.Views
+    ORDER BY 
+        TotalScore DESC
+    LIMIT 10
+)
+SELECT 
+    ph.PostId,
+    ph.Title,
+    ph.OwnerDisplayName,
+    ph.ViewCount,
+    ph.Score,
+    ph.CommentCount,
+    tu.DisplayName AS TopUserName,
+    tu.PostsCount,
+    tu.TotalScore,
+    ph.Tags
+FROM 
+    PostsDetails ph
+LEFT JOIN LATERAL (
+    SELECT 
+        tu.DisplayName,
+        tu.PostsCount,
+        tu.TotalScore
+    FROM 
+        TopUsers tu
+    WHERE 
+        tu.UserId = ph.OwnerDisplayName 
+    ORDER BY 
+        tu.TotalScore DESC
+    LIMIT 1
+) AS tu ON true
+WHERE 
+    ph.ScoreRank <= 10 
+ORDER BY 
+    ph.Score DESC, 
+    ph.ViewCount DESC;

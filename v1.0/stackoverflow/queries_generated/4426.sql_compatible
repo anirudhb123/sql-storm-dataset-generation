@@ -1,0 +1,86 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) b ON u.Id = b.UserId
+),
+PostSummary AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(p.Score) AS AverageScore,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+PostStats AS (
+    SELECT 
+        ps.OwnerUserId,
+        ps.PostCount,
+        ps.QuestionCount,
+        ps.AnswerCount,
+        ps.AverageScore,
+        ps.LastPostDate,
+        COALESCE(ur.Reputation, 0) AS UserReputation,
+        ur.BadgeCount,
+        LAG(ps.AverageScore) OVER (ORDER BY ps.OwnerUserId) AS PreviousAverageScore
+    FROM 
+        PostSummary ps
+    LEFT JOIN 
+        UserReputation ur ON ps.OwnerUserId = ur.UserId
+)
+SELECT 
+    p.DisplayName AS OwnerDisplayName,
+    ps.PostCount,
+    ps.QuestionCount,
+    ps.AverageScore,
+    ps.PreviousAverageScore,
+    CASE 
+        WHEN ps.PreviousAverageScore IS NOT NULL THEN 
+            CASE 
+                WHEN ps.AverageScore > ps.PreviousAverageScore THEN 'Improved'
+                WHEN ps.AverageScore < ps.PreviousAverageScore THEN 'Declined'
+                ELSE 'Unchanged'
+            END
+        ELSE 'First Post'
+    END AS ScoreTrend,
+    COALESCE(t.TagName, 'No Tags') AS PopularTag
+FROM 
+    PostStats ps
+LEFT JOIN 
+    Users p ON ps.OwnerUserId = p.Id
+LEFT JOIN (
+    SELECT 
+        unnest(string_to_array(Tags, ',')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts 
+    WHERE 
+        Tags IS NOT NULL
+    GROUP BY 
+        TagName
+) t ON true
+WHERE 
+    ps.PostCount > 10
+AND 
+    ps.UserReputation > 100
+ORDER BY 
+    ps.UserReputation DESC;

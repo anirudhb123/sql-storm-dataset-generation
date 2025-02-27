@@ -1,0 +1,59 @@
+WITH PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        MAX(CASE WHEN p.ViewCount > 1000 THEN 1 ELSE 0 END) AS IsHighTraffic,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2 -- Answers only
+    LEFT JOIN 
+        PostTags pt ON p.Id = pt.PostId -- Assuming there's a PostTags table for linking Posts and Tags
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' -- Focus on recent posts
+    GROUP BY 
+        p.Id, p.Title
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS TypesOfEdits
+    FROM 
+        PostHistory ph 
+    INNER JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.CommentCount,
+    pa.AnswerCount,
+    pa.AcceptedAnswerId,
+    pa.IsHighTraffic,
+    pa.TagsUsed,
+    pa.AverageReputation,
+    phs.EditCount,
+    phs.LastEditDate,
+    phs.TypesOfEdits
+FROM 
+    PostAnalytics pa
+LEFT JOIN 
+    PostHistorySummary phs ON pa.PostId = phs.PostId
+ORDER BY 
+    pa.CommentCount DESC, phs.EditCount DESC
+LIMIT 100;

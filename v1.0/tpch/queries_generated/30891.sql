@@ -1,0 +1,48 @@
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > 50000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    JOIN TopSuppliers ts ON s.s_acctbal > ts.s_acctbal * 0.9
+),
+SalesSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS number_of_orders
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierPartAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    p.p_mfgr,
+    p.p_brand,
+    COALESCE(sp.total_available, 0) AS total_available,
+    CASE 
+        WHEN sp.total_available IS NOT NULL THEN 'Available'
+        ELSE 'Out of Stock'
+    END AS availability_status,
+    COUNT(DISTINCT ss.c_custkey) AS customer_count,
+    AVG(ss.total_spent) AS avg_spent
+FROM part p
+LEFT JOIN SupplierPartAvailability sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN SalesSummary ss ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O')
+WHERE p.p_retailprice > 50.00
+AND p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_container LIKE '%BOX%')
+GROUP BY p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, sp.total_available
+HAVING AVG(ss.total_spent) > 1000
+ORDER BY avg_spent DESC
+LIMIT 10;

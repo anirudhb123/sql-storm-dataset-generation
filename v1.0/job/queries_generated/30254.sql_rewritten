@@ -1,0 +1,51 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT ch.name) AS character_count,
+    COUNT(DISTINCT mh.movie_id) AS movie_count,
+    AVG(m.production_year) AS average_production_year,
+    STRING_AGG(DISTINCT kt.keyword, ', ') AS keywords,
+    MAX(mh.level) AS max_hierarchy_level
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    char_name ch ON ci.person_role_id = ch.id
+CROSS JOIN 
+    movie_keyword mk
+JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 2 AND
+    AVG(m.production_year) <= 2015;

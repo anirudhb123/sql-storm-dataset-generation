@@ -1,0 +1,77 @@
+
+WITH ranked_returns AS (
+    SELECT
+        sr.returning_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr.return_amt) AS total_return_amount,
+        ROW_NUMBER() OVER (PARTITION BY sr.returning_customer_sk ORDER BY SUM(sr.return_amt) DESC) AS rnk
+    FROM store_returns sr
+    GROUP BY sr.returning_customer_sk
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        COALESCE(d.d_current_year, 0) AS current_year,
+        COALESCE(CASE WHEN cd.cd_purchase_estimate > 1000 THEN 'High' ELSE 'Low' END, 'Unknown') AS purchase_segment,
+        (
+            SELECT COUNT(*)
+            FROM ranked_returns rr
+            WHERE rr.returning_customer_sk = c.c_customer_sk
+        ) AS returns_count,
+        (
+            SELECT AVG(ws.ws_net_profit)
+            FROM web_sales ws
+            WHERE ws.ws_bill_customer_sk = c.c_customer_sk
+            GROUP BY ws.ws_bill_customer_sk
+        ) AS average_web_profit
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN date_dim d ON c.c_first_sales_date_sk = d.d_date_sk
+    WHERE c.c_birth_year BETWEEN 1980 AND 2000 
+    AND (cd.cd_gender = 'M' OR cd.cd_gender IS NULL)
+    AND EXISTS (
+        SELECT 1
+        FROM store_sales ss
+        WHERE ss.ss_customer_sk = c.c_customer_sk
+        AND ss.ss_quantity > (
+            SELECT AVG(ss_inner.ss_quantity)
+            FROM store_sales ss_inner
+            WHERE ss_inner.ss_sold_date_sk < 2459545
+        )
+    )
+),
+filled_data AS (
+    SELECT 
+        cs.*,
+        COALESCE(cs.returns_count, 0) AS filled_returns_count,
+        COALESCE(cs.average_web_profit, 0) AS filled_average_web_profit
+    FROM customer_stats cs
+)
+SELECT 
+    fd.c_customer_id,
+    fd.c_first_name,
+    fd.c_last_name,
+    fd.cd_gender,
+    fd.purchase_segment,
+    fd.filled_returns_count,
+    fd.filled_average_web_profit
+FROM filled_data fd
+WHERE fd.filled_returns_count > 0
+ORDER BY fd.filled_average_web_profit DESC
+FETCH FIRST 100 ROWS ONLY;
+
+-- Including a test for obscure NULL logic handling with string expressions
+SELECT DISTINCT
+    CASE 
+        WHEN cd_gender IS NOT NULL THEN CONCAT('Gender: ', cd_gender)
+        ELSE 'Gender: Unknown'
+    END AS gender_info,
+    COUNT(*) AS number_of_customers
+FROM customer_demographics
+GROUP BY cd_gender
+HAVING COUNT(*) > 0 OR cd_gender IS NULL;

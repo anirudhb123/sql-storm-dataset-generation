@@ -1,0 +1,68 @@
+
+WITH ProcessedTags AS (
+    SELECT 
+        PostId,
+        UNNEST(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '> <')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+TagStats AS (
+    SELECT 
+        pt.Tag AS TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT ps.UserId) AS ContributingUsers,
+        COUNT(DISTINCT ps.UserId) * 1.0 / NULLIF(COUNT(DISTINCT p.Id), 0) AS AverageContributorsPerPost
+    FROM 
+        ProcessedTags pt
+    JOIN 
+        Posts p ON pt.PostId = p.Id
+    JOIN 
+        Posts ps ON p.Id = ps.Id
+    GROUP BY 
+        pt.Tag
+)
+
+SELECT 
+    ud.UserId,
+    ud.DisplayName,
+    ud.TotalPosts,
+    ud.TotalQuestions,
+    ud.TotalAnswers,
+    ud.GoldBadges,
+    ud.SilverBadges,
+    ud.BronzeBadges,
+    ts.TagName,
+    ts.PostCount,
+    ts.ContributingUsers,
+    ts.AverageContributorsPerPost
+FROM 
+    UserStats ud
+JOIN 
+    TagStats ts ON ts.ContributingUsers > 0 
+ORDER BY 
+    ts.PostCount DESC, 
+    ud.TotalPosts DESC
+LIMIT 50;

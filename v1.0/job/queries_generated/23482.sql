@@ -1,0 +1,74 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank,
+        COUNT(c.movie_id) OVER (PARTITION BY t.id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorDetails AS (
+    SELECT 
+        k.person_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        MAX(t.production_year) AS latest_movie_year,
+        MIN(t.production_year) AS earliest_movie_year
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    LEFT JOIN 
+        keyword k ON k.id = ANY(ARRAY(SELECT movie_keyword.keyword_id FROM movie_keyword WHERE movie_keyword.movie_id = t.id))
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        k.person_id, a.name
+),
+FilteredActors AS (
+    SELECT 
+        ad.actor_name,
+        ad.total_movies,
+        ad.latest_movie_year,
+        ad.earliest_movie_year,
+        ad.total_movies - LEAD(ad.total_movies) OVER (ORDER BY ad.latest_movie_year) AS successive_movie_variation
+    FROM 
+        ActorDetails ad
+    WHERE 
+        ad.total_movies > 0
+),
+LatestInfo AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.cast_count,
+        m.rank,
+        COALESCE(ri.info, 'No Additional Info') AS additional_info
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        movie_info ri ON m.movie_id = ri.movie_id 
+        AND ri.info_type_id = (SELECT id FROM info_type WHERE info LIKE '%rating%')
+)
+SELECT 
+    fa.actor_name,
+    l.title AS movie_title,
+    l.production_year,
+    l.cast_count,
+    l.additional_info,
+    fa.successive_movie_variation
+FROM 
+    FilteredActors fa
+INNER JOIN 
+    LatestInfo l ON fa.latest_movie_year = l.rank
+WHERE 
+    (fa.successive_movie_variation IS NOT NULL OR fa.successive_movie_variation = 0)
+ORDER BY 
+    fa.latest_movie_year DESC, fa.total_movies DESC;

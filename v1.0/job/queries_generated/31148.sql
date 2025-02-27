@@ -1,0 +1,84 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE
+        mh.depth < 3  -- Limit recursion to a depth of 3
+),
+RankedMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        RANK() OVER (PARTITION BY mh.production_year ORDER BY mh.depth) AS rank_within_year
+    FROM
+        MovieHierarchy mh
+    WHERE
+        mh.production_year IS NOT NULL
+),
+CastMatrix AS (
+    SELECT
+        ci.movie_id,
+        COUNT(ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY
+        ci.movie_id
+),
+MovieDetails AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        cm.actor_count,
+        COALESCE(cm.actor_names, 'No cast information') AS actor_names
+    FROM
+        RankedMovies rm
+    LEFT JOIN
+        CastMatrix cm ON rm.movie_id = cm.movie_id
+)
+SELECT
+    md.title,
+    md.production_year,
+    md.actor_count,
+    md.actor_names,
+    CASE 
+        WHEN md.actor_count IS NULL THEN 'No actors'
+        WHEN md.actor_count > 10 THEN 'Large cast'
+        ELSE 'Small cast'
+    END AS cast_size,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM
+    MovieDetails md
+LEFT JOIN
+    movie_keyword mk ON md.movie_id = mk.movie_id
+GROUP BY
+    md.movie_id, md.title, md.production_year, md.actor_count, md.actor_names
+HAVING
+    md.production_year >= 2000 AND
+    md.actor_count IS NOT NULL
+ORDER BY
+    md.production_year DESC, md.actor_count DESC;

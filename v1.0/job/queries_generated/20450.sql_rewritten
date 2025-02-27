@@ -1,0 +1,51 @@
+WITH Recursive ActorHierarchy AS (
+    SELECT c.id AS cast_id, c.person_id, c.movie_id, 
+           c.nur_order AS order_in_cast,
+           ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS row_num
+    FROM cast_info c
+    WHERE c.person_role_id IS NOT NULL
+),
+MovieDetails AS (
+    SELECT t.id AS movie_id, t.title, t.production_year,
+           ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM aka_title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE t.production_year >= 2000
+    GROUP BY t.id, t.title, t.production_year
+),
+ActorMovies AS (
+    SELECT ah.person_id, m.title, m.production_year 
+    FROM ActorHierarchy ah
+    JOIN MovieDetails m ON ah.movie_id = m.movie_id
+),
+DistinctActors AS (
+    SELECT DISTINCT person_id 
+    FROM ActorMovies
+),
+ActorInfo AS (
+    SELECT a.person_id, 
+           n.name AS actor_name, 
+           pi.info AS personal_info,
+           ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY pi.info_type_id DESC) AS info_rank
+    FROM DistinctActors a
+    JOIN name n ON a.person_id = n.imdb_id
+    LEFT JOIN person_info pi ON a.person_id = pi.person_id
+),
+CombinedActors AS (
+    SELECT ai.person_id, 
+           ai.actor_name, 
+           COALESCE(ai.personal_info, 'No Info') AS personal_info
+    FROM ActorInfo ai
+    WHERE ai.info_rank = 1
+)
+SELECT ca.actor_name,
+       COUNT(DISTINCT am.movie_id) AS total_movies,
+       STRING_AGG(DISTINCT md.keywords::text, ', ') AS movie_keywords 
+FROM CombinedActors ca
+JOIN ActorMovies am ON ca.person_id = am.person_id
+JOIN MovieDetails md ON am.title = md.title
+GROUP BY ca.actor_name
+HAVING COUNT(DISTINCT am.movie_id) > 3
+ORDER BY total_movies DESC
+LIMIT 10;

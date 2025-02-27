@@ -1,0 +1,50 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        B.Class,
+        COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName, B.Class
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty,
+        SUM(COALESCE(C.Score, 0)) AS TotalCommentScore,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY COUNT(P.Id) DESC) AS ActivityRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id
+),
+TopUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.PostCount,
+        UA.TotalBounty,
+        UA.TotalCommentScore,
+        UB.BadgeCount,
+        DENSE_RANK() OVER (ORDER BY UA.PostCount DESC) AS RankByPosts,
+        DENSE_RANK() OVER (ORDER BY UA.TotalBounty DESC) AS RankByBounty
+    FROM UserActivity UA
+    JOIN UserBadges UB ON UA.UserId = UB.UserId
+    WHERE UA.PostCount > 0
+)
+SELECT 
+    UserId,
+    DisplayName,
+    PostCount,
+    TotalBounty,
+    TotalCommentScore,
+    BadgeCount,
+    RankByPosts,
+    RankByBounty
+FROM TopUsers
+WHERE RankByPosts <= 10 OR RankByBounty <= 5
+ORDER BY RankByPosts, RankByBounty
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

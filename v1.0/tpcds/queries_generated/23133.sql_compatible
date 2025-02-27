@@ -1,0 +1,66 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT ca_address_sk, ca_address_id, ca_city, ca_state, ca_country, 1 AS level
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+
+    UNION ALL
+
+    SELECT a.ca_address_sk, a.ca_address_id, a.ca_city, a.ca_state, a.ca_country, ah.level + 1
+    FROM customer_address a
+    JOIN address_hierarchy ah ON a.ca_city = ah.ca_city AND a.ca_state = ah.ca_state
+    WHERE a.ca_address_sk != ah.ca_address_sk
+), 
+daily_sales AS (
+    SELECT 
+        d.d_date_sk, 
+        d.d_date, 
+        COALESCE(SUM(ws.ws_ext_sales_price), 0) AS total_sales
+    FROM 
+        date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_date_sk, d.d_date
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_gender,
+        CASE WHEN cd.cd_purchase_estimate < 500 THEN 'Low'
+             WHEN cd.cd_purchase_estimate BETWEEN 500 AND 1500 THEN 'Medium'
+             ELSE 'High' END AS purchase_category
+    FROM 
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        ci.c_first_name || ' ' || ci.c_last_name AS customer_name,
+        ci.purchase_category,
+        SUM(ds.total_sales) AS total_sales
+    FROM 
+        daily_sales ds
+    JOIN customer_info ci ON ds.d_date_sk = ci.rank_gender
+    GROUP BY 
+        ci.c_first_name, ci.c_last_name, ci.purchase_category
+)
+SELECT 
+    ah.ca_city,
+    ah.ca_state,
+    ah.ca_country,
+    ss.customer_name,
+    ss.purchase_category,
+    CASE WHEN ss.total_sales IS NULL THEN 'No Sales' 
+         ELSE CAST(ss.total_sales AS VARCHAR) END AS sales_info,
+    RANK() OVER (PARTITION BY ah.ca_city ORDER BY ss.total_sales DESC) AS sales_rank
+FROM 
+    address_hierarchy ah
+LEFT JOIN sales_summary ss ON ss.customer_name IS NOT NULL
+WHERE 
+    (ah.ca_country = 'USA' OR ah.ca_country IS NULL)
+    AND (ah.ca_state IN ('CA', 'TX', 'NY') OR ah.ca_state IS NULL)
+ORDER BY 
+    ah.ca_city, sales_rank
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

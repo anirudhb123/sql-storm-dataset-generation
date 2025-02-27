@@ -1,0 +1,91 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId 
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+),
+
+PostHistoryAggregation AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        COUNT(*) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+
+ClosedPostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT ph.Id) AS CloseReasonCount,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11)  
+    WHERE 
+        p.ClosedDate IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    ur.DisplayName AS OwnerDisplayName,
+    ur.Reputation AS OwnerReputation,
+    ur.TotalBounty,
+    pha.HistoryTypes,
+    pha.HistoryCount,
+    cps.CloseReasonCount,
+    cps.LastClosedDate,
+    COALESCE(cps.CloseReasonCount, 0) - COALESCE(pha.HistoryCount, 0) AS BizarreDifference,  
+    (SELECT AVG(V.Score) 
+     FROM Votes V 
+     WHERE V.PostId = rp.PostId 
+     AND (V.CreationDate > rp.CreationDate) 
+    ) AS AverageVoteAfterCreation
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+LEFT JOIN 
+    PostHistoryAggregation pha ON rp.PostId = pha.PostId
+LEFT JOIN 
+    ClosedPostSummary cps ON rp.PostId = cps.PostId
+WHERE 
+    rp.UserRank <= 5 
+ORDER BY 
+    rp.ViewCount DESC
+LIMIT 50;

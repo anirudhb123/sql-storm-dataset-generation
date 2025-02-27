@@ -1,0 +1,28 @@
+SELECT 
+    CONCAT('Part Name: ', p.p_name, ', Supplier Name: ', s.s_name, ', Customer Name: ', c.c_name) AS Benchmark_Info,
+    LENGTH(CONCAT(p.p_name, s.s_name, c.c_name)) AS Total_Length,
+    UPPER(p.p_name) AS Uppercase_Part_Name,
+    LEFT(s.s_name, 10) AS Supplier_Name_Short,
+    REPLACE(c.c_address, 'Street', 'St') AS Formatted_Address,
+    SUBSTRING_INDEX(n.n_name, ' ', 1) AS Short_Nation_Name,
+    TRIM(both ' ' from p.p_comment) AS Trimmed_Part_Comment
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON c.c_custkey IN (
+        SELECT o.o_custkey 
+        FROM orders o 
+        WHERE o.o_orderstatus = 'O'
+    )
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    p.p_size > 10 AND 
+    s.s_acctbal BETWEEN 1000 AND 5000
+ORDER BY 
+    Total_Length DESC
+LIMIT 100;

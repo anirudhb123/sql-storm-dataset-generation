@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVoteStats AS (
+    SELECT
+        p.OwnerUserId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId IN (1, 4) THEN 1 ELSE 0 END) AS AcceptedVotes
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    GROUP BY
+        p.OwnerUserId
+),
+CombinedData AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        rph.PostId,
+        rph.Title AS PostTitle,
+        rph.PostTypeId,
+        pvs.TotalVotes,
+        pvs.UpVotes,
+        pvs.DownVotes,
+        rph.Level
+    FROM 
+        Users u
+    LEFT JOIN 
+        RecursivePostHierarchy rph ON u.Id = rph.PostId
+    LEFT JOIN 
+        PostVoteStats pvs ON u.Id = pvs.OwnerUserId
+),
+FinalOutput AS (
+    SELECT 
+        cd.UserId,
+        cd.DisplayName,
+        cd.Reputation,
+        cd.Views,
+        cd.PostId,
+        cd.PostTitle,
+        cd.PostTypeId,
+        cd.TotalVotes,
+        cd.UpVotes,
+        cd.DownVotes,
+        cd.Level,
+        ROW_NUMBER() OVER (PARTITION BY cd.UserId ORDER BY cd.Reputation DESC) AS UserRank
+    FROM 
+        CombinedData cd
+    WHERE 
+        cd.TotalVotes > 0 
+)
+SELECT 
+    fo.UserId,
+    fo.DisplayName,
+    fo.Reputation,
+    fo.Views,
+    fo.PostId,
+    fo.PostTitle,
+    fo.PostTypeId,
+    fo.TotalVotes,
+    fo.UpVotes,
+    fo.DownVotes,
+    fo.Level,
+    fo.UserRank
+FROM 
+    FinalOutput fo
+WHERE 
+    fo.UserRank <= 5 
+ORDER BY 
+    fo.Reputation DESC, fo.UserId;

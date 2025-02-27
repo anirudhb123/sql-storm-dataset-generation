@@ -1,0 +1,67 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopRatedMovies AS (
+    SELECT 
+        ct.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        complete_cast cc
+    JOIN 
+        movie_keyword k ON cc.movie_id = k.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        movie_companies mc ON cc.movie_id = mc.movie_id
+    WHERE 
+        cc.status_id = (SELECT id FROM info_type WHERE info = 'released')
+        AND cc.movie_id IN (SELECT movie_id FROM RankedTitles WHERE year_rank = 1)
+    GROUP BY 
+        cc.movie_id
+),
+AggregatedInfo AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COALESCE(r.keyword_count, 0) AS keyword_count,
+        COALESCE(r.actor_count, 0) AS actor_count,
+        COALESCE(r.company_count, 0) AS company_count,
+        CASE 
+            WHEN COALESCE(r.keyword_count, 0) > 0 THEN 'Has Keywords' 
+            ELSE 'No Keywords' 
+        END AS keyword_status,
+        CASE 
+            WHEN COALESCE(r.actor_count, 0) >= 5 THEN 'Top Cast'
+            ELSE 'Small Cast'
+        END AS cast_size
+    FROM 
+        RankedTitles t
+    LEFT JOIN 
+        TopRatedMovies r ON t.title_id = r.movie_id
+)
+SELECT 
+    a.title,
+    a.production_year,
+    a.keyword_count,
+    a.actor_count,
+    a.company_count,
+    a.keyword_status,
+    a.cast_size,
+    (a.actor_count - COALESCE(NULLIF(a.company_count, 0), 1)) * 2 AS adjusted_role_count
+FROM 
+    AggregatedInfo a
+WHERE 
+    a.production_year BETWEEN 1990 AND 2023
+ORDER BY 
+    a.production_year DESC, a.keyword_count DESC
+LIMIT 100;

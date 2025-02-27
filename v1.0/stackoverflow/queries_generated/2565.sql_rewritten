@@ -1,0 +1,85 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS TotalBadges,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(P.Score) AS TotalScore,
+        COUNT(C.Id) AS TotalComments,
+        AVG(P.ViewCount) AS AverageViews
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.OwnerUserId
+),
+CombinedStats AS (
+    SELECT
+        UB.UserId,
+        UB.DisplayName,
+        COALESCE(PS.TotalPosts, 0) AS TotalPosts,
+        COALESCE(PS.TotalScore, 0) AS TotalScore,
+        COALESCE(PS.TotalComments, 0) AS TotalComments,
+        UB.TotalBadges,
+        UB.GoldBadges,
+        UB.SilverBadges,
+        UB.BronzeBadges
+    FROM 
+        UserBadges UB
+    LEFT JOIN 
+        PostStatistics PS ON UB.UserId = PS.OwnerUserId
+)
+SELECT 
+    C.DisplayName,
+    C.TotalPosts,
+    C.TotalScore,
+    C.TotalComments,
+    C.TotalBadges,
+    C.GoldBadges,
+    C.SilverBadges,
+    C.BronzeBadges,
+    CASE 
+        WHEN C.TotalPosts > 100 THEN 'Expert'
+        WHEN C.TotalPosts BETWEEN 50 AND 100 THEN 'Intermediate'
+        WHEN C.TotalPosts < 50 THEN 'Novice' 
+        ELSE 'No Posts'
+    END AS UserLevel
+FROM 
+    CombinedStats C
+WHERE 
+    C.TotalBadges > 5 AND 
+    C.TotalScore > 50
+ORDER BY 
+    C.TotalScore DESC
+FETCH FIRST 10 ROWS ONLY
+UNION ALL
+SELECT 
+    'Overall' AS DisplayName,
+    COUNT(*) AS TotalPosts,
+    SUM(COALESCE(TotalScore, 0)) AS TotalScore,
+    SUM(COALESCE(TotalComments, 0)) AS TotalComments,
+    COUNT(DISTINCT UserId) AS TotalBadges,
+    COUNT(DISTINCT CASE WHEN GoldBadges > 0 THEN UserId END) AS GoldBadges,
+    COUNT(DISTINCT CASE WHEN SilverBadges > 0 THEN UserId END) AS SilverBadges,
+    COUNT(DISTINCT CASE WHEN BronzeBadges > 0 THEN UserId END) AS BronzeBadges,
+    'N/A' AS UserLevel
+FROM 
+    CombinedStats
+WHERE 
+    TotalScore IS NOT NULL;

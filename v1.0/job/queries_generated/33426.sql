@@ -1,0 +1,62 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.id AS cast_id,
+        a.person_id,
+        a.movie_id,
+        a.role_id,
+        1 AS level
+    FROM 
+        cast_info a
+    JOIN 
+        aka_name n ON a.person_id = n.person_id
+    WHERE 
+        n.name ILIKE '%Smith%'  -- Starting point for hierarchy, example surname
+
+    UNION ALL
+
+    SELECT 
+        c.id AS cast_id,
+        a.person_id,
+        a.movie_id,
+        a.role_id,
+        ah.level + 1 AS level
+    FROM 
+        cast_info a
+    JOIN 
+        ActorHierarchy ah ON a.movie_id = ah.movie_id
+    JOIN 
+        aka_name n ON a.person_id = n.person_id
+    WHERE 
+        n.name ILIKE '%Johnson%'  -- Extend hierarchy with another surname for additional connections
+)
+
+SELECT
+    t.title AS movie_title,
+    ARRAY_AGG(DISTINCT n.name) AS actor_names,
+    COUNT(DISTINCT ah.cast_id) AS number_of_actors,
+    AVG(CASE WHEN m.production_year IS NOT NULL THEN m.production_year ELSE NULL END) AS avg_production_year,
+    COUNT(DISTINCT m.id) FILTER (WHERE m.production_year IS NOT NULL) AS non_null_production_year_count,
+    COALESCE(MAX(m.production_year), 'Unknown') AS latest_movie_year,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords
+FROM 
+    ActorHierarchy ah
+JOIN 
+    aka_title at ON ah.movie_id = at.movie_id
+JOIN 
+    title t ON t.id = at.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN 
+    movie_info m ON m.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+LEFT JOIN 
+    company_name cn ON cn.id = mc.company_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND (ah.role_id IS NOT NULL OR ah.role_id IS NULL)  -- NULL logic to include all roles
+GROUP BY 
+    t.title
+ORDER BY 
+    number_of_actors DESC, latest_movie_year DESC
+LIMIT 10;

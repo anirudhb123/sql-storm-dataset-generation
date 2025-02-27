@@ -1,0 +1,80 @@
+
+WITH RECURSIVE UserPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.AcceptedAnswerId,
+        COALESCE(SUM(CASE WHEN vt.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN vt.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes vt ON vt.PostId = p.Id
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    GROUP BY u.Id, p.Id, p.AcceptedAnswerId, p.LastActivityDate
+),
+PostStatistics AS (
+    SELECT 
+        UserId,
+        COUNT(PostId) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN AcceptedAnswerId IS NOT NULL THEN AcceptedAnswerId END) AS AcceptedAnswers,
+        COUNT(DISTINCT CASE WHEN LastActivityDate < (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year') THEN PostId END) AS InactivePosts,
+        SUM(UpVotes) - SUM(DownVotes) AS Score
+    FROM UserPosts
+    GROUP BY UserId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        p.TotalPosts,
+        p.AcceptedAnswers,
+        p.InactivePosts,
+        p.Score,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS Ranking
+    FROM Users u
+    JOIN PostStatistics p ON u.Id = p.UserId
+    WHERE u.LastAccessDate >= DATE_TRUNC('month', (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 month'))
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.Comment AS CloseReason,
+        ph.CreationDate AS CloseDate,
+        u.DisplayName AS CloserUser
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    JOIN Users u ON ph.UserId = u.Id
+    WHERE ph.PostHistoryTypeId = 10 
+),
+TopClosedPosts AS (
+    SELECT 
+        cp.PostId,
+        cp.Title,
+        cp.CloseReason,
+        cp.CloseDate,
+        cp.CloserUser,
+        ROW_NUMBER() OVER (ORDER BY cp.CloseDate DESC) AS CloseRank
+    FROM ClosedPosts cp
+    WHERE CloseDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '6 months')
+)
+SELECT
+    au.DisplayName AS UserDisplayName,
+    au.TotalPosts,
+    au.AcceptedAnswers,
+    au.InactivePosts,
+    au.Score,
+    tcp.Title,
+    tcp.CloseReason,
+    tcp.CloseDate,
+    tcp.CloserUser
+FROM ActiveUsers au
+LEFT JOIN TopClosedPosts tcp ON au.UserId = tcp.PostId 
+WHERE au.TotalPosts > 5 
+  AND (tcp.CloseRank IS NULL OR tcp.CloseRank <= 5) 
+ORDER BY au.Score DESC
+LIMIT 50;

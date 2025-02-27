@@ -1,0 +1,69 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CAST(s.s_name AS VARCHAR(255)) AS hierarchy_path,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000.00
+
+    UNION ALL
+
+    SELECT 
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CONCAT(sh.hierarchy_path, ' -> ', s.s_name),
+        sh.level + 1
+    FROM 
+        supplier_hierarchy sh
+    JOIN 
+        partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        sh.level < 5
+),
+
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(li.l_orderkey) AS item_count,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+    GROUP BY 
+        o.o_orderkey
+)
+
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    COALESCE(oss.item_count, 0) AS order_item_count,
+    COALESCE(oss.total_revenue, 0.00) AS order_total_revenue,
+    sh.hierarchy_path,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY COALESCE(oss.total_revenue, 0) DESC) AS revenue_rank
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    order_summary oss ON s.s_suppkey = oss.o_orderkey
+LEFT JOIN 
+    supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE 
+    r.r_comment IS NOT NULL 
+    AND (s.s_acctbal < COALESCE((SELECT AVG(s2.s_acctbal) FROM supplier s2), 5000) OR s.s_acctbal IS NULL)
+    AND sh.level IS NOT NULL
+ORDER BY 
+    r.r_name, n.n_name, revenue_rank DESC;

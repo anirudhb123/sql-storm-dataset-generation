@@ -1,0 +1,80 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (
+            SELECT MIN(d_date_sk) 
+            FROM date_dim 
+            WHERE d_year = 2023
+        )
+    GROUP BY 
+        ws_item_sk
+),
+item_inventory AS (
+    SELECT 
+        i.i_item_sk,
+        COALESCE(SUM(i_quantity_on_hand), 0) AS total_inventory
+    FROM 
+        item i
+    LEFT JOIN 
+        inventory inv ON i.i_item_sk = inv.inv_item_sk
+    GROUP BY 
+        i.i_item_sk
+),
+customer_info AS (
+    SELECT 
+        customer.c_customer_sk,
+        customer.c_first_name,
+        customer.c_last_name,
+        cd.cd_income_band_sk,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Other'
+        END AS marital_status
+    FROM 
+        customer
+    JOIN 
+        customer_demographics cd ON customer.c_current_cdemo_sk = cd.cd_demo_sk
+),
+ranked_customers AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.marital_status,
+        ROW_NUMBER() OVER (PARTITION BY ci.marital_status ORDER BY SUM(ws_ext_sales_price) DESC) AS customer_rank
+    FROM 
+        customer_info ci
+    LEFT JOIN 
+        web_sales ws ON ci.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        ci.c_customer_sk, ci.c_first_name, ci.c_last_name, ci.marital_status
+)
+SELECT 
+    item.i_item_sk,
+    item.i_item_desc,
+    sales.total_sales,
+    inventory.total_inventory,
+    customer.c_first_name,
+    customer.c_last_name,
+    customer.marital_status
+FROM 
+    item i
+JOIN 
+    sales_summary sales ON i.i_item_sk = sales.ws_item_sk
+JOIN 
+    item_inventory inventory ON i.i_item_sk = inventory.i_item_sk
+JOIN 
+    ranked_customers customer ON sales.sales_rank = 1 AND customer.customer_rank <= 10
+WHERE 
+    inventory.total_inventory > 0
+ORDER BY 
+    sales.total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

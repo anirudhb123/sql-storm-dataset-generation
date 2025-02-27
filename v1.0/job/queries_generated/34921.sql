@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        a.title,
+        a.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    p.name AS person_name,
+    r.role AS role_name,
+    COALESCE(gender_count.male_count, 0) AS male_count,
+    COALESCE(gender_count.female_count, 0) AS female_count,
+    NULLIF(gender_count.male_count - gender_count.female_count, 0) AS gender_difference,
+    CASE 
+        WHEN gender_count.male_count > gender_count.female_count THEN 'More Males'
+        WHEN gender_count.female_count > gender_count.male_count THEN 'More Females'
+        ELSE 'Equal'
+    END AS gender_ratio
+FROM 
+    MovieHierarchy mh
+JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+JOIN 
+    name p ON ci.person_id = p.id
+JOIN 
+    role_type r ON ci.role_id = r.id
+LEFT JOIN (
+    SELECT 
+        ci.movie_id,
+        SUM(CASE WHEN p.gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+        SUM(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS female_count
+    FROM 
+        cast_info ci
+    JOIN 
+        name p ON ci.person_id = p.id
+    GROUP BY 
+        ci.movie_id
+) AS gender_count ON mh.movie_id = gender_count.movie_id
+WHERE 
+    mh.production_year IS NOT NULL 
+    AND mh.level = 1
+ORDER BY 
+    mh.production_year DESC,
+    m.title;

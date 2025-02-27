@@ -1,0 +1,70 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (
+        SELECT AVG(s_acctbal)
+        FROM supplier
+        WHERE s_nationkey IS NOT NULL
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+AggregatedLineItems AS (
+    SELECT l_orderkey, SUM(l_extendedprice * (1 - l_discount)) AS net_revenue
+    FROM lineitem
+    WHERE l_returnflag = 'N' 
+    GROUP BY l_orderkey
+),
+QualifiedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate
+    FROM orders o
+    LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE c.c_acctbal IS NOT NULL 
+    AND EXISTS (
+        SELECT 1
+        FROM lineitem l
+        WHERE l.l_orderkey = o.o_orderkey
+        AND l.l_quantity > (
+            SELECT AVG(l_quantity)
+            FROM lineitem
+            WHERE l_orderkey = o.o_orderkey
+        )
+    )
+),
+RegionAggregates AS (
+    SELECT r.r_regionkey, COUNT(DISTINCT n.n_nationkey) AS total_nations, 
+           SUM(p.p_retailprice) AS total_retail_value
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN part p ON p.p_mfgr LIKE '%manufacturer%'
+    GROUP BY r.r_regionkey
+),
+FinalResults AS (
+    SELECT rh.s_name,
+           COALESCE(a.net_revenue, 0) AS total_revenue,
+           ra.total_nations,
+           ra.total_retail_value,
+           ROW_NUMBER() OVER (PARTITION BY ra.r_regionkey ORDER BY COALESCE(a.net_revenue, 0) DESC) AS rn
+    FROM SupplierHierarchy rh
+    LEFT JOIN AggregatedLineItems a ON rh.s_suppkey = a.l_orderkey
+    JOIN RegionAggregates ra ON ra.total_nations > 0
+    WHERE rh.level = 1
+)
+SELECT fr.s_name, 
+       fr.total_revenue, 
+       fr.total_nations,
+       fr.total_retail_value
+FROM FinalResults fr
+WHERE fr.rn <= 10
+ORDER BY fr.total_revenue DESC
+UNION ALL
+SELECT 'Total', 
+       SUM(total_revenue),
+       SUM(total_nations),
+       SUM(total_retail_value)
+FROM FinalResults
+WHERE total_revenue > 0
+HAVING COUNT(*) > 5;

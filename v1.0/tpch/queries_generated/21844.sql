@@ -1,0 +1,80 @@
+WITH ranked_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY SUM(ps.ps_supplycost) DESC) AS rank_within_brand
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+),
+nation_with_comment AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        CASE 
+            WHEN n.n_comment LIKE '%important%' THEN 'High Priority'
+            ELSE 'Regular'
+        END AS priority_level
+    FROM 
+        nation n
+),
+suppliers_with_priority AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.priority_level,
+        ROW_NUMBER() OVER (PARTITION BY n.priority_level ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation_with_comment n ON s.s_nationkey = n.n_nationkey
+)
+SELECT 
+    rn.n_name,
+    COALESCE(rp.p_name, 'Unknown Part') AS part_name,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+    SUM(li.l_quantity) AS total_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    CASE 
+        WHEN SUM(li.l_tax) IS NULL THEN 'No Tax Data'
+        WHEN SUM(li.l_tax) > 1000 THEN 'High Tax'
+        ELSE 'Normal Tax'
+    END AS tax_status
+FROM 
+    orders o
+JOIN 
+    lineitem li ON o.o_orderkey = li.l_orderkey
+JOIN 
+    ranked_parts rp ON li.l_partkey = rp.p_partkey
+LEFT JOIN 
+    nation rn ON o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = rn.n_nationkey)
+LEFT JOIN 
+    suppliers_with_priority sp ON li.l_suppkey = sp.s_suppkey AND sp.supplier_rank = 1
+WHERE 
+    (o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31')
+    AND (rp.rank_within_brand <= 5 OR rp.p_partkey IS NULL)
+GROUP BY 
+    rn.n_name, rp.p_name
+HAVING 
+    SUM(li.l_extendedprice) > 50000
+ORDER BY 
+    total_revenue DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Aggregate Total' AS n_name,
+    NULL AS part_name,
+    SUM(li.l_extendedprice * (1 - li.l_discount)),
+    SUM(li.l_quantity),
+    COUNT(DISTINCT o.o_orderkey)
+FROM 
+    orders o
+JOIN 
+    lineitem li ON o.o_orderkey = li.l_orderkey
+WHERE 
+    o.o_orderdate > '2022-12-31';

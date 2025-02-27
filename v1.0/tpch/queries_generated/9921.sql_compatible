@@ -1,0 +1,77 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+),
+CustomerSpending AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighSpendingCustomers AS (
+    SELECT 
+        cs.c_custkey,
+        cs.c_name,
+        cs.total_spent,
+        RANK() OVER (ORDER BY cs.total_spent DESC) AS spending_rank
+    FROM 
+        CustomerSpending cs
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    hs.c_name AS customer_name,
+    hs.total_spent,
+    ts.s_name AS supplier_name,
+    ts.total_supply_cost,
+    ro.o_orderstatus,
+    ro.o_totalprice,
+    ro.o_orderdate
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    TopSuppliers ts ON s.s_suppkey = ts.s_suppkey
+JOIN 
+    RankedOrders ro ON ro.o_orderkey IN (
+        SELECT l.l_orderkey 
+        FROM lineitem l 
+        WHERE l.l_suppkey = s.s_suppkey
+    )
+JOIN 
+    HighSpendingCustomers hs ON hs.c_custkey = ro.o_custkey
+WHERE 
+    hs.spending_rank <= 10 AND ro.order_rank <= 5
+ORDER BY 
+    r.r_name, n.n_name, hs.total_spent DESC, ro.o_totalprice DESC;

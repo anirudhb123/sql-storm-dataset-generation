@@ -1,0 +1,69 @@
+WITH UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId IN (6, 7) THEN 1 ELSE 0 END), 0) AS TotalCloseReopenVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS TimesClosed,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS TimesReopened,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE P.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title, P.CreationDate, P.ViewCount
+),
+PostRanked AS (
+    SELECT 
+        PS.*, 
+        COALESCE(R.TotalUpvotes - R.TotalDownvotes, 0) AS NetVotes
+    FROM PostSummary PS
+    LEFT JOIN UserVoteCounts R ON PS.PostId = R.UserId  -- Poor join logic to induce confusion
+)
+SELECT 
+    PR.Title,
+    PR.ViewCount,
+    PR.CommentCount,
+    PR.TimesClosed,
+    PR.TimesReopened,
+    PR.NetVotes,
+    P.OwnerUserId,
+    U.DisplayName,
+    CASE 
+        WHEN PR.ViewCount IS NULL THEN 'Unknown Views'
+        WHEN PR.CommentCount > 10 THEN 'Highly Engaged'
+        WHEN PR.CommentCount = 0 THEN 'No Interaction'
+        ELSE 'Moderately Engaged'
+    END AS EngagementLevel,
+    COALESCE(P.CreationDate, 'N/A') AS CreatedAt,  -- NULL logic demonstration
+    (SELECT COUNT(*) FROM Posts P1 WHERE P1.ResourceTypeId = P.ResourceTypeId AND P1.Id <> PR.PostId) AS RelatedPostCount,
+    STRING_AGG(PH.Comment, ', ') WITHIN GROUP (ORDER BY PH.CreationDate DESC) AS LastComments
+FROM PostRanked PR
+JOIN Posts P ON PR.PostId = P.Id
+LEFT JOIN Users U ON P.OwnerUserId = U.Id
+LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+WHERE PR.NetVotes > 0
+GROUP BY 
+    PR.Title, 
+    PR.ViewCount, 
+    PR.CommentCount, 
+    PR.TimesClosed,
+    PR.TimesReopened,
+    PR.NetVotes,
+    P.OwnerUserId, 
+    U.DisplayName, 
+    P.CreationDate
+ORDER BY PR.ViewCount DESC, PR.TimesClosed ASC NULLS LAST
+LIMIT 50;

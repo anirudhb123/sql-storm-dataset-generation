@@ -1,0 +1,48 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws_order_number, ws_item_sk, ws_quantity, ws_sales_price, ws_sold_date_sk 
+    FROM web_sales 
+    WHERE ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+    UNION ALL
+    SELECT cs_order_number, cs_item_sk, cs_quantity, cs_sales_price, cs_sold_date_sk 
+    FROM catalog_sales 
+    WHERE cs_order_number NOT IN (SELECT ws_order_number FROM web_sales)
+),
+RefundCTE AS (
+    SELECT 
+        COALESCE(sr_item_sk, cr_item_sk) AS item_sk, 
+        SUM(COALESCE(sr_return_quantity, 0) + COALESCE(cr_return_quantity, 0)) AS total_returns, 
+        SUM(COALESCE(sr_return_amt, 0) + COALESCE(cr_return_amount, 0)) AS total_return_amount
+    FROM store_returns sr
+    FULL OUTER JOIN catalog_returns cr ON sr_item_sk = cr_item_sk
+    GROUP BY COALESCE(sr_item_sk, cr_item_sk)
+),
+SalesSummary AS (
+    SELECT 
+        s.item_sk,
+        SUM(s.quantity) AS total_sold,
+        SUM(s.sales_price * s.quantity) AS total_sales,
+        COALESCE(r.total_returns, 0) AS total_returns,
+        COALESCE(r.total_return_amount, 0) AS total_return_amount,
+        ROW_NUMBER() OVER (PARTITION BY s.item_sk ORDER BY SUM(s.sales_price * s.quantity) DESC) AS sales_rank
+    FROM SalesCTE s
+    LEFT JOIN RefundCTE r ON s.item_sk = r.item_sk
+    GROUP BY s.item_sk, r.total_returns, r.total_return_amount
+    HAVING SUM(s.sales_price * s.quantity) > 1000
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    ss.total_sold,
+    ss.total_sales,
+    ss.total_returns,
+    ss.total_return_amount,
+    CASE 
+        WHEN ss.total_sales > 5000 THEN 'High Performer' 
+        WHEN ss.total_sales BETWEEN 1000 AND 5000 THEN 'Average Performer' 
+        ELSE 'Low Performer' 
+    END AS performance_category
+FROM SalesSummary ss
+JOIN item i ON ss.item_sk = i.i_item_sk
+WHERE ss.sales_rank = 1
+ORDER BY ss.total_sales DESC;

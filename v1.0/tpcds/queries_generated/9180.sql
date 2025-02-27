@@ -1,0 +1,60 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_sold_date_sk AS sold_date,
+        COUNT(ws.ws_order_number) AS total_sales,
+        SUM(ws.ws_sales_price) AS total_revenue,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        d.d_year AS year,
+        d.d_month_seq AS month
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2022 AND 2023
+    GROUP BY 
+        d.d_year, d.d_month_seq
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        cd.cd_gender,
+        ib.ib_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, ib.ib_income_band_sk
+),
+summary AS (
+    SELECT 
+        sd.year, 
+        sd.month, 
+        SUM(sd.total_sales) AS sales_count, 
+        SUM(sd.total_revenue) AS revenue,
+        AVG(cd.customer_count) AS avg_customers
+    FROM 
+        sales_data sd
+    LEFT JOIN 
+        customer_demographics cd ON sd.year = 2022  -- Intersect only for the year 2022
+    GROUP BY 
+        sd.year, sd.month
+)
+SELECT 
+    s.year,
+    s.month,
+    s.sales_count,
+    s.revenue,
+    s.avg_customers
+FROM 
+    summary s
+ORDER BY 
+    s.year DESC, 
+    s.month DESC;

@@ -1,0 +1,66 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+), 
+
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title, p.CreationDate, p.Score, p.AcceptedAnswerId
+), 
+
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 24)
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(pd.CommentCount, 0) AS Comments,
+    COALESCE(pd.Score, 0) AS PostScore,
+    COALESCE(pd.UpVoteCount, 0) AS UpVotes,
+    COALESCE(pd.DownVoteCount, 0) AS DownVotes,
+    COALESCE(pd.PostScore, 0) * 1.0 / NULLIF(COALESCE(pd.CommentCount, 0), 0) AS ScorePerComment,
+    COALESCE(p.EditCount, 0) AS TotalEdits,
+    RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRanking
+FROM 
+    RankedUsers u
+LEFT JOIN 
+    PostDetails pd ON u.UserId = pd.OwnerUserId
+LEFT JOIN 
+    PostHistoryDetails p ON pd.PostId = p.PostId
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    ReputationRanking, u.DisplayName;

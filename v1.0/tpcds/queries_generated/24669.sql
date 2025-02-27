@@ -1,0 +1,77 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk
+),
+top_sales AS (
+    SELECT 
+        r.web_site_sk,
+        r.total_sales
+    FROM 
+        ranked_sales r
+    WHERE 
+        r.sales_rank <= 5
+),
+customer_return_data AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS total_returns
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+customer_metrics AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(c.c_current_cdemo_sk, c.c_current_hdemo_sk) AS demographic_sk,
+        CASE 
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            ELSE 'Unknown'
+        END AS gender,
+        SUM(COALESCE(ws.ws_sales_price, 0)) AS total_spent,
+        SUM(COALESCE(cr.cr_return_amount, 0)) AS total_refunded
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender
+)
+SELECT 
+    cm.c_customer_sk,
+    cm.gender,
+    cm.total_spent,
+    cm.total_refunded,
+    CASE 
+        WHEN cm.total_spent IS NULL THEN 'No Purchases'
+        WHEN cm.total_spent = 0 THEN 'Freebie Finder'
+        WHEN cm.total_spent > 1000 THEN 'High Roller'
+        ELSE 'Casual Shopper'
+    END AS shopper_type,
+    ts.total_sales AS top_site_sales
+FROM 
+    customer_metrics cm
+LEFT JOIN 
+    top_sales ts ON cm.c_customer_sk = ts.web_site_sk
+WHERE 
+    (cm.total_spent - cm.total_refunded) > 100 
+    OR cm.gender IS NULL
+    OR (cm.gender IS NOT NULL AND cm.total_spent < 100)
+ORDER BY 
+    cm.total_spent DESC NULLS LAST;

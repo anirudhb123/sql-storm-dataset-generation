@@ -1,0 +1,87 @@
+
+WITH RecursivePostTree AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostTree rpt ON p.ParentId = rpt.PostId
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    rpt.PostId,
+    rpt.Title,
+    ur.DisplayName AS OwnerName,
+    ur.Reputation AS OwnerReputation,
+    pst.CommentCount,
+    pst.VoteCount,
+    pst.UpVotes,
+    pst.DownVotes,
+    CASE 
+        WHEN pst.CommentCount > 0 THEN 'Has Comments'
+        ELSE 'No Comments' 
+    END AS CommentStatus,
+    CASE 
+        WHEN pst.UpVotes - pst.DownVotes > 0 THEN 'Positive Feedback'
+        ELSE 'No Positive Feedback' 
+    END AS FeedbackStatus,
+    COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostsCount
+FROM 
+    RecursivePostTree rpt
+LEFT JOIN 
+    Users ur ON rpt.OwnerUserId = ur.Id
+LEFT JOIN 
+    PostStatistics pst ON rpt.PostId = pst.PostId
+LEFT JOIN 
+    PostLinks pl ON rpt.PostId = pl.PostId
+GROUP BY 
+    rpt.PostId, rpt.Title, ur.DisplayName, ur.Reputation, pst.CommentCount, pst.VoteCount, pst.UpVotes, pst.DownVotes
+HAVING 
+    COUNT(DISTINCT pl.RelatedPostId) > 0
+ORDER BY 
+    ur.Reputation DESC, rpt.PostId
+LIMIT 100 OFFSET 0;

@@ -1,0 +1,72 @@
+
+WITH RECURSIVE Sales_Totals AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rnk
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey
+),
+Filtered_Suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > (
+            SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_acctbal IS NOT NULL
+        )
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+Top_Sales AS (
+    SELECT 
+        cust.c_custkey,
+        cust.total_sales,
+        CASE 
+            WHEN cust.total_sales > 10000 THEN 'High Value'
+            WHEN cust.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value
+    FROM 
+        Sales_Totals cust
+    WHERE 
+        cust.rnk = 1
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(f.total_supplycost, 0) AS total_supply_cost,
+    COALESCE(t.total_sales, 0) AS customer_total_sales,
+    t.customer_value
+FROM 
+    part p
+LEFT JOIN 
+    Filtered_Suppliers f ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = f.s_suppkey)
+LEFT JOIN 
+    Top_Sales t ON t.c_custkey IN (
+        SELECT o.o_custkey 
+        FROM orders o 
+        JOIN lineitem li ON o.o_orderkey = li.l_orderkey 
+        WHERE li.l_partkey = p.p_partkey
+    )
+WHERE 
+    p.p_container IS NOT NULL
+    AND (p.p_retailprice > 50 OR EXISTS (
+        SELECT 1 
+        FROM lineitem li2 
+        WHERE li2.l_partkey = p.p_partkey 
+        AND li2.l_discount > 0.2
+    ))
+ORDER BY 
+    p.p_partkey, total_supply_cost DESC;

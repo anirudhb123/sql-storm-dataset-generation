@@ -1,0 +1,45 @@
+WITH RECURSIVE supplier_part AS (
+    SELECT s.s_suppkey, p.p_partkey, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY p.p_retailprice DESC) as rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size > 10
+), high_value_orders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) as total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate > '2023-01-01'
+    GROUP BY o.o_orderkey
+    HAVING total_revenue > 50000
+), customer_nations AS (
+    SELECT c.c_custkey, n.n_nationkey, n.n_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE n.n_comment IS NOT NULL
+), ranked_suppliers AS (
+    SELECT sp.*, ROW_NUMBER() OVER (PARTITION BY sp.p_partkey ORDER BY sp.s_acctbal DESC) AS supplier_rank
+    FROM supplier_part sp
+    WHERE sp.rank <= 5
+), combined_data AS (
+    SELECT cn.n_name, COUNT(DISTINCT ho.o_orderkey) AS order_count
+    FROM customer_nations cn
+    LEFT JOIN high_value_orders ho ON cn.c_custkey = ho.o_orderkey
+    GROUP BY cn.n_name
+), final_output AS (
+    SELECT r.n_name, COALESCE(cd.order_count, 0) AS total_orders, 
+           SUM(CASE WHEN ss.rank IS NOT NULL THEN ss.s_acctbal ELSE 0 END) as total_balance
+    FROM customer_nations cn
+    LEFT JOIN combined_data cd ON cn.n_name = cd.n_name
+    LEFT JOIN ranked_suppliers ss ON cn.n_nationkey = ss.p_partkey
+    GROUP BY r.n_name
+)
+SELECT f.n_name, f.total_orders, f.total_balance, 
+       CASE 
+           WHEN f.total_orders > 0 THEN 'Active'
+           ELSE 'Inactive'
+       END AS customer_status
+FROM final_output f
+WHERE f.total_balance > (SELECT AVG(s_acctbal) FROM supplier WHERE s_comment LIKE '%loyal%')
+ORDER BY f.total_orders DESC, f.total_balance DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

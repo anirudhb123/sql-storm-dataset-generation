@@ -1,0 +1,56 @@
+WITH OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopOrders AS (
+    SELECT 
+        os.o_orderkey,
+        os.o_orderdate,
+        os.total_sales,
+        os.unique_parts
+    FROM 
+        OrderSummary os
+    WHERE 
+        os.rank_sales <= 5
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(CASE WHEN s.s_acctbal IS NOT NULL THEN ps.ps_availqty ELSE 0 END) AS total_available_quantity
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    t.o_orderkey,
+    t.o_orderdate,
+    t.total_sales,
+    t.unique_parts,
+    COALESCE(sp.total_available_quantity, 0) AS total_available_quantity,
+    CONCAT('Order #', t.o_orderkey, ' made on ', t.o_orderdate) AS order_description
+FROM 
+    TopOrders t
+LEFT JOIN 
+    SupplierParts sp ON t.o_orderkey = (SELECT o.o_orderkey 
+                                          FROM lineitem l 
+                                          JOIN orders o ON l.l_orderkey = o.o_orderkey 
+                                          WHERE l.l_partkey IN (SELECT ps.ps_partkey FROM partsupp ps)
+                                          LIMIT 1)
+ORDER BY 
+    t.total_sales DESC, 
+    t.o_orderdate ASC;

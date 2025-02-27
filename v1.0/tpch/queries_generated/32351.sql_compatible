@@ -1,0 +1,50 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON ps.ps_suppkey = sh.s_suppkey
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice < 100.00 AND sh.level < 3
+),
+order_summaries AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+nation_stats AS (
+    SELECT n.n_nationkey, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey
+),
+supplier_orders AS (
+    SELECT s.s_suppkey, COUNT(o.o_orderkey) AS order_count
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY s.s_suppkey
+),
+final_summary AS (
+    SELECT n.n_name, 
+           n_stats.supplier_count, 
+           COALESCE(s_orders.order_count, 0) AS order_count,
+           (SELECT COUNT(*) FROM supplier_hierarchy sh WHERE sh.s_nationkey = n.n_nationkey) AS active_suppliers
+    FROM nation n
+    LEFT JOIN nation_stats n_stats ON n.n_nationkey = n_stats.n_nationkey
+    LEFT JOIN supplier_orders s_orders ON n.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = s_orders.s_suppkey LIMIT 1)
+)
+SELECT final_summary.*, 
+       CONCAT(final_summary.n_name, ' has ', final_summary.supplier_count, ' suppliers and ', final_summary.order_count, ' orders in total. Active suppliers from hierarchy: ', final_summary.active_suppliers) AS summary_report
+FROM final_summary
+WHERE final_summary.order_count > 5
+ORDER BY final_summary.supplier_count DESC, final_summary.order_count DESC
+LIMIT 10;

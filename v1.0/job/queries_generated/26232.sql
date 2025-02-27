@@ -1,0 +1,47 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(GROUP_CONCAT(a.name), 'No Cast') AS cast_list,
+        COUNT(DISTINCT k.keyword) AS total_keywords,
+        AVG(CASE WHEN m.production_year IS NOT NULL THEN m.production_year ELSE 0 END) AS avg_production_year,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT k.keyword) DESC) AS rank
+    FROM 
+        title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title
+), 
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        rm.cast_list,
+        rm.total_keywords,
+        rm.avg_production_year,
+        CASE 
+            WHEN rm.total_keywords > 10 THEN 'Popular'
+            ELSE 'Less Popular'
+        END AS popularity
+    FROM 
+        RankedMovies rm
+)
+SELECT 
+    md.movie_title,
+    md.cast_list,
+    md.total_keywords,
+    md.avg_production_year,
+    md.popularity
+FROM 
+    MovieDetails md
+WHERE 
+    md.avg_production_year > 2000
+ORDER BY 
+    md.total_keywords DESC, md.movie_title;

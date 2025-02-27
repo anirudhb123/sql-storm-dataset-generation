@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_order_number,
+        ws_ship_date_sk,
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+    GROUP BY 
+        ws_order_number, ws_ship_date_sk, ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        RankedSales.total_sales,
+        RankedSales.order_count
+    FROM 
+        RankedSales
+    JOIN 
+        item ON RankedSales.ws_item_sk = item.i_item_sk
+    WHERE 
+        RankedSales.sales_rank <= 10
+),
+CustomerDetails AS (
+    SELECT 
+        customer.c_customer_id,
+        customer.c_first_name,
+        customer.c_last_name,
+        customer_address.ca_city,
+        customer_address.ca_state,
+        customer_address.ca_country,
+        TOPItems.total_sales
+    FROM 
+        customer
+    JOIN 
+        customer_address ON customer.c_current_addr_sk = customer_address.ca_address_sk
+    JOIN 
+        TopItems ON customer.c_customer_sk = TopItems.ws_item_sk
+)
+SELECT 
+    cd.c_customer_id,
+    cd.c_first_name,
+    cd.c_last_name,
+    SUM(cd.total_sales) AS total_spent,
+    COUNT(cd.total_sales) AS purchase_count,
+    MAX(cd.ca_city) AS city,
+    MAX(cd.ca_state) AS state,
+    MAX(cd.ca_country) AS country
+FROM 
+    CustomerDetails cd
+GROUP BY 
+    cd.c_customer_id, cd.c_first_name, cd.c_last_name
+ORDER BY 
+    total_spent DESC
+LIMIT 100;

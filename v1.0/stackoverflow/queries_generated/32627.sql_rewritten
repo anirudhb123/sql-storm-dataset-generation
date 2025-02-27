@@ -1,0 +1,82 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        a.ParentId,
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy q ON a.ParentId = q.PostId
+    WHERE 
+        a.PostTypeId = 2  
+),
+PostScores AS (
+    
+    SELECT 
+        ph.PostId,
+        COALESCE(ROUND(Score::numeric / NULLIF(ViewCount, 0) * 100, 2), 0) AS ScorePerView,
+        U.DisplayName,
+        COUNT(CASE WHEN c.Id IS NOT NULL THEN 1 END) AS CommentCount
+    FROM 
+        Posts ph
+    LEFT JOIN 
+        Users U ON ph.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments c ON ph.Id = c.PostId
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId, U.DisplayName, ph.Score, ph.ViewCount
+),
+TopPosts AS (
+    
+    SELECT 
+        ph.PostId,
+        ph.ScorePerView,
+        RANK() OVER (ORDER BY ph.ScorePerView DESC) AS ScoreRank
+    FROM 
+        PostScores ph
+)
+SELECT 
+    p.Title,
+    p.CreatedDate,
+    U.DisplayName AS Author,
+    t.ScorePerView,
+    COALESCE(t.ScoreRank, 0) AS Rank,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    COUNT(DISTINCT v.Id) AS TotalVotes,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Posts p
+LEFT JOIN 
+    Users U ON p.OwnerUserId = U.Id
+LEFT JOIN 
+    PostScores ps ON p.Id = ps.PostId
+LEFT JOIN 
+    VoteTypes vt ON vt.Id IN (SELECT VoteTypeId FROM Votes v WHERE v.PostId = p.Id)
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    LATERAL (SELECT STRING_AGG(TagName, ', ') AS TagName FROM Tags WHERE Tags.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '>'))::int)) AS t ON TRUE
+WHERE 
+    p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+GROUP BY 
+    p.Title, p.CreationDate, U.DisplayName, t.ScorePerView, t.ScoreRank
+HAVING 
+    COUNT(DISTINCT c.Id) > 0 AND SUM(CASE WHEN vt.Id IS NOT NULL THEN 1 ELSE 0 END) > 5
+ORDER BY 
+    ScorePerView DESC;

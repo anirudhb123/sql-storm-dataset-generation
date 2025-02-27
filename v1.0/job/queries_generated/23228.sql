@@ -1,0 +1,68 @@
+WITH Recursive_Aka_Name AS (
+    SELECT 
+        aka.id AS aka_id,
+        aka.person_id,
+        aka.name,
+        ROW_NUMBER() OVER (PARTITION BY aka.person_id ORDER BY aka.id) AS rn
+    FROM 
+        aka_name aka
+    WHERE 
+        aka.name IS NOT NULL 
+        AND aka.name <> ''
+),
+Filtered_Titles AS (
+    SELECT 
+        title.id AS title_id,
+        title.title,
+        title.production_year
+    FROM 
+        aka_title title
+    JOIN 
+        movie_info mi ON title.movie_id = mi.movie_id
+    WHERE 
+        mi.info LIKE 'Award%'
+),
+Cast_Person_Info AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        rn.name AS actor_name,
+        p.gender,
+        COUNT(*) OVER (PARTITION BY ci.movie_id) AS total_cast
+    FROM 
+        cast_info ci
+    JOIN 
+        Recursive_Aka_Name rn ON ci.person_id = rn.person_id
+    LEFT JOIN 
+        name p ON ci.person_id = p.imdb_id
+),
+Comp_Cast_Title AS (
+    SELECT 
+        title.title,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        Filtered_Titles title
+    LEFT JOIN 
+        cast_info ci ON title.id = ci.movie_id
+    GROUP BY 
+        title.title
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 5
+)
+SELECT 
+    title.title,
+    cp.actor_name,
+    cp.gender,
+    CASE 
+        WHEN cp.total_cast IS NULL THEN 'No Cast'
+        ELSE CAST(cp.total_cast AS VARCHAR)
+    END AS cast_count,
+    COALESCE(cc.actor_count, 0) AS high_cast_count
+FROM 
+    Comp_Cast_Title cc
+LEFT JOIN 
+    Cast_Person_Info cp ON cc.title = cp.actor_name
+WHERE 
+    cc.actor_count > 5
+ORDER BY 
+    title.title, cp.actor_name;

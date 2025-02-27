@@ -1,0 +1,63 @@
+WITH RecentPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+UserStatistics AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(bp.Count), 0) AS BadgeCount,
+        COALESCE(SUM(bp.Class), 0) AS TotalBadgeClass,
+        MAX(rp.CreationDate) AS LatestPostDate
+    FROM
+        Users u
+    LEFT JOIN
+        Badges bp ON u.Id = bp.UserId
+    LEFT JOIN
+        RecentPosts rp ON u.Id = rp.OwnerUserId
+    WHERE
+        u.Reputation > 100
+    GROUP BY
+        u.Id, u.DisplayName, u.Reputation
+),
+RankedUsers AS (
+    SELECT
+        us.*,
+        RANK() OVER (ORDER BY us.Reputation DESC, us.BadgeCount DESC) AS UserRank
+    FROM
+        UserStatistics us
+)
+SELECT
+    ru.DisplayName,
+    ru.Reputation,
+    ru.BadgeCount,
+    ru.TotalBadgeClass,
+    ru.LatestPostDate,
+    CASE
+        WHEN ru.UserRank <= 10 THEN 'Top Contributor'
+        ELSE 'Contributor'
+    END AS UserCategory
+FROM
+    RankedUsers ru
+WHERE
+    ru.LatestPostDate IS NOT NULL
+ORDER BY
+    ru.UserRank;

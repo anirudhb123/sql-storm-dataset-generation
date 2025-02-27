@@ -1,0 +1,43 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s_suppkey, s_name, s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) as rn
+    FROM supplier
+),
+nation_part_suppliers AS (
+    SELECT n.n_nationkey, n.n_name, p.p_partkey, p.p_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    GROUP BY n.n_nationkey, n.n_name, p.p_partkey, p.p_name
+),
+lineitem_overview AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           l.l_returnflag,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS line_no
+    FROM lineitem l
+    GROUP BY l.l_orderkey, l.l_returnflag
+),
+total_customer_revenue AS (
+    SELECT c.c_custkey, 
+           SUM(lo.total_revenue) AS customer_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem_overview lo ON o.o_orderkey = lo.l_orderkey
+    GROUP BY c.c_custkey
+)
+SELECT np.n_name, 
+       np.p_name, 
+       ts.s_name AS supplier_name,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       COALESCE(SUM(cr.customer_revenue), 0) AS total_customer_revenue,
+       MAX(CASE WHEN ts.rn = 1 THEN ts.s_acctbal ELSE NULL END) AS highest_account_balance
+FROM nation_part_suppliers np
+LEFT JOIN top_suppliers ts ON np.n_nationkey = ts.s_suppkey
+LEFT JOIN orders o ON np.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+LEFT JOIN total_customer_revenue cr ON cr.c_custkey = o.o_custkey
+GROUP BY np.n_name, np.p_name, ts.s_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5 AND total_customer_revenue > 10000
+ORDER BY 1, 2 DESC, 3;

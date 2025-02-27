@@ -1,0 +1,60 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ur.TotalBounty,
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.CommentCount,
+    CASE 
+        WHEN pd.CommentCount > 10 THEN 'Hot Post'
+        ELSE 'Normal Post' 
+    END AS PostStatus,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = pd.PostId AND v.VoteTypeId = 2) AS Upsvotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = pd.PostId AND v.VoteTypeId = 3) AS Downvotes
+FROM 
+    UserReputation ur
+JOIN 
+    Users u ON ur.UserId = u.Id
+JOIN 
+    PostDetails pd ON u.Id = pd.OwnerUserId
+WHERE 
+    ur.Reputation > 1000
+ORDER BY 
+    ur.TotalBounty DESC, pd.ViewCount DESC;
+

@@ -1,0 +1,70 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        NULL AS parent_id,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        h.movie_id AS parent_id,
+        h.level + 1
+    FROM
+        aka_title e
+    INNER JOIN movie_hierarchy h ON e.episode_of_id = h.movie_id
+),
+ranked_movies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level) AS movie_rank
+    FROM
+        movie_hierarchy mh
+),
+cast_and_info AS (
+    SELECT
+        ci.movie_id,
+        STRING_AGG(a.name, ', ') AS cast_names,
+        STRING_AGG(ki.keyword, ', ') AS keywords,
+        COUNT(DISTINCT mi.info) AS info_count
+    FROM
+        cast_info ci
+    LEFT JOIN aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN movie_keyword mk ON ci.movie_id = mk.movie_id
+    LEFT JOIN keyword ki ON mk.keyword_id = ki.id
+    LEFT JOIN movie_info mi ON ci.movie_id = mi.movie_id
+    WHERE
+        a.name IS NOT NULL
+    GROUP BY
+        ci.movie_id
+)
+
+SELECT
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.movie_rank,
+    cai.cast_names,
+    cai.keywords,
+    cai.info_count,
+    COALESCE(mi.info, 'No additional info') AS additional_info
+FROM
+    ranked_movies rm
+LEFT JOIN cast_and_info cai ON rm.movie_id = cai.movie_id
+LEFT JOIN movie_info mi ON rm.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis' LIMIT 1)
+WHERE
+    rm.production_year > 2000
+ORDER BY
+    rm.production_year DESC,
+    rm.movie_rank;

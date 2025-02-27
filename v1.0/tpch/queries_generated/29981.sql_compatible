@@ -1,0 +1,48 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_mfgr,
+        p.p_retailprice,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(line_item.l_quantity) AS total_line_item_qty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        lineitem line_item ON line_item.l_partkey = p.p_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_mfgr, p.p_retailprice
+),
+RankedByPrice AS (
+    SELECT 
+        rp.*,
+        RANK() OVER (ORDER BY rp.p_retailprice DESC) AS price_rank
+    FROM 
+        RankedParts rp
+),
+FilteredParts AS (
+    SELECT 
+        rbp.*
+    FROM 
+        RankedByPrice rbp
+    WHERE 
+        rbp.supplier_count > 5 AND rbp.total_line_item_qty > 100
+)
+SELECT 
+    CONCAT('PartName: ', p.p_name, 
+           ', Brand: ', p.p_brand, 
+           ', Mfgr: ', p.p_mfgr, 
+           ', RetailPrice: ', FORMAT(p.p_retailprice, 2), 
+           ', SupplierCount: ', p.supplier_count, 
+           ', TotalAvailableQty: ', p.total_avail_qty, 
+           ', TotalLineItemQty: ', p.total_line_item_qty) AS part_details
+FROM 
+    FilteredParts p
+ORDER BY 
+    p.price_rank ASC
+LIMIT 10;

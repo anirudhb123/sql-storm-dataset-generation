@@ -1,0 +1,79 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL 
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id 
+),
+filmography AS (
+    SELECT 
+        ca.person_id,
+        ak.name AS actor_name,
+        mh.title AS movie_title,
+        mh.level AS movie_level,
+        ROW_NUMBER() OVER (PARTITION BY ca.person_id ORDER BY mh.production_year DESC) AS film_order
+    FROM 
+        cast_info ca
+    JOIN 
+        movie_hierarchy mh ON ca.movie_id = mh.movie_id
+    JOIN 
+        aka_name ak ON ca.person_id = ak.person_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+star_rankings AS (
+    SELECT 
+        actor_name,
+        COUNT(*) AS movie_count,
+        AVG(movie_level) AS avg_movie_level
+    FROM 
+        filmography
+    GROUP BY 
+        actor_name
+),
+ranked_stars AS (
+    SELECT 
+        actor_name,
+        movie_count,
+        avg_movie_level,
+        DENSE_RANK() OVER (ORDER BY movie_count DESC, avg_movie_level ASC) AS star_rank
+    FROM 
+        star_rankings
+)
+SELECT 
+    rs.actor_name,
+    rs.movie_count,
+    rs.avg_movie_level,
+    rs.star_rank,
+    ARRAY_AGG(mh.title) FILTER (WHERE film_order <= 5) AS recent_movies,
+    COALESCE(c.comp_cast_type, 'Unknown') AS cast_type
+FROM 
+    ranked_stars rs
+LEFT JOIN 
+    cast_info ci ON ci.person_id = (SELECT id FROM aka_name WHERE name = rs.actor_name LIMIT 1)
+LEFT JOIN 
+    comp_cast_type c ON ci.person_role_id = c.id
+JOIN 
+    movie_hierarchy mh ON mh.movie_id = ci.movie_id
+GROUP BY 
+    rs.actor_name, rs.movie_count, rs.avg_movie_level, rs.star_rank, c.comp_cast_type
+ORDER BY 
+    rs.star_rank
+LIMIT 10;

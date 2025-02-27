@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE((
+            SELECT AnswersCount
+            FROM (
+                SELECT 
+                    ParentId,
+                    COUNT(*) AS AnswersCount
+                FROM 
+                    Posts
+                WHERE 
+                    PostTypeId = 2
+                GROUP BY 
+                    ParentId
+            ) AS AnswerCount
+            WHERE AnswerCount.ParentId = p.Id
+        ), 0) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        MAX(u.Reputation) AS MaxReputation
+    FROM 
+        Users u
+    GROUP BY 
+        u.Id
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        p.Id,
+        GROUP_CONCAT(DISTINCT ph.Comment ORDER BY ph.CreationDate DESC) AS RecentComments,
+        MAX(ph.CreationDate) AS LastModified
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 10, 12) 
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    coalesce(pc.CommentCount, 0) AS TotalComments,
+    phd.RecentComments,
+    phd.LastModified,
+    CASE 
+        WHEN ur.MaxReputation IS NULL THEN 'No Reputation'
+        ELSE CASE 
+            WHEN ur.MaxReputation >= 1000 THEN 'High Reputation'
+            WHEN ur.MaxReputation >= 500 THEN 'Medium Reputation'
+            ELSE 'Low Reputation'
+        END
+    END AS ReputationCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostComments pc ON rp.PostId = pc.PostId
+LEFT JOIN 
+    UserReputation ur ON rp.PostId IN (SELECT ParentId FROM Posts WHERE Id = rp.PostId)
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.Id
+WHERE 
+    rp.PostRank = 1 
+AND 
+    (rp.Score > 0 OR phd.LastModified >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days')
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 50;

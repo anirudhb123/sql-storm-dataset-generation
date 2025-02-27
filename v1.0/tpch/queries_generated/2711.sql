@@ -1,0 +1,71 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+        AND o.o_orderdate < DATE '2023-12-31'
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 1000
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 5000
+),
+NationSupplier AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    p.p_name,
+    ps.ps_availqty,
+    ps.ps_supplycost,
+    COALESCE(cs.total_spent, 0) AS total_spent_by_customers,
+    ns.supplier_count,
+    COUNT(DISTINCT lo.o_orderkey) AS order_count_in_year
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    lineitem lo ON ps.ps_partkey = lo.l_partkey
+LEFT JOIN 
+    RankedOrders ro ON lo.l_orderkey = ro.o_orderkey
+LEFT JOIN 
+    CustomerStats cs ON lo.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+LEFT JOIN 
+    NationSupplier ns ON ns.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = lo.l_orderkey) LIMIT 1)
+WHERE 
+    ps.ps_availqty IS NOT NULL
+    AND ps.ps_supplycost > 100
+    AND (p.p_comment LIKE '%metal%' OR p.p_comment IS NULL)
+GROUP BY 
+    p.p_name, ps.ps_availqty, ps.ps_supplycost, cs.total_spent, ns.supplier_count
+HAVING 
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) > 10000
+ORDER BY 
+    p.p_name, ps.ps_supplycost DESC;

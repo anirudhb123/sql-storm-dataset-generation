@@ -1,0 +1,78 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><')) AS tag ON TRUE
+    JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '30 days' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.AnswerCount
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        UpVotes DESC, TotalPosts DESC 
+    LIMIT 10
+),
+PostEngagement AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.AnswerCount,
+        tu.DisplayName,
+        tu.UpVotes,
+        tu.DownVotes
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        Posts p ON rp.PostId = p.Id
+    LEFT JOIN 
+        TopUsers tu ON p.OwnerUserId = tu.UserId
+)
+SELECT 
+    pe.PostId,
+    pe.Title,
+    pe.CreationDate,
+    pe.ViewCount,
+    pe.AnswerCount,
+    pe.DisplayName AS PostOwner,
+    pe.UpVotes AS OwnerUpVotes,
+    pe.DownVotes AS OwnerDownVotes,
+    COALESCE(p2.Title, 'No Related Post') AS RelatedPostTitle
+FROM 
+    PostEngagement pe
+LEFT JOIN 
+    PostLinks pl ON pe.PostId = pl.PostId
+LEFT JOIN 
+    Posts p2 ON pl.RelatedPostId = p2.Id
+WHERE 
+    pe.ViewCount > 100
+ORDER BY 
+    pe.CreationDate DESC;

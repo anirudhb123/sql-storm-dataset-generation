@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        mt.production_year, 
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        level + 1 
+    FROM 
+        movie_link ml 
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieCTE cte ON ml.movie_id = cte.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+)
+
+SELECT 
+    DISTINCT a.name AS actor_name,
+    mt.movie_title,
+    mt.production_year,
+    COUNT(DISTINCT c.role_id) OVER (PARTITION BY a.id) AS total_roles,
+    STRING_AGG(DISTINCT k.keyword, ', ') FILTER (WHERE k.keyword IS NOT NULL) AS keywords,
+    CASE 
+        WHEN mt.production_year < 2010 THEN 'Classic'
+        ELSE 'Modern'
+    END AS movie_era
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    MovieCTE mt ON ci.movie_id = mt.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mt.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    a.name IS NOT NULL 
+    AND mt.movie_title IS NOT NULL
+    AND (mt.production_year IS NOT NULL OR ci.note IS NOT NULL)
+    AND a.md5sum IS NOT NULL
+ORDER BY 
+    total_roles DESC, 
+    movie_era;

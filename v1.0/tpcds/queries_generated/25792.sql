@@ -1,0 +1,35 @@
+
+WITH string_aggregates AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS address,
+        CONCAT(c.cc_call_center_id, ' - ', w.w_warehouse_name) AS warehouse_info
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        call_center cc ON c.c_current_hdemo_sk = cc.cc_call_center_sk
+    JOIN 
+        warehouse w ON cc.cc_company = w.w_warehouse_sk
+),
+string_metrics AS (
+    SELECT 
+        FULL_NAME,
+        LENGTH(full_name) AS name_length,
+        LENGTH(address) AS address_length,
+        LENGTH(warehouse_info) AS warehouse_length,
+        REGEXP_COUNT(full_name, '[AEIOUaeiou]') AS vowel_count,
+        REGEXP_COUNT(full_name, '[^AEIOUaeiou]') AS consonant_count
+    FROM 
+        string_aggregates
+)
+SELECT 
+    AVG(name_length) AS avg_name_length,
+    AVG(address_length) AS avg_address_length,
+    AVG(warehouse_length) AS avg_warehouse_length,
+    SUM(vowel_count) AS total_vowel_count,
+    SUM(consonant_count) AS total_consonant_count
+FROM 
+    string_metrics;

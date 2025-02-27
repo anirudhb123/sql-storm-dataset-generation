@@ -1,0 +1,36 @@
+
+SELECT 
+    ca.city AS address_city,
+    SUBSTR(c.first_name, 1, 1) || '. ' || c.last_name AS customer_name,
+    cd.gender AS customer_gender,
+    cd.education_status AS education,
+    COUNT(DISTINCT ws.order_number) AS total_orders,
+    SUM(ws.net_profit) AS total_profit,
+    MAX(d.date) AS last_purchase_date,
+    STRING_AGG(DISTINCT sm.type) AS shipping_modes_used,
+    COUNT(DISTINCT CASE 
+        WHEN LOWER(i.item_desc) LIKE '%organic%' THEN i.i_item_sk 
+        END) AS organic_items_purchased
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.current_addr_sk = ca.ca_address_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    item i ON ws.ws_item_sk = i.i_item_sk
+JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+LEFT JOIN 
+    ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+WHERE 
+    ca.city IN ('San Francisco', 'Los Angeles')
+    AND cd.marital_status = 'M'
+    AND d.year = 2023
+GROUP BY 
+    ca.city, c.first_name, c.last_name, cd.gender, cd.education_status
+ORDER BY 
+    total_profit DESC 
+LIMIT 100;

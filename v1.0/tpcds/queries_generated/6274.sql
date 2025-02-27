@@ -1,0 +1,52 @@
+
+WITH sales_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        DATE_FORMAT(dd.d_date, '%Y-%m') as sales_month,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_item_sk) AS total_items_sold
+    FROM 
+        customer c
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+        JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+        AND cd.cd_gender = 'F'
+    GROUP BY 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        sales_month
+),
+average_sales AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        sales_month,
+        AVG(total_sales) AS avg_sales,
+        AVG(total_orders) AS avg_orders,
+        AVG(total_items_sold) AS avg_items
+    FROM 
+        sales_summary
+    GROUP BY 
+        cd_gender, 
+        cd_marital_status, 
+        sales_month
+)
+SELECT 
+    sales_month,
+    cd_gender,
+    cd_marital_status,
+    avg_sales,
+    avg_orders,
+    avg_items,
+    RANK() OVER (PARTITION BY sales_month ORDER BY avg_sales DESC) AS sales_rank
+FROM 
+    average_sales
+ORDER BY 
+    sales_month,
+    sales_rank;

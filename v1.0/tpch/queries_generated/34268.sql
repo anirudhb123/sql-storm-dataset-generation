@@ -1,0 +1,35 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+OrderStats AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts,
+           MAX(l.l_shipdate) AS last_shipdate
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+NationRevenue AS (
+    SELECT n.n_nationkey, n.n_name, SUM(os.total_revenue) AS total_revenue
+    FROM nation n
+    LEFT JOIN OrderStats os ON n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = os.o_orderkey)
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT nh.n_name, COALESCE(sr.s_name, 'No Supplier') AS supplier_name,
+       SUM(CASE WHEN l.l_returnflag = 'Y' THEN l.l_quantity ELSE 0 END) AS returned_quantity,
+       AVG(os.total_revenue) AS avg_revenue,
+       ROW_NUMBER() OVER (PARTITION BY nh.n_name ORDER BY SUM(os.total_revenue) DESC) AS revenue_rank
+FROM NationRevenue nr
+JOIN supplier sr ON nr.total_revenue > 1000 AND sr.s_acctbal > 0
+JOIN lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F')
+JOIN nation nh ON nh.n_nationkey = sr.s_nationkey
+WHERE l.l_discount BETWEEN 0.05 AND 0.15
+GROUP BY nh.n_name, sr.s_name
+ORDER BY avg_revenue DESC, returned_quantity DESC;

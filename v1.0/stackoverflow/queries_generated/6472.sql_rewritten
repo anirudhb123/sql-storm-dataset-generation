@@ -1,0 +1,45 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.QuestionCount,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByUser
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate > cast('2024-10-01' as date) - INTERVAL '30 days'
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.UpVoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByUser <= 3
+)
+SELECT 
+    fp.OwnerDisplayName,
+    COUNT(fp.PostId) AS TopPostCount,
+    SUM(fp.CommentCount) AS TotalComments,
+    SUM(fp.UpVoteCount) AS TotalUpVotes,
+    MIN(fp.CreationDate) AS FirstPostDate,
+    MAX(fp.CreationDate) AS LastPostDate
+FROM 
+    FilteredPosts fp
+GROUP BY 
+    fp.OwnerDisplayName
+ORDER BY 
+    TopPostCount DESC, TotalUpVotes DESC
+LIMIT 10;

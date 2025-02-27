@@ -1,0 +1,72 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+        CASE 
+            WHEN Reputation > 1000 THEN 'High'
+            WHEN Reputation BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationCategory
+    FROM Users
+),
+UserPostCounts AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM Posts
+    GROUP BY OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM Badges
+    GROUP BY UserId
+),
+PostsWithHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName AS Editor,
+        ph.Comment
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= DATE_SUB(CURRENT_DATE(), INTERVAL 1 YEAR)
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.ReputationRank,
+    u.ReputationCategory,
+    COALESCE(up.PostCount, 0) AS TotalPosts,
+    COALESCE(up.QuestionCount, 0) AS TotalQuestions,
+    COALESCE(up.AnswerCount, 0) AS TotalAnswers,
+    COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+    COALESCE(ub.BadgeNames, 'No badges') AS BadgeNames,
+    COALESCE(pwh.Title, 'No posts') AS RecentPostTitle,
+    COALESCE(pwh.Editor, 'N/A') AS LastEditor,
+    COALESCE(pwh.HistoryDate, 'Never Edited') AS LastEditDate
+FROM RankedUsers u
+LEFT JOIN UserPostCounts up ON u.Id = up.OwnerUserId
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN (
+    SELECT 
+        PostId,
+        MAX(HistoryDate) AS LastEditDate
+    FROM PostsWithHistory
+    GROUP BY PostId
+) AS recent_posts ON recent_posts.LastEditDate IS NOT NULL
+LEFT JOIN PostsWithHistory pwh ON recent_posts.PostId = pwh.PostId
+WHERE u.Id IS NOT NULL
+ORDER BY u.Reputation DESC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

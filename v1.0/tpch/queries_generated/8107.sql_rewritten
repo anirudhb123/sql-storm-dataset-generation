@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        c.c_name, 
+        c.c_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) as rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+),
+TopCustomers AS (
+    SELECT 
+        rank, 
+        o_orderkey, 
+        o_orderdate, 
+        c_name, 
+        o_totalprice
+    FROM 
+        RankedOrders 
+    WHERE 
+        rank <= 3
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_suppkey, 
+        SUM(ps.ps_supplycost) AS total_supplycost, 
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        ps.total_supplycost, 
+        ss.part_count
+    FROM 
+        part p 
+    JOIN 
+        SupplierStats ss ON ss.ps_suppkey = (SELECT TOP 1 ps_suppkey FROM partsupp WHERE ps_partkey = p.p_partkey ORDER BY ps_supplycost DESC)
+    JOIN 
+        partsupp ps ON ps.ps_partkey = p.p_partkey
+)
+SELECT 
+    tc.o_orderkey, 
+    tc.o_orderdate, 
+    tc.c_name AS customer_name, 
+    tc.o_totalprice AS order_total, 
+    pd.p_name AS part_name, 
+    pd.p_brand AS part_brand, 
+    pd.total_supplycost AS supplier_cost, 
+    pd.part_count AS related_parts_count
+FROM 
+    TopCustomers tc
+JOIN 
+    lineitem l ON tc.o_orderkey = l.l_orderkey
+JOIN 
+    PartDetails pd ON l.l_partkey = pd.p_partkey
+ORDER BY 
+    tc.o_orderdate DESC, 
+    tc.o_totalprice DESC, 
+    tc.c_name;

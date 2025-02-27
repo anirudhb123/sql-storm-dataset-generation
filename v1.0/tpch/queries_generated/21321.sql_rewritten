@@ -1,0 +1,96 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        DENSE_RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank,
+        COUNT(p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+    HAVING 
+        AVG(s.s_acctbal) > 1000
+    ORDER BY 
+        s.s_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS cust_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        TO_CHAR(o.o_orderdate, 'YYYY-MM-DD') AS order_date,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '30 days'
+),
+JoinWithLineItems AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.order_date,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_items
+    FROM 
+        RecentOrders ro
+    LEFT JOIN 
+        lineitem l ON ro.o_orderkey = l.l_orderkey
+    GROUP BY 
+        ro.o_orderkey, ro.order_date
+)
+SELECT 
+    r.s_suppkey,
+    r.s_name,
+    r.rank,
+    COALESCE(h.total_spent, 0) AS customer_spent,
+    COALESCE(j.total_line_items, 0) AS order_total
+FROM 
+    RankedSuppliers r
+LEFT JOIN 
+    HighValueCustomers h ON r.s_nationkey = h.c_custkey
+LEFT JOIN 
+    JoinWithLineItems j ON h.cust_rank = j.o_orderkey
+WHERE 
+    r.rank = 1
+AND 
+    r.part_count IS NOT NULL
+ORDER BY 
+    r.s_suppkey
+UNION
+SELECT 
+    NULL AS s_suppkey,
+    NULL AS s_name,
+    NULL AS rank,
+    MAX(total_spent) AS customer_spent,
+    SUM(total_line_items) AS order_total
+FROM 
+    JoinWithLineItems
+WHERE 
+    total_line_items IS NOT NULL
+HAVING 
+    COUNT(*) > 0
+AND 
+    NULLIF(MIN(total_line_items), 0) IS NOT NULL
+ORDER BY 
+    customer_spent DESC;

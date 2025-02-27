@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, cte.level + 1
+    FROM supplier s
+    JOIN SupplierCTE cte ON cte.s_nationkey = s.s_nationkey
+    WHERE cte.level < 10
+),
+
+PartStats AS (
+    SELECT p.p_partkey, p.p_name, AVG(ps.ps_supplycost) AS avg_supplycost, 
+           (SUM(l.l_extendedprice * (1 - l.l_discount)) + 
+            SUM(l.l_tax * l.l_extendedprice * 0.1)) AS total_revenue
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN lineitem l ON ps.ps_suppkey = l.l_suppkey
+    WHERE p.p_size BETWEEN 1 AND 20
+    GROUP BY p.p_partkey, p.p_name
+),
+
+CustomerOrderData AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+)
+
+SELECT s.s_name, 
+       ps.p_name, 
+       cs.total_spent, 
+       cs.order_count, 
+       CASE 
+           WHEN cs.order_count > 10 THEN 'Frequent Buyer' 
+           WHEN cs.order_count IS NULL THEN 'No Orders'
+           ELSE 'Occasional Buyer' 
+       END AS buyer_category,
+       RANK() OVER (PARTITION BY s.s_nationkey ORDER BY cs.total_spent DESC) AS supplier_rank
+FROM SupplierCTE s
+JOIN PartStats ps ON s.s_suppkey = ps.p_partkey
+LEFT JOIN CustomerOrderData cs ON s.s_nationkey = cs.c_nationkey
+WHERE (cs.order_count IS NOT NULL OR cs.total_spent IS NOT NULL)
+  AND COALESCE(cs.total_spent, 0) > 1000
+  AND EXISTS (
+      SELECT 1
+      FROM lineitem l
+      WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+      AND l.l_returnflag = 'R'
+  )
+ORDER BY s.s_name, ps.avg_supplycost DESC;

@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserVoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    us.UpVotes,
+    us.DownVotes,
+    cp.CloseCount,
+    COALESCE((SELECT STRING_AGG(t.TagName, ', ') 
+              FROM Tags t 
+              WHERE t.Id IN (
+                  SELECT unnest(string_to_array(p.Tags, '<>'))::int
+              )), 'No Tags') AS Tags,
+    CASE 
+        WHEN cp.CloseCount IS NULL THEN 'Active'
+        ELSE 'Closed'
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserVoteSummary us ON rp.PostId = us.PostId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.PostId DESC;
+
+-- This is a complex SQL query that filters posts from the last year, ranks them by score 
+-- and view count, aggregates user votes, and checks for close history. 
+-- It also enriches the result with associated tags and categorizes it by status (Active/Closed).

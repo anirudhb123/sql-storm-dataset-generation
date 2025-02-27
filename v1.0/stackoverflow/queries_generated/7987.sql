@@ -1,0 +1,33 @@
+WITH UserBadges AS (
+    SELECT U.Id AS UserId, U.DisplayName, COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT P.OwnerUserId, COUNT(P.Id) AS PostCount, SUM(P.Score) AS TotalScore, AVG(P.ViewCount) AS AvgViews
+    FROM Posts P
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY P.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT P.OwnerUserId, COUNT(P.Id) AS ClosedCount
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId 
+    WHERE PH.PostHistoryTypeId IN (10, 11) AND PH.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY P.OwnerUserId
+),
+CombinedStats AS (
+    SELECT U.DisplayName, UB.BadgeCount, PS.PostCount, PS.TotalScore, PS.AvgViews, COALESCE(CP.ClosedCount, 0) AS ClosedCount
+    FROM UserBadges UB
+    JOIN PostStatistics PS ON UB.UserId = PS.OwnerUserId
+    LEFT JOIN ClosedPosts CP ON UB.UserId = CP.OwnerUserId
+)
+
+SELECT DisplayName, BadgeCount, 
+       PostCount, TotalScore, AvgViews, ClosedCount,
+       RANK() OVER (ORDER BY TotalScore DESC) AS UserRank
+FROM CombinedStats
+WHERE BadgeCount > 0
+ORDER BY UserRank
+LIMIT 10;

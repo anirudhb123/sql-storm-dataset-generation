@@ -1,0 +1,81 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank
+    FROM
+        web_sales ws
+    JOIN
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE
+        w.web_rec_start_date <= CURRENT_DATE AND (w.web_rec_end_date IS NULL OR w.web_rec_end_date > CURRENT_DATE)
+    GROUP BY
+        ws.web_site_sk
+),
+customer_stats AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        COALESCE(SUM(ws.ws_net_paid), 0) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+top_customers AS (
+    SELECT
+        cs.*,
+        RANK() OVER (ORDER BY cs.total_spent DESC) AS customer_rank
+    FROM
+        customer_stats cs
+),
+product_sales AS (
+    SELECT
+        i.i_item_sk,
+        i.i_product_name,
+        SUM(ws.ws_quantity) AS total_units_sold,
+        SUM(ws.ws_ext_sales_price) AS total_revenue
+    FROM
+        item i
+    JOIN
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    WHERE
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY
+        i.i_item_sk, i.i_product_name
+),
+high_demand_products AS (
+    SELECT
+        ps.i_item_sk,
+        ps.i_product_name,
+        ps.total_units_sold,
+        ps.total_revenue,
+        RANK() OVER (ORDER BY ps.total_units_sold DESC) AS demand_rank
+    FROM
+        product_sales ps
+)
+SELECT
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    hdp.i_product_name,
+    hdp.total_units_sold,
+    hdp.total_revenue
+FROM
+    top_customers tc
+LEFT JOIN
+    high_demand_products hdp ON tc.customer_rank <= 10
+ORDER BY
+    tc.customer_rank, hdp.demand_rank
+FETCH FIRST 100 ROWS ONLY;

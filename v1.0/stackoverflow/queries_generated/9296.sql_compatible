@@ -1,0 +1,78 @@
+
+WITH UserVotes AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, p.AnswerCount, p.CommentCount
+),
+BadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+)
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.ViewCount,
+    pm.Score,
+    pm.AnswerCount,
+    pm.CommentCount,
+    pm.UpVotes,
+    pm.DownVotes,
+    uv.DisplayName AS UserDisplayName,
+    COALESCE(bc.BadgeCount, 0) AS UserBadgeCount,
+    COUNT(DISTINCT rp.UserId) AS PostEditors,
+    STRING_AGG(DISTINCT CASE WHEN rp.PostHistoryTypeId IN (10, 11) THEN 'Closed/Reopened' END, ', ') AS ClosureStatus
+FROM 
+    PostMetrics pm
+JOIN 
+    Users u ON pm.OwnerUserId = u.Id
+LEFT JOIN 
+    UserVotes uv ON u.Id = uv.UserId
+LEFT JOIN 
+    BadgeCounts bc ON u.Id = bc.UserId
+LEFT JOIN 
+    RecentPostHistory rp ON pm.PostId = rp.PostId AND rp.rn = 1
+GROUP BY 
+    pm.PostId, pm.Title, pm.ViewCount, pm.Score, pm.AnswerCount, pm.CommentCount, pm.UpVotes, pm.DownVotes, uv.DisplayName, bc.BadgeCount
+ORDER BY 
+    pm.Score DESC, pm.ViewCount DESC
+LIMIT 100;

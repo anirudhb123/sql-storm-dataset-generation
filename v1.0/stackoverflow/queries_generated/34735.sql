@@ -1,0 +1,70 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        1 AS Level
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) -- Closed, Reopened, Deleted
+    UNION ALL
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        rp.Level + 1
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        RecursivePostHistory rp ON ph.PostId = rp.PostId
+    WHERE 
+        ph.CreationDate < rp.CreationDate
+)
+, PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        MAX(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS HasUpvote,
+        MAX(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS HasDownvote,
+        SUM(CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN 1
+            WHEN ph.PostHistoryTypeId = 11 THEN -1
+            ELSE 0 END
+        ) AS CloseStatus
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        RecursivePostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ps.PostId,
+    ps.CommentCount,
+    ps.TotalBounty,
+    ps.HasUpvote,
+    ps.HasDownvote,
+    ps.CloseStatus,
+    COALESCE(pt.Name, 'Unknown') AS PostType,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    PostStats ps
+LEFT JOIN 
+    PostTypes pt ON EXISTS (SELECT 1 FROM Posts p WHERE p.PostTypeId = pt.Id AND p.Id = ps.PostId)
+LEFT JOIN 
+    Posts p ON p.Id = ps.PostId
+LEFT JOIN 
+    Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+GROUP BY 
+    ps.PostId, ps.CommentCount, ps.TotalBounty, ps.HasUpvote, ps.HasDownvote, ps.CloseStatus, pt.Name
+ORDER BY 
+    ps.CommentCount DESC, TotalBounty DESC
+LIMIT 10;

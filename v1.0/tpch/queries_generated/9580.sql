@@ -1,0 +1,42 @@
+WITH SupplierPartCounts AS (
+    SELECT s.s_suppkey, COUNT(ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, spc.part_count
+    FROM supplier s
+    JOIN SupplierPartCounts spc ON s.s_suppkey = spc.s_suppkey
+    WHERE spc.part_count > (SELECT AVG(part_count) FROM SupplierPartCounts)
+    ORDER BY spc.part_count DESC
+    LIMIT 10
+),
+OrderLineSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+TopOrders AS (
+    SELECT ols.o_orderkey, ols.revenue
+    FROM OrderLineSummary ols
+    JOIN TopSuppliers ts ON ols.o_orderkey IN (SELECT o.o_orderkey
+                                                FROM orders o
+                                                JOIN customer c ON o.o_custkey = c.c_custkey
+                                                WHERE c.c_nationkey IN (SELECT n.n_nationkey 
+                                                                        FROM nation n 
+                                                                        WHERE n.n_regionkey IN (SELECT r.r_regionkey 
+                                                                                                FROM region r 
+                                                                                                WHERE r.r_name = 'ASIA')))
+    ORDER BY ols.revenue DESC
+    LIMIT 10
+)
+SELECT ts.s_suppkey, ts.s_name, to.o_orderkey, to.revenue 
+FROM TopSuppliers ts
+JOIN TopOrders to ON ts.s_suppkey IN (SELECT ps.ps_suppkey 
+                                       FROM partsupp ps 
+                                       WHERE ps.ps_partkey IN (SELECT l.l_partkey 
+                                                               FROM lineitem l 
+                                                               WHERE l.l_orderkey = to.o_orderkey))
+ORDER BY to.revenue DESC, ts.s_name;

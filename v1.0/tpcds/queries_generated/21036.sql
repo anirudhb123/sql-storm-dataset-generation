@@ -1,0 +1,52 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (PARTITION BY c.c_birth_year ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank,
+        COUNT(CASE WHEN ws.ws_ship_mode_sk IS NULL THEN 1 END) AS null_ship_modes
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id, c.c_birth_year
+    HAVING 
+        SUM(ws.ws_net_profit) IS NOT NULL AND 
+        COUNT(ws.ws_order_number) > 0
+),
+SalesByMonth AS (
+    SELECT 
+        d.d_month_seq,
+        SUM(total_net_profit) AS monthly_net_profit,
+        COUNT(DISTINCT c_customer_sk) AS unique_customers
+    FROM 
+        date_dim d
+    JOIN 
+        CustomerSales cs ON d.d_date_sk = ws_sold_date_sk
+    GROUP BY 
+        d.d_month_seq
+)
+SELECT 
+    s.d_month_seq,
+    s.monthly_net_profit,
+    CASE 
+        WHEN s.monthly_net_profit IS NULL THEN 'No Sales Data'
+        WHEN s.monthly_net_profit > 10000 THEN 'High Sales'
+        ELSE 'Average Sales'
+    END AS sales_category,
+    COALESCE(s.unique_customers, 0) AS total_customers,
+    (SELECT COUNT(*) FROM warehouse) AS total_warehouses,
+    COALESCE(NULLIF(MAX(s.monthly_net_profit) OVER (ORDER BY s.d_month_seq), 0), -1) AS max_profit_override
+FROM 
+    SalesByMonth s
+RIGHT JOIN 
+    date_dim d ON s.d_month_seq = d.d_month_seq
+WHERE 
+    d.d_year = 2023
+ORDER BY 
+    s.d_month_seq;

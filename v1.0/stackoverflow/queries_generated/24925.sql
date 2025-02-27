@@ -1,0 +1,80 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.PostTypeId,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes,  -- Count Upvotes
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes, -- Count Downvotes
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Comments c
+            WHERE c.PostId = p.Id
+        ), 0) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserDisplayName AS EditorDisplayName,
+        ph.CreationDate AS EditDate,
+        ph.Comment AS CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRow
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) -- Closed, Reopened, Deleted
+),
+LastEditedPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.UpVotes,
+        pd.DownVotes,
+        pd.CommentCount,
+        COALESCE(phd.EditorDisplayName, 'No Edits') AS LastEditor,
+        COALESCE(phd.EditDate, pd.CreationDate) AS LastEditDate,
+        CASE 
+            WHEN pd.PostTypeId = 1 AND phd.PostHistoryTypeId = 10 THEN 'Closed' 
+            WHEN pd.PostTypeId = 1 AND phd.PostHistoryTypeId = 11 THEN 'Reopened' 
+            WHEN pd.PostTypeId IN (2, 3) AND phd.PostHistoryTypeId = 12 THEN 'Deleted' 
+            ELSE 'Active'
+        END AS PostStatus
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        PostHistoryDetails phd ON pd.PostId = phd.PostId AND phd.EditRow = 1
+)
+
+SELECT 
+    lped.PostId,
+    lped.Title,
+    lped.UpVotes,
+    lped.DownVotes,
+    lped.CommentCount,
+    lped.LastEditor,
+    lped.LastEditDate,
+    lped.PostStatus,
+    STRING_AGG(CASE 
+        WHEN lped.PostStatus = 'Closed' THEN CONCAT('Closed Reason: ', lped.CloseReason)
+        ELSE NULL 
+    END, '; ') AS AdditionalInfo
+FROM 
+    LastEditedPosts lped
+WHERE 
+    lped.UpVotes - lped.DownVotes > 0 -- Only include posts with a net positive score
+GROUP BY 
+    lped.PostId, lped.Title, lped.UpVotes, lped.DownVotes, lped.CommentCount, lped.LastEditor, lped.LastEditDate, lped.PostStatus
+ORDER BY 
+    lped.LastEditDate DESC
+LIMIT 100;

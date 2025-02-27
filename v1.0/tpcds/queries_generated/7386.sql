@@ -1,0 +1,45 @@
+
+WITH RankedSales AS (
+    SELECT
+        w.w_warehouse_name,
+        i.i_item_desc,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        RANK() OVER (PARTITION BY w.w_warehouse_name ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    JOIN
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY
+        w.w_warehouse_name, i.i_item_desc
+),
+TopItems AS (
+    SELECT
+        warehouse_name,
+        i_item_desc,
+        total_sales
+    FROM
+        RankedSales
+    WHERE
+        sales_rank <= 5
+)
+SELECT
+    ti.warehouse_name,
+    ti.i_item_desc,
+    ti.total_sales,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COUNT(DISTINCT c.c_customer_id) AS customer_count
+FROM
+    TopItems ti
+JOIN
+    web_sales ws ON ti.i_item_desc = (SELECT i_item_desc FROM item WHERE i_item_sk = ws.ws_item_sk)
+JOIN
+    customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+JOIN
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+GROUP BY
+    ti.warehouse_name, ti.i_item_desc, cd.cd_gender, cd.cd_marital_status
+ORDER BY
+    ti.warehouse_name, ti.total_sales DESC;

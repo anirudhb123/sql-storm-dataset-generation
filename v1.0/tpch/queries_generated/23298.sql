@@ -1,0 +1,53 @@
+WITH RECURSIVE customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IS NOT NULL
+
+    UNION ALL
+    
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer_orders co
+    JOIN orders o ON co.c_custkey = o.o_custkey 
+    WHERE o.o_orderdate > co.o_orderdate
+),
+
+part_supplier_details AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) as rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+),
+
+high_value_customers AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING SUM(o.o_totalprice) > 50000
+),
+
+nation_region_info AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name,
+           COUNT(DISTINCT s.s_suppkey) AS total_suppliers
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name, r.r_name
+    HAVING COUNT(DISTINCT s.s_suppkey) > 5
+)
+
+SELECT co.c_name, co.o_orderkey, co.o_orderdate, 
+       pp.p_name, pp.ps_availqty, pp.ps_supplycost,
+       nr.r_name, nr.total_suppliers
+FROM customer_orders co
+FULL OUTER JOIN part_supplier_details pp ON co.o_orderkey IS NULL 
+      OR pp.p_partkey IN (SELECT l.l_partkey FROM lineitem l 
+                          WHERE l.l_orderkey = co.o_orderkey)
+JOIN high_value_customers hvc ON co.c_custkey = hvc.c_custkey
+LEFT JOIN nation_region_info nr ON hvc.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = nr.n_nationkey)
+WHERE co.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+AND (pp.ps_availqty IS NOT NULL OR pp.ps_supplycost IS NULL)
+ORDER BY co.o_orderdate DESC, pp.ps_supplycost ASC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

@@ -1,0 +1,52 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS rn,
+        COUNT(*) OVER (PARTITION BY a.production_year) AS title_count
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL AND
+        a.kind_id IN (SELECT id FROM kind_type WHERE kind = 'feature')
+),
+CastRoles AS (
+    SELECT 
+        c.movie_id, 
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+),
+CompanyCounts AS (
+    SELECT 
+        mc.movie_id, 
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rt.title, 
+    rt.production_year, 
+    COALESCE(cr.roles, 'No Roles') AS roles, 
+    COALESCE(cc.company_count, 0) AS company_count,
+    rt.title_count,
+    CASE 
+        WHEN rt.title_count > 5 THEN 'Popular Year'
+        ELSE 'Less Popular Year'
+    END AS popularity_rating
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    CastRoles cr ON rt.title = cr.movie_id
+LEFT JOIN 
+    CompanyCounts cc ON rt.title = cc.movie_id
+WHERE 
+    rt.rn <= 10 
+ORDER BY 
+    rt.production_year DESC, rt.title;

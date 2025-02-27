@@ -1,0 +1,33 @@
+SELECT 
+    p.p_name,
+    s.s_name,
+    CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ', Price: $', FORMAT(ps.ps_supplycost, 2)) AS detailed_info,
+    SUBSTRING(p.p_comment, 1, 20) AS short_comment,
+    CASE 
+        WHEN p.p_size > 25 THEN 'Large'
+        ELSE 'Small'
+    END AS size_category,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    MAX(o.o_totalprice) AS max_order_value
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_retailprice > 100.00 
+    AND s.s_acctbal > 500.00
+    AND o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    p.p_name, s.s_name, ps.ps_supplycost, p.p_comment, p.p_size
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY 
+    size_category DESC, max_order_value DESC;

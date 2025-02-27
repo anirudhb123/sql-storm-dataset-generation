@@ -1,0 +1,64 @@
+
+WITH CustomerReturns AS (
+    SELECT sr.returned_date_sk, 
+           sr.return_time_sk, 
+           sr_item_sk, 
+           sr_customer_sk, 
+           sr_ticket_number,
+           SUM(sr_return_quantity) AS total_returned_quantity,
+           SUM(sr_return_amt_inc_tax) AS total_returned_amount,
+           COUNT(DISTINCT sr_ticket_number) AS unique_returns
+    FROM store_returns sr
+    WHERE sr_return_quantity IS NOT NULL 
+          AND sr_return_amt_inc_tax > 0 
+    GROUP BY sr.returned_date_sk, sr.return_time_sk, sr_item_sk, sr_customer_sk
+),
+SalesData AS (
+    SELECT ws_item_sk, 
+           SUM(ws_quantity) AS total_sold,
+           SUM(ws_sales_price) AS total_sales,
+           COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM web_sales 
+    WHERE ws_sold_date_sk > 1000
+    GROUP BY ws_item_sk
+),
+MergedData AS (
+    SELECT coalesce(cr.sr_item_sk, sd.ws_item_sk) AS item_sk,
+           COALESCE(cr.total_returned_quantity, 0) AS total_returned_quantity,
+           COALESCE(cr.total_returned_amount, 0) AS total_returned_amount,
+           COALESCE(sd.total_sold, 0) AS total_sold,
+           COALESCE(sd.total_sales, 0) AS total_sales,
+           COALESCE(sd.total_orders, 0) AS total_orders
+    FROM CustomerReturns cr
+    FULL OUTER JOIN SalesData sd ON cr.sr_item_sk = sd.ws_item_sk
+),
+RankedData AS (
+    SELECT item_sk, 
+           total_returned_quantity, 
+           total_returned_amount, 
+           total_sold, 
+           total_sales,
+           total_orders,
+           RANK() OVER (ORDER BY total_sales DESC) AS sales_rank,
+           RANK() OVER (ORDER BY total_returned_amount DESC) AS return_rank
+    FROM MergedData
+)
+SELECT item_sk, 
+       total_returned_quantity, 
+       total_returned_amount,
+       total_sold,
+       total_sales,
+       total_orders,
+       CASE 
+           WHEN total_sales = 0 THEN NULL 
+           ELSE ROUND((total_returned_amount / total_sales) * 100, 2) 
+       END AS return_percentage,
+       CASE 
+           WHEN sales_rank = return_rank THEN 'Equal Returns and Sales'
+           WHEN sales_rank < return_rank THEN 'More Sales than Returns'
+           ELSE 'More Returns than Sales'
+       END AS return_to_sales_analysis
+FROM RankedData
+WHERE (total_sold > 0 OR total_returned_quantity > 0)
+AND (total_sales IS NOT NULL AND total_sales > 100)
+ORDER BY return_percentage DESC NULLS LAST, total_sales DESC;

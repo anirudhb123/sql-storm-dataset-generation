@@ -1,0 +1,67 @@
+
+WITH MovieData AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+        ARRAY_AGG(DISTINCT c.role_id ORDER BY c.nr_order) AS role_ids,
+        COUNT(DISTINCT mi.info) AS info_count,
+        COUNT(DISTINCT kw.keyword) AS keyword_count
+    FROM 
+        title m
+    JOIN 
+        aka_title ak ON m.id = ak.movie_id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword kw ON m.id = kw.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year, m.kind_id
+    HAVING 
+        COUNT(DISTINCT ak.name) > 1
+),
+
+RoleCounts AS (
+    SELECT 
+        c.role_id,
+        COUNT(*) AS total_roles
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.role_id
+),
+
+InfoTypeCounts AS (
+    SELECT 
+        mi.info_type_id,
+        COUNT(DISTINCT mi.movie_id) AS movie_count
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.info_type_id
+)
+
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    COUNT(DISTINCT r.role_id) AS unique_roles,
+    ic.movie_count AS info_type_count,
+    md.aka_names,
+    md.role_ids,
+    md.keyword_count
+FROM 
+    MovieData md
+LEFT JOIN 
+    RoleCounts r ON r.role_id = ANY(md.role_ids)
+LEFT JOIN 
+    InfoTypeCounts ic ON ic.info_type_id IN (SELECT DISTINCT mi.info_type_id FROM movie_info mi WHERE mi.movie_id = md.movie_id)
+GROUP BY 
+    md.movie_id, md.title, md.production_year, md.aka_names, md.role_ids, md.keyword_count, ic.movie_count
+ORDER BY 
+    md.production_year DESC, unique_roles DESC, md.keyword_count DESC 
+LIMIT 50;

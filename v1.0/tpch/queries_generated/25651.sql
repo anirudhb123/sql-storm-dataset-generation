@@ -1,0 +1,44 @@
+WITH RECURSIVE string_benchmark AS (
+    SELECT 
+        p_partkey,
+        p_name,
+        p_mfgr,
+        p_brand,
+        p_type,
+        LENGTH(p_name) AS name_length,
+        UPPER(p_name) AS name_upper,
+        LOWER(p_name) AS name_lower,
+        SUBSTRING(p_comment FROM 1 FOR 10) AS comment_substring,
+        POSITION('part' IN p_name) AS position_part,
+        CONCAT(p_name, ' - ', p_brand) AS name_brand_concat,
+        REPLACE(p_comment, 'small', 'mini') AS altered_comment
+    FROM 
+        part
+    WHERE 
+        LENGTH(p_name) > 10
+),
+aggregated_results AS (
+    SELECT 
+        COUNT(*) AS total_parts,
+        AVG(name_length) AS avg_name_length,
+        MAX(name_length) AS max_name_length,
+        MIN(name_length) AS min_name_length,
+        STRING_AGG(DISTINCT name_upper, ', ') AS unique_upper_names,
+        STRING_AGG(DISTINCT name_brand_concat, ', ') AS unique_name_brand_combinations
+    FROM 
+        string_benchmark
+)
+SELECT 
+    a.total_parts,
+    a.avg_name_length,
+    a.max_name_length,
+    a.min_name_length,
+    a.unique_upper_names,
+    a.unique_name_brand_combinations,
+    COUNT(DISTINCT s.n_nationkey) AS total_nations
+FROM 
+    aggregated_results a
+JOIN 
+    supplier s ON s.s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_comment LIKE '%important%')
+GROUP BY 
+    a.total_parts, a.avg_name_length, a.max_name_length, a.min_name_length, a.unique_upper_names, a.unique_name_brand_combinations;

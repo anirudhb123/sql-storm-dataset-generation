@@ -1,0 +1,85 @@
+WITH RegionStats AS (
+    SELECT 
+        r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(CASE WHEN n.n_nationkey % 2 = 0 THEN 1 ELSE 0 END) AS even_nation_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_name
+),
+SupplierStats AS (
+    SELECT 
+        s_nationkey,
+        AVG(s_acctbal) AS avg_acctbal,
+        MAX(s_acctbal) AS max_acctbal,
+        MIN(s_acctbal) AS min_acctbal
+    FROM 
+        supplier
+    GROUP BY 
+        s_nationkey
+),
+PartSupplierStats AS (
+    SELECT 
+        ps.partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps.s_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+OrderAnalysis AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS high_value_rank,
+        LEAD(o.o_totalprice) OVER (ORDER BY o.o_orderdate) AS next_order_total
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN '1996-01-01' AND '1997-01-01'
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS cust_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    RS.r_name,
+    RS.nation_count,
+    RS.even_nation_count,
+    SS.avg_acctbal,
+    PS.total_supply_value,
+    PS.supplier_count,
+    OA.o_orderkey,
+    OA.o_totalprice,
+    OA.high_value_rank,
+    OA.next_order_total,
+    CS.order_count,
+    CS.total_spent,
+    CS.cust_rank
+FROM 
+    RegionStats RS
+JOIN 
+    SupplierStats SS ON RS.nation_count > SS.s_nationkey
+JOIN 
+    PartSupplierStats PS ON PS.supplier_count = (SELECT COUNT(*) FROM supplier WHERE s_nationkey = RS.nation_count)
+FULL OUTER JOIN 
+    OrderAnalysis OA ON OA.high_value_rank < 5 
+LEFT JOIN 
+    CustomerSummary CS ON CS.cust_rank = 1
+WHERE 
+    COALESCE(CS.order_count, 0) > 0
+ORDER BY 
+    RS.r_name, OA.o_totalprice DESC, CS.total_spent DESC;

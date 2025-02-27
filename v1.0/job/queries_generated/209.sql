@@ -1,0 +1,51 @@
+WITH MovieDetails AS (
+    SELECT
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        COALESCE(SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END), 0) AS has_notes,
+        MAX(CASE WHEN ci.role_id IS NOT NULL THEN r.role END) AS lead_role
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN
+        role_type r ON ci.role_id = r.id
+    WHERE
+        t.production_year >= 2000
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT
+        md.movie_title,
+        md.production_year,
+        md.actor_count,
+        md.has_notes,
+        md.lead_role,
+        RANK() OVER (ORDER BY md.actor_count DESC) AS movie_rank
+    FROM
+        MovieDetails md
+)
+SELECT
+    tm.movie_title,
+    tm.production_year,
+    tm.actor_count,
+    tm.has_notes,
+    tm.lead_role,
+    COALESCE(CAST(tm.actor_count AS TEXT), 'N/A') AS actor_count_str,
+    CASE 
+        WHEN tm.lead_role IS NULL THEN 'Unknown'
+        ELSE tm.lead_role
+    END AS processed_role,
+    CASE
+        WHEN tm.actor_count > 5 THEN 'High'
+        WHEN tm.actor_count BETWEEN 3 AND 5 THEN 'Medium'
+        ELSE 'Low'
+    END AS actor_density
+FROM
+    TopMovies tm
+WHERE
+    tm.movie_rank <= 10
+ORDER BY
+    tm.actor_count DESC

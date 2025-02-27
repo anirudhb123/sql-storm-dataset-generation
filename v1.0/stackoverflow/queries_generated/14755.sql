@@ -1,0 +1,70 @@
+-- Performance Benchmarking Query
+WITH UserVoteCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+UserPostInteraction AS (
+    SELECT 
+        u.Id AS UserId,
+        p.PostId,
+        COUNT(c.Id) AS UserCommentCount,
+        SUM(v.VoteTypeId = 2) AS UserUpVotes,
+        SUM(v.VoteTypeId = 3) AS UserDownVotes
+    FROM 
+        Users u
+    CROSS JOIN 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId AND c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.UserId = u.Id
+    GROUP BY 
+        u.Id, p.PostId
+)
+SELECT 
+    ud.UserId,
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    P.ViewCount,
+    P.Score,
+    P.CommentCount,
+    up.UserCommentCount,
+    up.UserUpVotes,
+    up.UserDownVotes
+FROM 
+    UserVoteCounts ud
+JOIN 
+    PostDetails P ON P.Score > 0 
+JOIN 
+    UserPostInteraction up ON ud.UserId = up.UserId
+ORDER BY 
+    P.Score DESC;

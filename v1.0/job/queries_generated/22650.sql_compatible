@@ -1,0 +1,79 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        kc.keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC, a.title) AS year_rank
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    WHERE 
+        a.production_year IS NOT NULL 
+        AND a.title IS NOT NULL
+),
+CompanyRoles AS (
+    SELECT 
+        cc.id,
+        cm.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(ci.person_id) AS actor_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cm ON mc.company_id = cm.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        complete_cast cc ON mc.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY 
+        cc.id, cm.name, ct.kind
+),
+HighRankedMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        cr.company_name,
+        cr.company_type,
+        cr.actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyRoles cr ON rm.year_rank <= 5 
+),
+MovieInfo AS (
+    SELECT 
+        m.title,
+        STRING_AGG(DISTINCT mi.info, ', ') AS movie_info
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    WHERE 
+        mi.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%box office%') 
+    GROUP BY 
+        m.title
+)
+SELECT 
+    h.title,
+    h.production_year,
+    h.company_name,
+    h.company_type,
+    h.actor_count,
+    COALESCE(m.movie_info, 'No Info') AS additional_info
+FROM 
+    HighRankedMovies h
+LEFT JOIN 
+    MovieInfo m ON h.title = m.title
+WHERE 
+    h.production_year > 2000 
+    AND (h.actor_count IS NULL OR h.actor_count < 10) 
+ORDER BY 
+    h.production_year DESC,
+    h.company_name ASC
+LIMIT 50;

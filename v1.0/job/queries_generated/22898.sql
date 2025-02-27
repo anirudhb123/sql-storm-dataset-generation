@@ -1,0 +1,84 @@
+WITH RECURSIVE movie_dates AS (
+    SELECT 
+        movie_id,
+        MIN(production_year) AS first_year,
+        MAX(production_year) AS last_year
+    FROM 
+        aka_title
+    GROUP BY 
+        movie_id
+),
+recent_movies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        (current_date - INTERVAL '1 year')::date AS one_year_ago,
+        AVG(CASE WHEN p.production_year >= (current_date - INTERVAL '5 years')::date THEN NULL ELSE p.production_year END) AS avg_year
+    FROM 
+        aka_title AS m
+    JOIN 
+        movie_info AS mi ON m.id = mi.movie_id
+    JOIN 
+        movie_dates AS md ON m.id = md.movie_id
+    WHERE 
+        md.first_year >= (current_date - INTERVAL '10 years')::date
+    GROUP BY 
+        m.movie_id, m.title
+    HAVING 
+        AVG(p.production_year) IS NOT NULL
+),
+cast_details AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        rk.role AS role_name,
+        COUNT(*) OVER (PARTITION BY ci.person_id) AS total_movies
+    FROM 
+        cast_info AS ci
+    JOIN 
+        role_type AS rk ON ci.role_id = rk.id
+),
+movies_with_cast AS (
+    SELECT 
+        m.title,
+        COALESCE(c.person_id, -1) AS person_id,
+        c.role_name,
+        mwc.movie_id,
+        mwc.total_movies
+    FROM 
+        recent_movies AS m
+    LEFT JOIN 
+        cast_details AS c ON c.movie_id = m.movie_id
+    LEFT JOIN 
+        (SELECT movie_id, COUNT(DISTINCT person_id) AS total_movies FROM cast_info GROUP BY movie_id) mwc ON mwc.movie_id = m.movie_id
+),
+null_handling AS (
+    SELECT 
+        title,
+        person_id,
+        role_name,
+        total_movies,
+        CASE 
+            WHEN role_name IS NULL THEN 'No Role Assigned'
+            ELSE role_name
+        END AS role_description
+    FROM 
+        movies_with_cast
+)
+SELECT 
+    title,
+    COUNT(DISTINCT person_id) AS actor_count,
+    STRING_AGG(DISTINCT role_description, ', ') AS roles,
+    BOOL_AND(CASE WHEN total_movies > 5 THEN TRUE ELSE FALSE END) AS has_frequent_contributors,
+    (SELECT COUNT(*) 
+     FROM complete_cast 
+     WHERE movie_id IN (SELECT movie_id FROM recent_movies)) AS total_complete_cast
+FROM 
+    null_handling
+GROUP BY 
+    title
+HAVING 
+    actor_count > 2
+ORDER BY 
+    actor_count DESC
+LIMIT 10;

@@ -1,0 +1,63 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY AVG(ps.ps_supplycost) DESC) AS rn
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        DENSE_RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS customer_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) >= 1000
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+    HAVING 
+        total_avail_qty > 0
+)
+SELECT 
+    p.p_name,
+    p.avg_supply_cost,
+    c.c_name AS top_customer,
+    c.total_spent,
+    s.total_supply_value,
+    ROW_NUMBER() OVER (ORDER BY c.total_spent DESC) AS rank
+FROM 
+    RankedParts p
+LEFT JOIN 
+    HighValueCustomers c ON p.rn = 1  -- Join to get the top customer for the most supplied part
+JOIN 
+    SupplierParts s ON s.total_supply_value > 200000  -- Join on significant suppliers
+WHERE 
+    p.avg_supply_cost IS NOT NULL
+    AND (c.total_spent IS NULL OR c.customer_rank <= 5)
+ORDER BY 
+    p.p_partkey, c.total_spent DESC;

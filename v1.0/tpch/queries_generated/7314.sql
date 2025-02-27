@@ -1,0 +1,59 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        COUNT(DISTINCT ps.ps_partkey) AS UniquePartsSupplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS TotalOrders,
+        SUM(o.o_totalprice) AS TotalExpenditure
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RegionStats AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        SUM(COALESCE(cs.TotalExpenditure, 0)) AS TotalExpenditureByRegion,
+        COUNT(DISTINCT cs.c_custkey) AS UniqueCustomers
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        CustomerOrderStats cs ON c.c_custkey = cs.c_custkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+)
+SELECT 
+    s.s_suppkey,
+    s.s_name,
+    ss.TotalSupplyCost,
+    cs.TotalOrders,
+    cs.TotalExpenditure,
+    rs.TotalExpenditureByRegion,
+    rs.UniqueCustomers
+FROM 
+    SupplierStats ss
+JOIN 
+    CustomerOrderStats cs ON ss.UniquePartsSupplied > 5
+JOIN 
+    RegionStats rs ON ss.TotalSupplyCost > 10000
+ORDER BY 
+    ss.TotalSupplyCost DESC, cs.TotalExpenditure DESC;

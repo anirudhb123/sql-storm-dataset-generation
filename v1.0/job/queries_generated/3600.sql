@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        title.title AS movie_title,
+        title.production_year,
+        COUNT(DISTINCT cast_info.person_id) AS cast_count,
+        AVG(person_info.info_type_id) AS avg_role_type
+    FROM 
+        title
+    LEFT JOIN 
+        movie_companies ON title.id = movie_companies.movie_id
+    LEFT JOIN 
+        cast_info ON title.id = cast_info.movie_id
+    LEFT JOIN 
+        person_info ON cast_info.person_id = person_info.person_id
+    GROUP BY 
+        title.id, title.title, title.production_year
+), 
+FilteredMovies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        cast_count,
+        avg_role_type,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY cast_count DESC) AS rn
+    FROM 
+        RankedMovies
+    WHERE 
+        production_year IS NOT NULL
+)
+SELECT 
+    f.movie_title,
+    f.production_year,
+    f.cast_count,
+    f.avg_role_type,
+    COALESCE(CHAR_LENGTH(f.movie_title) - CHAR_LENGTH(REPLACE(f.movie_title, ' ', '')), 0) AS word_count,
+    CASE 
+        WHEN f.avg_role_type > 0 THEN 'High Role Type'
+        WHEN f.avg_role_type = 0 THEN 'No Role Type'
+        ELSE 'Unknown'
+    END AS role_type_classification
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    aka_title a ON f.movie_title = a.title
+WHERE 
+    f.rn <= 10
+UNION 
+SELECT 
+    'N/A' AS movie_title,
+    NULL AS production_year,
+    COUNT(DISTINCT movie_id) AS cast_count,
+    NULL AS avg_role_type
+FROM 
+    cast_info
+WHERE 
+    movie_id IS NULL
+GROUP BY 1
+ORDER BY 
+    production_year DESC NULLS LAST, cast_count DESC;

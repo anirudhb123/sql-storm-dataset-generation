@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS PostRank,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM 
+        Posts p 
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        Tags t ON t.Id = ANY (STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '>')::int[]) 
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.Score, u.DisplayName
+), FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.TagList,
+        rp.CreationDate,
+        rp.Score,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 3 -- Top 3 Posts per User
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.VoteTypeId = 9 -- BountyClose votes
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    fs.PostId,
+    fs.Title,
+    fs.Body,
+    fs.TagList,
+    fs.CreationDate,
+    fs.Score,
+    us.UserId,
+    us.DisplayName AS UserDisplayName,
+    us.Reputation,
+    us.BadgeCount,
+    us.TotalBounty
+FROM 
+    FilteredPosts fs
+JOIN 
+    UserStats us ON fs.OwnerDisplayName = us.DisplayName
+ORDER BY 
+    fs.CreationDate DESC, us.Reputation DESC;

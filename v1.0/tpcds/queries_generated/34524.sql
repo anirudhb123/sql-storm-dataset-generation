@@ -1,0 +1,93 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_number_employees,
+        s_floor_space,
+        1 AS level
+    FROM 
+        store
+    WHERE 
+        s_closed_date_sk IS NULL
+    UNION ALL 
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_number_employees,
+        s_floor_space,
+        level + 1
+    FROM 
+        store s
+    JOIN 
+        sales_hierarchy sh ON s.s_store_sk = sh.s_store_sk
+    WHERE 
+        sh.level < 5 -- arbitrary limit to avoid infinite recursion
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        da.ca_city,
+        da.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address da ON c.c_current_addr_sk = da.ca_address_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000 -- Filtering customers with high purchase estimates
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales,
+        AVG(ws.ws_ext_tax) AS average_tax,
+        MAX(ws.ws_sold_date_sk) AS last_sales_date
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        customer_data cd ON ws.ws_bill_customer_sk = cd.c_customer_sk
+    GROUP BY 
+        ws.ws_item_sk
+)
+
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    ss.total_sales,
+    ss.total_quantity,
+    sh.s_store_name,
+    sh.s_number_employees,
+    sh.s_floor_space,
+    cd.rank,
+    CASE 
+        WHEN cd.cd_gender = 'F' THEN 'Female'
+        WHEN cd.cd_gender = 'M' THEN 'Male'
+        ELSE 'Other'
+    END AS gender_category,
+    (SELECT COUNT(DISTINCT cr_return_number) 
+        FROM catalog_returns cr 
+        WHERE cr.cr_item_sk = ss.ws_item_sk) AS return_count
+FROM 
+    item i
+LEFT JOIN 
+    sales_summary ss ON i.i_item_sk = ss.ws_item_sk
+LEFT JOIN 
+    sales_hierarchy sh ON sh.s_store_sk = ss.s_store_sk
+LEFT JOIN 
+    customer_data cd ON ss.ws_sold_date_sk = cd.c_customer_sk
+WHERE 
+    i.i_current_price > 50.00 
+    AND ss.total_sales IS NOT NULL 
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

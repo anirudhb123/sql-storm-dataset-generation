@@ -1,0 +1,78 @@
+
+WITH RECURSIVE income_ranks AS (
+    SELECT 
+        ib_income_band_sk,
+        ib_lower_bound,
+        ib_upper_bound,
+        ROW_NUMBER() OVER (ORDER BY ib_lower_bound) AS income_rank
+    FROM 
+        income_band
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(cd.cd_credit_rating, 'Unknown') AS credit_rating,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    INNER JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL AND cd.cd_purchase_estimate > 0
+),
+customer_addresses AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(c.c_customer_id) AS customer_count
+    FROM 
+        customer_address ca
+    LEFT JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        ca.ca_address_sk, ca.ca_city, ca.ca_state
+),
+address_shipping AS (
+    SELECT 
+        ws.ship_customer_sk,
+        ws.ws_total_sales,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_ship_customer_sk) AS total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_ship_customer_sk ORDER BY ws.ws_sold_date_sk DESC) AS recent_order
+    FROM 
+        web_sales ws
+)
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT ca.ca_address_sk) AS unique_addresses,
+    SUM(CASE WHEN ca.ca_state IN ('CA', 'TX') THEN 1 ELSE 0 END) AS west_states,
+    (SELECT AVG(cd.cd_purchase_estimate) FROM top_customers AS t WHERE t.gender_rank <= 10) AS avg_top_purchase,
+    COALESCE(SUM(abh.total_quantity), 0) AS total_items_shipped,
+    CASE 
+        WHEN SUM(abh.total_quantity) IS NULL THEN 'No Quantities'
+        WHEN SUM(abh.total_quantity) = 0 THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sales_status
+FROM 
+    customer c
+LEFT JOIN 
+    customer_addresses ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    address_shipping abh ON abh.ship_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    income_ranks ir ON ir.ib_income_band_sk = (SELECT hd.hd_income_band_sk FROM household_demographics hd WHERE hd.hd_demo_sk = c.c_current_hdemo_sk)
+WHERE 
+    c.c_first_shipto_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+GROUP BY 
+    c.c_customer_id, ca.ca_city, ca.ca_state
+HAVING 
+    COUNT(DISTINCT ca.ca_address_sk) > 1 AND 
+    (SUM(CASE WHEN ca.ca_state = 'NY' THEN 1 ELSE 0 END) = 0 OR SUM(CASE WHEN ca.ca_state = 'NY' THEN 1 ELSE 0 END) IS NULL)
+ORDER BY 
+    avg_top_purchase DESC;

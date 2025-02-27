@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        a.id AS movie_id,
+        a.title AS movie_title,
+        1 AS level,
+        a.production_year,
+        COALESCE(b.linked_movie_id, 0) AS linked_movie_id
+    FROM
+        aka_title a
+    LEFT JOIN
+        movie_link b ON a.id = b.movie_id
+    WHERE
+        a.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        mh.movie_id,
+        mh.movie_title,
+        mh.level + 1,
+        mh.production_year,
+        COALESCE(b.linked_movie_id, 0)
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link b ON mh.linked_movie_id = b.movie_id
+)
+
+SELECT
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT c.person_id) AS total_actors,
+    AVG(peer_ratings.avg_rating) AS average_peer_rating,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN (
+    SELECT
+        movie_id,
+        AVG(rating) AS avg_rating
+    FROM
+        (SELECT
+            link.movie_id,
+            COALESCE(rating.info, 'No Rating') AS rating
+        FROM
+            movie_info link
+        LEFT JOIN
+            movie_info_idx rating ON link.movie_id = rating.movie_id
+        WHERE
+            link.info_type_id = (SELECT id FROM info_type WHERE info = 'Peer Rating')
+        ) AS ratings
+    GROUP BY movie_id
+) AS peer_ratings ON mh.movie_id = peer_ratings.movie_id
+WHERE
+    mh.level < 3 -- Consider movies only within 2 degrees of separation
+GROUP BY
+    mh.movie_title,
+    mh.production_year
+HAVING
+    COUNT(DISTINCT c.person_id) > 5
+ORDER BY
+    average_peer_rating DESC NULLS LAST, 
+    total_actors DESC;

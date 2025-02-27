@@ -1,0 +1,57 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal)
+        FROM supplier s2
+    )
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = (
+        SELECT n.n_nationkey
+        FROM nation n
+        WHERE n.n_name = 'GERMANY'
+    )
+    WHERE sh.level < 5
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartSupplierStats AS (
+    SELECT p.p_partkey, AVG(ps.ps_supplycost) AS avg_supply_cost, 
+           SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT 
+    s.s_name AS supplier_name,
+    cs.order_count,
+    cs.total_spent,
+    ps.avg_supply_cost,
+    ps.total_available,
+    ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY cs.total_spent DESC) AS rank_within_nation
+FROM SupplierHierarchy s
+LEFT JOIN CustomerOrderStats cs ON cs.c_custkey = s.s_suppkey
+LEFT JOIN PartSupplierStats ps ON ps.p_partkey = (
+    SELECT p.p_partkey
+    FROM part p
+    WHERE p.p_size = (
+        SELECT MAX(p2.p_size)
+        FROM part p2
+        WHERE p2.p_retailprice < 100
+    )
+    LIMIT 1
+)
+WHERE (ps.avg_supply_cost IS NOT NULL OR cs.total_spent > (
+    SELECT AVG(total_spent)
+    FROM CustomerOrderStats
+))
+ORDER BY supplier_name, rank_within_nation;

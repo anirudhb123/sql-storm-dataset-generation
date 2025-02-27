@@ -1,0 +1,51 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC)
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON sh.suppkey = s.s_nationkey
+    WHERE sh.rnk <= 5
+),
+part_summaries AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+high_value_parts AS (
+    SELECT part.p_partkey, part.p_name,
+           COALESCE(supplier.s_acctbal, 0) AS supplier_acctbal,
+           part.total_supply_cost,
+           CASE WHEN SUM(line.l_quantity) > 100 THEN 'High' ELSE 'Low' END AS quantity_category
+    FROM part_summaries part
+    LEFT JOIN lineitem line ON part.p_partkey = line.l_partkey
+    LEFT JOIN supplier s ON line.l_suppkey = s.s_suppkey
+    WHERE part.total_supply_cost IS NOT NULL
+    GROUP BY part.p_partkey, part.p_name, supplier.s_acctbal
+),
+nation_agg AS (
+    SELECT n.n_nationkey, n.n_name, AVG(c.c_acctbal) AS avg_acctbal
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+combined_data AS (
+    SELECT h.p_name, n.n_name, h.total_supply_cost, h.quantity_category,
+           n.avg_acctbal, s.s_name AS supplier_name
+    FROM high_value_parts h
+    LEFT JOIN nation_agg n ON h.supplier_acctbal > n.avg_acctbal
+    LEFT JOIN supplier s ON h.supplier_acctbal = s.s_acctbal
+)
+SELECT c.p_name, c.n_name, COUNT(*) AS nation_count,
+       SUM(CASE WHEN c.quantity_category = 'High' THEN 1 ELSE 0 END) AS high_quantity_parts,
+       MAX(c.total_supply_cost) AS max_supply_cost
+FROM combined_data c
+WHERE c.n_name IS NOT NULL AND c.supplier_name IS NOT NULL
+GROUP BY c.p_name, c.n_name
+HAVING SUM(CASE WHEN c.quantity_category = 'High' THEN 0 ELSE 1 END) <= 10
+ORDER BY nation_count DESC, max_supply_cost DESC
+LIMIT 20 OFFSET 5;

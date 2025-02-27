@@ -1,0 +1,50 @@
+
+WITH customer_data AS (
+    SELECT c.c_customer_id, 
+           cd.cd_gender, 
+           cd.cd_marital_status, 
+           cd.cd_education_status, 
+           SUM(COALESCE(ws.ws_net_paid, 0)) AS total_spent,
+           COUNT(ws.ws_order_number) AS order_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+warehouse_inventory AS (
+    SELECT w.w_warehouse_id, 
+           SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM warehouse w
+    JOIN inventory inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    GROUP BY w.w_warehouse_id
+),
+sales_summary AS (
+    SELECT ws.ws_sold_date_sk, 
+           COUNT(ws.ws_order_number) AS total_orders, 
+           SUM(ws.ws_net_paid) AS total_sales
+    FROM web_sales ws
+    GROUP BY ws.ws_sold_date_sk
+),
+sales_analysis AS (
+    SELECT ds.d_date, 
+           ss.total_orders, 
+           ss.total_sales, 
+           ROUND(COALESCE(NULLIF(ss.total_orders, 0) / NULLIF(ss.total_sales, 0), 0), 2) AS avg_order_value
+    FROM date_dim ds
+    LEFT JOIN sales_summary ss ON ds.d_date_sk = ss.ws_sold_date_sk
+)
+
+SELECT cd.c_customer_id, 
+       cd.cd_gender, 
+       cd.cd_marital_status, 
+       cd.cd_education_status, 
+       COUNT(DISTINCT w.w_warehouse_id) AS active_warehouses, 
+       SUM(wi.total_inventory) AS total_inventory_across_active_warehouses,
+       sa.avg_order_value,
+       cd.total_spent,
+       cd.order_count
+FROM customer_data cd
+LEFT JOIN warehouse_inventory wi ON wi.total_inventory > 0
+JOIN sales_analysis sa ON cd.order_count > 0
+GROUP BY cd.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, sa.avg_order_value, cd.total_spent, cd.order_count
+ORDER BY cd.total_spent DESC;

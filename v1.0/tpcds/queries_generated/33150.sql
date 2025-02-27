@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+), 
+TopSales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        COALESCE(SUM(sales.total_quantity), 0) AS total_quantity_sold,
+        COALESCE(SUM(sales.total_profit), 0) AS total_profit,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(total_profit, 0) DESC) AS rank
+    FROM item
+    LEFT JOIN SalesCTE AS sales ON item.i_item_sk = sales.ws_item_sk
+    GROUP BY item.i_item_id, item.i_item_desc
+    HAVING SUM(sales.total_quantity) > 0
+), 
+CustomerReturns AS (
+    SELECT
+        sr_item_sk,
+        COUNT(DISTINCT sr_ticket_number) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amt
+    FROM store_returns
+    GROUP BY sr_item_sk
+)
+
+SELECT 
+    ts.i_item_id,
+    ts.i_item_desc,
+    ts.total_quantity_sold,
+    ts.total_profit,
+    COALESCE(cr.return_count, 0) AS returns,
+    COALESCE(cr.total_returned_amt, 0) AS total_returned_amt,
+    (CASE 
+         WHEN cr.return_count IS NOT NULL THEN (cr.total_returned_amt / NULLIF(ts.total_profit, 0)) * 100 
+         ELSE 0 
+     END) AS return_percentage
+FROM TopSales ts
+LEFT JOIN CustomerReturns cr ON ts.i_item_id = cr.sr_item_sk
+WHERE ts.rank <= 10
+ORDER BY ts.total_profit DESC;

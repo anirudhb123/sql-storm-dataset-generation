@@ -1,0 +1,4 @@
+SELECT min(at.title) AS aka_title, min(t.title) AS internet_movie_title
+FROM aka_title AS at, company_name AS cn, company_type AS ct, info_type AS it1, keyword AS k, movie_companies AS mc, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = at.movie_id AND t.id = mi.movie_id AND t.id = mk.movie_id AND t.id = mc.movie_id AND mk.movie_id = mi.movie_id AND mk.movie_id = mc.movie_id AND mk.movie_id = at.movie_id AND mi.movie_id = mc.movie_id AND mi.movie_id = at.movie_id AND mc.movie_id = at.movie_id AND k.id = mk.keyword_id AND it1.id = mi.info_type_id AND cn.id = mc.company_id AND ct.id = mc.company_type_id
+AND t.season_nr IS NOT NULL AND ct.kind > 'miscellaneous companies' AND at.episode_nr IN (11, 19, 21, 380, 65, 712) AND mc.movie_id > 1306936 AND at.season_nr = 1 AND at.note > '(Singapore: English title) (working title)';

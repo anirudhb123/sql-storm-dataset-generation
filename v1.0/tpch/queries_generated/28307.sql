@@ -1,0 +1,55 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey,
+        CONCAT(s.s_name, ' - ', s.s_address, ', ', s.s_phone) AS supplier_info
+    FROM supplier s
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        CONCAT(c.c_name, ' - ', c.c_address) AS customer_info
+    FROM customer c
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_totalprice,
+        o.o_orderdate,
+        COUNT(l.l_orderkey) AS item_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        UPPER(p.p_brand) AS upper_brand,
+        LOWER(p.p_comment) AS lower_comment
+    FROM part p
+)
+SELECT 
+    s.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    o.o_orderkey,
+    o.o_orderdate,
+    o.item_count,
+    pd.p_name,
+    pd.upper_brand,
+    pd.lower_comment,
+    o.o_totalprice,
+    CASE 
+        WHEN o.o_totalprice > 1000 THEN 'High Value'
+        ELSE 'Regular Value'
+    END AS order_value_category
+FROM SupplierDetails s
+JOIN CustomerDetails c ON s.s_nationkey = c.c_nationkey
+JOIN OrderDetails o ON c.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN PartDetails pd ON l.l_partkey = pd.p_partkey
+WHERE pd.lower_comment LIKE '%quality%'
+ORDER BY o.o_orderdate DESC, o.o_totalprice DESC;

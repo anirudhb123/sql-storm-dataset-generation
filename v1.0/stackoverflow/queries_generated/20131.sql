@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.CreationDate
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        CASE 
+            WHEN COUNT(b.Id) > 10 THEN 'Gold'
+            WHEN COUNT(b.Id) BETWEEN 5 AND 10 THEN 'Silver'
+            ELSE 'Bronze'
+        END AS BadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerUserId,
+        rp.CreationDate,
+        rp.UpVotes,
+        rp.DownVotes,
+        ub.TotalBadges,
+        ub.BadgeClass,
+        CASE 
+            WHEN rp.UpVotes > rp.DownVotes THEN 'Positive'
+            WHEN rp.UpVotes < rp.DownVotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteSentiment
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+    WHERE 
+        rp.Rank = 1
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    u.DisplayName AS OwnerDisplayName,
+    p.CreationDate,
+    p.UpVotes,
+    p.DownVotes,
+    p.TotalBadges,
+    p.BadgeClass,
+    p.VoteSentiment,
+    (SELECT COUNT(c.Id) 
+     FROM Comments c 
+     WHERE c.PostId = p.PostId) AS CommentCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RecentPosts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    STRING_TO_ARRAY(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><') AS t ON t.Id = Posts.Id
+GROUP BY 
+    p.PostId, u.DisplayName, p.CreationDate, p.UpVotes, p.DownVotes, p.TotalBadges, p.BadgeClass, p.VoteSentiment
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 50
+OFFSET 0;
+
+-- Additional Insights
+-- This query aims to analyze the most recent posts (from each user), categorizing them by influential metrics 
+-- while also integrating badge classifications and sentiments based on voting (upvotes vs downvotes).
+-- Utilize outer joins and window functions to showcase engagement metrics effectively.
+This SQL query example incorporates several advanced SQL concepts, such as CTEs (Common Table Expressions), window functions for ranking and counting, filtering, and aggregation functions like `STRING_AGG()`, illustrating a multi-faceted analysis of posts in the given schema.

@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, title AS t
+WHERE cn.id = mc.company_id AND mc.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND mc.movie_id = mk.movie_id
+AND mc.note IN ('(1922) (USA) (theatrical) (as Famous Players-Lasky Corporation)', '(1926) (Germany) (theatrical) (im Emelka Konzern)', '(1986) (Brazil) (VHS) (rumored)', '(1987) (France) (TV)', '(1990) (non-USA) (all media)', '(2001) (France) (DVD) (special edition)', '(2010) (Japan) (all media) (PlayStation 3 version)', '(2012) (UK) (DVD) (as Cine Asia)');

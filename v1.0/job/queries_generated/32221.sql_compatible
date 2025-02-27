@@ -1,0 +1,54 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL AS parent_title
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year > 2000 
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1,
+        mh.title AS parent_title
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    mh.parent_title,
+    COALESCE(COUNT(c.id), 0) AS cast_count,
+    STRING_AGG(DISTINCT an.name, ', ') AS actor_names,
+    COALESCE(
+        (SELECT AVG(CAST(pi.info AS numeric)) 
+         FROM person_info pi 
+         WHERE pi.person_id IN (SELECT DISTINCT c.person_id FROM cast_info c WHERE c.movie_id = mh.movie_id)), 
+        0) AS avg_actor_age
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    cast_info c ON mh.movie_id = c.movie_id
+LEFT JOIN
+    aka_name an ON c.person_id = an.person_id
+GROUP BY
+    mh.movie_id, mh.title, mh.production_year, mh.level, mh.parent_title
+HAVING
+    COUNT(c.id) > 0
+ORDER BY 
+    mh.production_year DESC, mh.level, mh.title;

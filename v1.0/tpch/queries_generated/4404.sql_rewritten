@@ -1,0 +1,69 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as status_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1997-12-31'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(s.s_acctbal) AS avg_acct_balance
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_mktsegment = 'BUILDING'
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    R.region_name,
+    R.total_orders,
+    C.c_name AS customer_name,
+    C.order_count,
+    C.total_spent,
+    S.s_name AS supplier_name,
+    S.total_avail_qty,
+    S.avg_acct_balance
+FROM 
+    (SELECT 
+        n.n_name AS region_name,
+        COUNT(o.o_orderkey) AS total_orders
+     FROM 
+        nation n 
+     JOIN 
+        region r ON n.n_regionkey = r.r_regionkey 
+     JOIN 
+        orders o ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey LIMIT 1)
+     GROUP BY 
+        n.n_name) R
+FULL OUTER JOIN 
+    CustomerOrders C ON R.region_name = (SELECT n.n_name FROM nation n JOIN customer cs ON n.n_nationkey = cs.c_nationkey WHERE cs.c_custkey = C.c_custkey LIMIT 1)
+LEFT JOIN 
+    SupplierStats S ON C.total_spent > S.avg_acct_balance
+WHERE 
+    (C.order_count IS NOT NULL OR S.total_avail_qty IS NOT NULL)
+ORDER BY 
+    R.total_orders DESC, C.total_spent DESC, S.avg_acct_balance DESC;

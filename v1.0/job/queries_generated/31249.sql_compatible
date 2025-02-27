@@ -1,0 +1,106 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ca.person_id,
+        ca.movie_id,
+        1 AS depth
+    FROM 
+        cast_info ca
+    WHERE 
+        ca.role_id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ca.person_id,
+        ca.movie_id,
+        ah.depth + 1
+    FROM 
+        cast_info ca
+    JOIN 
+        actor_hierarchy ah ON ca.movie_id = ah.movie_id
+    WHERE 
+        ca.role_id IS NOT NULL AND 
+        ca.person_id != ah.person_id
+),
+movie_cast AS (
+    SELECT 
+        a.id AS actor_id,
+        an.name AS actor_name,
+        m.title AS movie_title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY ca.nr_order) AS actor_order,
+        m.id AS movie_id
+    FROM 
+        aka_name an
+    JOIN 
+        cast_info ca ON an.person_id = ca.person_id
+    JOIN 
+        aka_title m ON ca.movie_id = m.movie_id
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+keyword_statistics AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+final_output AS (
+    SELECT 
+        m.actor_id,
+        m.actor_name,
+        m.movie_title,
+        m.production_year,
+        cd.company_name,
+        cd.company_type,
+        ks.keyword_count,
+        ah.depth AS actor_depth,
+        CASE 
+            WHEN ks.keyword_count >= 3 THEN 'Popular'
+            ELSE 'Less Popular'
+        END AS popularity
+    FROM 
+        movie_cast m
+    LEFT JOIN 
+        company_details cd ON m.movie_id = cd.movie_id
+    LEFT JOIN 
+        keyword_statistics ks ON m.movie_id = ks.movie_id
+    LEFT JOIN 
+        actor_hierarchy ah ON m.actor_id = ah.person_id
+)
+SELECT 
+    actor_name,
+    movie_title,
+    production_year,
+    STRING_AGG(DISTINCT company_name, ', ') AS companies,
+    STRING_AGG(DISTINCT company_type, ', ') AS company_types,
+    MAX(keyword_count) AS total_keywords,
+    COUNT(DISTINCT actor_id) AS total_actors,
+    MAX(actor_depth) AS maximum_depth,
+    popularity
+FROM 
+    final_output
+GROUP BY 
+    actor_name,
+    movie_title,
+    production_year,
+    popularity
+ORDER BY 
+    total_keywords DESC, 
+    production_year DESC;

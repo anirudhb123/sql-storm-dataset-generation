@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(rp.Id) AS TotalQuestions,
+        COALESCE(SUM(vt.VoteCount), 0) AS TotalVotes,
+        AVG(rp.Score) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            v.PostId, 
+            COUNT(v.Id) AS VoteCount
+        FROM 
+            Votes v 
+        WHERE 
+            v.VoteTypeId = 2
+        GROUP BY 
+            v.PostId
+    ) vt ON rp.Id = vt.PostId
+    GROUP BY 
+        u.Id
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalQuestions,
+    ups.TotalVotes,
+    ups.AvgScore,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    COALESCE(ub.BadgeNames, 'None') AS BadgeNames
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    UserBadges ub ON ups.UserId = ub.UserId
+WHERE 
+    ups.TotalQuestions > 0
+ORDER BY 
+    ups.TotalVotes DESC NULLS LAST, 
+    ups.AvgScore DESC;

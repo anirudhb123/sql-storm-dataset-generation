@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Ranking,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerIndicator
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+
+PostAgg AS (
+    SELECT 
+        PostId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        MAX(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS HasUpVote,
+        MAX(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS HasDownVote
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    GROUP BY 
+        PostId
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(CONCAT('Change: ', pt.Name, ' at ', ph.CreationDate), '; ') AS HistoryDetails
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    ra.CommentCount,
+    ra.VoteCount,
+    ra.HasUpVote,
+    ra.HasDownVote,
+    phd.HistoryDetails,
+    CASE 
+        WHEN rp.AcceptedAnswerIndicator > 0 THEN 'Has Accepted Answer' 
+        WHEN rp.Ranking <= 5 THEN 'Top Ranking Post'
+        ELSE 'Regular Post' 
+    END AS PostTypeDescription
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostAgg ra ON rp.PostId = ra.PostId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE 
+    rp.Ranking <= 10
+ORDER BY 
+    rp.ViewCount DESC, rp.CreationDate DESC;

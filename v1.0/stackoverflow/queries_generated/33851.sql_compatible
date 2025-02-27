@@ -1,0 +1,82 @@
+
+WITH RECURSIVE TagHierarchy AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        1 AS Level
+    FROM 
+        Tags
+    WHERE 
+        IsRequired = 1
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        th.Level + 1
+    FROM 
+        Tags t
+    INNER JOIN 
+        PostLinks pl ON pl.RelatedPostId = t.Id
+    INNER JOIN 
+        TagHierarchy th ON th.Id = pl.PostId
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate > (CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '30 days')
+)
+
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalQuestions,
+    u.TotalAnswers,
+    u.TotalBounty,
+    p.Title AS RecentPostTitle,
+    ph.CreationDate AS RecentPostDate
+FROM 
+    UserActivity u
+LEFT JOIN 
+    RecentPostHistory ph ON u.UserId = ph.UserId AND ph.rn = 1
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT UNNEST(string_to_array(p.Tags, '><')))
+LEFT JOIN 
+    TagHierarchy th ON th.Id = t.Id
+WHERE 
+    u.TotalPosts > 10
+ORDER BY 
+    u.TotalBounty DESC, 
+    u.TotalPosts DESC;

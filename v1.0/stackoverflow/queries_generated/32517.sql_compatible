@@ -1,0 +1,94 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.ParentId,
+        p2.Title,
+        r.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy r ON p2.ParentId = r.Id
+),
+PostScoreWithRank AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS PostsCount,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserBadgeSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ups.PostId,
+    ups.Title,
+    ups.Score,
+    ups.ScoreRank,
+    upbs.BadgeCount,
+    upbs.GoldBadges,
+    upbs.SilverBadges,
+    upbs.BronzeBadges,
+    rph.Level AS PostLevel,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) AS VoteCount
+FROM 
+    Users u
+INNER JOIN 
+    PostScoreWithRank ups ON u.Id = ups.OwnerUserId
+LEFT JOIN 
+    Comments c ON c.PostId = ups.PostId
+LEFT JOIN 
+    Votes v ON v.PostId = ups.PostId
+LEFT JOIN 
+    UserBadgeSummary upbs ON u.Id = upbs.UserId
+LEFT JOIN 
+    RecursivePostHierarchy rph ON ups.PostId = rph.Id
+GROUP BY 
+    u.DisplayName,
+    u.Reputation,
+    ups.PostId,
+    ups.Title,
+    ups.Score,
+    ups.ScoreRank,
+    upbs.BadgeCount,
+    upbs.GoldBadges,
+    upbs.SilverBadges,
+    upbs.BronzeBadges,
+    rph.Level
+HAVING 
+    AVG(ups.Score) > 10  
+ORDER BY 
+    u.Reputation DESC, 
+    ups.Score DESC;

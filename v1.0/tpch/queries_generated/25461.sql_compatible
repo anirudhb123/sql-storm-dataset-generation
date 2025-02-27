@@ -1,0 +1,30 @@
+
+SELECT 
+    p.p_name AS part_name,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    SUM(l.l_quantity) AS total_quantity_sold,
+    AVG(o.o_totalprice) AS avg_order_value,
+    MAX(l.l_extendedprice) AS max_extended_price,
+    SUBSTRING(p.p_comment, 1, 15) AS short_comment,
+    CONCAT('Supplier Count: ', COUNT(DISTINCT ps.s_suppkey), ', ', 
+           'Total Quantity: ', SUM(l.l_quantity), ', ', 
+           'Avg Order Value: ', AVG(o.o_totalprice)) AS detailed_summary
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    p.p_name LIKE '%widget%'
+    AND o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY 
+    p.p_name, p.p_comment
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    avg_order_value DESC;

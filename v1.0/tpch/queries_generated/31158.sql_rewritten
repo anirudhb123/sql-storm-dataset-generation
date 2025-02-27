@@ -1,0 +1,68 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS level,
+        o.o_custkey
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '1996-01-01'
+    
+    UNION ALL
+    
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        h.level + 1,
+        o.o_custkey
+    FROM orders o
+    JOIN OrderHierarchy h ON o.o_custkey = h.o_custkey AND o.o_orderdate > h.o_orderdate
+    WHERE o.o_orderstatus = 'O'
+),
+AvgOrderPrices AS (
+    SELECT 
+        o.o_custkey,
+        AVG(o.o_totalprice) AS avg_price
+    FROM OrderHierarchy o
+    GROUP BY o.o_custkey
+),
+TotalLineItemSales AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate < cast('1998-10-01' as date) - INTERVAL '90 days'
+    GROUP BY l.l_orderkey
+),
+CustomerRankings AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    s.s_name,
+    p.p_name,
+    COALESCE(a.avg_price, 0) AS average_order_price,
+    COALESCE(t.total_sales, 0) AS total_line_item_sales,
+    cr.rank
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN part p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+LEFT JOIN AvgOrderPrices a ON s.s_suppkey = a.o_custkey
+LEFT JOIN TotalLineItemSales t ON s.s_suppkey = t.l_orderkey
+LEFT JOIN CustomerRankings cr ON s.s_nationkey = cr.c_custkey
+WHERE 
+    p.p_size BETWEEN 10 AND 20 
+    AND p.p_retailprice IS NOT NULL
+ORDER BY 
+    COALESCE(a.avg_price, 0) DESC, 
+    total_sales DESC;

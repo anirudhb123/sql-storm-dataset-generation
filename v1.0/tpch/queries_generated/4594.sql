@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_partkey,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(*) AS item_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_totalprice,
+    COALESCE(ls.total_revenue, 0) AS total_revenue,
+    COALESCE(ls.item_count, 0) AS item_count,
+    s.s_name AS supplier_name,
+    s.ps_availqty,
+    CASE 
+        WHEN r.o_orderstatus = 'F' THEN 'Finished'
+        WHEN r.o_orderstatus IS NULL THEN 'Unknown'
+        ELSE 'In Progress'
+    END AS order_status
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    LineItemSummary ls ON r.o_orderkey = ls.l_orderkey
+LEFT JOIN 
+    SupplierParts s ON r.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = s.ps_partkey)
+WHERE 
+    r.rank_order <= 10
+ORDER BY 
+    r.o_totalprice DESC, 
+    s.s_name ASC;

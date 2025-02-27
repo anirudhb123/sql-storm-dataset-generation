@@ -1,0 +1,55 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(c.title, 'Original') AS parent_title,
+        1 AS level
+    FROM
+        title m
+    LEFT JOIN
+        movie_link ml ON m.id = ml.movie_id
+    LEFT JOIN
+        title c ON ml.linked_movie_id = c.id
+    WHERE
+        m.production_year >= 2000
+    UNION ALL
+    SELECT
+        m.id,
+        m.title,
+        COALESCE(c.title, 'Original') AS parent_title,
+        mh.level + 1
+    FROM
+        movie_hierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        title m ON ml.linked_movie_id = m.id
+    LEFT JOIN
+        title c ON ml.linked_movie_id = c.id
+    WHERE
+        m.production_year >= 2000
+)
+SELECT 
+    mh.movie_id,
+    mh.title AS movie_title,
+    mh.parent_title,
+    mh.level,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    STRING_AGG(DISTINCT akn.name, ', ') AS known_actors,
+    AVG(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') THEN CAST(mi.info AS DECIMAL) ELSE NULL END) AS avg_budget,
+    MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'BoxOffice') THEN CAST(mi.info AS DECIMAL) ELSE NULL END) AS max_box_office
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name akn ON ci.person_id = akn.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.parent_title, mh.level
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY 
+    level ASC, total_cast DESC, movie_title
+LIMIT 100 OFFSET 0;

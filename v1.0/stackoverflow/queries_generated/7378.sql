@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 -- UpMod votes
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+TopPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        rp.VoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+),
+PostDetails AS (
+    SELECT 
+        tp.Id,
+        tp.Title,
+        tp.CreationDate,
+        tp.Score,
+        tp.CommentCount,
+        tp.VoteCount,
+        u.DisplayName AS OwnerDisplayName,
+        (SELECT STRING_AGG(t.TagName, ', ') 
+         FROM Tags t 
+         WHERE t.Id IN (SELECT UNNEST(string_to_array(p.Tags, '><'))::int)
+                        FROM Posts p 
+                        WHERE p.Id = tp.Id)) AS Tags
+    FROM 
+        TopPosts tp
+    JOIN 
+        Users u ON tp.OwnerUserId = u.Id
+)
+SELECT 
+    pd.Id,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.CommentCount,
+    pd.VoteCount,
+    pd.OwnerDisplayName,
+    pd.Tags
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.Score DESC;

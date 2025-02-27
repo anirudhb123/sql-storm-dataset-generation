@@ -1,0 +1,41 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS unique_customers,
+        RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey
+),
+TopOrders AS (
+    SELECT * FROM RankedOrders WHERE revenue_rank <= 10
+),
+SupplierInfo AS (
+    SELECT 
+        ps.ps_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_suppkey
+)
+SELECT 
+    o.o_orderkey, 
+    o.total_revenue, 
+    o.unique_customers, 
+    s.s_name, 
+    s.total_supply_cost
+FROM 
+    TopOrders o
+JOIN 
+    SupplierInfo s ON s.ps_suppkey IN (SELECT DISTINCT l.l_suppkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+ORDER BY 
+    o.total_revenue DESC;

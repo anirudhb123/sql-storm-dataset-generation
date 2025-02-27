@@ -1,0 +1,86 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(ka.name, 'Unknown') AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY ca.nr_order) AS actor_rank,
+        m.production_year,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ca ON ca.movie_id = m.id
+    LEFT JOIN 
+        aka_name ka ON ca.person_id = ka.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    GROUP BY 
+        m.id, m.title, ka.name
+),
+
+FilteredMovies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        actor_name,
+        actor_rank,
+        production_year,
+        keyword_count
+    FROM 
+        RankedMovies
+    WHERE 
+        production_year BETWEEN 1990 AND 2020 
+        AND actor_rank <= 3
+),
+
+MovieStatistics AS (
+    SELECT 
+        production_year,
+        COUNT(*) AS movie_count,
+        AVG(keyword_count) AS avg_keywords
+    FROM 
+        FilteredMovies
+    GROUP BY 
+        production_year
+)
+
+SELECT 
+    f.production_year,
+    m.movie_title,
+    CAST(f.actor_name AS text) as actor_name,
+    COALESCE(s.movie_count, 0) AS movie_count,
+    COALESCE(s.avg_keywords, 0) AS average_keywords
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    MovieStatistics s ON f.production_year = s.production_year
+JOIN 
+    title m ON m.id = f.movie_id
+WHERE 
+    f.actor_name LIKE 'J%' 
+    OR f.actor_name IS NULL
+ORDER BY 
+    f.production_year DESC, 
+    m.movie_title,
+    f.actor_rank;
+
+
+### Explanation:
+1. **Common Table Expressions (CTEs)**:
+   - **RankedMovies**: This CTE ranks actors in movies based on their order in the cast, aggregates keywords, and filters out unknown actors.
+   - **FilteredMovies**: This filters the ranked movies to those released between 1990 and 2020 and only includes up to the top 3 actors per movie.
+   - **MovieStatistics**: This aggregates the filtered movies by year to calculate total movie counts and average keywords.
+
+2. **Joins**:
+   - **LEFT JOIN**: Used to include movies with no keywords and actors who may not have names.
+
+3. **NULL Handling**: 
+   - The query uses `COALESCE` to handle potential NULL values, such as when there are no keywords or when an actor has a name that isn’t available.
+
+4. **String Expressions**: 
+   - The query filters by `actor_name` starting with 'J' or being NULL, taking advantage of the LIKE operator.
+
+5. **Ordering**: 
+   - The final output is ordered first by year (descending) and then by movie title and actor rank for a structured presentation.
+
+This SQL query combines multiple advanced concepts into a cohesive performance benchmarking request that could be used to analyze movie data effectively.

@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_within_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorsInfo AS (
+    SELECT 
+        a.name AS actor_name,
+        c.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+),
+MovieDetailsAS AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ARRAY_AGG(DISTINCT a.actor_name) AS actors_list
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        ActorsInfo a ON m.title_id = a.movie_id
+    GROUP BY 
+        m.id, m.title
+),
+FilteredMovies AS (
+    SELECT 
+        md.title,
+        md.actors_list,
+        COALESCE(NULLIF(SUBSTRING(md.title FROM '.*\(%#.*\)'), ''), 'Unknown') AS special_character
+    FROM 
+        MovieDetailsAS md
+    WHERE 
+        ARRAY_LENGTH(md.actors_list, 1) > 2
+)
+SELECT 
+    fm.title,
+    fm.actors_list,
+    fm.special_character,
+    COUNT(DISTINCT a.id) AS actor_count,
+    CASE 
+        WHEN fm.special_character IS NOT NULL THEN 'Has Special Char'
+        ELSE 'No Special Char'
+    END AS special_character_indicator
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    aka_name a ON a.name = ANY(fm.actors_list)
+GROUP BY 
+    fm.title, fm.actors_list, fm.special_character
+HAVING 
+    COUNT(DISTINCT a.id) > 5
+ORDER BY 
+    actor_count DESC,
+    fm.title;

@@ -1,0 +1,98 @@
+WITH UserBadgeStats AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS TotalBadges,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(P.ViewCount) AS TotalViews,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        COALESCE(UB.TotalBadges, 0) AS TotalBadges,
+        COALESCE(PS.TotalPosts, 0) AS TotalPosts,
+        COALESCE(PS.TotalQuestions, 0) AS TotalQuestions,
+        COALESCE(PS.TotalAnswers, 0) AS TotalAnswers,
+        COALESCE(PS.TotalViews, 0) AS TotalViews,
+        PS.LastPostDate,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(PS.TotalPosts, 0) DESC, COALESCE(UB.TotalBadges, 0) DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserBadgeStats UB ON U.Id = UB.UserId
+    LEFT JOIN 
+        PostStats PS ON U.Id = PS.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        PH.UserId,
+        COUNT(PH.Id) AS ClosedPostCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11, 12) 
+    GROUP BY 
+        PH.UserId
+),
+DetailedUserStats AS (
+    SELECT 
+        UA.UserId,
+        UA.TotalBadges,
+        UA.TotalPosts,
+        UA.TotalQuestions,
+        UA.TotalAnswers,
+        UA.TotalViews,
+        COALESCE(CP.ClosedPostCount, 0) AS ClosedPosts,
+        CASE 
+            WHEN UA.LastPostDate IS NULL THEN 'No Posts Yet'
+            ELSE TO_CHAR(UA.LastPostDate, 'YYYY-MM-DD HH24:MI:SS')
+        END AS LastPostFormatted,
+        CASE 
+            WHEN UA.TotalPosts >= 100 THEN 'Legendary'
+            WHEN UA.TotalPosts >= 50 THEN 'Experienced'
+            ELSE 'Novice'
+        END AS UserLevel
+    FROM 
+        UserActivity UA
+    LEFT JOIN 
+        ClosedPosts CP ON UA.UserId = CP.UserId
+)
+SELECT 
+    DUS.UserId,
+    U.DisplayName,
+    DUS.TotalBadges,
+    DUS.TotalPosts,
+    DUS.TotalQuestions,
+    DUS.TotalAnswers,
+    DUS.TotalViews,
+    DUS.ClosedPosts,
+    DUS.LastPostFormatted,
+    DUS.UserLevel
+FROM 
+    DetailedUserStats DUS
+JOIN 
+    Users U ON DUS.UserId = U.Id
+WHERE 
+    (DUS.ClosedPosts > 0 OR DUS.TotalPosts > 0)
+    AND DUS.UserLevel IN ('Legendary', 'Experienced')
+ORDER BY 
+    DUS.Rank;

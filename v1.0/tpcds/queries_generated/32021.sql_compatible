@@ -1,0 +1,60 @@
+
+WITH RECURSIVE sales_path AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_sales_price, 
+        ws_ship_date_sk, 
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > 100.00
+
+    UNION ALL
+
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price * 1.1 AS ws_sales_price,
+        ws.ws_ship_date_sk,
+        sp.level + 1
+    FROM 
+        web_sales ws
+    JOIN sales_path sp ON ws.ws_item_sk = sp.ws_item_sk 
+    WHERE 
+        sp.level < 5
+)
+SELECT 
+    ca.city AS customer_city,
+    SUM(sp.ws_sales_price) AS total_sales_price,
+    COUNT(sp.ws_order_number) AS total_orders,
+    AVG(sp.ws_sales_price) AS avg_sales_price,
+    MAX(sp.ws_sales_price) AS max_sales_price,
+    MIN(sp.ws_sales_price) AS min_sales_price,
+    COUNT(DISTINCT c.c_customer_id) AS unique_customers,
+    (SELECT COUNT(*) 
+     FROM store s 
+     WHERE s.s_store_sk IN (
+         SELECT DISTINCT ws.ws_warehouse_sk 
+         FROM web_sales ws 
+         WHERE ws.ws_item_sk = sp.ws_item_sk
+     )) AS store_count
+FROM 
+    sales_path sp
+JOIN 
+    customer c ON c.c_customer_sk = (
+        SELECT ws_bill_customer_sk 
+        FROM web_sales 
+        WHERE ws_order_number = sp.ws_order_number
+    )
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+GROUP BY 
+    ca.city
+HAVING 
+    total_sales_price > 5000.00 OR 
+    (total_orders > 10 AND customer_city IS NOT NULL)
+ORDER BY 
+    total_sales_price DESC
+LIMIT 10;

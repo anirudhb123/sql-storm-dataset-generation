@@ -1,0 +1,55 @@
+WITH RECURSIVE nation_stats AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        SUM(o.o_totalprice) AS total_revenue,
+        SUM(l.l_quantity) AS total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY 
+        n.n_nationkey, n.n_name
+), 
+ranked_nations AS (
+    SELECT 
+        n.n_name, 
+        ns.total_revenue,
+        ns.total_quantity,
+        ns.rank
+    FROM 
+        nation_stats ns
+    JOIN 
+        nation n ON ns.n_nationkey = n.n_nationkey
+    WHERE 
+        ns.rank <= 3
+)
+SELECT 
+    r.r_name AS region_name, 
+    ARRAY_AGG(rn.n_name ORDER BY rn.total_revenue DESC) AS top_nations,
+    SUM(rn.total_revenue) AS total_region_revenue
+FROM 
+    region r
+LEFT JOIN 
+    ranked_nations rn ON r.r_regionkey = (
+        SELECT n.n_regionkey 
+        FROM nation n 
+        WHERE n.n_nationkey = rn.n_nationkey
+    )
+GROUP BY 
+    r.r_regionkey, r.r_name
+HAVING 
+    SUM(rn.total_revenue) IS NOT NULL
+ORDER BY 
+    total_region_revenue DESC;

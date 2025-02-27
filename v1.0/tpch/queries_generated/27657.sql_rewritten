@@ -1,0 +1,86 @@
+WITH part_details AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        s.s_name AS supplier_name,
+        s.s_address AS supplier_address,
+        n.n_name AS nation_name,
+        r.r_name AS region_name
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+customer_details AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_address,
+        n.n_name AS nation_name,
+        c.c_phone,
+        c.c_acctbal,
+        c.c_mktsegment,
+        c.c_comment
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+),
+order_details AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        o.o_clerk,
+        o.o_shippriority,
+        o.o_comment,
+        COUNT(l.l_orderkey) AS lineitem_count,
+        SUM(l.l_extendedprice) AS total_extended_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderstatus, o.o_totalprice, 
+        o.o_orderdate, o.o_orderpriority, o.o_clerk, o.o_shippriority, 
+        o.o_comment
+)
+SELECT 
+    pd.p_name,
+    pd.supplier_name,
+    pd.nation_name AS supplier_nation,
+    cd.c_name AS customer_name,
+    cd.nation_name AS customer_nation,
+    od.o_orderdate,
+    od.lineitem_count,
+    od.total_extended_price,
+    CONCAT('Part: ', pd.p_name, ' | Supplier: ', pd.supplier_name, 
+           ' | Customer: ', cd.c_name, ' | Order Date: ', od.o_orderdate) AS details
+FROM 
+    part_details pd
+JOIN 
+    customer_details cd ON pd.p_partkey % 10 = cd.c_custkey % 10  
+JOIN 
+    order_details od ON cd.c_custkey = od.o_custkey
+WHERE 
+    pd.p_retailprice > 100.00 AND 
+    od.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+ORDER BY 
+    total_extended_price DESC
+LIMIT 100;

@@ -1,0 +1,60 @@
+
+WITH RankedItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_product_name,
+        i.i_current_price,
+        RANK() OVER (PARTITION BY i.i_category ORDER BY i.i_current_price DESC) AS price_rank
+    FROM 
+        item i
+    WHERE 
+        i.i_rec_start_date <= DATE '2002-10-01' 
+        AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > DATE '2002-10-01')
+),
+CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(SUM(sr.return_quantity), 0) AS total_returns,
+        COUNT(DISTINCT sr.ticket_number) AS distinct_return_tickets
+    FROM 
+        customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        cd.gender,
+        cd.marital_status,
+        SUM(cd.purchase_estimate) AS total_estimate
+    FROM 
+        customer_demographics cd
+    INNER JOIN CustomerReturns cr ON cr.c_customer_id = cd.demo_sk
+    WHERE 
+        cr.total_returns > 5
+    GROUP BY 
+        cd.gender, cd.marital_status
+)
+SELECT 
+    r.i_item_id,
+    r.i_product_name,
+    r.i_current_price,
+    r.price_rank,
+    h.gender,
+    h.marital_status,
+    h.total_estimate
+FROM 
+    RankedItems r
+JOIN HighValueCustomers h ON r.i_category IN (
+        SELECT DISTINCT 
+            c.i_category 
+        FROM 
+            catalog_sales cs
+        JOIN item c ON c.i_item_sk = cs.cs_item_sk
+        WHERE 
+            cs.net_profit > 1000
+    )
+WHERE 
+    r.price_rank <= 10
+ORDER BY 
+    r.price_rank, h.total_estimate DESC;

@@ -1,0 +1,48 @@
+WITH SupplierAggregates AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        sa.total_supply_cost,
+        sa.part_count
+    FROM SupplierAggregates sa
+    JOIN supplier s ON sa.s_suppkey = s.s_suppkey
+    WHERE sa.total_supply_cost > (
+        SELECT AVG(total_supply_cost) 
+        FROM SupplierAggregates
+    )
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        n.n_name AS supplier_nation
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+    LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+)
+SELECT 
+    HD.s_name, 
+    SUM(OD.l_extendedprice * (1 - OD.l_discount)) AS total_revenue,
+    COUNT(DISTINCT OD.o_orderkey) AS order_count,
+    HD.total_supply_cost,
+    HD.part_count
+FROM HighValueSuppliers HD
+LEFT JOIN OrderDetails OD ON HD.s_suppkey = OD.l_suppkey 
+GROUP BY HD.s_name, HD.total_supply_cost, HD.part_count 
+HAVING total_revenue > 100000
+ORDER BY total_revenue DESC;

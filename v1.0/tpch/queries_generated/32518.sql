@@ -1,0 +1,63 @@
+WITH RECURSIVE supplier_sales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) as sales_rank
+    FROM
+        supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+top_sellers AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(ss.s_suppkey) AS num_top_suppliers,
+        SUM(ss.total_sales) AS total_sales
+    FROM 
+        nation n
+    LEFT JOIN supplier_sales ss ON n.n_nationkey = ss.s_nationkey AND ss.sales_rank <= 3
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+annual_expenditure AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_expenditure
+    FROM 
+        customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'P') 
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+final_report AS (
+    SELECT 
+        ts.n_name AS nation,
+        ts.num_top_suppliers,
+        ts.total_sales,
+        ae.c_name AS top_customer,
+        ae.total_expenditure
+    FROM 
+        top_sellers ts
+    JOIN annual_expenditure ae ON ts.total_sales > 100000
+)
+SELECT 
+    fr.nation,
+    fr.num_top_suppliers,
+    fr.total_sales,
+    COALESCE(fr.top_customer, 'None') AS top_customer,
+    COALESCE(fr.total_expenditure, 0) AS total_expenditure
+FROM 
+    final_report fr
+ORDER BY 
+    total_sales DESC, num_top_suppliers DESC;

@@ -1,0 +1,31 @@
+-- Performance Benchmarking Query
+
+-- This query retrieves the count of posts, average score of posts, 
+-- total number of comments, and average reputation of users who own those posts.
+
+WITH UserPostStats AS (
+    SELECT
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.Score) AS AvgPostScore,
+        SUM(c.Id IS NOT NULL) AS TotalComments
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.OwnerUserId
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation
+    FROM Users u
+)
+
+SELECT
+    ups.OwnerUserId,
+    ups.PostCount,
+    ups.AvgPostScore,
+    ups.TotalComments,
+    ur.Reputation
+FROM UserPostStats ups
+JOIN UserReputation ur ON ups.OwnerUserId = ur.UserId
+ORDER BY ups.PostCount DESC, ur.Reputation DESC;

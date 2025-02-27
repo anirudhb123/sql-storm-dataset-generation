@@ -1,0 +1,61 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '1998-10-01' - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+CustomerSpending AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(ro.total_revenue), 0) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        RecentOrders ro ON c.c_custkey = ro.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    cs.c_name,
+    cs.total_spent,
+    rs.s_name AS top_supplier,
+    rs.s_acctbal AS top_supplier_balance
+FROM 
+    CustomerSpending cs
+LEFT JOIN 
+    RankedSuppliers rs ON cs.total_spent = (
+        SELECT MAX(total_spent) 
+        FROM CustomerSpending
+    )
+WHERE 
+    cs.total_spent > (
+        SELECT AVG(total_spent) 
+        FROM CustomerSpending
+    )
+ORDER BY 
+    cs.total_spent DESC
+FETCH FIRST 10 ROWS ONLY;

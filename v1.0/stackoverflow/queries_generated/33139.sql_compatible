@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Reputation
+    FROM RankedPosts rp
+    WHERE rp.Rank <= 5
+),
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 24)  
+    GROUP BY ph.PostId, ph.UserId
+),
+EndResults AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.ViewCount,
+        COALESCE(pv.VoteCount, 0) AS TotalVotes,
+        COALESCE(pv.UpVoteCount, 0) AS UpVotes,
+        COALESCE(pv.DownVoteCount, 0) AS DownVotes,
+        COALESCE(phs.EditCount, 0) AS TotalEdits,
+        phs.LastEditDate
+    FROM TopPosts tp
+    LEFT JOIN PostVotes pv ON tp.PostId = pv.PostId
+    LEFT JOIN PostHistorySummary phs ON tp.PostId = phs.PostId
+)
+SELECT 
+    e.PostId,
+    e.Title,
+    e.ViewCount,
+    e.TotalVotes,
+    e.UpVotes,
+    e.DownVotes,
+    e.TotalEdits,
+    e.LastEditDate,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     JOIN LATERAL UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS tag ON tag = t.Id 
+     WHERE p.Id = e.PostId) AS PostTags
+FROM EndResults e
+JOIN Posts p ON e.PostId = p.Id
+ORDER BY e.ViewCount DESC, e.TotalVotes DESC
+LIMIT 10;

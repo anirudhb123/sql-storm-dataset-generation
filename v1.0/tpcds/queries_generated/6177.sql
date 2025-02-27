@@ -1,0 +1,65 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        SUM(cs.cs_ext_sales_price) AS total_catalog_sales,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count
+    FROM 
+        customer_demographics cd
+    INNER JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+), 
+SalesByDemographics AS (
+    SELECT 
+        dem.cd_gender,
+        dem.cd_marital_status,
+        SUM(sales.total_web_sales) AS total_web_sales,
+        SUM(sales.total_catalog_sales) AS total_catalog_sales,
+        SUM(sales.total_store_sales) AS total_store_sales
+    FROM 
+        CustomerSales sales
+    JOIN 
+        CustomerDemographics dem ON sales.c_customer_sk = dem.cd_demo_sk
+    GROUP BY 
+        dem.cd_gender,
+        dem.cd_marital_status
+)
+
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(SUM(sb.total_web_sales), 0) AS total_web_sales,
+    COALESCE(SUM(sb.total_catalog_sales), 0) AS total_catalog_sales,
+    COALESCE(SUM(sb.total_store_sales), 0) AS total_store_sales,
+    COUNT(DISTINCT sb.c_customer_sk) AS customer_count
+FROM 
+    SalesByDemographics sb
+RIGHT JOIN 
+    CustomerDemographics cd ON sb.cd_gender = cd.cd_gender AND sb.cd_marital_status = cd.cd_marital_status
+GROUP BY 
+    cd.cd_gender,
+    cd.cd_marital_status
+ORDER BY 
+    cd.cd_gender, 
+    cd.cd_marital_status;

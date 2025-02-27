@@ -1,0 +1,91 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year DESC) AS rnk
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+TopFemaleCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name
+    FROM 
+        RankedCustomers c
+    WHERE 
+        c.cd_gender = 'F' AND c.rnk <= 10
+),
+TopMaleCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name
+    FROM 
+        RankedCustomers c
+    WHERE 
+        c.cd_gender = 'M' AND c.rnk <= 10
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_ship_date_sk IS NOT NULL
+    GROUP BY 
+        ws.ws_item_sk
+),
+BestSellingItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        sd.total_quantity,
+        sd.total_sales
+    FROM 
+        item i
+    INNER JOIN 
+        SalesData sd ON i.i_item_sk = sd.ws_item_sk
+    WHERE 
+        sd.total_sales > (SELECT AVG(total_sales) FROM SalesData)
+),
+FinalReport AS (
+    SELECT 
+        f.c_customer_id,
+        CONCAT(f.c_first_name, ' ', f.c_last_name) AS full_name,
+        b.i_item_desc,
+        b.total_quantity,
+        b.total_sales
+    FROM 
+        TopFemaleCustomers f
+    FULL OUTER JOIN 
+        BestSellingItems b ON f.c_customer_id = (SELECT c.c_customer_id FROM customer c WHERE c.c_current_cdemo_sk IN (SELECT cd.cd_demo_sk FROM customer_demographics cd WHERE cd.cd_gender = 'F') ORDER BY RANDOM() LIMIT 1)
+    UNION ALL
+    SELECT 
+        m.c_customer_id,
+        CONCAT(m.c_first_name, ' ', m.c_last_name) AS full_name,
+        b.i_item_desc,
+        b.total_quantity,
+        b.total_sales
+    FROM 
+        TopMaleCustomers m
+    FULL OUTER JOIN 
+        BestSellingItems b ON m.c_customer_id = (SELECT c.c_customer_id FROM customer c WHERE c.c_current_cdemo_sk IN (SELECT cd.cd_demo_sk FROM customer_demographics cd WHERE cd.cd_gender = 'M') ORDER BY RANDOM() LIMIT 1)
+)
+SELECT 
+    COALESCE(full_name, 'Unknown') AS customer_name,
+    COALESCE(i_item_desc, 'No Item') AS item_description,
+    COALESCE(total_quantity, 0) AS quantity,
+    COALESCE(total_sales, 0.00) AS sales
+FROM 
+    FinalReport
+ORDER BY 
+    customer_name, sales DESC;

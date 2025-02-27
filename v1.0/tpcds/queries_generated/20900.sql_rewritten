@@ -1,0 +1,62 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price > (
+            SELECT AVG(i2.i_current_price) 
+            FROM item i2 
+            WHERE i2.i_rec_start_date <= cast('2002-10-01' as date) 
+              AND (i2.i_rec_end_date IS NULL OR i2.i_rec_end_date > cast('2002-10-01' as date))
+        )
+    GROUP BY 
+        ws.web_site_sk, ws_item_sk
+),
+TotalNetProfit AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_net_profit) AS overall_net_profit
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+),
+HighPerformingItems AS (
+    SELECT 
+        r.ws_item_sk,
+        r.total_quantity,
+        r.total_net_profit
+    FROM 
+        RankedSales r
+    JOIN 
+        TotalNetProfit tp ON r.ws_item_sk = tp.ws_item_sk
+    WHERE 
+        r.profit_rank <= 5 AND
+        (r.total_net_profit > (SELECT AVG(total_net_profit) FROM RankedSales WHERE profit_rank <= 5))
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    i.i_current_price,
+    COALESCE(ht.total_quantity, 0) AS high_perform_quantity,
+    COALESCE(ht.total_net_profit, 0) AS high_perform_profit,
+    CASE 
+        WHEN ht.total_net_profit IS NULL THEN 'Not High Performer'
+        ELSE 'High Performer'
+    END AS performance_status
+FROM 
+    item i
+LEFT JOIN 
+    HighPerformingItems ht ON i.i_item_sk = ht.ws_item_sk
+WHERE 
+    i.i_rec_start_date <= cast('2002-10-01' as date) 
+    AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > cast('2002-10-01' as date))
+ORDER BY 
+    i.i_item_id ASC;

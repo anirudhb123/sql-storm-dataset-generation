@@ -1,0 +1,44 @@
+WITH RECURSIVE region_summary AS (
+    SELECT r.r_regionkey, r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_regionkey, r.r_name
+    UNION ALL
+    SELECT r.r_regionkey, CONCAT(r.r_name, ' (Area - Recursive)') AS r_name, ns.nation_count
+    FROM region_summary rs
+    JOIN region r ON rs.r_regionkey = r.r_regionkey
+    JOIN (
+        SELECT n.n_regionkey, COUNT(n.n_nationkey) AS nation_count
+        FROM nation n
+        GROUP BY n.n_regionkey
+    ) ns ON ns.n_regionkey = r.r_regionkey
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '1996-01-01' 
+      AND l.l_shipdate < '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+supplier_revenue AS (
+    SELECT s.s_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_revenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey
+),
+final_report AS (
+    SELECT 
+        rs.r_name AS region_name, 
+        COALESCE(oss.total_revenue, 0) AS order_total_revenue,
+        COALESCE(supp_rev.supplier_revenue, 0) AS supplier_total_revenue,
+        (COALESCE(oss.total_revenue, 0) - COALESCE(supp_rev.supplier_revenue, 0)) AS profit_margin
+    FROM region_summary rs
+    LEFT JOIN order_summary oss ON rs.nation_count > 0
+    LEFT JOIN supplier_revenue supp_rev ON supp_rev.supplier_revenue > 0
+)
+SELECT region_name, order_total_revenue, supplier_total_revenue, profit_margin
+FROM final_report
+WHERE profit_margin > 1000
+ORDER BY profit_margin DESC;

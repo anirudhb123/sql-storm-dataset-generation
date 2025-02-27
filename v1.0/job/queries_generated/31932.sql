@@ -1,0 +1,65 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        NULL::integer AS parent_movie_id
+    FROM 
+        aka_title t
+    WHERE 
+        t.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        e.id,
+        e.title,
+        e.production_year,
+        p.movie_id
+    FROM 
+        aka_title e
+    JOIN 
+        movie_hierarchy p ON e.episode_of_id = p.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    STRING_AGG(DISTINCT c.kind, ', ') AS company_types,
+    SUM(w.rank) OVER (PARTITION BY m.id ORDER BY w.rank DESC) AS total_rank,
+    COALESCE(cn.name, 'Unknown') AS character_name,
+    CASE 
+        WHEN m.production_year < 2000 THEN 'Classic'
+        WHEN m.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era
+FROM 
+    cast_info ci
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    movie_hierarchy m ON ci.movie_id = m.movie_id
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type c ON mc.company_type_id = c.id
+LEFT JOIN 
+    char_name cn ON cn.imdb_id = a.id
+LEFT JOIN 
+    (SELECT 
+        name, 
+        ROW_NUMBER() OVER (PARTITION BY movie_id ORDER BY name) AS rank 
+     FROM 
+        char_name
+     WHERE 
+        name IS NOT NULL) w ON w.name = cn.name
+WHERE 
+    a.name IS NOT NULL
+GROUP BY 
+    a.name, m.title, m.production_year, cn.name
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    m.production_year DESC, actor_name;

@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.Score > 0
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.CreationDate, p.Score
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ISNULL(SUM(b.Class), 0) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        ur.DisplayName,
+        ur.Reputation,
+        rp.Score,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+    WHERE 
+        rp.OwnerPostRank <= 5
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.DisplayName,
+    tp.Reputation,
+    tp.Score,
+    CASE 
+        WHEN tp.Score >= 100 THEN 'High Scorer'
+        WHEN tp.Score BETWEEN 50 AND 99 THEN 'Medium Scorer'
+        ELSE 'Low Scorer'
+    END AS ScoreCategory,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS RelatedTags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Posts p ON tp.PostId = p.Id
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            unnest(string_to_array(p.Tags, ',')) AS TagName
+    ) t ON TRUE
+GROUP BY 
+    tp.Title, tp.CreationDate, tp.DisplayName, tp.Reputation, tp.Score
+ORDER BY 
+    tp.Score DESC
+LIMIT 50;

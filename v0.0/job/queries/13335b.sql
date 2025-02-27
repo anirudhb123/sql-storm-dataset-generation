@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id
+AND mi.info IN ('$40,538,872 (USA) (15 May 2005)', '553,000 (Sweden)', 'CAM:Phantom Flex, Panavision G-Series and Super High Speed Lenses', 'CONT: When Mr. Miyagi fights Terry Silver and the gang at the Cobra Kai dojo, he throws Barnes into the wall and temporarily knocks him out. Barnes falls face down with his head pointing away from the front door. In the next shot, they show Barnes lying on his back on the mat and his head is pointing toward the door.', 'Locarno Beach, Vancouver, British Columbia, Canada', 'Norway:9 January 1981');

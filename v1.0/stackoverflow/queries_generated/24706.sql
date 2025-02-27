@@ -1,0 +1,83 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PosPosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegPosts,
+        AVG(EXTRACT(EPOCH FROM (p.LastActivityDate - p.CreationDate))) AS AvgPostLifespan,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(p.Tags, '>')) AS TagName) t ON TRUE
+    GROUP BY 
+        u.Id, u.DisplayName
+), RankedUsers AS (
+    SELECT 
+        ua.*,
+        RANK() OVER (ORDER BY PostCount DESC, PosPosts - NegPosts DESC) AS Rank
+    FROM 
+        UserActivity ua
+), PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        MAX(v.CreationDate) AS LastVoteDate,
+        MAX(CASE WHEN v.VoteTypeId = 2 THEN v.UserId ELSE NULL END) AS LastUpvoteUserId  -- UserId of last person to upvote
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.LastActivityDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title
+), UserRanking AS (
+    SELECT 
+        ru.UserId,
+        ru.DisplayName,
+        COUNT(pe.PostId) AS EngagedPosts,
+        AVG(pe.CommentCount) AS AvgCommentsPerPost,
+        SUM(COALESCE(pe.TotalBounty, 0)) AS TotalBountyEarned,
+        COUNT(DISTINCT pe.LastUpvoteUserId) AS UniqueUpvoters
+    FROM 
+        RankedUsers ru
+    LEFT JOIN 
+        PostEngagement pe ON ru.UserId = pe.LastUpvoteUserId
+    GROUP BY 
+        ru.UserId, ru.DisplayName
+)
+SELECT 
+    ur.DisplayName,
+    ur.PostCount,
+    ur.TagsUsed,
+    ur.Rank,
+    COALESCE(NULLIF(ur.EngagedPosts, 0), NULL) AS EngagedPosts,
+    COALESCE(NULLIF(ur.AvgCommentsPerPost, 0), NULL) AS AvgCommentsPerPost,
+    ur.TotalBountyEarned,
+    ur.UniqueUpvoters,
+    (
+        SELECT 
+            MIN(uh.UserId) 
+        FROM 
+            Users uh 
+        WHERE 
+            uh.Reputation > ur.Reputation 
+            AND uh.CreationDate < u.CreationDate
+    ) AS HigherReputationUser
+FROM 
+    RankedUsers ur
+LEFT JOIN 
+    Users u ON ur.UserId = u.Id
+WHERE 
+    ur.Rank <= 10  -- Top 10 ranked users
+ORDER BY 
+    ur.Rank;
+

@@ -1,0 +1,77 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title ASC) AS rn,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS cnt
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.title IS NOT NULL
+),
+
+TopMovies AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        CASE 
+            WHEN rt.cnt > 5 THEN 'Popular'
+            ELSE 'Less Popular'
+        END AS popularity_category
+    FROM 
+        RankedTitles rt
+    WHERE 
+        rt.rn <= 5
+),
+
+MovieAchievements AS (
+    SELECT 
+        m.movie_id,
+        SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS noted_roles,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        complete_cast cc ON mc.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mc.movie_id = mk.movie_id
+    GROUP BY 
+        m.movie_id
+),
+
+FinalReport AS (
+    SELECT 
+        tt.title,
+        tt.production_year,
+        ma.noted_roles,
+        ma.keyword_count,
+        tt.popularity_category
+    FROM 
+        TopMovies tt
+    LEFT JOIN 
+        MovieAchievements ma ON tt.title = ma.title
+    WHERE 
+        ma.noted_roles IS NOT NULL 
+        OR ma.keyword_count > 0
+)
+
+SELECT 
+    fr.title,
+    fr.production_year,
+    COALESCE(fr.noted_roles, 0) AS noted_roles,
+    COALESCE(fr.keyword_count, 0) AS keyword_count,
+    CASE 
+        WHEN fr.noted_roles IS NOT NULL AND fr.keyword_count > 0 THEN 'Highly Rated'
+        WHEN fr.noted_roles IS NULL AND fr.keyword_count = 0 THEN 'Not Rated'
+        ELSE 'Average Rated'
+    END AS rating_status
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.production_year DESC, 
+    fr.noted_roles DESC, 
+    fr.keyword_count DESC;
+This query provides a complex benchmarking solution encapsulating various SQL features, including CTEs, window functions, outer joins, and correlated logic evaluations. It categorizes movies based on popularity, and counts noted roles and keywords while considering NULL logic and aggregates to determine a final rating status.

@@ -1,0 +1,50 @@
+WITH ranked_titles AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS title_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL
+),
+keyword_counts AS (
+    SELECT 
+        m.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title m ON mk.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    rt.actor_name,
+    rt.title,
+    rt.production_year,
+    COALESCE(kc.keyword_count, 0) AS keyword_count,
+    CASE 
+        WHEN rt.title_rank = 1 THEN 'Latest'
+        ELSE 'Earlier'
+    END AS title_status,
+    CASE 
+        WHEN kc.keyword_count > 5 THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS popularity_status
+FROM 
+    ranked_titles rt
+LEFT JOIN 
+    keyword_counts kc ON rt.title = kc.movie_id
+WHERE 
+    rt.title_rank <= 5
+AND 
+    rt.production_year >= 2000
+ORDER BY 
+    rt.actor_name, 
+    rt.production_year DESC;

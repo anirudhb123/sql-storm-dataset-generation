@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- Base case: Select all movies from the title table
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        0 AS level
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+
+    UNION ALL
+    
+    -- Recursive case: Find linked movies based on their IDs
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    COALESCE(NULLIF(COUNT(DISTINCT ci.person_id), 0), 'No Cast') AS cast_count,
+    COALESCE(NULLIF(GROUP_CONCAT(DISTINCT ak.name), ''), 'No Actors') AS actors,
+    AVG(mi.info_type_id) OVER (PARTITION BY mh.production_year) AS avg_info_type_id,
+    COUNT(DISTINCT mc.company_id) FILTER (WHERE ct.kind = 'Production') AS production_companies,
+    MAX(CASE 
+            WHEN mr.role = 'Lead' THEN ci.note 
+            ELSE NULL 
+        END) AS lead_role_notes
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    role_type mr ON ci.role_id = mr.id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+ORDER BY 
+    mh.production_year DESC, cast_count DESC;

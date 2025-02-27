@@ -1,0 +1,65 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+), 
+SupplierStats AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS num_customers,
+    SUM(o.o_totalprice) AS total_revenue,
+    COALESCE(MAX(ss.total_avail_qty), 0) AS max_available_qty,
+    ROUND(AVG(CASE 
+        WHEN o.o_orderstatus = 'O' THEN o.o_totalprice 
+        ELSE NULL END), 2) AS avg_confirmed_order_value,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS popular_parts
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    RankedOrders o ON ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+LEFT JOIN 
+    CustomerOrders c ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    part p ON p.p_partkey = ps.ps_partkey
+WHERE 
+    n.n_name LIKE 'A%' AND 
+    (o.o_orderstatus IS NULL OR o.o_orderstatus != 'F') AND 
+    (s.s_acctbal > 100 OR s.s_acctbal IS NULL)
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5 AND 
+    SUM(o.o_totalprice) IS NOT NULL
+ORDER BY 
+    total_revenue DESC;

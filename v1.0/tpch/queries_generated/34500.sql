@@ -1,0 +1,63 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey,
+           o_custkey,
+           o_orderstatus,
+           o_totalprice,
+           o_orderdate,
+           o_orderpriority,
+           o_clerk,
+           o_shippriority,
+           1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+
+    UNION ALL
+
+    SELECT o.o_orderkey,
+           o.o_custkey,
+           o.o_orderstatus,
+           o.o_totalprice,
+           o.o_orderdate,
+           o.o_orderpriority,
+           o.o_clerk,
+           o.o_shippriority,
+           oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderstatus = 'O' AND oh.level < 10
+), SupplierDetails AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT p.p_partkey) AS parts_count,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+), RegionSummary AS (
+    SELECT r.r_name,
+           COALESCE(SUM(d.total_supply_cost), 0) AS total_cost,
+           COUNT(DISTINCT d.s_suppkey) AS unique_suppliers
+    FROM region r
+    LEFT JOIN (
+        SELECT n.n_regionkey, sd.total_supply_cost
+        FROM nation n
+        JOIN SupplierDetails sd ON n.n_nationkey = sd.parts_count
+    ) AS d ON r.r_regionkey = d.n_regionkey
+    GROUP BY r.r_name
+)
+
+SELECT r.r_name AS region_name,
+       COALESCE(r.total_cost, 0) AS total_supply_cost,
+       r.unique_suppliers AS number_of_unique_suppliers,
+       oh.o_orderkey,
+       oh.o_totalprice,
+       COUNT(DISTINCT l.l_orderkey) OVER (PARTITION BY oh.o_orderkey) AS line_items_count,
+       CASE WHEN oh.o_orderdate < CURRENT_DATE - INTERVAL '90 days' THEN 'Old Order' ELSE 'Recent Order' END AS order_age
+FROM RegionSummary r
+JOIN OrderHierarchy oh ON r.unique_suppliers > 5
+LEFT JOIN lineitem l ON l.l_orderkey = oh.o_orderkey
+WHERE r.total_cost IS NOT NULL
+ORDER BY r.total_cost DESC, region_name ASC;

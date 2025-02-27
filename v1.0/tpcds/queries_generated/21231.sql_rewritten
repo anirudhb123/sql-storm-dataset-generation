@@ -1,0 +1,86 @@
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_net_paid DESC) AS rn,
+        SUM(ws_quantity) OVER (PARTITION BY ws_bill_customer_sk) AS total_quantity
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = cast('2002-10-01' as date))
+),
+TopSales AS (
+    SELECT 
+        rs.ws_bill_customer_sk,
+        rs.ws_item_sk,
+        rs.ws_quantity,
+        rs.ws_sales_price,
+        CASE 
+            WHEN rs.ws_quantity IS NULL THEN 'No Quantity Sold' 
+            WHEN rs.total_quantity = 0 THEN 'No Sales' 
+            ELSE 'Sales Exist'
+        END AS sales_status,
+        COALESCE(rs.ws_net_paid * 0.1, 0) AS potential_discount,
+        CAST(CONCAT('Customer-', CAST(rs.ws_bill_customer_sk AS VARCHAR)) AS VARCHAR) AS unique_identifier
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rn <= 5
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    WHERE 
+        c.c_first_name IS NOT NULL
+),
+WarehouseInfo AS (
+    SELECT 
+        w.w_warehouse_sk,
+        w.w_warehouse_name,
+        w.w_country,
+        w.w_gmt_offset,
+        COUNT(DISTINCT ws.ws_item_sk) AS total_items
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_sk, w.w_warehouse_name, w.w_country, w.w_gmt_offset
+)
+SELECT 
+    t.ws_bill_customer_sk,
+    t.ws_item_sk,
+    t.sales_status,
+    t.potential_discount,
+    cd.cd_gender,
+    wi.total_items,
+    wi.w_country,
+    EXTRACT(HOUR FROM cast('2002-10-01 12:34:56' as timestamp) AT TIME ZONE 'UTC' + INTERVAL wi.w_gmt_offset HOUR) AS local_hour,
+    CASE 
+        WHEN t.potential_discount > 50 THEN 'High Discount Potential'
+        ELSE 'Low Discount Potential'
+    END AS discount_evaluation
+FROM 
+    TopSales t
+JOIN 
+    CustomerDemographics cd ON t.ws_bill_customer_sk = cd.cd_demo_sk
+LEFT JOIN 
+    WarehouseInfo wi ON t.ws_item_sk IN (SELECT cs_item_sk FROM catalog_sales WHERE cs_order_number IN 
+        (SELECT DISTINCT ss_ticket_number FROM store_sales WHERE ss_item_sk = t.ws_item_sk))
+WHERE 
+    (t.potential_discount IS NOT NULL OR wi.total_items > 0)
+    AND (wi.w_country IS NOT NULL OR t.sales_status = 'Sales Exist')
+ORDER BY 
+    t.ws_net_paid DESC, cd.cd_purchase_estimate DESC
+FETCH FIRST 10 ROWS ONLY;

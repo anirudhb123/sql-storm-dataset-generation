@@ -1,0 +1,65 @@
+WITH RankedMovies AS (
+    SELECT
+        a.id AS aka_id,
+        a.name AS aka_name,
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS year_rank
+    FROM
+        aka_name a
+    JOIN
+        cast_info c ON a.person_id = c.person_id
+    JOIN
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE
+        a.name IS NOT NULL
+        AND t.production_year IS NOT NULL
+        AND t.production_year > 1980
+),
+FilteredMovies AS (
+    SELECT
+        rm.aka_id,
+        rm.aka_name,
+        rm.movie_title,
+        rm.production_year,
+        rm.actor_count,
+        CASE
+            WHEN rm.actor_count >= 5 THEN 'Popular'
+            WHEN rm.actor_count BETWEEN 3 AND 4 THEN 'Moderate'
+            ELSE 'Less Known'
+        END AS popularity
+    FROM
+        RankedMovies rm
+    WHERE
+        rm.actor_count > 2
+),
+CompanyDetails AS (
+    SELECT
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name ORDER BY cn.name SEPARATOR ', ') AS companies
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY
+        mc.movie_id
+)
+SELECT
+    fm.aka_id,
+    fm.aka_name,
+    fm.movie_title,
+    fm.production_year,
+    fm.actor_count,
+    fm.popularity,
+    cd.companies
+FROM
+    FilteredMovies fm
+LEFT JOIN
+    CompanyDetails cd ON fm.aka_id = cd.movie_id
+WHERE
+    fm.year_rank <= 10
+    AND (fm.popularity = 'Popular' OR cd.companies IS NULL)
+ORDER BY
+    fm.production_year DESC,
+    fm.actor_count DESC;

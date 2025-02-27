@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, 
+           m.title AS movie_title, 
+           m.production_year, 
+           COALESCE(ca.name, 'Unknown') AS cast_name, 
+           COALESCE(direct.casting_director, 'Unknown') AS director_name,
+           1 AS level
+    FROM aka_title AS m
+    LEFT JOIN cast_info AS ca ON m.id = ca.movie_id
+    LEFT JOIN (
+        SELECT movie_id, 
+               ak.name AS casting_director 
+        FROM aka_name AS ak
+        JOIN cast_info AS ci ON ak.person_id = ci.person_id
+        WHERE ci.role_id IN (SELECT id FROM role_type WHERE role = 'Director')
+    ) AS direct ON m.id = direct.movie_id
+
+    UNION ALL
+
+    SELECT m.id AS movie_id, 
+           m.title AS movie_title, 
+           m.production_year, 
+           COALESCE(ca.name, 'Unknown') AS cast_name,  
+           COALESCE(direct.casting_director, 'Unknown') AS director_name,
+           level + 1
+    FROM aka_title AS m
+    JOIN MovieHierarchy AS mh ON m.id = mh.movie_id
+    LEFT JOIN cast_info AS ca ON m.id = ca.movie_id
+    LEFT JOIN (
+        SELECT movie_id, 
+               ak.name AS casting_director 
+        FROM aka_name AS ak
+        JOIN cast_info AS ci ON ak.person_id = ci.person_id
+        WHERE ci.role_id IN (SELECT id FROM role_type WHERE role = 'Director')
+    ) AS direct ON m.id = direct.movie_id
+    WHERE level < 5  -- Limit to 5 levels for hierarchy
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    mh.cast_name,
+    mh.director_name,
+    COUNT(*) OVER (PARTITION BY mh.movie_id) AS total_cast,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    AVG(mi.info IS NOT NULL::int) AS has_info_ratio
+FROM MovieHierarchy AS mh
+LEFT JOIN movie_keyword AS mk ON mh.movie_id = mk.movie_id
+LEFT JOIN keyword AS kw ON mk.keyword_id = kw.id
+LEFT JOIN movie_info AS mi ON mh.movie_id = mi.movie_id
+GROUP BY mh.movie_id, mh.movie_title, mh.production_year, mh.cast_name, mh.director_name
+HAVING COUNT(DISTINCT ca.person_id) > 1 -- Movies with more than one cast member
+ORDER BY mh.production_year DESC, total_cast DESC
+LIMIT 100;

@@ -1,0 +1,67 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        AVG(COALESCE(P.Score, 0)) AS AvgPostScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON V.PostId = P.Id
+    GROUP BY 
+        U.Id
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(P.Score, 0) AS Score,
+        P.ViewCount,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS RankInUser
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        PD.*,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation AS OwnerReputation
+    FROM 
+        PostDetails PD
+    JOIN 
+        Users U ON PD.OwnerUserId = U.Id
+    WHERE 
+        PD.RankInUser = 1
+)
+SELECT 
+    T.PostId,
+    T.Title,
+    T.CreationDate,
+    T.Score,
+    T.ViewCount,
+    T.CommentCount,
+    T.OwnerDisplayName,
+    T.OwnerReputation,
+    US.TotalVotes,
+    US.UpVotes,
+    US.DownVotes,
+    US.AvgPostScore,
+    (SELECT STRING_AGG(TG.TagName, ', ') 
+     FROM Tags TG 
+     WHERE TG.Id IN (SELECT unnest(string_to_array(P.Tags, '><')::int[]))) AS Tags
+FROM 
+    TopPosts T
+LEFT JOIN 
+    UserVoteStats US ON T.OwnerUserId = US.UserId
+WHERE 
+    T.Score > (SELECT AVG(Score) FROM Posts)
+ORDER BY 
+    T.Score DESC
+LIMIT 10;

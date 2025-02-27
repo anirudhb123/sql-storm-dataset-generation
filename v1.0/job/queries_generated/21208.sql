@@ -1,0 +1,65 @@
+WITH recursive movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        ARRAY[mt.title] AS hierarchy_titles
+    FROM aka_title mt
+    WHERE mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.hierarchy_titles || at.title
+    FROM movie_link ml
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+actor_roles AS (
+    SELECT 
+        ak.name AS actor_name,
+        ct.kind AS character_role,
+        COUNT(c.id) AS appearances
+    FROM cast_info c
+    JOIN aka_name ak ON c.person_id = ak.person_id
+    JOIN comp_cast_type ct ON c.person_role_id = ct.id
+    LEFT JOIN movie_info mi ON c.movie_id = mi.movie_id
+    WHERE 
+        c.note IS NULL 
+        OR c.note <> 'Cameo'
+    GROUP BY ak.name, ct.kind
+),
+top_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        SUM(CASE WHEN ar.appearances IS NULL THEN 0 ELSE ar.appearances END) AS total_appearances
+    FROM movie_hierarchy mh
+    LEFT JOIN actor_roles ar ON mh.movie_id IN (
+        SELECT movie_id FROM cast_info
+        WHERE person_id IN (SELECT person_id FROM aka_name WHERE name ILIKE '%Smith%')
+    )
+    GROUP BY mh.movie_id, mh.title, mh.production_year
+    HAVING SUM(COALESCE(ar.appearances, 0)) > 5
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(CONCAT('Total appearances: ', tm.total_appearances), 'No appearances') AS appearance_info,
+    CASE 
+        WHEN tm.total_appearances IS NULL THEN 'Unseen'
+        WHEN tm.total_appearances > 50 THEN 'Highly Rated'
+        ELSE 'Moderately Rated'
+    END AS rating_status,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors_in_movie
+FROM top_movies tm
+LEFT JOIN cast_info ci ON tm.movie_id = ci.movie_id
+LEFT JOIN aka_name ak ON ci.person_id = ak.person_id
+GROUP BY tm.title, tm.production_year, tm.total_appearances
+ORDER BY tm.production_year DESC, tm.title;

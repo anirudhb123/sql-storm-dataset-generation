@@ -1,0 +1,89 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM age(t.production_year)) ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'feature')
+        AND t.production_year >= 2000
+),
+CastRoleCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        MAX(rt.role) AS primary_role
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id
+),
+CompanyMovieCount AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.movie_id
+),
+CompanyTypes AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_kinds
+    FROM 
+        movie_companies m
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    COALESCE(cr.actor_count, 0) AS actor_count,
+    COALESCE(ct.company_count, 0) AS company_count,
+    COALESCE(ctk.company_kinds, 'None') AS company_types,
+    CASE 
+        WHEN COALESCE(cr.primary_role, '') LIKE 'Director%' THEN 'Director'
+        ELSE 'Actor/Other'
+    END AS role_type
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastRoleCounts cr ON rm.movie_id = cr.movie_id
+LEFT JOIN 
+    CompanyMovieCount ct ON rm.movie_id = ct.movie_id
+LEFT JOIN 
+    CompanyTypes ctk ON rm.movie_id = ctk.movie_id
+WHERE 
+    rm.rank <= 5 -- Get top 5 latest feature films for each year since 2000
+    AND (ct.company_count IS NULL OR ct.company_count > 1) -- Filter for movies with more than one associated company
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title ASC;
+
+-- Optional Analysis: Check the effect of NULLs and empty company types
+SELECT 
+    rm.movie_id,
+    COUNT(DISTINCT cr.actor_count) AS unique_actors,
+    SUM(CASE WHEN ctk.company_kinds IS NULL THEN 1 ELSE 0 END) AS no_company_entries
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastRoleCounts cr ON rm.movie_id = cr.movie_id
+LEFT JOIN 
+    CompanyTypes ctk ON rm.movie_id = ctk.movie_id
+WHERE 
+    rm.rank <= 10
+GROUP BY 
+    rm.movie_id
+HAVING 
+    COUNT(DISTINCT cr.actor_count) > 5 
+ORDER BY 
+    unique_actors DESC;

@@ -1,0 +1,65 @@
+WITH RecursiveBadges AS (
+    SELECT UserId, 
+           Name, 
+           Class, 
+           Date,
+           ROW_NUMBER() OVER (PARTITION BY UserId ORDER BY Date DESC) AS BadgeRank
+    FROM Badges
+),
+QuestionStatistics AS (
+    SELECT p.Id AS QuestionId,
+           COUNT(a.Id) AS AnswerCount,
+           MAX(p.CreationDate) AS LastActivityDate,
+           AVG(b.Reputation) AS AvgReputation,
+           STRING_AGG(DISTINCT CONCAT('Tag: ', t.TagName), ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId AND p.PostTypeId = 1
+    LEFT JOIN Users b ON p.OwnerUserId = b.Id
+    JOIN UNNEST(string_to_array(p.Tags, ',')) AS t(Tag) ON t.Tag = t.TagName
+    WHERE p.PostTypeId = 1 AND p.Score > 0
+    GROUP BY p.Id
+),
+ClosedPostReasons AS (
+    SELECT ph.PostId,
+           ARRAY_AGG(cr.Name ORDER BY ph.CreationDate DESC) AS CloseReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY ph.PostId
+),
+ActiveUsers AS (
+    SELECT id,
+           DisplayName,
+           COUNT(*) AS PostCount,
+           SUM(COALESCE(ViewCount, 0)) AS TotalViews
+    FROM Users u
+    JOIN Posts p ON p.OwnerUserId = u.Id
+    WHERE u.Reputation > 100
+    GROUP BY u.Id
+    HAVING COUNT(*) > 5
+),
+CombinedPOSTS AS (
+    SELECT q.QuestionId,
+           qs.AnswerCount,
+           qs.Tags,
+           cp.CloseReasons,
+           au.DisplayName,
+           au.TotalViews
+    FROM QuestionStatistics qs
+    LEFT JOIN ClosedPostReasons cp ON qs.QuestionId = cp.PostId
+    JOIN ActiveUsers au ON qs.QuestionId IN (SELECT DISTINCT ParentId FROM Posts WHERE PostTypeId = 2)
+)
+SELECT c.PostId,
+       c.QuestionId,
+       CASE 
+           WHEN c.CloseReasons IS NULL THEN 'Open'
+           ELSE 'Closed'
+       END AS PostStatus,
+       SUM(b.Class) AS TotalBadgeClass,
+       STRING_AGG(b.Name, ', ') AS Badges,
+       COUNT(c.DisplayName) AS EngagingUsers
+FROM CombinedPOSTS c
+LEFT JOIN RecursiveBadges b ON c.DisplayName = b.UserId
+GROUP BY c.QuestionId, c.PostId
+HAVING COUNT(DISTINCT c.DisplayName) > 2 AND SUM(b.Class) > 1
+ORDER BY TotalBadgeClass DESC, EngagingUsers DESC;

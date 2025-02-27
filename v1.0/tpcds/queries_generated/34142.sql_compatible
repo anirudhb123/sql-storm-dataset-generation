@@ -1,0 +1,58 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        COUNT(ss_ticket_number) AS total_sales,
+        SUM(ss_net_profit) AS total_profit
+    FROM 
+        store_sales ss
+    GROUP BY 
+        s_store_sk
+    UNION ALL
+    SELECT 
+        s.s_store_sk,
+        sh.total_sales + ss.total_sales,
+        sh.total_profit + ss.total_profit
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store s ON sh.s_store_sk = s.s_store_sk
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    WHERE 
+        sh.total_sales < 10000
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+    ROUND(SUM(COALESCE(s.total_profit, 0)), 2) AS total_profit,
+    STRING_AGG(DISTINCT p.p_promo_name, ', ') AS active_promotions
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    store s ON c.c_customer_sk = s.s_store_sk
+LEFT JOIN 
+    promotion p ON s.s_store_sk = p.p_promo_sk
+LEFT JOIN 
+    sales_hierarchy sh ON s.s_store_sk = sh.s_store_sk
+WHERE 
+    ca.ca_state IS NOT NULL
+AND 
+    (c.c_birth_year BETWEEN 1970 AND 1990)
+AND 
+    EXISTS (
+        SELECT 1
+        FROM web_sales ws
+        WHERE 
+            ws.ws_bill_customer_sk = c.c_customer_sk 
+            AND ws.ws_sold_date_sk > 2458516  
+    )
+GROUP BY 
+    ca.ca_city, ca.ca_state
+HAVING 
+    SUM(COALESCE(sh.total_profit, 0)) > 10000
+ORDER BY 
+    total_profit DESC;

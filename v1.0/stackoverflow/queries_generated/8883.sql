@@ -1,0 +1,48 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+TopUsers AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(rp.Score) AS TotalScore
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        rp.Rank = 1
+    GROUP BY 
+        u.DisplayName, u.Reputation
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.PostCount,
+    tu.TotalScore,
+    RANK() OVER (ORDER BY tu.TotalScore DESC) AS UserRank
+FROM 
+    TopUsers tu
+ORDER BY 
+    tu.TotalScore DESC
+LIMIT 10;

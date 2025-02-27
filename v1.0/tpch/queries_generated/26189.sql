@@ -1,0 +1,50 @@
+WITH SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts_supplied,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        STRING_AGG(DISTINCT p.p_name, ', ') AS supplied_part_names,
+        AVG(ps.ps_availqty) AS avg_available_quantity
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighVolumeSuppliers AS (
+    SELECT 
+        supplier.s_suppkey,
+        supplier.s_name,
+        supplier.total_parts_supplied,
+        supplier.total_supply_cost,
+        supplier.supplied_part_names,
+        supplier.avg_available_quantity
+    FROM 
+        SupplierPartDetails supplier
+    WHERE 
+        supplier.total_parts_supplied > 10 AND 
+        supplier.total_supply_cost > 1000
+)
+SELECT 
+    h.s_suppkey, 
+    h.s_name, 
+    h.total_parts_supplied, 
+    h.total_supply_cost, 
+    h.supplied_part_names, 
+    h.avg_available_quantity,
+    JSON_OBJECT(
+        'suppkey', h.s_suppkey,
+        'name', h.s_name,
+        'total_parts_supplied', h.total_parts_supplied,
+        'total_supply_cost', h.total_supply_cost,
+        'supplied_part_names', h.supplied_part_names,
+        'avg_available_quantity', h.avg_available_quantity
+    ) AS supplier_info
+FROM 
+    HighVolumeSuppliers h
+ORDER BY 
+    h.total_supply_cost DESC;

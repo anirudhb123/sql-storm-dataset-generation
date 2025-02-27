@@ -1,0 +1,56 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::text[])
+    WHERE 
+        Posts.PostTypeId = 1 
+    GROUP BY 
+        Tags.TagName
+),
+
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(DISTINCT P.Id) AS QuestionsAsked,
+        SUM(CASE WHEN P.ViewCount > 100 THEN 1 ELSE 0 END) AS PopularQuestions,
+        SUM(COALESCE(B.Class, 0)) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+
+PopularTags AS (
+    SELECT 
+        TagCounts.TagName,
+        TagCounts.PostCount,
+        ROW_NUMBER() OVER (ORDER BY TagCounts.PostCount DESC) AS Rank
+    FROM 
+        TagCounts
+)
+
+SELECT 
+    U.DisplayName, 
+    U.QuestionsAsked, 
+    U.PopularQuestions, 
+    U.TotalBadges,
+    T.TagName,
+    T.PostCount
+FROM 
+    TopUsers U
+JOIN 
+    PopularTags T ON U.QuestionsAsked > 5 
+WHERE 
+    T.Rank <= 10 
+ORDER BY 
+    U.TotalBadges DESC, U.QuestionsAsked DESC;

@@ -1,0 +1,49 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level,
+        m.production_year,
+        t.kind AS movie_kind,
+        ARRAY[m.id] AS path
+    FROM title m
+    JOIN kind_type t ON m.kind_id = t.id
+    WHERE m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mh.level + 1,
+        mt.production_year,
+        kt.kind,
+        mh.path || ml.linked_movie_id
+    FROM movie_link ml
+    JOIN title mt ON ml.linked_movie_id = mt.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN kind_type kt ON mt.kind_id = kt.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT ch.movie_id) AS total_movies,
+    AVG(DATE_PART('year', NOW()) - mv.production_year) AS avg_movie_age,
+    STRING_AGG(DISTINCT mv.title || ' (' || mv.production_year || ')', ', ') AS movie_titles,
+    CASE 
+        WHEN AVG(mv.production_year) IS NULL THEN 'No data'
+        WHEN AVG(mv.production_year) > 2000 THEN 'Modern Era'
+        ELSE 'Classic Era'
+    END AS movie_era,
+    MAX(n.gender) AS predominant_gender
+FROM aka_name ak
+LEFT JOIN cast_info ci ON ci.person_id = ak.person_id
+LEFT JOIN complete_cast cc ON cc.movie_id = ci.movie_id
+LEFT JOIN movie_hierarchy mv ON mv.movie_id = ci.movie_id
+LEFT JOIN name n ON ak.person_id = n.imdb_id
+LEFT JOIN keyword k ON k.id = (SELECT keyword_id FROM movie_keyword WHERE movie_id = mv.movie_id LIMIT 1)
+WHERE ak.name IS NOT NULL
+GROUP BY ak.name, ak.person_id
+HAVING COUNT(DISTINCT ch.movie_id) >= 5
+ORDER BY total_movies DESC
+LIMIT 10;

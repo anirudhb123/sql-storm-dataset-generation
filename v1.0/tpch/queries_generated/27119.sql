@@ -1,0 +1,27 @@
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    AVG(ps.ps_supplycost) AS average_supply_cost,
+    SUM(l.l_quantity) AS total_quantity_sold,
+    SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT CONCAT(c.c_name, ' (', c.c_phone, ')') ORDER BY c.c_name SEPARATOR '; '), '; ', 3) AS top_customers
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_name LIKE '%steel%'
+    AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    p.p_name
+HAVING 
+    AVG(ps.ps_supplycost) > 100.00
+ORDER BY 
+    total_quantity_sold DESC;

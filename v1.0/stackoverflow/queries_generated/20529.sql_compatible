@@ -1,0 +1,59 @@
+
+WITH UserScore AS (
+    SELECT 
+        U.Id AS UserId,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        P.ViewCount,
+        PH.Comment AS LastEditComment,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY PH.CreationDate DESC) AS EditRank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpvoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownvoteCount,
+        CASE 
+            WHEN P.ClosedDate IS NOT NULL THEN 'Closed' 
+            ELSE 'Open' 
+        END AS PostStatus
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5) 
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, U.DisplayName, PH.Comment
+),
+UserRanking AS (
+    SELECT 
+        US.UserId,
+        (US.Upvotes - US.Downvotes) AS NetScore,
+        US.TotalPosts,
+        US.TotalComments,
+        RANK() OVER (ORDER BY (US.Upvotes - US.Downvotes) DESC) AS UserRank
+    FROM UserScore US
+)
+SELECT 
+    UD.UserId,
+    UD.NetScore AS UserNetScore,
+    UD.UserRank,
+    PD.PostId,
+    PD.Title,
+    PD.OwnerDisplayName,
+    PD.ViewCount AS PostViewCount,
+    PD.PostStatus,
+    (SELECT COUNT(*) FROM Comments C WHERE C.PostId = PD.PostId) AS TotalComments,
+    CASE WHEN PD.EditRank = 1 THEN CONCAT('Last edit by: ', PD.LastEditComment) ELSE NULL END AS LastEditDetail
+FROM UserRanking UD
+JOIN PostDetails PD ON UD.UserId = PD.OwnerDisplayName 
+WHERE UD.NetScore > 0
+ORDER BY UD.UserRank, PD.ViewCount DESC;

@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        u.DisplayName AS Author,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND /* Only questions */
+        p.Tags IS NOT NULL AND /* Filter out posts with no tags */
+        CHAR_LENGTH(p.Body) > 100 /* Only consider posts with a body longer than 100 characters */
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, '>')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(DISTINCT b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Author,
+    rp.ViewCount,
+    rp.AnswerCount,
+    pt.Tag,
+    ub.BadgeCount,
+    ub.BadgeNames
+FROM 
+    RankedPosts rp
+JOIN 
+    PopularTags pt ON rp.Tags LIKE '%' || pt.Tag || '%'
+JOIN 
+    UserBadges ub ON rp.Author = ub.UserId
+WHERE 
+    rp.TagRank <= 3 -- Get the top 3 recent posts for each unique tag
+ORDER BY 
+    rp.CreationDate DESC;

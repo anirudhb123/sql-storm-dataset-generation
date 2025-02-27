@@ -1,0 +1,61 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales_value,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.ws_item_sk
+),
+store_sales_data AS (
+    SELECT 
+        ss.ss_item_sk,
+        SUM(ss.ss_quantity) AS total_store_sales_quantity,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales_value
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.ss_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ss.ss_item_sk
+),
+combined_sales AS (
+    SELECT 
+        s.ws_item_sk,
+        COALESCE(s.total_sales_quantity, 0) AS total_sales_quantity,
+        COALESCE(s.total_sales_value, 0) AS total_sales_value,
+        COALESCE(s.total_discount, 0) AS total_discount,
+        COALESCE(ss.total_store_sales_quantity, 0) AS total_store_sales_quantity,
+        COALESCE(ss.total_store_sales_value, 0) AS total_store_sales_value
+    FROM 
+        sales_data s
+    FULL OUTER JOIN 
+        store_sales_data ss ON s.ws_item_sk = ss.ss_item_sk
+)
+SELECT 
+    item.i_item_id,
+    COALESCE(cs.total_sales_quantity, 0) AS web_sales_quantity,
+    COALESCE(ss.total_store_sales_quantity, 0) AS store_sales_quantity,
+    (COALESCE(cs.total_sales_value, 0) - COALESCE(cs.total_discount, 0)) AS net_web_sales,
+    ss.total_store_sales_value AS net_store_sales,
+    CASE 
+        WHEN (COALESCE(cs.total_sales_value, 0) - COALESCE(cs.total_discount, 0)) > ss.total_store_sales_value 
+        THEN 'Web' 
+        ELSE 'Store' 
+    END AS preferred_sales_channel
+FROM 
+    combined_sales cs
+JOIN 
+    item ON cs.ws_item_sk = item.i_item_sk
+LEFT JOIN 
+    store_sales ss ON cs.ws_item_sk = ss.ss_item_sk
+WHERE 
+    (COALESCE(cs.total_sales_quantity, 0) > 10 OR COALESCE(ss.total_store_sales_quantity, 0) > 10)
+ORDER BY 
+    net_web_sales DESC, net_store_sales DESC;

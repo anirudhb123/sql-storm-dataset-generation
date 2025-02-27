@@ -1,0 +1,41 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        RANK() OVER (ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_bill_customer_sk
+), 
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        s.total_profit
+    FROM 
+        SalesCTE s
+    JOIN 
+        customer c ON s.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        s.profit_rank <= 10
+)
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name || ' ' || tc.c_last_name AS full_name,
+    COALESCE(tc.total_profit, 0) AS total_profit,
+    (SELECT COUNT(*) FROM store_sales ss WHERE ss.ss_customer_sk = tc.c_customer_id AND ss.ss_sold_date_sk BETWEEN 20230101 AND 20231231) AS store_purchase_count,
+    (SELECT COUNT(*) FROM web_sales ws WHERE ws.ws_bill_customer_sk = tc.c_customer_id AND ws.ws_sold_date_sk BETWEEN 20230101 AND 20231231) AS web_purchase_count,
+    (SELECT SUM(ss.ss_net_profit) FROM store_sales ss WHERE ss.ss_customer_sk = tc.c_customer_id) AS total_store_profit,
+    (SELECT SUM(ws.ws_net_profit) FROM web_sales ws WHERE ws.ws_bill_customer_sk = tc.c_customer_id) AS total_web_profit,
+    (SELECT MAX(sm.sm_ship_mode_id) FROM ship_mode sm 
+     JOIN store_sales ss ON ss.ss_ship_mode_sk = sm.sm_ship_mode_sk 
+     WHERE ss.ss_customer_sk = tc.c_customer_id) AS preferred_shipping_mode
+FROM 
+    TopCustomers tc
+ORDER BY 
+    tc.total_profit DESC;

@@ -1,0 +1,55 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT
+        ss_store_sk,
+        ss_item_sk,
+        SUM(ss_quantity) AS total_quantity,
+        SUM(ss_net_paid) AS total_sales
+    FROM
+        store_sales
+    GROUP BY
+        ss_store_sk, ss_item_sk
+    UNION ALL
+    SELECT
+        s.s_store_sk,
+        i.i_item_sk,
+        sh.total_quantity, 
+        sh.total_sales
+    FROM
+        sales_hierarchy sh
+    JOIN
+        store s ON sh.ss_store_sk = s.s_store_sk
+    JOIN 
+        item i ON sh.ss_item_sk = i.i_item_sk
+    WHERE
+        sh.total_quantity > 10
+)
+SELECT
+    ca.city,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    AVG(cd.credit_rating) AS average_credit_rating,
+    SUM(ws.net_profit) AS online_net_profit,
+    SUM(ss.net_profit) AS store_net_profit,
+    COALESCE(SUM(ws.net_profit), 0) - COALESCE(SUM(ss.net_profit), 0) AS profit_difference
+FROM
+    customer_address ca
+LEFT JOIN
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN
+    web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+LEFT JOIN
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN 
+    sales_hierarchy sh ON sh.ss_store_sk = ss.ss_store_sk AND sh.ss_item_sk = ss.ss_item_sk
+WHERE
+    (cd.cd_gender = 'M' OR cd.cd_gender IS NULL)
+    AND (cd.cd_credit_rating = 'Excellent' OR cd.cd_credit_rating IS NULL)
+GROUP BY
+    ca.city
+HAVING
+    COUNT(DISTINCT c.c_customer_sk) > 0
+ORDER BY
+    total_customers DESC
+LIMIT 10;

@@ -1,0 +1,72 @@
+WITH UserBadgeSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName, 
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges,
+        COALESCE(SUM(CASE WHEN b.TagBased = 1 THEN 1 ELSE 0 END), 0) AS TagBasedBadges,
+        COALESCE(AVG(u.Reputation), 0) AS AverageReputation,
+        RANK() OVER (ORDER BY COUNT(b.Id) DESC) AS BadgeRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        COALESCE(AVG(p.Score), 0) AS AverageScore,
+        MAX(p.LastActivityDate) AS MostRecentActivity
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+UserEngagement AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        ps.TotalPosts,
+        ps.Questions,
+        ps.Answers,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges,
+        us.TagBasedBadges,
+        COALESCE(ps.AverageScore, 0) AS AveragePostScore,
+        (DATEDIFF(CURRENT_DATE, us.LastAccessDate) + 1) AS DaysSinceLastAccess
+    FROM 
+        UserBadgeSummary us
+    LEFT JOIN 
+        PostStatistics ps ON us.UserId = ps.OwnerUserId
+    WHERE 
+        us.AverageReputation > 100
+)
+SELECT 
+    ue.DisplayName,
+    ue.TotalPosts,
+    ue.Questions,
+    ue.Answers,
+    ue.GoldBadges,
+    ue.SilverBadges,
+    ue.BronzeBadges,
+    ue.TagBasedBadges,
+    ue.AveragePostScore,
+    CASE 
+        WHEN ue.DaysSinceLastAccess > 30 THEN 'Inactive'
+        WHEN ue.DaysSinceLastAccess BETWEEN 1 AND 30 THEN 'Active'
+        ELSE 'Unknown'
+    END AS ActivityStatus
+FROM 
+    UserEngagement ue
+WHERE 
+    ue.TotalPosts > 0
+ORDER BY 
+    ue.TotalPosts DESC,
+    ue.DisplayName ASC;

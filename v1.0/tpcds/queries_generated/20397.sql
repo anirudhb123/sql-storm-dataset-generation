@@ -1,0 +1,71 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        DENSE_RANK() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_quantity) DESC) AS rank
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+TopReturnedItems AS (
+    SELECT 
+        rr.sr_item_sk,
+        rr.total_returned,
+        i.i_item_desc,
+        i.i_current_price,
+        COALESCE(i.i_current_price * (1 - p.p_discount_active::int), i.i_current_price) AS adjusted_price,
+        CASE 
+            WHEN rr.total_returned > 100 THEN 'High Return'
+            WHEN rr.total_returned BETWEEN 50 AND 100 THEN 'Moderate Return'
+            ELSE 'Low Return'
+        END AS return_category
+    FROM RankedReturns rr
+    LEFT JOIN item i ON rr.sr_item_sk = i.i_item_sk
+    LEFT JOIN promotion p ON i.i_item_sk = p.p_item_sk AND p.p_discount_active = 'Y'
+    WHERE rr.rank <= 10
+),
+SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+FinalReport AS (
+    SELECT 
+        tri.sr_item_sk,
+        tri.i_item_desc,
+        tri.total_returned,
+        tri.adjusted_price,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        COALESCE(sd.total_orders, 0) AS total_orders,
+        tri.return_category,
+        CASE 
+            WHEN COALESCE(sd.total_sales, 0) = 0 THEN 'No Sales'
+            ELSE 'Sales Exist'
+        END AS sales_status
+    FROM TopReturnedItems tri
+    LEFT JOIN SalesData sd ON tri.sr_item_sk = sd.ws_item_sk
+)
+SELECT 
+    fr.sr_item_sk,
+    fr.i_item_desc,
+    fr.total_returned,
+    fr.adjusted_price,
+    fr.total_sales,
+    fr.total_orders,
+    fr.return_category,
+    fr.sales_status,
+    DATEDIFF(day, MIN(sd.ws_sold_date_sk), MAX(sd.ws_sold_date_sk)) AS sales_period
+FROM FinalReport fr
+LEFT JOIN web_sales sd ON fr.sr_item_sk = sd.ws_item_sk
+GROUP BY 
+    fr.sr_item_sk, 
+    fr.i_item_desc, 
+    fr.total_returned, 
+    fr.adjusted_price, 
+    fr.return_category, 
+    fr.sales_status
+ORDER BY fr.total_returned DESC, fr.total_sales ASC
+FETCH FIRST 20 ROWS ONLY;

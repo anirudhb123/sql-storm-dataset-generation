@@ -1,0 +1,20 @@
+SELECT 
+    a.name AS aka_name,
+    t.title AS movie_title,
+    p.name AS person_name,
+    c.kind AS role
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    role_type c ON ci.role_id = c.id
+JOIN 
+    company_name cn ON ci.movie_id = cn.imdb_id
+WHERE 
+    a.name IS NOT NULL
+    AND t.production_year > 2000
+ORDER BY 
+    t.production_year DESC, a.name;

@@ -1,0 +1,71 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) as supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+RecentOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) as cust_order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '6 months'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > 100.00
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    COALESCE(r.s_name, 'No Supplier') AS supplier_name,
+    p.p_name,
+    r.s_acctbal,
+    f.total_avail_qty,
+    CASE 
+        WHEN f.total_avail_qty IS NULL THEN 'Unavailable'
+        WHEN r.s_acctbal IS NOT NULL THEN 'Available'
+        ELSE 'Check Inventory'
+    END AS availability_status,
+    AVG(o.total_revenue) OVER () AS avg_revenue,
+    COUNT(DISTINCT o.o_custkey) AS customer_count,
+    STRING_AGG(DISTINCT r.s_name, ', ' ORDER BY r.s_name) AS supplier_names
+FROM 
+    RecentOrders o
+LEFT JOIN 
+    RankedSuppliers r ON o.o_custkey = r.s_suppkey AND r.supplier_rank = 1
+RIGHT JOIN 
+    FilteredParts f ON f.p_partkey = r.ps_partkey
+WHERE 
+    o.o_orderdate IS NOT NULL
+GROUP BY 
+    o.o_orderkey, o.o_orderdate, r.s_name, p.p_name, r.s_acctbal, f.total_avail_qty
+HAVING 
+    COUNT(o.o_orderkey) > 0 AND MAX(r.s_acctbal) IS NOT NULL
+ORDER BY 
+    o.o_orderdate DESC, p.p_name ASC;

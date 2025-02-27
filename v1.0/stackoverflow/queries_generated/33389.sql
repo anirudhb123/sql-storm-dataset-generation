@@ -1,0 +1,60 @@
+WITH RecursiveUserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, CreationDate, NULL::int AS ParentId
+    FROM Users
+    WHERE Reputation > 0
+    UNION ALL
+    SELECT u.Id, u.DisplayName, u.Reputation, u.CreationDate, r.Id
+    FROM Users u
+    JOIN RecursiveUserHierarchy r ON u.Reputation < r.Reputation
+    WHERE r.Id IS NOT NULL
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpvoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownvoteCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.Location,
+    u.CreationDate,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    p.Title,
+    p.CommentCount,
+    p.UpvoteCount,
+    p.DownvoteCount,
+    p.LastEditDate
+FROM Users u
+LEFT JOIN UserBadges us ON u.Id = us.UserId
+LEFT JOIN PostStatistics p ON u.Id = p.PostId
+OUTER APPLY (
+    SELECT 
+        COUNT(*) AS RelatedPostsCount
+    FROM PostLinks pl
+    WHERE pl.PostId = p.PostId
+) rp
+WHERE u.Reputation > 100
+ORDER BY u.Reputation DESC, p.LastEditDate DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

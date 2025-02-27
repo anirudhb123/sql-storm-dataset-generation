@@ -1,0 +1,78 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        RANK() OVER (PARTITION BY at.production_year ORDER BY COUNT(c.id) DESC) AS rank_by_cast,
+        COALESCE(mi.info, 'No Info Available') AS movie_info
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        complete_cast cc ON at.id = cc.movie_id
+    LEFT JOIN 
+        movie_info mi ON at.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'tag line')
+    GROUP BY 
+        at.id, at.title, at.production_year, mi.info
+),
+
+TopMovies AS (
+    SELECT 
+        movie_id, title, production_year, movie_info
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_by_cast = 1
+),
+
+CastDetails AS (
+    SELECT 
+        ak.name AS actor_name,
+        at.title AS movie_title,
+        at.production_year,
+        rc.role AS role_name,
+        COALESCE(cj.nota, 'N/A') AS note,
+        ci.movie_id
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        title at ON ci.movie_id = at.id
+    JOIN 
+        role_type rc ON ci.role_id = rc.id
+    LEFT JOIN 
+        (SELECT 
+            c.movie_id, 
+            STRING_AGG(c.note, ', ') AS nota 
+         FROM 
+            cast_info c 
+         GROUP BY 
+            c.movie_id) cj ON cj.movie_id = ci.movie_id
+    WHERE 
+        at.production_year >= 2000
+)
+
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    cd.actor_name,
+    cd.role_name,
+    cd.note,
+    CASE 
+        WHEN LENGTH(tm.movie_info) < 10 THEN 'Short description' 
+        ELSE 'Detailed description' 
+    END AS description_length,
+    COUNT(cd.actor_name) OVER (PARTITION BY tm.movie_id) AS number_of_actors,
+    CASE 
+        WHEN COUNT(cd.actor_name) OVER (PARTITION BY tm.movie_id) > 5 THEN 'Popular' 
+        ELSE 'Less Popular' 
+    END AS popularity_status
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    CastDetails cd ON tm.movie_id = cd.movie_id
+ORDER BY 
+    tm.production_year DESC, tm.title ASC
+LIMIT 10 OFFSET 5;

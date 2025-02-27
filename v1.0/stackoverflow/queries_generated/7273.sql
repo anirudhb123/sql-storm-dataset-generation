@@ -1,0 +1,55 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS TotalAnswers,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 AND P.AcceptedAnswerId IS NOT NULL THEN P.Id END) AS AcceptedQuestions,
+        SUM(P.Score) AS TotalScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalAnswers,
+        AcceptedQuestions,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM UserStats
+    WHERE Reputation > 100
+),
+PostWithTags AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        T.TagName
+    FROM Posts P
+    JOIN Tags T ON T.ExcerptPostId = P.Id
+    WHERE P.CreationDate > NOW() - INTERVAL '1 year'
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    T.TotalPosts,
+    T.TotalAnswers,
+    T.AcceptedQuestions,
+    T.TotalScore,
+    P.Title,
+    P.CreationDate,
+    P.ViewCount,
+    STRING_AGG(P.TagName, ', ') AS Tags
+FROM TopUsers T
+JOIN PostWithTags P ON P.PostId IN (
+    SELECT Id FROM Posts WHERE OwnerUserId = T.UserId
+)
+GROUP BY U.DisplayName, T.Reputation, T.TotalPosts, T.TotalAnswers, T.AcceptedQuestions, T.TotalScore, P.Title, P.CreationDate, P.ViewCount
+ORDER BY T.ScoreRank, P.ViewCount DESC
+LIMIT 10;

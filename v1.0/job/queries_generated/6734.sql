@@ -1,0 +1,40 @@
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    GROUP_CONCAT(DISTINCT g.kind) AS genres,
+    COUNT(k.keyword) AS keyword_count,
+    AVG(mi.info) AS average_info_length
+FROM 
+    aka_title t
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+JOIN 
+    company_name cn ON t.id = cn.imdb_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    comp_cast_type cct ON ci.person_role_id = cct.id
+JOIN 
+    kind_type kt ON t.kind_id = kt.id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2020
+    AND k.keyword LIKE '%action%'
+GROUP BY 
+    t.title, a.name
+HAVING 
+    COUNT(DISTINCT ci.id) >= 2
+ORDER BY 
+    average_info_length DESC
+LIMIT 10;

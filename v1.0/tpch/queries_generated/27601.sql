@@ -1,0 +1,72 @@
+WITH SupplierDetails AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        s.s_acctbal,
+        LENGTH(CONCAT(s.s_name, ' ', s.s_address)) AS name_address_length
+    FROM
+        supplier s
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PartDetails AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_type,
+        LENGTH(p.p_name) AS name_length,
+        p.p_retailprice
+    FROM
+        part p
+),
+OrderAnalysis AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01'
+    GROUP BY
+        o.o_orderkey,
+        o.o_orderstatus
+),
+StringBenchmark AS (
+    SELECT
+        sd.s_name,
+        pd.p_name,
+        oa.o_orderstatus,
+        LENGTH(CONCAT(sd.s_name, ' ', pd.p_name)) AS combined_length,
+        oa.total_sales
+    FROM
+        SupplierDetails sd
+    JOIN
+        PartDetails pd ON sd.s_suppkey % 10 = pd.p_partkey % 10
+    JOIN
+        OrderAnalysis oa ON LENGTH(sd.s_name) > 10 AND oa.lineitem_count > 5
+)
+SELECT
+    s.supp_name,
+    COUNT(DISTINCT p.p_partkey) AS total_parts,
+    SUM(sb.total_sales) AS total_sales,
+    MAX(sb.combined_length) AS max_combined_length
+FROM
+    SupplierDetails s
+JOIN
+    StringBenchmark sb ON s.s_suppkey = sb.s_suppkey
+JOIN
+    PartDetails p ON sb.p_partkey = p.p_partkey
+GROUP BY
+    s.s_suppkey
+ORDER BY
+    total_sales DESC, max_combined_length ASC
+LIMIT 10;

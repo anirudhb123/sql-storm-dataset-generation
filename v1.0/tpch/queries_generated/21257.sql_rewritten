@@ -1,0 +1,69 @@
+WITH RankedParts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) as rank
+    FROM
+        part p
+    WHERE
+        p.p_retailprice IS NOT NULL AND p.p_size > 10
+), 
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        COUNT(DISTINCT ps.ps_partkey) AS part_count, 
+        AVG(s.s_acctbal) AS avg_acctbal,
+        SUM(CASE 
+                WHEN s.s_acctbal IS NULL THEN 0 
+                ELSE s.s_acctbal 
+            END) AS total_acctbal
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_comment IS NOT NULL
+    GROUP BY 
+        s.s_suppkey
+), 
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_price,
+        COUNT(DISTINCT l.l_partkey) AS part_count,
+        o.o_orderdate,
+        CASE 
+            WHEN COUNT(DISTINCT l.l_partkey) > 10 THEN 'Large Order'
+            ELSE 'Regular Order'
+        END AS order_type 
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    n.n_name,
+    SUM(COALESCE(ods.net_price, 0)) AS total_sales,
+    SUM(COALESCE(sst.total_acctbal, 0)) AS total_supplier_acctbal,
+    COUNT(DISTINCT rp.p_partkey) as unique_parts,
+    MAX(rp.p_retailprice) AS max_part_price
+FROM 
+    RankedParts rp
+LEFT JOIN 
+    SupplierStats sst ON rp.p_partkey = sst.part_count
+JOIN 
+    nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = (SELECT MIN(o.o_custkey) FROM orders o WHERE o.o_orderkey IN (SELECT o_orderkey FROM OrderDetails)))
+LEFT JOIN 
+    OrderDetails ods ON ods.part_count > 5
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(COALESCE(ods.net_price, 0)) > 10000
+ORDER BY 
+    total_sales DESC, n.n_name
+FETCH FIRST 100 ROWS ONLY;

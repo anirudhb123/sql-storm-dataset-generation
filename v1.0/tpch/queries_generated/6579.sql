@@ -1,0 +1,53 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COUNT(ps.ps_availqty) AS available_parts,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+), TotalCustomers AS (
+    SELECT 
+        c.c_nationkey,
+        COUNT(c.c_custkey) AS customer_count
+    FROM 
+        customer c
+    GROUP BY 
+        c.c_nationkey
+), OrdersSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+)
+SELECT 
+    n.n_name,
+    AVG(rs.total_supply_cost) AS avg_supply_cost,
+    SUM(os.total_revenue) AS total_revenue_generated,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers
+FROM 
+    nation n
+LEFT JOIN 
+    RankedSuppliers rs ON n.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = rs.s_suppkey)
+LEFT JOIN 
+    TotalCustomers tc ON n.n_nationkey = tc.c_nationkey
+LEFT JOIN 
+    OrdersSummary os ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    customer c ON os.o_custkey = c.c_custkey
+GROUP BY 
+    n.n_name
+ORDER BY 
+    total_revenue_generated DESC, avg_supply_cost DESC;

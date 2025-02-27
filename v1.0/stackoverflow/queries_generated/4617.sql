@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        OwnerDisplayName,
+        SUM(ViewCount) AS TotalViews,
+        SUM(Score) AS TotalScore,
+        COUNT(PostId) AS TotalPosts
+    FROM 
+        RankedPosts
+    WHERE 
+        UserPostRank <= 5
+    GROUP BY 
+        OwnerDisplayName
+    HAVING 
+        COUNT(PostId) >= 3
+),
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseCounts,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteCounts
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    pu.OwnerDisplayName,
+    pu.TotalViews,
+    pu.TotalScore,
+    ph.CloseCounts,
+    ph.DeleteCounts
+FROM 
+    TopUsers pu
+LEFT JOIN 
+    PostHistoryCounts ph ON pu.OwnerDisplayName = ph.PostId::text
+WHERE 
+    pu.TotalScores > 100
+ORDER BY 
+    pu.TotalViews DESC
+LIMIT 10;

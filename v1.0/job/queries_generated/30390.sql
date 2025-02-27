@@ -1,0 +1,60 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.id AS actor_id,
+        c.person_id,
+        c.movie_id,
+        1 AS level
+    FROM cast_info c
+    WHERE c.role_id = (SELECT id FROM role_type WHERE role = 'actor')
+    
+    UNION ALL
+    
+    SELECT 
+        c.id AS actor_id,
+        c.person_id,
+        c.movie_id,
+        ah.level + 1
+    FROM cast_info c
+    INNER JOIN ActorHierarchy ah ON c.movie_id = ah.movie_id
+    WHERE c.person_id <> ah.person_id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    INNER JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+MovieInfoFiltered AS (
+    SELECT 
+        mi.movie_id,
+        ARRAY_AGG(DISTINCT mi.info) AS info_list
+    FROM movie_info mi
+    WHERE mi.note IS NOT NULL
+    GROUP BY mi.movie_id
+), 
+RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        ROW_NUMBER() OVER(PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM title t
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    LEFT JOIN movie_info_filtered mif ON t.id = mif.movie_id
+    GROUP BY t.id, t.title, t.production_year
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.actor_count,
+    mk.keywords,
+    COALESCE(mif.info_list, '{}') AS additional_info,
+    ah.level AS actor_hierarchy_level
+FROM RankedMovies rm
+LEFT JOIN MovieKeywords mk ON rm.movie_id = mk.movie_id
+LEFT JOIN MovieInfoFiltered mif ON rm.movie_id = mif.movie_id
+LEFT JOIN ActorHierarchy ah ON ah.movie_id = rm.movie_id
+WHERE rm.actor_count > 2
+ORDER BY rm.production_year DESC, rm.actor_count DESC;

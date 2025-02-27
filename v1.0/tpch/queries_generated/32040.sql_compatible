@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_acctbal < sh.s_acctbal
+    WHERE sh.level < 5
+),
+TotalOrderValue AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+CustomerOrderCount AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    SUM(COALESCE(ps.ps_availqty, 0)) AS total_available,
+    AVG(sp.level) AS avg_supplier_level,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COALESCE(tr.total_value, 0) AS customer_total_value,
+    CASE 
+        WHEN cr.order_count > 10 THEN 'High'
+        WHEN cr.order_count BETWEEN 5 AND 10 THEN 'Medium'
+        ELSE 'Low'
+    END AS order_priority
+FROM 
+    part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierHierarchy sp ON ps.ps_suppkey = sp.s_suppkey
+LEFT JOIN TotalOrderValue tr ON tr.o_custkey = (
+    SELECT c.c_custkey 
+    FROM customer c 
+    WHERE c.c_name LIKE 'Customer%' 
+      AND c.c_nationkey IN (SELECT n.n_nationkey FROM NationRegion nr WHERE nr.n_name LIKE 'United%')
+    LIMIT 1
+)
+LEFT JOIN CustomerOrderCount cr ON cr.o_custkey = tr.o_custkey
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_brand, 
+    cr.order_count
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) BETWEEN 1 AND 5
+ORDER BY 
+    total_available DESC, 
+    p.p_retailprice ASC;

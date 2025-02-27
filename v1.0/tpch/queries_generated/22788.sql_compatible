@@ -1,0 +1,98 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_nationkey,
+        CAST(s.s_name AS VARCHAR(255)) AS hierarchy_path
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT 
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_nationkey,
+        CAST(CONCAT(sh.hierarchy_path, ' -> ', s.s_name) AS VARCHAR(255))
+    FROM 
+        SupplierHierarchy sh
+    JOIN 
+        partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal < sh.s_acctbal
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartsUnderSupply AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_availqty) < 100
+),
+RegionalSales AS (
+    SELECT 
+        n.n_nationkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    c.c_name,
+    cs.total_spent,
+    psu.total_available,
+    MAX(rs.total_sales) AS nation_sales,
+    SH.hierarchy_path
+FROM 
+    CustomerStats cs
+JOIN 
+    customer c ON cs.c_custkey = c.c_custkey
+LEFT JOIN 
+    PartsUnderSupply psu ON psu.p_partkey IN (
+        SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty <= (SELECT AVG(ps_availqty) FROM partsupp)
+    )
+LEFT JOIN 
+    RegionalSales rs ON c.c_nationkey = rs.n_nationkey
+JOIN 
+    SupplierHierarchy SH ON c.c_nationkey = SH.s_nationkey
+WHERE 
+    cs.order_count > (SELECT AVG(order_count) FROM CustomerStats)
+GROUP BY 
+    c.c_name, cs.total_spent, psu.total_available, SH.hierarchy_path
+HAVING 
+    COALESCE(MAX(rs.total_sales), 0) > 50000
+ORDER BY 
+    cs.total_spent DESC;

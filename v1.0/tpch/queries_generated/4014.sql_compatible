@@ -1,0 +1,79 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+NationCount AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+),
+ShippingInfo AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_shipmode,
+        COUNT(*) AS shipment_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate IS NOT NULL
+    GROUP BY 
+        l.l_orderkey, l.l_shipmode
+)
+SELECT 
+    n.n_name AS nation,
+    ss.s_name AS supplier_name,
+    ss.total_supply_cost,
+    ss.unique_parts,
+    od.o_orderkey,
+    od.o_totalprice,
+    od.net_revenue,
+    si.l_shipmode,
+    si.shipment_count,
+    CASE 
+        WHEN od.order_rank = 1 THEN 'Latest Order'
+        ELSE 'Older Order'
+    END AS order_status
+FROM 
+    SupplierStats ss
+JOIN 
+    NationCount n ON ss.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 100))
+LEFT JOIN 
+    OrderDetails od ON ss.s_suppkey = od.o_orderkey
+LEFT JOIN 
+    ShippingInfo si ON od.o_orderkey = si.l_orderkey
+WHERE 
+    ss.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierStats)
+ORDER BY 
+    n.n_name, ss.total_supply_cost DESC, od.o_totalprice;

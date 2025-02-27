@@ -1,0 +1,69 @@
+WITH movie_rankings AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        k.keyword,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year >= 2000
+    GROUP BY 
+        a.id, a.title, a.production_year, k.keyword
+),
+ranked_movies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        keyword,
+        actor_count,
+        RANK() OVER (PARTITION BY production_year ORDER BY actor_count DESC) AS ranking
+    FROM 
+        movie_rankings
+),
+top_movies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        keyword,
+        actor_count
+    FROM 
+        ranked_movies
+    WHERE 
+        ranking <= 5
+)
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    tm.keyword,
+    tm.actor_count,
+    ak.name AS actor_name,
+    ct.kind AS company_type,
+    cn.name AS company_name
+FROM 
+    top_movies tm
+JOIN 
+    complete_cast cc ON tm.movie_title = cc.movie_id
+JOIN 
+    aka_name ak ON cc.subject_id = ak.person_id
+JOIN 
+    movie_companies mc ON cc.movie_id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+ORDER BY 
+    tm.production_year DESC, 
+    tm.actor_count DESC;
+
+This query performs the following operations:
+1. It builds a common table expression (CTE) named `movie_rankings` that retrieves movie titles from `aka_title`, associates them with keywords, and counts distinct actors for each movie.
+2. It ranks the movies by actor count for each production year in the `ranked_movies` CTE.
+3. It filters to keep only the top 5 movies per year.
+4. Finally, it selects movie details along with associated actor names and company information for each of the top movies, presenting them in an ordered format by production year and actor count.

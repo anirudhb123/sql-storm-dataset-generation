@@ -1,0 +1,57 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returned,
+        COUNT(cr.order_number) AS return_count,
+        ROW_NUMBER() OVER (PARTITION BY cr.returning_customer_sk ORDER BY SUM(cr.return_quantity) DESC) AS rank
+    FROM catalog_returns cr
+    GROUP BY cr.returning_customer_sk
+),
+HighReturners AS (
+    SELECT 
+        rr.returning_customer_sk,
+        rr.total_returned,
+        rr.return_count,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COALESCE(hd.hd_buy_potential, 'Unknown') AS buy_potential,
+        CASE 
+            WHEN hd.hd_income_band_sk IS NULL THEN 'N/A' 
+            WHEN hd.hd_income_band_sk IN (1, 2, 3) THEN 'Low Income'
+            WHEN hd.hd_income_band_sk IN (4, 5, 6) THEN 'Middle Income'
+            ELSE 'High Income'
+        END AS income_category
+    FROM RankedReturns rr
+    JOIN customer c ON rr.returning_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE rr.rank <= 10
+),
+SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        AVG(ws_net_profit) AS avg_net_profit
+    FROM web_sales 
+    GROUP BY ws_bill_customer_sk
+)
+SELECT 
+    hr.returning_customer_sk,
+    hr.total_returned,
+    hr.return_count,
+    ss.total_sales,
+    ss.order_count,
+    ss.avg_net_profit,
+    hr.cd_gender,
+    hr.cd_marital_status,
+    hr.cd_education_status,
+    hr.buy_potential,
+    hr.income_category
+FROM HighReturners hr
+JOIN SalesSummary ss ON hr.returning_customer_sk = ss.ws_bill_customer_sk
+WHERE ss.total_sales > 1000
+ORDER BY hr.total_returned DESC, ss.avg_net_profit DESC
+LIMIT 50;

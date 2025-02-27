@@ -1,0 +1,46 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(V.VoteTypeId = 2) AS UpvoteCount,
+        SUM(V.VoteTypeId = 3) AS DownvoteCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COUNT(C.Id) AS CommentCount,
+        SUM(V.VoteTypeId = 2) AS UpvoteCount,
+        SUM(V.VoteTypeId = 3) AS DownvoteCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.CreationDate, P.ViewCount
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.UpvoteCount AS UserUpvotes,
+    U.DownvoteCount AS UserDownvotes,
+    P.PostId,
+    P.Title AS PostTitle,
+    P.CreationDate AS PostCreationDate,
+    P.ViewCount AS PostViews,
+    P.CommentCount AS PostCommentCount,
+    P.UpvoteCount AS PostUpvotes,
+    P.DownvoteCount AS PostDownvotes
+FROM UserStats U
+JOIN PostStats P ON U.UserId = P.OwnerUserId
+ORDER BY U.Reputation DESC, P.ViewCount DESC
+LIMIT 100; -- Adjust LIMIT as needed for benchmarking

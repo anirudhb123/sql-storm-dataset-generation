@@ -1,0 +1,78 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(ws.ws_order_number) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price > 0
+    GROUP BY 
+        ws.ws_item_sk
+),
+TopSales AS (
+    SELECT 
+        s.ws_item_sk, 
+        total_profit,
+        total_sales
+    FROM 
+        SalesCTE s
+    WHERE 
+        rank <= 10
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(s.ss_ticket_number) AS store_sales_count,
+        SUM(s.ss_net_profit) AS store_total_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales s ON c.c_customer_sk = s.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+
+ReturnStats AS (
+    SELECT 
+        cr_refunded_customer_sk AS customer_sk,
+        COUNT(cr.return_quantity) AS total_returns,
+        SUM(cr.cr_net_loss) AS total_net_loss
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr_refunded_customer_sk
+),
+FinalStats AS (
+    SELECT 
+        cs.c_customer_sk,
+        COALESCE(cs.store_sales_count, 0) AS store_sales_count,
+        COALESCE(cs.store_total_profit, 0) AS total_profit,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        COALESCE(rs.total_net_loss, 0) AS total_net_loss,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(cs.store_total_profit, 0) DESC) AS rank
+    FROM 
+        CustomerStats cs
+    LEFT JOIN 
+        ReturnStats rs ON cs.c_customer_sk = rs.customer_sk
+)
+
+SELECT 
+    fs.c_customer_sk,
+    fs.store_sales_count,
+    fs.total_profit,
+    fs.total_returns,
+    fs.total_net_loss,
+    (fs.total_profit - fs.total_net_loss) AS net_earnings
+FROM 
+    FinalStats fs
+JOIN 
+    TopSales ts ON fs.store_sales_count > ts.total_sales
+WHERE 
+    fs.rank <= 50
+ORDER BY 
+    net_earnings DESC;

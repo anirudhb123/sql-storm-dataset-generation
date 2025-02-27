@@ -1,0 +1,84 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopProducts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity_sold,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        part p ON l.l_partkey = p.p_partkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        total_quantity_sold > 1000
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_partkey,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty > 50
+)
+SELECT 
+    p.p_name,
+    tp.total_quantity_sold,
+    tp.total_revenue,
+    cs.c_name,
+    cs.order_count,
+    cs.total_spent,
+    sd.s_name AS supplier_name,
+    sd.ps_availqty,
+    sd.ps_supplycost,
+    rs.supplier_rank
+FROM 
+    TopProducts tp
+JOIN 
+    CustomerOrders cs ON cs.order_count > 5
+LEFT JOIN 
+    SupplierDetails sd ON sd.ps_partkey = tp.p_partkey
+JOIN 
+    RankedSuppliers rs ON rs.s_suppkey = sd.s_suppkey
+WHERE 
+    rs.supplier_rank = 1
+ORDER BY 
+    tp.total_revenue DESC, 
+    cs.total_spent DESC
+LIMIT 100;

@@ -1,0 +1,54 @@
+
+WITH MovieData AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        STRING_AGG(DISTINCT c.id::TEXT, ',') AS cast_ids,
+        STRING_AGG(DISTINCT a.name, ',') AS cast_names,
+        STRING_AGG(DISTINCT k.keyword, ',') AS movie_keywords,
+        STRING_AGG(DISTINCT co.name, ',') AS companies_involved
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+
+RoleCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_role_id) AS role_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+)
+
+SELECT 
+    md.movie_id,
+    md.movie_title,
+    md.production_year,
+    md.cast_ids,
+    md.cast_names,
+    md.movie_keywords,
+    md.companies_involved,
+    COALESCE(rc.role_count, 0) AS unique_roles
+FROM 
+    MovieData md
+LEFT JOIN 
+    RoleCounts rc ON md.movie_id = rc.movie_id
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_title;

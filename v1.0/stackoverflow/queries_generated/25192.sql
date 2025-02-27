@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Scored,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+
+TopPosts AS (
+    SELECT 
+        rp.*,
+        ROW_NUMBER() OVER (ORDER BY rp.UpVotes - rp.DownVotes DESC, rp.CommentCount DESC) AS VoteRank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10 -- Top 10 posts by score
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.CommentCount,
+    tp.OwnerDisplayName,
+    CASE 
+        WHEN tp.VoteRank <= 3 THEN 'High Engagement'
+        WHEN tp.VoteRank BETWEEN 4 AND 7 THEN 'Medium Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.VoteRank;

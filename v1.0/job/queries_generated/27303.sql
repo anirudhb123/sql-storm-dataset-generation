@@ -1,0 +1,56 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT c.name, ', ') AS cast_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT c.id) AS cast_count
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+
+TopMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.cast_names,
+        md.keywords,
+        md.company_names,
+        md.cast_count,
+        RANK() OVER (ORDER BY md.cast_count DESC) AS rank_by_cast
+    FROM 
+        MovieDetails md
+)
+
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    tm.cast_names,
+    tm.keywords,
+    tm.company_names,
+    tm.cast_count
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank_by_cast <= 10
+ORDER BY 
+    tm.cast_count DESC, 
+    tm.production_year DESC;
+
+This SQL query generates a list of the top 10 movies based on the number of distinct cast members, along with detailed information about each movie, including the title, production year, cast names, associated keywords, and production companies. The use of Common Table Expressions (CTEs) simplifies the query structure and enhances performance for aggregation and ranking operations.

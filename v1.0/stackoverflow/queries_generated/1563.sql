@@ -1,0 +1,48 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 4) THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY COUNT(V.Id) DESC) AS VoteRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    U.DisplayName AS OwnerDisplayName,
+    P.CreationDate,
+    COALESCE(VS.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(VS.DownVotes, 0) AS TotalDownVotes,
+    CASE 
+        WHEN COALESCE(B.Reputation, 0) > 1000 THEN 'High Reputation'
+        WHEN COALESCE(B.Reputation, 0) BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationGroup,
+    COUNT(C.Comments) AS CommentCount,
+    MAX(C.CreationDate) AS LastCommentDate
+FROM 
+    Posts P
+INNER JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    UserVoteSummary VS ON U.Id = VS.UserId AND VS.VoteRank = 1
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Badges B ON U.Id = B.UserId AND B.Class = 1
+GROUP BY 
+    P.Id, U.DisplayName, B.Reputation
+HAVING 
+    COUNT(C.Id) > 5 OR COALESCE(VS.UpVotes, 0) > 10
+ORDER BY 
+    TotalUpVotes DESC,
+    LastCommentDate DESC
+LIMIT 100;

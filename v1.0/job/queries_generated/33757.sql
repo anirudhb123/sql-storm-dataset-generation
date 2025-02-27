@@ -1,0 +1,68 @@
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        m.movie_id,
+        t.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title AS t
+    JOIN 
+        movie_companies AS m ON t.id = m.movie_id
+    WHERE 
+        t.production_year > 2000
+    UNION ALL
+    SELECT 
+        m.movie_id,
+        t.title,
+        m.production_year,
+        cte.level + 1
+    FROM 
+        MovieCTE AS cte
+    JOIN 
+        movie_link AS ml ON cte.movie_id = ml.movie_id
+    JOIN 
+        aka_title AS t ON ml.linked_movie_id = t.id
+    JOIN 
+        movie_companies AS m ON t.id = m.movie_id
+    WHERE 
+        m.production_year > 2000 AND 
+        cte.level < 3
+),
+FilteredMovies AS (
+    SELECT 
+        c.movie_id,
+        c.subject_id,
+        ci.person_role_id,
+        COUNT(DISTINCT ci.person_id) AS role_count
+    FROM 
+        complete_cast AS c
+    JOIN 
+        cast_info AS ci ON c.subject_id = ci.id
+    WHERE 
+        ci.note IS NULL
+    GROUP BY 
+        c.movie_id, c.subject_id, ci.person_role_id
+),
+RankedMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY f.role_count DESC) AS rank
+    FROM 
+        MovieCTE AS m
+    JOIN 
+        FilteredMovies AS f ON m.movie_id = f.movie_id
+    WHERE 
+        f.role_count >= 3
+)
+SELECT 
+    r.title,
+    r.production_year,
+    r.rank,
+    COALESCE((SELECT COUNT(*) FROM movie_info WHERE movie_id = r.movie_id AND info_type_id = 1), 0) AS info_count
+FROM 
+    RankedMovies AS r
+WHERE 
+    r.rank <= 10
+ORDER BY 
+    r.production_year DESC, r.rank;

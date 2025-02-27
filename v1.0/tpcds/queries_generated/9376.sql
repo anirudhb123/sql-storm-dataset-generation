@@ -1,0 +1,51 @@
+
+WITH customer_summary AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_item_sk) AS total_items_purchased
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+top_customers AS (
+    SELECT 
+        cs.*,
+        RANK() OVER (ORDER BY cs.total_net_profit DESC) AS profit_rank
+    FROM 
+        customer_summary cs
+)
+SELECT 
+    w.w_warehouse_name,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders_from_warehouse,
+    SUM(ws.ws_net_profit) AS total_net_profit_from_warehouse,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_net_profit,
+    tc.total_orders
+FROM 
+    warehouse w
+JOIN 
+    web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+JOIN 
+    top_customers tc ON ws.ws_bill_customer_sk = tc.c_customer_id
+GROUP BY 
+    w.w_warehouse_name, tc.c_first_name, tc.c_last_name, tc.total_net_profit, tc.total_orders
+HAVING 
+    SUM(ws.ws_net_profit) > 10000
+ORDER BY 
+    total_net_profit_from_warehouse DESC
+LIMIT 10;

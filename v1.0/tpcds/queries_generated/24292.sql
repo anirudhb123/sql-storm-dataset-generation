@@ -1,0 +1,58 @@
+
+WITH customer_sales AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           SUM(ws.net_paid) AS total_sales,
+           COUNT(DISTINCT ws.order_number) AS order_count,
+           AVG(ws.net_paid) OVER (PARTITION BY c.c_customer_sk) AS avg_order_value
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+high_value_customers AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           cs.total_sales,
+           cs.order_count,
+           cs.avg_order_value
+    FROM customer_sales cs
+    JOIN customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE cs.total_sales > (SELECT AVG(total_sales) FROM customer_sales)
+),
+promotion_stats AS (
+    SELECT p.p_promo_id,
+           COUNT(DISTINCT ws.order_number) AS order_count,
+           SUM(ws.net_paid) AS total_revenue
+    FROM promotion p
+    JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY p.p_promo_id
+),
+high_performance_promotions AS (
+    SELECT p.p_promo_id,
+           ps.order_count,
+           ps.total_revenue,
+           (CASE 
+                WHEN ps.order_count > 10 THEN 'High'
+                WHEN ps.order_count BETWEEN 5 AND 10 THEN 'Medium'
+                ELSE 'Low'
+            END) AS performance_level
+    FROM promotion_stats ps
+    JOIN promotion p ON ps.p_promo_id = p.p_promo_id
+    WHERE ps.total_revenue > (SELECT AVG(total_revenue) FROM promotion_stats)
+)
+SELECT hvc.c_first_name,
+       hvc.c_last_name,
+       hvc.total_sales,
+       hp.promo_id,
+       hp.order_count,
+       hp.total_revenue,
+       hp.performance_level
+FROM high_value_customers hvc
+FULL OUTER JOIN high_performance_promotions hp ON hvc.c_customer_sk = (CASE 
+                                                                         WHEN hp.order_count IS NULL THEN NULL
+                                                                         ELSE CAST((RAND() * 100) AS INT) % (SELECT COUNT(*) FROM high_value_customers)
+                                                                     END)
+WHERE hvc.total_sales IS NOT NULL OR hp.total_revenue IS NOT NULL
+ORDER BY hvc.total_sales DESC NULLS LAST, hp.performance_level;

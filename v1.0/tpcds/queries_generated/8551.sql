@@ -1,0 +1,43 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit,
+        d.d_year,
+        d.d_month_seq
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY ws.web_site_id, d.d_year, d.d_month_seq
+),
+ProfitMargin AS (
+    SELECT 
+        web_site_id,
+        d_year,
+        d_month_seq,
+        total_sales,
+        total_profit,
+        CASE 
+            WHEN total_sales = 0 THEN 0 
+            ELSE (total_profit / total_sales) * 100 
+        END AS profit_margin
+    FROM SalesData
+),
+RankedProfitMargin AS (
+    SELECT 
+        web_site_id,
+        d_year,
+        d_month_seq,
+        profit_margin,
+        RANK() OVER (PARTITION BY d_year, d_month_seq ORDER BY profit_margin DESC) AS rank
+    FROM ProfitMargin
+)
+SELECT 
+    web_site_id,
+    d_year,
+    d_month_seq,
+    profit_margin
+FROM RankedProfitMargin
+WHERE rank <= 5
+ORDER BY d_year, d_month_seq, profit_margin DESC;

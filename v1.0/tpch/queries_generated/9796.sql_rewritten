@@ -1,0 +1,30 @@
+WITH SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' 
+      AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_custkey
+),
+Revenues AS (
+    SELECT od.o_orderkey, s.p_partkey, s.ps_supplycost, od.total_sales,
+           (od.total_sales - s.ps_supplycost * AVG(s.ps_availqty) OVER (PARTITION BY s.p_partkey)) AS profit
+    FROM OrderDetails od
+    JOIN SupplierParts s ON s.s_suppkey = (SELECT MIN(s2.s_suppkey) FROM SupplierParts s2 WHERE s2.p_partkey = s.p_partkey)
+)
+SELECT r.p_partkey, COUNT(r.o_orderkey) AS num_orders, 
+       AVG(r.total_sales) AS avg_sales, 
+       SUM(r.profit) AS total_profit,
+       RANK() OVER (ORDER BY SUM(r.profit) DESC) AS rank
+FROM Revenues r
+GROUP BY r.p_partkey
+HAVING COUNT(r.o_orderkey) > 5 
+ORDER BY total_profit DESC
+LIMIT 10;

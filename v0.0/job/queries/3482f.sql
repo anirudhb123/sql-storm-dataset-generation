@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND n.md5sum IN ('08cd336942eeba1fc08638e65be1216c', '2c07da57ea994cc21124f50b4b4c96d3', '3a95fa26672004d42ed77872e0a9f11c', '74c8dbf50b075a411b62f572242b48a9', '789f57824e58da88d12007f1b8414b3d', '94a44ee33d55ec75e7ebdb1c17ecfcca', 'a32b6129e5b9caa1ad84d1de75cdb783', 'b4c0e515f0fe3faaf735485ba2079fb9', 'c2c6f1a410208ee938c1487c5d5ece59', 'f25c01ed4c778835ace2d40cc7f4f6b5') AND t.season_nr < 7 AND ci.note IS NOT NULL AND t.production_year IS NOT NULL;

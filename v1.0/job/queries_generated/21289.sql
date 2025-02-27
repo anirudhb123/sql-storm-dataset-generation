@@ -1,0 +1,76 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.movie_id = at.id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE
+        mh.level < 5  -- Limit the recursion depth to avoid excessive joins
+)
+
+SELECT
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    STRING_AGG(DISTINCT cct.kind, ', ') AS cast_types,
+    COUNT(DISTINCT km.keyword) AS keyword_count,
+    AVG(COALESCE(mi.info_type_id, 0)) AS avg_info_type_id,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS notes_count,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY COUNT(DISTINCT at.id) DESC) AS actor_rank,
+    MAX(CASE WHEN cg.id IS NOT NULL THEN 'Company Involved' ELSE 'No Company' END) AS company_status
+FROM
+    aka_name ak
+JOIN
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+JOIN
+    aka_title at ON mh.movie_id = at.id
+LEFT JOIN
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN
+    keyword km ON mk.keyword_id = km.id
+LEFT JOIN
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN
+    comp_cast_type cct ON ci.role_id = cct.id
+LEFT JOIN
+    complete_cast cc ON ci.movie_id = cc.movie_id
+LEFT JOIN
+    movie_info mi ON at.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'box office')
+LEFT JOIN
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN
+    (SELECT DISTINCT company_id FROM movie_companies) cg ON cn.id = cg.company_id
+WHERE
+    ak.name IS NOT NULL
+    AND at.production_year IS NOT NULL
+    AND (ci.note IS NULL OR ci.note != 'Cameo')
+GROUP BY
+    ak.name, at.title
+HAVING
+    COUNT(DISTINCT at.id) > 2
+ORDER BY
+    actor_rank, keyword_count DESC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;
+
+This query utilizes various advanced SQL concepts including CTEs for hierarchical movie structures, correlated subqueries, outer joins for optional data retrieval, and set operators to handle keyword counts and other aggregations. It serves as a performance benchmark by retrieving a comprehensive set of data while applying several complexities and nuances in the logic.

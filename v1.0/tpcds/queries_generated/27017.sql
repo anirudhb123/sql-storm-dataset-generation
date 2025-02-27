@@ -1,0 +1,53 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        CA.ca_address_sk,
+        CONCAT(CA.ca_street_number, ' ', CA.ca_street_name, ' ', CA.ca_street_type) AS full_address,
+        CA.ca_city,
+        CA.ca_state
+    FROM 
+        customer_address CA
+    WHERE 
+        CA.ca_state IN ('CA', 'NY', 'TX')  -- Filtering for specific states for benchmarking
+),
+CustomerSales AS (
+    SELECT 
+        C.c_customer_sk,
+        C.c_first_name,
+        C.c_last_name,
+        COUNT(WS.ws_order_number) AS total_orders,
+        SUM(WS.ws_sales_price) AS total_spent
+    FROM 
+        customer C
+    LEFT JOIN 
+        web_sales WS ON WS.ws_bill_customer_sk = C.c_customer_sk
+    GROUP BY 
+        C.c_customer_sk, C.c_first_name, C.c_last_name
+),
+SalesByRegion AS (
+    SELECT 
+        AD.ca_state,
+        CS.c_first_name,
+        CS.c_last_name,
+        CS.total_orders,
+        CS.total_spent,
+        ROW_NUMBER() OVER (PARTITION BY AD.ca_state ORDER BY CS.total_spent DESC) AS sales_rank
+    FROM 
+        AddressDetails AD
+    JOIN 
+        CustomerSales CS ON AD.ca_address_sk = C.c_current_addr_sk
+)
+SELECT 
+    s.ca_state,
+    COUNT(*) AS customer_count,
+    AVG(total_spent) AS avg_spent,
+    MAX(total_orders) AS max_orders,
+    MIN(total_orders) AS min_orders
+FROM 
+    SalesByRegion s
+GROUP BY 
+    s.ca_state
+HAVING 
+    COUNT(*) > 10  -- Include only states with more than 10 customers
+ORDER BY 
+    avg_spent DESC;

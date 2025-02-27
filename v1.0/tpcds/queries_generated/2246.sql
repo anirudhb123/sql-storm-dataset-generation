@@ -1,0 +1,75 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) as purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+high_value_customers AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.full_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        customer_info ci
+    LEFT JOIN 
+        web_sales ws ON ci.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        ci.c_customer_sk, ci.full_name, ci.cd_gender, ci.cd_marital_status
+    HAVING 
+        SUM(ws.ws_net_paid_inc_tax) > 1000
+),
+top_reasons AS (
+    SELECT 
+        r.r_reason_desc,
+        COUNT(sr.sr_item_sk) AS return_count
+    FROM 
+        store_returns sr
+    JOIN 
+        reason r ON sr.sr_reason_sk = r.r_reason_sk
+    GROUP BY 
+        r.r_reason_sk, r.r_reason_desc
+    ORDER BY 
+        return_count DESC
+    LIMIT 10
+),
+latest_returns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.return_amt) AS total_return_amt
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.returned_date_sk = (SELECT MAX(wr2.returned_date_sk) FROM web_returns wr2)
+    GROUP BY 
+        wr.returning_customer_sk
+)
+SELECT 
+    hv.full_name,
+    hv.cd_gender,
+    hv.cd_marital_status,
+    hv.total_spent,
+    hv.total_orders,
+    COALESCE(tr.return_count, 0) AS top_return_reason_count,
+    lr.total_return_amt
+FROM 
+    high_value_customers hv
+LEFT JOIN 
+    top_reasons tr ON hv.c_customer_sk IN (SELECT sr_customer_sk FROM store_returns WHERE sr_customer_sk IS NOT NULL)
+LEFT JOIN 
+    latest_returns lr ON hv.c_customer_sk = lr.returning_customer_sk
+WHERE 
+    hv.purchase_rank <= 10
+ORDER BY 
+    hv.total_spent DESC;

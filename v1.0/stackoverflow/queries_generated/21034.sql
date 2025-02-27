@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS RankScore,
+        COALESCE(UPPER(SUBSTRING(p.Body FROM '\<strong\>(.*?)\<\/strong\>')), 'NO HIGHLIGHT') AS HighlightedText,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpvoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownvoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), 
+HeavyHitters AS (
+    SELECT 
+        rh.PostId,
+        rh.Title,
+        rh.Score,
+        rh.ViewCount,
+        (rh.UpvoteCount - rh.DownvoteCount) AS NetVotes,
+        CASE 
+            WHEN rh.RankScore <= 5 THEN 'Top Performer'
+            WHEN rh.RankScore BETWEEN 6 AND 10 THEN 'High Performer'
+            ELSE 'Average Performer'
+        END AS PerformanceCategory,
+        COUNT(DISTINCT ph.Id) AS EditCount
+    FROM 
+        RankedPosts rh
+    LEFT JOIN 
+        PostHistory ph ON rh.PostId = ph.PostId AND ph.PostHistoryTypeId IN (4, 5, 6)  -- Title, Body, Tags Modified
+    GROUP BY 
+        rh.PostId, rh.Title, rh.Score, rh.ViewCount, rh.UpvoteCount, rh.DownvoteCount, rh.RankScore
+), 
+PostAnalysis AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.NetVotes,
+        p.PerformanceCategory,
+        p.EditCount,
+        CASE
+            WHEN p.NetVotes IS NULL THEN 'No Engagement'
+            WHEN p.NetVotes > 10 THEN 'Highly Engaged'
+            WHEN p.NetVotes <= 10 AND p.NetVotes > 0 THEN 'Moderately Engaged'
+            ELSE 'Minimally Engaged'
+        END AS EngagementLevel
+    FROM 
+        HeavyHitters p
+    WHERE 
+        p.EditCount > 2 OR p.NetVotes IS NOT NULL
+), 
+TotalStats AS (
+    SELECT 
+        (SELECT COUNT(*) FROM Posts) AS TotalPosts,
+        (SELECT COUNT(DISTINCT u.Id) FROM Users u) AS TotalUsers,
+        (SELECT COUNT(*) FROM Comments) AS TotalComments
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.Score,
+    pa.ViewCount,
+    pa.NetVotes,
+    pa.PerformanceCategory,
+    pa.EditCount,
+    pa.EngagementLevel,
+    ts.TotalPosts,
+    ts.TotalUsers,
+    ts.TotalComments,
+    CASE
+        WHEN pa.Score BETWEEN 50 AND 100 THEN 'High Scoring'
+        WHEN pa.Score BETWEEN 20 AND 49 THEN 'Moderate Scoring'
+        ELSE 'Low Scoring'
+    END AS ScoreCategory,
+    CONCAT('[', COALESCE(STRING_AGG(DISTINCT t.TagName, ', '), 'No Tags'), ']') AS Tags
+FROM 
+    PostAnalysis pa
+LEFT JOIN 
+    Tags t ON t.WikiPostId = (SELECT WikiPostId FROM Tags WHERE TagName IN (SELECT UNNEST(string_to_array(pa.Title, ' '))) LIMIT 1)
+CROSS JOIN 
+    TotalStats ts
+WHERE 
+    pa.NetVotes IS NOT NULL
+GROUP BY 
+    pa.PostId, pa.Title, pa.Score, pa.ViewCount, 
+    pa.NetVotes, pa.PerformanceCategory, pa.EditCount, 
+    ts.TotalPosts, ts.TotalUsers, ts.TotalComments
+ORDER BY 
+    pa.Score DESC,
+    pa.ViewCount DESC
+LIMIT 100;

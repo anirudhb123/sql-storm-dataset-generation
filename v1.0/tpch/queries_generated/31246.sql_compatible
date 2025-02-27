@@ -1,0 +1,42 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 1 AS depth
+    FROM customer c
+    WHERE c.custkey > 100000.00
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.depth + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_custkey = ch.c_custkey
+    WHERE c.c_acctbal > 100000.00
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate <= DATE '1997-12-31'
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, SUM(ps.ps_availqty) AS total_available, COUNT(ps.ps_partkey) AS total_parts,
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+)
+SELECT n.n_name, 
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_revenue,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       COALESCE(r.total_available, 0) AS total_available_parts,
+       RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank,
+       (SELECT MAX(c.c_acctbal) FROM customer c WHERE c.c_nationkey = n.n_nationkey) AS max_customer_balance
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN RankedOrders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN SupplierStats r ON s.s_suppkey = r.s_suppkey
+WHERE n.n_name IS NOT NULL AND l.l_shipdate IS NOT NULL
+GROUP BY n.n_name, r.total_available
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_revenue DESC;

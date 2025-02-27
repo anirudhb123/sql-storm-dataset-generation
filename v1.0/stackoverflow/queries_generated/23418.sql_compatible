@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CURRENT_TIMESTAMP)
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryAggregate AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT ph.Comment, ', ') AS Changes,
+        COUNT(ph.Id) AS RevisionCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    us.TotalPosts,
+    us.TotalBadges,
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rpa.RevisionCount,
+    CASE 
+        WHEN rp.PostRank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory,
+    CASE 
+        WHEN u.Location IS NULL OR u.Location = '' THEN 'Location Unknown'
+        ELSE u.Location
+    END AS UserLocation,
+    CASE 
+        WHEN us.TotalPosts > 5 THEN 'Active Contributor'
+        ELSE 'Newbie Contributor'
+    END AS UserCategory
+FROM 
+    Users u
+JOIN 
+    UserStats us ON u.Id = us.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    PostHistoryAggregate rpa ON rp.PostId = rpa.PostId
+WHERE 
+    (us.Reputation > 100 OR us.TotalPosts > 10)
+    AND (rp.Score IS NOT NULL AND rp.Score > 0)
+ORDER BY 
+    us.TotalBadges DESC, 
+    rp.Score DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

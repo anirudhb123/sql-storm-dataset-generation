@@ -1,0 +1,57 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        SUM(cs.cs_ext_sales_price) AS total_catalog_sales,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+SalesSummary AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(total_web_sales, 0) AS web_sales,
+        COALESCE(total_catalog_sales, 0) AS catalog_sales,
+        COALESCE(total_store_sales, 0) AS store_sales,
+        (COALESCE(total_web_sales, 0) + COALESCE(total_catalog_sales, 0) + COALESCE(total_store_sales, 0)) AS total_sales,
+        ROW_NUMBER() OVER (ORDER BY (COALESCE(total_web_sales, 0) + COALESCE(total_catalog_sales, 0) + COALESCE(total_store_sales, 0)) DESC) AS sales_rank
+    FROM 
+        CustomerSales c
+),
+WinningCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        s.total_sales,
+        s.sales_rank
+    FROM 
+        SalesSummary s
+    JOIN 
+        customer c ON c.c_customer_id = s.c_customer_id
+    WHERE 
+        s.sales_rank <= 10
+)
+SELECT 
+    w.w_warehouse_name,
+    wc.c_customer_id,
+    wc.total_sales
+FROM 
+    WinningCustomers wc
+LEFT JOIN 
+    inventory i ON wc.c_customer_id = i.inv_item_sk
+JOIN 
+    warehouse w ON i.inv_warehouse_sk = w.w_warehouse_sk
+WHERE 
+    i.inv_quantity_on_hand > (SELECT AVG(inv_quantity_on_hand) FROM inventory)
+AND 
+    wc.total_sales > (SELECT AVG(total_sales) FROM SalesSummary)
+ORDER BY 
+    wc.total_sales DESC;

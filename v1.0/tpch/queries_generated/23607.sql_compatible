@@ -1,0 +1,57 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS Rank
+    FROM supplier s
+),
+HighValueParts AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_retailprice, 
+           COUNT(ps.ps_suppkey) AS SupplierCount
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice) 
+        FROM part p2 
+        WHERE p2.p_size IS NOT NULL
+    )
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, 
+           COUNT(o.o_orderkey) AS OrderCount, 
+           SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_mktsegment = 'BUILDING'
+    GROUP BY c.c_custkey
+)
+SELECT 
+    n.n_name AS Nation,
+    r.r_name AS Region,
+    COALESCE(AVG(hp.p_retailprice), 0) AS AvgHighValuePartPrice,
+    SUM(co.TotalSpent) AS TotalSpentByCustomers,
+    MAX(s.s_name) AS TopSupplier,
+    COUNT(DISTINCT hp.p_partkey) AS HighValuePartCount
+FROM nation n
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN HighValueParts hp ON hp.SupplierCount > 0
+LEFT JOIN CustomerOrders co ON n.n_nationkey IN (
+    SELECT c.c_nationkey 
+    FROM customer c 
+    WHERE c.c_acctbal > 1000
+)
+LEFT JOIN RankedSuppliers s ON n.n_nationkey = s.s_nationkey AND s.Rank = 1
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name, r.r_name
+HAVING COUNT(DISTINCT co.c_custkey) > 0
+   AND SUM(COALESCE(co.TotalSpent, 0)) > (
+       SELECT SUM(s2.s_acctbal) 
+       FROM supplier s2 
+       WHERE s2.s_nationkey = n.n_nationkey
+       AND s2.s_acctbal IS NOT NULL
+   )
+ORDER BY Nation, Region;

@@ -1,0 +1,90 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year,
+        h.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        MovieHierarchy h ON m.episode_of_id = h.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT cn.note, ', ') AS production_companies
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        mi.info IS NOT NULL
+    GROUP BY 
+        m.id
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(md.keywords, 'No keywords') AS keywords,
+    COALESCE(cd.cast_names, 'No cast') AS cast,
+    COALESCE(cd.cast_count, 0) AS cast_count,
+    mh.level,
+    CASE 
+        WHEN mh.production_year < 2000 THEN 'Classic'
+        WHEN mh.production_year BETWEEN 2000 AND 2010 THEN 'Contemporary'
+        ELSE 'Modern'
+    END AS period,
+    ROW_NUMBER() OVER (PARTITION BY CASE 
+        WHEN mh.production_year < 2000 THEN 'Classic'
+        WHEN mh.production_year BETWEEN 2000 AND 2010 THEN 'Contemporary'
+        ELSE 'Modern'
+    END ORDER BY mh.production_year DESC) AS rn
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    MovieInfo md ON mh.movie_id = md.movie_id
+LEFT JOIN 
+    CastDetails cd ON mh.movie_id = cd.movie_id
+WHERE 
+    mh.level = 1
+ORDER BY 
+    mh.production_year DESC, rn;

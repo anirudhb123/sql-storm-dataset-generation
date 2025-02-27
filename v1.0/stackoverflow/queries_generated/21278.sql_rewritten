@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+CloseReasonSummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN cr.Name END) AS CloseReason,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseReasonCount
+    FROM 
+        PostHistory ph
+        LEFT JOIN CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    GROUP BY 
+        ph.PostId
+),
+PostAnswers AS (
+    SELECT 
+        p.Id AS QuestionId,
+        COUNT(a.Id) AS AnswerCount,
+        MAX(a.Score) AS BestAnswerScore
+    FROM 
+        Posts p
+        LEFT JOIN Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id
+),
+FinalSummary AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.TotalPosts,
+        us.TotalViews,
+        us.TotalScore,
+        COALESCE(ps.AnswerCount, 0) AS TotalAnswers,
+        COALESCE(ps.BestAnswerScore, 0) AS BestAnswerScore,
+        COALESCE(cr.CloseReason, 'No close reason') AS CloseReason
+    FROM 
+        UserStatistics us
+        LEFT JOIN PostAnswers ps ON us.UserId = ps.QuestionId
+        LEFT JOIN CloseReasonSummary cr ON ps.QuestionId = cr.PostId
+    WHERE 
+        us.TotalPosts > 10
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalViews,
+    u.TotalScore,
+    f.TotalAnswers,
+    f.BestAnswerScore,
+    f.CloseReason
+FROM 
+    UserStatistics u
+    LEFT JOIN FinalSummary f ON u.UserId = f.UserId
+WHERE 
+    u.TotalScores > (SELECT AVG(TotalScore) FROM UserStatistics)
+ORDER BY 
+    u.TotalViews DESC 
+LIMIT 10;

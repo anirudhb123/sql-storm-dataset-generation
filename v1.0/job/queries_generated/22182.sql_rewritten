@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        1 AS level
+    FROM 
+        movie_link ml
+    WHERE 
+        ml.link_type_id = 1  
+
+    UNION ALL
+
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.linked_movie_id
+)
+
+SELECT 
+    a.name AS Actor_Name,
+    t.title AS Movie_Title,
+    COALESCE(mk.keyword, 'No keywords') AS Movie_Keyword,
+    ma.company_name AS Production_Company,
+    ROW_NUMBER() OVER (PARTITION BY a.name ORDER BY t.production_year DESC) AS Actor_Movie_Count,
+    COUNT(DISTINCT ch.id) AS Character_Count,
+    AVG(CASE 
+            WHEN mc.note IS NULL THEN 0 
+            ELSE LENGTH(mc.note) 
+        END) AS Avg_Notes_Length,
+    SUM(
+        CASE 
+            WHEN a.name_pcode_nf IS NULL AND mc.company_type_id IS NULL THEN 1 
+            ELSE 0 
+        END
+    ) AS Null_Counter
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON c.person_id = a.person_id
+JOIN 
+    aka_title t ON c.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+LEFT JOIN 
+    company_name ma ON ma.id = mc.company_id
+LEFT JOIN 
+    char_name ch ON ch.id = a.id
+LEFT JOIN 
+    MovieHierarchy mh ON mh.movie_id = t.id
+
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'Drama%')
+    AND (LOWER(a.name) LIKE '%john%' OR LOWER(a.name) LIKE '%doe%')
+GROUP BY 
+    a.name, t.title, mk.keyword, ma.company_name
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 3
+ORDER BY 
+    Actor_Movie_Count DESC, a.name;

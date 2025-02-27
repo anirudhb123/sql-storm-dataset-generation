@@ -1,0 +1,40 @@
+WITH RECURSIVE region_hierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_regionkey = 1
+    
+    UNION ALL
+    
+    SELECT r.r_regionkey, r.r_name, rh.level + 1
+    FROM region r
+    JOIN region_hierarchy rh ON r.r_regionkey = rh.r_regionkey + 1
+),
+supplier_summary AS (
+    SELECT s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_nationkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT l.l_orderkey) AS total_orders,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_returns,
+    AVG(cs.total_spent) AS average_customer_spending,
+    MAX(ps.ps_supplycost) AS max_supply_cost
+FROM lineitem l
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer_orders cs ON o.o_custkey = cs.c_custkey
+JOIN supplier_summary ss ON ss.s_nationkey = n.n_nationkey
+JOIN nation n ON n.n_nationkey = ss.s_nationkey
+JOIN region_hierarchy rh ON rh.r_regionkey = n.n_regionkey
+WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    AND (l.l_discount BETWEEN 0.05 AND 0.20 OR l.l_tax IS NOT NULL)
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT l.l_orderkey) > 5
+ORDER BY total_orders DESC, average_customer_spending DESC;

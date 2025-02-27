@@ -1,0 +1,48 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        AVG(COALESCE(Posts.ViewCount, 0)) AS AvgViewCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostActivity AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN P.PostTypeId = 2 AND P.AcceptedAnswerId IS NOT NULL THEN 1 END) AS AcceptedAnswerCount,
+        COUNT(CASE WHEN P.LastActivityDate > NOW() - INTERVAL '30 days' THEN 1 END) AS ActivePostCount
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.AvgViewCount,
+    U.BadgeCount,
+    U.UpvoteCount,
+    U.DownvoteCount,
+    COALESCE(PA.QuestionCount, 0) AS QuestionCount,
+    COALESCE(PA.AcceptedAnswerCount, 0) AS AcceptedAnswerCount,
+    COALESCE(PA.ActivePostCount, 0) AS ActivePostCount
+FROM 
+    UserStats U
+LEFT JOIN 
+    PostActivity PA ON U.UserId = PA.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, U.AvgViewCount DESC;

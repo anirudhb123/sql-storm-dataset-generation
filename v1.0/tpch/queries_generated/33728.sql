@@ -1,0 +1,31 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.nationkey
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+    UNION ALL
+    SELECT ps.ps_suppkey, s.s_name, s.s_acctbal, s.nationkey
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN SupplierHierarchy sh ON ps.ps_partkey = sh.s_suppkey
+), 
+RevenuePerNation AS (
+    SELECT n.n_name, SUM(o.o_totalprice) AS total_revenue
+    FROM nation n
+    JOIN customer c ON c.c_nationkey = n.n_nationkey
+    JOIN orders o ON o.o_custkey = c.c_custkey
+    GROUP BY n.n_name
+),
+RankedSuppliers AS (
+    SELECT sh.s_name, sh.s_acctbal, ROW_NUMBER() OVER (PARTITION BY sh.nationkey ORDER BY sh.s_acctbal DESC) AS rank
+    FROM SupplierHierarchy sh
+)
+SELECT 
+    p.p_name,
+    COALESCE(rpn.total_revenue, 0) AS total_revenue,
+    COALESCE(rs.s_acctbal, 0) AS supplier_acctbal
+FROM part p
+LEFT JOIN RevenuePerNation rpn ON p.p_partkey = rpn.n_name
+LEFT JOIN RankedSuppliers rs ON rpn.n_name = rs.s_name
+WHERE p.p_retailprice > 
+    (SELECT AVG(p_retailprice) FROM part WHERE p_size IS NOT NULL)
+ORDER BY total_revenue DESC, supplier_acctbal DESC;

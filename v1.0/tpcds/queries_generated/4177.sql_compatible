@@ -1,0 +1,67 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk BETWEEN 1 AND 365
+    GROUP BY 
+        sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        COALESCE(cd.cd_dep_count, 0) AS dep_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+FilteredSalesData AS (
+    SELECT 
+        sd.ws_bill_customer_sk,
+        sd.total_net_profit,
+        sd.total_orders,
+        COALESCE(cr.total_returned, 0) AS total_returns,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount
+    FROM 
+        SalesData sd
+    LEFT JOIN 
+        CustomerReturns cr ON sd.ws_bill_customer_sk = cr.sr_customer_sk
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_income_band_sk,
+    SUM(fs.total_net_profit) AS cumulative_net_profit,
+    AVG(fs.total_orders) AS average_orders,
+    MAX(fs.total_returns) AS max_returns,
+    COUNT(DISTINCT fs.ws_bill_customer_sk) AS unique_customers
+FROM 
+    CustomerDemographics cd
+JOIN 
+    FilteredSalesData fs ON cd.c_customer_sk = fs.ws_bill_customer_sk
+GROUP BY 
+    cd.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+HAVING 
+    SUM(fs.total_net_profit) > 1000 AND
+    COUNT(DISTINCT fs.ws_bill_customer_sk) > 10
+ORDER BY 
+    cumulative_net_profit DESC;

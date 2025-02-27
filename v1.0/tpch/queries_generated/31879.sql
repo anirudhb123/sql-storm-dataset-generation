@@ -1,0 +1,46 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS lvl
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, oh.o_totalprice, lvl + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+
+SupplierRanking AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost) AS total_supplycost,
+           DENSE_RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+
+LineItemSummary AS (
+    SELECT l.l_orderkey, COUNT(*) AS lineitem_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(lo.o_totalprice) AS total_order_value,
+    AVG(lo.o_totalprice) AS average_order_value,
+    MAX(srank.total_supplycost) AS max_supply_cost,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS parts_ordered
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders lo ON c.c_custkey = lo.o_custkey
+LEFT JOIN LineItemSummary lis ON lo.o_orderkey = lis.l_orderkey
+LEFT JOIN SupplierRanking srank ON c.c_nationkey = srank.s_nationkey
+LEFT JOIN partsupp ps ON ps.ps_suppkey = srank.s_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+WHERE lo.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY total_order_value DESC;

@@ -1,0 +1,65 @@
+WITH MovieDetails AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        string_agg(DISTINCT cn.name, ', ') AS production_companies,
+        COUNT(DISTINCT ca.person_id) AS cast_count,
+        SUM(CASE WHEN ci.id IS NOT NULL THEN 1 ELSE 0 END) AS complete_cast_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        cast_info ca ON mt.movie_id = ca.movie_id
+    LEFT JOIN 
+        complete_cast cc ON mt.movie_id = cc.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+
+RankedMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.production_companies,
+        md.cast_count,
+        md.complete_cast_count,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.cast_count DESC) AS cast_rank,
+        MAX(COALESCE(NULLIF(md.cast_count, 0), 1)) OVER () AS max_cast_count
+    FROM 
+        MovieDetails md
+)
+
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.production_companies,
+    rm.cast_count,
+    rm.complete_cast_count,
+    rm.cast_rank,
+    CASE 
+        WHEN rm.cast_count = rm.max_cast_count THEN 'Top Cast Movie'
+        ELSE 'Regular Movie'
+    END AS movie_category,
+    (SELECT COUNT(DISTINCT kh.keyword) 
+     FROM movie_keyword mk
+     JOIN keyword kh ON mk.keyword_id = kh.id
+     WHERE mk.movie_id = rm.movie_id) AS keyword_count,
+    (SELECT string_agg(DISTINCT rk.role, ', ')
+     FROM role_type rk 
+     JOIN cast_info ci ON ci.role_id = rk.id 
+     WHERE ci.movie_id = rm.movie_id) AS roles_in_movie
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.cast_rank <= 5
+ORDER BY 
+    rm.production_year DESC, 
+    rm.cast_rank;

@@ -1,0 +1,94 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpvoteCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownvoteCount,
+        COALESCE(SUM(B.Class = 1)::int, 0) AS GoldBadgeCount,
+        COALESCE(SUM(B.Class = 2)::int, 0) AS SilverBadgeCount,
+        COALESCE(SUM(B.Class = 3)::int, 0) AS BronzeBadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        PT.Name AS PostType,
+        COUNT(C.Id) AS CommentCount,
+        COALESCE(SUM(V.VoteTypeId = 2)::int, 0) AS UpvoteCount,
+        COALESCE(SUM(V.VoteTypeId = 3)::int, 0) AS DownvoteCount
+    FROM 
+        Posts P
+    JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score, PT.Name
+),
+AggregateData AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.PostCount,
+        UA.CommentCount,
+        UA.UpvoteCount,
+        UA.DownvoteCount,
+        UA.GoldBadgeCount,
+        UA.SilverBadgeCount,
+        UA.BronzeBadgeCount,
+        PM.PostId,
+        PM.Title,
+        PM.CreationDate AS PostCreationDate,
+        PM.ViewCount AS PostViewCount,
+        PM.Score AS PostScore,
+        PM.PostType,
+        PM.CommentCount AS PostCommentCount,
+        PM.UpvoteCount AS PostUpvoteCount,
+        PM.DownvoteCount AS PostDownvoteCount
+    FROM 
+        UserActivity UA
+    LEFT JOIN 
+        PostMetrics PM ON UA.UserId = PM.OwnerUserId
+)
+SELECT 
+    AD.UserId,
+    AD.DisplayName,
+    AD.PostCount,
+    AD.CommentCount,
+    AD.UpvoteCount,
+    AD.DownvoteCount,
+    AD.GoldBadgeCount,
+    AD.SilverBadgeCount,
+    AD.BronzeBadgeCount,
+    AD.PostId,
+    AD.Title,
+    AD.PostCreationDate,
+    AD.PostViewCount,
+    AD.PostScore,
+    AD.PostType,
+    AD.PostCommentCount,
+    AD.PostUpvoteCount,
+    AD.PostDownvoteCount
+FROM 
+    AggregateData AD
+ORDER BY 
+    AD.UserId, AD.PostCreationDate DESC;

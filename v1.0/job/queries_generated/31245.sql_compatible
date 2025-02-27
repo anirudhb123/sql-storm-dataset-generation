@@ -1,0 +1,55 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        a.title,
+        a.production_year,
+        a.kind_id,
+        m.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy m ON ml.movie_id = m.movie_id
+    JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+)
+SELECT 
+    DISTINCT a.name AS actor_name,
+    t.title AS movie_title,
+    mh.title AS linked_movie_title,
+    mh.production_year AS linked_movie_year,
+    RANK() OVER (PARTITION BY a.name ORDER BY mh.depth) AS movie_rank,
+    CASE 
+        WHEN mi.production_year IS NOT NULL THEN 'Present'
+        ELSE 'Unavailable'
+    END AS movie_status
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.id
+LEFT JOIN 
+    MovieHierarchy mh ON t.id = mh.movie_id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+WHERE 
+    a.md5sum IS NOT NULL
+    AND (t.production_year > 2010 OR (mh.title IS NOT NULL AND mh.production_year >= 2000))
+GROUP BY 
+    a.name, t.title, mh.title, mh.production_year, mi.production_year
+ORDER BY 
+    a.name, movie_rank;

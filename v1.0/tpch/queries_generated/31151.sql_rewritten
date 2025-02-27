@@ -1,0 +1,32 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 5000 AND sh.level < 5
+)
+SELECT 
+    n.n_name AS nation_name,
+    p.p_name AS part_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(l.l_quantity) AS avg_quantity,
+    RANK() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+FROM lineitem l
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN supplier s ON l.l_suppkey = s.s_suppkey
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey AND l.l_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+INNER JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+AND (c.c_mktsegment IN ('BUILDING', 'FURNITURE') OR l.l_returnflag IS NULL)
+GROUP BY n.n_name, p.p_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY total_revenue DESC, nation_name ASC
+LIMIT 100;

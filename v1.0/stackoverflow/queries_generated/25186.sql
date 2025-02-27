@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT c.Id) DESC) AS CommentRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tagArray ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(BOTH '<>' FROM tagArray)
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate
+),
+
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.AnswerCount,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.CommentRank <= 10
+)
+
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.Body,
+    pp.CreationDate,
+    pp.CommentCount,
+    pp.AnswerCount,
+    pp.Tags,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation AS OwnerReputation,
+    bh.Name AS BadgeName,
+    bh.Class AS BadgeClass
+FROM 
+    PopularPosts pp
+JOIN 
+    Users u ON pp.PostId IN (SELECT ParentId FROM Posts WHERE OwnerUserId = u.Id)
+LEFT JOIN 
+    Badges bh ON bh.UserId = u.Id
+WHERE 
+    bh.Date = (
+        SELECT MAX(Date) 
+        FROM Badges 
+        WHERE UserId = u.Id
+    )
+ORDER BY 
+    pp.CommentCount DESC;
+
+This query benchmark evaluates string processing by aggregating tags for the top 10 most commented questions, enriching the result set with user and badge information while showcasing complex joins and string manipulations.

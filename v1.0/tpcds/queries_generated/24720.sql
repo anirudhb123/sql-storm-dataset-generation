@@ -1,0 +1,138 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CDEP.cdep_count,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        (SELECT 
+            cd_demo_sk, 
+            COUNT(cd_dep_count) AS cdep_count
+         FROM 
+            household_demographics 
+         GROUP BY 
+            cd_demo_sk) CDEP ON cd.cd_demo_sk = CDEP.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+TopCustomers AS (
+    SELECT 
+        r.c_customer_id, 
+        r.cd_gender, 
+        r.cdep_count
+    FROM 
+        RankedCustomers r
+    WHERE 
+        r.gender_rank <= 5
+),
+SalesData AS (
+    SELECT 
+        ws.ws_customer_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1000 AND 2000 
+    GROUP BY 
+        ws.ws_customer_sk
+)
+SELECT 
+    tc.c_customer_id,
+    tc.cd_gender,
+    COALESCE(sd.total_net_profit, 0) AS net_profit,
+    COALESCE(sd.total_orders, 0) AS order_count,
+    CASE 
+        WHEN sd.total_net_profit IS NULL THEN NULL 
+        ELSE sd.total_net_profit / NULLIF(sd.total_orders, 0) 
+    END AS avg_profit_per_order
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    SalesData sd ON tc.c_customer_id = sd.ws_customer_sk
+ORDER BY 
+    avg_profit_per_order DESC, 
+    tc.cd_gender ASC
+FETCH FIRST 10 ROWS ONLY;
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT 
+        ca_address_sk,
+        ca_city, 
+        ca_state, 
+        1 AS level
+    FROM 
+        customer_address
+    WHERE 
+        ca_country IS NOT NULL
+    
+    UNION ALL 
+    
+    SELECT 
+        a.ca_address_sk,
+        a.ca_city, 
+        a.ca_state,
+        ah.level + 1
+    FROM 
+        customer_address a
+    JOIN 
+        AddressHierarchy ah ON a.ca_address_sk = ah.ca_address_sk
+    WHERE 
+        ah.level < 5
+)
+SELECT 
+    DISTINCT ca_city, 
+    ca_state
+FROM 
+    AddressHierarchy
+WHERE 
+    ca_city NOT IN (SELECT ca_city FROM customer_address WHERE ca_country = 'USA')
+ORDER BY 
+    ca_state ASC;
+
+SELECT 
+    * 
+FROM 
+    (SELECT 
+        cd.cd_marital_status, 
+        COUNT(DISTINCT c.c_customer_id) AS total_customers 
+     FROM 
+        customer c 
+     JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk 
+     WHERE 
+        cd.cd_marital_status IS NOT NULL 
+     GROUP BY 
+        cd.cd_marital_status) AS marital_counts
+UNION ALL 
+SELECT 
+    'Total' AS cd_marital_status, 
+    COUNT(DISTINCT c.c_customer_id) 
+FROM 
+    customer c;
+
+SELECT 
+    S.s_store_name, 
+    COUNT(distinct sd.ss_ticket_number) AS total_store_sales
+FROM 
+    store S 
+LEFT JOIN 
+    store_sales sd ON S.s_store_sk = sd.ss_store_sk
+LEFT JOIN 
+    customer c ON (sd.ss_customer_sk = c.c_customer_sk AND c.c_birth_year < 1970)
+WHERE 
+    S.s_zip IS NOT NULL 
+    AND S.s_city IS NOT NULL 
+GROUP BY 
+    S.s_store_name
+HAVING 
+    total_store_sales > (SELECT AVG(total_store_sales) FROM store_sales) 
+ORDER BY 
+    total_store_sales DESC;

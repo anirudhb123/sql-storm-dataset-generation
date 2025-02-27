@@ -1,0 +1,52 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s_store_sk,
+        ss_item_sk,
+        SUM(ss_sales_price) AS total_sales_price,
+        SUM(ss_quantity) AS total_quantity,
+        RANK() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_sales_price) DESC) AS sales_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN 2450000 AND 2450500
+    GROUP BY 
+        s_store_sk, ss_item_sk
+),
+TopItems AS (
+    SELECT 
+        r.s_store_sk,
+        i.i_item_id,
+        r.total_sales_price,
+        r.total_quantity
+    FROM 
+        RankedSales r
+    JOIN 
+        item i ON r.ss_item_sk = i.i_item_sk
+    WHERE 
+        r.sales_rank <= 5
+)
+SELECT 
+    s.s_store_id,
+    si.i_item_id,
+    si.total_sales_price,
+    si.total_quantity,
+    c.cc_city,
+    c.cc_state,
+    d.d_year,
+    d.d_month_seq
+FROM 
+    TopItems si
+JOIN 
+    store s ON si.s_store_sk = s.s_store_sk
+JOIN 
+    customer c ON c.c_customer_sk = (SELECT DISTINCT ss.ss_customer_sk 
+                                        FROM store_sales ss 
+                                        WHERE ss.ss_store_sk = si.s_store_sk 
+                                        ORDER BY ss.ss_sales_price DESC LIMIT 1)
+JOIN 
+    date_dim d ON d.d_date_sk = ss_sold_date_sk
+WHERE 
+    s.s_state = 'CA'
+ORDER BY 
+    si.total_sales_price DESC;

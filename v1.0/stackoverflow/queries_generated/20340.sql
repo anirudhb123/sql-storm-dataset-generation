@@ -1,0 +1,75 @@
+WITH UserAggregates AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END), 0) AS PositivePosts,
+        COALESCE(SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END), 0) AS NegativePosts,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(u.CreationDate) AS LastCreationDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+RecentUserActivity AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS RecentPostCount,
+        COUNT(DISTINCT c.Id) AS RecentCommentCount,
+        ROW_NUMBER() OVER (PARTITION BY UserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY 
+        UserId
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.Reputation,
+    ua.PositivePosts,
+    ua.NegativePosts,
+    ua.BadgeCount,
+    COALESCE(ru.RecentPostCount, 0) AS RecentPostCount,
+    COALESCE(ru.RecentCommentCount, 0) AS RecentCommentCount,
+    CASE 
+        WHEN ua.BadgeCount > 10 THEN 'High Achiever'
+        WHEN ua.Reputation > 1000 THEN 'Reputable Contributor'
+        ELSE 'Newbie'
+    END AS UserStatus,
+    CASE 
+        WHEN ua.Reputation IS NULL THEN 'No Reputation'
+        WHEN ua.Reputation < 100 THEN 'Beginner'
+        ELSE 'Experienced'
+    END AS ExperienceLevel,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+FROM 
+    UserAggregates ua
+LEFT JOIN 
+    RecentUserActivity ru ON ua.UserId = ru.UserId
+LEFT JOIN 
+    Posts p ON ua.UserId = p.OwnerUserId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            DISTINCT unnest(string_to_array(p.Tags, '>')) AS TagName 
+        WHERE 
+            p.Tags IS NOT NULL
+    ) t ON true
+WHERE 
+    ua.PositivePosts > 0 OR ua.NegativePosts > 0
+GROUP BY 
+    ua.UserId, ua.DisplayName, ua.Reputation, ru.RecentPostCount, ru.RecentCommentCount
+ORDER BY 
+    ua.Reputation DESC, ua.BadgeCount DESC
+LIMIT 50;
+
+This SQL query comprises several advanced constructs and demonstrates complex logic. It aggregates user activity and reputation, computes user statuses based on badges and reputations, and joins with tags to dynamically list the tags users have dealt with recently. It utilizes CTEs for organization, string manipulations, and conditional logic to classify users into statuses and experience levels. Additionally, it applies outer joins and handles NULL logic comprehensively.

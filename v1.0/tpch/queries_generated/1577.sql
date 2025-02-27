@@ -1,0 +1,62 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+TotalSales AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+TopRevenueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity,
+    AVG(ps.ps_supplycost) AS avg_supply_cost,
+    (SELECT COUNT(DISTINCT c.c_custkey) 
+     FROM customer c 
+     WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')) AS usa_customer_count,
+    (SELECT COUNT(DISTINCT o.o_orderkey)
+     FROM orders o
+     JOIN TotalSales ts ON o.o_orderkey = ts.o_orderkey
+     WHERE ts.total_revenue > 10000) AS high_revenue_order_count
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON p.p_partkey = rs.ps_partkey AND rs.rank = 1
+GROUP BY 
+    p.p_partkey, p.p_name
+HAVING 
+    COUNT(DISTINCT l.l_orderkey) > 5
+ORDER BY 
+    total_quantity DESC, avg_supply_cost ASC;

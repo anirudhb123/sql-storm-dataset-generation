@@ -1,0 +1,81 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+        AND o.o_orderdate < DATE '1997-01-01'
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        r.r_name AS region_name,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, r.r_name
+),
+SupplierPartCount AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS total_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        l.l_returnflag,
+        l.l_linestatus
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1997-01-01'
+    GROUP BY 
+        l.l_orderkey, l.l_returnflag, l.l_linestatus
+)
+SELECT 
+    cr.region_name,
+    COUNT(DISTINCT ro.o_orderkey) AS total_orders,
+    SUM(fli.total_revenue) AS total_revenue,
+    COUNT(DISTINCT sp.s_suppkey) AS distinct_suppliers,
+    MAX(sp.total_parts) AS max_parts,
+    CASE 
+        WHEN COUNT(DISTINCT ro.o_orderkey) > 10 THEN 'High Volume'
+        WHEN COUNT(DISTINCT ro.o_orderkey) BETWEEN 5 AND 10 THEN 'Medium Volume'
+        ELSE 'Low Volume'
+    END AS order_volume_category
+FROM 
+    CustomerRegion cr
+LEFT JOIN 
+    RankedOrders ro ON cr.c_custkey = ro.o_custkey
+LEFT JOIN 
+    SupplierPartCount sp ON sp.total_parts > 5
+LEFT JOIN 
+    FilteredLineItems fli ON ro.o_orderkey = fli.l_orderkey
+GROUP BY 
+    cr.region_name
+HAVING 
+    SUM(fli.total_revenue) IS NOT NULL
+ORDER BY 
+    cr.region_name ASC,
+    order_volume_category DESC;

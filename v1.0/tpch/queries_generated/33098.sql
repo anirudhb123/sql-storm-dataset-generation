@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(MONTH, -1, GETDATE())
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, ps.ps_availqty, p.p_retailprice,
+           CASE 
+               WHEN ps.ps_availqty = 0 THEN 0 
+               ELSE ROUND((p.p_retailprice - ps.ps_supplycost) / ps.ps_supplycost * 100, 2) 
+           END AS margin_percent
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty < 100
+),
+CustomerTotalSpend AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spend
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+EligibleCustomers AS (
+    SELECT c.c_custkey, c.c_name, ts.total_spend
+    FROM customer c
+    JOIN CustomerTotalSpend ts ON c.c_custkey = ts.c_custkey
+    WHERE ts.total_spend > (SELECT AVG(total_spend) FROM CustomerTotalSpend)
+)
+SELECT c.c_name, COUNT(DISTINCT o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_order_value,
+       p.p_name, p.margin_percent, s.s_name, s.level
+FROM EligibleCustomers c
+LEFT JOIN RankedOrders o ON c.c_custkey = o.o_custkey
+LEFT JOIN PartSupplierDetails p ON p.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+LEFT JOIN SupplierHierarchy s ON s.s_nationkey = c.c_nationkey
+GROUP BY c.c_name, p.p_name, p.margin_percent, s.s_name, s.level
+HAVING SUM(o.o_totalprice) > 5000 OR COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY total_order_value DESC, order_count DESC;

@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < 5000
+),
+AveragePrice AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+NationWithComment AS (
+    SELECT n.n_nationkey, n.n_name, n.n_comment, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE n.n_comment IS NOT NULL
+)
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE NULL END), 0) AS total_returns,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    ROW_NUMBER() OVER (PARTITION BY p.p_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN SupplierHierarchy sh ON l.l_suppkey = sh.s_suppkey
+JOIN AveragePrice ap ON p.p_partkey = ap.ps_partkey
+LEFT JOIN NationWithComment nwc ON sh.s_nationkey = nwc.n_nationkey
+WHERE p.p_size IN (SELECT DISTINCT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty > 100)
+AND (p.p_comment LIKE '%special%' OR p.p_retailprice < (SELECT AVG(p2.p_retailprice) FROM part p2))
+GROUP BY p.p_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+ORDER BY total_sales DESC;

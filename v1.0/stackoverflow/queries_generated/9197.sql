@@ -1,0 +1,65 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.Score) AS TotalScore,
+        SUM(b.Class) AS TotalBadges,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        TotalPosts, 
+        TotalQuestions, 
+        TotalAnswers, 
+        TotalScore, 
+        TotalBadges, 
+        LastPostDate,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM 
+        UserStatistics
+),
+ActiveUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        DATEDIFF(CURRENT_TIMESTAMP, LastPostDate) AS DaysSinceLastPost
+    FROM 
+        TopUsers
+    WHERE 
+        TotalPosts > 0
+)
+SELECT 
+    au.DisplayName, 
+    au.TotalPosts, 
+    au.TotalQuestions, 
+    au.TotalAnswers, 
+    au.TotalScore, 
+    au.TotalBadges, 
+    au.DaysSinceLastPost, 
+    php.Id AS PostHistoryId,
+    php.Comment AS EditComment,
+    php.CreationDate AS EditDate,
+    php.UserDisplayName AS EditorName
+FROM 
+    ActiveUsers au
+JOIN 
+    PostHistory php ON php.UserId = au.UserId
+WHERE 
+    php.CreationDate >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY)
+ORDER BY 
+    au.TotalScore DESC, 
+    au.DaysSinceLastPost ASC
+LIMIT 10;

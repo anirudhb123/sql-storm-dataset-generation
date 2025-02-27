@@ -1,0 +1,67 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        SUM(COALESCE(v.VoteTypeId = 2::smallint, 0)) AS UpVotes,
+        SUM(COALESCE(v.VoteTypeId = 3::smallint, 0)) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Posts a ON u.Id = a.OwnerUserId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+FilteredBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(b.Class) AS HighestBadge
+    FROM 
+        Badges b
+    WHERE 
+        b.Class IN (1, 2) 
+    GROUP BY 
+        b.UserId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.UserId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseActions,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteActions
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.UserId
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.QuestionCount,
+    ua.AnswerCount,
+    ua.UpVotes,
+    ua.DownVotes,
+    ua.CommentCount,
+    COALESCE(bb.BadgeCount, 0) AS BadgeCount,
+    COALESCE(bb.HighestBadge, 0) AS HighestBadge,
+    COALESCE(phs.CloseActions, 0) AS CloseActions,
+    COALESCE(phs.DeleteActions, 0) AS DeleteActions
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    FilteredBadges bb ON ua.UserId = bb.UserId
+LEFT JOIN 
+    PostHistorySummary phs ON ua.UserId = phs.UserId
+WHERE 
+    ua.QuestionCount > 0 
+ORDER BY 
+    ua.QuestionCount DESC,
+    ua.UpVotes DESC;

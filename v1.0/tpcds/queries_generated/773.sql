@@ -1,0 +1,69 @@
+
+WITH CustomerSummary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_income_band_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS income_rank
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+),
+TopSpenders AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name || ' ' || cs.c_last_name AS full_name,
+        cs.total_orders,
+        cs.total_spent
+    FROM 
+        CustomerSummary cs
+    WHERE 
+        cs.income_rank <= 10
+),
+ItemSales AS (
+    SELECT 
+        i.i_item_id,
+        COUNT(ws.ws_order_number) AS order_count,
+        SUM(ws.ws_sales_price) AS total_revenue
+    FROM 
+        item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_id
+    HAVING 
+        SUM(ws.ws_sales_price) > (SELECT AVG(ws1.ws_sales_price) FROM web_sales ws1)
+),
+CustomerItemPurchases AS (
+    SELECT 
+        cs.full_name,
+        isales.i_item_id,
+        isales.order_count,
+        isales.total_revenue
+    FROM 
+        TopSpenders cs 
+    JOIN web_sales ws ON cs.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN ItemSales isales ON ws.ws_item_sk = isales.i_item_id
+)
+SELECT 
+    cip.full_name,
+    cip.i_item_id,
+    cip.order_count,
+    cip.total_revenue,
+    COALESCE(ROUND((cip.total_revenue / NULLIF(SUM(c.total_spent) OVER (PARTITION BY cip.i_item_id)), 0)) * 100, 2), 0) AS revenue_percentage,
+    CASE 
+        WHEN cip.total_revenue > 1000 THEN 'High Value'
+        WHEN cip.total_revenue BETWEEN 500 AND 1000 THEN 'Moderate Value'
+        ELSE 'Low Value'
+    END AS item_value_category
+FROM 
+    CustomerItemPurchases cip
+ORDER BY 
+    cip.total_revenue DESC;

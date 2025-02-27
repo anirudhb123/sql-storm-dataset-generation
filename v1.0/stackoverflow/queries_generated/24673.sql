@@ -1,0 +1,98 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.PostTypeId
+),
+RecentEdits AS (
+    SELECT 
+        PostId,
+        MAX(CreationDate) AS LastEditDate
+    FROM 
+        PostHistory
+    WHERE
+        PostHistoryTypeId IN (4, 5, 6, 14, 15)
+    GROUP BY 
+        PostId
+),
+UserMetrics AS (
+    SELECT
+        u.Id AS UserId,
+        SUM(b.Class = 1) AS GoldBadges,
+        COALESCE(AVG(v.BountyAmount), 0) AS AvgBountyAmount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostSummaries AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        re.LastEditDate,
+        um.GoldBadges,
+        um.AvgBountyAmount,
+        CASE
+            WHEN rp.Rank = 1 THEN 'Top Post'
+            WHEN rp.Rank BETWEEN 2 AND 5 THEN 'Highly Rated'
+            ELSE 'Other'
+        END AS PostCategory
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentEdits re ON rp.PostId = re.PostId
+    LEFT JOIN 
+        UserMetrics um ON rp.PostId IN (
+            SELECT 
+                DISTINCT OwnerUserId 
+            FROM 
+                Posts 
+            WHERE 
+                Id = rp.PostId
+        )
+    WHERE 
+        (rp.CommentCount IS NULL OR rp.CommentCount < 10)
+        AND (rp.Score > 5 OR um.AvgBountyAmount > 0)
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.LastEditDate,
+    ps.GoldBadges,
+    ps.AvgBountyAmount,
+    ps.PostCategory,
+    CASE 
+        WHEN ps.LastEditDate IS NULL THEN 'Never Edited'
+        WHEN ps.LastEditDate < CURRENT_TIMESTAMP - INTERVAL '30 days' THEN 'Edited Over 30 Days Ago'
+        ELSE 'Recently Edited'
+    END AS EditStatus
+FROM 
+    PostSummaries ps
+ORDER BY 
+    ps.Score DESC, ps.CommentCount DESC, ps.LastEditDate DESC
+LIMIT 100;

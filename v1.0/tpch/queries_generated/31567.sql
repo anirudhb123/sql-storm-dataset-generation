@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal AND sh.level < 5
+),
+PartSupply AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS unique_customers,
+        ROW_NUMBER() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(od.total_revenue) AS avg_order_revenue,
+    COALESCE(SUM(ps.total_available_qty), 0) AS total_available_parts,
+    COALESCE(SUM(ps.average_supply_cost), 0.00) AS total_average_supplier_cost
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN OrderDetails od ON od.o_orderkey = s.s_suppkey
+LEFT JOIN orders o ON od.o_orderkey = o.o_orderkey
+WHERE r.r_name IS NOT NULL AND r.r_comment NOT LIKE '%test%'
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY avg_order_revenue DESC;

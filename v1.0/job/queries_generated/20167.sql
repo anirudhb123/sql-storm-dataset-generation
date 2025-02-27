@@ -1,0 +1,95 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy AS mh ON mh.movie_id = ml.movie_id
+), 
+
+actor_details AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name,
+        ak.md5sum,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        aka_name AS ak
+    LEFT JOIN 
+        cast_info AS ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.id, ak.name, ak.md5sum
+),
+
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword AS mk
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+filtered_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        mh.level
+    FROM 
+        movie_hierarchy AS mh
+    LEFT JOIN 
+        movie_keywords AS mk ON mh.movie_id = mk.movie_id
+    WHERE 
+        mh.production_year = (SELECT MAX(production_year) FROM aka_title WHERE kind_id = 1)
+        OR mh.level > 1
+)
+
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.keywords,
+    ad.name AS actor_name,
+    ad.movie_count,
+    COUNT(DISTINCT cc.id) AS complete_cast_count,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    AVG(COALESCE(mi.info LIKE '%award%', 1, 0)) AS award_info_ratio
+FROM 
+    filtered_movies AS fm
+LEFT JOIN 
+    complete_cast AS cc ON fm.movie_id = cc.movie_id
+JOIN 
+    cast_info AS ci ON fm.movie_id = ci.movie_id
+JOIN 
+    actor_details AS ad ON ci.person_id = ad.actor_id
+LEFT JOIN 
+    movie_companies AS mc ON fm.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_info AS mi ON fm.movie_id = mi.movie_id
+WHERE 
+    ad.movie_count > 5
+GROUP BY 
+    fm.movie_id, ad.name
+HAVING 
+    COUNT(DISTINCT cc.id) > 3
+ORDER BY 
+    fm.production_year DESC, COUNT(DISTINCT mc.company_id) DESC;

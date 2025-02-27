@@ -1,0 +1,65 @@
+
+WITH customer_sales AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ss.ss_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions
+    FROM
+        customer c
+    JOIN
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE
+        ss.ss_sold_date_sk BETWEEN 40000 AND 40030 -- sales between certain dates
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+top_customers AS (
+    SELECT
+        c.customer_id,
+        cs.total_sales,
+        cs.total_transactions,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM
+        customer_sales cs
+    JOIN
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+),
+average_sales AS (
+    SELECT
+        AVG(total_sales) AS avg_sales,
+        AVG(total_transactions) AS avg_transactions
+    FROM
+        customer_sales
+),
+sales_analysis AS (
+    SELECT
+        tc.customer_id,
+        tc.total_sales,
+        tc.total_transactions,
+        aa.avg_sales,
+        aa.avg_transactions,
+        (tc.total_sales - aa.avg_sales) / NULLIF(aa.avg_sales, 0) * 100 AS sales_deviation_percentage
+    FROM
+        top_customers tc,
+        average_sales aa
+)
+SELECT
+    sa.customer_id,
+    sa.total_sales,
+    sa.total_transactions,
+    sa.avg_sales,
+    sa.avg_transactions,
+    sa.sales_deviation_percentage,
+    CASE
+        WHEN sa.sales_deviation_percentage > 0 THEN 'Above Average'
+        WHEN sa.sales_deviation_percentage < 0 THEN 'Below Average'
+        ELSE 'Average'
+    END AS performance_category
+FROM
+    sales_analysis sa
+WHERE
+    sales_rank <= 10 -- Top 10 customers
+ORDER BY
+    sa.total_sales DESC;

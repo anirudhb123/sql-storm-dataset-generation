@@ -1,0 +1,94 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        pm.PostHistoryTypeId,
+        RANK() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS RankHistory,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE vt.Name = 'UpMod') AS UpVotes,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE vt.Name = 'DownMod') AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        PostHistoryTypes pm ON ph.PostHistoryTypeId = pm.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, pm.PostHistoryTypeId
+), FilteredPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.Score, 
+        rp.RankHistory,
+        COALESCE(rp.UpVotes - rp.DownVotes, 0) AS NetVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankHistory = 1 AND 
+        rp.Score > 0 
+), PostTags AS (
+    SELECT 
+        p.Id AS PostId, 
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON POSITION(t.TagName IN p.Tags) > 0 
+    GROUP BY 
+        p.Id
+), PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+), FinalResults AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.CreationDate,
+        fp.Score,
+        fp.NetVotes,
+        pt.TagList,
+        COALESCE(pc.CommentCount, 0) AS CommentCount
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        PostTags pt ON fp.PostId = pt.PostId
+    LEFT JOIN 
+        PostComments pc ON fp.PostId = pc.PostId
+)
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.CreationDate,
+    fr.Score,
+    fr.NetVotes,
+    fr.TagList,
+    fr.CommentCount,
+    CASE 
+        WHEN fr.NetVotes > 10 THEN 'Highly Voted'
+        WHEN fr.NetVotes BETWEEN 0 AND 10 THEN 'Moderately Voted'
+        ELSE 'Low Votes' 
+    END AS VoteCategory,
+    (SELECT COUNT(DISTINCT u.Id) 
+     FROM Users u 
+     WHERE u.Reputation > (SELECT AVG(Reputation) FROM Users)) AS AboveAverageUserCount
+FROM 
+    FinalResults fr
+WHERE 
+    fr.CommentCount > 5
+ORDER BY 
+    fr.Score DESC,
+    fr.CreationDate ASC
+LIMIT 50;

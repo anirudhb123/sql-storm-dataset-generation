@@ -1,0 +1,42 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        RANK() OVER (PARTITION BY m.production_year ORDER BY COALESCE(mk.keyword_count, 0) DESC) AS rank_by_keyword
+    FROM title m
+    LEFT JOIN (
+        SELECT 
+            mk.movie_id,
+            COUNT(*) AS keyword_count
+        FROM movie_keyword mk
+        GROUP BY mk.movie_id
+    ) mk ON m.id = mk.movie_id
+),
+ActorStats AS (
+    SELECT 
+        ai.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(COALESCE(CAST(SUBSTRING(ci.note, '\\d+') AS INTEGER), 0)) AS average_order
+    FROM cast_info ci
+    JOIN aka_name ai ON ci.person_id = ai.person_id
+    WHERE ai.name IS NOT NULL
+    GROUP BY ai.person_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    as.person_id,
+    as.movie_count,
+    as.average_order,
+    CASE 
+        WHEN as.movie_count > 5 THEN 'Veteran Actor'
+        WHEN as.movie_count > 0 THEN 'Emerging Talent'
+        ELSE 'Unknown Actor'
+    END AS actor_experience,
+    COALESCE(n.name, 'No Name') AS actor_name
+FROM RankedMovies rm
+LEFT JOIN ActorStats as ON as.movie_count > 0 AND rm.rank_by_keyword <= 10
+LEFT JOIN aka_name n ON n.person_id = as.person_id
+WHERE rm.production_year > 1990
+ORDER BY rm.production_year DESC, rm.title;

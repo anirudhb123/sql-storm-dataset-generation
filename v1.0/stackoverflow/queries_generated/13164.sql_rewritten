@@ -1,0 +1,53 @@
+WITH UserPostStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.CommentCount IS NOT NULL THEN p.CommentCount ELSE 0 END) AS TotalComments,
+        SUM(p.ViewCount) AS TotalViewCount,
+        AVG(v.Score) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagPostStatistics AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    GROUP BY 
+        t.Id, t.TagName
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.PostCount,
+    u.QuestionCount,
+    u.AnswerCount,
+    u.TotalComments,
+    u.TotalViewCount,
+    u.AverageScore,
+    t.TagId,
+    t.TagName,
+    t.PostCount AS TagPostCount,
+    t.QuestionCount AS TagQuestionCount,
+    t.AnswerCount AS TagAnswerCount
+FROM 
+    UserPostStatistics u
+JOIN 
+    TagPostStatistics t ON u.PostCount > 0 AND t.PostCount > 0
+ORDER BY 
+    u.TotalViewCount DESC, u.PostCount DESC;

@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes
+    FROM Users u
+    LEFT JOIN Comments c ON c.UserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id
+),
+BadgedUsers AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    ua.DisplayName AS UserName,
+    ua.CommentCount,
+    bu.BadgeCount,
+    bu.HighestBadgeClass,
+    CASE 
+        WHEN rp.Score > 10 THEN 'High Score'
+        WHEN rp.Score > 0 THEN 'Moderate Score'
+        ELSE 'Low Score' 
+    END AS ScoreCategory,
+    CASE 
+        WHEN bu.BadgeCount > 0 THEN 'Has Badges'
+        ELSE 'No Badges' 
+    END AS BadgeStatus
+FROM RankedPosts rp
+LEFT JOIN Users u ON u.Id = rp.Id
+LEFT JOIN UserActivity ua ON ua.UserId = u.Id
+LEFT JOIN BadgedUsers bu ON bu.UserId = u.Id
+WHERE rp.PostRank <= 5 
+AND (ua.UpVotes - ua.DownVotes) > 5
+ORDER BY rp.Score DESC, ua.CommentCount DESC
+UNION ALL
+SELECT 
+    NULL AS PostId,
+    'Summary' AS Title,
+    NULL AS Score,
+    NULL AS ViewCount,
+    NULL AS UserName,
+    COUNT(DISTINCT ua.UserId) AS UniqueUsers,
+    COUNT(DISTINCT bu.UserId) AS BadgeHolders,
+    AVG(ua.CommentCount) AS AvgComments,
+    SUM(rp.Score) AS TotalScore
+FROM RankedPosts rp
+LEFT JOIN UserActivity ua ON ua.UpVotes > 0 
+LEFT JOIN BadgedUsers bu ON bu.BadgeCount > 0
+WHERE rp.PostRank <= 5;

@@ -1,0 +1,50 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        c.kind AS company_type,
+        a.name AS actor_name,
+        p.info AS actor_info,
+        t.id AS title_id
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        person_info p ON a.person_id = p.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'Birth Year')
+    WHERE 
+        t.production_year >= 2000
+),
+KeywordDetails AS (
+    SELECT 
+        md.movie_title,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        MovieDetails md
+    JOIN 
+        movie_keyword mk ON md.title_id = mk.movie_id
+    GROUP BY 
+        md.movie_title
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.company_type,
+    md.actor_name,
+    k.keyword_count
+FROM 
+    MovieDetails md
+JOIN 
+    KeywordDetails k ON md.movie_title = k.movie_title
+ORDER BY 
+    md.production_year DESC, 
+    k.keyword_count DESC;

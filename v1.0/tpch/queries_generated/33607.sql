@@ -1,0 +1,29 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_orderdate, c.c_name, c.c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE c.c_acctbal IS NOT NULL
+),
+supply_info AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_availqty,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size > 10
+    GROUP BY ps.ps_partkey
+),
+nation_summary AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(s.s_suppkey) AS total_suppliers,
+           SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT n.n_name, n.total_suppliers, n.total_acctbal, s.total_availqty, s.total_supplycost,
+       oh.o_orderkey, oh.o_orderstatus, oh.o_orderdate, oh.c_name, oh.c_acctbal
+FROM nation_summary n
+LEFT JOIN supply_info s ON n.n_nationkey = (SELECT DISTINCT s_nationkey FROM supplier s2 WHERE s2.s_suppkey = s.ps_partkey)
+LEFT JOIN order_hierarchy oh ON n.total_suppliers = (SELECT COUNT(*) FROM supplier s3 WHERE s3.s_nationkey = n.n_nationkey)
+WHERE n.total_suppliers > 0 AND n.total_acctbal IS NOT NULL
+ORDER BY n.n_name, oh.o_orderdate;

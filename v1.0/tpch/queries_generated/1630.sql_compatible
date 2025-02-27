@@ -1,0 +1,74 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) as rnk
+    FROM 
+        part p
+    WHERE 
+        p.p_size > 10
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+SupplierPartInfo AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(ps.ps_partkey) AS part_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) as line_item_order
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+)
+SELECT 
+    r.p_partkey,
+    r.p_name,
+    r.p_brand,
+    r.p_retailprice,
+    co.total_spent,
+    CASE 
+        WHEN sp.part_count IS NULL THEN 'No Suppliers'
+        ELSE CAST(sp.part_count AS VARCHAR) || ' Suppliers'
+    END AS supplier_info,
+    COUNT(od.o_orderkey) FILTER (WHERE od.line_item_order = 1) AS first_line_items_count
+FROM 
+    RankedParts r
+LEFT JOIN 
+    CustomerOrders co ON co.total_spent > 1000
+LEFT JOIN 
+    SupplierPartInfo sp ON r.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sp.s_suppkey)
+LEFT JOIN 
+    OrderDetails od ON od.l_partkey = r.p_partkey
+WHERE 
+    r.rnk <= 5
+GROUP BY 
+    r.p_partkey, r.p_name, r.p_brand, r.p_retailprice, co.total_spent, sp.part_count
+ORDER BY 
+    r.p_retailprice DESC, co.total_spent ASC;

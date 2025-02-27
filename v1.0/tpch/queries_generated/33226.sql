@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000.00  -- Filtering suppliers with account balance above 5000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal  -- Hierarchical filtering based on account balance
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+HighRevenueOrders AS (
+    SELECT o.order_date, o.total_revenue,
+           RANK() OVER (PARTITION BY o.order_date ORDER BY o.total_revenue DESC) AS revenue_rank
+    FROM OrderDetails o
+    WHERE o.total_revenue > (SELECT AVG(total_revenue) FROM OrderDetails)
+),
+SupplierParts AS (
+    SELECT ps.ps_partkey, s.s_nationkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_nationkey
+),
+Nations AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT n.n_name AS nation_name, 
+       COUNT(DISTINCT sp.ps_partkey) AS parts_supplied,
+       AVG(sp.total_supply_cost) AS avg_supply_cost,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       SUM(COALESCE(hr.total_revenue, 0)) AS total_revenue
+FROM Nations n
+LEFT JOIN SupplierParts sp ON n.n_nationkey = sp.s_nationkey
+LEFT JOIN HighRevenueOrders hr ON hr.order_date = CURRENT_DATE
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN orders o ON sh.s_suppkey = o.o_custkey
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name
+ORDER BY total_revenue DESC, avg_supply_cost ASC;

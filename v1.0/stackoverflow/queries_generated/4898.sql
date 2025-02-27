@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) as rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+),
+MaxScores AS (
+    SELECT 
+        OwnerUserId,
+        MAX(Score) AS MaxScore
+    FROM 
+        Posts
+    GROUP BY 
+        OwnerUserId
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS EditDate,
+        ph.UserDisplayName,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5) -- Edit Title or Edit Body
+        AND ph.CreationDate >= DATEADD(MONTH, -3, GETDATE())
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(b.Class) AS HighestBadge
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COUNT(DISTINCT RP.PostId) AS PostCount,
+    COALESCE(SUM(CASE WHEN RP.rn = 1 THEN 1 ELSE 0 END), 0) AS TopPosts,
+    COALESCE(SUM(CASE WHEN RB.BadgeCount > 0 THEN 1 ELSE 0 END), 0) AS UsersWithBadges,
+    COALESCE(SUM(CASE WHEN re.PostId IS NOT NULL THEN 1 ELSE 0 END), 0) AS RecentEditsCount
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts RP ON u.Id = RP.OwnerUserId
+LEFT JOIN 
+    UserBadges RB ON u.Id = RB.UserId
+LEFT JOIN 
+    RecentEdits re ON u.Id = re.UserDisplayName
+JOIN 
+    MaxScores MS ON u.Id = MS.OwnerUserId AND MS.MaxScore > 0
+WHERE 
+    u.Reputation > 100
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(DISTINCT RP.PostId) > 5
+ORDER BY 
+    u.Reputation DESC;

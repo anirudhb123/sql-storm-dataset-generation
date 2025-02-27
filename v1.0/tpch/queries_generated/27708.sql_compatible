@@ -1,0 +1,29 @@
+
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(lp.l_discount) AS average_discount,
+    MAX(CASE WHEN c.c_mktsegment = 'BUILDING' THEN l.l_extendedprice ELSE 0 END) AS max_building_price,
+    STRING_AGG(DISTINCT SUBSTRING_INDEX(s.s_name, ' ', 1) ORDER BY s.s_name ASC) AS supplier_names
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_comment LIKE '%green%'
+    AND l.l_shipmode IN ('AIR', 'TRUCK')
+GROUP BY 
+    p.p_name
+HAVING 
+    SUM(l.l_quantity) > 500
+ORDER BY 
+    total_quantity DESC;

@@ -1,0 +1,61 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > (
+            SELECT AVG(s_acctbal) 
+            FROM supplier 
+            WHERE s_nationkey IN (
+                SELECT n.n_nationkey 
+                FROM nation n 
+                WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')
+            )
+        )
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+)
+SELECT 
+    cs.c_custkey,
+    cs.c_name,
+    COALESCE(SUM(rn.s_acctbal), 0) AS total_benefit,
+    COUNT(DISTINCT li.l_orderkey) AS unique_orders
+FROM 
+    CustomerOrders cs
+LEFT JOIN 
+    RankedSuppliers rn ON cs.c_custkey = rn.s_suppkey
+LEFT JOIN 
+    lineitem li ON li.l_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey = cs.c_custkey
+    )
+GROUP BY 
+    cs.c_custkey, cs.c_name
+HAVING 
+    COALESCE(SUM(rn.s_acctbal), 0) > 0 OR COUNT(DISTINCT li.l_orderkey) > 5
+ORDER BY 
+    total_benefit DESC, unique_orders ASC;

@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS t(TagName)
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, U.DisplayName
+),
+TopQuestions AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.Tags,
+        rp.OwnerDisplayName,
+        rp.UserPostRank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.UserPostRank = 1 -- Only latest question per user
+),
+QuestionStats AS (
+    SELECT 
+        q.PostId,
+        q.Title,
+        q.CreationDate,
+        q.ViewCount,
+        q.Score,
+        q.Tags,
+        q.OwnerDisplayName,
+        c.CommentCount,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes
+    FROM 
+        TopQuestions q
+    LEFT JOIN 
+        (SELECT 
+            PostId, COUNT(*) AS CommentCount 
+         FROM 
+            Comments 
+         GROUP BY 
+            PostId) c ON q.PostId = c.PostId
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM 
+            Votes 
+         GROUP BY 
+            PostId) v ON q.PostId = v.PostId
+)
+SELECT 
+    qs.Title,
+    qs.CreationDate,
+    qs.ViewCount,
+    qs.Score,
+    qs.Tags,
+    qs.OwnerDisplayName,
+    qs.CommentCount,
+    qs.UpVotes,
+    qs.DownVotes,
+    ROUND((qs.UpVotes::decimal / NULLIF(qs.UpVotes + qs.DownVotes, 0)) * 100, 2) AS UpvotePercentage
+FROM 
+    QuestionStats qs
+ORDER BY 
+    qs.Score DESC, qs.ViewCount DESC;

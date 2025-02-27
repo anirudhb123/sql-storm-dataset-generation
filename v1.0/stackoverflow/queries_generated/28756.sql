@@ -1,0 +1,86 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(V.CreationDate IS NOT NULL) AS UpvotesCount,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1 -- Questions
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId AND V.VoteTypeId = 2 -- Upvotes
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+), 
+
+TopReputationUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        QuestionCount, 
+        UpvotesCount
+    FROM 
+        RankedUsers
+    WHERE 
+        Rank <= 10
+),
+
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.Body,
+        P.CreationDate,
+        COALESCE(P.LastActivityDate, P.CreationDate) AS LastActivity,
+        P.ViewCount,
+        P.AnswerCount,
+        C.UserDisplayName AS LastCommenter,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        U.DisplayName AS OwnerName
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 -- Questions
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.CreationDate, P.ViewCount, P.AnswerCount, C.UserDisplayName, U.DisplayName
+), 
+
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Body, 
+        CreationDate, 
+        LastActivity, 
+        ViewCount, 
+        AnswerCount,
+        CommentCount,
+        ROW_NUMBER() OVER (ORDER BY ViewCount DESC) AS Rank
+    FROM 
+        PostAnalytics
+)
+
+SELECT 
+    U.DisplayName AS TopUser,
+    U.Reputation,
+    P.Title AS TopPostTitle,
+    P.ViewCount AS PostViews,
+    P.AnswerCount AS PostAnswers,
+    P.LastActivity AS PostLastActivity
+FROM 
+    TopReputationUsers U
+JOIN 
+    TopPosts P ON U.UserId = P.OwnerId
+WHERE 
+    P.Rank <= 5 -- Top 5 most viewed questions by top users
+ORDER BY 
+    U.Reputation DESC, 
+    P.ViewCount DESC;

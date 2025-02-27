@@ -1,0 +1,71 @@
+
+WITH RankedReturns AS (
+    SELECT
+        sr_returned_date_sk,
+        sr_item_sk,
+        sr_customer_sk,
+        sr_return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk, sr_customer_sk ORDER BY sr_returned_date_sk DESC) AS rn
+    FROM store_returns
+    WHERE sr_return_quantity > 0
+),
+CustomerWithReturns AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COUNT(rr.sr_item_sk) AS return_count,
+        SUM(rr.sr_return_quantity) AS total_returned_quantity,
+        AVG(rr.sr_return_quantity) AS avg_return_quantity
+    FROM customer c
+    LEFT JOIN RankedReturns rr ON c.c_customer_sk = rr.sr_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopReturningCustomers AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.return_count,
+        c.total_returned_quantity,
+        c.avg_return_quantity,
+        DENSE_RANK() OVER (ORDER BY c.total_returned_quantity DESC) AS rank
+    FROM CustomerWithReturns c
+    WHERE c.return_count > 0
+),
+ItemDetails AS (
+    SELECT
+        i.i_item_sk,
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_sales_quantity,
+        SUM(ws.ws_net_paid) AS total_sales_amount
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_item_id
+),
+TopItems AS (
+    SELECT
+        id.i_item_sk,
+        id.i_item_id,
+        id.total_sales_quantity,
+        id.total_sales_amount,
+        DENSE_RANK() OVER (ORDER BY id.total_sales_amount DESC) AS rank
+    FROM ItemDetails id
+)
+SELECT
+    c.c_customer_sk,
+    c.c_first_name,
+    c.c_last_name,
+    t.total_returned_quantity,
+    oi.i_item_id,
+    ti.total_sales_quantity,
+    CASE 
+        WHEN ti.total_sales_quantity IS NULL THEN 'No Sales'
+        ELSE 'Has Sales'
+    END AS sales_status,
+    NULLIF(ROUND(ti.total_sales_amount / NULLIF(ti.total_sales_quantity, 0), 2), 0) AS avg_sales_per_item
+FROM TopReturningCustomers t
+LEFT JOIN TopItems ti ON t.rank = ti.rank
+JOIN customer c ON c.c_customer_sk = t.c_customer_sk
+LEFT JOIN inventory inv ON ti.i_item_sk = inv.inv_item_sk AND inv.inv_quantity_on_hand > 0
+ORDER BY t.total_returned_quantity DESC, c.c_last_name, c.c_first_name;

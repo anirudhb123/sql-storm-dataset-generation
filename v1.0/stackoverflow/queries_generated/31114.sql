@@ -1,0 +1,69 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, CreationDate, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT p.Id, p.Title, p.ParentId, p.CreationDate, ph.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy ph ON p.ParentId = ph.Id
+),
+UserBadgeCounts AS (
+    SELECT UserId, COUNT(*) AS BadgeCount
+    FROM Badges
+    GROUP BY UserId
+),
+PostVotesSummary AS (
+    SELECT p.Id AS PostId, 
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+ActiveUserPostStats AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName, 
+           COUNT(DISTINCT p.Id) AS TotalPosts, 
+           COALESCE(bc.BadgeCount, 0) AS BadgeCount,
+           SUM(ps.UpVotes) AS TotalUpVotes,
+           SUM(ps.DownVotes) AS TotalDownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN UserBadgeCounts bc ON u.Id = bc.UserId
+    LEFT JOIN PostVotesSummary ps ON p.Id = ps.PostId
+    WHERE u.Reputation > (
+           SELECT AVG(Reputation) FROM Users
+           WHERE Reputation IS NOT NULL
+           )
+    GROUP BY u.Id, u.DisplayName
+),
+RecentEdits AS (
+    SELECT ph.PostId, 
+           ph.UserId, 
+           ph.CreationDate,
+           ROW_NUMBER() OVER(PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6)  -- Title, Body, Tags edits
+)
+
+SELECT 
+    u.DisplayName, 
+    u.TotalPosts,
+    u.BadgeCount, 
+    u.TotalUpVotes, 
+    u.TotalDownVotes,
+    COALESCE(r.MaxEditDate, 'No edits') AS LastEditDate,
+    (SELECT STRING_AGG(CONCAT_WS(',', ph.Title, ph.Level), '; ')
+     FROM RecursivePostHierarchy ph
+     WHERE ph.Id IN (SELECT DISTINCT p.Id FROM Posts p WHERE p.OwnerUserId = u.UserId)
+     GROUP BY u.UserId) AS RelatedPostTitles
+FROM ActiveUserPostStats u
+LEFT JOIN (
+    SELECT PostId, MAX(CreationDate) AS MaxEditDate
+    FROM RecentEdits
+    WHERE EditRank = 1
+    GROUP BY PostId
+) r ON r.PostId IN (SELECT DISTINCT p.Id FROM Posts p WHERE p.OwnerUserId = u.UserId)
+ORDER BY u.TotalPosts DESC, u.TotalUpVotes DESC;

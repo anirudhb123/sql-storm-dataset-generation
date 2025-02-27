@@ -1,0 +1,84 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+),
+BadgesCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges
+    FROM Badges b
+    GROUP BY b.UserId
+),
+UserActivityStats AS (
+    SELECT 
+        p.OwnerUserId,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(c.Score, 0)) AS TotalComments
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.UserId AS CloserId,
+        COUNT(DISTINCT ph.PostId) AS TotalClosedPosts,
+        STRING_AGG(DISTINCT CASE WHEN ph.Comment IS NOT NULL THEN ph.Comment ELSE 'No Comment' END, ', ') AS CloseComments
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10  -- Post Closed
+    GROUP BY ph.UserId
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.Reputation,
+        bc.TotalBadges,
+        uas.TotalViews,
+        uas.PostCount,
+        uas.TotalComments,
+        cp.TotalClosedPosts,
+        cp.CloseComments
+    FROM UserReputation ur
+    LEFT JOIN BadgesCounts bc ON ur.UserId = bc.UserId
+    LEFT JOIN UserActivityStats uas ON ur.UserId = uas.OwnerUserId
+    LEFT JOIN ClosedPosts cp ON ur.UserId = cp.CloserId
+    WHERE ur.Reputation > 1000 -- Arbitrary reputation threshold to filter
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.TotalBadges,
+    U.TotalViews,
+    U.PostCount,
+    U.TotalComments,
+    COALESCE(U.TotalClosedPosts, 0) AS ClosedPosts,
+    U.CloseComments,
+    (CASE 
+        WHEN U.TotalComments > 10 THEN 'Active Commenter'
+        WHEN U.TotalClosedPosts > 0 THEN 'Moderative Presence'
+        ELSE 'Regular User'
+     END) AS UserType
+FROM TopUsers U
+WHERE U.ReputationRank <= 50 -- Top 50 users
+ORDER BY U.Reputation DESC, U.TotalViews DESC;
+
+-- Demonstrating usage of UNION to combine results of different user types
+UNION ALL
+
+SELECT 
+    'Statistics Summary' AS DisplayName,
+    AVG(u.Reputation) AS AverageReputation,
+    SUM(bc.TotalBadges) AS TotalBadgesAcrossUsers,
+    SUM(uas.TotalViews) AS OverallViews,
+    SUM(uas.PostCount) AS OverallPosts,
+    SUM(uas.TotalComments) AS OverallComments,
+    COUNT(DISTINCT cp.CloserId) AS UniqueClosers
+FROM Users u
+JOIN BadgesCounts bc ON u.Id = bc.UserId
+JOIN UserActivityStats uas ON u.Id = uas.OwnerUserId
+LEFT JOIN ClosedPosts cp ON u.Id = cp.CloserId;

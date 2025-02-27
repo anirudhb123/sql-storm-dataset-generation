@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        s.ss_sold_date_sk,
+        s.ss_ticket_number,
+        s.ss_quantity,
+        s.ss_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY s.ss_sales_price DESC) AS sales_rank,
+        SUM(s.ss_quantity) OVER (PARTITION BY c.c_customer_id) AS total_quantity
+    FROM 
+        store_sales s
+    JOIN 
+        customer c ON s.ss_customer_sk = c.c_customer_sk
+    WHERE 
+        s.ss_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    AND 
+        c.c_current_cdemo_sk IN (
+            SELECT cd_demo_sk FROM customer_demographics 
+            WHERE cd_marital_status = 'S' AND cd_gender = 'F'
+        )
+),
+
+GoodCustomers AS (
+    SELECT 
+        r.c_customer_id,
+        r.c_first_name,
+        r.c_last_name,
+        r.total_quantity,
+        CASE 
+            WHEN r.total_quantity > 20 THEN 'Frequent Buyer' 
+            ELSE 'Occasional Buyer' 
+        END AS buyer_category
+    FROM 
+        RankedSales r
+    WHERE 
+        r.sales_rank = 1
+)
+
+SELECT 
+    gc.c_customer_id,
+    gc.c_first_name,
+    gc.c_last_name,
+    gc.buyer_category,
+    SUM(ws.ws_net_profit) AS total_profit,
+    COUNT(DISTINCT ws.ws_order_number) AS num_orders
+FROM 
+    GoodCustomers gc
+LEFT JOIN 
+    web_sales ws ON gc.c_customer_id = ws.ws_bill_customer_id
+WHERE 
+    ws.ws_net_profit IS NOT NULL
+GROUP BY 
+    gc.c_customer_id, gc.c_first_name, gc.c_last_name, gc.buyer_category
+HAVING 
+    total_profit > 1000 OR buyer_category = 'Frequent Buyer'
+ORDER BY 
+    total_profit DESC, gc.c_last_name ASC, gc.c_first_name ASC;

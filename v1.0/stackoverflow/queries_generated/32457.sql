@@ -1,0 +1,99 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        1 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        rp.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        Posts rp ON p.ParentId = rp.Id
+    WHERE 
+        p.PostTypeId = 2 -- Answers only
+),
+AggregatedData AS (
+    SELECT 
+        up.Id AS UserId,
+        up.DisplayName,
+        up.Reputation,
+        COUNT(DISTINCT r.PostId) AS QuestionCount,
+        SUM(r.ViewCount) AS TotalViews,
+        AVG(r.Score) AS AvgScore,
+        MAX(r.CreationDate) AS LastQuestionDate
+    FROM 
+        Users up
+    LEFT JOIN 
+        RecursivePosts r ON up.Id = r.OwnerUserId
+    GROUP BY 
+        up.Id, up.DisplayName, up.Reputation
+),
+FrequentlyAnsweredQuestions AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(a.Id) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, p.Title
+    HAVING 
+        COUNT(a.Id) > 0
+),
+PerformingUsers AS (
+    SELECT 
+        ad.UserId,
+        ad.DisplayName,
+        ad.Reputation,
+        ad.QuestionCount,
+        ad.TotalViews,
+        ad.AvgScore,
+        ad.LastQuestionDate,
+        COALESCE(faq.AnswerCount, 0) AS AnswersProvided
+    FROM 
+        AggregatedData ad
+    LEFT JOIN 
+        FrequentlyAnsweredQuestions faq ON ad.QuestionCount > 10 AND faq.Id = ad.UserId
+    WHERE 
+        ad.Reputation > 100 -- Only reputable users
+)
+
+SELECT 
+    pu.DisplayName,
+    pu.Reputation,
+    pu.QuestionCount,
+    pu.TotalViews,
+    pu.AvgScore,
+    pu.LastQuestionDate,
+    pu.AnswersProvided,
+    COALESCE(pht.Name, 'Unknown') AS PostHistoryType
+FROM 
+    PerformingUsers pu
+LEFT JOIN 
+    PostHistory ph ON ph.UserId = pu.UserId
+LEFT JOIN 
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+WHERE 
+    pu.QuestionCount > 5 -- Users with more than 5 questions
+ORDER BY 
+    pu.TotalViews DESC, pu.Reputation ASC;
+

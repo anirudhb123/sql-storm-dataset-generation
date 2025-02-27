@@ -1,0 +1,26 @@
+
+SELECT 
+    CA.ca_city, 
+    CA.ca_state, 
+    COUNT(DISTINCT C.c_customer_id) AS customer_count, 
+    SUM(CC.cc_employees) AS total_call_center_employees,
+    STRING_AGG(DISTINCT CD.cd_gender) AS genders,
+    STRING_AGG(DISTINCT CD.cd_marital_status) AS marital_statuses,
+    STRING_AGG(DISTINCT CD.cd_education_status) AS education_levels
+FROM 
+    customer_address CA
+JOIN 
+    customer C ON CA.ca_address_sk = C.c_current_addr_sk
+JOIN 
+    customer_demographics CD ON C.c_current_cdemo_sk = CD.cd_demo_sk
+JOIN 
+    call_center CC ON CC.cc_city = CA.ca_city AND CC.cc_state = CA.ca_state
+WHERE 
+    CA.ca_country = 'USA'
+GROUP BY 
+    CA.ca_city, CA.ca_state
+HAVING 
+    COUNT(DISTINCT C.c_customer_id) > 10
+ORDER BY 
+    customer_count DESC
+LIMIT 100;

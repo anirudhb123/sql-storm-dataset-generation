@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_trend AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS sale_rank
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+        AND ws_sold_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_sold_date_sk, 
+        ws_item_sk
+    HAVING 
+        SUM(ws_quantity) > 0
+),
+customer_stats AS (
+    SELECT
+        c.c_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        AVG(ws_net_profit) AS avg_net_profit,
+        MAX(ws_sales_price) AS max_sales_price,
+        COUNT(DISTINCT s_store_sk) AS store_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        store s ON ws.ws_warehouse_sk = s.s_store_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+high_value_customers AS (
+    SELECT 
+        c_customer_sk,
+        order_count, 
+        avg_net_profit, 
+        max_sales_price, 
+        store_count
+    FROM 
+        customer_stats
+    WHERE 
+        avg_net_profit > 1000
+)
+SELECT 
+    ca.city,
+    SUM(st.total_quantity) AS total_sales,
+    COUNT(DISTINCT hvc.c_customer_sk) AS high_value_customer_count,
+    AVG(hvc.avg_net_profit) AS avg_profit_high_value_customers
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    sales_trend st ON c.c_customer_sk = st.ws_item_sk
+LEFT JOIN 
+    high_value_customers hvc ON c.c_customer_sk = hvc.c_customer_sk
+WHERE 
+    ca.ca_state = 'CA'
+GROUP BY 
+    ca.city
+HAVING 
+    total_sales > 5000
+ORDER BY 
+    total_sales DESC;

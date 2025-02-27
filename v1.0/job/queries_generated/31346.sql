@@ -1,0 +1,68 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        ma.title,
+        ma.production_year,
+        ma.kind_id,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title ma ON ml.movie_id = ma.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    mv.title AS movie_title,
+    mv.production_year,
+    COALESCE(cn.name, 'Unknown Company') AS company_name,
+    COUNT(ci.person_id) AS actor_count,
+    AVG(yr.rev_year) AS avg_revenue_year,
+    STRING_AGG(DISTINCT akc.name, ', ') AS all_kinds
+FROM 
+    MovieHierarchy mv
+LEFT JOIN 
+    movie_companies mc ON mv.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    cast_info ci ON mv.movie_id = ci.movie_id
+LEFT JOIN 
+    (SELECT 
+        movie_id,
+        EXTRACT(YEAR FROM MAX(mvi.info)) AS rev_year
+    FROM 
+        movie_info mvi
+    WHERE 
+        mvi.info_type_id = (SELECT id FROM info_type WHERE info = 'Revenue')
+    GROUP BY 
+        movie_id) yr ON mv.movie_id = yr.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mv.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    aka_name akc ON ci.person_id = akc.person_id
+WHERE 
+    mv.production_year >= 2000
+AND 
+    (cn.country_code IS NULL OR cn.country_code IN ('USA', 'UK'))
+GROUP BY 
+    mv.movie_id, mv.title, mv.production_year, cn.name
+HAVING 
+    COUNT(ci.person_id) > 0
+ORDER BY 
+    avg_revenue_year DESC, actor_count DESC;

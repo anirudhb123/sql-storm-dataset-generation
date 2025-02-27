@@ -1,0 +1,82 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id,
+        ARRAY[a.name] AS actor_names,
+        1 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        c.movie_id = (SELECT id FROM title WHERE title = 'The Godfather' LIMIT 1)
+    
+    UNION ALL
+    
+    SELECT 
+        c.person_id,
+        actor_names || a.name,
+        level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        ActorHierarchy ah ON c.movie_id IN (
+            SELECT 
+                linked_movie_id 
+            FROM 
+                movie_link 
+            WHERE 
+                movie_id = ah.person_id
+        )
+    WHERE 
+        level < 5
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        (SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = m.id) AS cast_count
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+)
+SELECT 
+    mi.title,
+    mi.production_year,
+    ah.actor_names,
+    mi.cast_count,
+    mi.keywords
+FROM 
+    MovieInfo mi
+LEFT JOIN 
+    ActorHierarchy ah ON ah.person_id IN (
+        SELECT 
+            c.person_id 
+        FROM 
+            cast_info c 
+        WHERE 
+            c.movie_id = mi.movie_id
+    )
+WHERE 
+    mi.production_year > 2000
+    AND EXISTS (
+        SELECT 1
+        FROM 
+            movie_info i 
+        WHERE 
+            i.movie_id = mi.movie_id
+            AND i.info_type_id = (SELECT id FROM info_type WHERE info = 'Launch')
+            AND i.info IS NOT NULL
+    )
+ORDER BY 
+    mi.production_year DESC, 
+    mi.cast_count DESC
+LIMIT 10;

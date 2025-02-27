@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.warehouse_sk,
+        ws.item_sk,
+        SUM(ws.quantity) AS total_quantity,
+        SUM(ws.ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.warehouse_sk ORDER BY SUM(ws.ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 
+        AND dd.d_moy BETWEEN 1 AND 6
+    GROUP BY 
+        ws.warehouse_sk, 
+        ws.item_sk
+),
+TopItems AS (
+    SELECT 
+        warehouse_sk,
+        item_sk,
+        total_quantity,
+        total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 5
+),
+CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.return_quantity) AS total_returns,
+        SUM(wr.return_amt_inc_tax) AS total_return_value,
+        COUNT(DISTINCT wr.order_number) AS return_count
+    FROM 
+        web_returns wr
+    JOIN 
+        Customer c ON wr.returning_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_current_addr_sk IS NOT NULL
+    GROUP BY 
+        wr.returning_customer_sk
+)
+SELECT
+    ca.ca_city,
+    ca.ca_state,
+    COALESCE(TR.total_sales, 0) AS total_sales,
+    COALESCE(CR.total_return_value, 0) AS total_return_value,
+    COALESCE(TR.total_sales, 0) - COALESCE(CR.total_return_value, 0) AS net_sales
+FROM 
+    customer_address ca
+LEFT JOIN 
+    TopItems TR ON ca.ca_address_sk = TR.warehouse_sk
+LEFT JOIN 
+    CustomerReturns CR ON CR.returning_customer_sk = TR.item_sk
+WHERE 
+    ca.ca_country = 'US'
+ORDER BY 
+    net_sales DESC
+FETCH FIRST 10 ROWS ONLY;

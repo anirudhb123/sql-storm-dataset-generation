@@ -1,0 +1,64 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT c.kind) AS company_types,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        COUNT(DISTINCT i.info_type_id) AS total_info_types
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type c ON mc.company_type_id = c.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id AND ci.movie_id = t.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        info_type i ON mi.info_type_id = i.id
+    WHERE 
+        t.production_year >= 1990
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+SortedMovies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        keywords,
+        company_types,
+        total_cast,
+        total_info_types,
+        RANK() OVER (ORDER BY production_year DESC, total_cast DESC) AS movie_rank
+    FROM 
+        MovieDetails
+)
+SELECT 
+    sm.movie_id,
+    sm.movie_title,
+    sm.production_year,
+    sm.keywords,
+    sm.company_types,
+    sm.total_cast,
+    sm.total_info_types,
+    r.role AS main_role
+FROM 
+    SortedMovies sm
+LEFT JOIN 
+    cast_info ci ON sm.movie_id = ci.movie_id
+LEFT JOIN 
+    role_type r ON ci.role_id = r.id
+WHERE 
+    sm.total_cast > 5 AND sm.movie_rank <= 50
+ORDER BY 
+    sm.movie_rank;

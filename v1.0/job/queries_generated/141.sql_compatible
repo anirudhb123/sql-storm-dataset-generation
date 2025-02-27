@@ -1,0 +1,49 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        title.title,
+        title.production_year,
+        COUNT(DISTINCT cast_info.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY title.production_year ORDER BY COUNT(DISTINCT cast_info.person_id) DESC) AS rank
+    FROM 
+        title
+    LEFT JOIN 
+        cast_info ON title.id = cast_info.movie_id
+    GROUP BY 
+        title.title, title.production_year
+),
+MovieDetails AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        mi.text AS movie_info,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_info mi ON rm.title = mi.info
+    LEFT JOIN 
+        movie_keyword mk ON rm.title = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    WHERE 
+        rm.rank <= 5
+    GROUP BY 
+        rm.title, rm.production_year, rm.cast_count, mi.text
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.cast_count,
+    COALESCE(md.movie_info, 'No Info') AS movie_info,
+    CASE 
+        WHEN md.cast_count > 10 THEN 'Large Cast'
+        WHEN md.cast_count BETWEEN 5 AND 10 THEN 'Moderate Cast'
+        ELSE 'Small Cast'
+    END AS cast_size,
+    md.keywords
+FROM 
+    MovieDetails md
+ORDER BY 
+    md.production_year DESC, md.cast_count DESC;

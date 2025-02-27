@@ -1,0 +1,26 @@
+
+WITH customer_info AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_income_band AS income_band, 
+           ca.ca_city, ca.ca_state, SUM(ws.ws_net_paid) AS total_sales
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE cd.cd_marital_status = 'M' AND cd.cd_credit_rating IS NOT NULL
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_income_band, ca.ca_city, ca.ca_state
+),
+sales_by_category AS (
+    SELECT i.i_category, SUM(ws.ws_net_sales) AS total_sales
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_category
+)
+SELECT ci.c_first_name, ci.c_last_name, ci.ca_city, ci.ca_state, ci.total_sales,
+       COALESCE(sb.total_sales, 0) AS sales_by_category
+FROM customer_info ci
+LEFT JOIN sales_by_category sb ON ci.income_band = sb.i_category -- simulate a correlation
+WHERE ci.total_sales > (
+    SELECT AVG(total_sales) FROM customer_info
+) OR ci.ca_state IS NULL
+ORDER BY ci.total_sales DESC
+LIMIT 100;

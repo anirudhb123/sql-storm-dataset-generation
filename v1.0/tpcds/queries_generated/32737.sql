@@ -1,0 +1,42 @@
+
+WITH RECURSIVE inventory_cte AS (
+    SELECT inv_date_sk, inv_item_sk, inv_warehouse_sk, inv_quantity_on_hand, 1 as level
+    FROM inventory
+    WHERE inv_quantity_on_hand > 100
+    UNION ALL
+    SELECT i.inv_date_sk, i.inv_item_sk, i.inv_warehouse_sk, i.inv_quantity_on_hand, cte.level + 1
+    FROM inventory i
+    JOIN inventory_cte cte ON i.inv_item_sk = cte.inv_item_sk AND i.inv_warehouse_sk = cte.inv_warehouse_sk
+    WHERE i.inv_quantity_on_hand > cte.inv_quantity_on_hand
+),
+sales_summary AS (
+    SELECT ws_item_sk, SUM(ws_sales_price) AS total_sales, COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+customer_info AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd_cd.purchase_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    wa.w_warehouse_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ss.total_sales,
+    ss.order_count,
+    COALESCE(cte.inv_quantity_on_hand, 0) AS inventory,
+    CASE 
+        WHEN ci.cd_gender = 'F' THEN 'Female'
+        WHEN ci.cd_gender = 'M' THEN 'Male'
+        ELSE 'Unknown'
+    END AS gender_description
+FROM sales_summary ss
+LEFT JOIN item i ON ss.ws_item_sk = i.i_item_sk
+LEFT JOIN warehouse wa ON i.i_item_sk = wa.w_warehouse_sk
+LEFT JOIN customer_info ci ON wa.w_warehouse_sk = ci.c_customer_sk
+LEFT JOIN inventory_cte cte ON i.i_item_sk = cte.inv_item_sk
+WHERE ss.total_sales > 1000 AND (ci.cd_marital_status IS NULL OR ci.cd_marital_status = 'S')
+ORDER BY ss.total_sales DESC
+LIMIT 100;

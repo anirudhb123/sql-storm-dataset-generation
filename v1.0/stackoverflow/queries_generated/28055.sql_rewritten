@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        (SELECT COUNT(*) 
+         FROM Votes v 
+         WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) 
+         FROM Votes v 
+         WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVotes,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopQuestions AS (
+    SELECT 
+        rp.*,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostsTags pt ON rp.Id = pt.PostId
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    WHERE 
+        rp.PostRank <= 10
+    GROUP BY 
+        rp.Id
+),
+PostInteractions AS (
+    SELECT 
+        q.Id AS QuestionId,
+        q.Title AS QuestionTitle,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN hl.PostId = q.Id THEN 1 ELSE 0 END) AS HasLinksToOtherPosts
+    FROM 
+        TopQuestions q
+    LEFT JOIN 
+        Comments c ON q.Id = c.PostId
+    LEFT JOIN 
+        PostLinks hl ON hl.PostId = q.Id
+    GROUP BY 
+        q.Id, q.Title
+)
+SELECT 
+    tq.Id,
+    tq.Title,
+    tq.Body,
+    tq.CreationDate,
+    tq.ViewCount,
+    tq.Score,
+    tq.OwnerDisplayName,
+    tq.OwnerReputation,
+    tq.UpVotes,
+    tq.DownVotes,
+    tq.Tags,
+    pi.CommentCount,
+    pi.HasLinksToOtherPosts
+FROM 
+    TopQuestions tq
+JOIN 
+    PostInteractions pi ON tq.Id = pi.QuestionId
+ORDER BY 
+    tq.Score DESC, 
+    tq.ViewCount DESC;

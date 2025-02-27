@@ -1,0 +1,57 @@
+
+WITH CustomerAddressDetails AS (
+    SELECT 
+        ca.ca_address_sk,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        STRING_AGG(CONCAT(c.c_first_name, ' ', c.c_last_name), ', ' ORDER BY c.c_last_name) AS customer_names
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        ca.ca_address_sk, ca.ca_street_number, ca.ca_street_name, ca.ca_street_type, ca.ca_city, ca.ca_state, ca.ca_zip
+),
+SalesSummary AS (
+    SELECT 
+        ws.web_site_sk,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk
+),
+AggregateDetails AS (
+    SELECT 
+        cad.full_address,
+        cad.ca_city,
+        cad.ca_state,
+        cad.ca_zip,
+        ss.total_orders,
+        ss.total_sales
+    FROM 
+        CustomerAddressDetails cad
+    LEFT JOIN 
+        SalesSummary ss ON cad.ca_address_sk = ss.web_site_sk
+)
+SELECT 
+    full_address,
+    ca_city,
+    ca_state,
+    ca_zip,
+    total_orders,
+    total_sales,
+    CASE 
+        WHEN total_sales IS NULL THEN 'No Sales'
+        WHEN total_sales < 1000 THEN 'Low Sales'
+        WHEN total_sales BETWEEN 1000 AND 5000 THEN 'Moderate Sales'
+        ELSE 'High Sales'
+    END AS sales_category
+FROM 
+    AggregateDetails
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

@@ -1,0 +1,35 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT i.item_sk, i.item_desc, i.brand_id, 1 AS level
+    FROM item i
+    WHERE i.brand_id IS NOT NULL
+    UNION ALL
+    SELECT i.item_sk, CONCAT(ih.item_desc, ' -> ', i.item_desc), i.brand_id, ih.level + 1
+    FROM item i
+    JOIN ItemHierarchy ih ON i.brand_id = ih.brand_id
+)
+SELECT 
+    ca.country AS address_country,
+    d.d_year AS year,
+    SUM(ws.ws_quantity) AS total_quantity_sold,
+    AVG(ws.ws_net_profit) AS avg_net_profit,
+    ROW_NUMBER() OVER (PARTITION BY ca.country ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk 
+LEFT JOIN 
+    ItemHierarchy ih ON ws.ws_item_sk = ih.item_sk
+WHERE 
+    d.d_year IN (2021, 2022)
+    AND (ws.ws_net_profit > 0 OR ws.ws_quantity > 0)
+GROUP BY 
+    ca.country, d.d_year
+HAVING 
+    SUM(ws.ws_quantity) > 100
+ORDER BY 
+    address_country, year;

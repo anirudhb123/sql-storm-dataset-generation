@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) as rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+), RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, 
+           p.p_partkey, p.p_name,
+           SUM(ps.ps_supplycost) AS total_cost,
+           COUNT(*) AS supplier_count,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_supplycost) DESC) as rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+    GROUP BY s.s_suppkey, s.s_name, p.p_partkey, p.p_name
+), CustomerOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, c.c_custkey, 
+           c.c_name, c.c_mktsegment, 
+           RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_orderdate DESC) as segment_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+), OrderLineDetails AS (
+    SELECT o.o_orderkey, l.l_linenumber, 
+           l.l_extendedprice, l.l_discount, 
+           (l.l_extendedprice * (1 - l.l_discount)) AS net_price
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+), FinalResults AS (
+    SELECT cs.c_name, o.order_key, 
+           SUM(OLD.net_price) as total_order_value, 
+           AVG(OLD.net_price) as avg_line_item_value,
+           COALESCE(SC.total_cost, 0) as total_supply_cost
+    FROM CustomerOrders cs
+    JOIN OrderLineDetails OLD ON cs.o_orderkey = OLD.o_orderkey
+    LEFT JOIN RankedSuppliers SC ON OLD.l_linenumber = SC.rn
+    WHERE cs.segment_rank <= 5
+    GROUP BY cs.c_name, o.o_orderkey, SC.total_cost
+)
+SELECT fr.c_name, 
+       fr.total_order_value, 
+       fr.avg_line_item_value,
+       fr.total_supply_cost
+FROM FinalResults fr
+WHERE fr.total_order_value > (SELECT AVG(total_order_value) 
+                               FROM FinalResults)
+ORDER BY fr.total_order_value DESC;

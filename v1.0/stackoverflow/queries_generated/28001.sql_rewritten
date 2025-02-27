@@ -1,0 +1,59 @@
+WITH TagAnalysis AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        COUNT(DISTINCT T.TagName) AS UniqueTagCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS TagsList,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        P.CreationDate,
+        P.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName
+    FROM
+        Posts P
+    LEFT JOIN
+        UNNEST(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')) AS T(TagName) ON TRUE
+    LEFT JOIN
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN
+        Users U ON P.OwnerUserId = U.Id
+    WHERE
+        P.PostTypeId = 1  
+    GROUP BY
+        P.Id, P.Title, P.CreationDate, P.OwnerUserId, U.DisplayName
+),
+PostEngagement AS (
+    SELECT
+        PostId,
+        SUM(CommentCount) AS TotalComments,
+        SUM(UpVoteCount) AS TotalUpVotes,
+        SUM(DownVoteCount) AS TotalDownVotes,
+        UniqueTagCount,
+        TagsList,
+        MIN(CreationDate) AS FirstPosted
+    FROM
+        TagAnalysis
+    GROUP BY
+        PostId, UniqueTagCount, TagsList
+)
+SELECT
+    PE.PostId,
+    TA.Title,
+    PE.TotalComments,
+    PE.TotalUpVotes,
+    PE.TotalDownVotes,
+    PE.UniqueTagCount,
+    PE.TagsList,
+    TA.FirstPosted,
+    EXTRACT(EPOCH FROM cast('2024-10-01 12:34:56' as timestamp) - TA.CreationDate) / 86400 AS DaysSinceCreation
+FROM
+    PostEngagement PE
+JOIN
+    TagAnalysis TA ON PE.PostId = TA.PostId
+ORDER BY
+    PE.TotalUpVotes DESC,
+    PE.TotalComments DESC,
+    PE.UniqueTagCount DESC;

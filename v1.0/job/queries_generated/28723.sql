@@ -1,0 +1,49 @@
+WITH actor_movies AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER(PARTITION BY c.person_id ORDER BY t.production_year DESC) AS movie_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+actor_movie_counts AS (
+    SELECT
+        person_id,
+        COUNT(*) AS movie_count
+    FROM 
+        actor_movies
+    GROUP BY 
+        person_id
+),
+top_actors AS (
+    SELECT 
+        a.person_id,
+        ak.name AS name,
+        amc.movie_count
+    FROM 
+        actor_movie_counts amc
+    JOIN 
+        aka_name ak ON amc.person_id = ak.person_id
+    WHERE 
+        amc.movie_count > 5  -- Arbitrary threshold for top actors
+)
+SELECT 
+    ta.name AS Top_Actor,
+    STRING_AGG(DISTINCT am.movie_title, ', ') AS Movies,
+    COUNT(DISTINCT am.production_year) AS Distinct_Years_Active
+FROM 
+    top_actors ta
+JOIN 
+    actor_movies am ON ta.person_id = am.person_id
+GROUP BY 
+    ta.name
+ORDER BY 
+    Distinct_Years_Active DESC;

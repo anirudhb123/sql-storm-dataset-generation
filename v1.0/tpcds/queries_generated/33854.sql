@@ -1,0 +1,58 @@
+
+WITH RECURSIVE DateRange AS (
+    SELECT d_date_sk, d_date, d_year
+    FROM date_dim
+    WHERE d_date >= '2023-01-01'
+    UNION ALL
+    SELECT d.d_date_sk, d.d_date, d.d_year
+    FROM date_dim d
+    JOIN DateRange dr ON d.d_date = dr.d_date + INTERVAL '1 day'
+),
+CustomerIncome AS (
+    SELECT 
+        cd.cd_demo_sk,
+        SUM(hd.hd_income_band_sk) AS total_income_band,
+        COUNT(*) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE cd.cd_marital_status = 'M'
+    GROUP BY cd.cd_demo_sk
+),
+SalesDetail AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    GROUP BY ws.ws_sold_date_sk, ws.ws_item_sk
+),
+ReturnDetail AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM store_returns
+    GROUP BY sr_item_sk
+)
+SELECT 
+    d.d_date,
+    COALESCE(SD.total_sales, 0) AS total_sales,
+    COALESCE(RD.total_returned, 0) AS total_returns,
+    CI.total_income_band,
+    CI.customer_count,
+    CI.avg_purchase_estimate,
+    DENSE_RANK() OVER (PARTITION BY d.d_year ORDER BY COALESCE(SD.total_sales, 0) DESC) AS sales_rank
+FROM DateRange d
+LEFT JOIN SalesDetail SD ON d.d_date_sk = SD.ws_sold_date_sk
+LEFT JOIN ReturnDetail RD ON SD.ws_item_sk = RD.sr_item_sk
+LEFT JOIN CustomerIncome CI ON CI.cd_demo_sk = (
+    SELECT cd.cd_demo_sk
+    FROM customer cd
+    WHERE cd.c_current_addr_sk IS NOT NULL
+    ORDER BY RANDOM() LIMIT 1
+)
+WHERE d.d_year = (SELECT MAX(d_year) FROM DateRange)
+ORDER BY d.d_date;
+

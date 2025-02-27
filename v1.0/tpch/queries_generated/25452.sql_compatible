@@ -1,0 +1,41 @@
+
+WITH FilteredParts AS (
+    SELECT p_partkey, 
+           p_name, 
+           p_type, 
+           p_size, 
+           REPLACE(UPPER(p_container), ' ', '_') AS formatted_container,
+           p_retailprice
+    FROM part
+    WHERE p_size BETWEEN 10 AND 20
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_address, 
+           s.nationkey,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_address, s.nationkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.custkey, c.c_name
+)
+SELECT fp.p_partkey, 
+       fp.p_name, 
+       fp.formatted_container, 
+       sd.s_name AS supplier_name, 
+       cd.c_name AS customer_name, 
+       cd.order_count,
+       fp.p_retailprice
+FROM FilteredParts fp
+JOIN SupplierDetails sd ON sd.part_count > 5
+JOIN CustomerOrders cd ON cd.order_count > 2
+WHERE fp.p_retailprice > 100.00
+ORDER BY fp.p_partkey, sd.s_name, cd.order_count DESC;

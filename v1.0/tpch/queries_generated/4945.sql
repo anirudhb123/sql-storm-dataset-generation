@@ -1,0 +1,62 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        AVG(ps.ps_availqty) AS avg_avail_qty
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        SUM(l.l_quantity) AS total_quantity
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    co.c_custkey,
+    co.c_name,
+    co.total_orders,
+    co.total_spent,
+    COALESCE(ss.total_parts, 0) AS total_parts,
+    COALESCE(ss.total_supplycost, 0) AS total_supplycost,
+    COALESCE(ss.avg_avail_qty, 0) AS avg_avail_qty,
+    ls.net_revenue,
+    ls.total_quantity
+FROM 
+    CustomerOrderStats co
+LEFT JOIN 
+    SupplierStats ss ON co.total_orders > 0 
+    AND co.total_orders = (SELECT COUNT(*) FROM orders WHERE o_custkey = co.c_custkey)
+LEFT JOIN 
+    LineItemSummary ls ON co.total_orders > 0 
+    AND ls.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+WHERE 
+    co.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderStats)
+ORDER BY 
+    co.total_spent DESC
+LIMIT 100;

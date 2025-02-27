@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS rank
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = 1  
+),
+ActorsInMovies AS (
+    SELECT 
+        a.name AS actor_name,
+        c.movie_id,
+        COUNT(c.id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        a.name, c.movie_id
+),
+ActorAwards AS (
+    SELECT 
+        a.name AS actor_name,
+        a.movie_id,
+        COALESCE(SUM(m.info = 'Best Actor'), 0) AS awards_count
+    FROM 
+        ActorsInMovies a
+    LEFT JOIN 
+        movie_info m ON a.movie_id = m.movie_id AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'Award')
+    GROUP BY 
+        a.name, a.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(a.role_count, 0) AS actor_count,
+        COALESCE(a.awards_count, 0) AS awards_count
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        (SELECT 
+            actor_name,
+            movie_id,
+            role_count,
+            awards_count
+         FROM 
+            ActorsInMovies i
+         LEFT JOIN 
+            ActorAwards a ON i.actor_name = a.actor_name) a ON m.movie_id = a.movie_id
+    WHERE 
+        rank <= 5
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.actor_count,
+    f.awards_count,
+    CASE 
+        WHEN f.awards_count > 0 THEN 'Awarded'
+        ELSE 'Not Awarded'
+    END AS award_status
+FROM 
+    FilteredMovies f
+WHERE 
+    f.actor_count > 1 
+ORDER BY 
+    f.production_year DESC, f.awards_count DESC;

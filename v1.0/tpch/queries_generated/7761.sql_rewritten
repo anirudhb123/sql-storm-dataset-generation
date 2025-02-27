@@ -1,0 +1,33 @@
+WITH SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1994-01-01' AND DATE '1994-12-31'
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+HighValueSuppliers AS (
+    SELECT sp.s_suppkey, sp.s_name, SUM(sp.ps_supplycost * sp.ps_availqty) AS total_supply_cost
+    FROM SupplierParts sp
+    GROUP BY sp.s_suppkey, sp.s_name
+    HAVING SUM(sp.ps_supplycost * sp.ps_availqty) > 100000
+)
+SELECT c.c_name, co.o_orderkey, co.total_revenue, hvs.s_name AS supplier_name, hvs.total_supply_cost
+FROM CustomerOrders co
+JOIN HighValueSuppliers hvs ON hvs.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > 100
+)
+JOIN supplier s ON hvs.s_suppkey = s.s_suppkey
+JOIN lineitem l ON co.o_orderkey = l.l_orderkey
+WHERE l.l_receiptdate > co.o_orderdate
+ORDER BY co.total_revenue DESC, hvs.total_supply_cost ASC
+LIMIT 10;

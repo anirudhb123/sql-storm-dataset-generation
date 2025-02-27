@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > DATEADD(year, -1, GETDATE()) 
+        AND p.Score > 0
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        ups.UserId,
+        ups.DisplayName,
+        ups.TotalPosts,
+        ups.TotalScore,
+        ups.AvgViewCount,
+        RANK() OVER (ORDER BY ups.TotalScore DESC) AS UserRank
+    FROM 
+        UserPostStats ups
+    WHERE 
+        ups.TotalPosts > 10
+),
+PostHistoryAndVotes AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryDate,
+        COUNT(v.Id) AS VoteCount,
+        STRING_AGG(v.VoteTypeId::varchar, ',') AS VoteTypes
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Votes v ON ph.PostId = v.PostId
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId, ph.CreationDate
+)
+
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.TotalScore,
+    tu.AvgViewCount,
+    rp.Title,
+    rp.CreationDate AS PostCreationDate,
+    rp.Score AS PostScore,
+    ph.VoteCount,
+    ph.VoteTypes
+FROM 
+    TopUsers tu
+JOIN 
+    RankedPosts rp ON tu.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostHistoryAndVotes ph ON rp.PostId = ph.PostId
+WHERE 
+    rp.PostRank <= 3 
+ORDER BY 
+    tu.UserRank, rp.Score DESC;

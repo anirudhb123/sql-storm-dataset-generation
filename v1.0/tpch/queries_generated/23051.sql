@@ -1,0 +1,44 @@
+WITH RECURSIVE supplier_with_highest_acctbal AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    ORDER BY s.s_acctbal DESC
+    LIMIT 1
+), recent_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) as order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= (CURRENT_DATE - INTERVAL '1 YEAR')
+), high_value_customers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+), lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+), nation_details AS (
+    SELECT n.n_nationkey, n.n_name, c.c_custkey
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    WHERE n.n_name LIKE '%land%' AND n.n_comment IS NOT NULL
+), ranked_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_size, ROW_NUMBER() OVER (PARTITION BY p.p_container ORDER BY p.p_retailprice DESC) as rn
+    FROM part p
+    WHERE p.p_comment IS NOT NULL AND p.p_size BETWEEN 1 AND 50
+)
+SELECT DISTINCT 
+    nac.n_name AS nation_name,
+    hvc.c_name AS customer_name,
+    swh.s_name AS supplier_name,
+    l.total_revenue AS total_value,
+    rp.p_name AS part_name
+FROM lineitem_summary l
+JOIN recent_orders ro ON l.l_orderkey = ro.o_orderkey
+JOIN supplier_with_highest_acctbal swh ON swh.s_acctbal = (SELECT MAX(s2.s_acctbal) FROM supplier s2)
+JOIN high_value_customers hvc ON ro.o_custkey = hvc.c_custkey
+LEFT JOIN nation_details nac ON hvc.c_nationkey = nac.c_custkey
+JOIN ranked_parts rp ON rp.rn = 1
+WHERE l.total_revenue IS NOT NULL 
+AND (hvc.c_acctbal IS NOT NULL OR hvc.c_name IS NOT NULL)
+AND swh.s_suppkey NOT IN (SELECT ps_suppkey FROM partsupp WHERE ps_availqty <= 0)
+ORDER BY nac.n_name, hvc.c_name;

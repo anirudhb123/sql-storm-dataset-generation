@@ -1,0 +1,58 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation, 
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        Reputation,
+        PostCount,
+        AnswerCount,
+        QuestionCount,
+        BadgeCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS RankByReputation,
+        RANK() OVER (ORDER BY PostCount DESC) AS RankByPosts
+    FROM UserStats
+),
+UserPostInteractions AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN ph.PostId IS NOT NULL THEN 1 ELSE 0 END) AS HistoryEntries,
+        u.Id AS UserId
+    FROM Users u
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN PostHistory ph ON u.Id = ph.UserId
+    WHERE u.Id IN (SELECT UserId FROM TopUsers WHERE RankByReputation <= 10)
+    GROUP BY u.DisplayName, u.Id
+)
+SELECT 
+    tu.RankByReputation,
+    tu.RankByPosts,
+    tu.UserId,
+    up.DisplayName,
+    us.Reputation,
+    us.PostCount,
+    us.AnswerCount,
+    us.QuestionCount,
+    us.BadgeCount,
+    up.CommentCount,
+    up.VoteCount,
+    up.HistoryEntries
+FROM TopUsers tu
+JOIN UserStats us ON tu.UserId = us.UserId
+JOIN UserPostInteractions up ON tu.UserId = up.UserId
+WHERE tu.RankByReputation <= 10 OR tu.RankByPosts <= 10
+ORDER BY tu.RankByReputation, tu.RankByPosts;

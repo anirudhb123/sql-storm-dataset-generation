@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS Owner,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        Owner
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+),
+PostWithTags AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.Score,
+        tp.ViewCount,
+        tp.Owner,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Posts p ON tp.PostId = p.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        tp.PostId, tp.Title, tp.CreationDate, tp.Score, tp.ViewCount, tp.Owner
+)
+SELECT 
+    ptw.PostId,
+    ptw.Title,
+    ptw.CreationDate,
+    ptw.Score,
+    ptw.ViewCount,
+    ptw.Owner,
+    ptw.Tags,
+    COUNT(c.Id) AS CommentCount,
+    COALESCE(MAX(v.BountyAmount), 0) AS HighestBounty
+FROM 
+    PostWithTags ptw
+LEFT JOIN 
+    Comments c ON ptw.PostId = c.PostId
+LEFT JOIN 
+    Votes v ON ptw.PostId = v.PostId AND v.VoteTypeId = 8  -- BountyStart
+GROUP BY 
+    ptw.PostId, ptw.Title, ptw.CreationDate, ptw.Score, ptw.ViewCount, ptw.Owner, ptw.Tags
+ORDER BY 
+    ptw.Score DESC, ptw.ViewCount DESC;

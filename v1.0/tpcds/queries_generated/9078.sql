@@ -1,0 +1,47 @@
+
+WITH sales_summary AS (
+    SELECT 
+        dd.d_year, 
+        SUM(CASE WHEN ws_sold_date_sk = dd.d_date_sk THEN ws_net_profit ELSE 0 END) AS online_sales_profit,
+        SUM(CASE WHEN ss_sold_date_sk = dd.d_date_sk THEN ss_net_profit ELSE 0 END) AS store_sales_profit,
+        COALESCE(ws_sold_quantity, 0) + COALESCE(ss_sold_quantity, 0) AS total_quantity_sold,
+        COUNT(DISTINCT ws_order_number) AS online_orders_count,
+        COUNT(DISTINCT ss_ticket_number) AS store_orders_count,
+        COUNT(DISTINCT CASE WHEN ws_sold_date_sk = dd.d_date_sk THEN ws_bill_customer_sk END) AS unique_online_customers,
+        COUNT(DISTINCT CASE WHEN ss_sold_date_sk = dd.d_date_sk THEN ss_customer_sk END) AS unique_store_customers
+    FROM 
+        date_dim dd
+    LEFT JOIN web_sales ws ON dd.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN store_sales ss ON dd.d_date_sk = ss.ss_sold_date_sk
+    GROUP BY dd.d_year
+),
+profit_analysis AS (
+    SELECT 
+        d_year, 
+        online_sales_profit,
+        store_sales_profit,
+        total_quantity_sold,
+        online_orders_count,
+        store_orders_count,
+        unique_online_customers,
+        unique_store_customers,
+        (online_sales_profit + store_sales_profit) AS total_profit,
+        (online_sales_profit / NULLIF(total_quantity_sold, 0)) AS avg_profit_per_item,
+        (onlineOrdersCount + storeOrdersCount) AS total_orders,
+        (unique_online_customers + unique_store_customers) AS total_unique_customers
+    FROM 
+        sales_summary
+)
+SELECT 
+    d_year,
+    total_profit,
+    avg_profit_per_item,
+    total_orders,
+    total_unique_customers,
+    RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
+FROM 
+    profit_analysis
+WHERE 
+    d_year >= 2010
+ORDER BY 
+    d_year ASC;

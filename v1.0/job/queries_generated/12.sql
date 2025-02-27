@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS actor_count_rank
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_companies mc ON mc.movie_id = mt.id
+    JOIN 
+        company_name cn ON cn.id = mc.company_id
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = mt.id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = cc.movie_id
+    GROUP BY 
+        mt.title, mt.production_year
+), ActorInfo AS (
+    SELECT 
+        ak.name AS actor_name,
+        mt.title AS movie_title,
+        mt.production_year
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ci.person_id = ak.person_id
+    JOIN 
+        aka_title mt ON mt.id = ci.movie_id
+), KeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    COUNT(DISTINCT ai.actor_name) AS total_actors,
+    COALESCE(kc.keyword_count, 0) AS total_keywords,
+    CASE 
+        WHEN COUNT(DISTINCT ai.actor_name) > 10 THEN 'High Actor Count'
+        ELSE 'Low Actor Count'
+    END AS actor_count_category
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorInfo ai ON ai.movie_title = rm.movie_title 
+                 AND ai.production_year = rm.production_year
+LEFT JOIN 
+    KeywordCounts kc ON kc.movie_id = rm.movie_title
+WHERE 
+    rm.actor_count_rank = 1
+GROUP BY 
+    rm.movie_title, rm.production_year, kc.keyword_count
+ORDER BY 
+    rm.production_year DESC, total_actors DESC;

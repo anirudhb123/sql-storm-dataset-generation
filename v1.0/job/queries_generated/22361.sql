@@ -1,0 +1,77 @@
+WITH MovieStats AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        COALESCE(AVG(CASE WHEN ci.note IS NULL THEN NULL ELSE ci.nr_order END), 0) AS avg_order,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_actors
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        m.title, 
+        m.production_year,
+        m.actor_count,
+        m.avg_order,
+        m.keywords,
+        m.company_count,
+        m.rank_by_actors
+    FROM 
+        MovieStats m
+    WHERE 
+        m.actor_count > 5 OR
+        (m.avg_order IS NOT NULL AND m.avg_order < 3)
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    CASE 
+        WHEN tm.company_count > 1 THEN 'Multiple Companies'
+        WHEN tm.company_count = 1 THEN 'Single Company'
+        ELSE 'No Companies'
+    END AS company_status,
+    tm.keywords,
+    COALESCE(p.info, 'No additional info') AS person_info
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    person_info p ON p.info_type_id IN (
+        SELECT id FROM info_type WHERE info = 'Biography'
+    ) AND p.person_id IN (
+        SELECT 
+            c.person_id 
+        FROM 
+            cast_info c 
+        JOIN 
+            complete_cast cc ON c.id = cc.subject_id 
+        WHERE 
+            cc.movie_id = (SELECT id FROM aka_title WHERE title = tm.title AND production_year = tm.production_year)
+    )
+WHERE 
+    tm.rank_by_actors <= 10
+ORDER BY 
+    tm.production_year DESC, 
+    tm.actor_count DESC;
+
+-- This query captures complex performance metrics for movies,
+-- focusing on those with a significant number of actors and 
+-- simple criteria for companies involved, while dynamically pulling additional 
+-- biography info for actors linked with those movies, even handling NULLs. 
+

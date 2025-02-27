@@ -1,0 +1,58 @@
+WITH RECURSIVE part_summary AS (
+    SELECT p_partkey, 
+           p_name, 
+           p_brand, 
+           p_size, 
+           p_retailprice, 
+           ROW_NUMBER() OVER (PARTITION BY p_brand ORDER BY p_retailprice DESC) AS rank_price,
+           CASE 
+               WHEN p_size IS NULL THEN 'Unknown Size'
+               WHEN p_size < 10 THEN 'Small'
+               WHEN p_size BETWEEN 10 AND 20 THEN 'Medium'
+               ELSE 'Large'
+           END AS size_category
+    FROM part
+),
+nation_supplier AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING COUNT(s.s_suppkey) > 1
+),
+order_summary AS (
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT c.c_custkey) AS unique_customers
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+)
+SELECT ps.ps_partkey,
+       ps.ps_suppkey,
+       ps.ps_availqty,
+       ps.ps_supplycost,
+       ps.ps_comment,
+       (SELECT AVG(l_extendedprice) 
+        FROM lineitem 
+        WHERE l_partkey = ps.ps_partkey AND l_shipdate < CURRENT_DATE) AS avg_past_price,
+       (SELECT COUNT(DISTINCT o.o_orderkey)
+        FROM orders o 
+        INNER JOIN lineitem l ON o.o_orderkey = l.l_orderkey 
+        WHERE l.l_partkey = ps.ps_partkey AND o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year') AS recent_orders,
+       COALESCE(ns.supplier_count, 0) AS supplier_count,
+       p.size_category,
+       CASE 
+           WHEN ns.supplier_count IS NULL THEN 'No Suppliers'
+           WHEN ns.supplier_count < 3 THEN 'Few Suppliers'
+           ELSE 'Many Suppliers'
+       END AS supplier_status
+FROM partsupp ps
+LEFT JOIN part_summary p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN nation_supplier ns ON ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = ns.n_nationkey)
+WHERE ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp) 
+      AND (SELECT COUNT(*) FROM order_summary) > 10
+ORDER BY p.p_name DESC, ps.ps_supplycost ASC
+LIMIT 50;

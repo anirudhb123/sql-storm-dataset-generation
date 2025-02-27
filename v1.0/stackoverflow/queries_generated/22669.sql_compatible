@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        pt.Name AS PostType,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+TagFrequency AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 5
+),
+PostActivity AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentsCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+VoteStatistics AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.PostType,
+    rp.ViewCount,
+    rp.CreationDate,
+    COALESCE(pa.CommentsCount, 0) AS CommentsCount,
+    COALESCE(pa.LastCommentDate, 'No Comments') AS LastCommentDate,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    t.TagName,
+    tf.PostCount AS TagFrequency
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostActivity pa ON rp.PostId = pa.PostId
+LEFT JOIN 
+    VoteStatistics vs ON rp.PostId = vs.PostId
+LEFT JOIN 
+    TagFrequency tf ON t.TagName IN (SELECT TagName FROM TagFrequency tf WHERE tf.PostCount > 0 
+                                       OFFSET FLOOR(RANDOM() * (SELECT COUNT(*) FROM TagFrequency)))
+LEFT JOIN 
+    Tags t ON t.TagName = tf.TagName
+WHERE 
+    rp.Rank <= 10
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

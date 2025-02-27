@@ -1,0 +1,46 @@
+
+WITH RecursiveSupplierChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, r.level + 1
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN RecursiveSupplierChain r ON ps.ps_partkey = r.s_suppkey
+    WHERE r.level < 5
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '1997-10-01' AND l.l_shipdate < '1997-11-01'
+    GROUP BY o.o_orderkey
+),
+NationStats AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count,
+           AVG(c.c_acctbal) AS avg_account_balance
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT 
+    r.n_name AS national_name,
+    COALESCE(n.avg_account_balance, 0) AS avg_balance,
+    SUM(o.total_revenue) AS revenue_by_region,
+    COUNT(DISTINCT ss.s_suppkey) AS supplier_count,
+    CASE 
+        WHEN COUNT(DISTINCT ss.s_suppkey) > 5 THEN 'Well-Supplied'
+        WHEN COUNT(DISTINCT ss.s_suppkey) = 0 THEN 'Under-Supplied'
+        ELSE 'Moderately Supplied'
+    END AS supply_status,
+    ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY SUM(o.total_revenue) DESC) AS revenue_rank
+FROM region r
+LEFT JOIN NationStats n ON r.r_regionkey = n.n_nationkey
+LEFT JOIN OrderSummary o ON r.r_regionkey = o.o_orderkey
+LEFT JOIN RecursiveSupplierChain ss ON ss.s_suppkey = o.o_orderkey
+GROUP BY r.n_name, n.avg_account_balance, r.r_regionkey
+HAVING SUM(o.total_revenue) > 50000
+ORDER BY revenue_rank;

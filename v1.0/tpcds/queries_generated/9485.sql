@@ -1,0 +1,48 @@
+
+WITH Customer_Sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk,
+        hd.hd_buy_potential
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE 
+        YEAR(ws.ws_sold_date_sk) = 2023
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status, hd.hd_income_band_sk, hd.hd_buy_potential
+    HAVING 
+        SUM(ws.ws_net_paid) > 1000
+),
+Sales_Count AS (
+    SELECT 
+        COUNT(*) AS customer_count,
+        cd_gender,
+        cd_marital_status,
+        hd_income_band_sk,
+        hd_buy_potential
+    FROM 
+        Customer_Sales
+    GROUP BY 
+        cd_gender, cd_marital_status, hd_income_band_sk, hd_buy_potential
+)
+SELECT 
+    gender,
+    marital_status,
+    income_band,
+    buy_potential,
+    customer_count,
+    RANK() OVER (ORDER BY customer_count DESC) AS sales_rank
+FROM 
+    Sales_Count
+ORDER BY 
+    sales_rank
+LIMIT 10;

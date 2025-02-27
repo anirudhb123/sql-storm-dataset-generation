@@ -1,0 +1,77 @@
+
+WITH RECURSIVE demo_analysis AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        cd_dep_count,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS rn
+    FROM customer_demographics
+    WHERE cd_dep_count IS NOT NULL
+),
+
+address_analysis AS (
+    SELECT 
+        ca_address_sk,
+        ca_city,
+        ca_state,
+        COUNT(*) AS customer_count
+    FROM customer 
+    JOIN customer_address ON c_current_addr_sk = ca_address_sk
+    GROUP BY ca_address_sk, ca_city, ca_state
+),
+
+sales_analysis AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_spent,
+        COUNT(ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+
+product_analysis AS (
+    SELECT 
+        wp_web_page_sk,
+        wp_url,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM web_page
+    JOIN web_sales ON ws_web_page_sk = wp_web_page_sk
+    GROUP BY wp_web_page_sk, wp_url
+    HAVING SUM(ws_ext_sales_price) > 1000
+)
+
+SELECT 
+    da.cd_demo_sk,
+    da.cd_gender,
+    da.cd_marital_status,
+    da.cd_purchase_estimate,
+    aa.ca_city,
+    aa.ca_state,
+    sa.total_spent,
+    pa.total_sales,
+    CASE 
+        WHEN sa.order_count > 5 THEN 'Frequent Buyer'
+        ELSE 'Occasional Buyer'
+    END AS buyer_category
+FROM demo_analysis da
+LEFT JOIN address_analysis aa ON da.cd_demo_sk = (
+    SELECT c.c_customer_sk 
+    FROM customer c 
+    WHERE c.c_current_cdemo_sk = da.cd_demo_sk 
+    FETCH FIRST 1 ROW ONLY
+)
+LEFT JOIN sales_analysis sa ON da.cd_demo_sk = sa.ws_bill_customer_sk
+FULL OUTER JOIN product_analysis pa ON pa.wp_web_page_sk = (
+    SELECT wp_web_page_sk 
+    FROM web_page 
+    WHERE wp_creation_date_sk IS NOT NULL 
+    ORDER BY wp_creation_date_sk DESC 
+    FETCH FIRST 1 ROW ONLY
+)
+WHERE da.rn <= 10
+AND pa.total_sales IS NOT NULL
+ORDER BY sa.total_spent DESC, pa.total_sales DESC
+FETCH FIRST 20 ROWS ONLY;

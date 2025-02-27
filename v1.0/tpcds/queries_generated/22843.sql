@@ -1,0 +1,56 @@
+
+WITH RECURSIVE income_bracket AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound, 1 AS level
+    FROM income_band
+    WHERE ib_lower_bound IS NOT NULL
+    UNION ALL
+    SELECT ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound, level + 1
+    FROM income_band ib
+    JOIN income_bracket ibr ON ib.ib_income_band_sk > ibr.ib_income_band_sk
+    WHERE level < 3
+), customer_info AS (
+    SELECT c.c_customer_sk, 
+           c.c_customer_id, 
+           cd.cd_gender, 
+           cd.cd_marital_status,
+           COALESCE(NULLIF(cd.cd_credit_rating, ''), 'Unknown') AS credit_rating,
+           (SELECT COUNT(*) 
+            FROM customer_demographics as sub_cd 
+            WHERE sub_cd.cd_demo_sk = c.c_current_cdemo_sk 
+              AND sub_cd.cd_dep_college_count IS NOT NULL) AS num_college_deps
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), sales_info AS (
+    SELECT ws.ws_ship_date_sk,
+           ws.ws_item_sk,
+           SUM(ws.ws_quantity) AS total_quantity,
+           SUM(ws.ws_net_paid) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rank_sales
+    FROM web_sales ws
+    GROUP BY ws.ws_ship_date_sk, ws.ws_item_sk
+)
+
+SELECT ca.ca_city,
+       ci.c_customer_id,
+       ci.credit_rating,
+       COALESCE(i.ib_lower_bound, '0') AS lower_bound,
+       SUM(si.total_sales) AS total_net_sales,
+       CASE 
+           WHEN MAX(si.total_quantity) IS NULL THEN 'No Sales'
+           ELSE 'Sales Exist'
+       END AS sales_status
+FROM customer_info ci
+JOIN store s ON ci.c_customer_sk = s.s_store_sk
+LEFT JOIN customer_address ca ON ci.c_customer_id = ca.ca_address_id
+LEFT JOIN income_bracket i ON ci.credit_rating = CASE 
+                                                     WHEN ci.credit_rating IS NULL THEN 'Unknown'
+                                                     ELSE ci.credit_rating
+                                                 END
+LEFT JOIN sales_info si ON si.ws_item_sk = s.s_store_sk
+WHERE ci.c_current_addr_sk IS NOT NULL
+GROUP BY ca.ca_city, ci.c_customer_id, ci.credit_rating, i.ib_lower_bound
+HAVING AVG(si.total_net_sales) > (SELECT AVG(total_sales)
+                                    FROM sales_info
+                                    WHERE rank_sales = 1)
+ORDER BY ca.ca_city DESC, total_net_sales DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,82 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_addr_sk, 1 AS hierarchy_level
+    FROM customer
+    WHERE c_current_addr_sk IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT ch.c_customer_sk, ch.c_first_name, ch.c_last_name, ch.c_current_addr_sk, ch.hierarchy_level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_addr_sk = ch.c_current_addr_sk
+    WHERE ch.hierarchy_level < 5
+), 
+SalesData AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(ws.ws_item_sk) AS total_items_sold
+    FROM web_sales ws
+    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2001)
+    GROUP BY w.w_warehouse_id
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_demographics cd
+    JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_id
+    HAVING SUM(ws.ws_quantity) > 100
+),
+SalesDetails AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_net_paid_inc_tax) AS total_net_paid,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        SUM(ws.ws_ext_tax) AS total_tax
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 1 AND 10
+    GROUP BY ws.ws_item_sk
+),
+AvgSales AS (
+    SELECT 
+        AVG(total_net_paid) AS avg_net_paid,
+        AVG(total_discount) AS avg_discount,
+        AVG(total_tax) AS avg_tax
+    FROM SalesDetails
+)
+
+SELECT 
+    ch.c_first_name,
+    ch.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    sd.w_warehouse_id,
+    sd.total_net_profit,
+    sd.total_orders,
+    sd.total_items_sold,
+    ti.i_item_id,
+    ti.total_quantity,
+    as.avg_net_paid,
+    as.avg_discount,
+    as.avg_tax
+FROM CustomerHierarchy ch
+JOIN CustomerDemographics cd ON ch.c_current_addr_sk = cd.cd_demo_sk
+JOIN SalesData sd ON 1=1  
+JOIN TopItems ti ON ti.total_quantity > 100
+CROSS JOIN AvgSales as
+WHERE cd.customer_count > 5
+ORDER BY sd.total_net_profit DESC, ch.c_last_name ASC;

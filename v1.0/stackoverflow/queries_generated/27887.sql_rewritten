@@ -1,0 +1,61 @@
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id as PostId,
+        COUNT(DISTINCT t.Id) as TagCount
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.TagName = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+), 
+UserPostStats AS (
+    SELECT 
+        u.Id as UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) as TotalPosts,
+        SUM(p.ViewCount) as TotalViews,
+        SUM(p.Score) as TotalScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    WHERE 
+        u.Reputation > 1000 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        pt.Name as PostHistoryType
+    FROM 
+        PostHistory ph 
+    JOIN 
+        PostHistoryTypes pt ON pt.Id = ph.PostHistoryTypeId
+    WHERE 
+        ph.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' 
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalViews,
+    u.TotalScore,
+    ptc.TagCount,
+    RE.name AS RecentEditType,
+    COUNT(re.UserDisplayName) AS RecentEditCount
+FROM 
+    UserPostStats u
+JOIN 
+    PostTagCounts ptc ON u.TotalPosts > 0
+LEFT JOIN 
+    RecentEdits re ON re.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.UserId)
+GROUP BY 
+    u.UserId, u.DisplayName, ptc.TagCount, RE.name
+ORDER BY 
+    u.TotalScore DESC, u.TotalPosts DESC;

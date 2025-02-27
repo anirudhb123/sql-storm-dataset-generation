@@ -1,0 +1,46 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_orderstatus, o_totalprice, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_orderstatus, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate > oh.o_orderdate
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           AVG(o.o_totalprice) AS average_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    ch.o_orderkey,
+    cu.c_name,
+    cu.total_spent,
+    sd.total_supply_cost AS supplier_cost,
+    RANK() OVER (PARTITION BY cu.c_custkey ORDER BY cu.total_spent DESC) AS spending_rank,
+    COALESCE(ROW_NUMBER() OVER (PARTITION BY cu.c_custkey ORDER BY ch.o_orderdate DESC), 0) AS order_rank,
+    CASE 
+        WHEN cu.total_spent IS NULL THEN 'No Orders'
+        WHEN cu.total_spent > 10000 THEN 'High Value'
+        ELSE 'Regular'
+    END AS customer_type
+FROM OrderHierarchy ch
+JOIN CustomerOrders cu ON ch.o_custkey = cu.c_custkey
+LEFT JOIN SupplierDetails sd ON sd.s_suppkey IN (
+    SELECT l.l_suppkey
+    FROM lineitem l
+    WHERE l.l_orderkey = ch.o_orderkey
+)
+WHERE ch.level <= 3
+ORDER BY cu.total_spent DESC, ch.o_orderdate;

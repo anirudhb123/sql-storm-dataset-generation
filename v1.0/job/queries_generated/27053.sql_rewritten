@@ -1,0 +1,49 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+top_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_count,
+        RANK() OVER (ORDER BY cast_count DESC) AS rank
+    FROM 
+        ranked_movies
+    WHERE 
+        production_year BETWEEN 2000 AND 2020
+)
+SELECT 
+    m.title,
+    m.production_year,
+    m.cast_count,
+    GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS actor_names,
+    GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords
+FROM 
+    top_movies m
+LEFT JOIN 
+    cast_info ci ON m.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    m.rank <= 10
+GROUP BY 
+    m.movie_id, m.title, m.production_year, m.cast_count
+ORDER BY 
+    m.cast_count DESC;

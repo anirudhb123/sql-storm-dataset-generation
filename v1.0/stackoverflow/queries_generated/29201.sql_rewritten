@@ -1,0 +1,71 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.Score) AS AvgScore,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'  
+    GROUP BY 
+        t.TagName
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+Benchmark AS (
+    SELECT 
+        ts.TagName,
+        ts.PostCount,
+        ts.AvgScore,
+        ua.DisplayName AS TopUser,
+        ua.PostCount AS UserPostCount,
+        phs.EditCount,
+        phs.LastEditDate
+    FROM 
+        TagStats ts
+    JOIN 
+        UserActivity ua ON ua.PostCount = (
+            SELECT MAX(PostCount) FROM UserActivity
+        )
+    JOIN 
+        PostHistoryStats phs ON phs.PostId IN (SELECT p.Id FROM Posts p WHERE p.Tags LIKE '%' || ts.TagName || '%')
+)
+SELECT 
+    b.TagName,
+    b.PostCount,
+    b.AvgScore,
+    b.TopUser,
+    b.UserPostCount,
+    b.EditCount,
+    b.LastEditDate
+FROM 
+    Benchmark b
+ORDER BY 
+    b.AvgScore DESC, b.PostCount DESC;

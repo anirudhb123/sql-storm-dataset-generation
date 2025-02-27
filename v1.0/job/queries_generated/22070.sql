@@ -1,0 +1,79 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(GROUP_CONCAT(DISTINCT c.name), 'No Cast') AS cast_names,
+        1 AS depth
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.id
+    LEFT JOIN 
+        aka_name c ON c.person_id = ci.person_id
+    WHERE 
+        m.production_year IS NOT NULL
+    GROUP BY 
+        m.id
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(GROUP_CONCAT(DISTINCT c.name), 'No Cast') AS cast_names,
+        mh.depth + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON m.id = ml.linked_movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.id
+    LEFT JOIN 
+        aka_name c ON c.person_id = ci.person_id
+    WHERE 
+        m.production_year IS NOT NULL
+    GROUP BY 
+        m.id, mh.depth
+),
+ranked_movies AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY depth ORDER BY production_year DESC) AS year_rank
+    FROM 
+        movie_hierarchy
+),
+final_selection AS (
+    SELECT 
+        movie_id,
+        title,
+        cast_names,
+        depth,
+        year_rank
+    FROM 
+        ranked_movies
+    WHERE 
+        year_rank <= 3
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.cast_names,
+    f.depth,
+    CASE 
+        WHEN f.cast_names = 'No Cast' THEN NULL 
+        ELSE LENGTH(f.cast_names) - LENGTH(REPLACE(f.cast_names, ',', '')) + 1 
+    END AS num_cast_members,
+    COALESCE(k.keyword, 'No Keywords') AS keywords,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM movie_keyword mk WHERE mk.movie_id = f.movie_id) 
+        THEN 'Has Keywords' 
+        ELSE 'No Keywords' 
+    END AS keyword_status
+FROM 
+    final_selection f
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = f.movie_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+ORDER BY 
+    f.depth, f.movie_id;

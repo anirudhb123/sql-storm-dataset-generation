@@ -1,0 +1,54 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2450000 AND 2450600 -- Arbitrary date range for benchmarking
+    GROUP BY 
+        ws_item_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_age_group,
+        CASE 
+            WHEN cd_purchase_estimate > 1000 THEN 'High Value'
+            ELSE 'Low Value'
+        END AS customer_value
+    FROM 
+        customer_demographics
+), 
+SalesWithDemographics AS (
+    SELECT 
+        r.ws_item_sk,
+        r.total_quantity,
+        r.total_net_paid,
+        cd_gender,
+        cd_age_group,
+        customer_value
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        customer c ON r.ws_item_sk = c.c_customer_sk
+    LEFT JOIN 
+        CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    s.ws_item_sk,
+    s.total_quantity,
+    s.total_net_paid,
+    COALESCE(cd_gender, 'Unknown') AS gender_label,
+    COUNT(*) OVER (PARTITION BY s.customer_value) AS customer_count,
+    MAX(s.total_net_paid) OVER (PARTITION BY s.gs_item_sk ORDER BY s.total_net_paid DESC) AS max_net_paid
+FROM 
+    SalesWithDemographics s
+WHERE 
+    s.total_quantity > 100
+ORDER BY 
+    s.total_net_paid DESC
+LIMIT 50;

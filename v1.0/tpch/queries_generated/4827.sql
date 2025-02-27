@@ -1,0 +1,58 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        o.o_totalprice,
+        r.r_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS nation_rank
+    FROM 
+        RankedOrders r
+    JOIN 
+        customer c ON r.c_custkey = c.c_custkey
+    LEFT JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rnk <= 5
+)
+SELECT 
+    ho.c_name,
+    ho.o_orderkey,
+    ho.o_totalprice,
+    COALESCE(p.p_name, 'Unknown Part') AS part_name,
+    ps.ps_availqty,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM 
+    HighValueOrders ho
+LEFT JOIN 
+    lineitem l ON ho.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey AND ps.ps_suppkey IN (
+        SELECT 
+            s.s_suppkey 
+        FROM 
+            supplier s 
+        WHERE 
+            s.s_acctbal > 5000
+    )
+LEFT JOIN 
+    part p ON l.l_partkey = p.p_partkey
+GROUP BY 
+    ho.c_name, ho.o_orderkey, ho.o_totalprice, part_name, ps.ps_availqty
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY 
+    ho.o_totalprice DESC, ho.c_name ASC;

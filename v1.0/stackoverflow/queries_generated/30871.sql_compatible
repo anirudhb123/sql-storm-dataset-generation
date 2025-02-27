@@ -1,0 +1,92 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ParentId,
+        R.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy R ON P.ParentId = R.PostId
+),
+PostStats AS (
+    SELECT 
+        RPH.PostId,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN C.UserId IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount
+    FROM 
+        RecursivePostHierarchy RPH
+    LEFT JOIN 
+        Votes V ON RPH.PostId = V.PostId
+    LEFT JOIN 
+        Comments C ON RPH.PostId = C.PostId
+    GROUP BY 
+        RPH.PostId
+),
+PostHistoryStats AS (
+    SELECT 
+        PH.PostId,
+        PHT.Name AS HistoryType,
+        COUNT(PH.Id) AS HistoryCount
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE 
+        PH.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        PH.PostId, PHT.Name
+),
+FinalResults AS (
+    SELECT 
+        PS.PostId,
+        P.Title,
+        PS.VoteCount,
+        PS.UpVotes,
+        PS.DownVotes,
+        PS.CommentCount,
+        COALESCE(PHS.HistoryType, 'No History') AS HistoryType,
+        COALESCE(PHS.HistoryCount, 0) AS HistoryCount
+    FROM 
+        PostStats PS
+    LEFT JOIN 
+        PostHistoryStats PHS ON PS.PostId = PHS.PostId
+    JOIN 
+        Posts P ON PS.PostId = P.Id
+)
+SELECT 
+    FR.PostId,
+    FR.Title,
+    FR.VoteCount,
+    FR.UpVotes,
+    FR.DownVotes,
+    FR.CommentCount,
+    FR.HistoryType,
+    FR.HistoryCount,
+    CASE 
+        WHEN FR.CommentCount > 10 THEN 'Popular'
+        WHEN FR.UpVotes > FR.DownVotes THEN 'Positive'
+        ELSE 'Neutral'
+    END AS PostSentiment
+FROM 
+    FinalResults FR
+WHERE 
+    FR.HistoryCount > 0
+ORDER BY 
+    FR.VoteCount DESC, 
+    FR.UpVotes DESC;

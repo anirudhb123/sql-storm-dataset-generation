@@ -1,0 +1,38 @@
+
+SELECT 
+    n.name AS actor_name,
+    t.title AS movie_title,
+    c.nr_order AS role_order,
+    ct.kind AS comp_cast_type,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    STRING_AGG(DISTINCT co.name, ', ') AS companies,
+    MAX(mi.production_year) AS max_production_year
+FROM 
+    aka_name an
+JOIN 
+    cast_info c ON an.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name co ON mc.company_id = co.id
+JOIN 
+    comp_cast_type ct ON c.person_role_id = ct.id
+JOIN 
+    name n ON an.id = n.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+WHERE 
+    mi.production_year > 2000
+    AND ct.kind IN ('Actor', 'Director')
+GROUP BY 
+    n.name, t.title, c.nr_order, ct.kind
+ORDER BY 
+    MAX(mi.production_year) DESC, actor_name;

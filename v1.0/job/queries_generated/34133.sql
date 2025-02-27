@@ -1,0 +1,89 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        movie_link m
+    JOIN 
+        aka_title t ON m.linked_movie_id = t.id
+    JOIN 
+        MovieHierarchy mh ON m.movie_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(mh.level) OVER (PARTITION BY mh.movie_id) AS depth,
+        ROW_NUMBER() OVER (ORDER BY mh.production_year DESC) AS movie_rank
+    FROM 
+        MovieHierarchy mh
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.depth
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.depth >= 2
+),
+ActorStats AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS num_movies,
+        STRING_AGG(DISTINCT t.title, ', ') AS movie_titles
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        FilteredMovies fm ON ci.movie_id = fm.movie_id
+    GROUP BY 
+        a.name
+),
+CompanyStats AS (
+    SELECT 
+        cn.name AS company_name,
+        COUNT(DISTINCT mc.movie_id) AS movies_produced,
+        STRING_AGG(DISTINCT t.title, ', ') AS titles
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        FilteredMovies fm ON mc.movie_id = fm.movie_id
+    GROUP BY 
+        cn.name
+)
+SELECT 
+    a.actor_name,
+    a.num_movies,
+    a.movie_titles,
+    c.company_name,
+    c.movies_produced,
+    c.titles
+FROM 
+    ActorStats a
+LEFT JOIN 
+    CompanyStats c ON a.num_movies = c.movies_produced
+WHERE 
+    COALESCE(a.num_movies, 0) > 0 OR COALESCE(c.movies_produced, 0) > 0
+ORDER BY 
+    a.num_movies DESC, c.movies_produced DESC;

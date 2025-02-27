@@ -1,0 +1,78 @@
+WITH ProcessedTags AS (
+    SELECT 
+        PostId,
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(DISTINCT pt.Name) AS PostTypes,
+        t.Tag AS PostTag
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        ProcessedTags t ON p.Id = t.PostId
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month' 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+AggregatedPostDetails AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.ViewCount,
+        pd.CreationDate,
+        pd.AnswerCount,
+        pd.OwnerDisplayName,
+        pd.PostTypes,
+        STRING_AGG(DISTINCT pd.PostTag, ', ') AS Tags
+    FROM 
+        PostDetails pd 
+    GROUP BY 
+        pd.PostId, pd.Title, pd.ViewCount, pd.CreationDate, pd.AnswerCount, pd.OwnerDisplayName, pd.PostTypes
+)
+SELECT 
+    apd.PostId,
+    apd.Title,
+    apd.ViewCount,
+    apd.CreationDate,
+    apd.AnswerCount,
+    apd.OwnerDisplayName,
+    apd.PostTypes,
+    apd.Tags,
+    ub.BadgeCount,
+    ub.BadgeNames
+FROM 
+    AggregatedPostDetails apd
+LEFT JOIN 
+    UserBadges ub ON apd.OwnerDisplayName = ub.UserId
+WHERE 
+    ub.BadgeCount > 0
+ORDER BY 
+    apd.ViewCount DESC, 
+    apd.CreationDate DESC
+LIMIT 50;

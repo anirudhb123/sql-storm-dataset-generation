@@ -1,0 +1,53 @@
+
+WITH RECURSIVE customer_sales_cte AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(COALESCE(ss.ss_net_paid, 0) + COALESCE(ws.ws_net_paid, 0)) AS total_sales,
+        COUNT(DISTINCT cs.cs_order_number) AS order_count,
+        MAX(COALESCE(ss.ss_sold_date_sk, ws.ws_sold_date_sk)) AS last_purchase_date
+    FROM customer c
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk 
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN date_dim d ON d.d_date_sk IN (ss.ss_sold_date_sk, ws.ws_sold_date_sk)
+    GROUP BY c.c_customer_sk
+    HAVING total_sales > 1000
+    UNION ALL
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_sales * 1.10 AS total_sales,
+        cs.order_count,
+        NULLIF(cs.last_purchase_date, '1900-01-01')
+    FROM customer_sales_cte cs
+    WHERE cs.order_count < 5
+), ranked_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_sales,
+        cs.order_count,
+        ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY cs.total_sales DESC) AS rank
+    FROM customer c
+    JOIN customer_sales_cte cs ON c.c_customer_sk = cs.c_customer_sk
+    JOIN date_dim d ON d.d_date_sk = current_date
+)
+SELECT 
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name,
+    cs.total_sales,
+    CASE 
+        WHEN cs.order_count > 5 THEN 'High'
+        WHEN cs.order_count BETWEEN 3 AND 5 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category,
+    d.d_day_name,
+    d.d_date,
+    CASE
+        WHEN cs.total_sales IS NULL THEN 'No Purchases'
+        WHEN cs.order_count IS NULL THEN 'No Orders'
+        ELSE 'Orders Found'
+    END AS order_status
+FROM ranked_sales cs
+JOIN customer c ON cs.c_customer_sk = c.c_customer_sk
+JOIN date_dim d ON d.d_date = current_date
+WHERE cs.rank <= 10
+ORDER BY cs.total_sales DESC;

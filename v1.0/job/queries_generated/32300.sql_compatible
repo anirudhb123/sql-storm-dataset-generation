@@ -1,0 +1,54 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS depth
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000 
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.depth + 1 AS depth
+    FROM 
+        movie_link m
+    JOIN 
+        aka_title t ON m.linked_movie_id = t.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = m.movie_id
+)
+SELECT 
+    mh.title AS Movie_Title,
+    mh.production_year AS Production_Year,
+    mh.depth AS Movie_Depth,
+    ARRAY_AGG(DISTINCT a.name) AS Cast_Names,
+    COUNT(DISTINCT mc.company_id) AS Company_Count,
+    COALESCE(STRING_AGG(kt.keyword, ', '), 'No Keywords') AS Keywords,
+    AVG(COALESCE(mvi.info * 1.0, 0)) AS Average_Info_Value
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+LEFT JOIN 
+    movie_info mvi ON mvi.movie_id = mh.movie_id AND mvi.info_type_id = 1 
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.depth
+ORDER BY 
+    mh.production_year DESC, Movie_Depth;

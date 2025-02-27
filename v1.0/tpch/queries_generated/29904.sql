@@ -1,0 +1,42 @@
+WITH String_Benchmark AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_name,
+        c.c_name,
+        CONCAT(p.p_name, ' - ', s.s_name) AS Supplier_Product_Info,
+        LENGTH(CONCAT(p.p_name, ' - ', s.s_name)) AS Combined_Length,
+        UPPER(p.p_name) AS Upper_Part_Name,
+        LOWER(s.s_name) AS Lower_Supplier_Name,
+        REPLACE(p.p_comment, 'good', 'excellent') AS Updated_Comment,
+        SUBSTRING(p.p_name, 1, 10) AS Part_Name_Substring
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        customer c ON c.c_nationkey = s.s_nationkey -- Assuming customer linked via supplier's nation
+    WHERE 
+        p.p_size > 10
+),
+Aggregated_Results AS (
+    SELECT 
+        SUBSTRING(Upper_Part_Name, 1, 5) AS Initials,
+        COUNT(*) AS Total_Entries,
+        AVG(Combined_Length) AS Avg_Combined_Length
+    FROM 
+        String_Benchmark
+    GROUP BY 
+        Initials
+)
+SELECT 
+    Initials,
+    Total_Entries,
+    Avg_Combined_Length,
+    CONCAT('Total: ', Total_Entries, ', Avg Length: ', ROUND(Avg_Combined_Length, 2)) AS Summary
+FROM 
+    Aggregated_Results
+ORDER BY 
+    Initials;

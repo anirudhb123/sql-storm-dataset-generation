@@ -1,0 +1,75 @@
+WITH UserVoteDetails AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        DENSE_RANK() OVER (ORDER BY COUNT(V.Id) DESC) AS VoteRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.Score,
+        P.ViewCount,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseOpenCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        Tags T ON T.Id IN (SELECT unnest(string_to_array(P.Tags, ','))::int)
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.OwnerUserId, P.Score, P.ViewCount
+),
+FilteredPosts AS (
+    SELECT 
+        PD.*,
+        UVD.TotalVotes AS UserTotalVotes,
+        UVD.UpVotes AS UserUpVotes,
+        UVD.DownVotes AS UserDownVotes
+    FROM 
+        PostDetails PD
+    LEFT JOIN 
+        UserVoteDetails UVD ON PD.OwnerUserId = UVD.UserId
+    WHERE 
+        PD.CloseOpenCount > 0 AND 
+        PD.Score > 0 AND           
+        UVD.VoteRank <= 10          
+)
+SELECT 
+    FP.PostId,
+    FP.Title,
+    FP.ViewCount,
+    FP.Score,
+    FP.CommentCount,
+    FP.UserTotalVotes,
+    FP.UserUpVotes,
+    FP.UserDownVotes,
+    CASE 
+        WHEN FP.UserTotalVotes IS NULL THEN 'No Votes'
+        WHEN FP.UserUpVotes > FP.UserDownVotes THEN 'Positive Contribution'
+        WHEN FP.UserUpVotes < FP.UserDownVotes THEN 'Negative Contribution'
+        ELSE 'Neutral'
+    END AS UserVoteContribution,
+    IFNULL(FP.Tags, 'No Tags') AS TagList
+FROM 
+    FilteredPosts FP
+ORDER BY 
+    FP.Score DESC, 
+    FP.ViewCount DESC;

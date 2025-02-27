@@ -1,0 +1,96 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        P.Title,
+        P.CreationDate,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.ParentId,
+        P.Title,
+        P.CreationDate,
+        Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(C.Id) AS CommentCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AvgPostScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 10
+),
+ClosedPostDetails AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        PH.CreationDate AS ClosedDate,
+        PH.Comment AS CloseComment
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId = 10 -- Post Closed
+)
+SELECT 
+    U.DisplayName,
+    UP.CommentCount,
+    UP.TotalBounty,
+    UP.TotalViews,
+    UP.AvgPostScore,
+    RP.PostId AS RelatedPostId,
+    RP.Title AS RelatedPostTitle,
+    CT.ClosedDate,
+    CT.CloseComment,
+    PT.TagName,
+    PT.PostCount
+FROM 
+    UserEngagement UP
+JOIN 
+    RecursivePostHierarchy RP ON RP.PostId IN (SELECT ParentId FROM Posts WHERE OwnerUserId = UP.UserId)
+LEFT JOIN 
+    ClosedPostDetails CT ON RP.PostId = CT.Id
+JOIN 
+    PopularTags PT ON PT.PostCount >= 5
+WHERE 
+    UP.CommentCount > 5
+ORDER BY 
+    UP.TotalViews DESC, UP.AvgPostScore DESC;

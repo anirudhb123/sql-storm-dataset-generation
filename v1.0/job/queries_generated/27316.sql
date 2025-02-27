@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        title.title AS movie_title,
+        title.production_year,
+        title.kind_id,
+        ARRAY_AGG(DISTINCT aka_name.name) AS aliases,
+        COUNT(DISTINCT cast_info.person_id) AS cast_count
+    FROM 
+        title
+    LEFT JOIN 
+        aka_title ON title.id = aka_title.movie_id
+    LEFT JOIN 
+        aka_name ON aka_title.id = aka_name.id
+    LEFT JOIN 
+        cast_info ON title.id = cast_info.movie_id
+    GROUP BY 
+        title.title, title.production_year, title.kind_id
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.kind_id,
+        rm.aliases,
+        rm.cast_count,
+        COALESCE(mk.keywords, '{}') AS keywords,
+        COALESCE(mi.info, '') AS additional_info
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        (SELECT movie_id, array_agg(keyword.keyword) AS keywords 
+         FROM movie_keyword 
+         JOIN keyword ON movie_keyword.keyword_id = keyword.id 
+         GROUP BY movie_id) mk ON mk.movie_id = (SELECT DISTINCT id FROM title WHERE title = rm.movie_title AND production_year = rm.production_year)
+    LEFT JOIN 
+        (SELECT movie_id, string_agg(info, '; ') AS info 
+         FROM movie_info 
+         GROUP BY movie_id) mi ON mi.movie_id = (SELECT DISTINCT id FROM title WHERE title = rm.movie_title AND production_year = rm.production_year)
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    COUNT(DISTINCT ci.person_id) AS unique_cast_members,
+    md.cast_count,
+    cardinality(md.aliases) AS alias_count,
+    md.additional_info,
+    md.keywords
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    complete_cast cc ON md.movie_title = (SELECT title FROM title WHERE id = cc.movie_id)
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = (SELECT id FROM title WHERE title = md.movie_title AND production_year = md.production_year)
+GROUP BY 
+    md.movie_title, md.production_year, md.cast_count, md.additional_info, md.keywords
+ORDER BY 
+    md.production_year DESC,
+    alias_count DESC,
+    unique_cast_members DESC;

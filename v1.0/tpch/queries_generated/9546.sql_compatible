@@ -1,0 +1,35 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT s.s_name, s.s_nationkey, s.total_supply_cost, 
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.total_supply_cost DESC) AS rank
+    FROM RankedSuppliers s
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+FilteredOrders AS (
+    SELECT co.c_custkey, co.c_name, co.order_count, co.total_spent, ns.r_name
+    FROM CustomerOrders co
+    JOIN nation n ON co.c_custkey = n.n_nationkey
+    JOIN region ns ON n.n_regionkey = ns.r_regionkey
+    WHERE co.total_spent > (
+        SELECT AVG(total_spent) FROM CustomerOrders
+    )
+),
+FinalOutput AS (
+    SELECT to.s_name AS supplier_name, fo.c_name AS customer_name, fo.order_count, fo.total_spent
+    FROM TopSuppliers to
+    JOIN FilteredOrders fo ON to.rank <= 5
+    WHERE fo.order_count > 1
+)
+SELECT * FROM FinalOutput
+ORDER BY supplier_name, customer_name;

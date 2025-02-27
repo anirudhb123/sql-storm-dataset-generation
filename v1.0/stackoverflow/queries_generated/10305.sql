@@ -1,0 +1,63 @@
+-- Performance Benchmarking SQL Query
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.Reputation AS OwnerReputation,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, u.Reputation, u.DisplayName
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.AnswerCount,
+    pd.CommentCount,
+    pd.OwnerReputation,
+    pd.OwnerDisplayName,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AvgScore,
+    pd.LastEditDate
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    TagStats ts ON pd.PostId = ts.PostId
+ORDER BY 
+    pd.CreationDate DESC
+LIMIT 100;

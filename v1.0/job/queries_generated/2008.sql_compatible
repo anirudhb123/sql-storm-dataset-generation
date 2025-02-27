@@ -1,0 +1,56 @@
+
+WITH RankedActors AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT c.movie_id) DESC) AS actor_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.id, a.name
+),
+MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT kc.keyword_id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword kc ON t.id = kc.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+ActorMovies AS (
+    SELECT 
+        r.actor_id,
+        d.movie_title,
+        d.production_year,
+        r.actor_rank,
+        r.actor_name
+    FROM 
+        RankedActors r
+    JOIN 
+        cast_info c ON r.actor_id = c.person_id
+    JOIN 
+        aka_title d ON c.movie_id = d.id
+    WHERE 
+        d.production_year BETWEEN 2000 AND 2023
+)
+SELECT 
+    am.actor_name,
+    STRING_AGG(DISTINCT am.movie_title, ', ') AS movies,
+    COUNT(DISTINCT am.production_year) AS unique_years,
+    SUM(CASE WHEN am.production_year IS NULL THEN 1 ELSE 0 END) AS null_year_count
+FROM 
+    ActorMovies am
+GROUP BY 
+    am.actor_id, am.actor_name
+HAVING 
+    COUNT(DISTINCT am.movie_title) > 5
+ORDER BY 
+    unique_years DESC, am.actor_name ASC;

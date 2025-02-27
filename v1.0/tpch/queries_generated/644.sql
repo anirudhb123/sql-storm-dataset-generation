@@ -1,0 +1,55 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate <= DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > 1000
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(CASE WHEN R.revenue_rank <= 10 THEN R.total_revenue END), 0) AS top_order_revenue,
+    COALESCE(SUM(T.total_cost), 0) AS total_supplier_cost
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    (SELECT o.o_custkey 
+     FROM orders o 
+     WHERE o.o_orderstatus = 'F') AS FilteredOrders ON c.c_custkey = FilteredOrders.o_custkey
+LEFT JOIN 
+    RankedOrders R ON R.o_orderdate IS NOT NULL
+LEFT JOIN 
+    TopSuppliers T ON T.s_suppkey = (SELECT ps.ps_suppkey 
+                                       FROM partsupp ps 
+                                       JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+                                       WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F') 
+                                       LIMIT 1)
+GROUP BY 
+    r.r_name
+ORDER BY 
+    r.r_name;

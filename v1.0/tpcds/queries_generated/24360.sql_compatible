@@ -1,0 +1,75 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status = 'S'
+),
+SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        COUNT(*) AS total_orders,
+        SUM(ws_net_profit) AS total_profit,
+        AVG(ws_net_paid) AS avg_net_paid
+    FROM 
+        web_sales
+    WHERE 
+        ws_net_paid > 100
+    GROUP BY 
+        ws_bill_customer_sk
+),
+InventoryLevels AS (
+    SELECT 
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_quantity
+    FROM 
+        inventory
+    GROUP BY 
+        inv_item_sk
+)
+SELECT 
+    rc.c_customer_id, 
+    rc.c_first_name,
+    rc.c_last_name,
+    ss.total_orders,
+    ss.total_profit,
+    CAST(ss.avg_net_paid AS DECIMAL(10, 2)) AS avg_net_paid,
+    COALESCE(il.total_quantity, 0) AS total_inventory,
+    CASE 
+        WHEN il.total_quantity IS NULL THEN 'Out of Stock'
+        WHEN il.total_quantity < 50 THEN 'Low Stock'
+        ELSE 'In Stock'
+    END AS stock_status,
+    CASE 
+        WHEN rc.rn = 1 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status
+FROM 
+    RankedCustomers rc
+LEFT JOIN 
+    SalesSummary ss ON rc.c_customer_id = ss.ws_bill_customer_sk
+LEFT JOIN 
+    InventoryLevels il ON il.inv_item_sk = (
+        SELECT 
+            ws_item_sk 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_bill_customer_sk = ss.ws_bill_customer_sk 
+        ORDER BY 
+            ws_net_profit DESC
+        FETCH FIRST 1 ROW ONLY
+    )
+WHERE 
+    rc.rn <= 10
+ORDER BY 
+    ss.total_profit DESC NULLS LAST;

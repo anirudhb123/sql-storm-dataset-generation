@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) as rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+TopSuppliers AS (
+    SELECT 
+        r.region_name, 
+        r.s_name, 
+        r.s_acctbal
+    FROM 
+        RankedSuppliers r
+    WHERE 
+        r.rnk <= 3
+),
+OrdersSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_profit,
+        COUNT(DISTINCT o.o_orderkey) OVER (PARTITION BY o.o_orderpriority) AS order_count,
+        AVG(o.o_totalprice) OVER (PARTITION BY o.o_orderstatus) AS avg_order_value
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '2021-01-01' AND '2021-12-31'
+)
+SELECT 
+    ts.region_name,
+    ts.s_name,
+    ts.s_acctbal,
+    os.order_count,
+    os.avg_order_value,
+    COALESCE(os.total_profit, 0) AS total_profit,
+    CASE 
+        WHEN os.total_profit IS NULL THEN 'No Profit'
+        ELSE 'Profitable'
+    END AS profit_status
+FROM 
+    TopSuppliers ts
+LEFT JOIN 
+    OrdersSummary os ON ts.s_suppkey = os.o_orderkey
+ORDER BY 
+    ts.region_name, 
+    ts.s_acctbal DESC;

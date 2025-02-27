@@ -1,0 +1,62 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        w.warehouse_id,
+        ws_sold_date_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY w.warehouse_id ORDER BY SUM(ws_ext_sales_price) DESC) AS rank_sales
+    FROM 
+        web_sales w
+    JOIN 
+        warehouse ws ON w.ws_warehouse_sk = ws.warehouse_sk
+    GROUP BY 
+        w.warehouse_id, ws_sold_date_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        CASE 
+            WHEN cd.gender = 'F' THEN 'Female' 
+            WHEN cd.gender = 'M' THEN 'Male' 
+            ELSE 'Other' 
+        END AS gender,
+        cd.marital_status,
+        cd.purchase_estimate,
+        DENSE_RANK() OVER (ORDER BY cd.purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        sd.warehouse_id,
+        sd.ws_sold_date_sk,
+        sd.total_sales,
+        ci.gender,
+        ci.marital_status,
+        AVG(ci.purchase_estimate) OVER (PARTITION BY sd.warehouse_id) AS avg_estimate
+    FROM 
+        sales_data sd
+    JOIN 
+        customer_info ci ON sd.ws_sold_date_sk = ci.c_customer_sk
+)
+
+SELECT 
+    ss.warehouse_id,
+    ss.ws_sold_date_sk,
+    ss.total_sales,
+    ss.gender,
+    ss.marital_status,
+    ss.avg_estimate,
+    COALESCE(SUM(ss.total_sales) OVER (PARTITION BY ss.warehouse_id ORDER BY ss.ws_sold_date_sk ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), 0) AS running_total_sales
+FROM 
+    sales_summary ss
+WHERE 
+    ss.total_sales > (SELECT AVG(total_sales) FROM sales_data)  
+    AND ss.avg_estimate IS NOT NULL
+ORDER BY 
+    ss.warehouse_id, ss.ws_sold_date_sk;

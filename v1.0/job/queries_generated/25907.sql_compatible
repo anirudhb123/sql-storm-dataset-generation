@@ -1,0 +1,55 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        c.name AS company_name,
+        STRING_AGG(DISTINCT ak.name, ', ' ORDER BY ak.name) AS aka_names,
+        STRING_AGG(DISTINCT k.keyword, ', ' ORDER BY k.keyword) AS keywords,
+        STRING_AGG(DISTINCT p.info, ', ' ORDER BY p.info) AS person_info
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        person_info p ON cc.subject_id = p.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year, c.name
+),
+TopMovies AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.company_name,
+        md.aka_names,
+        md.keywords,
+        md.person_info,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY COUNT(DISTINCT md.aka_names) DESC) AS rank
+    FROM 
+        MovieDetails md
+    GROUP BY 
+        md.title, md.production_year, md.company_name, md.aka_names, md.keywords, md.person_info
+)
+SELECT 
+    title,
+    production_year,
+    company_name,
+    aka_names,
+    keywords,
+    person_info
+FROM 
+    TopMovies
+WHERE 
+    rank <= 5
+ORDER BY 
+    production_year DESC, rank;

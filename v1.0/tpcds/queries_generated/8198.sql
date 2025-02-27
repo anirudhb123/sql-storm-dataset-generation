@@ -1,0 +1,49 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_ext_sales_price) AS total_sales_amount,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE 
+        dd.d_year = 2023
+        AND p.p_discount_active = 'Y'
+    GROUP BY 
+        ws.web_site_id
+),
+DemographicSummary AS (
+    SELECT 
+        cd.cd_gender,
+        SUM(ss.total_sales_amount) AS total_sales_by_gender,
+        SUM(ss.total_quantity_sold) AS total_quantity_by_gender
+    FROM 
+        SalesSummary ss
+    JOIN 
+        customer c ON ss.web_site_id = c.c_customer_id
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender
+)
+
+SELECT 
+    cd.cd_gender,
+    ds.total_sales_by_gender,
+    ds.total_quantity_by_gender,
+    ds.total_sales_by_gender / NULLIF(SUM(ds.total_sales_by_gender) OVER(), 0) * 100 AS sales_percentage,
+    ds.total_quantity_by_gender / NULLIF(SUM(ds.total_quantity_by_gender) OVER(), 0) * 100 AS quantity_percentage
+FROM 
+    DemographicSummary ds
+JOIN 
+    customer_demographics cd ON cd.cd_gender = ds.cd_gender
+ORDER BY 
+    ds.total_sales_by_gender DESC;

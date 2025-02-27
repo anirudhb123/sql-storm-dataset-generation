@@ -1,0 +1,79 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+),
+HighValueCustomers AS (
+    SELECT 
+        c.custkey,
+        c.c_name,
+        c.total_spent
+    FROM 
+        CustomerOrders c
+    WHERE 
+        c.total_spent > (
+            SELECT 
+                AVG(total_spent)
+            FROM 
+                CustomerOrders
+        )
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_value
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+MaxSupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        MAX(ps.total_supply_value) AS max_supply_value
+    FROM 
+        SupplierParts ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    n.n_name AS supplier_nation,
+    sp.total_supply_value,
+    CASE 
+        WHEN hvc.total_spent IS NOT NULL THEN 'High Value'
+        ELSE 'Regular'
+    END AS customer_segment
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    HighValueCustomers hvc ON hvc.custkey = (
+        SELECT o.o_custkey 
+        FROM orders o 
+        JOIN lineitem li ON o.o_orderkey = li.l_orderkey 
+        WHERE li.l_partkey = p.p_partkey 
+        LIMIT 1
+    )
+JOIN 
+    MaxSupplierParts sp ON ps.ps_partkey = sp.ps_partkey
+WHERE 
+    p.p_retailprice > 100.00
+    AND n.n_name IS NOT NULL
+ORDER BY 
+    p.p_name, supplier_nation;

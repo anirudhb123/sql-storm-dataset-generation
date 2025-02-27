@@ -1,0 +1,67 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        COUNT(DISTINCT ps.ps_partkey) AS SupplyPartsCount
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+RegionalSales AS (
+    SELECT 
+        n.n_nationkey,
+        r.r_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        n.n_nationkey, r.r_name
+)
+SELECT 
+    r.r_name,
+    COALESCE(S.TotalSupplyCost, 0) AS TotalSupplierCost,
+    COALESCE(S.SupplyPartsCount, 0) AS PartsSupplied,
+    RS.TotalRevenue AS Revenue,
+    O.o_orderkey,
+    O.o_orderdate,
+    O.c_name,
+    O.o_totalprice,
+    O.OrderRank
+FROM 
+    RegionalSales RS
+RIGHT JOIN 
+    SupplierStats S ON RS.n_nationkey = S.s_suppkey
+LEFT JOIN 
+    RankedOrders O ON O.o_orderkey = (SELECT sub.o_orderkey 
+                                        FROM RankedOrders sub 
+                                        WHERE sub.OrderRank = 1 
+                                          AND sub.o_orderkey IS NOT NULL
+                                          ORDER BY sub.o_orderdate DESC 
+                                          LIMIT 1)
+ORDER BY 
+    RS.TotalRevenue DESC NULLS LAST;

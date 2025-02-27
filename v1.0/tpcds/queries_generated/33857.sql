@@ -1,0 +1,89 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        0 AS level,
+        CAST(c.c_first_name AS VARCHAR(100)) AS path
+    FROM 
+        customer c
+    WHERE 
+        c.c_customer_sk IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        sr.sr_customer_sk,
+        sr.sr_return_quantity,
+        c.c_last_name,
+        sh.level + 1,
+        CAST(sh.path || ' -> ' || CAST(sr.sr_return_quantity AS VARCHAR) AS VARCHAR(100))
+    FROM 
+        store_returns sr
+    JOIN 
+        sales_hierarchy sh ON sr.sr_customer_sk = sh.c_customer_sk
+    WHERE 
+        sr.sr_return_quantity > 0
+),
+sales_summary AS (
+    SELECT 
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_quantity) AS total_units,
+        c.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.cd_gender
+),
+income_breakdown AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        COUNT(*) AS demographic_count
+    FROM 
+        household_demographics hd
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+),
+final_summary AS (
+    SELECT 
+        ss.*, 
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        DENSE_RANK() OVER (PARTITION BY ss.cd_gender ORDER BY ss.total_profit DESC) AS profit_rank
+    FROM 
+        sales_summary ss
+    LEFT JOIN 
+        income_breakdown ib ON ss.customer_count BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound
+)
+SELECT 
+    f.cd_gender,
+    f.total_profit,
+    f.total_orders,
+    f.total_units,
+    f.customer_count,
+    f.ib_lower_bound,
+    f.ib_upper_bound,
+    CASE 
+        WHEN f.total_profit IS NULL THEN 'No Profit'
+        ELSE 'Profit Exists'
+    END AS profit_status,
+    COALESCE(sh.path, 'No Hierarchy Data') AS sales_path
+FROM 
+    final_summary f
+LEFT JOIN 
+    sales_hierarchy sh ON f.customer_count = sh.c_customer_sk
+WHERE
+    f.profit_rank <= 10
+ORDER BY 
+    f.cd_gender, f.total_profit DESC;

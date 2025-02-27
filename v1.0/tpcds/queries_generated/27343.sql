@@ -1,0 +1,59 @@
+
+WITH processed_addresses AS (
+    SELECT
+        ca_address_sk,
+        CONCAT_WS(' ', ca_street_number, ca_street_name, ca_street_type, COALESCE(ca_suite_number, '')) AS full_address,
+        UPPER(ca_city) AS city_upper,
+        ca_state AS state_code,
+        REPLACE(ca_zip, '-', '') AS clean_zip
+    FROM
+        customer_address
+),
+gender_statistics AS (
+    SELECT
+        cd_gender,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        AVG(cd_dep_count) AS avg_dependents,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM
+        customer_demographics cd
+    JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY
+        cd_gender
+),
+sales_summary AS (
+    SELECT
+        ws.web_site_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM
+        web_sales ws
+    GROUP BY
+        ws.web_site_id
+),
+final_benchmarking AS (
+    SELECT
+        a.ca_address_sk,
+        a.full_address,
+        g.cd_gender,
+        g.customer_count,
+        g.avg_dependents,
+        s.total_orders,
+        s.total_sales,
+        s.unique_customers
+    FROM
+        processed_addresses a
+    LEFT JOIN gender_statistics g ON a.ca_address_sk = g.customer_count
+    LEFT JOIN sales_summary s ON a.ca_address_sk = s.total_orders
+)
+SELECT
+    fb.*,
+    CONCAT(fb.full_address, ' - ', fb.cd_gender) AS address_gender_combination
+FROM
+    final_benchmarking fb
+WHERE
+    fb.total_sales > 1000
+ORDER BY
+    fb.total_sales DESC
+LIMIT 50;

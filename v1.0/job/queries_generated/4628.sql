@@ -1,0 +1,58 @@
+WITH MovieRoleCounts AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS role_count,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(k.keywords, 'No keywords') AS keywords
+    FROM 
+        title m
+    LEFT JOIN (
+        SELECT 
+            mk.movie_id,
+            STRING_AGG(kw.keyword, ', ') AS keywords
+        FROM 
+            movie_keyword mk
+        JOIN 
+            keyword kw ON mk.keyword_id = kw.id
+        GROUP BY 
+            mk.movie_id
+    ) k ON m.id = k.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        mk.keywords,
+        r.role_count,
+        r.roles
+    FROM 
+        MoviesWithKeywords mk
+    LEFT JOIN 
+        MovieRoleCounts r ON mk.movie_id = r.movie_id
+    WHERE 
+        mk.keywords IS NOT NULL
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.keywords,
+    md.role_count,
+    COALESCE(md.roles, 'N/A') AS roles
+FROM 
+    MovieDetails md
+WHERE 
+    (md.role_count > 5 OR md.production_year > 2000)
+ORDER BY 
+    md.production_year DESC,
+    md.role_count DESC;

@@ -1,0 +1,60 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Starting with questions
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.PostTypeId,
+        p2.AcceptedAnswerId,
+        p2.CreationDate,
+        ph.Level + 1
+    FROM 
+        Posts p2
+    JOIN 
+        PostHierarchy ph ON p2.ParentId = ph.PostId
+)
+SELECT 
+    u.DisplayName AS User,
+    p.Title AS QuestionTitle,
+    p.CreationDate AS QuestionDate,
+    COUNT(DISTINCT CASE WHEN a.Id IS NOT NULL THEN a.Id END) AS AnswerCount,
+    SUM(COALESCE(v.Score, 0)) AS VoteScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    (SELECT AVG(DATEDIFF(SECOND, c.CreationDate, p.LastActivityDate)) 
+     FROM Comments c 
+     WHERE c.PostId = p.Id) AS AvgCommentAge,
+    MAX(COALESCE(b.Date, '1970-01-01'::timestamp)) AS LastBadgeDate, 
+    COUNT(b.Id) AS TotalBadges
+FROM 
+    PostHierarchy p
+LEFT JOIN 
+    Posts a ON p.PostId = a.ParentId AND a.PostTypeId = 2 -- Answers
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON v.PostId = p.PostId
+LEFT JOIN 
+    Tags t ON ',' || p.Tags || ',' LIKE '%' || ',' || t.TagName || ',' || '%' -- Tag filtering
+LEFT JOIN 
+    Badges b ON b.UserId = u.Id
+WHERE 
+    u.Reputation > 1000 -- Filter users with reputation above 1000
+GROUP BY 
+    u.DisplayName, p.Title, p.CreationDate
+HAVING 
+    COUNT(DISTINCT a.Id) > 0 -- Only include questions with answers
+ORDER BY 
+    VoteScore DESC, QuestionDate DESC
+LIMIT 10;

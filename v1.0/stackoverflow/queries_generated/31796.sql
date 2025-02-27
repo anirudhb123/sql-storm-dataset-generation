@@ -1,0 +1,75 @@
+WITH RecursivePostHierarchy AS (
+    -- Base case: Select all questions
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1
+
+    UNION ALL
+
+    -- Recursive case: Select answers related to the questions
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        a.CreationDate,
+        Level + 1
+    FROM Posts a
+    JOIN RecursivePostHierarchy rph ON a.ParentId = rph.PostId
+)
+
+SELECT 
+    p.Id AS PostId, 
+    p.Title AS QuestionTitle, 
+    p.CreationDate AS QuestionCreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    COALESCE(MAX(v.UpVoteCount), 0) AS TotalUpVotes,
+    COALESCE(MIN(v.DownVoteCount), 0) AS TotalDownVotes,
+    CASE 
+        WHEN u.Reputation > 1000 THEN 'Expert'
+        ELSE 'Novice'
+    END AS UserExpertise,
+    ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS PostRank
+FROM RecursivePostHierarchy p
+LEFT JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN Comments c ON p.PostId = c.PostId
+LEFT JOIN (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+    FROM Votes
+    GROUP BY PostId
+) v ON p.PostId = v.PostId
+WHERE p.Level = 1
+GROUP BY p.Id, p.Title, u.DisplayName, u.Reputation
+ORDER BY TotalUpVotes DESC, PostRank
+LIMIT 10;
+
+-- Check for any unclosed posts with users having negative reputation
+SELECT 
+    u.DisplayName,
+    COUNT(*) AS UnclosedPosts
+FROM Posts p
+JOIN Users u ON p.OwnerUserId = u.Id
+WHERE p.ClosedDate IS NULL
+AND u.Reputation < 0
+GROUP BY u.DisplayName
+HAVING COUNT(*) > 5
+ORDER BY UnclosedPosts DESC;
+
+-- Identify the most frequent close reasons and the percentage of posts they apply to
+SELECT 
+    cht.Name AS CloseReason,
+    COUNT(ph.Id) AS CloseCount,
+    COUNT(DISTINCT p.Id) * 100.0 / (SELECT COUNT(*) FROM Posts) AS Percentage
+FROM PostHistory ph
+JOIN CloseReasonTypes cht ON ph.Comment = cht.Id
+WHERE ph.PostHistoryTypeId = 10 -- Only closed posts
+GROUP BY cht.Name
+ORDER BY CloseCount DESC;

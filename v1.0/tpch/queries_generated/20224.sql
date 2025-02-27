@@ -1,0 +1,67 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        p.p_container, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_container ORDER BY p.p_retailprice DESC) AS rank_by_price
+    FROM 
+        part p
+), 
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_name,
+        CASE 
+            WHEN ps.ps_availqty IS NULL THEN 'Out of Stock'
+            WHEN ps.ps_availqty < 50 THEN 'Limited Stock'
+            ELSE 'In Stock'
+        END AS stock_status
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+), 
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        c.c_name,
+        DENSE_RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+)
+
+SELECT 
+    cp.c_name,
+    SUM(cp.o_totalprice) AS total_spent,
+    COUNT(DISTINCT cp.o_orderkey) AS order_count,
+    STRING_AGG(DISTINCT CONCAT_WS(':', sp.s_name, sp.stock_status) ORDER BY sp.s_name) AS supplier_status,
+    AVG(sp.ps_supplycost) AS avg_supply_cost,
+    COUNT(rp.rank_by_price) AS top_parts_count
+FROM 
+    CustomerOrders cp
+LEFT JOIN 
+    SupplierParts sp ON cp.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_orderkey = cp.o_orderkey)
+LEFT JOIN 
+    RankedParts rp ON rp.p_partkey = sp.ps_partkey AND rp.rank_by_price <= 5
+WHERE 
+    cp.order_rank = 1 
+    AND (cp.o_totalprice * 0.1) > (SELECT AVG(o_totalprice) FROM orders)
+GROUP BY 
+    cp.c_name
+HAVING 
+    SUM(cp.o_totalprice) > 1000
+ORDER BY 
+    total_spent DESC
+LIMIT 10;

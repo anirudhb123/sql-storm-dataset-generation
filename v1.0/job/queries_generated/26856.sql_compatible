@@ -1,0 +1,66 @@
+
+WITH NameCount AS (
+    SELECT 
+        ak.name AS aka_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.name
+),
+TopActors AS (
+    SELECT 
+        n.id,
+        n.name,
+        nc.movie_count
+    FROM 
+        name n
+    JOIN 
+        NameCount nc ON n.name = nc.aka_name
+    WHERE 
+        nc.movie_count > 10
+),
+MovieDetails AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        STRING_AGG(DISTINCT mn.name, ',' ORDER BY mn.name) AS actors
+    FROM 
+        aka_title mt
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    JOIN 
+        TopActors ta ON ci.person_id = ta.id
+    JOIN 
+        name mn ON ta.id = mn.id
+    GROUP BY 
+        mt.title, mt.production_year, mt.kind_id
+),
+KeywordDetails AS (
+    SELECT 
+        mt.title,
+        mw.keyword
+    FROM 
+        MovieDetails mt
+    JOIN 
+        movie_keyword mk ON mt.title = mk.movie_id
+    JOIN 
+        keyword mw ON mk.keyword_id = mw.id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.kind_id,
+    md.actors,
+    STRING_AGG(DISTINCT kd.keyword, ',' ORDER BY kd.keyword) AS keywords
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    KeywordDetails kd ON md.title = kd.title
+GROUP BY 
+    md.title, md.production_year, md.kind_id, md.actors
+ORDER BY 
+    md.production_year DESC, md.title;

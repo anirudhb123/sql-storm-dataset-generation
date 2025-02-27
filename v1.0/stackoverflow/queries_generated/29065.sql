@@ -1,0 +1,81 @@
+WITH RankedUserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Score,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')))
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ActionCount,
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS Comments
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+GrowthMetrics AS (
+    SELECT 
+        UserId,
+        SUM(CASE WHEN PostHistoryTypeId = 4 THEN 1 ELSE 0 END) AS TitleEdits,
+        SUM(CASE WHEN PostHistoryTypeId = 5 THEN 1 ELSE 0 END) AS BodyEdits,
+        SUM(CASE WHEN PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseActions,
+        SUM(CASE WHEN PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenActions
+    FROM 
+        PostHistory
+    GROUP BY 
+        UserId
+)
+SELECT 
+    ruh.UserId,
+    ruh.DisplayName,
+    ruh.Reputation,
+    ruh.ReputationRank,
+    ps.PostId,
+    ps.Title,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.Score,
+    ps.TagsList,
+    pha.ActionCount,
+    pha.Comments,
+    gm.TitleEdits,
+    gm.BodyEdits,
+    gm.CloseActions,
+    gm.ReopenActions
+FROM 
+    RankedUserReputation ruh
+LEFT JOIN 
+    PostStats ps ON ps.PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = ruh.UserId)
+LEFT JOIN 
+    PostHistoryAnalysis pha ON pha.PostId = ps.PostId
+LEFT JOIN 
+    GrowthMetrics gm ON gm.UserId = ruh.UserId
+WHERE 
+    ruh.Reputation > 1000
+ORDER BY 
+    ruh.Reputation DESC, 
+    ps.ViewCount DESC;

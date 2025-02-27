@@ -1,0 +1,85 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rp ON p.ParentId = rp.PostId
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        (SELECT COUNT(*) FROM Posts sub WHERE sub.ParentId = p.Id) AS AnswerCount 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.OwnerUserId,
+    ur.Reputation,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.AnswerCount,
+    (SELECT COUNT(*) FROM PostLinks pl WHERE pl.PostId = ps.PostId) AS RelatedPostCount,
+    CASE 
+        WHEN ph.Level IS NULL THEN 0 
+        ELSE ph.Level 
+    END AS HierarchyLevel,
+    COALESCE(ur.BadgeCount, 0) AS BadgeCount
+FROM 
+    PostStats ps
+LEFT JOIN 
+    RecursivePostHierarchy ph ON ps.PostId = ph.PostId
+LEFT JOIN 
+    UserReputation ur ON ps.OwnerUserId = ur.UserId
+WHERE 
+    ps.CommentCount > 0 AND 
+    ps.UpVotes > ps.DownVotes
+ORDER BY 
+    ps.UpVotes DESC, ps.CreationDate DESC
+LIMIT 100;

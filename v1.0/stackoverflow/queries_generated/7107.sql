@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        Count(c.Id) AS CommentCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Posts post ON rp.PostId = post.Id
+    JOIN 
+        Users u ON post.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON post.Id = c.PostId
+    WHERE 
+        rp.Rank <= 10
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score, rp.ViewCount, u.DisplayName, u.Reputation
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.OwnerDisplayName,
+    tp.OwnerReputation,
+    tp.CommentCount,
+    pt.Name AS PostTypeName,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopPosts tp
+JOIN 
+    PostTypes pt ON tp.PostId IN (SELECT Id FROM Posts WHERE PostTypeId = pt.Id)
+LEFT JOIN 
+    Tags t ON t.ExcerptPostId = tp.PostId
+GROUP BY 
+    tp.PostId, tp.Title, tp.Score, tp.ViewCount, tp.OwnerDisplayName, tp.OwnerReputation
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

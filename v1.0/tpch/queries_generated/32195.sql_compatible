@@ -1,0 +1,71 @@
+
+WITH RECURSIVE supplier_part_summaries AS (
+    SELECT 
+        ps_partkey,
+        s_suppkey,
+        SUM(ps_availqty * ps_supplycost) AS total_supply_value,
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY SUM(ps_availqty * ps_supplycost) DESC) AS rank
+    FROM 
+        partsupp 
+    GROUP BY 
+        ps_partkey, s_suppkey
+),
+top_suppliers AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        sp.total_supply_value
+    FROM 
+        part p
+    JOIN 
+        supplier_part_summaries sp ON p.p_partkey = sp.ps_partkey
+    WHERE 
+        sp.rank = 1
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        AVG(c.c_acctbal) AS avg_account_balance
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    t.p_partkey,
+    t.p_name,
+    t.p_retailprice,
+    t.total_supply_value,
+    o.o_orderkey,
+    o.total_order_value,
+    o.customer_count,
+    o.avg_account_balance
+FROM 
+    top_suppliers t
+LEFT JOIN 
+    order_summary o ON t.p_partkey IN (
+        SELECT 
+            l.l_partkey
+        FROM 
+            lineitem l
+        JOIN 
+            orders o2 ON l.l_orderkey = o2.o_orderkey
+        WHERE 
+            o2.o_orderdate > DATEADD(year, -1, '1998-10-01')
+    )
+WHERE 
+    t.total_supply_value IS NOT NULL
+ORDER BY 
+    t.total_supply_value DESC, 
+    o.total_order_value DESC NULLS LAST
+LIMIT 100;

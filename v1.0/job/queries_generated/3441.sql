@@ -1,0 +1,55 @@
+WITH movie_details AS (
+    SELECT 
+        at.title, 
+        at.production_year, 
+        ARRAY_AGG(DISTINCT cn.name) AS company_names,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        COALESCE(SUM(mi.info::numeric), 0) AS total_info_length
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_companies mc ON at.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        complete_cast cc ON at.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        movie_info mi ON at.id = mi.movie_id 
+    WHERE 
+        at.production_year IS NOT NULL 
+        AND at.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY 
+        at.id
+),
+ranked_movies AS (
+    SELECT 
+        title, 
+        production_year, 
+        company_names, 
+        total_cast, 
+        total_info_length,
+        RANK() OVER (PARTITION BY production_year ORDER BY total_cast DESC) AS cast_rank
+    FROM 
+        movie_details
+)
+SELECT 
+    r.title, 
+    r.production_year, 
+    r.company_names, 
+    r.total_cast, 
+    r.total_info_length,
+    CASE 
+        WHEN r.total_cast > 50 THEN 'High Cast'
+        WHEN r.total_cast BETWEEN 20 AND 50 THEN 'Moderate Cast'
+        ELSE 'Low Cast'
+    END AS cast_category
+FROM 
+    ranked_movies r
+WHERE 
+    r.cast_rank <= 5
+ORDER BY 
+    r.production_year DESC, 
+    r.total_cast DESC
+LIMIT 10;

@@ -1,0 +1,49 @@
+WITH RecursiveSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rn
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+PartPriceGross AS (
+    SELECT p.p_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+HighBuyers AS (
+    SELECT c.c_custkey, COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY c.c_custkey
+    HAVING SUM(o.o_totalprice) > 10000
+),
+MixedResults AS (
+    SELECT r.r_name, COALESCE(SUM(ppg.total_cost), 0) AS total_part_cost,
+           COALESCE(MAX(hb.total_spent), 0) AS max_spent,
+           COALESCE(SUM(hb.order_count), 0) AS total_orders
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN PartPriceGross ppg ON s.s_suppkey = ppg.ps_partkey
+    LEFT JOIN HighBuyers hb ON s.s_nationkey = hb.c_custkey
+    GROUP BY r.r_name
+),
+FinalResults AS (
+    SELECT r.r_name,
+           CASE WHEN total_orders IS NULL THEN 'No Orders' ELSE 'Has Orders' END AS order_status,
+           CASE WHEN total_part_cost IS NULL THEN 0 ELSE total_part_cost END AS calculated_cost,
+           DENSE_RANK() OVER (ORDER BY total_part_cost DESC NULLS LAST) AS rank_cost,
+           ROW_NUMBER() OVER (PARTITION BY order_status ORDER BY calculated_cost DESC) AS order_status_rank
+    FROM MixedResults r
+)
+SELECT r.r_name, 
+       r.order_status, 
+       r.calculated_cost, 
+       r.rank_cost, 
+       COALESCE(r.order_status_rank, 0) AS status_rank
+FROM FinalResults r
+WHERE r.rank_cost <= 5 OR (r.order_status = 'No Orders' AND r.calculated_cost > 0)
+ORDER BY r.rank_cost DESC, r.calculated_cost ASC;

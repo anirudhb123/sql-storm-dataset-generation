@@ -1,0 +1,62 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level + 1
+    FROM
+        movie_hierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE
+        mh.level < 5  -- Limit hierarchy depth for performance
+)
+
+SELECT
+    m.title AS main_title,
+    m.production_year,
+    a.name AS actor_name,
+    ROW_NUMBER() OVER (PARTITION BY m.movie_id ORDER BY a.name) AS actor_rank,
+    c.kind AS cast_type,
+    COALESCE(ci.note, 'No note provided') AS casting_note,
+    CASE 
+        WHEN a.id IS NULL THEN 'Missing Actor'
+        ELSE 'Active Actor'
+    END AS actor_status,
+    ARRAY_AGG(DISTINCT kw.keyword ORDER BY kw.keyword) AS movie_keywords
+FROM
+    movie_hierarchy m
+LEFT JOIN
+    cast_info ci ON ci.movie_id = m.movie_id
+LEFT JOIN
+    aka_name a ON a.person_id = ci.person_id
+LEFT JOIN
+    comp_cast_type c ON ci.person_role_id = c.id
+LEFT JOIN
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN
+    keyword kw ON mk.keyword_id = kw.id
+WHERE
+    m.production_year >= 2000 
+    AND m.production_year <= 2023
+    AND (a.name IS NOT NULL OR a.surname_pcode IS NULL)
+GROUP BY
+    m.movie_id, m.title, m.production_year, a.name, ci.note, c.kind
+HAVING
+    COUNT(DISTINCT a.id) > 0  -- Ensure at least one actor is present
+ORDER BY
+    m.production_year DESC, actor_rank;

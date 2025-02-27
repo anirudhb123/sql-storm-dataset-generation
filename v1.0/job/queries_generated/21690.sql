@@ -1,0 +1,76 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, 
+           m.title, 
+           m.production_year,
+           0 AS depth
+    FROM aka_title m
+    WHERE m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT m.id AS movie_id,
+           m.title,
+           m.production_year,
+           mh.depth + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+),
+cast_ranking AS (
+    SELECT c.movie_id,
+           a.name AS actor_name,
+           ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank,
+           COUNT(c.id) OVER (PARTITION BY c.movie_id) AS total_cast
+    FROM cast_info c
+    JOIN aka_name a ON a.person_id = c.person_id
+),
+movie_summary AS (
+    SELECT m.movie_id,
+           m.title,
+           m.production_year,
+           COALESCE(cr.total_cast, 0) AS total_cast,
+           COALESCE(STRING_AGG(cr.actor_name, ', '), 'No Cast') AS cast_names
+    FROM movie_hierarchy m
+    LEFT JOIN cast_ranking cr ON m.movie_id = cr.movie_id
+    GROUP BY m.movie_id, m.title, m.production_year
+),
+keyword_summary AS (
+    SELECT mk.movie_id,
+           STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+SELECT ms.title,
+       ms.production_year,
+       ms.total_cast,
+       ms.cast_names,
+       COALESCE(ks.keywords, 'No Keywords') AS keywords,
+       COALESCE(COUNT(DISTINCT mc.company_id), 0) AS total_companies,
+       CASE 
+           WHEN ms.production_year IS NULL THEN 'Unknown Year'
+           WHEN ms.production_year < 2000 THEN 'Classic'
+           ELSE 'Modern'
+       END AS era
+FROM movie_summary ms
+LEFT JOIN movie_companies mc ON ms.movie_id = mc.movie_id
+LEFT JOIN keyword_summary ks ON ms.movie_id = ks.movie_id
+GROUP BY ms.title, ms.production_year, ms.total_cast, ms.cast_names, ks.keywords
+ORDER BY ms.production_year DESC, ms.total_cast DESC
+LIMIT 100;
+
+This SQL query combines several advanced techniques and constructs:
+
+1. **Common Table Expressions (CTEs)**: It uses multiple CTEs to build a movie hierarchy, rank cast members, summarize movies with their cast, and gather keywords for the movies.
+
+2. **Window Functions**: The query employs the `ROW_NUMBER()` and `COUNT()` window functions for actor ranking and to compute the total cast for each movie.
+
+3. **String Aggregation**: The `STRING_AGG()` function is utilized to create comma-separated lists of actor names and keywords associated with each movie.
+
+4. **Outer Joins**: There are `LEFT JOIN` operations to ensure that movies without related cast information or keywords are still included in the results.
+
+5. **Complicated Case Logic**: The `CASE` statement categorizes movies into 'Classic' or 'Modern' based on their production year.
+
+6. **Handling NULL Values**: The `COALESCE` function is used to manage NULL values, providing default text when no keywords or cast information is available.
+
+The query is designed to be intricate, displaying a rich array of SQL capabilities while also being structured for real-world data inquiries regarding movie information.

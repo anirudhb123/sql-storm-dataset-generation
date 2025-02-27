@@ -1,0 +1,90 @@
+
+WITH RECURSIVE RelatedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        0 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year = 2020
+    
+    UNION ALL
+    
+    SELECT 
+        lm.linked_movie_id,
+        lm.title,
+        rm.depth + 1
+    FROM 
+        RelatedMovies rm
+    JOIN 
+        movie_link ml ON ml.movie_id = rm.movie_id
+    JOIN 
+        aka_title lm ON lm.id = ml.linked_movie_id
+    WHERE 
+        rm.depth < 3
+), RankedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        ROW_NUMBER() OVER (PARTITION BY rm.depth ORDER BY lm.production_year DESC) AS rank
+    FROM 
+        RelatedMovies rm
+    JOIN 
+        aka_title lm ON lm.id = rm.movie_id
+), CastInfoSummary AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    GROUP BY 
+        ci.movie_id
+), MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        COALESCE(cis.actor_count, 0) AS actor_count,
+        cis.actor_names,
+        CASE 
+            WHEN ci.status_id = 1 THEN 'Released' 
+            ELSE 'Pending' 
+        END AS release_status
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        complete_cast ci ON ci.movie_id = rm.movie_id
+    LEFT JOIN 
+        CastInfoSummary cis ON cis.movie_id = rm.movie_id
+)
+SELECT 
+    md.movie_title,
+    md.actor_count,
+    md.actor_names,
+    md.release_status,
+    CASE 
+        WHEN md.actor_count > 5 THEN 'Large Cast'
+        WHEN md.actor_count BETWEEN 3 AND 5 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 
+            FROM movie_info mi 
+            WHERE mi.movie_id = md.movie_id 
+              AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget')
+              AND mi.info IS NOT NULL
+        ) THEN 'Budget Available'
+        ELSE 'Budget Unknown'
+    END AS budget_status
+FROM 
+    MovieDetails md
+WHERE 
+    md.release_status = 'Released'
+ORDER BY 
+    md.actor_count DESC, 
+    md.movie_title
+FETCH FIRST 50 ROWS ONLY;

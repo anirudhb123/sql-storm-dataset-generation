@@ -1,0 +1,101 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with Questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS RevisionCount,
+        MAX(ph.CreationDate) AS LastRevisionDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        ph.UserDisplayName AS ClosedBy,
+        ph.CreationDate AS ClosedDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  -- Closed or Reopened
+),
+UserRankings AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        DENSE_RANK() OVER (ORDER BY ua.TotalBounty DESC) AS BountyRank,
+        DENSE_RANK() OVER (ORDER BY ua.TotalPosts DESC) AS PostsRank,
+        RANK() OVER (ORDER BY (ua.UpVotes - ua.DownVotes) DESC) AS ScoreRank
+    FROM 
+        UserActivity ua
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    COALESCE(ps.TotalPosts, 0) AS UserTotalPosts,
+    COALESCE(ps.UpVotes, 0) AS UserUpVotes,
+    COALESCE(ps.DownVotes, 0) AS UserDownVotes,
+    uar.BountyRank,
+    uar.PostsRank,
+    uar.ScoreRank,
+    p.Title AS QuestionTitle,
+    p.CreationDate AS QuestionDate,
+    cp.ClosedBy AS ClosedByUser,
+    cp.ClosedDate AS CloseDate
+FROM 
+    UserActivity ps
+JOIN 
+    UserRankings uar ON ps.UserId = uar.UserId
+LEFT JOIN 
+    RecursivePostHierarchy r ON r.PostId IN (SELECT Id FROM Posts WHERE PostTypeId = 1)  -- User's Questions
+LEFT JOIN 
+    ClosedPosts cp ON cp.Id = r.PostId
+WHERE 
+    uar.BountyRank <= 10                     -- Filter top users based on bounty
+    OR uar.PostsRank <= 10                    -- Filter top users based on posts
+ORDER BY 
+    uar.BountyRank, uar.PostsRank, uar.ScoreRank;

@@ -1,0 +1,45 @@
+
+WITH RECURSIVE supplier_chain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT ps.ps_suppkey, s.s_name, s.s_nationkey, sc.level + 1
+    FROM partsupp ps
+    JOIN supplier_chain sc ON ps.ps_suppkey = sc.s_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > sc.level * 100
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY o.o_orderkey
+)
+
+SELECT 
+    p.p_name, 
+    COUNT(DISTINCT sc.s_suppkey) AS unique_suppliers,
+    AVG(os.total_revenue) AS avg_order_revenue,
+    REGEXP_REPLACE(p.p_comment, '(limited|special)', 'oceanic') AS modified_comment
+FROM part p
+LEFT OUTER JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT OUTER JOIN supplier_chain sc ON ps.ps_suppkey = sc.s_suppkey
+LEFT JOIN order_summary os ON os.o_orderkey = ps.ps_partkey
+WHERE p.p_size IN (SELECT DISTINCT l.l_quantity 
+                   FROM lineitem l 
+                   WHERE l.l_returnflag = 'R' 
+                   AND l.l_tax IS NOT NULL)
+  AND (p.p_retailprice BETWEEN 100 AND 200 OR COALESCE(p.p_comment, '') LIKE '%custom%')
+GROUP BY p.p_name, p.p_comment
+HAVING COUNT(DISTINCT sc.s_suppkey) > COALESCE((SELECT COUNT(*)
+                                                 FROM supplier s 
+                                                 WHERE s.s_nationkey = (SELECT n.n_nationkey 
+                                                                        FROM nation n 
+                                                                        WHERE n.n_name = 'USA')), 0)
+ORDER BY unique_suppliers DESC, avg_order_revenue ASC
+OFFSET 5 ROWS 
+FETCH NEXT 10 ROWS ONLY;

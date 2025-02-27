@@ -1,0 +1,75 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalAnswers,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS TotalQuestions,
+        COALESCE(SUM(V.Id), 0) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.CreationDate, 
+        P.ViewCount, 
+        P.Score, 
+        P.Tags,
+        COUNT(C.ID) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id
+),
+TagStatistics AS (
+    SELECT 
+        T.TagName, 
+        COUNT(P.Id) AS AssociatedPosts, 
+        AVG(P.ViewCount) AS AverageViews
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    US.TotalPosts,
+    US.TotalQuestions,
+    US.TotalAnswers,
+    US.TotalVotes,
+    PA.Title AS PostTitle,
+    PA.CreationDate AS PostCreationDate,
+    PA.ViewCount AS PostViews,
+    PA.Score AS PostScore,
+    PA.CommentCount,
+    TS.TagName,
+    TS.AssociatedPosts,
+    TS.AverageViews
+FROM 
+    UserStatistics US
+JOIN 
+    Users U ON U.Id = US.UserId
+LEFT JOIN 
+    PostActivity PA ON PA.CommentCount > 0
+LEFT JOIN 
+    TagStatistics TS ON PA.Tags LIKE CONCAT('%', TS.TagName, '%')
+WHERE
+    U.Reputation > 1000
+ORDER BY 
+    U.Reputation DESC, 
+    PA.ViewCount DESC, 
+    TS.AssociatedPosts DESC;

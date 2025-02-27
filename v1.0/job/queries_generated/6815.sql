@@ -1,0 +1,25 @@
+WITH ranked_titles AS (
+    SELECT t.id AS title_id, t.title, t.production_year, ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+complete_cast_info AS (
+    SELECT c.movie_id, GROUP_CONCAT(DISTINCT ak.name) AS actors, GROUP_CONCAT(DISTINCT COALESCE(cn.name, 'Unknown Company')) AS companies
+    FROM complete_cast cc
+    JOIN aka_title ak ON cc.movie_id = ak.movie_id
+    LEFT JOIN movie_companies mc ON cc.movie_id = mc.movie_id
+    LEFT JOIN company_name cn ON mc.company_id = cn.imdb_id
+    GROUP BY cc.movie_id
+),
+info_summary AS (
+    SELECT m.movie_id, STRING_AGG(DISTINCT mi.info ORDER BY mi.info_type_id) AS movie_info
+    FROM movie_info mi
+    JOIN complete_cast cc ON mi.movie_id = cc.movie_id
+    GROUP BY m.movie_id
+)
+SELECT rt.title, rt.production_year, cci.actors, cci.companies, is.movie_info
+FROM ranked_titles rt
+JOIN complete_cast_info cci ON rt.title_id = cci.movie_id
+JOIN info_summary is ON rt.title_id = is.movie_id
+WHERE rt.year_rank <= 5
+ORDER BY rt.production_year DESC, rt.title;

@@ -1,0 +1,70 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        1 AS level,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        web_sales w ON c.c_customer_sk = w.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id
+    
+    UNION ALL
+    
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        sh.level + 1,
+        sh.total_sales + SUM(ws_ext_sales_price) 
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        customer c ON c.c_current_cdemo_sk = sh.c_customer_sk
+    JOIN 
+        web_sales w ON c.c_customer_sk = w.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id, sh.level
+)
+
+SELECT 
+    ca.ca_city,
+    COUNT(DISTINCT c.c_customer_id) AS total_customers,
+    SUM(ws.ws_ext_sales_price) AS total_web_sales,
+    AVG(ws.ws_net_profit) AS avg_net_profit_per_order,
+    MAX(ws.ws_sales_price) AS max_sales_price,
+    MIN(ws.ws_sales_price) AS min_sales_price,
+    DENSE_RANK() OVER (ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+FROM 
+    web_sales ws
+JOIN 
+    customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    (SELECT 
+         ci.c_customer_sk, 
+         SUM(ws_ext_sales_price) AS total_sales 
+     FROM 
+         web_sales ws 
+     LEFT JOIN 
+         customer ci ON ws.ws_ship_customer_sk = ci.c_customer_sk 
+     GROUP BY 
+         ci.c_customer_sk) subquery_sales
+ON 
+    c.c_customer_sk = subquery_sales.c_customer_sk
+WHERE 
+    ca.ca_state = 'CA' 
+    AND (ws.ws_sold_date_sk BETWEEN 2458311 AND 2458626) 
+    AND c.c_birth_year < (YEAR(CURDATE()) - 30)
+GROUP BY 
+    ca.ca_city
+HAVING 
+    total_web_sales > 10000 
+ORDER BY 
+    sales_rank,
+    total_customers DESC;
+
+```

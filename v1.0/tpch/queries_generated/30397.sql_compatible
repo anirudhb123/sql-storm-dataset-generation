@@ -1,0 +1,99 @@
+
+WITH RECURSIVE region_sales AS (
+    SELECT 
+        r.r_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        1 AS level
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        r.r_name
+
+    UNION ALL
+
+    SELECT 
+        r.r_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        r.level + 1 AS level
+    FROM 
+        region_sales r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        r.r_name, r.level
+),
+sales_ranks AS (
+    SELECT 
+        r.r_name,
+        r.total_revenue,
+        DENSE_RANK() OVER (ORDER BY r.total_revenue DESC) AS revenue_rank
+    FROM 
+        region_sales r
+    WHERE 
+        r.total_revenue IS NOT NULL
+),
+active_customers AS (
+    SELECT 
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' 
+    GROUP BY 
+        c.c_name
+),
+customers_with_high_spending AS (
+    SELECT 
+        c.c_name,
+        c.total_orders,
+        c.total_spent,
+        CASE 
+            WHEN c.total_spent > 10000 THEN 'High'
+            WHEN c.total_spent BETWEEN 5000 AND 10000 THEN 'Medium'
+            ELSE 'Low'
+        END AS spending_category
+    FROM 
+        active_customers c
+)
+SELECT 
+    r.r_name AS region,
+    s.revenue_rank,
+    c.c_name AS customer_name,
+    c.total_orders,
+    c.total_spent,
+    c.spending_category,
+    COALESCE(r.total_revenue, 0) AS total_revenue
+FROM 
+    sales_ranks s
+FULL OUTER JOIN 
+    customers_with_high_spending c ON s.revenue_rank = c.total_orders
+LEFT JOIN 
+    region r ON r.r_name = c.c_name
+WHERE 
+    (c.total_spent IS NOT NULL OR r.total_revenue IS NOT NULL)
+ORDER BY 
+    total_revenue DESC, customer_name;

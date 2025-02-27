@@ -1,0 +1,62 @@
+
+WITH TagCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        T.TagName,
+        COUNT(*) AS TagUsage
+    FROM 
+        Posts P
+    JOIN 
+        Tags T ON POSITION(T.TagName IN P.Tags) > 0
+    GROUP BY 
+        P.Id, T.TagName
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostsCreated
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+HighScoringPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.Score > 10
+),
+TagUsageStats AS (
+    SELECT 
+        TC.PostId,
+        TC.TagName,
+        TC.TagUsage,
+        UR.Reputation AS UserReputation
+    FROM 
+        TagCounts TC
+    JOIN 
+        HighScoringPosts HSP ON TC.PostId = HSP.Id
+    JOIN 
+        UserReputation UR ON HSP.OwnerDisplayName = UR.UserId
+)
+SELECT 
+    TUS.TagName,
+    SUM(TUS.TagUsage) AS TotalUsage,
+    AVG(TUS.UserReputation) AS AverageUserReputation
+FROM 
+    TagUsageStats TUS
+GROUP BY 
+    TUS.TagName
+ORDER BY 
+    TotalUsage DESC
+LIMIT 10;

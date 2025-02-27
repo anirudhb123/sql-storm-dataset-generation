@@ -1,0 +1,59 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(sr_return_quantity, 0)) AS total_returned,
+        SUM(COALESCE(sr_return_amt_inc_tax, 0)) AS total_returned_value,
+        COUNT(DISTINCT sr_ticket_number) AS refund_count
+    FROM
+        customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+WebReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS web_return_count,
+        SUM(wr_return_amt_inc_tax) AS web_return_value
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+ReturnStats AS (
+    SELECT 
+        cr.c_customer_id,
+        cr.total_returned,
+        cr.total_returned_value,
+        wr.web_return_count,
+        wr.web_return_value,
+        (SELECT COUNT(*) FROM pattern_ctl ct WHERE ct.ct_returning_cdemo_sk = cr.c_customer_id) AS unique_patterns
+    FROM 
+        CustomerReturns cr
+    LEFT JOIN WebReturns wr ON cr.c_customer_id = wr.wr_returning_customer_sk
+),
+RankedReturns AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY total_returned_value DESC) AS rank_by_value,
+        RANK() OVER (ORDER BY total_returned DESC) AS rank_by_count
+    FROM 
+        ReturnStats
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_returned > 100 AND web_return_count IS NULL THEN 'High Store Return'
+        WHEN web_return_value IS NOT NULL AND unique_patterns > 10 THEN 'Frequent Web Returns'
+        ELSE 'Normal'
+    END AS return_category,
+    COALESCE(NULLIF(total_returned_value, 0), NULL) AS total_value_adjusted
+FROM 
+    RankedReturns
+WHERE 
+    (rank_by_value <= 10 OR rank_by_count <= 10) 
+    AND (total_returned_value BETWEEN 100.00 AND 10000.00 OR total_returned < 220)
+ORDER BY 
+    rank_by_value, rank_by_count DESC
+OPTION (MAXRECURSION 0);

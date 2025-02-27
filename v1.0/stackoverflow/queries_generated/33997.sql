@@ -1,0 +1,92 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL  -- root posts (questions)
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStatistics AS (
+    SELECT 
+        ph.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.Score IS NULL THEN 0 ELSE p.Score END) AS TotalScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHierarchy ph ON p.Id = ph.PostId
+    GROUP BY 
+        ph.OwnerUserId
+),
+UsersWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+CombinedStats AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(p.TotalPosts, 0) AS TotalPosts,
+        COALESCE(p.TotalQuestions, 0) AS TotalQuestions,
+        COALESCE(p.TotalAnswers, 0) AS TotalAnswers,
+        COALESCE(p.TotalScore, 0) AS TotalScore,
+        b.BadgeCount
+    FROM 
+        UsersWithBadges u
+    LEFT JOIN 
+        PostStatistics p ON u.UserId = p.OwnerUserId
+    LEFT JOIN 
+        UsersWithBadges b ON u.UserId = b.UserId
+)
+SELECT 
+    cs.UserId,
+    cs.DisplayName,
+    cs.Reputation,
+    cs.TotalPosts,
+    cs.TotalQuestions,
+    cs.TotalAnswers,
+    cs.TotalScore,
+    CASE 
+        WHEN cs.Reputation > 1000 THEN 'Highly Reputable'
+        WHEN cs.Reputation BETWEEN 500 AND 1000 THEN 'Moderately Reputable'
+        ELSE 'Newbie'
+    END AS ReputationCategory,
+    COALESCE(cs.BadgeCount, 0) AS BadgeCount
+FROM 
+    CombinedStats cs
+WHERE 
+    cs.TotalQuestions > 0 AND
+    cs.TotalAnswers > 0
+ORDER BY 
+    cs.TotalScore DESC, 
+    cs.Reputation DESC
+LIMIT 10;

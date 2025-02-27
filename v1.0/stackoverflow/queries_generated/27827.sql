@@ -1,0 +1,62 @@
+WITH TaggedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Tags,
+        U.DisplayName AS OwnerDisplayName,
+        PH.CreationDate AS LastEdit,
+        PH.UserDisplayName AS LastEditor,
+        COALESCE(PH.Text::text, 'No Recent Changes') AS LastChangeDetails
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.PostTypeId = 1  -- Only considering questions
+),
+TagAnalytics AS (
+    SELECT 
+        tag,
+        COUNT(*) AS PostCount,
+        AVG(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - P.CreationDate)) / 86400) AS AvgDaysOld,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed
+    FROM 
+        TaggedPosts P
+    CROSS JOIN 
+        LATERAL UNNEST(STRING_TO_ARRAY(P.Tags, '> <')) AS tag
+    GROUP BY 
+        tag
+),
+UserActivity AS (
+    SELECT 
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionsAsked,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.DisplayName
+)
+SELECT 
+    T.tag,
+    T.PostCount,
+    T.AvgDaysOld,
+    T.TagsUsed,
+    U.DisplayName,
+    U.QuestionsAsked,
+    U.UpVotesReceived,
+    U.DownVotesReceived
+FROM 
+    TagAnalytics T
+JOIN 
+    UserActivity U ON T.PostCount = U.QuestionsAsked
+ORDER BY 
+    T.PostCount DESC, 
+    U.UpVotesReceived DESC;

@@ -1,0 +1,53 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_custkey, 0 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, oh.o_custkey, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE oh.level < 5 AND o.o_orderdate > cast('1998-10-01' as date) - interval '1 year'
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+LoyalCustomers AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > ALL (SELECT c2.c_acctbal FROM customer c2 WHERE c2.c_nationkey = c.c_nationkey)
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COUNT(o.o_orderkey) > 3
+)
+SELECT DISTINCT
+    rh.o_orderkey,
+    rh.o_orderdate,
+    lc.c_name,
+    SS.s_name,
+    CASE 
+        WHEN lc.order_count > 5 THEN 'Frequent'
+        ELSE 'Occasional'
+    END AS customer_type,
+    ROW_NUMBER() OVER (PARTITION BY lc.c_custkey ORDER BY lc.avg_order_value DESC) AS rank
+FROM OrderHierarchy rh
+JOIN LoyalCustomers lc ON rh.o_custkey = lc.c_custkey
+LEFT JOIN SupplierStats SS ON SS.total_supplycost > 10000
+WHERE lc.avg_order_value IS NOT NULL
+AND EXISTS (
+    SELECT 1
+    FROM lineitem l
+    WHERE l.l_orderkey = rh.o_orderkey
+      AND l.l_discount BETWEEN 0.05 AND 0.20
+      AND l.l_quantity > (SELECT AVG(l2.l_quantity) FROM lineitem l2 WHERE l2.l_orderkey = rh.o_orderkey)
+)
+AND rh.o_orderdate = (
+    SELECT MAX(o2.o_orderdate)
+    FROM orders o2
+    WHERE o2.o_orderkey = rh.o_orderkey
+      AND o2.o_orderstatus = 'O'
+)
+ORDER BY customer_type, lc.avg_order_value DESC
+LIMIT 50;

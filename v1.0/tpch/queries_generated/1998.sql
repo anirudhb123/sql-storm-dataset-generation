@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o 
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2024-01-01'
+),
+SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+FilteredSuppliers AS (
+    SELECT 
+        s_total.s_suppkey,
+        s_total.s_name,
+        s_total.total_sales,
+        RANK() OVER (ORDER BY s_total.total_sales DESC) AS sales_rank
+    FROM 
+        SupplierSales s_total
+    WHERE 
+        s_total.total_sales > (SELECT AVG(total_sales) FROM SupplierSales)
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(f.suppliers, 'None') AS suppliers,
+    r.r_name,
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS number_of_customers,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    (SELECT s.s_suppkey, STRING_AGG(s.s_name, ', ') AS suppliers
+     FROM FilteredSuppliers fs
+     JOIN supplier s ON fs.s_suppkey = s.s_suppkey
+     GROUP BY fs.s_suppkey) AS f ON s.s_suppkey = f.s_suppkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+WHERE 
+    p.p_retailprice > 100.00
+GROUP BY 
+    p.p_name, p.p_retailprice, r.r_name, n.n_name
+ORDER BY 
+    total_revenue DESC, p.p_name
+FETCH FIRST 10 ROWS ONLY;

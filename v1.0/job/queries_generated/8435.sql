@@ -1,0 +1,26 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS cast_type,
+    c.nr_order AS order_in_cast,
+    p.info AS person_details,
+    COALESCE(mk.keyword, 'No Keywords') AS movie_keyword
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+JOIN 
+    person_info p ON a.person_id = p.person_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023 
+AND 
+    p.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%biography%')
+ORDER BY 
+    t.production_year DESC, 
+    c.nr_order ASC;

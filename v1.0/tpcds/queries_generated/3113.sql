@@ -1,0 +1,47 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+top_customers AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.ca_city,
+        ci.ca_state,
+        ci.cd_gender,
+        ci.cd_purchase_estimate
+    FROM customer_info ci
+    WHERE ci.rn <= 10
+),
+sales_summary AS (
+    SELECT
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales,
+        SUM(ws_net_paid_inc_tax) AS total_revenue
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+)
+SELECT 
+    tc.c_customer_id,
+    tc.ca_city,
+    tc.ca_state,
+    tc.cd_gender,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(ss.total_revenue, 0) AS total_revenue
+FROM top_customers tc
+LEFT JOIN sales_summary ss ON tc.c_customer_id = ss.ws_item_sk
+WHERE tc.cd_gender = 'M' OR tc.cd_marital_status = 'S'
+ORDER BY total_revenue DESC
+LIMIT 50;

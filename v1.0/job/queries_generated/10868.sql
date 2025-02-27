@@ -1,0 +1,20 @@
+SELECT 
+    k.keyword AS Keyword,
+    COUNT(DISTINCT m.id) AS MovieCount,
+    AVG(m.production_year) AS AverageProductionYear
+FROM 
+    keyword k
+JOIN 
+    movie_keyword mk ON k.id = mk.keyword_id
+JOIN 
+    aka_title a ON mk.movie_id = a.id
+JOIN 
+    movie_companies mc ON a.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    title t ON a.id = t.id
+GROUP BY 
+    k.keyword
+ORDER BY 
+    MovieCount DESC;

@@ -1,0 +1,70 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title,
+        0 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id, 
+        mt.title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+),
+ActorRoleCounts AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT rt.role, ', ') AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.person_id
+),
+PersonMovieInfo AS (
+    SELECT 
+        ak.name AS actor_name,
+        ah.movie_title,
+        COALESCE(mk.keyword, 'No Keyword') AS movie_keyword,
+        pi.info AS person_info
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title ah ON ci.movie_id = ah.id
+    LEFT JOIN 
+        movie_keyword mk ON ah.id = mk.movie_id
+    LEFT JOIN 
+        person_info pi ON ak.person_id = pi.person_id
+)
+SELECT 
+    ph.actor_name,
+    COUNT(DISTINCT ph.movie_title) AS total_movies,
+    SUM(CASE WHEN ph.movie_keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyworded_movies,
+    MAX(CASE WHEN mh.depth = 0 THEN ph.movie_title END) AS "Latest Movie",
+    ARRAY_AGG(DISTINCT ar.roles) AS roles_list,
+    MIN(pi.info) AS first_person_info
+FROM 
+    PersonMovieInfo ph
+JOIN 
+    ActorRoleCounts ar ON ph.actor_name = ar.person_id
+JOIN 
+    MovieHierarchy mh ON ph.movie_title = mh.movie_title
+GROUP BY 
+    ph.actor_name
+HAVING 
+    COUNT(DISTINCT ph.movie_title) > 5
+ORDER BY 
+    total_movies DESC
+LIMIT 10;

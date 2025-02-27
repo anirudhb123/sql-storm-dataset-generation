@@ -1,0 +1,68 @@
+WITH ranked_movies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title ASC) AS title_rank,
+        COUNT(DISTINCT mc.company_id) OVER (PARTITION BY mt.id) AS company_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+high_company_count AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        title_rank,
+        company_count
+    FROM 
+        ranked_movies
+    WHERE 
+        company_count > 3
+),
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        ak.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    GROUP BY 
+        ak.name, ak.person_id
+)
+SELECT 
+    hm.movie_id,
+    hm.title,
+    hm.production_year,
+    a.actor_name AS main_actor,
+    a.movie_count,
+    CASE 
+        WHEN hm.title_rank IS NULL THEN 'No Rank'
+        ELSE CAST(hm.title_rank AS TEXT) 
+    END AS title_rank,
+    COALESCE(hm.company_count, 0) AS company_count
+FROM 
+    high_company_count hm
+LEFT JOIN 
+    actor_info a ON hm.movie_id IN (
+        SELECT 
+            c.movie_id 
+        FROM 
+            cast_info c 
+        JOIN 
+            aka_name ak ON ak.person_id = c.person_id
+        WHERE 
+            ak.name LIKE '%Smith%' 
+        GROUP BY 
+            c.movie_id
+    )
+ORDER BY 
+    hm.production_year DESC, 
+    hm.title ASC
+LIMIT 50 OFFSET 10;

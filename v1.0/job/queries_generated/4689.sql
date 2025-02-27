@@ -1,0 +1,51 @@
+WITH RankedMovies AS (
+    SELECT
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        AVG(CASE WHEN ci.note IS NULL THEN 0 ELSE 1 END) AS average_note_presence
+    FROM
+        aka_title t
+    LEFT JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget')
+    LEFT JOIN
+        person_info pi ON c.person_id = pi.person_id
+    LEFT JOIN
+        info_type it ON pi.info_type_id = it.id
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY
+        t.id, t.title, t.production_year
+    HAVING
+        COUNT(DISTINCT c.person_id) > 10
+),
+TopMovies AS (
+    SELECT
+        title,
+        production_year,
+        actor_count,
+        average_note_presence,
+        RANK() OVER (ORDER BY actor_count DESC, production_year DESC) AS movie_rank
+    FROM
+        RankedMovies
+)
+SELECT
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    tm.average_note_presence,
+    COALESCE(ARRAY_AGG(DISTINCT mk.keyword ORDER BY mk.keyword) FILTER (WHERE mk.keyword IS NOT NULL), '{}') AS keywords
+FROM
+    TopMovies tm
+LEFT JOIN
+    movie_keyword mk ON tm.movie_id = mk.movie_id
+WHERE
+    tm.movie_rank <= 10
+GROUP BY
+    tm.title, tm.production_year, tm.actor_count, tm.average_note_presence
+ORDER BY
+    tm.actor_count DESC, tm.production_year DESC;

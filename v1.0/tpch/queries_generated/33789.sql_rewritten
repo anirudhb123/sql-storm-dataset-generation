@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT ps.s_suppkey, s.s_name, s.n_nationkey, s.s_acctbal, sh.level + 1
+    FROM partsupp ps
+    JOIN SupplierHierarchy sh ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+),
+FilteringOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_mktsegment
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderstatus = 'O'
+    AND c.c_mktsegment IN ('AUTO', 'FOOD')
+),
+PartSales AS (
+    SELECT p.p_partkey, p.p_name, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales
+    FROM part p
+    JOIN lineitem li ON p.p_partkey = li.l_partkey
+    WHERE li.l_shipdate >= DATE '1997-01-01'
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS num_customers,
+    COALESCE(SUM(sh.s_acctbal), 0) AS total_supplier_acctbal,
+    AVG(ps.total_sales) AS avg_part_sales
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN FilteringOrders fo ON s.s_nationkey = fo.c_nationkey
+LEFT JOIN PartSales ps ON ps.p_partkey IN (
+    SELECT DISTINCT li.l_partkey
+    FROM lineitem li
+    WHERE li.l_orderkey IN (SELECT o.o_orderkey FROM FilteringOrders o)
+)
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 0
+ORDER BY region_name DESC;

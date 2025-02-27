@@ -1,0 +1,27 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           RANK() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+), 
+TotalSales AS (
+    SELECT l.l_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    GROUP BY l.l_suppkey
+), 
+SalesWithRank AS (
+    SELECT ts.l_suppkey, ts.total_sales, rs.s_name
+    FROM TotalSales ts
+    JOIN RankedSuppliers rs ON ts.l_suppkey = rs.s_suppkey
+    WHERE rs.rank <= 5
+)
+SELECT rs.s_name, COALESCE(SUM(l.l_quantity), 0) AS total_quantity, 
+       COUNT(DISTINCT o.o_orderkey) AS total_orders
+FROM SalesWithRank rs
+LEFT JOIN lineitem l ON l.l_suppkey = rs.l_suppkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey AND o.o_orderstatus = 'O'
+WHERE l.l_shipdate >= DATE '2023-01-01' 
+  AND (l.l_discount IS NULL OR l.l_discount < 0.1)
+GROUP BY rs.s_name
+ORDER BY total_orders DESC, total_quantity DESC
+LIMIT 10;

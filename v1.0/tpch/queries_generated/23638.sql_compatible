@@ -1,0 +1,83 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rnk
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_container = 'SM CASE')
+), 
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts
+    FROM 
+        supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        COUNT(DISTINCT ps.ps_partkey) > 5
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus <> 'F' 
+        AND l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+), 
+CustomerBalance AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        customer c 
+    WHERE 
+        c.c_acctbal IS NOT NULL
+        AND c.c_acctbal > (
+            SELECT 
+                AVG(c1.c_acctbal) 
+            FROM 
+                customer c1
+            WHERE 
+                c1.c_nationkey = c.c_nationkey
+        )
+)
+SELECT 
+    COALESCE(rp.p_name, 'None') AS part_name,
+    COALESCE(ss.s_name, 'Unknown Supplier') AS supplier_name,
+    cb.c_name AS customer_name,
+    fo.total_price,
+    CASE 
+        WHEN fo.item_count > 10 THEN 'High Volume'
+        ELSE 'Regular Volume'
+    END AS order_volume_category,
+    MAX(COALESCE(ss.total_cost, 0)) AS total_supplier_cost
+FROM 
+    RankedParts rp
+FULL OUTER JOIN SupplierStats ss ON ss.supplied_parts > (SELECT COUNT(*) FROM RankedParts) / 10 
+JOIN FilteredOrders fo ON fo.o_orderkey = (SELECT MAX(o_orderkey) FROM orders)
+JOIN CustomerBalance cb ON cb.c_custkey = (SELECT o_custkey FROM orders WHERE o_orderkey = fo.o_orderkey)
+GROUP BY 
+    rp.p_name, ss.s_name, cb.c_name, fo.total_price
+HAVING 
+    COUNT(rp.p_partkey) > 2 OR cb.c_acctbal > 500.00
+ORDER BY 
+    fo.total_price DESC, cb.c_name ASC
+LIMIT 50 OFFSET 10;

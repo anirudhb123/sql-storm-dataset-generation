@@ -1,0 +1,60 @@
+WITH ranked_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+), 
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    INNER JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey
+), 
+supplier_availability AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS available_parts,
+        SUM(ps.ps_availqty) AS total_available_qty
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT co.c_custkey) AS customer_count,
+    SUM(co.total_spent) AS total_revenue,
+    AVG(sa.total_available_qty) AS avg_available_qty,
+    STRING_AGG(DISTINCT pp.p_name, ', ') AS top_parts
+FROM 
+    nation n
+LEFT JOIN 
+    customer_orders co ON co.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+LEFT JOIN 
+    supplier_availability sa ON sa.s_suppkey IN (SELECT DISTINCT ps.ps_suppkey FROM partsupp ps 
+                                                  WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM ranked_parts pp WHERE pp.rank <= 5)) 
+WHERE
+    n.n_regionkey IS NOT NULL OR n.n_comment IS NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    AVG(COALESCE(sa.total_available_qty, 0)) > (SELECT AVG(ps_availqty) FROM partsupp) 
+ORDER BY 
+    customer_count DESC, 
+    total_revenue DESC FETCH FIRST 10 ROWS ONLY;

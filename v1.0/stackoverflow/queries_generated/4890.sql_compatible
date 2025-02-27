@@ -1,0 +1,78 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        QuestionsCount,
+        AnswersCount,
+        AvgScore,
+        RANK() OVER (ORDER BY AvgScore DESC) AS ScoreRank
+    FROM 
+        UserPostStats
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate,
+        DATEDIFF(DAY, p.CreationDate, '2024-10-01 12:34:56') AS DaysSinceCreation,
+        ph.UserDisplayName AS ClosedBy
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+),
+TagsData AS (
+    SELECT 
+        STRING_AGG(t.TagName, ', ') AS TagList,
+        p.Id AS PostId
+    FROM 
+        Posts p
+    CROSS JOIN LATERAL 
+        (SELECT 
+            DISTINCT UNNEST(string_to_array(p.Tags, '><')) AS TagName
+        ) t
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.QuestionsCount,
+    u.AnswersCount,
+    u.AvgScore,
+    c.PostId,
+    c.Title,
+    c.DaysSinceCreation,
+    c.ClosedBy,
+    t.TagList
+FROM 
+    RankedUsers u
+LEFT JOIN 
+    ClosedPosts c ON u.UserId = c.ClosedBy
+LEFT JOIN 
+    TagsData t ON c.PostId = t.PostId
+WHERE 
+    u.TotalPosts > 0 
+    AND (u.QuestionsCount > 5 OR u.AnswersCount > 10)
+ORDER BY 
+    u.ScoreRank, c.DaysSinceCreation DESC
+LIMIT 100;

@@ -1,0 +1,84 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title m
+    JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        m.production_year IS NOT NULL
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(mk.keyword, 'Unknown') AS keyword,
+        COALESCE(cp.kind, 'N/A') AS company_type,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON rm.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_type cp ON mc.company_type_id = cp.id
+    LEFT JOIN 
+        cast_info ci ON rm.movie_id = ci.movie_id
+    WHERE 
+        rm.rank <= 10
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year, mk.keyword, cp.kind
+),
+FinalOutput AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.keyword,
+        md.company_type,
+        md.actor_count,
+        CASE 
+            WHEN md.actor_count > 5 THEN 'Popular'
+            WHEN md.actor_count BETWEEN 3 AND 5 THEN 'Moderate'
+            ELSE 'Less Popular'
+        END AS popularity
+    FROM 
+        MovieDetails md
+    ORDER BY 
+        md.production_year DESC, md.actor_count DESC
+)
+SELECT 
+    fo.movie_id,
+    fo.title,
+    fo.production_year,
+    fo.keyword,
+    fo.company_type,
+    fo.actor_count,
+    fo.popularity
+FROM 
+    FinalOutput fo
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM aka_name an 
+        WHERE 
+            an.person_id IN (
+                SELECT ci.person_id 
+                FROM cast_info ci 
+                WHERE 
+                    ci.movie_id = fo.movie_id
+            )
+        AND an.name LIKE '%Smith%'
+    )
+ORDER BY 
+    fo.popularity DESC, 
+    fo.production_year;

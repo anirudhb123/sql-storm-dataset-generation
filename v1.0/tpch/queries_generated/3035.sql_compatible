@@ -1,0 +1,70 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+    HAVING 
+        p.p_retailprice > 50.00 AND COUNT(DISTINCT ps.ps_suppkey) > 1
+),
+CustomerOrderTotals AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1997-01-01' AND l.l_shipdate < '1998-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT ns.n_nationkey) AS nation_count,
+    SUM(COALESCE(c.total_spent, 0)) AS total_customer_spent,
+    AVG(lp.total_line_value) AS avg_lineitem_value
+FROM 
+    region r
+LEFT JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    HighValueParts hp ON hp.p_brand IN ('BrandA', 'BrandB') 
+LEFT JOIN 
+    CustomerOrderTotals c ON ns.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    FilteredLineItems lp ON lp.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O')
+GROUP BY 
+    r.r_name
+ORDER BY 
+    nation_count DESC, total_customer_spent DESC
+FETCH FIRST 10 ROWS ONLY;

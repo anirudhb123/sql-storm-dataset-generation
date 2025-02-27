@@ -1,0 +1,39 @@
+SELECT 
+    p.p_name AS product_name, 
+    p.p_brand AS brand, 
+    r.r_name AS region_name, 
+    n.n_name AS nation_name, 
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count, 
+    SUM(ps.ps_availqty) AS total_available_quantity, 
+    AVG(l.l_extendedprice) AS avg_extended_price, 
+    GROUP_CONCAT(DISTINCT CONCAT(c.c_name, ' (', c.c_mktsegment, ')') ORDER BY c.c_name SEPARATOR '; ') AS customer_details, 
+    CASE 
+        WHEN COUNT(DISTINCT l.l_orderkey) > 0 THEN 'Has Orders' 
+        ELSE 'No Orders' 
+    END AS order_status 
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_size > 10 
+    AND p.p_retailprice < 500 
+    AND n.n_name LIKE 'A%' 
+GROUP BY 
+    p.p_partkey, r.r_regionkey 
+HAVING 
+    total_available_quantity > 1000 
+ORDER BY 
+    avg_extended_price DESC, supplier_count DESC;

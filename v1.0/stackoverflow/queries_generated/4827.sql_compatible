@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL '1 year')
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounties,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS TagCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        pt.Name IN ('Question', 'Answer')
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.Id) > 10
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    COALESCE(ub.BadgeNames, 'No Badges') AS Badges,
+    COUNT(tp.TagName) AS ActiveTags,
+    AVG(rp.Score) AS AvgPostScore,
+    SUM(CASE WHEN rp.rn <= 5 THEN 1 ELSE 0 END) AS RecentPostsCount
+FROM 
+    UserStats u
+LEFT JOIN 
+    UserBadges ub ON u.UserId = ub.UserId
+LEFT JOIN 
+    TopTags tp ON tp.TagName IN (
+        SELECT UNNEST(string_to_array(SUBSTRING(STRING_AGG(p.Tags, ', '), 2, LENGTH(STRING_AGG(p.Tags, ', ')) - 2), ', '))
+        FROM Posts p WHERE p.OwnerUserId = u.UserId)
+    )
+LEFT JOIN 
+    RankedPosts rp ON u.UserId = rp.OwnerUserId
+GROUP BY 
+    u.DisplayName, u.TotalPosts, ub.BadgeNames
+HAVING 
+    COUNT(tp.TagName) > 2
+ORDER BY 
+    AvgPostScore DESC, u.TotalPosts DESC;

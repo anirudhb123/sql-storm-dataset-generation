@@ -1,0 +1,35 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name,
+           RANK() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+FilteredSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, rs.nation_name
+    FROM RankedSuppliers rs
+    JOIN supplier s ON s.s_suppkey = rs.s_suppkey
+    WHERE rs.rank <= 5
+),
+SupplierParts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           p.p_name, p.p_brand, p.p_type, 
+           ROUND(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END), 2) AS total_returned_qty,
+           ROUND(SUM(CASE WHEN l.l_returnflag <> 'R' THEN l.l_quantity ELSE 0 END), 2) AS total_sold_qty
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey AND ps.ps_suppkey = l.l_suppkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost, p.p_name, p.p_brand, p.p_type
+),
+FinalReport AS (
+    SELECT fs.suppkey, fs.s_name, fs.nation_name, sp.p_name, sp.p_brand, sp.p_type,
+           sp.ps_availqty, sp.ps_supplycost, 
+           sp.total_returned_qty, sp.total_sold_qty,
+           sp.total_returned_qty / NULLIF(sp.total_sold_qty, 0) AS return_ratio
+    FROM FilteredSuppliers fs
+    JOIN SupplierParts sp ON fs.s_suppkey = sp.ps_suppkey
+)
+SELECT suppkey, s_name, nation_name, p_name, p_brand, p_type,
+       ps_availqty, ps_supplycost, total_returned_qty, total_sold_qty, return_ratio
+FROM FinalReport
+WHERE return_ratio > 0.1
+ORDER BY return_ratio DESC, s_name;

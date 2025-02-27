@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+), 
+TopSupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        r.r_name AS region_name,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'No Balance' 
+            ELSE CONCAT('Balance: ', CAST(s.s_acctbal AS VARCHAR))
+        END AS supplier_balance_info
+    FROM 
+        partsupp ps
+        JOIN part p ON ps.ps_partkey = p.p_partkey
+        LEFT JOIN RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey AND s.rnk <= 5
+        LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+        LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+), 
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(l.l_orderkey) AS total_items
+    FROM 
+        orders o
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'O')
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+)
+SELECT 
+    tsp.p_name,
+    tsp.region_name,
+    od.o_orderkey,
+    od.total_price,
+    od.total_items,
+    COALESCE(NULLIF(tsp.supplier_balance_info, 'No Balance'), 'Unresolved Balance') AS balance_info
+FROM 
+    TopSupplierParts tsp
+    FULL OUTER JOIN OrderDetails od ON tsp.ps_partkey = od.o_orderkey
+WHERE 
+    (od.total_price > 1000 OR tsp.region_name IS NULL)
+    AND (tsp.supplier_balance_info IS NOT NULL OR tsp.p_name LIKE '%premium%')
+ORDER BY 
+    tsp.region_name ASC NULLS LAST, 
+    od.total_price DESC;

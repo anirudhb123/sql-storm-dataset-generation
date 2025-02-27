@@ -1,0 +1,56 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) -- Filter high account balance
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey AND sh.hierarchy_level < 3
+),
+EligibleParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_container ORDER BY p.p_retailprice DESC) AS rnk
+    FROM part p
+    WHERE p.p_size % 2 = 0 AND p.p_retailprice > 100 -- Even sizes and high retail prices
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_linenumber) AS item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+SupplierOrders AS (
+    SELECT sh.s_name, o.o_orderkey, COALESCE(os.total_revenue, 0) AS total_revenue,
+           os.item_count
+    FROM SupplierHierarchy sh
+    LEFT JOIN OrderSummary os ON os.o_orderkey IN (
+        SELECT o.o_orderkey
+        FROM orders o
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+        WHERE l.l_suppkey = sh.s_suppkey
+    )
+)
+SELECT so.s_name, so.o_orderkey, so.total_revenue,
+       CASE WHEN so.total_revenue > 1000 THEN 'High Revenue' 
+            ELSE 'Low Revenue' END AS revenue_category,
+       COALESCE(pl.p_name, 'No Associated Parts') AS part_name
+FROM SupplierOrders so
+LEFT JOIN EligibleParts pl ON so.o_orderkey = (
+    SELECT DISTINCT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_partkey IN (
+        SELECT ps.ps_partkey
+        FROM partsupp ps
+        WHERE ps.ps_availqty < (
+            SELECT AVG(ps_availqty) FROM partsupp
+        ) LIMIT 1
+    ) 
+    AND l.l_suppkey IN (
+        SELECT s.s_suppkey
+        FROM supplier s
+        WHERE s.s_acctbal IS NOT NULL
+    )
+)
+WHERE so.item_count IS NOT NULL OR so.total_revenue > 0
+ORDER BY so.total_revenue DESC NULLS LAST, so.s_name;

@@ -1,0 +1,64 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment, 
+           CAST(s_name AS VARCHAR(255)) AS full_name, 
+           1 AS level
+    FROM supplier
+    WHERE s_nationkey IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment,
+           CAST(CONCAT(sh.full_name, ' -> ', s.s_name) AS VARCHAR(255)), 
+           level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 10
+),
+
+ExpensiveParts AS (
+    SELECT p_partkey, p_name, p_retailprice, p_mfgr,
+           RANK() OVER (PARTITION BY p_mfgr ORDER BY p_retailprice DESC) AS price_rank
+    FROM part
+    WHERE p_retailprice IS NOT NULL
+),
+
+OrdersWithDiscount AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus,
+           SUM(l.l_discount * l.l_extendedprice) AS total_discount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_discount < 0.1
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus
+),
+
+FinalSummary AS (
+    SELECT n.n_name, 
+           COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           SUM(p.p_retailprice) AS total_retail_value,
+           MAX(l.l_shipdate) AS latest_ship_date
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN (
+        SELECT l.l_orderkey, l.l_partkey
+        FROM lineitem l
+        JOIN ExpensiveParts ep ON l.l_partkey = ep.p_partkey
+        WHERE ep.price_rank <= 5
+    ) AS expensive_items ON s.s_suppkey = expensive_items.l_partkey
+    LEFT JOIN OrdersWithDiscount o ON expensive_items.l_orderkey = o.o_orderkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY n.n_name
+)
+
+SELECT f.n_name, 
+       f.total_orders,
+       f.total_retail_value,
+       COALESCE(f.latest_ship_date, 'No shipments') AS latest_ship_date,
+       COALESCE(sh.full_name, 'No suppliers') AS supplier_hierarchy
+FROM FinalSummary f
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey IN 
+                                    (SELECT n.n_nationkey 
+                                     FROM nation n 
+                                     WHERE n.n_name = f.n_name)
+WHERE f.total_orders > 0 
+  OR (f.total_retail_value IS NULL AND EXISTS (SELECT 1 FROM supplier s WHERE s.s_nationkey = f.n_name))
+ORDER BY f.total_retail_value DESC NULLS LAST;

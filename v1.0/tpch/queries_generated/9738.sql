@@ -1,0 +1,51 @@
+WITH supplier_summary AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_summary AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(DISTINCT o.o_orderkey) AS orders_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+part_summary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate > '2022-01-01'
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    cs.c_custkey,
+    cs.c_name,
+    ss.s_suppkey,
+    ss.s_name,
+    ps.p_partkey,
+    ps.p_name,
+    cs.total_order_value,
+    ss.total_supply_cost,
+    ps.total_revenue,
+    RANK() OVER (PARTITION BY cs.c_custkey ORDER BY cs.total_order_value DESC) AS customer_rank,
+    RANK() OVER (PARTITION BY ss.s_suppkey ORDER BY ss.total_supply_cost DESC) AS supplier_rank,
+    RANK() OVER (PARTITION BY ps.p_partkey ORDER BY ps.total_revenue DESC) AS part_rank
+FROM customer_summary cs
+JOIN supplier_summary ss ON cs.orders_count > 5
+JOIN part_summary ps ON ps.order_count > 10
+WHERE cs.total_order_value > 10000
+ORDER BY cs.c_custkey, ss.s_suppkey, ps.p_partkey;

@@ -1,0 +1,50 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 1 AS level
+    FROM aka_title mt
+    WHERE mt.title LIKE 'A%'
+
+    UNION ALL
+
+    SELECT mt.id, mt.title, mt.production_year, mh.level + 1
+    FROM aka_title mt
+    JOIN movie_link ml ON mt.id = ml.movie_id
+    JOIN MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+),
+
+RankedActors AS (
+    SELECT 
+        ca.person_id, 
+        ak.name AS actor_name, 
+        COUNT(ca.movie_id) AS movie_count,
+        RANK() OVER (PARTITION BY ca.person_id ORDER BY COUNT(ca.movie_id) DESC) AS rank
+    FROM cast_info ca
+    JOIN aka_name ak ON ca.person_id = ak.person_id
+    GROUP BY ca.person_id, ak.name
+),
+
+MovieInfo AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        COALESCE(SUM(CASE WHEN mi.info = 'award' THEN 1 ELSE 0 END), 0) AS has_award,
+        ROW_NUMBER() OVER (ORDER BY mt.production_year DESC) AS recent_rank
+    FROM aka_title mt
+    LEFT JOIN cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN movie_info mi ON mt.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'award')
+    GROUP BY mt.id, mt.title
+)
+
+SELECT 
+    mh.title,
+    mh.production_year,
+    mi.actors,
+    mi.has_award,
+    ra.actor_name AS top_actor
+FROM MovieHierarchy mh
+LEFT JOIN MovieInfo mi ON mh.movie_id = mi.movie_id
+LEFT JOIN RankedActors ra ON ra.rank = 1 AND ra.movie_count = (SELECT MAX(movie_count) FROM RankedActors)
+WHERE mi.has_award > 0
+ORDER BY mh.production_year DESC, mh.title;

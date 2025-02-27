@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankByScore
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        SUM(CASE WHEN B.UserId IS NOT NULL THEN 1 ELSE 0 END) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+    HAVING 
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) > 10
+),
+Leaderboards AS (
+    SELECT 
+        U.DisplayName,
+        R.PostId,
+        R.Title,
+        R.CreationDate,
+        R.Score,
+        R.ViewCount,
+        T.TotalUpVotes,
+        T.TotalDownVotes,
+        T.TotalBadges
+    FROM 
+        RankedPosts R
+    JOIN 
+        TopUsers T ON R.OwnerDisplayName = T.DisplayName
+    WHERE 
+        R.RankByScore <= 10
+)
+SELECT 
+    L.DisplayName,
+    L.Title,
+    L.CreationDate,
+    L.Score,
+    L.ViewCount,
+    L.TotalUpVotes,
+    L.TotalDownVotes,
+    L.TotalBadges
+FROM 
+    Leaderboards L
+ORDER BY 
+    L.Score DESC, L.ViewCount DESC;

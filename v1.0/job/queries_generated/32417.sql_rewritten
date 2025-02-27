@@ -1,0 +1,66 @@
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        CAST(NULL AS INTEGER) AS parent_movie_id,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+
+    UNION ALL
+
+    
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        mh.movie_id AS parent_movie_id,
+        mh.level + 1 AS level
+    FROM 
+        movie_link m
+        JOIN MovieHierarchy mh ON m.linked_movie_id = mh.movie_id
+        JOIN aka_title t ON m.movie_id = t.id
+)
+
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    mh.level,
+    COALESCE(aka.name, 'Unknown Actor') AS actor_name,
+    COALESCE(cast_info.nr_order, 0) AS cast_order,
+    CASE 
+        WHEN c.kind IS NULL THEN 'Not Specified'
+        ELSE c.kind
+    END AS company_type,
+    COUNT(DISTINCT mi.info) AS info_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY mh.level DESC) AS rank_within_level
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ON cc.subject_id = cast_info.person_id
+LEFT JOIN 
+    aka_name aka ON cast_info.person_id = aka.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type c ON mc.company_type_id = c.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    (mh.production_year BETWEEN 2000 AND 2023) 
+    AND (mh.title IS NOT NULL)
+GROUP BY 
+    mh.movie_title, mh.production_year, mh.level, aka.name, cast_info.nr_order, c.kind
+ORDER BY 
+    mh.production_year DESC, mh.level, rank_within_level DESC;

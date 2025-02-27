@@ -1,0 +1,70 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+RankedSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.total_sales,
+        s.order_count,
+        RANK() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM 
+        SupplierSales s
+),
+TopSuppliers AS (
+    SELECT 
+        r.s_suppkey,
+        r.s_name,
+        r.total_sales,
+        r.order_count
+    FROM 
+        RankedSales r
+    WHERE 
+        r.sales_rank <= 10
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_nationkey,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        SUM(c.c_acctbal) AS total_account_balance
+    FROM 
+        customer c
+    GROUP BY 
+        c.c_nationkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(ts.s_name, 'No Supplier') AS supplier_name,
+    ts.total_sales,
+    cs.customer_count,
+    cs.total_account_balance
+FROM 
+    region r
+LEFT OUTER JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT OUTER JOIN 
+    TopSuppliers ts ON n.n_nationkey = ts.s_nationkey
+LEFT OUTER JOIN 
+    CustomerSummary cs ON n.n_nationkey = cs.c_nationkey
+WHERE 
+    r.r_name IS NOT NULL
+    AND (ts.total_sales IS NOT NULL OR cs.customer_count > 0)
+ORDER BY 
+    r.r_name, ts.total_sales DESC NULLS LAST;

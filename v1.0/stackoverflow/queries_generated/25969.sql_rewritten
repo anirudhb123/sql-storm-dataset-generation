@@ -1,0 +1,61 @@
+WITH PostTagCounts AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(t.Id) AS TagCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><') AS tag ON TRUE
+    JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.OwnerUserId
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        p.ViewCount,
+        COALESCE(pt.TagCount, 0) AS TagCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        PostTagCounts pt ON u.Id = pt.OwnerUserId
+    LEFT JOIN 
+        (
+            SELECT 
+                OwnerUserId, 
+                SUM(ViewCount) AS ViewCount
+            FROM 
+                Posts
+            WHERE 
+                PostTypeId = 1  
+            GROUP BY 
+                OwnerUserId
+        ) p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 100  
+), RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        ViewCount,
+        TagCount,
+        RANK() OVER (ORDER BY Reputation DESC, ViewCount DESC, TagCount DESC) AS UserRank
+    FROM 
+        UserReputation
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    ViewCount,
+    TagCount,
+    UserRank
+FROM 
+    RankedUsers
+WHERE 
+    UserRank <= 10;

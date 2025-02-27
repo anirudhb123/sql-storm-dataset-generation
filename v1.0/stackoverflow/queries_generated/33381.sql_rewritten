@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopAuthors AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount,
+        SUM(UpVotes - DownVotes) AS NetVotes
+    FROM 
+        RankedPosts
+    GROUP BY 
+        OwnerUserId
+    HAVING 
+        COUNT(*) >= 5
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerUserId,
+        tb.PostCount,
+        ub.BadgeCount,
+        RANK() OVER (ORDER BY rp.Score DESC, rp.ViewCount DESC) AS Rank
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TopAuthors tb ON rp.OwnerUserId = tb.OwnerUserId
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.Score,
+    pp.ViewCount,
+    tb.PostCount,
+    ub.BadgeCount,
+    CASE 
+        WHEN pp.Rank <= 10 THEN 'Top 10 Popular Posts'
+        ELSE 'Others'
+    END AS PopularityRank
+FROM 
+    PopularPosts pp
+LEFT JOIN 
+    Users u ON pp.OwnerUserId = u.Id
+WHERE 
+    pp.BadgeCount > 0 OR pp.PostCount > 10
+ORDER BY 
+    pp.Rank, pp.Score DESC;

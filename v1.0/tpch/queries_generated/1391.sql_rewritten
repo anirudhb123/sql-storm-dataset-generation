@@ -1,0 +1,57 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(SUM(p.ps_supplycost * p.ps_availqty), 0) AS total_supply_value
+    FROM supplier s
+    LEFT JOIN partsupp p ON s.s_suppkey = p.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+CustomerSegmentation AS (
+    SELECT 
+        c.c_custkey,
+        c.c_mktsegment,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_mktsegment
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_orderstatus,
+    cs.c_mktsegment,
+    s.s_name,
+    s.total_supply_value,
+    COALESCE(fl.net_revenue, 0) AS net_revenue,
+    (CASE 
+        WHEN r.o_orderstatus = 'O' THEN 'Open'
+        WHEN r.o_orderstatus = 'F' THEN 'Fulfilled'
+        ELSE 'Other'
+     END) AS order_status_desc
+FROM RankedOrders r
+JOIN CustomerSegmentation cs ON r.o_orderkey = cs.c_custkey
+LEFT JOIN SupplierDetails s ON s.s_acctbal > 1000
+LEFT JOIN FilteredLineItems fl ON r.o_orderkey = fl.l_orderkey
+WHERE s.total_supply_value > 2000 OR cs.total_orders > 10
+ORDER BY r.o_orderdate DESC, r.o_orderstatus;

@@ -1,0 +1,68 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.Score) AS AverageScore,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.FavoriteCount) AS TotalFavorites
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        pt.Name
+),
+CombinedStats AS (
+    SELECT 
+        us.DisplayName,
+        us.TotalPosts,
+        us.TotalComments,
+        us.UpVotes,
+        us.DownVotes,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges,
+        ps.PostType,
+        ps.PostCount,
+        ps.AverageScore,
+        ps.TotalViews,
+        ps.TotalFavorites
+    FROM 
+        UserStatistics us
+    JOIN 
+        PostStatistics ps ON us.TotalPosts > 0
+    ORDER BY 
+        us.Reputation DESC, ps.PostCount DESC
+)
+SELECT 
+    * 
+FROM 
+    CombinedStats
+LIMIT 50;

@@ -1,0 +1,51 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_shippriority, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    UNION ALL
+    SELECT oh.o_orderkey, ol.l_shipdate, SUM(ol.l_extendedprice * (1 - ol.l_discount)) AS total_revenue, 
+           oh.o_shippriority
+    FROM OrderHierarchy oh
+    JOIN lineitem ol ON ol.l_orderkey = oh.o_orderkey
+    GROUP BY oh.o_orderkey, ol.l_shipdate, oh.o_shippriority
+),
+SupplierAvgCost AS (
+    SELECT ps.ps_suppkey, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_suppkey
+),
+HighRevenueOrders AS (
+    SELECT oh.o_orderkey, oh.o_totalprice, oh.o_orderdate
+    FROM OrderHierarchy oh
+    WHERE oh.OrderRank = 1 AND oh.o_totalprice > 10000
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+CombinedData AS (
+    SELECT co.c_name, COUNT(DISTINCT ho.o_orderkey) AS order_count,
+           SUM(ho.o_totalprice) AS total_spent, s.avg_supplycost
+    FROM HighRevenueOrders ho
+    JOIN CustomerOrders co ON co.total_orders > 5
+    LEFT JOIN SupplierAvgCost s ON s.ps_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+        WHERE l.l_orderkey = ho.o_orderkey
+    )
+    GROUP BY co.c_name, s.avg_supplycost
+)
+SELECT cd.c_name, cd.order_count, cd.total_spent,
+       CASE 
+           WHEN cd.avg_supplycost IS NULL THEN 'No Supply Cost'
+           ELSE CONCAT('Average Supply Cost: $', ROUND(cd.avg_supplycost, 2))
+       END AS supply_cost_info
+FROM CombinedData cd
+WHERE cd.total_spent IS NOT NULL
+ORDER BY cd.total_spent DESC
+LIMIT 10;

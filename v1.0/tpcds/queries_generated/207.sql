@@ -1,0 +1,77 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS profit_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 2450010 AND 2450540
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk
+    FROM
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+top_customers AS (
+    SELECT
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        SUM(rs.ws_net_profit) AS total_profit
+    FROM
+        customer_info ci
+    JOIN ranked_sales rs ON ci.c_customer_sk = rs.ws_ship_customer_sk
+    WHERE
+        rs.profit_rank = 1
+    GROUP BY
+        ci.c_customer_sk, ci.c_first_name, ci.c_last_name
+),
+sales_summary AS (
+    SELECT
+        DATE_FORMAT(DD.d_date, '%Y-%m') AS sale_month,
+        SUM(ws.ws_net_profit) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM
+        web_sales ws
+    JOIN date_dim DD ON ws.ws_sold_date_sk = DD.d_date_sk
+    GROUP BY
+        DATE_FORMAT(DD.d_date, '%Y-%m')
+)
+SELECT
+    ci.c_first_name,
+    ci.c_last_name,
+    ts.total_profit,
+    ss.sale_month,
+    ss.total_sales,
+    ss.total_orders
+FROM
+    top_customers ts
+LEFT JOIN sales_summary ss ON ss.sale_month = (
+    SELECT 
+        DATE_FORMAT(DD.d_date, '%Y-%m') 
+    FROM 
+        web_sales ws 
+    JOIN date_dim DD ON ws.ws_sold_date_sk = DD.d_date_sk
+    WHERE 
+        ws.ws_ship_customer_sk = ts.c_customer_sk 
+    ORDER BY 
+        ws.ws_sold_date_sk DESC 
+    LIMIT 1
+)
+JOIN customer_info ci ON ci.c_customer_sk = ts.c_customer_sk
+WHERE
+    ci.hd_income_band_sk IS NOT NULL
+ORDER BY
+    ts.total_profit DESC, ss.total_sales ASC;

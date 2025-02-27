@@ -1,0 +1,73 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        RANK() OVER (PARTITION BY t.kind_id ORDER BY COALESCE(mi.info, 'N/A') DESC) AS rank,
+        COALESCE(mi.info, 'No Info') AS movie_info
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_info mi ON t.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'summary')
+    WHERE 
+        t.production_year IS NOT NULL
+),
+actor_movie_count AS (
+    SELECT 
+        ci.person_id,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+),
+personal_info AS (
+    SELECT
+        p.id AS person_id,
+        COALESCE(a.name, 'Unknown') AS actor_name,
+        p.gender,
+        COALESCE(ac.movie_count, 0) AS total_movies
+    FROM 
+        name p
+    LEFT JOIN 
+        aka_name a ON p.imdb_id = a.person_id
+    LEFT JOIN 
+        actor_movie_count ac ON p.id = ac.person_id
+    WHERE 
+        (p.gender IS NOT NULL AND p.gender IN ('F', 'M')) OR (p.gender IS NULL)
+),
+movie_company_info AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT m.id) AS companies_involved,
+        STRING_AGG(DISTINCT com.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name com ON mc.company_id = com.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    pm.actor_name,
+    pm.gender,
+    COALESCE(mci.companies_involved, 0) AS company_count,
+    COALESCE(mci.company_names, 'No Companies') AS company_names
+FROM 
+    ranked_movies rm
+JOIN 
+    cast_info ci ON rm.movie_id = ci.movie_id
+JOIN 
+    personal_info pm ON ci.person_id = pm.person_id
+LEFT JOIN 
+    movie_company_info mci ON rm.movie_id = mci.movie_id
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    rm.production_year DESC, 
+    pm.total_movies DESC
+FETCH FIRST 10 ROWS ONLY;

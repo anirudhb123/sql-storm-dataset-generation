@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+), 
+
+OrderStats AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey,
+        COUNT(l.l_orderkey) AS item_count, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        MAX(l.l_discount) AS max_discount,
+        AVG(l.l_tax) AS avg_tax
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+), 
+
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, osc.total_price
+    FROM customer c
+    JOIN OrderStats osc ON c.c_custkey = osc.o_custkey
+    WHERE osc.total_price > (SELECT AVG(total_price) FROM OrderStats)
+)
+
+SELECT 
+    p.p_name, 
+    p.p_mfgr, 
+    s.s_name AS supplier_name,
+    rh.r_name AS supplier_region,
+    t.total_price,
+    COUNT(l.l_orderkey) AS number_of_orders,
+    SUM(l.l_extendedprice * l.l_discount) AS discount_value
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN region rh ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN TopCustomers t ON l.l_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = t.c_custkey)
+WHERE s.s_acctbal IS NOT NULL 
+  AND (rh.r_name IS NULL OR rh.r_name LIKE '%west%')
+GROUP BY p.p_name, p.p_mfgr, s.s_name, rh.r_name, t.total_price
+HAVING COUNT(l.l_orderkey) > 5
+ORDER BY total_price DESC
+LIMIT 10;

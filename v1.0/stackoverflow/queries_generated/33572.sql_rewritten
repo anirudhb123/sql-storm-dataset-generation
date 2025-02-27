@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryFiltered AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment,
+        COUNT(*) AS EditCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS IsClosed,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS IsReopened
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    COALESCE(up.BadgeCount, 0) AS BadgeCount,
+    COALESCE(up.GoldBadges, 0) AS GoldBadges,
+    COALESCE(up.SilverBadges, 0) AS SilverBadges,
+    COALESCE(up.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(ph.EditCount, 0) AS EditCount,
+    CASE 
+        WHEN ph.IsClosed = 1 THEN 'Closed'
+        WHEN ph.IsReopened = 1 THEN 'Reopened'
+        ELSE 'Active'
+    END AS PostStatus,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Posts p
+LEFT JOIN 
+    RankedPosts rp ON p.Id = rp.PostId
+LEFT JOIN 
+    UserBadges up ON p.OwnerUserId = up.UserId
+LEFT JOIN 
+    PostHistoryFiltered ph ON p.Id = ph.PostId
+LEFT JOIN 
+    UNNEST(string_to_array(Tags, ',')) AS t(TagName) ON TRUE
+WHERE 
+    rp.PostRank = 1
+GROUP BY 
+    p.Id, up.BadgeCount, up.GoldBadges, up.SilverBadges, up.BronzeBadges, ph.EditCount, ph.IsClosed, ph.IsReopened
+ORDER BY 
+    p.Score DESC
+LIMIT 100;

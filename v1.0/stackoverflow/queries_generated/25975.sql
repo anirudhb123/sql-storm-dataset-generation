@@ -1,0 +1,46 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    LEFT JOIN Users u ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    GROUP BY t.TagName
+),
+
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerName,
+        t.TagName
+    FROM Posts p
+    JOIN Users u ON u.Id = p.OwnerUserId
+    JOIN LATERAL unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tag ON true
+    JOIN Tags t ON t.TagName = tag
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+)
+
+SELECT 
+    ts.TagName,
+    ts.PostCount AS TotalPosts,
+    ts.CommentCount AS TotalComments,
+    ts.VoteCount AS TotalVotes,
+    ts.GoldBadges,
+    ts.SilverBadges,
+    ts.BronzeBadges,
+    ARRAY_AGG(DISTINCT rp.Title ORDER BY rp.CreationDate DESC) AS RecentPostTitles
+FROM TagStats ts
+LEFT JOIN RecentPosts rp ON rp.TagName = ts.TagName
+GROUP BY ts.TagName, ts.PostCount, ts.CommentCount, ts.VoteCount, ts.GoldBadges, ts.SilverBadges, ts.BronzeBadges
+ORDER BY ts.PostCount DESC;

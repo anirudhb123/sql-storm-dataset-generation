@@ -1,0 +1,94 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        string_agg(CASE 
+            WHEN ph.Comment IS NOT NULL THEN cr.Name 
+            ELSE 'Unknown Reason' 
+        END, ', ') AS Reasons
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  -- Closed or Reopened
+    GROUP BY 
+        ph.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS VoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+CombinedResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.RankScore,
+        cr.Reasons,
+        ua.UserId,
+        ua.Reputation,
+        ua.VoteCount,
+        ua.BadgeCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        CloseReasons cr ON rp.PostId = cr.PostId
+    LEFT JOIN 
+        UserActivity ua ON rp.OwnerUserId = ua.UserId
+)
+SELECT 
+    c.PostId,
+    c.Title,
+    c.CreationDate,
+    c.Score,
+    c.ViewCount,
+    c.RankScore,
+    COALESCE(c.Reasons, 'No Close Reasons') AS Reasons,
+    COALESCE(ua.Reputation, 0) AS Reputation,
+    COALESCE(ua.VoteCount, 0) AS VoteCount,
+    COALESCE(ua.BadgeCount, 0) AS BadgeCount
+FROM 
+    CombinedResults c
+LEFT JOIN 
+    Users ua ON c.UserId = ua.Id
+WHERE 
+    c.RankScore <= 5
+    AND c.Reputation > 100
+ORDER BY 
+    c.Score DESC, c.CreationDate DESC
+LIMIT 100;
+
+-- Edge case: Handling NULL values in reasons, ensuring they don't return an empty set
+-- We must prioritize posts with low rank scores to emphasize popularity measured by votes and activity.

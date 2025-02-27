@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id, 
+        P.Title, 
+        P.CreationDate, 
+        P.Score, 
+        P.ViewCount, 
+        U.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 year'
+),
+RecentVotes AS (
+    SELECT 
+        V.PostId, 
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes, 
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes V
+    WHERE 
+        V.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+    GROUP BY 
+        V.PostId
+),
+PostDetails AS (
+    SELECT 
+        RP.Id,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RV.UpVotes,
+        RV.DownVotes,
+        (RV.UpVotes - RV.DownVotes) AS NetVoteScore,
+        (RP.Score + COALESCE(RV.UpVotes, 0) - COALESCE(RV.DownVotes, 0)) AS AdjustedScore
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        RecentVotes RV ON RP.Id = RV.PostId
+)
+SELECT 
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    PD.UpVotes,
+    PD.DownVotes,
+    PD.NetVoteScore,
+    PD.AdjustedScore
+FROM 
+    PostDetails PD
+WHERE 
+    PD.Rank <= 5
+ORDER BY 
+    PD.AdjustedScore DESC;

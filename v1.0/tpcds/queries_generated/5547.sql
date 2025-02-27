@@ -1,0 +1,53 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+PromotedSales AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_sales,
+        cs.order_count,
+        cs.avg_sales_price,
+        p.p_promo_name
+    FROM 
+        CustomerSales cs
+    LEFT JOIN 
+        promotion p ON cs.total_sales > p.p_cost -- Assuming promotions apply based on total sales
+)
+SELECT 
+    ps.c_first_name,
+    ps.c_last_name,
+    ps.total_sales,
+    ps.order_count,
+    ps.avg_sales_price,
+    COUNT(cr.cr_return_number) AS return_count,
+    COUNT(DISTINCT wr.wr_item_sk) AS unique_return_items
+FROM 
+    PromotedSales ps
+LEFT JOIN 
+    catalog_returns cr ON ps.c_customer_sk = cr.cr_returning_customer_sk
+LEFT JOIN 
+    web_returns wr ON ps.c_customer_sk = wr.wr_returning_customer_sk
+GROUP BY 
+    ps.c_first_name, ps.c_last_name, ps.total_sales, ps.order_count, ps.avg_sales_price
+ORDER BY 
+    ps.total_sales DESC
+LIMIT 100;

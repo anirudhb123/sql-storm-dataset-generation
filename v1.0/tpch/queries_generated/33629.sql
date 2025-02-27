@@ -1,0 +1,55 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '2022-01-01' 
+      AND o.o_orderdate < '2023-01-01'
+),
+avg_price AS (
+    SELECT ps_partkey, AVG(ps_supplycost) AS avg_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+supplier_info AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           CASE 
+               WHEN s.s_acctbal IS NULL THEN 'No Balance'
+               WHEN s.s_acctbal < 1000 THEN 'Low Balance'
+               ELSE 'Sufficient Balance' 
+           END AS balance_status
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT p.p_name, p.p_retailprice, n.n_name AS nation_name, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       AVG(a.avg_cost) AS avg_supply_cost,
+       CASE 
+           WHEN COUNT(DISTINCT o.o_orderkey) > 5 THEN 'Frequent Buyer'
+           ELSE 'Occasional Buyer' 
+       END AS buyer_status
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer_orders co ON co.order_count > 0
+JOIN nation n ON co.c_custkey = n.n_nationkey
+JOIN avg_price a ON p.p_partkey = a.ps_partkey
+LEFT JOIN supplier_info si ON l.l_suppkey = si.s_suppkey
+GROUP BY p.p_name, p.p_retailprice, n.n_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY total_sales DESC, p.p_retailprice DESC;

@@ -1,0 +1,62 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT ca_address_sk, ca_address_id, 1 AS level
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+), 
+item_sales AS (
+    SELECT 
+        cs_item_sk,
+        SUM(cs_net_paid) AS total_sales,
+        COUNT(DISTINCT cs_order_number) AS order_count
+    FROM catalog_sales
+    GROUP BY cs_item_sk
+), 
+promotion_effect AS (
+    SELECT 
+        p.p_promo_sk,
+        p.p_promo_name,
+        SUM(ws.ws_net_paid_inc_tax) AS total_net_paid
+    FROM promotion p
+    JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    WHERE p.p_start_date_sk < p.p_end_date_sk
+    GROUP BY p.p_promo_sk, p.p_promo_name
+), 
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(cd.cd_gender, 'U') AS gender,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY COALESCE(cd.cd_gender, 'U') ORDER BY SUM(ws.ws_net_paid) DESC) AS rank
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_birth_year BETWEEN 1980 AND 2000
+    GROUP BY c.c_customer_sk, cd.cd_gender
+    HAVING SUM(ws.ws_net_paid) IS NOT NULL
+)
+SELECT 
+    a.ca_address_id,
+    c.gender,
+    a.level,
+    COALESCE(i.total_sales, 0) AS total_sales,
+    COALESCE(p.total_net_paid, 0) AS total_promotion_effect,
+    COALESCE(c.total_spent, 0) AS total_customer_spent,
+    (CASE 
+        WHEN c.total_orders > 3 THEN 'Frequent Buyer'
+        WHEN c.total_orders BETWEEN 1 AND 3 THEN 'Occasional Buyer'
+        ELSE 'No Purchase'
+     END) AS purchase_category
+FROM address_hierarchy a
+FULL OUTER JOIN item_sales i ON i.cs_item_sk = (
+    SELECT cs_item_sk FROM catalog_sales WHERE cs_sold_date_sk = (
+        SELECT MAX(cs_sold_date_sk) FROM catalog_sales
+    ) LIMIT 1
+)
+FULL OUTER JOIN customer_data c ON c.rank <= 10
+LEFT JOIN promotion_effect p ON p.p_promo_sk = (
+    SELECT p_promo_sk FROM promotion WHERE p_discount_active = 'Y' ORDER BY p_start_date_sk DESC LIMIT 1
+)
+ORDER BY a.ca_address_id, c.gender, total_sales DESC
+LIMIT 100;

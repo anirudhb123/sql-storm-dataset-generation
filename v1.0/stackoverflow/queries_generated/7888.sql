@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Questions and Answers
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+),
+PostDetails AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.OwnerDisplayName,
+        tp.CreationDate,
+        tp.Score,
+        tp.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS UpVoteCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Comments c ON tp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON tp.PostId = v.PostId AND v.VoteTypeId = 2 -- Upvote
+    GROUP BY 
+        tp.PostId, tp.Title, tp.OwnerDisplayName, tp.CreationDate, tp.Score, tp.ViewCount
+)
+SELECT 
+    pd.Title,
+    pd.OwnerDisplayName,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.CommentCount,
+    pd.UpVoteCount,
+    COALESCE(tl.TagList, 'No Tags') AS Tags
+FROM 
+    PostDetails pd
+LEFT JOIN (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    JOIN 
+        UNNEST(STRING_TO_ARRAY(p.Tags, '><')) AS tag ON TRUE
+    JOIN 
+        Tags t ON t.TagName = TRIM(BOTH '<>' FROM tag)
+    GROUP BY 
+        p.Id
+) tl ON pd.PostId = tl.PostId
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

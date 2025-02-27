@@ -1,0 +1,98 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC, P.CreationDate DESC) AS Rnk
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId IN (1, 2) -- Only questions and answers
+        AND P.Score IS NOT NULL
+), 
+PostStats AS (
+    SELECT 
+        RP.OwnerUserId,
+        COUNT(RP.PostId) AS PostCount,
+        SUM(RP.ViewCount) AS TotalViews,
+        AVG(RP.Score) AS AvgScore
+    FROM 
+        RankedPosts RP
+    WHERE 
+        RP.Rnk <= 10 -- Only consider top 10 posts per user
+    GROUP BY 
+        RP.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        B.Class,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, B.Class
+),
+EngagementStats AS (
+    SELECT 
+        U.Id AS UserId,
+        COALESCE(UB1.BadgeCount, 0) AS GoldBadges,
+        COALESCE(UB2.BadgeCount, 0) AS SilverBadges,
+        COALESCE(UB3.BadgeCount, 0) AS BronzeBadges,
+        PS.PostCount,
+        PS.TotalViews,
+        PS.AvgScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserBadges UB1 ON U.Id = UB1.UserId AND UB1.Class = 1
+    LEFT JOIN 
+        UserBadges UB2 ON U.Id = UB2.UserId AND UB2.Class = 2
+    LEFT JOIN 
+        UserBadges UB3 ON U.Id = UB3.UserId AND UB3.Class = 3
+    LEFT JOIN 
+        PostStats PS ON U.Id = PS.OwnerUserId
+)
+SELECT 
+    E.UserId,
+    U.DisplayName,
+    E.PostCount,
+    E.TotalViews,
+    E.AvgScore,
+    E.GoldBadges,
+    E.SilverBadges,
+    E.BronzeBadges
+FROM 
+    EngagementStats E
+JOIN 
+    Users U ON E.UserId = U.Id
+WHERE 
+    (E.PostCount > 5 OR E.TotalViews > 1000) 
+    AND (E.AvgScore IS NULL OR E.AvgScore > 10)
+ORDER BY 
+    E.TotalViews DESC, 
+    E.AvgScore DESC
+LIMIT 50;
+
+-- Coupled with CORRELATED subquery for posts with non-self answers and NULL logic
+SELECT 
+    P.Id,
+    P.Title,
+    (SELECT COUNT(*) 
+     FROM Posts A 
+     WHERE A.ParentId = P.Id AND A.OwnerUserId != P.OwnerUserId) AS NonSelfAnswerCount
+FROM 
+    Posts P
+WHERE 
+    P.PostTypeId = 1 -- Questions only
+    AND (SELECT COUNT(*) 
+         FROM Posts A 
+         WHERE A.ParentId = P.Id) > 0 
+    AND P.AcceptedAnswerId IS NULL 
+ORDER BY 
+    NonSelfAnswerCount DESC 
+LIMIT 20;

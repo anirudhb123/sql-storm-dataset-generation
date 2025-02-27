@@ -1,0 +1,59 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MAX(d.d_date) AS last_purchase_date
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        c.customer_id,
+        cs.total_sales,
+        cs.order_count,
+        cs.last_purchase_date
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer_demographics c ON cs.c_customer_id = c.c_customer_id
+    WHERE 
+        cs.total_sales > (SELECT AVG(total_sales) FROM CustomerSales)
+        AND c.cd_marital_status = 'M'
+        AND c.cd_gender = 'F'
+),
+StorePerformance AS (
+    SELECT 
+        s.s_store_id,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ss.ss_ticket_number) AS sale_count
+    FROM 
+        store s
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    WHERE 
+        ss.ss_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        s.s_store_id
+)
+SELECT 
+    hvc.customer_id,
+    hvc.total_sales AS customer_total_sales,
+    hvc.order_count AS customer_order_count,
+    hvc.last_purchase_date,
+    sp.s_store_id,
+    sp.total_net_profit AS store_total_net_profit,
+    sp.sale_count AS store_sale_count
+FROM 
+    HighValueCustomers hvc
+JOIN 
+    StorePerformance sp ON sp.total_net_profit > 10000
+ORDER BY 
+    hvc.total_sales DESC, sp.total_net_profit DESC;

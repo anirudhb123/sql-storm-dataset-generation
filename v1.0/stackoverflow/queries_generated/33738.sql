@@ -1,0 +1,96 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostDetails AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.Reputation) AS TotalReputation,
+        ROW_NUMBER() OVER (ORDER BY SUM(u.Reputation) DESC) AS Rank
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEdited,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseOpenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.OwnerDisplayName,
+    pd.CommentCount,
+    pd.VoteCount,
+    ph.LastEdited,
+    ph.CloseOpenCount,
+    tu.DisplayName AS TopUserDisplayName,
+    tu.TotalReputation AS TopUserReputation
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    PostHistoryDetails ph ON pd.PostId = ph.PostId
+LEFT JOIN 
+    TopUsers tu ON pd.OwnerDisplayName = tu.DisplayName
+WHERE 
+    pd.rn = 1 -- Get latest post only
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC
+LIMIT 100;

@@ -1,0 +1,93 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_by_balance
+    FROM 
+        supplier s
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (
+            SELECT AVG(o2.o_totalprice) 
+            FROM orders o2 
+            WHERE o2.o_orderdate >= '2023-01-01'
+        )
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS total_lines,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+SupplierPart JOINed AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        p.p_name,
+        p.p_retailprice,
+        s.s_name
+    FROM 
+        partsupp ps
+    INNER JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+TopSupplier AS (
+    SELECT 
+        s.s_name,
+        ps.ps_partkey,
+        ps.ps_supplycost,
+        COALESCE(SUM(l.l_quantity), 0) AS total_quantity,
+        CASE 
+            WHEN COALESCE(SUM(l.l_extendedprice), 0) > 0 
+            THEN COALESCE(SUM(l.l_discount * l.l_extendedprice), 0) / SUM(l.l_extendedprice) 
+            ELSE NULL 
+        END AS average_discount_amount
+    FROM 
+        SupplierPart JOINed ps
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.rank_by_balance <= 5
+    GROUP BY 
+        s.s_name, ps.ps_partkey, ps.ps_supplycost
+    HAVING 
+        SUM(l.l_quantity) > 1000 OR average_discount_amount IS NOT NULL
+)
+SELECT 
+    t.s_name,
+    t.ps_partkey,
+    t.ps_supplycost,
+    COALESCE(SUM(l.total_lines), 0) AS total_lines,
+    COALESCE(SUM(h.o_totalprice), 0) AS total_order_value,
+    CASE
+        WHEN COUNT(DISTINCT h.o_orderkey) > 0 
+        THEN 'Orders Exist' 
+        ELSE 'No Orders' 
+    END AS order_status
+FROM 
+    TopSupplier t
+LEFT JOIN 
+    LineItemSummary l ON t.ps_partkey = l.l_orderkey
+LEFT JOIN 
+    HighValueOrders h ON h.o_orderkey = l.l_orderkey
+GROUP BY 
+    t.s_name, t.ps_partkey, t.ps_supplycost
+ORDER BY 
+    total_order_value DESC NULLS LAST;

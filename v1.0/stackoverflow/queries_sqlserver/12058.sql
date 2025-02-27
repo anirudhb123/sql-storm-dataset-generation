@@ -1,0 +1,29 @@
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    u.Id AS UserId,
+    u.DisplayName AS UserName,
+    u.Reputation,
+    p.ViewCount,
+    p.Score,
+    p.AnswerCount,
+    p.CommentCount,
+    COUNT(v.Id) AS TotalVotes,
+    AVG(CASE WHEN v.VoteTypeId = 2 THEN 1.0 ELSE 0 END) AS AvgUpvotes, 
+    AVG(CASE WHEN v.VoteTypeId = 3 THEN 1.0 ELSE 0 END) AS AvgDownvotes 
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+WHERE 
+    p.CreationDate >= DATEADD(MONTH, -6, GETDATE()) 
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, u.Id, u.DisplayName, u.Reputation, p.ViewCount, p.Score, p.AnswerCount, p.CommentCount
+ORDER BY 
+    p.CreationDate DESC
+OFFSET 0 ROWS 
+FETCH NEXT 100 ROWS ONLY;

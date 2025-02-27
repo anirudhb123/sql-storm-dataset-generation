@@ -1,0 +1,51 @@
+WITH RecursiveCTE AS (
+    -- Recursive CTE to gather information about closed posts and their associated tags
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ClosedDate,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT t.TagName) AS TagCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    INNER JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN LATERAL (
+        SELECT UNNEST(string_to_array(p.Tags, ',')) AS TagName
+    ) t ON TRUE
+    WHERE p.ClosedDate IS NOT NULL
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ClosedDate, p.OwnerUserId
+),
+PostsWithBadges AS (
+    -- CTE to find users with badges and their most recent posts
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        b.Name AS BadgeName,
+        p.Title AS RecentPostTitle,
+        p.CreationDate AS RecentPostDate,
+        RANK() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Users u
+    JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.ClosedDate,
+    r.CommentCount,
+    r.TagCount,
+    ub.UserId,
+    ub.DisplayName,
+    ub.Reputation,
+    ub.BadgeName,
+    COALESCE(ub.RecentPostTitle, 'No Recent Post') AS RecentPostTitle,
+    COALESCE(ub.RecentPostDate, 'N/A') AS RecentPostDate
+FROM RecursiveCTE r
+LEFT JOIN PostsWithBadges ub ON r.OwnerUserId = ub.UserId AND ub.PostRank = 1
+WHERE r.TagCount >= 3
+AND r.CommentCount > 5
+ORDER BY r.ClosedDate DESC, r.TagCount DESC;

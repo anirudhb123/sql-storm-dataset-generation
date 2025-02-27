@@ -1,0 +1,92 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN VoteTypeId IN (1, 6) THEN 1 END) AS AcceptedVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Tags
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || Tags.TagName || '%'
+    GROUP BY 
+        Tags.TagName
+),
+UserReputationOverview AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadges,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalPostViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ps.PostId,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.AcceptedVotes,
+    th.TagName,
+    t.PostCount,
+    t.TotalViews,
+    t.AvgScore,
+    u.UserId,
+    u.DisplayName,
+    u.TotalBadges,
+    u.TotalPostViews,
+    h.CreationDate,
+    h.UserDisplayName AS LastEditedBy,
+    h.Comment AS EditComment,
+    h.Text AS LastEditText
+FROM 
+    PostVoteSummary ps
+JOIN 
+    TagStatistics t ON t.PostCount > 0
+JOIN 
+    Users u ON u.Id = ps.PostId
+LEFT JOIN 
+    RecursivePostHistory h ON h.PostId = ps.PostId AND h.HistoryRank = 1
+WHERE 
+    ps.UpVotes > ps.DownVotes 
+    AND EXISTS (
+        SELECT 
+            1 
+        FROM 
+            Comments c 
+        WHERE 
+            c.PostId = ps.PostId 
+            AND c.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+    )
+ORDER BY 
+    ps.UpVotes DESC, 
+    t.TotalViews DESC
+LIMIT 50;

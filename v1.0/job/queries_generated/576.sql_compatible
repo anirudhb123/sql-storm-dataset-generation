@@ -1,0 +1,70 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rn
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    GROUP BY 
+        mt.title, mt.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        company_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        STRING_AGG(DISTINCT ka.name, ', ') AS cast_list,
+        COALESCE(mi.info, 'No information available') AS movie_info
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        complete_cast cc ON tm.title = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        aka_name ka ON ci.person_id = ka.person_id
+    LEFT JOIN 
+        movie_info mi ON tm.title = mi.movie_id
+    GROUP BY 
+        tm.title, tm.production_year, mi.info
+),
+FinalOutput AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.cast_list,
+        md.movie_info,
+        DENSE_RANK() OVER (ORDER BY md.production_year DESC) AS year_rank
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.movie_info IS NOT NULL
+)
+SELECT 
+    fo.title,
+    fo.production_year,
+    fo.cast_list,
+    fo.movie_info,
+    CASE 
+        WHEN fo.year_rank <= 10 THEN 'Top 10 Recent'
+        ELSE 'Older Movies'
+    END AS movie_category
+FROM 
+    FinalOutput fo
+WHERE 
+    fo.year_rank IS NOT NULL
+ORDER BY 
+    fo.production_year DESC, fo.title ASC;

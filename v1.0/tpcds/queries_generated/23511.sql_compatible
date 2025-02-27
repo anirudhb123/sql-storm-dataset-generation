@@ -1,0 +1,72 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_marital_status ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        rc.c_customer_id,
+        rc.cd_gender,
+        rc.cd_marital_status,
+        COALESCE(SUM(ws.ws_ext_sales_price), 0) AS total_sales
+    FROM 
+        RankedCustomers rc
+    LEFT JOIN 
+        web_sales ws ON rc.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        rc.rank <= 10
+    GROUP BY 
+        rc.c_customer_id, rc.cd_gender, rc.cd_marital_status
+),
+SalesByGender AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT hvc.c_customer_id) AS customer_count,
+        SUM(hvc.total_sales) AS total_revenue
+    FROM 
+        HighValueCustomers hvc
+    JOIN 
+        customer_demographics cd ON hvc.cd_gender = cd.cd_gender
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    sbg.cd_gender,
+    sbg.customer_count,
+    sbg.total_revenue,
+    CASE 
+        WHEN sbg.total_revenue IS NULL THEN 'No Revenue'
+        WHEN sbg.total_revenue > 10000 THEN 'High Roller'
+        WHEN sbg.total_revenue BETWEEN 5000 AND 10000 THEN 'Mid Tier'
+        ELSE 'Low Tier'
+    END AS customer_tier
+FROM 
+    SalesByGender sbg
+WHERE 
+    sbg.customer_count > 0
+ORDER BY 
+    sbg.customer_count DESC
+UNION ALL
+SELECT 
+    'Unknown' AS cd_gender,
+    0 AS customer_count,
+    SUM(COALESCE(ws.ws_ext_sales_price, 0)) AS total_revenue
+FROM 
+    web_sales ws
+LEFT JOIN 
+    customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+WHERE 
+    c.c_customer_sk IS NULL
+GROUP BY 
+    cd_gender
+HAVING 
+    SUM(ws.ws_ext_sales_price) > 1000;

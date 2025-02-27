@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(SUM(pb.Reputation), 0) AS BadgeReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        (SELECT 
+             userId,
+             SUM(CASE WHEN Class = 1 THEN 1000 WHEN Class = 2 THEN 500 WHEN Class = 3 THEN 100 END) AS Reputation
+         FROM 
+             Badges 
+         GROUP BY 
+             userId) pb ON u.Id = pb.userId
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        ur.UserId,
+        ur.DisplayName,
+        (ur.Reputation + ur.BadgeReputation) AS TotalReputation,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users ur ON rp.OwnerUserId = ur.Id
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    WHERE 
+        rp.rn = 1
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, ur.UserId, ur.DisplayName, ur.Reputation, ur.BadgeReputation
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.DisplayName,
+    ps.TotalReputation,
+    ps.CommentCount,
+    ps.UpVoteCount,
+    CASE 
+        WHEN ps.UpVoteCount >= 50 THEN 'Highly Voted'
+        WHEN ps.UpVoteCount BETWEEN 20 AND 49 THEN 'Moderately Voted'
+        ELSE 'Less Voted'
+    END AS VoteCategory
+FROM 
+    PostStatistics ps
+WHERE 
+    ps.TotalReputation IS NOT NULL AND ps.CommentCount > 0
+ORDER BY 
+    ps.TotalReputation DESC, ps.Score DESC
+FETCH FIRST 10 ROWS ONLY;

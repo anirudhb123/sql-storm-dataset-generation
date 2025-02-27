@@ -1,0 +1,66 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.AnswerCount) AS TotalAcceptedAnswers
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+UserPostHistory AS (
+    SELECT 
+        ph.UserId,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.Text,
+        COUNT(ph.Id) OVER (PARTITION BY ph.UserId ORDER BY ph.CreationDate RANGE BETWEEN INTERVAL '7 days' PRECEDING AND CURRENT ROW) AS EditCountLastWeek,
+        STRING_AGG(DISTINCT CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN cr.Name END, ', ') AS CloseReasons
+    FROM PostHistory ph
+    LEFT JOIN CloseReasonTypes cr ON ph.Comment::int = cr.Id
+),
+RecentActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        MAX(ph.CreationDate) AS LastActivityDate,
+        STRING_AGG(DISTINCT CAST(p.Title AS varchar), '; ') AS RelatedPostTitles
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY u.Id, u.DisplayName
+)
+SELECT 
+    ur.UserId,
+    ur.DisplayName,
+    ur.Reputation,
+    ps.TotalPosts,
+    ps.TotalQuestions,
+    ps.TotalAnswers,
+    ps.TotalViews,
+    ps.TotalAcceptedAnswers,
+    ua.LastActivityDate,
+    ua.RelatedPostTitles,
+    COALESCE(uh.EditCountLastWeek, 0) AS EditsLastWeek,
+    COALESCE(uh.CloseReasons, 'No close reasons') AS EditCloseReasons
+FROM UserReputation ur
+LEFT JOIN PostStatistics ps ON ur.UserId = ps.OwnerUserId
+LEFT JOIN UserPostHistory uh ON ur.UserId = uh.UserId
+LEFT JOIN RecentActivity ua ON ur.UserId = ua.UserId
+WHERE ur.Reputation > 1000 
+  AND (uh.EditCountLastWeek IS NULL OR uh.EditCountLastWeek > 1)
+  AND ur.UserId IS NOT NULL
+ORDER BY ur.Reputation DESC, ps.TotalPosts DESC
+FETCH FIRST 10 ROWS ONLY;

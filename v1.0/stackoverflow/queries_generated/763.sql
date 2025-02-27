@@ -1,0 +1,65 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN v.VoteTypeId IN (1, 6) THEN 1 ELSE 0 END) AS AcceptedOrCloseVotes
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.AnswerCount,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        COALESCE(pa.ViewCount, 0) AS PreviousViewCount,
+        DATEDIFF(CURRENT_TIMESTAMP, p.CreationDate) AS DaysSinceCreation,
+        DENSE_RANK() OVER (ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(ViewCount) AS ViewCount
+        FROM Posts
+        GROUP BY PostId
+    ) pa ON p.Id = pa.PostId
+),
+PostInteraction AS (
+    SELECT 
+        pa.PostId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(pl.RelatedPostId) AS LinkedPostCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.CreationDate END) AS LastClosedDate
+    FROM PostActivity pa
+    LEFT JOIN Comments c ON pa.PostId = c.PostId
+    LEFT JOIN PostLinks pl ON pa.PostId = pl.PostId
+    LEFT JOIN PostHistory ph ON pa.PostId = ph.PostId
+    GROUP BY pa.PostId
+)
+SELECT 
+    uvs.DisplayName,
+    uvs.TotalVotes,
+    uvs.Upvotes,
+    uvs.Downvotes,
+    pa.Title,
+    pa.AnswerCount,
+    pa.ViewCount,
+    pi.CommentCount,
+    pi.LinkedPostCount,
+    pi.LastEditDate,
+    pi.LastClosedDate
+FROM UserVoteStats uvs
+JOIN Posts p ON uvs.UserId = p.OwnerUserId
+JOIN PostActivity pa ON p.Id = pa.PostId
+JOIN PostInteraction pi ON pa.PostId = pi.PostId
+WHERE uvs.TotalVotes > 10 
+  AND (uvs.Upvotes - uvs.Downvotes) > 5 
+  AND pa.DaysSinceCreation < 30
+ORDER BY uvs.TotalVotes DESC, pa.ViewCount DESC
+LIMIT 100;

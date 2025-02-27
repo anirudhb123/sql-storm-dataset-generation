@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- Base case: select the initial movies
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000  -- Focus on movies from the 2000s
+    UNION ALL
+    -- Recursive case: select linked movies (sequels)
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        a.title,
+        a.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    AVG(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS avg_actor_roles,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    SUM(mi.info LIKE '%blockbuster%') AS blockbuster_info_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+WHERE 
+    mh.level <= 2  -- Limit the hierarchy to 2 levels deep
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 3  -- Only movies with more than 3 actors
+ORDER BY 
+    mh.production_year DESC, actor_count DESC
+LIMIT 50;  -- Return only the top 50 results

@@ -1,0 +1,69 @@
+WITH Recursive ActorsWithTitles AS (
+    SELECT 
+        ka.id AS actor_id, 
+        ka.name AS actor_name,
+        at.title AS movie_title,
+        tt.production_year,
+        'Direct' AS relation
+    FROM aka_name ka
+    JOIN cast_info ci ON ka.person_id = ci.person_id
+    JOIN aka_title at ON ci.movie_id = at.movie_id
+    JOIN title tt ON at.movie_id = tt.id
+    WHERE at.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ka.id, 
+        ka.name,
+        at.title,
+        tt.production_year,
+        'Indirect' AS relation
+    FROM aka_name ka
+    JOIN cast_info ci ON ka.person_id = ci.person_id
+    JOIN movie_link ml ON ci.movie_id = ml.movie_id
+    JOIN aka_title at ON ml.linked_movie_id = at.movie_id
+    JOIN title tt ON at.movie_id = tt.id
+    WHERE at.production_year IS NOT NULL
+),
+ActorStats AS (
+    SELECT 
+        actor_id,
+        actor_name,
+        COUNT(DISTINCT movie_title) AS total_movies,
+        MIN(production_year) AS first_movie_year,
+        MAX(production_year) AS last_movie_year,
+        AVG(production_year) AS average_movie_year
+    FROM ActorsWithTitles
+    GROUP BY actor_id, actor_name
+),
+KeywordedMovies AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(mk.keyword) AS keyword_count
+    FROM movie_keyword mk
+    JOIN aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY mt.movie_id
+    HAVING COUNT(mk.keyword) >= 3
+),
+LatestMoviesWithKeywords AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        km.keyword_count
+    FROM aka_title at
+    JOIN KeywordedMovies km ON at.id = km.movie_id
+    WHERE at.production_year = (SELECT MAX(production_year) FROM aka_title)
+)
+SELECT 
+    a.actor_name,
+    a.total_movies,
+    a.first_movie_year,
+    COALESCE(LMM.movie_title, 'No recent keyworded movie') AS recent_keyworded_movie_title,
+    COALESCE(LMM.production_year, 'N/A') AS recent_keyworded_movie_year,
+    COALESCE(LMM.keyword_count, 0) AS keyword_count,
+    RANK() OVER (ORDER BY a.total_movies DESC) AS actor_rank
+FROM ActorStats a
+LEFT JOIN LatestMoviesWithKeywords LMM ON a.actor_name LIKE '%' || SUBSTRING(LMM.title FROM '[^ ]+$') || '%'
+WHERE a.average_movie_year IS NOT NULL AND a.total_movies > 5
+ORDER BY actor_rank;

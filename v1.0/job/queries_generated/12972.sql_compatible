@@ -1,0 +1,25 @@
+
+SELECT
+    t.title AS movie_title,
+    a.name AS actor_name,
+    r.role AS role,
+    c.production_year,
+    COUNT(*) AS total_roles
+FROM
+    title t
+JOIN
+    movie_companies mc ON t.id = mc.movie_id
+JOIN
+    company_name cn ON mc.company_id = cn.id
+JOIN
+    complete_cast cc ON t.id = cc.movie_id
+JOIN
+    aka_name a ON cc.subject_id = a.person_id
+JOIN
+    role_type r ON cc.role_id = r.id
+JOIN
+    cast_info ci ON a.person_id = ci.person_id AND t.id = ci.movie_id
+GROUP BY
+    t.title, a.name, r.role, c.production_year
+ORDER BY
+    total_roles DESC;

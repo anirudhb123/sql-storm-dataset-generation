@@ -1,0 +1,45 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_custkey, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, o.o_orderdate, o.o_custkey, o.o_totalprice, oh.level + 1
+    FROM OrderHierarchy oh
+    JOIN orders o ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > (SELECT MAX(o2.o_orderdate) FROM orders o2 WHERE o2.o_orderkey = oh.o_orderkey)
+)
+
+SELECT 
+    n.n_name AS nation,
+    r.r_name AS region,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    CASE WHEN ROUND(AVG(l.l_quantity), 2) IS NULL THEN 'N/A' ELSE ROUND(AVG(l.l_quantity), 2) END AS avg_quantity,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey AND s.s_suppkey = ps.ps_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate >= DATE '2023-01-01' 
+    AND l.l_shipdate < DATE '2023-12-31'
+    AND (s.s_acctbal IS NOT NULL OR c.c_acctbal IS NOT NULL)
+GROUP BY 
+    n.n_name, r.r_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+ORDER BY 
+    total_revenue DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,61 @@
+-- Performance Benchmarking Query
+
+-- This query retrieves a sample of users along with their posts, comments, and votes for performance benchmarking.
+-- It gathers the total number of posts, comments, and votes per user and the latest activity date.
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(C.Id) AS TotalComments,
+        COUNT(V.Id) AS TotalVotes,
+        MAX(P.LastActivityDate) AS LastPostActivityDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        P.OwnerUserId,
+        P.LastActivityDate
+    FROM 
+        Posts P
+    WHERE 
+        P.LastActivityDate > CURRENT_TIMESTAMP - INTERVAL '1 year' -- filter on recent posts for performance
+)
+SELECT 
+    UPS.UserId,
+    UPS.DisplayName,
+    UPS.TotalPosts,
+    UPS.TotalComments,
+    UPS.TotalVotes,
+    UPS.LastPostActivityDate,
+    PS.Title,
+    PS.CreationDate,
+    PS.ViewCount,
+    PS.Score,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.FavoriteCount
+FROM 
+    UserPostStats UPS
+LEFT JOIN 
+    PostStats PS ON UPS.UserId = PS.OwnerUserId
+ORDER BY 
+    UPS.TotalPosts DESC
+LIMIT 100; -- Limit output for performance considerations

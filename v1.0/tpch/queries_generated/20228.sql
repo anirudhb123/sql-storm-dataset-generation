@@ -1,0 +1,98 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+), 
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+    GROUP BY 
+        c.c_custkey
+), 
+BestSuppliedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        pp.s_name AS best_supplier,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS cost_rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier pp ON ps.ps_suppkey = pp.s_suppkey
+), 
+NullCheck AS (
+    SELECT 
+        DISTINCT n.n_name, 
+        COUNT(n.n_nationkey) AS nation_count 
+    FROM 
+        nation n 
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        n.n_name
+    HAVING 
+        COUNT(r.r_regionkey) IS NULL
+),
+FinalMetrics AS (
+    SELECT 
+        cs.c_custkey,
+        cs.total_spent,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal,
+        NULLIF(rp.best_supplier, 'UNKNOWN') AS best_supplier,
+        rp.ps_availqty,
+        rp.ps_supplycost,
+        n.n_name AS nation_name,
+        COALESCE(NULLIF(n.n_name, ''), 'No Nation') AS effective_nation
+    FROM 
+        CustomerSummary cs
+    LEFT JOIN 
+        RankedSuppliers rs ON rs.supplier_rank = 1
+    LEFT JOIN 
+        BestSuppliedParts rp ON rp.cost_rank = 1
+    LEFT JOIN 
+        nation n ON n.n_nationkey = cs.c_custkey  -- assuming a bizarre foreign key relationship
+    WHERE 
+        cs.total_spent > (SELECT AVG(total_spent) FROM CustomerSummary)
+)
+SELECT 
+    fm.c_custkey, 
+    fm.total_spent, 
+    fm.s_name,
+    fm.best_supplier,
+    fm.ps_availqty,
+    fm.ps_supplycost,
+    fm.nation_name,
+    fm.effective_nation
+FROM 
+    FinalMetrics fm
+WHERE 
+    fm.ps_availqty IS NOT NULL 
+    AND (fm.total_spent < 10000 OR fm.s_acctbal BETWEEN 5000 AND 20000)
+    AND (fm.s_name LIKE '%%' OR fm.s_name IS NOT NULL) 
+ORDER BY 
+    fm.total_spent DESC, 
+    fm.s_name ASC
+LIMIT 100;

@@ -1,0 +1,44 @@
+WITH RECURSIVE ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_available, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+high_value_orders AS (
+    SELECT oo.o_orderkey, oo.o_totalprice, 
+           CASE WHEN oo.o_orderstatus = 'F' THEN 'Finished'
+                WHEN oo.o_orderstatus = 'P' THEN 'Pending'
+                ELSE 'Other' END AS order_status
+    FROM ranked_orders oo
+    WHERE oo.rank <= 5
+),
+part_supplier_info AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT DISTINCT n.n_name, 
+       COUNT(DISTINCT co.o_orderkey) AS total_orders, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       COALESCE(ss.total_available, 0) AS total_available_parts,
+       COALESCE(ss.avg_supply_cost, 0) AS avg_supply_cost,
+       ROUND(AVG(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice ELSE 0 END), 2) AS avg_returned_price
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN high_value_orders co ON l.l_orderkey = co.o_orderkey
+LEFT JOIN supplier_summary ss ON s.s_suppkey = ss.s_suppkey
+WHERE n.n_name IN ('USA', 'Germany', 'France')
+GROUP BY n.n_name
+HAVING SUM(l.l_quantity) > 100
+ORDER BY n.n_name;

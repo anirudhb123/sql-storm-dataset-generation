@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+),
+SuppWithLongComments AS (
+    SELECT 
+        s.s_suppkey,
+        LENGTH(s.s_comment) AS comment_length
+    FROM 
+        supplier s
+    WHERE 
+        LENGTH(s.s_comment) > 50
+),
+RegionNationDetails AS (
+    SELECT 
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name, r.r_name
+    HAVING 
+        COUNT(DISTINCT s.s_suppkey) > 0
+)
+SELECT 
+    r.nation_name,
+    r.region_name,
+    MAX(r.supplier_count) OVER (PARTITION BY r.region_name) AS max_suppliers,
+    COALESCE(h.total_spent, 0) AS high_value_customer_spent,
+    SUM(CASE WHEN ps.ps_supplycost IS NULL THEN 0 ELSE ps.ps_supplycost END) AS total_supply_cost,
+    SUM(CASE WHEN l.l_discount > 0 THEN l.l_discount * l.l_extendedprice ELSE 0 END) AS total_discounted_value
+FROM 
+    RegionNationDetails r
+LEFT JOIN 
+    supplier s ON r.nation_name = (SELECT n_name FROM nation WHERE n_nationkey = s.s_nationkey)
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN 
+    HighValueCustomers h ON h.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l2 WHERE l2.l_partkey = ps.ps_partkey) LIMIT 1)
+GROUP BY 
+    r.nation_name, r.region_name, h.total_spent
+HAVING 
+    MAX(r.supplier_count) > 2
+ORDER BY 
+    r.region_name, high_value_customer_spent DESC
+LIMIT 10;

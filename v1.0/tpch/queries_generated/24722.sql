@@ -1,0 +1,36 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name, 
+           CAST(s.s_name AS VARCHAR(100)) AS hierarchy 
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name, 
+           CONCAT(sh.hierarchy, ' -> ', s.s_name) 
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_acctbal < s.s_acctbal
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice END), 0) AS return_value,
+    STRING_AGG(DISTINCT sh.nation_name, ', ') AS supplier_nations,
+    AVG(CASE WHEN l.l_shipmode = 'AIR' THEN l.l_extendedprice ELSE NULL END) OVER (PARTITION BY l.l_shipmode) AS avg_air_ship_price,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY p.p_retailprice DESC) AS part_rank
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE p.p_container IS NOT NULL
+AND p.p_size BETWEEN (SELECT MIN(p_size) FROM part) AND (SELECT MAX(p_size) FROM part)
+GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+HAVING return_value > (SELECT AVG(return_value) FROM (SELECT COALESCE(SUM(CASE WHEN l_returnflag = 'R' THEN l_extendedprice END), 0) AS return_value 
+                                                      FROM lineitem 
+                                                      GROUP BY l_orderkey) AS subquery)
+ORDER BY p.p_retailprice DESC, part_rank ASC
+LIMIT 50;

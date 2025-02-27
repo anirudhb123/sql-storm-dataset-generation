@@ -1,0 +1,97 @@
+WITH RecursiveUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        1 AS ActivityLevel
+    FROM Users u
+    WHERE u.Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        ra.ActivityLevel + 1
+    FROM Users u
+    JOIN RecursiveUserActivity ra ON u.Id = ra.UserId
+    WHERE u.Reputation > 1000 AND ra.ActivityLevel < 5
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+),
+PostVoteDetails AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotesCount
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY v.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(b.Date) AS MostRecentBadgeDate
+    FROM Badges b
+    WHERE b.Class = 1  -- Gold Badges
+    GROUP BY b.UserId
+),
+CombinedData AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        ub.BadgeCount,
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate AS PostCreationDate,
+        pd.UpVotesCount,
+        pd.DownVotesCount
+    FROM Users u
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN RecentPosts rp ON u.Id = rp.OwnerUserId
+    LEFT JOIN PostVoteDetails pd ON rp.PostId = pd.PostId
+)
+SELECT 
+    cd.UserId,
+    cd.DisplayName,
+    cd.Reputation,
+    cd.Views,
+    cd.UpVotes,
+    cd.DownVotes,
+    COALESCE(cd.BadgeCount, 0) AS BadgeCount,
+    COALESCE(cd.Title, 'No Posts') AS RecentPostTitle,
+    COALESCE(cd.PostCreationDate, CURRENT_TIMESTAMP) AS RecentPostDate,
+    COALESCE(cd.UpVotesCount, 0) AS UpVotesReceived,
+    COALESCE(cd.DownVotesCount, 0) AS DownVotesReceived,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+FROM CombinedData cd
+LEFT JOIN Posts p ON cd.PostId = p.Id
+LEFT JOIN STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS t ON true
+WHERE cd.Reputation > 1000
+GROUP BY cd.UserId, cd.DisplayName, cd.Reputation, cd.Views, cd.UpVotes, cd.DownVotes, cd.BadgeCount, cd.Title, cd.PostCreationDate
+ORDER BY cd.Reputation DESC, cd.Views DESC
+LIMIT 100;

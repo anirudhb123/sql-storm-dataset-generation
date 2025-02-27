@@ -1,0 +1,47 @@
+
+WITH RECURSIVE date_series AS (
+    SELECT d_date_sk, d_date, d_month_seq
+    FROM date_dim
+    WHERE d_date >= '2023-01-01'
+    UNION ALL
+    SELECT dd.d_date_sk, dd.d_date, dd.d_month_seq
+    FROM date_dim dd
+    JOIN date_series ds ON dd.d_date_sk = ds.d_date_sk + 1
+),
+customer_summary AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           CASE WHEN cd.cd_gender = 'F' THEN 'Female' ELSE 'Male' END AS gender,
+           COUNT(DISTINCT s.ss_ticket_number) AS total_transactions,
+           SUM(ss.ss_net_paid_inc_tax) AS total_spent
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN date_series ds ON ss.ss_sold_date_sk = ds.d_date_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+top_customers AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cs.total_transactions, cs.total_spent,
+           RANK() OVER (ORDER BY cs.total_spent DESC) AS spend_rank
+    FROM customer_summary cs
+    JOIN customer c ON cs.c_customer_sk = c.c_customer_sk
+)
+SELECT tc.c_customer_sk,
+       tc.c_first_name,
+       tc.c_last_name,
+       tc.total_transactions,
+       tc.total_spent,
+       CASE 
+           WHEN tc.spend_rank <= 10 THEN 'Top 10%'
+           ELSE 'Lower 90%'
+       END AS customer_segment
+FROM top_customers tc
+WHERE tc.total_spent IS NOT NULL
+AND tc.total_transactions > 0
+ORDER BY tc.total_spent DESC
+LIMIT 100;
+
+-- Performance Benchmarking:  
+-- Outer join with customer demographics, CTE for date series and customer summary, 
+-- Window function for ranking, complex predicates, and string expressions.

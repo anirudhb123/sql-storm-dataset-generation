@@ -1,0 +1,73 @@
+
+WITH RecursiveReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_customer_sk,
+        sr_return_quantity,
+        COALESCE(sr_return_amt, 0) AS return_amt,
+        SUM(sr_return_quantity) OVER (PARTITION BY sr_item_sk ORDER BY sr_customer_sk ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_returns,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_return_quantity DESC) AS rn
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+),
+WebBenefits AS (
+    SELECT 
+        wr_item_sk,
+        COUNT(DISTINCT wr_returning_customer_sk) AS unique_returning_customers,
+        SUM(wr_return_amt_inc_tax) AS total_web_return_value,
+        AVG(CASE WHEN wr_net_loss IS NOT NULL THEN wr_net_loss ELSE 0 END) AS avg_net_loss
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_item_sk
+),
+CustomerInsights AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        MAX(CASE WHEN r.r_reason_id IS NOT NULL THEN r.r_reason_desc ELSE 'No Reason' END) AS top_return_reason,
+        COUNT(DISTINCT sr_item_sk) AS total_returned_items
+    FROM 
+        customer AS c
+    JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_returns AS sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN reason AS r ON sr.sr_reason_sk = r.r_reason_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_bill_customer_sk) AS cumulative_sales
+    FROM 
+        web_sales AS ws
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    rc.rn,
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ci.top_return_reason,
+    COALESCE(si.total_sales, 0) AS total_sales_history,
+    COALESCE(wb.unique_returning_customers, 0) AS web_unique_returns,
+    rc.cumulative_returns,
+    rc.return_amt
+FROM 
+    CustomerInsights AS ci
+LEFT JOIN 
+    RecursiveReturns AS rc ON ci.c_customer_sk = rc.sr_customer_sk
+LEFT JOIN 
+    SalesData AS si ON rc.sr_item_sk = si.ws_item_sk
+LEFT JOIN 
+    WebBenefits AS wb ON rc.sr_item_sk = wb.wr_item_sk
+WHERE 
+    ci.total_returned_items > 0
+ORDER BY 
+    ci.c_customer_sk, rc.cumulative_returns DESC, wb.total_web_return_value DESC
+LIMIT 100;

@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        c.c_birth_year,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk,
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_email_address, cd.cd_marital_status, hd.hd_income_band_sk, c.c_birth_year
+    UNION ALL
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        CASE 
+            WHEN c.c_birth_year IS NULL THEN NULL 
+            ELSE c.c_birth_year + 1 
+        END AS c_birth_year,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk,
+        SUM(ws.ws_sales_price) + sh.total_sales
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    JOIN 
+        sales_hierarchy sh ON sh.c_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_email_address, cd.cd_marital_status, hd.hd_income_band_sk
+)
+SELECT 
+    sh.c_first_name,
+    sh.c_last_name,
+    sh.c_email_address,
+    sh.total_sales,
+    CASE 
+        WHEN sh.total_sales > (SELECT AVG(total_sales) FROM sales_hierarchy) THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS sales_performance,
+    COALESCE(ib.ib_lower_bound, 0) AS income_lower,
+    COALESCE(ib.ib_upper_bound, 0) AS income_upper
+FROM 
+    sales_hierarchy sh
+LEFT JOIN 
+    income_band ib ON sh.hd_income_band_sk = ib.ib_income_band_sk
+WHERE 
+    sh.total_sales IS NOT NULL
+ORDER BY 
+    sh.total_sales DESC
+LIMIT 100;

@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        u.DisplayName AS Author,
+        p.CreationDate,
+        p.Body,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswer,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS RankWithinTag
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.Tags, p.CreationDate, p.Body, p.AcceptedAnswerId
+),
+AnsweredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Author,
+        rp.CreationDate,
+        rp.Body,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.BadgeCount,
+        rp.AcceptedAnswer,
+        ROW_NUMBER() OVER (ORDER BY rp.CreationDate DESC) AS RecentPostRank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.AcceptedAnswer > 0
+)
+SELECT 
+    ap.PostId,
+    ap.Title,
+    ap.Author,
+    ap.CreationDate,
+    ap.CommentCount,
+    ap.UpVotes,
+    ap.DownVotes,
+    ap.BadgeCount,
+    p2.Title AS AcceptedAnswerTitle,
+    COALESCE(ap.RecentPostRank, 0) AS RecentRank,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagList
+FROM 
+    AnsweredPosts ap
+LEFT JOIN 
+    Posts p2 ON ap.AcceptedAnswer = p2.Id
+LEFT JOIN 
+    LATERAL (SELECT unnest(string_to_array(ap.Tags, ',')) AS TagName) AS t ON TRUE 
+GROUP BY 
+    ap.PostId, ap.Title, ap.Author, ap.CreationDate, ap.CommentCount, ap.UpVotes, ap.DownVotes, ap.BadgeCount, p2.Title, ap.AcceptedAnswer
+ORDER BY 
+    ap.RecentPostRank;

@@ -1,0 +1,29 @@
+
+SELECT 
+    CONCAT('Supplier: ', s.s_name, 
+           ', Region: ', r.r_name, 
+           ', Part: ', p.p_name, 
+           ', Order Count: ', COUNT(o.o_orderkey) AS Order_Count, 
+           ', Total Supply Cost: $', FORMAT(SUM(ps.ps_supplycost * ps.ps_availqty), 2) AS Total_Supply_Cost
+FROM 
+    supplier s 
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey 
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey 
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey 
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey 
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey 
+WHERE 
+    r.r_name LIKE 'Asia%' 
+AND 
+    p.p_comment LIKE '%fragile%' 
+GROUP BY 
+    s.s_suppkey, r.r_regionkey, p.p_partkey, s.s_name, r.r_name, p.p_name 
+ORDER BY 
+    Total_Supply_Cost DESC, Order_Count DESC;

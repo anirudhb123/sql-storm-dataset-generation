@@ -1,0 +1,57 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(sr_return_quantity, 0)) AS total_returned_quantity,
+        SUM(COALESCE(sr_return_amt, 0)) AS total_returned_amount,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        CASE 
+            WHEN cd.cd_purchase_estimate >= 5000 THEN 'High'
+            WHEN cd.cd_purchase_estimate BETWEEN 2000 AND 4999 THEN 'Medium'
+            ELSE 'Low'
+        END AS purchase_category
+    FROM 
+        customer_demographics cd
+),
+TopCustomers AS (
+    SELECT 
+        cr.c_customer_id,
+        cr.total_returned_quantity,
+        cr.total_returned_amount,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.purchase_category
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        customer_demographics cd ON cr.c_customer_id = cd.cd_demo_sk
+    WHERE 
+        cr.total_returned_quantity > 0
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_returned_quantity,
+    tc.total_returned_amount,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    tc.cd_education_status,
+    tc.purchase_category
+FROM 
+    TopCustomers tc
+ORDER BY 
+    tc.total_returned_amount DESC
+LIMIT 100;

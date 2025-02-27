@@ -1,0 +1,83 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) as rank,
+        JSON_AGG(
+            JSON_BUILD_OBJECT('partkey', ps.ps_partkey, 'supplycost', ps.ps_supplycost)
+        ) AS partsupplies
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey
+),
+TotalLines AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(DISTINCT l.l_linenumber) AS line_count,
+        AVG(l.l_discount) AS avg_discount
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'P')
+    GROUP BY 
+        o.o_orderkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        tl.total_quantity,
+        COALESCE(tl.avg_discount, 0) AS avg_discount,
+        RANK() OVER (ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    LEFT JOIN 
+        TotalLines tl ON o.o_orderkey = tl.o_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31' AND 
+        ((o.o_orderpriority = '1-URGENT' AND tl.total_quantity > 100) OR 
+        (o.o_orderpriority IS NULL) OR 
+        (tl.total_quantity IS NULL AND o.o_totalprice > 5000))
+),
+FinalResults AS (
+    SELECT 
+        r.r_name, 
+        COALESCE(SUM(o.o_totalprice), 0) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(o.avg_discount) AS overall_avg_discount,
+        COUNT(DISTINCT ss.s_suppkey) AS supplier_count
+    FROM 
+        FilteredOrders o
+    LEFT JOIN 
+        nation n ON o.o_orderkey % 5 = n.n_nationkey  
+    LEFT JOIN 
+        RankedSuppliers ss ON n.n_nationkey = ss.s_nationkey 
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    r_name, 
+    total_revenue, 
+    order_count, 
+    overall_avg_discount,
+    supplier_count,
+    CASE 
+        WHEN overall_avg_discount < 0 THEN 'Negative Discounting'
+        WHEN overall_avg_discount IS NULL THEN 'No Discounts Applied'
+        ELSE 'Standard Discounting'
+    END AS discount_status
+FROM 
+    FinalResults
+WHERE 
+    total_revenue > (SELECT AVG(total_revenue) FROM FinalResults)
+ORDER BY 
+    total_revenue DESC;

@@ -1,0 +1,61 @@
+WITH PostTagCounts AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(DISTINCT t.TagName) AS TagCount
+    FROM
+        Posts p
+    JOIN
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName ON TRUE
+    JOIN
+        Tags t ON TagName = t.TagName
+    WHERE
+        p.PostTypeId = 1 -- Considering only Questions
+    GROUP BY
+        p.Id
+),
+
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.PostTypeId = 1 AND ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedQuestions
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY
+        u.Id
+),
+
+CombinedData AS (
+    SELECT
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalPosts,
+        ua.Questions,
+        ua.Answers,
+        ua.ClosedQuestions,
+        ptc.TagCount
+    FROM
+        UserActivity ua
+    LEFT JOIN
+        PostTagCounts ptc ON ua.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = ptc.PostId)
+)
+
+SELECT
+    cd.DisplayName,
+    cd.TotalPosts,
+    cd.Questions,
+    cd.Answers,
+    cd.ClosedQuestions,
+    COALESCE(cd.TagCount, 0) AS UniqueTagsContributed,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = cd.UserId) AS BadgeCount
+FROM
+    CombinedData cd
+ORDER BY
+    cd.TotalPosts DESC, cd.Questions DESC;

@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) AND 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id, u.Reputation
+), PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        SUM(CASE WHEN pc.Comment IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        AVG(v.VoteTypeId) AS AverageVoteType
+    FROM 
+        RankedPosts rp
+    LEFT JOIN Comments pc ON rp.PostId = pc.PostId
+    LEFT JOIN Votes v ON rp.PostId = v.PostId
+    GROUP BY 
+        rp.PostId
+)
+SELECT 
+    up.UserId,
+    up.Reputation,
+    up.TotalPosts,
+    up.TotalBadges,
+    pp.PostId,
+    pp.CommentCount,
+    pp.AverageVoteType,
+    CASE 
+        WHEN pp.AverageVoteType IS NULL THEN 'No Votes'
+        WHEN pp.AverageVoteType > 2 THEN 'Well Received'
+        ELSE 'Needs Attention'
+    END AS PostStatus,
+    COALESCE(rp.Title, 'Untitled Post') AS PostTitle
+FROM 
+    UserReputation up
+JOIN 
+    PopularPosts pp ON up.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = pp.PostId)
+JOIN 
+    RankedPosts rp ON pp.PostId = rp.PostId
+WHERE 
+    up.Reputation > 1000
+ORDER BY 
+    up.TotalPosts DESC, 
+    pp.CommentCount DESC NULLS LAST;

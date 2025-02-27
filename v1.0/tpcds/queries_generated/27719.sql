@@ -1,0 +1,68 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca_address_id,
+        LOWER(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS full_address
+    FROM 
+        customer_address
+),
+DemographicInfo AS (
+    SELECT 
+        cd_demo_sk,
+        CASE
+            WHEN cd_gender = 'M' THEN 'Male'
+            WHEN cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate
+    FROM 
+        customer_demographics
+),
+SalesInfo AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+ExtendedInfo AS (
+    SELECT 
+        c.c_customer_id,
+        d.gender,
+        d.cd_marital_status,
+        a.full_address,
+        s.total_sales,
+        s.order_count
+    FROM 
+        customer c
+    JOIN 
+        DemographicInfo d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    JOIN 
+        AddressInfo a ON c.c_current_addr_sk = a.ca_address_sk
+    JOIN 
+        SalesInfo s ON c.c_customer_sk = s.ws_bill_customer_sk
+)
+SELECT 
+    e.c_customer_id,
+    e.gender,
+    e.cd_marital_status,
+    e.full_address,
+    e.total_sales,
+    e.order_count,
+    CASE 
+        WHEN e.total_sales > 1000 THEN 'High Value'
+        WHEN e.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    ExtendedInfo e
+WHERE 
+    e.cd_marital_status = 'M'
+ORDER BY 
+    e.total_sales DESC
+LIMIT 100;

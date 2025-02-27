@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rank_by_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CompanyMovieCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.*,
+        cm.company_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyMovieCounts cm ON rm.movie_id = cm.movie_id
+    WHERE 
+        cm.company_count IS NOT NULL OR rm.rank_by_year <= 5
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        SUM(CASE WHEN rt.role = 'Lead' THEN 1 ELSE 0 END) AS lead_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    COALESCE(ar.actor_count, 0) AS total_actors,
+    COALESCE(ar.lead_count, 0) AS lead_actors,
+    CASE 
+        WHEN fm.rank_by_year <= 5 AND ar.lead_count > 0 THEN 'Highly Recommend'
+        WHEN ar.actor_count = 0 THEN 'No Actors'
+        ELSE 'Considered'
+    END AS recommendation,
+    STRING_AGG(DISTINCT CONCAT(aka.name, ' (', aka.id, ')'), '; ') AS aka_names
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    ActorRoles ar ON fm.movie_id = ar.movie_id
+LEFT JOIN 
+    aka_name aka ON aka.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = fm.movie_id)
+GROUP BY 
+    fm.movie_id, fm.title, fm.production_year, fm.rank_by_year
+ORDER BY 
+    fm.production_year DESC, total_actors DESC;

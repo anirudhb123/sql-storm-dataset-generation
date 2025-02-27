@@ -1,0 +1,52 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank,
+        (SELECT COUNT(*) 
+         FROM store_sales ss 
+         WHERE ss.ss_item_sk = ws.ws_item_sk 
+           AND ss.ss_sold_date_sk BETWEEN DATEADD(DAY, -30, GETDATE()) AND GETDATE()) AS store_sales_last_30_days
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > 0
+),
+CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returns,
+        COUNT(DISTINCT cr_order_number) AS distinct_orders
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    SUM(COALESCE(rs.ws_net_profit, 0)) AS total_profit,
+    COUNT(DISTINCT rs.ws_order_number) AS total_orders,
+    MAX(rs.store_sales_last_30_days) AS max_store_sales_last_30_days,
+    COUNT(DISTINCT cr.cr_returning_customer_sk) AS total_unique_returning_customers,
+    AVG(cr.total_returns) AS avg_returns_per_customer
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    RankedSales rs ON c.c_customer_sk = rs.web_site_sk
+LEFT JOIN 
+    CustomerReturns cr ON cr.cr_returning_customer_sk = c.c_customer_sk
+WHERE 
+    ca.ca_state IN (SELECT ca_state FROM customer_address WHERE ca_country IS NOT NULL)
+    AND rs.profit_rank <= 10
+GROUP BY 
+    ca.ca_city, ca.ca_state
+HAVING 
+    total_profit > (SELECT AVG(total_profit) FROM (SELECT SUM(ws.ws_net_profit) AS total_profit FROM web_sales ws GROUP BY ws.web_site_sk) AS AvgProfit)
+ORDER BY 
+    total_profit DESC, ca.ca_city ASC;

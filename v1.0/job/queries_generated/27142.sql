@@ -1,0 +1,57 @@
+WITH MovieData AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        c.kind AS company_type,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title, t.production_year, a.name, c.kind
+),
+RankedMovies AS (
+    SELECT 
+        title_id,
+        title,
+        production_year,
+        actor_name,
+        company_type,
+        company_count,
+        keywords,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY company_count DESC, title ASC) AS rank
+    FROM 
+        MovieData
+)
+SELECT 
+    rm.title_id,
+    rm.title,
+    rm.production_year,
+    rm.actor_name,
+    rm.company_type,
+    rm.company_count,
+    rm.keywords
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    rm.production_year DESC, rm.company_count DESC;
+
+This SQL query benchmarks string processing by aggregating multiple string fields, counting distinct companies associated with each movie, and ranking the results accordingly. The Common Table Expressions (CTEs) used make it easier to manage complex joins and aggregations, providing a structured approach to analyzing the data.

@@ -1,0 +1,87 @@
+WITH CustomerSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        AVG(s.s_acctbal) AS avg_acctbalance
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        DENSE_RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+)
+SELECT 
+    cs.c_name,
+    cs.total_spent,
+    cs.order_count,
+    pd.p_name,
+    pd.total_available,
+    ss.avg_acctbalance,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No purchases'
+        WHEN cs.total_spent > 1000 THEN 'High spender'
+        ELSE 'Moderate spender'
+    END AS spender_classification,
+    RANK() OVER (ORDER BY cs.total_spent DESC) AS spender_rank
+FROM 
+    CustomerSales cs
+FULL OUTER JOIN 
+    PartDetails pd ON cs.c_custkey = (
+        SELECT 
+            l.o_custkey 
+        FROM 
+            lineitem l 
+        JOIN 
+            RankedOrders ro ON l.l_orderkey = ro.o_orderkey 
+        WHERE 
+            ro.order_rank = 1
+        LIMIT 1
+    )
+LEFT JOIN 
+    SupplierStats ss ON ss.s_supplier_count = (
+        SELECT 
+            COUNT(*) 
+        FROM 
+            partsupp 
+        WHERE 
+            ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_retailprice > 50)
+    )
+WHERE 
+    cs.total_spent IS NOT NULL OR pd.total_available IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC NULLS LAST;

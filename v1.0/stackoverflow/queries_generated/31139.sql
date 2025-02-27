@@ -1,0 +1,81 @@
+WITH RecursivePostStats AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  -- Only Questions
+    UNION ALL
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        rps.Level + 1
+    FROM Posts p
+    JOIN RecursivePostStats rps ON p.ParentId = rps.PostId
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostVoteStats AS (
+    SELECT
+        v.PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN vt.Name = 'Close' THEN 1 END) AS CloseVotes
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY v.PostId
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastEditedDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+)
+SELECT
+    p.Id AS PostId,
+    p.Title,
+    p.OwnerDisplayName,
+    u.Reputation,
+    COALESCE(up.BadgeCount, 0) AS TotalBadges,
+    COALESCE(up.GoldBadgeCount, 0) AS GoldBadges,
+    COALESCE(up.SilverBadgeCount, 0) AS SilverBadges,
+    COALESCE(up.BronzeBadgeCount, 0) AS BronzeBadges,
+    COALESCE(vs.UpVotes, 0) AS UpVoteCount,
+    COALESCE(vs.DownVotes, 0) AS DownVoteCount,
+    COALESCE(vs.CloseVotes, 0) AS CloseVoteCount,
+    COALESCE(ph.LastEditedDate, 'No Edits') AS LastEdited,
+    COALESCE(ph.HistoryCount, 0) AS TotalHistory,
+    COALESCE(ph.HistoryTypes, 'No History') AS HistoryDetails
+FROM Posts p
+LEFT JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN UserBadges up ON up.UserId = u.Id
+LEFT JOIN PostVoteStats vs ON vs.PostId = p.Id
+LEFT JOIN PostHistoryAggregates ph ON ph.PostId = p.Id 
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '1 year' AND
+    (p.Score > 10 OR p.ViewCount > 1000 OR p.AcceptedAnswerId IS NOT NULL)
+ORDER BY p.Score DESC, p.ViewCount DESC
+LIMIT 100;

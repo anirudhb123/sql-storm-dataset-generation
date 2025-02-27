@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss.store_sk,
+        ss_item_sk,
+        ss_quantity,
+        ss_net_paid,
+        RANK() OVER (PARTITION BY ss.store_sk ORDER BY ss_net_paid DESC) AS rank_per_store
+    FROM store_sales ss
+    WHERE ss_sold_date_sk IN (
+        SELECT dd.d_date_sk
+        FROM date_dim dd
+        WHERE dd.d_year = 2023 AND dd.d_weekend = 'Y'
+    )
+), StoreInfo AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        s.state,
+        s.s_zip,
+        COALESCE(NULLIF(s.s_manager, ''), 'Unknown') AS manager_name
+    FROM store s
+), ReturnedSales AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt) AS total_returned_amt
+    FROM store_returns
+    GROUP BY sr_item_sk
+), SalesSummary AS (
+    SELECT 
+        r.store_sk,
+        SUM(r.ss_quantity) AS total_quantity_sold,
+        SUM(r.ss_net_paid) AS total_net_paid,
+        COALESCE(sum(rs.total_returns), 0) AS total_returns,
+        COALESCE(sum(rs.total_returned_quantity), 0) AS total_returned_quantity,
+        COALESCE(sum(rs.total_returned_amt), 0) AS total_returned_amt
+    FROM RankedSales r
+    LEFT JOIN ReturnedSales rs ON r.ss_item_sk = rs.sr_item_sk
+    GROUP BY r.store_sk
+)
+SELECT 
+    si.s_store_name,
+    ss.total_quantity_sold,
+    ss.total_net_paid,
+    ss.total_returns,
+    ss.total_returned_quantity,
+    ss.total_returned_amt,
+    (CASE 
+        WHEN ss.total_net_paid > 1000 THEN 'High Revenue'
+        WHEN ss.total_net_paid BETWEEN 500 AND 1000 THEN 'Medium Revenue'
+        ELSE 'Low Revenue' 
+    END) AS revenue_category,
+    (SELECT COUNT(*) 
+     FROM customer 
+     WHERE c_current_addr_sk IN (
+         SELECT ca_address_sk 
+         FROM customer_address 
+         WHERE ca_state = si.state
+     )) AS customers_in_state
+FROM SalesSummary ss
+JOIN StoreInfo si ON ss.store_sk = si.s_store_sk
+WHERE ss.total_quantity_sold > 10
+ORDER BY ss.total_net_paid DESC, si.manager_name ASC
+LIMIT 50;

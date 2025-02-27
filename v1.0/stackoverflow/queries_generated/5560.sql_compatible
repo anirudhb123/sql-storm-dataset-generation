@@ -1,0 +1,30 @@
+
+SELECT 
+    u.DisplayName AS UserName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+    AVG(COALESCE(p.Score, 0)) AS AverageScore,
+    SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+    COUNT(DISTINCT b.Id) AS TotalBadges,
+    MAX(p.LastActivityDate) AS LastActivity,
+    ARRAY_AGG(DISTINCT t.TagName) AS AssociatedTags
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    PostsTags pt ON p.Id = pt.PostId
+LEFT JOIN 
+    Tags t ON pt.TagId = t.Id
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, u.DisplayName
+ORDER BY 
+    TotalPosts DESC
+LIMIT 50;

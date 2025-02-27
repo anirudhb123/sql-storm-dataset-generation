@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        COALESCE(a.Score, 0) AS AnswerScore,
+        COUNT(a.Id) AS AnswerCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, a.Score, p.CreationDate, u.DisplayName, u.Reputation
+),
+PopularBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 OR b.Class = 2 
+    GROUP BY 
+        b.UserId
+),
+PostHistoryActivity AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(ph.Comment, '; ') AS EditComments
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.Tags,
+    rp.AnswerScore,
+    rp.AnswerCount,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.Reputation,
+    pb.BadgeNames,
+    pha.LastEditDate,
+    pha.EditComments
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PopularBadges pb ON rp.OwnerUserId = pb.UserId
+LEFT JOIN 
+    PostHistoryActivity pha ON rp.PostId = pha.PostId
+WHERE 
+    rp.OwnerPostRank <= 5  
+ORDER BY 
+    rp.CreationDate DESC;

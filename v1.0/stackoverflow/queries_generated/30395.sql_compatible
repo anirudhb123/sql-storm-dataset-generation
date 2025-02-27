@@ -1,0 +1,74 @@
+
+WITH RECURSIVE UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(p.Id) + up.PostCount
+    FROM 
+        UserPostCounts up
+    JOIN 
+        Users u ON u.Id = up.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        up.PostCount < 1000  
+)
+
+, RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        p.Title,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rnk
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+)
+
+SELECT 
+    p.Title,
+    u.DisplayName AS PostOwner,
+    upc.PostCount,
+    STRING_AGG(DISTINCT ph.Comment, '; ') AS RecentComments,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    COUNT(DISTINCT c.Id) AS TotalComments
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+JOIN 
+    UserPostCounts upc ON u.Id = upc.UserId
+LEFT JOIN 
+    RecentPostHistory ph ON p.Id = ph.PostId AND ph.rnk = 1
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+WHERE 
+    p.CreationDate < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+GROUP BY 
+    p.Title, u.DisplayName, upc.PostCount
+HAVING 
+    COUNT(DISTINCT c.Id) > 5  
+ORDER BY 
+    UpVotes DESC, DownVotes ASC
+LIMIT 10;

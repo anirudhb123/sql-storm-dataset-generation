@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS Author,
+        p.CreationDate,
+        p.Body,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS Score,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Author,
+        rp.CreationDate,
+        rp.Body,
+        rp.AnswerCount,
+        rp.Score,
+        pt.TagName 
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Posts p ON rp.PostId = p.Id
+    JOIN 
+        UNNEST(string_to_array(p.Tags, '><')) AS tag ON tag IS NOT NULL
+    JOIN 
+        Tags pt ON pt.TagName = tag
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Author,
+    ps.CreationDate,
+    ps.Body,
+    ps.AnswerCount,
+    ps.Score,
+    ARRAY(SELECT pt.TagName FROM Posts p JOIN UNNEST(string_to_array(p.Tags, '><')) AS pt ON pt IS NOT NULL WHERE p.Id = ps.PostId) AS Tags,
+    COALESCE(ptags.PostCount, 0) AS Popularity
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    PopularTags ptags ON ps.TagName = ptags.TagName
+WHERE 
+    ps.Rank <= 10
+ORDER BY 
+    ps.Score DESC, ps.CreationDate DESC;

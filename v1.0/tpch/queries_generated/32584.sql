@@ -1,0 +1,32 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+),
+NationMaxSuppliers AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING COUNT(DISTINCT s.s_suppkey) > 5
+)
+SELECT p.p_partkey, p.p_name, SUM(l.l_quantity) AS total_quantity_sold,
+       AVG(ps.ps_supplycost) AS avg_supply_cost, COALESCE(n.n_name, 'Unknown') AS nation_name
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN RankedOrders ro ON l.l_orderkey = ro.o_orderkey
+JOIN SupplyChain sc ON l.l_suppkey = sc.s_suppkey
+LEFT JOIN nation n ON sc.s_suppkey = n.n_nationkey
+JOIN NationMaxSuppliers ns ON n.n_nationkey = ns.n_nationkey
+WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY p.p_partkey, p.p_name, n.n_name
+HAVING SUM(l.l_quantity) > 1000 AND AVG(sc.ps_supplycost) < 50
+ORDER BY total_quantity_sold DESC, avg_supply_cost ASC
+LIMIT 10;

@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_sales_price,
+        ws_sold_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) as SalesRank
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (
+        SELECT d_date_sk 
+        FROM date_dim 
+        WHERE d_year = 2023 AND d_current_month = 'Y'
+    )
+),
+TopSales AS (
+    SELECT 
+        ws_item_sk,
+        MAX(ws_sales_price) as MaxSalesPrice
+    FROM RankedSales
+    WHERE SalesRank <= 5
+    GROUP BY ws_item_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk 
+    FROM customer
+    LEFT JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    COUNT(DISTINCT ws.ws_order_number) AS TotalOrders,
+    SUM(ws.ws_net_profit) AS TotalProfit
+FROM CustomerDetails cd
+LEFT JOIN web_sales ws ON cd.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN TopSales ts ON ws.ws_item_sk = ts.ws_item_sk
+LEFT JOIN household_demographics hd ON cd.cd_income_band_sk = hd.hd_demo_sk 
+LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk 
+GROUP BY 
+    cd.c_first_name, 
+    cd.c_last_name, 
+    cd.cd_gender, 
+    cd.cd_marital_status, 
+    ib.ib_lower_bound, 
+    ib.ib_upper_bound
+HAVING 
+    SUM(ws.ws_net_profit) > 10000 OR COUNT(DISTINCT ws.ws_order_number) > 10
+ORDER BY TotalProfit DESC;

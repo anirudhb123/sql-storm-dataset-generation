@@ -1,0 +1,58 @@
+
+WITH RecursiveVoteCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId IN (2, 4)) AS UpVotes,   
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY P.CreationDate DESC) AS VoteRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'  
+    GROUP BY 
+        P.Id, P.Title
+),
+
+TopPosts AS (
+    SELECT 
+        RC.PostId,
+        RC.Title,
+        RC.UpVotes - RC.DownVotes AS NetVotes   
+    FROM 
+        RecursiveVoteCounts RC
+    WHERE 
+        RC.VoteRank = 1 AND RC.UpVotes > RC.DownVotes  
+)
+
+SELECT 
+    TP.Title,
+    COALESCE(U.DisplayName, 'Deleted User') AS OwnerName,
+    T.TagName,
+    COUNT(C.Id) AS CommentCount,
+    COUNT(DISTINCT B.Id) AS BadgeCount,
+    MAX(PH.CreationDate) AS LastEditDate,
+    TP.NetVotes
+FROM 
+    TopPosts TP
+JOIN 
+    Posts P ON TP.PostId = P.Id
+LEFT JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Badges B ON U.Id = B.UserId AND B.Class = 1  
+LEFT JOIN 
+    UNNEST(SPLIT(P.Tags, ',')) AS T(TagName) ON TRUE  
+LEFT JOIN 
+    PostHistory PH ON P.Id = PH.PostId
+WHERE 
+    PH.PostHistoryTypeId IN (4, 5)  
+GROUP BY 
+    TP.Title, U.DisplayName, T.TagName, TP.NetVotes
+ORDER BY 
+    NetVotes DESC, CommentCount DESC
+LIMIT 10;

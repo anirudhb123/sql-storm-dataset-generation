@@ -1,0 +1,72 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_ship_date_sk,
+        ws_sales_price,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_ship_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > 0
+),
+Sales_Summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        Sales_CTE
+    WHERE 
+        rn <= 5
+    GROUP BY 
+        ws_item_sk
+),
+High_Sellers AS (
+    SELECT 
+        s_item_sk,
+        total_sales,
+        order_count,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        Sales_Summary
+    WHERE 
+        order_count > 1
+),
+Top_Sellers AS (
+    SELECT 
+        hs.s_item_sk,
+        hs.total_sales,
+        hs.order_count,
+        pd.p_promo_id,
+        pd.p_promo_name
+    FROM 
+        High_Sellers hs
+    LEFT JOIN 
+        promotion pd ON pd.p_item_sk = hs.s_item_sk
+    WHERE 
+        hs.sales_rank <= 10
+)
+SELECT 
+    itm.i_item_id,
+    itm.i_item_desc,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    COALESCE(ts.order_count, 0) AS order_count,
+    CASE 
+        WHEN ts.order_count > 0 THEN 'High Volume'
+        ELSE 'Low Volume'
+    END AS performance_category,
+    pa.p_promo_name
+FROM 
+    item itm
+LEFT JOIN 
+    Top_Sellers ts ON itm.i_item_sk = ts.s_item_sk
+LEFT JOIN 
+    promotion pa ON pa.p_item_sk = ts.s_item_sk
+WHERE 
+    itm.i_current_price IS NOT NULL
+ORDER BY 
+    total_sales DESC
+LIMIT 50;

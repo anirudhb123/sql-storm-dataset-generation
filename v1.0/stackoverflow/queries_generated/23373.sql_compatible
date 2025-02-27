@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+        AND p.Score > 10
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopenedDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+UserVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(ubi.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(ubi.BadgeNames, 'No badges') AS UserBadges,
+    COALESCE(phi.LastClosedDate, 'Never') AS LastClosed,
+    COALESCE(phi.LastReopenedDate, 'Never') AS LastReopened,
+    COALESCE(uv.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(uv.DownVotes, 0) AS TotalDownVotes
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ubi ON rp.OwnerUserId = ubi.UserId
+LEFT JOIN 
+    PostHistoryInfo phi ON rp.PostId = phi.PostId
+LEFT JOIN 
+    UserVotes uv ON rp.PostId = uv.PostId
+WHERE 
+    rp.rn = 1
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, ubi.BadgeCount, ubi.BadgeNames, phi.LastClosedDate, phi.LastReopenedDate, uv.UpVotes, uv.DownVotes
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 50;

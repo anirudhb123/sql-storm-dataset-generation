@@ -1,0 +1,76 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        sr.item_sk,
+        sr.return_quantity,
+        sr.return_amt,
+        sr.reason_sk,
+        DENSE_RANK() OVER (PARTITION BY sr.reason_sk ORDER BY sr.return_amt DESC) as rank_by_reason
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.return_quantity IS NOT NULL
+),
+TotalReturns AS (
+    SELECT 
+        rr.item_sk,
+        SUM(rr.return_quantity) AS total_returned,
+        SUM(rr.return_amt) AS total_return_amount
+    FROM 
+        RankedReturns rr
+    WHERE 
+        rr.rank_by_reason = 1
+    GROUP BY 
+        rr.item_sk
+),
+Sales AS (
+    SELECT 
+        ws.ws_item_sk AS item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        SUM(ws.ws_sales_price) AS total_sales_value,
+        AVG(ws.ws_net_profit) AS average_net_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2020000 AND 2021000
+    GROUP BY 
+        ws.ws_item_sk
+),
+FinalReport AS (
+    SELECT 
+        s.item_sk,
+        COALESCE(s.total_sales, 0) AS total_sales,
+        COALESCE(s.total_sales_value, 0) AS total_sales_value,
+        COALESCE(t.total_returned, 0) AS total_returns,
+        COALESCE(t.total_return_amount, 0) AS total_return_amount,
+        CASE 
+            WHEN COALESCE(s.total_sales, 0) = 0 THEN NULL
+            ELSE (COALESCE(t.total_return_amount, 0) / COALESCE(s.total_sales_value, 1))
+        END AS return_ratio,
+        CASE 
+            WHEN (SELECT COUNT(DISTINCT csr.c_demo_sk) FROM customer c JOIN customer_demographics csr ON c.c_current_cdemo_sk = csr.cd_demo_sk WHERE c.c_current_addr_sk IS NULL) > 0 THEN 'Contains Null'
+            ELSE 'No Null'
+        END AS null_presence_indicator
+    FROM 
+        Sales s
+    FULL OUTER JOIN 
+        TotalReturns t ON s.item_sk = t.item_sk
+)
+SELECT 
+    item_sk,
+    total_sales,
+    total_sales_value,
+    total_returns,
+    total_return_amount,
+    return_ratio,
+    null_presence_indicator
+FROM 
+    FinalReport
+WHERE 
+    (total_sales > 100 OR total_returns > 50)
+    AND (return_ratio IS NULL OR return_ratio < 0.1)
+ORDER BY 
+    item_sk
+LIMIT 100;

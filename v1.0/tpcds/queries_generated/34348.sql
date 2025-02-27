@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(ss.ss_net_profit), 0) AS total_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    UNION ALL
+    SELECT 
+        s.s_store_sk AS parent_customer_sk,
+        NULL AS c_first_name,
+        NULL AS c_last_name,
+        SUM(ss.ss_net_profit) AS total_sales
+    FROM 
+        store s
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.s_store_sk
+),
+dates AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        d.d_date
+    FROM 
+        date_dim d
+    WHERE 
+        d.d_year >= 2020 AND d.d_year <= 2023
+),
+sales_summary AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_net_profit) AS total_web_sales,
+        SUM(cs.cs_net_profit) AS total_catalog_sales
+    FROM 
+        dates d
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN 
+        catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq
+)
+SELECT 
+    s.c_first_name,
+    s.c_last_name,
+    s.total_sales,
+    ds.d_year,
+    ds.d_month_seq,
+    ds.total_web_sales,
+    ds.total_catalog_sales
+FROM 
+    sales_hierarchy s
+INNER JOIN 
+    sales_summary ds ON ds.d_year = EXTRACT(YEAR FROM CURRENT_DATE) AND ds.d_month_seq = 1
+WHERE 
+    s.total_sales > 1000
+ORDER BY 
+    ds.d_year, ds.d_month_seq DESC, s.total_sales DESC;

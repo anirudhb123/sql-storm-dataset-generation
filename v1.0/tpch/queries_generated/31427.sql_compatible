@@ -1,0 +1,52 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS Level
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+    
+    UNION ALL 
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.Level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderdate < '1997-01-01'
+), 
+CustomerSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+), 
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+), 
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+) 
+SELECT 
+    rh.o_orderkey,
+    cs.c_name,
+    cs.total_spent,
+    ps.total_cost,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No Orders'
+        ELSE 'Placed Order'
+    END AS order_status,
+    rs.s_name AS top_supplier 
+FROM OrderHierarchy rh
+FULL OUTER JOIN CustomerSummary cs ON rh.o_orderkey = cs.c_custkey
+LEFT JOIN PartSupplier ps ON cs.total_spent > 1000 AND ps.total_cost IS NOT NULL
+LEFT JOIN RankedSuppliers rs ON ps.p_partkey IN (
+    SELECT ps_partkey 
+    FROM partsupp 
+    WHERE ps_availqty > 0 
+    ORDER BY ps_supplycost DESC 
+    LIMIT 1
+)
+WHERE (rh.o_orderdate IS NULL OR rh.o_orderdate >= '1997-01-01')
+    AND (cs.total_spent IS NULL OR cs.total_spent < 5000)
+ORDER BY rh.o_orderkey, cs.c_name;

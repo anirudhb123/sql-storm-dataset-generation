@@ -1,0 +1,63 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+),
+ActorMovieCounts AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.person_id
+),
+EligibleActors AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        COALESCE(amc.movie_count, 0) AS movie_count
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        ActorMovieCounts amc ON ak.person_id = amc.person_id
+)
+SELECT 
+    em.actor_id,
+    em.actor_name,
+    SUM(CASE WHEN mh.production_year >= 2000 THEN 1 ELSE 0 END) AS movies_since_2000,
+    STRING_AGG(DISTINCT CONCAT(mh.title, ' (', mh.production_year, ')'), ', ') AS movies
+FROM 
+    EligibleActors em
+LEFT JOIN 
+    cast_info c ON em.actor_id = c.person_id
+LEFT JOIN 
+    MovieHierarchy mh ON c.movie_id = mh.movie_id
+GROUP BY 
+    em.actor_id, em.actor_name
+HAVING 
+    SUM(CASE WHEN mh.production_year >= 2000 THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    movies_since_2000 DESC, em.actor_name ASC
+LIMIT 10;

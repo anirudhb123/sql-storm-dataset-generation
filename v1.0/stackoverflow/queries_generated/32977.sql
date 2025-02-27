@@ -1,0 +1,55 @@
+WITH RecursiveUserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY Id ORDER BY Reputation DESC) AS Rank
+    FROM Users
+    WHERE Reputation > 0
+    UNION ALL
+    SELECT u.Id, u.DisplayName, u.Reputation, u.CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.Reputation DESC) AS Rank
+    FROM Users u
+    INNER JOIN RecursiveUserHierarchy r ON u.Id = r.Id
+    WHERE r.Rank < 5
+),
+UserPostStats AS (
+    SELECT u.Id AS UserId, 
+           COUNT(p.Id) AS PostCount, 
+           SUM(p.Score) AS TotalScore,
+           AVG(p.Score) AS AvgScore,
+           MAX(p.CreationDate) AS LastPostDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+TopVotedPosts AS (
+    SELECT p.Id, p.Title, p.Score, p.OwnerUserId, 
+           ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS PostRank
+    FROM Posts p
+    WHERE p.Score > 0
+),
+UserBadges AS (
+    SELECT b.UserId, 
+           STRING_AGG(b.Name, ', ') AS BadgeList,
+           COUNT(*) AS BadgeCount
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    us.PostCount,
+    us.TotalScore,
+    us.AvgScore,
+    us.LastPostDate,
+    tb.BadgeList,
+    tb.BadgeCount,
+    tp.Title AS MostVotedPost,
+    tp.Score AS MostVotedPostScore
+FROM Users u
+JOIN UserPostStats us ON u.Id = us.UserId
+LEFT JOIN UserBadges tb ON u.Id = tb.UserId
+LEFT JOIN TopVotedPosts tp ON u.Id = tp.OwnerUserId
+WHERE u.Reputation > 100
+  AND us.PostCount > 5
+  AND us.LastPostDate < (CURRENT_TIMESTAMP - INTERVAL '30 days')
+  AND tp.PostRank = 1
+ORDER BY u.Reputation DESC, us.TotalScore DESC;

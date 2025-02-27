@@ -1,0 +1,46 @@
+
+WITH RECURSIVE OrderDetails AS (
+    SELECT cs_order_number, 
+           cs_item_sk, 
+           SUM(cs_quantity) AS total_quantity,
+           SUM(cs_net_profit) AS total_profit,
+           RANK() OVER (PARTITION BY cs_order_number ORDER BY SUM(cs_net_profit) DESC) AS rank_profit
+    FROM catalog_sales
+    GROUP BY cs_order_number, cs_item_sk
+),
+CustomerReturns AS (
+    SELECT sr_customer_sk, 
+           COUNT(DISTINCT sr_ticket_number) AS returns_count, 
+           SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+WeeklySales AS (
+    SELECT d_year, 
+           d_week_seq,
+           SUM(ws_net_paid) AS total_sales,
+           COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY d_year, d_week_seq
+)
+SELECT ca.ca_city, 
+       ca.ca_state,
+       COALESCE(c_demo.cd_gender, 'Unknown') AS gender,
+       SUM(od.total_quantity) AS total_items_sold,
+       SUM(CASE WHEN cr.returns_count IS NULL THEN 0 ELSE cr.returns_count END) AS total_returns,
+       AVG(ws.total_sales) AS avg_weekly_sales,
+       MAX(ws.total_orders) AS max_orders_per_week,
+       COUNT(DISTINCT od.cs_order_number) AS unique_order_count,
+       STRING_AGG(DISTINCT CONCAT('Order ', od.cs_order_number, ': ', od.total_quantity, ' items sold')) AS order_details
+FROM customer c
+LEFT JOIN customer_demographics c_demo ON c.c_current_cdemo_sk = c_demo.cd_demo_sk
+LEFT JOIN customer_addresses ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN OrderDetails od ON od.cs_item_sk IN (SELECT DISTINCT i_item_sk FROM item WHERE i_current_price >= 10.00)
+LEFT JOIN CustomerReturns cr ON cr.sr_customer_sk = c.c_customer_sk
+JOIN WeeklySales ws ON ws.d_year = 2023
+WHERE ca.ca_city IS NOT NULL
+GROUP BY ca.ca_city, ca.ca_state, c_demo.cd_gender
+HAVING SUM(od.total_profit) > 1000 AND COUNT(DISTINCT od.cs_order_number) > 5
+ORDER BY total_items_sold DESC, avg_weekly_sales ASC;

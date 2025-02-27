@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_dates AS (
+    SELECT d_date_sk
+    FROM date_dim
+    WHERE d_date = '2023-01-01' 
+    UNION ALL 
+    SELECT d_date_sk + 1
+    FROM sales_dates
+    WHERE d_date_sk + 1 <= (SELECT MAX(d_date_sk) FROM date_dim)
+),
+customer_sales_info AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_profit,
+        SUM(ws_quantity) AS total_items_purchased,
+        MAX(ws_sold_date_sk) AS last_purchase_date
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM sales_dates)
+    GROUP BY c.c_customer_id
+),
+ranking_info AS (
+    SELECT 
+        csi.c_customer_id,
+        csi.total_orders,
+        csi.total_profit,
+        csi.total_items_purchased,
+        ROW_NUMBER() OVER (ORDER BY csi.total_profit DESC) AS profit_rank
+    FROM customer_sales_info csi
+),
+item_info AS (
+    SELECT 
+        i.i_item_id,
+        i.i_product_name,
+        SUM(ws_quantity) AS total_sales
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM sales_dates)
+    GROUP BY i.i_item_id, i.i_product_name
+)
+SELECT 
+    r.c_customer_id,
+    r.total_orders,
+    r.total_profit,
+    r.total_items_purchased,
+    i.i_item_id,
+    i.i_product_name,
+    i.total_sales,
+    CASE
+        WHEN i.total_sales IS NULL THEN 'No sales'
+        ELSE 'Sales recorded'
+    END AS sales_status
+FROM ranking_info r
+LEFT JOIN item_info i ON r.c_customer_id = (
+    SELECT ws_ship_customer_sk
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM sales_dates) 
+    ORDER BY ws_net_profit DESC 
+    LIMIT 1
+)
+WHERE r.total_orders > 0
+ORDER BY r.total_profit DESC, i.total_sales DESC;

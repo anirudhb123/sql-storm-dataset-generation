@@ -1,0 +1,35 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+),
+SupplierPartDetails AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_retailprice, ps.ps_availqty,
+           SUM(ps.ps_supplycost) OVER(PARTITION BY ps.ps_partkey) AS total_supply_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+)
+SELECT r.r_name, COUNT(DISTINCT c.c_custkey) AS total_customers,
+       AVG(o.o_totalprice) AS avg_order_total, 
+       SUM(spd.total_supply_cost) AS total_supply_cost,
+       STRING_AGG(DISTINCT spd.p_name, ', ') AS part_names,
+       MIN(o.o_orderdate) AS first_order_date
+FROM nation n
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN CustomerOrders o ON n.n_nationkey = o.c_custkey
+LEFT JOIN SupplierPartDetails spd ON spd.ps_suppkey = o.c_custkey
+WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderstatus = 'O'
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY total_supply_cost DESC
+LIMIT 5;

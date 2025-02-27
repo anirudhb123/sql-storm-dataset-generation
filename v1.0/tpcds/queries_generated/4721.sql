@@ -1,0 +1,62 @@
+
+WITH item_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        SUM(ws_sales_price) AS total_sales,
+        AVG(ws_sales_price) AS avg_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2451945 AND 2451980 -- Sample date range
+    GROUP BY ws_item_sk
+),
+customer_demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender, 
+        cd_marital_status,
+        COUNT(*) OVER (PARTITION BY cd_gender) AS gender_count,
+        SUM(cd_purchase_estimate) OVER (PARTITION BY cd_gender) AS total_purchase_by_gender
+    FROM customer_demographics
+),
+popular_items AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_item_desc,
+        is.total_sold,
+        is.total_sales,
+        is.avg_sales_price
+    FROM item i
+    JOIN item_sales is ON i.i_item_sk = is.ws_item_sk
+    WHERE is.rn <= 10 -- Top 10 items by total sales
+),
+sales_with_demographics AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.c_first_name,
+        ci.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        pi.i_item_id,
+        pi.total_sales,
+        pi.avg_sales_price
+    FROM customer ci
+    JOIN customer_demographics cd ON ci.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN web_sales ws ON ci.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN popular_items pi ON ws.ws_item_sk = pi.i_item_sk
+)
+SELECT 
+    cd_gender,
+    cd_marital_status,
+    COUNT(DISTINCT c_customer_id) AS customer_count,
+    SUM(total_sales) AS total_revenue,
+    AVG(avg_sales_price) AS avg_item_price,
+    CASE 
+        WHEN COUNT(DISTINCT c_customer_id) > 100 THEN 'VIP'
+        ELSE 'Regular'
+    END AS customer_status
+FROM sales_with_demographics
+GROUP BY cd_gender, cd_marital_status
+ORDER BY total_revenue DESC
+LIMIT 5;

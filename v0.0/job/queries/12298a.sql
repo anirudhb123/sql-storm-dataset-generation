@@ -1,0 +1,4 @@
+SELECT min(cn.name) AS movie_company, min(mi_idx.info) AS rating, min(t.title) AS western_violent_movie
+FROM company_name AS cn, company_type AS ct, info_type AS it1, info_type AS it2, keyword AS k, kind_type AS kt, movie_companies AS mc, movie_info AS mi, movie_info_idx AS mi_idx, movie_keyword AS mk, title AS t
+WHERE kt.id = t.kind_id AND t.id = mi.movie_id AND t.id = mk.movie_id AND t.id = mi_idx.movie_id AND t.id = mc.movie_id AND mk.movie_id = mi.movie_id AND mk.movie_id = mi_idx.movie_id AND mk.movie_id = mc.movie_id AND mi.movie_id = mi_idx.movie_id AND mi.movie_id = mc.movie_id AND mc.movie_id = mi_idx.movie_id AND k.id = mk.keyword_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id AND ct.id = mc.company_type_id AND cn.id = mc.company_id
+AND mk.movie_id > 1622116 AND mi.note < '(Kodak Vision2 50D 5201, Vision2 250D 5205, Vision2 100T 5212, Vision2 200T 5217, Vision2 500T 5218)' AND k.id > 40480;

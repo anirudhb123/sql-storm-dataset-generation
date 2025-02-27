@@ -1,0 +1,100 @@
+WITH TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        STRING_AGG(t.TagName, ', ') AS TagsList, 
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS t(TagName)
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(b.Id) AS BadgeCount,
+        CASE 
+            WHEN SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) > 0 THEN 'Gold'
+            WHEN SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) > 0 THEN 'Silver'
+            ELSE 'Bronze'
+        END AS HighestBadge
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(b.HighestBadge, 'None') AS HighestBadge,
+        SUM(coalesce(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, 
+        u.DisplayName
+)
+SELECT 
+    up.DisplayName AS UserName,
+    tp.Title AS PostTitle,
+    tp.CreationDate AS PostDate,
+    tp.TagsList,
+    up.BadgeCount,
+    up.HighestBadge,
+    COALESCE(up.TotalBounty, 0) AS TotalBounty,
+    CASE 
+        WHEN tp.CommentCount > 5 THEN 'Highly Discussed'
+        WHEN tp.CommentCount BETWEEN 1 AND 5 THEN 'Moderately Discussed'
+        ELSE 'Not Discussed'
+    END AS DiscussionLevel
+FROM 
+    TaggedPosts tp
+JOIN 
+    UserStats up ON tp.OwnerUserId = up.UserId
+WHERE 
+    tp.UserPostRank = 1
+    AND (tp.TagsList IS NOT NULL OR tp.CommentCount > 0)
+ORDER BY 
+    up.BadgeCount DESC,
+    tp.CreationDate DESC
+LIMIT 10;
+
+-- Additional complicated checks and edge cases, like consideration for NULL values
+SELECT 
+    pp.PostId,
+    pp.Title,
+    CASE 
+        WHEN pp.TagsList IS NULL THEN 'No Tags'
+        WHEN LENGTH(pp.TagsList) > 200 THEN 'Too Many Tags'
+        ELSE pp.TagsList
+    END AS ProcessedTags,
+    (SELECT COUNT(*) FROM Comments cc WHERE cc.PostId = pp.PostId) AS TotalComments
+FROM 
+    TaggedPosts pp
+WHERE 
+    EXISTS (
+        SELECT 1 FROM Votes v 
+        WHERE v.PostId = pp.PostId 
+        AND v.VoteTypeId = (
+            SELECT MAX(Id) FROM VoteTypes WHERE Name LIKE '%upvote%'
+        )
+    )
+    AND (pp.CommentCount IS NULL OR pp.CommentCount < 10)
+ORDER BY 
+    pp.CreationDate DESC;
+

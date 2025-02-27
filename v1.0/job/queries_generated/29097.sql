@@ -1,0 +1,69 @@
+WITH actor_movie_count AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(ci.movie_id) AS total_movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.id, a.name
+),
+movie_keyword_ct AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.id) AS total_keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+relevant_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        COALESCE(mkc.total_keywords, 0) AS total_keywords
+    FROM 
+        title m
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        movie_keyword_ct mkc ON m.id = mkc.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+actor_performance AS (
+    SELECT 
+        am.actor_id,
+        am.actor_name,
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        rm.total_cast,
+        rm.total_keywords
+    FROM 
+        actor_movie_count am
+    JOIN 
+        cast_info ci ON am.actor_id = ci.person_id
+    JOIN 
+        relevant_movies rm ON ci.movie_id = rm.movie_id
+    WHERE 
+        rm.production_year BETWEEN 2000 AND 2020
+)
+SELECT 
+    ap.actor_name,
+    COUNT(DISTINCT ap.movie_id) AS movies_participated,
+    SUM(ap.total_cast) AS total_cast_in_movies,
+    SUM(ap.total_keywords) AS total_keywords_in_movies
+FROM 
+    actor_performance ap
+GROUP BY 
+    ap.actor_name
+ORDER BY 
+    movies_participated DESC
+LIMIT 10;

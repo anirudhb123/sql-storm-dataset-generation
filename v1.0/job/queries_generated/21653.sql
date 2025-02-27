@@ -1,0 +1,45 @@
+WITH recursive movie_hierarchy AS (
+    SELECT t.id AS title_id, t.title, t.production_year, ct.kind AS title_kind, 
+           STRING_AGG(DISTINCT c.name, ', ') AS cast_names,
+           ROW_NUMBER() OVER(PARTITION BY t.id ORDER BY c.nr_order) AS cast_order
+    FROM title t
+    LEFT JOIN aka_title at ON at.movie_id = t.id
+    LEFT JOIN cast_info c ON c.movie_id = t.id
+    LEFT JOIN role_type rt ON rt.id = c.role_id
+    LEFT JOIN kind_type kt ON kt.id = t.kind_id
+    LEFT JOIN company_name cn ON cn.imdb_id = at.id
+    LEFT JOIN movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN company_type ct ON ct.id = mc.company_type_id
+    WHERE t.production_year IS NOT NULL
+      AND t.production_year BETWEEN 1970 AND 2023
+      AND ct.kind IS NOT NULL
+    GROUP BY t.id, t.title, t.production_year, ct.kind
+),
+filtered_movies AS (
+    SELECT mh.*, 
+           COUNT(*) OVER(PARTITION BY mh.title_id) AS cast_count,
+           SUM(CASE WHEN mh.cast_names IS NULL THEN 1 ELSE 0 END) OVER() AS null_cast_count
+    FROM movie_hierarchy mh
+    WHERE mh.cast_order = 1 -- Selecting only the first actor/actress for each film
+),
+salaries AS (
+    SELECT p.id AS person_id, p.name, (RANDOM() * 50000 + 30000) AS salary
+    FROM name p
+    WHERE p.gender = 'M' OR p.gender IS NULL
+),
+movie_salaries AS (
+    SELECT fm.*, s.salary
+    FROM filtered_movies fm
+    LEFT JOIN salaries s ON s.person_id = (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = fm.title_id ORDER BY ci.nr_order LIMIT 1)
+)
+SELECT ms.title_id, ms.title, ms.production_year, ms.title_kind, 
+       ms.cast_names, ms.cast_count, ms.salary, 
+       COALESCE(ms.null_cast_count, '0') AS null_cast_count,
+       CASE 
+           WHEN ms.salary IS NULL THEN 'No Salary' 
+           ELSE 'Salary Exists' 
+       END AS salary_info
+FROM movie_salaries ms
+WHERE ms.salary >= (SELECT AVG(salary) FROM salaries)
+  AND ms.cast_count > 1
+ORDER BY ms.production_year DESC, ms.title;

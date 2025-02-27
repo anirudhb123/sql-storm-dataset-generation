@@ -1,0 +1,101 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+),
+FrequentTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+QualifiedUsers AS (
+    SELECT 
+        ue.UserId,
+        ue.DisplayName,
+        ue.QuestionsAsked,
+        ue.UpVotesReceived,
+        ue.DownVotesReceived,
+        RANK() OVER (ORDER BY ue.UpVotesReceived DESC) AS UpvoteRank
+    FROM 
+        UserEngagement ue
+    WHERE 
+        ue.QuestionsAsked > 5
+        AND ue.UpVotesReceived > ue.DownVotesReceived
+),
+FinalOutput AS (
+    SELECT 
+        rp.PostId,
+        rp.PostTitle,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.Score,
+        rp.Body,
+        rp.Tags,
+        rp.OwnerDisplayName,
+        ft.TagName,
+        qu.DisplayName AS EngagedUser,
+        qu.UpvoteRank
+    FROM 
+        RankedPosts rp
+    JOIN 
+        FrequentTags ft ON ft.TagName = ANY(string_to_array(rp.Tags, '><'))
+    JOIN 
+        QualifiedUsers qu ON rp.OwnerUserId = qu.UserId
+)
+SELECT 
+    PostId, 
+    PostTitle, 
+    ViewCount, 
+    CreationDate, 
+    Score, 
+    Body, 
+    Tags, 
+    OwnerDisplayName, 
+    TagName,
+    EngagedUser,
+    UpvoteRank
+FROM 
+    FinalOutput
+ORDER BY 
+    Score DESC, 
+    UpvoteRank;

@@ -1,0 +1,58 @@
+WITH RECURSIVE supplier_sales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_sales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+top_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_sales
+    FROM 
+        supplier s
+    LEFT JOIN 
+        supplier_sales ss ON s.s_suppkey = ss.s_suppkey
+    WHERE 
+        ss.rank_sales <= 5
+),
+nation_sales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS national_sales
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_regionkey,
+    r.r_name,
+    COALESCE(ts.total_sales, 0) AS total_supplier_sales,
+    COALESCE(ns.national_sales, 0) AS total_national_sales,
+    (COALESCE(ts.total_sales, 0) - COALESCE(ns.national_sales, 0)) AS sales_difference
+FROM 
+    region r
+LEFT JOIN 
+    top_suppliers ts ON r.r_regionkey = (SELECT n.r_regionkey FROM nation n WHERE n.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey = ts.s_suppkey))
+LEFT JOIN 
+    nation_sales ns ON r.r_regionkey = (SELECT n.r_regionkey FROM nation n WHERE n.n_nationkey = ns.n_nationkey)
+ORDER BY 
+    sales_difference DESC
+LIMIT 10;

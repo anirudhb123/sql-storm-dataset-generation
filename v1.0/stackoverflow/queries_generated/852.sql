@@ -1,0 +1,79 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        Reputation,
+        TotalViews,
+        TotalScore,
+        TotalPosts,
+        TotalComments,
+        RANK() OVER (ORDER BY Reputation DESC, TotalScore DESC) AS UserRank
+    FROM 
+        UserActivity
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        GREATEST(COALESCE(p.ViewCount, 0), 1) AS ViewCount,
+        COALESCE(AVG(CAST(v.BountyAmount AS FLOAT)), 0) AS AverageBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+),
+PostHistoryUpdates AS (
+    SELECT 
+        ph.PostId, 
+        MAX(ph.CreationDate) AS LastUpdateDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    tu.UserId,
+    tu.Reputation,
+    tu.TotalViews,
+    tu.TotalScore,
+    tu.TotalPosts,
+    tu.TotalComments,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AverageBounty,
+    COALESCE(pu.LastUpdateDate, 'Never') AS LastPostUpdate
+FROM 
+    TopUsers tu
+JOIN 
+    RecentPosts rp ON rp.ViewCount > 0
+LEFT JOIN 
+    PostHistoryUpdates pu ON rp.PostId = pu.PostId
+WHERE 
+    tu.UserRank <= 10
+ORDER BY 
+    tu.TotalScore DESC, tu.TotalViews DESC;

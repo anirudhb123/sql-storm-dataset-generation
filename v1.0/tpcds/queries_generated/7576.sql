@@ -1,0 +1,48 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_sales,
+        cs.order_count,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer_demographics cd ON cs.c_customer_id = cd.cd_demo_sk
+    WHERE 
+        cs.total_sales > (SELECT AVG(total_sales) FROM CustomerSales)
+)
+SELECT 
+    hvc.c_customer_id,
+    hvc.total_sales,
+    hvc.order_count,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    COUNT(DISTINCT wr.wr_order_number) AS return_count,
+    SUM(wr.wr_return_amt) AS total_return_amount
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    web_returns wr ON hvc.c_customer_id = wr.wr_returning_customer_sk
+GROUP BY 
+    hvc.c_customer_id, hvc.total_sales, hvc.order_count, hvc.cd_gender, hvc.cd_marital_status
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

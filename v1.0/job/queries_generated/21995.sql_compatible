@@ -1,0 +1,70 @@
+
+WITH RECURSIVE top_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        MAX(mk.keyword) AS most_popular_keyword,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year >= 2000
+        AND mk.keyword IS NOT NULL
+    GROUP BY 
+        t.id, t.title
+),
+actor_info AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        AVG(c.nr_order) AS avg_order,
+        COUNT(DISTINCT cc.movie_id) AS total_movies_played
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    LEFT JOIN 
+        complete_cast cc ON c.movie_id = cc.movie_id
+    WHERE 
+        a.surname_pcode IS NOT NULL
+    GROUP BY 
+        a.person_id, a.name
+),
+enhanced_movie_data AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.most_popular_keyword,
+        tm.cast_count,
+        CASE 
+            WHEN ai.total_movies_played IS NULL THEN 'No Movies'
+            ELSE CONCAT(ai.name, ' (', ai.total_movies_played, ' movies)')
+        END AS leading_actor_info
+    FROM 
+        top_movies tm
+    LEFT JOIN 
+        actor_info ai ON ai.total_movies_played = tm.cast_count
+)
+SELECT 
+    emd.movie_id,
+    emd.title,
+    emd.most_popular_keyword,
+    emd.cast_count,
+    emd.leading_actor_info,
+    COUNT(DISTINCT mc.company_id) AS production_companies
+FROM 
+    enhanced_movie_data emd
+LEFT JOIN 
+    movie_companies mc ON emd.movie_id = mc.movie_id
+WHERE 
+    emd.cast_count > 2
+GROUP BY 
+    emd.movie_id, emd.title, emd.most_popular_keyword, emd.cast_count, emd.leading_actor_info
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY 
+    emd.cast_count DESC, emd.title ASC;

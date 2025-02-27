@@ -1,0 +1,81 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice < 100 THEN 'Low'
+            WHEN p.p_retailprice BETWEEN 100 AND 500 THEN 'Medium'
+            ELSE 'High'
+        END AS price_category
+    FROM 
+        part p
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderstatus,
+        CASE 
+            WHEN o.o_orderstatus = 'O' THEN 'Open'
+            ELSE 'Closed'
+        END AS order_status
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderdate >= '1997-01-01')
+),
+PartSupplierInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_name,
+        s.s_name,
+        s.s_acctbal
+    FROM 
+        partsupp ps
+    JOIN 
+        HighValueParts p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.rank <= 3
+)
+SELECT 
+    p.p_name,
+    MAX(o.o_totalprice) AS max_order_price,
+    AVG(ps.ps_supplycost) AS avg_supply_cost,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS number_of_orders,
+    CASE 
+        WHEN COUNT(DISTINCT o.o_orderkey) > 10 THEN 'High Demand'
+        ELSE 'Low Demand'
+    END AS demand_category,
+    JSON_AGG(DISTINCT s.s_name) AS supplier_names
+FROM 
+    PartSupplierInfo ps
+LEFT JOIN 
+    FilteredOrders o ON ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+GROUP BY 
+    p.p_name
+HAVING 
+    SUM(ps.ps_availqty) IS NOT NULL
+    AND AVG(ps.ps_supplycost) > 50
+ORDER BY 
+    max_order_price DESC
+LIMIT 5;

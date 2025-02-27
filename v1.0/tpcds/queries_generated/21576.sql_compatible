@@ -1,0 +1,53 @@
+
+WITH RECURSIVE income_brackets AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound
+    FROM income_band
+    WHERE ib_lower_bound IS NOT NULL
+    UNION ALL
+    SELECT ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+    FROM income_band ib
+    JOIN income_brackets ib_prev ON ib_prev.ib_upper_bound = ib.ib_lower_bound
+    WHERE ib.ib_lower_bound IS NOT NULL
+),
+advanced_demos AS (
+    SELECT cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status,
+           COUNT(c.c_customer_sk) AS customer_count,
+           SUM(CASE WHEN c.c_birth_year IS NOT NULL THEN 1 ELSE 0 END) AS birth_year_known
+    FROM customer_demographics cd
+    LEFT JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+deep_joins AS (
+    SELECT 
+          c.c_customer_id,
+          COUNT(DISTINCT ws.ws_order_number) AS web_sales_count,
+          SUM(ws.ws_sales_price) AS total_sales,
+          MAX(ws.ws_net_profit) AS highest_profit,
+          RANK() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id
+),
+final_summary AS (
+    SELECT a.cd_gender, a.cd_marital_status, a.cd_education_status,
+           COALESCE(db.customer_count, 0) AS customer_count,
+           COALESCE(db.birth_year_known, 0) AS birth_year_known,
+           s.web_sales_count,
+           s.total_sales,
+           s.highest_profit,
+           s.sales_rank
+    FROM advanced_demos a
+    FULL OUTER JOIN deep_joins s ON a.cd_demo_sk = s.c_customer_id
+    LEFT JOIN income_brackets ib ON ib.ib_lower_bound <= s.total_sales AND s.total_sales < ib.ib_upper_bound
+)
+SELECT fs.cd_gender,
+       fs.cd_marital_status,
+       fs.customer_count,
+       fs.birth_year_known,
+       SUM(COALESCE(fs.total_sales, 0)) AS sum_sales,
+       AVG(CASE WHEN fs.sales_rank = 1 THEN fs.highest_profit END) AS avg_highest_profit,
+       COUNT(DISTINCT CASE WHEN fs.web_sales_count > 0 THEN fs.cd_gender END) AS distinct_gender_count
+FROM final_summary fs
+GROUP BY fs.cd_gender, fs.cd_marital_status, fs.customer_count, fs.birth_year_known
+HAVING COUNT(*) > 5
+ORDER BY sum_sales DESC, avg_highest_profit DESC;

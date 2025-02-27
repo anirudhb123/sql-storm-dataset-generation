@@ -1,0 +1,72 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        AVG(P.Score) AS AverageScore,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS TotalAnswers
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.OwnerUserId
+),
+AggregatedStats AS (
+    SELECT 
+        US.UserId,
+        US.DisplayName,
+        US.Reputation,
+        US.TotalPosts,
+        US.TotalComments,
+        US.TotalBadges,
+        PS.TotalPosts AS UserTotalPosts,
+        PS.TotalViews,
+        PS.AverageScore,
+        PS.TotalQuestions,
+        PS.TotalAnswers
+    FROM 
+        UserStats US
+    LEFT JOIN 
+        PostStats PS ON US.UserId = PS.OwnerUserId
+)
+SELECT 
+    AS.UserId,
+    AS.DisplayName,
+    AS.Reputation,
+    AS.TotalPosts,
+    AS.TotalComments,
+    AS.TotalBadges,
+    AS.UserTotalPosts,
+    AS.TotalViews,
+    AS.AverageScore,
+    AS.TotalQuestions,
+    AS.TotalAnswers
+FROM 
+    AggregatedStats AS
+ORDER BY 
+    AS.Reputation DESC, 
+    AS.TotalPosts DESC
+LIMIT 100;

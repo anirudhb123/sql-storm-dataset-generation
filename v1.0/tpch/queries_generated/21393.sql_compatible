@@ -1,0 +1,72 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rank
+    FROM 
+        part p
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerBreakdown AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) > 5000 OR COUNT(o.o_orderkey) IS NULL
+),
+FrequentOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderstatus, 
+        COUNT(li.l_orderkey) AS line_item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+    HAVING 
+        COUNT(li.l_orderkey) > 10
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(c.c_custkey, 0) AS top_customer,
+    s.total_cost,
+    RANK() OVER (ORDER BY p.p_retailprice) AS price_rank,
+    CASE 
+        WHEN C1.total_spent IS NULL THEN 'No Sales' 
+        ELSE 'Sales Made'
+    END AS sales_status
+FROM 
+    RankedParts p
+LEFT JOIN 
+    SupplierStats s ON p.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN 
+    CustomerBreakdown c ON c.c_custkey = (SELECT c2.c_custkey FROM CustomerBreakdown c2 WHERE c2.order_count = 
+        (SELECT MAX(order_count) FROM CustomerBreakdown))
+FULL OUTER JOIN 
+    FrequentOrders fo ON fo.o_orderkey = (SELECT MIN(o_orderkey) FROM FrequentOrders)
+WHERE 
+    p.rank = 1 
+ORDER BY 
+    p.p_partkey;

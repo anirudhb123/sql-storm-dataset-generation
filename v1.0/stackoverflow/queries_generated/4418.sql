@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS PostHistoryTypes,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    ps.UpVotes,
+    ps.DownVotes,
+    rph.PostHistoryTypes,
+    rph.LastChangeDate
+FROM 
+    Users u
+JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    PostVoteSummary ps ON rp.PostId = ps.PostId
+LEFT JOIN 
+    RecentPostHistory rph ON rp.PostId = rph.PostId
+WHERE 
+    rp.UserPostRank <= 5 -- Top 5 most recent posts per user
+    AND (ps.UpVotes - ps.DownVotes) > 0 -- Only include posts with a positive net score
+ORDER BY 
+    u.Reputation DESC, 
+    rp.CreationDate DESC;

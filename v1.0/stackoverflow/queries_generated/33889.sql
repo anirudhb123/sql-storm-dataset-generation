@@ -1,0 +1,79 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Start with Questions
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        ph.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        PostHierarchy ph ON p2.ParentId = ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVotes AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        SUM(CASE WHEN VoteTypeId = 8 THEN BountyAmount ELSE 0 END) AS TotalBounty
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        ph.Level,
+        pv.Upvotes,
+        pv.Downvotes,
+        pv.TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY ph.Level ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        PostHierarchy ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        PostVotes pv ON p.Id = pv.PostId
+)
+SELECT 
+    r.Rank,
+    r.Title,
+    r.ViewCount,
+    r.Upvotes,
+    r.Downvotes,
+    r.TotalBounty,
+    ub.BadgeCount,
+    ub.BadgeNames
+FROM 
+    RankedPosts r
+JOIN 
+    UserBadges ub ON r.OwnerUserId = ub.UserId
+WHERE 
+    r.Rank <= 10 AND r.Level = 1 -- Top 10 questions
+ORDER BY 
+    r.Level, r.Rank;
+

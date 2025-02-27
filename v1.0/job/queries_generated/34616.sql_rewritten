@@ -1,0 +1,52 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        1 AS depth
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    WHERE 
+        an.name ILIKE '%Smith%'  
+
+    UNION ALL
+
+    SELECT 
+        ci2.person_id,
+        ci2.movie_id,
+        ah.depth + 1
+    FROM 
+        cast_info ci2
+    JOIN 
+        ActorHierarchy ah ON ci2.movie_id = ah.movie_id 
+    WHERE 
+        ci2.person_id != ah.person_id 
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(distinct ah.person_id) AS number_of_actors,
+    AVG(ah.depth) AS avg_depth,
+    string_agg(DISTINCT co.name, ', ') AS company_names
+FROM 
+    ActorHierarchy ah
+JOIN 
+    aka_name a ON ah.person_id = a.person_id
+JOIN 
+    title t ON ah.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    a.name, t.title, t.production_year
+HAVING 
+    COUNT(distinct ah.person_id) > 1
+ORDER BY 
+    avg_depth DESC, number_of_actors DESC
+LIMIT 10;

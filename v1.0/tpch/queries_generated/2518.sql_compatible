@@ -1,0 +1,54 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o 
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' 
+        AND o.o_orderdate < DATE '1997-01-01'
+), 
+SupplierComputed AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_suppkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(si.avg_supply_cost, 0) AS avg_supply_cost,
+    COALESCE(si.total_available, 0) AS total_available,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(CASE WHEN line.l_discount > 0.1 THEN line.l_extendedprice END) AS avg_discounted_price,
+    COUNT(DISTINCT CASE WHEN o.o_orderpriority = 'HIGH' THEN o.o_orderkey END) AS high_priority_orders,
+    CASE
+        WHEN SUM(CASE WHEN line.l_returnflag = 'R' THEN 1 ELSE 0 END) > 0 THEN 'Has Returns'
+        ELSE 'No Returns'
+    END AS return_status
+FROM 
+    part p
+LEFT JOIN 
+    lineitem line ON p.p_partkey = line.l_partkey
+LEFT JOIN 
+    RankedOrders o ON line.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    SupplierComputed si ON p.p_partkey = si.ps_partkey
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, si.total_available, si.avg_supply_cost
+HAVING 
+    SUM(line.l_discount) > 100
+ORDER BY 
+    avg_supply_cost DESC, order_count DESC;

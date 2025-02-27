@@ -1,0 +1,44 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS Level
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.Level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+),
+CustomerStats AS (
+    SELECT c.c_name, 
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_name
+),
+SupplierStats AS (
+    SELECT s.s_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_name
+),
+LineitemStats AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+           COUNT(*) AS total_count,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT c.c_name,
+       COALESCE(o.order_count, 0) AS order_count,
+       COALESCE(o.total_spent, 0) AS total_spent,
+       COALESCE(s.total_supply_value, 0) AS total_supply_value,
+       ll.total_lineitem_value,
+       ll.total_count
+FROM CustomerStats o
+FULL OUTER JOIN SupplierStats s ON (o.order_count > 0 OR s.total_supply_value IS NOT NULL)
+LEFT JOIN LineitemStats ll ON o.order_count = ll.total_count
+WHERE (COALESCE(o.total_spent, 0) >= 10000 OR s.total_supply_value IS NULL)
+ORDER BY c.c_name;

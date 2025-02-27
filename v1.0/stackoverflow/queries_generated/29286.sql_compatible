@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByUser
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1
+),
+TagStatistics AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM
+        Tags t
+        JOIN Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%' )
+    GROUP BY
+        t.TagName
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM
+        Users u
+        LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+ClosedPostDetails AS (
+    SELECT
+        ph.PostId,
+        STRING_AGG(pt.Name, ', ') AS ClosedReasons,
+        COUNT(*) AS ReasonCount
+    FROM
+        PostHistory ph
+        JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE
+        pt.Name IN ('Post Closed', 'Post Reopened')
+    GROUP BY
+        ph.PostId
+)
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AverageScore,
+    ub.DisplayName AS UserDisplayName,
+    ub.BadgeCount,
+    ub.HighestBadgeClass,
+    cpd.ClosedReasons,
+    cpd.ReasonCount
+FROM
+    RankedPosts rp
+    LEFT JOIN TagStatistics ts ON rp.Tags LIKE CONCAT('%<', ts.TagName, '>%' )
+    LEFT JOIN UserBadges ub ON rp.OwnerUserId = ub.UserId
+    LEFT JOIN ClosedPostDetails cpd ON rp.PostId = cpd.PostId
+WHERE
+    rp.RankByUser <= 10
+ORDER BY
+    rp.Score DESC,
+    ts.PostCount DESC;

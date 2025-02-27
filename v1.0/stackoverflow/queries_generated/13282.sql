@@ -1,0 +1,30 @@
+-- Performance Benchmarking Query
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    COALESCE(SUM(b.Class = 1), 0) AS GoldBadges,
+    COALESCE(SUM(b.Class = 2), 0) AS SilverBadges,
+    COALESCE(SUM(b.Class = 3), 0) AS BronzeBadges
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+WHERE 
+    p.PostTypeId = 1 -- Only questions
+GROUP BY 
+    p.Id, u.DisplayName
+ORDER BY 
+    p.ViewCount DESC
+LIMIT 100; -- Limit to 100 most viewed questions

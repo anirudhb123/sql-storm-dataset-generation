@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 1000.00 AND sh.level < 5
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierAggregates AS (
+    SELECT p.p_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+RankedLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           DENSE_RANK() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT c.c_name, s.s_name, ps.supplier_count, psa.avg_supply_cost, 
+       COALESCE(rli.total_revenue, 0) AS revenue, 
+       CASE WHEN psa.avg_supply_cost IS NULL THEN 'No suppliers' ELSE 'Has suppliers' END AS supplier_status
+FROM CustomerOrderSummary c
+LEFT JOIN SupplierHierarchy s ON c.c_custkey = s.s_suppkey
+LEFT JOIN PartSupplierAggregates psa ON s.s_suppkey = psa.supplier_count
+LEFT JOIN RankedLineItems rli ON rli.l_orderkey = c.c_custkey
+WHERE c.total_spent > 5000
+AND (s.s_nationkey IS NOT NULL OR s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_availqty > 0))
+ORDER BY revenue DESC, supplier_count DESC;

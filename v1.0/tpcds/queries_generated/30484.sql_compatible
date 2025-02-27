@@ -1,0 +1,66 @@
+
+WITH RECURSIVE total_sales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        total_sales.total_profit + COALESCE(ws.ws_net_profit, 0)
+    FROM 
+        total_sales
+    JOIN 
+        web_sales ws ON total_sales.ws_item_sk = ws.ws_item_sk 
+    WHERE 
+        total_sales.ws_sold_date_sk < ws.ws_sold_date_sk
+),
+summary_sales AS (
+    SELECT
+        item.i_item_id,
+        item.i_item_desc,
+        SUM(COALESCE(sales.total_profit, 0)) AS overall_profit,
+        COUNT(DISTINCT c.c_customer_sk) AS unique_customers
+    FROM 
+        item
+    LEFT JOIN 
+        total_sales sales ON item.i_item_sk = sales.ws_item_sk
+    JOIN 
+        web_sales ws ON item.i_item_sk = ws.ws_item_sk
+    JOIN 
+        customer c ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        item.i_item_id, item.i_item_desc
+),
+top_items AS (
+    SELECT 
+        i_item_id,
+        i_item_desc,
+        overall_profit,
+        unique_customers,
+        RANK() OVER (ORDER BY overall_profit DESC) AS rank
+    FROM 
+        summary_sales
+)
+SELECT
+    ti.i_item_id,
+    ti.i_item_desc,
+    ti.overall_profit,
+    ti.unique_customers,
+    s.ca_city, 
+    s.ca_state,
+    s.ca_country
+FROM 
+    top_items ti
+JOIN 
+    customer_address s ON ti.i_item_id = s.ca_address_sk
+WHERE 
+    ti.rank <= 10 
+    AND s.ca_state IS NOT NULL 
+ORDER BY 
+    ti.overall_profit DESC;

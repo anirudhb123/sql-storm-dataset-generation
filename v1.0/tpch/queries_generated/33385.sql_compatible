@@ -1,0 +1,42 @@
+
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS Level
+    FROM nation
+    WHERE n_nationkey = 1 
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, Level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_regionkey
+    WHERE n.n_nationkey <> nh.n_nationkey
+), 
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(ps.ps_partkey) AS PartCount,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS OrderCount,
+           SUM(o.o_totalprice) AS TotalSpent,
+           MAX(o.o_orderdate) AS LastOrderDate
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+AggregateStats AS (
+    SELECT nh.n_name, SUM(ss.PartCount) AS TotalParts,
+           SUM(ss.TotalSupplyCost) AS TotalSupplyCost,
+           COUNT(DISTINCT co.c_custkey) AS UniqueCustomers,
+           AVG(co.TotalSpent) AS AvgSpentPerCustomer
+    FROM NationHierarchy nh
+    LEFT JOIN SupplierStats ss ON nh.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = ss.s_suppkey)
+    LEFT JOIN CustomerOrders co ON co.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ss.ps_partkey)
+    GROUP BY nh.n_name
+)
+SELECT a.n_name, a.TotalParts, a.TotalSupplyCost, a.UniqueCustomers, a.AvgSpentPerCustomer,
+       CASE WHEN a.AvgSpentPerCustomer IS NULL THEN 'No Customers' ELSE 'Active Customers' END AS CustomerStatus
+FROM AggregateStats a
+WHERE a.TotalParts > 10
+ORDER BY a.TotalSupplyCost DESC, a.UniqueCustomers ASC
+FETCH FIRST 10 ROWS ONLY;

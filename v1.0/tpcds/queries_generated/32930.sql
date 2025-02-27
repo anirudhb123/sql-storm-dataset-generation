@@ -1,0 +1,66 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        ws_quantity, 
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+avg_sales AS (
+    SELECT 
+        ws_item_sk, 
+        AVG(ws_net_profit) AS avg_profit
+    FROM 
+        sales_data
+    WHERE 
+        rn <= 10
+    GROUP BY 
+        ws_item_sk
+),
+profit_data AS (
+    SELECT 
+        inv.inv_item_sk,
+        COALESCE(sd.ws_net_profit, 0) AS total_net_profit,
+        COALESCE((SELECT AVG(sd.ws_net_profit) FROM sales_data sd WHERE sd.ws_item_sk = inv.inv_item_sk), 0) AS avg_profit_last_10_sales,
+        inv.inv_quantity_on_hand
+    FROM 
+        inventory inv
+    LEFT JOIN 
+        sales_data sd ON inv.inv_item_sk = sd.ws_item_sk
+    GROUP BY 
+        inv.inv_item_sk, inv.inv_quantity_on_hand, sd.ws_net_profit
+),
+high_performers AS (
+    SELECT 
+        pd.inv_item_sk, 
+        pd.total_net_profit,
+        pd.avg_profit_last_10_sales,
+        pd.inv_quantity_on_hand,
+        RANK() OVER (ORDER BY pd.total_net_profit DESC) AS profit_rank
+    FROM 
+        profit_data pd
+    WHERE 
+        pd.avg_profit_last_10_sales > 500 -- Example threshold
+)
+SELECT 
+    hi.inv_item_sk,
+    i.i_item_desc,
+    hi.total_net_profit,
+    hi.avg_profit_last_10_sales,
+    hi.inv_quantity_on_hand,
+    CASE 
+        WHEN hi.profit_rank <= 5 THEN 'Top Performer'
+        WHEN hi.profit_rank BETWEEN 6 AND 15 THEN 'Average Performer'
+        ELSE 'Low Performer' 
+    END AS performance_category
+FROM 
+    high_performers hi
+JOIN 
+    item i ON hi.inv_item_sk = i.i_item_sk
+ORDER BY 
+    hi.total_net_profit DESC;

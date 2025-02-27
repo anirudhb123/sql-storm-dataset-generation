@@ -1,0 +1,61 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(DISTINCT ki.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        MAX(r.role) AS main_role
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cc.name) AS company_count,
+        STRING_AGG(DISTINCT co.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rt.keyword_count,
+    cd.cast_count,
+    cd.main_role,
+    co.company_count,
+    co.company_names
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    CastDetails cd ON rt.title_id = cd.movie_id
+LEFT JOIN 
+    CompanyDetails co ON rt.title_id = co.movie_id
+WHERE 
+    (rt.production_year IS NOT NULL AND rt.keyword_count >= 2 AND (co.company_count > 1 OR co.company_count IS NULL)) 
+    OR (cd.cast_count IS NULL AND co.company_count IS NULL)
+ORDER BY 
+    rt.production_year DESC, rt.title_rank
+LIMIT 100;

@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' 
+        AND o.o_orderdate < DATE '2023-01-01'
+),
+SupplierPartData AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_name,
+        ps.ps_availqty,
+        ps.ps_supplycost * (1 + COALESCE(NULLIF(SUBSTRING(s.s_comment FROM 'discounted ([0-9]*)\%')::integer / 100.0, NULL), 0)) AS effective_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        p.p_retailprice > 50.00
+        OR p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice < 30.00)
+),
+CategorySupplier AS (
+    SELECT 
+        np.n_name AS nation,
+        ROUND(AVG(sp.effective_cost), 2) AS avg_cost
+    FROM 
+        nation np
+    LEFT JOIN 
+        SupplierPartData sp ON np.n_nationkey = (
+            SELECT DISTINCT s.s_nationkey FROM supplier s WHERE s.s_name ILIKE '%' || TRIM(np.n_name) || '%'
+        )
+    GROUP BY 
+        np.n_name
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_totalprice,
+    ro.o_orderdate,
+    cs.nation,
+    cs.avg_cost,
+    SUM(l.l_quantity) OVER (PARTITION BY ro.o_orderkey) AS total_quantity,
+    COALESCE(ROUND(SUM(l.l_extendedprice * (1 - l.l_discount)), 2), 0) AS total_value,
+    CASE 
+        WHEN ro.o_totalprice > (SELECT AVG(o_totalprice) FROM orders) THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS price_category
+FROM 
+    RankedOrders ro
+LEFT JOIN 
+    lineitem l ON ro.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    CategorySupplier cs ON cs.avg_cost IS NOT NULL
+WHERE 
+    ro.rn <= 5
+    AND (ro.o_totalprice > 100.00 OR cs.nation IS NOT NULL)
+ORDER BY 
+    ro.o_orderdate DESC, 
+    ro.o_totalprice DESC;

@@ -1,0 +1,94 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS acct_rank
+    FROM 
+        supplier s
+), 
+AvailableParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        COALESCE(SUM(ps.ps_availqty), 0) AS total_avail 
+    FROM 
+        part p 
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey 
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c 
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 1
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice, 
+        DENSE_RANK() OVER (ORDER BY o.o_totalprice DESC) AS total_rank
+    FROM 
+        orders o 
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+ProductInfo AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        CASE 
+            WHEN p.p_size IS NULL THEN 'Unknown Size' 
+            ELSE CAST(p.p_size AS VARCHAR)
+        END AS size_description
+    FROM 
+        part p
+)
+SELECT 
+    cu.c_name AS customer_name, 
+    co.order_count, 
+    pi.p_name AS product_name, 
+    pi.size_description, 
+    sum(li.l_extendedprice * (1 - li.l_discount)) AS revenue
+FROM 
+    CustomerOrders co 
+JOIN 
+    lineitem li ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+JOIN 
+    ProductInfo pi ON li.l_partkey = pi.p_partkey 
+JOIN 
+    RankedSuppliers rs ON li.l_suppkey = rs.s_suppkey AND rs.acct_rank = 1
+WHERE 
+    COALESCE(pi.p_retailprice, 0) > 100.00 
+GROUP BY 
+    cu.c_name, co.order_count, pi.p_name, pi.size_description
+HAVING 
+    revenue > 1000
+ORDER BY 
+    customer_name, revenue DESC
+UNION ALL 
+SELECT 
+    'NULL Customer' AS customer_name, 
+    NULL AS order_count, 
+    'Discontinued Product' AS product_name, 
+    'N/A' AS size_description, 
+    NULLIF(SUM(li.l_extendedprice), 0) AS revenue
+FROM 
+    lineitem li 
+LEFT JOIN 
+    orders o ON li.l_orderkey = o.o_orderkey 
+WHERE 
+    o.o_orderkey IS NULL
+GROUP BY 
+    li.l_partkey;

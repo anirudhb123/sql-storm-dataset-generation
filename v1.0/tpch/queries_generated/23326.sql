@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_availqty > (SELECT AVG(ps.ps_availqty) FROM partsupp) LIMIT 1)
+    WHERE sh.Level < 3
+)
+
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_returns,
+    SUM(l.l_extendedprice) AS total_sales,
+    MAX(s.s_acctbal) FILTER (WHERE s.s_name LIKE '%Inc%') AS max_account_balance,
+    STRING_AGG(DISTINCT p.p_name, '; ') AS product_names,
+    FIRST_VALUE(l.l_shipmode) OVER (PARTITION BY r.r_name ORDER BY l.l_shipdate) AS first_shipmode,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice) DESC) AS price_rank,
+    CASE WHEN SUM(l.l_discount) > 0.2 THEN 'High Discount' ELSE 'Normal Discount' END AS discount_category
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    AND r.r_comment NOT LIKE '%obsolete%'
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5 
+    AND MAX(s.s_acctbal) IS NOT NULL
+ORDER BY 
+    price_rank DESC, total_sales DESC;

@@ -1,0 +1,54 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank_in_region
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_regionkey
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.total_cost,
+        n.n_name AS region
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.rank_in_region <= 3 AND n.n_nationkey = s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+)
+SELECT 
+    ts.region,
+    COUNT(co.o_orderkey) AS total_orders,
+    SUM(co.o_totalprice) AS total_revenue,
+    AVG(co.o_totalprice) AS avg_order_value,
+    STRING_AGG(DISTINCT ts.s_name, ', ') AS top_suppliers
+FROM 
+    TopSuppliers ts
+JOIN 
+    CustomerOrders co ON ts.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps JOIN lineitem li ON ps.ps_partkey = li.l_partkey)
+GROUP BY 
+    ts.region
+ORDER BY 
+    ts.region;

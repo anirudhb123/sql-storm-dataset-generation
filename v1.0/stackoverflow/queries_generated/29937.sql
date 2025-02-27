@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 -- We're only interested in questions
+    GROUP BY 
+        p.Id, p.Title, p.Tags, p.CreationDate, u.DisplayName
+),
+TopUserPosts AS (
+    SELECT 
+        rp.OwnerDisplayName,
+        rp.Title,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.Tags,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 5 -- Getting top 5 questions per user
+),
+TagStatistics AS (
+    SELECT 
+        TRIM(t.TagName) AS TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.ViewCount) AS AverageViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    tup.OwnerDisplayName,
+    tup.Title,
+    tup.ViewCount,
+    tup.CreationDate,
+    tup.Tags,
+    tup.CommentCount,
+    tup.UpVotes,
+    tup.DownVotes,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AverageViews
+FROM 
+    TopUserPosts tup
+JOIN 
+    TagStatistics ts ON tup.Tags LIKE '%' || ts.TagName || '%'
+ORDER BY 
+    tup.OwnerDisplayName, tup.ViewCount DESC;

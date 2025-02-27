@@ -1,0 +1,37 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk, 
+        SUM(cr_return_quantity) AS total_returns, 
+        SUM(cr_return_amount) AS total_return_amount
+    FROM catalog_returns
+    GROUP BY cr_returning_customer_sk
+),
+WebSalesDetails AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.order_number) AS order_count,
+        MAX(ws.ship_date_sk) AS last_ship_date
+    FROM web_sales ws
+    GROUP BY ws.bill_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    COALESCE(NULLIF(cd.cd_gender, 'U'), 'Gender Unknown') AS customer_gender,
+    COALESCE(cd.cd_marital_status, 'Not Specified') AS marital_status,
+    COALESCE(cr.total_returns, 0) AS total_returns,
+    COALESCE(cr.total_return_amount, 0.00) AS total_return_amount,
+    COALESCE(ws.total_net_profit, 0.00) AS total_net_profit,
+    ws.order_count,
+    CASE 
+        WHEN ws.last_ship_date > DATEADD(DAY, -30, GETDATE()) THEN 'Active'
+        ELSE 'Inactive'
+    END AS customer_status
+FROM customer c
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+LEFT JOIN WebSalesDetails ws ON c.c_customer_sk = ws.bill_customer_sk
+WHERE c.c_preferred_cust_flag = 'Y'
+AND (cd.cd_purchase_estimate > 1000 OR cd.cd_credit_rating = 'Excellent')
+ORDER BY total_net_profit DESC, c.c_customer_id;

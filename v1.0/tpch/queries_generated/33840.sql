@@ -1,0 +1,48 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 0 AS level
+    FROM customer c
+    WHERE c.c_mktsegment = 'BUILDING'
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_custkey <> ch.c_custkey
+), 
+
+SupplierAggregates AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_availqty, 
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+
+OrderStats AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY o.o_orderkey
+)
+
+SELECT 
+    c.c_name, 
+    ch.level, 
+    COALESCE(sa.total_availqty, 0) AS total_available_quantity,
+    sa.avg_supplycost AS average_supply_cost,
+    os.total_sales AS total_sales,
+    os.distinct_parts AS distinct_parts_sold
+FROM customer c
+LEFT JOIN CustomerHierarchy ch ON c.c_custkey = ch.c_custkey
+LEFT JOIN SupplierAggregates sa ON sa.ps_partkey = (SELECT p.p_partkey 
+                                                      FROM part p 
+                                                      WHERE p.p_name LIKE '%widget%')
+LEFT JOIN OrderStats os ON os.o_orderkey = (SELECT o.o_orderkey 
+                                              FROM orders o 
+                                              WHERE o.o_custkey = c.c_custkey 
+                                              LIMIT 1)
+WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_nationkey = c.c_nationkey)
+ORDER BY c.c_name, ch.level DESC
+LIMIT 100;

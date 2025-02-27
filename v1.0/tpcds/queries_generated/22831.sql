@@ -1,0 +1,62 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_net_profit) AS average_net_profit,
+        SUM(ws.ws_net_paid_inc_tax) AS total_net_paid,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_quantity) DESC) AS rank
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        ws.web_site_id
+), 
+returns_data AS (
+    SELECT 
+        wr.wr_web_page_sk,
+        COUNT(*) AS total_returns,
+        SUM(wr.wr_return_amt) AS total_return_amount,
+        COALESCE(SUM(wr.wr_return_quantity), 0) AS total_return_quantity
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.wr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        wr.wr_web_page_sk
+),
+ranked_sales AS (
+    SELECT 
+        sd.web_site_id,
+        sd.total_quantity,
+        sd.average_net_profit,
+        rd.total_returns,
+        rd.total_return_amount,
+        RANK() OVER (ORDER BY sd.average_net_profit DESC) AS sales_rank
+    FROM 
+        sales_data sd
+    LEFT JOIN 
+        returns_data rd ON sd.web_site_id = rd.wr_web_page_sk
+)
+SELECT 
+    r.web_site_id,
+    r.total_quantity,
+    r.average_net_profit,
+    r.total_returns,
+    r.total_return_amount,
+    CASE 
+        WHEN r.sales_rank <= 10 THEN 'Top Performer'
+        WHEN r.average_net_profit IS NULL OR r.total_quantity = 0 THEN 'No Sales'
+        ELSE 'Average Performer'
+    END AS performance_category
+FROM 
+    ranked_sales r
+WHERE 
+    r.total_return_quantity < (SELECT AVG(total_return_quantity) FROM returns_data)
+ORDER BY 
+    r.average_net_profit DESC, 
+    r.total_quantity ASC;

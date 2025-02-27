@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tagArray ON true
+    LEFT JOIN 
+        Tags t ON t.Id = tagArray::int
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, p.CreationDate, p.PostTypeId
+),
+PostHistoryAggregated AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.Tags,
+        ph.LastClosedDate,
+        ph.CloseReopenCount,
+        CASE 
+            WHEN ph.LastClosedDate IS NULL THEN 'Active'
+            WHEN ph.CloseReopenCount > 0 THEN 'Closed and Reopened'
+            ELSE 'Closed'
+        END AS PostStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryAggregated ph ON rp.PostId = ph.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Score,
+    fp.ViewCount,
+    COALESCE(fp.CommentCount, 0) AS TotalComments,
+    fp.Tags,
+    fp.LastClosedDate,
+    fp.PostStatus,
+    CASE 
+        WHEN fp.Score IS NULL THEN 'No Score Available'
+        WHEN fp.Score > 100 THEN 'Highly Rated'
+        ELSE 'Moderately Rated'
+    END AS ScoreCategory,
+    COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 1) AS GoldBadgesCount,
+    COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 2) AS SilverBadgesCount,
+    COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadgesCount
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    Badges b ON fp.PostId = b.UserId
+GROUP BY 
+    fp.PostId, fp.Title, fp.Score, fp.ViewCount, fp.CommentCount, fp.Tags, 
+    fp.LastClosedDate, fp.PostStatus
+ORDER BY 
+    fp.Score DESC NULLS LAST, 
+    fp.PostId
+LIMIT 100;

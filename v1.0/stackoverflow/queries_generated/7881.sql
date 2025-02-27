@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' AND 
+        p.PostTypeId = 1 -- Considering only Questions
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerDisplayName
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+),
+PostDetails AS (
+    SELECT 
+        tp.*,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVoteCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Comments c ON tp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON tp.PostId = v.PostId
+    GROUP BY 
+        tp.PostId, tp.Title, tp.CreationDate, tp.Score, tp.ViewCount, tp.OwnerDisplayName
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.OwnerDisplayName,
+    pd.CommentCount,
+    pd.UpVoteCount,
+    pd.DownVoteCount
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

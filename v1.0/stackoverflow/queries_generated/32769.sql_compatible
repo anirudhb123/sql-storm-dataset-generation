@@ -1,0 +1,85 @@
+
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        (SELECT COUNT(*) FROM Posts P WHERE P.OwnerUserId = U.Id) AS PostCount,
+        (SELECT COUNT(*) FROM Comments C WHERE C.UserId = U.Id) AS CommentCount,
+        0 AS Level
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 100  
+
+    UNION ALL
+
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        (SELECT COUNT(*) FROM Posts P WHERE P.OwnerUserId = U.Id) AS PostCount,
+        (SELECT COUNT(*) FROM Comments C WHERE C.UserId = U.Id) AS CommentCount,
+        UA.Level + 1 AS Level
+    FROM 
+        Users U
+    INNER JOIN 
+        UserActivity UA ON U.Id = UA.UserId
+    WHERE 
+        U.Reputation > 0 AND UA.Level < 5  
+),
+
+RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.Tags,
+        U.DisplayName AS Author,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'  
+)
+
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.Reputation,
+    UA.PostCount,
+    UA.CommentCount,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.ViewCount,
+    CASE 
+        WHEN P.Score > 10 THEN 'High Score'
+        WHEN P.Score BETWEEN 5 AND 10 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    STRING_AGG(T.TagName, ', ') AS RelatedTags
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    RecentPosts P ON UA.UserId = P.OwnerUserId AND P.PostRank <= 3  
+LEFT JOIN 
+    (SELECT 
+         P.Id, 
+         T.TagName
+     FROM 
+         Posts P
+     JOIN 
+         Tags T ON P.Tags LIKE CONCAT('%', T.TagName, '%')) T ON P.Id = T.Id
+GROUP BY 
+    UA.UserId, UA.DisplayName, UA.Reputation, UA.PostCount, UA.CommentCount, P.Title, P.CreationDate, P.Score, P.ViewCount
+ORDER BY 
+    UA.Reputation DESC, P.CreationDate DESC;

@@ -1,0 +1,56 @@
+
+WITH CustomerOverview AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        CAST(CONCAT(c.c_first_name, ' ', c.c_last_name) AS VARCHAR(100)) AS full_name
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+), ReturnMetrics AS (
+    SELECT
+        wr.returning_customer_sk,
+        SUM(wr.return_qty) AS total_returns,
+        AVG(wr.return_amount) AS avg_return_amount,
+        COUNT(DISTINCT wr.return_order_number) AS unique_return_orders
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk
+), CustomerReturnAnalysis AS (
+    SELECT
+        co.full_name,
+        co.ca_city,
+        co.ca_state,
+        rm.total_returns,
+        rm.avg_return_amount,
+        CASE 
+            WHEN rm.total_returns > 10 THEN 'High'
+            WHEN rm.total_returns BETWEEN 5 AND 10 THEN 'Medium'
+            ELSE 'Low'
+        END AS return_category
+    FROM 
+        CustomerOverview co
+    LEFT JOIN 
+        ReturnMetrics rm ON co.c_customer_id = rm.returning_customer_sk
+)
+SELECT 
+    return_category,
+    COUNT(*) AS customer_count,
+    AVG(total_returns) AS avg_returns,
+    SUM(avg_return_amount) AS total_return_amount
+FROM 
+    CustomerReturnAnalysis
+GROUP BY 
+    return_category
+ORDER BY 
+    customer_count DESC;

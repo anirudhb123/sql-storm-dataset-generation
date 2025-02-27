@@ -1,0 +1,50 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT
+        ml.linked_movie_id,
+        at.title,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT
+    ah.name AS actor_name,
+    mv.title AS movie_title,
+    COUNT(DISTINCT kc.keyword) AS total_keywords,
+    AVG(pi.info::numeric) AS avg_person_age,
+    ROW_NUMBER() OVER (PARTITION BY ah.id ORDER BY mv.production_year DESC) AS movie_rank,
+    COALESCE(SUM(CASE WHEN pi.info_type_id = 1 THEN 1 ELSE 0 END), 0) AS has_person_info
+FROM
+    aka_name ah
+JOIN
+    cast_info ci ON ah.person_id = ci.person_id
+JOIN
+    movie_hierarchy mv ON ci.movie_id = mv.movie_id
+LEFT JOIN
+    movie_keyword mk ON mv.movie_id = mk.movie_id
+LEFT JOIN
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN
+    person_info pi ON ah.person_id = pi.person_id
+WHERE
+    ah.name IS NOT NULL AND
+    mv.level <= 3
+GROUP BY
+    ah.id, mv.title
+HAVING
+    COUNT(DISTINCT kc.keyword) > 5
+ORDER BY
+    avg_person_age DESC,
+    movie_title ASC;

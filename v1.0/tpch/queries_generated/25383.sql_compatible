@@ -1,0 +1,24 @@
+
+SELECT
+    CONCAT('Supplier: ', s.s_name, ' | Nation: ', n.n_name, ' | Product: ', p.p_name, 
+           ' | Total Supply Cost: ', SUM(ps.ps_supplycost * ps.ps_availqty), 
+           ' | Comments: ', LEFT(ps.ps_comment, 50), '...') AS supplier_info
+FROM
+    supplier s
+JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE
+    LENGTH(p.p_name) > 20 AND 
+    n.n_name LIKE '%land%' AND 
+    ps.ps_supplycost > (
+        SELECT AVG(ps_supplycost) FROM partsupp
+    )
+GROUP BY
+    s.s_suppkey, s.s_name, n.n_nationkey, n.n_name, p.p_partkey, p.p_name
+ORDER BY
+    SUM(ps.ps_supplycost * ps.ps_availqty) DESC
+LIMIT 10;

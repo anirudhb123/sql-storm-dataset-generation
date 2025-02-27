@@ -1,0 +1,84 @@
+WITH RECURSIVE OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_price,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY li.l_linenumber) AS line_item_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SuppliersWithParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        COALESCE(NULLIF(ps.ps_availqty, 0), 1) AS adjusted_qty
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 5000
+),
+NationRegionStats AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name, r.r_name
+)
+SELECT 
+    o.o_orderkey,
+    CASE 
+        WHEN os.total_price IS NULL THEN 0 
+        ELSE os.total_price 
+    END AS order_total,
+    COUNT(DISTINCT cu.c_custkey) AS customer_count,
+    COALESCE(A.adj_qty, 0) AS adjusted_quantity,
+    ns.n_name,
+    ns.supplier_count
+FROM 
+    OrderSummary os
+FULL OUTER JOIN 
+    FilteredCustomers cu ON os.o_orderkey = cu.c_custkey
+LEFT JOIN 
+    SuppliersWithParts A ON A.ps_partkey = os.o_orderkey
+JOIN 
+    NationRegionStats ns ON ns.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'Germany')
+WHERE 
+    ns.supplier_count > 0
+GROUP BY 
+    o.o_orderkey, os.total_price, A.adj_qty, ns.n_name, ns.supplier_count
+ORDER BY 
+    order_total DESC;

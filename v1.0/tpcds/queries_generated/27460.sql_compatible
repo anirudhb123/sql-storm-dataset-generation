@@ -1,0 +1,51 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS address_count,
+        MAX(LENGTH(ca_street_name)) AS max_street_name_length,
+        MIN(LENGTH(ca_street_name)) AS min_street_name_length,
+        AVG(LENGTH(ca_street_name)) AS avg_street_name_length,
+        STRING_AGG(DISTINCT ca_street_type, ',' ORDER BY ca_street_type) AS unique_street_types
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_gender,
+        CASE 
+            WHEN EXTRACT(YEAR FROM DATE '2002-10-01') - cd_birth_year < 25 THEN '18-24'
+            WHEN EXTRACT(YEAR FROM DATE '2002-10-01') - cd_birth_year BETWEEN 25 AND 34 THEN '25-34'
+            WHEN EXTRACT(YEAR FROM DATE '2002-10-01') - cd_birth_year BETWEEN 35 AND 44 THEN '35-44'
+            WHEN EXTRACT(YEAR FROM DATE '2002-10-01') - cd_birth_year BETWEEN 45 AND 54 THEN '45-54'
+            WHEN EXTRACT(YEAR FROM DATE '2002-10-01') - cd_birth_year BETWEEN 55 AND 64 THEN '55-64'
+            ELSE '65+' 
+        END AS cd_age_group,
+        COUNT(DISTINCT c_customer_id) AS customer_count,
+        SUM(CASE WHEN cd_marital_status = 'S' THEN 1 ELSE 0 END) AS single_count
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY 
+        cd_gender, cd_age_group
+)
+SELECT 
+    a.ca_state,
+    a.address_count,
+    a.max_street_name_length,
+    a.min_street_name_length,
+    a.avg_street_name_length,
+    a.unique_street_types,
+    c.cd_gender,
+    c.cd_age_group,
+    c.customer_count,
+    c.single_count
+FROM 
+    AddressStats a
+JOIN 
+    CustomerDemographics c ON 1=1
+ORDER BY 
+    a.ca_state, c.cd_gender;

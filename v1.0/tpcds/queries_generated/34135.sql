@@ -1,0 +1,52 @@
+
+WITH RECURSIVE customer_sales AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           ws_item_sk, 
+           SUM(ws_sales_price) AS total_sales
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+    UNION ALL
+    SELECT cs.c_customer_sk, 
+           cs.c_first_name, 
+           cs.c_last_name, 
+           cs.ws_item_sk, 
+           SUM(cs.total_sales) AS total_sales
+    FROM customer_sales cs
+    JOIN web_sales ws ON cs.ws_item_sk = ws.ws_item_sk
+    GROUP BY cs.c_customer_sk, cs.c_first_name, cs.c_last_name, cs.ws_item_sk
+),
+sales_summary AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           COALESCE(SUM(ss.ws_sales_price), 0) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ss.ws_sales_price) DESC) AS rank
+    FROM customer c
+    LEFT JOIN web_sales ss ON c.c_customer_sk = ss.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING total_sales > 1000
+),
+top_customers AS (
+    SELECT c.customer_id, 
+           cs.total_sales,
+           RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM customer c
+    JOIN customer_sales cs ON c.c_customer_sk = cs.c_customer_sk
+    WHERE cs.total_sales IS NOT NULL
+)
+SELECT s.c_customer_sk, 
+       s.c_first_name, 
+       s.c_last_name, 
+       COALESCE(sc.total_sales, 0) AS total_sales,
+       s.rank,
+       CASE 
+           WHEN s.rank <= 10 THEN 'Top 10 Customers'
+           ELSE 'Other Customers'
+       END AS customer_category
+FROM sales_summary s
+LEFT JOIN top_customers sc ON s.c_customer_sk = sc.customer_id
+WHERE s.c_last_name IS NOT NULL
+ORDER BY total_sales DESC, s.c_last_name ASC;

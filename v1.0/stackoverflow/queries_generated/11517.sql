@@ -1,0 +1,64 @@
+-- Performance benchmarking query on StackOverflow schema
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        pt.Name AS PostType,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalComments,
+    us.TotalBadges,
+    us.TotalUpvotes,
+    us.TotalDownvotes,
+    ps.PostId,
+    ps.Title,
+    ps.PostType,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount
+FROM 
+    UserStats us
+LEFT JOIN 
+    PostStats ps ON us.UserId = ps.OwnerUserId -- Assuming you want to link back to posts associated with the user
+ORDER BY 
+    us.Reputation DESC, ps.Score DESC; -- Performance sorted by user reputation and post score

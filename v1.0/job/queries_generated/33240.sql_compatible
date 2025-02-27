@@ -1,0 +1,72 @@
+
+WITH RECURSIVE movie_chain AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ARRAY[m.title] AS title_chain,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id AS movie_id,
+        lt.title,
+        title_chain || lt.title,
+        level + 1
+    FROM 
+        movie_link mc
+    JOIN 
+        aka_title lt ON lt.id = mc.linked_movie_id
+    JOIN 
+        movie_chain c ON c.movie_id = mc.movie_id
+    WHERE 
+        level < 5
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    COUNT(DISTINCT km.keyword_id) AS keyword_count,
+    AVG(CAST(p.info AS FLOAT)) AS avg_rating,
+    ARRAY_AGG(DISTINCT cc.kind) AS company_kinds,
+    MAX(w.rank) AS max_rank
+FROM 
+    movie_companies mc
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    aka_title t ON mc.movie_id = t.id
+LEFT JOIN 
+    cast_info ci ON t.id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword km ON t.id = km.movie_id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN 
+    person_info p ON ci.person_id = p.person_id
+LEFT JOIN 
+    (SELECT 
+         movie_id, 
+         ROW_NUMBER() OVER (PARTITION BY movie_id ORDER BY info ASC) AS rank
+     FROM 
+         movie_info mi2
+     WHERE 
+         mi2.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    ) AS w ON w.movie_id = t.id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2020
+    AND cn.country_code IS NOT NULL
+    AND (p.info IS NULL OR p.info != '')
+GROUP BY 
+    a.name, 
+    t.title
+ORDER BY 
+    keyword_count DESC, 
+    avg_rating DESC
+LIMIT 100;

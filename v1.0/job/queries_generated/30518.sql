@@ -1,0 +1,55 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    row_number() OVER (PARTITION BY a.id ORDER BY m.production_year DESC) AS movie_rank,
+    c.kind AS cast_type,
+    COALESCE(pi.info, 'No additional info') AS person_info,
+    CONCAT_WS(', ', NULLIF(pt.note, 'No Note'), COALESCE(mk.keyword, 'No Keyword')) AS notes_and_keywords
+FROM 
+    cast_info ci
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    movie_hierarchy m ON ci.movie_id = m.movie_id
+LEFT JOIN 
+    comp_cast_type c ON ci.person_role_id = c.id
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON m.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Summary')
+LEFT JOIN 
+    (SELECT movie_id, STRING_AGG(note, '; ') AS note FROM movie_info GROUP BY movie_id) pt ON m.movie_id = pt.movie_id
+WHERE 
+    m.production_year > 2000
+    AND a.name IS NOT NULL
+ORDER BY 
+    actor_name, m.production_year DESC;

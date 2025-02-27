@@ -1,0 +1,37 @@
+WITH RECURSIVE SupplyCostCTE AS (
+    SELECT ps_partkey, SUM(ps_supplycost * ps_availqty) AS total_supply_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           COALESCE(SUM(l.l_quantity), 0) AS total_quantity,
+           MAX(l.l_shipdate) AS last_ship_date
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+)
+SELECT pd.p_partkey, pd.p_name, pd.p_brand, pd.p_retailprice, 
+       scc.total_supply_cost,
+       co.total_orders,
+       co.total_spent,
+       CASE WHEN co.total_spent IS NOT NULL AND co.total_spent > 1000 
+            THEN 'High spender' 
+            ELSE 'Regular spender' END AS customer_category
+FROM PartDetails pd
+JOIN SupplyCostCTE scc ON pd.p_partkey = scc.ps_partkey
+LEFT JOIN CustomerOrders co ON co.c_custkey IN (
+    SELECT o.o_custkey
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_partkey = pd.p_partkey
+)
+WHERE pd.total_quantity > 20
+ORDER BY scc.total_supply_cost DESC, pd.p_retailprice ASC
+LIMIT 10;

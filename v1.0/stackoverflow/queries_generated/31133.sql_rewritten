@@ -1,0 +1,76 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        0 as Level,
+        CAST(TagName AS varchar(200)) as FullTagPath
+    FROM 
+        Tags
+    WHERE 
+        IsModeratorOnly = 0
+    
+    UNION ALL
+    
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        r.Level + 1,
+        CAST(r.FullTagPath + ' > ' + t.TagName AS varchar(200))
+    FROM 
+        Tags t
+    JOIN 
+        RecursiveTagHierarchy r ON r.Id = t.ExcerptPostId
+    WHERE 
+        t.IsModeratorOnly = 0
+),
+TopUsers AS (
+    SELECT 
+        u.Id, 
+        u.DisplayName, 
+        u.Reputation, 
+        u.Views,
+        DENSE_RANK() OVER (ORDER BY u.Reputation DESC) as Rank
+    FROM 
+        Users u
+    WHERE 
+        u.LastAccessDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+RecentCloseReasons AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.UserId,
+        ph.Comment,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) as ReasonOrder
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+)
+SELECT 
+    u.DisplayName AS TopUser,
+    u.Reputation,
+    t.FullTagPath AS TagsHierarchy,
+    p.Title AS RecentClosedPost,
+    r.Comment AS CloseReason,
+    r.CreationDate AS CloseDate
+FROM 
+    TopUsers u
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id 
+LEFT JOIN 
+    RecentCloseReasons r ON p.Id = r.PostId AND r.ReasonOrder = 1
+CROSS JOIN 
+    (SELECT STRING_AGG(t.TagName, ', ') AS TagsList
+     FROM Tags t 
+     WHERE t.Count > 10) AS t
+WHERE 
+    u.Rank <= 10
+ORDER BY 
+    u.Reputation DESC, 
+    p.CreationDate DESC NULLS LAST;

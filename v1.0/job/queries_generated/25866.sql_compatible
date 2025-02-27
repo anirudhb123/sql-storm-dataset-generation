@@ -1,0 +1,64 @@
+
+WITH MoviePersonInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        p.id AS person_id,
+        p.name AS actor_name,
+        c.person_role_id,
+        r.role AS actor_role,
+        COALESCE(mk.keyword, 'N/A') AS movie_keyword,
+        mt.kind AS movie_type,
+        COALESCE(mi.info, 'No information') AS movie_information
+    FROM 
+        aka_title m
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        kind_type mt ON m.kind_id = mt.id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id 
+    WHERE 
+        m.production_year > 2000
+),
+KeyActorSummary AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT movie_id) AS movie_count,
+        STRING_AGG(DISTINCT movie_title, ', ') AS movies,
+        STRING_AGG(DISTINCT movie_keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT movie_information, ', ') AS summary_information
+    FROM 
+        MoviePersonInfo
+    GROUP BY 
+        actor_name
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        movie_count,
+        movies,
+        keywords,
+        summary_information,
+        RANK() OVER (ORDER BY movie_count DESC) AS actor_rank
+    FROM 
+        KeyActorSummary
+)
+SELECT 
+    actor_name,
+    movie_count,
+    movies,
+    keywords,
+    summary_information
+FROM 
+    TopActors
+WHERE 
+    actor_rank <= 10
+ORDER BY 
+    movie_count DESC;

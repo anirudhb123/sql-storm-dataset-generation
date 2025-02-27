@@ -1,0 +1,55 @@
+WITH TagStatistics AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(u.Reputation) AS AverageUserReputation
+    FROM Tags AS t
+    LEFT JOIN Posts AS p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN Users AS u ON p.OwnerUserId = u.Id
+    GROUP BY t.TagName
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users AS u
+    LEFT JOIN Badges AS b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostHistoryAnalysis AS (
+    SELECT
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseVoteCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenVoteCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 END) AS EditCount
+    FROM PostHistory AS ph
+    GROUP BY ph.PostId
+)
+
+SELECT
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.AverageUserReputation,
+    ub.UserId,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    ph.CloseVoteCount,
+    ph.ReopenVoteCount,
+    ph.EditCount
+FROM TagStatistics AS ts
+JOIN UserBadges AS ub ON ub.BadgeCount > 0
+LEFT JOIN PostHistoryAnalysis AS ph ON ph.PostId IN (
+    SELECT p.Id
+    FROM Posts AS p
+    WHERE p.Tags LIKE '%' || ts.TagName || '%'
+)
+ORDER BY ts.PostCount DESC, ub.BadgeCount DESC;

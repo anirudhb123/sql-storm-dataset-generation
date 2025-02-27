@@ -1,0 +1,58 @@
+
+WITH SalesData AS (
+    SELECT
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY
+        ws_sold_date_sk, ws_item_sk
+),
+CustomerDemographics AS (
+    SELECT
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+TopItems AS (
+    SELECT
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_net_paid,
+        RANK() OVER (PARTITION BY YEAR(d_date) ORDER BY total_net_paid DESC) AS rank
+    FROM
+        SalesData sd
+    JOIN date_dim d ON sd.ws_sold_date_sk = d.d_date_sk
+)
+SELECT
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.hd_income_band_sk,
+    ti.ws_item_sk,
+    ti.total_quantity,
+    ti.total_net_paid
+FROM
+    TopItems ti
+JOIN CustomerDemographics ci ON ci.c_customer_sk IN (
+    SELECT
+        sr_customer_sk
+    FROM
+        store_returns
+    WHERE
+        sr_return_quantity > 0 AND sr_return_amt > (SELECT AVG(sr_return_amt) FROM store_returns)
+)
+WHERE
+    ti.rank <= 10
+ORDER BY
+    ci.hd_income_band_sk, ti.total_net_paid DESC;

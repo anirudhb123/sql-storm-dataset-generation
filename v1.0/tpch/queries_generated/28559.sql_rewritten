@@ -1,0 +1,28 @@
+SELECT 
+    CONCAT(s.s_name, ' from ', r.r_name) AS supplier_location,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ' (', p.p_size, ')'), ', ') AS parts_supplied
+FROM 
+    supplier s
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+WHERE 
+    r.r_name IN ('ASIA', 'EUROPE')
+    AND l.l_shipdate >= '1997-01-01'
+GROUP BY 
+    s.s_name, r.r_name
+ORDER BY 
+    total_available_quantity DESC;

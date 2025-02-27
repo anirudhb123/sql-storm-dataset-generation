@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+), HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 100
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost) > (SELECT AVG(ps_supplycost) FROM partsupp)
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        FIRST_VALUE(l.l_shipmode) OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber ASC) AS ship_mode
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        COUNT(l.l_linenumber) > 1
+)
+SELECT 
+    r.r_name,
+    SUM(CASE WHEN od.total_price IS NOT NULL THEN od.total_price ELSE 0 END) AS total_sales,
+    COUNT(DISTINCT hp.p_partkey) AS unique_parts,
+    MAX(rs.s_name) AS supplier_name
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey AND rs.rank <= 5
+LEFT JOIN 
+    HighValueParts hp ON hp.p_partkey IN (SELECT ps.p_partkey FROM partsupp ps WHERE ps.ps_supplycost < 50.00)
+LEFT JOIN 
+    OrderDetails od ON od.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderstatus = 'O')
+GROUP BY 
+    r.r_name
+HAVING 
+    total_sales > (SELECT AVG(total_sales) FROM (
+        SELECT 
+            COUNT(1) AS total_sales
+        FROM 
+            orders
+        GROUP BY 
+            o_orderkey
+    ) AS avg_sales)
+ORDER BY 
+    r.r_name DESC NULLS LAST;

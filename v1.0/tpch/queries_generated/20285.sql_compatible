@@ -1,0 +1,46 @@
+
+WITH RECURSIVE full_orders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS recursion_level
+    FROM orders
+    WHERE o_orderdate >= '1995-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice + fo.o_totalprice, recursion_level + 1
+    FROM orders o
+    JOIN full_orders fo ON o.o_custkey = fo.o_custkey
+    WHERE o.o_orderdate > fo.o_orderdate
+      AND recursion_level < 5
+),
+average_order_cost AS (
+    SELECT o_custkey, AVG(o_totalprice) AS avg_cost
+    FROM full_orders
+    GROUP BY o_custkey
+),
+part_supplier_info AS (
+    SELECT ps.ps_partkey, s.s_suppkey, s.s_acctbal, s.s_name, ps.ps_supplycost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT c.c_custkey) AS customer_count,
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_returned,
+       COUNT(DISTINCT fo.o_orderkey) AS total_orders,
+       PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY fo.o_totalprice) AS median_order_value,
+       STRING_AGG(DISTINCT p.p_name) AS part_names,
+       ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(fo.o_totalprice) DESC) AS row_num
+FROM region r
+LEFT JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+LEFT JOIN full_orders fo ON fo.o_custkey = c.c_custkey
+LEFT JOIN part_supplier_info psi ON psi.ps_supplycost < 100
+LEFT JOIN part p ON p.p_partkey = psi.ps_partkey
+WHERE r.r_name LIKE '%land%'
+  AND o.o_orderstatus NOT IN ('F', 'O')
+  AND (c.c_acctbal IS NULL OR c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer))
+GROUP BY r.r_name, total_returned, SUM(fo.o_totalprice)
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+   AND total_returned > 0
+   AND SUM(fo.o_totalprice) IS NOT NULL
+ORDER BY r.r_name;

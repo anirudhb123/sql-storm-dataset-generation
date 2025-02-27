@@ -1,0 +1,53 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT cs_order_number, cs_ship_date_sk, cs_item_sk, cs_quantity, 1 AS recursive_level
+    FROM catalog_sales
+    WHERE cs_sales_price > 100
+    UNION ALL
+    SELECT cs.cs_order_number, cs.cs_ship_date_sk, cs.cs_item_sk, cs.cs_quantity, oh.recursive_level + 1
+    FROM catalog_sales cs
+    INNER JOIN OrderHierarchy oh ON cs.cs_order_number = oh.cs_order_number AND oh.cs_quantity > oh.cs_quantity
+),
+TotalReturns AS (
+    SELECT 
+        COALESCE(sr_store_sk, cr_store_sk) AS store_sk,
+        SUM(sr_return_quantity) AS total_store_returns,
+        SUM(cr_return_quantity) AS total_catalog_returns
+    FROM store_returns sr
+    FULL OUTER JOIN catalog_returns cr ON sr.sr_item_sk = cr.cr_item_sk
+    GROUP BY sr_store_sk, cr_store_sk WITH ROLLUP
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk, 
+        COUNT(c.c_customer_sk) AS customer_count, 
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_demo_sk
+)
+SELECT 
+    oh.cs_order_number, 
+    oh.cs_ship_date_sk, 
+    SUM(oh.cs_quantity) AS total_quantity,
+    td.store_sk,
+    td.total_store_returns,
+    td.total_catalog_returns,
+    cd.customer_count,
+    cd.avg_purchase_estimate,
+    ROW_NUMBER() OVER (PARTITION BY oh.cs_order_number ORDER BY oh.cs_ship_date_sk DESC) AS row_num,
+    CASE 
+        WHEN cd.avg_purchase_estimate IS NULL THEN 'Not Available'
+        ELSE CASE 
+            WHEN cd.avg_purchase_estimate > 500 THEN 'High Value'
+            WHEN cd.avg_purchase_estimate BETWEEN 200 AND 500 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END
+    END AS customer_value
+FROM OrderHierarchy oh
+JOIN TotalReturns td ON oh.cs_item_sk IN (SELECT sr_item_sk FROM store_returns WHERE sr_store_sk = td.store_sk)
+JOIN CustomerDemographics cd ON cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_customer_sk = oh.cs_order_number)
+WHERE oh.recursive_level <= 5
+GROUP BY oh.cs_order_number, oh.cs_ship_date_sk, td.store_sk, td.total_store_returns, td.total_catalog_returns, cd.customer_count, cd.avg_purchase_estimate
+HAVING SUM(oh.cs_quantity) > 10
+ORDER BY total_quantity DESC;

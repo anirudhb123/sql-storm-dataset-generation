@@ -1,0 +1,65 @@
+WITH UpdatedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        ph.CreationDate AS LastEditDate,
+        ph.UserDisplayName AS LastEditedBy,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS PostType,
+        STRING_AGG(DISTINCT bt.Name, ', ') AS BadgeNames,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 24)  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, ph.CreationDate, ph.UserDisplayName
+),
+PostMetrics AS (
+    SELECT 
+        UP.PostId,
+        UP.Title,
+        UP.LastEditDate,
+        UP.LastEditedBy,
+        UP.PostType,
+        UP.CommentCount,
+        p.ViewCount,
+        p.AnswerCount,
+        p.FavoriteCount,
+        EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - UP.CreationDate)) / 86400 AS DaysSinceCreated 
+    FROM 
+        UpdatedPosts UP
+    JOIN 
+        Posts p ON UP.PostId = p.Id
+)
+SELECT 
+    PM.PostId,
+    PM.Title,
+    PM.LastEditDate,
+    PM.LastEditedBy,
+    PM.PostType,
+    PM.CommentCount,
+    PM.ViewCount,
+    PM.AnswerCount,
+    PM.FavoriteCount,
+    PM.DaysSinceCreated,
+    CASE 
+        WHEN PM.DaysSinceCreated < 30 THEN 'Recent'
+        WHEN PM.DaysSinceCreated BETWEEN 30 AND 90 THEN 'Moderate'
+        ELSE 'Old'
+    END AS PostAgeCategory,
+    ROUND((PM.ViewCount::float / NULLIF(PM.CommentCount, 0))::float, 2) AS ViewPerCommentRatio
+FROM 
+    PostMetrics PM
+ORDER BY 
+    PM.ViewCount DESC, PM.CommentCount DESC;

@@ -1,0 +1,75 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+
+PartAvailability AS (
+    SELECT p.p_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count, 
+           SUM(ps.ps_availqty) AS total_available, 
+           MAX(ps.ps_supplycost) AS max_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+
+TotalOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2024-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+
+SupplierPerformance AS (
+    SELECT sh.s_suppkey, sh.s_name, nh.n_name AS nation_name, 
+           SUM(o.total_spent) AS total_sales
+    FROM SupplierHierarchy sh
+    LEFT JOIN TotalOrders o ON o.o_custkey = sh.s_nationkey -- correlates with nationkey
+    JOIN nation nh ON sh.s_nationkey = nh.n_nationkey
+    GROUP BY sh.s_suppkey, sh.s_name, nh.n_name
+)
+
+SELECT 
+    pa.p_partkey, 
+    COALESCE(sp.total_sales, 0) AS total_sales, 
+    pa.supplier_count, 
+    pa.total_available, 
+    pa.max_cost
+FROM PartAvailability pa
+LEFT JOIN SupplierPerformance sp ON pa.p_partkey = sp.s_suppkey 
+WHERE pa.supplier_count > 1 
+  AND pa.max_cost IS NOT NULL 
+  AND pa.total_available > (SELECT AVG(total_available) FROM PartAvailability) 
+ORDER BY pa.p_partkey DESC, total_sales DESC NULLS LAST
+LIMIT 10;
+
+SELECT DISTINCT p.p_name, r.r_name, COUNT(DISTINCT sp.s_suppkey) AS unique_suppliers
+FROM part p
+CROSS JOIN region r
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier sp ON ps.ps_suppkey = sp.s_suppkey
+WHERE r.r_regionkey IS NOT NULL
+AND (r.r_comment LIKE '%shipping%' OR r.r_name NOT IN (SELECT r_name FROM region WHERE r_regionkey = 0))
+GROUP BY p.p_name, r.r_name;
+
+WITH HighValueAsOf2023 AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate < '2023-12-31'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+)
+
+SELECT *
+FROM HighValueAsOf2023
+WHERE EXISTS (SELECT 1 FROM supplier s WHERE s.s_acctbal IS NOT NULL)
+WITH ROLLUP;

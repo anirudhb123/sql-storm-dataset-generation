@@ -1,0 +1,31 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 1 AS level
+    FROM aka_title AS m
+    WHERE m.id IN (SELECT movie_id FROM cast_info GROUP BY movie_id HAVING COUNT(*) > 1)
+
+    UNION ALL
+
+    SELECT m.id AS movie_id, m.title, m.production_year, mh.level + 1
+    FROM aka_title AS m
+    JOIN movie_link AS ml ON m.id = ml.linked_movie_id
+    JOIN movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year AS release_year,
+    COUNT(DISTINCT c.id) AS role_count,
+    STRING_AGG(DISTINCT r.role, ', ') AS roles,
+    AVG(CASE WHEN mi.info IS NOT NULL THEN LENGTH(mi.info) ELSE 0 END) AS avg_info_length,
+    COUNT(DISTINCT CASE WHEN c.note IS NULL THEN 'NULL_NOTE' ELSE c.note END) AS null_note_count,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY COUNT(DISTINCT c.id) DESC) AS rank
+FROM aka_name AS a
+JOIN cast_info AS c ON a.person_id = c.person_id
+JOIN movie_hierarchy AS m ON c.movie_id = m.movie_id
+LEFT JOIN role_type AS r ON c.role_id = r.id
+LEFT JOIN movie_info AS mi ON m.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Summary' LIMIT 1)
+GROUP BY a.id, a.name, m.movie_id, m.title, m.production_year
+HAVING COUNT(DISTINCT c.id) > 1
+ORDER BY rank, avg_info_length DESC 
+LIMIT 50 OFFSET 0;

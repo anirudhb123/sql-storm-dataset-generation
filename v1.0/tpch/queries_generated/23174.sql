@@ -1,0 +1,72 @@
+WITH RECURSIVE region_stats AS (
+    SELECT
+        r_regionkey,
+        r_name,
+        COUNT(n_nationkey) AS nation_count,
+        SUM(s_acctbal) FILTER (WHERE s_acctbal IS NOT NULL) AS total_account_balance,
+        MAX(s_acctbal) AS max_account_balance
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r_regionkey, r_name
+),
+customer_orders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(O.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+adjusted_line_items AS (
+    SELECT
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        CASE 
+            WHEN l.l_discount > 0 THEN (l.l_extendedprice * (1 - l.l_discount))
+            ELSE l.l_extendedprice
+        END AS adjusted_price
+    FROM lineitem l
+    WHERE l.l_shipdate < CURRENT_DATE AND l.l_returnflag <> 'R'
+),
+final_result AS (
+    SELECT
+        rs.r_name,
+        co.c_name,
+        COALESCE(SUM(al.adjusted_price), 0) AS total_adjusted_sales,
+        COALESCE(AVG(al.l_quantity), 0) AS avg_quantity,
+        COUNT(DISTINCT co.c_custkey) AS unique_customers,
+        SUM(CASE WHEN co.order_count > 0 THEN 1 ELSE 0 END) AS active_customers
+    FROM region_stats rs
+    JOIN customer_orders co ON rs.nation_count > 5
+    LEFT JOIN adjusted_line_items al ON co.c_custkey IN (
+        SELECT DISTINCT o.o_custkey
+        FROM orders o
+        WHERE o.o_orderstatus = 'F' AND o.o_orderdate < CURRENT_DATE
+    )
+    GROUP BY rs.r_name, co.c_name
+)
+SELECT 
+    r.r_name,
+    MAX(f.total_adjusted_sales) AS max_sales,
+    MIN(f.avg_quantity) AS min_quantity,
+    MAX(f.unique_customers) AS max_unique_customers,
+    SUM(f.active_customers) AS total_active_customers
+FROM final_result f
+JOIN region_stats r ON f.r_name = r.r_name
+WHERE r.max_account_balance > (
+    SELECT AVG(s.s_acctbal)
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+)
+GROUP BY r.r_name
+ORDER BY r.r_name DESC
+LIMIT 10;

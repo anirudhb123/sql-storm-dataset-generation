@@ -1,0 +1,47 @@
+
+WITH CustomerPurchaseInfo AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_email_address,
+           cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk,
+           SUM(ws.ws_ext_sales_price) AS total_sales,
+           COUNT(ws.ws_order_number) AS number_of_purchases
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_sold_date_sk >= (
+        SELECT MIN(d_date_sk) 
+        FROM date_dim 
+        WHERE d_year = 2023
+    )
+    AND ws.ws_sold_date_sk <= (
+        SELECT MAX(d_date_sk) 
+        FROM date_dim 
+        WHERE d_year = 2023
+    )
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_email_address,
+             cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+),
+IncomeBandSales AS (
+    SELECT ib.ib_income_band_sk, SUM(cpi.total_sales) AS total_income
+    FROM CustomerPurchaseInfo cpi
+    JOIN household_demographics hd ON cpi.cd_income_band_sk = hd.hd_income_band_sk
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY ib.ib_income_band_sk
+),
+SalesAnalysis AS (
+    SELECT ib.ib_income_band_sk, 
+           ib.ib_lower_bound, 
+           ib.ib_upper_bound,
+           COALESCE(ibs.total_income, 0) AS total_income,
+           ROUND(COALESCE(ibs.total_income, 0) / NULLIF(SUM(ibs.total_income) OVER (), 0), 4) AS income_percentage
+    FROM income_band ib
+    LEFT JOIN IncomeBandSales ibs ON ib.ib_income_band_sk = ibs.ib_income_band_sk
+)
+SELECT 
+    income_band.ib_income_band_sk,
+    income_band.ib_lower_bound,
+    income_band.ib_upper_bound,
+    sales_analysis.total_income,
+    sales_analysis.income_percentage
+FROM income_band
+JOIN SalesAnalysis ON income_band.ib_income_band_sk = SalesAnalysis.ib_income_band_sk
+ORDER BY income_band.ib_income_band_sk;

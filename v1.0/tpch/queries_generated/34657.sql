@@ -1,0 +1,62 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 2
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupply AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS suppliers_count,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > 50
+    GROUP BY p.p_partkey, p.p_name
+),
+RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM orders o
+)
+SELECT 
+    c.c_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+    p.p_name,
+    COALESCE(s.suppliers_count, 0) AS num_suppliers,
+    (SELECT COUNT(DISTINCT n.n_nationkey)
+     FROM nation n
+     WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')) AS asia_nations,
+    CASE 
+        WHEN SUM(o.o_totalprice) > 10000 THEN 'High Value Customer'
+        WHEN SUM(o.o_totalprice) BETWEEN 5000 AND 10000 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_value
+FROM customer c
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN PartSupply p ON l.l_partkey = p.p_partkey
+LEFT JOIN SupplierHierarchy s ON c.c_nationkey = s.s_nationkey
+GROUP BY c.c_name, p.p_name
+HAVING net_revenue > 2000
+ORDER BY net_revenue DESC
+LIMIT 10;
+

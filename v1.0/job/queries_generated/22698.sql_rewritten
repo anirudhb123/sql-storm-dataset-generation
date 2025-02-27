@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title, 
+        t.production_year,
+        mt.kind AS movie_type,
+        1 AS level
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        kind_type mt ON t.kind_id = mt.id
+    WHERE 
+        t.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        t.id, 
+        CONCAT(re.title, ' -> ', t.title) AS title, 
+        t.production_year,
+        mt.kind AS movie_type,
+        level + 1
+    FROM 
+        aka_title t
+    INNER JOIN 
+        movie_link ml ON ml.linked_movie_id = t.id
+    INNER JOIN 
+        MovieHierarchy re ON re.movie_id = ml.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.movie_type,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    CASE 
+        WHEN COUNT(DISTINCT ak.name) > 5 THEN 'Star-studded'
+        ELSE 'Modest Cast'
+    END AS cast_description,
+    DENSE_RANK() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_cast_size,
+    (SELECT 
+        MAX(m.production_year) 
+     FROM 
+        aka_title m 
+     WHERE 
+        m.kind_id = t.kind_id AND m.production_year IS NOT NULL 
+        AND m.production_year < mh.production_year
+    ) AS last_year_released_same_type
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info c ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = c.person_id
+LEFT JOIN 
+    aka_title t ON t.id = mh.movie_id
+WHERE 
+    mh.movie_type IS NOT NULL 
+    AND mh.production_year >= (SELECT 
+                                    MAX(production_year) 
+                                FROM 
+                                    aka_title 
+                                WHERE 
+                                    production_year IS NOT NULL) - 10
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.movie_type
+HAVING 
+    COUNT(DISTINCT ak.name) > 0
+ORDER BY 
+    mh.production_year desc, 
+    total_cast desc;

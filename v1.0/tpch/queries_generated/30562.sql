@@ -1,0 +1,38 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 1 AS level
+    FROM nation n
+    WHERE n.n_regionkey = 1  -- Assuming 1 is a specific region key for the top level
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_available
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    ss.total_available AS supplier_total_available,
+    os.total_orders,
+    os.total_spent,
+    COALESCE(os.total_orders, 0) * 1.0 / NULLIF(s.total_available, 0) AS order_to_supply_ratio
+FROM NationHierarchy n
+LEFT JOIN SupplierStats s ON n.n_nationkey = s.s_suppkey
+LEFT JOIN OrderSummary os ON n.n_nationkey = os.c_custkey
+WHERE 
+    (s.total_available > 100 OR s.total_available IS NULL) 
+    AND (n.n_name LIKE '%land%' OR n.n_name IS NOT NULL)
+ORDER BY 
+    order_to_supply_ratio DESC NULLS LAST;

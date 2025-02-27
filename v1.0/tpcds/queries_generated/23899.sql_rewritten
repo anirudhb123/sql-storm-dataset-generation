@@ -1,0 +1,57 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.web_site_sk, 
+        SUM(ws.ws_quantity) AS total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS rank,
+        DATEADD(day, -1 * d.d_day, cast('2002-10-01' as date)) AS report_date
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = EXTRACT(YEAR FROM cast('2002-10-01' as date)) 
+        AND d.d_moy BETWEEN 1 AND 6
+    GROUP BY ws.web_site_sk, d.d_day
+),
+AddressCTE AS (
+    SELECT 
+        ca.ca_address_sk,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        ca.ca_city,
+        CASE 
+            WHEN ca.ca_state IS NOT NULL THEN ca.ca_state 
+            ELSE 'UNKNOWN' 
+        END AS state_info
+    FROM 
+        customer_address ca
+)
+SELECT 
+    ads.full_address,
+    ads.state_info,
+    COALESCE(s.total_quantity, 0) AS quantity_sold,
+    COUNT(DISTINCT c.c_customer_id) AS unique_customers,
+    MAX(CASE WHEN d.d_weekend = 'Y' THEN s.total_quantity ELSE 0 END) AS weekend_sales,
+    CASE 
+        WHEN COUNT(DISTINCT c.c_customer_id) > 0 THEN 
+            MAX(s.total_quantity) / COUNT(DISTINCT c.c_customer_id)
+        ELSE 0 END AS sales_per_customer
+FROM 
+    customer c
+LEFT JOIN 
+    AddressCTE ads ON c.c_current_addr_sk = ads.ca_address_sk
+LEFT JOIN 
+    SalesCTE s ON c.c_bill_cdemo_sk = s.web_site_sk
+LEFT JOIN 
+    date_dim d ON d.d_date_sk = s.report_date
+WHERE 
+    c.c_preferred_cust_flag = 'Y'
+    AND( 
+        (s.total_quantity IS NOT NULL OR s.total_quantity = 0) 
+        AND (ads.ca_city IS NOT NULL OR ads.ca_city IS NULL)
+    )
+GROUP BY 
+    ads.full_address, ads.state_info
+HAVING 
+    SUM(s.total_quantity) > 0
+ORDER BY 
+    ads.state_info, quantity_sold DESC;

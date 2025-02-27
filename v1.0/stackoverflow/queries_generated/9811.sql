@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.Title,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM p.CreationDate) ORDER BY p.Score DESC, p.ViewCount DESC) AS RankPerYear
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '5 years'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        u.Id
+    HAVING 
+        SUM(p.Score) > 0
+),
+PostStats AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Score,
+        r.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation,
+        COALESCE(ah.AvgScore, 0) AS AvgScore,
+        COALESCE(ac.CommentCount, 0) AS TotalComments
+    FROM 
+        RankedPosts r
+    JOIN 
+        Users u ON r.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            AVG(Score) AS AvgScore
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) ah ON r.PostId = ah.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) ac ON r.PostId = ac.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.OwnerDisplayName,
+    ps.Reputation,
+    ps.AvgScore,
+    ps.TotalComments,
+    tp.TotalPosts AS UserPostCount
+FROM 
+    PostStats ps
+JOIN 
+    TopUsers tp ON ps.OwnerUserId = tp.UserId
+WHERE 
+    ps.RankPerYear <= 5
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

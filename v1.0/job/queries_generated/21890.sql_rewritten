@@ -1,0 +1,57 @@
+WITH RecursiveMovies AS (
+    SELECT 
+        ct.movie_id,
+        ct.person_id,
+        COALESCE(a.name, 'Unknown') AS actor_name,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ct.movie_id ORDER BY ct.nr_order) AS actor_order
+    FROM 
+        cast_info ct
+    LEFT JOIN aka_name a ON ct.person_id = a.person_id
+    LEFT JOIN aka_title t ON ct.movie_id = t.movie_id
+), 
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS all_keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MoviesWithActors AS (
+    SELECT 
+        rm.movie_id,
+        rm.actor_name,
+        rm.title,
+        rm.production_year,
+        rk.all_keywords,
+        NULLIF(rk.all_keywords, '') AS keywords_available
+    FROM 
+        RecursiveMovies rm
+    LEFT JOIN 
+        MovieKeywords rk ON rm.movie_id = rk.movie_id
+)
+SELECT 
+    mwa.movie_id,
+    mwa.title,
+    mwa.production_year,
+    COUNT(mwa.actor_name) AS number_of_actors,
+    COUNT(DISTINCT CASE WHEN mwa.keywords_available IS NOT NULL THEN mwa.actor_name END) AS actors_with_keywords,
+    MAX(mwa.actor_order) AS max_actor_order,
+    MIN(mwa.production_year) AS oldest_movie_year,
+    SUM(CASE WHEN mwa.production_year < 2000 THEN 1 ELSE 0 END) AS pre_2000_count
+FROM 
+    MoviesWithActors mwa
+GROUP BY 
+    mwa.movie_id, mwa.title, mwa.production_year
+HAVING 
+    COUNT(mwa.actor_name) > 1 
+    AND MIN(mwa.production_year) < 2010
+ORDER BY 
+    pre_2000_count DESC,
+    oldest_movie_year ASC
+LIMIT 50;

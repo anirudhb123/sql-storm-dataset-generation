@@ -1,0 +1,73 @@
+WITH TagCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN unnest(string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><')) AS TagNames ON TRUE
+    LEFT JOIN Tags T ON T.TagName = TagNames
+    WHERE U.Reputation > 1000
+    GROUP BY U.Id, U.DisplayName
+),
+
+PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COALESCE(COUNT(DISTINCT C.Id), 0) AS CommentCount,
+        COALESCE(V.UpVotes, 0) AS UpVotes,
+        COALESCE(V.DownVotes, 0) AS DownVotes,
+        PH.UserDisplayName AS LastEditor,
+        PH.CreationDate AS LastEditDate
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN (SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+                      SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+               FROM Votes 
+               GROUP BY PostId) V ON P.Id = V.PostId
+    LEFT JOIN PostHistory PH ON P.LastEditorUserId = PH.UserId
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY P.Id, U.DisplayName, PH.UserDisplayName, PH.CreationDate
+),
+
+BenchmarkingResults AS (
+    SELECT 
+        TC.UserId,
+        TC.DisplayName,
+        TC.TagsUsed,
+        PM.PostId,
+        PM.Title,
+        PM.ViewCount,
+        PM.CommentCount,
+        PM.Score,
+        PM.OwnerDisplayName,
+        PM.LastEditor,
+        PM.LastEditDate
+    FROM TagCounts TC
+    JOIN PostMetrics PM ON TC.UserId = PM.OwnerDisplayName
+    ORDER BY TC.PostCount DESC, PM.ViewCount DESC
+)
+
+SELECT 
+    UserId,
+    DisplayName,
+    TagsUsed,
+    COUNT(PostId) AS TotalPosts,
+    SUM(ViewCount) AS TotalViews,
+    SUM(CommentCount) AS TotalComments,
+    AVG(Score) AS AverageScore,
+    MAX(LastEditDate) AS RecentEditDate
+FROM BenchmarkingResults
+GROUP BY UserId, DisplayName, TagsUsed
+HAVING COUNT(PostId) > 5
+ORDER BY TotalPosts DESC, TotalViews DESC;

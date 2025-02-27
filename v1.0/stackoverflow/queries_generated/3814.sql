@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+),
+FilteredPosts AS (
+    SELECT 
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.Rank,
+        COALESCE(u.DisplayName, 'Anonymous') AS OwnerName
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.Rank <= 10 AND 
+        (rp.Score > 20 OR rp.UpVoteCount > 15)
+),
+PostDetails AS (
+    SELECT 
+        fp.Title,
+        fp.CreationDate,
+        fp.ViewCount,
+        fp.Score,
+        COUNT(c.Id) AS CommentCount,
+        MAX(b.Class) AS HighestBadge
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        Comments c ON fp.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON fp.OwnerName = b.UserId::text
+    GROUP BY 
+        fp.Title, fp.CreationDate, fp.ViewCount, fp.Score
+)
+SELECT 
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.Score,
+    pd.CommentCount,
+    CASE 
+        WHEN pd.HighestBadge IS NULL THEN 'No Badges'
+        WHEN pd.HighestBadge = 1 THEN 'Gold Badge Holder'
+        WHEN pd.HighestBadge = 2 THEN 'Silver Badge Holder'
+        ELSE 'Bronze Badge Holder'
+    END AS BadgeStatus
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.Score DESC, pd.CreationDate DESC;

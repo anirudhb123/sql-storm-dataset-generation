@@ -1,0 +1,62 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        c.nr_order,
+        1 AS level
+    FROM 
+        cast_info c
+    WHERE 
+        c.role_id = (SELECT id FROM role_type WHERE role = 'Lead Actor')  -- Start with Lead Actors
+
+    UNION ALL
+
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        c.nr_order,
+        ah.level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        ActorHierarchy ah ON c.movie_id = ah.movie_id
+    WHERE 
+        c.nr_order > ah.nr_order  -- Find subordinate cast members
+)
+
+, MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        a.person_id,
+        a.level,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY a.nr_order) AS actor_rank
+    FROM 
+        title t
+    INNER JOIN 
+        ActorHierarchy a ON t.id = a.movie_id
+)
+
+SELECT 
+    md.title,
+    md.production_year,
+    COUNT(DISTINCT md.person_id) AS num_actors,
+    STRING_AGG(CASE WHEN md.level = 1 THEN 'Lead' ELSE 'Support' END, ', ') AS actor_types,
+    MAX(md.actor_rank) OVER (PARTITION BY md.title) AS highest_actor_rank
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    aka_title at ON md.title = at.title
+LEFT JOIN 
+    aka_name an ON an.person_id = md.person_id
+WHERE 
+    at.production_year = md.production_year
+    AND (md.num_actors > 3 OR md.production_year > 2000)  -- Filter conditions based on number of actors or production year
+GROUP BY 
+    md.title,
+    md.production_year
+HAVING 
+    COUNT(DISTINCT md.person_id) >= 3  -- Ensure that there are at least 3 distinct actors
+ORDER BY 
+    md.production_year DESC,
+    num_actors DESC;

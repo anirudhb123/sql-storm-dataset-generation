@@ -1,0 +1,44 @@
+WITH SupplierStats AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           SUM(o.o_totalprice) AS total_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' -- 'O' for 'open' orders
+    GROUP BY c.c_custkey, c.c_name
+),
+RankedSuppliers AS (
+    SELECT s.*,
+           RANK() OVER (ORDER BY total_supply_cost DESC) AS supplier_rank
+    FROM SupplierStats s
+),
+RegionalData AS (
+    SELECT n.n_nationkey, 
+           r.r_regionkey, 
+           SUM(o.o_totalprice) AS region_order_total
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey, r.r_regionkey
+)
+SELECT s.s_name, 
+       COALESCE(s.part_count, 0) AS supplier_part_count, 
+       r.r_regionkey, 
+       COALESCE(rd.region_order_total, 0) AS regional_order_total,
+       rs.supplier_rank
+FROM RankedSuppliers rs
+FULL OUTER JOIN RegionalData rd ON 
+    rs.s_suppkey = rd.n_nationkey
+LEFT JOIN supplier s ON s.s_suppkey = rs.s_suppkey
+ORDER BY region_order_total DESC, supplier_rank;

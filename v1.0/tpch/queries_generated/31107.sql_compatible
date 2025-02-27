@@ -1,0 +1,55 @@
+
+WITH RECURSIVE NationSales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+FilteredSales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        ns.total_sales
+    FROM 
+        nation n
+    LEFT JOIN 
+        NationSales ns ON n.n_nationkey = ns.n_nationkey
+    WHERE 
+        ns.sales_rank IS NOT NULL OR ns.total_sales > 10000
+),
+RankedNations AS (
+    SELECT 
+        n.n_name,
+        n.total_sales,
+        RANK() OVER (ORDER BY n.total_sales DESC) AS nation_rank
+    FROM 
+        FilteredSales n
+)
+SELECT
+    r.r_name,
+    COALESCE(rn.n_name, 'Unknown') AS nation_name,
+    COALESCE(rn.total_sales, 0) AS nation_sales,
+    CASE 
+        WHEN rn.total_sales IS NULL THEN 'No sales'
+        WHEN rn.total_sales < 50000 THEN 'Low Sales'
+        ELSE 'High Sales'
+    END AS sales_status
+FROM 
+    region r
+LEFT JOIN 
+    RankedNations rn ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_name = rn.nation_name LIMIT 1);

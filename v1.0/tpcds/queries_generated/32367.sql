@@ -1,0 +1,77 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        s_store_name, 
+        s_city,
+        s_state,
+        1 AS level,
+        SUM(ss_net_profit) AS total_profit
+    FROM 
+        store
+    LEFT JOIN 
+        store_sales ON store.s_store_sk = store_sales.ss_store_sk
+    GROUP BY 
+        s_store_sk, s_store_name, s_city, s_state
+    
+    UNION ALL
+    
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name, 
+        s.s_city,
+        s.s_state,
+        sh.level + 1,
+        SUM(ss_net_profit) AS total_profit
+    FROM 
+        store s
+    JOIN 
+        sales_hierarchy sh ON s.s_store_sk = sh.s_store_sk
+    LEFT JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.s_store_sk, s.s_store_name, s.s_city, s.s_state, sh.level
+)
+
+SELECT 
+    c.c_customer_id,
+    CASE 
+        WHEN cd.cd_gender = 'F' THEN 'Female'
+        WHEN cd.cd_gender = 'M' THEN 'Male'
+        ELSE 'Other' 
+    END AS gender,
+    MAX(ws.ws_net_paid) AS max_spent,
+    MIN(ws.ws_net_paid) AS min_spent,
+    AVG(ws.ws_net_paid) AS avg_spent,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    sh.total_profit,
+    CASE 
+        WHEN sh.total_profit IS NULL THEN 'No Profit'
+        WHEN sh.total_profit > 1000 THEN 'High Profit'
+        ELSE 'Normal Profit' 
+    END AS profit_category
+FROM 
+    customer c
+INNER JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    sales_hierarchy sh ON sh.s_store_sk = c.c_current_addr_sk
+WHERE 
+    cd.cd_marital_status = 'M' 
+    AND cd.cd_credit_rating IS NOT NULL
+    AND c.c_last_review_date_sk > (
+        SELECT 
+            MAX(d_date_sk) 
+        FROM 
+            date_dim 
+        WHERE 
+            d_dow IN (1, 5) 
+            AND d_holiday = 'N'
+    )
+GROUP BY 
+    c.c_customer_id, cd.cd_gender, sh.total_profit
+ORDER BY 
+    avg_spent DESC, total_orders DESC
+LIMIT 10 OFFSET 0;

@@ -1,0 +1,66 @@
+
+WITH RECURSIVE CustomerPaths AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        0 AS path_level
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE ca.ca_state = 'CA'
+    
+    UNION ALL
+    
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        cp.path_level + 1
+    FROM CustomerPaths cp
+    JOIN customer c ON cp.c_customer_sk = c.c_customer_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cp.path_level < 3
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS rank
+    FROM web_sales ws
+    JOIN CustomerPaths cp ON ws.ws_bill_customer_sk = cp.c_customer_sk
+    GROUP BY ws.ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_sales,
+        sd.total_orders
+    FROM SalesData sd
+    WHERE sd.rank <= 5
+),
+SelectedPromotions AS (
+    SELECT 
+        p.p_promo_name,
+        p.p_cost,
+        ti.total_sales
+    FROM promotion p
+    JOIN TopItems ti ON p.p_item_sk = ti.ws_item_sk
+    WHERE p.p_discount_active = 'Y'
+    AND ti.total_sales > 5000
+)
+SELECT 
+    cp.c_first_name,
+    cp.c_last_name,
+    cp.ca_city,
+    SUM(sp.total_sales) AS total_spent,
+    COUNT(DISTINCT sp.p_promo_name) AS promo_count
+FROM CustomerPaths cp
+LEFT JOIN SelectedPromotions sp ON cp.c_customer_sk = sp.c_promo_name
+WHERE cp.path_level = 0 OR cp.ca_city IS NOT NULL
+GROUP BY cp.c_first_name, cp.c_last_name, cp.ca_city
+ORDER BY total_spent DESC;

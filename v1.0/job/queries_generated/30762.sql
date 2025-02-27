@@ -1,0 +1,53 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000  -- Starting point: movies from the year 2000 or later
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.depth + 1 AS depth
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS total_movies,
+    ARRAY_AGG(DISTINCT mh.movie_title) AS linked_movie_titles,
+    AVG(CASE WHEN mi.info_type_id = 1 THEN CAST(mi.info AS FLOAT) END) AS avg_rating,
+    MAX(mh.production_year) AS latest_linked_year,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    cast_info c
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+JOIN 
+    movie_info mi ON c.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON c.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    MovieHierarchy mh ON c.movie_id = mh.movie_id
+WHERE 
+    c.nr_order = 1  -- Main actor only
+GROUP BY 
+    a.name
+HAVING
+    COUNT(DISTINCT c.movie_id) > 5  -- Actors who have worked in more than 5 movies
+ORDER BY 
+    avg_rating DESC
+LIMIT 10;

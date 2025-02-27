@@ -1,0 +1,56 @@
+
+WITH sales_summary AS (
+    SELECT
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM
+        web_sales AS ws
+    JOIN
+        date_dim AS dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY
+        ws.web_site_id
+),
+customer_info AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        hd.hd_income_band_sk,
+        CASE 
+            WHEN hd.hd_income_band_sk IS NULL THEN 'Unknown'
+            ELSE 'Known'
+        END AS income_band_status
+    FROM
+        customer AS c
+    LEFT JOIN
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        household_demographics AS hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+top_sales AS (
+    SELECT
+        ss.web_site_id,
+        ss.total_profit,
+        ss.total_orders,
+        ci.income_band_status,
+        RANK() OVER (PARTITION BY ci.income_band_status ORDER BY ss.total_profit DESC) AS profit_rank
+    FROM
+        sales_summary AS ss
+    JOIN
+        customer_info AS ci ON ss.total_orders > 10
+)
+SELECT
+    t.web_site_id,
+    t.total_profit,
+    t.total_orders,
+    t.income_band_status
+FROM
+    top_sales AS t
+WHERE
+    t.profit_rank <= 5
+ORDER BY
+    t.income_band_status,
+    t.total_profit DESC;
+
+```

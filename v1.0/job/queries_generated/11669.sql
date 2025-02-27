@@ -1,0 +1,33 @@
+-- Performance benchmarking query using multiple joins across different tables.
+SELECT 
+    a.name AS aka_name,
+    t.title AS movie_title,
+    p.name AS person_name,
+    cc.kind AS comp_cast_type,
+    c.name AS company_name,
+    m.info AS movie_info,
+    k.keyword AS movie_keyword
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+JOIN 
+    company_name c ON mc.company_id = c.id
+JOIN 
+    movie_info m ON m.movie_id = t.id
+JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    person_info pi ON a.person_id = pi.person_id
+WHERE 
+    t.production_year >= 2000
+ORDER BY 
+    a.name, t.title;

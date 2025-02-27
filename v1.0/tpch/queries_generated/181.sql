@@ -1,0 +1,61 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+), 
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey, 
+        rs.s_name, 
+        rs.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rn <= 3
+), 
+PartSupplyDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_availqty, 
+        ps.ps_supplycost, 
+        (ps.ps_availqty * ps.ps_supplycost) AS total_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+), 
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    ns.n_name AS nation_name,
+    SUM(pd.total_cost) AS total_costs,
+    COALESCE(SUM(os.total_revenue), 0) AS total_revenues,
+    (SUM(pd.total_cost) - COALESCE(SUM(os.total_revenue), 0)) AS profit_loss
+FROM 
+    nation ns
+LEFT JOIN 
+    TopSuppliers ts ON ts.s_suppkey = ns.n_nationkey
+LEFT JOIN 
+    PartSupplyDetails pd ON pd.p_partkey = (SELECT ps.p_partkey FROM partsupp ps WHERE ps.ps_suppkey = ts.s_suppkey AND ps.ps_availqty > 0 LIMIT 1)
+LEFT JOIN 
+    OrderSummary os ON os.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = ns.n_nationkey) LIMIT 1)
+GROUP BY 
+    ns.n_name
+HAVING 
+    (SUM(pd.total_cost) IS NOT NULL OR SUM(os.total_revenue) IS NOT NULL)
+ORDER BY 
+    nation_name;

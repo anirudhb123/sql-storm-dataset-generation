@@ -1,0 +1,50 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, 0 AS level
+    FROM customer_address
+    WHERE ca_state IS NOT NULL
+    UNION ALL
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, level + 1
+    FROM customer_address ca
+    JOIN address_hierarchy ah ON ca.ca_address_sk = ah.ca_address_sk
+    WHERE ca_state = 'CA'
+), customer_info AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           cd.cd_gender, cd.cd_marital_status,
+           cd.cd_purchase_estimate,
+           RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), item_sales AS (
+    SELECT ws_item_sk, SUM(ws_quantity) AS total_quantity,
+           SUM(ws_net_paid_inc_tax) AS total_sales
+    FROM web_sales
+    GROUP BY ws_item_sk
+), top_items AS (
+    SELECT i.i_item_id, its.total_quantity, its.total_sales
+    FROM item i
+    JOIN item_sales its ON i.i_item_sk = its.ws_item_sk
+    WHERE its.total_sales > (SELECT AVG(total_sales) FROM item_sales)
+), state_summary AS (
+    SELECT ca_state, COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+           SUM(cd.cd_purchase_estimate) AS total_purchase_estimate
+    FROM customer_address ca
+    LEFT JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY ca_state
+    HAVING COUNT(DISTINCT c.c_customer_sk) > 10
+)
+SELECT ah.ca_city, ah.ca_state, ah.ca_country,
+       si.i_item_id, ti.total_quantity, ti.total_sales,
+       cs.customer_count, cs.total_purchase_estimate
+FROM address_hierarchy ah
+FULL OUTER JOIN top_items ti ON ti.total_quantity > 100
+JOIN state_summary cs ON ah.ca_state = cs.ca_state
+WHERE cs.total_purchase_estimate IS NOT NULL
+AND EXISTS (
+    SELECT 1
+    FROM customer_info co
+    WHERE co.rank <= 5
+    AND co.c_customer_sk = cs.customer_count
+)
+ORDER BY ah.ca_city, ti.total_sales DESC;

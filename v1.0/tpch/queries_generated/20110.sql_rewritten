@@ -1,0 +1,75 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_size,
+        CASE 
+            WHEN p.p_size IS NULL THEN 'Unknown'
+            WHEN p.p_size > 10 THEN 'Large'
+            WHEN p.p_size BETWEEN 5 AND 10 THEN 'Medium'
+            ELSE 'Small'
+        END AS size_category
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_container IS NOT NULL)
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, cast('1998-10-01' as date))
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+SupplierStatistics AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    fp.p_name,
+    fp.p_retailprice,
+    fp.size_category,
+    ss.total_avail_qty,
+    ss.avg_supply_cost,
+    rs.s_name AS top_supplier,
+    ro.lineitem_count
+FROM 
+    FilteredParts fp
+JOIN 
+    SupplierStatistics ss ON fp.p_partkey = ss.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON rs.rn = 1 
+LEFT JOIN 
+    RecentOrders ro ON ro.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name LIKE '%Smith%' LIMIT 1)
+WHERE 
+    (ss.total_avail_qty IS NOT NULL AND ss.total_avail_qty > 0)
+    OR (fp.p_retailprice BETWEEN 100 AND 500)
+ORDER BY 
+    fp.p_retailprice DESC,
+    ro.lineitem_count ASC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY P.Id) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY P.Id) AS Downvotes,
+        U.Reputation AS OwnerReputation
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+AggregateData AS (
+    SELECT
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        Score,
+        Rank,
+        Upvotes,
+        Downvotes,
+        OwnerReputation,
+        CASE 
+            WHEN OwnerReputation >= 1000 THEN 'High Reputation'
+            WHEN OwnerReputation BETWEEN 500 AND 999 THEN 'Moderate Reputation'
+            ELSE 'Low Reputation'
+        END AS ReputationCategory
+    FROM RankedPosts
+),
+PostHistoryData AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS HistoryCreationDate,
+        PHT.Name AS PostHistoryType,
+        PH.UserDisplayName AS EditorName,
+        PH.Text AS HistoryText
+    FROM PostHistory PH
+    JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE PH.CreationDate > CURRENT_DATE - INTERVAL '1 month'
+)
+SELECT 
+    AD.PostId,
+    AD.Title,
+    AD.CreationDate,
+    AD.ViewCount,
+    AD.Score,
+    AD.Rank,
+    AD.Upvotes,
+    AD.Downvotes,
+    AD.OwnerReputation,
+    AD.ReputationCategory,
+    COALESCE(HD.EditorName, 'No Edits') AS MostRecentEditor,
+    COALESCE(HD.HistoryCreationDate, 'No Edits') AS LastEditDate,
+    COALESCE(HD.PostHistoryType, 'N/A') AS LastEditType,
+    COALESCE(HD.HistoryText, 'No changes made') AS LastEditComment
+FROM AggregateData AD
+LEFT JOIN PostHistoryData HD ON AD.PostId = HD.PostId
+WHERE AD.Rank <= 3 
+ORDER BY AD.Score DESC, AD.ViewCount DESC
+FETCH FIRST 100 ROWS ONLY;

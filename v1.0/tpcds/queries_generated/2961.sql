@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rank_price,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk) AS total_quantity
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2452001 AND 2452100
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returned
+    FROM 
+        web_returns
+    WHERE 
+        wr_returned_date_sk BETWEEN 2452001 AND 2452100
+    GROUP BY 
+        wr_returning_customer_sk
+),
+ItemReturns AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_cr_returned
+    FROM 
+        catalog_returns
+    WHERE 
+        cr_returned_date_sk BETWEEN 2452001 AND 2452100
+    GROUP BY 
+        cr_item_sk
+),
+AllReturns AS (
+    SELECT 
+        wr.returning_customer_sk AS customer_id,
+        ir.cr_item_sk AS item_id,
+        COALESCE(cr.total_cr_returned, 0) AS catalog_returned,
+        COALESCE(r.total_returned, 0) AS web_returned
+    FROM 
+        (SELECT DISTINCT wr_returning_customer_sk FROM web_returns WHERE wr_returned_date_sk BETWEEN 2452001 AND 2452100) AS wr
+    FULL OUTER JOIN 
+        ItemReturns ir ON wr.returning_customer_sk = ir.cr_returning_customer_sk
+    FULL OUTER JOIN 
+        CustomerReturns r ON wr.returning_customer_sk = r.wr_returning_customer_sk
+)
+SELECT 
+    it.i_item_id,
+    it.i_product_name,
+    COALESCE(ar.catalog_returned, 0) AS total_catalog_returned,
+    COALESCE(ar.web_returned, 0) AS total_web_returned,
+    ((COALESCE(ar.catalog_returned, 0) + COALESCE(ar.web_returned, 0)) / NULLIF(SUM(rs.total_quantity), 0)) * 100 AS return_rate
+FROM 
+    item it
+LEFT JOIN 
+    RankedSales rs ON it.i_item_sk = rs.ws_item_sk
+LEFT JOIN 
+    AllReturns ar ON it.i_item_sk = ar.item_id
+WHERE 
+    rs.rank_price = 1
+GROUP BY 
+    it.i_item_id, it.i_product_name, ar.catalog_returned, ar.web_returned
+ORDER BY 
+    return_rate DESC;

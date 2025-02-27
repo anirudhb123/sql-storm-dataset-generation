@@ -1,0 +1,62 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_name AS nation,
+        s.s_acctbal, 
+        s.s_comment,
+        LENGTH(s.s_name) AS name_length,
+        UPPER(s.s_name) AS upper_name,
+        LOWER(s.s_comment) AS lower_comment
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        LENGTH(p.p_name) AS part_name_length,
+        INITCAP(p.p_comment) AS formatted_comment
+    FROM 
+        part p
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    sd.s_suppkey, 
+    sd.s_name, 
+    pd.p_partkey, 
+    pd.p_name, 
+    os.o_orderkey,
+    os.total_revenue,
+    sd.name_length,
+    pd.part_name_length,
+    sd.upper_name,
+    pd.formatted_comment
+FROM 
+    SupplierDetails sd
+JOIN 
+    partsupp ps ON sd.s_suppkey = ps.ps_suppkey
+JOIN 
+    PartDetails pd ON ps.ps_partkey = pd.p_partkey
+JOIN 
+    OrderSummary os ON os.o_custkey = sd.s_suppkey
+WHERE 
+    sd.s_acctbal > 1000
+ORDER BY 
+    sd.s_name, pd.p_name;

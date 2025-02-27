@@ -1,0 +1,64 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_availqty IS NOT NULL)
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+EligibleCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c1.c_acctbal) FROM customer c1 WHERE c1.c_mktsegment = c.c_mktsegment)
+),
+SalesRanking AS (
+    SELECT 
+        e.c_custkey,
+        SUM(co.total_order_value) AS customer_total_sales,
+        RANK() OVER (ORDER BY SUM(co.total_order_value) DESC) AS sales_rank
+    FROM 
+        EligibleCustomers e
+    LEFT JOIN 
+        CustomerOrders co ON e.c_custkey = co.o_custkey
+    GROUP BY 
+        e.c_custkey
+)
+SELECT 
+    r.p_partkey,
+    r.p_name,
+    COALESCE(e.sales_rank, 0) AS customer_sales_rank,
+    (CASE 
+        WHEN r.rn <= 5 THEN 'Top 5'
+        ELSE 'Other'
+    END) AS part_category
+FROM 
+    RankedParts r
+LEFT JOIN 
+    SalesRanking e ON r.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey IS NOT NULL) ORDER BY ps.ps_supplycost DESC LIMIT 1)
+WHERE 
+    r.p_retailprice > (SELECT AVG(p1.p_retailprice) FROM part p1 WHERE p1.p_container IS NOT NULL)
+ORDER BY 
+    r.p_partkey;

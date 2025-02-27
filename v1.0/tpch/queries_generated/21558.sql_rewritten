@@ -1,0 +1,72 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'F' AND 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT l.l_orderkey) AS order_count,
+        AVG(l.l_extendedprice) AS avg_extended_price
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    r.s_name AS top_supplier,
+    pd.p_name,
+    pd.order_count,
+    pd.avg_extended_price,
+    COALESCE(r.total_supplycost, 0) + COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END), 0) AS adjusted_cost
+FROM 
+    CustomerOrders c
+LEFT JOIN 
+    RankedSuppliers r ON r.s_suppkey = (
+        SELECT s.s_suppkey 
+        FROM partsupp ps 
+        JOIN supplier s ON ps.ps_suppkey = s.s_suppkey 
+        WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM PartDetails p WHERE p.order_count > 0)
+        ORDER BY ps.ps_supplycost DESC 
+        LIMIT 1
+    )
+LEFT JOIN 
+    lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+JOIN 
+    PartDetails pd ON pd.p_partkey = l.l_partkey
+WHERE 
+    pd.order_count IS NOT NULL
+GROUP BY 
+    c.c_custkey, c.c_name, r.s_name, pd.p_name, pd.order_count, pd.avg_extended_price
+HAVING 
+    adjusted_cost > 1000
+ORDER BY 
+    adjusted_cost DESC;

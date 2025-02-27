@@ -1,0 +1,65 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+DetailedPostInfo AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        COALESCE(CR.Name, 'Not Closed') AS CloseReason,
+        PH.CreationDate AS HistoryDate,
+        U.DisplayName AS PostOwner,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (10, 11)  
+    LEFT JOIN CloseReasonTypes CR ON CAST(JSON_VALUE(PH.Comment, '$.CloseReasonId') AS INT) = CR.Id  
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+),
+AggregatedResults AS (
+    SELECT
+        U.DisplayName,
+        UB.BadgeCount,
+        PS.PostCount,
+        PS.TotalViews,
+        PS.AverageScore,
+        COUNT(DISTINCT D.PostId) AS TotalPostsWithReason,
+        SUM(CASE WHEN D.CloseReason IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPosts,
+        MAX(D.LastPostDate) AS LatestPostDate
+    FROM UserBadges UB
+    JOIN PostStats PS ON UB.UserId = PS.OwnerUserId
+    LEFT JOIN DetailedPostInfo D ON UB.UserId = D.PostOwner
+    GROUP BY UB.DisplayName, UB.BadgeCount, PS.PostCount, PS.TotalViews, PS.AverageScore
+)
+SELECT 
+    AR.DisplayName,
+    AR.BadgeCount,
+    AR.PostCount,
+    AR.TotalViews,
+    AR.AverageScore,
+    AR.TotalPostsWithReason,
+    AR.ClosedPosts,
+    COALESCE(EXTRACT(YEAR FROM AR.LatestPostDate), 'No Posts') AS LastPostYear
+FROM AggregatedResults AR
+WHERE AR.PostCount > 0
+ORDER BY AR.TotalViews DESC, AR.AverageScore DESC
+LIMIT 10;

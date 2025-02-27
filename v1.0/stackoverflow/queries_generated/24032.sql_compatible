@@ -1,0 +1,77 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(V.BountyAmount) AS TotalBounties,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS PostsClosed,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 52 THEN 1 ELSE 0 END) AS HotQuestions,
+        AVG(COALESCE(P.ViewCount, 0)) AS AvgViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        U.Id,
+        U.DisplayName,
+        U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        TotalBounties,
+        PostsClosed,
+        HotQuestions,
+        AvgViews,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, PostCount DESC) AS UserRank
+    FROM 
+        UserActivity
+), 
+MonthlyStats AS (
+    SELECT 
+        EXTRACT(YEAR FROM CreationDate) AS Year,
+        EXTRACT(MONTH FROM CreationDate) AS Month,
+        COUNT(*) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.PostId END) AS ClosedPosts
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        EXTRACT(YEAR FROM CreationDate), 
+        EXTRACT(MONTH FROM CreationDate)
+)
+
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.PostCount,
+    TU.TotalBounties,
+    TU.PostsClosed,
+    TU.HotQuestions,
+    TU.AvgViews,
+    MS.Year,
+    MS.Month,
+    MS.TotalPosts,
+    MS.ClosedPosts
+FROM 
+    TopUsers TU
+CROSS JOIN 
+    MonthlyStats MS
+WHERE 
+    TU.UserRank <= 10
+AND 
+    (TU.Reputation > 1000 OR TU.PostCount > 50)
+ORDER BY 
+    MS.Year DESC, 
+    MS.Month DESC, 
+    TU.Reputation DESC;

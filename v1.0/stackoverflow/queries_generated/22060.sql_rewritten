@@ -1,0 +1,92 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE 
+            WHEN P.PostTypeId = 1 AND P.AcceptedAnswerId IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS QuestionsWithAcceptedAnswers,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        ROW_NUMBER() OVER (ORDER BY SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) DESC) AS ActivityRank
+    FROM Users AS U
+    LEFT JOIN Posts AS P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes AS V ON P.Id = V.PostId
+    LEFT JOIN Comments AS C ON P.Id = C.PostId
+    LEFT JOIN Badges AS B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.TotalUpVotes,
+        UA.TotalPosts,
+        UA.QuestionsWithAcceptedAnswers,
+        UA.TotalComments,
+        UA.TotalBadges,
+        CASE 
+            WHEN UA.ActivityRank <= 10 THEN 'Top Contributor'
+            ELSE 'Regular Contributor' 
+        END AS ContributorType
+    FROM UserActivity AS UA
+    WHERE UA.TotalPosts > 0 
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        CASE 
+            WHEN P.ClosedDate IS NOT NULL THEN 'Closed' 
+            ELSE 'Open' 
+        END AS PostStatus,
+        P.Tags
+    FROM Posts AS P
+    LEFT JOIN Comments AS C ON P.Id = C.PostId
+    LEFT JOIN Votes AS V ON P.Id = V.PostId
+    WHERE P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title, P.CreationDate, P.Score, P.ClosedDate, P.Tags
+),
+FinalReport AS (
+    SELECT 
+        TU.DisplayName,
+        TU.TotalUpVotes,
+        TU.TotalPosts,
+        PA.PostId,
+        PA.Title,
+        PA.CreationDate,
+        PA.Score,
+        PA.CommentCount,
+        PA.UpVoteCount,
+        PA.DownVoteCount,
+        PA.PostStatus,
+        PA.Tags,
+        NTILE(5) OVER (ORDER BY PA.Score DESC) AS ScorePercentile
+    FROM TopUsers AS TU
+    INNER JOIN PostAnalytics AS PA ON TU.UserId = PA.OwnerUserId
+    ORDER BY TU.TotalUpVotes DESC
+)
+SELECT 
+    FR.DisplayName,
+    FR.TotalUpVotes,
+    FR.TotalPosts,
+    FR.PostId,
+    FR.Title,
+    EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - FR.CreationDate)) / 86400 AS DaysSinceCreation,
+    FR.Score,
+    FR.CommentCount,
+    FR.UpVoteCount,
+    FR.DownVoteCount,
+    FR.PostStatus,
+    FR.Tags,
+    FR.ScorePercentile
+FROM FinalReport AS FR
+WHERE FR.Score < 10 OR FR.PostStatus = 'Closed'
+ORDER BY FR.DaysSinceCreation DESC, FR.UpVoteCount DESC;

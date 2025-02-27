@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::integer AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 
+    
+    UNION ALL
+    
+    SELECT 
+        m.id, 
+        m.title, 
+        m.production_year, 
+        mh.movie_id
+    FROM 
+        aka_title m 
+    INNER JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+)
+
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    STRING_AGG(DISTINCT cn.name, ', ') AS production_companies,
+    STRING_AGG(DISTINCT ak.name, ', ') AS cast_members,
+    COUNT(DISTINCT mc.id) AS total_movie_companies,
+    AVG(CASE 
+            WHEN info.note IS NULL THEN 0 
+            ELSE LENGTH(info.note) 
+        END) AS avg_note_length
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    info_type info ON mi.info_type_id = info.id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+ORDER BY 
+    mh.production_year DESC,
+    mh.title;

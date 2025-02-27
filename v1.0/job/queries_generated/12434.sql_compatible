@@ -1,0 +1,35 @@
+
+SELECT 
+    t.title AS movie_title,
+    ak.name AS actor_name,
+    ckt.kind AS role_kind,
+    m.production_year,
+    m.info AS movie_info,
+    k.keyword AS movie_keyword
+FROM
+    title t
+JOIN
+    aka_title ak_t ON t.id = ak_t.movie_id
+JOIN
+    cast_info c ON ak_t.id = c.movie_id
+JOIN
+    aka_name ak ON c.person_id = ak.person_id
+JOIN
+    role_type ckt ON c.role_id = ckt.id
+JOIN
+    movie_info m ON t.id = m.movie_id
+JOIN
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN
+    keyword k ON mk.keyword_id = k.id
+WHERE
+    m.info_type_id = (SELECT id FROM info_type WHERE info = 'summary')
+GROUP BY
+    t.title,
+    ak.name,
+    ckt.kind,
+    m.production_year,
+    m.info,
+    k.keyword
+ORDER BY
+    m.production_year DESC, t.title;

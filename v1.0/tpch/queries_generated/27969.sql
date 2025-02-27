@@ -1,0 +1,31 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent, c.c_nationkey
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+PopularParts AS (
+    SELECT p.p_partkey, p.p_name, COUNT(l.l_orderkey) AS order_count, 
+           SUM(l.l_extendedprice) AS total_revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT r.r_name, rs.s_name, cp.c_name, pp.p_name, pp.order_count, pp.total_revenue, 
+       co.order_count AS customer_order_count, co.total_spent
+FROM RankedSuppliers rs
+JOIN nation r ON rs.s_nationkey = r.n_nationkey
+JOIN CustomerOrders co ON rs.s_nationkey = co.c_nationkey
+JOIN PopularParts pp ON pp.order_count = (
+       SELECT MAX(order_count) 
+       FROM PopularParts 
+       WHERE p.p_partkey = pp.p_partkey
+       )
+WHERE rs.rank <= 3
+ORDER BY r.r_name, rs.s_name, pp.total_revenue DESC;

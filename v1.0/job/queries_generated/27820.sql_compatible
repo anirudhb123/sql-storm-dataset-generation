@@ -1,0 +1,58 @@
+
+WITH ActorMovies AS (
+    SELECT
+        c.person_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movies
+    FROM
+        cast_info c
+    JOIN
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN
+        title t ON c.movie_id = t.id
+    WHERE
+        ak.name IS NOT NULL
+    GROUP BY
+        c.person_id, ak.name
+),
+KeywordMovies AS (
+    SELECT
+        m.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    JOIN
+        title m ON mk.movie_id = m.id
+    GROUP BY
+        m.movie_id
+),
+MoviesInfo AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(kw.keywords, 'No keywords') AS keywords,
+        COALESCE(am.movie_count, 0) AS actor_count
+    FROM
+        title m
+    LEFT JOIN
+        KeywordMovies kw ON m.id = kw.movie_id
+    LEFT JOIN
+        ActorMovies am ON m.id IN (SELECT movie_id FROM cast_info WHERE person_id IN (SELECT person_id FROM aka_name))
+)
+SELECT
+    mi.title,
+    mi.production_year,
+    mi.keywords,
+    mi.actor_count
+FROM
+    MoviesInfo mi
+WHERE
+    mi.production_year BETWEEN 2000 AND 2020
+ORDER BY
+    mi.actor_count DESC,
+    mi.production_year DESC
+LIMIT 50;

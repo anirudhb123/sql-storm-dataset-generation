@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ViewCount, 
+        p.CreationDate, 
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankViewCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostComments AS (
+    SELECT 
+        c.PostId, 
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    COALESCE(pc.CommentCount, 0) AS CommentCount,
+    COALESCE(phd.LastEditDate, 'No Edits') AS LastEditDate,
+    COALESCE(phd.EditCount, 0) AS EditCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteStats ps ON rp.PostId = ps.PostId
+LEFT JOIN 
+    PostComments pc ON rp.PostId = pc.PostId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE 
+    rp.RankViewCount <= 10
+ORDER BY 
+    rp.ViewCount DESC;

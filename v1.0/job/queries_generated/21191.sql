@@ -1,0 +1,63 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        COALESCE(ka.name, 'Unknown') AS actor_name,
+        0 AS level
+    FROM aka_title m
+    LEFT JOIN cast_info c ON m.id = c.movie_id
+    LEFT JOIN aka_name ka ON c.person_id = ka.person_id
+
+    UNION ALL
+
+    SELECT
+        m.id,
+        m.title,
+        COALESCE(ka.name, 'Unknown') AS actor_name,
+        mh.level + 1
+    FROM movie_hierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+    LEFT JOIN cast_info c ON m.id = c.movie_id
+    LEFT JOIN aka_name ka ON c.person_id = ka.person_id
+),
+ranked_movies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.actor_name,
+        ROW_NUMBER() OVER (PARTITION BY mh.actor_name ORDER BY mh.level DESC) AS actor_rank,
+        COUNT(*) OVER (PARTITION BY mh.movie_id) AS total_actors
+    FROM movie_hierarchy mh
+),
+filter_movies AS (
+    SELECT
+        r.movie_id,
+        r.title,
+        r.actor_name,
+        r.actor_rank,
+        r.total_actors
+    FROM ranked_movies r
+    WHERE r.actor_rank = 1 
+        AND r.total_actors >= 5
+)
+SELECT
+    f.movie_id,
+    f.title,
+    f.actor_name,
+    f.total_actors,
+    COALESCE(mi.info, 'No additional info') AS movie_info,
+    COALESCE(cn.name, 'No company info') AS company_name
+FROM filter_movies f
+LEFT JOIN movie_info mi ON f.movie_id = mi.movie_id AND mi.info_type_id IN (
+    SELECT id FROM info_type WHERE info = 'summary' OR info LIKE '%award%'
+)
+LEFT JOIN (
+    SELECT mc.movie_id, GROUP_CONCAT(cn.name SEPARATOR ', ') AS name
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    WHERE mc.note IS NULL OR mc.note != 'uncredited'
+    GROUP BY mc.movie_id
+) cn ON f.movie_id = cn.movie_id
+ORDER BY f.total_actors DESC, f.title;
+

@@ -1,0 +1,74 @@
+
+WITH RECURSIVE supplier_performance AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS latest_order
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+not_showing_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        CASE 
+            WHEN MAX(o.o_totalprice) IS NULL THEN 'No Orders'
+            ELSE 'Has Orders'
+        END AS order_status
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+lineitem_summary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS returns
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+    HAVING SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) > 0
+),
+nation_supplier AS (
+    SELECT 
+        n.n_name,
+        COUNT(s.s_suppkey) AS supplier_count,
+        AVG(s.s_acctbal) AS avg_account_balance
+    FROM nation n
+    FULL OUTER JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+SELECT 
+    ns.n_name,
+    ns.supplier_count,
+    ns.avg_account_balance,
+    cp.c_custkey,
+    cp.o_orderkey,
+    CASE 
+        WHEN sp.total_supply_value IS NULL THEN 0
+        ELSE sp.total_supply_value 
+    END AS supplier_value,
+    COALESCE(lq.net_value, 0) AS lineitem_value,
+    CASE 
+        WHEN np.order_status = 'No Orders' THEN 'New Customer'
+        ELSE 'Existing Customer'
+    END AS customer_status
+FROM nation_supplier ns
+LEFT JOIN customer_orders cp ON ns.supplier_count > 0
+LEFT JOIN supplier_performance sp ON cp.latest_order = 1 AND ns.supplier_count > 1
+LEFT JOIN lineitem_summary lq ON cp.o_orderkey = lq.l_orderkey
+LEFT JOIN not_showing_orders np ON cp.c_custkey = np.c_custkey
+WHERE ns.avg_account_balance IS NOT NULL
+ORDER BY ns.n_name, supplier_value DESC NULLS LAST;

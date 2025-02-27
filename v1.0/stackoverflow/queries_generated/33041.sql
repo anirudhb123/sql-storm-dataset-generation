@@ -1,0 +1,56 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT p.Id, p.Title, p.ParentId, r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT u.Id AS UserId, u.DisplayName, u.Reputation,
+           ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank,
+           COUNT(b.Id) AS BadgeCount,
+           SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+           SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+           SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostVoteCounts AS (
+    SELECT PostId,
+           COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+           COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+ClosedPosts AS (
+    SELECT ph.PostId, MIN(ph.CreationDate) AS ClosedDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+)
+SELECT p.Id AS PostId, 
+       p.Title AS PostTitle,
+       COALESCE(pv.UpVotes, 0) AS TotalUpVotes,
+       COALESCE(pv.DownVotes, 0) AS TotalDownVotes,
+       COALESCE(c.ClosedDate, NULL) AS PostClosedDate,
+       rp.Level AS PostLevel,
+       u.DisplayName AS UserDisplayName,
+       u.Reputation AS UserReputation,
+       u.BadgeCount,
+       u.GoldBadges,
+       u.SilverBadges,
+       u.BronzeBadges
+FROM Posts p
+LEFT JOIN PostVoteCounts pv ON p.Id = pv.PostId
+LEFT JOIN ClosedPosts c ON p.Id = c.PostId
+LEFT JOIN RecursivePostHierarchy rp ON p.Id = rp.Id
+INNER JOIN UserReputation u ON p.OwnerUserId = u.UserId
+WHERE 
+    (p.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 YEAR' OR rp.Level > 1)
+    AND (u.Reputation > 100 OR u.BadgeCount > 0)
+ORDER BY u.Reputation DESC, TotalUpVotes DESC;

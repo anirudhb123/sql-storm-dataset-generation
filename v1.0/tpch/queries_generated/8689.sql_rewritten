@@ -1,0 +1,70 @@
+WITH SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+), 
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderstatus
+), 
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(co.total_spent) AS total_ordered
+    FROM 
+        CustomerOrderDetails co
+    JOIN 
+        customer c ON co.c_custkey = c.c_custkey
+    WHERE 
+        co.o_orderstatus = 'O' 
+    GROUP BY 
+        c.c_custkey, c.c_name
+    ORDER BY 
+        total_ordered DESC
+    LIMIT 5
+) 
+SELECT 
+    sp.s_name AS supplier_name,
+    p.p_name AS part_name,
+    sp.ps_supplycost AS supplier_cost,
+    sp.ps_availqty AS available_quantity,
+    tc.c_name AS top_customer_name,
+    tc.total_ordered AS total_spent_by_customer
+FROM 
+    SupplierPartDetails sp
+JOIN 
+    TopCustomers tc ON sp.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = sp.p_partkey 
+        ORDER BY ps.ps_supplycost ASC 
+        LIMIT 1
+    )
+WHERE 
+    sp.rn = 1
+ORDER BY 
+    total_spent DESC, supplier_cost ASC;

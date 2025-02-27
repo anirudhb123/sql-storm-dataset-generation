@@ -1,0 +1,80 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.PostTypeId,
+        CAST(NULL AS int) AS ParentId, 
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        a.Id,
+        a.Title,
+        a.CreationDate,
+        a.Score,
+        a.ViewCount,
+        a.OwnerUserId,
+        a.PostTypeId,
+        p.Id AS ParentId, 
+        r.Level + 1
+    FROM 
+        RecursivePosts r
+    JOIN 
+        Posts a ON a.ParentId = r.Id
+)
+, VotesInfo AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+, LatestComments AS (
+    SELECT 
+        c.PostId,
+        c.Text,
+        c.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY c.PostId ORDER BY c.CreationDate DESC) AS rn
+    FROM 
+        Comments c
+)
+SELECT 
+    rp.Id AS PostID,
+    rp.Title,
+    rp.CreationDate AS PostDate,
+    rp.Score AS PostScore,
+    rp.ViewCount AS Views,
+    vi.UpVotes,
+    vi.DownVotes,
+    CASE 
+        WHEN rp.PostTypeId = 1 THEN (SELECT COUNT(*) FROM Posts WHERE ParentId = rp.Id) 
+        ELSE 0 
+    END AS AnswerCount,
+    COALESCE(lc.Text, 'No comments yet.') AS LatestComment,
+    lc.CreationDate AS LatestCommentDate,
+    rp.Level
+FROM 
+    RecursivePosts rp
+LEFT JOIN 
+    VotesInfo vi ON rp.Id = vi.PostId
+LEFT JOIN 
+    LatestComments lc ON rp.Id = lc.PostId AND lc.rn = 1
+WHERE 
+    rp.Score >= 10
+ORDER BY 
+    rp.CreationDate DESC
+WITH TIES
+OFFSET 0 ROWS
+FETCH NEXT 10 ROWS ONLY;

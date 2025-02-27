@@ -1,0 +1,66 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.movie_title,
+    mt.production_year,
+    cnt_roles.role_count,
+    mp.company_name,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    movie_hierarchy mt ON ci.movie_id = mt.movie_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mt.movie_id
+LEFT JOIN 
+    company_name mp ON mc.company_id = mp.id
+LEFT JOIN 
+    movie_keyword mk ON mt.movie_id = mk.movie_id
+LEFT JOIN (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.role_id) AS role_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+) cnt_roles ON cnt_roles.movie_id = mt.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND mt.production_year BETWEEN 2000 AND 2023
+    AND mp.country_code IS NOT NULL
+GROUP BY 
+    ak.name, mt.movie_title, mt.production_year, cnt_roles.role_count, mp.company_name
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 5
+ORDER BY 
+    mt.production_year DESC, cnt_roles.role_count DESC
+LIMIT 100;

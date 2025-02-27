@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) as RN
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+PartCosts AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerSegmentation AS (
+    SELECT 
+        c.c_custkey,
+        c.c_mktsegment,
+        CASE 
+            WHEN c.c_acctbal > 5000 THEN 'High Value'
+            ELSE 'Low Value'
+        END AS ValueSegment
+    FROM customer c
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_totalprice, 
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as OrderRank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_retailprice, 
+    COALESCE(SUM(l.l_quantity), 0) AS TotalQuantity,
+    COALESCE(AVG(l.l_extendedprice), 0) AS AvgExtendedPrice,
+    COUNT(DISTINCT o.o_orderkey) AS OrderCount,
+    COUNT(DISTINCT cs.c_custkey) AS CustomerCount,
+    RANK() OVER (ORDER BY COALESCE(SUM(l.l_quantity), 0) DESC) AS PartRank
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN FilteredOrders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN CustomerSegmentation cs ON o.o_custkey = cs.c_custkey
+LEFT JOIN RankedSuppliers rs ON cs.c_custkey = rs.s_suppkey
+LEFT JOIN PartCosts pc ON p.p_partkey = pc.ps_partkey
+WHERE p.p_size > 10 
+  AND (p.p_comment LIKE '%special%' OR NULLIF(p.p_container, '') IS NULL)
+GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+HAVING COUNT(DISTINCT o.o_orderkey) > 5 
+ORDER BY PartRank, TotalQuantity DESC;

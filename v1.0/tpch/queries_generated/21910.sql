@@ -1,0 +1,64 @@
+WITH RecursiveSales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1995-01-01' AND '1996-12-31'
+    GROUP BY 
+        c.c_custkey, c.c_nationkey
+), 
+HighValueCust AS (
+    SELECT 
+        r.r_name, 
+        ns.n_name, 
+        c.c_name, 
+        rs.sales_rank, 
+        rs.total_sales
+    FROM 
+        RecursiveSales rs
+    JOIN 
+        nation ns ON ns.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = rs.c_custkey)
+    LEFT JOIN 
+        region r ON r.r_regionkey = ns.n_regionkey
+    WHERE 
+        rs.total_sales > (SELECT AVG(total_sales) FROM RecursiveSales WHERE sales_rank <= 5)
+)
+SELECT 
+    hvc.r_name,
+    hvc.ns.n_name, 
+    hvc.c_name,
+    COALESCE(NULLIF(hvc.total_sales, 0), 'N/A') AS effective_sales,
+    CASE 
+        WHEN hvc.sales_rank <= 5 THEN 'Top Tier'
+        ELSE 'Lower Tier'
+    END AS tier_status
+FROM 
+    HighValueCust hvc
+ORDER BY 
+    hvc.r_name, hvc.total_sales DESC
+UNION ALL 
+SELECT 
+    'Total' AS r_name, 
+    'All Nations' AS n_name, 
+    COUNT(DISTINCT c.c_custkey) AS c_name, 
+    SUM(total_sales) AS effective_sales, 
+    NULL AS tier_status
+FROM 
+    RecursiveSales rs
+LEFT JOIN 
+    customer c ON rs.c_custkey = c.c_custkey
+WHERE 
+    rs.sales_rank IS NULL
+GROUP BY 
+    'Total'
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 0
+ORDER BY 
+    r_name;

@@ -1,0 +1,76 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -12, GETDATE()) 
+        AND o.o_totalprice IS NOT NULL
+),
+supp_summary AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    INNER JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+    GROUP BY 
+        ps.ps_partkey
+),
+top_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS supplier_rank
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31' 
+        AND l.l_discount IS NOT NULL
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(ss.total_supply_cost, 0) AS total_supply_cost,
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.o_totalprice
+FROM 
+    part p
+LEFT JOIN 
+    supp_summary ss ON p.p_partkey = ss.ps_partkey
+LEFT JOIN 
+    ranked_orders ro ON ro.o_orderkey IN (
+        SELECT top 5 o_orderkey 
+        FROM orders 
+        WHERE o_orderstatus = 'O' 
+        ORDER BY o_totalprice DESC
+    )
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM nation n 
+        WHERE n.n_nationkey = (
+            SELECT s.s_nationkey 
+            FROM supplier s 
+            WHERE s.s_suppkey = ss.ps_suppkey
+        )
+    )
+    AND (p.p_retailprice - COALESCE(ss.total_supply_cost, 0)) >= 0
+ORDER BY 
+    p.p_partkey DESC, 
+    ro.o_orderdate ASC NULLS LAST
+LIMIT 50 OFFSET 2;

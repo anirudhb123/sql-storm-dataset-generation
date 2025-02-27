@@ -1,0 +1,84 @@
+
+WITH RecursivePostTree AS (
+    SELECT 
+        Id,
+        ParentId,
+        0 AS Depth
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        pt.Depth + 1
+    FROM Posts p
+    JOIN RecursivePostTree pt ON p.ParentId = pt.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        u.Reputation,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON c.UserId = u.Id
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(AVG(v.VoteTypeId), 0) AS AverageVote,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT pv.UserId) AS UniqueViewers,
+        p.OwnerUserId
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2  
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN UserActivity ua ON p.OwnerUserId = ua.UserId
+    LEFT JOIN Votes pv ON p.Id = pv.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount, p.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS CloseCount,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10  
+    GROUP BY ph.PostId
+),
+FinalReport AS (
+    SELECT 
+        ps.PostId, 
+        ps.Title,
+        ps.CreationDate,
+        ps.ViewCount,
+        ps.AverageVote,
+        ps.CommentCount,
+        COALESCE(cp.CloseCount, 0) AS CloseCount,
+        cp.LastClosedDate,
+        ua.DisplayName AS Author,
+        ua.Reputation AS AuthorReputation,
+        ua.TotalViews AS AuthorTotalViews,
+        ua.TotalPosts AS AuthorTotalPosts,
+        ua.TotalComments AS AuthorTotalComments,
+        ps.OwnerUserId
+    FROM PostStats ps
+    LEFT JOIN ClosedPosts cp ON ps.PostId = cp.PostId
+    LEFT JOIN UserActivity ua ON ps.OwnerUserId = ua.UserId
+)
+SELECT 
+    *,
+    RANK() OVER (PARTITION BY Author ORDER BY ViewCount DESC) AS AuthorRank,
+    ROW_NUMBER() OVER (ORDER BY ViewCount DESC, CloseCount DESC) AS GlobalRank
+FROM FinalReport
+WHERE CloseCount = 0 
+AND ViewCount > 10 
+ORDER BY GlobalRank
+LIMIT 50;

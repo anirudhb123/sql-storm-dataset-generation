@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS ScoreRank,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(V.Id) AS VoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, U.DisplayName, P.Title, P.CreationDate, P.Score
+),
+FilteredPosts AS (
+    SELECT 
+        RP.*,
+        COALESCE(PH.Comment, 'No recent edits') AS RecentEditComment,
+        PH.CreationDate AS RecentEditDate
+    FROM 
+        RankedPosts RP
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            Comment, 
+            CreationDate 
+        FROM 
+            PostHistory
+        WHERE 
+            PostHistoryTypeId IN (4, 5, 6) 
+            AND CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '7 days'
+    ) PH ON RP.PostId = PH.PostId
+    WHERE 
+        RP.ScoreRank <= 5
+)
+SELECT 
+    FP.*,
+    CASE 
+        WHEN FP.RecentEditComment IS NOT NULL THEN 'Edited Recently' 
+        ELSE 'No Edits in Last 7 Days' 
+    END AS EditStatus,
+    SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    STRING_AGG(T.TagName, ', ') AS Tags
+FROM 
+    FilteredPosts FP
+LEFT JOIN 
+    Votes V ON FP.PostId = V.PostId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            DISTINCT UNNEST(string_to_array(FP.Tags, '><')) AS TagName
+    ) T ON TRUE
+GROUP BY 
+    FP.PostId, FP.Title, FP.CreationDate, FP.Score, FP.EditStatus, FP.RecentEditComment, FP.RecentEditDate
+ORDER BY 
+    FP.Score DESC;

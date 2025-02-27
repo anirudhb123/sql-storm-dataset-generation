@@ -1,0 +1,89 @@
+WITH RecursiveTopPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        P.AnswerCount,
+        P.ViewCount,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    INNER JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 AND P.Score > 0
+),
+PostComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(*) AS CommentCount
+    FROM 
+        Comments C
+    GROUP BY 
+        C.PostId
+),
+PostTags AS (
+    SELECT 
+        P.Id AS PostId,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    OUTER JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(P.Tags, 2, LENGTH(P.Tags)-2), '><')) AS T(TagName) ON TRUE
+    GROUP BY 
+        P.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastEditedDate,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 12 THEN 1 END) AS DeleteCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    R.Title,
+    R.Score,
+    R.ViewCount,
+    R.CreationDate,
+    R.OwnerDisplayName,
+    COALESCE(C.CommentCount, 0) AS TotalComments,
+    COALESCE(T.Tags, 'No Tags') AS Tags,
+    COALESCE(H.LastEditedDate, 'Never') AS LastEdited,
+    H.CloseCount,
+    H.DeleteCount
+FROM 
+    RecursiveTopPosts R
+LEFT JOIN 
+    PostComments C ON R.Id = C.PostId
+LEFT JOIN 
+    PostTags T ON R.Id = T.PostId
+LEFT JOIN 
+    PostHistoryDetails H ON R.Id = H.PostId
+WHERE 
+    R.Rank <= 5
+ORDER BY 
+    R.Score DESC,
+    R.CreationDate DESC;
+
+This query does several things:
+1. **CTEs**:
+   - `RecursiveTopPosts`: Finds the top questions by score and ranks them per user.
+   - `PostComments`: Counts the comments per post.
+   - `PostTags`: Aggregates tags into a single string per post.
+   - `PostHistoryDetails`: Gathers information on the latest edit dates and number of close/delete actions.
+
+2. **Joins**: Combines the results from the CTEs with the main query.
+
+3. **Window Function**: To rank posts by score for each user.
+
+4. **String Aggregation**: Compiles tags into a single string for readability.
+
+5. **NULL Handling**: Uses `COALESCE` to handle posts that don't have comments or tags.
+
+6. **Sorting and Filtering**: Only selects the top 5 ranked questions and orders them by score and creation date.

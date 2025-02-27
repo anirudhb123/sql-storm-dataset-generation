@@ -1,0 +1,68 @@
+
+WITH SalesData AS (
+    SELECT
+        cs.cs_item_sk,
+        SUM(cs.cs_ext_sales_price) AS total_sales,
+        SUM(cs.cs_net_profit) AS total_profit,
+        COUNT(cs.cs_order_number) AS order_count,
+        i.i_brand
+    FROM
+        catalog_sales cs
+    JOIN
+        item i ON cs.cs_item_sk = i.i_item_sk
+    WHERE
+        cs.cs_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY
+        cs.cs_item_sk, i.i_brand
+),
+TopBrands AS (
+    SELECT
+        sd.i_brand,
+        RANK() OVER (ORDER BY AVG(sd.total_sales) DESC) AS brand_rank
+    FROM
+        SalesData sd
+    GROUP BY
+        sd.i_brand
+    HAVING
+        COUNT(*) > 10
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(sd.total_sales) AS total_sales_per_demographic
+    FROM
+        SalesData sd
+    JOIN
+        customer c ON sd.cs_item_sk = c.c_customer_sk
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE
+        cd.cd_gender IN ('M', 'F')
+    GROUP BY
+        cd.cd_gender, cd.cd_marital_status
+),
+FinalReport AS (
+    SELECT
+        tb.i_brand,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.total_sales_per_demographic,
+        tb.brand_rank
+    FROM
+        TopBrands tb
+    JOIN
+        CustomerDemographics cd ON tb.i_brand = cd.cd_brand -- Fixed join condition
+)
+SELECT
+    fr.i_brand,
+    fr.cd_gender,
+    fr.cd_marital_status,
+    fr.total_sales_per_demographic,
+    fr.brand_rank
+FROM
+    FinalReport fr
+WHERE
+    fr.brand_rank <= 5
+ORDER BY
+    fr.brand_rank, fr.total_sales_per_demographic DESC;

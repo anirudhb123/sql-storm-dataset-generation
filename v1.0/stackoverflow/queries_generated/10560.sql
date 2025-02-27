@@ -1,0 +1,42 @@
+-- Performance Benchmarking Query
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        AVG(P.Score) AS AveragePostScore,
+        AVG(CAST(DATEDIFF(second, P.CreationDate, P.LastActivityDate) AS float)) AS AvgPostActivityTime
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalComments,
+        TotalUpvotes,
+        TotalDownvotes,
+        AveragePostScore,
+        AvgPostActivityTime,
+        ROW_NUMBER() OVER (ORDER BY TotalPosts DESC) AS Rank
+    FROM UserActivity
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalComments,
+    TotalUpvotes,
+    TotalDownvotes,
+    AveragePostScore,
+    AvgPostActivityTime
+FROM TopUsers
+WHERE Rank <= 10
+ORDER BY Rank;

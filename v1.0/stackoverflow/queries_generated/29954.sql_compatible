@@ -1,0 +1,70 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName, 
+        COUNT(p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    GROUP BY 
+        t.TagName
+),
+UserActivity AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        COUNT(DISTINCT a.Id) AS AnswersProvided,
+        SUM(COALESCE(v.Score, 0)) AS TotalVoteScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id AND p.PostTypeId = 1
+    LEFT JOIN 
+        Posts a ON a.OwnerUserId = u.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(DISTINCT ph.Id) AS RevisionCount,
+        MAX(ph.CreationDate) AS LastEdited,
+        STRING_AGG(ph.UserDisplayName, ', ') AS Editors
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.CommentCount,
+    ts.TotalViews,
+    ts.AverageScore,
+    ua.DisplayName AS UserName,
+    ua.QuestionsAsked,
+    ua.AnswersProvided,
+    ua.TotalVoteScore,
+    COALESCE(phs.RevisionCount, 0) AS RevisionCount,
+    phs.LastEdited,
+    phs.Editors
+FROM 
+    TagStatistics ts
+JOIN 
+    UserActivity ua ON ts.PostCount > 0 /* Filter to only those tags having posts */
+LEFT JOIN 
+    PostHistorySummary phs ON phs.PostId IN (
+        SELECT p.Id FROM Posts p WHERE p.Tags LIKE '%' || ts.TagName || '%'
+    )
+ORDER BY 
+    ts.TotalViews DESC, ua.TotalVoteScore DESC
+FETCH FIRST 100 ROWS ONLY;

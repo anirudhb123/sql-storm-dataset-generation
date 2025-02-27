@@ -1,0 +1,41 @@
+WITH CustomerOrderSummary AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS total_orders,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierPartAvailability AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_availqty) AS total_available,
+           MAX(s.s_acctbal) AS max_account_balance
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+HighValueCustomer AS (
+    SELECT * FROM CustomerOrderSummary WHERE total_spent > (SELECT AVG(total_spent) FROM CustomerOrderSummary)
+),
+LineItemDiscounts AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_discounted_price,
+           COUNT(*) AS total_line_items
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT n.n_name,
+       COUNT(DISTINCT c.c_custkey) AS number_of_customers,
+       SUM(COALESCE(l.total_discounted_price, 0)) AS total_discounted_revenue,
+       SUM(COALESCE(s.total_available, 0)) AS total_part_availability
+FROM nation n
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN HighValueCustomer hv ON hv.c_custkey = c.c_custkey
+LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN LineItemDiscounts l ON l.l_orderkey = o.o_orderkey
+LEFT JOIN SupplierPartAvailability s ON s.ps_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = n.n_nationkey))
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name
+ORDER BY number_of_customers DESC, total_part_availability DESC;

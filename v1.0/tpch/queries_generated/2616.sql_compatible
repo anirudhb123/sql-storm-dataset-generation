@@ -1,0 +1,72 @@
+
+WITH CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+TopNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        ROW_NUMBER() OVER (ORDER BY SUM(s.s_acctbal) DESC) AS rank
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    c.c_name,
+    p.p_name,
+    COALESCE(co.total_spent, 0) AS total_spent,
+    COALESCE(p_sd.total_quantity, 0) AS total_quantity,
+    p_sd.avg_supply_cost,
+    tn.n_name AS top_nation
+FROM 
+    part p
+LEFT JOIN 
+    PartSupplierDetails p_sd ON p.p_partkey = p_sd.ps_partkey
+LEFT JOIN 
+    CustomerOrderSummary co ON p.p_partkey = (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_suppkey IN (
+            SELECT l.l_suppkey 
+            FROM lineitem l 
+            WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+        ) 
+        LIMIT 1
+    )
+LEFT JOIN 
+    TopNations tn ON tn.n_nationkey = (
+        SELECT c.c_nationkey 
+        FROM customer c 
+        WHERE c.c_custkey = co.c_custkey
+    )
+WHERE 
+    p.p_size > 10 AND 
+    p.p_retailprice IS NOT NULL
+ORDER BY 
+    total_spent DESC, total_quantity ASC;

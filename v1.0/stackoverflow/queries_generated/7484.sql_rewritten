@@ -1,0 +1,60 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.ViewCount,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND P.Score > 10
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.CreationDate, P.ViewCount
+    ORDER BY 
+        P.Score DESC 
+    LIMIT 10
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostsCreated,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    RU.DisplayName AS TopUser,
+    RU.Reputation,
+    PP.Title AS PopularPost,
+    PP.Score AS PostScore,
+    PPS.PostsCreated,
+    PPS.TotalScore
+FROM 
+    RankedUsers RU
+JOIN 
+    PopularPosts PP ON RU.UserId = PP.OwnerUserId
+JOIN 
+    UserPostStats PPS ON RU.UserId = PPS.UserId
+ORDER BY 
+    RU.UserRank, PP.Score DESC;

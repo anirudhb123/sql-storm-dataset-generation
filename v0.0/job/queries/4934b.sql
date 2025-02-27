@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND n.md5sum IN ('3a69b48d56c4c8b2d936461b4639359c', '440dbe96b554a6fa08495eb4cd2fc017', '4d95528969cc3ce5dd8bc9bc7613d1b9', '6e2b6cf37a9e85df45fcf518059abef0', '76c8951ee2f344be9021a738773a55f7', '8d6a96018cb79f56e644d99168e11743', '9edab48fccc5fe5fce68a8f2a579a3a8', 'ac43454cf1d80f77126e05f197fef15e', 'c58cd57893125e75b647280e8f5902d3', 'f6ed34d6a17431bd1bfa3776265597f8') AND t.phonetic_code IS NOT NULL AND t.title < 'The Long Journey Home';

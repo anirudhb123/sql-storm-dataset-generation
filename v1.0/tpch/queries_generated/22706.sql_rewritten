@@ -1,0 +1,54 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        DENSE_RANK() OVER (PARTITION BY o.custkey ORDER BY o.o_orderdate DESC) AS order_rank,
+        (
+            SELECT COUNT(*) 
+            FROM orders o2 
+            WHERE o2.o_custkey = o.o_custkey 
+              AND o2.o_orderstatus = 'F' 
+              AND DATEDIFF(day, o2.o_orderdate, o.o_orderdate) <= 365
+        ) AS repeat_order_count
+    FROM 
+        orders o
+)
+SELECT 
+    r.r_name AS region, 
+    n.n_name AS nation, 
+    p.p_name AS part_name, 
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    MAX(o.o_totalprice) AS max_order_value
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey AND l.l_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    RankedOrders ro ON c.c_custkey = ro.o_custkey AND ro.order_rank = 1
+WHERE 
+    l.l_shipdate >= '1997-01-01' 
+    AND l.l_shipdate < cast('1998-10-01' as date) 
+    AND (p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) OR p.p_comment IS NULL)
+GROUP BY 
+    r.r_name, n.n_name, p.p_name
+HAVING 
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) < 0.5 * SUM(l.l_quantity)
+ORDER BY 
+    total_quantity DESC NULLS LAST
+OFFSET 10 ROWS
+FETCH NEXT 20 ROWS ONLY;

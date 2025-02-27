@@ -1,0 +1,22 @@
+SELECT 
+    ak.name AS aka_name, 
+    ta.title AS title, 
+    p.name AS person_name, 
+    r.role AS role, 
+    ta.production_year AS year
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    title ta ON ci.movie_id = ta.id
+JOIN 
+    role_type r ON ci.role_id = r.id
+JOIN 
+    person_info pi ON ak.person_id = pi.person_id
+WHERE 
+    ta.production_year >= 2000
+AND 
+    ta.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+ORDER BY 
+    ta.production_year DESC, ak.name;

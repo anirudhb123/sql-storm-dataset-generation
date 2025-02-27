@@ -1,0 +1,77 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_nationkey,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT 
+        p.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_nationkey,
+        sh.level + 1
+    FROM 
+        partsupp p
+    JOIN 
+        supplier s ON p.ps_suppkey = s.s_suppkey
+    JOIN 
+        supplier_hierarchy sh ON p.ps_partkey = sh.s_suppkey
+    WHERE 
+        s.s_acctbal > 5000
+),
+
+customer_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+
+lineitem_stats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(*) OVER (PARTITION BY l.l_orderkey) AS line_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate < DATE '1998-10-01' - INTERVAL '30 days'
+    GROUP BY 
+        l.l_orderkey
+)
+
+SELECT 
+    cs.c_name,
+    cs.order_count,
+    cs.total_spent,
+    COALESCE(ls.total_revenue, 0) AS last_30_days_revenue,
+    sh.level AS supplier_level,
+    sh.s_name AS supplier_name
+FROM 
+    customer_summary cs
+LEFT JOIN 
+    lineitem_stats ls ON cs.c_custkey = ls.l_orderkey
+LEFT JOIN 
+    supplier_hierarchy sh ON cs.c_nationkey = sh.s_nationkey
+WHERE 
+    cs.order_count > 5
+ORDER BY 
+    cs.total_spent DESC, 
+    last_30_days_revenue DESC;

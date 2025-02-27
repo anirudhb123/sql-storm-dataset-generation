@@ -1,0 +1,65 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(COALESCE(V.VoteTypeId = 2, 0)) AS TotalUpVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Score,
+        P.AnswerCount,
+        P.ViewCount,
+        ROW_NUMBER() OVER(PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+RecentUserPosts AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS RecentPostsCount,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        PostStats P
+    WHERE 
+        P.RecentPostRank <= 5
+    GROUP BY 
+        P.OwnerUserId
+)
+SELECT 
+    U.DisplayName,
+    UA.TotalPosts,
+    UA.TotalComments,
+    UA.TotalUpVotes,
+    COALESCE(RUP.RecentPostsCount, 0) AS RecentPostsCount,
+    COALESCE(RUP.AverageScore, 0) AS AverageScore,
+    CASE 
+        WHEN UA.TotalPosts > 0 THEN (UA.TotalUpVotes::FLOAT / UA.TotalPosts) * 100 
+        ELSE 0 
+    END AS UpVotePercentage,
+    CASE 
+        WHEN UA.TotalComments > 0 THEN ROUND((UA.TotalUpVotes::FLOAT / UA.TotalComments), 2) 
+        ELSE 0 
+    END AS UpVotePerCommentRatio
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    RecentUserPosts RUP ON RUP.OwnerUserId = UA.UserId
+ORDER BY 
+    UpVotePercentage DESC NULLS LAST
+LIMIT 10;

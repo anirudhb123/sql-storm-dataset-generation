@@ -1,0 +1,73 @@
+WITH RecursiveMovieLinks AS (
+    SELECT 
+        ml.movie_id, 
+        ml.linked_movie_id,
+        1 AS depth
+    FROM 
+        movie_link ml
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'similar')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.movie_id, 
+        ml.linked_movie_id,
+        depth + 1
+    FROM 
+        movie_link ml
+    INNER JOIN 
+        RecursiveMovieLinks rml ON ml.movie_id = rml.linked_movie_id
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'similar')
+)
+
+SELECT 
+    t.title, 
+    t.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    AVG(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE NULL END) AS avg_roles,
+    STRING_AGG(DISTINCT ak.name, ', ') FILTER (WHERE ak.name IS NOT NULL) AS actor_names,
+    CASE WHEN COUNT(mk.keyword_id) > 0 THEN 'Has Keywords' ELSE 'No Keywords' END AS keyword_status,
+    COUNT(mmk.movie_id) AS similar_movies_count
+FROM 
+    title t
+LEFT JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    aka_title ak_t ON t.id = ak_t.movie_id
+LEFT JOIN 
+    aka_name ak ON ak_t.id = ak.id
+LEFT JOIN 
+    RecursiveMovieLinks rml ON rml.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mmk ON mmk.movie_id = rml.linked_movie_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    t.id, t.title, t.production_year
+ORDER BY 
+    keyword_status DESC, company_count DESC, avg_roles DESC
+LIMIT 50;
+
+-- Additional complexity with NULL checking and a correlated subquery
+SELECT 
+    t.title, 
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = t.id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Description') 
+           AND mi.note IS NULL) AS null_description_count
+FROM 
+    title t
+WHERE 
+    EXISTS (SELECT 1 FROM movie_info mi WHERE mi.movie_id = t.id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office'))
+    AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'Drama%')
+ORDER BY 
+    null_description_count DESC
+LIMIT 10;

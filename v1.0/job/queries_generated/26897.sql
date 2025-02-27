@@ -1,0 +1,44 @@
+WITH movie_title_info AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title,
+        m.production_year,
+        k.keyword,
+        a.name AS actor_name,
+        p.gender,
+        COALESCE(g.kind, 'Unknown') AS genre,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY m.production_year DESC) AS row_num
+    FROM title m
+    JOIN aka_title a ON m.id = a.movie_id
+    JOIN movie_keyword mk ON m.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN kind_type g ON m.kind_id = g.id
+    JOIN cast_info c ON m.id = c.movie_id
+    JOIN name p ON c.person_id = p.id
+    WHERE m.production_year >= 2000
+    AND a.kind_id IN (SELECT id FROM comp_cast_type WHERE kind LIKE 'actor%')
+),
+filtered_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        STRING_AGG(DISTINCT keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT actor_name, ', ') AS actors,
+        COUNT(DISTINCT actor_name) AS actor_count,
+        gender
+    FROM movie_title_info
+    WHERE row_num <= 5
+    GROUP BY movie_id, title, production_year, gender
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    keywords,
+    actors,
+    actor_count,
+    gender
+FROM filtered_movies
+ORDER BY production_year DESC, actor_count DESC
+LIMIT 50;

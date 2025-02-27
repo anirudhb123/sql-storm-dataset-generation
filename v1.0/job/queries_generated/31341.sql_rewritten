@@ -1,0 +1,68 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = 1 
+
+    UNION ALL
+
+    SELECT 
+        mv.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link mv
+    JOIN 
+        aka_title m ON mv.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON mv.movie_id = mh.movie_id
+),
+movie_cast AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        r.role AS role,
+        ci.nr_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+),
+movie_info_agg AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(mi.info, ', ') AS aggregated_info
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT mc.actor_name) AS actor_count,
+    MAX(mc.nr_order) AS max_role_order,
+    COALESCE(mia.aggregated_info, 'No additional info') AS info,
+    CASE 
+        WHEN mh.level > 0 THEN 'Sequel/Related Movie'
+        ELSE 'Original Movie'
+    END AS movie_type
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_cast mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_info_agg mia ON mh.movie_id = mia.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level
+ORDER BY 
+    mh.production_year DESC, actor_count DESC;

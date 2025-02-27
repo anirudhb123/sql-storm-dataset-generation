@@ -1,0 +1,59 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'F' AND 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+TopSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost) AS total_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_supplycost) > 10000
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(l.l_discount) AS avg_discount,
+    MAX(o.o_totalprice) AS max_order_value,
+    COALESCE((
+        SELECT 
+            COUNT(*)
+        FROM 
+            TopSuppliers ts
+        LEFT JOIN 
+            supplier s ON ts.ps_suppkey = s.s_suppkey
+        WHERE 
+            s.s_nationkey = n.n_nationkey
+    ), 0) AS total_suppliers
+FROM 
+    nation n
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+WHERE 
+    l.l_shipdate >= DATE '1997-01-01'
+GROUP BY 
+    n.n_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

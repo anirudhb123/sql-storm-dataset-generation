@@ -1,0 +1,87 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT
+        ak.id AS actor_id,
+        ak.name AS actor_name,
+        0 AS level
+    FROM
+        aka_name ak
+    WHERE
+        ak.name IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT
+        ak.id AS actor_id,
+        CONCAT(ah.actor_name, ' -> ', ak.name) AS actor_name,
+        ah.level + 1
+    FROM
+        aka_name ak
+    JOIN
+        cast_info c ON ak.person_id = c.person_id
+    JOIN
+        actor_hierarchy ah ON c.movie_id = (SELECT movie_id FROM cast_info WHERE person_id = ah.actor_id LIMIT 1)
+    WHERE
+        ak.name IS NOT NULL AND ah.level < 3
+),
+
+-- Identify movies with high cast counts
+movie_cast_count AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast
+    FROM
+        cast_info c
+    GROUP BY
+        c.movie_id
+    HAVING
+        COUNT(DISTINCT c.person_id) > 5
+),
+
+-- Get titles from those movies with some conditional filtering
+movie_titles AS (
+    SELECT DISTINCT
+        m.title,
+        m.production_year
+    FROM
+        aka_title m
+    JOIN
+        movie_cast_count cc ON m.movie_id = cc.movie_id
+    WHERE
+        m.production_year >= 2000 AND m.production_year < 2023
+)
+
+-- Final selection of movies, actors and roles
+SELECT
+    mt.title,
+    mt.production_year,
+    ah.actor_name,
+    CASE
+        WHEN r.role IS NOT NULL THEN r.role
+        ELSE 'Unknown Role' 
+    END AS role,
+    COALESCE(mk.keyword, 'No Keyword') AS keyword,
+    CASE 
+        WHEN c.note IS NOT NULL THEN c.note 
+        ELSE 'No Note' 
+    END AS note_text
+FROM
+    movie_titles mt
+LEFT JOIN
+    cast_info c ON mt.movie_id = c.movie_id
+LEFT JOIN
+    aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN
+    role_type r ON c.role_id = r.id
+LEFT JOIN
+    movie_keyword mk ON mt.movie_id = mk.movie_id
+WHERE
+    ak.name IS NOT NULL 
+    AND (mt.production_year IS NULL OR mt.production_year BETWEEN 2000 AND 2022)
+    AND ak.name NOT LIKE '%(voice)%'
+ORDER BY
+    mt.production_year DESC,
+    mt.title ASC,
+    ah.actor_name
+LIMIT 50;
+
+-- Utilizing string concatenation and handling NULLs for readable output.

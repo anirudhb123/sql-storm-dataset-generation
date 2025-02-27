@@ -1,0 +1,100 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(NULLIF(p.AcceptedAnswerId, -1), p.Id) AS EffectiveAcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '5 years'
+    GROUP BY 
+        p.Id
+),
+UserReputationAndBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        AVG(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(b.Class) AS TotalBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+QuestionStatistics AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.ViewCount,
+        ud.Reputation,
+        ud.BadgeCount,
+        ud.GoldBadges,
+        ROW_NUMBER() OVER (PARTITION BY pd.ViewCount ORDER BY pd.ViewCount DESC) AS RankByViews,
+        
+        (SELECT COUNT(*) FROM Comments WHERE PostId = pd.PostId) AS TotalComments
+    FROM 
+        PostDetails pd
+    JOIN 
+        UserReputationAndBadges ud ON pd.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ud.UserId)
+    WHERE 
+        pd.EffectiveAcceptedAnswerId IS NOT NULL
+),
+ClosedPostAnalytics AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        COUNT(ph.Id) AS ChangeCount 
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+),
+FinalStatistics AS (
+    SELECT 
+        qs.PostId,
+        qs.Title,
+        qs.ViewCount,
+        qs.Reputation,
+        qs.BadgeCount,
+        qs.GoldBadges,
+        COALESCE(ca.ChangeCount, 0) AS ClosureChanges,
+        qs.TotalComments,
+        CASE 
+            WHEN qs.RankByViews <= 5 THEN 'Top 5'
+            ELSE 'Other'
+        END AS ViewRankCategory
+    FROM 
+        QuestionStatistics qs
+    LEFT JOIN 
+        ClosedPostAnalytics ca ON qs.PostId = ca.PostId
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN ClosureChanges > 0 THEN 'Closed Post'
+        ELSE 'Active Post'
+    END AS PostStatus,
+    COUNT(*) OVER () AS TotalRows
+FROM 
+    FinalStatistics
+WHERE 
+    Reputation > (SELECT AVG(Reputation) FROM Users)
+ORDER BY 
+    ViewCount DESC, 
+    TotalComments DESC
+LIMIT 100;

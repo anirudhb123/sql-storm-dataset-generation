@@ -1,0 +1,81 @@
+WITH RECURSIVE SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-10-01' AND l.l_shipdate < DATE '1997-11-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_sales
+    FROM 
+        SupplierSales ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+    WHERE 
+        ss.sales_rank <= 10
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus <> 'C' OR o.o_orderstatus IS NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RegionSummary AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        COUNT(DISTINCT c.c_custkey) AS num_customers,
+        SUM(co.total_spent) AS total_revenue
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        CustomerOrders co ON c.c_custkey = co.c_custkey
+    GROUP BY 
+        n.n_regionkey, r.r_name
+)
+SELECT 
+    r.r_name,
+    rs.total_revenue,
+    COALESCE(SUM(ts.total_sales), 0) AS supplier_sales
+FROM 
+    RegionSummary rs
+LEFT JOIN 
+    TopSuppliers ts ON rs.r_name IN (
+        SELECT DISTINCT p.p_brand 
+        FROM part p 
+        WHERE p.p_mfgr = 'Brand#12' 
+        AND p.p_type LIKE '%metal%'
+    )
+GROUP BY 
+    r.r_name, rs.total_revenue
+ORDER BY 
+    rs.total_revenue DESC;

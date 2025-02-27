@@ -1,0 +1,62 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS TotalAcceptedAnswers
+    FROM Tags t
+    LEFT JOIN Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY t.TagName
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        SUM(v.VoteTypeId = 2) AS UpVotesReceived
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+ClosedPostReasons AS (
+    SELECT 
+        ph.UserId,
+        COUNT(DISTINCT ph.PostId) AS ClosedPostCount,
+        MIN(ph.CreationDate) AS FirstCloseDate,
+        MAX(ph.CreationDate) AS LastCloseDate,
+        STRING_AGG(DISTINCT crt.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE ph.PostHistoryTypeId = 10 -- Close action
+    GROUP BY ph.UserId
+)
+SELECT 
+    ts.TagName,
+    ts.TotalPosts,
+    ts.TotalQuestions,
+    ts.TotalAnswers,
+    ts.TotalAcceptedAnswers,
+    ua.DisplayName AS UserName,
+    ua.PostsCreated,
+    ua.CommentsMade,
+    ua.UpVotesReceived,
+    cpr.ClosedPostCount,
+    cpr.FirstCloseDate,
+    cpr.LastCloseDate,
+    cpr.CloseReasons
+FROM 
+    TagStatistics ts
+JOIN 
+    UserActivity ua ON ua.PostsCreated > 0
+LEFT JOIN 
+    ClosedPostReasons cpr ON ua.UserId = cpr.UserId
+WHERE 
+    ts.TotalPosts > 10 -- Only consider tags with more than 10 posts
+ORDER BY 
+    ts.TotalQuestions DESC, 
+    ua.UpVotesReceived DESC
+LIMIT 50;

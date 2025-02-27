@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS year_count
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+PopularActors AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(ci.nr_order) AS avg_order
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY ak.person_id, ak.name
+    HAVING COUNT(DISTINCT ci.movie_id) > 5 
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY mc.movie_id
+),
+MoviesWithCompanies AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        cs.company_count,
+        cs.company_names,
+        RANK() OVER (ORDER BY rm.production_year DESC, cs.company_count DESC) AS rank
+    FROM RankedMovies rm
+    LEFT JOIN CompanyStats cs ON rm.title_id = cs.movie_id
+),
+TopActors AS (
+    SELECT 
+        pa.person_id,
+        pa.name,
+        pa.movie_count,
+        pa.avg_order,
+        RANK() OVER (ORDER BY pa.movie_count DESC, pa.avg_order ASC) AS rank
+    FROM PopularActors pa
+)
+SELECT 
+    mwc.title,
+    mwc.production_year,
+    mwc.company_count,
+    COALESCE(ta.name, 'No Actor Found') AS leading_actor,
+    COALESCE(ta.movie_count, 0) AS actor_movie_count
+FROM MoviesWithCompanies mwc
+LEFT JOIN TopActors ta ON mwc.title_id = (
+    SELECT ci.movie_id 
+    FROM cast_info ci 
+    WHERE ci.movie_id = mwc.title_id 
+    ORDER BY ci.nr_order ASC 
+    LIMIT 1
+)
+WHERE mwc.rank <= 10 
+ORDER BY mwc.production_year DESC, mwc.company_count DESC, mwc.title;

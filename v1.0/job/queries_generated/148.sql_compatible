@@ -1,0 +1,55 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    GROUP BY 
+        a.title, a.production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.company_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.year_rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        pi.info AS person_info,
+        COALESCE(CONCAT(cn.name, ' (', c.kind, ')'), 'Unknown') AS cast_name
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        complete_cast cc ON tm.title = (SELECT t.title FROM title t WHERE t.id = cc.movie_id)
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = cc.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN 
+        comp_cast_type c ON ci.person_role_id = c.id
+    LEFT JOIN 
+        person_info pi ON an.person_id = pi.person_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.person_info,
+    COUNT(DISTINCT md.cast_name) AS distinct_cast_count
+FROM 
+    MovieDetails md
+GROUP BY 
+    md.title, md.production_year, md.person_info
+ORDER BY 
+    md.production_year DESC, distinct_cast_count DESC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

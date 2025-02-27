@@ -1,0 +1,77 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.partkey) AS parts_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(*) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 1000
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TotalLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_item_value
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    co.total_spent,
+    ss.parts_count,
+    ss.total_supply_cost,
+    ro.o_orderdate,
+    ro.o_totalprice,
+    COALESCE(tli.total_line_item_value, 0) AS total_line_item_value,
+    CASE 
+        WHEN ro.o_orderstatus = 'F' THEN 'Finalized'
+        WHEN ro.o_orderstatus = 'P' THEN 'Pending'
+        ELSE 'Unknown'
+    END AS order_status_description
+FROM 
+    CustomerOrders co
+JOIN 
+    SupplierSummary ss ON co.order_count > 2
+LEFT JOIN 
+    RankedOrders ro ON co.total_spent > 5000
+LEFT JOIN 
+    TotalLineItems tli ON ro.o_orderkey = tli.l_orderkey
+WHERE 
+    ss.parts_count > 5
+ORDER BY 
+    co.total_spent DESC, ss.total_supply_cost ASC
+FETCH FIRST 100 ROWS ONLY;

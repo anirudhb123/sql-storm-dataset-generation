@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, 
+           (SELECT COUNT(*) FROM partsupp ps 
+            WHERE ps.ps_suppkey = s.s_suppkey) AS TotalParts
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, 
+           (SELECT COUNT(*) FROM partsupp ps 
+            WHERE ps.ps_suppkey = s.s_suppkey) AS TotalParts
+    FROM supplier s
+    JOIN SupplierCTE cte ON s.s_suppkey < cte.s_suppkey
+    WHERE s.s_acctbal < (SELECT MIN(s2.s_acctbal) 
+                          FROM supplier s2 
+                          WHERE s2.s_nationkey = (SELECT n.n_nationkey 
+                                                   FROM nation n 
+                                                   WHERE n.n_name = 'GERMANY'))
+), 
+CustomerRank AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS TotalSpent,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS Rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+PartStats AS (
+    SELECT p.p_partkey, p.p_type, AVG(ps.ps_supplycost) AS AvgSupplyCost, 
+           COUNT(DISTINCT ps.ps_suppkey) AS UniqueSuppliers
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_type
+),
+FinalMetrics AS (
+    SELECT c.c_custkey, c.c_name, 
+           COALESCE(MAX(pr.TotalSpent), 0) AS MaxSpent, 
+           SUM(ps.UniqueSuppliers) OVER (PARTITION BY ps.p_type) AS TotalUniqueSuppliers
+    FROM CustomerRank pr
+    FULL OUTER JOIN PartStats ps ON pr.Rank <= 3
+    LEFT JOIN supplier s ON pr.c_custkey = s.s_nationkey
+    WHERE s.s_comment IS NOT NULL OR pr.TotalSpent IS NULL
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT CASE WHEN fm.MaxSpent > 5000 THEN fm.c_custkey END) AS HighSpendingCustomers,
+       SUM(fm.TotalUniqueSuppliers) AS OverallUniqueSuppliers
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN CustomerRank cr ON n.n_nationkey = cr.c_nationkey
+LEFT JOIN FinalMetrics fm ON cr.c_custkey = fm.c_custkey
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT cr.c_custkey) > 10
+ORDER BY r.r_name DESC;

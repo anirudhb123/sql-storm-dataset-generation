@@ -1,0 +1,71 @@
+WITH RecursiveActorRoles AS (
+    SELECT
+        ca.id AS cast_info_id,
+        ca.movie_id,
+        ak.name AS actor_name,
+        r.role AS character_name,
+        ROW_NUMBER() OVER (PARTITION BY ca.movie_id ORDER BY ca.nr_order) AS role_order
+    FROM
+        cast_info ca
+    JOIN
+        aka_name ak ON ca.person_id = ak.person_id
+    JOIN
+        role_type r ON ca.role_id = r.id
+    WHERE
+        ak.name IS NOT NULL
+), 
+MovieDetails AS (
+    SELECT
+        mt.title AS movie_title,
+        mt.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS all_actors,
+        COUNT(DISTINCT ak.id) AS num_actors
+    FROM
+        aka_title mt
+    LEFT JOIN
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE
+        mt.production_year >= 2000
+    GROUP BY
+        mt.id
+), 
+HighRatedMovies AS (
+    SELECT 
+        m.movie_title,
+        m.production_year,
+        m.all_actors,
+        m.num_actors,
+        AVG(i.info::numeric) AS avg_rating
+    FROM 
+        MovieDetails m
+    JOIN 
+        movie_info i ON m.movie_title = i.info
+    WHERE 
+        i.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    GROUP BY 
+        m.movie_title, m.production_year, m.all_actors, m.num_actors
+    HAVING
+        AVG(i.info::numeric) > 8.0
+)
+SELECT
+    h.movie_title,
+    h.production_year,
+    h.all_actors,
+    h.num_actors,
+    COALESCE(ROW_NUMBER() OVER (ORDER BY h.avg_rating DESC), 0) AS popularity_rank,
+    CASE 
+        WHEN h.production_year IN (SELECT DISTINCT production_year FROM HighRatedMovies WHERE num_actors > 5) THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS popularity_category,
+    -- Note the use of NULL logic, coalescing NULL actor names if none are present
+    COALESCE(h.all_actors, 'No actors listed') AS actor_list
+FROM 
+    HighRatedMovies h
+LEFT JOIN 
+    complete_cast cc ON h.movie_title = (SELECT title FROM movie_info_idx WHERE movie_id = cc.movie_id LIMIT 1)
+ORDER BY 
+    h.avg_rating DESC, h.movie_title;
+
+-- The above query may perform better with appropriate indexes on the movie_titles and related foreign keys

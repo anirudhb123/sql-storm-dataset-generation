@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'GERMANY')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+), 
+RankedLineItems AS (
+    SELECT l.*, 
+           ROW_NUMBER() OVER (PARTITION BY l_orderkey ORDER BY l_extendedprice DESC) AS item_rank,
+           SUM(l_extendedprice) OVER (PARTITION BY l_orderkey) AS total_order_price
+    FROM lineitem l
+    WHERE l_shipdate >= DATE '2023-01-01'
+), 
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, 
+           COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+), 
+PartsWithComments AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, 
+           COALESCE(NULLIF(p.p_comment, ''), 'No Comment') AS p_comment
+    FROM part p
+)
+SELECT c.c_name, 
+       COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name, 
+       p.p_name, 
+       rli.item_rank, 
+       rli.total_order_price, 
+       ch.total_orders,
+       ch.total_spent
+FROM CustomerOrderSummary ch
+JOIN RankedLineItems rli ON ch.total_orders > 0
+LEFT JOIN SupplierHierarchy sh ON sh.level < 3
+LEFT JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+LEFT JOIN PartsWithComments p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE ch.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderSummary)
+ORDER BY ch.total_spent DESC, rli.item_rank ASC
+LIMIT 100;

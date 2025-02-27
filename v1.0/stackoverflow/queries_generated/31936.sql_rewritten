@@ -1,0 +1,53 @@
+WITH RecursivePostHistory AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        CAST(NULL AS varchar(8000)) AS ParentTitle,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        ph.Title AS ParentTitle,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHistory ph ON p.ParentId = ph.PostId
+)
+SELECT 
+    u.DisplayName AS UserName,
+    COUNT(DISTINCT p.Id) AS QuestionCount,
+    SUM(CASE WHEN p.Score >= 0 THEN 1 ELSE 0 END) AS PositiveQuestions,
+    SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativeQuestions,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed,
+    MAX(p.CreationDate) AS LastQuestionDate,
+    COALESCE(NULLIF(SUM(b.Class = 1), 0), 0) AS GoldBadges,
+    COALESCE(NULLIF(SUM(b.Class = 2), 0), 0) AS SilverBadges,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+LEFT JOIN 
+    Tags t ON t.WikiPostId = p.Id 
+LEFT JOIN 
+    Badges b ON b.UserId = u.Id
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 10 
+ORDER BY 
+    LastQuestionDate DESC;

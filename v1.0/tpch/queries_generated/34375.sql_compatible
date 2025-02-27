@@ -1,0 +1,45 @@
+
+WITH RECURSIVE top_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+ranked_part AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty,
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_type
+),
+aggregated_orders AS (
+    SELECT o.o_orderkey, 
+           COUNT(l.l_orderkey) AS line_count, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+filtered_orders AS (
+    SELECT o.o_orderkey, o.line_count, o.total_revenue,
+           CASE WHEN o.total_revenue > 5000 THEN 'High' ELSE 'Low' END AS revenue_category
+    FROM aggregated_orders o
+)
+SELECT n.n_name AS nation_name, 
+       SUM(o.total_revenue) AS total_revenue,
+       COUNT(DISTINCT c.c_custkey) AS customer_count,
+       MAX(pc.total_avail_qty) AS max_avail_part_qty,
+       COUNT(DISTINCT CASE WHEN ranked.rank <= 3 THEN ranked.p_partkey END) AS top_parts_count,
+       COALESCE(AVG(o.line_count), 0) AS avg_lines_per_order
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN customer c ON s.s_suppkey = c.c_nationkey
+LEFT JOIN filtered_orders o ON c.c_custkey = o.c_custkey
+LEFT JOIN ranked_part ranked ON ranked.rank <= 3
+LEFT JOIN (SELECT p.p_partkey, SUM(ps.ps_availqty) AS total_avail_qty 
+           FROM part p
+           JOIN partsupp ps ON p.p_partkey = ps.ps_partkey 
+           GROUP BY p.p_partkey) pc ON pc.p_partkey = ranked.p_partkey
+GROUP BY n.n_name
+ORDER BY total_revenue DESC;

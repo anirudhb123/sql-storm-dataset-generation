@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        ur.PostCount,
+        ur.TotalBadges,
+        ROW_NUMBER() OVER (ORDER BY ur.Reputation DESC, ur.PostCount DESC) AS UserRank
+    FROM 
+        UserReputation ur
+    WHERE 
+        ur.Reputation > 500
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        ARRAY_AGG(DISTINCT ph.Comment) AS CloseComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    u.DisplayName AS Owner,
+    ur.Reputation AS OwnerReputation,
+    tp.UserRank,
+    COALESCE(c.LastClosedDate, NULL) AS LastClosedDate,
+    COALESCE(c.CloseComments, '{}') AS CloseCommentsList
+FROM 
+    RankedPosts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN 
+    TopUsers tp ON ur.UserId = tp.UserId
+LEFT JOIN 
+    ClosedPosts c ON p.Id = c.PostId
+WHERE 
+    p.RankScore <= 5 OR p.ViewCount > 100
+ORDER BY 
+    p.Score DESC, 
+    u.Reputation ASC;

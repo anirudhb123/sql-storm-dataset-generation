@@ -1,0 +1,69 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS TotalAnswers,
+        SUM(P.Score) AS TotalScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.ViewCount > 1000 THEN 1 ELSE 0 END) AS HighTrafficPosts
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%<' || T.TagName || '>%'  -- Assuming tag format `<tag>`
+    GROUP BY T.TagName
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges B
+    GROUP BY B.UserId
+),
+PostHistorySummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(DISTINCT PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditedDate
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE P.PostTypeId = 1  -- Only questions
+    GROUP BY P.Id, P.Title, P.CreationDate
+)
+
+SELECT 
+    UPS.DisplayName,
+    UPS.Reputation,
+    UPS.TotalPosts,
+    UPS.TotalQuestions,
+    UPS.TotalAnswers,
+    UPS.TotalScore,
+    COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+    COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+    COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+    TS.TagName,
+    TS.PostCount,
+    TS.HighTrafficPosts,
+    PHS.PostId,
+    PHS.Title,
+    PHS.CreationDate,
+    PHS.EditCount,
+    PHS.LastEditedDate
+FROM UserPostStats UPS
+LEFT JOIN UserBadges UB ON UPS.UserId = UB.UserId
+LEFT JOIN TagStats TS ON TS.PostCount > 0  -- Join with tags that have posts
+LEFT JOIN PostHistorySummary PHS ON PHS.PostId IN (
+    SELECT P.Id FROM Posts P WHERE P.OwnerUserId = UPS.UserId
+)
+ORDER BY UPS.Reputation DESC, UPS.TotalScore DESC;

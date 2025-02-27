@@ -1,0 +1,72 @@
+
+WITH RecursiveItemSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+),
+FilteredItem AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        ii.total_sold,
+        (SELECT COUNT(DISTINCT cr_return_quantity) 
+         FROM catalog_returns cr 
+         WHERE cr.cr_item_sk = i.i_item_sk 
+         AND cr.returned_time_sk > 0) AS return_count
+    FROM 
+        item i
+    JOIN 
+        RecursiveItemSales ii ON i.i_item_sk = ii.ws_item_sk
+    WHERE 
+        ii.rank = 1 
+        AND i.i_current_price >= (SELECT AVG(i_current_price) FROM item) 
+        AND EXISTS (
+            SELECT 1 
+            FROM store_sales ss 
+            WHERE ss.ss_item_sk = i.i_item_sk 
+            AND ss.ss_net_profit < 0
+        )
+),
+ShippingData AS (
+    SELECT 
+        sm.sm_type,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_revenue
+    FROM 
+        web_sales ws
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE 
+        ws.ws_ship_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        sm.sm_type
+)
+SELECT 
+    fi.i_item_id,
+    fi.i_item_desc,
+    fi.total_sold,
+    fi.return_count,
+    sd.sm_type,
+    sd.total_orders,
+    sd.total_revenue
+FROM 
+    FilteredItem fi
+LEFT JOIN 
+    ShippingData sd ON fi.total_sold > (SELECT AVG(total_sold) FROM RecursiveItemSales)
+WHERE 
+    fi.return_count IS NULL OR fi.return_count IN (SELECT DISTINCT hd_income_band_sk 
+                                                    FROM household_demographics 
+                                                    WHERE hd_buy_potential = 'High')
+ORDER BY 
+    fi.total_sold DESC, 
+    sd.total_revenue DESC
+LIMIT 50;
+

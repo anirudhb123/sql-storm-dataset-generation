@@ -1,0 +1,56 @@
+
+WITH movie_data AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        r.role AS actor_role,
+        c.kind AS character_type,
+        k.keyword AS movie_keyword,
+        cct.kind AS company_type,
+        cn.name AS company_name
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        role_type r ON ci.role_id = r.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        movie_companies mc ON cc.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type cct ON mc.company_type_id = cct.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        aka_title at ON t.id = at.movie_id
+    LEFT JOIN 
+        kind_type kt ON t.kind_id = kt.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    WHERE 
+        t.production_year BETWEEN 1990 AND 2020
+        AND kt.kind = 'feature'
+)
+SELECT 
+    title,
+    production_year,
+    COUNT(DISTINCT actor_name) AS num_actors,
+    STRING_AGG(DISTINCT actor_role, ', ') AS roles,
+    STRING_AGG(DISTINCT character_type, ', ') AS character_types,
+    STRING_AGG(DISTINCT movie_keyword, ', ') AS keywords,
+    STRING_AGG(DISTINCT company_name, ', ') AS companies
+FROM 
+    movie_data
+GROUP BY 
+    title, production_year
+ORDER BY 
+    production_year DESC, num_actors DESC
+LIMIT 100;

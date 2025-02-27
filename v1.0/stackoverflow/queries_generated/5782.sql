@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p 
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+), AggregatedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.Reputation) AS TotalReputation,
+        COUNT(b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId 
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    r.PostId, 
+    r.Title, 
+    r.OwnerDisplayName, 
+    r.CreationDate, 
+    r.Score, 
+    r.ViewCount, 
+    r.CommentCount, 
+    r.UpVotes, 
+    r.DownVotes, 
+    a.DisplayName AS TopUser, 
+    a.TotalReputation,
+    a.BadgeCount,
+    a.TotalPosts,
+    a.TotalComments
+FROM 
+    RankedPosts r
+JOIN 
+    AggregatedUsers a ON r.OwnerDisplayName = a.DisplayName
+WHERE 
+    r.Rank <= 10
+ORDER BY 
+    r.Score DESC, r.ViewCount DESC;

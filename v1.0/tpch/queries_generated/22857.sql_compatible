@@ -1,0 +1,67 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s 
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name,
+        p.p_size,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 0 
+            ELSE p.p_retailprice * 0.1 
+        END AS discount_amount
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_supplycost > 1000)
+),
+OrderSummary AS (
+    SELECT 
+        o.o_custkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate BETWEEN DATEADD(MONTH, -6, CURRENT_DATE) AND CURRENT_DATE
+    GROUP BY 
+        o.o_custkey
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(os.total_spent, 0) AS total_spent,
+    COUNT(DISTINCT ps.ps_partkey) AS part_count,
+    r.r_name AS region_name,
+    s.s_name AS top_supplier,
+    SUM(fp.discount_amount) AS total_discounts
+FROM 
+    customer c
+LEFT JOIN 
+    OrderSummary os ON c.c_custkey = os.o_custkey
+LEFT JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM FilteredParts p)
+LEFT JOIN 
+    RankedSuppliers s ON s.rank = 1 AND s.s_nationkey = c.c_nationkey
+GROUP BY 
+    c.c_custkey, c.c_name, r.r_name, s.s_name, os.total_spent
+HAVING 
+    COALESCE(os.total_spent, 0) > 0 OR COUNT(DISTINCT ps.ps_partkey) > 5
+ORDER BY 
+    total_spent DESC, part_count ASC;

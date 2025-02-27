@@ -1,0 +1,56 @@
+
+WITH RECURSIVE cast_hierarchy AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        1 AS depth,
+        CAST(a.name AS VARCHAR(255)) AS actor_name
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ch.depth + 1,
+        CAST(a.name AS VARCHAR(255)) AS actor_name
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        cast_hierarchy ch ON ci.movie_id = ch.movie_id
+    WHERE 
+        a.name IS NOT NULL 
+)
+
+SELECT 
+    t.title AS movie_title,
+    CASE 
+        WHEN ch.depth > 1 THEN 'Supporting'
+        ELSE 'Lead' 
+    END AS role_type,
+    ARRAY_AGG(DISTINCT ch.actor_name) AS co_actors,
+    COUNT(DISTINCT ch.person_id) AS co_actor_count,
+    AVG(m.production_year) AS avg_production_year,
+    MAX(CASE WHEN m.production_year IS NULL THEN 'Unknown' ELSE CAST(m.production_year AS VARCHAR(255)) END) AS latest_year,
+    STRING_AGG(DISTINCT CASE WHEN m.info IS NULL THEN 'N/A' ELSE m.info END, ', ') AS additional_info
+FROM 
+    title t
+JOIN 
+    cast_info ci ON t.id = ci.movie_id
+JOIN 
+    cast_hierarchy ch ON ci.movie_id = ch.movie_id
+LEFT JOIN 
+    movie_info m ON ci.movie_id = m.movie_id 
+WHERE 
+    t.production_year >= 2000
+GROUP BY 
+    t.title, ch.depth
+ORDER BY 
+    avg_production_year DESC NULLS LAST;

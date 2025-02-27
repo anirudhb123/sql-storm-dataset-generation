@@ -1,0 +1,25 @@
+
+WITH Regional_Supplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, n.n_name AS nation_name, r.r_name AS region_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+Part_Supplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_brand, p.p_retailprice
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+Combined AS (
+    SELECT rs.region_name, rs.nation_name, ps.p_name, ps.p_brand, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost, 
+           COUNT(DISTINCT rs.s_suppkey) AS supplier_count
+    FROM Regional_Supplier rs
+    JOIN Part_Supplier ps ON rs.s_suppkey = ps.ps_suppkey
+    GROUP BY rs.region_name, rs.nation_name, ps.p_name, ps.p_brand
+)
+SELECT region_name, nation_name, p_name, p_brand, total_supply_cost, supplier_count
+FROM Combined
+WHERE total_supply_cost > (SELECT AVG(total_supply_cost) FROM Combined)
+ORDER BY total_supply_cost DESC, supplier_count DESC
+FETCH FIRST 10 ROWS ONLY;

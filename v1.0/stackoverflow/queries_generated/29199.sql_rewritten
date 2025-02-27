@@ -1,0 +1,56 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        AVG(u.Reputation) AS AvgUserReputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN p.ViewCount > 100 THEN 1 ELSE 0 END) AS HighViewPosts,
+        AVG(LENGTH(p.Body)) AS AvgPostLength,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+RecentClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        ph.UserDisplayName AS Closer,
+        ph.CreationDate AS CloseDate,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+        AND ph.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.AvgUserReputation,
+    ts.BadgeCount,
+    ts.HighViewPosts,
+    ts.AvgPostLength,
+    ts.LastPostDate,
+    COUNT(rp.Id) AS RecentClosedCount,
+    ARRAY_AGG(DISTINCT rp.Title) AS RecentClosedPostTitles,
+    ARRAY_AGG(DISTINCT rp.Closer) AS Closers,
+    ARRAY_AGG(DISTINCT rp.CloseReason) AS CloseReasons
+FROM 
+    TagStatistics ts
+LEFT JOIN 
+    RecentClosedPosts rp ON rp.Title LIKE '%' || ts.TagName || '%'
+GROUP BY 
+    ts.TagName, ts.PostCount, ts.AvgUserReputation, ts.BadgeCount, ts.HighViewPosts, ts.AvgPostLength, ts.LastPostDate
+ORDER BY 
+    ts.PostCount DESC, ts.AvgUserReputation DESC;

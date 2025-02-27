@@ -1,0 +1,59 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS rn
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT c.role_id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id, a.name
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        SUM(role_count) AS total_roles
+    FROM 
+        ActorRoles
+    GROUP BY 
+        actor_name
+    ORDER BY 
+        total_roles DESC
+    LIMIT 10
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    t.actor_name,
+    COALESCE(t.total_roles, 0) AS actor_role_count,
+    COALESCE(mk.keyword, 'N/A') AS movie_keyword,
+    CASE 
+        WHEN rm.production_year < 2000 THEN 'Classic'
+        WHEN rm.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era_category
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    TopActors t ON rm.movie_id = t.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = rm.movie_id
+WHERE 
+    (rm.production_year > 1995 AND ((mk.keyword IS NOT NULL) OR (rm.title LIKE '%Avengers%')))
+    OR (rm.production_year <= 1995 AND t.actor_name IS NOT NULL)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title ASC;

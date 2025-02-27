@@ -1,0 +1,46 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS depth
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.depth + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.depth < 5
+),
+SupplierCosts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) END), 0) AS return_sales,
+        COALESCE(MIN(l.l_extendedprice), 0) AS min_price,
+        COALESCE(MAX(l.l_extendedprice), 0) AS max_price,
+        AVG(l.l_extendedprice) OVER (PARTITION BY p.p_partkey) AS avg_price
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+)
+SELECT 
+    pd.p_name,
+    pd.p_brand,
+    pd.return_sales,
+    pd.min_price,
+    pd.max_price,
+    pd.avg_price,
+    sc.total_supply_cost,
+    RANK() OVER (ORDER BY pd.return_sales DESC) AS sales_rank
+FROM PartDetails pd
+LEFT JOIN SupplierCosts sc ON pd.p_partkey = sc.ps_partkey
+WHERE pd.return_sales > (
+    SELECT AVG(return_sales) FROM PartDetails
+)
+ORDER BY pd.return_sales DESC, pd.p_name
+LIMIT 10;

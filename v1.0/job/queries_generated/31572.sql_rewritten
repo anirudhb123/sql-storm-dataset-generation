@@ -1,0 +1,42 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.movie_id, 
+           mt.title, 
+           mt.production_year, 
+           1 AS level
+    FROM aka_title mt
+    WHERE mt.kind_id IN (
+        SELECT kt.id 
+        FROM kind_type kt 
+        WHERE kt.kind = 'movie'
+    )
+    UNION ALL
+    SELECT mt.movie_id, 
+           mt.title, 
+           mt.production_year, 
+           mh.level + 1
+    FROM movie_link ml
+    JOIN MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+    JOIN aka_title mt ON ml.movie_id = mt.id
+)
+SELECT 
+    ak.name AS actor_name,
+    ak.id AS actor_id,
+    th.title AS title,
+    th.production_year AS release_year,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    AVG(CASE WHEN tc.gender = 'M' THEN 1 ELSE 0 END) AS male_actor_ratio,
+    SUM(CASE WHEN mc.note IS NOT NULL THEN 1 ELSE 0 END) AS companies_involved,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY th.production_year DESC) AS movie_rank
+FROM aka_name ak
+JOIN cast_info ci ON ak.person_id = ci.person_id
+JOIN aka_title th ON ci.movie_id = th.id
+LEFT JOIN movie_keyword mk ON th.id = mk.movie_id
+LEFT JOIN movie_companies mc ON th.id = mc.movie_id
+JOIN name tc ON ak.id = tc.imdb_id
+WHERE th.production_year > 2000
+  AND ak.name IS NOT NULL
+  AND ak.md5sum IS NOT NULL
+GROUP BY ak.id, ak.name, th.title, th.production_year
+HAVING COUNT(DISTINCT mk.keyword) > 3
+ORDER BY release_year DESC, keyword_count DESC
+LIMIT 50;

@@ -1,0 +1,59 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '1997-01-01' AND l.l_shipdate < '1998-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+HighValueSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supply_value
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_name IN (SELECT DISTINCT n_name FROM nation WHERE r_regionkey = 1) 
+    GROUP BY 
+        ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+FinalReport AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        ro.total_revenue,
+        hvs.supply_value,
+        CASE 
+            WHEN ro.total_revenue IS NULL THEN 'No Revenue'
+            WHEN hvs.supply_value IS NULL THEN 'No Supply Value'
+            ELSE 'Active'
+        END AS status
+    FROM 
+        RankedOrders ro
+    FULL OUTER JOIN 
+        HighValueSuppliers hvs ON ro.o_orderkey = hvs.ps_suppkey
+)
+SELECT 
+    f.o_orderkey,
+    f.o_orderstatus,
+    COALESCE(f.total_revenue, 0) AS total_revenue,
+    COALESCE(f.supply_value, 0) AS supply_value,
+    f.status
+FROM 
+    FinalReport f
+WHERE 
+    f.total_revenue > 50000 OR f.status = 'No Revenue'
+ORDER BY 
+    f.o_orderkey DESC;

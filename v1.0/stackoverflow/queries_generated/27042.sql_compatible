@@ -1,0 +1,64 @@
+
+WITH RankedTags AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(p.Id) DESC) AS Rank
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::text[])
+    GROUP BY 
+        t.Id, t.TagName
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopActiveUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalPosts,
+        ua.TotalComments,
+        ua.TotalBadges,
+        ua.TotalVotes,
+        ROW_NUMBER() OVER (ORDER BY ua.TotalPosts DESC) AS Rank
+    FROM 
+        UserActivity ua
+)
+SELECT 
+    rt.TagName,
+    ta.DisplayName,
+    ta.TotalPosts,
+    ta.TotalComments,
+    ta.TotalBadges,
+    ta.TotalVotes,
+    rt.PostCount AS TagPostCount,
+    (SELECT COUNT(*) FROM Posts p WHERE p.Tags LIKE '%' || rt.TagName || '%') AS TotalPostsForTag
+FROM 
+    RankedTags rt
+JOIN 
+    TopActiveUsers ta ON rt.TagId IN (SELECT t.Id FROM Tags t WHERE t.TagName = ANY(string_to_array(ta.TotalPosts::text, ' ')))
+WHERE 
+    rt.Rank <= 10 AND ta.Rank <= 10
+ORDER BY 
+    rt.PostCount DESC, ta.TotalPosts DESC;

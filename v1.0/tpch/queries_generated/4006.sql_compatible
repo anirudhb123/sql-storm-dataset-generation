@@ -1,0 +1,45 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate <= DATE '1997-12-31'
+    GROUP BY s.s_suppkey, s.s_name, ps.ps_partkey
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value,
+        MAX(o.o_totalprice) AS max_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name,
+    r.r_name AS region,
+    cs.order_count,
+    cs.avg_order_value,
+    COALESCE(rs.total_sales, 0) AS total_sales,
+    CASE 
+        WHEN COALESCE(rs.total_sales, 0) > 10000 THEN 'High'
+        WHEN COALESCE(rs.total_sales, 0) BETWEEN 5000 AND 10000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN RankedSales rs ON ps.ps_suppkey = rs.s_suppkey
+JOIN nation n ON n.n_nationkey = rs.s_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN CustomerSummary cs ON cs.c_custkey = (SELECT c.c_custkey FROM customer c ORDER BY c.c_acctbal DESC LIMIT 1)
+WHERE p.p_size > 10
+ORDER BY total_sales DESC, p.p_name;

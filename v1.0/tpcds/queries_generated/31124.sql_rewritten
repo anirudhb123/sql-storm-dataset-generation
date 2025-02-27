@@ -1,0 +1,82 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk, 
+        s_store_name, 
+        s_store_id, 
+        1 AS depth
+    FROM 
+        store
+    WHERE 
+        s_closed_date_sk IS NULL
+    UNION ALL
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        s.s_store_id,
+        sh.depth + 1
+    FROM 
+        store s
+    JOIN 
+        sales_hierarchy sh ON s.s_manager = sh.s_store_id
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_sold_date_sk, 
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS customer_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_sold_date_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_sold_date_sk
+),
+customer_data AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(coalesce(ws.ws_net_profit, 0)) AS total_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+),
+outer_sales_data AS (
+    SELECT 
+        nh.s_store_name,
+        n.s_store_sk,
+        ns.total_sales,
+        ns.order_count,
+        cm.gender AS customer_gender,
+        cm.marital_status AS customer_marital_status
+    FROM 
+        sales_summary ns
+    LEFT JOIN 
+        sales_hierarchy nh ON ns.ws_sold_date_sk = nh.s_store_sk
+    LEFT JOIN 
+        customer_data cm ON 1=1  
+)
+SELECT 
+    osm.s_store_sk,
+    osm.s_store_name,
+    COALESCE(osd.total_sales, 0) AS sales_total,
+    COALESCE(osd.order_count, 0) AS total_orders,
+    cd.customer_gender,
+    cd.customer_marital_status,
+    SUM(COALESCE(osd.total_sales, 0)) OVER (PARTITION BY cd.customer_gender ORDER BY osm.s_store_name) AS cumulative_sales_gender
+FROM 
+    store osm
+LEFT JOIN 
+    outer_sales_data osd ON osm.s_store_sk = osd.s_store_sk
+LEFT JOIN 
+    customer_data cd ON 1=1  
+WHERE 
+    osm.s_closed_date_sk IS NULL
+    AND (cd.customer_count IS NOT NULL OR cd.total_profit > 0)
+ORDER BY 
+    osm.s_store_name, cd.customer_gender;

@@ -1,0 +1,26 @@
+SELECT 
+    SUBSTRING(p_name, 1, 20) AS short_name,
+    CONCAT('Manufacturer: ', p_mfgr) AS manufactured_by,
+    REGEXP_REPLACE(p_comment, '[^A-Za-z0-9 ]', '') AS cleaned_comment,
+    COUNT(DISTINCT s.s_name) AS supplier_count,
+    AVG(ps.ps_supplycost) AS avg_supply_cost
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    CHAR_LENGTH(cleaned_comment) > 10 AND
+    r.r_name LIKE 'E%'
+GROUP BY 
+    short_name, manufactured_by
+HAVING 
+    supplier_count > 5
+ORDER BY 
+    avg_supply_cost DESC
+LIMIT 10;

@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, '; ') AS CommentTexts
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostHistoryWithReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment AS CloseReason,
+        p.Title,
+        ph.PostHistoryTypeId
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closure or Reopening events
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    COALESCE(pc.CommentCount, 0) AS TotalComments,
+    COALESCE(pc.CommentTexts, 'No comments') AS RecentComments,
+    rp.OwnerDisplayName,
+    rp.OwnerReputation,
+    jsonb_agg(DISTINCT ph.CloseReason) FILTER (WHERE ph.CloseReason IS NOT NULL) AS CloseReasons,
+    CASE 
+        WHEN rp.PostRank <= 5 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostComments pc ON rp.PostId = pc.PostId
+LEFT JOIN 
+    PostHistoryWithReasons ph ON rp.PostId = ph.PostId
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.AnswerCount, rp.OwnerDisplayName, rp.OwnerReputation, rp.PostRank
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

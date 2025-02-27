@@ -1,0 +1,82 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'P')
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+    HAVING 
+        COUNT(DISTINCT ps.ps_partkey) > 5
+),
+ProductVariations AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(NULLIF(p.p_container, ''), 'UNKNOWN') AS container_type
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 1 AND 10
+    UNION ALL
+    SELECT 
+        p.p_partkey,
+        CONCAT(p.p_name, ' - SPECIAL') AS p_name,
+        p.p_retailprice * 1.1,
+        p.p_container
+    FROM 
+        part p
+    WHERE 
+        p.p_price > 100.0
+),
+EligibleCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (ORDER BY c.c_acctbal DESC) AS customer_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer WHERE c_acctbal IS NOT NULL)
+)
+SELECT 
+    o.o_orderkey, 
+    o.o_orderdate, 
+    s.s_suppkey, 
+    ss.total_supply_cost, 
+    pv.container_type, 
+    ec.c_name, 
+    ec.customer_rank
+FROM 
+    RankedOrders o
+LEFT OUTER JOIN 
+    lineitem l ON l.l_orderkey = o.o_orderkey
+JOIN 
+    SupplierStats ss ON l.l_suppkey = ss.s_suppkey
+JOIN 
+    ProductVariations pv ON l.l_partkey = pv.p_partkey
+JOIN 
+    EligibleCustomers ec ON ec.c_custkey = o.o_custkey
+WHERE 
+    o.o_orderdate >= '2023-01-01' AND 
+    pv.p_retailprice > (SELECT AVG(p_retailprice) FROM part) 
+ORDER BY 
+    o.o_orderdate DESC,
+    ss.total_supply_cost DESC
+FETCH FIRST 100 ROWS ONLY;

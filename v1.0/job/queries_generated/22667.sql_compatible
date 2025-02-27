@@ -1,0 +1,58 @@
+
+WITH RankedMovies AS (
+    SELECT
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) OVER(PARTITION BY a.id) AS actor_count,
+        RANK() OVER(ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_count
+    FROM aka_title a
+    LEFT JOIN cast_info c ON a.id = c.movie_id
+    GROUP BY a.id, a.title, a.production_year
+),
+
+TitleKeyword AS (
+    SELECT
+        t.title,
+        k.keyword,
+        ROW_NUMBER() OVER(PARTITION BY t.id ORDER BY k.keyword) AS keyword_rank
+    FROM aka_title t
+    JOIN movie_keyword mk ON t.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    WHERE k.keyword IS NOT NULL
+),
+
+CriticalInfo AS (
+    SELECT
+        cc.movie_id,
+        COUNT(DISTINCT ci.info) AS info_count,
+        STRING_AGG(ci.info, ', ' ORDER BY ci.info) AS concatenated_info
+    FROM complete_cast cc
+    JOIN movie_info mi ON cc.movie_id = mi.movie_id
+    JOIN info_type it ON mi.info_type_id = it.id
+    JOIN title t ON cc.movie_id = t.id
+    JOIN movie_info_idx mii ON t.id = mii.movie_id
+    WHERE it.info IS NOT NULL AND LENGTH(it.info) > 0
+    GROUP BY cc.movie_id
+)
+
+SELECT 
+    a.name,
+    tm.title,
+    tm.actor_count,
+    tm.production_year,
+    COALESCE(ki.keyword, 'No Keywords') AS keyword,
+    ci.info_count,
+    ci.concatenated_info,
+    CASE 
+        WHEN ci.info_count IS NULL THEN 'No Info'
+        ELSE 'Info Available' 
+    END AS info_status,
+    COALESCE(rng.rank_count, 0) AS rank_count
+FROM aka_name a
+LEFT JOIN cast_info c ON a.person_id = c.person_id
+LEFT JOIN RankedMovies tm ON c.movie_id = tm.id
+LEFT JOIN TitleKeyword ki ON tm.title = ki.title AND ki.keyword_rank = 1
+LEFT JOIN CriticalInfo ci ON tm.id = ci.movie_id
+LEFT JOIN (SELECT movie_id, COUNT(*) AS rank_count FROM movie_info GROUP BY movie_id) rng ON tm.id = rng.movie_id
+WHERE a.name IS NOT NULL
+ORDER BY tm.actor_count DESC, ci.info_count DESC NULLS LAST, a.name;

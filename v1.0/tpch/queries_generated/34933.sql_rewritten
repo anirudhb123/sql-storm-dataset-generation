@@ -1,0 +1,37 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 0 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'F' AND o.o_orderdate >= '1997-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA'))
+    WHERE o.o_orderdate < oh.o_orderdate
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, SUM(ps.ps_availqty) AS total_availqty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT co.c_name, co.order_count, co.avg_order_value, ph.p_name, ph.total_availqty,
+       ROW_NUMBER() OVER (PARTITION BY co.c_custkey ORDER BY co.avg_order_value DESC) AS row_num,
+       ns.r_name AS supplier_region
+FROM CustomerOrderStats co
+LEFT JOIN PartDetails ph ON co.order_count > 5
+LEFT JOIN RankedSuppliers rs ON co.c_custkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_brand = 'Brand#23'))
+LEFT JOIN nation ns ON rs.rank <= 3 AND ns.n_nationkey = rs.s_nationkey
+WHERE co.avg_order_value > (SELECT AVG(o.o_totalprice) FROM orders o WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31')
+ORDER BY co.order_count DESC, ph.total_availqty ASC
+LIMIT 10;

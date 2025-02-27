@@ -1,0 +1,60 @@
+
+WITH TagCounts AS (
+    SELECT 
+        TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><'))) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        TagName
+),
+
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagCounts
+    WHERE 
+        PostCount > 1 
+),
+
+PostsWithTopTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        t.TagName
+    FROM 
+        Posts p
+    JOIN 
+        TopTags t ON t.TagName = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    p.PostId,
+    p.Title,
+    p.Body,
+    p.CreationDate,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    PostsWithTopTags p
+LEFT JOIN 
+    Users u ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON c.PostId = p.PostId
+LEFT JOIN 
+    Votes v ON v.PostId = p.PostId
+GROUP BY 
+    u.DisplayName, p.PostId, p.Title, p.Body, p.CreationDate
+ORDER BY 
+    CommentCount DESC, UpVotes - DownVotes DESC
+LIMIT 10;

@@ -1,0 +1,89 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT 
+        ca_address_sk, 
+        ca_address_id, 
+        ca_city,
+        ca_state,
+        ca_country,
+        0 AS level
+    FROM 
+        customer_address 
+    WHERE 
+        ca_city IS NOT NULL
+    UNION ALL
+    SELECT 
+        a.ca_address_sk, 
+        a.ca_address_id,
+        a.ca_city,
+        a.ca_state,
+        'Unknown' AS ca_country,
+        h.level + 1
+    FROM 
+        customer_address a
+    JOIN address_hierarchy h ON a.ca_city = h.ca_city AND a.ca_state != h.ca_state
+    WHERE 
+        h.level < 5
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name || ' ' || c.c_last_name AS customer_name,
+        ca.ca_city,
+        CASE 
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            ELSE 'Other'
+        END AS gender,
+        COALESCE(cd.cd_marital_status, 'Unknown') AS marital_status,
+        SUM(ws.ws_net_profit) OVER (PARTITION BY c.c_customer_sk) AS total_profit
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+),
+date_info AS (
+    SELECT 
+        d.d_date_sk,
+        d.d_date,
+        d.d_year,
+        d.d_month_seq,
+        DENSE_RANK() OVER (ORDER BY d.d_year DESC) AS year_rank
+    FROM 
+        date_dim d
+)
+SELECT 
+    ci.customer_name,
+    ci.gender,
+    ci.marital_status,
+    ah.ca_city,
+    ah.ca_country,
+    di.d_year,
+    di.year_rank,
+    SUM(ws.ws_net_profit) AS total_sales,
+    COUNT(DISTINCT ws.ws_order_number) AS order_count
+FROM 
+    customer_info ci
+JOIN address_hierarchy ah ON ci.ca_city = ah.ca_city
+JOIN web_sales ws ON ci.c_customer_sk = ws.ws_bill_customer_sk
+JOIN date_info di ON ws.ws_sold_date_sk = di.d_date_sk
+WHERE 
+    (ci.total_profit > 1000 OR ah.ca_country IS NULL)
+GROUP BY 
+    ci.customer_name, 
+    ci.gender, 
+    ci.marital_status, 
+    ah.ca_city, 
+    ah.ca_country, 
+    di.d_year, 
+    di.year_rank
+HAVING 
+    COUNT(DISTINCT ws.ws_order_number) > 5 AND
+    SUM(ws.ws_net_profit) IS NOT NULL
+ORDER BY 
+    total_sales DESC, 
+    ci.customer_name ASC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

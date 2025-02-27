@@ -1,0 +1,92 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        Posts a ON p.ParentId = a.Id  
+    JOIN 
+        RecursivePostHierarchy r ON a.Id = r.PostId
+),
+UserReputationInfo AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostVoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.OwnerUserId,
+        u.DisplayName,
+        pi.TotalPosts,
+        pi.TotalComments,
+        vc.UpVotes,
+        vc.DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY ph.OwnerUserId ORDER BY vc.UpVotes DESC) AS Rank
+    FROM 
+        RecursivePostHierarchy ph
+    JOIN 
+        Users u ON ph.OwnerUserId = u.Id
+    JOIN 
+        UserReputationInfo pi ON u.Id = pi.UserId
+    JOIN 
+        PostVoteCounts vc ON ph.PostId = vc.PostId
+    WHERE 
+        pi.Reputation > 1000 
+)
+SELECT 
+    tp.Title,
+    tp.DisplayName AS Author,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.TotalPosts,
+    tp.TotalComments,
+    COALESCE(tp2.Title, 'No Accepted Answer') AS AcceptedAnswerTitle
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Posts p ON tp.PostId = p.AcceptedAnswerId 
+LEFT JOIN 
+    TopPosts tp2 ON p.AcceptedAnswerId = tp2.PostId
+WHERE 
+    tp.Rank <= 5 
+ORDER BY 
+    tp.OwnerUserId, tp.UpVotes DESC;

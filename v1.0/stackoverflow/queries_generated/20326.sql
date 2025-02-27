@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(p.Body, 'No content available') AS Body,
+        pt.Name AS PostType,
+        p.CreationDate,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM
+        Posts p
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE
+        p.CreationDate > NOW() - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation < 100 THEN 'Novice' 
+            WHEN u.Reputation < 1000 THEN 'Intermediate' 
+            ELSE 'Expert' 
+        END AS UserLevel
+    FROM Users u
+),
+TagsWithCounts AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE t.IsModeratorOnly = 0
+    GROUP BY t.TagName
+),
+FinalStats AS (
+    SELECT
+        up.UserId,
+        up.UserLevel,
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.PostType,
+        rp.Rank,
+        COALESCE(tc.PostCount, 0) AS TagCount
+    FROM
+        UserReputation up
+    LEFT JOIN RankedPosts rp ON up.UserId = rp.PostId
+    LEFT JOIN TagsWithCounts tc ON tc.TagName = ANY(string_to_array(rp.Body, ' '))
+    WHERE 
+        rp.Rank = 1
+)
+SELECT 
+    fs.UserId,
+    fs.UserLevel,
+    fs.Title,
+    fs.Body,
+    fs.PostType,
+    fs.TagCount,
+    COALESCE(ph.Comment, 'No history available') AS PostHistoryComments
+FROM 
+    FinalStats fs
+LEFT JOIN PostHistory ph ON fs.PostId = ph.PostId 
+    AND ph.CreationDate = (
+        SELECT MAX(ph2.CreationDate)
+        FROM PostHistory ph2
+        WHERE ph2.PostId = fs.PostId AND ph2.PostHistoryTypeId IN (10, 11, 12)  -- Closed, Reopened, Deleted
+    )
+WHERE
+    fs.TagCount > 5  -- Only keep posts with more than 5 associated tags
+ORDER BY 
+    fs.UserLevel DESC, fs.TagCount DESC, fs.CreationDate DESC;
+
+This query build incorporates a combination of Common Table Expressions (CTEs) to manage user reputation categories, rank posts by owner timestamp, aggregate tag counts for each post, and select the latest relevant post history comments, while applying various joins and conditions to get specific insights into user activities. Unusual semantics like the use of `LEFT JOIN` to facilitate optional relationships and conditional aggregation highlight performance and logical operations.

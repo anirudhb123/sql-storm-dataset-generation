@@ -1,0 +1,59 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        1 AS level
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+),
+RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS part_rank
+    FROM part p
+    WHERE p.p_size > 10
+),
+AggregatedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts_sold
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+FinalResults AS (
+    SELECT 
+        o.o_orderkey,
+        a.total_revenue,
+        p.p_name,
+        p.p_retailprice
+    FROM AggregatedOrders a
+    JOIN RankedParts p ON a.unique_parts_sold = p.part_rank
+    LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    WHERE p.p_retailprice IS NOT NULL
+)
+
+SELECT 
+    f.o_orderkey,
+    f.total_revenue AS revenue,
+    f.p_name || ' - ' || COALESCE(NULLIF(f.p_retailprice::text, ''), 'N/A') AS part_details,
+    sh.s_name AS supplier_name
+FROM FinalResults f
+LEFT JOIN supplier sh ON f.o_orderkey = sh.s_suppkey
+ORDER BY f.total_revenue DESC
+LIMIT 100;

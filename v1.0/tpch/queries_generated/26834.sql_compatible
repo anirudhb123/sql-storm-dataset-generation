@@ -1,0 +1,81 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS part_rank
+    FROM 
+        part p
+),
+PartSuppliers AS (
+    SELECT 
+        rp.p_partkey,
+        rp.p_name,
+        s.s_name AS supplier_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        CASE 
+            WHEN ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp) THEN 'Below Average'
+            WHEN ps.ps_supplycost = (SELECT AVG(ps_supplycost) FROM partsupp) THEN 'Average'
+            ELSE 'Above Average'
+        END AS cost_comparison
+    FROM 
+        RankedParts rp
+    JOIN 
+        partsupp ps ON rp.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        rp.part_rank <= 5
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+HighlightedData AS (
+    SELECT 
+        ps.part_rank,
+        ps.p_name,
+        ps.supplier_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        co.c_name,
+        co.total_spent
+    FROM 
+        PartSuppliers ps
+    JOIN 
+        CustomerOrders co ON ps.supplier_name = co.c_name
+)
+SELECT 
+    ps.part_rank,
+    ps.p_name,
+    ps.supplier_name,
+    ps.ps_availqty,
+    ps.ps_supplycost,
+    co.c_name,
+    co.total_spent
+FROM 
+    HighlightedData
+WHERE 
+    total_spent > 1000
+ORDER BY 
+    ps.part_rank, total_spent DESC;

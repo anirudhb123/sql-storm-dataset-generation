@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+AggregatedVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId IN (2, 8) THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        Tag
+),
+CombinedData AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Body,
+        RP.CreationDate,
+        RP.ViewCount,
+        RP.Score,
+        RP.Tags,
+        RP.OwnerDisplayName,
+        AV.TotalUpVotes,
+        AV.TotalDownVotes,
+        TS.PostCount AS TagPostCount
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        AggregatedVotes AV ON RP.PostId = AV.PostId
+    LEFT JOIN 
+        TagStatistics TS ON TS.Tag = ANY(string_to_array(substring(RP.Tags, 2, length(RP.Tags)-2), '><'))
+)
+SELECT 
+    PostId,
+    Title,
+    Body,
+    CreationDate,
+    ViewCount,
+    Score,
+    OwnerDisplayName,
+    TotalUpVotes,
+    TotalDownVotes,
+    TagPostCount
+FROM 
+    CombinedData
+WHERE 
+    Rank = 1 -- Get only the latest post for each tag
+ORDER BY 
+    Score DESC
+LIMIT 10;

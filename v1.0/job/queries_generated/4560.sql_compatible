@@ -1,0 +1,63 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rn
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+PopularMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rn <= 10
+),
+Genres AS (
+    SELECT 
+        mt.movie_id,
+        kt.keyword AS genre
+    FROM 
+        movie_keyword mt
+    JOIN 
+        keyword kt ON mt.keyword_id = kt.id
+),
+GenreCounts AS (
+    SELECT 
+        pm.title,
+        COUNT(DISTINCT g.genre) AS genre_count
+    FROM 
+        PopularMovies pm
+    LEFT JOIN 
+        Genres g ON pm.title = g.title
+    GROUP BY 
+        pm.title
+)
+SELECT 
+    pm.title,
+    pm.production_year,
+    pm.cast_count,
+    COALESCE(gc.genre_count, 0) AS genre_count,
+    CASE 
+        WHEN COALESCE(gc.genre_count, 0) > 3 THEN 'Diverse Genre'
+        ELSE 'Narrow Genre'
+    END AS genre_diversity
+FROM 
+    PopularMovies pm
+LEFT JOIN 
+    GenreCounts gc ON pm.title = gc.title
+ORDER BY 
+    pm.production_year DESC, pm.cast_count DESC;

@@ -1,0 +1,35 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+),
+SupplierPerformance AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerRevenue AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT r.o_orderkey, r.o_orderdate, r.o_totalprice, 
+       coalesce(sr.s_name, 'No Supplier') AS supplier_name,
+       cr.c_name AS customer_name, 
+       sr.total_supply_cost,
+       cr.total_revenue,
+       CASE 
+           WHEN r.o_orderstatus = 'O' THEN 'Order Placed'
+           WHEN r.o_orderstatus = 'F' THEN 'Order Fulfilled'
+           ELSE 'Unknown Status' 
+       END AS order_status_desc
+FROM RankedOrders r
+LEFT JOIN SupplierPerformance sr ON r.o_orderkey = sr.s_suppkey
+LEFT JOIN CustomerRevenue cr ON cr.total_revenue IS NOT NULL
+WHERE r.rn <= 10
+ORDER BY r.o_totalprice DESC, r.o_orderdate ASC
+LIMIT 50;

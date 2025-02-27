@@ -1,0 +1,75 @@
+
+WITH MovieStatistics AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        MAX(CASE WHEN ci.kind_id IS NOT NULL THEN 1 ELSE 0 END) AS has_comp_cast,
+        AVG(CASE 
+            WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'duration') THEN CAST(mi.info AS FLOAT)
+            ELSE NULL 
+        END) AS avg_duration
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        comp_cast_type ci ON c.person_role_id = ci.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.title, t.production_year
+),
+
+TopActors AS (
+    SELECT 
+        ak.name, 
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+
+CombinedStats AS (
+    SELECT 
+        ms.title,
+        ms.production_year,
+        ms.actor_count,
+        ms.has_comp_cast,
+        ms.avg_duration,
+        ta.movie_count
+    FROM 
+        MovieStatistics ms
+    LEFT JOIN 
+        TopActors ta ON ms.actor_count = ta.movie_count
+)
+
+SELECT 
+    c.title,
+    c.production_year,
+    c.actor_count,
+    CASE 
+        WHEN c.has_comp_cast = 1 THEN 'Yes' 
+        ELSE 'No' 
+    END AS has_comp_cast,
+    COALESCE(c.avg_duration, 'N/A') AS avg_duration,
+    COALESCE(c.movie_count, 0) AS actor_movie_count
+FROM 
+    CombinedStats c
+WHERE 
+    c.actor_count > 0
+ORDER BY 
+    c.production_year DESC, 
+    c.actor_count DESC
+FETCH FIRST 100 ROWS ONLY;

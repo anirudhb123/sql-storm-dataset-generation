@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.LastActivityDate,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.LastActivityDate
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        QuestionCount DESC
+    LIMIT 10
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+)
+
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Body,
+    r.AnswerCount,
+    r.UpVotes,
+    r.DownVotes,
+    u.DisplayName AS OwnerDisplayName,
+    r.CreationDate,
+    r.LastActivityDate,
+    t.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount AS TagAnswerCount,
+    r.PostRank
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    TagStatistics ts ON r.Tags LIKE '%' || ts.TagName || '%'
+WHERE 
+    r.PostRank = 1  -- Most recent post per user
+ORDER BY 
+    r.CreationDate DESC;
+

@@ -1,0 +1,61 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mk.linked_movie_id,
+        a.title,
+        a.production_year,
+        mh.level + 1
+    FROM 
+        movie_link mk
+    JOIN 
+        movie_hierarchy mh ON mk.movie_id = mh.movie_id
+    JOIN 
+        aka_title a ON mk.linked_movie_id = a.id
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    COUNT(DISTINCT mc.company_id) AS companies_involved,
+    AVG(CASE WHEN a.gender = 'F' THEN 1 ELSE 0 END) OVER (PARTITION BY t.id) AS female_actor_percentage,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    mh.production_year AS movie_year,
+    DENSE_RANK() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank_companies
+FROM 
+    aka_name AS a
+JOIN 
+    cast_info AS ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title AS t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_companies AS mc ON t.id = mc.movie_id
+LEFT JOIN 
+    movie_keyword AS mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_hierarchy AS mh ON t.id = mh.movie_id
+WHERE 
+    a.name IS NOT NULL
+    AND (t.production_year > 2000 OR t.production_year IS NULL)
+    AND NOT EXISTS (SELECT 1 FROM movie_info mi WHERE mi.movie_id = t.id AND mi.info_type_id = 5)
+GROUP BY 
+    a.name, t.title, mh.production_year, t.id
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 2
+    AND AVG(CASE WHEN a.gender = 'F' THEN 1 ELSE 0 END) > 0.3
+ORDER BY 
+    mh.production_year DESC, 
+    companies_involved DESC;

@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS Author,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, u.DisplayName, p.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Author,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Author,
+    tp.CreationDate,
+    tp.CommentCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    (tp.UpVotes - tp.DownVotes) AS NetVotes,
+    STRING_AGG(tags.TagName, ', ') AS Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    (SELECT 
+         pt.PostId, 
+         t.TagName
+     FROM 
+         PostsTags pt
+     JOIN 
+         Tags t ON pt.TagId = t.Id) AS tags ON tp.PostId = tags.PostId
+GROUP BY 
+    tp.PostId, tp.Title, tp.Author, tp.CreationDate, tp.CommentCount, tp.UpVotes, tp.DownVotes
+ORDER BY 
+    NetVotes DESC;

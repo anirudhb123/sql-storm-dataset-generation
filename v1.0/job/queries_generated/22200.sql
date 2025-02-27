@@ -1,0 +1,75 @@
+WITH RECURSIVE MovieSeries AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.season_nr,
+        t.episode_nr,
+        1 AS level
+    FROM title t
+    WHERE t.season_nr IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.season_nr,
+        m.episode_nr,
+        ms.level + 1
+    FROM title m
+    INNER JOIN MovieSeries ms ON m.episode_of_id = ms.movie_id
+), 
+
+ActorDetails AS (
+    SELECT 
+        a.person_id,
+        ak.name,
+        MAX(CASE WHEN r.role = 'Actor' THEN r.role ELSE NULL END) AS is_actor,
+        COUNT(DISTINCT t.id) AS movie_count,
+        COALESCE(SUM(mg.amount), 0) AS total_gross
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    JOIN title t ON ci.movie_id = t.id
+    LEFT JOIN (SELECT movie_id, SUM(revenue) as amount FROM movie_info WHERE info_type_id = (SELECT id FROM info_type WHERE info LIKE '%gross%') GROUP BY movie_id) mg ON t.id = mg.movie_id
+    JOIN role_type r ON ci.role_id = r.id
+    GROUP BY a.person_id, ak.name
+), 
+
+HighGrossMovies AS (
+    SELECT 
+        t.id,
+        t.title, 
+        mi.info AS gross_info,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY mi.info DESC) AS rn
+    FROM title t
+    JOIN movie_info mi ON t.id = mi.movie_id
+    WHERE mi.info_type_id = (SELECT id FROM info_type WHERE info LIKE '%gross%')
+),
+
+FinalSelection AS (
+    SELECT 
+        md.*,
+        ad.name AS actor_name,
+        ad.movie_count,
+        ad.total_gross,
+        hg.gross_info
+    FROM MovieSeries md
+    LEFT JOIN ActorDetails ad ON md.movie_id = ad.movie_id
+    LEFT JOIN HighGrossMovies hg ON hg.id = md.movie_id
+    WHERE hg.rn <= 5 OR ad.total_gross IS NOT NULL
+)
+
+SELECT 
+    fs.title,
+    fs.production_year,
+    fs.season_nr,
+    fs.episode_nr,
+    COALESCE(fs.actor_name, 'Unknown Actor') AS actor_name,
+    fs.movie_count AS movies_with_actor,
+    COALESCE(fs.gross_info, 'No Gross Info') AS gross_info
+FROM FinalSelection fs
+WHERE fs.level > 1
+ORDER BY fs.production_year DESC, fs.title
+LIMIT 50;

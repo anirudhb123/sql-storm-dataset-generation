@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 1 AS depth
+    FROM aka_title m
+    WHERE m.production_year > 2000  
+
+    UNION ALL
+
+    SELECT m.id, m.title, m.production_year, mh.depth + 1
+    FROM movie_link ml
+    JOIN aka_title m ON m.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+
+TopMovies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        COUNT(DISTINCT ci.person_id) AS num_actors,
+        AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_order
+    FROM aka_title m
+    LEFT JOIN cast_info ci ON ci.movie_id = m.id
+    WHERE m.production_year IN (
+        SELECT production_year
+        FROM aka_title
+        WHERE production_year IS NOT NULL
+        GROUP BY production_year
+        HAVING COUNT(*) > 2
+    )
+    GROUP BY m.id
+    HAVING COUNT(DISTINCT ci.person_id) > 5
+),
+
+MovieDetails AS (
+    SELECT
+        th.movie_id,
+        th.title,
+        th.num_actors,
+        th.avg_order,
+        COALESCE(mt.info, 'No additional info') AS additional_info
+    FROM TopMovies th
+    LEFT JOIN movie_info mt ON mt.movie_id = th.movie_id AND mt.info_type_id = (SELECT id FROM info_type WHERE info = 'Tagline')
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    md.num_actors,
+    md.avg_order,
+    CASE WHEN md.avg_order > 5 THEN 'Popular Cast'
+         WHEN md.num_actors > 10 THEN 'High Actor Count'
+         ELSE 'Regular' END AS classification,
+    ROW_NUMBER() OVER (PARTITION BY mh.depth ORDER BY mh.production_year DESC) AS rank_within_depth
+FROM MovieHierarchy mh
+LEFT JOIN MovieDetails md ON mh.movie_id = md.movie_id
+ORDER BY mh.depth, rank_within_depth;

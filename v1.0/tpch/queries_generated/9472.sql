@@ -1,0 +1,50 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey, 
+        rs.s_name 
+    FROM 
+        RankedSuppliers rs 
+    WHERE 
+        rs.rank <= 10
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '2022-01-01' 
+        AND l.l_shipdate < DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    ts.s_suppkey, 
+    ts.s_name, 
+    COUNT(os.o_orderkey) AS order_count, 
+    AVG(os.total_revenue) AS avg_revenue
+FROM 
+    TopSuppliers ts
+LEFT JOIN 
+    OrderSummary os ON os.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_suppkey = ts.s_suppkey)
+GROUP BY 
+    ts.s_suppkey, ts.s_name
+ORDER BY 
+    avg_revenue DESC;

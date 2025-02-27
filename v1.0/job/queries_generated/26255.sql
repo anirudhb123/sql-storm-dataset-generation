@@ -1,0 +1,51 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorCount AS (
+    SELECT 
+        ki.movie_id,
+        COUNT(ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    JOIN 
+        title ti ON ci.movie_id = ti.id
+    WHERE 
+        ti.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+    GROUP BY 
+        ki.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(mi.info, ', ') AS movie_info_aggregate
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rt.title_rank,
+    ac.actor_count,
+    mi.movie_info_aggregate
+FROM 
+    RankedTitles rt
+JOIN 
+    ActorCount ac ON rt.title_id = ac.movie_id
+LEFT JOIN 
+    MovieInfo mi ON rt.title_id = mi.movie_id
+WHERE 
+    rt.title_rank <= 10 -- Get top 10 titles by year
+ORDER BY 
+    rt.production_year DESC, rt.title_rank;
+

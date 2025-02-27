@@ -1,0 +1,77 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        ROW_NUMBER() OVER (PARTITION BY sr_returning_customer_sk ORDER BY SUM(sr_return_quantity) DESC) AS rn
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        r.sr_returning_customer_sk,
+        r.total_returned_quantity,
+        r.total_returns,
+        c.c_first_name,
+        c.c_last_name,
+        DENSE_RANK() OVER (ORDER BY r.total_returned_quantity DESC) AS rank_by_quantity
+    FROM 
+        RankedReturns r
+    JOIN 
+        customer c ON r.sr_returning_customer_sk = c.c_customer_sk
+    WHERE 
+        r.total_returned_quantity > (SELECT AVG(total_returned_quantity) FROM RankedReturns)
+),
+SalesAndReturns AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        COALESCE(SUM(sr.sr_return_quantity), 0) AS total_returned,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        store_returns sr ON ws.ws_item_sk = sr.sr_item_sk
+    GROUP BY 
+        ws.ws_item_sk
+),
+IncomeBand AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        MAX(c.c_birth_year) AS latest_birth_year
+    FROM 
+        customer c
+    JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        ib.ib_income_band_sk
+)
+SELECT 
+    cust.c_first_name,
+    cust.c_last_name,
+    cust.total_returned_quantity,
+    cust.total_returns,
+    sa.total_sold,
+    sa.total_returned,
+    sa.total_net_profit,
+    ib.customer_count,
+    ib.latest_birth_year
+FROM 
+    HighReturnCustomers cust
+JOIN 
+    SalesAndReturns sa ON cust.rank_by_quantity = sa.total_sold
+LEFT JOIN 
+    IncomeBand ib ON cust.sr_returning_customer_sk = ib.ib_income_band_sk
+WHERE 
+    COALESCE(sa.total_returned, 0) > 0
+    AND ib.customer_count < (SELECT COUNT(*) FROM customer)
+ORDER BY 
+    cust.total_returns DESC, 
+    sa.total_net_profit ASC
+LIMIT 100 OFFSET 50;

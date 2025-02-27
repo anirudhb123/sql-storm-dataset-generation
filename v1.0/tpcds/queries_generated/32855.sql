@@ -1,0 +1,69 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_sold_date_sk,
+        cs_item_sk,
+        SUM(cs_net_profit) AS total_net_profit
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        cs_sold_date_sk, cs_item_sk
+),
+Address_CTE AS (
+    SELECT
+        ca.city,
+        COUNT(c.customer_sk) AS customer_count
+    FROM 
+        customer_address ca
+    LEFT JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        ca.city
+    HAVING 
+        COUNT(c.customer_sk) > 0
+),
+Top_Customers AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws_net_profit) AS customer_net_profit
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+    ORDER BY 
+        customer_net_profit DESC
+    LIMIT 10
+)
+
+SELECT 
+    a.city,
+    COUNT(a.customer_count) AS active_customer_count,
+    SUM(s.total_net_profit) AS total_net_sales_profit,
+    CASE 
+        WHEN a.customer_count > 0 THEN SUM(s.total_net_profit) / COUNT(a.customer_count) 
+        ELSE 0 
+    END AS avg_profit_per_customer
+FROM 
+    Address_CTE a
+JOIN 
+    Sales_CTE s ON a.customer_count > 0
+JOIN 
+    Top_Customers tc ON s.ws_item_sk IN (SELECT ws_item_sk FROM store_sales) 
+GROUP BY 
+    a.city
+ORDER BY 
+    avg_profit_per_customer DESC;

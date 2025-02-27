@@ -1,0 +1,58 @@
+WITH ranked_sales AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_ship_date_sk,
+        COALESCE(ws.ws_quantity, 0) AS total_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_net_profit > 0
+),
+store_sales_summary AS (
+    SELECT
+        ss.ss_store_sk,
+        SUM(ss.ss_sales_price) AS total_sales_price,
+        SUM(ss.ss_net_profit) AS total_profit
+    FROM
+        store_sales ss
+    GROUP BY
+        ss.ss_store_sk
+),
+customer_statistics AS (
+    SELECT
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        AVG(COALESCE(cd.cd_purchase_estimate, 0)) AS avg_purchase_estimate,
+        MAX(COALESCE(hd.hd_vehicle_count, 0)) AS max_vehicle_count
+    FROM
+        customer c
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    GROUP BY
+        ca.ca_state
+)
+
+SELECT
+    s.ss_store_sk,
+    COALESCE(s.total_sales_price, 0) AS total_store_sales,
+    COALESCE(cs.customer_count, 0) AS state_customer_count,
+    COALESCE(cs.avg_purchase_estimate, 0) AS average_customer_purchase,
+    CASE WHEN s.total_profit > 0 THEN 'Profitable' ELSE 'Not Profitable' END AS profitability_status,
+    (
+        SELECT COUNT(*) 
+        FROM ranked_sales r 
+        WHERE r.ws_order_number = ss.ss_order_number AND r.rank = 1
+    ) AS top_sales_count
+FROM
+    store_sales_summary s
+LEFT JOIN customer_statistics cs ON s.ss_store_sk = cs.ca_state  
+LEFT JOIN store s2 ON s.ss_store_sk = s2.s_store_sk
+WHERE
+    s.total_sales_price > 10000
+    AND (s.total_profit IS NULL OR s.total_profit < 5000)
+    AND (SELECT COUNT(*) FROM store_returns sr WHERE sr.sr_store_sk = s.ss_store_sk) < 50
+ORDER BY
+    total_store_sales DESC, state_customer_count ASC;

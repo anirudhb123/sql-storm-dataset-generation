@@ -1,0 +1,64 @@
+
+WITH
+    item_sales AS (
+        SELECT 
+            i.i_item_sk,
+            i.i_item_desc,
+            SUM(ws.ws_quantity) AS total_web_sales,
+            SUM(cs.cs_quantity) AS total_catalog_sales,
+            SUM(ss.ss_quantity) AS total_store_sales
+        FROM 
+            item i
+        LEFT JOIN 
+            web_sales ws ON i.i_item_sk = ws.ws_item_sk
+        LEFT JOIN 
+            catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+        LEFT JOIN 
+            store_sales ss ON i.i_item_sk = ss.ss_item_sk
+        GROUP BY 
+            i.i_item_sk, i.i_item_desc
+    ),
+    demographic_analysis AS (
+        SELECT 
+            cd.cd_gender,
+            cd.cd_marital_status,
+            AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+            COUNT(DISTINCT c.c_customer_id) AS customer_count
+        FROM 
+            customer c
+        JOIN 
+            customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        GROUP BY 
+            cd.cd_gender, cd.cd_marital_status
+    ),
+    sales_analysis AS (
+        SELECT 
+            is.i_item_desc,
+            COALESCE(is.total_web_sales, 0) AS web_sales,
+            COALESCE(is.total_catalog_sales, 0) AS catalog_sales,
+            COALESCE(is.total_store_sales, 0) AS store_sales,
+            ROW_NUMBER() OVER (PARTITION BY is.i_item_sk ORDER BY is.total_store_sales DESC) AS rank_by_store,
+            ROW_NUMBER() OVER (PARTITION BY is.i_item_sk ORDER BY is.total_web_sales DESC) AS rank_by_web
+        FROM 
+            item_sales is
+    )
+SELECT 
+    sa.i_item_desc,
+    sa.web_sales,
+    sa.catalog_sales,
+    sa.store_sales,
+    da.cd_gender,
+    da.cd_marital_status,
+    da.customer_count
+FROM 
+    sales_analysis sa
+LEFT JOIN 
+    demographic_analysis da ON sa.rank_by_store = da.customer_count
+WHERE 
+    (sa.web_sales + sa.catalog_sales > 100 OR da.customer_count IS NULL)
+    AND sa.store_sales IS NOT NULL
+ORDER BY 
+    sa.i_item_desc ASC,
+    sa.web_sales DESC,
+    da.customer_count DESC
+FETCH FIRST 50 ROWS ONLY;

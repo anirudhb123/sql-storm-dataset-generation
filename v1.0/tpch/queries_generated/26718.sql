@@ -1,0 +1,34 @@
+SELECT 
+    p.p_name,
+    s.s_name,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    AVG(o.o_totalprice) AS average_order_value,
+    STRING_AGG(DISTINCT r.r_name, ', ') AS regions_supplied,
+    MAX(l.l_extendedprice * (1 - l.l_discount)) AS max_discounted_price
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_retailprice > 20.00
+    AND l.l_shipdate >= DATE '2023-01-01'
+    AND l.l_shipdate < DATE '2023-12-31'
+GROUP BY 
+    p.p_name, s.s_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_available_quantity DESC, unique_customers DESC;

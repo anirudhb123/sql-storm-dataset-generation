@@ -1,0 +1,92 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        s.ss_sold_date_sk, 
+        s.ss_item_sk, 
+        SUM(s.ss_quantity) AS total_quantity
+    FROM 
+        customer c
+    JOIN 
+        store_sales s ON c.c_customer_sk = s.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        s.ss_sold_date_sk, 
+        s.ss_item_sk
+    UNION ALL
+    SELECT 
+        sh.c_customer_sk, 
+        sh.c_first_name, 
+        sh.c_last_name, 
+        s.ss_sold_date_sk, 
+        s.ss_item_sk, 
+        sh.total_quantity + SUM(s.ss_quantity)
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store_sales s ON sh.ss_item_sk = s.ss_item_sk AND sh.ss_sold_date_sk = s.ss_sold_date_sk
+    GROUP BY 
+        sh.c_customer_sk, 
+        sh.c_first_name, 
+        sh.c_last_name,
+        s.ss_sold_date_sk,
+        s.ss_item_sk
+),
+item_sales AS (
+    SELECT 
+        i.i_item_sk, 
+        i.i_product_name, 
+        i.i_current_price, 
+        COUNT(ws.ws_order_number) AS web_sales_count,
+        COUNT(cs.cs_order_number) AS catalog_sales_count,
+        COUNT(ss.ss_ticket_number) AS store_sales_count
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+    LEFT JOIN 
+        store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    GROUP BY 
+        i.i_item_sk, 
+        i.i_product_name, 
+        i.i_current_price
+),
+sales_summary AS (
+    SELECT 
+        sh.c_first_name, 
+        sh.c_last_name, 
+        sh.total_quantity,
+        isales.i_product_name, 
+        isales.web_sales_count, 
+        isales.catalog_sales_count, 
+        isales.store_sales_count,
+        RANK() OVER (PARTITION BY sh.c_customer_sk ORDER BY sh.total_quantity DESC) AS customer_rank
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        item_sales isales ON sh.ss_item_sk = isales.i_item_sk
+)
+SELECT 
+    s.c_first_name, 
+    s.c_last_name, 
+    s.total_quantity, 
+    i.i_product_name,
+    COALESCE(s.web_sales_count, 0) AS web_sales_count, 
+    COALESCE(s.catalog_sales_count, 0) AS catalog_sales_count, 
+    COALESCE(s.store_sales_count, 0) AS store_sales_count 
+FROM 
+    sales_summary s
+JOIN 
+    item_sales i ON i.i_item_sk = s.ss_item_sk
+WHERE 
+    s.total_quantity > 5
+    AND s.customer_rank = 1
+ORDER BY 
+    s.total_quantity DESC, 
+    i.i_product_name;

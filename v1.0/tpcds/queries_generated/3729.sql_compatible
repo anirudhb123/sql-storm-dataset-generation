@@ -1,0 +1,73 @@
+
+WITH ItemSales AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        SUM(ws.ws_quantity) AS total_qty_sold,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY i.i_item_id ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_month_seq IN (5, 6))
+    GROUP BY 
+        i.i_item_id, i.i_item_desc
+),
+TopSellingItems AS (
+    SELECT 
+        i_item_id, 
+        i_item_desc, 
+        total_qty_sold, 
+        total_sales
+    FROM 
+        ItemSales
+    WHERE 
+        sales_rank <= 10
+),
+CustomerReturns AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returns,
+        SUM(cr.cr_return_amount) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    JOIN 
+        date_dim dd ON cr.cr_returned_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        cr.cr_item_sk
+),
+ReturnImpact AS (
+    SELECT 
+        tsi.i_item_id,
+        tsi.i_item_desc,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+        tsi.total_qty_sold,
+        tsi.total_sales,
+        CASE 
+            WHEN tsi.total_sales > 0 THEN (COALESCE(cr.total_return_amount, 0) / tsi.total_sales) * 100
+            ELSE 0
+        END AS return_ratio
+    FROM 
+        TopSellingItems tsi
+    LEFT JOIN 
+        CustomerReturns cr ON tsi.i_item_id = cr.cr_item_sk
+)
+SELECT 
+    r.i_item_id,
+    r.i_item_desc,
+    r.total_qty_sold,
+    r.total_sales,
+    r.total_returns,
+    r.total_return_amount,
+    r.return_ratio
+FROM 
+    ReturnImpact r
+WHERE 
+    r.return_ratio > 5 OR r.total_returns > 10
+ORDER BY 
+    r.return_ratio DESC, r.total_sales DESC;

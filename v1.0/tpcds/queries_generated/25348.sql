@@ -1,0 +1,33 @@
+
+WITH StringBenchmark AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        REPLACE(REPLACE(c.c_email_address, '@', ' @'), '.', ' .') AS modified_email,
+        CHAR_LENGTH(REPLACE(c.c_first_name, 'a', '')) AS name_length_without_a,
+        SUBSTRING(c.c_first_name, 1, 3) AS name_prefix,
+        LOWER(c.c_first_name) AS lower_first_name,
+        UPPER(c.c_last_name) AS upper_last_name,
+        LPAD(c.c_birth_month, 2, '0') AS padded_birth_month
+    FROM 
+        customer c
+    WHERE 
+        c.c_customer_id LIKE 'CUST%' 
+        AND c.c_birth_year BETWEEN 1980 AND 1990
+),
+AggregatedResults AS (
+    SELECT 
+        COUNT(*) AS total_customers,
+        COUNT(DISTINCT full_name) AS unique_full_names,
+        COUNT(DISTINCT modified_email) AS unique_modified_emails,
+        AVG(name_length_without_a) AS avg_name_length_without_a,
+        MIN(name_prefix) AS smallest_name_prefix,
+        MAX(lower_first_name) AS max_lower_first_name,
+        MIN(upper_last_name) AS min_upper_last_name
+    FROM 
+        StringBenchmark
+)
+SELECT 
+    * 
+FROM 
+    AggregatedResults;

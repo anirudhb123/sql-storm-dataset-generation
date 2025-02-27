@@ -1,0 +1,72 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        COUNT(c.id) OVER (PARTITION BY m.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY c.nr_order) AS cast_order
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    WHERE 
+        m.production_year IS NOT NULL 
+        AND m.production_year >= 2000
+),
+
+combined_details AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.keyword,
+        mh.cast_count,
+        mh.cast_order,
+        COALESCE(cn.name, 'Unknown') AS company_name,
+        CASE 
+            WHEN mh.cast_count > 5 THEN 'Large Cast' 
+            WHEN mh.cast_count BETWEEN 2 AND 5 THEN 'Medium Cast' 
+            ELSE 'Small Cast' 
+        END AS cast_size,
+        CASE 
+            WHEN ih.info IS NULL THEN 'No Info Available' 
+            ELSE ih.info 
+        END AS movie_info
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_info ih ON mh.movie_id = ih.movie_id AND ih.info_type_id = 1  
+)
+
+SELECT 
+    cd.movie_id,
+    cd.title,
+    cd.production_year,
+    cd.keyword,
+    cd.cast_size,
+    cd.company_name,
+    cd.movie_info,
+    COUNT(mh.keyword) AS keyword_count,
+    MAX(cd.cast_count) OVER () AS max_cast_count,
+    MIN(cd.production_year) OVER () AS earliest_year,
+    STRING_AGG(DISTINCT cd.keyword, ', ') AS all_keywords
+FROM 
+    combined_details cd 
+JOIN 
+    movie_hierarchy mh ON cd.movie_id = mh.movie_id
+GROUP BY 
+    cd.movie_id, cd.title, cd.production_year, cd.keyword, cd.cast_size, cd.company_name, cd.movie_info
+HAVING 
+    COUNT(mh.keyword) > 1
+ORDER BY 
+    cd.production_year DESC,
+    cd.cast_count DESC
+LIMIT 100
+OFFSET 0;

@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(a.Id) AS AnswerCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Tags t ON t.WikiPostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.Score, p.ViewCount
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        u.DisplayName AS Author,
+        u.Reputation,
+        hp.CreationDate AS LastEditDate,
+        hp.UserDisplayName AS LastEditor
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostHistory hp ON rp.PostId = hp.PostId
+    WHERE 
+        rp.ScoreRank <= 5 
+)
+SELECT 
+    tp.Title,
+    tp.Body,
+    tp.Tags,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.AnswerCount,
+    tp.Author,
+    tp.Reputation,
+    tp.LastEditDate,
+    tp.LastEditor,
+    RANK() OVER (ORDER BY tp.Score DESC) AS GlobalRank,
+    (SELECT 
+         COUNT(v.Id) 
+     FROM 
+         Votes v 
+     WHERE 
+         v.PostId = tp.PostId AND v.VoteTypeId = 2) AS UpVotes,
+    (SELECT 
+         COUNT(v.Id) 
+     FROM 
+         Votes v 
+     WHERE 
+         v.PostId = tp.PostId AND v.VoteTypeId = 3) AS DownVotes
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, 
+    tp.CreationDate ASC;

@@ -1,0 +1,80 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM 
+        web_sales ws 
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL AND 
+        i.i_current_price > 0
+),
+AggregateReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        COUNT(DISTINCT sr_ticket_number) AS return_count,
+        AVG(sr_return_amt) AS avg_return_amt
+    FROM 
+        store_returns 
+    GROUP BY 
+        sr_item_sk
+),
+ReturnImpact AS (
+    SELECT 
+        ws.ws_item_sk,
+        COALESCE(ar.total_returned, 0) AS total_returned,
+        COALESCE(ar.return_count, 0) AS return_count,
+        RANK() OVER (ORDER BY COALESCE(ar.total_returned, 0) DESC) AS return_rank
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        AggregateReturns ar ON ws.ws_item_sk = ar.sr_item_sk
+),
+SalesImpact AS (
+    SELECT 
+        r.ws_item_sk,
+        r.total_returned,
+        r.return_count,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        (SUM(ws.ws_net_profit) - COALESCE(SUM(ar.avg_return_amt), 0)) AS adjusted_net_profit
+    FROM 
+        ReturnImpact r
+    JOIN 
+        web_sales ws ON r.ws_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        AggregateReturns ar ON r.ws_item_sk = ar.sr_item_sk
+    GROUP BY 
+        r.ws_item_sk, r.total_returned, r.return_count
+)
+SELECT 
+    si.ws_item_sk,
+    si.total_returned,
+    si.return_count,
+    si.total_sold,
+    si.total_net_profit,
+    si.adjusted_net_profit,
+    (si.adjusted_net_profit / NULLIF(si.total_sold, 0)) AS net_profit_per_item,
+    CASE 
+        WHEN si.return_count > 0 THEN TRUE
+        ELSE FALSE
+    END AS has_returns,
+    CONCAT('Item ', CAST(si.ws_item_sk AS CHAR)) AS item_identifier
+FROM 
+    SalesImpact si
+JOIN 
+    item i ON si.ws_item_sk = i.i_item_sk
+WHERE 
+    i.i_brand = 'BrandX' 
+    AND si.total_sold > 100 
+    AND (si.return_count > 0 OR si.total_net_profit < 0)
+ORDER BY 
+    si.return_rank, si.adjusted_net_profit DESC
+LIMIT 100
+OFFSET 0;

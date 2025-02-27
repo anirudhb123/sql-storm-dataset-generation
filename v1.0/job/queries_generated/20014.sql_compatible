@@ -1,0 +1,82 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.id) AS rn
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS num_cast_members,
+        STRING_AGG(DISTINCT a.name, ', ' ORDER BY a.name) AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, '; ') AS company_names,
+        MAX(ct.kind) AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+MoviesWithDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(cd.num_cast_members, 0) AS num_cast_members,
+        COALESCE(cd.cast_names, 'N/A') AS cast_names,
+        COALESCE(mc.company_names, 'N/A') AS company_names,
+        mc.company_type
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CastDetails cd ON rm.movie_id = cd.movie_id
+    LEFT JOIN 
+        MovieCompanies mc ON rm.movie_id = mc.movie_id
+)
+SELECT 
+    mwd.movie_id,
+    mwd.title,
+    mwd.production_year,
+    mwd.num_cast_members,
+    mwd.cast_names,
+    mwd.company_names,
+    CASE 
+        WHEN mwd.company_type IS NULL THEN 'Unknown Company Type'
+        WHEN mwd.company_type LIKE '%Production%' THEN 'Production Company'
+        ELSE 'Other Company Type'
+    END AS company_type_category,
+    EXISTS (
+        SELECT 1
+        FROM movie_info mi
+        WHERE mi.movie_id = mwd.movie_id AND mi.info_type_id = (
+            SELECT id
+            FROM info_type
+            WHERE info = 'Budget'
+            LIMIT 1
+        )
+    ) AS has_budget_info
+FROM 
+    MoviesWithDetails mwd
+WHERE 
+    mwd.production_year > 2000
+ORDER BY 
+    mwd.production_year DESC, mwd.title;

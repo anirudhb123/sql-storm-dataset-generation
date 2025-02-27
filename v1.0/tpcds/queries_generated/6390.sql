@@ -1,0 +1,56 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_profit) AS avg_profit,
+        MAX(ws.ws_net_paid) AS max_payment,
+        MIN(ws.ws_net_paid) AS min_payment
+    FROM 
+        customer c
+        JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1970 AND 1990 AND
+        ws.ws_sold_date_sk BETWEEN 2458849 AND 2458914 -- Date range example
+    GROUP BY 
+        c.c_customer_id
+),
+DemographicSales AS (
+    SELECT 
+        cd.cd_gender,
+        SUM(cs.total_sales) AS total_sales_by_gender,
+        AVG(cs.avg_profit) AS avg_profit_by_gender,
+        COUNT(DISTINCT cs.c_customer_id) AS unique_customers
+    FROM 
+        CustomerSales cs
+        JOIN customer_demographics cd ON cs.c_customer_id = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender
+),
+WarehouseSales AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws.ws_quantity) AS total_items_sold,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        warehouse w
+        JOIN web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    d.cd_gender,
+    d.total_sales_by_gender,
+    d.avg_profit_by_gender,
+    d.unique_customers,
+    w.w_warehouse_id,
+    w.total_items_sold AS items_sold_in_warehouse,
+    w.total_profit AS profit_from_warehouse
+FROM 
+    DemographicSales d
+    JOIN WarehouseSales w ON w.total_profit > 10000
+ORDER BY 
+    d.total_sales_by_gender DESC, 
+    w.total_profit DESC
+LIMIT 100;

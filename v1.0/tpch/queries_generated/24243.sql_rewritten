@@ -1,0 +1,90 @@
+WITH RECURSIVE SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_custkey,
+        o.o_orderstatus
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice >= (
+            SELECT AVG(o2.o_totalprice) * 1.5
+            FROM orders o2
+        )
+        AND o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'Unknown'
+            ELSE 'Known'
+        END AS balance_status
+    FROM 
+        customer c
+    WHERE 
+        c.c_mktsegment IN ('BUILDING', 'AUTO')
+),
+SubqueryAggregates AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name,
+        COUNT(DISTINCT l.l_orderkey) AS order_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(ss.total_sales), 0) AS total_supplier_sales,
+    COALESCE(SUM(c.c_acctbal), 0) AS total_customer_balance,
+    COALESCE(SUM(ha.total_revenue), 0) AS total_national_revenue,
+    COUNT(DISTINCT fo.o_orderkey) AS high_value_order_count
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SubqueryAggregates ha ON n.n_nationkey = ha.n_nationkey
+LEFT JOIN 
+    FilteredCustomers c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    SupplierSales ss ON ss.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_availqty > 100
+    )
+LEFT JOIN 
+    HighValueOrders fo ON fo.o_custkey = c.c_custkey
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(ss.total_sales) > 10000 OR COUNT(fo.o_orderkey) > 5
+ORDER BY 
+    total_supplier_sales DESC, r.r_name;

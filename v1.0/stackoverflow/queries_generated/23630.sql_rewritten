@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(p.ClosedDate, 'No Closure') AS ClosureStatus,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE 
+        p.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AcceptedAnswerId, p.ParentId
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgePoints
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.Views
+),
+
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS IsClosedOrReopened
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    up.PostId,
+    up.Title,
+    up.CreationDate,
+    up.Score,
+    up.ViewCount,
+    us.DisplayName,
+    us.Reputation,
+    us.Views,
+    us.BadgeCount,
+    up.ClosureStatus,
+    up.TagsList,
+    phc.HistoryCount,
+    CASE 
+        WHEN phc.IsClosedOrReopened = 1 THEN 'Closed/Reopened' 
+        ELSE 'Open' 
+    END AS PostStatus,
+    COALESCE(rn, 0) AS UserPostRank 
+FROM 
+    RankedPosts up
+JOIN 
+    Users u ON up.AcceptedAnswerId = u.Id
+JOIN 
+    UserStats us ON u.Id = us.UserId
+LEFT JOIN 
+    PostHistoryCounts phc ON up.PostId = phc.PostId
+ORDER BY 
+    up.CreationDate DESC,
+    up.Score DESC
+LIMIT 100 OFFSET 0;

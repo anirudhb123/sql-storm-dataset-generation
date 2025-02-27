@@ -1,0 +1,84 @@
+WITH RecursivePostCTE AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostCTE rp ON p.ParentId = rp.PostId
+),
+PostVotes AS (
+    
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) OVER (PARTITION BY PostId) AS TotalVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostStats AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COALESCE(v.TotalVotes, 0) AS TotalVotes,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM Posts p
+    LEFT JOIN PostVotes v ON p.Id = v.PostId
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId IN (1, 2)  
+),
+ClosedPosts AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS ClosedPostTitle,
+        ph.Comment AS CloseReason
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10  
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.TotalVotes,
+    ps.OwnerDisplayName,
+    ps.OwnerReputation,
+    COALESCE(cp.CloseReason, 'Not Closed') AS CloseReason,
+    ARRAY_AGG(DISTINCT r.Title) AS ParentPostTitles
+FROM PostStats ps
+LEFT JOIN ClosedPosts cp ON ps.PostId = cp.PostId
+LEFT JOIN RecursivePostCTE r ON ps.PostId = r.AcceptedAnswerId
+GROUP BY 
+    ps.PostId, 
+    ps.Title, 
+    ps.CreationDate, 
+    ps.UpVotes, 
+    ps.DownVotes, 
+    ps.TotalVotes, 
+    ps.OwnerDisplayName, 
+    ps.OwnerReputation, 
+    cp.CloseReason
+ORDER BY ps.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,61 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS actor_count_rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+CompleteMovieInfo AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        mk.keywords,
+        COALESCE(mi.info, 'No info available') AS additional_info
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_info mi ON rm.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'summary' LIMIT 1)
+)
+SELECT 
+    cm.movie_id,
+    cm.title,
+    cm.production_year,
+    cm.keywords,
+    cm.additional_info,
+    COUNT(DISTINCT ci.person_id) AS total_actors,
+    CASE 
+        WHEN cm.production_year < 2000 THEN 'Classic'
+        WHEN cm.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era
+FROM 
+    CompleteMovieInfo cm
+LEFT JOIN 
+    cast_info ci ON cm.movie_id = ci.movie_id
+WHERE 
+    cm.actor_count_rank <= 5
+GROUP BY 
+    cm.movie_id, cm.title, cm.production_year, cm.keywords, cm.additional_info, cm.actor_count_rank
+ORDER BY 
+    total_actors DESC, cm.production_year DESC;

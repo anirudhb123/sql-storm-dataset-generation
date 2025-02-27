@@ -1,0 +1,68 @@
+WITH RECURSIVE UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostsCreated,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS UpVotes,  -- Upvotes
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS DownVotes,  -- Downvotes
+        RANK() OVER (ORDER BY COUNT(DISTINCT P.Id) DESC) AS EngagementRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON V.PostId = P.Id
+    GROUP BY U.Id, U.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS Author,
+        P.Body,
+        P.Tags,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RN
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.UserId) AS CloseVoteCount,
+        MAX(PH.CreationDate) AS LastClosed
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.PostId
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS Author,
+        COALESCE(CP.CloseVoteCount, 0) AS CloseCount,
+        COALESCE(REP.ParentId, 0) AS ParentPostId,
+        RANK() OVER (ORDER BY COALESCE(CP.CloseVoteCount, 0) DESC) AS CloseRank
+    FROM Posts P
+    LEFT JOIN ClosedPosts CP ON P.Id = CP.PostId
+    LEFT JOIN Posts REP ON P.AcceptedAnswerId = REP.Id
+)
+SELECT 
+    UE.UserId,
+    UE.DisplayName,
+    UE.PostsCreated,
+    UE.UpVotes,
+    UE.DownVotes,
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate AS PostCreationDate,
+    RP.Author,
+    RP.Body,
+    RP.Tags,
+    PS.CloseCount,
+    PS.CloseRank
+FROM UserEngagement UE
+JOIN RecentPosts RP ON UE.UserId = RP.OwnerUserId AND RP.RN = 1
+JOIN PostSummary PS ON RP.PostId = PS.PostId
+WHERE UE.PostsCreated > 5 
+ORDER BY UE.EngagementRank, RP.CreationDate DESC
+LIMIT 100;

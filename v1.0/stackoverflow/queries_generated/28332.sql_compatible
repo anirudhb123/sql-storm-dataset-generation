@@ -1,0 +1,77 @@
+
+WITH TagFrequency AS (
+    SELECT 
+        LOWER(TRIM(tag)) AS CleanedTag,
+        COUNT(*) AS TagCount
+    FROM
+        Posts p
+    CROSS JOIN 
+        UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><')) AS tag
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        LOWER(TRIM(tag))
+),
+TopTags AS (
+    SELECT 
+        CleanedTag,
+        TagCount,
+        ROW_NUMBER() OVER (ORDER BY TagCount DESC) AS TagRank
+    FROM 
+        TagFrequency
+    WHERE 
+        TagCount > 5 
+),
+UsersWithPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(DISTINCT t.TagName) AS AssociatedTags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::text[])
+    WHERE 
+        p.Score > 10 
+    GROUP BY 
+        p.Id, u.DisplayName
+)
+SELECT 
+    ut.UserId,
+    ut.PostCount,
+    ut.TotalViews,
+    ut.TotalScore,
+    tt.CleanedTag AS TopTag,
+    pp.Title AS PopularPostTitle,
+    pp.ViewCount AS PopularPostViews,
+    pp.Score AS PopularPostScore,
+    pp.OwnerDisplayName
+FROM 
+    UsersWithPosts ut
+LEFT JOIN 
+    TopTags tt ON ut.PostCount > 0
+LEFT JOIN 
+    PopularPosts pp ON pp.AssociatedTags && ARRAY[tt.CleanedTag] 
+WHERE 
+    ut.TotalViews > 1000 
+ORDER BY 
+    ut.TotalScore DESC, ut.TotalViews DESC, tt.TagCount DESC
+LIMIT 50;

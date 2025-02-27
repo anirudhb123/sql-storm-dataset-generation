@@ -1,0 +1,66 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1  -- Assuming 1 represents 'movie'
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1 AS level
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+, person_movie_roles AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        r.role AS role,
+        COUNT(*) OVER (PARTITION BY ci.person_id ORDER BY ci.movie_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+)
+
+SELECT 
+    p.person_id,
+    a.name AS actor_name,
+    json_agg(DISTINCT mh.title) AS movies,
+    json_agg(DISTINCT mh.production_year) AS production_years,
+    COUNT(DISTINCT mh.movie_id) AS total_movies,
+    SUM(CASE WHEN pmr.role_count > 1 THEN 1 ELSE 0 END) AS multiple_roles,
+    MIN(mh.production_year) AS first_movie_year,
+    MAX(mh.production_year) AS last_movie_year,
+    STRING_AGG(DISTINCT c.kind, ', ') AS company_types
+FROM 
+    aka_name a
+JOIN 
+    person_movie_roles pmr ON a.person_id = pmr.person_id
+JOIN 
+    movie_hierarchy mh ON pmr.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type c ON mc.company_type_id = c.id
+WHERE 
+    a.name IS NOT NULL
+GROUP BY 
+    p.person_id, a.name
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 5
+ORDER BY 
+    total_movies DESC;

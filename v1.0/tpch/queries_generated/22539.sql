@@ -1,0 +1,54 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, 0 AS level
+    FROM customer
+    WHERE c_acctbal IS NOT NULL AND c_acctbal > (SELECT AVG(c_acctbal) FROM customer WHERE c_nationkey IS NOT NULL)
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, h.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy h ON c.c_nationkey = h.c_nationkey
+    WHERE h.level < 3
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) as total_avail_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+LineItemInfo AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, 
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) as order_rank,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) OVER(PARTITION BY l.l_orderkey) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate > '2023-01-01'
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderstatus, l.total_revenue
+    FROM orders o
+    JOIN LineItemInfo l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_totalprice IS NOT NULL AND o.o_orderstatus IN ('O', 'F')
+    AND EXISTS (
+        SELECT 1 FROM partsupp ps
+        WHERE ps.ps_partkey = l.l_partkey 
+        AND ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+    )
+),
+SupplierNation AS (
+    SELECT DISTINCT ns.n_name, ns.n_regionkey, s.s_suppkey
+    FROM nation ns
+    JOIN supplier s ON ns.n_nationkey = s.s_nationkey
+)
+SELECT DISTINCT ch.c_name, 
+                pn.p_name, 
+                sn.n_name, 
+                COALESCE(ho.o_totalprice, 0) AS order_total_price,
+                SUM(CASE WHEN l.l_tax IS NULL THEN 0 ELSE l.l_tax END) AS total_tax,
+                COUNT(DISTINCT l.l_orderkey) AS order_count
+FROM CustomerHierarchy ch
+LEFT JOIN HighValueOrders ho ON ch.c_custkey = ho.o_orderkey
+LEFT JOIN PartSupplier ps ON ps.ps_partkey IN (
+    SELECT p.p_partkey FROM part p WHERE p.p_size > 10
+)
+JOIN SupplierNation sn ON sn.s_suppkey = ps.ps_suppkey AND sn.n_regionkey IS NOT NULL
+LEFT JOIN lineitem l ON l.l_orderkey = ho.o_orderkey
+GROUP BY ch.c_name, pn.p_name, sn.n_name, ho.o_totalprice
+HAVING SUM(COALESCE(l.l_extendedprice, 0)) > 1000.00
+ORDER BY ch.c_name, sn.n_name;

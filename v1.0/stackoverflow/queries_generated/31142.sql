@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- only questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+        COALESCE(ub.BadgeNames, 'No Badges') AS BadgesList
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    WHERE 
+        u.Reputation > 100 -- focusing on users with significant reputation
+    ORDER BY 
+        u.Reputation DESC
+    LIMIT 10
+)
+SELECT 
+    tp.DisplayName,
+    tp.Reputation,
+    tp.TotalBadges,
+    tp.BadgesList,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate,
+    rp.Score AS RecentPostScore,
+    rp.ViewCount AS RecentPostViews,
+    rp.CommentCount AS RecentPostComments,
+    rp.Upvotes AS RecentPostUpvotes,
+    rp.Downvotes AS RecentPostDownvotes
+FROM 
+    TopUsers tp
+LEFT JOIN 
+    RankedPosts rp ON tp.Id = rp.OwnerUserId AND rp.PostRank = 1 -- getting the most recent post per user
+ORDER BY 
+    tp.Reputation DESC;

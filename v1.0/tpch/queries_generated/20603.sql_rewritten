@@ -1,0 +1,91 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_mktsegment,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'P')
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS acc_rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+    HAVING 
+        COUNT(DISTINCT ps.ps_suppkey) > 3 AND p.p_retailprice >= 50.00
+),
+SupplierSales AS (
+    SELECT 
+        l.l_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        l.l_returnflag = 'N' AND 
+        l.l_shipdate BETWEEN '1996-01-01' AND '1997-12-31'
+    GROUP BY 
+        l.l_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ss.total_sales,
+        ss.last_order_date
+    FROM 
+        SupplierInfo s
+    JOIN 
+        SupplierSales ss ON s.s_suppkey = ss.l_suppkey
+    WHERE 
+        s.acc_rank <= 5
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    r.r_name AS region,
+    IFNULL(hp.p_name, 'No High Value Part') AS part_name,
+    ts.s_name AS supplier_name,
+    ts.total_sales,
+    COUNT(*) OVER (PARTITION BY o.o_orderstatus) AS order_status_count
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    HighValueParts hp ON o.o_orderkey = (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = hp.p_partkey LIMIT 1)
+JOIN 
+    nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey)
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    TopSuppliers ts ON ts.total_sales = (SELECT MAX(total_sales) FROM SupplierSales WHERE l_suppkey = ts.s_suppkey)
+WHERE 
+    o.o_orderdate >= DATEADD(YEAR, -1, cast('1998-10-01' as date))
+ORDER BY 
+    o.o_orderdate DESC, 
+    ts.total_sales DESC;

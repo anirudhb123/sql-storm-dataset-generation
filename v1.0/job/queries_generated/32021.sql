@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS title,
+        mt.production_year,
+        1 AS level,
+        STRING_AGG(DISTINCT c.name, ', ') AS cast_names
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level + 1,
+        STRING_AGG(DISTINCT c.name, ', ') AS cast_names
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title linked_mt ON ml.linked_movie_id = linked_mt.id
+    LEFT JOIN 
+        cast_info ci ON linked_mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.level
+)
+
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    r.level,
+    COALESCE(r.cast_names, 'No Cast') AS cast_summary,
+    ROW_NUMBER() OVER (PARTITION BY r.production_year ORDER BY r.level) AS rank_by_year
+FROM 
+    MovieHierarchy r
+WHERE 
+    r.production_year IS NOT NULL
+    AND r.level = (
+        SELECT MAX(level)
+        FROM MovieHierarchy
+        WHERE movie_id = r.movie_id
+    )
+ORDER BY 
+    r.production_year DESC, 
+    r.level DESC;
+
+-- Performance benchmark for different join types and data aggregation.

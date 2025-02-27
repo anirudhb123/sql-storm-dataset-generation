@@ -1,0 +1,81 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        P2.Id,
+        P2.Title,
+        P2.OwnerUserId,
+        R.Level + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        Posts P ON P2.ParentId = P.Id
+    INNER JOIN 
+        RecursivePostHierarchy R ON R.PostId = P.Id
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Location
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 5000
+),
+TopPosts AS (
+    SELECT 
+        R.PostId,
+        R.Title,
+        R.OwnerUserId,
+        R.Level,
+        P.Score,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY R.OwnerUserId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        RecursivePostHierarchy R
+    INNER JOIN 
+        Posts P ON R.PostId = P.Id
+)
+SELECT 
+    U.DisplayName,
+    U.Location,
+    TP.Title AS TopPostTitle,
+    TP.Score AS TopPostScore,
+    TP.CreationDate AS PostDate,
+    PH.Name AS PostHistoryType,
+    (SELECT COUNT(*) FROM PostHistory PH WHERE PH.PostId = TP.PostId) AS EditCount,
+    COALESCE((SELECT STRING_AGG(VT.Name, ', ') 
+               FROM Votes V 
+               JOIN VoteTypes VT ON V.VoteTypeId = VT.Id 
+               WHERE V.PostId = TP.PostId), 'No votes') AS VoteTypes
+FROM 
+    TopPosts TP
+JOIN 
+    UserReputation U ON TP.OwnerUserId = U.UserId
+LEFT JOIN 
+    PostHistory PH ON PH.PostId = TP.PostId AND PH.CreationDate = (SELECT MAX(CreationDate) FROM PostHistory WHERE PostId = TP.PostId)
+WHERE 
+    TP.Rank = 1
+GROUP BY 
+    U.DisplayName,
+    U.Location,
+    TP.Title,
+    TP.Score,
+    TP.CreationDate,
+    PH.Name
+ORDER BY 
+    U.Reputation DESC, 
+    TP.Score DESC;

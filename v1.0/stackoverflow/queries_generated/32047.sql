@@ -1,0 +1,102 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        Id, 
+        TagName,
+        0 AS Level
+    FROM 
+        Tags
+    WHERE 
+        IsModeratorOnly = 0  -- Start with non-moderator tags
+    UNION ALL
+    SELECT 
+        t.Id, 
+        t.TagName,
+        Level + 1
+    FROM 
+        Tags t
+    JOIN 
+        RecursiveTagHierarchy rth ON t.ExcerptPostId = rth.Id
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.CreationDate IS NOT NULL), 0) AS VoteCount,
+        COALESCE(SUM(c.Id IS NOT NULL), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(c.CommentCount, 0) AS TotalComments,
+        COALESCE(ph.EditCount, 0) AS TotalEdits
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS EditCount
+        FROM 
+            PostHistory 
+        WHERE 
+            PostHistoryTypeId IN (4, 5, 6) -- Title, Body and Tags edits
+        GROUP BY 
+            PostId
+    ) ph ON p.Id = ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        ue.UserId,
+        ue.DisplayName,
+        ue.VoteCount,
+        ue.CommentCount,
+        RANK() OVER (ORDER BY ue.VoteCount DESC, ue.CommentCount DESC) AS Rank
+    FROM 
+        UserEngagement ue
+)
+SELECT 
+    p.Title AS PostTitle,
+    p.Score AS PostScore,
+    p.ViewCount AS PostViews,
+    t.TagName,
+    u.DisplayName AS TopUser,
+    u.Rank AS UserRank,
+    CASE 
+        WHEN u.VoteCount > 0 THEN 'Active User' 
+        ELSE 'New User' 
+    END AS UserType
+FROM 
+    PostActivity p
+LEFT JOIN 
+    RecursiveTagHierarchy t ON p.Title LIKE '%' || t.TagName || '%' -- Assume title contains tag
+LEFT JOIN 
+    TopUsers u ON p.OwnerUserId = u.UserId
+WHERE 
+    p.ViewCount > 1000
+ORDER BY 
+    p.Score DESC, 
+    p.ViewCount DESC
+FETCH FIRST 20 ROWS ONLY;

@@ -1,0 +1,43 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        pg_size_pretty(pg_total_relation_size('Posts')) AS PostSize,
+        COALESCE(SUM(CASE WHEN v.UserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS VoteCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) b ON p.OwnerUserId = b.UserId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, c.CommentCount, b.BadgeCount
+)
+SELECT 
+    *,
+    (EXTRACT(EPOCH FROM '2024-10-01 12:34:56' - CreationDate) / 86400) AS DaysSinceCreation
+FROM 
+    PostStats
+ORDER BY 
+    VoteCount DESC, CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,53 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM web_sales 
+    GROUP BY ws_item_sk
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        SUM(ws.net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_ext_sales_price) AS avg_sales_price
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c.c_birth_year > 1970
+    GROUP BY c.c_customer_sk, cd.cd_gender
+),
+income_bracket AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        COUNT(hd.hd_demo_sk) AS household_count
+    FROM household_demographics hd
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY ib.ib_income_band_sk
+),
+ranked_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_net_profit,
+        RANK() OVER (ORDER BY cs.total_net_profit DESC) AS net_profit_rank
+    FROM customer_summary cs
+)
+SELECT 
+    s_store.s_store_name,
+    SUM(ws.ws_quantity) AS total_units_sold,
+    SUM(ws.ws_net_profit) AS total_revenue,
+    COALESCE(i.household_count, 0) AS households_in_income_bracket
+FROM store s_store
+JOIN web_sales ws ON ws.ws_ship_store_sk = s_store.s_store_sk
+JOIN ranked_customers rc ON ws.ws_bill_customer_sk = rc.c_customer_sk
+LEFT JOIN income_bracket i ON rc.order_count = i.household_count
+WHERE s_store.s_closed_date_sk IS NULL
+AND (ws.ws_sales_price - ws.ws_ext_discount_amt) > 10.00
+GROUP BY s_store.s_store_name
+HAVING SUM(ws.ws_net_profit) > 100000
+ORDER BY total_units_sold DESC
+LIMIT 10;

@@ -1,0 +1,62 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS Questions,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS Answers,
+        COUNT(CASE WHEN P.PostTypeId IN (4, 5) THEN 1 END) AS TagWikis,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+RankedUsers AS (
+    SELECT 
+        UA.*,
+        RANK() OVER (ORDER BY UA.Reputation DESC, UA.TotalPosts DESC) AS UserRank
+    FROM 
+        UserActivity UA
+),
+TopUsers AS (
+    SELECT 
+        RU.* 
+    FROM 
+        RankedUsers RU
+    WHERE 
+        RU.UserRank <= 10
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(PH.Comment, 'No comments') AS LastEditComment,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.LastActivityDate DESC) AS ActivityRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5) 
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.TotalPosts,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.LastEditComment
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    PostStatistics P ON TU.UserId = P.OwnerUserId AND P.ActivityRank = 1
+WHERE 
+    P.Score > 10 OR P.LastEditComment LIKE '%%'
+ORDER BY 
+    TU.Reputation DESC, P.Score DESC;

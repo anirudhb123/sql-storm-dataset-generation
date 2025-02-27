@@ -1,0 +1,69 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC, at.title) AS rank_year
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+MovieCast AS (
+    SELECT 
+        c.movie_id,
+        p.id AS person_id,
+        ak.name AS actor_name,
+        ct.kind AS role_type
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        comp_cast_type ct ON c.person_role_id = ct.id
+),
+MovieCompany AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies_list
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+FilmKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    mc.total_companies,
+    mc.companies_list,
+    fk.keywords,
+    CASE 
+        WHEN rm.rank_year = 1 THEN 'Top Movie'
+        WHEN rm.rank_year <= 5 THEN 'Popular Movie'
+        ELSE 'Less Known Movie'
+    END AS popularity,
+    COALESCE((SELECT COUNT(*) FROM MovieCast mca WHERE mca.movie_id = rm.movie_id AND mca.role_type = 'actor'), 0) AS actor_count
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieCompany mc ON rm.movie_id = mc.movie_id
+LEFT JOIN 
+    FilmKeywords fk ON rm.movie_id = fk.movie_id
+ORDER BY 
+    rm.production_year DESC, rm.title
+LIMIT 100;

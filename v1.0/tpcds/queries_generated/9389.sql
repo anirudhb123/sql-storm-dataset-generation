@@ -1,0 +1,39 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_quantity) AS total_quantity
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 AND 
+        dd.d_month_seq BETWEEN 1 AND 12
+    GROUP BY 
+        ws.web_site_sk
+), 
+top_sales AS (
+    SELECT 
+        ss.web_site_sk,
+        ss.total_sales,
+        RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM 
+        sales_summary ss
+)
+SELECT 
+    w.web_site_id,
+    w.web_name,
+    ts.total_sales,
+    ts.total_orders,
+    ts.total_quantity
+FROM 
+    top_sales ts
+JOIN 
+    web_site w ON ts.web_site_sk = w.web_site_sk
+WHERE 
+    ts.sales_rank <= 10
+ORDER BY 
+    ts.total_sales DESC;

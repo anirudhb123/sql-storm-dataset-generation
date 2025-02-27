@@ -1,0 +1,49 @@
+
+WITH CombinedData AS (
+    SELECT
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        c.c_email_address,
+        c.c_birth_year,
+        DATE_PART('year', CURRENT_DATE) - c.c_birth_year AS age,
+        d.d_date AS purchase_date,
+        i.i_item_desc,
+        ws.ws_sales_price,
+        ws.ws_quantity
+    FROM
+        customer c
+    JOIN
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE
+        (cd.cd_gender = 'M' OR cd.cd_gender = 'F')
+        AND (d.d_year = DATE_PART('year', CURRENT_DATE) OR d.d_year = DATE_PART('year', CURRENT_DATE) - 1)
+)
+SELECT
+    full_name,
+    full_address,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    c_email_address,
+    age,
+    COUNT(*) AS purchase_count,
+    SUM(ws.ws_sales_price * ws.ws_quantity) AS total_spent
+FROM
+    CombinedData
+GROUP BY
+    full_name, full_address, cd_gender, cd_marital_status, cd_education_status, c_email_address, age
+ORDER BY
+    total_spent DESC
+LIMIT 100;

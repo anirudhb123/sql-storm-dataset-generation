@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgeClass,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    ua.PostCount,
+    ua.TotalBadgeClass,
+    ua.GoldBadges,
+    ua.SilverBadges,
+    ua.BronzeBadges,
+    COUNT(DISTINCT rp.PostId) AS ActivePostCount,
+    MAX(rp.CreationDate) AS LastActivePostDate,
+    SUM(COALESCE(phd.EditCount, 0)) AS TotalEdits,
+    AVG(rp.ViewCount) AS AvgViewCount,
+    SUM(CASE WHEN rp.Score < 0 THEN 1 ELSE 0 END) AS NegativeScorePosts
+FROM 
+    UserActivity ua
+JOIN 
+    Users u ON ua.UserId = u.Id
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.PostRank 
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId 
+WHERE 
+    (u.Location IS NOT NULL OR u.WebsiteUrl IS NOT NULL)
+    AND u.Reputation > 50
+GROUP BY 
+    u.UserId, u.DisplayName, ua.PostCount, ua.TotalBadgeClass, ua.GoldBadges, ua.SilverBadges, ua.BronzeBadges
+HAVING 
+    COUNT(DISTINCT rp.PostId) > 3
+ORDER BY 
+    AvgViewCount DESC NULLS LAST;

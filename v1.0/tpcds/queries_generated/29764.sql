@@ -1,0 +1,77 @@
+
+WITH address_summary AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        COUNT(DISTINCT ca_address_sk) AS address_count,
+        COUNT(DISTINCT ca_country) AS unique_countries
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city, ca_state
+),
+demographics_summary AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(cd_demo_sk) AS demo_count
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender, cd_marital_status
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_cdemo_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_cdemo_sk
+),
+final_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        a.ca_city,
+        a.ca_state,
+        d.cd_gender,
+        d.cd_marital_status,
+        s.total_net_profit,
+        s.total_orders,
+        address_count,
+        unique_countries,
+        d.avg_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        address_summary a ON c.c_current_addr_sk = a.ca_address_sk
+    JOIN 
+        demographics_summary d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    LEFT JOIN 
+        sales_summary s ON c.c_customer_sk = s.ws_bill_cdemo_sk
+)
+SELECT 
+    f.c_customer_sk,
+    f.c_first_name,
+    f.c_last_name,
+    f.ca_city,
+    f.ca_state,
+    f.cd_gender,
+    f.cd_marital_status,
+    COALESCE(f.total_net_profit, 0) AS total_net_profit,
+    COALESCE(f.total_orders, 0) AS total_orders,
+    f.address_count,
+    f.unique_countries,
+    f.avg_purchase_estimate
+FROM 
+    final_summary f
+WHERE 
+    f.address_count > 1 
+    AND f.total_orders > 5
+ORDER BY 
+    f.total_net_profit DESC 
+LIMIT 100;

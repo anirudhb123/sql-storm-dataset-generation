@@ -1,0 +1,82 @@
+WITH UserScore AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 6 THEN 1 ELSE 0 END), 0) AS CloseVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 7 THEN 1 ELSE 0 END), 0) AS ReopenVotes,
+        COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS ClosedPosts,
+        COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 ELSE 0 END), 0) AS ReopenedPosts,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY COALESCE(SUM(V.CreationDate), 0) DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostHistory PH ON PH.UserId = U.Id AND PH.PostId = P.Id
+    GROUP BY 
+        U.Id
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(CASE WHEN Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        AVG(P.ViewCount) AS AverageViews
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+)
+SELECT 
+    U.DisplayName, 
+    U.Reputation, 
+    PS.TotalPosts, 
+    PS.PositivePosts, 
+    PS.NegativePosts,
+    PS.AverageViews, 
+    US.UpVotes, 
+    US.DownVotes, 
+    US.CloseVotes, 
+    US.ReopenVotes,
+    UB.GoldBadges, 
+    UB.SilverBadges, 
+    UB.BronzeBadges,
+    COALESCE(US.ClosedPosts, 0) AS ClosedPosts,
+    COALESCE(US.ReopenedPosts, 0) AS ReopenedPosts,
+    CASE 
+        WHEN U.CreationDate < NOW() - INTERVAL '1 year' THEN 'Veteran' 
+        ELSE 'Newcomer' 
+    END AS UserStatus
+FROM 
+    Users U
+LEFT JOIN 
+    PostStats PS ON PS.OwnerUserId = U.Id
+LEFT JOIN 
+    UserScore US ON US.UserId = U.Id
+LEFT JOIN 
+    UserBadges UB ON UB.UserId = U.Id
+WHERE 
+    U.Reputation > (SELECT AVG(Reputation) FROM Users) 
+    AND PS.TotalPosts > 5
+ORDER BY 
+    U.Reputation DESC, 
+    US.UpVotes DESC
+OFFSET 30 ROWS 
+FETCH NEXT 10 ROWS ONLY;

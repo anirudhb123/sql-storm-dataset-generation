@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.PostTypeId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(MAX(v.CreationDate), '1970-01-01') AS LastVoteDate,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.PostTypeId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.PostTypeId,
+        rp.CommentCount,
+        rp.LastVoteDate
+    FROM 
+        RankedPosts rp
+    WHERE 
+        (rp.Score > 0 OR rp.CommentCount > 0) 
+        AND rp.PostRank <= 10
+),
+Closes AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT ctr.Name, ', ') AS CloseReasons
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    JOIN 
+        CloseReasonTypes ctr ON ctr.Id = CAST(ph.Comment AS smallint)
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  -- Closed or Reopened
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Score,
+    fp.CreationDate,
+    fp.CommentCount,
+    CASE 
+        WHEN c.LastClosedDate IS NOT NULL THEN 'Closed (' || c.CloseReasons || ')'
+        ELSE 'Open'
+    END AS PostStatus,
+    CASE 
+        WHEN fp.LastVoteDate IS NULL THEN 'No Votes'
+        ELSE 'Last Vote: ' || TO_CHAR(fp.LastVoteDate, 'YYYY-MM-DD HH24:MI:SS')
+    END AS VoteInfo
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    Closes c ON c.PostId = fp.PostId
+ORDER BY 
+    fp.Score DESC NULLS LAST, 
+    fp.CreationDate DESC;

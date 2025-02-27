@@ -1,0 +1,58 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1998-01-01'
+), 
+supplier_stats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+), 
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey
+)
+
+SELECT 
+    r.n_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    AVG(cs.total_orders) AS avg_orders_per_customer,
+    SUM(ss.total_supplycost) AS total_supply_cost
+FROM 
+    nation r
+LEFT JOIN 
+    customer_orders cs ON cs.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = r.n_nationkey)
+LEFT JOIN 
+    supplier_stats ss ON ss.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps JOIN part p ON ps.ps_partkey = p.p_partkey WHERE p.p_type LIKE 'SMALL%')
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 0
+ORDER BY 
+    avg_orders_per_customer DESC
+LIMIT 10;

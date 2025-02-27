@@ -1,0 +1,46 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT mt.id, mt.title, mt.production_year, mh.level + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT cc.movie_id) AS movies_count,
+    ARRAY_AGG(DISTINCT mt.title || ' (' || mt.production_year || ')') AS movie_titles,
+    MAX(CASE WHEN cc.status_id IS NULL THEN 'Inactive' ELSE 'Active' END) AS casting_status,
+    AVG(CASE 
+        WHEN ai.info IS NOT NULL AND ai.info_type_id = it.id THEN ai.info::numeric
+        ELSE NULL
+    END) AS average_info_value,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY COUNT(DISTINCT cc.movie_id) DESC) AS rn
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info cc ON ak.person_id = cc.person_id 
+LEFT JOIN 
+    complete_cast cct ON cct.movie_id = cc.movie_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = cc.movie_id
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    info_type it ON it.id = mi.info_type_id
+WHERE 
+    ak.name IS NOT NULL
+    AND ak.name NOT LIKE '%Unknown%'
+GROUP BY 
+    ak.name, ak.id
+HAVING 
+    COUNT(DISTINCT cc.movie_id) > 0
+ORDER BY 
+    movies_count DESC,
+    rn
+LIMIT 10;

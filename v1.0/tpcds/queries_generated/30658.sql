@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_growth AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws.ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY w.w_warehouse_id ORDER BY SUM(ws.ext_sales_price) DESC) AS sales_rank
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+),
+annual_growth AS (
+    SELECT 
+        d.d_year,
+        SUM(ss.net_profit) AS total_net_profit
+    FROM 
+        date_dim d
+    JOIN 
+        store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    WHERE 
+        d.d_year >= 2018
+    GROUP BY 
+        d.d_year
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender
+)
+SELECT 
+    s.w_warehouse_id,
+    COALESCE(SUM(s.total_sales), 0) AS total_sales,
+    a.d_year,
+    a.total_net_profit,
+    cd.cd_gender,
+    cd.customer_count,
+    CASE 
+        WHEN COALESCE(SUM(s.total_sales), 0) > 100000 THEN 'High'
+        WHEN COALESCE(SUM(s.total_sales), 0) BETWEEN 50000 AND 100000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM 
+    sales_growth s
+FULL OUTER JOIN 
+    annual_growth a ON s.w_warehouse_id = (
+        SELECT w.w_warehouse_id
+        FROM warehouse w
+        ORDER BY RANDOM() 
+        LIMIT 1
+    )
+JOIN 
+    customer_demographics cd ON 1 = 1
+GROUP BY 
+    s.w_warehouse_id, a.d_year, a.total_net_profit, cd.cd_gender, cd.customer_count
+HAVING 
+    (a.total_net_profit IS NOT NULL OR s.total_sales IS NOT NULL)
+ORDER BY 
+    total_sales DESC, a.d_year;

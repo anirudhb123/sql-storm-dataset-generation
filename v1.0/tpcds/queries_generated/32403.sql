@@ -1,0 +1,57 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2451110 AND 2451117
+    GROUP BY 
+        ws_bill_customer_sk
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name || ' ' || c.c_last_name AS customer_name,
+        s.total_sales,
+        s.order_count
+    FROM 
+        sales_data s
+    JOIN 
+        customer c ON s.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        s.rn <= 10
+),
+loyalty AS (
+    SELECT 
+        cd_demo_sk,
+        COUNT(*) AS purchase_count,
+        MAX(total_sales) AS max_purchase,
+        MIN(total_sales) AS min_purchase,
+        CAST(AVG(total_sales) AS DECIMAL(10, 2)) AS avg_purchase
+    FROM 
+        sales_data
+    GROUP BY 
+        cd_demo_sk
+)
+SELECT 
+    tc.customer_name,
+    tc.total_sales,
+    lc.purchase_count,
+    lc.max_purchase,
+    lc.min_purchase,
+    lc.avg_purchase,
+    CASE 
+        WHEN lc.avg_purchase > 1000 THEN 'High Value'
+        WHEN lc.avg_purchase > 500 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_classification
+FROM 
+    top_customers tc
+LEFT JOIN 
+    loyalty lc ON tc.c_customer_sk = lc.cd_demo_sk
+ORDER BY 
+    tc.total_sales DESC;

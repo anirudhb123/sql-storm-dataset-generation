@@ -1,0 +1,59 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           cd.cd_income_band_sk, cd.cd_gender, cd.cd_marital_status, 
+           cd.cd_purchase_estimate, 1 AS level
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender = 'F' AND (cd.cd_marital_status = 'M' OR cd.cd_purchase_estimate > 500)
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           cd.cd_income_band_sk, cd.cd_gender, cd.cd_marital_status, 
+           cd.cd_purchase_estimate, ch.level + 1
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_hierarchy ch ON ch.cd_income_band_sk = cd.cd_income_band_sk
+    WHERE ch.level < 3
+),
+total_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales 
+    GROUP BY ws_bill_customer_sk
+),
+sales_ranked AS (
+    SELECT 
+        ch.c_customer_sk,
+        ch.c_first_name,
+        ch.c_last_name,
+        ts.total_profit,
+        ts.order_count,
+        RANK() OVER (PARTITION BY ch.cd_income_band_sk ORDER BY ts.total_profit DESC) AS sales_rank
+    FROM customer_hierarchy ch
+    LEFT JOIN total_sales ts ON ch.c_customer_sk = ts.ws_bill_customer_sk
+),
+top_customers AS (
+    SELECT *
+    FROM sales_ranked
+    WHERE sales_rank = 1
+)
+SELECT 
+    cu.c_first_name || ' ' || cu.c_last_name AS "Customer Name",
+    CAST(cu.total_profit AS DECIMAL(10, 2)) AS "Total Profit",
+    cu.order_count AS "Order Count", 
+    d.d_month_seq AS "Month",
+    d.d_year AS "Year",
+    SUM(ss.ss_net_paid_inc_tax) AS "Store Sales Including Tax"
+FROM top_customers cu
+LEFT JOIN date_dim d ON d.d_date_sk = (SELECT MIN(ws_sold_date_sk) 
+                                        FROM web_sales
+                                        WHERE ws_bill_customer_sk = cu.c_customer_sk)
+LEFT JOIN store_sales ss ON ss.ss_customer_sk = cu.c_customer_sk
+GROUP BY cu.c_customer_sk, cu.c_first_name, cu.c_last_name, d.d_month_seq, d.d_year
+HAVING SUM(ss.ss_net_paid_inc_tax) IS NOT NULL
+ORDER BY "Total Profit" DESC
+LIMIT 10;

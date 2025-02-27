@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        ARRAY_AGG(t.TagName) AS TagsArray
+    FROM 
+        Posts p
+        LEFT JOIN LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS tag ON true
+        LEFT JOIN Tags t ON t.TagName = tag
+    GROUP BY 
+        p.Id
+),
+PostStats AS (
+    SELECT 
+        post.OwnerUserId,
+        COUNT(post.Id) AS TotalPosts,
+        SUM(post.Score) AS TotalScore,
+        AVG(post.ViewCount) AS AvgViewCount,
+        MAX(post.ViewCount) AS MaxViewCount,
+        MIN(post.ViewCount) AS MinViewCount,
+        MAX(post.CreationDate) AS LatestPost
+    FROM 
+        Posts post
+    GROUP BY 
+        post.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        ps.TotalPosts, 
+        ps.TotalScore, 
+        ps.AvgViewCount,
+        RANK() OVER (ORDER BY ps.TotalScore DESC) AS ScoreRank
+    FROM 
+        Users u
+        JOIN PostStats ps ON u.Id = ps.OwnerUserId
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.TotalScore,
+    tu.AvgViewCount,
+    COALESCE(rp.TagsArray, '{}') AS AssociatedTags,
+    (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = tu.Id AND p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year') AS RecentPostsLastYear
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    RankedPosts rp ON tu.Id = rp.OwnerUserId 
+WHERE 
+    tu.TotalPosts >= 5
+ORDER BY 
+    tu.TotalScore DESC, 
+    tu.DisplayName
+LIMIT 10;

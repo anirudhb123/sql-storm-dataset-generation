@@ -1,0 +1,70 @@
+WITH RECURSIVE RegionalSales AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_name
+),
+TopNations AS (
+    SELECT 
+        nation_name,
+        total_sales
+    FROM 
+        RegionalSales
+    WHERE 
+        rank_sales <= 5
+),
+PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+),
+SalesData AS (
+    SELECT 
+        r.nation_name,
+        pt.p_name,
+        COALESCE(ts.total_sales, 0) AS total_sales,
+        COALESCE(pi.total_cost, 0) AS total_cost,
+        (COALESCE(ts.total_sales, 0) - COALESCE(pi.total_cost, 0)) AS profit
+    FROM 
+        TopNations ts
+    FULL OUTER JOIN 
+        PartSupplierInfo pi ON ts.nation_name = (SELECT n.n_name FROM nation n JOIN supplier s ON n.n_nationkey = s.s_nationkey WHERE s.s_suppkey = pi.p_partkey)
+    LEFT JOIN 
+        part pt ON pt.p_partkey = pi.p_partkey
+)
+SELECT 
+    nation_name,
+    p_name,
+    total_sales,
+    total_cost,
+    profit,
+    CASE 
+        WHEN profit > 0 THEN 'Profitable'
+        WHEN profit < 0 THEN 'Loss'
+        ELSE 'Break-even'
+    END AS profit_status
+FROM 
+    SalesData
+WHERE 
+    (total_sales <> total_cost OR total_sales IS NULL OR total_cost IS NULL)
+ORDER BY 
+    profit DESC, nation_name, p_name
+FETCH FIRST 100 ROWS ONLY;

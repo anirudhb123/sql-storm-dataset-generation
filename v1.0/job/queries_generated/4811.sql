@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        COUNT(c.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.id, a.title, a.production_year
+), 
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.cast_count,
+        mk.keywords
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        MovieKeywords mk ON m.movie_id = mk.movie_id
+    WHERE 
+        m.rank <= 5
+    ORDER BY 
+        m.production_year DESC
+)
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(md.keywords, 'No keywords') AS keywords,
+    SUM(CASE WHEN c.role_id IS NOT NULL THEN 1 ELSE 0 END) AS roles_present,
+    (SELECT AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END)
+     FROM cast_info ci 
+     WHERE ci.movie_id = md.movie_id) AS avg_roles
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    cast_info c ON md.movie_id = c.movie_id
+GROUP BY 
+    md.title, md.production_year, md.keywords
+HAVING 
+    SUM(CASE WHEN c.role_id IS NOT NULL THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    md.production_year DESC;

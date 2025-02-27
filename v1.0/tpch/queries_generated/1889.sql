@@ -1,0 +1,97 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+PartRegion AS (
+    SELECT 
+        p.p_partkey, 
+        r.r_name AS region_name,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        p.p_partkey, r.r_name
+),
+OrderHighlights AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    cs.total_orders,
+    cs.total_spent,
+    pr.region_name,
+    pr.total_available,
+    oh.revenue,
+    oh.item_count,
+    COALESCE(rs.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(rs.s_acctbal, 0) AS supplier_acctbal
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerStats cs ON c.c_custkey = cs.c_custkey
+LEFT JOIN 
+    PartRegion pr ON pr.p_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_availqty > 0
+        GROUP BY ps.ps_partkey 
+        HAVING COUNT(ps.ps_suppkey) > 1
+    )
+LEFT JOIN 
+    RankedSuppliers rs ON rs.rank = 1 AND rs.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_supplycost < 
+            (SELECT AVG(ps_supplycost) FROM partsupp)
+    )
+LEFT JOIN 
+    OrderHighlights oh ON oh.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey = c.c_custkey
+    )
+WHERE 
+    (cs.total_spent IS NOT NULL OR pr.total_available IS NOT NULL)
+ORDER BY 
+    c.c_custkey;

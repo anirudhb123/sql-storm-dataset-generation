@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_profit) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+    GROUP BY
+        ws.web_site_id
+),
+customer_info AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+),
+filtered_sales AS (
+    SELECT
+        si.si_item_sk,
+        si.si_quantity,
+        si.si_ext_sales_price,
+        si.si_net_profit,
+        ci.income_band
+    FROM
+        catalog_sales si
+    JOIN
+        customer_info ci ON si.cs_bill_customer_sk = ci.c_customer_id
+    WHERE
+        si.cs_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    AND
+        ci.cd_purchase_estimate > 10000
+)
+SELECT
+    s.web_site_id,
+    sales.total_sales,
+    COUNT(fs.si_item_sk) AS number_of_sales,
+    SUM(fs.si_ext_sales_price) AS total_revenue,
+    AVG(fs.si_net_profit) AS avg_net_profit
+FROM
+    sales_cte sales
+LEFT JOIN
+    filtered_sales fs ON sales.web_site_id = fs.si_item_sk
+GROUP BY
+    s.web_site_id, sales.total_sales
+HAVING
+    COUNT(fs.si_item_sk) > 5
+ORDER BY
+    total_revenue DESC;

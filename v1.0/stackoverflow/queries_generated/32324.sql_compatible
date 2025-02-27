@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS RankWithinType,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, TIMESTAMP '2024-10-01 12:34:56') 
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, pt.Name
+),
+PostHistoryCTE AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) 
+),
+PostsWithHistory AS (
+    SELECT 
+        rp.*,
+        ph.UserDisplayName AS LastEditor,
+        ph.Comment AS LastActionComment,
+        ph.CreationDate AS LastActionDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryCTE ph ON rp.PostId = ph.PostId AND ph.HistoryRank = 1
+)
+SELECT 
+    pwh.PostId,
+    pwh.Title,
+    pwh.Score,
+    pwh.CommentCount,
+    pwh.UpVotes,
+    pwh.DownVotes,
+    COALESCE(pwh.LastEditor, 'Not Edited') AS LastEditor,
+    COALESCE(pwh.LastActionComment, 'No Action Recorded') AS LastActionComment,
+    pwh.LastActionDate,
+    CASE 
+        WHEN pwh.RankWithinType <= 5 THEN 'Top Post in Type'
+        ELSE 'Regular Post'
+    END AS PostRankCategory
+FROM 
+    PostsWithHistory pwh
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM Votes v
+        WHERE v.PostId = pwh.PostId AND v.VoteTypeId IN (2, 3) 
+        GROUP BY v.PostId
+        HAVING COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) > COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) 
+    )
+ORDER BY 
+    pwh.CreationDate DESC;

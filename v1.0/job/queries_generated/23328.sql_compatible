@@ -1,0 +1,68 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        COALESCE(t.title, 'Unknown Title') AS title,
+        COALESCE(c.name, 'Unknown Company') AS company_name,
+        COALESCE(k.keyword, 'No Keywords') AS keyword,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title t 
+        LEFT JOIN movie_companies mc ON mc.movie_id = t.movie_id
+        LEFT JOIN company_name c ON mc.company_id = c.id
+        LEFT JOIN movie_keyword mk ON mk.movie_id = t.movie_id
+        LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year = (SELECT MAX(production_year) FROM aka_title)
+    
+    UNION ALL
+    
+    SELECT 
+        m.movie_id,
+        COALESCE(t.title, 'Unknown Title') AS title,
+        COALESCE(c.name, 'Unknown Company') AS company_name,
+        COALESCE(k.keyword, 'No Keywords') AS keyword,
+        m.production_year,
+        level + 1
+    FROM 
+        MovieHierarchy m
+        LEFT JOIN movie_link ml ON ml.movie_id = m.movie_id
+        LEFT JOIN aka_title t ON ml.linked_movie_id = t.movie_id
+        LEFT JOIN movie_companies mc ON mc.movie_id = t.movie_id
+        LEFT JOIN company_name c ON mc.company_id = c.id
+        LEFT JOIN movie_keyword mk ON mk.movie_id = t.movie_id
+        LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE 
+        m.level < 5  
+),
+RankedMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        company_name,
+        keyword,
+        production_year,
+        DENSE_RANK() OVER (PARTITION BY production_year ORDER BY movie_id) AS production_rank
+    FROM 
+        MovieHierarchy
+)
+SELECT 
+    r.movie_id,
+    r.title,
+    r.company_name,
+    r.keyword,
+    r.production_year,
+    COALESCE(r.production_rank, 0) AS production_rank,
+    CASE 
+        WHEN r.keyword = 'No Keywords' THEN 'None listed' 
+        ELSE r.keyword 
+    END AS display_keyword
+FROM 
+    RankedMovies r
+WHERE 
+    r.production_year IS NOT NULL
+    AND r.company_name IS NOT NULL
+ORDER BY 
+    r.production_year DESC, 
+    r.production_rank;

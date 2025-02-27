@@ -1,0 +1,70 @@
+
+WITH TagAnalysis AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(Posts.ViewCount) AS AvgViews,
+        SUM(CASE WHEN Posts.ClosedDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPosts,
+        STRING_AGG(DISTINCT Users.DisplayName, ', ') AS ActiveUsers
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::text[])
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    GROUP BY 
+        Tags.TagName
+),
+PostHistoryInsights AS (
+    SELECT 
+        Posts.Title,
+        COUNT(PostHistory.Id) AS EditCount,
+        MAX(PostHistory.CreationDate) AS LastEdited,
+        STRING_AGG(DISTINCT PostHistory.UserDisplayName, ', ') AS Editors
+    FROM 
+        Posts
+    LEFT JOIN 
+        PostHistory ON Posts.Id = PostHistory.PostId
+    WHERE 
+        PostHistory.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        Posts.Title
+),
+BenchmarkingResult AS (
+    SELECT 
+        ta.TagName,
+        ta.PostCount,
+        ta.QuestionCount,
+        ta.AnswerCount,
+        ta.AvgViews,
+        ta.ClosedPosts,
+        ta.ActiveUsers,
+        ph.Title,
+        ph.EditCount,
+        ph.LastEdited,
+        ph.Editors
+    FROM 
+        TagAnalysis ta
+    LEFT JOIN 
+        PostHistoryInsights ph ON ta.TagName = ANY(string_to_array(substring(ph.Title, 2, length(ph.Title) - 2), ', '))
+)
+SELECT 
+    TagName,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    AvgViews,
+    ClosedPosts,
+    ActiveUsers,
+    Title,
+    EditCount,
+    LastEdited,
+    Editors
+FROM 
+    BenchmarkingResult
+ORDER BY 
+    PostCount DESC, 
+    QuestionCount DESC,
+    AvgViews DESC;

@@ -1,0 +1,62 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+PopularActors AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(ci.movie_id) AS movies_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.name
+    HAVING 
+        COUNT(ci.movie_id) > 10
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        pa.actor_name,
+        pa.movies_count
+    FROM 
+        RankedMovies rm
+    JOIN 
+        PopularActors pa ON pa.movies_count > 10
+    WHERE 
+        rm.rank <= 5
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_name,
+    md.movies_count,
+    COUNT(DISTINCT m.id) AS total_movie_links
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    movie_link m ON m.movie_id = md.movie_id
+GROUP BY 
+    md.title, 
+    md.production_year, 
+    md.actor_name, 
+    md.movies_count
+ORDER BY 
+    md.production_year DESC, 
+    total_movie_links DESC;
+
+This query structure uses Common Table Expressions (CTEs) to create a ranked list of movies based on the number of unique actors involved, identifies actors who have participated in more than 10 movies, and provides detailed information about those movies while incorporating related movie links.

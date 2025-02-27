@@ -1,0 +1,57 @@
+WITH ranked_parts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+), 
+supplier_details AS (
+    SELECT 
+        s.s_suppkey,
+        n.n_name,
+        n.n_regionkey,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, n.n_name, n.n_regionkey
+), 
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(s.s_name, 'N/A') AS supplier_name,
+    COALESCE(r.total_avail_qty, 0) AS available_quantity,
+    os.total_price,
+    os.part_count
+FROM 
+    ranked_parts p
+LEFT JOIN 
+    supplier_details s ON p.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost = (SELECT MIN(ps2.ps_supplycost) FROM partsupp ps2 WHERE ps2.ps_partkey = p.p_partkey))
+LEFT JOIN 
+    order_summary os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2023-12-31')
+WHERE 
+    (p.price_rank <= 10 OR p.p_container IS NULL)
+ORDER BY 
+    p.p_partkey, available_quantity DESC NULLS LAST;

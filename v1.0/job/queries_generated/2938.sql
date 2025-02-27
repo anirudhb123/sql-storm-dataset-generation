@@ -1,0 +1,28 @@
+WITH TopMovies AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, COUNT(cc.person_id) AS total_cast
+    FROM aka_title mt
+    LEFT JOIN complete_cast cc ON mt.id = cc.movie_id
+    WHERE mt.production_year >= 2000
+    GROUP BY mt.id
+    HAVING COUNT(cc.person_id) > 5
+),
+ActorRoles AS (
+    SELECT ci.movie_id, ak.name AS actor_name, 
+           ROW_NUMBER() OVER(PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    WHERE ci.person_role_id IN (SELECT id FROM role_type WHERE role LIKE 'Actor%')
+),
+MovieKeywords AS (
+    SELECT mk.movie_id, STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+SELECT tm.title, tm.production_year, ak.actor_name, ak.role_order, mk.keywords
+FROM TopMovies tm
+LEFT JOIN ActorRoles ak ON tm.movie_id = ak.movie_id
+LEFT JOIN MovieKeywords mk ON tm.movie_id = mk.movie_id
+WHERE mk.keywords IS NOT NULL
+ORDER BY tm.production_year DESC, tm.total_cast DESC, ak.role_order
+LIMIT 20;

@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+),
+
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(cd.cd_dep_count, 0) AS dependent_count,
+        SUM(CASE WHEN ws.ws_sales_price > 100 THEN ws.ws_sales_price * ws.ws_quantity ELSE 0 END) AS total_high_value_sales
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_dep_count
+),
+
+StoreProfit AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_profit,
+        COUNT(DISTINCT ss_ticket_number) AS sales_count
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+          AND (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY ss_store_sk
+)
+
+SELECT 
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.dependent_count,
+    sp.total_profit,
+    sp.sales_count,
+    COUNT(rs.ws_order_number) AS high_value_order_count,
+    MIN(rs.ws_sales_price) AS min_high_value_price
+FROM CustomerInfo ci
+LEFT JOIN StoreProfit sp ON sp.ss_store_sk = (
+    SELECT 
+        ss_store_sk 
+    FROM store_sales 
+    WHERE ss_customer_sk = ci.c_customer_id 
+    LIMIT 1
+)
+LEFT JOIN RankedSales rs ON ci.c_customer_id = (
+    SELECT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = rs.ws_item_sk
+)
+WHERE ci.total_high_value_sales > 0
+GROUP BY ci.c_customer_id, ci.cd_gender, ci.cd_marital_status, ci.dependent_count, sp.total_profit, sp.sales_count
+HAVING sp.total_profit IS NOT NULL AND sp.total_profit > 5000
+ORDER BY total_profit DESC, cd_gender;

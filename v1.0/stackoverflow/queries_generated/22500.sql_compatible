@@ -1,0 +1,92 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS ScoreVotes,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        AVG(COALESCE(VB.BountyAmount, 0)) AS AvgBounty
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Votes VB ON U.Id = VB.UserId AND VB.VoteTypeId = 8 
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, PostCount DESC, ScoreVotes DESC) AS Rank
+    FROM UserActivity
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(C) AS CommentCount,
+        COUNT(V.Id) AS VoteCount,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN LATERAL (
+        SELECT 
+            DISTINCT UNNEST(STRING_TO_ARRAY(P.Tags, '>')) AS TagName
+    ) T ON TRUE
+    WHERE P.CreationDate >= DATEADD(YEAR, -1, '2024-10-01 12:34:56')
+    GROUP BY P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount
+),
+RecentEdits AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId AS EditorId,
+        PH.CreationDate,
+        PH.Comment,
+        PH.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (4, 5, 6) 
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS TotalComments,
+        (SELECT COUNT(DISTINCT V.Id) FROM Votes V WHERE V.PostId = P.Id) AS TotalVotes,
+        COUNT(E.EditorId) AS TotalEdits
+    FROM Posts P
+    LEFT JOIN RecentEdits E ON P.Id = E.PostId AND E.EditRank <= 3
+    GROUP BY P.Id
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(PP.PostCount, 0) AS TotalPosts,
+    COALESCE(PP.BadgeCount, 0) AS TotalBadges,
+    MaxPostDetails.Title AS MostRecentPost,
+    MaxPostDetails.TotalComments AS CommentCount,
+    MaxPostDetails.TotalVotes AS VoteCount,
+    MaxPostDetails.TotalEdits AS EditCount
+FROM UserActivity U
+LEFT JOIN TopUsers TU ON U.UserId = TU.UserId
+LEFT JOIN PostStatistics PP ON PP.PostId = (
+    SELECT P.Id 
+    FROM Posts P 
+    WHERE P.OwnerUserId = U.UserId 
+    ORDER BY P.CreationDate DESC 
+    LIMIT 1
+)
+LEFT JOIN PostStatistics MaxPostDetails ON MaxPostDetails.PostId = (
+    SELECT P.Id 
+    FROM Posts P 
+    WHERE P.OwnerUserId = U.UserId 
+    ORDER BY P.CreationDate DESC 
+    LIMIT 1
+)
+WHERE TU.Rank <= 10
+ORDER BY U.Reputation DESC, U.PostCount DESC;

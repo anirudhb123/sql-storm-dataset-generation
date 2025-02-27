@@ -1,0 +1,82 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.ClosedDate,
+        FIRST_VALUE(PS.DisplayName) OVER (PARTITION BY P.Id ORDER BY P.CreationDate) AS FirstUserDisplayName
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users PS ON P.OwnerUserId = PS.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.CreationDate,
+        PD.Score,
+        PD.ViewCount,
+        PD.AnswerCount,
+        PD.CommentCount,
+        PD.ClosedDate,
+        UserStats.DisplayName AS ClosedBy
+    FROM 
+        PostDetails PD
+    LEFT JOIN 
+        PostHistory PH ON PD.PostId = PH.PostId AND PH.PostHistoryTypeId = 10
+    LEFT JOIN 
+        Users U ON PH.UserId = U.Id
+    WHERE 
+        PD.ClosedDate IS NOT NULL
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.TotalBounties,
+    CASE 
+        WHEN CP.PostId IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS HasClosedPosts,
+    COUNT(DISTINCT CP.PostId) AS ClosedPostCount,
+    SUM(PD.ViewCount) AS TotalViews,
+    AVG(PD.Score) AS AverageScore
+FROM 
+    UserStats U
+LEFT JOIN 
+    ClosedPosts CP ON U.UserId = CP.ClosedBy
+LEFT JOIN 
+    PostDetails PD ON CP.PostId = PD.PostId
+GROUP BY 
+    U.UserId, U.DisplayName, U.Reputation, U.TotalBounties
+ORDER BY 
+    U.Reputation DESC, TotalViews DESC;

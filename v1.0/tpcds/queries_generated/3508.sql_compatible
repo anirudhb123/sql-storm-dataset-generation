@@ -1,0 +1,60 @@
+
+WITH sales_summary AS (
+    SELECT 
+        c.c_customer_id,
+        d.d_year,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ss_order_number) AS total_orders
+    FROM store_sales ss
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE d.d_year BETWEEN 2021 AND 2023
+    GROUP BY c.c_customer_id, d.d_year
+), 
+customer_ranks AS (
+    SELECT
+        c_customer_id,
+        d_year,
+        total_sales,
+        total_orders,
+        RANK() OVER (PARTITION BY d_year ORDER BY total_sales DESC) AS sales_rank
+    FROM sales_summary
+), 
+gender_incomes AS (
+    SELECT 
+        cd.cd_gender,
+        ib.ib_income_band_sk,
+        SUM(cs.cs_net_profit) AS total_profit
+    FROM catalog_sales cs
+    JOIN customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY cd.cd_gender, ib.ib_income_band_sk
+), 
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        cr.sales_rank,
+        cr.total_sales,
+        ci.c_current_addr_sk,
+        COALESCE(ca.ca_city, 'Unknown') AS city,
+        CASE 
+            WHEN cr.sales_rank <= 10 THEN 'Top Customer'
+            ELSE 'Regular Customer'
+        END AS customer_type
+    FROM customer_ranks cr
+    JOIN customer c ON cr.c_customer_id = c.c_customer_id
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    tc.customer_type,
+    tc.city,
+    gc.cd_gender,
+    gc.ib_income_band_sk,
+    SUM(gc.total_profit) AS total_profit_by_type,
+    COUNT(DISTINCT tc.c_customer_id) AS customer_count
+FROM top_customers tc
+LEFT JOIN gender_incomes gc ON tc.c_customer_id = gc.c_customer_id
+GROUP BY tc.customer_type, tc.city, gc.cd_gender, gc.ib_income_band_sk
+HAVING COUNT(DISTINCT tc.c_customer_id) > 5
+ORDER BY total_profit_by_type DESC;

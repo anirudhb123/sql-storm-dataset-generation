@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Score,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags tg ON tg.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::int[])
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.AnswerCount, p.Score, p.PostTypeId
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.Score,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+UserPostEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+EngagementSummary AS (
+    SELECT 
+        upe.UserId,
+        upe.DisplayName,
+        upe.TotalPosts,
+        upe.UpVotes,
+        upe.DownVotes,
+        pp.Title AS PopularPostTitle,
+        pp.ViewCount AS PopularPostViews
+    FROM 
+        UserPostEngagement upe
+    CROSS JOIN 
+        PopularPosts pp
+)
+SELECT 
+    es.DisplayName,
+    es.TotalPosts, 
+    es.UpVotes, 
+    es.DownVotes,
+    es.PopularPostTitle,
+    es.PopularPostViews
+FROM 
+    EngagementSummary es
+ORDER BY 
+    es.UpVotes DESC, 
+    es.DownVotes ASC;

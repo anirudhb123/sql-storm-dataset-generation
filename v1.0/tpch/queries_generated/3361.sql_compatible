@@ -1,0 +1,64 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+OrderAnalytics AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS items_count,
+        AVG(l.l_quantity) AS avg_quantity,
+        o.o_orderstatus
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+CustomerSegmentation AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(o.o_totalprice), 0) AS total_spent,
+        CASE 
+            WHEN COALESCE(SUM(o.o_totalprice), 0) > 10000 THEN 'Premium'
+            WHEN COALESCE(SUM(o.o_totalprice), 0) BETWEEN 5000 AND 10000 THEN 'Standard'
+            ELSE 'Basic'
+        END AS customer_segment
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    cs.customer_segment,
+    COUNT(DISTINCT cs.c_custkey) AS customer_count,
+    AVG(cs.total_spent) AS avg_spent,
+    SUM(oa.total_revenue) AS total_order_revenue,
+    COALESCE((SELECT SUM(ps.ps_supplycost) FROM partsupp ps WHERE ps.ps_availqty < 50), 0) AS low_supply_cost
+FROM 
+    CustomerSegmentation cs
+LEFT JOIN 
+    OrderAnalytics oa ON cs.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'O')
+GROUP BY 
+    cs.customer_segment
+ORDER BY 
+    customer_count DESC;

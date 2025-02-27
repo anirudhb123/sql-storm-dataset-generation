@@ -1,0 +1,51 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_name LIKE '%A%'
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_nationkey
+)
+
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS num_customers,
+    SUM(CASE WHEN l.l_discount > 0.1 THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_discounted_sales,
+    AVG(l.l_tax) OVER (PARTITION BY r.r_regionkey ORDER BY l.l_shipdate ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS avg_tax_last_7_days,
+    STRING_AGG(DISTINCT ps.ps_comment) FILTER (WHERE ps.ps_availqty IS NOT NULL) AS all_comments,
+    MIN(COALESCE(CAST(NULLIF(LEFT(p.p_name, 3), '') AS VARCHAR), 'Unknown')) AS min_part_name
+FROM 
+    region r
+JOIN 
+    nation n ON n.n_regionkey = r.r_regionkey
+JOIN 
+    supplier s ON s.s_nationkey = n.n_nationkey
+JOIN 
+    partsupp ps ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    part p ON p.p_partkey = ps.ps_partkey
+JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN 
+    orders o ON o.o_orderkey = l.l_orderkey
+JOIN 
+    customer c ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    supplier_hierarchy sh ON sh.s_nationkey = c.c_nationkey
+WHERE 
+    (l.l_shipdate BETWEEN '2022-01-01' AND '2023-01-01') 
+    AND (o.o_orderstatus = 'F' OR (o.o_orderstatus IS NULL AND l.l_returnflag = 'N'))
+    AND EXISTS (SELECT 1 
+                FROM lineitem l2 
+                WHERE l2.l_orderkey = l.l_orderkey AND l2.l_returnflag = 'R')
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    total_discounted_sales DESC
+LIMIT 10
+OFFSET 5;

@@ -1,0 +1,53 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_sold_date_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM
+        web_sales
+    GROUP BY
+        ws_sold_date_sk
+),
+TopSales AS (
+    SELECT
+        d.d_date,
+        sd.total_quantity,
+        sd.total_net_profit,
+        sd.rank
+    FROM
+        SalesData sd
+    JOIN date_dim d ON d.d_date_sk = sd.ws_sold_date_sk
+    WHERE
+        sd.rank <= 10
+),
+CustomerPromotions AS (
+    SELECT
+        c.c_customer_sk,
+        COUNT(DISTINCT p.p_promo_id) AS promo_count
+    FROM
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    GROUP BY
+        c.c_customer_sk
+)
+SELECT
+    t.d_date AS sale_date,
+    t.total_quantity,
+    t.total_net_profit,
+    cp.promo_count,
+    COALESCE(cp.promo_count, 0) AS adjusted_promo_count
+FROM
+    TopSales t
+LEFT JOIN CustomerPromotions cp ON cp.c_customer_sk IN (
+    SELECT
+        DISTINCT ws_bill_customer_sk
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk = t.ws_sold_date_sk
+)
+ORDER BY
+    t.d_date DESC;

@@ -1,0 +1,80 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS item_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+),
+aggregate_sales AS (
+    SELECT 
+        sz.ss_item_sk,
+        SUM(sz.ss_sales_price) AS total_sales,
+        COUNT(DISTINCT sz.ss_ticket_number) AS sales_count
+    FROM 
+        store_sales sz
+    GROUP BY 
+        sz.ss_item_sk
+),
+total_returns AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_amount) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.cr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        cr.cr_item_sk
+),
+customer_gender AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    i.i_item_id,
+    COALESCE(total_sales.total_sales, 0) AS total_sales_amount,
+    COALESCE((SELECT MAX(ts.total_sales) FROM aggregate_sales ts WHERE ts.ss_item_sk = i.i_item_sk), 0) AS max_store_sales,
+    COALESCE(total_returns.total_return_amount, 0) AS total_return_amount,
+    c_gender.customer_count AS gender_distinct_count,
+    CASE 
+        WHEN total_sales.total_sales > 100000 THEN 'High Performer'
+        ELSE 'Regular Performer'
+    END AS performance_category
+FROM 
+    item i
+LEFT JOIN 
+    aggregate_sales total_sales ON i.i_item_sk = total_sales.ss_item_sk
+LEFT JOIN 
+    total_returns ON i.i_item_sk = total_returns.cr_item_sk
+LEFT JOIN 
+    customer_gender c_gender ON c_gender.cd_gender = 
+    (CASE 
+        WHEN (SELECT cd.cd_gender FROM customer_demographics cd 
+              WHERE cd.cd_demo_sk = 
+                    (SELECT c.c_current_cdemo_sk FROM customer c 
+                     WHERE c.c_current_addr_sk IS NOT NULL 
+                     LIMIT 1)) IS NULL 
+        THEN 'M' 
+        ELSE (SELECT cd.cd_gender FROM customer_demographics cd 
+              WHERE cd.cd_demo_sk = c.c_current_cdemo_sk) 
+     END)
+WHERE 
+    i.i_rec_start_date <= DATE '2002-10-01'
+AND 
+    (i.i_rec_end_date IS NULL OR i.i_rec_end_date > DATE '2002-10-01')
+ORDER BY 
+    total_sales_amount DESC,
+    i.i_item_id
+FETCH FIRST 20 ROWS ONLY;

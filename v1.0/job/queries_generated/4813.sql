@@ -1,0 +1,54 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+GenreCount AS (
+    SELECT 
+        ct.kind AS genre,
+        COUNT(m.id) AS movie_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        aka_title m ON mc.movie_id = m.id
+    GROUP BY 
+        ct.kind
+),
+TopGenres AS (
+    SELECT 
+        genre
+    FROM 
+        GenreCount
+    WHERE 
+        movie_count > 5
+)
+SELECT 
+    rt.movie_title,
+    rt.production_year,
+    ct.kind AS genre,
+    COALESCE(ki.keyword, 'No keywords') AS keyword,
+    ci.nr_order,
+    NULLIF(ci.note, '') AS role_note
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    movie_keyword mk ON rt.production_year = mk.movie_id
+LEFT JOIN 
+    keyword ki ON mk.keyword_id = ki.id
+LEFT JOIN 
+    complete_cast cc ON rt.production_year = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id 
+JOIN 
+    TopGenres tg ON ci.role_id = tg.genre
+WHERE 
+    rt.rank <= 10
+ORDER BY 
+    rt.production_year DESC, rt.movie_title;

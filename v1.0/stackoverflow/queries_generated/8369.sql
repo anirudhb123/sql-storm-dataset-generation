@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpvoteCount,  -- 2 = UpMod
+        SUM(v.VoteTypeId = 3) AS DownvoteCount -- 3 = DownMod
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        OwnerDisplayName,
+        CommentCount,
+        UpvoteCount,
+        DownvoteCount,
+        ROW_NUMBER() OVER (ORDER BY Score DESC) AS Rank
+    FROM 
+        RankedPosts
+),
+TopQuestions AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerDisplayName,
+        p.CommentCount,
+        p.UpvoteCount,
+        p.DownvoteCount
+    FROM 
+        PostStats p
+    WHERE 
+        p.Rank <= 10
+)
+SELECT 
+    tq.PostId,
+    tq.Title,
+    tq.CreationDate,
+    tq.Score,
+    tq.OwnerDisplayName,
+    tq.CommentCount,
+    tq.UpvoteCount,
+    tq.DownvoteCount,
+    COALESCE(SUM(ph.Comment) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)), 0) AS CloseReopenCount
+FROM 
+    TopQuestions tq
+LEFT JOIN 
+    PostHistory ph ON tq.PostId = ph.PostId
+GROUP BY 
+    tq.PostId, tq.Title, tq.CreationDate, tq.Score, tq.OwnerDisplayName, tq.CommentCount, tq.UpvoteCount, tq.DownvoteCount
+ORDER BY 
+    tq.Score DESC;

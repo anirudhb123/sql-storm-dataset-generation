@@ -1,0 +1,54 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        CAST(m.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || e.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title e
+    INNER JOIN 
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+)
+SELECT 
+    mk.keyword,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    AVG(CASE 
+            WHEN ci.note IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS avg_note_present,
+    STRING_AGG(DISTINCT CONCAT(a.name, ' (', a.id, ')'), ', ') AS actors,
+    mh.path
+FROM 
+    movie_keyword mk
+JOIN 
+    aka_title at ON mk.movie_id = at.id
+JOIN 
+    cast_info ci ON at.id = ci.movie_id
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = at.id
+WHERE 
+    at.production_year >= 2000 
+    AND mk.keyword IS NOT NULL
+GROUP BY 
+    mk.keyword, mh.path
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 5
+ORDER BY 
+    total_cast DESC, mh.path;

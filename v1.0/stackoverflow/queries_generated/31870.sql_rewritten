@@ -1,0 +1,73 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserStatistics AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryDate,
+        ph.Comment,
+        ph.UserDisplayName AS Editor,
+        CASE
+            WHEN ph.PostHistoryTypeId = 10 THEN 
+                (SELECT cr.Name FROM CloseReasonTypes cr WHERE cr.Id = CAST(ph.Comment AS INT))
+            ELSE 
+                NULL
+        END AS CloseReason
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.CreationDate,
+    COALESCE(us.PostCount, 0) AS UserPostCount,
+    COALESCE(us.TotalScore, 0) AS UserTotalScore,
+    COALESCE(us.AvgViewCount, 0) AS UserAvgViewCount,
+    ph.PostHistoryTypeId,
+    ph.HistoryDate,
+    ph.Editor,
+    ph.CloseReason
+FROM RecursivePostHierarchy rp
+LEFT JOIN UserStatistics us ON rp.OwnerUserId = us.UserId
+LEFT JOIN PostHistoryDetails ph ON rp.Id = ph.PostId
+WHERE ph.PostHistoryTypeId IS NOT NULL 
+ORDER BY rp.ViewCount DESC, rp.Title ASC;

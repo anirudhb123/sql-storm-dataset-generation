@@ -1,0 +1,54 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        m.production_year,
+        CASE 
+            WHEN t.season_nr IS NOT NULL THEN 'Episode'
+            ELSE 'Movie'
+        END AS movie_type
+    FROM 
+        aka_title t
+    JOIN 
+        title m ON t.movie_id = m.id
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.movie_id,
+        um.title,
+        um.production_year,
+        'Linked Movie' AS movie_type
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        title um ON ml.linked_movie_id = um.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT mh.movie_id) AS total_movies,
+    AVG(CASE WHEN mh.movie_type = 'Movie' THEN mh.production_year ELSE NULL END) AS avg_movie_year,
+    STRING_AGG(DISTINCT mh.title, ', ') AS movie_titles,
+    STRING_AGG(DISTINCT mh.title, ', ') AS episode_titles
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL 
+    AND ak.name != ''
+    AND (ci.note IS NULL OR ci.note NOT LIKE '%uncredited%')
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 5
+ORDER BY 
+    total_movies DESC;

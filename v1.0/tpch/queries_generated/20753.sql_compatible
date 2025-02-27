@@ -1,0 +1,40 @@
+
+WITH RECURSIVE ranked_customers AS (
+    SELECT c_custkey, c_name, c_acctbal, ROW_NUMBER() OVER (PARTITION BY c_nationkey ORDER BY c_acctbal DESC) AS rank
+    FROM customer
+), 
+filtered_orders AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    WHERE EXISTS (
+        SELECT 1 
+        FROM lineitem l 
+        WHERE l.l_orderkey = o.o_orderkey 
+        AND l.l_discount = (
+            SELECT MAX(l2.l_discount)
+            FROM lineitem l2
+            WHERE l2.l_orderkey = o.o_orderkey
+        ) 
+        AND l.l_returnflag IS NOT NULL
+    )
+    GROUP BY o.o_custkey
+),
+part_supply AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, (ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+),
+detailed_parts AS (
+    SELECT p.p_partkey, p.p_name, COALESCE(SUM(ps.total_cost), 0) AS supply_cost
+    FROM part p
+    LEFT JOIN part_supply ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT rc.rank, rc.c_name, fo.total_spent, dp.p_name, dp.supply_cost
+FROM ranked_customers rc
+JOIN filtered_orders fo ON rc.c_custkey = fo.o_custkey
+LEFT JOIN detailed_parts dp ON dp.supply_cost > fo.total_spent * 0.1
+WHERE rc.rank <= 5 AND fo.total_spent IS NOT NULL
+ORDER BY rc.rank ASC, fo.total_spent DESC
+OFFSET (SELECT COUNT(DISTINCT c_nationkey) FROM nation) ROWS
+FETCH NEXT 10 ROWS ONLY;

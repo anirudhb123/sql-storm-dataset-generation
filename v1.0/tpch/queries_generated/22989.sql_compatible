@@ -1,0 +1,51 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS cost_rank,
+        SUM(ps.ps_availqty) AS total_available_qty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal)
+        FROM supplier
+        WHERE s_comment NOT LIKE '%important%'
+    ) 
+    GROUP BY s.s_suppkey, s.s_name, p.p_partkey
+), HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) AS total_lineitems,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus NOT IN ('F', 'O')
+    GROUP BY o.o_orderkey, o.o_totalprice
+), SupplierInfo AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        s.s_name AS supplier_name,
+        rs.total_available_qty
+    FROM RankedSuppliers rs
+    JOIN supplier s ON rs.s_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE rs.cost_rank = 1
+)
+SELECT 
+    H.o_orderkey,
+    H.total_revenue,
+    COALESCE((SELECT AVG(HV.total_revenue) FROM HighValueOrders HV WHERE HV.order_rank <= 10), 0) AS avg_top_revenue,
+    SI.region_name,
+    SI.nation_name
+FROM HighValueOrders H
+LEFT JOIN SupplierInfo SI ON H.total_lineitems > 5
+WHERE H.total_revenue > (
+    SELECT MAX(HV.total_revenue) FROM HighValueOrders HV WHERE HV.order_rank <= 100 
+) OR H.total_revenue IS NULL
+ORDER BY H.o_orderkey DESC;

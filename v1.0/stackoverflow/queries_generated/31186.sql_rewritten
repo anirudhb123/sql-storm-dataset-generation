@@ -1,0 +1,93 @@
+WITH RecursivePostTree AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        pt.Level + 1 AS Level
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostTree pt ON p.ParentId = pt.Id  
+),
+PostVoteStats AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostHistoryStats AS (
+    SELECT 
+        p.Id,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 END) AS EditCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+PostsWithTags AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(t.TagName, 'No Tags') AS TagName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+             pt.Id,
+             STRING_AGG(t.TagName, ', ') AS TagName
+         FROM 
+             Posts pt
+         LEFT JOIN 
+             UNNEST(string_to_array(pt.Tags, ',')) AS tag(T) ON TRUE
+         LEFT JOIN 
+             Tags t ON t.TagName = TRIM(tag.T)
+         GROUP BY 
+             pt.Id) t ON p.Id = t.Id
+)
+SELECT 
+    p.Id AS PostID,
+    p.Title,
+    p.CreationDate,
+    pws.UpVotes,
+    pws.DownVotes,
+    pHistory.LastClosedDate,
+    pHistory.EditCount,
+    r.Level AS PostLevel,
+    pw.TagName
+FROM 
+    Posts p
+LEFT JOIN 
+    PostVoteStats pws ON p.Id = pws.PostId
+LEFT JOIN 
+    PostHistoryStats pHistory ON p.Id = pHistory.Id
+LEFT JOIN 
+    RecursivePostTree r ON p.Id = r.Id
+LEFT JOIN 
+    PostsWithTags pw ON p.Id = pw.Id
+WHERE 
+    p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+ORDER BY 
+    r.Level, p.CreationDate DESC
+LIMIT 100;

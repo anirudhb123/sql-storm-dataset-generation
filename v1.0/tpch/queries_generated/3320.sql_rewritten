@@ -1,0 +1,69 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate <= '1997-12-31'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS TotalAvailable,
+        AVG(ps.ps_supplycost) AS AverageCost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerSpend AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COALESCE(TotalAvailable, 0) AS AvailableQuantity,
+    COALESCE(TotalSpent, 0) AS CustomerTotalSpent,
+    CASE 
+        WHEN TotalSpent IS NULL THEN 'No Spending'
+        WHEN TotalSpent > 10000 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS CustomerType
+FROM 
+    part p
+LEFT JOIN 
+    SupplierParts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    CustomerSpend cs ON p.p_partkey = (
+        SELECT 
+            l.l_partkey 
+        FROM 
+            lineitem l 
+        JOIN 
+            orders o ON l.l_orderkey = o.o_orderkey 
+        WHERE 
+            o.o_orderdate >= '1997-01-01' AND o.o_orderdate <= '1997-12-31'
+        GROUP BY 
+            l.l_partkey
+        HAVING 
+            SUM(l.l_extendedprice) > 5000
+        LIMIT 1
+    )
+ORDER BY 
+    p.p_retailprice DESC,
+    CustomerTotalSpent ASC;

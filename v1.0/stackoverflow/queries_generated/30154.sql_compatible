@@ -1,0 +1,77 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Ranking,
+        RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'  
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    p.Title AS PostTitle,
+    p.ViewCount AS TotalViews,
+    r.Ranking AS RankByViews,
+    r.ScoreRank AS RankByScore,
+    u.DisplayName AS UserDisplayName,
+    ub.BadgeCount AS UserBadgeCount,
+    ub.BadgeNames AS UserBadgeNames,
+    COALESCE(p2.Title, 'No accepted answer') AS AcceptedAnswerTitle,
+    CASE 
+        WHEN p2.Id IS NULL THEN 'Not Answered'
+        ELSE 'Answered'
+    END AS AnswerStatus
+FROM 
+    RankedPosts r
+JOIN 
+    Posts p ON r.Id = p.Id
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Posts p2 ON p.AcceptedAnswerId = p2.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    (SELECT COUNT(c.Id) FROM Comments c WHERE c.PostId = p.Id) > 10  
+    OR r.ScoreRank <= 5  
+ORDER BY 
+    r.ScoreRank, p.ViewCount DESC;

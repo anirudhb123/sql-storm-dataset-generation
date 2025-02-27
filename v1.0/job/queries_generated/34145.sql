@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        NULL::text AS parent_title
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.title AS parent_title
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    m.title AS "Movie Title",
+    m.production_year AS "Year",
+    COALESCE(NULLIF(ca.name, ''), 'Unknown') AS "Cast Name",
+    COUNT(DISTINCT mk.keyword) AS "Number of Keywords",
+    STRING_AGG(DISTINCT COALESCE(k.keyword, 'No Keyword'), ', ') AS "Keywords",
+    ROW_NUMBER() OVER (PARTITION BY m.title ORDER BY ca.nr_order) AS "Cast Order",
+    COUNT(DISTINCT mc.company_id) FILTER (WHERE ct.kind = 'Production') AS "Production Companies",
+    SUM(CASE WHEN pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') THEN 
+        CAST(pi.info AS numeric) ELSE 0 END) AS "Total Budget"
+FROM 
+    MovieHierarchy m
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = m.movie_id
+LEFT JOIN 
+    cast_info ca ON ca.movie_id = cc.movie_id 
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.movie_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = m.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = m.movie_id
+LEFT JOIN 
+    person_info pi ON pi.person_id = ca.person_id
+GROUP BY 
+    m.movie_id, m.title, m.production_year, ca.name
+ORDER BY 
+    m.production_year DESC, COUNT(DISTINCT mk.keyword) DESC;

@@ -1,0 +1,33 @@
+WITH SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_totalprice, o.o_orderdate, o.o_orderstatus
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '2023-01-01'
+),
+NationRegions AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS revenue,
+    SUM(si.total_supply_cost) AS total_supply_cost
+FROM CustomerOrders o
+JOIN Customer c ON o.c_custkey = c.c_custkey
+JOIN NationRegions nr ON c.c_nationkey = nr.n_nationkey
+JOIN lineitem lo ON o.o_orderkey = lo.l_orderkey
+JOIN SupplierInfo si ON lo.l_suppkey = si.s_suppkey
+GROUP BY c.c_name, n.n_name, r.r_name
+HAVING SUM(lo.l_extendedprice * (1 - lo.l_discount)) > 100000
+ORDER BY revenue DESC
+LIMIT 10;

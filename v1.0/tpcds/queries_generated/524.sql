@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        w.w_warehouse_name,
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY w.w_warehouse_name ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) - 30 FROM date_dim d) 
+    GROUP BY 
+        w.w_warehouse_name, i.i_item_id
+),
+HighPerformers AS (
+    SELECT 
+        warehouse_name,
+        i_item_id,
+        total_quantity,
+        total_net_profit
+    FROM 
+        RankedSales
+    WHERE 
+        profit_rank <= 5
+),
+TotalSales AS (
+    SELECT 
+        i_item_id,
+        SUM(total_quantity) AS grand_total_quantity,
+        SUM(total_net_profit) AS grand_total_net_profit
+    FROM 
+        HighPerformers
+    GROUP BY 
+        i_item_id
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(ts.grand_total_quantity, 0) AS total_quantity,
+    COALESCE(ts.grand_total_net_profit, 0) AS total_net_profit,
+    (SELECT COUNT(DISTINCT c.c_customer_sk) FROM customer c 
+     WHERE c.c_current_cdemo_sk IN (SELECT cd_demo_sk FROM customer_demographics WHERE cd_gender = 'F')) AS female_customer_count
+FROM 
+    item i
+LEFT JOIN 
+    TotalSales ts ON i.i_item_id = ts.i_item_id
+WHERE 
+    i.i_current_price > (SELECT AVG(i2.i_current_price) FROM item i2) 
+ORDER BY 
+    total_net_profit DESC
+LIMIT 10;

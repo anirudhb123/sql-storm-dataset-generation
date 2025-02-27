@@ -1,0 +1,93 @@
+
+WITH RECURSIVE film_series AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        ARRAY[mt.title] AS titles,
+        ROW_NUMBER() OVER (PARTITION BY mt.kind_id ORDER BY mt.production_year) AS rn
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'series')
+    UNION ALL
+    SELECT
+        m.id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        fs.titles || m.title,
+        fs.rn + 1
+    FROM
+        aka_title m
+    JOIN film_series fs ON m.episode_of_id = fs.movie_id
+    WHERE
+        m.production_year > fs.production_year
+),
+movie_keywords AS (
+    SELECT
+        mt.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keyword_list
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    JOIN
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY
+        mt.id
+),
+director_info AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS director_count
+    FROM
+        cast_info ci
+    JOIN
+        role_type rt ON ci.role_id = rt.id
+    WHERE
+        rt.role = 'director'
+    GROUP BY
+        ci.movie_id
+),
+top_series AS (
+    SELECT
+        fs.movie_id,
+        fs.titles,
+        fs.production_year,
+        fs.kind_id,
+        COALESCE(director_info.director_count, 0) AS director_count,
+        movie_keywords.keyword_list
+    FROM
+        film_series fs
+    LEFT JOIN
+        director_info ON fs.movie_id = director_info.movie_id
+    LEFT JOIN
+        movie_keywords ON fs.movie_id = movie_keywords.movie_id
+    WHERE
+        fs.rn <= 5
+)
+SELECT
+    ts.movie_id,
+    ts.titles[1] AS first_title,
+    ts.titles[ARRAY_LENGTH(ts.titles, 1)] AS last_title,
+    ts.production_year,
+    ts.director_count,
+    ts.keyword_list,
+    CASE
+        WHEN ts.director_count = 0 THEN 'No Directors'
+        ELSE 'Directed by ' || ts.director_count || ' person(s)'
+    END AS director_info,
+    CASE
+        WHEN ts.production_year IS NULL THEN 'Year Unknown'
+        WHEN ts.production_year < 1990 THEN 'Classic'
+        WHEN ts.production_year BETWEEN 1990 AND 2000 THEN '90s Hit'
+        WHEN ts.production_year > 2000 THEN 'Modern Flick'
+    END AS age_category
+FROM
+    top_series ts
+ORDER BY
+    ts.production_year DESC NULLS LAST, 
+    ts.director_count DESC,
+    ts.movie_id;

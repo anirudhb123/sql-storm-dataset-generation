@@ -1,0 +1,26 @@
+-- Performance Benchmarking Query
+SELECT 
+    a.name AS aka_name,
+    t.title AS movie_title,
+    ci.nr_order AS cast_order,
+    p.info AS person_info,
+    ckt.kind AS company_type,
+    mt.info AS movie_info
+FROM 
+    aka_name AS a
+JOIN 
+    cast_info AS ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title AS t ON ci.movie_id = t.movie_id
+JOIN 
+    person_info AS p ON ci.person_id = p.person_id
+JOIN 
+    movie_companies AS mc ON t.id = mc.movie_id
+JOIN 
+    company_type AS ckt ON mc.company_type_id = ckt.id
+JOIN 
+    movie_info AS mt ON t.id = mt.movie_id
+WHERE 
+    t.production_year >= 2000
+ORDER BY 
+    t.production_year DESC, a.name;

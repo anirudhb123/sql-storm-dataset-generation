@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        m.id AS root_movie_id
+    FROM
+        aka_title AS m
+    WHERE
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        mh.root_movie_id
+    FROM
+        movie_link AS ml
+    JOIN
+        aka_title AS m ON m.id = ml.linked_movie_id
+    JOIN
+        MovieHierarchy AS mh ON mh.movie_id = ml.movie_id
+)
+SELECT
+    m.title,
+    m.production_year,
+    COALESCE(c.name, 'Unknown') AS company_name,
+    COUNT(DISTINCT ca.person_id) AS num_cast,
+    SUM(CASE WHEN ca.nr_order IS NOT NULL THEN 1 ELSE 0 END) AS cast_with_order,
+    STRING_AGG(DISTINCT a.name, '; ') AS actor_names,
+    MAX(DATE_PART('year', CURRENT_DATE) - m.production_year) AS age_years,
+    ROW_NUMBER() OVER (PARTITION BY m.root_movie_id ORDER BY m.production_year DESC) AS movie_rank
+FROM
+    MovieHierarchy AS m
+LEFT JOIN
+    complete_cast AS cc ON cc.movie_id = m.movie_id
+LEFT JOIN
+    cast_info AS ca ON ca.movie_id = cc.movie_id
+LEFT JOIN
+    aka_name AS a ON a.person_id = ca.person_id
+LEFT JOIN
+    movie_companies AS mc ON mc.movie_id = m.movie_id
+LEFT JOIN
+    company_name AS c ON c.id = mc.company_id
+WHERE
+    m.production_year BETWEEN 2000 AND 2023
+    AND c.country_code IS NOT NULL
+GROUP BY
+    m.title, m.production_year, c.name
+HAVING
+    COUNT(DISTINCT ca.person_id) > 2
+ORDER BY
+    age_years DESC, m.production_year DESC;

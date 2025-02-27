@@ -1,0 +1,47 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(u.Reputation) AS AvgReputation,
+        DENSE_RANK() OVER (ORDER BY COUNT(p.Id) DESC) AS PostRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        ROW_NUMBER() OVER (ORDER BY COUNT(p.Id) DESC) AS TagRank
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.Questions,
+    ups.Answers,
+    ups.TotalViews AS UserTotalViews,
+    ups.AvgReputation,
+    pts.TagName,
+    pts.PostCount AS TagPostCount,
+    pts.TotalViews AS TagTotalViews
+FROM 
+    UserPostStats ups
+JOIN 
+    (SELECT TagName FROM PopularTags WHERE TagRank <= 5) pts ON ups.TotalPosts > 10
+ORDER BY 
+    ups.PostRank, pts.TagPostCount DESC;

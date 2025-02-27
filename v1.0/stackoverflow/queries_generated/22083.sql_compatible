@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+
+UserVoteCounts AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        p.Title,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount
+    FROM 
+        PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId, p.Title
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Location,
+    COALESCE(uc.UpVotes, 0) AS UpVotes,
+    COALESCE(uc.DownVotes, 0) AS DownVotes,
+    COUNT(DISTINCT rp.Id) AS QuestionCount,
+    SUM(COALESCE(ph.CloseCount, 0)) AS TotalClosedPosts,
+    MAX(rp.CreationDate) AS LastPostDate,
+    SUM(
+        CASE 
+            WHEN rp.ViewCount > 100 THEN 1 
+            ELSE 0 
+        END
+    ) AS HighViewPosts,
+    STRING_AGG(DISTINCT CONCAT('<Post ', rp.Id, ' (', rp.Title, ') - ', rp.ViewCount, ' views>'), ', ') AS PostDetails
+    
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN 
+    UserVoteCounts uc ON u.Id = uc.UserId
+LEFT JOIN 
+    PostHistoryAnalysis ph ON ph.PostId IN (
+        SELECT p.Id 
+        FROM Posts p 
+        WHERE p.OwnerUserId = u.Id
+    )
+
+WHERE 
+    u.Reputation > 100
+GROUP BY 
+    u.Id, u.DisplayName, u.Location
+HAVING 
+    SUM(COALESCE(ph.CloseCount, 0)) IS NULL OR SUM(COALESCE(ph.CloseCount, 0)) < 5
+ORDER BY 
+    u.Reputation DESC,
+    LastPostDate DESC
+LIMIT 50;

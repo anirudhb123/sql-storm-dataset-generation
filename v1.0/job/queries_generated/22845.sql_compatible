@@ -1,0 +1,74 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rn
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.movie_id = ci.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.title, mt.production_year
+),
+MostPopularActors AS (
+    SELECT 
+        an.id AS actor_id,
+        an.name,
+        COUNT(CASE WHEN ci.note IS NOT NULL THEN 1 END) AS roles_count,
+        AVG(COALESCE(pt.info, 0)) AS average_rating
+    FROM 
+        aka_name an
+    LEFT JOIN 
+        cast_info ci ON an.person_id = ci.person_id
+    LEFT JOIN 
+        person_info pt ON an.person_id = pt.person_id AND pt.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        an.id, an.name
+    HAVING 
+        COUNT(ci.movie_id) > 5
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        STRING_AGG(kw.keyword, ', ') AS keywords
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        movie_keyword mk ON mt.movie_id = mk.movie_id
+    INNER JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        mt.id
+),
+FilteredActors AS (
+    SELECT 
+        ma.actor_id,
+        ma.name,
+        RANK() OVER (PARTITION BY ma.roles_count ORDER BY ma.average_rating DESC) AS rating_rank
+    FROM 
+        MostPopularActors ma
+    WHERE
+        ma.average_rating > 7.5
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    mk.keywords,
+    fa.name AS top_actor,
+    fa.average_rating
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MoviesWithKeywords mk ON rm.title = mk.movie_id
+LEFT JOIN 
+    FilteredActors fa ON rm.cast_count = fa.roles_count
+WHERE 
+    rm.rn <= 5
+ORDER BY 
+    rm.production_year DESC, 
+    rm.cast_count DESC;

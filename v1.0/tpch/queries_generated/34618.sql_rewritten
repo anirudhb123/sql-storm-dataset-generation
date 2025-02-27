@@ -1,0 +1,44 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.orderkey, o.orderstatus, o.totalprice, o.orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.orderstatus ORDER BY o.totalprice DESC) AS rank
+    FROM orders o
+    WHERE o.orderdate >= '1997-01-01'
+    UNION ALL
+    SELECT o.orderkey, o.orderstatus, o.totalprice, o.orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.orderstatus ORDER BY o.totalprice DESC)
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.orderkey > oh.orderkey
+    WHERE oh.rank <= 10
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           COUNT(DISTINCT p.p_partkey) AS unique_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerRegion AS (
+    SELECT c.c_custkey, c.c_name, r.r_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, r.r_name
+    HAVING SUM(o.o_totalprice) IS NOT NULL
+),
+FinalSummary AS (
+    SELECT oh.orderstatus, COUNT(DISTINCT oh.orderkey) AS total_orders,
+           AVG(oh.totalprice) AS avg_order_value,
+           COALESCE(cr.total_spent, 0) AS customer_spending
+    FROM OrderHierarchy oh
+    LEFT JOIN CustomerRegion cr ON cr.total_spent > 0
+    GROUP BY oh.orderstatus
+)
+SELECT fs.orderstatus, fs.total_orders, fs.avg_order_value,
+       ss.s_name, ss.total_available, ss.avg_supply_cost, ss.unique_parts
+FROM FinalSummary fs
+LEFT JOIN SupplierStats ss ON fs.orderstatus = 
+    (SELECT orderstatus FROM orders GROUP BY orderstatus ORDER BY COUNT(DISTINCT o_orderkey) DESC LIMIT 1)
+ORDER BY fs.total_orders DESC, fs.avg_order_value DESC;

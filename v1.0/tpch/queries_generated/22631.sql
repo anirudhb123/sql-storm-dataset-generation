@@ -1,0 +1,58 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, 0 AS level
+    FROM customer c
+    WHERE c.c_name LIKE 'A%'
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_custkey <> ch.c_custkey
+),
+AggregatedSupplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail,
+           AVG(ps.ps_supplycost) AS avg_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_availqty) DESC) AS rn
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+OrdersWithDiscount AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+NationDetails AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name,
+           CASE 
+               WHEN n.n_name IS NULL THEN 'Unknown Nation'
+               ELSE n.n_name
+           END AS nation_label,
+           (SELECT COUNT(*) FROM supplier s WHERE s.s_nationkey = n.n_nationkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+FinalBenchmark AS (
+    SELECT ch.c_name,
+           nd.nation_label,
+           SUM(os.net_revenue) AS total_net_revenue,
+           SUM(asup.total_avail) AS total_availability
+    FROM CustomerHierarchy ch
+    LEFT JOIN OrdersWithDiscount os ON ch.c_custkey = os.o_orderkey
+    LEFT JOIN AggregatedSupplier asup ON asup.ps_partkey IN (
+        SELECT l.l_partkey FROM lineitem l 
+        WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = ch.c_custkey)
+    )
+    LEFT JOIN NationDetails nd ON ch.c_nationkey = nd.n_nationkey
+    GROUP BY ch.c_name, nd.nation_label
+    HAVING SUM(os.net_revenue) > (SELECT AVG(net_revenue) FROM OrdersWithDiscount)
+    ORDER BY total_net_revenue DESC, total_availability DESC
+)
+
+SELECT * FROM FinalBenchmark
+WHERE total_availability IS NOT NULL AND nation_label NOT LIKE 'Unknown%'
+UNION ALL
+SELECT DISTINCT c.c_name, 'No Revenue' AS nation_label, 0 AS total_net_revenue, 0 AS total_availability
+FROM customer c
+WHERE c.c_custkey NOT IN (SELECT DISTINCT ch.c_custkey FROM FinalBenchmark ch);

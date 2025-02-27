@@ -1,0 +1,44 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey AND s.s_suppkey <> sh.s_suppkey
+    WHERE sh.level < 5
+),
+MaxInvoice AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_invoice
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+RankedInvoices AS (
+    SELECT mi.o_orderkey, mi.total_invoice,
+           RANK() OVER (ORDER BY mi.total_invoice DESC) AS rnk
+    FROM MaxInvoice mi
+    WHERE mi.total_invoice > 1000
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, 
+           SUM(COALESCE(o.o_totalprice, 0)) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+FinalOutput AS (
+    SELECT ch.c_custkey AS cust_key, ch.c_name AS cust_info, i.total_invoice, sh.level
+    FROM CustomerOrderStats ch
+    JOIN RankedInvoices i ON ch.order_count > 10
+    LEFT JOIN SupplierHierarchy sh ON ch.c_custkey = sh.s_nationkey
+)
+SELECT DISTINCT f.cust_info, 
+       f.total_invoice, 
+       CASE WHEN f.level IS NOT NULL THEN 'High' ELSE 'Low' END AS supplier_status
+FROM FinalOutput f
+WHERE f.total_invoice > (SELECT AVG(total_invoice) FROM RankedInvoices)
+ORDER BY f.total_invoice DESC;

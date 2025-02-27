@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+        AND p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 year'
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+VotingStats AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes  
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Author,
+    COALESCE(pc.CommentCount, 0) AS CommentCount,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    COALESCE(phs.EditCount, 0) AS EditCount,
+    phs.LastEditDate,
+    CASE 
+        WHEN rp.Score > 0 THEN 'Positive'
+        WHEN rp.Score < 0 THEN 'Negative'
+        ELSE 'Neutral' 
+    END AS ScoreCategory,
+    (SELECT 
+        STRING_AGG(tag.TagName, ', ') 
+     FROM 
+        Tags tag
+     WHERE 
+        tag.Id IN (
+            SELECT 
+                CAST(value AS INT)
+            FROM 
+                UNNEST(STRING_TO_ARRAY(TRIM(BOTH '<>' FROM rp.Tags), '><')) AS value
+        )
+    ) AS TagsList
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostComments pc ON rp.PostId = pc.PostId
+LEFT JOIN 
+    VotingStats vs ON rp.PostId = vs.PostId
+LEFT JOIN 
+    PostHistoryStats phs ON rp.PostId = phs.PostId
+WHERE 
+    rp.Rank <= 5 
+ORDER BY 
+    rp.CreationDate DESC;

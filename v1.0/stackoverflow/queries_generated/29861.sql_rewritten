@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.ExcerptPostId = p.Id
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.OwnerUserId
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        COUNT(c.Id) AS TotalComments,
+        COUNT(b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id 
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    ra.PostId,
+    ra.Title,
+    ra.Body,
+    ra.CreationDate,
+    ra.ViewCount,
+    ra.Rank,
+    ra.TagList,
+    ua.DisplayName,
+    ua.TotalBounty,
+    ua.TotalComments,
+    ua.TotalBadges
+FROM 
+    RankedPosts ra
+JOIN 
+    UserActivity ua ON ra.OwnerUserId = ua.UserId
+WHERE 
+    ra.Rank <= 5  
+ORDER BY 
+    ra.ViewCount DESC, ua.TotalBounty DESC;

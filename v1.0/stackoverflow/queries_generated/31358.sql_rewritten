@@ -1,0 +1,49 @@
+WITH RecursiveUserPosts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        P.Id AS PostId,
+        P.CreationDate,
+        P.Title
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    WHERE U.Reputation > 1000
+    UNION ALL
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        P.Id,
+        P.CreationDate,
+        P.Title
+    FROM Users U
+    JOIN Posts P ON U.Id = P.LastEditorUserId
+    JOIN RecursiveUserPosts R ON U.Id = R.UserId
+)
+
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    COUNT(DISTINCT P.Id) AS TotalPosts,
+    COUNT(DISTINCT C.Id) AS TotalComments,
+    SUM(V.UserId IS NOT NULL AND V.VoteTypeId = 2) AS TotalUpvotes,
+    AVG(P.Score) AS AverageScore,
+    MAX(P.ViewCount) AS MaxViewCount,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed
+FROM Users U
+LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN Comments C ON P.Id = C.PostId
+LEFT JOIN Votes V ON P.Id = V.PostId
+LEFT JOIN LATERAL (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(P.Tags, '>')) AS TagName
+) AS T ON TRUE
+WHERE U.Reputation > 500 
+AND EXISTS (
+    SELECT 1 
+    FROM Posts P2 
+    WHERE P2.OwnerUserId = U.Id 
+    AND P2.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+)
+GROUP BY U.Id, U.DisplayName
+HAVING COUNT(DISTINCT P.Id) > 5
+ORDER BY TotalPosts DESC, U.DisplayName;

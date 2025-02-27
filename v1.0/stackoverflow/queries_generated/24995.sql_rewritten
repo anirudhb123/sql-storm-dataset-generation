@@ -1,0 +1,94 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM
+        Posts p
+    WHERE
+        p.Score > 0
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownVotes,
+        u.Reputation
+    FROM
+        Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY
+        u.Id
+),
+PostHistoryDetails AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        COUNT(DISTINCT ph.UserId) AS EditorCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM
+        PostHistory ph
+    WHERE
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY
+        ph.PostId, ph.PostHistoryTypeId
+),
+PostEditCounts AS (
+    SELECT
+        phd.PostId,
+        SUM(phd.EditorCount) AS TotalEdits
+    FROM
+        PostHistoryDetails phd
+    GROUP BY
+        phd.PostId
+),
+UserPostStats AS (
+    SELECT
+        u.UserId,
+        u.DisplayName,
+        COUNT(DISTINCT rp.PostId) AS PostCount,
+        MAX(rp.CreationDate) AS MostRecentPostDate,
+        SUM(rp.ViewCount) AS TotalViews,
+        SUM(rp.Score) AS TotalScore,
+        COALESCE(pec.TotalEdits, 0) AS TotalEdits
+    FROM
+        UserActivity u
+    JOIN RankedPosts rp ON u.UserId = rp.OwnerUserId
+    LEFT JOIN PostEditCounts pec ON rp.PostId = pec.PostId
+    GROUP BY
+        u.UserId, u.DisplayName
+)
+SELECT
+    u.DisplayName,
+    u.PostCount,
+    u.TotalViews,
+    u.TotalScore,
+    u.TotalEdits,
+    u.MostRecentPostDate,
+    COALESCE(u.Reputation, 0) AS UserReputation,
+    CASE
+        WHEN u.TotalViews > 1000 THEN 'High Activity'
+        WHEN u.PostCount > 10 THEN 'Moderate Activity'
+        ELSE 'Low Activity'
+    END AS ActivityLevel,
+    CASE
+        WHEN u.PostCount = 0 THEN 'No posts available for user.'
+        ELSE (
+            SELECT STRING_AGG(DISTINCT p.Title, '; ') 
+            FROM Posts p 
+            WHERE p.OwnerUserId = u.UserId
+        )
+    END AS PostTitles
+FROM
+    UserPostStats u
+ORDER BY
+    u.TotalScore DESC NULLS LAST,
+    u.PostCount DESC NULLS LAST,
+    u.TotalViews DESC NULLS LAST;

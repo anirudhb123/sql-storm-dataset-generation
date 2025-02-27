@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ViewCount, 
+        p.Score, 
+        p.OwnerUserId, 
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY p.Id) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY p.Id) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.PostTypeId = 1  
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation,
+        u.Location,
+        COALESCE(b.Name, 'No Badge') AS BadgeName
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId AND b.Class = 1  
+),
+PostHistoryCount AS (
+    SELECT 
+        PostId, 
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory 
+    GROUP BY 
+        PostId
+)
+SELECT 
+    p.PostId, 
+    p.Title, 
+    p.ViewCount, 
+    p.Score,
+    up.Reputation,
+    up.Location,
+    up.BadgeName,
+    COALESCE(phc.HistoryCount, 0) AS HistoryCount,
+    (CASE 
+        WHEN up.Reputation IS NULL THEN 'No Reputation'
+        WHEN up.Reputation > 1000 THEN 'High Reputation'
+        ELSE 'Moderate Reputation'
+    END) AS ReputationCategory,
+    (SELECT 
+        STRING_AGG(DISTINCT CONCAT(t.TagName, ': ', t.Count) ORDER BY t.Count DESC)
+     FROM 
+        Tags t 
+     JOIN 
+        STRING_TO_ARRAY(p.Tags, ',') AS tag ON t.TagName = TRIM(tag) 
+     WHERE 
+        t.WikiPostId IS NOT NULL
+     ) AS PopularTags
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    UserReputation up ON p.OwnerUserId = up.UserId
+LEFT JOIN 
+    PostHistoryCount phc ON p.PostId = phc.PostId
+WHERE 
+    p.rn = 1  
+    AND (p.ViewCount > 100 OR p.Score > 10)
+ORDER BY 
+    p.Score DESC, 
+    p.ViewCount DESC
+LIMIT 10;

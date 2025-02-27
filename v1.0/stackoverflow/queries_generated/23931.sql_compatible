@@ -1,0 +1,65 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+RecentActivities AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.CreationDate,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentRank
+    FROM Posts P
+),
+CloseReasons AS (
+    SELECT 
+        PH.PostId,
+        MIN(CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.Comment END) AS CloseReason,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+),
+PostStats AS (
+    SELECT 
+        R.OwnerUserId,
+        R.PostId,
+        CASE 
+            WHEN C.CloseReason IS NOT NULL THEN 'Closed'
+            ELSE 'Active'
+        END AS PostStatus,
+        C.CloseCount,
+        R.CreationDate
+    FROM RecentActivities R
+    LEFT JOIN CloseReasons C ON R.PostId = C.PostId
+    WHERE R.RecentRank = 1
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.TotalPosts,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    U.TotalViews,
+    U.TotalScore,
+    P.PostId,
+    P.PostStatus,
+    P.CloseCount,
+    COALESCE(TO_CHAR(P.CreationDate, 'YYYY-MM-DD HH24:MI:SS'), 'No date') AS FormattedDate
+FROM UserActivity U
+LEFT JOIN PostStats P ON U.UserId = P.OwnerUserId
+WHERE U.Reputation > (SELECT AVG(Reputation) FROM Users) 
+    AND P.CloseCount IS NOT NULL 
+    AND P.PostStatus = 'Closed'
+ORDER BY U.Reputation DESC, P.CloseCount DESC
+LIMIT 10;

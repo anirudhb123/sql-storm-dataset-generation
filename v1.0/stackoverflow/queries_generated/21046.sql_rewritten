@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(NULLIF(p.Score, 0), 1) AS AdjustedScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgeClass,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        us.UserId,
+        us.QuestionCount,
+        us.TotalBadgeClass,
+        us.TotalUpVotes,
+        us.TotalDownVotes,
+        p.AnswerCount,
+        p.CommentCount,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+            ELSE 'Not Accepted'
+        END AS AnswerStatus,
+        (EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - p.CreationDate)) / 3600)::int AS AgeInHours
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users us ON us.Id = rp.OwnerUserId
+    JOIN 
+        Posts p ON p.Id = rp.PostId
+    WHERE 
+        rp.rn = 1 AND 
+        (p.ViewCount > (SELECT AVG(ViewCount) FROM Posts) OR 
+         us.QuestionCount > 5) 
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.UserId,
+    fp.QuestionCount,
+    fp.TotalBadgeClass,
+    fp.TotalUpVotes,
+    fp.TotalDownVotes,
+    fp.AnswerCount,
+    fp.CommentCount,
+    fp.AnswerStatus,
+    fp.AgeInHours,
+    CASE 
+        WHEN fp.TotalUpVotes - fp.TotalDownVotes > 0 THEN 'Net Positive'
+        WHEN fp.TotalUpVotes - fp.TotalDownVotes < 0 THEN 'Net Negative'
+        ELSE 'Neutral'
+    END AS VoteTrend,
+    CASE 
+        WHEN fp.TotalBadgeClass > 5 THEN 'Expert'
+        WHEN fp.QuestionCount > 20 THEN 'Active Contributor'
+        ELSE 'Newcomer'
+    END AS UserType,
+    CONCAT('Post ID: ', fp.PostId, ' | Title: ', fp.Title) AS PostDetails
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.QuestionCount DESC,
+    fp.AgeInHours ASC
+LIMIT 100;

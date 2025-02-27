@@ -1,0 +1,41 @@
+
+WITH RECURSIVE income_summary AS (
+    SELECT 
+        cd.cd_demo_sk,
+        CASE 
+            WHEN ib.ib_lower_bound IS NULL THEN 'Unknown'
+            ELSE CONCAT(ib.ib_lower_bound, '-', COALESCE(ib.ib_upper_bound, '∞'))
+        END AS income_band,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM customer_demographics cd
+    JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    LEFT JOIN web_sales ws ON cd.cd_demo_sk = ws.ws_bill_cdemo_sk
+    GROUP BY cd.cd_demo_sk, ib.ib_lower_bound, ib.ib_upper_bound
+
+    UNION ALL
+
+    SELECT 
+        income_summary.cd_demo_sk,
+        CONCAT(income_summary.income_band, ' (Aggregated)') AS income_band,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM income_summary
+    JOIN web_sales ws ON income_summary.cd_demo_sk = ws.ws_bill_cdemo_sk
+    GROUP BY income_summary.cd_demo_sk, income_summary.income_band
+)
+
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    SUM(is.total_net_profit) AS aggregate_net_profit,
+    COUNT(DISTINCT c.c_customer_id) AS unique_customers
+FROM customer_address ca
+JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN income_summary is ON c.c_current_cdemo_sk = is.cd_demo_sk
+GROUP BY ca.ca_city, ca.ca_state
+HAVING SUM(is.total_net_profit) > (
+    SELECT AVG(total_net_profit) 
+    FROM income_summary 
+    WHERE total_net_profit IS NOT NULL
+) OR COUNT(DISTINCT c.c_customer_id) < 100
+ORDER BY aggregate_net_profit DESC, ca.ca_city ASC;

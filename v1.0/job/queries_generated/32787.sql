@@ -1,0 +1,77 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        1 AS hierarchy_level
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.nr_order = 1  -- Start with the first actor in each movie's cast
+
+    UNION ALL
+
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        ah.hierarchy_level + 1
+    FROM 
+        cast_info ci
+    JOIN 
+        actor_hierarchy ah ON ci.movie_id = ah.movie_id
+    WHERE 
+        ci.nr_order = ah.hierarchy_level + 1  -- Get the next actor in hierarchy
+),
+movie_info_summary AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        AVG(CASE WHEN mi.info_type_id IS NOT NULL THEN LENGTH(mi.info) ELSE NULL END) AS avg_info_length,
+        MAX(CAST(COALESCE(mi.note, '') AS INTEGER)) AS max_info_note -- Assuming note can store numeric values
+    FROM 
+        title m
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    WHERE 
+        m.production_year >= 2000  -- Focus on movies post-2000
+    GROUP BY 
+        m.id, m.title
+),
+actor_movies AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.name
+),
+high_actor_movies AS (
+    SELECT 
+        actor_name, 
+        movies_count 
+    FROM 
+        actor_movies 
+    WHERE 
+        movies_count > 5  -- Actors who appeared in more than 5 movies
+)
+SELECT 
+    m.title,
+    m.production_year,
+    m.actor_count,
+    m.avg_info_length,
+    m.max_info_note,
+    ham.actor_name,
+    ham.movies_count
+FROM 
+    movie_info_summary m
+LEFT JOIN 
+    high_actor_movies ham ON m.actor_count = ham.movies_count
+ORDER BY 
+    m.actor_count DESC,
+    m.production_year DESC
+LIMIT 50;  -- Limit to top 50 movies based on actor count

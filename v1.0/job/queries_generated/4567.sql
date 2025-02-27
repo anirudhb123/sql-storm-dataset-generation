@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        cm.name AS company_name,
+        cc.total_cast
+    FROM 
+        RankedMovies rm
+    LEFT JOIN movie_companies mc ON mc.movie_id = rm.movie_id
+    LEFT JOIN company_name cm ON cm.id = mc.company_id
+    JOIN CastCounts cc ON cc.movie_id = rm.movie_id
+    WHERE 
+        rm.year_rank <= 10
+      AND 
+        cm.country_code IS NOT NULL
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    COALESCE(fm.total_cast, 0) AS total_cast,
+    CASE 
+        WHEN fm.total_cast > 50 THEN 'Large Ensemble'
+        WHEN fm.total_cast BETWEEN 30 AND 50 THEN 'Medium Ensemble'
+        ELSE 'Small Ensemble'
+    END AS ensemble_size,
+    STRING_AGG(DISTINCT cm.name, ', ') AS companies
+FROM 
+    FilteredMovies fm
+LEFT JOIN movie_info mi ON mi.movie_id = fm.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+LEFT JOIN movie_keyword mk ON mk.movie_id = fm.movie_id
+WHERE 
+    (mi.info IS NOT NULL OR mk.keyword_id IS NOT NULL)
+GROUP BY 
+    fm.title, fm.production_year, fm.total_cast
+ORDER BY 
+    fm.production_year DESC, fm.title;

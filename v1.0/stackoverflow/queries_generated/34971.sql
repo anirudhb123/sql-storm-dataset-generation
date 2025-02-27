@@ -1,0 +1,100 @@
+WITH RecursiveUserReputation AS (
+    SELECT 
+        u.Id, 
+        u.Reputation, 
+        u.DisplayName,
+        1 AS Level
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        u.Id, 
+        u.Reputation, 
+        u.DisplayName,
+        Level + 1
+    FROM 
+        Users u
+    INNER JOIN 
+        RecursiveUserReputation r ON u.Reputation > r.Reputation AND r.Level < 5
+),
+TopTags AS (
+    SELECT 
+        t.TagName, 
+        SUM(v.Id) AS TotalVotes, 
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 10
+    ORDER BY 
+        TotalVotes DESC
+    LIMIT 10
+),
+RecentPostEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5) -- Edit Title or Edit Body
+),
+CombinedData AS (
+    SELECT 
+        u.DisplayName,
+        r.Reputation,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS ContributionCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        RecursiveUserReputation r
+    JOIN 
+        Posts p ON p.OwnerUserId = r.Id
+    JOIN 
+        Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id AND v.VoteTypeId IN (8, 9) -- BountyStart or BountyClose
+    GROUP BY 
+        u.DisplayName, r.Reputation, t.TagName
+),
+FinalOutput AS (
+    SELECT 
+        c.DisplayName,
+        c.Reputation,
+        c.TagName,
+        c.ContributionCount,
+        c.TotalBounty,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM RecentPostEdits re
+            WHERE re.PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = c.UserId) 
+        ), 0) AS EditCount
+    FROM 
+        CombinedData c
+    JOIN 
+        TopTags tt ON c.TagName = tt.TagName
+)
+SELECT 
+    f.DisplayName,
+    f.Reputation,
+    f.TagName,
+    f.ContributionCount,
+    f.TotalBounty,
+    f.EditCount
+FROM 
+    FinalOutput f
+ORDER BY 
+    f.Reputation DESC, f.TotalBounty DESC;

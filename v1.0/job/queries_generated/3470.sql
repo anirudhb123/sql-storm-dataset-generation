@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+MovieInfo AS (
+    SELECT 
+        m.movie_id,
+        GROUP_CONCAT(DISTINCT CONCAT(mk.keyword, '(', mt.kind, ')') ORDER BY mk.keyword) AS keywords,
+        STRING_AGG(DISTINCT ci.note) AS cast_notes
+    FROM 
+        movie_info m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON m.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_link ml ON m.movie_id = ml.movie_id
+    LEFT JOIN 
+        cast_info ci ON m.movie_id = ci.movie_id
+    GROUP BY 
+        m.movie_id
+),
+FilteredTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        CASE 
+            WHEN t.production_year < 2000 THEN 'Classic'
+            WHEN t.production_year BETWEEN 2000 AND 2015 THEN 'Modern'
+            ELSE 'Recent'
+        END AS era
+    FROM 
+        title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'feature%') 
+)
+SELECT 
+    ft.title,
+    ft.production_year,
+    ft.era,
+    mi.keywords,
+    mi.cast_notes,
+    COALESCE(CAST(SUM(CASE WHEN c.note IS NULL THEN 1 ELSE 0 END) AS INTEGER), 0) AS null_cast_notes
+FROM 
+    FilteredTitles ft
+LEFT JOIN 
+    MovieInfo mi ON ft.production_year = mi.movie_id
+LEFT JOIN 
+    cast_info c ON ft.production_year = c.movie_id
+WHERE 
+    ft.era IS NOT NULL
+GROUP BY 
+    ft.title, ft.production_year, ft.era, mi.keywords, mi.cast_notes
+HAVING 
+    COUNT(DISTINCT c.person_id) > 5
+ORDER BY 
+    ft.production_year DESC, ft.title;

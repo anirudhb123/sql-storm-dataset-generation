@@ -1,0 +1,19 @@
+
+SELECT 
+    ca.city AS customer_city,
+    COUNT(DISTINCT c.c_customer_sk) AS number_of_customers,
+    SUM(ss.ss_quantity) AS total_sales_quantity,
+    AVG(ss.ss_sales_price) AS average_sales_price
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+WHERE 
+    ca.ca_city IS NOT NULL
+GROUP BY 
+    ca.city
+ORDER BY 
+    total_sales_quantity DESC
+LIMIT 10;

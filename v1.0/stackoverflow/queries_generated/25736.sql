@@ -1,0 +1,75 @@
+WITH RecursiveTags AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        WikiPostId,
+        ExcerptPostId,
+        IsModeratorOnly,
+        IsRequired,
+        1 AS Level
+    FROM Tags
+    WHERE IsRequired = 1
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        t.WikiPostId,
+        t.ExcerptPostId,
+        t.IsModeratorOnly,
+        t.IsRequired,
+        rt.Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTags rt ON rt.Id = t.Id
+    WHERE t.IsModeratorOnly = 1
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    WHERE p.CreationDate > (CURRENT_TIMESTAMP - INTERVAL '1 year')
+    GROUP BY p.Id
+    HAVING COUNT(c.Id) > 5 AND p.ViewCount > 500
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 6) THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    WHERE u.CreationDate < (CURRENT_TIMESTAMP - INTERVAL '6 months')
+    GROUP BY u.Id
+    HAVING SUM(CASE WHEN v.VoteTypeId IN (2, 6) THEN 1 ELSE 0 END) > 10
+),
+TagPostCounts AS (
+    SELECT 
+        unnest(string_to_array(Tags, '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM Posts
+    GROUP BY Tag
+)
+SELECT 
+    ut.DisplayName AS User,
+    pp.Title AS PopularPost,
+    pp.ViewCount,
+    pp.CommentCount,
+    tt.Tag AS ActiveTag,
+    tt.PostCount
+FROM ActiveUsers ut
+JOIN PopularPosts pp ON pp.ViewCount > 1000
+JOIN TagPostCounts tt ON tt.Tag = ANY(string_to_array(pp.Tags, '><'))
+ORDER BY ut.BadgeCount DESC, pp.ViewCount DESC, tt.PostCount DESC
+LIMIT 50;

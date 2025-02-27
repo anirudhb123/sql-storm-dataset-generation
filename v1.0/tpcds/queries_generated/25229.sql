@@ -1,0 +1,74 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        CAST(LEFT(c.c_email_address, 20) AS VARCHAR(20)) AS email_prefix,
+        LENGTH(c.c_email_address) AS email_length
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesStats AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws_item_sk) AS unique_items_purchased
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        ci.full_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        ci.ca_city,
+        ci.ca_state,
+        ci.ca_country,
+        si.total_net_profit,
+        si.total_orders,
+        si.unique_items_purchased,
+        CASE 
+            WHEN si.total_net_profit IS NULL THEN 'No Purchases' 
+            WHEN si.total_net_profit < 0 THEN 'Loss'
+            ELSE 'Profit'
+        END AS profit_status
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        SalesStats si ON ci.c_customer_sk = si.ws_bill_customer_sk
+)
+SELECT 
+    full_name,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    ca_city,
+    ca_state,
+    ca_country,
+    total_net_profit,
+    total_orders,
+    unique_items_purchased,
+    profit_status,
+    CONCAT(email_prefix, RIGHT(LEFT(cast(current_timestamp AS VARCHAR), 100), 10)) AS temp_email
+FROM 
+    FinalReport
+WHERE 
+    ca_country = 'USA' AND
+    email_length > 0
+ORDER BY 
+    total_net_profit DESC, 
+    full_name;

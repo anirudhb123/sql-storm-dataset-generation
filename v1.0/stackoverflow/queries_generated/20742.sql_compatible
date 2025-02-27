@@ -1,0 +1,86 @@
+
+WITH PostAnalytics AS (
+    SELECT
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COALESCE(ph.ChangeCount, 0) AS TotalChanges,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM
+        Posts p
+    LEFT JOIN
+        (SELECT 
+            PostId, 
+            COUNT(*) AS ChangeCount 
+         FROM 
+            PostHistory 
+         GROUP BY 
+            PostId) ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title, p.CreationDate, ph.ChangeCount
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(b.Class) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+RankedPosts AS (
+    SELECT 
+        pa.PostId,
+        pa.Title,
+        pa.TotalChanges,
+        pa.CommentCount,
+        pa.UpVotes,
+        pa.DownVotes,
+        RANK() OVER (PARTITION BY pa.OwnerUserId ORDER BY pa.UpVotes DESC, pa.TotalChanges DESC) AS Rank
+    FROM 
+        PostAnalytics pa
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    u.DisplayName AS OwnerDisplay,
+    u.Reputation AS OwnerReputation,
+    r.TotalChanges,
+    r.CommentCount,
+    r.UpVotes - r.DownVotes AS Score,
+    CASE 
+        WHEN r.Rank = 1 AND r.UpVotes > 0 THEN 'Top Upvoted Post'
+        WHEN r.UpVotes = 0 AND r.DownVotes > 0 THEN 'Controversial Post'
+        ELSE 'Regular Post'
+    END AS PostStatus
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+WHERE 
+    r.TotalChanges <> 0
+    AND u.Reputation >= (
+        SELECT AVG(Reputation) FROM Users WHERE Reputation IS NOT NULL
+    )
+ORDER BY 
+    Score DESC, 
+    r.TotalChanges DESC
+LIMIT 10;

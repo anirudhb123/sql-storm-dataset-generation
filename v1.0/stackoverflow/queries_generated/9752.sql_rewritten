@@ -1,0 +1,77 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownvotes,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, ',')) AS tag_ids(tag) ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(tag_ids.tag)
+    WHERE 
+        u.Reputation > 1000 
+        AND u.AccountId IS NOT NULL
+    GROUP BY 
+        u.Id
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        pt.Name AS PostType,
+        p.Score,
+        COUNT(v.Id) AS TotalVotes,
+        COUNT(c.Id) AS TotalComments,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, pt.Name
+)
+SELECT 
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalComments,
+    ua.TotalUpvotes,
+    ua.TotalDownvotes,
+    ua.TagsUsed,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.PostType,
+    ps.Score,
+    ps.TotalVotes,
+    ps.TotalComments,
+    ps.GoldBadges,
+    ps.SilverBadges,
+    ps.BronzeBadges
+FROM 
+    UserActivity ua
+JOIN 
+    PostSummary ps ON ua.UserId = ps.OwnerUserId
+ORDER BY 
+    ua.TotalUpvotes DESC, 
+    ps.Score DESC
+LIMIT 100;

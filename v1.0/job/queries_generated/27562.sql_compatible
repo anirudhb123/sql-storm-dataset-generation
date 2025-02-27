@@ -1,0 +1,66 @@
+
+WITH RankedActors AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name AS actor_name,
+        ak.person_id,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.id, ak.name, ak.person_id
+),
+TopActors AS (
+    SELECT 
+        actor_id,
+        actor_name,
+        movie_count,
+        ROW_NUMBER() OVER (ORDER BY movie_count DESC) AS rank
+    FROM 
+        RankedActors
+    WHERE 
+        movie_count > 5  
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.title, m.production_year
+),
+ActorMovieDetails AS (
+    SELECT 
+        ta.actor_name,
+        mwk.title,
+        mwk.production_year,
+        mwk.keywords
+    FROM 
+        TopActors ta
+    JOIN 
+        cast_info ci ON ta.actor_id = ci.person_id
+    JOIN 
+        aka_title mwk ON ci.movie_id = mwk.id
+)
+SELECT 
+    amd.actor_name,
+    COUNT(DISTINCT amd.title) AS titles_count,
+    STRING_AGG(DISTINCT amd.keywords, '; ') AS all_keywords,
+    MIN(mw.production_year) AS earliest_movie_year,
+    MAX(mw.production_year) AS latest_movie_year
+FROM 
+    ActorMovieDetails amd
+JOIN 
+    MoviesWithKeywords mw ON amd.title = mw.title
+GROUP BY 
+    amd.actor_name
+ORDER BY 
+    titles_count DESC;

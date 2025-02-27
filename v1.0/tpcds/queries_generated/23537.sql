@@ -1,0 +1,84 @@
+
+WITH RankedReturns AS (
+    SELECT
+        cr_returning_customer_sk,
+        cr_return_quantity,
+        cr_return_amount,
+        ROW_NUMBER() OVER (PARTITION BY cr_returning_customer_sk ORDER BY cr_return_amount DESC) AS rnk
+    FROM
+        catalog_returns
+    WHERE
+        cr_return_quantity IS NOT NULL AND cr_returned_date_sk > 1000
+),
+CustomerStatistics AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        COUNT(DISTINCT r.rc_customer_sk) AS return_count,
+        SUM(COALESCE(r.cr_return_amount, 0)) AS total_return_amount,
+        SUM(COALESCE(r.cr_return_quantity, 0)) AS total_return_quantity
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        (SELECT DISTINCT cr_returning_customer_sk, cr_return_amount, cr_return_quantity FROM RankedReturns) r ON r.cr_returning_customer_sk = c.c_customer_sk
+    GROUP BY
+        c.c_customer_id, cd.cd_gender
+),
+IncomeBands AS (
+    SELECT
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        CASE
+            WHEN ib.ib_lower_bound < 50000 THEN 'Low Income'
+            WHEN ib.ib_lower_bound BETWEEN 50000 AND 100000 THEN 'Middle Income'
+            ELSE 'High Income'
+        END AS income_category
+    FROM
+        income_band ib
+),
+FinalReport AS (
+    SELECT
+        cs.c_customer_id,
+        cs.cd_gender,
+        ib.income_category,
+        cs.return_count,
+        cs.total_return_amount,
+        cs.total_return_quantity,
+        (cs.total_return_amount / NULLIF(cs.return_count, 0)) AS avg_return_amount
+    FROM
+        CustomerStatistics cs
+    CROSS JOIN
+        IncomeBands ib
+    WHERE
+        cs.return_count > 0
+    ORDER BY
+        cs.total_return_amount DESC
+    LIMIT 10
+)
+SELECT
+    fr.c_customer_id,
+    fr.cd_gender,
+    fr.income_category,
+    fr.return_count,
+    fr.total_return_amount,
+    fr.total_return_quantity,
+    fr.avg_return_amount,
+    CASE
+        WHEN fr.avg_return_amount IS NULL THEN 'No Returns'
+        WHEN fr.avg_return_amount < 100 THEN 'Low Avg Return'
+        WHEN fr.avg_return_amount BETWEEN 100 AND 500 THEN 'Medium Avg Return'
+        ELSE 'High Avg Return'
+    END AS return_category
+FROM
+    FinalReport fr
+LEFT JOIN
+    web_sales ws ON fr.c_customer_id = ws.ws_bill_customer_sk
+WHERE
+    ws.ws_ship_date_sk IS NULL OR ws.ws_ship_date_sk > 2000
+AND
+    (fr.return_count >= (SELECT COUNT(*) FROM customer) * 0.01 OR fr.total_return_amount < (SELECT AVG(total_return_amount) FROM CustomerStatistics))
+ORDER BY
+    fr.avg_return_amount DESC;

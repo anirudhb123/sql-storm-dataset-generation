@@ -1,0 +1,42 @@
+WITH PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS Tag
+    FROM Posts p
+    WHERE p.PostTypeId = 1  -- Only consider questions
+),
+TagStatistics AS (
+    SELECT 
+        Tag,
+        COUNT(p.PostId) AS PostCount,
+        AVG(u.Reputation) AS AverageUserReputation,
+        COUNT(DISTINCT p.OwnerUserId) AS UniqueAuthors
+    FROM PostTags pt
+    JOIN Posts p ON pt.PostId = p.Id
+    JOIN Users u ON p.OwnerUserId = u.Id
+    GROUP BY Tag
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        AverageUserReputation,
+        UniqueAuthors,
+        RANK() OVER (ORDER BY PostCount DESC, AverageUserReputation DESC) AS TagRank
+    FROM TagStatistics
+    WHERE PostCount > 1  -- Only consider tags with more than one question
+)
+SELECT 
+    T.Tag,
+    T.PostCount,
+    ROUND(T.AverageUserReputation, 2) AS AverageUserReputation,
+    T.UniqueAuthors,
+    COUNT(c.Id) AS TotalComments,
+    COUNT(v.Id) AS TotalVotes
+FROM TopTags T
+LEFT JOIN Posts p ON T.Tag = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AND p.PostTypeId = 1
+LEFT JOIN Comments c ON p.Id = c.PostId
+LEFT JOIN Votes v ON p.Id = v.PostId
+WHERE T.TagRank <= 10 -- Only the top 10 tags
+GROUP BY T.Tag, T.PostCount, T.AverageUserReputation, T.UniqueAuthors
+ORDER BY T.TagRank;

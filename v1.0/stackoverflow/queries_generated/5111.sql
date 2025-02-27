@@ -1,0 +1,77 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id as UserId,
+        U.DisplayName,
+        COUNT(distinct P.Id) as TotalPosts,
+        COUNT(distinct C.Id) as TotalComments,
+        COUNT(distinct B.Id) as TotalBadges,
+        SUM(COALESCE(P.ViewCount, 0)) as TotalViews,
+        SUM(COALESCE(P.Score, 0)) as TotalScore,
+        MAX(P.CreationDate) as LastPostDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostEngagement AS (
+    SELECT 
+        P.Id as PostId,
+        COUNT(V.Id) as TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) as UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) as DownVotes,
+        MAX(COALESCE(P.LastActivityDate, P.CreationDate)) as LastActivityDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) as PostsCount,
+        SUM(P.ViewCount) as TotalViews
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostsCount DESC
+    LIMIT 10
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalPosts,
+    UA.TotalComments,
+    UA.TotalBadges,
+    UA.TotalViews,
+    UA.TotalScore,
+    UA.LastPostDate,
+    PE.TotalVotes,
+    PE.UpVotes,
+    PE.DownVotes,
+    PT.TagName,
+    PT.PostsCount,
+    PT.TotalViews
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    PostEngagement PE ON UA.TotalPosts > 0
+LEFT JOIN 
+    PopularTags PT ON UA.TotalPosts > 0
+WHERE 
+    UA.LastPostDate >= NOW() - INTERVAL '1 year'
+ORDER BY 
+    UA.TotalScore DESC, UA.TotalPosts DESC;

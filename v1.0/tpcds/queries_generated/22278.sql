@@ -1,0 +1,45 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank
+    FROM web_sales
+),
+TopSales AS (
+    SELECT 
+        ws_item_sk, 
+        MAX(ws_sales_price) AS max_price
+    FROM RankedSales
+    WHERE price_rank <= 5
+    GROUP BY ws_item_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        s.ws_item_sk, 
+        s.ws_order_number,
+        COALESCE(r.wr_return_quantity, 0) AS return_quantity,
+        s.ws_sales_price
+    FROM web_sales s
+    LEFT JOIN web_returns r ON s.ws_item_sk = r.wr_item_sk AND s.ws_order_number = r.wr_order_number
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    smax.max_price,
+    SUM(s.return_quantity) OVER (PARTITION BY s.ws_item_sk) AS total_returns,
+    AVG(s.ws_sales_price) OVER (PARTITION BY s.ws_item_sk) AS avg_sales_price,
+    COUNT(DISTINCT s.ws_order_number) AS total_orders,
+    CASE
+        WHEN total_returns > 0 THEN 'Returned'
+        WHEN total_orders > 10 THEN 'Popular'
+        ELSE 'Occasional'
+    END AS sale_status
+FROM SalesWithReturns s
+JOIN TopSales smax ON s.ws_item_sk = smax.ws_item_sk
+JOIN item i ON i.i_item_sk = s.ws_item_sk
+WHERE s.ws_sales_price IS NOT NULL
+AND sws_sales_price > COALESCE((SELECT AVG(ws_sales_price) FROM web_sales WHERE ws_item_sk = s.ws_item_sk), 0)
+GROUP BY i.i_item_id, i.i_item_desc, smax.max_price
+ORDER BY total_orders DESC, avg_sales_price DESC;

@@ -1,0 +1,66 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS title_id,
+        a.title,
+        a.production_year,
+        kt.kind AS title_kind,
+        COUNT(ci.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(ci.id) DESC) AS rank_within_year
+    FROM 
+        aka_title a
+    JOIN 
+        title t ON a.id = t.id
+    JOIN 
+        kind_type kt ON t.kind_id = kt.id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = a.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year, kt.kind
+), 
+TopRankedTitles AS (
+    SELECT 
+        title_id,
+        title,
+        production_year,
+        title_kind,
+        cast_count
+    FROM 
+        RankedTitles
+    WHERE 
+        rank_within_year <= 5
+),
+MoviesWithKeywords AS (
+    SELECT 
+        tt.title,
+        tt.production_year,
+        tt.title_kind,
+        ARRAY_AGG(k.keyword) AS keywords
+    FROM 
+        TopRankedTitles tt
+    JOIN 
+        movie_keyword mk ON tt.title_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        tt.title, tt.production_year, tt.title_kind
+)
+SELECT 
+    mwk.title,
+    mwk.production_year,
+    mwk.title_kind,
+    mwk.keywords,
+    cn.name AS production_company,
+    pi.info AS person_info
+FROM 
+    MoviesWithKeywords mwk
+LEFT JOIN 
+    movie_companies mc ON mwk.title_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    person_info pi ON cn.imdb_id = pi.person_id
+WHERE 
+    mwk.production_year >= 2000
+ORDER BY 
+    mwk.production_year DESC, 
+    mwk.title_kind ASC;

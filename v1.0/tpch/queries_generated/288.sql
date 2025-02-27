@@ -1,0 +1,60 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= '2022-01-01' AND l.l_shipdate < '2023-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name,
+        ss.s_name,
+        ss.total_sales
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        SupplierSales ss ON n.n_nationkey = ss.s_nationkey
+    WHERE 
+        ss.rank <= 3
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS orders_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    COALESCE(ts.r_name, 'Unknown Region') AS region_name,
+    ts.s_name,
+    ts.total_sales,
+    COALESCE(co.orders_count, 0) AS total_orders,
+    COALESCE(co.total_spent, 0) AS total_spent,
+    CASE 
+        WHEN co.total_spent IS NULL OR co.total_spent < 1000 THEN 'Low Spender'
+        WHEN co.total_spent >= 1000 AND co.total_spent < 5000 THEN 'Medium Spender'
+        ELSE 'High Spender'
+    END AS customer_segment
+FROM 
+    TopSuppliers ts
+LEFT JOIN 
+    CustomerOrders co ON ts.s_name = co.c_custkey
+ORDER BY 
+    ts.total_sales DESC, ts.s_name;

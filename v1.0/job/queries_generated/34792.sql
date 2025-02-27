@@ -1,0 +1,50 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        1 AS level,
+        CAST(m.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id,
+        m.title,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || m.title AS VARCHAR(255))
+    FROM 
+        aka_title AS m
+    JOIN 
+        MovieHierarchy AS mh ON m.episode_of_id = mh.movie_id
+)
+SELECT 
+    movie.title AS Movie_Title,
+    movie.production_year AS Production_Year,
+    COALESCE(a.name, 'N/A') AS Actor_Name,
+    COUNT(DISTINCT mc.company_id) AS Production_Companies,
+    SUM(mk.keyword IS NOT NULL) AS Total_Keywords,
+    MAX(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS Max_Actor_Order,
+    ROW_NUMBER() OVER (PARTITION BY movie.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS Year_Rank
+FROM 
+    aka_title AS movie
+LEFT JOIN 
+    cast_info AS ci ON movie.id = ci.movie_id
+LEFT JOIN 
+    aka_name AS a ON a.person_id = ci.person_id
+LEFT JOIN 
+    movie_companies AS mc ON mc.movie_id = movie.id
+LEFT JOIN 
+    movie_keyword AS mk ON mk.movie_id = movie.id
+WHERE 
+    movie.production_year >= 2000 
+    AND movie.production_year <= 2023
+GROUP BY 
+    movie.id, movie.title, movie.production_year, a.name
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    Year_Rank, movie.production_year;

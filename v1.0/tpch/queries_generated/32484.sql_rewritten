@@ -1,0 +1,65 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+
+PartSupplierStats AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_availqty) AS total_avail_qty, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost 
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+
+LineItemData AS (
+    SELECT l.l_orderkey, 
+           l.l_partkey, 
+           l.l_quantity, 
+           l.l_extendedprice, 
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS rn
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+)
+
+SELECT 
+    p.p_name AS part_name,
+    s.s_name AS supplier_name,
+    n.n_name AS nation_name,
+    COALESCE(l.total_qty, 0) AS lineitem_total_quantity,
+    COALESCE(l.total_price, 0) AS lineitem_total_price,
+    sh.level AS supplier_level,
+    CASE 
+        WHEN ps.avg_supply_cost IS NULL THEN 'No Data'
+        ELSE CONCAT('$', FORMAT(ps.avg_supply_cost, 2))
+    END AS average_supply_cost,
+    CASE 
+        WHEN l.rn IS NULL THEN 'Filtered Out'
+        ELSE 'Included'
+    END AS lineitem_status
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN (
+    SELECT l_orderkey, 
+           SUM(l_quantity) AS total_qty, 
+           SUM(l_extendedprice) AS total_price,
+           ROW_NUMBER() OVER (PARTITION BY l_orderkey ORDER BY l_orderkey) AS rn
+    FROM LineItemData
+    GROUP BY l_orderkey
+) l ON p.p_partkey = l.l_partkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) 
+    FROM part p2 
+    WHERE p2.p_size = p.p_size
+)
+ORDER BY part_name, supplier_name, nation_name;

@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND -- Only questions
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, ',')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(*) > 10
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.OwnerDisplayName,
+    pt.Tag,
+    ub.BadgeCount
+FROM 
+    RankedPosts rp
+JOIN 
+    PopularTags pt ON pt.Tag = ANY(string_to_array(rp.Tags, ','))
+JOIN 
+    UserBadges ub ON ub.UserId = rp.OwnerUserId
+WHERE 
+    rp.rn = 1 -- Only the latest question for each user
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC 
+LIMIT 100;

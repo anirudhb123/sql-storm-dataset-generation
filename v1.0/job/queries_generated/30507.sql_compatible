@@ -1,0 +1,46 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        NULL AS parent_id,
+        1 AS level
+    FROM title m
+    WHERE m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        mt.linked_movie_id,
+        t.title,
+        mh.movie_id,
+        mh.level + 1
+    FROM MovieHierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN title t ON ml.linked_movie_id = t.id
+)
+
+SELECT
+    t.title AS Movie_Title,
+    t.production_year,
+    ak.name AS Actor_Name,
+    COUNT(DISTINCT mc.company_id) AS Company_Count,
+    AVG(mi.info) AS Average_Info_Value,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS Keywords,
+    ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ak.name) AS Actor_Rank,
+    CASE 
+        WHEN t.production_year IS NOT NULL THEN 'Released'
+        ELSE 'Unknown Year'
+    END AS Production_Status
+FROM title t
+LEFT JOIN aka_title akm ON akm.movie_id = t.id
+LEFT JOIN aka_name ak ON ak.id = akm.id
+LEFT JOIN movie_companies mc ON mc.movie_id = t.id
+LEFT JOIN movie_info mi ON mi.movie_id = t.id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget')
+LEFT JOIN movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN keyword k ON k.id = mk.keyword_id
+LEFT JOIN MovieHierarchy mh ON mh.movie_id = t.id
+WHERE t.production_year BETWEEN 2000 AND 2020
+GROUP BY t.id, t.title, t.production_year, ak.name
+HAVING COUNT(DISTINCT mc.company_id) > 0
+ORDER BY t.production_year DESC, ak.name;

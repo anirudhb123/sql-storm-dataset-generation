@@ -1,0 +1,55 @@
+WITH RECURSIVE ordered_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_sales,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rank
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+part_supplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS supplier_rank
+    FROM part p 
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+region_summary AS (
+    SELECT
+        r.r_regionkey,
+        r.r_name,
+        COUNT(n.n_nationkey) AS nation_count,
+        SUM(s.s_acctbal) AS total_account_balance
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_regionkey, r.r_name
+)
+SELECT 
+    o.order_key,
+    o.order_date,
+    o.total_sales,
+    p.p_partkey,
+    p.p_name,
+    ps.suppkey,
+    ps.s_name,
+    r.r_name AS region,
+    rs.total_account_balance
+FROM ordered_summary o
+JOIN part_supplier ps ON ps.supplier_rank = 1
+JOIN part p ON ps.p_partkey = p.p_partkey
+JOIN region_summary rs ON rs.nation_count > 0
+LEFT JOIN region r ON rs.r_regionkey = r.r_regionkey
+WHERE o.total_sales > 1000
+AND r.r_name IS NOT NULL
+ORDER BY o.total_sales DESC, o.order_date;

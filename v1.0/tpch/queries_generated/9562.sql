@@ -1,0 +1,39 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, sum(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name
+    FROM RankedSuppliers s
+    WHERE s.total_supply_cost > (
+        SELECT AVG(total_supply_cost) FROM RankedSuppliers
+    )
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+OrderLineItems AS (
+    SELECT o.o_orderkey, l.l_partkey, l.l_quantity, l.l_discount, l.l_tax
+    FROM lineitem l
+    JOIN CustomerOrders o ON l.l_orderkey = o.o_orderkey
+)
+SELECT 
+    r.r_name AS Region_Name,
+    n.n_name AS Nation_Name,
+    COUNT(DISTINCT c.c_custkey) AS Total_Customers,
+    SUM(ol.l_extendedprice * (1 - ol.l_discount)) AS Total_Sales,
+    AVG(ol.l_quantity) AS Average_Quantity
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN TopSuppliers ts ON s.s_suppkey = ts.s_suppkey
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN OrderLineItems ol ON ps.ps_partkey = ol.l_partkey
+JOIN customer c ON c.c_nationkey = n.n_nationkey
+GROUP BY r.r_name, n.n_name
+ORDER BY Total_Sales DESC, Region_Name, Nation_Name;

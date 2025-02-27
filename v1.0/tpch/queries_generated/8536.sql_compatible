@@ -1,0 +1,53 @@
+
+WITH SupplierCost AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey
+),
+LineItemStats AS (
+    SELECT l.l_partkey, COUNT(DISTINCT l.l_orderkey) AS total_orders, AVG(l.l_extendedprice) AS avg_price
+    FROM lineitem l
+    GROUP BY l.l_partkey
+),
+FinalReport AS (
+    SELECT n.n_name, 
+           SUM(CASE WHEN cs.total_supply_cost > 100000 THEN cs.total_supply_cost ELSE 0 END) AS high_cost_suppliers,
+           COALESCE(SUM(co.total_order_value), 0) AS total_customer_orders,
+           COALESCE(SUM(ls.total_orders), 0) AS total_lines_ordered,
+           COUNT(DISTINCT p.p_partkey) AS unique_parts_supplied
+    FROM nation n
+    LEFT JOIN SupplierCost cs ON cs.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT p.p_partkey 
+            FROM part p 
+            WHERE p.p_type LIKE '%metal%'
+        )
+    )
+    LEFT JOIN CustomerOrders co ON co.c_custkey IN (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_nationkey = n.n_nationkey
+    )
+    LEFT JOIN LineItemStats ls ON ls.l_partkey IN (
+        SELECT p.p_partkey 
+        FROM part p 
+        WHERE p.p_size > 20
+    )
+    LEFT JOIN part p ON p.p_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps WHERE ps.ps_suppkey = cs.s_suppkey
+    )
+    GROUP BY n.n_name
+)
+SELECT * FROM FinalReport
+ORDER BY total_customer_orders DESC, high_cost_suppliers DESC;

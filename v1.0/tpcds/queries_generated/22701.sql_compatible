@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rnk
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+NullAddress AS (
+    SELECT 
+        ca_address_sk,
+        COALESCE(NULLIF(ca_street_number, ''), 'Unknown') AS street_number,
+        COALESCE(NULLIF(ca_city, ''), 'N/A') AS city,
+        COALESCE(NULLIF(ca_state, ''), 'ZZ') AS state
+    FROM customer_address
+    WHERE ca_city IS NULL OR ca_state IS NULL
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        COALESCE(NULLIF(i.i_brand, ''), 'Generic') AS brand,
+        i.i_current_price,
+        MIN(NULLIF(i.i_size, '')) AS available_size,
+        COUNT(*) AS stock_count
+    FROM item i 
+    JOIN inventory inv ON i.i_item_sk = inv.inv_item_sk
+    WHERE inv.inv_quantity_on_hand > 0 
+    GROUP BY i.i_item_sk, i.i_item_desc, i.i_current_price
+),
+SalesSummary AS (
+    SELECT 
+        r.rnk,
+        i.i_item_desc,
+        SUM(s.ss_quantity) AS total_sold,
+        AVG(s.ss_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT s.ss_ticket_number) AS transaction_count
+    FROM RankedSales r
+    JOIN store_sales s ON r.ws_item_sk = s.ss_item_sk
+    JOIN ItemDetails i ON r.ws_item_sk = i.i_item_sk
+    WHERE r.rnk <= 10
+    GROUP BY r.rnk, i.i_item_desc
+)
+SELECT 
+    s.rnk,
+    s.i_item_desc,
+    s.total_sold,
+    ROUND(s.avg_sales_price, 2) AS avg_sales_price,
+    a.street_number,
+    a.city,
+    a.state
+FROM SalesSummary s
+LEFT JOIN NullAddress a ON a.ca_address_sk = (SELECT ca_address_sk FROM customer_address WHERE ca_city = 'N/A' LIMIT 1)
+WHERE s.total_sold > 100
+ORDER BY s.rnk, s.total_sold DESC
+FETCH FIRST 5 ROWS ONLY;

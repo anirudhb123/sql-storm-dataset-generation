@@ -1,0 +1,18 @@
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    u.DisplayName AS UserName,
+    p.Score,
+    p.CreationDate
+FROM 
+    Posts p
+INNER JOIN 
+    Users u ON p.OwnerUserId = u.Id
+WHERE 
+    p.PostTypeId = 1 
+GROUP BY 
+    p.Id, p.Title, u.DisplayName, p.Score, p.CreationDate
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 10;

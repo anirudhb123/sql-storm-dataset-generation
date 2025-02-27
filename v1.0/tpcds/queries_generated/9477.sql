@@ -1,0 +1,48 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        d.d_year,
+        c.cd_gender,
+        ca.ca_state
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        d.d_year BETWEEN 2020 AND 2022
+    GROUP BY 
+        ws.ws_item_sk, d.d_year, c.cd_gender, ca.ca_state
+),
+RankedSales AS (
+    SELECT 
+        sd.*,
+        RANK() OVER (PARTITION BY d_year ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        SalesData sd
+)
+SELECT 
+    year,
+    gender,
+    state,
+    total_sales,
+    total_quantity
+FROM 
+    (SELECT 
+        d_year AS year, 
+        cd_gender AS gender, 
+        ca_state AS state, 
+        total_sales, 
+        total_quantity 
+     FROM 
+        RankedSales 
+     WHERE 
+        sales_rank <= 5) top_sales
+ORDER BY 
+    year, gender, state;

@@ -1,0 +1,75 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rn,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        *
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 10  -- Top 10 movies per year
+),
+ActorDetails AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        a.md5sum,
+        COUNT(DISTINCT ci.movie_id) AS num_movies,
+        COALESCE(SUM(CASE WHEN ci.note LIKE '%lead%' THEN 1 ELSE 0 END), 0) AS lead_roles
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.id, a.name, a.md5sum
+    HAVING 
+        num_movies > 5  -- Actors who have appeared in more than 5 movies
+),
+MovieKeywordInfo AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    fm.title, 
+    fm.production_year, 
+    ad.name AS actor_name, 
+    ad.num_movies, 
+    ad.lead_roles, 
+    mki.keywords,
+    CASE 
+        WHEN fm.actor_count > 0 THEN ROUND((ad.lead_roles::decimal / fm.actor_count) * 100, 2)
+        ELSE NULL
+    END AS lead_role_percentage,
+    COALESCE(mi.info, 'No info available') AS additional_info
+FROM 
+    FilteredMovies fm
+JOIN 
+    ActorDetails ad ON ad.num_movies > 0 AND EXISTS (SELECT 1 FROM cast_info ci WHERE ci.movie_id = fm.title_id AND ci.person_id = ad.actor_id)
+LEFT JOIN 
+    MovieKeywordInfo mki ON mki.movie_id = fm.title_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = fm.title_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'tagline' LIMIT 1)
+ORDER BY 
+    fm.production_year DESC, 
+    ad.lead_roles DESC,
+    fm.title;

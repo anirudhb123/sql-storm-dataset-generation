@@ -1,0 +1,82 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS title_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+MovieCompanies AS (
+    SELECT 
+        m.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(mc.id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        m.movie_id, c.name, ct.kind
+),
+SlowestPerformers AS (
+    SELECT 
+        m.movie_id, 
+        COUNT(*) AS cast_count
+    FROM 
+        complete_cast m
+    JOIN 
+        cast_info c ON m.movie_id = c.movie_id
+    GROUP BY 
+        m.movie_id
+    HAVING COUNT(*) > 10
+),
+SelectedTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        m.company_name,
+        m.company_type,
+        coalesce(sp.cast_count, 0) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_row
+    FROM 
+        RankedMovies t
+    LEFT JOIN 
+        MovieCompanies m ON t.movie_id = m.movie_id
+    LEFT JOIN 
+        SlowestPerformers sp ON t.movie_id = sp.movie_id
+    WHERE 
+        (t.production_year = (SELECT MAX(production_year) FROM aka_title) OR m.company_count IS NULL)
+)
+SELECT 
+    t.title,
+    t.production_year,
+    t.company_name,
+    t.company_type,
+    CASE 
+        WHEN t.cast_count > 5 THEN 'Large Cast'
+        WHEN t.cast_count = 0 THEN 'No Cast'
+        ELSE 'Medium Cast'
+    END AS cast_category,
+    COUNT(DISTINCT ct.id) AS unique_companies,
+    STRING_AGG(DISTINCT ct.kind, ', ' ORDER BY ct.kind) AS company_kinds,
+    first_value(t.title) OVER (PARTITION BY t.production_year ORDER BY t.title) AS first_title_of_year
+FROM 
+    SelectedTitles t
+LEFT JOIN 
+    movie_companies mc ON t.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+GROUP BY 
+    t.title, t.production_year, t.company_name, t.company_type, t.cast_count
+ORDER BY 
+    t.production_year DESC, t.title;
+
+-- This query benchmarks performance by ensuring it checks for various corner 
+-- cases including NULL handling in LEFT JOINs, grouped aggregations, subqueries, 
+-- and ranking functions.

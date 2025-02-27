@@ -1,0 +1,69 @@
+WITH RECURSIVE price_analysis AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        ps.ps_supplycost * (1 - (COALESCE(l.l_discount, 0) / 100)) AS adjusted_price,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY ps.ps_supplycost DESC) AS price_rank
+    FROM 
+        part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem l ON ps.ps_suppkey = l.l_suppkey AND l.l_returnflag = 'R'
+    WHERE 
+        p.p_retailprice >= 100.00
+    UNION ALL
+    SELECT 
+        pa.p_partkey,
+        pa.p_name,
+        pa.p_brand,
+        pa.adjusted_price * 0.95 AS adjusted_price,
+        price_rank + 1
+    FROM 
+        price_analysis pa
+    WHERE 
+        pa.price_rank <= 3
+), customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        DENSE_RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'P') AND o.o_orderdate > cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        c.c_custkey, c.c_name
+), order_details AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+        CASE 
+            WHEN SUM(l.l_tax) IS NULL THEN 0 
+            ELSE SUM(l.l_tax) 
+        END AS total_tax
+    FROM 
+        orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    ca.c_custkey,
+    ca.c_name,
+    COALESCE(pa.adjusted_price, 0) AS best_price,
+    ca.total_spent,
+    od.total_lineitem_value,
+    od.total_tax
+FROM 
+    customer_orders ca
+LEFT JOIN price_analysis pa ON ca.rank = pa.price_rank
+FULL OUTER JOIN order_details od ON ca.custkey = od.custkey
+WHERE 
+    ca.total_spent > (SELECT AVG(total_spent) FROM customer_orders WHERE rank < 10) 
+    OR pa.adjusted_price IS NULL
+ORDER BY 
+    ca.total_spent DESC, best_price ASC;

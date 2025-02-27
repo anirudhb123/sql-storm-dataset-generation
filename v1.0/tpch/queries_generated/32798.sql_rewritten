@@ -1,0 +1,66 @@
+WITH RECURSIVE PriceRanking AS (
+    SELECT 
+        ps_partkey, 
+        ps_suppkey, 
+        ps_availqty, 
+        ps_supplycost,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) as supply_rank
+    FROM partsupp
+),
+RegionSales AS (
+    SELECT 
+        r.r_name,
+        SUM(o.o_totalprice) AS total_sales
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY r.r_name
+),
+TopProducts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        ROW_NUMBER() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) as revenue_rank
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+TotalRevenue AS (
+    SELECT 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 0
+            ELSE s.s_acctbal 
+        END AS adjusted_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+)
+SELECT 
+    r.r_name,
+    ts.p_name,
+    ts.revenue,
+    tr.total_revenue,
+    COUNT(DISTINCT fs.s_suppkey) AS supplier_count
+FROM RegionSales r
+LEFT JOIN TopProducts ts ON r.total_sales > ts.revenue
+LEFT JOIN FilteredSuppliers fs ON fs.s_acctbal > 0
+CROSS JOIN TotalRevenue tr
+WHERE r.total_sales IS NOT NULL
+GROUP BY r.r_name, ts.p_name, ts.revenue, tr.total_revenue
+HAVING COUNT(DISTINCT fs.s_suppkey) > 0
+ORDER BY r.r_name, ts.revenue DESC;

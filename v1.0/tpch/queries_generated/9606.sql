@@ -1,0 +1,56 @@
+WITH SupplierSummary AS (
+  SELECT 
+    s.s_suppkey,
+    s.s_name,
+    n.n_name AS nation,
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+    COUNT(DISTINCT p.p_partkey) AS part_count
+  FROM 
+    supplier s
+  JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+  JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+  JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+  GROUP BY 
+    s.s_suppkey, s.s_name, n.n_name
+),
+OrderSummary AS (
+  SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS order_total,
+    COUNT(DISTINCT li.l_orderkey) AS lineitem_count
+  FROM 
+    orders o
+  JOIN 
+    lineitem li ON o.o_orderkey = li.l_orderkey
+  WHERE 
+    o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+  GROUP BY 
+    o.o_orderkey, o.o_orderdate
+)
+SELECT 
+  ss.s_name,
+  ss.nation,
+  ss.total_cost,
+  os.order_total,
+  os.lineitem_count
+FROM 
+  SupplierSummary ss
+JOIN 
+  OrderSummary os ON ss.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    JOIN lineitem li ON ps.ps_partkey = li.l_partkey 
+    WHERE li.l_orderkey IN (
+      SELECT o.o_orderkey 
+      FROM orders o 
+      WHERE o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    )
+  )
+WHERE 
+  ss.total_cost > 10000
+ORDER BY 
+  ss.total_cost DESC, os.order_total ASC;

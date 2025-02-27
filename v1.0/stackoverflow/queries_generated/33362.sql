@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COALESCE(CAST((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS INT), 0) AS UpVotes,
+        COALESCE(CAST((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS INT), 0) AS DownVotes
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+
+RecentUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS PostsCreated,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCreated,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCreated,
+        SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentsMade
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.CreationDate >= NOW() - INTERVAL '1 year'
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id AND c.CreationDate >= NOW() - INTERVAL '1 year'
+    WHERE 
+        u.Reputation > 50
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    u.DisplayName,
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    r.UpVotes,
+    r.DownVotes,
+    ra.PostRank,
+    COALESCE(a.AnswersCount, 0) AS AnswerCount,
+    coa.CommentsMade
+FROM 
+    Users u
+JOIN 
+    RecentUserActivity coa ON u.Id = coa.UserId
+JOIN 
+    (SELECT 
+         PostId,
+         COUNT(ParentId) AS AnswersCount 
+     FROM 
+         Posts 
+     WHERE 
+         PostTypeId = 2
+     GROUP BY 
+         PostId) a ON a.PostId = u.Id
+JOIN 
+    RankedPosts r ON r.UpVotes > 5 AND r.DownVotes = 0
+JOIN 
+    Posts p ON p.Id = r.PostId
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = p.Id AND ph.CreationDate = (
+        SELECT MAX(CreationDate) 
+        FROM PostHistory 
+        WHERE PostId = p.Id AND PostHistoryTypeId IN (10, 11)
+    )
+WHERE 
+    ph.PostHistoryTypeId IS NULL
+ORDER BY 
+    r.PostRank
+OFFSET 0 LIMIT 10;

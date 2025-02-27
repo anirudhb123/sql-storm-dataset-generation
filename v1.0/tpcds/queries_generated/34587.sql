@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_ext_sales_price) AS total_sales,
+        1 AS level
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk
+    UNION ALL
+    SELECT 
+        sh.ss_store_sk,
+        SUM(sales.total_sales) AS total_sales,
+        h.level + 1
+    FROM 
+        sales_hierarchy h
+    JOIN store_sales sh ON sh.ss_store_sk = h.ss_store_sk
+    GROUP BY 
+        sh.ss_store_sk
+),
+customer_rank AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+)
+SELECT 
+    ca.ca_city,
+    SUM(ws.ws_ext_sales_price) as total_revenue,
+    AVG(ws.ws_net_profit) as avg_profit,
+    (SELECT 
+        COUNT(DISTINCT ws.ws_order_number) 
+     FROM 
+        web_sales ws2 
+     WHERE 
+        ws2.ws_ship_addr_sk = ca.ca_address_sk) AS distinct_orders,
+    COUNT(cr.cr_return_quantity) AS total_returns
+FROM 
+    customer_address ca
+LEFT JOIN 
+    web_sales ws ON ca.ca_address_sk = ws.ws_ship_addr_sk
+LEFT JOIN 
+    catalog_returns cr ON ws.ws_order_number = cr.cr_order_number
+WHERE 
+    ca.ca_state IN ('CA', 'NY') 
+    AND ca.ca_country IS NOT NULL 
+    AND (ws.ws_ext_sales_price IS NOT NULL OR ws.ws_ext_sales_price < 0)
+GROUP BY 
+    ca.ca_city
+HAVING 
+    total_revenue > 10000
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

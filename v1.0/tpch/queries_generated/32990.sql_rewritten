@@ -1,0 +1,54 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN supplier sp ON sp.s_nationkey = sh.s_nationkey
+    WHERE sp.s_suppkey <> sh.s_suppkey
+),
+customer_order_stats AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent, 
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+part_supplier_stats AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+nations_with_orders AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT sh.s_suppkey, sh.s_name, coss.c_custkey, coss.c_name, coss.total_orders, coss.total_spent,
+       ps.p_partkey, ps.p_name, ps.total_available, ps.avg_supply_cost,
+       cast('1998-10-01 12:34:56' as timestamp) AS query_time, 
+       CASE 
+           WHEN o.order_rank <= 10 THEN 'Top Customer' 
+           ELSE 'Regular Customer' 
+       END AS customer_type
+FROM supplier_hierarchy sh
+JOIN customer_order_stats coss ON sh.s_nationkey = coss.c_nationkey
+JOIN part_supplier_stats ps ON ps.avg_supply_cost >= 100
+LEFT JOIN nations_with_orders nw ON nw.order_count > 5
+WHERE coss.total_spent IS NOT NULL 
+  AND nw.order_count IS NOT NULL
+  AND sh.level = (
+      SELECT MAX(level)
+      FROM supplier_hierarchy
+      WHERE s_nationkey = sh.s_nationkey
+  )
+ORDER BY coss.total_spent DESC, ps.p_name ASC;

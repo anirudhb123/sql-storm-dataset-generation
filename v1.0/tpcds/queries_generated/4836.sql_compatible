@@ -1,0 +1,76 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank
+    FROM
+        web_sales
+),
+AverageSales AS (
+    SELECT
+        ws_item_sk,
+        AVG(ws_sales_price) AS avg_sales_price
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+),
+TopProducts AS (
+    SELECT
+        i.i_item_id,
+        i.i_product_name,
+        COALESCE(RSUM.total_quantity, 0) AS total_quantity_sold,
+        COALESCE(RSUM.total_sales, 0) AS total_sales_amount,
+        A.avg_sales_price
+    FROM
+        item i
+    LEFT JOIN (
+        SELECT 
+            ws_item_sk,
+            SUM(ws_quantity) AS total_quantity,
+            SUM(ws_net_paid) AS total_sales
+        FROM 
+            web_sales
+        GROUP BY 
+            ws_item_sk
+    ) AS RSUM ON i.i_item_sk = RSUM.ws_item_sk
+    JOIN AverageSales A ON i.i_item_sk = A.ws_item_sk
+    WHERE
+        i.i_current_price > 0
+),
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_value
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    TP.i_item_id,
+    TP.i_product_name,
+    TP.total_quantity_sold,
+    TP.total_sales_amount,
+    CR.total_returns,
+    CR.total_return_value,
+    CASE 
+        WHEN CR.total_return_value IS NOT NULL THEN
+            (TP.total_sales_amount - CR.total_return_value) * 100.0 / NULLIF(TP.total_sales_amount, 0)
+        ELSE 0
+    END AS return_percentage,
+    D.d_date AS sales_date
+FROM 
+    TopProducts TP
+LEFT JOIN 
+    CustomerReturns CR ON TP.i_item_id = CR.sr_item_sk
+CROSS JOIN
+    (SELECT d_date FROM date_dim WHERE d_year = 2023 AND d_moy = 10 AND d_dow = 5) AS D
+WHERE 
+    TP.total_sales_amount > 1000
+ORDER BY 
+    TP.total_sales_amount DESC
+LIMIT 10;

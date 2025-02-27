@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        pt.Name AS PostType,
+        ARRAY_AGG(t.TagName) AS Tags,
+        COALESCE(ah.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        px.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Id ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Posts ah ON p.Id = ah.AcceptedAnswerId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) px ON p.Id = px.PostId
+    LEFT JOIN 
+        (SELECT 
+            UNNEST(string_to_array(Tags, ',')) AS TagName, 
+            PostId 
+         FROM 
+            Posts) t ON p.Id = t.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, pt.Name, ah.AcceptedAnswerId, px.CommentCount
+),
+TrendingTags AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS UsageCount
+    FROM 
+        (SELECT UNNEST(Tags) AS TagName FROM RankedPosts) AS SubTags
+    GROUP BY 
+        TagName
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 10
+),
+PostAnalytics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.Rank,
+        tt.UsageCount AS TagUsageCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TrendingTags tt ON tt.TagName = ANY(rp.Tags)
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.ViewCount,
+    pa.Score,
+    pa.Rank,
+    pa.TagUsageCount,
+    CASE 
+        WHEN pa.Score > 100 THEN 'High Score'
+        WHEN pa.Score BETWEEN 50 AND 100 THEN 'Medium Score'
+        ELSE 'Low Score' 
+    END AS ScoreCategory
+FROM 
+    PostAnalytics pa
+ORDER BY 
+    pa.Rank ASC, pa.ViewCount DESC;

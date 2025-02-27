@@ -1,0 +1,77 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL 
+        AND ws.ws_sales_price > 50.00 
+        AND ws.ws_quantity > 1
+), SalesSummary AS (
+    SELECT 
+        r.ws_item_sk,
+        SUM(r.ws_sales_price * r.ws_quantity) AS total_sales_amount,
+        AVG(r.ws_sales_price) AS average_sales_price,
+        COUNT(*) AS number_of_sales
+    FROM 
+        RankedSales r
+    WHERE 
+        r.price_rank <= 3
+    GROUP BY 
+        r.ws_item_sk
+), AddressCount AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ca.ca_address_sk) AS address_count
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        c.c_customer_sk
+), HighValueCustomers AS (
+    SELECT 
+        s.ws_bill_customer_sk,
+        SUM(ss.ws_net_paid) AS total_spent
+    FROM 
+        web_sales s
+    JOIN 
+        store_sales ss ON s.ws_item_sk = ss.ss_item_sk
+    WHERE 
+        ss.ss_sales_price IS NOT NULL
+    GROUP BY 
+        s.ws_bill_customer_sk
+    HAVING 
+        SUM(ss.ws_net_paid) > 1000.00
+)
+SELECT 
+    a.ca_city, 
+    a.ca_state,
+    COALESCE(c.total_spent, 0) AS total_spent_by_customer,
+    SUM(ss.total_sales_amount) AS total_sales_in_city,
+    COUNT(DISTINCT c.c_customer_id) AS unique_customers
+FROM 
+    AddressCount a
+LEFT JOIN 
+    HighValueCustomers c ON a.c_customer_sk = c.ws_bill_customer_sk
+LEFT JOIN 
+    SalesSummary ss ON a.c_customer_sk = ss.ws_item_sk
+WHERE 
+    a.address_count > 1
+GROUP BY 
+    a.ca_city, 
+    a.ca_state, 
+    c.total_spent
+HAVING 
+    total_sales_in_city > 10000.00 
+ORDER BY 
+    total_sales_in_city DESC
+LIMIT 
+    5
+OFFSET 
+    (SELECT COUNT(*) FROM web_sales) % 10

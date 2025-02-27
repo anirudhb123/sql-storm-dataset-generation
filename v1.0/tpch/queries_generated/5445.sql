@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+FilteredNation AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name
+    FROM 
+        nation n
+    WHERE 
+        n.n_name IN ('Australia', 'Canada', 'Germany')
+),
+OrderStats AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spend,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY 
+        c.c_custkey
+),
+SupplierPerformance AS (
+    SELECT 
+        r.r_name AS region_name,
+        f.n_name AS nation_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        AVG(rst.total_available_qty) AS avg_available_qty,
+        AVG(rst.total_supply_cost) AS avg_supply_cost
+    FROM 
+        RankedSuppliers rst
+    JOIN 
+        FilteredNation f ON rst.s_nationkey = f.n_nationkey
+    JOIN 
+        region r ON f.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name, f.n_name
+)
+SELECT 
+    sp.region_name,
+    sp.nation_name,
+    sp.supplier_count,
+    sp.avg_available_qty,
+    sp.avg_supply_cost,
+    os.total_spend,
+    os.total_orders
+FROM 
+    SupplierPerformance sp
+LEFT JOIN 
+    OrderStats os ON sp.supplier_count > 0
+ORDER BY 
+    sp.region_name, sp.nation_name;

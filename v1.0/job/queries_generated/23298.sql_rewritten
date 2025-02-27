@@ -1,0 +1,81 @@
+WITH RECURSIVE rated_movies AS (
+    SELECT 
+        t.id, 
+        t.title, 
+        cast_info.movie_id, 
+        AVG(rating) AS avg_rating
+    FROM 
+        aka_title AS t
+    JOIN 
+        movie_info AS mi ON t.id = mi.movie_id
+    JOIN 
+        movie_info_idx AS mii ON mi.id = mii.id
+    LEFT JOIN 
+        (SELECT 
+            movie_id,
+            ROUND(AVG(NULLIF(info, ''))::numeric, 1) AS rating 
+         FROM 
+            movie_info 
+         WHERE 
+            info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+         GROUP BY movie_id) AS rating ON t.id = rating.movie_id
+    JOIN 
+        cast_info ON t.id = cast_info.movie_id
+    GROUP BY 
+        t.id, t.title, cast_info.movie_id
+), 
+cast_counts AS (
+    SELECT 
+        movie_id, 
+        COUNT(DISTINCT person_id) AS cast_count
+    FROM 
+        cast_info
+    GROUP BY 
+        movie_id
+), 
+movies_with_actors AS (
+    SELECT 
+        r.id AS movie_id,
+        r.title,
+        r.avg_rating, 
+        cc.cast_count,
+        CASE 
+            WHEN cc.cast_count IS NULL THEN 'No actors'
+            WHEN cc.cast_count < 5 THEN 'Few actors'
+            ELSE 'Many actors' 
+        END AS actor_classification
+    FROM 
+        rated_movies r
+    LEFT JOIN 
+        cast_counts cc ON r.movie_id = cc.movie_id
+),
+filtered_movies AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY actor_classification ORDER BY avg_rating DESC) AS rank
+    FROM 
+        movies_with_actors
+    WHERE 
+        actor_classification <> 'No actors'
+)
+SELECT 
+    m.title,
+    m.avg_rating,
+    m.actor_classification,
+    m.rank
+FROM 
+    filtered_movies m
+WHERE 
+    m.rank <= 10
+ORDER BY 
+    m.actor_classification, m.avg_rating DESC
+UNION 
+SELECT 
+    'N/A' AS title,
+    NULL AS avg_rating,
+    'Movies without ratings' AS actor_classification,
+    NULL AS rank
+WHERE 
+    NOT EXISTS (SELECT 1 FROM rated_movies WHERE movie_id IS NOT NULL)
+ORDER BY 
+    actor_classification, avg_rating DESC;

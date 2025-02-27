@@ -1,0 +1,44 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS tier
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, co.tier + 1
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN CustomerOrders co ON co.o_orderkey = o.o_orderkey
+    WHERE co.tier < 5
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, COUNT(DISTINCT li.l_orderkey) AS line_item_count,
+           SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales
+    FROM orders o
+    LEFT JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey
+),
+PriceSummary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT co.c_custkey, co.c_name, os.line_item_count, os.total_sales,
+       CASE WHEN os.total_sales > 1000 THEN 'High Value' ELSE 'Low Value' END AS order_value_category,
+       ps.total_supply_cost
+FROM CustomerOrders co
+JOIN OrderSummary os ON co.o_orderkey = os.o_orderkey
+LEFT JOIN PriceSummary ps ON ps.p_partkey = (
+    SELECT ps2.ps_partkey
+    FROM partsupp ps2
+    WHERE ps2.ps_availqty = (
+        SELECT MAX(ps1.ps_availqty)
+        FROM partsupp ps1
+        WHERE ps1.ps_partkey = ps.p_partkey
+    )
+)
+WHERE co.tier = 1
+ORDER BY co.c_custkey, os.total_sales DESC;

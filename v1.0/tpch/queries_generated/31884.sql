@@ -1,0 +1,49 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linestatus) AS order_line
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2023-10-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+), 
+RegionStats AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_balance
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    r.r_name,
+    o.o_orderkey,
+    o.o_orderstatus,
+    o.total_sales,
+    COALESCE(r.supplier_count, 0) AS supplier_count,
+    COALESCE(r.total_balance, 0) AS total_balance,
+    CASE 
+        WHEN o.total_sales > 10000 THEN 'High Value'
+        WHEN o.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS sales_category
+FROM 
+    OrderHierarchy o
+LEFT JOIN 
+    RegionStats r ON r.r_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = (SELECT o2.o_custkey FROM orders o2 WHERE o2.o_orderkey = o.o_orderkey LIMIT 1) LIMIT 1))
+WHERE 
+    o.o_orderstatus = 'O'
+ORDER BY 
+    total_sales DESC, r.r_name;

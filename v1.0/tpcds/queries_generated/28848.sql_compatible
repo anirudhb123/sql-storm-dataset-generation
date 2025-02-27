@@ -1,0 +1,80 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c_customer_id,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status
+    FROM 
+        customer 
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+),
+SalesDetails AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_order_number,
+        ws_sold_date_sk,
+        ws_bill_customer_sk,
+        ws_ship_mode_sk
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > 100
+),
+WarehouseDetails AS (
+    SELECT 
+        w_warehouse_id,
+        w_warehouse_name,
+        CONCAT(w_street_number, ' ', w_street_name, ' ', w_street_type) AS warehouse_address,
+        w_city,
+        w_state,
+        w_zip,
+        w_country
+    FROM 
+        warehouse
+)
+SELECT 
+    cd.full_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ad.full_address,
+    sd.ws_sales_price,
+    sd.ws_quantity,
+    wd.warehouse_address,
+    COUNT(sd.ws_order_number) AS total_orders
+FROM 
+    CustomerDetails cd
+JOIN 
+    SalesDetails sd ON cd.c_customer_id = sd.ws_bill_customer_sk
+JOIN 
+    AddressDetails ad ON sd.ws_bill_customer_sk = ad.ca_address_id
+JOIN 
+    WarehouseDetails wd ON sd.ws_item_sk = wd.w_warehouse_id
+WHERE 
+    CONCAT(cd.full_name, ' - ', ad.full_address) LIKE '%New York%'
+GROUP BY 
+    cd.full_name, 
+    cd.cd_gender, 
+    cd.cd_marital_status, 
+    ad.full_address, 
+    sd.ws_sales_price, 
+    sd.ws_quantity, 
+    wd.warehouse_address
+ORDER BY 
+    total_orders DESC
+FETCH FIRST 50 ROWS ONLY;

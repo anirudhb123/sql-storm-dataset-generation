@@ -1,0 +1,90 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        rd.r_reason_desc,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender, cd.cd_marital_status ORDER BY c.c_birth_year DESC) AS rnk
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        (SELECT 
+            wr_returning_customer_sk, 
+            wr_return_quantity, 
+            wr_return_amt_inc_tax,
+            r.r_reason_desc
+         FROM 
+            web_returns wr 
+         JOIN 
+            reason r ON wr.wr_reason_sk = r.r_reason_sk
+         WHERE 
+            wr_return_quantity IS NOT NULL AND wr_return_amt_inc_tax > 0) AS subquery ON c.c_customer_sk = subquery.wr_returning_customer_sk
+),
+sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        store s ON ws.ws_store_sk = s.s_store_sk
+    GROUP BY 
+        ws.ws_item_sk
+),
+inventory_check AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(CASE 
+            WHEN inv.inv_quantity_on_hand IS NULL THEN 0 
+            ELSE inv.inv_quantity_on_hand 
+        END) AS total_quantity
+    FROM 
+        inventory inv
+    RIGHT JOIN 
+        item i ON inv.inv_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_sk
+),
+combined_data AS (
+    SELECT 
+        rc.c_customer_id,
+        sd.total_net_profit,
+        ic.total_quantity,
+        COALESCE(sd.total_orders, 0) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY rc.cd_gender ORDER BY total_net_profit DESC) as order_rank
+    FROM 
+        ranked_customers rc
+    JOIN 
+        sales_data sd ON rc.c_customer_id = sd.ws_item_sk
+    JOIN 
+        inventory_check ic ON sd.ws_item_sk = ic.i_item_sk
+)
+SELECT 
+    c.c_customer_id,
+    MAX(cd.cd_gender) AS gender,
+    COUNT(DISTINCT o.order_number) AS total_order_count,
+    SUM(CASE WHEN o.net_profit IS NULL THEN 0 ELSE o.net_profit END) AS total_net_profit,
+    COUNT(DISTINCT i.i_item_sk) AS total_items,
+    SUM(i.total_quantity) AS total_inventory
+FROM 
+    combined_data o
+LEFT JOIN 
+    ranked_customers rc ON o.c_customer_id = rc.c_customer_id
+LEFT JOIN 
+    inventory_check i ON o.ws_item_sk = i.i_item_sk
+GROUP BY 
+    c.c_customer_id
+HAVING 
+    COUNT(DISTINCT o.ws_order_number) > (
+        SELECT 
+            COUNT(*) 
+        FROM 
+            (SELECT DISTINCT ws_order_number FROM web_sales WHERE ws_net_paid_inc_tax IS NOT NULL) AS orders
+    ) / 10
+ORDER BY 
+    total_net_profit DESC
+LIMIT 100;

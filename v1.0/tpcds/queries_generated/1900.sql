@@ -1,0 +1,65 @@
+
+WITH sales_summary AS (
+    SELECT 
+        s.store_sk,
+        SUM(ss.ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ticket_number) AS total_transactions
+    FROM 
+        store_sales ss
+    INNER JOIN 
+        store s ON ss.store_sk = s.s_store_sk
+    WHERE 
+        ss.sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY 
+        s.store_sk
+),
+returns_summary AS (
+    SELECT 
+        sr.store_sk,
+        SUM(sr.return_amt) AS total_returns,
+        COUNT(DISTINCT sr.ticket_number) AS total_returns_transactions
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.store_sk
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+final_summary AS (
+    SELECT 
+        ss.store_sk,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        cs.cd_gender,
+        SUM(ss.total_sales) OVER (PARTITION BY cs.cd_gender) AS gender_sales
+    FROM 
+        sales_summary ss
+    LEFT JOIN 
+        returns_summary rs ON ss.store_sk = rs.store_sk
+    CROSS JOIN 
+        customer_demographics cs
+)
+SELECT 
+    fs.store_sk,
+    fs.total_sales,
+    fs.total_returns,
+    fs.cd_gender,
+    CASE 
+        WHEN fs.total_sales - fs.total_returns > 1000 THEN 'Profitable'
+        ELSE 'Not Profitable' 
+    END AS profitability_status
+FROM 
+    final_summary fs
+WHERE 
+    fs.total_sales > 0 AND fs.gender_sales > 5000
+ORDER BY 
+    fs.total_sales DESC;

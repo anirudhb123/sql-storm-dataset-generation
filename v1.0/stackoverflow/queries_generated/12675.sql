@@ -1,0 +1,62 @@
+-- Performance Benchmarking Query
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        COUNT(c.Id) AS CommentTotal,
+        COUNT(DISTINCT v.Id) AS VoteTotal
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        p.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(p.Score) AS UserPostScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.CommentTotal,
+    ps.VoteTotal,
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.BadgeCount,
+    us.UserPostScore
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.PostId = u.Id
+JOIN 
+    UserStats us ON us.UserId = u.Id
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

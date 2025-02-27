@@ -1,0 +1,67 @@
+
+WITH demographic_summary AS (
+    SELECT 
+        d.cd_gender,
+        d.cd_marital_status,
+        COUNT(CASE WHEN d.cd_department_count IS NULL THEN 1 END) AS null_departments,
+        AVG(COALESCE(d.cd_purchase_estimate, 0)) AS avg_purchase_estimate,
+        SUM(d.cd_dep_count) AS total_dependents,
+        DENSE_RANK() OVER (PARTITION BY d.cd_gender ORDER BY SUM(d.cd_purchase_estimate) DESC) AS gender_rank
+    FROM 
+        customer_demographics d
+    JOIN 
+        customer c ON d.cd_demo_sk = c.c_current_cdemo_sk
+    LEFT JOIN 
+        household_demographics h ON d.cd_demo_sk = h.hd_demo_sk
+    GROUP BY 
+        d.cd_gender, d.cd_marital_status
+),
+inventory_summary AS (
+    SELECT 
+        inv.warehouse_sk,
+        SUM(COALESCE(inv.inv_quantity_on_hand, 0)) AS total_quantity_on_hand,
+        ROW_NUMBER() OVER (PARTITION BY inv.warehouse_sk ORDER BY SUM(inv.inv_quantity_on_hand) DESC) AS warehouse_rank
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.warehouse_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        MAX(ws.ws_net_profit) AS max_profit
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL AND
+        ws.ws_sales_price IS NOT NULL
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    d.cd_gender,
+    d.cd_marital_status,
+    i.total_quantity_on_hand,
+    s.total_sales,
+    s.max_profit,
+    CASE 
+        WHEN d.cd_gender = 'F' AND d.cd_marital_status = 'M' THEN 'Married Female'
+        WHEN d.cd_gender = 'M' AND d.cd_marital_status = 'M' THEN 'Married Male'
+        ELSE 'Other'
+    END AS marital_category
+FROM 
+    demographic_summary d
+FULL OUTER JOIN 
+    inventory_summary i ON d.gender_rank = i.warehouse_rank
+FULL OUTER JOIN 
+    sales_summary s ON d.gender_rank = s.ws_item_sk
+WHERE 
+    (d.null_departments > 2 OR i.total_quantity_on_hand IS NOT NULL)
+    AND (s.total_sales IS NOT NULL OR d.cd_gender IS NULL)
+ORDER BY 
+    d.cd_gender, s.total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,62 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 2000.00 AND sh.level < 3
+),
+PartWithMaxPrice AS (
+    SELECT p_partkey, p_name, MAX(p_retailprice) AS max_price
+    FROM part
+    GROUP BY p_partkey, p_name
+),
+NationCounts AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+),
+OrderStats AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_sales
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_custkey
+),
+CustomerRanking AS (
+    SELECT c.c_custkey, c.c_name, DENSE_RANK() OVER (ORDER BY os.total_sales DESC) AS sales_rank
+    FROM customer c
+    LEFT JOIN OrderStats os ON c.c_custkey = os.o_custkey
+)
+SELECT 
+    p.p_name,
+    ph.s_name AS supplier_name,
+    nc.supplier_count,
+    cr.sales_rank,
+    ph.s_acctbal,
+    (ph.s_acctbal / (SELECT AVG(s_acctbal) FROM supplier)) * 100 AS acctbal_percentage
+FROM 
+    PartWithMaxPrice p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier ph ON ps.ps_suppkey = ph.s_suppkey
+JOIN 
+    NationCounts nc ON ph.s_nationkey = nc.n_nationkey
+LEFT JOIN 
+    CustomerRanking cr ON cr.c_custkey = (
+        SELECT o.o_custkey
+        FROM orders o
+        WHERE o.o_orderkey = (
+            SELECT MIN(o2.o_orderkey)
+            FROM orders o2
+            WHERE o2.o_custkey = cr.c_custkey
+        )
+    )
+WHERE 
+    p.max_price > 100.00
+ORDER BY 
+    cr.sales_rank, ph.s_acctbal DESC;

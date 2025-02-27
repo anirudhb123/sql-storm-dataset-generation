@@ -1,0 +1,41 @@
+
+WITH UserReputation AS (
+    SELECT Id, Reputation, CreationDate,
+           RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+MaxReputation AS (
+    SELECT MAX(Reputation) AS MaxRep
+    FROM Users
+),
+PostDetails AS (
+    SELECT p.Id AS PostId, p.Title, p.CreationDate, p.Score,
+           COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount,
+           u.DisplayName AS OwnerDisplayName,
+           (SELECT SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE -1 END)
+            FROM Votes v
+            WHERE v.PostId = p.Id) AS NetVotes
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+FilteredPosts AS (
+    SELECT pd.*, ur.Reputation
+    FROM PostDetails pd
+    JOIN UserReputation ur ON pd.OwnerDisplayName = ur.Id
+    WHERE ur.Reputation > (SELECT MaxRep * 0.1 FROM MaxReputation)
+),
+RankedPosts AS (
+    SELECT *,
+           DENSE_RANK() OVER (PARTITION BY Reputation ORDER BY Score DESC) AS ScoreRank
+    FROM FilteredPosts
+)
+SELECT PostId, Title, CreationDate, Score, CommentCount, OwnerDisplayName, Reputation, ScoreRank,
+       CASE 
+           WHEN CommentCount > 10 THEN 'High Engagement'
+           ELSE 'Low Engagement'
+       END AS EngagementLevel
+FROM RankedPosts
+WHERE ScoreRank = 1
+ORDER BY Reputation DESC, Score DESC
+LIMIT 10 OFFSET 0;

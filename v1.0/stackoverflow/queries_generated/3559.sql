@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= (CURRENT_TIMESTAMP - INTERVAL '1 year') 
+        AND p.PostTypeId = 1 -- Only Questions
+),
+TopPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1
+),
+BadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        BadgeCounts b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.BadgeCount,
+    up.TotalViews,
+    up.TotalScore,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    CASE 
+        WHEN tp.CommentCount IS NOT NULL THEN 'Has Comments'
+        ELSE 'No Comments'
+    END AS CommentStatus
+FROM 
+    UserStatistics up
+JOIN 
+    TopPosts tp ON up.UserId = tp.OwnerDisplayName
+ORDER BY 
+    up.TotalScore DESC,
+    up.TotalViews DESC;

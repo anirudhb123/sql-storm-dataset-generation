@@ -1,0 +1,62 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_within_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieCast AS (
+    SELECT 
+        c.movie_id,
+        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS cast_names,
+        COUNT(*) AS cast_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        mc.cast_names,
+        mc.cast_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieCast mc ON rm.movie_id = mc.movie_id
+    WHERE 
+        rm.rank_within_year <= 5
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT it.info ORDER BY it.info) AS movie_info
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        it.info IS NOT NULL
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    COALESCE(fm.cast_names, 'No cast') AS cast_names,
+    COALESCE(fm.cast_count, 0) AS total_cast,
+    COALESCE(mi.movie_info, 'No information') AS additional_info
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    MovieInfo mi ON fm.movie_id = mi.movie_id
+ORDER BY 
+    fm.production_year DESC, fm.title;

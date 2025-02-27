@@ -1,0 +1,63 @@
+WITH RECURSIVE CTE_OrderDates AS (
+    SELECT o_orderdate, 1 AS depth
+    FROM orders
+    WHERE o_orderdate >= '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT DATEADD(DAY, 1, o_orderdate), depth + 1
+    FROM CTE_OrderDates
+    WHERE depth < 30
+),
+SupplierMetrics AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey AND o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey, c.c_name
+),
+PartAvailability AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+JoinedData AS (
+    SELECT
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+        AVG(cm.total_spent) AS avg_spent_per_customer,
+        MAX(sm.total_supply_cost) AS max_supply_cost
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    LEFT JOIN CustomerOrderSummary cm ON c.c_custkey = cm.c_custkey
+    LEFT JOIN SupplierMetrics sm ON sm.s_suppkey = (
+        SELECT TOP 1 ps.ps_suppkey
+        FROM partsupp ps
+        JOIN part p ON ps.ps_partkey = p.p_partkey
+        ORDER BY ps.ps_supplycost DESC
+    )
+    WHERE r.r_name IS NOT NULL
+    GROUP BY n.n_name, r.r_name
+)
+SELECT 
+    j.nation_name,
+    j.region_name,
+    j.total_orders,
+    j.total_revenue,
+    j.avg_spent_per_customer,
+    j.max_supply_cost
+FROM JoinedData j
+WHERE j.total_orders > 10 
+ORDER BY j.total_revenue DESC
+LIMIT 100;

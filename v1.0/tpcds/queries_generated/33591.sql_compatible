@@ -1,0 +1,44 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT
+        ws.web_site_sk,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2001
+    GROUP BY
+        ws.web_site_sk, ws.ws_sold_date_sk
+),
+ranked_sales AS (
+    SELECT
+        sd.web_site_sk,
+        sd.ws_sold_date_sk,
+        sd.total_quantity,
+        sd.total_profit,
+        RANK() OVER (PARTITION BY sd.web_site_sk ORDER BY sd.total_profit DESC) AS rank
+    FROM 
+        sales_data sd
+)
+SELECT 
+    r.web_site_sk,
+    COUNT(r.ws_sold_date_sk) AS sales_days,
+    SUM(r.total_quantity) AS total_quantity_sold,
+    AVG(r.total_profit) AS avg_profit_per_day,
+    MAX(r.total_profit) AS max_daily_profit
+FROM 
+    ranked_sales r
+JOIN 
+    web_site w ON r.web_site_sk = w.web_site_sk
+WHERE 
+    r.rank <= 5
+GROUP BY 
+    r.web_site_sk
+HAVING 
+    SUM(r.total_quantity) > 100
+ORDER BY 
+    total_quantity_sold DESC;

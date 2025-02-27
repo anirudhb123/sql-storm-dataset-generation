@@ -1,0 +1,67 @@
+
+WITH Address AS (
+    SELECT
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM
+        customer_address
+),
+Customers AS (
+    SELECT
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_demo_sk
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+Sales AS (
+    SELECT
+        ws.ship_customer_sk,
+        SUM(ws.net_paid) AS total_spent
+    FROM
+        web_sales ws
+    GROUP BY
+        ws.ship_customer_sk
+),
+Combined AS (
+    SELECT
+        c.full_name,
+        c.cd_gender,
+        c.cd_marital_status,
+        a.full_address,
+        s.total_spent
+    FROM
+        Customers c
+    JOIN
+        Sales s ON c.c_customer_sk = s.ship_customer_sk
+    JOIN
+        Address a ON c.c_current_addr_sk = a.ca_address_sk
+)
+SELECT
+    full_name,
+    cd_gender,
+    cd_marital_status,
+    full_address,
+    total_spent,
+    CASE
+        WHEN total_spent > 1000 THEN 'High Spender'
+        WHEN total_spent BETWEEN 500 AND 1000 THEN 'Medium Spender'
+        ELSE 'Low Spender'
+    END AS spending_category
+FROM
+    Combined
+WHERE
+    cd_gender = 'F'
+ORDER BY
+    total_spent DESC
+LIMIT 10;

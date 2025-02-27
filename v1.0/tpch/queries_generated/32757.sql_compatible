@@ -1,0 +1,43 @@
+
+WITH RECURSIVE PriceChanges AS (
+    SELECT p_partkey, p_retailprice, p_comment, 1 AS depth
+    FROM part
+    WHERE p_retailprice > 100.00
+
+    UNION ALL
+
+    SELECT p.p_partkey, p.p_retailprice * 1.05, p.p_comment, pc.depth + 1
+    FROM part p
+    INNER JOIN PriceChanges pc ON p.p_partkey = pc.p_partkey
+    WHERE p.p_retailprice < pc.p_retailprice AND pc.depth < 5
+),
+NationSupplier AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 5000
+)
+SELECT 
+    pc.p_partkey,
+    pc.p_retailprice AS final_price,
+    ns.n_name AS nation_name,
+    hvc.c_name AS high_value_customer,
+    ROW_NUMBER() OVER (PARTITION BY ns.n_name ORDER BY pc.p_retailprice DESC) AS rank,
+    CASE 
+        WHEN pc.depth > 3 THEN 'Significant Change'
+        ELSE 'Normal Change'
+    END AS price_change_type
+FROM PriceChanges pc
+JOIN partsupp ps ON pc.p_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN NationSupplier ns ON s.s_nationkey = ns.n_nationkey
+LEFT JOIN HighValueCustomers hvc ON hvc.total_spent > pc.p_retailprice
+WHERE ns.supplier_count > 2
+ORDER BY nation_name, final_price DESC;

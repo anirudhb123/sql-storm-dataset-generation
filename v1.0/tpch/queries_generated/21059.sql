@@ -1,0 +1,54 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_payment,
+        COUNT(DISTINCT l.l_orderkey) AS item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT hvp.p_partkey) AS high_value_part_count,
+    SUM(COALESCE(rk.s_acctbal, 0)) AS total_supplier_balance,
+    AVG(od.net_payment) AS average_order_value,
+    MAX(od.item_count) AS max_item_count_per_order,
+    COALESCE(rk.s_name, 'No Supplier') AS top_supplier_name
+FROM nation n
+LEFT JOIN RankedSuppliers rk ON n.n_nationkey = rk.s_nationkey AND rk.rank = 1
+LEFT JOIN HighValueParts hvp ON hvp.p_partkey IN (
+    SELECT p.p_partkey
+    FROM part p
+    WHERE p.p_mfgr NOT LIKE 'B%' AND length(p.p_comment) >= 10
+    UNION ALL
+    SELECT p.p_partkey
+    FROM part p
+    WHERE p.p_retailprice IS NULL OR p.p_size < 10
+)
+LEFT JOIN OrderDetails od ON n.n_nationkey = 
+(
+    SELECT c.c_nationkey
+    FROM customer c
+    WHERE c.c_custkey = od.o_custkey
+)
+GROUP BY n.n_name
+ORDER BY total_supplier_balance DESC, high_value_part_count DESC, average_order_value DESC
+FETCH FIRST 50 ROWS ONLY;

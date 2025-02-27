@@ -1,0 +1,71 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2022-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_nationkey, 
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_nationkey
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_nationkey,
+        AVG(c.c_acctbal) AS avg_acctbal,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_nationkey
+)
+SELECT 
+    CASE 
+        WHEN rs.rnk <= 10 THEN 'Top Orders'
+        ELSE 'Other Orders'
+    END AS order_group,
+    rs.o_orderkey,
+    rs.o_totalprice,
+    cs.avg_acctbal,
+    ss.total_parts,
+    ss.total_supplycost
+FROM 
+    RankedOrders rs
+LEFT JOIN 
+    CustomerSummary cs ON cs.c_nationkey = (
+        SELECT c.c_nationkey
+        FROM customer c
+        JOIN orders o ON c.c_custkey = o.o_custkey
+        WHERE o.o_orderkey = rs.o_orderkey
+        LIMIT 1
+    )
+LEFT JOIN 
+    SupplierStats ss ON ss.s_nationkey = (
+        SELECT s.s_nationkey 
+        FROM supplier s 
+        JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+        WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = rs.o_orderkey)
+        LIMIT 1
+    )
+WHERE 
+    rs.o_totalprice > 500.00
+ORDER BY 
+    rs.o_orderdate DESC, 
+    rs.o_totalprice DESC
+FETCH FIRST 50 ROWS ONLY;

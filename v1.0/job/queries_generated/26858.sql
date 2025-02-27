@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        r.movie_title,
+        r.production_year,
+        r.kind_id
+    FROM 
+        RankedMovies r
+    WHERE 
+        r.year_rank <= 5
+),
+MovieWithAkaNames AS (
+    SELECT 
+        tm.movie_title,
+        tm.production_year,
+        ak.name AS aka_name
+    FROM 
+        TopMovies tm
+    JOIN 
+        aka_title at ON tm.movie_title = at.title
+    JOIN 
+        aka_name ak ON ak.person_id = at.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        mwak.movie_title,
+        mwak.production_year,
+        mwak.aka_name,
+        ci.person_role_id,
+        c.role AS cast_role,
+        COUNT(ci.id) AS cast_count
+    FROM 
+        MovieWithAkaNames mwak
+    LEFT JOIN 
+        cast_info ci ON mwak.movie_title = ci.movie_id
+    LEFT JOIN 
+        role_type c ON ci.person_role_id = c.id
+    GROUP BY 
+        mwak.movie_title, mwak.production_year, mwak.aka_name, ci.person_role_id, c.role
+),
+FinalReport AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.aka_name,
+        md.cast_role,
+        md.cast_count,
+        info.info AS additional_info
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = (SELECT id FROM title WHERE title = md.movie_title LIMIT 1)
+    LEFT JOIN 
+        info_type info ON mi.info_type_id = info.id
+    ORDER BY 
+        md.production_year DESC, md.cast_count DESC
+)
+
+SELECT * FROM FinalReport
+WHERE production_year >= 2000
+LIMIT 50;

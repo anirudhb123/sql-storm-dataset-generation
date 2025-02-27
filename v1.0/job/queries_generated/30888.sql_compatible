@@ -1,0 +1,46 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, 0 AS level
+    FROM aka_title m
+    WHERE m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT m.id, m.title, mh.level + 1
+    FROM movie_hierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+)
+
+SELECT
+    a.name AS actor_name,
+    t.title AS movie_title,
+    COALESCE(c.role_id, 0) AS role_id,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY COUNT(DISTINCT k.keyword) DESC) AS actor_rank,
+    t.md5sum AS movie_md5
+FROM
+    aka_name a
+JOIN
+    cast_info ci ON a.person_id = ci.person_id
+JOIN
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+JOIN
+    aka_title t ON mh.movie_id = t.id
+LEFT JOIN
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN
+    role_type c ON ci.role_id = c.id
+WHERE
+    a.name IS NOT NULL
+    AND (t.production_year BETWEEN 2000 AND 2023)
+    AND (ci.note IS NULL OR ci.note != 'Cameo')
+GROUP BY
+    a.name, t.title, c.role_id, t.md5sum, a.person_id
+HAVING
+    COUNT(DISTINCT k.keyword) > 0
+ORDER BY
+    actor_rank,
+    movie_title;

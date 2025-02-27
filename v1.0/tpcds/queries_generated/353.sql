@@ -1,0 +1,85 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    GROUP BY 
+        ws.web_site_sk
+), 
+HighSales AS (
+    SELECT 
+        web_site_sk, 
+        total_sales 
+    FROM 
+        RankedSales 
+    WHERE 
+        sales_rank <= 5
+), 
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_marital_status,
+        cd.cd_gender,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        HIDDEN_COLS.dep_info
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN (
+        SELECT 
+            hd.hd_demo_sk,
+            hd.hd_dep_count,
+            hd.hd_vehicle_count,
+            CASE 
+                WHEN hd.hd_dep_count IS NULL THEN 'No Dependents' 
+                ELSE 'Has Dependents' 
+            END AS dep_info
+        FROM 
+            household_demographics hd
+    ) AS HIDDEN_COLS ON c.c_current_hdemo_sk = HIDDEN_COLS.hd_demo_sk
+), 
+SalesDetails AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS item_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_order_number, ws.ws_item_sk
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    hs.total_sales,
+    sd.total_quantity_sold,
+    sd.total_net_profit
+FROM 
+    CustomerDemographics cd
+JOIN 
+    HighSales hs ON cd.c_customer_sk IN (
+        SELECT 
+            ws_bill_customer_sk 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_ext_sales_price IS NOT NULL
+    )
+LEFT JOIN 
+    SalesDetails sd ON sd.ws_item_sk = cd.c_current_hdemo_sk
+WHERE 
+    cd.cd_credit_rating IS NOT NULL 
+    AND hs.total_sales > 1000000
+ORDER BY 
+    hs.total_sales DESC, cd.c_customer_sk;

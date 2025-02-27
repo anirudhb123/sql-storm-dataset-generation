@@ -1,0 +1,71 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        AVG(V.VoteTypeId = 2) AS AvgUpVotes,
+        AVG(V.VoteTypeId = 3) AS AvgDownVotes,
+        SUM(B.Class = 1) AS GoldBadges,
+        SUM(B.Class = 2) AS SilverBadges,
+        SUM(B.Class = 3) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.CreationDate, 
+        P.Score, 
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM 
+        Posts P
+    JOIN 
+        Tags T ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.PostCount,
+    UA.AnswerCount,
+    UA.QuestionCount,
+    UA.AvgUpVotes,
+    UA.AvgDownVotes,
+    UA.GoldBadges,
+    UA.SilverBadges,
+    UA.BronzeBadges,
+    COUNT(PS.PostId) AS PostsCount,
+    AVG(PS.Score) AS AvgPostScore,
+    SUM(PS.ViewCount) AS TotalViews,
+    SUM(PS.CommentCount) AS TotalComments,
+    SUM(PS.FavoriteCount) AS TotalFavorites,
+    ARRAY_AGG(DISTINCT PS.Tags) AS AllTags
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    PostStatistics PS ON UA.UserId = PS.OwnerUserId
+GROUP BY 
+    UA.UserId, UA.DisplayName
+ORDER BY 
+    UA.PostCount DESC, AvgPostScore DESC
+LIMIT 10;

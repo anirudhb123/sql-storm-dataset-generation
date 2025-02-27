@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS role_rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        role_rank <= 5
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+MovieInfo AS (
+    SELECT 
+        m.movie_id,
+        MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'summary') THEN mi.info END) AS summary,
+        MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'genre') THEN mi.info END) AS genre
+    FROM 
+        movie_info mi
+    JOIN 
+        TopMovies m ON mi.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    mi.summary,
+    mi.genre,
+    cd.company_name,
+    cd.company_type,
+    COUNT(DISTINCT ci.person_id) AS cast_count,
+    (SELECT AVG(role_id) FROM cast_info WHERE movie_id = tm.movie_id) AS avg_role_id
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieInfo mi ON tm.movie_id = mi.movie_id
+LEFT JOIN 
+    CompanyDetails cd ON tm.movie_id = cd.movie_id
+LEFT JOIN 
+    cast_info ci ON tm.movie_id = ci.movie_id
+GROUP BY 
+    tm.title, tm.production_year, mi.summary, mi.genre, cd.company_name, cd.company_type
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 2
+    AND SUM(CASE WHEN ci.note IS NULL THEN 1 ELSE 0 END) < COUNT(ci.id) -- ensuring at least some cast info is present
+    AND MAX(CASE WHEN cd.company_type LIKE '%Production%' THEN 1 ELSE 0 END) = 1 -- ensuring at least one production company
+ORDER BY 
+    tm.production_year DESC, 
+    cast_count DESC;

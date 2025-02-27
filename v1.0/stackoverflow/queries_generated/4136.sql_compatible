@@ -1,0 +1,72 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CURRENT_TIMESTAMP) 
+        AND p.Score > 0
+),
+PostComments AS (
+    SELECT 
+        c.PostId, 
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, ', ') AS CommentTexts
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    rp.PostId, 
+    rp.Title, 
+    rp.CreationDate, 
+    rp.Score, 
+    rp.ViewCount, 
+    pc.CommentCount, 
+    pc.CommentTexts,
+    ups.DisplayName AS UserDisplayName,
+    ups.QuestionCount,
+    ups.AnswerCount,
+    CASE 
+        WHEN rp.Rank <= 10 THEN 'Top 10'
+        ELSE 'Below Top 10' 
+    END AS RankCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostComments pc ON rp.PostId = pc.PostId
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserPostStats ups ON u.Id = ups.UserId
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM Votes v 
+        WHERE v.PostId = rp.PostId 
+        AND v.VoteTypeId = 2
+    )
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

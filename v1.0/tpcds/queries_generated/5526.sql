@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ROW_NUMBER() OVER(PARTITION BY ws.web_site_id ORDER BY ws_sales_price DESC) as rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    INNER JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' 
+        AND cd.cd_marital_status = 'M'
+        AND ws.ws_sold_date_sk BETWEEN 2400 AND 2410
+),
+AggregateSales AS (
+    SELECT 
+        rs.web_site_id,
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS total_sales,
+        COUNT(*) AS transaction_count
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rank <= 5
+    GROUP BY 
+        rs.web_site_id
+),
+AverageSales AS (
+    SELECT 
+        web_site_id,
+        total_sales,
+        transaction_count,
+        (total_sales / NULLIF(transaction_count, 0)) AS avg_sales_per_transaction
+    FROM 
+        AggregateSales
+)
+SELECT 
+    web_site_id, 
+    total_sales, 
+    transaction_count, 
+    avg_sales_per_transaction
+FROM 
+    AverageSales
+ORDER BY 
+    total_sales DESC;

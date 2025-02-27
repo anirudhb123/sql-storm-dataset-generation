@@ -1,0 +1,65 @@
+
+WITH TagStatistics AS (
+    SELECT
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(Posts.Score) AS AverageScore,
+        SUM(Posts.ViewCount) AS TotalViews
+    FROM
+        Tags
+    LEFT JOIN
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '><')::text[])
+    GROUP BY
+        Tags.TagName
+),
+MostActiveUsers AS (
+    SELECT
+        U.Id,
+        U.DisplayName,
+        COUNT(Posts.Id) AS Contributions,
+        SUM(Posts.ViewCount) AS TotalViews
+    FROM
+        Users U
+    JOIN
+        Posts ON U.Id = Posts.OwnerUserId
+    WHERE
+        Posts.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY
+        U.Id, U.DisplayName
+    ORDER BY
+        Contributions DESC
+    LIMIT 10
+),
+PostHistoryDetails AS (
+    SELECT
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(PH.Id) AS EditCount,
+        STRING_AGG(DISTINCT PH.Comment, '; ') AS EditComments
+    FROM
+        PostHistory PH
+    GROUP BY
+        PH.PostId, PH.PostHistoryTypeId
+)
+SELECT
+    TS.TagName,
+    TS.PostCount,
+    TS.QuestionCount,
+    TS.AnswerCount,
+    TS.AverageScore,
+    TS.TotalViews,
+    MA.DisplayName AS MostActiveUser,
+    MA.Contributions,
+    MA.TotalViews AS UserTotalViews,
+    PHD.EditCount,
+    PHD.EditComments
+FROM
+    TagStatistics TS
+JOIN
+    MostActiveUsers MA ON TRUE 
+LEFT JOIN
+    PostHistoryDetails PHD ON TS.PostCount > 0
+ORDER BY
+    TS.PostCount DESC, MA.Contributions DESC;

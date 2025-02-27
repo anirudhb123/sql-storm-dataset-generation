@@ -1,0 +1,66 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        s.s_acctbal, 
+        0 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT 
+        ps.ps_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        s.s_acctbal + ps.ps_supplycost AS adjusted_acctbal, 
+        h.level + 1
+    FROM 
+        partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN SupplierHierarchy h ON ps.ps_partkey = h.s_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+AverageOrderValue AS (
+    SELECT 
+        AVG(avg_order_value) AS overall_avg_order_value
+    FROM 
+        CustomerOrderSummary
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    s.s_name,
+    COALESCE(sh.s_acctbal, 0) AS supplier_account_balance,
+    c.c_name,
+    cos.total_spent,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY bb_level DESC) AS rank_within_part,
+    CASE 
+        WHEN cos.total_spent > aov.overall_avg_order_value THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS spending_category
+FROM 
+    part p
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN CustomerOrderSummary cos ON s.s_nationkey = cos.c_custkey
+CROSS JOIN AverageOrderValue aov
+WHERE 
+    p.p_size BETWEEN 10 AND 50 
+    AND s.s_acctbal IS NOT NULL
+ORDER BY 
+    p.p_partkey, rank_within_part;

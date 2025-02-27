@@ -1,0 +1,62 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplier_value,
+        AVG(s.s_acctbal) AS avg_account_balance
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (ORDER BY total_supplier_value DESC) AS rn
+    FROM 
+        SupplierStats s
+    WHERE 
+        total_supplier_value > 10000
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(l.l_orderkey) AS total_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    ts.s_name,
+    ts.total_supplier_value,
+    os.total_order_value,
+    os.total_items,
+    r.r_name AS supplier_region,
+    CASE 
+        WHEN os.total_order_value IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status
+FROM 
+    TopSuppliers ts
+LEFT JOIN 
+    supplier s ON ts.s_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    OrderSummary os ON ts.s_suppkey = os.o_orderkey
+WHERE 
+    ts.rn <= 10 
+    AND (r.r_name IS NOT NULL OR r.r_regionkey IS NULL)
+ORDER BY 
+    ts.total_supplier_value DESC;

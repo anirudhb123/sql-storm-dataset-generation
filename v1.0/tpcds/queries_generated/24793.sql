@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.item_sk,
+        ws_net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS profit_rank,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price ASC) AS price_rank
+    FROM web_sales ws
+    WHERE ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = CURRENT_DATE)
+),
+AggregatedSales AS (
+    SELECT 
+        item_sk,
+        COUNT(*) AS total_sales,
+        SUM(ws_net_profit) AS total_profit,
+        AVG(ws_net_profit) AS avg_profit
+    FROM RankedSales
+    GROUP BY item_sk
+    HAVING SUM(ws_net_profit) > (SELECT AVG(ws_net_profit) FROM web_sales)
+),
+HighProfitItems AS (
+    SELECT 
+        a.item_sk,
+        a.total_sales,
+        b.i_item_desc,
+        COALESCE(c.item_count, 0) AS returned_count
+    FROM AggregatedSales a
+    JOIN item b ON a.item_sk = b.i_item_sk
+    LEFT JOIN (
+        SELECT 
+            cr_item_sk,
+            COUNT(*) AS item_count
+        FROM catalog_returns
+        GROUP BY cr_item_sk
+    ) c ON a.item_sk = c.cr_item_sk
+    WHERE a.total_profit > 1000
+)
+SELECT 
+    h.item_sk,
+    h.total_sales,
+    h.returned_count,
+    CASE 
+        WHEN h.returned_count IS NULL THEN 'Never Returned'
+        WHEN h.returned_count > 0 AND h.total_sales > 50 THEN 'High Return Rate'
+        ELSE 'Normal Return Rate'
+    END AS return_rate_category
+FROM HighProfitItems h
+ORDER BY h.total_sales DESC, h.returned_count ASC
+LIMIT 10;

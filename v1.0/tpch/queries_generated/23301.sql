@@ -1,0 +1,76 @@
+WITH SupplierAggregates AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS distinct_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > (
+            SELECT AVG(s2.s_acctbal) 
+            FROM supplier s2 
+            WHERE s2.s_nationkey = s.s_nationkey
+        )
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        cust.c_custkey, 
+        cust.c_name 
+    FROM 
+        CustomerOrders cust
+    WHERE 
+        cust.total_spent > (
+            SELECT AVG(total_spent) FROM CustomerOrders
+        )
+),
+PartSuppliers AS (
+    SELECT 
+        ps.ps_partkey, 
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    COALESCE(s.total_cost, 0) AS supplier_cost,
+    COALESCE(hvc.order_count, 0) AS customer_order_count,
+    p.p_size + COALESCE(hvc.order_count, 0) AS adjusted_size,
+    p.p_type || ' (' || p.p_brand || ')' AS part_identity,
+    ps.supplier_count
+FROM 
+    part p
+LEFT JOIN 
+    SupplierAggregates s ON p.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_supplycost = (SELECT MAX(ps_supplycost) FROM partsupp))
+LEFT JOIN 
+    HighValueCustomers hvc ON hvc.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'O')
+LEFT JOIN 
+    PartSuppliers ps ON p.p_partkey = ps.ps_partkey
+WHERE 
+    (p.p_size IS NOT NULL AND p.p_size > 10) 
+    OR (p.p_comment LIKE '%special%' AND p.p_retailprice < 50.00)
+ORDER BY 
+    supplier_cost DESC,
+    adjusted_size DESC
+FETCH FIRST 10 ROWS ONLY;

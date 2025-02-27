@@ -1,0 +1,73 @@
+WITH RecursiveUserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        1 AS Level
+    FROM Users U
+    WHERE U.Reputation > 0
+
+    UNION ALL
+
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        R.Level + 1
+    FROM Users U
+    JOIN RecursiveUserReputation R ON U.Reputation > R.Reputation
+    WHERE R.Level < 5
+), 
+
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.Score) AS AverageScore,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM Posts P
+    WHERE P.CreationDate >= '2022-01-01'
+    GROUP BY P.OwnerUserId
+),
+
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Badges B
+    GROUP BY B.UserId
+),
+
+RecentComments AS (
+    SELECT 
+        C.UserId,
+        COUNT(C.Id) AS CommentCount,
+        MAX(C.CreationDate) AS LastCommentDate
+    FROM Comments C
+    GROUP BY C.UserId
+)
+
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    COALESCE(UR.Reputation, 0) AS Reputation,
+    COALESCE(PS.PostCount, 0) AS PostCount,
+    COALESCE(PS.TotalScore, 0) AS TotalScore,
+    COALESCE(PS.AverageScore, 0) AS AverageScore,
+    COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+    COALESCE(UB.BadgeNames, 'None') AS BadgeNames,
+    COALESCE(RC.CommentCount, 0) AS CommentCount,
+    COALESCE(RC.LastCommentDate, 'N/A') AS LastCommentDate,
+    CASE 
+        WHEN UR.Reputation IS NOT NULL THEN 'Active' 
+        ELSE 'Inactive' 
+    END AS UserStatus
+FROM Users U
+LEFT JOIN RecursiveUserReputation UR ON U.Id = UR.UserId
+LEFT JOIN PostStatistics PS ON U.Id = PS.OwnerUserId
+LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN RecentComments RC ON U.Id = RC.UserId
+WHERE U.Reputation > 100 
+ORDER BY 
+    COALESCE(PS.TotalScore, 0) DESC,
+    U.DisplayName ASC;

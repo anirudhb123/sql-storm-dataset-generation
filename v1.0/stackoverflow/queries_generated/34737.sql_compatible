@@ -1,0 +1,100 @@
+
+WITH RecursivePostChain AS (
+    
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        1 AS Depth
+    FROM 
+        PostLinks pl
+    WHERE 
+        pl.LinkTypeId = 3  
+
+    UNION ALL
+
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        rpc.Depth + 1
+    FROM 
+        PostLinks pl
+    INNER JOIN 
+        RecursivePostChain rpc ON pl.PostId = rpc.RelatedPostId
+    WHERE 
+        pl.LinkTypeId = 3
+),
+UserReputation AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RankedPosts AS (
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        RANK() OVER (ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+),
+ActiveUserStats AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        MAX(p.CreationDate) AS LastActiveDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'  
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(rp.TotalScore, 0) AS ReputationScore,
+    COALESCE(ups.PostCount, 0) AS UserPostCount,
+    COALESCE(ups.CommentCount, 0) AS UserCommentCount,
+    COALESCE(ups.LastActiveDate, 'No Activity') AS LastActivePeriod,
+    COALESCE(rp.TotalUpVotes, 0) - COALESCE(rp.TotalDownVotes, 0) AS VoteBalance,
+    COUNT(DISTINCT r.RelatedPostId) AS DuplicateCount
+FROM 
+    Users u
+LEFT JOIN 
+    UserReputation rp ON u.Id = rp.UserId
+LEFT JOIN 
+    ActiveUserStats ups ON u.Id = ups.UserId
+LEFT JOIN 
+    RecursivePostChain r ON u.Id IN (
+        SELECT 
+            DISTINCT p.OwnerUserId
+        FROM 
+            Posts p
+        JOIN 
+            PostLinks pl ON p.Id = pl.PostId
+        WHERE 
+            pl.LinkTypeId = 3 
+    )
+WHERE 
+    u.Reputation > 1000  
+GROUP BY 
+    u.Id, u.DisplayName, ups.PostCount, ups.CommentCount, rp.TotalScore, ups.LastActiveDate
+ORDER BY 
+    ReputationScore DESC, DuplicateCount DESC;

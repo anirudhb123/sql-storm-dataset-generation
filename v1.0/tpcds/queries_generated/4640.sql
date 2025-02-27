@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returned,
+        SUM(wr_return_amt) AS total_return_amount,
+        COUNT(DISTINCT wr_order_number) AS return_count
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+JoinSalesReturns AS (
+    SELECT 
+        cs.ws_item_sk,
+        cs.total_quantity,
+        cs.total_sales,
+        cr.total_returned,
+        cr.total_return_amount,
+        cr.return_count
+    FROM 
+        RankedSales cs
+    LEFT JOIN 
+        CustomerReturns cr ON cs.ws_item_sk = cr.wr_returning_customer_sk
+)
+SELECT 
+    COALESCE(SUM(total_sales), 0) AS total_sales_value,
+    COALESCE(SUM(total_quantity), 0) AS total_quantity_sold,
+    COALESCE(SUM(total_returned), 0) AS total_returns,
+    COUNT(DISTINCT ws_item_sk) AS item_count,
+    AVG(total_sales) AS avg_sales_per_item,
+    MAX(total_sales) AS max_sales_per_item,
+    MIN(total_sales) AS min_sales_per_item
+FROM 
+    JoinSalesReturns
+WHERE 
+    total_sales > 1000 OR (total_returned IS NULL AND total_sales < 500)
+GROUP BY 
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM customer WHERE c_customer_sk = wr_returning_customer_sk AND c_preferred_cust_flag = 'Y') 
+            THEN 'Preferred Customer'
+        ELSE 'Regular Customer'
+    END
+ORDER BY 
+    total_sales_value DESC;

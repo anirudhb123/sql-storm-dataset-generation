@@ -1,0 +1,64 @@
+WITH RecursivePostHistory AS (
+    SELECT
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ph.Text,
+        1 AS Level
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11) -- Only closed and reopened posts
+    UNION ALL
+    SELECT
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ph.Text,
+        Level + 1
+    FROM PostHistory ph
+    INNER JOIN RecursivePostHistory rph ON ph.PostId = rph.PostId
+    WHERE ph.CreationDate < rph.CreationDate
+),
+MaxLevelCTE AS (
+    SELECT 
+        PostId,
+        MAX(Level) AS MaxLevel
+    FROM RecursivePostHistory
+    GROUP BY PostId
+),
+PostDetails AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate AS PostCreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        MAX(pl.CreationDate) AS LastLinkDate
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  -- Only BountyStart
+    LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+    WHERE p.PostTypeId = 1  -- Focus on Questions
+    GROUP BY p.Id, u.DisplayName
+)
+SELECT
+    pd.PostId,
+    pd.Title,
+    pd.PostCreationDate,
+    pd.OwnerDisplayName,
+    pd.CommentCount,
+    pd.TotalBounty,
+    ml.MaxLevel,
+    CASE 
+        WHEN pd.LastLinkDate IS NOT NULL THEN 'Has Links'
+        ELSE 'No Links'
+    END AS LinkStatus
+FROM PostDetails pd
+LEFT JOIN MaxLevelCTE ml ON pd.PostId = ml.PostId
+WHERE pd.CommentCount > 5 -- Filter for posts with significant comments
+ORDER BY pd.TotalBounty DESC, pd.CommentCount DESC;

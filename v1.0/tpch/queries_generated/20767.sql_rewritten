@@ -1,0 +1,55 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_comment, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.suppkey <> sh.s_suppkey AND s.s_acctbal < 0
+),
+expensive_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.ps_supplycost, 
+           (p.p_retailprice - ROUND(ps.ps_supplycost, 2)) AS profit_margin
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+),
+valid_orders AS (
+    SELECT DISTINCT o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate <= cast('1998-10-01' as date) AND o.o_orderstatus IN ('O', 'F')
+    GROUP BY o_orderkey
+),
+ranked_customers AS (
+    SELECT c.c_custkey, c.c_name, 
+           NTILE(5) OVER (ORDER BY c.c_acctbal DESC) AS revenue_segment
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+joined_data AS (
+    SELECT r.r_name, COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+           SUM(ep.profit_margin) AS total_profit_margin,
+           SUM(vo.total_revenue) AS total_order_revenue
+    FROM region r
+    LEFT JOIN supplier_hierarchy sh ON r.r_regionkey = sh.s_nationkey
+    LEFT JOIN expensive_parts ep ON ep.p_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        INNER JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+        WHERE s.s_accountbal > 0
+    )
+    LEFT JOIN valid_orders vo ON vo.o_orderkey BETWEEN 100 AND 200
+    GROUP BY r.r_name
+)
+SELECT j.r_name, j.supplier_count, j.total_profit_margin, 
+       COALESCE(ROUND(j.total_order_revenue, 2), 'No Revenue') AS total_order_revenue,
+       CASE WHEN j.total_profit_margin > 100 THEN 'High Profit'
+            WHEN j.total_profit_margin BETWEEN 50 AND 100 THEN 'Moderate Profit'
+            ELSE 'Low Profit' END AS profit_category
+FROM joined_data j
+ORDER BY j.supplier_count DESC, j.total_profit_margin DESC
+FETCH FIRST 10 ROWS ONLY;

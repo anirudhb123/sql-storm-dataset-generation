@@ -1,0 +1,75 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        kt.kind AS movie_kind,
+        GROUP_CONCAT(DISTINCT ak.name) AS aka_names,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        c.country_code AS production_company_country
+    FROM
+        title t
+    JOIN
+        aka_title ak ON t.id = ak.movie_id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    JOIN
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN
+        company_name c ON mc.company_id = c.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, kt.kind, c.country_code
+),
+ActorDetails AS (
+    SELECT 
+        DISTINCT p.id AS person_id,
+        ak.name AS actor_name,
+        ct.kind AS character_type,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY p.id ORDER BY t.production_year DESC) AS latest_movie_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    JOIN 
+        role_type ct ON ci.role_id = ct.id
+    WHERE 
+        ct.kind LIKE '%lead%'
+),
+ActorMovieDetails AS (
+    SELECT 
+        ad.actor_name,
+        ad.movie_title,
+        ad.production_year,
+        md.movie_kind,
+        md.aka_names,
+        md.keywords,
+        md.production_company_country
+    FROM 
+        ActorDetails ad
+    JOIN 
+        MovieDetails md ON ad.movie_title = md.title AND ad.production_year = md.production_year
+    WHERE 
+        ad.latest_movie_rank = 1
+)
+SELECT 
+    actor_name,
+    movie_title,
+    production_year,
+    movie_kind,
+    aka_names,
+    keywords,
+    production_company_country
+FROM 
+    ActorMovieDetails
+ORDER BY 
+    production_year DESC, actor_name;

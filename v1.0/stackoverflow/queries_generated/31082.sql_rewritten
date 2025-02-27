@@ -1,0 +1,96 @@
+WITH RECURSIVE UserReputations AS (
+    SELECT 
+        Id,
+        Reputation,
+        CreationDate,
+        DisplayName,
+        UpVotes,
+        DownVotes,
+        NULL AS ParentId
+    FROM 
+        Users
+    WHERE 
+        Reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.CreationDate,
+        u.DisplayName,
+        u.UpVotes,
+        u.DownVotes,
+        ur.Id AS ParentId
+    FROM 
+        Users u
+    JOIN 
+        UserReputations ur ON ur.UpVotes > u.DownVotes
+    WHERE 
+        u.Reputation <= 1000
+),
+
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentsCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        AVG(CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 
+            ELSE 0 END) OVER (PARTITION BY p.OwnerUserId) AS AcceptanceRate
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+
+UserWithPostStats AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.Score,
+        ps.CommentsCount,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        ps.CreationDate,
+        ps.PostRank,
+        ps.AcceptanceRate
+    FROM 
+        Users u
+    LEFT JOIN 
+        PostStatistics ps ON u.Id = ps.OwnerUserId
+)
+
+SELECT 
+    uwp.DisplayName,
+    CASE 
+        WHEN uwp.Reputation IS NULL THEN 'No Reputation'
+        ELSE CAST(uwp.Reputation AS VARCHAR)
+    END AS Reputation,
+    uwp.Title,
+    uwp.ViewCount,
+    uwp.Score,
+    uwp.CommentsCount,
+    COALESCE(uwp.UpVoteCount, 0) AS UpVotes,
+    COALESCE(uwp.DownVoteCount, 0) AS DownVotes,
+    CASE 
+        WHEN uwp.PostRank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory,
+    (SELECT STRING_AGG(t.TagName, ', ') FROM Tags t 
+     WHERE t.ExcerptPostId = uwp.PostId) AS Tags
+FROM 
+    UserWithPostStats uwp
+WHERE 
+    uwp.AcceptanceRate > 0.5
+ORDER BY 
+    uwp.Score DESC;

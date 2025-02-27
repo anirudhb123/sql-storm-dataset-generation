@@ -1,0 +1,76 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ca.person_id,
+        a.name AS actor_name,
+        1 AS level
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name a ON ca.person_id = a.person_id
+    WHERE 
+        ca.movie_id IN (SELECT id FROM aka_title WHERE kind_id = 1)  -- Only movies
+
+    UNION ALL
+
+    SELECT 
+        ca.person_id,
+        a.name,
+        ah.level + 1
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name a ON ca.person_id = a.person_id
+    JOIN 
+        ActorHierarchy ah ON ca.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = ah.person_id)
+    WHERE 
+        ah.level < 3  -- limit hierarchy depth for performance
+),
+
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(DISTINCT a.actor_name, ', ') AS actors,
+        COUNT(DISTINCT rw.role_id) AS role_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info rw ON m.id = rw.movie_id
+    LEFT JOIN 
+        aka_name a ON rw.person_id = a.person_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+
+FilteredMovies AS (
+    SELECT
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.actors,
+        md.role_count,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.role_count DESC) AS rn
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.production_year >= 2000
+        AND md.role_count > 0
+)
+
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.actors,
+    fm.role_count,
+    ah.actor_name AS top_actor
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    ActorHierarchy ah ON fm.actors LIKE '%' || ah.actor_name || '%'
+WHERE 
+    fm.rn <= 5
+ORDER BY 
+    fm.production_year DESC, 
+    fm.role_count DESC
+LIMIT 50;

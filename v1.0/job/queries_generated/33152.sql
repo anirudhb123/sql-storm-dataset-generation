@@ -1,0 +1,84 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        1 AS level
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        ci.movie_id IN (SELECT id FROM aka_title WHERE production_year = 2020)
+    
+    UNION ALL
+    
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        ah.level + 1
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        ActorHierarchy ah ON ci.movie_id = (SELECT movie_id FROM cast_info WHERE person_id = ah.person_id)
+    WHERE 
+        ah.level < 5
+),
+HighRatingMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(AVG(r.rating), 0) AS avg_rating
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    LEFT JOIN 
+        (SELECT movie_id, COUNT(*) as rating FROM person_info GROUP BY movie_id) r ON r.movie_id = m.id
+    GROUP BY 
+        m.id
+    HAVING 
+        COALESCE(AVG(r.rating), 0) >= 7.5
+),
+ActorMovieCount AS (
+    SELECT
+        a.actor_name,
+        COUNT(DISTINCT cm.movie_id) AS movie_count
+    FROM 
+        ActorHierarchy a
+    JOIN 
+        complete_cast cm ON a.person_id = cm.subject_id
+    GROUP BY 
+        a.actor_name
+),
+MovieCompanyCounts AS (
+    SELECT
+        m.id AS movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    a.actor_name,
+    hm.title AS high_rating_movie,
+    amc.movie_count,
+    mcc.company_count
+FROM 
+    ActorMovieCount amc
+JOIN 
+    ActorHierarchy ah ON amc.actor_name = ah.actor_name
+LEFT JOIN 
+    HighRatingMovies hm ON ah.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = hm.movie_id)
+LEFT JOIN 
+    MovieCompanyCounts mcc ON hm.movie_id = mcc.movie_id
+WHERE 
+    amc.movie_count > 3 AND
+    COALESCE(mcc.company_count, 0) > 1
+ORDER BY 
+    amc.movie_count DESC, 
+    hm.title;

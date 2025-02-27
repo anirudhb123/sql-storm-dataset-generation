@@ -1,0 +1,51 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+HighValueCustomers AS (
+    SELECT c_custkey, c_name, c_mktsegment, ROW_NUMBER() OVER (PARTITION BY c_mktsegment ORDER BY c_acctbal DESC) AS rn
+    FROM customer
+    WHERE c_acctbal IS NOT NULL
+),
+SupplyCosts AS (
+    SELECT ps_partkey, ps_suppkey, SUM(ps_supplycost) AS total_supply_cost
+    FROM partsupp
+    GROUP BY ps_partkey, ps_suppkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, l.l_quantity, l.l_discount, l.l_tax, 
+           (l.l_extendedprice * (1 - l.l_discount) + l.l_tax) AS charge
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate > '1997-01-01'
+),
+NationRegion AS (
+    SELECT n.n_name, r.r_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    sh.s_suppkey,
+    sh.s_name,
+    vc.c_name,
+    vc.c_mktsegment,
+    COALESCE(SUM(od.charge), 0) AS total_charges,
+    COUNT(DISTINCT od.o_orderkey) AS order_count,
+    COALESCE(SUM(sc.total_supply_cost), 0) AS total_cost,
+    CONCAT(nr.n_name, ' - ', nr.r_name) AS nation_region,
+    sh.level
+FROM SupplierHierarchy sh
+JOIN HighValueCustomers vc ON sh.s_nationkey = vc.c_nationkey
+LEFT JOIN OrderDetails od ON vc.c_custkey = od.o_orderkey
+LEFT JOIN SupplyCosts sc ON sc.ps_suppkey = sh.s_suppkey
+JOIN NationRegion nr ON sh.s_nationkey = (SELECT MAX(n.nationkey) FROM nation n WHERE n.nationkey = sh.s_nationkey)
+GROUP BY sh.s_suppkey, sh.s_name, vc.c_name, vc.c_mktsegment, nr.n_name, nr.r_name, sh.level
+HAVING COALESCE(SUM(od.charge), 0) > 10000
+ORDER BY total_charges DESC, total_cost;

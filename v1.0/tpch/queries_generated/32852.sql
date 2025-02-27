@@ -1,0 +1,64 @@
+WITH RECURSIVE supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_nationkey,
+        CONCAT(s.s_name, ' - Account Balance: ', CAST(s.s_acctbal AS VARCHAR)) AS supplier_details
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+
+    UNION ALL
+
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_nationkey,
+        CONCAT(s.s_name, ' - Account Balance: ', CAST(s.s_acctbal AS VARCHAR)) AS supplier_details
+    FROM supplier s
+    INNER JOIN supplier_info si ON s.s_nationkey = si.s_nationkey
+    WHERE s.s_acctbal > si.s_acctbal
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(l.l_orderkey) AS line_item_count,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rnk
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY o.o_orderkey
+),
+leading_suppliers AS (
+    SELECT 
+        si.s_suppkey,
+        si.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier_info si
+    JOIN partsupp ps ON si.s_suppkey = ps.ps_suppkey
+    GROUP BY si.s_suppkey, si.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) < (SELECT AVG(total_supply_cost) FROM (
+        SELECT SUM(ps_supplycost * ps_availqty) AS total_supply_cost
+        FROM partsupp ps
+        GROUP BY ps.ps_suppkey
+    ) AS avg_cost)
+)
+SELECT 
+    o.o_orderkey,
+    os.total_price,
+    os.line_item_count,
+    ls.s_name,
+    ls.total_supply_cost,
+    CASE 
+        WHEN os.line_item_count > 5 THEN 'High Volume'
+        ELSE 'Regular Volume'
+    END AS order_volume,
+    COALESCE(r.r_name, 'Unknown') AS region_name
+FROM order_summary os
+JOIN leading_suppliers ls ON os.o_orderkey = ls.s_suppkey
+LEFT JOIN nation n ON ls.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE os.order_rnk = 1
+ORDER BY os.total_price DESC, os.line_item_count DESC;

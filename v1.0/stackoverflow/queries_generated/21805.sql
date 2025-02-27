@@ -1,0 +1,69 @@
+WITH UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(V.VoteTypeId = 2, 0)) AS UpVotes,
+        SUM(COALESCE(V.VoteTypeId = 3, 0)) AS DownVotes,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        RANK() OVER (PARTITION BY U.Id ORDER BY SUM(COALESCE(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END, 0)) DESC) AS VoteRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON V.PostId = P.Id
+    LEFT JOIN Badges B ON B.UserId = U.Id
+    GROUP BY U.Id, U.Reputation
+),
+
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        ARRAY_AGG(T.TagName) AS TagsArray
+    FROM Posts P
+    LEFT JOIN Tags T ON T.Id = ANY(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')::int[])
+    GROUP BY P.Id, P.OwnerUserId, P.Score, P.ViewCount, P.AnswerCount
+),
+
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseCount,
+        ARRAY_AGG(DISTINCT PH.Comment) AS CloseReasons
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (10, 11)  -- Close or Reopen actions
+    GROUP BY PH.PostId
+),
+
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        UE.Reputation,
+        UE.PostCount,
+        UE.TotalViews,
+        UE.UpVotes,
+        UE.DownVotes,
+        UE.BadgeCount,
+        DENSE_RANK() OVER (ORDER BY UE.Reputation DESC) AS UserRank
+    FROM Users U
+    JOIN UserEngagement UE ON U.Id = UE.UserId
+    WHERE UE.PostCount > 0
+)
+
+SELECT 
+    TU.UserRank,
+    TU.DisplayName,
+    TU.Reputation,
+    COALESCE(SUM(PS.ViewCount), 0) AS TotalPostViews,
+    COALESCE(CP.CloseCount, 0) AS TotalClosedPosts,
+    COALESCE(CP.CloseReasons, '{}') AS CloseReasonComments
+FROM TopUsers TU
+LEFT JOIN PostStats PS ON TU.Id = PS.OwnerUserId
+LEFT JOIN ClosedPosts CP ON PS.PostId = CP.PostId
+GROUP BY TU.UserRank, TU.DisplayName, TU.Reputation, CP.CloseCount, CP.CloseReasons
+ORDER BY TU.UserRank
+LIMIT 10;

@@ -1,0 +1,45 @@
+WITH RankedMovies AS (
+    SELECT
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY a.id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM
+        aka_title a
+    LEFT JOIN
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN
+        aka_name ak ON c.person_id = ak.person_id
+    WHERE
+        a.production_year >= 2000
+    GROUP BY
+        a.id
+),
+TopMovies AS (
+    SELECT
+        title,
+        production_year,
+        actor_count,
+        actor_names,
+        ROW_NUMBER() OVER (ORDER BY actor_count DESC) AS rank
+    FROM
+        RankedMovies
+)
+SELECT
+    tm.title,
+    tm.production_year,
+    COALESCE(tm.actor_count, 0) AS actor_count,
+    tm.actor_names,
+    CASE 
+        WHEN tm.actor_count > 10 THEN 'Ensemble Cast'
+        WHEN tm.actor_count IS NULL THEN 'No Cast Info'
+        ELSE 'Regular Cast'
+    END AS cast_description
+FROM
+    TopMovies tm
+WHERE
+    tm.rank <= 10
+ORDER BY
+    tm.rank;
+
+

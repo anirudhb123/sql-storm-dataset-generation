@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01'
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerData AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (ORDER BY c.c_acctbal DESC) AS rank_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL
+)
+SELECT 
+    o.o_orderkey, 
+    o.o_orderdate, 
+    o.o_totalprice, 
+    s.s_name AS supplier_name, 
+    p.p_name AS part_name, 
+    (ld.l_extendedprice * (1 - ld.l_discount)) AS net_price,
+    CASE WHEN ld.l_returnflag = 'R' THEN 'Returned' ELSE 'Not Returned' END AS return_status,
+    COALESCE(SUM(sc.total_cost), 0) AS supplier_cost
+FROM 
+    RankedOrders o
+JOIN 
+    lineitem ld ON o.o_orderkey = ld.l_orderkey
+LEFT JOIN 
+    part p ON ld.l_partkey = p.p_partkey
+LEFT JOIN 
+    SupplierCosts sc ON p.p_partkey = sc.ps_partkey
+LEFT JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    o.o_orderstatus = 'O' AND 
+    c.c_custkey IN (SELECT c.c_custkey FROM CustomerData cd WHERE cd.rank_acctbal <= 10)
+GROUP BY 
+    o.o_orderkey, 
+    o.o_orderdate, 
+    o.o_totalprice, 
+    s.s_name, 
+    p.p_name, 
+    ld.l_extendedprice, 
+    ld.l_discount, 
+    ld.l_returnflag
+HAVING 
+    SUM(sc.total_cost) > 0
+ORDER BY 
+    o.o_totalprice DESC, 
+    o.o_orderdate ASC;

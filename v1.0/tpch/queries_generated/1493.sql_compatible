@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.partkey ORDER BY ps.ps_supplycost ASC) AS SupplierRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, c.c_custkey, c.c_name
+),
+PartAvailability AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(ps.ps_availqty), 0) AS TotalAvailable,
+        SUM(ps.ps_supplycost) AS TotalSupplyCost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    pa.p_partkey,
+    pa.p_name,
+    pa.TotalAvailable,
+    pa.TotalSupplyCost,
+    co.c_name,
+    co.TotalRevenue,
+    rs.s_name AS SupplierName
+FROM 
+    PartAvailability pa
+LEFT JOIN 
+    CustomerOrders co ON pa.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty > 0 LIMIT 1)
+LEFT JOIN 
+    RankedSuppliers rs ON pa.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = rs.s_suppkey AND rs.SupplierRank <= 3)
+JOIN 
+    nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = co.c_custkey)
+WHERE 
+    n.n_name IN ('USA', 'Canada')
+ORDER BY 
+    TotalRevenue DESC, TotalAvailable ASC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,65 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS unique_parts,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS rank_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM CustomerOrders c
+    WHERE c.total_orders >= 5 AND c.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+),
+RecentSuppliers AS (
+    SELECT 
+        s.s_name,
+        COUNT(l.l_orderkey) AS recent_orders_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATE '1998-10-01' - INTERVAL '30 days'
+    GROUP BY s.s_name
+),
+FinalReport AS (
+    SELECT 
+        hs.c_custkey,
+        hs.c_name,
+        ss.s_name AS supplier_name,
+        ss.total_avail_qty,
+        ss.avg_supply_cost
+    FROM HighValueCustomers hs
+    LEFT JOIN SupplierStats ss ON MOD(hs.c_custkey, 10) = MOD(ss.s_suppkey, 10)
+    WHERE ss.rank_supply_cost <= 10 OR ss.total_avail_qty IS NULL
+)
+SELECT 
+    fr.c_custkey,
+    fr.c_name,
+    fr.supplier_name,
+    COALESCE(fr.total_avail_qty, 0) AS total_available_quantity,
+    CASE 
+        WHEN fr.avg_supply_cost IS NULL THEN 'No data'
+        ELSE CONCAT('$', CAST(fr.avg_supply_cost AS VARCHAR(20)))
+    END AS average_supply_cost,
+    ROW_NUMBER() OVER (PARTITION BY fr.c_custkey ORDER BY fr.supplier_name) AS line_number
+FROM FinalReport fr
+ORDER BY fr.c_custkey, fr.supplier_name;

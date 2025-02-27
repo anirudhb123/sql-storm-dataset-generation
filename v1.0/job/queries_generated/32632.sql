@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title,
+        m.production_year,
+        0 AS level -- root level of the hierarchy
+    FROM 
+        title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mk.linked_movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        movie_link mk
+    JOIN 
+        title t ON mk.linked_movie_id = t.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = mk.movie_id
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT c.person_id) AS actor_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+    MAX(flagged_years.year) AS max_flagged_year -- maximum flagged year from subquery
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.id
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN (
+    SELECT 
+        m.production_year AS year, 
+        COUNT(*) AS flagged_count
+    FROM 
+        movie_info mi
+    JOIN 
+        title m ON mi.movie_id = m.id
+    WHERE 
+        mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Flagged')
+    GROUP BY 
+        m.production_year
+    HAVING 
+        COUNT(*) > 5
+) AS flagged_years ON mh.production_year = flagged_years.year
+WHERE 
+    mh.level <= 2
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+ORDER BY 
+    actor_count DESC, mh.production_year DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,62 @@
+WITH UserBadgeCount AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Class) AS TopBadgeClass
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE((SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId IN (2, 3)), 0) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM Posts P
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.LastAccessDate,
+    U.Location,
+    U.BadgeCount,
+    P.Title,
+    P.ViewCount,
+    P.VoteCount,
+    P.CreationDate,
+    COALESCE(PH.ClosedDate, 'Not Closed') AS LastStatusChange,
+    CASE 
+        WHEN PH.PostHistoryTypeId IN (10, 11) THEN 'Closed'
+        WHEN PH.PostHistoryTypeId = 12 THEN 'Deleted'
+        ELSE 'Active'
+    END AS PostStatus,
+    COUNT(DISTINCT C.Id) AS CommentCount,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+FROM Users U
+LEFT JOIN UserBadgeCount UB ON U.Id = UB.UserId
+LEFT JOIN PostStatistics P ON U.Id = P.OwnerUserId
+LEFT JOIN PostHistory PH ON P.PostId = PH.PostId AND PH.CreationDate = (
+    SELECT MAX(PhSub.CreationDate)
+    FROM PostHistory PhSub
+    WHERE PhSub.PostId = P.PostId
+    GROUP BY PhSub.PostHistoryTypeId
+)
+LEFT JOIN Comments C ON P.PostId = C.PostId
+LEFT JOIN (
+    SELECT 
+        PT.Id, 
+        PT.TagName
+    FROM Tags PT
+) T ON T.ExcerptPostId = P.PostId
+WHERE P.RecentPostRank <= 3 -- Limit to the 3 most recent posts per user
+AND U.Reputation >= 100
+GROUP BY U.Id, U.DisplayName, U.Reputation, U.LastAccessDate, U.Location, 
+           UB.BadgeCount, P.Title, P.ViewCount, P.VoteCount, 
+           P.CreationDate, PH.ClosedDate, PH.PostHistoryTypeId
+ORDER BY U.Reputation DESC, P.ViewCount DESC
+LIMIT 50 OFFSET 0;
+

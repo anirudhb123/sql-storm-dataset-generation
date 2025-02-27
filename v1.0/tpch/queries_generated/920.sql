@@ -1,0 +1,66 @@
+WITH SupplierCost AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count, 
+        SUM(o.o_totalprice) AS total_spending
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'O') -- 'F' for finished, 'O' for open
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank
+    FROM 
+        part p
+    WHERE 
+        p.p_size > 10
+)
+SELECT 
+    c.c_name AS customer_name,
+    sc.s_name AS supplier_name,
+    pd.p_name AS part_name,
+    pd.p_retailprice,
+    co.total_spending,
+    sc.total_supply_cost,
+    CASE 
+        WHEN co.total_spending IS NULL THEN 'No Orders'
+        ELSE 'Orders Made'
+    END AS order_status,
+    COALESCE(SUM(l.l_discount * l.l_extendedprice), 0) AS total_discount_value
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+JOIN 
+    PartDetails pd ON l.l_partkey = pd.p_partkey 
+JOIN 
+    SupplierCost sc ON l.l_suppkey = sc.s_suppkey 
+LEFT JOIN 
+    nation n ON n.n_nationkey = co.c_custkey 
+WHERE 
+    pd.rank <= 5 
+GROUP BY 
+    c.c_name, sc.s_name, pd.p_name, pd.p_retailprice, co.total_spending, sc.total_supply_cost
+ORDER BY 
+    total_discount_value DESC, co.order_count DESC;

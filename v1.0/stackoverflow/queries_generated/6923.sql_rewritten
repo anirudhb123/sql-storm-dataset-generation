@@ -1,0 +1,44 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        COUNT(C.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId 
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        P.Id
+),
+TopPosts AS (
+    SELECT 
+        RP.* 
+    FROM 
+        RankedPosts RP 
+    WHERE 
+        RP.Rank <= 10
+)
+SELECT 
+    TP.Id AS PostId,
+    TP.Title,
+    TP.Score,
+    TP.CommentCount,
+    TP.UpVoteCount,
+    TP.DownVoteCount,
+    U.DisplayName AS OwnerDisplayName,
+    U.Reputation AS OwnerReputation
+FROM 
+    TopPosts TP
+JOIN 
+    Users U ON TP.OwnerUserId = U.Id
+ORDER BY 
+    TP.Score DESC;

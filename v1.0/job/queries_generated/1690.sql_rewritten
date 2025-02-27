@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank_per_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank_per_year <= 5
+), 
+MovieDetails AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        COUNT(ci.id) AS cast_count,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note_ratio
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        movie_keyword mk ON tm.movie_id = mk.movie_id
+    LEFT JOIN 
+        cast_info ci ON tm.movie_id = ci.movie_id
+    GROUP BY 
+        tm.movie_id, tm.title
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.keyword,
+    md.cast_count,
+    md.has_note_ratio,
+    CASE 
+        WHEN md.has_note_ratio > 0.5 THEN 'High Note'
+        ELSE 'Low Note'
+    END AS note_category
+FROM 
+    MovieDetails md
+WHERE 
+    md.cast_count > 2
+ORDER BY 
+    md.production_year DESC, 
+    md.title
+LIMIT 10;

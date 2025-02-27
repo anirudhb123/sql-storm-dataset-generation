@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS Author,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2)  -- Only Questions and Answers 
+        AND p.CreationDate >= DATEADD(YEAR, -1, GETDATE())  -- Posts from the last year
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosureDate,
+        cr.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Post Closed
+),
+PostDetails AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Body,
+        r.Tags,
+        r.CreationDate,
+        r.Score,
+        r.Author,
+        COALESCE(c.ClosureDate, 'Not Closed') AS ClosureDate,
+        COALESCE(c.CloseReason, 'N/A') AS CloseReason
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        ClosedPosts c ON r.PostId = c.PostId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Author,
+    pd.Score,
+    pd.CreationDate,
+    pd.ClosureDate,
+    pd.CloseReason,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            UNNEST(string_to_array(pd.Tags, '><')) AS TagName
+    ) t ON TRUE
+WHERE 
+    pd.Rank = 1  -- Only top-ranked posts in each tag category
+GROUP BY 
+    pd.PostId, pd.Title, pd.Author, pd.Score, pd.CreationDate, 
+    pd.ClosureDate, pd.CloseReason
+ORDER BY 
+    pd.Score DESC;

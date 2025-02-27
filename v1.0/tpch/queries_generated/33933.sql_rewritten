@@ -1,0 +1,58 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+PartSummary AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= '1997-01-01' AND l.l_shipdate < '1998-01-01'
+    GROUP BY p.p_partkey, p.p_name
+),
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+CustomerSales AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND cast('1998-10-01' as date)
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS number_of_customers,
+    SUM(COALESCE(cs.total_sales, 0)) AS total_sales,
+    AVG(ps.revenue) AS average_part_revenue,
+    SUM(si.total_cost) AS total_supplier_cost
+FROM NationRegion ns
+LEFT JOIN CustomerSales cs ON ns.n_nationkey = cs.c_custkey
+LEFT JOIN PartSummary ps ON ps.p_partkey IN (
+    SELECT DISTINCT ps_partkey 
+    FROM partsupp 
+    WHERE ps_availqty > 0
+)
+LEFT JOIN SupplierInfo si ON si.s_suppkey IN (
+    SELECT DISTINCT ps_suppkey
+    FROM partsupp
+    WHERE ps_availqty IS NOT NULL
+)
+GROUP BY ns.n_name
+ORDER BY number_of_customers DESC, total_sales DESC
+LIMIT 10;

@@ -1,0 +1,53 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey, 
+        rs.s_name, 
+        rs.total_avail_qty, 
+        rs.total_supply_cost
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rank <= 5
+),
+TotalOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    ts.s_name AS supplier_name,
+    COUNT(DISTINCT to.o_orderkey) AS order_count,
+    SUM(to.total_price) AS total_revenue,
+    AVG(to.total_price) AS avg_order_value,
+    ts.total_avail_qty,
+    ts.total_supply_cost
+FROM 
+    TopSuppliers ts
+LEFT JOIN 
+    TotalOrders to ON ts.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 15) LIMIT 1)
+GROUP BY 
+    ts.s_suppkey, ts.s_name, ts.total_avail_qty, ts.total_supply_cost
+ORDER BY 
+    total_revenue DESC;

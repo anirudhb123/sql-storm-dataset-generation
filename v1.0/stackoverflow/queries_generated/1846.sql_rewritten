@@ -1,0 +1,63 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN P.Score ELSE 0 END) AS QuestionScore,
+        COALESCE(SUM(CASE WHEN P.ParentId IS NOT NULL THEN 1 END), 0) AS ChildPosts,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+), ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS CloseCount,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10 
+    GROUP BY 
+        PH.PostId
+), PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = P.Tags
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 5
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.AnswerCount,
+    U.QuestionScore,
+    U.ChildPosts,
+    U.ReputationRank,
+    CP.CloseCount,
+    COALESCE(CP.LastClosedDate, 'Never Closed') AS LastClosedDate,
+    PT.TagName
+FROM 
+    UserStats U
+LEFT JOIN 
+    ClosedPosts CP ON U.PostCount > 0 AND U.PostCount = CP.PostId
+CROSS JOIN 
+    PopularTags PT
+WHERE 
+    U.Reputation > 1000
+ORDER BY 
+    U.Reputation DESC, PT.PostCount DESC;

@@ -1,0 +1,61 @@
+
+WITH RECURSIVE MonthlySales AS (
+    SELECT 
+        d_year,
+        d_month_seq,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        date_dim dd
+    JOIN 
+        web_sales ws ON dd.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d_year, d_month_seq
+    UNION ALL
+    SELECT 
+        d_year, 
+        d_month_seq,
+        total_sales + (SELECT SUM(ws_ext_sales_price) FROM web_sales WHERE ws_sold_date_sk = d_date_sk)
+    FROM 
+        MonthlySales
+    WHERE 
+        d_month_seq < (SELECT MAX(d_month_seq) FROM date_dim)
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    cs.c_customer_id,
+    cs.total_web_sales,
+    cs.order_count,
+    CASE
+        WHEN cs.order_count > 10 THEN 'High Value'
+        WHEN cs.order_count BETWEEN 5 AND 10 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value,
+    COALESCE(ms.total_sales, 0) AS sales_this_month
+FROM 
+    CustomerSales cs
+LEFT JOIN 
+    (SELECT 
+        d_year, 
+        SUM(total_sales) AS total_sales 
+     FROM 
+        MonthlySales 
+     WHERE 
+        d_year = (SELECT MAX(d_year) FROM date_dim)
+     GROUP BY 
+        d_year) ms ON 1=1
+WHERE 
+    cs.total_web_sales > 1000
+ORDER BY 
+    cs.total_web_sales DESC
+LIMIT 50;

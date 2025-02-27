@@ -1,0 +1,58 @@
+
+WITH RECURSIVE date_range AS (
+    SELECT MIN(d_date) AS start_date, MAX(d_date) AS end_date
+    FROM date_dim
+), customer_summary AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ws.ws_net_profit) DESC) AS gender_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+), sales_summary AS (
+    SELECT 
+        cb.c_customer_id,
+        SUM(ss.ws_net_profit) AS total_profit,
+        COUNT(ss.ws_order_number) AS total_orders,
+        (SELECT COUNT(*) 
+         FROM web_page 
+         WHERE wp_autogen_flag = 'Y' 
+         AND wp_creation_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = DATE '2002-10-01' - INTERVAL '30 days')) AS auto_generated_page_count
+    FROM web_sales ss
+    JOIN customer_summary cb ON ss.ws_bill_customer_sk = cb.c_customer_id
+    GROUP BY cb.c_customer_id
+)
+SELECT 
+    cs.c_customer_id,
+    cs.total_orders,
+    cs.total_profit,
+    ss.total_orders AS last_month_orders,
+    ss.total_profit AS last_month_profit,
+    CASE 
+        WHEN cs.gender_rank = 1 THEN 'Top Performer'
+        WHEN cs.gender_rank = 2 THEN 'Average Performer'
+        ELSE 'Under Performer'
+    END AS performance_category,
+    COALESCE((SELECT MAX(sm.sm_code) 
+              FROM ship_mode sm 
+              JOIN catalog_sales cs ON sm.sm_ship_mode_sk = cs.cs_ship_mode_sk 
+              WHERE cs.cs_item_sk IN (SELECT DISTINCT ws.ws_item_sk 
+                                      FROM web_sales ws 
+                                      WHERE ws.ws_bill_customer_sk = cs.c_customer_id)), 'N/A') AS top_ship_mode,
+    CASE 
+        WHEN cs.cd_marital_status = 'S' THEN 'Single'
+        WHEN cs.cd_marital_status = 'M' THEN 'Married'
+        ELSE 'Other'
+    END AS marital_category
+FROM customer_summary cs
+LEFT JOIN sales_summary ss ON cs.c_customer_id = ss.c_customer_id
+JOIN customer_demographics cd ON cd.cd_demo_sk = cs.cd_demo_sk
+WHERE cs.total_profit > (SELECT AVG(total_profit) FROM sales_summary) 
+  AND DATE '2002-10-01' BETWEEN (SELECT start_date FROM date_range) AND (SELECT end_date FROM date_range)
+ORDER BY cs.total_profit DESC, cs.total_orders ASC;

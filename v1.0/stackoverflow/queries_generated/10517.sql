@@ -1,0 +1,60 @@
+-- Performance Benchmarking Query
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+), PostTypeCounts AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        pt.Name
+), TagCounts AS (
+    SELECT 
+        t.TagName,
+        SUM(t.Count) AS TotalCount
+    FROM 
+        Tags t
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalComments,
+    u.TotalBadges,
+    u.TotalUpVotes,
+    u.TotalDownVotes,
+    pt.PostType,
+    pt.PostCount,
+    tg.TagName,
+    tg.TotalCount
+FROM 
+    UserPostStats u
+CROSS JOIN 
+    PostTypeCounts pt
+CROSS JOIN 
+    TagCounts tg
+ORDER BY 
+    u.TotalPosts DESC, u.DisplayName;

@@ -1,0 +1,50 @@
+
+WITH RECURSIVE part_hierarchy AS (
+    SELECT p_partkey, p_name, p_brand, p_retailprice,
+           CASE WHEN p_size IS NULL THEN 0 ELSE p_size END AS size_adjusted
+    FROM part
+    WHERE p_brand LIKE '%B%'
+    
+    UNION ALL
+    
+    SELECT ps.ps_partkey, p.p_name, p.p_brand, p.p_retailprice,
+           CASE WHEN p.p_size IS NULL THEN 0 ELSE p.p_size END
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN part_hierarchy ph ON ph.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > (
+        SELECT AVG(ps_availqty) FROM partsupp WHERE ps_partkey = ps.ps_partkey
+    )
+),
+aggregated_prices AS (
+    SELECT ph.p_brand, AVG(ph.p_retailprice) AS avg_price, 
+           COUNT(*) AS part_count
+    FROM part_hierarchy ph
+    GROUP BY ph.p_brand
+    HAVING AVG(ph.p_retailprice) > (SELECT AVG(p_retailprice) FROM part)
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY c.c_custkey, c.c_name
+),
+supplier_rankings AS (
+    SELECT s.s_suppkey, s.s_name, 
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+)
+SELECT c.c_name, COALESCE(ap.avg_price, 0) AS avg_part_price, 
+       SUM(co.order_total) AS total_order_value, 
+       sr.rank AS supplier_rank
+FROM customer_orders co
+JOIN aggregated_prices ap ON TRUE
+LEFT JOIN supplier_rankings sr ON sr.s_suppkey = co.o_orderkey % 1000
+JOIN nation n ON n.n_nationkey = c.c_nationkey
+WHERE n.n_regionkey IS NOT NULL
+GROUP BY c.c_name, ap.avg_price, sr.rank
+ORDER BY total_order_value DESC, supplier_rank ASC
+LIMIT 10;

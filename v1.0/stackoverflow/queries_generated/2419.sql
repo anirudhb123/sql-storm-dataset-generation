@@ -1,0 +1,72 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.UpVotes > p.DownVotes THEN 1 ELSE 0 END) AS PopularPosts,
+        MAX(p.CreationDate) AS LastActive
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        ua.Id,
+        ua.DisplayName,
+        ua.TotalPosts,
+        ua.Questions,
+        ua.Answers,
+        ua.PopularPosts,
+        ua.LastActive,
+        NTILE(10) OVER (ORDER BY ua.TotalPosts DESC) AS ActivityRank
+    FROM 
+        UserActivity ua
+),
+BadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+FinalMetrics AS (
+    SELECT 
+        tu.DisplayName,
+        tu.TotalPosts,
+        tu.Questions,
+        tu.Answers,
+        tu.PopularPosts,
+        tu.LastActive,
+        COALESCE(bc.BadgeCount, 0) AS BadgeCount,
+        tu.ActivityRank
+    FROM 
+        TopUsers tu
+    LEFT JOIN 
+        BadgeCounts bc ON tu.Id = bc.UserId
+)
+SELECT 
+    DisplayName,
+    TotalPosts,
+    Questions,
+    Answers,
+    PopularPosts,
+    LastActive,
+    BadgeCount,
+    ActivityRank,
+    CASE 
+        WHEN LastActive < CURRENT_TIMESTAMP - INTERVAL '1 year' THEN 'Inactive'
+        ELSE 'Active'
+    END AS UserStatus
+FROM 
+    FinalMetrics
+WHERE 
+    PopularPosts > 5 OR BadgeCount > 2
+ORDER BY 
+    ActivityRank, PopularPosts DESC;

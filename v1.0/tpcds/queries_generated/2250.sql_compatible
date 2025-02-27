@@ -1,0 +1,63 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        c.c_customer_id AS customer_id,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+),
+TopCustomers AS (
+    SELECT 
+        customer_id,
+        SUM(ws_sales_price * ws_quantity) AS total_spent,
+        AVG(ws_net_profit) AS avg_net_profit
+    FROM 
+        SalesData
+    GROUP BY 
+        customer_id
+    HAVING 
+        SUM(ws_sales_price * ws_quantity) > 1000
+),
+ReturnData AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS total_returned,
+        COUNT(DISTINCT wr_return_number) AS return_count
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+)
+SELECT 
+    tc.customer_id,
+    tc.total_spent,
+    tc.avg_net_profit,
+    COALESCE(rd.total_returned, 0) AS total_returned,
+    COALESCE(rd.return_count, 0) AS return_count,
+    CASE 
+        WHEN rd.total_returned IS NULL THEN 'No Returns'
+        WHEN rd.total_returned > 300 THEN 'High Returns'
+        ELSE 'Low Returns'
+    END AS return_category
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    ReturnData rd ON tc.customer_id = rd.wr_returning_customer_sk
+WHERE 
+    tc.avg_net_profit > 20
+ORDER BY 
+    tc.total_spent DESC
+LIMIT 100;

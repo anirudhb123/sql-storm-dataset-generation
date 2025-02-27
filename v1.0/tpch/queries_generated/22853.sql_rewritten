@@ -1,0 +1,52 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, 
+           SUM(ps.ps_availqty) AS total_avail_qty, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT lo.l_orderkey, SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_price,
+           COUNT(DISTINCT lo.l_linenumber) AS line_item_count,
+           STRING_AGG(DISTINCT lo.l_shipmode, ',') AS unique_ship_modes
+    FROM lineitem lo
+    GROUP BY lo.l_orderkey
+),
+NationCheapestSupplier AS (
+    SELECT n.n_name, MIN(s.s_acctbal) AS min_acct_balance
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY n.n_name
+)
+SELECT
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    COALESCE(ss.total_avail_qty, 0) AS total_supply_qty,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(ods.total_price) AS total_order_value,
+    CONCAT('Average Shipping’: ', AVG(CASE WHEN lo.l_shipdate IS NOT NULL THEN DATEDIFF(day, lo.l_commitdate, lo.l_shipdate) END), ' days') AS avg_shipping_days,
+    CASE 
+        WHEN COUNT(DISTINCT o.o_orderkey) > 10 THEN 'Large'
+        WHEN COUNT(DISTINCT o.o_orderkey) BETWEEN 5 AND 10 THEN 'Medium'
+        ELSE 'Small' 
+    END AS order_size_category
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierStats ss ON n.n_nationkey = ss.total_avail_qty
+LEFT JOIN RankedOrders o ON n.n_nationkey = o.o_orderkey
+LEFT JOIN OrderDetails ods ON o.o_orderkey = ods.l_orderkey
+LEFT JOIN lineitem lo ON ods.l_orderkey = lo.l_orderkey
+LEFT JOIN NationCheapestSupplier cheaps ON n.n_name = cheaps.n_name
+WHERE cheaps.min_acct_balance < (SELECT AVG(s_acctbal) FROM supplier s) 
+GROUP BY r.r_name, n.n_name
+HAVING COUNT(DISTINCT o.o_orderkey) > (SELECT COUNT() FROM orders WHERE o_orderstatus = 'F' AND o_orderdate < '1997-01-01') 
+ORDER BY total_order_value DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

@@ -1,0 +1,47 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    GROUP BY t.TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+)
+
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostCount,
+    ua.CommentCount,
+    ua.UpVotes,
+    ua.DownVotes,
+    tb.TagName,
+    ub.BadgeCount
+FROM UserActivity ua
+CROSS JOIN TopTags tb
+LEFT JOIN UserBadges ub ON ua.UserId = ub.UserId
+ORDER BY ua.PostCount DESC, ua.UpVotes DESC;

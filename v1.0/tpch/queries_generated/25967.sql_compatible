@@ -1,0 +1,31 @@
+
+SELECT
+    SUBSTRING(p.p_name, 1, 10) AS short_name,
+    REGEXP_REPLACE(CONCAT(s.s_name, ' ', s.s_address), '[^a-zA-Z0-9 ]', '') AS sanitized_supplier_info,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(l.l_extendedprice) AS avg_extended_price,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned_quantity,
+    STRING_AGG(DISTINCT n.n_name, ', ' ORDER BY n.n_name) AS nations_served
+FROM
+    part p
+JOIN
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN
+    customer c ON o.o_custkey = c.c_custkey
+JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE
+    p.p_size > 10 AND
+    o.o_orderdate BETWEEN '1996-01-01' AND '1997-12-31'
+GROUP BY
+    p.p_name, s.s_name, s.s_address
+HAVING
+    total_orders > 5
+ORDER BY
+    avg_extended_price DESC;

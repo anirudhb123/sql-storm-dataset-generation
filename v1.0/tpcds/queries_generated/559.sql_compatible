@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank_within_item
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.total_quantity,
+        rs.total_profit,
+        SUM(CASE WHEN item.i_brand LIKE '%Brand%' THEN 1 ELSE 0 END) AS brand_count
+    FROM 
+        RankedSales rs
+    JOIN 
+        item ON rs.ws_item_sk = item.i_item_sk
+    WHERE 
+        rs.rank_within_item <= 10
+    GROUP BY 
+        rs.ws_item_sk, rs.total_quantity, rs.total_profit
+)
+SELECT 
+    ca.city, 
+    ca.state,
+    COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+    COALESCE(SUM(t.total_profit), 0) AS total_profit,
+    CASE 
+        WHEN COUNT(DISTINCT c.c_customer_sk) = 0 THEN 'No Customers' 
+        ELSE 'Customers Present' 
+    END AS customer_status
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    TopItems t ON t.ws_item_sk IN (
+        SELECT 
+            ws_item_sk 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_ship_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') 
+            AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    )
+GROUP BY 
+    ca.city, ca.state
+HAVING 
+    COUNT(DISTINCT c.c_customer_sk) > 5 OR COALESCE(SUM(t.total_profit), 0) > 1000
+ORDER BY 
+    total_profit DESC;

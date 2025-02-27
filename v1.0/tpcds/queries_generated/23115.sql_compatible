@@ -1,0 +1,48 @@
+
+WITH RECURSIVE address_info AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_zip, ca_country, 
+           ROW_NUMBER() OVER (PARTITION BY ca_state ORDER BY ca_city) AS rn
+    FROM customer_address
+    WHERE ca_state IS NOT NULL
+),
+customer_info AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name,
+           cd.cd_gender, cd.cd_marital_status,
+           (SELECT COUNT(*) FROM customer_demographics WHERE cd_mkt_id = c.c_customer_sk AND cd_gender IS NOT NULL) AS demographic_count,
+           COALESCE((SELECT MAX(d.cd_purchase_estimate) 
+                     FROM customer_demographics d 
+                     WHERE d.cd_demo_sk = c.c_current_cdemo_sk AND d.cd_purchase_estimate IS NOT NULL), 0) AS max_purchase_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c.c_birth_year IS NOT NULL AND c.c_birth_month IS NOT NULL
+),
+sales_data AS (
+    SELECT ss.customer_sk, 
+           SUM(ss.net_paid) AS total_sales,
+           COUNT(DISTINCT ss.ticket_number) AS sales_count,
+           RANK() OVER (PARTITION BY ss.customer_sk ORDER BY SUM(ss.net_paid) DESC) AS sales_rank
+    FROM store_sales ss
+    WHERE ss.ss_sales_price > 0
+    GROUP BY ss.customer_sk
+),
+bizarre_logic AS (
+    SELECT ca.*
+    FROM address_info ca
+    LEFT JOIN customer_info c ON ca.ca_city LIKE '%' || c.c_first_name || '%'
+    WHERE ca.rn % 2 = 0 
+      AND (SELECT COUNT(*) FROM sales_data s WHERE s.customer_sk = c.c_customer_sk AND s.total_sales >= 1000) > 0
+)
+SELECT bi.ca_city, bi.ca_state, bi.ca_zip, bi.ca_country, 
+       ci.c_first_name, ci.c_last_name, ci.cd_gender, 
+       COALESCE(sd.total_sales, 0) AS total_sales,
+       CASE 
+           WHEN ci.max_purchase_estimate < 5000 THEN 'Low Spender'
+           WHEN ci.max_purchase_estimate >= 5000 AND ci.max_purchase_estimate <= 15000 THEN 'Medium Spender'
+           ELSE 'High Spender'
+       END AS spender_category
+FROM bizarre_logic bi
+LEFT JOIN customer_info ci ON ci.c_customer_sk IN (SELECT DISTINCT customer_sk FROM sales_data)
+LEFT JOIN sales_data sd ON sd.customer_sk = ci.c_customer_sk
+WHERE bi.ca_country IS NOT NULL 
+  AND LENGTH(bi.ca_zip) = 5
+ORDER BY bi.ca_city, bi.ca_state;

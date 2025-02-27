@@ -1,0 +1,54 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        NULL::integer AS parent_movie_id
+    FROM title m
+    WHERE m.season_nr IS NULL -- Starting point: top-level movies (not episodes)
+
+    UNION ALL
+
+    SELECT
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.movie_id
+    FROM title e
+    JOIN MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT
+        th.movie_id,
+        th.title,
+        th.production_year,
+        ROW_NUMBER() OVER (PARTITION BY th.production_year ORDER BY th.title) AS title_rank
+    FROM title th
+),
+CombinedInfo AS (
+    SELECT
+        ak.name AS actor_name,
+        mk.title AS movie_title,
+        mk.production_year,
+        COUNT(mk.movie_id) OVER (PARTITION BY ak.person_id, mk.production_year) AS actor_movie_count,
+        COALESCE(i.info, 'N/A') AS info_detail
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    JOIN title mk ON ci.movie_id = mk.id
+    LEFT JOIN movie_info i ON mk.id = i.movie_id AND i.info_type_id = (SELECT id FROM info_type WHERE info = 'Tagline')
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    ci.actor_name,
+    ci.actor_movie_count,
+    CASE 
+        WHEN ci.info_detail IS NULL THEN 'No information available'
+        ELSE ci.info_detail
+    END AS info_detail,
+    RANK() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS production_rank
+FROM MovieHierarchy mh
+LEFT JOIN CombinedInfo ci ON mh.movie_id = ci.movie_id
+WHERE mh.title IS NOT NULL
+ORDER BY mh.production_year DESC, mh.title ASC;

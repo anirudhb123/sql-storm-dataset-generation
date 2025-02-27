@@ -1,0 +1,54 @@
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.Score > 0 THEN 1 ELSE 0 END) AS PositivePostCount,
+        AVG(COALESCE(Posts.ViewCount, 0)) AS AvgViewCount
+    FROM Tags
+    LEFT JOIN Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '><')::int[])
+    GROUP BY Tags.TagName
+),
+UserBadges AS (
+    SELECT
+        Users.Id AS UserId,
+        COUNT(CASE WHEN Badges.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN Badges.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN Badges.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Users
+    LEFT JOIN Badges ON Users.Id = Badges.UserId
+    GROUP BY Users.Id
+),
+PostHistorySummary AS (
+    SELECT
+        PostHistory.PostId,
+        COUNT(CASE WHEN PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        MAX(CASE WHEN PostHistoryTypeId = 10 THEN PostHistory.CreationDate END) AS LastCloseDate,
+        COUNT(CASE WHEN PostHistoryTypeId = 12 THEN 1 END) AS DeleteCount
+    FROM PostHistory
+    GROUP BY PostHistory.PostId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+    COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+    COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+    T.TagName,
+    TS.PostCount,
+    TS.PositivePostCount,
+    TS.AvgViewCount,
+    COALESCE(PHS.CloseReopenCount, 0) AS CloseReopenCount,
+    PHS.LastCloseDate,
+    PHS.DeleteCount
+FROM Users U
+LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+JOIN Tags T ON T.IsRequired = 1
+LEFT JOIN TagStats TS ON T.TagName = TS.TagName
+LEFT JOIN PostHistorySummary PHS ON U.Id = PHS.PostId
+WHERE 
+    U.Reputation > (SELECT AVG(Reputation) FROM Users) AND 
+    (SELECT COUNT(*) FROM Votes WHERE UserId = U.Id) > 5
+ORDER BY 
+    U.Reputation DESC,
+    TS.PostCount DESC
+LIMIT 50;

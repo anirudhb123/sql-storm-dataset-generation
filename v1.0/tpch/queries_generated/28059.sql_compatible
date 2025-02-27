@@ -1,0 +1,61 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_size,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rnk
+    FROM part p
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        s.s_comment
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_name,
+        c.c_mktsegment
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+)
+SELECT 
+    rp.p_name,
+    rp.p_size,
+    fs.s_name,
+    co.o_orderkey,
+    co.o_totalprice,
+    co.o_orderdate,
+    co.c_name,
+    co.c_mktsegment
+FROM RankedParts rp
+JOIN partsupp ps ON rp.p_partkey = ps.ps_partkey
+JOIN FilteredSuppliers fs ON ps.ps_suppkey = fs.s_suppkey
+JOIN CustomerOrders co ON co.o_orderkey IN (
+    SELECT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_partkey = rp.p_partkey
+)
+WHERE rp.rnk <= 5
+GROUP BY 
+    rp.p_name,
+    rp.p_size,
+    fs.s_name,
+    co.o_orderkey,
+    co.o_totalprice,
+    co.o_orderdate,
+    co.c_name,
+    co.c_mktsegment
+ORDER BY rp.p_type, rp.p_retailprice DESC, co.o_orderdate;

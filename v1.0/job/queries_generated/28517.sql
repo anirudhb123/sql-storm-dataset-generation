@@ -1,0 +1,44 @@
+WITH RecursiveMovieTitles AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        a.id AS actor_id,
+        rn.rank AS cast_rank,
+        COUNT(cc.id) OVER (PARTITION BY t.id) AS total_cast
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON ci.movie_id = cc.movie_id AND ci.person_id = cc.subject_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        r.role = 'Actor'
+),
+RankedMovies AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY total_cast DESC) AS rank_per_year
+    FROM 
+        RecursiveMovieTitles
+)
+
+SELECT 
+    production_year,
+    movie_title, 
+    actor_name,
+    cast_rank,
+    total_cast,
+    rank_per_year
+FROM 
+    RankedMovies
+WHERE 
+    production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    production_year ASC, rank_per_year ASC;
+
+This SQL query benchmarks string processing by retrieving movie titles, production years, actor names, and casting ranks while using multiple joins and window functions to provide detailed output and ranking within specified production years.

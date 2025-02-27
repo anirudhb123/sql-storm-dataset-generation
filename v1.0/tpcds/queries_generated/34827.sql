@@ -1,0 +1,69 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ext_sales_price) AS total_web_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        MAX(d.d_date) AS last_purchase_date
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        c.c_customer_id
+),
+ReturnData AS (
+    SELECT 
+        wr_returned_date_sk,
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returned,
+        SUM(wr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returned_date_sk, wr_item_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_web_sales,
+        COALESCE(rr.total_returned, 0) AS total_returned,
+        COALESCE(rr.total_return_amount, 0) AS total_return_amount
+    FROM 
+        CustomerSales cs
+    LEFT JOIN 
+        ReturnData rr ON cs.total_orders = rr.total_returned
+)
+SELECT 
+    ss.s_store_sk,
+    SUM(ss.ss_quantity) AS total_store_sales,
+    (SELECT COUNT(DISTINCT ws.web_site_id) FROM web_site ws) AS total_websites,
+    (SELECT COUNT(DISTINCT c.c_customer_id) FROM customer c WHERE c.c_current_addr_sk IS NOT NULL) AS total_customers,
+    AVG(total_web_sales) AS avg_web_sales,
+    MAX(last_purchase_date) AS last_purchase
+FROM 
+    store_sales ss
+JOIN 
+    SalesAndReturns sale_ret ON sale_ret.total_web_sales > 0
+GROUP BY 
+    ss.s_store_sk
+HAVING 
+    SUM(ss.ss_net_profit) > (SELECT AVG(ss_net_profit) FROM store_sales)
+ORDER BY 
+    total_store_sales DESC
+LIMIT 10;

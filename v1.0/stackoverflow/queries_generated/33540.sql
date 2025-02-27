@@ -1,0 +1,78 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        Id,
+        Reputation,
+        CreationDate,
+        DisplayName,
+        LastAccessDate,
+        1 AS Level
+    FROM 
+        Users 
+    WHERE 
+        Reputation IS NOT NULL
+
+    UNION ALL 
+
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.CreationDate,
+        u.DisplayName,
+        u.LastAccessDate,
+        ur.Level + 1
+    FROM 
+        Users u
+    INNER JOIN 
+        UserReputationCTE ur ON u.Reputation > ur.Reputation
+    WHERE 
+        ur.Level < 5
+), 
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        AVG(p.Score) AS AverageScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.OwnerUserId
+),
+CommentDetails AS (
+    SELECT 
+        c.UserId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    ur.Level AS ReputationLevel,
+    COALESCE(ps.QuestionCount, 0) AS TotalQuestions,
+    COALESCE(ps.AnswerCount, 0) AS TotalAnswers,
+    COALESCE(cd.CommentCount, 0) AS TotalComments,
+    COALESCE(cd.LastCommentDate, 'No Comments') AS LastComment,
+    ps.AverageScore,
+    ps.TotalViews
+FROM 
+    Users u
+LEFT JOIN 
+    PostStatistics ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    CommentDetails cd ON u.Id = cd.UserId
+JOIN 
+    UserReputationCTE ur ON u.Id = ur.Id
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    u.Reputation DESC,
+    TotalViews DESC
+LIMIT 100;

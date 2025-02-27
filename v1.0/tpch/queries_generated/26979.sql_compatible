@@ -1,0 +1,23 @@
+
+SELECT 
+    CONCAT('Supplier: ', s_name, ' (', s_nationkey, ')', ' | ', 
+           'Part: ', p_name, ' | ', 
+           'Type: ', p_type, ' | ', 
+           'Retail Price: $', TO_CHAR(p_retailprice, 'FM999999999.00'), ' | ', 
+           'Total Order Qty: ', SUM(l_quantity), ' | ', 
+           'Total Sales: $', TO_CHAR(SUM(l_extendedprice * (1 - l_discount)), 'FM999999999.00')) AS Benchmark_String_Processing
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey AND s.s_suppkey = l.l_suppkey
+GROUP BY 
+    s.s_suppkey, s_name, s_nationkey, p.p_partkey, p_name, p_type, p_retailprice
+HAVING 
+    SUM(l_quantity) > 100
+ORDER BY 
+    SUM(l_extendedprice * (1 - l_discount)) DESC
+LIMIT 10;

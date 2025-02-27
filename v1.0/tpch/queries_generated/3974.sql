@@ -1,0 +1,62 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+), CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+), SupplyDetail AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available, 
+        SUM(ps.ps_supplycost) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(rd.total_available, 0) AS available_qty,
+    COALESCE(rd.total_cost, 0.00) AS supply_cost,
+    cs.total_orders,
+    cs.total_spent,
+    ns.n_name AS supplier_nation,
+    CASE 
+        WHEN cs.total_spent > 1000 THEN 'High Value' 
+        WHEN cs.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value' 
+        ELSE 'Low Value' 
+    END AS customer_value,
+    s.s_name AS supplier_name
+FROM 
+    part p
+LEFT JOIN 
+    SupplyDetail rd ON p.p_partkey = rd.ps_partkey
+LEFT JOIN 
+    RankedSuppliers s ON rd.ps_suppkey = s.s_suppkey AND s.rank = 1
+LEFT JOIN 
+    CustomerOrderSummary cs ON cs.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = rd.ps_suppkey ORDER BY o.o_orderdate DESC LIMIT 1)
+JOIN 
+    nation ns ON s.n_nationkey = ns.n_nationkey 
+WHERE 
+    p.p_retailprice > 50.00 
+    AND (cs.total_orders IS NULL OR cs.total_orders > 5)
+ORDER BY 
+    p.p_retailprice DESC, customer_value;

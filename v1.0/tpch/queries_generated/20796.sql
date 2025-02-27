@@ -1,0 +1,67 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('F', 'O') 
+        AND EXISTS (
+            SELECT 1 
+            FROM customer c 
+            WHERE c.c_custkey = o.o_custkey 
+              AND c.c_acctbal > 0 
+              AND c.c_nationkey IS NOT NULL
+        )
+),
+SupplierPart AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        partsupp ps 
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        COUNT(DISTINCT s.s_nationkey) > 2
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(sp.total_supply_value, 0) AS supply_value
+    FROM 
+        part p 
+    LEFT JOIN 
+        SupplierPart sp ON p.p_partkey = sp.ps_partkey
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+)
+SELECT 
+    r.r_name AS region_name,
+    nv.n_name AS nation_name,
+    COUNT(DISTINCT hp.p_partkey) AS high_value_parts_count,
+    CONCAT(nv.n_comment, ' ', hp.p_name) AS detailed_info 
+FROM 
+    nation nv 
+JOIN 
+    region r ON nv.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    HighValueParts hp ON hp.supply_value BETWEEN 10000 AND 100000
+GROUP BY 
+    r.r_name, nv.n_name
+HAVING 
+    COUNT(DISTINCT hp.p_partkey) > 5 
+    AND EXISTS (
+        SELECT 1 
+        FROM customer c 
+        WHERE c.c_nationkey = nv.n_nationkey 
+        AND c.c_acctbal IS NOT NULL
+        HAVING SUM(c.c_acctbal) > 50000
+    )
+ORDER BY 
+    region_name ASC, nation_name ASC;

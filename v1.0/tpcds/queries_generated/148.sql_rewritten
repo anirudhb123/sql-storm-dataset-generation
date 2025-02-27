@@ -1,0 +1,44 @@
+WITH SalesCTE AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) as profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price > 50 
+)
+SELECT
+    ca.ca_city,
+    SUM(s.ws_quantity) AS total_sales_quantity,
+    AVG(s.ws_sales_price) AS avg_sales_price,
+    COUNT(DISTINCT s.ws_order_number) AS unique_orders,
+    (SELECT COUNT(*) FROM customer c WHERE c.c_current_addr_sk = ca.ca_address_sk) AS num_customers,
+    CASE 
+        WHEN SUM(s.ws_net_profit) IS NULL THEN 'No Profit'
+        ELSE 'Profit Exists'
+    END AS profit_status
+FROM 
+    customer_address ca
+LEFT JOIN 
+    SalesCTE s ON ca.ca_address_sk = s.ws_item_sk
+WHERE 
+    ca.ca_state = 'CA'
+    AND EXISTS (
+        SELECT 1
+        FROM store st
+        WHERE st.s_store_sk = s.ws_item_sk
+        AND st.s_number_employees > 20 
+    )
+GROUP BY 
+    ca.ca_city
+HAVING 
+    SUM(s.ws_quantity) > 100
+ORDER BY 
+    avg_sales_price DESC
+LIMIT 10;

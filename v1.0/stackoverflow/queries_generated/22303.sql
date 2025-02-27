@@ -1,0 +1,94 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        CommentCount,
+        Upvotes,
+        Downvotes,
+        (Upvotes - Downvotes) AS VoteScore
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank <= 5
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        b.Name AS BadgeName,
+        b.Class,
+        b.Date,
+        COUNT(b.Id) OVER (PARTITION BY u.Id) AS BadgeCount
+    FROM 
+        Users u
+    JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        b.Date > '2020-01-01'
+),
+PostBadgeSummary AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.OwnerDisplayName,
+        p.CommentCount,
+        p.Upvotes,
+        p.Downvotes,
+        p.VoteScore,
+        COALESCE(b.BadgeCount, 0) AS UserBadgeCount
+    FROM 
+        PostVoteSummary p
+    LEFT JOIN 
+        UserBadges b ON p.OwnerDisplayName = b.UserId
+)
+SELECT 
+    PostId,
+    Title,
+    OwnerDisplayName,
+    CommentCount,
+    Upvotes,
+    Downvotes,
+    VoteScore,
+    UserBadgeCount,
+    CASE 
+        WHEN UserBadgeCount > 5 THEN 'Experienced User'
+        WHEN UserBadgeCount BETWEEN 1 AND 5 THEN 'New Contributor'
+        ELSE 'No Badges'
+    END AS UserStatus,
+    CASE 
+        WHEN VoteScore > 10 THEN 'Trending' 
+        WHEN VoteScore BETWEEN 1 AND 10 THEN 'Moderate Activity' 
+        ELSE 'Low Activity' 
+    END AS ActivityStatus
+FROM 
+    PostBadgeSummary
+WHERE 
+    VoteScore IS NOT NULL 
+    AND Title IS NOT NULL
+ORDER BY 
+    VoteScore DESC NULLS LAST
+LIMIT 100;

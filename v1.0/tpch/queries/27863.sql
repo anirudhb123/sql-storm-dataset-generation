@@ -1,0 +1,33 @@
+SELECT 
+    p.p_name AS Product_Name,
+    COUNT(DISTINCT s.s_suppkey) AS Supplier_Count,
+    SUM(ps.ps_availqty) AS Total_Available_Qty,
+    AVG(s.s_acctbal) AS Average_Account_Balance,
+    r.r_name AS Region_Name,
+    n.n_name AS Nation_Name,
+    MAX(o.o_totalprice) AS Max_Order_Total,
+    STRING_AGG(DISTINCT c.c_name, ', ') AS Customer_Names,
+    STRING_AGG(DISTINCT o.o_orderstatus, ', ') AS Order_Statuses
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_comment LIKE '%fragile%' 
+    AND c.c_mktsegment = 'BUILDING'
+GROUP BY 
+    p.p_name, r.r_name, n.n_name
+ORDER BY 
+    Total_Available_Qty DESC, Average_Account_Balance DESC;

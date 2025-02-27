@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        pt.Name AS PostType,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC, p.ViewCount DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' 
+        AND p.ViewCount > 100
+),
+TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp 
+    WHERE 
+        rp.PostRank <= 5
+),
+PostTags AS (
+    SELECT 
+        tp.PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts tp
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(tp.Tags, 2, length(tp.Tags)-2), '><')::int[])
+    GROUP BY 
+        tp.PostId
+),
+PostComments AS (
+    SELECT 
+        pc.PostId,
+        COUNT(pc.Id) AS CommentCount,
+        STRING_AGG(pc.Text, ' | ') AS Comments
+    FROM 
+        Comments pc
+    GROUP BY 
+        pc.PostId
+)
+SELECT 
+    t.Title,
+    t.PostType,
+    t.ViewCount,
+    t.Score,
+    t.CreationDate,
+    t.OwnerDisplayName,
+    pt.Tags,
+    pc.CommentCount,
+    pc.Comments
+FROM 
+    TopPosts t
+LEFT JOIN 
+    PostTags pt ON t.PostId = pt.PostId
+LEFT JOIN 
+    PostComments pc ON t.PostId = pc.PostId
+ORDER BY 
+    t.Score DESC;

@@ -1,0 +1,76 @@
+WITH PostVoteCount AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId IN (6, 10, 12)) AS CloseVotes,
+        COALESCE(COUNT(ev.Id), 0) AS EditVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Votes ev ON p.Id = ev.PostId AND ev.VoteTypeId = 1 -- AcceptedByOriginator votes
+    GROUP BY 
+        p.Id
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastHistoryDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) -- Close, Reopen, Delete, Undelete
+    GROUP BY 
+        ph.PostId
+),
+TagCounts AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(pt.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts pt ON pt.Tags ILIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    pv.UpVotes,
+    pv.DownVotes,
+    pv.CloseVotes,
+    ph.HistoryCount,
+    ph.LastHistoryDate,
+    COALESCE(tc.PostCount, 0) AS TagCount,
+    (SELECT STRING_AGG(DISTINCT comm.UserDisplayName, ', ') 
+     FROM Comments comm 
+     WHERE comm.PostId = p.Id) AS CommentAuthors,
+    CASE 
+        WHEN pv.CloseVotes > 0 THEN 'Closed'
+        WHEN ph.HistoryCount > 0 THEN 'Has History'
+        ELSE 'Active'
+    END AS PostStatus
+FROM 
+    Posts p
+LEFT JOIN 
+    PostVoteCount pv ON p.Id = pv.PostId
+LEFT JOIN 
+    PostHistoryAggregates ph ON p.Id = ph.PostId
+LEFT JOIN 
+    TagCounts tc ON tc.TagId IN (SELECT UNNEST(STRING_TO_ARRAY(p.Tags, ','))::int)
+WHERE 
+    p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+    AND COALESCE(pv.UpVotes, 0) - COALESCE(pv.DownVotes, 0) >= 10
+ORDER BY 
+    p.CreationDate DESC,
+    pv.UpVotes - pv.DownVotes DESC
+LIMIT 100;
+
+

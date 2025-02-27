@@ -1,0 +1,100 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+HighProfitItems AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        COALESCE(rs.total_profit, 0) AS total_profit,
+        COALESCE(rs.total_quantity, 0) AS total_quantity,
+        CASE 
+            WHEN COALESCE(rs.total_profit, 0) > 1000 THEN 'High'
+            WHEN COALESCE(rs.total_profit, 0) BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS profit_category
+    FROM 
+        item i
+    LEFT JOIN 
+        RecursiveSales rs ON i.i_item_sk = rs.ws_item_sk
+    WHERE 
+        rs.rn = 1 OR rs.rn IS NULL
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_buy_potential,
+        COALESCE(sd.total_spent, 0) AS total_spent
+    FROM 
+        customer c
+    INNER JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN (
+        SELECT 
+            ss_customer_sk,
+            SUM(ss_net_paid_inc_tax) AS total_spent
+        FROM 
+            store_sales
+        GROUP BY 
+            ss_customer_sk
+    ) sd ON c.c_customer_sk = sd.ss_customer_sk
+),
+FilteredCustomers AS (
+    SELECT 
+        cinfo.c_customer_id,
+        cinfo.cd_gender,
+        cinfo.cd_marital_status,
+        cinfo.hd_buy_potential,
+        cinfo.total_spent,
+        ROW_NUMBER() OVER (PARTITION BY cinfo.cd_marital_status ORDER BY cinfo.total_spent DESC) AS rn
+    FROM 
+        CustomerInfo cinfo
+    WHERE
+        cinfo.total_spent > 500
+)
+
+SELECT 
+    fi.c_customer_id,
+    fi.cd_gender,
+    fi.cd_marital_status,
+    fi.total_spent,
+    hi.i_item_id,
+    hi.total_profit,
+    hi.profit_category
+FROM 
+    FilteredCustomers fi
+JOIN 
+    HighProfitItems hi ON fi.total_spent > (SELECT AVG(total_profit) FROM HighProfitItems WHERE total_profit IS NOT NULL)
+WHERE 
+    fi.rn <= 10
+ORDER BY 
+    fi.total_spent DESC, hi.total_profit DESC;
+
+-- Including some complex predicates and expressions for performance benchmarking
+SELECT 
+    SUBSTRING(CAST(SUM(ws_net_profit) AS VARCHAR), 1, 10) AS truncated_profit,
+    COUNT(DISTINCT CASE WHEN c.c_birth_year IS NULL THEN 1 END) AS null_birth_years,
+    SUM(CASE WHEN (hd.hd_vehicle_count IS NOT NULL AND hd.hd_vehicle_count > 0) THEN hd.hd_vehicle_count ELSE 0 END) AS total_vehicles
+FROM 
+    web_sales ws
+LEFT JOIN 
+    customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+WHERE 
+    ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2020) 
+    AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2020)
+GROUP BY 
+    ws.ws_sold_date_sk
+HAVING 
+    COUNT(ws.ws_order_number) > (SELECT COUNT(*) FROM web_sales) * 0.05;

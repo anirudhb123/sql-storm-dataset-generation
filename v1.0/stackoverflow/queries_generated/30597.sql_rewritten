@@ -1,0 +1,79 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.Reputation, 
+        1 AS Depth,
+        U.DisplayName
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        U.Id, 
+        U.Reputation,
+        UR.Depth + 1,
+        U.DisplayName
+    FROM 
+        Users U
+    JOIN 
+        UserReputationCTE UR ON U.Id = (SELECT UserId FROM Votes V WHERE V.UserId <> U.Id LIMIT 1)  
+    WHERE 
+        UR.Depth < 5  
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        SUM(Reputation) AS TotalReputation
+    FROM 
+        UserReputationCTE
+    GROUP BY 
+        UserId
+    ORDER BY 
+        TotalReputation DESC
+    LIMIT 10
+),
+UserBadges AS (
+    SELECT 
+        B.UserId, 
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+PostInfo AS (
+    SELECT 
+        P.Title, 
+        P.ViewCount, 
+        P.CreationDate, 
+        P.OwnerUserId,
+        COALESCE(UB.BadgeCount, 0) AS BadgeCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        UserBadges UB ON P.OwnerUserId = UB.UserId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 MONTH'
+)
+SELECT 
+    U.DisplayName, 
+    T.TotalReputation, 
+    PI.Title, 
+    PI.ViewCount, 
+    PI.BadgeCount,
+    COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount
+FROM 
+    TopUsers T
+JOIN 
+    Users U ON T.UserId = U.Id
+LEFT JOIN 
+    PostInfo PI ON PI.OwnerUserId = U.Id
+LEFT JOIN 
+    Comments C ON C.PostId = PI.Id
+GROUP BY 
+    U.DisplayName, T.TotalReputation, PI.Title, PI.ViewCount, PI.BadgeCount
+ORDER BY 
+    T.TotalReputation DESC, U.DisplayName;

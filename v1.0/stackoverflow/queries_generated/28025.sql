@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.ViewCount, p.Score, u.DisplayName
+),
+TagStats AS (
+    SELECT 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '> <'))::varchar[]) AS TagName, 
+        COUNT(*) AS PostsCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        TagName
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.Tags,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    ts.PostsCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagStats ts ON ts.TagName = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '> <'))
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE 
+    rp.UserPostRank <= 5 -- Top 5 posts per user
+ORDER BY 
+    rp.ViewCount DESC, rp.Score DESC;
+
+This query benchmarks string processing by creating common table expressions (CTEs) that calculate user post ranking, stats for tags, and user badge counts before producing a final comprehensive output that combines these insights with the necessary details from the `Posts` table. The output focuses on the top 5 questions per user, ordered by view and score.

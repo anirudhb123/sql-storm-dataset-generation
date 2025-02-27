@@ -1,0 +1,89 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+PartSupplierJoin AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerSegment AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_mktsegment,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_mktsegment
+),
+CustTotalPrice AS (
+    SELECT 
+        o.o_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_custkey
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND 
+        (s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2) OR 
+         s.s_comment LIKE '%excellent%')
+),
+PartWithMaxSupp AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        MAX(ps.avg_supplycost) AS max_supply_cost
+    FROM 
+        part p
+    JOIN 
+        PartSupplierJoin ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    c.c_name,
+    cs.c_mktsegment,
+    p.p_name,
+    p.max_supply_cost,
+    COALESCE(ct.total_spent, 0) AS total_spent,
+    COALESCE(o.order_count, 0) AS order_count
+FROM 
+    CustomerSegment cs
+JOIN 
+    CustTotalPrice ct ON cs.c_custkey = ct.o_custkey
+JOIN 
+    FilteredSuppliers fs ON cs.c_custkey = fs.s_suppkey
+JOIN 
+    PartWithMaxSupp p ON fs.s_suppkey = p.p_partkey
+LEFT JOIN 
+    RankedOrders o ON cs.c_custkey = o.o_custkey AND o.rn = 1
+WHERE 
+    p.max_supply_cost > (SELECT AVG(max_supply_cost) FROM PartWithMaxSupp) 
+ORDER BY 
+    total_spent DESC, order_count ASC, p_name;

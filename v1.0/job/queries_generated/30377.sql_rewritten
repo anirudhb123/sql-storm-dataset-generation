@@ -1,0 +1,72 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        id AS movie_id,
+        title,
+        production_year,
+        episode_of_id,
+        season_nr,
+        episode_nr,
+        1 AS level
+    FROM 
+        aka_title
+    WHERE 
+        production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        m.episode_of_id,
+        m.season_nr,
+        m.episode_nr,
+        mh.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    mk.movie_id,
+    at.title,
+    at.production_year,
+    (SELECT COUNT(*) 
+     FROM cast_info ci 
+     WHERE ci.movie_id = mk.movie_id 
+       AND ci.role_id = (SELECT id FROM role_type WHERE role = 'Director')) AS director_count,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+    AVG(CASE 
+            WHEN mi.info IS NOT NULL THEN LENGTH(mi.info) 
+            ELSE 0 
+       END) AS avg_info_length,
+    COUNT(DISTINCT CASE 
+                      WHEN cct.kind IS NOT NULL THEN mc.company_id 
+                   END) AS production_companies_count
+FROM 
+    movie_keyword mk
+JOIN 
+    aka_title at ON mk.movie_id = at.id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mk.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mk.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    company_type cct ON mc.company_type_id = cct.id
+LEFT JOIN 
+    movie_info mi ON mk.movie_id = mi.movie_id
+WHERE 
+    (at.production_year IS NOT NULL OR at.episode_of_id IS NOT NULL)
+    AND (cct.kind IS NOT NULL OR cn.name IS NULL)
+GROUP BY 
+    mk.movie_id, at.title, at.production_year
+HAVING 
+    COUNT(ci.person_id) > 5
+ORDER BY 
+    total_cast DESC, at.production_year DESC;

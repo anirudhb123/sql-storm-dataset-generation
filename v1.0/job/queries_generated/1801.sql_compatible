@@ -1,0 +1,46 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS actor_count,
+        AVG(p.info) OVER (PARTITION BY t.id) AS avg_rating,
+        ROW_NUMBER() OVER (ORDER BY t.production_year DESC, t.title) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        person_info p ON c.person_id = p.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        title,
+        production_year,
+        actor_count,
+        avg_rating,
+        rank,
+        CASE 
+            WHEN actor_count > 5 THEN 'Major Cast'
+            ELSE 'Minor Cast'
+        END AS cast_size
+    FROM 
+        RankedMovies
+    WHERE 
+        avg_rating IS NOT NULL
+)
+SELECT 
+    ff.title,
+    ff.production_year,
+    ff.cast_size,
+    COALESCE(ff.avg_rating, 'No Rating') AS avg_rating
+FROM 
+    FilteredMovies ff
+WHERE 
+    ff.rank <= 10
+ORDER BY 
+    ff.avg_rating DESC NULLS LAST;

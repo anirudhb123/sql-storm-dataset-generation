@@ -1,0 +1,75 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        mt.episode_of_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1,
+        mt.episode_of_id
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+cast_stats AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(ak.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+company_stats AS (
+    SELECT 
+        mc.movie_id, 
+        COUNT(DISTINCT c.id) AS total_companies,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        MAX(CASE WHEN ct.kind = 'Distributor' THEN 1 ELSE 0 END) AS has_distributor
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(cs.total_cast, 0) AS total_cast,
+    COALESCE(cs.cast_names, 'No Cast') AS cast_names,
+    COALESCE(cps.total_companies, 0) AS total_companies,
+    COALESCE(cps.company_names, 'No Companies') AS company_names,
+    mh.level,
+    CASE 
+        WHEN mh.level > 1 THEN 'Episode'
+        ELSE 'Movie'
+    END AS movie_type,
+    mh.episode_of_id IS NULL AS is_root_movie
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_stats cs ON mh.movie_id = cs.movie_id
+LEFT JOIN 
+    company_stats cps ON mh.movie_id = cps.movie_id
+ORDER BY 
+    mh.production_year DESC, mh.title;

@@ -1,0 +1,64 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '1998-10-01' - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierDetails AS (
+    SELECT 
+        ns.n_name AS nation, 
+        COUNT(DISTINCT rs.s_suppkey) AS total_suppliers,
+        AVG(rs.total_supplycost) AS avg_supplycost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation ns ON rs.s_nationkey = ns.n_nationkey
+    GROUP BY 
+        ns.n_name
+)
+SELECT 
+    r.nation,
+    r.total_suppliers,
+    CASE 
+        WHEN r.avg_supplycost IS NULL THEN 'INFO: No suppliers found.'
+        ELSE CONCAT('Average Supply Cost: ', CAST(r.avg_supplycost AS VARCHAR))
+    END AS avg_supplycost_description,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        HighValueOrders hvo 
+     WHERE 
+        hvo.net_value > (SELECT AVG(net_value) FROM HighValueOrders)
+    ) AS high_value_order_count,
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity_sold 
+FROM 
+    SupplierDetails r
+LEFT JOIN 
+    lineitem l ON l.l_orderkey IN (SELECT l_orderkey FROM HighValueOrders) 
+GROUP BY 
+    r.nation, r.total_suppliers, r.avg_supplycost
+ORDER BY 
+    r.total_suppliers DESC, 
+    r.nation ASC;

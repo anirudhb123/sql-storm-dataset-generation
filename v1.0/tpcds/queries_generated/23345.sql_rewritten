@@ -1,0 +1,60 @@
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_sales_price DESC) AS SalesRank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL 
+        AND ws_quantity > 0
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        cd_demo_sk,
+        SUM(ws_sales_price * ranked.ws_quantity) AS TotalSales,
+        COUNT(DISTINCT ws_order_number) AS OrderCount,
+        MAX(ws_sales_price) AS MaxSale
+    FROM 
+        customer c
+    JOIN 
+        RankedSales ranked ON c.c_customer_sk = ranked.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_id, cd_demo_sk
+),
+FilteredCustomerStats AS (
+    SELECT 
+        c.*,
+        ROW_NUMBER() OVER (ORDER BY TotalSales DESC) AS CustomerRank
+    FROM 
+        CustomerStats c
+    WHERE 
+        MaxSale > 100 
+)
+SELECT 
+    fcs.c_customer_id, 
+    fcs.TotalSales, 
+    fcs.OrderCount, 
+    COALESCE((SELECT SUM(cr_return_amt) FROM catalog_returns cr WHERE cr_returning_customer_sk = fcs.c_customer_id), 0) AS TotalReturns,
+    CASE 
+        WHEN TotalSales > 1000 THEN 'High Value'
+        WHEN TotalSales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS CustomerValueCategory
+FROM 
+    FilteredCustomerStats fcs
+LEFT JOIN 
+    customer_address ca ON fcs.c_customer_sk = ca.ca_address_sk
+WHERE 
+    fcs.CustomerRank <= 50 
+    AND (ca.ca_city IS NOT NULL OR ca.ca_state IS NOT NULL) 
+ORDER BY 
+    TotalSales DESC, 
+    fcs.c_customer_id
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,47 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(CAST(p.CreationDate AS TIMESTAMP)) AS AvgCreationDate
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY 
+        p.OwnerUserId
+), 
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.UpVotes,
+        u.DownVotes,
+        b.Class AS BadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+)
+
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.UpVotes,
+    us.DownVotes,
+    COALESCE(ps.PostCount, 0) AS PostCount,
+    COALESCE(ps.TotalScore, 0) AS TotalScore,
+    COALESCE(ps.TotalViews, 0) AS TotalViews,
+    COALESCE(ps.AvgCreationDate, TIMESTAMP '1970-01-01 00:00:00') AS AvgCreationDate,
+    MAX(us.BadgeClass) AS HighestBadgeClass
+FROM 
+    UserStats us
+LEFT JOIN 
+    PostStats ps ON us.UserId = ps.OwnerUserId
+GROUP BY 
+    us.UserId, us.Reputation, us.UpVotes, us.DownVotes
+ORDER BY 
+    TotalViews DESC
+LIMIT 10;

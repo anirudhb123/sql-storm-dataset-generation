@@ -1,0 +1,62 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title, 
+        mt.production_year,
+        1 AS level,
+        mt.imdb_index,
+        NULL AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        at.imdb_index,
+        mh.movie_id
+    FROM 
+        movie_link ml 
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5  
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    SUM(CASE WHEN mc.note IS NULL THEN 1 ELSE 0 END) AS null_company_notes,
+    STRING_AGG(DISTINCT kw.keyword, ', ') FILTER (WHERE kw.keyword IS NOT NULL) AS keywords,
+    RANK() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank_by_company_count
+FROM 
+    movie_hierarchy mh
+JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+WHERE 
+    mh.production_year BETWEEN 1980 AND 2020
+    AND ak.name IS NOT NULL
+GROUP BY 
+    ak.name, mh.movie_id, mh.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 2 
+ORDER BY 
+    mh.production_year DESC, rank_by_company_count
+LIMIT 10;

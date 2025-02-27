@@ -1,0 +1,45 @@
+WITH RECURSIVE RecursiveActors AS (
+    SELECT c.person_id, COUNT(DISTINCT m.id) AS movie_count
+    FROM cast_info c
+    JOIN aka_title a ON c.movie_id = a.movie_id
+    JOIN title t ON a.title = t.title
+    WHERE t.production_year >= 2000
+    GROUP BY c.person_id
+    HAVING COUNT(DISTINCT m.id) > 1
+),
+ActorMovies AS (
+    SELECT ra.person_id,
+           STRING_AGG(DISTINCT t.title, ', ') AS titles,
+           ROW_NUMBER() OVER (PARTITION BY ra.person_id ORDER BY ra.movie_count DESC) AS rn
+    FROM RecursiveActors ra
+    JOIN cast_info c ON ra.person_id = c.person_id
+    JOIN aka_title a ON c.movie_id = a.movie_id
+    JOIN title t ON a.title = t.title
+    GROUP BY ra.person_id
+),
+DetailedActorInfo AS (
+    SELECT a.person_id,
+           ak.name AS actor_name,
+           COALESCE(ami.info, 'No Information Available') AS additional_info,
+           am.titles
+    FROM ActorMovies am
+    JOIN aka_name ak ON am.person_id = ak.person_id
+    LEFT JOIN person_info ami ON am.person_id = ami.person_id AND ami.info_type_id = 1  -- Assume 1 is for some relevant info type
+)
+SELECT dai.actor_name,
+       dai.titles,
+       CASE 
+           WHEN dai.titles IS NULL THEN 'No Movies Found'
+           ELSE 'Movies Listed'
+       END AS movie_status,
+       COUNT(DISTINCT m.id) AS explicit_relation_count
+FROM DetailedActorInfo dai
+LEFT JOIN cast_info ci ON dai.person_id = ci.person_id
+LEFT JOIN aka_title at ON ci.movie_id = at.movie_id
+LEFT JOIN title m ON at.title = m.title
+WHERE dai.rn = 1
+GROUP BY dai.actor_name, dai.titles
+HAVING COUNT(DISTINCT m.id) > 1 OR COUNT(DISTINCT ci.id) IS NULL
+ORDER BY dai.actor_name ASC NULLS LAST;
+
+This query is designed to benchmark performance across multiple SQL constructs, including recursive CTEs, string aggregations, conditional expressions, complex joins, and NULL handling, while also being interesting with respect to data extraction and logic.

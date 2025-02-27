@@ -1,0 +1,79 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_price,
+        CASE 
+            WHEN o.o_orderstatus = 'O' THEN 'Open'
+            WHEN o.o_orderstatus = 'F' THEN 'Filled'
+            ELSE 'Unknown' 
+        END AS order_status_desc
+    FROM 
+        orders o
+),
+PartSupply AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+SupplierWithComment AS (
+    SELECT DISTINCT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_comment,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'No balance'
+            ELSE TO_CHAR(s.s_acctbal, 'FM$999,999,999.00') 
+        END AS formatted_balance
+    FROM 
+        supplier s
+),
+FinalReport AS (
+    SELECT 
+        ps.ps_partkey,
+        p.p_name,
+        COALESCE(pc.total_orders, 0) AS total_orders,
+        COALESCE(pc.total_spent, 0) AS total_spent,
+        COALESCE(pc.last_order_date, 'No orders') AS last_order_date,
+        AVG(ss.avg_supply_cost) AS avg_supply_cost,
+        sr.formatted_balance
+    FROM 
+        PartSupply ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN 
+        CustomerSummary pc ON p.p_partkey = pc.c_custkey
+    LEFT JOIN 
+        SupplierWithComment sr ON p.p_partkey = sr.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, p.p_name, sr.formatted_balance
+)
+SELECT 
+    fr.*,
+    fr.total_orders - LEAD(fr.total_orders, 1, 0) OVER (ORDER BY fr.total_spent DESC) AS order_diff
+FROM 
+    FinalReport fr
+WHERE 
+    (fr.avg_supply_cost > 10 OR fr.total_spent IS NULL)
+    AND fr.total_orders IS NOT NULL
+ORDER BY 
+    fr.total_spent DESC, fr.last_order_date DESC;

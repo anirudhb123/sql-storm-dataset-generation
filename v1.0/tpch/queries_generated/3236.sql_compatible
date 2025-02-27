@@ -1,0 +1,74 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate >= DATE '1997-01-01'
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    r.r_name,
+    c.c_name,
+    cs.total_orders,
+    cs.total_spent,
+    si.total_supply_value,
+    si.unique_parts_supplied
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    CustomerStats cs ON cs.total_orders > 5
+LEFT JOIN 
+    SupplierInfo si ON si.unique_parts_supplied > 10
+WHERE 
+    r.r_name LIKE 'N%'
+    AND (cs.total_spent IS NULL OR cs.total_spent > 1000)
+UNION ALL
+SELECT 
+    NULL AS r_name,
+    NULL AS c_name,
+    COUNT(*) AS total_orders,
+    NULL AS total_spent,
+    NULL AS total_supply_value,
+    NULL AS unique_parts_supplied
+FROM 
+    RankedOrders
+WHERE 
+    order_rank <= 5
+GROUP BY 
+    r_name, c_name
+ORDER BY 
+    r_name, c_name;

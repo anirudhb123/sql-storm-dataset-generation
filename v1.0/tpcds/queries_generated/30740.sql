@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s.s_store_id,
+        s.s_store_name,
+        s.s_address_id,
+        CAST(ss.ext_sales_price AS DECIMAL(10, 2)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s.s_store_id ORDER BY ss_sold_date_sk DESC) AS sales_rank
+    FROM 
+        store s
+    LEFT JOIN 
+        store_sales ss ON ss.ss_store_sk = s.s_store_sk
+    WHERE 
+        ss.ss_sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    
+    UNION ALL
+    
+    SELECT
+        sh.s_store_id,
+        sh.s_store_name,
+        sh.s_address_id,
+        sh.total_sales + ss.ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY sh.s_store_id ORDER BY ss_sold_date_sk DESC) AS sales_rank
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store_sales ss ON ss.ss_store_sk = sh.s_store_id
+    WHERE 
+        ss.ss_sold_date_sk < (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_sales_price) AS total_web_sales
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+),
+top_customers AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_web_sales,
+        RANK() OVER (ORDER BY cs.total_web_sales DESC) AS sales_rank
+    FROM 
+        customer_sales cs
+)
+SELECT 
+    sh.s_store_id,
+    sh.s_store_name,
+    tc.c_first_name,
+    tc.c_last_name,
+    sh.total_sales,
+    tc.total_web_sales
+FROM 
+    sales_hierarchy sh
+JOIN 
+    top_customers tc ON sh.s_store_id = tc.c_customer_id
+WHERE 
+    sh.total_sales IS NOT NULL
+ORDER BY 
+    sh.total_sales DESC, tc.total_web_sales DESC
+LIMIT 10;

@@ -1,0 +1,52 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year,
+        1 AS level,
+        m.title AS path
+    FROM title m
+    WHERE m.episode_of_id IS NULL
+    UNION ALL
+    SELECT 
+        e.id AS movie_id, 
+        e.title, 
+        e.production_year,
+        mh.level + 1,
+        CONCAT(mh.path, ' > ', e.title) AS path
+    FROM title e
+    JOIN movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+),
+actor_movies AS (
+    SELECT 
+        a.person_id,
+        a.movie_id,
+        n.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS actor_movie_rank
+    FROM cast_info a
+    JOIN title t ON a.movie_id = t.id
+    JOIN aka_name n ON a.person_id = n.person_id
+),
+keyword_counts AS (
+    SELECT 
+        m.movie_id,
+        COUNT(k.id) AS keyword_count
+    FROM movie_keyword m
+    JOIN keyword k ON m.keyword_id = k.id
+    GROUP BY m.movie_id
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year AS production_year,
+    COUNT(DISTINCT am.actor_name) AS actor_count,
+    COALESCE(kc.keyword_count, 0) AS keyword_count,
+    CASE 
+        WHEN mh.level = 1 THEN 'Main Movie'
+        ELSE 'Episode'
+    END AS movie_type
+FROM movie_hierarchy mh
+LEFT JOIN actor_movies am ON mh.movie_id = am.movie_id AND am.actor_movie_rank <= 3
+LEFT JOIN keyword_counts kc ON mh.movie_id = kc.movie_id
+GROUP BY mh.movie_id, mh.title, mh.production_year, mh.level
+ORDER BY mh.production_year DESC, actor_count DESC, mh.title;

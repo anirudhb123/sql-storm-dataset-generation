@@ -1,0 +1,59 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year BETWEEN 1990 AND 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    a.id AS actor_id,
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT ci.movie_id) OVER (PARTITION BY a.id) AS total_movies_with_roles,
+    MAX(mh.level) AS max_link_level,
+    STRING_AGG(DISTINCT km.keyword, ', ') AS associated_keywords
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword km ON mh.movie_id = km.movie_id
+LEFT JOIN 
+    role_type rt ON ci.role_id = rt.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (
+        SELECT id FROM info_type WHERE info = 'Director' LIMIT 1
+    )
+WHERE 
+    a.name IS NOT NULL 
+    AND (mi.info IS NULL OR mi.note IS NOT NULL)
+    AND mh.production_year IS NOT NULL
+GROUP BY 
+    a.id, a.name, mh.movie_title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 5
+ORDER BY 
+    total_movies_with_roles DESC, 
+    mh.production_year DESC;

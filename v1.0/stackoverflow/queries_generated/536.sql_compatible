@@ -1,0 +1,78 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 
+            ELSE 0 
+        END AS HasAcceptedAnswer
+    FROM 
+        Posts p
+),
+CommentCounts AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS TotalComments
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+TopPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.Score,
+        pd.CreationDate,
+        pd.HasAcceptedAnswer,
+        COALESCE(cc.TotalComments, 0) AS CommentCount,
+        ur.Reputation AS UserReputation
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        CommentCounts cc ON pd.PostId = cc.PostId
+    LEFT JOIN 
+        UserReputation ur ON pd.OwnerUserId = ur.UserId
+    WHERE 
+        pd.Score > 10
+    ORDER BY 
+        pd.Score DESC
+    LIMIT 10
+)
+SELECT 
+    tp.Title,
+    tp.Score,
+    tp.CreationDate,
+    CASE 
+        WHEN tp.HasAcceptedAnswer = 1 THEN 'Yes' 
+        ELSE 'No' 
+    END AS AcceptedAnswer,
+    tp.CommentCount,
+    tp.UserReputation,
+    CASE 
+        WHEN tp.UserReputation IS NULL THEN 'No Reputation' 
+        ELSE 'Has Reputation' 
+    END AS ReputationStatus
+FROM 
+    TopPosts tp
+FULL OUTER JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+WHERE 
+    (u.Location IS NULL OR u.Location = 'Unknown') 
+    AND (tp.UserReputation BETWEEN 100 AND 10000 OR tp.UserReputation IS NULL)
+ORDER BY 
+    tp.CommentCount DESC, 
+    tp.Score DESC;

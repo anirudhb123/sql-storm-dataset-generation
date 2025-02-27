@@ -1,0 +1,57 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title AS movie_title, 
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC, at.title ASC) AS year_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+TitleKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    JOIN 
+        aka_title mt ON mt.id = mk.movie_id
+    WHERE 
+        k.keyword IS NOT NULL
+    GROUP BY 
+        mt.movie_id
+),
+PeopleInMovies AS (
+    SELECT 
+        c.movie_id, 
+        STRING_AGG(DISTINCT a.name, ', ') AS actors
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    GROUP BY 
+        c.movie_id
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    COALESCE(tk.keywords, 'No Keywords') AS keywords,
+    COALESCE(pim.actors, 'No Cast') AS actors,
+    CASE 
+        WHEN rm.year_rank <= 5 THEN 'Top 5 Movies of the Year'
+        ELSE 'Other Movies'
+    END AS movie_category
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    TitleKeywords tk ON tk.movie_id = rm.id
+LEFT JOIN 
+    PeopleInMovies pim ON pim.movie_id = rm.id
+WHERE 
+    (rm.production_year > 2000 AND rm.production_year < 2023) 
+    OR (rm.production_year IS NULL)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.movie_title;

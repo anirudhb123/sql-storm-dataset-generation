@@ -1,0 +1,57 @@
+WITH RankedLineItems AS (
+    SELECT
+        l_orderkey,
+        l_partkey,
+        l_suppkey,
+        l_linenumber,
+        l_quantity,
+        l_extendedprice,
+        l_discount,
+        l_tax,
+        l_returnflag,
+        l_linestatus,
+        l_shipdate,
+        DENSE_RANK() OVER (PARTITION BY l_orderkey ORDER BY l_quantity DESC) AS rank_quantity
+    FROM lineitem
+),
+
+FilteredSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS top_supplier_rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+
+HighValueOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000
+)
+
+SELECT
+    p.p_name,
+    RLI.l_orderkey,
+    FS.s_name AS supplier_name,
+    COUNT(DISTINCT HVO.o_orderkey) AS total_high_value_orders,
+    AVG(HVO.net_value) AS avg_net_value,
+    STRING_AGG(DISTINCT RLI.l_returnflag) AS return_flags,
+    MAX(FS.s_acctbal) AS max_supplier_balance
+FROM part p
+LEFT JOIN RankedLineItems RLI ON p.p_partkey = RLI.l_partkey
+LEFT JOIN FilteredSuppliers FS ON RLI.l_suppkey = FS.s_suppkey AND FS.top_supplier_rank <= 3
+LEFT JOIN HighValueOrders HVO ON RLI.l_orderkey = HVO.o_orderkey
+WHERE RLI.rank_quantity = 1
+  AND (RLI.l_discount IS NULL OR RLI.l_discount < 0.05)
+  AND (HVO.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31' OR HVO.o_orderdate IS NULL)
+GROUP BY p.p_name, RLI.l_orderkey, FS.s_name
+ORDER BY total_high_value_orders DESC, p.p_name ASC;

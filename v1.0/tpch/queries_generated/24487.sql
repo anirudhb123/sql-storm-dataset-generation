@@ -1,0 +1,59 @@
+WITH RankedParts AS (
+    SELECT 
+        p_partkey,
+        p_name,
+        p_size,
+        p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p_size ORDER BY p_retailprice DESC) AS rn
+    FROM 
+        part
+    WHERE 
+        p_retailprice > 20.00
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PotentialSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        COUNT(DISTINCT s.s_nationkey) AS nation_count
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+)
+
+SELECT 
+    c.c_name,
+    COALESCE(co.order_count, 0) AS order_count,
+    COALESCE(co.total_spent, 0) AS total_spent,
+    rp.p_name,
+    rp.p_retailprice,
+    ps.total_supplycost,
+    ps.nation_count
+FROM 
+    RankedParts rp
+LEFT JOIN 
+    PotentialSuppliers ps ON rp.p_partkey = ps.ps_partkey
+FULL OUTER JOIN 
+    CustomerOrders co ON co.c_custkey = COALESCE(ps.ps_suppkey, -1)
+WHERE 
+    rp.rn <= 3
+    AND (rp.p_retailprice / NULLIF(ps.total_supplycost, 0) > 2 OR ps.total_supplycost IS NULL)
+ORDER BY 
+    rp.p_partkey, co.total_spent DESC
+LIMIT 100;

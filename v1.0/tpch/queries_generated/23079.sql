@@ -1,0 +1,104 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+), 
+LargeOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N' 
+        AND o.o_orderstatus = 'F' 
+        AND o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders WHERE o_orderstatus = 'F')
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+), 
+QualifiedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_container,
+        COUNT(DISTINCT ps.s_suppkey) AS supplier_count
+    FROM 
+        part p 
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice, p.p_container
+    HAVING 
+        COUNT(DISTINCT ps.s_suppkey) >= 3
+), 
+SupplierContribution AS (
+    SELECT 
+        rs.s_suppkey,
+        (SUM(ps.ps_supplycost * ps.ps_availqty) / NULLIF(SUM(ps.ps_availqty), 0)) AS avg_supply_cost
+    FROM 
+        RankedSuppliers rs
+    LEFT JOIN 
+        partsupp ps ON rs.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        rs.s_suppkey
+    ORDER BY 
+        avg_supply_cost DESC
+)
+SELECT 
+    cp.p_name,
+    cp.p_retailprice,
+    COUNT(DISTINCT qc.o_orderkey) OVER (PARTITION BY cp.p_partkey) AS order_count,
+    AVG(qc.total_revenue) AS average_order_revenue,
+    CASE 
+        WHEN cp.supplier_count > 5 THEN 'High' 
+        WHEN cp.supplier_count BETWEEN 3 AND 5 THEN 'Medium' 
+        ELSE 'Low' 
+    END AS supplier_quality,
+    r.r_name
+FROM 
+    QualifiedParts cp
+LEFT JOIN 
+    LargeOrders qc ON qc.o_orderkey IN (
+        SELECT
+            o.o_orderkey
+        FROM
+            orders o
+        JOIN 
+            lineitem l ON o.o_orderkey = l.l_orderkey
+        WHERE 
+            l.l_partkey = cp.p_partkey
+    )
+LEFT JOIN 
+    nation n ON n.n_nationkey IN (
+        SELECT 
+            s.s_nationkey 
+        FROM 
+            supplier s
+        JOIN 
+            RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+        WHERE 
+            rs.rank = 1
+    )
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    cp.p_retailprice IS NOT NULL 
+    AND EXISTS (
+        SELECT 1 
+        FROM SupplierContribution sc 
+        WHERE 
+            sc.avg_supply_cost < 20.00 
+            AND sc.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = cp.p_partkey)
+    )
+ORDER BY 
+    average_order_revenue DESC
+LIMIT 10;

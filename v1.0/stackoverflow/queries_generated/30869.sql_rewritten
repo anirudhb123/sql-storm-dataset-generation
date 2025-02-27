@@ -1,0 +1,79 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT Id, TagName, Count, ExcerptPostId, IsModeratorOnly, IsRequired
+    FROM Tags
+    WHERE IsRequired = 1 
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.IsModeratorOnly, t.IsRequired
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy rth ON t.Id = rth.WikiPostId 
+), 
+
+UserPostActivity AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           COUNT(p.Id) AS TotalPosts,
+           SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+           SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+
+MostActiveUsers AS (
+    SELECT UserId, 
+           DisplayName, 
+           TotalPosts, 
+           TotalQuestions, 
+           TotalAnswers,
+           ROW_NUMBER() OVER (ORDER BY TotalPosts DESC) AS Rank
+    FROM UserPostActivity
+    WHERE TotalPosts > 0
+), 
+
+VotedPosts AS (
+    SELECT p.Id AS PostId,
+           COUNT(v.Id) AS TotalVotes,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+
+FilteredPosts AS (
+    SELECT p.Id,
+           p.Title,
+           p.CreationDate,
+           p.ViewCount,
+           vp.TotalVotes,
+           vp.UpVotes,
+           vp.DownVotes,
+           u.DisplayName AS OwnerDisplayName,
+           STRING_AGG(t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN VotedPosts vp ON p.Id = vp.PostId
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN RecursiveTagHierarchy t ON p.Id = t.ExcerptPostId
+    WHERE p.ViewCount > 100 AND vp.TotalVotes IS NOT NULL
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount, vp.TotalVotes, vp.UpVotes, vp.DownVotes, u.DisplayName
+)
+
+SELECT f.*, 
+       CASE 
+           WHEN f.TotalVotes > 50 THEN 'Hot'
+           WHEN f.TotalVotes BETWEEN 20 AND 50 THEN 'Trending'
+           ELSE 'New'
+       END AS PopularityLevel,
+       CASE 
+           WHEN f.ViewCount IS NULL THEN 'No Views Recorded'
+           ELSE f.ViewCount 
+       END AS AdjustedViewCount,
+       u.DisplayName AS TopUser
+FROM FilteredPosts f
+CROSS JOIN (
+    SELECT TOP 1 DisplayName 
+    FROM MostActiveUsers 
+    WHERE Rank = 1
+) u
+ORDER BY f.ViewCount DESC, f.TotalVotes DESC
+OPTION (MAXRECURSION 100);

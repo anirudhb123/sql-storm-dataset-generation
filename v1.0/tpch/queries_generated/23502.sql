@@ -1,0 +1,46 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_in_nation
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT sh.s_suppkey, sh.s_name, sh.s_nationkey, sh.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY sh.s_nationkey ORDER BY sh.s_acctbal DESC)
+    FROM supplier_hierarchy sh
+    JOIN supplier s ON sh.s_nationkey = s.s_nationkey
+    WHERE sh.rank_in_nation < 5
+), 
+average_price AS (
+    SELECT ps.suppkey, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.suppkey
+), 
+high_value_orders AS (
+    SELECT o.o_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE o.o_orderdate > DATE '2022-01-01' 
+    GROUP BY o.o_orderkey
+    HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) > 10000
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+    AVG(ap.avg_supplycost) AS average_supply_cost,
+    MAX(hvo.revenue) AS maximum_order_revenue
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier_hierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN average_price ap ON sh.s_suppkey = ap.suppkey
+LEFT JOIN high_value_orders hvo ON sh.s_suppkey = 
+    (SELECT ps.ps_suppkey 
+     FROM partsupp ps 
+     WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice IS NOT NULL))
+     ORDER BY ps.ps_supplycost DESC
+     LIMIT 1)
+WHERE r.r_name IS NOT NULL 
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT sh.s_suppkey) > 2 
+   AND AVG(ap.avg_supplycost) < 50
+   AND MAX(hvo.revenue) IS NOT NULL
+ORDER BY supplier_count DESC, average_supply_cost ASC;

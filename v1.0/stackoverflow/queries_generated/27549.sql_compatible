@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT unnest(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS TagName FROM Posts p) AS t ON t.TagName IS NOT NULL
+    JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.Body, p.CreationDate
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.BadgeCount,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.AnswerCount > 5
+        AND rp.CommentCount > 10
+        AND rp.BadgeCount > 2
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.OwnerDisplayName,
+    fp.AnswerCount,
+    fp.CommentCount,
+    fp.Tags,
+    DENSE_RANK() OVER (ORDER BY fp.CreationDate DESC) AS RecentPostRank
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    RecentPostRank
+LIMIT 10;

@@ -1,0 +1,92 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_size,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_size ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+), 
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        SUM(s.s_acctbal) AS total_balance
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CriticalOrders AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(li.l_orderkey) AS line_item_count,
+        SUM(li.l_extendedprice) AS total_price,
+        MAX(CASE WHEN li.l_discount > 0.1 THEN li.l_discount END) AS max_discount
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        COUNT(li.l_orderkey) > 5 AND SUM(li.l_extendedprice) > 1000
+),
+RegionNation AS (
+    SELECT 
+        r.r_name,
+        n.n_name,
+        n.n_nationkey,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_name, n.n_name, n.n_nationkey
+    HAVING 
+        COUNT(s.s_suppkey) > 0
+),
+StringAggregates AS (
+    SELECT 
+        CONCAT_WS(', ', ARRAY_AGG(DISTINCT p.p_name ORDER BY p.p_name)) AS part_names,
+        COUNT(DISTINCT p.p_partkey) AS unique_parts
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice < (SELECT AVG(p2.p_retailprice) FROM part p2)
+    GROUP BY 
+        p.p_size
+)
+SELECT 
+    rg.r_name,
+    n.n_name,
+    SUM(s.total_available) AS total_availability,
+    AVG(s.avg_supply_cost) AS average_cost,
+    SUM(co.line_item_count) AS total_line_items,
+    SUM(co.total_price) AS total_order_value,
+    sp.part_names,
+    CASE 
+        WHEN SUM(co.total_price) IS NULL THEN 'No Orders' 
+        ELSE 'Has Orders' 
+    END AS order_status
+FROM 
+    RegionNation rg
+JOIN 
+    SupplierStats s ON rg.n_nationkey = s.s_suppkey
+LEFT JOIN 
+    CriticalOrders co ON rg.n_nationkey = co.o_orderkey
+CROSS JOIN 
+    StringAggregates sp
+GROUP BY 
+    rg.r_name, n.n_name
+ORDER BY 
+    rg.r_name, total_order_value DESC
+LIMIT 10;

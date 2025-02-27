@@ -1,0 +1,75 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_quantity,
+        ws_sales_price * ws_quantity AS total_sales,
+        1 AS level
+    FROM web_sales
+    WHERE ws_sales_price > 0
+
+    UNION ALL
+
+    SELECT 
+        s.ws_item_sk,
+        s.ws_order_number,
+        s.ws_sales_price,
+        s.ws_quantity,
+        s.ws_sales_price * s.ws_quantity + c.total_sales AS total_sales,
+        c.level + 1
+    FROM web_sales s
+    JOIN Sales_CTE c ON s.ws_order_number = c.ws_order_number AND c.level < 10
+),
+
+Ranked_Sales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(c.total_sales) AS total_customer_sales,
+        RANK() OVER (ORDER BY SUM(c.total_sales) DESC) AS sales_rank
+    FROM Sales_CTE c
+    GROUP BY c.c_customer_sk
+),
+
+Customer_Info AS (
+    SELECT 
+        cu.c_customer_sk,
+        cu.c_first_name,
+        cu.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM customer cu
+    LEFT JOIN customer_demographics cd ON cu.c_current_cdemo_sk = cd.cd_demo_sk
+),
+
+Filtered_Customers AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        rs.total_customer_sales,
+        rs.sales_rank
+    FROM Customer_Info ci
+    JOIN Ranked_Sales rs ON ci.c_customer_sk = rs.c_customer_sk
+    WHERE rs.total_customer_sales > (
+        SELECT AVG(total_sales)
+        FROM Ranked_Sales
+    )
+)
+
+SELECT 
+    fc.c_first_name,
+    fc.c_last_name,
+    fc.cd_gender,
+    fc.cd_marital_status,
+    fc.total_customer_sales,
+    CASE 
+        WHEN fc.sales_rank <= 10 THEN 'Top 10%'
+        WHEN fc.sales_rank <= 50 THEN 'Top 50%'
+        ELSE 'Other'
+    END AS customer_category
+FROM Filtered_Customers fc
+ORDER BY fc.total_customer_sales DESC;

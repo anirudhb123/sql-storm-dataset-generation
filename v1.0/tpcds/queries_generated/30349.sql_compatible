@@ -1,0 +1,66 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ss.s_sold_date_sk,
+        ss.ss_item_sk,
+        ss.ss_quantity,
+        ss.ss_sales_price,
+        ss.ss_net_profit,
+        1 AS sales_level
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.ss_sold_date_sk = (SELECT MAX(ss2.ss_sold_date_sk) FROM store_sales ss2)
+    
+    UNION ALL
+
+    SELECT 
+        ss2.ss_sold_date_sk,
+        ss2.ss_item_sk,
+        ss2.ss_quantity,
+        ss2.ss_sales_price,
+        ss2.ss_net_profit,
+        cte.sales_level + 1
+    FROM 
+        store_sales ss2
+    INNER JOIN SalesCTE cte ON ss2.ss_item_sk = cte.ss_item_sk
+    WHERE 
+        cte.sales_level < 5
+),
+CustomerReturns AS (
+    SELECT 
+        sr.sr_item_sk,
+        SUM(sr.sr_return_quantity) AS total_returns,
+        SUM(sr.sr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_item_sk
+),
+NetSales AS (
+    SELECT 
+        s.ss_item_sk,
+        SUM(s.ss_net_profit) AS total_net_profit
+    FROM 
+        store_sales s
+    INNER JOIN CustomerReturns cr ON s.ss_item_sk = cr.sr_item_sk
+    GROUP BY 
+        s.ss_item_sk
+)
+SELECT 
+    i.i_item_id,
+    COALESCE(cr.total_returns, 0) AS returns,
+    ns.total_net_profit,
+    ns.total_net_profit / NULLIF(cr.total_return_amt, 0) AS profit_per_return,
+    ROW_NUMBER() OVER (PARTITION BY ns.total_net_profit ORDER BY ns.total_net_profit DESC) AS rnk
+FROM 
+    item i
+LEFT JOIN 
+    CustomerReturns cr ON i.i_item_sk = cr.sr_item_sk
+INNER JOIN 
+    NetSales ns ON i.i_item_sk = ns.ss_item_sk
+WHERE 
+    cr.total_returns IS NOT NULL OR ns.total_net_profit > 5000
+ORDER BY 
+    profit_per_return DESC
+FETCH FIRST 10 ROWS ONLY;

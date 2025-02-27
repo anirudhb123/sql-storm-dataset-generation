@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+FrequentTags AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+),
+TagCounts AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS TagFrequency
+    FROM 
+        FrequentTags
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(*) > 5
+)
+SELECT 
+    u.DisplayName,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    tc.Tag,
+    rp.CommentCount,
+    rp.TotalBounty
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    TagCounts tc ON tc.Tag IN (SELECT UNNEST(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><')))
+                               WHERE EXISTS (SELECT 1 FROM FrequentTags WHERE Tag = tc.Tag))
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC
+LIMIT 10;

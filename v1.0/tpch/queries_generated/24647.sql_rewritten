@@ -1,0 +1,37 @@
+WITH RankedOrders AS (
+    SELECT o_orderkey, o_custkey, o_totalprice, 
+           RANK() OVER (PARTITION BY o_orderstatus ORDER BY o_totalprice DESC) AS order_rank
+    FROM orders
+    WHERE o_orderdate >= DATE '1994-01-01'
+), SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           COALESCE(NULLIF(s.s_comment, ''), 'No comment') AS adjusted_comment
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+), LineItemStats AS (
+    SELECT l_partkey, SUM(l_quantity) AS total_quantity,
+           AVG(l_discount) AS avg_discount, 
+           COUNT(*) AS line_count
+    FROM lineitem
+    WHERE l_returnflag = 'N'
+    GROUP BY l_partkey
+), CombinedData AS (
+    SELECT p.p_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           SUM(l.total_quantity) AS total_quantity,
+           MAX(oi.o_totalprice) AS max_price,
+           SUM(CASE WHEN l.l_discount > 0.1 THEN l.l_discount ELSE 0 END) as total_discounted
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN LineItemStats l ON p.p_partkey = l.l_partkey
+    LEFT JOIN RankedOrders oi ON oi.o_custkey = ps.ps_suppkey
+    GROUP BY p.p_partkey
+)
+SELECT c.c_custkey, c.c_name, d.total_quantity, d.max_price,
+       CASE WHEN d.supplier_count IS NULL THEN 'No Suppliers' ELSE 'Has Suppliers' END AS supplier_status,
+       STRING_AGG(DISTINCT sd.adjusted_comment, ', ') AS supplier_comments
+FROM customer c
+LEFT JOIN CombinedData d ON c.c_custkey = d.supplier_count
+LEFT JOIN SupplierDetails sd ON sd.s_suppkey = (SELECT ps_suppkey FROM partsupp WHERE ps_partkey = d.p_partkey LIMIT 1)
+GROUP BY c.c_custkey, c.c_name, d.total_quantity, d.max_price
+HAVING d.max_price > (SELECT AVG(o_totalprice) FROM orders)
+ORDER BY total_quantity DESC, supplier_status;

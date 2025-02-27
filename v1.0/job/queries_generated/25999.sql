@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+    FROM 
+        aka_title ak
+    JOIN 
+        title m ON ak.movie_id = m.id
+    JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id
+),
+MovieInfo AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        COALESCE(mi.info, 'No info available') AS info
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_info mi ON rm.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+),
+MovieCompanies AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    mi.title,
+    mi.production_year,
+    mi.cast_count,
+    mi.info,
+    mc.companies,
+    rm.aka_names
+FROM 
+    MovieInfo mi
+JOIN 
+    MovieCompanies mc ON mi.movie_id = mc.movie_id
+JOIN 
+    RankedMovies rm ON rm.movie_id = mi.movie_id
+WHERE 
+    mi.cast_count > 5
+ORDER BY 
+    mi.production_year DESC, 
+    mi.cast_count DESC
+LIMIT 10;

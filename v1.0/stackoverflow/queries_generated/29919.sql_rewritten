@@ -1,0 +1,78 @@
+WITH TagStats AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        Tag
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStats
+    WHERE 
+        PostCount > 5 
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        ur.QuestionCount,
+        ur.CommentCount,
+        ur.BadgeCount,
+        ur.TotalBounty,
+        RANK() OVER (ORDER BY ur.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    JOIN 
+        UserReputation ur ON u.Id = ur.UserId
+    WHERE 
+        ur.QuestionCount > 10 
+)
+SELECT 
+    tt.Tag,
+    tt.PostCount,
+    tu.DisplayName AS UserName,
+    tu.Reputation AS UserReputation,
+    tu.QuestionCount AS UserQuestions,
+    tu.CommentCount AS UserComments,
+    tu.BadgeCount AS UserBadges,
+    tu.TotalBounty AS UserTotalBounty
+FROM 
+    TopTags tt
+JOIN 
+    Posts p ON tt.Tag = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))
+JOIN 
+    TopUsers tu ON p.OwnerUserId = tu.Id
+WHERE 
+    tu.UserRank <= 10 AND tt.TagRank <= 10 
+ORDER BY 
+    tt.PostCount DESC, tu.Reputation DESC;

@@ -1,0 +1,29 @@
+SELECT 
+    p.p_name, 
+    s.s_name, 
+    CONCAT(s.s_name, ' from ', SUBSTRING_INDEX(s.s_address, ',', 1)) AS supplier_info, 
+    SUM(CASE 
+        WHEN l_returnflag = 'R' THEN l_quantity 
+        ELSE 0 
+    END) AS total_returned_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    GROUP_CONCAT(DISTINCT p.p_type ORDER BY p.p_type SEPARATOR ', ') AS product_types
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    s.s_acctbal > 1000 AND 
+    l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    p.p_partkey, s.s_suppkey
+HAVING 
+    total_returned_quantity > 0
+ORDER BY 
+    total_returned_quantity DESC;

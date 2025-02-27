@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    COUNT(DISTINCT ci.person_id) AS cast_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+    SUM(CASE WHEN co.name IS NOT NULL THEN 1 ELSE 0 END) AS num_companies
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+WHERE 
+    mh.production_year IS NOT NULL
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY 
+    mh.production_year DESC, mh.level ASC;
+
+This SQL query performs an elaborate performance benchmarking on a movie hierarchy. It uses a recursive Common Table Expression (CTE) to gather information about movies produced after the year 2000 and their linked movies. The main query aggregates information about the cast and associated companies, using outer joins on `complete_cast`, `cast_info`, and `movie_companies`, with NULL logic to account for movies that may not have cast or companies associated. The results are grouped, ensuring only movies with a non-zero cast are returned, ordered by production year and hierarchy level.

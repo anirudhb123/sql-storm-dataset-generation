@@ -1,0 +1,44 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+SELECT 
+    p.name AS actor_name,
+    ARRAY_AGG(DISTINCT mh.title) AS movies,
+    COUNT(DISTINCT mh.movie_id) AS movie_count,
+    string_agg(DISTINCT ci.note, ', ') AS roles,
+    SUM(CASE WHEN mt.production_year = 2023 THEN 1 ELSE 0 END) AS movies_released_2023,
+    ROW_NUMBER() OVER (PARTITION BY p.id ORDER BY COUNT(DISTINCT mh.movie_id) DESC) AS role_ranking
+FROM 
+    cast_info ci
+JOIN 
+    aka_name p ON ci.person_id = p.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+GROUP BY 
+    p.name
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 1 
+ORDER BY 
+    movie_count DESC, p.name;

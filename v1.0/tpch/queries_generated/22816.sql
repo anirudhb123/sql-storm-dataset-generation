@@ -1,0 +1,66 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_orders,
+        COUNT(o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+ActiveSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS available_parts,
+        MAX(ps.ps_availqty) AS max_avail_qty
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(l_extendedprice) FROM lineitem)
+)
+SELECT 
+    co.c_name,
+    co.total_orders,
+    ap.s_name,
+    tp.p_name,
+    CASE 
+        WHEN co.total_orders IS NULL THEN 'No Orders'
+        ELSE 'Orders Present'
+    END AS order_status,
+    COALESCE(tp.revenue, 0) AS part_revenue,
+    ap.available_parts
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    ActiveSuppliers ap ON co.c_custkey % 10 = ap.s_suppkey % 10  -- Bizarre join condition to match customers with suppliers on the modulo
+FULL OUTER JOIN 
+    TopParts tp ON co.c_custkey % 5 = tp.p_partkey % 5 -- Further bizarre relationship
+WHERE 
+    co.rank = 1 OR ap.available_parts > 5 OR (tp.revenue IS NULL AND ap.max_avail_qty > 0) -- Complex predicates mixing various logic
+ORDER BY 
+    co.total_orders DESC NULLS LAST, 
+    ap.available_parts DESC, 
+    tp.revenue DESC;

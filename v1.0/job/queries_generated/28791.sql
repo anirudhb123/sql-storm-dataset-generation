@@ -1,0 +1,73 @@
+WITH movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        c.name AS cast_name,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT comp.name) AS companies
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name comp ON mc.company_id = comp.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title, t.production_year, cast_name
+),
+cast_details AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(DISTINCT t.id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    GROUP BY 
+        a.id, a.name
+),
+highlighted_movies AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.keywords,
+        md.companies,
+        CAST(cd.actor_name AS VARCHAR(255)) AS top_actor
+    FROM 
+        movie_details md
+    JOIN 
+        (SELECT 
+            actor_name, 
+            movie_count 
+         FROM 
+            cast_details 
+         WHERE 
+            movie_count > 5
+         ORDER BY 
+            movie_count DESC 
+         LIMIT 1) cd ON 1=1 -- Cartesian product to get the top actor for all movies
+)
+
+SELECT 
+    title,
+    production_year,
+    keywords,
+    companies,
+    top_actor
+FROM 
+    highlighted_movies
+ORDER BY 
+    production_year DESC, 
+    title;

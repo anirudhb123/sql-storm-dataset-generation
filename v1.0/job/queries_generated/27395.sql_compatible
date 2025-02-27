@@ -1,0 +1,95 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title AS movie_title,
+        title.production_year,
+        AVG(CASE 
+            WHEN role_type.role = 'Lead' THEN 1 
+            ELSE 0 
+        END) AS lead_role_percentage,
+        COUNT(DISTINCT cast_info.person_id) AS cast_count
+    FROM 
+        title
+    JOIN 
+        movie_companies ON title.id = movie_companies.movie_id
+    JOIN 
+        cast_info ON title.id = cast_info.movie_id
+    JOIN 
+        role_type ON cast_info.role_id = role_type.id
+    GROUP BY 
+        title.id, title.title, title.production_year
+),
+
+TopActors AS (
+    SELECT 
+        aka_name.name AS actor_name,
+        COUNT(DISTINCT cast_info.movie_id) AS movies_count,
+        SUM(CASE 
+            WHEN cast_info.note IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS notable_roles
+    FROM 
+        aka_name
+    JOIN 
+        cast_info ON aka_name.person_id = cast_info.person_id
+    WHERE 
+        aka_name.name IS NOT NULL
+    GROUP BY 
+        aka_name.name
+    HAVING 
+        COUNT(DISTINCT cast_info.movie_id) > 5
+),
+
+MovieDetails AS (
+    SELECT 
+        RankedMovies.movie_id,
+        RankedMovies.movie_title,
+        RankedMovies.production_year,
+        RankedMovies.lead_role_percentage,
+        RankedMovies.cast_count,
+        COALESCE(TopActors.actor_name, 'Unknown') AS lead_actor,
+        COALESCE(TopActors.movies_count, 0) AS lead_actor_movies,
+        COALESCE(TopActors.notable_roles, 0) AS lead_actor_notable_roles
+    FROM 
+        RankedMovies
+    LEFT JOIN 
+        TopActors ON RankedMovies.movie_id = (
+            SELECT 
+                cast_info.movie_id 
+            FROM 
+                cast_info 
+            JOIN 
+                aka_name ON cast_info.person_id = aka_name.person_id
+            WHERE 
+                aka_name.name = (
+                    SELECT 
+                        aka_name.name 
+                    FROM 
+                        aka_name
+                    JOIN 
+                        cast_info ON aka_name.person_id = cast_info.person_id
+                    WHERE 
+                        cast_info.movie_id = RankedMovies.movie_id
+                    FETCH FIRST 1 ROWS ONLY
+                )
+            FETCH FIRST 1 ROWS ONLY
+        )
+)
+
+SELECT 
+    movie_id,
+    movie_title,
+    production_year,
+    lead_role_percentage,
+    cast_count,
+    lead_actor,
+    lead_actor_movies,
+    lead_actor_notable_roles
+FROM 
+    MovieDetails
+WHERE 
+    production_year >= 2000
+ORDER BY 
+    lead_role_percentage DESC, cast_count DESC
+FETCH FIRST 10 ROWS ONLY;

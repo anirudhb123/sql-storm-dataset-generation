@@ -1,0 +1,56 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.kind_id ORDER BY at.production_year DESC) AS rn,
+        kt.keyword
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN 
+        keyword kt ON mk.keyword_id = kt.id
+    WHERE 
+        at.production_year >= 2000
+),
+DistinctCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code IS NOT NULL
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rt.keyword,
+    dc.companies,
+    (SELECT COUNT(DISTINCT ci.person_id)
+     FROM cast_info ci
+     WHERE ci.movie_id = rt.id) AS actor_count,
+    (SELECT 
+         AVG(y.years_active)
+     FROM 
+         (SELECT 
+             (EXTRACT(YEAR FROM cast('2024-10-01' as date)) - EXTRACT(YEAR FROM pi.info::date)) AS years_active
+          FROM 
+             person_info pi
+          WHERE 
+             pi.info_type_id = (SELECT id FROM info_type WHERE info = 'active_years') 
+             AND pi.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = rt.id)
+         ) y) AS avg_years_active
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    DistinctCompanies dc ON rt.id = dc.movie_id
+WHERE 
+    rt.rn = 1 
+    AND rt.keyword IS NOT NULL
+ORDER BY 
+    rt.production_year DESC;

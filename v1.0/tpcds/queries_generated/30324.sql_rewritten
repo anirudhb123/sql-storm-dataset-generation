@@ -1,0 +1,54 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk, 1 AS level
+    FROM customer
+    WHERE c_customer_sk = 1  
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk, ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+),
+monthly_sales AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM date_dim d
+    JOIN web_sales ws ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_year, d.d_month_seq
+),
+customer_demographics_agg AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(cd.cd_purchase_estimate) AS total_purchase_estimate
+    FROM customer_demographics cd
+    LEFT JOIN customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender, cd.cd_marital_status
+),
+returns_info AS (
+    SELECT 
+        sr_item_sk, 
+        COUNT(*) AS return_count, 
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM store_returns
+    GROUP BY sr_item_sk
+)
+SELECT
+    ch.c_first_name,
+    ch.c_last_name,
+    cd.gender_totals,
+    (SELECT 
+        COUNT(DISTINCT wr_returned_date_sk) 
+     FROM web_returns wr 
+     WHERE wr.returning_customer_sk = ch.c_customer_sk
+    ) AS web_return_count,
+    ms.total_sales,
+    COALESCE(ri.return_count, 0) AS return_count,
+    COALESCE(ri.total_return_amount, 0) AS total_return_amount
+FROM customer_hierarchy ch
+LEFT JOIN customer_demographics_agg cd ON ch.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN monthly_sales ms ON ms.d_year = EXTRACT(YEAR FROM cast('2002-10-01' as date)) AND ms.d_month_seq = EXTRACT(MONTH FROM cast('2002-10-01' as date))
+LEFT JOIN returns_info ri ON ri.sr_item_sk = ch.c_current_addr_sk  
+WHERE ch.level <= 3
+ORDER BY cd.total_purchase_estimate DESC
+LIMIT 50;

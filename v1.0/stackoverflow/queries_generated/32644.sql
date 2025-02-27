@@ -1,0 +1,119 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        Score,
+        CreationDate,
+        OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostVoteStats AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+TagStats AS (
+    SELECT 
+        TagName,
+        COUNT(PostId) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score <= 0 THEN 1 ELSE 0 END) AS NonPositivePosts
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        TagName
+),
+RecentUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostsCount,
+        MAX(p.CreationDate) AS LastPostDate,
+        SUM(coalesce(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        ph.UserDisplayName AS LastEditor,
+        ph.CreationDate AS LastEditDate,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteStats v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.LastEditorUserId = ph.UserId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        p.Id, ph.UserDisplayName, ph.CreationDate
+)
+SELECT 
+    u.DisplayName AS UserName,
+    r.Title AS PostTitle,
+    r.Score AS PostScore,
+    CASE 
+        WHEN r.Level = 0 THEN 'Top Level Post'
+        ELSE 'Response to Parent'
+    END AS PostHierarchy,
+    pd.ViewCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    ta.PostCount AS AssociatedTagUsed,
+    COALESCE(uta.PostsCount, 0) AS UserPostCount,
+    COALESCE(uta.TotalBadges, 0) AS UserBadgesCount,
+    STRING_AGG(DISTINCT tag.TagName, ', ') AS Tags
+FROM 
+    RecursivePostHierarchy r
+JOIN 
+    PostDetails pd ON r.Id = pd.PostId
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    TagStats ta ON ta.TagName = ANY(pd.Tags)
+LEFT JOIN 
+    RecentUserActivity uta ON u.Id = uta.UserId
+WHERE 
+    pd.ViewCount > 1000
+ORDER BY 
+    r.Score DESC, pd.ViewCount DESC;

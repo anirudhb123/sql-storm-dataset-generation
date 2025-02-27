@@ -1,0 +1,79 @@
+WITH RECURSIVE title_hierarchy AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.imdb_index,
+        t.episode_of_id,
+        COALESCE(e.season_nr, 0) AS season_nr,
+        COALESCE(e.episode_nr, 0) AS episode_nr,
+        CASE
+            WHEN e.episode_of_id IS NOT NULL THEN 'Episode'
+            ELSE 'Movie'
+        END AS title_type
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        aka_title e ON t.id = e.episode_of_id
+
+    UNION ALL
+
+    SELECT 
+        th.title_id,
+        th.title,
+        th.production_year,
+        th.imdb_index,
+        th.episode_of_id,
+        th.season_nr,
+        th.episode_nr,
+        th.title_type
+    FROM 
+        title_hierarchy th
+    JOIN 
+        aka_title e ON th.title_id = e.episode_of_id
+),
+
+related_movies AS (
+    SELECT 
+        DISTINCT ml.linked_movie_id, 
+        COUNT(DISTINCT ml.movie_id) AS related_count
+    FROM 
+        movie_link ml
+    GROUP BY 
+        ml.linked_movie_id
+)
+
+SELECT 
+    ti.title,
+    ti.production_year,
+    COUNT(DISTINCT ci.id) AS cast_count,
+    AVG(person_info.age) AS avg_age,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+    SUM(CASE 
+            WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating') THEN mi.info::FLOAT
+            ELSE 0
+        END) AS total_rating,
+    ROW_NUMBER() OVER (PARTITION BY ti.production_year ORDER BY COUNT(ci.id) DESC) AS rank_by_cast,
+    CASE 
+        WHEN r.related_count IS NULL THEN 'No Related Movies'
+        ELSE r.related_count::TEXT || ' Related Movies'
+    END AS related_movie_info
+FROM 
+    title ti
+LEFT JOIN 
+    cast_info ci ON ti.id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    person_info ON person_info.person_id = ci.person_id AND person_info.info_type_id = (SELECT id FROM info_type WHERE info = 'Age')
+LEFT JOIN 
+    related_movies r ON ti.id = r.linked_movie_id
+LEFT JOIN 
+    movie_info mi ON ti.id = mi.movie_id
+GROUP BY 
+    ti.id, ti.title, ti.production_year, r.related_count
+HAVING 
+    COUNT(DISTINCT ci.id) > 0
+ORDER BY 
+    rank_by_cast,
+    ti.production_year DESC;

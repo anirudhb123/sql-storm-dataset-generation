@@ -1,0 +1,70 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.CreationDate < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+UserRanked AS (
+    SELECT 
+        UA.*,
+        RANK() OVER (ORDER BY TotalPosts DESC, UpVotes DESC) AS UserRank,
+        ROW_NUMBER() OVER (PARTITION BY (CASE WHEN Reputation >= 1000 THEN 1 ELSE 0 END) ORDER BY TotalComments DESC) AS ReputationGroup
+    FROM 
+        UserActivity UA
+),
+TopUsers AS (
+    SELECT 
+        U.*
+    FROM 
+        UserRanked U
+    WHERE 
+        U.UserRank <= 10
+)
+
+SELECT 
+    TU.UserId,
+    TU.DisplayName,
+    TU.Reputation,
+    TU.TotalPosts,
+    TU.TotalComments,
+    CASE 
+        WHEN TU.ReputationGroup = 1 THEN 'Elite'
+        WHEN TU.ReputationGroup = 0 THEN 'Rookie'
+        ELSE 'Intermediate'
+    END AS ReputationTier,
+    COALESCE(HP.TotalHistoryChanges, 0) AS TotalHistoryChanges
+FROM 
+    TopUsers TU
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(*) AS TotalHistoryChanges
+    FROM 
+        PostHistory
+    GROUP BY 
+        UserId
+) HP ON TU.UserId = HP.UserId
+ORDER BY 
+    TU.Reputation DESC, 
+    TU.TotalPosts DESC;

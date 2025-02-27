@@ -1,0 +1,41 @@
+
+WITH movie_years AS (
+    SELECT production_year, COUNT(*) AS total_movies
+    FROM aka_title
+    GROUP BY production_year
+),
+top_companies AS (
+    SELECT co.name AS company_name, COUNT(mc.movie_id) AS movie_count
+    FROM company_name co
+    JOIN movie_companies mc ON co.id = mc.company_id
+    GROUP BY co.name
+    ORDER BY movie_count DESC
+    LIMIT 10
+),
+actor_roles AS (
+    SELECT a.name AS actor_name, r.role AS character_role, COUNT(c.movie_id) AS role_count
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN role_type r ON c.role_id = r.id
+    GROUP BY a.name, r.role
+    HAVING COUNT(c.movie_id) > 1
+),
+keyword_count AS (
+    SELECT mk.movie_id, COUNT(mk.keyword_id) AS total_keywords
+    FROM movie_keyword mk
+    GROUP BY mk.movie_id
+)
+SELECT 
+    t.title AS movie_title, 
+    t.production_year, 
+    COUNT(DISTINCT ai.actor_name) AS number_of_actors, 
+    COALESCE(kc.total_keywords, 0) AS keyword_count, 
+    tc.company_name 
+FROM title t
+JOIN complete_cast cc ON t.id = cc.movie_id
+JOIN actor_roles ai ON cc.subject_id = ai.actor_name
+JOIN movie_info mi ON t.id = mi.movie_id
+JOIN top_companies tc ON mi.note = tc.company_name
+LEFT JOIN keyword_count kc ON t.id = kc.movie_id
+GROUP BY t.title, t.production_year, tc.company_name
+ORDER BY t.production_year ASC, number_of_actors DESC;

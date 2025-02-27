@@ -1,0 +1,64 @@
+
+WITH RECURSIVE customer_ranks AS (
+    SELECT c.c_customer_sk,
+           RANK() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS purchase_rank,
+           cd_purchase_estimate,
+           cd_credit_rating,
+           cd_demo_sk
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd_purchase_estimate IS NOT NULL
+), recent_sales AS (
+    SELECT ws_ship_customer_sk,
+           SUM(ws_net_profit) AS total_net_profit,
+           COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (
+        SELECT d_date_sk
+        FROM date_dim
+        WHERE d_date BETWEEN DATE '2002-10-01' - INTERVAL '30 DAY' AND DATE '2002-10-01'
+    )
+    GROUP BY ws_ship_customer_sk
+), eligible_customers AS (
+    SELECT cr.c_customer_sk,
+           cr.purchase_rank,
+           rs.total_net_profit,
+           rs.order_count,
+           CASE 
+               WHEN rs.total_net_profit IS NULL THEN 'No Sales'
+               WHEN rs.total_net_profit > 1000 THEN 'High Value'
+               WHEN rs.total_net_profit BETWEEN 500 AND 1000 THEN 'Medium Value'
+               ELSE 'Low Value'
+           END AS customer_value_category
+    FROM customer_ranks cr
+    LEFT JOIN recent_sales rs ON cr.c_customer_sk = rs.ws_ship_customer_sk
+)
+SELECT e.c_customer_sk,
+       e.purchase_rank,
+       e.customer_value_category,
+       COALESCE(e.total_net_profit, 0) AS total_net_profit,
+       e.order_count,
+       SUM(CASE 
+               WHEN cd.credit_rating IS NULL THEN 0
+               ELSE CAST(cd.credit_rating AS VARCHAR)
+           END) OVER (PARTITION BY e.customer_value_category) AS cumulative_credit_rating
+FROM eligible_customers e
+LEFT JOIN customer_demographics cd ON e.cd_demo_sk = cd.cd_demo_sk
+WHERE e.purchase_rank <= 5 AND e.customer_value_category != 'No Sales'
+ORDER BY e.customer_value_category, e.total_net_profit DESC
+FETCH FIRST 100 ROWS ONLY
+UNION ALL
+SELECT DISTINCT ca.ca_address_sk,
+                'Address Info' AS category,
+                NULL AS purchase_rank,
+                NULL AS customer_value_category,
+                NULL AS total_net_profit,
+                NULL AS order_count
+FROM customer_address ca
+WHERE ca.ca_country IS NOT NULL AND ca.ca_city IS NOT NULL
+AND NOT EXISTS (
+    SELECT 1 
+    FROM eligible_customers e
+    WHERE e.c_customer_sk = ca.ca_address_sk
+)
+ORDER BY 2, 1;

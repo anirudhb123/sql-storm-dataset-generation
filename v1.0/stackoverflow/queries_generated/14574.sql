@@ -1,0 +1,62 @@
+-- Performance Benchmarking SQL Query
+WITH PostStats AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        COALESCE(SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS BadgeCount
+    FROM
+        Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY
+        p.Id
+),
+UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COALESCE(SUM(bs.BadgeCount), 0) AS TotalBadges,
+        COUNT(DISTINCT ps.PostId) AS TotalPosts,
+        SUM(pv.UpVoteCount) AS TotalUpVotes,
+        SUM(pv.DownVoteCount) AS TotalDownVotes
+    FROM
+        Users u
+    LEFT JOIN Badges bs ON u.Id = bs.UserId
+    LEFT JOIN PostStats ps ON u.Id = ps.OwnerUserId
+    LEFT JOIN (
+        SELECT DISTINCT OwnerUserId, UpVoteCount, DownVoteCount
+        FROM PostStats
+    ) pv ON u.Id = pv.OwnerUserId
+    GROUP BY
+        u.Id
+)
+SELECT
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.CreationDate,
+    us.TotalBadges,
+    us.TotalPosts,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    COUNT(DISTINCT ps.PostId) AS TotalComments,
+    COUNT(DISTINCT v.Id) AS TotalVotes
+FROM
+    UserStats us
+LEFT JOIN Posts ps ON us.UserId = ps.OwnerUserId
+LEFT JOIN Comments c ON ps.Id = c.PostId
+LEFT JOIN Votes v ON ps.Id = v.PostId
+GROUP BY
+    us.UserId, us.DisplayName, us.Reputation, us.CreationDate, us.TotalBadges, us.TotalPosts, us.TotalUpVotes, us.TotalDownVotes
+ORDER BY
+    us.Reputation DESC,
+    us.TotalPosts DESC;

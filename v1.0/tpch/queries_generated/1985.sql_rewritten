@@ -1,0 +1,83 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+),
+ProductDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        COALESCE(NULLIF(SUM(line.l_quantity), 0), 1) AS total_sales
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem line ON p.p_partkey = line.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+)
+SELECT 
+    c.c_name,
+    c.c_acctbal,
+    COALESCE(o.order_count, 0) AS customer_order_count,
+    COALESCE(o.total_spent, 0) AS customer_total_spent,
+    COALESCE(p.p_name, 'N/A') AS product_name,
+    r.r_name,
+    SUM(DISTINCT CASE 
+        WHEN l.l_returnflag = 'R' THEN 1 
+        ELSE 0 
+    END) AS return_count,
+    SUM(p.p_retailprice * CASE 
+        WHEN p.total_sales > 1 THEN 1 
+        ELSE 0 
+    END) AS discounted_retail_value
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerOrders o ON c.c_custkey = o.c_custkey
+LEFT JOIN 
+    lineitem l ON l.l_orderkey IN (SELECT o_orderkey FROM RankedOrders WHERE order_rank <= 10)
+LEFT JOIN 
+    ProductDetails p ON l.l_partkey = p.p_partkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    c.c_acctbal IS NOT NULL
+GROUP BY 
+    c.c_name, c.c_acctbal, o.order_count, o.total_spent, p.p_name, r.r_name
+HAVING 
+    SUM(p.p_retailprice * p.total_sales) > 1000
+ORDER BY 
+    customer_total_spent DESC, customer_order_count DESC;

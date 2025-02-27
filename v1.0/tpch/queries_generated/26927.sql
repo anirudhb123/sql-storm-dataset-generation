@@ -1,0 +1,50 @@
+WITH PartDetails AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_brand, 
+           p.p_type, 
+           LENGTH(p.p_comment) AS comment_length,
+           CASE 
+               WHEN p.p_size BETWEEN 1 AND 5 THEN 'Small'
+               WHEN p.p_size BETWEEN 6 AND 15 THEN 'Medium'
+               ELSE 'Large'
+           END AS size_category
+    FROM part p
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_nationkey,
+           SUBSTRING(s.s_comment FROM 1 FOR 20) AS short_comment,
+           LOWER(s.s_address) AS normalized_address
+    FROM supplier s
+),
+RegionDetails AS (
+    SELECT r.r_regionkey,
+           r.r_name,
+           UPPER(r.r_comment) AS capitalized_comment
+    FROM region r
+),
+NationDetails AS (
+    SELECT n.n_nationkey,
+           n.n_name,
+           array_agg(n.n_comment) AS comments
+    FROM nation n
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT pd.p_partkey,
+       pd.p_name,
+       pd.p_brand,
+       pd.size_category,
+       sd.s_name,
+       rd.r_name AS region_name,
+       nd.comments,
+       pd.comment_length
+FROM PartDetails pd
+JOIN partsupp ps ON pd.p_partkey = ps.ps_partkey
+JOIN SupplierDetails sd ON ps.ps_suppkey = sd.s_suppkey
+JOIN NationDetails nd ON sd.s_nationkey = nd.n_nationkey
+JOIN RegionDetails rd ON nd.n_regionkey = rd.r_regionkey
+WHERE pd.comment_length > 10
+ORDER BY pd.size_category, pd.p_name
+LIMIT 100;

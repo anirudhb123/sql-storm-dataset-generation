@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+)
+
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT c.id) AS role_count,
+    STRING_AGG(DISTINCT CAST(DISTINCT rt.role AS TEXT), ', ') AS roles,
+    MAX(CASE 
+        WHEN r.gender = 'F' THEN 'Female'
+        WHEN r.gender = 'M' THEN 'Male'
+        ELSE 'Unknown'
+    END) AS gender,
+    AVG(m.production_year) OVER (PARTITION BY r.gender) AS avg_production_year
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    MovieHierarchy m ON c.movie_id = m.movie_id
+JOIN 
+    name r ON a.person_id = r.imdb_id
+LEFT JOIN 
+    role_type rt ON c.role_id = rt.id
+WHERE 
+    m.production_year IS NOT NULL 
+    AND (m.title LIKE '%Adventure%' OR m.title LIKE '%Action%')
+GROUP BY 
+    a.id, m.id, r.gender
+ORDER BY 
+    role_count DESC, m.production_year DESC
+LIMIT 10;

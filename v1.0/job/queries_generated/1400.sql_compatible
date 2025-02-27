@@ -1,0 +1,33 @@
+
+WITH ActorData AS (
+    SELECT 
+        a.id AS actor_id, 
+        a.name AS actor_name, 
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(t.title, ', ') AS movies
+    FROM aka_name a
+    INNER JOIN cast_info ci ON a.person_id = ci.person_id
+    INNER JOIN aka_title t ON ci.movie_id = t.id
+    WHERE a.name IS NOT NULL
+    GROUP BY a.id, a.name
+),
+TopActors AS (
+    SELECT 
+        actor_id, 
+        actor_name, 
+        movie_count,
+        RANK() OVER (ORDER BY movie_count DESC) AS actor_rank
+    FROM ActorData
+)
+SELECT 
+    ta.actor_id, 
+    ta.actor_name, 
+    ta.movie_count, 
+    ta.actor_rank, 
+    CASE 
+        WHEN ta.movie_count = 0 THEN 'No Movies'
+        ELSE ta.movies
+    END AS movie_list
+FROM TopActors ta
+WHERE ta.actor_rank <= 10
+ORDER BY ta.actor_rank;

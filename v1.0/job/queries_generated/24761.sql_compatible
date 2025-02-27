@@ -1,0 +1,81 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorNames AS (
+    SELECT 
+        a.person_id,
+        STRING_AGG(DISTINCT a.name, ', ') AS full_name
+    FROM 
+        aka_name a
+    GROUP BY 
+        a.person_id
+),
+MovieRoles AS (
+    SELECT 
+        c.movie_id,
+        c.role_id,
+        r.role,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id, c.role_id, r.role
+),
+CompanyMovieInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT co.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rn.full_name,
+    COALESCE(mr.actor_count, 0) AS actor_count,
+    cmi.company_names,
+    COALESCE(cmi.company_count, 0) AS company_count,
+    CASE 
+        WHEN mr.actor_count IS NULL THEN 'Unknown'
+        ELSE CAST(mr.actor_count AS VARCHAR)
+    END AS actor_count_display,
+    CASE 
+        WHEN rm.year_rank <= 5 THEN 'Top 5 Movies of the Year'
+        ELSE 'Other Movies'
+    END AS movie_category,
+    COALESCE(mr.role, 'No Roles Assigned') AS role_assignment
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieRoles mr ON rm.movie_id = mr.movie_id
+LEFT JOIN 
+    ActorNames rn ON rn.person_id IN (
+        SELECT person_id 
+        FROM cast_info 
+        WHERE movie_id = rm.movie_id
+    )
+LEFT JOIN 
+    CompanyMovieInfo cmi ON rm.movie_id = cmi.movie_id
+WHERE 
+    rm.production_year > 2000 
+    AND (cmi.company_count IS NULL OR cmi.company_count > 1)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title;

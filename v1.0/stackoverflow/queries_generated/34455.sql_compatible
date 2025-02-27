@@ -1,0 +1,84 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER(PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, '2024-10-01')
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        PostId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+RecentPopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        pvc.UpVotes,
+        pvc.DownVotes,
+        COALESCE(SUM(CASE WHEN phs.PostHistoryTypeId = 10 THEN phs.HistoryCount END), 0) AS CloseHistory,
+        COALESCE(SUM(CASE WHEN phs.PostHistoryTypeId = 11 THEN phs.HistoryCount END), 0) AS OpenHistory
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostVoteCounts pvc ON rp.PostId = pvc.PostId
+    LEFT JOIN 
+        PostHistorySummary phs ON rp.PostId = phs.PostId
+    WHERE 
+        rp.rn <= 5
+    GROUP BY 
+        rp.PostId, rp.Title, rp.ViewCount, pvc.UpVotes, pvc.DownVotes
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::text[])
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    rpp.Title,
+    rpp.ViewCount,
+    rpp.UpVotes,
+    rpp.DownVotes,
+    rpp.CloseHistory,
+    rpp.OpenHistory,
+    t.TagName,
+    t.PostCount
+FROM 
+    RecentPopularPosts rpp
+CROSS JOIN 
+    TopTags t
+ORDER BY 
+    rpp.ViewCount DESC, 
+    rpp.UpVotes DESC;

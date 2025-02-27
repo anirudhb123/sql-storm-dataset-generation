@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        mt.episode_of_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1,
+        mt.episode_of_id
+    FROM 
+        aka_title mt
+    JOIN 
+        MovieHierarchy mh ON mt.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    m.title AS Movie_Title,
+    m.production_year AS Production_Year,
+    p.name AS Person_Name,
+    p.gender AS Gender,
+    COALESCE(c.role_id, NULL) AS Role_ID,
+    COUNT(DISTINCT cc.id) OVER (PARTITION BY m.id) AS Total_Cast,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS Keywords,
+    CASE 
+        WHEN m.production_year IS NULL THEN 'Unknown Year'
+        WHEN m.production_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END AS Era,
+    ARRAY_AGG(DISTINCT cmp.name) FILTER (WHERE cmp.country_code IN ('USA', 'GB')) AS US_GB_Companies
+FROM 
+    MovieHierarchy m
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = m.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name p ON p.person_id = ci.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.movie_id
+LEFT JOIN 
+    keyword kw ON kw.id = mk.keyword_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = m.movie_id
+LEFT JOIN 
+    company_name cmp ON cmp.id = mc.company_id
+GROUP BY 
+    m.id, p.name, p.gender, c.role_id
+ORDER BY 
+    m.production_year DESC, Total_Cast DESC, m.title;

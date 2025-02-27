@@ -1,0 +1,66 @@
+
+WITH SupplierTotalCost AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderRevenue AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+    GROUP BY 
+        o.o_orderkey
+),
+NationRevenue AS (
+    SELECT 
+        n.n_name,
+        SUM(OR.total_revenue) AS revenue_per_nation
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        OrderRevenue OR ON o.o_orderkey = OR.o_orderkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    n.n_name,
+    COALESCE(nt.revenue_per_nation, 0) AS total_revenue,
+    stc.total_supply_cost,
+    CASE 
+        WHEN COALESCE(nt.revenue_per_nation, 0) > 0 THEN 
+            (stc.total_supply_cost / COALESCE(nt.revenue_per_nation, 1)) 
+        ELSE 
+            NULL 
+    END AS supply_cost_to_revenue_ratio
+FROM 
+    NationRevenue nt
+FULL OUTER JOIN 
+    SupplierTotalCost stc ON nt.n_name = (SELECT DISTINCT n.n_name 
+                                           FROM nation n 
+                                           WHERE n.n_nationkey = (SELECT c.c_nationkey 
+                                                                  FROM customer c 
+                                                                  JOIN orders o ON c.c_custkey = o.o_custkey 
+                                                                  WHERE o.o_orderkey IN (SELECT o_orderkey 
+                                                                                         FROM orders 
+                                                                                         WHERE o_orderstatus = 'O' 
+                                                                                         LIMIT 1)))
+ORDER BY 
+    total_revenue DESC, 
+    supply_cost_to_revenue_ratio DESC;

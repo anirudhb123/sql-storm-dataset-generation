@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+RankedLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, l.l_quantity,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rn
+    FROM lineitem l
+    WHERE l.l_shipdate > CURRENT_DATE - INTERVAL '30' DAY
+),
+AggregatedSales AS (
+    SELECT ol.o_orderkey, SUM(ol.l_extendedprice * (1 - ol.l_discount)) AS total_sales
+    FROM orders ol
+    JOIN RankedLineItems rli ON ol.o_orderkey = rli.l_orderkey
+    GROUP BY ol.o_orderkey
+),
+NationsWithComments AS (
+    SELECT n.n_name, COALESCE(n.r_comment, 'No Comment') AS region_comment
+    FROM nation n LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+
+SELECT s.s_name, NH.n_name, NH.region_comment, COALESCE(A.total_sales, 0) AS total_sales,
+       CASE 
+           WHEN A.total_sales > 1000 THEN 'High Value'
+           WHEN A.total_sales > 500 THEN 'Medium Value'
+           ELSE 'Low Value' 
+       END AS sales_category,
+       STRING_AGG(R.l_partkey::text, ', ') AS part_keys
+FROM supplier s
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN AggregatedSales A ON s.s_suppkey = A.o_orderkey
+JOIN NationsWithComments NH ON s.s_nationkey = NH.n_name
+LEFT JOIN RankedLineItems R ON s.s_suppkey = R.l_suppkey
+WHERE NVL(sh.level, 0) > 0 AND (s.s_name IS NOT NULL OR s.s_acctbal < 50000)
+GROUP BY s.s_name, NH.n_name, NH.region_comment, A.total_sales
+HAVING COUNT(DISTINCT R.l_partkey) > 2
+ORDER BY total_sales DESC, regional_comment ASC;

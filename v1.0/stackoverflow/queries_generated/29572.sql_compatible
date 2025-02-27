@@ -1,0 +1,91 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        AVG(U.Reputation) AS AverageReputation,
+        STRING_AGG(DISTINCT U.DisplayName, ', ') AS UserNames
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    LEFT JOIN 
+        Users U ON U.Id = P.OwnerUserId
+    GROUP BY 
+        T.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        CommentCount,
+        AverageReputation,
+        UserNames,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStatistics
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        U.DisplayName AS Owner,
+        T.TagName
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON U.Id = P.OwnerUserId
+    JOIN 
+        Tags T ON P.Tags LIKE '%' || T.TagName || '%'
+    ORDER BY 
+        P.ViewCount DESC
+    LIMIT 10
+),
+RecentEdits AS (
+    SELECT 
+        P.Title, 
+        PH.CreationDate AS EditDate,
+        PH.UserDisplayName,
+        PH.Comment,
+        PH.Text
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6)  
+    ORDER BY 
+        PH.CreationDate DESC
+    LIMIT 5
+)
+
+SELECT 
+    T.TagName,
+    T.PostCount,
+    T.CommentCount,
+    T.AverageReputation,
+    T.UserNames,
+    R.PostId,
+    R.Title AS PopularPostTitle,
+    R.ViewCount AS PopularPostViewCount,
+    R.CreationDate AS PopularPostDate,
+    R.Owner AS PopularPostOwner,
+    E.EditDate,
+    E.UserDisplayName AS EditorName,
+    E.Comment AS EditComment,
+    E.Text AS EditedText
+FROM 
+    TopTags T
+LEFT JOIN 
+    PopularPosts R ON R.TagName = T.TagName
+LEFT JOIN 
+    RecentEdits E ON E.Title = R.Title
+WHERE 
+    T.TagRank <= 10 
+ORDER BY 
+    T.PostCount DESC, R.ViewCount DESC;

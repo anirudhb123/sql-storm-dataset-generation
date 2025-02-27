@@ -1,0 +1,44 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, 
+           s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, 
+           s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 500.00
+),
+PartSummary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, c.c_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, c.c_name
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       AVG(p.total_supply_cost) AS avg_supply_cost,
+       SUM(od.total_price) AS total_revenue,
+       ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(od.total_price) DESC) AS revenue_rank
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN PartSummary p ON sh.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN OrderDetails od ON sh.s_suppkey = od.o_orderkey
+WHERE r.r_name IS NOT NULL
+  AND p.total_avail_qty IS NOT NULL
+  AND (sh.s_acctbal IS NULL OR sh.s_acctbal > 1500.00)
+GROUP BY r.r_name, p.total_avail_qty
+HAVING SUM(od.total_price) > 10000.00
+ORDER BY revenue_rank
+FETCH FIRST 10 ROWS ONLY;

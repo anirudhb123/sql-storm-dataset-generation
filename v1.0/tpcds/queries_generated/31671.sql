@@ -1,0 +1,63 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') 
+        AND ws_sold_date_sk <= (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    HAVING 
+        total_sales > 1000
+),
+CustomerResults AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        SUM(ws_sales_price) AS total_web_sales
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c_customer_sk, c_first_name, c_last_name, cd_gender, cd_marital_status
+    HAVING 
+        SUM(ws_sales_price) > (SELECT AVG(total_sales) FROM SalesCTE)
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    c.cd_gender,
+    COUNT(ws.ws_order_number) AS total_orders,
+    SUM(ws.ws_sales_price) AS total_spent,
+    ROUND(AVG(ws.ws_sales_price), 2) AS avg_order_value,
+    CASE 
+        WHEN cd.cd_marital_status = 'M' THEN 'Married'
+        WHEN cd.cd_marital_status = 'S' THEN 'Single'
+        ELSE 'Other'
+    END AS marital_status,
+    ROW_NUMBER() OVER (ORDER BY total_spent DESC) AS rank
+FROM 
+    CustomerResults cr
+JOIN 
+    web_sales ws ON cr.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    customer_demographics cd ON cr.c_customer_sk = cd.cd_demo_sk
+GROUP BY 
+    cr.c_first_name, cr.c_last_name, cd.gender, cd.marital_status
+HAVING 
+    COUNT(ws.ws_order_number) > 5
+ORDER BY 
+    total_spent DESC
+LIMIT 10;
+

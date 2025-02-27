@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        pht.Name AS HistoryType,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.UserId IS NOT NULL -- Only take user-related history
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score AS PostScore,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.AnswerCount,
+    ph.HistoryDate,
+    ph.HistoryType,
+    ph.UserDisplayName AS HistoryUser,
+    ph.Comment AS HistoryComment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryDetails ph ON rp.PostId = ph.PostId AND ph.HistoryRank = 1 -- get the most recent history per post
+WHERE 
+    rp.UserPostRank <= 5 -- Limit to top 5 posts per user
+ORDER BY 
+    rp.OwnerUserId, rp.Score DESC;

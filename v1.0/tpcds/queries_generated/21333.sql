@@ -1,0 +1,58 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM web_sales ws
+    WHERE ws.ws_ship_date_sk IS NOT NULL
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_marital_status,
+        COALESCE(cd.cd_dep_count, 0) AS dep_count,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_marital_status, cd.cd_dep_count
+),
+date_sales AS (
+    SELECT 
+        d.d_date,
+        ds.total_sales,
+        ds.total_quantity
+    FROM (
+        SELECT 
+            d.d_date,
+            SUM(ws.ws_sales_price) AS total_sales,
+            SUM(ws.ws_quantity) AS total_quantity
+        FROM date_dim d
+        JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+        GROUP BY d.d_date
+    ) ds
+    WHERE ds.total_sales > 0
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_marital_status,
+    ci.dep_count,
+    SUM(ds.total_sales) AS total_sales,
+    SUM(ds.total_quantity) AS total_quantity,
+    AVG(rs.ws_net_profit) AS avg_profit,
+    STRING_AGG(DISTINCT 'Item ID: ' || CAST(rs.ws_item_sk AS CHAR(16)) || ' Rank: ' || CAST(rs.profit_rank AS CHAR)) AS items_ranked
+FROM customer_info ci
+LEFT JOIN ranked_sales rs ON ci.c_customer_sk = rs.ws_item_sk
+LEFT JOIN date_sales ds ON ds.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+WHERE ci.order_count > 5 AND
+      (ci.cd_marital_status IS NOT NULL OR ci.dep_count > 0)
+GROUP BY ci.c_first_name, ci.c_last_name, ci.cd_marital_status, ci.dep_count
+HAVING SUM(ds.total_sales) > 1000 OR COUNT(rs.ws_item_sk) > 10
+ORDER BY total_sales DESC NULLS LAST
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

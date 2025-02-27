@@ -1,0 +1,98 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank,
+        COALESCE(NULLIF(SUBSTRING(p.Body, 1, 50), ''), 'No Content Available') AS ShortBody,
+        (SELECT COUNT(*) 
+         FROM Votes v 
+         WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotesCount,
+        (SELECT COUNT(*) 
+         FROM Votes v 
+         WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVotesCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+        AND p.Score > 0
+),
+
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS DeleteCount,
+        MAX(ph.CreationDate) AS LastModified
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    up.DisplayName AS User_DisplayName,
+    pp.PostId,
+    pp.Title,
+    pp.ShortBody,
+    pp.ViewCount,
+    pp.Rank,
+    pm.CloseCount,
+    pm.DeleteCount,
+    um.TotalUpVotes,
+    um.TotalDownVotes,
+    um.TotalBadges,
+    CASE 
+        WHEN pp.Rank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory,
+    COALESCE(pp.UpVotesCount, 0) - COALESCE(pp.DownVotesCount, 0) AS VoteBalance
+FROM 
+    RankedPosts pp
+JOIN 
+    Users up ON pp.OwnerUserId = up.Id
+LEFT JOIN 
+    PostHistoryAggregates pm ON pp.PostId = pm.PostId
+JOIN 
+    UserMetrics um ON up.Id = um.UserId
+WHERE 
+    pp.Rank <= 5
+ORDER BY 
+    pp.Rank, pp.ViewCount DESC;
+
+-- Additional Query Exploring Null Logic and String Expressions
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COALESCE(NULLIF(p.Body, ''), 'Empty Body') AS Body_Contents,
+    CASE 
+        WHEN p.ClosedDate IS NULL THEN 'Open'
+        ELSE 'Closed'
+    END AS Post_Status,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Posts p
+LEFT JOIN 
+    STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '> <') AS tags_array ON true
+LEFT JOIN 
+    Tags t ON t.TagName = ANY(tags_array)
+GROUP BY 
+    p.Id, p.Title, p.Body, p.ClosedDate
+HAVING 
+    COUNT(t.Id) > 0 OR p.ClosedDate IS NOT NULL;

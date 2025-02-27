@@ -1,0 +1,48 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS customer_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT ns.n_nationkey) AS nations_count,
+    SUM(tc.total_spent) AS total_spent_by_top_customers,
+    SUM(ro.total_revenue) AS total_revenue_by_top_orders
+FROM 
+    region r
+JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    TopCustomers tc ON ns.n_nationkey = tc.c_nationkey
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderdate >= CURRENT_DATE - INTERVAL '6 months'
+WHERE 
+    ns.n_nationkey IN (SELECT DISTINCT s.s_nationkey FROM supplier s)
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_revenue_by_top_orders DESC, total_spent_by_top_customers DESC;

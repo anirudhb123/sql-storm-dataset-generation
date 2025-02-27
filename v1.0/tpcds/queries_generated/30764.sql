@@ -1,0 +1,82 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        s.s_store_sk,
+        SUM(ss_quantity) AS total_sales,
+        SUM(ss_net_paid) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY s.s_store_sk ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM 
+        store s
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.s_store_sk
+
+    UNION ALL
+
+    SELECT 
+        ss.s_store_sk,
+        ss.total_sales + COALESCE(t.total_sales, 0) AS total_sales,
+        ss.total_revenue + COALESCE(t.total_revenue, 0) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ss.s_store_sk ORDER BY (ss.total_revenue + COALESCE(t.total_revenue, 0)) DESC) AS sales_rank
+    FROM 
+        sales_summary ss
+    LEFT JOIN 
+        store s ON ss.s_store_sk = s.s_store_sk
+    LEFT JOIN 
+        (SELECT 
+            ws_store_sk, 
+            SUM(ws_quantity) AS total_sales, 
+            SUM(ws_net_paid) AS total_revenue 
+         FROM 
+            web_sales 
+         GROUP BY 
+            ws_store_sk) t ON s.s_store_sk = t.ws_store_sk
+),
+highest_sales AS (
+    SELECT
+        s_store_sk,
+        total_sales,
+        total_revenue
+    FROM
+        sales_summary
+    WHERE 
+        sales_rank = 1
+),
+customer_analysis AS (
+    SELECT 
+        cd.demo_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        SUM(ws.net_profit) AS total_net_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        cd.demo_sk, c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+    HAVING 
+        SUM(ws.net_profit) IS NOT NULL
+)
+SELECT 
+    h.s_store_sk,
+    h.total_sales,
+    h.total_revenue,
+    ca.c_customer_id, 
+    ca.cd_gender, 
+    ca.cd_marital_status,
+    ca.cd_credit_rating,
+    ca.total_net_profit
+FROM 
+    highest_sales h
+LEFT JOIN 
+    customer_analysis ca ON h.s_store_sk = ca.cd_demo_sk
+WHERE 
+    h.total_sales > 1000 AND 
+    (ca.cd_gender = 'F' OR ca.cd_marital_status = 'M' OR ca.total_net_profit > 500)
+ORDER BY 
+    h.total_revenue DESC, h.total_sales ASC;

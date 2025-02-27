@@ -1,0 +1,83 @@
+WITH RecursiveActorInfo AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        c.movie_id,
+        tt.title AS movie_title,
+        COALESCE(tm.production_year, tt.production_year) AS production_year
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    LEFT JOIN 
+        aka_title tt ON c.movie_id = tt.id
+    LEFT JOIN 
+        title tm ON c.movie_id = tm.id
+    WHERE 
+        a.name IS NOT NULL
+    UNION ALL
+    SELECT 
+        a.id,
+        a.name,
+        c.movie_id,
+        tt.title,
+        COALESCE(tm.production_year, tt.production_year)
+    FROM 
+        RecursiveActorInfo r
+    JOIN 
+        cast_info c ON r.actor_id = c.person_id
+    LEFT JOIN 
+        aka_title tt ON c.movie_id = tt.id
+    LEFT JOIN 
+        title tm ON c.movie_id = tm.id
+    WHERE 
+        r.actor_id <> c.person_id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+ActorRoles AS (
+    SELECT 
+        a.id AS actor_id,
+        r.role AS role,
+        COUNT(c.movie_id) AS total_movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.id, r.role
+)
+SELECT 
+    r.actor_id,
+    r.actor_name,
+    r.movie_title,
+    r.production_year,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    ar.role AS primary_role,
+    ar.total_movies AS movies_count
+FROM 
+    RecursiveActorInfo r
+LEFT JOIN 
+    MovieKeywords mk ON r.movie_id = mk.movie_id
+LEFT JOIN 
+    ActorRoles ar ON r.actor_id = ar.actor_id
+WHERE 
+    r.production_year >= 2000 
+    AND (r.actor_name ILIKE '%smith%' OR r.actor_name ILIKE '%john%') 
+    AND (ar.total_movies >= 5 OR ar.total_movies IS NULL) 
+ORDER BY 
+    r.actor_name, r.production_year DESC 
+LIMIT 50;

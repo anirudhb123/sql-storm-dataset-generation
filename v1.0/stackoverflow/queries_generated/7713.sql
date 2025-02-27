@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 10 AND 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank = 1
+),
+PostDetails AS (
+    SELECT 
+        tp.*,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Comments c ON tp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON tp.PostId = v.PostId
+    GROUP BY 
+        tp.PostId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Score,
+    pd.ViewCount,
+    pd.OwnerDisplayName,
+    pd.AnswerCount,
+    pd.CommentCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    (pd.UpVotes - pd.DownVotes) AS NetVotes,
+    pd.CreationDate
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.NetVotes DESC, 
+    pd.CreationDate DESC
+LIMIT 50;

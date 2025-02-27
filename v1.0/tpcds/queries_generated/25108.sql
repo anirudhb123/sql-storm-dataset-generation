@@ -1,0 +1,52 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        c.c_email_address,
+        cd_cdemo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk 
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ad.full_address,
+        cd.full_name,
+        cd.cd_gender
+    FROM web_sales ws
+    JOIN CustomerDetails cd ON ws.ws_bill_customer_sk = cd.c_customer_sk
+    JOIN AddressDetails ad ON ws.ws_bill_addr_sk = ad.ca_address_sk
+),
+AggregatedSales AS (
+    SELECT 
+        full_address,
+        SUM(ws_quantity) AS total_quantity_sold,
+        SUM(ws_net_profit) AS total_profit
+    FROM SalesData
+    GROUP BY full_address
+)
+SELECT 
+    ad.full_address,
+    ad.total_quantity_sold,
+    ad.total_profit,
+    ROW_NUMBER() OVER (ORDER BY ad.total_profit DESC) AS profit_rank
+FROM AggregatedSales ad
+WHERE ad.total_profit > 100.00
+ORDER BY ad.total_profit DESC;

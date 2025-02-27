@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        ARRAY_AGG(DISTINCT SUBSTRING(p.Tags FROM '\w+') ORDER BY SUBSTRING(p.Tags FROM '\w+')) AS TagArray
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL 
+        AND p.Body IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+UserVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 WHEN vt.Name = 'DownMod' THEN -1 ELSE 0 END) AS VoteBalance
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(CASE WHEN b.Class = 1 THEN 'Gold' WHEN b.Class = 2 THEN 'Silver' ELSE 'Bronze' END) AS HighestBadge
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Id END) AS CloseCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 12 THEN ph.Id END) AS DeleteCount,
+        COUNT(DISTINCT ph.Id) AS TotalHistoryCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    COALESCE(uv.VoteBalance, 0) AS VoteBalance,
+    ub.BadgeCount,
+    ub.HighestBadge,
+    phs.CloseCount,
+    phs.DeleteCount,
+    phs.TotalHistoryCount,
+    rp.TagArray
+FROM 
+    Users u
+JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    UserVotes uv ON rp.PostId = uv.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+WHERE 
+    rp.PostRank = 1
+    AND (u.Reputation >= 1000 OR ub.BadgeCount > 0)
+ORDER BY 
+    u.Reputation DESC,
+    rp.Score DESC,
+    rp.CreationDate DESC
+LIMIT 100;
+

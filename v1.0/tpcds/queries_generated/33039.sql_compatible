@@ -1,0 +1,61 @@
+
+WITH RECURSIVE date_series AS (
+    SELECT d_date_sk, d_date
+    FROM date_dim
+    WHERE d_date = '2023-01-01'
+    UNION ALL
+    SELECT d.d_date_sk, d.d_date
+    FROM date_dim d
+    JOIN date_series ds ON d.d_date_sk = ds.d_date_sk + 1
+    WHERE ds.d_date_sk < (SELECT MAX(d_date_sk) FROM date_dim)
+),
+customer_summary AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        COALESCE(SUM(ws_ext_sales_price), 0) AS total_sales
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_birth_year < 1990
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+inventory_summary AS (
+    SELECT
+        i.i_item_sk,
+        SUM(i.inv_quantity_on_hand) AS total_quantity
+    FROM inventory i
+    JOIN warehouse w ON i.inv_warehouse_sk = w.warehouse_sk
+    WHERE w.w_country = 'USA'
+    GROUP BY i.i_item_sk
+),
+order_summary AS (
+    SELECT
+        cs.cs_item_sk,
+        SUM(cs.cs_quantity) AS total_sold,
+        SUM(cs.cs_ext_sales_price) AS total_revenue
+    FROM catalog_sales cs
+    WHERE cs.cs_sold_date_sk IN (SELECT d_date_sk FROM date_series)
+    GROUP BY cs.cs_item_sk
+)
+SELECT
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    COALESCE(i.total_quantity, 0) AS total_inventory,
+    COALESCE(o.total_sold, 0) AS total_ordered,
+    COALESCE(o.total_revenue, 0) AS total_revenue,
+    CASE 
+        WHEN COALESCE(o.total_revenue, 0) > 0 THEN 'Active Customer'
+        ELSE 'Inactive Customer'
+    END AS customer_status
+FROM customer_summary cs
+LEFT JOIN inventory_summary i ON cs.c_customer_sk = i.i_item_sk
+LEFT JOIN order_summary o ON i.i_item_sk = o.cs_item_sk
+ORDER BY total_revenue DESC
+LIMIT 100;

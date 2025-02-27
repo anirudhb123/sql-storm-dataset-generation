@@ -1,0 +1,63 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY COUNT(p.Id) DESC) AS Rank
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id
+),
+MostActiveUsers AS (
+    SELECT 
+        DisplayName,
+        TotalPosts,
+        UpVotes,
+        DownVotes,
+        Rank
+    FROM 
+        UserPostStats
+    WHERE 
+        Rank <= 10
+),
+PostCloseHistory AS (
+    SELECT 
+        ph.PostId,
+        p.Title,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS CloseEventRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    u.DisplayName AS ActiveUser,
+    up.TotalPosts,
+    up.UpVotes,
+    up.DownVotes,
+    pc.Title AS ClosedPostTitle,
+    pc.UserDisplayName AS CloserUser,
+    pc.CreationDate AS CloseDate,
+    pc.Comment AS CloseReason
+FROM 
+    MostActiveUsers up
+JOIN 
+    PostCloseHistory pc ON up.UserId = pc.PostId
+WHERE 
+    pc.CloseEventRank = 1
+ORDER BY 
+    up.TotalPosts DESC, pc.CloseDate DESC;

@@ -1,0 +1,57 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS depth
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.linked_movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link m 
+        JOIN title t ON m.linked_movie_id = t.id
+        JOIN MovieHierarchy mh ON m.movie_id = mh.movie_id
+    WHERE 
+        mh.depth < 3  
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(DISTINCT c.id) AS total_cast_members,
+    AVG(p.info) AS avg_age, 
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    CASE
+        WHEN COUNT(DISTINCT c.id) > 10 THEN 'Large Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    MovieHierarchy mh ON c.movie_id = mh.movie_id
+JOIN 
+    title t ON mh.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    person_info p ON a.person_id = p.person_id
+GROUP BY 
+    a.name, t.title, t.production_year
+HAVING 
+    AVG(p.info) IS NOT NULL
+ORDER BY 
+    t.production_year DESC, total_cast_members DESC;

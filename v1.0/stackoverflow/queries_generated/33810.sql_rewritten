@@ -1,0 +1,63 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        0 AS Level,
+        CAST(P.Title AS VARCHAR(MAX)) AS FullPostPath
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        Level + 1,
+        CAST(CONCAT(RPH.FullPostPath, ' -> ', P.Title) AS VARCHAR(MAX)) AS FullPostPath
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+)
+
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    COUNT(DISTINCT P.Id) AS PostCount,
+    COUNT(DISTINCT C.Id) AS CommentCount,
+    SUM(V.BountyAmount) AS TotalBounty,
+    AVG(P.Score) AS AvgPostScore,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags,
+    MAX(P.CreationDate) AS LastActiveDate,
+    COUNT(DISTINCT B.Id) AS BadgeCount,
+    CASE 
+        WHEN SUM(V.BountyAmount) IS NULL THEN 0 
+        ELSE SUM(V.BountyAmount) 
+    END AS NonNullBounty,
+    ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY SUM(V.BountyAmount) DESC) AS BountyRank
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9)  
+LEFT JOIN 
+    Tags T ON P.Tags LIKE '%' + T.TagName + '%'  
+LEFT JOIN 
+    Badges B ON U.Id = B.UserId
+WHERE 
+    U.Reputation > 1000  
+GROUP BY 
+    U.Id, U.DisplayName, U.Reputation
+HAVING 
+    COUNT(DISTINCT P.Id) > 5  
+ORDER BY 
+    TotalBounty DESC, AvgPostScore DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

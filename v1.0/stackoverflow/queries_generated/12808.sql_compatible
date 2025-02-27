@@ -1,0 +1,61 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        DATEDIFF('2024-10-01 12:34:56', p.CreationDate) AS DaysSinceCreation,
+        p.ViewCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 /* Only include questions */
+)
+SELECT 
+    ua.DisplayName,
+    ua.PostCount,
+    ua.QuestionCount,
+    ua.AnswerCount,
+    ua.UpVotes,
+    ua.DownVotes,
+    ps.Id AS PostId,
+    ps.Title,
+    ps.Score,
+    ps.DaysSinceCreation,
+    ps.ViewCount,
+    ps.CommentCount
+FROM 
+    UserActivity ua
+JOIN 
+    PostStatistics ps ON ua.QuestionCount > 0 
+ORDER BY 
+    ua.UpVotes DESC, 
+    ps.Score DESC
+LIMIT 100;

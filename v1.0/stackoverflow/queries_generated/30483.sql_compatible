@@ -1,0 +1,85 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.ParentId,
+        RPH.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+
+PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,  
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes, 
+        COALESCE(COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END), 0) AS CommentCount,    
+        COALESCE(AVG(P.Score), 0) AS AverageScore,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                unnest(string_to_array(P.Tags, '><')) AS TagName
+        ) T ON TRUE
+    GROUP BY 
+        P.Id, P.Title
+),
+
+PostsWithHistory AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS EditCount, 
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+)
+
+SELECT 
+    PM.PostId,
+    PM.Title,
+    PM.Upvotes,
+    PM.Downvotes,
+    PM.CommentCount,
+    PM.AverageScore,
+    PM.Tags,
+    COALESCE(PWH.EditCount, 0) AS EditCount,
+    P.ViewCount AS TotalViewCount,
+    RPH.Level
+FROM 
+    PostMetrics PM
+LEFT JOIN 
+    PostsWithHistory PWH ON PM.PostId = PWH.PostId
+LEFT JOIN 
+    RecursivePostHierarchy RPH ON PM.PostId = RPH.PostId
+ORDER BY 
+    PM.AverageScore DESC,
+    PM.Upvotes DESC
+LIMIT 100;

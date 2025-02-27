@@ -1,0 +1,52 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+SupplierParts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY c.c_custkey
+),
+PartPriceStats AS (
+    SELECT p.p_partkey, AVG(p.p_retailprice) AS avg_price, MAX(p.p_retailprice) AS max_price
+    FROM part p
+    GROUP BY p.p_partkey
+)
+SELECT 
+    nh.n_name AS nation_name,
+    COALESCE(SUM(sp.total_avail_qty), 0) AS total_avail_qty,
+    COALESCE(SUM(co.total_spent), 0) AS total_spent,
+    p.p_name AS part_name,
+    ps.avg_price,
+    ps.max_price
+FROM NationHierarchy nh
+LEFT JOIN SupplierParts sp ON sp.ps_partkey IN (SELECT ps_partkey 
+                                                FROM partsupp 
+                                                WHERE ps_suppkey IN (SELECT s.s_suppkey 
+                                                                     FROM supplier s 
+                                                                     WHERE s.s_nationkey = nh.n_nationkey))
+LEFT JOIN CustomerOrders co ON co.c_custkey IN (SELECT o.o_custkey 
+                                                FROM orders o 
+                                                JOIN customer c ON o.o_custkey = c.c_custkey 
+                                                WHERE c.c_nationkey = nh.n_nationkey)
+LEFT JOIN PartPriceStats ps ON ps.p_partkey IN (SELECT ps.ps_partkey 
+                                                FROM partsupp ps 
+                                                JOIN supplier s ON ps.ps_suppkey = s.s_suppkey 
+                                                WHERE s.s_nationkey = nh.n_nationkey)
+JOIN part p ON p.p_partkey = sp.ps_partkey
+GROUP BY nh.n_name, p.p_name, ps.avg_price, ps.max_price
+HAVING SUM(sp.total_avail_qty) > 100 OR COALESCE(SUM(co.total_spent), 0) > 5000
+ORDER BY nation_name, part_name;

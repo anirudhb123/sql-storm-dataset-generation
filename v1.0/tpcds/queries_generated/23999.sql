@@ -1,0 +1,70 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_state,
+        COUNT(DISTINCT ca_address_sk) AS address_count,
+        AVG(ca_zip::integer) AS avg_zip,
+        MAX(ca_gmt_offset) - MIN(ca_gmt_offset) AS offset_range
+    FROM 
+        customer_address
+    WHERE 
+        ca_country IS NOT NULL
+    GROUP BY 
+        ca_state
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS demo_count,
+        SUM(cd_dep_count) AS total_dependents,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_credit_rating IS NOT NULL
+    GROUP BY 
+        cd_gender
+), 
+SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(ws.ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_profit) DESC) AS profitability_rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 AND dd.d_dow NOT IN (1, 7 -- Exclude Sundays and Mondays
+        )
+    GROUP BY 
+        ws.web_site_id
+)
+SELECT 
+    as.ca_state,
+    cs.cd_gender,
+    s.total_net_profit,
+    s.order_count,
+    CASE 
+        WHEN as.address_count > 100 THEN 'High Density'
+        WHEN as.address_count BETWEEN 50 AND 100 THEN 'Moderate Density'
+        ELSE 'Low Density'
+    END AS address_density,
+    COALESCE(as.avg_zip, 0) AS avg_zip_code,
+    CASE 
+        WHEN s.profitability_rank = 1 THEN 'Top Performer'
+        ELSE 'Other'
+    END AS website_performance
+FROM 
+    AddressStats as
+FULL OUTER JOIN 
+    CustomerDemographics cs ON as.ca_state IS NOT DISTINCT FROM cs.cd_gender
+LEFT JOIN 
+    SalesData s ON s.web_site_id = 'WS_001'
+WHERE 
+    (as.offset_range IS NULL OR as.offset_range > 2)
+    AND cs.demo_count >= (SELECT AVG(demo_count) FROM CustomerDemographics)
+ORDER BY 
+    as.address_count DESC, 
+    s.total_net_profit DESC;

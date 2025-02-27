@@ -1,0 +1,51 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COALESCE(STRING_AGG(DISTINCT a.name, ', '), 'Unknown') AS actors,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+TopActors AS (
+    SELECT 
+        production_year,
+        title,
+        actors,
+        actor_count,
+        rank
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5
+)
+SELECT 
+    pa.name AS actor_name,
+    tm.title AS movie_title,
+    tm.production_year,
+    COALESCE(mk.keyword, 'No Keywords') AS movie_keyword,
+    CASE 
+        WHEN tm.actor_count > 0 THEN 'Featured'
+        ELSE 'Not Featured'
+    END AS actor_status
+FROM 
+    TopActors tm
+LEFT JOIN 
+    cast_info ci ON tm.title = (SELECT title FROM aka_title WHERE id = ci.movie_id)
+LEFT JOIN 
+    movie_keyword mk ON ci.movie_id = mk.movie_id
+LEFT JOIN 
+    aka_name pa ON pa.person_id = ci.person_id
+WHERE 
+    tm.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    tm.production_year DESC, tm.actor_count DESC;

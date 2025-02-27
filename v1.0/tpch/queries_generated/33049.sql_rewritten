@@ -1,0 +1,70 @@
+WITH RECURSIVE RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_retailprice, 
+        SUM(l.l_quantity) as total_quantity_sold
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+)
+SELECT 
+    r.n_name AS supplier_nation,
+    r.r_name AS region_name,
+    sp.ps_partkey,
+    pd.p_name,
+    pd.p_brand,
+    pd.total_quantity_sold,
+    sp.total_avail_qty,
+    SPD.total_supply_cost,
+    o.o_orderkey,
+    COUNT(DISTINCT o.o_orderkey) OVER (PARTITION BY r.r_regionkey) AS total_orders_in_region,
+    CASE 
+        WHEN pd.total_quantity_sold IS NULL THEN 'No Sales' 
+        ELSE 'Sales Recorded' 
+    END AS sales_status
+FROM SupplierParts sp
+LEFT JOIN supplier s ON sp.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN PartDetails pd ON sp.ps_partkey = pd.p_partkey
+LEFT JOIN RankedOrders o ON o.o_orderkey = (
+    SELECT oo.o_orderkey
+    FROM orders oo 
+    WHERE oo.o_custkey = (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_nationkey = s.s_nationkey
+        LIMIT 1
+    )
+    ORDER BY oo.o_orderdate DESC
+    LIMIT 1
+)
+WHERE sp.total_avail_qty > (
+    SELECT AVG(ps_total_avail_qty) 
+    FROM (SELECT SUM(ps.ps_availqty) AS ps_total_avail_qty 
+          FROM partsupp ps 
+          GROUP BY ps.ps_partkey) AS avg_qty
+)
+ORDER BY r.n_name, pd.p_name;

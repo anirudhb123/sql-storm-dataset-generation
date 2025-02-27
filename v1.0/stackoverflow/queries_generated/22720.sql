@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.Id AS OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.Id
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        CASE 
+            WHEN rp.ViewCount > 100 THEN 'High'
+            WHEN rp.ViewCount BETWEEN 50 AND 100 THEN 'Medium'
+            ELSE 'Low'
+        END AS ViewRank,
+        COALESCE(SUM(v.VoteTypeId = 2)::int, 0) AS UpVotesCount,
+        COALESCE(SUM(v.VoteTypeId = 3)::int, 0) AS DownVotesCount,
+        SUM(
+            CASE 
+                WHEN v.VoteTypeId IS NULL THEN 0
+                ELSE 1
+            END
+        ) AS TotalVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, 
+        rp.OwnerUserId, rp.OwnerDisplayName
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.OwnerUserId,
+    fp.OwnerDisplayName,
+    fp.CommentCount,
+    fp.ViewRank,
+    fp.UpVotesCount,
+    fp.DownVotesCount,
+    (SELECT MAX(Date) FROM Badges b WHERE b.UserId = fp.OwnerUserId) AS LastBadgeDate,
+    CASE
+        WHEN fp.Score < 0 AND fp.CommentCount = 0 THEN 'Unpopular Post'
+        WHEN fp.UpVotesCount > fp.DownVotesCount THEN 'Well-liked'
+        ELSE 'Needs Improvement'
+    END AS PostStatus
+FROM 
+    FilteredPosts fp
+WHERE 
+    NOT EXISTS (
+        SELECT 1 
+        FROM Posts p 
+        WHERE p.ParentId = fp.PostId AND p.PostTypeId = 2
+    )
+ORDER BY 
+    fp.ViewRank DESC, fp.Score DESC, LastBadgeDate DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

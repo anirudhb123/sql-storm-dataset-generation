@@ -1,0 +1,97 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        CAST(0 AS INT) AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        b.Class,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, b.Class
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        v.VoteTypeId,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'  
+    GROUP BY 
+        v.PostId, v.VoteTypeId
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(rv.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(rv.DownVoteCount, 0) AS DownVoteCount,
+        COALESCE(rv.AcceptedCount, 0) AS AcceptedCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+            SUM(CASE WHEN VoteTypeId = 1 THEN 1 ELSE 0 END) AS AcceptedCount
+        FROM 
+            RecentVotes
+        GROUP BY 
+            PostId
+    ) rv ON p.Id = rv.PostId
+)
+SELECT 
+    pvs.PostId,
+    pvs.Title,
+    COALESCE(rp.Level, 0) AS AnswerLevel,
+    ub.DisplayName,
+    ub.BadgeCount,
+    pvs.UpVoteCount,
+    pvs.DownVoteCount,
+    pvs.AcceptedCount,
+    CASE 
+        WHEN pvs.AcceptedCount > 0 THEN 'Accepted'
+        WHEN pvs.UpVoteCount > pvs.DownVoteCount THEN 'Popular'
+        ELSE 'Unpopular'
+    END AS PopularityStatus
+FROM 
+    PostVoteSummary pvs
+LEFT JOIN 
+    Users u ON pvs.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    RecursivePostCTE rp ON pvs.PostId = rp.PostId
+WHERE 
+    pvs.UpVoteCount > 0 OR pvs.DownVoteCount > 0
+ORDER BY 
+    pvs.UpVoteCount DESC, pvs.DownVoteCount ASC;

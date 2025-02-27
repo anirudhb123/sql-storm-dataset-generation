@@ -1,0 +1,79 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title m
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.linked_movie_id
+),
+
+cast_ranks AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        RANK() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank,
+        COUNT(*) OVER (PARTITION BY c.movie_id) AS total_actors
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.md5sum IS NOT NULL
+),
+
+performance AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        cr.actor_name,
+        cr.actor_rank,
+        cr.total_actors,
+        mt.info AS movie_info,
+        COALESCE(NULLIF(mt.info, ''), 'N/A') AS info_display
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_ranks cr ON mh.movie_id = cr.movie_id
+    LEFT JOIN 
+        movie_info mt ON mh.movie_id = mt.movie_id AND mt.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget')
+    WHERE 
+        mh.production_year > 2000
+)
+
+SELECT 
+    p.movie_id,
+    p.title,
+    p.production_year,
+    p.actor_name,
+    p.actor_rank,
+    p.total_actors,
+    p.movie_info,
+    p.info_display
+FROM 
+    performance p
+WHERE 
+    p.actor_rank < 4 
+    OR p.info_display LIKE '%high%' 
+ORDER BY 
+    p.production_year DESC, 
+    p.total_actors ASC 
+LIMIT 100;

@@ -1,0 +1,27 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT i_item_sk, i_item_id, i_item_desc, i_current_price, CAST(i_item_desc AS VARCHAR(200)) AS full_path
+    FROM item
+    WHERE i_rec_start_date <= CURRENT_DATE AND (i_rec_end_date IS NULL OR i_rec_end_date > CURRENT_DATE)
+    
+    UNION ALL
+    
+    SELECT i.i_item_sk, i.i_item_id, i.i_item_desc, i.i_current_price, CONCAT(ih.full_path, ' > ', i.i_item_desc)
+    FROM item_hierarchy ih
+    JOIN item i ON ih.i_item_sk = i.i_item_sk -- Example of self-referential join if items had parent-child relationship
+)
+SELECT 
+    c.c_customer_id,
+    SUM(ws.ws_sales_price) AS total_sales,
+    COUNT(ws.ws_order_number) AS total_orders,
+    DENSE_RANK() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank,
+    COALESCE(SUM(CASE WHEN c.c_birth_month = EXTRACT(MONTH FROM CURRENT_DATE) THEN ws.ws_sales_price ELSE 0 END), 0) AS this_month_sales,
+    ARRAY_AGG(DISTINCT CONCAT(i.full_path, ': ', ws.ws_sales_price) ORDER BY i.full_path) AS item_sales_details
+FROM customer c
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN item_hierarchy i ON ws.ws_item_sk = i.i_item_sk
+WHERE c.c_current_cdemo_sk IS NOT NULL
+GROUP BY c.c_customer_id
+HAVING total_sales > (SELECT AVG(total) FROM (SELECT SUM(ws2.ws_sales_price) AS total FROM web_sales ws2 GROUP BY ws2.ws_bill_customer_sk) AS avg_total)
+ORDER BY total_sales DESC
+LIMIT 10;

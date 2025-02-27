@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT sh.s_suppkey, sh.s_name, sh.s_acctbal, sh.level + 1
+    FROM supplier sh
+    JOIN SupplierHierarchy shierarchy ON sh.s_suppkey = shierarchy.s_suppkey
+    WHERE shierarchy.level < 5
+),
+AggregatedSales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS orders_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+EligibleSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey
+    HAVING AVG(ps.ps_supplycost) < (
+        SELECT AVG(ps_supplycost) FROM partsupp
+    )
+),
+FinalReport AS (
+    SELECT 
+        s.s_name,
+        COALESCE(a.total_spent, 0) AS total_spent,
+        COALESCE(es.total_parts, 0) AS parts_supplied,
+        sh.level AS supplier_level
+    FROM supplier s
+    LEFT JOIN AggregatedSales a ON s.s_suppkey = a.c_custkey
+    LEFT JOIN EligibleSuppliers es ON s.s_suppkey = es.s_suppkey
+    LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+)
+SELECT 
+    f.s_name,
+    f.total_spent,
+    f.parts_supplied,
+    CASE 
+        WHEN f.total_spent > 10000 THEN 'High Value'
+        WHEN f.total_spent BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_segment,
+    MAX(f.parts_supplied) OVER (PARTITION BY f.s_name) AS max_parts,
+    (SELECT COUNT(*) 
+     FROM customer c 
+     WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+     AND c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderdate >= '1997-01-01')) AS above_average_customers
+FROM FinalReport f
+WHERE f.parts_supplied IS NOT NULL AND f.total_spent > 0
+ORDER BY f.total_spent DESC
+LIMIT 100;

@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+  SELECT 
+    t.id AS movie_id,
+    t.title,
+    t.production_year,
+    t.kind_id,
+    ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+  FROM 
+    aka_title t
+  WHERE 
+    t.production_year IS NOT NULL
+),
+MovieDetails AS (
+  SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    kt.kind AS movie_kind,
+    GROUP_CONCAT(DISTINCT c.role_id) AS roles,
+    COUNT(DISTINCT mk.keyword_id) AS keyword_count
+  FROM 
+    RankedMovies rm
+  LEFT JOIN 
+    complete_cast cc ON rm.movie_id = cc.movie_id
+  LEFT JOIN 
+    role_type c ON cc.role_id = c.id
+  LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = rm.movie_id
+  LEFT JOIN 
+    kind_type kt ON rm.kind_id = kt.id
+  GROUP BY 
+    rm.movie_id, rm.title, rm.production_year, kt.kind
+),
+TopKeywords AS (
+  SELECT 
+    movie_id,
+    ARRAY_AGG(DISTINCT keyword ORDER BY keyword) AS top_keywords
+  FROM 
+    movie_keyword mk
+  JOIN 
+    keyword k ON k.id = mk.keyword_id
+  GROUP BY 
+    movie_id
+)
+SELECT 
+  md.movie_id,
+  md.title,
+  md.production_year,
+  md.movie_kind,
+  md.roles,
+  md.keyword_count,
+  tk.top_keywords
+FROM 
+  MovieDetails md
+LEFT JOIN 
+  TopKeywords tk ON md.movie_id = tk.movie_id
+WHERE 
+  md.keyword_count > 5
+ORDER BY 
+  md.production_year DESC, 
+  md.title;

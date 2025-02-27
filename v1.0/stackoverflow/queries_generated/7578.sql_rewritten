@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+HighScorePosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.Score, 
+        rp.ViewCount, 
+        rp.OwnerDisplayName,
+        rp.ScoreRank,
+        rp.CommentCount,
+        rp.VoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ScoreRank <= 10 
+),
+PostDetails AS (
+    SELECT 
+        hsp.PostId,
+        hsp.Title,
+        hsp.OwnerDisplayName,
+        hsp.Score,
+        hsp.CommentCount,
+        hsp.VoteCount,
+        COALESCE(JSON_AGG(DISTINCT b.Name) FILTER (WHERE b.Id IS NOT NULL), '[]') AS BadgeNames
+    FROM 
+        HighScorePosts hsp
+    LEFT JOIN 
+        Badges b ON hsp.PostId = b.UserId
+    GROUP BY 
+        hsp.PostId, hsp.Title, hsp.OwnerDisplayName, hsp.Score, hsp.CommentCount, hsp.VoteCount
+)
+SELECT 
+    pd.*, 
+    (SELECT COUNT(*) FROM Posts p WHERE p.ParentId = pd.PostId) AS AnswerCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = pd.PostId AND v.VoteTypeId = 2) AS UpvoteCount
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC
+LIMIT 50;

@@ -1,0 +1,60 @@
+
+WITH RankedCustomer AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_current_addr_sk,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > 10000
+),
+RecentSales AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_date >= CURRENT_DATE - INTERVAL '1 YEAR'
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        rc.c_customer_id,
+        rs.total_profit,
+        RANK() OVER (ORDER BY rs.total_profit DESC) AS profit_rank
+    FROM 
+        RankedCustomer rc
+    JOIN 
+        RecentSales rs ON rc.c_customer_id = rs.ws_bill_customer_sk
+    WHERE 
+        rc.gender_rank <= 10
+)
+SELECT 
+    tc.c_customer_id,
+    COALESCE(total_profit, 0) AS total_profit,
+    d.d_year,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    web_sales ws ON tc.c_customer_id = ws.ws_bill_customer_sk
+LEFT JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    d.d_year IS NOT NULL
+GROUP BY 
+    tc.c_customer_id, total_profit, d.d_year
+HAVING 
+    total_profit > 5000
+ORDER BY 
+    total_profit DESC
+LIMIT 100;

@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, p.p_partkey, p.p_name, p.p_retailprice
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT sc.s_suppkey, sc.s_name, sc.s_acctbal, p.p_partkey, p.p_name, p.p_retailprice
+    FROM SupplyChain sc
+    JOIN partsupp ps ON sc.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > 2000
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1996-01-01' AND o.o_orderdate <= '1996-12-31'
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT c_custkey, c_name
+    FROM CustomerOrders
+    WHERE total_spent > (
+        SELECT AVG(total_spent) FROM CustomerOrders
+    )
+)
+SELECT 
+    sc.s_suppkey,
+    sc.s_name,
+    sc.s_acctbal,
+    COUNT(DISTINCT hc.c_custkey) AS num_high_value_customers,
+    AVG(sc.p_retailprice) AS avg_retail_price,
+    SUM(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * (1 - l.l_discount) ELSE l.l_extendedprice END) AS total_revenue_after_discount,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY l.l_extendedprice) OVER () AS median_price
+FROM SupplyChain sc
+LEFT JOIN lineitem l ON sc.p_partkey = l.l_partkey
+LEFT JOIN HighValueCustomers hc ON sc.s_suppkey = (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = hc.c_custkey)
+GROUP BY sc.s_suppkey, sc.s_name, sc.s_acctbal
+ORDER BY num_high_value_customers DESC, avg_retail_price DESC;

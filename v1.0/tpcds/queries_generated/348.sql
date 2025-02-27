@@ -1,0 +1,77 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk, 
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ws.ws_sales_price, 
+        ws.ws_net_paid, 
+        ws.ws_net_paid_inc_tax,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.ws_item_sk, ws.ws_sales_price, ws.ws_net_paid, ws.ws_net_paid_inc_tax
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        cd.cd_credit_rating IS NOT NULL AND 
+        ca.ca_state IN ('CA', 'NY', 'TX')
+),
+TopSellingItems AS (
+    SELECT 
+        sd.ws_item_sk, 
+        sd.total_quantity, 
+        sd.total_profit,
+        ci.ca_city,
+        ci.ca_state
+    FROM 
+        SalesData sd
+    JOIN 
+        CustomerInfo ci ON ci.c_customer_sk = (SELECT TOP 1 c.c_customer_sk
+                                               FROM customer c 
+                                               WHERE c.c_current_hdemo_sk = (SELECT TOP 1 h.hd_demo_sk 
+                                                                               FROM household_demographics h 
+                                                                               WHERE h.hd_income_band_sk = 
+                                                                                   (SELECT ib.ib_income_band_sk 
+                                                                                    FROM income_band ib 
+                                                                                    WHERE ib.ib_lower_bound < 50000 AND ib.ib_upper_bound > 30000) 
+                                                                               ORDER BY NEWID())
+                                               ORDER BY NEWID())
+    WHERE 
+        sd.rank <= 5
+)
+SELECT 
+    tsi.ws_item_sk,
+    tsi.total_quantity,
+    tsi.total_profit,
+    tsi.ca_city, 
+    tsi.ca_state,
+    (SELECT COUNT(DISTINCT customer.c_customer_sk)
+     FROM customer 
+     WHERE customer.c_current_addr_sk IS NOT NULL
+     AND customer.c_customer_sk IN (SELECT r.refunded_customer_sk 
+                                     FROM web_returns r 
+                                     WHERE r.wr_return_quantity > 0)) AS total_refund_customers
+FROM 
+    TopSellingItems tsi
+ORDER BY 
+    tsi.total_profit DESC;

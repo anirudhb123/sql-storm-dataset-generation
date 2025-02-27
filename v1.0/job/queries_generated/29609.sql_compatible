@@ -1,0 +1,61 @@
+
+WITH movie_details AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        a.kind_id,
+        STRING_AGG(DISTINCT ka.name, ', ') AS aliases,
+        STRING_AGG(DISTINCT p.name, ', ') AS cast_members,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT c.name, ', ') AS companies,
+        MAX(m_info.info) AS additional_info
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ka ON ci.person_id = ka.person_id
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_info m_info ON a.id = m_info.movie_id
+    GROUP BY 
+        a.title, a.production_year, a.kind_id
+), 
+ranked_movies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        kind_id,
+        aliases,
+        cast_members,
+        keywords,
+        companies,
+        additional_info,
+        RANK() OVER (ORDER BY production_year DESC) AS rank
+    FROM 
+        movie_details
+    WHERE 
+        production_year IS NOT NULL
+)
+
+SELECT 
+    rank,
+    movie_title,
+    production_year,
+    kind_id,
+    aliases,
+    cast_members,
+    keywords,
+    companies,
+    additional_info
+FROM 
+    ranked_movies
+WHERE 
+    rank <= 10;

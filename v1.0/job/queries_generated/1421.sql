@@ -1,0 +1,44 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        AVG(CASE WHEN c.nr_order IS NOT NULL THEN c.nr_order END) AS avg_order,
+        SUM(mi.info IS NOT NULL AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget')) AS has_budget_info
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast c ON a.id = c.movie_id
+    LEFT JOIN 
+        movie_info mi ON a.id = mi.movie_id
+    WHERE 
+        a.production_year >= 2000
+    GROUP BY 
+        a.id
+),
+FilteredMovies AS (
+    SELECT 
+        title, 
+        production_year,
+        actor_count,
+        avg_order,
+        has_budget_info
+    FROM 
+        RankedMovies
+    WHERE 
+        actor_count > 5 
+        AND (has_budget_info > 0 OR avg_order > 3)
+)
+SELECT 
+    f.title,
+    f.production_year,
+    COALESCE(f.actor_count, 0) AS actor_count,
+    CONCAT('Avg Order: ', COALESCE(ROUND(f.avg_order, 2), 0)) AS avg_order,
+    CASE 
+        WHEN f.has_budget_info > 0 THEN 'Budget Info Available'
+        ELSE 'No Budget Info'
+    END AS budget_info_status
+FROM 
+    FilteredMovies f
+ORDER BY 
+    f.production_year DESC, f.actor_count DESC;

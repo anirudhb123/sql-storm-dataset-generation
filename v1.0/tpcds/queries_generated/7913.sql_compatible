@@ -1,0 +1,58 @@
+
+WITH SalesSummary AS (
+    SELECT
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    JOIN
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN
+        inventory inv ON ws.ws_item_sk = inv.inv_item_sk
+    JOIN
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN
+        store s ON ws.ws_ship_addr_sk = s.s_store_sk
+    JOIN
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE
+        dd.d_year = 2023 AND
+        cd.cd_marital_status = 'M' AND
+        cd.cd_gender = 'F' AND
+        inv.inv_quantity_on_hand > 0
+    GROUP BY
+        ws.web_site_id
+),
+PromotionsApplied AS (
+    SELECT
+        ss.web_site_id,
+        ss.total_quantity_sold,
+        ss.total_sales,
+        ss.total_orders,
+        p.p_promo_name,
+        COUNT(p.p_promo_sk) AS promos_used
+    FROM
+        SalesSummary ss
+    LEFT JOIN
+        promotion p ON ss.total_sales > p.p_cost
+    GROUP BY
+        ss.web_site_id, ss.total_quantity_sold, ss.total_sales, ss.total_orders, p.p_promo_name
+)
+SELECT
+    pa.web_site_id,
+    pa.total_quantity_sold,
+    pa.total_sales,
+    pa.total_orders,
+    COALESCE(pa.promos_used, 0) AS promos_used,
+    ROW_NUMBER() OVER (ORDER BY pa.total_sales DESC) AS rank
+FROM
+    PromotionsApplied pa
+ORDER BY
+    pa.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

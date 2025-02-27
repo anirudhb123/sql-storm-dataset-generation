@@ -1,0 +1,48 @@
+WITH SupplierParts AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        p.p_name, 
+        p.p_type, 
+        p.p_brand, 
+        ps.ps_supplycost, 
+        ps.ps_availqty,
+        CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ' [Type: ', p.p_type, ']') AS part_description
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    ORDER BY 
+        total_value DESC
+    LIMIT 5
+)
+SELECT 
+    sp.s_suppkey, 
+    sp.s_name, 
+    COUNT(sp.part_description) AS part_count, 
+    SUM(ps.ps_availqty) AS total_avail_qty,
+    STRING_AGG(sp.part_description, '; ') AS part_descriptions
+FROM 
+    SupplierParts sp
+JOIN 
+    TopSuppliers ts ON sp.s_suppkey = ts.s_suppkey
+JOIN 
+    partsupp ps ON sp.p_name = ps.ps_partkey
+GROUP BY 
+    sp.s_suppkey, sp.s_name
+ORDER BY 
+    total_avail_qty DESC;

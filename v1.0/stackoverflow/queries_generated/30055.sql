@@ -1,0 +1,83 @@
+WITH RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS Author,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostVoteStatistics AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        PostId
+),
+TagPopularity AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS rn
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.Id, T.TagName
+),
+ClosedPostHistory AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10 -- Closed posts
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Author,
+    PS.UpVotes,
+    PS.DownVotes,
+    PS.TotalVotes,
+    TP.TagName,
+    TP.PostCount,
+    TP.TotalViews,
+    CPH.LastClosedDate,
+    CASE 
+        WHEN CPH.LastClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    RecentPosts RP
+LEFT JOIN 
+    PostVoteStatistics PS ON RP.PostId = PS.PostId
+LEFT JOIN 
+    TagPopularity TP ON RP.PostId IN (SELECT PostId FROM PostTags WHERE TagId = TP.TagId)
+LEFT JOIN 
+    ClosedPostHistory CPH ON RP.PostId = CPH.PostId
+WHERE 
+    RP.rn = 1 -- Only select the most recent post per user
+AND 
+    (PS.TotalVotes > 0 OR PS.UpVotes > 10) -- Filter for popular posts
+ORDER BY 
+    RP.CreationDate DESC;
+

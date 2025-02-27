@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT
+        t.title AS movie_title,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) AS year_rank,
+        COUNT(DISTINCT kc.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM
+        aka_title t
+    JOIN
+        cast_info ci ON ci.movie_id = t.movie_id
+    JOIN
+        aka_name a ON a.person_id = ci.person_id
+    LEFT JOIN
+        movie_keyword mk ON mk.movie_id = t.movie_id
+    LEFT JOIN
+        keyword kc ON kc.id = mk.keyword_id
+    WHERE
+        t.production_year IS NOT NULL
+),
+
+MovieDetails AS (
+    SELECT
+        rm.movie_title,
+        rm.actor_name,
+        rm.year_rank,
+        rm.keyword_count,
+        COALESCE(ci.note, 'No role') AS role_note,
+        (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = (SELECT mt.id FROM aka_title mt WHERE mt.title = rm.movie_title LIMIT 1)) AS info_count
+    FROM
+        RankedMovies rm
+    LEFT JOIN
+        cast_info ci ON ci.movie_id = (SELECT mt.id FROM aka_title mt WHERE mt.title = rm.movie_title LIMIT 1)
+)
+
+SELECT
+    md.movie_title,
+    md.actor_name,
+    md.year_rank,
+    md.keyword_count,
+    md.role_note,
+    md.info_count
+FROM
+    MovieDetails md
+WHERE
+    (md.year_rank = 1 OR md.keyword_count > 3) AND 
+    (md.role_note IS NOT NULL OR md.info_count > 0)
+ORDER BY
+    md.keyword_count DESC,
+    md.movie_title ASC
+LIMIT 50;
+
+-- Intermediary results handling for NULLs and string expressions
+-- This may yield exotic cases such as movies released in non-standard years, or actors with missing roles, 
+-- creating a unique set of results for performance analysis.

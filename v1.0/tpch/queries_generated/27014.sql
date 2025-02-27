@@ -1,0 +1,47 @@
+WITH SupplierPartDetails AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        p.p_name AS part_name,
+        p.p_brand AS brand,
+        p.p_type AS type,
+        ps.ps_availqty AS available_quantity,
+        ps.ps_supplycost AS supply_cost,
+        CONCAT(s.s_name, ' supplies ', p.p_name, ' (', p.p_brand, ') which is of type ', p.p_type) AS detailed_info
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_name AS customer_name,
+        o.o_orderkey AS order_key,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        o.o_orderdate AS order_date,
+        o.o_orderpriority AS order_priority,
+        CONCAT(c.c_name, ' ordered ', COUNT(l.l_orderkey), ' items totaling ', 
+               FORMAT(SUM(l.l_extendedprice * (1 - l.l_discount)), 2), 
+               ' on ', DATE_FORMAT(o.o_orderdate, '%Y-%m-%d')) AS order_summary
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_name, o.o_orderkey, o.o_orderdate, o.o_orderpriority
+)
+SELECT 
+    spd.detailed_info AS supplier_part_info,
+    cod.order_summary AS customer_order_info,
+    RANK() OVER (ORDER BY cod.total_price DESC) AS order_rank
+FROM 
+    SupplierPartDetails spd
+JOIN 
+    CustomerOrderDetails cod ON spd.supplier_name LIKE CONCAT('%', SUBSTRING(cod.customer_name, 1, 3), '%')
+WHERE 
+    spd.available_quantity > 10 
+ORDER BY 
+    order_rank, spd.supplier_name;

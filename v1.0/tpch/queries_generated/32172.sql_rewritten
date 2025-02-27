@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey,
+           CAST(s.s_name AS VARCHAR(255)) AS full_name,
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal)
+        FROM supplier s2
+        WHERE s2.s_acctbal IS NOT NULL
+    )
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey,
+           CAST(CONCAT(sh.full_name, ' -> ', s.s_name) AS VARCHAR(255)),
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE sh.level < 3
+),
+
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_by_price
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(month, -6, cast('1998-10-01' as date))
+),
+
+AggregatedData AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_availqty,
+           SUM(ps.ps_supplycost) AS total_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+
+SELECT n.n_name, s.full_name, r.region_key,
+       COALESCE(SUM(o.o_totalprice), 0) AS total_order_value,
+       COALESCE(AVG(l.l_extendedprice), 0) AS avg_price,
+       COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN RankedOrders o ON o.o_custkey = s.s_suppkey
+LEFT JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE s.s_acctbal > (
+    SELECT AVG(s2.s_acctbal)
+    FROM supplier s2
+    WHERE s2.s_acctbal IS NOT NULL
+)
+GROUP BY n.n_name, s.full_name, r.region_key
+HAVING COUNT(o.o_orderkey) > 0
+ORDER BY total_order_value DESC, avg_price DESC;

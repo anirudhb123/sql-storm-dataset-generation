@@ -1,0 +1,70 @@
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Users.Reputation) AS AvgReputation,
+        COUNT(DISTINCT Users.Id) AS UserCount
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::int[])
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    WHERE 
+        Tags.TagName IS NOT NULL
+    GROUP BY 
+        Tags.TagName
+),
+PostDetails AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.CreationDate,
+        Posts.Score,
+        Posts.ViewCount,
+        COALESCE(SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(STRING_AGG(DISTINCT Comments.Text, ' | '), '') AS CommentsSummary
+    FROM 
+        Posts
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    WHERE 
+        Posts.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        Posts.Id
+),
+TagRanking AS (
+    SELECT 
+        TagStats.TagName,
+        TagStats.PostCount,
+        TagStats.TotalViews,
+        TagStats.AvgReputation,
+        TagStats.UserCount,
+        ROW_NUMBER() OVER (ORDER BY TagStats.PostCount DESC) AS TagRank
+    FROM 
+        TagStats
+)
+SELECT 
+    TagRanking.TagName,
+    TagRanking.PostCount,
+    TagRanking.TotalViews,
+    TagRanking.AvgReputation,
+    TagRanking.UserCount,
+    PostDetails.PostId,
+    PostDetails.Title,
+    PostDetails.CreationDate,
+    PostDetails.Score,
+    PostDetails.ViewCount,
+    PostDetails.Upvotes,
+    PostDetails.Downvotes,
+    PostDetails.CommentsSummary
+FROM 
+    TagRanking
+JOIN 
+    PostDetails ON TagRanking.TagName = ANY(STRING_TO_ARRAY(Posts.Tags, '><'))
+ORDER BY 
+    TagRanking.TagRank, PostDetails.Score DESC;

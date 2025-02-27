@@ -1,0 +1,33 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        SUM(P.Score) AS TotalScore,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(CAST(P.CreationDate AS TIMESTAMP)) AS AveragePostDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    TotalPosts,
+    TotalQuestions,
+    TotalAnswers,
+    TotalScore,
+    TotalViews,
+    AveragePostDate
+FROM 
+    UserPostStats
+ORDER BY 
+    Reputation DESC, TotalScore DESC;

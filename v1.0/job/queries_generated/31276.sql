@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        1 AS level
+    FROM 
+        aka_title AS t
+    JOIN 
+        movie_companies AS mc ON t.movie_id = mc.movie_id
+    WHERE 
+        mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Production')
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        t.title,
+        mh.level + 1
+    FROM 
+        movie_hierarchy AS mh
+    JOIN 
+        movie_link AS ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title AS t ON ml.linked_movie_id = t.movie_id
+    WHERE 
+        mh.level < 3  -- Limiting levels to avoid excessive recursion
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    COALESCE(STRING_AGG(DISTINCT ak.name, ', '), 'No Cast') AS cast_names,
+    AVG(mi.info::numeric) FILTER (WHERE it.info = 'rating') AS avg_rating,
+    ARRAY_AGG(DISTINCT km.keyword) AS keywords_used,
+    (SELECT COUNT(*) FROM movie_info mi2 WHERE mi2.movie_id = mh.movie_id AND mi2.info_type_id = 2) AS info_count
+FROM
+    movie_hierarchy AS mh
+LEFT JOIN 
+    complete_cast AS cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name AS ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword AS mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword AS km ON mk.keyword_id = km.id
+LEFT JOIN 
+    movie_info AS mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    info_type AS it ON mi.info_type_id = it.id 
+GROUP BY 
+    mh.movie_id, mh.movie_title
+ORDER BY 
+    AVG(mi.info::numeric) DESC, total_cast DESC
+LIMIT 10;

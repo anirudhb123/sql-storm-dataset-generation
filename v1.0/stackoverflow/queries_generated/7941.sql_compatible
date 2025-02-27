@@ -1,0 +1,89 @@
+
+WITH RankedUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM
+        Users u
+    WHERE
+        u.Reputation > 1000
+),
+TopTags AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM
+        Tags t
+    JOIN
+        Posts p ON t.Id = ANY(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><'))
+    GROUP BY
+        t.TagName
+    HAVING
+        COUNT(p.Id) > 50
+),
+ActivePostHistory AS (
+    SELECT
+        ph.PostId,
+        COUNT(ph.Id) AS HistoryCount
+    FROM
+        PostHistory ph
+    WHERE
+        ph.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY
+        ph.PostId
+),
+QuestionData AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)
+    WHERE
+        p.PostTypeId = 1
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AnswerCount
+),
+FinalResults AS (
+    SELECT
+        u.UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        SUM(q.ViewCount) AS TotalViews,
+        SUM(q.Score) AS TotalScore,
+        COUNT(DISTINCT th.TagName) AS UniqueTags,
+        AVG(ph.HistoryCount) AS AvgPostHistory
+    FROM
+        RankedUsers u
+    JOIN
+        Posts p ON p.OwnerUserId = u.UserId
+    LEFT JOIN
+        ActivePostHistory ph ON ph.PostId = p.Id
+    JOIN
+        QuestionData q ON q.PostId = p.Id
+    JOIN
+        LATERAL (
+            SELECT TagName 
+            FROM TopTags tt 
+            WHERE tt.PostCount > 50 
+            AND tt.TagName = ANY(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><')) 
+            LIMIT 5
+        ) th ON true
+    GROUP BY
+        u.UserId, u.DisplayName
+)
+SELECT
+    *
+FROM
+    FinalResults
+ORDER BY
+    TotalQuestions DESC, TotalScore DESC
+LIMIT 10;

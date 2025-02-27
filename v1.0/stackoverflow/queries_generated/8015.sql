@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 0
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON t.Id = ANY(string_to_array(substring(pt.Tags, 2, length(pt.Tags)-2), '><')::int[])
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 10
+),
+RecentActivity AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 24)
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.Rank,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    pt.TagName,
+    ra.EditCount,
+    ra.LastEdited
+FROM 
+    RankedPosts rp
+JOIN 
+    PostLinks pl ON rp.Id = pl.PostId
+JOIN 
+    PopularTags pt ON pl.RelatedPostId = pt.Id
+JOIN 
+    RecentActivity ra ON rp.Id = ra.PostId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

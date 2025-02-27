@@ -1,0 +1,69 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank_within_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey
+    FROM 
+        SupplierStats s
+    WHERE 
+        s.rank_within_nation <= 3
+),
+OrderDetails AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        MAX(l.l_shipdate) AS latest_shipdate
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey, l.l_partkey
+)
+SELECT 
+    co.c_name AS customer_name,
+    COALESCE(SUM(od.revenue), 0) AS total_revenue,
+    COALESCE(MAX(od.latest_shipdate), 'No Orders') AS last_shipment_date,
+    COUNT(DISTINCT ts.s_suppkey) AS unique_suppliers
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    OrderDetails od ON co.c_custkey = od.l_orderkey
+LEFT JOIN 
+    TopSuppliers ts ON od.l_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_mfgr IN (SELECT DISTINCT p_altbrand 
+                                                                                        FROM part WHERE p_brand IS NOT NULL))
+GROUP BY 
+    co.c_name
+HAVING 
+    COALESCE(SUM(od.revenue), 0) > 1000
+ORDER BY 
+    total_revenue DESC;

@@ -1,0 +1,36 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT c.person_id,
+           a.name AS actor_name,
+           1 AS level
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    WHERE c.movie_id IN (SELECT id FROM aka_title WHERE production_year = 2020)
+
+    UNION ALL
+
+    SELECT c.person_id,
+           a.name AS actor_name,
+           ah.level + 1 AS level
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN ActorHierarchy ah ON c.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = ah.person_id)
+)
+
+SELECT a.actor_name,
+       COUNT(DISTINCT c.movie_id) AS movie_count,
+       SUM(CASE WHEN ka.note IS NOT NULL THEN 1 ELSE 0 END) AS keyword_notes,
+       MAX(t.production_year) AS last_active_year,
+       STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM ActorHierarchy a
+LEFT JOIN cast_info c ON a.person_id = c.person_id
+LEFT JOIN aka_title t ON c.movie_id = t.id
+LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+LEFT JOIN movie_info mi ON t.id = mi.movie_id
+LEFT JOIN movie_info_idx mii ON mii.movie_id = mi.movie_id AND mii.info_type_id = (SELECT id FROM info_type WHERE info = 'Awards')
+LEFT JOIN complete_cast cc ON cc.movie_id = t.id
+LEFT JOIN (SELECT movie_id, note FROM movie_companies WHERE company_type_id = (SELECT id FROM company_type WHERE kind = 'Production')) pc ON pc.movie_id = t.id
+GROUP BY a.actor_name
+HAVING COUNT(DISTINCT c.movie_id) > 5
+ORDER BY last_active_year DESC, movie_count DESC
+LIMIT 10;

@@ -1,0 +1,66 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(COALESCE(v.BountyAmount, 0) + COALESCE(p.Score, 0)) AS TotalScore
+    FROM Users AS u
+    LEFT JOIN Votes AS v ON u.Id = v.UserId
+    LEFT JOIN Posts AS p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+RecentPostActivity AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS RecentRank
+    FROM Posts AS p
+    LEFT JOIN Comments AS c ON p.Id = c.PostId
+    LEFT JOIN Users AS u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY p.Id, p.Title, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM PostHistory AS ph
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(th.Titles, 'No Title') AS RecentTitle
+    FROM Posts AS p
+    LEFT JOIN Votes AS v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT 
+            ph.PostId, 
+            STRING_AGG(ph.Comment, ', ') AS Titles
+        FROM PostHistory AS ph
+        WHERE ph.PostHistoryTypeId IN (4, 5)
+        GROUP BY ph.PostId
+    ) AS th ON p.Id = th.PostId
+    GROUP BY p.Id, th.Titles
+)
+SELECT 
+    u.DisplayName,
+    ur.TotalScore AS UserScore,
+    COUNT(DISTINCT rp.PostId) AS RecentPostCount,
+    SUM(ps.UpVotes) AS TotalUpVotes,
+    SUM(ps.DownVotes) AS TotalDownVotes,
+    COALESCE(cp.LastClosedDate, 'Never Closed') AS LastClosedDate,
+    STRING_AGG(DISTINCT rp.Title, ' | ') AS RecentPostTitles
+FROM UserReputation AS ur
+INNER JOIN Users AS u ON ur.UserId = u.Id
+LEFT JOIN RecentPostActivity AS rp ON u.Id = rp.OwnerDisplayName
+LEFT JOIN PostStatistics AS ps ON ps.PostId = rp.PostId
+LEFT JOIN ClosedPosts AS cp ON cp.PostId = rp.PostId
+GROUP BY u.Id, ur.TotalScore
+HAVING SUM(ps.UpVotes) > SUM(ps.DownVotes) OR COUNT(DISTINCT rp.PostId) > 5
+ORDER BY UserScore DESC
+LIMIT 10;

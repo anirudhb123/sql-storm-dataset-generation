@@ -1,0 +1,43 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(year, -1, CURRENT_TIMESTAMP) 
+      AND o.o_orderstatus IN ('F', 'O')
+),
+supplier_stats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        MAX(CASE WHEN ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp) 
+                 THEN 1 ELSE 0 END) AS below_average_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+)
+SELECT 
+    n.n_name,
+    r.r_name,
+    COALESCE(SUM(lo.l_extendedprice * (1 - lo.l_discount)), 0) AS total_sales,
+    COALESCE(AVG(rp.o_totalprice), 0) AS avg_order_value,
+    COUNT(DISTINCT s.s_suppkey) AS unique_suppliers,
+    SUM(ss.total_parts) AS total_parts_supplied
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN lineitem lo ON ps.ps_partkey = lo.l_partkey
+LEFT JOIN ranked_orders rp ON rp.o_orderkey = lo.l_orderkey
+WHERE (rp.o_orderkey IS NOT NULL OR s.s_suppkey IS NULL)
+GROUP BY n.n_name, r.r_name
+HAVING SUM(lo.l_quantity) > (
+    SELECT AVG(l_quantity) 
+    FROM lineitem 
+    WHERE l_returnflag = 'R'
+) OR COUNT(DISTINCT s.s_suppkey) > 5
+ORDER BY total_sales DESC;

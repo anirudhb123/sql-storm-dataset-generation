@@ -1,0 +1,82 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(v.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.DownVotes, 0)) AS TotalDownVotes,
+        AVG(v.Reputation) AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostScoreDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        pt.Name AS PostTypeName,
+        COUNT(c.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCounts
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, pt.Name
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        RANK() OVER (ORDER BY PostCount DESC, TotalUpVotes DESC) AS UserRank
+    FROM 
+        UserPostStats
+    WHERE 
+        PostCount > 0
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        UpVoteCounts,
+        RANK() OVER (ORDER BY Score DESC, UpVoteCounts DESC) AS PostRank
+    FROM 
+        PostScoreDetails
+    WHERE 
+        Score > 0
+)
+SELECT 
+    tu.DisplayName AS TopUser,
+    tu.UserRank,
+    tp.Title AS TopPostTitle,
+    tp.Score AS TopPostScore,
+    tp.UpVoteCounts AS TopPostUpVotes,
+    tp.CreationDate AS TopPostDate,
+    CASE 
+        WHEN tp.Score >= 100 THEN 'Popular'
+        WHEN tp.Score >= 50 THEN 'Moderate'
+        ELSE 'Low'
+    END AS PostPopularity
+FROM 
+    TopUsers tu
+JOIN 
+    TopPosts tp ON tu.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = tp.PostId)
+WHERE 
+    tu.UserRank <= 10
+ORDER BY 
+    tu.UserRank, tp.Score DESC;

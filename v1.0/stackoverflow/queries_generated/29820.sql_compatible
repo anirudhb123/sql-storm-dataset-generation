@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        ARRAY_AGG(t.TagName) AS Tags,
+        COALESCE(v.upvote_count, 0) AS UpVotes,
+        COALESCE(c.comment_count, 0) AS CommentCount,
+        COALESCE(a.answer_count, 0) AS AnswerCount,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS upvote_count FROM Votes WHERE VoteTypeId = 2 GROUP BY PostId) v ON v.PostId = p.Id
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS comment_count FROM Comments GROUP BY PostId) c ON c.PostId = p.Id
+    LEFT JOIN 
+        (SELECT ParentId, COUNT(*) AS answer_count FROM Posts WHERE PostTypeId = 2 GROUP BY ParentId) a ON a.ParentId = p.Id
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = p.Id OR t.WikiPostId = p.Id
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body
+    ORDER BY 
+        p.CreationDate DESC
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.UpVotes,
+        rp.CommentCount,
+        rp.AnswerCount,
+        COUNT(ph.Id) AS EditCount,  
+        MAX(ph.CreationDate) AS LastEditDate  
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = rp.PostId AND ph.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.Tags, rp.UpVotes, rp.CommentCount, rp.AnswerCount
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.Tags,
+    fp.UpVotes,
+    fp.CommentCount,
+    fp.AnswerCount,
+    fp.EditCount,
+    fp.LastEditDate,
+    RANK() OVER (ORDER BY fp.UpVotes DESC, fp.CommentCount DESC, fp.AnswerCount DESC) AS PopularityRank  
+FROM 
+    FilteredPosts fp
+WHERE 
+    fp.EditCount > 0  
+ORDER BY 
+    PopularityRank, LastEditDate DESC;

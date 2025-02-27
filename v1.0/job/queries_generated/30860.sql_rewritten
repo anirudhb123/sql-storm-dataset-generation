@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        title m ON t.movie_id = m.id
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    a.name,
+    th.title,
+    th.production_year,
+    COALESCE(ci.note, 'No role specified') AS role_description,
+    COUNT(DISTINCT mh.movie_id) AS related_movies_count,
+    COUNT(CASE WHEN mi.info IS NOT NULL THEN 1 END) AS movie_info_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords_list
+FROM 
+    aka_name a
+LEFT JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_title th ON th.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+WHERE 
+    a.name IS NOT NULL
+    AND th.production_year IS NOT NULL
+    AND (ci.nr_order IS NULL OR ci.nr_order < 5)
+GROUP BY 
+    a.name, th.title, th.production_year, ci.note
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 1
+ORDER BY 
+    related_movies_count DESC, a.name;

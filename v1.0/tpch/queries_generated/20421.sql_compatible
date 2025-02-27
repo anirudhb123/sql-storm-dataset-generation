@@ -1,0 +1,43 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+), 
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           CASE 
+               WHEN o.o_totalprice > 1000 THEN 'High'
+               WHEN o.o_totalprice BETWEEN 500 AND 1000 THEN 'Medium'
+               ELSE 'Low'
+           END AS price_category
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+), 
+LineItemStatistics AS (
+    SELECT l.l_orderkey, COUNT(l.l_linenumber) AS total_lines,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT r.s_name, 
+       COALESCE(h.price_category, 'No Orders') AS price_category,
+       AVG(ls.total_sales) AS avg_sales,
+       COUNT(ls.total_lines) FILTER (WHERE ls.total_lines > 1) AS multi_line_order_count
+FROM RankedSuppliers r
+LEFT JOIN HighValueOrders h ON r.s_suppkey = (SELECT ps.ps_suppkey 
+                                                  FROM partsupp ps 
+                                                  WHERE ps.ps_partkey IN (SELECT p.p_partkey 
+                                                                          FROM part p 
+                                                                          WHERE p.p_size BETWEEN 1 AND 10))
+LEFT JOIN LineItemStatistics ls ON r.s_suppkey = ls.l_orderkey
+WHERE r.rank = 1
+GROUP BY r.s_name, h.price_category
+HAVING AVG(ls.total_sales) > 200 AND r.s_name IS NOT NULL
+ORDER BY CASE 
+             WHEN h.price_category = 'High' THEN 1 
+             WHEN h.price_category = 'Medium' THEN 2 
+             ELSE 3 
+         END, avg_sales DESC;

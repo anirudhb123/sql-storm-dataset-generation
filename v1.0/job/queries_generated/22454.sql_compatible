@@ -1,0 +1,100 @@
+
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(NULLIF(k.keyword, ''), 'Unknown') AS movie_keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023 
+          AND t.title IS NOT NULL
+),
+CastRanking AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        DENSE_RANK() OVER (PARTITION BY c.movie_id ORDER BY ca.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    INNER JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        comp_cast_type ca ON c.person_role_id = ca.id
+    WHERE 
+        c.nr_order IS NOT NULL
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY co.name) AS company_rank
+    FROM 
+        movie_companies mc
+    INNER JOIN 
+        company_name co ON mc.company_id = co.id
+    INNER JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+FinalResults AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.movie_keyword,
+        cr.actor_name,
+        COALESCE(cr.actor_rank, 0) AS actor_rank,
+        ci.company_name,
+        ci.company_type,
+        ci.company_rank,
+        COUNT(DISTINCT ci.company_name) OVER (PARTITION BY m.movie_id) AS distinct_company_count
+    FROM 
+        MovieCTE m
+    LEFT JOIN 
+        CastRanking cr ON m.movie_id = cr.movie_id
+    LEFT JOIN 
+        CompanyInfo ci ON m.movie_id = ci.movie_id
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    movie_keyword,
+    actor_name,
+    actor_rank,
+    company_name,
+    company_type,
+    company_rank,
+    distinct_company_count
+FROM 
+    FinalResults
+WHERE 
+    (actor_rank IS NULL OR actor_rank <= 2) 
+    AND (company_type IS NOT NULL OR movie_keyword = 'Unknown')
+ORDER BY 
+    production_year DESC, title ASC
+LIMIT 100
+OFFSET 0
+UNION ALL
+SELECT 
+    NULL AS movie_id,
+    'Total Count' AS title,
+    NULL AS production_year,
+    NULL AS movie_keyword,
+    NULL AS actor_name,
+    NULL AS actor_rank,
+    NULL AS company_name,
+    NULL AS company_type,
+    NULL AS company_rank,
+    COUNT(*) AS distinct_company_count
+FROM 
+    FinalResults
+GROUP BY
+    movie_id;

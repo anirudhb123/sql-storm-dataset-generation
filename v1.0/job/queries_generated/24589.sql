@@ -1,0 +1,55 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(distinct c.person_id) DESC) as rank_per_year,
+        COUNT(distinct c.person_id) as num_cast_members
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        t.title, t.production_year
+),
+popular_titles AS (
+    SELECT 
+        r.title, 
+        r.production_year
+    FROM 
+        ranked_movies r
+    WHERE 
+        r.rank_per_year = 1
+)
+SELECT 
+    pt.title,
+    pt.production_year,
+    COALESCE(k.keyword, 'No Keywords') as keyword,
+    n.name AS director_name,
+    COUNT(DISTINCT mc.company_id) AS production_companies_count,
+    SUM(CASE WHEN n.gender = 'M' THEN 1 ELSE 0 END) AS male_actors_count,
+    SUM(CASE WHEN n.gender = 'F' THEN 1 ELSE 0 END) AS female_actors_count,
+    STRING_AGG(DISTINCT n.name, ', ') AS all_actor_names,
+    ARRAY_AGG(DISTINCT n.name ORDER BY n.name) FILTER (WHERE n.name IS NOT NULL) AS sorted_actor_names
+FROM 
+    popular_titles pt
+LEFT JOIN 
+    movie_keyword mk ON pt.title = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = (SELECT id FROM aka_title WHERE title = pt.title LIMIT 1)
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.id
+LEFT JOIN 
+    aka_name n ON n.person_id = c.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = (SELECT id FROM aka_title WHERE title = pt.title LIMIT 1)
+WHERE 
+    pt.production_year BETWEEN 2000 AND 2023 
+    AND (n.gender IS NOT NULL OR n.gender IS NULL)  -- bizarre NULL logic
+GROUP BY 
+    pt.title, pt.production_year, k.keyword, n.name
+ORDER BY 
+    pt.production_year DESC, AVG(c.nr_order) DESC;

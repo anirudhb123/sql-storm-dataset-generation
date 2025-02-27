@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.ViewCount,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpvoteCount, -- Count Upvotes
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownvoteCount, -- Count Downvotes
+        ROW_NUMBER() OVER (ORDER BY P.ViewCount DESC) AS ViewRank,
+        ROW_NUMBER() OVER (ORDER BY COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) DESC) AS UpvoteRank,
+        ROW_NUMBER() OVER (ORDER BY COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) DESC) AS DownvoteRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId = 1 -- Only consider Questions
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.ViewCount
+),
+TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.ViewCount) AS AverageViews
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+),
+UserPostInteraction AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostsCreated,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.Body,
+    RP.ViewCount,
+    RP.UpvoteCount,
+    RP.DownvoteCount,
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews,
+    TS.AverageViews,
+    UPI.UserId,
+    UPI.DisplayName,
+    UPI.PostsCreated,
+    UPI.TotalUpvotes,
+    UPI.TotalDownvotes
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    TagStatistics TS ON TS.PostCount > 10 -- Only consider tags used in more than 10 posts
+LEFT JOIN 
+    UserPostInteraction UPI ON UPI.TotalUpvotes > 50 -- Only consider users with more than 50 upvotes on their posts
+WHERE 
+    RP.ViewRank <= 10 OR RP.UpvoteRank <= 10 OR RP.DownvoteRank <= 10 -- Limit to top 10 in any rank
+ORDER BY 
+    RP.ViewCount DESC, RP.UpvoteCount DESC;

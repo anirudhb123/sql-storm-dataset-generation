@@ -1,0 +1,76 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.order_number,
+        ws.net_paid_inc_tax,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_paid_inc_tax DESC) AS rnk
+    FROM
+        web_sales ws
+    WHERE
+        ws.sold_date_sk BETWEEN 1 AND 1000
+),
+aggregated_returns AS (
+    SELECT
+        sr.r_ticket_number,
+        COUNT(*) AS return_count,
+        SUM(sr.return_amt) AS total_return_amt
+    FROM
+        store_returns sr
+    GROUP BY
+        sr_ticket_number
+),
+category_inventory AS (
+    SELECT
+        i.category,
+        SUM(inv.quantity_on_hand) AS total_quantity,
+        CASE
+            WHEN SUM(inv.quantity_on_hand) > 100 THEN 'High Stock'
+            WHEN SUM(inv.quantity_on_hand) BETWEEN 50 AND 100 THEN 'Medium Stock'
+            ELSE 'Low Stock'
+        END AS stock_status
+    FROM
+        inventory inv
+    JOIN
+        item i ON inv.inv_item_sk = i.i_item_sk
+    GROUP BY
+        i.category
+)
+SELECT
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(r.return_count, 0) AS return_count,
+    COALESCE(r.total_return_amt, 0) AS total_return_amt,
+    COUNT(ws.order_number) AS total_orders,
+    SUM(ws.net_paid_inc_tax) AS total_spent,
+    ci.total_quantity,
+    ci.stock_status
+FROM
+    customer c
+LEFT JOIN
+    ranked_sales rs ON c.c_customer_sk = rs.web_site_sk
+LEFT JOIN
+    aggregated_returns r ON rs.order_number = r.r_ticket_number
+LEFT JOIN
+    web_sales ws ON c.c_customer_sk = ws.bill_customer_sk
+LEFT JOIN
+    category_inventory ci ON ws.item_sk = ci.category
+WHERE
+    (c.c_birth_month = 12 OR c.c_birth_month IS NULL)
+    AND (c.c_preferred_cust_flag = 'Y' OR c.c_preferred_cust_flag IS NULL)
+GROUP BY
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    r.return_count,
+    r.total_return_amt,
+    ci.total_quantity,
+    ci.stock_status
+HAVING
+    SUM(ws.net_paid_inc_tax) > 1000
+ORDER BY
+    total_spent DESC,
+    c.c_last_name ASC
+FETCH FIRST 100 ROWS ONLY;
+

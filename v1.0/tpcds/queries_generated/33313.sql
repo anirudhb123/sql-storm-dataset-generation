@@ -1,0 +1,52 @@
+
+WITH RECURSIVE Sales_Hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        ss_ticket_number,
+        ss_sold_date_sk,
+        ss_quantity,
+        ss_net_paid,
+        1 AS level
+    FROM store_sales
+    WHERE ss_sold_date_sk = (SELECT MAX(ss_sold_date_sk) FROM store_sales)
+
+    UNION ALL
+
+    SELECT 
+        sh.ss_store_sk,
+        sh.ss_item_sk,
+        sh.ss_ticket_number,
+        sh.ss_sold_date_sk,
+        sh.ss_quantity,
+        sh.ss_net_paid,
+        sh.level + 1
+    FROM store_sales sh
+    JOIN Sales_Hierarchy shier ON sh.ss_store_sk = shier.ss_store_sk 
+                                AND sh.ss_item_sk = shier.ss_item_sk 
+                                AND sh.level < 5
+)
+
+SELECT 
+    c.c_first_name || ' ' || c.c_last_name AS customer_name,
+    sa.ss_store_sk,
+    SUM(sa.ss_net_paid) AS total_spent,
+    COUNT(DISTINCT sa.ss_ticket_number) AS purchase_count,
+    RANK() OVER (PARTITION BY sa.ss_store_sk ORDER BY SUM(sa.ss_net_paid) DESC) AS expenditure_rank,
+    d.d_date AS sale_date
+FROM Sales_Hierarchy sa
+JOIN customer c ON sa.ss_customer_sk = c.c_customer_sk
+JOIN date_dim d ON sa.ss_sold_date_sk = d.d_date_sk
+WHERE 
+    sa.ss_net_paid IS NOT NULL
+    AND d.d_year = 2023
+    AND c.c_birth_year < (EXTRACT(YEAR FROM CURRENT_DATE) - 18)
+GROUP BY 
+    customer_name,
+    sa.ss_store_sk,
+    sale_date
+HAVING 
+    total_spent > (SELECT AVG(ss_net_paid) FROM store_sales WHERE ss_sold_date_sk = d.d_date_sk)
+ORDER BY 
+    total_spent DESC
+LIMIT 100;

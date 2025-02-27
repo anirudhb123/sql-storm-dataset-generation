@@ -1,0 +1,40 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM title t
+    JOIN cast_info ci ON t.id = ci.movie_id
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+    GROUP BY t.id
+),
+MovieInsights AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        rm.actors,
+        rm.keywords,
+        CASE 
+            WHEN rm.production_year < 2000 THEN 'Classic'
+            WHEN rm.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+            ELSE 'Contemporary'
+        END AS era
+    FROM RankedMovies rm
+)
+SELECT 
+    mi.title,
+    mi.production_year,
+    mi.cast_count,
+    mi.actors,
+    mi.keywords,
+    mi.era
+FROM MovieInsights mi
+WHERE mi.cast_count > 5
+ORDER BY mi.production_year DESC, mi.title;

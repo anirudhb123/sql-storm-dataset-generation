@@ -1,0 +1,79 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS PurchaseRank,
+        COUNT(CASE WHEN cd.cd_marital_status = 'M' THEN 1 END) OVER (PARTITION BY cd.cd_gender) AS MarriedCount
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+HighValueAddresses AS (
+    SELECT 
+        ca.ca_address_id,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT rv.c_customer_id) AS HighValueCount
+    FROM 
+        customer_address ca
+    JOIN (
+        SELECT 
+            c.c_customer_id, 
+            SUM(ws.ws_net_paid) AS TotalSpent
+        FROM 
+            customer c
+        JOIN 
+            web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+        GROUP BY 
+            c.c_customer_id
+        HAVING 
+            SUM(ws.ws_net_paid) > (
+                SELECT AVG(TotalSpent)
+                FROM (
+                    SELECT SUM(ws2.ws_net_paid) AS TotalSpent
+                    FROM web_sales ws2
+                    GROUP BY ws2.ws_bill_customer_sk
+                ) AS subquery
+            )
+    ) rv ON rv.c_customer_id = c.c_customer_id
+    GROUP BY 
+        ca.ca_address_id, ca.ca_city, ca.ca_state
+),
+MaxIncomeBand AS (
+    SELECT 
+        MAX(ib.ib_upper_bound) AS MaxIncome
+    FROM 
+        household_demographics hd
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        hd.hd_dep_count IS NOT NULL
+),
+FinalReport AS (
+    SELECT 
+        rc.c_customer_id,
+        rc.PurchaseRank,
+        ha.ca_city,
+        ha.ca_state,
+        ha.HighValueCount,
+        mib.MaxIncome
+    FROM 
+        RankedCustomers rc
+    LEFT JOIN 
+        HighValueAddresses ha ON rc.c_customer_id = ha.c_customer_id
+    CROSS JOIN 
+        MaxIncomeBand mib
+    WHERE 
+        rc.PurchaseRank <= 5
+        AND (ha.HighValueCount IS NULL OR ha.HighValueCount > 10)
+)
+SELECT 
+    *
+FROM 
+    FinalReport
+ORDER BY 
+    ca_city, PurchaseRank;

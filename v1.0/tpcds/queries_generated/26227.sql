@@ -1,0 +1,67 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca.city AS AddressCity,
+        ca.state AS AddressState,
+        ca.zip AS AddressZip,
+        LENGTH(ca.street_name) AS StreetLength,
+        CONCAT(ca.street_number, ' ', ca.street_name, ' ', ca.street_type) AS FullAddress
+    FROM 
+        customer_address ca
+),
+CustomerInfo AS (
+    SELECT 
+        c.customer_id AS CustomerID,
+        cd.gender AS Gender,
+        cd.marital_status AS MaritalStatus,
+        cd.education_status AS EducationStatus,
+        cd.purchase_estimate AS PurchaseEstimate,
+        CONCAT(c.first_name, ' ', c.last_name) AS FullName
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.demo_sk
+),
+SalesInfo AS (
+    SELECT 
+        ws.web_site_id AS WebsiteID,
+        COUNT(DISTINCT ws.order_number) AS TotalOrders,
+        SUM(ws.net_profit) AS TotalProfit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_id
+)
+SELECT 
+    ai.AddressCity,
+    ai.AddressState,
+    ai.AddressZip,
+    ci.CustomerID,
+    ci.FullName,
+    ci.Gender,
+    ci.MaritalStatus,
+    ci.EducationStatus,
+    si.WebsiteID,
+    si.TotalOrders,
+    si.TotalProfit,
+    MAX(ai.StreetLength) AS MaxStreetLength
+FROM 
+    AddressInfo ai
+JOIN 
+    CustomerInfo ci ON ai.AddressCity LIKE '%New%'  -- Example condition for a specific city
+JOIN 
+    SalesInfo si ON si.TotalOrders > 0
+GROUP BY 
+    ai.AddressCity, 
+    ai.AddressState, 
+    ai.AddressZip, 
+    ci.CustomerID, 
+    ci.FullName, 
+    ci.Gender, 
+    ci.MaritalStatus, 
+    ci.EducationStatus, 
+    si.WebsiteID
+ORDER BY 
+    TotalProfit DESC, 
+    AddressCity ASC
+LIMIT 100;

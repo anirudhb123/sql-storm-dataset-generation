@@ -1,0 +1,34 @@
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    p.Score,
+    p.ViewCount,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) AS VoteCount,
+    STRING_AGG(t.TagName, ', ') AS Tags,
+    b.Name AS BadgeName,
+    pt.Name AS PostTypeName
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::text[])
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+WHERE 
+    p.CreationDate >= '2020-01-01' 
+    AND p.Score > 0
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, u.DisplayName, p.Score, p.ViewCount, b.Name, pt.Name
+ORDER BY 
+    p.CreationDate DESC;

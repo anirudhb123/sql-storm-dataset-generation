@@ -1,0 +1,60 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) - 30 AND 
+                                   (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY ws_item_sk
+),
+market_data AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_preferred_cust_flag,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE
+        cd.cd_gender IS NOT NULL
+        AND hd.hd_income_band_sk IS NOT NULL
+        AND (hd.hd_dep_count IS NULL OR hd.hd_dep_count > 0)
+),
+fact_sales AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        d.d_week_seq,
+        ss.ss_item_sk,
+        ss.ss_store_sk,
+        SUM(ss.ss_quantity) AS total_sales_quantity,
+        SUM(ss.ss_net_paid_inc_tax) AS total_sales_value
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2022
+    GROUP BY d.d_year, d.d_month_seq, d.d_week_seq, ss.ss_item_sk, ss.ss_store_sk
+)
+SELECT 
+    fd.ss_store_sk,
+    COALESCE(SUM(sd.total_quantity), 0) AS web_sales_quantity,
+    COALESCE(SUM(fd.total_sales_quantity), 0) AS store_sales_quantity,
+    CASE 
+        WHEN COALESCE(SUM(sd.total_quantity), 0) < 0 OR COALESCE(SUM(fd.total_sales_quantity), 0) < 0 THEN 'Negative'
+        ELSE 
+            CASE 
+                WHEN COALESCE(SUM(sd.total_quantity), 0) > COALESCE(SUM(fd.total_sales_quantity), 0) THEN 'Web Dominant'
+                ELSE 'Store Dominant' 
+            END
+    END AS sales_channel
+FROM fact_sales fd 
+FULL OUTER JOIN sales_data sd ON fd.ss_item_sk = sd.ws_item_sk
+GROUP BY fd.ss_store_sk
+HAVING COALESCE(SUM(fd.total_sales_quantity), 0) > (SELECT AVG(total_sales_value) FROM market_data WHERE rn = 1)
+ORDER BY sales_channel DESC NULLS LAST
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

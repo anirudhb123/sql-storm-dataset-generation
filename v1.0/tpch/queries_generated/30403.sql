@@ -1,0 +1,48 @@
+WITH RECURSIVE
+    supplier_hierarchy AS (
+        SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, 0 AS level
+        FROM supplier s
+        WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+        
+        UNION ALL
+        
+        SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, sh.level + 1
+        FROM supplier_hierarchy sh
+        JOIN partsupp ps ON ps.ps_suppkey = sh.s_suppkey
+        JOIN part p ON p.p_partkey = ps.ps_partkey
+        WHERE p.p_retailprice > 100
+    ),
+    
+    average_order_value AS (
+        SELECT o.o_custkey, AVG(o.o_totalprice) AS avg_order_value
+        FROM orders o
+        GROUP BY o.o_custkey
+    ),
+    
+    lineitem_summary AS (
+        SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+        FROM lineitem l
+        GROUP BY l.l_orderkey
+    )
+    
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    COALESCE(AVG(a.avg_order_value), 0) AS average_order_value,
+    MAX(ls.total_revenue) AS max_revenue,
+    r.r_name AS region_name,
+    CASE 
+        WHEN COUNT(DISTINCT s.s_nationkey) IS NULL THEN 'No Suppliers'
+        ELSE 'Suppliers Available'
+    END AS supplier_availability
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN average_order_value a ON s.s_nationkey = a.o_custkey
+LEFT JOIN lineitem_summary ls ON ps.ps_partkey = ls.l_orderkey
+WHERE p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 50)
+GROUP BY p.p_name, r.r_name
+HAVING COUNT(DISTINCT s.s_suppkey) > 2
+ORDER BY max_revenue DESC;

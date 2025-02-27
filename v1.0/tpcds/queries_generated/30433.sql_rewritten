@@ -1,0 +1,73 @@
+WITH RECURSIVE SalesGrowth AS (
+    SELECT
+        d.d_year,
+        SUM(ss_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM
+        store_sales
+    JOIN
+        date_dim d ON ss_sold_date_sk = d.d_date_sk
+    GROUP BY
+        d.d_year
+),
+TopYears AS (
+    SELECT
+        d_year,
+        total_sales,
+        LEAD(total_sales) OVER (ORDER BY d_year) AS next_year_sales
+    FROM
+        SalesGrowth
+    WHERE
+        sales_rank <= 5
+),
+CustomerData AS (
+    SELECT
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        COUNT(ws_order_number) AS order_count,
+        SUM(ws_net_paid) AS total_spent
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_sk, cd.cd_gender, cd.cd_income_band_sk
+),
+IncomeGrowth AS (
+    SELECT
+        ib.ib_income_band_sk,
+        AVG(total_spent) AS avg_spent,
+        COUNT(DISTINCT c_customer_sk) AS customer_count
+    FROM
+        CustomerData
+    JOIN
+        household_demographics hd ON CustomerData.cd_income_band_sk = hd.hd_income_band_sk
+    JOIN
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY
+        ib.ib_income_band_sk
+)
+SELECT
+    i.ib_income_band_sk,
+    i.ib_lower_bound,
+    i.ib_upper_bound,
+    ig.avg_spent,
+    ig.customer_count,
+    tg.d_year,
+    tg.total_sales,
+    tg.next_year_sales,
+    (tg.next_year_sales - tg.total_sales) / NULLIF(tg.total_sales, 0) * 100 AS sales_growth_percentage
+FROM
+    IncomeGrowth ig
+JOIN
+    income_band i ON ig.ib_income_band_sk = i.ib_income_band_sk
+LEFT JOIN
+    TopYears tg ON tg.d_year = EXTRACT(YEAR FROM cast('2002-10-01' as date)) 
+WHERE
+    ig.avg_spent IS NOT NULL
+    AND tg.total_sales > 0
+ORDER BY
+    i.ib_income_band_sk, tg.d_year;

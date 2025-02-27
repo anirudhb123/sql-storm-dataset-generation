@@ -1,0 +1,51 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        DENSE_RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(c.id) OVER (PARTITION BY t.id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorsWithKeywords AS (
+    SELECT 
+        ak.name AS actor_name,
+        mk.keyword AS movie_keyword,
+        m.title AS movie_title,
+        RANK() OVER (PARTITION BY ak.person_id ORDER BY m.production_year DESC) AS movie_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title m ON ci.movie_id = m.id
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+)
+SELECT 
+    mv.title,
+    mv.production_year,
+    COALESCE(actor.actor_name, 'Unknown Actor') AS actor_name,
+    k.keyword AS movie_keyword,
+    mv.cast_count,
+    CASE 
+        WHEN mv.title_rank <= 5 THEN 'Top 5'
+        ELSE 'Other'
+    END AS title_group
+FROM 
+    RankedMovies mv
+LEFT JOIN 
+    ActorsWithKeywords actor ON mv.movie_id = actor.movie_title AND actor.movie_rank <= 5
+LEFT JOIN 
+    keyword k ON mv.movie_id = k.id
+WHERE 
+    mv.cast_count >= 1
+ORDER BY 
+    mv.production_year DESC, mv.title;

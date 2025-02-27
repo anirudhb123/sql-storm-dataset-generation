@@ -1,0 +1,66 @@
+
+WITH part_details AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice,
+        p.p_comment,
+        CONCAT('Brand: ', TRIM(p.p_brand), ' | Type: ', TRIM(p.p_type), ' | Size: ', p.p_size, ' | Price: ', CAST(p.p_retailprice AS DECIMAL(10, 2))) AS part_summary
+    FROM 
+        part p
+),
+supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        CONCAT('Supplier: ', TRIM(s.s_name), ' | Phone: ', TRIM(s.s_phone)) AS supplier_details
+    FROM 
+        supplier s
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        CONCAT('Order Key: ', o.o_orderkey, ' | Status: ', o.o_orderstatus, ' | Total Price: ', CAST(o.o_totalprice AS DECIMAL(10, 2))) AS order_details
+    FROM 
+        orders o
+),
+customer_info AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        CONCAT('Customer: ', TRIM(c.c_name), ' | Market Segment: ', TRIM(c.c_mktsegment)) AS customer_details
+    FROM 
+        customer c
+),
+combined_info AS (
+    SELECT 
+        o.o_orderkey,
+        c.customer_details,
+        s.supplier_details,
+        pd.part_summary,
+        o.order_details
+    FROM 
+        order_summary o
+        JOIN customer_info c ON o.o_custkey = c.c_custkey
+        JOIN partsupp ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM part_details pd WHERE pd.part_summary IS NOT NULL)
+        JOIN supplier_info s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    ci.order_details,
+    ci.customer_details,
+    ci.supplier_details,
+    ci.part_summary
+FROM 
+    combined_info ci
+WHERE 
+    ci.order_details LIKE '%Total Price:%'
+ORDER BY 
+    ci.order_details;

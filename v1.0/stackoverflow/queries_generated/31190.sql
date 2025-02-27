@@ -1,0 +1,75 @@
+WITH RECURSIVE PostsHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Selecting only questions
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostsHierarchy ph ON p.ParentId = ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVoteStats AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    ph.PostId,
+    ph.Title,
+    ph.CreationDate,
+    ph.Score,
+    ph.Level,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    CASE 
+        WHEN ub.BadgeCount > 0 THEN ub.BadgeCount
+        ELSE 'No Badges'
+    END AS UserBadges
+FROM 
+    PostsHierarchy ph
+LEFT JOIN 
+    PostVoteStats vs ON ph.PostId = vs.PostId
+LEFT JOIN 
+    Users u ON u.Id = ph.PostId
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = u.Id
+ORDER BY 
+    ph.Score DESC, 
+    ph.CreationDate DESC
+LIMIT 100
+OFFSET 0;
+
+-- Auxiliary Scenarios
+-- This would additionally ensure that we also get accounts with no votes or badges.

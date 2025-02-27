@@ -1,0 +1,50 @@
+
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM Tags t
+    LEFT JOIN Posts p ON t.Id = ANY(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')::text[])
+    GROUP BY t.TagName
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId AND v.VoteTypeId = 8 
+    GROUP BY u.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 2 THEN ph.CreationDate END) AS FirstEditDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 12 THEN ph.CreationDate END) AS DeleteDate
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ups.DisplayName AS TopUser,
+    ups.PostsCreated AS UserPostsCreated,
+    ups.CommentsMade AS UserCommentsMade,
+    ups.TotalBounties,
+    phs.EditCount,
+    phs.FirstEditDate,
+    phs.DeleteDate
+FROM TagStats ts
+JOIN UserPostStats ups ON ts.PostCount = (SELECT MAX(PostCount) FROM TagStats)
+JOIN PostHistoryStats phs ON phs.PostId = (SELECT MIN(p.Id) FROM Posts p WHERE p.Tags LIKE '%' || ts.TagName || '%')
+ORDER BY ts.PostCount DESC
+LIMIT 5;

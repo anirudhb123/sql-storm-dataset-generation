@@ -1,0 +1,90 @@
+WITH avg_price AS (
+    SELECT 
+        ps_partkey,
+        AVG(ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp
+    GROUP BY 
+        ps_partkey
+),
+nation_details AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_regionkey,
+        r.r_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+),
+supply_stats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+ranked_lineitems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_discount DESC, l.l_extendedprice DESC) AS item_rank
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01'
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ns.n_name AS supplier_nation,
+    cs.c_name AS customer_name,
+    co.total_spent,
+    co.order_count,
+    s.total_available_qty,
+    s.total_supply_value,
+    lp.item_rank,
+    a.avg_supply_cost
+FROM 
+    part p
+LEFT JOIN 
+    partsupp s ON p.p_partkey = s.ps_partkey
+LEFT JOIN 
+    supplier sp ON s.ps_suppkey = sp.s_suppkey
+LEFT JOIN 
+    supply_stats s ON p.p_partkey = s.ps_partkey
+LEFT JOIN 
+    ranked_lineitems lp ON lp.l_partkey = p.p_partkey
+LEFT JOIN 
+    customer_orders co ON co.c_custkey = ANY (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = lp.l_orderkey)
+LEFT JOIN 
+    nation_details ns ON sp.s_nationkey = ns.n_nationkey
+JOIN 
+    avg_price a ON p.p_partkey = a.ps_partkey
+WHERE 
+    (s.total_available_qty IS NULL OR s.total_available_qty > 100)
+    AND (co.total_spent > 1000 OR co.order_count > 2)
+ORDER BY 
+    co.total_spent DESC, 
+    a.avg_supply_cost ASC;

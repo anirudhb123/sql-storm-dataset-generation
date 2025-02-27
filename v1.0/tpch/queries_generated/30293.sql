@@ -1,0 +1,56 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_totalprice, o_orderdate, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'F'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderstatus = 'F' AND oh.level < 5
+),
+SupplierPart AS (
+    SELECT ps.ps_partkey, s.s_name, ps.ps_supplycost, ps.ps_availqty,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > 10000
+),
+TopSuppliers AS (
+    SELECT sp.ps_partkey, sp.s_name, sp.ps_supplycost, sp.ps_availqty
+    FROM SupplierPart sp
+    WHERE sp.rn = 1
+),
+RegionSummary AS (
+    SELECT r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count,
+           SUM(ps.ps_availqty) AS total_avail_qty
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY r.r_name
+),
+FinalSummary AS (
+    SELECT r.r_name, 
+           COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+           rs.nation_count,
+           rs.total_avail_qty
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN region r ON o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+    LEFT JOIN RegionSummary rs ON r.r_name = rs.r_name
+    WHERE l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY r.r_name, rs.nation_count, rs.total_avail_qty
+)
+SELECT f.r_name,
+       f.total_revenue,
+       f.nation_count,
+       f.total_avail_qty,
+       (SELECT COUNT(DISTINCT o_orderkey) 
+        FROM OrderHierarchy 
+        WHERE o_orderdate BETWEEN '2022-01-01' AND '2022-12-31') AS order_count
+FROM FinalSummary f
+WHERE f.total_revenue > (
+    SELECT AVG(total_revenue) 
+    FROM FinalSummary
+)
+ORDER BY f.total_revenue DESC;

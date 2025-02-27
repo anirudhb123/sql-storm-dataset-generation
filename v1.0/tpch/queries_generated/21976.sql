@@ -1,0 +1,39 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= '1995-01-01' AND o.o_orderstatus = 'O'
+
+    UNION ALL
+
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    INNER JOIN OrderHierarchy oh ON o.o_orderkey < oh.o_orderkey
+    WHERE o.o_orderdate < oh.o_orderdate
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(ps.ps_partkey) AS part_count, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING COUNT(ps.ps_partkey) > 5
+),
+LineItemStats AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales, 
+           STRING_AGG(DISTINCT l.l_shipmode, ', ') AS ship_modes,
+           RANK() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice) DESC) AS order_rank
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT rh.o_orderkey, rh.o_orderdate, 
+       COALESCE(ls.total_sales, 0) AS total_sales,
+       sd.s_name AS supplier_name,
+       sd.part_count, sd.total_supplycost,
+       CASE WHEN rh.level IS NULL THEN 'N/A' ELSE rh.level END AS order_level,
+       -- Edge case to check for NULLs in aggregate functions
+       NULLIF(NULLIF(MAX(sd.total_supplycost), 0), NULL) AS adjusted_supplycost
+FROM OrderHierarchy rh
+FULL OUTER JOIN LineItemStats ls ON rh.o_orderkey = ls.l_orderkey
+LEFT JOIN SupplierDetails sd ON sd.part_count = (SELECT MAX(part_count) FROM SupplierDetails WHERE part_count < sd.part_count)
+WHERE rh.o_orderdate IS NOT NULL 
+AND xs.total_sales > 1000
+ORDER BY rh.o_orderdate DESC, sd.total_supplycost NULLS LAST;

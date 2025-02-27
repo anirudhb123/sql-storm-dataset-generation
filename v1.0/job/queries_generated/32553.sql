@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- Base case: select all top-level movies
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    -- Recursive case: select child movies associated with the parent
+    SELECT 
+        c.movie_id,
+        a.title,
+        a.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS a ON ml.linked_movie_id = a.id
+    JOIN 
+        movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title AS movie_title,
+    mh.production_year,
+    mh.level,
+    GROUP_CONCAT(DISTINCT ak.name) AS actor_names,
+    COUNT(DISTINCT moc.company_id) AS total_companies,
+    AVG(mo.info_type_id) AS average_info_type
+FROM 
+    movie_hierarchy AS mh
+LEFT JOIN 
+    complete_cast AS cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name AS ak ON cc.subject_id = ak.person_id
+LEFT JOIN 
+    movie_companies AS moc ON mh.movie_id = moc.movie_id
+LEFT JOIN 
+    movie_info AS mo ON mh.movie_id = mo.movie_id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level
+ORDER BY 
+    mh.level DESC, mh.production_year ASC
+LIMIT 100;
+
+-- Benchmarking aspects:
+-- - CTE (Recursive CTE for movie hierarchy)
+-- - LEFT JOINs to include multiple relationships
+-- - Aggregation with GROUP_CONCAT for actors and COUNT for companies
+-- - AVG() for a statistical measure
+-- - Filtering movies by production year
+-- - Ordering results for better performance analysis

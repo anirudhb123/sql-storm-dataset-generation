@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rank_by_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+),
+TopMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        ct.kind,
+        COUNT(ci.person_id) AS total_cast
+    FROM 
+        RankedMovies rm
+    JOIN 
+        kind_type ct ON rm.kind_id = ct.id
+    LEFT JOIN 
+        complete_cast cc ON rm.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    WHERE 
+        rm.rank_by_year <= 5
+    GROUP BY 
+        rm.title, rm.production_year, ct.kind
+),
+CompanyCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tc.kind,
+    COALESCE(cc.company_count, 0) AS company_count,
+    tc.total_cast
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    CompanyCounts cc ON tm.movie_id = cc.movie_id
+JOIN 
+    (SELECT 
+        movie_id, 
+        SUM(CASE WHEN note IS NOT NULL THEN 1 ELSE 0 END) AS total_cast
+     FROM 
+        cast_info 
+     GROUP BY 
+        movie_id) tc ON tm.movie_id = tc.movie_id
+ORDER BY 
+    tm.production_year DESC, 
+    tc.total_cast DESC;

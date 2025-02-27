@@ -1,0 +1,85 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        r.Level + 1 AS Level
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2 
+),
+
+PostSummary AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.Level,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS Upvotes,
+        SUM(v.VoteTypeId = 3) AS Downvotes,
+        CASE 
+            WHEN ph.ParentId IS NOT NULL THEN 'Answer'
+            ELSE 'Question'
+        END AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY ph.ParentId ORDER BY ph.CreationDate DESC) AS AnswerRank
+    FROM 
+        RecursivePostHierarchy ph
+    LEFT JOIN 
+        Comments c ON c.PostId = ph.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = ph.PostId
+    GROUP BY 
+        ph.PostId, ph.Title, ph.Level, ph.ParentId
+),
+
+FilteredPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.Level,
+        ps.CommentCount,
+        ps.Upvotes,
+        ps.Downvotes,
+        ps.PostType,
+        ps.AnswerRank
+    FROM 
+        PostSummary ps
+    WHERE 
+        (ps.PostType = 'Question' AND ps.CommentCount > 0 AND ps.Upvotes > ps.Downvotes)
+        OR (ps.PostType = 'Answer' AND ps.Upvotes - ps.Downvotes > 10)
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CommentCount,
+    fp.Upvotes,
+    fp.Downvotes,
+    fp.PostType,
+    ROUND(COALESCE(fp.Upvotes, 0) * 100.0 / NULLIF((fp.Upvotes + fp.Downvotes), 0), 2) AS UpvotePercentage,
+    CASE 
+        WHEN fp.AnswerRank = 1 THEN 'Top Answer'
+        ELSE CONCAT('Answer rank: ', fp.AnswerRank)
+    END AS AnswerRanking
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.PostType, 
+    UpvotePercentage DESC;

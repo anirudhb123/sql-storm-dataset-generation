@@ -1,0 +1,58 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY r.score DESC) AS rank
+    FROM title t
+    LEFT JOIN (
+        SELECT 
+            m.movie_id, 
+            SUM(k.likelihood) AS score
+        FROM movie_keyword m
+        JOIN keyword k ON m.keyword_id = k.id
+        GROUP BY m.movie_id
+    ) r ON t.id = r.movie_id
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    GROUP BY c.movie_id
+),
+MoviesWithDetails AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        cd.cast_count,
+        cd.actor_names,
+        COALESCE(mci.note, 'No additional info') AS company_notes
+    FROM RankedTitles rt
+    JOIN CastDetails cd ON rt.title_id = cd.movie_id
+    LEFT JOIN movie_companies mci ON rt.title_id = mci.movie_id
+    WHERE rt.rank <= 5
+),
+FilteredMovies AS (
+    SELECT *,
+        CASE 
+            WHEN cast_count IS NULL THEN 'No Cast'
+            WHEN cast_count > 10 THEN 'Large Cast'
+            ELSE 'Regular Cast'
+        END AS cast_size
+    FROM MoviesWithDetails
+)
+SELECT 
+    title, 
+    production_year, 
+    actor_names, 
+    cast_count, 
+    cast_size,
+    company_notes
+FROM FilteredMovies
+WHERE production_year >= 2000 
+ORDER BY production_year DESC, cast_count DESC
+LIMIT 50;

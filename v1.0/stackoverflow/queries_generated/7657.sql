@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days' 
+        AND p.PostTypeId IN (1, 2)  -- Considering Questions and Answers
+),
+PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.Id) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        unnest(string_to_array(p.Tags, '<>')) AS tag ON TRUE
+    JOIN 
+        Tags t ON t.TagName = tag
+    GROUP BY 
+        p.Id
+),
+BadgedUsers AS (
+    SELECT 
+        u.Id,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000  -- Only considering well-reputed users
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.OwnerDisplayName,
+    pt.TagCount,
+    bu.BadgeCount,
+    COALESCE(bu.BadgeCount, 0) AS BadgeCountOrDefault
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostTagCounts pt ON rp.PostId = pt.PostId
+LEFT JOIN 
+    BadgedUsers bu ON rp.OwnerDisplayName = bu.DisplayName  -- Assuming DisplayName is unique for simplicity
+WHERE 
+    rp.Rank <= 5  -- Top 5 posts in each category by Score
+ORDER BY 
+    rp.PostTypeId, 
+    rp.Score DESC;

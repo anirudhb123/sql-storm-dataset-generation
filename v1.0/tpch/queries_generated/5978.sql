@@ -1,0 +1,38 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, COUNT(ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+    HAVING total_spent > 10000
+),
+OrderStatistics AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, l.l_quantity, l.l_discount, l.l_shipmode
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('F', 'O')
+)
+SELECT 
+    r.r_name as region,
+    s.s_name as supplier_name,
+    h.c_name as customer_name,
+    SUM(os.o_totalprice) as total_order_value,
+    AVG(os.l_quantity) as avg_quantity,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_extended_price,
+    COUNT(DISTINCT o.o_orderkey) as total_orders,
+    COUNT(DISTINCT s.s_suppkey) as unique_suppliers
+FROM RankedSuppliers s
+JOIN HighValueCustomers h ON s.s_acctbal > h.c_acctbal
+JOIN nation n ON h.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN OrderStatistics os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = h.c_custkey)
+JOIN lineitem l ON os.o_orderkey = l.l_orderkey
+GROUP BY r.r_name, s.s_name, h.c_name
+ORDER BY total_order_value DESC
+LIMIT 10;

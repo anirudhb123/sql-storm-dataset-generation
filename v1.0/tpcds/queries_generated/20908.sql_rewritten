@@ -1,0 +1,72 @@
+WITH RankedReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        sr.item_sk,
+        sr.customer_sk,
+        sr.return_quantity,
+        sr.return_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr.customer_sk ORDER BY sr.returned_date_sk DESC) AS rn
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.return_quantity > 0
+        AND sr.return_amt IS NOT NULL
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Other' 
+        END AS marital_status
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesInfo AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_order_number, ws.ws_item_sk, ws.ws_sales_price
+    HAVING 
+        SUM(ws.ws_quantity) > 10
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.marital_status,
+    COALESCE(SUM(r.return_quantity), 0) AS total_returned,
+    COALESCE(SUM(r.return_amt), 0) AS total_return_amount,
+    s.total_quantity_sold,
+    s.total_net_profit
+FROM 
+    CustomerInfo ci
+LEFT JOIN 
+    RankedReturns r ON ci.c_customer_id = CAST(r.customer_sk AS CHAR(16))
+LEFT JOIN 
+    SalesInfo s ON r.item_sk = s.ws_item_sk 
+GROUP BY 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.marital_status
+HAVING 
+    SUM(r.return_quantity) > 0
+    OR MAX(s.total_net_profit) IS NOT NULL
+ORDER BY 
+    total_return_amount DESC,
+    total_net_profit ASC
+FETCH FIRST 100 ROWS ONLY;

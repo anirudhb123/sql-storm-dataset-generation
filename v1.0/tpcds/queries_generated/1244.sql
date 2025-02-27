@@ -1,0 +1,72 @@
+
+WITH CustomerReturnStats AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(cr_return_quantity, 0) + COALESCE(sr_return_quantity, 0)) AS total_returns,
+        COUNT(DISTINCT cr_return_number) AS total_catalog_returns,
+        COUNT(DISTINCT sr_ticket_number) AS total_store_returns
+    FROM 
+        customer c
+    LEFT JOIN 
+        catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+HighReturnCustomers AS (
+    SELECT 
+        c.customer_id,
+        cs.total_returns,
+        cs.total_catalog_returns,
+        cs.total_store_returns
+    FROM 
+        CustomerReturnStats cs
+    JOIN 
+        customer c ON cs.c_customer_id = c.c_customer_id
+    WHERE 
+        cs.total_returns > (
+            SELECT AVG(total_returns)
+            FROM CustomerReturnStats
+        )
+),
+SalesByIncomeBand AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        ws.ws_sold_date_sk = (
+            SELECT MAX(d_date_sk) 
+            FROM date_dim 
+            WHERE d_date BETWEEN '2022-01-01' AND '2022-12-31'
+        )
+    GROUP BY 
+        ib.ib_income_band_sk
+)
+SELECT 
+    ric.c_customer_id,
+    ric.total_returns,
+    ib.ib_income_band_sk,
+    ib.total_profit,
+    COALESCE(ric.total_catalog_returns, 0) AS catalog_returns,
+    COALESCE(ric.total_store_returns, 0) AS store_returns,
+    (ric.total_returns * 1.0 / NULLIF((SELECT COUNT(*) FROM customer), 0)) AS return_rate,
+    CASE 
+        WHEN ric.total_returns > 10 THEN 'High Return'
+        WHEN ric.total_returns BETWEEN 5 AND 10 THEN 'Moderate Return'
+        ELSE 'Low Return'
+    END AS return_category
+FROM 
+    HighReturnCustomers ric
+LEFT JOIN 
+    SalesByIncomeBand ib ON ric.total_returns > 5
+ORDER BY 
+    return_rate DESC;

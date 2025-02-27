@@ -1,0 +1,81 @@
+
+WITH RecursiveUserReputation AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        1 AS Level
+    FROM Users U
+    WHERE U.Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        R.Level + 1
+    FROM Users U
+    JOIN RecursiveUserReputation R ON U.Reputation > R.Reputation
+    WHERE R.Level < 10
+),
+TopUsersWithBadges AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        COUNT(B.Id) AS TotalBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        ROW_NUMBER() OVER (ORDER BY P.ViewCount DESC, P.Score DESC) AS Rank
+    FROM Posts P
+    WHERE P.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    AND P.ViewCount IS NOT NULL
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS CloseCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.PostId
+),
+UserPostStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN P.OwnerUserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS PostsCreated,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesReceived,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesReceived
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(B.GoldBadges, 0) AS GoldBadges,
+    COALESCE(B.SilverBadges, 0) AS SilverBadges,
+    COALESCE(B.BronzeBadges, 0) AS BronzeBadges,
+    PS.PostsCreated,
+    PS.UpVotesReceived,
+    PS.DownVotesReceived,
+    COALESCE(CP.CloseCount, 0) AS ClosedPostsCount
+FROM Users U
+JOIN TopUsersWithBadges B ON U.Id = B.Id
+JOIN UserPostStatistics PS ON U.Id = PS.UserId
+LEFT JOIN ClosedPosts CP ON U.Id = CP.PostId
+WHERE U.Reputation > (SELECT AVG(Reputation) FROM Users) 
+AND U.Id IN (SELECT Id FROM RecursiveUserReputation WHERE Level <= 2)
+ORDER BY U.Reputation DESC;

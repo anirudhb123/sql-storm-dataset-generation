@@ -1,0 +1,71 @@
+WITH TaggedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Tags,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        T.TagName
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    JOIN 
+        Tags T ON T.Id IN (SELECT unnest(string_to_array(P.Tags, '>'))::int)
+    WHERE 
+        P.PostTypeId = 1  -- Only questions
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PHT.Name AS ChangeType,
+        PH.UserDisplayName,
+        PH.Comment,
+        PH.Text
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE 
+        PH.CreationDate > NOW() - INTERVAL '30 days'
+),
+PostMetrics AS (
+    SELECT 
+        TP.PostId,
+        COUNT(C.Id) AS CommentCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        TaggedPosts TP
+    LEFT JOIN 
+        Comments C ON C.PostId = TP.PostId
+    LEFT JOIN 
+        Votes V ON V.PostId = TP.PostId
+    GROUP BY 
+        TP.PostId
+)
+SELECT 
+    TP.PostId,
+    TP.Title,
+    TP.CreationDate,
+    TP.OwnerDisplayName,
+    COALESCE(PM.CommentCount, 0) AS CommentCount,
+    PM.TotalBounty,
+    PM.UpVotes,
+    PM.DownVotes,
+    RPH.CreationDate AS RecentEditDate,
+    RPH.ChangeType,
+    RPH.UserDisplayName AS EditedBy,
+    RPH.Comment AS EditComment,
+    RPH.Text AS EditContent
+FROM 
+    TaggedPosts TP
+LEFT JOIN 
+    PostMetrics PM ON TP.PostId = PM.PostId
+LEFT JOIN 
+    RecentPostHistory RPH ON TP.PostId = RPH.PostId
+ORDER BY 
+    TP.CreationDate DESC
+LIMIT 100;

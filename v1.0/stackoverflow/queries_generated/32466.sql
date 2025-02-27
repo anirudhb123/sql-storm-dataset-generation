@@ -1,0 +1,90 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ParentId, 
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS AvgScore,
+        RANK() OVER (ORDER BY COUNT(p.Id) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        h.CreationDate AS ClosedDate,
+        p.OwnerUserId,
+        h.UserId AS CloserUserId,
+        h.Comment
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory h ON p.Id = h.PostId AND h.PostHistoryTypeId = 10
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS UsageCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(p.Id) DESC) AS TagRank
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName
+)
+
+SELECT 
+    up.UserId,
+    up.DisplayName, 
+    up.TotalPosts,
+    up.QuestionCount,
+    up.AnswerCount,
+    up.AvgScore,
+    CASE WHEN c.ClosedCount IS NULL THEN 0 ELSE c.ClosedCount END AS ClosedPostCount,
+    pt.TagName,
+    pt.UsageCount AS TagUsage,
+    pt.TagRank
+FROM 
+    UserPostStats up
+LEFT JOIN 
+    (SELECT OwnerUserId, COUNT(*) AS ClosedCount FROM ClosedPostStats GROUP BY OwnerUserId) c 
+ON 
+    up.UserId = c.OwnerUserId
+CROSS JOIN 
+    PopularTags pt
+WHERE 
+    up.Rank <= 10
+    AND pt.TagRank <= 5
+ORDER BY 
+    up.TotalPosts DESC, pt.TagUsage DESC;

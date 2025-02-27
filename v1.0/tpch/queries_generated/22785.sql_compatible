@@ -1,0 +1,68 @@
+
+WITH RECURSIVE max_part AS (
+    SELECT p_partkey, p_retailprice 
+    FROM part 
+    WHERE p_retailprice IS NOT NULL
+    ORDER BY p_retailprice DESC 
+    FETCH FIRST 1 ROW ONLY
+),
+supplier_orders AS (
+    SELECT s.s_suppkey, SUM(o.o_totalprice) AS total_spent
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey 
+    GROUP BY s.s_suppkey
+),
+customer_status AS (
+    SELECT c.c_custkey, 
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           CASE WHEN COUNT(DISTINCT o.o_orderkey) > 0 THEN 'Active'
+                ELSE 'Inactive' 
+           END AS status
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY c.c_custkey
+),
+avg_discount AS (
+    SELECT AVG(l.l_discount) AS average_discount
+    FROM lineitem l 
+    WHERE l.l_returnflag = 'N'
+)
+SELECT c.c_name AS customer_name, 
+       c.c_acctbal AS account_balance, 
+       COALESCE(o.total_spent, 0) AS supplier_spending,
+       COALESCE(MAX(mp.p_retailprice) FILTER (WHERE mp.p_partkey IS NOT NULL), 0) AS max_part_price,
+       cs.order_count,
+       cs.status,
+       CASE WHEN cs.order_count > 10 THEN 'High Value' 
+            ELSE 'Low Value' 
+       END AS customer_value_segment
+FROM customer c 
+LEFT JOIN customer_status cs ON c.c_custkey = cs.c_custkey 
+LEFT JOIN supplier_orders o ON cs.order_count > 5 
+LEFT JOIN max_part mp ON TRUE 
+WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > (
+    SELECT COALESCE(AVG(c1.c_acctbal), 0)
+    FROM customer c1 
+    WHERE c1.c_mktsegment = c.c_mktsegment
+) 
+GROUP BY c.c_name, c.c_acctbal, o.total_spent, cs.order_count, cs.status
+ORDER BY customer_name ASC, customer_value_segment DESC 
+FETCH FIRST 100 ROWS ONLY
+UNION 
+SELECT s.s_name AS supplier_name, 
+       NULL AS account_balance, 
+       SO.total_spent AS supplier_spending, 
+       0 AS max_part_price, 
+       NULL AS order_count,
+       NULL AS status,
+       'Supplier' AS customer_value_segment
+FROM supplier_orders SO 
+JOIN supplier s ON s.s_suppkey = SO.s_suppkey 
+WHERE SO.total_spent >= (
+    SELECT AVG(total_spent) FROM supplier_orders
+)
+GROUP BY s.s_name, SO.total_spent
+ORDER BY supplier_name 
+FETCH FIRST 50 ROWS ONLY;

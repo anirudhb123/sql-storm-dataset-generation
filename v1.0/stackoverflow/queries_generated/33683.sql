@@ -1,0 +1,66 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.Id  -- Join on parent's Id
+)
+SELECT 
+    p.Title AS QuestionTitle,
+    u.DisplayName AS OwnerName,
+    u.Reputation AS OwnerReputation,
+    COALESCE(qa.Title, 'No Accepted Answer') AS AcceptedAnswerTitle,
+    MAX(v.CreationDate) AS LastVoteDate,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    CASE 
+        WHEN SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) > SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) 
+            THEN 'Positive' 
+        WHEN SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) < SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) 
+            THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS VoteSentiment,
+    STUFF((SELECT ',' + TagName
+           FROM Tags t
+           WHERE t.Id IN (SELECT value::int 
+                          FROM unnest(string_to_array(p.Tags, '<>')) AS value))
+           FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, '') AS TagsList
+FROM 
+    RecursivePostCTE p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Posts qa ON p.AcceptedAnswerId = qa.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '1 year'
+GROUP BY 
+    p.Title, u.DisplayName, u.Reputation, qa.Title
+ORDER BY 
+    COUNT(DISTINCT c.Id) DESC,
+    COALESCE(MAX(v.CreationDate), '1900-01-01') DESC
+FETCH FIRST 20 ROWS ONLY;

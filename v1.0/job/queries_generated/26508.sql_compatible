@@ -1,0 +1,59 @@
+
+WITH NameRanked AS (
+    SELECT
+        ak.name AS aka_name,
+        n.name AS person_name,
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY ak.name) AS name_rank,
+        ak.person_id
+    FROM
+        aka_name ak
+    JOIN
+        name n ON ak.person_id = n.imdb_id
+),
+MovieStats AS (
+    SELECT
+        m.title,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CASE WHEN m.production_year IS NOT NULL THEN m.production_year ELSE NULL END) AS avg_production_year
+    FROM
+        aka_title m
+    JOIN
+        cast_info c ON m.id = c.movie_id
+    GROUP BY
+        m.title
+),
+CompanyInfo AS (
+    SELECT
+        mc.movie_id,
+        STRING_AGG(DISTINCT co.name, ', ' ORDER BY co.name) AS companies,
+        STRING_AGG(DISTINCT ct.kind, ', ' ORDER BY ct.kind) AS company_types
+    FROM
+        movie_companies mc
+    JOIN
+        company_name co ON mc.company_id = co.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY
+        mc.movie_id
+)
+SELECT
+    nr.aka_name,
+    nr.person_name,
+    ms.title AS movie_title,
+    ms.cast_count,
+    ms.avg_production_year,
+    ci.companies,
+    ci.company_types
+FROM
+    NameRanked nr
+JOIN
+    cast_info ci ON nr.person_id = ci.person_id
+JOIN
+    MovieStats ms ON ci.movie_id = ms.movie_id
+JOIN
+    CompanyInfo cci ON ms.title = cci.movie_id
+WHERE
+    nr.name_rank = 1
+ORDER BY
+    nr.person_name,
+    ms.avg_production_year DESC;

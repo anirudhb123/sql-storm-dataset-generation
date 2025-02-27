@@ -1,0 +1,56 @@
+WITH MovieActors AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        c.nr_order AS role_order,
+        r.role AS role_name
+    FROM
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        title t ON c.movie_id = t.id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+),
+MovieKeywords AS (
+    SELECT 
+        t.title AS movie_title,
+        GROUP_CONCAT(k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        title t ON mk.movie_id = t.id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.title
+),
+ActorInfo AS (
+    SELECT 
+        a.name AS actor_name,
+        GROUP_CONCAT(DISTINCT pi.info) AS actor_info
+    FROM 
+        aka_name a
+    JOIN 
+        person_info pi ON a.person_id = pi.person_id
+    GROUP BY 
+        a.name
+)
+SELECT 
+    ma.actor_name,
+    ma.movie_title,
+    ma.role_order,
+    ma.role_name,
+    mk.keywords,
+    ai.actor_info
+FROM 
+    MovieActors ma
+LEFT JOIN 
+    MovieKeywords mk ON ma.movie_title = mk.movie_title
+LEFT JOIN 
+    ActorInfo ai ON ma.actor_name = ai.actor_name
+ORDER BY 
+    ma.actor_name, ma.movie_title;

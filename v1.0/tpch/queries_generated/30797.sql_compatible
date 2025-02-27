@@ -1,0 +1,60 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        c.c_custkey, c.c_nationkey
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+HighValueCustomers AS (
+    SELECT 
+        sc.c_custkey,
+        sc.total_sales
+    FROM 
+        SalesCTE sc
+    WHERE 
+        sc.rank <= 10
+)
+SELECT 
+    n.n_name AS nation_name,
+    SUM(ps.avg_supply_cost) AS total_avg_supply_cost,
+    SUM(cv.total_sales) AS total_sales_per_nation
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.s_suppkey
+LEFT JOIN 
+    PartStats p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    HighValueCustomers cv ON n.n_nationkey = cv.c_custkey
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(ps.avg_supply_cost) IS NOT NULL
+    OR COUNT(cv.c_custkey) > 0
+ORDER BY 
+    total_sales_per_nation DESC;

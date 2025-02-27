@@ -1,0 +1,83 @@
+WITH SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_availqty) DESC) AS rank_per_nation
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        si.total_supply_cost,
+        si.rank_per_nation
+    FROM 
+        supplier s
+    LEFT JOIN 
+        SupplierInfo si ON s.s_suppkey = si.s_suppkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+        AND si.rank_per_nation IS NOT NULL
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        DENSE_RANK() OVER (ORDER BY COUNT(o.o_orderkey) DESC) AS customer_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierCustomerAnalysis AS (
+    SELECT 
+        hc.s_suppkey,
+        hc.s_name,
+        tc.c_custkey,
+        tc.c_name,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue
+    FROM 
+        HighValueSuppliers hc
+    LEFT JOIN 
+        lineitem l ON hc.s_suppkey = l.l_suppkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN 
+        customer tc ON o.o_custkey = tc.c_custkey
+    GROUP BY 
+        hc.s_suppkey, hc.s_name, tc.c_custkey, tc.c_name
+)
+SELECT 
+    s.s_suppkey,
+    s.s_name,
+    c.c_custkey,
+    c.c_name,
+    COALESCE(sa.total_revenue, 0) AS total_revenue,
+    CASE 
+        WHEN sa.total_revenue > 10000 THEN 'High Revenue' 
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM 
+    HighValueSuppliers s
+FULL OUTER JOIN 
+    TopCustomers c ON s.s_suppkey = c.c_custkey
+LEFT JOIN 
+    SupplierCustomerAnalysis sa ON sa.s_suppkey = s.s_suppkey AND sa.c_custkey = c.c_custkey
+WHERE 
+    (s.total_supply_cost IS NOT NULL AND s.total_avail_qty < 1000) 
+    OR (c.order_count IS NULL AND s.s_name LIKE '%Inc%')
+ORDER BY 
+    total_revenue DESC, revenue_category ASC;

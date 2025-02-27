@@ -1,0 +1,98 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 END), 0) AS DownVotes,
+        COUNT(DISTINCT v.PostId) AS TotalVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        AVG(u.Reputation) OVER () AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COALESCE(vt.BountyAmount, 0) AS LastBountyAmount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank,
+        COALESCE(
+            (SELECT SUM(CASE WHEN PostHistoryTypeId = 10 THEN 1 ELSE 0 END)
+             FROM PostHistory ph 
+             WHERE ph.PostId = p.Id), 0
+        ) AS CloseCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        (SELECT PostId, MAX(BountyAmount) AS BountyAmount FROM Votes GROUP BY PostId) vt ON vt.PostId = p.Id
+    GROUP BY 
+        p.Id, vt.BountyAmount
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT CASE WHEN p.AnswerCount > 0 THEN p.Id END) AS AnsweredCount,
+        AVG(COALESCE(a.Score, 0)) AS AvgScore,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Id END) AS PostClosedCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT PostId, SUM(Score) AS Score FROM Posts GROUP BY PostId) a ON a.PostId = p.Id
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    ups.PostsCount,
+    ups.AnsweredCount,
+    ups.AvgScore,
+    ups.EditCount,
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.CommentCount,
+    pa.TotalBounties,
+    pa.CloseCount,
+    COALESCE(uvs.UpVotes, 0) AS UserUpVotes,
+    COALESCE(uvs.DownVotes, 0) AS UserDownVotes,
+    COALESCE(uvs.BadgeCount, 0) AS UserBadges,
+    uvs.AvgReputation,
+    CASE 
+        WHEN pa.CloseCount > 0 THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus
+FROM 
+    UserPostStats ups
+JOIN 
+    UserVoteStats uvs ON ups.UserId = uvs.UserId
+LEFT JOIN 
+    PostActivity pa ON pa.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ups.UserId AND p.AnswerCount > 0)
+JOIN 
+    Users u ON ups.UserId = u.Id
+WHERE 
+    u.CreationDate < NOW() - INTERVAL '1 year'
+ORDER BY 
+    UserUpVotes DESC, AvgReputation DESC
+LIMIT 100;

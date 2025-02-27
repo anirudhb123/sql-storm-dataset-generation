@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01' as date) - INTERVAL '365 days'
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(rp.Score + rp.UpVotes - rp.DownVotes) AS TotalEngagement
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId 
+    WHERE 
+        rp.UserPostRank <= 5
+    GROUP BY 
+        u.Id
+),
+UserRankings AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalEngagement,
+        RANK() OVER (ORDER BY TotalEngagement DESC) AS EngagementRank
+    FROM 
+        TopUsers
+)
+SELECT 
+    ur.DisplayName,
+    ur.TotalEngagement,
+    ur.EngagementRank,
+    COUNT(b.Id) AS BadgeCount
+FROM 
+    UserRankings ur
+LEFT JOIN 
+    Badges b ON ur.UserId = b.UserId
+GROUP BY 
+    ur.UserId, ur.DisplayName, ur.TotalEngagement, ur.EngagementRank
+ORDER BY 
+    ur.EngagementRank;

@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS UserName,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount, -- Upvotes
+        SUM(v.VoteTypeId = 3) AS DownVoteCount, -- Downvotes
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+        JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN Posts a ON p.Id = a.ParentId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, u.DisplayName
+),
+
+TopUsers AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS TotalPosts,
+        SUM(UpVoteCount) AS TotalUpVotes,
+        SUM(DownVoteCount) AS TotalDownVotes
+    FROM (
+        SELECT 
+            p.OwnerUserId AS UserId,
+            COUNT(p.Id) AS UserPosts, 
+            SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+        FROM 
+            Posts p
+            LEFT JOIN Votes v ON p.Id = v.PostId
+        WHERE 
+            p.PostTypeId = 1 -- Only questions
+        GROUP BY 
+            p.OwnerUserId 
+    ) AS UserStats
+    GROUP BY 
+        UserId
+)
+
+SELECT 
+    u.DisplayName,
+    t.TotalPosts,
+    t.TotalUpVotes,
+    t.TotalDownVotes,
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.AnswerCount
+FROM 
+    TopUsers t
+    JOIN Users u ON t.UserId = u.Id
+    JOIN RankedPosts r ON u.Id = r.UserName
+WHERE 
+    t.TotalPosts > 5 -- Only users with more than 5 posts
+ORDER BY 
+    t.TotalUpVotes DESC, t.TotalPosts DESC; -- Order by upvotes and number of posts

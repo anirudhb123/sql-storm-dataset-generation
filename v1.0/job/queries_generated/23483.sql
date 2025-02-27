@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        SUM(CASE 
+                WHEN md.info IS NOT NULL THEN 1 
+                ELSE 0 
+            END) AS has_info_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM aka_title t
+    LEFT JOIN cast_info c ON t.movie_id = c.movie_id
+    LEFT JOIN movie_info md ON t.movie_id = md.movie_id
+    GROUP BY t.id, t.title, t.production_year
+),
+PopularActors AS (
+    SELECT 
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count,
+        MAX(m.production_year) AS last_movie_year
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN aka_title m ON ci.movie_id = m.movie_id
+    WHERE m.kind_id = 1  -- Assuming 1 is for 'movie'
+    GROUP BY a.name
+    HAVING COUNT(DISTINCT ci.movie_id) > 5
+),
+DiscountedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        CASE 
+            WHEN rm.cast_count > 5 THEN 'Popular' 
+            WHEN rm.has_info_count = 0 THEN 'No Info' 
+            ELSE 'Moderate' 
+        END AS popularity_status
+    FROM RankedMovies rm
+    WHERE rm.rank < 10
+)
+SELECT 
+    dm.title,
+    dm.popularity_status,
+    pa.name,
+    pa.movies_count,
+    pa.last_movie_year,
+    COALESCE(mci.note, 'No note available') AS company_note
+FROM DiscountedMovies dm
+LEFT JOIN movie_companies mc ON dm.movie_id = mc.movie_id
+LEFT JOIN company_name cn ON mc.company_id = cn.id
+LEFT JOIN PopularActors pa ON pa.last_movie_year >= dm.title AND pa.movies_count > 10
+LEFT JOIN movie_info mci ON dm.movie_id = mci.movie_id AND mci.info_type_id = (SELECT MIN(id) FROM info_type WHERE info = 'tagline')
+WHERE dm.popularity_status = 'Popular' OR (dm.popularity_status = 'Moderate' AND pa.name IS NOT NULL)
+ORDER BY dm.title, pa.movies_count DESC NULLS LAST;

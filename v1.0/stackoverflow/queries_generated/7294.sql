@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) AND 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), FrequentTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 10
+), TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM 
+        Users u
+    JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        v.VoteTypeId IN (8, 9) -- BountyStart, BountyClose
+    GROUP BY 
+        u.Id
+    ORDER BY 
+        TotalBounties DESC
+    LIMIT 10
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    ft.TagName,
+    tu.DisplayName AS TopUser,
+    tu.TotalBounties
+FROM 
+    RankedPosts rp
+JOIN 
+    FrequentTags ft ON rp.Title LIKE '%' || ft.TagName || '%'
+JOIN 
+    TopUsers tu ON rp.OwnerUserId = tu.UserId
+WHERE 
+    rp.PostRank <= 10
+ORDER BY 
+    rp.PostId, ft.TagCount DESC, tu.TotalBounties DESC;

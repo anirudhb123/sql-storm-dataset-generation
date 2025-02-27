@@ -1,0 +1,73 @@
+WITH UserVoteCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 6) THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(ph.UserId, 0) AS LastEditorId,
+        COALESCE(ph.LastEditDate, p.CreationDate) AS LastEditDate
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON ph.PostId = p.Id AND ph.PostHistoryTypeId IN (4, 5) -- Title and Body edits
+),
+TagStatistics AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY t.Id
+),
+CombinedStats AS (
+    SELECT 
+        us.UserId,
+        us.VoteCount,
+        us.UpvoteCount,
+        us.DownvoteCount,
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.ViewCount,
+        ps.Score,
+        ps.LastEditorId,
+        ps.LastEditDate,
+        ts.TagId,
+        ts.TagName,
+        ts.TotalViews,
+        ts.PostCount
+    FROM UserVoteCounts us
+    CROSS JOIN PostStatistics ps
+    CROSS JOIN TagStatistics ts
+)
+SELECT 
+    UserId,
+    VoteCount,
+    UpvoteCount,
+    DownvoteCount,
+    PostId,
+    Title,
+    CreationDate,
+    ViewCount,
+    Score,
+    LastEditorId,
+    LastEditDate,
+    TagId,
+    TagName,
+    TotalViews,
+    PostCount
+FROM CombinedStats
+WHERE Score > 0
+ORDER BY TotalViews DESC, VoteCount DESC
+LIMIT 50;

@@ -1,0 +1,68 @@
+WITH SupplierSales AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY
+        s.s_suppkey,
+        s.s_name
+),
+TopSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        ss.total_sales
+    FROM
+        SupplierSales ss
+    JOIN
+        supplier s ON ss.s_suppkey = s.s_suppkey
+    ORDER BY
+        ss.total_sales DESC
+    LIMIT 10
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderdate >= '2023-01-01'
+    GROUP BY
+        c.c_custkey,
+        c.c_name
+),
+OrderDetails AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        o.o_orderkey
+)
+SELECT
+    ts.s_name AS Top_Supplier_Name,
+    ts.total_sales AS Total_Sales,
+    co.c_name AS Customer_Name,
+    co.order_count AS Number_of_Orders,
+    od.order_total AS Total_Order_Value
+FROM
+    TopSuppliers ts
+JOIN
+    CustomerOrders co ON co.order_count > 5
+JOIN
+    OrderDetails od ON od.order_total > 1000
+ORDER BY
+    ts.total_sales DESC, co.order_count DESC;

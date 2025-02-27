@@ -1,0 +1,27 @@
+SELECT 
+    a.name AS actor_name, 
+    t.title AS movie_title, 
+    c.character_name AS character_played, 
+    COUNT(DISTINCT mc.company_id) AS production_companies_count, 
+    AVG(m_info.info::numeric) AS average_rating
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    char_name c ON c.imdb_id = ci.role_id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    movie_info m_info ON t.id = m_info.movie_id AND m_info.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+WHERE 
+    t.production_year >= 2000 
+    AND a.name IS NOT NULL 
+GROUP BY 
+    a.name, t.title, c.character_name
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    average_rating DESC, a.name ASC;

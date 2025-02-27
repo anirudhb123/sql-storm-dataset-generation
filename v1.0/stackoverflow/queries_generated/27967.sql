@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.Tags,
+        rp.CommentCount,
+        CASE 
+            WHEN rp.Score >= 50 THEN 'High Score'
+            WHEN rp.Score BETWEEN 20 AND 49 THEN 'Medium Score'
+            ELSE 'Low Score' 
+        END AS ScoreCategory,
+        ROW_NUMBER() OVER (ORDER BY rp.Score DESC, rp.ViewCount DESC) AS Rank
+    FROM 
+        RankedPosts rp
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.ViewCount,
+        ps.Score,
+        ps.Tags,
+        ps.CommentCount,
+        ps.ScoreCategory
+    FROM 
+        PostStatistics ps
+    WHERE 
+        ps.Rank <= 10
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.ScoreCategory,
+    ps.CommentCount,
+    COALESCE(badge_count.badge_count, 0) AS BadgeCount
+FROM 
+    TopPosts ps
+LEFT JOIN (
+    SELECT 
+        UserId, 
+        COUNT(Id) AS badge_count
+    FROM 
+        Badges 
+    WHERE 
+        Class = 1 -- Only Gold badges
+    GROUP BY 
+        UserId
+) AS badge_count ON badge_count.UserId = (
+    SELECT OwnerUserId 
+    FROM Posts 
+    WHERE Id = ps.PostId
+)
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

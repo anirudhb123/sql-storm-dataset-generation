@@ -1,0 +1,14 @@
+-- Performance benchmarking query across various tables
+
+-- This query will evaluate the number of posts, users and votes, and aggregate the average score for posts
+SELECT 
+    (SELECT COUNT(*) FROM Posts) AS TotalPosts,
+    (SELECT COUNT(*) FROM Users) AS TotalUsers,
+    (SELECT COUNT(*) FROM Votes) AS TotalVotes,
+    AVG(Score) AS AveragePostScore,
+    AVG(ViewCount) AS AveragePostViewCount,
+    (SELECT COUNT(*) FROM Badges) AS TotalBadges,
+    (SELECT COUNT(*) FROM Comments) AS TotalComments,
+    (SELECT COUNT(*) FROM PostHistory) AS TotalPostHistoryEntries
+FROM 
+    Posts;

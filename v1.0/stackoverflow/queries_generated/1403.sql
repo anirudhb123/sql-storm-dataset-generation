@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score > 0
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    up.DisplayName AS UserDisplayName,
+    up.Views AS UserViews,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    pvc.Upvotes,
+    pvc.Downvotes,
+    CASE 
+        WHEN rp.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+        ELSE 'Not Accepted'
+    END AS AcceptanceStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+JOIN 
+    PostVoteCounts pvc ON rp.Id = pvc.PostId
+WHERE 
+    rp.RankScore <= 3
+ORDER BY 
+    ub.GoldBadges DESC, rp.Score DESC, rp.ViewCount DESC
+LIMIT 10;

@@ -1,0 +1,60 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+order_summary AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_payment,
+           COUNT(l.l_orderkey) AS line_count,
+           RANK() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS payment_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1996-01-01' AND '1997-10-01'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+part_supplier AS (
+    SELECT p.p_partkey, ps.ps_suppkey, 
+           COALESCE(AVG(ps.ps_supplycost), 0) AS avg_supply_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+customer_rank AS (
+    SELECT c.c_custkey, c.c_name, c.c_mktsegment,
+           SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(o.o_totalprice) DESC) AS std_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_mktsegment
+),
+final_selection AS (
+    SELECT DISTINCT
+        c.c_custkey,
+        c.c_name,
+        nh.n_name AS nation_name,
+        ps.avg_supply_cost,
+        ps.supplier_count,
+        os.total_payment,
+        os.line_count,
+        cr.std_rank
+    FROM customer_rank cr
+    JOIN customer c ON c.c_custkey = cr.c_custkey
+    LEFT JOIN nation_hierarchy nh ON c.c_nationkey = nh.n_nationkey
+    LEFT JOIN order_summary os ON c.c_custkey = os.o_orderkey
+    LEFT JOIN part_supplier ps ON ps.supplier_count > 0
+    WHERE cr.std_rank < 5
+      AND os.total_payment IS NOT NULL
+      AND ps.avg_supply_cost IS NOT NULL
+)
+SELECT *
+FROM final_selection
+WHERE (nation_name IS NOT NULL OR avg_supply_cost < 100.00)
+ORDER BY total_payment DESC, nation_name ASC
+FETCH FIRST 100 ROWS ONLY;

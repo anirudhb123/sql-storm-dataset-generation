@@ -1,0 +1,53 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+TopSuppliers AS (
+    SELECT 
+        rs.nation,
+        rs.s_name,
+        rs.total_supply_cost
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.supplier_rank <= 5
+),
+OrdersSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS customer_count,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    ts.nation,
+    ts.s_name,
+    os.total_revenue,
+    os.customer_count,
+    os.last_ship_date
+FROM 
+    TopSuppliers ts
+JOIN 
+    OrdersSummary os ON ts.total_supply_cost > (SELECT AVG(total_supply_cost) FROM TopSuppliers)
+ORDER BY 
+    ts.nation, os.total_revenue DESC;

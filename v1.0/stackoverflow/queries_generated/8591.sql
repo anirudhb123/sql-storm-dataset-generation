@@ -1,0 +1,46 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank 
+    FROM Users u
+), 
+UserBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(*) AS BadgeCount 
+    FROM Badges b 
+    GROUP BY b.UserId
+), 
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId, 
+        COUNT(p.Id) AS PostCount, 
+        SUM(p.Score) AS TotalScore, 
+        AVG(p.ViewCount) AS AverageViewCount 
+    FROM Posts p 
+    GROUP BY p.OwnerUserId
+), 
+Activity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount, 
+        COALESCE(ps.PostCount, 0) AS PostCount, 
+        COALESCE(ps.TotalScore, 0) AS TotalScore, 
+        COALESCE(ps.AverageViewCount, 0) AS AverageViewCount 
+    FROM RankedUsers u 
+    LEFT JOIN UserBadges ub ON u.UserId = ub.UserId 
+    LEFT JOIN PostStatistics ps ON u.UserId = ps.OwnerUserId 
+) 
+SELECT 
+    a.DisplayName, 
+    a.BadgeCount, 
+    a.PostCount, 
+    a.TotalScore, 
+    a.AverageViewCount, 
+    RANK() OVER (ORDER BY a.TotalScore DESC, a.PostCount DESC) AS OverallRank 
+FROM Activity a 
+ORDER BY OverallRank
+LIMIT 100;

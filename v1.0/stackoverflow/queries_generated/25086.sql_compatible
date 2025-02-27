@@ -1,0 +1,78 @@
+
+WITH TagCounts AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::text[])
+    GROUP BY 
+        t.TagName
+),
+
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        TotalScore DESC
+    LIMIT 5
+),
+
+RecentPostEditHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Text
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '30 days'
+        AND ph.PostHistoryTypeId IN (4, 5, 6)  
+),
+
+MostEditedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(pe.PostId) AS EditCount
+    FROM 
+        Posts p
+    JOIN 
+        RecentPostEditHistory pe ON p.Id = pe.PostId
+    GROUP BY 
+        p.Id, p.Title
+    ORDER BY 
+        EditCount DESC
+    LIMIT 10
+)
+
+SELECT 
+    tc.TagName,
+    tc.PostCount,
+    tu.UserId,
+    tu.DisplayName,
+    tu.TotalScore,
+    mu.Title,
+    mu.EditCount
+FROM 
+    TagCounts tc
+CROSS JOIN 
+    TopUsers tu
+LEFT JOIN 
+    MostEditedPosts mu ON TRUE
+ORDER BY 
+    tc.PostCount DESC, 
+    tu.TotalScore DESC, 
+    mu.EditCount DESC;

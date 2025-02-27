@@ -1,0 +1,39 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        rt.role AS actor_role,
+        STRING_AGG(ti.info, ', ') AS info_details
+    FROM title t
+    JOIN cast_info ci ON t.id = ci.movie_id
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    JOIN role_type rt ON ci.role_id = rt.id
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN info_type it ON mi.info_type_id = it.id
+    GROUP BY t.id, ak.id, t.title, t.production_year, rt.role
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.actor_name,
+    md.actor_role,
+    mc.company_names,
+    mc.company_types,
+    md.info_details
+FROM MovieDetails md
+LEFT JOIN MovieCompanies mc ON md.movie_id = mc.movie_id
+ORDER BY md.production_year DESC, md.title;

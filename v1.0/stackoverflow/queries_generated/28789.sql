@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- We're only interested in Questions
+),
+
+TagStats AS (
+    SELECT 
+        unnest(string_to_array(p.Tags, '>')) AS Tag,
+        COUNT(*) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+
+PostHistogram AS (
+    SELECT 
+        EXTRACT(HOUR FROM p.CreationDate) AS Hour,
+        COUNT(*) AS PostsCreated
+    FROM 
+        Posts p
+    GROUP BY 
+        Hour
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Tags,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.Score,
+    rp.ViewCount,
+    ts.Tag,
+    ts.PostCount AS TagPostCount,
+    ts.TotalViews AS TagTotalViews,
+    ts.AverageScore AS TagAverageScore,
+    ph.Hours AS PostCreationHour,
+    ph.PostsCreated,
+    ub.BadgeCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagStats ts ON ts.Tag = ANY(string_to_array(rp.Tags, '>'))
+LEFT JOIN 
+    PostHistogram ph ON ph.Hour = EXTRACT(HOUR FROM rp.CreationDate)
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = rp.OwnerUserId
+WHERE 
+    rp.Rank = 1 -- Only the most recent question per user
+ORDER BY 
+    rp.CreationDate DESC, TagPostCount DESC;

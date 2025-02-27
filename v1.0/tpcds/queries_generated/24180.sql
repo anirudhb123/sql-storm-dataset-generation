@@ -1,0 +1,78 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > 0
+), 
+item_details AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(SUM(cs.cs_quantity), 0) AS total_catalog_sales,
+        COALESCE(SUM(ss.ss_quantity), 0) AS total_store_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_web_orders
+    FROM 
+        item i
+    LEFT JOIN 
+        catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+    LEFT JOIN 
+        store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_id, i.i_item_desc
+),
+return_data AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt,
+        SUM(sr_return_tax) AS total_return_tax
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+sales_comparison AS (
+    SELECT 
+        id.i_item_id,
+        id.i_item_desc,
+        id.total_catalog_sales,
+        id.total_store_sales,
+        rd.total_returns,
+        rd.total_return_amt,
+        rd.total_return_tax,
+        (id.total_catalog_sales + id.total_store_sales - COALESCE(rd.total_returns, 0)) AS net_sales_after_returns,
+        CASE 
+            WHEN id.total_catalog_sales + id.total_store_sales = 0 THEN NULL
+            ELSE (id.total_catalog_sales + id.total_store_sales) / NULLIF(rd.total_returns, 0) 
+        END AS sales_return_ratio
+    FROM 
+        item_details id
+    LEFT JOIN 
+        return_data rd ON id.i_item_sk = rd.sr_item_sk
+)
+SELECT 
+    sc.i_item_id,
+    sc.i_item_desc,
+    sc.total_catalog_sales,
+    sc.total_store_sales,
+    sc.net_sales_after_returns,
+    sc.sales_return_ratio,
+    rs.ws_sales_price AS highest_web_price
+FROM 
+    sales_comparison sc
+LEFT JOIN 
+    ranked_sales rs ON sc.i_item_sk = rs.ws_item_sk AND rs.rank = 1
+WHERE 
+    (sc.sales_return_ratio IS NULL OR sc.sales_return_ratio > 1.5)
+ORDER BY 
+    sc.net_sales_after_returns DESC NULLS LAST;

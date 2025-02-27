@@ -1,0 +1,39 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rnk
+    FROM orders o
+    WHERE o.o_orderdate >= CURRENT_DATE - INTERVAL '90 days'
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, l.l_extendedprice,
+           COALESCE(l.l_discount, 0) AS l_discount_applied
+    FROM lineitem l
+    WHERE l.l_quantity > (SELECT AVG(l2.l_quantity) FROM lineitem l2)
+)
+SELECT 
+    p.p_name,
+    SUM(f.l_extendedprice - (f.l_extendedprice * f.l_discount_applied)) AS total_revenue,
+    COUNT(DISTINCT r.r_name) AS region_count,
+    AVG(sh.level) AS avg_supplier_level
+FROM part p
+LEFT JOIN FilteredLineItems f ON p.p_partkey = f.l_partkey
+JOIN RecentOrders o ON f.l_orderkey = o.o_orderkey
+LEFT JOIN supplier s ON s.s_suppkey = f.l_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE p.p_retailprice BETWEEN 10.00 AND 500.00
+  AND o.o_totalprice > 100.00
+  AND (s.s_acctbal IS NOT NULL OR (s.s_acctbal IS NULL AND r.r_name <> 'Dummy'))
+GROUP BY p.p_name
+HAVING total_revenue > 1000
+ORDER BY total_revenue DESC;

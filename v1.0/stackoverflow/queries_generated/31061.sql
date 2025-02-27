@@ -1,0 +1,62 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment AS EditComment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+),
+RecentPostInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS NetVotes, -- Upvotes - Downvotes
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        row_number() OVER (ORDER BY COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = p.OwnerUserId
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 10
+)
+SELECT 
+    rpi.PostId,
+    rpi.Title,
+    rpi.CreationDate,
+    rpi.NetVotes,
+    rpi.CommentCount,
+    rpi.Rank,
+    rph.EditComment,
+    pt.TagName,
+    pt.TotalViews
+FROM 
+    RecentPostInfo rpi
+LEFT JOIN 
+    RecursivePostHistory rph ON rpi.PostId = rph.PostId AND rph.rn = 1
+LEFT JOIN 
+    PopularTags pt ON pt.TotalViews > 5000 -- Tags with total views greater than a threshold
+WHERE 
+    rpi.Rank <= 5 -- Top 5 posts based on net votes
+ORDER BY 
+    rpi.NetVotes DESC;

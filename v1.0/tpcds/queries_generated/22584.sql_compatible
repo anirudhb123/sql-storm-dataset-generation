@@ -1,0 +1,41 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        wr.web_page_sk,
+        wr.returned_date_sk,
+        wr.order_number,
+        wr.return_quantity,
+        wr.return_amt,
+        COALESCE(SUM(wr.return_amt) OVER (PARTITION BY wr.returned_date_sk ORDER BY wr.returned_date_sk ROWS BETWEEN 6 PRECEDING AND CURRENT ROW), 0) AS running_return_amt,
+        ROW_NUMBER() OVER (PARTITION BY wr.web_page_sk ORDER BY wr.returned_date_sk DESC) AS return_rank
+    FROM web_returns wr
+    WHERE wr.return_quantity IS NOT NULL
+),
+
+CustomerReturns AS (
+    SELECT 
+        c.customer_id,
+        COUNT(DISTINCT r.returned_date_sk) AS distinct_return_days,
+        SUM(r.return_quantity) AS total_returned,
+        CASE 
+            WHEN SUM(r.return_quantity) IS NULL THEN 'No Returns'
+            WHEN SUM(r.return_quantity) > 100 THEN 'High Return Customer'
+            ELSE 'Regular Customer'
+        END AS return_category
+    FROM customer c
+    LEFT JOIN RankedReturns r ON c.c_customer_sk = r.web_page_sk 
+    GROUP BY c.customer_id
+)
+
+SELECT 
+    ca.city, 
+    ca.state, 
+    cr.return_category, 
+    AVG(cr.total_returned) AS avg_total_returned, 
+    COUNT(DISTINCT cr.customer_id) AS customer_count,
+    AVG(COALESCE(cr.distinct_return_days, 0)) AS avg_distinct_days_returned
+FROM CustomerReturns cr
+JOIN customer_address ca ON cr.customer_id = ca.ca_address_id
+GROUP BY ca.city, ca.state, cr.return_category
+HAVING COUNT(DISTINCT cr.customer_id) > 5
+ORDER BY avg_total_returned DESC, ca.city;

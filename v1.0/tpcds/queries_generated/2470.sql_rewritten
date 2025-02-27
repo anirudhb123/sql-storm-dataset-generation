@@ -1,0 +1,66 @@
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+sales_summary AS (
+    SELECT 
+        i_item_id,
+        i_current_price,
+        COALESCE(rs.total_quantity, 0) AS total_quantity,
+        COALESCE(rs.total_sales, 0) AS total_sales,
+        CASE 
+            WHEN COALESCE(rs.total_quantity, 0) > 0 THEN 
+                ROUND((COALESCE(rs.total_sales, 0) / COALESCE(rs.total_quantity, 1)), 2)
+            ELSE 
+                0
+        END AS avg_sales_price,
+        CASE 
+            WHEN i_current_price > 0 THEN 
+                ROUND((COALESCE(rs.total_sales, 0) / i_current_price) * 100, 2)
+            ELSE
+                0
+        END AS sales_to_price_ratio
+    FROM 
+        item 
+    LEFT OUTER JOIN ranked_sales rs ON i_item_sk = rs.ws_item_sk
+    WHERE 
+        i_rec_start_date < cast('2002-10-01' as date)
+),
+top_sales AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS row_num
+    FROM 
+        sales_summary
+    WHERE 
+        sales_rank = 1
+)
+SELECT 
+    s_store_name,
+    COUNT(DISTINCT cs_order_number) AS total_orders,
+    SUM(cs_net_profit) AS total_net_profit,
+    AVG(avg_sales_price) AS avg_price_per_item,
+    MAX(sales_to_price_ratio) AS highest_sales_ratio
+FROM 
+    store s 
+JOIN 
+    catalog_sales cs ON s.s_store_sk = cs.cs_store_sk
+JOIN 
+    top_sales ts ON cs.cs_item_sk = ts.i_item_sk
+WHERE 
+    s.s_state = 'NY' 
+    AND cs.cs_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2001-10-01') 
+    AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2001-10-31')
+GROUP BY 
+    s_store_name
+HAVING 
+    SUM(cs_net_profit) > 1000
+ORDER BY 
+    total_net_profit DESC;

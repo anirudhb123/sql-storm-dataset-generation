@@ -1,0 +1,57 @@
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+ItemDetails AS (
+    SELECT 
+        i_item_sk,
+        i_item_desc,
+        i_current_price,
+        COALESCE(i_current_price * 0.9, 0) AS discounted_price 
+    FROM 
+        item
+)
+SELECT 
+    id.i_item_desc,
+    id.i_current_price,
+    id.discounted_price,
+    sd.total_quantity,
+    sd.total_sales,
+    CASE 
+        WHEN sd.total_sales IS NULL THEN 'No sales'
+        WHEN sd.total_sales > 1000 THEN 'High sales'
+        ELSE 'Normal sales' 
+    END AS sales_category,
+    DATEADD(day, 1, DENSE_RANK() OVER (ORDER BY sd.ws_sold_date_sk)) AS next_day_sales,
+    ARRAY_AGG(DISTINCT ca.ca_city) FILTER (WHERE ca.ca_state IS NULL) AS unusual_cities, 
+    LAG(sd.total_sales) OVER (PARTITION BY id.i_item_sk ORDER BY sd.ws_sold_date_sk) AS previous_sales,
+    RANK() OVER (PARTITION BY sd.ws_item_sk ORDER BY sd.total_sales DESC) AS sales_rank
+FROM 
+    SalesData sd
+JOIN 
+    ItemDetails id ON sd.ws_item_sk = id.i_item_sk
+LEFT JOIN 
+    customer_address ca ON ca.ca_address_sk = (sd.ws_sold_date_sk %% 100) 
+WHERE 
+    (sd.total_quantity IS NOT NULL AND sd.total_quantity > 5) 
+    OR 
+    (id.discounted_price < 10 AND sd.sales_rank = 1) 
+    OR 
+    (sd.total_sales IS NULL AND id.i_item_desc LIKE '%Gadget%')
+GROUP BY 
+    id.i_item_desc, 
+    id.i_current_price, 
+    sd.total_quantity, 
+    sd.total_sales
+HAVING 
+    COUNT(CASE WHEN sd.total_sales IS NOT NULL THEN 1 END) > 1
+ORDER BY 
+    sales_rank DESC, id.i_item_desc;

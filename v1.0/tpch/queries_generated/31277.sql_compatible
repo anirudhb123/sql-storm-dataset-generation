@@ -1,0 +1,47 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS lvl
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.lvl + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON ps.ps_partkey = s.s_suppkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate >= DATE '1998-10-01' - INTERVAL '30 days'
+    GROUP BY o.o_orderkey
+),
+part_supplier_info AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+),
+region_stats AS (
+    SELECT r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count,
+           AVG(s.s_acctbal) AS avg_supplier_balance
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name
+)
+SELECT ps.p_name, 
+       ps.ps_supplycost, 
+       os.total_revenue, 
+       rs.nation_count, 
+       rs.avg_supplier_balance,
+       COALESCE(sh.s_name, 'No Higher Supplier') AS high_supplier_name
+FROM part_supplier_info ps
+LEFT JOIN order_summary os ON ps.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = os.o_orderkey)
+LEFT JOIN region_stats rs ON ps.p_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_type = 'Gadget')
+LEFT JOIN supplier_hierarchy sh ON ps.p_partkey = sh.s_suppkey
+GROUP BY ps.p_name, ps.ps_supplycost, os.total_revenue, rs.nation_count, rs.avg_supplier_balance, sh.s_name
+HAVING (MAX(ps.ps_supplycost) > 200) AND (COUNT(os.o_orderkey) > 5)
+ORDER BY ps.p_name;

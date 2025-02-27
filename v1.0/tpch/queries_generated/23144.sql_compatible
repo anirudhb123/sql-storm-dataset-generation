@@ -1,0 +1,69 @@
+
+WITH RECURSIVE SoldParts AS (
+    SELECT 
+        l_partkey,
+        SUM(l_quantity) AS total_quantity_sold
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        l_partkey
+),
+TopParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        sp.total_quantity_sold,
+        ROW_NUMBER() OVER (ORDER BY sp.total_quantity_sold DESC) AS rank
+    FROM 
+        part p
+    LEFT JOIN 
+        SoldParts sp ON p.p_partkey = sp.l_partkey
+    WHERE 
+        p.p_size IS NOT NULL AND 
+        (p.p_retailprice * 1.1) > 10.00
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Unknown'
+            ELSE CONCAT('Balance: $', CAST(s.s_acctbal AS CHAR))
+        END AS account_details
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+)
+SELECT 
+    tp.p_name,
+    sd.s_name,
+    sd.account_details,
+    tp.total_quantity_sold,
+    COALESCE(NULLIF(s.s_phone, ''), 'No Phone Provided') AS supplier_phone
+FROM 
+    TopParts tp
+JOIN 
+    partsupp ps ON tp.p_partkey = ps.ps_partkey
+JOIN 
+    SupplierDetails sd ON ps.ps_suppkey = sd.s_suppkey
+LEFT JOIN 
+    nation n ON sd.s_nationkey = n.n_nationkey
+WHERE 
+    tp.rank <= 10
+    AND EXISTS (
+        SELECT 1
+        FROM orders o
+        WHERE o.o_orderkey IN (
+            SELECT l_orderkey 
+            FROM lineitem 
+            WHERE l_partkey = tp.p_partkey
+        )
+        AND o.o_orderstatus IN ('O', 'F')
+    )
+ORDER BY 
+    tp.total_quantity_sold DESC,
+    n.n_name NULLS LAST;

@@ -1,0 +1,63 @@
+WITH RecursiveTags AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        0 AS Level
+    FROM Tags
+    WHERE IsModeratorOnly = 0
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        rt.Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTags rt ON t.ExcerptPostId = rt.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        COUNT(c.Id) AS TotalComments,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(p.Id) DESC) AS Rnk
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+PostsAnalysis AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(ph.Comment, 'No comment') AS LastEditComment,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastEditDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 24
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalPosts,
+    rt.TagName AS PopularTag,
+    COUNT(pa.Id) FILTER (WHERE pa.PostRank = 1) AS MostRecentPosts,
+    SUM(CASE WHEN pa.Score > 5 THEN 1 ELSE 0 END) AS HighScoringPosts
+FROM UserActivity ua
+JOIN PostsAnalysis pa ON ua.UserId = pa.OwnerUserId
+LEFT JOIN RecursiveTags rt ON pa.Id IN (SELECT Id FROM Tags WHERE COUNT > 100)  -- Assuming looking for popular tags
+WHERE ua.TotalPosts > 0
+AND ua.UpVotes > ua.DownVotes
+GROUP BY ua.UserId, ua.DisplayName, rt.TagName
+HAVING COUNT(pa.Id) > 5
+ORDER BY ua.TotalPosts DESC;

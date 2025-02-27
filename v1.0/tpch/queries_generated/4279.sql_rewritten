@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rank_status
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_availability,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (ORDER BY c.c_acctbal DESC) AS rank_balance
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 5000
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    s.s_name AS supplier_name,
+    sd.total_availability,
+    hv.c_name AS high_value_customer
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    SupplierDetails sd ON ps.ps_suppkey = sd.s_suppkey
+LEFT JOIN 
+    HighValueCustomers hv ON o.o_custkey = hv.c_custkey
+WHERE 
+    (o.o_orderstatus = 'F' OR hv.rank_balance IS NOT NULL)
+AND 
+    sd.unique_parts > 5
+ORDER BY 
+    o.o_orderdate DESC, o.o_totalprice ASC
+LIMIT 100;

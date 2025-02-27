@@ -1,0 +1,42 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ARRAY_AGG(DISTINCT ak.name ORDER BY ak.name) AS actor_names
+    FROM 
+        aka_title a
+    JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        a.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        a.id
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        cast_count,
+        actor_names,
+        ROW_NUMBER() OVER (ORDER BY cast_count DESC) AS rank
+    FROM 
+        RankedMovies
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    tm.actor_names
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank <= 10 
+ORDER BY 
+    tm.cast_count DESC;
+
+This SQL query benchmarks string processing by analyzing movie titles and their respective casts in the `aka_title`, `movie_companies`, `cast_info`, and `aka_name` tables. It selects the top 10 movies released between 2000 and 2020 with the highest number of distinct actors, aggregating their names into an array for easier readability.

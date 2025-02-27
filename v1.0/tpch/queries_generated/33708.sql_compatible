@@ -1,0 +1,44 @@
+
+WITH RECURSIVE region_hierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_regionkey = 0
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, rh.level + 1
+    FROM region_hierarchy rh
+    JOIN nation n ON n.n_regionkey = rh.r_regionkey
+    JOIN region r ON r.r_regionkey = n.n_regionkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, 
+           SUM(o.o_totalprice) AS total_spent, 
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+high_value_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+),
+supplier_parts AS (
+    SELECT ps.ps_partkey, s.s_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_name
+)
+SELECT r.r_name, 
+       c.c_name, 
+       co.total_spent, 
+       hvo.order_rank, 
+       sp.s_name,
+       sp.total_cost
+FROM region_hierarchy r
+JOIN customer_orders co ON co.total_spent > 1000
+LEFT JOIN high_value_orders hvo ON hvo.o_orderkey = co.c_custkey
+INNER JOIN supplier_parts sp ON sp.ps_partkey = (SELECT MAX(ps_partkey) FROM partsupp)
+WHERE r.r_name IS NOT NULL
+ORDER BY r.r_name, co.total_spent DESC;

@@ -1,0 +1,34 @@
+
+SELECT 
+    p.p_name,
+    s.s_name,
+    SUBSTRING(s.s_address FROM 1 FOR 10) AS short_address,
+    CONCAT('Order Date: ', TO_CHAR(o.o_orderdate, 'YYYY-MM-DD')) AS order_info,
+    CASE 
+        WHEN l.l_returnflag = 'Y' THEN 'Returned'
+        ELSE 'Not Returned'
+    END AS return_status,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(p.p_retailprice) AS avg_part_price,
+    STRING_AGG(n.n_name, ', ') AS supplier_nations
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey AND s.s_suppkey = l.l_suppkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+GROUP BY 
+    p.p_name, s.s_name, s.s_address, o.o_orderdate, l.l_returnflag
+HAVING 
+    SUM(l.l_quantity) > 1000
+ORDER BY 
+    total_revenue DESC, avg_part_price ASC;

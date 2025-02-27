@@ -1,0 +1,38 @@
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS cast_type,
+    y.info AS movie_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    person_info pi ON ci.person_id = pi.person_id
+JOIN 
+    info_type it ON pi.info_type_id = it.id
+JOIN 
+    movie_info y ON t.id = y.movie_id AND y.info_type_id = it.id
+WHERE 
+    a.name LIKE 'A%' 
+    AND t.production_year > 2000 
+    AND cn.country_code = 'USA'
+GROUP BY 
+    a.name, 
+    t.title, 
+    y.info, 
+    c.kind
+ORDER BY 
+    t.production_year DESC, 
+    a.name;

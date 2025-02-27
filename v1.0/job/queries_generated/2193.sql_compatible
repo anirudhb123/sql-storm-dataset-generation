@@ -1,0 +1,60 @@
+
+WITH MovieStats AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(person_info.length) AS avg_person_length,
+        m.id AS movie_id
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        person_info ON c.person_id = person_info.person_id
+    GROUP BY 
+        m.title, m.production_year, m.id
+),
+KeywordStats AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords_list
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        ms.title,
+        ms.production_year,
+        ms.total_cast,
+        ms.avg_person_length,
+        ks.keywords_list,
+        RANK() OVER (PARTITION BY ms.production_year ORDER BY ms.total_cast DESC) AS cast_rank
+    FROM 
+        MovieStats ms
+    LEFT JOIN 
+        KeywordStats ks ON ms.movie_id = ks.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    COALESCE(rm.total_cast, 0) AS total_cast,
+    COALESCE(rm.avg_person_length, 0) AS avg_person_length,
+    rm.keywords_list,
+    CASE 
+        WHEN rm.cast_rank IS NULL THEN 'No Cast'
+        WHEN rm.cast_rank <= 5 THEN 'Top 5'
+        ELSE 'Other'
+    END AS ranking_category
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    rm.production_year, rm.cast_rank;

@@ -1,0 +1,64 @@
+
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        r.r_name AS region_name,
+        SUBSTRING(s.s_comment, POSITION('special' IN s.s_comment) + LENGTH('special'), 30) AS special_comment
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        LENGTH(s.s_comment) > 0
+), PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        CONCAT(p.p_name, ' - ', p.p_brand) AS full_description
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 10 AND 50
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        CASE 
+            WHEN o.o_orderstatus = 'O' THEN 'Open'
+            ELSE 'Closed' 
+        END AS order_status
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+)
+SELECT 
+    sd.s_name,
+    sd.region_name,
+    pd.full_description,
+    od.o_totalprice,
+    od.order_status,
+    od.o_orderdate,
+    CONCAT(sd.special_comment, ' (Check Order Status: ', od.order_status, ')') AS detailed_comment
+FROM 
+    SupplierDetails sd
+JOIN 
+    partsupp ps ON sd.s_suppkey = ps.ps_suppkey
+JOIN 
+    PartDetails pd ON ps.ps_partkey = pd.p_partkey
+JOIN 
+    OrderDetails od ON pd.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = od.o_orderkey)
+WHERE 
+    sd.special_comment IS NOT NULL
+ORDER BY 
+    sd.s_name, od.o_orderdate DESC;

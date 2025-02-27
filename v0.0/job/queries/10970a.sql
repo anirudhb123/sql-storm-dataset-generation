@@ -1,0 +1,4 @@
+SELECT min(mi_idx.info) AS rating, min(t.title) AS northern_dark_movie
+FROM info_type AS it1, info_type AS it2, keyword AS k, kind_type AS kt, movie_info AS mi, movie_info_idx AS mi_idx, movie_keyword AS mk, title AS t
+WHERE kt.id = t.kind_id AND t.id = mi.movie_id AND t.id = mk.movie_id AND t.id = mi_idx.movie_id AND mk.movie_id = mi.movie_id AND mk.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id AND k.id = mk.keyword_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id
+AND t.md5sum IN ('26f0e469aa8168dc902449c56f94a1e8', '326ce3e0cf797627f9da65ed2b1a3ca3', '56e807af61d6c1fec263df80f0df0eeb', '5ab2be0a56021dbbe12c2d870243b0e9', '7f80217e16d557c0d2aaaa45dbad1038', 'a165d8757984d1d5dfa6525c41f011c5');

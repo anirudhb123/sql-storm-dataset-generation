@@ -1,0 +1,52 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+part_analysis AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           SUM(ps.ps_availqty) AS total_available,
+           COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name,
+           COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+),
+high_spending_customers AS (
+    SELECT c.c_custkey, c.c_name
+    FROM customer_orders co
+    WHERE co.total_spent > (SELECT AVG(total_spent) FROM customer_orders)
+)
+SELECT 
+    ph.p_name,
+    ph.total_available,
+    ph.unique_suppliers,
+    hsc.c_name,
+    os.o_orderstatus,
+    os.price_rank
+FROM part_analysis ph
+JOIN supplier_hierarchy sh ON sh.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+JOIN high_spending_customers hsc ON hsc.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = (SELECT MAX(o2.o_orderkey) FROM orders o2))
+LEFT JOIN order_summary os ON os.o_orderkey = (SELECT MIN(o3.o_orderkey) FROM orders o3 WHERE o3.o_orderstatus = 'O')
+WHERE ph.total_available IS NOT NULL
+ORDER BY ph.p_name, hsc.c_name;

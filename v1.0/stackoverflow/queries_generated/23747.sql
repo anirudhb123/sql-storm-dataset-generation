@@ -1,0 +1,114 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+),
+
+PostAnalysis AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        rp.TotalUpvotes,
+        rp.TotalDownvotes,
+        CASE 
+            WHEN rp.TotalUpvotes > rp.TotalDownvotes THEN 'Positive'
+            WHEN rp.TotalDownvotes > rp.TotalUpvotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS PostSentiment,
+        ur.Reputation AS UserReputation,
+        ur.DisplayName AS UserDisplayName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    JOIN 
+        UserReputation ur ON u.Id = ur.UserId
+)
+
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.ViewCount,
+    pa.Score,
+    pa.CommentCount,
+    pa.TotalUpvotes,
+    pa.TotalDownvotes,
+    pa.PostSentiment,
+    pa.UserReputation,
+    pa.UserDisplayName
+FROM 
+    PostAnalysis pa
+WHERE 
+    pa.PostSentiment = 'Positive' 
+    AND pa.UserReputation >= (SELECT AVG(Reputation) FROM Users)
+ORDER BY 
+    pa.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY;
+
+-- Adding UNION with potentially bizarre condition for further analysis
+UNION ALL
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.Score,
+    (SELECT COUNT(*) FROM Comments WHERE PostId = p.Id) AS CommentCount,
+    0 AS TotalUpvotes,
+    0 AS TotalDownvotes,
+    'Orphaned' AS PostSentiment,
+    0 AS UserReputation,
+    'Unknown' AS UserDisplayName
+FROM 
+    Posts p
+WHERE 
+    NOT EXISTS (SELECT 1 FROM Comments c WHERE c.PostId = p.Id)
+    AND p.CreationDate < CURRENT_DATE - INTERVAL '1 year';
+
+-- Dealing with NULL logic and corner cases
+SELECT 
+    CASE 
+        WHEN COUNT(*) IS NULL THEN 'No Results' 
+        ELSE 'Results Found: ' || COUNT(*) 
+    END AS ResultCountMessage
+FROM 
+    Posts
+WHERE 
+    ViewCount > 0;

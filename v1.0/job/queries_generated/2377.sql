@@ -1,0 +1,47 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank,
+        COUNT(ci.person_id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY 
+        t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_title, rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 5
+)
+
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    COALESCE(ai.name, 'Unknown') AS actor_name,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    AVG(CASE WHEN ci.note IS NOT NULL THEN 1 END) AS avg_cast_note_presence
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    complete_cast cc ON tm.movie_title = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name an ON ci.person_id = an.person_id
+LEFT JOIN 
+    movie_keyword mk ON tm.movie_title = mk.movie_id
+GROUP BY 
+    tm.movie_title, tm.production_year, actor_name
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 2
+ORDER BY 
+    tm.production_year DESC, tm.movie_title;

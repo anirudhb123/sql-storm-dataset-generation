@@ -1,0 +1,68 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        array_agg(DISTINCT k.keyword) AS keywords,
+        array_agg(DISTINCT c.name) AS company_names,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id
+),
+PersonRoles AS (
+    SELECT 
+        ci.person_id,
+        ci.role_id,
+        COUNT(ci.id) AS role_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id, ci.role_id
+),
+RoleTypes AS (
+    SELECT 
+        p.person_id,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY p.person_id ORDER BY COUNT(p.role_id) DESC) AS role_rank
+    FROM 
+        PersonRoles p
+    JOIN 
+        role_type r ON p.role_id = r.id
+    GROUP BY 
+        p.person_id, r.role
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.keywords,
+    md.company_names,
+    md.cast_count,
+    rt.role AS top_role
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    RoleTypes rt ON rt.person_id = (
+        SELECT person_id 
+        FROM cast_info 
+        WHERE movie_id = md.movie_id 
+        ORDER BY role_rank LIMIT 1
+    )
+ORDER BY 
+    md.production_year DESC, 
+    md.cast_count DESC;

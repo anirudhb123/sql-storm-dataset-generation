@@ -1,0 +1,97 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.OwnerUserId
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ph.Text,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) -- Only considering close, reopen, and delete actions
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+TopTags AS (
+    SELECT 
+        tag.TagName,
+        COUNT(pt.Id) AS TagPostCount
+    FROM 
+        Tags tag
+    JOIN 
+        Posts pt ON pt.Tags LIKE '%' || tag.TagName || '%'
+    GROUP BY 
+        tag.TagName
+    ORDER BY 
+        TagPostCount DESC
+    LIMIT 5
+)
+
+SELECT 
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    u.DisplayName AS OwnerName,
+    COALESCE(ARRAY_AGG(DISTINCT t.TagName), '{}') AS AssociatedTags,
+    ph.Comment AS PostHistoryComment,
+    mu.DisplayName AS ActiveUserName,
+    mu.PostCount AS UserPostCount,
+    mu.TotalUpVotes,
+    mu.TotalDownVotes,
+    CASE 
+        WHEN rp.RankScore = 1 THEN 'Top Post' 
+        ELSE 'Regular Post' 
+    END AS PostRank,
+    th.TagPostCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    PostHistories ph ON rp.Id = ph.PostId AND ph.HistoryRank = 1
+LEFT JOIN 
+    TopTags th ON rp.Tags LIKE '%' || th.TagName || '%'
+LEFT JOIN 
+    MostActiveUsers mu ON u.Id = mu.Id
+WHERE 
+    rp.Score IS NOT NULL
+    AND rp.Score > 10
+    AND (ph.PostHistoryTypeId IS NULL OR ph.PostHistoryTypeId = 11) -- Filter for specific post history types
+GROUP BY 
+    rp.Title, rp.Score, rp.CreationDate, u.DisplayName, ph.Comment, mu.DisplayName, mu.PostCount, mu.TotalUpVotes, mu.TotalDownVotes, th.TagPostCount
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 100;

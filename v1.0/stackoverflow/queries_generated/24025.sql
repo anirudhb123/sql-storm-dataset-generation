@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN,
+        COUNT(c.Id) OVER (PARTITION BY p.OwnerUserId) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes, 
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '5 years'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS LastClosed,
+        ARRAY_AGG(DISTINCT pht.Name) AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id 
+    GROUP BY 
+        ph.PostId
+),
+PostFinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        ur.Reputation,
+        ur.DisplayName,
+        ur.BadgeCount,
+        ph.LastClosed,
+        ph.HistoryTypes,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserReputation ur ON rp.PostId = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+    LEFT JOIN 
+        PostHistoryAnalysis ph ON rp.PostId = ph.PostId
+    WHERE 
+        rp.RN = 1
+    ORDER BY 
+        ur.Reputation DESC, 
+        rp.CommentCount DESC
+)
+SELECT 
+    *,
+    CASE 
+        WHEN LastClosed IS NULL THEN 'Open'
+        ELSE 'Closed since ' || to_char(LastClosed, 'YYYY-MM-DD HH24:MI:SS')
+    END AS PostStatus,
+    CASE 
+        WHEN Comments > 10 THEN 'Highly Engaging'
+        WHEN Comments IS NULL THEN 'No comments yet'
+        ELSE 'Average Engagement'
+    END AS EngagementLevel,
+    NULLIF(UPPER(REGEXP_REPLACE(Title, '[^A-Z0-9 ]', '', 'g')), '') AS CleanTitle
+FROM 
+    PostFinalResults
+WHERE 
+    BadgeCount >= 5 OR UpVotes > 100
+LIMIT 100;

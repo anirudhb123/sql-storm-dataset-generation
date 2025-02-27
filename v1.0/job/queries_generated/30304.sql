@@ -1,0 +1,64 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        c.person_id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER(PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        h.actor_id,
+        h.actor_name,
+        a.title AS movie_title,
+        a.production_year,
+        ROW_NUMBER() OVER(PARTITION BY a.movie_id ORDER BY c.nr_order) AS role_order
+    FROM 
+        actor_hierarchy h
+    JOIN 
+        cast_info c ON h.actor_id = c.person_id 
+    JOIN 
+        aka_title a ON c.movie_id = a.movie_id
+    WHERE 
+        a.production_year > h.production_year
+),
+aggregated_actors AS (
+    SELECT
+        actor_id,
+        actor_name,
+        COUNT(DISTINCT movie_title) AS movies_count,
+        MAX(production_year) AS latest_movie_year
+    FROM 
+        actor_hierarchy
+    GROUP BY 
+        actor_id, actor_name
+)
+SELECT 
+    a.actor_name,
+    a.movies_count,
+    a.latest_movie_year,
+    COALESCE(k.keyword, 'No Keywords') AS keyword,
+    p.info AS actor_info
+FROM 
+    aggregated_actors a
+LEFT JOIN 
+    movie_keyword mk ON a.actor_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info p ON a.actor_id = p.person_id
+WHERE 
+    a.movies_count > 5
+    AND (p.info_type_id IS NULL OR p.info_type_id = 1)
+ORDER BY 
+    a.latest_movie_year DESC, 
+    a.actor_name ASC;
+
+This SQL query creates a recursive common table expression (CTE) called `actor_hierarchy` to capture all actors and their respective movies, while also supporting their roles in multiple movies if applicable. The second CTE, `aggregated_actors`, summarizes the total movies per actor along with the latest movie year. Finally, it retrieves data from the `aggregated_actors`, incorporating keyword associations and any additional info linked to actors, filtered by a minimum number of movies and specific info type. The output is ordered by the latest movie year and actor name.

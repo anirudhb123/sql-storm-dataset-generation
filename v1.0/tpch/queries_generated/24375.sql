@@ -1,0 +1,32 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, CAST(s.s_name AS VARCHAR(255)) AS hierarchy_path
+    FROM supplier s
+    WHERE s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+
+    UNION ALL
+
+    SELECT ps.ps_suppkey, s.s_name, s.s_nationkey, CAST(CONCAT(sh.hierarchy_path, ' -> ', s.s_name) AS VARCHAR(255))
+    FROM partsupp ps
+    JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    SUM(CASE WHEN l.l_discount > 0.05 THEN l.l_extendedprice * (1 - l.l_discount) ELSE l.l_extendedprice END) AS adjusted_price,
+    COUNT(DISTINCT l.l_orderkey) AS order_count,
+    COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN l.l_orderkey END) AS return_count,
+    AVG(COALESCE(s.s_acctbal, 0)) AS avg_supplier_balance,
+    ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY adjusted_price DESC) AS price_rank
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN SupplierHierarchy sh ON l.l_suppkey = sh.s_suppkey
+LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+WHERE p.p_retailprice BETWEEN 10 AND 150
+  AND (p.p_container IS NULL OR p.p_container NOT LIKE '%BOX%')
+  AND l.l_shipdate > '2023-01-01'
+GROUP BY p.p_partkey, p.p_name, p.p_size
+HAVING AVG(NULLIF(s.s_acctbal, 0)) > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name != 'USA'))
+ORDER BY price_rank, adjusted_price DESC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

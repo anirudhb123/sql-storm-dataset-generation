@@ -1,0 +1,83 @@
+
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        Id, 
+        Reputation,
+        CreationDate,
+        1 AS Level
+    FROM 
+        Users
+    WHERE 
+        Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        u.Id, 
+        u.Reputation,
+        u.CreationDate,
+        ur.Level + 1
+    FROM 
+        Users u
+    JOIN 
+        UserReputation ur ON u.Reputation < ur.Reputation
+    WHERE 
+        ur.Level < 5
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount,
+        COUNT(c.Id) AS CommentsCount,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostsCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    GROUP BY 
+        p.Id, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        ur.Reputation,
+        ps.UpVotesCount,
+        ps.DownVotesCount,
+        ps.CommentsCount,
+        ps.RelatedPostsCount,
+        RANK() OVER (ORDER BY ur.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    JOIN 
+        UserReputation ur ON u.Id = ur.Id
+    JOIN 
+        PostStats ps ON u.Id = ps.OwnerUserId
+    WHERE 
+        ur.Level = 1
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.Reputation,
+    tu.UpVotesCount,
+    tu.DownVotesCount,
+    tu.CommentsCount,
+    tu.RelatedPostsCount,
+    CASE 
+        WHEN tu.CommentsCount > 50 THEN 'Highly Engaged'
+        WHEN tu.CommentsCount BETWEEN 20 AND 50 THEN 'Moderately Engaged'
+        ELSE 'Less Engaged'
+    END AS EngagementLevel
+FROM 
+    TopUsers tu
+WHERE 
+    tu.ReputationRank <= 10
+ORDER BY 
+    tu.ReputationRank;

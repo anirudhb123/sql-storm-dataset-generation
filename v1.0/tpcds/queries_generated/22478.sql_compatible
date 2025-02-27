@@ -1,0 +1,61 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(DISTINCT sr_return_ticket_number) AS return_count,
+        SUM(sr_return_amt) AS total_return_amt,
+        RANK() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_amt) DESC) AS rnk
+    FROM store_returns
+    GROUP BY sr_item_sk
+), CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        COALESCE(cd.cd_dep_employed_count, 0) AS employed_count,
+        COALESCE(cd.cd_dep_college_count, 0) AS college_count,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE c.c_birth_year IS NOT NULL AND (cd.cd_gender = 'F' OR (cd.cd_gender IS NULL AND hd.hd_vehicle_count > 0))
+), ItemDetails AS (
+    SELECT 
+        i.i_item_id,
+        i.i_current_price,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        AVG(ws.ws_sales_price) AS avg_selling_price,
+        CASE 
+            WHEN AVG(ws.ws_sales_price) > 100 THEN 'Premium' 
+            WHEN AVG(ws.ws_sales_price) BETWEEN 50 AND 100 THEN 'Mid-range' 
+            ELSE 'Budget' 
+        END AS price_category
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_id, i.i_current_price
+)
+
+SELECT 
+    cd.c_customer_id,
+    cd.cd_gender,
+    cd.cd_income_band_sk,
+    ir.item_ranked_id,
+    ir.return_count,
+    ir.total_return_amt,
+    id.total_quantity_sold,
+    id.avg_selling_price,
+    id.price_category,
+    COALESCE(cd.ib_lower_bound, 0) || '-' || COALESCE(cd.ib_upper_bound, '∞') AS income_band
+FROM CustomerDetails cd
+JOIN (
+    SELECT 
+        rr.sr_item_sk AS item_ranked_id,
+        rr.return_count,
+        rr.total_return_amt
+    FROM RankedReturns rr
+    WHERE rr.rnk = 1
+) ir ON ir.item_ranked_id = cd.cd_income_band_sk
+LEFT JOIN ItemDetails id ON ir.item_ranked_id = id.i_item_id
+ORDER BY cd.c_customer_id, ir.total_return_amt DESC;

@@ -1,0 +1,87 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+),
+
+ActorDetails AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movie_titles
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    GROUP BY 
+        a.person_id, a.name
+),
+
+CompanyInfo AS (
+    SELECT 
+        c.id AS company_id,
+        c.name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mc.movie_id) AS productions_count
+    FROM 
+        company_name c
+    JOIN 
+        movie_companies mc ON c.id = mc.company_id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        c.id, c.name, ct.kind
+),
+
+MovieInfo AS (
+    SELECT
+        m.id AS movie_id,
+        t.title,
+        k.keyword,
+        COALESCE(NULLIF(mi.info, ''), 'No Information Available') AS movie_info
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mi ON t.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating' LIMIT 1)
+)
+
+SELECT 
+    ad.person_id,
+    ad.name,
+    ad.movie_count,
+    ad.movie_titles,
+    ci.company_id,
+    ci.name AS company_name,
+    ci.company_type,
+    ci.productions_count,
+    mt.title,
+    mt.keyword,
+    mt.movie_info
+FROM 
+    ActorDetails ad
+LEFT JOIN 
+    CompanyInfo ci ON ad.movie_count > 5 AND ci.productions_count > 10
+FULL OUTER JOIN 
+    MovieInfo mt ON mt.movie_id IN (
+        SELECT mk.movie_id 
+        FROM movie_keyword mk
+        WHERE mk.keyword_id IN (SELECT id FROM keyword WHERE phonetic_code IS NOT NULL)
+    )
+WHERE 
+    ad.person_id IS NOT NULL 
+    AND (mt.movie_info IS NOT NULL OR ci.company_name IS NULL)
+ORDER BY 
+    ad.person_id, ci.production_count DESC NULLS LAST;
+
+This SQL query combines multiple advanced techniques and constructs, including Common Table Expressions (CTEs), window functions, and outer joins. It gathers details on actors, the companies they have worked with, and information about movies, including keywords and other relevant details, while implementing filtering, aggregation, and handling of NULL logic in complex ways.

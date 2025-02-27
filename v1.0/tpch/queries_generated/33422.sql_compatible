@@ -1,0 +1,52 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS ranking
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+nation_customer AS (
+    SELECT n.n_name, n.n_nationkey, SUM(co.total_spent) AS total_spent_by_nation
+    FROM nation n
+    LEFT JOIN customer_orders co ON n.n_nationkey = co.c_custkey
+    GROUP BY n.n_name, n.n_nationkey
+),
+region_summary AS (
+    SELECT r.r_name, SUM(nc.total_spent_by_nation) AS total_spent_per_region
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN nation_customer nc ON n.n_nationkey = nc.n_nationkey
+    GROUP BY r.r_name
+)
+SELECT 
+    COALESCE(r.rs_name, 'Unknown') AS region_name,
+    COALESCE(sh.s_name, 'No Supplier') AS supplier_name,
+    rs.total_spent_per_region,
+    RANK() OVER (ORDER BY rs.total_spent_per_region DESC) AS region_rank
+FROM region_summary rs
+FULL OUTER JOIN supplier_hierarchy sh ON sh.s_nationkey = (
+    SELECT n.n_nationkey 
+    FROM nation n 
+    WHERE n.n_name = 'USA'
+)
+ORDER BY region_rank, region_name;

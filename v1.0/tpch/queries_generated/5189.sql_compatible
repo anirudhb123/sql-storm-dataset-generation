@@ -1,0 +1,68 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+), TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.price_rank <= 5
+), SupplierCostDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        s.s_name,
+        s.s_acctbal,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS cost_rank
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+), TopSuppliers AS (
+    SELECT 
+        scd.ps_partkey,
+        scd.ps_suppkey,
+        scd.p_name,
+        scd.s_name,
+        scd.s_acctbal,
+        scd.ps_supplycost
+    FROM 
+        SupplierCostDetails scd
+    WHERE 
+        scd.cost_rank = 1
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.o_totalprice,
+    to.c_name,
+    ts.p_name,
+    ts.s_name,
+    ts.ps_supplycost
+FROM 
+    TopOrders to
+JOIN 
+    lineitem l ON to.o_orderkey = l.l_orderkey
+JOIN 
+    TopSuppliers ts ON l.l_partkey = ts.ps_partkey
+WHERE 
+    to.o_orderdate >= DATE '1997-01-01' AND to.o_orderdate < DATE '1997-12-31'
+ORDER BY 
+    to.o_orderdate, to.o_totalprice DESC;

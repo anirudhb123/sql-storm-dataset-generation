@@ -1,0 +1,57 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_partkey
+), FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+), FinalOutput AS (
+    SELECT 
+        r.r_name AS region_name,
+        c.c_mktsegment,
+        SUM(fo.net_revenue) AS total_revenue,
+        COUNT(DISTINCT fo.o_orderkey) AS order_count,
+        STRING_AGG(DISTINCT s.s_name) AS top_suppliers
+    FROM 
+        FilteredOrders fo
+    JOIN 
+        customer c ON fo.o_orderkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        RankedSuppliers rs ON rs.supplier_rank <= 3
+    GROUP BY 
+        r.r_name, c.c_mktsegment
+)
+SELECT 
+    region_name,
+    c_mktsegment,
+    total_revenue,
+    order_count,
+    top_suppliers
+FROM 
+    FinalOutput
+ORDER BY 
+    total_revenue DESC, order_count DESC;

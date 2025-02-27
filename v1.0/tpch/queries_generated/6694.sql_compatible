@@ -1,0 +1,34 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_mktsegment,
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+),
+TopOrders AS (
+    SELECT ro.o_orderkey, ro.o_orderdate, ro.o_totalprice, ro.c_mktsegment
+    FROM RankedOrders ro
+    WHERE ro.rank <= 5
+),
+SupplierDetails AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name, s.s_name, s.s_nationkey,
+           s.s_acctbal, s.s_comment, SUM(ps.ps_availqty) AS total_availqty
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, p.p_name, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment
+),
+FinalResult AS (
+    SELECT to.o_orderkey, to.o_orderdate, to.o_totalprice, to.c_mktsegment, sd.p_name,
+           sd.s_name, sd.total_availqty
+    FROM TopOrders to
+    JOIN lineitem l ON to.o_orderkey = l.l_orderkey
+    JOIN SupplierDetails sd ON l.l_suppkey = sd.ps_suppkey
+)
+SELECT c.r_name AS region, COUNT(DISTINCT fr.o_orderkey) AS total_orders, 
+       SUM(fr.o_totalprice) AS total_revenue, AVG(fr.total_availqty) AS avg_avail_qty
+FROM FinalResult fr
+JOIN nation n ON n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = fr.s_name)
+JOIN region c ON n.n_regionkey = c.r_regionkey
+GROUP BY c.r_name
+ORDER BY total_orders DESC, total_revenue DESC;

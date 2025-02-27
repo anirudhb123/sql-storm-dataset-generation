@@ -1,0 +1,73 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.ParentId,
+        R.Level + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostHierarchy R ON P2.ParentId = R.PostId
+),
+
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id
+),
+
+PopularPosts AS (
+    SELECT 
+        RPH.PostId,
+        RPH.Title,
+        PS.Upvotes,
+        PS.Downvotes,
+        PS.CommentCount,
+        PS.CloseReopenCount,
+        ROW_NUMBER() OVER (PARTITION BY RPH.Level ORDER BY PS.Upvotes DESC) AS Rank
+    FROM 
+        RecursivePostHierarchy RPH
+    INNER JOIN 
+        PostStatistics PS ON RPH.PostId = PS.PostId
+)
+
+SELECT 
+    R.Level,
+    P.Title,
+    PS.Upvotes,
+    PS.Downvotes,
+    PS.CommentCount,
+    PS.CloseReopenCount
+FROM 
+    PopularPosts P
+JOIN 
+    PostStatistics PS ON P.PostId = PS.PostId
+WHERE 
+    P.Rank <= 5  
+ORDER BY 
+    R.Level, PS.Upvotes DESC;

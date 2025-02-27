@@ -1,0 +1,54 @@
+
+WITH MovieStats AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        SUM(CASE WHEN c.role_id IS NOT NULL THEN 1 ELSE 0 END) AS roles_count,
+        AVG(CASE WHEN ci.status_id IS NOT NULL THEN ci.status_id END) AS avg_status
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        movie_info mi ON a.id = mi.movie_id
+    LEFT JOIN 
+        person_info pi ON c.person_id = pi.person_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.title, a.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        total_cast,
+        roles_count,
+        avg_status,
+        RANK() OVER (ORDER BY total_cast DESC) AS rank
+    FROM 
+        MovieStats
+    WHERE 
+        total_cast > 0
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.total_cast,
+    tm.roles_count,
+    COALESCE(tm.avg_status, 'No Status') AS average_status,
+    CASE 
+        WHEN tm.rank <= 10 THEN 'Top Ten'
+        WHEN tm.rank > 10 AND tm.rank <= 50 THEN 'Top Fifty'
+        ELSE 'Others'
+    END AS category
+FROM 
+    TopMovies tm
+WHERE 
+    tm.roles_count > 10 OR tm.total_cast > 20
+ORDER BY 
+    tm.production_year DESC, tm.total_cast DESC

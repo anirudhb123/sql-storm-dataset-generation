@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS RankByScore,
+        COUNT(pc.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments pc ON p.Id = pc.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2  -- Only counting Upvotes
+    LEFT JOIN 
+        STRING_SPLIT(p.Tags, ',') AS tagList ON t.TagName = TRIM(tagList.value)
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(tagList.value)
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+PopularUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(rp.PostId) AS PostCount,
+        SUM(rp.Score) AS TotalScore,
+        SUM(rp.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY
+        u.Id, u.DisplayName, u.Reputation
+    ORDER BY
+        TotalScore DESC, PostCount DESC 
+    LIMIT 10
+)
+SELECT 
+    pu.DisplayName,
+    pu.Reputation,
+    pu.PostCount,
+    pu.TotalScore,
+    pu.TotalViews,
+    STRING_AGG(rp.Title, '; ') AS PostTitles
+FROM 
+    PopularUsers pu
+LEFT JOIN 
+    RankedPosts rp ON pu.UserId = rp.OwnerUserId
+GROUP BY 
+    pu.DisplayName, pu.Reputation, pu.PostCount, pu.TotalScore, pu.TotalViews
+ORDER BY 
+    pu.TotalScore DESC;

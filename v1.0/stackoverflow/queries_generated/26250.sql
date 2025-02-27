@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS t(TagName)
+    GROUP BY 
+        p.Id, u.DisplayName
+), 
+OpenQuestions AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostHistory ph ON rp.PostId = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+        AND ph.CreationDate < (SELECT MIN(CreationDate) FROM PostHistory WHERE PostId = rp.PostId AND PostHistoryTypeId IN (11,12)) -- Reopened or Deleted
+)
+SELECT 
+    oq.PostId,
+    oq.Title,
+    oq.OwnerDisplayName,
+    oq.CreationDate,
+    oq.ViewCount,
+    oq.Score,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = oq.PostId) AS CommentCount,
+    COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = oq.PostId AND v.VoteTypeId = 2), 0) AS UpVotes
+FROM 
+    OpenQuestions oq
+WHERE 
+    oq.Score > 10  -- Filter for high scoring open questions
+ORDER BY 
+    oq.CreationDate DESC;

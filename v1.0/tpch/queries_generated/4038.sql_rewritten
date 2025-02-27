@@ -1,0 +1,62 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS RevenueRank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' 
+        AND o.o_orderdate < '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        r.r_name AS RegionName,
+        n.n_name AS NationName
+    FROM 
+        RankedOrders ro
+    JOIN 
+        orders o ON ro.o_orderkey = o.o_orderkey
+    LEFT JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        ro.RevenueRank <= 10
+)
+SELECT 
+    RegionName,
+    NationName,
+    COUNT(*) AS OrderCount,
+    AVG(o_totalprice) AS AvgTotalPrice,
+    SUM(o_totalprice) AS TotalSales
+FROM 
+    TopOrders
+GROUP BY 
+    RegionName, NationName
+HAVING 
+    COUNT(*) > 5
+ORDER BY 
+    TotalSales DESC
+UNION ALL
+SELECT 
+    'Total' AS RegionName,
+    NULL AS NationName,
+    COUNT(*) AS OrderCount,
+    AVG(o_totalprice) AS AvgTotalPrice,
+    SUM(o_totalprice) AS TotalSales
+FROM 
+    TopOrders
+WHERE 
+    o_totalprice IS NOT NULL;

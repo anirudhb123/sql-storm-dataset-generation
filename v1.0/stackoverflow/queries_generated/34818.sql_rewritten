@@ -1,0 +1,86 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        Id AS PostId, 
+        ParentId,
+        0 AS Level,
+        Title
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        Level + 1,
+        p.Title
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2  
+),
+PostWithStats AS (
+    
+    SELECT 
+        q.Id AS QuestionId,
+        COUNT(a.Id) AS AnswerCount,
+        COALESCE(SUM(a.Score), 0) AS TotalAnswerScore,
+        MAX(a.CreationDate) AS LatestAnswerDate
+    FROM 
+        Posts q
+    LEFT JOIN 
+        Posts a ON q.Id = a.ParentId AND a.PostTypeId = 2 
+    WHERE 
+        q.PostTypeId = 1  
+    GROUP BY 
+        q.Id
+),
+UserBadges AS (
+    
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentActivity AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        CASE 
+            WHEN p.LastActivityDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 1 
+            ELSE 0 
+        END AS RecentlyActive
+    FROM 
+        Posts p
+)
+SELECT 
+    u.DisplayName,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    ph.QuestionId,
+    ph.AnswerCount,
+    ph.TotalAnswerScore,
+    ra.RecentlyActive,
+    COALESCE(ra.RecentlyActive, 0) AS IsRecentActivity
+FROM 
+    Users u
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostWithStats ph ON u.Id = ph.QuestionId
+LEFT JOIN 
+    RecentActivity ra ON ph.QuestionId = ra.PostId
+WHERE 
+    ub.BadgeCount > 0 
+    OR ph.AnswerCount > 0
+ORDER BY 
+    u.Reputation DESC,
+    ph.TotalAnswerScore DESC,
+    ph.LatestAnswerDate DESC;

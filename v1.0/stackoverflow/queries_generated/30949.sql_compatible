@@ -1,0 +1,89 @@
+
+WITH RecursivePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        0 AS Level,
+        P.Id AS RootPostId
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        RP.Level + 1,
+        RP.RootPostId
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePosts RP ON P.ParentId = RP.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        V.PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.PostId
+),
+PostHistoryInfo AS (
+    SELECT 
+        PH.PostId,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteUndeleteCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+),
+RankedPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.OwnerUserId,
+        COALESCE(PVS.UpVotes, 0) AS UpVotes,
+        COALESCE(PVS.DownVotes, 0) AS DownVotes,
+        COALESCE(PHI.CloseReopenCount, 0) AS CloseReopenCount,
+        COALESCE(PHI.DeleteUndeleteCount, 0) AS DeleteUndeleteCount,
+        ROW_NUMBER() OVER (PARTITION BY RP.RootPostId ORDER BY RP.CreationDate DESC) AS Rank
+    FROM 
+        RecursivePosts RP
+    LEFT JOIN 
+        PostVoteSummary PVS ON RP.PostId = PVS.PostId
+    LEFT JOIN 
+        PostHistoryInfo PHI ON RP.PostId = PHI.PostId
+)
+SELECT 
+    R.Title,
+    R.CreationDate,
+    R.UpVotes,
+    R.DownVotes,
+    R.CloseReopenCount,
+    R.DeleteUndeleteCount,
+    U.DisplayName AS OwnerDisplayName,
+    COUNT(CM.Id) AS CommentCount
+FROM 
+    RankedPosts R
+LEFT JOIN 
+    Users U ON R.OwnerUserId = U.Id
+LEFT JOIN 
+    Comments CM ON R.PostId = CM.PostId
+WHERE 
+    R.Rank = 1
+GROUP BY 
+    R.PostId, R.Title, R.CreationDate, R.UpVotes, R.DownVotes, 
+    R.CloseReopenCount, R.DeleteUndeleteCount, U.DisplayName
+ORDER BY 
+    R.UpVotes DESC, R.CreationDate ASC
+LIMIT 50;

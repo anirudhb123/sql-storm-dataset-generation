@@ -1,0 +1,62 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS average_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS suppliers_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_size > 10
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS average_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 1000
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name AS region,
+    np.n_name AS nation,
+    rp.p_name AS part_name,
+    rp.total_available AS total_available_quantity,
+    rp.average_supply_cost AS avg_supply_cost,
+    co.total_spent AS customer_spent,
+    co.average_order_value AS avg_order_value
+FROM 
+    region r
+JOIN 
+    nation np ON r.r_regionkey = np.n_regionkey
+JOIN 
+    supplier s ON s.s_nationkey = np.n_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    RankedParts rp ON ps.ps_partkey = rp.p_partkey
+JOIN 
+    CustomerOrders co ON co.c_custkey IN (
+        SELECT 
+            o.o_custkey 
+        FROM 
+            orders o 
+        WHERE 
+            o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate <= DATE '2023-12-31'
+    )
+WHERE 
+    rp.total_available > 50
+ORDER BY 
+    region, nation, part_name;

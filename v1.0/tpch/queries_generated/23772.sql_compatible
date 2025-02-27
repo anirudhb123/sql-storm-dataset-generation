@@ -1,0 +1,47 @@
+
+WITH RECURSIVE CTE_CUST AS (
+    SELECT c_custkey, c_name, c_acctbal, c_nationkey, 0 AS depth
+    FROM customer
+    WHERE c_acctbal > (SELECT AVG(c_acctbal) FROM customer WHERE c_nationkey IS NOT NULL)
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, depth + 1
+    FROM customer c
+    INNER JOIN CTE_CUST cte ON c.c_nationkey = cte.c_nationkey
+    WHERE c.c_custkey <> cte.c_custkey AND depth < 3
+),
+PARTIAL_ORDERS AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY o.o_orderkey
+),
+SUPPLIER_REGION AS (
+    SELECT s.s_suppkey, n.n_name, r.r_name, COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, n.n_name, r.r_name
+    HAVING COUNT(DISTINCT ps.ps_partkey) IS NOT NULL
+),
+FINAL_RESULT AS (
+    SELECT c.c_name, COALESCE(r.r_name, 'Unknown') AS region_name,
+           SUM(po.total_revenue) AS total_orders,
+           COUNT(s.s_suppkey) FILTER (WHERE s.s_nationkey = c.c_nationkey) AS supplier_count
+    FROM CTE_CUST c
+    LEFT JOIN PARTIAL_ORDERS po ON po.o_orderkey IN (
+        SELECT o.o_orderkey
+        FROM orders o
+        WHERE o.o_custkey = c.c_custkey AND o.o_orderstatus != 'F'
+    )
+    LEFT JOIN supplier s ON c.c_nationkey = s.s_nationkey
+    LEFT JOIN SUPPLIER_REGION r ON s.s_suppkey = r.s_suppkey
+    GROUP BY c.c_name, r.r_name
+)
+SELECT f.c_name, 
+       f.region_name, 
+       CASE WHEN f.total_orders IS NULL THEN 'No Orders' ELSE CAST(f.total_orders AS VARCHAR) END AS order_status,
+       f.supplier_count
+FROM FINAL_RESULT f
+ORDER BY f.region_name, f.total_orders DESC NULLS LAST;

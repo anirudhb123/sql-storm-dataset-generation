@@ -1,0 +1,53 @@
+WITH PostUserActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Tags,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        ROW_NUMBER() OVER(PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- only questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Tags, u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteUndeleteCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    pu.PostId,
+    pu.Title,
+    pu.CreationDate,
+    pu.Tags,
+    pu.Author,
+    pu.CommentCount,
+    pu.UpVotes,
+    pu.DownVotes,
+    phs.CloseReopenCount,
+    phs.DeleteUndeleteCount
+FROM 
+    PostUserActivity pu
+LEFT JOIN 
+    PostHistorySummary phs ON pu.PostId = phs.PostId
+WHERE 
+    pu.UserPostRank <= 5 -- limit to posts by each user to the most recent 5
+ORDER BY 
+    pu.CreationDate DESC;

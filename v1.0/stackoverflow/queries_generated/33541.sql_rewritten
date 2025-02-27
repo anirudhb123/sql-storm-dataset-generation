@@ -1,0 +1,91 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.Id, T.TagName
+    
+    UNION ALL
+
+    SELECT 
+        RT.TagId,
+        RT.TagName,
+        RT.PostCount + 1
+    FROM 
+        RecursiveTagCounts RT
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || RT.TagName || '%'
+    WHERE 
+        RT.PostCount < (SELECT COUNT(*) FROM Posts)
+),
+
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS Owner,
+        P.ViewCount,
+        P.Score,
+        COALESCE(P.AnswerCount, 0) AS AnswerCount,
+        COALESCE(P.CommentCount, 0) AS CommentCount,
+        NTILE(4) OVER (ORDER BY P.Score DESC) AS ScoreQuartile
+    FROM 
+        Posts P
+    INNER JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+
+VoteStats AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+
+FinalResults AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CreationDate,
+        PS.Owner,
+        PS.ViewCount,
+        PS.Score,
+        PS.AnswerCount,
+        PS.CommentCount,
+        VS.UpVotes,
+        VS.DownVotes,
+        COALESCE((SELECT STRING_AGG(T.TagName, ', ') FROM Tags T WHERE PS.Tags LIKE '%' || T.TagName || '%'), 'No Tags') AS Tags,
+        RC.PostCount AS RelatedTagCount
+    FROM 
+        PostStatistics PS
+    LEFT JOIN 
+        VoteStats VS ON PS.PostId = VS.PostId
+    LEFT JOIN 
+        RecursiveTagCounts RC ON PS.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE '%' || RC.TagName || '%')
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN Score > 0 AND AnswerCount > 0 THEN 'High Engagement'
+        WHEN Score <= 0 THEN 'Neutral'
+        ELSE 'Needs Attention'
+    END AS EngagementLevel
+FROM 
+    FinalResults
+WHERE 
+    ViewCount > 100
+ORDER BY 
+    EngagementLevel DESC, ScoreQuartile ASC, RelatedTagCount DESC;

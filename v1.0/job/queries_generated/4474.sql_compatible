@@ -1,0 +1,61 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        RANK() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS rank
+    FROM
+        aka_name a
+    JOIN
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_type_id) AS company_type_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.actor_name,
+    rm.movie_title,
+    rm.production_year,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    cd.company_names,
+    cd.company_type_count,
+    CASE 
+        WHEN rm.rank = 1 THEN 'Latest'
+        ELSE 'Earlier'
+    END AS release_rank
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    movie_keywords mk ON rm.movie_title = mk.movie_id
+LEFT JOIN 
+    company_details cd ON rm.movie_title = cd.movie_id
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    rm.actor_name, rm.production_year DESC;

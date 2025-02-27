@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        mt.episode_of_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mt2.id,
+        mt2.title,
+        mt2.production_year,
+        mh.level + 1,
+        mt2.episode_of_id
+    FROM 
+        aka_title mt2
+    JOIN 
+        MovieHierarchy mh ON mt2.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    am.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year AS year,
+    SUM(NULLIF(mc.note IS NOT NULL, 0)) AS has_movie_notes,
+    COUNT(DISTINCT mk.keyword) AS total_keywords,
+    ROW_NUMBER() OVER (PARTITION BY am.name ORDER BY mt.production_year DESC) AS row_num
+FROM 
+    aka_name am
+JOIN 
+    cast_info ci ON am.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_title mt ON mh.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON mt.id = mi.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info ILIKE '%note%')
+WHERE 
+    am.name IS NOT NULL
+    AND mt.production_year IS NOT NULL
+    AND (mt.production_year BETWEEN 2000 AND 2023 OR 
+         (mt.season_nr IS NOT NULL AND mt.episode_nr IS NOT NULL)) 
+GROUP BY 
+    am.name, mt.title, mt.production_year
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 3
+ORDER BY 
+    actor_name, year DESC
+LIMIT 50;

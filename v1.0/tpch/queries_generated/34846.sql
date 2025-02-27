@@ -1,0 +1,50 @@
+WITH RECURSIVE MonthlySales AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           EXTRACT(YEAR FROM o.o_orderdate) AS order_year, 
+           EXTRACT(MONTH FROM o.o_orderdate) AS order_month, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name, order_year, order_month
+), RankedSales AS (
+    SELECT c.custkey, 
+           c.c_name, 
+           order_year, 
+           order_month, 
+           total_sales,
+           RANK() OVER (PARTITION BY c.custkey ORDER BY total_sales DESC) AS sales_rank
+    FROM MonthlySales c
+), SupplierStats AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), PartSupplier AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           s.s_name, 
+           s.s_acctbal,
+           COALESCE(ss.total_supply_cost, 0) AS total_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN SupplierStats ss ON ps.ps_partkey = ss.ps_partkey
+), HighValueCustomers AS (
+    SELECT c.custkey, 
+           c.c_name, 
+           SUM(ms.total_sales) AS total_sales
+    FROM RankedSales ms
+    WHERE ms.sales_rank = 1
+    GROUP BY c.custkey, c.c_name
+)
+SELECT p.p_name,
+       ps.s_name,
+       p.p_retailprice,
+       p.p_size,
+       COALESCE(NULLIF(hv.total_sales, 0), 'No Sales') AS customer_sales
+FROM PartSupplier p
+LEFT JOIN HighValueCustomers hv ON p.s_acctbal > 1000
+ORDER BY p.p_partkey, p.p_retailprice DESC
+FETCH FIRST 10 ROWS ONLY;

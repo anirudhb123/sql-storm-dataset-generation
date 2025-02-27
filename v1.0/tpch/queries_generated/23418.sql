@@ -1,0 +1,53 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+TotalLineItems AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderstatus, 
+           o.o_totalprice, 
+           o.o_orderdate
+    FROM orders o
+    JOIN TotalLineItems t ON o.o_orderkey = t.l_orderkey
+    WHERE t.total_value > (
+        SELECT AVG(total_value) 
+        FROM TotalLineItems
+    )
+),
+NationsWithComments AS (
+    SELECT n.n_nationkey, 
+           n.n_name, 
+           COALESCE(NULLIF(n.n_comment, ''), 'No Comments') AS n_comment
+    FROM nation n
+)
+SELECT r.r_name, 
+       ns.n_name, 
+       COUNT(DISTINCT ns.s_suppkey) AS supplier_count, 
+       SUM(CASE WHEN hs.o_orderstatus = 'O' THEN 1 ELSE 0 END) AS open_orders,
+       MAX(CASE 
+           WHEN ns.rn = 1 THEN ns.s_acctbal 
+           ELSE NULL 
+           END) AS highest_account_balance,
+       COUNT(DISTINCT (SELECT p.p_partkey 
+                        FROM part p 
+                        WHERE p.p_size < 20 AND p.p_container LIKE '%BOX%')
+              ) AS small_box_parts
+FROM region r
+JOIN NationsWithComments ns ON r.r_regionkey = ns.n_nationkey 
+LEFT JOIN RankedSuppliers rs ON ns.n_nationkey = rs.s_suppkey
+LEFT JOIN HighValueOrders hs ON rs.s_suppkey = hs.o_orderkey
+WHERE r.r_name LIKE 'A%' 
+AND ns.n_comment IS NOT NULL
+GROUP BY r.r_name, ns.n_name
+HAVING SUM(CASE WHEN rs.rn IS NULL THEN 1 ELSE 0 END) = 0 
+ORDER BY r.r_name, supplier_count DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

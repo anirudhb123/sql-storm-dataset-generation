@@ -1,0 +1,48 @@
+
+WITH RECURSIVE supplier_rank AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+nation_sales AS (
+    SELECT n.n_nationkey, 
+           n.n_name, 
+           SUM(o.o_totalprice) AS total_sales
+    FROM nation n
+    LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+ranked_sales AS (
+    SELECT ns.n_nationkey, 
+           ns.n_name, 
+           ns.total_sales,
+           ROW_NUMBER() OVER (ORDER BY ns.total_sales DESC) AS sales_rank
+    FROM nation_sales ns
+    WHERE ns.total_sales IS NOT NULL
+),
+part_supplier AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           ps.ps_availqty, 
+           ps.ps_supplycost, 
+           COALESCE(NULLIF(p.p_comment, ''), 'No Comment') AS effective_comment
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_supplycost < (SELECT AVG(ps2.ps_supplycost) FROM partsupp ps2)
+)
+SELECT rs.n_name, 
+       ps.p_name, 
+       ps.effective_comment, 
+       ps.ps_availqty * COALESCE(NULLIF(ps.ps_supplycost, 0), 1) AS adjusted_supply_cost,
+       s.rank,
+       s.s_name
+FROM ranked_sales rs
+JOIN part_supplier ps ON rs.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name IS NOT NULL LIMIT 1)
+LEFT JOIN supplier_rank s ON s.s_suppkey IN (SELECT ps_inner.ps_suppkey FROM part_supplier ps_inner WHERE ps_inner.p_partkey = ps.p_partkey)
+WHERE (rs.total_sales > 1000 OR (rs.total_sales IS NULL AND rs.n_name LIKE 'A%'))
+      AND s.rank <= 5
+ORDER BY adjusted_supply_cost DESC, rs.n_name;

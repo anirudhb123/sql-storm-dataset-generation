@@ -1,0 +1,62 @@
+WITH RankedMovies AS (
+    SELECT
+        T.id AS title_id,
+        T.title,
+        T.production_year,
+        ROW_NUMBER() OVER (PARTITION BY T.production_year ORDER BY T.id) AS rank_per_year,
+        COUNT(DISTINCT CAST.person_id) OVER (PARTITION BY T.id) AS cast_count
+    FROM title T
+    LEFT JOIN cast_info CAST ON T.id = CAST.movie_id
+    WHERE T.production_year IS NOT NULL
+),
+TitleWithKeywords AS (
+    SELECT
+        TM.title_id,
+        TM.title,
+        TM.production_year,
+        COALESCE(K.keyword, 'No Keyword') AS keyword
+    FROM RankedMovies TM
+    LEFT JOIN movie_keyword MK ON TM.title_id = MK.movie_id
+    LEFT JOIN keyword K ON MK.keyword_id = K.id
+),
+CompanyMovieInfo AS (
+    SELECT
+        M.movie_id,
+        C.name AS company_name,
+        CT.kind AS company_type,
+        M.info AS movie_info
+    FROM movie_companies M
+    JOIN company_name C ON M.company_id = C.id
+    JOIN company_type CT ON M.company_type_id = CT.id
+),
+FilteredMovies AS (
+    SELECT
+        TWK.title,
+        TWK.production_year,
+        CMI.company_name,
+        CMI.company_type,
+        TWK.keyword,
+        CM.cast_count
+    FROM TitleWithKeywords TWK
+    LEFT JOIN CompanyMovieInfo CMI ON TWK.title_id = CMI.movie_id
+    WHERE TWK.rank_per_year <= 3
+      AND TWK.keyword <> 'No Keyword'
+      AND CMI.company_type IS NOT NULL
+)
+SELECT
+    FM.title,
+    FM.production_year,
+    FM.company_name,
+    FM.company_type,
+    FM.keyword,
+    FM.cast_count,
+    CASE
+        WHEN FM.production_year < 2000 THEN 'Classic'
+        WHEN FM.production_year BETWEEN 2000 AND 2010 THEN 'Modern Classic'
+        ELSE 'Contemporary'
+    END AS era,
+    COALESCE(NULLIF(FM.company_type, 'Distributor'), 'Other') AS adjusted_company_type,
+    CONCAT('Title: ', FM.title, ' | Year: ', FM.production_year) AS title_info
+FROM FilteredMovies FM
+ORDER BY FM.production_year DESC, FM.cast_count DESC
+LIMIT 50;

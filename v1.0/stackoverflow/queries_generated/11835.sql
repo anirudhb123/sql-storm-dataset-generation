@@ -1,0 +1,29 @@
+-- Performance benchmarking query to analyze post statistics along with user information
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    p.CommentCount,
+    u.DisplayName AS AuthorDisplayName,
+    u.Reputation AS AuthorReputation,
+    COUNT(v.Id) AS VoteCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tagArray ON TRUE
+LEFT JOIN 
+    Tags t ON tagArray[index] = t.Id
+WHERE 
+    p.CreationDate >= '2023-01-01' 
+GROUP BY 
+    p.Id, u.Id
+ORDER BY 
+    p.CreationDate DESC;

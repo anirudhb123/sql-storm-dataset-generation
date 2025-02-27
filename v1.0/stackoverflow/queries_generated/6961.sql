@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only include questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+HighScoringPosts AS (
+    SELECT 
+        rp.*
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Score > 100 AND rp.PostRank = 1
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    hsp.Title,
+    hsp.CreationDate,
+    hsp.Score,
+    hsp.OwnerDisplayName,
+    ub.BadgeCount,
+    ub.HighestBadgeClass
+FROM 
+    HighScoringPosts hsp
+JOIN 
+    UserBadges ub ON hsp.OwnerUserId = ub.UserId
+ORDER BY 
+    hsp.Score DESC, hsp.CreationDate ASC
+LIMIT 10;

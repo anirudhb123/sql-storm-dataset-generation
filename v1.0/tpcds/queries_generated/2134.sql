@@ -1,0 +1,54 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    JOIN
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE
+        d.d_year = 2023
+    GROUP BY
+        ws.web_site_sk, ws.ws_order_number
+),
+TopWebsites AS (
+    SELECT
+        web_site_sk,
+        SUM(total_quantity) AS cumulative_quantity,
+        SUM(total_sales) AS cumulative_sales
+    FROM
+        RankedSales
+    WHERE
+        sales_rank <= 10
+    GROUP BY
+        web_site_sk
+)
+SELECT
+    w.w_warehouse_name,
+    COALESCE(ts.cumulative_sales, 0) AS total_sales,
+    COALESCE(ts.cumulative_quantity, 0) AS total_quantity,
+    CASE 
+        WHEN ts.cumulative_sales > 10000 THEN 'High Sales'
+        WHEN ts.cumulative_sales BETWEEN 5000 AND 10000 THEN 'Medium Sales'
+        ELSE 'Low Sales'
+    END AS sales_category,
+    COUNT(DISTINCT ws.ws_order_number) AS unique_orders,
+    SUM(ws.ws_net_profit) AS total_net_profit
+FROM
+    warehouse w
+LEFT JOIN
+    TopWebsites ts ON w.w_warehouse_sk = ts.web_site_sk
+LEFT JOIN
+    web_sales ws ON ws.ws_web_site_sk = ts.web_site_sk
+WHERE
+    w.w_country = 'USA'
+GROUP BY
+    w.w_warehouse_sk, w.w_warehouse_name, ts.cumulative_sales, ts.cumulative_quantity
+HAVING
+    SUM(ws.ws_net_profit) IS NOT NULL
+ORDER BY
+    total_sales DESC;

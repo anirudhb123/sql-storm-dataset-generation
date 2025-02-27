@@ -1,0 +1,78 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (PARTITION BY YEAR(o.o_orderdate) ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+),
+TopCustomers AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        o.o_comment,
+        RANK() OVER (ORDER BY o.o_totalprice DESC) AS customer_rank
+    FROM 
+        RankedOrders o
+    WHERE 
+        o.order_rank <= 10
+),
+ProductSales AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales
+    FROM 
+        lineitem li
+    JOIN 
+        partsupp ps ON li.l_partkey = ps.ps_partkey
+    JOIN 
+        orders o ON li.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+    GROUP BY 
+        ps.ps_partkey
+),
+TopProducts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.total_sales,
+        RANK() OVER (ORDER BY ps.total_sales DESC) AS product_rank
+    FROM 
+        part p
+    JOIN 
+        ProductSales ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_size > 10
+)
+
+SELECT 
+    c.c_name AS Customer_Name,
+    c.c_acctbal AS Customer_Account_Balance,
+    o.o_orderkey AS Order_Number,
+    o.o_totalprice AS Order_Total_Price,
+    p.p_name AS Product_Name,
+    ps.total_sales AS Product_Total_Sales
+FROM 
+    TopCustomers o
+JOIN 
+    customer c ON o.o_orderkey = c.c_custkey
+JOIN 
+    lineitem li ON o.o_orderkey = li.l_orderkey
+JOIN 
+    TopProducts ps ON li.l_partkey = ps.p_partkey
+JOIN 
+    part p ON ps.p_partkey = p.p_partkey
+WHERE 
+    o.customer_rank <= 5 AND ps.product_rank <= 5
+ORDER BY 
+    o.o_orderkey DESC, ps.total_sales DESC;

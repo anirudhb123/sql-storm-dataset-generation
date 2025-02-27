@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        pt.Name AS PostType,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COALESCE(p.Score, 0) AS Score,
+        p.CreationDate
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation IS NOT NULL
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        ur.ReputationRank
+    FROM 
+        UserReputation ur
+    WHERE 
+        ur.ReputationRank <= 10
+),
+PostComments AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(c.Text, '; ') AS AllComments,
+        COUNT(c.Id) AS TotalComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.PostType,
+    rp.CommentCount,
+    pu.UserId,
+    pu.Reputation,
+    pc.AllComments,
+    pc.TotalComments,
+    CASE 
+        WHEN rp.Score >= 0 THEN 'Positive' 
+        ELSE 'Negative' 
+    END AS ScoreCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TopUsers pu ON rp.PostRank = 1 AND rp.OwnerUserId = pu.UserId
+LEFT JOIN 
+    PostComments pc ON rp.PostId = pc.PostId
+WHERE 
+    rp.CommentCount > 0
+ORDER BY 
+    pu.Reputation DESC, rp.CreationDate DESC
+LIMIT 100;

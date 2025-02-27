@@ -1,0 +1,109 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        0 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        r.Level + 1 AS Level
+    FROM Posts p
+    JOIN RecursivePostCTE r ON p.ParentId = r.PostId
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+
+VotingSummary AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    GROUP BY v.UserId
+),
+
+PostDetails AS (
+    SELECT 
+        pp.PostId,
+        pp.Title,
+        pp.CreationDate,
+        pp.Score,
+        pp.ViewCount,
+        COALESCE(vs.UpVotes, 0) AS UpVotes,
+        COALESCE(vs.DownVotes, 0) AS DownVotes,
+        ROUND(pp.Score / NULLIF(pp.ViewCount, 0), 2) AS EngagementScore,
+        CASE 
+            WHEN pp.Score < 0 THEN 'Low Engagement'
+            WHEN pp.Score BETWEEN 1 AND 10 THEN 'Moderate Engagement'
+            ELSE 'High Engagement'
+        END AS EngagementLevel,
+        pp.OwnerUserId
+    FROM RecursivePostCTE pp
+    LEFT JOIN VotingSummary vs ON pp.OwnerUserId = vs.UserId
+),
+
+FinalSummary AS (
+    SELECT 
+        ud.UserId,
+        ud.DisplayName,
+        ud.Reputation,
+        ud.PostsCount,
+        ud.TotalBounties,
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.Score,
+        pd.ViewCount,
+        pd.UpVotes,
+        pd.DownVotes,
+        pd.EngagementScore,
+        pd.EngagementLevel
+    FROM UserReputation ud
+    LEFT JOIN PostDetails pd ON ud.UserId = pd.OwnerUserId
+)
+
+SELECT 
+    fs.UserId,
+    fs.DisplayName,
+    fs.Reputation,
+    fs.PostsCount,
+    fs.TotalBounties,
+    fs.PostId,
+    fs.Title,
+    fs.CreationDate,
+    fs.Score,
+    fs.ViewCount,
+    fs.UpVotes,
+    fs.DownVotes,
+    fs.EngagementScore,
+    fs.EngagementLevel
+FROM FinalSummary fs
+WHERE fs.Reputation > 1000
+ORDER BY fs.Reputation DESC, fs.EngagementScore DESC
+LIMIT 50 OFFSET 0;

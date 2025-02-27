@@ -1,0 +1,59 @@
+WITH RECURSIVE CTE_SupplierOrders AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        l.l_extendedprice,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE
+        o.o_orderstatus IN ('O', 'F')
+    AND
+        l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+),
+HighestSale AS (
+    SELECT 
+        s.s_suppkey,
+        MAX(l.l_extendedprice) AS max_extendedprice
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    ns.n_name,
+    COALESCE(SUM(coalesce(lo.l_extendedprice, 0)), 0) AS total_sales,
+    AVG(p.p_retailprice) AS avg_retail_price,
+    COUNT(DISTINCT so.o_orderkey) AS order_count,
+    COUNT(DISTINCT CASE WHEN so.l_returnflag = 'R' THEN so.l_orderkey END) AS return_count
+FROM 
+    nation ns
+LEFT JOIN 
+    supplier s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    CTE_SupplierOrders so ON s.s_suppkey = so.s_suppkey
+LEFT JOIN 
+    lineitem lo ON so.o_orderkey = lo.l_orderkey
+LEFT JOIN 
+    part p ON lo.l_partkey = p.p_partkey
+WHERE 
+    ns.n_name LIKE 'A%'
+GROUP BY 
+    ns.n_name
+HAVING 
+    total_sales > (SELECT AVG(max_extendedprice) FROM HighestSale)
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

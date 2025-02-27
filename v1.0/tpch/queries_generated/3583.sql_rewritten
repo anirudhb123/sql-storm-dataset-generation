@@ -1,0 +1,53 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS supplier_nation,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+ActiveOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_type,
+    SUM(l.l_quantity) AS total_quantity,
+    COALESCE(SUM(a.total_revenue), 0) AS total_revenue_from_orders,
+    COALESCE(MAX(rs.s_name), 'No Supplier') AS top_supplier_name,
+    MAX(rs.total_supply_cost) AS max_supply_cost
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    ActiveOrders a ON l.l_orderkey = a.o_orderkey
+LEFT JOIN 
+    RankedSuppliers rs ON l.l_suppkey = rs.s_suppkey
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_type
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    total_quantity DESC, p.p_name;

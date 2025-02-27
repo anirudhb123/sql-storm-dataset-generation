@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS AuthorName,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName) ON TRUE
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        ViewCount,
+        AuthorName,
+        CommentCount,
+        UpVoteCount,
+        Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        rn <= 5  -- Filtering to top 5 posts by owner user
+)
+SELECT 
+    fp.*,
+    pt.Name AS PostTypeName,
+    json_agg(b.Name) AS BadgeNames
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostTypes pt ON fp.PostId IN (SELECT p.Id FROM Posts p WHERE p.PostTypeId = pt.Id)
+LEFT JOIN 
+    Badges b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = fp.PostId) 
+GROUP BY 
+    fp.PostId, pt.Name
+ORDER BY 
+    fp.ViewCount DESC, fp.CreationDate DESC;

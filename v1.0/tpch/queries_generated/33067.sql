@@ -1,0 +1,46 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS order_level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, oh.order_level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > (CURRENT_DATE - INTERVAL '1 year') AND o.o_orderkey != oh.o_orderkey
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) as total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) IS NOT NULL
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, COUNT(ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING COUNT(ps.ps_suppkey) > 0
+),
+CombinedData AS (
+    SELECT c.c_custkey, c.c_name, co.total_spent, ps.supplier_count
+    FROM CustomerOrders co
+    JOIN Customer c ON co.c_custkey = c.c_custkey
+    LEFT JOIN PartSupplier ps ON ps.p_partkey IN (
+        SELECT l.l_partkey
+        FROM lineitem l
+        WHERE l.l_orderkey IN (
+            SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey
+        )
+    )
+)
+SELECT c.c_name, COALESCE(c.total_spent, 0) AS total_spent, COALESCE(p.supplier_count, 0) AS supplier_count,
+       ROW_NUMBER() OVER (ORDER BY COALESCE(c.total_spent, 0) DESC) AS rank
+FROM CombinedData c
+LEFT JOIN region r ON r.r_regionkey = (
+    SELECT n.n_regionkey
+    FROM nation n
+    WHERE n.n_nationkey = c.c_nationkey
+)
+WHERE r.r_name IS NOT NULL
+ORDER BY rank, c.c_name;

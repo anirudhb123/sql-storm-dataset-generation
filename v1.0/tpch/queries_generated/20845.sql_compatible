@@ -1,0 +1,75 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year' 
+        AND o.o_orderstatus IN ('O', 'F')
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name
+    FROM 
+        SupplierDetails sd
+    WHERE 
+        sd.total_supplycost > 100000
+),
+CustomerRanking AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        RANK() OVER (ORDER BY c.c_acctbal DESC) AS acct_rank
+    FROM 
+        customer c
+)
+SELECT 
+    o.o_orderkey,
+    o.o_totalprice,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    c.c_name AS customer_name,
+    CASE 
+        WHEN o.o_orderstatus = 'O' THEN 'Pending'
+        ELSE 'Completed'
+    END AS order_status,
+    CONCAT('Order Date: ', TO_CHAR(o.o_orderdate, 'MM/DD/YYYY'), ' | Total Price: $', CAST(o.o_totalprice AS VARCHAR(20))) AS order_details,
+    p.p_name AS part_name,
+    ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) as line_item_rank
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    HighValueSuppliers s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    CustomerRanking c ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    part p ON l.l_partkey = p.p_partkey
+WHERE 
+    ((o.o_orderstatus = 'F' AND c.acct_rank <= 10) OR 
+    (o.o_orderstatus = 'O' AND s.s_name IS NOT NULL))
+    AND COALESCE(l.l_discount, 0) < 0.2
+ORDER BY 
+    o.o_orderdate DESC, 
+    line_item_rank;

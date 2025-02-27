@@ -1,0 +1,46 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        c.c_name, 
+        RANK() OVER (ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+)
+SELECT 
+    p.p_name,
+    COALESCE(os.price_rank, 'No Orders') AS order_rank,
+    rs.s_name,
+    rs.total_cost
+FROM 
+    part p
+LEFT JOIN 
+    RankedSuppliers rs ON p.p_partkey = rs.s_suppkey
+LEFT JOIN 
+    OrderSummary os ON os.o_orderkey = rs.s_suppkey
+WHERE 
+    p.p_size > 10
+AND 
+    (rs.total_cost IS NULL OR rs.total_cost > 100.00)
+ORDER BY 
+    p.p_name, order_rank DESC
+LIMIT 50;

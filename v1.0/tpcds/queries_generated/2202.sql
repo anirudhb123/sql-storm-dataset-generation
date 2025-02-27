@@ -1,0 +1,46 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        store s ON ws.ws_ship_addr_sk = s.s_addr_sk
+    WHERE 
+        i.i_current_price IS NOT NULL 
+        AND s.s_state = 'CA'
+    GROUP BY 
+        ws.ws_item_sk
+),
+TopSales AS (
+    SELECT
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_sales
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.sales_rank <= 5
+)
+SELECT 
+    ia.i_item_desc,
+    ia.i_current_price,
+    COALESCE(ts.total_quantity, 0) AS total_quantity_sold,
+    COALESCE(ts.total_sales, 0) AS total_sales_value,
+    CASE 
+        WHEN COALESCE(ts.total_sales, 0) = 0 THEN 'No Sales'
+        ELSE 'Sales Made'
+    END AS sales_status,
+    CONCAT(ia.i_item_desc, ' (', CAST(ts.total_quantity AS VARCHAR), ' units sold)') AS sales_summary
+FROM 
+    item ia
+LEFT JOIN 
+    TopSales ts ON ia.i_item_sk = ts.ws_item_sk
+ORDER BY 
+    ts.total_sales_value DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

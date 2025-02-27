@@ -1,0 +1,89 @@
+
+WITH RECURSIVE MovieChains AS (
+    SELECT 
+        mt.movie_id AS start_movie_id,
+        mt.linked_movie_id AS linked_movie_id,
+        1 AS chain_depth
+    FROM 
+        movie_link mt
+    WHERE 
+        mt.link_type_id = (SELECT id FROM link_type WHERE link = 'related')
+    UNION ALL
+    SELECT 
+        mc.start_movie_id,
+        ml.linked_movie_id,
+        mc.chain_depth + 1
+    FROM 
+        MovieChains mc
+    JOIN 
+        movie_link ml ON mc.linked_movie_id = ml.movie_id
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'related')
+        AND mc.chain_depth < 10
+),
+ActorRoles AS (
+    SELECT 
+        ci.person_id,
+        ct.kind AS role_kind,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY 
+        ci.person_id, ct.kind
+),
+TopActors AS (
+    SELECT 
+        person_id,
+        role_kind,
+        role_count,
+        RANK() OVER (PARTITION BY role_kind ORDER BY role_count DESC) AS rank
+    FROM 
+        ActorRoles
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        mk.keyword,
+        ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+        COALESCE(mi.info, 'N/A') AS movie_note
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'summary')
+    GROUP BY 
+        t.title, t.production_year, mk.keyword, mi.info
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.keyword,
+    md.movie_note,
+    ma.start_movie_id,
+    COUNT(*) AS related_movie_count,
+    SUM(CASE WHEN ta.role_kind = 'actor' THEN ta.role_count ELSE 0 END) AS actor_roles,
+    SUM(CASE WHEN ta.role_kind = 'director' THEN ta.role_count ELSE 0 END) AS director_roles
+FROM 
+    MovieDetails md
+JOIN 
+    MovieChains ma ON md.production_year = (
+        SELECT MAX(production_year)
+        FROM title
+        WHERE id IN (ma.start_movie_id, ma.linked_movie_id)
+    )
+LEFT JOIN 
+    TopActors ta ON ta.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = ma.start_movie_id)
+WHERE 
+    md.movie_note IS NOT NULL
+GROUP BY 
+    md.title, md.production_year, md.keyword, md.movie_note, ma.start_movie_id
+HAVING 
+    COUNT(*) > 0
+ORDER BY 
+    md.production_year DESC, related_movie_count DESC, md.title;

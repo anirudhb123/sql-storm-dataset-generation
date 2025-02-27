@@ -1,0 +1,49 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounties,
+        AVG(COALESCE(P.Score, 0)) AS AvgScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 9 -- BountyClose
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        STRING_AGG(PH.Comment, '; ') AS ClosureComments,
+        MIN(PH.CreationDate) AS FirstClosureDate
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY PH.PostId
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        COALESCE(CP.ClosureComments, 'No comments') AS ClosureComments,
+        COALESCE(CP.FirstClosureDate, 'Open') AS PostStatus,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation AS OwnerReputation
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN ClosedPosts CP ON P.Id = CP.PostId
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation AS UserReputation,
+    PD.Title AS PostTitle,
+    PD.ViewCount AS PostViews,
+    PD.ClosureComments,
+    PD.PostStatus,
+    U.TotalBounties,
+    U.AvgScore
+FROM UserStats U
+JOIN PostDetails PD ON U.UserId = PD.OwnerDisplayName
+WHERE U.Reputation > 1000
+ORDER BY U.TotalBounties DESC, U.AvgScore DESC
+LIMIT 100;

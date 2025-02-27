@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023) - 90 
+        AND (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+),
+SalesSummary AS (
+    SELECT 
+        sa.ws_item_sk AS item_id,
+        SUM(sa.ws_net_paid) AS total_sales_profit,
+        COUNT(DISTINCT sa.ws_order_number) AS unique_orders
+    FROM 
+        web_sales sa
+    INNER JOIN item i ON sa.ws_item_sk = i.i_item_sk
+    WHERE 
+        sa.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        sa.ws_item_sk
+),
+FilteredSales AS (
+    SELECT 
+        i.i_item_id,
+        s.total_sales_profit,
+        CASE 
+            WHEN s.total_sales_profit IS NULL THEN 'NO SALES'
+            WHEN s.total_sales_profit > 1000 THEN 'HIGH SALES'
+            ELSE 'LOW SALES' 
+        END AS sales_category
+    FROM 
+        SalesSummary s
+    RIGHT JOIN item i ON s.item_id = i.i_item_id
+),
+FinalReport AS (
+    SELECT 
+        f.i_item_id,
+        COALESCE(f.total_sales_profit, 0) AS total_sales_profit,
+        f.sales_category,
+        COALESCE(r.rn, 0) AS rank,
+        ROW_NUMBER() OVER (PARTITION BY f.sales_category ORDER BY f.total_sales_profit DESC) AS category_rank
+    FROM 
+        FilteredSales f
+    LEFT JOIN RankedSales r ON f.i_item_id = r.ws_item_sk
+)
+SELECT 
+    fr.i_item_id,
+    fr.total_sales_profit,
+    fr.sales_category,
+    fr.rank,
+    fr.category_rank
+FROM 
+    FinalReport fr
+WHERE 
+    fr.sales_category = 'HIGH SALES' 
+    OR (fr.sales_category = 'LOW SALES' AND fr.total_sales_profit < (SELECT AVG(total_sales_profit) FROM FinalReport))
+ORDER BY 
+    fr.category_rank, fr.total_sales_profit DESC;

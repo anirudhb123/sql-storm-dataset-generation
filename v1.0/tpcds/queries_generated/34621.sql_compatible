@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ws.ws_sold_date_sk,
+        d.d_date,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+),
+BestSellers AS (
+    SELECT 
+        item.i_item_id,
+        SUM(sd.ws_ext_sales_price) AS total_sales,
+        COUNT(sd.ws_order_number) AS number_of_orders,
+        ROW_NUMBER() OVER (ORDER BY SUM(sd.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        SalesData sd
+    JOIN 
+        item item ON sd.ws_item_sk = item.i_item_sk
+    GROUP BY 
+        item.i_item_id
+)
+SELECT 
+    bs.i_item_id,
+    bs.total_sales,
+    bs.number_of_orders,
+    COALESCE(sa.c_first_name || ' ' || sa.c_last_name, 'Unknown') AS buyer_name,
+    CASE
+        WHEN bd.hd_income_band_sk IS NOT NULL THEN 'Income Band Exists'
+        ELSE 'No Income Band'
+    END AS income_band_status
+FROM 
+    BestSellers bs
+LEFT JOIN 
+    (
+        SELECT 
+            wd.ws_bill_customer_sk,
+            c.c_first_name,
+            c.c_last_name
+        FROM 
+            web_sales wd
+        JOIN 
+            customer c ON wd.ws_bill_customer_sk = c.c_customer_sk
+        WHERE 
+            wd.ws_sales_price > 100
+    ) sa ON sa.ws_bill_customer_sk = bs.i_item_id
+LEFT JOIN 
+    household_demographics bd ON bd.hd_demo_sk = sa.ws_bill_customer_sk
+WHERE 
+    bs.sales_rank <= 10;
+``` 

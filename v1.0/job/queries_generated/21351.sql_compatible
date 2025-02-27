@@ -1,0 +1,73 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id DESC) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+actor_roles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        COUNT(c.person_id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id, a.name, r.role
+),
+movie_info_summary AS (
+    SELECT 
+        m.movie_id,
+        ARRAY_AGG(DISTINCT mi.info ORDER BY mi.info) AS info_details
+    FROM 
+        movie_info mi
+    JOIN 
+        movie_info_idx m ON mi.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id
+),
+movie_title_info AS (
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title), 0) AS title_number,
+        COALESCE(mt.info_details, ARRAY[]::TEXT[]) AS info_details
+    FROM 
+        ranked_titles t
+    LEFT JOIN 
+        movie_info_summary mt ON t.title_id = mt.movie_id
+)
+SELECT 
+    mti.title,
+    mti.production_year,
+    mti.title_number,
+    COUNT(DISTINCT ar.actor_name) AS total_actors,
+    SUM(ar.role_count) FILTER (WHERE ar.role_name = 'Lead') AS lead_actors,
+    NULLIF(SUM(NULLIF(ar.role_count, 0)), 0) AS total_role_count,
+    CASE 
+        WHEN mti.production_year < 2000 THEN 'Classic' 
+        WHEN mti.production_year BETWEEN 2000 AND 2010 THEN 'Modern' 
+        ELSE 'Recent'
+    END AS era,
+    STRING_AGG(DISTINCT mti.info_details::TEXT, ', ') AS aggregated_info
+FROM 
+    movie_title_info mti
+LEFT JOIN 
+    actor_roles ar ON mti.movie_id = ar.movie_id
+GROUP BY 
+    mti.title, mti.production_year, mti.title_number
+HAVING 
+    COUNT(DISTINCT ar.actor_name) > 2
+ORDER BY 
+    mti.production_year DESC, mti.title;

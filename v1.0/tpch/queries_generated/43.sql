@@ -1,0 +1,54 @@
+WITH supplier_summary AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2022-01-01'
+    GROUP BY c.c_custkey, c.c_name
+),
+lineitem_analysis AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+           COUNT(*) AS line_count
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2022-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT r.r_name,
+       COALESCE(ss.total_supply_cost, 0) AS total_supply_cost,
+       COALESCE(co.order_count, 0) AS customer_order_count,
+       la.line_count,
+       MAX(la.net_revenue) AS max_revenue
+FROM region r
+LEFT JOIN supplier_summary ss ON r.r_regionkey = (
+    SELECT n.n_regionkey FROM nation n 
+    WHERE n.n_nationkey = (
+        SELECT c.c_nationkey FROM customer c 
+        WHERE c.c_custkey = COALESCE((SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l)), -1)
+    )
+)
+LEFT JOIN customer_orders co ON co.c_custkey = (
+    SELECT DISTINCT o.o_custkey FROM orders o 
+    WHERE o.o_orderstatus = 'F'
+    ORDER BY o.o_totalprice DESC
+    LIMIT 1
+)
+FULL OUTER JOIN lineitem_analysis la ON la.l_orderkey = (
+    SELECT l.l_orderkey FROM lineitem l
+    WHERE l.l_returnflag = 'R'
+    ORDER BY l.l_shipdate DESC
+    LIMIT 1
+)
+GROUP BY r.r_name, ss.total_supply_cost, co.order_count, la.line_count
+ORDER BY r.r_name;

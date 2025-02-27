@@ -1,0 +1,78 @@
+WITH RECURSIVE UserPostCount AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+), 
+RankedUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS UserRank
+    FROM 
+        UserPostCount
+), 
+HighScoringPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate, 
+        u.DisplayName AS OwnerName 
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.Score > 100
+), 
+CommentStats AS (
+    SELECT 
+        PostId, 
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        PostId
+), 
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId, 
+        COUNT(ph.Id) AS EditCount, 
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5) -- Edit Title, Edit Body
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    r.UserId,
+    r.DisplayName,
+    r.PostCount,
+    p.Title,
+    p.Score,
+    COALESCE(cs.CommentCount, 0) AS CommentCount,
+    COALESCE(ed.EditCount, 0) AS EditCount,
+    COALESCE(ed.LastEditDate, 'Never') AS LastEdit
+FROM 
+    RankedUsers r
+LEFT JOIN 
+    HighScoringPosts p ON r.UserId = p.OwnerUserId
+LEFT JOIN 
+    CommentStats cs ON p.PostId = cs.PostId
+LEFT JOIN 
+    PostHistoryCounts ed ON p.PostId = ed.PostId
+WHERE 
+    r.UserRank <= 10 -- Top 10 users by post count
+ORDER BY 
+    r.PostCount DESC, p.Score DESC;

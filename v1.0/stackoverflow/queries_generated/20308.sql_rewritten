@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate > DATEADD(year, -1, cast('2024-10-01 12:34:56' as timestamp)) 
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId, 
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryCreationDate,
+        H.Name AS HistoryTypeName,
+        ROW_NUMBER() OVER(PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes H ON ph.PostHistoryTypeId = H.Id
+    WHERE 
+        ph.CreationDate > DATEADD(year, -1, cast('2024-10-01 12:34:56' as timestamp)) 
+),
+TagsWithCounts AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%<'+T.TagName+'>%' 
+    GROUP BY 
+        T.Id, T.TagName
+    HAVING 
+        COUNT(P.Id) > 0 
+)
+
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.ViewCount,
+    RP.Score,
+    RP.OwnerDisplayName,
+    COALESCE(Ph.UserId, 0) AS LastUserId,
+    Ph.HistoryTypeName,
+    Ph.HistoryCreationDate,
+    T.TagName,
+    T.PostCount
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    PostHistoryData Ph ON RP.PostId = Ph.PostId AND Ph.HistoryRank = 1 
+LEFT JOIN 
+    TagsWithCounts T ON T.PostCount > 1 
+WHERE 
+    RP.PostRank <= 10 
+ORDER BY 
+    RP.CreationDate DESC,
+
+    
+    CASE 
+        WHEN Ph.PostHistoryTypeId IS NULL THEN 1
+        ELSE 0
+    END,
+    RP.Score DESC;

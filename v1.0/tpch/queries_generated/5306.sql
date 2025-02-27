@@ -1,0 +1,50 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        r.r_name AS region_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+)
+SELECT 
+    r.region_name,
+    COUNT(DISTINCT hv.s_suppkey) AS high_value_supplier_count,
+    SUM(hv.s_acctbal) AS total_account_balance,
+    SUM(rs.total_supply_cost) AS total_supply_cost_by_ranking
+FROM 
+    HighValueSuppliers hv
+JOIN 
+    RankedSuppliers rs ON hv.s_suppkey = rs.s_suppkey
+JOIN 
+    nation n ON hv.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    rs.rank <= 5
+GROUP BY 
+    r.region_name
+ORDER BY 
+    r.region_name;

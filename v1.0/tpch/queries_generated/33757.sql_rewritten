@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, h.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy h ON s.s_nationkey = h.s_suppkey
+), 
+TotalOrders AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    WHERE o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+    GROUP BY o.o_custkey
+),
+LineItemStats AS (
+    SELECT l.l_orderkey, AVG(l.l_extendedprice) AS avg_price, COUNT(*) AS total_lines
+    FROM lineitem l
+    WHERE l.l_shipdate IS NOT NULL AND l.l_shipdate >= '1996-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    p.p_name, 
+    p.p_type, 
+    (SELECT COUNT(DISTINCT ps.s_suppkey) 
+     FROM partsupp ps 
+     WHERE ps.ps_partkey = p.p_partkey) AS supplier_count,
+    COALESCE(ROUND(AVG(t.total_spent), 2), 0) AS avg_spent,
+    MAX(l.avg_price) AS max_line_price,
+    MIN(l.total_lines) AS min_lines,
+    rh.r_name AS region_name
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN TotalOrders t ON sh.s_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = t.o_custkey)
+LEFT JOIN LineItemStats l ON l.l_orderkey = (SELECT MAX(o.o_orderkey) FROM orders o WHERE o.o_custkey = t.o_custkey)
+JOIN nation n ON n.n_nationkey = sh.s_nationkey
+JOIN region rh ON rh.r_regionkey = n.n_regionkey
+WHERE p.p_size > (SELECT AVG(p2.p_size) FROM part p2) 
+AND (sh.s_acctbal > 1000 OR sh.s_acctbal IS NULL)
+GROUP BY p.p_name, p.p_type, rh.r_name;

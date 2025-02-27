@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        m.episode_of_id, 
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+    UNION ALL
+    SELECT 
+        e.id AS movie_id, 
+        e.title, 
+        e.production_year, 
+        e.episode_of_id, 
+        level + 1
+    FROM 
+        aka_title e
+    INNER JOIN 
+        MovieHierarchy mh 
+    ON 
+        mh.movie_id = e.episode_of_id
+),
+ActorPerformance AS (
+    
+    SELECT 
+        ai.person_id, 
+        an.name AS actor_name, 
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(mi.info::float) AS avg_rating,
+        MAX(mi.info) AS max_budget
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN 
+        movie_info mi ON ci.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    GROUP BY 
+        ai.person_id, an.name
+),
+TopMovies AS (
+    
+    SELECT 
+        mh.movie_id, 
+        mh.title, 
+        mh.production_year, 
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 3
+)
+
+SELECT 
+    tp.title AS top_movie_title,
+    tp.production_year,
+    ap.actor_name,
+    ap.movie_count,
+    ap.avg_rating,
+    ap.max_budget
+FROM 
+    TopMovies tp
+LEFT JOIN 
+    ActorPerformance ap ON tp.actor_count > 3
+ORDER BY 
+    tp.production_year DESC, 
+    tp.actor_count DESC;

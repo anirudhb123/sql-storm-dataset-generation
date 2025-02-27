@@ -1,0 +1,57 @@
+
+WITH RECURSIVE price_growth AS (
+    SELECT ps_partkey, 
+           ps_suppkey, 
+           ps_availqty, 
+           ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS rank
+    FROM partsupp 
+    WHERE ps_supplycost IS NOT NULL
+), 
+filtered_suppliers AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal, 
+           n.n_name, 
+           COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey AND o.o_orderstatus = 'F'
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal, n.n_name
+    HAVING COUNT(DISTINCT o.o_orderkey) > 5
+), 
+most_popular_parts AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           SUM(l.l_quantity) AS total_quantity
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(l.l_quantity) > 100
+), 
+avg_discount AS (
+    SELECT l.l_partkey,
+           AVG(l.l_discount) AS avg_discount,
+           RANK() OVER (ORDER BY AVG(l.l_discount) DESC) AS discount_rank
+    FROM lineitem l
+    GROUP BY l.l_partkey
+)
+SELECT fs.s_name, 
+       fs.s_acctbal, 
+       fs.n_name AS supplier_nation,
+       mp.p_name AS popular_part,
+       pg.ps_supplycost AS growth_supplycost,
+       ad.avg_discount
+FROM filtered_suppliers fs
+JOIN most_popular_parts mp ON EXISTS (
+    SELECT 1
+    FROM price_growth pg
+    WHERE pg.ps_partkey = mp.p_partkey
+    AND pg.rank = 1
+    AND pg.ps_supplycost < 100
+) 
+JOIN avg_discount ad ON ad.l_partkey = mp.p_partkey
+WHERE fs.s_acctbal NOT BETWEEN 0 AND 1000
+AND (EXTRACT(MONTH FROM DATE '1998-10-01') IN (6, 12) OR fs.total_orders < 10)
+ORDER BY fs.s_acctbal DESC NULLS LAST;

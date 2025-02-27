@@ -1,0 +1,56 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        1 AS level,
+        mt.title,
+        mt.production_year,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        at.id AS movie_id,
+        mh.level + 1 AS level,
+        at.title,
+        at.production_year,
+        mh.movie_id AS parent_movie_id
+    FROM 
+        aka_title at
+    JOIN 
+        movie_hierarchy mh ON at.episode_of_id = mh.movie_id  
+)
+
+SELECT 
+    r.role,
+    p.name AS actor_name,
+    COUNT(DISTINCT cc.movie_id) AS movies_count,
+    AVG(EXTRACT(YEAR FROM DATE '2024-10-01') - ch.production_year) AS avg_movie_age,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords
+FROM 
+    movie_hierarchy mh
+JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+JOIN 
+    role_type r ON ci.role_id = r.id
+JOIN 
+    aka_name p ON ci.person_id = p.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    aka_title mt ON mh.movie_id = mt.id
+WHERE 
+    mt.production_year >= 2000 AND 
+    (p.name IS NOT NULL AND p.name <> '')  
+GROUP BY 
+    p.name, r.role, mh.movie_id, mh.production_year
+HAVING 
+    COUNT(DISTINCT cc.movie_id) > 5  
+ORDER BY 
+    avg_movie_age DESC, movies_count DESC;

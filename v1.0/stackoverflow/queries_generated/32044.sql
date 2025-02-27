@@ -1,0 +1,55 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.ParentId, 
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Selecting only questions (PostTypeId = 1)
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.ParentId, 
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+)
+SELECT 
+    u.DisplayName AS UserName,
+    p.Title AS QuestionTitle,
+    ph.Level AS AnswerLevel,
+    COUNT(DISTINCT a.Id) AS AnswerCount,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+    COALESCE(NULLIF(SUM(v.BountyAmount), 0), 'No Bounty') AS BountyAmount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MIN(p.CreationDate) AS FirstCreatedDate
+FROM 
+    Posts p
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2  -- Joining to Answers
+LEFT JOIN 
+    UNNEST(string_to_array(p.Tags, ',')) AS t(TagName) ON TRUE  -- Parsing Tags
+INNER JOIN 
+    PostHierarchy ph ON ph.PostId = p.Id
+WHERE 
+    ph.Level = 0  -- Only top-level questions
+GROUP BY 
+    u.DisplayName, p.Title, ph.Level
+ORDER BY 
+    TotalUpVotes DESC, AnswerCount DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;
+This SQL query provides an elaborate performance benchmark of the questions on a Stack Overflow-like schema, featuring recursive CTEs to ascertain a hierarchy of questions and their answers, aggregation to compute vote totals and a bounty sums, and the gathering of tags into a string representation. It also leverages outer joins to include answers and users comprehensively while ensuring filters and particular ordering for better performance analysis.

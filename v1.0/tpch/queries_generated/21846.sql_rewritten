@@ -1,0 +1,57 @@
+WITH RECURSIVE SaleAnalysis AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        customer c
+        JOIN orders o ON c.c_custkey = o.o_custkey
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RankedSales AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN rank = 1 THEN 'Top_Spender'
+            WHEN rank BETWEEN 2 AND 5 THEN 'Moderate_Spenders'
+            ELSE 'Low_Spenders' 
+        END AS spending_category
+    FROM 
+        SaleAnalysis
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(NULLIF(s.s_address, ''), 'Unknown Address') AS address,
+        r.r_name AS region_name
+    FROM 
+        supplier s
+        LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+        LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    rs.c_custkey,
+    rs.c_name,
+    rs.total_sales,
+    rs.spending_category,
+    si.s_name AS supplier_name,
+    si.address AS supplier_address,
+    CASE 
+        WHEN si.region_name IS NULL THEN 'Region Not Specified'
+        ELSE si.region_name 
+    END AS region,
+    (SELECT COUNT(*) FROM partsupp ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = rs.c_custkey))) AS parts_supplied_count
+FROM 
+    RankedSales rs
+    FULL OUTER JOIN SupplierInfo si ON rs.total_sales > 10000 AND si.s_suppkey IS NOT NULL
+WHERE 
+    (rs.spending_category = 'Top_Spender' AND si.region_name IS NOT NULL) OR 
+    rs.spending_category = 'Low_Spenders'
+ORDER BY 
+    rs.total_sales DESC NULLS LAST;

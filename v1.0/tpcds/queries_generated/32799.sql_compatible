@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        SUM(ss_quantity) AS total_sales,
+        MAX(ss_sales_price) AS max_price,
+        MIN(ss_sales_price) AS min_price,
+        COUNT(DISTINCT ss_ticket_number) AS transaction_count,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_quantity) DESC) AS rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ss_store_sk, ss_item_sk
+),
+ItemInventory AS (
+    SELECT 
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory
+    WHERE 
+        inv_date_sk = (SELECT MAX(inv_date_sk) FROM inventory)
+    GROUP BY 
+        inv_item_sk
+),
+CombinedSales AS (
+    SELECT 
+        a.ss_store_sk,
+        a.ss_item_sk,
+        a.total_sales,
+        b.total_inventory,
+        a.rank
+    FROM 
+        SalesCTE a
+    LEFT JOIN 
+        ItemInventory b ON a.ss_item_sk = b.inv_item_sk
+)
+SELECT 
+    ws.web_site_id,
+    ca.ca_city,
+    cs.cs_order_number,
+    cs.cs_sales_price,
+    cs.cs_net_profit,
+    CASE 
+        WHEN cs.cs_sales_price IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS Sales_Status,
+    RANK() OVER (ORDER BY cs.cs_net_profit DESC) AS Profit_Rank
+FROM 
+    CombinedSales cs
+INNER JOIN 
+    web_sales ws ON cs.ss_item_sk = ws.ws_item_sk
+LEFT JOIN 
+    customer_address ca ON ws.ws_ship_addr_sk = ca.ca_address_sk
+WHERE 
+    cs.total_sales > 100 
+    AND (cs.total_inventory IS NULL OR cs.total_inventory < 50)
+    AND ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+ORDER BY 
+    Profit_Rank, Sales_Status DESC
+LIMIT 10;

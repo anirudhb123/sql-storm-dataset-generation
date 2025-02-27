@@ -1,0 +1,57 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        hd.hd_income_band_sk,
+        hd.hd_buy_potential
+    FROM 
+        customer AS c
+    JOIN 
+        customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics AS hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+StringBenchmark AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        LENGTH(CONCAT(c.c_first_name, ' ', c.c_last_name)) AS name_length,
+        INITCAP(ca.ca_city) AS formatted_city,
+        TRIM(ca.ca_state) AS trimmed_state,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender_description,
+        REPLACE(cd.cd_marital_status, 'S', 'Single') AS marital_status_desc,
+        UPPER(cd.cd_education_status) AS education_status_upper,
+        CONCAT(hd.hd_buy_potential, ' Potential') AS purchasing_power
+    FROM 
+        CustomerDetails AS c
+)
+SELECT 
+    full_name,
+    name_length,
+    formatted_city,
+    trimmed_state,
+    gender_description,
+    marital_status_desc,
+    education_status_upper,
+    purchasing_power
+FROM 
+    StringBenchmark
+WHERE 
+    name_length > 20 
+ORDER BY 
+    name_length DESC, 
+    full_name ASC
+LIMIT 100;

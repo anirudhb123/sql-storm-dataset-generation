@@ -1,0 +1,96 @@
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        pt.Name AS PostType,
+        COUNT(c.Id) AS CommentCount,
+        AVG(COALESCE(v.VoteCount, 0)) AS AverageVotes,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN (
+        SELECT 
+            PostId, COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, pt.Name
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        ph.CreationDate AS ClosedDate,
+        COUNT(ph.Id) AS ClosureReasons
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 -- Post Closed
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, ph.CreationDate
+),
+HotQuestions AS (
+    SELECT 
+        DISTINCT p.Id AS HotPostId
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId IN (52, 53) -- SelectedHotQuestion / RemovedHotQuestion
+),
+AggregateStatistics AS (
+    SELECT 
+        ps.PostId,
+        ps.PostType,
+        ps.CommentCount,
+        ps.AverageVotes,
+        ps.GoldBadges,
+        ps.SilverBadges,
+        ps.BronzeBadges,
+        COALESCE(cp.ClosedDate, 'No Closure') AS ClosedDate,
+        COALESCE(cp.ClosureReasons, 0) AS ClosureReasons,
+        CASE 
+            WHEN hq.HotPostId IS NOT NULL THEN 'Yes'
+            ELSE 'No' 
+        END AS IsHotQuestion
+    FROM 
+        PostStatistics ps
+    LEFT JOIN 
+        ClosedPosts cp ON ps.PostId = cp.ClosedPostId
+    LEFT JOIN 
+        HotQuestions hq ON ps.PostId = hq.HotPostId
+)
+SELECT 
+    PostId,
+    PostType,
+    CommentCount,
+    AverageVotes,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    ClosedDate,
+    ClosureReasons,
+    IsHotQuestion
+FROM 
+    AggregateStatistics
+WHERE 
+    (CommentCount > 5 AND AverageVotes > 10) OR
+    (GoldBadges > 0 AND SilverBadges > 3)
+ORDER BY 
+    AverageVotes DESC, CommentCount DESC;

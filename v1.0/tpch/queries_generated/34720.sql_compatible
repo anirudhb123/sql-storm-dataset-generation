@@ -1,0 +1,55 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_address, s_nationkey, s_comment, 1 AS level
+    FROM supplier
+    WHERE s_nationkey = (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+), 
+
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           COUNT(DISTINCT o.o_orderkey) AS total_orders, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+), 
+
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_item_value, 
+           COUNT(l.l_orderkey) AS line_item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1997-01-01' 
+      AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY o.o_orderkey
+), 
+
+SupplierPerformance AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+
+SELECT 
+    c.c_name, 
+    COALESCE(o.total_orders, 0) AS total_orders, 
+    COALESCE(o.total_spent, 0) AS total_spent, 
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+    SUM(sp.total_supply_cost) AS total_supplier_cost,
+    MAX(od.total_line_item_value) AS max_order_value,
+    AVG(od.line_item_count) AS avg_line_item_count
+FROM CustomerOrders o
+FULL OUTER JOIN customer c ON o.c_custkey = c.c_custkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = c.c_nationkey
+LEFT JOIN SupplierPerformance sp ON sh.s_suppkey = sp.s_suppkey
+LEFT JOIN OrderDetails od ON o.c_custkey = od.o_orderkey
+GROUP BY c.c_name
+HAVING COALESCE(o.total_spent, 0) > 1000
+ORDER BY total_orders DESC NULLS LAST;

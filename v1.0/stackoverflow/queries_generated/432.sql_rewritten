@@ -1,0 +1,51 @@
+WITH UserDetails AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.Views,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON u.Id = v.UserId AND v.VoteTypeId = 8 
+    GROUP BY u.Id
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        COALESCE(crt.Name, 'Unknown') AS CloseReason
+    FROM PostHistory ph
+    LEFT JOIN CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE ph.PostHistoryTypeId = 10
+)
+SELECT 
+    ud.UserId,
+    ud.DisplayName,
+    ud.Reputation,
+    ud.Views,
+    ud.PostCount,
+    ud.TotalBounties,
+    rp.PostId,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate,
+    cp.ClosedDate,
+    cp.CloseReason
+FROM UserDetails ud
+LEFT JOIN RecentPosts rp ON ud.UserId = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    ud.Reputation > 1000 
+    AND (ud.Views IS NULL OR ud.Views > 10000)
+ORDER BY ud.Reputation DESC, rp.RecentPostDate DESC NULLS LAST;

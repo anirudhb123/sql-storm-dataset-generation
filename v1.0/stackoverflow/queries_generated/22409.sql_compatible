@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate ASC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        b.Class,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Users u
+    JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, b.Class
+),
+PostCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON CAST(ph.Comment AS int) = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        ph.PostId
+),
+LikelyDeletedPosts AS (
+    SELECT 
+        p.Id AS DeletedPostId,
+        COALESCE(MAX(v.CreationDate), CAST('1900-01-01' AS timestamp)) AS LastVoteDate,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (10, 11)  
+    WHERE 
+        p.Score < 0 AND 
+        (p.LastActivityDate < CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '6 months' OR p.ViewCount < 5)
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS TotalQuestions,
+    AVG(COALESCE(rp.Score, 0)) AS AvgScore,
+    SUM(CASE WHEN ub.Class = 1 THEN ub.BadgeCount ELSE 0 END) AS GoldBadges,
+    SUM(CASE WHEN ub.Class = 2 THEN ub.BadgeCount ELSE 0 END) AS SilverBadges,
+    SUM(CASE WHEN ub.Class = 3 THEN ub.BadgeCount ELSE 0 END) AS BronzeBadges,
+    COALESCE(pc.CloseReasons, 'No Reasons') AS PostCloseReasons,
+    LAG(pc.CloseReasons) OVER (PARTITION BY u.Id ORDER BY COUNT(DISTINCT p.Id)) AS PreviousCloseReasons
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostCloseReasons pc ON pc.PostId = rp.PostId
+LEFT JOIN 
+    LikelyDeletedPosts ldp ON ldp.DeletedPostId = rp.PostId
+WHERE 
+    u.Reputation >= 1000
+GROUP BY 
+    u.Id, u.DisplayName, pc.CloseReasons
+HAVING 
+    COUNT(DISTINCT p.Id) > 10
+ORDER BY 
+    AvgScore DESC NULLS LAST;

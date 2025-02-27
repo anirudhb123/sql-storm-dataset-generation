@@ -1,0 +1,85 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_city, 
+        ca_state, 
+        COUNT(*) AS address_count 
+    FROM 
+        customer_address 
+    GROUP BY 
+        ca_city, 
+        ca_state
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_gender, 
+        cd_marital_status, 
+        COUNT(*) AS demographic_count 
+    FROM 
+        customer_demographics 
+    GROUP BY 
+        cd_gender, 
+        cd_marital_status
+),
+DateSummary AS (
+    SELECT 
+        d_year, 
+        d_month_seq, 
+        COUNT(*) AS sales_count 
+    FROM 
+        (SELECT 
+            ws_sold_date_sk 
+        FROM 
+            web_sales 
+        UNION ALL 
+        SELECT 
+            cs_sold_date_sk 
+        FROM 
+            catalog_sales 
+        UNION ALL 
+        SELECT 
+            ss_sold_date_sk 
+        FROM 
+            store_sales) AS all_sales 
+    JOIN 
+        date_dim ON all_sales.ws_sold_date_sk = date_dim.d_date_sk 
+    GROUP BY 
+        d_year, 
+        d_month_seq
+),
+ItemSummary AS (
+    SELECT 
+        i_brand, 
+        SUM(ws_quantity) AS total_quantity_sold 
+    FROM 
+        web_sales 
+    JOIN 
+        item ON web_sales.ws_item_sk = item.i_item_sk 
+    GROUP BY 
+        i_brand
+)
+SELECT 
+    ad.ca_city, 
+    ad.ca_state, 
+    ad.address_count, 
+    cd.cd_gender, 
+    cd.cd_marital_status, 
+    cd.demographic_count, 
+    ds.d_year, 
+    ds.d_month_seq, 
+    ds.sales_count, 
+    it.i_brand, 
+    it.total_quantity_sold 
+FROM 
+    AddressDetails ad 
+JOIN 
+    CustomerDemographics cd ON cd.cd_demo_sk IS NOT NULL 
+JOIN 
+    DateSummary ds ON ds.sales_count > 0 
+JOIN 
+    ItemSummary it ON it.total_quantity_sold > 0 
+ORDER BY 
+    ad.ca_city, 
+    cd.cd_gender, 
+    ds.d_year, 
+    it.total_quantity_sold DESC;

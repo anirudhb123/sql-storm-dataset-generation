@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(b.Id) > 0
+),
+CommentedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CommentCount,
+        ub.BadgeCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        UserBadges ub ON c.UserId = ub.UserId
+)
+SELECT 
+    cp.PostId,
+    cp.Title,
+    cp.CommentCount,
+    COALESCE(cp.BadgeCount, 0) AS BadgeCount,
+    CASE 
+        WHEN COALESCE(cp.BadgeCount, 0) = 0 THEN 'No Badges'
+        ELSE 'Has Badges: ' || cp.BadgeCount 
+    END AS BadgeStatus
+FROM 
+    CommentedPosts cp
+WHERE 
+    cp.CommentCount > 5
+ORDER BY 
+    cp.CommentCount DESC,
+    cp.PostId ASC
+LIMIT 10
+
+UNION ALL
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COALESCE(cp.CommentCount, 0) AS CommentCount,
+    0 AS BadgeCount,
+    'No Badges' AS BadgeStatus
+FROM 
+    Posts p
+LEFT JOIN 
+    (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) cp ON p.Id = cp.PostId
+WHERE 
+    p.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM Comments c 
+        WHERE c.PostId = p.Id
+        LIMIT 1
+    )
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 5;

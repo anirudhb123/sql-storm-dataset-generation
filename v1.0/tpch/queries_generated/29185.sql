@@ -1,0 +1,65 @@
+WITH PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        n.n_name AS nation_name,
+        s.s_name AS supplier_name,
+        s.s_address AS supplier_address
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TotalOrderAmount AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    pd.p_partkey,
+    pd.p_name,
+    pd.p_mfgr,
+    pd.p_type,
+    pd.p_container,
+    pd.p_retailprice,
+    pd.supplier_name,
+    pd.supplier_address,
+    ta.total_amount,
+    CASE 
+        WHEN ta.total_amount > 10000 THEN 'High Value'
+        WHEN ta.total_amount BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS order_value_category,
+    CONCAT(pd.p_comment, ' | Offered by: ', pd.supplier_name, ' in ', pd.nation_name) AS detailed_comment
+FROM 
+    PartDetails pd
+LEFT JOIN 
+    TotalOrderAmount ta ON pd.p_partkey = (
+        SELECT 
+            l.l_partkey
+        FROM 
+            lineitem l
+        JOIN 
+            orders o ON l.l_orderkey = o.o_orderkey
+        WHERE 
+            o.o_orderkey IN (SELECT DISTINCT o.o_orderkey FROM orders)
+        FETCH FIRST ROW ONLY
+    )
+ORDER BY 
+    pd.p_retailprice DESC, order_value_category;

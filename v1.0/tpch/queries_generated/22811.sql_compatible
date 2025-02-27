@@ -1,0 +1,95 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 1 AND 50
+),
+SupplierAvgCost AS (
+    SELECT 
+        ps.ps_suppkey,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        CASE 
+            WHEN o.o_totalprice > 1000 THEN 'High Value'
+            ELSE 'Regular'
+        END AS order_value_type
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1996-01-01'
+),
+SupplierWithComments AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(NULLIF(s.s_comment, ''), 'No comment provided') AS effective_comment
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (
+            SELECT AVG(s_acctbal) 
+            FROM supplier 
+            WHERE s_nationkey = s.s_nationkey
+        )
+),
+PartSupplierJoin AS (
+    SELECT 
+        p.p_partkey,
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_availqty
+    FROM 
+        RankedParts p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        p.rn <= 3
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    ps.s_name,
+    ps.ps_availqty,
+    o.o_totalprice,
+    CASE 
+        WHEN o.o_totalprice IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status,
+    CASE 
+        WHEN p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) THEN 'Expensive'
+        ELSE 'Affordable'
+    END AS price_category
+FROM 
+    PartSupplierJoin ps
+FULL OUTER JOIN 
+    HighValueOrders o ON o.o_orderkey = ps.p_partkey  
+WHERE 
+    (ps.ps_availqty > 0 AND o.o_totalprice IS NOT NULL) 
+    OR (ps.ps_availqty IS NULL AND o.o_totalprice IS NULL)
+GROUP BY 
+    p.p_name,
+    p.p_retailprice,
+    ps.s_name,
+    ps.ps_availqty,
+    o.o_totalprice
+HAVING 
+    SUM(ps.ps_availqty) > 10
+    OR EXISTS (SELECT 1 FROM SupplierWithComments sc WHERE sc.s_suppkey = ps.s_suppkey AND LOWER(sc.effective_comment) LIKE '%urgent%')
+ORDER BY 
+    price_category, order_status, p.p_retailprice DESC

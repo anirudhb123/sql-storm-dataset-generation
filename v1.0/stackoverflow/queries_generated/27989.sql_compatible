@@ -1,0 +1,89 @@
+
+WITH UserEngagement AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 2 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopContributors AS (
+    SELECT 
+        ue.DisplayName,
+        ue.TotalPosts,
+        ue.QuestionCount,
+        ue.AnswerCount,
+        ue.AcceptedAnswers,
+        ue.CommentCount,
+        ue.TotalBounties,
+        RANK() OVER (ORDER BY ue.TotalPosts DESC) AS Rank
+    FROM 
+        UserEngagement ue
+),
+TagStatistics AS (
+    SELECT
+        TRIM(UNNEST(SPLIT_PART(Tags, '><', 1))) AS TagName,
+        COUNT(*) AS TagUsageCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        TRIM(UNNEST(SPLIT_PART(Tags, '><', 1)))
+),
+TagEngagement AS (
+    SELECT 
+        ts.TagName,
+        COUNT(*) AS PostCount,
+        COALESCE(SUM(ue.QuestionCount), 0) AS QuestionCount,
+        COALESCE(SUM(ue.AcceptedAnswers), 0) AS AcceptedQuestionCount
+    FROM 
+        TagStatistics ts
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || ts.TagName || '%'
+    LEFT JOIN 
+        UserEngagement ue ON ue.UserId = p.OwnerUserId
+    GROUP BY 
+        ts.TagName
+),
+FinalReport AS (
+    SELECT 
+        tc.DisplayName,
+        tc.TotalPosts,
+        tc.QuestionCount,
+        tc.AnswerCount,
+        tc.AcceptedAnswers,
+        tc.CommentCount,
+        tc.TotalBounties,
+        te.TagName,
+        te.PostCount,
+        te.QuestionCount AS TagQuestionCount,
+        te.AcceptedQuestionCount
+    FROM 
+        TopContributors tc
+    JOIN 
+        TagEngagement te ON te.PostCount > 0
+    ORDER BY 
+        tc.Rank, te.TagName
+)
+SELECT 
+    *
+FROM 
+    FinalReport
+WHERE 
+    TotalPosts > 10 
+ORDER BY 
+    TagUsageCount DESC, DisplayName;

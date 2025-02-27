@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS NetVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount,
+        SUM(Score) AS TotalScore
+    FROM 
+        RankedPosts
+    GROUP BY 
+        OwnerUserId
+    HAVING 
+        COUNT(*) > 0
+    ORDER BY 
+        TotalScore DESC
+    LIMIT 10
+),
+PostDetails AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CommentCount,
+        rp.CreationDate,
+        rp.Score,
+        tu.PostCount,
+        tu.TotalScore,
+        CASE 
+            WHEN rp.NetVotes > 0 THEN 'Popular' 
+            WHEN rp.NetVotes < 0 THEN 'Unpopular'
+            ELSE 'Neutral' 
+        END AS PopularityStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        TopUsers tu ON rp.OwnerUserId = tu.OwnerUserId
+)
+
+SELECT 
+    pd.Id,
+    pd.Title,
+    pd.CommentCount,
+    pd.CreationDate,
+    pd.Score,
+    pd.PostCount,
+    pd.TotalScore,
+    pd.PopularityStatus,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Posts p ON pd.Id = p.Id
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            unnest(NULLIF(string_to_array(p.Tags, '><'), '{}'::text)) AS TagName
+    ) t ON true
+WHERE 
+    pd.CommentCount > 5
+GROUP BY 
+    pd.Id, pd.Title, pd.CommentCount, pd.CreationDate, pd.Score, pd.PostCount, pd.TotalScore, pd.PopularityStatus
+ORDER BY 
+    pd.TotalScore DESC, pd.CommentCount DESC;

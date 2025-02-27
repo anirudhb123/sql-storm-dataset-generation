@@ -1,0 +1,76 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_orderstatus,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'F'
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_suppkey
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(l.l_extendedprice) AS avg_extendedprice
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate < DATE '1998-10-01' - INTERVAL '30' DAY 
+    GROUP BY 
+        l.l_orderkey, l.l_partkey
+),
+FinalResult AS (
+    SELECT 
+        r.o_orderkey,
+        pp.p_name,
+        pp.p_brand,
+        pp.p_retailprice,
+        li.total_quantity,
+        li.avg_extendedprice,
+        ROW_NUMBER() OVER (PARTITION BY r.o_orderkey ORDER BY pp.p_retailprice DESC) AS product_rank
+    FROM 
+        RankedOrders r
+    LEFT JOIN 
+        FilteredLineItems li ON r.o_orderkey = li.l_orderkey
+    LEFT JOIN 
+        part pp ON li.l_partkey = pp.p_partkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.c_name,
+    COALESCE(pp.p_name, 'Unknown Part') AS part_name,
+    COALESCE(li.total_quantity, 0) AS total_quantity,
+    COALESCE(li.avg_extendedprice, 0.00) AS avg_extendedprice,
+    CASE 
+        WHEN r.order_rank <= 5 THEN 'Top 5 Order'
+        ELSE 'Other Orders'
+    END AS order_priority
+FROM 
+    FinalResult r
+WHERE 
+    r.product_rank <= 3
+ORDER BY 
+    r.o_orderdate DESC, 
+    r.o_orderkey;

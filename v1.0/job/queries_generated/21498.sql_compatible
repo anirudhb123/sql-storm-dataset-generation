@@ -1,0 +1,69 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn,
+        COUNT(comment.id) OVER (PARTITION BY t.id) AS comment_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'comments')
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.id
+    LEFT JOIN 
+        aka_name an ON an.person_id = c.person_id
+    LEFT JOIN 
+        title ti ON ti.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND (t.production_year > 2000 OR t.title LIKE 'A%')
+        AND COALESCE(an.name, 'Unknown') != 'Unknown'
+        AND (c.note IS NULL OR c.note LIKE '%lead%')
+),
+PopularMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        comment_count,
+        RANK() OVER (ORDER BY comment_count DESC) AS popularity_rank
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 5
+)
+SELECT 
+    pm.title,
+    pm.production_year,
+    pm.popularity_rank,
+    COALESCE(cast_count.cast_count, 0) AS cast_count,
+    COALESCE(mci.company_count, 0) AS company_count,
+    CASE 
+        WHEN pm.production_year < 2010 THEN 'Classic'
+        WHEN pm.production_year BETWEEN 2010 AND 2015 THEN 'Modern'
+        ELSE 'Recent'
+    END AS movie_age_category
+FROM 
+    PopularMovies pm
+LEFT JOIN (
+    SELECT movie_id, COUNT(*) AS cast_count
+    FROM cast_info
+    GROUP BY movie_id
+) cast_count ON cast_count.movie_id = pm.movie_id
+LEFT JOIN (
+    SELECT movie_id, COUNT(*) AS company_count
+    FROM movie_companies
+    GROUP BY movie_id
+) mci ON mci.movie_id = pm.movie_id
+WHERE 
+    pm.popularity_rank <= 10
+ORDER BY 
+    pm.popularity_rank ASC, 
+    pm.production_year DESC
+LIMIT 20;

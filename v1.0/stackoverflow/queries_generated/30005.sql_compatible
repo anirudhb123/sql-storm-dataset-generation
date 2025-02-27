@@ -1,0 +1,67 @@
+
+WITH RECURSIVE UserActivity AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+), PostScore AS (
+    
+    SELECT 
+        UserId,
+        AVG(Score) AS AvgPostScore
+    FROM 
+        Posts
+    GROUP BY 
+        UserId
+), TopUsers AS (
+    
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.Reputation,
+        ua.TotalPosts,
+        ps.AvgPostScore,
+        RANK() OVER (ORDER BY ua.Reputation DESC) AS ReputationRank
+    FROM 
+        UserActivity ua
+    JOIN 
+        PostScore ps ON ua.UserId = ps.UserId
+    WHERE 
+        ua.TotalPosts > 10 
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.TotalPosts,
+    COALESCE(ps.AvgPostScore, 0) AS AvgPostScore,
+    (SELECT COUNT(*) 
+     FROM Badges b 
+     WHERE b.UserId = tu.UserId 
+       AND b.Class = 1 
+    ) AS GoldBadges,
+    (SELECT COUNT(*) 
+     FROM Badges b 
+     WHERE b.UserId = tu.UserId 
+       AND b.Class IN (2, 3) 
+    ) AS SilverBronzeBadges,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     JOIN Posts p ON t.ExcerptPostId = p.Id 
+     WHERE p.OwnerUserId = tu.UserId 
+    ) AS UserTags
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    Votes v ON tu.UserId = v.UserId 
+GROUP BY 
+    tu.UserId, tu.DisplayName, tu.Reputation, tu.TotalPosts, ps.AvgPostScore
+ORDER BY 
+    ReputationRank, tu.Reputation DESC;

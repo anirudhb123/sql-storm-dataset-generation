@@ -1,0 +1,65 @@
+WITH movie_ratings AS (
+    SELECT 
+        mt.movie_id,
+        AVG(CASE 
+            WHEN mr.rating IS NOT NULL THEN mr.rating 
+            ELSE 0 
+        END) AS avg_rating
+    FROM 
+        movie_info AS mi
+    LEFT JOIN 
+        movie_info AS mr ON mi.movie_id = mr.movie_id 
+        AND mr.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        mt.movie_id
+),
+movie_details AS (
+    SELECT 
+        t.title, 
+        t.production_year,
+        r.avg_rating,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        movie_companies AS mc ON t.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        complete_cast AS cc ON t.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info AS ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        movie_ratings AS r ON t.movie_id = r.movie_id
+    WHERE 
+        t.production_year >= 2000 
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'feature'))
+    GROUP BY 
+        t.title, t.production_year, r.avg_rating
+),
+ranked_movies AS (
+    SELECT 
+        md.*,
+        RANK() OVER (ORDER BY avg_rating DESC) AS rating_rank
+    FROM 
+        movie_details AS md
+)
+SELECT 
+    title, 
+    production_year, 
+    avg_rating, 
+    company_names, 
+    cast_count,
+    CASE 
+        WHEN rating_rank <= 10 THEN 'Top 10'
+        WHEN rating_rank <= 50 THEN 'Top 50'
+        ELSE 'Below Top 50'
+    END AS ranking_category
+FROM 
+    ranked_movies
+WHERE 
+    cast_count > 5
+ORDER BY 
+    avg_rating DESC, 
+    production_year ASC;

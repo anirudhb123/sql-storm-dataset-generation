@@ -1,0 +1,94 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id,
+        a.Title,
+        a.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts a
+    JOIN 
+        Posts q ON a.ParentId = q.Id
+    JOIN 
+        RecursivePostHierarchy r ON q.Id = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TaggedPosts,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ','))
+    GROUP BY 
+        t.TagName
+),
+CloseReasonRank AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS CloseReasonCount,
+        STRING_AGG(DISTINCT crt.Name, ', ') AS CloseReasons
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    LEFT JOIN 
+        CloseReasonTypes crt ON (ph.Comment::text = crt.Id::text)
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    r.Level,
+    u.DisplayName,
+    u.Reputation,
+    ts.TaggedPosts,
+    ts.TotalViews,
+    cr.CloseReasonCount,
+    cr.CloseReasons
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.PostId
+LEFT JOIN 
+    TagStats ts ON ts.TagName = ANY(string_to_array(p.Tags, ','))
+LEFT JOIN 
+    CloseReasonRank cr ON p.Id = cr.PostId
+WHERE 
+    (u.Reputation > 1000 AND r.Level < 3) OR 
+    (u.Reputation IS NULL AND cr.CloseReasonCount > 0)
+ORDER BY 
+    u.Reputation DESC, 
+    cr.CloseReasonCount DESC, 
+    p.CreationDate DESC
+LIMIT 50;

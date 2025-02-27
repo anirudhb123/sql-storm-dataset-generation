@@ -1,0 +1,19 @@
+SELECT 
+    p.p_name,
+    s.s_name,
+    CONCAT('Supplier ', s.s_name, ' provides ', p.p_name, ' with a size of ', p.p_size, ' and a retail price of $', FORMAT(p.p_retailprice, 2)) AS product_info,
+    COUNT(*) AS supply_count,
+    AVG(ps.ps_supplycost) AS avg_supply_cost
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    p.p_size BETWEEN 10 AND 50
+    AND s.s_acctbal > 500.00
+GROUP BY 
+    p.p_name, s.s_name, p.p_size, p.p_retailprice
+ORDER BY 
+    avg_supply_cost DESC, supply_count DESC;

@@ -1,0 +1,83 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND o.o_orderstatus IN ('O', 'F', 'P')
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS TotalSupplyValue
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+PartSummary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS SupplierCount,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+LineItemImpact AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS AdjustedRevenue,
+        COUNT(*) AS LineItemCount
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    n.n_name AS Nation,
+    sd.s_name AS Supplier,
+    ps.p_name AS PartName,
+    IFNULL(pi.SupplierCount, 0) AS NumSuppliers,
+    CASE 
+        WHEN sd.TotalSupplyValue > 20000 THEN 'High Supplier Value'
+        ELSE 'Normal Supplier Value'
+    END AS SupplierValueCategory,
+    li.AdjustedRevenue AS RevenueImpact,
+    li.LineItemCount AS TotalLineItems
+FROM 
+    RankedOrders r
+FULL OUTER JOIN 
+    LineItemImpact li ON r.o_orderkey = li.l_orderkey
+LEFT JOIN 
+    customer c ON c.c_custkey = r.o_orderkey
+LEFT JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    SupplierDetails sd ON sd.s_suppkey = c.c_custkey
+LEFT JOIN 
+    PartSummary ps ON ps.SupplierCount = sd.TotalSupplyValue
+WHERE 
+    (n.n_name IS NOT NULL OR sd.s_name IS NOT NULL)
+    AND (li.AdjustedRevenue IS NOT NULL OR r.o_totalprice > 5000)
+ORDER BY 
+    r.o_orderdate DESC, n.n_name ASC
+LIMIT 100
+OFFSET 0;

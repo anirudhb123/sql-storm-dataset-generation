@@ -1,0 +1,72 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ph.CreationDate AS HistoryCreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ph.UserId AS EditorUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- Only Bounty related votes
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+RecentPopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.CreationDate DESC) AS PopularityRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+)
+
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    us.PostCount,
+    us.CommentCount,
+    us.TotalBounty,
+    p.PostId,
+    p.Title AS PostTitle,
+    p.Score AS PostScore,
+    rph.HistoryCreationDate,
+    rph.Comment AS LatestEditComment,
+    rph.PostHistoryTypeId,
+    rp.PopularityRank
+FROM 
+    UserStatistics us
+    INNER JOIN Users up ON us.UserId = up.Id
+    LEFT JOIN RecentPopularPosts rp ON us.PostCount > 5 -- More active users
+    LEFT JOIN RecursivePostHistory rph ON up.Id = rph.EditorUserId AND rph.rn = 1 
+WHERE 
+    up.Reputation > 1000
+ORDER BY 
+    us.TotalBounty DESC, 
+    us.CommentCount DESC;
+

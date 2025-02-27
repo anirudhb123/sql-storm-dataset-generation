@@ -1,0 +1,105 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        0 AS Level 
+    FROM 
+        Posts 
+    WHERE 
+        ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        r.Level + 1 AS Level 
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        PostsCount, 
+        TotalBounties, 
+        TotalBadges,
+        RANK() OVER (ORDER BY Reputation DESC, PostsCount DESC) AS UserRank
+    FROM 
+        UserReputation
+),
+FilteredPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        COUNT(DISTINCT ph.Id) AS PostHistoryCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName, p.Score
+),
+PostStatistics AS (
+    SELECT 
+        fp.*,
+        CASE 
+            WHEN fp.UpVoteCount > fp.DownVoteCount THEN 'Popular'
+            WHEN fp.DownVoteCount > fp.UpVoteCount THEN 'Unpopular'
+            ELSE 'Neutral'
+        END AS Popularity
+    FROM 
+        FilteredPosts fp
+)
+SELECT 
+    pu.UserRank,
+    pu.DisplayName AS TopUser,
+    ps.*,
+    COALESCE(rph.Title, 'N/A') AS ParentPostTitle
+FROM 
+    TopUsers pu
+LEFT JOIN 
+    PostStatistics ps ON ps.OwnerDisplayName = pu.DisplayName
+LEFT JOIN 
+    RecursivePostHierarchy rph ON ps.Id = rph.Id
+WHERE 
+    pu.UserRank <= 10
+ORDER BY 
+    pu.UserRank, ps.CreationDate DESC;

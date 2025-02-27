@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC, P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.Score > 0
+),
+PostDetails AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Score,
+        RP.CreationDate,
+        RP.ViewCount,
+        RP.OwnerName,
+        PH.Comment AS LastEditComment,
+        PH.CreationDate AS LastEditDate,
+        PH.PostHistoryTypeId
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        PostHistory PH ON RP.PostId = PH.PostId AND PH.PostHistoryTypeId = 24 
+    WHERE 
+        RP.PostRank <= 10
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        SUM(COALESCE(UP.Score, 0)) AS Upvotes,
+        SUM(COALESCE(DN.Score, 0)) AS Downvotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes UP ON P.Id = UP.PostId AND UP.VoteTypeId = 2 
+    LEFT JOIN 
+        Votes DN ON P.Id = DN.PostId AND DN.VoteTypeId = 3 
+    WHERE 
+        U.Reputation > 100
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+FinalOutput AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.Score,
+        PD.CreationDate,
+        PD.ViewCount,
+        PD.OwnerName,
+        PD.LastEditComment,
+        PD.LastEditDate,
+        US.UserId,
+        US.DisplayName AS UserDisplayName,
+        US.Reputation,
+        US.PostsCount,
+        US.Upvotes,
+        US.Downvotes
+    FROM 
+        PostDetails PD
+    LEFT JOIN 
+        UserStats US ON PD.OwnerName = US.DisplayName
+)
+SELECT 
+    FO.*,
+    CASE 
+        WHEN FO.Score >= 20 THEN 'High Score'
+        WHEN FO.Score BETWEEN 5 AND 19 THEN 'Medium Score'
+        ELSE 'Low Score' 
+    END AS ScoreCategory
+FROM 
+    FinalOutput FO
+ORDER BY 
+    FO.ViewCount DESC, FO.Score DESC
+LIMIT 50;

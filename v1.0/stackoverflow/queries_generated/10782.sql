@@ -1,0 +1,50 @@
+-- Performance Benchmarking SQL Query
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounties,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        pt.Name AS PostType,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, pt.Name
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.BadgeCount,
+    us.TotalBounties,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.PostType,
+    ps.CommentCount,
+    ps.VoteCount
+FROM UserStats us
+LEFT JOIN PostStats ps ON us.UserId = ps.OwnerUserId
+ORDER BY us.Reputation DESC, ps.VoteCount DESC
+LIMIT 100; -- Adjust the limit based on your performance benchmarking needs
+

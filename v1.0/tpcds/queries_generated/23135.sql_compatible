@@ -1,0 +1,60 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        cr.return_qty,
+        ROW_NUMBER() OVER (PARTITION BY cr.returning_customer_sk ORDER BY cr.returned_date_sk DESC) AS rn
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.return_qty IS NOT NULL AND cr.return_qty > 0
+),
+CustomerDetails AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(hd.hd_buy_potential, 'UNKNOWN') AS buying_power,
+        COUNT(DISTINCT c.c_customer_sk) OVER (PARTITION BY cd.cd_gender) AS gender_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+ExcessReturns AS (
+    SELECT 
+        r.returning_customer_sk, 
+        SUM(r.return_qty) AS total_return_qty
+    FROM 
+        RankedReturns r
+    WHERE 
+        r.rn <= 5
+    GROUP BY 
+        r.returning_customer_sk
+    HAVING 
+        SUM(r.return_qty) > (SELECT AVG(total_return_qty) FROM ExcessReturns)
+)
+SELECT 
+    cd.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    cd.buying_power,
+    COALESCE(er.total_return_qty, 0) AS total_excess_returns,
+    CASE 
+        WHEN er.total_return_qty IS NOT NULL THEN 'At Risk'
+        ELSE 'Stable'
+    END AS risk_status
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    ExcessReturns er ON cd.c_customer_id = er.returning_customer_sk
+WHERE 
+    cd.cd_purchase_estimate > 1000
+    AND (cd.cd_marital_status = 'S' OR cd.gender_count > 5)
+ORDER BY 
+    total_excess_returns DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

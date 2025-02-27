@@ -1,0 +1,47 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 ELSE 0 END), 0) AS Score,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(Tag) ON t.Tag LIKE concat('%', t.Tag, '%')
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Only Questions and Answers
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        ROW_NUMBER() OVER (ORDER BY rp.Score DESC, rp.CommentCount DESC, rp.CreationDate DESC) AS Rank
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.CreationDate,
+    tp.Author,
+    tp.CommentCount,
+    tp.Score,
+    tp.Tags
+FROM 
+    TopPosts tp
+WHERE 
+    tp.Rank <= 10 -- Get top 10 posts based on score
+ORDER BY 
+    tp.Score DESC, tp.CommentCount DESC;

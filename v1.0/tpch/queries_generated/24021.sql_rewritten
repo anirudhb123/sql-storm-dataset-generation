@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, CAST(s.s_name AS VARCHAR(100)) AS full_path, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    
+    UNION ALL
+    
+    SELECT sp.s_suppkey, sp.s_name, sp.s_acctbal, CONCAT(sh.full_path, ' -> ', sp.s_name) AS full_path, sh.level + 1
+    FROM supplier sp
+    JOIN SupplierHierarchy sh ON sp.s_nationkey = sh.s_suppkey
+    WHERE sh.level < 3
+),
+CustomerOrderCount AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartSupplierData AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size BETWEEN 1 AND 25
+    GROUP BY p.p_partkey, p.p_name
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderstatus IN ('O', 'P')
+),
+ExtensiveAggregate AS (
+    SELECT nh.n_name, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM lineitem li
+    JOIN orders o ON li.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation nh ON c.c_nationkey = nh.n_nationkey
+    WHERE li.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY nh.n_name
+)
+SELECT sh.full_path, c.c_name, c.order_count, p.p_name, ps.total_supply_cost, 
+       COALESCE(SUM(e.total_revenue), 0) AS total_revenue,
+       MAX(e.total_revenue) OVER (PARTITION BY c.c_custkey) AS max_revenue
+FROM SupplierHierarchy sh
+JOIN CustomerOrderCount c ON c.order_count > (SELECT AVG(order_count) FROM CustomerOrderCount)
+JOIN PartSupplierData p ON p.total_supply_cost < (SELECT SUM(ps_total_cost) FROM PartSupplierData LIMIT 1 OFFSET 5)
+LEFT JOIN ExtensiveAggregate e ON e.n_name IN (SELECT r.r_name FROM region r WHERE r.r_regionkey % 2 = 0)
+WHERE sh.level <= 3 AND (sh.s_acctbal IS NOT NULL OR sh.s_acctbal > 1000)
+GROUP BY sh.full_path, c.c_name, c.order_count, p.p_name, ps.total_supply_cost;

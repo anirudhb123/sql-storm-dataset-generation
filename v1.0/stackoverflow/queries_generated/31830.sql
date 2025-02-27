@@ -1,0 +1,69 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        U.CreationDate, 
+        1 AS Level
+    FROM Users U
+    WHERE U.Reputation > 0
+    
+    UNION ALL
+    
+    SELECT 
+        U.Id, 
+        U.DisplayName, 
+        U.Reputation, 
+        U.CreationDate, 
+        UR.Level + 1
+    FROM Users U
+    INNER JOIN UserReputationCTE UR ON U.Reputation >= UR.Reputation
+    WHERE U.Reputation > 0
+)
+, RecentPostActivity AS (
+    SELECT 
+        P.OwnerUserId, 
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        MAX(P.LastActivityDate) AS LatestActivity
+    FROM Posts P
+    WHERE P.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY P.OwnerUserId
+)
+, UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    COALESCE(RP.PostCount, 0) AS PostCount,
+    COALESCE(RP.TotalViews, 0) AS TotalViews,
+    COALESCE(RP.TotalScore, 0) AS TotalScore,
+    COALESCE(RP.LatestActivity, 'Never') AS LatestActivity,
+    COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+    (SELECT SUM(V.BountyAmount) 
+     FROM Votes V 
+     WHERE V.UserId = U.Id AND V.BountyAmount IS NOT NULL) AS TotalBounties,
+    CASE 
+        WHEN U.Reputation IS NULL THEN 'Unknown'
+        WHEN U.Reputation > 1000 THEN 'High Reputation'
+        WHEN U.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationLevel,
+    CASE 
+        WHEN U.Location IS NOT NULL THEN U.Location 
+        ELSE 'Location Not Specified' 
+    END AS UserLocation
+FROM Users U
+LEFT JOIN RecentPostActivity RP ON U.Id = RP.OwnerUserId
+LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+WHERE U.Reputation > 0
+ORDER BY U.Reputation DESC, U.DisplayName
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;
+This query combines several SQL constructs: a recursive CTE to determine user reputation levels, another CTE to gather recent post activity for users, and additional computations for badge counts and bounty amounts. The results are filtered and sorted by reputation to generate a paginated view of user performance metrics on the platform.

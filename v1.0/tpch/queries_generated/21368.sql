@@ -1,0 +1,53 @@
+WITH RECURSIVE CTE_DISTINCT_SUPPLIERS AS (
+    SELECT DISTINCT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as row_num
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+CTE_LOWEST_PART AS (
+    SELECT ps.ps_partkey, MIN(ps.ps_supplycost) AS min_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CTE_COMBINED AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, cte.min_cost, 
+           s.s_name, s.s_acctbal,
+           CASE 
+               WHEN s.s_acctbal IS NULL THEN 'Unknown'
+               WHEN s.s_acctbal < 1000 THEN 'Low Balance'
+               ELSE 'Healthy'
+           END AS balance_status
+    FROM part p
+    JOIN CTE_LOWEST_PART cte ON p.p_partkey = cte.ps_partkey
+    LEFT JOIN supplier s ON s.s_suppkey = (SELECT ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey ORDER BY ps.ps_supplycost LIMIT 1)
+),
+CTE_ORDERS AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderstatus,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as rank_status
+    FROM orders o
+    WHERE o.o_totalprice IS NOT NULL
+),
+CTE_LINEITEM AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+CTE_FILTERED_ORDERS AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice,
+           li.total_price AS calc_price,
+           CASE WHEN o.o_orderstatus = 'F' AND li.total_price > 1000 THEN 'High'
+                WHEN o.o_orderstatus = 'O' AND li.total_price < 500 THEN 'Low'
+                ELSE 'Normal'
+           END AS order_condition
+    FROM CTE_ORDERS o
+    JOIN CTE_LINEITEM li ON o.o_orderkey = li.l_orderkey
+)
+SELECT cte.p_partkey, cte.p_name, cte.p_retailprice, cte.min_cost,
+       cte.balance_status, fo.order_condition, fo.o_totalprice,
+       ROW_NUMBER() OVER (PARTITION BY cte.balance_status ORDER BY fo.o_totalprice DESC) AS order_rank
+FROM CTE_COMBINED cte
+LEFT JOIN CTE_FILTERED_ORDERS fo ON cte.s_acctbal IS NOT NULL AND fo.total_price IS NOT NULL
+WHERE cte.min_cost IS NOT NULL
+  AND (cte.balance_status = 'Healthy' OR fo.order_condition = 'High')
+ORDER BY cte.p_partkey, fo.o_totalprice DESC
+LIMIT 50;

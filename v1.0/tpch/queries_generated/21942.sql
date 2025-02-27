@@ -1,0 +1,64 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.n_nationkey)
+),
+
+OrderSummaries AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus <> 'F' AND l.l_quantity IS NOT NULL
+    GROUP BY o.o_orderkey
+),
+
+PartSupplierDetails AS (
+    SELECT p.p_partkey, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+
+SELECT 
+    sh.s_name AS supplier_name,
+    r.r_name AS region_name,
+    ns.total_sales,
+    CASE 
+        WHEN AVG(ps.avg_supply_cost) IS NULL THEN 'No Data'
+        ELSE CAST(AVG(ps.avg_supply_cost) AS VARCHAR)
+    END AS average_supply_cost,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM SupplierHierarchy sh
+LEFT JOIN region r ON sh.s_nationkey = r.r_regionkey
+LEFT JOIN OrderSummaries ns ON ns.o_orderkey IN (
+    SELECT o2.o_orderkey
+    FROM orders o2
+    WHERE EXISTS (
+        SELECT 1
+        FROM lineitem l2 
+        WHERE l2.l_orderkey = o2.o_orderkey AND l2.l_tax IS NOT NULL
+    )
+) 
+FULL OUTER JOIN PartSupplierDetails ps ON ps.p_partkey IN (
+    SELECT p2.p_partkey
+    FROM part p2
+    WHERE p2.p_retailprice >= 100.00 AND p2.p_size > 20
+)
+
+WHERE 
+    sh.level > 1 AND 
+    (r.r_name LIKE '%NA%' OR r.r_name IS NULL)
+GROUP BY 
+    sh.s_name, r.r_name, ns.total_sales
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_sales DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

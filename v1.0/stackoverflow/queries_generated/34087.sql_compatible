@@ -1,0 +1,88 @@
+
+WITH RECURSIVE UserRankings AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        1 AS Rank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 0
+    UNION ALL
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        UR.Rank + 1
+    FROM 
+        Users U
+    INNER JOIN 
+        UserRankings UR ON U.Reputation < UR.Reputation
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        V.VoteTypeId,
+        COALESCE(P.AcceptedAnswerId, 0) AS AcceptedAnswer,
+        COALESCE(Ph.Comment, 'No comments') AS LatestComment,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY Ph.CreationDate DESC) AS CommentRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments Ph ON P.Id = Ph.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.Score > 10
+),
+FilteredPosts AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.CreationDate,
+        PD.AcceptedAnswer,
+        PD.LatestComment
+    FROM 
+        PostDetails PD
+    WHERE 
+        PD.CommentRank = 1
+),
+PostStats AS (
+    SELECT
+        F.Title,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        FilteredPosts F
+    LEFT JOIN 
+        Votes V ON F.PostId = V.PostId
+    GROUP BY 
+        F.Title
+)
+SELECT 
+    UR.DisplayName,
+    UR.Reputation,
+    PS.Title,
+    PS.VoteCount,
+    PS.UpVotes,
+    PS.DownVotes,
+    F.CreationDate AS PostCreationDate,
+    CASE 
+        WHEN PS.UpVotes IS NULL THEN 'No upvotes'
+        ELSE (CASE WHEN PS.UpVotes > PS.DownVotes THEN 'Positive' ELSE 'Negative' END)
+    END AS VoteAnalysis
+FROM 
+    UserRankings UR
+INNER JOIN 
+    FilteredPosts F ON UR.UserId = F.OwnerUserId
+INNER JOIN 
+    PostStats PS ON F.Title = PS.Title
+WHERE 
+    UR.Rank <= 10
+ORDER BY 
+    UR.Reputation DESC;

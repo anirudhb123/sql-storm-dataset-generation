@@ -1,0 +1,71 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        U.DisplayName AS Owner,
+        CASE 
+            WHEN P.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS Status
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 YEAR'
+),
+BadgeDistribution AS (
+    SELECT 
+        B.Name AS BadgeName,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges B
+    GROUP BY 
+        B.Name
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.PositivePosts,
+    U.NegativePosts,
+    U.BadgeCount,
+    P.Title AS RecentPostTitle,
+    P.CreationDate AS RecentPostDate,
+    P.ViewCount AS RecentPostViews,
+    P.AnswerCount AS RecentPostAnswers,
+    P.Status AS RecentPostStatus,
+    BD.BadgeName,
+    BD.BadgeCount AS BadgeDistributionCount
+FROM 
+    UserReputation U
+LEFT JOIN 
+    PostStatistics P ON U.UserId = P.Owner
+LEFT JOIN 
+    BadgeDistribution BD ON BD.BadgeCount > 0
+ORDER BY 
+    U.Reputation DESC
+LIMIT 50;

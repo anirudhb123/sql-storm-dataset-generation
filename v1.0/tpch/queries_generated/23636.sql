@@ -1,0 +1,55 @@
+WITH RECURSIVE size_ranked_parts AS (
+    SELECT p_partkey, p_name, p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p_size ORDER BY p_retailprice DESC) AS price_rank
+    FROM part
+    WHERE p_size IS NOT NULL
+),
+supplier_stats AS (
+    SELECT s.s_suppkey, SUM(ps.ps_availqty) AS total_availqty,
+           COUNT(DISTINCT p.p_partkey) AS part_count,
+           AVG(s.s_acctbal) AS avg_acctbal
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey
+),
+high_value_customers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           DENSE_RANK() OVER (ORDER BY c.c_acctbal DESC) AS rank_by_acctbal
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+suspicious_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           COUNT(l.l_orderkey) AS line_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' 
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate
+    HAVING COUNT(l.l_orderkey) = 0 OR MAX(l.l_discount) > 0.5
+)
+SELECT r.n_name AS nation, COUNT(DISTINCT h.c_custkey) AS high_value_cust_count,
+       COALESCE(SUM(s.total_availqty), 0) AS total_supplier_qty,
+       COUNT(DISTINCT p.p_partkey) FILTER (WHERE sr.price_rank <= 5) AS top_price_parts
+FROM nation r
+LEFT JOIN high_value_customers h ON h.c_custkey IN (
+        SELECT c2.c_custkey 
+        FROM customer c2 
+        WHERE c2.c_nationkey = r.n_nationkey
+    )
+LEFT JOIN supplier_stats s ON s.total_availqty > (
+        SELECT AVG(total_availqty) FROM supplier_stats
+    )
+LEFT JOIN size_ranked_parts sr ON sr.p_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps
+        WHERE ps.ps_suppkey IN (SELECT s_suppkey FROM supplier)
+    )
+LEFT JOIN suspicious_orders o ON o.o_orderkey IN (
+        SELECT l.l_orderkey 
+        FROM lineitem l 
+        WHERE l.l_returnflag = 'R' OR l.l_returnflag IS NULL
+    )
+GROUP BY r.n_name
+ORDER BY COUNT(DISTINCT h.c_custkey) DESC, total_supplier_qty DESC
+LIMIT 10;

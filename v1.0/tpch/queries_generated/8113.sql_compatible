@@ -1,0 +1,59 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1995-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_orderstatus
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+FinalReport AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.total_revenue,
+        ts.s_name AS top_supplier,
+        ts.total_cost
+    FROM 
+        RankedOrders ro
+    JOIN 
+        lineitem li ON ro.o_orderkey = li.l_orderkey
+    JOIN 
+        partsupp ps ON li.l_partkey = ps.ps_partkey
+    JOIN 
+        supplier ts ON ps.ps_suppkey = ts.s_suppkey
+    WHERE 
+        ro.revenue_rank <= 10 AND li.l_shipmode = 'AIR'
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.total_revenue,
+    o.top_supplier,
+    o.total_cost
+FROM 
+    FinalReport o
+ORDER BY 
+    o.total_revenue DESC;

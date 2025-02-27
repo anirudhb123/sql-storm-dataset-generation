@@ -1,0 +1,90 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        0 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.linked_movie_id AS movie_id,
+        sub.title AS movie_title,
+        sub.production_year,
+        h.level + 1
+    FROM 
+        movie_link m
+    JOIN 
+        title sub ON m.linked_movie_id = sub.id
+    JOIN 
+        movie_hierarchy h ON h.movie_id = m.movie_id
+    WHERE 
+        h.level < 5  -- Restricting hierarchy depth to avoid excessively deep recursion
+),
+aggregated_cast AS (
+    SELECT 
+        ci.movie_id,
+        count(DISTINCT ci.person_id) AS distinct_actors,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+),
+movies_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+),
+final_selection AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        ac.distinct_actors,
+        ac.actor_names,
+        mwk.keywords,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY ac.distinct_actors DESC) AS actor_rank
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        aggregated_cast ac ON mh.movie_id = ac.movie_id
+    LEFT JOIN 
+        movies_with_keywords mwk ON mh.movie_id = mwk.movie_id
+)
+SELECT 
+    fs.movie_id,
+    fs.movie_title,
+    fs.production_year,
+    fs.distinct_actors,
+    COALESCE(fs.actor_names, 'Nobody') AS actor_names,
+    COALESCE(fs.keywords, 'No keywords') AS keywords,
+    CASE
+        WHEN fs.actor_rank <= 3 THEN 'Top Movie'
+        ELSE 'Regular Movie'
+    END AS movie_category
+FROM 
+    final_selection fs
+WHERE 
+    fs.production_year BETWEEN 2000 AND 2023
+    AND (fs.distinct_actors IS NULL OR fs.distinct_actors > 0)
+ORDER BY 
+    fs.production_year DESC, 
+    fs.distinct_actors DESC, 
+    fs.movie_title;

@@ -1,0 +1,48 @@
+WITH movie_ratings AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        COUNT(m.keyword_id) AS keyword_count,
+        AVG(i.rating) AS avg_rating
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword m ON t.id = m.movie_id
+    LEFT JOIN 
+        movie_info i ON t.id = i.movie_id AND i.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        t.id, t.title
+),
+top_movies AS (
+    SELECT 
+        movie_id, title, avg_rating, DENSE_RANK() OVER (ORDER BY avg_rating DESC) AS rating_rank
+    FROM 
+        movie_ratings
+    WHERE 
+        keyword_count > 3
+)
+SELECT 
+    ak.name AS actor_name,
+    t.title AS movie_title,
+    tc.kind AS company_type,
+    COALESCE(cast.nr_order, 0) AS order_in_cast,
+    NULLIF(i.info, '') AS rating_info
+FROM 
+    aka_name ak
+JOIN 
+    cast_info cast ON ak.person_id = cast.person_id
+JOIN 
+    title t ON cast.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type tc ON mc.company_type_id = tc.id
+LEFT JOIN 
+    movie_info i ON t.id = i.movie_id AND i.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+WHERE 
+    t.production_year >= 2000
+    AND (EXISTS (SELECT 1 FROM complete_cast cc WHERE cc.movie_id = t.id) OR cast.nr_order IS NOT NULL)
+    AND ak.name IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM person_info pi WHERE pi.person_id = ak.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'negative'))
+ORDER BY 
+    rating_rank, movie_title, actor_name;

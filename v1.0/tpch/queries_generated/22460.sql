@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.n_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey 
+    WHERE sh.level < 3
+),
+RankedCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS rn
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           COALESCE(MAX(ps.ps_supplycost), 0) AS max_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT 
+    r.r_name,
+    nd.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(COALESCE(p.p_retailprice, 0) * l.l_quantity) AS total_revenue,
+    COUNT(DISTINCT s.s_name) FILTER (WHERE s.s_comment LIKE '%special%') AS special_supplier_count,
+    MAX(l.l_shipdate) AS latest_ship_date,
+    SUM(SUM(l.l_extendedprice * (1 - l.l_discount))) OVER (PARTITION BY r.r_regionkey) AS total_discounted_revenue
+FROM region r
+JOIN nation nd ON r.r_regionkey = nd.n_regionkey
+JOIN supplier s ON nd.n_nationkey = s.s_nationkey
+JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN RankedCustomers c ON o.o_custkey = c.c_custkey AND c.rn <= 5
+LEFT JOIN PartDetails p ON l.l_partkey = p.p_partkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE l.l_shipdate > '2022-01-01'
+AND (l.l_discount IS NOT NULL OR l.l_tax IS NOT NULL)
+GROUP BY r.r_name, nd.n_name
+HAVING SUM(l.l_quantity) > (
+    SELECT AVG(l2.l_quantity) 
+    FROM lineitem l2 
+    WHERE l2.l_shipdate < CURRENT_DATE
+    AND l2.l_returnflag = 'R'
+)
+ORDER BY total_revenue DESC;

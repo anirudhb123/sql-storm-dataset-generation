@@ -1,0 +1,44 @@
+
+WITH RECURSIVE customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('F', 'O')
+    UNION ALL
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer_orders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderdate < (SELECT MAX(o2.o_orderdate) 
+                            FROM orders o2 
+                            WHERE o2.o_orderkey < co.o_orderkey)
+),
+supplier_region AS (
+    SELECT s.s_suppkey, s.s_name, r.r_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, r.r_name
+),
+ranked_orders AS (
+    SELECT co.c_custkey, co.c_name, co.o_orderkey, co.o_orderdate, co.o_totalprice, 
+           RANK() OVER (PARTITION BY co.c_custkey ORDER BY co.o_totalprice DESC) AS order_rank
+    FROM customer_orders co
+),
+top_orders AS (
+    SELECT * FROM ranked_orders WHERE order_rank = 1
+),
+returning_suppliers AS (
+    SELECT DISTINCT s.s_suppkey, s.s_name
+    FROM supplier s
+    JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    WHERE l.l_returnflag = 'R' AND l.l_shipmentdate >= ( DATE '1998-10-01' - INTERVAL '1 year')
+)
+SELECT DISTINCT cn.c_name, sr.r_name, sr.total_supply_value, to.o_orderkey, to.o_totalprice
+FROM supplier_region sr
+LEFT JOIN top_orders to ON sr.total_supply_value > 1000
+RIGHT JOIN customer cn ON cn.c_custkey = to.c_custkey
+WHERE sr.s_suppkey IN (SELECT su.s_suppkey FROM returning_suppliers su)
+AND COALESCE(sr.total_supply_value, 0) - to.o_totalprice > 0
+ORDER BY cn.c_name, sr.total_supply_value DESC, to.o_totalprice ASC
+LIMIT 100;

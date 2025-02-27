@@ -1,0 +1,42 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank,
+        o.o_custkey
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierPartInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > 50
+)
+SELECT 
+    n.n_name,
+    r.r_name,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_sales,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(s.s_acctbal) AS avg_supplier_balance
+FROM RankedOrders o
+LEFT JOIN lineitem lo ON o.o_orderkey = lo.l_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN SupplierPartInfo spi ON lo.l_partkey = spi.p_partkey
+WHERE o.o_orderstatus IN ('F', 'P') 
+  AND (lo.l_returnflag IS NULL OR lo.l_returnflag = 'N')
+GROUP BY n.n_name, r.r_name
+HAVING SUM(lo.l_extendedprice * (1 - lo.l_discount)) > 1000000
+ORDER BY total_sales DESC
+LIMIT 10;

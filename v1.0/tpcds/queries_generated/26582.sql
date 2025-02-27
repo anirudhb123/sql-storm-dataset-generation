@@ -1,0 +1,56 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS customer_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), AddressStats AS (
+    SELECT 
+        ca.ca_city,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(CASE WHEN cd.cd_marital_status = 'M' THEN 1 ELSE 0 END) AS married_count,
+        SUM(CASE WHEN cd.cd_marital_status = 'S' THEN 1 ELSE 0 END) AS single_count
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        ca.ca_city
+), TopCustomers AS (
+    SELECT 
+        r.c_customer_sk,
+        r.c_first_name,
+        r.c_last_name,
+        r.cd_gender,
+        a.ca_city
+    FROM 
+        RankedCustomers r
+    JOIN 
+        customer_address a ON r.c_customer_sk = c.c_current_addr_sk
+    WHERE 
+        r.customer_rank <= 10
+)
+SELECT 
+    a.ca_city,
+    COUNT(DISTINCT a.customer_count) AS unique_customer_count,
+    SUM(a.married_count) AS total_married,
+    SUM(a.single_count) AS total_single,
+    COUNT(DISTINCT tc.c_customer_sk) AS top_customers_count
+FROM 
+    AddressStats a
+LEFT JOIN 
+    TopCustomers tc ON a.ca_city = tc.ca_city
+GROUP BY 
+    a.ca_city
+ORDER BY 
+    unique_customer_count DESC;

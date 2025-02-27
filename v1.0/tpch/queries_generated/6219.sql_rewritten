@@ -1,0 +1,64 @@
+WITH OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_linenumber) AS item_count,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus, o.o_orderdate
+),
+SupplierSummary AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available_quantity
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+TopNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        n.n_nationkey, n.n_name
+    ORDER BY 
+        total_sales DESC
+    LIMIT 5
+)
+SELECT 
+    ns.n_name,
+    os.o_orderkey,
+    os.o_orderstatus,
+    os.total_revenue,
+    os.item_count,
+    ss.total_available_quantity
+FROM 
+    OrderSummary os
+JOIN 
+    TopNations ns ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE l.l_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = ns.n_nationkey)))
+JOIN 
+    SupplierSummary ss ON ss.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = os.o_orderkey)
+ORDER BY 
+    os.total_revenue DESC, os.o_orderdate;

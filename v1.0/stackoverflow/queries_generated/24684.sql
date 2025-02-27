@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        PT.Name AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY PT.Name ORDER BY P.Score DESC, P.ViewCount DESC) AS Rank,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        COALESCE(
+            (SELECT SUM(V.BountyAmount) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 8), 
+            0) AS TotalBounty
+    FROM 
+        Posts P
+    JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+AggregatedUserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalPostScore,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(B.Class, 0)) AS TotalBadgeClasses
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+FilteredPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        RP.PostType,
+        RP.Rank,
+        AU.UserId,
+        AU.DisplayName,
+        AU.Reputation,
+        AU.BadgeCount,
+        AU.TotalPostScore,
+        AU.TotalViews,
+        AU.TotalBadgeClasses
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        AggregatedUserStats AU ON RP.PostId = (SELECT TOP 1 P.Id FROM Posts P WHERE P.OwnerUserId = AU.UserId ORDER BY P.CreationDate DESC)
+    WHERE 
+        RP.Rank <= 5
+),
+UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN C.PostId IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    FP.*,
+    UE.UpVotes,
+    UE.DownVotes,
+    UE.CommentCount AS UserCommentCount
+FROM 
+    FilteredPosts FP
+LEFT JOIN 
+    UserEngagement UE ON FP.UserId = UE.UserId
+WHERE 
+    FP.TotalViews > 1000 OR (FP.UserId IS NULL AND FP.TotalBounty > 0)
+ORDER BY 
+    FP.Score DESC, FP.ViewCount DESC, FP.Rank ASC
+LIMIT 100;
+

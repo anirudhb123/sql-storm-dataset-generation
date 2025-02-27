@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity_sold,
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price * ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+top_items AS (
+    SELECT 
+        ss.ws_item_sk,
+        ss.total_quantity_sold,
+        ss.total_sales,
+        ROW_NUMBER() OVER (ORDER BY ss.total_sales DESC) AS item_rank
+    FROM 
+        sales_summary ss
+    WHERE 
+        ss.total_quantity_sold > 100
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        h.hd_income_band_sk,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            ELSE 'Single'
+        END AS marital_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics h ON cd.cd_demo_sk = h.hd_demo_sk
+    WHERE 
+        c.c_birth_year > 1980
+)
+SELECT 
+    ci.c_customer_id,
+    ci.cd_gender,
+    it.i_item_id,
+    it.i_product_name,
+    ti.total_sales,
+    ti.total_quantity_sold,
+    ci.marital_status
+FROM 
+    customer_info ci
+JOIN 
+    top_items ti ON ci.c_customer_id IN (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = ti.ws_item_sk)
+JOIN 
+    item it ON ti.ws_item_sk = it.i_item_sk
+WHERE 
+    ti.item_rank <= 10
+ORDER BY 
+    ti.total_sales DESC
+LIMIT 100;

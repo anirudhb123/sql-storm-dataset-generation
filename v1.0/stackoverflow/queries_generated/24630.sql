@@ -1,0 +1,82 @@
+WITH UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 -- Only gold badges
+    GROUP BY 
+        b.UserId
+),
+TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(tag.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+        CROSS JOIN LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS tag(TagName)
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        h.PostId,
+        COUNT(*) AS CloseEventCount,
+        MAX(h.CreationDate) AS LastCloseDate
+    FROM 
+        PostHistory h
+    WHERE 
+        h.PostHistoryTypeId = 10 -- Posts that have been closed
+    GROUP BY 
+        h.PostId
+),
+PostsWithVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM 
+        Posts p
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        COALESCE(uv.BadgeCount, 0) AS UserBadgeCount,
+        (UPD.UpVoteCount - UPD.DownVoteCount) AS NetVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+        LEFT JOIN UserBadges uv ON p.OwnerUserId = uv.UserId
+        LEFT JOIN PostsWithVotes UPD ON p.Id = UPD.PostId
+)
+SELECT 
+    rp.OwnerUserId,
+    rp.Title AS PostTitle,
+    rp.CreationDate,
+    rp.NetVotes,
+    COALESCE(cp.CloseEventCount, 0) AS ClosureCount,
+    COALESCE(tp.Tags, 'No Tags') AS AssociatedTags,
+    CASE 
+        WHEN rp.UserBadgeCount > 0 THEN 'Badged User'
+        ELSE 'No Badges'
+    END AS UserStatus
+FROM 
+    RankedPosts rp
+    LEFT JOIN ClosedPosts cp ON rp.PostId = cp.PostId
+    LEFT JOIN TaggedPosts tp ON rp.PostId = tp.PostId
+WHERE 
+    rp.PostRank = 1 -- Only the most recent post per user
+ORDER BY 
+    rp.NetVotes DESC, 
+    rp.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY; -- Final limit for top results

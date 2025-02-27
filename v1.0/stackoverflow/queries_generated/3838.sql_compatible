@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1 
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountySpent
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON u.Id = v.UserId
+    WHERE
+        u.Reputation > 1000 
+    GROUP BY
+        u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(u.DisplayName, 'Unknown') AS OwnerDisplayName,
+        p.Score,
+        CASE
+            WHEN ph.PostId IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus,
+        COUNT(DISTINCT c.Id) AS CommentsCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM
+        Posts p
+    LEFT JOIN
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        LATERAL (SELECT unnest(string_to_array(p.Tags, '>')) AS TagName) AS t ON TRUE
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 30 DAY) 
+    GROUP BY
+        p.Id, u.DisplayName, p.Score
+)
+SELECT
+    ua.DisplayName,
+    ua.QuestionCount,
+    ua.CommentCount,
+    ua.TotalBountySpent,
+    pd.PostId,
+    pd.Title AS PostTitle,
+    pd.OwnerDisplayName,
+    pd.Score,
+    pd.PostStatus,
+    pd.CommentsCount,
+    pd.Tags
+FROM
+    UserActivity ua
+JOIN
+    PostDetails pd ON ua.UserId = pd.OwnerDisplayName
+WHERE
+    ua.QuestionCount > 10
+ORDER BY
+    ua.TotalBountySpent DESC, pd.Score DESC;

@@ -1,0 +1,32 @@
+WITH SupplierDetails AS (
+    SELECT s.s_name AS supplier_name,
+           s.s_address AS supplier_address,
+           n.n_name AS nation_name,
+           r.r_name AS region_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+PartDetails AS (
+    SELECT p.p_name AS part_name,
+           p.p_brand AS part_brand,
+           p.p_type AS part_type
+    FROM part p
+),
+CustomerOrders AS (
+    SELECT c.c_name AS customer_name,
+           o.o_orderkey AS order_key,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_name, o.o_orderkey
+)
+SELECT CONCAT(sd.supplier_name, ' (', sd.supplier_address, ', ', sd.nation_name, ', ', sd.region_name, ')') AS Supplier_Info,
+       CONCAT(pd.part_name, ' - ', pd.part_brand, ' [', pd.part_type, ']') AS Part_Info,
+       SUM(co.total_revenue) AS Total_Revenue
+FROM SupplierDetails sd
+CROSS JOIN PartDetails pd
+LEFT JOIN CustomerOrders co ON pd.part_name LIKE CONCAT('%', SUBSTRING_INDEX(sd.supplier_name, ' ', -1), '%')
+GROUP BY sd.supplier_name, sd.supplier_address, sd.nation_name, sd.region_name, pd.part_name, pd.part_brand, pd.part_type
+ORDER BY Total_Revenue DESC;

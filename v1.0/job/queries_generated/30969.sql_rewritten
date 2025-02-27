@@ -1,0 +1,50 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM aka_title mt
+    WHERE mt.kind_id = 1  
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM movie_link ml
+    JOIN aka_title at ON at.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON mh.movie_id = ml.movie_id
+),
+cast_aggregate AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM cast_info ci
+    JOIN aka_name ak ON ak.person_id = ci.person_id
+    GROUP BY ci.movie_id
+),
+info_aggregated AS (
+    SELECT 
+        mi.movie_id,
+        MAX(CASE WHEN it.info = 'Rating' THEN mi.info END) AS rating,
+        MAX(CASE WHEN it.info = 'Genre' THEN mi.info END) AS genre
+    FROM movie_info mi
+    JOIN info_type it ON it.id = mi.info_type_id
+    GROUP BY mi.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    ca.actor_count,
+    ca.actors,
+    ia.rating,
+    ia.genre,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY ca.actor_count DESC) AS rank_within_year
+FROM movie_hierarchy mh
+LEFT JOIN cast_aggregate ca ON mh.movie_id = ca.movie_id
+LEFT JOIN info_aggregated ia ON mh.movie_id = ia.movie_id
+WHERE mh.production_year IS NOT NULL
+ORDER BY mh.production_year DESC, ca.actor_count DESC;

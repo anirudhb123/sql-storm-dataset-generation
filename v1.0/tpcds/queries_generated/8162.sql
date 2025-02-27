@@ -1,0 +1,42 @@
+
+WITH aggregated_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        AVG(ws.ws_net_paid) AS avg_net_paid
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL 
+        AND ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        customer_id,
+        total_profit, 
+        total_orders, 
+        avg_sales_price, 
+        avg_net_paid,
+        RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
+    FROM 
+        aggregated_sales
+)
+SELECT 
+    tc.customer_id,
+    tc.total_profit,
+    tc.total_orders,
+    tc.avg_sales_price,
+    tc.avg_net_paid,
+    (SELECT COUNT(DISTINCT sr_store_sk) FROM store_returns sr WHERE sr.sr_return_quantity > 0) AS total_store_returns,
+    (SELECT COUNT(DISTINCT cr_item_sk) FROM catalog_returns cr WHERE cr.cr_return_quantity > 0) AS total_catalog_returns,
+    (SELECT COUNT(DISTINCT wr_item_sk) FROM web_returns wr WHERE wr.wr_return_quantity > 0) AS total_web_returns
+FROM 
+    top_customers tc
+WHERE 
+    tc.profit_rank <= 10;

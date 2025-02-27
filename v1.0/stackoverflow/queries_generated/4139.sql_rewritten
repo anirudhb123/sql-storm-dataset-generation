@@ -1,0 +1,49 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        CONCAT('https://stackoverflow.com/questions/', p.Id) AS PostUrl
+    FROM Posts p
+    WHERE p.PostTypeId = 1 AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8
+    GROUP BY u.Id
+    HAVING COUNT(DISTINCT p.Id) > 5
+),
+TopPostDetails AS (
+    SELECT 
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        mu.DisplayName AS OwnerDisplayName,
+        mu.PostCount,
+        mu.TotalBounty,
+        rp.PostUrl
+    FROM RankedPosts rp
+    JOIN MostActiveUsers mu ON rp.Id IN (
+        SELECT p.Id FROM Posts p WHERE p.OwnerUserId = mu.UserId
+    )
+    WHERE rp.rn = 1
+)
+SELECT 
+    COALESCE(tpd.OwnerDisplayName, 'Anonymous') AS PostOwner,
+    tpd.Title,
+    tpd.Score,
+    tpd.CreationDate,
+    tpd.PostUrl,
+    CASE WHEN tpd.TotalBounty > 0 THEN 'Eligible for Bounty' ELSE 'No Bounty' END AS BountyStatus
+FROM TopPostDetails tpd
+FULL OUTER JOIN Badges b ON tpd.OwnerDisplayName = b.UserId
+WHERE b.Id IS NULL OR b.Class = 1
+ORDER BY tpd.Score DESC, tpd.CreationDate DESC;

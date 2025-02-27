@@ -1,0 +1,37 @@
+WITH RecursiveTitles AS (
+    SELECT t.id AS title_id, t.title, t.production_year, 
+           COALESCE(ct.kind, 'Unknown') AS genre, 
+           ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_order
+    FROM title t
+    LEFT JOIN kind_type kt ON t.kind_id = kt.id
+    LEFT JOIN comp_cast_type ct ON ct.id = (
+        SELECT cct.id 
+        FROM comp_cast_type cct 
+        WHERE cct.kind = 'production' 
+        LIMIT 1
+    )
+),
+
+ActorRoles AS (
+    SELECT ci.movie_id, a.id AS actor_id, a.name, r.role AS role_name
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN role_type r ON ci.role_id = r.id
+    WHERE ci.nr_order < 5
+),
+
+MoviesWithActors AS (
+    SELECT rt.title, rt.production_year, ar.actor_id, ar.role_name,
+           RANK() OVER (PARTITION BY rt.year_order ORDER BY COUNT(ar.actor_id) DESC) AS actor_rank
+    FROM RecursiveTitles rt
+    LEFT JOIN ActorRoles ar ON rt.title_id = ar.movie_id
+    GROUP BY rt.title, rt.production_year, ar.actor_id, ar.role_name, rt.year_order
+)
+
+SELECT DISTINCT mt.production_year, mt.title, STRING_AGG(DISTINCT CONCAT(ar.name, ' as ', ar.role_name), ', ') AS main_cast
+FROM MoviesWithActors mt
+LEFT JOIN ActorRoles ar ON mt.actor_id = ar.actor_id
+WHERE mt.actor_rank <= 3 
+GROUP BY mt.production_year, mt.title
+HAVING COUNT(ar.actor_id) >= 2
+ORDER BY mt.production_year DESC, mt.title;

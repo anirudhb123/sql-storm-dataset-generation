@@ -1,0 +1,75 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        a_t.movie_id AS movie_id,
+        a_t.title,
+        COALESCE(k.keyword, 'No Keyword') AS keyword,
+        COALESCE(c.name, 'Unknown Company') AS company_name,
+        ct.kind AS company_type,
+        a.name AS actor_name,
+        COUNT(DISTINCT kc.keyword_id) AS keyword_count
+    FROM 
+        aka_title a_t
+    LEFT JOIN 
+        aka_name a ON a.id = a_t.id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = a_t.movie_id
+    LEFT JOIN 
+        company_name c ON c.id = mc.company_id
+    LEFT JOIN 
+        company_type ct ON ct.id = mc.company_type_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = a_t.movie_id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    JOIN 
+        RankedTitles rt ON a_t.id = rt.title_id
+    GROUP BY 
+        a_t.movie_id, a_t.title, k.keyword, c.name, ct.kind, a.name
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        ARRAY_AGG(DISTINCT CONCAT(r.role, ' ', p.name)) AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON r.id = ci.person_role_id
+    JOIN 
+        name p ON p.id = ci.person_id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    rt.production_year,
+    md.keyword,
+    md.company_name,
+    md.company_type,
+    md.actor_name,
+    ar.roles,
+    COUNT(DISTINCT ar.roles) OVER (PARTITION BY md.movie_id) AS total_roles,
+    CASE 
+        WHEN md.keyword_count IS NULL THEN 'No Keywords Found'
+        ELSE CONCAT('Keyword Count: ', md.keyword_count)
+    END AS keyword_info
+FROM 
+    MovieDetails md
+JOIN 
+    RankedTitles rt ON md.movie_id = rt.title_id
+LEFT JOIN 
+    ActorRoles ar ON ar.movie_id = md.movie_id
+ORDER BY 
+    rt.production_year DESC, md.title;

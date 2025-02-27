@@ -1,0 +1,28 @@
+-- Performance benchmarking query
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.Score,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT a.Id) AS AnswerCount,
+    COALESCE(MAX(v.CreationDate), 'No Votes') AS LastVoteDate,
+    u.Reputation AS OwnerReputation
+FROM 
+    Posts p
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+WHERE 
+    p.PostTypeId = 1 -- Only questions
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, u.Reputation
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100; -- Limit to the latest 100 questions for performance consideration

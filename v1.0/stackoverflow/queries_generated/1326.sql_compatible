@@ -1,0 +1,70 @@
+
+WITH UserBadgeCounts AS (
+    SELECT 
+        b.UserId, 
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS RecentBadgeDate
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id, 
+        u.Reputation,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ps.TotalPosts, 0) AS TotalPosts,
+        COALESCE(ps.QuestionCount, 0) AS QuestionCount,
+        COALESCE(ps.AnswerCount, 0) AS AnswerCount,
+        COALESCE(ps.TotalViews, 0) AS TotalViews,
+        COALESCE(ps.AverageScore, 0) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadgeCounts ub ON u.Id = ub.UserId
+    LEFT JOIN 
+        PostStatistics ps ON u.Id = ps.OwnerUserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.BadgeCount,
+    u.TotalPosts,
+    u.QuestionCount,
+    u.AnswerCount,
+    u.TotalViews,
+    u.AverageScore,
+    CASE 
+        WHEN u.Reputation > 1000 THEN 'High Reputation'
+        WHEN u.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationLevel,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM 
+    UserReputation u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    UNNEST(STRING_TO_ARRAY(p.Tags, '><')) AS t(TagName) ON TRUE
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation, u.BadgeCount, 
+    u.TotalPosts, u.QuestionCount, u.AnswerCount, 
+    u.TotalViews, u.AverageScore
+HAVING 
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) > 0 
+ORDER BY 
+    u.Reputation DESC, u.TotalPosts DESC;

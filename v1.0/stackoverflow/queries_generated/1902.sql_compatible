@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tag_arr ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_arr
+    WHERE 
+        p.CreationDate >= DATE '2024-10-01' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AnswerCount
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.Rank <= 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.OwnerReputation,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.AnswerCount,
+    tp.CommentCount,
+    CASE 
+        WHEN tp.ViewCount IS NULL THEN 'No views' 
+        ELSE 'Views available' 
+    END AS ViewStatus,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM Votes v WHERE v.PostId = tp.PostId AND v.VoteTypeId = 2) THEN 'Has Upvotes'
+        ELSE 'No Upvotes'
+    END AS VoteStatus,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = tp.OwnerUserId AND b.Class = 1) AS GoldBadges,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = tp.OwnerUserId AND b.Class = 2) AS SilverBadges,
+    COALESCE(tp.Tags, 'No Tags') AS PostTags
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, 
+    tp.CreationDate DESC;

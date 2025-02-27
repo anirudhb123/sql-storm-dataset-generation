@@ -1,0 +1,42 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year) AS rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+AggregatedData AS (
+    SELECT 
+        ca.ca_city,
+        COUNT(DISTINCT rc.c_customer_sk) AS unique_customers,
+        COUNT(*) AS total_visits,
+        AVG(LEN(c.c_first_name) + LEN(c.c_last_name)) AS avg_name_length
+    FROM 
+        RankedCustomers rc
+    JOIN 
+        customer_address ca ON rc.c_customer_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_city
+)
+SELECT 
+    city,
+    unique_customers,
+    total_visits,
+    avg_name_length,
+    CASE 
+        WHEN unique_customers > 100 THEN 'High'
+        WHEN unique_customers BETWEEN 50 AND 100 THEN 'Medium'
+        ELSE 'Low'
+    END AS customer_density
+FROM 
+    AggregatedData
+ORDER BY 
+    unique_customers DESC, total_visits DESC;

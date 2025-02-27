@@ -1,0 +1,64 @@
+
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS AuthorDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVotes,
+        (SELECT STRING_AGG(t.TagName, ', ') FROM Tags t WHERE t.Id IN (
+            SELECT CAST(UNNEST(STRING_TO_ARRAY(p.Tags, '><')) AS INT)
+        )) AS AssociatedTags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS EditDate,
+        ph.Comment,
+        ph.Text AS PreviousContent,
+        p.Title
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+),
+FinalResults AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.Body,
+        pd.CreationDate,
+        pd.ViewCount,
+        pd.AuthorDisplayName,
+        pd.CommentCount,
+        pd.UpVotes,
+        pd.DownVotes,
+        pd.AssociatedTags,
+        JSON_AGG(ROW_TO_JSON(phd)) AS EditHistory
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        PostHistoryDetails phd ON pd.PostId = phd.PostId
+    GROUP BY 
+        pd.PostId, pd.Title, pd.Body, pd.CreationDate, pd.ViewCount, pd.AuthorDisplayName, pd.CommentCount, pd.UpVotes, pd.DownVotes, pd.AssociatedTags
+)
+SELECT 
+    * 
+FROM 
+    FinalResults
+ORDER BY 
+    ViewCount DESC
+LIMIT 10;

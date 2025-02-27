@@ -1,0 +1,40 @@
+-- Performance Benchmarking Query
+WITH UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.UserId = u.Id
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    um.UserId,
+    um.DisplayName,
+    um.PostCount,
+    um.Questions,
+    um.Answers,
+    um.UpVotes,
+    um.DownVotes,
+    um.GoldBadges,
+    um.SilverBadges,
+    um.BronzeBadges,
+    (um.UpVotes - um.DownVotes) AS NetVotes
+FROM 
+    UserMetrics um
+ORDER BY 
+    um.PostCount DESC, 
+    NetVotes DESC
+LIMIT 100;

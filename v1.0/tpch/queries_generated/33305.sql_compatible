@@ -1,0 +1,33 @@
+
+WITH RECURSIVE CustomerOrderCTE AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate, 1 AS order_level
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate > '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate, co.order_level + 1
+    FROM CustomerOrderCTE co
+    JOIN orders o ON co.o_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+SupplierPriceStats AS (
+    SELECT ps.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(*) AS supply_count, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.s_suppkey
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (ORDER BY COALESCE(ss.total_supply_cost, 0) DESC) AS rank
+    FROM supplier s
+    LEFT JOIN SupplierPriceStats ss ON s.s_suppkey = ss.s_suppkey
+    WHERE s.s_acctbal > 1000
+)
+SELECT co.c_name, co.o_orderkey, co.o_totalprice, co.o_orderdate, rs.s_name, rs.rank
+FROM CustomerOrderCTE co
+LEFT JOIN RankedSuppliers rs ON co.o_orderkey = rs.s_suppkey
+WHERE (co.o_totalprice * 0.1 * NULLIF(rs.rank, 0)) > 100
+ORDER BY co.o_orderdate DESC, co.o_totalprice DESC;

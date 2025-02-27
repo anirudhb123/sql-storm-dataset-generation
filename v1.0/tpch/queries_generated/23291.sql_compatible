@@ -1,0 +1,74 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_custkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(ro.total_revenue) AS lifetime_value
+    FROM 
+        customer c
+    JOIN 
+        RankedOrders ro ON c.c_custkey = ro.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(ro.total_revenue) > (SELECT AVG(total_revenue) FROM RankedOrders GROUP BY o_custkey)
+),
+SupplierParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        s.s_suppkey
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+HighValueLowStockParts AS (
+    SELECT 
+        pp.p_partkey,
+        pp.p_name,
+        SUM(sp.ps_supplycost) AS total_cost,
+        COUNT(pp.p_partkey) AS stock_count
+    FROM 
+        SupplierParts pp
+    GROUP BY 
+        pp.p_partkey, pp.p_name
+    HAVING 
+        SUM(sp.ps_supplycost) < (SELECT AVG(ps_supplycost) FROM SupplierParts) AND COUNT(pp.p_partkey) < 5
+)
+SELECT 
+    cu.c_name,
+    cu.lifetime_value,
+    hp.p_name,
+    hp.stock_count,
+    hp.total_cost,
+    CASE 
+        WHEN hp.stock_count IS NULL THEN 'Out of Stock'
+        WHEN hp.total_cost > 1000 THEN 'High Cost'
+        ELSE 'Normal'
+    END AS stock_status
+FROM 
+    TopCustomers cu
+LEFT JOIN 
+    HighValueLowStockParts hp ON cu.lifetime_value > 1000 
+ORDER BY 
+    cu.lifetime_value DESC, hp.total_cost ASC;

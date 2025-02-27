@@ -1,0 +1,19 @@
+WITH RECURSIVE PartSupplier AS (
+    SELECT ps.ps_partkey, s.s_nationkey, s.s_supplycost, s.s_acctbal
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT ps.ps_partkey, s.n_nationkey, ps.ps_supplycost + ps.ps_supplycost * 0.1 * ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS s_supplycost,
+           s.s_acctbal * 0.9
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN PartSupplier ps_inner ON ps_inner.ps_partkey = ps.ps_partkey
+    WHERE ps_inner.s_nationkey = s.n_nationkey
+)
+SELECT p.p_partkey, p.p_name, SUM(p_supplycost) AS total_supplycost, COUNT(DISTINCT ps.s_nationkey) AS supplier_count
+FROM part p
+JOIN PartSupplier ps ON p.p_partkey = ps.ps_partkey
+GROUP BY p.p_partkey, p.p_name
+HAVING total_supplycost > 50000
+ORDER BY total_supplycost DESC;

@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(p.Tags, '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 5
+),
+PostHistorySubquery AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  -- Title, Body, Tags edits
+    GROUP BY 
+        ph.PostId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        COALESCE(e.EditCount, 0) AS EditCount,
+        COALESCE(ub.BadgeCount, 0) AS UserBadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistorySubquery e ON rp.PostId = e.PostId
+    LEFT JOIN 
+        Users u ON u.Id = rp.OwnerUserId
+    LEFT JOIN 
+        UserBadges ub ON ub.UserId = u.Id
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Score,
+    fp.ViewCount,
+    fp.EditCount,
+    fp.UserBadgeCount,
+    COALESCE(pt.TagCount, 0) AS PopularTagsCount
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PopularTags pt ON pt.TagName = ANY(STRING_TO_ARRAY(fp.Tags, '><'))
+WHERE 
+    fp.UserBadgeCount > 0 
+    AND fp.EditCount > 0
+ORDER BY 
+    fp.Score DESC
+LIMIT 50;

@@ -1,0 +1,53 @@
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+TotalSales AS (
+    SELECT
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    WHERE l.l_shipdate < CURRENT_DATE
+    GROUP BY l.l_partkey
+),
+OutOfStockParts AS (
+    SELECT
+        ps.ps_partkey
+    FROM partsupp ps
+    LEFT JOIN RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+    WHERE rs.rank IS NULL OR rs.rank > 3
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY c.c_custkey
+    HAVING SUM(o.o_totalprice) > 100000
+)
+SELECT
+    p.p_name,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    COUNT(DISTINCT hvc.c_custkey) AS high_value_customer_count,
+    COUNT(DISTINCT CASE WHEN ps.ps_partkey IS NOT NULL THEN ps.ps_partkey END) AS out_of_stock_count
+FROM part p
+LEFT JOIN TotalSales ts ON p.p_partkey = ts.l_partkey
+LEFT JOIN OutOfStockParts osp ON p.p_partkey = osp.ps_partkey
+LEFT JOIN HighValueCustomers hvc ON hvc.c_custkey IN (
+    SELECT DISTINCT o.o_custkey
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_partkey = p.p_partkey
+)
+GROUP BY p.p_partkey, p.p_name
+HAVING SUM(ts.total_sales) > (SELECT AVG(total_sales) FROM TotalSales) OR COUNT(osp.ps_partkey) = 0
+ORDER BY total_sales DESC, high_value_customer_count DESC
+LIMIT 10 OFFSET (SELECT COUNT(*) FROM part) / 2;

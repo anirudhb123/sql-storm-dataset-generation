@@ -1,0 +1,115 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id
+    HAVING 
+        (p.Score IS NOT NULL AND p.Score > 0) OR (p.ViewCount IS NOT NULL AND p.ViewCount > 100)
+), TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViewCount,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        AVG(p.Score) > 10 AND COUNT(DISTINCT p.Id) > 5
+), RecentBadges AS (
+    SELECT 
+        b.UserId,
+        b.Name AS BadgeName,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastAwardedDate
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 MONTH'
+    GROUP BY 
+        b.UserId, b.Name
+    HAVING 
+        COUNT(b.Id) > 1
+), PostHistoryCounts AS (
+    SELECT 
+        p.Id AS PostId, 
+        COUNT(ph.Id) AS HistoryCount
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+    HAVING 
+        COUNT(ph.Id) > 0
+), FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.PostTypeId,
+        rp.Score,
+        rp.ViewCount,
+        rp.RankScore,
+        ts.TagName,
+        ts.PostCount,
+        ts.TotalViewCount,
+        ts.AverageScore,
+        rb.UserId,
+        rb.BadgeName,
+        rb.BadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        TagStats ts ON rp.PostId = (SELECT MIN(p.Id) FROM Posts p WHERE p.Tags LIKE '%' || ts.TagName || '%')
+    LEFT JOIN 
+        RecentBadges rb ON rb.UserId = (SELECT p.OwnerUserId FROM Posts p WHERE p.Id = rp.PostId)
+    LEFT JOIN 
+        PostHistoryCounts phc ON rp.PostId = phc.PostId
+    WHERE 
+        rp.RankScore <= 10 AND (rb.BadgeCount IS NULL OR rb.BadgeCount < 5)
+)
+SELECT 
+    PostId, 
+    Title, 
+    CreationDate, 
+    PostTypeId, 
+    Score, 
+    ViewCount,
+    TagName,
+    PostCount,
+    TotalViewCount,
+    AverageScore,
+    UserId,
+    BadgeName,
+    BadgeCount,
+    CASE 
+        WHEN rc.UserId IS NULL THEN 'No Recent Badges'
+        ELSE 'Recent Badges Earned: ' || STRING_AGG(DISTINCT rb.BadgeName, ', ')
+    END AS BadgeInfo
+FROM 
+    FinalResults fr
+LEFT JOIN 
+    RecentBadges rc ON rc.UserId = fr.UserId
+ORDER BY 
+    Score DESC, CreationDate DESC;

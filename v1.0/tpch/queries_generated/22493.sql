@@ -1,0 +1,68 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS SupplyRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_regionkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+        AND (o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL) 
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (ORDER BY c.c_acctbal DESC) AS CustomerRank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+SupplierCustomerStats AS (
+    SELECT 
+        fs.s_suppkey,
+        f.c_custkey,
+        f.line_count,
+        s.TotalSupplyCost
+    FROM 
+        RankedSuppliers s
+    JOIN 
+        FilteredOrders f ON s.SupplyRank <= 3 
+    LEFT JOIN 
+        customer c ON c.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderkey = f.o_orderkey)
+)
+SELECT 
+    sc.s_suppkey,
+    SC.c_custkey,
+    sc.line_count,
+    (sc.TotalSupplyCost / NULLIF(sc.line_count, 0)) AS AvgCostPerLine,
+    CASE 
+        WHEN sc.line_count > 100 THEN 'High'
+        ELSE 'Low'
+    END AS OrderVolumeCategory
+FROM 
+    SupplierCustomerStats sc
+ORDER BY 
+    AvgCostPerLine DESC,
+    sc.line_count;

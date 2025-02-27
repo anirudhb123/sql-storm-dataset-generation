@@ -1,0 +1,45 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01' 
+      AND o.o_orderdate < '1997-12-31'
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierPartInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS parts_supplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    co.c_name,
+    co.total_spent,
+    CASE 
+        WHEN co.total_spent > 1000 THEN 'High Value'
+        WHEN co.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value,
+    r.o_orderkey,
+    r.o_orderdate,
+    sp.parts_supplied,
+    ROW_NUMBER() OVER (PARTITION BY co.c_custkey ORDER BY co.total_spent DESC) AS rank
+FROM CustomerOrders co
+JOIN RankedOrders r ON co.total_spent > 0 AND r.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+LEFT JOIN SupplierPartInfo sp ON sp.parts_supplied > 5
+WHERE co.total_spent IS NOT NULL
+ORDER BY co.total_spent DESC, rank ASC;

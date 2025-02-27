@@ -1,0 +1,67 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.person_id,
+        at.title,
+        at.production_year,
+        RANK() OVER (PARTITION BY a.person_id ORDER BY at.production_year DESC) AS title_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+),
+FilteredTitles AS (
+    SELECT 
+        rt.person_id,
+        rt.title,
+        rt.production_year
+    FROM 
+        RankedTitles rt
+    WHERE 
+        rt.title_rank <= 3
+),
+StaffedMovies AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(DISTINCT ci.person_id) AS staff_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    GROUP BY 
+        mt.movie_id
+),
+CombinedTitles AS (
+    SELECT 
+        ft.person_id,
+        ft.title,
+        ft.production_year,
+        sm.staff_count
+    FROM 
+        FilteredTitles ft
+    LEFT JOIN 
+        StaffedMovies sm ON ft.movie_id = sm.movie_id
+)
+SELECT 
+    ct.person_id,
+    ct.title,
+    COALESCE(ct.production_year, 'Unknown') AS production_year,
+    CASE WHEN ct.staff_count >= 5 THEN 'Large Cast'
+         WHEN ct.staff_count IS NULL THEN 'No Cast Info'
+         ELSE 'Small Cast' END AS cast_size,
+    STRING_AGG(DISTINCT COALESCE(ki.keyword, 'N/A'), ', ') AS keywords
+FROM 
+    CombinedTitles ct
+LEFT JOIN 
+    movie_keyword mk ON ct.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword ki ON mk.keyword_id = ki.id
+WHERE 
+    ct.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    ct.person_id, ct.title, ct.production_year, ct.staff_count
+ORDER BY 
+    ct.production_year DESC, ct.person_id;

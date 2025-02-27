@@ -1,0 +1,55 @@
+
+WITH 
+    sales_data AS (
+        SELECT 
+            w.w_warehouse_id,
+            c.c_customer_id,
+            SUM(ws.ws_ext_sales_price) AS total_sales,
+            COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+            COUNT(ws.ws_item_sk) AS items_sold
+        FROM 
+            web_sales ws
+        JOIN 
+            warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+        JOIN 
+            customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+        JOIN 
+            date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+        WHERE 
+            d.d_year = 2023
+        GROUP BY 
+            w.w_warehouse_id, c.c_customer_id
+    ),
+    enhanced_sales AS (
+        SELECT 
+            wd.w_warehouse_id, 
+            cs.c_customer_id,
+            es.total_sales,
+            es.total_orders,
+            es.items_sold,
+            d.d_month_seq,
+            d.d_week_seq
+        FROM 
+            sales_data es
+        JOIN 
+            warehouse wd ON wd.w_warehouse_id = es.w_warehouse_id
+        JOIN 
+            customer cs ON cs.c_customer_id = es.c_customer_id
+        JOIN 
+            date_dim d ON d.d_year = 2023 AND d.d_date_sk IN (SELECT ws.ws_sold_date_sk FROM web_sales ws WHERE ws.ws_bill_customer_sk = cs.c_customer_id)
+    )
+SELECT 
+    e.w_warehouse_id,
+    COUNT(DISTINCT e.c_customer_id) AS unique_customers,
+    AVG(e.total_sales) AS avg_sales_per_customer,
+    SUM(e.total_orders) AS total_orders_placed,
+    SUM(e.items_sold) AS total_items_sold,
+    SUM(CASE WHEN e.d_month_seq = 1 THEN e.total_sales ELSE 0 END) AS january_sales,
+    SUM(CASE WHEN e.d_week_seq = 14 THEN e.items_sold ELSE 0 END) AS sales_in_week_14
+FROM 
+    enhanced_sales e
+GROUP BY 
+    e.w_warehouse_id
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

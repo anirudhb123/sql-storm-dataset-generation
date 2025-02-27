@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        U.DisplayName AS Owner,
+        P.CreationDate,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.TAGS ORDER BY P.Score DESC) AS RankPerTag
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+),
+TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT RP.PostId) AS NumberOfQuestions,
+        AVG(RP.ViewCount) AS AvgViews,
+        AVG(RP.AnswerCount) AS AvgAnswers,
+        AVG(RP.CommentCount) AS AvgComments
+    FROM 
+        Tags T
+    LEFT JOIN 
+        RankedPosts RP ON RP.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+),
+DetailsWithRank AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Owner,
+        RP.CreationDate,
+        RP.ViewCount,
+        RP.AnswerCount,
+        RP.CommentCount,
+        RP.Score,
+        T.TagName,
+        T.NumberOfQuestions,
+        T.AvgViews,
+        T.AvgAnswers,
+        T.AvgComments
+    FROM 
+        RankedPosts RP
+    JOIN 
+        TagStats T ON RP.Tags LIKE '%' || T.TagName || '%'
+)
+
+SELECT 
+    DWR.PostId,
+    DWR.Title,
+    DWR.Owner,
+    DWR.CreationDate,
+    DWR.ViewCount,
+    DWR.AnswerCount,
+    DWR.CommentCount,
+    DWR.Score,
+    DWR.TagName,
+    DWR.NumberOfQuestions,
+    DWR.AvgViews,
+    DWR.AvgAnswers,
+    DWR.AvgComments,
+    CASE 
+        WHEN DWR.RankPerTag = 1 THEN 'Top Question for ' || DWR.TagName 
+        ELSE NULL 
+    END AS Remark
+FROM 
+    DetailsWithRank DWR
+WHERE 
+    DWR.RankPerTag <= 5 -- Top 5 questions for each tag
+ORDER BY 
+    DWR.TagName, DWR.Score DESC;

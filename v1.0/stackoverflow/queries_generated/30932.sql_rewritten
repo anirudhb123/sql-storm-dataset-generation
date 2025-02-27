@@ -1,0 +1,69 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+
+    UNION ALL
+
+    
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        p.AcceptedAnswerId,
+        rph.Level + 1 AS Level
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.QuestionId
+    WHERE p.PostTypeId = 2  
+),
+
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON c.UserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id
+),
+
+
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalComments,
+        TotalBounties,
+        RANK() OVER (ORDER BY TotalPosts DESC, TotalComments DESC) AS UserRank
+    FROM UserActivity
+)
+
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    COALESCE(rph.Level, 0) AS AnswerLevel,
+    u.DisplayName AS OwnerDisplayName,
+    ru.UserRank,
+    ru.TotalPosts,
+    ru.TotalComments,
+    ru.TotalBounties
+FROM Posts p
+LEFT JOIN RecursivePostHierarchy rph ON p AcceptedAnswerId = rph.QuestionId  
+LEFT JOIN Users u ON p.OwnerUserId = u.Id  
+LEFT JOIN RankedUsers ru ON u.Id = ru.UserId  
+WHERE p.CreationDate >= DATEADD(MONTH, -6, GETDATE())  
+  AND (p.ContentLicense IS NULL OR p.ContentLicense <> 'CC BY-SA')  
+ORDER BY ru.UserRank, p.Score DESC;

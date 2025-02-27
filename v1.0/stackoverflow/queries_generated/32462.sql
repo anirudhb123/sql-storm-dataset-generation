@@ -1,0 +1,105 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankByUser,
+        RANK() OVER (ORDER BY p.ViewCount DESC) AS RankByViews
+    FROM
+        Posts p
+    INNER JOIN
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.PostTypeId = 1 -- Questions only
+),
+
+PostActivity AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        p.Title,
+        ph.PostHistoryTypeId,
+        CASE
+            WHEN ph.PostHistoryTypeId = 10 THEN 'Closed'
+            WHEN ph.PostHistoryTypeId = 11 THEN 'Reopened'
+            ELSE 'Other'
+        END AS ChangeType
+    FROM
+        PostHistory ph
+    INNER JOIN
+        Posts p ON ph.PostId = p.Id
+    WHERE
+        ph.CreationDate >= (NOW() - INTERVAL '6 months') -- Recent activity
+),
+
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+),
+
+PopularTags AS (
+    SELECT
+        unnest(string_to_array(p.Tags, '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1 -- Questions Only
+    GROUP BY
+        TagName
+    HAVING
+        COUNT(*) > 5
+),
+
+FinalResults AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.Score,
+        rp.OwnerDisplayName,
+        pa.ChangeType,
+        ub.BadgeCount,
+        ub.BadgeNames,
+        pt.TagName,
+        pt.TagCount
+    FROM
+        RankedPosts rp
+    LEFT JOIN
+        PostActivity pa ON rp.PostId = pa.PostId
+    LEFT JOIN
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+    LEFT JOIN
+        PopularTags pt ON rp.PostId = pt.TagName
+    WHERE
+        rp.RankByUser <= 3 -- Top 3 recent posts per user
+)
+
+SELECT DISTINCT
+    fr.*,
+    CASE
+        WHEN fr.BadgeCount IS NULL THEN 'No Badges'
+        ELSE fr.BadgeNames
+    END AS BadgeInformation,
+    COALESCE(pt.TagCount, 0) AS TagCount
+FROM
+    FinalResults fr
+ORDER BY
+    fr.Score DESC, -- High score first
+    fr.ViewCount DESC -- Then by view count
+LIMIT 100;
+

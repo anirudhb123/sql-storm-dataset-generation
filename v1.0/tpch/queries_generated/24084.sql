@@ -1,0 +1,64 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey AS nation_key, n_name AS nation_name, n_regionkey AS region_key, 1 AS level
+    FROM nation
+    WHERE n_nationkey IN (SELECT MIN(n_nationkey) FROM nation)
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, h.level + 1
+    FROM nation n
+    JOIN nation_hierarchy h ON n.n_regionkey = h.region_key
+    WHERE h.level < 5
+),
+supplier_analysis AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count,
+        MAX(s.s_acctbal) AS max_acctbalance,
+        CASE 
+            WHEN COUNT(DISTINCT p.p_partkey) > 10 THEN 'High'
+            WHEN COUNT(DISTINCT p.p_partkey) BETWEEN 5 AND 10 THEN 'Medium'
+            ELSE 'Low' 
+        END AS supplier_rating
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        COALESCE(SUM(o.o_totalprice), 0) AS total_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+
+SELECT 
+    n.nation_name,
+    s.s_name,
+    ca.c_name,
+    ca.order_count,
+    ca.total_order_value,
+    sa.total_supply_cost,
+    sa.part_count,
+    sa.supplier_rating,
+    ROW_NUMBER() OVER (PARTITION BY n.nation_name ORDER BY ca.total_order_value DESC) AS order_rank,
+    RANK() OVER (PARTITION BY n.nation_name ORDER BY sa.total_supply_cost DESC) AS supplier_rank
+FROM nation_hierarchy n
+JOIN supplier_analysis sa ON sa.s_suppkey IN (
+    SELECT ps.ps_suppkey FROM partsupp ps
+    WHERE ps.ps_availqty > 100 AND ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+)
+JOIN customer_orders ca ON ca.c_custkey IN (
+    SELECT o.o_custkey FROM orders o
+    WHERE o.o_orderstatus = 'F' AND o.o_totalprice > 500
+)
+WHERE n.level = 1 
+AND sa.max_acctbalance IS NOT NULL
+ORDER BY n.nation_name, sa.part_count DESC, ca.order_count DESC;

@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+    GROUP BY
+        ws.web_site_sk
+),
+TopWebSites AS (
+    SELECT 
+        r.web_site_sk,
+        r.total_net_profit,
+        r.total_orders,
+        w.web_name,
+        r.rank
+    FROM 
+        RankedSales r
+    JOIN 
+        web_site w ON r.web_site_sk = w.web_site_sk
+    WHERE 
+        r.rank <= 5 -- Get top 5 websites
+),
+CustomerSpend AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_spent,
+        ROW_NUMBER() OVER (ORDER BY cs.total_spent DESC) AS rank
+    FROM 
+        CustomerSpend cs
+    WHERE 
+        cs.total_spent > (SELECT AVG(total_spent) FROM CustomerSpend) -- Only customers who spent above average
+)
+SELECT 
+    w.web_name,
+    COUNT(DISTINCT hvc.c_customer_sk) AS high_value_customers_count,
+    AVG(hvc.total_spent) AS avg_spent_per_high_value_customer,
+    SUM(ts.total_net_profit) AS total_net_profit_from_high_value_customers
+FROM 
+    TopWebSites ts
+JOIN 
+    HighValueCustomers hvc ON ts.web_site_sk = (SELECT ws.web_site_sk FROM web_sales ws WHERE ws.ws_order_number = hvc.c_customer_sk LIMIT 1) -- Assuming joining criteria
+GROUP BY 
+    w.web_name
+ORDER BY 
+    total_net_profit_from_high_value_customers DESC;

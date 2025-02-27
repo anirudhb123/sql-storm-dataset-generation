@@ -1,0 +1,66 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerAvgSpend AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        AVG(o.o_totalprice) AS avg_spend
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    COALESCE(sa.total_avail_qty, 0) AS available_quantity,
+    COALESCE(sa.avg_supply_cost, 0) AS average_supply_cost,
+    (SELECT COUNT(*) FROM RankedOrders ro WHERE ro.o_orderdate >= '1997-01-01') AS recent_orders_count,
+    CASE 
+        WHEN cs.avg_spend IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS customer_order_status
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    SupplierSummary sa ON l.l_suppkey = sa.s_suppkey
+LEFT JOIN 
+    CustomerAvgSpend cs ON cs.c_custkey IN (
+        SELECT c.c_custkey 
+        FROM customer c 
+        JOIN orders o ON c.c_custkey = o.o_custkey 
+        WHERE o.o_orderstatus = 'O'
+    )
+GROUP BY 
+    p.p_name, sa.total_avail_qty, sa.avg_supply_cost, cs.avg_spend
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000 OR COALESCE(sa.total_avail_qty, 0) > 0
+ORDER BY 
+    total_sales DESC;

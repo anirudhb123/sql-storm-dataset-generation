@@ -1,0 +1,57 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, Reputation, CreationDate, 
+           CAST(DisplayName AS varchar(255)) AS FullPath,
+           0 AS Level
+    FROM Users
+    WHERE Id = (SELECT MIN(Id) FROM Users)
+
+    UNION ALL
+
+    SELECT u.Id, u.Reputation, u.CreationDate,
+           CAST(CONCAT(up.FullPath, ' -> ', u.DisplayName) AS varchar(255)),
+           up.Level + 1
+    FROM Users u
+    JOIN UserHierarchy up ON u.Id > up.Id
+    WHERE up.Level < 5 -- Limiting to 5 hierarchy levels
+),
+RecentPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, 
+           p.ViewCount, u.DisplayName AS AuthorDisplayName
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    ORDER BY p.CreationDate DESC
+    LIMIT 100
+),
+VoteStats AS (
+    SELECT PostId,
+           SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostHistoryDetails AS (
+    SELECT ph.*, 
+           p.Title AS PostTitle, 
+           p.CreationDate AS PostCreationDate,
+           CASE WHEN ph.PostHistoryTypeId = 10 THEN 'Closed'
+                WHEN ph.PostHistoryTypeId = 11 THEN 'Reopened'
+                ELSE 'Other' END AS ActionType,
+           ph.CreationDate - p.CreationDate AS TimeSincePost
+    FROM PostHistory ph
+    LEFT JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.CreationDate >= NOW() - INTERVAL '6 months'
+)
+SELECT u.FullPath AS UserHierarchy,
+       rp.Title AS RecentPostTitle,
+       rp.CreationDate AS PostCreationDate,
+       rp.Score AS PostScore,
+       vs.UpVotes AS TotalUpVotes,
+       vs.DownVotes AS TotalDownVotes,
+       phd.ActionType AS RecentPostAction,
+       phd.TimeSincePost
+FROM UserHierarchy u
+INNER JOIN RecentPosts rp ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = rp.Id)
+LEFT JOIN VoteStats vs ON rp.Id = vs.PostId
+LEFT JOIN PostHistoryDetails phd ON rp.Id = phd.PostId
+ORDER BY u.Level, rp.CreationDate DESC;

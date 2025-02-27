@@ -1,0 +1,64 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        a.id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC, a.title ASC) AS rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+ActorStats AS (
+    SELECT 
+        p.name,
+        COUNT(ci.id) AS movies_count,
+        AVG(CAST(m.production_year AS FLOAT)) AS avg_production_year
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    JOIN 
+        title m ON ci.movie_id = m.id
+    WHERE 
+        ci.nr_order IS NOT NULL
+    GROUP BY 
+        p.name
+),
+FilteredMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(CAST(l.linked_movie_id AS VARCHAR) AS VARCHAR, 'No Links') AS linked_movie
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        movie_link l ON m.movie_id = l.movie_id
+    WHERE 
+        m.rank <= 5
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    COALESCE(as.name, 'Unknown Actor') AS actor_name,
+    as.movies_count,
+    as.avg_production_year,
+    CASE 
+        WHEN as.avg_production_year IS NULL THEN 'No Data'
+        ELSE CAST(as.avg_production_year AS VARCHAR)
+    END AS avg_year_display,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_keyword mk ON fm.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    ActorStats as ON as.movies_count > 0
+GROUP BY 
+    fm.title, fm.production_year, as.name, as.movies_count, as.avg_production_year
+ORDER BY 
+    fm.production_year DESC, fm.title ASC;

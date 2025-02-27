@@ -1,0 +1,74 @@
+
+WITH ActorMovies AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        SUM(CASE WHEN m.production_year IS NOT NULL THEN 1 ELSE 0 END) AS successful_movies
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info c ON a.person_id = c.person_id
+    LEFT JOIN 
+        aka_title m ON c.movie_id = m.id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.person_id, a.name
+),
+RankedActors AS (
+    SELECT 
+        am.*,
+        RANK() OVER (ORDER BY am.successful_movies DESC) AS rank
+    FROM 
+        ActorMovies am
+),
+ComplicatedMovies AS (
+    SELECT 
+        DISTINCT tt.title, 
+        tn.name AS actor_name, 
+        COALESCE(tc.kind, 'Unknown') AS company_type,
+        tk.keyword AS movie_keyword
+    FROM 
+        title tt
+    JOIN 
+        cast_info ci ON tt.id = ci.movie_id
+    JOIN 
+        aka_name tn ON ci.person_id = tn.person_id
+    LEFT JOIN 
+        movie_companies mc ON tt.id = mc.movie_id
+    LEFT JOIN 
+        company_type tc ON mc.company_type_id = tc.id
+    LEFT JOIN 
+        movie_keyword mk ON tt.id = mk.movie_id
+    LEFT JOIN 
+        keyword tk ON mk.keyword_id = tk.id
+    WHERE 
+        tt.production_year >= 2000
+)
+SELECT 
+    r.rank,
+    r.name AS actor_name,
+    r.movie_count,
+    r.successful_movies,
+    COUNT(cm.title) AS movie_count_in_complicated_movies,
+    STRING_AGG(DISTINCT cm.title, ', ') AS complicated_movie_titles,
+    SUM(CASE 
+            WHEN cm.company_type IS NOT NULL THEN 1
+            ELSE 0 
+        END) AS company_count,
+    AVG(CASE 
+            WHEN cm.movie_keyword IS NOT NULL THEN 1 
+            ELSE 0 
+        END * 1.0) AS avg_keyword_association
+FROM 
+    RankedActors r
+LEFT JOIN 
+    ComplicatedMovies cm ON r.name = cm.actor_name
+GROUP BY 
+    r.rank, r.name, r.movie_count, r.successful_movies
+HAVING 
+    COUNT(cm.title) > 0 OR r.successful_movies > 5
+ORDER BY 
+    r.rank
+LIMIT 50;

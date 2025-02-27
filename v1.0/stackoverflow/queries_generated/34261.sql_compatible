@@ -1,0 +1,60 @@
+
+WITH RECURSIVE UserVoteDetails AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        V.VoteTypeId,
+        COUNT(V.Id) AS VoteCount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName, V.VoteTypeId
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        COALESCE(PH.Comment, 'No Close Reason') AS CloseReason,
+        COUNT(V.Id) AS UpVotes,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 2
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId = 10
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.Id, P.Title, P.ViewCount, P.CreationDate, PH.Comment
+),
+AvgPostStats AS (
+    SELECT 
+        AVG(ViewCount) AS AvgViewCount,
+        AVG(CommentCount) AS AvgCommentCount
+    FROM PostDetails
+),
+JoinedPostVoteStats AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.ViewCount,
+        PD.CloseReason,
+        PD.UpVotes,
+        PD.CommentCount,
+        CASE 
+            WHEN PD.UpVotes > AS.AvgViewCount THEN 'Above Average' 
+            ELSE 'Below Average' 
+        END AS VoteStatus
+    FROM PostDetails PD
+    CROSS JOIN AvgPostStats AS
+)
+SELECT 
+    J.PostId,
+    J.Title,
+    J.ViewCount,
+    J.CloseReason,
+    J.UpVotes,
+    J.CommentCount,
+    J.VoteStatus,
+    STRING_AGG(UD.DisplayName, ', ') AS VoterNames
+FROM JoinedPostVoteStats J
+LEFT JOIN UserVoteDetails UD ON J.UpVotes >= 1
+GROUP BY J.PostId, J.Title, J.ViewCount, J.CloseReason, J.UpVotes, J.CommentCount, J.VoteStatus
+ORDER BY J.ViewCount DESC;

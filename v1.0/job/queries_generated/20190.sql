@@ -1,0 +1,84 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        1 AS depth,
+        CAST(m.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 1990
+    UNION ALL
+    SELECT 
+        m.id,
+        m.title,
+        mh.depth + 1,
+        CAST(mh.path || ' -> ' || m.title AS VARCHAR(255))
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.linked_movie_id
+    WHERE 
+        mh.depth < 5
+),
+ActorMovies AS (
+    SELECT
+        ak.name AS actor_name,
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.id AS movie_id,
+        RANK() OVER (PARTITION BY ak.person_id ORDER BY mt.production_year DESC) AS rank_order
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.movie_id
+    WHERE 
+        ak.name IS NOT NULL AND ak.surname_pcode IS NULL
+),
+FilteredMovies AS (
+    SELECT
+        DISTINCT am.actor_name,
+        mh.path AS movie_path,
+        am.movie_title,
+        am.production_year
+    FROM 
+        ActorMovies am
+    JOIN 
+        MovieHierarchy mh ON am.movie_id = mh.movie_id
+    WHERE 
+        am.rank_order <= 3
+)
+SELECT 
+    fm.actor_name,
+    fm.movie_path,
+    COUNT(fm.movie_title) AS total_movies,
+    MAX(fm.production_year) AS latest_year
+FROM 
+    FilteredMovies fm
+GROUP BY 
+    fm.actor_name, fm.movie_path
+HAVING 
+    COUNT(fm.movie_title) > 1
+ORDER BY 
+    total_movies DESC, latest_year DESC
+LIMIT 10;
+
+-- Additional Subquery for actors with NULL values in 'note'
+SELECT 
+    ak.name AS actor_name,
+    COUNT(CASE WHEN ci.note IS NULL THEN 1 END) AS null_notes_count
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+GROUP BY 
+    ak.name
+HAVING 
+    null_notes_count > 0
+ORDER BY 
+    null_notes_count DESC
+LIMIT 5;

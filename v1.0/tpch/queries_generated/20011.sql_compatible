@@ -1,0 +1,71 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        p.p_partkey,
+        SUM(ps.ps_availqty) AS total_availqty
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, p.p_partkey
+),
+FilteredNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        DENSE_RANK() OVER (ORDER BY n.n_regionkey) AS nation_rank
+    FROM 
+        nation n 
+    WHERE 
+        n.n_comment LIKE '%good%'
+),
+SalesSummary AS (
+    SELECT 
+        o.o_orderstatus,
+        AVG(total_sales) AS avg_sales,
+        MAX(total_sales) AS max_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        RankedOrders o
+    WHERE 
+        o.order_rank <= 5
+    GROUP BY 
+        o.o_orderstatus
+)
+SELECT 
+    fn.n_name,
+    fn.nation_rank,
+    ss.o_orderstatus,
+    ss.avg_sales,
+    ss.max_sales,
+    ss.order_count,
+    COALESCE(SUM(sp.total_availqty), 0) AS total_avail
+FROM 
+    FilteredNations fn
+LEFT JOIN 
+    SupplierParts sp ON fn.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey IN (SELECT sp.s_suppkey FROM SupplierParts sp))
+CROSS JOIN 
+    SalesSummary ss
+GROUP BY 
+    fn.n_name, fn.nation_rank, ss.o_orderstatus, ss.avg_sales, ss.max_sales, ss.order_count
+HAVING 
+    COALESCE(total_avail, 0) > 0 OR (MAX(ss.max_sales) IS NULL AND ss.order_count = 0)
+ORDER BY 
+    fn.nation_rank, ss.o_orderstatus;

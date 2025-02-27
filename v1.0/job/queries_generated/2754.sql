@@ -1,0 +1,64 @@
+WITH ranked_movies AS (
+    SELECT
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM
+        aka_title a
+    WHERE
+        a.production_year IS NOT NULL
+),
+company_movies AS (
+    SELECT
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM
+        movie_companies mc
+    JOIN
+        company_name c ON mc.company_id = c.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE
+        c.country_code IS NOT NULL
+),
+movie_cast AS (
+    SELECT
+        cc.movie_id,
+        ak.name AS actor_name,
+        rt.role
+    FROM
+        complete_cast cc
+    JOIN
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN
+        role_type rt ON ci.role_id = rt.id
+)
+SELECT
+    rm.title,
+    rm.production_year,
+    cm.company_name,
+    mc.actor_name,
+    COUNT(DISTINCT mc.actor_name) OVER (PARTITION BY rm.title) AS actor_count,
+    CASE 
+        WHEN rm.production_year < 2000 THEN 'Classic'
+        WHEN rm.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Contemporary'
+    END AS era,
+    CASE
+        WHEN cm.company_type = 'Distributor' THEN 'Wide Release'
+        WHEN cm.company_type = 'Production' THEN 'Indie'
+        ELSE 'Not Specified'
+    END AS release_type
+FROM
+    ranked_movies rm
+LEFT JOIN
+    company_movies cm ON rm.movie_id = cm.movie_id
+LEFT JOIN
+    movie_cast mc ON rm.movie_id = mc.movie_id
+WHERE
+    rm.year_rank <= 5
+ORDER BY
+    rm.production_year DESC, actor_count DESC;

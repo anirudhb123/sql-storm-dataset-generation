@@ -1,0 +1,54 @@
+
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, r_comment, 0 AS level
+    FROM region
+    WHERE r_regionkey = 1 
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, r.r_comment, rh.level + 1
+    FROM region r
+    JOIN RegionHierarchy rh ON r.r_regionkey > rh.r_regionkey 
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderLineItem AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_after_discount
+    FROM lineitem l
+    GROUP BY l.l_orderkey, l.l_partkey
+)
+SELECT 
+    rh.r_name AS region_name,
+    co.c_name AS customer_name,
+    ps.p_name AS part_name,
+    ol.total_quantity,
+    ol.avg_price_after_discount,
+    COALESCE(co.order_count, 0) AS number_of_orders,
+    COALESCE(co.total_spent, 0.00) AS total_spent,
+    ROUND(ps.avg_supply_cost, 2) AS average_supply_cost
+FROM RegionHierarchy rh
+LEFT JOIN CustomerOrders co ON co.c_custkey = (SELECT MIN(c.c_custkey) FROM customer c WHERE c.c_nationkey = rh.r_regionkey)
+LEFT JOIN PartSupplierDetails ps ON ps.p_partkey = (SELECT MAX(psd.p_partkey) FROM partsupp psd)
+LEFT JOIN OrderLineItem ol ON ol.l_orderkey = (SELECT MAX(o.o_orderkey) FROM orders o)
+WHERE ol.total_quantity > 0
+ORDER BY rh.r_name, co.c_name DESC, ps.p_name;

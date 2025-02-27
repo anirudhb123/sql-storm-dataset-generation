@@ -1,0 +1,60 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS rank_supplycost,
+        SUM(ps.ps_availqty) OVER (PARTITION BY ps.ps_suppkey) AS total_availqty
+    FROM partsupp ps
+), 
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_mktsegment,
+        (CASE 
+            WHEN c.c_acctbal IS NULL THEN 'No Balance'
+            WHEN c.c_acctbal = 0 THEN 'Zero Balance'
+            ELSE 'Positive Balance'
+        END) AS acctbal_status
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_mktsegment IN ('BUILDING', 'HOUSEHOLD')
+), 
+ProjectedSales AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+)
+
+SELECT 
+    r.r_name,
+    SUM(o.o_totalprice) AS total_order_amount,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    AVG(PL.total_availqty) AS avg_available_quantity,
+    MAX(PL.rank_supplycost) AS max_rank_supplier_cost,
+    COALESCE(AVG(PS.net_sales), 0) AS avg_net_sales,
+    SUBSTRING(NC.n_comment, 1, 20) AS nation_comment_excerpt
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN RankedSuppliers as RS ON s.s_suppkey = RS.ps_suppkey
+LEFT JOIN FilteredCustomers AS c ON s.s_nationkey = c.c_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN ProjectedSales AS PS ON o.o_orderkey = PS.l_orderkey
+LEFT JOIN (
+    SELECT DISTINCT 
+        n.n_nationkey, 
+        n.n_comment 
+    FROM nation n 
+    WHERE n.n_comment IS NOT NULL AND n.n_comment LIKE '%excellent%'
+) AS NC ON n.n_nationkey = NC.n_nationkey
+WHERE 
+    r.r_name NOT LIKE '%east%' 
+    AND (o.o_orderdate BETWEEN '2023-01-01' AND '2023-10-31' OR o.o_orderdate IS NULL)
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    total_order_amount DESC
+LIMIT 10;

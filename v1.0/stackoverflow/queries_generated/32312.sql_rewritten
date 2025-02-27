@@ -1,0 +1,88 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ParentId, 
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL 
+    
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        ph.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+ScoreSummary AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVoteCount AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN vt.Id = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN vt.Id = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON vt.Id = v.VoteTypeId
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    u.DisplayName,
+    us.PostCount,
+    COALESCE(us.TotalScore, 0) AS TotalScore,
+    COALESCE(us.AvgScore, 0) AS AvgScore,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    COALESCE(pv.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(pv.DownVotes, 0) AS TotalDownVotes,
+    ph.Level,
+    ph.Title AS ParentPostTitle
+FROM 
+    Users u
+LEFT JOIN 
+    ScoreSummary us ON u.Id = us.OwnerUserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostVoteCount pv ON pv.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+LEFT JOIN 
+    PostHierarchy ph ON ph.PostId IN (SELECT ParentId FROM Posts WHERE OwnerUserId = u.Id)
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    us.TotalScore DESC, 
+    u.DisplayName;

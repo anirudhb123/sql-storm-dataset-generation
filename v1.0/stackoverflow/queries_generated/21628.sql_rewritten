@@ -1,0 +1,64 @@
+WITH UserBadges AS (
+    SELECT u.Id AS UserId, u.DisplayName, COUNT(b.Id) AS BadgeCount,
+           SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+           SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+           SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT UserId, DisplayName, BadgeCount, GoldBadges, SilverBadges, BronzeBadges,
+           ROW_NUMBER() OVER (ORDER BY BadgeCount DESC) AS rn
+    FROM UserBadges
+),
+PostStats AS (
+    SELECT p.OwnerUserId, COUNT(c.Id) AS CommentCount, 
+           SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedCount,
+           SUM(CASE WHEN p.ViewCount IS NULL THEN 0 ELSE p.ViewCount END) AS TotalViews
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY p.OwnerUserId
+),
+PostHistoryAggregated AS (
+    SELECT ph.UserId,
+           COUNT(ph.Id) AS PostHistoryCount,
+           COUNT(DISTINCT ph.PostId) AS UniquePostsModified,
+           MAX(CASE WHEN ph.PostHistoryTypeId = 12 THEN ph.CreationDate END) AS LastDeletedDate
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= cast('2024-10-01' as date) - INTERVAL '5 years'
+    GROUP BY ph.UserId
+),
+UserMetrics AS (
+    SELECT u.Id AS UserId, 
+           COALESCE(ps.CommentCount, 0) AS CommentCount,
+           COALESCE(ps.AcceptedCount, 0) AS AcceptedAnswerCount,
+           COALESCE(ps.TotalViews, 0) AS TotalViews,
+           COALESCE(ph.PostHistoryCount, 0) AS PostEditCount,
+           COALESCE(ph.UniquePostsModified, 0) AS UniquePostsEdited,
+           COALESCE(ph.LastDeletedDate, NULL) AS LastDeletedPostDate,
+           ub.BadgeCount, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+    FROM Users u
+    LEFT JOIN PostStats ps ON u.Id = ps.OwnerUserId
+    LEFT JOIN PostHistoryAggregated ph ON u.Id = ph.UserId
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+)
+SELECT um.UserId, um.DisplayName,
+       um.CommentCount, um.AcceptedAnswerCount, 
+       um.TotalViews, um.PostEditCount, 
+       um.UniquePostsEdited, 
+       (CASE 
+           WHEN BadgeCount = 0 THEN 'No badges'
+           WHEN BadgeCount BETWEEN 1 AND 5 THEN 'Novice'
+           WHEN BadgeCount BETWEEN 6 AND 15 THEN 'Intermediate'
+           ELSE 'Expert' 
+       END) AS UserLevel,
+       (CASE 
+           WHEN LastDeletedPostDate IS NULL THEN 'Never deleted a post'
+           ELSE CONCAT('Last deleted on ', TO_CHAR(LastDeletedPostDate, 'YYYY-MM-DD HH24:MI:SS'))
+       END) AS LastDeletedPostStatus
+FROM UserMetrics um
+JOIN TopUsers tu ON um.UserId = tu.UserId
+WHERE tu.rn <= 10 OR (um.TotalViews > 100 OR um.CommentCount > 20)
+ORDER BY um.TotalViews DESC NULLS LAST, um.CommentCount DESC;

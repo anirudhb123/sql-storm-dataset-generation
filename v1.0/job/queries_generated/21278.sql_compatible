@@ -1,0 +1,70 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        1 AS level,
+        ARRAY[mt.id] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        mh.level + 1,
+        path || m.id
+    FROM 
+        aka_title m 
+    JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        ARRAY_AGG(DISTINCT mc.note) AS company_notes,
+        MAX(mi.info) AS primary_info
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id 
+          AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'primary info')
+    GROUP BY 
+        m.id, m.title
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.level,
+    CASE 
+        WHEN mi.company_count > 10 THEN 'Mega'
+        WHEN mi.company_count BETWEEN 5 AND 10 THEN 'Large'
+        WHEN mi.company_count BETWEEN 1 AND 4 THEN 'Small'
+        ELSE 'None' 
+    END AS company_size,
+    COALESCE(mi.primary_info, 'No Data') AS primary_info_available,
+    COUNT(DISTINCT casts.person_id) AS total_casts,
+    STRING_AGG(DISTINCT ak.name, ', ' ORDER BY ak.name) AS cast_names,
+    COUNT(*) FILTER (WHERE mi.primary_info IS NOT NULL) AS info_count_with_data
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    MovieInfo mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    cast_info casts ON mh.movie_id = casts.movie_id
+LEFT JOIN 
+    aka_name ak ON casts.person_id = ak.person_id
+WHERE 
+    mh.level <= 5
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.level, mi.company_count, mi.primary_info
+ORDER BY 
+    mh.level, company_size DESC, total_casts DESC
+LIMIT 50;

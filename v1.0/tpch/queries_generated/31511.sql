@@ -1,0 +1,54 @@
+WITH RECURSIVE PopularBrands AS (
+    SELECT p_brand, SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+    FROM part
+    JOIN lineitem ON part.p_partkey = lineitem.l_partkey
+    GROUP BY p_brand
+    ORDER BY total_revenue DESC
+    LIMIT 5
+),
+BrandSuppliers AS (
+    SELECT DISTINCT s.s_suppkey, s.s_name, s.s_nationkey
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+),
+NationRegion AS (
+    SELECT n.n_name, r.r_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COUNT(o.o_orderkey) > 0
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+)
+SELECT DISTINCT
+    c.c_name,
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_discount) AS total_discounts,
+    MAX(l.l_extendedprice) AS max_lineitem_price,
+    MIN(l.l_extendedprice) AS min_lineitem_price,
+    MAX(o.o_totalprice) AS max_order_price,
+    (SELECT SUM(l2.l_quantity)
+     FROM lineitem l2
+     WHERE l2.l_orderkey = o.o_orderkey) AS total_quantity_per_order
+FROM CustomerOrders AS co
+JOIN customer c ON co.c_custkey = c.c_custkey
+JOIN NationRegion n ON c.c_nationkey = n.n_nationkey
+JOIN BrandSuppliers bs ON c.c_nationkey = bs.s_nationkey
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+WHERE o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+GROUP BY c.c_name, n.n_name, r.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY total_orders DESC, total_discounts DESC
+LIMIT 20;

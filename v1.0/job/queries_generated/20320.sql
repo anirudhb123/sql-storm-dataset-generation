@@ -1,0 +1,57 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY YEAR(t.production_year) ORDER BY t.id DESC) AS YearRank,
+        COUNT(ci.person_role_id) OVER (PARTITION BY t.id) AS CastCount
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Synopsis')
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    WHERE 
+        t.production_year >= 2010
+        AND (cn.country_code IS NULL OR cn.country_code <> 'USA')
+        AND (mi.info IS NOT NULL OR ci.note IS NOT NULL)
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.CastCount,
+        CASE 
+            WHEN rm.CastCount > 10 THEN 'Ensemble Cast'
+            WHEN rm.CastCount BETWEEN 5 AND 10 THEN 'Moderate Cast'
+            ELSE 'Few Cast Members'
+        END AS CastClassification
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.YearRank <= 3
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.CastCount,
+    fm.CastClassification,
+    CASE 
+        WHEN fm.production_year < 2020 THEN 'Released Before 2020'
+        ELSE 'Released After or in 2020'
+    END AS ReleasePeriod,
+    COALESCE(k.keyword, 'No Keywords') AS KeywordInfo
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_keyword mk ON fm.title = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    fm.CastCount IS NOT NULL
+ORDER BY 
+    fm.production_year DESC, 
+    fm.CastCount DESC;

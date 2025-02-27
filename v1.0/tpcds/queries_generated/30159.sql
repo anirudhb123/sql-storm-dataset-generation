@@ -1,0 +1,68 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk, 
+        s_store_name, 
+        s_floor_space, 
+        1 AS level
+    FROM store
+    WHERE s_closed_date_sk IS NULL
+    UNION ALL
+    SELECT 
+        s.s_store_sk, 
+        s.s_store_name, 
+        s.s_floor_space, 
+        sh.level + 1
+    FROM store s
+    JOIN sales_hierarchy sh ON s.s_store_sk = sh.s_store_sk
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        SUM(ws.ws_net_profit) AS total_profit 
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        DENSE_RANK() OVER (ORDER BY cs.total_profit DESC) AS rank 
+    FROM customer_sales cs
+    JOIN customer c ON cs.c_customer_sk = c.c_customer_sk
+),
+address_stats AS (
+    SELECT 
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS distinct_customers,
+        AVG(i.i_current_price) AS avg_item_price
+    FROM customer_address ca
+    JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN item i ON i.i_item_sk IN (
+        SELECT DISTINCT ws.ws_item_sk 
+        FROM web_sales ws 
+        LEFT JOIN top_customers tc ON ws.ws_bill_customer_sk = tc.c_customer_sk 
+        WHERE tc.rank <= 10
+    )
+    GROUP BY ca.ca_state
+    HAVING AVG(i.i_current_price) IS NOT NULL
+)
+SELECT 
+    a.ca_state, 
+    a.distinct_customers, 
+    a.avg_item_price, 
+    sh.s_store_name,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    SUM(ws.ws_net_profit) AS total_store_profit
+FROM address_stats a
+JOIN store_sales ss ON ss.ss_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = CURRENT_DATE)
+JOIN sales_hierarchy sh ON sh.s_store_sk = ss.ss_store_sk
+JOIN web_sales ws ON ws.ws_bill_addr_sk = a.ca_zip
+WHERE a.distinct_customers > 0
+GROUP BY a.ca_state, a.distinct_customers, a.avg_item_price, sh.s_store_name
+ORDER BY a.avg_item_price DESC, total_store_profit DESC
+LIMIT 10;

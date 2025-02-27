@@ -1,0 +1,82 @@
+
+WITH address_components AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT_WS(' ', ca_street_number, ca_street_name, ca_street_type, ca_suite_number) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        LENGTH(cd_education_status) AS education_length,
+        SUBSTRING(cd_gender, 1, 1) AS short_gender
+    FROM 
+        customer_demographics
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_coupon_amt) AS total_coupons
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+final_report AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        addr.full_address,
+        addr.ca_city,
+        addr.ca_state,
+        addr.ca_zip,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.education_length,
+        s.total_orders,
+        s.total_sales,
+        s.total_coupons
+    FROM 
+        customer c
+    JOIN 
+        address_components addr ON c.c_current_addr_sk = addr.ca_address_sk
+    JOIN 
+        demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    LEFT JOIN 
+        sales_summary s ON c.c_customer_sk = s.customer_sk
+    WHERE 
+        d.cd_marital_status = 'M'
+        AND addr.ca_state IN ('CA', 'TX', 'NY')
+        AND LENGTH(c.c_last_name) > 5
+)
+SELECT 
+    customer_sk, 
+    c_first_name,
+    c_last_name,
+    full_address,
+    ca_city,
+    ca_state,
+    ca_zip,
+    cd_gender,
+    cd_marital_status,
+    education_length,
+    total_orders,
+    total_sales,
+    total_coupons 
+FROM 
+    final_report
+ORDER BY 
+    total_sales DESC, 
+    c_last_name ASC
+LIMIT 100;

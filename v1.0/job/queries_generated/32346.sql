@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::integer AS parent_movie_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.movie_id AS parent_movie_id,
+        mh.level + 1 AS level
+    FROM 
+        aka_title e
+    JOIN 
+        MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+CompanyCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.name) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    (SELECT COUNT(*) FROM ActorRoles ar WHERE ar.movie_id = mh.movie_id) AS total_actors,
+    COALESCE(cc.company_count, 0) AS total_companies,
+    STRING_AGG(DISTINCT ar.actor_name || ' (' || ar.role_name || ')', ', ' ORDER BY ar.actor_order) AS actor_details,
+    CASE 
+        WHEN mh.production_year < 2000 THEN 'Classic'
+        WHEN mh.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era_category
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    ActorRoles ar ON mh.movie_id = ar.movie_id
+LEFT JOIN 
+    CompanyCounts cc ON mh.movie_id = cc.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, cc.company_count
+ORDER BY 
+    mh.production_year DESC, mh.title;

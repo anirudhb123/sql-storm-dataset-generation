@@ -1,0 +1,55 @@
+
+WITH processed_addresses AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               COALESCE(CONCAT(', Suite ', ca_suite_number), ''), 
+               COALESCE(CONCAT(', ', ca_city), ''), 
+               COALESCE(CONCAT(', ', ca_state), ''), 
+               COALESCE(CONCAT(' ', ca_zip), '')) AS full_address,
+        ca_country
+    FROM 
+        customer_address
+), customer_sales AS (
+    SELECT
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        MIN(ws.ws_sold_date_sk) AS first_order_date,
+        MAX(ws.ws_sold_date_sk) AS last_order_date
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+), address_sales AS (
+    SELECT 
+        p.full_address,
+        p.ca_country,
+        cs.total_spent,
+        cs.total_orders,
+        cs.first_order_date,
+        cs.last_order_date
+    FROM 
+        processed_addresses p
+    JOIN 
+        customer_sales cs ON p.ca_address_id = c.c_current_addr_sk
+)
+SELECT 
+    a.full_address,
+    a.ca_country,
+    a.total_spent,
+    a.total_orders,
+    a.first_order_date,
+    a.last_order_date,
+    CASE 
+        WHEN a.total_spent > 1000 THEN 'High Value Customer'
+        WHEN a.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_value_segment
+FROM 
+    address_sales a
+WHERE 
+    a.total_orders > 5
+ORDER BY 
+    a.total_spent DESC;

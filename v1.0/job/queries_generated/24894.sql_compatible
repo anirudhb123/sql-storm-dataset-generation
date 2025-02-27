@@ -1,0 +1,82 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        c.person_id AS actor_id, 
+        c.movie_id, 
+        c.nr_order,
+        COALESCE(a.name, 'Unknown Actor') AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_rank
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        aka_name a ON a.person_id = c.person_id
+), 
+title_info AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year, 
+        k.keyword AS keywords,
+        ARRAY_AGG(DISTINCT cn.name) AS company_names
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN 
+        company_name cn ON cn.id = mc.company_id
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND (t.production_year BETWEEN 2000 AND 2023)
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+actor_activity AS (
+    SELECT 
+        ah.actor_id,
+        ah.actor_name,
+        COUNT(DISTINCT ah.movie_id) AS movies_count,
+        SUM(CASE 
+                WHEN ti.production_year > 2010 THEN 1 
+                ELSE 0 
+            END) AS recent_movies_count
+    FROM 
+        actor_hierarchy ah
+    JOIN 
+        title_info ti ON ti.title_id = ah.movie_id
+    GROUP BY 
+        ah.actor_id, ah.actor_name
+)
+SELECT 
+    a.actor_id,
+    a.actor_name,
+    a.movies_count,
+    a.recent_movies_count,
+    (CASE 
+        WHEN a.movies_count = 0 THEN 'No movies' 
+        ELSE ROUND((CAST(a.recent_movies_count AS DECIMAL) / a.movies_count) * 100, 2) || '%' 
+     END) AS recent_movie_percentage,
+    (SELECT 
+        STRING_AGG(DISTINCT t.title, ', ') 
+     FROM 
+        title_info t 
+     WHERE 
+        t.production_year = (
+            SELECT 
+                MAX(production_year) 
+            FROM 
+                title_info 
+            WHERE 
+                actor_id = a.actor_id
+        )
+    ) AS latest_movie_title
+FROM 
+    actor_activity a
+WHERE 
+    a.recent_movies_count > 0
+ORDER BY 
+    a.movies_count DESC, a.actor_name
+LIMIT 10;

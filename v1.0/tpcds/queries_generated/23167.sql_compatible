@@ -1,0 +1,50 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.item_sk,
+        ws.order_number,
+        ws.net_profit AS ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.item_sk ORDER BY ws.net_profit DESC) AS rank_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.item_sk ORDER BY ws.quantity DESC) AS rank_quantity
+    FROM web_sales ws
+    WHERE ws.sold_date_sk IN (SELECT d.d_date_sk 
+                               FROM date_dim d
+                               WHERE d.d_year = 2021 AND d.d_moy BETWEEN 1 AND 6)
+),
+StoreProfit AS (
+    SELECT 
+        ss.store_sk,
+        SUM(ss.net_profit) AS total_store_profit,
+        COUNT(DISTINCT ss.customer_sk) AS unique_customers
+    FROM store_sales ss
+    WHERE ss.sold_date_sk BETWEEN (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2021) 
+                              AND (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2021)
+    GROUP BY ss.store_sk
+),
+CustomerReturns AS (
+    SELECT 
+        sr.customer_sk,
+        COUNT(sr.returned_date_sk) AS return_count,
+        SUM(sr.return_amt) AS total_return_amount
+    FROM store_returns sr
+    WHERE sr.return_date_sk IS NOT NULL
+    GROUP BY sr.customer_sk
+)
+SELECT 
+    ca.city,
+    COUNT(DISTINCT R.customer_sk) AS return_customers,
+    SUM(R.total_return_amount) AS total_returned,
+    ROUND(AVG(sp.total_store_profit), 2) AS average_store_profit,
+    CASE WHEN AVG(sp.total_store_profit) > 10000 
+        THEN 'High Profit Store' 
+        ELSE 'Low Profit Store' 
+    END AS profit_category
+FROM customer_address ca
+LEFT JOIN CustomerReturns R ON ca.address_sk = R.customer_sk
+LEFT JOIN StoreProfit sp ON sp.store_sk IN (SELECT DISTINCT sr.store_sk 
+                                             FROM store_returns sr 
+                                             WHERE sr.customer_sk IS NOT NULL)
+WHERE ca.city IS NOT NULL
+GROUP BY ca.city
+HAVING COUNT(DISTINCT R.customer_sk) > 10
+ORDER BY return_customers DESC, average_store_profit DESC;

@@ -1,0 +1,54 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CURRENT_TIMESTAMP) 
+        AND p.Score IS NOT NULL
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(COALESCE(vs.BountyAmount, 0)) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes vs ON p.Id = vs.PostId AND vs.VoteTypeId = 8 
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalBounty,
+    us.TotalPosts,
+    us.TotalComments,
+    rp.Title AS TopPostTitle,
+    rp.Score AS TopPostScore,
+    rp.ViewCount AS TopPostViews
+FROM 
+    UserStats us
+LEFT JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId AND rp.rn = 1
+WHERE 
+    us.Reputation > 1000
+ORDER BY 
+    us.TotalPosts DESC, us.TotalBounty DESC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

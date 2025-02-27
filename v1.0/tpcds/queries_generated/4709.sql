@@ -1,0 +1,60 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year > 1980
+),
+AggregateSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        SUM(sd.ws_quantity) AS total_quantity,
+        SUM(sd.ws_net_profit) AS total_net_profit
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.rn = 1
+    GROUP BY 
+        sd.ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        as.ws_item_sk,
+        ai.i_item_id,
+        ai.i_product_name,
+        ai.i_current_price,
+        ai.i_brand
+    FROM 
+        AggregateSales as
+    JOIN 
+        item ai ON as.ws_item_sk = ai.i_item_sk
+    ORDER BY 
+        as.total_net_profit DESC
+    LIMIT 10
+)
+SELECT 
+    ti.i_item_id,
+    ti.i_product_name,
+    ti.i_current_price,
+    COALESCE(SUM(ws.ws_quantity), 0) AS total_quantity_sold,
+    COALESCE(SUM(ws.ws_net_profit), 0) AS total_net_profit_generated,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders
+FROM 
+    TopItems ti
+LEFT JOIN 
+    web_sales ws ON ti.ws_item_sk = ws.ws_item_sk
+GROUP BY 
+    ti.i_item_id, ti.i_product_name, ti.i_current_price
+ORDER BY 
+    total_net_profit_generated DESC
+OFFSET 5 ROWS
+FETCH NEXT 5 ROWS ONLY;

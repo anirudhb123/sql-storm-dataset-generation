@@ -1,0 +1,60 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        wr.returning_cdemo_sk,
+        SUM(wr.return_quantity) AS total_return_quantity,
+        SUM(wr.return_amt) AS total_return_amt,
+        ROW_NUMBER() OVER (PARTITION BY wr.returning_customer_sk ORDER BY SUM(wr.return_quantity) DESC) AS rn
+    FROM web_returns wr
+    GROUP BY
+        wr.returning_customer_sk,
+        wr.returning_cdemo_sk
+), CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band,
+        COALESCE(hd.hd_buy_potential, 'UNKNOWN') AS buy_potential
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+), CustomerReturnSummary AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.income_band,
+        cd.buy_potential,
+        COALESCE(rr.total_return_quantity, 0) AS total_return_quantity,
+        COALESCE(rr.total_return_amt, 0.00) AS total_return_amt
+    FROM CustomerDetails cd
+    LEFT JOIN RankedReturns rr ON cd.c_customer_sk = rr.returning_customer_sk
+    WHERE rr.rn = 1 OR rr.rn IS NULL
+)
+SELECT 
+    cus.c_first_name,
+    cus.c_last_name,
+    cus.cd_gender,
+    cus.cd_marital_status,
+    cus.total_return_quantity,
+    cus.total_return_amt,
+    CASE 
+        WHEN cus.total_return_amt >= 1000 THEN 'High Value'
+        WHEN cus.total_return_amt BETWEEN 500 AND 999 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS return_value_category,
+    CASE 
+        WHEN cus.buy_potential IS NULL THEN 'No data'
+        ELSE cus.buy_potential
+    END AS effective_buy_potential
+FROM CustomerReturnSummary cus
+WHERE (cus.total_return_quantity > 0 AND cus.buy_potential <> 'UNKNOWN')
+   OR (cus.total_return_amt IS NULL AND cus.income_band = 0)
+ORDER BY cus.total_return_quantity DESC
+LIMIT 100;

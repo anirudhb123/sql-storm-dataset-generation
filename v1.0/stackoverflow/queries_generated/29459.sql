@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS t(TagName) ON TRUE
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))::int[]
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    up.DisplayName AS TopUser,
+    up.PostCount AS TopUserPostCount,
+    up.TotalScore AS TopUserTotalScore,
+    ut.TagName AS TopTag,
+    ut.PostCount AS TopTagPostCount,
+    ut.TotalScore AS TopTagTotalScore
+FROM 
+    UserStats up
+JOIN 
+    TagStats ut ON up.TotalScore > 1000 AND ut.PostCount > 10
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM RankedPosts rp 
+        WHERE rp.UserPostRank = 1 AND rp.PostId IN (
+            SELECT p.Id
+            FROM Posts p
+            WHERE p.OwnerUserId = up.UserId
+        )
+    )
+ORDER BY 
+    up.TotalScore DESC, ut.TotalScore DESC
+LIMIT 10;

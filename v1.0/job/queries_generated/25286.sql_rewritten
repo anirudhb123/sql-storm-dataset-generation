@@ -1,0 +1,60 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        r.role AS role_name,
+        c.name AS company_name,
+        ko.keyword AS keyword,
+        GROUP_CONCAT(DISTINCT ko.keyword) AS keywords_list
+    FROM 
+        title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword ko ON mk.keyword_id = ko.id
+    WHERE 
+        t.production_year >= 2000 AND
+        a.name IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year, a.name, r.role, c.name
+),
+FormattedMovieDetails AS (
+    SELECT 
+        title_id,
+        title,
+        production_year,
+        actor_name,
+        role_name,
+        company_name,
+        keywords_list,
+        LCASE(REPLACE(title, ' ', '_')) AS formatted_title,
+        CONCAT('The movie "', title, '" starring ', actor_name, ' as ', role_name, ' produced by ', company_name, ' has keywords: ', keywords_list) AS description
+    FROM 
+        MovieDetails
+)
+SELECT 
+    title_id,
+    title,
+    production_year,
+    actor_name,
+    role_name,
+    company_name,
+    keywords_list,
+    formatted_title,
+    description
+FROM 
+    FormattedMovieDetails
+ORDER BY 
+    production_year DESC, actor_name;

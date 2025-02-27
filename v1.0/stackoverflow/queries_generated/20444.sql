@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.PostTypeId) AS totalPosts
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        CASE 
+            WHEN rp.rn <= 10 THEN 'Top 10'
+            ELSE 'Other'
+        END AS RankCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn <= 10 OR rp.rn = totalPosts
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostHistoryByCloseReason AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT r.Name, ', ') AS CloseReasonNames,
+        COUNT(ph.Id) AS CloseCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes r ON ph.Comment::INT = r.Id 
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Filter for close and reopen actions
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.Score,
+    tp.ViewCount,
+    tp.RankCategory,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    ph.CloseReasonNames,
+    ph.CloseCount,
+    COALESCE(NULLIF(tp.Score, 0), 'Score is zero or NULL') AS ScoreDisplay,
+    CASE 
+        WHEN ph.CloseCount > 0 THEN TRUE
+        ELSE FALSE
+    END AS IsClosed
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    UserBadges ub ON tp.OwnerDisplayName = (SELECT u.DisplayName FROM Users u WHERE u.Id = ub.UserId)
+LEFT JOIN 
+    PostHistoryByCloseReason ph ON tp.PostId = ph.PostId
+ORDER BY 
+    tp.Score DESC, 
+    tp.CreationDate ASC;

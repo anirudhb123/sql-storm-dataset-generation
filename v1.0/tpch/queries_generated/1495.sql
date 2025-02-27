@@ -1,0 +1,47 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.orderkey,
+        o.totalprice,
+        o.orderdate,
+        RANK() OVER (PARTITION BY o.orderstatus ORDER BY o.totalprice DESC) as order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.orderdate >= DATE '2022-01-01' 
+        AND o.totalprice BETWEEN 100 AND 10000
+), 
+SupplierSummary AS (
+    SELECT 
+        s.suppkey,
+        SUM(ps.availqty) AS total_available,
+        AVG(ps.supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.partkey) AS unique_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.suppkey = ps.suppkey
+    GROUP BY 
+        s.suppkey
+)
+SELECT 
+    R.orderkey,
+    R.totalprice,
+    R.orderdate,
+    SS.total_available,
+    SS.avg_supply_cost,
+    SS.unique_parts,
+    CASE 
+        WHEN SS.avg_supply_cost IS NULL THEN 'No Data'
+        WHEN SS.avg_supply_cost > 500 THEN 'High Cost'
+        ELSE 'Low/Moderate Cost'
+    END AS cost_category
+FROM 
+    RankedOrders R 
+LEFT JOIN 
+    SupplierSummary SS ON R.orderkey = SS.suppkey 
+WHERE 
+    (R.order_rank <= 5 OR SS.total_available IS NOT NULL)
+    AND R.totalprice IS NOT NULL
+ORDER BY 
+    R.totalprice DESC, 
+    R.orderdate ASC;

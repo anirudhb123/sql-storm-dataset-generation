@@ -1,0 +1,81 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2024-01-01'
+),
+supplier_product AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, 
+        ps.ps_suppkey
+),
+customer_region AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_regionkey,
+        r.r_name,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, 
+        c.c_name, 
+        n.n_regionkey, 
+        r.r_name
+),
+order_product AS (
+    SELECT 
+        l.l_orderkey,
+        p.p_partkey,
+        SUM(l.l_quantity) AS total_quantity,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        part p ON l.l_partkey = p.p_partkey
+    GROUP BY 
+        l.l_orderkey, 
+        p.p_partkey
+)
+SELECT 
+    cr.r_name,
+    cr.c_name,
+    COUNT(DISTINCT cr.c_custkey) AS unique_customers,
+    SUM(op.total_revenue) AS total_revenue,
+    AVG(sp.avg_supply_cost) AS avg_cost_per_part,
+    SUM(CASE WHEN ro.order_rank <= 5 THEN 1 ELSE 0 END) AS top_orders_count
+FROM 
+    customer_region cr
+LEFT JOIN 
+    order_product op ON cr.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderkey = op.l_orderkey)
+LEFT JOIN 
+    supplier_product sp ON op.p_partkey IN (SELECT DISTINCT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sp.ps_suppkey)
+LEFT JOIN 
+    ranked_orders ro ON cr.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderkey = ro.o_orderkey)
+WHERE 
+    cr.order_count > 0
+GROUP BY 
+    cr.r_name, 
+    cr.c_name
+ORDER BY 
+    total_revenue DESC, unique_customers DESC;

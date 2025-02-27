@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Body,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+                           WHERE t.TagName IS NOT NULL)
+    WHERE 
+        p.CreationDate >= (CURRENT_DATE - INTERVAL '1 year') -- considering recent posts
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.Body,
+        rp.Tags,
+        rp.CommentCount,
+        rp.PostRank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 5 -- Top 5 posts by type
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.Tags,
+    us.DisplayName AS Owner,
+    us.TotalBadges,
+    us.TotalPosts,
+    us.TotalComments,
+    us.TotalViews
+FROM 
+    TopPosts tp
+JOIN 
+    Users us ON tp.PostId = (SELECT AcceptedAnswerId FROM Posts WHERE Id = tp.PostId)
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

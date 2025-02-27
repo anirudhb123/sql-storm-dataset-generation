@@ -1,0 +1,77 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        0 AS Level,
+        CAST(p.Title AS VARCHAR) AS FullTitle
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1,
+        CAST(r.FullTitle || ' -> ' || p.Title AS VARCHAR)
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostVoteStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN 1 ELSE 0 END) AS NonNullableViews
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    r.FullTitle AS PostHierarchy,
+    COALESCE(vs.TotalVotes, 0) AS TotalVotes,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    COALESCE(ts.PostCount, 0) AS AssociatedTagCount,
+    COALESCE(ts.NonNullableViews, 0) AS ValidViewCount,
+    CASE 
+        WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS HasAcceptedAnswer
+FROM 
+    Posts p
+LEFT JOIN 
+    PostVoteStatistics vs ON p.Id = vs.PostId
+LEFT JOIN 
+    TagStatistics ts ON ',' || p.Tags || ',' LIKE '%,' || ts.TagName || ',%'
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.Id
+WHERE 
+    p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+ORDER BY 
+    TotalVotes DESC, p.ViewCount DESC
+LIMIT 100;

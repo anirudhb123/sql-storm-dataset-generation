@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(e.PostId) AS EditCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS RecentEditRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5, 6)
+    LEFT JOIN 
+        PostHistory ph2 ON p.Id = ph2.PostId AND ph2.PostHistoryTypeId = 24
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, u.DisplayName
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.EditCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RecentEditRank = 1
+        AND rp.CommentCount > 5 
+        AND rp.EditCount > 0
+),
+
+AggregatedData AS (
+    SELECT 
+        fp.OwnerDisplayName,
+        COUNT(fp.PostId) AS TotalPosts,
+        SUM(fp.CommentCount) AS TotalComments,
+        SUM(fp.EditCount) AS TotalEdits,
+        STRING_AGG(fp.Title, ', ') AS PostTitles
+    FROM 
+        FilteredPosts fp
+    GROUP BY 
+        fp.OwnerDisplayName
+)
+
+SELECT 
+    ad.OwnerDisplayName,
+    ad.TotalPosts,
+    ad.TotalComments,
+    ad.TotalEdits,
+    ad.PostTitles
+FROM 
+    AggregatedData ad
+WHERE 
+    ad.TotalComments > 50
+ORDER BY 
+    ad.TotalComments DESC;

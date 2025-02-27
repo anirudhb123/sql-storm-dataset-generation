@@ -1,0 +1,16 @@
+SELECT 
+    pt.Name AS PostType,
+    COUNT(p.Id) AS PostCount,
+    SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount,
+    SUM(CASE WHEN p.AwardedDate IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswerCount,
+    AVG(COALESCE(DATEDIFF(MINUTE, p.CreationDate, p.LastActivityDate), 0)) AS AvgActiveTimeMinutes,
+    SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+    SUM(COALESCE(CASE WHEN p.PostTypeId = 1 THEN p.AnswerCount ELSE 0 END, 0)) AS TotalAnswersToQuestions
+FROM 
+    Posts p
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+GROUP BY 
+    pt.Name
+ORDER BY 
+    PostCount DESC;

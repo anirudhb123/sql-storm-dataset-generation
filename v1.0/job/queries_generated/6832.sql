@@ -1,0 +1,41 @@
+SELECT 
+    t.title AS movie_title, 
+    ak.name AS actor_name, 
+    ci.nr_order AS actor_order, 
+    cmt.kind AS company_type, 
+    ct.kind AS comp_company_type, 
+    ti.info AS movie_info, 
+    kw.keyword AS movie_keyword 
+FROM 
+    title t 
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id 
+JOIN 
+    cast_info ci ON cc.subject_id = ci.id 
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id 
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id 
+JOIN 
+    company_name cn ON mc.company_id = cn.id 
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id 
+JOIN 
+    movie_info mi ON t.id = mi.movie_id 
+JOIN 
+    info_type it ON mi.info_type_id = it.id 
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id 
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id 
+LEFT JOIN 
+    kind_type kt ON t.kind_id = kt.id 
+LEFT JOIN 
+    comp_cast_type cmt ON ci.person_role_id = cmt.id 
+WHERE 
+    t.production_year >= 2000 
+    AND ak.name IS NOT NULL 
+    AND cn.country_code = 'USA' 
+ORDER BY 
+    t.title, 
+    ci.nr_order;

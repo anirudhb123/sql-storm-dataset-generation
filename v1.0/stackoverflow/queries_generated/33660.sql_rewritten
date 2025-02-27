@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' AND 
+        p.Score > 0
+), 
+UsersBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), 
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        MAX(ph.CreationDate) AS LastChangeDate,
+        STRING_AGG(DISTINCT ph.UserDisplayName, ', ') AS Editors
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, 
+        ph.PostHistoryTypeId
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    COUNT(DISTINCT rp.PostId) AS PostCount,
+    COALESCE(SUM(upb.TotalBadges), 0) AS BadgeCount,
+    AVG(rp.Score) AS AverageScore,
+    MAX(rp.ViewCount) AS MaxViewCount,
+    MAX(phd.ChangeCount) AS MaxHistoryChanges
+FROM 
+    Users u
+JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    UsersBadges upb ON u.Id = upb.UserId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE 
+    rp.Rank <= 5  
+GROUP BY 
+    u.Id, 
+    u.DisplayName
+ORDER BY 
+    AverageScore DESC, 
+    BadgeCount DESC
+LIMIT 10;

@@ -1,0 +1,47 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM Posts p
+    WHERE p.PostTypeId = 1 AND p.Score > 0
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostComments AS (
+    SELECT 
+        pc.PostId,
+        COUNT(pc.Id) AS CommentCount,
+        MAX(pc.CreationDate) AS LastCommentDate
+    FROM Comments pc
+    GROUP BY pc.PostId
+)
+SELECT 
+    up.PostId,
+    up.Title,
+    up.CreationDate,
+    up.Score,
+    up.ViewCount,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    pc.CommentCount,
+    pc.LastCommentDate,
+    COALESCE(pd.ClosedDate, 'Not Closed') AS ClosedStatus,
+    CASE WHEN pc.CommentCount > 5 THEN 'Popular Discussion' ELSE 'Less Active' END AS ActivityStatus
+FROM RankedPosts up
+LEFT JOIN UserBadges ub ON up.OwnerUserId = ub.UserId
+LEFT JOIN PostComments pc ON up.PostId = pc.PostId
+LEFT JOIN Posts pd ON up.PostId = pd.Id
+WHERE up.rn = 1
+AND up.Score > (SELECT AVG(Score) FROM Posts WHERE PostTypeId = 1)
+ORDER BY up.Score DESC, up.ViewCount DESC;

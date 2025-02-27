@@ -1,0 +1,50 @@
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY RAND()) AS random_rank
+    FROM title m
+    WHERE m.production_year IS NOT NULL
+),
+actor_movie_count AS (
+    SELECT 
+        c.person_id, 
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM cast_info c
+    JOIN ranked_movies rm ON c.movie_id = rm.movie_id
+    GROUP BY c.person_id
+    HAVING COUNT(DISTINCT c.movie_id) > 5
+),
+actor_names AS (
+    SELECT 
+        a.person_id, 
+        STRING_AGG(a.name, ', ') AS all_names
+    FROM aka_name a
+    JOIN actor_movie_count amc ON a.person_id = amc.person_id
+    GROUP BY a.person_id
+),
+movie_keyword_count AS (
+    SELECT 
+        mk.movie_id, 
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM movie_keyword mk
+    JOIN ranked_movies rm ON mk.movie_id = rm.movie_id
+    GROUP BY mk.movie_id
+    HAVING COUNT(DISTINCT mk.keyword_id) > 3
+)
+SELECT 
+    rm.title, 
+    rm.production_year, 
+    ak.all_names, 
+    COALESCE(mkc.keyword_count, 0) AS keyword_count
+FROM ranked_movies rm
+LEFT JOIN movie_keyword_count mkc ON rm.movie_id = mkc.movie_id
+JOIN actor_names ak ON ak.person_id IN (
+    SELECT c.person_id 
+    FROM cast_info c 
+    WHERE c.movie_id = rm.movie_id
+)
+WHERE rm.random_rank <= 10
+ORDER BY rm.production_year DESC, mkc.keyword_count DESC
+LIMIT 20;

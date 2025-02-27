@@ -1,0 +1,33 @@
+
+SELECT 
+    p.p_name, 
+    s.s_name, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    SUBSTRING(p.p_comment FROM 1 FOR 15) AS short_comment,
+    CONCAT('Supplier: ', s.s_name, ' - Region: ', r.r_name) AS supplier_info,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON c.c_nationkey = s.s_nationkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    orders o ON o.o_custkey = c.c_custkey
+WHERE 
+    r.r_name LIKE '%EUROPE%'
+    AND l.l_shipdate >= '1997-01-01'
+GROUP BY 
+    p.p_name, s.s_name, r.r_name, p.p_comment
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY 
+    revenue DESC, s.s_name;

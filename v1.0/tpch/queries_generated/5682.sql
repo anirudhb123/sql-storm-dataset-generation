@@ -1,0 +1,55 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.order_rank <= 10
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_availqty,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.o_totalprice,
+    spd.s_name,
+    spd.total_availqty,
+    spd.total_supplycost
+FROM 
+    TopOrders to
+JOIN 
+    lineitem l ON to.o_orderkey = l.l_orderkey
+JOIN 
+    SupplierPartDetails spd ON l.l_partkey = spd.ps_partkey
+WHERE 
+    l.l_shipdate >= DATE '2023-01-01'
+ORDER BY 
+    to.o_totalprice DESC, to.o_orderdate ASC;

@@ -1,0 +1,70 @@
+WITH UserBadgeCounts AS (
+    SELECT UserId, COUNT(*) AS BadgeCount
+    FROM Badges
+    GROUP BY UserId
+),
+PostTypeSummary AS (
+    SELECT 
+        pt.Id AS PostTypeId,
+        pt.Name AS PostTypeName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM PostTypes pt
+    LEFT JOIN Posts p ON p.PostTypeId = pt.Id
+    GROUP BY pt.Id, pt.Name
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+UserVoteSummary AS (
+    SELECT 
+        v.UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesGiven,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesGiven
+    FROM Votes v
+    GROUP BY v.UserId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenedDate,
+        COUNT(DISTINCT ph.UserId) AS NumberOfEdits
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+    COALESCE(uvs.UpVotesGiven, 0) AS UpVotesGiven,
+    COALESCE(uvs.DownVotesGiven, 0) AS DownVotesGiven,
+    COALESCE(rp.Title, 'No Recent Posts') AS RecentPostTitle,
+    COALESCE(rp.CreationDate, 'No Recent Posts') AS RecentPostDate,
+    pts.PostTypeName,
+    pts.PostCount,
+    pts.TotalViews,
+    pts.AverageScore,
+    COALESCE(phs.ClosedDate, 'Not Closed') AS ClosedDate,
+    COALESCE(phs.ReopenedDate, 'Not Reopened') AS ReopenedDate,
+    phs.NumberOfEdits
+FROM Users u
+LEFT JOIN UserBadgeCounts ub ON u.Id = ub.UserId
+LEFT JOIN UserVoteSummary uvs ON u.Id = uvs.UserId
+LEFT JOIN RecentPosts rp ON u.Id = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN PostTypeSummary pts ON pts.PostTypeId IN (SELECT PostTypeId FROM Posts WHERE OwnerUserId = u.Id)
+LEFT JOIN PostHistorySummary phs ON phs.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+WHERE 
+    (COALESCE(ub.BadgeCount, 0) > 0 OR COALESCE(uvs.UpVotesGiven, 0) > 0)
+    AND (rp.Title IS NOT NULL OR pts.PostCount > 0)
+ORDER BY u.Reputation DESC, ub.BadgeCount DESC
+LIMIT 100;

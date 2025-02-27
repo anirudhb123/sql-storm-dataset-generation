@@ -1,0 +1,79 @@
+
+WITH RECURSIVE AddressCTE AS (
+    SELECT 
+        ca_address_sk,
+        ca_city,
+        ca_state,
+        ca_country,
+        1 AS level
+    FROM 
+        customer_address
+    WHERE 
+        ca_state = 'CA'
+    
+    UNION ALL
+    
+    SELECT 
+        ca_address_sk,
+        'Other Cities' AS ca_city,
+        ca_state,
+        ca_country,
+        level + 1
+    FROM 
+        customer_address
+    JOIN 
+        AddressCTE ON ca_state = AddressCTE.ca_state
+    WHERE 
+        level < 3
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(distinct CASE WHEN cd_gender = 'M' THEN c.c_customer_id END) AS male_count,
+        COUNT(distinct CASE WHEN cd_gender = 'F' THEN c.c_customer_id END) AS female_count,
+        SUM(COALESCE(cd_purchase_estimate, 0)) AS total_purchase_estimate,
+        a.ca_city,
+        a.ca_state,
+        a.ca_country
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        AddressCTE a ON c.c_current_addr_sk = a.ca_address_sk
+    GROUP BY 
+        a.ca_city, a.ca_state, a.ca_country
+),
+SalesSummary AS (
+    SELECT 
+        ws_ship_date_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS unique_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_ship_date_sk
+)
+SELECT 
+    cs.ca_city,
+    cs.ca_state,
+    cs.ca_country,
+    cs.male_count,
+    cs.female_count,
+    cs.total_purchase_estimate,
+    ss.total_net_profit,
+    ss.unique_orders,
+    RANK() OVER (PARTITION BY cs.ca_state ORDER BY cs.total_purchase_estimate DESC) AS rank_by_purchase_estimate,
+    CASE 
+        WHEN ss.total_net_profit IS NULL THEN 'No Sales'
+        WHEN ss.total_net_profit < 1000 THEN 'Low Profit'
+        ELSE 'High Profit'
+    END AS profit_band
+FROM 
+    CustomerSummary cs
+LEFT JOIN 
+    SalesSummary ss ON cs.ca_city = 'Los Angeles' AND cs.ca_state = ss.ws_ship_date_sk
+WHERE 
+    (cs.total_purchase_estimate > 10000 OR cs.male_count > 5)
+ORDER BY 
+    cs.total_purchase_estimate DESC, cs.ca_city;

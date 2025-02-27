@@ -1,0 +1,59 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL 
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.PostTypeId,
+        a.ParentId,
+        ph.Level + 1 AS Level
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy ph ON a.ParentId = ph.PostId
+)
+SELECT 
+    users.DisplayName,
+    users.Reputation,
+    COUNT(DISTINCT posts.Id) AS TotalPosts,
+    COUNT(DISTINCT comments.Id) AS TotalComments,
+    COALESCE(SUM(CASE WHEN votes.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+    COALESCE(SUM(CASE WHEN votes.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+    COUNT(DISTINCT badges.Id) AS TotalBadges,
+    STRING_AGG(DISTINCT tags.TagName, ', ') AS TagList,
+    ph.Level
+FROM 
+    Users users
+LEFT JOIN 
+    Posts posts ON users.Id = posts.OwnerUserId
+LEFT JOIN 
+    Comments comments ON posts.Id = comments.PostId
+LEFT JOIN 
+    Votes votes ON posts.Id = votes.PostId
+LEFT JOIN 
+    Badges badges ON users.Id = badges.UserId
+LEFT JOIN 
+    Posts postLinks ON posts.Id = postLinks.Id 
+LEFT JOIN 
+    Tags tags ON tags.Id IN (SELECT UNNEST(string_to_array(posts.Tags, '>'))::integer)
+LEFT JOIN 
+    RecursivePostHierarchy ph ON posts.Id = ph.PostId
+WHERE 
+    users.Reputation > 100
+GROUP BY 
+    users.Id, users.DisplayName, users.Reputation, ph.Level
+ORDER BY 
+    TotalPosts DESC, TotalUpvotes DESC 
+LIMIT 100;

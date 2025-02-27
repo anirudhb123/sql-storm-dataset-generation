@@ -1,0 +1,64 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        l.Name AS LinkType,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN 
+        LinkTypes l ON pl.LinkTypeId = l.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        b.Name AS BadgeName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, b.Name
+),
+TopUsers AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        SUM(CASE WHEN ub.BadgeName IS NOT NULL THEN ub.BadgeCount ELSE 0 END) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+    ORDER BY 
+        u.Reputation DESC, TotalBadges DESC
+    LIMIT 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    tu.DisplayName AS TopUser,
+    tu.Reputation
+FROM 
+    RankedPosts rp
+JOIN 
+    TopUsers tu ON rp.OwnerUserId = tu.UserId
+WHERE 
+    rp.Rank <= 3 
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

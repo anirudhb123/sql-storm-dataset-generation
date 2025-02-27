@@ -1,0 +1,50 @@
+
+WITH RECURSIVE PriceHistory AS (
+    SELECT l_partkey, 
+           l_orderkey, 
+           l_extendedprice, 
+           ROW_NUMBER() OVER (PARTITION BY l_partkey ORDER BY l_orderkey DESC) AS rn
+    FROM lineitem
+    WHERE l_returnflag = 'R'
+),
+NationalSuppliers AS (
+    SELECT n.n_nationkey, 
+           n.n_name, 
+           s.s_suppkey, 
+           SUM(s.s_acctbal) AS total_acctbal,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_mfgr, 
+    COUNT(DISTINCT l.l_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(NULLIF(l.l_tax, 0)) OVER (PARTITION BY p.p_partkey) AS avg_tax,
+    (SELECT MAX(ps.ps_supplycost)
+     FROM partsupp ps 
+     WHERE ps.ps_partkey = p.p_partkey) AS max_supply_cost,
+    (
+        SELECT COUNT(*)
+        FROM (
+            SELECT 1 
+            FROM lineitem
+            WHERE l_shipdate > DATE '1998-10-01' - INTERVAL '1' YEAR
+            GROUP BY l_partkey
+            HAVING SUM(l_quantity) >= (SELECT AVG(ps.ps_availqty) FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+        ) AS subquery
+    ) AS order_count_exceeding_avg,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM NationalSuppliers ns WHERE ns.total_acctbal > 100000 AND ns.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'FRANCE')) THEN 'High Value'
+        ELSE 'Regular Value'
+    END AS supplier_value_category
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN PriceHistory ph ON ph.l_partkey = p.p_partkey
+WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size < p.p_size)
+GROUP BY p.p_partkey, p.p_name, p.p_mfgr
+HAVING total_orders > COALESCE(NULLIF(SUM(CASE WHEN l.l_discount > 0 THEN l.l_quantity ELSE 0 END), 0), 1)
+ORDER BY total_revenue DESC, p.p_name ASC;

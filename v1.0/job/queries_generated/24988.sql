@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorCounts AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type,
+        RANK() OVER (PARTITION BY mc.movie_id ORDER BY ct.kind) AS company_rank
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        co.country_code IS NOT NULL
+),
+MovieInfo AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT mi.info, ', ') AS infos
+    FROM 
+        movie_info m
+    JOIN 
+        info_type it ON m.info_type_id = it.id
+    WHERE 
+        mi.info IS NOT NULL
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    R.movie_id,
+    R.title,
+    R.production_year,
+    COALESCE(A.actor_count, 0) AS actor_count,
+    COALESCE(C.company_name, 'Unknown') AS company_name,
+    COALESCE(C.company_type, 'Not Specified') AS company_type,
+    COALESCE(M.infos, 'No Information') AS additional_info,
+    CASE 
+        WHEN R.production_year IS NULL OR R.production_year < 1900 THEN 'Classic'
+        WHEN R.production_year < 2000 THEN 'Modern Classic'
+        ELSE 'Contemporary'
+    END AS era_category
+FROM 
+    RankedMovies R
+LEFT JOIN 
+    ActorCounts A ON R.movie_id = A.movie_id
+LEFT JOIN 
+    CompanyDetails C ON R.movie_id = C.movie_id AND C.company_rank = 1
+LEFT JOIN 
+    MovieInfo M ON R.movie_id = M.movie_id
+ORDER BY 
+    R.production_year DESC, R.title;

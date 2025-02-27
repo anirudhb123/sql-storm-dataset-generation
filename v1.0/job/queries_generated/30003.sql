@@ -1,0 +1,84 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id, 
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+cast_with_roles AS (
+    SELECT 
+        c.movie_id,
+        ak.name AS actor_name,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY ak.name) AS role_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+movies_with_keywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+joined_data AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        cw.actor_name,
+        cw.role,
+        mw.keywords,
+        mh.depth
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_with_roles cw ON mh.movie_id = cw.movie_id
+    LEFT JOIN 
+        movies_with_keywords mw ON mh.movie_id = mw.movie_id
+)
+SELECT 
+    jd.movie_id,
+    jd.title,
+    jd.production_year,
+    jd.actor_name,
+    jd.role,
+    jd.keywords,
+    jd.depth,
+    COALESCE(jd.keywords, 'No Keywords') AS keywords_description,
+    CASE 
+        WHEN jd.depth > 1 THEN 'Linked Movie'
+        ELSE 'Standalone Movie'
+    END AS movie_type
+FROM 
+    joined_data jd
+WHERE 
+    jd.production_year >= 2000
+ORDER BY 
+    jd.production_year DESC, jd.title;

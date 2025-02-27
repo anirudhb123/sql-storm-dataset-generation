@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS ActorName,
+    at.title AS MovieTitle,
+    COUNT(DISTINCT cc.person_id) AS TotalCast,
+    MAX(mh.depth) AS MaxDepth,
+    AVG(mh.production_year) AS AvgProductionYear,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS Keywords,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY COUNT(DISTINCT kw.keyword) DESC) AS KeywordRank,
+    COALESCE(SUM(CASE WHEN pi.info IS NOT NULL THEN 1 ELSE 0 END), 0) AS InfoCount
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    MovieHierarchy mh ON mh.movie_id = at.id
+LEFT JOIN 
+    person_info pi ON pi.person_id = ak.person_id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.id, at.title
+HAVING 
+    COUNT(DISTINCT cc.person_id) > 10 
+ORDER BY 
+    KeywordRank, MaxDepth DESC;

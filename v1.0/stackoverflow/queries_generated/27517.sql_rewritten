@@ -1,0 +1,67 @@
+WITH PostTags AS (
+    SELECT 
+        P.Id AS PostId,
+        unnest(string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><')) AS Tag
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalQuestions,
+        COUNT(DISTINCT A.Id) AS TotalAnswers,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1 
+    LEFT JOIN 
+        Posts A ON A.ParentId = P.Id 
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id AND V.PostId IN (P.Id, A.Id) 
+    GROUP BY 
+        U.Id
+),
+TagStats AS (
+    SELECT 
+        T.Tag,
+        COUNT(DISTINCT PT.PostId) AS QuestionCount,
+        COUNT(DISTINCT P.Id) AS PostIdCount
+    FROM 
+        PostTags PT
+    JOIN 
+        Posts P ON PT.PostId = P.Id
+    JOIN 
+        Tags T ON PT.Tag = T.TagName
+    GROUP BY 
+        T.Tag
+),
+UserRanking AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.TotalQuestions,
+        U.TotalAnswers,
+        U.TotalUpVotes - U.TotalDownVotes AS NetVotes,
+        RANK() OVER (ORDER BY U.TotalQuestions DESC, NetVotes DESC) AS Rank
+    FROM 
+        UserStats U
+)
+SELECT 
+    UR.Rank,
+    UR.DisplayName,
+    UR.TotalQuestions,
+    UR.TotalAnswers,
+    UR.NetVotes,
+    TS.Tag,
+    TS.QuestionCount
+FROM 
+    UserRanking UR
+JOIN 
+    TagStats TS ON UR.TotalQuestions > 0
+ORDER BY 
+    UR.Rank, TS.Tag;

@@ -1,0 +1,62 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name AS cust_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'P') 
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 5000
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    hs.cust_name,
+    hs.total_spent,
+    ps.p_name,
+    ps.total_avail_qty,
+    ps.avg_supply_cost,
+    rs.s_name AS top_supplier
+FROM 
+    HighValueCustomers hs
+LEFT JOIN 
+    PartStats ps ON hs.total_spent > ps.total_avail_qty
+LEFT JOIN 
+    RankedSuppliers rs ON ps.supplier_count > 1 AND rs.rank = 1
+WHERE 
+    ps.total_avail_qty IS NOT NULL 
+ORDER BY 
+    hs.total_spent DESC, ps.avg_supply_cost ASC
+LIMIT 100;

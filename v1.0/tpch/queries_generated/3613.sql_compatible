@@ -1,0 +1,63 @@
+
+WITH OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_custkey) AS unique_customers
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierPerformance AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(li.l_quantity) AS total_quantity_supplied,
+        AVG(li.l_extendedprice) AS avg_extended_price,
+        COUNT(DISTINCT o.o_orderkey) AS num_orders
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem li ON ps.ps_partkey = li.l_partkey
+    JOIN 
+        orders o ON li.l_orderkey = o.o_orderkey
+    GROUP BY 
+        ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        sp.s_suppkey,
+        sp.s_name,
+        sp.s_acctbal,
+        sp.s_nationkey,
+        ROW_NUMBER() OVER (ORDER BY pp.total_quantity_supplied DESC) AS rank
+    FROM 
+        supplier sp
+    JOIN 
+        SupplierPerformance pp ON sp.s_suppkey = pp.ps_suppkey
+    WHERE 
+        sp.s_acctbal > (SELECT AVG(s.s_acctbal) FROM supplier s)
+)
+SELECT 
+    ns.n_name AS nation_name,
+    ts.s_name AS supplier_name,
+    pp.total_quantity_supplied,
+    os.unique_customers,
+    os.total_sales
+FROM 
+    TopSuppliers ts
+LEFT JOIN 
+    nation ns ON ts.s_nationkey = ns.n_nationkey
+LEFT JOIN 
+    OrderSummary os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = ts.s_nationkey))
+LEFT JOIN 
+    SupplierPerformance pp ON ts.s_suppkey = pp.ps_suppkey
+WHERE 
+    ts.rank <= 10
+ORDER BY 
+    os.total_sales DESC;

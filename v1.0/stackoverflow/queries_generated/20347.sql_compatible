@@ -1,0 +1,80 @@
+
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.AcceptedAnswerId,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score, P.AcceptedAnswerId, P.OwnerUserId
+), 
+FilteredPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CreationDate,
+        PS.ViewCount,
+        PS.Score,
+        PS.UpVotes,
+        PS.DownVotes,
+        PS.CommentCount,
+        PS.UserPostRank,
+        U.DisplayName,
+        U.Reputation,
+        
+        CASE 
+            WHEN PS.UpVotes < PS.DownVotes THEN U.Reputation * (-1)
+            ELSE U.Reputation 
+        END AS AdjustedReputation
+    FROM 
+        PostStats PS
+    JOIN 
+        Users U ON PS.AcceptedAnswerId = U.Id
+    WHERE 
+        PS.UserPostRank <= 3 
+), 
+AggregatedStats AS (
+    SELECT 
+        AVG(AdjustedReputation) AS AvgAdjustedReputation,
+        SUM(ViewCount) AS TotalViews,
+        SUM(CommentCount) AS TotalComments
+    FROM 
+        FilteredPosts
+    WHERE 
+        AdjustedReputation IS NOT NULL
+)
+SELECT 
+    FP.PostId,
+    FP.Title,
+    FP.CreationDate,
+    FP.ViewCount,
+    FP.Score,
+    FP.UpVotes,
+    FP.DownVotes,
+    FP.CommentCount,
+    FP.DisplayName,
+    FP.Reputation,
+    FS.AvgAdjustedReputation,
+    FS.TotalViews,
+    FS.TotalComments
+FROM 
+    FilteredPosts FP
+CROSS JOIN 
+    AggregatedStats FS
+ORDER BY 
+    FP.ViewCount DESC
+LIMIT 10;

@@ -1,0 +1,44 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        ws.web_name,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023) - 30 
+        AND (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        ws.web_site_id, ws.web_name
+),
+TopSales AS (
+    SELECT web_site_id, web_name, total_sales, order_count
+    FROM SalesData
+    WHERE sales_rank <= 5
+)
+SELECT 
+    w.web_site_id,
+    w.web_name,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    COALESCE(ts.order_count, 0) AS order_count,
+    CASE 
+        WHEN COALESCE(ts.total_sales, 0) = 0 THEN 'No Sales'
+        ELSE CONCAT('Total Sales: ', COALESCE(ts.total_sales, 0))
+    END AS sales_message,
+    (SELECT COUNT(*) FROM customer c WHERE c.c_current_cdemo_sk IS NOT NULL) AS customer_count,
+    (SELECT COUNT(*) FROM promotion p WHERE p.p_discount_active = 'Y') AS active_promos,
+    (SELECT AVG(inv.inv_quantity_on_hand) 
+     FROM inventory inv 
+     JOIN item i ON inv.inv_item_sk = i.i_item_sk 
+     WHERE inv.inv_date_sk = (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)) AS avg_inventory
+FROM 
+    web_site w
+LEFT JOIN 
+    TopSales ts ON w.web_site_id = ts.web_site_id
+ORDER BY 
+    ts.total_sales DESC NULLS LAST;

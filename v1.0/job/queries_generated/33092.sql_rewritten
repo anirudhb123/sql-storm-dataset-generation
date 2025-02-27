@@ -1,0 +1,58 @@
+WITH RECURSIVE recent_movies AS (
+    SELECT id, title, production_year
+    FROM aka_title
+    WHERE production_year >= 2020
+    UNION ALL
+    SELECT a.id, a.title, a.production_year
+    FROM aka_title a
+    INNER JOIN recent_movies r ON a.id = r.id
+    WHERE a.production_year < r.production_year
+),
+company_stats AS (
+    SELECT cc.id AS company_id, 
+           c.name AS company_name, 
+           ct.kind AS company_type, 
+           COUNT(DISTINCT mc.movie_id) AS total_movies,
+           AVG(m.production_year) AS avg_production_year
+    FROM company_name c
+    JOIN movie_companies mc ON c.id = mc.company_id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    JOIN aka_title m ON mc.movie_id = m.id
+    WHERE c.country_code IS NOT NULL
+    GROUP BY cc.id, c.name, ct.kind
+),
+cast_role_count AS (
+    SELECT ci.movie_id,
+           COUNT(ci.role_id) AS role_count
+    FROM cast_info ci
+    GROUP BY ci.movie_id
+),
+joined_data AS (
+    SELECT a.id AS movie_id,
+           a.title,
+           a.production_year,
+           cs.company_name,
+           cs.total_movies,
+           cs.avg_production_year,
+           crc.role_count
+    FROM aka_title a
+    LEFT JOIN company_stats cs ON cs.total_movies > 5
+    LEFT JOIN cast_role_count crc ON a.id = crc.movie_id
+    WHERE a.production_year >= 2020
+),
+ranked_data AS (
+    SELECT jd.*,
+           ROW_NUMBER() OVER (PARTITION BY jd.company_name ORDER BY jd.production_year DESC) AS rank_per_company
+    FROM joined_data jd
+)
+SELECT jd.movie_id,
+       jd.title,
+       jd.production_year,
+       jd.company_name,
+       jd.total_movies,
+       jd.avg_production_year,
+       jd.role_count,
+       jd.rank_per_company
+FROM ranked_data jd
+WHERE jd.rank_per_company <= 5
+ORDER BY jd.company_name, jd.production_year DESC;

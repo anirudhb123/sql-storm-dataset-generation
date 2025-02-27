@@ -1,0 +1,52 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca_country,
+        COUNT(*) AS address_count,
+        STRING_AGG(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, ', ', ca_city, ', ', ca_state, ' ', ca_zip), '; ') AS full_addresses
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_country
+),
+DemographicsInfo AS (
+    SELECT 
+        cd_gender,
+        SUM(cd_dep_count) AS total_dependents,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        STRING_AGG(CONCAT(cd_gender, ' ', cd_marital_status, ' ', cd_education_status), '; ') AS demographics_summary
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+DateDetails AS (
+    SELECT 
+        d_year,
+        COUNT(d_date) AS total_days,
+        STRING_AGG(DISTINCT d_day_name, ', ') AS unique_days
+    FROM 
+        date_dim
+    GROUP BY 
+        d_year
+)
+
+SELECT 
+    A.ca_country,
+    A.address_count,
+    A.full_addresses,
+    D.d_year,
+    D.total_days,
+    D.unique_days,
+    DE.cd_gender,
+    DE.total_dependents,
+    DE.avg_purchase_estimate,
+    DE.demographics_summary
+FROM 
+    AddressInfo A
+JOIN 
+    DemographicsInfo DE ON (1=1)  -- Cartesian join for every combination
+JOIN 
+    DateDetails D ON (1=1)  -- Cartesian join for every combination
+ORDER BY 
+    A.ca_country, DE.cd_gender, D.d_year;

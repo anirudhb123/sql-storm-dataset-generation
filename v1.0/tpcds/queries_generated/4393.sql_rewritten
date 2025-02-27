@@ -1,0 +1,54 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ws.ws_sold_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim) 
+),
+CustomerReturns AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returns,
+        COUNT(DISTINCT cr.cr_returning_customer_sk) AS unique_returners
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.cr_returned_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        cr.cr_item_sk
+),
+SalesSummary AS (
+    SELECT 
+        i.i_item_id,
+        COALESCE(SUM(ws.ws_sales_price), 0) AS total_sales_amount,
+        COALESCE(cs.total_returns, 0) AS total_returns,
+        COALESCE(cs.unique_returners, 0) AS unique_returners
+    FROM 
+        item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN CustomerReturns cs ON i.i_item_sk = cs.cr_item_sk
+    GROUP BY 
+        i.i_item_id
+)
+SELECT 
+    ss.i_item_id,
+    ss.total_sales_amount,
+    ss.total_returns,
+    ss.unique_returners,
+    CASE 
+        WHEN ss.total_sales_amount > 0 THEN 
+            ROUND((ss.total_returns::decimal / NULLIF(ss.total_sales_amount, 0)) * 100, 2)
+        ELSE 
+            0
+    END AS return_rate_percentage
+FROM 
+    SalesSummary ss
+JOIN RankedSales rs ON ss.i_item_id = (SELECT i.i_item_id FROM item i WHERE i.i_item_sk = rs.ws_item_sk AND rs.rn = 1)
+ORDER BY 
+    return_rate_percentage DESC;

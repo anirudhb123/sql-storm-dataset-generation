@@ -1,0 +1,89 @@
+
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        Id,
+        Reputation,
+        CreationDate,
+        1 AS Level
+    FROM 
+        Users
+    WHERE 
+        Reputation > 1000
+    UNION ALL
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.CreationDate,
+        ur.Level + 1
+    FROM 
+        Users u
+        INNER JOIN UserReputationCTE ur ON u.Reputation > 1000
+        AND u.Id <> ur.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate,
+        p.Score, 
+        COALESCE(AVG(v.BountyAmount), 0) AS AvgBounty,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p 
+        LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+RecentHighlyActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS ActivePostCount
+    FROM 
+        Users u
+        JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+    HAVING 
+        COUNT(p.Id) > 5
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(sc.SubmittedCount, 0) AS SubmittedPostCount,
+    COALESCE(pc.CLOSEDPostCount, 0) AS ClosedPostCount,
+    ps.PostRank,
+    ps.Title AS LastPostedTitle,
+    ps.Score AS LastPostScore,
+    ps.AvgBounty,
+    pc.CreationDate AS ClosedDate,
+    CASE 
+        WHEN pc.CreationDate IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS IsClosedPost
+FROM 
+    Users u
+    LEFT JOIN RecentHighlyActiveUsers rau ON u.Id = rau.Id
+    LEFT JOIN (SELECT OwnerUserId, COUNT(Id) AS SubmittedCount FROM Posts GROUP BY OwnerUserId) sc ON u.Id = sc.OwnerUserId
+    LEFT JOIN (SELECT OwnerUserId, COUNT(Id) AS CLOSEDPostCount FROM ClosedPosts GROUP BY OwnerUserId) pc ON u.Id = pc.OwnerUserId
+    LEFT JOIN PostStats ps ON u.Id = ps.OwnerUserId
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    u.Reputation DESC, 
+    ps.PostRank ASC;

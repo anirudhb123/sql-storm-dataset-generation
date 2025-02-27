@@ -1,0 +1,60 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM customer_address
+),
+CustomerInfo AS (
+    SELECT 
+        c_customer_sk,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesInfo AS (
+    SELECT 
+        ws_customer_sk,
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_customer_sk
+),
+DetailedInfo AS (
+    SELECT 
+        ci.full_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        ai.full_address,
+        ai.ca_city,
+        ai.ca_state,
+        ai.ca_zip,
+        si.total_sales,
+        si.order_count
+    FROM CustomerInfo ci
+    JOIN AddressInfo ai ON ci.c_customer_sk = ai.ca_address_sk
+    LEFT JOIN SalesInfo si ON ci.c_customer_sk = si.ws_customer_sk
+)
+SELECT 
+    full_name,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    full_address,
+    ca_city,
+    ca_state,
+    ca_zip,
+    COALESCE(total_sales, 0) AS total_sales,
+    COALESCE(order_count, 0) AS order_count
+FROM DetailedInfo
+WHERE cd_gender = 'M' 
+    AND ca_state IN ('CA', 'NY', 'TX')
+ORDER BY total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

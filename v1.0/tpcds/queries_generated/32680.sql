@@ -1,0 +1,73 @@
+
+WITH RECURSIVE sales_trends AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number) AS order_seq
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > 10.00
+),
+seasonal_sales AS (
+    SELECT 
+        d_year,
+        SUM(ws_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_month_seq IN (1, 2, 3)   -- Filtering for first quarter
+    GROUP BY 
+        d_year
+),
+average_sales AS (
+    SELECT 
+        d_year,
+        AVG(total_sales) AS avg_sales
+    FROM 
+        seasonal_sales
+    GROUP BY 
+        d_year
+),
+customer_return_stats AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned,
+        AVG(cr_return_amt) AS avg_return_amt
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    SUM(COALESCE(ws.ws_ext_sales_price, 0)) AS total_web_sales,
+    AVG(COALESCE(cr.avg_return_amt, 0)) AS avg_return_amount,
+    SUM(COALESCE(st.total_returned, 0)) AS total_returns,
+    MAX(CASE WHEN s.year IS NOT NULL THEN s.total_sales ELSE 0 END) AS max_seasonal_sales,
+    ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    customer_return_stats cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+LEFT JOIN 
+    seasonal_sales s ON s.d_year = YEAR(CURRENT_DATE)
+LEFT JOIN 
+    sales_trends st ON ws.ws_item_sk = st.ws_item_sk
+WHERE 
+    c.c_current_cdemo_sk IS NOT NULL
+GROUP BY 
+    c.c_customer_id, ca.ca_city
+HAVING 
+    total_web_sales > 1000
+ORDER BY 
+    sales_rank ASC
+LIMIT 100;

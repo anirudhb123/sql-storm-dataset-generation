@@ -1,0 +1,66 @@
+WITH SupplierData AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        sum(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderData AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01'
+        AND l.l_shipdate < DATE '2024-01-01'
+    GROUP BY 
+        l.l_orderkey
+),
+OverallSummary AS (
+    SELECT 
+        cd.c_custkey,
+        cd.c_name,
+        sd.s_suppkey,
+        sd.s_name,
+        sd.total_supply_cost,
+        coalesce(lis.total_lineitem_value, 0) AS total_order_value,
+        cd.order_count
+    FROM 
+        CustomerOrderData cd
+    LEFT JOIN 
+        SupplierData sd ON sd.total_supply_cost > 50000
+    LEFT JOIN 
+        LineItemSummary lis ON cd.order_count > 5
+    ORDER BY 
+        total_order_value DESC
+)
+SELECT 
+    o.c_name AS customer_name,
+    o.s_name AS supplier_name,
+    o.total_order_value,
+    o.total_supply_cost,
+    o.order_count
+FROM 
+    OverallSummary o
+WHERE 
+    o.total_order_value > 10000
+LIMIT 10;

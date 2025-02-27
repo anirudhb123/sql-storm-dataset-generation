@@ -1,0 +1,60 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey = (SELECT r_regionkey FROM region WHERE r_name = 'ASIA')
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+), part_avg_price AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), supplier_info AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'No Account'
+            ELSE CAST(s.s_acctbal AS varchar)
+        END AS account_balance,
+        COALESCE(s.s_comment, 'No Comments') AS sup_comment
+    FROM supplier s
+), filtered_orders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY o.o_orderkey
+), ranked_orders AS (
+    SELECT fo.o_orderkey, fo.total_revenue,
+           ROW_NUMBER() OVER (PARTITION BY fo.o_orderkey ORDER BY fo.total_revenue DESC) AS revenue_rank
+    FROM filtered_orders fo
+), bizarre_selection AS (
+    SELECT p.p_partkey, p.p_name, pp.avg_cost, 
+        CASE 
+            WHEN pp.avg_cost IS NOT NULL AND pp.avg_cost > (SELECT AVG(avg_cost) FROM part_avg_price) 
+            THEN 'Above Average'
+            ELSE 'Below Average'
+        END AS price_trend
+    FROM part_avg_price pp
+    JOIN part p ON p.p_partkey = pp.ps_partkey
+), cross_joined_data AS (
+    SELECT nh.n_name, si.s_name, bs.p_name, 
+        CASE 
+            WHEN nh.level = 0 AND si.s_nationkey = nh.n_nationkey THEN 'Same Nation'
+            ELSE 'Different Nation'
+        END AS nation_relation
+    FROM nation_hierarchy nh
+    CROSS JOIN supplier_info si
+    CROSS JOIN bizarre_selection bs
+)
+SELECT c.c_custkey, c.c_name, cj.n_name AS nation_name, cj.s_name AS supplier_name, 
+       cj.b_name AS part_name, cj.nation_relation, 
+       COALESCE(fo.total_revenue, 0) AS revenue
+FROM customer c
+LEFT JOIN ranked_orders fo ON c.c_custkey = fo.o_orderkey
+LEFT JOIN cross_joined_data cj ON c.c_nationkey = cj.n_nationkey
+WHERE (cj.nation_relation = 'Same Nation' OR cj.nation_relation IS NULL)
+AND (cj.price_trend = 'Above Average' OR cj.price_trend IS NULL)
+ORDER BY c.c_custkey, cj.s_name;

@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 AND
+        dd.d_week_seq BETWEEN 1 AND 52
+    GROUP BY 
+        ws.web_site_sk
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(cd.cd_gender, 'N/A') AS gender,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender
+),
+HighSpenders AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.gender,
+        cs.total_orders,
+        cs.total_spent
+    FROM 
+        CustomerStats cs
+    WHERE 
+        cs.total_spent > (
+            SELECT 
+                AVG(total_spent) 
+            FROM 
+                CustomerStats
+        )
+)
+SELECT 
+    rh.web_site_sk,
+    rs.total_sales,
+    hs.c_customer_sk,
+    hs.gender,
+    hs.total_orders,
+    hs.total_spent
+FROM 
+    RankedSales rs
+FULL OUTER JOIN 
+    HighSpenders hs ON rs.web_site_sk = hs.c_customer_sk
+WHERE 
+    (rs.rank <= 5 OR hs.total_orders IS NOT NULL)
+ORDER BY 
+    rs.total_sales DESC, hs.total_spent DESC
+LIMIT 10;

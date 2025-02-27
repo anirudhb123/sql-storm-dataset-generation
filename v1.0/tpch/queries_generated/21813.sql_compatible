@@ -1,0 +1,78 @@
+
+WITH RECURSIVE order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_partkey) AS total_items,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+ranked_orders AS (
+    SELECT 
+        os.o_orderkey,
+        os.total_sales,
+        os.total_items,
+        CASE 
+            WHEN os.total_sales > 1000 THEN 'High Value'
+            WHEN os.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS order_value_category
+    FROM 
+        order_summary os
+    WHERE 
+        os.order_rank = 1
+),
+supplier_info AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+),
+part_regions AS (
+    SELECT 
+        p.p_partkey,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        MIN(p.p_retailprice) AS min_price,
+        MAX(p.p_retailprice) AS max_price
+    FROM 
+        part p
+    JOIN 
+        supplier s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        p.p_partkey, n.n_name, r.r_name
+)
+SELECT 
+    ro.o_orderkey,
+    ro.total_sales,
+    ro.total_items,
+    ro.order_value_category,
+    pr.region_name,
+    pr.nation_name,
+    COALESCE(si.total_supply_cost, 0) AS total_supply_cost
+FROM 
+    ranked_orders ro
+LEFT JOIN 
+    part_regions pr ON ro.total_items = (SELECT COUNT(*) FROM part WHERE p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = ro.o_orderkey))
+LEFT JOIN 
+    supplier_info si ON si.ps_partkey = (SELECT MIN(p.p_partkey) FROM part p)
+WHERE 
+    ro.total_sales IS NOT NULL
+ORDER BY 
+    ro.total_sales DESC;

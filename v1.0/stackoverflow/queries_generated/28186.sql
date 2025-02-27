@@ -1,0 +1,85 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(u.Reputation) AS AvgUserReputation
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+UserActivity AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(c.Score) AS TotalCommentScore,
+        SUM(b.Class) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.Type AS PostType,
+        COUNT(*) AS EditCount,
+        AVG(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - ph.CreationDate))) AS AvgEditAge
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.Type
+),
+OverallStats AS (
+    SELECT 
+        t.TagName,
+        ts.PostCount,
+        ts.QuestionCount,
+        ts.AnswerCount,
+        ts.AvgUserReputation,
+        ua.TotalPosts,
+        ua.TotalQuestions,
+        ua.TotalAnswers,
+        ua.TotalCommentScore,
+        ua.TotalBadges,
+        phs.EditCount,
+        phs.AvgEditAge
+    FROM 
+        TagStats ts
+    JOIN 
+        UserActivity ua ON 1=1 -- Cross join for combined results
+    JOIN 
+        PostHistoryStats phs ON 1=1 -- Cross join for combined results
+)
+SELECT 
+    TagName,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    AvgUserReputation,
+    TotalPosts,
+    TotalQuestions,
+    TotalAnswers,
+    TotalCommentScore,
+    TotalBadges,
+    EditCount,
+    AvgEditAge
+FROM 
+    OverallStats
+ORDER BY 
+    PostCount DESC, AvgUserReputation DESC;

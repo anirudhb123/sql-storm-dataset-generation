@@ -1,0 +1,79 @@
+
+WITH RankedTitles AS (
+    SELECT
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT
+        ci.person_id,
+        ct.kind AS role_type,
+        COUNT(*) AS role_count
+    FROM
+        cast_info ci
+    JOIN
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY
+        ci.person_id, ct.kind
+),
+ActorMovies AS (
+    SELECT
+        a.person_id AS actor_id,
+        a.name AS actor_name,
+        ARRAY_AGG(DISTINCT rt.movie_title ORDER BY rt.production_year) AS movies,
+        (SELECT COUNT(*) FROM ActorRoles ar WHERE ar.person_id = a.person_id) AS total_roles
+    FROM
+        aka_name a
+    JOIN
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN
+        RankedTitles rt ON ci.movie_id = (SELECT id FROM aka_title WHERE title = rt.movie_title)
+    WHERE
+        a.name IS NOT NULL
+    GROUP BY
+        a.person_id, a.name
+),
+AwardWinningMovies AS (
+    SELECT
+        DISTINCT m.id AS movie_id,
+        m.title
+    FROM
+        aka_title m
+    JOIN
+        movie_info mi ON m.id = mi.movie_id
+    WHERE
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Award')
+        AND mi.info IS NOT NULL
+),
+OuterJoinActors AS (
+    SELECT
+        am.actor_id,
+        am.actor_name,
+        COALESCE(aw.title, 'No Awards') AS award_movie_title
+    FROM
+        ActorMovies am
+    LEFT JOIN
+        AwardWinningMovies aw ON am.movies @> ARRAY[aw.title]
+)
+SELECT
+    o.actor_name,
+    o.award_movie_title,
+    CASE
+        WHEN o.award_movie_title = 'No Awards' THEN 'No Awards Won'
+        ELSE 'Award Winner'
+    END AS award_status,
+    ar.role_type,
+    ar.role_count
+FROM
+    OuterJoinActors o
+LEFT JOIN
+    ActorRoles ar ON o.actor_id = ar.person_id
+WHERE
+    ar.role_count IS NOT NULL
+ORDER BY
+    o.actor_name;

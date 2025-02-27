@@ -1,0 +1,47 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(l.l_orderkey) AS line_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2024-01-01'
+    GROUP BY o.o_orderkey
+    UNION ALL
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) + s.total_sales,
+           COUNT(l.l_orderkey) + s.line_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN SalesCTE s ON s.o_orderkey = o.o_orderkey
+    WHERE s.total_sales IS NOT NULL
+),
+MaxSales AS (
+    SELECT o.o_custkey, 
+           MAX(total_sales) AS max_sales
+    FROM SalesCTE s
+    JOIN orders o ON s.o_orderkey = o.o_orderkey
+    GROUP BY o.o_custkey
+),
+RankedCustomers AS (
+    SELECT c.c_custkey, 
+           c.c_name,
+           ms.max_sales,
+           RANK() OVER (ORDER BY ms.max_sales DESC) AS sales_rank
+    FROM customer c
+    JOIN MaxSales ms ON c.c_custkey = ms.o_custkey
+)
+SELECT rc.c_name, 
+       COALESCE(NULLIF(rc.max_sales, 0), 'No Sales') AS sales_amount,
+       CASE 
+           WHEN rc.sales_rank <= 10 THEN 'Top Customer' 
+           ELSE 'Regular Customer' 
+       END AS customer_status,
+       COALESCE((SELECT 'Region: ' || r.r_name
+                 FROM nation n 
+                 JOIN region r ON n.n_regionkey = r.r_regionkey
+                 WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = rc.c_custkey)), 'Unknown Region') AS customer_region
+FROM RankedCustomers rc
+FULL OUTER JOIN partsupp ps ON rc.c_custkey = ps.ps_suppkey
+WHERE rc.max_sales > 10000 OR ps.ps_partkey IS NULL
+ORDER BY rc.sales_rank
+OFFSET 2 ROWS FETCH NEXT 5 ROWS ONLY;

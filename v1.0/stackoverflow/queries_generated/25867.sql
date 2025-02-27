@@ -1,0 +1,63 @@
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        AVG(Users.Reputation) AS AverageReputation,
+        STRING_AGG(DISTINCT Users.DisplayName, ', ') AS UserList
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    GROUP BY 
+        Tags.TagName
+),
+PostDetails AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.CreationDate,
+        Posts.ViewCount,
+        Posts.Score,
+        COALESCE(Posts.AnswerCount, 0) AS AnswerCount,
+        COALESCE(Posts.CommentCount, 0) AS CommentCount,
+        COALESCE(Badges.Name, 'No Badge') AS UserBadge
+    FROM 
+        Posts
+    LEFT JOIN 
+        Badges ON Posts.OwnerUserId = Badges.UserId AND Badges.Date = (
+            SELECT MAX(Date) FROM Badges WHERE UserId = Posts.OwnerUserId
+        )
+    WHERE 
+        Posts.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+BenchmarkedPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.ViewCount,
+        pd.Score,
+        pd.AnswerCount,
+        pd.CommentCount,
+        ts.TagName,
+        ts.PostCount,
+        ts.AverageReputation,
+        ts.UserList
+    FROM 
+        PostDetails pd
+    JOIN 
+        TagStatistics ts ON pd.PostId = (SELECT Posts.Id FROM Posts WHERE Tags @> ARRAY[ts.TagName] LIMIT 1)
+)
+SELECT 
+    bp.*,
+    CASE 
+        WHEN bp.Score > 10 AND bp.ViewCount > 100 THEN 'High Engagement'
+        WHEN bp.Score BETWEEN 5 AND 10 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement' 
+    END AS EngagementCategory
+FROM 
+    BenchmarkedPosts bp
+ORDER BY 
+    bp.Score DESC, bp.ViewCount DESC;

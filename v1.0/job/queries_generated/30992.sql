@@ -1,0 +1,84 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level,
+        CAST(mt.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        at.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || at.title AS VARCHAR(255)) AS path
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE
+        at.production_year IS NOT NULL
+),
+
+ActorRoleCounts AS (
+    SELECT 
+        ka.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        MAX(ci.nr_order) AS highest_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ka ON ci.person_id = ka.person_id
+    GROUP BY 
+        ka.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+
+MovieKeywordCounts AS (
+    SELECT 
+        mt.id AS movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.id
+),
+
+FinalResults AS (
+    SELECT 
+        mh.movie_id, 
+        mh.movie_title, 
+        mh.production_year,
+        alc.actor_name,
+        alc.movie_count,
+        alc.highest_order,
+        mkc.keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        ActorRoleCounts alc ON mh.movie_id = alc.movie_id
+    LEFT JOIN 
+        MovieKeywordCounts mkc ON mh.movie_id = mkc.movie_id
+)
+
+SELECT 
+    * 
+FROM 
+    FinalResults
+WHERE 
+    (movie_title LIKE '%Action%' OR movie_title LIKE '%Adventure%')
+    AND (keyword_count > 2 OR highest_order > 3)
+ORDER BY 
+    production_year DESC, movie_title;

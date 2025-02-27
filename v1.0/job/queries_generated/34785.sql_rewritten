@@ -1,0 +1,81 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    UNION ALL
+    SELECT 
+        t.linked_movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        mh.depth + 1
+    FROM 
+        movie_link t
+    JOIN 
+        MovieHierarchy mh ON t.movie_id = mh.movie_id
+),
+MovieStats AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.depth,
+        COUNT(DISTINCT c.id) AS cast_count,
+        AVG(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS has_notes_ratio
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.depth
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        depth,
+        cast_count,
+        has_notes_ratio,
+        RANK() OVER (PARTITION BY depth ORDER BY cast_count DESC) AS rank_within_depth
+    FROM 
+        MovieStats
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.depth,
+    tm.cast_count,
+    tm.has_notes_ratio,
+    r.role,
+    COUNT(DISTINCT mi.id) AS associated_movie_info_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_info mi ON tm.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON tm.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    cast_info ci ON tm.movie_id = ci.movie_id
+LEFT JOIN 
+    role_type r ON ci.role_id = r.id
+WHERE 
+    tm.rank_within_depth <= 5 AND
+    tm.has_notes_ratio > 0.5 AND
+    tm.production_year IS NOT NULL
+GROUP BY 
+    tm.movie_id, tm.title, tm.production_year, tm.depth, tm.cast_count, tm.has_notes_ratio, r.role
+ORDER BY 
+    tm.depth, tm.cast_count DESC;

@@ -1,0 +1,4 @@
+SELECT min(an.name) AS alternative_name, min(chn.name) AS voiced_character, min(n.name) AS voicing_actress, min(t.title) AS american_movie
+FROM aka_name AS an, char_name AS chn, cast_info AS ci, company_name AS cn, movie_companies AS mc, name AS n, role_type AS rt, title AS t
+WHERE ci.movie_id = t.id AND t.id = mc.movie_id AND ci.movie_id = mc.movie_id AND mc.company_id = cn.id AND ci.role_id = rt.id AND n.id = ci.person_id AND chn.id = ci.person_role_id AND an.person_id = n.id AND an.person_id = ci.person_id
+AND t.episode_of_id > 694643 AND t.md5sum > 'ddbccf351eda88e31c6898897b41f969' AND chn.surname_pcode IN ('F4353', 'K1612', 'L645', 'N3', 'O1321', 'P3132', 'P5634', 'R5421', 'W132') AND n.name < 'Yacinthe, Kwassi' AND n.name_pcode_cf > 'G3151';

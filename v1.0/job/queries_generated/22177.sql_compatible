@@ -1,0 +1,84 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(DISTINCT mk.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorInfo AS (
+    SELECT 
+        a.person_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT t.title, ', ') AS movies_list
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    GROUP BY 
+        a.person_id, a.name
+),
+FilteredMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(dci.actor_count, 0) AS actor_count
+    FROM 
+        RankedMovies m
+    LEFT JOIN (
+        SELECT 
+            ci.movie_id,
+            COUNT(DISTINCT ci.person_id) AS actor_count
+        FROM 
+            cast_info ci
+        GROUP BY 
+            ci.movie_id
+    ) dci ON m.movie_id = dci.movie_id
+    WHERE 
+        m.keyword_count >= (
+            SELECT 
+                AVG(keyword_count)
+            FROM 
+                RankedMovies
+        )
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    COALESCE(ai.actor_name, 'Unknown') AS lead_actor,
+    f.actor_count,
+    CASE
+        WHEN f.production_year < 2000 THEN 'Classic'
+        WHEN f.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era_category,
+    CASE 
+        WHEN f.actor_count = 0 THEN 'No Actors' 
+        ELSE 'Has Actors' 
+    END AS actors_status
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    ActorInfo ai ON f.movie_id IN (
+        SELECT 
+            ci.movie_id 
+        FROM 
+            cast_info ci 
+        WHERE 
+            ci.role_id = (SELECT id FROM role_type WHERE role = 'Lead') 
+    )
+ORDER BY 
+    f.production_year DESC, 
+    f.title ASC;

@@ -1,0 +1,63 @@
+
+WITH movie_details AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        STRING_AGG(DISTINCT an.name, ', ') AS actors,
+        COUNT(DISTINCT mci.company_id) AS production_companies,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS yearly_rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN 
+        movie_companies mci ON mt.id = mci.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+top_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        actors,
+        production_companies,
+        yearly_rank
+    FROM 
+        movie_details
+    WHERE 
+        production_companies > 0
+),
+popular_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actors,
+    pk.keywords,
+    CASE 
+        WHEN tm.yearly_rank <= 10 THEN 'Top 10'
+        ELSE 'Other'
+    END AS ranking_category,
+    COALESCE(NULLIF(tm.production_companies, 0), 'No Production Companies') AS production_status
+FROM 
+    top_movies tm
+LEFT JOIN 
+    popular_keywords pk ON tm.movie_id = pk.movie_id
+WHERE 
+    tm.production_year BETWEEN 1990 AND 2023
+ORDER BY 
+    tm.production_year DESC,
+    tm.title;

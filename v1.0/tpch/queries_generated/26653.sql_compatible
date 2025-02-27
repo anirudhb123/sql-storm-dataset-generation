@@ -1,0 +1,33 @@
+
+SELECT 
+    p.p_name, 
+    s.s_name, 
+    c.c_name, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    MAX(l.l_shipdate) AS last_ship_date,
+    SUBSTRING(s.s_comment, 1, LOCATE(' ', s.s_comment, LOCATE(' ', s.s_comment, LOCATE(' ', s.s_comment) + 1) + 1) - 1) AS short_comment,
+    CONCAT('Supplier ', s.s_name, ' delivered ', COUNT(DISTINCT l.l_orderkey), ' orders of ', p.p_name) AS delivery_summary
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    l.l_returnflag = 'N' AND 
+    l.l_linestatus = 'F' AND 
+    c.c_mktsegment = 'BUILDING'
+GROUP BY 
+    p.p_name, 
+    s.s_name, 
+    c.c_name, 
+    s.s_comment
+HAVING 
+    total_revenue > 100000
+ORDER BY 
+    total_revenue DESC;

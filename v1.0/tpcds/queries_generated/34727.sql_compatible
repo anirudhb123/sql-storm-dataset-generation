@@ -1,0 +1,63 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        sc.ws_bill_customer_sk, 
+        sc.total_sales, 
+        sc.order_count,
+        ca.ca_city,
+        ROW_NUMBER() OVER (ORDER BY sc.total_sales DESC) AS city_rank
+    FROM 
+        SalesCTE sc
+    JOIN 
+        customer ca ON sc.ws_bill_customer_sk = ca.c_customer_sk
+    JOIN 
+        customer_address ca_addr ON ca.c_current_addr_sk = ca_addr.ca_address_sk
+    WHERE 
+        sc.order_count > 5
+),
+ItemSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+HighProfitItems AS (
+    SELECT 
+        ws_item_sk,
+        total_profit,
+        ROW_NUMBER() OVER (ORDER BY total_profit DESC) AS item_rank
+    FROM 
+        ItemSales
+    WHERE 
+        total_profit > (SELECT AVG(total_profit) FROM ItemSales)
+)
+SELECT 
+    tc.ws_bill_customer_sk,
+    tc.total_sales,
+    tc.order_count,
+    hc.ws_item_sk,
+    hc.total_profit,
+    tc.ca_city
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    HighProfitItems hc ON tc.city_rank = hc.item_rank
+WHERE 
+    (tc.city_rank <= 10 OR hc.total_profit IS NOT NULL)
+ORDER BY 
+    tc.total_sales DESC, 
+    hc.total_profit DESC;

@@ -1,0 +1,48 @@
+WITH RecursiveBadgeCte AS (
+    SELECT UserId, COUNT(*) AS BadgeCount
+    FROM Badges
+    GROUP BY UserId
+),
+ActiveUserPosts AS (
+    SELECT u.Id AS UserId, u.DisplayName, COUNT(p.Id) AS PostCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.Reputation > 1000 AND u.LastAccessDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY u.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT Tags.TagName, COUNT(p.Id) AS TotalPosts
+    FROM Posts p
+    JOIN UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS Tag(TAGS) ON Tags.TagName = Tag.TAGS
+    GROUP BY Tags.TagName
+    ORDER BY TotalPosts DESC
+    LIMIT 10
+),
+RecentPostHistory AS (
+    SELECT p.Id, p.Title, ph.CreationDate, ph.PostHistoryTypeId, ph.Comment
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+UserWithBadges AS (
+    SELECT u.Id as UserId, u.DisplayName, COALESCE(rb.BadgeCount, 0) AS BadgeCount
+    FROM Users u
+    LEFT JOIN RecursiveBadgeCte rb ON u.Id = rb.UserId
+)
+SELECT 
+    uwp.UserId,
+    uwp.DisplayName,
+    uwp.BadgeCount,
+    COALESCE(up.PostCount, 0) AS PostCount,
+    STRING_AGG(tt.TagName, ', ') AS TopTags,
+    ph.Title,
+    ph.CreationDate AS LastEdited,
+    ph.Comment AS EditComment
+FROM UserWithBadges uwp
+LEFT JOIN ActiveUserPosts up ON uwp.UserId = up.UserId
+LEFT JOIN TopTags tt ON tt.TotalPosts > 10
+LEFT JOIN RecentPostHistory ph ON uwp.UserId = ph.UserId
+WHERE uwp.BadgeCount > 0
+GROUP BY 
+    uwp.UserId, uwp.DisplayName, uwp.BadgeCount, up.PostCount, ph.Title, ph.CreationDate, ph.Comment
+ORDER BY uwp.BadgeCount DESC, up.PostCount DESC;

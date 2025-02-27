@@ -1,0 +1,84 @@
+
+WITH AddressData AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS FullAddress,
+        ca_city,
+        ca_state,
+        ca_zip,
+        COUNT(*) AS AddressCount
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_street_number, ca_street_name, ca_street_type, ca_suite_number, ca_city, ca_state, ca_zip
+),
+DemographicsData AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        COUNT(*) AS DemographicsCount
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender, cd_marital_status
+),
+ItemData AS (
+    SELECT 
+        i_brand, 
+        i_category, 
+        COUNT(*) AS ItemCount,
+        AVG(i_current_price) AS AvgPrice
+    FROM 
+        item
+    GROUP BY 
+        i_brand, i_category
+),
+SalesData AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_sales_price) AS TotalSales, 
+        SUM(ws_quantity) AS TotalQuantity
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+CombinedData AS (
+    SELECT 
+        a.FullAddress,
+        a.ca_city,
+        a.ca_state,
+        a.ca_zip,
+        d.cd_gender,
+        d.cd_marital_status,
+        i.i_brand,
+        i.i_category,
+        s.TotalSales,
+        s.TotalQuantity
+    FROM 
+        AddressData a
+    JOIN 
+        DemographicsData d ON 1=1
+    JOIN 
+        ItemData i ON 1=1
+    JOIN 
+        SalesData s ON i.i_item_sk = s.ws_item_sk
+)
+SELECT 
+    FullAddress,
+    ca_city,
+    ca_state,
+    ca_zip,
+    cd_gender,
+    cd_marital_status,
+    i_brand,
+    i_category,
+    SUM(TotalSales) AS TotalSalesSum,
+    SUM(TotalQuantity) AS TotalQuantitySum
+FROM 
+    CombinedData
+GROUP BY 
+    FullAddress, ca_city, ca_state, ca_zip, cd_gender, cd_marital_status, i_brand, i_category
+ORDER BY 
+    TotalSalesSum DESC
+LIMIT 100;

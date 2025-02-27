@@ -1,0 +1,58 @@
+
+WITH RECURSIVE address_cte AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, 
+           ROW_NUMBER() OVER (PARTITION BY ca_state ORDER BY ca_city) AS city_rank
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+), sales_summary AS (
+    SELECT 
+        s.s_store_id,
+        SUM(COALESCE(ss_sales_price, 0)) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions,
+        DENSE_RANK() OVER (ORDER BY SUM(ss_sales_price) DESC) AS sales_rank
+    FROM store_sales s
+    LEFT JOIN (
+        SELECT ss_store_sk, ss_sales_price, ss_ticket_number
+        FROM store_sales
+        WHERE ss_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_yoy = '2023' AND d_dow = 1)
+        AND (SELECT MIN(d_date_sk) FROM date_dim WHERE d_yoy = '2023' AND d_dow = 7)
+    ) ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY s.s_store_id
+), product_summary AS (
+    SELECT 
+        i.i_item_id,
+        SUM(cr_return_quantity) AS total_returns,
+        AVG(cr_return_amount) AS avg_return_amount
+    FROM catalog_returns cr
+    JOIN item i ON cr.cr_item_sk = i.i_item_sk
+    GROUP BY i.i_item_id
+), demographics AS (
+    SELECT
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(CASE WHEN c.c_birth_year < 1980 THEN 1 ELSE 0 END) AS senior_customers
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender, cd.cd_marital_status
+)
+
+SELECT
+    a.ca_city,
+    a.ca_state,
+    a.ca_country,
+    COALESCE(ss.total_sales, 0) AS yearly_sales,
+    COALESCE(ss.total_transactions, 0) AS transaction_count,
+    d.cd_gender,
+    d.cd_marital_status,
+    d.customer_count,
+    d.senior_customers,
+    p.total_returns,
+    p.avg_return_amount
+FROM address_cte a
+FULL OUTER JOIN sales_summary ss ON a.city_rank <= 5
+LEFT JOIN demographics d ON (a.ca_state = d.cd_gender OR a.ca_city = d.cd_marital_status)
+LEFT JOIN product_summary p ON a.ca_address_sk = NULLIF(p.i_item_id, 'UNKNOWN_ID')
+WHERE (d.customer_count > 100 OR p.total_returns > 5)
+  AND (a.ca_country IS DISTINCT FROM 'USA' OR a.ca_city LIKE '%City%')
+ORDER BY yearly_sales DESC, a.ca_country;

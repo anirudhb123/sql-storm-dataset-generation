@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM
+        Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.PostTypeId = 1
+),
+
+TopPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.OwnerName
+    FROM
+        RankedPosts rp
+    WHERE
+        rp.Rank = 1
+        AND rp.Score > (
+            SELECT AVG(Score)
+            FROM Posts
+            WHERE PostTypeId = 1
+        )
+),
+
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM
+        Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+),
+
+FinalResults AS (
+    SELECT
+        tp.Title,
+        tp.Score,
+        tp.ViewCount,
+        ub.BadgeCount,
+        CASE
+            WHEN ub.BadgeCount > 5 THEN 'Experienced'
+            WHEN ub.BadgeCount BETWEEN 3 AND 5 THEN 'Moderate'
+            ELSE 'Newbie'
+        END AS UserLevel
+    FROM
+        TopPosts tp
+    JOIN UserBadges ub ON tp.OwnerName = ub.UserId
+)
+
+SELECT
+    fr.Title,
+    fr.Score,
+    fr.ViewCount,
+    fr.BadgeCount,
+    fr.UserLevel,
+    CASE 
+        WHEN fr.ViewCount IS NULL THEN 'No views yet'
+        ELSE 'Has views'
+    END AS ViewStatus
+FROM
+    FinalResults fr
+ORDER BY
+    fr.Score DESC
+LIMIT 10;

@@ -1,0 +1,39 @@
+
+WITH customer_data AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        hd.hd_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_purchases,
+        SUM(ss.ss_ext_sales_price) AS total_spent
+    FROM 
+        customer c
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+        JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+        LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        cd.cd_marital_status = 'M'
+        AND ib.ib_upper_bound > 50000
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate, hd.hd_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+)
+SELECT 
+    dd.d_year,
+    dd.d_quarter_seq,
+    COUNT(DISTINCT cd.c_customer_id) AS unique_customers,
+    SUM(cd.total_spent) AS total_revenue
+FROM 
+    customer_data cd
+    JOIN date_dim dd ON dd.d_date_sk = (SELECT MAX(d_date_sk) FROM store_sales WHERE ss_sold_date_sk = dd.d_date_sk)
+GROUP BY 
+    dd.d_year, dd.d_quarter_seq
+ORDER BY 
+    dd.d_year DESC, dd.d_quarter_seq DESC
+LIMIT 10;

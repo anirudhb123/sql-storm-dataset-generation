@@ -1,0 +1,78 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC, mt.title) AS rank_in_year
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles,
+        COUNT(DISTINCT CASE WHEN c.note IS NOT NULL THEN c.note END) AS unique_notes
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    LEFT JOIN 
+        role_type r ON r.id = c.role_id
+    GROUP BY 
+        c.person_id, a.name
+),
+MovieCompanyInfo AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies,
+        COUNT(DISTINCT co.id) AS company_count
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name co ON co.id = m.company_id
+    GROUP BY 
+        m.movie_id
+),
+DetailedMovieInfo AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ac.actor_name,
+        ac.roles,
+        mc.companies,
+        mc.company_count,
+        CASE WHEN mc.company_count > 0 THEN 'Has Companies' ELSE 'No Companies' END AS company_status
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorRoles ac ON ac.person_id IN (
+            SELECT DISTINCT person_id 
+            FROM cast_info 
+            WHERE movie_id = rm.movie_id
+        )
+    LEFT JOIN 
+        MovieCompanyInfo mc ON mc.movie_id = rm.movie_id
+)
+SELECT 
+    dmi.title,
+    dmi.production_year,
+    dmi.actor_name,
+    dmi.roles,
+    dmi.companies,
+    dmi.company_count,
+    dmi.company_status,
+    CASE 
+        WHEN dmi.rank_in_year IS NULL THEN 'Not Ranked'
+        ELSE CONCAT('Rank: ', dmi.rank_in_year)
+    END AS rank_status
+FROM 
+    DetailedMovieInfo dmi
+WHERE 
+    dmi.company_status = 'Has Companies'
+ORDER BY 
+    dmi.production_year DESC, 
+    dmi.title;

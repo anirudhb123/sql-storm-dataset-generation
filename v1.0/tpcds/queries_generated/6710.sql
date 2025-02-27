@@ -1,0 +1,56 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        MAX(ws.ws_sales_price) AS max_sales_price,
+        MIN(ws.ws_sales_price) AS min_sales_price
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        total_sales,
+        order_count,
+        avg_sales_price,
+        max_sales_price,
+        min_sales_price,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_sales,
+    tc.order_count,
+    tc.avg_sales_price,
+    tc.max_sales_price,
+    tc.min_sales_price,
+    dd.d_year,
+    dd.d_month_seq,
+    df.d_day_name
+FROM 
+    TopCustomers tc
+JOIN 
+    date_dim dd ON dd.d_date_sk = (SELECT MAX(ws.ws_ship_date_sk) FROM web_sales ws WHERE ws.ws_bill_customer_sk = tc.c_customer_sk)
+JOIN 
+    time_dim df ON df.t_time_sk = (SELECT MAX(ws.ws_ship_time_sk) FROM web_sales ws WHERE ws.ws_bill_customer_sk = tc.c_customer_sk)
+WHERE 
+    tc.sales_rank <= 10
+ORDER BY 
+    tc.total_sales DESC;

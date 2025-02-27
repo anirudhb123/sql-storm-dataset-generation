@@ -1,0 +1,74 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        rh.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rh ON p.ParentId = rh.PostId
+)
+
+, PostMetrics AS (
+    SELECT 
+        rh.PostId,
+        rh.Title,
+        rh.Level,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY rh.Level ORDER BY COUNT(c.Id) DESC) AS Rnk
+    FROM 
+        RecursivePostHierarchy rh
+    LEFT JOIN 
+        Comments c ON c.PostId = rh.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = rh.PostId
+    LEFT JOIN 
+        Users u ON u.Id = rh.OwnerUserId
+    GROUP BY 
+        rh.PostId, rh.Title, rh.Level, u.DisplayName, u.Reputation
+)
+
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.Level,
+    pm.CommentCount,
+    pm.UpVoteCount,
+    pm.DownVoteCount,
+    pm.OwnerDisplayName,
+    pm.OwnerReputation,
+    CASE 
+        WHEN pm.CommentCount > 5 THEN 'Highly Engaged'
+        WHEN pm.CommentCount BETWEEN 1 AND 5 THEN 'Moderately Engaged'
+        ELSE 'Less Engaged'
+    END AS EngagementLevel
+FROM 
+    PostMetrics pm
+WHERE 
+    pm.Level = 1  
+    AND (pm.CommentCount > 0 OR pm.UpVoteCount > 10)
+    AND pm.Rnk <= 10  
+ORDER BY 
+    pm.CommentCount DESC, pm.UpVoteCount DESC;

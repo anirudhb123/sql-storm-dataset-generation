@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 10
+),
+RankedLines AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, l.l_extendedprice,
+           ROW_NUMBER() OVER(PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rn
+    FROM lineitem l
+    WHERE l.l_discount BETWEEN 0.05 AND 0.10
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+RegionSuppliers AS (
+    SELECT r.r_name, s.s_name, s.s_acctbal
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL OR s.s_acctbal IS NULL
+)
+SELECT p.p_name, p.p_brand, p.p_retailprice,
+       COUNT(DISTINCT su.s_suppkey) AS supplier_count,
+       AVG(COALESCE(su.s_acctbal, 0)) AS avg_acctbal,
+       MAX(hl.total_value) AS max_order_value
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN RankedLines rl ON rl.l_partkey = p.p_partkey
+LEFT JOIN HighValueOrders hl ON hl.o_orderkey = rl.l_orderkey
+LEFT JOIN RegionSuppliers su ON p.p_mfgr = su.s_name
+WHERE (LEFT(p.p_comment, 1) IN ('A', 'B', 'C') OR p.p_size > 10)
+AND (EXISTS (SELECT 1 FROM orders o WHERE o.o_orderstatus = 'F' AND o.o_orderkey = hl.o_orderkey)
+     OR NOT EXISTS (SELECT 1 FROM orders o2 WHERE o2.o_orderkey = hl.o_orderkey))
+GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+HAVING COUNT(DISTINCT rl.l_suppkey) > 1
+ORDER BY supplier_count DESC, avg_acctbal DESC
+LIMIT 50;

@@ -1,0 +1,76 @@
+
+WITH CustomerReturnStatistics AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT sr_item_sk) AS return_count,
+        SUM(COALESCE(sr_return_amt, 0)) AS total_return_amount,
+        SUM(COALESCE(sr_return_quantity, 0)) AS total_return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(sr_return_amt) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+PromotionalItemSales AS (
+    SELECT 
+        ws.ws_web_site_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE 
+        p.p_discount_active = 'Y'
+    GROUP BY 
+        ws.ws_web_site_sk
+),
+ItemInventory AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+)
+SELECT 
+    crs.c_customer_id,
+    pis.total_sales,
+    pis.total_profit,
+    i.inv_item_sk,
+    COALESCE(item_sales.total_return_quantity, 0) AS total_returned_quantity,
+    i.total_inventory,
+    CASE 
+        WHEN i.total_inventory > COALESCE(item_sales.total_return_quantity, 0) THEN 'Sufficient Inventory'
+        ELSE 'Low Inventory Warning'
+    END AS inventory_status
+FROM 
+    CustomerReturnStatistics crs
+LEFT JOIN 
+    (SELECT 
+        ws_ship_customer_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_return_quantity
+     FROM 
+        web_sales
+     GROUP BY 
+        ws_ship_customer_sk, ws_item_sk) item_sales ON crs.c_customer_id = item_sales.ws_ship_customer_sk
+LEFT JOIN 
+    ItemInventory i ON item_sales.ws_item_sk = i.inv_item_sk
+LEFT JOIN 
+    PromotionalItemSales pis ON pis.ws_web_site_sk = (
+        SELECT 
+            ws_web_site_sk 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_bill_customer_sk = crs.c_customer_sk 
+        LIMIT 1
+    )
+WHERE 
+    crs.return_count > 5
+ORDER BY 
+    crs.total_return_amount DESC, pis.total_profit DESC;

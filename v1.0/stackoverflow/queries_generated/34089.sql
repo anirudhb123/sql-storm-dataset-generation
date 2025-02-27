@@ -1,0 +1,84 @@
+WITH RecursivePostHierarchy AS (
+    -- Recursive CTE to get the hierarchy of posts (questions and answers)
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Start with questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+        INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+    WHERE 
+        p.PostTypeId = 2 -- Get answers
+),
+PostStatistics AS (
+    -- CTE to aggregate statistics for each post
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT bh.Id) AS BadgeCount,
+        MAX(bh.Date) AS LastBadgeDate
+    FROM 
+        Posts p
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+        LEFT JOIN Badges bh ON p.OwnerUserId = bh.UserId
+    GROUP BY 
+        p.Id, p.OwnerUserId
+),
+UserActivity AS (
+    -- CTE to gather user activity metrics
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(ps.CommentCount, 0)) AS TotalComments,
+        SUM(COALESCE(ps.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(ps.DownVotes, 0)) AS TotalDownVotes
+    FROM 
+        Users u
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+        LEFT JOIN PostStatistics ps ON p.Id = ps.PostId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+
+SELECT 
+    u.UserId,
+    u.Reputation,
+    u.PostCount,
+    u.TotalComments,
+    u.TotalUpVotes,
+    u.TotalDownVotes,
+    (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = u.UserId AND p.PostTypeId = 1) AS QuestionCount,
+    (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = u.UserId AND p.PostTypeId = 2) AS AnswerCount,
+    (SELECT COUNT(DISTINCT bh.Id) FROM Badges bh WHERE bh.UserId = u.UserId) AS TotalBadges,
+    (SELECT ARRAY_AGG(DISTINCT bh.Name) FROM Badges bh WHERE bh.UserId = u.UserId) AS BadgeNames,
+    CASE
+        WHEN u.Reputation > 1000 THEN 'Gold'
+        WHEN u.Reputation BETWEEN 500 AND 1000 THEN 'Silver'
+        ELSE 'Bronze'
+    END AS Tier
+FROM 
+    UserActivity u
+ORDER BY 
+    u.Reputation DESC;

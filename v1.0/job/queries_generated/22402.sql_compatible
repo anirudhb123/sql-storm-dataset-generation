@@ -1,0 +1,70 @@
+
+WITH movie_summary AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS roles_assigned,
+        AVG(CASE 
+            WHEN ti.info IS NOT NULL THEN LENGTH(ti.info) 
+            ELSE NULL 
+        END) AS avg_info_length
+    FROM aka_title AS m
+    LEFT JOIN cast_info AS ci ON m.movie_id = ci.movie_id
+    LEFT JOIN aka_name AS ak ON ci.person_id = ak.person_id
+    LEFT JOIN movie_keyword AS mk ON m.id = mk.movie_id
+    LEFT JOIN movie_info AS ti ON m.id = ti.movie_id
+    WHERE 
+        m.production_year IS NOT NULL 
+        AND m.production_year >= 1980 
+        AND (m.title LIKE '%Star%' OR m.title LIKE '%Galaxy%')
+    GROUP BY m.id, m.title, m.production_year
+),
+company_summary AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_id) AS companies_count
+    FROM movie_companies AS mc
+    JOIN company_name AS cn ON mc.company_id = cn.id
+    WHERE cn.country_code IS NOT NULL
+    GROUP BY mc.movie_id
+),
+complete_summary AS (
+    SELECT 
+        ms.movie_id, 
+        ms.title, 
+        ms.production_year,
+        ms.aka_names,
+        ms.cast_count,
+        ms.keyword_count,
+        ms.roles_assigned,
+        ms.avg_info_length,
+        cs.company_names,
+        cs.companies_count,
+        CASE 
+            WHEN ms.cast_count IS NULL THEN 'No Cast'
+            WHEN ms.cast_count > 5 THEN 'Multiple Cast Members'
+            ELSE 'Few Cast Members' 
+        END AS cast_size_info
+    FROM movie_summary ms
+    LEFT JOIN company_summary cs ON ms.movie_id = cs.movie_id
+)
+SELECT 
+    cs.*,
+    ROW_NUMBER() OVER (PARTITION BY cs.production_year ORDER BY cs.cast_count DESC) AS rank_within_year,
+    CASE
+        WHEN cs.avg_info_length IS NULL THEN 'No Information Available'
+        WHEN cs.avg_info_length = 0 THEN 'Empty Information'
+        ELSE 'Information Present'
+    END AS info_status,
+    COALESCE(cs.aka_names, 'N/A') AS aka_names_cleaned,
+    COALESCE(cs.company_names, 'N/A') AS company_names_cleaned
+FROM complete_summary cs
+WHERE
+    cs.companies_count IS NOT NULL
+    AND cs.cast_size_info IN ('Multiple Cast Members', 'Few Cast Members')
+ORDER BY cs.production_year DESC, cs.cast_count DESC;

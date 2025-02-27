@@ -1,0 +1,72 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        COALESCE(cd.cd_marital_status, 'Unknown') AS marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER(PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+highest_purchasers AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.marital_status,
+        ci.cd_purchase_estimate,
+        ci.rank
+    FROM 
+        customer_info ci
+    WHERE 
+        ci.rank <= 5
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_net_paid) AS total_spent,
+        COUNT(*) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+promotions_data AS (
+    SELECT 
+        p.p_promo_id,
+        SUM(cs.cs_sales_price - cs.cs_ext_discount_amt) AS total_discount
+    FROM 
+        promotion p
+    JOIN 
+        catalog_sales cs ON p.p_promo_sk = cs.cs_promo_sk
+    WHERE 
+        p.p_channel_email = 'Y'
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    hp.c_first_name,
+    hp.c_last_name,
+    hp.marital_status,
+    COALESCE(ss.total_spent, 0) AS total_spent,
+    ss.total_orders,
+    COALESCE(pd.total_discount, 0) AS total_discount
+FROM 
+    highest_purchasers hp
+LEFT JOIN 
+    sales_summary ss ON hp.c_customer_sk = ss.customer_sk
+LEFT JOIN 
+    promotion p ON hp.c_customer_sk IN (SELECT cr_returning_customer_sk FROM catalog_returns cr WHERE 
+        cr_return_number = ANY(SELECT cs_order_number FROM catalog_sales cs 
+        WHERE cs.cs_item_sk IN (SELECT cs_item_sk FROM catalog_sales WHERE cs.promo_sk IS NOT NULL)))
+LEFT JOIN 
+    promotions_data pd ON p.p_promo_id = pd.p_promo_id
+WHERE 
+    (hp.marital_status = 'M' OR hp.marital_status = 'S')
+ORDER BY 
+    total_spent DESC, total_orders ASC;

@@ -1,0 +1,63 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returned,
+        COUNT(DISTINCT cr.order_number) AS total_orders
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.returned_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        cr.returning_customer_sk
+    HAVING 
+        SUM(cr.return_quantity) > 10
+),
+CustomerAddresses AS (
+    SELECT 
+        c.c_customer_sk,
+        ca.ca_city,
+        ca.ca_state,
+        CD.cd_gender,
+        ROW_NUMBER() OVER(PARTITION BY ca.ca_state ORDER BY ca.ca_city) AS rn
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics CD ON c.c_current_cdemo_sk = CD.cd_demo_sk
+    WHERE 
+        ca.ca_state IN ('CA', 'NY')
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    CD.cd_gender AS gender,
+    COALESCE(cr.total_returned, 0) AS total_returned,
+    COALESCE(sd.total_sales, 0) AS total_sales,
+    sd.avg_sales_price,
+    sd.total_profit
+FROM 
+    CustomerAddresses ca
+LEFT JOIN 
+    CustomerReturns cr ON ca.c_customer_sk = cr.returning_customer_sk
+LEFT JOIN 
+    SalesData sd ON ca.c_customer_sk = sd.ws_item_sk
+WHERE 
+    (COALESCE(cr.total_orders, 0) > 0 OR COALESCE(sd.total_sales, 0) > 0)
+    AND ca.rn <= 5
+ORDER BY 
+    ca.ca_state, ca.ca_city;

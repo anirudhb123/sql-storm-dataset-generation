@@ -1,0 +1,103 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank,
+        COALESCE(accepted.AnswerCount, 0) AS AcceptedAnswers,
+        COALESCE(users.UpVotes - users.DownVotes, 0) AS NetVotes,
+        CASE 
+            WHEN p.Score > 50 THEN 'High Score'
+            WHEN p.Score BETWEEN 21 AND 50 THEN 'Medium Score'
+            ELSE 'Low Score'
+        END AS ScoreCategory
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+            ParentId,
+            COUNT(*) AS AnswerCount
+         FROM 
+            Posts 
+         WHERE 
+            PostTypeId = 2 
+         GROUP BY 
+            ParentId) AS accepted ON p.Id = accepted.ParentId
+    LEFT JOIN 
+        (SELECT 
+            u.Id,
+            SUM(u.UpVotes) AS UpVotes,
+            SUM(u.DownVotes) AS DownVotes
+         FROM 
+            Users u
+         GROUP BY 
+            u.Id) AS users ON p.OwnerUserId = users.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+        AND p.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+),
+RecentActivity AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.AcceptedAnswers,
+        rp.NetVotes,
+        rp.ScoreCategory,
+        COALESCE(ra.CommentCount, 0) AS CommentCount,
+        ra.LastCommentDate,
+        LEAD(rp.Score) OVER (ORDER BY rp.Score DESC) AS NextPostScore
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentActivity ra ON rp.PostId = ra.PostId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.Score,
+    pd.AcceptedAnswers,
+    pd.NetVotes,
+    pd.ScoreCategory,
+    pd.CommentCount,
+    pd.LastCommentDate,
+    (pd.Score - COALESCE(pd.NextPostScore, 0)) AS ScoreDifference,
+    CASE 
+        WHEN pd.LastCommentDate IS NULL THEN 'No Comments'
+        ELSE 'Has Comments'
+    END AS CommentStatus,
+    (SELECT 
+        STRING_AGG(DISTINCT pt.Name, ', ') 
+     FROM 
+        PostHistory ph
+     INNER JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id 
+     WHERE 
+        ph.PostId = pd.PostId
+        AND ph.CreationDate <= pd.LastCommentDate) AS HistoryTypes
+FROM 
+    PostDetails pd
+WHERE 
+    pd.Rank <= 5
+    AND pd.NetVotes IS NOT NULL
+    AND (pd.Score > 0 OR pd.CommentCount > 0)
+ORDER BY 
+    pd.Score DESC, 
+    pd.CreationDate ASC;

@@ -1,0 +1,46 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT cc.person_id) AS cast_count,
+        AVG(CASE WHEN pi.info IS NOT NULL THEN 1 ELSE 0 END) AS has_info_rate
+    FROM aka_title at
+    LEFT JOIN complete_cast cc ON at.id = cc.movie_id
+    LEFT JOIN cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN person_info pi ON ci.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Bio')
+    GROUP BY at.id, at.title, at.production_year
+),
+KeywordDetails AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM movie_keyword mt
+    JOIN keyword mk ON mt.keyword_id = mk.id
+    GROUP BY mt.movie_id
+),
+HighRatedMovies AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.cast_count,
+        kd.keywords,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.cast_count DESC) AS rn
+    FROM MovieDetails md
+    LEFT JOIN KeywordDetails kd ON md.id = kd.movie_id
+    WHERE md.production_year >= 2000
+)
+SELECT 
+    title,
+    production_year,
+    cast_count,
+    COALESCE(keywords, 'No keywords') AS keywords,
+    CASE 
+        WHEN cast_count > 20 THEN 'Large Cast'
+        WHEN cast_count BETWEEN 10 AND 20 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size,
+    has_info_rate
+FROM HighRatedMovies
+WHERE rn <= 10
+ORDER BY production_year DESC, cast_count DESC;

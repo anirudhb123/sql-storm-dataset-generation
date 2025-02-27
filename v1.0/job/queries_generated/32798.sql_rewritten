@@ -1,0 +1,54 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title,
+        COALESCE(t.season_nr, 0) AS season_number,
+        COALESCE(t.episode_nr, 0) AS episode_number,
+        1 AS level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        aka_title t ON m.episode_of_id = t.id
+    WHERE 
+        m.production_year >= 2000 
+    
+    UNION ALL
+    
+    SELECT 
+        ch.id AS movie_id, 
+        ch.title,
+        COALESCE(t.season_nr, 0),
+        COALESCE(t.episode_nr, 0),
+        level + 1
+    FROM 
+        aka_title ch
+    JOIN 
+        MovieHierarchy mh ON ch.episode_of_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.season_number,
+    mh.episode_number,
+    AVG(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY mh.movie_id) AS avg_has_cast,
+    MAX(pi.info) FILTER (WHERE pi.info_type_id IN (1, 2)) AS director_or_writer,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COUNT(DISTINCT c.id) AS total_cast_members
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.season_number, mh.episode_number
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 1 
+ORDER BY 
+    mh.production_year DESC NULLS LAST;

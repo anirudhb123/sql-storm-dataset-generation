@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.AverageScore,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) as PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(v.PostId) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+
+PostHistoryCombined AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.CreationDate END) AS CloseReopenDate,
+        ARRAY_AGG(DISTINCT ht.Name) AS HistoryTypes,
+        COUNT(DISTINCT ph.UserId) AS EditorCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes ht ON ph.PostHistoryTypeId = ht.Id
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    CONCAT('Created by ', COALESCE(u.DisplayName, 'Unknown'), ' on ', TO_CHAR(p.CreationDate, 'YYYY-MM-DD HH24:MI:SS')) AS PostDetails,
+    pr.ViewCount AS RankViewCount,
+    CASE 
+        WHEN COUNT(co.Id) > 0 THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus,
+    STRING_AGG(DISTINCT ht.Name, ', ') AS HistoryTypeNames,
+    DATEDIFF('day', MIN(ph.CreationDate), MAX(ph.CreationDate)) AS DaysActive,
+    p.ClosedDate,
+    COALESCE(ua.VoteCount, 0) AS UserVoteCount,
+    ua.UpVotes AS UserUpVotes,
+    ua.DownVotes AS UserDownVotes,
+    ph.EditorCount AS UniqueEditors,
+    CASE 
+        WHEN COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 12) > 0 THEN 'Deleted' 
+        ELSE 'Not Deleted' 
+    END AS DeletionStatus
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostLinks pl ON p.Id = pl.PostId
+LEFT JOIN 
+    PostHistoryCombined ph ON p.Id = ph.PostId
+LEFT JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN 
+    Comments co ON p.Id = co.PostId
+LEFT JOIN 
+    PostHistory h ON p.Id = h.PostId
+LEFT JOIN 
+    PostHistoryTypes ht ON h.PostHistoryTypeId = ht.Id
+WHERE 
+    p.Score > 0 
+    AND (p.Tags ILIKE '%SQL%' OR p.Body ILIKE '%SQL%')
+GROUP BY 
+    p.Id, u.DisplayName, pr.ViewCount, ua.VoteCount, ua.UpVotes, ua.DownVotes, ph.EditorCount, p.ClosedDate
+ORDER BY 
+    pr.ViewCount DESC, DaysActive DESC;

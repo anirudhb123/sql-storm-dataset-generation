@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS OwnerPostRank,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.CreationDate DESC) AS GlobalPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 -- Upvotes only
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE()) -- Posts from the last year
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.ViewCount, p.AnswerCount, p.CommentCount, p.FavoriteCount, p.OwnerUserId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.Views
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Score,
+    r.VoteCount,
+    r.CreationDate,
+    us.DisplayName AS UserDisplayName,
+    us.Reputation AS UserReputation,
+    us.PositivePostCount,
+    us.TotalViews
+FROM 
+    RankedPosts r
+JOIN 
+    UserStatistics us ON r.OwnerUserId = us.UserId
+WHERE 
+    r.GlobalPostRank <= 100 -- Top 100 posts globally
+    AND r.OwnerPostRank <= 10 -- Top 10 posts per user
+ORDER BY 
+    r.Score DESC, r.CreationDate DESC;

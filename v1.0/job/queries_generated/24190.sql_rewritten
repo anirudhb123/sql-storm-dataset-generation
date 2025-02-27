@@ -1,0 +1,38 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT ci.person_id,
+           1 AS level,
+           t.id AS movie_id,
+           t.title AS movie_title,
+           a.name AS actor_name,
+           CASE WHEN ci.note IS NULL THEN 'Standard Role' ELSE ci.note END as role_note
+    FROM cast_info ci
+    INNER JOIN aka_name a ON ci.person_id = a.person_id
+    INNER JOIN aka_title t ON ci.movie_id = t.movie_id
+    WHERE t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT ah.person_id,
+           ah.level + 1,
+           t.id AS movie_id,
+           t.title AS movie_title,
+           a.name AS actor_name,
+           'Cameo Appearance' as role_note
+    FROM actor_hierarchy ah
+    INNER JOIN cast_info ci ON ci.movie_id = ah.movie_id
+    INNER JOIN aka_name a ON ci.person_id = a.person_id
+    INNER JOIN aka_title t ON ci.movie_id = t.movie_id
+    WHERE ah.level < 5 AND t.production_year < 2010
+)
+SELECT a.actor_name,
+       COUNT(DISTINCT ah.movie_id) AS total_movies,
+       MAX(CASE WHEN ah.level = 1 THEN ah.role_note END) AS primary_role,
+       STRING_AGG(DISTINCT ah.movie_title, '; ') AS movie_titles,
+       AVG(EXTRACT(YEAR FROM cast('2024-10-01' as date)) - t.production_year) AS avg_years_since_release
+FROM actor_hierarchy ah
+INNER JOIN aka_name a ON ah.person_id = a.person_id
+INNER JOIN aka_title t ON ah.movie_id = t.id
+GROUP BY a.actor_name
+HAVING COUNT(DISTINCT ah.movie_id) > 2
+ORDER BY avg_years_since_release DESC
+LIMIT 10;

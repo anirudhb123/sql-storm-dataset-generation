@@ -1,0 +1,91 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL -- Starting point: Root posts (questions)
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpvoteCount,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownvoteCount,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadgeSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Looking for close events
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    u.DisplayName AS Owner,
+    COALESCE(ps.UpvoteCount, 0) AS Upvotes,
+    COALESCE(ps.DownvoteCount, 0) AS Downvotes,
+    COALESCE(ps.TotalVotes, 0) AS TotalVotes,
+    COALESCE(bs.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(bs.GoldBadges, 0) AS UserGoldBadges,
+    COALESCE(bs.SilverBadges, 0) AS UserSilverBadges,
+    COALESCE(bs.BronzeBadges, 0) AS UserBronzeBadges,
+    COALESCE(cr.CloseReasons, 'Not Closed') AS CloseReasonDetails,
+    r.Depth AS PostDepth
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostVoteSummary ps ON p.Id = ps.PostId
+LEFT JOIN 
+    UserBadgeSummary bs ON u.Id = bs.UserId
+LEFT JOIN 
+    PostCloseReasons cr ON p.Id = cr.PostId
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.PostId
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '1 year' -- Last year
+ORDER BY 
+    Upvotes DESC, TotalVotes DESC
+LIMIT 100;

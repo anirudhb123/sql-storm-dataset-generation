@@ -1,0 +1,79 @@
+
+WITH customer_loyalty AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_spent,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ws.ws_net_profit) DESC) AS gender_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+high_value_customers AS (
+    SELECT 
+        cl.c_customer_sk, 
+        cl.c_first_name, 
+        cl.c_last_name, 
+        cl.total_orders, 
+        cl.total_spent
+    FROM 
+        customer_loyalty cl
+    WHERE 
+        cl.total_spent IS NOT NULL AND 
+        cl.total_spent > (SELECT AVG(total_spent) FROM customer_loyalty)
+)
+SELECT 
+    cl.c_first_name,
+    cl.c_last_name,
+    cl.total_orders,
+    cl.total_spent,
+    COALESCE(dc.d_holiday, 'N') AS is_holiday,
+    CASE 
+        WHEN cl.total_spent > 1000 THEN 'Gold' 
+        WHEN cl.total_spent BETWEEN 500 AND 1000 THEN 'Silver' 
+        ELSE 'Bronze' 
+    END AS membership_level,
+    CASE 
+        WHEN cl.gender_rank = 1 THEN 'Top Spender in Gender'
+        ELSE NULL 
+    END AS special_note
+FROM 
+    high_value_customers cl
+LEFT JOIN 
+    date_dim dc ON dc.d_date_sk = (
+        SELECT MIN(ws.ws_sold_date_sk) 
+        FROM web_sales ws 
+        WHERE ws.ws_bill_customer_sk = cl.c_customer_sk
+    )
+ORDER BY 
+    cl.total_spent DESC,
+    cl.total_orders ASC
+LIMIT 10
+OFFSET 5;
+
+-- Union with another fictitious report for added complexity
+UNION ALL
+
+SELECT 
+    'Overall Total' AS c_first_name, 
+    NULL AS c_last_name,
+    COUNT(*) AS total_orders, 
+    SUM(ws.ws_net_profit) AS total_spent,
+    DENSE_RANK() OVER (ORDER BY SUM(ws.ws_net_profit) DESC) AS overall_rank
+FROM 
+    web_sales ws
+WHERE 
+    ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+HAVING 
+    SUM(ws.ws_net_profit) > 0
+ORDER BY 
+    total_spent DESC
+WITH ROLLUP;

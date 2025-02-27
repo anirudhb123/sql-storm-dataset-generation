@@ -1,0 +1,54 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        m.production_year,
+        1 AS depth
+    FROM
+        aka_title AS m
+    LEFT JOIN
+        movie_keyword AS mk ON m.id = mk.movie_id
+    WHERE
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        mt.title AS movie_title,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        mt.production_year,
+        mh.depth + 1
+    FROM
+        movie_link AS ml
+    INNER JOIN
+        aka_title AS mt ON ml.linked_movie_id = mt.id
+    INNER JOIN
+        MovieHierarchy AS mh ON mh.movie_id = ml.movie_id
+)
+SELECT
+    h.movie_id,
+    h.movie_title,
+    h.keyword,
+    h.production_year,
+    COUNT(DISTINCT c.person_id) AS cast_count,
+    AVG(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS has_notes_ratio,
+    STRING_AGG(DISTINCT p.info, ', ') AS person_info,
+    ROW_NUMBER() OVER (PARTITION BY h.movie_id ORDER BY h.depth DESC) AS rank
+FROM
+    MovieHierarchy AS h
+LEFT JOIN
+    complete_cast AS cc ON h.movie_id = cc.movie_id
+LEFT JOIN
+    cast_info AS c ON cc.subject_id = c.person_id
+LEFT JOIN
+    person_info AS p ON c.person_id = p.person_id AND p.info_type_id = 1
+WHERE
+    h.keyword IS NOT NULL
+GROUP BY
+    h.movie_id, h.movie_title, h.keyword, h.production_year
+HAVING
+    COUNT(DISTINCT c.person_id) > 5
+ORDER BY
+    h.production_year DESC, cast_count DESC;

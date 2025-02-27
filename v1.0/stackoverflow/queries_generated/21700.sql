@@ -1,0 +1,93 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT V.PostId) AS TotalVotes,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) DESC) AS VoteRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT PH.Id) AS HistoryChangeCount,
+        ROW_NUMBER() OVER (ORDER BY P.Score DESC, P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.CreationDate
+),
+ClosedPosts AS (
+    SELECT 
+        PostId, 
+        COUNT(DISTINCT PostHistoryTypeId) AS CloseActionCount
+    FROM 
+        PostHistory 
+    WHERE 
+        PostHistoryTypeId IN (10, 11) -- 10 = Post Closed, 11 = Post Reopened
+    GROUP BY 
+        PostId
+),
+FinalStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        UP.UpVotes,
+        UP.DownVotes,
+        P.PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.UpVoteCount,
+        P.DownVoteCount,
+        P.CommentCount,
+        P.HistoryChangeCount,
+        COALESCE(CP.CloseActionCount, 0) AS CloseActionCount,
+        UP.VoteRank,
+        P.PostRank
+    FROM 
+        UserVoteStats UP
+    INNER JOIN 
+        PostStats P ON UP.UserId = P.PostId -- Establish a correlation by post ID
+    LEFT JOIN 
+        ClosedPosts CP ON P.PostId = CP.PostId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Title AS PostTitle,
+    Score AS PostScore,
+    CreationDate AS PostCreatedOn,
+    UpVoteCount,
+    DownVoteCount,
+    CommentCount,
+    HistoryChangeCount,
+    CloseActionCount,
+    VoteRank,
+    PostRank
+FROM 
+    FinalStats
+WHERE 
+    CloseActionCount = 0 AND 
+    UpVoteCount > DownVoteCount
+ORDER BY 
+    VoteRank, PostRank
+FETCH FIRST 10 ROWS ONLY;

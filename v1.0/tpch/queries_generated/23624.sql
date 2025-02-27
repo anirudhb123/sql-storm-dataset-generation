@@ -1,0 +1,64 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderstatus IN ('O', 'F') -- Only open and finished orders
+),
+SupplierDetails AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+LineItemStats AS (
+    SELECT
+        l.l_orderkey,
+        COUNT(*) AS total_items,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM
+        lineitem l
+    GROUP BY
+        l.l_orderkey
+)
+SELECT
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(SUM(l.total_revenue) FILTER (WHERE l.total_revenue > 0), 0) AS total_revenue,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    CASE
+        WHEN MAX(o.o_orderstatus) IS NULL THEN 'No Orders'
+        ELSE MAX(o.o_orderstatus)
+    END AS max_order_status,
+    AVG(sd.avg_supplycost) AS avg_supplier_cost
+FROM
+    part p
+LEFT JOIN
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN
+    RankedOrders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN
+    customer c ON c.c_custkey = o.o_custkey
+LEFT JOIN
+    SupplierDetails sd ON sd.s_suppkey = l.l_suppkey
+GROUP BY
+    p.p_partkey, p.p_name, p.p_retailprice
+HAVING
+    COUNT(DISTINCT o.o_orderkey) > 5 OR MAX(o.o_orderdate) IS NULL
+ORDER BY
+    total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

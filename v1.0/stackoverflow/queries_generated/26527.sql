@@ -1,0 +1,51 @@
+WITH TagStats AS (
+    SELECT
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Posts.AnswerCount) AS AverageAnswers,
+        STRING_AGG(DISTINCT Users.DisplayName, ', ') AS ActiveUsers
+    FROM
+        Tags
+    JOIN
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    JOIN
+        Users ON Posts.OwnerUserId = Users.Id
+    GROUP BY
+        Tags.TagName
+),
+PopularTags AS (
+    SELECT
+        TagName,
+        PostCount,
+        TotalViews,
+        AverageAnswers,
+        ActiveUsers,
+        RANK() OVER (ORDER BY TotalViews DESC) as ViewRank
+    FROM
+        TagStats
+),
+TopTags AS (
+    SELECT
+        TagName,
+        PostCount,
+        TotalViews,
+        AverageAnswers,
+        ActiveUsers
+    FROM
+        PopularTags
+    WHERE
+        ViewRank <= 10
+)
+SELECT
+    tt.TagName,
+    tt.PostCount,
+    tt.TotalViews,
+    tt.AverageAnswers,
+    tt.ActiveUsers,
+    (SELECT COUNT(*) FROM Posts WHERE Tags LIKE '%' || tt.TagName || '%') AS TotalPostsWithTag,
+    (SELECT COUNT(*) FROM Votes WHERE PostId IN (SELECT Id FROM Posts WHERE Tags LIKE '%' || tt.TagName || '%') AND VoteTypeId = 2) AS TotalUpvotes
+FROM
+    TopTags tt
+ORDER BY
+    tt.TotalViews DESC;

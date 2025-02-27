@@ -1,0 +1,48 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COALESCE(p.CommentCount, 0) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RankByRecency,
+        RANK() OVER (ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopRankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        CreationDate,
+        Score,
+        AnswerCount,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByRecency <= 5 AND RankByScore <= 10
+)
+SELECT 
+    trp.PostId,
+    trp.Title,
+    trp.OwnerDisplayName,
+    trp.CreationDate,
+    trp.Score,
+    trp.AnswerCount,
+    trp.CommentCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = trp.PostId AND v.VoteTypeId = 2) AS UpVotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = trp.PostId AND v.VoteTypeId = 3) AS DownVotes,
+    (SELECT STRING_AGG(t.TagName, ', ') FROM Tags t WHERE t.Id IN (SELECT unnest(string_to_array(substring(trp.Tags, 2, length(trp.Tags) - 2), '><')::int[]))) AS Tags
+FROM 
+    TopRankedPosts trp
+ORDER BY 
+    trp.Score DESC, trp.CreationDate DESC
+LIMIT 50;

@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierachy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        m.id AS root_movie_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        mh.root_movie_id
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierachy mh ON ml.movie_id = mh.movie_id
+),
+AggregatedData AS (
+    SELECT 
+        mh.root_movie_id,
+        mh.title,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note_percentage,
+        COUNT(DISTINCT mk.keyword) FILTER (WHERE mk.keyword IS NOT NULL) AS keyword_count,
+        STRING_AGG(DISTINCT c.name, ', ' ORDER BY c.name) AS cast_names
+    FROM 
+        MovieHierachy mh
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    GROUP BY 
+        mh.root_movie_id, mh.title
+),
+RankedMovies AS (
+    SELECT 
+        ad.root_movie_id,
+        ad.title,
+        ad.cast_count,
+        ad.has_note_percentage,
+        ad.keyword_count,
+        ad.cast_names,
+        RANK() OVER (ORDER BY ad.cast_count DESC, ad.keyword_count DESC) AS rank
+    FROM 
+        AggregatedData ad
+)
+SELECT 
+    rm.rank,
+    rm.title,
+    rm.cast_count,
+    rm.has_note_percentage,
+    rm.keyword_count,
+    rm.cast_names
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rank <= 10
+ORDER BY 
+    rm.rank;

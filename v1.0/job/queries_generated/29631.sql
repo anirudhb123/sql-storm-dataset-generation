@@ -1,0 +1,67 @@
+WITH 
+-- CTE to get movie titles with a specific keyword and their related information
+movie_keyword_info AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mk.keyword
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    WHERE 
+        mk.keyword = 'Action'  -- Adjust keyword for benchmarking
+),
+
+-- CTE to get cast information for those movies
+cast_info_detail AS (
+    SELECT 
+        ci.movie_id, 
+        ci.person_id,
+        ak.name AS actor_name,
+        rl.role AS role_name
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rl ON ci.role_id = rl.id
+    WHERE 
+        ci.movie_id IN (SELECT movie_id FROM movie_keyword_info)
+),
+
+-- CTE to aggregate company information related to the movies
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name) AS companies,
+        GROUP_CONCAT(DISTINCT ct.kind) AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        mc.movie_id IN (SELECT movie_id FROM movie_keyword_info)
+    GROUP BY 
+        mc.movie_id
+)
+
+-- Final selection to benchmark string processing with a complex join
+SELECT 
+    mki.title,
+    mki.production_year,
+    cii.actor_name,
+    cii.role_name,
+    cd.companies,
+    cd.company_types
+FROM 
+    movie_keyword_info mki
+JOIN 
+    cast_info_detail cii ON mki.movie_id = cii.movie_id
+JOIN 
+    company_details cd ON mki.movie_id = cd.movie_id
+ORDER BY 
+    mki.production_year DESC, mki.title;

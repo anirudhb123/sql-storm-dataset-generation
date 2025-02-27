@@ -1,0 +1,54 @@
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey
+    FROM supplier s
+    JOIN SupplierCTE r ON s.s_nationkey = r.s_nationkey
+    WHERE s.s_acctbal > r.s_acctbal AND s.s_suppkey <> r.s_suppkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           CASE 
+               WHEN p.p_size IS NULL THEN 'Unknown Size' 
+               ELSE CONCAT('Size: ', p.p_size)
+           END AS size_info,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+),
+OrderStats AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY o.o_orderkey
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT c.c_custkey) AS customer_count, 
+       SUM(o.total_price) AS total_order_value,
+       AVG(o.part_count) AS avg_parts_per_order,
+       sp.s_name AS major_supplier
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN (
+    SELECT DISTINCT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+) AS MajorSup ON EXISTS (
+    SELECT 1 FROM SupplierCTE sct WHERE sct.s_suppkey = MajorSup.ps_suppkey
+) 
+LEFT JOIN OrderStats o ON c.c_custkey = o.o_orderkey
+JOIN SupplierCTE sp ON sp.s_suppkey = (
+    SELECT s.s_suppkey
+    FROM SupplierCTE s
+    WHERE s.s_acctbal = (SELECT MAX(s_acctbal) FROM SupplierCTE)
+    LIMIT 1
+)
+GROUP BY r.r_name, sp.s_name
+HAVING COUNT(DISTINCT c.c_custkey) > 0 
+   AND SUM(o.total_price) > 10000
+   AND COUNT(DISTINCT CASE WHEN o.part_count IS NULL THEN NULL ELSE o.o_orderkey END) > 0
+ORDER BY customer_count DESC, total_order_value DESC;

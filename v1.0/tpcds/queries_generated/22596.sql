@@ -1,0 +1,81 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_gender,
+        COALESCE(hd.hd_buy_potential, 'Unknown') AS buy_potential,
+        COALESCE(SUM(ws.ws_quantity) FILTER (WHERE ws.ws_sales_price > 50), 0) AS high_value_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON hd.hd_demo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, hd.hd_buy_potential
+),
+TopNCustomers AS (
+    SELECT 
+        rc.c_customer_sk,
+        rc.c_first_name,
+        rc.c_last_name,
+        rc.rank_gender,
+        rc.buy_potential,
+        rc.high_value_sales,
+        CASE 
+            WHEN rc.high_value_sales > 500 THEN 'High Value'
+            WHEN rc.high_value_sales BETWEEN 100 AND 500 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS sales_category
+    FROM 
+        RankedCustomers rc
+    WHERE 
+        rc.rank_gender <= 2 -- Top 2 per gender
+),
+FinalResult AS (
+    SELECT 
+        tnc.c_customer_sk,
+        tnc.c_first_name,
+        tnc.c_last_name,
+        tnc.sales_category,
+        COALESCE(SUM(cs.cs_ext_sales_price), 0) AS total_catalog_sales,
+        COALESCE(SUM(ss.ss_ext_sales_price), 0) AS total_store_sales,
+        COALESCE(SUM(ws.ws_ext_sales_price), 0) AS total_web_sales,
+        COUNT(DISTINCT tnc.c_customer_sk) OVER (PARTITION BY tnc.sales_category) AS customer_count_in_category
+    FROM 
+        TopNCustomers tnc
+    LEFT JOIN 
+        catalog_sales cs ON cs.cs_bill_customer_sk = tnc.c_customer_sk
+    LEFT JOIN 
+        store_sales ss ON ss.ss_customer_sk = tnc.c_customer_sk
+    LEFT JOIN 
+        web_sales ws ON ws.ws_bill_customer_sk = tnc.c_customer_sk
+    GROUP BY 
+        tnc.c_customer_sk, tnc.c_first_name, tnc.c_last_name, tnc.sales_category
+)
+SELECT 
+    f.c_customer_sk,
+    f.c_first_name,
+    f.c_last_name,
+    f.sales_category,
+    f.total_catalog_sales,
+    f.total_store_sales,
+    f.total_web_sales,
+    CASE 
+        WHEN f.customer_count_in_category IS NULL THEN 'No Customers Found'
+        ELSE 'Customers Found'
+    END AS customer_status
+FROM 
+    FinalResult f
+WHERE 
+    f.total_web_sales > 1000 OR f.total_catalog_sales < 500
+ORDER BY 
+    f.total_web_sales DESC, f.total_catalog_sales DESC
+FETCH FIRST 10 ROWS ONLY;

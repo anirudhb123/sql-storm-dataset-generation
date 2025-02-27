@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS rank_title
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ARRAY_AGG(DISTINCT kc.keyword) AS keywords,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    LEFT JOIN 
+        cast_info ci ON rm.movie_id = ci.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+),
+ActorPerformance AS (
+    SELECT 
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count,
+        AVG(COALESCE(mp.rating, 0)) AS average_rating
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN 
+        movie_info mp ON ci.movie_id = mp.movie_id AND mp.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        a.name
+)
+SELECT 
+    mv.title,
+    mv.production_year,
+    mv.keywords,
+    mv.cast_count,
+    ap.name AS lead_actor,
+    ap.movies_count,
+    ap.average_rating,
+    CASE 
+        WHEN ap.average_rating IS NULL THEN 'No Ratings'
+        WHEN ap.average_rating >= 8 THEN 'Highly Rated'
+        ELSE 'Average Rated'
+    END AS rating_category
+FROM 
+    MovieDetails mv
+LEFT JOIN 
+    ActorPerformance ap ON mv.movie_id = (SELECT movie_id FROM cast_info ci WHERE ci.role_id = (SELECT id FROM role_type WHERE role = 'lead actor') AND ci.movie_id = mv.movie_id LIMIT 1)
+WHERE 
+    mv.production_year > 2000 
+ORDER BY 
+    mv.production_year DESC, mv.cast_count DESC, mv.title;

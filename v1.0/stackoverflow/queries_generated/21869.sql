@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank,
+        COALESCE(pt.Name, 'Unknown') AS PostType,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS Upvotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS Downvotes
+    FROM
+        Posts p
+    LEFT JOIN
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN
+        Votes v ON v.PostId = p.Id
+    WHERE
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 month'
+    GROUP BY
+        p.Id, pt.Name
+),
+ClosedPosts AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate,
+        hr.Comment,
+        p.Title AS ClosedPostTitle
+    FROM
+        PostHistory ph
+    JOIN
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    INNER JOIN
+        Posts p ON ph.PostId = p.Id
+    LEFT JOIN
+        (SELECT PostId, COUNT(*) AS Comments, MIN(CreationDate) AS FirstCloseDate
+         FROM PostHistory
+         WHERE PostHistoryTypeId = 10
+         GROUP BY PostId) hr ON p.Id = hr.PostId
+    WHERE
+        ph.PostHistoryTypeId IN (10, 11) -- Closed or Reopened posts
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+)
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.PostType,
+    rp.Upvotes,
+    rp.Downvotes,
+    cp.CreationDate AS CloseDate,
+    cp.ClosedPostTitle,
+    ub.TotalBadges,
+    ub.HighestBadgeClass
+FROM
+    RankedPosts rp
+LEFT JOIN
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN
+    UserBadges ub ON rp.PostId IN (SELECT DISTINCT AcceptedAnswerId FROM Posts WHERE AcceptedAnswerId IS NOT NULL)
+WHERE
+    rp.Rank <= 5 -- Limit to top 5 posts per type
+ORDER BY
+    rp.PostType, rp.Score DESC, rp.ViewCount DESC;
+

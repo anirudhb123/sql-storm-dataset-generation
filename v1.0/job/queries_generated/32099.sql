@@ -1,0 +1,84 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+MovieCastInfo AS (
+    SELECT 
+        c.movie_id,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names,
+        COUNT(DISTINCT ci.id) AS total_cast
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        c.movie_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mi.cast_names,
+        mw.keywords,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(mw.keywords) DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        MovieCastInfo mi ON mh.movie_id = mi.movie_id
+    LEFT JOIN 
+        MoviesWithKeywords mw ON mh.movie_id = mw.movie_id
+    WHERE 
+        mw.keywords IS NOT NULL
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mi.cast_names, mw.keywords
+)
+SELECT 
+    r.title,
+    r.production_year,
+    r.cast_names,
+    r.keywords,
+    CASE 
+        WHEN r.rank <= 5 THEN 'Top 5'
+        ELSE 'Others'
+    END AS rank_category
+FROM 
+    RankedMovies r
+WHERE 
+    r.rank <= 10
+ORDER BY 
+    r.production_year DESC, r.rank;

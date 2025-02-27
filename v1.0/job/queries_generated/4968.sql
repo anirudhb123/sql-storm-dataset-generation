@@ -1,0 +1,68 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(k.keyword, 'No Keyword') AS keyword,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword
+),
+high_cast_movies AS (
+    SELECT 
+        md.title_id,
+        md.title,
+        md.production_year,
+        md.keyword,
+        md.cast_count
+    FROM 
+        movie_details md
+    WHERE 
+        md.cast_count >= 5
+),
+summary AS (
+    SELECT 
+        p.name AS person_name, 
+        COUNT(DISTINCT cc.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT md.title, ', ') AS movies
+    FROM 
+        aka_name p
+    JOIN 
+        cast_info cc ON p.person_id = cc.person_id
+    JOIN 
+        high_cast_movies md ON cc.movie_id = md.title_id
+    GROUP BY 
+        p.id
+    HAVING 
+        COUNT(DISTINCT cc.movie_id) > 3
+),
+movie_summary AS (
+    SELECT 
+        year_rank,
+        AVG(cast_count) AS avg_cast_count
+    FROM 
+        movie_details
+    GROUP BY 
+        year_rank
+)
+SELECT 
+    s.person_name, 
+    s.movie_count, 
+    s.movies,
+    ms.avg_cast_count
+FROM 
+    summary s
+LEFT JOIN 
+    movie_summary ms ON s.movie_count > ms.avg_cast_count
+ORDER BY 
+    s.movie_count DESC, 
+    s.person_name;

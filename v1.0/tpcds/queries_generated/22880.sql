@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.order_number,
+        ws_sales_price,
+        ws_ext_discount_amt,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        ws.sales_price > 0 
+        AND c.c_current_cdemo_sk IS NOT NULL
+),
+FilteredReturns AS (
+    SELECT 
+        sr.return_ticket_number,
+        SUM(sr.return_quantity) AS total_return_quantity,
+        COUNT(sr.return_ticket_number) AS return_count
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.return_ticket_number
+    HAVING 
+        total_return_quantity > 5
+),
+HighValueCustomers AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        MAX(cd.cd_purchase_estimate) AS max_purchase_estimate
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_credit_rating IN ('Excellent', 'Good')
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender
+    HAVING 
+        MAX(cd.cd_purchase_estimate) > 1000
+)
+SELECT 
+    RANK() OVER (ORDER BY AVG(ws.ws_sales_price) DESC) as web_rank,
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    SUM(COALESCE(ws.ws_sales_price, 0) - COALESCE(ws.ws_ext_discount_amt, 0)) AS total_sales,
+    COUNT(DISTINCT sr.return_ticket_number) AS total_returns,
+    SUM(fr.total_return_quantity) AS sum_returned_quantity,
+    cd.cd_gender
+FROM 
+    web_sales ws
+LEFT JOIN 
+    customer c ON ws.bill_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    FilteredReturns fr ON fr.return_ticket_number = ws.order_number
+LEFT JOIN 
+    HighValueCustomers cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    c.c_birth_year IS NOT NULL 
+    AND (c.c_birth_month < 6 OR c.c_birth_month IS NULL) 
+    AND (ws.ws_net_profit IS NOT NULL AND ws.ws_net_profit > 0)
+GROUP BY 
+    c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender
+HAVING 
+    total_sales > 10000
+ORDER BY 
+    web_rank, total_sales DESC;

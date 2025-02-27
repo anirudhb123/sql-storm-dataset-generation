@@ -1,0 +1,42 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.web_site_id,
+        COUNT(ws.order_number) AS total_orders,
+        SUM(ws.net_paid) AS total_revenue,
+        AVG(ws.net_paid) AS average_order_value
+    FROM web_sales ws
+    JOIN customer c ON ws.bill_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender = 'F'
+    AND cd.cd_marital_status = 'M'
+    AND ws.sold_date_sk IN (
+        SELECT d_date_sk
+        FROM date_dim
+        WHERE d_year = 2023 AND d_month_seq BETWEEN 1 AND 6
+    )
+    GROUP BY ws.web_site_id
+),
+return_data AS (
+    SELECT 
+        wr.web_site_sk,
+        COUNT(wr.order_number) AS total_returns,
+        SUM(wr.return_amt) AS total_returned
+    FROM web_returns wr
+    JOIN web_page wp ON wr.web_page_sk = wp.wp_web_page_sk
+    WHERE wp.url LIKE '%/products%'
+    AND wr.returning_cdemo_sk IS NOT NULL
+    GROUP BY wr.web_site_sk
+)
+SELECT 
+    sd.web_site_id,
+    sd.total_orders,
+    sd.total_revenue,
+    sd.average_order_value,
+    COALESCE(rd.total_returns, 0) AS total_returns,
+    COALESCE(rd.total_returned, 0) AS total_returned,
+    (sd.total_revenue - COALESCE(rd.total_returned, 0)) AS net_revenue
+FROM sales_data sd
+LEFT JOIN return_data rd ON sd.web_site_id = rd.web_site_sk
+ORDER BY net_revenue DESC
+LIMIT 10;

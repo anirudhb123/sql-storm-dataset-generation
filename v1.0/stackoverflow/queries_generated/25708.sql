@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.Score,
+        P.Tags,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+),
+TagStatistics AS (
+    SELECT 
+        TAG.TagName,
+        COUNT(P.Id) AS PostCount,
+        AVG(P.Score) AS AvgScore
+    FROM 
+        Posts P
+    CROSS JOIN 
+        LATERAL string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><') AS TAG(TagName)
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        TAG.TagName
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore,
+        COUNT(P.Id) AS QuestionsAnswered
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 2 -- Answers
+    GROUP BY 
+        U.Id, U.DisplayName
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 10
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.Body,
+    RP.CreationDate,
+    RP.Score,
+    RP.Tags,
+    RP.OwnerDisplayName,
+    TS.PostCount AS TagPostCount,
+    TS.AvgScore AS TagAvgScore,
+    TU.DisplayName AS TopUserDisplayName,
+    TU.TotalViews,
+    TU.TotalScore,
+    TU.QuestionsAnswered
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    TagStatistics TS ON TS.TagName = ANY(string_to_array(substring(RP.Tags, 2, length(RP.Tags)-2), '><'))
+JOIN 
+    TopUsers TU ON RP.OwnerUserId = TU.UserId
+WHERE 
+    RP.PostRank = 1 -- Get only the latest question per user
+ORDER BY 
+    RP.CreationDate DESC
+LIMIT 20;

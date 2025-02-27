@@ -1,0 +1,58 @@
+
+WITH SalesDetails AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (
+        SELECT d.d_date_sk
+        FROM date_dim d
+        WHERE d.d_year = 2001 AND d.d_dow IN (5, 6) 
+    )
+    GROUP BY ws.web_site_id
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_id,
+        i.i_brand,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_id, i.i_brand
+),
+ReturnDetails AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+WarehouseInfo AS (
+    SELECT 
+        w.w_warehouse_id,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_profit) AS warehouse_net_profit
+    FROM warehouse w
+    JOIN web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY w.w_warehouse_id
+)
+SELECT 
+    C.cat_item_id,
+    COALESCE(S.total_quantity, 0) AS total_web_sales,
+    COALESCE(I.order_count, 0) AS total_item_orders,
+    COALESCE(R.total_returned_quantity, 0) AS total_returns,
+    (COALESCE(S.total_net_profit, 0) - COALESCE(R.total_returned_quantity, 0)) AS net_profit_after_returns,
+    W.warehouse_net_profit AS total_warehouse_net_profit,
+    CASE WHEN I.avg_sales_price IS NULL THEN 'No Sales' 
+         ELSE 'Sales Available' END AS sales_status
+FROM (SELECT DISTINCT i.i_item_id AS cat_item_id FROM item i) C
+LEFT JOIN SalesDetails S ON C.cat_item_id = S.web_site_id
+LEFT JOIN ItemDetails I ON C.cat_item_id = I.i_item_id
+LEFT JOIN ReturnDetails R ON I.i_item_id = R.sr_item_sk
+LEFT JOIN WarehouseInfo W ON W.order_count = I.order_count
+WHERE (COALESCE(S.total_quantity, 0) + COALESCE(I.order_count, 0)) > 0
+ORDER BY net_profit_after_returns DESC, sales_status DESC
+FETCH FIRST 100 ROWS ONLY;

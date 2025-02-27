@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '6 months'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) FILTER (WHERE b.Class = 1) AS GoldCount,
+        COUNT(*) FILTER (WHERE b.Class = 2) AS SilverCount,
+        COUNT(*) FILTER (WHERE b.Class = 3) AS BronzeCount,
+        SUM(b.Class) AS TotalBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostActivity AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+InactiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.LastAccessDate,
+        DATEDIFF(NOW(), u.LastAccessDate) AS DaysInactive
+    FROM 
+        Users u
+    WHERE 
+        u.LastAccessDate < NOW() - INTERVAL '1 year'
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    ub.GoldCount,
+    ub.SilverCount,
+    ub.BronzeCount,
+    pa.HistoryCount,
+    pa.LastEditDate,
+    iu.DisplayName AS InactiveUserDisplayName,
+    iu.DaysInactive
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = rp.PostId -- Assuming PostId relates to a User
+LEFT JOIN 
+    PostActivity pa ON pa.PostId = rp.PostId
+LEFT JOIN 
+    InactiveUsers iu ON iu.UserId = rp.PostId -- Assuming PostId relates to a User
+WHERE 
+    rp.ViewRank <= 5
+    AND (ub.TotalBadgeClass IS NULL OR ub.TotalBadgeClass < 5)
+ORDER BY 
+    rp.ViewCount DESC
+LIMIT 100;

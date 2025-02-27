@@ -1,0 +1,37 @@
+SELECT 
+    a.id AS aka_id,
+    a.name AS aka_name,
+    t.id AS title_id,
+    t.title AS title_name,
+    c.id AS cast_id,
+    p.id AS person_id,
+    p.name AS person_name,
+    ci.kind AS cast_type,
+    GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    AVG(mi.production_year) AS avg_production_year
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    name p ON a.person_id = p.id
+JOIN 
+    comp_cast_type ci ON c.person_role_id = ci.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2020
+GROUP BY 
+    a.id, a.name, t.id, t.title, c.id, p.id, p.name, ci.kind
+ORDER BY 
+    COUNT(DISTINCT mc.company_id) DESC,
+    AVG(mi.production_year) ASC;

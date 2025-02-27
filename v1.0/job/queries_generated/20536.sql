@@ -1,0 +1,99 @@
+WITH Recursive_CTE AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.nr_order IS NOT NULL
+),
+Actor_Counts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(*) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+Title_Info AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COALESCE(ak.name, 'Unknown') AS actor_name,
+        rc.role_order
+    FROM 
+        aka_title ak
+    LEFT JOIN 
+        title t ON ak.movie_id = t.id
+    LEFT JOIN 
+        Recursive_CTE rc ON rc.movie_id = t.id
+),
+Company_Info AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(CONCAT(cn.name, ' (', ct.kind, ')'), ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+Keyword_Info AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+Final_Output AS (
+    SELECT 
+        ti.title_id,
+        ti.title,
+        ti.production_year,
+        ti.actor_name,
+        ci.companies,
+        ki.keywords,
+        ac.actor_count
+    FROM 
+        Title_Info ti
+    LEFT JOIN 
+        Company_Info ci ON ti.title_id = ci.movie_id
+    LEFT JOIN 
+        Keyword_Info ki ON ti.title_id = ki.movie_id
+    LEFT JOIN 
+        Actor_Counts ac ON ti.title_id = ac.movie_id
+)
+SELECT 
+    f.title_id,
+    f.title,
+    f.production_year,
+    f.actor_name,
+    f.companies,
+    f.keywords,
+    f.actor_count,
+    CASE 
+        WHEN f.actor_count IS NULL THEN 'No actors registered'
+        WHEN f.actor_count > 5 THEN 'Blockbuster'
+        ELSE 'Indie Film'
+    END AS film_category,
+    (SELECT MAX(rc.role_order) 
+     FROM Recursive_CTE rc 
+     WHERE rc.movie_id = f.title_id) AS max_role_order
+FROM 
+    Final_Output f
+ORDER BY 
+    f.production_year DESC,
+    f.actor_count DESC NULLS LAST;
+
+This SQL query retrieves detailed information about films including their titles, production years, actors, involved companies, keywords, and a categorization based on actor count. It combines several SQL constructs such as Common Table Expressions (CTEs), aggregation functions, complex joins, and subqueries to create a comprehensive output, while also handling NULLs and specific conditions.

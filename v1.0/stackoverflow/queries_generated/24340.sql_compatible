@@ -1,0 +1,74 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    WHERE U.Reputation > 100
+    GROUP BY U.Id, U.DisplayName
+),
+ActivePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        COALESCE(P.AcceptedAnswerId, -1) AS AnswerId,
+        P.CreationDate,
+        DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank,
+        COUNT(C.Id) AS CommentCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 YEAR')
+    GROUP BY P.Id, P.AcceptedAnswerId, P.CreationDate
+),
+PostChanges AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.UserId,
+        PH.CreationDate,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS ChangeRank
+    FROM PostHistory PH
+    WHERE PH.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 DAYS')
+),
+RecentChanges AS (
+    SELECT 
+        PC.PostId,
+        PC.UserId,
+        PC.CreationDate,
+        PC.Comment,
+        PH.Name AS ChangeType,
+        PC.ChangeRank
+    FROM PostChanges PC
+    JOIN PostHistoryTypes PH ON PC.PostHistoryTypeId = PH.Id
+    WHERE PC.ChangeRank <= 3
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        STRING_AGG(Name, ', ' ORDER BY Date DESC) AS BadgeList
+    FROM Badges
+    WHERE Date >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 YEAR')
+    GROUP BY UserId
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalPosts,
+    UA.TotalComments,
+    UA.TotalBounty,
+    AP.PostId AS RecentPostId,
+    AP.CreationDate AS RecentPostDate,
+    AP.CommentCount,
+    RC.ChangeType,
+    RB.BadgeList
+FROM UserActivity UA
+LEFT JOIN ActivePosts AP ON UA.UserId = AP.OwnerUserId AND AP.RecentPostRank = 1
+LEFT JOIN RecentChanges RC ON AP.PostId = RC.PostId
+LEFT JOIN UserBadges RB ON UA.UserId = RB.UserId
+ORDER BY UA.TotalPosts DESC, UA.TotalBounty DESC NULLS LAST, UA.DisplayName;

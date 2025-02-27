@@ -1,0 +1,4 @@
+SELECT min(k.keyword) AS movie_keyword, min(n.name) AS actor_name, min(t.title) AS hero_movie
+FROM cast_info AS ci, keyword AS k, movie_keyword AS mk, name AS n, title AS t
+WHERE k.id = mk.keyword_id AND t.id = mk.movie_id AND t.id = ci.movie_id AND ci.movie_id = mk.movie_id AND n.id = ci.person_id
+AND mk.movie_id < 2420963 AND ci.movie_id > 189343 AND t.kind_id < 7 AND n.gender > 'f' AND n.md5sum IN ('41a3074cf4416891f5e4f5b1ed4c1549', '456ee5f3dac2411b4167a086d5af3177', '514c5d4470513f4d37fc1edc06959039', '75ea973b902f9a26548a812d38cf776c', 'a6519d20232c56c68b8e6d73b59cd613', 'b79e34ec93afc2dded59f42ddeed1463') AND n.imdb_index LIKE '%I%';

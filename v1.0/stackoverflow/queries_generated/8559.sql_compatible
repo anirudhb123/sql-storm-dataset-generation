@@ -1,0 +1,54 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvotesReceived,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvotesReceived,
+        COUNT(DISTINCT C.Id) AS CommentsMade,
+        COUNT(DISTINCT B.Id) AS BadgesEarned
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    LEFT JOIN 
+        Badges B ON B.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionsAsked,
+        AnswersGiven,
+        UpvotesReceived,
+        DownvotesReceived,
+        CommentsMade,
+        BadgesEarned,
+        DENSE_RANK() OVER (ORDER BY QuestionsAsked DESC, UpvotesReceived DESC) AS Rank
+    FROM 
+        UserActivity
+)
+SELECT 
+    UserId,
+    DisplayName,
+    QuestionsAsked,
+    AnswersGiven,
+    UpvotesReceived,
+    DownvotesReceived,
+    CommentsMade,
+    BadgesEarned,
+    Rank
+FROM 
+    RankedUsers
+WHERE
+    Rank <= 10
+ORDER BY 
+    Rank;

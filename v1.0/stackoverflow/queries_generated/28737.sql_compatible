@@ -1,0 +1,87 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+        AND p.CreationDate >= DATE_SUB('2024-10-01', INTERVAL 1 YEAR)  
+),
+PopularTags AS (
+    SELECT 
+        TRIM(UNNEST(SPLIT(Tags, ','))) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        RankedPosts
+    WHERE 
+        TagRank = 1
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(*) > 5  
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS AnswerCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 2  
+        AND p.CreationDate >= DATE_SUB('2024-10-01', INTERVAL 1 YEAR)
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        pt.Name AS PostHistoryTypeName
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= DATE_SUB('2024-10-01', INTERVAL 1 MONTH)  
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Tags,
+    pgh.PostHistoryTypeName,
+    pgh.UserDisplayName AS EditedBy,
+    pgh.CreationDate AS EditDate,
+    tu.DisplayName AS TopUser,
+    tu.UpVotes,
+    tu.DownVotes,
+    tu.AnswerCount
+FROM 
+    RankedPosts rp
+JOIN 
+    RecentPostHistory pgh ON rp.PostId = pgh.PostId
+JOIN 
+    PopularTags pt ON pt.TagName IN (SELECT TRIM(value) FROM UNNEST(SPLIT(rp.Tags, ',')) AS value)
+JOIN 
+    TopUsers tu ON tu.UserId IN (SELECT DISTINCT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+WHERE 
+    rp.TagRank = 1
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC
+LIMIT 100;

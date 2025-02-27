@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(COALESCE(v.BountyAmount, 0)) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  -- BountyStart
+    WHERE 
+        p.PostTypeId IN (1, 2)  -- Only Questions and Answers
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        b.Class,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, b.Class
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.TotalBounty,
+        ub.UserId,
+        COALESCE(SUM(CASE WHEN ub.Class = 1 THEN ub.BadgeCount ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN ub.Class = 2 THEN ub.BadgeCount ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN ub.Class = 3 THEN ub.BadgeCount ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+    WHERE 
+        rp.rn = 1  -- Get only the latest post for each user
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score, rp.CreationDate, rp.CommentCount, rp.TotalBounty, ub.UserId
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.CreationDate,
+    tp.CommentCount,
+    tp.TotalBounty,
+    tp.GoldBadges,
+    tp.SilverBadges,
+    tp.BronzeBadges,
+    COUNT(DISTINCT ph.Id) AS PostHistoryCount,
+    SUM(CASE 
+        WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 
+        ELSE 0 
+    END) AS CloseOpenCount
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistory ph ON tp.PostId = ph.PostId
+WHERE 
+    tp.Score > 0
+    AND tp.TotalBounty >= ANY (ARRAY[0, 100, 500]) -- Include posts with a certain bounty
+GROUP BY 
+    tp.PostId, tp.Title, tp.Score, tp.CreationDate, tp.CommentCount, tp.TotalBounty, tp.GoldBadges, tp.SilverBadges, tp.BronzeBadges
+ORDER BY 
+    tp.Score DESC, tp.TotalBounty DESC
+LIMIT 10;

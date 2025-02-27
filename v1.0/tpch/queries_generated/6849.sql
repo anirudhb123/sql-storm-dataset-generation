@@ -1,0 +1,44 @@
+WITH CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+), 
+TopCustomers AS (
+    SELECT c.custkey, c.name, c.order_count
+    FROM CustomerOrders c
+    ORDER BY c.order_count DESC
+    LIMIT 10
+),
+NationSuppliers AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+),
+SupplierParts AS (
+    SELECT ps.ps_suppkey, SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+),
+PartInfo AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, pp.supplier_key
+    FROM part p
+    JOIN SupplierParts pp ON p.p_partkey = pp.ps_partkey
+),
+FinalReport AS (
+    SELECT tc.c_name,
+           ns.n_name,
+           pi.p_name,
+           pi.p_retailprice,
+           sp.total_available
+    FROM TopCustomers tc
+    CROSS JOIN NationSuppliers ns
+    JOIN PartInfo pi ON ns.supplier_key = pi.supplier_key
+    JOIN SupplierParts sp ON pi.supplier_key = sp.ps_suppkey
+)
+
+SELECT *
+FROM FinalReport
+ORDER BY c_name, n_name;

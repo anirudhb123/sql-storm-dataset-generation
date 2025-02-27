@@ -1,0 +1,77 @@
+WITH UserBadgeCount AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadgeCount,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadgeCount,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+
+PostsWithTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        STRING_AGG(substring(t.TagName from 2 for char_length(t.TagName) - 2), ', ') AS Tags
+    FROM 
+        Posts p
+    CROSS JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, char_length(p.Tags) - 2), '><')) AS t(TagName)
+    GROUP BY 
+        p.Id, p.OwnerUserId
+),
+
+UserVoteStats AS (
+    SELECT 
+        v.UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END), 0) AS PositiveScoreCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.OwnerUserId
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(ubc.GoldBadgeCount, 0) AS GoldBadges,
+    COALESCE(ubc.SilverBadgeCount, 0) AS SilverBadges,
+    COALESCE(ubc.BronzeBadgeCount, 0) AS BronzeBadges,
+    COUNT(DISTINCT p.Tags) AS PostCount,
+    SUM(pws.CommentCount) AS TotalComments,
+    SUM(uvs.UpVotes - uvs.DownVotes) AS NetVotes,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY pa.PositiveScoreCount) AS MedianPositiveScore
+FROM 
+    Users u
+LEFT JOIN 
+    UserBadgeCount ubc ON u.Id = ubc.UserId
+LEFT JOIN 
+    PostsWithTags pws ON u.Id = pws.OwnerUserId
+LEFT JOIN 
+    UserVoteStats uvs ON u.Id = uvs.UserId
+LEFT JOIN 
+    PostActivity pa ON u.Id = pa.OwnerUserId
+WHERE 
+    u.Reputation > 50
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation, ubc.GoldBadgeCount, ubc.SilverBadgeCount, ubc.BronzeBadgeCount
+ORDER BY 
+    Reputation DESC, NetVotes DESC
+FETCH FIRST 10 ROWS ONLY;

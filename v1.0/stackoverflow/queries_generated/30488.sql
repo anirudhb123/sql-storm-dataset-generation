@@ -1,0 +1,89 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL 
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserVotes AS (
+    SELECT 
+        v.UserId,
+        v.PostId,
+        vt.Name AS VoteType,
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId, v.PostId, vt.Name
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(SUM(c.Score), 0) AS TotalCommentScore,
+        COALESCE(SUM(v.VoteCount), 0) AS TotalVotes,
+        ph.Level
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        UserVotes uv ON p.Id = uv.PostId
+    LEFT JOIN 
+        PostHierarchy ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, ph.Level
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int[])
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 5
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.TotalCommentScore,
+    ps.TotalVotes,
+    (SELECT COUNT(*)
+     FROM Posts p
+     WHERE p.AcceptedAnswerId = ps.PostId) AS AcceptedAnswers,
+    STRING_AGG(tt.TagName, ', ') AS TopTags
+FROM 
+    PostStats ps
+LEFT JOIN 
+    TopTags tt ON tt.PostCount > 0
+GROUP BY 
+    ps.PostId, ps.Title, ps.CreationDate, ps.Score, ps.TotalCommentScore, ps.TotalVotes
+ORDER BY 
+    ps.Score DESC, ps.CreationDate DESC;

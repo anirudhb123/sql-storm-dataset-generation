@@ -1,0 +1,63 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    JOIN 
+        aka_name a ON a.person_id = ci.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id
+),
+popular_keywords AS (
+    SELECT 
+        keyword,
+        COUNT(DISTINCT movie_id) AS movie_count
+    FROM 
+        movie_keyword
+    GROUP BY 
+        keyword
+    HAVING 
+        COUNT(DISTINCT movie_id) > 5
+),
+top_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year, 
+        rm.cast_count,
+        rm.actor_names,
+        rm.keywords,
+        ROW_NUMBER() OVER (ORDER BY rm.cast_count DESC, rm.production_year DESC) AS rank
+    FROM 
+        ranked_movies rm
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    tm.actor_names,
+    tm.keywords,
+    pk.keyword AS popular_keyword,
+    pk.movie_count
+FROM 
+    top_movies tm
+JOIN 
+    popular_keywords pk ON tm.keywords LIKE '%' || pk.keyword || '%'
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.cast_count DESC, 
+    tm.production_year DESC;

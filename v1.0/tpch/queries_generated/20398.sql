@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, 
+           CAST(s.s_name AS VARCHAR(100)) AS full_name, 
+           CAST(NULL AS VARCHAR(255)) AS parent_name, 
+           0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, 
+           CONCAT(sh.full_name, ' -> ', s.s_name), 
+           sh.s_name, 
+           sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    WHERE s.s_acctbal < sh.s_acctbal AND sh.level < 3
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent, 
+           AVG(o.o_totalprice) AS avg_order_value,
+           SUM(CASE WHEN o.o_orderstatus = 'O' THEN 1 ELSE 0 END) AS open_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+FrequentParts AS (
+    SELECT ps.ps_partkey, COUNT(ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING COUNT(ps.ps_suppkey) > 5
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, 
+           DENSE_RANK() OVER (ORDER BY o.o_totalprice DESC) AS value_rank
+    FROM orders o
+    WHERE o.o_totalprice > 1000
+)
+SELECT ch.c_custkey, ch.c_name, 
+       COALESCE(hr.s_name, 'No Hierarchy') AS supplier_hierarchy, 
+       cs.order_count, 
+       cs.total_spent,
+       IF(cs.avg_order_value > 500, 'High Value Customer', 'Regular Customer') AS customer_type,
+       p.p_name,
+       p.p_retailprice
+FROM CustomerOrderStats cs
+JOIN CustomerHierarchy ch ON cs.c_custkey = ch.s_suppkey
+LEFT JOIN FrequentParts fp ON ch.s_suppkey = fp.ps_partkey
+LEFT JOIN part p ON fp.ps_partkey = p.p_partkey
+LEFT JOIN HighValueOrders ho ON cs.order_count > 10 AND ho.o_orderkey = cs.order_count
+WHERE (ch.s_acctbal > 1000 OR ho.value_rank IS NOT NULL)
+ORDER BY cs.total_spent DESC, ch.level, ch.full_name, p.p_retailprice;

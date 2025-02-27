@@ -1,0 +1,87 @@
+WITH RecursiveOrders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_orderdate,
+        o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS rn
+    FROM 
+        orders
+    WHERE 
+        o_orderstatus IN ('O', 'F') 
+        AND o_orderdate >= DATEADD(MONTH, -6, GETDATE())
+),
+
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        n.n_name AS nation_name,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'No Balance'
+            WHEN c.c_acctbal < 1000 THEN 'Low Balance'
+            ELSE 'Sufficient Balance'
+        END AS balance_status
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        (c.c_mktsegment = 'BUILDING' OR c.c_mktsegment = 'HOUSEHOLD')
+),
+
+PartSupplier AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+
+HighValueOrders AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000
+)
+
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    rc.nation_name,
+    COALESCE(hv.total_price, 0) AS high_value_order_total,
+    fc.balance_status,
+    COUNT(DISTINCT rc.c_custkey) AS customer_count
+FROM 
+    part p
+LEFT JOIN 
+    PartSupplier ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    RecursiveOrders ro ON ro.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    FilteredCustomers fc ON fc.c_custkey = ro.o_custkey
+LEFT JOIN 
+    HighValueOrders hv ON hv.l_orderkey = l.l_orderkey
+LEFT JOIN 
+    nation rc ON fc.nation_name = rc.n_name
+WHERE 
+    p.p_size IN (SELECT DISTINCT ps_availqty FROM partsupp WHERE ps_supplycost < 100)
+    AND (ps.total_supply_cost IS NULL OR ps.supplier_count > 2)
+GROUP BY 
+    p.p_name, p.p_brand, p.p_retailprice, rc.nation_name, fc.balance_status, hv.total_price
+ORDER BY 
+    p.p_retailprice DESC, customer_count ASC;

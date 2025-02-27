@@ -1,0 +1,48 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 
+        AND dd.d_moy BETWEEN 1 AND 6
+    GROUP BY 
+        ws.web_site_sk
+), 
+DemographicSummary AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS average_purchase_estimate
+    FROM 
+        customer c
+    INNER JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    w.w_warehouse_id,
+    w.w_warehouse_name,
+    COALESCE(rs.total_quantity, 0) AS total_quantity,
+    COALESCE(rs.total_sales, 0) AS total_sales,
+    COALESCE(ds.customer_count, 0) AS customer_count,
+    ds.average_purchase_estimate
+FROM 
+    warehouse w
+LEFT JOIN 
+    RankedSales rs ON w.w_warehouse_sk = rs.web_site_sk
+LEFT JOIN 
+    DemographicSummary ds ON ds.customer_count > 0
+WHERE 
+    w.w_state = 'CA'
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

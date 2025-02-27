@@ -1,0 +1,78 @@
+WITH UserPostScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalScore,
+        QuestionCount,
+        AnswerCount,
+        AvgViewCount,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC) AS UserRank
+    FROM 
+        UserPostScores
+),
+PostWithComments AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(c.Score, 0) AS CommentScore,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        CLOSURE_REASON = CASE ph.Comment
+            WHEN '1' THEN 'Exact Duplicate'
+            WHEN '2' THEN 'Off-topic'
+            WHEN '3' THEN 'Subjective and argumentative'
+            ELSE 'Other'
+        END
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    u.DisplayName,
+    up.TotalScore,
+    pp.Title AS RecentPostTitle,
+    pp.CreationDate,
+    pp.CommentScore,
+    pp.CommentCount,
+    cb.CLOSURE_REASON
+FROM 
+    RankedUsers u
+JOIN 
+    PostWithComments pp ON u.UserId = pp.PostId
+LEFT JOIN 
+    ClosedPosts cb ON cb.PostId = pp.PostId
+WHERE 
+    u.UserRank <= 10
+ORDER BY 
+    up.TotalScore DESC, pp.CommentScore DESC
+LIMIT 20;

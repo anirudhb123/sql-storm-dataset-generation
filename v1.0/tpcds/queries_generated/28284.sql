@@ -1,0 +1,54 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS FullAddress,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+DemographicDetails AS (
+    SELECT 
+        cd_demo_sk,
+        CONCAT(cd_gender, ' ', cd_marital_status, ' ', cd_credit_rating) AS Demographics,
+        cd_purchase_estimate,
+        cd_dep_count
+    FROM 
+        customer_demographics
+),
+CustomerDetails AS (
+    SELECT 
+        c_customer_sk,
+        CONCAT(c_first_name, ' ', c_last_name) AS FullName,
+        c_email_address,
+        c_birth_country,
+        c_preferred_cust_flag,
+        cd_demo_sk
+    FROM 
+        customer
+)
+SELECT 
+    c.FullName,
+    c.c_email_address,
+    a.FullAddress,
+    a.ca_city,
+    a.ca_state,
+    d.Demographics,
+    d.cd_purchase_estimate,
+    d.cd_dep_count
+FROM 
+    CustomerDetails c
+JOIN 
+    AddressDetails a ON c.c_current_addr_sk = a.ca_address_sk
+JOIN 
+    DemographicDetails d ON c.cd_demo_sk = d.cd_demo_sk
+WHERE 
+    a.ca_state = 'CA' 
+    AND d.cd_purchase_estimate > 500
+ORDER BY 
+    d.cd_purchase_estimate DESC,
+    c.FullName ASC
+LIMIT 100;

@@ -1,0 +1,60 @@
+
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM
+        supplier s
+),
+HighValueParts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ps.ps_comment
+    FROM
+        part p
+    JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE
+        p.p_retailprice > (SELECT AVG(p1.p_retailprice) FROM part p1)
+),
+OrderSummary AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_linenumber) AS total_items
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY
+        o.o_orderkey
+)
+SELECT
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    p.p_name AS part_name,
+    p.p_retailprice,
+    ps.ps_supplycost,
+    os.total_revenue
+FROM
+    RankedSuppliers s
+LEFT JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN
+    HighValueParts p ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN
+    OrderSummary os ON os.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_suppkey = s.s_suppkey)
+WHERE
+    s.rank <= 5
+    AND (p.ps_availqty IS NULL OR p.ps_availqty > 100)
+ORDER BY
+    os.total_revenue DESC, s.s_name;

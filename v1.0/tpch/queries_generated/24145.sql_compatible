@@ -1,0 +1,77 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_availqty,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        o.o_comment,
+        DENSE_RANK() OVER (ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        n.n_nationkey,
+        n.n_name,
+        c.c_acctbal,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY c.c_acctbal DESC) AS nation_rank
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+)
+SELECT 
+    pn.p_name,
+    rn.r_name,
+    cs.n_name AS customer_nation,
+    COUNT(DISTINCT lo.l_orderkey) AS total_orders,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue,
+    AVG(lo.l_tax) AS avg_tax,
+    (SELECT COUNT(*)
+     FROM HighValueOrders hv 
+     WHERE hv.o_orderkey IN (SELECT DISTINCT l.l_orderkey 
+                             FROM lineitem l 
+                             WHERE l.l_partkey = pn.p_partkey)) AS total_high_value_orders,
+    RANK() OVER (PARTITION BY pn.p_partkey ORDER BY SUM(lo.l_extendedprice) DESC) AS revenue_rank
+FROM 
+    part pn
+LEFT JOIN 
+    lineitem lo ON pn.p_partkey = lo.l_partkey
+LEFT JOIN 
+    HighValueOrders hvo ON lo.l_orderkey = hvo.o_orderkey
+LEFT JOIN 
+    CustomerNation cs ON cs.c_custkey IN (
+         SELECT 
+             o.o_custkey 
+         FROM 
+             orders o 
+         WHERE 
+             o.o_orderkey = lo.l_orderkey
+    )
+LEFT JOIN 
+    nation rn ON cs.n_nationkey = rn.n_nationkey
+WHERE 
+    lo.l_shipdate >= DATE '1995-01-01' AND lo.l_shipdate < DATE '1997-01-01'
+GROUP BY 
+    pn.p_partkey, pn.p_name, rn.r_name, cs.n_name
+HAVING 
+    COALESCE(SUM(lo.l_extendedprice * (1 - lo.l_discount)), 0) > 1000
+ORDER BY 
+    total_revenue DESC NULLS LAST;

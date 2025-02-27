@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS title,
+        m.production_year,
+        1 AS level,
+        ARRAY[m.title] AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year < 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS title,
+        m.production_year,
+        mh.level + 1 AS level,
+        mh.path || m.title
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    mk.keyword,
+    COUNT(DISTINCT m.id) AS movie_count,
+    AVG(m.production_year) AS avg_production_year,
+    MAX(m.production_year) AS latest_production_year,
+    MIN(m.production_year) AS earliest_production_year
+FROM 
+    movie_keyword mk
+JOIN 
+    aka_title m ON m.id = mk.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = m.id
+LEFT JOIN 
+    aka_name an ON an.person_id = ci.person_id
+LEFT JOIN 
+    person_info pi ON pi.person_id = ci.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birth date') 
+GROUP BY 
+    mk.keyword
+HAVING 
+    COUNT(DISTINCT m.id) > 5 
+    AND AVG(m.production_year) > 1995
+ORDER BY 
+    movie_count DESC, 
+    avg_production_year ASC
+LIMIT 10;

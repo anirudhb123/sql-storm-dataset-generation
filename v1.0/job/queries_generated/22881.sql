@@ -1,0 +1,67 @@
+WITH movie_years AS (
+    SELECT movie_id, 
+           EXTRACT(YEAR FROM NOW()) - production_year AS year_diff
+    FROM aka_title
+    WHERE production_year IS NOT NULL
+),
+cast_info_enriched AS (
+    SELECT c.id, 
+           c.person_id, 
+           c.movie_id, 
+           c.nr_order, 
+           COALESCE(r.role, 'Unknown Role') AS role_name,
+           CASE
+               WHEN c.note IS NULL THEN 'No Notes'
+               ELSE c.note
+           END AS note
+    FROM cast_info c
+    LEFT JOIN role_type r ON c.role_id = r.id
+),
+keyworded_movies AS (
+    SELECT m.movie_id, 
+           COUNT(DISTINCT k.keyword) AS num_keywords 
+    FROM movie_keyword mk
+    INNER JOIN keyword k ON mk.keyword_id = k.id
+    INNER JOIN aka_title m ON mk.movie_id = m.id
+    GROUP BY m.movie_id
+),
+movies_with_high_keywords AS (
+    SELECT m.movie_id
+    FROM keyworded_movies m
+    WHERE m.num_keywords >= 5
+),
+company_movie_info AS (
+    SELECT mc.movie_id, 
+           ARRAY_AGG(DISTINCT cn.name) AS company_names,
+           STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id
+),
+overall_stats AS (
+    SELECT at.id AS movie_id,
+           at.title,
+           COALESCE(CAST(NULLIF(cm.company_names, '{}') AS TEXT), 'No Companies') AS companies,
+           COALESCE(w.year_diff, 'N/A') AS years_since_release,
+           COALESCE(kw.num_keywords, 0) AS keyword_count,
+           COUNT(DISTINCT ci.person_id) AS num_actors
+    FROM aka_title at
+    LEFT JOIN company_movie_info cm ON at.id = cm.movie_id
+    LEFT JOIN movie_years w ON at.id = w.movie_id
+    LEFT JOIN keyworded_movies kw ON at.id = kw.movie_id
+    LEFT JOIN cast_info_enriched ci ON at.id = ci.movie_id
+    GROUP BY at.id, at.title, cm.company_names, w.year_diff, kw.num_keywords
+    ORDER BY at.production_year DESC
+)
+SELECT *,
+       CASE
+           WHEN keyword_count >= 5 THEN 'High Keyword Movie'
+           WHEN keyword_count >= 1 THEN 'Moderate Keyword Movie'
+           ELSE 'Low Keyword Movie'
+       END AS keyword_status
+FROM overall_stats
+WHERE years_since_release IS NOT NULL
+AND (years_since_release < 10 OR companies != 'No Companies')
+AND num_actors > 3;
+

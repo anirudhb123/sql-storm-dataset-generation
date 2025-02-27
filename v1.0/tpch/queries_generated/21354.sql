@@ -1,0 +1,43 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS row_num
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartAvailability AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available,
+           COUNT(DISTINCT ps.ps_suppkey) AS total_suppliers
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+       r.s_name AS supplier_name,
+       pa.p_name AS part_name,
+       pa.total_available,
+       co.order_count,
+       co.total_spent,
+       (CASE WHEN pa.total_available IS NULL THEN 'Unavailable' 
+             WHEN pa.total_available > 100 THEN 'Plentiful' 
+             ELSE 'Scarce' END) AS availability_status,
+       (SELECT MAX(p_retailprice) FROM part 
+        WHERE p_partkey IN (SELECT ps.ps_partkey 
+                            FROM partsupp ps 
+                            WHERE ps.ps_suppkey = r.s_suppkey)) AS max_price_from_supplier
+FROM RankedSuppliers r
+FULL OUTER JOIN CustomerOrders co ON r.row_num = (SELECT MAX(rs.row_num) 
+                                                    FROM RankedSuppliers rs 
+                                                    WHERE rs.rank_acctbal = r.rank_acctbal)
+LEFT JOIN PartAvailability pa ON pa.total_suppliers > 5
+WHERE (co.total_spent > 1000 OR r.s_acctbal IS NULL)
+  AND (pa.total_available IS NOT NULL OR r.s_name LIKE 'Supplier%')
+ORDER BY co.total_spent DESC, r.s_name ASC
+FETCH FIRST 50 ROWS ONLY;

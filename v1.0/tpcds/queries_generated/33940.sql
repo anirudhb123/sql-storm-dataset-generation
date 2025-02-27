@@ -1,0 +1,44 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT ws_order_number, SUM(ws_quantity) AS total_quantity, SUM(ws_ext_sales_price) AS total_sales
+    FROM web_sales
+    GROUP BY ws_order_number
+    UNION ALL
+    SELECT cs_order_number, SUM(cs_quantity), SUM(cs_ext_sales_price)
+    FROM catalog_sales
+    GROUP BY cs_order_number
+), detailed_sales AS (
+    SELECT 
+        s.store_name,
+        d.d_date,
+        SUM(COALESCE(ws.ws_quantity, 0 + cs.cs_quantity, 0)) AS total_quantity,
+        SUM(COALESCE(ws.ws_ext_sales_price, 0 + cs.cs_ext_sales_price, 0)) AS total_sales,
+        COUNT(DISTINCT CASE WHEN cd.cd_gender = 'F' THEN c.c_customer_sk END) AS female_customers,
+        COUNT(DISTINCT CASE WHEN cd.cd_gender = 'M' THEN c.c_customer_sk END) AS male_customers,
+        RANK() OVER (PARTITION BY s.store_name ORDER BY SUM(COALESCE(ws.ws_sales_price, 0) + COALESCE(cs.cs_sales_price, 0)) DESC) AS sales_rank
+    FROM store s
+    LEFT JOIN web_sales ws ON s.s_store_sk = ws.ws_store_sk
+    LEFT JOIN catalog_sales cs ON s.s_store_sk = cs.cs_ship_addr_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk OR cs.cs_sold_date_sk = d.d_date_sk
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk OR cs.cs_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY s.store_name, d.d_date
+), fulfilled_orders AS (
+    SELECT store_name, SUM(total_sales) AS total_fulfilled_sales
+    FROM detailed_sales
+    WHERE total_quantity > 0
+    GROUP BY store_name
+)
+SELECT 
+    ds.store_name,
+    ds.total_quantity,
+    ds.total_sales,
+    fo.total_fulfilled_sales,
+    CASE 
+        WHEN ds.total_sales IS NULL THEN 'Pending'
+        WHEN ds.total_sales > 10000 THEN 'High Value'
+        ELSE 'Standard'
+    END AS order_status
+FROM detailed_sales ds
+JOIN fulfilled_orders fo ON ds.store_name = fo.store_name
+ORDER BY ds.sales_rank, ds.store_name;

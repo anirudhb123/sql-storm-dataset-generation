@@ -1,0 +1,42 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        k.keyword, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(mk.keyword_id) DESC) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword
+),
+AverageRating AS (
+    SELECT 
+        DISTINCT c.movie_id, 
+        AVG(CASE WHEN ci.note IS NOT NULL THEN CAST(ci.note AS FLOAT) ELSE 0 END) AS avg_rating
+    FROM 
+        complete_cast c
+    LEFT JOIN 
+        cast_info ci ON c.subject_id = ci.person_id AND c.movie_id = ci.movie_id
+    GROUP BY 
+        c.movie_id
+)
+SELECT 
+    rm.title, 
+    rm.production_year, 
+    AVG(rm.production_year / NULLIF(ar.avg_rating, 0)) AS adjusted_score
+FROM 
+    RankedMovies rm
+JOIN 
+    AverageRating ar ON rm.movie_id = ar.movie_id
+WHERE 
+    rm.rank <= 5 
+    AND rm.keyword IS NOT NULL 
+    AND ar.avg_rating IS NOT NULL
+GROUP BY 
+    rm.title, rm.production_year
+ORDER BY 
+    adjusted_score DESC;

@@ -1,0 +1,66 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- CTE to create a hierarchy of movies linked to each other
+    SELECT
+        ml.movie_id,
+        ml.linked_movie_id,
+        1 as level
+    FROM
+        movie_link ml
+    WHERE
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+    
+    UNION ALL
+    
+    SELECT
+        ml.movie_id,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM
+        movie_link ml
+    INNER JOIN movie_hierarchy mh ON ml.movie_id = mh.linked_movie_id
+),
+cast_with_roles AS (
+    -- CTE to gather all cast members with their roles in each movie
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        rt.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    INNER JOIN aka_name a ON ci.person_id = a.person_id
+    INNER JOIN role_type rt ON ci.role_id = rt.id
+),
+movie_data AS (
+    -- CTE to combine movie details with additional information like keywords
+    SELECT
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT mk.keyword) AS keywords,
+        COUNT(DISTINCT cc.subject_id) AS complete_cast_count
+    FROM
+        title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+    GROUP BY
+        t.id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    mh.level AS sequel_level,
+    cr.actor_name,
+    cr.role_name,
+    md.keywords,
+    md.complete_cast_count
+FROM
+    movie_data md
+LEFT JOIN movie_hierarchy mh ON md.production_year < mh.level
+LEFT JOIN cast_with_roles cr ON md.id = cr.movie_id
+WHERE
+    md.production_year IS NOT NULL
+    AND md.keywords IS NOT NULL
+ORDER BY
+    md.production_year DESC,
+    mh.level ASC,
+    cr.role_order ASC;

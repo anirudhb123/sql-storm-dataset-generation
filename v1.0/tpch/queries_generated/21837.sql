@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS Level
+    FROM supplier
+    WHERE s_nationkey IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.Level < 5
+),
+RegionStats AS (
+    SELECT r.r_regionkey, r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count,
+           STRING_AGG(DISTINCT n.n_name, ', ') AS nations_list
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_regionkey, r.r_name
+),
+OrderMetrics AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           AVG(CASE WHEN o.o_totalprice IS NULL THEN 0 ELSE o.o_totalprice END) AS avg_order_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COALESCE(SUM(om.total_sales), 0) AS total_sales,
+    AVG(CASE WHEN sh.Level = 0 THEN om.avg_order_price END) AS avg_price_top_suppliers,
+    STRING_AGG(DISTINCT p.p_name, '; ') AS products_in_region,
+    COUNT(DISTINCT CASE WHEN l.l_shipdate IS NOT NULL THEN l.l_orderkey END) AS shipped_orders,
+    MIN(CASE WHEN l.l_discount > 0.5 THEN l.l_returnflag ELSE NULL END) AS high_discount_returns
+FROM region r
+LEFT JOIN RegionStats rs ON r.r_regionkey = rs.r_regionkey
+LEFT JOIN supplier s ON r.r_regionkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN OrderMetrics om ON sh.s_suppkey = om.o_orderkey
+LEFT JOIN lineitem l ON om.o_orderkey = l.l_orderkey
+LEFT JOIN part p ON l.l_partkey = p.p_partkey
+WHERE rs.nation_count BETWEEN 2 AND 10
+    AND COALESCE(s.s_acctbal, 0) > 1000
+GROUP BY r.r_name
+ORDER BY total_sales DESC, total_orders DESC
+LIMIT 100 OFFSET 10;

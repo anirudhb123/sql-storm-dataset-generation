@@ -1,0 +1,38 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT sr_returned_date_sk, sr_item_sk, sr_customer_sk, sr_return_quantity, sr_return_amt, sr_store_sk,
+           (CASE WHEN sr_return_quantity IS NULL THEN 0 ELSE sr_return_quantity END) AS adjusted_return_quantity
+    FROM store_returns
+    WHERE sr_return_qty > 0
+    UNION ALL
+    SELECT cr_returned_date_sk, cr_item_sk, cr_returning_customer_sk, cr_return_quantity, cr_return_amount, cr_call_center_sk,
+           (CASE WHEN cr_return_quantity IS NULL THEN 0 ELSE cr_return_quantity END) AS adjusted_return_quantity
+    FROM catalog_returns
+    WHERE cr_return_quantity > 0
+),
+StateCounts AS (
+    SELECT ca_state, COUNT(DISTINCT c_customer_sk) AS customer_count
+    FROM customer_address AS ca
+    JOIN customer AS c ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY ca_state
+),
+SalesMetrics AS (
+    SELECT w.w_warehouse_id, SUM(ws.net_profit) AS total_net_profit,
+           COUNT(DISTINCT ws_order_number) AS total_orders,
+           AVG(CASE WHEN ws_quantity IS NULL OR ws_quantity = 0 THEN NULL ELSE ws_quantity END) AS avg_quantity_per_order
+    FROM web_sales AS ws
+    JOIN warehouse AS w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY w.w_warehouse_id
+)
+SELECT s.state_counts, sm.total_net_profit, sm.total_orders, sm.avg_quantity_per_order
+FROM (SELECT sc.ca_state, sc.customer_count AS state_counts
+      FROM StateCounts AS sc
+      WHERE sc.customer_count > (
+            SELECT AVG(customer_count) FROM StateCounts
+      )
+) AS s
+LEFT JOIN SalesMetrics AS sm ON s.ca_state = SM.w_warehouse_id
+WHERE sm.total_net_profit IS NOT NULL 
+  AND (s.state_counts > (SELECT MAX(state_counts) FROM state_counts) * 0.5 
+       OR s.state_counts IS NULL)
+ORDER BY s.state_counts DESC, sm.total_net_profit ASC;

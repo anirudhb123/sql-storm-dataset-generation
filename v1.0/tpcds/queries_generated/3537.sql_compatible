@@ -1,0 +1,64 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        MAX(ws.ws_sales_price) AS max_sales_price,
+        COUNT(DISTINCT ws.ws_item_sk) AS unique_items_purchased
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_sales,
+        cs.order_count,
+        CASE 
+            WHEN cs.total_sales > 1000 THEN 'High Value'
+            WHEN cs.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value
+    FROM 
+        CustomerSales cs
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        c.c_customer_id
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+)
+SELECT 
+    hvc.c_customer_id,
+    hvc.total_sales,
+    hvc.order_count,
+    hvc.customer_value,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COUNT(DISTINCT ws.ws_item_sk) AS total_unique_items,
+    COALESCE(SUM(ws.ws_net_paid), 0) AS total_extra_sales,
+    MAX(ws.ws_sales_price) AS highest_item_price
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    web_sales ws ON hvc.c_customer_id = ws.ws_bill_customer_sk
+LEFT JOIN 
+    CustomerDemographics cd ON hvc.c_customer_id = cd.c_customer_id
+WHERE 
+    hvc.total_sales > 500 OR cd.cd_gender IS NULL
+GROUP BY 
+    hvc.c_customer_id, hvc.total_sales, hvc.order_count, hvc.customer_value, cd.cd_gender, cd.cd_marital_status
+ORDER BY 
+    hvc.total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

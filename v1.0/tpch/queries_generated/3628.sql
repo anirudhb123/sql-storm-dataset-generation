@@ -1,0 +1,57 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+), 
+MaxAcctBal AS (
+    SELECT 
+        n.n_nationkey,
+        MAX(s.s_acctbal) AS max_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_nationkey
+), 
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_custkey) AS unique_customers,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS returned_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(rnk.s_name, 'No Supplier') AS supplier_name,
+    (SELECT COUNT(*) FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey) AS supplier_count,
+    (SELECT AVG(total_sales) FROM OrderStats) AS avg_order_sales,
+    COALESCE(m.max_acctbal, 0) AS max_supplier_balance,
+    (SELECT STRING_AGG(DISTINCT c.c_mktsegment, ', ') FROM customer c 
+     WHERE c.c_nationkey = n.n_nationkey) AS market_segments
+FROM 
+    part p
+LEFT JOIN 
+    RankedSuppliers rnk ON rnk.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN 
+    MaxAcctBal m ON m.n_nationkey = (SELECT n.n_nationkey FROM nation n JOIN supplier s ON n.n_nationkey = s.s_nationkey WHERE s.s_suppkey = rnk.s_suppkey)
+LEFT JOIN 
+    nation n ON n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = rnk.s_suppkey)
+ORDER BY 
+    p.p_partkey;

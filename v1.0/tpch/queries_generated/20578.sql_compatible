@@ -1,0 +1,83 @@
+
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate < DATE '1998-10-01'
+),
+SupplierRevenue AS (
+    SELECT
+        ps.ps_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM
+        lineitem l
+    JOIN
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    WHERE
+        l.l_shipdate >= DATE '1997-01-01'
+        AND l.l_shipdate < DATE '1998-10-01'
+    GROUP BY
+        ps.ps_partkey
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderstatus = 'O'
+    GROUP BY
+        c.c_custkey, c.c_name
+    HAVING
+        SUM(o.o_totalprice) > (
+            SELECT AVG(TotalSpent)
+            FROM (
+                SELECT SUM(o2.o_totalprice) AS TotalSpent
+                FROM orders o2
+                GROUP BY o2.o_custkey
+            ) AS subquery
+        )
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COALESCE(sr.TotalRevenue, 0) AS SupplierRevenue,
+    COALESCE(AVG(hvc.TotalSpent), 0) AS AvgHighValueCustomer,
+    CASE 
+        WHEN sr.TotalRevenue IS NULL THEN 'No Sales'
+        WHEN COALESCE(hvc.TotalSpent, 0) > 10000 THEN 'High Spender'
+        ELSE 'Regular Spender'
+    END AS SpendingCategory
+FROM 
+    part p
+LEFT JOIN 
+    SupplierRevenue sr ON p.p_partkey = sr.ps_partkey
+LEFT JOIN 
+    HighValueCustomers hvc ON hvc.c_custkey = (
+        SELECT o.o_custkey 
+        FROM orders o 
+        WHERE o.o_orderkey IN (
+            SELECT o2.o_orderkey 
+            FROM RankedOrders ro 
+            JOIN orders o2 ON ro.o_orderkey = o2.o_orderkey
+            WHERE ro.OrderRank = 1
+        ) 
+        ORDER BY o.o_totalprice DESC
+        LIMIT 1
+    )
+WHERE 
+    p.p_retailprice > 50.00
+    AND p.p_comment NOT LIKE '%fragile%'
+GROUP BY 
+    p.p_name, p.p_brand, sr.TotalRevenue
+ORDER BY 
+    SupplierRevenue DESC, AvgHighValueCustomer DESC;

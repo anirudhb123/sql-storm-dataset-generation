@@ -1,0 +1,94 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(c.Score) AS CommentScore,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        MAX(u.CreationDate) AS AccountCreationDate,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 0
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate AS PostCreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ph.PostHistoryTypeId,
+        COUNT(ph.Id) AS HistoryChangeCount,
+        AVG(COALESCE(EXTRACT(EPOCH FROM ph.CreationDate) - EXTRACT(EPOCH FROM p.CreationDate), 0)) AS AvgTimeToChange
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' AND 
+        p.ViewCount > 10
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, 
+        p.AnswerCount, p.CommentCount, ph.PostHistoryTypeId
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostCount,
+        ua.QuestionCount,
+        ua.AnswerCount,
+        ua.CommentScore,
+        ua.UpVotes,
+        ua.DownVotes,
+        ua.AccountCreationDate,
+        ua.BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY ua.Reputation DESC) AS Ranking
+    FROM 
+        UserActivity ua
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.PostCount,
+    tu.QuestionCount,
+    tu.AnswerCount,
+    tu.CommentScore,
+    tu.UpVotes,
+    tu.DownVotes,
+    ps.PostId,
+    ps.Title,
+    ps.PostCreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount AS PostAnswerCount,
+    ps.CommentCount AS PostCommentCount,
+    ps.PostHistoryTypeId,
+    ps.HistoryChangeCount,
+    ps.AvgTimeToChange,
+    tu.Ranking
+FROM 
+    TopUsers tu
+JOIN 
+    PostStatistics ps ON tu.UserId = ps.OwnerUserId
+WHERE 
+    tu.Ranking <= 10
+ORDER BY 
+    tu.Ranking, ps.ViewCount DESC;

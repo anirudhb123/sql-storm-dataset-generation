@@ -1,0 +1,75 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+), 
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopPostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 DAY'
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    p.Score,
+    p.ViewCount,
+    u.DisplayName AS Owner,
+    ua.PostCount AS UserPostCount,
+    ua.TotalViews AS UserTotalViews,
+    ua.TotalScore AS UserTotalScore,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.Id IN (
+         SELECT CAST(SUBSTRING(tag.TagName, 2, LENGTH(tag.TagName) - 2) AS INT) 
+         FROM unnest(string_to_array(p.Tags, '<>')) AS tag
+     )
+    ) AS RelatedTags,
+    ph.UserDisplayName AS LastEditedBy,
+    ph.CreationDate AS LastEditDate
+FROM 
+    TopPostDetails p
+LEFT JOIN 
+    UserActivity ua ON ua.UserId = p.OwnerUserId
+LEFT JOIN 
+    RecursivePostHistory ph ON ph.PostId = p.PostId AND ph.HistoryRank = 1
+WHERE 
+    p.ViewCount > 10
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC
+LIMIT 10;

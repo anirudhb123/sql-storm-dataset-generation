@@ -1,0 +1,76 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank_within_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name,
+        rs.s_name,
+        rs.total_supply_cost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rank_within_nation <= 3
+),
+HighValueCustomers AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        co.order_count,
+        co.total_spent,
+        CASE 
+            WHEN co.total_spent >= 10000 THEN 'High Value'
+            WHEN co.total_spent < 1000 THEN 'Low Value'
+            ELSE 'Medium Value'
+        END AS customer_value_segment
+    FROM 
+        CustomerOrders co
+    WHERE 
+        co.total_spent IS NOT NULL
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT hvc.c_custkey) AS high_value_customer_count,
+    SUM(ts.total_supply_cost) AS regional_supply_cost,
+    AVG(hvc.total_spent) AS avg_spent_per_high_value_customer
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    nation n ON hvc.c_custkey = n.n_nationkey
+LEFT JOIN 
+    TopSuppliers ts ON n.n_regionkey = ts.r_name
+WHERE 
+    hvc.customer_value_segment = 'High Value'
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT hvc.c_custkey) > 0
+ORDER BY 
+    regional_supply_cost DESC;

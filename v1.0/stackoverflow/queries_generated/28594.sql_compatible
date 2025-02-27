@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, '2024-10-01'::date)
+),
+TagStats AS (
+    SELECT 
+        TRIM(value) AS Tag,
+        COUNT(*) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.ViewCount) AS AvgViews
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+    CROSS JOIN 
+        UNNEST(string_to_array(p.Tags, '>')) AS value
+    GROUP BY 
+        TRIM(value)
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(u.Reputation) AS TotalReputation,
+        ROW_NUMBER() OVER (ORDER BY SUM(u.Reputation) DESC) AS UserRank
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    rp.Title AS PostTitle,
+    rp.CreationDate AS PostDate,
+    rp.ViewCount AS PostViews,
+    ts.Tag AS RelatedTag,
+    ts.PostCount AS TagPostCount,
+    ts.TotalViews AS TagTotalViews,
+    ts.AvgViews AS TagAvgViews,
+    ur.DisplayName AS AuthorName,
+    ur.PostsCreated AS AuthorPosts,
+    ur.TotalReputation AS AuthorReputation,
+    ur.UserRank AS AuthorRank
+FROM 
+    RankedPosts rp
+JOIN 
+    TagStats ts ON rp.Tags LIKE '%' || ts.Tag || '%'
+JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    ts.TotalViews DESC, rp.CreationDate DESC;

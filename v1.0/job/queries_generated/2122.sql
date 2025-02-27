@@ -1,0 +1,54 @@
+WITH MovieDetails AS (
+    SELECT 
+        a.title AS MovieTitle,
+        a.production_year AS ProductionYear,
+        COALESCE(c.role_id, -1) AS RoleId,
+        COALESCE(c.nr_order, 0) AS OrderInCast,
+        k.keyword AS MovieKeyword,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY c.nr_order) AS RowNum
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.production_year > 2000 
+        AND a.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'series'))
+    
+), CompanyDetails AS (
+    SELECT 
+        m.movie_id,
+        string_agg(DISTINCT cn.name, ', ') AS Companies,
+        COUNT(DISTINCT mc.company_type_id) AS CompanyTypesCount
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        complete_cast m ON mc.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id
+)
+
+SELECT 
+    md.MovieTitle,
+    md.ProductionYear,
+    cd.Companies,
+    md.MovieKeyword,
+    md.RoleId,
+    md.OrderInCast
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    CompanyDetails cd ON md.id = cd.movie_id
+WHERE 
+    md.RowNum = 1
+    AND (md.RoleId IS NULL OR md.RoleId > 0)
+ORDER BY 
+    md.ProductionYear DESC, 
+    md.MovieTitle;
+
+

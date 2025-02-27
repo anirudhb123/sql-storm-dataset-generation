@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.PostTypeId = 1
+),
+UserAggregates AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ua.UserId,
+    u.DisplayName,
+    ua.GoldBadges,
+    ua.SilverBadges,
+    ua.BronzeBadges,
+    ua.QuestionCount,
+    ua.CommentCount,
+    rp.Title AS TopPostTitle,
+    rp.CreationDate AS TopPostDate,
+    rp.Score AS TopPostScore,
+    rp.ViewCount AS TopPostViews
+FROM 
+    UserAggregates ua
+JOIN 
+    Users u ON ua.UserId = u.Id
+LEFT JOIN 
+    RankedPosts rp ON ua.UserId = rp.OwnerUserId AND rp.Rank = 1
+WHERE 
+    ua.QuestionCount > 5
+ORDER BY 
+    ua.QuestionCount DESC, 
+    ua.GoldBadges DESC;

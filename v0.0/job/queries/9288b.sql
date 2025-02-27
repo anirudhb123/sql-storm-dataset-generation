@@ -1,0 +1,4 @@
+SELECT min(at.title) AS aka_title, min(t.title) AS internet_movie_title
+FROM aka_title AS at, company_name AS cn, company_type AS ct, info_type AS it1, keyword AS k, movie_companies AS mc, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = at.movie_id AND t.id = mi.movie_id AND t.id = mk.movie_id AND t.id = mc.movie_id AND mk.movie_id = mi.movie_id AND mk.movie_id = mc.movie_id AND mk.movie_id = at.movie_id AND mi.movie_id = mc.movie_id AND mi.movie_id = at.movie_id AND mc.movie_id = at.movie_id AND k.id = mk.keyword_id AND it1.id = mi.info_type_id AND cn.id = mc.company_id AND ct.id = mc.company_type_id
+AND mk.movie_id < 2193882 AND cn.name_pcode_sf LIKE '%1%' AND mc.company_id IN (153653, 15469, 171001, 208486, 229708, 25468, 3015, 60158, 61145) AND k.phonetic_code < 'M2643' AND at.production_year IS NOT NULL;

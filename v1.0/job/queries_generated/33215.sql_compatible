@@ -1,0 +1,69 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ca.person_id AS actor_id,
+        ct.kind AS role_type,
+        1 AS level
+    FROM 
+        cast_info ca
+    JOIN 
+        comp_cast_type ct ON ca.person_role_id = ct.id
+    WHERE 
+        ct.kind = 'Actor'
+    
+    UNION ALL
+    
+    SELECT 
+        ca.person_id AS actor_id,
+        ct.kind AS role_type,
+        level + 1
+    FROM 
+        cast_info ca
+    JOIN 
+        comp_cast_type ct ON ca.person_role_id = ct.id
+    JOIN 
+        actor_hierarchy ah ON ca.movie_id = (
+            SELECT movie_id 
+            FROM cast_info 
+            WHERE person_id = ah.actor_id 
+            ORDER BY nr_order 
+            LIMIT 1
+        )
+    WHERE 
+        level < 5 
+)
+
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT mc.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT kt.keyword, ', ') AS keywords,
+    MAX(title.production_year) AS latest_movie_year,
+    ARRAY_AGG(DISTINCT mt.kind ORDER BY mt.kind) AS company_types
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    movie_companies mc ON ci.movie_id = mc.movie_id
+JOIN 
+    movie_keyword mk ON mk.movie_id = mc.movie_id
+JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+JOIN 
+    movie_info mi ON mc.movie_id = mi.movie_id
+JOIN 
+    title ON ci.movie_id = title.id
+LEFT JOIN 
+    actor_hierarchy ah ON ak.person_id = ah.actor_id
+LEFT JOIN 
+    company_type mt ON mc.company_type_id = mt.id
+WHERE 
+    ak.name IS NOT NULL
+    AND title.production_year IS NOT NULL
+    AND ak.name ILIKE '%John%'
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT mc.movie_id) > 3
+ORDER BY 
+    total_movies DESC;

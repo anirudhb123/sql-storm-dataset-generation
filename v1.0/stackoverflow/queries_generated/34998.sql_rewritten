@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        P.Score,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotesCount,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RN
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+
+RecentEditHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.UserDisplayName,
+        PH.CreationDate AS EditDate,
+        RANK() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6)  
+),
+
+TopBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges B
+    WHERE 
+        B.Class = 1  
+    GROUP BY 
+        B.UserId
+    ORDER BY 
+        BadgeCount DESC
+    LIMIT 10
+)
+
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.OwnerDisplayName,
+    RP.CreationDate,
+    RP.Score,
+    RP.UpVotesCount,
+    RP.DownVotesCount,
+    RP.CommentCount,
+    RE.EditDate AS MostRecentEdit,
+    TB.BadgeCount
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    RecentEditHistory RE ON RP.PostId = RE.PostId AND RE.EditRank = 1
+LEFT JOIN 
+    TopBadges TB ON RP.OwnerUserId = TB.UserId
+WHERE 
+    RP.Score > 10
+    AND RP.CommentCount > 5
+ORDER BY 
+    RP.CreationDate DESC
+LIMIT 100;

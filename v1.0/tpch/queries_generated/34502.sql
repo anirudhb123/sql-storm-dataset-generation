@@ -1,0 +1,59 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+AggregatedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(DISTINCT o.o_custkey) AS unique_customers
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+    GROUP BY o.o_orderkey
+),
+TopSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (ORDER BY ts.total_cost DESC) AS rank
+    FROM supplier s
+    JOIN TopSuppliers ts ON s.s_suppkey = ts.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(a.revenue), 0) AS total_revenue,
+        COUNT(a.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN AggregatedOrders a ON c.c_custkey = a.o_orderkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    rh.level AS supplier_hierarchy_level,
+    cs.c_name AS customer_name,
+    cs.total_revenue,
+    COALESCE(ts.total_cost, 0) AS supplier_cost,
+    DENSE_RANK() OVER (ORDER BY cs.total_revenue DESC) AS revenue_rank
+FROM CustomerOrders cs
+LEFT JOIN RankedSuppliers rs ON cs.c_custkey = rs.s_suppkey
+JOIN SupplierHierarchy rh ON rs.s_suppkey = rh.s_suppkey
+WHERE cs.total_revenue IS NOT NULL AND cs.total_revenue > 1000
+ORDER BY supplier_hierarchy_level, total_revenue DESC;

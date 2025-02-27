@@ -1,0 +1,85 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        AVG(CASE WHEN V.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentActivity
+    FROM 
+        Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COALESCE(UPALES.TotalUpvotes, 0) AS TotalUpvotes,
+        COALESCE(DPALES.TotalDownvotes, 0) AS TotalDownvotes,
+        CASE 
+            WHEN P.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' THEN 'Old'
+            WHEN P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month' THEN 'New'
+            ELSE 'Moderate'
+        END AS AgeReference,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS TotalUpvotes
+        FROM Votes 
+        WHERE VoteTypeId = 2
+        GROUP BY PostId
+    ) UPALES ON P.Id = UPALES.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS TotalDownvotes
+        FROM Votes 
+        WHERE VoteTypeId = 3
+        GROUP BY PostId
+    ) DPALES ON P.Id = DPALES.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PHT.Name AS HistoryType,
+        PH.CreationDate,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory PH
+    JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+),
+FinalReport AS (
+    SELECT 
+        UVS.UserId,
+        UVS.DisplayName,
+        SUM(PS.Score) AS TotalPostScore,
+        SUM(PS.CommentCount) AS TotalComments,
+        AVG(PS.TotalUpvotes) AS AvgUpvotesPerPost,
+        AVG(PS.TotalDownvotes) AS AvgDownvotesPerPost,
+        STRING_AGG(DISTINCT CASE WHEN PHD.HistoryRank <= 3 THEN PHD.HistoryType END, ', ') AS RecentHistoryTypes
+    FROM 
+        UserVoteSummary UVS
+    LEFT JOIN PostStatistics PS ON PS.PostId IN (
+        SELECT DISTINCT PH.PostId 
+        FROM PostHistoryDetails PHD 
+        WHERE PHD.HistoryRank <= 10  
+    )
+    LEFT JOIN PostHistoryDetails PHD ON UVS.UserId = PHD.PostId
+    GROUP BY UVS.UserId, UVS.DisplayName
+)
+SELECT 
+    F.UserId,
+    F.DisplayName,
+    F.TotalPostScore,
+    F.TotalComments,
+    F.AvgUpvotesPerPost,
+    F.AvgDownvotesPerPost,
+    COALESCE(F.RecentHistoryTypes, 'None') AS RecentHistory
+FROM 
+    FinalReport F
+ORDER BY 
+    F.TotalPostScore DESC;

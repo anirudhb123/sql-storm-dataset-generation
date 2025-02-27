@@ -1,0 +1,43 @@
+
+WITH RECURSIVE part_hierarchy AS (
+    SELECT p_partkey, p_name, p_mfgr, p_size,
+           p_retailprice,
+           CAST(p_name AS VARCHAR(55)) AS full_tree
+    FROM part
+    WHERE p_size > 10
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_size,
+           p.p_retailprice,
+           CONCAT(ph.full_tree, ' > ', p.p_name)
+    FROM part_hierarchy ph
+    JOIN part p ON ph.p_partkey = p.p_partkey
+    WHERE p.p_size > 5
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           COUNT(DISTINCT ps.ps_partkey) AS supplied_parts,
+           SUM(COALESCE(ps.ps_supplycost, 0)) AS total_supply_cost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, total_spent,
+           RANK() OVER (ORDER BY total_spent DESC) AS rnk
+    FROM customer_orders c
+)
+SELECT ph.full_tree, ss.s_name, ss.supplied_parts, ss.total_supply_cost, 
+       tc.c_name, tc.order_count, tc.total_spent
+FROM part_hierarchy ph
+JOIN supplier_summary ss ON ss.supplied_parts > 10
+LEFT JOIN top_customers tc ON tc.total_spent > 1000
+WHERE ss.total_supply_cost < (SELECT AVG(total_supply_cost) FROM supplier_summary)
+ORDER BY tc.total_spent DESC NULLS LAST;

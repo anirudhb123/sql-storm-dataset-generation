@@ -1,0 +1,55 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        COUNT(DISTINCT p.p_partkey) AS parts_supplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(l.l_orderkey) AS item_count
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY l.l_orderkey
+)
+
+SELECT 
+    R.o_orderkey,
+    R.o_orderstatus,
+    R.o_totalprice,
+    C.total_spent,
+    S.parts_supplied,
+    F.item_count,
+    COALESCE(S.total_supplycost, 0) AS supply_cost
+FROM RankedOrders R
+LEFT JOIN CustomerOrders C ON R.o_orderkey = C.c_custkey
+LEFT JOIN SupplierDetails S ON S.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = R.o_orderkey LIMIT 1))
+LEFT JOIN FilteredLineItems F ON R.o_orderkey = F.l_orderkey
+WHERE R.rn <= 10 AND (C.total_spent IS NULL OR C.total_spent > 5000)
+ORDER BY R.o_totalprice DESC, C.total_spent ASC;

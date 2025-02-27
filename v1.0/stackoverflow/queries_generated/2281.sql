@@ -1,0 +1,59 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(V.BountyAmount) AS TotalBounties,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9)
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostActivity AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        PH.UserDisplayName AS LastEditor,
+        PH.CreationDate AS LastEditDate,
+        DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.LastActivityDate DESC) AS RecentActivity
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE P.LastActivityDate >= NOW() - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        PH.CreationDate AS ClosedDate,
+        CR.Name AS CloseReason
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId = 10
+    JOIN CloseReasonTypes CR ON PH.Comment::jsonb ->> 'reasonId'::text = CR.Id::text
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.AnswerCount,
+    U.QuestionCount,
+    U.TotalBounties,
+    PA.PostId,
+    PA.Title AS LatestPostTitle,
+    PA.CreationDate AS PostCreationDate,
+    PA.LastEditor,
+    PA.LastEditDate,
+    CP.Title AS ClosedPostTitle,
+    CP.ClosedDate,
+    CP.CloseReason
+FROM UserStats U
+LEFT JOIN PostActivity PA ON U.UserId = PA.OwnerUserId
+LEFT JOIN ClosedPosts CP ON U.UserId = CP.OwnerUserId
+WHERE U.ReputationRank <= 50
+ORDER BY U.Reputation DESC, PA.RecentActivity DESC
+LIMIT 100;

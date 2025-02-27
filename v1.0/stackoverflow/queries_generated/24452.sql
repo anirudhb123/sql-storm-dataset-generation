@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(ph.Id) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= (NOW() - INTERVAL '1 year')
+    GROUP BY 
+        p.Id
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(rp.Upvotes - rp.Downvotes), 0) AS NetVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges,
+        us.TotalViews,
+        us.NetVotes,
+        RANK() OVER (ORDER BY us.NetVotes DESC, us.TotalViews DESC) AS UserRank
+    FROM 
+        UserStatistics us
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    tu.GoldBadges,
+    tu.SilverBadges,
+    tu.BronzeBadges,
+    tu.TotalViews,
+    tu.NetVotes,
+    CASE 
+        WHEN tu.UserRank <= 10 THEN 'Top Contributor'
+        WHEN tu.UserRank BETWEEN 11 AND 50 THEN 'Valued Contributor'
+        ELSE 'New Contributor'
+    END AS ContributionLevel
+FROM 
+    TopUsers tu
+JOIN 
+    Users u ON u.Id = tu.UserId
+WHERE 
+    tu.UserRank <= 50 
+    AND u.Reputation > 100
+ORDER BY 
+    tu.UserRank;
+This SQL query is structured to deliver information about the top contributors based on their posts, including their voting statistics and saved badges. It utilizes CTEs (Common Table Expressions) for organizing the ranking of users, along with window functions to determine ranks and aggregate stats conditionally. The query includes NULL logic via `COALESCE` for managing possible missing values in the joins, and calculates complex statistics, making it both extensive and elaborate.

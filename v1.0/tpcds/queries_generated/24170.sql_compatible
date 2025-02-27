@@ -1,0 +1,64 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        c.c_customer_id,
+        s.ss_sold_date_sk,
+        SUM(s.ss_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(s.ss_sales_price) DESC) AS sales_rank
+    FROM 
+        store_sales s
+    JOIN 
+        customer c ON s.ss_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_id, s.ss_sold_date_sk
+    HAVING 
+        SUM(s.ss_sales_price) > 100
+),
+daily_average AS (
+    SELECT 
+        d.d_date,
+        AVG(total_sales) AS avg_daily_sales
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        ranked_sales rs ON d.d_date_sk = rs.ss_sold_date_sk
+    GROUP BY 
+        d.d_date
+)
+SELECT 
+    d.d_date,
+    da.avg_daily_sales,
+    COALESCE(MAX(rs.total_sales), 0) AS max_sales_today,
+    MIN(CASE WHEN rs.sales_rank = 1 THEN rs.total_sales END) AS top_customer_sales,
+    COUNT(DISTINCT c.c_customer_id) FILTER (WHERE c.c_birth_month = 12) AS count_december_birthdays
+FROM 
+    daily_average da
+JOIN 
+    date_dim d ON da.d_date = d.d_date
+LEFT JOIN 
+    ranked_sales rs ON d.d_date_sk = rs.ss_sold_date_sk
+LEFT JOIN 
+    customer c ON rs.c_customer_id = c.c_customer_id
+GROUP BY 
+    d.d_date, da.avg_daily_sales
+ORDER BY 
+    d.d_date DESC
+OFFSET 10 ROWS FETCH NEXT 50 ROWS ONLY
+UNION ALL
+SELECT 
+    'Total' AS d_date, 
+    AVG(da.avg_daily_sales) AS avg_daily_sales,
+    SUM(max_sales_today) AS max_sales_today,
+    SUM(top_customer_sales) AS top_customer_sales,
+    COUNT(DISTINCT c.c_customer_id) FILTER (WHERE c.c_birth_month = 12) AS count_december_birthdays
+FROM 
+    daily_average da
+LEFT JOIN 
+    ranked_sales rs ON da.d_date = rs.ss_sold_date_sk
+LEFT JOIN 
+    customer c ON rs.c_customer_id = c.c_customer_id
+WHERE 
+    da.avg_daily_sales IS NOT NULL
+ORDER BY 
+    d_date ASC
+FETCH FIRST 5 ROWS ONLY;

@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title, 
+        t.production_year,
+        a.name AS actor_name,
+        p.gender,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY a.name) AS actor_rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        name p ON a.person_id = p.id
+    WHERE 
+        t.production_year >= 2000
+        AND p.gender = 'F'  -- Filtering for female actors
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_title, 
+        rm.production_year,
+        rm.actor_name,
+        mk.keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON rm.id = mk.movie_id
+    WHERE 
+        rm.actor_rank <= 3  -- Get top 3 female actors for each movie
+)
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    tm.actor_name,
+    tm.keywords
+FROM 
+    TopMovies tm
+ORDER BY 
+    tm.production_year DESC, 
+    tm.movie_title;
+

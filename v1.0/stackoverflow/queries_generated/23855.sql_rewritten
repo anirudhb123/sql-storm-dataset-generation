@@ -1,0 +1,60 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 5) THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT P.Id) AS AnsweredQuestions,
+        COUNT(DISTINCT CASE 
+            WHEN B.Id IS NOT NULL AND B.Class = 1 THEN B.Id 
+            ELSE NULL END) AS GoldBadges
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 2
+    LEFT JOIN Badges B ON U.Id = B.UserId AND B.TagBased = 0
+    WHERE U.Reputation > 100
+    GROUP BY U.Id, U.DisplayName
+),
+
+ClosedPostStats AS (
+    SELECT 
+        PH.UserId,
+        COUNT(*) AS ClosedPosts,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10 
+    GROUP BY PH.UserId
+),
+
+PostStats AS (
+    SELECT
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.AcceptedAnswerId,
+        CHAR_LENGTH(P.Body) AS BodyLength,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Accepted' 
+            ELSE 'Not Accepted' 
+        END AS AnswerStatus,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+)
+
+SELECT 
+    U.DisplayName, 
+    U.VotesCount, 
+    COALESCE(CPS.ClosedPosts, 0) AS ClosedPostsCount, 
+    COALESCE(CPS.LastClosedDate, 'Never Closed') AS LastClosedPostDate,
+    U.AnsweredQuestions,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    P.BodyLength,
+    P.AnswerStatus
+FROM UserVoteStats U
+LEFT JOIN ClosedPostStats CPS ON U.UserId = CPS.UserId
+LEFT JOIN PostStats P ON U.UserId = P.OwnerUserId AND P.PostRank = 1
+WHERE (U.TotalUpVotes - U.TotalDownVotes) > 10
+ORDER BY U.TotalUpVotes DESC, U.GoldBadges DESC
+LIMIT 10;

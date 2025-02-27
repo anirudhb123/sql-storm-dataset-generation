@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS budget, min(t.title) AS unsuccsessful_movie
+FROM company_name AS cn, company_type AS ct, info_type AS it1, info_type AS it2, movie_companies AS mc, movie_info AS mi, movie_info_idx AS mi_idx, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND mi.info_type_id = it1.id AND mi_idx.info_type_id = it2.id AND t.id = mc.movie_id AND ct.id = mc.company_type_id AND cn.id = mc.company_id AND mc.movie_id = mi.movie_id AND mc.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id
+AND mi.info < 'One of a number of Soviet attempts to do a "western" in a Russian setting. During the Civil War (1918-20) between the Red Army and the White Army, just after the Communist Revolution, the Red Cavalry (the "good guys") are being victimized by rustlers stealing their horses. The hero devises a ruse in hopes of tricking the "bad guys" (the rustlers) and recovering the stolen herd.' AND cn.country_code IS NOT NULL AND t.title LIKE '%jidai%';

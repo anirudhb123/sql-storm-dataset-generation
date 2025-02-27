@@ -1,0 +1,84 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.sold_date_sk,
+        ws.ws_item_sk,
+        ws.net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_profit DESC) AS profit_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.net_profit IS NOT NULL
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'UNKNOWN'
+            WHEN cd.cd_purchase_estimate < 1000 THEN 'LOW'
+            WHEN cd.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'MEDIUM'
+            ELSE 'HIGH'
+        END AS purchase_level
+    FROM
+        customer_demographics cd
+),
+FilteredReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        sr.return_quantity,
+        sr.store_sk,
+        sr.return_amt,
+        COALESCE(sr.refunded_cash, 0) AS refunded_cash
+    FROM 
+        store_returns sr
+    WHERE
+        sr.return_quantity > 0
+        AND sr.return_amt IS NOT NULL
+),
+SalesSummary AS (
+    SELECT
+        i.item_id,
+        SUM(cs.quantity) AS total_quantity,
+        SUM(cs.net_profit) AS total_net_profit
+    FROM
+        catalog_sales cs
+    JOIN 
+        item i ON cs.cs_item_sk = i.i_item_sk
+    GROUP BY
+        i.item_id
+)
+SELECT
+    ca.city,
+    ca.state,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    SUM(COALESCE(fr.return_quantity, 0)) AS total_returned_products,
+    MAX(s.total_net_profit) AS max_product_profit,
+    AVG(subquery.purchase_level) AS avg_purchase_level
+FROM
+    customer c
+JOIN
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN
+    FilteredReturns fr ON c.c_customer_sk = fr.store_sk
+JOIN
+    SalesSummary s ON s.item_id IN (SELECT DISTINCT wp.web_page_id 
+                                     FROM web_page wp 
+                                     WHERE wp.web_creation_date_sk 
+                                     > (SELECT MAX(wp_access_date_sk) FROM web_page WHERE wp_access_date_sk IS NOT NULL))
+LEFT JOIN 
+    CustomerDemographics subquery ON c.c_current_cdemo_sk = subquery.cd_demo_sk
+GROUP BY
+    ca.city, ca.state
+HAVING
+    COUNT(DISTINCT c.c_customer_sk) > 10
+    AND MAX(s.total_net_profit) IS NOT NULL
+ORDER BY 
+    total_returned_products DESC,
+    city ASC,
+    state DESC
+OPTION (RECOMPILE);

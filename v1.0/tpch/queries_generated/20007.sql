@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        DENSE_RANK() OVER (ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+LineItemsSummarized AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= CURRENT_DATE - INTERVAL '1 month'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE((
+        SELECT 
+            COUNT(DISTINCT l.l_orderkey) 
+        FROM 
+            lineitem l 
+        WHERE 
+            l.l_partkey = p.p_partkey
+    ), 0) AS order_count,
+    COUNT(DISTINCT ro.o_orderkey) AS recent_order_count,
+    SUM(ls.total_revenue) AS total_revenue_last_month,
+    s.s_name AS top_supplier_name
+FROM 
+    part p
+LEFT JOIN 
+    RecentOrders ro ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM RankedSuppliers s WHERE s.rn = 1))
+LEFT JOIN 
+    LineItemsSummarized ls ON p.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = ro.o_orderkey)
+LEFT JOIN 
+    RankedSuppliers s ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey LIMIT 1)
+WHERE 
+    p.p_retailprice < (SELECT AVG(p2.p_retailprice) FROM part p2) 
+    AND p.p_comment LIKE '%eloquent%'
+GROUP BY 
+    p.p_partkey, p.p_name, s.s_name
+HAVING 
+    COALESCE(SUM(ls.total_revenue), 0) > 1000 
+ORDER BY 
+    total_revenue_last_month DESC, order_count DESC;

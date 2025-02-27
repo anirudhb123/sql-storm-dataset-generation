@@ -1,0 +1,42 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_net_profit) AS total_profit,
+        ROW_NUMBER() OVER(PARTITION BY s_store_sk ORDER BY SUM(ss_net_profit) DESC) AS rank
+    FROM store_sales 
+    GROUP BY s_store_sk, ss_sold_date_sk
+),
+date_ranges AS (
+    SELECT 
+        d.d_date_sk,
+        d.d_date,
+        CASE 
+            WHEN d.d_dow IN (1, 7) THEN 'Weekend' 
+            ELSE 'Weekday' 
+        END AS day_type
+    FROM date_dim d
+),
+total_store_profits AS (
+    SELECT 
+        sh.s_store_sk,
+        SUM(sh.total_profit) AS overall_profit 
+    FROM sales_hierarchy sh
+    JOIN store s ON sh.s_store_sk = s.s_store_sk
+    GROUP BY sh.s_store_sk
+)
+SELECT 
+    s.s_store_name,
+    s.s_country,
+    dp.day_type,
+    tsp.overall_profit,
+    CAST(NULL AS decimal(10, 2)) AS avg_excess_profit,
+    COALESCE(NULLIF(tsp.overall_profit - (SELECT AVG(overall_profit) FROM total_store_profits), 0), NULL) AS profit_difference
+FROM store s
+LEFT JOIN date_ranges dp ON dp.d_date_sk = (SELECT MAX(ss_sold_date_sk) FROM store_sales WHERE ss_store_sk = s.s_store_sk)
+LEFT JOIN total_store_profits tsp ON tsp.s_store_sk = s.s_store_sk
+WHERE s.s_number_employees IS NOT NULL
+AND tsp.overall_profit > (SELECT AVG(overall_profit) FROM total_store_profits)
+ORDER BY tsp.overall_profit DESC
+LIMIT 10;

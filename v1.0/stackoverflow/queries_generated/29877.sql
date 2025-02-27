@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerUser,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM p.CreationDate) ORDER BY p.ViewCount DESC) AS RankYearly
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate >= CURRENT_DATE - INTERVAL '5 years'
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+AnswerStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(a.Id) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.Title,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CreationDate,
+    rp.OwnerUser,
+    pt.TagName,
+    ast.AnswerCount AS RelatedAnswerCount,
+    rp.RankYearly
+FROM 
+    RankedPosts rp
+JOIN 
+    PopularTags pt ON rp.ViewCount > 100 -- Only consider posts with more than 100 views
+LEFT JOIN 
+    AnswerStats ast ON rp.PostId = ast.PostId
+WHERE 
+    rp.RankYearly <= 3 -- Top 3 posts per year based on views
+ORDER BY 
+    rp.CreationDate DESC, rp.ViewCount DESC;

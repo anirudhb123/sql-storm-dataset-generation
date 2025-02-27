@@ -1,0 +1,58 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(V.VoteCount, 0)) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+), PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (ORDER BY P.ViewCount DESC) AS Rank
+    FROM 
+        Posts P
+    INNER JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT 
+    US.DisplayName AS UserDisplayName,
+    US.Reputation,
+    US.BadgeCount,
+    US.PostCount,
+    PP.PostId,
+    PP.Title AS PopularPostTitle,
+    PP.ViewCount AS PopularPostViews,
+    PP.Score AS PopularPostScore
+FROM 
+    UserStats US
+JOIN 
+    PopularPosts PP ON US.UserId = PP.OwnerDisplayName
+WHERE 
+    US.BadgeCount > 5
+ORDER BY 
+    US.Reputation DESC, PP.ViewCount DESC
+LIMIT 10;

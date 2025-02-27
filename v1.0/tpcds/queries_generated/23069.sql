@@ -1,0 +1,62 @@
+
+WITH Sales_Data AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER(PARTITION BY ws.ws_sold_date_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank_profit
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk
+), 
+Item_Stats AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        COALESCE(SUM(sd.total_quantity), 0) AS total_quantity_sold,
+        COALESCE(SUM(sd.total_profit), 0) AS total_profit_generated
+    FROM 
+        item AS i
+    LEFT JOIN 
+        Sales_Data AS sd ON i.i_item_sk = sd.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_desc
+), 
+High_Performers AS (
+    SELECT 
+        is.i_item_sk,
+        is.i_item_desc,
+        is.total_quantity_sold,
+        is.total_profit_generated,
+        DENSE_RANK() OVER(ORDER BY is.total_profit_generated DESC) AS profit_rank
+    FROM 
+        Item_Stats AS is
+    WHERE 
+        is.total_profit_generated > 500
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    coalesce(ca.ca_city, 'Unknown City') AS city,
+    hp.i_item_desc,
+    hp.total_quantity_sold,
+    hp.total_profit_generated
+FROM 
+    customer AS c
+LEFT JOIN 
+    customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    High_Performers AS hp ON hp.total_profit_generated = (
+        SELECT MAX(total_profit_generated) FROM High_Performers
+    )
+WHERE 
+    hp.profit_rank <= 10
+ORDER BY 
+    hp.total_profit_generated DESC, c.c_first_name;

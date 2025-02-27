@@ -1,0 +1,68 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_cdemo_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(*) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_cdemo_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_cdemo_sk
+),
+customer_ranking AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(ca.ca_city, 'Unknown') AS city,
+        CASE
+            WHEN cd.cd_purchase_estimate > 1000 THEN 'High Value'
+            WHEN cd.cd_purchase_estimate BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS value_category
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+combined_data AS (
+    SELECT 
+        cr.ws_cdemo_sk,
+        SUM(cr.ws_net_profit) AS total_web_net_profit,
+        COALESCE(cs.total_net_profit, 0) AS total_catalog_net_profit,
+        COALESCE(ss.total_net_profit, 0) AS total_store_net_profit
+    FROM 
+        web_sales cr
+    LEFT JOIN 
+        (SELECT ws_cdemo_sk, SUM(ws_net_profit) AS total_net_profit FROM web_sales GROUP BY ws_cdemo_sk) cs ON cr.ws_cdemo_sk = cs.ws_cdemo_sk
+    LEFT JOIN 
+        (SELECT ss_cdemo_sk, SUM(ss_net_profit) AS total_net_profit FROM store_sales GROUP BY ss_cdemo_sk) ss ON cr.ws_cdemo_sk = ss.ss_cdemo_sk
+    GROUP BY 
+        cr.ws_cdemo_sk
+)
+SELECT 
+    cd.cd_demo_sk,
+    cd.cd_gender,
+    cd.city,
+    cd.value_category,
+    SUM(cd.total_web_net_profit) AS total_web_sales,
+    SUM(cd.total_catalog_net_profit) AS total_catalog_sales,
+    SUM(cd.total_store_net_profit) AS total_store_sales,
+    ROW_NUMBER() OVER (ORDER BY SUM(cd.total_web_net_profit) DESC) AS overall_rank
+FROM 
+    combined_data cd
+JOIN 
+    customer_ranking cr ON cd.ws_cdemo_sk = cr.cd_demo_sk
+WHERE 
+    cd.total_web_net_profit IS NOT NULL
+GROUP BY 
+    cd.cd_demo_sk, cd.cd_gender, cd.city, cd.value_category
+HAVING 
+    SUM(cd.total_web_net_profit) > 1000
+ORDER BY 
+    overall_rank
+LIMIT 10;

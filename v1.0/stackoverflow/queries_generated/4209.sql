@@ -1,0 +1,58 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(V.BountyAmount) AS TotalBounties,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        C.Name AS CloseReason,
+        PH.UserDisplayName AS ClosedBy
+    FROM PostHistory PH
+    JOIN CloseReasonTypes C ON PH.Comment::int = C.Id
+    WHERE PH.PostHistoryTypeId = 10
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalBounties,
+        TotalUpvotes,
+        TotalDownvotes,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS RankByPosts,
+        RANK() OVER (ORDER BY TotalUpvotes DESC) AS RankByUpvotes
+    FROM UserStats
+)
+SELECT 
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    U.TotalBounties,
+    U.TotalUpvotes,
+    U.TotalDownvotes,
+    COALESCE(CP.CloseReason, 'N/A') AS LastCloseReason,
+    COALESCE(CP.CreationDate, 'No Closed Posts') AS LastClosedDate,
+    R.RankByPosts,
+    R.RankByUpvotes
+FROM RankedUsers R
+LEFT JOIN ClosedPosts CP ON R.UserId = CP.PostId
+JOIN Users U ON R.UserId = U.Id
+WHERE (U.LastAccessDate > NOW() - INTERVAL '1 year' OR U.Location IS NOT NULL)
+AND (U.Reputation > 100 OR U.Views > 1000)
+ORDER BY R.RankByPosts, R.RankByUpvotes DESC
+LIMIT 50;

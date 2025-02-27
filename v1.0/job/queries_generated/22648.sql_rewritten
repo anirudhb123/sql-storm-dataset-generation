@@ -1,0 +1,72 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC, at.title) AS rn,
+        COALESCE(NULLIF(at.note, ''), 'No notes available') AS note
+    FROM
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        ci.person_id,
+        ct.kind AS role_type,
+        ct.id AS role_type_id,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY 
+        ci.person_id, ct.kind, ct.id
+    HAVING 
+        COUNT(ci.movie_id) > 5
+),
+TitleKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mt
+    JOIN 
+        keyword k ON mt.keyword_id = k.id
+    GROUP BY 
+        mt.movie_id
+),
+OuterJoinCTE AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        tt.keywords,
+        ar.role_type,
+        ar.movie_count
+    FROM 
+        RankedTitles t
+    LEFT JOIN 
+        TitleKeywords tt ON t.title_id = tt.movie_id
+    LEFT JOIN 
+        ActorRoles ar ON t.title_id IN (SELECT movie_id FROM cast_info WHERE person_id = ar.person_id)
+)
+SELECT 
+    oj.title_id,
+    oj.title,
+    oj.production_year,
+    oj.keywords,
+    COALESCE(oj.role_type, 'Unknown Role') AS role_type,
+    CASE 
+        WHEN oj.movie_count IS NULL THEN 'No movies acted'
+        ELSE CAST(oj.movie_count AS TEXT) || ' movies acted'
+    END AS acting_summary
+FROM 
+    OuterJoinCTE oj
+JOIN 
+    aka_name an ON an.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = oj.title_id)
+WHERE 
+    oj.keywords IS NOT NULL
+ORDER BY 
+    oj.production_year DESC, 
+    uj.title ASC
+LIMIT 100;

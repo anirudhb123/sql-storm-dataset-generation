@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- Initial anchor member to get the top-level movies
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        1 AS level
+    FROM 
+        title m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    -- Recursive member to get episodes belonging to the top-level movies
+    SELECT 
+        e.id AS movie_id,
+        e.title AS movie_title,
+        h.level + 1 AS level
+    FROM 
+        title e
+    JOIN 
+        MovieHierarchy h ON e.episode_of_id = h.movie_id
+),
+MovieKeywords AS (
+    -- CTE to find movies with specific keywords
+    SELECT 
+        mk.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword IN ('Action', 'Adventure', 'Drama')
+),
+MovieCasting AS (
+    -- CTE to get movie casting details and roles
+    SELECT 
+        ci.movie_id,
+        ARRAY_AGG(DISTINCT ak.name) AS actor_names,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        SUM(CASE WHEN rt.role = 'Director' THEN 1 ELSE 0 END) AS director_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.level,
+    COALESCE(mk.keyword, 'No keyword') AS movie_keyword,
+    mc.actor_names,
+    mc.cast_count,
+    mc.director_count,
+    CASE 
+        WHEN mc.director_count > 0 THEN 'Has Director'
+        ELSE 'No Director'
+    END AS director_status
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    MovieKeywords mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    MovieCasting mc ON mh.movie_id = mc.movie_id
+WHERE 
+    mh.level = 1 -- Select only top-level movies
+ORDER BY 
+    mh.movie_title ASC;

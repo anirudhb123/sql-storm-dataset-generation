@@ -1,0 +1,66 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT i_item_sk, i_item_id, i_item_desc, i_current_price, i_wholesale_cost,
+           1 AS hierarchy_level
+    FROM item
+    WHERE i_current_price > 10.00
+
+    UNION ALL
+
+    SELECT ih.i_item_sk, ih.i_item_id, ih.i_item_desc, ih.i_current_price, ih.i_wholesale_cost,
+           ih.hierarchy_level + 1
+    FROM item_hierarchy ih
+    JOIN item i ON ih.i_item_sk = i.i_item_sk
+    WHERE ih.hierarchy_level < 10 AND i.i_current_price < ih.i_current_price
+),
+
+store_web_sales AS (
+    SELECT ws.web_site_sk, SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    JOIN store s ON ws.ws_ship_addr_sk = s.s_store_sk
+    GROUP BY ws.web_site_sk
+),
+
+demographic_stats AS (
+    SELECT cd_demo_sk, COUNT(c.c_customer_sk) AS customer_count, 
+           AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+           SUM(CASE WHEN cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+           SUM(CASE WHEN cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count
+    FROM customer_demographics cd
+    LEFT JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd_demo_sk
+),
+
+inventory_check AS (
+    SELECT inv.inv_item_sk, 
+           CASE 
+               WHEN SUM(inv.inv_quantity_on_hand) IS NULL THEN 'Out of Stock'
+               WHEN SUM(inv.inv_quantity_on_hand) = 0 THEN 'Low Stock'
+               ELSE 'In Stock'
+           END AS inventory_status
+    FROM inventory inv
+    GROUP BY inv.inv_item_sk
+)
+
+SELECT
+    coh.i_item_id AS "Item ID", 
+    coh.i_item_desc AS "Item Description",
+    coh.hierarchy_level AS "Hierarchy Level",
+    sws.total_profit AS "Store Web Total Profit",
+    ds.customer_count AS "Customer Count",
+    ds.avg_purchase_estimate AS "Average Purchase Estimate",
+    ic.inventory_status AS "Inventory Status"
+FROM item_hierarchy coh
+JOIN store_web_sales sws ON coh.i_item_sk = sws.web_site_sk
+JOIN demographic_stats ds ON coh.i_item_sk = ds.cd_demo_sk
+JOIN inventory_check ic ON coh.i_item_sk = ic.inv_item_sk
+WHERE coh.hierarchy_level IN (SELECT DISTINCT hierarchy_level FROM item_hierarchy WHERE hierarchy_level IS NOT NULL)
+AND ds.customer_count > 0
+AND (sws.total_profit > (
+    SELECT AVG(total_profit) 
+    FROM store_web_sales 
+    WHERE total_profit IS NOT NULL
+) OR sws.total_profit IS NULL)
+AND ic.inventory_status IS NOT NULL
+ORDER BY coh.hierarchy_level DESC, sws.total_profit DESC
+LIMIT 100;

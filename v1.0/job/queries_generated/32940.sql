@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        1 AS depth,
+        t.title,
+        t.production_year
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    WHERE 
+        co.country_code = 'USA'
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        mh.depth + 1,
+        t.title,
+        t.production_year
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    mh.depth AS link_depth,
+    COUNT(DISTINCT mc.company_id) AS num_production_companies,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    MAX(pi.info) AS personal_info
+FROM 
+    cast_info ci
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Birthdate' LIMIT 1)
+JOIN 
+    MovieHierarchy mh ON t.id = mh.movie_id
+WHERE 
+    t.production_year >= 2000
+    AND (a.name IS NOT NULL AND a.name <> '')
+GROUP BY 
+    a.name, t.title, t.production_year, mh.depth
+ORDER BY 
+    t.production_year DESC, link_depth;

@@ -1,0 +1,69 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        MAX(ws.ws_sales_price) AS max_sales_price,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+WarehouseStats AS (
+    SELECT 
+        w.w_warehouse_id,
+        COUNT(CASE WHEN i.i_item_id IS NOT NULL THEN 1 END) AS stocked_items,
+        SUM(i.i_current_price) / NULLIF(COUNT(i.i_item_id), 0) AS avg_item_price
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        inventory inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    LEFT JOIN 
+        item i ON inv.inv_item_sk = i.i_item_sk
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    rc.c_customer_id,
+    rc.cd_gender,
+    rc.cd_marital_status,
+    sd.ws_item_sk,
+    sd.total_quantity,
+    sd.total_net_paid,
+    sd.total_discount,
+    wd.w_warehouse_id,
+    wd.stocked_items,
+    wd.avg_item_price
+FROM 
+    RankedCustomers rc
+JOIN 
+    SalesData sd ON rc.purchase_rank = 1 
+LEFT JOIN 
+    WarehouseStats wd ON sd.ws_item_sk IN (SELECT i.i_item_sk FROM inventory i WHERE i.inv_quantity_on_hand > 0) 
+WHERE 
+    rc.cd_credit_rating IN ('Good', 'Excellent')
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM web_returns wr 
+        WHERE wr.wr_returned_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2001) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+        AND wr.wr_returning_customer_sk = rc.c_customer_id
+    )
+ORDER BY 
+    sd.total_net_paid DESC, 
+    rc.c_customer_id;

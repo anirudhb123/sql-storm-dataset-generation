@@ -1,0 +1,68 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.usual_rating DESC NULLS LAST) AS title_rank
+    FROM 
+        title t
+        JOIN movie_keyword mk ON t.id = mk.movie_id
+        JOIN keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword ILIKE ANY(ARRAY['action%', 'drama%', 'comedy%'])
+),
+ActorRoles AS (
+    SELECT 
+        a.name, 
+        ci.movie_id,
+        r.role,
+        COUNT(ci.role_id) AS role_count
+    FROM 
+        aka_name a
+        JOIN cast_info ci ON a.person_id = ci.person_id
+        JOIN role_type r ON ci.role_id = r.id
+    GROUP BY 
+        a.name, ci.movie_id, r.role
+),
+TopActors AS (
+    SELECT 
+        name, 
+        SUM(role_count) AS total_roles
+    FROM 
+        ActorRoles
+    GROUP BY 
+        name
+    HAVING 
+        SUM(role_count) > 5
+),
+MoviesWithTopActors AS (
+    SELECT 
+        rt.title_id, 
+        rt.title, 
+        rt.production_year,
+        ta.name AS top_actor
+    FROM 
+        RankedTitles rt
+        JOIN cast_info ci ON rt.title_id = ci.movie_id
+        JOIN aka_name an ON ci.person_id = an.person_id
+        JOIN TopActors ta ON an.name = ta.name
+)
+SELECT 
+    m.title,
+    m.production_year,
+    COUNT(DISTINCT c.company_id) AS num_companies,
+    STRING_AGG(DISTINCT c.name, ', ') AS production_companies,
+    (SELECT COUNT(DISTINCT km.keyword_id)
+     FROM movie_keyword km
+     WHERE km.movie_id = m.title_id) AS num_keywords
+FROM 
+    MoviesWithTopActors m
+    LEFT JOIN movie_companies mc ON m.title_id = mc.movie_id
+    LEFT JOIN company_name c ON mc.company_id = c.id
+WHERE 
+    m.production_year >= 2000
+GROUP BY 
+    m.title_id, m.title, m.production_year
+ORDER BY 
+    m.production_year DESC, num_companies DESC
+FETCH FIRST 10 ROWS ONLY;

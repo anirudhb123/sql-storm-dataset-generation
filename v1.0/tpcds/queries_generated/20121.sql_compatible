@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS rn,
+        SUM(ws_quantity) OVER (PARTITION BY ws_item_sk) AS total_quantity
+    FROM 
+        web_sales
+),
+FilteredSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_quantity,
+        rs.ws_sales_price,
+        rs.total_quantity,
+        (CASE 
+            WHEN rs.total_quantity > 100 THEN 'High Volume'
+            WHEN rs.total_quantity BETWEEN 50 AND 100 THEN 'Medium Volume'
+            ELSE 'Low Volume' 
+        END) AS volume_category
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rn = 1 AND 
+        rs.ws_sales_price IS NOT NULL
+),
+SalesDetails AS (
+    SELECT 
+        fs.ws_item_sk,
+        fs.volume_category,
+        COALESCE(ROUND(AVG(fs.ws_sales_price) FILTER (WHERE fs.volume_category = 'High Volume'), 2), 0) AS avg_sales_high,
+        COALESCE(ROUND(AVG(fs.ws_sales_price) FILTER (WHERE fs.volume_category = 'Medium Volume'), 2), 0) AS avg_sales_medium,
+        COALESCE(ROUND(AVG(fs.ws_sales_price) FILTER (WHERE fs.volume_category = 'Low Volume'), 2), 0) AS avg_sales_low
+    FROM 
+        FilteredSales fs
+    GROUP BY 
+        fs.ws_item_sk, fs.volume_category
+)
+SELECT 
+    sd.ws_item_sk,
+    sd.volume_category,
+    sd.avg_sales_high,
+    sd.avg_sales_medium,
+    sd.avg_sales_low,
+    COALESCE((SELECT SUM(ss.net_profit) 
+               FROM store_sales ss 
+               WHERE ss.ss_item_sk = sd.ws_item_sk 
+               AND ss.ss_sold_date_sk BETWEEN 2450025 AND 2450675), 0) AS total_store_profit,
+    (SELECT COUNT(*) 
+     FROM customer c 
+     WHERE c.c_current_cdemo_sk IN (
+         SELECT DISTINCT cd.cd_demo_sk 
+         FROM customer_demographics cd 
+         WHERE cd.cd_gender = 'F'
+     )
+     AND c.c_birth_year < 1990
+    ) AS female_customers_born_before_1990
+FROM 
+    SalesDetails sd
+WHERE 
+    sd.avg_sales_high > 30.00 
+    OR sd.avg_sales_medium > 20.00
+    OR sd.avg_sales_low > 10.00
+ORDER BY 
+    sd.ws_item_sk DESC;

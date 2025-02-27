@@ -1,0 +1,53 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        COALESCE(ARRAY_AGG(DISTINCT c.name), ARRAY['No Cast']) AS cast_names,
+        COALESCE(ARRAY_AGG(DISTINCT cp.kind), ARRAY['No Company']) AS companies
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type cp ON mc.company_type_id = cp.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+popular_movies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        keywords,
+        cast_names,
+        companies,
+        ROW_NUMBER() OVER (ORDER BY ARRAY_LENGTH(keywords) DESC) AS popularity_rank
+    FROM 
+        movie_details
+)
+SELECT 
+    pm.movie_id,
+    pm.movie_title,
+    pm.production_year,
+    pm.keywords,
+    pm.cast_names,
+    pm.companies
+FROM 
+    popular_movies pm
+WHERE 
+    pm.popularity_rank <= 10;

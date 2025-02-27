@@ -1,0 +1,65 @@
+WITH PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_type,
+        p.p_retailprice, 
+        p.p_comment, 
+        s.s_name AS supplier_name, 
+        c.c_name AS customer_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        p.p_name LIKE '%steel%'
+        AND o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+),
+RegionSupplier AS (
+    SELECT 
+        r.r_name AS region_name, 
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name
+),
+AggregateResults AS (
+    SELECT 
+        pd.*,
+        rs.region_name,
+        rs.supplier_count,
+        rs.total_supply_cost
+    FROM 
+        PartDetails pd
+    JOIN 
+        RegionSupplier rs ON pd.supplier_name = rs.region_name
+)
+SELECT 
+    region_name,
+    COUNT(DISTINCT customer_name) AS distinct_customers,
+    AVG(o_totalprice) AS avg_order_price,
+    SUM(p_retailprice) AS total_retail_price
+FROM 
+    AggregateResults
+GROUP BY 
+    region_name
+ORDER BY 
+    distinct_customers DESC, avg_order_price DESC;

@@ -1,0 +1,42 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    LEFT JOIN Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::text[])
+    GROUP BY p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName, p.AcceptedAnswerId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        CASE 
+            WHEN rp.CommentCount > 5 THEN 'Highly Engaged'
+            WHEN rp.VoteCount > 10 THEN 'Popular'
+            ELSE 'Standard'
+        END AS EngagementLevel
+    FROM RankedPosts rp
+    WHERE rp.Rank <= 10
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.OwnerDisplayName,
+    fp.CreationDate,
+    fp.EngagementLevel,
+    STRING_AGG(DISTINCT tag, ', ') AS TagsList
+FROM FilteredPosts fp
+LEFT JOIN LATERAL unnest(fp.Tags) AS tag ON true
+GROUP BY fp.PostId, fp.Title, fp.OwnerDisplayName, fp.CreationDate, fp.EngagementLevel
+ORDER BY fp.CreationDate DESC;

@@ -1,0 +1,52 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        a.person_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        c.note AS role_note,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    JOIN aka_title t ON c.movie_id = t.movie_id
+    WHERE t.production_year IS NOT NULL
+),
+AggregatedMovies AS (
+    SELECT 
+        r.actor_name, 
+        COUNT(DISTINCT r.movie_title) AS total_movies,
+        MAX(r.rn) AS max_role,
+        STRING_AGG(DISTINCT r.role_note, ', ') AS role_notes
+    FROM RecursiveCTE r
+    WHERE r.rn <= 5
+    GROUP BY r.actor_name
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id, 
+        m.title, 
+        AVG(CAST(mi.info AS numeric)) AS average_info,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        CASE 
+            WHEN COUNT(DISTINCT mk.keyword) > 5 THEN 'Popular'
+            ELSE 'Less Known'
+        END AS movie_category
+    FROM aka_title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id AND mi.note IS NOT NULL
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY m.movie_id, m.title
+)
+SELECT 
+    a.actor_name,
+    a.total_movies,
+    a.max_role,
+    a.role_notes,
+    md.title AS movie_title,
+    md.average_info,
+    md.keyword_count,
+    md.movie_category
+FROM AggregatedMovies a
+JOIN MovieDetails md ON a.total_movies > 0
+WHERE (a.total_movies > 10 OR a.max_role IS NOT NULL)
+ORDER BY a.total_movies DESC, md.average_info DESC
+LIMIT 50;

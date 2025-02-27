@@ -1,0 +1,71 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+PopularTitles AS (
+    SELECT
+        t.title,
+        COALESCE(COUNT(DISTINCT kc.keyword), 0) AS keyword_count
+    FROM aka_title at
+    LEFT JOIN movie_keyword mk ON at.movie_id = mk.movie_id
+    LEFT JOIN keyword kc ON mk.keyword_id = kc.id
+    JOIN RankedTitles r ON at.id = r.title_id
+    WHERE at.kind_id = (
+        SELECT id FROM kind_type WHERE kind = 'feature'
+    )
+    GROUP BY t.title
+    HAVING COUNT(DISTINCT kc.keyword) > 2
+),
+CastSummary AS (
+    SELECT
+        ci.movie_id,
+        STRING_AGG(CONCAT(a.name, ' as ', rt.role), ', ') AS cast_list,
+        COUNT(ci.id) AS total_cast
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN role_type rt ON ci.role_id = rt.id
+    GROUP BY ci.movie_id
+),
+CompCount AS (
+    SELECT
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM movie_companies mc
+    WHERE mc.note IS NULL
+    GROUP BY mc.movie_id
+),
+MoviesDetails AS (
+    SELECT
+        t.title,
+        t.production_year,
+        cs.cast_list,
+        cc.company_count,
+        COALESCE(pt.keyword_count, 0) AS keyword_count
+    FROM title t
+    LEFT JOIN CastSummary cs ON t.id = cs.movie_id
+    LEFT JOIN CompCount cc ON t.id = cc.movie_id
+    LEFT JOIN PopularTitles pt ON t.title = pt.title
+)
+
+SELECT 
+    md.title,
+    md.production_year,
+    md.cast_list,
+    md.company_count,
+    md.keyword_count,
+    CASE 
+        WHEN md.company_count = 0 THEN 'Self Production'
+        WHEN md.company_count IS NULL THEN 'Details Missing'
+        ELSE 'Distributed'
+    END AS distribution_status,
+    COUNT(DISTINCT ci.person_id) OVER () AS universe_of_cast
+FROM MoviesDetails md
+LEFT JOIN complete_cast cc ON cc.movie_id = md.title_id
+LEFT JOIN aka_title at ON at.title = md.title
+WHERE md.production_year BETWEEN 2000 AND 2023
+AND (md.keyword_count IS NULL OR md.keyword_count < 5);

@@ -1,0 +1,56 @@
+
+WITH SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ps.ps_supplycost,
+        p.p_name,
+        p.p_brand,
+        p.p_type
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        SupplierPartDetails ps
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost) > 5000
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+)
+SELECT 
+    hs.s_name AS supplier_name,
+    cs.c_name AS customer_name,
+    cs.order_count,
+    cs.total_spent,
+    hs.total_supply_cost
+FROM 
+    HighValueSuppliers hs
+JOIN 
+    CustomerOrderSummary cs ON hs.total_supply_cost > 10000
+ORDER BY 
+    cs.total_spent DESC, hs.total_supply_cost DESC;

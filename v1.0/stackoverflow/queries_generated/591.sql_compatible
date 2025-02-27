@@ -1,0 +1,71 @@
+
+WITH UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 5 THEN 1 ELSE 0 END), 0) AS Favorites
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostNumber,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS TotalComments
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title, P.Score, P.ViewCount, P.AnswerCount, P.CommentCount, P.CreationDate
+),
+RecentUserPosts AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        COUNT(P.PostId) AS TotalPosts,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore,
+        MAX(P.CreationDate) AS MostRecentPostDate,
+        AVG(P.AnswerCount) AS AvgAnswersPerPost
+    FROM UserVoteCounts U
+    JOIN Posts P ON U.UserId = P.OwnerUserId
+    WHERE U.UpVotes > 0 OR U.DownVotes > 0
+    GROUP BY U.UserId, U.DisplayName
+)
+SELECT 
+    R.DisplayName,
+    R.TotalPosts,
+    R.TotalViews,
+    R.TotalScore,
+    R.MostRecentPostDate,
+    R.AvgAnswersPerPost,
+    COALESCE(MAX(PV.PostId), -1) AS ExamplePostId,
+    COALESCE(MAX(PV.Title), 'No Posts') AS ExamplePostTitle,
+    U.UpVotes,
+    U.DownVotes,
+    U.Favorites
+FROM RecentUserPosts R
+LEFT JOIN PostStats PV ON R.UserId = PV.PostId
+JOIN UserVoteCounts U ON R.UserId = U.UserId
+GROUP BY 
+    R.UserId,
+    R.DisplayName,
+    R.TotalPosts,
+    R.TotalViews,
+    R.TotalScore,
+    R.MostRecentPostDate,
+    R.AvgAnswersPerPost,
+    U.UpVotes,
+    U.DownVotes,
+    U.Favorites
+ORDER BY 
+    R.TotalScore DESC,
+    R.TotalPosts DESC;

@@ -1,0 +1,66 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1970 AND 1990
+    GROUP BY 
+        c.c_customer_sk
+),
+warehouse_sales AS (
+    SELECT 
+        w.w_warehouse_sk,
+        SUM(ws.ws_ext_sales_price) AS warehouse_total_sales,
+        COUNT(ws.ws_order_number) AS warehouse_orders_count
+    FROM 
+        warehouse w
+    JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_sk
+),
+sales_analysis AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_orders,
+        cs.total_sales,
+        ws.warehouse_orders_count,
+        ws.warehouse_total_sales
+    FROM 
+        customer_sales cs
+    JOIN 
+        warehouse_sales ws ON cs.total_orders > 5
+),
+demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk
+    FROM 
+        customer_demographics
+)
+SELECT 
+    sa.c_customer_sk,
+    d.cd_gender,
+    d.cd_marital_status,
+    d.cd_income_band_sk,
+    sa.total_orders,
+    sa.total_sales,
+    sa.warehouse_orders_count,
+    sa.warehouse_total_sales
+FROM 
+    sales_analysis sa
+JOIN 
+    demographics d ON d.cd_demo_sk = sa.c_customer_sk
+WHERE 
+    sa.total_sales > 1000
+ORDER BY 
+    sa.total_sales DESC
+LIMIT 100;

@@ -1,0 +1,97 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (CURRENT_TIMESTAMP - INTERVAL '1 year')
+        AND p.Score IS NOT NULL
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        COUNT(DISTINCT CASE WHEN b.Class = 1 THEN b.Id END) AS GoldBadges,
+        COUNT(DISTINCT CASE WHEN b.Class = 2 THEN b.Id END) AS SilverBadges,
+        COUNT(DISTINCT CASE WHEN b.Class = 3 THEN b.Id END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate,
+        COUNT(ph.Id) AS CloseVotes
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(ur.Reputation, 0) AS Reputation,
+        COALESCE(up.BadgeCount, 0) AS BadgeCount,
+        COALESCE(up.GoldBadges, 0) AS GoldBadges,
+        COALESCE(up.SilverBadges, 0) AS SilverBadges,
+        COALESCE(up.BronzeBadges, 0) AS BronzeBadges,
+        COALESCE(cp.CloseVotes, 0) AS CloseVotes,
+        COALESCE(cp.FirstClosedDate, '9999-12-31'::timestamp) AS FirstClosedDate -- using a high date to easily identify users with no closures
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserReputation ur ON u.Id = ur.UserId
+    LEFT JOIN 
+        ClosedPosts cp ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = cp.PostId)
+    LEFT JOIN 
+        (SELECT UserId, COUNT(*) AS BadgeCount, 
+                SUM(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+                SUM(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+                SUM(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+         FROM Badges 
+         GROUP BY UserId) up ON u.Id = up.UserId
+)
+
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.BadgeCount,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    COUNT(DISTINCT rp.PostId) AS PostCount,
+    SUM(CASE WHEN rp.Score IS NOT NULL THEN rp.Score ELSE 0 END) AS TotalScore,
+    AVG(COALESCE(rp.Score::float, 0)) AS AverageScore,
+    MIN(rp.CreationDate) AS FirstPostDate,
+    MAX(rp.CreationDate) AS LatestPostDate,
+    COUNT(DISTINCT cp.PostId) AS ClosedPostCount,
+    MIN(cp.FirstClosedDate) AS FirstClosedPostDate,
+    MAX(CASE WHEN us.CloseVotes > 0 THEN us.FirstClosedDate ELSE NULL END) AS LastClosureDate
+FROM 
+    UserStats us
+LEFT JOIN 
+    RankedPosts rp ON rp.OwnerUserId = us.UserId
+LEFT JOIN 
+    ClosedPosts cp ON cp.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = us.UserId)
+GROUP BY 
+    us.UserId, us.Reputation, us.BadgeCount, us.GoldBadges, us.SilverBadges, us.BronzeBadges
+HAVING 
+    SUM(CASE WHEN us.Reputation > 0 THEN 1 ELSE 0 END) > 5 AND 
+    COUNT(DISTINCT rp.PostId) > 0
+ORDER BY 
+    us.Reputation DESC, 
+    TotalScore DESC
+LIMIT 50;

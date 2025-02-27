@@ -1,0 +1,76 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        COALESCE(NULLIF(wb.warehouse_name, ''), 'Unknown Warehouse') AS warehouse_name,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        MAX(ws.ws_sales_price) AS max_sales_price,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        DENSE_RANK() OVER (PARTITION BY COALESCE(ws.ws_ship_mode_sk, 0) ORDER BY SUM(ws.ws_net_profit) DESC) AS rank_by_profit
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        warehouse wb ON ws.ws_warehouse_sk = wb.w_warehouse_sk
+    GROUP BY 
+        wb.warehouse_name
+),
+TopWarehouses AS (
+    SELECT 
+        warehouse_name,
+        total_quantity,
+        total_net_profit,
+        total_orders,
+        max_sales_price,
+        avg_sales_price
+    FROM 
+        SalesSummary
+    WHERE 
+        rank_by_profit <= 5
+),
+DetailedCustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        CASE 
+            WHEN cd.cd_credit_rating = 'Excellent' THEN 'High value'
+            WHEN cd.cd_credit_rating = 'Good' THEN 'Medium value'
+            ELSE 'Low value'
+        END AS customer_value_category
+    FROM 
+        customer c
+    INNER JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+FinalReport AS (
+    SELECT 
+        ti.warehouse_name,
+        ci.customer_value_category,
+        COUNT(ci.c_customer_id) AS customer_count,
+        SUM(ts.total_net_profit) AS total_profit_contributed
+    FROM 
+        TopWarehouses ti
+    INNER JOIN 
+        DetailedCustomerInfo ci ON ci.c_customer_id LIKE '%A%'  
+    INNER JOIN 
+        web_sales ws ON ws.ws_bill_customer_sk = CAST(ci.c_customer_id AS INT)
+    INNER JOIN 
+        SalesSummary ts ON ts.warehouse_name = ti.warehouse_name
+    GROUP BY 
+        ti.warehouse_name, ci.customer_value_category
+    HAVING 
+        SUM(ts.total_net_profit) > 1000
+)
+SELECT 
+    warehouse_name,
+    customer_value_category,
+    customer_count,
+    total_profit_contributed
+FROM 
+    FinalReport
+ORDER BY 
+    total_profit_contributed DESC;

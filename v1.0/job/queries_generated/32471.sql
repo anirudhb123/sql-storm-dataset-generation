@@ -1,0 +1,56 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        title.id AS movie_id, 
+        title.title AS movie_title,
+        0 AS level
+    FROM 
+        title
+    WHERE 
+        title.kind_id = 1  -- Considering only movies
+    
+    UNION ALL
+    
+    SELECT 
+        mt.linked_movie_id AS movie_id,
+        title.title AS movie_title,
+        mh.level + 1
+    FROM 
+        movie_link mt
+    JOIN 
+        movie_hierarchy mh ON mt.movie_id = mh.movie_id
+    JOIN 
+        title ON mt.linked_movie_id = title.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    ti.title AS movie_title,
+    COUNT(DISTINCT ci.person_id) AS total_actors,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    MAX(CASE WHEN mi.info_type_id = 1 THEN mi.info END) AS movie_rating,
+    SUM(CASE WHEN mi.info_type_id = 2 THEN 1 ELSE 0 END) AS awards_count,
+    ROW_NUMBER() OVER (PARTITION BY ti.id ORDER BY ak.name) AS actor_rank
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    title ti ON ci.movie_id = ti.id
+LEFT JOIN 
+    movie_keyword mk ON ti.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON ti.id = mi.movie_id
+LEFT JOIN 
+    movie_hierarchy mh ON ti.id = mh.movie_id
+WHERE 
+    ti.production_year BETWEEN 2000 AND 2023
+    AND (ak.name IS NOT NULL OR k.keyword IS NULL)
+GROUP BY 
+    ak.name, ti.title
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY 
+    total_actors DESC, 
+    movie_title ASC;

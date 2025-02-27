@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_suppkey = (SELECT MIN(s_suppkey) FROM supplier)  
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey <> sh.s_suppkey
+),
+TotalOrderValue AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, t.total_value
+    FROM customer c
+    JOIN TotalOrderValue t ON c.c_custkey = t.o_custkey
+    WHERE t.total_value > (SELECT AVG(total_value) FROM TotalOrderValue)
+),
+SupplierStats AS (
+    SELECT s.n_nationkey, COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.n_nationkey
+)
+SELECT r.r_name, 
+       COALESCE(hv.total_value, 0) AS high_value_total,
+       ss.supplier_count,
+       ss.avg_supplycost
+FROM region r
+LEFT JOIN SupplierStats ss ON r.r_regionkey = ss.n_nationkey
+LEFT JOIN HighValueCustomers hv ON hv.c_custkey IN (
+    SELECT c.c_custkey
+    FROM customer c
+    WHERE c.c_nationkey = ss.n_nationkey
+)
+ORDER BY r.r_name, high_value_total DESC;

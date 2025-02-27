@@ -1,0 +1,55 @@
+WITH RECURSIVE Movie_CTE AS (
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           mt.production_year,
+           1 AS level,
+           mt.episode_of_id
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL 
+  UNION ALL
+    SELECT mt.id, 
+           mt.title, 
+           mt.production_year,
+           level + 1,
+           mt.episode_of_id
+    FROM aka_title mt
+    JOIN Movie_CTE m
+      ON mt.episode_of_id = m.movie_id 
+)
+SELECT 
+    ak.name AS aka_name,
+    t.title AS movie_title,
+    t.production_year,
+    COALESCE(ac.person_role_id, 0) AS role_id,
+    ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ac.nr_order) AS role_order,
+    DENSE_RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ac.id) DESC) AS year_rank,
+    STRING_AGG(DISTINCT cmt.name, ', ') AS companies,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ac ON ak.person_id = ac.person_id
+JOIN 
+    title t ON ac.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    company_name cmt ON mc.company_id = cmt.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+WHERE 
+    t.production_year IS NOT NULL
+    AND (t.kind_id = 1 OR t.kind_id = 2) 
+    AND EXISTS (
+        SELECT 1 
+        FROM person_info pi 
+        WHERE pi.person_id = ak.person_id AND pi.info_type_id = 1
+    )
+GROUP BY 
+    ak.name, t.id, t.production_year, ac.person_role_id
+HAVING 
+    COUNT(DISTINCT ac.id) > 1
+ORDER BY 
+    t.production_year DESC,
+    year_rank,
+    role_order;

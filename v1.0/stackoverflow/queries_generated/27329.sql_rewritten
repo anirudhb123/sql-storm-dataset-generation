@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.Score, p.ViewCount
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.AnswerCount,
+        ROW_NUMBER() OVER (ORDER BY rp.Score DESC, rp.ViewCount DESC) AS Rank
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.AnswerCount,
+    COALESCE(NULLIF(pht.Comments, ''), 'No comments available') AS RecentComment,
+    STRING_AGG(t.TagName, ', ') AS TagList
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistory ph ON tp.PostId = ph.PostId
+LEFT JOIN 
+    (SELECT 
+         PostId, 
+         STRING_AGG(Text, ' | ') AS Comments 
+     FROM 
+         Comments 
+     WHERE 
+         CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '7 days' 
+     GROUP BY 
+         PostId) AS pht ON tp.PostId = pht.PostId
+LEFT JOIN 
+    Posts p ON tp.PostId = p.Id
+LEFT JOIN 
+    Tags t ON position(t.TagName IN p.Tags) > 0
+WHERE 
+    tp.Rank <= 10
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, tp.Score, tp.ViewCount, 
+    tp.CommentCount, tp.AnswerCount, pht.Comments
+ORDER BY 
+    tp.Rank;

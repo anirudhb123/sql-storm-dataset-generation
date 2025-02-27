@@ -1,0 +1,40 @@
+
+SELECT 
+    akn.name AS aka_name,
+    ttl.title AS movie_title,
+    grp.role AS cast_role,
+    comp.name AS company_name,
+    info.info AS movie_info,
+    kt.keyword AS movie_keyword,
+    nm.gender AS person_gender,
+    COUNT(*) OVER (PARTITION BY ttl.production_year) AS movie_count_per_year
+FROM 
+    aka_name akn
+JOIN 
+    cast_info ci ON akn.person_id = ci.person_id
+JOIN 
+    title ttl ON ci.movie_id = ttl.id
+JOIN 
+    movie_companies mc ON ttl.id = mc.movie_id
+JOIN 
+    company_name comp ON mc.company_id = comp.id
+LEFT JOIN 
+    movie_info mi ON ttl.id = mi.movie_id
+LEFT JOIN 
+    info_type it ON mi.info_type_id = it.id
+LEFT JOIN 
+    movie_keyword mk ON ttl.id = mk.movie_id
+LEFT JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+LEFT JOIN 
+    name nm ON akn.person_id = nm.imdb_id
+WHERE 
+    ttl.production_year BETWEEN 2000 AND 2023
+AND 
+    akn.name IS NOT NULL
+AND 
+    (it.info IS NULL OR it.info LIKE '%award%')
+GROUP BY 
+    akn.name, ttl.title, grp.role, comp.name, mi.info, kt.keyword, nm.gender, ttl.production_year
+ORDER BY 
+    ttl.production_year DESC, akn.name;

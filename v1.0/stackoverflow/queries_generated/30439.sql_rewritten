@@ -1,0 +1,84 @@
+WITH RecursivePostCTE AS (
+    
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        P.Title,
+        1 AS Depth
+    FROM Posts P
+    WHERE P.PostTypeId = 2  
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        P.Title,
+        RPC.Depth + 1
+    FROM Posts P
+    INNER JOIN RecursivePostCTE RPC ON P.Id = RPC.ParentId
+),
+PostScoreCTE AS (
+    
+    SELECT 
+        P.Id AS QuestionId,
+        P.Title,
+        AVG(A.Score) AS AvgAnswerScore,
+        COUNT(A.Id) AS TotalAnswers
+    FROM Posts P
+    LEFT JOIN Posts A ON P.Id = A.ParentId AND A.PostTypeId = 2  
+    WHERE P.PostTypeId = 1  
+    GROUP BY P.Id
+),
+UserBadgesCTE AS (
+    
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    JOIN Posts A ON U.Id = A.OwnerUserId AND A.PostTypeId = 2  
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    P.Title AS QuestionTitle,
+    PS.TotalAnswers,
+    PS.AvgAnswerScore,
+    U.DisplayName AS AnswererDisplayName,
+    U.BadgeCount,
+    COUNT(DISTINCT C.Id) AS CommentCount,
+    MAX(C.CreationDate) AS LastCommentDate,
+    STRING_AGG(T.TagName, ', ') AS Tags,
+    CASE
+        WHEN PS.AvgAnswerScore IS NULL THEN 'No Answers'
+        WHEN PS.AvgAnswerScore > 5 THEN 'Good Answer Quality'
+        ELSE 'Needs Improvement'
+    END AS AnswerQualityFeedback,
+    CASE 
+        WHEN PS.TotalAnswers > 10 THEN 'High Activity'
+        WHEN PS.TotalAnswers BETWEEN 5 AND 10 THEN 'Moderate Activity'
+        ELSE 'Low Activity'
+    END AS ActivityLevel
+FROM Posts P
+JOIN PostScoreCTE PS ON P.Id = PS.QuestionId
+JOIN UserBadgesCTE U ON U.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = P.Id)
+LEFT JOIN Comments C ON C.PostId = P.Id
+LEFT JOIN LATERAL (
+    SELECT 
+        T.TagName
+    FROM Tags T
+    WHERE T.Id IN (SELECT UNNEST(string_to_array(P.Tags, '<>'))::int)  
+) T ON true  
+WHERE P.PostTypeId = 1  
+GROUP BY 
+    P.Title, 
+    PS.TotalAnswers, 
+    PS.AvgAnswerScore, 
+    U.DisplayName, 
+    U.BadgeCount
+HAVING 
+    COUNT(DISTINCT C.Id) > 0  
+ORDER BY 
+    PS.AvgAnswerScore DESC, 
+    PS.TotalAnswers DESC;

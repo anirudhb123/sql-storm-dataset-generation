@@ -1,0 +1,52 @@
+
+WITH AddressAnalysis AS (
+    SELECT 
+        ca_address_sk, 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        LOWER(ca_country) AS lower_country
+    FROM customer_address
+),
+DemographicsAnalysis AS (
+    SELECT 
+        cd_demo_sk,
+        COUNT(c_demo_sk) AS demo_count,
+        SUM(cd_dep_count) AS total_dependents,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics
+    GROUP BY cd_demo_sk
+),
+SalesSummary AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        AA.full_address,
+        DA.demo_count,
+        DA.total_dependents,
+        DA.avg_purchase_estimate,
+        SA.total_sales,
+        SA.total_orders
+    FROM AddressAnalysis AA
+    JOIN customer C ON C.c_current_addr_sk = AA.ca_address_sk
+    LEFT JOIN DemographicsAnalysis DA ON C.c_current_cdemo_sk = DA.cd_demo_sk
+    LEFT JOIN SalesSummary SA ON C.c_customer_sk = SA.ws_bill_customer_sk
+    WHERE AA.lower_country = 'usa' 
+        AND DA.avg_purchase_estimate > 10000
+)
+
+SELECT 
+    full_address,
+    demo_count,
+    total_dependents,
+    avg_purchase_estimate,
+    COALESCE(total_sales, 0) AS total_sales,
+    COALESCE(total_orders, 0) AS total_orders
+FROM FinalReport
+ORDER BY total_sales DESC, demo_count DESC;

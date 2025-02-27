@@ -1,0 +1,49 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderstatus,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders AS o
+    JOIN 
+        customer AS c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+),
+top_orders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_totalprice,
+        ro.c_name,
+        ro.c_acctbal
+    FROM 
+        ranked_orders AS ro
+    WHERE 
+        ro.order_rank <= 10
+),
+order_items AS (
+    SELECT 
+        lo.l_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_line_item_price,
+        COUNT(lo.l_orderkey) AS line_item_count
+    FROM 
+        lineitem AS lo
+    GROUP BY 
+        lo.l_orderkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_totalprice,
+    to.c_name,
+    to.c_acctbal,
+    oi.total_line_item_price,
+    oi.line_item_count
+FROM 
+    top_orders AS to
+JOIN 
+    order_items AS oi ON to.o_orderkey = oi.l_orderkey
+ORDER BY 
+    to.o_totalprice DESC;

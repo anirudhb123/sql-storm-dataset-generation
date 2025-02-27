@@ -1,0 +1,84 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        COUNT(DISTINCT C.Id) AS CommentsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        UpVotes - DownVotes AS NetVotes,
+        ROW_NUMBER() OVER (ORDER BY (UpVotes - DownVotes) DESC) AS Rank
+    FROM 
+        UserVoteStats
+    WHERE 
+        PostsCount > 5
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(C.Comment) AS CommentCount,
+        COALESCE(MAX(PH.CreationDate), P.CreationDate) AS LastEditDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        OwnerDisplayName,
+        CommentCount,
+        DENSE_RANK() OVER (ORDER BY Score DESC) AS Rank
+    FROM 
+        RecentPosts
+)
+SELECT 
+    U.UserId,
+    U.DisplayName AS UserName,
+    T.Title AS PostTitle,
+    T.Score AS PostScore,
+    T.CommentCount,
+    T.CreationDate AS PostCreationDate,
+    CASE 
+        WHEN T.Rank <= 10 THEN 'Top Post'
+        ELSE 'Other Post'
+    END AS PostCategory
+FROM 
+    TopUsers U
+JOIN 
+    TopPosts T ON U.UpVotes > 0 
+WHERE 
+    T.CommentCount > 5
+ORDER BY 
+    U.NetVotes DESC, T.Score DESC
+LIMIT 50;

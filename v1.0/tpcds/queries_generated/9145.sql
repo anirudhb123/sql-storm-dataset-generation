@@ -1,0 +1,30 @@
+
+SELECT 
+    ca.city AS Customer_City,
+    ca.state AS Customer_State,
+    cd.gender AS Customer_Gender,
+    SUM(ws.net_profit) AS Total_Net_Profit,
+    COUNT(DISTINCT ws.order_number) AS Total_Orders,
+    AVG(ws.net_paid) AS Average_Sale_Amount,
+    COUNT(DISTINCT ws.web_page_sk) AS Unique_Web_Pages,
+    EXTRACT(YEAR FROM dd.date) AS Sale_Year
+
+FROM 
+    web_sales ws
+JOIN 
+    customer c ON ws.bill_customer_sk = c.c_customer_sk
+JOIN 
+    customer_demographics cd ON c.current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    customer_address ca ON c.current_addr_sk = ca.ca_address_sk
+JOIN 
+    date_dim dd ON ws.sold_date_sk = dd.d_date_sk
+JOIN 
+    web_site w ON ws.web_site_sk = w.web_site_sk
+WHERE 
+    dd.date >= '2023-01-01' AND dd.date < '2024-01-01'
+GROUP BY 
+    ca.city, ca.state, cd.gender, EXTRACT(YEAR FROM dd.date)
+ORDER BY 
+    Total_Net_Profit DESC
+LIMIT 100;

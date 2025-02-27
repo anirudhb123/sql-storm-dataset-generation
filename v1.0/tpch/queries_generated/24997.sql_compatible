@@ -1,0 +1,77 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1995-01-01' AND o.o_orderdate < '1996-01-01'
+),
+SuppliedParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp)
+    GROUP BY 
+        ps.ps_partkey
+), 
+CustomerPurchases AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        c.c_acctbal IS NOT NULL 
+        AND l.l_returnflag = 'N'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+FinalResults AS (
+    SELECT 
+        r.o_orderkey,
+        cp.c_name,
+        cp.total_spent,
+        CASE 
+            WHEN cp.total_spent > 1000 THEN 'Premium'
+            WHEN cp.total_spent BETWEEN 500 AND 1000 THEN 'Standard'
+            ELSE 'Basic' 
+        END AS customer_segment
+    FROM 
+        RankedOrders r
+    LEFT JOIN 
+        CustomerPurchases cp ON r.o_orderkey = cp.order_count
+)
+SELECT 
+    fp.o_orderkey,
+    fp.c_name,
+    fp.total_spent,
+    fp.customer_segment,
+    CASE 
+        WHEN sp.total_available IS NULL THEN 'No Supply Information'
+        ELSE CAST(sp.total_available AS VARCHAR) 
+    END AS availability_info
+FROM 
+    FinalResults fp
+LEFT OUTER JOIN 
+    SuppliedParts sp ON random() < 0.3 
+WHERE 
+    fp.customer_segment <> 'Basic'
+ORDER BY 
+    fp.total_spent DESC, 
+    fp.o_orderkey
+LIMIT 10;

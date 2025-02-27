@@ -1,0 +1,73 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2451545 AND 2451545 + 30 -- Example date range
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk
+),
+
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        CASE 
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            ELSE 'Other' 
+        END AS gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        SUM(ws.ws_net_profit) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+),
+
+ItemData AS (
+    SELECT
+        i.i_item_sk,
+        i.i_product_name,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_count,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_product_name
+)
+
+SELECT 
+    sd.ws_sold_date_sk,
+    cd.gender,
+    cd.marital_status,
+    id.i_product_name,
+    sd.total_quantity,
+    sd.total_net_profit,
+    cd.total_spent,
+    cd.order_count,
+    id.orders_count,
+    COALESCE(NULLIF(MIN(sd.avg_sales_price), 0), 'N/A') AS safer_price
+FROM 
+    SalesData sd
+JOIN 
+    CustomerData cd ON sd.ws_item_sk = cd.order_count
+JOIN 
+    ItemData id ON sd.ws_item_sk = id.i_item_sk
+ORDER BY 
+    sd.ws_sold_date_sk, cd.total_spent DESC
+LIMIT 100;

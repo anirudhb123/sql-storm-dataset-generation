@@ -1,0 +1,38 @@
+
+WITH Address_Concat AS (
+    SELECT ca_address_sk, 
+           CONCAT(TRIM(ca_street_number), ' ', 
+                  TRIM(ca_street_name), ' ', 
+                  TRIM(ca_street_type), ' ', 
+                  COALESCE(TRIM(ca_suite_number), ''), ' ', 
+                  TRIM(ca_city), ', ', 
+                  TRIM(ca_state), ' ', 
+                  TRIM(ca_zip), ' ', 
+                  TRIM(ca_country)) AS full_address
+    FROM customer_address
+),
+Demographics_Stats AS (
+    SELECT cd_gender,
+           COUNT(DISTINCT cd_demo_sk) AS demo_count, 
+           AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics
+    GROUP BY cd_gender
+),
+Customer_Details AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name || ' ' || c.c_last_name AS full_name, 
+           a.full_address,
+           d.demo_count,
+           d.avg_purchase_estimate
+    FROM customer c
+    JOIN Address_Concat a ON c.c_current_addr_sk = a.ca_address_sk
+    JOIN Demographics_Stats d ON c.c_current_cdemo_sk = d.cd_demo_sk
+)
+SELECT full_name, 
+       full_address, 
+       demo_count, 
+       avg_purchase_estimate
+FROM Customer_Details
+WHERE avg_purchase_estimate > 500
+ORDER BY demo_count DESC, full_name ASC
+LIMIT 100;

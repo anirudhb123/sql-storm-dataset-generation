@@ -1,0 +1,58 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        w.warehouse_id,
+        d.d_year,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_quantity) AS total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY w.warehouse_id ORDER BY d.d_year DESC) AS rnk
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        w.warehouse_id, d.d_year
+), 
+customer_rank AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        COALESCE(SUM(ws.ws_ext_sales_price), 0) AS total_spent,
+        COUNT(ws.ws_item_sk) AS purchase_count,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY COALESCE(SUM(ws.ws_ext_sales_price), 0) DESC) AS gender_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender
+    HAVING 
+        COUNT(ws.ws_item_sk) > 0
+)
+SELECT 
+    ss.warehouse_id,
+    ss.d_year,
+    ss.total_sales,
+    ss.total_quantity,
+    CR.c_customer_sk,
+    CR.cd_gender,
+    CR.total_spent,
+    CR.purchase_count,
+    CASE 
+        WHEN ss.total_sales > 10000 THEN 'High Revenue'
+        WHEN ss.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM 
+    sales_summary ss
+JOIN 
+    customer_rank CR ON ss.total_sales = CR.total_spent
+WHERE 
+    ss.rnk = 1
+ORDER BY 
+    ss.warehouse_id, ss.d_year DESC, CR.total_spent DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,53 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        s.s_store_id,
+        ws.ws_web_site_id,
+        ws.ws_sold_date_sk,
+        SUM(ss.ss_quantity) AS total_quantity,
+        SUM(ss.ss_net_paid) AS total_sales,
+        RANK() OVER (PARTITION BY s.s_store_id ORDER BY SUM(ss.ss_net_paid) DESC) AS sales_rank
+    FROM 
+        store s
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    JOIN 
+        web_sales ws ON ss.ss_order_number = ws.ws_order_number
+    GROUP BY 
+        s.s_store_id, ws.ws_web_site_id, ws.ws_sold_date_sk
+),
+top_sales AS (
+    SELECT 
+        store_id,
+        web_site_id,
+        sold_date_sk,
+        total_quantity,
+        total_sales
+    FROM 
+        ranked_sales
+    WHERE 
+        sales_rank <= 5
+)
+SELECT 
+    t.store_id,
+    t.web_site_id,
+    d.d_date AS sales_date,
+    t.total_quantity,
+    t.total_sales,
+    c.c_first_name,
+    c.c_last_name,
+    c.c_email_address,
+    cd.cd_gender,
+    cd.cd_marital_status
+FROM 
+    top_sales t
+JOIN 
+    date_dim d ON t.ws_sold_date_sk = d.d_date_sk
+JOIN 
+    web_sales ws ON t.web_site_id = ws.ws_web_site_sk AND t.sold_date_sk = ws.ws_sold_date_sk
+JOIN 
+    customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+ORDER BY 
+    t.total_sales DESC;

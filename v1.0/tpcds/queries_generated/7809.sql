@@ -1,0 +1,62 @@
+
+WITH SalesData AS (
+    SELECT 
+        w.w_warehouse_name,
+        d.d_year,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_order_value
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2021 AND 2023 
+    GROUP BY 
+        w.w_warehouse_name, d.d_year
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        SUM(ws.ws_sales_price) AS total_customer_sales
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender
+),
+Summary AS (
+    SELECT 
+        sd.w_warehouse_name,
+        cd.cd_gender,
+        sd.d_year,
+        sd.total_sales,
+        cd.total_customer_sales,
+        sd.total_orders,
+        sd.avg_order_value
+    FROM 
+        SalesData sd
+    JOIN 
+        CustomerData cd ON sd.total_sales > cd.total_customer_sales
+)
+SELECT 
+    w.w_warehouse_name,
+    SUM(CASE WHEN cd.cd_gender = 'M' THEN sd.total_sales ELSE 0 END) AS male_sales,
+    SUM(CASE WHEN cd.cd_gender = 'F' THEN sd.total_sales ELSE 0 END) AS female_sales,
+    SUM(sd.total_orders) AS total_orders,
+    AVG(sd.avg_order_value) AS average_order_value
+FROM 
+    Summary sd
+JOIN 
+    warehouse w ON sd.w_warehouse_name = w.w_warehouse_name
+GROUP BY 
+    w.w_warehouse_name
+ORDER BY 
+    total_orders DESC
+LIMIT 10;

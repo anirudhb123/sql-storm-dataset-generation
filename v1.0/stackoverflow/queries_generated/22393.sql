@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        p.AcceptedAnswerId,
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount,
+        COALESCE((SELECT SUM(v.BountyAmount) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 8), 0) AS TotalBounty,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.CreationDate, p.AcceptedAnswerId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation IS NOT NULL AND u.Reputation > 0
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+ActiveUserPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        u.DisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS RecentActivityRank,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        (SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId = p.Id AND ph.PostHistoryTypeId = 10) AS CloseVotes
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        (p.CreationDate >= NOW() - INTERVAL '1 year') AND 
+        (p.Score >= 5 OR p.ViewCount > 1000)
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, u.DisplayName
+    HAVING 
+        COUNT(c.Id) > 0
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.Reputation,
+    COUNT(DISTINCT ap.PostId) AS PostCount,
+    SUM(ap.CommentCount) AS TotalComments,
+    SUM(ap.UpVoteCount) AS TotalUpVotes,
+    MAX(cmt.CommentCount) AS MaxComments,
+    MAX(RankedPosts.CommentCount) FILTER (WHERE RankedPosts.PostRank = 1) AS MaxCommentsForMostRecentPost,
+    CASE 
+        WHEN SUM(ap.UpVoteCount) > SUM(ap.DownVoteCount) THEN 'Positive'
+        WHEN SUM(ap.UpVoteCount) < SUM(ap.DownVoteCount) THEN 'Negative'
+        ELSE 'Neutral'
+    END AS Sentiment
+FROM 
+    UserStatistics up
+LEFT JOIN 
+    ActiveUserPosts ap ON up.UserId = ap.OwnerUserId
+LEFT JOIN 
+    (SELECT OwnerUserId, COUNT(*) AS CommentCount FROM Comments GROUP BY OwnerUserId) cmt ON up.UserId = cmt.OwnerUserId
+LEFT JOIN 
+    RankedPosts ON up.UserId = RankedPosts.OwnerUserId
+GROUP BY 
+    up.UserId, up.DisplayName, up.Reputation
+HAVING 
+    AVG(up.Reputation) > 100
+ORDER BY 
+    TotalComments DESC, Sentiment DESC, PostCount DESC
+LIMIT 10;

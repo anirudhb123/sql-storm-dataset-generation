@@ -1,0 +1,70 @@
+
+WITH RECURSIVE regional_sales AS (
+    SELECT 
+        r.r_name AS region,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        r.r_name
+),
+top_sales AS (
+    SELECT 
+        region,
+        total_sales
+    FROM 
+        regional_sales
+    WHERE 
+        rn <= 5
+),
+customer_ranking AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS cust_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.region,
+    r.total_sales,
+    c.c_name,
+    c.total_spent,
+    COALESCE(c.total_spent, 0) AS customer_spending,
+    CASE 
+        WHEN r.total_sales > 100000 THEN 'High'
+        WHEN r.total_sales BETWEEN 50000 AND 100000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM 
+    top_sales r
+FULL OUTER JOIN 
+    customer_ranking c ON r.region = (
+        SELECT 
+            rn.r_name 
+        FROM 
+            region rn 
+        JOIN 
+            nation n ON rn.r_regionkey = n.n_regionkey 
+        WHERE 
+            n.n_nationkey = c.c_nationkey
+        LIMIT 1
+    )
+ORDER BY 
+    r.total_sales DESC, c.total_spent DESC;

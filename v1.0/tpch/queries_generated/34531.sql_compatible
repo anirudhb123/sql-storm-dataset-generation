@@ -1,0 +1,44 @@
+
+WITH RECURSIVE OrdersCTE AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS rn
+    FROM orders
+    WHERE o_orderstatus = 'O'
+), HighValueSuppliers AS (
+    SELECT ps.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > 10000
+    GROUP BY ps.s_suppkey
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 50000
+), CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN OrdersCTE o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+), SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, r.r_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY s.s_suppkey, s.s_name, r.r_name
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > (
+        SELECT AVG(total_sales) FROM (
+            SELECT SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+            FROM lineitem
+            GROUP BY l_suppkey
+        ) AS avg_sales
+    )
+)
+SELECT co.c_custkey, co.c_name, co.order_count, co.avg_order_value,
+       si.s_name, si.total_sales, COUNT(DISTINCT o.o_orderkey) AS recent_order_count
+FROM CustomerOrders co
+LEFT JOIN OrdersCTE o ON co.c_custkey = o.o_custkey AND o.rn <= 5
+JOIN SupplierInfo si ON si.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (
+    SELECT p.p_partkey FROM part p WHERE p.p_size >= 10 AND p.p_size <= 20
+))
+GROUP BY co.c_custkey, co.c_name, co.order_count, co.avg_order_value, si.s_name, si.total_sales
+ORDER BY co.avg_order_value DESC, recent_order_count DESC
+LIMIT 100;

@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey AND s.s_suppkey != sh.s_suppkey 
+    WHERE sh.level < 3
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rn,
+           COUNT(*) OVER (PARTITION BY p.p_partkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, 
+           AVG(o.o_totalprice) AS avg_order_value, 
+           CASE WHEN COUNT(o.o_orderkey) > 0 THEN 'Active' ELSE 'Inactive' END AS customer_status
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT nh.n_name AS nation_name, 
+       SUM(COALESCE(ps.ps_availqty, 0)) AS total_available_qty,
+       SUM(CASE WHEN ps.ps_supplycost < 100.00 THEN 1 ELSE 0 END) AS low_cost_supplies,
+       CONCAT('Supplier ', sh.s_name, ' in Level ', sh.level) AS supplier_info,
+       COUNT(DISTINCT ps.ps_suppkey) AS distinct_suppliers,
+       cs.total_spent,
+       cs.avg_order_value,
+       cs.customer_status
+FROM nation nh
+LEFT JOIN supplier s ON nh.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+LEFT JOIN PartSupplierDetails ps ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN CustomerOrderSummary cs ON cs.c_custkey = s.s_nationkey
+WHERE s.s_acctbal IS NOT NULL AND 
+      EXISTS(SELECT 1 FROM lineitem l WHERE l.l_shipdate = cast('1998-10-01' as date) - INTERVAL '1 day' 
+             AND l.l_returnflag = 'N')
+GROUP BY nh.n_name, sh.s_name, sh.level, cs.total_spent, cs.avg_order_value, cs.customer_status
+ORDER BY total_available_qty DESC NULLS LAST, nation_name
+LIMIT 50;

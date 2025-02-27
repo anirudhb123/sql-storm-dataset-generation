@@ -1,0 +1,68 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_acctbal, 0 AS level
+    FROM customer
+    WHERE c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_custkey = ch.c_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal < ch.c_acctbal
+),
+PriceDetails AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost 
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderStats AS (
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+           COUNT(DISTINCT l.l_suppkey) AS supplier_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+SupplierPerformance AS (
+    SELECT s.s_suppkey, 
+           s.s_name,
+           COUNT(DISTINCT ps.ps_partkey) AS parts_supplied,
+           MIN(ps.ps_supplycost) AS min_supplycost,
+           MAX(ps.ps_supplycost) AS max_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey, s.s_name
+),
+NationRegion AS (
+    SELECT n.n_nationkey,
+           r.r_regionkey,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           RANK() OVER (PARTITION BY r.r_regionkey ORDER BY COUNT(DISTINCT s.s_suppkey) DESC) AS region_rank
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY n.n_nationkey, r.r_regionkey
+)
+SELECT ch.c_name, 
+       ch.level,
+       od.o_orderkey,
+       p.p_name,
+       pd.total_cost,
+       sp.parts_supplied,
+       nr.region_rank
+FROM CustomerHierarchy ch
+JOIN OrderStats od ON od.net_revenue > (SELECT AVG(net_revenue) FROM OrderStats)
+JOIN PriceDetails pd ON pd.total_cost < 5000
+JOIN SupplierPerformance sp ON sp.parts_supplied > 10
+LEFT JOIN NationRegion nr ON nr.supplier_count IS NOT NULL
+WHERE ch.c_custkey IN (
+    SELECT c.c_custkey
+    FROM customer c
+    WHERE c.c_mktsegment NOT LIKE 'AUTO%'
+) 
+AND (ch.level % 2 = 0 OR ch.c_acctbal IS NULL)
+ORDER BY ch.level, nr.region_rank DESC;

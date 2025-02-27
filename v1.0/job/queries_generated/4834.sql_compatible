@@ -1,0 +1,58 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_role_order,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) DESC) as rn
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    GROUP BY 
+        at.title, at.production_year
+),
+movie_details AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.avg_role_order,
+        rm.total_cast,
+        CASE 
+            WHEN rm.total_cast > 10 THEN 'Large Cast'
+            WHEN rm.total_cast BETWEEN 5 AND 10 THEN 'Medium Cast'
+            ELSE 'Small Cast'
+        END AS cast_size
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.rn <= 10
+),
+final_selection AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.avg_role_order,
+        md.cast_size,
+        STRING_AGG(DISTINCT an.name, ', ') AS actors
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        cast_info ci ON md.title IN (SELECT at.title FROM aka_title at WHERE at.movie_id = ci.movie_id)
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        md.title, md.production_year, md.avg_role_order, md.cast_size
+)
+SELECT 
+    f.title, 
+    f.production_year, 
+    f.avg_role_order, 
+    f.cast_size, 
+    COALESCE(f.actors, 'No Actors Listed') AS actors 
+FROM 
+    final_selection f
+ORDER BY 
+    f.production_year DESC, 
+    f.avg_role_order DESC;

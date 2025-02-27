@@ -1,0 +1,31 @@
+WITH MovieDetails AS (
+    SELECT 
+        at.title AS movie_title,
+        at.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_order
+    FROM aka_title at
+    LEFT JOIN cast_info ci ON at.id = ci.movie_id
+    GROUP BY at.title, at.production_year
+),
+HighRatedMovies AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.cast_count,
+        md.avg_order,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.cast_count DESC) AS movie_rank
+    FROM MovieDetails md
+    WHERE md.production_year >= 2000
+)
+SELECT 
+    h.movie_title,
+    h.production_year,
+    h.cast_count,
+    h.avg_order,
+    COALESCE((SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = at.id), 0) AS keyword_count,
+    COALESCE((SELECT STRING_AGG(k.keyword, ', ') FROM movie_keyword mk JOIN keyword k ON mk.keyword_id = k.id WHERE mk.movie_id = at.id), 'No Keywords') AS keywords
+FROM HighRatedMovies h
+LEFT JOIN aka_title at ON h.movie_title = at.title AND h.production_year = at.production_year
+WHERE h.movie_rank <= 10
+ORDER BY h.production_year DESC, h.cast_count DESC;

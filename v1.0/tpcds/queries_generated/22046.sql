@@ -1,0 +1,83 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        w.web_open_date_sk <= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+        AND w.web_close_date_sk IS NULL
+),
+high_profit_web_sales AS (
+    SELECT 
+        r.web_site_sk, 
+        SUM(r.ws_sales_price * r.ws_quantity) AS total_sales,
+        SUM(r.ws_net_profit) AS total_net_profit
+    FROM 
+        ranked_sales r
+    WHERE 
+        r.rank <= 10
+    GROUP BY 
+        r.web_site_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cd.cd_marital_status, 'Unknown') AS marital_status,
+        COALESCE(cd.cd_gender, 'N/A') AS gender,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_profit) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_marital_status, cd.cd_gender
+),
+final_report AS (
+    SELECT 
+        c.c_first_name,
+        c.c_last_name,
+        ci.marital_status,
+        ci.gender,
+        sales.web_site_sk,
+        COALESCE(sales.total_sales, 0) AS total_sales,
+        COALESCE(sales.total_net_profit, 0) AS total_net_profit
+    FROM 
+        customer_info ci
+    LEFT JOIN 
+        high_profit_web_sales sales ON ci.order_count > 5 
+        AND sales.web_site_sk IS NOT NULL
+    ORDER BY 
+        ci.total_spent DESC, sales.total_net_profit DESC
+)
+SELECT 
+    f.c_first_name,
+    f.c_last_name,
+    f.marital_status,
+    f.gender,
+    COALESCE(f.total_sales, 0) AS total_sales_last_10,
+    CASE 
+        WHEN f.total_net_profit IS NULL THEN 'No profit recorded'
+        ELSE CAST(f.total_net_profit AS VARCHAR)
+    END AS net_profit_info
+FROM 
+    final_report f
+WHERE 
+    f.total_sales > (SELECT AVG(total_sales) FROM high_profit_web_sales)
+    AND f.gender NOT LIKE 'N/A'
+    AND (f.marital_status IS NOT NULL OR f.gender IS NOT NULL)
+ORDER BY 
+    total_sales_last_10 DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,29 @@
+
+SELECT 
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    SUM(o.o_totalprice) AS total_revenue,
+    AVG(l.l_quantity) AS average_line_quantity,
+    CONCAT(SUBSTRING_INDEX(r.r_name, ' ', 1), ' - ', SUBSTRING(r.r_comment, 1, 20)) AS region_desc,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ': ', s.s_address) ORDER BY s.s_name ASC) AS supplier_details
+FROM 
+    customer c 
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    o.o_orderdate >= '1997-01-01' 
+    AND o.o_orderdate < '1998-01-01'
+    AND r.r_name LIKE 'N%'
+GROUP BY 
+    c.c_custkey, r.r_regionkey, r.r_name, r.r_comment
+ORDER BY 
+    total_revenue DESC;

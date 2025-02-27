@@ -1,0 +1,64 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        c.c_birth_day,
+        c.c_birth_month,
+        c.c_birth_year
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        EXTRACT(YEAR FROM d.d_date) AS sales_year,
+        EXTRACT(MONTH FROM d.d_date) AS sales_month
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws.ws_order_number, sales_year, sales_month
+),
+CustomerSales AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.full_name,
+        sd.total_sales,
+        sd.order_count,
+        sd.sales_year,
+        sd.sales_month
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        SalesData sd ON ci.c_customer_id = sd.ws_order_number
+)
+SELECT 
+    full_name,
+    SUM(total_sales) AS lifetime_sales,
+    COUNT(DISTINCT sales_year) AS active_years,
+    AVG(order_count) AS avg_orders_per_year,
+    STRING_AGG(DISTINCT CONCAT(sales_year, '-', sales_month), ', ' ORDER BY sales_year, sales_month) AS sales_periods
+FROM 
+    CustomerSales
+GROUP BY 
+    full_name
+HAVING 
+    SUM(total_sales) > 1000
+ORDER BY 
+    lifetime_sales DESC
+LIMIT 10;

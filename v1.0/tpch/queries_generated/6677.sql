@@ -1,0 +1,41 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    RANK() OVER (ORDER BY total_revenue DESC) AS revenue_rank,
+    co.c_name,
+    co.c_acctbal,
+    r.r_name AS region,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(s.s_supplycost) AS average_supply_cost,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    RankedOrders ro
+JOIN 
+    customer co ON ro.o_orderkey = co.c_custkey
+JOIN 
+    partsupp ps ON ps.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_name LIKE 'Widget%')
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    ro.rank <= 10
+GROUP BY 
+    co.c_name, co.c_acctbal, r.r_name
+ORDER BY 
+    revenue_rank;

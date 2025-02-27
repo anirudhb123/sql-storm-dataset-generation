@@ -1,0 +1,46 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sale_rank
+    FROM customer AS c
+    JOIN web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_demographics AS cd
+    JOIN customer AS c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+),
+FilteredSales AS (
+    SELECT 
+        r.c_customer_id,
+        r.total_sales,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM RankedSales AS r
+    JOIN CustomerDemographics AS cd ON r.c_customer_id IN (
+        SELECT c.c_customer_id
+        FROM customer AS c 
+        WHERE c.c_current_hdemo_sk IS NOT NULL
+    )
+    WHERE r.sale_rank = 1
+)
+SELECT 
+    fs.cd_gender,
+    fs.cd_marital_status,
+    AVG(fs.total_sales) AS average_sales,
+    COUNT(*) AS total_customers
+FROM FilteredSales AS fs
+GROUP BY fs.cd_gender, fs.cd_marital_status
+HAVING AVG(fs.total_sales) > (SELECT AVG(total_sales) FROM RankedSales)
+ORDER BY average_sales DESC
+LIMIT 10;
+

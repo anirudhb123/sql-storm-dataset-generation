@@ -1,0 +1,70 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        Id AS TagId, 
+        TagName, 
+        Count, 
+        ExcerptPostId,
+        WikiPostId,
+        1 as Level
+    FROM 
+        Tags
+    WHERE 
+        Count > 100
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        t.ExcerptPostId,
+        t.WikiPostId,
+        Level + 1
+    FROM 
+        Tags t
+    JOIN 
+        RecursiveTagCounts r ON t.Id = r.Id
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(SUM(p.ViewCount), 0) AS TotalViewCount,
+    COALESCE(SUM(p.Score), 0) AS TotalScore,
+    COUNT(DISTINCT CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN p.Id END) AS AcceptedAnswersCount,
+    STUFF(
+        (SELECT 
+            ', ' + t.TagName 
+        FROM 
+            Posts ps
+        JOIN 
+            Tags t ON ps.Tags LIKE '%' + t.TagName + '%'
+        WHERE 
+            ps.OwnerUserId = u.Id
+        FOR XML PATH('')), 
+        1, 
+        2, 
+        ''
+    ) AS UsedTags,
+    COUNT(DISTINCT b.Id) AS TotalBadges,
+    COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Id END) AS ClosedPostsCount,
+    COUNT(DISTINCT pg.PostId) AS TotalPostLinks
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    PostLinks pg ON p.Id = pg.PostId
+LEFT JOIN 
+    RecursiveTagCounts rtc ON CHARINDEX(rtc.TagName, p.Tags) > 0
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+HAVING 
+    COUNT(p.Id) > 10
+ORDER BY 
+    TotalViewCount DESC, TotalScore DESC;

@@ -1,0 +1,66 @@
+
+WITH customer_summary AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status, 
+        hd.hd_income_band_sk,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, 
+        cd.cd_marital_status, cd.cd_education_status, hd.hd_income_band_sk
+),
+income_summary AS (
+    SELECT 
+        ib.ib_income_band_sk, 
+        COUNT(cs.cs_order_number) AS total_sales 
+    FROM 
+        income_band ib
+    JOIN 
+        catalog_sales cs ON ib.ib_income_band_sk = hd.hd_income_band_sk
+    GROUP BY 
+        ib.ib_income_band_sk
+),
+warehouse_sales_summary AS (
+    SELECT 
+        w.w_warehouse_name,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        warehouse w
+    JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_name
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name, 
+    cs.total_orders, 
+    cs.total_spent,
+    is.total_sales AS income_band_sales,
+    wss.total_sales AS warehouse_sales,
+    wss.order_count AS warehouse_order_count
+FROM 
+    customer_summary cs
+JOIN 
+    income_summary is ON cs.hd_income_band_sk = is.ib_income_band_sk
+JOIN 
+    warehouse_sales_summary wss ON cs.c_customer_sk IN (SELECT ws_bill_customer_sk FROM web_sales)
+WHERE 
+    cs.total_spent > 1000
+ORDER BY 
+    cs.total_spent DESC
+LIMIT 50;

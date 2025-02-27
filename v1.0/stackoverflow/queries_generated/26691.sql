@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11, 12) 
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+    ORDER BY 
+        p.CreationDate DESC
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagNames,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        MAX(ph.CreationDate) AS LastHistoryChange
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(rp.Tags, '<>')::int[])
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    WHERE 
+        rp.HistoryRank = 1 
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.Tags, rp.CreationDate, rp.Score, rp.ViewCount, rp.OwnerDisplayName
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.OwnerDisplayName,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.CommentCount,
+    pd.VoteCount,
+    pd.TagNames,
+    EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - pd.LastHistoryChange)) AS SecondsSinceLastEdit
+FROM 
+    PostDetails pd
+WHERE 
+    pd.ViewCount > 1000
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC
+LIMIT 20;

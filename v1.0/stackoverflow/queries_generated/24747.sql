@@ -1,0 +1,49 @@
+WITH ActiveUsers AS (
+    SELECT Id, Reputation, Views, UpVotes, DownVotes, 
+           LEAD(Reputation) OVER (ORDER BY Reputation DESC) AS NextReputation,
+           LAG(Reputation) OVER (ORDER BY Reputation DESC) AS PrevReputation
+    FROM Users
+    WHERE LastAccessDate > NOW() - INTERVAL '6 months'
+),
+PostStatistics AS (
+    SELECT p.Id AS PostId, p.Title, p.CreationDate, 
+           COUNT(a.Id) AS AnswerCount,
+           SUM(COALESCE(c.Score, 0)) AS TotalCommentScore,
+           AVG(COALESCE(c.Score, 0)) AS AvgCommentScore
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.PostTypeId = 1 -- Only Questions
+    GROUP BY p.Id
+),
+HighScorePosts AS (
+    SELECT ps.PostId, ps.Title, ps.CreationDate, ps.AnswerCount, ps.TotalCommentScore, 
+           COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM PostStatistics ps
+    LEFT JOIN Votes v ON ps.PostId = v.PostId AND v.VoteTypeId IN (8, 9) -- BountyStart, BountyClose
+    GROUP BY ps.PostId, ps.Title, ps.CreationDate, ps.AnswerCount, ps.TotalCommentScore
+    HAVING ps.AnswerCount > 5 AND (TotalBounty > 0 OR TotalCommentScore > 100)
+),
+UserBadges AS (
+    SELECT u.Id AS UserId, ARRAY_AGG(b.Name) AS BadgeNames
+    FROM Users u
+    JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+FinalResults AS (
+    SELECT au.Id AS UserId, au.Reputation, au.Views, au.UpVotes, au.DownVotes,
+           hb.PostId, hb.Title, hb.AnswerCount, hb.TotalCommentScore, hb.TotalBounty,
+           ub.BadgeNames
+    FROM ActiveUsers au
+    JOIN HighScorePosts hb ON au.Reputation >= hb.AnswerCount * 10
+    LEFT JOIN UserBadges ub ON au.Id = ub.UserId
+)
+SELECT fr.UserId, fr.Reputation, fr.Views, fr.UpVotes, fr.DownVotes, 
+       fr.Title, fr.AnswerCount, fr.TotalCommentScore, fr.TotalBounty,
+       CASE 
+           WHEN fr.BadgeNames IS NULL THEN 'No Badges'
+           ELSE ARRAY_TO_STRING(fr.BadgeNames, ', ')
+       END AS Badges
+FROM FinalResults fr
+ORDER BY fr.Reputation DESC, fr.Views DESC
+LIMIT 50;

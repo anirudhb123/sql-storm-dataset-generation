@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_paid DESC) as sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+),
+CustomerReturnSummary AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT wr.wr_order_number) AS total_web_returns,
+        SUM(wr.wr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+StoreSalesSummary AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_paid) AS total_store_sales,
+        AVG(ss_sales_price) AS avg_sales_price
+    FROM 
+        store_sales 
+    WHERE 
+        ss_sold_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY 
+        ss_store_sk
+)
+SELECT 
+    ca.ca_city,
+    SUM(COALESCE(rws.ws_net_paid, 0)) AS total_web_sales,
+    SUM(COALESCE(srs.total_store_sales, 0)) AS total_store_sales,
+    SUM(COALESCE(crs.total_web_returns, 0)) AS total_web_returns,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers
+FROM 
+    customer_address ca
+LEFT JOIN 
+    RankedSales rws ON ca.ca_address_sk = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_current_cdemo_sk IS NOT NULL)
+LEFT JOIN 
+    StoreSalesSummary srs ON 1 = 1
+LEFT JOIN 
+    CustomerReturnSummary crs ON crs.c_customer_sk IN (SELECT c.c_customer_sk FROM customer c WHERE c.c_current_hdemo_sk IS NOT NULL)
+WHERE 
+    ca.ca_state = 'CA'
+GROUP BY 
+    ca.ca_city
+HAVING 
+    SUM(rws.ws_net_paid) > 10000
+ORDER BY 
+    total_web_sales DESC
+LIMIT 10;

@@ -1,0 +1,60 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        1 AS depth,
+        t.production_year
+    FROM 
+        title t
+    JOIN 
+        aka_title a ON a.movie_id = t.id
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    WHERE 
+        t.production_year >= 2000
+        AND mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Distributor')
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.depth + 1,
+        mh.production_year
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        title tt ON tt.id = ml.linked_movie_id
+    WHERE 
+        tt.production_year >= 2000
+)
+
+SELECT 
+    a.name AS actor_name,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT mc.company_id) AS num_companies,
+    SUM(CASE WHEN p.info_type_id = (SELECT id FROM info_type WHERE info = 'Oscar Winner') THEN 1 ELSE 0 END) AS oscars_won,
+    ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank
+FROM 
+    MovieHierarchy mh
+JOIN 
+    cast_info ci ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_name a ON a.person_id = ci.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    person_info p ON p.person_id = ci.person_id
+WHERE 
+    a.name IS NOT NULL
+GROUP BY 
+    a.name, mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY 
+    mh.production_year DESC, num_companies DESC
+LIMIT 10;

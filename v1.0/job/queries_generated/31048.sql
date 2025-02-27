@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        h.level + 1
+    FROM 
+        aka_title AS m
+    JOIN 
+        movie_link AS ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy AS h ON ml.movie_id = h.movie_id
+)
+
+SELECT 
+    c.person_id,
+    a.name AS actor_name,
+    mv.title AS movie_title,
+    mv.production_year,
+    COALESCE(ki.keyword, 'No Keyword') AS movie_keyword,
+    count(mv.id) OVER (PARTITION BY c.person_id ORDER BY mv.production_year) AS movie_count,
+    row_number() OVER (PARTITION BY c.person_id ORDER BY mv.production_year) AS rank
+FROM 
+    cast_info AS c
+JOIN 
+    aka_name AS a ON c.person_id = a.person_id
+JOIN 
+    MovieHierarchy AS mv ON c.movie_id = mv.movie_id
+LEFT JOIN 
+    movie_keyword AS mk ON mv.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword AS ki ON mk.keyword_id = ki.id
+WHERE 
+    mv.production_year IN (SELECT production_year FROM aka_title GROUP BY production_year HAVING COUNT(*) > 5)
+    AND a.name IS NOT NULL
+    AND c.note IS NULL
+ORDER BY 
+    c.person_id, mv.production_year;
+
+This SQL query explores the relationship between actors (`aka_name`) and movies (`aka_title`) while incorporating movie keyword filtering and counts. It uses a recursive CTE to establish hierarchy in movie links, performing complex joins with outer join behavior and custom ordering with window functions. It enforces multiple cases of NULL logic and aggregates information for effective performance benchmarking.

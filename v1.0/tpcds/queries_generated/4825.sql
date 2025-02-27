@@ -1,0 +1,55 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    INNER JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 
+        AND dd.d_month_seq BETWEEN 1 AND 6 
+    GROUP BY ws.web_site_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        hd.hd_income_band_sk
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+),
+top_customers AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        r.r_reason_desc,
+        SUM(ws.ws_net_paid) AS total_spent,
+        RANK() OVER (ORDER BY SUM(ws.ws_net_paid) DESC) AS spending_rank
+    FROM customer_info ci
+    INNER JOIN web_sales ws ON ci.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN web_returns wr ON ws.ws_order_number = wr.wr_order_number
+    LEFT JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk 
+    GROUP BY ci.c_customer_sk, ci.c_first_name, ci.c_last_name, r.r_reason_desc
+)
+SELECT 
+    ts.total_quantity,
+    ts.total_sales,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_spent,
+    tc.spending_rank
+FROM sales_summary ts
+INNER JOIN top_customers tc ON ts.web_site_sk = tc.c_customer_sk
+WHERE 
+    ts.sales_rank <= 5 
+    AND tc.spending_rank <= 10
+ORDER BY ts.total_sales DESC, tc.total_spent DESC;

@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 5
+)
+SELECT 
+    TOPP.Title, 
+    TOPP.Score, 
+    TOPP.ViewCount, 
+    TOPP.CommentCount, 
+    TOPP.OwnerDisplayName,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    TopPosts TOPP
+LEFT JOIN 
+    STRING_TO_ARRAY((
+        SELECT 
+            Tags 
+        FROM 
+            Posts 
+        WHERE 
+            Id = TOPP.Id
+    ), ',') AS t ON TRUE
+GROUP BY 
+    TOPP.Id, TOPP.Title, TOPP.Score, TOPP.ViewCount, TOPP.CommentCount, TOPP.OwnerDisplayName
+ORDER BY 
+    TOPP.Score DESC;

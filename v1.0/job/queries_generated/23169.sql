@@ -1,0 +1,85 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC, a.id ASC) AS year_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+DirectorDetails AS (
+    SELECT 
+        m.movie_id,
+        d.name AS director_name,
+        STRING_AGG(DISTINCT f.name, ', ') AS filmmakers
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name d ON m.company_id = d.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+    JOIN 
+        name f ON f.id = m.movie_id
+    WHERE 
+        ct.kind LIKE '%Director%'
+    GROUP BY 
+        m.movie_id, d.name
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        MAX(CASE WHEN role.role IS NOT NULL THEN role.role ELSE 'Unknown' END) AS role,
+        COUNT(DISTINCT ci.person_id) AS num_actors
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        role_type role ON ci.role_id = role.id
+    GROUP BY 
+        ci.movie_id, a.name
+),
+FinalReport AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        d.director_name,
+        a.actor_name,
+        a.role,
+        ROW_NUMBER() OVER (PARTITION BY r.timeout ORDER BY r.year_rank DESC, r.title ASC) AS report_rank
+    FROM 
+        RankedMovies r
+    LEFT JOIN 
+        DirectorDetails d ON r.movie_id = d.movie_id
+    LEFT JOIN 
+        ActorRoles a ON r.movie_id = a.movie_id
+)
+SELECT 
+    movie.movie_id,
+    movie.title,
+    movie.production_year,
+    COALESCE(dir.director_name, 'No Director') AS director,
+    COALESCE(actor.actor_name, 'No Actor Information') AS actor,
+    actor.role AS actor_role,
+    CASE 
+        WHEN movie.production_year < 2000 THEN 'Classic'
+        WHEN movie.production_year >= 2000 AND movie.production_year <= 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era,
+    CASE 
+        WHEN actor.num_actors > 5 THEN 'Large Cast'
+        ELSE 'Small Cast'
+    END AS cast_size,
+    COUNT(*) OVER (PARTITION BY movie.production_year) AS total_movies_in_year
+FROM 
+    FinalReport movie
+LEFT JOIN 
+    ActorRoles actor ON movie.movie_id = actor.movie_id
+ORDER BY 
+    movie.production_year DESC,
+    movie.title ASC
+LIMIT 100 OFFSET 0;

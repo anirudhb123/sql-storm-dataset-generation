@@ -1,0 +1,46 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws_item_sk, 
+           ws_order_number, 
+           ws_sales_price AS sales_price, 
+           ws_quantity AS quantity, 
+           ws_ext_sales_price AS extended_sales_price, 
+           ws_net_profit AS net_profit,
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk > 0
+
+    UNION ALL
+
+    SELECT c.cs_item_sk, 
+           c.cs_order_number, 
+           c.cs_sales_price, 
+           c.cs_quantity,
+           c.cs_ext_sales_price,
+           c.cs_net_profit,
+           ROW_NUMBER() OVER (PARTITION BY c.cs_item_sk ORDER BY c.cs_order_number) AS rn
+    FROM catalog_sales c
+    JOIN SalesCTE s ON c.cs_item_sk = s.ws_item_sk
+    WHERE c.cs_order_number < s.ws_order_number
+),
+MonthlySales AS (
+    SELECT SUM(sales_price) AS total_sales, 
+           DATE_TRUNC('month', d.d_date) AS month
+    FROM SalesCTE s
+    JOIN date_dim d ON d.d_date_sk = s.ws_order_number
+    GROUP BY month
+),
+NullHandling AS (
+    SELECT COALESCE(m.total_sales, 0) AS total_sales, 
+           m.month
+    FROM MonthlySales m
+    RIGHT JOIN date_dim d ON d.d_date >= cast('2002-10-01' as date) - INTERVAL '12 months'
+)
+SELECT n.total_sales, 
+       n.month,
+       CASE 
+           WHEN n.total_sales > 100000 THEN 'High'
+           WHEN n.total_sales BETWEEN 50000 AND 100000 THEN 'Medium'
+           ELSE 'Low' 
+       END AS sales_category
+FROM NullHandling n
+ORDER BY n.month DESC;

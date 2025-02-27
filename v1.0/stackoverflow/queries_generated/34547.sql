@@ -1,0 +1,107 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        0 AS Level,
+        1 AS Path
+    FROM 
+        Users u
+    WHERE 
+        u.Id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        ur.Level + 1,
+        ur.Path + 1
+    FROM 
+        UserReputationCTE ur
+    JOIN 
+        Users u ON ur.Reputation < u.Reputation 
+    WHERE 
+        ur.Level < 5
+),
+PostCounts AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+VoteCounts AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        b.UserId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COALESCE(pc.TotalPosts, 0) AS TotalPosts,
+        COALESCE(pc.Questions, 0) AS Questions,
+        COALESCE(pc.Answers, 0) AS Answers,
+        COALESCE(vc.TotalVotes, 0) AS TotalVotes,
+        COALESCE(vc.UpVotes, 0) AS UpVotes,
+        COALESCE(vc.DownVotes, 0) AS DownVotes,
+        COALESCE(rb.BadgeNames, 'None') AS RecentBadges,
+        ur.Reputation AS ReputationLevel
+    FROM 
+        Users u
+    LEFT JOIN 
+        PostCounts pc ON u.Id = pc.OwnerUserId
+    LEFT JOIN 
+        VoteCounts vc ON u.Id = vc.UserId
+    LEFT JOIN 
+        RecentBadges rb ON u.Id = rb.UserId
+    LEFT JOIN 
+        UserReputationCTE ur ON u.Id = ur.Id
+)
+SELECT 
+    us.DisplayName,
+    us.TotalPosts,
+    us.Questions,
+    us.Answers,
+    us.TotalVotes,
+    us.UpVotes,
+    us.DownVotes,
+    us.RecentBadges,
+    us.ReputationLevel,
+    CASE 
+        WHEN us.TotalPosts > 100 THEN 'Veteran' 
+        WHEN us.TotalPosts BETWEEN 50 AND 100 THEN 'Intermediate'
+        ELSE 'Newbie'
+    END AS UserCategory
+FROM 
+    UserStatistics us
+WHERE 
+    us.ReputationLevel IS NOT NULL
+ORDER BY 
+    us.ReputationLevel DESC, 
+    us.TotalPosts DESC;

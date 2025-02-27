@@ -1,0 +1,68 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS price_rank,
+        c.c_name,
+        n.n_name,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_extended_price
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, n.n_name
+    HAVING COUNT(DISTINCT l.l_orderkey) > 1
+),
+top_orders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_orderdate,
+        r.price_rank,
+        r.c_name,
+        r.n_name,
+        r.total_extended_price
+    FROM ranked_orders r
+    WHERE r.price_rank <= 5
+),
+supplier_data AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        MAX(s.s_acctbal) AS max_acctbal,
+        MIN(s.s_acctbal) AS min_acctbal,
+        AVG(NULLIF(s.s_acctbal, 0)) AS avg_acctbal, 
+        n.n_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, n.n_name
+),
+final_results AS (
+    SELECT 
+        t.o_orderkey,
+        t.o_orderdate,
+        t.c_name,
+        COALESCE(s.total_supply_cost, 0) AS total_supply_cost,
+        s.n_name AS supplier_nation,
+        CASE 
+            WHEN s.max_acctbal > 10000 THEN 'High Balance'
+            WHEN s.min_acctbal < 1 THEN 'Low Balance'
+            ELSE 'Average'
+        END AS acctbal_category,
+        ROW_NUMBER() OVER (PARTITION BY t.c_name ORDER BY t.total_extended_price DESC) AS rn
+    FROM top_orders t
+    LEFT JOIN supplier_data s ON t.n_name = s.n_name
+)
+SELECT 
+    CASE 
+        WHEN AVG(t.total_supply_cost) IS NULL THEN 'No Supply Cost Data'
+        ELSE CONCAT('Average Supply Cost: ', ROUND(AVG(t.total_supply_cost), 2)) 
+    END AS average_supply_cost,
+    COUNT(CASE WHEN rn = 1 THEN 1 END) AS top_customer_orders
+FROM final_results t
+WHERE t.acctbal_category = 'High Balance'
+GROUP BY t.c_name
+HAVING COUNT(*) > 5 
+ORDER BY average_supply_cost DESC;

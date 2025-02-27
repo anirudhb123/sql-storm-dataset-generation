@@ -1,0 +1,70 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY[t.title] AS title_path,
+        1 AS depth
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code IS NOT NULL
+  
+    UNION ALL
+  
+    SELECT 
+        mh.movie_id,
+        t.title,
+        t.production_year,
+        mh.title_path || t.title,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+)
+SELECT 
+    m.id AS movie_id,
+    m.title,
+    m.production_year,
+    COALESCE(rt.role, 'Unknown Role') AS role,
+    COUNT(DISTINCT ai.id) AS actor_count,
+    STRING_AGG(DISTINCT ak.name, ', ' ORDER BY ak.name) AS actors,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    MAX(t.production_year) OVER (PARTITION BY m.id) AS latest_year
+FROM 
+    aka_title m
+LEFT JOIN 
+    cast_info ci ON m.id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    role_type rt ON ci.role_id = rt.id
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    m.production_year >= 2000
+    AND (ak.name IS NOT NULL OR ak.id IS NULL)
+GROUP BY 
+    m.id, m.title, m.production_year, rt.role
+ORDER BY 
+    actor_count DESC,
+    latest_year DESC;
+
+This query comprehensively demonstrates a mix of elements as per your specifications:
+1. A recursive CTE (Common Table Expression) is used to explore a movie hierarchy and generate a path.
+2. Multiple outer joins connect movies to cast, keywords, and roles.
+3. The query performs aggregations using `COUNT(DISTINCT...)` and `STRING_AGG()` to gather actor names and counts.
+4. The `COALESCE()` function handles potential NULL values for roles.
+5. It applies a filter with `WHERE` using conditions on the `production_year` and checking for NULL on `aka_name`.
+6. It utilizes a window function `MAX(...) OVER (...)` to find the latest year within a partitioned set. 
+
+The output is sorted by the actor count and production year in descending order.

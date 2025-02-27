@@ -1,0 +1,74 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        1 AS level,
+        NULL AS parent_movie_title
+    FROM
+        aka_title m
+    WHERE
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        mh.level + 1,
+        mh.title AS parent_movie_title
+    FROM
+        aka_title m
+    JOIN
+        movie_hierarchy mh ON m.episode_of_id = mh.movie_id
+),
+cast_with_roles AS (
+    SELECT
+        ci.movie_id,
+        a.name AS actor_name,
+        ci.note AS role_note,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_order
+    FROM
+        cast_info ci
+    JOIN
+        aka_name a ON ci.person_id = a.person_id
+),
+movie_info_ext AS (
+    SELECT
+        mi.movie_id,
+        STRING_AGG(mi.info, ', ') AS info_details
+    FROM
+        movie_info mi
+    WHERE
+        mi.info IS NOT NULL
+    GROUP BY
+        mi.movie_id
+)
+SELECT
+    mh.movie_id,
+    mh.title AS movie_title,
+    mh.parent_movie_title,
+    COALESCE(cwr.actor_name, 'No Actors') AS main_actor,
+    COALESCE(cwr.role_note, 'N/A') AS role_note,
+    COALESCE(mie.info_details, 'No additional info') AS additional_info,
+    mh.level AS hierarchy_level,
+    COUNT(cwr.actor_name) OVER (PARTITION BY mh.movie_id) AS total_actors
+FROM
+    movie_hierarchy mh
+LEFT JOIN
+    cast_with_roles cwr ON mh.movie_id = cwr.movie_id
+LEFT JOIN
+    movie_info_ext mie ON mh.movie_id = mie.movie_id
+WHERE
+    mh.level <= 2
+GROUP BY
+    mh.movie_id,
+    mh.title,
+    mh.parent_movie_title,
+    mh.level,
+    cwr.actor_name,
+    cwr.role_note,
+    mie.info_details
+ORDER BY
+    mh.movie_id,
+    cwr.actor_order NULLS LAST;

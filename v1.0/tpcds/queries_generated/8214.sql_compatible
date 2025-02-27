@@ -1,0 +1,73 @@
+
+WITH sales_summary AS (
+    SELECT
+        ss_store_sk,
+        SUM(ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss_customer_sk) AS unique_customers,
+        AVG(ss_quantity) AS avg_quantity_per_order,
+        CAST(d_date AS DATE) AS sales_date
+    FROM
+        store_sales
+    JOIN
+        date_dim ON ss_sold_date_sk = d_date_sk
+    WHERE
+        d_year = 2022
+    GROUP BY
+        ss_store_sk, d_date
+),
+top_stores AS (
+    SELECT
+        ss_store_sk,
+        total_sales,
+        unique_customers,
+        avg_quantity_per_order,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM
+        sales_summary
+),
+customer_demographics AS (
+    SELECT
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk,
+        hd_income_band_sk,
+        hd_buy_potential
+    FROM
+        customer_demographics
+    JOIN
+        household_demographics ON cd_demo_sk = hd_demo_sk
+),
+store_info AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_city,
+        s_state,
+        s_country
+    FROM
+        store
+)
+SELECT
+    si.s_store_name,
+    si.s_city,
+    si.s_state,
+    si.s_country,
+    ts.total_sales,
+    ts.unique_customers,
+    ts.avg_quantity_per_order,
+    COUNT(cd.cd_demo_sk) AS total_customers,
+    MAX(cd.hd_buy_potential) AS highest_buy_potential,
+    (SELECT COUNT(*) FROM web_sales ws WHERE ws.ws_ship_date_sk BETWEEN 20220101 AND 20221231 AND ws.ws_web_site_sk = si.s_store_sk) AS total_web_sales
+FROM
+    top_stores ts
+JOIN
+    store_info si ON ts.ss_store_sk = si.s_store_sk
+LEFT JOIN
+    customer_demographics cd ON ts.unique_customers = cd.cd_demo_sk
+WHERE
+    ts.sales_rank <= 10
+GROUP BY
+    si.s_store_name, si.s_city, si.s_state, si.s_country, ts.total_sales, ts.unique_customers, ts.avg_quantity_per_order
+ORDER BY
+    ts.total_sales DESC;

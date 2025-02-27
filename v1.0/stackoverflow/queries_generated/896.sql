@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(NULLIF(p.ViewCount, 0), 1) AS NonZeroViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.Score > 0
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstActionDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseActions,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenActions
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+    WHERE u.Reputation IS NOT NULL
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.NonZeroViewCount,
+    pha.FirstActionDate,
+    pha.CloseActions,
+    pha.ReopenActions,
+    ur.UserId,
+    ur.Reputation,
+    ur.ReputationRank,
+    CASE 
+        WHEN pha.CloseActions > 0 THEN 'Closed'
+        WHEN pha.ReopenActions > 0 THEN 'Reopened'
+        ELSE 'Active'
+    END AS PostStatus
+FROM RankedPosts rp
+LEFT JOIN PostHistoryAggregates pha ON rp.PostId = pha.PostId
+LEFT JOIN Users u ON rp.OwnerUserId = u.Id
+JOIN UserReputation ur ON u.Id = ur.UserId
+WHERE rp.rn = 1
+AND (rp.CommentCount > 0 OR ur.Reputation > 100)
+ORDER BY rp.CreationDate DESC, rp.Score DESC
+LIMIT 100;

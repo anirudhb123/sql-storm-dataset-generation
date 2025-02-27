@@ -1,0 +1,91 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+
+UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostViewStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) AS ViewRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount
+)
+
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Level,
+    u.DisplayName,
+    u.UpVotes,
+    u.DownVotes,
+    p.ViewCount,
+    p.ViewRank,
+    COALESCE(SUM(CASE WHEN c.Score IS NOT NULL THEN 1 ELSE 0 END), 0) AS NonNullComments,
+    CASE 
+        WHEN p.ViewCount > 1000 THEN 'Popular'
+        WHEN p.ViewCount BETWEEN 500 AND 1000 THEN 'Moderate'
+        ELSE 'Less Active'
+    END AS ActivityStatus
+FROM 
+    RecursivePostHierarchy r
+JOIN 
+    UserVoteStats u ON u.UserId = (
+        SELECT 
+            OwnerUserId 
+        FROM 
+            Posts 
+        WHERE 
+            Id = r.PostId
+    )
+JOIN 
+    PostViewStats p ON r.PostId = p.PostId
+LEFT JOIN 
+    Comments c ON c.PostId = r.PostId
+WHERE 
+    u.TotalVotes > 5
+GROUP BY 
+    r.PostId, r.Title, r.Level, u.DisplayName, u.UpVotes, u.DownVotes, p.ViewCount, p.ViewRank
+ORDER BY 
+    r.Level, p.ViewCount DESC;

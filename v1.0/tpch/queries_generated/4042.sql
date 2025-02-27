@@ -1,0 +1,50 @@
+WITH SaleSummary AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name AS nation,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2022-01-01' AND l.l_shipdate < '2023-01-01'
+    GROUP BY 
+        c.c_custkey, n.n_name
+),
+ProductAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s1.s_acctbal) FROM supplier s1 WHERE s1.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA'))
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_mfgr,
+    ss.nation,
+    ss.total_sales,
+    COALESCE(pa.total_avail, 0) AS available_quantity,
+    ROW_NUMBER() OVER (PARTITION BY ss.nation ORDER BY ss.total_sales DESC) AS sales_rank
+FROM 
+    part p
+LEFT JOIN 
+    ProductAvailability pa ON p.p_partkey = pa.ps_partkey
+JOIN 
+    SaleSummary ss ON p.p_partkey = ANY (SELECT l.l_partkey FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey WHERE o.o_custkey = ss.c_custkey)
+WHERE 
+    p.p_retailprice > 100.00 OR pa.total_avail IS NOT NULL
+ORDER BY 
+    ss.nation, sales_rank;

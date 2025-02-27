@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 5000 AND sh.level < 5
+),
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderStats AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, 
+           AVG(o.o_totalprice) AS avg_order_value, 
+           MAX(o.o_totalprice) AS max_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey
+)
+SELECT 
+    sh.s_name,
+    COUNT(DISTINCT p.p_partkey) AS part_count,
+    psi.total_supply_cost,
+    os.order_count,
+    os.avg_order_value,
+    os.max_order_value,
+    RANK() OVER (PARTITION BY sh.level ORDER BY os.avg_order_value DESC) AS avg_order_rank
+FROM SupplierHierarchy sh
+LEFT JOIN PartSupplierInfo psi ON psi.p_partkey IN (SELECT DISTINCT ps.p_partkey FROM part p JOIN partsupp ps ON p.p_partkey = ps.ps_partkey WHERE sh.s_nationkey = p.p_nationkey)
+LEFT JOIN OrderStats os ON sh.s_suppkey = os.c_custkey
+WHERE psi.total_supply_cost IS NOT NULL
+GROUP BY sh.s_name, psi.total_supply_cost, os.order_count, os.avg_order_value, os.max_order_value, sh.level
+ORDER BY sh.level, part_count DESC, os.avg_order_value DESC;

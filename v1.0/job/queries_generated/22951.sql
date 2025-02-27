@@ -1,0 +1,102 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(ci.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(ci.id) DESC) AS rank
+    FROM 
+        aka_title mt
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+HighCastMovies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.cast_count,
+        mk.keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON rm.movie_title = mk.movie_id
+    WHERE 
+        rm.rank <= 5
+),
+CompanyContribution AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+DetailedMovieInfo AS (
+    SELECT 
+        hcm.movie_title,
+        hcm.production_year,
+        hcm.cast_count,
+        hcm.keywords,
+        cc.companies
+    FROM 
+        HighCastMovies hcm
+    LEFT JOIN 
+        CompanyContribution cc ON hcm.movie_title = cc.movie_id
+)
+SELECT 
+    dmi.movie_title,
+    dmi.production_year,
+    COALESCE(dmi.cast_count, 0) AS cast_count,
+    COALESCE(dmi.keywords, 'No Keywords') AS keywords,
+    COALESCE(dmi.companies, 'No Companies') AS companies
+FROM 
+    DetailedMovieInfo dmi
+WHERE 
+    dmi.production_year >= 2000 
+    AND dmi.cast_count > 0
+ORDER BY 
+    dmi.production_year DESC, 
+    dmi.cast_count DESC;
+
+### Explanation:
+1. **CTEs (Common Table Expressions)**:
+   - `RankedMovies`: Calculates the number of cast members for each movie and ranks them within their respective production year.
+   - `MovieKeywords`: Aggregates keywords associated with each movie.
+   - `HighCastMovies`: Joins the previous two CTEs and filters for movies with the highest cast counts.
+   - `CompanyContribution`: Lists the companies associated with each movie.
+   - `DetailedMovieInfo`: Combines details from the `HighCastMovies` and `CompanyContribution`.
+
+2. **Aggregations and String Functions**:
+   - `COUNT`, `STRING_AGG`: Used for aggregating cast counts and keywords, respectively.
+
+3. **LEFT JOINs**:
+   - Ensures all information is retained even if some movies lack keywords or associated companies.
+
+4. **COALESCE**: 
+   - This is used to handle NULL values in the output for keywords and companies, replacing them with default messages.
+
+5. **Bizarre Semantics**:
+   - The use of `STRING_AGG` can get tricky when dealing with NULLs or empty results, but it's managed with COALESCE. 
+
+6. **Filtering by Conditions**:
+   - Results are filtered based on production year (only movies from 2000 or later) and a minimum cast count.
+
+7. **Ordering**:
+   - Final output is ordered by production year descending and then by cast count descending to highlight the most significant movies.

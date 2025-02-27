@@ -1,0 +1,62 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id, 
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY 
+        c.c_customer_id
+), 
+TopCustomers AS (
+    SELECT 
+        c.customer_id, 
+        cs.total_sales,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_id = c.c_customer_id
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        COUNT(*) AS customer_count
+    FROM 
+        TopCustomers tc
+    JOIN 
+        customer_demographics cd ON tc.customer_id = cd.cd_demo_sk
+    WHERE 
+        tc.sales_rank <= 100
+    GROUP BY 
+        cd.cd_gender, 
+        cd.cd_marital_status
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.customer_count,
+    LS.total_sales AS last_sales
+FROM 
+    CustomerDemographics cd
+LEFT JOIN (
+    SELECT 
+        c.c_customer_id, 
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        ws.ws_ship_date_sk = (SELECT MAX(ws2.ws_ship_date_sk) FROM web_sales ws2)
+    GROUP BY 
+        c.c_customer_id
+) LS ON cd.customer_id = LS.c_customer_id
+ORDER BY 
+    cd.customer_count DESC, 
+    last_sales DESC;

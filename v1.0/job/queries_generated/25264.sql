@@ -1,0 +1,69 @@
+WITH ActorMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        rt.role AS role,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS role_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        t.production_year >= 2000
+),
+HighProfileActors AS (
+    SELECT 
+        actor_id, 
+        actor_name, 
+        COUNT(DISTINCT movie_title) AS movies_count
+    FROM 
+        ActorMovies
+    GROUP BY 
+        actor_id, actor_name 
+    HAVING 
+        COUNT(DISTINCT movie_title) >= 5
+),
+UniqueMovies AS (
+    SELECT 
+        movie_id, 
+        title AS movie_title,
+        COUNT(DISTINCT actor_id) AS actor_count
+    FROM 
+        cast_info ci 
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    JOIN 
+        ActorMovies am ON ci.person_id = am.actor_id
+    WHERE 
+        am.role_rank <= 3
+    GROUP BY 
+        movie_id, movie_title
+    HAVING 
+        COUNT(DISTINCT actor_id) > 3
+),
+CombinedData AS (
+    SELECT 
+        h.actor_name,
+        u.movie_title,
+        u.actor_count,
+        ROW_NUMBER() OVER (ORDER BY u.actor_count DESC) AS ranking
+    FROM 
+        HighProfileActors h
+    JOIN 
+        UniqueMovies u ON u.actor_count > 3
+)
+SELECT 
+    actor_name,
+    movie_title,
+    actor_count,
+    ranking
+FROM 
+    CombinedData
+ORDER BY 
+    ranking;

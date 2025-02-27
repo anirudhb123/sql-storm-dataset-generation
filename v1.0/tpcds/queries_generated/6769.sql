@@ -1,0 +1,46 @@
+
+WITH LatestSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_sales_quantity,
+        SUM(ws.ws_net_paid) AS total_sales_revenue,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        DATE(d.d_date) AS sales_date
+    FROM 
+        web_sales ws
+        JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk, sales_date
+),
+SalesCategories AS (
+    SELECT 
+        la.web_site_sk,
+        la.sales_date,
+        CASE 
+            WHEN la.total_sales_revenue > 100000 THEN 'High Revenue'
+            WHEN la.total_sales_revenue BETWEEN 50000 AND 100000 THEN 'Medium Revenue'
+            ELSE 'Low Revenue'
+        END AS revenue_category
+    FROM 
+        LatestSales la
+)
+SELECT 
+    sc.web_site_sk,
+    sc.sales_date,
+    sc.revenue_category,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+FROM 
+    SalesCategories sc
+    LEFT JOIN customer c ON c.c_current_addr_sk IN (
+        SELECT ca.ca_address_sk 
+        FROM customer_address ca 
+        WHERE ca.ca_country = 'USA'
+    )
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+GROUP BY 
+    sc.web_site_sk, sc.sales_date, sc.revenue_category
+ORDER BY 
+    sc.sales_date DESC, total_customers DESC;

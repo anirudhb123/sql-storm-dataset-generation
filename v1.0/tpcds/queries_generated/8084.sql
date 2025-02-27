@@ -1,0 +1,59 @@
+
+WITH customer_summary AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        cd.cd_marital_status = 'M'
+        AND cd.cd_gender = 'F'
+        AND ws.ws_sold_date_sk BETWEEN 2451847 AND 2452020 -- assuming valid date range
+    GROUP BY
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk
+),
+income_distribution AS (
+    SELECT
+        ib.ib_income_band_sk,
+        COUNT(*) AS customer_count,
+        SUM(cs.cs_net_profit) AS total_profit
+    FROM
+        household_demographics hd
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    JOIN customer_summary cs ON cs.cd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY
+        ib.ib_income_band_sk
+),
+ranked_income AS (
+    SELECT
+        *,
+        RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
+    FROM
+        income_distribution
+)
+SELECT
+    ri.ib_income_band_sk,
+    ri.customer_count,
+    ri.total_profit,
+    CASE
+        WHEN ri.profit_rank <= 5 THEN 'Top Income Bands'
+        WHEN ri.profit_rank <= 10 THEN 'Top 5-10 Income Bands'
+        ELSE 'Others'
+    END AS income_band_category
+FROM
+    ranked_income ri
+ORDER BY
+    ri.total_profit DESC;

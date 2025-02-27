@@ -1,0 +1,69 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER(PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn,
+        c.c_name,
+        n.n_name AS customer_nation
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 50000
+),
+RecentOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_totalprice,
+        ro.o_orderdate,
+        ro.c_name,
+        ro.customer_nation
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.rn = 1
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_totalprice,
+    ro.o_orderdate,
+    ro.c_name,
+    s.s_name AS supplier_name,
+    s.total_supply_cost,
+    CASE 
+        WHEN ro.o_totalprice > s.total_supply_cost THEN 'High Margin'
+        ELSE 'Low Margin'
+    END AS margin_status
+FROM 
+    RecentOrders ro
+LEFT JOIN 
+    HighValueSuppliers s ON s.s_suppkey = (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+        WHERE l.l_orderkey = ro.o_orderkey
+        ORDER BY ps.ps_supplycost * ps.ps_availqty DESC
+        LIMIT 1
+    )
+WHERE 
+    ro.o_orderdate >= DATEADD(DAY, -30, CURRENT_DATE)
+ORDER BY 
+    ro.o_orderdate DESC, ro.o_totalprice DESC;

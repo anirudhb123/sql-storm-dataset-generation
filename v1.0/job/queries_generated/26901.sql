@@ -1,0 +1,60 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        COALESCE(ci.kind, 'Unknown') AS company_type,
+        pi.info AS actor_info
+    FROM 
+        title t
+    JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        person_info pi ON a.person_id = pi.person_id
+    WHERE 
+        t.production_year > 2000
+    GROUP BY 
+        t.id, a.name, ci.kind, pi.info
+),
+CompanyInsights AS (
+    SELECT 
+        c.name AS company_name,
+        mc.note AS connection_note,
+        COUNT(DISTINCT m.id) AS movie_count
+    FROM 
+        company_name c
+    JOIN 
+        movie_companies mc ON c.id = mc.company_id
+    JOIN 
+        title m ON mc.movie_id = m.id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        c.name, mc.note
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.actor_name,
+    md.keywords,
+    ci.company_name,
+    ci.connection_note,
+    ci.movie_count,
+    md.actor_info
+FROM 
+    MovieDetails md
+JOIN 
+    CompanyInsights ci ON md.movie_title = ci.company_name
+ORDER BY 
+    md.production_year DESC, md.movie_title;

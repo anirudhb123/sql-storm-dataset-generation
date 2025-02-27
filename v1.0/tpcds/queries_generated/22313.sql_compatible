@@ -1,0 +1,91 @@
+
+WITH SalesDetails AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rank_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk BETWEEN 1 AND 100 AND 
+        ws_net_profit IS NOT NULL
+), 
+HighestSellingItems AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.ws_order_number,
+        sd.ws_quantity,
+        sd.ws_net_profit
+    FROM 
+        SalesDetails sd
+    WHERE 
+        sd.rank_profit <= 3
+), 
+ItemReturns AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returned,
+        COUNT(DISTINCT cr_order_number) AS total_return_records
+    FROM 
+        catalog_returns
+    WHERE 
+        cr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        cr_item_sk
+), 
+CustomerReturns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_web_returns,
+        COUNT(DISTINCT wr_order_number) AS total_web_return_records
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_item_sk
+),
+MergedReturns AS (
+    SELECT 
+        COALESCE(ir.cr_item_sk, wr.wr_item_sk) AS item_sk,
+        COALESCE(ir.total_returned, 0) AS total_returned,
+        COALESCE(ir.total_return_records, 0) AS total_return_records,
+        COALESCE(wr.total_web_returns, 0) AS total_web_returns,
+        COALESCE(wr.total_web_return_records, 0) AS total_web_return_records
+    FROM 
+        ItemReturns ir
+    FULL OUTER JOIN 
+        CustomerReturns wr ON ir.cr_item_sk = wr.wr_item_sk
+),
+FinalResults AS (
+    SELECT 
+        hs.ws_item_sk,
+        SUM(hs.ws_quantity) AS total_sold,
+        AVG(hs.ws_net_profit) AS avg_profit,
+        COALESCE(mr.total_returned, 0) AS total_returned,
+        COALESCE(mr.total_web_returns, 0) AS total_web_returns,
+        CASE 
+            WHEN SUM(hs.ws_quantity) = 0 THEN NULL
+            ELSE (COALESCE(mr.total_returned, 0) + COALESCE(mr.total_web_returns, 0)) * 1.0 / NULLIF(SUM(hs.ws_quantity), 0) 
+        END AS return_rate
+    FROM 
+        HighestSellingItems hs
+    LEFT JOIN 
+        MergedReturns mr ON hs.ws_item_sk = mr.item_sk
+    GROUP BY 
+        hs.ws_item_sk
+)
+SELECT 
+    fr.ws_item_sk,
+    fr.total_sold,
+    fr.avg_profit,
+    fr.total_returned,
+    fr.total_web_returns,
+    fr.return_rate
+FROM 
+    FinalResults fr
+WHERE 
+    fr.return_rate IS NOT NULL 
+    AND fr.avg_profit > 0 
+ORDER BY 
+    fr.avg_profit DESC;

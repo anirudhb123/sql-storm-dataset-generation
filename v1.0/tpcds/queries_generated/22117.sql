@@ -1,0 +1,62 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_sales_value,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk, ws_item_sk
+),
+TopCustomers AS (
+    SELECT 
+        cs_bill_customer_sk
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_quantity > (SELECT AVG(cs_quantity) FROM catalog_sales GROUP BY cs_bill_customer_sk)
+),
+LeftJoinSales AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(SUM(ws.total_sales_value), 0) AS total_sales_value,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        RecursiveSales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL 
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    lcs.c_customer_id,
+    lcs.total_sales_value,
+    lcs.order_count,
+    d.d_year,
+    dr.d_current_month,
+    STRING_AGG(DISTINCT p.p_promo_name) AS promotions_used,
+    CASE
+        WHEN lcs.total_sales_value IS NULL THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END AS sales_status,
+    (SELECT MAX(total_sales_value) FROM LeftJoinSales) AS max_sales_value
+FROM 
+    LeftJoinSales lcs
+JOIN 
+    date_dim d ON d.d_date_sk = (SELECT MIN(ws_sold_date_sk) FROM web_sales WHERE ws_bill_customer_sk = lcs.ws_bill_customer_sk)
+LEFT JOIN 
+    promotion p ON p.p_item_sk IN (SELECT ws_item_sk FROM RecursiveSales WHERE ws_bill_customer_sk = lcs.ws_bill_customer_sk AND rn <= 3)
+CROSS JOIN 
+    (SELECT CASE WHEN d_current_month = 'Y' THEN 'Yes' ELSE 'No' END AS d_current_month FROM date_dim WHERE d_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_current_year = 1)) dr
+WHERE 
+    lcs.order_count > 5
+GROUP BY 
+    lcs.c_customer_id, lcs.total_sales_value, lcs.order_count, d.d_year, dr.d_current_month
+ORDER BY 
+    total_sales_value DESC
+LIMIT 10;

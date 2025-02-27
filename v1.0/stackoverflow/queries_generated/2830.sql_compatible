@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id AND c.UserId IS NOT NULL), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS Upvotes,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0) AS Downvotes
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2023-10-01 12:34:56'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        r.Title,
+        pt.Name AS PostType,
+        COUNT(ph.Id) AS HistoryCount
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        RankedPosts r ON ph.PostId = r.Id
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    JOIN 
+        PostTypes pt ON r.PostTypeId = pt.Id
+    WHERE 
+        pht.Name = 'Post Closed'
+    GROUP BY 
+        ph.PostId, r.Title, pt.Name, ph.CreationDate
+)
+SELECT 
+    p.Id,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    COALESCE(cp.HistoryCount, 0) AS ClosureInstances,
+    (CASE WHEN p.ViewCount IS NOT NULL AND p.ViewCount > 0 
+          THEN (CAST(p.Score AS FLOAT) / p.ViewCount) * 100
+          ELSE 0 END) AS EngagementRate,
+    CASE 
+        WHEN p.ViewCount IS NULL THEN 'No views recorded'
+        WHEN p.ViewCount < 100 THEN 'Low engagement'
+        WHEN p.ViewCount BETWEEN 100 AND 1000 THEN 'Moderate engagement'
+        ELSE 'High engagement' 
+    END AS EngagementCategory
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    ClosedPosts cp ON p.Id = cp.PostId
+WHERE 
+    p.Rank <= 5
+ORDER BY 
+    p.Score DESC, p.CreationDate DESC;

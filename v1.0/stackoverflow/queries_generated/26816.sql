@@ -1,0 +1,62 @@
+WITH UserVotes AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId IN (2, 1) THEN p.AcceptedAnswerId END) AS AcceptedAnswers
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.ViewCount > 1000 THEN 1 ELSE 0 END) AS PopularPosts
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')  -- Assuming tags are in XML or similar format
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    u.DisplayName,
+    u.TotalVotes,
+    u.UpVotes,
+    u.DownVotes,
+    STRING_AGG(DISTINCT p.Title, ', ') AS Posts,
+    COUNT(DISTINCT t.TagName) AS UniqueTags,
+    COUNT(DISTINCT p.PostId) AS TotalPosts,
+    SUM(t.PopularPosts) AS TotalPopularPosts
+FROM 
+    UserVotes u
+JOIN 
+    PostDetails p ON u.UserId = p.OwnerUserId
+JOIN 
+    TagStatistics t ON p.PostId IN (SELECT p2.Id FROM Posts p2 WHERE p2.Tags LIKE CONCAT('%<', t.TagName, '>%'))
+GROUP BY 
+    u.DisplayName, u.TotalVotes, u.UpVotes, u.DownVotes
+ORDER BY 
+    u.TotalVotes DESC
+LIMIT 10;

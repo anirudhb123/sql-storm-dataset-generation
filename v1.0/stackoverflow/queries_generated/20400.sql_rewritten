@@ -1,0 +1,60 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS TotalQuestions,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalAnswers,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownvotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+HotQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        RANK() OVER (ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM Posts p
+    WHERE p.PostTypeId = 1 AND p.Score > 0
+),
+BadgeStats AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        COUNT(*) AS BadgeCount
+    FROM Badges b
+    GROUP BY b.UserId
+),
+PostHistorySummary AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5) 
+    GROUP BY p.OwnerUserId
+)
+
+SELECT 
+    us.DisplayName,
+    us.TotalPosts,
+    us.TotalQuestions,
+    us.TotalAnswers,
+    us.TotalUpvotes,
+    us.TotalDownvotes,
+    COALESCE(bs.BadgeNames, 'No Badges') AS BadgeNames,
+    COALESCE(bs.BadgeCount, 0) AS BadgeCount,
+    COALESCE(phs.EditCount, 0) AS EditCount,
+    COALESCE(phs.LastEditDate, 'Never') AS LastEditDate,
+    (SELECT COUNT(*) FROM HotQuestions hq WHERE hq.ViewRank <= 50) AS HotQuestionsCount,
+    (SELECT STRING_AGG(hq.Title, ' | ') FROM HotQuestions hq WHERE hq.ViewRank <= 10) AS TopHotQuestions
+FROM UserStats us
+LEFT JOIN BadgeStats bs ON us.UserId = bs.UserId
+LEFT JOIN PostHistorySummary phs ON us.UserId = phs.OwnerUserId
+WHERE us.TotalPosts > 0 OR us.TotalUpvotes > 0
+ORDER BY us.TotalUpvotes DESC, us.TotalPosts DESC;

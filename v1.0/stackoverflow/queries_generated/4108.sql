@@ -1,0 +1,59 @@
+WITH UserActivity AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(P.Score) AS TotalPostScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalComments,
+        TotalPostScore,
+        RANK() OVER (ORDER BY TotalPostScore DESC, Reputation DESC) AS UserRank
+    FROM UserActivity
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.AcceptedAnswerId,
+        P.PostTypeId,
+        COALESCE(A.Score, 0) AS AcceptedAnswerScore,
+        COUNT(C.Id) AS CommentCount,
+        SUM(V.VoteTypeId = 2) AS Upvotes,
+        SUM(V.VoteTypeId = 3) AS Downvotes,
+        P.CreationDate
+    FROM Posts P
+    LEFT JOIN Posts A ON P.AcceptedAnswerId = A.Id
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.IsDeleted = 0
+    GROUP BY P.Id, P.Title, P.AcceptedAnswerId, P.PostTypeId, A.Score, P.CreationDate
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    PU.PostId,
+    PU.Title,
+    PU.CommentCount,
+    PU.Upvotes,
+    PU.Downvotes,
+    PU.AcceptedAnswerScore,
+    COALESCE((SELECT SUM(PH.CreationDate) 
+              FROM PostHistory PH 
+              WHERE PH.PostId = PU.PostId AND PH.PostHistoryTypeId IN (10, 11)), 0) AS CloseReopenCount,
+    T.UserRank
+FROM TopUsers T
+JOIN PostStats PU ON T.UserId = PU.PostId
+WHERE T.UserRank <= 10
+ORDER BY U.Reputation DESC, PU.Upvotes DESC;

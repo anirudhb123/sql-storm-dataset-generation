@@ -1,0 +1,85 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F', 'P')
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+ProductPrices AS (
+    SELECT 
+        p.p_partkey,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_size > 20 THEN p.p_retailprice * 1.1
+            ELSE p.p_retailprice * 0.9 
+        END AS adjusted_price
+    FROM 
+        part p
+),
+FilteredCountries AS (
+    SELECT DISTINCT
+        n.n_nationkey,
+        n.n_name
+    FROM 
+        nation n
+    WHERE 
+        LOWER(n.n_comment) LIKE '%north%' OR LOWER(n.n_comment) LIKE '%south%'
+),
+LineItemsAggregate AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(*) AS item_count,
+        MAX(l.l_shipdate) AS latest_shipdate
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    COALESCE(l.total_price, 0) AS total_lineitem_price,
+    COALESCE(r.total_supplycost, 0) AS total_supplycost,
+    p.adjusted_price,
+    COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+    c.c_mktsegment
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    LineItemsAggregate l ON o.o_orderkey = l.l_orderkey
+FULL OUTER JOIN 
+    SupplierStats r ON r.total_supplycost > 10000
+JOIN 
+    ProductPrices p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost < 500)
+FULL JOIN 
+    customer c ON c.c_custkey = (SELECT MIN(c2.c_custkey) FROM customer c2 WHERE c2.c_nationkey IN (SELECT n.n_nationkey FROM FilteredCountries n))
+WHERE 
+    (o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31' OR o.o_orderdate IS NULL)
+    AND r.part_count > 5
+GROUP BY 
+    o.o_orderkey, o.o_orderdate, l.total_price, r.total_supplycost, p.adjusted_price, c.c_mktsegment
+HAVING 
+    SUM(CASE WHEN c.c_mktsegment = 'BUILDING' THEN 1 ELSE 0 END) > 3
+ORDER BY 
+    o.o_orderdate DESC, total_lineitem_price DESC
+LIMIT 100;

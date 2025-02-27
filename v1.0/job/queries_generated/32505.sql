@@ -1,0 +1,53 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id as movie_id, 
+        mt.title, 
+        1 as level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id as movie_id,
+        at.title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+SELECT 
+    mk.keyword, 
+    COUNT(DISTINCT c.id) AS cast_count,
+    AVG(c.nr_order) AS avg_order,
+    STRING_AGG(DISTINCT p.info ORDER BY p.info_type_id) AS person_info,
+    MAX(CASE WHEN cc.kind IS NULL THEN 'Other' ELSE cc.kind END) AS company_kind,
+    COALESCE(SUM(CASE WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END), 0) AS info_count
+FROM 
+    movie_keyword mk
+JOIN 
+    aka_title at ON mk.movie_id = at.id
+LEFT JOIN 
+    cast_info c ON at.id = c.movie_id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    company_type cc ON mc.company_type_id = cc.id
+LEFT JOIN 
+    movie_info mi ON at.id = mi.movie_id
+LEFT JOIN 
+    person_info p ON c.person_id = p.person_id
+LEFT JOIN 
+    movie_hierarchy mh ON at.id = mh.movie_id
+WHERE 
+    mh.level <= 2
+GROUP BY 
+    mk.keyword
+HAVING 
+    COUNT(DISTINCT c.id) > 1
+ORDER BY 
+    avg_order DESC NULLS LAST
+LIMIT 10;

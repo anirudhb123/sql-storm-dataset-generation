@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        r.ws_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        r.total_profit,
+        r.total_sales,
+        CASE 
+            WHEN r.total_sales > 100 THEN 'High Volume'
+            WHEN r.total_sales > 50 THEN 'Medium Volume'
+            ELSE 'Low Volume'
+        END AS sales_volume_category
+    FROM 
+        RankedSales r
+    JOIN 
+        item i ON r.ws_item_sk = i.i_item_sk
+    WHERE 
+        r.profit_rank <= 10
+),
+YearlySales AS (
+    SELECT 
+        d.d_year,
+        ti.ws_item_sk,
+        SUM(ti.total_profit) AS yearly_profit,
+        COUNT(ti.ws_item_sk) AS yearly_sales_count
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ti ON d.d_date_sk = ti.ws_sold_date_sk
+    JOIN 
+        TopItems t ON ti.ws_item_sk = t.ws_item_sk
+    GROUP BY 
+        d.d_year, ti.ws_item_sk
+)
+SELECT 
+    d.d_year,
+    t.ws_item_sk,
+    t.i_item_desc,
+    t.i_current_price,
+    ys.yearly_profit,
+    ys.yearly_sales_count,
+    COALESCE(t.sales_volume_category, 'Undefined') AS sales_volume_category
+FROM 
+    YearlySales ys
+JOIN 
+    TopItems t ON ys.ws_item_sk = t.ws_item_sk
+JOIN 
+    date_dim d ON d.d_year = ys.d_year
+WHERE 
+    ys.yearly_profit > 10000
+ORDER BY 
+    d.d_year ASC, 
+    ys.yearly_profit DESC;

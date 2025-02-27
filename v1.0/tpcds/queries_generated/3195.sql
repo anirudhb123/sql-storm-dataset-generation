@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_net_paid,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+HighValueItems AS (
+    SELECT 
+        ri.ws_item_sk, 
+        i.i_item_desc, 
+        i.i_current_price
+    FROM 
+        RankedSales ri
+    JOIN 
+        item i ON ri.ws_item_sk = i.i_item_sk
+    WHERE 
+        ri.sales_rank = 1 AND i.i_current_price > 50
+),
+TotalReturns AS (
+    SELECT 
+        sr_item_sk, 
+        SUM(sr_return_quantity) AS total_return_quantity, 
+        COUNT(DISTINCT sr_return_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        hi.ws_item_sk,
+        hi.i_item_desc,
+        hi.i_current_price,
+        COALESCE(tr.total_return_quantity, 0) AS total_return_quantity,
+        COALESCE(tr.return_count, 0) AS return_count
+    FROM 
+        HighValueItems hi
+    LEFT JOIN 
+        TotalReturns tr ON hi.ws_item_sk = tr.sr_item_sk
+)
+SELECT 
+    sar.ws_item_sk,
+    sar.i_item_desc,
+    sar.i_current_price,
+    sar.total_return_quantity,
+    sar.return_count,
+    sar.total_return_quantity * hi.i_current_price AS potential_loss
+FROM 
+    SalesAndReturns sar
+JOIN 
+    HighValueItems hi ON sar.ws_item_sk = hi.ws_item_sk
+WHERE 
+    sar.return_count > 0
+ORDER BY 
+    sar.potential_loss DESC
+LIMIT 10;

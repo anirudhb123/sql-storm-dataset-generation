@@ -1,0 +1,46 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_orderpriority, 1 AS Level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT oh.o_orderkey, o.o_custkey, o.o_orderdate, o.o_orderpriority, oh.Level + 1
+    FROM OrderHierarchy oh
+    JOIN orders o ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderdate < DATE '1998-10-01' - INTERVAL '30 days'
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty * ps.ps_supplycost) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+SupplierRanking AS (
+    SELECT s.s_suppkey, DENSE_RANK() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+)
+SELECT 
+    DISTINCT p.p_name,
+    r.r_name AS region_name,
+    COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+    COUNT(DISTINCT oh.o_orderkey) AS order_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    AVG(l.l_extendedprice) OVER (PARTITION BY p.p_partkey) AS avg_price_per_part,
+    ps.total_cost,
+    CASE 
+        WHEN ps.total_cost > 10000 THEN 'Expensive'
+        ELSE 'Affordable'
+    END AS cost_label
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders oh ON l.l_orderkey = oh.o_orderkey
+LEFT JOIN customer c ON oh.o_custkey = c.c_custkey
+LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN SupplierRanking sr ON s.s_suppkey = sr.s_suppkey
+JOIN region r ON s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)
+JOIN PartSupplier ps ON p.p_partkey = ps.ps_partkey
+WHERE (oh.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1998-10-01')
+GROUP BY p.p_partkey, p.p_name, r.r_name, c.c_name, ps.total_cost
+HAVING COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) = 0 
+ORDER BY total_sales DESC NULLS LAST;

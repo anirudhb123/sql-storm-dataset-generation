@@ -1,0 +1,66 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, 0 AS level
+    FROM customer
+    WHERE c_customer_sk = (SELECT MIN(c_customer_sk) FROM customer)
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws_bill_cdemo_sk AS customer_sk, 
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        AVG(ws_sales_price) AS avg_sales_price
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2450000 AND 2450600 
+    GROUP BY ws_bill_cdemo_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_sk, 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cs.total_sales,
+        cs.order_count
+    FROM customer c
+    LEFT JOIN SalesSummary cs ON c.c_customer_sk = cs.customer_sk
+    WHERE cs.total_sales IS NOT NULL
+    ORDER BY cs.total_sales DESC
+    LIMIT 10
+),
+AddressDetails AS (
+    SELECT 
+        ca.ca_address_id, 
+        ca.ca_city, 
+        ca.ca_state, 
+        ca.ca_country
+    FROM customer_address ca
+    WHERE ca.ca_state IN ('NY', 'CA') 
+),
+FinalOutput AS (
+    SELECT 
+        tc.full_name, 
+        tc.total_sales,
+        tc.order_count,
+        COUNT(DISTINCT ad.ca_address_id) AS address_count
+    FROM TopCustomers tc
+    LEFT JOIN AddressDetails ad ON tc.c_customer_sk = ad.ca_address_id
+    GROUP BY tc.full_name, tc.total_sales, tc.order_count
+)
+SELECT 
+    fo.*, 
+    ROW_NUMBER() OVER (ORDER BY fo.total_sales DESC) AS rank
+FROM FinalOutput fo
+WHERE fo.address_count > 0 
+UNION ALL 
+SELECT 
+    'Total' AS full_name,
+    SUM(fo.total_sales) AS total_sales,
+    SUM(fo.order_count) AS order_count,
+    COUNT(DISTINCT ad.ca_address_id) AS address_count
+FROM FinalOutput fo
+JOIN AddressDetails ad ON fo.full_name IS NOT NULL
+GROUP BY 1
+HAVING COUNT(DISTINCT ad.ca_address_id) > 0;

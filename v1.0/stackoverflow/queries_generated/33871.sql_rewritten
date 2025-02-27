@@ -1,0 +1,69 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursiveCTE r ON p.ParentId = r.PostId
+)
+
+SELECT 
+    u.DisplayName AS UserName, 
+    u.Reputation, 
+    r.PostId, 
+    r.Title, 
+    r.CreationDate, 
+    r.Score, 
+    r.ViewCount, 
+    r.Level,
+    COALESCE(tblBadges.BadgeCount, 0) AS BadgeCount,
+    COUNT(c.Id) AS CommentCount,
+    AVG(v.Score) FILTER (WHERE vt.Name = 'UpMod') AS AverageUpVotes
+FROM 
+    Users u 
+LEFT JOIN 
+    RecursiveCTE r ON u.Id = r.OwnerUserId 
+LEFT JOIN 
+    (SELECT 
+         UserId, 
+         COUNT(*) AS BadgeCount 
+     FROM 
+         Badges 
+     GROUP BY 
+         UserId) AS tblBadges ON u.Id = tblBadges.UserId 
+LEFT JOIN 
+    Comments c ON r.PostId = c.PostId 
+LEFT JOIN 
+    Votes v ON r.PostId = v.PostId 
+LEFT JOIN 
+    VoteTypes vt ON v.VoteTypeId = vt.Id 
+WHERE 
+    r.Level <= 2 
+GROUP BY 
+    u.DisplayName, u.Reputation, r.PostId, r.Title, 
+    r.CreationDate, r.Score, r.ViewCount, r.Level, tblBadges.BadgeCount
+HAVING 
+    COUNT(c.Id) > 0 
+ORDER BY 
+    r.Score DESC, r.ViewCount DESC;

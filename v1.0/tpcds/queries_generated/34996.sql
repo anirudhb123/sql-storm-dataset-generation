@@ -1,0 +1,57 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS total_orders,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS item_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY ws_item_sk
+), top_sales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_profit,
+        sd.total_orders,
+        i.i_item_desc,
+        i.i_category,
+        ROW_NUMBER() OVER (ORDER BY sd.total_profit DESC) AS rank
+    FROM sales_data sd
+    JOIN item i ON sd.ws_item_sk = i.i_item_sk
+    WHERE sd.item_rank <= 10
+), return_data AS (
+    SELECT 
+        rwr_item_sk,
+        SUM(rwr_return_amt) AS total_return_amt,
+        COUNT(rwr_order_number) AS total_returns
+    FROM (
+        SELECT 
+            wr_item_sk AS rwr_item_sk,
+            wr_return_amt,
+            wr_order_number
+        FROM web_returns
+        UNION ALL
+        SELECT 
+            cr_item_sk AS rwr_item_sk,
+            cr_return_amount AS wr_return_amt,
+            cr_order_number
+        FROM catalog_returns
+    ) combined_returns
+    GROUP BY rwr_item_sk
+)
+SELECT 
+    ts.ws_item_sk,
+    ts.i_item_desc,
+    ts.total_profit,
+    ts.total_orders,
+    COALESCE(rd.total_return_amt, 0) AS total_return_amt,
+    COALESCE(rd.total_returns, 0) AS total_returns,
+    (ts.total_profit - COALESCE(rd.total_return_amt, 0)) AS net_profit_after_returns,
+    CASE 
+        WHEN (ts.total_profit - COALESCE(rd.total_return_amt, 0)) < 0 THEN 'Loss'
+        ELSE 'Profit'
+    END AS profit_loss_status
+FROM top_sales ts
+LEFT JOIN return_data rd ON ts.ws_item_sk = rd.rwr_item_sk
+ORDER BY net_profit_after_returns DESC
+LIMIT 20;

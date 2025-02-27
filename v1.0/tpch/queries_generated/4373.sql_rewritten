@@ -1,0 +1,56 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+OrderLineItems AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND
+        o.o_orderdate < '1998-01-01'
+    GROUP BY 
+        o.o_orderkey
+), 
+CustomerPurchases AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COALESCE(SUM(oli.total_sales), 0) AS total_amount_spent
+    FROM 
+        customer c 
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        OrderLineItems oli ON o.o_orderkey = oli.o_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    cs.c_custkey,
+    cs.c_name, 
+    cs.total_amount_spent, 
+    COALESCE(ss.total_available_qty, 0) AS total_available_qty,
+    COALESCE(ss.avg_supply_cost, 0) AS avg_supply_cost,
+    RANK() OVER (ORDER BY cs.total_amount_spent DESC) AS spending_rank
+FROM 
+    CustomerPurchases cs
+LEFT JOIN 
+    SupplierStats ss ON cs.total_amount_spent > ss.avg_supply_cost
+WHERE 
+    cs.total_amount_spent > 0
+ORDER BY 
+    cs.total_amount_spent DESC;

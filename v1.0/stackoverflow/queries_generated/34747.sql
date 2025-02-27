@@ -1,0 +1,106 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+
+    UNION ALL
+
+    SELECT 
+        a.Id,
+        a.Title,
+        a.Score,
+        a.CreationDate,
+        a.LastActivityDate,
+        a.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostCTE rp ON a.ParentId = rp.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Questions and Answers
+    GROUP BY 
+        p.Id
+),
+UserBadgeSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostAnalysis AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.LastActivityDate,
+        pvs.UpVotes,
+        pvs.DownVotes,
+        pvs.TotalVotes,
+        ubs.BadgeCount,
+        ubs.GoldBadges,
+        ubs.SilverBadges,
+        ubs.BronzeBadges,
+        ROW_NUMBER() OVER (PARTITION BY rp.OwnerUserId ORDER BY rp.LastActivityDate DESC) AS UserPostRank
+    FROM 
+        RecursivePostCTE rp
+    JOIN 
+        PostVoteSummary pvs ON rp.PostId = pvs.Id
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    JOIN 
+        UserBadgeSummary ubs ON u.Id = ubs.UserId
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.Score,
+    pa.CreationDate,
+    pa.LastActivityDate,
+    pa.UpVotes,
+    pa.DownVotes,
+    pa.TotalVotes,
+    pa.BadgeCount,
+    pa.GoldBadges,
+    pa.SilverBadges,
+    pa.BronzeBadges
+FROM 
+    PostAnalysis pa
+WHERE 
+    pa.UserPostRank = 1 -- Get the latest post for each user
+    AND pa.TotalVotes > 10 -- Most active users
+ORDER BY 
+    pa.Score DESC,
+    pa.LastActivityDate DESC;

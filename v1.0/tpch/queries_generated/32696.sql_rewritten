@@ -1,0 +1,38 @@
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01' 
+    GROUP BY c.c_custkey, c.c_name
+    HAVING total_spent > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, sh.total_spent + SUM(o.o_totalprice)
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN SalesHierarchy sh ON c.c_custkey = sh.c_custkey
+    WHERE o.o_orderdate < '1997-01-01'
+    GROUP BY c.c_custkey, c.c_name, sh.total_spent
+),
+TopCustomers AS (
+    SELECT c.n_nationkey, SUM(sh.total_spent) AS total_spent
+    FROM SalesHierarchy sh
+    JOIN customer c ON sh.c_custkey = c.c_custkey
+    GROUP BY c.n_nationkey
+),
+NationRankings AS (
+    SELECT n.n_name, tc.total_spent,
+           ROW_NUMBER() OVER (ORDER BY tc.total_spent DESC) AS nation_rank
+    FROM TopCustomers tc
+    JOIN nation n ON tc.n_nationkey = n.n_nationkey
+)
+SELECT n.r_name, n.n_name, nr.total_spent, 
+       CASE 
+           WHEN nr.nation_rank <= 5 THEN 'Top 5' 
+           ELSE 'Other' 
+       END AS ranking,
+       COALESCE(r.r_comment, 'No comment') AS region_comment
+FROM NationRankings nr
+JOIN region r ON nr.n_nationkey = r.r_regionkey
+LEFT JOIN supplier s ON s.s_nationkey = nr.n_nationkey
+WHERE r.r_name IS NOT NULL
+ORDER BY nr.total_spent DESC, nr.n_name ASC;

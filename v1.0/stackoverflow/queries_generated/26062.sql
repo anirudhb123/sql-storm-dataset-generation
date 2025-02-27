@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rnk
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1
+),
+TagCounts AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '> <'))::varchar[]) AS TagName,
+        COUNT(*) AS Count
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+),
+TopTags AS (
+    SELECT 
+        TagName, 
+        Count, 
+        RANK() OVER (ORDER BY Count DESC) AS TagRank
+    FROM 
+        TagCounts
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.OwnerDisplayName,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    tt.TagName AS TopTag
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    TopTags tt ON tt.TagName = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '> <'))
+WHERE 
+    p.rnk = 1
+ORDER BY 
+    p.Score DESC, 
+    p.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,25 @@
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.ViewCount,
+    COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS VoteScore,
+    COUNT(c.Id) AS CommentCount,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation AS OwnerReputation,
+    p.CreationDate,
+    p.LastActivityDate,
+    p.PostTypeId
+FROM 
+    Posts p
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+WHERE 
+    p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'  
+GROUP BY 
+    p.Id, u.DisplayName
+ORDER BY 
+    VoteScore DESC, p.LastActivityDate DESC;

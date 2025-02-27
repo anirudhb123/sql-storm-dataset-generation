@@ -1,0 +1,85 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        1 AS depth
+    FROM
+        aka_title m
+    WHERE
+        m.production_year = 2023
+    
+    UNION ALL
+    
+    SELECT
+        m.linked_movie_id AS movie_id,
+        m2.title,
+        mh.depth + 1
+    FROM
+        movie_link m
+    JOIN
+        aka_title m2 ON m.linked_movie_id = m2.id
+    JOIN
+        MovieHierarchy mh ON m.movie_id = mh.movie_id
+),
+
+HighRatedActors AS (
+    SELECT
+        ak.name,
+        AVG(COALESCE(m.rating, 0)) AS avg_rating
+    FROM
+        aka_name ak
+    JOIN
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN
+        aka_title m ON ci.movie_id = m.id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id 
+        AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY
+        ak.name
+    HAVING
+        AVG(COALESCE(m.rating, 0)) > 7.0
+),
+
+MoviesWithKeywords AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        m.id
+    HAVING
+        COUNT(k.id) > 2
+),
+
+FinalResults AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.depth,
+        ha.avg_rating,
+        mk.keywords
+    FROM
+        MovieHierarchy mh
+    JOIN
+        HighRatedActors ha ON mh.title = ha.name
+    JOIN
+        MoviesWithKeywords mk ON mh.movie_id = mk.movie_id
+)
+
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.depth,
+    fr.avg_rating,
+    fr.keywords
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.depth, fr.avg_rating DESC;

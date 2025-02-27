@@ -1,0 +1,76 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        s.s_acctbal, 
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (
+            SELECT AVG(s1.s_acctbal)
+            FROM supplier s1
+        )
+    
+    UNION ALL
+    
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        s.s_acctbal, 
+        h.level + 1
+    FROM 
+        SupplierHierarchy h
+    JOIN 
+        supplier s ON h.s_nationkey = s.s_nationkey
+    WHERE 
+        s.s_acctbal > (
+            SELECT AVG(s1.s_acctbal)
+            FROM supplier s1
+            WHERE s1.s_nationkey = s.n_nationkey
+        )
+),
+TotalOrders AS (
+    SELECT 
+        o.o_custkey, 
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_custkey
+)
+
+SELECT 
+    p.p_name, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    r.r_name,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn,
+    COUNT(DISTINCT CASE WHEN c.c_acctbal IS NULL THEN NULL END) AS null_customers
+FROM 
+    lineitem l
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    part p ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    nation n ON n.n_nationkey = s.s_nationkey
+JOIN 
+    region r ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+WHERE 
+    l.l_shipdate > '2022-01-01'
+    AND l.l_shipdate < CURRENT_DATE
+GROUP BY 
+    p.p_name, r.r_name
+HAVING 
+    revenue > 1000 AND (SELECT COUNT(*) FROM TotalOrders to WHERE to.o_custkey = c.c_custkey) > 5
+    OR r.r_name IS NULL
+ORDER BY 
+    r.r_name, revenue DESC;

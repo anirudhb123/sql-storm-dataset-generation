@@ -1,0 +1,54 @@
+
+WITH RECURSIVE date_series AS (
+    SELECT MIN(d_date_sk) AS d_date_sk
+    FROM date_dim
+    UNION ALL
+    SELECT d_date_sk + 1
+    FROM date_dim
+    WHERE d_date_sk + 1 <= (SELECT MAX(d_date_sk) FROM date_dim)
+),
+total_sales AS (
+    SELECT 
+        d.d_date_id,
+        SUM(COALESCE(ws.ws_ext_sales_price, 0)) AS total_web_sales,
+        SUM(COALESCE(cs.cs_ext_sales_price, 0)) AS total_catalog_sales,
+        SUM(COALESCE(ss.ss_ext_sales_price, 0)) AS total_store_sales
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    LEFT JOIN store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    GROUP BY d.d_date_id
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_marital_status ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_marital_status, cd.cd_credit_rating, cd.cd_purchase_estimate
+)
+SELECT 
+    ds.d_date_id,
+    ts.total_web_sales,
+    ts.total_catalog_sales,
+    ts.total_store_sales,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_marital_status,
+    ci.cd_credit_rating,
+    ci.total_orders,
+    CASE 
+        WHEN ci.total_orders IS NULL THEN 'No Orders'
+        ELSE CONCAT(ci.total_orders, ' Orders')
+    END AS order_summary
+FROM date_series ds
+LEFT JOIN total_sales ts ON ds.d_date_sk = ts.d_date_id
+LEFT JOIN customer_info ci ON ci.rn <= 5
+ORDER BY ds.d_date_id, ci.total_orders DESC NULLS LAST;

@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostWithTags AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        (SELECT 
+            unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS TagName, Id 
+         FROM 
+            Posts) t ON rp.PostId = t.Id
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT v.PostId) AS UpvotedPosts,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.VoteTypeId IN (2, 3)
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    pw.PostId,
+    pw.Title,
+    pw.CreationDate,
+    pw.Score,
+    pw.ViewCount,
+    pw.Tags,
+    ue.UserId,
+    ue.DisplayName,
+    ue.UpvotedPosts,
+    ue.CommentsMade,
+    ue.GoldBadges
+FROM 
+    PostWithTags pw
+LEFT JOIN 
+    UserEngagement ue ON pw.PostId IN (SELECT PostId FROM Votes WHERE UserId = ue.UserId)
+WHERE 
+    pw.Rank <= 5
+AND 
+    (pw.Score >= 10 OR pw.ViewCount > 100)
+ORDER BY 
+    pw.CreationDate DESC;

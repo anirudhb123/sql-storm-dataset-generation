@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 month'
+)
+
+SELECT 
+    rp.OwnerDisplayName,
+    rp.OwnerReputation,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CommentCount,
+    COALESCE(PH.EditCount, 0) AS EditCount,
+    PT.Name AS PostTypeName
+FROM 
+    RankedPosts rp
+LEFT JOIN (
+    SELECT 
+        PostId,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory
+    WHERE 
+        PostHistoryTypeId IN (4, 5, 6) -- Considering title and body edits
+    GROUP BY 
+        PostId
+) PH ON rp.PostId = PH.PostId
+JOIN 
+    PostTypes PT ON rp.PostTypeId = PT.Id
+WHERE 
+    rp.Rank <= 5 -- Top 5 posts in each type
+ORDER BY 
+    PT.Name, rp.Rank;

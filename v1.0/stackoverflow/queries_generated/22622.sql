@@ -1,0 +1,102 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.PostTypeId,
+        p.Title,
+        p.Score,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 month'
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.OwnerUserId,
+        rp.RecentRank,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        COALESCE(pc.LastCommentDate, '1970-01-01'::timestamp) AS LastCommentDate
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        PostComments pc ON rp.PostId = pc.PostId
+    WHERE 
+        rp.RecentRank = 1 
+        AND EXISTS (
+            SELECT 1 
+            FROM Votes v 
+            WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2
+        )
+),
+PostDetails AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.Score,
+        u.DisplayName AS OwnerName,
+        u.Reputation AS OwnerReputation,
+        fp.CommentCount,
+        fp.LastCommentDate,
+        CASE 
+            WHEN fp.LastCommentDate IS NULL THEN 'No comments yet' 
+            WHEN fp.LastCommentDate < NOW() - INTERVAL '1 week' THEN 'Stale' 
+            ELSE 'Recent' 
+        END AS PostStatus
+    FROM 
+        FilteredPosts fp
+    JOIN 
+        Users u ON fp.OwnerUserId = u.Id
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Score,
+    pd.OwnerName,
+    pd.OwnerReputation,
+    pd.CommentCount,
+    pd.LastCommentDate,
+    pd.PostStatus,
+    COALESCE(pt.Name, 'Unknown') AS PostType,
+    COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 1) AS GoldBadgeCount, -- Counting gold badges
+    COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 2) AS SilverBadgeCount, -- Counting silver badges
+    COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadgeCount -- Counting bronze badges
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Posts p ON pd.PostId = p.Id
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    Badges b ON b.UserId = pd.OwnerUserId
+GROUP BY 
+    pd.PostId, pd.Title, pd.Score, pd.OwnerName, pd.OwnerReputation, 
+    pd.CommentCount, pd.LastCommentDate, pd.PostStatus, pt.Name
+HAVING 
+    pd.Score > 0 
+ORDER BY 
+    pd.Score DESC, pd.PostId ASC
+LIMIT 100;

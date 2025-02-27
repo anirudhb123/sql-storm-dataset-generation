@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, '><')) AS t(TagName) ON true
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.Score
+),
+
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        rp.Tags,
+        u.DisplayName AS UserDisplayName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.UserPostRank = 1 AND u.Id = rp.OwnerUserId
+    ORDER BY 
+        rp.Score DESC, rp.CommentCount DESC
+    LIMIT 10
+)
+
+SELECT 
+    tp.Title,
+    tp.Body,
+    tp.CreationDate,
+    tp.Score,
+    tp.CommentCount,
+    tp.Tags,
+    tp.UserDisplayName,
+    COALESCE(AVG(v.BountyAmount), 0) AS AverageBounty
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Votes v ON tp.PostId = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+GROUP BY 
+    tp.PostId, tp.Title, tp.Body, tp.CreationDate, tp.Score, tp.CommentCount, tp.Tags, tp.UserDisplayName
+ORDER BY 
+    tp.Score DESC;

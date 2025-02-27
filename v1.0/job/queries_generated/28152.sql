@@ -1,0 +1,52 @@
+WITH movie_actors AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        rp.role AS role
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type rp ON c.role_id = rp.id
+),
+movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        k.keyword AS movie_keyword,
+        GROUP_CONCAT(DISTINCT a.actor_name) AS actor_list
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_actors a ON m.id = a.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+filtered_movies AS (
+    SELECT 
+        md.movie_id,
+        md.movie_title,
+        md.production_year,
+        md.movie_keyword,
+        md.actor_list
+    FROM 
+        movie_details md
+    WHERE 
+        md.production_year >= 2000 AND
+        md.movie_keyword LIKE '%action%'
+)
+SELECT 
+    fm.movie_title,
+    fm.production_year,
+    fm.actor_list,
+    COUNT(*) OVER (PARTITION BY fm.production_year) AS movies_count_per_year
+FROM 
+    filtered_movies fm
+ORDER BY 
+    fm.production_year DESC;

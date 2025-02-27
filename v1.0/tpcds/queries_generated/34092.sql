@@ -1,0 +1,70 @@
+
+WITH RECURSIVE sales_growth AS (
+    SELECT 
+        d_year,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY 
+        d_year
+    UNION ALL
+    SELECT 
+        d_year,
+        SUM(ws.ws_net_profit) * 1.2 -- Assuming a 20% growth year-over-year
+    FROM 
+        sales_growth sg
+    JOIN 
+        date_dim dd ON sg.d_year + 1 = dd.d_year
+    JOIN 
+        web_sales ws ON dd.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d_year
+),
+customer_costs AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid) AS total_spending,
+        cd.cd_marital_status
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_marital_status
+),
+item_statistics AS (
+    SELECT 
+        i.i_item_sk,
+        AVG(ws.ws_sales_price) AS avg_price,
+        COUNT(ws.ws_order_number) AS sales_count
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk
+)
+SELECT 
+    d.d_year,
+    SUM(sg.total_profit) AS annual_growth,
+    AVG(cc.total_spending) AS avg_customer_spending,
+    AVG(its.avg_price) AS avg_item_price,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers
+FROM 
+    sales_growth sg
+JOIN 
+    customer_costs cc ON cc.total_spending IS NOT NULL
+JOIN 
+    date_dim d ON d.d_year = sg.d_year
+LEFT JOIN 
+    item_statistics its ON its.sales_count > 5
+GROUP BY 
+    d.d_year
+HAVING 
+    annual_growth > 100000
+ORDER BY 
+    d.d_year;

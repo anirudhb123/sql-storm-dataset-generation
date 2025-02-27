@@ -1,0 +1,75 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_customer_sk,
+        ws.ws_item_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_customer_sk ORDER BY ws.ws_net_profit DESC) AS rn,
+        COALESCE(NULLIF(ws.ws_net_profit, 0), NULL) AS net_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT 
+                                    d_date_sk 
+                                FROM 
+                                    date_dim 
+                                WHERE 
+                                    d_year = 2023)
+),
+top_sales AS (
+    SELECT
+        rs.ws_customer_sk,
+        SUM(rs.net_profit) AS total_net_profit
+    FROM 
+        ranked_sales rs
+    WHERE 
+        rs.rn <= 5 
+    GROUP BY 
+        rs.ws_customer_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cb.ib_lower_bound,
+        cb.ib_upper_bound,
+        CASE 
+            WHEN cd.cd_dep_count IS NULL THEN 'No Dependent'
+            WHEN cd.cd_dep_count > 0 AND cd.cd_dep_employed_count IS NULL THEN 'Employed Unknown'
+            ELSE 'Employed'
+        END AS employment_status
+    FROM 
+        customer c 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON hd.hd_demo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        income_band cb ON cb.ib_income_band_sk = hd.hd_income_band_sk
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_purchase_estimate,
+    ts.total_net_profit,
+    CASE 
+        WHEN ts.total_net_profit IS NULL THEN 'No Sales'
+        WHEN ts.total_net_profit >= cb.ib_upper_bound THEN 'High Income'
+        WHEN ts.total_net_profit < cb.ib_lower_bound THEN 'Low Income'
+        ELSE 'Middle Income'
+    END AS income_category
+FROM 
+    customer_info ci
+LEFT JOIN 
+    top_sales ts ON ci.c_customer_sk = ts.ws_customer_sk
+WHERE 
+    ci.cd_purchase_estimate > (SELECT AVG(cd_purchase_estimate) FROM customer_demographics)
+ORDER BY 
+    ci.c_last_name, ci.c_first_name
+LIMIT 100;

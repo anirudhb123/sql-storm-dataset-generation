@@ -1,0 +1,75 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        ml.movie_id AS parent_movie_id,
+        ml.linked_movie_id,
+        1 AS level
+    FROM 
+        movie_link ml
+    UNION ALL
+    SELECT 
+        mh.parent_movie_id,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.linked_movie_id = ml.movie_id
+),
+AggregatedCast AS (
+    
+    SELECT 
+        ci.movie_id,
+        ct.kind AS role_type,
+        COUNT(ci.person_id) AS num_cast
+    FROM 
+        cast_info ci
+    JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY 
+        ci.movie_id, ct.kind
+),
+MovieDetails AS (
+    
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ARRAY_AGG(DISTINCT mk.keyword) AS keywords,
+        ARRAY_AGG(DISTINCT mi.info) AS info,
+        COALESCE(ac.num_cast, 0) AS num_cast
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN 
+        movie_info mi ON at.id = mi.movie_id
+    LEFT JOIN 
+        AggregatedCast ac ON at.id = ac.movie_id
+    GROUP BY 
+        at.id, at.title, at.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.keywords,
+    md.info,
+    mh.linked_movie_id AS linked_movie,
+    mh.level,
+    md.num_cast
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    MovieHierarchy mh ON md.movie_id = mh.parent_movie_id
+WHERE 
+    md.production_year BETWEEN 1990 AND 2023 
+    AND md.num_cast > (
+        SELECT 
+            AVG(num_cast)
+        FROM 
+            AggregatedCast
+    )
+ORDER BY 
+    md.production_year DESC,
+    md.title;

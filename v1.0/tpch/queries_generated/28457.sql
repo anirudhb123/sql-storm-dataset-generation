@@ -1,0 +1,29 @@
+SELECT 
+    CONCAT('Product Name: ', p.p_name, ', Supplier: ', s.s_name, ', Region: ', r.r_name) AS detail_description,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    GROUP_CONCAT(DISTINCT CONCAT(n.n_name, ' (', s.s_phone, ')') ORDER BY n.n_name SEPARATOR ', ') AS supplier_nations,
+    AVG(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE NULL END) AS avg_returned_quantity
+FROM 
+    lineitem l
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    customer c ON c.c_custkey = l.l_orderkey -- Assuming l_orderkey as customer reference to illustrate join
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    AND p.p_brand LIKE 'BrandA%'
+GROUP BY 
+    p.p_partkey, s.s_suppkey, r.r_regionkey
+HAVING 
+    total_revenue > 10000
+ORDER BY 
+    total_revenue DESC;

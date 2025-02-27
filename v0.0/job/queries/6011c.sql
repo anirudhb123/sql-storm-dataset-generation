@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND t.episode_nr IN (12241, 13848) AND mi.info < 'The original concept for the show was different from what would come on the air. It would have been on ABC and set in an upscale Long Island town, not in Manhattan. There was no older brother, originally, and the housekeeper would have been younger and sexier. The production company balked at the changes the network suggested, and ABC lost interest.';

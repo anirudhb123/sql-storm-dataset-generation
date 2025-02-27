@@ -1,0 +1,55 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, CreationDate, Score, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT p.Id, p.Title, p.ParentId, p.CreationDate, p.Score, r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId, 
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        RANK() OVER (ORDER BY COUNT(c.Id) DESC) AS CommentRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN LATERAL unnest(string_to_array(p.Tags, '>')) AS tag ON true
+    LEFT JOIN Tags t ON t.TagName = tag
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id
+),
+PostsWithHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        u.DisplayName AS UserName,
+        ph.CreationDate AS HistoryCreationDate,
+        p.Title AS PostTitle,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    INNER JOIN Posts p ON ph.PostId = p.Id
+    INNER JOIN Users u ON ph.UserId = u.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11) -- Closed/Reopened Posts
+)
+SELECT 
+    ps.PostId,
+    ps.AcceptedAnswerId,
+    ps.CommentCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    ps.Tags,
+    COALESCE((SELECT ph.UserName FROM PostsWithHistory ph WHERE ph.PostId = ps.PostId AND ph.rn = 1), 'No history') AS LastHistoryUser,
+    COALESCE((SELECT ph.HistoryCreationDate FROM PostsWithHistory ph WHERE ph.PostId = ps.PostId AND ph.rn = 1), 'Never') AS LastHistoryDate,
+    ROW_NUMBER() OVER (ORDER BY ps.CommentRank) AS Rank
+FROM PostStatistics ps
+ORDER BY ps.CommentCount DESC
+LIMIT 10;

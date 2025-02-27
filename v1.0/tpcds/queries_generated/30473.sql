@@ -1,0 +1,81 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_net_profit,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_net_profit > 0
+    UNION ALL
+    SELECT 
+        s.ws_sold_date_sk,
+        s.ws_item_sk,
+        s.ws_order_number,
+        s.ws_quantity,
+        s.ws_net_profit + c.ws_net_profit,
+        c.level + 1
+    FROM 
+        web_sales s
+    JOIN 
+        Sales_CTE c ON s.ws_item_sk = c.ws_item_sk AND s.ws_order_number = c.ws_order_number 
+    WHERE 
+        c.level < 10
+), 
+Highest_Profit AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        Sales_CTE
+    GROUP BY 
+        ws_item_sk
+),
+Customer_Sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_profit) AS total_customer_profit
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 2000
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    hp.ws_item_sk,
+    COUNT(DISTINCT cs.c_customer_sk) AS unique_customers,
+    hp.total_profit,
+    cs.total_customer_profit
+FROM 
+    customer_address ca
+LEFT JOIN 
+    Highest_Profit hp ON hp.ws_item_sk IN (
+        SELECT i_item_sk
+        FROM item
+        WHERE i_current_price > 30 AND i_current_price < 100
+    )
+LEFT JOIN 
+    Customer_Sales cs ON cs.total_customer_profit > 500
+GROUP BY 
+    ca.ca_city, 
+    ca.ca_state, 
+    hp.ws_item_sk, 
+    hp.total_profit, 
+    cs.total_customer_profit
+HAVING 
+    COUNT(DISTINCT cs.c_customer_sk) > 5
+ORDER BY 
+    total_profit DESC, 
+    unique_customers DESC;

@@ -1,0 +1,66 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+    UNION ALL
+    SELECT
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_sales_price) AS total_sales
+    FROM
+        catalog_sales
+    GROUP BY
+        cs_item_sk
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name || ' ' || c.c_last_name AS customer_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CA.ca_city,
+        CA.ca_state,
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        customer_address CA ON c.c_current_addr_sk = CA.ca_address_sk
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+        AND ws.ws_sales_price IS NOT NULL
+    GROUP BY
+        c.c_customer_sk, customer_name, cd.cd_gender, cd.cd_marital_status, CA.ca_city, CA.ca_state
+),
+total_revenue AS (
+    SELECT
+        COALESCE(SUM(total_sales), 0) AS total_revenue
+    FROM
+        (SELECT total_sales FROM sales_summary
+         UNION ALL
+         SELECT total_sales FROM customer_info) AS combined_sales
+)
+SELECT
+    ci.customer_name,
+    ci.total_spent,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.ca_city,
+    ci.ca_state,
+    tr.total_revenue,
+    ROUND(ci.total_spent * 100.0 / NULLIF(tr.total_revenue, 0), 2) AS spending_percentage
+FROM
+    customer_info ci,
+    total_revenue tr
+WHERE
+    ci.total_spent > (SELECT AVG(total_spent) FROM customer_info)
+ORDER BY
+    ci.total_spent DESC
+LIMIT 10;

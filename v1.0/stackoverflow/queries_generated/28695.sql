@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3)  -- Considering only upvotes and downvotes
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Body, 
+        CreationDate, 
+        Author, 
+        CommentCount, 
+        VoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank = 1  -- Selecting only the highest score posts for each user
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tag_names ON TRUE
+    LEFT JOIN 
+        Tags t ON tag_names = t.TagName
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.Author,
+    fp.CommentCount,
+    fp.VoteCount,
+    pt.Tags
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostTags pt ON fp.PostId = pt.PostId
+WHERE 
+    fp.CreationDate >= CURRENT_DATE - INTERVAL '7 days'  -- Posts created in the last week
+ORDER BY 
+    fp.VoteCount DESC, fp.CommentCount DESC
+LIMIT 10;

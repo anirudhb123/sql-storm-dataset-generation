@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+
+    UNION ALL
+
+    SELECT ps.ps_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM partsupp ps
+    JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+), 
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+), 
+NationRevenue AS (
+    SELECT n.n_nationkey, n.n_name, COALESCE(SUM(os.total_revenue), 0) AS revenue
+    FROM nation n
+    LEFT JOIN OrderSummary os ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c JOIN orders o ON c.c_custkey = o.o_custkey WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l))
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT r.r_name AS region, n.n_name AS nation, nh.s_name AS supplier_name, 
+       SUM(nr.revenue) AS total_revenue, 
+       COUNT(DISTINCT os.o_orderkey) AS total_orders,
+       STRING_AGG(DISTINCT n.n_name, ', ') AS nation_list,
+       MAX(nr.revenue) AS max_nation_revenue
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierHierarchy nh ON nh.s_nationkey = n.n_nationkey
+LEFT JOIN NationRevenue nr ON n.n_nationkey = nr.n_nationkey
+LEFT JOIN OrderSummary os ON nr.revenue > 0
+WHERE nr.revenue IS NOT NULL OR nr.revenue > (SELECT AVG(nr2.revenue) FROM NationRevenue nr2)
+GROUP BY r.r_name, n.n_name, nh.s_name
+HAVING COUNT(DISTINCT os.o_orderkey) > 5
+ORDER BY total_revenue DESC, region, nation;

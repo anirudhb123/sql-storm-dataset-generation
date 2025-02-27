@@ -1,0 +1,80 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank,
+        DATEADD(day, d.d_dom, d.d_date) AS effective_sales_date
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+        AND d.d_moy IN (5, 6) -- May and June
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_addr_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state,
+        hd.hd_income_band_sk,
+        COALESCE(hd.hd_dep_count, 0) AS dependent_count
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics AS hd ON c.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+returned_sales AS (
+    SELECT 
+        sr_returning_customer_sk AS customer_sk,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        COUNT(sr_item_sk) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+),
+combined_sales AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.ca_city,
+        ci.ca_state,
+        SUM(rs.ws_net_profit) AS total_profits,
+        COUNT(rs.ws_order_number) AS order_count,
+        SUM(COALESCE(rs.ws_net_profit, 0)) / NULLIF(COUNT(rs.ws_order_number), 0) AS avg_profit_per_order
+    FROM 
+        customer_info AS ci
+    LEFT JOIN 
+        ranked_sales AS rs ON ci.c_customer_sk = rs.web_site_sk
+    LEFT JOIN 
+        returned_sales AS r ON ci.c_customer_sk = r.customer_sk
+    GROUP BY 
+        ci.c_customer_sk, ci.ca_city, ci.ca_state
+)
+SELECT 
+    city,
+    state,
+    total_profits,
+    order_count,
+    avg_profit_per_order,
+    CASE 
+        WHEN total_profits > 1000 AND order_count > 10 THEN 'High Value'
+        WHEN total_profits <= 1000 AND order_count <= 10 THEN 'Low Value'
+        ELSE 'Medium Value'
+    END AS customer_value_segment
+FROM 
+    combined_sales
+WHERE 
+    (avg_profit_per_order > (SELECT AVG(avg_profit_per_order) FROM combined_sales) OR city IS NULL)
+ORDER BY 
+    total_profits DESC NULLS LAST
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

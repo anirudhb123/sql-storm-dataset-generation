@@ -1,0 +1,92 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS Questions, 
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS Answers,
+        COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS PostsClosed,
+        COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 ELSE 0 END), 0) AS PostsReopened,
+        COUNT(DISTINCT B.Id) AS BadgesEarned
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    WHERE U.Reputation > 1000
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+RecentActivity AS (
+    SELECT 
+        UserId, 
+        COUNT(*) AS RecentPostCount,
+        ROW_NUMBER() OVER (PARTITION BY UserId ORDER BY CreationDate DESC) AS rn
+    FROM Posts 
+    WHERE CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY UserId
+),
+RankedUsers AS (
+    SELECT 
+        Us.UserId, 
+        Us.DisplayName, 
+        Us.Reputation,
+        Us.Questions,
+        Us.Answers,
+        Us.PostsClosed,
+        Us.PostsReopened,
+        Us.BadgesEarned,
+        COALESCE(RA.RecentPostCount, 0) AS RecentPosts
+    FROM UserStats Us
+    LEFT JOIN RecentActivity RA ON Us.UserId = RA.UserId
+)
+SELECT 
+    RU.DisplayName, 
+    RU.Reputation, 
+    RU.Questions,
+    RU.Answers,
+    RU.PostsClosed,
+    RU.PostsReopened,
+    RU.BadgesEarned,
+    RU.RecentPosts,
+    CASE 
+        WHEN RU.Reputation >= 10000 THEN 'Legend'
+        WHEN RU.Reputation >= 5000 THEN 'Pro'
+        ELSE 'Novice'
+    END AS UserRank,
+    STRING_AGG(T.TagName, ', ') AS Tags
+FROM RankedUsers RU
+LEFT JOIN Posts P ON RU.UserId = P.OwnerUserId AND P.PostTypeId = 1
+LEFT JOIN LATERAL (
+    SELECT DISTINCT 
+        unnest(string_to_array(P.Tags, ',')) AS TagName
+) T ON TRUE
+GROUP BY RU.UserId, RU.DisplayName, RU.Reputation, RU.Questions, RU.Answers, RU.PostsClosed, RU.PostsReopened, RU.BadgesEarned, RU.RecentPosts
+ORDER BY RU.Reputation DESC, RU.Questions DESC
+LIMIT 10;
+
+-- Additional segments to capture edge cases
+WITH ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(PH.UserId) AS CloseVotes,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM PostHistory PH
+    JOIN Posts P ON PH.PostId = P.Id
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.PostId, P.Title, P.CreationDate
+),
+OpenVsClosed AS (
+    SELECT 
+        COUNT(*) FILTER (WHERE LastClosedDate IS NOT NULL) AS ClosedCount,
+        COUNT(*) FILTER (WHERE LastClosedDate IS NULL) AS OpenCount
+    FROM ClosedPosts
+)
+SELECT 
+    COALESCE(OpenCount, 0) AS OpenPosts, 
+    COALESCE(ClosedCount, 0) AS ClosedPosts,
+    CASE 
+        WHEN ClosedCount >= 1.5 * OpenCount THEN 'Investigate Closures'
+        ELSE 'Status Normal'
+    END AS ClosureStatus
+FROM OpenVsClosed;

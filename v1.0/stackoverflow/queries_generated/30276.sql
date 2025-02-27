@@ -1,0 +1,89 @@
+WITH RecursivePostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Score AS PostScore,
+        p.OwnerUserId,
+        COALESCE(v.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(v.DownVoteCount, 0) AS DownVoteCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(ph.EditCount, 0) AS EditCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS EditCount
+        FROM 
+            PostHistory 
+        WHERE 
+            PostHistoryTypeId IN (4, 5, 6)
+        GROUP BY 
+            PostId
+    ) ph ON p.Id = ph.PostId
+    WHERE 
+        p.PostTypeId = 1
+    UNION ALL
+    SELECT 
+        r.LinkedPostId AS PostId,
+        r.PostScore,
+        r.OwnerUserId,
+        r.UpVoteCount,
+        r.DownVoteCount,
+        r.CommentCount,
+        r.EditCount
+    FROM 
+        RecursivePostStats r
+    JOIN 
+        PostLinks pl ON r.PostId = pl.PostId
+    JOIN 
+        Posts p ON pl.RelatedPostId = p.Id
+)
+
+SELECT 
+    u.DisplayName,
+    COUNT(b.Id) AS BadgeCount,
+    SUM(COALESCE(rp.PostScore, 0)) AS TotalPostScore,
+    AVG(rp.CommentCount) AS AverageComments,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Users u
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    RecursivePostStats rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            unnest(string_to_array(p.Tags, '><')) AS TagName
+        FROM 
+            Posts p 
+        WHERE 
+            p.OwnerUserId = u.Id
+    ) t ON TRUE
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id
+HAVING 
+    SUM(COALESCE(rp.UpVoteCount, 0)) > 50
+ORDER BY 
+    TotalPostScore DESC;

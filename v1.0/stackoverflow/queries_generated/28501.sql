@@ -1,0 +1,50 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(c.Id) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Tags
+),
+UserTags AS (
+    SELECT 
+        u.Id AS UserId,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS UserTags
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    JOIN 
+        UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '>><<'))::varchar[]) AS tag(t) ON TRUE
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    ut.UserTags,
+    rp.Title,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id AND rp.Rank <= 5)
+JOIN 
+    UserTags ut ON u.Id = ut.UserId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    u.DisplayName ASC;

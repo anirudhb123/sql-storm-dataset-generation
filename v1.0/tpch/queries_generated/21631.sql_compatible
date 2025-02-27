@@ -1,0 +1,59 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, s.s_comment, 
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, s.s_comment, 
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+OrderStats AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue, 
+           COUNT(DISTINCT l.l_orderkey) AS item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+FilteredRevenues AS (
+    SELECT os.o_orderkey, os.total_revenue, os.item_count
+    FROM OrderStats os
+    WHERE os.item_count > (SELECT AVG(item_count) FROM OrderStats)
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1998-10-01' - INTERVAL '60 DAY' 
+    AND o.o_orderstatus = 'O'
+),
+CustomerRevenue AS (
+    SELECT c.c_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS customer_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) IS NOT NULL
+),
+FinalReport AS (
+    SELECT sh.s_name, sh.s_acctbal, fr.total_revenue, COALESCE(cr.customer_revenue, 0) AS customer_revenue
+    FROM SupplierHierarchy sh
+    LEFT JOIN FilteredRevenues fr ON fr.o_orderkey IN (
+        SELECT DISTINCT l.l_orderkey
+        FROM lineitem l
+        JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+        WHERE ps.ps_supplycost < 100.00)
+    LEFT JOIN CustomerRevenue cr ON sh.s_nationkey = cr.c_custkey
+)
+SELECT f.*, 
+       CASE WHEN f.customer_revenue = 0 THEN 'No Revenue'
+            ELSE CONCAT('Revenue: ', CAST(f.customer_revenue AS VARCHAR(20)))
+       END AS revenue_statement
+FROM FinalReport f
+WHERE f.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+ORDER BY f.total_revenue DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

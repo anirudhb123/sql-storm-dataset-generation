@@ -1,0 +1,45 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > COALESCE((SELECT AVG(s_acctbal) FROM supplier), 0)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+LineItemAnalysis AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(*) OVER (PARTITION BY l.l_orderkey) AS line_item_count,
+           MAX(l.l_shipdate) OVER (PARTITION BY l.l_orderkey) AS last_ship_date
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N' AND l.l_linestatus != 'F'
+),
+OrderDetails AS (
+    SELECT o.o_orderkey,
+           o.o_totalprice,
+           COALESCE(la.total_revenue, 0) AS total_revenue,
+           la.line_item_count,
+           la.last_ship_date
+    FROM orders o
+    LEFT JOIN LineItemAnalysis la ON o.o_orderkey = la.l_orderkey
+)
+SELECT n.n_name,
+       COUNT(DISTINCT c.c_custkey) AS customer_count,
+       MAX(od.o_totalprice) AS max_order_price,
+       SUM(CASE WHEN od.total_revenue IS NULL THEN NULL ELSE od.total_revenue * 1.05 END) AS adjusted_revenue,
+       ARRAY_AGG(DISTINCT sh.s_name) AS suppliers,
+       SUM(CASE WHEN n.n_name LIKE '%land%' THEN 1 ELSE 0 END) AS land_nation_count,
+       AVG(NULLIF(od.total_revenue, 0)) AS avg_revenue_per_nation
+FROM nation n
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN OrderDetails od ON od.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus IN ('O', 'F'))
+JOIN SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5
+   OR (AVG(od.o_totalprice) IS NOT NULL AND COUNT(DISTINCT sh.s_name) > 2)
+ORDER BY adjusted_revenue DESC NULLS LAST;

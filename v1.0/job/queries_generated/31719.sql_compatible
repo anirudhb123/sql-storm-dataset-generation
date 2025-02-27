@@ -1,0 +1,83 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id 
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS rn
+    FROM 
+        MovieHierarchy mh
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.name) AS distinct_companies,
+        SUM(CASE WHEN ct.kind = 'Distributor' THEN 1 ELSE 0 END) AS distributor_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        cs.distinct_companies,
+        cs.distributor_count,
+        CASE 
+            WHEN cs.distinct_companies IS NULL THEN 'No Company Info' 
+            ELSE 'Company Info Available' 
+        END AS company_info_status
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyStats cs ON rm.movie_id = cs.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.movie_title,
+    md.production_year,
+    md.distinct_companies,
+    md.distributor_count,
+    md.company_info_status,
+    (SELECT COUNT(*) FROM cast_info ci WHERE ci.movie_id = md.movie_id) AS total_cast_members,
+    COALESCE((SELECT AVG(pi.note) FROM person_info pi WHERE pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating') AND pi.person_id IN 
+        (SELECT DISTINCT c.person_id FROM cast_info c WHERE c.movie_id = md.movie_id)), 0) AS average_rating
+FROM 
+    MovieDetails md
+WHERE 
+    md.production_year BETWEEN 2005 AND 2023
+ORDER BY 
+    md.production_year DESC, 
+    md.distinct_companies DESC NULLS LAST
+LIMIT 10;

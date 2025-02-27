@@ -1,0 +1,33 @@
+
+WITH String_Benchmark AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        LENGTH(c.c_email_address) AS email_length,
+        LOWER(c.c_state) AS lowercase_state,
+        UPPER(c.c_city) AS uppercase_city,
+        REPLACE(c.c_street_name, 'Street', 'St.') AS modified_street_name,
+        REGEXP_REPLACE(c.c_first_name, '[^a-zA-Z]', '') AS clean_first_name,
+        SUBSTRING(c.c_email_address, 1, 5) AS email_prefix,
+        REPEAT('*', LENGTH(c.c_email_address) - 5) AS email_masked,
+        TRIM(c.c_first_name) AS trimmed_first_name
+    FROM 
+        customer AS c
+    WHERE 
+        c.c_birth_year > 1980
+)
+SELECT 
+    full_name,
+    email_length,
+    lowercase_state,
+    uppercase_city,
+    modified_street_name,
+    clean_first_name,
+    email_prefix,
+    email_masked,
+    trimmed_first_name
+FROM 
+    String_Benchmark
+ORDER BY 
+    email_length DESC
+LIMIT 100;

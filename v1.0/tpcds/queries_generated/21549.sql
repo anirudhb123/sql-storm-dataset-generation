@@ -1,0 +1,67 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT
+        wr_returning_customer_sk,
+        wr_web_page_sk,
+        SUM(wr_return_quantity) AS total_returns,
+        COUNT(DISTINCT wr_order_number) AS return_count,
+        ROW_NUMBER() OVER (PARTITION BY wr_returning_customer_sk ORDER BY SUM(wr_return_quantity) DESC) AS rn
+    FROM web_returns
+    WHERE wr_returning_customer_sk IS NOT NULL
+    GROUP BY wr_returning_customer_sk, wr_web_page_sk
+),
+ItemSales AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        AVG(ws_sales_price) AS avg_sales_price
+    FROM web_sales
+    WHERE ws_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY ws_item_sk
+),
+WarehouseInventory AS (
+    SELECT
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_inventory
+    FROM inventory
+    GROUP BY inv_item_sk
+),
+FilteredReturns AS (
+    SELECT
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returns
+    FROM catalog_returns
+    WHERE cr_ship_mode_sk IN (SELECT sm_ship_mode_sk FROM ship_mode WHERE sm_type LIKE 'Express%')
+    GROUP BY cr_item_sk
+),
+ReturnAnalysis AS (
+    SELECT
+        ci.c_customer_id,
+        ci.c_first_name,
+        ci.c_last_name,
+        cr.total_returns AS customer_returns,
+        is.total_sold AS item_sold,
+        COALESCE(wi.total_inventory, 0) AS inventory_on_hand,
+        CASE
+            WHEN cr.total_returns IS NULL THEN 'No Returns'
+            WHEN cr.total_returns > 10 THEN 'High Returns'
+            ELSE 'Low Returns'
+        END AS return_category
+    FROM customer ci
+    LEFT JOIN CustomerReturns cr ON ci.c_customer_sk = cr.wr_returning_customer_sk
+    LEFT JOIN ItemSales is ON cr.w_web_page_sk = is.ws_item_sk
+    LEFT JOIN WarehouseInventory wi ON is.ws_item_sk = wi.inv_item_sk
+    WHERE ci.c_birth_year BETWEEN 1970 AND 2000
+)
+SELECT
+    r.customer_id,
+    r.first_name,
+    r.last_name,
+    r.customer_returns,
+    r.item_sold,
+    r.inventory_on_hand,
+    r.return_category,
+    ROW_NUMBER() OVER (PARTITION BY r.return_category ORDER BY r.customer_returns DESC) AS rank_within_category
+FROM ReturnAnalysis r
+WHERE r.customer_returns IS NOT NULL
+ORDER BY r.return_category, r.customer_returns DESC;

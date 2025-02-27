@@ -1,0 +1,66 @@
+
+WITH RECURSIVE mellifluous_summary AS (
+    SELECT 
+        ps_partkey,
+        ps_suppkey,
+        ps_availqty,
+        ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) AS rn
+    FROM partsupp
+    WHERE ps_availqty IS NOT NULL AND ps_supplycost > 0
+), 
+total_suppliers AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(DISTINCT ps.s_suppkey) AS total_supply_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size BETWEEN 10 AND 20
+    GROUP BY p.p_partkey
+),
+market_analysis AS (
+    SELECT 
+        c.c_nationkey,
+        SUM(o.o_totalprice) AS total_sales,
+        MAX(c.c_acctbal) AS max_balance
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY c.c_nationkey
+),
+regional_insights AS (
+    SELECT 
+        r.r_name,
+        SUM(ts.total_sales) AS region_sales,
+        COUNT(DISTINCT n.n_nationkey) AS nations_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN market_analysis ts ON n.n_nationkey = ts.c_nationkey
+    GROUP BY r.r_name
+),
+supplier_analysis AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(SUM(ps.ps_availqty), 0) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN mellifluous_summary ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.rn = 1
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    ra.r_name,
+    sa.s_name,
+    sa.total_avail_qty,
+    sa.avg_supply_cost,
+    COALESCE(ra.region_sales, 0) AS total_region_sales,
+    CASE 
+        WHEN ra.nations_count > 0 THEN 'Diverse'
+        ELSE 'Solely'
+    END AS supplier_diversity
+FROM regional_insights ra
+FULL OUTER JOIN supplier_analysis sa ON ra.r_name IS NOT NULL OR sa.s_name IS NOT NULL
+WHERE ra.region_sales > 0 OR sa.total_avail_qty > 0
+ORDER BY ra.region_sales DESC NULLS LAST, sa.avg_supply_cost ASC,
+         CASE WHEN sa.s_name IS NULL THEN 1 ELSE 0 END, sa.s_name;

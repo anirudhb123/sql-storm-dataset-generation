@@ -1,0 +1,53 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year,
+        1 AS level,
+        NULL::integer AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year BETWEEN 1990 AND 2020
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.title AS Movie_Title,
+    mh.production_year AS Production_Year,
+    COUNT(DISTINCT ci.person_id) AS Total_Cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS Cast_Names,
+    AVG(mi.info_type_id) FILTER (WHERE mi.info_type_id IS NOT NULL) AS Average_Info_Type_ID,
+    CASE 
+        WHEN COUNT(DISTINCT mi.info_type_id) = 0 THEN 'No Info'
+        ELSE 'Has Info'
+    END AS Info_Status
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 2 
+ORDER BY 
+    mh.production_year DESC, Total_Cast DESC;

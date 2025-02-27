@@ -1,0 +1,73 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ss.sold_date_sk,
+        ss.item_sk,
+        SUM(ss.quantity) AS total_sales,
+        SUM(ss.net_profit) AS total_profit,
+        1 AS level
+    FROM 
+        store_sales ss
+    GROUP BY 
+        ss.sold_date_sk, ss.item_sk
+    UNION ALL
+    SELECT 
+        sd.sold_date_sk,
+        sd.item_sk,
+        SUM(sd.total_sales) AS total_sales,
+        SUM(sd.total_profit) AS total_profit,
+        sd.level + 1
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.level < 3  
+    GROUP BY 
+        sd.sold_date_sk, sd.item_sk, sd.level
+),
+RecentReturns AS (
+    SELECT 
+        sr.item_sk,
+        SUM(sr.return_quantity) AS total_returns,
+        SUM(sr.return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.returned_date_sk IN (SELECT DISTINCT d_date_sk FROM date_dim WHERE d_year = 2001)
+    GROUP BY 
+        sr.item_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        MAX(cd.cd_purchase_estimate) AS max_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk
+)
+SELECT 
+    sd.sold_date_sk,
+    sd.item_sk,
+    sd.total_sales,
+    COALESCE(rr.total_returns, 0) AS total_returns,
+    COALESCE(rr.total_return_amount, 0) AS total_return_amount,
+    cd.customer_count,
+    cd.max_purchase_estimate,
+    CASE 
+        WHEN sd.total_profit > 0 THEN 'Profit'
+        WHEN sd.total_profit < 0 THEN 'Loss'
+        ELSE 'Neutral'
+    END AS profit_status
+FROM 
+    SalesData sd
+LEFT JOIN 
+    RecentReturns rr ON sd.item_sk = rr.item_sk
+JOIN 
+    CustomerDemographics cd ON cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_current_addr_sk = sd.sold_date_sk LIMIT 1)
+WHERE 
+    sd.total_sales > 100
+ORDER BY 
+    sd.total_sales DESC, sd.sold_date_sk ASC;

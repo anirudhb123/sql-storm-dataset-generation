@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        NULL::integer AS parent_movie_id,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+    UNION ALL
+    SELECT 
+        c.movie_id,
+        c.title,
+        c.production_year,
+        mh.movie_id AS parent_movie_id,
+        mh.level + 1
+    FROM 
+        aka_title c
+    JOIN 
+        MovieHierarchy mh ON c.episode_of_id = mh.movie_id
+),
+
+CastWithRoles AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        p.name AS person_name,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    JOIN 
+        name p ON ci.person_id = p.imdb_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+),
+
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COALESCE(NULLIF(mc.note, ''), 'N/A') AS note
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(GROUP_CONCAT(DISTINCT cw.person_name ORDER BY cw.role_order), 'No Cast') AS cast_names,
+    COALESCE(GROUP_CONCAT(DISTINCT cw.role_name ORDER BY cw.role_order), 'No Roles') AS role_names,
+    COUNT(DISTINCT ci.id) AS total_cast,
+    COALESCE(GROUP_CONCAT(DISTINCT ci.note separator '; '), 'No Notes') AS cast_notes,
+    COALESCE(GROUP_CONCAT(DISTINCT co.company_name ORDER BY co.company_name), 'No Companies') AS company_names,
+    COALESCE(GROUP_CONCAT(DISTINCT co.company_type ORDER BY co.company_name), 'No Company Types') AS company_types,
+    mh.level
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastWithRoles cw ON mh.movie_id = cw.movie_id
+LEFT JOIN 
+    CompanyInfo co ON mh.movie_id = co.movie_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis' LIMIT 1)
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level
+ORDER BY 
+    mh.production_year DESC, mh.title;

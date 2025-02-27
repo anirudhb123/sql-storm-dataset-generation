@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.production_year > 2000
+    UNION ALL
+    SELECT 
+        linked_movie_id AS movie_id, 
+        l.movie_title,
+        l.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title AS l ON ml.linked_movie_id = l.id
+)
+SELECT 
+    m.movie_id,
+    m.movie_title,
+    m.production_year,
+    COALESCE(c.name, 'Unknown') AS company_name,
+    MAX(p.info) AS person_info,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    SUM(CASE WHEN p.note IS NOT NULL THEN 1 ELSE 0 END) AS notes_present,
+    STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+FROM 
+    MovieHierarchy AS m
+LEFT JOIN 
+    movie_companies AS mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name AS c ON mc.company_id = c.imdb_id AND c.country_code = 'USA'
+LEFT JOIN 
+    cast_info AS ci ON m.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name AS a ON ci.person_id = a.person_id
+LEFT JOIN 
+    person_info AS p ON ci.person_id = p.person_id AND p.info_type_id IN (1, 2)
+LEFT JOIN 
+    movie_keyword AS mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword AS kc ON mk.keyword_id = kc.id
+GROUP BY 
+    m.movie_id, m.movie_title, m.production_year, c.name
+HAVING 
+    COUNT(DISTINCT ci.id) > 1  -- At least two cast members
+ORDER BY 
+    m.production_year DESC, 
+    keyword_count DESC, 
+    actor_names;

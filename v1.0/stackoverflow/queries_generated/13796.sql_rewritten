@@ -1,0 +1,61 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews,
+        SUM(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostsCount,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName
+),
+PostHistoryCount AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS EditCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ups.UserId,
+    ups.Reputation,
+    ups.TotalPosts,
+    ups.Questions,
+    ups.Answers,
+    ups.TotalViews,
+    ups.TotalScore,
+    ts.TagId,
+    ts.TagName,
+    ts.PostsCount,
+    ts.TotalViews AS TagTotalViews,
+    phc.EditCount
+FROM 
+    UserPostStats ups
+CROSS JOIN 
+    TagStats ts
+LEFT JOIN 
+    PostHistoryCount phc ON phc.PostId = ups.UserId
+ORDER BY 
+    ups.Reputation DESC, ts.PostsCount DESC;

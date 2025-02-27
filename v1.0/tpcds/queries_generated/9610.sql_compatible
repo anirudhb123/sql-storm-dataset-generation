@@ -1,0 +1,42 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s.s_store_name,
+        i.i_item_id,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_net_paid) AS total_revenue,
+        RANK() OVER (PARTITION BY s.s_store_name ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        store s ON ws.ws_store_sk = s.s_store_sk
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - INTERVAL '30 DAY' AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        s.s_store_name, i.i_item_id, ws.ws_sold_date_sk
+),
+TopStores AS (
+    SELECT 
+        s_store_name,
+        total_sold,
+        total_revenue,
+        sales_rank
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 5
+)
+SELECT 
+    t.s_store_name,
+    SUM(t.total_sold) AS overall_sold,
+    ROUND(SUM(t.total_revenue), 2) AS overall_revenue,
+    COUNT(DISTINCT t.i_item_id) AS unique_items_sold
+FROM 
+    TopStores t
+GROUP BY 
+    t.s_store_name
+ORDER BY 
+    overall_revenue DESC;

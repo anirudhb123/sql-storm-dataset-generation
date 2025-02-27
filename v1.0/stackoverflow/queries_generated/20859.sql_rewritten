@@ -1,0 +1,97 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(u.Reputation, 0) AS UserReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(*) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostRanks AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.UserReputation,
+        ac.PostsCount,
+        rc.CommentCount,
+        rc.LastCommentDate,
+        ROW_NUMBER() OVER (PARTITION BY rp.OwnerUserId ORDER BY rp.Score DESC, rp.ViewCount DESC) AS UserPostRank
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ActiveUsers ac ON rp.OwnerUserId = ac.UserId
+    LEFT JOIN 
+        RecentComments rc ON rp.PostId = rc.PostId
+)
+
+SELECT 
+    pr.PostId,
+    pr.Title,
+    pr.Score,
+    pr.ViewCount,
+    pr.CreationDate,
+    pr.UserReputation,
+    pr.PostsCount,
+    pr.CommentCount,
+    pr.LastCommentDate,
+    COALESCE(accepted.Title, 'No Accepted Answer') AS AcceptedAnswerTitle,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        Votes v 
+     WHERE 
+        v.PostId = pr.PostId AND v.VoteTypeId = 2) AS UpVotes,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        Votes v 
+     WHERE 
+        v.PostId = pr.PostId AND v.VoteTypeId = 3) AS DownVotes
+FROM 
+    PostRanks pr
+LEFT JOIN 
+    Posts accepted ON pr.AcceptedAnswerId = accepted.Id
+WHERE 
+    pr.UserPostRank = 1
+    AND (pr.CommentCount IS NULL OR pr.CommentCount > 5)
+ORDER BY 
+    pr.Score DESC, pr.ViewCount DESC
+LIMIT 50;

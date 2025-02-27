@@ -1,0 +1,77 @@
+
+WITH CountrySales AS (
+    SELECT 
+        ca_country,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ca_country ORDER BY SUM(ws_sales_price) DESC) AS country_rank
+    FROM 
+        web_sales
+    JOIN 
+        customer_address ON ws_ship_addr_sk = ca_address_sk
+    GROUP BY 
+        ca_country
+), HighSpendCustomers AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name, 
+        c_last_name,
+        SUM(ws_sales_price) AS total_spend,
+        COUNT(DISTINCT ws_order_number) AS orders,
+        DENSE_RANK() OVER (ORDER BY SUM(ws_sales_price) DESC) AS spend_rank
+    FROM 
+        web_sales
+    JOIN 
+        customer ON ws_bill_customer_sk = c_customer_sk
+    GROUP BY 
+        c_customer_sk, c_first_name, c_last_name
+    HAVING 
+        SUM(ws_sales_price) > 1000
+), ReasonedReturns AS (
+    SELECT 
+        r.r_reason_desc,
+        SUM(wr_return_amt) AS total_return_amount,
+        COUNT(DISTINCT wr_order_number) AS return_count,
+        COALESCE(SUM(wr_return_qty), 0) AS total_return_quantity
+    FROM 
+        web_returns wr
+    JOIN 
+        reason r ON wr_reason_sk = r.r_reason_sk
+    GROUP BY 
+        r.r_reason_desc
+), MarketDynamics AS (
+    SELECT 
+        ca_state,
+        (SELECT COUNT(*) FROM customer c 
+         WHERE c.c_current_addr_sk IN (SELECT ca_address_sk FROM customer_address WHERE ca_state = ca_state)) AS customer_count,
+        COUNT(DISTINCT wr_returning_customer_sk) AS returning_customers,
+        (SELECT AVG(total_sales) FROM CountrySales WHERE country_rank <= 10) AS avg_top_country_sales
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+)
+
+SELECT 
+    h.c_first_name,
+    h.c_last_name,
+    h.total_spend,
+    cs.total_sales AS country_sales,
+    rr.total_return_amount,
+    md.customer_count,
+    md.returning_customers,
+    md.avg_top_country_sales
+FROM 
+    HighSpendCustomers h
+LEFT JOIN 
+    CountrySales cs ON cs.ca_country = (SELECT ca_country FROM customer_address WHERE ca_address_sk = h.c_customer_sk)
+LEFT JOIN 
+    ReasonedReturns rr ON rr.return_count > 2
+JOIN 
+    MarketDynamics md ON md.ca_state = (SELECT ca_state FROM customer_address WHERE ca_address_sk = h.c_customer_sk)
+WHERE 
+    h.spend_rank <= 20
+ORDER BY 
+    h.total_spend DESC, 
+    cs.total_sales DESC, 
+    rr.total_return_amount DESC;

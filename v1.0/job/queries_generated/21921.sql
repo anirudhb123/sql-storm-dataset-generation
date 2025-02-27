@@ -1,0 +1,61 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ARRAY[m.title] AS movie_path,
+        0 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        linked.movie_id,
+        l.title,
+        l.production_year,
+        m.movie_path || l.title,
+        level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title l ON ml.linked_movie_id = l.id
+    JOIN
+        RecursiveMovieHierarchy m ON m.movie_id = ml.movie_id
+)
+
+SELECT
+    r.movie_id,
+    r.title,
+    r.production_year,
+    r.movie_path,
+    COUNT(DISTINCT c.person_id) AS actor_count,
+    AVG(WEEKDAY(CURRENT_DATE) - (r.production_year % 7)) AS avg_age_difference,
+    STRING_AGG(DISTINCT ak.name, ', ') AS all_aka_names,
+    COUNT(CASE WHEN mi.info_type_id IS NOT NULL THEN 1 END) AS info_type_count,
+    COUNT(DISTINCT k.keyword) FILTER (WHERE k.keyword IS NOT NULL) AS non_null_keyword_count,
+    RANK() OVER (PARTITION BY r.production_year ORDER BY AVG(age) DESC) AS year_rank
+FROM
+    RecursiveMovieHierarchy r
+LEFT JOIN
+    cast_info c ON c.movie_id = r.movie_id
+LEFT JOIN
+    aka_name ak ON ak.person_id = c.person_id
+LEFT JOIN
+    movie_info mi ON mi.movie_id = r.movie_id
+LEFT JOIN
+    movie_keyword mk ON mk.movie_id = r.movie_id
+LEFT JOIN
+    keyword k ON k.id = mk.keyword_id
+WHERE
+    r.level <= 5 
+    AND r.production_year NOT IN (SELECT DISTINCT production_year FROM aka_title WHERE production_year < 1950)
+GROUP BY
+    r.movie_id, r.title, r.production_year, r.movie_path
+HAVING
+    COUNT(DISTINCT c.person_id) > 2
+    AND MAX(NULLIF(r.production_year, 0)) > 1900
+ORDER BY
+    r.production_year DESC, actor_count DESC;

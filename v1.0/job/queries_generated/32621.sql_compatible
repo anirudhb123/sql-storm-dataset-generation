@@ -1,0 +1,57 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        t.id AS movie_id, 
+        t.title AS movie_title,
+        0 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000 
+
+    UNION ALL
+
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title AS movie_title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_title,
+    COUNT(c.id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    AVG(CASE WHEN i.info IS NOT NULL THEN LENGTH(i.info) ELSE 0 END) AS avg_info_length,
+    MAX(CASE WHEN k.keyword IS NOT NULL THEN k.keyword ELSE 'N/A' END) AS example_keyword,
+    MIN(cast.year) AS earliest_year,
+    MAX(mci.type) AS company_types
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info c ON mh.movie_id = c.movie_id
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN 
+    movie_info i ON mh.movie_id = i.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type mci ON mc.company_type_id = mci.id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+GROUP BY 
+    mh.movie_title, 
+    mh.movie_id
+ORDER BY 
+    total_cast DESC, avg_info_length DESC
+LIMIT 100;

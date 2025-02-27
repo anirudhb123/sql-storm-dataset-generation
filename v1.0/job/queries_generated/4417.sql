@@ -1,0 +1,49 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT mc.company_id) AS num_companies,
+        ROW_NUMBER() OVER(PARTITION BY at.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_companies mc ON at.id = mc.movie_id
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5
+),
+ActorMovieCount AS (
+    SELECT 
+        ka.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ka ON ci.person_id = ka.person_id
+    GROUP BY 
+        ka.id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    amc.actor_name,
+    amc.movie_count,
+    CASE 
+        WHEN amc.movie_count IS NULL THEN 'No Movies'
+        ELSE amc.movie_count::text
+    END AS movies_description
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    ActorMovieCount amc ON amc.movie_count > 0
+ORDER BY 
+    tm.production_year DESC, 
+    tm.title;

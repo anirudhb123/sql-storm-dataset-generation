@@ -1,0 +1,46 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, Body, ParentId, OwnerUserId, CreationDate, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT p.Id, p.Title, p.Body, p.ParentId, p.OwnerUserId, p.CreationDate, ph.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy ph ON p.ParentId = ph.Id
+)
+, RecentPosts AS (
+    SELECT Id, Title, Score, ViewCount, OwnerUserId, CreationDate
+    FROM Posts
+    WHERE CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+),
+UserStatistics AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName,
+           SUM(cs.Score) AS CommentScore,
+           COUNT(b.Id) AS BadgeCount,
+           COUNT(DISTINCT p.Id) AS PostCount,
+           Count(DISTINCT v.Id) AS VoteCount
+    FROM Users u
+    LEFT JOIN Comments cs ON u.Id = cs.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.PostCount,
+    u.CommentScore,
+    COALESCE(CAST(ROUND((u.VoteCount * 1.0 / NULLIF(u.PostCount, 0)), 2) AS DECIMAL), 0) AS FollowerVoteRatio,
+    COUNT(DISTINCT p.Id) AS RelatedPostCount,
+    MAX(ph.Level) AS MaxPostHierarchyLevel,
+    STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypeNames
+FROM UserStatistics u
+LEFT JOIN RecentPosts p ON u.UserId = p.OwnerUserId
+LEFT JOIN PostTypes pt ON pt.Id = p.PostTypeId
+LEFT JOIN RecursivePostHierarchy ph ON ph.OwnerUserId = u.UserId
+GROUP BY u.UserId, u.DisplayName, u.PostCount, u.CommentScore
+HAVING COUNT(DISTINCT p.Id) > 5
+ORDER BY u.CommentScore DESC;

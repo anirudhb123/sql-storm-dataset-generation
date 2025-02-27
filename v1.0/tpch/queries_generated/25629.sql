@@ -1,0 +1,22 @@
+SELECT 
+    CONCAT('Supplier: ', s_name, ' | Part: ', p_name, ' | Order Date: ', o_orderdate, ' | Total Price: ', o_totalprice) AS order_info,
+    SUM(l_extendedprice * (1 - l_discount)) AS total_revenue,
+    COUNT(DISTINCT o_orderkey) AS unique_orders
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+    AND p.p_comment LIKE '%special%'
+GROUP BY 
+    s_name, p_name, o_orderdate
+ORDER BY 
+    total_revenue DESC, unique_orders DESC
+LIMIT 100;

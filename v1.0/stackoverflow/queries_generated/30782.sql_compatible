@@ -1,0 +1,80 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        rph.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName, 
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM Users u
+),
+
+ClosePostHistory AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        MIN(ph.CreationDate) AS FirstCloseDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11)  
+    GROUP BY ph.PostId
+),
+
+PostWithVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(vs.UpVotes, 0) AS UpVotes,
+        COALESCE(vs.DownVotes, 0) AS DownVotes,
+        COALESCE(vs.VoteCount, 0) AS VoteCount
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+            COUNT(*) AS VoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) vs ON p.Id = vs.PostId
+)
+
+SELECT 
+    rph.PostId,
+    rph.Title,
+    rph.CreationDate,
+    ur.DisplayName AS TopUser,
+    ur.Reputation AS UserReputation,
+    cp.CloseCount,
+    cp.FirstCloseDate,
+    pw.UpVotes,
+    pw.DownVotes,
+    pw.VoteCount
+FROM RecursivePostHierarchy rph
+LEFT JOIN UserReputation ur ON ur.Rank = 1  
+LEFT JOIN ClosePostHistory cp ON cp.PostId = rph.PostId
+LEFT JOIN PostWithVotes pw ON pw.PostId = rph.PostId
+WHERE 
+    rph.Level = 1  
+ORDER BY 
+    rph.CreationDate DESC;

@@ -1,0 +1,70 @@
+
+WITH RECURSIVE SalesTrend AS (
+    SELECT 
+        ws_sold_date_sk,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (ORDER BY ws_sold_date_sk) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk IS NOT NULL
+    GROUP BY 
+        ws_sold_date_sk
+    UNION ALL
+    SELECT 
+        DATEADD(DAY, 1, ws_sold_date_sk),
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (ORDER BY DATEADD(DAY, 1, ws_sold_date_sk)) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk IS NOT NULL
+    GROUP BY 
+        ws_sold_date_sk
+),
+CustomerEstimates AS (
+    SELECT 
+        cd_gender,
+        SUM(cd_purchase_estimate) AS total_estimate,
+        COUNT(DISTINCT c_customer_sk) AS customer_count
+    FROM 
+        customer_demographics
+    JOIN 
+        customer ON cd_demo_sk = c_current_cdemo_sk
+    GROUP BY 
+        cd_gender
+),
+InventorySummary AS (
+    SELECT 
+        inv_warehouse_sk,
+        SUM(inv_quantity_on_hand) AS total_quantity
+    FROM 
+        inventory
+    GROUP BY 
+        inv_warehouse_sk
+)
+SELECT 
+    d.d_date,
+    COALESCE(st.total_sales, 0) AS total_web_sales,
+    ce.total_estimate,
+    is.total_quantity,
+    CASE 
+        WHEN st.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Available'
+    END AS sales_status
+FROM 
+    date_dim d
+LEFT JOIN 
+    (SELECT ws_sold_date_sk, SUM(ws_sales_price) AS total_sales
+     FROM web_sales
+     WHERE ws_ship_date_sk IS NOT NULL
+     GROUP BY ws_sold_date_sk) st
+ON d.d_date_sk = st.ws_sold_date_sk
+LEFT JOIN CustomerEstimates ce ON 1=1
+LEFT JOIN InventorySummary is ON 1=1
+WHERE 
+    d.d_date >= '2023-01-01'
+    AND (d.d_dow IN (0, 6) OR ce.customer_count > 50)
+ORDER BY 
+    d.d_date DESC
+LIMIT 100;

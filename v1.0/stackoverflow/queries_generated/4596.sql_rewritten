@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    u.Reputation,
+    p.Score,
+    ub.BadgeCount,
+    p.TotalPosts,
+    COALESCE(pc.CommentCount, 0) AS CommentCount,
+    COALESCE(pc.LastCommentDate, 'No Comments') AS LastCommentDate,
+    CASE 
+        WHEN p.Score > 10 THEN 'High Score'
+        ELSE 'Moderate/Low Score'
+    END AS ScoreCategory,
+    CASE 
+        WHEN p.CreationDate IS NOT NULL THEN EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - p.CreationDate)) / 3600
+        ELSE NULL
+    END AS HoursSinceCreation
+FROM 
+    RankedPosts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostComments pc ON p.PostId = pc.PostId
+WHERE 
+    p.rn = 1
+ORDER BY 
+    p.Score DESC, 
+    p.TotalPosts DESC
+LIMIT 50;

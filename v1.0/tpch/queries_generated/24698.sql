@@ -1,0 +1,96 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+), FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        CASE 
+            WHEN p.p_size IS NULL THEN 'Unknown Size'
+            ELSE CAST(p.p_size AS varchar)
+        END AS size_desc
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (
+            SELECT AVG(p1.p_retailprice)
+            FROM part p1 
+            WHERE p1.p_mfgr = p.p_mfgr
+        )
+), ActiveOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        CASE 
+            WHEN o.o_orderstatus = 'O' THEN 'Active'
+            ELSE 'Inactive'
+        END AS order_status
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+), LineitemStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_revenue,
+        COUNT(*) AS lineitem_count,
+        AVG(l.l_discount) AS avg_discount
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    r.r_name,
+    p.p_name,
+    pp.rank AS supplier_rank,
+    o.o_orderkey,
+    o.order_status,
+    ls.total_lineitem_revenue,
+    ls.lineitem_count,
+    ls.avg_discount,
+    CASE 
+        WHEN ls.total_lineitem_revenue > 10000 THEN 'High Value'
+        WHEN ls.total_lineitem_revenue IS NULL THEN 'No Revenue'
+        ELSE 'Standard'
+    END AS revenue_category
+FROM 
+    customer c
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    ActiveOrders o ON o.o_custkey = c.c_custkey
+JOIN 
+    LineitemStats ls ON ls.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    FilteredParts p ON p.p_partkey IN (
+        SELECT ps.ps_partkey
+        FROM partsupp ps
+        JOIN RankedSuppliers pp ON pp.s_suppkey = ps.ps_suppkey
+        WHERE pp.rank <= 5
+    )
+WHERE 
+    r.r_name LIKE 'Europe%'
+ORDER BY 
+    c.c_name, 
+    total_lineitem_revenue DESC;

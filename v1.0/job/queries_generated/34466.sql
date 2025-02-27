@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth,
+        NULL AS parent_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1 AS depth,
+        mh.movie_id AS parent_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.depth,
+    COALESCE(CAST(SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY mh.movie_id), INTEGER), 0) AS cast_count,
+    ARRAY_AGG(DISTINCT cn.name) AS character_names,
+    COALESCE(mk.keywords, ARRAY[]::text[]) AS movie_keywords
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    char_name cn ON ci.person_id = cn.imdb_id
+LEFT JOIN (
+    SELECT 
+        mk.movie_id,
+        ARRAY_AGG(mk.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+) mk ON mh.movie_id = mk.movie_id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.depth
+ORDER BY 
+    mh.production_year DESC, mh.title ASC;

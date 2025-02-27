@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+      AND 
+        p.CreationDate >= DATEADD(year, -1, GETDATE()) -- Last year
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        CASE 
+            WHEN u.Reputation < 100 THEN 'Newbie'
+            WHEN u.Reputation BETWEEN 100 AND 1000 THEN 'Intermediate'
+            WHEN u.Reputation > 1000 THEN 'Expert'
+            ELSE 'Unknown'
+        END AS ReputationLevel
+    FROM 
+        Users u
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= DATEADD(month, -6, GETDATE()) -- Last 6 months
+      AND 
+        ph.PostHistoryTypeId IN (10, 11, 12) -- Closure, reopening, deletion
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    ur.DisplayName AS OwnerDisplayName,
+    ur.Reputation,
+    ur.ReputationLevel,
+    COALESCE(rp.PostRank, 0) AS RecentPostRank,
+    COALESCE(ph.PostId, -1) AS RecentActionPostId,
+    COALESCE(ph.HistoryDate, 'No Recent Actions') AS RecentActionDate,
+    COALESCE(ps.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(ps.DownVotes, 0) AS TotalDownVotes
+FROM 
+    RankedPosts rp
+JOIN 
+    Users ur ON rp.OwnerUserId = ur.Id
+LEFT JOIN 
+    RecentPostHistory ph ON rp.PostId = ph.PostId AND ph.HistoryRank = 1
+LEFT JOIN 
+    PostVoteSummary ps ON rp.PostId = ps.PostId
+WHERE 
+    (rp.PostRank = 1 OR rp.PostRank IS NULL) -- Return most recent post per user
+ORDER BY 
+    ur.Reputation DESC, 
+    rp.CreationDate DESC;

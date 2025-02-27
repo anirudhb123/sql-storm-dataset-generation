@@ -1,0 +1,42 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT Id, TagName, Count, ExcerptPostId, WikiPostId, IsModeratorOnly, IsRequired, 1 AS Level
+    FROM Tags
+    WHERE IsModeratorOnly = 0
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, t.IsModeratorOnly, t.IsRequired, r.Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy r ON t.ExcerptPostId = r.Id
+)
+, UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore,
+        RANK() OVER (ORDER BY SUM(p.ViewCount) DESC) AS ViewRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(ps.TotalPosts, 0) AS TotalPosts,
+    COALESCE(ps.Questions, 0) AS Questions,
+    COALESCE(ps.Answers, 0) AS Answers,
+    COALESCE(ps.TotalViews, 0) AS TotalViews,
+    COALESCE(ps.AverageScore, 0) AS AverageScore,
+    CASE 
+        WHEN ps.ViewRank IS NOT NULL AND ps.ViewRank <= 10 THEN 'Top 10 by Views'
+        ELSE 'Other' 
+    END AS ViewCategory,
+    ARRAY_AGG(DISTINCT t.TagName) AS AssociatedTags
+FROM Users u
+LEFT JOIN UserPostStats ps ON u.Id = ps.UserId
+LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN RecursiveTagHierarchy t ON t.ExcerptPostId = p.Id
+GROUP BY u.Id, ps.ViewRank
+ORDER BY u.Reputation DESC, TotalPosts DESC;

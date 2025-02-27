@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><'))::int)
+                           ) 
+    WHERE 
+        p.PostTypeId = 1 AND      -- Only Questions
+        p.CreationDate >= NOW() - INTERVAL '1 year'  -- Posts created in the last year
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+TopQuestions AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.TagList
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank = 1
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        STRING_AGG(c.Text, ' | ') AS Comments, 
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+FinalOutput AS (
+    SELECT 
+        tq.PostId,
+        tq.Title,
+        tq.Body,
+        tq.CreationDate,
+        tq.Score,
+        tq.ViewCount,
+        tq.OwnerDisplayName,
+        tq.TagList,
+        pc.Comments,
+        pc.CommentCount
+    FROM 
+        TopQuestions tq
+    LEFT JOIN 
+        PostComments pc ON tq.PostId = pc.PostId
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN Score < 10 THEN 'Low'
+        WHEN Score BETWEEN 10 AND 50 THEN 'Medium'
+        ELSE 'High'
+    END AS ScoreCategory
+FROM 
+    FinalOutput
+ORDER BY 
+    CreationDate DESC
+LIMIT 50;

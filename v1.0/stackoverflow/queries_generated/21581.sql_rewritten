@@ -1,0 +1,97 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        DENSE_RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, '>')) AS tag ON t.TagName = tag
+    GROUP BY 
+        p.Id
+),
+BadgesByUser AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    WHERE 
+        Class = 1 
+    GROUP BY 
+        UserId
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        COALESCE(rv.VoteCount, 0) AS TotalVotes,
+        COALESCE(rv.UpVotes, 0) AS UpVotes,
+        COALESCE(rv.DownVotes, 0) AS DownVotes,
+        pt.Tags,
+        bu.BadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentVotes rv ON rp.PostId = rv.PostId
+    LEFT JOIN 
+        PostTags pt ON rp.PostId = pt.PostId
+    LEFT JOIN 
+        BadgesByUser bu ON rp.PostId = bu.UserId
+    WHERE 
+        (rp.UserPostRank = 1 OR rp.ScoreRank <= 10) 
+)
+SELECT 
+    FR.PostId,
+    FR.Title,
+    FR.CreationDate,
+    FR.Score,
+    FR.ViewCount,
+    FR.AnswerCount,
+    FR.TotalVotes,
+    FR.UpVotes,
+    FR.DownVotes,
+    FR.Tags,
+    FR.BadgeCount,
+    CASE 
+        WHEN FR.Score IS NULL THEN 'Score not available'
+        WHEN FR.Score > 100 THEN 'Highly Scored'
+        WHEN FR.Score BETWEEN 51 AND 100 THEN 'Moderately Scored'
+        ELSE 'Low Scored'
+    END AS ScoreCategory
+FROM 
+    FinalResults FR
+WHERE 
+    FR.BadgeCount > 0 
+ORDER BY 
+    FR.Score DESC, FR.CreationDate DESC
+FETCH FIRST 50 ROWS ONLY;

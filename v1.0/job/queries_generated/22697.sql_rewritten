@@ -1,0 +1,78 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON m.id = ml.linked_movie_id
+    WHERE 
+        mh.level < 5  
+),
+cast_summary AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast_members,
+        ARRAY_AGG(DISTINCT a.name) AS cast_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk 
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    COALESCE(cs.total_cast_members, 0) AS total_cast_members,
+    COALESCE(cs.cast_names, ARRAY[]::text[]) AS cast_names,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    COUNT(DISTINCT m.id) OVER() AS total_movies,
+    ROW_NUMBER() OVER(ORDER BY mh.production_year DESC, mh.movie_title) AS row_num
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_summary cs ON mh.movie_id = cs.movie_id
+LEFT JOIN 
+    movie_keywords mk ON mh.movie_id = mk.movie_id
+WHERE 
+    mh.production_year >= 2000 
+    OR mh.movie_title LIKE '%Zombie%'
+    OR EXISTS (
+        SELECT 1 FROM movie_info mi 
+        WHERE mi.movie_id = mh.movie_id 
+        AND mi.info LIKE 'Award%' 
+        AND mi.note IS NOT NULL
+    )
+ORDER BY 
+    mh.production_year DESC, mh.movie_title
+LIMIT 100;

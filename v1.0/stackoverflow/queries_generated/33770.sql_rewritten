@@ -1,0 +1,73 @@
+WITH RecursivePostThreads AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        0 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        r.Depth + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostThreads r ON a.ParentId = r.PostId
+),
+UserVoteSummary AS (
+    SELECT 
+        v.UserId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    INNER JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(us.UpVotes, 0) AS UpVotes,
+    COALESCE(us.DownVotes, 0) AS DownVotes,
+    ub GoldBadges,
+    ub SilverBadges,
+    ub BronzeBadges,
+    p.Depth AS QuestionDepth,
+    COUNT(DISTINCT r.PostId) AS AnswerCount,
+    AVG(p.Score) AS AveragePostScore,
+    STRING_AGG(DISTINCT p.Tags, ', ') AS AssociatedTags
+FROM 
+    Users u
+LEFT JOIN 
+    UserVoteSummary us ON u.Id = us.UserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    RecursivePostThreads p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Posts r ON p.PostId = r.ParentId
+WHERE 
+    u.Reputation > 1000  
+GROUP BY 
+    u.Id, u.DisplayName, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges, p.Depth
+ORDER BY 
+    u.Reputation DESC, QuestionDepth ASC;

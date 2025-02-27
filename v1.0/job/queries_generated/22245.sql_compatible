@@ -1,0 +1,84 @@
+
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM
+        aka_title t
+    WHERE
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+CompanyAggregates AS (
+    SELECT
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY
+        mc.movie_id
+),
+TitleWithCompany AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(ca.company_count, 0) AS total_companies,
+        ca.company_names
+    FROM
+        RankedMovies rm
+    LEFT JOIN
+        CompanyAggregates ca ON rm.movie_id = ca.movie_id
+),
+DetailedCast AS (
+    SELECT
+        cc.movie_id,
+        COUNT(DISTINCT cc.person_id) AS distinct_actors,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+        AVG(CASE WHEN cc.note IS NOT NULL THEN 1 ELSE 0 END) AS note_presence
+    FROM
+        cast_info cc
+    JOIN
+        aka_name a ON cc.person_id = a.person_id
+    GROUP BY
+        cc.movie_id
+),
+MoviesAsJSON AS (
+    SELECT
+        twc.movie_id,
+        twc.title,
+        twc.production_year,
+        twc.total_companies,
+        twc.company_names,
+        dc.distinct_actors,
+        dc.actor_names,
+        dc.note_presence
+    FROM
+        TitleWithCompany twc
+    LEFT JOIN
+        DetailedCast dc ON twc.movie_id = dc.movie_id
+)
+SELECT
+    json_build_object(
+        'movie_id', movie_id,
+        'title', title,
+        'production_year', production_year,
+        'total_companies', total_companies,
+        'company_names', company_names,
+        'distinct_actors', distinct_actors,
+        'actor_names', actor_names,
+        'note_presence', note_presence
+    ) AS movie_details
+FROM
+    MoviesAsJSON
+WHERE
+    production_year IS NOT NULL
+    AND (total_companies > 1 OR note_presence > 0.5)
+ORDER BY
+    production_year DESC,
+    title ASC
+LIMIT 50;

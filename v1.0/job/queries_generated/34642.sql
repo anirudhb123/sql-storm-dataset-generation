@@ -1,0 +1,68 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year > 2000 -- Filtering for movies after 2000
+    UNION ALL
+    SELECT
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+AggregatedMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.depth,
+        COUNT(ci.person_id) AS actor_count
+    FROM
+        MovieHierarchy mh
+    LEFT JOIN
+        cast_info ci ON mh.movie_id = ci.movie_id
+    GROUP BY
+        mh.movie_id, mh.title, mh.production_year, mh.depth
+),
+TopMovies AS (
+    SELECT
+        am.movie_id,
+        am.title,
+        am.production_year,
+        am.depth,
+        am.actor_count,
+        RANK() OVER (PARTITION BY am.depth ORDER BY am.actor_count DESC) AS ranking
+    FROM
+        AggregatedMovies am
+)
+SELECT
+    t.title,
+    COUNT(DISTINCT c.person_id) AS unique_actors,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    DENSE_RANK() OVER (ORDER BY t.production_year DESC) AS release_rank
+FROM
+    TopMovies t
+LEFT JOIN
+    cast_info c ON t.movie_id = c.movie_id
+LEFT JOIN
+    aka_name ak ON c.person_id = ak.person_id
+WHERE
+    t.ranking <= 5 -- Selecting top 5 movies per depth
+GROUP BY
+    t.movie_id, t.title, t.production_year
+HAVING
+    COUNT(DISTINCT c.person_id) > 0 -- Only consider movies with actors
+ORDER BY
+    release_rank, t.actor_count DESC; -- Final ordering
+

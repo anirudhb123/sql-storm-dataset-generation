@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS Owner,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 month'
+    GROUP BY 
+        p.Id, p.Title, u.DisplayName, p.CreationDate
+),
+PopularTags AS (
+    SELECT 
+        t.TagName, 
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+PostHistoryTypesWithReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(CASE 
+            WHEN pht.Id IN (10, 11) THEN ctr.Name
+            ELSE pht.Name 
+        END, ', ') AS HistoryComments
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    LEFT JOIN 
+        CloseReasonTypes ctr ON ph.Comment::int = ctr.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Owner,
+    rp.CreationDate,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    pht.HistoryComments,
+    COALESCE(pt.PostCount, 0) AS PopularTagCount,
+    CASE 
+        WHEN rp.Rank = 1 AND rp.UpVotes > 10 THEN 'Hot Post'
+        WHEN rp.DownVotes > 5 THEN 'Needs Attention'
+        ELSE 'Regular Post'
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryTypesWithReasons pht ON rp.PostId = pht.PostId
+LEFT JOIN 
+    PopularTags pt ON p.Title LIKE CONCAT('%', pt.TagName, '%')
+WHERE 
+    rp.CommentCount > 0 
+    AND (rp.UpVotes - rp.DownVotes) >= 5
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 100;

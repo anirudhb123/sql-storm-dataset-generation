@@ -1,0 +1,60 @@
+WITH RECURSIVE UserBadges AS (
+    SELECT UserId, COUNT(*) AS BadgeCount
+    FROM Badges
+    GROUP BY UserId
+),
+PostScore AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Score,
+        COALESCE(MAX(b.Class), 0) AS MaxBadgeClass -- Get max badge class of user
+    FROM Posts p
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY p.Id, p.OwnerUserId, p.Score
+),
+PostWithUserStats AS (
+    SELECT 
+        p.*,
+        COALESCE(u.Reputation, 0) AS UserReputation,
+        COALESCE(ub.BadgeCount, 0) AS UserBadgeCount
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+),
+RankedPosts AS (
+    SELECT 
+        pwus.*,
+        RANK() OVER (PARTITION BY PostTypeId ORDER BY Score DESC, ViewCount DESC) AS PostRank
+    FROM PostWithUserStats pwus
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.UserReputation,
+    rp.UserBadgeCount,
+    CASE 
+        WHEN rp.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+        ELSE 'Not Accepted'
+    END AS AnswerStatus,
+    STRING_AGG(DISTINCT tag.TagName, ', ') AS TagsList
+FROM RankedPosts rp
+LEFT JOIN LATERAL (
+    SELECT 
+        unnest(string_to_array(rp.Tags, '>,<'))::varchar AS TagName
+) AS tag ON TRUE
+WHERE rp.PostRank <= 10 -- Top 10 posts per type
+GROUP BY 
+    rp.Id,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.UserReputation,
+    rp.UserBadgeCount,
+    rp.AcceptedAnswerId
+ORDER BY 
+    rp.PostTypeId, rp.Score DESC;

@@ -1,0 +1,66 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+PartSummary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name,
+    COALESCE(c.total_spent, 0) AS customer_spending,
+    COALESCE(rnk.s_name, '--') AS top_supplier_name,
+    COALESCE(ps.total_revenue, 0) AS part_revenue,
+    (CASE 
+        WHEN c.total_spent IS NULL THEN 'No Orders' 
+        WHEN c.total_spent > 10000 THEN 'High Roller' 
+        ELSE 'Regular' 
+     END) AS customer_status,
+    CASE 
+        WHEN ps.total_revenue > 5000 THEN 'High Revenue Part' 
+        ELSE 'Regular Part' 
+    END AS part_classification
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    HighValueCustomers c ON n.n_nationkey = c.c_custkey
+LEFT JOIN 
+    RankedSuppliers rnk ON n.n_nationkey = rnk.s_suppkey AND rnk.rnk = 1
+LEFT JOIN 
+    PartSummary ps ON ps.p_partkey = (SELECT ps_partkey FROM partsupp WHERE ps_supplycost = (SELECT MAX(ps_supplycost) FROM partsupp))
+WHERE 
+    n.n_nationkey IS NOT NULL
+ORDER BY 
+    customer_spending DESC, part_revenue DESC 
+FETCH FIRST 50 ROWS ONLY;

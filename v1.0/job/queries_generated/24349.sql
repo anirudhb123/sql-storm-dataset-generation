@@ -1,0 +1,90 @@
+WITH RECURSIVE movie_series AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.season_nr,
+        t.episode_nr,
+        ROW_NUMBER() OVER (PARTITION BY t.episode_of_id ORDER BY t.season_nr, t.episode_nr) AS seq
+    FROM 
+        aka_title t
+    WHERE 
+        t.episode_of_id IS NOT NULL
+),
+company_info AS (
+    SELECT 
+        c.name AS company_name,
+        ct.kind AS company_type,
+        m.production_year,
+        COUNT(m.id) AS movie_count
+    FROM 
+        movie_companies m_c
+    JOIN 
+        company_name c ON m_c.company_id = c.id
+    JOIN 
+        company_type ct ON m_c.company_type_id = ct.id
+    JOIN 
+        aka_title m ON m_c.movie_id = m.id
+    GROUP BY 
+        c.name, ct.kind, m.production_year
+),
+person_movie_roles AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        ct.kind AS character_type,
+        cnt.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY a.name ORDER BY cnt.nr_order) AS role_seq
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info cnt ON a.person_id = cnt.person_id
+    JOIN 
+        aka_title t ON cnt.movie_id = t.id
+    JOIN 
+        role_type ct ON cnt.role_id = ct.id
+    WHERE 
+        t.production_year >= 2000
+),
+filtered_movies AS (
+    SELECT 
+        m.title AS movie_title,
+        m.production_year,
+        m.id AS movie_id,
+        COALESCE((SELECT COUNT(*) 
+                  FROM movie_keyword mk 
+                  WHERE mk.movie_id = m.id 
+                    AND mk.keyword_id IN (SELECT id FROM keyword WHERE keyword LIKE '%action%')), 0) AS action_keyword_count
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2010
+)
+SELECT 
+    pm.actor_name,
+    pm.movie_title,
+    pm.role_seq,
+    ms.title AS series_title,
+    ms.season_nr,
+    ms.episode_nr,
+    ci.company_name,
+    ci.company_type,
+    ci.movie_count,
+    fm.production_year,
+    fm.action_keyword_count
+FROM 
+    person_movie_roles pm
+LEFT JOIN 
+    movie_series ms ON pm.movie_title = ms.title
+LEFT JOIN 
+    company_info ci ON ci.movie_count > 1
+LEFT JOIN 
+    filtered_movies fm ON fm.movie_title = pm.movie_title
+WHERE 
+    pm.role_seq <= 3
+    AND (fm.action_keyword_count IS NULL OR fm.action_keyword_count > 1)
+ORDER BY 
+    pm.actor_name,
+    fm.production_year DESC,
+    ms.season_nr ASC NULLS LAST,
+    pm.role_seq;

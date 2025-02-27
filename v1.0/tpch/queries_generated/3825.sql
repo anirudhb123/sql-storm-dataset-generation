@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank_per_nation
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS customer_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey
+),
+BestParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+)
+SELECT 
+    ns.n_name AS nation,
+    rs.s_name AS supplier_name,
+    bp.p_name AS part_name,
+    os.total_revenue,
+    os.customer_count
+FROM 
+    RankedSuppliers rs
+JOIN 
+    nation ns ON rs.s_nationkey = ns.n_nationkey
+LEFT JOIN 
+    BestParts bp ON EXISTS (
+        SELECT 1 
+        FROM partsupp ps 
+        WHERE ps.ps_suppkey = rs.s_suppkey 
+        AND ps.ps_partkey = bp.p_partkey
+    )
+JOIN 
+    OrderStats os ON os.o_orderkey IN (
+        SELECT o.o_orderkey
+        FROM orders o
+        WHERE o.o_custkey IN (
+            SELECT c.c_custkey 
+            FROM customer c 
+            WHERE c.c_nationkey = ns.n_nationkey
+        )
+    )
+WHERE 
+    rs.rank_per_nation <= 5
+    AND os.total_revenue IS NOT NULL
+ORDER BY 
+    ns.n_name, rs.s_acctbal DESC;

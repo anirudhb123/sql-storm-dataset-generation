@@ -1,0 +1,51 @@
+
+WITH ranked_addresses AS (
+    SELECT 
+        ca.ca_address_id,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_city ORDER BY ca.ca_address_id) AS address_rank
+    FROM customer_address ca
+    WHERE ca.ca_state = 'NY'
+),
+customer_with_addresses AS (
+    SELECT 
+        c.c_customer_id,
+        ca.full_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM customer c
+    JOIN ranked_addresses ra ON c.c_current_addr_sk = ra.ca_address_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE ra.address_rank <= 5
+),
+sales_summary AS (
+    SELECT 
+        cwa.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM customer_with_addresses cwa
+    JOIN web_sales ws ON cwa.c_customer_id = ws.ws_bill_customer_sk
+    GROUP BY cwa.c_customer_id
+),
+final_report AS (
+    SELECT 
+        cwa.c_customer_id,
+        cwa.full_address,
+        cwa.cd_gender,
+        cwa.cd_marital_status,
+        cwa.cd_education_status,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        COALESCE(ss.total_orders, 0) AS total_orders
+    FROM customer_with_addresses cwa
+    LEFT JOIN sales_summary ss ON cwa.c_customer_id = ss.c_customer_id
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_sales > 1000 THEN 'High Value'
+        WHEN total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM final_report
+ORDER BY total_sales DESC;

@@ -1,0 +1,63 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS rn,
+        COUNT(c.movie_id) OVER (PARTITION BY a.id) AS cast_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ARRAY_AGG(mk.keyword) AS keywords,
+        COUNT(mi.info) FILTER (WHERE it.info = 'description') AS description_count
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        m.id, m.title
+),
+CastSummary AS (
+    SELECT 
+        ci.movie_id,
+        ARRAY_AGG(a.name) AS actors,
+        COUNT(ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    ms.actors,
+    ms.actor_count,
+    CASE 
+        WHEN rm.cast_count > 0 THEN 'Has Cast'
+        ELSE 'No Cast'
+    END AS cast_status,
+    COALESCE(mi.keywords, '{}') AS keywords,
+    mi.description_count
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastSummary ms ON rm.id = ms.movie_id
+LEFT JOIN 
+    MovieInfo mi ON rm.title = mi.title AND rm.production_year = mi.production_year 
+WHERE 
+    rm.rn <= 5
+ORDER BY 
+    rm.production_year DESC, rm.title;

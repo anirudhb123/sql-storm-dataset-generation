@@ -1,0 +1,37 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT m.company_id) AS num_companies,
+        COUNT(DISTINCT k.keyword) AS num_keywords,
+        ROW_NUMBER() OVER (ORDER BY t.production_year DESC) AS rank
+    FROM title t
+    LEFT JOIN movie_companies m ON t.id = m.movie_id
+    LEFT JOIN movie_keyword k ON t.id = k.movie_id
+    GROUP BY t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title, 
+        rm.production_year, 
+        rm.num_companies, 
+        rm.num_keywords
+    FROM RankedMovies rm
+    WHERE rm.rank <= 100
+)
+SELECT 
+    fm.title, 
+    fm.production_year, 
+    fm.num_companies,
+    fm.num_keywords,
+    AVG(pi.info_type_id) AS avg_info_type_id,
+    STRING_AGG(DISTINCT c.name, ', ') AS cast_names
+FROM FilteredMovies fm
+LEFT JOIN complete_cast cc ON fm.title = cc.movie_id
+LEFT JOIN person_info pi ON cc.subject_id = pi.person_id
+LEFT JOIN aka_name an ON cc.subject_id = an.person_id
+LEFT JOIN cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN name n ON an.person_id = n.imdb_id
+LEFT JOIN char_name cn ON n.id = cn.imdb_id
+GROUP BY fm.title, fm.production_year, fm.num_companies, fm.num_keywords
+ORDER BY fm.production_year DESC;

@@ -1,0 +1,69 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        NULL::integer AS parent_id
+    FROM
+        aka_title mt
+    WHERE
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_id
+    FROM
+        aka_title e
+    INNER JOIN
+        MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+),
+FilteredMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level,
+        pm.role AS lead_role,
+        ce.name AS company_name
+    FROM
+        MovieHierarchy mh
+    LEFT JOIN
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN
+        role_type pm ON cc.role_id = pm.id AND pm.role IS NOT NULL
+    LEFT JOIN
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN
+        company_name ce ON mc.company_id = ce.id
+    WHERE
+        mh.level <= 2 
+)
+SELECT
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.level,
+    COALESCE(fm.lead_role, 'Unknown Role') AS lead_role,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    STRING_AGG(DISTINCT ce.name, ', ') AS company_names,
+    CASE 
+        WHEN fm.production_year IS NULL THEN 'Year Unknown'
+        WHEN fm.production_year BETWEEN 1900 AND 1929 THEN 'Early Cinema'
+        WHEN fm.production_year BETWEEN 1930 AND 1969 THEN 'Classic Era'
+        WHEN fm.production_year BETWEEN 1970 AND 1999 THEN 'Modern Era'
+        ELSE 'Recent Cinema'
+    END AS era
+FROM
+    FilteredMovies fm
+LEFT JOIN
+    movie_companies mc ON fm.movie_id = mc.movie_id
+GROUP BY
+    fm.movie_id, fm.title, fm.production_year, fm.level
+ORDER BY
+    fm.production_year DESC, fm.level DESC, fm.title;

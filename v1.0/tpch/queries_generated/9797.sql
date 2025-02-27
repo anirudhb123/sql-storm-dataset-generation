@@ -1,0 +1,26 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_name, c.c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+RegionalInfo AS (
+    SELECT r.r_name, SUM(CASE WHEN ro.order_rank <= 10 THEN ro.o_orderkey END) AS top_orders_count,
+           AVG(c.c_acctbal) AS avg_acctbal
+    FROM RankedOrders ro
+    JOIN nation n ON ro.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY r.r_name
+),
+PartAggregates AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT ri.r_name, ri.top_orders_count, ri.avg_acctbal, pa.p_name, pa.total_available_qty, pa.avg_supply_cost
+FROM RegionalInfo ri
+JOIN PartAggregates pa ON ri.top_orders_count > 50
+ORDER BY ri.r_name, ri.top_orders_count DESC, pa.total_available_qty DESC;

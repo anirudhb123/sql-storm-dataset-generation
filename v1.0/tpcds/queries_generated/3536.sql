@@ -1,0 +1,48 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name || ' ' || c.c_last_name AS full_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_paid) AS avg_order_value
+    FROM 
+        customer AS c
+    JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) 
+                               AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.full_name,
+        cs.total_sales,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer AS c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.total_sales > (SELECT AVG(total_sales) FROM CustomerSales)
+)
+SELECT 
+    tc.full_name,
+    tc.total_sales,
+    CASE 
+        WHEN tc.total_sales > 1000 THEN 'Gold'
+        WHEN tc.total_sales BETWEEN 500 AND 1000 THEN 'Silver'
+        ELSE 'Bronze'
+    END AS customer_tier,
+    COALESCE((SELECT COUNT(sr.ticket_number) 
+              FROM store_returns sr 
+              WHERE sr.sr_customer_sk = tc.c_customer_sk), 0) AS returns_count
+FROM 
+    TopCustomers tc
+WHERE 
+    tc.sales_rank <= 10
+ORDER BY 
+    tc.total_sales DESC;

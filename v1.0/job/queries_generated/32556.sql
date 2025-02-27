@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        aka_title t
+    JOIN 
+        movie_link ml ON t.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+
+MoviesWithKeywords AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COUNT(mk.keyword_id) AS keyword_count,
+        MAX(t.production_year) AS year
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, t.title
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(cr.total_cast, 0) AS total_cast,
+    COALESCE(cr.cast_names, 'No cast') AS cast_names,
+    COALESCE(mk.keyword_count, 0) AS keyword_count,
+    mh.level
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastRoles cr ON mh.movie_id = cr.movie_id
+LEFT JOIN 
+    MoviesWithKeywords mk ON mh.movie_id = mk.movie_id
+WHERE 
+    mh.production_year >= 2000
+ORDER BY 
+    mh.production_year DESC, mh.title;
+
+-- This query provides a hierarchical view of movies, their cast information, and associated keywords. 
+-- It includes several advanced SQL features: recursive CTEs, string aggregation, outer joins, and COALESCE for NULL handling.

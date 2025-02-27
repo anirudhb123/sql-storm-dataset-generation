@@ -1,0 +1,51 @@
+WITH UserVotes AS (
+    SELECT 
+        V.UserId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 4 THEN 1 END) AS OffensiveVotes
+    FROM Votes V
+    GROUP BY V.UserId
+),
+PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COALESCE(UpV.UpVotes, 0) AS UpVotes,
+        COALESCE(DownV.DownVotes, 0) AS DownVotes,
+        COALESCE(OffensiveV.OffensiveVotes, 0) AS OffensiveVotes,
+        P.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY P.Score DESC, P.ViewCount DESC) AS Rank
+    FROM Posts P
+    LEFT JOIN UserVotes UpV ON P.OwnerUserId = UpV.UserId
+    LEFT JOIN UserVotes DownV ON P.OwnerUserId = DownV.UserId
+    LEFT JOIN UserVotes OffensiveV ON P.OwnerUserId = OffensiveV.UserId
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+)
+SELECT 
+    M.PostId,
+    M.Title,
+    M.Score,
+    M.UpVotes,
+    M.DownVotes,
+    M.OffensiveVotes,
+    CASE 
+        WHEN M.UpVotes > M.DownVotes THEN 'Positive' 
+        WHEN M.UpVotes < M.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS Sentiment,
+    PHT.Name AS PostHistoryType,
+    (SELECT 
+        STRING_AGG(DISTINCT T.TagName, ', ') 
+     FROM Tags T
+     JOIN Posts P ON T.Id = P.Tags
+     WHERE P.Id = M.PostId) AS TagsList
+FROM PostMetrics M
+LEFT JOIN PostHistory PH ON PH.PostId = M.PostId
+LEFT JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+WHERE M.Rank <= 10
+  AND M.UpVotes + M.DownVotes > 0
+ORDER BY M.Score DESC, M.ViewCount DESC;
+

@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM
+        aka_title t
+    WHERE
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') -- Base case: direct movies
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title t ON ml.linked_movie_id = t.id
+)
+
+SELECT
+    a.name AS actor_name,
+    STRING_AGG(DISTINCT mt.title, ', ') AS movies,
+    COUNT(DISTINCT mt.id) AS movie_count,
+    AVG(mt.production_year) AS avg_production_year,
+    COUNT(DISTINCT CASE WHEN mci.note IS NOT NULL THEN mci.note END) AS company_notes,
+    COUNT(DISTINCT nk.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY AVG(m.production_year) DESC) AS rank
+FROM
+    aka_name a
+JOIN
+    cast_info c ON a.person_id = c.person_id
+JOIN
+    aka_title mt ON c.movie_id = mt.id
+LEFT JOIN
+    movie_companies mc ON mc.movie_id = mt.id
+LEFT JOIN
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN
+    movie_info mi ON mt.id = mi.movie_id
+LEFT JOIN
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN
+    keyword nk ON mk.keyword_id = nk.id
+LEFT JOIN
+    complete_cast mci ON mt.id = mci.movie_id
+WHERE
+    mt.production_year BETWEEN 2000 AND 2023
+    AND (cn.country_code IS NOT NULL OR mc.note IS NOT NULL)
+GROUP BY
+    a.id, a.name
+HAVING
+    COUNT(DISTINCT mt.id) > 3
+ORDER BY
+    avg_production_year DESC;

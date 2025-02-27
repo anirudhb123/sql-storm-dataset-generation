@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sh.level + 1
+    FROM supplier sp
+    JOIN SupplierHierarchy sh ON sp.s_nationkey = sh.s_nationkey
+    WHERE sp.s_acctbal > sh.level * 1000
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY c.c_custkey, c.c_name
+    ORDER BY total_spent DESC
+    LIMIT 10
+),
+HighValueParts AS (
+    SELECT p.*, ps.ps_supplycost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+RegionPerformance AS (
+    SELECT r.r_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE l.l_shipdate BETWEEN '1996-01-01' AND '1997-01-01'
+    GROUP BY r.r_name
+)
+
+SELECT rh.s_suppkey, rh.s_name, rh.level, tc.c_name AS top_customer, tc.total_spent, p.p_name, rp.total_revenue
+FROM SupplierHierarchy rh
+JOIN TopCustomers tc ON rh.s_nationkey = tc.c_custkey
+JOIN HighValueParts p ON rh.s_suppkey = p.p_partkey 
+JOIN RegionPerformance rp ON tc.c_custkey = rp.total_revenue
+WHERE rp.total_revenue IS NOT NULL
+ORDER BY rp.total_revenue DESC, tc.total_spent DESC
+FETCH FIRST 100 ROWS ONLY;

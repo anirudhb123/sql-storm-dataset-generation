@@ -1,0 +1,62 @@
+WITH RankedProducts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > 100
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        COUNT(DISTINCT ps.ps_partkey) > 5
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent, 
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        o.o_orderdate >= '2023-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    cu.c_name AS customer_name, 
+    cu.total_spent AS total_spent, 
+    rp.p_name AS product_name, 
+    rp.total_supply_cost AS total_supply_cost, 
+    ts.s_name AS supplier_name, 
+    ts.part_count AS number_of_parts_supplied
+FROM 
+    CustomerOrderSummary cu
+JOIN 
+    RankedProducts rp ON rp.total_supply_cost > 1000
+JOIN 
+    TopSuppliers ts ON ts.part_count > 10
+WHERE 
+    cu.total_spent > 500
+ORDER BY 
+    cu.total_spent DESC, rp.total_supply_cost ASC
+LIMIT 10;

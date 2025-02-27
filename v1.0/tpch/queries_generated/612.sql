@@ -1,0 +1,60 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rn
+    FROM supplier s
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) as total_spent,
+        COUNT(DISTINCT o.o_orderkey) as order_count,
+        AVG(o.o_totalprice) as avg_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        SUM(ps.ps_availqty) as total_available_quantity,
+        AVG(ps.ps_supplycost) as avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    cs.cust_name,
+    cs.total_spent,
+    cs.order_count,
+    p.part_name,
+    p.total_available_quantity,
+    ps.s_name AS supplier_name,
+    ps.avg_supply_cost
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN customer c ON c.c_nationkey = n.n_nationkey
+JOIN CustomerOrderStats cs ON cs.c_custkey = c.c_custkey
+LEFT JOIN PartSupplierInfo p ON p.p_retailprice < 100 AND EXISTS (
+    SELECT 1
+    FROM RankedSuppliers s
+    WHERE s.s_suppkey = (SELECT ps.ps_suppkey 
+                         FROM partsupp ps 
+                         WHERE ps.ps_partkey = p.p_partkey 
+                         ORDER BY ps.ps_supplycost ASC LIMIT 1)
+    AND s.rn <= 5
+)
+LEFT JOIN supplier ps ON ps.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey = p.p_partkey
+)
+WHERE c.c_acctbal IS NOT NULL
+AND p.total_available_quantity IS NOT NULL
+ORDER BY total_spent DESC, customer_name;

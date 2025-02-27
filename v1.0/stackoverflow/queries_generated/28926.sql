@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.Tags,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        P.Score,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COALESCE(COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.Tags ORDER BY P.CreationDate DESC) AS TagRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.PostTypeId = 1   -- Eagering only questions
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+
+FilteredPosts AS (
+    SELECT 
+        RP.* 
+    FROM 
+        RankedPosts RP
+    WHERE 
+        RP.TagRank <= 3  -- Getting top 3 posts per tag
+),
+
+PostWithBadges AS (
+    SELECT 
+        FP.*,
+        B.Name AS BadgeName,
+        B.Class AS BadgeClass
+    FROM 
+        FilteredPosts FP
+    LEFT JOIN 
+        Badges B ON FP.OwnerUserId = B.UserId
+    WHERE 
+        B.Date >= DATEADD(year, -1, GETDATE())  -- Only badges earned in the last year
+)
+
+SELECT 
+    PW.PostId,
+    PW.Title,
+    PW.OwnerDisplayName,
+    PW.CreationDate,
+    PW.Score,
+    PW.UpVotes,
+    PW.DownVotes,
+    PW.CommentCount,
+    STRING_AGG(DISTINCT PW.BadgeName, ', ') AS BadgeNames,
+    STRING_AGG(DISTINCT CASE 
+                            WHEN PW.BadgeClass = 1 THEN 'Gold'
+                            WHEN PW.BadgeClass = 2 THEN 'Silver'
+                            WHEN PW.BadgeClass = 3 THEN 'Bronze'
+                        END, ', ') AS BadgeClasses
+FROM 
+    PostWithBadges PW
+GROUP BY 
+    PW.PostId, PW.Title, PW.OwnerDisplayName, PW.CreationDate, PW.Score, PW.UpVotes, PW.DownVotes, PW.CommentCount
+ORDER BY 
+    PW.Score DESC;

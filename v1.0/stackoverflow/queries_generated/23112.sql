@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        ph.UserDisplayName,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Comment END) AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed and reopened
+    GROUP BY 
+        ph.PostId, ph.UserDisplayName, ph.CreationDate
+),
+UserVotingStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId = 4 THEN 1 ELSE 0 END) AS OffensiveVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+RecentTagUsage AS (
+    SELECT 
+        unnest(string_to_array(p.Tags, '>')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days' 
+        AND p.Tags IS NOT NULL
+    GROUP BY 
+        TagName
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS MaxBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.DisplayName,
+    COUNT(DISTINCT rp.PostId) AS QuestionCount,
+    COALESCE(SUM(cb.CloseReason IS NOT NULL), 0) AS ClosedQuestions,
+    COALESCE(uvs.TotalVotes, 0) AS TotalVotes,
+    COALESCE(uvs.UpVotes, 0) AS UpVotes,
+    COALESCE(uvs.DownVotes, 0) AS DownVotes,
+    COALESCE(uvs.OffensiveVotes, 0) AS OffensiveVotes,
+    COALESCE(MAX(rb.BadgeCount), 0) AS TotalBadges,
+    STRING_AGG(DISTINCT rt.TagName, ', ') AS RecentTags
+FROM 
+    Users up
+LEFT JOIN 
+    RankedPosts rp ON up.Id = rp.OwnerUserId AND rp.PostRank = 1
+LEFT JOIN 
+    ClosedPosts cb ON rp.PostId = cb.PostId
+LEFT JOIN 
+    UserVotingStatistics uvs ON up.Id = uvs.UserId
+LEFT JOIN 
+    UserBadges rb ON up.Id = rb.UserId
+LEFT JOIN 
+    RecentTagUsage rt ON rt.TagName = ANY(STRING_TO_ARRAY(rp.Tags, '>'))
+WHERE 
+    up.Reputation > 1000
+GROUP BY 
+    up.Id
+HAVING 
+    COUNT(DISTINCT rp.PostId) > 5
+ORDER BY 
+    QuestionCount DESC, TotalVotes DESC;

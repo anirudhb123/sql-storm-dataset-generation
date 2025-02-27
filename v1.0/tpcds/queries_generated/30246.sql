@@ -1,0 +1,51 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_addr_sk, 0 AS level
+    FROM customer
+    WHERE c_current_addr_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_addr_sk, ch.level + 1
+    FROM customer c
+    INNER JOIN customer_hierarchy ch ON c.c_current_addr_sk = ch.c_current_addr_sk
+    WHERE ch.level < 10
+),
+sales_summary AS (
+    SELECT
+        d.d_year,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        COUNT(DISTINCT ws_bill_customer_sk) AS unique_customers
+    FROM web_sales w
+    JOIN date_dim d ON w.ws_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_year
+),
+last_sales AS (
+    SELECT
+        cs_bill_customer_sk,
+        MAX(ws_sold_date_sk) AS last_purchase_date
+    FROM web_sales
+    GROUP BY cs_bill_customer_sk
+)
+SELECT 
+    ca.ca_country,
+    SUM(ss.total_sales) AS total_sales,
+    AVG(ss.order_count) AS average_orders,
+    MAX(ss.unique_customers) AS max_unique_customers,
+    COUNT(DISTINCT ch.c_customer_sk) AS customer_count,
+    STRING_AGG(DISTINCT CONCAT(ch.c_first_name, ' ', ch.c_last_name)) AS customer_names,
+    CASE 
+        WHEN ss.total_sales > 1000000 THEN 'High Revenue'
+        WHEN ss.total_sales BETWEEN 500000 AND 1000000 THEN 'Medium Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category,
+    COALESCE(l.last_purchase_date, 'No purchases') AS last_purchase
+FROM customer_address ca
+LEFT JOIN sales_summary ss ON ca.ca_address_sk = ss.d_year
+LEFT JOIN customer_hierarchy ch ON ca.ca_address_sk = ch.c_current_addr_sk
+LEFT JOIN last_sales l ON ch.c_customer_sk = l.cs_bill_customer_sk
+WHERE ca.ca_country IS NOT NULL AND ca.ca_country <> ''
+GROUP BY ca.ca_country, l.last_purchase_date
+HAVING SUM(ss.total_sales) > 20000
+ORDER BY total_sales DESC;

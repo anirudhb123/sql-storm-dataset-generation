@@ -1,0 +1,62 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS Author,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS RankScore
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        ph.Comment AS CloseReason,
+        u.DisplayName AS Closer
+    FROM 
+        PostHistory ph
+    JOIN 
+        Users u ON ph.UserId = u.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+        AND ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+TopQuestions AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.Author,
+        COALESCE(cp.CloseDate, 'Not Closed') AS ClosedStatus,
+        COALESCE(cp.CloseReason, 'N/A') AS CloseReason,
+        COALESCE(cp.Closer, 'N/A') AS CloserName
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.Id = cp.PostId
+    WHERE 
+        rp.RankScore <= 10
+)
+SELECT 
+    tq.*,
+    (ViewCount + 2 * AnswerCount + 3 * CommentCount) AS EngagementScore
+FROM 
+    TopQuestions tq
+ORDER BY 
+    EngagementScore DESC, 
+    CreationDate DESC;

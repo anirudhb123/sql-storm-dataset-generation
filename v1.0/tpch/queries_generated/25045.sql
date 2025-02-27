@@ -1,0 +1,32 @@
+SELECT 
+    p.p_name,
+    s.s_name,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(o.o_totalprice) AS average_order_price,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    r.r_name AS region_name,
+    n.n_name AS nation_name
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    orders o ON o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_brand LIKE 'Brand%'
+    AND s.s_acctbal > 1000
+    AND o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    p.p_name, s.s_name, r.r_name, n.n_name
+HAVING 
+    SUM(ps.ps_availqty) > 100
+ORDER BY 
+    average_order_price DESC, total_available_quantity DESC;

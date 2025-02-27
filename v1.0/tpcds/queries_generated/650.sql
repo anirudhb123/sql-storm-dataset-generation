@@ -1,0 +1,58 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank_by_quantity
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        ci.city_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN (
+        SELECT ca_city, COUNT(*) AS city_count
+        FROM customer_address
+        GROUP BY ca_city
+    ) ci ON c.c_current_addr_sk = ci.ca_address_sk
+),
+sales_analysis AS (
+    SELECT 
+        s.ss_item_sk,
+        s.ss_store_sk,
+        SUM(s.ss_net_profit) AS total_profit,
+        COUNT(DISTINCT s.ss_ticket_number) AS sale_count
+    FROM store_sales s
+    WHERE s.ss_sold_date_sk >= 2450000   -- Filter for a specific date range
+    GROUP BY s.ss_item_sk, s.ss_store_sk
+),
+top_stores AS (
+    SELECT 
+        ss.ss_store_sk,
+        SUM(ss.total_profit) AS store_profit
+    FROM sales_analysis ss
+    GROUP BY ss.ss_store_sk
+    ORDER BY store_profit DESC
+    LIMIT 5
+)
+SELECT 
+    c.c_customer_sk,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    coalesce(s.total_quantity, 0) AS total_web_quantity,
+    coalesce(sa.sale_count, 0) AS total_store_sales,
+    ts.store_profit
+FROM customer_info ci
+LEFT JOIN ranked_sales s ON ci.c_customer_sk = s.ws_item_sk
+LEFT JOIN sales_analysis sa ON ca_address_sk = ci.c_current_addr_sk
+LEFT JOIN top_stores ts ON ts.ss_store_sk = (SELECT s_store_sk FROM store WHERE s_store_sk = sa.ss_store_sk)
+WHERE ci.cd_gender IS NOT NULL
+    AND ci.cd_credit_rating = 'Good'
+ORDER BY total_web_quantity DESC, total_store_sales DESC;

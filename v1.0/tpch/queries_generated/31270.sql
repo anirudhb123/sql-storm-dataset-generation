@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_address, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+),
+IncreasedPrices AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_retailprice * 1.1 AS inflated_price,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+),
+OrderStats AS (
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           MIN(o.o_orderdate) AS first_order_date,
+           MAX(o.o_orderdate) AS last_order_date,
+           COUNT(DISTINCT o.o_custkey) AS unique_customers
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT n.n_name,
+       SUM(op.total_sales) AS total_sales,
+       AVG(ip.inflated_price) AS avg_inflated_retail_price,
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       COUNT(DISTINCT os.o_orderkey) AS total_orders,
+       COUNT(CASE WHEN os.unique_customers > 1 THEN 1 END) AS repeat_customers
+FROM nation n
+LEFT JOIN IncreasedPrices ip ON ip.supplier_count > 1
+LEFT JOIN OrderStats os ON os.total_sales > 0
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+WHERE n.n_name IS NOT NULL AND n.n_nationkey IN (SELECT DISTINCT s_nationkey FROM supplier WHERE s_acctbal IS NOT NULL)
+GROUP BY n.n_name
+HAVING SUM(op.total_sales) > 100000
+ORDER BY total_sales DESC;

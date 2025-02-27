@@ -1,0 +1,78 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+),
+CustomerCTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        n.n_name AS nation_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+    GROUP BY 
+        s.s_suppkey 
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+ProductDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_brand,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice, p.p_brand
+    HAVING 
+        COUNT(DISTINCT ps.ps_suppkey) > 1
+)
+SELECT 
+    c.c_name,
+    c.nation_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(o.o_totalprice) AS total_spent,
+    p.p_name,
+    p.supplier_count,
+    RANK() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS customer_rank
+FROM 
+    CustomerCTE c
+LEFT JOIN 
+    RankedOrders o ON c.c_custkey = o.o_custkey AND o.order_rank <= 5
+JOIN 
+    lineitem l ON l.l_orderkey = o.o_orderkey
+JOIN 
+    productdetails p ON p.p_partkey = l.l_partkey
+JOIN 
+    HighValueSuppliers hvs ON l.l_suppkey = hvs.s_suppkey
+WHERE 
+    o.o_orderstatus IN ('F', 'O')
+GROUP BY 
+    c.c_custkey, c.c_name, c.nation_name, p.p_name, p.supplier_count
+HAVING 
+    SUM(o.o_totalprice) IS NOT NULL AND p.supplier_count IS NOT NULL
+ORDER BY 
+    total_spent DESC, customer_rank ASC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

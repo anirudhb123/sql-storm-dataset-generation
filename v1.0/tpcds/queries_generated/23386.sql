@@ -1,0 +1,57 @@
+
+WITH RankedReturns AS (
+    SELECT sr_customer_sk,
+           SUM(sr_return_quantity) AS total_returned,
+           ROW_NUMBER() OVER (PARTITION BY sr_customer_sk ORDER BY SUM(sr_return_quantity) DESC) AS rnk
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+HighReturnCustomers AS (
+    SELECT rr.sr_customer_sk,
+           CR.first_name || ' ' || CR.last_name AS customer_name,
+           CR.c_email_address,
+           rr.total_returned
+    FROM RankedReturns rr
+    JOIN customer CR ON rr.sr_customer_sk = CR.c_customer_sk
+    WHERE rr.rnk = 1 AND rr.total_returned > (
+        SELECT AVG(total_returned)
+        FROM RankedReturns
+    )
+),
+SalesData AS (
+    SELECT ws.bill_customer_sk,
+           SUM(ws.net_profit) AS total_sales_profit,
+           COUNT(DISTINCT ws.order_number) AS total_orders
+    FROM web_sales ws
+    WHERE ws.bill_customer_sk IS NOT NULL
+    GROUP BY ws.bill_customer_sk
+),
+CustomerSales AS (
+    SELECT hrc.customer_name,
+           hrc.c_email_address,
+           COALESCE(sd.total_sales_profit, 0) AS total_sales_profit,
+           COALESCE(sd.total_orders, 0) AS total_orders,
+           hrc.total_returned
+    FROM HighReturnCustomers hrc
+    LEFT JOIN SalesData sd ON hrc.sr_customer_sk = sd.bill_customer_sk
+),
+FinalResults AS (
+    SELECT c.customer_name,
+           c.total_sales_profit,
+           c.total_orders,
+           CASE 
+               WHEN c.total_returned IS NULL THEN 'No Returns'
+               WHEN c.total_returned = 0 THEN 'Zero Returns'
+               ELSE 'Has Returns'
+           END AS return_status,
+           CASE 
+               WHEN c.total_sales_profit > 1000 THEN 'High Profit'
+               WHEN c.total_sales_profit BETWEEN 500 AND 1000 THEN 'Medium Profit'
+               ELSE 'Low Profit'
+           END AS profit_band
+    FROM CustomerSales c
+)
+SELECT *
+FROM FinalResults
+WHERE (return_status = 'Has Returns' AND profit_band != 'Low Profit')
+   OR (return_status = 'No Returns' AND total_orders > 5);

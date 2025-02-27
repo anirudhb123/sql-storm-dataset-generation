@@ -1,0 +1,76 @@
+
+WITH RECURSIVE OrderTotals AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        RANK() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(ps.ps_supplycost) AS supply_count,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        STRING_AGG(s.s_name, ', ') AS suppliers_list,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers,
+        AVG(ps.ps_supplycost) AS average_cost,
+        MAX(ps.ps_availqty) AS max_avail_qty
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(ot.total_price), 0) AS total_order_price,
+    p.p_name,
+    psi.suppliers_list,
+    s.avg_supply_cost,
+    s.total_avail_qty
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    OrderTotals ot ON o.o_orderkey = ot.o_orderkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    PartSupplierInfo psi ON l.l_partkey = psi.p_partkey
+JOIN 
+    SupplierDetails s ON psi.unique_suppliers = s.supply_count
+WHERE 
+    r.r_name IS NOT NULL AND 
+    o.o_orderstatus = 'O' AND 
+    (o.o_orderdate >= DATE '1997-01-01' OR o.o_totalprice IS NOT NULL)
+GROUP BY 
+    r.r_name, p.p_name, psi.suppliers_list, s.avg_supply_cost, s.total_avail_qty
+HAVING 
+    (COUNT(o.o_orderkey) > 10 OR SUM(ot.total_price) > 10000)
+ORDER BY 
+    total_order_price DESC
+LIMIT 50;

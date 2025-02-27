@@ -1,0 +1,56 @@
+
+WITH RecursiveMovieCTE AS (
+    SELECT m.id AS movie_id, m.title, 0 AS depth
+    FROM aka_title m
+    WHERE m.title LIKE '%Inception%' 
+
+    UNION ALL
+
+    SELECT m2.id, m2.title, rm.depth + 1
+    FROM movie_link ml
+    JOIN RecursiveMovieCTE rm ON ml.movie_id = rm.movie_id
+    JOIN aka_title m2 ON ml.linked_movie_id = m2.id
+    WHERE rm.depth < 4 
+),
+RankedActors AS (
+    SELECT a.id AS actor_id, an.name, COUNT(c.movie_id) AS role_count,
+           RANK() OVER (ORDER BY COUNT(c.movie_id) DESC) AS rnk
+    FROM cast_info c
+    JOIN aka_name an ON c.person_id = an.person_id
+    WHERE an.name IS NOT NULL
+    GROUP BY a.id, an.name
+),
+FilteredMovieInfo AS (
+    SELECT mi.movie_id, mi.info, mi.note
+    FROM movie_info mi
+    JOIN title t ON mi.movie_id = t.id
+    WHERE t.production_year BETWEEN 2000 AND 2023 
+      AND mi.info_type_id IN (SELECT id FROM info_type WHERE info LIKE 'Rating%')
+      AND mi.info IS NOT NULL
+),
+CompanyDetails AS (
+    SELECT mc.movie_id, cn.name AS company_name, CT.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type CT ON mc.company_type_id = CT.id
+)
+SELECT 
+    rm.movie_id,
+    rm.title AS linked_movie_title,
+    ra.actor_id AS actor_id,
+    ra.name AS actor_name,
+    ra.role_count,
+    fmi.info AS movie_info,
+    cd.company_name,
+    cd.company_type,
+    CASE
+        WHEN fmi.note IS NOT NULL THEN 'Info Available'
+        ELSE 'No Additional Info'
+    END AS info_status,
+    COALESCE(NULLIF(cd.company_name, ''), 'Unknown Company') AS resolved_company_name
+FROM RecursiveMovieCTE rm
+LEFT JOIN RankedActors ra ON rm.movie_id = ra.actor_id
+LEFT JOIN FilteredMovieInfo fmi ON rm.movie_id = fmi.movie_id
+LEFT JOIN CompanyDetails cd ON rm.movie_id = cd.movie_id
+WHERE ra.rnk <= 5  
+ORDER BY rm.depth, ra.role_count DESC;

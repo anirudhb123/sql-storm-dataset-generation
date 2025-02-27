@@ -1,0 +1,61 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate AS PostCreationDate,
+        COALESCE(P.ClosedDate, 'N/A') AS ClosedDate,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        PH.UserDisplayName AS LastEditor,
+        PH.CreationDate AS LastEditDate,
+        PH.Comment AS LastEditComment
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5, 6) 
+    WHERE P.LastActivityDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+RecentVotes AS (
+    SELECT 
+        V.PostId,
+        COUNT(*) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId IN (2,3) THEN 1 ELSE 0 END) AS UpDownVoteCount
+    FROM Votes V
+    WHERE V.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY V.PostId
+)
+
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.TotalPosts,
+    US.TotalViews,
+    PD.PostId,
+    PD.Title,
+    PD.PostCreationDate,
+    PD.ClosedDate,
+    PD.CommentCount,
+    PD.LastEditor,
+    PD.LastEditDate,
+    PD.LastEditComment,
+    COALESCE(RV.VoteCount, 0) AS RecentVoteCount,
+    COALESCE(RV.UpDownVoteCount, 0) AS RecentUpDownVoteCount
+FROM UserStatistics US
+JOIN PostDetails PD ON US.UserId = PD.PostId
+LEFT JOIN RecentVotes RV ON PD.PostId = RV.PostId
+WHERE US.Reputation > 1000
+ORDER BY US.ReputationRank, US.TotalPosts DESC, PD.PostCreationDate DESC;

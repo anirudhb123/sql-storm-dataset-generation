@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS release_date, min(miidx.info) AS rating, min(t.title) AS german_movie
+FROM company_name AS cn, company_type AS ct, info_type AS it, info_type AS it2, kind_type AS kt, movie_companies AS mc, movie_info AS mi, movie_info_idx AS miidx, title AS t
+WHERE mi.movie_id = t.id AND it2.id = mi.info_type_id AND kt.id = t.kind_id AND mc.movie_id = t.id AND cn.id = mc.company_id AND ct.id = mc.company_type_id AND miidx.movie_id = t.id AND it.id = miidx.info_type_id AND mi.movie_id = miidx.movie_id AND mi.movie_id = mc.movie_id AND miidx.movie_id = mc.movie_id
+AND mi.id > 3430116 AND cn.name_pcode_nf IS NOT NULL AND t.md5sum IS NOT NULL AND t.season_nr IN (10, 18, 1987, 2007, 35, 41, 51, 56, 59, 62) AND t.phonetic_code LIKE '%6%' AND mc.note < '(2004) (USA) (TV) (2001 restoration)' AND t.production_year > 1911;

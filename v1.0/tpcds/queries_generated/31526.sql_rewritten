@@ -1,0 +1,43 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        ss_sold_date_sk,
+        ss_item_sk,
+        SUM(ss_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_net_profit) DESC) as sales_rank
+    FROM 
+        store_sales
+    GROUP BY 
+        s_store_sk, 
+        ss_sold_date_sk, 
+        ss_item_sk
+),
+address_with_sales AS (
+    SELECT 
+        ca.*, 
+        COALESCE(SUM(sh.total_profit), 0) AS total_store_sales_profit
+    FROM 
+        customer_address ca 
+    LEFT OUTER JOIN sales_hierarchy sh ON ca.ca_address_sk = sh.s_store_sk
+    GROUP BY 
+        ca.ca_address_sk, 
+        ca.ca_address_id, 
+        ca.city, 
+        ca.state
+)
+SELECT 
+    a.ca_address_id,
+    a.ca_city,
+    a.ca_state,
+    a.total_store_sales_profit,
+    (SELECT COUNT(*) FROM customer c WHERE c.c_current_addr_sk = a.ca_address_sk) AS customer_count,
+    DENSE_RANK() OVER (ORDER BY a.total_store_sales_profit DESC) AS sales_rank_by_address
+FROM 
+    address_with_sales a
+WHERE 
+    a.total_store_sales_profit > (
+        SELECT AVG(total_store_sales_profit) FROM address_with_sales
+    )
+ORDER BY 
+    a.total_store_sales_profit DESC
+LIMIT 10;

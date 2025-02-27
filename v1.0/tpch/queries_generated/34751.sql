@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_nationkey,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_totalprice > 1000
+),
+PartsWithHighSupplyCost AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_supplycost) > 5000
+)
+SELECT p.p_name, p.p_brand, p.p_mfgr, rh.n_name AS region_name, 
+       MAX(l.l_extendedprice) AS max_extended_price,
+       AVG(COALESCE(l.l_discount, 0)) AS avg_discount,
+       COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       COUNT(DISTINCT sh.s_suppkey) AS suppliers_count,
+       STRING_AGG(DISTINCT c.c_name, ', ') AS customer_names
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN nation rh ON c.c_nationkey = rh.n_nationkey
+LEFT JOIN SupplierHierarchy sh ON rh.n_nationkey = sh.s_nationkey
+WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+AND EXISTS (SELECT 1 FROM HighValueOrders hvo 
+            WHERE hvo.o_orderkey = o.o_orderkey 
+            AND hvo.rn <= 5)
+AND p.p_retailprice IS NOT NULL
+GROUP BY p.p_partkey, rh.n_name
+HAVING MAX(l.l_extendedprice) > 300
+ORDER BY max_extended_price DESC
+LIMIT 10;

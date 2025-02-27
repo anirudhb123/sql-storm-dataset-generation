@@ -1,0 +1,33 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01'
+),
+SupplierCosts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT n.n_name, COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       SUM(COALESCE(l.l_extendedprice * (1 - l.l_discount), 0)) AS total_revenue,
+       AVG(cos.total_spent) AS avg_customer_spent,
+       MAX(sup.total_supply_cost) AS Max_Supplier_Cost
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN RankedOrders o ON ps.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_name LIKE CONCAT('%', 'widget', '%') LIMIT 1)
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN CustomerOrderStats cos ON o.o_custkey = cos.c_custkey
+LEFT JOIN SupplierCosts sup ON ps.ps_partkey = sup.ps_partkey
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 0
+ORDER BY total_revenue DESC NULLS LAST;

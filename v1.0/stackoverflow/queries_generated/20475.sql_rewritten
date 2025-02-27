@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0) AS Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    WHERE 
+        p.ViewCount > 0
+),
+LatestActivity AS (
+    SELECT 
+        Posts.Id,
+        MAX(COALESCE(Comments.CreationDate, p.LastActivityDate)) AS LastActiveDate
+    FROM 
+        Posts 
+    LEFT JOIN Comments ON Comments.PostId = Posts.Id
+    GROUP BY 
+        Posts.Id
+),
+CategorizedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        CASE 
+            WHEN COUNT(b.Id) >= 10 THEN 'Expert'
+            WHEN COUNT(b.Id) >= 5 THEN 'Intermediate'
+            ELSE 'Novice'
+        END AS UserLevel
+    FROM 
+        Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    la.LastActiveDate,
+    cu.UserId,
+    cu.UserLevel
+FROM 
+    RankedPosts rp
+JOIN 
+    LatestActivity la ON rp.PostId = la.Id
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+JOIN 
+    CategorizedUsers cu ON u.Id = cu.UserId
+WHERE 
+    rp.PostRank <= 5 
+    AND (la.LastActiveDate IS NULL OR la.LastActiveDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days')
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

@@ -1,0 +1,74 @@
+
+WITH TagCounts AS (
+    SELECT
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount
+    FROM
+        Tags
+    LEFT JOIN
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::text[])
+    GROUP BY
+        Tags.TagName
+),
+UserReputation AS (
+    SELECT
+        Users.Id AS UserId,
+        Users.DisplayName,
+        SUM(CASE 
+            WHEN Posts.PostTypeId = 1 THEN 1 
+            ELSE 0 
+        END) AS QuestionCount,
+        SUM(CASE 
+            WHEN Posts.PostTypeId = 2 THEN 1 
+            ELSE 0 
+        END) AS AnswerCount,
+        SUM(Posts.ViewCount) AS TotalViews
+    FROM
+        Users
+    LEFT JOIN
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY
+        Users.Id, Users.DisplayName
+),
+ActiveDiscussions AS (
+    SELECT
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.CreationDate,
+        Posts.ViewCount,
+        Users.DisplayName,
+        COUNT(Comments.Id) AS CommentCount
+    FROM
+        Posts
+    LEFT JOIN
+        Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN
+        Users ON Posts.OwnerUserId = Users.Id
+    WHERE
+        Posts.LastActivityDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 DAYS'
+    GROUP BY
+        Posts.Id, Posts.Title, Posts.CreationDate, Posts.ViewCount, Users.DisplayName
+)
+SELECT
+    tc.TagName,
+    tc.PostCount,
+    ud.UserId,
+    ud.DisplayName,
+    ud.QuestionCount,
+    ud.AnswerCount,
+    ud.TotalViews,
+    ad.PostId,
+    ad.Title,
+    ad.CreationDate,
+    ad.ViewCount,
+    ad.CommentCount
+FROM
+    TagCounts tc
+JOIN
+    UserReputation ud ON ud.QuestionCount > 0
+JOIN
+    ActiveDiscussions ad ON ad.ViewCount > 100
+ORDER BY
+    tc.PostCount DESC, 
+    ud.Reputation DESC,
+    ad.CommentCount DESC;

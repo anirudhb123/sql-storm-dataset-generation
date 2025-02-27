@@ -1,0 +1,87 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+PopularPosts AS (
+    SELECT 
+        rph.PostId,
+        rph.Title,
+        rph.Level,
+        rph.Score,
+        rph.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY rph.Level ORDER BY rph.Score DESC) AS Rank
+    FROM 
+        RecursivePostHierarchy rph
+    LEFT JOIN 
+        Comments c ON rph.PostId = c.PostId
+    WHERE 
+        rph.ViewCount > 100 AND rph.Score >= 5
+    GROUP BY 
+        rph.PostId, rph.Title, rph.Level, rph.Score, rph.ViewCount
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.Score,
+    pp.ViewCount,
+    pp.CommentCount,
+    pp.Level,
+    ur.DisplayName AS Owner,
+    ur.Reputation AS OwnerReputation,
+    ur.BadgeCount,
+    ur.LastBadgeDate
+FROM 
+    PopularPosts pp
+JOIN 
+    Posts p ON pp.PostId = p.Id
+LEFT JOIN 
+    UserReputation ur ON p.OwnerUserId = ur.UserId
+WHERE 
+    pp.Rank <= 10
+ORDER BY 
+    pp.Level, pp.Score DESC;

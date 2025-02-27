@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal >= 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+TotalLineItem AS (
+    SELECT l_orderkey, SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+    FROM lineitem
+    WHERE l_shipdate >= DATE '1997-01-01'
+    GROUP BY l_orderkey
+),
+SupplierWithParts AS (
+    SELECT s.s_suppkey, s.s_name, 
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerRevenue AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey
+),
+RankedSuppliers AS (
+    SELECT s.s_name, s.s_suppkey, 
+           DENSE_RANK() OVER (ORDER BY SUM(l.l_extendedprice) DESC) AS supplier_rank
+    FROM supplier s
+    JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT n.n_nationkey) AS nation_count,
+       SUM(COALESCE(t.total_revenue, 0)) AS total_revenue,
+       STRING_AGG(DISTINCT CONCAT(c.c_name, ' (', cr.total_spent, ')'), '; ') AS customer_info
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN CustomerRevenue cr ON n.n_nationkey = cr.c_custkey
+LEFT JOIN TotalLineItem t ON t.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cr.c_custkey)
+LEFT JOIN RankedSuppliers s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 30))
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT n.n_nationkey) > 0 AND SUM(COALESCE(t.total_revenue, 0)) > 1000
+ORDER BY total_revenue DESC;

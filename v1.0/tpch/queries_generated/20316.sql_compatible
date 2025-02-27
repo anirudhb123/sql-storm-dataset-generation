@@ -1,0 +1,89 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_size, 
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_size ORDER BY p.p_retailprice DESC) AS SizeRank
+    FROM 
+        part p
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        COUNT(ps.ps_partkey) AS TotalParts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+        DENSE_RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS RevenueRank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, 
+        o.o_orderdate
+),
+FilteredNations AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name
+    FROM 
+        nation n
+    WHERE 
+        n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE '%land%')
+)
+SELECT 
+    rp.p_partkey, 
+    rp.p_name, 
+    rp.p_size, 
+    rp.p_retailprice, 
+    si.s_name AS SupplierName, 
+    os.TotalRevenue, 
+    os.RevenueRank
+FROM 
+    RankedParts rp
+LEFT JOIN 
+    SupplierInfo si ON si.TotalParts = (SELECT MAX(TotalParts) FROM SupplierInfo)
+JOIN 
+    FilteredNations fn ON fn.n_nationkey = (
+        SELECT 
+            c.c_nationkey 
+        FROM 
+            customer c 
+        WHERE 
+            c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'O')
+        LIMIT 1
+    )
+JOIN 
+    partsupp ps ON ps.ps_partkey = rp.p_partkey
+JOIN 
+    supplier s ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    OrderStats os ON os.o_orderkey = (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_orderdate < DATE '1998-10-01' - INTERVAL '30 days' 
+        ORDER BY o.o_orderdate DESC 
+        LIMIT 1
+    )
+WHERE 
+    (rp.p_size = ANY(ARRAY[10, 20, 30]) OR rp.p_retailprice BETWEEN 100.00 AND 500.00)
+    AND (rp.p_comment IS NULL OR rp.p_comment LIKE '%wholesale%')
+ORDER BY 
+    rp.p_retailprice DESC, 
+    os.TotalRevenue DESC;

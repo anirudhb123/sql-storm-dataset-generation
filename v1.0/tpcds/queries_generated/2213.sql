@@ -1,0 +1,49 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.ws_item_sk
+),
+top_sales AS (
+    SELECT 
+        ss.ws_item_sk,
+        ss.total_quantity,
+        ss.total_sales
+    FROM sales_summary ss
+    WHERE ss.sales_rank <= 10
+),
+item_details AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        COALESCE(SUBSTRING(i.i_item_desc, INSTR(i.i_item_desc, ' ')+1), 'No Description') AS item_name
+    FROM item i
+)
+SELECT 
+    d.d_month AS sales_month,
+    id.item_name,
+    ts.total_quantity,
+    ts.total_sales,
+    (SELECT COUNT(DISTINCT c.c_customer_sk) 
+     FROM customer c
+     WHERE c.c_current_cdemo_sk = (SELECT DISTINCT cd.cd_demo_sk 
+                                    FROM customer_demographics cd 
+                                    WHERE cd.cd_gender = 'F' 
+                                    AND cd.cd_marital_status = 'M') 
+    ) AS female_married_customers,
+    (SELECT COUNT(*) 
+     FROM store s 
+     LEFT JOIN warehouse w ON s.s_store_sk = w.w_warehouse_sk 
+     WHERE s.s_state = 'CA' AND w.w_warehouse_sq_ft > 10000
+    ) AS large_warehouses_ca
+FROM top_sales ts
+JOIN item_details id ON ts.ws_item_sk = id.i_item_sk
+JOIN date_dim d ON d.d_date = CURRENT_DATE
+ORDER BY ts.total_sales DESC;

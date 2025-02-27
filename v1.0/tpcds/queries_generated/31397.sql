@@ -1,0 +1,59 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        cs_order_number,
+        cs_item_sk,
+        cs_quantity,
+        cs_ext_sales_price,
+        cs_ext_discount_amt,
+        cs_ext_tax,
+        cs_net_paid_inc_tax,
+        1 AS level
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk = (SELECT d_date_sk FROM date_dim WHERE d_date = CURRENT_DATE)
+
+    UNION ALL
+
+    SELECT 
+        cs.order_number,
+        cs.item_sk,
+        cs.quantity,
+        cs.ext_sales_price,
+        cs.ext_discount_amt,
+        cs.ext_tax,
+        cs.net_paid_inc_tax,
+        sd.level + 1
+    FROM 
+        catalog_sales cs
+    JOIN 
+        sales_data sd ON cs_order_number = sd.cs_order_number
+    WHERE 
+        sd.level < 5  -- limit recursion to 5 levels
+)
+
+SELECT 
+    sd.cs_order_number,
+    COUNT(*) AS total_orders,
+    SUM(sd.cs_quantity) AS total_quantity,
+    AVG(sd.cs_ext_sales_price) AS avg_sales_price,
+    SUM(CASE WHEN sd.cs_ext_discount_amt IS NOT NULL THEN sd.cs_ext_discount_amt ELSE 0 END) AS total_discount,
+    SUM(sd.cs_ext_tax) AS total_tax,
+    MAX(sd.level) AS max_recursion_level,
+    CASE
+        WHEN SUM(sd.cs_net_paid_inc_tax) IS NULL THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END AS sales_status
+FROM 
+    sales_data sd
+LEFT JOIN 
+    item i ON sd.cs_item_sk = i.i_item_sk
+LEFT JOIN 
+    customer_demographics cd ON sd.cs_bill_cdemo_sk = cd.cd_demo_sk
+GROUP BY 
+    sd.cs_order_number
+HAVING 
+    total_quantity > 10 OR sales_status = 'Sales Recorded'
+ORDER BY 
+    total_orders DESC, total_quantity DESC;

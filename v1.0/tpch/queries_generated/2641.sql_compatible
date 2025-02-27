@@ -1,0 +1,62 @@
+
+WITH CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        co.order_count,
+        co.total_spent,
+        RANK() OVER (ORDER BY co.total_spent DESC) AS rank
+    FROM
+        CustomerOrders co
+    JOIN
+        customer c ON co.c_custkey = c.c_custkey
+    WHERE
+        co.total_spent > 1000
+),
+SupplierParts AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+)
+SELECT
+    tc.c_name,
+    tc.order_count,
+    tc.total_spent,
+    sp.s_name,
+    sp.total_supply_cost,
+    CASE WHEN tc.order_count > 5 THEN 'Frequent Buyer' ELSE 'Occasional Buyer' END AS buyer_type,
+    (SELECT COUNT(DISTINCT n.n_nationkey)
+     FROM nation n
+     WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = tc.c_custkey)) AS nation_count
+FROM
+    TopCustomers tc
+LEFT JOIN
+    lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = tc.c_custkey)
+LEFT JOIN
+    SupplierParts sp ON sp.s_suppkey = l.l_suppkey
+WHERE
+    l.l_returnflag = 'N' AND
+    l.l_shipdate >= DATE '1998-10-01' - INTERVAL '1 year'
+ORDER BY
+    tc.total_spent DESC,
+    sp.total_supply_cost ASC;

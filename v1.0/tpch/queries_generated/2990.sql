@@ -1,0 +1,63 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rank_order
+    FROM 
+        orders o
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    c.c_name AS customer_name,
+    cs.total_orders,
+    cs.total_spent,
+    cs.avg_order_value,
+    sp.s_name AS supplier_name,
+    sp.total_available_qty,
+    sp.avg_supply_cost,
+    ro.o_orderdate,
+    ro.o_totalprice
+FROM 
+    CustomerStats cs
+LEFT JOIN 
+    lineitem li ON li.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = cs.c_custkey)
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderkey = li.l_orderkey
+LEFT JOIN 
+    SupplierParts sp ON sp.s_suppkey = li.l_suppkey
+WHERE 
+    cs.total_orders > 0
+    AND sp.total_available_qty IS NOT NULL
+    OR ro.platform_date IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC, 
+    sp.avg_supply_cost ASC
+LIMIT 100;

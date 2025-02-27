@@ -1,0 +1,74 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        OwnerUserId,
+        Score,
+        1 AS Depth
+    FROM Posts
+    WHERE ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        r.Depth + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(c.Id) AS CommentCount
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostScore AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        u.DisplayName AS Author,
+        r.Depth,
+        ueng.TotalVotes,
+        ueng.UpVotes,
+        ueng.DownVotes,
+        ueng.CommentCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN UserEngagement ueng ON u.Id = ueng.UserId
+    LEFT JOIN RecursivePostHierarchy r ON p.Id = r.Id
+)
+SELECT 
+    ps.Title,
+    ps.Score,
+    ps.Depth,
+    ps.Author,
+    COALESCE(ps.TotalVotes, 0) AS TotalVotes,
+    COALESCE(ps.UpVotes, 0) AS UpVotes,
+    COALESCE(ps.DownVotes, 0) AS DownVotes,
+    COALESCE(ps.CommentCount, 0) AS CommentCount,
+    (
+        SELECT STRING_AGG(CONCAT('[', t.TagName, ']'), ', ')
+        FROM Tags t
+        WHERE t.Id IN (SELECT UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))::int)
+        )
+    ) AS Tags
+FROM PostScore ps
+WHERE ps.Depth = 1
+ORDER BY ps.Score DESC
+LIMIT 10;

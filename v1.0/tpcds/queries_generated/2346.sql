@@ -1,0 +1,51 @@
+
+WITH SalesData AS (
+    SELECT
+        ws.ws_sold_date_sk AS sold_date,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY
+        ws.ws_sold_date_sk, ws.ws_item_sk
+),
+TopItems AS (
+    SELECT
+        item.i_item_sk,
+        item.i_item_desc,
+        sd.total_quantity,
+        sd.total_sales
+    FROM
+        SalesData sd
+    JOIN
+        item ON sd.ws_item_sk = item.i_item_sk
+    WHERE
+        sd.sales_rank <= 10
+)
+SELECT
+    ca.ca_city,
+    COUNT(DISTINCT c.c_customer_id) AS num_customers,
+    SUM(td.total_sales) AS total_sales,
+    AVG(td.total_sales) AS average_sales
+FROM
+    TopItems td
+JOIN
+    customer c ON c.c_current_addr_sk = (SELECT ca.ca_address_sk FROM customer_address ca WHERE ca.ca_city = 'San Francisco' LIMIT 1)
+LEFT JOIN
+    store s ON s.s_store_sk = (SELECT sr_store_sk FROM store_returns sr WHERE sr.sr_item_sk = td.i_item_sk LIMIT 1)
+WHERE
+    c.c_current_cdemo_sk IS NOT NULL
+GROUP BY
+    ca.ca_city
+HAVING
+    AVG(td.total_sales) > (
+        SELECT AVG(total_sales)
+        FROM TopItems
+    )
+ORDER BY
+    total_sales DESC
+LIMIT 5;

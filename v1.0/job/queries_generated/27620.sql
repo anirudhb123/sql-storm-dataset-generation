@@ -1,0 +1,44 @@
+WITH movie_summary AS (
+    SELECT 
+        t.title AS movie_title,
+        c.kind AS movie_type,
+        t.production_year,
+        ARRAY_AGG(DISTINCT a.name) AS actors,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        ARRAY_AGG(DISTINCT co.name) AS companies
+    FROM 
+        aka_title t
+    JOIN 
+        title tt ON t.title = tt.title 
+    JOIN 
+        movie_info mi ON tt.id = mi.movie_id 
+    JOIN 
+        cast_info ci ON tt.id = ci.movie_id 
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id 
+    JOIN 
+        movie_companies mc ON tt.id = mc.movie_id 
+    JOIN 
+        company_name co ON mc.company_id = co.id 
+    JOIN 
+        movie_keyword mk ON tt.id = mk.movie_id 
+    JOIN 
+        keyword k ON mk.keyword_id = k.id 
+    WHERE 
+        t.production_year >= 2000
+        AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'plot')
+    GROUP BY 
+        t.id, t.title, c.kind, t.production_year
+)
+SELECT 
+    ms.movie_title,
+    ms.movie_type,
+    ms.production_year,
+    COALESCE(NULLIF(ms.actors, '{}'), ARRAY['No Actors Found']) AS actor_list,
+    COALESCE(NULLIF(ms.keywords, '{}'), ARRAY['No Keywords Found']) AS keyword_list,
+    COALESCE(NULLIF(ms.companies, '{}'), ARRAY['No Companies Found']) AS company_list
+FROM 
+    movie_summary ms
+ORDER BY 
+    ms.production_year DESC,
+    ms.movie_title;

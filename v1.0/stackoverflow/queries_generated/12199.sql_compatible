@@ -1,0 +1,65 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        u.Reputation AS OwnerReputation,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        COALESCE(AVG(v.BountyAmount), 0) AS AvgBountyAmount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, 
+        p.PostTypeId, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.AnswerCount, 
+        p.CommentCount, 
+        p.FavoriteCount, 
+        u.Reputation
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.PostTypeId,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.OwnerReputation,
+    COALESCE(phs.EditCount, 0) AS EditCount,
+    phs.LastEditDate,
+    ps.VoteCount,
+    ps.AvgBountyAmount
+FROM 
+    PostStats ps
+LEFT JOIN 
+    PostHistoryStats phs ON ps.PostId = phs.PostId
+ORDER BY 
+    ps.Score DESC, 
+    ps.ViewCount DESC;

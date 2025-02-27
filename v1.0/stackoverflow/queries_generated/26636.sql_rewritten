@@ -1,0 +1,70 @@
+WITH TagCounts AS (
+    SELECT 
+        TagName, 
+        COUNT(*) AS PostCount 
+    FROM 
+        Tags t
+        JOIN Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[]) 
+    GROUP BY 
+        TagName
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u 
+        JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(p.Id) > 5
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.UserDisplayName, 
+        ph.PostId, 
+        ph.PostHistoryTypeId, 
+        ph.CreationDate,
+        pt.Name AS PostType
+    FROM 
+        PostHistory ph
+        JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+        JOIN Posts p ON ph.PostId = p.Id
+        JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        ph.CreationDate > cast('2024-10-01' as date) - INTERVAL '30 days'
+),
+PostTypeStatistics AS (
+    SELECT 
+        pt.Id AS PostTypeId, 
+        pt.Name AS PostType, 
+        COUNT(p.Id) AS TotalPosts,
+        AVG(EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - p.CreationDate))/3600) AS AvgHoursToPost
+    FROM 
+        PostTypes pt 
+        LEFT JOIN Posts p ON pt.Id = p.PostTypeId 
+    GROUP BY 
+        pt.Id, pt.Name
+)
+SELECT 
+    tc.TagName, 
+    tc.PostCount,
+    aut.DisplayName AS ActiveUser,
+    aut.PostCount AS ActiveUserPostCount,
+    rph.UserDisplayName AS RecentEditor,
+    rph.CreationDate AS RecentEditDate,
+    rph.PostType,
+    pts.PostType,
+    pts.TotalPosts,
+    pts.AvgHoursToPost
+FROM 
+    TagCounts tc
+    LEFT JOIN MostActiveUsers aut ON aut.PostCount = (SELECT MAX(PostCount) FROM MostActiveUsers)
+    LEFT JOIN RecentPostHistory rph ON rph.CreationDate = (SELECT MAX(CreationDate) FROM RecentPostHistory)
+    LEFT JOIN PostTypeStatistics pts ON pts.TotalPosts = (SELECT MAX(TotalPosts) FROM PostTypeStatistics)
+ORDER BY 
+    tc.PostCount DESC, 
+    aut.PostCount DESC, 
+    rph.CreationDate DESC;

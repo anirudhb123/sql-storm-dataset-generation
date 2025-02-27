@@ -1,0 +1,71 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+OrderLineStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(*) AS lineitem_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+SalesPerRegion AS (
+    SELECT 
+        n.n_name AS nation,
+        r.r_name AS region,
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        n.n_name, r.r_name
+)
+SELECT 
+    ss.s_name AS supplier_name,
+    COALESCE(sp.total_sales, 0) AS total_sales_by_nation,
+    ss.total_avail_qty,
+    ss.total_supply_cost,
+    ss.unique_parts_supplied,
+    ol.total_revenue AS order_revenue,
+    ol.avg_quantity AS average_lineitem_quantity
+FROM 
+    SupplierStats ss
+LEFT JOIN 
+    SalesPerRegion sp ON ss.s_suppkey = (SELECT ps.ps_suppkey 
+                                          FROM partsupp ps 
+                                          WHERE ps.ps_partkey IN (SELECT p.p_partkey 
+                                                                  FROM part p 
+                                                                  WHERE p.p_brand = 'Brand#1'))
+LEFT JOIN 
+    OrderLineStats ol ON ss.s_suppkey = (SELECT l.l_suppkey 
+                                          FROM lineitem l 
+                                          WHERE l.l_orderkey IN (SELECT o.o_orderkey 
+                                                                  FROM orders o 
+                                                                  WHERE o.o_orderdate > '1997-06-30'))
+WHERE 
+    ss.total_avail_qty > 0
+ORDER BY 
+    total_sales_by_nation DESC, 
+    supplier_name ASC;

@@ -1,0 +1,59 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        0 AS level
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        oh.level + 1
+    FROM 
+        orders o
+    JOIN 
+        OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE 
+        oh.level < 5 
+)
+
+SELECT 
+    n.n_name,
+    SUM(ps.ps_supplycost * l.l_quantity) AS total_cost,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(o.o_totalprice) AS avg_order_value,
+    STRING_AGG(p.p_name, ', ') AS products_sold
+FROM 
+    lineitem l
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+WHERE 
+    l.l_shipdate > DATE '1997-01-01'
+    AND n.n_name IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(ps.ps_supplycost * l.l_quantity) > (SELECT AVG(ps_supplycost) FROM partsupp)
+ORDER BY 
+    total_cost DESC
+LIMIT 10;

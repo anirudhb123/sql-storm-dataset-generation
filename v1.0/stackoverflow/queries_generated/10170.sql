@@ -1,0 +1,42 @@
+-- Performance benchmarking query
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        AVG(v.BountyAmount) AS AverageBountyAmount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  -- BountyStart votes
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserStatistics
+)
+SELECT 
+    u.Id AS UserId,
+    u.Reputation,
+    u.TotalPosts,
+    u.TotalQuestions,
+    u.TotalAnswers,
+    u.AverageBountyAmount,
+    u.ReputationRank
+FROM 
+    TopUsers u
+WHERE 
+    u.ReputationRank <= 10  -- Top 10 users by reputation
+ORDER BY 
+    u.Reputation DESC;

@@ -1,0 +1,30 @@
+-- Performance benchmarking query for Stack Overflow schema
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) AS VoteCount,
+    ph.PostHistoryTypeId,
+    ph.CreationDate AS HistoryCreationDate
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+WHERE 
+    p.CreationDate >= DATEADD(YEAR, -1, GETDATE())  -- Posts from the last year
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName, ph.PostHistoryTypeId, ph.CreationDate
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC
+LIMIT 100;  -- Limit results to top 100 posts

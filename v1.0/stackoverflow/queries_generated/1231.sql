@@ -1,0 +1,47 @@
+WITH UserReputation AS (
+    SELECT Id, DisplayName, Reputation, 
+           RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+TopPosts AS (
+    SELECT p.Id, p.Title, p.ViewCount, p.Score, p.OwnerUserId,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostHistorySummary AS (
+    SELECT ph.PostId, COUNT(*) AS EditCount, 
+           MAX(ph.CreationDate) AS LastEditDate
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+ClosedPosts AS (
+    SELECT p.Id, ph.Comment AS CloseReason
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10
+),
+UserPostStats AS (
+    SELECT u.Id AS UserId, u.DisplayName,
+           COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+           COALESCE(SUM(p.Score), 0) AS TotalScore,
+           COALESCE(E.EditCount, 0) AS TotalEdits,
+           COALESCE(CR.CloseReason, 'Not Closed') AS CloseReason
+    FROM Users u
+    LEFT JOIN TopPosts p ON u.Id = p.OwnerUserId
+    LEFT JOIN PostHistorySummary E ON p.Id = E.PostId
+    LEFT JOIN ClosedPosts CR ON p.Id = CR.Id
+    GROUP BY u.Id, u.DisplayName, CR.CloseReason
+)
+SELECT u.DisplayName, u.Reputation, u.TotalViews, u.TotalScore, 
+       u.TotalEdits, u.CloseReason, r.ReputationRank
+FROM UserPostStats u
+JOIN UserReputation r ON u.UserId = r.Id
+WHERE u.TotalViews > 1000
+ORDER BY u.TotalScore DESC, r.Reputation DESC
+LIMIT 10;
+
+-- Check if any user has null CloseReason or total edits and set it to 'No Edits/Closed' if NULL
+UPDATE UserPostStats 
+SET CloseReason = 'No Edits/Closed'
+WHERE CloseReason IS NULL OR TotalEdits IS NULL;

@@ -1,0 +1,62 @@
+WITH RECURSIVE UserVoteScores AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 END), 0) AS Score,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 END), 0) DESC) AS Rnk
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        Score,
+        TotalPosts,
+        TotalComments
+    FROM 
+        UserVoteScores
+    WHERE 
+        Rnk <= 10
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        LATERAL string_to_array(p.Tags, ',') AS tagName ON true
+    JOIN 
+        Tags t ON t.TagName = TRIM(BOTH ' ' FROM tagName)
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName AS TopUser,
+    u.Reputation AS Reputation,
+    u.CreationDate AS AccountCreationDate,
+    tu.Score AS Score,
+    tu.TotalPosts AS PostsCreated,
+    tu.TotalComments AS CommentsMade,
+    pt.Tags AS RelatedTags
+FROM 
+    TopUsers tu
+JOIN 
+    Users u ON tu.UserId = u.Id
+LEFT JOIN 
+    PostTags pt ON pt.PostId IN (
+        SELECT DISTINCT p.Id 
+        FROM Posts p 
+        WHERE p.OwnerUserId = tu.UserId
+    )
+ORDER BY 
+    tu.Score DESC;

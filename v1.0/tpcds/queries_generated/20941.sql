@@ -1,0 +1,81 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        COUNT(sr_ticket_number) AS return_count,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_quantity) DESC) AS rank
+    FROM store_returns
+    GROUP BY sr_item_sk
+    HAVING SUM(sr_return_quantity) > 0
+),
+ShippingModes AS (
+    SELECT 
+        sm_ship_mode_id,
+        sm_type,
+        COUNT(ws_order_number) AS orders_count
+    FROM web_sales
+    JOIN ship_mode ON ws_ship_mode_sk = sm_ship_mode_sk
+    GROUP BY sm_ship_mode_id, sm_type
+),
+ItemRevenue AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_paid) AS total_revenue,
+        COUNT(ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+CustomerReturnData AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(SUM(sr_return_quantity), 0) AS total_returns,
+        COUNT(sr_ticket_number) AS returns_count,
+        MIN(sr_returned_date_sk) AS first_return_date
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        i.i_item_id,
+        COALESCE(ir.total_returned_quantity, 0) AS total_returns,
+        COALESCE(ir.return_count, 0) AS return_count,
+        COALESCE(tr.total_revenue, 0) AS total_revenue,
+        COALESCE(sm.orders_count, 0) AS shipping_orders_count,
+        c.crm_sgd
+    FROM item i
+    LEFT JOIN RankedReturns ir ON i.i_item_sk = ir.sr_item_sk
+    LEFT JOIN ItemRevenue tr ON i.i_item_sk = tr.ws_item_sk
+    LEFT JOIN ShippingModes sm ON sm.sm_ship_mode_id = (
+        SELECT sm_ship_mode_id 
+        FROM web_sales 
+        WHERE ws_item_sk = i.i_item_sk 
+        ORDER BY ws_sold_date_sk DESC 
+        LIMIT 1
+    )
+    LEFT JOIN (
+        SELECT 
+            cd.cdemo_sk,
+            COUNT(DISTINCT c.c_customer_sk) AS crm_sgd
+        FROM customer_demographics cd
+        JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+        WHERE cd_cd_income_band_sk IS NOT NULL
+        GROUP BY cd.cdemo_sk
+        HAVING COUNT(DISTINCT c.c_customer_sk) > 2
+    ) AS c ON c.cdemo_sk = i.i_item_sk
+)
+SELECT 
+    item_id,
+    total_returns,
+    return_count,
+    total_revenue,
+    shipping_orders_count,
+    CASE 
+        WHEN shipping_orders_count >= 5 THEN 'High Activity'
+        WHEN shipping_orders_count BETWEEN 1 AND 4 THEN 'Medium Activity'
+        ELSE 'Low Activity'
+    END AS activity_level
+FROM FinalReport
+WHERE total_revenue > (SELECT AVG(total_revenue) FROM ItemRevenue)
+ORDER BY total_returns DESC, total_revenue DESC;

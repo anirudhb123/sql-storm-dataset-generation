@@ -1,0 +1,86 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' 
+        AND o.o_orderdate < DATE '1997-01-01'
+), 
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Unknown'
+            ELSE 'Account Balance: ' || CAST(s.s_acctbal AS VARCHAR)
+        END AS acctbal_info
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 1000
+), 
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_mfgr,
+        p.p_retailprice,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY p.p_retailprice) OVER() AS median_price
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    SUM(CASE 
+            WHEN cs.total_spent IS NULL THEN 0 
+            ELSE cs.total_spent 
+        END) AS total_spent_by_customers,
+    STRING_AGG(DISTINCT SUBSTRING(s.s_name FROM 1 FOR 5), ', ') AS supplier_names,
+    pp.p_mfgr,
+    AVG(l.l_tax) AS avg_tax,
+    MAX(fo.median_price) AS max_median_price
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SupplierDetails s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    CustomerStats cs ON cs.custkey = (SELECT c.c_custkey FROM customer c ORDER BY c.c_acctbal DESC LIMIT 1)
+LEFT JOIN 
+    FilteredParts pp ON pp.p_partkey IN (SELECT DISTINCT ps.ps_partkey FROM partsupp ps)
+LEFT JOIN 
+    lineitem l ON l.l_partkey = pp.p_partkey
+CROSS JOIN 
+    (SELECT MAX(l_tax) AS median_price FROM lineitem) fo
+WHERE 
+    EXISTS (SELECT 1 FROM orders o WHERE o.o_orderkey = 1)
+GROUP BY 
+    r.r_name, pp.p_mfgr
+HAVING 
+    SUM(l.l_quantity) > 1000
+ORDER BY 
+    total_spent_by_customers DESC NULLS LAST;

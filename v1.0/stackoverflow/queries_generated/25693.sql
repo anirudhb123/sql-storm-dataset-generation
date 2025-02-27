@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        COALESCE(upVoteCount.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(downVoteCount.DownVotes, 0) AS TotalDownVotes,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS UpVotes
+        FROM 
+            Votes
+        WHERE 
+            VoteTypeId = 2
+        GROUP BY 
+            PostId
+    ) upVoteCount ON p.Id = upVoteCount.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS DownVotes
+        FROM 
+            Votes
+        WHERE 
+            VoteTypeId = 3
+        GROUP BY 
+            PostId
+    ) downVoteCount ON p.Id = downVoteCount.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Considering only Questions
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.TotalUpVotes,
+        rp.TotalDownVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank = 1
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.TotalUpVotes,
+    tp.TotalDownVotes,
+    CASE 
+        WHEN tp.TotalUpVotes > tp.TotalDownVotes THEN 'Popular'
+        WHEN tp.TotalDownVotes > tp.TotalUpVotes THEN 'Controversial'
+        ELSE 'Neutral'
+    END AS PostSentiment,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Posts p ON tp.PostId = p.Id
+LEFT JOIN 
+    UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tagName ON TRUE
+LEFT JOIN 
+    Tags t ON tagName::varchar = t.TagName
+GROUP BY 
+    tp.PostId, tp.Title, tp.Body, tp.TotalUpVotes, tp.TotalDownVotes
+ORDER BY 
+    tp.TotalUpVotes DESC;

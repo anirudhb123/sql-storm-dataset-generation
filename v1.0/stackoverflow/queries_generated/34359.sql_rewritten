@@ -1,0 +1,60 @@
+WITH RecursiveTagCTE AS (
+    SELECT Id, TagName, Count, ExcerptPostId, WikiPostId, 1 AS Level
+    FROM Tags
+    WHERE Id IS NOT NULL
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, Level + 1
+    FROM Tags t
+    JOIN RecursiveTagCTE r ON t.Id = r.WikiPostId
+),
+UserBadgeAgg AS (
+    SELECT UserId,
+           COUNT(CASE WHEN Class = 1 THEN 1 END) AS GoldBadges,
+           COUNT(CASE WHEN Class = 2 THEN 1 END) AS SilverBadges,
+           COUNT(CASE WHEN Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges
+    GROUP BY UserId
+),
+PostVoteSummary AS (
+    SELECT p.Id AS PostId,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+ClosedPostDetails AS (
+    SELECT ph.PostId, ph.CreationDate AS CloseDate, 
+           ph.UserDisplayName AS ClosedBy,
+           COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId, ph.CreationDate, ph.UserDisplayName
+),
+TopUsers AS (
+    SELECT u.Id,
+           u.DisplayName,
+           u.Reputation,
+           COALESCE(b.GoldBadges, 0) + COALESCE(b.SilverBadges, 0) + COALESCE(b.BronzeBadges, 0) AS TotalBadges,
+           ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN UserBadgeAgg b ON u.Id = b.UserId
+    WHERE u.Reputation IS NOT NULL
+)
+
+SELECT p.Title,
+       p.Score,
+       p.ViewCount,
+       pst.TagName,
+       COALESCE(ct.CloseCount, 0) AS TotalCloseCount,
+       u.DisplayName AS TopUser,
+       u.Reputation AS UserReputation,
+       u.TotalBadges,
+       RANK() OVER (PARTITION BY pst.TagName ORDER BY p.Score DESC) AS TagRank
+FROM Posts p
+JOIN PostVoteSummary vs ON p.Id = vs.PostId
+JOIN RecursiveTagCTE pst ON pst.Id IN (SELECT unnest(string_to_array(p.Tags, '><')))
+LEFT JOIN ClosedPostDetails ct ON p.Id = ct.PostId
+JOIN TopUsers u ON u.UserRank <= 10
+WHERE p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+  AND (p.Score - COALESCE(vs.DownVotes, 0)) > 0
+ORDER BY pst.TagName, p.Score DESC;

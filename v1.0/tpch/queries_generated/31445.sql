@@ -1,0 +1,33 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_accountbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31' 
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost, ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+TopCustomers AS (
+    SELECT cust.c_custkey, cust.c_name, cust.total_spent
+    FROM CustomerOrders cust
+    WHERE cust.order_count > 5
+    ORDER BY cust.total_spent DESC
+    LIMIT 10
+)
+SELECT ps.p_partkey, ps.p_name, ps.ps_availqty, ps.ps_supplycost, ch.total_spent
+FROM PartSupplier ps
+LEFT OUTER JOIN TopCustomers ch ON ps.ps_availqty = (SELECT MAX(ps_availqty) FROM PartSupplier WHERE p_partkey = ps.p_partkey)
+WHERE ps.rn = 1
+ORDER BY ps.ps_supplycost DESC, ch.total_spent DESC;

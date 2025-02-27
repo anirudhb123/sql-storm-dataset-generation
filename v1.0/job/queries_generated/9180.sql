@@ -1,0 +1,34 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS cast_type,
+    k.keyword AS movie_keyword,
+    ARRAY_AGG(DISTINCT p.info) AS additional_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+JOIN 
+    info_type it ON mi.info_type_id = it.id
+JOIN 
+    comp_cast_type cct ON ci.person_role_id = cct.id
+JOIN 
+    company_name cn ON ci.movie_id = (SELECT mc.movie_id FROM movie_companies mc WHERE mc.company_id = cn.id LIMIT 1)
+LEFT JOIN 
+    person_info p ON a.person_id = p.person_id
+WHERE 
+    t.production_year > 2000
+GROUP BY 
+    a.id, t.id, c.id, k.id
+ORDER BY 
+    a.name, t.title;

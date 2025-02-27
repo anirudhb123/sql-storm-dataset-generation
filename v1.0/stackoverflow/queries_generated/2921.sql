@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), PopularPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        ub.UserId,
+        ub.BadgeCount,
+        ub.BadgeNames
+    FROM 
+        RankedPosts rp
+    INNER JOIN 
+        Users u ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    WHERE 
+        rp.PostRank = 1 AND rp.ViewCount > 100
+)
+SELECT 
+    pp.Title,
+    pp.ViewCount,
+    COALESCE(ub.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(ub.BadgeNames, 'No Badges') AS UserBadges,
+    CASE 
+        WHEN pp.ViewCount IS NULL THEN 'No Views'
+        ELSE 'Viewed'
+    END AS ViewStatus
+FROM 
+    PopularPosts pp
+FULL OUTER JOIN 
+    Users u ON pp.UserId = u.Id
+WHERE 
+    pp.BadgeCount IS NOT NULL OR u.Reputation > 50
+ORDER BY 
+    pp.ViewCount DESC, pp.Title;

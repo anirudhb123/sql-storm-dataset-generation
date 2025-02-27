@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_sales_price DESC) as rank_sales_price,
+        SUM(ws_quantity) OVER (PARTITION BY ws_bill_customer_sk) as total_quantity
+    FROM web_sales
+    WHERE ws_sales_price IS NOT NULL
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesSummary AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        SUM(rs.ws_sales_price * rs.ws_quantity) as total_spent,
+        AVG(rs.ws_sales_price) as avg_spent_per_item,
+        MAX(rs.ws_sales_price) as max_spent_on_item
+    FROM RankedSales rs
+    JOIN CustomerInfo ci ON rs.ws_bill_customer_sk = ci.c_customer_sk
+    GROUP BY ci.c_customer_sk, ci.c_first_name, ci.c_last_name
+)
+SELECT 
+    ss.c_customer_sk,
+    ss.c_first_name,
+    ss.c_last_name,
+    ss.total_spent,
+    ss.avg_spent_per_item,
+    ss.max_spent_on_item,
+    CASE 
+        WHEN ss.total_spent > 1000 THEN 'High Value'
+        WHEN ss.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END as customer_value_class,
+    COALESCE((SELECT COUNT(*) FROM web_sales ws WHERE ws.ws_bill_customer_sk = ss.c_customer_sk AND ws.ws_ship_date_sk IS NOT NULL), 0) as total_orders,
+    (SELECT COUNT(DISTINCT ci.c_city) 
+     FROM CustomerInfo ci 
+     WHERE ci.c_customer_sk = ss.c_customer_sk) as unique_cities
+FROM SalesSummary ss
+WHERE ss.avg_spent_per_item IS NOT NULL
+HAVING MAX(ss.max_spent_on_item) IS NOT NULL
+ORDER BY ss.total_spent DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

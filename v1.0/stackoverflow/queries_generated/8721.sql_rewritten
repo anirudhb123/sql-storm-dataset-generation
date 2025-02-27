@@ -1,0 +1,47 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        u.Reputation AS OwnerReputation,
+        p.CreationDate,
+        p.LastActivityDate,
+        RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM Posts p
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN Votes v ON v.PostId = p.Id AND v.VoteTypeId = 8 
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN STRING_SPLIT(p.Tags, ',') AS TagIds ON CONVERT(VARCHAR, TagIds.value) = CAST(t.Id AS VARCHAR)
+    LEFT JOIN Tags t ON t.TagName = TRIM(TagIds.value)
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, p.Title, p.Score, p.ViewCount, u.Reputation, p.CreationDate, p.LastActivityDate
+),
+PostRanking AS (
+    SELECT 
+        *,
+        DENSE_RANK() OVER (ORDER BY TotalBounty DESC) AS BountyRank
+    FROM PostStats
+)
+SELECT 
+    Pr.PostId,
+    Pr.Title,
+    Pr.Score,
+    Pr.ViewCount,
+    Pr.CommentCount,
+    Pr.AnswerCount,
+    Pr.TotalBounty,
+    Pr.Tags,
+    Pr.OwnerReputation,
+    Pr.CreationDate,
+    Pr.LastActivityDate,
+    Pr.ScoreRank,
+    Pr.BountyRank
+FROM PostRanking Pr
+WHERE Pr.ScoreRank <= 10 AND Pr.BountyRank <= 5
+ORDER BY Pr.Score DESC, Pr.TotalBounty DESC;

@@ -1,0 +1,58 @@
+WITH Recursive_Cast_Info AS (
+    SELECT 
+        c.id AS cast_id,
+        c.person_id,
+        c.movie_id,
+        c.note AS cast_note,
+        c.nr_order,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ct.kind AS cast_type,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    JOIN 
+        comp_cast_type ct ON c.person_role_id = ct.id
+    WHERE 
+        c.nr_order IS NOT NULL
+),
+Movie_Statistics AS (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT person_id) AS total_actors,
+        COUNT(DISTINCT CASE WHEN actor_order = 1 THEN person_id END) AS lead_actors,
+        AVG(year_diff) AS avg_year_diff
+    FROM (
+        SELECT 
+            movie_id,
+            person_id,
+            actor_order,
+            EXTRACT(YEAR FROM CURRENT_DATE) - production_year AS year_diff
+        FROM 
+            Recursive_Cast_Info
+        JOIN 
+            title t ON Recursive_Cast_Info.movie_id = t.id
+    ) AS Year_Table
+    GROUP BY 
+        movie_id
+)
+SELECT 
+    m.id AS movie_id,
+    m.title,
+    ms.total_actors,
+    ms.lead_actors,
+    ms.avg_year_diff
+FROM 
+    title m
+JOIN 
+    Movie_Statistics ms ON m.id = ms.movie_id
+WHERE 
+    ms.total_actors > 5
+ORDER BY 
+    ms.avg_year_diff DESC, 
+    m.title;

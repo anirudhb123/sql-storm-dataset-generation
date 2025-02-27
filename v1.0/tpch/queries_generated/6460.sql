@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_orderstatus
+), SupplierRevenue AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_revenue
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), RegionSummary AS (
+    SELECT 
+        r.r_regionkey, 
+        r.r_name, 
+        COUNT(DISTINCT n.n_nationkey) AS nation_count, 
+        SUM(SR.supplier_revenue) AS total_supplier_revenue
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        SupplierRevenue SR ON n.n_nationkey = SR.s_nationkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+)
+SELECT 
+    RO.o_orderkey, 
+    RO.o_orderdate, 
+    RO.total_revenue, 
+    RS.r_name AS region_name, 
+    RS.nation_count, 
+    RS.total_supplier_revenue
+FROM 
+    RankedOrders RO 
+JOIN 
+    orders O ON RO.o_orderkey = O.o_orderkey
+JOIN 
+    customer C ON O.o_custkey = C.c_custkey
+JOIN 
+    nation N ON C.c_nationkey = N.n_nationkey
+JOIN 
+    region RS ON N.n_regionkey = RS.r_regionkey
+WHERE 
+    RO.order_rank <= 10
+ORDER BY 
+    RO.total_revenue DESC, 
+    RS.region_name;

@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT
+        w.warehouse_id,
+        i.i_item_id,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY w.warehouse_id, i.i_item_id ORDER BY ws.ws_net_profit DESC) AS sales_rank
+    FROM
+        web_sales ws
+    JOIN
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE
+        ws.ws_sold_date_sk BETWEEN (
+            SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023
+        ) - 30 AND (
+            SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023
+        )
+),
+TotalReturns AS (
+    SELECT
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned
+    FROM
+        store_returns
+    GROUP BY
+        sr_customer_sk
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        td.total_returned,
+        CASE
+            WHEN td.total_returned IS NULL THEN '0'
+            WHEN td.total_returned > 5 THEN '>5 Returns'
+            ELSE 'Few Returns'
+        END AS return_category
+    FROM
+        customer c
+    LEFT JOIN
+        TotalReturns td ON c.c_customer_sk = td.sr_customer_sk
+)
+SELECT
+    r.warehouse_id,
+    r.i_item_id,
+    r.ws_order_number,
+    r.ws_net_profit,
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.return_category
+FROM
+    RankedSales r
+LEFT JOIN
+    HighValueCustomers hvc ON r.ws_order_number = hvc.c_customer_sk
+WHERE
+    r.sales_rank = 1
+    AND (hvc.return_category = '>5 Returns' OR hvc.return_category IS NULL)
+ORDER BY
+    r.ws_net_profit DESC,
+    hvc.c_last_name ASC
+FETCH FIRST 50 ROWS ONLY;

@@ -1,0 +1,83 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND ws_ship_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+promotions AS (
+    SELECT 
+        p_promo_sk, 
+        p_promo_name,
+        p_channel_email,
+        p_discount_active,
+        COUNT(*) AS promo_count
+    FROM 
+        promotion
+    WHERE 
+        p_discount_active = 'Y'
+    GROUP BY 
+        p_promo_sk, p_promo_name, p_channel_email, p_discount_active
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, hd.hd_income_band_sk
+),
+sales_summary AS (
+    SELECT 
+        item.i_item_id,
+        COUNT(DISTINCT sd.ws_order_number) AS total_orders,
+        SUM(sd.ws_quantity) AS total_quantity_sold,
+        AVG(sd.ws_sales_price) AS avg_sales_price
+    FROM 
+        sales_data sd
+    JOIN 
+        item i ON sd.ws_item_sk = i.i_item_sk
+    WHERE 
+        sd.rn = 1  -- gets the latest sales data per item
+    GROUP BY 
+        item.i_item_id
+)
+SELECT 
+    ci.c_first_name, 
+    ci.c_last_name,
+    ci.cd_gender,
+    ss.total_orders,
+    ss.total_quantity_sold,
+    ss.avg_sales_price,
+    COALESCE(p.promo_count, 0) AS promo_count
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_summary ss ON ci.c_customer_sk = ss.i_item_id  -- Adjust join based on actual relationships
+LEFT JOIN 
+    promotions p ON p.promo_count > 0
+WHERE 
+    ci.total_spent IS NOT NULL 
+    AND ci.income_band <> 0
+ORDER BY 
+    ci.total_spent DESC
+LIMIT 100;

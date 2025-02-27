@@ -1,0 +1,76 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS SalesRank
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderdate >= DATE '1997-01-01'
+), TopCustomers AS (
+    SELECT
+        c.n_nationkey,
+        SUM(o.o_totalprice) AS TotalSales,
+        COUNT(DISTINCT c.c_custkey) AS CustomerCount
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY
+        c.n_nationkey
+), SupplierPerformance AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS TotalSupplyCost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+), DetailedSales AS (
+    SELECT
+        l.l_orderkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS NetRevenue,
+        SUM(l.l_quantity) AS TotalQuantity
+    FROM
+        lineitem l
+    JOIN
+        part p ON l.l_partkey = p.p_partkey
+    GROUP BY
+        l.l_orderkey, p.p_name
+)
+
+SELECT
+    r.r_name,
+    COALESCE(SUM(TC.TotalSales), 0) AS NationSales,
+    COUNT(DISTINCT TC.c_nationkey) AS TotalCustomers,
+    COALESCE(SUM(SP.TotalSupplyCost), 0) AS NationSupplyCost,
+    COUNT(DISTINCT DS.l_orderkey) AS UniqueOrders,
+    AVG(DS.NetRevenue) AS AverageRevenuePerOrder
+FROM
+    region r
+LEFT JOIN
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN
+    TopCustomers TC ON n.n_nationkey = TC.n_nationkey
+LEFT JOIN
+    SupplierPerformance SP ON n.n_nationkey = SP.s_suppkey
+LEFT JOIN
+    DetailedSales DS ON TC.c_custkey = DS.l_orderkey
+WHERE
+    r.r_name IS NOT NULL
+GROUP BY
+    r.r_name
+ORDER BY
+    NationSales DESC;

@@ -1,0 +1,75 @@
+WITH RecursivePostChain AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with Questions
+    
+    UNION ALL
+    
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.AcceptedAnswerId,
+        rpc.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostChain rpc ON a.ParentId = rpc.PostId
+    WHERE 
+        a.PostTypeId = 2  -- Only Answers
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Level,
+        COALESCE(ph.Comment, 'No Comments') AS LastComment,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        RecursivePostChain rp
+    LEFT JOIN 
+        Comments ph ON ph.PostId = rp.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId AND v.VoteTypeId IN (2, 3)  -- Count only Upvotes and Downvotes
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Level, ph.Comment
+),
+RankedPosts AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.CreationDate,
+        fp.Level,
+        fp.LastComment,
+        fp.VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY fp.Level ORDER BY fp.VoteCount DESC) AS Rank
+    FROM 
+        FilteredPosts fp
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Level,
+    rp.LastComment,
+    rp.VoteCount,
+    CASE 
+        WHEN rp.Rank <= 3 THEN 'Top Rank'
+        WHEN rp.Rank BETWEEN 4 AND 10 THEN 'Mid Rank'
+        ELSE 'Low Rank'
+    END AS PostRankCategory
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Level = 1 OR 
+    (rp.Level > 1 AND rp.VoteCount > 0)
+ORDER BY 
+    rp.Level, rp.VoteCount DESC;

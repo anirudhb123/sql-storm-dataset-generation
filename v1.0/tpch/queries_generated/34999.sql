@@ -1,0 +1,72 @@
+WITH RECURSIVE RevenueBySupplier AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01' 
+        AND l.l_shipdate < DATE '2023-02-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    UNION ALL
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        RevenueBySupplier rbs
+    JOIN 
+        supplier s ON rbs.s_suppkey = s.s_suppkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '2023-02-01' 
+        AND l.l_shipdate < DATE '2023-03-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+SupplierNation AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name AS nation_name,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(r.total_revenue, 0) AS total_revenue
+    FROM 
+        supplier s
+    LEFT JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        RevenueBySupplier r ON s.s_suppkey = r.s_suppkey
+),
+RankedSuppliers AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY nation_name ORDER BY total_revenue DESC) AS revenue_rank
+    FROM 
+        SupplierNation
+)
+SELECT 
+    nation_name, 
+    s.s_name, 
+    s.s_acctbal, 
+    total_revenue
+FROM 
+    RankedSuppliers s
+WHERE 
+    revenue_rank = 1
+ORDER BY 
+    nation_name;

@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only considering Questions
+),
+LatestTags AS (
+    SELECT 
+        p.PostId,
+        STRING_AGG(t.TagName, ', ') AS CombinedTags
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '> <')::int[])
+    GROUP BY 
+        p.PostId
+),
+VotesSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotesCount,
+        COUNT(CASE WHEN VoteTypeId IN (6, 10) THEN 1 END) AS CloseVotesCount
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    lt.CombinedTags,
+    vs.UpVotesCount,
+    vs.DownVotesCount,
+    vs.CloseVotesCount,
+    u.Id AS UserId,
+    u.DisplayName,
+    ub.BadgeCount,
+    ub.Badges
+FROM 
+    RankedPosts rp
+JOIN 
+    VotesSummary vs ON rp.PostId = vs.PostId
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+JOIN 
+    LatestTags lt ON rp.PostId = lt.PostId
+WHERE 
+    rp.rn = 1 -- Select only the latest questions for each user
+    AND rp.ViewCount > 100 -- Filter for questions with more than 100 views
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 50;

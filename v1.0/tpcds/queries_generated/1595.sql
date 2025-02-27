@@ -1,0 +1,60 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS unique_orders
+    FROM web_sales ws
+    LEFT JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price > 10.00
+        AND ws.ws_sold_date_sk BETWEEN 2459001 AND 2459100
+    GROUP BY ws.ws_sold_date_sk, ws.ws_item_sk
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_profit) AS average_profit
+    FROM customer c
+    JOIN web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY c.c_customer_sk
+),
+sales_ranked AS (
+    SELECT 
+        s.ws_item_sk, 
+        s.total_sales,
+        RANK() OVER (PARTITION BY s.ws_item_sk ORDER BY s.total_sales DESC) AS sales_rank
+    FROM sales_summary s
+),
+top_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.order_count,
+        cs.average_profit
+    FROM customer_summary cs
+    WHERE cs.order_count > 5
+)
+SELECT 
+    i.i_item_id,
+    COALESCE(srs.total_quantity, 0) AS total_quantity,
+    COALESCE(srs.total_sales, 0) AS total_sales,
+    tr.customer_count,
+    CASE 
+        WHEN srs.total_sales > 1000 THEN 'High Performer'
+        WHEN srs.total_sales BETWEEN 500 AND 1000 THEN 'Medium Performer'
+        ELSE 'Low Performer' 
+    END AS performance_category
+FROM item i
+LEFT JOIN sales_ranked srs ON i.i_item_sk = srs.ws_item_sk
+LEFT JOIN (
+    SELECT 
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count 
+    FROM customer c
+    JOIN top_customers tc ON c.c_customer_sk = tc.c_customer_sk
+) tr ON TRUE
+WHERE i.i_current_price IS NOT NULL
+ORDER BY i.i_item_id;

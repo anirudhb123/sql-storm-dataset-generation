@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.ScoreRank,
+        COALESCE(NULLIF(rp.CommentCount, 0), 'No Comments') AS CommentCount,
+        CASE 
+            WHEN rp.UpVotesCount > rp.DownVotesCount THEN 'Positive' 
+            WHEN rp.UpVotesCount < rp.DownVotesCount THEN 'Negative' 
+            ELSE 'Neutral' 
+        END AS PostSentiment
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ScoreRank <= 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.ViewCount,
+    tp.CreationDate,
+    tp.Score,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    tp.PostSentiment,
+    GROUP_CONCAT(DISTINCT pt.Name) AS PostTypeNames,
+    STRFTIME('%Y-%m', tp.CreationDate) AS MonthCreated
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostTypes pt ON pt.Id = (SELECT p.PostTypeId FROM Posts p WHERE p.Id = tp.PostId)
+GROUP BY 
+    tp.PostId, tp.Title, tp.ViewCount, tp.CreationDate, tp.Score, tp.OwnerDisplayName, tp.CommentCount, tp.PostSentiment
+ORDER BY 
+    tp.Score DESC;

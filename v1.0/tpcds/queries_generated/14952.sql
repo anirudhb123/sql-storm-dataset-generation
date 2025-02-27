@@ -1,0 +1,20 @@
+
+SELECT 
+    c.c_customer_id,
+    COUNT(ss.ticket_number) AS total_sales,
+    SUM(ss.ext_sales_price) AS total_revenue,
+    AVG(ss.ext_discount_amt) AS average_discount,
+    d.year AS sales_year
+FROM 
+    customer c
+JOIN 
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+JOIN 
+    date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+WHERE 
+    d.year >= 2020
+GROUP BY 
+    c.c_customer_id, d.year
+ORDER BY 
+    total_revenue DESC
+LIMIT 100;

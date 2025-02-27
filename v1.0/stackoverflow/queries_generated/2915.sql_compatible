@@ -1,0 +1,65 @@
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), PostsWithVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 END) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title
+), RankedPosts AS (
+    SELECT 
+        pwv.PostId,
+        pwv.Title,
+        pwv.UpVotes,
+        pwv.DownVotes,
+        pwv.TotalVotes,
+        RANK() OVER (ORDER BY pwv.UpVotes - pwv.DownVotes DESC) AS VoteRank
+    FROM 
+        PostsWithVotes pwv
+)
+SELECT 
+    ub.UserId,
+    ub.DisplayName,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    rp.PostId,
+    rp.Title,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.TotalVotes,
+    CASE 
+        WHEN rp.TotalVotes = 0 THEN 'No Votes'
+        ELSE CONCAT('Vote Difference: ', (rp.UpVotes - rp.DownVotes))
+    END AS VoteStatus,
+    CASE 
+        WHEN ub.GoldBadges > 0 THEN 'Gold Member'
+        ELSE 'Regular Member'
+    END AS MembershipStatus
+FROM 
+    UserBadges ub
+JOIN 
+    RankedPosts rp ON ub.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId LIMIT 1)
+WHERE 
+    ub.Reputation >= 1000
+ORDER BY 
+    ub.DisplayName, rp.VoteRank;

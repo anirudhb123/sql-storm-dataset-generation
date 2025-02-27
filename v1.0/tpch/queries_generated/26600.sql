@@ -1,0 +1,52 @@
+WITH StringManipulation AS (
+    SELECT
+        p.p_name AS original_name,
+        UPPER(p.p_name) AS upper_name,
+        LOWER(p.p_name) AS lower_name,
+        LENGTH(p.p_name) AS name_length,
+        SUBSTRING(p.p_name FROM 1 FOR 10) AS name_substring,
+        REPLACE(p.p_comment, 'good', 'excellent') AS modified_comment,
+        CONCAT('Part: ', p.p_name, ' - Type: ', p.p_type) AS concatenated_info
+    FROM
+        part p
+    WHERE
+        p.p_size > 10
+),
+AggregatedData AS (
+    SELECT
+        s.s_name AS supplier_name,
+        s.s_address,
+        s.s_comment,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        AVG(ps.ps_availqty) AS avg_avail_qty,
+        MAX(p.p_retailprice) AS max_price,
+        STRING_AGG(sm.concanated_info, '; ') AS aggregated_info
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN
+        StringManipulation sm ON p.p_name = sm.original_name
+    GROUP BY
+        s.s_name, s.s_address, s.s_comment
+)
+SELECT
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    ad.supplier_name,
+    ad.part_count,
+    ad.avg_avail_qty,
+    ad.max_price,
+    ad.aggregated_info
+FROM
+    region r
+JOIN
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN
+    AggregatedData ad ON n.n_nationkey = ad.s_nationkey
+WHERE
+    ad.part_count > 5
+ORDER BY
+    ad.max_price DESC;

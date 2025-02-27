@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags)-2), '>')) AS t(TagName)
+    WHERE 
+        p.PostTypeId IN (1, 2)  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.Reputation
+),
+
+FinalPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.OwnerReputation,
+        rp.CommentCount,
+        rp.AnswerCount,
+        rp.Tags,
+        CASE
+            WHEN rp.OwnerReputation >= 1000 THEN 'Veteran'
+            WHEN rp.OwnerReputation >= 500 THEN 'Experienced'
+            ELSE 'Novice'
+        END AS UserType
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1  
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.OwnerReputation,
+    fp.CommentCount,
+    fp.AnswerCount,
+    fp.Tags,
+    fp.UserType,
+    COALESCE(pht.Name, 'No History') AS PostHistory,
+    COUNT(DISTINCT b.Id) AS BadgeCount
+FROM 
+    FinalPosts fp
+LEFT JOIN 
+    PostHistory ph ON fp.PostId = ph.PostId
+LEFT JOIN 
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+LEFT JOIN 
+    Badges b ON fp.PostId = b.UserId
+GROUP BY 
+    fp.PostId, fp.Title, fp.Body, fp.CreationDate, fp.OwnerReputation,
+    fp.CommentCount, fp.AnswerCount, fp.Tags, fp.UserType, pht.Name
+ORDER BY 
+    fp.CreationDate DESC;

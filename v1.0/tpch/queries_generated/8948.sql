@@ -1,0 +1,75 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) as rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'F' 
+        AND o.o_orderdate >= DATEADD(MONTH, -6, CURRENT_DATE)
+),
+TopCustomers AS (
+    SELECT 
+        c.n_nationkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        c.n_nationkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+DetailedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        p.p_name,
+        p.p_brand,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        l.l_returnflag = 'N'
+)
+SELECT 
+    rc.r_name AS region_name,
+    tc.c_name AS customer_name,
+    tc.total_spent,
+    dl.p_name AS part_name,
+    SUM(dl.l_extendedprice * (1 - dl.l_discount)) AS total_price_after_discount,
+    COUNT(dl.l_orderkey) AS total_items
+FROM 
+    RankedOrders ro
+JOIN 
+    TopCustomers tc ON ro.o_custkey = tc.c_custkey
+JOIN 
+    DetailedLineItems dl ON ro.o_orderkey = dl.l_orderkey
+JOIN 
+    nation n ON tc.n_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    ro.rn <= 5
+GROUP BY 
+    rc.r_name, tc.c_name, tc.total_spent, dl.p_name
+ORDER BY 
+    region_name, total_price_after_discount DESC;

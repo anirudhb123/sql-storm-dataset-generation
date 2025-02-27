@@ -1,0 +1,70 @@
+WITH SalesData AS (
+    SELECT 
+        ws.wb_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        ws.wb_sold_date_sk, ws.ws_item_sk
+),
+TopSellingItems AS (
+    SELECT 
+        sd.wb_sold_date_sk,
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_sales
+    FROM 
+        SalesData sd
+    WHERE
+        sd.sales_rank <= 5 
+),
+ReturnsData AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returns,
+        SUM(cr.cr_return_amt) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.cr_item_sk
+),
+AggregatedData AS (
+    SELECT 
+        tsi.ws_item_sk,
+        tsi.total_quantity,
+        tsi.total_sales,
+        COALESCE(rd.total_returns, 0) AS total_returns,
+        COALESCE(rd.total_return_amount, 0) AS total_return_amount,
+        CASE 
+            WHEN COALESCE(rd.total_return_amount, 0) > 0 THEN 
+                (tsi.total_sales - COALESCE(rd.total_return_amount, 0)) / tsi.total_sales 
+            ELSE 
+                1 
+        END AS net_sales_ratio
+    FROM 
+        TopSellingItems tsi
+    LEFT JOIN 
+        ReturnsData rd ON tsi.ws_item_sk = rd.cr_item_sk
+)
+SELECT 
+    a.ws_item_sk,
+    a.total_quantity,
+    a.total_sales,
+    a.total_returns,
+    a.total_return_amount,
+    a.net_sales_ratio,
+    i.i_item_desc,
+    i.i_brand
+FROM 
+    AggregatedData a
+JOIN 
+    item i ON a.ws_item_sk = i.i_item_sk
+WHERE 
+    a.net_sales_ratio < 0.95 
+ORDER BY 
+    a.net_sales_ratio ASC;

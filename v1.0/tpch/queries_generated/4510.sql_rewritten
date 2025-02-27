@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+), FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_quantity) AS total_quantity,
+        MIN(o.o_orderdate) AS first_order_date
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+), OrderDetails AS (
+    SELECT 
+        fo.o_orderkey,
+        fo.o_totalprice,
+        fo.total_quantity,
+        CASE 
+            WHEN fo.total_quantity > 100 THEN 'High Volume'
+            WHEN fo.total_quantity BETWEEN 50 AND 100 THEN 'Medium Volume'
+            ELSE 'Low Volume'
+        END AS order_volume,
+        coalesce(s.s_name, 'No Supplier') AS supplier_name
+    FROM 
+        FilteredOrders fo
+    LEFT JOIN 
+        RankedSuppliers s ON fo.o_orderkey = (SELECT MAX(o_orderkey) 
+                                               FROM orders 
+                                               WHERE o_orderkey = fo.o_orderkey
+                                                 AND supplier_rank = 1)
+)
+SELECT 
+    od.o_orderkey,
+    od.o_totalprice,
+    od.total_quantity,
+    od.order_volume,
+    od.supplier_name
+FROM 
+    OrderDetails od
+WHERE 
+    od.o_totalprice > (SELECT AVG(o_totalprice) FROM FilteredOrders)
+ORDER BY 
+    od.o_totalprice DESC
+LIMIT 10;

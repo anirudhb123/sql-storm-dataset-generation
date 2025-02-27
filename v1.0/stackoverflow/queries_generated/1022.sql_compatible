@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+), UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+), PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+), PostsWithDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.rn,
+        rp.TotalPosts,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        ub.BadgeCount,
+        ub.Badges
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostComments pc ON rp.PostId = pc.PostId
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.CommentCount,
+    p.BadgeCount,
+    p.Badges,
+    CASE 
+        WHEN p.TotalPosts > 1 THEN 'Multiple Posts'
+        ELSE 'Single Post'
+    END AS PostStatus
+FROM 
+    PostsWithDetails p
+WHERE 
+    p.Score > (SELECT AVG(Score) FROM Posts) AND
+    p.CommentCount > 5
+ORDER BY 
+    p.Score DESC 
+LIMIT 10;

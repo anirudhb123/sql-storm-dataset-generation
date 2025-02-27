@@ -1,0 +1,84 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+ActorNames AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        COALESCE(n.gender, 'U') AS gender,  
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY ak.id) AS name_rank
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        name n ON ak.person_id = n.imdb_id
+),
+
+MovieCompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(*) AS company_count,
+        SUM(CASE WHEN ct.kind = 'Distributor' THEN 1 ELSE 0 END) AS distributor_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+
+FinalResults AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        an.name AS actor_name,
+        an.gender,
+        mci.company_names,
+        mci.company_count,
+        mci.distributor_count,
+        r.title_rank
+    FROM 
+        RankedTitles r
+    LEFT JOIN 
+        complete_cast cc ON r.title_id = cc.movie_id
+    LEFT JOIN 
+        ActorNames an ON cc.subject_id = an.person_id AND an.name_rank = 1
+    LEFT JOIN 
+        MovieCompanyInfo mci ON r.title_id = mci.movie_id
+    WHERE 
+        r.title_rank <= 5  
+    ORDER BY 
+        r.production_year, 
+        mci.company_count DESC, 
+        an.name
+)
+
+SELECT 
+    f.*,
+    CASE 
+        WHEN f.distributor_count IS NULL THEN 'No Distributor' 
+        ELSE 'Has Distributor' 
+    END AS distributor_status,
+    CASE 
+        WHEN f.production_year > 2000 THEN 'Modern Era' 
+        ELSE 'Classic Era' 
+    END AS era_category
+FROM 
+    FinalResults f
+WHERE 
+    f.actor_name IS NOT NULL
+ORDER BY 
+    f.production_year, 
+    f.company_count DESC, 
+    f.actor_name;

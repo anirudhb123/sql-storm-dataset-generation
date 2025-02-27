@@ -1,0 +1,51 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title,
+        0 AS level
+    FROM 
+        aka_title AS t
+    WHERE 
+        t.production_year >= 2000
+        
+    UNION ALL
+    
+    SELECT 
+        mk.linked_movie_id AS movie_id,
+        lt.title,
+        mh.level + 1
+    FROM 
+        MovieHierarchy AS mh
+    JOIN 
+        movie_link AS mk ON mh.movie_id = mk.movie_id
+    JOIN 
+        aka_title AS lt ON mk.linked_movie_id = lt.id
+)
+
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS movie_count,
+    ARRAY_AGG(DISTINCT m.title) AS movies,
+    MAX(CASE WHEN m.production_year = 2021 THEN m.title END) AS latest_movie_2021,
+    AVG(CASE WHEN m.production_year < 2020 THEN m.production_year END) AS avg_year_before_2020,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COALESCE(NULLIF(p.info, ''), 'No info available') AS person_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    MovieHierarchy m ON c.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info p ON a.person_id = p.person_id AND p.info_type_id = 1
+GROUP BY 
+    a.name
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 5
+ORDER BY 
+    movie_count DESC, actor_name;

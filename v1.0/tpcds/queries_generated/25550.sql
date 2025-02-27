@@ -1,0 +1,50 @@
+
+WITH AddressDetails AS (
+    SELECT
+        ca_address_sk,
+        ca_city,
+        ca_state,
+        ca_country,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+),
+CustomerNames AS (
+    SELECT
+        c_customer_sk,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        c_email_address
+    FROM customer
+    WHERE c_email_address LIKE '%@%'
+),
+SalesInfo AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+Details AS (
+    SELECT 
+        c.full_name,
+        c.c_email_address,
+        a.full_address,
+        COALESCE(s.total_sales, 0) AS total_sales,
+        s.order_count
+    FROM CustomerNames c
+    JOIN AddressDetails a ON a.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN SalesInfo s ON s.ws_bill_customer_sk = c.c_customer_sk
+)
+SELECT 
+    full_name,
+    full_address,
+    total_sales,
+    order_count,
+    CASE 
+        WHEN total_sales > 1000 THEN 'High Value'
+        WHEN total_sales > 0 THEN 'Medium Value'
+        ELSE 'No Sales'
+    END AS customer_value
+FROM Details
+ORDER BY total_sales DESC;

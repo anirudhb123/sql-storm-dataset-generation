@@ -1,0 +1,68 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.id AS top_level_id,
+        1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mh.top_level_id,
+        mh.level + 1
+    FROM movie_hierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE mh.level < 5 
+),
+ranked_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.top_level_id ORDER BY mh.production_year DESC) AS rank
+    FROM movie_hierarchy mh
+),
+cast_ranks AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+    FROM cast_info c
+    JOIN role_type r ON c.role_id = r.id
+),
+combined_details AS (
+    SELECT 
+        mv.movie_id,
+        mv.title,
+        c.person_id,
+        c.role,
+        mv.production_year,
+        COALESCE(mk.keyword, 'No keyword') AS keyword,
+        COALESCE(n.name, 'Unknown') AS actor_name,
+        RANK() OVER (PARTITION BY mv.movie_id ORDER BY mv.production_year DESC) AS year_rank
+    FROM ranked_movies mv
+    LEFT JOIN cast_ranks c ON mv.movie_id = c.movie_id
+    LEFT JOIN movie_keyword mk ON mv.movie_id = mk.movie_id
+    LEFT JOIN name n ON c.person_id = n.id
+    WHERE n.gender IS NULL OR n.gender = 'M' 
+)
+SELECT 
+    cd.movie_id,
+    cd.title,
+    cd.production_year,
+    COUNT(DISTINCT cd.person_id) AS total_actors,
+    STRING_AGG(DISTINCT cd.keyword, ', ') AS keywords,
+    MIN(cd.role_order) AS first_role_order,
+    MAX(CASE WHEN cd.year_rank = 1 THEN cd.actor_name END) AS latest_actor 
+FROM combined_details cd
+GROUP BY cd.movie_id, cd.title, cd.production_year
+HAVING COUNT(DISTINCT cd.person_id) > 0
+ORDER BY cd.production_year DESC, total_actors DESC
+LIMIT 100;

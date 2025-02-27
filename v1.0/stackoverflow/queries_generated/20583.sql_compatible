@@ -1,0 +1,88 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        TotalViews,
+        AvgScore,
+        RANK() OVER (ORDER BY TotalViews DESC) AS ViewRank,
+        RANK() OVER (ORDER BY AvgScore DESC) AS ScoreRank
+    FROM 
+        UserPostStats
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.CreationDate,
+        p.Title,
+        p.Score,
+        h.UserId AS EditorId,
+        h.UserDisplayName AS EditorName,
+        h.CreationDate AS EditDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY h.CreationDate DESC) AS EditRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory h ON p.Id = h.PostId AND h.PostHistoryTypeId IN (4, 5, 6, 10)
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS ViewCount,
+        p.CreationDate,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COALESCE(MIN(pa.EditDate), p.CreationDate) AS FirstEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostActivity pa ON p.Id = pa.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+)
+SELECT 
+    tu.DisplayName,
+    S.UserId,
+    S.PostId,
+    S.Title,
+    S.AnswerCount,
+    S.ViewCount,
+    S.UpVotes,
+    S.DownVotes,
+    S.FirstEditDate,
+    CASE 
+        WHEN S.FirstEditDate = S.CreationDate THEN 'Never Edited'
+        ELSE 'Edited'
+    END AS EditStatus
+FROM 
+    TopUsers tu
+JOIN 
+    PostSummary S ON tu.UserId = S.UserId
+WHERE 
+    tu.ViewRank <= 10 OR 
+    tu.ScoreRank <= 10
+ORDER BY 
+    S.ViewCount DESC, S.AnswerCount DESC;

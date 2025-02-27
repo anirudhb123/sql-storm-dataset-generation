@@ -1,0 +1,94 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        a.person_id, 
+        a.name AS actor_name,
+        1 AS level
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year = 2020
+
+    UNION ALL
+
+    SELECT 
+        a.person_id, 
+        a.name, 
+        ah.level + 1
+    FROM 
+        ActorHierarchy ah
+    JOIN 
+        cast_info c ON ah.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year = 2021 AND
+        ah.level < 5
+),
+MovieTitles AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        mp.name AS production_company,
+        COALESCE(GROUP_CONCAT(DISTINCT k.keyword) OVER(), 'None') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name mp ON mc.company_id = mp.id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        m.production_year IS NOT NULL
+    GROUP BY 
+        m.title, m.production_year, mp.name
+),
+ActorDetails AS (
+    SELECT 
+        ah.actor_name, 
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        MAX(m.production_year) AS last_movie_year,
+        MIN(m.production_year) AS first_movie_year
+    FROM 
+        ActorHierarchy ah
+    JOIN 
+        cast_info c ON ah.person_id = c.person_id
+    JOIN 
+        aka_title m ON c.movie_id = m.movie_id
+    GROUP BY 
+        ah.actor_name
+)
+SELECT 
+    AD.actor_name,
+    AD.total_movies,
+    CASE 
+        WHEN AD.first_movie_year IS NULL THEN 'No Movies'
+        ELSE CAST(AD.first_movie_year AS VARCHAR) || ' - ' || CAST(AD.last_movie_year AS VARCHAR)
+    END AS active_year_span,
+    MT.title,
+    MT.production_year,
+    MT.production_company,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id IN (SELECT DISTINCT c.movie_id FROM cast_info c WHERE c.person_id = AD.actor_name)) AS related_info_count,
+    CASE 
+        WHEN AD.total_movies > 10 THEN 'Prolific Actor'
+        ELSE 'Emerging Talent'
+    END AS actor_status
+FROM 
+    ActorDetails AD
+LEFT JOIN 
+    MovieTitles MT ON AD.total_movies > 5
+WHERE 
+    AD.last_movie_year IS NOT NULL
+ORDER BY 
+    AD.total_movies DESC,
+    AD.actor_name
+LIMIT 50;

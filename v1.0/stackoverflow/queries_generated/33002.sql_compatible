@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1  
+        AND P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserBadgeCounts AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) FILTER (WHERE B.Class = 1) AS GoldBadgeCount,
+        COUNT(*) FILTER (WHERE B.Class = 2) AS SilverBadgeCount,
+        COUNT(*) FILTER (WHERE B.Class = 3) AS BronzeBadgeCount
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT PHT.Name, ', ') AS EditTypes
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.OwnerDisplayName,
+    RP.CreationDate,
+    RP.Score,
+    RP.ViewCount,
+    COALESCE(UBC.GoldBadgeCount, 0) AS GoldBadgeCount,
+    COALESCE(UBC.SilverBadgeCount, 0) AS SilverBadgeCount,
+    COALESCE(UBC.BronzeBadgeCount, 0) AS BronzeBadgeCount,
+    COALESCE(PHS.EditCount, 0) AS EditCount,
+    COALESCE(PHS.LastEditDate, 'No Edits') AS LastEditDate,
+    COALESCE(PHS.EditTypes, 'No Edits') AS EditTypes
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    UserBadgeCounts UBC ON RP.OwnerUserId = UBC.UserId
+LEFT JOIN 
+    PostHistorySummary PHS ON RP.PostId = PHS.PostId
+WHERE 
+    RP.Rank = 1  
+ORDER BY 
+    RP.Score DESC, RP.ViewCount DESC;

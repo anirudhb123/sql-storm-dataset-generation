@@ -1,0 +1,62 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        grp.role AS role
+    FROM 
+        aka_title t
+    INNER JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    INNER JOIN 
+        aka_name a ON cc.subject_id = a.person_id
+    LEFT JOIN 
+        role_type grp ON cc.role_id = grp.id
+    WHERE 
+        t.production_year >= 2000  
+),
+keyword_count AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(k.id) AS keyword_total
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(*) AS company_count
+    FROM 
+        movie_companies mc
+    INNER JOIN 
+        company_name c ON mc.company_id = c.id
+    INNER JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.actor_name,
+    md.role,
+    COALESCE(kc.keyword_total, 0) AS total_keywords,
+    COALESCE(ci.company_count, 0) AS total_companies
+FROM 
+    movie_details md
+LEFT JOIN 
+    keyword_count kc ON md.movie_id = kc.movie_id
+LEFT JOIN 
+    company_info ci ON md.movie_id = ci.movie_id
+ORDER BY 
+    md.production_year DESC,
+    md.title;

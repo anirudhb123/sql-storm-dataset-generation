@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        p.ViewCount,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(p.Id) AS TotalQuestions
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(p.Id) >= 5 -- Users with at least 5 questions
+)
+SELECT 
+    ru.DisplayName AS TopUser,
+    ru.TotalScore,
+    ru.TotalViews,
+    COUNT(DISTINCT rp.PostId) AS QuestionCount,
+    SUM(rp.Score) AS TotalPostScore,
+    SUM(rp.CommentCount) AS TotalComments,
+    STRING_AGG(DISTINCT rp.Title, '; ') AS RecentQuestions
+FROM 
+    TopUsers ru
+JOIN 
+    RankedPosts rp ON ru.UserId = rp.PostId 
+WHERE 
+    rp.rn <= 5 -- Get top 5 recent posts per user
+GROUP BY 
+    ru.DisplayName, ru.TotalScore, ru.TotalViews
+ORDER BY 
+    ru.TotalScore DESC, ru.TotalViews DESC
+LIMIT 10;

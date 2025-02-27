@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        t.TagName,
+        RANK() OVER (PARTITION BY p.Id ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS t(TagName)
+    WHERE 
+        p.PostTypeId = 1 /* Filtering for Questions */
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS VoteCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.CommentCount,
+    ug.UserId,
+    ug.DisplayName AS UserDisplayName,
+    ug.VoteCount,
+    ug.CommentCount AS UserComments,
+    ug.UpVotes,
+    ug.DownVotes
+FROM 
+    RankedPosts rp
+JOIN 
+    UserEngagement ug ON ug.UserId = rp.PostId
+WHERE 
+    rp.RankByScore = 1  /* Selecting top-ranked posts */
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 
+    50;

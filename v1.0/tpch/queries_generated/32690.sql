@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+), SupplierPart AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           p.p_name, p.p_type, p.p_size
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > 50.00
+), OrderLineSummary AS (
+    SELECT l_orderkey,
+           SUM(l_quantity) AS total_quantity,
+           AVG(l_extendedprice) AS avg_price,
+           MAX(l_discount) AS max_discount,
+           SUM(CASE WHEN l_returnflag = 'R' THEN 1 ELSE 0 END) AS returns_count
+    FROM lineitem
+    GROUP BY l_orderkey
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    COALESCE(s.s_name, 'Unknown') AS supplier_name,
+    SUM(ols.total_quantity) AS total_ordered,
+    AVG(ols.avg_price) AS avg_order_price,
+    COUNT(DISTINCT ro.o_orderkey) AS total_orders,
+    COUNT(DISTINCT sh.s_suppkey) AS active_suppliers,
+    MAX(sh.level) AS max_supplier_level
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN RankedOrders ro ON s.s_suppkey = ro.o_custkey
+LEFT JOIN OrderLineSummary ols ON ro.o_orderkey = ols.l_orderkey
+GROUP BY r.r_name, n.n_name, s.s_name
+HAVING AVG(ols.avg_price) > 100.00
+ORDER BY total_ordered DESC;

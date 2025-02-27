@@ -1,0 +1,97 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+    WHERE 
+        p.PostTypeId = 2 
+),
+AggregateVotes AS (
+    
+    SELECT
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    INNER JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+PostDetails AS (
+    
+    SELECT
+        p.Id,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(a.UpVotes, 0) AS UpVotes,
+        COALESCE(a.DownVotes, 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        AggregateVotes a ON p.Id = a.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+ClosedPosts AS (
+    
+    SELECT
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Comment END) AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    pd.Id AS PostID,
+    pd.Title,
+    pd.OwnerDisplayName,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.CommentCount,
+    COALESCE(cp.CloseReason, 'Open') AS PostStatus,
+    COALESCE(rph.Level, 0) AS AnswerLevel
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    ClosedPosts cp ON pd.Id = cp.PostId
+LEFT JOIN 
+    RecursivePostHierarchy rph ON pd.Id = rph.PostId
+WHERE 
+    pd.UpVotes - pd.DownVotes > 0 
+ORDER BY 
+    pd.UpVotes DESC,
+    pd.CommentCount DESC;

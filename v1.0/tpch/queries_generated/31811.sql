@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, CAST(s_name AS VARCHAR(255)) AS full_hierarchy
+    FROM supplier
+    WHERE s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, CONCAT(sh.full_hierarchy, ' > ', s.s_name)
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 5000 AND s.s_suppkey <> sh.s_suppkey
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_mktsegment, COUNT(l.l_orderkey) AS item_count
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_mktsegment
+    HAVING o.o_totalprice > 50000
+),
+NationAggregates AS (
+    SELECT n.n_nationkey, n.n_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT
+    COALESCE(n.n_name, 'Unknown Nation') AS nation_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(ho.item_count) AS total_line_items,
+    AVG(s.s_acctbal) AS avg_supplier_balance,
+    STRING_AGG(DISTINCT sh.full_hierarchy, '; ') AS supplier_hierarchies,
+    CASE WHEN SUM(na.total_supply_cost) IS NULL THEN 0 ELSE SUM(na.total_supply_cost) END AS total_cost
+FROM nation n
+LEFT JOIN HighValueOrders ho ON n.n_nationkey = ho.c_mktsegment
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN NationAggregates na ON n.n_nationkey = na.n_nationkey
+GROUP BY n.n_name
+ORDER BY total_orders DESC, nation_name
+LIMIT 10;

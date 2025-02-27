@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_suppkey IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate > DATE '2021-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+NationStats AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(s.s_suppkey) AS supplier_count,
+           AVG(s.s_acctbal) AS avg_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+RankedOrders AS (
+    SELECT od.o_orderkey, od.total_price, 
+           RANK() OVER (ORDER BY od.total_price DESC) AS price_rank
+    FROM OrderDetails od
+)
+SELECT n.n_name, ns.supplier_count, ns.avg_acctbal, ro.total_price, ro.price_rank
+FROM NationStats ns
+JOIN SupplierHierarchy sh ON ns.n_nationkey = sh.s_nationkey
+LEFT JOIN RankedOrders ro ON ro.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE c.c_nationkey = n.n_nationkey
+)
+WHERE ns.avg_acctbal IS NOT NULL
+ORDER BY ns.n_name, ro.price_rank;

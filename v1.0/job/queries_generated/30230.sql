@@ -1,0 +1,62 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+    UNION ALL
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        mh.level < 3
+)
+
+SELECT 
+    m.title, 
+    m.production_year, 
+    ARRAY_AGG(DISTINCT a.name) AS actors, 
+    COUNT(DISTINCT kw.keyword) AS keyword_count,
+    COUNT(DISTINCT c.company_id) FILTER (WHERE c.company_type_id = 1) AS production_companies_count,
+    window_avg.avg_rating
+FROM 
+    movie_hierarchy m
+LEFT JOIN 
+    cast_info ci ON m.movie_id = ci.movie_id 
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id 
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id 
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_companies c ON m.movie_id = c.movie_id 
+LEFT JOIN 
+    (SELECT 
+         movie_id, 
+         AVG(star_rating) AS avg_rating
+     FROM 
+         movie_info 
+     WHERE 
+         info_type_id IN (SELECT id FROM info_type WHERE info = 'Star Rating')
+     GROUP BY 
+         movie_id) window_avg ON m.movie_id = window_avg.movie_id
+WHERE 
+    m.production_year IS NOT NULL
+GROUP BY 
+    m.movie_id, window_avg.avg_rating
+ORDER BY 
+    keyword_count DESC, m.production_year DESC
+LIMIT 50;

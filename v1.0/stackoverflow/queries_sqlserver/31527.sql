@@ -1,0 +1,57 @@
+
+WITH RecursiveVoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes
+    WHERE 
+        CreationDate >= CAST('2024-10-01 12:34:56' AS DATETIME) - INTERVAL 30 DAY
+    GROUP BY 
+        PostId
+),
+UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(rv.VoteCount, 0) AS RecentVoteCount,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursiveVoteCounts rv ON p.Id = rv.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS DATETIME) - INTERVAL 90 DAY
+)
+SELECT 
+    rp.Title,
+    rp.RecentVoteCount,
+    ur.Reputation,
+    ur.ReputationRank,
+    CASE 
+        WHEN rp.RecentVoteCount = 0 THEN 'No Votes Yet'
+        WHEN rp.RecentVoteCount > 10 THEN 'Popular Post'
+        ELSE 'Moderately Active'
+    END AS ActivityStatus
+FROM 
+    RecentPosts rp
+INNER JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+WHERE 
+    rp.RecentVoteCount > 0
+ORDER BY 
+    ur.Reputation DESC, 
+    rp.RecentVoteCount DESC
+OFFSET 0 ROWS FETCH NEXT 20 ROWS ONLY;

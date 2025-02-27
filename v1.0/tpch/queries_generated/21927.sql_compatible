@@ -1,0 +1,82 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (
+            SELECT AVG(p1.p_retailprice)
+            FROM part p1
+            WHERE p1.p_type LIKE '%metal%'
+        )
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey 
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    r.r_name,
+    SUM(COALESCE(c_total.total_orders, 0)) AS total_orders_contributed,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    p.p_name,
+    COALESCE(s.total_supplycost, 0) * CASE WHEN COUNT(l.l_orderkey) > 0 THEN 1 ELSE 0 END AS adjusted_supplycost
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    CustomerOrders AS c_total ON c_total.c_custkey = c.c_custkey
+LEFT JOIN 
+    orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    lineitem l ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    RankedParts p ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    SupplierStats s ON s.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = p.p_partkey 
+        ORDER BY ps.ps_supplycost DESC 
+        FETCH FIRST ROW ONLY
+    )
+WHERE 
+    r.r_name IS NOT NULL 
+    AND (c.c_acctbal > 1000 OR c.c_acctbal IS NULL)
+GROUP BY 
+    r.r_name, p.p_name, s.total_supplycost
+HAVING 
+    SUM(COALESCE(c_total.total_orders, 0)) > 10 
+    OR (SUM(l.l_extendedprice) > 10000 AND p.p_brand IS NULL)
+ORDER BY 
+    r.r_name, total_orders_contributed DESC
+FETCH FIRST 50 ROWS ONLY;

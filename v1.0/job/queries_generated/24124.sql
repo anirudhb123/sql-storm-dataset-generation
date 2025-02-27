@@ -1,0 +1,66 @@
+WITH ranked_movies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rn
+    FROM
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+actor_count AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM
+        cast_info c
+    GROUP BY
+        c.movie_id
+),
+movie_with_actors AS (
+    SELECT
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        ac.actor_count
+    FROM
+        ranked_movies rm
+    LEFT JOIN
+        actor_count ac ON rm.movie_id = ac.movie_id
+    WHERE
+        ac.actor_count IS NOT NULL OR rm.production_year IS NOT NULL
+),
+movies_above_avg_actors AS (
+    SELECT
+        m.movie_title,
+        m.production_year,
+        m.actor_count
+    FROM
+        movie_with_actors m
+    WHERE
+        m.actor_count > (SELECT AVG(actor_count) FROM movie_with_actors)
+)
+SELECT
+    ma.movie_title,
+    ma.production_year,
+    ma.actor_count,
+    COALESCE(NULLIF(ARRAY_AGG(DISTINCT a.name ORDER BY a.name), '{}'), ARRAY['No Actors']) AS actor_names,
+    CASE
+        WHEN ma.production_year IS NULL AND ma.actor_count < 5 THEN 'Unknown Title Category'
+        ELSE COALESCE(it.info, 'General Info')
+    END AS info_category
+FROM
+    movies_above_avg_actors ma
+LEFT JOIN
+    cast_info c ON ma.movie_id = c.movie_id
+LEFT JOIN
+    aka_name a ON c.person_id = a.person_id
+LEFT JOIN
+    movie_info mi ON ma.movie_id = mi.movie_id
+LEFT JOIN
+    info_type it ON mi.info_type_id = it.id
+GROUP BY
+    ma.movie_title, ma.production_year, ma.actor_count, it.info
+ORDER BY
+    ma.production_year DESC, ma.actor_count DESC;

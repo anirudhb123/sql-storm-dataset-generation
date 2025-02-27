@@ -1,0 +1,66 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT V.Id) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.Reputation, U.Views, U.UpVotes, U.DownVotes
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        P.ClosedDate,
+        P.LastActivityDate,
+        COUNT(C.Id) AS TotalComments
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, 
+        P.AnswerCount, P.CommentCount, P.FavoriteCount, 
+        P.ClosedDate, P.LastActivityDate
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.Views,
+    U.UpVotes,
+    U.DownVotes,
+    U.TotalPosts,
+    U.TotalVotes,
+    P.PostId,
+    P.Title,
+    P.CreationDate AS PostCreationDate,
+    P.Score AS PostScore,
+    P.ViewCount AS PostViewCount,
+    P.AnswerCount AS PostAnswerCount,
+    P.CommentCount AS PostCommentCount,
+    P.FavoriteCount AS PostFavoriteCount,
+    P.ClosedDate AS PostClosedDate,
+    P.LastActivityDate AS PostLastActivityDate,
+    P.TotalComments AS PostTotalComments
+FROM 
+    UserStats U
+LEFT JOIN 
+    PostStats P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, P.Score DESC;

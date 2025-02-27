@@ -1,0 +1,49 @@
+WITH RECURSIVE RevenueCTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS rn
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1996-01-01'
+    GROUP BY c.c_custkey, c.c_name
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey
+    )
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING COUNT(ps.ps_partkey) > 5
+)
+SELECT 
+    r.r_name,
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue_after_discount,
+    COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity END), 0) AS total_returns,
+    MAX(s_part_supplier) AS unique_suppliers
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN RECURSIVE RevenueCTE r ON l.l_orderkey IN (
+    SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = r.c_custkey AND o.o_orderstatus = 'O'
+)
+LEFT JOIN FilteredSuppliers fs ON fs.part_count > 10
+JOIN nation n ON n.n_nationkey = (
+    CASE 
+        WHEN fs.s_name IS NOT NULL THEN (SELECT s_nationkey FROM supplier WHERE s_suppkey = fs.s_suppkey)
+        ELSE NULL
+    END)
+JOIN region r ON n.n_regionkey = r.r_regionkey
+GROUP BY r.r_name, p.p_name
+HAVING revenue_after_discount > (
+    SELECT AVG(l_extendedprice) FROM lineitem WHERE l_tax < 0.05
+)
+ORDER BY revenue_after_discount DESC
+LIMIT 10
+OFFSET 3;

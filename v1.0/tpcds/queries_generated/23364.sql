@@ -1,0 +1,88 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws_order_number,
+        ws.net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY ws.net_profit DESC) as rn,
+        DENSE_RANK() OVER (ORDER BY ws.net_profit DESC) as profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        w.web_country = 'USA'
+        AND ws.ws_sold_date_sk BETWEEN 2458497 AND 2458610
+), CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.return_quantity) AS total_returned,
+        COUNT(DISTINCT wr.order_number) AS total_return_orders
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.returned_date_sk >= 2458500
+    GROUP BY 
+        wr.returning_customer_sk
+), SalesComparison AS (
+    SELECT 
+        r.sales_web_site,
+        SUM(COALESCE(s.sales_amount, 0)) AS total_sales,
+        COALESCE(c.total_returned, 0) AS total_returns
+    FROM 
+        (SELECT 
+            w.web_site_sk AS sales_web_site,
+            SUM(ws.ws_net_profit) AS sales_amount
+         FROM 
+            web_sales ws 
+         JOIN 
+            web_site w ON ws.ws_web_site_sk = w.web_site_sk
+         GROUP BY 
+            w.web_site_sk) r
+    LEFT JOIN 
+        CustomerReturns c ON r.sales_web_site = c.returning_customer_sk
+    GROUP BY 
+        r.sales_web_site
+), FinalOutput AS (
+    SELECT 
+        s.sales_web_site,
+        s.total_sales,
+        s.total_returns,
+        CASE 
+            WHEN s.total_sales IS NULL OR s.total_sales = 0 THEN 'No Sales'
+            WHEN s.total_returns > 0 THEN 'Returns Exist'
+            ELSE 'Sales Only'
+        END AS Sales_Status,
+        CASE 
+            WHEN s.total_sales - s.total_returns < 0 THEN 'Negative Profit'
+            ELSE 'Positive Profit'
+        END AS Profit_Status
+    FROM 
+        SalesComparison s
+)
+
+SELECT 
+    f.sales_web_site,
+    f.total_sales,
+    f.total_returns,
+    f.Sales_Status,
+    f.Profit_Status,
+    r.web_page_id,
+    COALESCE(wc.count_web_pages, 0) AS web_page_count
+FROM 
+    FinalOutput f
+LEFT JOIN 
+    web_page r ON f.sales_web_site = r.wp_web_page_id
+LEFT JOIN 
+    (SELECT 
+        wp.web_site_id, 
+        COUNT(*) AS count_web_pages 
+     FROM 
+        web_page wp 
+     GROUP BY 
+        wp.web_site_id) wc ON wc.web_site_id = r.web_page_id
+WHERE 
+    f.Profit_Status = 'Positive Profit'
+ORDER BY 
+    f.total_sales DESC NULLS LAST
+LIMIT 10;

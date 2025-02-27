@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.Views,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.Views DESC) AS ScoreRank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVoteCount,
+        COALESCE(MAX(b.Date) FILTER (WHERE b.Class = 1), 'No Gold Badge') AS GoldBadgeDate
+    FROM
+        Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+
+PostDetails AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.Views,
+        rp.CreationDate,
+        rp.ScoreRank,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        rp.GoldBadgeDate,
+        CASE 
+            WHEN rp.Score < 0 THEN 'Negative'
+            WHEN rp.Score BETWEEN 0 AND 10 THEN 'Neutral'
+            ELSE 'Positive'
+        END AS ScoreCategory
+    FROM
+        RankedPosts rp
+    WHERE
+        rp.ScoreRank <= 10
+),
+
+MostCommentedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM
+        Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY
+        p.Id
+    HAVING
+        COUNT(c.Id) >= 5
+),
+
+FinalMetrics AS (
+    SELECT
+        pd.Title,
+        pd.Views,
+        pd.Score,
+        pd.UpVoteCount,
+        pd.DownVoteCount,
+        pd.GoldBadgeDate,
+        pd.ScoreCategory,
+        COALESCE(mc.CommentCount, 0) AS CommentCount
+    FROM
+        PostDetails pd
+    LEFT JOIN MostCommentedPosts mc ON pd.PostId = mc.PostId
+)
+
+SELECT
+    Title,
+    Views,
+    Score,
+    UpVoteCount,
+    DownVoteCount,
+    GoldBadgeDate,
+    ScoreCategory,
+    CommentCount,
+    CASE 
+        WHEN ScoreCategory = 'Positive' AND CommentCount > 10 THEN 'Hot Post!'
+        WHEN ScoreCategory = 'Negative' AND CommentCount < 3 THEN 'Potentially Unpopular'
+        ELSE 'Standard Engagement'
+    END AS EngagementStatus
+FROM
+    FinalMetrics
+WHERE
+    (GoldBadgeDate IS NOT NULL OR UpVoteCount > 50)
+ORDER BY
+    Views DESC, Score DESC;

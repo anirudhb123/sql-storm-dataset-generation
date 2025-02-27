@@ -1,0 +1,49 @@
+WITH RECURSIVE sup_cte AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal)
+        FROM supplier s2
+        WHERE s2.s_nationkey = s.s_nationkey
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, c.level + 1
+    FROM supplier s
+    JOIN sup_cte c ON s.s_nationkey = c.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal < c.s_acctbal
+),
+part_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT r.r_name,
+       COUNT(DISTINCT n.n_nationkey) AS nation_count,
+       SUM(coalesce(ps.total_supplycost, 0)) AS total_supplycost_per_region,
+       MAX(coalesce(co.total_spent, 0)) AS max_spent_per_customer,
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity END) AS return_quantity,
+       COUNT(DISTINCT s.s_suppkey) AS unique_suppliers,
+       ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY SUM(l.l_extendedprice) DESC) AS region_rank
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN customer_orders co ON co.c_custkey = (SELECT MAX(c.c_custkey)
+                                                 FROM customer c
+                                                 WHERE c.c_nationkey = n.n_nationkey
+                                                 AND c.c_acctbal IS NOT NULL)
+WHERE r.r_name IS NOT NULL OR n.n_comment IS NULL
+GROUP BY r.r_regionkey
+HAVING SUM(l.l_discount) > (SELECT AVG(l2.l_discount)
+                             FROM lineitem l2
+                             WHERE l2.l_tax < 0.05)
+ORDER BY region_rank, total_supplycost_per_region DESC;

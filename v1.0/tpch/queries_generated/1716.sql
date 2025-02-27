@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01'
+),
+TopProducts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(l.l_quantity) > 1000
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_name,
+        s.s_acctbal, 
+        n.n_name AS supplier_nation,
+        r.r_name AS supplier_region
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 5000
+)
+
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_type,
+    COALESCE(tp.total_quantity, 0) AS total_ordered_quantity,
+    COALESCE(tp.avg_price, 0) AS average_price,
+    sd.supplier_nation,
+    sd.supplier_region,
+    COUNT(DISTINCT ro.o_orderkey) AS total_orders
+FROM 
+    part p
+LEFT JOIN 
+    TopProducts tp ON p.p_partkey = tp.ps_partkey
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)
+LEFT JOIN 
+    SupplierDetails sd ON sd.supplier_nation = (SELECT n.n_name FROM nation n JOIN supplier s ON n.n_nationkey = s.s_nationkey WHERE s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey))
+WHERE 
+    p.p_retailprice > 20.00 AND 
+    (p.p_comment LIKE '%high quality%' OR p.p_comment IS NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_type, sd.supplier_nation, sd.supplier_region
+ORDER BY 
+    total_ordered_quantity DESC, avg_price DESC;

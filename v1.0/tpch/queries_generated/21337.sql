@@ -1,0 +1,57 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) as rank,
+           n.n_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+    UNION ALL
+    SELECT sh.s_suppkey, sh.s_name, sh.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY sh.n_nationkey ORDER BY sh.s_acctbal DESC),
+           sh.n_name
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 50
+),
+customer_summary AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F') OR o.o_orderstatus IS NULL
+    GROUP BY c.c_custkey
+),
+part_details AS (
+    SELECT p.p_partkey, p.p_name, 
+           p.p_retailprice, 
+           LPAD(CAST(p.p_size AS CHAR), 10, '0') AS formatted_size,
+           CASE 
+               WHEN p.p_retailprice IS NULL THEN 'NO PRICE' 
+               WHEN p.p_retailprice < 0 THEN 'NEGATIVE PRICE' 
+               ELSE 'VALID PRICE' 
+           END AS price_status
+    FROM part p
+    WHERE p.p_size BETWEEN 10 AND 20
+)
+SELECT 
+    cs.c_custkey,
+    cs.total_spent,
+    cs.order_count,
+    cs.avg_order_value,
+    pd.p_name,
+    pd.formatted_size,
+    pd.price_status,
+    sh.n_name AS supplier_nation,
+    sh.rank AS supplier_rank
+FROM customer_summary cs
+LEFT JOIN part_details pd ON pd.p_partkey IN (
+    SELECT DISTINCT l.l_partkey 
+    FROM lineitem l 
+    WHERE l.l_quantity > (SELECT AVG(l2.l_quantity) FROM lineitem l2)
+)
+LEFT JOIN supplier_hierarchy sh ON sh.s_acctbal > cs.total_spent
+ORDER BY cs.total_spent DESC, sh.rank ASC
+LIMIT 100 OFFSET 10;

@@ -1,0 +1,69 @@
+
+WITH ItemSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_paid) AS total_sales,
+        AVG(ws.ws_sales_price) AS average_price
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_product_name,
+        i.i_brand,
+        i.i_class,
+        i.i_category,
+        is.total_quantity_sold,
+        is.total_sales,
+        is.average_price
+    FROM 
+        ItemSales is
+    JOIN 
+        item i ON is.ws_item_sk = i.i_item_sk
+    ORDER BY 
+        is.total_sales DESC
+    LIMIT 10
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate,
+        cd.cd_dep_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000
+)
+SELECT 
+    ti.i_item_id,
+    ti.i_product_name,
+    ti.i_brand,
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ti.total_quantity_sold,
+    ti.total_sales,
+    ti.average_price
+FROM 
+    TopItems ti
+JOIN 
+    CustomerInfo ci ON ti.total_sales > ((SELECT AVG(total_sales) FROM TopItems) * 0.5)
+ORDER BY 
+    ti.total_sales DESC;

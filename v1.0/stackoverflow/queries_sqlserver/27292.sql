@@ -1,0 +1,66 @@
+
+WITH UserRank AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.ViewCount,
+        P.AnswerCount,
+        CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS IsAccepted,
+        T.TagName,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    CROSS APPLY 
+        (SELECT value AS TagName FROM STRING_SPLIT(P.Tags, '>')) AS T
+    WHERE 
+        P.PostTypeId = 1 
+),
+MostActiveUsers AS (
+    SELECT 
+        PostSummary.OwnerDisplayName,
+        COUNT(PostSummary.PostId) AS QuestionCount,
+        SUM(PostSummary.ViewCount) AS TotalViews,
+        SUM(PostSummary.AnswerCount) AS TotalAnswers,
+        R.UserRank
+    FROM 
+        PostSummary
+    JOIN 
+        UserRank R ON PostSummary.OwnerDisplayName = R.DisplayName
+    GROUP BY 
+        PostSummary.OwnerDisplayName, R.UserRank
+),
+TopActiveUsers AS (
+    SELECT 
+        OwnerDisplayName,
+        QuestionCount,
+        TotalViews,
+        TotalAnswers,
+        RANK() OVER (ORDER BY QuestionCount DESC, TotalViews DESC) AS ActivityRank
+    FROM 
+        MostActiveUsers
+)
+SELECT 
+    OwnerDisplayName,
+    QuestionCount,
+    TotalViews,
+    TotalAnswers,
+    ActivityRank
+FROM 
+    TopActiveUsers
+WHERE 
+    ActivityRank <= 10
+ORDER BY 
+    ActivityRank;

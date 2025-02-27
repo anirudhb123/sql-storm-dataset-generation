@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS budget, min(t.title) AS unsuccsessful_movie
+FROM company_name AS cn, company_type AS ct, info_type AS it1, info_type AS it2, movie_companies AS mc, movie_info AS mi, movie_info_idx AS mi_idx, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND mi.info_type_id = it1.id AND mi_idx.info_type_id = it2.id AND t.id = mc.movie_id AND ct.id = mc.company_type_id AND cn.id = mc.company_id AND mc.movie_id = mi.movie_id AND mc.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id
+AND it2.id > 60 AND t.series_years IN ('1959-1967', '1963-1970', '1971-????', '1988-2007', '1994-2004') AND mi.info_type_id < 92 AND mi_idx.info < '0...1.0025' AND mc.note > '(2011) (USA) (DVD) (Blu-ray) (double feature with "Phantoms")';

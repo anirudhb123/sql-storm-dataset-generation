@@ -1,0 +1,97 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName) ON TRUE
+    WHERE 
+        p.PostTypeId = 1 -- Questions Only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT ca.Id) AS ClosedPosts,
+        COUNT(DISTINCT c.Id) AS CommentsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts ca ON ca.OwnerUserId = u.Id AND ca.PostTypeId = 1 AND ca.ClosedDate IS NOT NULL
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+ActiveUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalBounty,
+        ua.ClosedPosts,
+        ua.CommentsCount,
+        RANK() OVER (ORDER BY ua.ClosedPosts DESC, ua.CommentsCount DESC ) AS UserRank
+    FROM 
+        UserActivity ua
+    WHERE 
+        ua.ClosedPosts > 0 OR ua.CommentsCount > 0
+),
+
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        p.Title AS PostTitle,
+        ph.UserId AS EditorId,
+        ph.UserDisplayName AS EditorName,
+        ph.CreationDate AS EditDate,
+        COUNT(*) OVER (PARTITION BY ph.PostId) AS EditCount,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+)
+
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    r.Tags,
+    u.DisplayName AS UserDisplayName,
+    u.TotalBounty,
+    a.UserRank,
+    p.EditCount,
+    p.EditDate,
+    p.EditorName,
+    p.Comment
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+JOIN 
+    ActiveUsers a ON u.Id = a.UserId
+LEFT JOIN 
+    PostHistoryAnalysis p ON r.PostId = p.PostId
+WHERE 
+    r.Rank <= 5
+ORDER BY 
+    u.TotalBounty DESC, 
+    r.Score DESC, 
+    r.ViewCount DESC;

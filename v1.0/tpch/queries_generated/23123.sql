@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SupplierParts AS (
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING AVG(ps.ps_supplycost) < (
+        SELECT AVG(ps_supplycost) * 1.1 FROM partsupp
+    )
+),
+FinalResults AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(CASE WHEN hs.total_revenue IS NOT NULL THEN hs.total_revenue ELSE 0 END), 0) AS total_order_revenue,
+        COALESCE(MAX(sps.avg_supply_cost), 0) AS highest_avg_supply_cost,
+        COUNT(DISTINCT rs.s_suppkey) AS unique_supplier_count
+    FROM part p
+    LEFT JOIN HighValueOrders hs ON p.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = hs.o_orderkey)
+    LEFT JOIN SupplierParts sps ON p.p_partkey = sps.ps_partkey
+    LEFT JOIN RankedSuppliers rs ON p.p_partkey IN (
+        SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = rs.s_suppkey
+    )
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    fr.p_partkey,
+    fr.p_name,
+    fr.total_order_revenue,
+    fr.highest_avg_supply_cost,
+    fr.unique_supplier_count,
+    CASE 
+        WHEN fr.total_order_revenue > 50000 THEN 'High Revenue'
+        WHEN fr.total_order_revenue IS NULL THEN 'No Revenue'
+        ELSE 'Moderate Revenue'
+    END AS revenue_category
+FROM FinalResults fr
+ORDER BY fr.total_order_revenue DESC NULLS LAST;

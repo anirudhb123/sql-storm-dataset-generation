@@ -1,0 +1,90 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(P.Score) AS AvgPostScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        Views,
+        UpVotes,
+        DownVotes,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        AvgPostScore,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserReputation
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+TopUsersWithBadges AS (
+    SELECT 
+        TU.UserId,
+        TU.DisplayName,
+        TU.Reputation,
+        TU.Views,
+        TU.UpVotes,
+        TU.DownVotes,
+        TU.PostCount,
+        TU.QuestionCount,
+        TU.AnswerCount,
+        TU.AvgPostScore,
+        UB.BadgeCount,
+        UB.GoldBadges,
+        UB.SilverBadges,
+        UB.BronzeBadges
+    FROM 
+        TopUsers TU
+    LEFT JOIN 
+        UserBadges UB ON TU.UserId = UB.UserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    Views,
+    UpVotes,
+    DownVotes,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    AvgPostScore,
+    BadgeCount,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    ReputationRank
+FROM 
+    TopUsersWithBadges
+WHERE 
+    ReputationRank <= 10
+ORDER BY 
+    Reputation DESC;

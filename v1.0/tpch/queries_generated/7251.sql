@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name,
+        ro.c_acctbal
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.order_rank <= 5
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, p.p_name, s.s_name, s.s_acctbal
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.o_totalprice,
+    to.c_name,
+    s.s_name,
+    SUM(ls.total_revenue) AS total_revenue_from_top_orders,
+    AVG(s.s_acctbal) AS average_supplier_account_balance
+FROM 
+    TopOrders to
+JOIN 
+    LineItemSummary ls ON to.o_orderkey = ls.l_orderkey
+JOIN 
+    SupplierDetails s ON s.ps_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey = to.o_orderkey)
+GROUP BY 
+    to.o_orderkey, to.o_orderdate, to.o_totalprice, to.c_name, s.s_name
+ORDER BY 
+    total_revenue_from_top_orders DESC, to.o_orderdate;

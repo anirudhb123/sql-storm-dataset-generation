@@ -1,0 +1,73 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales_value,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS row_num
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+item_info AS (
+    SELECT 
+        i_item_sk,
+        i_item_id,
+        i_item_desc,
+        COALESCE(i_current_price, 0) AS current_price,
+        COALESCE(i_wholesale_cost, 0) AS wholesale_cost
+    FROM 
+        item
+),
+customer_info AS (
+    SELECT 
+        c_customer_sk,
+        c_email_address,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer 
+    LEFT JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+),
+date_filter AS (
+    SELECT 
+        d_date_sk
+    FROM 
+        date_dim
+    WHERE 
+        d_date BETWEEN '2023-01-01' AND '2023-12-31'
+)
+SELECT 
+    ci.c_email_address,
+    ii.i_item_desc,
+    ss.total_quantity,
+    ss.total_sales_value,
+    (ss.total_sales_value / NULLIF(ss.total_quantity, 0)) AS avg_price,
+    cd.cd_marital_status,
+    cd.cd_gender,
+    CASE 
+        WHEN cd_purchase_estimate > 1000 THEN 'High Value'
+        WHEN cd_purchase_estimate BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM 
+    sales_summary ss
+JOIN 
+    item_info ii ON ss.ws_item_sk = ii.i_item_sk
+JOIN 
+    customer_info ci ON ss.ws_bill_customer_sk = ci.c_customer_sk
+JOIN 
+    date_filter df ON ss.ws_sold_date_sk = df.d_date_sk
+LEFT JOIN 
+    customer_demographics cd ON ci.c_customer_sk = cd.cd_demo_sk
+WHERE 
+    (ci.gender_rank <= 5) AND 
+    (ci.cd_marital_status = 'M' OR ci.cd_marital_status = 'S')
+ORDER BY 
+    total_sales_value DESC
+LIMIT 100;

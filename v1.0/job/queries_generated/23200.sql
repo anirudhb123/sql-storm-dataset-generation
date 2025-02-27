@@ -1,0 +1,68 @@
+WITH RECURSIVE title_hierarchy AS (
+    SELECT t.id AS title_id, 
+           t.title, 
+           t.production_year, 
+           t.kind_id,
+           t.imdb_id,
+           NULL AS parent_id,
+           0 AS level
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+    UNION ALL
+    SELECT m.id AS title_id, 
+           m.title, 
+           m.production_year, 
+           m.kind_id,
+           m.imdb_id,
+           th.title_id AS parent_id,
+           th.level + 1
+    FROM title_hierarchy th
+    JOIN movie_link ml ON th.title_id = ml.movie_id
+    JOIN title m ON ml.linked_movie_id = m.id
+    WHERE th.level < 5 -- Limit hierarchy depth for performance
+),
+cast_summary AS (
+    SELECT ci.movie_id,
+           COUNT(DISTINCT ci.person_id) AS total_cast,
+           STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM cast_info ci
+    LEFT JOIN aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY ci.movie_id
+),
+movie_details AS (
+    SELECT t.title, 
+           t.production_year, 
+           ct.kind AS company_type,
+           cs.total_cast,
+           cs.cast_names,
+           ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY cs.total_cast DESC) AS cast_rank,
+           MAX(CASE WHEN mi.info_type_id = 1 THEN mi.info ELSE NULL END) AS summary_info,
+           COALESCE(COUNT(DISTINCT mk.keyword), 0) AS keyword_count
+    FROM title t
+    JOIN title_hierarchy th ON t.id = th.title_id
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN cast_summary cs ON t.id = cs.movie_id
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY t.id, ct.kind, cs.total_cast, cs.cast_names
+)
+SELECT md.title, 
+       md.production_year, 
+       md.company_type, 
+       md.total_cast, 
+       md.cast_names,
+       CASE WHEN md.keyword_count > 0 THEN 'Has Keywords' ELSE 'No Keywords' END AS keyword_status,
+       GREATEST(md.keyword_count, 1) AS adjusted_keyword_count,
+       STRING_AGG(DISTINCT CASE 
+           WHEN md.summary_info IS NOT NULL THEN md.summary_info
+           ELSE 'No info available'
+       END, '; ') AS summary_info
+FROM movie_details md
+LEFT JOIN kind_type kt ON md.company_type = kt.kind
+WHERE md.cast_rank <= 5 -- Top 5 movies per year by total cast
+AND md.production_year BETWEEN 1990 AND 2023
+AND md.company_type IS NOT NULL
+GROUP BY md.title, md.production_year, md.company_type, md.total_cast, md.cast_names, md.keyword_count
+ORDER BY md.production_year DESC, md.total_cast DESC;

@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.ViewCount IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+RecentPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        ub.BadgeCount,
+        ub.HighestBadgeClass,
+        pvs.UpVotes,
+        pvs.DownVotes,
+        CASE 
+            WHEN pvs.UpVotes - pvs.DownVotes >= 10 THEN 'Popular'
+            WHEN pvs.UpVotes - pvs.DownVotes >= 0 THEN 'Moderate'
+            ELSE 'Unpopular'
+        END AS Popularity
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+    LEFT JOIN 
+        PostVoteSummary pvs ON rp.PostId = pvs.PostId
+    WHERE 
+        rp.PostRank <= 3
+)
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.BadgeCount,
+    rp.HighestBadgeClass,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.Popularity,
+    CASE 
+        WHEN rp.BadgeCount IS NULL THEN 'No Badges'
+        ELSE rp.BadgeNames
+    END AS BadgeDetails,
+    COUNT(c.Id) AS CommentCount
+FROM
+    RecentPosts rp
+LEFT JOIN 
+    Comments c ON rp.PostId = c.PostId
+GROUP BY 
+    rp.PostId, rp.Title, rp.BadgeCount, rp.HighestBadgeClass, rp.UpVotes, rp.DownVotes, rp.Popularity
+ORDER BY 
+    rp.Popularity DESC, rp.BadgeCount DESC, rp.UpVotes DESC;

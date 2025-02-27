@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s1.s_acctbal) FROM supplier s1)
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_supplycost,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+)
+
+SELECT 
+    r.r_name,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    h.o_orderkey,
+    h.total_line_value,
+    sd.p_brand,
+    sd.p_type,
+    sd.p_size,
+    sd.p_retailprice,
+    CASE 
+        WHEN h.total_line_value IS NULL THEN 0 
+        ELSE h.total_line_value / sd.p_retailprice 
+    END AS value_ratio,
+    COUNT(DISTINCT h.o_orderkey) OVER (PARTITION BY r.r_regionkey) AS order_count
+FROM 
+    region r
+LEFT JOIN 
+    RankedSuppliers s ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_suppkey)
+LEFT JOIN 
+    HighValueOrders h ON h.o_orderkey IN (SELECT DISTINCT o.o_orderkey FROM orders o WHERE o.o_orderkey = h.o_orderkey)
+LEFT JOIN 
+    SupplierDetails sd ON s.s_suppkey = sd.ps_partkey
+WHERE 
+    (sd.p_size IS NULL OR sd.p_size > 10)
+ORDER BY 
+    r.r_name, supplier_name, h.total_line_value DESC;

@@ -1,0 +1,54 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        ARRAY[m.title] AS title_path,
+        CAST(0 AS INTEGER) AS level
+    FROM 
+        title m
+    WHERE 
+        m.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title AS movie_title,
+        title_path || e.title,
+        level + 1
+    FROM 
+        title e
+    JOIN 
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.level,
+    string_agg(DISTINCT ak.name, ', ') AS actors,
+    string_agg(DISTINCT mk.keyword, ', ') AS keywords,
+    string_agg(DISTINCT co.name, ', ') AS companies,
+    COUNT(DISTINCT mi.info) AS info_count
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.level
+ORDER BY 
+    mh.level, mh.movie_title;
+
+This SQL query builds a recursive Common Table Expression (CTE) to construct a hierarchy of movies and their episodes, aggregates detailed information such as actors, keywords, and companies associated with each movie, and counts additional informational entries per movie for benchmarking string processing efficiency.

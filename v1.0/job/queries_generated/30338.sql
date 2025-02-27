@@ -1,0 +1,80 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- Base case: selecting the top level movies
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mv.linked_movie_id,
+        1 AS depth
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_link mv ON m.id = mv.movie_id
+    WHERE 
+        mv.link_type_id IS NOT NULL
+    
+    UNION ALL
+    
+    -- Recursive case: joining to find linked movies
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        mv.linked_movie_id,
+        mh.depth + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link mv ON mh.linked_movie_id = mv.movie_id
+    JOIN 
+        title t ON mv.linked_movie_id = t.id
+    WHERE 
+        mv.link_type_id IS NOT NULL
+),
+cast_stats AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_actors,
+        STRING_AGG(DISTINCT n.name, ', ') AS actor_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name n ON ci.person_id = n.person_id
+    GROUP BY 
+        ci.movie_id
+),
+info_details AS (
+    SELECT 
+        mi.movie_id,
+        SUM(CASE WHEN it.info = 'Budget' THEN CAST(mi.info AS INTEGER) ELSE 0 END) AS total_budget,
+        SUM(CASE WHEN it.info = 'BoxOffice' THEN CAST(mi.info AS INTEGER) ELSE 0 END) AS total_boxoffice
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    th.movie_id,
+    th.title,
+    COALESCE(cs.total_actors, 0) AS total_actors,
+    COALESCE(cs.actor_names, 'No actors') AS actor_names,
+    COALESCE(id.total_budget, 0) AS total_budget,
+    COALESCE(id.total_boxoffice, 0) AS total_boxoffice,
+    mh.depth,
+    CASE 
+        WHEN id.total_budget > id.total_boxoffice THEN 'Budget Exceeds BoxOffice'
+        ELSE 'BoxOffice is Sufficient'
+    END AS financial_status
+FROM 
+    movie_hierarchy mh
+JOIN 
+    title th ON mh.movie_id = th.id
+LEFT JOIN 
+    cast_stats cs ON th.id = cs.movie_id
+LEFT JOIN 
+    info_details id ON th.id = id.movie_id
+WHERE 
+    th.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    mh.depth, th.title
+LIMIT 100;

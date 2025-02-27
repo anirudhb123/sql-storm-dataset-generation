@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COALESCE(ps.AnswerCount, 0) AS AnswerCount,
+        COALESCE(ps.CommentCount, 0) AS CommentCount,
+        COALESCE(ps.FavoriteCount, 0) AS FavoriteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            COUNT(*) AS AnswerCount, 
+            SUM(CommentCount) AS CommentCount, 
+            SUM(FavoriteCount) AS FavoriteCount
+          FROM 
+            Posts 
+          WHERE 
+            PostTypeId IN (2, 1) -- Answers and Questions
+          GROUP BY 
+            PostId) ps ON p.Id = ps.PostId
+    LEFT JOIN 
+        (SELECT 
+            p.Id, 
+            unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName
+          FROM 
+            Posts p) t ON p.Id = t.Id
+    GROUP BY 
+        p.Id, u.DisplayName, ps.AnswerCount, ps.CommentCount, ps.FavoriteCount
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT cht.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cht ON ph.Comment::int = cht.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId, 
+    rp.Title, 
+    rp.Body, 
+    rp.CreationDate, 
+    rp.OwnerDisplayName, 
+    rp.Tags, 
+    rp.AnswerCount, 
+    rp.CommentCount, 
+    rp.FavoriteCount, 
+    cp.LastClosedDate, 
+    cp.CloseReasons
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.PostRank = 1 -- Get the latest post for each owner
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 100; -- Limit the result to the most recent 100 posts

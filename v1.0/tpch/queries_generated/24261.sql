@@ -1,0 +1,93 @@
+WITH RECURSIVE part_prices AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_comment,
+        CASE 
+            WHEN p.p_retailprice > 100 THEN 'High' 
+            WHEN p.p_retailprice BETWEEN 50 AND 100 THEN 'Medium' 
+            ELSE 'Low' 
+        END AS price_category
+    FROM 
+        part p
+    WHERE 
+        p.p_size > 0
+    UNION ALL
+    SELECT 
+        pp.p_partkey,
+        pp.p_name,
+        pp.p_retailprice * 0.9 AS p_retailprice,
+        pp.p_comment,
+        CASE 
+            WHEN pp.p_retailprice * 0.9 > 100 THEN 'High' 
+            WHEN pp.p_retailprice * 0.9 BETWEEN 50 AND 100 THEN 'Medium' 
+            ELSE 'Low' 
+        END AS price_category
+    FROM 
+        part_prices pp
+    WHERE 
+        pp.p_retailprice * 0.9 > 0
+), supplier_stats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS num_parts
+    FROM 
+        supplier s 
+    INNER JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), order_details AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        DENSE_RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    AVG(s.s_acctbal) AS avg_supplier_balance,
+    SUM(CASE WHEN o.total_value IS NULL THEN 0 ELSE o.total_value END) AS total_order_value,
+    STRING_AGG(p.price_category, ', ') AS price_categories
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    supplier_stats s ON s.s_suppkey = (
+        SELECT s_sub.s_suppkey 
+        FROM supplier s_sub 
+        WHERE s_sub.s_acctbal = (
+            SELECT MAX(s_acctbal) 
+            FROM supplier s_max 
+            WHERE s_max.s_nationkey = n.n_nationkey
+        )
+        LIMIT 1
+    )
+LEFT JOIN 
+    order_details o ON c.c_custkey = o.o_orderkey
+INNER JOIN 
+    part_prices p ON p.p_partkey = o.o_orderkey
+WHERE 
+    r.r_comment IS NULL OR r.r_comment <> ''
+GROUP BY 
+    r.r_name, n.n_name
+HAVING 
+    COUNT(c.c_custkey) > 10
+ORDER BY 
+    region_name, nation_name;

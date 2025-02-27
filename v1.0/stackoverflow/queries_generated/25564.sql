@@ -1,0 +1,73 @@
+WITH PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        t.TagName
+    FROM 
+        Posts p
+    CROSS JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS tag
+    JOIN 
+        Tags t ON t.TagName = tag
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopTags AS (
+    SELECT 
+        pt.TagName,
+        COUNT(DISTINCT p.Id) AS CountPosts
+    FROM 
+        PostTags pt
+    JOIN 
+        Posts p ON p.Id = pt.PostId
+    GROUP BY 
+        pt.TagName
+    ORDER BY 
+        CountPosts DESC
+    LIMIT 10
+),
+UserWithTopTags AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT pt.TagName) AS TagsCount,
+        SUM(u.Reputation) AS TotalReputation
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTags pt ON pt.PostId = p.Id
+    WHERE 
+        pt.TagName IN (SELECT TagName FROM TopTags)
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ut.UserId,
+    ut.DisplayName,
+    ut.TotalReputation,
+    ut.TagsCount,
+    ARRAY_AGG(DISTINCT tt.TagName ORDER BY tt.TagName) AS MostUsedTags
+FROM 
+    UserWithTopTags ut
+JOIN 
+    PostTags pt ON pt.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ut.UserId)
+JOIN 
+    TopTags tt ON tt.TagName = pt.TagName
+GROUP BY 
+    ut.UserId, ut.DisplayName, ut.TotalReputation, ut.TagsCount
+ORDER BY 
+    ut.TotalReputation DESC, ut.TagsCount DESC;

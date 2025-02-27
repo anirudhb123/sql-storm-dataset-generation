@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT ph.Id) AS PostHistoryCount
+    FROM 
+        Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN PostHistory ph ON u.Id = ph.UserId
+    GROUP BY 
+        u.Id
+),
+
+RecentPostHistory AS (
+    SELECT 
+        ph.UserId,
+        ph.PostId,
+        ph.Comment,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        RANK() OVER (PARTITION BY ph.UserId ORDER BY ph.CreationDate DESC) AS RecentRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.CreationDate,
+    ua.UpVotes,
+    ua.DownVotes,
+    ua.CommentCount,
+    ua.BadgeCount,
+    COALESCE(rp.PostId, 0) AS TopPostId,
+    COALESCE(rp.Title, 'No Posts') AS TopPostTitle,
+    COALESCE(rp.Score, 0) AS TopPostScore,
+    COALESCE(rp.ViewCount, 0) AS TopPostViewCount,
+    COALESCE(rph.Comment, 'No Recent Activity') AS RecentPostComment,
+    rph.CreationDate AS RecentPostActivityDate
+FROM 
+    Users u
+LEFT JOIN UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN RankedPosts rp ON ua.UpVotes > 10 AND rp.Rank = 1
+LEFT JOIN RecentPostHistory rph ON u.Id = rph.UserId AND rph.RecentRank = 1
+WHERE 
+    u.Reputation IS NOT NULL
+    AND (u.Location IS NOT NULL OR u.WebsiteUrl IS NOT NULL)
+ORDER BY 
+    u.Reputation DESC
+LIMIT 100;

@@ -1,0 +1,36 @@
+WITH RECURSIVE regional_sales AS (
+    SELECT n.n_nationkey, n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+ranked_sales AS (
+    SELECT n.n_name, total_sales,
+           RANK() OVER (PARTITION BY n.n_name ORDER BY total_sales DESC) AS sales_rank
+    FROM regional_sales r
+    JOIN nation n ON r.n_nationkey = n.n_nationkey
+)
+SELECT sales_summary.n_name,
+       COALESCE(SUM(sales_summary.total_sales), 0) AS total_sales,
+       COALESCE(AVG(NULLIF(ws.total_sales, 0)), 0) AS avg_non_zero_sales,
+       RANK() OVER (ORDER BY COALESCE(SUM(sales_summary.total_sales), 0) DESC) AS overall_rank
+FROM (
+    SELECT n_name, total_sales
+    FROM ranked_sales
+    WHERE sales_rank <= 5
+) AS sales_summary
+LEFT JOIN regional_sales ws ON sales_summary.n_name = ws.n_name
+GROUP BY sales_summary.n_name
+ORDER BY overall_rank, sales_summary.n_name ASC
+UNION ALL
+SELECT 'No Sales Region' AS n_name,
+       0 AS total_sales,
+       0 AS avg_non_zero_sales,
+       COUNT(*) AS overall_rank
+FROM nation
+WHERE n_nationkey NOT IN (SELECT DISTINCT n.n_nationkey FROM regional_sales)
+HAVING COUNT(*) > 0
+ORDER BY n_name;

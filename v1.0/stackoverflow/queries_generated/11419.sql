@@ -1,0 +1,30 @@
+-- Performance benchmarking query to retrieve post statistics and associated user data
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    p.Score AS PostScore,
+    p.ViewCount,
+    u.Id AS UserId,
+    u.DisplayName AS UserDisplayName,
+    u.Reputation,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+    AVG(pH.CreationDate) AS AverageEditDate
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    PostHistory pH ON p.Id = pH.PostId
+WHERE 
+    p.CreationDate >= '2022-01-01'  -- Modify as needed for the benchmarking period
+GROUP BY 
+    p.Id, u.Id
+ORDER BY 
+    p.CreationDate DESC;

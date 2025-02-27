@@ -1,0 +1,36 @@
+WITH RECURSIVE cte_supplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+    FROM supplier s
+    JOIN cte_supplier c ON s.s_nationkey = c.s_nationkey
+    WHERE s.s_acctbal < c.s_acctbal
+), 
+cte_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, COUNT(ps.ps_sup != NULL) AS part_supply_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+), 
+cte_orders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price, o.o_orderdate
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate < o.o_orderdate
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT os.total_price) AS unique_order_totals,
+    AVG(cte_parts.p_retailprice) AS average_part_price,
+    SUM(CASE WHEN os.total_price IS NULL THEN 1 ELSE 0 END) AS null_order_count,
+    COUNT(DISTINCT cte_supply.s_suppkey) AS distinct_suppliers
+FROM nation n
+LEFT JOIN cte_parts ON n.n_nationkey = (SELECT DISTINCT s.s_nationkey FROM cte_supplier s WHERE s.s_acctbal = (SELECT MIN(s2.s_acctbal) FROM cte_supplier s2 WHERE s2.s_nationkey = n.n_nationkey))
+LEFT JOIN cte_orders os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O' AND o.o_totalprice > 50000)
+LEFT JOIN cte_supplier s ON n.n_nationkey = s.s_nationkey
+GROUP BY n.n_name
+HAVING AVG(cte_parts.p_retailprice) > (SELECT AVG(p.p_retailprice) FROM part p WHERE p.p_size > 10)
+ORDER BY unique_order_totals DESC, n.n_name;

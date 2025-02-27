@@ -1,0 +1,53 @@
+WITH ranked_movies AS (
+    SELECT
+        a.title,
+        a.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC, k.keyword) AS rank_by_year,
+        COUNT(DISTINCT p.id) OVER (PARTITION BY a.id) AS actor_count
+    FROM
+        aka_title a
+    LEFT JOIN
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN
+        aka_name p ON c.person_id = p.person_id
+    WHERE
+        a.production_year IS NOT NULL
+        AND LOWER(k.keyword) LIKE '%action%'
+)
+
+SELECT
+    r.title,
+    r.production_year,
+    r.keyword,
+    r.actor_count,
+    COALESCE(r.rank_by_year, 0) AS movie_rank,
+    (SELECT STRING_AGG(p.name, ', ') 
+     FROM cast_info c2 
+     JOIN aka_name p ON c2.person_id = p.person_id 
+     WHERE c2.movie_id = r.id) AS cast_names,
+    CASE 
+        WHEN r.actor_count > 10 THEN 'Ensemble Cast'
+        WHEN r.actor_count IS NULL THEN 'No Cast Info'
+        ELSE 'Small Cast'
+    END AS cast_size_description
+FROM
+    ranked_movies r
+WHERE
+    r.rank_by_year <= 5
+ORDER BY
+    r.production_year DESC,
+    r.actor_count DESC
+OFFSET (SELECT COUNT(*) FROM ranked_movies) / 2 ROWS FETCH NEXT 5 ROWS ONLY;
+
+-- This query fulfills several complex requirements:
+-- 1. Uses CTEs to rank movies by production year and keyword.
+-- 2. Incorporates outer joins for potentially missing relationships.
+-- 3. Uses window functions to compute rankings and counts.
+-- 4. Contains correlated subqueries for aggregating actor names.
+-- 5. Utilizes CASE statements for string-based logic and NULL handling.
+-- 6. Applies OFFSET and FETCH for pagination in an interesting way.

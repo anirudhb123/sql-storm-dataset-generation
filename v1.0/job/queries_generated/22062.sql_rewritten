@@ -1,0 +1,81 @@
+WITH RecursiveTitleCTE AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year, 
+        t.kind_id,
+        
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) as rank
+    FROM 
+        title t
+), 
+CompanyTitleCTE AS (
+    SELECT 
+        mt.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        mt.note AS company_note,
+        
+        COALESCE(mk.keyword, 'No keywords') AS keyword
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_keyword mk ON mc.movie_id = mk.movie_id
+), 
+CastWithRank AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        ak.name IS NOT NULL
+), 
+MovieInfoWithCount AS (
+    SELECT 
+        mi.movie_id,
+        COUNT(mk.id) AS keyword_count
+    FROM 
+        movie_info mi
+    LEFT JOIN 
+        movie_keyword mk ON mi.movie_id = mk.movie_id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    ct.company_name,
+    ct.company_type,
+    ct.company_note,
+    COALESCE(mic.keyword_count, 0) AS keyword_count,
+    STRING_AGG(DISTINCT ca.actor_name, ', ') AS actors
+FROM 
+    RecursiveTitleCTE rt
+LEFT JOIN 
+    CompanyTitleCTE ct ON rt.title_id = ct.movie_id
+LEFT JOIN 
+    MovieInfoWithCount mic ON rt.title_id = mic.movie_id
+LEFT JOIN 
+    CastWithRank ca ON rt.title_id = ca.movie_id
+WHERE 
+    rt.kind_id IN (SELECT k.id FROM keyword k WHERE k.keyword LIKE '%Horror%') 
+    AND rt.production_year >= 2000
+GROUP BY 
+    rt.title, 
+    rt.production_year, 
+    ct.company_name, 
+    ct.company_type, 
+    ct.company_note
+HAVING 
+    COUNT(DISTINCT ca.actor_name) >= 3
+ORDER BY 
+    rt.production_year DESC, 
+    rt.title;

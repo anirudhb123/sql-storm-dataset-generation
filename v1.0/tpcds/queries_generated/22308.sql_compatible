@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_ext_sales_price,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_ext_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+),
+TopSales AS (
+    SELECT 
+        r.web_site_sk,
+        r.ws_order_number,
+        COALESCE(r.ws_ext_sales_price, 0) AS total_sales
+    FROM 
+        RankedSales r
+    WHERE 
+        r.sales_rank <= 10
+),
+CustomerInfo AS (
+    SELECT 
+        DISTINCT c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        hd.hd_income_band_sk
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > (SELECT AVG(cd_purchase_estimate) FROM customer_demographics)
+)
+SELECT 
+    ci.c_customer_id,
+    ci.cd_gender,
+    SUM(ts.total_sales) AS total_sales
+FROM 
+    TopSales ts
+JOIN 
+    CustomerInfo ci ON ci.c_customer_id IN (
+        SELECT 
+            web.w_web_site_id 
+        FROM 
+            web_site web 
+        WHERE 
+            web.web_class = (SELECT DISTINCT wp.wp_type FROM web_page wp WHERE wp.wp_web_page_sk IN (SELECT wr.wr_web_page_sk FROM web_returns wr WHERE wr.wr_return_quantity > 0))
+    )
+GROUP BY 
+    ci.c_customer_id, ci.cd_gender
+HAVING 
+    SUM(ts.total_sales) IS NOT NULL
+ORDER BY 
+    total_sales DESC;

@@ -1,0 +1,69 @@
+
+WITH DailySales AS (
+    SELECT 
+        dd.d_date AS SaleDate,
+        SUM(ws.ws_sales_price) AS TotalSales,
+        COUNT(ws.ws_order_number) AS TotalOrders,
+        RANK() OVER (PARTITION BY dd.d_year ORDER BY SUM(ws.ws_sales_price) DESC) AS DailyRank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY 
+        dd.d_date, dd.d_year
+),
+TopSales AS (
+    SELECT 
+        SaleDate,
+        TotalSales,
+        TotalOrders
+    FROM 
+        DailySales
+    WHERE 
+        DailyRank <= 10
+),
+CustomerWithSales AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(SUM(ws.ws_sales_price), 0) AS TotalSpent,
+        COUNT(DISTINCT ws.ws_order_number) AS OrderCount
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        wd.TotalSpent,
+        wd.OrderCount,
+        CASE 
+            WHEN wd.TotalSpent > 1000 THEN 'High Value'
+            WHEN wd.TotalSpent BETWEEN 500 AND 1000 THEN 'Mid Value'
+            ELSE 'Low Value'
+        END AS ValueCategory
+    FROM 
+        CustomerWithSales wd
+    JOIN 
+        customer_demographics cd ON wd.OrderCount > cd.cd_dep_count
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.ValueCategory,
+    ts.TotalSales AS TopDailySales
+FROM 
+    customer c
+JOIN 
+    CustomerDemographics cd ON c.c_customer_id = cd.c_customer_id
+LEFT JOIN 
+    TopSales ts ON ts.TotalSales = (SELECT MAX(TotalSales) FROM TopSales)
+WHERE 
+    cd.cd_gender IS NOT NULL
+ORDER BY 
+    ts.TotalSales DESC NULLS LAST;

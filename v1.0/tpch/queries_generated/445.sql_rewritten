@@ -1,0 +1,58 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' AND 
+        o.o_orderdate >= DATE '1997-01-01' AND 
+        o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+RankedSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.total_sales,
+        s.order_count,
+        RANK() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM 
+        SupplierSales s
+),
+RegionNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_regionkey,
+        r.r_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    COALESCE(s.s_name, 'Not Provided') AS supplier_name,
+    COALESCE(total_sales, 0) AS total_sales,
+    COALESCE(order_count, 0) AS order_count,
+    sales_rank
+FROM 
+    RegionNations n
+LEFT OUTER JOIN 
+    RankedSales s ON n.n_nationkey = (SELECT supplier_nation 
+                                        FROM supplier_lookups 
+                                        WHERE s_suppkey = s.s_suppkey)
+ORDER BY 
+    r.r_name, total_sales DESC 
+LIMIT 100;

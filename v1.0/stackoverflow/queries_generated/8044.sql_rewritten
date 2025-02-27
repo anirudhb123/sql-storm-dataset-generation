@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    WHERE
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+TopPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        rp.VoteCount
+    FROM
+        RankedPosts rp
+    WHERE
+        rp.PostRank <= 10
+)
+SELECT
+    u.DisplayName AS Author,
+    t.TagName,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.CommentCount,
+    tp.VoteCount
+FROM
+    TopPosts tp
+JOIN
+    Users u ON tp.PostId = u.Id
+JOIN
+    PostsTags pt ON tp.PostId = pt.PostId
+JOIN
+    Tags t ON pt.TagId = t.Id
+ORDER BY
+    tp.Score DESC, tp.CreationDate DESC;

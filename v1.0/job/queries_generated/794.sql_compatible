@@ -1,0 +1,48 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+PersonMovieRoles AS (
+    SELECT 
+        c.movie_id,
+        a.person_id,
+        a.name,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+)
+SELECT
+    rt.production_year,
+    rt.title,
+    pmr.name AS actor_name,
+    pmr.role,
+    (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = pmr.movie_id) AS keyword_count,
+    (SELECT STRING_AGG(mk.keyword, ', ') FROM movie_keyword mk WHERE mk.movie_id = pmr.movie_id) AS keywords_list,
+    COALESCE(NULLIF(SUBSTRING(rt.title, POSITION('"' IN rt.title) + 1), ''), 'N/A') AS sanitized_title
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    PersonMovieRoles pmr ON rt.title_id = pmr.movie_id
+WHERE 
+    rt.title_rank <= 5
+GROUP BY 
+    rt.production_year, 
+    rt.title, 
+    pmr.name, 
+    pmr.role
+ORDER BY 
+    rt.production_year DESC, 
+    rt.title;

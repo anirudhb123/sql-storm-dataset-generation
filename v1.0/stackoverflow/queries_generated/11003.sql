@@ -1,0 +1,67 @@
+-- Performance Benchmarking SQL Query
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.CreationDate,
+        U.ViewCount,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id, U.Reputation, U.CreationDate, U.ViewCount, U.UpVotes, U.DownVotes
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.Title,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        COUNT(DISTINCT C.Id) AS PostCommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.Score, P.ViewCount, P.AnswerCount, P.CommentCount, P.CreationDate, P.LastActivityDate, P.Title
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.BadgeCount,
+    PS.PostId,
+    PS.Score,
+    PS.ViewCount AS PostViewCount,
+    PS.AnswerCount,
+    PS.CommentCount AS PostCommentCount,
+    PS.VoteCount,
+    PS.Title,
+    U.CreationDate AS UserCreationDate,
+    U.ViewCount AS UserViewCount,
+    U.UpVotes,
+    U.DownVotes
+FROM 
+    UserStats U
+JOIN 
+    PostStats PS ON U.UserId = PS.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, 
+    PS.Score DESC
+LIMIT 100; -- Adjust limit as needed for benchmarking

@@ -1,0 +1,59 @@
+
+WITH AddressAnalysis AS (
+    SELECT 
+        ca_address_id, 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city, 
+        ca_state, 
+        ca_zip, 
+        LENGTH(ca_street_name) AS street_name_length,
+        UPPER(ca_city) AS upper_city,
+        LOWER(ca_state) AS lower_state
+    FROM customer_address
+),
+CustomerAnalysis AS (
+    SELECT 
+        c_customer_id,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        COUNT(cd_demo_sk) AS demographics_count,
+        STRING_AGG(CONCAT(cd_gender, ', ', cd_marital_status, ', ', cd_education_status), '; ') AS demographics_summary
+    FROM customer
+    JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY c_customer_id, cd_gender, cd_marital_status, cd_education_status
+),
+DateAnalysis AS (
+    SELECT 
+        d_date_id, 
+        d_month_seq, 
+        d_year, 
+        d_day_name,
+        COUNT(*) AS total_sales,
+        STRING_AGG(d_day_name, ', ') AS days_in_month
+    FROM date_dim
+    JOIN store_sales ON ss_sold_date_sk = d_date_sk
+    GROUP BY d_date_id, d_month_seq, d_year, d_day_name
+),
+FinalReport AS (
+    SELECT 
+        a.full_address,
+        c.demographics_summary,
+        d.days_in_month,
+        d.total_sales
+    FROM AddressAnalysis a
+    JOIN CustomerAnalysis c ON a.ca_address_id = (
+        SELECT ca_address_id 
+        FROM customer_address 
+        WHERE ca_address_sk = c.c_customer_id
+        LIMIT 1
+    )
+    JOIN DateAnalysis d ON d.d_year = 2023
+)
+SELECT 
+    *,
+    LENGTH(demographics_summary) AS demographics_summary_length,
+    REPLACE(full_address, ' ', '-') AS address_with_hyphens
+FROM FinalReport
+WHERE total_sales > 10
+ORDER BY demographics_summary_length DESC;

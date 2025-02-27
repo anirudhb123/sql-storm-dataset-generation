@@ -1,0 +1,65 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+RecentOrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+)
+SELECT 
+    n.n_name AS nation,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(s.total_cost) AS avg_supplier_cost,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS total_returns,
+    MAX(o.o_orderdate) AS last_order_date
+FROM 
+    nation n
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    lineitem l ON l.l_orderkey = o.o_orderkey
+JOIN 
+    SupplierStats s ON s.total_available > 0
+WHERE 
+    o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year' OR o.o_orderkey IS NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) >= 10
+ORDER BY 
+    total_revenue DESC
+LIMIT 5;

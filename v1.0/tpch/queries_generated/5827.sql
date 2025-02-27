@@ -1,0 +1,46 @@
+WITH OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_mktsegment,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01'
+        AND l.l_shipdate < '2024-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_mktsegment
+),
+TopRegions AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        SUM(os.total_revenue) AS region_revenue
+    FROM 
+        OrderSummary os
+    JOIN 
+        supplier s ON os.o_orderkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        n.n_regionkey, r.r_name
+)
+SELECT 
+    r.r_name,
+    r.region_revenue,
+    RANK() OVER (ORDER BY r.region_revenue DESC) AS revenue_rank
+FROM 
+    TopRegions r
+WHERE 
+    r.region_revenue > (SELECT AVG(region_revenue) FROM TopRegions)
+ORDER BY 
+    r.region_revenue DESC
+LIMIT 10;

@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) as rn
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price > 10.00
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returns,
+        COUNT(DISTINCT wr_order_number) AS return_count
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        rwr.rn,
+        rws.web_site_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        rws.ws_quantity,
+        rws.ws_net_profit
+    FROM 
+        RankedSales rws
+    LEFT JOIN 
+        CustomerReturns cr ON rws.ws_order_number = cr.wr_returning_customer_sk
+    JOIN 
+        customer c ON rws.ws_ship_customer_sk = c.c_customer_sk
+)
+SELECT 
+    swr.web_site_sk,
+    swr.c_first_name,
+    swr.c_last_name,
+    SUM(swr.ws_quantity) AS total_quantity,
+    SUM(swr.ws_net_profit) AS total_profit,
+    AVG(swr.total_returns) AS avg_returns
+FROM 
+    SalesWithReturns swr
+GROUP BY 
+    swr.web_site_sk, swr.c_first_name, swr.c_last_name
+HAVING 
+    SUM(swr.ws_net_profit) > 1000
+ORDER BY 
+    total_profit DESC
+LIMIT 10;
+

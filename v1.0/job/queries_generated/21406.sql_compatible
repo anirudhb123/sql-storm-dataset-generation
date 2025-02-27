@@ -1,0 +1,89 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rn,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_titles
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+actor_roles AS (
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        r.role AS actor_role,
+        COUNT(*) OVER (PARTITION BY c.person_id) AS role_count,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY c.nr_order) AS role_order
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+movies_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+),
+person_info_summary AS (
+    SELECT 
+        pi.person_id,
+        STRING_AGG(p.info, '; ') AS all_info
+    FROM 
+        person_info pi
+    JOIN 
+        info_type p ON pi.info_type_id = p.id
+    WHERE 
+        pi.info IS NOT NULL
+    GROUP BY 
+        pi.person_id
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    ar.actor_role,
+    mk.keywords,
+    pis.all_info,
+    CASE 
+        WHEN t.production_year < 2000 THEN 'Classic'
+        WHEN t.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era,
+    COALESCE(NULLIF(r.handle, ''), 'No Handle Available') AS role_handle
+FROM 
+    aka_name a
+LEFT JOIN 
+    actor_roles ar ON a.person_id = ar.person_id
+LEFT JOIN 
+    ranked_titles t ON ar.movie_id = t.title_id AND t.rn = ar.role_order
+LEFT JOIN 
+    movies_with_keywords mk ON t.title_id = mk.movie_id
+LEFT JOIN 
+    person_info_summary pis ON a.person_id = pis.person_id
+LEFT JOIN 
+    (SELECT 
+         DISTINCT c.id,
+         CASE 
+             WHEN c.kind IS NULL THEN 'Unknown'
+             ELSE c.kind
+         END AS handle
+     FROM 
+         comp_cast_type c) r ON ar.person_role_id = r.id
+WHERE 
+    a.name IS NOT NULL 
+    AND (ar.role_count > 1 OR pis.all_info IS NOT NULL)
+ORDER BY 
+    t.production_year DESC, 
+    a.name ASC;

@@ -1,0 +1,36 @@
+
+WITH supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+order_summary AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_order_value
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+item_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS line_number
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT ns.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count,
+       SUM(os.total_order_value) AS total_orders,
+       COALESCE(SUM(ss.total_supply_cost), 0) AS total_supply_cost,
+       COUNT(DISTINCT CASE WHEN iss.line_number = 1 THEN iss.l_orderkey END) AS first_line_count
+FROM nation ns
+LEFT JOIN customer c ON c.c_nationkey = ns.n_nationkey
+LEFT JOIN order_summary os ON os.o_custkey = c.c_custkey
+LEFT JOIN supplier_summary ss ON ss.s_suppkey = (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_type LIKE 'TYPE%' AND ps.ps_availqty > 0
+    FETCH FIRST 1 ROW ONLY
+)
+LEFT JOIN item_summary iss ON iss.l_orderkey = os.o_orderkey
+GROUP BY ns.n_name
+ORDER BY total_orders DESC, customer_count DESC;

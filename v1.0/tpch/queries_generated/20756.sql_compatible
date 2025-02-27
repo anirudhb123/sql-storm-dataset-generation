@@ -1,0 +1,62 @@
+
+WITH RECURSIVE CTE_Supplier_Totals AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+), 
+CTE_Order_Sum AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_amount
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '1998-10-01' - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey
+), 
+CTE_Customer_Orders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(COALESCE(o.o_totalprice, 0)) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(COALESCE(c.total_spent, 0)) AS total_revenue,
+    AVG(s.total_cost) AS avg_supplier_cost,
+    COUNT(o.o_orderkey) AS order_count,
+    SUM(o.total_order_amount) AS total_order_value
+FROM 
+    nation n
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    CTE_Customer_Orders o ON c.c_custkey = o.c_custkey
+LEFT JOIN 
+    CTE_Supplier_Totals s ON c.c_nationkey = s.s_suppkey % 5 
+WHERE 
+    n.n_name IS NOT NULL 
+GROUP BY 
+    n.n_name
+HAVING 
+    AVG(s.total_cost) > (SELECT AVG(total_cost) FROM CTE_Supplier_Totals WHERE total_cost IS NOT NULL) * 0.8 
+ORDER BY 
+    total_revenue DESC NULLS LAST
+LIMIT 
+    10 OFFSET 5;

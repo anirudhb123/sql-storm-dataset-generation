@@ -1,0 +1,74 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 5000
+),
+PartSupplierData AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS supplier_rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+FinalBenchmark AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name AS customer_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returns,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM 
+        CustomerOrders co
+    JOIN 
+        orders o ON co.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN 
+        PartSupplierData ps ON l.l_partkey = ps.p_partkey AND ps.supplier_rank = 1
+    GROUP BY 
+        co.c_custkey, co.c_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+SELECT 
+    f.customer_name,
+    f.total_revenue,
+    f.total_returns,
+    COALESCE(r.s_name, 'No Supplier') AS top_supplier,
+    f.unique_suppliers
+FROM 
+    FinalBenchmark f
+LEFT JOIN 
+    RankedSuppliers r ON f.unique_suppliers = r.s_suppkey
+ORDER BY 
+    f.total_revenue DESC, f.total_returns DESC;

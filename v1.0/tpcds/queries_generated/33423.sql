@@ -1,0 +1,86 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        SUM(ss_quantity) AS total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_quantity) DESC) AS rank
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk, ss_item_sk
+),
+top_items AS (
+    SELECT 
+        sh.ss_store_sk,
+        sh.ss_item_sk,
+        sh.total_quantity
+    FROM 
+        sales_hierarchy sh
+    WHERE 
+        sh.rank <= 5
+),
+customers_with_purchases AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_spent,
+        COUNT(ws.ws_order_number) AS order_count,
+        cd.cd_gender,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            ELSE cd.cd_purchase_estimate::text 
+        END AS purchase_estimate
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_purchase_estimate
+),
+inventory_status AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(i.inv_quantity_on_hand) AS total_stock
+    FROM 
+        inventory i
+    GROUP BY 
+        i.i_item_sk
+),
+sales_summary AS (
+    SELECT 
+        ti.ss_store_sk,
+        ti.ss_item_sk,
+        t.total_quantity,
+        is.total_stock,
+        cwp.total_spent,
+        cwp.order_count
+    FROM 
+        top_items ti
+    JOIN 
+        inventory_status is ON ti.ss_item_sk = is.i_item_sk
+    JOIN 
+        customers_with_purchases cwp ON cwp.order_count > 0
+)
+SELECT 
+    ss.ss_store_sk,
+    ss.ss_item_sk,
+    ss.total_quantity,
+    COALESCE(ss.total_stock, 0) AS available_stock,
+    COALESCE(ss.total_spent, 0) AS total_spent,
+    COALESCE(ss.order_count, 0) AS order_count,
+    CASE 
+        WHEN ss.available_stock < 10 THEN 'Low Stock'
+        WHEN ss.available_stock BETWEEN 10 AND 50 THEN 'Moderate Stock'
+        ELSE 'High Stock'
+    END AS stock_status
+FROM 
+    sales_summary ss
+LEFT JOIN 
+    reason r ON r.r_reason_sk = 1
+WHERE 
+    r.r_reason_desc IS NOT NULL
+ORDER BY 
+    ss.total_quantity DESC, 
+    ss.total_spent DESC;

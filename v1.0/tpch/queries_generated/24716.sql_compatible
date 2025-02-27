@@ -1,0 +1,79 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty) DESC) AS rank_num
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT *
+    FROM RankedSuppliers
+    WHERE rank_num <= 3
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+ComprehensiveOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        COUNT(DISTINCT l.l_linenumber) AS lineitem_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(cp.total_spent, 0) AS total_spent,
+    COALESCE(cp.order_count, 0) AS order_count,
+    SUM(COALESCE(co.total_lineitem_price, 0)) AS order_value,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    AVG(CASE WHEN s.s_suppkey IS NULL THEN NULL ELSE ps.ps_supplycost END) AS avg_supply_cost,
+    STRING_AGG(DISTINCT r.r_name, ', ') AS regions_served
+FROM 
+    CustomerPurchases cp
+FULL OUTER JOIN 
+    customer c ON cp.c_custkey = c.c_custkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.o_orderkey
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    ComprehensiveOrders co ON o.o_orderkey = co.o_orderkey
+GROUP BY 
+    c.c_custkey, c.c_name
+HAVING 
+    SUM(COALESCE(co.total_lineitem_price, 0)) > 0 OR COUNT(DISTINCT s.s_suppkey) > 0
+ORDER BY 
+    total_spent DESC 
+LIMIT 50;

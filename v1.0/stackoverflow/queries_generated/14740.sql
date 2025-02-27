@@ -1,0 +1,22 @@
+-- Performance Benchmarking SQL Query
+
+-- This query retrieves the total number of posts, average score, and average view count 
+-- for each post type along with the corresponding user information for performance analysis.
+
+SELECT 
+    pt.Name AS PostType,
+    COUNT(p.Id) AS TotalPosts,
+    AVG(p.Score) AS AverageScore,
+    AVG(p.ViewCount) AS AverageViewCount,
+    u.Reputation AS UserReputation,
+    u.CreationDate AS UserCreationDate
+FROM 
+    Posts p
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+GROUP BY 
+    pt.Name, u.Reputation, u.CreationDate
+ORDER BY 
+    TotalPosts DESC;

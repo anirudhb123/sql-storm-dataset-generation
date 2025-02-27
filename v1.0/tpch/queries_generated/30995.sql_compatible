@@ -1,0 +1,61 @@
+
+WITH RECURSIVE customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+popular_parts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+    ORDER BY 
+        total_quantity DESC
+    LIMIT 10
+),
+final_summary AS (
+    SELECT 
+        co.c_name,
+        co.total_spent,
+        pp.p_name,
+        pp.total_quantity,
+        COALESCE(co.total_spent - pp.total_quantity * 0.05, 0) AS adjusted_spending
+    FROM 
+        customer_orders co
+    LEFT JOIN 
+        popular_parts pp ON co.c_custkey = pp.p_partkey
+    WHERE 
+        co.order_rank = 1
+)
+SELECT
+    r.r_name,
+    COUNT(DISTINCT fs.c_name) AS customer_count,
+    AVG(fs.adjusted_spending) AS avg_adjusted_spending
+FROM 
+    final_summary fs
+JOIN 
+    nation n ON fs.c_name = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+GROUP BY 
+    r.r_name
+HAVING 
+    AVG(fs.adjusted_spending) > 500
+ORDER BY 
+    r.r_name;

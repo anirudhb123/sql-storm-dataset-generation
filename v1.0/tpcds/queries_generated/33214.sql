@@ -1,0 +1,74 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        c_current_cdemo_sk,
+        1 AS level
+    FROM 
+        customer
+    WHERE 
+        c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT 
+        ch.c_customer_sk,
+        ch.c_first_name,
+        ch.c_last_name,
+        ch.c_current_cdemo_sk,
+        ch.level + 1
+    FROM 
+        customer c
+    JOIN 
+        CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_current_cdemo_sk 
+    WHERE 
+        ch.level < 5
+),
+SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk
+),
+TopSales AS (
+    SELECT 
+        t.ws_item_sk,
+        t.total_quantity,
+        t.total_sales,
+        t.total_discount
+    FROM 
+        SalesData t
+    WHERE 
+        t.rank <= 10
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    COUNT(ts.total_discount) AS discount_count,
+    SUM(ts.total_discount) AS total_discount_amount,
+    DENSE_RANK() OVER (ORDER BY SUM(ts.total_sales) DESC) AS sales_rank
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    TopSales ts ON c.c_customer_sk = ts.ws_item_sk
+JOIN 
+    CustomerHierarchy ch ON c.c_customer_sk = ch.c_customer_sk
+WHERE 
+    ch.level IS NOT NULL AND ca.ca_city IS NOT NULL
+GROUP BY 
+    c.c_first_name, c.c_last_name, ca.ca_city
+HAVING 
+    SUM(ts.total_sales) > 1000 OR COUNT(ts.total_discount) > 0
+ORDER BY 
+    sales_rank;

@@ -1,0 +1,57 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+)
+SELECT 
+    mk.keyword,
+    COUNT(DISTINCT mc.movie_id) AS total_movies,
+    AVG(CASE 
+            WHEN c.role_id IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS avg_roles,
+    COUNT(DISTINCT CASE 
+            WHEN p.gender = 'F' THEN p.person_id 
+            END) AS female_actors,
+    COUNT(DISTINCT CASE 
+            WHEN p.gender = 'M' THEN p.person_id 
+            END) AS male_actors,
+    MAX(mh.production_year) AS latest_movie_year
+FROM 
+    movie_keyword mk
+JOIN 
+    aka_title m ON mk.movie_id = m.id
+LEFT JOIN 
+    cast_info c ON m.id = c.movie_id
+LEFT JOIN 
+    name p ON c.person_id = p.id
+LEFT JOIN 
+    MovieHierarchy mh ON m.id = mh.movie_id
+WHERE 
+    m.production_year BETWEEN 2000 AND 2023
+    AND mk.keyword IS NOT NULL
+GROUP BY 
+    mk.keyword
+HAVING 
+    COUNT(DISTINCT m.id) > 5
+ORDER BY 
+    total_movies DESC, avg_roles DESC;

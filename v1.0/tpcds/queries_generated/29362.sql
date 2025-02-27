@@ -1,0 +1,33 @@
+
+SELECT 
+    c.c_customer_id,
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+    CASE 
+        WHEN cd_gender = 'M' THEN 'Mr. ' 
+        WHEN cd_gender = 'F' THEN 'Ms. ' 
+        ELSE '' 
+    END AS salutation,
+    ca.ca_city,
+    ca.ca_state,
+    ca.ca_country,
+    cd.education_status,
+    COUNT(ws.ws_order_number) AS total_orders,
+    SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+    STRING_AGG(DISTINCT DISTINCT i.i_product_name, ', ') AS purchased_items
+FROM 
+    customer c 
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    item i ON ws.ws_item_sk = i.i_item_sk
+GROUP BY 
+    c.c_customer_id, full_name, salutation, ca.ca_city, ca.ca_state, ca.ca_country, cd.education_status
+HAVING 
+    SUM(ws.ws_net_paid_inc_tax) > 1000
+ORDER BY 
+    total_spent DESC
+LIMIT 10;

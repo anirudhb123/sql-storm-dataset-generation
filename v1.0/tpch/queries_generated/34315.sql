@@ -1,0 +1,38 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_supplycost > 100.00)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY o.o_orderkey
+),
+CustomerRanked AS (
+    SELECT c.c_custkey, c.c_name, RANK() OVER (ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+)
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT o.o_orderkey) AS orders_count,
+    AVG(p.ps_supplycost) AS avg_supplycost,
+    MAX(o.total_revenue) AS max_revenue,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, '(', sh.level, ')'), ', ') AS suppliers_hierarchy
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN OrderSummary o ON ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+LEFT JOIN CustomerRanked c ON o.o_orderkey IN (SELECT o2.o_orderkey FROM orders o2 WHERE o2.o_custkey = c.c_custkey)
+WHERE p.p_retailprice IS NOT NULL
+GROUP BY p.p_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 10 
+   OR MAX(o.total_revenue) > 10000 
+ORDER BY orders_count DESC, p.p_name
+LIMIT 50;

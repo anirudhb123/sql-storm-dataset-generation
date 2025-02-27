@@ -1,0 +1,79 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.store_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr.return_amount) AS total_return_amount,
+        DENSE_RANK() OVER (PARTITION BY sr.store_sk ORDER BY COUNT(*) DESC) AS rank_by_returns
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.returned_date_sk, sr.store_sk
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_birth_year,
+        CASE 
+            WHEN cd.marital_status = 'M' THEN 'Married'
+            WHEN cd.marital_status = 'S' THEN 'Single'
+            ELSE 'Other'
+        END AS marital_status,
+        COUNT(DISTINCT ss.ticket_number) AS total_store_purchases,
+        COALESCE(SUM(ss.net_profit), 0) AS total_net_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_birth_year, cd.marital_status
+),
+CustomerPromotionStats AS (
+    SELECT 
+        cs.c_customer_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit_from_web
+    FROM 
+        CustomerStats cs
+    LEFT JOIN 
+        web_sales ws ON cs.c_customer_sk = ws.bill_customer_sk
+    GROUP BY 
+        cs.c_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        c.c_customer_sk,
+        cs.marital_status,
+        cs.total_store_purchases,
+        cs.total_net_profit,
+        COALESCE(cps.total_net_profit_from_web, 0) AS total_net_profit_from_web,
+        (cs.total_net_profit + COALESCE(cps.total_net_profit_from_web, 0)) AS grand_total_profit,
+        rr.total_returns
+    FROM 
+        CustomerStats cs
+    LEFT JOIN 
+        CustomerPromotionStats cps ON cs.c_customer_sk = cps.c_customer_sk
+    LEFT JOIN 
+        RankedReturns rr ON rr.store_sk = (SELECT s.store_sk 
+                                             FROM store s 
+                                             WHERE s.store_sk = cs.total_store_purchases 
+                                             LIMIT 1)
+)
+SELECT 
+    f.c_customer_sk,
+    f.marital_status,
+    f.total_store_purchases,
+    f.total_net_profit,
+    f.total_net_profit_from_web,
+    f.grand_total_profit,
+    f.total_returns
+FROM 
+    FinalReport f
+WHERE 
+    f.grand_total_profit > (SELECT AVG(grand_total_profit) FROM FinalReport)
+    AND f.total_net_profit IS NOT NULL
+ORDER BY 
+    f.grand_total_profit DESC
+LIMIT 10;

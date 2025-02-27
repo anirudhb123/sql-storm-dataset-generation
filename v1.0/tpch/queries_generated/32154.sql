@@ -1,0 +1,67 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, r_comment, 0 AS level
+    FROM region
+    WHERE r_regionkey = 1  -- Assuming the starting region is region with key 1
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, r.r_comment, rh.level + 1
+    FROM region r
+    JOIN RegionHierarchy rh ON r.r_regionkey > rh.r_regionkey  -- Recursive condition
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING total_supply_cost > (
+        SELECT AVG(SUM(ps_supplycost * ps_availqty))
+        FROM partsupp ps
+        GROUP BY ps.ps_suppkey
+    )
+),
+CustomerOrderInfo AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+QualifiedOrders AS (
+    SELECT li.l_orderkey, COUNT(*) AS line_count, SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue
+    FROM lineitem li
+    WHERE li.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY li.l_orderkey
+)
+SELECT rh.r_name AS region_name,
+       COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+       ts.total_supply_cost,
+       coi.order_count,
+       coi.total_spent,
+       qo.line_count,
+       qo.revenue
+FROM RegionHierarchy rh
+LEFT JOIN QualifiedOrders qo ON qo.l_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    INNER JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE c.c_nationkey = ANY (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = rh.r_regionkey)
+)
+LEFT JOIN CustomerOrderInfo coi ON coi.c_custkey IN (
+    SELECT DISTINCT o.o_custkey
+    FROM orders o
+    WHERE o.o_orderkey IN (
+        SELECT l.l_orderkey
+        FROM lineitem l
+        WHERE l.l_returnflag IS NULL
+    )
+)
+LEFT JOIN TopSuppliers ts ON ts.s_suppkey = ANY (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_partkey IN (
+        SELECT p.p_partkey
+        FROM part p
+        WHERE p.p_retailprice > (
+            SELECT AVG(p1.p_retailprice) FROM part p1
+        )
+    )
+)
+ORDER BY region_name, customer_name;

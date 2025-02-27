@@ -1,0 +1,87 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice, 
+        RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS part_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+), 
+SupplierWithHighAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        s.s_acctbal
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty > (
+            SELECT AVG(ps1.ps_availqty) * 1.1 
+            FROM partsupp ps1 
+            WHERE ps1.ps_partkey = ps.ps_partkey
+        )
+), 
+HighSpendingCustomers AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+), 
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        RANK() OVER (ORDER BY s.s_acctbal DESC) AS account_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+)
+
+SELECT 
+    rp.p_partkey,
+    rp.p_name,
+    IFNULL(s.availability_count, 0) AS available_suppliers,
+    CASE 
+        WHEN hsc.total_spent IS NOT NULL THEN 'High'
+        ELSE 'Low'
+    END AS customer_spending_category,
+    sd.nation_name
+FROM 
+    RankedParts rp
+LEFT JOIN 
+    (SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS availability_count 
+     FROM SupplierWithHighAvailability ps 
+     GROUP BY ps.ps_partkey) s ON rp.p_partkey = s.ps_partkey
+LEFT JOIN 
+    HighSpendingCustomers hsc ON hsc.c_custkey = (SELECT MIN(c.c_custkey) 
+                                                  FROM customer c 
+                                                  WHERE c.c_acctbal IS NOT NULL)
+LEFT JOIN 
+    SupplierDetails sd ON sd.s_suppkey = (SELECT MIN(ps.ps_suppkey) 
+                                            FROM SupplierWithHighAvailability ps 
+                                            WHERE ps.ps_partkey = rp.p_partkey)
+WHERE 
+    EXISTS (SELECT 1 
+            FROM lineitem l 
+            WHERE l.l_partkey = rp.p_partkey 
+            AND l.l_quantity >= 100) 
+    OR rp.p_retailprice < (
+        SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_type = rp.p_type
+    )
+ORDER BY 
+    rp.p_retailprice DESC NULLS LAST
+LIMIT 100 OFFSET COALESCE((SELECT COUNT(*) FROM part) / 2, 0);

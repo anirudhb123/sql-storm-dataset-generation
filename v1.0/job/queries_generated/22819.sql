@@ -1,0 +1,72 @@
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COALESCE(k.keyword, 'Unknown') AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) AS row_num
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredRoles AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        rt.role,
+        COUNT(ci.role_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id, ci.person_id, rt.role
+    HAVING 
+        COUNT(ci.role_id) > 1
+),
+MovieInfoWithSetOperators AS (
+    SELECT 
+        m.movie_id, 
+        STRING_AGG(DISTINCT m.keyword, ', ') AS keywords,
+        SUM(CASE WHEN pi.info_type_id = 1 THEN 1 ELSE 0 END) AS known_actors
+    FROM 
+        RecursiveMovieCTE m
+    LEFT JOIN 
+        complete_cast cc ON m.movie_id = cc.movie_id
+    LEFT JOIN 
+        person_info pi ON cc.subject_id = pi.person_id
+    WHERE 
+        m.row_num = 1
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    mv.movie_id,
+    mv.title,
+    mv.production_year,
+    mv.keywords,
+    COALESCE(f.role, 'No prominent role') AS prominent_role,
+    CASE 
+        WHEN mv.known_actors > 5 THEN 'Star-studded'
+        ELSE 'Indie'
+    END AS movie_type
+FROM 
+    MovieInfoWithSetOperators mv
+LEFT JOIN 
+    FilteredRoles f ON mv.movie_id = f.movie_id
+ORDER BY 
+    mv.production_year DESC,
+    mv.keywords;
+
+This query accomplishes several tasks:
+- It creates a recursive CTE to aggregate movie data and associated keywords.
+- It uses another CTE to filter cast information based on roles.
+- Aggregates movie information with set operators, allowing rich summaries for each movie.
+- The final SELECT combines these components to give a clear output of movies, including a case statement to classify by known actors and a COALESCE for roles. 
+- The query exploits window functions and various join styles, including outer joins, complex GROUP BY, and HAVING clauses, whilst showcasing advanced SQL concepts.

@@ -1,0 +1,94 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+actor_movie_details AS (
+    SELECT 
+        ak.name AS actor_name,
+        am.title AS movie_title,
+        am.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY am.production_year DESC) AS rn
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        aka_title am ON ci.movie_id = am.id
+    WHERE 
+        ak.name IS NOT NULL AND am.kind_id = (
+            SELECT id FROM kind_type WHERE kind = 'movie'
+        )
+        AND ak.name ILIKE '%Smith%' -- Filter to actors with 'Smith' in their name
+),
+movie_keyword_details AS (
+    SELECT 
+        mk.movie_id,
+        array_agg(DISTINCT k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+combined_details AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(ak.actor_name, 'Unknown') AS actor_name,
+        COALESCE(mkd.keywords, '{}') AS keywords,
+        mh.depth
+    FROM 
+        movie_hierarchy m
+    LEFT JOIN 
+        actor_movie_details ak ON m.movie_id = ak.movie_title
+    LEFT JOIN 
+        movie_keyword_details mkd ON m.movie_id = mkd.movie_id
+)
+SELECT 
+    cd.movie_id,
+    cd.title,
+    cd.production_year,
+    cd.actor_name,
+    cd.keywords,
+    cd.depth,
+    CASE 
+        WHEN cd.depth > 2 THEN 'Deeply Nested'
+        ELSE 'Shallow'
+    END AS hierarchy_level,
+    CASE 
+        WHEN COUNT(DISTINCT cd.actor_name) = 0 THEN 'No Actors'
+        ELSE 'Actors Present'
+    END AS actor_status
+FROM 
+    combined_details cd
+GROUP BY 
+    cd.movie_id, cd.title, cd.production_year, cd.actor_name, cd.keywords, cd.depth
+HAVING 
+    COUNT(DISTINCT cd.actor_name) FILTER (WHERE cd.actor_name IS NOT NULL) > 2
+ORDER BY 
+    cd.production_year DESC, 
+    cd.depth ASC
+FETCH FIRST 10 ROWS ONLY;

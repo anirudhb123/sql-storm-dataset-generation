@@ -1,0 +1,41 @@
+
+WITH RankedNation AS (
+    SELECT n_name, r_name, ROW_NUMBER() OVER (PARTITION BY r_name ORDER BY n_nationkey) AS nation_rank
+    FROM nation
+    JOIN region ON n_regionkey = r_regionkey
+),
+TopSuppliers AS (
+    SELECT s_name, s_nationkey, SUM(ps_supplycost * ps_availqty) AS total_supply_value
+    FROM supplier
+    JOIN partsupp ON s_suppkey = ps_suppkey
+    GROUP BY s_name, s_nationkey
+    HAVING SUM(ps_supplycost * ps_availqty) > (SELECT AVG(ps_supplycost * ps_availqty) FROM partsupp)
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, MAX(o.o_totalprice) AS max_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING MAX(o.o_totalprice) IS NOT NULL AND COUNT(o.o_orderkey) >= 1
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate > DATE '1996-01-01'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SupplierNationData AS (
+    SELECT sn.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count, AVG(s.s_acctbal) AS avg_account_balance
+    FROM supplier s
+    JOIN RankedNation sn ON s.s_nationkey = (SELECT n_nationkey FROM nation WHERE n_name = sn.n_name AND nation_rank = 1)
+    GROUP BY sn.n_name
+)
+SELECT rn.n_name, sn.supplier_count, sn.avg_account_balance, co.order_count, hvo.total_price_after_discount
+FROM SupplierNationData sn
+LEFT JOIN CustomerOrders co ON co.c_custkey = (SELECT c_custkey FROM customer ORDER BY c_acctbal DESC LIMIT 1)
+FULL OUTER JOIN HighValueOrders hvo ON hvo.o_orderkey = (SELECT MIN(o_orderkey) FROM orders)
+JOIN RankedNation rn ON rn.n_name = sn.n_name
+WHERE rn.nation_rank = 1 AND sn.avg_account_balance IS NOT NULL
+ORDER BY rn.n_name DESC, sn.supplier_count ASC NULLS FIRST;

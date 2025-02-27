@@ -1,0 +1,52 @@
+
+WITH RankedParts AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_mfgr, 
+           p.p_retailprice, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rank_price
+    FROM part p
+),
+FilteredSuppliers AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_nationkey, 
+           AVG(p.ps_supplycost) AS avg_supplycost
+    FROM supplier s
+    JOIN partsupp p ON s.s_suppkey = p.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+    HAVING AVG(p.ps_supplycost) < (
+        SELECT AVG(ps_supplycost) FROM partsupp
+    )
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, 
+           COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT rp.p_name, 
+       rp.p_retailprice, 
+       fs.s_name, 
+       fs.avg_supplycost,
+       co.order_count,
+       co.total_spent
+FROM RankedParts rp
+LEFT JOIN FilteredSuppliers fs ON rp.p_partkey IN (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_supplycost < (
+        SELECT MAX(avg_supplycost) 
+        FROM FilteredSuppliers
+    )
+)
+LEFT JOIN CustomerOrders co ON co.order_count > (
+    SELECT AVG(order_count) 
+    FROM CustomerOrders
+)
+WHERE rp.rank_price <= 5
+  AND (fs.avg_supplycost IS NOT NULL OR co.total_spent IS NULL)
+  AND COALESCE(fs.s_name, '') <> ''
+ORDER BY rp.p_retailprice DESC, co.total_spent ASC;

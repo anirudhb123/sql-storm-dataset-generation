@@ -1,0 +1,82 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, c.c_name, o.o_orderdate
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(r.revenue), 0) AS total_revenue
+    FROM 
+        customer c
+    LEFT JOIN 
+        (SELECT r.c_custkey, r.revenue FROM RankedOrders r) r
+    ON 
+        c.c_custkey = r.c_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COALESCE(SUM(r.revenue), 0) > 10000
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        p.p_name,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+ExpensiveParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        AVG(sp.ps_supplycost) AS avg_supplycost
+    FROM 
+        part p
+    JOIN 
+        SupplierParts sp ON p.p_partkey = sp.ps_partkey
+    WHERE 
+        p.p_retailprice > 200
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT 
+    C.c_name AS customer_name,
+    EP.p_name AS part_name,
+    EP.p_retailprice AS retail_price,
+    S.s_name AS supplier_name,
+    CASE 
+        WHEN EP.avg_supplycost IS NOT NULL 
+        THEN EP.avg_supplycost 
+        ELSE 'No Suppliers' 
+    END AS avg_supplier_cost
+FROM 
+    TopCustomers C
+JOIN 
+    ExpensiveParts EP ON C.c_custkey = (SELECT MIN(c_custkey) FROM customer WHERE c_name = C.c_name) 
+LEFT JOIN 
+    supplier S ON S.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = EP.p_partkey)
+WHERE 
+    EP.p_retailprice IS NOT NULL
+ORDER BY 
+    C.c_name, EP.p_name;

@@ -1,0 +1,59 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_customer_sk, 
+           c.c_customer_id, 
+           cd.cd_gender, 
+           cd.cd_marital_status, 
+           cd.cd_purchase_estimate, 
+           cd.cd_credit_rating, 
+           1 AS hierarchy_level
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender = 'M' AND cd.cd_marital_status IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, 
+           c.c_customer_id, 
+           cd.cd_gender, 
+           cd.cd_marital_status, 
+           cd.cd_purchase_estimate, 
+           cd.cd_credit_rating, 
+           ch.hierarchy_level + 1
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_hierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+    WHERE cd.cd_purchase_estimate > ch.cd_purchase_estimate
+),
+earned_income AS (
+    SELECT CD.hd_income_band_sk,
+           COUNT(CASE WHEN cd.cd_income_band_sk IS NOT NULL THEN 1 END) AS Count_Customers,
+           SUM(CASE WHEN cd.cd_income_band_sk IS NULL THEN 0 ELSE cd.cd_purchase_estimate END) AS Total_Estimate
+    FROM household_demographics CD
+    JOIN customer_demographics cd ON CD.hd_demo_sk = cd.cd_demo_sk
+    WHERE cd.cd_dep_count IS NOT NULL
+    GROUP BY CD.hd_income_band_sk
+),
+daily_sales AS (
+    SELECT d.d_date, 
+           SUM(ws.ws_sales_price) AS total_sales,
+           COUNT(ws.ws_order_number) AS total_orders,
+           AVG(ws.ws_net_profit) OVER (PARTITION BY d.d_year ORDER BY d.d_date) AS avg_net_profit
+    FROM date_dim d
+    JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_date
+)
+SELECT 
+    ch.c_customer_id, 
+    ch.hierarchy_level, 
+    COALESCE(earned_income.Count_Customers, 0) AS Count_Customers,
+    earned_income.Total_Estimate,
+    ds.total_sales,
+    ds.total_orders,
+    ds.avg_net_profit
+FROM customer_hierarchy ch
+LEFT JOIN earned_income ON ch.c_customer_sk = earned_income.hd_income_band_sk
+LEFT JOIN daily_sales ds ON ds.d_date = DATE_SUB('2002-10-01', INTERVAL 1 DAY)
+WHERE ch.hierarchy_level > 1
+ORDER BY ch.c_customer_id, ch.hierarchy_level DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum,
+        COUNT(DISTINCT v.Id) OVER (PARTITION BY p.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) 
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        STRING_AGG(Name, ', ') AS BadgeNames,
+        COUNT(CASE WHEN Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+ClosedPostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ClosedDate,
+        ph.UserDisplayName AS ClosedBy,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 
+    WHERE 
+        p.ClosedDate IS NOT NULL
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName,
+    COALESCE(rb.BadgeNames, 'No Badges') AS Badges,
+    up.Reputation,
+    rp.PostId,
+    rp.Title AS PostTitle,
+    rp.Score,
+    rp.ViewCount,
+    rp.VoteCount,
+    cp.ClosedDate,
+    cp.ClosedBy,
+    cp.CloseReason
+FROM 
+    Users up
+LEFT JOIN 
+    RankedPosts rp ON up.Id = rp.OwnerUserId AND rp.RowNum = 1  
+LEFT JOIN 
+    UserBadges rb ON up.Id = rb.UserId
+LEFT JOIN 
+    ClosedPostDetails cp ON rp.PostId = cp.PostId
+WHERE 
+    up.Reputation > 1000
+    AND (rp.ViewCount IS NULL OR rp.ViewCount > 50) 
+ORDER BY 
+    up.Reputation DESC, 
+    rp.Score DESC;

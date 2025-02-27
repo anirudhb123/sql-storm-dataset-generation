@@ -1,0 +1,59 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        orders o
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    JOIN 
+        RankedOrders ro ON c.c_custkey = ro.o_custkey
+    JOIN 
+        orders o ON ro.o_orderkey = o.o_orderkey
+    WHERE 
+        ro.OrderRank <= 5
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ps.ps_availqty,
+    ps.ps_supplycost,
+    COALESCE(SUM(li.l_quantity), 0) AS TotalQuantitySold,
+    COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) AS TotalRevenue,
+    rc.r_name AS RegionName,
+    COUNT(DISTINCT c.c_custkey) AS UniqueCustomerCount
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    lineitem li ON ps.ps_partkey = li.l_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region rc ON n.n_regionkey = rc.r_regionkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+WHERE 
+    p.p_retailprice > 100
+    AND (li.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31' OR li.l_shipdate IS NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost, rc.r_name
+HAVING 
+    TotalRevenue > 10000
+ORDER BY 
+    TotalRevenue DESC
+LIMIT 10;

@@ -1,0 +1,60 @@
+WITH RecursiveTags AS (
+    SELECT 
+        Id AS TagId, 
+        TagName, 
+        Count, 
+        0 AS Level
+    FROM 
+        Tags
+    WHERE 
+        IsModeratorOnly = 0
+
+    UNION ALL
+
+    SELECT 
+        pl.RelatedPostId AS TagId,
+        t.TagName,
+        t.Count,
+        rt.Level + 1
+    FROM 
+        PostLinks pl
+    join 
+        Posts p on p.Id = pl.PostId
+    JOIN 
+        Tags t ON t.Id = p.Id
+    JOIN 
+        RecursiveTags rt ON rt.TagId = pl.PostId
+    WHERE 
+        pl.LinkTypeId = 1
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(CASE WHEN pt.Name = 'Question' THEN 1 ELSE 0 END) AS TotalQuestions,
+    SUM(CASE WHEN pt.Name = 'Answer' THEN 1 ELSE 0 END) AS TotalAnswers,
+    ARRAY_AGG(DISTINCT rt.TagName) AS TagsUsed,
+    COUNT(DISTINCT b.Id) AS BadgesEarned,
+    SUM(CASE WHEN co.Comments IS NOT NULL THEN 1 ELSE 0 END) AS TotalComments,
+    AVG(EXTRACT(EPOCH FROM (p.LastActivityDate - p.CreationDate)) / 3600) AS AvgPostAgeInHours
+FROM 
+    Users u
+JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    Badges b ON b.UserId = u.Id
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS Comments FROM Comments GROUP BY PostId) co ON co.PostId = p.Id
+LEFT JOIN 
+    RecursiveTags rt ON rt.TagId = p.Id
+WHERE 
+    u.Reputation > 100
+GROUP BY 
+    u.Id
+HAVING 
+    COUNT(DISTINCT p.Id) > 10
+ORDER BY 
+    TotalPosts DESC, UserName;

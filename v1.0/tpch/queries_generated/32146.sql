@@ -1,0 +1,54 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_availqty > 100)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey <> sh.s_suppkey AND sh.level < 3
+),
+EligibleOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000
+),
+RankedCustomers AS (
+    SELECT c.c_custkey, c.c_name, RANK() OVER (ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+PartAvailability AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+SupplierStats AS (
+    SELECT sh.level, COUNT(*) AS supplier_count, AVG(sh.s_acctbal) AS avg_acctbal
+    FROM SupplierHierarchy sh
+    GROUP BY sh.level
+)
+SELECT 
+    r1.n_name AS nation_name,
+    SUM(o.o_totalprice) AS total_order_value,
+    COUNT(DISTINCT c.c_custkey) AS distinct_customers,
+    AVG(ps.total_avail) AS avg_part_availability,
+    ss.avg_acctbal AS avg_supplier_acctbal
+FROM region r1
+LEFT JOIN nation n ON r1.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN EligibleOrders o ON c.c_custkey = o.o_orderkey
+LEFT JOIN PartAvailability ps ON ps.p_partkey IN (
+    SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey
+)
+LEFT JOIN SupplierStats ss ON ss.level = 1
+WHERE r1.r_name IS NOT NULL
+GROUP BY r1.n_name, ss.avg_acctbal
+HAVING COUNT(o.o_orderkey) > 10
+ORDER BY total_order_value DESC;

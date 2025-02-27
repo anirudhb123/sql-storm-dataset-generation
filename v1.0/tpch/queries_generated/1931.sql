@@ -1,0 +1,62 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS PriceRank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS TotalAvailable,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_suppkey
+),
+Summary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS Revenue,
+        AVG(s.TotalAvailable) AS AvgAvailability,
+        SUM(CASE WHEN l.l_shipdate > l.l_commitdate THEN l.l_quantity ELSE 0 END) AS LateShipments
+    FROM 
+        lineitem l
+    JOIN 
+        part p ON l.l_partkey = p.p_partkey
+    LEFT JOIN 
+        SupplierParts s ON p.p_partkey = s.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS TotalOrders,
+    SUM(COALESCE(s.Revenue, 0)) AS TotalRevenue,
+    COUNT(DISTINCT CASE WHEN o.o_orderstatus = 'F' THEN o.o_orderkey END) AS FilledOrders,
+    SUM(COALESCE(s.LateShipments, 0)) AS TotalLateShipments
+FROM 
+    RankedOrders o
+JOIN 
+    nation n ON n.n_nationkey = (SELECT DISTINCT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_orderkey)
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    Summary s ON s.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = o.o_orderkey)
+GROUP BY 
+    r.r_name
+HAVING 
+    TotalRevenue > 10000.00 OR TotalOrders > 50
+ORDER BY 
+    r.r_name DESC;

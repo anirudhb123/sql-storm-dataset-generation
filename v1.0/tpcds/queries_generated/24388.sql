@@ -1,0 +1,46 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) as sales_rank,
+        DATEADD(DAY, -1 * (ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_order_number)), CURRENT_DATE) AS return_date
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+)
+
+SELECT 
+    ca.ca_city,
+    pm.max_sales_price,
+    COALESCE(ROUND(AVG(ws.ws_sales_price), 2), 0) AS avg_sales_price,
+    NULLIF(SUM(CASE WHEN ws.ws_sales_price > 100 THEN 1 ELSE 0 END), 0) AS high_value_sales,
+    COUNT(DISTINCT cs.cs_order_number) AS catalog_sales_orders
+FROM 
+    customer_address ca
+LEFT JOIN 
+    (SELECT 
+        ws_sold_date_sk,
+        MAX(ws_sales_price) AS max_sales_price 
+     FROM 
+        web_sales 
+     WHERE 
+        ws_sales_price > 0 
+     GROUP BY 
+        ws_sold_date_sk) pm ON pm.ws_sold_date_sk = CURRENT_DATE
+LEFT JOIN 
+    web_sales ws ON ws.ws_item_sk = pm.ws_sold_date_sk
+LEFT JOIN 
+    catalog_sales cs ON cs.cs_item_sk = ws.ws_item_sk AND cs.cs_order_number = ws.ws_order_number 
+WHERE 
+    ca.ca_state IN ('CA', 'NY') 
+    AND EXISTS (SELECT 1 FROM RankedSales rs WHERE rs.ws_item_sk = ws.ws_item_sk AND rs.sales_rank = 1)
+GROUP BY 
+    ca.ca_city, pm.max_sales_price
+HAVING 
+    COUNT(DISTINCT ws.ws_order_number) > 5 
+    AND COALESCE(MAX(ws.ws_sales_price), 0) < 1000
+ORDER BY 
+    ca.ca_city ASC;

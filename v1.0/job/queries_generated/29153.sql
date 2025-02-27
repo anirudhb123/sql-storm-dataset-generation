@@ -1,0 +1,79 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        c.name AS company_name,
+        p.name AS person_name,
+        CAST(STRING_AGG(DISTINCT CONCAT(c2.kind, ': ', c2.name) ORDER BY c2.kind) AS text) AS companies_involved
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    LEFT JOIN 
+        company_type c2 ON mc.company_type_id = c2.id
+    GROUP BY 
+        t.id, k.keyword, c.name, p.name
+),
+PersonRoles AS (
+    SELECT 
+        ci.person_id,
+        r.role AS role_type,
+        COUNT(*) AS num_roles
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        ci.person_role_id IS NOT NULL
+    GROUP BY 
+        ci.person_id, r.role
+),
+KeywordStatistics AS (
+    SELECT 
+        k.keyword,
+        COUNT(DISTINCT t.id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movies
+    FROM 
+        keyword k
+    JOIN 
+        movie_keyword mk ON k.id = mk.keyword_id
+    JOIN 
+        title t ON mk.movie_id = t.id
+    GROUP BY 
+        k.keyword
+)
+
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.keyword,
+    md.company_name,
+    md.person_name,
+    md.companies_involved,
+    pr.role_type,
+    pr.num_roles,
+    ks.movie_count,
+    ks.movies
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    PersonRoles pr ON md.person_name = pr.person_id
+LEFT JOIN 
+    KeywordStatistics ks ON md.keyword = ks.keyword
+ORDER BY 
+    md.production_year DESC, md.title;
+
+This SQL query is a comprehensive benchmarking query that aggregates data from multiple tables to extract meaningful insights regarding movies, their associated keywords, and the personnel involved in their production. It combines common joins, aggregation functions, and common table expressions (CTEs) to produce a structured and informative result set.

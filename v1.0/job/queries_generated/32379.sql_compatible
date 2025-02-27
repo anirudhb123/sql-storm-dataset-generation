@@ -1,0 +1,40 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, m.title, 1 AS level
+    FROM aka_title m
+    WHERE m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT m.id, m.title, mh.level + 1
+    FROM aka_title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT
+    a.name AS Actor_Name,
+    t.title AS Movie_Title,
+    COALESCE(ci.note, 'No role assigned') AS Role,
+    ci.nr_order AS Role_Order,
+    mh.level AS Hierarchy_Level,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS Keywords,
+    COUNT(DISTINCT c.movie_id) AS Total_Movies_Acted_In
+FROM
+    aka_name a
+JOIN cast_info ci ON a.person_id = ci.person_id
+JOIN aka_title t ON ci.movie_id = t.id
+LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN MovieHierarchy mh ON t.id = mh.movie_id
+JOIN complete_cast c ON t.id = c.movie_id
+WHERE
+    t.production_year IS NOT NULL
+    AND (UPPER(a.name) LIKE '%SMITH%' OR a.name IS NULL)
+GROUP BY
+    a.name, t.title, ci.note, ci.nr_order, mh.level
+HAVING
+    COUNT(DISTINCT c.movie_id) > 1
+ORDER BY
+    Total_Movies_Acted_In DESC,
+    Actor_Name ASC;

@@ -1,0 +1,83 @@
+
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(VB.BountyAmount, 0)) AS TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY SUM(COALESCE(VB.BountyAmount, 0)) DESC) AS ActivityRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes VB ON P.Id = VB.PostId AND VB.VoteTypeId IN (8, 9)  
+    WHERE 
+        U.Reputation > 0 AND 
+        U.LastAccessDate > DATE '2024-10-01' - INTERVAL '1 year'
+    GROUP BY 
+        U.Id, U.DisplayName
+), TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        TotalBounty,
+        ActivityRank
+    FROM 
+        UserActivity
+    WHERE 
+        ActivityRank <= 10
+), PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        C.CommentCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,  
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount 
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate > DATE '2024-10-01' - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, C.CommentCount
+), CombinedStats AS (
+    SELECT 
+        TU.DisplayName,
+        TU.TotalBounty,
+        PS.Title,
+        PS.ViewCount,
+        C.CommentCount,
+        PS.UpVotesCount,
+        PS.DownVotesCount
+    FROM 
+        TopUsers TU
+    JOIN 
+        PostStats PS ON PS.ViewCount > 50  
+    ORDER BY 
+        TU.TotalBounty DESC, 
+        PS.ViewCount DESC
+)
+SELECT 
+    DisplayName,
+    TotalBounty,
+    Title,
+    ViewCount,
+    CommentCount,
+    UpVotesCount,
+    DownVotesCount,
+    CASE 
+        WHEN UpVotesCount > DownVotesCount THEN 'Positive'
+        WHEN UpVotesCount < DownVotesCount THEN 'Negative'
+        ELSE 'Neutral'
+    END AS PostSentiment
+FROM 
+    CombinedStats
+WHERE 
+    TotalBounty > 0
+LIMIT 10 OFFSET 0;

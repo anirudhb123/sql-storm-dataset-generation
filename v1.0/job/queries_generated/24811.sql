@@ -1,0 +1,86 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_title,
+        COUNT(mk.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id, 
+        cn.name AS actor_name, 
+        rt.role AS role,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        name cn ON ci.person_id = cn.imdb_id
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        cn.name IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title, 
+        rm.production_year,
+        ar.actor_name,
+        ar.role,
+        ar.role_rank,
+        rm.keyword_count,
+        CASE WHEN rm.keyword_count > 3 THEN 'High' 
+             WHEN rm.keyword_count BETWEEN 1 AND 3 THEN 'Medium' 
+             ELSE 'Low' END AS keyword_intensity
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorRoles ar ON rm.movie_id = ar.movie_id
+),
+CompanyMovieInfo AS (
+    SELECT 
+        mc.movie_id, 
+        ARRAY_AGG(DISTINCT cn.name) AS companies,
+        COUNT(DISTINCT mc.company_type_id) AS unique_company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.imdb_id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    COALESCE(md.actor_name, 'No Actor') AS actor_name,
+    COUNT(DISTINCT md.role) AS distinct_roles,
+    COALESCE(SUM(CASE WHEN md.role_rank > 1 THEN 1 ELSE 0 END), 0) AS co_starring_roles,
+    cm.companies,
+    cm.unique_company_types,
+    md.keyword_intensity
+FROM 
+    MovieDetails md
+JOIN 
+    CompanyMovieInfo cm ON md.movie_id = cm.movie_id
+GROUP BY 
+    md.movie_id, 
+    md.title, 
+    md.production_year, 
+    md.actor_name, 
+    cm.companies, 
+    cm.unique_company_types,
+    md.keyword_intensity
+HAVING 
+    COUNT(DISTINCT md.role) > 1 AND
+    SUM(CASE WHEN md.role_rank = 1 THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    md.production_year DESC, 
+    md.keyword_count DESC;

@@ -1,0 +1,41 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+         FROM Tags t 
+         WHERE t.Id IN (SELECT UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '>'))::int)) AS TagList
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+    GROUP BY p.Id
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.CommentCount,
+    rp.TagList,
+    COALESCE(pha.EditCount, 0) AS EditCount,
+    pha.LastEdited
+FROM RankedPosts rp
+LEFT JOIN PostHistoryAggregates pha ON rp.PostId = pha.PostId
+ORDER BY rp.Score DESC, rp.CreationDate DESC
+LIMIT 100;

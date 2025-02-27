@@ -1,0 +1,97 @@
+WITH RecursivePostPaths AS (
+    -- Recursive CTE to find all parent posts of a given post
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        rp.Level + 1 AS Level
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostPaths rp ON p.ParentId = rp.Id
+),
+UserVoteCounts AS (
+    -- CTE to get the number of votes per user
+    SELECT 
+        UserId, 
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        UserId
+),
+PostComments AS (
+    -- CTE to filter and aggregate comments on posts
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, '; ' ORDER BY c.CreationDate DESC) AS RecentComments
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostStatistics AS (
+    -- Aggregate statistics for posts, including vote counts, comment counts, etc.
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        ps.CommentCount,
+        COALESCE(uv.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(uv.DownVotes, 0) AS TotalDownVotes,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Yes' 
+            ELSE 'No' 
+        END AS HasAcceptedAnswer
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostComments ps ON p.Id = ps.PostId
+    LEFT JOIN 
+        UserVoteCounts uv ON p.OwnerUserId = uv.UserId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+PostHierarchy AS (
+    -- Join the recursive CTE results with post statistics
+    SELECT 
+        rpp.Id AS PostId,
+        rpp.Title,
+        rpp.Level,
+        ps.*
+    FROM 
+        RecursivePostPaths rpp
+    LEFT JOIN 
+        PostStatistics ps ON rpp.Id = ps.PostId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.ViewCount,
+    p.CommentCount,
+    p.TotalUpVotes,
+    p.TotalDownVotes,
+    p.HasAcceptedAnswer,
+    STRING_AGG(DISTINCT p2.Title, ' -> ') AS ParentTitles
+FROM 
+    PostHierarchy p
+LEFT JOIN 
+    PostHierarchy p2 ON p.Level = p2.Level + 1 AND p2.PostId = p.ParentId
+GROUP BY 
+    p.PostId, p.Title, p.ViewCount, p.CommentCount, p.TotalUpVotes, p.TotalDownVotes, p.HasAcceptedAnswer
+ORDER BY 
+    p.ViewCount DESC, p.TotalUpVotes DESC;

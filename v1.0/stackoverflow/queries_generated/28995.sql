@@ -1,0 +1,72 @@
+WITH UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN LATERAL (
+        SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName
+    ) t ON TRUE
+    WHERE p.PostTypeId IN (1, 2) -- Only questions and answers
+    GROUP BY p.Id, p.Title, p.Score, p.ViewCount, p.CreationDate, u.DisplayName
+    ORDER BY p.Score DESC
+    LIMIT 10
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.VoteCount, 0)) AS TotalVotes,
+        SUM(COALESCE(c.CommentCount, 0)) AS TotalComments
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS VoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    GROUP BY u.Id
+)
+SELECT
+    ub.UserId,
+    ub.DisplayName,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    ua.PostCount,
+    ua.TotalVotes,
+    ua.TotalComments,
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.CreationDate,
+    tp.Tags
+FROM UserBadges ub
+JOIN UserActivity ua ON ub.UserId = ua.UserId
+LEFT JOIN TopPosts tp ON tp.Tags && ARRAY(SELECT TagName FROM Tags WHERE Count > 100)
+WHERE ub.BadgeCount > 0
+ORDER BY ub.BadgeCount DESC, ua.TotalVotes DESC;

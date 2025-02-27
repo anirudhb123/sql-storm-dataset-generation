@@ -1,0 +1,63 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+ItemInfo AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_brand,
+        i.i_category,
+        SUM(ws.ws_quantity) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_id, 
+        i.i_item_desc, 
+        i.i_brand, 
+        i.i_category
+),
+SalesBenchmark AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.ca_city,
+        ci.ca_state,
+        ii.i_item_id,
+        ii.i_item_desc,
+        ii.i_brand,
+        ii.i_category,
+        ii.total_sales,
+        ii.total_profit,
+        RANK() OVER (PARTITION BY ci.ca_state ORDER BY ii.total_sales DESC) AS sales_rank
+    FROM CustomerInfo ci
+    JOIN ItemInfo ii ON ci.c_customer_id IN (
+        SELECT ws.ws_bill_customer_sk 
+        FROM web_sales ws 
+        WHERE ws.ws_item_sk IN (SELECT i.i_item_sk FROM item i)
+    )
+)
+SELECT 
+    ca.ca_state,
+    COUNT(DISTINCT sb.c_customer_id) AS num_customers,
+    SUM(sb.total_sales) AS total_sales,
+    AVG(sb.total_profit) AS avg_profit,
+    MAX(sb.sales_rank) AS max_sales_rank
+FROM SalesBenchmark sb
+JOIN customer_address ca ON sb.c_customer_id = ca.ca_address_sk
+GROUP BY ca.ca_state
+ORDER BY ca.ca_state;

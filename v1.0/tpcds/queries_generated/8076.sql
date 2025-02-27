@@ -1,0 +1,54 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        COUNT(DISTINCT ws.ws_order_number) AS unique_orders,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_sales,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        customer_sales cs
+    JOIN 
+        customer c ON cs.c_customer_id = c.c_customer_id
+),
+sales_by_gender AS (
+    SELECT 
+        cd.cd_gender,
+        SUM(cs.total_sales) AS gender_sales
+    FROM 
+        top_customers tc
+    JOIN 
+        customer_demographics cd ON tc.c_customer_id = cd.cd_demo_sk
+    JOIN 
+        customer_sales cs ON tc.c_customer_id = cs.c_customer_id
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    gb.ca_state,
+    SUM(sb.gender_sales) AS total_gender_sales,
+    COUNT(DISTINCT tc.c_customer_id) AS customer_count,
+    MAX(cs.avg_sales_price) AS max_avg_sales_price
+FROM 
+    sales_by_gender sb
+JOIN 
+    top_customers tc ON sb.c_customer_id = tc.c_customer_id
+JOIN 
+    customer_address ca ON tc.c_customer_id = ca.ca_address_id 
+GROUP BY 
+    gb.ca_state
+ORDER BY 
+    total_gender_sales DESC
+LIMIT 10;

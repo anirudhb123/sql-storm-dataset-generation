@@ -1,0 +1,53 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM web_sales
+    WHERE ws_sales_price > 0
+    UNION ALL
+    SELECT 
+        cs.sold_date_sk,
+        cs.item_sk,
+        cs.sales_price,
+        cs.quantity,
+        cs.net_paid
+    FROM catalog_sales cs
+    JOIN SalesCTE s ON cs.item_sk = s.ws_item_sk
+    WHERE cs.sold_date_sk < s.ws_sold_date_sk
+),
+RankedSales AS (
+    SELECT 
+        s.ws_item_sk,
+        SUM(s.ws_net_paid) AS total_net_paid,
+        COUNT(*) AS sales_count,
+        AVG(s.ws_sales_price) AS avg_sales_price,
+        RANK() OVER (ORDER BY SUM(s.ws_net_paid) DESC) AS sales_rank
+    FROM web_sales s
+    JOIN customer c ON s.ws_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_year IS NOT NULL
+    GROUP BY s.ws_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_product_name,
+    rs.total_net_paid,
+    rs.sales_count,
+    rs.avg_sales_price,
+    DENSE_RANK() OVER (PARTITION BY rs.sales_rank ORDER BY rs.total_net_paid DESC) AS dense_sales_rank
+FROM RankedSales rs
+JOIN item i ON rs.ws_item_sk = i.i_item_sk
+LEFT JOIN (
+    SELECT 
+        ia.inv_item_sk,
+        SUM(ia.inv_quantity_on_hand) AS total_quantity
+    FROM inventory ia
+    WHERE ia.inv_quantity_on_hand IS NOT NULL
+    GROUP BY ia.inv_item_sk
+) inv ON rs.ws_item_sk = inv.inv_item_sk
+WHERE rs.sales_count > 10 AND (inv.total_quantity IS NULL OR inv.total_quantity < 100)
+ORDER BY rs.sales_rank, total_net_paid DESC;

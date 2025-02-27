@@ -1,0 +1,59 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_clerk,
+        RANK() OVER (PARTITION BY o.o_clerk ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2024-01-01'
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        MIN(ps.ps_supplycost) AS min_cost,
+        MAX(ps.ps_supplycost) AS max_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+SupplierPerformance AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    c.c_name AS customer_name,
+    co.total_spent AS total_spent,
+    co.order_count AS order_count,
+    r.o_orderkey AS highest_value_order,
+    r.o_orderdate AS order_date,
+    r.o_totalprice AS order_total,
+    r.o_clerk AS processed_by,
+    p.p_name AS product_name,
+    ps.total_available AS available_quantity,
+    sp.total_supply_value AS supplier_value
+FROM CustomerOrders co
+LEFT JOIN RankedOrders r ON co.order_count > 0 AND r.rank_order = 1
+LEFT JOIN PartSupplierDetails p ON p.total_available > 0
+LEFT JOIN SupplierPerformance sp ON sp.supplied_parts > 0
+WHERE co.total_spent IS NOT NULL 
+  AND (sp.total_supply_value IS NULL OR sp.total_supply_value > 1000)
+ORDER BY co.total_spent DESC, order_total DESC;

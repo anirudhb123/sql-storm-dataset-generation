@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        RANK() OVER (ORDER BY p.CreationDate DESC) AS ChronologicalRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.PostTypeId IN (1, 2) -- considering Questions and Answers only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+), 
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') FILTER (WHERE b.Class = 1) AS GoldBadges,
+        STRING_AGG(b.Name, ', ') FILTER (WHERE b.Class = 2) AS SilverBadges,
+        STRING_AGG(b.Name, ', ') FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+), 
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstChangeDate,
+        MAX(ph.CreationDate) AS LastChangeDate,
+        COUNT(*) AS ChangeCount,
+        BOOL_OR(ph.PostHistoryTypeId IN (10, 11)) AS WasClosed,
+        JSON_AGG(DISTINCT ph.Comment) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseReasons
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.CommentCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    pha.FirstChangeDate,
+    pha.LastChangeDate,
+    pha.ChangeCount,
+    pha.WasClosed,
+    COALESCE(pha.CloseReasons, '[]') AS CloseReasons
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    UserBadges ub ON p.OwnerUserId = ub.UserId
+LEFT JOIN 
+    PostHistoryAnalysis pha ON p.PostId = pha.PostId
+WHERE 
+    p.ScoreRank <= 3 -- Top 3 highest scoring posts per user
+    AND p.ChronologicalRank <= 100 -- Top 100 posts overall
+ORDER BY 
+    p.Score DESC, 
+    p.CreationDate DESC;

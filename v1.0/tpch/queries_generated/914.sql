@@ -1,0 +1,78 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.total_cost
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rank <= 3
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_custkey,
+        SUM(o.o_totalprice) AS total_customer_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_custkey
+),
+OrderStats AS (
+    SELECT 
+        co.o_custkey,
+        co.total_customer_spent,
+        co.total_orders,
+        DENSE_RANK() OVER (ORDER BY co.total_customer_spent DESC) AS customer_rank
+    FROM 
+        CustomerOrders co
+),
+SupplierOrderDetails AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity * (1 - l.l_discount) AS discounted_price,
+        l.l_returnflag,
+        l.l_shipdate,
+        so.s_name,
+        so.s_nationkey
+    FROM 
+        lineitem l
+    JOIN 
+        TopSuppliers so ON l.l_suppkey = so.s_suppkey
+)
+SELECT 
+    os.o_custkey,
+    os.total_customer_spent,
+    os.total_orders,
+    sod.l_orderkey,
+    sod.discounted_price,
+    sod.l_returnflag,
+    sod.l_shipdate,
+    r.r_name AS region_name
+FROM 
+    OrderStats os
+LEFT JOIN 
+    SupplierOrderDetails sod ON os.o_custkey = sod.l_orderkey
+LEFT JOIN 
+    nation n ON sod.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    (os.customer_rank = 1 AND sod.l_returnflag = 'N') OR sod.l_returnflag IS NULL
+ORDER BY 
+    os.total_customer_spent DESC, sod.l_shipdate ASC;

@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerName,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        RANK() OVER (PARTITION BY u.Id ORDER BY p.ViewCount DESC) AS ViewRank,
+        RANK() OVER (PARTITION BY u.Id ORDER BY p.AnswerCount DESC) AS AnswerRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS TagName, PostId 
+         FROM Posts) t ON p.Id = t.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, u.Id
+), TopRankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.OwnerName,
+        rp.Tags,
+        rp.ViewRank,
+        rp.AnswerRank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ViewRank <= 5 OR rp.AnswerRank <= 5
+), UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.AnswerCount) AS TotalAnswers
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    us.DisplayName,
+    us.PostsCount,
+    us.TotalViews,
+    us.TotalAnswers,
+    string_agg(DISTINCT trp.Title, '; ') AS TopPosts,
+    string_agg(DISTINCT trp.Tags::text, '; ') AS AssociatedTags
+FROM 
+    UserStatistics us
+LEFT JOIN 
+    TopRankedPosts trp ON us.UserId = trp.OwnerName
+GROUP BY 
+    us.DisplayName, us.PostsCount, us.TotalViews, us.TotalAnswers
+ORDER BY 
+    us.TotalViews DESC, us.TotalAnswers DESC
+LIMIT 10;

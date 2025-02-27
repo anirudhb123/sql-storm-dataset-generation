@@ -1,0 +1,45 @@
+WITH RECURSIVE Region_Nations AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN Region_Nations rn ON n.n_regionkey = rn.n_nationkey
+),
+Total_Supplier_Cost AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+Order_Summary AS (
+    SELECT o.o_orderkey, o.o_orderdate, COUNT(l.l_orderkey) AS line_count, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+Top_Customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING total_spent > (SELECT AVG(o_totalprice) FROM orders)
+),
+Supplier_Ranking AS (
+    SELECT s.s_suppkey, s.s_name, ROW_NUMBER() OVER (PARTITION BY r_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN region r ON s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)
+)
+SELECT rn.r_name AS region,
+       cn.c_name AS customer,
+       SUM(os.total_sales) AS total_orders,
+       COALESCE(TRUNCATE(SUM(tsc.total_cost), 2), 0) AS total_supply_cost,
+       sr.rank
+FROM Region_Nations rn
+LEFT JOIN Top_Customers cn ON rn.n_nationkey = cn.c_custkey
+LEFT JOIN Order_Summary os ON os.o_orderkey = cn.c_custkey
+LEFT JOIN Total_Supplier_Cost tsc ON tsc.ps_partkey = os.line_count
+LEFT JOIN Supplier_Ranking sr ON sr.s_name = cn.c_name
+GROUP BY rn.r_name, cn.c_name, sr.rank
+ORDER BY region, total_orders DESC, total_supply_cost DESC;

@@ -1,0 +1,34 @@
+SELECT 
+    s.s_name AS supplier_name,
+    SUM(l.l_quantity) AS total_quantity,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS distinct_orders,
+    AVG(o.o_totalprice) AS average_order_value,
+    SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT p.p_name ORDER BY p.p_name SEPARATOR ', '), ', ', 5) AS top_products,
+    r.r_name AS region_name
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    AND l.l_returnflag = 'N'
+GROUP BY 
+    s.s_suppkey, r.r_regionkey
+HAVING 
+    total_quantity > 1000
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

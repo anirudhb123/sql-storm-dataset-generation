@@ -1,0 +1,63 @@
+WITH RECURSIVE actors_hierarchy AS (
+    SELECT 
+        c.id,
+        c.person_id,
+        c.movie_id,
+        c.nr_order,
+        a.name,
+        0 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        c.nr_order = 1  
+
+    UNION ALL
+
+    SELECT 
+        c.id,
+        c.person_id,
+        c.movie_id,
+        c.nr_order,
+        a.name,
+        ah.level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        actors_hierarchy ah ON c.movie_id = ah.movie_id AND c.nr_order = ah.nr_order + 1
+)
+
+SELECT 
+    t.title,
+    t.production_year,
+    STRING_AGG(DISTINCT ah.name, ', ') AS actors,
+    COUNT(DISTINCT mc.company_id) AS num_companies,
+    COUNT(DISTINCT mk.keyword) AS total_keywords,
+    AVG(CASE WHEN mi.info IS NOT NULL THEN LENGTH(mi.info) ELSE 0 END) AS average_info_length,
+    MAX(mk.keyword) AS last_keyword_alpha
+FROM 
+    title t
+LEFT JOIN 
+    cast_info ci ON t.id = ci.movie_id
+LEFT JOIN 
+    actors_hierarchy ah ON ci.id = ah.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+WHERE 
+    t.production_year BETWEEN 1990 AND 2023
+GROUP BY 
+    t.title, 
+    t.production_year
+HAVING 
+    COUNT(DISTINCT ah.name) > 2 
+ORDER BY 
+    t.production_year DESC, 
+    last_keyword_alpha
+LIMIT 50 OFFSET 100;

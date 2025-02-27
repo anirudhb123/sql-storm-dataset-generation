@@ -1,0 +1,4 @@
+SELECT min(n.name) AS of_person, min(t.title) AS biography_movie
+FROM aka_name AS an, cast_info AS ci, info_type AS it, link_type AS lt, movie_link AS ml, name AS n, person_info AS pi, title AS t
+WHERE n.id = an.person_id AND n.id = pi.person_id AND ci.person_id = n.id AND t.id = ci.movie_id AND ml.linked_movie_id = t.id AND lt.id = ml.link_type_id AND it.id = pi.info_type_id AND pi.person_id = an.person_id AND pi.person_id = ci.person_id AND an.person_id = ci.person_id AND ci.movie_id = ml.linked_movie_id
+AND t.phonetic_code < 'P5142' AND n.md5sum IS NOT NULL AND n.name_pcode_nf IN ('B542', 'C3524', 'H653', 'L343', 'O1615', 'U4215', 'V1351', 'V3216', 'X462', 'Z4253');

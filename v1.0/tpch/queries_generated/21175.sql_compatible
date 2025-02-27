@@ -1,0 +1,58 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(ps.ps_supplycost, 0) AS supply_cost,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_returned_value,
+    AVG(l.l_tax) AS avg_tax,
+    COUNT(DISTINCT o.o_orderkey) AS distinct_orders,
+    n.n_name AS nation_name,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY p.p_retailprice DESC) AS p_rank
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    CustomerOrders co ON co.o_orderkey = l.l_orderkey 
+LEFT JOIN 
+    nation n ON n.n_nationkey = co.c_custkey
+LEFT JOIN 
+    RankedSuppliers rs ON rs.s_suppkey = l.l_suppkey
+WHERE 
+    p.p_size BETWEEN 10 AND 20
+    AND (rs.rank = 1 OR rs.rank IS NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, ps.ps_supplycost, n.n_name
+HAVING 
+    SUM(l.l_quantity) > 100 
+    AND (COUNT(l.l_orderkey) > 10 OR COALESCE(AVG(rs.s_acctbal), 0) > 1000)
+ORDER BY 
+    total_returned_value DESC, avg_tax ASC;

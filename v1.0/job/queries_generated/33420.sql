@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        COALESCE(t.production_year, 0) AS production_year,
+        NULL::text AS parent_title
+    FROM 
+        aka_title AS t
+    JOIN 
+        title AS m ON t.movie_id = m.id
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        t.title,
+        COALESCE(t.production_year, 0),
+        mh.title
+    FROM 
+        MovieHierarchy AS mh
+    JOIN 
+        movie_link AS ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title AS t ON ml.linked_movie_id = t.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    th.title AS movie_title,
+    th.production_year AS year,
+    COUNT(DISTINCT ck.keyword) AS keyword_count,
+    AVG(l.link_type_id) AS avg_link_type,
+    CASE 
+        WHEN COUNT(DISTINCT mk.keyword_id) > 5 THEN 'High keyword count'
+        WHEN COUNT(DISTINCT mk.keyword_id) BETWEEN 3 AND 5 THEN 'Medium keyword count'
+        ELSE 'Low keyword count'
+    END AS keyword_analysis,
+    ROW_NUMBER() OVER (PARTITION BY th.production_year ORDER BY th.production_year DESC, actor_name ASC) AS row_num
+FROM 
+    aka_name AS a
+JOIN 
+    cast_info AS ci ON a.person_id = ci.person_id
+JOIN 
+    MovieHierarchy AS th ON ci.movie_id = th.movie_id
+LEFT JOIN 
+    movie_keyword AS mk ON th.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword AS ck ON mk.keyword_id = ck.id
+LEFT JOIN 
+    movie_link AS ml ON th.movie_id = ml.movie_id
+LEFT JOIN 
+    link_type AS l ON ml.link_type_id = l.id
+WHERE 
+    th.production_year BETWEEN 2000 AND 2023
+    AND l.link_type_id IS NOT NULL
+    AND a.name IS NOT NULL
+GROUP BY 
+    a.name, th.title, th.production_year
+HAVING 
+    COUNT(DISTINCT mk.keyword_id) > 0
+ORDER BY 
+    th.production_year, a.name;

@@ -1,0 +1,4 @@
+SELECT min(a1.name) AS writer_pseudo_name, min(t.title) AS movie_title
+FROM aka_name AS a1, cast_info AS ci, company_name AS cn, movie_companies AS mc, name AS n1, role_type AS rt, title AS t
+WHERE a1.person_id = n1.id AND n1.id = ci.person_id AND ci.movie_id = t.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.role_id = rt.id AND a1.person_id = ci.person_id AND ci.movie_id = mc.movie_id
+AND ci.role_id < 9 AND cn.name_pcode_sf IN ('A342', 'C6465', 'D2562', 'D4345', 'E1346', 'H6525', 'L145', 'M3534', 'N365') AND cn.name < 'FIlly Film Cult, The' AND ci.id > 25558267 AND t.md5sum > '918c2c9de587643d81b9dadc9f4c637c';

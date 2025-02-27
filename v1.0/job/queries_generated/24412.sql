@@ -1,0 +1,76 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorsInfo AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        ci.movie_id,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+),
+MoviesWithNotes AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mi.info, 'No info') AS additional_info
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id, 
+        COUNT(DISTINCT c.id) AS company_count 
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    mwt.title, 
+    mwt.production_year,
+    ai.name AS actor_name,
+    COUNT(DISTINCT ai.actor_id) AS total_actors,
+    COALESCE(cmp.company_count, 0) AS total_companies,
+    CASE 
+        WHEN mt.additional_info = 'No info' THEN 'Additional details unavailable' 
+        ELSE mt.additional_info 
+    END AS movie_details
+FROM 
+    MoviesWithNotes mt
+JOIN 
+    RankedTitles rt ON mt.movie_id = rt.title_id
+LEFT JOIN 
+    ActorsInfo ai ON mt.movie_id = ai.movie_id
+LEFT JOIN 
+    CompanyMovies cmp ON mt.movie_id = cmp.movie_id
+WHERE 
+    rt.title_rank <= 10
+    AND (mt.additional_info IS NOT NULL OR mt.additional_info IS NOT NULL)
+GROUP BY 
+    mwt.title, 
+    mwt.production_year, 
+    ai.name, 
+    mt.additional_info,
+    cmp.company_count
+HAVING 
+    COUNT(DISTINCT ai.actor_id) > 1 
+ORDER BY 
+    mwt.production_year DESC, 
+    total_actors DESC;

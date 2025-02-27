@@ -1,0 +1,71 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        COALESCE(NULLIF(ws.ws_quantity, 0), 1) AS quantity_adjusted
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_year BETWEEN 1980 AND 2000
+), 
+AggregateReturns AS (
+    SELECT 
+        sr_return_quantity,
+        SUM(sr_return_amt) AS total_return_amt,
+        AVG(sr_return_tax) AS avg_return_tax
+    FROM store_returns
+    GROUP BY sr_return_quantity
+), 
+SalesWithReturns AS (
+    SELECT 
+        rs.web_site_sk,
+        rs.ws_order_number,
+        rs.ws_sales_price,
+        ar.total_return_amt,
+        ar.avg_return_tax
+    FROM RankedSales rs
+    LEFT JOIN AggregateReturns ar ON rs.ws_order_number = ar.sr_ticket_number
+    WHERE (rs.price_rank <= 3 OR ar.total_return_amt IS NOT NULL)
+), 
+FinalResult AS (
+    SELECT 
+        s.ws_order_number,
+        s.ws_sales_price,
+        s.total_return_amt,
+        s.avg_return_tax,
+        CASE 
+            WHEN (s.total_return_amt IS NOT NULL AND s.average_return_tax IS NOT NULL) THEN
+                (s.ws_sales_price - s.total_return_amt + s.avg_return_tax) * 100 / NULLIF(s.ws_sales_price, 0)
+            ELSE
+                s.ws_sales_price * 0.1
+        END AS adjusted_value
+    FROM SalesWithReturns s
+)
+SELECT 
+    COUNT(*) AS total_orders,
+    AVG(adjusted_value) AS avg_adjusted_value,
+    MAX(adjusted_value) AS max_adjusted_value,
+    SUM(CASE 
+        WHEN adjusted_value > 0 THEN 1 
+        ELSE 0 
+    END) AS positive_adjusted_count
+FROM FinalResult
+WHERE adjusted_value IS NOT NULL
+UNION ALL
+SELECT 
+    COUNT(*) AS total_orders,
+    AVG(NULLIF(adjusted_value, 0)) AS avg_adjusted_value,
+    MAX(adjusted_value) AS max_adjusted_value,
+    SUM(CASE 
+        WHEN adjusted_value < 0 THEN 1 
+        ELSE 0 
+    END) AS negative_adjusted_count
+FROM FinalResult 
+WHERE adjusted_value IS NOT NULL 
+AND EXISTS (
+    SELECT 1 
+    FROM customer_demographics cd
+    WHERE cd.cd_demo_sk = (SELECT c_current_cdemo_sk FROM customer c WHERE c.c_customer_sk = FinalResult.ws_order_number)
+);

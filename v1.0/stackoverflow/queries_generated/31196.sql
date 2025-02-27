@@ -1,0 +1,94 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1 -- Questions only
+),
+
+TopUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.Reputation) AS TotalReputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        MAX(p.CreationDate) AS MostRecentPostDate
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE
+        u.Reputation IS NOT NULL
+    GROUP BY
+        u.Id, u.DisplayName
+    HAVING
+        COUNT(DISTINCT p.Id) > 5 -- Only users with more than 5 posts
+),
+
+PopularTags AS (
+    SELECT
+        unnest(string_to_array(Tags, ',')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM
+        Posts
+    WHERE
+        Tags IS NOT NULL
+    GROUP BY
+        TagName
+    HAVING
+        COUNT(*) > 10 -- Tags used more than 10 times
+),
+
+UserPostHistory AS (
+    SELECT
+        ph.UserId,
+        ph.PostId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.UserId ORDER BY ph.CreationDate DESC) AS ChangeRank
+    FROM
+        PostHistory ph
+    WHERE
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) -- Only relevant history types
+),
+
+FinalResult AS (
+    SELECT
+        u.DisplayName AS UserName,
+        COUNT(DISTINCT tp.PostId) AS QuestionsCount,
+        SUM(CASE WHEN tp.Rank = 1 THEN 1 ELSE 0 END) AS TopQuestionCount,
+        COUNT(DISTINCT p.PostId) AS CommentedPosts,
+        COUNT(DISTINCT ph.UserId) AS PostChanges,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsUsed
+    FROM
+        TopUsers u
+    JOIN
+        RankedPosts tp ON u.UserId = tp.OwnerUserId
+    LEFT JOIN
+        Comments c ON tp.PostId = c.PostId
+    LEFT JOIN
+        UserPostHistory ph ON u.UserId = ph.UserId
+    LEFT JOIN
+        PopularTags t ON t.TagName = ANY(string_to_array(tp.Tags, ','))
+    GROUP BY
+        u.UserId, u.DisplayName
+    HAVING
+        COUNT(DISTINCT tp.PostId) > 10 -- Limit to active users
+)
+
+SELECT
+    *,
+    COALESCE(TotalReputation * 0.1, 0) + COALESCE(TopQuestionCount * 5, 0) AS PerformanceScore
+FROM
+    FinalResult
+ORDER BY
+    PerformanceScore DESC
+LIMIT 10;

@@ -1,0 +1,50 @@
+
+WITH RECURSIVE customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_web_sales,
+        COALESCE(SUM(cs.cs_net_profit), 0) AS total_catalog_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_store_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY COALESCE(SUM(ws.ws_net_profit), 0) DESC) AS rnk
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        (c.c_birth_year IS NULL OR c.c_birth_year > 1980) AND 
+        (c.c_preferred_cust_flag = 'Y' OR c.c_email_address LIKE '%@example.com')
+    GROUP BY 
+        c.c_customer_id
+),
+ranked_customers AS (
+    SELECT 
+        customer_id, 
+        total_web_sales, 
+        total_catalog_sales, 
+        total_store_sales,
+        (total_web_sales + total_catalog_sales) AS grand_total,
+        NTILE(10) OVER (ORDER BY (total_web_sales + total_catalog_sales) DESC) AS income_band
+    FROM 
+        customer_sales
+)
+SELECT 
+    rc.customer_id,
+    STRING_AGG(CONCAT('Web: ', rc.total_web_sales, ', Catalog: ', rc.total_catalog_sales, ', Store: ', rc.total_store_sales), '; ') AS sales_summary,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound
+FROM 
+    ranked_customers rc
+LEFT JOIN 
+    income_band ib ON rc.income_band = ib.ib_income_band_sk
+WHERE 
+    rc.grand_total IS NOT NULL
+GROUP BY 
+    rc.customer_id, ib.ib_lower_bound, ib.ib_upper_bound
+ORDER BY 
+    rc.grand_total DESC
+LIMIT 50
+OFFSET (SELECT COUNT(*) FROM ranked_customers) / 2;

@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01' AS DATE) - INTERVAL '1 year')
+        AND p.Score IS NOT NULL
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        TRIM(unnest(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))) ) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT ctr.Name ORDER BY ctr.Name) AS CloseReasonNames
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes ctr ON ph.Comment = ctr.Id::TEXT
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN p.AnswerCount > 0 THEN 1 ELSE 0 END) AS ActiveQuestions,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id AND p.PostTypeId = 1
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.OwnerDisplayName,
+    COALESCE(cte.CloseReasonNames, 'No close reasons') AS CloseReasons,
+    COALESCE(pt.Tag, 'No tags') AS Tags,
+    us.BadgeCount,
+    us.ActiveQuestions,
+    us.TotalViews
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    CloseReasons cte ON rp.PostId = cte.PostId
+LEFT JOIN 
+    PostTags pt ON rp.PostId = pt.PostId
+JOIN 
+    UserStats us ON rp.OwnerDisplayName = us.UserId
+WHERE 
+    rp.rn <= 5
+ORDER BY 
+    rp.Score DESC NULLS LAST, 
+    rp.CreationDate DESC
+LIMIT 100;

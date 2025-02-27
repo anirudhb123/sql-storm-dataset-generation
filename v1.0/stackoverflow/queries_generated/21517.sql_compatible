@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank,
+        MAX(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS HasUpvote,
+        MAX(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS HasDownvote
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+    WHERE 
+        p.CreationDate < CAST('2024-10-01 12:34:56' AS TIMESTAMP)
+),
+HasAcceptedAnswer AS (
+    SELECT 
+        p.Id AS PostId,
+        CASE 
+            WHEN EXISTS (SELECT 1 FROM Posts a WHERE a.Id = p.AcceptedAnswerId) THEN 1 
+            ELSE 0 
+        END AS AcceptedAnswer
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+PostAggregate AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        COALESCE(ha.AcceptedAnswer, 0) AS AcceptedAnswer,
+        rp.HasUpvote,
+        rp.HasDownvote
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        HasAcceptedAnswer ha ON rp.PostId = ha.PostId
+    WHERE 
+        rp.Rank <= 10 
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.Score,
+    pa.ViewCount,
+    pa.AnswerCount,
+    pa.AcceptedAnswer,
+    pa.HasUpvote,
+    pa.HasDownvote,
+    COALESCE(ph.Name, 'Unknown') AS PostHistoryName,
+    COUNT(c.Id) AS CommentCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    PostAggregate pa
+LEFT JOIN 
+    PostHistory ph ON pa.PostId = ph.PostId
+LEFT JOIN 
+    Comments c ON pa.PostId = c.PostId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            TRIM(UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '>'))) AS TagName
+        FROM 
+            Posts p 
+        WHERE 
+            p.Id = pa.PostId
+    ) t ON TRUE
+GROUP BY 
+    pa.PostId, pa.Title, pa.Score, pa.ViewCount, pa.AnswerCount, pa.AcceptedAnswer, pa.HasUpvote, pa.HasDownvote, ph.Name
+ORDER BY 
+    pa.Score DESC, pa.CreationDate ASC, pa.Title
+LIMIT 20;

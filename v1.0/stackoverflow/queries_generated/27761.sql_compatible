@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.LastActivityDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.LastActivityDate, 
+        p.OwnerUserId, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.*, 
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Tags t ON rp.Tags LIKE CONCAT('%', t.TagName, '%')
+    WHERE 
+        PostRank = 1
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.Tags, rp.CreationDate, 
+        rp.LastActivityDate, rp.OwnerUserId, rp.OwnerDisplayName, 
+        rp.AnswerCount, rp.CommentCount
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId IN (1, 2)
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 10
+)
+SELECT 
+    tp.OwnerDisplayName,
+    tp.Title,
+    tp.CreationDate,
+    tp.LastActivityDate,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.TagList,
+    mau.DisplayName AS ActiveUserDisplayName,
+    mau.PostCount AS ActiveUserPostCount,
+    mau.TotalViews AS ActiveUserTotalViews
+FROM 
+    TopPosts tp
+JOIN 
+    MostActiveUsers mau ON tp.OwnerUserId = mau.UserId
+ORDER BY 
+    tp.LastActivityDate DESC, tp.AnswerCount DESC;

@@ -1,0 +1,95 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        p.Score,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Badges b
+    GROUP BY b.UserId
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(b.BadgeNames, 'No Badges') AS BadgeNames
+    FROM Users u
+    LEFT JOIN UserBadges b ON u.Id = b.UserId
+    WHERE u.Reputation > 1000
+),
+
+PostActivity AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastActivityDate
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        ra.RankByScore,
+        ua.UserId,
+        ua.Reputation,
+        ua.BadgeCount,
+        ua.BadgeNames,
+        pa.HistoryCount,
+        pa.LastActivityDate,
+        CASE 
+            WHEN pa.HistoryCount > 5 THEN 'Highly Active'
+            ELSE 'Less Active'
+        END AS ActivityLevel
+    FROM RankedPosts rp
+    INNER JOIN Users u ON rp.OwnerUserId = u.Id
+    INNER JOIN UserReputation ua ON u.Id = ua.UserId
+    LEFT JOIN PostActivity pa ON rp.PostId = pa.PostId
+    WHERE rp.RankByScore <= 10 -- Top 10 posts by score in each type
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.Reputation,
+    fp.BadgeCount,
+    fp.BadgeNames,
+    fp.ActivityLevel,
+    COALESCE(fp.LastActivityDate::DATE, 'No Activity') AS LastActivity,
+    CONCAT('Post:', fp.PostId, ' | Title:', fp.Title) AS FullDescription,
+    CASE 
+        WHEN fp.Score IS NULL THEN 'No votes'
+        WHEN fp.Score > 100 THEN 'Highly-rated'
+        WHEN fp.Score BETWEEN 50 AND 100 THEN 'Moderately-rated'
+        ELSE 'Lowly-rated'
+    END AS RatingClassification
+FROM FilteredPosts fp
+ORDER BY fp.Score DESC, fp.CreationDate DESC;
+
+This SQL query performs multiple operations, including:
+
+1. Common Table Expressions (CTEs) to rank posts, summarize user badges and reputation, and aggregate post activity.
+2. Complex JOINs with outer joins, correlated subqueries, and calculations that classify posts and users based on their activity and scoring metrics.
+3. String manipulation to concatenate post details, along with handling NULL values and defining unusual semantics in the categorization of user activity levels and post ratings. 
+4. Use of window functions for advanced ranking and aggregation logic.

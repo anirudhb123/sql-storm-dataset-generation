@@ -1,0 +1,70 @@
+
+WITH RECURSIVE ranked_customers AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_customer_id, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_gender
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+item_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws 
+    GROUP BY 
+        ws.ws_item_sk
+),
+high_sales_items AS (
+    SELECT 
+        i.i_item_sk, 
+        i.i_item_desc, 
+        is.total_quantity, 
+        is.total_sales, 
+        is.order_count
+    FROM 
+        item i
+    JOIN 
+        item_sales is ON i.i_item_sk = is.ws_item_sk
+    WHERE 
+        is.total_sales > (
+            SELECT 
+                AVG(total_sales) 
+            FROM 
+                item_sales
+            WHERE 
+                total_sales IS NOT NULL
+        )
+)
+SELECT 
+    rc.c_customer_id,
+    rc.cd_gender,
+    hsi.i_item_desc,
+    hsi.total_quantity,
+    hsi.total_sales,
+    CASE 
+        WHEN rc.rank_gender <= 10 THEN 'Top 10 ' || rc.cd_gender || ' Customers'
+        ELSE 'Other Customers'
+    END AS customer_segment,
+    STRING_AGG(CAST(hsi.total_sales AS TEXT), ', ') FILTER (WHERE hsi.total_sales IS NOT NULL) AS aggregate_sales,
+    CASE 
+        WHEN COUNT(hsi.i_item_sk) = 0 THEN 'No items sold'
+        ELSE 'Items sold'
+    END AS item_status
+FROM 
+    ranked_customers rc
+LEFT JOIN 
+    high_sales_items hsi ON rc.c_customer_sk = hsi.i_item_sk
+GROUP BY 
+    rc.c_customer_id, rc.cd_gender, hsi.i_item_desc, hsi.total_quantity, hsi.total_sales, rc.rank_gender
+HAVING 
+    COUNT(hsi.i_item_sk) > 0 OR rc.cd_gender IS NULL
+ORDER BY 
+    COUNT(hsi.i_item_sk) DESC, rc.cd_gender;

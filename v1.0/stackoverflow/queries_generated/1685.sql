@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score >= 10
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+),
+TopCommentedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        UserPostRank = 1
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.CommentCount,
+    COALESCE(b.Name, 'No Badge') AS Badge
+FROM 
+    Users u
+JOIN 
+    TopCommentedPosts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Badges b ON b.UserId = u.Id 
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    p.Score DESC, 
+    u.Reputation DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Total Comments' AS DisplayName,
+    NULL AS Reputation,
+    NULL AS Title,
+    NULL AS CreationDate,
+    COUNT(*) AS Score,
+    NULL AS CommentCount,
+    NULL AS Badge
+FROM 
+    Comments
+WHERE 
+    CreationDate >= NOW() - INTERVAL '1 month'
+HAVING 
+    COUNT(*) > 0
+ORDER BY 
+    Score DESC;

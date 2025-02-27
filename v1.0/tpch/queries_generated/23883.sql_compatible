@@ -1,0 +1,50 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5 AND s.s_acctbal > 3000
+),
+part_aggregates AS (
+    SELECT p.p_partkey, SUM(ps.ps_availqty) AS total_availqty, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+filtered_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           CASE WHEN o.o_orderstatus = 'O' THEN 'Active' ELSE 'Inactive' END AS order_status,
+           ROW_NUMBER() OVER (PARTITION BY CASE WHEN o.o_orderstatus = 'O' THEN 'Open' ELSE 'Closed' END
+                              ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+),
+nations_with_comment AS (
+    SELECT n.n_nationkey, n.n_name, n.n_comment,
+           COALESCE(NULLIF(n.n_comment, ''), 'No Comment') AS adjusted_comment
+    FROM nation n
+    WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE '%west%')
+),
+complex_selection AS (
+    SELECT p.p_name, pa.total_availqty, pa.avg_supplycost, 
+           nt.n_name, nt.adjusted_comment,
+           CASE 
+               WHEN pa.avg_supplycost < 10 THEN 'Cheap'
+               WHEN pa.avg_supplycost BETWEEN 10 AND 50 THEN 'Moderate'
+               ELSE 'Expensive'
+           END AS cost_category  
+    FROM part_aggregates pa
+    JOIN supplier_hierarchy sh ON pa.total_availqty < 100
+    LEFT JOIN nations_with_comment nt ON sh.s_nationkey = nt.n_nationkey
+)
+SELECT DISTINCT cs.p_name, cs.cost_category, fo.o_orderkey, fo.o_totalprice, fo.order_status
+FROM complex_selection cs
+JOIN filtered_orders fo ON cs.total_availqty <= fo.o_totalprice
+WHERE fo.order_rank = 1
+  AND (cs.cost_category = 'Cheap' OR cs.cost_category = 'Expensive')
+ORDER BY cs.cost_category DESC, fo.o_totalprice ASC
+FETCH FIRST 50 ROWS ONLY;

@@ -1,0 +1,81 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ParentId,
+        1 AS Level
+    FROM Posts P
+    WHERE P.PostTypeId = 1  -- Only considering Questions
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.ParentId,
+        Level + 1
+    FROM Posts P
+    INNER JOIN RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+PostVoteCounts AS (
+    SELECT
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS Downvotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostHistoryStatistics AS (
+    SELECT
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (4, 5, 6)  -- Edit Title, Edit Body, Edit Tags
+    GROUP BY PH.PostId
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(P.Score) AS TotalScore,
+        ROW_NUMBER() OVER (ORDER BY SUM(P.Score) DESC) AS UserRank
+    FROM Users U
+    INNER JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName
+),
+PopularPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(VC.Upvotes, 0) AS UpvoteCount,
+        COALESCE(VC.Downvotes, 0) AS DownvoteCount,
+        COALESCE(PHS.EditCount, 0) AS EditCount,
+        COUNT(CM.Id) AS CommentCount
+    FROM Posts P
+    LEFT JOIN PostVoteCounts VC ON P.Id = VC.PostId
+    LEFT JOIN PostHistoryStatistics PHS ON P.Id = PHS.PostId
+    LEFT JOIN Comments CM ON P.Id = CM.PostId
+    WHERE P.PostTypeId = 1  -- Only Questions
+    GROUP BY P.Id, P.Title, P.CreationDate, VC.Upvotes, VC.Downvotes, PHS.EditCount
+    ORDER BY UpvoteCount DESC
+    LIMIT 10
+)
+SELECT 
+    PHP.PostId,
+    PHP.Title,
+    PHP.CreationDate,
+    PHP.UpvoteCount,
+    PHP.DownvoteCount,
+    PHP.EditCount,
+    PHP.CommentCount,
+    COALESCE(NULLIF(RPH.Level, 0), 1) AS DepthLevel,
+    TU.DisplayName AS TopUser
+FROM PopularPosts PHP
+LEFT JOIN RecursivePostHierarchy RPH ON PHP.PostId = RPH.PostId
+LEFT JOIN TopUsers TU ON PHP.PostId IN (SELECT AcceptedAnswerId FROM Posts WHERE AcceptedAnswerId IS NOT NULL)
+WHERE PHP.UpvoteCount > 0
+ORDER BY PHP.UpvoteCount DESC, PHP.CommentCount DESC;
+

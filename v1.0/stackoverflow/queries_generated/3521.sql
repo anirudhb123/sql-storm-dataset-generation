@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COALESCE(SUM(v.VoteTypeId = 10), 0) AS Deletions
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostAnalytics AS (
+    SELECT 
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        us.DisplayName,
+        us.UpVotes,
+        us.DownVotes,
+        us.Deletions,
+        LEAD(rp.ViewCount) OVER (ORDER BY rp.CreationDate) AS NextPostViews
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserScores us ON rp.OwnerUserId = us.UserId
+    WHERE 
+        rp.PostRank = 1
+)
+SELECT 
+    pa.Title,
+    pa.ViewCount,
+    pa.Score,
+    pa.DisplayName,
+    pa.UpVotes,
+    pa.DownVotes,
+    pa.Deletions,
+    pa.NextPostViews,
+    CASE 
+        WHEN pa.ViewCount IS NOT NULL AND pa.NextPostViews IS NOT NULL 
+        THEN (pa.NextPostViews - pa.ViewCount)
+        ELSE NULL
+    END AS ViewChange,
+    CASE 
+        WHEN pa.UpVotes > pa.DownVotes THEN 'Positive'
+        WHEN pa.UpVotes < pa.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM 
+    PostAnalytics pa
+WHERE 
+    pa.ViewChange IS NOT NULL
+ORDER BY 
+    pa.Score DESC, 
+    pa.ViewCount DESC;

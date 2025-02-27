@@ -1,0 +1,50 @@
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    COALESCE(SUM(ss.total_avail_qty * ps.ps_supplycost), 0) AS region_supply_value,
+    AVG(co.total_spent) AS avg_customer_spending
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SupplierSummary ss ON ss.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        JOIN part p ON ps.ps_partkey = p.p_partkey 
+        WHERE p.p_type LIKE '%brass%'
+    )
+LEFT JOIN 
+    CustomerOrders co ON n.n_nationkey = co.c_custkey
+GROUP BY 
+    r.r_name
+HAVING 
+    AVG(co.total_spent) > 1000 OR COUNT(DISTINCT n.n_nationkey) > 5
+ORDER BY 
+    region_supply_value DESC, r.r_name;

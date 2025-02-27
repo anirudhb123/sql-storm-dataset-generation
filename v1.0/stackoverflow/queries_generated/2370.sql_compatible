@@ -1,0 +1,42 @@
+
+WITH RecentPosts AS (
+    SELECT Id, Title, CreationDate, OwnerUserId, PostTypeId, Tags,
+           ROW_NUMBER() OVER (PARTITION BY OwnerUserId ORDER BY CreationDate DESC) AS rn
+    FROM Posts
+    WHERE CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 DAY'
+), UserReputation AS (
+    SELECT Id AS UserId, Reputation, 
+           CASE 
+               WHEN Reputation > 10000 THEN 'High' 
+               WHEN Reputation BETWEEN 5000 AND 10000 THEN 'Medium' 
+               ELSE 'Low' 
+           END AS ReputationLevel
+    FROM Users
+), TagAnalytics AS (
+    SELECT TagName, COUNT(*) AS PostCount
+    FROM Tags
+    JOIN Posts ON Tags.Id = Posts.Id
+    GROUP BY TagName
+    HAVING COUNT(*) > 5
+)
+SELECT rp.Title AS RecentTitle, 
+       rp.CreationDate AS PostDate,
+       ur.Reputation, 
+       ur.ReputationLevel,
+       STRING_AGG(ta.TagName, ', ') AS RelatedTags,
+       MAX(ph.CreationDate) AS LastEditDate,
+       COALESCE(ph.UserId, -1) AS LastEditedByUserId,
+       COUNT(c.Id) AS CommentCount
+FROM RecentPosts rp
+LEFT JOIN UserReputation ur ON rp.OwnerUserId = ur.UserId
+LEFT JOIN PostHistory ph ON rp.Id = ph.PostId AND ph.CreationDate = (
+    SELECT MAX(CreationDate)
+    FROM PostHistory
+    WHERE PostId = rp.Id
+)
+LEFT JOIN Comments c ON rp.Id = c.PostId
+LEFT JOIN TagAnalytics ta ON ta.TagName = ANY(STRING_TO_ARRAY(rp.Tags, ','))
+WHERE rp.rn = 1
+GROUP BY rp.Id, rp.Title, rp.CreationDate, ur.Reputation, ur.ReputationLevel
+ORDER BY rp.CreationDate DESC
+LIMIT 50 OFFSET 0;

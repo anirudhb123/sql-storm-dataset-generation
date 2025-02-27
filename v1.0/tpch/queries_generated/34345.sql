@@ -1,0 +1,43 @@
+WITH RECURSIVE PartHierarchy AS (
+    SELECT p_partkey, p_name, p_size, p_brand, p_container, p_retailprice, 1 AS level
+    FROM part
+    WHERE p_size > 20
+
+    UNION ALL
+
+    SELECT p.p_partkey, p.p_name, p.p_size, p.p_brand, p.p_container, p.p_retailprice, ph.level + 1
+    FROM part p
+    JOIN PartHierarchy ph ON p.p_size < (ph.p_size - 5) AND p.p_brand = ph.p_brand
+),
+
+SupplierSummary AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           SUM(ps.ps_availqty) AS total_available, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+
+CustomerOrderSummary AS (
+    SELECT c.c_custkey,
+           COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+
+SELECT ph.p_name, 
+       ph.p_retailprice, 
+       SUM(css.total_orders) AS total_orders_by_customers,
+       AVG(ss.avg_supply_cost) AS avg_supply_cost_per_supplier,
+       COUNT(DISTINCT css.c_custkey) FILTER (WHERE css.total_spent > 1000) AS high_value_customers
+FROM PartHierarchy ph
+LEFT JOIN CustomerOrderSummary css ON ph.level = css.total_orders
+LEFT JOIN SupplierSummary ss ON ss.total_available > 100
+GROUP BY ph.p_name, ph.p_retailprice
+HAVING SUM(css.total_orders) > 0
+ORDER BY avg_supply_cost_per_supplier DESC, total_orders_by_customers DESC;

@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS Upvotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.Score > 0 
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 24) 
+    GROUP BY 
+        ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.Title,
+    rp.PostId,
+    rp.CreationDate,
+    rp.Score,
+    rp.AnswerCount,
+    COALESCE(phs.EditCount, 0) AS TotalEdits,
+    COALESCE(pbs.BadgeCount, 0) AS UserBadges,
+    rp.Upvotes,
+    rp.Downvotes,
+    CASE 
+        WHEN rp.Upvotes - rp.Downvotes > 10 THEN 'Highly Upvoted'
+        WHEN rp.Upvotes = rp.Downvotes THEN 'Neutral'
+        ELSE 'Needs Improvement'
+    END AS VoteStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+LEFT JOIN 
+    UserBadges pbs ON rp.OwnerUserId = pbs.UserId
+WHERE 
+    rp.rn = 1 
+    AND (rp.Upvotes - rp.Downvotes) IS NOT NULL
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC
+LIMIT 50;

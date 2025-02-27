@@ -1,0 +1,59 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        wr_returning_customer_sk,
+        COUNT(DISTINCT wr_order_number) AS TotalReturns,
+        SUM(wr_return_amt) AS TotalReturnAmount,
+        SUM(wr_return_tax) AS TotalReturnTax
+    FROM
+        web_returns
+    GROUP BY
+        wr_returning_customer_sk
+),
+SalesData AS (
+    SELECT
+        ws_ship_customer_sk,
+        SUM(ws_net_paid_inc_tax) AS TotalSales,
+        SUM(ws_ext_sales_price) AS TotalSalesPrice
+    FROM
+        web_sales
+    GROUP BY
+        ws_ship_customer_sk
+),
+SalesVsReturns AS (
+    SELECT
+        s.ws_ship_customer_sk,
+        COALESCE(cr.TotalReturns, 0) AS TotalReturns,
+        COALESCE(cr.TotalReturnAmount, 0) AS TotalReturnAmount,
+        COALESCE(cr.TotalReturnTax, 0) AS TotalReturnTax,
+        COALESCE(sd.TotalSales, 0) AS TotalSales,
+        COALESCE(sd.TotalSalesPrice, 0) AS TotalSalesPrice,
+        (COALESCE(sd.TotalSales, 0) - COALESCE(cr.TotalReturnAmount, 0)) AS NetSales,
+        CASE 
+            WHEN COALESCE(sd.TotalSales, 0) = 0 THEN NULL 
+            ELSE (COALESCE(cr.TotalReturnAmount, 0) / NULLIF(sd.TotalSales, 0)) * 100 
+        END AS ReturnPercentage
+    FROM
+        SalesData sd
+    LEFT JOIN 
+        CustomerReturns cr ON sd.ws_ship_customer_sk = cr.wr_returning_customer_sk
+)
+SELECT
+    c.c_customer_id,
+    COALESCE(sv.TotalReturns, 0) AS TotalReturns,
+    COALESCE(sv.TotalReturnAmount, 0) AS TotalReturnAmount,
+    COALESCE(sv.ReturnPercentage, 0) AS ReturnPercentage,
+    CASE 
+        WHEN sv.NetSales < 0 THEN 'Negative Net Sales' 
+        ELSE 'Positive Net Sales' 
+    END AS SalesStatus,
+    ROW_NUMBER() OVER (ORDER BY sv.NetSales DESC) AS SalesRank
+FROM
+    customer c
+LEFT JOIN 
+    SalesVsReturns sv ON c.c_customer_sk = sv.ws_ship_customer_sk
+WHERE
+    (sv.TotalReturns > 0 OR sv.TotalSales > 0)
+ORDER BY
+    sv.NetSales DESC, c.c_customer_id
+LIMIT 50;

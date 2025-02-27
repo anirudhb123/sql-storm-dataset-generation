@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rn,
+        DENSE_RANK() OVER (ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk) AS total_quantity
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+),
+FilteredSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        rs.ws_sales_price,
+        rs.total_quantity
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rn = 1 AND rs.total_quantity > 10
+),
+RecentReturns AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returns
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.cr_returned_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        cr.cr_item_sk
+),
+ReturnStats AS (
+    SELECT 
+        fs.ws_item_sk,
+        fs.ws_sales_price,
+        COALESCE(rr.total_returns, 0) AS total_returns,
+        CASE 
+            WHEN COALESCE(rr.total_returns, 0) = 0 THEN 'No Returns'
+            WHEN COALESCE(rr.total_returns, 0) < fs.total_quantity * 0.1 THEN 'Low Returns'
+            ELSE 'High Returns'
+        END AS return_category
+    FROM 
+        FilteredSales fs
+    LEFT JOIN 
+        RecentReturns rr ON fs.ws_item_sk = rr.cr_item_sk
+)
+SELECT 
+    r.ws_item_sk,
+    r.ws_sales_price,
+    r.return_category,
+    SUM(r.total_returns) OVER (PARTITION BY r.return_category) AS category_return_count,
+    COUNT(*) AS total_sales_count
+FROM 
+    ReturnStats r
+GROUP BY 
+    r.ws_item_sk, r.ws_sales_price, r.return_category
+HAVING 
+    r.ws_sales_price > (
+        SELECT AVG(ws_sales_price) 
+        FROM web_sales 
+        WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    ) 
+ORDER BY 
+    r.return_category, r.ws_sales_price DESC

@@ -1,0 +1,80 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpvoteCount,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownvoteCount
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+MaxVotePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ps.UpvoteCount,
+        ps.DownvoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY (ps.UpvoteCount - ps.DownvoteCount) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteSummary ps ON p.Id = ps.PostId
+    WHERE 
+        p.PostTypeId = 1  
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COALESCE(v.UpvoteCount, 0) AS TotalUpvotes,
+    COALESCE(v.DownvoteCount, 0) AS TotalDownvotes,
+    COALESCE(cp.FirstClosedDate, 'No Closure') AS ClosureDate,
+    ph.Level AS PostLevel
+FROM 
+    Posts p
+LEFT JOIN 
+    PostVoteSummary v ON p.Id = v.PostId
+LEFT JOIN 
+    ClosedPostHistory cp ON p.Id = cp.PostId
+LEFT JOIN 
+    RecursivePostHierarchy ph ON p.Id = ph.Id
+WHERE 
+    (v.UpvoteCount - v.DownvoteCount) > 10  
+    AND p.CreationDate >= DATEADD(YEAR, -1, cast('2024-10-01 12:34:56' as timestamp))  
+    AND ph.Level = 0  
+ORDER BY 
+    TotalUpvotes DESC;

@@ -1,0 +1,52 @@
+
+WITH RECURSIVE part_supplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+
+    UNION ALL
+
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty + 10, ps.ps_supplycost * 1.1
+    FROM partsupp ps
+    JOIN part_supplier psu ON ps.ps_partkey = psu.ps_partkey
+    WHERE psu.ps_availqty < 100
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_cost
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+nation_supplier AS (
+    SELECT n.n_name, s.s_suppkey, SUM(ps.ps_availqty) AS total_available
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_name, s.s_suppkey
+    HAVING SUM(ps.ps_availqty) IS NOT NULL
+),
+shipping_orders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, SUM(l.l_quantity) AS shipped_quantity
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+)
+
+SELECT 
+    p.p_name,
+    COALESCE(ns.n_name, 'Unknown') AS supplier_nation,
+    SUM(COALESCE(ps.ps_availqty, 0)) AS total_available,
+    os.o_orderkey,
+    os.total_cost,
+    so.shipped_quantity,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_availqty) DESC) AS availability_rank
+FROM part p
+LEFT JOIN part_supplier ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN nation_supplier ns ON ps.ps_suppkey = ns.s_suppkey
+LEFT JOIN order_summary os ON os.o_orderkey = so.o_orderkey
+LEFT JOIN shipping_orders so ON os.o_orderkey = so.o_orderkey
+GROUP BY p.p_partkey, p.p_name, ns.n_name, os.o_orderkey, os.total_cost, so.shipped_quantity
+HAVING SUM(ps.ps_availqty) > 0 OR os.total_cost IS NOT NULL
+ORDER BY p.p_name, total_available DESC;

@@ -1,0 +1,25 @@
+SELECT 
+    p.p_name,
+    s.s_name,
+    SUBSTRING(p.p_comment, 1, 10) AS short_comment,
+    CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name) AS detailed_description,
+    LENGTH(s.s_address) AS address_length,
+    CASE 
+        WHEN CHAR_LENGTH(s.s_phone) < 15 THEN 'Short Phone Number'
+        ELSE 'Normal Phone Number'
+    END AS phone_type,
+    COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    p.p_size > 10
+GROUP BY 
+    p.p_name, s.s_name, p.p_comment, s.s_address, s.s_phone
+HAVING 
+    num_suppliers > 1
+ORDER BY 
+    LENGTH(short_comment) DESC, s.s_name ASC;

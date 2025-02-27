@@ -1,0 +1,44 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.order_number,
+        ws.ws_sold_date_sk,
+        SUM(ws.quantity) AS total_quantity,
+        SUM(ws.net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.net_profit) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2022
+    GROUP BY 
+        ws.web_site_sk, ws.order_number, ws.ws_sold_date_sk
+),
+top_sales AS (
+    SELECT 
+        web_site_sk, 
+        order_number, 
+        total_quantity, 
+        total_net_profit
+    FROM 
+        ranked_sales
+    WHERE 
+        sales_rank <= 5
+)
+SELECT 
+    w.warehouse_name,
+    w.warehouse_id,
+    COALESCE(ts.order_number, 'No Sales') AS order_number,
+    COALESCE(ts.total_quantity, 0) AS total_quantity,
+    COALESCE(ts.total_net_profit, 0.00) AS total_net_profit
+FROM 
+    warehouse w
+LEFT JOIN 
+    top_sales ts ON w.warehouse_sk = ts.web_site_sk
+WHERE 
+    w.warehouse_sq_ft > (SELECT AVG(w2.warehouse_sq_ft) FROM warehouse w2)
+ORDER BY 
+    w.warehouse_name,
+    COALESCE(ts.total_net_profit, 0.00) DESC;

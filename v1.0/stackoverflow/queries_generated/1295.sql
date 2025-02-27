@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(b.Class = 1), 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2), 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3), 0) AS BronzeBadges,
+        COALESCE(SUM(RP.ViewCount), 0) AS TotalViews,
+        COUNT(RP.PostId) AS PostCount
+    FROM 
+        Users u
+        LEFT JOIN Badges b ON u.Id = b.UserId
+        LEFT JOIN RankedPosts RP ON u.Id = RP.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    us.TotalViews,
+    us.PostCount,
+    STRING_AGG(p.Title, ', ') AS TopPosts
+FROM 
+    UserStats us
+    LEFT JOIN RankedPosts p ON us.UserId = p.OwnerUserId AND p.ViewRank <= 3
+GROUP BY 
+    us.UserId, us.DisplayName, us.GoldBadges, us.SilverBadges, us.BronzeBadges, us.TotalViews, us.PostCount
+ORDER BY 
+    us.TotalViews DESC NULLS LAST;

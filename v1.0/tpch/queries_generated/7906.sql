@@ -1,0 +1,42 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        sum(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        dense_rank() OVER (PARTITION BY c.c_nationkey ORDER BY sum(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1996-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        r.r_name,
+        sum(ro.total_revenue) AS total_revenue_by_region
+    FROM 
+        RankedOrders ro
+    JOIN 
+        customer c ON ro.c_name = c.c_name
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        ro.revenue_rank <= 5
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    r.r_name,
+    r.total_revenue_by_region
+FROM 
+    TopCustomers r
+ORDER BY 
+    r.total_revenue_by_region DESC;

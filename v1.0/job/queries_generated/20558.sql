@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END), 0) AS num_cast_members,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title ASC) AS year_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.movie_id = ci.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+SubMovieInfo AS (
+    SELECT 
+        m.movie_id,
+        MAX(mi.info) AS longest_note,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    WHERE 
+        mi.note IS NOT NULL
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    r.title AS movie_title,
+    r.production_year,
+    r.num_cast_members,
+    sm.longest_note,
+    sm.keyword_count,
+    COALESCE(cn.name, 'Unknown Company') AS company_name,
+    COUNT(DISTINCT ci.person_id) FILTER (WHERE ci.nr_order IS NOT NULL) AS distinct_cast_members,
+    STRING_AGG(DISTINCT k.keyword, ', ' ORDER BY k.keyword) AS keywords_list
+FROM 
+    RankedMovies r
+LEFT JOIN 
+    complete_cast cc ON r.movie_id = cc.movie_id
+LEFT JOIN 
+    movie_companies mc ON r.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_keyword mk ON r.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    SubMovieInfo sm ON r.movie_id = sm.movie_id
+LEFT JOIN 
+    cast_info ci ON r.movie_id = ci.movie_id
+WHERE 
+    r.year_rank <= 5 AND (r.num_cast_members > 0 OR r.production_year < 2000)
+GROUP BY 
+    r.title, r.production_year, sm.longest_note, sm.keyword_count, cn.name
+ORDER BY 
+    r.production_year DESC, r.num_cast_members DESC;

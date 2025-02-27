@@ -1,0 +1,80 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales AS ws
+    WHERE 
+        ws.ws_sales_price > (
+            SELECT 
+                AVG(ws_inner.ws_sales_price) 
+            FROM 
+                web_sales AS ws_inner 
+            WHERE 
+                ws_inner.ws_item_sk = ws.ws_item_sk 
+                AND ws_inner.ws_sold_date_sk >= DATEADD(year, -1, CURRENT_DATE)
+        )
+),
+SalesSum AS (
+    SELECT 
+        SUM(ws_ext_sales_price) AS total_sales,
+        ws_item_sk
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN '20230101' AND '20231231'
+    GROUP BY 
+        ws_item_sk
+),
+FilteredReturns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returns
+    FROM 
+        web_returns
+    WHERE 
+        wr_returned_date_sk BETWEEN '20230101' AND '20231231'
+    GROUP BY 
+        wr_item_sk
+),
+RankedReturns AS (
+    SELECT 
+        fr.wr_item_sk,
+        fr.total_returns,
+        RANK() OVER (ORDER BY fr.total_returns DESC) AS return_rank
+    FROM 
+        FilteredReturns fr
+),
+FinalReport AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        COALESCE(sr.total_sales, 0) AS total_sales,
+        COALESCE(rr.total_returns, 0) AS total_returns,
+        (COALESCE(sr.total_sales, 0) - COALESCE(rr.total_returns, 0)) AS net_sales
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        SalesSum sr ON rs.ws_item_sk = sr.ws_item_sk
+    LEFT JOIN 
+        RankedReturns rr ON rs.ws_item_sk = rr.wr_item_sk
+)
+SELECT 
+    fr.ws_item_sk,
+    COUNT(DISTINCT fr.ws_order_number) AS order_count,
+    SUM(fr.net_sales) AS grand_total_net_sales,
+    AVG(fr.total_sales) AS avg_sales,
+    MAX(fr.total_returns) AS max_returned_quantity
+FROM 
+    FinalReport fr
+GROUP BY 
+    fr.ws_item_sk
+HAVING 
+    COUNT(DISTINCT fr.ws_order_number) > 5 
+    AND SUM(fr.net_sales) > 1000
+ORDER BY 
+    grand_total_net_sales DESC
+LIMIT 10;

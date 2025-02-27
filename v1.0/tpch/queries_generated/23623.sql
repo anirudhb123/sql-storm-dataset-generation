@@ -1,0 +1,46 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_acctbal IS NOT NULL)
+
+    UNION ALL
+
+    SELECT ch.c_custkey, ch.c_name, ch.c_acctbal, ch.level + 1
+    FROM customer_hierarchy ch
+    JOIN orders o ON o.o_custkey = ch.c_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+supplier_details AS (
+    SELECT s.s_suppkey, s.s_name, 
+           STRING_AGG(p.p_name, ', ') WITHIN GROUP (ORDER BY p.p_name) AS part_names,
+           SUM(ps.ps_supplycost) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+regional_sales AS (
+    SELECT r.r_name, SUM(o.o_totalprice) AS total_sales
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY r.r_name
+),
+ranked_sales AS (
+    SELECT r.*, 
+           RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM regional_sales r
+)
+
+SELECT ch.c_name, ch.c_acctbal, 
+       s.part_names, 
+       COALESCE(r.total_sales, 0) AS region_sales, 
+       sr.sales_rank
+FROM customer_hierarchy ch
+LEFT JOIN supplier_details s ON ch.c_custkey = (SELECT MIN(c2.c_custkey) FROM customer c2 WHERE c2.c_acctbal > ch.c_acctbal)
+LEFT JOIN regional_sales r ON r.r_name = (SELECT n.n_name FROM nation n JOIN customer c ON n.n_nationkey = c.c_nationkey WHERE c.c_custkey = ch.c_custkey)
+LEFT JOIN ranked_sales sr ON sr.r_name = r.r_name
+WHERE ch.level IS NULL OR ch.level % 2 = 0
+      AND ch.c_acctbal IS NOT NULL
+ORDER BY ch.c_acctbal DESC, sr.sales_rank;

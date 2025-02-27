@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount, 
+        p.Score, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.PostTypeId = 1
+),
+PostVoteDetails AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        RANK() OVER (ORDER BY SUM(p.Score) DESC) AS UserRank
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '2 years'
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    COALESCE(pvd.Upvotes, 0) AS Up Votes,
+    COALESCE(pvd.Downvotes, 0) AS Down Votes,
+    rp.CommentCount,
+    tu.DisplayName AS TopUser,
+    tu.UserRank
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteDetails pvd ON rp.PostId = pvd.PostId
+LEFT JOIN 
+    TopUsers tu ON rp.OwnerUserId = tu.UserId
+WHERE 
+    rp.UserPostRank = 1
+ORDER BY 
+    rp.ViewCount DESC, 
+    rp.Score DESC
+LIMIT 50;

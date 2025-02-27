@@ -1,0 +1,65 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_orderstatus
+),
+SupplierDetails AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'No Balance' 
+            WHEN s.s_acctbal < 1000 THEN 'Low Balance' 
+            ELSE 'High Balance'
+        END AS balance_category
+    FROM 
+        supplier s
+    WHERE 
+        EXISTS (SELECT 1 FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey AND ps.ps_availqty > 0)
+),
+RegionSummary AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name
+    HAVING 
+        SUM(ps.ps_supplycost) > 50000
+)
+SELECT 
+    r.r_name AS region_name,
+    o.o_orderkey,
+    o.total_revenue,
+    s.s_name AS supplier_name,
+    s.balance_category,
+    COALESCE(o.o_orderdate, '1900-01-01') AS order_date,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY o.total_revenue DESC) AS order_rank
+FROM 
+    RegionSummary r
+LEFT JOIN 
+    RankedOrders o ON o.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderdate > '2023-01-01')
+INNER JOIN 
+    SupplierDetails s ON s.s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size BETWEEN 1 AND 5))
+WHERE 
+    r.nation_count > 1 AND s.balance_category <> 'No Balance'
+ORDER BY 
+    region_name, order_rank
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

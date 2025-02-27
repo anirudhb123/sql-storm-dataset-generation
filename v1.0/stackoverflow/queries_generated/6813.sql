@@ -1,0 +1,40 @@
+WITH RecentActiveUsers AS (
+    SELECT Id, DisplayName, Reputation, LastAccessDate, Views, UpVotes, DownVotes
+    FROM Users
+    WHERE LastAccessDate >= NOW() - INTERVAL '30 days'
+),
+TopTags AS (
+    SELECT TagName, COUNT(*) AS TagPostCount
+    FROM Tags
+    JOIN Posts ON Tags.Id = Posts.Tags
+    GROUP BY TagName
+    ORDER BY TagPostCount DESC
+    LIMIT 10
+),
+UserActivity AS (
+    SELECT u.DisplayName, 
+           COUNT(DISTINCT p.Id) AS PostCount,
+           SUM(COALESCE(c.CommentCount, 0)) AS TotalComments,
+           SUM(v.VoteTypeId = 2) AS UpVotes,
+           SUM(v.VoteTypeId = 3) AS DownVotes,
+           CASE WHEN SUM(v.VoteTypeId = 2) > SUM(v.VoteTypeId = 3) THEN 'Positive' ELSE 'Negative' END AS UserSentiment
+    FROM RecentActiveUsers u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.DisplayName
+)
+SELECT ua.DisplayName, 
+       ua.PostCount, 
+       ua.TotalComments, 
+       ua.UpVotes, 
+       ua.DownVotes,
+       tt.TagName,
+       u.Reputation,
+       u.Views,
+       u.Location
+FROM UserActivity ua
+JOIN RecentActiveUsers u ON ua.DisplayName = u.DisplayName
+JOIN TopTags tt ON tt.TagPostCount > 5
+ORDER BY ua.PostCount DESC, u.Reputation DESC
+LIMIT 20;

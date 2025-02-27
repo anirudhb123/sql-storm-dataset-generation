@@ -1,0 +1,61 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT a.Id) AS TotalAnswers,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS TotalPostsTagged,
+        SUM(p.ViewCount) AS TotalViewsTagged
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.UserId, ph.PostHistoryTypeId
+)
+SELECT 
+    u.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalAnswers,
+    us.TotalViews,
+    us.TotalScore,
+    ts.TagName,
+    ts.TotalPostsTagged,
+    ts.TotalViewsTagged,
+    ph.UserId,
+    ph.HistoryCount
+FROM 
+    UserStats us
+JOIN 
+    Users u ON u.Id = us.UserId
+LEFT JOIN 
+    TagStats ts ON true
+LEFT JOIN 
+    PostHistoryStats ph ON ph.UserId = u.Id
+ORDER BY 
+    us.TotalScore DESC, us.Reputation DESC;

@@ -1,0 +1,62 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk,
+           0 AS level
+    FROM customer c
+    WHERE c.c_customer_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk,
+           ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+),
+sales_data AS (
+    SELECT ws.ws_customer_sk, 
+           COALESCE(ws.ws_quantity, 0) AS total_quantity_sold, 
+           SUM(ws.ws_sales_price) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY ws.ws_customer_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 1 AND 10000
+    GROUP BY ws.ws_customer_sk, ws.ws_quantity
+),
+return_data AS (
+    SELECT sr.sr_customer_sk,
+           SUM(sr.sr_return_quantity) AS total_returns,
+           SUM(sr.sr_return_amt) AS total_return_amount,
+           DENSE_RANK() OVER (ORDER BY SUM(sr.sr_return_quantity) DESC) AS return_rank
+    FROM store_returns sr
+    WHERE sr.sr_returned_date_sk IS NOT NULL
+    GROUP BY sr.sr_customer_sk
+),
+customer_sales AS (
+    SELECT ch.c_customer_sk,
+           ch.c_first_name,
+           ch.c_last_name,
+           COALESCE(sd.total_quantity_sold, 0) AS total_quantity_sold,
+           COALESCE(sd.total_sales, 0) AS total_sales,
+           COALESCE(rd.total_returns, 0) AS total_returns,
+           COALESCE(rd.total_return_amount, 0) AS total_return_amount
+    FROM customer_hierarchy ch
+    LEFT JOIN sales_data sd ON ch.c_customer_sk = sd.ws_customer_sk
+    LEFT JOIN return_data rd ON ch.c_customer_sk = rd.sr_customer_sk
+)
+SELECT c.c_customer_sk, 
+       c.c_first_name, 
+       c.c_last_name,
+       c.total_quantity_sold,
+       c.total_sales,
+       c.total_returns,
+       c.total_return_amount,
+       CASE 
+           WHEN c.total_sales > 1000 THEN 'High Roller'
+           WHEN c.total_sales BETWEEN 500 AND 999 THEN 'Medium Spender'
+           ELSE 'Budget Shopper'
+       END AS spending_category
+FROM customer_sales c
+LEFT JOIN store s ON c.total_quantity_sold > (SELECT AVG(total_quantity_sold) FROM customer_sales)
+WHERE c.total_returns IS NOT NULL
+ORDER BY c.total_sales DESC
+LIMIT 10
+OFFSET (SELECT COUNT(*) FROM customer_sales) / 2;

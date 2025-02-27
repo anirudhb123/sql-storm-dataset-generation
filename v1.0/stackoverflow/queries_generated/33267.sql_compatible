@@ -1,0 +1,92 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.ParentId, 
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.ParentId, 
+        RPH.Level + 1
+    FROM 
+        Posts P
+    JOIN 
+        RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+), CTE_Stats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(COUNT(DISTINCT P.Id), 0) AS PostCount,
+        AVG(P.Score) AS AvgScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+), PostDetails AS (
+    SELECT 
+        PH.PostId, 
+        PH.Title,
+        P.CreationDate,
+        P.LastActivityDate,
+        PH.Level,
+        U.DisplayName AS OwnerName,
+        Cs.CommentCount,
+        CTE_AvgValues.AvgScore
+    FROM 
+        RecursivePostHierarchy PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount 
+        FROM Comments 
+        GROUP BY PostId
+    ) Cs ON P.Id = Cs.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            AVG(Score) AS AvgScore 
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) CTE_AvgValues ON P.Id = CTE_AvgValues.PostId
+)
+
+SELECT 
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.LastActivityDate,
+    PD.Level,
+    PD.OwnerName,
+    PD.CommentCount,
+    COALESCE(PD.AvgScore, 0) AS AvgScore,
+    CASE 
+        WHEN PD.Level > 0 THEN 'Child Post'
+        ELSE 'Top Level Post'
+    END AS PostType
+FROM 
+    PostDetails PD
+WHERE 
+    PD.LastActivityDate > (CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '6 months')
+ORDER BY 
+    PD.LastActivityDate DESC,
+    PD.AvgScore DESC
+LIMIT 50;

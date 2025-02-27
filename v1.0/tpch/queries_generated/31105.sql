@@ -1,0 +1,46 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+  UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+price_summary AS (
+    SELECT l.l_partkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM lineitem l
+    JOIN orders o ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY l.l_partkey
+),
+high_value_parts AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, ps.ps_availqty, ps.ps_comment
+    FROM part p
+    JOIN partsupp ps ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 1000
+    AND ps.ps_supplycost = (SELECT MAX(ps_supplycost) FROM partsupp)
+),
+nation_stats AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT r.r_name, 
+       hs.s_name AS high_supplier, 
+       hp.p_name AS high_part, 
+       COALESCE(ns.supplier_count, 0) AS total_suppliers,
+       ps.total_revenue, 
+       RANK() OVER (PARTITION BY r.r_regionkey ORDER BY ps.total_revenue DESC) as revenue_rank
+FROM region r
+LEFT JOIN supplier_hierarchy hs ON hs.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)
+LEFT JOIN high_value_parts hp ON hp.ps_supplycost IS NOT NULL
+LEFT JOIN price_summary ps ON ps.l_partkey = hp.p_partkey
+LEFT JOIN nation_stats ns ON ns.n_nationkey = hs.s_nationkey
+WHERE ps.total_revenue IS NOT NULL
+AND hp.ps_availqty >= ALL (SELECT ps_availqty FROM partsupp)
+ORDER BY revenue_rank, r.r_name;

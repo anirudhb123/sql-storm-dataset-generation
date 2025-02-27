@@ -1,0 +1,50 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT c.customer_sk, c.first_name, c.last_name, c.current_addr_sk, 1 AS level
+    FROM customer c
+    WHERE c.salutation IS NOT NULL AND c.current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT c.customer_sk, c.first_name, c.last_name, c.current_addr_sk, sh.level + 1
+    FROM customer c
+    JOIN sales_hierarchy sh ON c.current_cdemo_sk = sh.customer_sk
+    WHERE sh.level < 3
+),
+sales_summary AS (
+    SELECT 
+        sh.customer_sk,
+        CONCAT(sh.first_name, ' ', sh.last_name) AS full_name,
+        ca.ca_city,
+        SUM(ws.ws_net_paid) AS total_sales,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM sales_hierarchy sh
+    LEFT JOIN customer_address ca ON sh.current_addr_sk = ca.ca_address_sk
+    LEFT JOIN web_sales ws ON sh.customer_sk = ws.ws_ship_customer_sk
+    GROUP BY sh.customer_sk, sh.first_name, sh.last_name, ca.ca_city
+),
+promotions_detail AS (
+    SELECT
+        ws.ws_order_number,
+        p.promo_name,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE p.p_start_date_sk <= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2022)
+      AND p.p_end_date_sk >= (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2020)
+    GROUP BY ws.ws_order_number, p.promo_name
+)
+SELECT 
+    ss.customer_sk,
+    ss.full_name,
+    ss.ca_city,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(ss.avg_sales_price, 0) AS avg_sales_price,
+    pd.promo_name,
+    pd.total_profit,
+    pd.total_orders
+FROM sales_summary ss
+FULL OUTER JOIN promotions_detail pd ON ss.customer_sk = pd.ws_order_number
+WHERE COALESCE(ss.total_sales, 0) > 0 OR pd.total_orders IS NOT NULL
+ORDER BY ss.full_name, pd.total_profit DESC
+LIMIT 100
+OFFSET 0

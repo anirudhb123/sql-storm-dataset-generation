@@ -1,0 +1,70 @@
+WITH TaggedQuestions AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><') AS tag ON true
+    JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+TopQuestions AS (
+    SELECT 
+        tq.QuestionId,
+        tq.Title,
+        tq.CreationDate,
+        tq.ViewCount,
+        tq.Score,
+        tq.CommentCount,
+        tq.TagsList,
+        ROW_NUMBER() OVER (ORDER BY tq.ViewCount DESC) AS Rank
+    FROM 
+        TaggedQuestions tq
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT q.QuestionId) AS QuestionsAsked,
+        SUM(v.VoteTypeId = 2) AS UpVotesReceived,  -- Assuming VoteType 2 is UpMod
+        SUM(v.VoteTypeId = 3) AS DownVotesReceived  -- Assuming VoteType 3 is DownMod
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts q ON q.OwnerUserId = u.Id AND q.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON v.PostId = q.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    tq.Title,
+    tq.CreationDate,
+    tq.ViewCount,
+    tq.Score,
+    tq.CommentCount,
+    tq.TagsList,
+    ua.DisplayName AS Author,
+    ua.QuestionsAsked AS TotalQuestionsAsked,
+    ua.UpVotesReceived AS TotalUpVotes,
+    ua.DownVotesReceived AS TotalDownVotes
+FROM 
+    TopQuestions tq
+JOIN 
+    UserActivity ua ON tq.QuestionId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ua.UserId)
+WHERE 
+    tq.Rank <= 10  -- Top 10 Questions by View Count
+ORDER BY 
+    tq.ViewCount DESC;

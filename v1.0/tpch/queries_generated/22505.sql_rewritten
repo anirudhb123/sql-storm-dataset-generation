@@ -1,0 +1,84 @@
+WITH RECURSIVE NationSuppliers AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+), 
+PartSupPrior AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+), 
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        CASE 
+            WHEN o.o_totalprice > 5000 THEN 'High'
+            WHEN o.o_totalprice BETWEEN 1000 AND 5000 THEN 'Medium'
+            ELSE 'Low'
+        END AS order_value
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+), 
+DiscountedLineItems AS (
+    SELECT 
+        li.l_orderkey,
+        SUM(li.l_quantity) AS discounted_quantity,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_discounted_price
+    FROM 
+        lineitem li
+    WHERE 
+        li.l_discount > 0.1
+    GROUP BY 
+        li.l_orderkey
+),
+AggregatedPartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.total_avail_qty) AS total_avail_qty,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        PartSupPrior ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    ns.n_name,
+    ap.p_name,
+    ap.total_avail_qty,
+    COALESCE(dli.discounted_quantity, 0) AS total_discounted_quantity,
+    COALESCE(dli.total_discounted_price, 0) AS total_discounted_price,
+    o.order_value
+FROM 
+    AggregatedPartDetails ap
+LEFT JOIN 
+    NationSuppliers ns ON ap.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ns.s_suppkey)
+LEFT JOIN 
+    HighValueOrders o ON o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = ns.n_nationkey)
+LEFT JOIN 
+    DiscountedLineItems dli ON dli.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = o.o_custkey)
+WHERE 
+    ap.total_avail_qty > (SELECT AVG(total_avail_qty) FROM AggregatedPartDetails) 
+    AND ns.r_name IS NOT NULL
+ORDER BY 
+    ns.n_name, ap.p_name;

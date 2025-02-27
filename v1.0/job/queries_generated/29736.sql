@@ -1,0 +1,42 @@
+WITH MovieDetails AS (
+    SELECT t.id AS movie_id,
+           t.title,
+           t.production_year,
+           GROUP_CONCAT(DISTINCT ak.name) AS aka_names,
+           GROUP_CONCAT(DISTINCT k.keyword) AS keywords
+    FROM aka_title ak
+    JOIN title t ON ak.movie_id = t.id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY t.id, t.title, t.production_year
+),
+ActorDetails AS (
+    SELECT c.movie_id,
+           COUNT(DISTINCT c.person_id) AS actor_count,
+           GROUP_CONCAT(DISTINCT a.name) AS actor_names
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    GROUP BY c.movie_id
+),
+FinalBenchmark AS (
+    SELECT md.movie_id,
+           md.title,
+           md.production_year,
+           ad.actor_count,
+           ad.actor_names,
+           md.aka_names,
+           md.keywords
+    FROM MovieDetails md
+    JOIN ActorDetails ad ON md.movie_id = ad.movie_id
+    WHERE md.production_year BETWEEN 2000 AND 2020
+    ORDER BY md.production_year DESC, ad.actor_count DESC
+)
+SELECT movie_id,
+       title,
+       production_year,
+       actor_count,
+       actor_names,
+       aka_names,
+       keywords
+FROM FinalBenchmark
+LIMIT 50;

@@ -1,0 +1,61 @@
+WITH RECURSIVE CompanyHierarchy AS (
+    SELECT 
+        mc.movie_id, 
+        cn.name AS company_name, 
+        ct.kind AS company_type, 
+        1 AS level
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+
+    UNION ALL
+
+    SELECT 
+        mc.movie_id, 
+        cn.name AS company_name, 
+        ct.kind AS company_type, 
+        ch.level + 1
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        CompanyHierarchy ch ON mc.movie_id = ch.movie_id
+)
+
+SELECT 
+    ak.person_id,
+    ak.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    ch.company_name,
+    ch.company_type,
+    COUNT(DISTINCT mc.company_id) AS total_companies,
+    SUM(CASE WHEN mc.note IS NOT NULL THEN 1 ELSE 0 END) AS companies_with_notes,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY COUNT(*) DESC) AS actor_rank,
+    COALESCE(GROUP_CONCAT(DISTINCT CASE WHEN i.info IS NOT NULL THEN i.info ELSE 'No Info' END), 'No Info') AS additional_info
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.movie_id
+LEFT JOIN 
+    movie_companies mc ON t.movie_id = mc.movie_id
+LEFT JOIN 
+    CompanyHierarchy ch ON mc.movie_id = ch.movie_id
+LEFT JOIN 
+    movie_info i ON t.movie_id = i.movie_id
+WHERE 
+    t.production_year > 2010
+GROUP BY 
+    ak.person_id, ak.name, t.title, t.production_year, ch.company_name, ch.company_type
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY 
+    total_companies DESC, actor_rank;

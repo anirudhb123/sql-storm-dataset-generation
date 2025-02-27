@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS depth
+    FROM supplier s
+    WHERE s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.depth + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_totalprice, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_totalprice
+),
+CustomerOrderCounts AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           CASE WHEN p.p_size IS NULL THEN 'Unknown Size' ELSE CAST(p.p_size AS VARCHAR) END AS size_info
+    FROM part p
+    WHERE p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice)
+        FROM part p2
+    )
+)
+SELECT p.p_partkey, p.p_name, p.p_retailprice, p.size_info,
+       s.s_name AS supplier_name, n.n_name AS nation_name,
+       os.total_lineitem_price, coc.order_count
+FROM FilteredParts p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN OrderSummary os ON os.o_orderkey IN (
+    SELECT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_partkey = p.p_partkey
+)
+JOIN CustomerOrderCounts coc ON coc.order_count > 10
+WHERE os.total_lineitem_price IS NOT NULL
+ORDER BY p.p_partkey, s.s_name;

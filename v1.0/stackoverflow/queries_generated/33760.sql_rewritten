@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostVoteCounts AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        LAG(ph.CreationDate) OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate) AS PreviousEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 10)  
+),
+CombinedResults AS (
+    SELECT 
+        p.Title,
+        u.Reputation,
+        up.TotalBadges,
+        pp.UpVotes,
+        pp.DownVotes,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS EditDate
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    JOIN 
+        UserReputation up ON u.Id = up.UserId
+    LEFT JOIN 
+        PostVoteCounts pp ON rp.PostId = pp.PostId
+    LEFT JOIN 
+        RecentPostHistory ph ON rp.PostId = ph.PostId
+)
+
+SELECT 
+    cr.Title,
+    cr.Reputation,
+    cr.TotalBadges,
+    cr.UpVotes,
+    cr.DownVotes,
+    CASE 
+        WHEN cr.PostHistoryTypeId IS NOT NULL THEN 'Edited or Closed'
+        ELSE 'No Recent Edits'
+    END AS PostStatus,
+    COALESCE(DATEDIFF(cr.EditDate, cast('2024-10-01 12:34:56' as timestamp)), 'Never Edited') AS DaysSinceLastEdit
+FROM 
+    CombinedResults cr
+WHERE 
+    cr.Reputation > 100
+ORDER BY 
+    cr.Reputation DESC, 
+    cr.UpVotes DESC
+LIMIT 100;

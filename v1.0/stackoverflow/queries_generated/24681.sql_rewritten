@@ -1,0 +1,74 @@
+WITH UserScore AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 WHEN V.VoteTypeId = 3 THEN -1 ELSE 0 END), 0) AS Score,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE U.Reputation > 0  
+    GROUP BY U.Id
+),
+TagPostCount AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        PH.CreationDate AS PostCreation,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON PH.PostId = P.Id AND PH.PostHistoryTypeId = 1  
+    LEFT JOIN Tags T ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY P.Id, P.Title, P.Score, P.ViewCount, P.AnswerCount, PH.CreationDate
+),
+RankedUsers AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Score,
+        U.PostCount,
+        RANK() OVER (ORDER BY U.Score DESC) AS ScoreRank
+    FROM UserScore U
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        T.PostCount,
+        RANK() OVER (ORDER BY T.PostCount DESC) AS TagRank
+    FROM TagPostCount T
+)
+SELECT 
+    PU.DisplayName,
+    PU.Reputation,
+    PU.Score,
+    PU.PostCount,
+    PT.PostId,
+    PT.Title,
+    PT.Score AS PostScore,
+    PT.ViewCount,
+    PT.AnswerCount,
+    PT.CommentCount,
+    PT.Tags,
+    TT.TagName,
+    TT.PostCount AS TagPostCount,
+    UT.TagRank
+FROM RankedUsers PU
+JOIN PostDetails PT ON PU.PostCount > 0  
+LEFT JOIN TopTags TT ON TT.TagPostCount > 5  
+WHERE PU.Score > 0 AND TT.TagRank <= 10
+ORDER BY PU.Score DESC, TT.PostCount DESC
+LIMIT 50;

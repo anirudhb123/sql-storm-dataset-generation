@@ -1,0 +1,74 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_order_number, 
+        ws_item_sk, 
+        ws_sales_price, 
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_sales_price DESC) AS rnk,
+        SUM(ws_sales_price) OVER (PARTITION BY ws_order_number) AS total_sales
+    FROM web_sales
+    WHERE ws_sales_price > 0
+),
+top_sales AS (
+    SELECT 
+        ws_order_number,
+        SUM(ws_sales_price) AS total_order_value,
+        COUNT(*) AS item_count
+    FROM ranked_sales
+    WHERE rnk <= 3
+    GROUP BY ws_order_number
+),
+sales_with_customer AS (
+    SELECT 
+        t.ws_order_number,
+        t.total_order_value,
+        c.c_customer_id,
+        c.c_preferred_cust_flag,
+        c.c_birth_month,
+        c.c_birth_day,
+        COALESCE(c.c_birth_year, 2000) AS birth_year_adjusted
+    FROM top_sales t
+    JOIN web_sales w ON t.ws_order_number = w.ws_order_number
+    JOIN customer c ON w.ws_bill_customer_sk = c.c_customer_sk
+),
+final_report AS (
+    SELECT 
+        s.ws_order_number,
+        s.total_order_value,
+        s.item_count,
+        s.c_customer_id,
+        CASE 
+            WHEN s.c_birth_month = 12 AND s.c_birth_day BETWEEN 21 AND 31 THEN 'Capricorn'
+            WHEN s.c_birth_month = 1 AND s.c_birth_day BETWEEN 1 AND 19 THEN 'Capricorn'
+            ELSE 'Other'
+        END AS zodiac_sign,
+        s.birth_year_adjusted
+    FROM sales_with_customer s
+)
+SELECT 
+    f.ws_order_number,
+    f.total_order_value,
+    f.item_count,
+    f.c_customer_id,
+    f.zodiac_sign,
+    f.birth_year_adjusted,
+    COALESCE(bb.total_birthday_bonus, 0) AS birthday_bonus
+FROM final_report f
+LEFT JOIN (
+    SELECT 
+        c.c_customer_id,
+        COUNT(*) * 10 AS total_birthday_bonus
+    FROM customer c
+    LEFT JOIN date_dim d ON d.d_dom = c.c_birth_day AND d.d_moy = c.c_birth_month
+    WHERE d.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY c.c_customer_id
+) bb ON f.c_customer_id = bb.c_customer_id
+WHERE f.total_order_value > (
+    SELECT AVG(total_order_value) 
+    FROM final_report 
+    WHERE total_order_value IS NOT NULL
+) 
+AND f.zodiac_sign <> 'Other'
+ORDER BY f.total_order_value DESC
+LIMIT 100;

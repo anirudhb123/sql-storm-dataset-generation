@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY TRIM(LEADING '<' FROM TRIM(TRAILING '>' FROM unnest(string_to_array(p.Tags, '><')))) ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+), BestPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.Score,
+        rp.CommentCount,
+        rp.AnswerCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank = 1 -- return only the top post for each unique tag
+    ORDER BY 
+        rp.ViewCount DESC
+)
+SELECT 
+    bp.Title,
+    bp.Body,
+    bp.OwnerDisplayName,
+    bp.ViewCount,
+    bp.CommentCount,
+    bp.AnswerCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS RelatedTags
+FROM 
+    BestPosts bp
+LEFT JOIN 
+    Tags t ON t.TagName = ANY(string_to_array(bp.Tags, '><')) 
+GROUP BY 
+    bp.PostId, bp.Title, bp.Body, bp.OwnerDisplayName, bp.ViewCount, bp.CommentCount, bp.AnswerCount
+ORDER BY 
+    bp.ViewCount DESC;

@@ -1,0 +1,56 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year > 2000
+    UNION ALL
+    SELECT
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE
+        mh.level < 3 -- limiting the hierarchy level
+)
+SELECT
+    ah.person_id,
+    ak.name AS actor_name,
+    mh.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    ARRAY_AGG(DISTINCT k.keyword) FILTER (WHERE k.keyword IS NOT NULL) AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY ah.person_id ORDER BY mh.production_year DESC) AS row_num,
+    MAX(ci.nr_order) AS max_order
+FROM
+    aka_name ak
+JOIN
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN
+    keyword k ON mk.keyword_id = k.id
+WHERE
+    ak.name IS NOT NULL
+    AND mh.production_year BETWEEN 2001 AND 2021
+    AND ak.name ILIKE '%Smith%' -- searching for names with 'Smith'
+GROUP BY
+    ah.person_id, ak.name, mh.title, mh.production_year
+HAVING
+    COUNT(DISTINCT mc.company_id) > 2 -- filtering to find actors in movies produced by more than 2 companies
+ORDER BY
+    mh.production_year DESC, actor_name;

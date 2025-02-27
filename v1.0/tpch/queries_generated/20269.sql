@@ -1,0 +1,30 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, ss.ps_partkey, ss.ps_availqty,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ss.ps_availqty DESC) AS rnk
+    FROM supplier s
+    JOIN partsupp ss ON s.s_suppkey = ss.ps_suppkey
+    WHERE ss.ps_availqty > 0
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sale,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(l_extendedprice) FROM lineitem) 
+             OR COUNT(l.l_orderkey) IS NULL
+), FilteredSupply AS (
+    SELECT sc.s_suppkey, sc.s_name, sc.s_nationkey, sc.ps_partkey, sc.ps_availqty
+    FROM SupplyChain sc
+    WHERE sc.rnk = 1 OR (sc.ps_availqty IS NOT NULL AND LENGTH(sc.s_name) > 5)
+), FinalOutput AS (
+    SELECT r.o_orderkey, r.total_sale, f.s_name, f.ps_availqty,
+           CASE WHEN f.ps_availqty < 100 THEN 'Low Supply' ELSE 'Sufficient Supply' END AS supply_status
+    FROM RankedOrders r
+    LEFT JOIN FilteredSupply f ON r.o_custkey = f.s_nationkey
+    WHERE r.order_rank <= 10
+)
+SELECT DISTINCT f.o_orderkey, f.total_sale, f.s_name, f.ps_availqty, f.supply_status
+FROM FinalOutput f
+WHERE f.ps_availqty IS NOT NULL AND (f.s_supplystatus IS NULL OR f.s_supplystatus = 'Sufficient Supply')
+ORDER BY f.total_sale DESC, f.s_name ASC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

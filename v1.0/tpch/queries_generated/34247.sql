@@ -1,0 +1,67 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'GERMANY')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 10
+),
+aggregated_data AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS total_supply_cost,
+        COALESCE(AVG(l.l_quantity), 0) AS avg_quantity,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+    LEFT JOIN orders o ON o.o_orderkey = l.l_orderkey
+    WHERE p.p_size > 10
+    GROUP BY p.p_partkey, p.p_name
+),
+ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS status_rank,
+        l.l_quantity,
+        l.l_discount
+    FROM orders o
+    JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'
+),
+final_results AS (
+    SELECT 
+        ad.p_partkey,
+        ad.p_name,
+        ad.total_supply_cost,
+        ad.avg_quantity,
+        ro.o_orderkey,
+        ro.status_rank,
+        CASE 
+            WHEN ro.l_discount > 0.2 THEN 'High Discount'
+            WHEN ro.l_discount BETWEEN 0.1 AND 0.2 THEN 'Moderate Discount'
+            ELSE 'No Discount' 
+        END AS discount_category
+    FROM aggregated_data ad
+    LEFT JOIN ranked_orders ro ON ro.l_quantity > ad.avg_quantity
+)
+SELECT 
+    n.n_name,
+    COALESCE(SUM(fr.total_supply_cost), 0) AS region_supply_cost,
+    COUNT(DISTINCT fr.o_orderkey) AS total_orders
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN final_results fr ON fr.p_partkey IN (
+    SELECT p.p_partkey 
+    FROM part p
+    WHERE p.p_type LIKE '%BRASS%'
+)
+GROUP BY n.n_name
+ORDER BY region_supply_cost DESC;

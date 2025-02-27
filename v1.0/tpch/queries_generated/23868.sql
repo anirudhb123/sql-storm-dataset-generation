@@ -1,0 +1,94 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        0 AS hierarchy_level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_nationkey IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        sh.hierarchy_level + 1
+    FROM 
+        supplier s
+    JOIN 
+        SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE 
+        sh.hierarchy_level < 5
+),
+
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '2021-01-01' AND '2021-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+
+DiscountAnalysis AS (
+    SELECT 
+        od.o_orderkey,
+        od.o_orderstatus,
+        od.total_revenue,
+        od.distinct_parts,
+        CASE 
+            WHEN od.total_revenue IS NULL THEN 'No Revenue'
+            WHEN od.total_revenue > 1000 THEN 'High Value Order'
+            ELSE 'Regular Order'
+        END AS order_category
+    FROM 
+        OrderDetails od
+    WHERE 
+        od.distinct_parts > 5
+),
+
+FinalReport AS (
+    SELECT 
+        rh.r_name,
+        sh.s_name,
+        da.o_orderstatus,
+        COUNT(da.o_orderkey) AS order_count,
+        AVG(da.total_revenue) AS average_revenue,
+        STRING_AGG(DISTINCT da.order_category, ', ') AS categories
+    FROM 
+        DiscountAnalysis da
+    LEFT JOIN 
+        nation n ON da.o_orderkey % 5 = n.n_nationkey
+    LEFT JOIN 
+        region rh ON n.n_regionkey = rh.r_regionkey
+    JOIN 
+        SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+    GROUP BY 
+        rh.r_name, sh.s_name, da.o_orderstatus
+    HAVING 
+        AVG(da.total_revenue) > (SELECT AVG(total_revenue) FROM DiscountAnalysis)
+)
+
+SELECT 
+    fr.r_name,
+    fr.s_name,
+    fr.o_orderstatus,
+    fr.order_count,
+    fr.average_revenue,
+    COALESCE(fr.categories, 'No Categories') AS categories
+FROM 
+    FinalReport fr
+WHERE 
+    fr.order_count > 1
+ORDER BY 
+    fr.average_revenue DESC, fr.r_name;

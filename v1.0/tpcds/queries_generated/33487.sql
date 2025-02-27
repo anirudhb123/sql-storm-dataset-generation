@@ -1,0 +1,46 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ss_ticket_number) AS total_sales,
+        1 AS level
+    FROM store_sales
+    WHERE ss_sold_date_sk >= (
+        SELECT d_date_sk
+        FROM date_dim
+        WHERE d_date = '2023-01-01'
+    )
+    GROUP BY s_store_sk
+
+    UNION ALL
+
+    SELECT 
+        ss.s_store_sk,
+        SUM(ss.ss_net_profit) + ss.total_net_profit,
+        COUNT(DISTINCT ss.ss_ticket_number) + ss.total_sales,
+        level + 1
+    FROM store_sales ss
+    JOIN sales_summary prev ON ss.s_store_sk = prev.s_store_sk
+    WHERE level < 5
+)
+
+SELECT 
+    s.s_store_name,
+    c.ca_city,
+    c.ca_state,
+    COALESCE(ss.total_net_profit, 0) AS total_profit,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    MAX(ws.ws_sales_price) OVER (PARTITION BY s.s_store_sk) AS max_item_price,
+    COUNT(DISTINCT ws.ws_item_sk) AS unique_items_sold,
+    SUM(CASE WHEN c.c_preferred_cust_flag = 'Y' THEN ss.total_net_profit ELSE 0 END) AS preferred_customer_profit
+FROM sales_summary ss
+RIGHT JOIN store s ON ss.s_store_sk = s.s_store_sk
+LEFT JOIN customer c ON c.c_current_addr_sk = s.s_steward_sk
+JOIN web_sales ws ON ws.ws_ship_date_sk = ss.s_store_sk
+GROUP BY 
+    s.s_store_name, 
+    c.ca_city, 
+    c.ca_state
+ORDER BY total_profit DESC
+LIMIT 100;

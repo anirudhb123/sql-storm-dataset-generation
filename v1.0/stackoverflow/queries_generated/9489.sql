@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(p.Tags, '>')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(*) > 5
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadges
+    FROM 
+        Users u
+    JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        SUM(b.Class) > 5
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    pt.Tag AS PopularTag,
+    tu.DisplayName AS TopUser,
+    tu.TotalBadges
+FROM 
+    RankedPosts rp
+JOIN 
+    PopularTags pt ON pt.Tag = ANY(string_to_array(rp.Title, ' '))
+JOIN 
+    TopUsers tu ON tu.Id = rp.OwnerUserId
+WHERE 
+    rp.Rank <= 10
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

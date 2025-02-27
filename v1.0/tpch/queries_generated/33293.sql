@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplyHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT ps.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM partsupp ps
+    JOIN SupplyHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > sh.s_acctbal AND sh.level < 5
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent, RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_order
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, AVG(ps.ps_supplycost) AS avg_supply_cost,
+           MAX(ps.ps_availqty) AS max_avail_qty,
+           COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT c.c_name AS customer_name,
+       MAX(co.total_orders) AS max_orders,
+       SUM(pd.avg_supply_cost * COALESCE(pd.max_avail_qty, 0)) AS total_supply_cost,
+       COALESCE(SUM(pd.unique_suppliers), 0) AS supplier_count,
+       rh.r_name AS region_name
+FROM CustomerOrders co
+JOIN nation n ON co.c_nationkey = n.n_nationkey
+JOIN region rh ON n.n_regionkey = rh.r_regionkey
+LEFT JOIN PartDetails pd ON pd.p_partkey IN (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_supplycost < (SELECT AVG(pss.ps_supplycost) FROM partsupp pss)
+)
+WHERE co.rank_order <= 10
+GROUP BY c.c_nationkey, c.c_name, rh.r_name
+HAVING SUM(pd.unique_suppliers) > 2
+ORDER BY total_supply_cost DESC
+LIMIT 20;

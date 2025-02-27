@@ -1,0 +1,82 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        count(DISTINCT p.id) AS actor_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors_list
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        name p ON a.id = p.id
+    WHERE 
+        ci.person_role_id IS NOT NULL
+    GROUP BY 
+        ci.movie_id
+),
+MoviesWithMoreThanTwoActors AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ar.actor_count,
+        ar.actors_list
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorRoles ar ON rm.movie_id = ar.movie_id
+    WHERE 
+        ar.actor_count > 2 OR ar.actor_count IS NULL
+),
+MoviesSummary AS (
+    SELECT 
+        mw.title,
+        mw.production_year,
+        COALESCE(mw.actor_count, 0) AS total_actors,
+        COUNT(mk.keyword) AS keyword_count,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords_used
+    FROM 
+        MoviesWithMoreThanTwoActors mw
+    LEFT JOIN 
+        movie_keyword mk ON mw.movie_id = mk.movie_id
+    GROUP BY 
+        mw.title, mw.production_year, mw.actor_count
+),
+FinalResults AS (
+    SELECT 
+        movie_title,
+        production_year,
+        total_actors,
+        keyword_count,
+        CASE 
+            WHEN total_actors = 0 THEN 'No actors'
+            WHEN total_actors < 5 THEN 'Few actors'
+            ELSE 'Many actors'
+        END AS actor_category,
+        keyword_count * total_actors AS engagement_index
+    FROM 
+        MoviesSummary
+)
+SELECT 
+    fr.*,
+    CASE 
+        WHEN fr.engagement_index IS NULL THEN 'Engagement data missing'
+        WHEN fr.engagement_index < 10 THEN 'Low engagement'
+        WHEN fr.engagement_index < 50 THEN 'Moderate engagement'
+        ELSE 'High engagement'
+    END AS engagement_level
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.production_year DESC, fr.keyword_count DESC;

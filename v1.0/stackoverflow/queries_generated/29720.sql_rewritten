@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        u.DisplayName AS Author,
+        u.Reputation,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM
+        Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.PostTypeId IN (1, 2) 
+),
+PopularTags AS (
+    SELECT
+        TRIM(SUBSTRING(tag, 2, LENGTH(tag) - 2)) AS TagName,
+        COUNT(*) AS TagCount
+    FROM
+        Posts
+    CROSS JOIN LATERAL string_to_array(Tags, '>') AS tag
+    WHERE
+        Tags IS NOT NULL
+    GROUP BY
+        TagName
+    ORDER BY
+        TagCount DESC
+    LIMIT 10 
+)
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.Author,
+    rp.Reputation,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    pt.TagName
+FROM
+    RankedPosts rp
+JOIN
+    (
+        SELECT
+            p.Id,
+            UNNEST(string_to_array(p.Tags, '>')) AS TagName
+        FROM
+            Posts p
+        WHERE
+            p.Tags IS NOT NULL
+    ) AS TagDetails ON rp.PostId = TagDetails.Id
+JOIN PopularTags pt ON TRIM(SUBSTRING(TagDetails.TagName, 2, LENGTH(TagDetails.TagName) - 2)) = pt.TagName
+WHERE
+    rp.Rank <= 5 
+ORDER BY
+    rp.PostTypeId, rp.Score DESC;

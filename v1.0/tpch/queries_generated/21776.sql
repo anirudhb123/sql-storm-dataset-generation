@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+), 
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000
+), 
+FilterCustomers AS (
+    SELECT 
+        DISTINCT c.c_custkey, c.c_name
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL 
+        AND c.c_acctbal < (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_mktsegment = c.c_mktsegment)
+)
+
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    COALESCE(rn.rank, 0) AS supplier_rank,
+    hv.total_revenue,
+    CASE 
+        WHEN hv.total_revenue IS NULL THEN 'No Revenue'
+        ELSE CONCAT('Revenue: $', hv.total_revenue)
+    END AS revenue_statement
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rn ON ps.ps_suppkey = rn.s_suppkey
+LEFT JOIN 
+    HighValueOrders hv ON ps.ps_partkey = hv.o_orderkey
+FULL OUTER JOIN 
+    FilterCustomers fc ON fc.c_custkey = ps.ps_partkey
+WHERE 
+    (p.p_size > 50 OR p.p_container = 'BOX')
+    AND (rn.rank IS NOT NULL OR hv.total_revenue IS NOT NULL)
+ORDER BY 
+    p.p_partkey DESC NULLS LAST;

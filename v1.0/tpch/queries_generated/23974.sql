@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY s.s_acctbal DESC) AS acctbal_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+        AND s.s_acctbal IS NOT NULL
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS recent_order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, CURRENT_DATE)
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts 
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate <= CURRENT_DATE
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    COALESCE(rs.s_name, 'No Supplier') AS supplier_name,
+    c.c_acctbal,
+    ro.o_orderkey,
+    ro.o_totalprice,
+    fl.total_revenue,
+    CASE 
+        WHEN fl.unique_parts > 0 THEN fl.unique_parts
+        ELSE NULL 
+    END AS unique_parts_count,
+    p.p_name
+FROM 
+    customer c
+LEFT JOIN 
+    RecentOrders ro ON c.c_custkey = ro.o_custkey
+LEFT JOIN 
+    FilteredLineItems fl ON ro.o_orderkey = fl.l_orderkey
+LEFT JOIN 
+    RankedSuppliers rs ON rs.acctbal_rank = 1 AND fl.total_revenue IS NOT NULL
+JOIN 
+    part p ON fl.unique_parts > 0 AND p.p_size IS NOT NULL
+WHERE 
+    c.c_acctbal BETWEEN (SELECT MIN(s_acctbal) FROM supplier) AND 
+    (SELECT MAX(s_acctbal) FROM supplier WHERE s_comment IS NOT NULL)
+ORDER BY 
+    c.c_name, ro.o_orderdate DESC NULLS LAST;

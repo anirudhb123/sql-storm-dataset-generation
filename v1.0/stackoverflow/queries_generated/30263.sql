@@ -1,0 +1,86 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.OwnerUserId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with Questions
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.Score,
+        p2.OwnerUserId,
+        p2.CreationDate,
+        rp.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        Posts rp ON rp.Id = p2.ParentId
+    WHERE 
+        rp.PostTypeId = 1  -- Join with Questions
+),
+UserRatings AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId IN (8, 9) THEN v.BountyAmount ELSE 0 END), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenedCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.OwnerUserId
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    up.UpVotes,
+    up.DownVotes,
+    pm.PostId,
+    pm.CommentCount,
+    pm.TotalUpVotes,
+    pm.TotalDownVotes,
+    pm.ClosedCount,
+    pm.ReopenedCount,
+    rp.Level
+FROM 
+    UserRatings up
+JOIN 
+    PostMetrics pm ON up.UserId = pm.OwnerUserId
+LEFT JOIN 
+    RecursivePosts rp ON rm.PostId = rp.Id
+WHERE 
+    up.Reputation > 1000  -- Only users with good reputation
+ORDER BY 
+    pm.CommentCount DESC, 
+    pm.TotalUpVotes DESC 
+LIMIT 100;

@@ -1,0 +1,64 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 as level
+    FROM supplier
+    WHERE s_suppkey IN (SELECT DISTINCT ps_suppkey FROM partsupp)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+PartSupply AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           SUM(ps.ps_availqty) AS total_availability,
+           AVG(ps.ps_supplycost) AS avg_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spend
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, 
+           DENSE_RANK() OVER (ORDER BY o.o_orderdate DESC) AS rank_order
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(month, -6, cast('1998-10-01' as date))
+),
+PerformanceBenchmark AS (
+    SELECT sh.s_suppkey, sh.s_name, 
+           COUNT(DISTINCT ps.ps_partkey) AS total_parts_supplied,
+           SUM(COALESCE(ps.ps_supplycost * ps.ps_availqty, 0)) AS total_supply_value,
+           MAX(CASE WHEN co.total_orders IS NULL THEN 'No Orders' ELSE 'Has Orders' END) as order_status
+    FROM SupplierHierarchy sh
+    LEFT JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    LEFT JOIN CustomerOrders co ON sh.s_nationkey = co.c_custkey
+    GROUP BY sh.s_suppkey, sh.s_name
+)
+SELECT 
+    pb.p_partkey,
+    pb.p_name,
+    pb.p_retailprice,
+    pb.total_availability,
+    pb.avg_cost,
+    pb.total_availability / NULLIF(pb.avg_cost, 0) AS availability_to_cost_ratio,
+    CASE 
+        WHEN EXTRACT(DAY FROM cast('1998-10-01' as date)) % 2 = 0 THEN 'Even Day' 
+        ELSE 'Odd Day' 
+    END AS day_type,
+    (SELECT MAX(supply_value) 
+     FROM (
+         SELECT SUM(ps.ps_supplycost * ps.ps_availqty) AS supply_value
+         FROM partsupp ps 
+         GROUP BY ps.ps_suppkey
+     ) AS supply_data) AS max_supply_value,
+    (SELECT COUNT(*) FROM RecentOrders) AS recent_orders_count
+FROM PartSupply pb
+LEFT JOIN PerformanceBenchmark pbm ON pb.p_partkey = pbm.total_parts_supplied
+WHERE pb.total_availability > 0
+ORDER BY pb.p_retailprice DESC, availability_to_cost_ratio DESC
+FETCH FIRST 100 ROWS ONLY;

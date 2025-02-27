@@ -1,0 +1,87 @@
+
+WITH rank_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1 AND 100
+    GROUP BY 
+        ws.ws_item_sk
+),
+aggregate_demo AS (
+    SELECT 
+        cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd_gender
+),
+top_items AS (
+    SELECT 
+        inv.inv_item_sk,
+        iw.i_item_desc,
+        RANK() OVER (ORDER BY inv_quantity_on_hand DESC) AS item_rank
+    FROM 
+        inventory inv
+    JOIN 
+        item iw ON inv.inv_item_sk = iw.i_item_sk
+),
+sales_summary AS (
+    SELECT 
+        ss.ss_item_sk,
+        SUM(ss.ss_net_profit) AS total_profit,
+        SUM(ss.ss_quantity) AS total_quantity
+    FROM 
+        store_sales ss
+    GROUP BY 
+        ss.ss_item_sk
+)
+
+SELECT 
+    ca.ca_address_id,
+    ca.ca_city,
+    ca.ca_state,
+    total_sales.total_qty,
+    total_sales.total_profit,
+    demo.demo_gender,
+    demo.customer_count,
+    demo.avg_estimate
+FROM 
+    customer_address ca
+LEFT JOIN 
+    (SELECT 
+        ti.inv_item_sk,
+        SUM(ss.ss_quantity) AS total_qty,
+        SUM(ss.ss_net_profit) AS total_profit
+     FROM 
+        sales_summary ss
+     JOIN 
+        top_items ti ON ss.ss_item_sk = ti.inv_item_sk
+     WHERE 
+        ti.item_rank <= 10
+     GROUP BY 
+        ti.inv_item_sk) AS total_sales ON total_sales.inv_item_sk = ca.ca_address_sk
+JOIN 
+    (SELECT 
+        ad.cd_gender AS demo_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(ad.cd_purchase_estimate) AS avg_estimate
+     FROM 
+        aggregate_demo ad
+     JOIN 
+        customer c ON ad.cd_demo_sk = c.c_current_cdemo_sk
+     GROUP BY 
+        ad.cd_gender) AS demo ON demo.demo_gender = 'F'
+WHERE 
+    ca.ca_state IS NOT NULL AND
+    ca.ca_city NOT IN ('New York', 'Los Angeles')
+ORDER BY 
+    total_sales.total_qty DESC
+LIMIT 50;

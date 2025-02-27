@@ -1,0 +1,51 @@
+
+WITH RankedParts AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           p.p_brand,
+           p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    WHERE p.p_size > 10
+),
+SupplierStats AS (
+    SELECT s.s_suppkey,
+           SUM(ps.ps_availqty) AS total_avail_qty,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT o.o_orderkey,
+           o.o_custkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+FinalReport AS (
+    SELECT rp.p_partkey,
+           rp.p_name,
+           COALESCE(ss.total_avail_qty, 0) AS total_avail_qty,
+           COALESCE(ss.total_supply_cost, 0) AS total_supply_cost,
+           COALESCE(c.net_order_value, 0) AS net_order_value,
+           CASE 
+               WHEN COALESCE(c.net_order_value, 0) > 1000 THEN 'High Value'
+               ELSE 'Low Value'
+           END AS order_value_category
+    FROM RankedParts rp
+    LEFT JOIN SupplierStats ss ON rp.p_partkey = ss.s_suppkey
+    LEFT JOIN CustomerOrders c ON rp.p_partkey = c.o_custkey
+    WHERE rp.rn <= 5
+)
+SELECT fr.p_partkey,
+       fr.p_name,
+       fr.total_avail_qty,
+       fr.total_supply_cost,
+       CAST(fr.net_order_value AS VARCHAR) AS formatted_net_order_value,
+       fr.order_value_category
+FROM FinalReport fr
+ORDER BY fr.total_avail_qty DESC, fr.p_retailprice ASC
+LIMIT 10;

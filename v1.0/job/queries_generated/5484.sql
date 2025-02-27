@@ -1,0 +1,62 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT kc.keyword) AS keyword_count,
+        AVG(pi.info_type_id) AS average_info_type
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    LEFT JOIN 
+        movie_info m_info ON t.id = m_info.movie_id
+    LEFT JOIN 
+        person_info pi ON m_info.info_type_id = pi.info_type_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+PopularActors AS (
+    SELECT
+        ak.name AS actor_name,
+        COUNT(ci.movie_id) AS acting_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.name
+    HAVING 
+        COUNT(ci.movie_id) > 5
+),
+MovieCompaniesCount AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.keyword_count,
+    rm.average_info_type,
+    pa.actor_name,
+    mv.company_count
+FROM 
+    RankedMovies rm
+JOIN 
+    PopularActors pa ON rm.movie_id = pa.actor_name
+JOIN 
+    MovieCompaniesCount mv ON rm.movie_id = mv.movie_id
+ORDER BY 
+    rm.production_year DESC, rm.keyword_count DESC;

@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.id) DESC) AS year_rank
+    FROM title t
+    LEFT JOIN cast_info ci ON t.id = ci.movie_id
+    GROUP BY t.id
+),
+HighRatedMovies AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END), 0) AS user_rating
+    FROM RankedMovies rm
+    JOIN movie_info mi ON rm.movie_id = mi.movie_id
+    JOIN movie_info_idx mii ON mi.movie_id = mii.movie_id
+    JOIN title m ON m.id = rm.movie_id
+    WHERE rm.year_rank <= 10
+    GROUP BY m.movie_id, m.title, m.production_year
+),
+TopDirectors AS (
+    SELECT 
+        cn.id AS company_id,
+        cn.name AS company_name,
+        COUNT(mc.id) AS movies_count
+    FROM company_name cn
+    JOIN movie_companies mc ON cn.id = mc.company_id
+    GROUP BY cn.id, cn.name
+    ORDER BY movies_count DESC
+    LIMIT 5
+),
+MovieDirectorInfo AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        cd.name AS director_name,
+        COALESCE(hm.user_rating, 0) AS user_rating
+    FROM title t
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN company_name cd ON mc.company_id = cd.id
+    LEFT JOIN HighRatedMovies hm ON t.id = hm.movie_id
+)
+
+SELECT 
+    mdi.title,
+    mdi.production_year,
+    mdi.director_name,
+    mdi.user_rating,
+    CASE 
+        WHEN mdi.user_rating IS NULL THEN 'Unrated'
+        ELSE 'Rated'
+    END AS rating_status
+FROM MovieDirectorInfo mdi
+JOIN TopDirectors td ON mdi.director_name = td.company_name
+WHERE mdi.user_rating > 0
+ORDER BY mdi.user_rating DESC, mdi.production_year ASC
+LIMIT 20;

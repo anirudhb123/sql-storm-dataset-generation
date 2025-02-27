@@ -1,0 +1,77 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        mt.episode_of_id,
+        CAST(mt.title AS VARCHAR(255)) AS path
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1,
+        mt.episode_of_id,
+        CAST(mh.path || ' > ' || mt.title AS VARCHAR(255))
+    FROM aka_title mt
+    JOIN movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+    WHERE mt.episode_of_id IS NOT NULL
+),
+
+ranked_movies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(*) OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS movie_count,
+        ROW_NUMBER() OVER (ORDER BY mt.title) AS rank_by_title,
+        RANK() OVER (ORDER BY mh.level DESC) AS rank_by_hierarchy
+    FROM aka_title mt
+    LEFT JOIN movie_hierarchy mh ON mt.id = mh.movie_id
+),
+
+cast_movies AS (
+    SELECT 
+        ca.movie_id,
+        COUNT(DISTINCT ca.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM cast_info ca
+    INNER JOIN aka_name ak ON ca.person_id = ak.person_id
+    GROUP BY ca.movie_id
+),
+
+final_summary AS (
+    SELECT 
+        r.title,
+        r.production_year,
+        r.movie_count,
+        COALESCE(c.cast_count, 0) AS cast_count,
+        COALESCE(c.actors, 'No Cast') AS actors,
+        CASE 
+            WHEN r.rank_by_hierarchy = 1 THEN 'Top Movie!'
+            ELSE 'Under Development'
+        END AS movie_status
+    FROM ranked_movies r
+    LEFT JOIN cast_movies c ON r.title = c.title
+)
+
+SELECT 
+    fs.title,
+    fs.production_year,
+    fs.movie_count,
+    fs.cast_count,
+    fs.actors,
+    fs.movie_status,
+    CASE 
+        WHEN fs.cast_count > 0 THEN CONCAT('Starring: ', fs.actors, ' (', fs.cast_count, ' actors)')
+        WHEN fs.cast_count IS NULL THEN 'No actors available'
+        ELSE 'Unknown status'
+    END AS detailed_cast_info
+FROM final_summary fs
+WHERE fs.movie_count > 1
+ORDER BY fs.production_year DESC, fs.rank_by_title
+LIMIT 100;

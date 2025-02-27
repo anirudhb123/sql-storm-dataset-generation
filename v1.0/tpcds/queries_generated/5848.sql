@@ -1,0 +1,45 @@
+
+WITH DateRange AS (
+    SELECT d_date_sk
+    FROM date_dim
+    WHERE d_date BETWEEN '2023-01-01' AND '2023-12-31'
+),
+FilteredCustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid_inc_tax) AS Total_Sales,
+        COUNT(ws.ws_order_number) AS Total_Orders
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN DateRange dr ON ws.ws_sold_date_sk = dr.d_date_sk
+    GROUP BY c.c_customer_sk
+    HAVING SUM(ws.ws_net_paid_inc_tax) > 1000
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(fc.c_customer_sk) AS Customer_Count
+    FROM customer_demographics cd
+    JOIN FilteredCustomerSales fc ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+AverageSales AS (
+    SELECT 
+        AVG(Total_Sales) AS Avg_Sales,
+        CD.cd_gender,
+        CD.cd_marital_status,
+        CD.cd_education_status
+    FROM FilteredCustomerSales fcs
+    JOIN CustomerDemographics CD ON fcs.c_customer_sk = CD.c_customer_sk
+    GROUP BY CD.cd_gender, CD.cd_marital_status, CD.cd_education_status
+)
+SELECT 
+    gender,
+    marital_status,
+    education_status,
+    Avg_Sales
+FROM AverageSales
+ORDER BY Avg_Sales DESC;

@@ -1,0 +1,74 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_sales_price,
+        ws_ship_date_sk,
+        DATEADD(DAY, 7, d_date) AS return_window_start,
+        DATEADD(DAY, 14, d_date) AS return_window_end,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_ship_date_sk) AS rn
+    FROM 
+        web_sales 
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    WHERE 
+        d_year = 2023
+), ItemReturns AS (
+    SELECT 
+        wr_return_number,
+        wr_item_sk,
+        wr_return_amt,
+        wr_return_date,
+        wr_return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY wr_return_number ORDER BY wr_return_date) AS return_rn
+    FROM 
+        web_returns 
+    JOIN 
+        web_sales ON wr_order_number = ws_order_number
+), CustomerStats AS (
+    SELECT 
+        c_current_cdemo_sk,
+        AVG(c_birth_year) AS average_birth_year,
+        COUNT(DISTINCT c_customer_sk) AS total_customers
+    FROM 
+        customer
+    GROUP BY 
+        c_current_cdemo_sk
+), ReturnStats AS (
+    SELECT 
+        r_reason_sk,
+        COUNT(*) AS total_returns,
+        SUM(wr_return_amt) AS total_return_value
+    FROM 
+        ItemReturns 
+    LEFT JOIN 
+        reason ON wr_reason_sk = r_reason_sk
+    GROUP BY 
+        r_reason_sk
+)
+SELECT 
+    cs.average_birth_year,
+    cs.total_customers,
+    rs.r_reason_sk,
+    rs.total_returns,
+    rs.total_return_value,
+    COUNT(DISTINCT sc.ws_item_sk) AS unique_items_returned
+FROM 
+    CustomerStats cs
+JOIN 
+    ReturnStats rs ON cs.c_current_cdemo_sk = rs.r_reason_sk
+LEFT JOIN 
+    SalesCTE sc ON cs.c_current_cdemo_sk = sc.ws_item_sk
+WHERE 
+    sc.rn = 1 
+    AND sc.return_window_start < CURRENT_DATE AND CURRENT_DATE < sc.return_window_end
+GROUP BY 
+    cs.average_birth_year, 
+    cs.total_customers, 
+    rs.r_reason_sk, 
+    rs.total_returns, 
+    rs.total_return_value
+ORDER BY 
+    cs.average_birth_year DESC, 
+    rs.total_return_value DESC;

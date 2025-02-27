@@ -1,0 +1,50 @@
+-- Performance benchmarking query for the StackOverflow schema
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    ur.DisplayName AS OwnerDisplayName,
+    ur.Reputation AS OwnerReputation,
+    rp.CommentCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    ur.BadgeCount
+FROM 
+    RecentPosts rp
+JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+ORDER BY 
+    rp.CreationDate DESC;

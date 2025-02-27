@@ -1,0 +1,69 @@
+
+WITH MovieDetails AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT ka.name, ', ' ORDER BY ka.name) AS aka_names,
+        STRING_AGG(DISTINCT kw.keyword, ', ' ORDER BY kw.keyword) AS keywords,
+        STRING_AGG(DISTINCT c.name, ', ' ORDER BY c.name) AS company_names
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN
+        aka_name ka ON cc.subject_id = ka.person_id
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+CastDetails AS (
+    SELECT
+        ci.movie_id,
+        ka.name AS actor_name,
+        COALESCE(RT.role, 'Unknown Role') AS role,
+        COUNT(DISTINCT ci.id) AS role_count
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ka ON ci.person_id = ka.person_id
+    LEFT JOIN
+        role_type RT ON ci.role_id = RT.id
+    GROUP BY
+        ci.movie_id, ka.name, RT.role
+),
+FinalBenchmark AS (
+    SELECT
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.aka_names,
+        md.keywords,
+        cd.actor_name,
+        cd.role,
+        cd.role_count
+    FROM
+        MovieDetails md
+    LEFT JOIN
+        CastDetails cd ON md.movie_id = cd.movie_id
+)
+SELECT
+    fb.movie_id,
+    fb.title,
+    fb.production_year,
+    fb.aka_names,
+    fb.keywords,
+    fb.actor_name,
+    fb.role,
+    fb.role_count
+FROM
+    FinalBenchmark fb
+ORDER BY
+    fb.production_year DESC, fb.title;

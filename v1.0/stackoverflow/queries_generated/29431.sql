@@ -1,0 +1,58 @@
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        STRING_AGG(DISTINCT Posts.Title, ', ') AS PostTitles,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Users.Reputation) AS AvgUserReputation
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    GROUP BY 
+        Tags.TagName
+),
+
+HighlyActiveUsers AS (
+    SELECT 
+        Users.DisplayName,
+        SUM(Posts.ViewCount) AS TotalViews,
+        COUNT(Posts.Id) AS PostsCount,
+        SUM(Posts.Score) AS TotalScore
+    FROM 
+        Users
+    JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    WHERE 
+        Users.Reputation > 1000 -- Users with reputation above 1000
+    GROUP BY 
+        Users.DisplayName
+    HAVING 
+        SUM(Posts.ViewCount) > 1000 -- Only including users with more than 1000 total views
+)
+
+SELECT 
+    T.TagName,
+    T.PostCount,
+    T.PostTitles,
+    T.TotalViews AS TagTotalViews,
+    T.AvgUserReputation,
+    A.DisplayName AS ActiveUser,
+    A.TotalViews AS UserTotalViews,
+    A.PostsCount,
+    A.TotalScore
+FROM 
+    TagStatistics T
+LEFT JOIN 
+    HighlyActiveUsers A ON A.TotalViews = (
+        SELECT MAX(TotalViews)
+        FROM HighlyActiveUsers
+        WHERE TotalViews < T.TotalViews
+    )
+WHERE 
+    T.PostCount > 0
+ORDER BY 
+    T.TotalViews DESC, A.TotalViews DESC
+LIMIT 10;

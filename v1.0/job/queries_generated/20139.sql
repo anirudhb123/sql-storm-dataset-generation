@@ -1,0 +1,76 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.id) DESC) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMoviesWithActors AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        ak.name AS actor_name,
+        ak.imdb_index AS actor_imdb_index
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        aka_name ak ON ak.person_id IN (SELECT DISTINCT ci.person_id FROM cast_info ci WHERE ci.movie_id = rm.title_id)
+    WHERE 
+        rm.rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.title_id,
+        tm.title,
+        tm.production_year,
+        ARRAY_AGG(DISTINCT tm.actor_name ORDER BY tm.actor_name) AS actor_names,
+        CASE 
+            WHEN EXISTS (SELECT 1 FROM movie_info mi WHERE mi.movie_id = tm.title_id AND mi.info_type_id = 1) THEN TRUE
+            ELSE FALSE
+        END AS has_additional_info
+    FROM 
+        TopMoviesWithActors tm
+    GROUP BY 
+        tm.title_id, tm.title, tm.production_year
+)
+SELECT 
+    md.title_id,
+    md.title,
+    md.production_year,
+    MD.actor_names,
+    md.has_additional_info,
+    COALESCE(mk.keyword, 'No Keywords') AS movie_keyword,
+    mci.name AS company_name,
+    CASE 
+        WHEN md.has_additional_info THEN 'Yes' 
+        ELSE 'No' 
+    END AS additional_info_present
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = md.title_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = md.title_id
+LEFT JOIN 
+    company_name mci ON mci.id = mc.company_id
+WHERE 
+    md.production_year > 2000
+    AND (md.has_additional_info IS TRUE OR md.actor_names IS NOT NULL)
+ORDER BY 
+    md.production_year DESC, md.title;
+
+This SQL query includes:
+- Common Table Expressions (CTEs) to rank movies by the number of cast members and aggregate actor names.
+- Outer joins to merge actors and associated companies, and use of array aggregation functions for actor names.
+- A correlated subquery to check the existence of additional info for each movie.
+- Case statements for logical decisions based on the presence of additional information.
+- Filtering based on conditions, ensuring movie years are after 2000 and incorporating NULL logic in the WHERE clause.

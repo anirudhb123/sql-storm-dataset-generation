@@ -1,0 +1,88 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        COUNT(p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+RecentActivity AS (
+    SELECT 
+        UserId,
+        MAX(CreationDate) AS LastActive
+    FROM 
+        Comments
+    GROUP BY 
+        UserId
+),
+FilteredUsers AS (
+    SELECT 
+        us.*, 
+        ra.LastActive,
+        ROW_NUMBER() OVER(ORDER BY us.Reputation DESC, us.TotalPosts DESC) AS Rank
+    FROM 
+        UserStats us
+    LEFT JOIN 
+        RecentActivity ra ON us.UserId = ra.UserId
+    WHERE 
+        us.Reputation > 50 AND 
+        (ra.LastActive IS NULL OR ra.LastActive > NOW() - INTERVAL '1 year')
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        LastActive,
+        Rank
+    FROM 
+        FilteredUsers
+    WHERE 
+        Rank <= 10
+)
+SELECT 
+    tu.DisplayName AS TopUser, 
+    tu.Reputation, 
+    tu.LastActive,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         Posts p 
+     WHERE 
+         p.OwnerUserId = tu.UserId AND 
+         p.AcceptedAnswerId IS NOT NULL) AS AcceptedAnswers,
+    (SELECT 
+         STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM 
+         Posts p2 
+     JOIN 
+         UNNEST(STRING_TO_ARRAY(p2.Tags, '><')) AS tag ON p2.Id = tag.PostId 
+     JOIN 
+         Tags t ON t.TagName = tag 
+     WHERE 
+         p2.OwnerUserId = tu.UserId) AS UniqueTags,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         PostHistory ph 
+     WHERE 
+         ph.UserId = tu.UserId AND 
+         ph.CreationDate > NOW() - INTERVAL '1 year' AND 
+         ph.PostHistoryTypeId IN (10, 11, 12, 13)) AS RecentEdits
+FROM 
+    TopUsers tu
+WHERE 
+    EXISTS (SELECT 1 FROM Badges b WHERE b.UserId = tu.UserId AND b.Class = 1) OR 
+    EXISTS (SELECT 1 FROM Badges b WHERE b.UserId = tu.UserId AND b.Class = 2)
+ORDER BY 
+    tu.Reputation DESC, tu.LastActive DESC;

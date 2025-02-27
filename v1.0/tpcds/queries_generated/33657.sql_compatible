@@ -1,0 +1,84 @@
+
+WITH RECURSIVE sales_growth AS (
+    SELECT 
+        ws_sold_date_sk, 
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_sold_date_sk ORDER BY ws_sold_date_sk) AS rn
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk > 0
+    GROUP BY 
+        ws_sold_date_sk
+    UNION ALL
+    SELECT 
+        ws.ws_sold_date_sk,
+        s.total_sales + COALESCE(ws.ws_sales_price, 0) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_sold_date_sk ORDER BY ws.ws_sold_date_sk) AS rn
+    FROM 
+        sales_growth s
+    JOIN 
+        web_sales ws ON s.ws_sold_date_sk = ws.ws_sold_date_sk - 1
+    WHERE 
+        s.rn < 10
+),
+highest_sales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS order_count,
+        DENSE_RANK() OVER (ORDER BY SUM(ws_net_profit) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        COUNT(ws_order_number) > 5
+),
+income_analysis AS (
+    SELECT 
+        hd_income_band_sk,
+        SUM(CASE WHEN hd_buy_potential = 'High' THEN 1 ELSE 0 END) AS high_buy_count,
+        COUNT(*) AS total_households
+    FROM 
+        household_demographics
+    GROUP BY 
+        hd_income_band_sk
+),
+combined_data AS (
+    SELECT 
+        a.ca_city,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        COALESCE(SUM(ws.ws_net_paid), 0) AS total_sales,
+        COUNT(DISTINCT s.ss_ticket_number) AS store_sales_count,
+        COALESCE(AVG(i.total_profit), 0) AS avg_item_profit
+    FROM 
+        customer_address a
+    LEFT JOIN 
+        customer c ON a.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        store_sales s ON c.c_customer_sk = s.ss_customer_sk
+    LEFT JOIN 
+        highest_sales i ON ws.ws_item_sk = i.ws_item_sk
+    GROUP BY 
+        a.ca_city
+    HAVING 
+        COUNT(DISTINCT c.c_customer_sk) > 0 AND 
+        COALESCE(SUM(ws.ws_net_paid), 0) > (SELECT AVG(total_sales) FROM sales_growth WHERE total_sales IS NOT NULL)
+)
+SELECT 
+    ci.ca_city, 
+    ci.customer_count, 
+    ci.total_sales, 
+    ci.store_sales_count, 
+    ia.high_buy_count,
+    ia.total_households
+FROM 
+    combined_data ci
+JOIN 
+    income_analysis ia ON ci.customer_count > 0
+ORDER BY 
+    ci.total_sales DESC
+LIMIT 100;

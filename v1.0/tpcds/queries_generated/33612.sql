@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_net_profit,
+        ws_sold_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2451971 AND 2451978  -- filtering for a specific date range
+),
+aggregate_sales AS (
+    SELECT 
+        sd.ws_item_sk,
+        SUM(sd.ws_quantity) AS total_quantity,
+        SUM(sd.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT sd.ws_order_number) AS order_count
+    FROM sales_data sd
+    GROUP BY sd.ws_item_sk
+),
+item_details AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.iCategory,
+        i.i_brand,
+        a.total_quantity,
+        a.total_profit,
+        a.order_count
+    FROM item i
+    LEFT JOIN aggregate_sales a ON i.i_item_sk = a.ws_item_sk
+),
+customer_returns AS (
+    SELECT 
+        cr_refunded_customer_sk,
+        SUM(cr_return_quantity) AS total_return_quantity,
+        SUM(cr_return_amt_inc_tax) AS total_return_amount
+    FROM catalog_returns
+    WHERE cr_returned_date_sk BETWEEN 2451971 AND 2451978
+    GROUP BY cr_refunded_customer_sk
+),
+final_results AS (
+    SELECT 
+        id.i_item_desc,
+        id.total_quantity,
+        id.total_profit,
+        COALESCE(cr.total_return_quantity, 0) AS total_return_quantity,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+        (id.total_profit - COALESCE(cr.total_return_amount, 0)) AS net_profit_adjusted
+    FROM item_details id
+    LEFT JOIN customer_returns cr ON id.ws_item_sk = cr.cr_refunded_customer_sk
+)
+SELECT 
+    *,
+    CASE 
+        WHEN net_profit_adjusted > 0 THEN 'Profitable'
+        WHEN net_profit_adjusted < 0 THEN 'Loss'
+        ELSE 'Break-even'
+    END AS profit_status
+FROM final_results
+ORDER BY net_profit_adjusted DESC
+LIMIT 20;  -- limiting to top 20 results for performance benchmarking

@@ -1,0 +1,76 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE rp ON rp.PostId = p.ParentId
+),
+VotesSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN VoteTypeId = 4 THEN 1 END) AS OffensiveVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostHistorySummary AS (
+    SELECT 
+        PostId,
+        MAX(CASE WHEN PostHistoryTypeId = 10 THEN CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN PostHistoryTypeId = 11 THEN CreationDate END) AS LastReopenedDate,
+        COUNT(CASE WHEN PostHistoryTypeId IN (10, 11) THEN 1 END) AS ClosureHistoryCount
+    FROM 
+        PostHistory
+    GROUP BY 
+        PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.OffensiveVotes,
+    phs.LastClosedDate,
+    phs.LastReopenedDate,
+    phs.ClosureHistoryCount,
+    (EXTRACT(EPOCH FROM TIMESTAMP '2024-10-01 12:34:56' - rp.CreationDate) / 3600) AS HoursSinceCreation,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount
+FROM 
+    RecursivePostCTE rp
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    VotesSummary ps ON rp.PostId = ps.PostId
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+WHERE 
+    rp.PostTypeId = 1 
+ORDER BY 
+    HoursSinceCreation DESC, 
+    rp.Title;

@@ -1,0 +1,33 @@
+
+WITH RECURSIVE CustomerOrderHistory AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(coh.total_sales) AS total_spent
+    FROM customer c
+    JOIN CustomerOrderHistory coh ON c.c_custkey = coh.o_custkey
+    WHERE coh.order_rank <= 5
+    GROUP BY c.c_custkey, c.c_name
+),
+NationSupplier AS (
+    SELECT s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_nationkey
+),
+HighSpendingCustomers AS (
+    SELECT tc.c_custkey, tc.c_name, tc.total_spent
+    FROM TopCustomers tc
+    WHERE tc.total_spent > (SELECT AVG(total_spent) FROM TopCustomers)
+)
+SELECT ns.r_name, COUNT(hsc.c_custkey) AS high_spending_customers, AVG(ns.total_supply_cost) AS avg_supply_cost
+FROM NationSupplier ns
+FULL OUTER JOIN nation n ON ns.s_nationkey = n.n_nationkey
+FULL OUTER JOIN HighSpendingCustomers hsc ON n.n_nationkey = hsc.c_custkey
+GROUP BY ns.r_name
+HAVING COUNT(hsc.c_custkey) > 0 OR AVG(ns.total_supply_cost) IS NOT NULL
+ORDER BY ns.r_name;

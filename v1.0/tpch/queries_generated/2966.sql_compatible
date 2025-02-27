@@ -1,0 +1,64 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '6 months'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        r.r_regionkey,
+        r.r_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+OrderLineItem AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(DISTINCT l.l_linenumber) AS line_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1997-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    cr.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COALESCE(SUM(ol.revenue), 0) AS total_revenue,
+    COALESCE(SUM(sp.total_cost), 0) AS total_supplier_cost
+FROM 
+    CustomerRegion cr
+LEFT JOIN 
+    RankedOrders o ON cr.c_custkey = o.o_orderkey
+LEFT JOIN 
+    OrderLineItem ol ON o.o_orderkey = ol.l_orderkey
+LEFT JOIN 
+    SupplierParts sp ON sp.ps_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_availqty > 0)
+GROUP BY 
+    cr.r_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 10 OR COALESCE(SUM(ol.revenue), 0) > 1000
+ORDER BY 
+    total_revenue DESC, total_orders DESC;

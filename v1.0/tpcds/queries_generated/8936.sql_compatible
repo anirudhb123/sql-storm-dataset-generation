@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_id,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_paid_inc_tax) AS total_revenue,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_quantity) DESC) AS rank_sales
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    JOIN
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE
+        dd.d_year = 2023
+    GROUP BY
+        ws.web_site_id, ws.ws_sold_date_sk, ws.ws_item_sk
+),
+BestSellingItems AS (
+    SELECT
+        rs.web_site_id,
+        ri.i_item_id,
+        ri.i_item_desc,
+        rs.total_quantity_sold,
+        rs.total_revenue
+    FROM
+        RankedSales rs
+    JOIN
+        item ri ON rs.ws_item_sk = ri.i_item_sk
+    WHERE
+        rs.rank_sales <= 5
+)
+SELECT
+    bsi.web_site_id,
+    bsi.i_item_id,
+    bsi.i_item_desc,
+    bsi.total_quantity_sold,
+    bsi.total_revenue
+FROM
+    BestSellingItems bsi
+JOIN
+    customer_demographics cd ON bsi.web_site_id = cd.cd_demo_sk
+WHERE
+    cd.cd_gender = 'F' AND
+    cd.cd_marital_status = 'M'
+ORDER BY
+    bsi.web_site_id, bsi.total_revenue DESC;

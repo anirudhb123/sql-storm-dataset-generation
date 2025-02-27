@@ -1,0 +1,65 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.level < 5
+),
+CumulativeSales AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_sales
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey, 
+        SUM(ps.ps_availqty) AS total_available, 
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name, p.p_brand
+)
+SELECT 
+    oh.o_orderkey,
+    oh.o_orderdate,
+    c.c_name,
+    cs.total_sales,
+    psi.p_partkey,
+    psi.total_available,
+    psi.avg_supply_cost,
+    rs.rank,
+    CASE 
+        WHEN rs.rank = 1 THEN 'Top Supplier'
+        ELSE 'Other Supplier'
+    END AS supplier_status,
+    COALESCE(oh.o_orderdate, DATE '0001-01-01') AS order_date_fallback
+FROM OrderHierarchy oh
+JOIN CumulativeSales cs ON cs.total_sales > 10000
+LEFT JOIN PartSupplierInfo psi ON psi.total_available > 50
+LEFT JOIN RankedSuppliers rs ON rs.s_suppkey = (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_partkey = psi.p_partkey
+    ORDER BY ps.ps_supplycost ASC
+    LIMIT 1
+)
+WHERE psi.p_partkey IS NOT NULL OR rs.rank IS NOT NULL
+ORDER BY oh.o_orderdate DESC, cs.total_sales DESC;

@@ -1,0 +1,76 @@
+
+WITH Address_Info AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+Demographic_Info AS (
+    SELECT
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating
+    FROM 
+        customer_demographics
+),
+Sales_Info AS (
+    SELECT 
+        wsbill_cdemo_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        wb_cdemo_sk
+),
+Full_Customer_Info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        a.full_address,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_education_status,
+        d.cd_purchase_estimate,
+        d.cd_credit_rating,
+        s.total_quantity,
+        s.total_sales,
+        s.order_count
+    FROM 
+        customer c
+    JOIN 
+        Address_Info a ON c.c_current_addr_sk = a.ca_address_sk
+    JOIN 
+        Demographic_Info d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    LEFT JOIN 
+        Sales_Info s ON c.c_customer_sk = s.wbill_cdemo_sk
+)
+SELECT 
+    CONCAT(first_name, ' ', last_name) AS customer_name,
+    full_address,
+    gender,
+    marital_status,
+    education_status,
+    purchase_estimate,
+    credit_rating,
+    total_quantity,
+    total_sales,
+    order_count
+FROM 
+    Full_Customer_Info
+WHERE 
+    (credit_rating = 'Excellent' OR credit_rating = 'Good')
+    AND total_sales > 500
+ORDER BY 
+    total_sales DESC
+LIMIT 25;

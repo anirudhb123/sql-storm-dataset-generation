@@ -1,0 +1,37 @@
+
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, ts.total_cost + SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN TopSuppliers ts ON s.s_suppkey != ts.s_suppkey
+    GROUP BY s.s_suppkey, s.s_name, ts.total_cost
+),
+OrderWithLineItem AS (
+    SELECT o.o_orderkey, o.o_custkey, l.l_partkey, l.l_quantity, l.l_extendedprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS line_number
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate <= DATE '1996-12-31'
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(ol.l_extendedprice * ol.l_quantity) AS total_spent,
+           COUNT(DISTINCT ol.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN OrderWithLineItem ol ON c.c_custkey = ol.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT cs.c_name,
+       COALESCE(cs.total_spent, 0) AS total_spent,
+       COALESCE(cs.order_count, 0) AS order_count,
+       ts.total_cost AS total_supplier_cost
+FROM CustomerOrderSummary cs
+LEFT JOIN TopSuppliers ts ON cs.c_custkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = (SELECT MIN(s2.s_suppkey) FROM supplier s2 WHERE s2.s_name LIKE '%Corp%'))
+WHERE cs.total_spent IS NOT NULL
+ORDER BY total_spent DESC, cs.c_name ASC
+LIMIT 10;

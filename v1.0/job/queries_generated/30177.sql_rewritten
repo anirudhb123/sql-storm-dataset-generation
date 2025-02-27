@@ -1,0 +1,44 @@
+WITH RECURSIVE RecursiveMovies AS (
+    
+    SELECT m.id AS movie_id, m.title, m.production_year, 1 AS level
+    FROM aka_title m
+    WHERE production_year > 2000
+    
+    UNION ALL
+    
+    
+    SELECT e.id AS movie_id, e.title, e.production_year, rm.level + 1
+    FROM aka_title e
+    INNER JOIN aka_title s ON e.episode_of_id = s.id
+    INNER JOIN RecursiveMovies rm ON rm.movie_id = s.id
+)
+
+SELECT 
+    r.title AS movie_title,
+    r.production_year,
+    c.name AS actor_name,
+    COUNT(*) OVER(PARTITION BY r.movie_id) AS actor_count,
+    COALESCE(mk.keyword, 'No Keyword') AS movie_keyword,
+    ROW_NUMBER() OVER(PARTITION BY r.movie_id ORDER BY c.nr_order) AS actor_order,
+    CASE 
+        WHEN r.production_year = 2000 THEN 'Millennium Hit'
+        WHEN r.production_year > 2000 AND r.production_year <= 2010 THEN 'Modern Classic'
+        ELSE 'One of the Classics'
+    END AS movie_category
+FROM 
+    RecursiveMovies r
+LEFT JOIN 
+    cast_info c ON r.movie_id = c.movie_id
+LEFT JOIN 
+    movie_keyword mk ON r.movie_id = mk.movie_id
+WHERE 
+    c.nr_order IS NOT NULL
+    AND EXISTS (
+        SELECT 1
+        FROM person_info pi
+        WHERE pi.person_id = c.person_id 
+        AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Birth Year')
+        AND pi.info::int < 1980  
+    )
+ORDER BY 
+    r.production_year DESC, actor_count DESC;

@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplyCostCTE AS (
+    SELECT 
+        ps.s_partkey, 
+        ps.s_suppkey, 
+        ps.ps_availqty, 
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM partsupp ps
+    WHERE ps.ps_supplycost IS NOT NULL
+),
+MaxCost AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+    GROUP BY l.l_orderkey
+    HAVING total_sales > (SELECT AVG(total_sales)*0.5 FROM (
+        SELECT SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+        FROM lineitem l
+        GROUP BY l_orderkey
+    ) AS avg_sales)
+),
+Combined AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(CASE WHEN ps.ps_supplycost IS NOT NULL THEN ps.ps_supplycost ELSE 0 END) AS total_supply_cost
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE r.r_comment IS NOT NULL
+    GROUP BY r.r_name
+)
+SELECT 
+    COALESCE(c.r_name, 'Unknown Region') AS region_name,
+    COALESCE(SUM(m.total_sales), 0) AS total_sales,
+    COALESCE(MAX(supply.total_supply_cost), 0) AS max_supply_cost,
+    CASE 
+        WHEN c.nation_count IS NULL THEN 'No Nations'
+        ELSE 'Has Nations'
+    END AS nation_status
+FROM Combined c
+FULL OUTER JOIN MaxCost m ON c.nation_count = m.supplier_count
+LEFT JOIN SupplyCostCTE supply ON supply.rn = 1
+WHERE c.total_supply_cost > 100
+GROUP BY c.r_name
+ORDER BY region_name DESC
+LIMIT 10;

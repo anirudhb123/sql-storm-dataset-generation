@@ -1,0 +1,49 @@
+
+WITH UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(AVG(p.Score), 0) AS AverageScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+HighScorers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        UpVotes,
+        DownVotes,
+        PostCount,
+        AverageScore,
+        RANK() OVER (ORDER BY AverageScore DESC) AS ScoreRank
+    FROM UserScores
+    WHERE PostCount > 0
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        DATEDIFF(CURRENT_TIMESTAMP, u.LastAccessDate) AS DaysSinceLastAccess,
+        b.Name AS BadgeName
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE b.TagBased = 0
+)
+SELECT 
+    hs.DisplayName AS UserName,
+    hs.UpVotes,
+    hs.DownVotes,
+    hs.PostCount,
+    hs.AverageScore,
+    au.DaysSinceLastAccess,
+    STRING_AGG(au.BadgeName, ', ') AS Badges
+FROM HighScorers hs
+FULL OUTER JOIN ActiveUsers au ON hs.UserId = au.Id
+WHERE (hs.ScoreRank <= 10 OR au.DaysSinceLastAccess < 30)
+GROUP BY hs.DisplayName, hs.UpVotes, hs.DownVotes, hs.PostCount, hs.AverageScore, au.DaysSinceLastAccess
+ORDER BY hs.AverageScore DESC, au.DaysSinceLastAccess ASC;

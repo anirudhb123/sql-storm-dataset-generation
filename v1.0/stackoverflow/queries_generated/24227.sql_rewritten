@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC NULLS LAST) AS ScoreRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    WHERE
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserBadgeStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        COUNT(DISTINCT CASE WHEN b.TagBased = 1 THEN b.Id END) AS TagBadges
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+),
+ClosedPostStats AS (
+    SELECT
+        ph.PostId,
+        COUNT(*) AS CloseReasonCount,
+        STRING_AGG(DISTINCT cr.Name) AS UniqueCloseReasonNames
+    FROM
+        PostHistory ph
+    INNER JOIN
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE
+        ph.PostHistoryTypeId = 10
+    GROUP BY
+        ph.PostId
+)
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score AS PostScore,
+    rp.ViewCount,
+    ubs.DisplayName AS OwnerDisplayName,
+    ubs.GoldBadges,
+    ubs.SilverBadges,
+    ubs.BronzeBadges,
+    ubs.TotalUpVotes,
+    ubs.TotalDownVotes,
+    COALESCE(cps.CloseReasonCount, 0) AS TotalCloseReasons,
+    COALESCE(cps.UniqueCloseReasonNames, 'N/A') AS CloseReasonNames,
+    rp.CommentCount,
+    CASE 
+        WHEN rp.ScoreRank = 1 THEN 'Top Scorer'
+        WHEN rp.ScoreRank IS NULL THEN 'No Score'
+        ELSE 'Regular Post'
+    END AS PostRankCategory
+FROM
+    RankedPosts rp
+LEFT JOIN
+    UserBadgeStats ubs ON ubs.UserId = rp.OwnerUserId
+LEFT JOIN
+    ClosedPostStats cps ON cps.PostId = rp.PostId
+WHERE
+    (rp.Score IS NOT NULL OR rp.CloseReasonCount > 0)
+    AND (ubs.TotalUpVotes - ubs.TotalDownVotes) > 10
+ORDER BY 
+    rp.CreationDate DESC,
+    rp.Score DESC;

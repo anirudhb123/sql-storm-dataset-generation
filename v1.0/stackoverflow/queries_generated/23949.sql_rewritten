@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS TotalComments,
+        COUNT(v.Id) OVER (PARTITION BY p.Id) AS TotalVotes,
+        (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+         FROM Tags t 
+         WHERE t.Id IN (SELECT unnest(string_to_array(substr(p.Tags, 2, length(p.Tags)-2), '><')::int[]))) 
+         ) AS TagList
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+),
+
+PostEngagement AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.RankScore,
+        rp.TotalComments,
+        rp.TotalVotes,
+        rp.TagList,
+        CASE 
+            WHEN rp.TotalComments > 10 THEN 'High Engagement'
+            WHEN rp.TotalComments <= 10 AND rp.TotalComments > 0 THEN 'Moderate Engagement'
+            ELSE 'No Engagement'
+        END AS EngagementLevel
+    FROM 
+        RankedPosts rp
+)
+
+SELECT 
+    pe.PostId,
+    pe.Title,
+    pe.CreationDate,
+    pe.Score,
+    pe.ViewCount,
+    pe.RankScore,
+    pe.TotalComments,
+    pe.TotalVotes,
+    pe.TagList,
+    pe.EngagementLevel,
+    COALESCE((SELECT COUNT(DISTINCT bh.UserId)
+               FROM PostHistory bh
+               WHERE bh.PostId = pe.PostId 
+               AND bh.PostHistoryTypeId IN (10, 11, 12, 13) /* Close, Reopen, Delete, Undelete */
+              ), 0) AS HistoricalChanges,
+    STRING_AGG(DISTINCT ut.DisplayName, ', ') AS UsersWithVotes
+FROM 
+    PostEngagement pe
+LEFT JOIN 
+    Votes v ON v.PostId = pe.PostId
+LEFT JOIN 
+    Users ut ON v.UserId = ut.Id
+GROUP BY 
+    pe.PostId, pe.Title, pe.CreationDate, pe.Score, pe.ViewCount, 
+    pe.RankScore, pe.TotalComments, pe.TotalVotes, pe.TagList, pe.EngagementLevel
+ORDER BY 
+    pe.RankScore ASC, pe.TotalVotes DESC
+OFFSET 5 LIMIT 10;

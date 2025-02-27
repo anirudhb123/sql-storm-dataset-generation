@@ -1,0 +1,29 @@
+WITH SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS nation_name, s.s_acctbal,
+           (SELECT COUNT(ps.ps_suppkey) 
+            FROM partsupp ps 
+            WHERE ps.ps_suppkey = s.s_suppkey) AS parts_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+), 
+PopularParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_quantity) AS total_quantity
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(l.l_quantity) > 100
+),
+Benchmark AS (
+    SELECT si.s_name, si.nation_name, si.parts_count, pp.p_name, pp.total_quantity
+    FROM SupplierInfo si
+    JOIN PopularParts pp ON si.parts_count > 0
+    ORDER BY si.parts_count DESC, pp.total_quantity DESC
+)
+SELECT s.s_name, s.nation_name, COUNT(DISTINCT p.p_partkey) AS unique_parts, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+FROM Benchmark b
+JOIN supplier s ON s.s_name = b.s_name
+JOIN lineitem l ON l.l_suppkey = s.s_suppkey
+GROUP BY s.s_name, s.nation_name
+HAVING total_sales > 10000
+ORDER BY total_sales DESC;

@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 10000
+),
+PartSupply AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_availqty, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1996-01-01' AND o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+    HAVING total_value > 50000
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(hv.total_value) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN HighValueOrders hv ON o.o_orderkey = hv.o_orderkey
+    GROUP BY c.c_custkey, c.c_name
+),
+NationSupplier AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+SELECT 
+    c.c_name,
+    COALESCE(o.order_count, 0) AS num_orders,
+    COALESCE(sp.total_availqty, 0) AS total_part_supply,
+    ns.supplier_count AS nation_supplier_count,
+    ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.order_count DESC) AS row_num
+FROM customerOrders o
+FULL OUTER JOIN PartSupply sp ON sp.ps_partkey = o.c_custkey
+JOIN NationSupplier ns ON ns.supplier_count = (
+    SELECT MAX(supplier_count) FROM NationSupplier
+)
+LEFT JOIN customer c ON c.c_custkey = o.c_custkey
+WHERE c.c_name LIKE 'A%' OR c.c_name LIKE '%s'
+ORDER BY o.total_spent DESC, c.c_name;

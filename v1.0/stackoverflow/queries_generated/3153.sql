@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankPerUser
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 0
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    up.TotalBadges,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.CommentCount,
+    CASE 
+        WHEN rp.RankPerUser = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostRankCategory
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation up ON rp.OwnerUserId = up.UserId
+WHERE 
+    up.Reputation > (SELECT AVG(Reputation) FROM Users)
+ORDER BY 
+    up.Reputation DESC, rp.Score DESC
+LIMIT 100;

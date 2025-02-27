@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        NULL AS parent_id
+    FROM title m
+    WHERE m.kind_id = 1  
+
+    UNION ALL
+
+    SELECT 
+        t.id AS movie_id, 
+        t.title,
+        t.production_year,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_id
+    FROM title t
+    JOIN movie_link ml ON t.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE t.kind_id = 1
+)
+
+SELECT 
+    ak.name AS actor_name, 
+    t.title AS movie_title, 
+    t.production_year, 
+    COUNT(DISTINCT c.id) AS total_cast,
+    MAX(CASE WHEN ci.note IS NOT NULL THEN ci.note ELSE 'No Note' END) AS casting_note,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ak.name) AS actor_order,
+    mh.level AS hierarchy_level,
+    (SELECT COUNT(*) FROM char_name cname WHERE cname.imdb_id = ak.id) AS total_aliases
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+LEFT JOIN 
+    MovieHierarchy mh ON t.id = mh.movie_id
+LEFT JOIN 
+    info_type it ON c.role_id = it.id
+LEFT JOIN 
+    company_name comp ON t.id = comp.imdb_id 
+GROUP BY 
+    ak.name, t.title, t.production_year, mh.level
+HAVING 
+    COUNT(DISTINCT c.id) > 1 
+ORDER BY 
+    t.production_year DESC, actor_order;

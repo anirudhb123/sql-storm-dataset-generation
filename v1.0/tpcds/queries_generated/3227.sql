@@ -1,0 +1,52 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_spent,
+        RANK() OVER (ORDER BY cs.total_spent DESC) AS rank
+    FROM 
+        CustomerSales cs
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    COALESCE(d.d_year, 'N/A') AS year_last_order,
+    tc.total_spent,
+    CASE 
+        WHEN tc.total_orders > 10 THEN 'Frequent'
+        WHEN tc.total_orders BETWEEN 5 AND 10 THEN 'Moderate'
+        ELSE 'Occasional'
+    END AS customer_type
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    (SELECT 
+         ws_bill_customer_sk,
+         MAX(d.d_year) AS d_year
+     FROM 
+         web_sales 
+     JOIN 
+         date_dim AS d ON ws_sold_date_sk = d.d_date_sk
+     GROUP BY 
+         ws_bill_customer_sk) AS last_order_year ON tc.c_customer_sk = last_order_year.ws_bill_customer_sk
+WHERE 
+    tc.rank <= 50
+ORDER BY 
+    tc.total_spent DESC;

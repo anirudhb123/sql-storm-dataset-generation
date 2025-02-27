@@ -1,0 +1,95 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, U.DisplayName
+),
+
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    pc.EditCount,
+    pc.CloseCount,
+    pc.ReopenCount,
+    rp.OwnerDisplayName
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryCounts pc ON rp.PostId = pc.PostId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;
+
+WITH RECURSIVE RelatedPosts AS (
+    SELECT 
+        pl.RelatedPostId, 
+        pl.PostId, 
+        1 AS Level
+    FROM 
+        PostLinks pl
+    UNION ALL
+    SELECT 
+        pl.RelatedPostId, 
+        rp.PostId, 
+        rp.Level + 1
+    FROM 
+        RelatedPosts rp
+    INNER JOIN 
+        PostLinks pl ON rp.RelatedPostId = pl.PostId
+    WHERE 
+        rp.Level < 3
+)
+SELECT 
+    p.Id, 
+    p.Title, 
+    COUNT(DISTINCT rp.RelatedPostId) AS RelatedPostCount
+FROM 
+    Posts p
+LEFT JOIN 
+    RelatedPosts rp ON p.Id = rp.PostId
+GROUP BY 
+    p.Id, p.Title
+HAVING 
+    COUNT(DISTINCT rp.RelatedPostId) > 0
+ORDER BY 
+    RelatedPostCount DESC;

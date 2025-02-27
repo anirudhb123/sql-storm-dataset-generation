@@ -1,0 +1,80 @@
+WITH RECURSIVE movie_hierarchy AS (
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE 
+        at.production_year >= 2000
+),
+
+
+cast_summary AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role,
+        COUNT(*) OVER (PARTITION BY ci.movie_id) AS cast_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        ak.name IS NOT NULL
+),
+
+
+keyword_summary AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+)
+
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    cs.actor_name,
+    cs.role,
+    cs.cast_count,
+    COALESCE(ks.keyword_count, 0) AS total_keywords,
+    CASE 
+        WHEN mh.depth > 2 THEN 'Deep Link'
+        ELSE 'Shallow Link' 
+    END AS link_depth
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_summary cs ON mh.movie_id = cs.movie_id
+LEFT JOIN 
+    keyword_summary ks ON mh.movie_id = ks.movie_id
+ORDER BY 
+    mh.production_year DESC,
+    mh.title ASC;

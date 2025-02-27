@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+TagUsage AS (
+    SELECT 
+        TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(Tags, '><', n.n), '><', -1)) AS TagName,
+        p.Id AS PostId
+    FROM 
+        Posts p
+    JOIN 
+        (SELECT a.N + 1 AS n FROM (SELECT 0 AS N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) AS a) n
+    ON CHAR_LENGTH(Tags) - CHAR_LENGTH(REPLACE(Tags, '><', '')) >= n.n - 1
+    WHERE 
+        p.PostTypeId = 1
+),
+UserBadges AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS UsageCount
+    FROM 
+        TagUsage
+    GROUP BY 
+        TagName
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.ViewCount,
+    rp.Score,
+    ub.BadgeCount,
+    ub.Badges,
+    tt.TagName AS TopTag,
+    tt.UsageCount
+FROM 
+    RankedPosts rp
+JOIN 
+    UserBadges ub ON rp.OwnerDisplayName = ub.DisplayName
+LEFT JOIN 
+    TopTags tt ON tt.TagName IN (TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX((SELECT Tags FROM Posts WHERE Id = rp.PostId), '><', n.n), '><', -1)) 
+                                  FROM (SELECT a.N + 1 AS n FROM (SELECT 0 AS N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) AS a) n)
+WHERE 
+    rp.PostRank <= 5
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC;

@@ -1,0 +1,72 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank,
+        COUNT(*) OVER (PARTITION BY p.p_type) AS type_count
+    FROM 
+        part p
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey 
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders) 
+),
+FrequentSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        COUNT(ps.ps_partkey) AS supply_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey 
+    HAVING 
+        COUNT(ps.ps_partkey) > 10
+),
+SalesSummary AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1997-01-01'
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    r.regionkey, 
+    r.r_name, 
+    COALESCE(SUM(ss.total_sales), 0) AS total_sales, 
+    COALESCE(SUM(CASE WHEN rp.price_rank <= 5 THEN rp.p_retailprice END), 0) AS top_products_value,
+    COALESCE(hvc.c_custkey, -1) AS customer_key
+FROM 
+    region r
+LEFT JOIN 
+    SalesSummary ss ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_name = r.r_name LIMIT 1)
+LEFT JOIN 
+    RankedParts rp ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps JOIN FrequentSuppliers fs ON ps.ps_suppkey = fs.s_suppkey)
+LEFT JOIN 
+    HighValueCustomers hvc ON hvc.total_spent > 100000
+GROUP BY 
+    r.r_regionkey, r.r_name, hvc.c_custkey
+ORDER BY 
+    total_sales DESC, r.r_name;

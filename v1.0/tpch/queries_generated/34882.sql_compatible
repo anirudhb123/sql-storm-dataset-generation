@@ -1,0 +1,52 @@
+
+WITH RECURSIVE nation_income AS (
+    SELECT n.n_nationkey, n.n_name, SUM(o.o_totalprice) AS total_income
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY n.n_nationkey, n.n_name
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, SUM(o.o_totalprice) AS total_income
+    FROM nation n
+    JOIN nation_income ni ON n.n_nationkey = ni.n_nationkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE ni.total_income < 1000000
+    GROUP BY n.n_nationkey, n.n_name
+),
+average_price AS (
+    SELECT AVG(l.l_extendedprice) AS avg_price
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+),
+part_summary AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_mfgr
+)
+SELECT 
+    ni.n_name,
+    ps.p_name,
+    ps.total_supply_cost,
+    AVG(ni.total_income) OVER (PARTITION BY ni.n_name) AS average_income,
+    CASE 
+        WHEN ps.total_supply_cost IS NULL THEN 'INSUFFICIENT SUPPLY'
+        ELSE 'SUFFICIENT SUPPLY'
+    END AS supply_status,
+    (SELECT COUNT(DISTINCT o.o_orderkey) 
+     FROM orders o 
+     WHERE o.o_orderdate >= DATEADD(MONTH, -6, CAST('1998-10-01' AS DATE)) 
+       AND o.o_orderstatus = 'O') AS recent_orders
+FROM 
+    nation_income ni
+JOIN 
+    part_summary ps ON ni.n_nationkey = ps.p_partkey
+WHERE 
+    ps.total_supply_cost > (SELECT avg_price FROM average_price)
+ORDER BY 
+    ni.total_income DESC, ps.total_supply_cost DESC;

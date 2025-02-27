@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY u.Id ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1 -- Only questions
+),
+
+TopViews AS (
+    SELECT 
+        rp.*,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM RankedPosts rp
+    JOIN Tags t ON rp.Tags LIKE '%' || t.TagName || '%'
+    WHERE rp.ViewRank <= 3
+    GROUP BY rp.PostId, rp.Title, rp.Body, rp.Tags, rp.ViewCount, rp.Score, rp.CreationDate, rp.OwnerDisplayName, rp.ViewRank
+),
+
+AverageViews AS (
+    SELECT
+        AVG(ViewCount) AS AvgViewCount,
+        COUNT(*) AS TotalPosts
+    FROM TopViews
+),
+
+Discussion AS (
+    SELECT 
+        ch.PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, '. ') AS DiscussionText
+    FROM Comments c
+    JOIN Posts ch ON c.PostId = ch.Id
+    GROUP BY ch.PostId
+)
+
+SELECT 
+    tv.PostId,
+    tv.Title,
+    tv.Body,
+    tv.ViewCount,
+    tv.Score,
+    tv.TagList,
+    d.CommentCount,
+    d.DiscussionText,
+    av.AvgViewCount,
+    av.TotalPosts
+FROM TopViews tv
+LEFT JOIN Discussion d ON tv.PostId = d.PostId
+CROSS JOIN AverageViews av
+ORDER BY tv.ViewCount DESC
+LIMIT 10;

@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.OwnerUserId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) DESC) AS VoteRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.PostTypeId, P.OwnerUserId
+),
+UserWithBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostHistoryWithCloseReasons AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.Comment,
+        PH.CreationDate,
+        CASE 
+            WHEN PH.PostHistoryTypeId = 10 THEN CR.Name
+            ELSE NULL 
+        END AS CloseReason
+    FROM 
+        PostHistory PH
+    LEFT JOIN 
+        CloseReasonTypes CR ON PH.Comment::int = CR.Id
+),
+FinalResult AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.UpVotes,
+        RP.DownVotes,
+        U.DisplayName AS Author,
+        U.BadgeCount,
+        U.GoldBadges,
+        U.SilverBadges,
+        U.BronzeBadges,
+        COUNT(DISTINCT PH.PostId) FILTER (WHERE PH.PostHistoryTypeId = 10) AS CloseCount,
+        STRING_AGG(PH.CloseReason, ', ') AS CloseReasons
+    FROM 
+        RankedPosts RP
+    JOIN 
+        UserWithBadges U ON RP.OwnerUserId = U.UserId
+    LEFT JOIN 
+        PostHistoryWithCloseReasons PH ON RP.PostId = PH.PostId
+    GROUP BY 
+        RP.PostId, RP.Title, RP.UpVotes, RP.DownVotes, U.DisplayName, U.BadgeCount, U.GoldBadges, U.SilverBadges, U.BronzeBadges
+)
+SELECT 
+    *,
+    CASE 
+        WHEN UpVotes > DownVotes THEN 'Positive'
+        WHEN UpVotes < DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment,
+    NULLIF(CloseCount, 0) AS ActualClosedCount
+FROM 
+    FinalResult
+WHERE 
+    VoteRank <= 10
+ORDER BY 
+    VoteSentiment DESC, UpVotes DESC;

@@ -1,0 +1,62 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        COALESCE(hd.hd_buy_potential, 'Unknown') AS buy_potential
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MAX(ws.ws_sold_date_sk) AS last_sale_date
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+item_details AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        ROW_NUMBER() OVER (PARTITION BY i.i_category_id ORDER BY i.i_current_price DESC) AS rank
+    FROM 
+        item i
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ss.total_sales,
+    ss.order_count,
+    id.i_item_desc,
+    id.i_current_price,
+    CASE 
+        WHEN sales_summary.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sales_status
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_summary ss ON ci.c_customer_sk = ss.ws_item_sk 
+JOIN 
+    item_details id ON ss.ws_item_sk = id.i_item_sk 
+WHERE 
+    ci.buy_potential <> 'Unknown'
+    AND id.rank <= 5
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

@@ -1,0 +1,74 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(Posts.ViewCount, 0)) AS AverageViews,
+        SUM(COALESCE(Posts.AnswerCount, 0)) AS TotalAnswers,
+        SUM(COALESCE(Posts.CommentCount, 0)) AS TotalComments
+    FROM
+        Tags
+    JOIN
+        Posts ON Posts.Tags LIKE CONCAT('%', Tags.TagName, '%')
+    GROUP BY
+        Tags.TagName
+),
+UserActivity AS (
+    SELECT 
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS TotalPosts,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(Posts.AnswerCount) AS TotalAnswers,
+        SUM(Posts.CommentCount) AS TotalComments,
+        SUM(Users.UpVotes) AS TotalUpvotes,
+        SUM(Users.DownVotes) AS TotalDownvotes
+    FROM 
+        Users
+    JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY 
+        Users.DisplayName
+),
+RecentPostUpdates AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        pt.Name AS UpdateType,
+        ph.Comment,
+        ph.Text
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+)
+SELECT 
+    tg.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AverageViews,
+    ts.TotalAnswers,
+    ts.TotalComments,
+    ua.DisplayName AS Author,
+    ua.TotalPosts,
+    ua.TotalViews AS AuthorTotalViews,
+    ua.TotalAnswers AS AuthorTotalAnswers,
+    ua.TotalComments AS AuthorTotalComments,
+    ua.TotalUpvotes,
+    ua.TotalDownvotes,
+    ru.UserDisplayName AS RecentUpdater,
+    ru.CreationDate AS UpdateDate,
+    ru.UpdateType,
+    ru.Comment AS UpdateComment
+FROM 
+    TagStatistics ts
+LEFT JOIN 
+    UserActivity ua ON ts.PostCount > 0
+LEFT JOIN 
+    RecentPostUpdates ru ON ru.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE CONCAT('%', ts.TagName, '%'))
+ORDER BY 
+    ts.PostCount DESC, 
+    ts.TotalViews DESC;

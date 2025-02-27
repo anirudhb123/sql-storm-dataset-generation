@@ -1,0 +1,57 @@
+
+WITH RECURSIVE PriceRanges AS (
+    SELECT DISTINCT 
+        CASE 
+            WHEN p_retailprice < 100 THEN 'Low'
+            WHEN p_retailprice BETWEEN 100 AND 500 THEN 'Medium'
+            ELSE 'High' 
+        END AS price_range,
+        COUNT(*) AS total_parts
+    FROM part
+    GROUP BY 
+        CASE 
+            WHEN p_retailprice < 100 THEN 'Low'
+            WHEN p_retailprice BETWEEN 100 AND 500 THEN 'Medium'
+            ELSE 'High' 
+        END
+), 
+SuppliersWithAvgCost AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), 
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS total_items
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name,
+    pr.price_range,
+    COALESCE(AVG(s.avg_supplycost), 0) AS avg_cost,
+    CASE 
+        WHEN od.total_revenue IS NULL THEN 'No Orders'
+        WHEN od.total_revenue > 5000 THEN 'High Revenue'
+        ELSE 'Low Revenue' 
+    END AS revenue_category
+FROM part p
+LEFT JOIN PriceRanges pr ON p.p_retailprice BETWEEN 0 AND 100000
+LEFT JOIN SuppliersWithAvgCost s ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+LEFT JOIN OrderDetails od ON p.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o))
+WHERE p.p_size IS NOT NULL
+AND (p.p_comment IS NULL OR LENGTH(p.p_comment) > 10)
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    pr.price_range, 
+    od.total_revenue
+ORDER BY pr.price_range, avg_cost DESC, revenue_category;

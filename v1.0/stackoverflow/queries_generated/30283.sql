@@ -1,0 +1,71 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+
+    UNION ALL
+
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        p2.CreationDate,
+        p2.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        Posts rp ON rp.PostId = p2.ParentId
+    WHERE 
+        p2.PostTypeId = 2  -- Answers only
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT p.PostId) AS QuestionCount,
+    COUNT(DISTINCT a.PostId) AS AnswerCount,
+    COUNT(DISTINCT ph.Id) AS PostHistoryCount,
+    SUM(COALESCE(v.UpVotes, 0)) AS TotalUpVotes,
+    SUM(COALESCE(v.DownVotes, 0)) AS TotalDownVotes,
+    COALESCE(MAX(ph.CreationDate), '1900-01-01') AS LastPostHistoryDate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id AND p.PostTypeId = 1 
+LEFT JOIN 
+    Posts a ON a.OwnerUserId = u.Id AND a.PostTypeId = 2
+LEFT JOIN 
+    PostHistory ph ON ph.UserId = u.Id 
+LEFT JOIN 
+    (SELECT 
+         PostId, 
+         SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+         SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+     FROM 
+         Votes 
+     GROUP BY 
+         PostId) v ON v.PostId = p.Id 
+LEFT JOIN 
+    (SELECT 
+         t.Id, 
+         t.TagName 
+     FROM 
+         Tags t 
+     INNER JOIN 
+         PostsTags pt ON t.Id = pt.TagId) t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+HAVING 
+    COUNT(DISTINCT p.PostId) > 5  -- Users with more than 5 questions
+ORDER BY 
+    TotalUpVotes DESC, 
+    u.Reputation DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

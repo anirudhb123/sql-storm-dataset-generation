@@ -1,0 +1,68 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(uc.UserCount, 0) AS UniqueUserCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, COUNT(DISTINCT UserId) AS UserCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) uc ON p.Id = uc.PostId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.PostCount,
+    u.CommentCount,
+    u.BadgeCount,
+    u.UpVotes,
+    u.DownVotes,
+    p.PostId,
+    p.Title AS PostTitle,
+    p.CreationDate AS PostCreationDate,
+    p.ViewCount AS PostViewCount,
+    p.Score AS PostScore,
+    p.AnswerCount AS PostAnswerCount,
+    p.CommentCount AS PostCommentCount,
+    p.UniqueUserCount AS PostUniqueUserVotes
+FROM 
+    UserStatistics u
+JOIN 
+    PostStatistics p ON u.UserId = p.CommentCount  
+ORDER BY 
+    u.Reputation DESC, p.ViewCount DESC
+LIMIT 100;

@@ -1,0 +1,32 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+    UNION ALL
+    SELECT s2.s_suppkey, s2.s_name, s2.s_nationkey, s2.s_acctbal, sh.level + 1
+    FROM supplier s2
+    JOIN SupplierHierarchy sh ON s2.s_nationkey = sh.s_nationkey 
+),
+OrdersDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1997-01-01' 
+    GROUP BY o.o_orderkey
+),
+HighValueOrders AS (
+    SELECT od.o_orderkey, od.total_revenue,
+           RANK() OVER (ORDER BY od.total_revenue DESC) as revenue_rank
+    FROM OrdersDetails od
+    WHERE od.total_revenue > 10000 
+),
+SupplierJoin AS (
+    SELECT sh.s_name, COUNT(ho.o_orderkey) AS order_count
+    FROM SupplierHierarchy sh
+    LEFT JOIN HighValueOrders ho ON sh.s_nationkey = ho.o_orderkey
+    GROUP BY sh.s_name
+)
+SELECT sj.s_name, sj.order_count, COALESCE(NULLIF(sj.order_count, 0), 'No orders') AS order_status
+FROM SupplierJoin sj
+WHERE sj.order_count > 0 OR sj.order_count IS NULL
+ORDER BY sj.order_count DESC;

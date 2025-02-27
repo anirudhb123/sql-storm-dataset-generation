@@ -1,0 +1,54 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        CAST(NULL AS text) AS parent_title,
+        1 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        et.id AS movie_id,
+        et.title,
+        et.production_year,
+        mh.title AS parent_title,
+        mh.level + 1
+    FROM 
+        aka_title AS et
+    JOIN 
+        MovieHierarchy AS mh ON et.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    m.id AS movie_id,
+    m.title,
+    m.production_year,
+    COALESCE(mh.parent_title, 'N/A') AS parent_title,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+    AVG(rating.rating) AS avg_rating,
+    COUNT(DISTINCT mk.keyword) AS total_keywords
+FROM 
+    MovieHierarchy AS m
+LEFT JOIN 
+    cast_info AS c ON m.movie_id = c.movie_id
+LEFT JOIN 
+    aka_name AS ak ON c.person_id = ak.person_id
+LEFT JOIN 
+    movie_info AS mi ON mi.movie_id = m.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating') 
+LEFT JOIN 
+    movie_keyword AS mk ON mk.movie_id = m.movie_id
+LEFT JOIN 
+    (SELECT movie_id, AVG(CAST(info AS float)) AS rating 
+     FROM movie_info 
+     WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'rating') 
+     GROUP BY movie_id) AS rating ON rating.movie_id = m.movie_id
+GROUP BY 
+    m.id, m.title, m.production_year, mh.parent_title
+ORDER BY 
+    m.production_year DESC, m.title;

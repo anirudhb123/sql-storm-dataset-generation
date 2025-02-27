@@ -1,0 +1,54 @@
+
+WITH RECURSIVE part_hierarchy AS (
+    SELECT p_partkey, p_name, p_type, p_retailprice, p_comment, 0 AS level
+    FROM part
+    WHERE p_size > 10
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_type, p.p_retailprice * 0.9, p.p_comment, ph.level + 1
+    FROM part_hierarchy ph
+    JOIN part p ON ph.p_partkey = (p.p_partkey + 1) 
+    WHERE p.p_size < 30
+),
+supplier_info AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+customer_order AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey
+),
+region_summary AS (
+    SELECT r.r_regionkey, r.r_name,
+           COUNT(DISTINCT n.n_nationkey) AS nation_count,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_regionkey, r.r_name
+),
+lineitem_analysis AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+           COUNT(*) AS order_count
+    FROM lineitem l
+    GROUP BY l.l_partkey
+),
+final_report AS (
+    SELECT ph.p_name, ph.p_type, ph.p_retailprice, ph.level,
+           COALESCE(si.s_name, 'No Supplier') AS supplier_name,
+           COALESCE(co.total_spent, 0) AS customer_spent,
+           rs.nation_count, rs.supplier_count, la.revenue, la.order_count
+    FROM part_hierarchy ph
+    LEFT JOIN supplier_info si ON si.rank = 1
+    LEFT JOIN customer_order co ON co.c_custkey = (SELECT MIN(c.c_custkey) FROM customer c)
+    LEFT JOIN region_summary rs ON rs.r_regionkey = (ph.p_partkey % 5)
+    LEFT JOIN lineitem_analysis la ON la.l_partkey = ph.p_partkey
+)
+SELECT *
+FROM final_report
+WHERE revenue > 10000
+ORDER BY customer_spent DESC, level ASC;

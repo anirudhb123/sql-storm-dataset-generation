@@ -1,0 +1,63 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS TotalReturns,
+        SUM(sr_return_amt) AS TotalReturnAmt,
+        SUM(sr_return_tax) AS TotalReturnTax,
+        MAX(sr_returned_date_sk) AS LastReturnDate
+    FROM store_returns
+    GROUP BY sr_customer_sk
+), 
+HighReturnCustomers AS (
+    SELECT 
+        cr.sr_customer_sk,
+        cr.TotalReturns,
+        cr.TotalReturnAmt,
+        cr.LastReturnDate,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cr.TotalReturnAmt DESC) AS GenderRank
+    FROM CustomerReturns cr
+    JOIN customer_demographics cd ON cr.sr_customer_sk = cd.cd_demo_sk
+    WHERE cr.TotalReturns > 5 AND cr.LastReturnDate > (SELECT MAX(d_date_sk) - 30 FROM date_dim WHERE d_current_year = 'Y')
+), 
+ReturnSummary AS (
+    SELECT 
+        HRC.sr_customer_sk,
+        HRC.TotalReturns,
+        HRC.TotalReturnAmt,
+        HRC.LastReturnDate,
+        CD.c_first_name,
+        CD.c_last_name,
+        wield.w_warehouse_name,
+        WSM.sm_type AS ShippingMethod
+    FROM HighReturnCustomers HRC
+    JOIN customer CD ON HRC.sr_customer_sk = CD.c_customer_sk
+    LEFT JOIN store S ON CD.c_current_addr_sk = S.s_store_sk
+    LEFT JOIN warehouse WIELD ON S.s_market_id = WIELD.w_warehouse_sk
+    LEFT JOIN ship_mode WSM ON HRC.TotalReturns = WSM.sm_ship_mode_sk
+    WHERE HRC.GenderRank <= 3 AND CD.c_preferred_cust_flag = 'Y'
+)
+SELECT 
+    RS.sr_customer_sk,
+    CONCAT(RS.c_first_name, ' ', RS.c_last_name) AS FullCustomerName,
+    RS.TotalReturns, 
+    RS.TotalReturnAmt, 
+    RS.LastReturnDate,
+    COALESCE(WSM.sm_carrier, 'UNKNOWN') AS Carrier,
+    CASE 
+        WHEN RS.TotalReturnAmt > 200 THEN 'High'
+        WHEN RS.TotalReturnAmt BETWEEN 100 AND 200 THEN 'Medium'
+        ELSE 'Low'
+    END AS ReturnSeverity,
+    CASE 
+        WHEN RS.TotalReturns IS NULL THEN 'No Returns'
+        ELSE 'Returned Items'
+    END AS ReturnStatus
+FROM ReturnSummary RS
+WHERE (RS.TotalReturns > 0 
+       OR EXISTS (SELECT 1 FROM store_returns SR WHERE SR.sr_customer_sk = RS.sr_customer_sk AND SR.sr_return_quantity IS NOT NULL))
+ORDER BY RS.TotalReturnAmt DESC
+FETCH FIRST 10 ROWS ONLY;

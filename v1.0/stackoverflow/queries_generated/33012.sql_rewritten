@@ -1,0 +1,53 @@
+WITH RECURSIVE UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN p.Score ELSE 0 END) AS TotalPositiveScore,
+        SUM(CASE WHEN p.Score < 0 THEN p.Score ELSE 0 END) AS TotalNegativeScore,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY SUM(CASE WHEN p.Score > 0 THEN p.Score ELSE 0 END) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        TotalPositiveScore,
+        TotalNegativeScore
+    FROM 
+        UserPostStats
+    WHERE 
+        Rank <= 10
+)
+SELECT 
+    tu.DisplayName,
+    tu.PostCount,
+    tu.TotalPositiveScore,
+    tu.TotalNegativeScore,
+    COALESCE(b.Name, 'No Badge') AS BadgeName,
+    CASE 
+        WHEN tu.TotalPositiveScore + ABS(tu.TotalNegativeScore) = 0 THEN 0
+        ELSE ROUND((tu.TotalPositiveScore::numeric / (tu.TotalPositiveScore + ABS(tu.TotalNegativeScore))) * 100, 2)
+    END AS PositiveScorePercentage,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    Badges b ON tu.UserId = b.UserId AND b.Class = 1 
+LEFT JOIN 
+    Posts p ON tu.UserId = p.OwnerUserId
+LEFT JOIN 
+    Tags t ON p.Tags LIKE '%' || t.TagName || '%' 
+GROUP BY 
+    tu.UserId, tu.DisplayName, tu.PostCount, tu.TotalPositiveScore, tu.TotalNegativeScore, b.Name
+ORDER BY 
+    tu.TotalPositiveScore DESC, tu.PostCount DESC
+LIMIT 20;

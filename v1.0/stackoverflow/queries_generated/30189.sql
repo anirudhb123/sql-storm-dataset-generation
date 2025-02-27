@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, p.OwnerUserId
+), UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        AVG(v.VoteTypeId = 2) AS AvgUpVotes,
+        AVG(v.VoteTypeId = 3) AS AvgDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+), RecentActivity AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(DISTINCT p.Id) AS RecentPosts,
+        COUNT(DISTINCT c.Id) AS RecentComments
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 MONTH'
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalPosts,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    COALESCE(ra.RecentPosts, 0) AS RecentPosts,
+    COALESCE(ra.RecentComments, 0) AS RecentComments,
+    rp.Title,
+    rp.Tags,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount
+FROM 
+    UserStatistics us
+LEFT JOIN 
+    RecentActivity ra ON ra.OwnerUserId = us.UserId
+LEFT JOIN 
+    RankedPosts rp ON rp.PostId IN (
+        SELECT p.Id 
+        FROM Posts p 
+        WHERE p.OwnerUserId = us.UserId 
+        ORDER BY p.CreationDate DESC 
+        LIMIT 1
+    )
+WHERE 
+    us.TotalPosts > 10
+ORDER BY 
+    us.TotalPosts DESC, us.DisplayName;

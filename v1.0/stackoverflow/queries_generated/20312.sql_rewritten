@@ -1,0 +1,92 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+), 
+UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(AVG(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END), 0) AS AverageViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+), 
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN 'Closed/Reopened'
+            WHEN ph.PostHistoryTypeId IN (12, 13) THEN 'Deleted/Restored'
+            ELSE 'Other'
+        END AS HistoryCategory
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId, ph.CreationDate
+), 
+Summary AS (
+    SELECT 
+        up.UserId,
+        up.DisplayName,
+        COUNT(DISTINCT rp.PostId) AS RecentPostCount,
+        SUM(CASE WHEN rp.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN rp.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(us.AverageViewCount) AS AverageViewStats
+    FROM 
+        UserStats us
+    JOIN 
+        RecentPosts rp ON us.UserId = rp.OwnerUserId
+    JOIN 
+        Users up ON us.UserId = up.Id
+    GROUP BY 
+        up.UserId, up.DisplayName
+)
+SELECT 
+    s.UserId,
+    s.DisplayName,
+    s.RecentPostCount,
+    s.QuestionCount,
+    s.AnswerCount,
+    s.AverageViewStats,
+    ph.HistoryCategory,
+    ph.HistoryTypes,
+    us.Reputation,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = s.UserId AND b.Class = 1) AS GoldBadges,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = s.UserId AND b.Class = 2) AS SilverBadges,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = s.UserId AND b.Class = 3) AS BronzeBadges
+FROM 
+    Summary s
+LEFT JOIN 
+    PostHistoryInfo ph ON s.UserId = ph.PostId 
+LEFT JOIN 
+    UserStats us ON s.UserId = us.UserId
+WHERE 
+    s.RecentPostCount > 0
+    AND (us.Reputation BETWEEN 100 AND 1000 OR us.AverageViewStats < 10)
+ORDER BY 
+    s.RecentPostCount DESC, 
+    us.Reputation DESC
+LIMIT 50;

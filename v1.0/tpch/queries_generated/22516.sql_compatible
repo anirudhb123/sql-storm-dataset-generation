@@ -1,0 +1,71 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY s.s_acctbal DESC) AS rn,
+        r.r_name AS region_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PriceAnalysis AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+HighValueParts AS (
+    SELECT 
+        pa.p_partkey,
+        pa.p_name,
+        pa.total_supply_cost,
+        pa.avg_supply_cost,
+        rs.region_name
+    FROM 
+        PriceAnalysis pa
+    JOIN 
+        RankedSuppliers rs ON rs.rn <= 5
+    WHERE 
+        pa.total_supply_cost > (
+            SELECT 
+                AVG(total_supply_cost)
+            FROM 
+                PriceAnalysis
+        )
+)
+SELECT 
+    hvp.p_name,
+    hvp.total_supply_cost,
+    hvp.avg_supply_cost,
+    hvp.region_name,
+    CASE 
+        WHEN hvp.total_supply_cost IS NULL THEN 'Unknown Cost'
+        ELSE 'Known Cost'
+    END AS cost_status
+FROM 
+    HighValueParts hvp
+LEFT JOIN 
+    orders o ON EXISTS (
+        SELECT 1 
+        FROM lineitem l 
+        WHERE l.l_orderkey = o.o_orderkey 
+        AND l.l_partkey = hvp.p_partkey
+    )
+WHERE 
+    o.o_orderstatus = 'O'
+    OR (o.o_orderstatus IS NULL AND hvp.region_name LIKE '%East%')
+ORDER BY 
+    hvp.total_supply_cost DESC;

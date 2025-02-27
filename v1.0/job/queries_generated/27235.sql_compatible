@@ -1,0 +1,68 @@
+
+WITH MovieAverages AS (
+    SELECT
+        k.keyword AS movie_keyword,
+        AVG(CASE WHEN mi.info_type_id = it.id THEN LENGTH(mi.info) END) AS avg_info_length,
+        AVG(CASE WHEN c.role_id IS NOT NULL THEN LENGTH(p.name) END) AS avg_cast_name_length
+    FROM
+        keyword k
+    JOIN
+        movie_keyword mk ON k.id = mk.keyword_id
+    JOIN
+        movie_info mi ON mk.movie_id = mi.movie_id
+    JOIN
+        info_type it ON mi.info_type_id = it.id
+    JOIN
+        complete_cast cc ON mk.movie_id = cc.movie_id
+    JOIN
+        cast_info c ON cc.subject_id = c.person_id
+    JOIN
+        aka_name p ON c.person_id = p.person_id
+    GROUP BY
+        k.keyword
+),
+CompanyAverages AS (
+    SELECT
+        cn.name AS company_name,
+        AVG(LENGTH(mc.note)) AS avg_company_note_length,
+        COUNT(DISTINCT mc.movie_id) AS total_movies
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY
+        cn.name
+),
+TopMovies AS (
+    SELECT
+        t.title,
+        COUNT(DISTINCT cc.subject_id) AS total_cast,
+        AVG(ma.avg_info_length) AS avg_info_length,
+        AVG(ca.avg_company_note_length) AS avg_company_note_length
+    FROM
+        title t
+    JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN
+        MovieAverages ma ON ma.movie_keyword IN (
+            SELECT DISTINCT keyword FROM movie_keyword WHERE movie_id = t.id)
+    LEFT JOIN
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN
+        CompanyAverages ca ON ca.company_name IN (
+            SELECT DISTINCT cn.name FROM company_name cn JOIN movie_companies mci ON cn.id = mci.company_id WHERE mci.movie_id = t.id)
+    GROUP BY
+        t.title
+    ORDER BY
+        total_cast DESC, avg_info_length DESC, avg_company_note_length DESC
+    LIMIT 10
+)
+SELECT
+    title,
+    total_cast,
+    avg_info_length,
+    avg_company_note_length
+FROM
+    TopMovies
+ORDER BY
+    avg_info_length DESC;

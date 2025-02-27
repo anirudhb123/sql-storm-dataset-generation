@@ -1,0 +1,89 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        LastAccessDate,
+        CreationDate,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        p.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastUpdated
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13)  -- Only considering relevant history types
+    GROUP BY 
+        ph.PostId
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.Score,
+        ps.CreationDate,
+        ps.CommentCount,
+        ps.AnswerCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        pvs.HistoryCount,
+        pvs.LastUpdated,
+        r.ReputationRank
+    FROM 
+        PostStats ps
+    JOIN 
+        PostHistorySummary pvs ON ps.PostId = pvs.PostId
+    JOIN 
+        UserReputation r ON ps.PostId IN (SELECT OwnerUserId FROM Posts WHERE Id = ps.PostId)
+    ORDER BY 
+        ps.Score DESC, 
+        LastUpdated DESC
+    LIMIT 10
+)
+SELECT 
+    tp.Title,
+    tp.ViewCount,
+    tp.Score,
+    tp.CommentCount,
+    tp.AnswerCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.HistoryCount,
+    tp.LastUpdated,
+    u.DisplayName AS Author,
+    CASE 
+        WHEN tp.UtilizedTags IS NULL THEN 'No Tags'
+        ELSE tp.UtilizedTags 
+    END AS Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = tp.PostId);

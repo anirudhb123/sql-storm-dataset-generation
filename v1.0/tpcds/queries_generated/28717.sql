@@ -1,0 +1,67 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        COUNT(DISTINCT ca_address_id) AS address_count,
+        ARRAY_AGG(DISTINCT ca_street_name || ' ' || ca_street_number || ' ' || ca_street_type) AS street_names
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city, ca_state
+),
+Demographics AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        COUNT(DISTINCT cd_demo_sk) AS demographic_count,
+        AVG(cd_purchase_estimate) AS average_purchase_estimate
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender, cd_marital_status
+),
+WebSalesSummary AS (
+    SELECT 
+        ws_bill_addr_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_addr_sk
+),
+FinalReport AS (
+    SELECT 
+        A.ca_city,
+        A.ca_state,
+        A.address_count,
+        D.cd_gender,
+        D.cd_marital_status,
+        D.demographic_count,
+        D.average_purchase_estimate,
+        W.total_sales,
+        W.order_count
+    FROM 
+        AddressDetails A
+    JOIN 
+        customer C ON A.ca_city = C.c_first_name OR A.ca_state = C.c_last_name
+    LEFT JOIN 
+        Demographics D ON C.c_current_cdemo_sk = D.cd_demo_sk
+    LEFT JOIN 
+        WebSalesSummary W ON C.c_current_addr_sk = W.ws_bill_addr_sk
+)
+SELECT 
+    ca_city,
+    ca_state,
+    SUM(address_count) AS total_addresses,
+    COUNT(DISTINCT cd_gender) AS gender_count,
+    SUM(total_sales) AS total_revenue,
+    AVG(average_purchase_estimate) AS avg_purchase_estimate
+FROM 
+    FinalReport
+GROUP BY 
+    ca_city, ca_state
+ORDER BY 
+    total_revenue DESC, total_addresses DESC
+LIMIT 50;

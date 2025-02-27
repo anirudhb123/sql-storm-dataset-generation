@@ -1,0 +1,68 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank,
+        n.n_regionkey
+    FROM
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (
+            SELECT AVG(s2.s_acctbal) 
+            FROM supplier s2 
+            WHERE s2.s_nationkey = n.n_nationkey
+        )
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(l.l_orderkey) AS total_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    ra.total_order_value,
+    ra.total_items,
+    COALESCE(rn.r_name, 'Unknown') AS supplier_region
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+LEFT JOIN 
+    HighValueOrders ra ON ra.o_custkey = (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_nationkey = (
+            SELECT n.n_nationkey 
+            FROM nation n 
+            JOIN supplier s ON n.n_nationkey = s.s_nationkey 
+            WHERE s.s_suppkey = rs.s_suppkey
+            LIMIT 1
+        ) 
+        LIMIT 1
+    )
+LEFT JOIN 
+    nation rn ON rs.n_regionkey = rn.n_nationkey
+WHERE 
+    p.p_size = ANY (ARRAY[10, 20, 30])
+GROUP BY 
+    p.p_partkey, p.p_name, ra.total_order_value, ra.total_items, rn.r_name
+ORDER BY 
+    ra.total_order_value DESC, supplier_count DESC;

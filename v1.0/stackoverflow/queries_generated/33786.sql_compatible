@@ -1,0 +1,71 @@
+
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        0 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        rp.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePosts rp ON p.ParentId = rp.PostId
+), 
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+VoteStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    JOIN Posts p ON v.PostId = p.Id
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY p.OwnerUserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.TotalBounties,
+    u.TotalPosts,
+    u.TotalComments,
+    u.TotalBadges,
+    COALESCE(vs.TotalVotes, 0) AS TotalVotes,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    COUNT(DISTINCT rp.PostId) AS QuestionThreadCount,
+    MAX(rp.CreationDate) AS LastQuestionCreationDate
+FROM UserStats u
+LEFT JOIN VoteStatistics vs ON u.UserId = vs.OwnerUserId
+LEFT JOIN RecursivePosts rp ON u.UserId = rp.OwnerUserId
+WHERE u.Reputation > 100  
+GROUP BY u.DisplayName, u.Reputation, u.TotalBounties, u.TotalPosts, u.TotalComments, u.TotalBadges, vs.TotalVotes, vs.UpVotes, vs.DownVotes
+HAVING COUNT(DISTINCT rp.PostId) > 0  
+ORDER BY u.Reputation DESC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

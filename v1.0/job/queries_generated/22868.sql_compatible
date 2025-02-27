@@ -1,0 +1,62 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        COUNT(DISTINCT cc.person_id) AS cast_count,
+        COALESCE(SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END), 0) AS note_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY NULL) AS row_num
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id 
+    GROUP BY 
+        mt.id, mt.title
+),
+extended_info AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.cast_count,
+        m.note_count,
+        ARRAY_AGG(DISTINCT ko.keyword) AS keywords,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_hierarchy m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword ko ON mk.keyword_id = ko.id
+    LEFT JOIN 
+        movie_companies mc ON m.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        m.movie_id, m.title, m.cast_count, m.note_count
+),
+final_summary AS (
+    SELECT 
+        ei.title,
+        ei.cast_count,
+        ei.note_count,
+        ei.keywords,
+        ei.company_names,
+        ROUND(CAST(ei.cast_count AS numeric) / NULLIF(ei.note_count, 0), 2) AS cast_note_ratio,
+        CASE 
+            WHEN ei.cast_count > 10 THEN 'Large Cast'
+            WHEN ei.cast_count BETWEEN 5 AND 10 THEN 'Medium Cast'
+            ELSE 'Small Cast'
+        END AS cast_size_category
+    FROM 
+        extended_info ei
+    WHERE 
+        ei.note_count < 20 
+        AND ei.cast_count IS NOT NULL
+)
+SELECT * 
+FROM 
+    final_summary 
+ORDER BY 
+    cast_note_ratio DESC;

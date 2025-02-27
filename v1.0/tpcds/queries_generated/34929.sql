@@ -1,0 +1,53 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT ss_store_sk, ss_item_sk, 
+           SUM(ss_quantity) AS total_quantity,
+           SUM(ss_net_paid) AS total_net_paid,
+           ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_paid) DESC) AS rank
+    FROM store_sales
+    GROUP BY ss_store_sk, ss_item_sk
+),
+item_stats AS (
+    SELECT i_item_sk, 
+           COUNT(*) AS purchase_count,
+           AVG(total_net_paid) AS average_net_paid,
+           MAX(total_quantity) AS max_quantity
+    FROM sales_summary
+    JOIN item ON sales_summary.ss_item_sk = item.i_item_sk
+    GROUP BY i_item_sk
+),
+return_details AS (
+    SELECT sr_item_sk, 
+           SUM(sr_return_quantity) AS total_returns,
+           COUNT(*) AS return_count
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+sales_with_returns AS (
+    SELECT ss.ss_store_sk, 
+           ss.ss_item_sk,
+           ss.total_quantity,
+           ss.total_net_paid,
+           coalesce(rd.total_returns, 0) AS total_returns,
+           coalesce(rd.return_count, 0) AS return_count,
+           (ss.total_net_paid - coalesce(rd.total_returns, 0)) AS net_sales_after_returns
+    FROM sales_summary ss
+    LEFT JOIN return_details rd ON ss.ss_item_sk = rd.sr_item_sk
+)
+SELECT s.store_id, 
+       i.i_item_id,
+       ss.total_quantity,
+       ss.total_net_paid,
+       ss.net_sales_after_returns,
+       CASE 
+           WHEN ss.return_count > 0 THEN 'Returns Present'
+           ELSE 'No Returns'
+       END AS return_status,
+       ROW_NUMBER() OVER (ORDER BY ss.net_sales_after_returns DESC) AS sales_rank
+FROM sales_with_returns ss
+JOIN store s ON ss.ss_store_sk = s.s_store_sk
+JOIN item i ON ss.ss_item_sk = i.i_item_sk
+WHERE ss.net_sales_after_returns > 0
+  AND ss.total_quantity > 0
+ORDER BY sales_rank
+LIMIT 100;

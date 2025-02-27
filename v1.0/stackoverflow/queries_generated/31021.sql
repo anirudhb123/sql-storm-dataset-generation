@@ -1,0 +1,69 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id AS PostId, ParentId, Title, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id AS PostId, p.ParentId, p.Title, rp.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rp ON p.ParentId = rp.PostId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,  -- Upvotes
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,  -- Downvotes
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCounts,  -- Closed posts
+        AVG(DATEDIFF(NOW(), p.CreationDate)) AS AvgPostAge  -- Average age of post in days
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CommentCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.CloseCounts,
+        ps.AvgPostAge,
+        ROW_NUMBER() OVER (ORDER BY ps.UpVotes DESC) AS PostRank
+    FROM PostStatistics ps
+    WHERE ps.CommentCount > 5 
+      AND ps.CloseCounts = 0
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    p.Title AS PostTitle,
+    p.CommentCount AS TotalComments,
+    p.UpVotes, 
+    p.DownVotes, 
+    u.DisplayName AS UserDisplayName,
+    ub.BadgeCount AS UserBadgeCount,
+    CASE 
+        WHEN ub.HighestBadgeClass IS NULL THEN 'None'
+        ELSE CASE ub.HighestBadgeClass 
+            WHEN 1 THEN 'Gold'
+            WHEN 2 THEN 'Silver'
+            WHEN 3 THEN 'Bronze'
+        END 
+    END AS UserHighestBadge,
+    rp.Level AS PostLevel,
+    p.AvgPostAge AS AveragePostAgeDays
+FROM TopPosts p
+JOIN Users u ON p.PostId = u.Id
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+JOIN RecursivePostHierarchy rp ON p.PostId = rp.PostId
+WHERE p.PostRank <= 10
+ORDER BY p.UpVotes DESC, p.CommentCount DESC;

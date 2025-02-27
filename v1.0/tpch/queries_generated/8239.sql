@@ -1,0 +1,34 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, RANK() OVER (ORDER BY total_cost DESC) AS rank
+    FROM RankedSuppliers s
+    WHERE total_cost > 10000
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, l.l_partkey, l.l_quantity, l.l_discount, l.l_extendedprice
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+),
+CustomerAggregate AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+FinalReport AS (
+    SELECT ts.s_name, ca.total_spent, SUM(od.l_extendedprice * (1 - od.l_discount)) AS revenue
+    FROM TopSuppliers ts
+    JOIN OrderDetails od ON ts.s_suppkey = od.l_partkey
+    JOIN CustomerAggregate ca ON od.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = ca.c_custkey)
+    GROUP BY ts.s_name, ca.total_spent
+)
+SELECT *
+FROM FinalReport
+WHERE revenue > 50000
+ORDER BY revenue DESC;

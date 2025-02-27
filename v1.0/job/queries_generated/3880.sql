@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS actor_rank
+    FROM 
+        aka_title m
+    JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+ActorCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+TopActors AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        a.name,
+        a.id AS actor_id,
+        ac.actor_count
+    FROM 
+        RankedMovies r
+    JOIN 
+        ActorCounts ac ON r.movie_id = ac.movie_id
+    JOIN 
+        aka_name a ON a.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = r.movie_id)
+    WHERE 
+        r.actor_rank <= 5
+)
+SELECT 
+    ta.title,
+    ta.production_year,
+    COALESCE(GROUP_CONCAT(DISTINCT ta.name || ' (' || ta.actor_id || ')'), 'No Actors') AS actors,
+    COUNT(DISTINCT ta.actor_id) AS total_actors,
+    NULLIF(MAX(ta.actor_count), 0) AS max_actor_count
+FROM 
+    TopActors ta
+GROUP BY 
+    ta.title, ta.production_year
+HAVING 
+    total_actors > 0
+ORDER BY 
+    ta.production_year DESC, total_actors DESC;

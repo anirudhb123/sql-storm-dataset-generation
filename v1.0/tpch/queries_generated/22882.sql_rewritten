@@ -1,0 +1,39 @@
+WITH RECURSIVE PartCounts AS (
+    SELECT ps_partkey, SUM(ps_availqty) AS total_availqty
+    FROM partsupp
+    GROUP BY ps_partkey
+), SupplierStats AS (
+    SELECT s_nationkey, COUNT(s_suppkey) AS total_suppliers, AVG(s_acctbal) AS avg_acct_balance
+    FROM supplier
+    GROUP BY s_nationkey
+), OrderSummary AS (
+    SELECT c.c_name, o.o_orderkey, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rn,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY c.c_nationkey) AS total_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+), NationRevenue AS (
+    SELECT n.n_regionkey, n.n_name, SUM(os.total_revenue) AS nation_revenue
+    FROM nation n
+    LEFT JOIN OrderSummary os ON n.n_nationkey = os.c_nationkey
+    GROUP BY n.n_regionkey, n.n_name
+), ContainerAnalysis AS (
+    SELECT p.p_container, AVG(p.p_retailprice) AS avg_price_per_container
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size BETWEEN 1 AND 10 AND ps.ps_availqty IS NOT NULL
+    GROUP BY p.p_container
+)
+SELECT n.n_name, COALESCE(nr.nation_revenue, 0) AS total_revenue, COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+       CONCAT('Avg Price for ', ca.p_container, ': ', ROUND(ca.avg_price_per_container, 2)) AS container_price_info
+FROM nation n
+LEFT JOIN NationRevenue nr ON n.n_regionkey = nr.n_regionkey
+LEFT JOIN SupplierStats s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN ContainerAnalysis ca ON s.total_suppliers > 0
+WHERE (n.n_name LIKE 'A%' OR n.n_name LIKE 'B%')
+  AND s.avg_acct_balance > (SELECT AVG(s_acctbal) FROM supplier)
+GROUP BY n.n_name, nr.nation_revenue, s.total_suppliers, ca.p_container
+HAVING total_revenue IS NOT NULL
+ORDER BY total_revenue DESC NULLS LAST;

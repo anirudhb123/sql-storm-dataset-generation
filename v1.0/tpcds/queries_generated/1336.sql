@@ -1,0 +1,61 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(ss.ss_ticket_number) AS total_store_sales,
+        COUNT(ws.ws_order_number) AS total_web_sales,
+        SUM(ss.ss_net_profit) AS total_store_profit,
+        SUM(ws.ws_net_profit) AS total_web_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating, cd.cd_purchase_estimate, ca.ca_city, ca.ca_state
+), RankedCustomerStats AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY ca.ca_state ORDER BY total_store_profit DESC) AS store_rank,
+        RANK() OVER (PARTITION BY ca.ca_state ORDER BY total_web_profit DESC) AS web_rank
+    FROM 
+        CustomerStats
+)
+SELECT 
+    r.c_customer_id,
+    r.c_first_name,
+    r.c_last_name,
+    r.cd_gender,
+    r.cd_marital_status,
+    r.total_store_sales,
+    r.total_web_sales,
+    r.total_store_profit,
+    r.total_web_profit,
+    CASE 
+        WHEN r.store_rank <= 10 THEN 'Top Store Customer'
+        ELSE 'Regular Store Customer' 
+    END AS store_customer_status,
+    CASE 
+        WHEN r.web_rank <= 10 THEN 'Top Web Customer'
+        ELSE 'Regular Web Customer' 
+    END AS web_customer_status
+FROM 
+    RankedCustomerStats r
+WHERE 
+    r.total_store_sales > 5 OR r.total_web_sales > 5
+ORDER BY 
+    r.total_store_profit DESC, r.total_web_profit DESC
+LIMIT 100;

@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+HighVolumeItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        item.i_current_price,
+        COALESCE(RankedSales.total_sold, 0) AS total_sold
+    FROM 
+        item
+    LEFT JOIN 
+        RankedSales ON item.i_item_sk = RankedSales.ws_item_sk
+    WHERE 
+        RankedSales.rank_sales IS NOT NULL AND RankedSales.total_sold > 100
+),
+CustomerSegments AS (
+    SELECT 
+        cd_demo_sk,
+        CASE 
+            WHEN cd_income_band_sk IS NULL THEN 'Unknown'
+            WHEN cd_purchase_estimate > 500 THEN 'High Spender'
+            ELSE 'Low Spender'
+        END AS spending_category
+    FROM 
+        customer_demographics
+)
+SELECT 
+    w.w_warehouse_name,
+    COUNT(DISTINCT cu.c_customer_id) AS distinct_customers,
+    SUM(COALESCE(ws.ws_net_profit, 0)) AS total_net_profit,
+    ARRAY_AGG(DISTINCT hvi.i_product_name) AS high_volume_items
+FROM 
+    warehouse w
+LEFT JOIN 
+    web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+LEFT JOIN 
+    customer cu ON ws.ws_bill_customer_sk = cu.c_customer_sk
+LEFT JOIN 
+    HighVolumeItems hvi ON ws.ws_item_sk = hvi.i_item_id
+JOIN 
+    CustomerSegments cs ON cu.c_current_cdemo_sk = cs.cd_demo_sk
+WHERE 
+    w.w_state = 'CA' 
+    AND cs.spending_category = 'High Spender'
+GROUP BY 
+    w.w_warehouse_name
+HAVING 
+    SUM(COALESCE(ws.ws_net_profit, 0)) > 1000
+ORDER BY 
+    total_net_profit DESC;

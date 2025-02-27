@@ -1,0 +1,54 @@
+WITH movie_summary AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        t.id, ak.name
+),
+company_summary AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    ms.movie_id,
+    ms.title,
+    ms.production_year,
+    ms.total_cast,
+    ms.aka_names,
+    cs.company_names,
+    cs.company_types,
+    CHAR_LENGTH(ms.aka_names) AS aka_name_length,
+    CHAR_LENGTH(cs.company_names) AS company_name_length
+FROM 
+    movie_summary ms
+LEFT JOIN 
+    company_summary cs ON ms.movie_id = cs.movie_id
+WHERE 
+    ms.production_year >= 2000
+ORDER BY 
+    ms.production_year DESC, ms.total_cast DESC
+LIMIT 100;

@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS actor_count,
+        DENSE_RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_by_year
+    FROM 
+        aka_title t
+   LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopYearlyMovies AS (
+    SELECT 
+        title, production_year, actor_count 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank_by_year <= 3
+),
+MovieKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords_agg
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    COALESCE(mk.keywords_agg, 'No Keywords') AS keywords,
+    CASE 
+        WHEN tm.actor_count IS NULL THEN 'Unknown'
+        WHEN tm.actor_count = 0 THEN 'No Cast'
+        WHEN tm.actor_count BETWEEN 1 AND 5 THEN 'Low Cast'
+        WHEN tm.actor_count BETWEEN 6 AND 10 THEN 'Moderate Cast'
+        ELSE 'Large Cast'
+    END AS cast_size_category
+FROM 
+    TopYearlyMovies tm
+LEFT JOIN 
+    MovieKeywords mk ON tm.title = mk.movie_id
+WHERE 
+    tm.production_year IS NOT NULL 
+    AND (tm.actor_count > 0 OR mk.keywords_agg IS NOT NULL)
+ORDER BY 
+    tm.production_year DESC, 
+    tm.actor_count DESC;

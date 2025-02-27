@@ -1,0 +1,80 @@
+WITH RankedMovies AS (
+    SELECT 
+        tt.id AS title_id,
+        tt.title,
+        tt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY tt.production_year ORDER BY tt.title) AS rn_year
+    FROM 
+        aka_title tt
+    WHERE 
+        tt.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS cast_with_note
+    FROM
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+TopGenres AS (
+    SELECT
+        mt.movie_id,
+        GROUP_CONCAT(DISTINCT kt.keyword ORDER BY kt.keyword SEPARATOR ', ') AS genres
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword kt ON mk.keyword_id = kt.id
+    JOIN
+        aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY 
+        mt.movie_id
+),
+CombineMovieDetails AS (
+    SELECT
+        tm.title_id,
+        tm.title,
+        tm.production_year,
+        COALESCE(cd.total_cast, 0) AS total_cast,
+        COALESCE(cd.cast_with_note, 0) AS cast_with_note,
+        tg.genres
+    FROM 
+        RankedMovies tm
+    LEFT JOIN 
+        CastDetails cd ON tm.title_id = cd.movie_id
+    LEFT JOIN 
+        TopGenres tg ON tm.title_id = tg.movie_id
+)
+SELECT 
+    cmd.title,
+    cmd.production_year,
+    cmd.total_cast,
+    cmd.cast_with_note,
+    cmd.genres,
+    CASE
+        WHEN cmd.total_cast > 10 THEN 'Epic'
+        WHEN cmd.total_cast BETWEEN 5 AND 10 THEN 'Good'
+        ELSE 'Low'
+    END AS cast_size_category,
+    CASE WHEN cmd.genres IS NOT NULL THEN 'Has Genres' ELSE 'No Genres' END AS genre_status,
+    MAX(ni.info) AS notable_info
+FROM 
+    CombineMovieDetails cmd
+LEFT JOIN 
+    movie_info mi ON cmd.title_id = mi.movie_id
+LEFT JOIN 
+    info_type it ON mi.info_type_id = it.id AND it.info = 'Awards'
+LEFT JOIN 
+    person_info pi ON pi.person_id = (SELECT person_id FROM cast_info c WHERE c.movie_id = cmd.title_id LIMIT 1)
+WHERE 
+    cmd.production_year > 2000 
+    AND cmd.genres NOT LIKE '%Horror%'
+GROUP BY 
+    cmd.title, cmd.production_year, cmd.total_cast, cmd.cast_with_note, cmd.genres
+HAVING 
+    (cast_size_category = 'Low' AND cmd.cast_with_note > 0)
+    OR (cast_size_category <> 'Low')
+ORDER BY 
+    cmd.production_year DESC, cmd.total_cast DESC;

@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        AVG(u.Reputation) AS AvgUserReputation
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%' -- Assuming tags are stored in a comma separated format
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+PopularBadges AS (
+    SELECT 
+        b.Name AS BadgeName,
+        COUNT(b.UserId) AS UserCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.Name
+    HAVING 
+        COUNT(b.UserId) > 5
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.VoteCount,
+    ts.TagName,
+    ts.PostCount,
+    ts.AvgUserReputation,
+    pb.BadgeName,
+    pb.UserCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagStatistics ts ON ts.PostCount > 10 -- Only include tags associated with more than 10 posts
+LEFT JOIN 
+    PopularBadges pb ON pb.UserCount >= 5
+WHERE 
+    rp.RowNum = 1 -- Get the latest update of each post
+ORDER BY 
+    rp.CreationDate DESC, rp.VoteCount DESC
+LIMIT 100;

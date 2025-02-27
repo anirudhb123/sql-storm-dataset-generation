@@ -1,0 +1,64 @@
+
+WITH RECURSIVE CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+), 
+SalesOverview AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_sales,
+        cs.total_orders,
+        cd.cd_gender,
+        hd.hd_income_band_sk,
+        ROW_NUMBER() OVER (ORDER BY cs.total_sales DESC) AS overall_rank
+    FROM 
+        CustomerSales cs
+    LEFT JOIN 
+        customer_demographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        sv.c_customer_sk,
+        sv.c_first_name,
+        sv.c_last_name,
+        sv.total_sales,
+        sv.total_orders,
+        hd.hd_income_band_sk
+    FROM 
+        SalesOverview sv
+    WHERE 
+        sv.total_sales > (SELECT AVG(total_sales) FROM SalesOverview)
+)
+SELECT 
+    sv.c_customer_sk,
+    sv.c_first_name,
+    sv.c_last_name,
+    sv.total_sales,
+    sv.total_orders,
+    COALESCE(hv.hd_income_band_sk, 'Not specified') AS income_band,
+    (SELECT COUNT(*) FROM store_sales ss WHERE ss.ss_customer_sk = sv.c_customer_sk) AS store_purchase_count,
+    DENSE_RANK() OVER (ORDER BY sv.total_sales DESC) AS sales_density
+FROM 
+    SalesOverview sv
+LEFT JOIN 
+    HighValueCustomers hv ON sv.c_customer_sk = hv.c_customer_sk
+WHERE 
+    sv.total_orders > 1
+ORDER BY 
+    sv.total_sales DESC
+LIMIT 50;

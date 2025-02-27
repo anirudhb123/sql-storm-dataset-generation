@@ -1,0 +1,81 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_ship_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS rank 
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sales_price IS NOT NULL
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        cd.cd_marital_status,
+        cd.cd_gender,
+        hd.hd_income_band_sk
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE 
+        cd.cd_credit_rating IS NOT NULL AND 
+        (cd.cd_marital_status = 'M' OR cd.cd_gender = 'F')
+),
+inventory_summary AS (
+    SELECT 
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_stock,
+        MAX(inv_date_sk) AS last_inventory_check
+    FROM 
+        inventory 
+    GROUP BY 
+        inv_item_sk
+),
+sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        SUM(ws_sales_price) AS total_sales_value,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk 
+),
+final_report AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_sold,
+        cs.total_sales_value,
+        COALESCE(is.total_stock, 0) AS available_stock,
+        COALESCE(rs.rank, 0) AS rank_id
+    FROM 
+        sales_summary cs
+    LEFT JOIN 
+        inventory_summary is ON cs.ws_item_sk = is.inv_item_sk
+    LEFT JOIN 
+        ranked_sales rs ON cs.ws_item_sk = rs.ws_item_sk AND rs.rank = 1
+    JOIN 
+        customer_details cd ON cs.ws_item_sk = cd.hd_income_band_sk
+)
+SELECT 
+    f.*,
+    CASE 
+        WHEN f.total_sales_value > 1000 THEN 'High Value'
+        WHEN f.total_sales_value BETWEEN 500 AND 1000 THEN 'Moderate Value'
+        ELSE 'Low Value'
+    END AS sales_category
+FROM 
+    final_report f
+WHERE 
+    f.available_stock > 0 
+    AND (f.total_sold IS NOT NULL OR f.sales_category = 'Low Value')
+ORDER BY 
+    f.total_sales_value DESC;

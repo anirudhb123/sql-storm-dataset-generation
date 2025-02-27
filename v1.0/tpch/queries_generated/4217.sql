@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name AS region_name,
+        supplier.s_name,
+        supplier.total_supply_cost
+    FROM 
+        RankedSuppliers supplier
+    JOIN 
+        nation n ON supplier.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        supplier.rank <= 3
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighSpendingCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.order_count,
+        c.total_spent
+    FROM 
+        CustomerOrders c
+    WHERE 
+        c.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+)
+SELECT 
+    h.customer_name,
+    t.region_name,
+    h.order_count,
+    h.total_spent,
+    (SELECT COUNT(DISTINCT l.l_orderkey) 
+     FROM lineitem l 
+     WHERE l.l_orderkey IN (SELECT o.o_orderkey 
+                            FROM orders o 
+                            WHERE o.o_custkey = h.c_custkey)) AS lineitem_count
+FROM 
+    HighSpendingCustomers h
+LEFT JOIN 
+    TopSuppliers t ON h.c_custkey = (SELECT o.o_custkey 
+                                        FROM orders o 
+                                        WHERE o.o_orderkey = (SELECT MIN(o2.o_orderkey) 
+                                                               FROM orders o2 
+                                                               WHERE o2.o_custkey = h.c_custkey))
+ORDER BY 
+    h.total_spent DESC;

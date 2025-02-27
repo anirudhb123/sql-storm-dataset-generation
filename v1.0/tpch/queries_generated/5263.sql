@@ -1,0 +1,44 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name, n.n_regionkey
+),
+TotalOrderValue AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2022-01-01' 
+      AND o.o_orderdate < DATE '2022-12-31'
+    GROUP BY o.o_orderkey
+),
+SupplierOrderSummary AS (
+    SELECT 
+        r.nation_name,
+        SUM(tov.order_value) AS total_orders,
+        COUNT(DISTINCT rs.s_suppkey) AS unique_suppliers
+    FROM TotalOrderValue tov
+    JOIN RankedSuppliers rs ON rs.total_value > 100000
+    JOIN nation r ON rs.nation_name = r.n_name
+    GROUP BY r.nation_name
+)
+SELECT 
+    sos.nation_name,
+    sos.total_orders,
+    sos.unique_suppliers,
+    CASE 
+        WHEN sos.total_orders > 500000 THEN 'High Value'
+        WHEN sos.total_orders BETWEEN 100000 AND 500000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS order_value_category
+FROM SupplierOrderSummary sos
+WHERE sos.unique_suppliers > 5
+ORDER BY sos.total_orders DESC;

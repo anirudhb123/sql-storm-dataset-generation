@@ -1,0 +1,59 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        c.nr_order,
+        1 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        c.movie_id = (SELECT MIN(movie_id) FROM cast_info)  
+
+    UNION ALL
+
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        c.nr_order,
+        ah.level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        ActorHierarchy ah ON c.movie_id = ah.movie_id  
+)
+
+SELECT 
+    mv.title,
+    mv.production_year,
+    COUNT(DISTINCT ac.actor_name) AS actor_count,
+    STRING_AGG(DISTINCT ac.actor_name, ', ') AS actor_names,
+    COUNT(DISTINCT ni.info) FILTER (WHERE ni.info_type_id = 1) AS genre_count,  
+    SUM(CASE WHEN tc.kind IS NOT NULL THEN 1 ELSE 0 END) AS type_count,
+    COALESCE(cn.name, 'Unknown') AS company_name
+FROM 
+    title mv
+LEFT JOIN 
+    movie_info ni ON mv.id = ni.movie_id
+LEFT JOIN 
+    movie_companies mc ON mv.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    ActorHierarchy ac ON mv.id = ac.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mv.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    kind_type tc ON mv.kind_id = tc.id
+GROUP BY 
+    mv.id, mv.title, mv.production_year, cn.name
+HAVING 
+    COUNT(DISTINCT ac.actor_name) > 0
+ORDER BY 
+    actor_count DESC, mv.production_year ASC
+LIMIT 10;

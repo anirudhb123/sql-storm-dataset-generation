@@ -1,0 +1,65 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        1 AS depth,
+        mt.id AS movie_id,
+        mt.episode_of_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        mt.title,
+        mt.production_year,
+        h.depth + 1,
+        mt.id AS movie_id,
+        mt.episode_of_id
+    FROM 
+        aka_title mt
+    JOIN 
+        MovieHierarchy h ON mt.episode_of_id = h.movie_id
+)
+SELECT 
+    p.name AS person_name,
+    a.title AS movie_title,
+    a.production_year,
+    ARRAY_AGG(DISTINCT kw.keyword) AS keywords,
+    STRING_AGG(DISTINCT c.name, ', ') AS companies,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    MAX(CASE WHEN p.gender = 'M' THEN ci.nr_order ELSE NULL END) AS highest_male_role_order,
+    SUM(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS female_count
+FROM 
+    MovieHierarchy mh
+JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id
+JOIN 
+    aka_name p ON p.person_id = ci.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword kw ON kw.id = mk.keyword_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    company_name c ON c.id = mc.company_id
+WHERE 
+    mh.production_year >= 2000
+GROUP BY 
+    p.name, a.title, a.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 2
+ORDER BY 
+    mh.production_year DESC, total_cast DESC;
+
+### Explanation:
+- The query uses a recursive Common Table Expression (CTE) `MovieHierarchy` to explore movies and their episodes, allowing you to organize the data hierarchically.
+- It selects various details including the person name, movie title, production year, keywords associated with movies, and companies involved in the production.
+- Data is aggregated to count distinct cast members and calculate the highest order role for male cast members.
+- The result is filtered to include only movies produced from the year 2000 onwards, with a HAVING clause to only include movies with more than two cast members.
+- Finally, the results are ordered by production year in descending order and total cast count in descending order for performance benchmarking.

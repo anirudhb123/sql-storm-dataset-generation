@@ -1,0 +1,43 @@
+WITH SupplierAvailability AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT ro.o_orderkey) AS total_orders,
+        SUM(ro.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN RecentOrders ro ON c.c_custkey = ro.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    c.c_name,
+    COALESCE(c.total_orders, 0) AS total_orders,
+    COALESCE(c.total_spent, 0) AS total_spent,
+    COUNT(DISTINCT pa.p_partkey) AS distinct_parts_supplied,
+    SUM(s.total_available_qty) AS total_available_qty,
+    AVG(s.avg_supply_cost) AS avg_supply_cost
+FROM CustomerOrderSummary c
+LEFT JOIN SupplierAvailability s ON c.total_orders > 0
+LEFT JOIN partsupp ps ON ps.ps_availqty > 0
+LEFT JOIN part pa ON ps.ps_partkey = pa.p_partkey
+GROUP BY c.c_name
+ORDER BY total_spent DESC, total_orders DESC;

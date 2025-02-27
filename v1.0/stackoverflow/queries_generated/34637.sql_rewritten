@@ -1,0 +1,87 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL  
+    
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.ParentId,
+        p2.CreationDate,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p2.ParentId = rph.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        PostCount, 
+        Upvotes, 
+        Downvotes,
+        RANK() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM 
+        UserReputation
+)
+SELECT 
+    rph.PostId,
+    rph.Title AS QuestionTitle,
+    rph.Level,
+    ru.DisplayName AS TopContributor,
+    ru.Reputation AS ContributorReputation,
+    ru.PostCount AS ContributorsPostCount,
+    COALESCE(TotalVotes.Upvotes, 0) AS TotalUpvotes,
+    COALESCE(TotalVotes.Downvotes, 0) AS TotalDownvotes
+FROM 
+    RecursivePostHierarchy rph
+LEFT JOIN 
+    Posts p ON rph.PostId = p.Id
+LEFT JOIN 
+    TopUsers ru ON p.OwnerUserId = ru.UserId
+LEFT JOIN (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+) AS TotalVotes ON p.Id = TotalVotes.PostId
+WHERE 
+    rph.Level = 1 
+AND 
+    (ru.Reputation > 1000 OR ru.Reputation IS NULL) 
+ORDER BY 
+    rph.CreationDate DESC, ru.Reputation DESC;

@@ -1,0 +1,33 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+      AND o.o_orderdate >= DATE '1997-01-01'
+),
+TotalSales AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN RankedOrders ro ON l.l_orderkey = ro.o_orderkey
+    GROUP BY l.l_orderkey
+),
+CountryStats AS (
+    SELECT n.n_name AS country, SUM(ts.total_sales) AS total_sales_by_country
+    FROM TotalSales ts
+    JOIN orders o ON ts.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+),
+AvgSales AS (
+    SELECT AVG(total_sales_by_country) AS avg_sales
+    FROM CountryStats
+)
+SELECT cs.country, cs.total_sales_by_country, 
+       (cs.total_sales_by_country - as.avg_sales) / as.avg_sales * 100 AS sales_variation_percentage
+FROM CountryStats cs, AvgSales as
+WHERE cs.total_sales_by_country > as.avg_sales
+ORDER BY sales_variation_percentage DESC
+LIMIT 10;

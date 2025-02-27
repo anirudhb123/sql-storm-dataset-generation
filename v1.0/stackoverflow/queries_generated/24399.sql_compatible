@@ -1,0 +1,101 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Votes v
+            WHERE v.PostId = p.Id AND v.VoteTypeId = 2 
+        ), 0) AS Upvotes,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Votes v
+            WHERE v.PostId = p.Id AND v.VoteTypeId = 3 
+        ), 0) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COALESCE(p.Score, 0) DESC) AS Rank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 30 DAY)
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(COALESCE(bp.BadgeCount, 0)) AS BadgeCount,
+        (SELECT COUNT(*) FROM Comments c WHERE c.UserId = u.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            b.UserId,
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges b
+        GROUP BY 
+            b.UserId
+    ) bp ON bp.UserId = u.Id
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+MergedPostData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        us.DisplayName AS Author,
+        rp.Upvotes,
+        rp.Downvotes,
+        us.QuestionCount,
+        us.BadgeCount,
+        us.CommentCount,
+        CASE 
+            WHEN rp.Upvotes > rp.Downvotes THEN 'Positive'
+            WHEN rp.Upvotes < rp.Downvotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS PostSentiment
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserStats us ON rp.OwnerUserId = us.UserId
+)
+
+SELECT 
+    mp.PostId,
+    mp.Title,
+    mp.Author,
+    mp.Upvotes,
+    mp.Downvotes,
+    mp.QuestionCount,
+    mp.BadgeCount,
+    mp.CommentCount,
+    mp.PostSentiment,
+    CASE 
+        WHEN mp.Upvotes IS NULL OR mp.Downvotes IS NULL THEN 'Vote data incomplete'
+        ELSE CONCAT('Votes: ', mp.Upvotes + mp.Downvotes)
+    END AS VoteSummary,
+    (SELECT GROUP_CONCAT(CONCAT(c.Text, ' (', DATE(c.CreationDate), ')') SEPARATOR '; ')
+     FROM Comments c
+     WHERE c.PostId = mp.PostId) AS CommentsSummary
+FROM 
+    MergedPostData mp
+WHERE 
+    mp.QuestionCount > 5 AND 
+    NOT EXISTS (
+        SELECT 1
+        FROM Votes v
+        WHERE v.PostId = mp.PostId AND v.VoteTypeId = 10 
+    )
+ORDER BY 
+    mp.Upvotes DESC, 
+    mp.QuestionCount DESC
+LIMIT 50;

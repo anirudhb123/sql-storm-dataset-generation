@@ -1,0 +1,84 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseCounts,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteCounts,
+        MAX(ph.CreationDate) AS LastActionDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(COALESCE(b.Class, 0)) AS BadgeScore,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+QuestionsWithStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        p.TotalBounty AS usdTotalBounty,
+        p.CloseCounts,
+        p.DeleteCounts,
+        us.BadgeScore,
+        us.TotalVotes,
+        ROW_NUMBER() OVER (ORDER BY rp.Score DESC, rp.ViewCount DESC) AS rnk
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistorySummary p ON rp.PostId = p.PostId
+    LEFT JOIN 
+        UserStatistics us ON rp.OwnerUserId = us.UserId
+)
+SELECT 
+    qws.PostId,
+    qws.Title,
+    qws.CreationDate,
+    qws.Score,
+    qws.ViewCount,
+    COALESCE(qws.CloseCounts, 0) AS CloseCounts,
+    COALESCE(qws.DeleteCounts, 0) AS DeleteCounts,
+    COALESCE(us.BadgeScore, 0) AS BadgeScore,
+    CASE 
+        WHEN qws.TotalVotes > 0 THEN 'Active'
+        WHEN us.BadgeScore > 0 THEN 'Contributing'
+        ELSE 'Unknown'
+    END AS UserActivityStatus
+FROM 
+    QuestionsWithStats qws
+LEFT JOIN 
+    Users u ON qws.OwnerUserId = u.Id
+WHERE 
+    qws.rnk <= 10
+    AND (qws.CloseCounts > 0 OR qws.DeleteCounts > 0)
+ORDER BY 
+    qws.CloseCounts DESC, qws.DeleteCounts DESC, qws.Score DESC;

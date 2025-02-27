@@ -1,0 +1,71 @@
+WITH StringMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        LENGTH(p.Body) AS BodyLength,
+        LENGTH(p.Title) AS TitleLength,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS UniqueVoters,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body
+),
+BenchmarkResults AS (
+    SELECT 
+        PostId,
+        Title,
+        BodyLength,
+        TitleLength,
+        CommentCount,
+        UniqueVoters,
+        BadgeCount,
+        EditCount,
+        TagsList,
+        RANK() OVER (ORDER BY BodyLength DESC) AS BodyLengthRank,
+        RANK() OVER (ORDER BY TitleLength DESC) AS TitleLengthRank,
+        RANK() OVER (ORDER BY CommentCount DESC) AS CommentCountRank,
+        RANK() OVER (ORDER BY UniqueVoters DESC) AS UniqueVotersRank,
+        RANK() OVER (ORDER BY BadgeCount DESC) AS BadgeCountRank,
+        RANK() OVER (ORDER BY EditCount DESC) AS EditCountRank
+    FROM 
+        StringMetrics
+)
+SELECT 
+    PostId,
+    Title,
+    BodyLength,
+    TitleLength,
+    CommentCount,
+    UniqueVoters,
+    BadgeCount,
+    EditCount,
+    TagsList,
+    BodyLengthRank,
+    TitleLengthRank,
+    CommentCountRank,
+    UniqueVotersRank,
+    BadgeCountRank,
+    EditCountRank
+FROM 
+    BenchmarkResults
+WHERE 
+    BodyLength > 1000 -- Filtering to see posts with substantial body text
+ORDER BY 
+    BodyLength DESC, CommentCount DESC;

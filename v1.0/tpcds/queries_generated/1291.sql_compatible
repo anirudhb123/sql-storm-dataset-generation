@@ -1,0 +1,54 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_profit) DESC) AS site_rank
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    GROUP BY 
+        ws.web_site_id
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(ROUND((cd.cd_dep_count + 1) * 1.5), 0) AS adjusted_dep_count,
+        CASE 
+            WHEN cd.cd_purchase_estimate > 500 THEN 'High Value' 
+            WHEN cd.cd_purchase_estimate BETWEEN 100 AND 500 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender IS NOT NULL
+)
+SELECT 
+    cs.c_customer_id,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.customer_value,
+    COALESCE(ss.total_profit, 0) AS total_profit,
+    COALESCE(ss.total_orders, 0) AS total_orders,
+    ss.avg_sales_price,
+    CASE 
+        WHEN cs.cd_marital_status = 'M' AND cs.adjusted_dep_count >= 2 THEN 'Family'
+        ELSE 'Individual'
+    END AS customer_type
+FROM 
+    customer_summary cs
+LEFT JOIN 
+    sales_summary ss ON cs.c_customer_id = ss.web_site_id
+WHERE 
+    ss.site_rank IS NULL OR ss.total_profit > 1000
+ORDER BY 
+    cs.customer_value, total_profit DESC;

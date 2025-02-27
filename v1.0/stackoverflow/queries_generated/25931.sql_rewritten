@@ -1,0 +1,68 @@
+WITH TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        AVG(P.CreationDate) AS AvgPostDate
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        T.TagName
+),
+UserActivity AS (
+    SELECT 
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpvoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownvoteCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id AND P.PostTypeId = 1 
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id
+    GROUP BY 
+        U.DisplayName
+),
+CloseReasons AS (
+    SELECT 
+        P.Id AS PostId,
+        PH.CreationDate AS CloseDate,
+        CR.Name AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CR ON PH.Comment::int = CR.Id
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10 
+)
+SELECT 
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews,
+    TS.TotalScore,
+    UA.DisplayName AS ActiveUser,
+    UA.QuestionCount,
+    UA.TotalScore AS UserScore,
+    UA.UpvoteCount,
+    UA.DownvoteCount,
+    CR.CloseDate,
+    CR.CloseReason
+FROM 
+    TagStats TS
+LEFT JOIN 
+    UserActivity UA ON UA.QuestionCount > 0
+LEFT JOIN 
+    CloseReasons CR ON CR.PostId = (SELECT Id FROM Posts WHERE Tags LIKE '%' || TS.TagName || '%' LIMIT 1)
+ORDER BY 
+    TS.TotalScore DESC, 
+    UA.TotalScore DESC
+LIMIT 10;

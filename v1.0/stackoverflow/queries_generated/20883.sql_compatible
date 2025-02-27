@@ -1,0 +1,89 @@
+
+WITH RecentVotes AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotesCount,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY V.CreationDate DESC) AS VoteRank
+    FROM Votes V
+    JOIN Posts P ON V.PostId = P.Id
+    WHERE V.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '90 days'
+    GROUP BY P.Id
+), PostDetails AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        PT.Name AS PostType,
+        U.DisplayName AS Owner,
+        COALESCE(RC.RecentCloseCount, 0) AS RecentCloseCount,
+        COALESCE(AV.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        RH.Revisions,
+        RV.UpVotesCount,
+        RV.DownVotesCount,
+        (COALESCE(RV.UpVotesCount, 0) - COALESCE(RV.DownVotesCount, 0)) AS NetVotes
+    FROM Posts P
+    JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN (
+        SELECT 
+            PH.PostId,
+            COUNT(PH.Id) AS RecentCloseCount
+        FROM PostHistory PH
+        WHERE PH.PostHistoryTypeId IN (10, 11) 
+        AND PH.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '180 days'
+        GROUP BY PH.PostId
+    ) RC ON P.Id = RC.PostId
+    LEFT JOIN RecentVotes RV ON P.Id = RV.PostId
+    LEFT JOIN (
+        SELECT 
+            AcceptedAnswerId,
+            PostId,
+            ROW_NUMBER() OVER (PARTITION BY PostId ORDER BY CreationDate DESC) AS RevCount
+        FROM Posts
+        WHERE AcceptedAnswerId IS NOT NULL
+    ) AV ON P.Id = AV.PostId
+    LEFT JOIN (
+        SELECT 
+            PH.PostId,
+            COUNT(PH.Id) AS Revisions
+        FROM PostHistory PH
+        WHERE PH.CreationDate IS NOT NULL
+        GROUP BY PH.PostId
+    ) RH ON P.Id = RH.PostId
+), FinalResults AS (
+    SELECT 
+        PD.Id,
+        PD.Title,
+        PD.PostType,
+        PD.Owner,
+        PD.RecentCloseCount,
+        PD.AcceptedAnswerId,
+        PD.Revisions,
+        PD.UpVotesCount,
+        PD.DownVotesCount,
+        PD.NetVotes,
+        CASE 
+            WHEN PD.NetVotes > 0 THEN 'Popular'
+            WHEN PD.RecentCloseCount > 0 THEN 'Closed Recently'
+            ELSE 'Neutral'
+        END AS PostStatus,
+        CONCAT('Post Title: ', PD.Title, ' | Votes: ', PD.NetVotes) AS PostDescription
+    FROM PostDetails PD
+)
+SELECT 
+    FR.Id AS PostId,
+    FR.Title,
+    FR.PostType,
+    FR.Owner,
+    FR.RecentCloseCount,
+    FR.AcceptedAnswerId,
+    FR.Revisions,
+    FR.UpVotesCount,
+    FR.DownVotesCount,
+    FR.NetVotes,
+    FR.PostStatus,
+    FR.PostDescription
+FROM FinalResults FR
+WHERE FR.RecentCloseCount > 0 
+   OR FR.NetVotes > 10
+ORDER BY FR.NetVotes DESC, FR.RecentCloseCount DESC;

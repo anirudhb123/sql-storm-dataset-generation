@@ -1,0 +1,20 @@
+
+SELECT
+    c.c_customer_id,
+    COUNT(ss.ticket_number) AS total_sales,
+    SUM(ss.ext_sales_price) AS total_revenue,
+    AVG(ss.ext_sales_price) AS average_order_value,
+    COUNT(DISTINCT ss.ticket_number) AS unique_orders
+FROM
+    customer c
+JOIN
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+JOIN
+    date_dim d ON ss.sold_date_sk = d.d_date_sk
+WHERE
+    d.d_year = 2023
+GROUP BY
+    c.c_customer_id
+ORDER BY
+    total_revenue DESC
+LIMIT 100;

@@ -1,0 +1,90 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        1 AS level,
+        COALESCE(ak.name, 'Unknown Actor') AS actor_name
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        ci.role_id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        ah.level + 1,
+        COALESCE(ak.name, 'Unknown Actor')
+    FROM 
+        cast_info ci
+    JOIN 
+        ActorHierarchy ah ON ci.movie_id = ah.movie_id 
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        ci.role_id IS NOT NULL AND ah.level < 3
+),
+
+MoviesWithDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+        COUNT(DISTINCT c.id) AS number_of_roles,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        title t
+    INNER JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = c.person_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN 
+        company_name cn ON cn.id = mc.company_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+
+MovieRatings AS (
+    SELECT 
+        m.movie_id,
+        AVG(CASE WHEN mr.rating IS NOT NULL THEN mr.rating ELSE 0 END) AS average_rating
+    FROM 
+        movie_info m
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            info 
+         FROM 
+            movie_info 
+         WHERE 
+            info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')) mr ON m.movie_id = mr.movie_id
+    GROUP BY 
+        m.movie_id
+) 
+
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_names,
+    md.number_of_roles,
+    md.company_count,
+    COALESCE(mr.average_rating, 0) AS average_rating,
+    ah.level AS actor_hierarchy_level
+FROM 
+    MoviesWithDetails md
+LEFT JOIN 
+    MovieRatings mr ON mr.movie_id = md.movie_id
+JOIN 
+    ActorHierarchy ah ON ah.movie_id = md.movie_id
+WHERE 
+    md.production_year BETWEEN 2000 AND 2023
+    AND md.number_of_roles >= 3
+ORDER BY 
+    md.production_year DESC, 
+    mr.average_rating DESC;

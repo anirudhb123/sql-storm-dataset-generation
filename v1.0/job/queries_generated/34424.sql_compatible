@@ -1,0 +1,77 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    
+    SELECT
+        c1.person_id AS actor_id,
+        c1.movie_id,
+        1 AS depth
+    FROM
+        cast_info c1
+    UNION ALL
+    SELECT
+        c2.person_id,
+        c2.movie_id,
+        a.depth + 1
+    FROM
+        cast_info c2
+    INNER JOIN actor_hierarchy a ON c2.movie_id = a.movie_id
+    WHERE
+        c2.person_id <> a.actor_id
+),
+movie_year_info AS (
+    
+    SELECT
+        t.title,
+        t.production_year,
+        t.id AS movie_id
+    FROM
+        title t
+),
+actor_details AS (
+    
+    SELECT
+        a.name AS actor_name,
+        c.role_id,
+        m.production_year,
+        a.id AS person_id
+    FROM
+        aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    JOIN movie_year_info m ON c.movie_id = m.movie_id
+),
+ranked_actors AS (
+    
+    SELECT
+        actor_name,
+        COUNT(*) AS movie_count,
+        RANK() OVER (ORDER BY COUNT(*) DESC) AS actor_rank
+    FROM
+        actor_details
+    GROUP BY
+        actor_name
+),
+co_actor_summary AS (
+    
+    SELECT
+        ah.actor_id,
+        COUNT(DISTINCT ah.movie_id) AS co_star_count
+    FROM
+        actor_hierarchy ah
+    GROUP BY
+        ah.actor_id
+)
+SELECT
+    ra.actor_name,
+    ra.movie_count,
+    COALESCE(co.co_star_count, 0) AS co_star_count,
+    CASE 
+        WHEN ra.movie_count > 10 THEN 'Prolific Actor'
+        ELSE 'Novice'
+    END AS classification
+FROM
+    ranked_actors ra
+LEFT JOIN co_actor_summary co ON ra.actor_name = co.actor_id
+WHERE
+    ra.actor_rank <= 10
+ORDER BY
+    ra.movie_count DESC, ra.actor_name;

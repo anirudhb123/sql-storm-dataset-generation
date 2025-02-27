@@ -1,0 +1,80 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation IS NOT NULL
+),
+PostVoteStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 2) AS Upvotes,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 3) AS Downvotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+),
+FlaggedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS RecentEdit,
+        PH.UserId,
+        PH.Comment AS ClosureReason
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10  
+    OR 
+        PH.PostHistoryTypeId = 11  
+),
+TopUsersWithClosedPosts AS (
+    SELECT 
+        UR.DisplayName,
+        COUNT(DISTINCT FP.PostId) AS ClosedPostCount
+    FROM 
+        UserReputation UR
+    JOIN 
+        Comments C ON UR.UserId = C.UserId
+    JOIN 
+        FlaggedPosts FP ON FP.UserId = C.UserId
+    GROUP BY 
+        UR.DisplayName
+    HAVING 
+        COUNT(DISTINCT FP.PostId) > 5
+)
+SELECT 
+    PU.DisplayName,
+    PU.Reputation,
+    PU.ReputationRank,
+    COALESCE(VS.Upvotes, 0) AS TotalUpvotes,
+    COALESCE(VS.Downvotes, 0) AS TotalDownvotes,
+    TUC.ClosedPostCount,
+    CASE 
+        WHEN PU.Reputation IS NULL OR PU.Reputation < 0 THEN 'Reputation Not Available'
+        ELSE 'Reputation Available'
+    END AS ReputationStatus,
+    STUFF(
+        (SELECT '; ' + PH.Reason
+         FROM Comments AS PH
+         WHERE PH.UserId = PU.UserId
+         FOR XML PATH('')), 1, 2, '') AS RecentComments
+FROM 
+    UserReputation PU
+LEFT JOIN 
+    PostVoteStatistics VS ON PU.UserId = VS.PostId
+LEFT JOIN 
+    TopUsersWithClosedPosts TUC ON PU.DisplayName = TUC.DisplayName
+WHERE 
+    PU.ReputationRank <= 10 AND
+    PU.DisplayName IS NOT NULL
+ORDER BY 
+    PU.Reputation DESC;

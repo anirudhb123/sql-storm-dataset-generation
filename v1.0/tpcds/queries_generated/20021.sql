@@ -1,0 +1,59 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_sales_price, 
+        ws_net_profit,
+        SUM(ws_quantity) OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > (SELECT AVG(ws_sales_price) FROM web_sales) 
+        AND ws_order_number IN (
+            SELECT DISTINCT ws_order_number FROM web_sales WHERE ws_item_sk IS NOT NULL
+        )
+), 
+TopSales AS (
+    SELECT 
+        sd.ws_item_sk, 
+        sd.ws_order_number, 
+        sd.ws_sales_price,
+        sd.ws_net_profit,
+        CASE 
+            WHEN sd.total_quantity > 100 THEN 'High Volume' 
+            WHEN sd.total_quantity BETWEEN 50 AND 100 THEN 'Medium Volume' 
+            ELSE 'Low Volume' 
+        END AS volume_category
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.rn <= 10
+)
+SELECT 
+    c.c_customer_id, 
+    ca.ca_city, 
+    ca.ca_state, 
+    ts.ws_item_sk, 
+    ts.volume_category,
+    SUM(ts.ws_net_profit) AS total_net_profit,
+    COUNT(ts.ws_order_number) AS order_count
+FROM 
+    TopSales ts
+JOIN 
+    customer c ON c.c_customer_sk = (SELECT c_customer_sk FROM web_sales WHERE ws_item_sk = ts.ws_item_sk LIMIT 1)
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+GROUP BY 
+    c.c_customer_id, 
+    ca.ca_city, 
+    ca.ca_state, 
+    ts.ws_item_sk, 
+    ts.volume_category
+HAVING 
+    total_net_profit > 5000
+ORDER BY 
+    total_net_profit DESC, 
+    c.c_customer_id
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

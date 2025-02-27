@@ -1,0 +1,60 @@
+
+WITH regional_sales AS (
+    SELECT 
+        w.w_warehouse_name,
+        SUM(ss.ss_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY w.w_warehouse_name ORDER BY SUM(ss.ss_sales_price) DESC) AS sales_rank
+    FROM store_sales ss
+    JOIN warehouse w ON ss.ss_store_sk = w.w_warehouse_sk
+    WHERE ss.ss_sold_date_sk IN (
+        SELECT d.d_date_sk 
+        FROM date_dim d 
+        WHERE d.d_year = 2023 AND d.d_month_seq IN (1, 2, 3)
+    )
+    GROUP BY w.w_warehouse_name
+),
+demographic_analysis AS (
+    SELECT 
+        cd.cd_gender,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(DISTINCT c.c_customer_id) AS unique_customers
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_marital_status = 'M'
+    GROUP BY cd.cd_gender
+),
+return_analysis AS (
+    SELECT
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS unique_tickets
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+performance_metrics AS (
+    SELECT
+        r.sales_rank,
+        da.cd_gender,
+        da.avg_purchase_estimate,
+        ra.total_returns,
+        ra.unique_tickets
+    FROM regional_sales r
+    FULL OUTER JOIN demographic_analysis da ON r.w_warehouse_name = da.cd_gender
+    FULL OUTER JOIN return_analysis ra ON r.w_warehouse_name = CAST(ra.sr_item_sk AS VARCHAR)
+)
+
+SELECT 
+    COALESCE(w.w_warehouse_name, 'Unknown') AS warehouse,
+    COALESCE(da.cd_gender, 'Not Specified') AS gender,
+    pm.avg_purchase_estimate,
+    ra.total_returns,
+    ra.unique_tickets,
+    CASE 
+        WHEN pm.avg_purchase_estimate IS NULL THEN 'No Data'
+        ELSE ROUND(pm.avg_purchase_estimate, 2)
+    END AS rounded_avg_purchase
+FROM performance_metrics pm
+LEFT JOIN warehouse w ON pm.sales_rank = w.w_warehouse_sk
+LEFT JOIN customer_demographics da ON pm.cd_gender = da.cd_gender
+WHERE (pm.total_returns IS NULL OR pm.total_returns > 5)
+ORDER BY pm.total_returns DESC NULLS LAST;

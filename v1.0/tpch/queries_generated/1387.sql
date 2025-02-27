@@ -1,0 +1,52 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name
+    FROM 
+        CustomerOrders c
+    WHERE 
+        c.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+)
+SELECT 
+    n.n_name, 
+    COUNT(DISTINCT h.c_custkey) AS high_value_customer_count, 
+    SUM(rs.total_supply_cost) AS total_supplier_cost
+FROM 
+    nation n
+LEFT JOIN 
+    HighValueCustomers h ON n.n_nationkey = h.c_nationkey
+LEFT JOIN 
+    RankedSuppliers rs ON n.n_nationkey = rs.s_nationkey
+WHERE 
+    rs.rank <= 5 OR rs.rank IS NULL
+GROUP BY 
+    n.n_name
+ORDER BY 
+    high_value_customer_count DESC, 
+    total_supplier_cost DESC;

@@ -1,0 +1,90 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.Id
+), 
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE 
+                WHEN v.VoteTypeId = 2 THEN 1 
+                WHEN v.VoteTypeId = 3 THEN -1 
+                ELSE 0 
+            END) AS ReputationScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostsAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ph.Level,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE 
+                WHEN ph.Level > 0 THEN 1 
+                ELSE 0 
+            END) AS ChildPostsCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHierarchy ph ON p.Id = ph.Id
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, u.DisplayName, ph.Level
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        ROW_NUMBER() OVER (ORDER BY ReputationScore DESC) AS UserRank
+    FROM 
+        UserReputation
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.Score,
+    pa.CreationDate,
+    pa.OwnerDisplayName,
+    pa.CommentCount,
+    pa.ChildPostsCount,
+    tu.UserRank
+FROM 
+    PostsAnalytics pa
+LEFT JOIN 
+    TopUsers tu ON pa.OwnerDisplayName = tu.DisplayName
+WHERE 
+    pa.Score > 0 
+    AND (pa.ChildPostsCount > 0 OR pa.CommentCount > 5)
+ORDER BY 
+    tu.UserRank,
+    pa.CreationDate DESC;

@@ -1,0 +1,49 @@
+
+WITH AddressCounts AS (
+    SELECT 
+        ca_state,
+        LEFT(ca_city, 3) AS city_prefix,
+        COUNT(*) AS total_addresses
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state, LEFT(ca_city, 3)
+),
+TopStates AS (
+    SELECT 
+        ca_state,
+        SUM(total_addresses) AS state_total
+    FROM 
+        AddressCounts
+    GROUP BY 
+        ca_state
+    ORDER BY 
+        state_total DESC 
+    LIMIT 5
+),
+Promotions AS (
+    SELECT 
+        p.p_promo_name, 
+        p.p_start_date_sk, 
+        p.p_end_date_sk,
+        COUNT(*) AS promo_count
+    FROM 
+        promotion p 
+    JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_name, p.p_start_date_sk, p.p_end_date_sk
+)
+SELECT 
+    ts.ca_state,
+    ac.city_prefix,
+    ac.total_addresses,
+    p.p_promo_name,
+    p.promo_count
+FROM 
+    TopStates ts
+JOIN 
+    AddressCounts ac ON ts.ca_state = ac.ca_state
+JOIN 
+    Promotions p ON ac.city_prefix IN (SELECT DISTINCT LEFT(ws.web_page_id, 3) FROM web_page ws)
+ORDER BY 
+    ts.state_total DESC, ac.total_addresses DESC, p.promo_count DESC;

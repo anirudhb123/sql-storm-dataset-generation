@@ -1,0 +1,39 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey AND s.s_suppkey != sh.s_suppkey
+)
+, RegionStats AS (
+    SELECT r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count,
+           SUM(s.s_acctbal) AS total_acctbal, AVG(s.s_acctbal) AS avg_acctbal
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name
+)
+SELECT p.p_name, 
+       COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+       MAX(ps.ps_supplycost) AS max_supply_cost,
+       MIN(ps.ps_supplycost) AS min_supply_cost,
+       SUM(CASE WHEN ps.ps_availqty IS NULL THEN 0 ELSE ps.ps_availqty END) AS total_avail_qty,
+       ROW_NUMBER() OVER (PARTITION BY p.p_name ORDER BY SUM(ps.ps_supplycost) DESC) AS rank,
+       (SELECT COUNT(*) FROM lineitem l 
+        WHERE l.l_partkey = p.p_partkey AND l.l_returnflag = 'R' 
+        GROUP BY l.l_orderkey) AS return_order_count
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN RegionStats rs ON sh.s_nationkey = rs.nation_count
+WHERE p.p_size BETWEEN 1 AND 20
+AND (ps.ps_availqty = 0 OR (ps.ps_supplycost < (SELECT AVG(ps2.ps_supplycost) FROM partsupp ps2 WHERE ps2.ps_availqty > 0)) )
+GROUP BY p.p_partkey
+HAVING COUNT(DISTINCT ps.ps_suppkey) > 1 AND 
+       MAX(ps.ps_supplycost) > COALESCE((SELECT AVG(ps_supplycost) FROM partsupp), 0)
+ORDER BY rank, total_avail_qty DESC
+LIMIT 10;

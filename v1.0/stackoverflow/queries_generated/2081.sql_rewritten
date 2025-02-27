@@ -1,0 +1,76 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(V.BountyAmount) AS TotalBounties
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(C.Id) AS CommentCount,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.BadgeCount,
+    U.TotalBounties,
+    P.PostId,
+    P.Title,
+    P.CommentCount,
+    P.UpVotes,
+    P.DownVotes
+FROM 
+    UserReputation U
+JOIN 
+    PostActivity P ON U.UserId = P.OwnerUserId
+WHERE 
+    U.Reputation IS NOT NULL AND
+    P.CommentCount > 5
+ORDER BY 
+    U.Reputation DESC, 
+    P.UpVotes - P.DownVotes DESC
+FETCH FIRST 10 ROWS ONLY
+UNION ALL
+SELECT 
+    'Unattributed' AS DisplayName,
+    0 AS Reputation,
+    0 AS BadgeCount,
+    0 AS TotalBounties,
+    P.PostId,
+    P.Title,
+    P.CommentCount,
+    P.UpVotes,
+    P.DownVotes
+FROM 
+    PostActivity P
+WHERE 
+    P.PostRank IS NULL
+AND 
+    P.CommentCount <= 5
+ORDER BY 
+    P.UpVotes DESC;

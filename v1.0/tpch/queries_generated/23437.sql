@@ -1,0 +1,61 @@
+WITH RankedNations AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        n.n_regionkey, 
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY COUNT(DISTINCT s.s_suppkey) DESC) AS supplier_rank
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name, n.n_regionkey
+),
+PartStatistics AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers
+    FROM 
+        part p 
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+)
+SELECT 
+    pn.n_name AS nation,
+    ps.p_name AS part_name,
+    ps.total_available_qty,
+    ps.avg_supply_cost,
+    c.c_name AS customer_name,
+    hc.total_order_value
+FROM 
+    RankedNations pn
+FULL OUTER JOIN 
+    PartStatistics ps ON ps.num_suppliers >= pn.supplier_rank
+LEFT JOIN 
+    HighValueCustomers hc ON hc.total_order_value > (0.5 * ps.total_available_qty * ps.avg_supply_cost)
+WHERE 
+    ps.total_available_qty IS NOT NULL 
+    AND (hc.total_order_value IS NULL OR hc.total_order_value > (SELECT STDDEV(total_order_value) FROM HighValueCustomers))
+ORDER BY 
+    pn.n_name, ps.p_name;

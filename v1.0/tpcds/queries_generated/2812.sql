@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.sold_date_sk,
+        ws.item_sk,
+        ws.sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.item_sk ORDER BY ws.sold_date_sk DESC) AS rank,
+        DENSE_RANK() OVER (ORDER BY ws.sales_price DESC) AS price_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sales_price IS NOT NULL
+),
+TotalReturns AS (
+    SELECT 
+        COALESCE(SUM(wr.return_quantity), 0) AS total_web_returns,
+        COALESCE(SUM(sr.return_quantity), 0) AS total_store_returns,
+        wr.item_sk
+    FROM 
+        web_returns wr
+    FULL OUTER JOIN 
+        store_returns sr ON wr.item_sk = sr.sr_item_sk
+    GROUP BY 
+        wr.item_sk
+),
+HighValueItems AS (
+    SELECT 
+        r.item_sk, 
+        r.sales_price, 
+        r.rank,
+        r.price_rank,
+        COALESCE(tr.total_web_returns, 0) AS total_web_returns,
+        COALESCE(tr.total_store_returns, 0) AS total_store_returns
+    FROM 
+        RankedSales r
+    JOIN 
+        TotalReturns tr ON r.item_sk = tr.item_sk
+    WHERE 
+        r.rank = 1 AND r.price_rank <= 10
+),
+ItemDetails AS (
+    SELECT 
+        i.item_id, 
+        i.item_desc, 
+        i.brand, 
+        hv.total_web_returns, 
+        hv.total_store_returns
+    FROM 
+        item i
+    JOIN 
+        HighValueItems hv ON i.i_item_sk = hv.item_sk
+)
+SELECT 
+    id.item_id,
+    id.item_desc,
+    id.brand,
+    id.total_web_returns,
+    id.total_store_returns,
+    CASE 
+        WHEN id.total_web_returns > id.total_store_returns THEN 'WEB'
+        WHEN id.total_store_returns > id.total_web_returns THEN 'STORE'
+        ELSE 'EQUAL'
+    END AS return_prefix
+FROM 
+    ItemDetails id
+ORDER BY 
+    id.total_web_returns DESC, id.total_store_returns DESC;

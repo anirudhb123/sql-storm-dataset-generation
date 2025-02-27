@@ -1,0 +1,55 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, 1 AS depth
+    FROM orders
+    WHERE o_orderstatus = 'F'
+    
+    UNION ALL
+    
+    SELECT o.orderkey, o.o_custkey, oh.depth + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderstatus = 'F'
+),
+SupplierCosts AS (
+    SELECT ps_partkey, ps_suppkey, 
+           SUM(ps_supplycost) AS total_supply_cost,
+           COUNT(*) AS supplier_count
+    FROM partsupp
+    GROUP BY ps_partkey, ps_suppkey
+),
+TotalLineItems AS (
+    SELECT l_orderkey,
+           SUM(l_extendedprice * (1 - l_discount)) AS total_price
+    FROM lineitem
+    WHERE l_shipdate >= '1995-01-01' AND l_shipdate < '1996-01-01'
+    GROUP BY l_orderkey
+),
+CustomerAggregates AS (
+    SELECT c.c_custkey, 
+           COUNT(o.o_orderkey) AS order_count,
+           AVG(c.c_acctbal) AS avg_acctbal,
+           MAX(o.o_totalprice) AS max_order_price
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_mktsegment = 'BUILDING'
+    GROUP BY c.c_custkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    COALESCE(SUM(tc.total_price), 0) AS total_order_price,
+    SUM(sc.total_supply_cost) AS total_supply_expenditure,
+    AVG(ca.avg_acctbal) AS avg_customer_acctbal,
+    MAX(ca.max_order_price) AS max_order_value,
+    SUM(CASE WHEN o.o_orderstatus IS NULL THEN 1 ELSE 0 END) AS pending_orders
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN TotalLineItems tc ON c.c_custkey = tc.l_orderkey
+LEFT JOIN SupplierCosts sc ON c.c_custkey = sc.ps_suppkey
+LEFT JOIN CustomerAggregates ca ON c.c_custkey = ca.c_custkey
+LEFT JOIN OrderHierarchy oh ON c.c_custkey = oh.o_custkey
+GROUP BY r.r_name, n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 50
+ORDER BY total_order_price DESC, unique_customers DESC;

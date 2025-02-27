@@ -1,0 +1,38 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = (SELECT n.n_nationkey 
+                                                   FROM nation n 
+                                                   WHERE n.n_name = (SELECT n2.n_name FROM nation n2 
+                                                                     WHERE n2.n_nationkey = sh.s_suppkey) 
+                                                   LIMIT 1)
+    WHERE sh.level < 5
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+TopOrders AS (
+    SELECT os.o_custkey, os.total_revenue, RANK() OVER (PARTITION BY os.o_custkey ORDER BY os.total_revenue DESC) AS ranking
+    FROM OrderSummary os
+)
+SELECT nh.r_name, 
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count, 
+       COALESCE(SUM(to.total_revenue), 0) AS total_revenue_per_region,
+       STRING_AGG(DISTINCT sh.s_name, ', ') AS supplier_names
+FROM region nh
+LEFT JOIN nation n ON nh.r_regionkey = n.n_regionkey
+LEFT JOIN supplier sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN TopOrders to ON sh.s_suppkey = to.o_custkey
+WHERE (sh.s_comment IS NOT NULL OR sh.s_acctbal < (SELECT AVG(s_acctbal) FROM supplier WHERE s_comment IS NULL))
+GROUP BY nh.r_name
+HAVING COUNT(DISTINCT sh.s_suppkey) > 0
+ORDER BY total_revenue_per_region DESC NULLS LAST;

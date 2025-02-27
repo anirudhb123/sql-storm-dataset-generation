@@ -1,0 +1,71 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(P.Score) AS TotalScore,
+        SUM(V.BountyAmount) AS TotalBounties
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 9 /* BountyClose */
+    GROUP BY U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        Questions,
+        Answers,
+        TotalScore,
+        TotalBounties,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC) AS UserRank
+    FROM UserPostStats
+),
+ActiveBadges AS (
+    SELECT
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Class) AS HighestClass
+    FROM Badges B
+    WHERE B.Date >= CURRENT_TIMESTAMP - INTERVAL '1 YEAR'
+    GROUP BY B.UserId
+),
+RankedUsers AS (
+    SELECT 
+        TU.UserId,
+        TU.DisplayName,
+        TU.TotalPosts,
+        TU.Questions,
+        TU.Answers,
+        TU.TotalScore,
+        TU.TotalBounties,
+        AB.BadgeCount,
+        AB.HighestClass,
+        COALESCE(TU.TotalScore - AB.BadgeCount * 10, TU.TotalScore) AS AdjustedScore
+    FROM TopUsers TU
+    LEFT JOIN ActiveBadges AB ON TU.UserId = AB.UserId
+)
+SELECT 
+    R.DisplayName,
+    R.TotalPosts,
+    R.Questions,
+    R.Answers,
+    R.TotalScore,
+    R.TotalBounties,
+    R.BadgeCount,
+    CASE 
+        WHEN R.HighestClass = 1 THEN 'Gold'
+        WHEN R.HighestClass = 2 THEN 'Silver'
+        WHEN R.HighestClass = 3 THEN 'Bronze'
+        ELSE 'No Badge'
+    END AS BadgeLevel,
+    R.AdjustedScore,
+    R.UserRank
+FROM RankedUsers R
+WHERE R.AdjustedScore > 0
+ORDER BY R.UserRank
+LIMIT 10;

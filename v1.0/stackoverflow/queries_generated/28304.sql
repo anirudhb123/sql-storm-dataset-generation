@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE vt.Name = 'UpMod') AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE vt.Name = 'DownMod') AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only considering Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TaggedPosts AS (
+    SELECT 
+        p.PostId,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Posts p ON rp.PostId = p.Id
+    LEFT JOIN 
+        LATERAL string_to_array(p.Tags, '>') AS t(tag) ON TRUE
+    GROUP BY 
+        p.PostId
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        tp.Tags,
+        ROW_NUMBER() OVER (ORDER BY rp.UpVotes - rp.DownVotes DESC) AS Rank
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        TaggedPosts tp ON rp.PostId = tp.PostId
+)
+SELECT 
+    FR.PostId,
+    FR.Title,
+    FR.Body,
+    FR.CreationDate,
+    FR.OwnerDisplayName,
+    FR.CommentCount,
+    FR.UpVotes,
+    FR.DownVotes,
+    FR.Tags,
+    FR.Rank
+FROM 
+    FinalResults FR
+WHERE 
+    FR.OwnerPostRank = 1
+ORDER BY 
+    FR.Rank DESC
+LIMIT 10;

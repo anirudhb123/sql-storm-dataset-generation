@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+    ORDER BY
+        part_count DESC
+    LIMIT 10
+),
+RegionStatistics AS (
+    SELECT
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(COALESCE(c.c_acctbal, 0)) AS total_acctbal
+    FROM
+        region r
+    JOIN
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN
+        customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY
+        r.r_regionkey, r.r_name
+),
+TopOrders AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderstatus = 'O'
+    GROUP BY
+        o.o_orderkey
+    ORDER BY
+        order_value DESC
+    LIMIT 5
+)
+SELECT
+    s.s_name,
+    s.part_count,
+    s.total_cost,
+    r.r_name,
+    r.nation_count,
+    r.total_acctbal,
+    to.o_orderkey,
+    to.order_value
+FROM
+    RankedSuppliers s
+CROSS JOIN
+    RegionStatistics r
+CROSS JOIN
+    TopOrders to
+WHERE
+    s.total_cost > 10000
+    AND r.nation_count > 5
+    AND to.order_value > 5000;

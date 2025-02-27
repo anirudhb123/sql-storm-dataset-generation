@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000 
+    
+    UNION ALL
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        mh.level + 1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_link ml ON ml.movie_id = t.id
+    JOIN 
+        MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+)
+
+SELECT 
+    m.movie_title,
+    m.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+    AVG(CASE WHEN ci.nr_order IS NULL THEN 0 ELSE ci.nr_order END) AS avg_cast_order,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS noted_cast,
+    COUNT(DISTINCT kw.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.movie_title) AS movie_rank
+FROM 
+    MovieHierarchy m
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = m.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id AND ci.nr_order IS NOT NULL
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = m.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+GROUP BY 
+    m.movie_title, m.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0 
+ORDER BY 
+    avg_cast_order DESC, company_count DESC;

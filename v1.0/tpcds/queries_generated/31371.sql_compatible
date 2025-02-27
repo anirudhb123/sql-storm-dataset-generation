@@ -1,0 +1,84 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        ws_net_profit
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_item_sk, ws_net_profit
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        SUM(cs_quantity) + s.total_quantity,
+        COUNT(DISTINCT cs_order_number) + s.total_orders,
+        cs_net_profit + s.ws_net_profit
+    FROM 
+        catalog_sales cs
+    JOIN 
+        SalesCTE s ON cs_item_sk = s.ws_item_sk
+    GROUP BY 
+        cs_item_sk, s.total_quantity, s.total_orders, s.ws_net_profit
+),
+CustomerStats AS (
+    SELECT 
+        c_customer_sk,
+        cd_gender,
+        cd_marital_status,
+        COUNT(DISTINCT ss_ticket_number) AS total_sales,
+        SUM(ss_net_paid_inc_tax) AS total_spent,
+        NULLIF(AVG(ss_net_profit), 0) AS average_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c_customer_sk, cd_gender, cd_marital_status
+),
+StoreSalesStats AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions,
+        AVG(ss_net_paid) AS avg_sale_amount
+    FROM 
+        store_sales
+    GROUP BY 
+        s_store_sk
+),
+RankedStores AS (
+    SELECT 
+        s_store_sk,
+        total_sales,
+        total_transactions,
+        avg_sale_amount,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        StoreSalesStats
+)
+SELECT 
+    ca.ca_city,
+    COALESCE(cs.total_sales, 0) AS customer_sales_count,
+    COALESCE(s.total_sales, 0) AS store_sales_total,
+    AVG(cs.average_profit) AS avg_profit,
+    MAX(s.sales_rank) AS highest_store_rank
+FROM 
+    customer_address ca
+LEFT JOIN 
+    CustomerStats cs ON ca.ca_address_sk = (SELECT c_current_addr_sk FROM customer WHERE c_customer_sk = cs.c_customer_sk)
+LEFT JOIN 
+    RankedStores s ON ca.ca_city = s.s_store_sk
+WHERE 
+    (ca.ca_state = 'CA' OR ca.ca_state = 'TX')
+  AND 
+    cs.total_spent > (SELECT AVG(total_spent) FROM CustomerStats)
+GROUP BY 
+    ca.ca_city, cs.total_sales, s.total_sales
+HAVING 
+    COUNT(DISTINCT cs.c_customer_sk) > 10
+ORDER BY 
+    ca.ca_city;

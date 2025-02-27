@@ -1,0 +1,93 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        0 AS Depth
+    FROM Posts
+    WHERE ParentId IS NULL -- Top level posts
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Depth + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+), 
+
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        v.UserId,
+        v.CreationDate,
+        vt.Name AS VoteType,
+        ROW_NUMBER() OVER (PARTITION BY v.PostId ORDER BY v.CreationDate DESC) AS VoteRank
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE v.CreationDate > NOW() - INTERVAL '30 days'
+),
+
+AuthorBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM Badges b
+    GROUP BY b.UserId
+),
+
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COALESCE(v.VotesCount, 0) AS VotesCount,
+        COALESCE(b.TotalBadges, 0) AS UserBadges,
+        COALESCE(b.HighestBadgeClass, 0) AS HighestBadgeClass,
+        p.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+            COUNT(*) AS VotesCount
+        FROM Votes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN AuthorBadges b ON p.OwnerUserId = b.UserId
+), 
+
+PopularPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.UserBadges,
+        ps.HighestBadgeClass,
+        ps.CreationDate
+    FROM PostStatistics ps
+    WHERE ps.UserBadges > 0 AND ps.CreationDate > NOW() - INTERVAL '90 days'
+    ORDER BY ps.UpVotes DESC, ps.DownVotes ASC
+)
+
+SELECT 
+    RPH.PostId,
+    RPH.Title AS PostTitle,
+    RPH.Depth,
+    pp.UpVotes,
+    pp.DownVotes,
+    pp.UserBadges,
+    pp.HighestBadgeClass,
+    pp.CreationDate
+FROM RecursivePostHierarchy RPH
+LEFT JOIN PopularPosts pp ON RPH.PostId = pp.PostId
+WHERE pp.UpVotes IS NOT NULL -- Exclude posts without votes
+ORDER BY RPH.Depth, pp.UpVotes DESC, pp.CreationDate DESC;

@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        U.DisplayName AS OwnerName,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) -- Posts created in the last year
+    GROUP BY 
+        p.Id, p.Title, U.DisplayName, p.PostTypeId
+),
+TopPosts AS (
+    SELECT PostId, Title, OwnerName, TotalComments, TotalVotes, UpVotes, DownVotes
+    FROM RankedPosts
+    WHERE PostRank <= 10 -- Get top 10 posts per type
+),
+MaxVotes AS (
+    SELECT 
+        PostTypeId, 
+        MAX(TotalVotes) AS MaxVoteCount
+    FROM 
+        RankedPosts
+    GROUP BY 
+        PostTypeId
+)
+SELECT 
+    t.PostId,
+    t.Title,
+    t.OwnerName,
+    t.TotalComments,
+    t.TotalVotes,
+    t.UpVotes,
+    t.DownVotes,
+    CASE 
+        WHEN m.MaxVoteCount IS NULL THEN 'No Votes'
+        ELSE CAST((t.TotalVotes * 1.0 / m.MaxVoteCount) * 100 AS VARCHAR(5)) + '%' -- Vote percentage of max votes
+    END AS VotePercentage,
+    COALESCE(b.Name, 'No Badge') AS BadgeEarned
+FROM 
+    TopPosts t
+LEFT JOIN 
+    Badges b ON t.OwnerName = (SELECT DisplayName FROM Users WHERE Id = b.UserId) AND b.Class = 1 -- Gold badge
+LEFT JOIN 
+    Posts p ON t.PostId = p.Id
+INNER JOIN 
+    MaxVotes m ON p.PostTypeId = m.PostTypeId
+ORDER BY 
+    t.TotalVotes DESC;

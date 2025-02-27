@@ -1,0 +1,57 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        ca.ca_city, 
+        ca.ca_state, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, ', ', ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip) AS full_address
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesInfo AS (
+    SELECT 
+        ws_bill_customer_sk, 
+        SUM(ws_net_paid) AS total_spending,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+CombinedInfo AS (
+    SELECT 
+        ci.c_customer_id, 
+        ci.full_name, 
+        ci.full_address, 
+        si.total_spending, 
+        si.total_orders
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        SalesInfo si ON ci.c_customer_sk = si.ws_bill_customer_sk
+)
+SELECT 
+    *, 
+    CASE 
+        WHEN total_spending IS NULL THEN 'No Orders'
+        WHEN total_spending < 100 THEN 'Low Value'
+        WHEN total_spending BETWEEN 100 AND 500 THEN 'Medium Value'
+        ELSE 'High Value'
+    END AS customer_value_category
+FROM 
+    CombinedInfo
+WHERE 
+    ca_state IN ('CA', 'NY')
+ORDER BY 
+    total_spending DESC
+LIMIT 100;

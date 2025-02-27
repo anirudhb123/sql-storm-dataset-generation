@@ -1,0 +1,74 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (
+            SELECT AVG(s2.s_acctbal)
+            FROM supplier s2
+            WHERE s2.s_nationkey = s.s_nationkey
+        )
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_linenumber) AS total_lines
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    n.n_name AS nation,
+    p.p_name AS part_name,
+    COALESCE(cs.total_spent, 0) AS total_spent,
+    rs.s_name AS top_supplier,
+    rs.s_acctbal AS supplier_balance,
+    os.total_revenue
+FROM 
+    nation n
+LEFT JOIN 
+    (SELECT
+        ps.ps_partkey, 
+        MAX(ps.ps_supplycost) AS max_supply_cost
+     FROM 
+        partsupp ps
+     GROUP BY 
+        ps.ps_partkey) AS maxcost ON 1=1
+JOIN 
+    part p ON p.p_partkey = maxcost.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON rs.rank = 1 AND rs.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN 
+    CustomerOrders cs ON cs.order_count > 5
+LEFT JOIN 
+    OrderSummary os ON os.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey ORDER BY o.o_orderkey DESC LIMIT 1)
+WHERE 
+    p.p_retailprice > 50
+ORDER BY 
+    total_spent DESC, supplier_balance DESC
+LIMIT 50;

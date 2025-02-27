@@ -1,0 +1,66 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name || ' ' || c.c_last_name AS customer_name, 
+           COALESCE(ws_net_paid, 0) AS total_sales, 
+           1 AS level
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_sold_date_sk IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT sh.c_customer_sk, sh.customer_name, 
+           sh.total_sales + COALESCE(ws.ws_net_paid, 0), 
+           level + 1
+    FROM sales_hierarchy sh
+    LEFT JOIN web_sales ws ON sh.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_sold_date_sk IS NOT NULL
+    AND level < 5
+),
+customer_income AS (
+    SELECT cd.cd_demo_sk, cd.cd_gender, 
+           CASE
+               WHEN h.hd_income_band_sk IS NULL THEN 'UNKNOWN'
+               ELSE CONCAT('Income Band: ', h.hd_income_band_sk)
+           END AS income_band,
+           SUM(ws.ws_net_paid) AS total_purchase
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics h ON cd.cd_demo_sk = h.hd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, h.hd_income_band_sk
+),
+top_customers AS (
+    SELECT c.*,
+           RANK() OVER (PARTITION BY ci.income_band ORDER BY ci.total_purchase DESC) AS sales_rank
+    FROM customer c
+    JOIN customer_income ci ON c.c_current_cdemo_sk = ci.cd_demo_sk
+),
+stores_info AS (
+    SELECT s.s_store_name, s.s_city, s.s_state,
+           COUNT(ss.ss_ticket_number) AS total_tickets,
+           SUM(ss.ss_net_paid) AS total_sales
+    FROM store s
+    LEFT JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY s.s_store_name, s.s_city, s.s_state
+),
+sales_summary AS (
+    SELECT si.s_store_name, si.s_city, si.s_state,
+           SUM(sh.total_sales) AS hierarchy_sales,
+           SUM(ws.ws_net_paid) AS web_sales_total
+    FROM stores_info si
+    LEFT JOIN sales_hierarchy sh ON si.s_store_sk = sh.c_customer_sk
+    LEFT JOIN web_sales ws ON si.s_store_sk = ws.ws_warehouse_sk
+    GROUP BY si.s_store_name, si.s_city, si.s_state
+)
+SELECT cs.customer_name, 
+       ci.income_band, 
+       ts.sales_rank,
+       ss.total_tickets, 
+       ss.hierarchy_sales, 
+       ss.web_sales_total
+FROM top_customers ts
+JOIN sales_summary ss ON ts.c_customer_sk = ss.s_store_sk
+JOIN customer_income ci ON ts.c_current_cdemo_sk = ci.cd_demo_sk
+WHERE ts.sales_rank <= 10
+ORDER BY ci.income_band, ts.sales_rank;

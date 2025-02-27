@@ -1,0 +1,50 @@
+
+WITH RecursivePostCTE AS (
+    SELECT p.Id, p.Title, p.AcceptedAnswerId, p.OwnerUserId,
+           1 AS Depth
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT p.Id, p.Title, p.AcceptedAnswerId, p.OwnerUserId,
+           cte.Depth + 1
+    FROM Posts p
+    INNER JOIN RecursivePostCTE cte ON p.ParentId = cte.Id
+),
+UserActivity AS (
+    SELECT u.Id AS UserId, 
+           COUNT(DISTINCT p.Id) AS TotalPosts,
+           COUNT(DISTINCT c.Id) AS TotalComments,
+           SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+),
+PostHistoryInfo AS (
+    SELECT ph.PostId,
+           MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS CloseDate,
+           MAX(ph.CreationDate) AS LastModified
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT u.DisplayName,
+       ua.TotalPosts,
+       ua.TotalComments,
+       ua.TotalBounty,
+       COALESCE(ph.CloseDate, 'No Closure') AS CloseDate,
+       ph.LastModified,
+       COUNT(DISTINCT p.Id) AS AnswerCount,
+       COUNT(DISTINCT ph2.Id) AS EditCount,
+       DENSE_RANK() OVER (PARTITION BY u.Id ORDER BY ua.TotalPosts DESC) AS UserRank
+FROM Users u
+LEFT JOIN UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 2  
+LEFT JOIN PostHistoryInfo ph ON p.Id = ph.PostId
+LEFT JOIN PostHistory ph2 ON p.Id = ph2.PostId AND ph2.PostHistoryTypeId = 4  
+WHERE u.Reputation > 100  
+GROUP BY u.Id, u.DisplayName, ua.TotalPosts, ua.TotalComments, ua.TotalBounty, 
+         ph.CloseDate, ph.LastModified
+ORDER BY UserRank, ua.TotalBounty DESC;

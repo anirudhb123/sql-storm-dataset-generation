@@ -1,0 +1,37 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk
+    FROM customer
+    WHERE c_customer_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.ss_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk
+    FROM store_sales s
+    JOIN sales_hierarchy sh ON s.ss_customer_sk = sh.c_customer_sk
+    JOIN customer c ON s.ss_customer_sk = c.c_customer_sk
+)
+
+SELECT
+    sh.c_customer_sk,
+    CONCAT(sh.c_first_name, ' ', sh.c_last_name) AS full_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    SUM(ss.ss_net_paid) AS total_spent,
+    COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions,
+    ROW_NUMBER() OVER (PARTITION BY sh.c_customer_sk ORDER BY SUM(ss.ss_net_paid) DESC) AS transaction_rank,
+    CASE 
+        WHEN SUM(ss.ss_net_paid) IS NULL THEN 'No Sales'
+        WHEN SUM(ss.ss_net_paid) < 100 THEN 'Low'
+        WHEN SUM(ss.ss_net_paid) BETWEEN 100 AND 500 THEN 'Medium'
+        ELSE 'High'
+    END AS spending_category
+FROM sales_hierarchy sh
+LEFT JOIN customer_demographics cd ON sh.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN store_sales ss ON sh.c_customer_sk = ss.ss_customer_sk
+WHERE cd.cd_gender IS NOT NULL -- ensuring gender is not null
+GROUP BY sh.c_customer_sk, sh.c_first_name, sh.c_last_name, cd.cd_gender, cd.cd_marital_status
+HAVING COUNT(ss.ss_ticket_number) > 1 -- focusing on customers with more than one transaction
+ORDER BY total_spent DESC
+LIMIT 10;
+

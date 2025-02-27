@@ -1,0 +1,90 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.AnswerCount,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COALESCE(u.DisplayName, 'Community User') AS PostOwner
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 90 DAY)
+        AND p.AcceptedAnswerId IS NULL
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN b.Class = 1 THEN 3 WHEN b.Class = 2 THEN 2 WHEN b.Class = 3 THEN 1 ELSE 0 END) AS TotalBadges,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstEdit,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS ClosureChanges
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+FinalPostList AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.AnswerCount,
+        rp.ViewCount,
+        rp.PostOwner,
+        u.TotalBadges,
+        u.TotalBounties,
+        ph.FirstEdit,
+        ph.ClosureChanges,
+        CASE 
+            WHEN ph.ClosureChanges = 0 THEN 'Open'
+            ELSE 'Closed'
+        END AS PostStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserReputation u ON rp.PostOwner = u.UserId
+    LEFT JOIN 
+        PostHistoryDetails ph ON rp.PostId = ph.PostId
+    WHERE 
+        rp.PostRank <= 10
+)
+SELECT 
+    fpl.PostId,
+    fpl.Title,
+    fpl.Score,
+    fpl.CreationDate,
+    fpl.AnswerCount,
+    fpl.ViewCount,
+    fpl.PostOwner,
+    COALESCE(fpl.TotalBadges, 0) AS BadgeCount,
+    COALESCE(fpl.TotalBounties, 0) AS BountyCount,
+    fpl.FirstEdit,
+    fpl.ClosureChanges,
+    fpl.PostStatus
+FROM 
+    FinalPostList fpl
+ORDER BY 
+    fpl.Score DESC, 
+    fpl.CreationDate DESC
+LIMIT 100;

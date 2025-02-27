@@ -1,0 +1,40 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 AND dd.d_moy IN (11, 12) -- November and December
+    GROUP BY 
+        ws.web_site_sk
+), HighPerformingSites AS (
+    SELECT 
+        w.w_warehouse_id,
+        w.w_warehouse_name,
+        rs.total_profit
+    FROM 
+        warehouse w
+    JOIN 
+        RankedSales rs ON w.w_warehouse_sk = rs.web_site_sk
+    WHERE 
+        rs.profit_rank <= 5 -- Top 5 performing websites
+)
+SELECT 
+    hps.w_warehouse_id,
+    hps.w_warehouse_name,
+    hps.total_profit,
+    COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+    AVG(cs.cs_net_profit) AS avg_order_profit
+FROM 
+    HighPerformingSites hps
+LEFT JOIN 
+    catalog_sales cs ON hps.w_warehouse_name = cs.cs_ship_mode_sk
+GROUP BY 
+    hps.w_warehouse_id, hps.w_warehouse_name, hps.total_profit
+ORDER BY 
+    hps.total_profit DESC;

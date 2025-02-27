@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.AnswerCount, 
+        p.ViewCount,
+        r.UserId,
+        r.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY r.CreationDate DESC) AS RecentVoteRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users r ON v.UserId = r.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        TAG.TagName, 
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags TAG
+    JOIN 
+        Posts P ON TAG.Id = P.Tags::int
+    GROUP BY 
+        TAG.TagName
+    HAVING 
+        COUNT(P.Id) > 5
+),
+PostHistoryCounts AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory
+    WHERE 
+        CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+    GROUP BY 
+        PostId
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.Score,
+    pp.AnswerCount,
+    pp.ViewCount,
+    COALESCE(ph.HistoryCount, 0) AS RecentHistoryCount,
+    ARRAY_AGG(DISTINCT pt.TagName) AS Tags,
+    SUM(CASE WHEN pp.RecentVoteRank = 1 THEN 1 ELSE 0 END) AS RecentVotes
+FROM 
+    RankedPosts pp
+LEFT JOIN 
+    PostHistoryCounts ph ON pp.PostId = ph.PostId
+LEFT JOIN 
+    PopularTags pt ON pt.TagName = ANY(string_to_array(pp.Tags, ','))
+WHERE 
+    pp.Score > 10 
+    AND pp.AnswerCount > 0
+GROUP BY 
+    pp.PostId, pp.Title, pp.Score, pp.AnswerCount, pp.ViewCount, ph.HistoryCount
+HAVING 
+    COUNT(DISTINCT pt.TagName) >= 2
+ORDER BY 
+    pp.ViewCount DESC, pp.Score DESC;

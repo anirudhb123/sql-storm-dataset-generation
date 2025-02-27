@@ -1,0 +1,71 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_profit,
+        1 AS level
+    FROM 
+        store_sales 
+    GROUP BY 
+        ss_store_sk
+    UNION ALL
+    SELECT 
+        s.s_store_sk,
+        SUM(ss.total_profit) AS total_profit,
+        h.level + 1
+    FROM 
+        SalesHierarchy h
+    JOIN 
+        store s ON h.ss_store_sk = s.s_store_sk
+    GROUP BY 
+        s.s_store_sk
+),
+TopStores AS (
+    SELECT 
+        ss_store_sk,
+        total_profit,
+        ROW_NUMBER() OVER (ORDER BY total_profit DESC) AS rank
+    FROM 
+        SalesHierarchy
+)
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    MAX(ws.ws_ship_date_sk) AS last_purchase_date,
+    (SELECT COUNT(DISTINCT wr.wr_order_number) 
+        FROM web_returns wr 
+        WHERE wr.wr_returning_customer_sk = c.c_customer_sk) AS total_returns,
+    CASE 
+        WHEN total_sales > 1000 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_type,
+    (SELECT 
+        AVG(ss_ext_sales_price) 
+     FROM 
+        store_sales ss 
+     WHERE 
+        ss.ss_store_sk IN (SELECT ss_store_sk FROM TopStores WHERE rank <= 5)
+    ) AS avg_sales_top_stores
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    store s ON ws.ws_ship_addr_sk = s.s_store_sk
+WHERE 
+    ca.ca_city IS NOT NULL
+    AND ws.ws_sold_date_sk >= (
+        SELECT MIN(d.d_date_sk) 
+        FROM date_dim d 
+        WHERE d.d_dow IN (1, 2, 3)  -- Monday, Tuesday, Wednesday
+    )
+GROUP BY 
+    c.c_customer_id, ca.ca_city
+HAVING 
+    total_sales > 500
+ORDER BY 
+    total_sales DESC;

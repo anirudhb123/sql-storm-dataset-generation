@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Considering only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        *,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS AllTags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(rp.Tags, '>')) AS tagItem ON TRUE
+    LEFT JOIN 
+        Tags t ON t.Id = tagItem::int
+    WHERE 
+        TagRank <= 5 -- Considering top 5 ranked posts per tag
+    GROUP BY 
+        PostId, Title, Body, Tags, CreationDate, OwnerDisplayName, TagRank
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), 
+FinalResults AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.Body,
+        fp.AllTags,
+        fp.CommentCount,
+        fp.CreationDate,
+        fp.OwnerDisplayName,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges
+    FROM 
+        FilteredPosts fp
+    JOIN 
+        UserBadges ub ON fp.OwnerDisplayName = ub.UserId -- Assuming DisplayName uniquely maps to user
+)
+
+SELECT 
+    PostId,
+    Title,
+    Body,
+    AllTags,
+    CommentCount,
+    CreationDate,
+    OwnerDisplayName,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges
+FROM 
+    FinalResults
+ORDER BY 
+    CreationDate DESC
+LIMIT 50; -- Limiting to 50 most recent entries for benchmarking

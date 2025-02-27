@@ -1,0 +1,54 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT cc.role_id) AS role_count,
+    STRING_AGG(DISTINCT rt.role, ', ') AS roles_played,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY mh.production_year DESC) AS movie_rank
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    role_type rt ON ci.role_id = rt.id
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id AND cc.subject_id = ci.person_id
+WHERE 
+    mh.production_year >= 2000
+    AND mh.depth <= 3
+GROUP BY 
+    ak.name, mh.movie_title, mh.production_year
+HAVING 
+    COUNT(DISTINCT cc.role_id) > 0 
+ORDER BY 
+    ak.name, mh.production_year DESC;
+
+This SQL query utilizes a recursive Common Table Expression (CTE) to build a movie hierarchy, connecting movies through links. It then correlates this data with casting information, aggregates roles played by actors, and ranks the results based on the production year. The query incorporates outer joins, window functions, string aggregation, and various predicates to filter and manipulate the dataset effectively.

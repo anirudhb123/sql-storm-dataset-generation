@@ -1,0 +1,70 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        Reputation
+    FROM UserReputation
+    WHERE ReputationRank <= 10
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Title,
+        p.Score,
+        COALESCE(CAST(p.Body AS VARCHAR), 'No Content') AS PostBody,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    INNER JOIN TopUsers tu ON p.OwnerUserId = tu.UserId
+    WHERE p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days'
+),
+PostScores AS (
+    SELECT 
+        rp.PostId,
+        rp.OwnerUserId,
+        rp.Title,
+        rp.Score,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM RecentPosts rp
+    LEFT JOIN Votes v ON rp.PostId = v.PostId
+    LEFT JOIN Comments c ON rp.PostId = c.PostId
+    GROUP BY rp.PostId, rp.OwnerUserId, rp.Title, rp.Score
+)
+SELECT 
+    u.DisplayName,
+    ps.Title,
+    ps.Score,
+    ps.VoteCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    CASE 
+        WHEN ps.Score >= 100 THEN 'High Score'
+        WHEN ps.Score BETWEEN 50 AND 99 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = ps.OwnerUserId) AS TotalPostsByUser,
+    COALESCE(STRING_AGG(DISTINCT t.TagName, ', '), 'No Tags') AS Tags
+FROM PostScores ps
+JOIN Users u ON ps.OwnerUserId = u.Id
+LEFT JOIN Posts p ON ps.PostId = p.Id 
+LEFT JOIN LATERAL (
+    SELECT t.TagName
+    FROM Tags t
+    WHERE t.Id IN (SELECT UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '> <'))::int)
+    ) AS t ON TRUE
+WHERE ps.rn = 1
+GROUP BY u.DisplayName, ps.Title, ps.Score, ps.VoteCount, ps.UpVotes, ps.DownVotes, ps.CommentCount
+ORDER BY ps.Score DESC
+LIMIT 50;

@@ -1,0 +1,57 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CASE WHEN t.production_year >= 2000 THEN 1 ELSE 0 END) AS modern_movie_indicator
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.title, t.production_year, t.kind_id
+),
+TopCastMovies AS (
+    SELECT
+        rm.title,
+        rm.production_year,
+        rm.kind_id,
+        rm.cast_count,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY rm.kind_id ORDER BY rm.cast_count DESC) AS rn
+    FROM 
+        RankedMovies rm
+    JOIN 
+        role_type r ON rm.cast_count > 5 
+)
+SELECT 
+    m.title AS Movie_Title,
+    m.production_year AS Production_Year,
+    ct.kind AS Kind,
+    m.cast_count AS Cast_Count,
+    CASE 
+        WHEN m.modern_movie_indicator = 1 THEN 'Modern'
+        ELSE 'Classic'
+    END AS Movie_Era,
+    STRING_AGG(DISTINCT ak.name, ', ') AS Known_Aliases
+FROM 
+    TopCastMovies m
+JOIN 
+    aka_name ak ON ak.person_id IN (
+        SELECT 
+            c.person_id 
+        FROM 
+            cast_info c 
+        WHERE 
+            c.movie_id IN (SELECT movie_id FROM aka_title WHERE title = m.title)
+    )
+JOIN 
+    kind_type ct ON m.kind_id = ct.id
+WHERE 
+    m.rn <= 5 
+GROUP BY
+    m.title, m.production_year, ct.kind, m.cast_count, m.modern_movie_indicator
+ORDER BY 
+    m.production_year DESC, m.cast_count DESC;

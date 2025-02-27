@@ -1,0 +1,60 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank
+    FROM 
+        part p
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(NULLIF(s.s_comment, ''), 'No comments available') AS safe_comment
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_orderkey) AS distinct_items
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name AS region_name,
+    np.n_name AS nation_name,
+    COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS total_supply_cost,
+    AVG(ods.total_revenue) AS average_total_revenue,
+    STRING_AGG(DISTINCT CONCAT(sp.s_name, ': ', sp.safe_comment), '; ') AS supplier_info
+FROM 
+    region r
+LEFT JOIN 
+    nation np ON r.r_regionkey = np.n_regionkey
+LEFT JOIN 
+    SupplierDetails sp ON np.n_nationkey = sp.s_nationkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_suppkey = sp.s_suppkey
+FULL OUTER JOIN 
+    OrderSummary ods ON ods.o_orderkey = ps.ps_partkey
+WHERE 
+    (ps.ps_availqty IS NOT NULL AND ps.ps_availqty > 0)
+    OR (sp.s_acctbal IS NULL)
+GROUP BY 
+    r.r_name, np.n_name
+HAVING 
+    AVG(ods.total_revenue) > 10000 OR COUNT(sp.s_suppkey) = 0
+ORDER BY 
+    region_name, nation_name DESC;

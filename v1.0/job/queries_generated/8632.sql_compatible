@@ -1,0 +1,28 @@
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.nr_order AS role_order,
+    ct.kind AS company_type,
+    SUM(CASE WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END) AS info_count,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    a.name, t.title, c.nr_order, ct.kind
+ORDER BY 
+    info_count DESC, keyword_count ASC, actor_name;

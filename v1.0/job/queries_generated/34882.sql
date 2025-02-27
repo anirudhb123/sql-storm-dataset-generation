@@ -1,0 +1,65 @@
+WITH RECURSIVE movie_cte AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(SUM(c.nr_order), 0) AS total_orders
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id
+), 
+best_movie AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        total_orders,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY total_orders DESC) AS rank
+    FROM 
+        movie_cte
+), 
+filtered_movies AS (
+    SELECT 
+        bm.movie_id,
+        bm.title,
+        bm.production_year,
+        bm.total_orders
+    FROM 
+        best_movie bm
+    WHERE 
+        bm.rank = 1
+)
+
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.total_orders,
+    ARRAY_AGG(DISTINCT co.name) AS production_companies,
+    COALESCE(STRING_AGG(DISTINCT k.keyword, ', '), 'No Keywords') AS keywords
+FROM 
+    filtered_movies f
+LEFT JOIN 
+    movie_companies mc ON f.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.imdb_id
+LEFT JOIN 
+    movie_keyword mk ON f.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+GROUP BY 
+    f.movie_id, f.title, f.production_year, f.total_orders
+ORDER BY 
+    f.production_year DESC, f.total_orders DESC
+LIMIT 10;
+
+-- This query retrieves the top production movies since 2000 based on the amount of cast members,
+-- along with their associated production companies and keywords. 
+-- It uses recursive CTEs, window functions, outer joins, and conditional aggregations.

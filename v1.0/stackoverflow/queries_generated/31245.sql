@@ -1,0 +1,84 @@
+WITH RecursivePosts AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        Score,
+        CAST(Title AS VARCHAR(255)) AS FullPath -- Keep track of the hierarchy
+    FROM Posts
+    WHERE ParentId IS NULL -- Start with root posts (Questions)
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        CAST(rp.FullPath || ' -> ' || p.Title AS VARCHAR(255)) AS FullPath
+    FROM Posts p
+    INNER JOIN RecursivePosts rp ON p.ParentId = rp.Id
+),
+PostScores AS (
+    SELECT 
+        r.Id,
+        r.Title,
+        r.CreationDate,
+        r.Score,
+        (SELECT COUNT(*) FROM Posts a WHERE a.ParentId = r.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (ORDER BY r.Score DESC) AS Rank
+    FROM RecursivePosts r
+),
+UserVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    INNER JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY v.PostId
+),
+CombinedData AS (
+    SELECT 
+        ps.Id,
+        ps.Title,
+        ps.CreationDate,
+        ps.Score,
+        ps.AnswerCount,
+        uv.UpVotes,
+        uv.DownVotes,
+        ps.Rank,
+        COALESCE(uv.UpVotes - uv.DownVotes, 0) AS NetScore -- Net score calculation
+    FROM PostScores ps
+    LEFT JOIN UserVotes uv ON ps.Id = uv.PostId
+),
+TopPosts AS (
+    SELECT 
+        Id, 
+        Title, 
+        CreationDate,
+        Score,
+        AnswerCount,
+        UpVotes,
+        DownVotes,
+        Rank,
+        NetScore
+    FROM CombinedData
+    WHERE Rank <= 10 -- Get the top 10 posts
+)
+SELECT 
+    tp.Id, 
+    tp.Title, 
+    tp.CreationDate, 
+    tp.Score, 
+    tp.AnswerCount, 
+    tp.UpVotes, 
+    tp.DownVotes, 
+    tp.NetScore,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = tp.Id) AS CommentCount, -- Counting comments
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') FROM Tags t 
+     INNER JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%' WHERE p.Id = tp.Id) AS Tags -- Concatenating tags
+FROM TopPosts tp
+ORDER BY tp.NetScore DESC; -- Order by the net score of the top posts

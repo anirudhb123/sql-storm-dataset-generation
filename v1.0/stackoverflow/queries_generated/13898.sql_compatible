@@ -1,0 +1,57 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'  
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, 
+        p.CommentCount, p.FavoriteCount, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        ps.*,
+        RANK() OVER (ORDER BY ps.Score DESC) AS RankByScore,
+        RANK() OVER (ORDER BY ps.ViewCount DESC) AS RankByViews
+    FROM 
+        PostStats ps
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    AnswerCount,
+    CommentCount,
+    FavoriteCount,
+    OwnerDisplayName,
+    UpVoteCount,
+    DownVoteCount,
+    RankByScore,
+    RankByViews
+FROM 
+    TopPosts
+WHERE 
+    RankByScore <= 10 OR RankByViews <= 10  
+ORDER BY 
+    RankByScore, RankByViews;

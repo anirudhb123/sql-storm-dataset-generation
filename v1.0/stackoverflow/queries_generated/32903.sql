@@ -1,0 +1,62 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.OwnerUserId, 
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with Questions
+
+    UNION ALL
+
+    SELECT 
+        p2.Id AS PostId, 
+        p2.Title, 
+        p2.CreationDate, 
+        p2.OwnerUserId, 
+        r.Level + 1
+    FROM 
+        Posts p2
+    JOIN 
+        Posts p1 ON p1.Id = p2.ParentId
+    JOIN 
+        RecursivePostHierarchy r ON r.PostId = p1.Id
+)
+SELECT 
+    u.DisplayName AS Author,
+    ph.Title AS QuestionTitle,
+    ph.CreationDate AS QuestionDate,
+    COUNT(DISTINCT p.Id) AS AnswerCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MAX(b.Name) AS HighestBadge,
+    CASE
+        WHEN MAX(b.Class) = 1 THEN 'Gold'
+        WHEN MAX(b.Class) = 2 THEN 'Silver'
+        WHEN MAX(b.Class) = 3 THEN 'Bronze'
+        ELSE 'No Badge'
+    END AS BadgeType
+FROM 
+    RecursivePostHierarchy ph
+JOIN 
+    Users u ON ph.OwnerUserId = u.Id
+LEFT JOIN 
+    Posts p ON p.ParentId = ph.PostId  -- Joining answers
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id  
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = u.Id  -- User badges assumed to be in a UserBadges table
+LEFT JOIN 
+    Badges b ON b.Id = ub.BadgeId  -- Assuming each badge has unique ID
+LEFT JOIN 
+    unnest(string_to_array(ph.Tags, ',')) AS t(TagName)
+WHERE 
+    ph.Level = 1
+GROUP BY 
+    Author, QuestionTitle, QuestionDate
+ORDER BY 
+    TotalUpVotes DESC, AnswerCount DESC, QuestionDate DESC;

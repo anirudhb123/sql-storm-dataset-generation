@@ -1,0 +1,84 @@
+
+WITH RECURSIVE UserPosts AS (
+    
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        PO.Id AS PostId,
+        PO.Title,
+        PO.CreationDate,
+        PO.Score
+    FROM 
+        Users U
+    JOIN 
+        Posts PO ON U.Id = PO.OwnerUserId
+    WHERE 
+        U.Reputation > 1000  
+),
+PostVoteCounts AS (
+    
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+),
+TagStats AS (
+    
+    SELECT 
+        T.TagName,
+        COUNT(PT.Id) AS PostCount,
+        AVG(PT.Score) AS AverageScore
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts PT ON T.Id = PT.TagsId  -- Assuming there's a foreign key relationship here, replaced Id with TagsId
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(PT.Id) > 10  
+),
+UserPostDetails AS (
+    
+    SELECT 
+        UP.UserId,
+        UP.DisplayName,
+        UP.PostId,
+        UP.Title,
+        COALESCE(PV.UpVotes, 0) AS UpVotes,
+        COALESCE(PV.DownVotes, 0) AS DownVotes,
+        T.TagName AS PopularTag,
+        TS.PostCount,
+        TS.AverageScore
+    FROM 
+        UserPosts UP
+    LEFT JOIN 
+        PostVoteCounts PV ON UP.PostId = PV.PostId
+    LEFT JOIN 
+        (SELECT DISTINCT T.TagName, P.Id 
+         FROM Tags T 
+         INNER JOIN Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')) T ON UP.PostId = T.Id
+    LEFT JOIN 
+        TagStats TS ON T.TagName = TS.TagName
+)
+SELECT 
+    U.DisplayName,
+    COUNT(DISTINCT UPD.PostId) AS TotalPosts,
+    SUM(UPD.UpVotes) AS TotalUpVotes,
+    SUM(UPD.DownVotes) AS TotalDownVotes,
+    AVG(UPD.AverageScore) AS AvgPostScore,
+    STRING_AGG(DISTINCT UPD.PopularTag, ', ') AS PopularTags
+FROM 
+    UserPostDetails UPD
+JOIN 
+    Users U ON UPD.UserId = U.Id
+GROUP BY 
+    U.DisplayName
+ORDER BY 
+    TotalPosts DESC, AvgPostScore DESC
+LIMIT 10;

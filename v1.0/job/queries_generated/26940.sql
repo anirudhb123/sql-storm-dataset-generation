@@ -1,0 +1,63 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT c.kind || ': ' || cn.name, ', ') AS companies,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+PopularActors AS (
+    SELECT 
+        c.movie_id,
+        ak.name AS actor_name,
+        COUNT(c.person_id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        c.movie_id, ak.name
+    HAVING 
+        COUNT(c.person_id) > 1
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ra.company_count,
+        ra.companies,
+        pa.actor_name,
+        pa.role_count
+    FROM 
+        RankedTitles ra
+    LEFT JOIN 
+        PopularActors pa ON ra.title_id = pa.movie_id
+    ORDER BY 
+        ra.production_year DESC, 
+        ra.company_count DESC
+)
+SELECT 
+    title, 
+    production_year, 
+    COALESCE(company_count, 0) AS company_counts,
+    COALESCE(companies, 'No Companies') AS companies_involved,
+    COALESCE(actor_name, 'No Actors') AS main_actor,
+    COALESCE(role_count, 0) AS number_of_roles
+FROM 
+    MovieDetails
+WHERE 
+    production_year >= 2000
+ORDER BY 
+    production_year DESC, 
+    company_counts DESC;

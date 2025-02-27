@@ -1,0 +1,53 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(SUM(ps.ps_availqty), 0) AS total_avail_qty,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY COALESCE(SUM(ps.ps_supplycost), 0) DESC) AS rank_in_nation
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name,
+    SUM(co.total_spent) AS total_revenue,
+    COUNT(DISTINCT co.c_custkey) AS unique_customers,
+    s.s_name,
+    s.total_avail_qty,
+    s.rank_in_nation
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+LEFT JOIN 
+    CustomerOrderStats co ON co.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey ORDER BY c.c_acctbal DESC LIMIT 1)
+WHERE 
+    s.total_avail_qty > 0 
+    AND rs.rank_in_nation <= 3
+GROUP BY 
+    r.r_name, s.s_name, s.total_avail_qty, s.rank_in_nation
+HAVING 
+    SUM(co.total_spent) IS NOT NULL
+ORDER BY 
+    total_revenue DESC, unique_customers DESC;

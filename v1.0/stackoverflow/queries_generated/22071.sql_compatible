@@ -1,0 +1,84 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 year'
+        AND U.Reputation > 1000
+),
+FilteredComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(*) AS CommentCount,
+        STRING_AGG(c.Text, ' | ') AS CommentsSnippet
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '2 weeks'
+    GROUP BY 
+        c.PostId
+),
+PostHistoryWithReason AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT rh.Comment, ', ') AS CloseReasons,
+        MAX(ph.CreationDate) AS LastActionDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes rh ON CAST(ph.Comment AS INTEGER) = rh.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+),
+BestPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rpc.CommentCount,
+        rpc.CommentsSnippet,
+        phwr.CloseReasons,
+        phwr.LastActionDate,
+        COALESCE(phwr.LastActionDate, 'N/A') AS LastAction,
+        CASE 
+            WHEN COALESCE(phwr.LastActionDate, 'N/A') = 'N/A' THEN 0 
+            ELSE 1 
+        END AS IsActive 
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        FilteredComments rpc ON rp.PostId = rpc.PostId
+    LEFT JOIN 
+        PostHistoryWithReason phwr ON rp.PostId = phwr.PostId
+    WHERE 
+        rp.Rank <= 5
+)
+SELECT 
+    bp.Title,
+    bp.CreationDate,
+    bp.CommentCount,
+    bp.CommentsSnippet,
+    bp.CloseReasons,
+    DATE_TRUNC('minute', COALESCE(bp.LastActionDate, '1970-01-01')) AS LastActionTime,
+    CASE 
+        WHEN bp.IsActive = 1 THEN 'Active' 
+        ELSE 'Inactive' 
+    END AS Status
+FROM 
+    BestPosts bp
+WHERE 
+    bp.CommentCount > 0
+ORDER BY 
+    bp.CreationDate DESC
+LIMIT 10;

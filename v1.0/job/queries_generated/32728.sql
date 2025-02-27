@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.kind_id,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    am.title AS movie_title,
+    am.production_year,
+    CASE 
+        WHEN am.kind_id IS NULL THEN 'Unknown'
+        ELSE kt.kind 
+    END AS kind,
+    COUNT(DISTINCT c.person_id) OVER (PARTITION BY am.id) AS actor_count,
+    ROW_NUMBER() OVER (PARTITION BY am.id ORDER BY ak.name) AS actor_rank,
+    SUM(CASE 
+        WHEN pe.info IS NOT NULL THEN 1 
+        ELSE 0 
+    END) AS valid_info_count
+FROM 
+    cast_info c 
+JOIN 
+    aka_name ak ON ak.person_id = c.person_id 
+JOIN 
+    aka_title am ON am.id = c.movie_id 
+LEFT JOIN 
+    kind_type kt ON kt.id = am.kind_id
+LEFT JOIN 
+    person_info pe ON pe.person_id = ak.person_id 
+WHERE 
+    am.production_year > 2000 
+    AND (c.note IS NULL OR c.note NOT LIKE '%extra%')
+GROUP BY 
+    ak.name, am.title, am.production_year, am.kind_id
+HAVING 
+    COUNT(DISTINCT c.person_id) > 1         
+ORDER BY 
+    am.production_year DESC, actor_count DESC;

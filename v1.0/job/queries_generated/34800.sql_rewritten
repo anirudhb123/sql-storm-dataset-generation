@@ -1,0 +1,48 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS actors_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    AVG(CASE WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END) AS has_info 
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.movie_id AND ci.person_role_id = (SELECT id FROM role_type WHERE role = 'Actor')
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+WHERE 
+    mh.level = 1
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+ORDER BY 
+    actors_count DESC, mh.production_year DESC
+LIMIT 10;

@@ -1,0 +1,69 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Account balance unknown'
+            WHEN s.s_acctbal < 500 THEN 'Low balance'
+            ELSE 'Sufficient balance'
+        END AS balance_status
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > 10000
+),
+PartSupplies AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_availqty > (
+            SELECT AVG(ps_inner.ps_availqty) 
+            FROM partsupp ps_inner 
+            WHERE ps_inner.ps_partkey = ps.ps_partkey
+        )
+)
+SELECT 
+    pd.s_suppkey,
+    pd.s_name,
+    pd.nation_name,
+    pd.balance_status,
+    COUNT(DISTINCT ho.o_orderkey) AS high_value_order_count,
+    SUM(COALESCE(ps.ps_availqty, 0)) AS total_available_quantity,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_after_discount
+FROM 
+    SupplierDetails pd
+LEFT JOIN 
+    HighValueOrders ho ON pd.s_suppkey IN (
+        SELECT DISTINCT l.l_suppkey 
+        FROM lineitem l 
+        WHERE l.l_orderkey IN (SELECT ho.o_orderkey FROM HighValueOrders ho)
+    )
+LEFT JOIN 
+    PartSupplies ps ON pd.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    lineitem l ON l.l_suppkey = pd.s_suppkey
+GROUP BY 
+    pd.s_suppkey, pd.s_name, pd.nation_name, pd.balance_status
+HAVING 
+    COUNT(DISTINCT ho.o_orderkey) > 0 
+ORDER BY 
+    total_available_quantity DESC, 
+    avg_price_after_discount DESC
+LIMIT 10;

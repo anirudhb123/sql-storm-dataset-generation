@@ -1,0 +1,47 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.id) AS rn
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+CompanyCounts AS (
+    SELECT 
+        m.movie_id,
+        COUNT(c.id) AS company_count
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    GROUP BY 
+        m.movie_id
+),
+TopMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        cc.company_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyCounts cc ON rm.id = cc.movie_id
+    WHERE 
+        rm.rn <= 10
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(tm.company_count, 0) AS company_count,
+    (SELECT COUNT(*) FROM cast_info ci WHERE ci.movie_id IN (SELECT movie_id FROM movie_info mi WHERE mi.info_type_id = (SELECT id FROM info_type WHERE info = 'duration'))) AS total_movie_duration,
+    CASE 
+        WHEN tm.company_count IS NULL THEN 'No Companies'
+        ELSE 'Has Companies'
+    END AS company_status
+FROM 
+    TopMovies tm
+ORDER BY 
+    tm.production_year DESC, 
+    tm.title;

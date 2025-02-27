@@ -1,0 +1,70 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws.ws_item_sk
+),
+HighProfitItems AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.total_quantity,
+        rs.total_net_profit
+    FROM RankedSales rs
+    WHERE rs.profit_rank = 1
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        i.i_brand
+    FROM item i
+    JOIN HighProfitItems hpi ON i.i_item_sk = hpi.ws_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        coalesce(sr_cdemo_sk, cr_refunded_cdemo_sk) AS customer_demo_sk,
+        SUM(cr_return_quantity) AS total_return_qty,
+        SUM(cr_return_amt) AS total_return_amt
+    FROM (
+        SELECT 
+            sr.sr_cdemo_sk,
+            sr.sr_return_quantity,
+            sr.sr_return_amt
+        FROM store_returns sr
+        UNION ALL
+        SELECT 
+            wr.wr_refunded_cdemo_sk,
+            wr.wr_return_quantity,
+            wr.wr_return_amt
+        FROM web_returns wr
+    ) AS combined_returns
+    GROUP BY coalesce(sr_cdemo_sk, cr_refunded_cdemo_sk)
+),
+AggregateReturns AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(*) AS return_count,
+        SUM(cr.return_qty) AS return_qty,
+        AVG(cr.return_amt) AS avg_return_amt
+    FROM CustomerReturns cr
+    JOIN customer_demographics cd ON cr.customer_demo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender
+)
+SELECT 
+    id.i_item_id,
+    id.i_item_desc,
+    id.i_current_price,
+    id.i_brand,
+    ar.return_count,
+    ar.return_qty,
+    ar.avg_return_amt
+FROM ItemDetails id
+LEFT JOIN AggregateReturns ar ON ar.return_count IS NOT NULL
+ORDER BY ar.return_count DESC, id.i_current_price DESC
+LIMIT 10;

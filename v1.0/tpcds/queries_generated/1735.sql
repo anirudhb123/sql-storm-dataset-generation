@@ -1,0 +1,49 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(CASE WHEN wr_return_quantity IS NOT NULL THEN wr_return_quantity ELSE 0 END), 0) AS total_web_returns,
+        COALESCE(SUM(CASE WHEN sr_return_quantity IS NOT NULL THEN sr_return_quantity ELSE 0 END), 0) AS total_store_returns
+    FROM customer c
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_demographics cd
+    JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+SalesSummary AS (
+    SELECT 
+        d.d_year,
+        SUM(ws.ws_net_profit) AS total_web_sales,
+        SUM(cs.cs_net_profit) AS total_catalog_sales,
+        SUM(ss.ss_net_profit) AS total_store_sales
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    LEFT JOIN store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    GROUP BY d.d_year
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    AVG(cr.total_web_returns) AS avg_web_returns,
+    AVG(cr.total_store_returns) AS avg_store_returns,
+    SUM(ss.total_web_sales) AS total_web_sales,
+    SUM(ss.total_catalog_sales) AS total_catalog_sales,
+    SUM(ss.total_store_sales) AS total_store_sales
+FROM CustomerReturns cr
+JOIN CustomerDemographics cd ON cr.c_customer_sk = cd.cd_demo_sk
+JOIN SalesSummary ss ON 1 = 1 -- cross join to get overall sales by year
+GROUP BY cd.cd_gender, cd.cd_marital_status
+HAVING AVG(cr.total_web_returns) > 0 AND SUM(ss.total_store_sales) > (SELECT AVG(ss.total_store_sales) FROM SalesSummary ss WHERE ss.total_store_sales IS NOT NULL)
+ORDER BY cd.cd_gender, cd.cd_marital_status;

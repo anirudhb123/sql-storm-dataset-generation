@@ -1,0 +1,57 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS ranking
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+), InventoryDetails AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity,
+        LEAD(SUM(inv.inv_quantity_on_hand), 1, 0) OVER (ORDER BY inv.inv_item_sk) AS next_quantity
+    FROM inventory inv
+    GROUP BY inv.inv_item_sk
+), HighProfitCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE 
+            WHEN cd.cd_purchase_estimate BETWEEN 10000 AND 20000 THEN 'Mid'
+            WHEN cd.cd_purchase_estimate > 20000 THEN 'High'
+            ELSE 'Low'
+        END AS purchase_band
+    FROM customer cs
+    JOIN customer_demographics cd ON cs.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN RecursiveSales rs ON cs.c_customer_sk = rs.ws_bill_customer_sk
+    WHERE rs.ranking <= 10
+)
+SELECT 
+    hpc.c_customer_sk,
+    hpc.cd_gender,
+    hpc.cd_marital_status,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    COALESCE(SUM(ws.ws_net_profit), 0) AS total_net_profit,
+    COUNT(DISTINCT i.i_item_sk) AS distinct_items,
+    AVG(CASE 
+        WHEN inv.total_quantity > 100 THEN 1 
+        ELSE 0 
+    END) OVER (PARTITION BY hpc.c_customer_sk) AS high_inventory_indicator,
+    COUNT(DISTINCT CASE 
+        WHEN inv.total_quantity < 20 THEN inv.inv_item_sk 
+        ELSE NULL 
+    END) AS low_inventory_items
+FROM HighProfitCustomers hpc
+LEFT JOIN web_sales ws ON hpc.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN InventoryDetails inv ON ws.ws_item_sk = inv.inv_item_sk
+LEFT JOIN income_band ib ON hpc.purchase_band = CASE 
+        WHEN ib.ib_lower_bound IS NOT NULL THEN 'High'
+        WHEN ib.ib_upper_bound IS NOT NULL THEN 'Low'
+        ELSE NULL 
+    END
+GROUP BY hpc.c_customer_sk, hpc.cd_gender, hpc.cd_marital_status, ib.ib_lower_bound, ib.ib_upper_bound
+HAVING AVG(ws.net_profit) > (SELECT AVG(ws.net_profit) FROM web_sales ws WHERE ws.ws_quantity > 1
+                               AND ws.ws_net_profit IS NOT NULL);

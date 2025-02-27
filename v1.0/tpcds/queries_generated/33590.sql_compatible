@@ -1,0 +1,66 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+RankedSales AS (
+    SELECT 
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        SUM(ss_ext_sales_price) AS total_sales,
+        COUNT(ss_item_sk) AS total_items_sold
+    FROM 
+        store_sales
+    JOIN 
+        customer c ON ss_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        ss_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+                             AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023 AND d_moy = 12)
+    GROUP BY 
+        c.c_first_name, c.c_last_name, ca.ca_city
+),
+AggregatedSales AS (
+    SELECT 
+        rs.c_first_name,
+        rs.c_last_name,
+        rs.ca_city,
+        rs.total_sales,
+        rs.total_items_sold,
+        RANK() OVER (ORDER BY rs.total_sales DESC) AS sales_rank,
+        COUNT(DISTINCT ws_item_sk) OVER () AS total_unique_items
+    FROM 
+        RankedSales rs
+)
+SELECT 
+    asales.c_first_name, 
+    asales.c_last_name, 
+    asales.ca_city,
+    asales.total_sales,
+    asales.total_items_sold,
+    asales.sales_rank,
+    CASE 
+        WHEN asales.total_items_sold IS NULL THEN 'No Items Sold'
+        ELSE CONCAT('Sold ', asales.total_items_sold, ' Items')
+    END AS item_summary,
+    CASE 
+        WHEN asales.total_sales = (SELECT MAX(total_sales) FROM RankedSales) THEN 'Top Performer'
+        ELSE NULL
+    END AS performance_label
+FROM 
+    AggregatedSales asales
+RIGHT JOIN 
+    SalesCTE sc ON COALESCE(asales.total_items_sold, 0) = sc.total_quantity
+WHERE 
+    COALESCE(asales.total_sales, 0) > 0
+ORDER BY 
+    asales.sales_rank;

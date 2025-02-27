@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.PostTypeId = 1 -- Questions only
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(v.BountyAmount) AS TotalBounty,
+        AVG(u.Reputation) AS AverageReputation,
+        SUM(u.UpVotes) AS TotalUpVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    us.TotalQuestions,
+    us.TotalBadges,
+    us.TotalBounty,
+    us.AverageReputation,
+    us.TotalUpVotes
+FROM 
+    RankedPosts rp
+JOIN 
+    UserStats us ON rp.OwnerDisplayName = us.UserId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

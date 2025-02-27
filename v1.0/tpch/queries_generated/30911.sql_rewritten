@@ -1,0 +1,60 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_orderdate, o_totalprice, o_orderstatus, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.level < 3
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    s.s_name AS supplier,
+    SUM(ps.ps_supplycost * l.l_quantity) AS total_cost,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name, n.n_name ORDER BY SUM(ps.ps_supplycost * l.l_quantity) DESC) AS rank,
+    CASE 
+        WHEN SUM(l.l_discount) > 0 THEN 'Discount Applied'
+        ELSE 'No Discount'
+    END AS discount_status
+FROM 
+    lineitem l
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    AND r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name, n.n_name, s.s_name
+ORDER BY 
+    total_cost DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Total' AS region,
+    'All Nations' AS nation,
+    NULL AS supplier,
+    SUM(ps.ps_supplycost * l.l_quantity) AS total_cost,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    NULL AS rank,
+    NULL AS discount_status
+FROM 
+    lineitem l
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31';

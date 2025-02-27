@@ -1,0 +1,85 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '::int'))::int[]
+    GROUP BY 
+        Tags.TagName
+),
+RecentUserActivity AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS PostsCreated,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(Posts.Score, 0)) AS TotalScore,
+        DENSE_RANK() OVER (PARTITION BY Users.Id ORDER BY Users.CreationDate DESC) AS ActivityRank
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        Posts.Id,
+        Posts.Title,
+        Posts.CreationDate,
+        MIN(PostHistory.CreationDate) AS FirstClosedDate,
+        COUNT(DISTINCT Comments.Id) AS TotalComments
+    FROM 
+        Posts
+    JOIN 
+        PostHistory ON Posts.Id = PostHistory.PostId
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    WHERE 
+        PostHistory.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        Posts.Id, Posts.Title, Posts.CreationDate
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        SUM(PostsCreated) AS TotalPostsCreated,
+        SUM(TotalViews) AS TotalUserViews,
+        RANK() OVER (ORDER BY SUM(PostsCreated) DESC) AS UserRank
+    FROM 
+        RecentUserActivity
+    GROUP BY 
+        UserId
+),
+FilteredTagCounts AS (
+    SELECT 
+        TagName,
+        PostCount
+    FROM 
+        RecursiveTagCounts
+    WHERE 
+        PostCount > 5
+)
+SELECT 
+    tu.UserId,
+    tu.UserRank,
+    u.DisplayName,
+    ftc.TagName,
+    ftc.PostCount,
+    cp.Title AS ClosedPostTitle,
+    cp.FirstClosedDate,
+    cp.TotalComments
+FROM 
+    TopUsers tu
+JOIN 
+    Users u ON tu.UserId = u.Id
+JOIN 
+    FilteredTagCounts ftc ON ftc.PostCount > 5 -- Filter tags with more than 5 posts
+LEFT JOIN 
+    ClosedPosts cp ON cp.TotalComments > 2 -- Include closed posts with more than 2 comments
+WHERE 
+    u.Reputation > 1000 -- Only consider users with a reputation greater than 1000
+ORDER BY 
+    tu.UserRank, ftc.PostCount DESC;

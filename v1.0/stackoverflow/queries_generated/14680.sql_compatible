@@ -1,0 +1,75 @@
+
+WITH UserVotes AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        p.ClosedDate,
+        COALESCE(ph.UserId, u.Id) AS LastEditorId,
+        u.DisplayName AS LastEditorDisplayName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5, 6) 
+    LEFT JOIN 
+        Users u ON ph.UserId = u.Id
+),
+UserPostStats AS (
+    SELECT 
+        ups.UserId,
+        ups.PostId,
+        ups.Title,
+        ups.CreationDate,
+        ups.Score,
+        ups.ViewCount,
+        ups.AnswerCount,
+        ups.CommentCount,
+        ups.FavoriteCount,
+        ups.ClosedDate,
+        ups.LastEditorId,
+        ups.LastEditorDisplayName,
+        uv.VoteCount,
+        uv.UpVotes,
+        uv.DownVotes
+    FROM 
+        UserVotes uv
+    JOIN 
+        PostStats ups ON uv.UserId = ups.LastEditorId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    p.CommentCount,
+    p.FavoriteCount,
+    p.ClosedDate,
+    p.LastEditorDisplayName,
+    uv.VoteCount,
+    uv.UpVotes,
+    uv.DownVotes
+FROM 
+    UserPostStats p
+JOIN 
+    UserVotes uv ON p.UserId = uv.UserId
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC;

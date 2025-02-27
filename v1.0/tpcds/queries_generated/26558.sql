@@ -1,0 +1,63 @@
+
+WITH AddressCounts AS (
+    SELECT 
+        ca_city, 
+        ca_state,
+        COUNT(DISTINCT ca_address_id) AS unique_address_count,
+        STRING_AGG(DISTINCT ca_street_name, ', ') AS street_names,
+        STRING_AGG(DISTINCT ca_suite_number, ', ') AS suite_numbers
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city, 
+        ca_state
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_gender,
+        COUNT(c.c_customer_sk) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        STRING_AGG(DISTINCT cd_marital_status, ', ') AS marital_statuses
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd_gender
+),
+SalesSummary AS (
+    SELECT 
+        d.year, 
+        SUM(ws.net_paid) AS total_web_sales, 
+        COUNT(ws.order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.year
+)
+SELECT 
+    a.ca_city, 
+    a.ca_state, 
+    a.unique_address_count, 
+    a.street_names, 
+    a.suite_numbers, 
+    c.cd_gender, 
+    c.customer_count, 
+    c.avg_purchase_estimate, 
+    c.marital_statuses, 
+    s.year, 
+    s.total_web_sales, 
+    s.total_orders
+FROM 
+    AddressCounts a
+JOIN 
+    CustomerDemographics c ON a.ca_state = c.cd_gender
+JOIN 
+    SalesSummary s ON s.year = EXTRACT(YEAR FROM CURRENT_DATE)
+ORDER BY 
+    a.unique_address_count DESC, 
+    c.customer_count DESC, 
+    s.total_web_sales DESC
+LIMIT 100;

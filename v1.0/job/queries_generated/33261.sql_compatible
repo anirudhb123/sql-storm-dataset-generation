@@ -1,0 +1,72 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+movie_cast AS (
+    SELECT 
+        ci.movie_id,
+        c.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name c ON ci.person_id = c.person_id
+),
+movie_info_summary AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mi.info, ', ') AS info_summary
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+),
+movie_details AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mcs.actor_name,
+        mis.info_summary,
+        COALESCE(NULLIF(mis.info_summary, ''), 'No Information') AS final_info
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_cast mcs ON mh.movie_id = mcs.movie_id
+    LEFT JOIN 
+        movie_info_summary mis ON mh.movie_id = mis.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    STRING_AGG(DISTINCT md.actor_name, ', ') AS cast,
+    md.final_info
+FROM 
+    movie_details md
+GROUP BY 
+    md.movie_id, md.title, md.production_year, md.final_info
+HAVING 
+    COUNT(md.actor_name) > 1
+ORDER BY 
+    md.production_year DESC, md.title;

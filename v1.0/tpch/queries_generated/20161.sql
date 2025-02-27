@@ -1,0 +1,113 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal
+    FROM 
+        RankedSuppliers s
+    WHERE 
+        s.rank <= 3
+),
+CustomerOrderInfo AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+SupplierPartInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+QualifiedParts AS (
+    SELECT 
+        p.*
+    FROM 
+        part p
+    WHERE 
+        EXISTS (
+            SELECT 1
+            FROM SupplierPartInfo spi
+            WHERE 
+                spi.ps_partkey = p.p_partkey
+                AND spi.total_avail_qty > 1000
+                AND spi.avg_supply_cost < (
+                    SELECT AVG(ps_avg.ps_supplycost)
+                    FROM partsupp ps_avg
+                    WHERE ps_avg.ps_partkey = p.p_partkey
+                )
+        )
+),
+OrderDetails AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        l.l_shipdate,
+        COALESCE(NULLIF(o.o_orderstatus, 'F'), 'Unknown') AS order_status,
+        RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS line_rank
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(t.total_spent, 0) AS total_spent,
+    COALESCE(t.order_count, 0) AS order_count,
+    p.p_name,
+    COUNT(DISTINCT od.l_orderkey) AS order_appearances
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerOrderInfo t ON c.c_custkey = t.c_custkey
+LEFT JOIN 
+    OrderDetails od ON od.l_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey = c.c_custkey
+    )
+LEFT JOIN 
+    QualifiedParts p ON od.l_partkey = p.p_partkey
+JOIN 
+    TopSuppliers ts ON ts.s_suppkey = 
+         (SELECT ps.ps_suppkey 
+          FROM partsupp ps 
+          WHERE ps.ps_partkey = p.p_partkey 
+          ORDER BY ps.ps_supplycost DESC 
+          LIMIT 1)
+WHERE 
+    t.total_spent IS NOT NULL 
+    AND (c.c_acctbal IS NULL OR c.c_acctbal > 0)
+GROUP BY 
+    c.c_custkey, c.c_name, t.total_spent, t.order_count, p.p_name
+HAVING 
+    SUM(od.l_extendedprice) - SUM(od.l_discount) > 1000
+ORDER BY 
+    total_spent DESC, c.c_custkey;

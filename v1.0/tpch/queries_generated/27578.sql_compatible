@@ -1,0 +1,27 @@
+
+SELECT 
+    CONCAT_WS(' - ', p.p_name, s.s_name, n.n_name) AS item_details,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    COUNT(DISTINCT o.o_orderkey) AS orders_count,
+    AVG(s.s_acctbal) AS average_supplier_balance
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    part p ON l.l_partkey = p.p_partkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    o.o_orderdate >= DATE '1997-01-01' 
+    AND o.o_orderdate < DATE '1998-01-01'
+GROUP BY 
+    p.p_name, s.s_name, n.n_name
+HAVING 
+    total_sales > 10000
+ORDER BY 
+    total_sales DESC, average_supplier_balance DESC;

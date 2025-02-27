@@ -1,0 +1,52 @@
+WITH UserReputation AS (
+    SELECT
+        Id AS UserId,
+        Reputation,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+TopTags AS (
+    SELECT
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount
+    FROM Tags
+    LEFT JOIN Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    GROUP BY Tags.TagName
+    HAVING COUNT(Posts.Id) > 10
+),
+ClosedPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        PH.CreationDate AS ClosedDate,
+        COALESCE(PH.Comment, 'Not specified') AS CloseReason
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId = 10
+),
+UserBadges AS (
+    SELECT
+        U.Id AS UserId,
+        B.Name AS BadgeName,
+        B.Class,
+        B.Date
+    FROM Users U
+    JOIN Badges B ON U.Id = B.UserId
+)
+SELECT
+    U.DisplayName,
+    UReputation.Reputation,
+    UReputation.ReputationRank,
+    TT.TagName,
+    COALESCE(CP.ClosedDate, 'Not Closed') AS PostClosedDate,
+    COALESCE(CP.CloseReason, 'N/A') AS CloseReason,
+    COUNT(UB.BadgeName) AS BadgeCount
+FROM Users U
+JOIN UserReputation UReputation ON U.Id = UReputation.UserId
+LEFT JOIN TopTags TT ON TT.PostCount > 5 -- assuming we want tags with more than 5 posts
+LEFT JOIN ClosedPosts CP ON CP.Title ILIKE '%' || TT.TagName || '%'
+LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+WHERE U.Reputation > 1000
+AND (UB.Date >= CURRENT_DATE - INTERVAL '1 year' OR UB.Date IS NULL)
+GROUP BY U.DisplayName, UReputation.Reputation, UReputation.ReputationRank, TT.TagName, CP.ClosedDate, CP.CloseReason
+ORDER BY UReputation.Reputation DESC, BadgeCount DESC
+LIMIT 50;

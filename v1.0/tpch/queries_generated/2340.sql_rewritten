@@ -1,0 +1,36 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+      AND o.o_orderstatus IN ('O', 'F')
+),
+SupplierCosts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_supplycost,
+           SUM(li.l_quantity) AS total_quantity
+    FROM partsupp ps
+    JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, ps.ps_supplycost
+),
+AggregatedParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT r.r_name, COUNT(DISTINCT c.c_custkey) AS total_customers,
+       AVG(o.o_totalprice) AS avg_order_value, 
+       SUM(s.total_quantity * s.ps_supplycost) AS total_cost,
+       STRING_AGG(p.p_name, ', ') AS part_names
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN customer c ON s.s_suppkey = c.c_custkey
+LEFT JOIN RankedOrders o ON c.c_custkey = o.o_orderkey
+LEFT JOIN AggregatedParts p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+WHERE c.c_acctbal > 1000
+  AND (o.o_orderdate IS NULL OR o.o_orderdate <= cast('1998-10-01' as date) - INTERVAL '30 DAY')
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY total_cost DESC;

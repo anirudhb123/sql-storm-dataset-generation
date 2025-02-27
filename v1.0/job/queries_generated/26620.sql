@@ -1,0 +1,49 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        a.name AS director_name,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_within_year
+    FROM title t
+    JOIN cast_info ci ON t.id = ci.movie_id
+    JOIN aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE t.production_year IS NOT NULL
+    GROUP BY t.id, t.title, t.production_year, a.name
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.director_name,
+        rm.cast_count,
+        rm.keywords
+    FROM RankedMovies rm
+    WHERE rm.rank_within_year <= 5 -- top 5 movies per year based on cast count
+),
+MovieDetails AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        fm.director_name,
+        fm.cast_count,
+        fm.keywords,
+        COALESCE(mi.info, 'No additional info available') AS additional_info
+    FROM FilteredMovies fm
+    LEFT JOIN movie_info mi ON fm.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.director_name,
+    md.cast_count,
+    md.keywords,
+    md.additional_info
+FROM MovieDetails md
+ORDER BY md.production_year DESC, md.cast_count DESC;

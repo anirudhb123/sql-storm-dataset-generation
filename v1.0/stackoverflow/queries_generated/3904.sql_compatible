@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerName,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.Id ORDER BY p.LastActivityDate DESC) AS ActivityRank,
+        COALESCE(bp.BadgeCount, 0) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            UserId, COUNT(*) AS BadgeCount
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) bp ON u.Id = bp.UserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, u.DisplayName, bp.BadgeCount
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 500
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        rp.OwnerName,
+        rp.CommentCount,
+        rp.BadgeCount,
+        u.UpVotes,
+        u.DownVotes,
+        CASE 
+            WHEN rp.ActivityRank = 1 THEN 'Most Active'
+            ELSE 'Less Active'
+        END AS ActivityLevel
+    FROM 
+        RankedPosts rp
+    JOIN 
+        ActiveUsers u ON rp.OwnerName = u.DisplayName
+    WHERE 
+        rp.CommentCount > 5 AND
+        rp.BadgeCount > 0
+)
+SELECT 
+    p.Id,
+    p.Title,
+    p.OwnerName,
+    p.CommentCount,
+    p.BadgeCount,
+    p.UpVotes,
+    p.DownVotes,
+    p.ActivityLevel,
+    CASE 
+        WHEN p.BadgeCount IS NULL OR p.BadgeCount = 0 THEN 'No Badges'
+        ELSE 'Has Badges'
+    END AS BadgeStatus
+FROM 
+    FilteredPosts p
+ORDER BY 
+    p.Score DESC, 
+    p.CommentCount DESC
+LIMIT 50;

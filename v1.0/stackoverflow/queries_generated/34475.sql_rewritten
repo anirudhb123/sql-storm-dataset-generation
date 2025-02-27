@@ -1,0 +1,105 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+MostCommentedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        ViewCount,
+        CommentCount,
+        UpVotes,
+        DownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        CommentCount > 10
+),
+RecentUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.LastAccessDate,
+        COUNT(p.Id) AS QuestionCount,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.LastAccessDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        u.Id
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Owner,
+        p.ViewCount
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '7 days'
+),
+CombinedResults AS (
+    SELECT 
+        mc.PostId,
+        mc.Title AS MostCommentedTitle,
+        mc.Score,
+        mc.ViewCount AS MostCommentedViews,
+        ra.UserId,
+        ra.DisplayName AS RecentUser,
+        ra.Reputation,
+        rp.PostId AS RecentPostId,
+        rp.Title AS RecentPostTitle,
+        rp.CreationDate AS RecentPostDate,
+        rp.ViewCount AS RecentPostViews
+    FROM 
+        MostCommentedPosts mc
+    JOIN 
+        RecentUserActivity ra ON ra.QuestionCount > 0
+    FULL OUTER JOIN 
+        RecentPosts rp ON rp.ViewCount > 20
+)
+SELECT 
+    cr.UserId,
+    cr.RecentUser,
+    cr.Reputation,
+    cr.MostCommentedTitle,
+    cr.MostCommentedViews,
+    cr.RecentPostTitle,
+    cr.RecentPostViews
+FROM 
+    CombinedResults cr
+WHERE 
+    cr.RecentPostId IS NOT NULL
+ORDER BY 
+    cr.Reputation DESC, 
+    cr.MostCommentedViews DESC;

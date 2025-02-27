@@ -1,0 +1,82 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number) AS rn
+    FROM 
+        web_sales
+),
+Customer_Summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_paid) AS total_spent,
+        MAX(ws_sales_price) AS max_item_price,
+        MIN(ws_sales_price) AS min_item_price,
+        AVG(ws_sales_price) AS avg_item_price
+    FROM 
+        Customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+Refund_Summary AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+), 
+Filtered_Customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_orders,
+        cs.total_spent,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        COALESCE(rs.total_return_amount, 0) AS total_return_amount,
+        CASE 
+            WHEN (cs.total_spent - COALESCE(rs.total_return_amount, 0)) > 0 
+            THEN (cs.total_spent - COALESCE(rs.total_return_amount, 0)) / NULLIF(cs.total_orders, 0) 
+            ELSE 0 
+        END AS avg_spent_per_order
+    FROM 
+        Customer_Summary cs
+    LEFT JOIN 
+        Refund_Summary rs ON cs.c_customer_sk = rs.sr_returning_customer_sk
+),
+Income_Bands AS (
+    SELECT 
+        hd.hd_demo_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        household_demographics hd
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT 
+    fc.c_customer_sk,
+    fc.total_orders,
+    fc.total_spent,
+    fc.total_returns,
+    fc.total_return_amount,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    fc.avg_spent_per_order
+FROM 
+    Filtered_Customers fc
+JOIN 
+    Income_Bands ib ON fc.total_spent BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound
+WHERE 
+    fc.total_spent IS NOT NULL
+ORDER BY 
+    fc.total_spent DESC
+LIMIT 10;

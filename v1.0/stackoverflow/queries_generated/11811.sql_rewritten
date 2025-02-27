@@ -1,0 +1,53 @@
+WITH PostAggregates AS (
+    SELECT 
+        P.Id AS PostId,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(DISTINCT V.Id) AS VoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.ViewCount, P.Score
+),
+UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        AVG(P.ViewCount) AS AvgPostViews,
+        SUM(P.Score) AS TotalScore,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(B.Class = 1) AS GoldBadges,
+        SUM(B.Class = 2) AS SilverBadges,
+        SUM(B.Class = 3) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.AvgPostViews,
+    U.TotalScore,
+    U.TotalPosts,
+    U.GoldBadges,
+    U.SilverBadges,
+    U.BronzeBadges,
+    SUM(PA.ViewCount) AS TotalPostViews,
+    SUM(PA.VoteCount) AS TotalVotes,
+    AVG(PA.CommentCount) AS AvgCommentsPerPost
+FROM 
+    UserStatistics U
+JOIN 
+    PostAggregates PA ON U.UserId = PA.PostId
+GROUP BY 
+    U.DisplayName, U.Reputation, U.AvgPostViews, U.TotalScore, U.TotalPosts, U.GoldBadges, U.SilverBadges, U.BronzeBadges;

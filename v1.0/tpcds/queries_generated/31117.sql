@@ -1,0 +1,59 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws.order_number, 
+           ws_sold_date_sk, 
+           ws_item_sk, 
+           ws_quantity, 
+           ws_net_profit, 
+           1 as level
+    FROM web_sales ws
+    WHERE ws_sold_date_sk = (
+        SELECT MAX(ws2.ws_sold_date_sk) 
+        FROM web_sales ws2
+    )
+    UNION ALL
+    SELECT ws.order_number, 
+           ws_sold_date_sk, 
+           ws_item_sk, 
+           ws_quantity, 
+           ws_net_profit, 
+           level + 1
+    FROM web_sales ws
+    JOIN SalesCTE sc ON ws.order_number = sc.order_number
+    WHERE sc.level < 4
+),
+CustomerStats AS (
+    SELECT c.c_customer_sk, 
+           COUNT(DISTINCT ws.order_number) AS order_count, 
+           SUM(ws.ws_net_profit) AS total_profit
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+HighValueCustomers AS (
+    SELECT cs.c_customer_sk, 
+           cs.order_count, 
+           cs.total_profit, 
+           CASE 
+               WHEN cs.total_profit > 10000 THEN 'High'
+               WHEN cs.total_profit BETWEEN 5000 AND 10000 THEN 'Medium'
+               ELSE 'Low' 
+           END AS customer_value
+    FROM CustomerStats cs
+)
+SELECT 
+    c.c_first_name || ' ' || c.c_last_name AS customer_name,
+    a.ca_city,
+    ws.item_sk,
+    SUM(ws.ws_quantity) AS total_items_sold,
+    COALESCE(CAST(SUM(ws.ws_net_profit) AS DECIMAL(10, 2)), 0) AS total_profit,
+    COALESCE(hvc.customer_value, 'No Value') AS customer_segment
+FROM web_sales ws
+LEFT JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+LEFT JOIN customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+LEFT JOIN HighValueCustomers hvc ON c.c_customer_sk = hvc.c_customer_sk
+WHERE ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+                              AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+GROUP BY c.c_customer_sk, a.ca_city, ws.item_sk, hvc.customer_value
+HAVING SUM(ws.ws_quantity) > 50
+ORDER BY total_profit DESC;

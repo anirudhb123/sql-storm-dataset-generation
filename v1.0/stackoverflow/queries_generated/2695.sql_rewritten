@@ -1,0 +1,40 @@
+WITH RecentPosts AS (
+    SELECT P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, 
+           ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM Posts P
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+PostWithVotes AS (
+    SELECT R.Id AS PostId, 
+           COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+           COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+           COALESCE(SUM(CASE WHEN V.VoteTypeId IN (6, 10) THEN 1 ELSE 0 END), 0) AS CloseVotes,
+           COALESCE(SUM(CASE WHEN V.VoteTypeId IN (11, 7) THEN 1 ELSE 0 END), 0) AS ReopenVotes
+    FROM RecentPosts R
+    LEFT JOIN Votes V ON R.Id = V.PostId
+    GROUP BY R.Id
+),
+UserBadges AS (
+    SELECT U.Id AS UserId, 
+           COUNT(B.Id) AS TotalBadges,
+           STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+)
+SELECT U.DisplayName, 
+       P.Title,
+       P.UpVotes, 
+       P.DownVotes,
+       P.CloseVotes,
+       P.ReopenVotes,
+       B.TotalBadges,
+       B.BadgeNames
+FROM PostWithVotes P
+INNER JOIN Users U ON P.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id)
+LEFT JOIN UserBadges B ON U.Id = B.UserId
+WHERE (P.UpVotes - P.DownVotes) > 0
+  AND (B.TotalBadges IS NULL OR B.TotalBadges > 0)
+  AND P.PostId IS NOT NULL
+ORDER BY P.UpVotes DESC, B.TotalBadges DESC
+LIMIT 10;

@@ -1,0 +1,46 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        DENSE_RANK() OVER (ORDER BY COUNT(c.Id) DESC) AS RankByComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+        AND p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByComments <= 10
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    (tp.UpVoteCount - tp.DownVoteCount) AS NetVotes
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.CommentCount DESC, 
+    tp.CreationDate DESC;

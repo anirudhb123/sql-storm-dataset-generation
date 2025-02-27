@@ -1,0 +1,59 @@
+
+WITH UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges,
+        COALESCE(SUM(CASE WHEN b.TagBased = 1 THEN 1 ELSE 0 END), 0) AS TagBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStatistics AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(CASE WHEN PostTypeId = 1 THEN 1 END) AS Questions,
+        COUNT(CASE WHEN PostTypeId = 2 THEN 1 END) AS Answers,
+        COUNT(*) AS TotalPosts,
+        SUM(ViewCount) AS TotalViews,
+        AVG(Score) AS AverageScore
+    FROM Posts
+    GROUP BY OwnerUserId
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ps.Questions, 0) AS TotalQuestions,
+        COALESCE(ps.Answers, 0) AS TotalAnswers,
+        COALESCE(us.GoldBadges, 0) AS GoldBadges,
+        COALESCE(us.SilverBadges, 0) AS SilverBadges,
+        COALESCE(us.BronzeBadges, 0) AS BronzeBadges,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+    LEFT JOIN PostStatistics ps ON u.Id = ps.OwnerUserId
+    LEFT JOIN UserBadgeCounts us ON u.Id = us.UserId
+),
+TopUsers AS (
+    SELECT 
+        ue.*,
+        NTILE(10) OVER (ORDER BY ue.Reputation DESC) AS ReputationDecile
+    FROM UserEngagement ue
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.TotalQuestions,
+    u.TotalAnswers,
+    CONCAT(CAST(u.GoldBadges AS VARCHAR), ' Gold, ', CAST(u.SilverBadges AS VARCHAR), ' Silver, ', CAST(u.BronzeBadges AS VARCHAR), ' Bronze') AS BadgeSummary,
+    u.ReputationRank,
+    CASE WHEN u.ReputationRank <= 10 THEN 'Top Contributor' ELSE 'Contributor' END AS ContributorStatus
+FROM TopUsers u
+WHERE 
+    u.TotalQuestions > 5 AND 
+    (u.ReputationRank > 10 OR u.TotalAnswers > 15)
+ORDER BY u.TotalQuestions DESC, u.Reputation DESC
+LIMIT 20;

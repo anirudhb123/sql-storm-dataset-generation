@@ -1,0 +1,60 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostComments AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        c.UserDisplayName,
+        c.Text,
+        c.CreationDate
+    FROM 
+        Posts p
+    JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        c.CreationDate >= NOW() - INTERVAL '30 days'
+),
+TopPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.ViewCount DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+)
+SELECT 
+    ub.UserId,
+    ub.DisplayName,
+    ub.BadgeCount,
+    rp.PostId,
+    rp.Title AS RecentPostTitle,
+    rp.UserDisplayName AS CommentedBy,
+    rp.Text AS CommentText,
+    rp.CreationDate AS CommentDate,
+    tp.Score AS TopPostScore,
+    tp.ViewCount AS TopPostViewCount
+FROM 
+    UserBadgeCounts ub
+LEFT JOIN 
+    RecentPostComments rp ON ub.UserId = rp.UserDisplayName
+LEFT JOIN 
+    TopPosts tp ON rp.PostId = tp.PostId
+WHERE 
+    ub.BadgeCount > 3
+    AND tp.PostRank <= 10
+ORDER BY 
+    ub.BadgeCount DESC, rp.CreationDate DESC;

@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+        AND p.Score >= 0
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.Tags,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId AND v.VoteTypeId = 2 -- UpMod vote type
+    WHERE 
+        rp.Rank <= 10
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.Tags
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        MAX(ph.CreationDate) OVER (PARTITION BY ph.PostId) AS LastModificationDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13, 14) -- Closed, Reopened, Deleted, Undeleted
+),
+RecentPostUpdates AS (
+    SELECT 
+        th.PostId,
+        th.Title,
+        th.ViewCount,
+        th.VoteCount,
+        CASE 
+            WHEN ph.PostId IS NOT NULL THEN 'Modified' 
+            ELSE 'Not Modified' 
+        END AS Status
+    FROM 
+        TopPosts th
+    LEFT JOIN 
+        PostHistories ph ON th.PostId = ph.PostId AND ph.LastModificationDate = th.CreationDate
+)
+SELECT 
+    rpu.*,
+    pt.Name AS PostType,
+    u.DisplayName AS LastEditedBy
+FROM 
+    RecentPostUpdates rpu
+LEFT JOIN 
+    PostTypes pt ON rpu.PostId IN (SELECT Id FROM Posts WHERE PostTypeId = pt.Id)
+LEFT JOIN 
+    Users u ON u.Id IN (SELECT LastEditorUserId FROM Posts WHERE Id = rpu.PostId)
+WHERE 
+    rpu.VoteCount > 0
+ORDER BY 
+    rpu.ViewCount DESC, 
+    rpu.Score DESC;
+

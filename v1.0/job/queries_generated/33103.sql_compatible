@@ -1,0 +1,92 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        title AS t ON ml.linked_movie_id = t.id
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+), RankedMovies AS (
+    SELECT 
+        mh.movie_id, 
+        mh.title, 
+        mh.production_year,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rn
+    FROM 
+        MovieHierarchy AS mh
+),
+CompanyMovieDetails AS (
+    SELECT 
+        c.name AS company_name,
+        m.title,
+        m.production_year,
+        COUNT(*) AS num_movies,
+        AVG(m.production_year) AS avg_production_year
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        company_name AS c ON mc.company_id = c.id
+    JOIN 
+        aka_title AS m ON mc.movie_id = m.id
+    WHERE 
+        m.production_year IS NOT NULL
+    GROUP BY 
+        c.name, m.title, m.production_year
+),
+CastDetails AS (
+    SELECT 
+        p.name AS person_name,
+        a.title,
+        a.production_year,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM 
+        cast_info AS ci
+    JOIN 
+        aka_name AS p ON ci.person_id = p.id
+    JOIN 
+        aka_title AS a ON ci.movie_id = a.id
+    JOIN 
+        role_type AS r ON ci.role_id = r.id
+    WHERE 
+        ci.nr_order < 5
+    GROUP BY 
+        p.name, a.title, a.production_year
+)
+SELECT 
+    rm.title AS movie_title,
+    rm.production_year,
+    cm.company_name,
+    cd.person_name,
+    cd.roles,
+    COALESCE(COALESCE(cd.title, 'No Cast Available'), 'Unknown Title') AS casted_title,
+    rm.level
+FROM 
+    RankedMovies AS rm
+LEFT JOIN 
+    CompanyMovieDetails AS cm ON rm.movie_id = cm.movie_id
+LEFT JOIN 
+    CastDetails AS cd ON rm.title = cd.title
+WHERE 
+    rm.rn <= 10
+ORDER BY 
+    rm.production_year DESC, 
+    cm.num_movies DESC, 
+    rm.level ASC;

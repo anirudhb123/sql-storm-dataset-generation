@@ -1,0 +1,104 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COALESCE(cnt.AnswerCount, 0) AS AnswerCount,
+        COALESCE(cmt.CommentCount, 0) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            ParentId AS PostId,
+            COUNT(*) AS AnswerCount
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 2
+        GROUP BY 
+            ParentId
+    ) AS cnt ON p.Id = cnt.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) AS cmt ON p.Id = cmt.PostId
+    WHERE 
+        p.PostTypeId = 1
+),
+RecentUpdates AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) 
+),
+PostUserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.CommentCount,
+    CASE 
+        WHEN ru.PostId IS NOT NULL THEN 'Post Updated'
+        ELSE 'No Recent Updates'
+    END AS UpdateStatus,
+    pb.UserId,
+    pb.BadgeCount,
+    pb.BadgeNames,
+    CASE 
+        WHEN rp.Score IS NULL THEN 'Score Unknown'
+        ELSE CAST(rp.Score AS VARCHAR)
+    END AS ScoreText
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentUpdates ru ON rp.PostId = ru.PostId AND ru.HistoryRank = 1
+LEFT JOIN 
+    PostUserBadges pb ON rp.OwnerUserId = pb.UserId
+WHERE 
+    rp.PostRank = 1
+    AND rp.ViewCount > (SELECT AVG(ViewCount) FROM Posts) 
+GROUP BY 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.CommentCount,
+    ru.PostId,
+    pb.UserId,
+    pb.BadgeCount,
+    pb.BadgeNames,
+    rp.Score
+ORDER BY 
+    rp.Score DESC,
+    rp.CreationDate DESC;

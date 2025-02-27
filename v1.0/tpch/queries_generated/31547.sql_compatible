@@ -1,0 +1,41 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate) AS order_rank
+    FROM orders
+    WHERE o_orderstatus = 'O'
+),
+SupplierPerformance AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_avail_qty,
+           SUM(ps.ps_supplycost) AS total_supply_cost,
+           STRING_AGG(s.s_name, ', ') AS supplier_names
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+CustomerPurchases AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS total_orders,
+           RANK() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS purchase_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT c.c_custkey) AS total_customers, 
+       AVG(cp.total_spent) AS avg_spent_per_customer,
+       SUM(sp.total_supply_cost) AS total_supply_cost,
+       COUNT(DISTINCT oh.o_orderkey) AS total_orders,
+       CASE 
+           WHEN AVG(cp.total_spent) IS NULL THEN 'No Purchases'
+           ELSE 'Purchases Made'
+       END AS purchase_status
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN SupplierPerformance sp ON ps.ps_partkey = sp.ps_partkey
+LEFT JOIN CustomerPurchases cp ON s.s_nationkey = cp.c_custkey
+LEFT JOIN OrderHierarchy oh ON cp.c_custkey = oh.o_custkey
+GROUP BY r.r_name
+ORDER BY total_orders DESC, avg_spent_per_customer DESC;

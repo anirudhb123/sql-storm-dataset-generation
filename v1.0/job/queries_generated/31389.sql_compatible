@@ -1,0 +1,87 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5  
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        RANK() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS rank_within_year
+    FROM 
+        MovieHierarchy mh
+),
+CastWithRoles AS (
+    SELECT 
+        ak.name AS actor_name,
+        mt.title AS movie_title,
+        ct.kind AS role_type,
+        ci.nr_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.id
+    LEFT JOIN 
+        role_type ct ON ci.role_id = ct.id
+),
+MovieKeywords AS (
+    SELECT 
+        mt.title,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.phonetic_code IS NOT NULL
+    GROUP BY 
+        mt.title
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.rank_within_year,
+    cwr.actor_name,
+    cwr.role_type,
+    mw.keywords
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastWithRoles cwr ON rm.title = cwr.movie_title
+LEFT JOIN 
+    MovieKeywords mw ON rm.title = mw.title
+WHERE 
+    rm.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    rm.production_year DESC, 
+    rm.rank_within_year, 
+    cwr.nr_order ASC NULLS LAST;

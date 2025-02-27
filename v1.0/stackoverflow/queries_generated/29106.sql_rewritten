@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        Tags, 
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tags
+    HAVING 
+        COUNT(*) > 10 
+),
+FinalOutput AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.AnswerCount,
+        tt.Tags
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TopTags tt ON rp.Tags = tt.Tags
+    WHERE 
+        rp.TagRank <= 5 
+)
+SELECT 
+    fo.PostId,
+    fo.Title,
+    fo.Body,
+    fo.CreationDate,
+    fo.OwnerDisplayName,
+    fo.ViewCount,
+    fo.CommentCount,
+    fo.AnswerCount,
+    fo.Tags
+FROM 
+    FinalOutput fo
+ORDER BY 
+    fo.Tags, fo.ViewCount DESC;

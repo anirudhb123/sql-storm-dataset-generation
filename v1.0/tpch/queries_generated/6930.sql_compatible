@@ -1,0 +1,66 @@
+
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name, c.c_acctbal
+    HAVING
+        SUM(o.o_totalprice) > 100000
+),
+SupplierCustomerCompare AS (
+    SELECT
+        r.n_name AS region_name,
+        s.s_name AS supplier_name,
+        c.c_name AS customer_name,
+        rank_s.total_supply_value,
+        rank_c.total_spent
+    FROM
+        RankedSuppliers rank_s
+    JOIN
+        partsupp ps ON rank_s.s_suppkey = ps.ps_suppkey
+    JOIN
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN
+        HighValueCustomers rank_c ON c.c_custkey = rank_c.c_custkey
+    WHERE
+        rank_s.supplier_rank <= 10
+)
+SELECT
+    region_name,
+    supplier_name,
+    customer_name,
+    total_supply_value,
+    total_spent
+FROM
+    SupplierCustomerCompare
+ORDER BY
+    total_supply_value DESC, total_spent DESC;

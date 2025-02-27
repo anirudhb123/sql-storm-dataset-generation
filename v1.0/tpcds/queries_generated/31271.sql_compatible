@@ -1,0 +1,35 @@
+
+WITH RecursiveSales AS (
+    SELECT ss_item_sk, SUM(ss_net_profit) AS total_profit, COUNT(*) AS transaction_count
+    FROM store_sales
+    GROUP BY ss_item_sk
+),
+ProfitRank AS (
+    SELECT item.i_item_id, item.i_product_name, sales.total_profit, sales.transaction_count,
+           RANK() OVER (ORDER BY sales.total_profit DESC) AS profit_rank
+    FROM item
+    JOIN RecursiveSales sales ON item.i_item_sk = sales.ss_item_sk
+),
+CustomerReturns AS (
+    SELECT sr_item_sk, COUNT(*) AS return_count, SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+CombinedResults AS (
+    SELECT p.i_item_id AS item_id, p.i_product_name AS product_name, p.total_profit, p.transaction_count, 
+           COALESCE(r.return_count, 0) AS return_count, 
+           COALESCE(r.total_return_amt, 0) AS total_return_amt
+    FROM ProfitRank p
+    LEFT JOIN CustomerReturns r ON p.i_item_id = r.sr_item_sk
+)
+SELECT cr.item_id, cr.product_name, cr.total_profit, cr.transaction_count,
+       cr.return_count, cr.total_return_amt,
+       CASE 
+           WHEN cr.return_count > 0 THEN 
+               ROUND(100.0 * (cr.total_profit / NULLIF(cr.total_return_amt, 0)), 2)
+           ELSE 
+               NULL 
+       END AS profit_to_return_ratio
+FROM CombinedResults cr
+WHERE cr.profit_rank <= 10
+ORDER BY cr.total_profit DESC;

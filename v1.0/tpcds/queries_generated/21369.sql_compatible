@@ -1,0 +1,65 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rank_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_sales,
+        cs.order_count
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer_demographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+    WHERE 
+        cs.total_sales > (SELECT AVG(total_sales) FROM CustomerSales)
+    AND 
+        cd.cd_marital_status = 'M'
+),
+RegionStats AS (
+    SELECT 
+        ca.ca_state,
+        AVG(hvc.total_sales) AS avg_sales_per_state,
+        RANK() OVER (ORDER BY AVG(hvc.total_sales) DESC) AS state_rank
+    FROM 
+        HighValueCustomers hvc
+    JOIN 
+        customer_address ca ON hvc.c_customer_id = ca.ca_address_id
+    GROUP BY 
+        ca.ca_state
+)
+SELECT 
+    hvc.c_customer_id,
+    hvc.total_sales,
+    hvc.order_count,
+    rs.avg_sales_per_state,
+    CASE 
+        WHEN rs.state_rank = 1 THEN 'Top Performer'
+        WHEN rs.state_rank BETWEEN 2 AND 5 THEN 'High Performer'
+        ELSE 'Average Performer'
+    END AS performance_category
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    RegionStats rs ON hvc.c_customer_id = rs.ca_state
+WHERE 
+    hvc.order_count > (
+        SELECT 
+            AVG(order_count) 
+        FROM 
+            CustomerSales
+    )
+ORDER BY 
+    hvc.total_sales DESC 
+FETCH FIRST 10 ROWS ONLY;

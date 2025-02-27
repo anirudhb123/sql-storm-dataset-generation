@@ -1,0 +1,64 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        c.c_email_address,
+        c.c_birth_day,
+        c.c_birth_month,
+        c.c_birth_year,
+        DATE_FORMAT(CURRENT_DATE, '%Y') - c.c_birth_year AS age
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+purchase_summary AS (
+    SELECT 
+        ci.c_customer_id,
+        COUNT(ws.order_number) AS total_orders,
+        SUM(ws.ws_sales_price) AS total_spent,
+        SUM(ws.ws_quantity) AS total_items_purchased
+    FROM 
+        web_sales ws
+    JOIN 
+        customer_info ci ON ci.c_customer_id = ws.ws_bill_customer_sk
+    GROUP BY 
+        ci.c_customer_id
+),
+demographic_summary AS (
+    SELECT 
+        ci.cd_gender,
+        ci.cd_marital_status,
+        COUNT(*) AS demographic_count,
+        AVG(ps.total_spent) AS average_spent
+    FROM 
+        customer_info ci
+    JOIN 
+        purchase_summary ps ON ci.c_customer_id = ps.c_customer_id
+    GROUP BY 
+        ci.cd_gender, 
+        ci.cd_marital_status
+)
+SELECT 
+    ds.cd_gender,
+    ds.cd_marital_status,
+    ds.demographic_count,
+    ds.average_spent,
+    CASE 
+        WHEN ds.average_spent > 1000 THEN 'High Value'
+        WHEN ds.average_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS customer_value_category
+FROM 
+    demographic_summary ds
+ORDER BY 
+    ds.average_spent DESC;

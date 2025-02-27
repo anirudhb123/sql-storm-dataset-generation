@@ -1,0 +1,65 @@
+
+WITH supplier_parts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        SUBSTRING(p.p_comment, 1, 10) AS short_comment,
+        LENGTH(p.p_comment) AS comment_length
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+ordered_suppliers AS (
+    SELECT 
+        sp.s_suppkey,
+        sp.s_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(l.l_extendedprice) AS total_revenue
+    FROM 
+        supplier_parts sp
+    JOIN 
+        lineitem l ON sp.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        sp.s_suppkey, sp.s_name
+),
+ranked_suppliers AS (
+    SELECT 
+        s.*,
+        RANK() OVER (ORDER BY s.total_revenue DESC) AS revenue_rank
+    FROM 
+        ordered_suppliers s
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    rs.s_name AS supplier_name,
+    rs.order_count,
+    rs.total_revenue,
+    rs.revenue_rank,
+    STRING_AGG(sp.short_comment, ', ') AS example_comments
+FROM 
+    ranked_suppliers rs
+JOIN 
+    supplier s ON rs.s_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    rs.revenue_rank <= 10
+GROUP BY 
+    r.r_name, n.n_name, rs.s_name, rs.order_count, rs.total_revenue, rs.revenue_rank
+ORDER BY 
+    r.r_name, n.n_name, rs.revenue_rank;

@@ -1,0 +1,70 @@
+
+WITH RECURSIVE CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ws.ws_net_profit) DESC) AS gender_rank,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+), 
+SalesRank AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_quantity,
+        cs.total_profit,
+        CASE 
+            WHEN cs.total_profit IS NULL THEN 'Unknown'
+            WHEN cs.total_profit > 1000 THEN 'High'
+            WHEN cs.total_profit > 500 THEN 'Medium'
+            ELSE 'Low'
+        END AS profit_category
+    FROM
+        CustomerStats cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.gender_rank <= 5
+), 
+ReturnStats AS (
+    SELECT 
+        CASE 
+            WHEN sr.returning_cdemo_sk IS NULL THEN 'Unknown'
+            ELSE 'Known'
+        END AS customer_status,
+        SUM(sr.return_quantity) AS total_returns
+    FROM 
+        store_returns sr
+    GROUP BY 
+        customer_status
+)
+SELECT 
+    sr.customer_status,
+    SUM(ss.total_profit) AS aggregated_profit,
+    AVG(ss.total_quantity) AS average_sales_quantity,
+    STRING_AGG(CONCAT(ss.c_first_name, ' ', ss.c_last_name), ', ') AS top_customers,
+    MAX(COALESCE(ss.total_orders, 0)) AS max_orders,
+    MIN(total_returns) AS min_returns
+FROM 
+    SalesRank ss
+JOIN 
+    ReturnStats sr ON ss.c_customer_sk = sr.customer_status
+GROUP BY 
+    sr.customer_status
+HAVING 
+    SUM(ss.total_profit) > 5000 
+ORDER BY 
+    aggregated_profit DESC;

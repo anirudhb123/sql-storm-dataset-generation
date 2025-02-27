@@ -1,0 +1,94 @@
+
+WITH RECURSIVE EmployeeHierarchy AS (
+    SELECT 
+        cc.cc_call_center_sk,
+        cc.cc_name,
+        cc.cc_manager,
+        0 AS level
+    FROM 
+        call_center cc
+    WHERE 
+        cc.cc_manager IS NULL
+    UNION ALL
+    SELECT 
+        cc.cc_call_center_sk,
+        cc.cc_name,
+        cc.cc_manager,
+        eh.level + 1
+    FROM 
+        call_center cc
+    JOIN 
+        EmployeeHierarchy eh ON cc.cc_manager = eh.cc_call_center_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk
+),
+HighProfitItems AS (
+    SELECT 
+        item.i_item_sk, 
+        item.i_item_desc,
+        sd.total_quantity_sold,
+        sd.total_net_profit
+    FROM 
+        item 
+    JOIN 
+        SalesData sd ON item.i_item_sk = sd.ws_item_sk
+    WHERE 
+        sd.total_net_profit > (
+            SELECT AVG(total_net_profit) * 1.5 FROM SalesData
+        )
+),
+CustomerReturns AS (
+    SELECT 
+        cr_item_sk, 
+        SUM(cr_return_quantity) AS total_returned
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_item_sk
+),
+FinalResults AS (
+    SELECT 
+        hi.i_item_sk,
+        hi.i_item_desc,
+        hi.total_quantity_sold,
+        hi.total_net_profit,
+        COALESCE(cr.total_returned, 0) AS total_returned
+    FROM 
+        HighProfitItems hi
+    LEFT JOIN 
+        CustomerReturns cr ON hi.i_item_sk = cr.cr_item_sk
+)
+SELECT 
+    fh.cc_name AS call_center_name,
+    fr.i_item_desc,
+    fr.total_quantity_sold,
+    fr.total_net_profit,
+    fr.total_returned,
+    CASE 
+        WHEN fr.total_net_profit - fr.total_returned < 0 THEN 'Negative Profit'
+        WHEN fr.total_net_profit - fr.total_returned BETWEEN 0 AND 1000 THEN 'Low Profit'
+        ELSE 'High Profit'
+    END AS profit_category
+FROM 
+    FinalResults fr
+JOIN 
+    EmployeeHierarchy eh ON fr.total_quantity_sold = (SELECT MAX(total_quantity_sold) FROM FinalResults)
+JOIN 
+    call_center cc ON eh.cc_call_center_sk = cc.cc_call_center_sk
+WHERE 
+    fr.total_net_profit IS NOT NULL
+ORDER BY 
+    fr.total_net_profit DESC;

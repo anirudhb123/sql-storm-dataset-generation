@@ -1,0 +1,77 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.ViewCount DESC) AS PostRank
+    FROM 
+        Posts P
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        PH.UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes, 
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes 
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    UB.UserId,
+    UB.DisplayName,
+    UB.BadgeCount,
+    UB.BadgeNames,
+    RP.Title AS TopPostTitle,
+    RP.ViewCount AS TopPostViewCount,
+    RP.CreationDate AS TopPostCreationDate,
+    PS.CommentCount,
+    PS.Upvotes,
+    PS.Downvotes,
+    COALESCE(RPH.UserDisplayName, 'No Edits') AS LastEditedBy,
+    COALESCE(RPH.CreationDate, 'N/A') AS LastEditDate
+FROM 
+    UserBadges UB
+LEFT JOIN 
+    RankedPosts RP ON UB.UserId = RP.OwnerUserId AND RP.PostRank = 1
+LEFT JOIN 
+    PostStatistics PS ON RP.PostId = PS.PostId
+LEFT JOIN 
+    RecentPostHistory RPH ON RP.PostId = RPH.PostId AND RPH.HistoryRank = 1
+WHERE 
+    UB.BadgeCount > 0
+ORDER BY 
+    UB.BadgeCount DESC, 
+    PS.Upvotes DESC;

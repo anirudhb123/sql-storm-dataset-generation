@@ -1,0 +1,98 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        SUM(l.l_quantity) AS total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighSpenders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' AND o.o_totalprice > 1000
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+NationalSummary AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        SUM(s.s_acctbal) AS total_supplier_balance
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    COALESCE(h.total_spent, 0) AS customer_spending,
+    COALESCE(ss.total_sales, 0) AS supplier_sales,
+    ns.customer_count,
+    ns.total_supplier_balance
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SupplierSales ss ON ss.s_suppkey = (
+        SELECT 
+            ps.ps_suppkey
+        FROM 
+            partsupp ps
+        WHERE 
+            ps.ps_partkey = (
+                SELECT 
+                    l.l_partkey
+                FROM 
+                    lineitem l
+                WHERE 
+                    l.l_orderkey IN (
+                        SELECT 
+                            o.o_orderkey
+                        FROM 
+                            orders o
+                        JOIN 
+                            customer c ON c.c_custkey = o.o_custkey
+                        WHERE 
+                            c.c_nationkey = n.n_nationkey
+                    )
+                LIMIT 1
+            )
+    )
+LEFT JOIN 
+    HighSpenders h ON h.c_custkey = (
+        SELECT 
+            c.c_custkey
+        FROM 
+            customer c
+        WHERE 
+            c.c_nationkey = n.n_nationkey
+        ORDER BY 
+            h.total_spent DESC
+        LIMIT 1
+    )
+JOIN 
+    NationalSummary ns ON ns.n_nationkey = n.n_nationkey
+ORDER BY 
+    r.r_name, n.n_name, supplier_name;

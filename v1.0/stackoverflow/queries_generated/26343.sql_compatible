@@ -1,0 +1,70 @@
+
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        u.Reputation AS AuthorReputation,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, u.DisplayName, u.Reputation
+), 
+TagStats AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(Tags, ','))) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+),
+FinalResults AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.Body,
+        pd.Tags,
+        pd.CreationDate,
+        pd.Author,
+        pd.AuthorReputation,
+        pd.CommentCount,
+        pd.VoteCount,
+        ts.PostCount AS TagUsage
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        TagStats ts ON pd.Tags LIKE '%' || ts.TagName || '%' 
+)
+SELECT 
+    PostId,
+    Title,
+    Body,
+    CreationDate,
+    Author,
+    AuthorReputation,
+    CommentCount,
+    VoteCount,
+    TagUsage
+FROM 
+    FinalResults
+ORDER BY 
+    VoteCount DESC, 
+    CommentCount DESC, 
+    CreationDate DESC
+LIMIT 10;

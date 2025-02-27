@@ -1,0 +1,55 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+    
+    UNION ALL
+
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    INNER JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderdate < oh.o_orderdate
+),
+CustomerStats AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+SupplierPerformance AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+LineitemStats AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(l.l_orderkey) AS line_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    s.s_name,
+    o.o_orderdate,
+    o.o_orderstatus,
+    NSF.total_revenue,
+    CS.total_spent,
+    COALESCE(PS.total_supply_cost, 0) AS supply_cost,
+    CASE 
+        WHEN NSD.total_revenue > 10000 THEN 'High Value'
+        WHEN NSD.total_revenue BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS revenue_category,
+    DENSE_RANK() OVER (PARTITION BY c.c_custkey ORDER BY total_spent DESC) AS rank_by_spent
+FROM CustomerStats CS
+JOIN SupplierPerformance PS ON CS.total_orders > 5
+LEFT JOIN LineitemStats NSF ON CS.c_custkey = NSF.l_orderkey
+LEFT JOIN orders o ON o.o_custkey = CS.c_custkey
+LEFT JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+WHERE l.l_shipdate IS NOT NULL AND o.o_orderstatus = 'O'
+ORDER BY revenue_category, CS.total_spent DESC;

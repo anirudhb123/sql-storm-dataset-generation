@@ -1,0 +1,58 @@
+
+WITH CustomerAddressCity AS (
+    SELECT DISTINCT 
+        ca.city AS City,
+        COUNT(DISTINCT c.customer_sk) AS CustomerCount,
+        STRING_AGG(DISTINCT CONCAT(c.first_name, ' ', c.last_name), ', ') AS Customers
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        ca.city
+),
+ItemSales AS (
+    SELECT 
+        i.item_desc AS ItemDescription,
+        SUM(ws.ws_quantity) AS TotalSold,
+        SUM(ws.ws_sales_price) AS TotalRevenue
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        i.item_desc
+),
+TopCities AS (
+    SELECT 
+        City,
+        CustomerCount
+    FROM 
+        CustomerAddressCity
+    ORDER BY 
+        CustomerCount DESC
+    LIMIT 5
+),
+TopItems AS (
+    SELECT 
+        ItemDescription,
+        TotalSold,
+        TotalRevenue
+    FROM 
+        ItemSales
+    ORDER BY 
+        TotalSold DESC
+    LIMIT 5
+)
+SELECT 
+    t.City,
+    t.CustomerCount,
+    ti.ItemDescription,
+    ti.TotalSold,
+    ti.TotalRevenue
+FROM 
+    TopCities t
+JOIN 
+    TopItems ti ON ti.TotalSold > 0
+ORDER BY 
+    t.CustomerCount DESC, ti.TotalSold DESC;

@@ -1,0 +1,57 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT ss_store_sk, ss_item_sk, SUM(ss_quantity) AS total_sales
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN 2450818 AND 2450819
+    GROUP BY ss_store_sk, ss_item_sk
+    UNION ALL
+    SELECT s.s_store_sk, s.ss_item_sk, sh.total_sales + SUM(s.ss_quantity)
+    FROM sales_hierarchy sh
+    JOIN store_sales s ON sh.ss_store_sk = s.ss_store_sk AND sh.ss_item_sk = s.ss_item_sk
+    WHERE sh.total_sales < 500
+    GROUP BY s.s_store_sk, s.ss_item_sk
+),
+customer_analysis AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           cd.cd_gender,
+           COUNT(DISTINCT cs_order_number) AS order_count,
+           AVG(ws_net_paid_inc_tax) AS avg_spent,
+           SUM(ws_net_paid) as total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+address_summary AS (
+    SELECT w.w_warehouse_sk,
+           ca.ca_state,
+           COUNT(DISTINCT ca.ca_address_sk) AS address_count,
+           SUM(ws_ext_sales_price) AS total_sales_value
+    FROM warehouse w
+    JOIN customer_address ca ON w.w_warehouse_sk = ca.ca_address_sk
+    LEFT JOIN web_sales ws ON ca.ca_address_sk = ws.ws_ship_addr_sk
+    GROUP BY w.w_warehouse_sk, ca.ca_state
+),
+final_report AS (
+    SELECT a.ca_state,
+           a.address_count,
+           a.total_sales_value,
+           c.order_count,
+           c.avg_spent,
+           c.total_spent
+    FROM address_summary a
+    FULL OUTER JOIN customer_analysis c ON c.order_count > 5
+    WHERE a.total_sales_value IS NOT NULL OR c.avg_spent IS NOT NULL
+)
+SELECT f.ca_state,
+       COALESCE(f.address_count, 0) AS address_count,
+       COALESCE(f.total_sales_value, 0) AS total_sales_value,
+       COALESCE(f.order_count, 0) AS order_count,
+       COALESCE(f.avg_spent, 0) AS avg_spent,
+       COALESCE(f.total_spent, 0) AS total_spent,
+       'Data aggregated successfully' AS status_message
+FROM final_report f
+ORDER BY f.total_sales_value DESC, f.avg_spent DESC;

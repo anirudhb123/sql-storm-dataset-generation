@@ -1,0 +1,61 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT u.Id, u.DisplayName, u.Reputation, 1 AS Level
+    FROM Users u
+    WHERE u.Reputation > 1000
+  UNION ALL
+    SELECT u.Id, u.DisplayName, u.Reputation, ur.Level + 1
+    FROM Users u
+    JOIN UserReputationCTE ur ON u.Reputation > ur.Reputation
+    WHERE ur.Level < 5
+),
+
+PostsWithVoteCount AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.CreationDate,
+           COUNT(v.Id) AS VoteCount,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate > (NOW() - INTERVAL '30 days')
+    GROUP BY p.Id, p.Title, p.CreationDate
+),
+
+ClosedPosts AS (
+    SELECT ph.PostId,
+           ph.CreationDate,
+           COUNT(*) AS CloseCount,
+           string_agg(DISTINCT c.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes c ON ph.Comment::int = c.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11) -- 10 = Post Closed, 11 = Post Reopened
+    GROUP BY ph.PostId, ph.CreationDate
+),
+
+TopPosts AS (
+    SELECT pw.PostId, 
+           pw.Title, 
+           pw.CreationDate, 
+           pw.VoteCount, 
+           pw.UpVotes, 
+           pw.DownVotes,
+           COALESCE(cp.CloseCount, 0) AS CloseCount,
+           COALESCE(cp.CloseReasons, 'No reasons') AS CloseReasons,
+           u.DisplayName AS OwnerDisplayName
+    FROM PostsWithVoteCount pw
+    LEFT JOIN ClosedPosts cp ON pw.PostId = cp.PostId
+    JOIN Posts p ON pw.PostId = p.Id
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE u.Reputation > 5000
+)
+
+SELECT *,
+       CASE 
+          WHEN VoteCount > 50 THEN 'Hot'
+          WHEN VoteCount BETWEEN 20 AND 50 THEN 'Trending'
+          ELSE 'New'
+       END AS PostStatus
+FROM TopPosts
+ORDER BY VoteCount DESC, CreationDate ASC
+LIMIT 10;

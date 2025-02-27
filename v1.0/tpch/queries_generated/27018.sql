@@ -1,0 +1,53 @@
+WITH SupplierData AS (
+    SELECT 
+        s_name,
+        s_acctbal,
+        CONCAT('Supplier: ', s_name, ', Balance: $', FORMAT(s_acctbal, 2)) AS SupplierInfo
+    FROM 
+        supplier
+    WHERE 
+        s_acctbal > 10000
+),
+PartData AS (
+    SELECT 
+        p_name,
+        p_retailprice,
+        CONCAT('Part: ', p_name, ', Price: $', FORMAT(p_retailprice, 2)) AS PartInfo
+    FROM 
+        part
+    WHERE 
+        p_retailprice < 50.00
+),
+OrderData AS (
+    SELECT 
+        o_orderkey,
+        o_orderdate,
+        o_totalprice,
+        CONCAT('Order: ', o_orderkey, ', Date: ', o_orderdate, ', Total: $', FORMAT(o_totalprice, 2)) AS OrderInfo
+    FROM 
+        orders
+    WHERE 
+        o_totalprice > 500.00
+),
+CombinedData AS (
+    SELECT 
+        sd.SupplierInfo,
+        pd.PartInfo,
+        od.OrderInfo
+    FROM 
+        SupplierData sd
+    JOIN 
+        partsupp ps ON ps.ps_suppkey = (SELECT s_suppkey FROM supplier WHERE s_name = sd.s_name LIMIT 1)
+    JOIN 
+        PartData pd ON pd.p_partkey = ps.ps_partkey
+    JOIN 
+        OrderData od ON od.o_orderkey = (SELECT o_orderkey FROM orders WHERE o_custkey IN (SELECT c_custkey FROM customer WHERE c_nationkey = (SELECT n_nationkey FROM nation WHERE n_name LIKE 'CANADA') LIMIT 1) LIMIT 1)
+)
+SELECT 
+    SupplierInfo,
+    PartInfo,
+    OrderInfo 
+FROM 
+    CombinedData
+ORDER BY 
+    SupplierInfo, PartInfo, OrderInfo;

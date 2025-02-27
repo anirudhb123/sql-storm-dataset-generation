@@ -1,0 +1,64 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts,
+        SUM(COALESCE(v.BountyAmount, 0)) FILTER (WHERE v.VoteTypeId = 8) OVER (PARTITION BY p.OwnerUserId) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT rp.PostId) AS PostCount,
+        SUM(COALESCE(rp.Score, 0)) AS TotalScore,
+        AVG(COALESCE(rp.Score, 0)) AS AverageScore,
+        MAX(rp.CreationDate) AS LastPostDate,
+        MAX(rp.TotalBounty) AS MaxBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasonNames
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON CAST(ph.Comment AS INTEGER) = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.PostCount,
+    ups.TotalScore,
+    ups.AverageScore,
+    ups.LastPostDate,
+    COALESCE(cr.CloseReasonNames, 'No close reason') AS CloseReasons
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    CloseReasons cr ON ups.PostId = cr.PostId
+WHERE 
+    ups.PostCount > 5 AND
+    ups.TotalScore > 100
+ORDER BY 
+    ups.TotalScore DESC
+LIMIT 10;

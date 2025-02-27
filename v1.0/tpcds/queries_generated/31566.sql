@@ -1,0 +1,65 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ss_ticket_number) AS total_sales_count,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_profit) DESC) AS rn
+    FROM store_sales
+    WHERE ss_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY ss_store_sk
+), 
+address_info AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_country
+    FROM customer_address
+), 
+customer_info AS (
+    SELECT
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        cd_dep_count
+    FROM customer
+    JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    WHERE cd_purchase_estimate > 1000
+), 
+store_info AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_city,
+        s_state,
+        w_warehouse_name,
+        w_warehouse_sq_ft
+    FROM store 
+    LEFT JOIN warehouse ON s_store_sk = w_warehouse_sk
+)
+
+SELECT 
+    s.s_store_name,
+    a.full_address,
+    s.warehouse_name,
+    COALESCE(sd.total_net_profit, 0) as total_net_profit,
+    COALESCE(sd.total_sales_count, 0) as total_sales_count,
+    COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+    AVG(c.cd_purchase_estimate) AS avg_purchase_estimate,
+    MAX(c.cd_credit_rating) AS highest_credit_rating
+FROM store_info s
+LEFT JOIN address_info a ON s.s_store_sk = a.ca_address_sk
+LEFT JOIN sales_data sd ON s.s_store_sk = sd.ss_store_sk
+LEFT JOIN customer_info c ON c.c_customer_sk = sd.ss_store_sk
+WHERE s.s_state = 'CA'
+AND (c.cd_gender = 'F' OR c.cd_marital_status = 'M')
+GROUP BY s.s_store_name, a.full_address, s.warehouse_name, sd.total_net_profit, sd.total_sales_count
+HAVING total_net_profit > 10000
+ORDER BY total_net_profit DESC
+LIMIT 10;

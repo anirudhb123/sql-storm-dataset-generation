@@ -1,0 +1,64 @@
+WITH RecursivePostHistory AS (
+    SELECT Id, PostId, PostHistoryTypeId, UserId, CreationDate, 
+           UserDisplayName, Comment, 
+           ROW_NUMBER() OVER (PARTITION BY PostId ORDER BY CreationDate DESC) as rn
+    FROM PostHistory
+),
+LatestPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate AS PostCreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges,
+        MAX(ph.CreationDate) AS LastHistoryDate
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN RecursivePostHistory ph ON p.Id = ph.PostId AND ph.rn = 1
+    WHERE p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        lp.PostId,
+        lp.Title,
+        lp.PostCreationDate,
+        lp.ViewCount,
+        lp.OwnerDisplayName,
+        lp.CommentCount,
+        lp.UpVotes,
+        lp.DownVotes,
+        lp.TotalBadges,
+        lp.LastHistoryDate,
+        ROW_NUMBER() OVER (ORDER BY lp.ViewCount DESC) AS PostOrder
+    FROM LatestPosts lp
+    WHERE lp.ViewCount > (
+        SELECT AVG(ViewCount) 
+        FROM LatestPosts 
+    )
+),
+TopPosts AS (
+    SELECT PostId, Title, ViewCount, OwnerDisplayName, CommentCount, UpVotes, DownVotes,
+           DENSE_RANK() OVER (ORDER BY ViewCount DESC) AS Rank
+    FROM FilteredPosts
+    WHERE PostOrder <= 10
+)
+SELECT 
+    tp.Title, 
+    tp.ViewCount, 
+    tp.OwnerDisplayName, 
+    tp.CommentCount, 
+    tp.UpVotes, 
+    tp.DownVotes,
+    CONCAT('The user ', tp.OwnerDisplayName, ' has garnered ', tp.UpVotes, ' upvotes and ', tp.DownVotes, ' downvotes on their post titled "', tp.Title, '".') AS UserActivityReport,
+    COALESCE(ph.Comment, 'No recent edits') AS RecentEditComment
+FROM TopPosts tp
+LEFT JOIN RecursivePostHistory ph ON tp.PostId = ph.PostId AND ph.rn = 1
+ORDER BY tp.Rank;

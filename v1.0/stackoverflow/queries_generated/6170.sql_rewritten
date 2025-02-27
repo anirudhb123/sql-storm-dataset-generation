@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        CreationDate,
+        CommentCount,
+        TotalUpVotes,
+        TotalDownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+),
+PostDetails AS (
+    SELECT 
+        tp.*,
+        CASE 
+            WHEN tp.TotalUpVotes > tp.TotalDownVotes THEN 'Positive'
+            WHEN tp.TotalDownVotes > tp.TotalUpVotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS Sentiment
+    FROM 
+        TopPosts tp
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.OwnerDisplayName,
+    pd.CreationDate,
+    pd.CommentCount,
+    pd.TotalUpVotes,
+    pd.TotalDownVotes,
+    pd.Sentiment,
+    COALESCE((SELECT STRING_AGG(t.TagName, ', ') 
+              FROM Tags t 
+              WHERE t.WikiPostId = p.WikiPostId), 'No Tags') AS Tags
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Posts p ON pd.PostId = p.Id
+ORDER BY 
+    pd.CreationDate DESC;

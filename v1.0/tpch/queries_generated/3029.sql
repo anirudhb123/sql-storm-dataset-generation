@@ -1,0 +1,60 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    ns.n_name AS nation_name,
+    ss.s_name AS supplier_name,
+    cs.c_name AS customer_name,
+    cs.total_orders,
+    cs.total_spent,
+    ps.p_name AS part_name,
+    ps.supplier_count,
+    RANK() OVER (PARTITION BY ns.n_nationkey ORDER BY cs.total_spent DESC) AS customer_rank,
+    COALESCE(ss.total_supply_cost, 0) AS total_supply_cost
+FROM 
+    nation ns
+LEFT JOIN 
+    supplier ss ON ns.n_nationkey = ss.s_nationkey
+LEFT JOIN 
+    CustomerOrderStats cs ON cs.total_orders > 0
+LEFT JOIN 
+    PartDetails ps ON ps.supplier_count > 0
+WHERE 
+    (cs.total_spent > 1000 OR ss.s_suppkey IS NULL)
+ORDER BY 
+    nation_name, total_spent DESC;

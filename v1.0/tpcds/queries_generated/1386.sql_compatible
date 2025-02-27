@@ -1,0 +1,75 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_ws_item_sk AS item_id,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_profit,
+        AVG(ws_sales_price) AS avg_sales_price
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (
+            SELECT 
+                d_date_sk 
+            FROM 
+                date_dim 
+            WHERE 
+                d_year = 2022 
+                AND d_moy = 12
+        )
+    GROUP BY 
+        ws_ws_item_sk
+),
+ReturnsData AS (
+    SELECT 
+        wr_item_sk AS item_id,
+        COUNT(DISTINCT wr_order_number) AS total_returns,
+        SUM(wr_net_loss) AS total_loss
+    FROM 
+        web_returns 
+    WHERE 
+        wr_returned_date_sk IN (
+            SELECT 
+                d_date_sk 
+            FROM 
+                date_dim 
+            WHERE 
+                d_year = 2022 
+                AND d_moy = 12
+        )
+    GROUP BY 
+        wr_item_sk
+),
+CombinedData AS (
+    SELECT 
+        s.item_id,
+        COALESCE(s.total_orders, 0) AS total_orders,
+        COALESCE(s.total_profit, 0) AS total_profit,
+        COALESCE(r.total_returns, 0) AS total_returns,
+        COALESCE(r.total_loss, 0) AS total_loss,
+        (COALESCE(s.total_profit, 0) - COALESCE(r.total_loss, 0)) AS net_profit
+    FROM 
+        SalesData s
+    FULL OUTER JOIN 
+        ReturnsData r 
+    ON 
+        s.item_id = r.item_id
+)
+SELECT 
+    item_id,
+    total_orders,
+    total_profit,
+    total_returns,
+    total_loss,
+    net_profit,
+    CASE 
+        WHEN net_profit > 0 THEN 'Profitable'
+        WHEN net_profit < 0 THEN 'Unprofitable'
+        ELSE 'Break-even'
+    END AS profitability_status
+FROM 
+    CombinedData
+WHERE 
+    (total_orders > 5 AND net_profit > 0) OR (total_returns < 3 AND total_profit < 100)
+ORDER BY 
+    net_profit DESC;

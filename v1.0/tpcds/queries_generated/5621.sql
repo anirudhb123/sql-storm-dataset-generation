@@ -1,0 +1,44 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_web_page_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    JOIN
+        web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year BETWEEN 2022 AND 2023
+    GROUP BY
+        ws.web_site_sk, wp.wp_web_page_sk
+),
+TopSites AS (
+    SELECT
+        web_site_sk,
+        total_quantity,
+        total_sales
+    FROM
+        RankedSales
+    WHERE
+        sales_rank = 1
+)
+SELECT
+    cs.c_customer_id,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.c_email_address,
+    ts.total_quantity,
+    ts.total_sales
+FROM
+    customer cs
+JOIN
+    TopSites ts ON cs.c_current_cdemo_sk = ts.web_site_sk
+WHERE
+    cs.c_birth_year >= 1980
+ORDER BY
+    ts.total_sales DESC
+LIMIT 100;

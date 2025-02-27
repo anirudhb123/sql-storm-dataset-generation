@@ -1,0 +1,74 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+OrderLinePrices AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_price
+    FROM 
+        lineitem l 
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    COALESCE(o.net_price, 0) AS order_net_price,
+    CASE 
+        WHEN r.price_rank = 1 THEN 'Top Order'
+        WHEN r.o_totalprice IS NULL THEN 'Unknown Price'
+        ELSE 'Regular Order'
+    END AS order_category,
+    s.s_name AS supplier_name,
+    NULLIF(s.total_supply_value, 0) AS supply_value,
+    (SELECT COUNT(*) FROM nation n WHERE n.n_nationkey = su.s_nationkey) AS associated_nation_count
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    OrderLinePrices o ON r.o_orderkey = o.l_orderkey
+LEFT JOIN 
+    HighValueSuppliers s ON s.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        JOIN lineitem li ON ps.ps_partkey = li.l_partkey 
+        WHERE li.l_orderkey = r.o_orderkey 
+        LIMIT 1
+    )
+FULL OUTER JOIN 
+    region rg ON (rg.r_regionkey IS NULL OR r.o_orderdate IS NOT NULL)
+WHERE 
+    r.o_totalprice IS NOT NULL
+GROUP BY 
+    r.o_orderkey, 
+    r.o_orderdate, 
+    o.net_price, 
+    r.price_rank, 
+    s.s_name, 
+    s.total_supply_value
+ORDER BY 
+    r.o_orderdate DESC, order_net_price DESC;

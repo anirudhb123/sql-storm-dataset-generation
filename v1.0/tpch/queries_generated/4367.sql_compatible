@@ -1,0 +1,76 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate <= DATE '1996-12-31'
+),
+supplier_availability AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+customer_totals AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS num_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 1000
+    GROUP BY 
+        c.c_custkey
+),
+supply_data AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COALESCE(MAX(ps.ps_supplycost), 0) AS max_supply_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+)
+SELECT 
+    o.order_rank,
+    c.c_name,
+    c.total_spent,
+    s.p_name,
+    s.total_cost,
+    s.max_supply_cost,
+    CASE 
+        WHEN c.num_orders > 10 THEN 'Regular'
+        ELSE 'Occasional'
+    END AS customer_type
+FROM 
+    ranked_orders o
+JOIN 
+    customer_totals c ON o.o_orderkey = c.c_custkey
+JOIN 
+    supply_data s ON s.p_partkey IN (
+        SELECT ps.ps_partkey
+        FROM supplier_availability ps
+        WHERE ps.total_avail_qty > 50
+    )
+WHERE 
+    o.o_totalprice > 500
+ORDER BY 
+    o.o_orderdate DESC, 
+    c.total_spent DESC;

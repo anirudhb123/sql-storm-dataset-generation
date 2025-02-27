@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.web_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    JOIN
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+        AND ws.ws_ship_date_sk IS NOT NULL
+    GROUP BY
+        ws.web_site_sk,
+        ws.web_name
+),
+TopWebSites AS (
+    SELECT
+        web_site_sk,
+        web_name
+    FROM
+        RankedSales
+    WHERE
+        sales_rank <= 10
+),
+CustomerSales AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_customer_spent
+    FROM
+        web_sales ws
+    JOIN
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN
+        TopWebSites tw ON ws.ws_web_site_sk = tw.web_site_sk
+    GROUP BY
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name
+)
+SELECT
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.total_customer_spent,
+    (SELECT
+         COUNT(*)
+     FROM
+         web_returns wr
+     WHERE
+         wr.wr_returning_customer_sk = cs.c_customer_sk) AS total_returns,
+    (SELECT
+         COUNT(*)
+     FROM
+         store_returns sr
+     WHERE
+         sr.sr_customer_sk = cs.c_customer_sk) AS total_store_returns
+FROM
+    CustomerSales cs
+ORDER BY
+    cs.total_customer_spent DESC
+LIMIT 50;

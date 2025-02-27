@@ -1,0 +1,61 @@
+
+WITH OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_suppkey) AS unique_suppliers,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROUND(AVG(ps.ps_supplycost), 2) AS avg_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name,
+        sd.avg_cost,
+        RANK() OVER (ORDER BY sd.avg_cost DESC) AS supplier_rank
+    FROM 
+        SupplierDetails sd
+)
+SELECT 
+    os.o_orderkey,
+    os.total_revenue,
+    ts.s_name AS supplier_name,
+    ts.avg_cost,
+    os.o_orderdate,
+    CASE 
+        WHEN ts.supplier_rank IS NULL THEN 'Not available' 
+        ELSE 'Top ' || ts.supplier_rank || ' Supplier'
+    END AS supplier_status
+FROM 
+    OrderSummary os
+LEFT JOIN 
+    TopSuppliers ts ON ts.s_suppkey IN (SELECT DISTINCT l.l_suppkey FROM lineitem l WHERE l.l_orderkey = os.o_orderkey)
+WHERE 
+    os.total_revenue > (
+        SELECT 
+            AVG(total_revenue) 
+        FROM 
+            OrderSummary
+    )
+ORDER BY 
+    os.total_revenue DESC 
+FETCH FIRST 10 ROWS ONLY;

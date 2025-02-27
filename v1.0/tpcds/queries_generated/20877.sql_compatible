@@ -1,0 +1,72 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(CASE WHEN ws.ws_sales_price > 100 THEN 1 ELSE 0 END) AS high_value_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+),
+
+WarehouseInventory AS (
+    SELECT 
+        inv.inv_warehouse_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity,
+        (SELECT COUNT(*) FROM item i WHERE i.i_item_sk IN (SELECT inv2.inv_item_sk FROM inventory inv2 WHERE inv2.inv_warehouse_sk = inv.inv_warehouse_sk)) AS distinct_items
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_warehouse_sk
+),
+
+ReturnAnalytics AS (
+    SELECT 
+        sr.sr_store_sk,
+        SUM(sr.sr_return_quantity) AS total_returns,
+        SUM(sr.sr_return_amt) AS total_return_amount,
+        COUNT(DISTINCT sr.sr_ticket_number) AS distinct_return_orders
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_store_sk
+)
+
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    COALESCE(ws.total_sales, 0) AS total_web_sales,
+    COALESCE(wi.total_quantity, 0) AS warehouse_total_quantity,
+    COALESCE(ra.total_returns, 0) AS store_total_returns,
+    CASE 
+        WHEN ws.order_count > 0 THEN ROUND(ws.high_value_orders * 100.00 / ws.order_count, 2)
+        ELSE NULL 
+    END AS high_value_order_percentage,
+    CASE 
+        WHEN cs.cd_gender = 'M' THEN 'He' 
+        WHEN cs.cd_gender = 'F' THEN 'She'
+        ELSE 'They' 
+    END AS preferred_pronoun
+FROM 
+    CustomerStats cs
+FULL OUTER JOIN 
+    WarehouseInventory wi ON cs.c_customer_sk IS NULL OR wi.inv_warehouse_sk IS NULL
+FULL OUTER JOIN 
+    ReturnAnalytics ra ON cs.c_customer_sk IS NULL OR ra.sr_store_sk IS NULL
+WHERE 
+    (wi.total_quantity > 100 AND ra.total_returns IS NOT NULL
+     OR cs.total_sales IS NOT NULL AND cs.order_count > 5
+     OR ra.total_return_amount > 500)
+ORDER BY 
+    cs.c_last_name ASC, cs.c_first_name ASC;

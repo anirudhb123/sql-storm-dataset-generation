@@ -1,0 +1,56 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+), 
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserReputation
+    WHERE Reputation > 1000
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS AuthorDisplayName,
+        U.Reputation AS AuthorReputation,
+        PH.Comment AS HistoryComment,
+        PH.CreationDate AS HistoryDate,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY PH.CreationDate DESC) AS HistoryRank
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+      AND P.Score > 0
+)
+SELECT 
+    TU.DisplayName AS TopUser,
+    TU.Reputation AS UserReputation,
+    PD.Title AS PostTitle,
+    PD.CreationDate AS PostCreationDate,
+    PD.Score AS PostScore,
+    PD.ViewCount AS PostViewCount,
+    PD.HistoryComment AS LatestHistoryComment,
+    PD.HistoryDate AS LatestHistoryDate
+FROM TopUsers TU
+JOIN PostDetails PD ON TU.UserId = PD.AuthorDisplayName
+WHERE PD.HistoryRank = 1
+ORDER BY TU.ReputationRank, PD.ViewCount DESC
+LIMIT 50;

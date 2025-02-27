@@ -1,0 +1,58 @@
+WITH RECURSIVE SupplierRecursive AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           STRING_AGG(DISTINCT p.p_name, ', ') AS supplied_parts
+    FROM supplier s
+    INNER JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    INNER JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+    
+    UNION ALL
+    
+    SELECT sr.s_suppkey, sr.s_name, sr.s_nationkey, sr.s_acctbal,
+           STRING_AGG(DISTINCT CONCAT(p.p_name, ' (recursive)'), ', ') AS supplied_parts
+    FROM SupplierRecursive sr
+    JOIN partsupp ps ON sr.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE sr.s_suppkey <= ps.ps_suppkey
+    GROUP BY sr.s_suppkey, sr.s_name, sr.s_nationkey, sr.s_acctbal
+),
+OrderCustomer AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartStatistics AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    s.s_name AS supplier_name,
+    sr.supplied_parts,
+    oc.c_name AS customer_name,
+    oc.order_count,
+    oc.avg_order_value,
+    ps.p_name AS part_name,
+    ps.total_available,
+    ps.avg_supply_cost
+FROM nation n
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN SupplierRecursive sr ON s.s_suppkey = sr.s_suppkey
+LEFT JOIN OrderCustomer oc ON oc.c_custkey = (SELECT c_custkey FROM customer WHERE c_nationkey = n.n_nationkey ORDER BY RANDOM() LIMIT 1)
+LEFT JOIN PartStatistics ps ON ps.total_available > 0
+WHERE (s.s_acctbal IS NOT NULL OR sr.s_acctbal IS NULL)
+AND (oc.order_count > (SELECT AVG(order_count) FROM OrderCustomer) OR ps.avg_supply_cost < 100.00)
+ORDER BY CASE 
+             WHEN oc.order_count IS NULL THEN 'No Orders'
+             WHEN ps.total_available < 10 THEN 'Low Stock'
+             ELSE 'Normal'
+         END DESC,
+         nation_name,
+         customer_name;

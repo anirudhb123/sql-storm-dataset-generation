@@ -1,0 +1,71 @@
+WITH RecursivePosts AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePosts rp ON p.ParentId = rp.PostId
+),
+TagsWithCount AS (
+    
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(p.Id) DESC) AS TagRank
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY t.TagName
+),
+UserBadges AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+UserPostStatistics AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+)
+SELECT 
+    u.DisplayName,
+    ub.BadgeCount,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.TotalViews,
+    t.TagName,
+    t.PostCount AS TagPostCount,
+    RANK() OVER (PARTITION BY u.Id ORDER BY ups.TotalViews DESC) AS ViewsRank
+FROM UserPostStatistics ups
+JOIN Users u ON ups.UserId = u.Id
+JOIN UserBadges ub ON u.Id = ub.UserId
+JOIN TagsWithCount t ON t.TagRank = 1 
+LEFT JOIN RecursivePosts rp ON rp.OwnerUserId = u.Id
+WHERE ub.BadgeCount > 0 
+ORDER BY ups.TotalViews DESC, u.DisplayName;

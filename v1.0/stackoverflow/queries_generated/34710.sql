@@ -1,0 +1,90 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Selecting initial questions only
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.Score,
+        a.ViewCount,
+        a.CreationDate,
+        a.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePosts rp ON a.ParentId = rp.PostId
+)
+, UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Score,
+    r.ViewCount,
+    r.CreationDate,
+    u.DisplayName AS Owner,
+    u.BadgeCount,
+    u.TotalViews,
+    u.TotalScore,
+    u.AvgScore,
+    CASE 
+        WHEN r.Score > 0 THEN 'Positive'
+        WHEN r.Score < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS ScoreType,
+    (
+        SELECT 
+            COUNT(*) 
+        FROM 
+            Votes v 
+        WHERE 
+            v.PostId = r.PostId 
+            AND v.VoteTypeId = 2 -- Counting upvotes
+    ) AS UpVotes,
+    (
+        SELECT 
+            COUNT(*) 
+        FROM 
+            Votes v 
+        WHERE 
+            v.PostId = r.PostId 
+            AND v.VoteTypeId = 3 -- Counting downvotes
+    ) AS DownVotes
+FROM 
+    RecursivePosts r
+INNER JOIN 
+    UserStats u ON r.OwnerUserId = u.UserId
+WHERE 
+    r.CreationDate >= CURRENT_DATE - INTERVAL '30 days' 
+    AND r.Level <= 2
+ORDER BY 
+    r.Score DESC, u.TotalViews DESC
+LIMIT 100;

@@ -1,0 +1,71 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        NULL AS parent_id
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+    UNION ALL
+    SELECT
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM
+        aka_title m
+    JOIN
+        movie_link ml ON ml.linked_movie_id = m.id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+CastDetails AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ak ON ak.person_id = ci.person_id
+    GROUP BY
+        ci.movie_id
+),
+MovieInfo AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(md.info, 'N/A') AS movie_info,
+        md.note AS info_note,
+        mh.level
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_info md ON md.movie_id = m.id AND md.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre')
+    LEFT JOIN
+        MovieHierarchy mh ON mh.movie_id = m.id
+)
+SELECT
+    mh.movie_id,
+    mh.title AS movie_title,
+    mh.production_year,
+    COALESCE(cd.total_cast, 0) AS total_cast,
+    COALESCE(cd.cast_names, 'No Cast Found') AS cast_names,
+    mi.movie_info,
+    mi.info_note,
+    mh.level
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    CastDetails cd ON cd.movie_id = mh.movie_id
+LEFT JOIN
+    MovieInfo mi ON mi.movie_id = mh.movie_id
+WHERE
+    mh.level <= 3
+ORDER BY
+    mh.production_year DESC, mh.level ASC, mh.movie_title;

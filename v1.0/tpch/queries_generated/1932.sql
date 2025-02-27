@@ -1,0 +1,63 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        MAX(ps.ps_availqty) AS max_avail_qty
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS finalized_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.region_name,
+    COALESCE(c.c_name, 'Unknown') AS customer_name,
+    so.part_count,
+    so.total_supplycost,
+    co.total_spent,
+    co.finalized_spent,
+    RANK() OVER (PARTITION BY r.region_name ORDER BY co.total_spent DESC) AS customer_rank
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    SupplierStats so ON so.s_suppkey = s.s_suppkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = s.s_suppkey
+WHERE 
+    so.part_count > 0
+    AND (co.total_spent IS NOT NULL OR co.finalized_spent IS NOT NULL)
+    AND r.r_name LIKE 'N%'
+ORDER BY 
+    r.region_name, customer_rank
+LIMIT 100;

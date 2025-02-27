@@ -1,0 +1,70 @@
+
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS line_count,
+        AVG(l.l_extendedprice) AS avg_price,
+        SUM(l.l_discount) AS total_discount
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+
+SELECT 
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(ss.total_supply_value) AS avg_supply_value,
+    SUM(ls.line_count) AS total_lineitems,
+    SUM(ls.total_discount) AS total_discount_received
+FROM 
+    nation ns
+LEFT JOIN 
+    customer c ON c.c_nationkey = ns.n_nationkey
+LEFT JOIN 
+    HighValueCustomers hvc ON c.c_custkey = hvc.c_custkey
+LEFT JOIN 
+    SupplierSummary ss ON EXISTS (
+        SELECT 1
+        FROM partsupp ps
+        WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_brand = 'Brand#23') 
+        AND c.c_custkey = ps.ps_suppkey 
+    )
+LEFT JOIN 
+    orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    LineItemStats ls ON ls.l_orderkey = o.o_orderkey
+WHERE 
+    ns.n_regionkey IS NOT NULL
+GROUP BY 
+    ns.n_name, ss.total_supply_value
+ORDER BY 
+    customer_count DESC, avg_supply_value ASC;

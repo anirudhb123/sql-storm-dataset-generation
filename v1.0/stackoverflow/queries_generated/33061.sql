@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS ScoreRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+),
+PostWithComments AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Score,
+        RP.OwnerDisplayName,
+        COALESCE(C.Count, 0) AS CommentCount
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS Count FROM Comments GROUP BY PostId) C ON RP.PostId = C.PostId
+),
+RecursiveTagCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    JOIN 
+        Tags T ON POSITION(',' || T.TagName || ',' IN ',' || P.Tags || ',') > 0
+    GROUP BY 
+        P.Id
+),
+FinalOutput AS (
+    SELECT 
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.OwnerDisplayName,
+        P.CommentCount,
+        RT.Tags,
+        CASE 
+            WHEN P.AnswerCount > 0 THEN 'Has answers'
+            ELSE 'No answers'
+        END AS AnswerStatus,
+        ROW_NUMBER() OVER (ORDER BY P.Score DESC, P.ViewCount DESC) AS RowNum
+    FROM 
+        PostWithComments P
+    JOIN 
+        RecursiveTagCTE RT ON P.PostId = RT.PostId
+    WHERE 
+        P.Score > 0
+)
+SELECT 
+    Title,
+    ViewCount,
+    Score,
+    OwnerDisplayName,
+    CommentCount,
+    Tags,
+    AnswerStatus 
+FROM 
+    FinalOutput
+WHERE 
+    RowNum <= 10;
+

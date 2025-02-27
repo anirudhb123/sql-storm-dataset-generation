@@ -1,0 +1,85 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS SupplierCost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS RankInRegion
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_regionkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_custkey,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'F' AND 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+PartSupplierAggregates AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS TotalAvailable,
+        AVG(ps.ps_supplycost) AS AvgSupplyCost,
+        COUNT(DISTINCT ps.ps_suppkey) AS UniqueSuppliers
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+DateFilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        CASE 
+            WHEN l.l_returnflag = 'R' THEN 1 
+            ELSE 0 
+        END AS IsReturned
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+)
+SELECT 
+    ps.p_partkey,
+    ps.p_name,
+    psa.TotalAvailable,
+    psa.AvgSupplyCost,
+    COALESCE(s.SupplierCost, 0) AS TotalSupplierCost,
+    MAX(CASE WHEN o.o_orderkey IS NOT NULL THEN o.o_orderdate END) AS LastOrderDate,
+    COUNT(DISTINCT li.l_orderkey) AS TotalLineItems,
+    SUM(li.l_quantity) AS TotalQuantity,
+    COUNT(DISTINCT CASE WHEN li.IsReturned = 1 THEN li.l_orderkey END) AS TotalReturns
+FROM 
+    PartSupplierAggregates psa
+LEFT JOIN 
+    RankedSuppliers s ON psa.p_partkey = s.s_suppkey DEFAULT 'None'
+LEFT JOIN 
+    HighValueOrders o ON psa.p_partkey = o.o_orderkey
+LEFT JOIN 
+    DateFilteredLineItems li ON psa.p_partkey = li.l_partkey
+GROUP BY 
+    ps.p_partkey, ps.p_name, psa.TotalAvailable, psa.AvgSupplyCost
+HAVING 
+    SUM(li.TotalQuantity) > 100 OR 
+    COUNT(DISTINCT s.s_suppkey) = 0 OR 
+    COALESCE(MAX(o.o_orderdate), '2000-01-01') > '1997-01-01'
+ORDER BY 
+    TotalSupplierCost DESC, ps.p_partkey ASC;

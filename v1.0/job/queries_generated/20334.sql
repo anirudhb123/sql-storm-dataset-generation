@@ -1,0 +1,77 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS avg_has_role
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        role_type rt ON c.role_id = rt.id
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            COUNT(DISTINCT person_id) AS cast_count
+        FROM 
+            cast_info
+        GROUP BY 
+            movie_id
+    ) ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword
+),
+
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name ORDER BY cn.name ASC) AS company_names,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        ARRAY_AGG(DISTINCT ct.kind) AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+
+final_benchmark AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        COALESCE(ci.company_names, 'No Companies') AS production_companies,
+        md.total_cast,
+        md.avg_has_role,
+        CASE 
+            WHEN md.total_cast IS NULL THEN 'Unknown' 
+            WHEN md.total_cast > 10 THEN 'Large Cast'
+            ELSE 'Small Cast'
+        END AS cast_size_category,
+        (SELECT COUNT(*) FROM aka_name an WHERE an.person_id IN (SELECT DISTINCT person_id FROM cast_info WHERE movie_id = md.movie_id)) AS distinct_persons_count,
+        (SELECT STRING_AGG(DISTINCT aka.name, ', ') FROM aka_name aka JOIN cast_info ci ON aka.person_id = ci.person_id WHERE ci.movie_id = md.movie_id) AS cast_names
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        company_info ci ON md.movie_id = ci.movie_id
+)
+
+SELECT 
+    fb.*, 
+    LEAD(fb.production_year) OVER (ORDER BY fb.production_year) AS next_movie_year
+FROM 
+    final_benchmark fb
+WHERE 
+    fb.avg_has_role IS NOT NULL
+ORDER BY 
+    fb.production_year DESC;

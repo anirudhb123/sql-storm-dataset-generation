@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) AS rank_cost,
+        SUM(ps_availqty) OVER (PARTITION BY ps_partkey) AS total_avail
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        c.c_name,
+        o.o_totalprice,
+        o.o_orderdate,
+        CASE 
+            WHEN o.o_orderpriority = '1-URGENT' THEN 'High Priority'
+            WHEN o.o_orderpriority = '2-HIGH' THEN 'Medium Priority'
+            ELSE 'Low Priority'
+        END AS order_priority
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN '1996-01-01' AND '1997-12-31'
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_discount,
+        l.l_extendedprice,
+        CASE 
+            WHEN l.l_returnflag = 'R' THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_quantity > 10 AND 
+        l.l_discount > 0.05
+)
+SELECT 
+    co.o_orderkey,
+    COUNT(DISTINCT ls.l_partkey) AS unique_parts,
+    SUM(ls.l_extendedprice * (1 - ls.l_discount)) AS total_revenue,
+    AVG(rs.total_avail) AS avg_supplier_availability,
+    COALESCE(MAX(rs.rank_cost), 0) AS max_supplier_rank,
+    STRING_AGG(DISTINCT rs.s_name, ', ') AS supplier_names
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    FilteredLineItems ls ON co.o_orderkey = ls.l_orderkey
+LEFT JOIN 
+    RankedSuppliers rs ON ls.l_partkey = rs.ps_partkey
+GROUP BY 
+    co.o_orderkey
+HAVING 
+    SUM(ls.l_extendedprice * (1 - ls.l_discount)) > 1000 AND 
+    COUNT(DISTINCT rs.s_suppkey) >= 2
+ORDER BY 
+    total_revenue DESC NULLS LAST;

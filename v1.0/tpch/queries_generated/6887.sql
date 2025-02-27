@@ -1,0 +1,61 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_mktsegment,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_mktsegment
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.rn <= 5
+),
+PartSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.total_supply_cost,
+        ROW_NUMBER() OVER (ORDER BY ps.total_supply_cost DESC) AS rn
+    FROM 
+        PartSuppliers ps
+)
+
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.o_totalprice,
+    to.c_mktsegment,
+    ts.ps_partkey,
+    ts.total_supply_cost
+FROM 
+    TopOrders to
+JOIN 
+    TopSuppliers ts ON ts.rn <= 10
+JOIN 
+    lineitem l ON l.l_orderkey = to.o_orderkey
+WHERE 
+    l.l_partkey = ts.ps_partkey
+ORDER BY 
+    to.o_orderdate DESC, 
+    to.o_totalprice DESC;

@@ -1,0 +1,74 @@
+
+WITH CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status, 
+        cd.cd_purchase_estimate, 
+        cd.cd_credit_rating, 
+        cd.cd_dep_count, 
+        cd.cd_dep_employed_count, 
+        cd.cd_dep_college_count,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        cd.cd_gender = 'F' 
+        AND cd.cd_marital_status = 'M'
+),
+StoreSalesData AS (
+    SELECT 
+        ss.ss_store_sk,
+        SUM(ss.ss_net_paid) AS total_sales,
+        COUNT(ss.ss_ticket_number) AS total_transactions
+    FROM 
+        store_sales ss
+    JOIN 
+        date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ss.ss_store_sk
+),
+SalesRank AS (
+    SELECT 
+        s.s_store_id,
+        sd.total_sales,
+        sd.total_transactions,
+        RANK() OVER (ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM 
+        StoreSalesData sd
+    JOIN 
+        store s ON sd.ss_store_sk = s.s_store_sk
+)
+SELECT 
+    cd.ca_city, 
+    cd.ca_state, 
+    COUNT(DISTINCT cr.cr_order_number) AS total_catalog_returns,
+    COUNT(DISTINCT wr.wr_order_number) AS total_web_returns,
+    COUNT(DISTINCT ss.ss_ticket_number) AS total_store_sales,
+    sr.sales_rank
+FROM 
+    CustomerDemographics cd
+LEFT JOIN 
+    catalog_returns cr ON cd.cd_demo_sk = cr.cr_refunded_cdemo_sk
+LEFT JOIN 
+    web_returns wr ON cd.cd_demo_sk = wr.wr_returning_cdemo_sk
+LEFT JOIN 
+    store_sales ss ON cd.cd_demo_sk = ss.ss_cdemo_sk
+LEFT JOIN 
+    SalesRank sr ON ss.ss_store_sk = sr.ss_store_sk
+GROUP BY 
+    cd.ca_city, 
+    cd.ca_state, 
+    sr.sales_rank
+HAVING 
+    COUNT(DISTINCT ss.ss_ticket_number) > 5
+ORDER BY 
+    sr.sales_rank, total_catalog_returns DESC;

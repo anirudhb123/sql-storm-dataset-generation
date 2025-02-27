@@ -1,0 +1,41 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounties
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON V.UserId = U.Id
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        U.PostCount,
+        U.AnswerCount,
+        U.QuestionCount,
+        U.TotalBounties,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM UserReputation U
+)
+SELECT 
+    T.DisplayName,
+    T.Reputation,
+    T.PostCount,
+    T.AnswerCount,
+    T.QuestionCount,
+    T.TotalBounties,
+    T.ReputationRank,
+    P.Title AS TopPostTitle,
+    P.ViewCount AS TopPostViews
+FROM TopUsers T
+LEFT JOIN Posts P ON T.UserId = P.OwnerUserId
+WHERE T.ReputationRank <= 10
+ORDER BY T.Reputation DESC, P.ViewCount DESC
+LIMIT 5;

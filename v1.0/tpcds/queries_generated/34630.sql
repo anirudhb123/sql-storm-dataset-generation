@@ -1,0 +1,83 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk, 
+        s_store_name,
+        s_number_employees,
+        s_floor_space,
+        NULL AS parent_store_sk
+    FROM 
+        store
+    WHERE 
+        s_closed_date_sk IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        s2.s_store_sk,
+        s2.s_store_name,
+        s2.s_number_employees,
+        s2.s_floor_space,
+        sh.s_store_sk
+    FROM 
+        store s2
+    JOIN sales_hierarchy sh ON s2.s_market_id = sh.s_store_sk
+    WHERE 
+        s2.s_closed_date_sk IS NULL
+),
+sales_data AS (
+    SELECT 
+        ws.web_site_id,
+        ws.web_name,
+        SUM(ws.ws_net_paid_inc_tax) AS total_revenue,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status = 'M'
+        AND cd.cd_gender = 'F'
+        AND ws.ws_sold_date_sk BETWEEN 2459535 AND 2459595
+    GROUP BY 
+        ws.web_site_id, ws.web_name
+),
+ranked_sales AS (
+    SELECT 
+        sd.web_site_id,
+        sd.web_name,
+        sd.total_revenue,
+        sd.total_orders,
+        RANK() OVER (ORDER BY sd.total_revenue DESC) AS revenue_rank
+    FROM 
+        sales_data sd
+),
+top_sales AS (
+    SELECT 
+        COUNT(*) AS top_sales_count,
+        COALESCE(SUM(total_orders), 0) AS total_orders
+    FROM 
+        ranked_sales
+    WHERE 
+        revenue_rank <= 10
+)
+SELECT 
+    a.ca_state,
+    a.ca_city,
+    IFNULL(AVG(sh.s_number_employees), 0) AS avg_employees,
+    IFNULL(ts.top_sales_count, 0) AS total_top_sales,
+    SUM(CASE WHEN ts.total_orders > 5 THEN 1 ELSE 0 END) AS high_order_stores
+FROM 
+    customer_address a
+LEFT JOIN 
+    sales_hierarchy sh ON sh.parent_store_sk IS NULL
+LEFT JOIN 
+    top_sales ts ON 1 = 1
+WHERE 
+    a.ca_country = 'USA'
+GROUP BY 
+    a.ca_state, a.ca_city
+ORDER BY 
+    a.ca_state, a.ca_city;

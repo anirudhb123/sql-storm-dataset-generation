@@ -1,0 +1,68 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT Id, Reputation, CreationDate, DisplayName
+    FROM Users
+    WHERE Reputation > 1000 
+    UNION ALL
+    SELECT u.Id, u.Reputation, u.CreationDate, u.DisplayName
+    FROM Users u
+    INNER JOIN UserReputationCTE ur ON u.Reputation > ur.Reputation
+    WHERE u.CreationDate < ur.CreationDate
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        AVG(v.VoteTypeId = 2) AS AverageUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        DATE_TRUNC('month', p.CreationDate) AS PostMonth,
+        COUNT(DISTINCT ph.Id) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseCount,
+        COUNT(DISTINCT pl.Id) FILTER (WHERE pl.LinkTypeId = 3) AS DuplicateCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+    GROUP BY p.Id, p.OwnerUserId, p.Title, p.PostTypeId, p.Score, p.ViewCount, PostMonth
+),
+UserActivity AS (
+    SELECT 
+        ur.Id AS UserId,
+        ur.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(pa.CommentCount) AS TotalComments,
+        SUM(pa.ViewCount) AS TotalViews,
+        SUM(pa.Score) AS TotalScore
+    FROM UserReputationCTE ur
+    LEFT JOIN Posts p ON ur.Id = p.OwnerUserId
+    LEFT JOIN PostAnalytics pa ON p.Id = pa.PostId
+    WHERE ur.Reputation >= 1000
+    GROUP BY ur.Id, ur.DisplayName
+),
+FinalAnalytics AS (
+    SELECT ua.UserId, 
+           ua.DisplayName,
+           ua.PostsCount,
+           ua.TotalComments,
+           ua.TotalViews,
+           ua.TotalScore,
+           RANK() OVER (ORDER BY ua.TotalScore DESC) AS UserRank
+    FROM UserActivity ua
+)
+SELECT u.Id AS UserId,
+       u.DisplayName,
+       fa.PostsCount,
+       fa.TotalComments,
+       fa.TotalViews,
+       fa.TotalScore,
+       fa.UserRank,
+       fa.UserRank * 10 AS AdjustedScore 
+FROM FinalAnalytics fa
+JOIN Users u ON u.Id = fa.UserId
+WHERE fa.PostsCount > 5 
+ORDER BY fa.UserRank
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

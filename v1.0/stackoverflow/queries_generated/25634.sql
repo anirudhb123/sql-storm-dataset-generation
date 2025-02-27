@@ -1,0 +1,68 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN P.PostTypeId IN (4, 5) THEN 1 ELSE 0 END) AS TotalWikis,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TagUsage AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        STRING_AGG(DISTINCT U.DisplayName, ', ') AS Users,
+        RANK() OVER (ORDER BY COUNT(DISTINCT P.Id) DESC) AS TagRank
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    GROUP BY 
+        T.Id, T.TagName
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        PH.CreationDate AS CloseDate,
+        PH.Comment AS CloseReason
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId = 10 -- Post Closed
+)
+SELECT 
+    UPS.UserId,
+    UPS.DisplayName,
+    UPS.TotalPosts,
+    UPS.TotalQuestions,
+    UPS.TotalAnswers,
+    UPS.TotalWikis,
+    UPS.LastPostDate,
+    TU.TagName,
+    TU.PostCount AS Popularity,
+    (SELECT COUNT(*) FROM ClosedPosts CP WHERE CP.PostId IN (
+        SELECT Id FROM Posts WHERE OwnerUserId = UPS.UserId
+    )) AS ClosedPostsCount,
+    (SELECT STRING_AGG(CloseReason, '; ') FROM ClosedPosts CP WHERE CP.PostId IN (
+        SELECT Id FROM Posts WHERE OwnerUserId = UPS.UserId
+    )) AS ClosedPostReasons
+FROM 
+    UserPostStats UPS
+JOIN 
+    TagUsage TU ON TU.TagRank <= 10
+ORDER BY 
+    UPS.TotalPosts DESC, Popularity DESC;

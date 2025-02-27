@@ -1,0 +1,84 @@
+
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        rk.rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info c ON t.movie_id = c.movie_id
+    LEFT JOIN
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN
+        (
+            SELECT movie_id, STRING_AGG(keyword, ', ') AS keywords
+            FROM movie_keyword mk
+            JOIN keyword k ON mk.keyword_id = k.id
+            GROUP BY movie_id
+        ) AS mk ON t.id = mk.movie_id
+    LEFT JOIN (
+        SELECT
+            movie_id,
+            DENSE_RANK() OVER (ORDER BY production_year DESC) AS rank
+        FROM
+            aka_title
+    ) AS rk ON t.id = rk.movie_id
+    WHERE
+        t.production_year > 2000 
+),
+FilteredMovies AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.rank,
+        rm.cast_count,
+        rm.cast_names,
+        CASE
+            WHEN rm.rank = 1 THEN 'Recent'
+            WHEN rm.rank BETWEEN 2 AND 5 THEN 'Mid'
+            ELSE 'Old'
+        END AS movie_age_group
+    FROM
+        RankedMovies rm
+    WHERE
+        rm.cast_count > 5 
+        AND rm.production_year IS NOT NULL
+),
+FinalResults AS (
+    SELECT
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        fm.rank,
+        fm.cast_count,
+        fm.cast_names,
+        fm.movie_age_group,
+        ct.kind AS company_type,
+        COUNT(mc.company_id) AS companies_count
+    FROM
+        FilteredMovies fm
+    LEFT JOIN
+        movie_companies mc ON fm.movie_id = mc.movie_id
+    LEFT JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY
+        fm.movie_id, fm.title, fm.production_year, fm.rank, fm.cast_count, fm.cast_names, fm.movie_age_group, ct.kind
+)
+SELECT
+    *,
+    COALESCE(companies_count, 0) AS valid_companies_count,
+    CASE
+        WHEN companies_count IS NULL THEN 'No Company'
+        ELSE 'Has Company'
+    END AS company_status
+FROM
+    FinalResults
+ORDER BY
+    rank ASC, production_year DESC
+LIMIT 10;

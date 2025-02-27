@@ -1,0 +1,95 @@
+WITH UserVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(ah.OwnerUserId, -1) AS AnswerOwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        ARRAY_AGG(t.TagName) AS TagsArray
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts ah ON ah.Id = p.AcceptedAnswerId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, ah.OwnerUserId
+),
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '2 years'
+    GROUP BY 
+        b.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+PostStats AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.TagsArray,
+        uvc.UpVotes,
+        uvc.DownVotes,
+        ubc.BadgeCount,
+        ubc.HighestBadgeClass,
+        COALESCE(cl.CloseReason, 'Not Closed') AS CloseReason,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = pd.PostId) AS CommentCount
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        UserVotes uvc ON uvc.UserId = pd.AnswerOwnerUserId
+    LEFT JOIN 
+        UserBadgeCounts ubc ON ubc.UserId = pd.AnswerOwnerUserId
+    LEFT JOIN 
+        ClosedPosts cl ON cl.PostId = pd.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.TagsArray,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.BadgeCount,
+    ps.HighestBadgeClass,
+    ps.CloseReason,
+    ps.CommentCount,
+    COALESCE((SELECT AVG(ViewCount) 
+              FROM Posts po 
+              WHERE po.CreationDate < ps.CreationDate), 0) AS AvgViewCountPrior
+FROM 
+    PostStats ps
+WHERE 
+    ps.CommentCount > 10
+ORDER BY 
+    ps.Score DESC, ps.PostRank
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,36 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.Customer_SK, c.First_Name, c.Last_Name, 
+           cd.Dep_Count, cd.HD_Income_Band_SK,
+           1 AS Level
+    FROM customer c
+    JOIN customer_demographics cd ON c.Current_CDemo_SK = cd.CD_Demo_SK
+    WHERE c.Customer_SK IS NOT NULL
+    UNION ALL
+    SELECT ch.Customer_SK, ch.First_Name, ch.Last_Name, 
+           ch.Dep_Count, ch.HD_Income_Band_SK,
+           Level + 1
+    FROM customer_hierarchy ch
+    JOIN household_demographics hd ON ch.Customer_SK = hd.HD_Demo_SK
+)
+SELECT ca.City, 
+       COUNT(DISTINCT c.Customer_SK) AS Total_Customers, 
+       AVG(cd.Purchase_Estimate) AS Avg_Purchase_Estimate, 
+       SUM(cd.Dep_Count) AS Total_Dependents,
+       SUM(hd.Vehicle_Count) AS Total_Vehicles,
+       CASE 
+           WHEN SUM(cd.Dep_Count) > 0 THEN MAX(hd.Income_Band_SK)
+           ELSE NULL
+       END AS Max_Income_Band,
+       STRING_AGG(DISTINCT CONCAT(c.First_Name, ' ', c.Last_Name), ', ') AS Customer_Names
+FROM customer_address ca
+JOIN customer c ON ca.CA_Address_SK = c.Current_Addr_SK
+LEFT JOIN customer_demographics cd ON c.Current_CDemo_SK = cd.CD_Demo_SK
+LEFT JOIN household_demographics hd ON cd.CD_Demo_SK = hd.HD_Demo_SK
+JOIN customer_hierarchy ch ON c.Customer_SK = ch.Customer_SK
+WHERE cd.Dep_Count IS NOT NULL
+GROUP BY ca.City
+HAVING COUNT(DISTINCT c.Customer_SK) > 10 
+   OR AVG(cd.Purchase_Estimate) > (SELECT AVG(Purchase_Estimate) FROM customer_demographics)
+ORDER BY Total_Customers DESC
+FETCH FIRST 10 ROWS ONLY;

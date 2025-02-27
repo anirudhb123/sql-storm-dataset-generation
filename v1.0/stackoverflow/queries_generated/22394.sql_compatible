@@ -1,0 +1,84 @@
+
+WITH UserBadgeStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 3) AS BronzeBadges,
+        SUM(CASE WHEN B.Date < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' THEN 1 ELSE 0 END) AS BadgesOlderThanOneYear,
+        COALESCE(NULLIF(MAX(B.Date), DATE '1970-01-01'), NULL) AS MostRecentBadgeDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostEngagement AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(C.Id) AS TotalComments,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        AVG(P.Score) FILTER (WHERE P.Score IS NOT NULL) AS AvgScore,
+        DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY AVG(P.Score) DESC) AS ScoreRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+    GROUP BY 
+        P.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        BS.GoldBadges,
+        BS.SilverBadges,
+        BS.BronzeBadges,
+        PE.TotalPosts,
+        PE.TotalComments,
+        PE.TotalViews,
+        PE.AvgScore,
+        ROW_NUMBER() OVER (ORDER BY PE.TotalViews DESC) AS ViewRank
+    FROM 
+        UserBadgeStats BS
+    JOIN 
+        PostEngagement PE ON BS.UserId = PE.OwnerUserId
+    INNER JOIN 
+        Users U ON BS.UserId = U.Id
+)
+SELECT 
+    TU.DisplayName,
+    TU.TotalPosts,
+    TU.TotalComments,
+    TU.TotalViews,
+    TU.AvgScore,
+    TU.GoldBadges,
+    TU.SilverBadges,
+    TU.BronzeBadges,
+    CASE 
+        WHEN TU.ViewRank <= 10 THEN 'Top Engager'
+        WHEN TU.TotalPosts > 50 THEN 'Frequent Poster'
+        ELSE 'Regular User'
+    END AS UserType,
+    
+    CONCAT_WS(', ', 
+        CASE WHEN TU.GoldBadges > 0 THEN CONCAT(TU.GoldBadges, ' Gold') END,
+        CASE WHEN TU.SilverBadges > 0 THEN CONCAT(TU.SilverBadges, ' Silver') END,
+        CASE WHEN TU.BronzeBadges > 0 THEN CONCAT(TU.BronzeBadges, ' Bronze') END
+    ) AS BadgeInfo,
+    CASE 
+        WHEN TU.MostRecentBadgeDate IS NULL THEN 'No badges yet!'
+        ELSE TO_CHAR(TU.MostRecentBadgeDate, 'YYYY-MM-DD') 
+    END AS MostRecentBadgeDate
+FROM 
+    TopUsers TU
+WHERE 
+    TU.AvgScore IS NOT NULL
+ORDER BY 
+    TU.TotalViews DESC, TU.AvgScore DESC
+LIMIT 50;

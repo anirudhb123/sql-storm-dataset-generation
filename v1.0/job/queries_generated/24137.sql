@@ -1,0 +1,88 @@
+WITH Recursive ActorHierarchy AS (
+    SELECT 
+        c.person_id AS actor_id,
+        c.movie_id AS movie_id,
+        c.nr_order AS role_order,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        c.nr_order IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title AS movie_title, 
+        t.production_year, 
+        k.keyword AS movie_keyword,
+        COALESCE(m.info, 'No Info') AS movie_info
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        (SELECT movie_id, STRING_AGG(info, ', ') AS info
+         FROM movie_info
+         GROUP BY movie_id) m ON t.id = m.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        md.movie_id,
+        md.movie_title, 
+        md.production_year,
+        md.movie_keyword,
+        ah.actor_name,
+        ah.role_order,
+        ah.role_rank
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        ActorHierarchy ah ON md.movie_id = ah.movie_id
+    WHERE 
+        md.production_year >= 2000
+        AND (md.movie_keyword IS NULL OR md.movie_keyword = 'Action')
+),
+RankedMovies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        movie_keyword,
+        actor_name,
+        role_order,
+        RANK() OVER (PARTITION BY movie_keyword ORDER BY production_year DESC) AS movie_rank
+    FROM 
+        FilteredMovies
+    WHERE 
+        actor_name IS NOT NULL
+)
+SELECT 
+    fm.movie_id,
+    fm.movie_title,
+    fm.production_year,
+    fm.movie_keyword,
+    fm.actor_name,
+    fm.role_order,
+    COALESCE(RANK() OVER (PARTITION BY fm.movie_keyword ORDER BY fm.production_year DESC), 0) AS computed_rank,
+    CASE 
+        WHEN fm.skill_level IS NULL THEN 'Unknown' 
+        ELSE 'Known' 
+    END AS actor_skill_level
+FROM 
+    RankedMovies fm
+OUTER JOIN 
+    person_info pi ON fm.actor_name = pi.info
+WHERE 
+    fm.movie_rank <= 5
+    AND (fm.production_year IS NOT NULL OR fm.actor_name IS NULL)
+ORDER BY 
+    fm.movie_keyword, 
+    fm.production_year, 
+    fm.actor_name;
+
+This SQL query utilizes various constructs such as CTEs, window functions, outer joins, complex filtering, and string expressions while considering NULL logic and corner cases. It retrieves movies from the `aka_title` table, focusing on those produced after the year 2000 and tagged with the 'Action' keyword. It includes actors' information and ranks the movies based on certain conditions. The purpose of this query is to benchmark the join performance across multiple tables while managing NULL values and applying complex ranking logic.

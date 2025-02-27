@@ -1,0 +1,50 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(sr_return_quantity, 0) + COALESCE(cr_return_quantity, 0)) AS total_returned,
+        COUNT(DISTINCT sr_ticket_number) + COUNT(DISTINCT cr_order_number) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+SalesAnalytics AS (
+    SELECT 
+        ws.ws_ship_customer_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price - ws.ws_ext_discount_amt > 0
+    GROUP BY 
+        ws.ws_ship_customer_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COALESCE(cr.total_returned, 0) AS total_returns,
+    COALESCE(sa.total_sales, 0) AS total_sales,
+    CASE 
+        WHEN COALESCE(cr.total_returned, 0) > COALESCE(sa.total_sales, 0) THEN 'High Returns'
+        WHEN COALESCE(cr.total_returned, 0) = COALESCE(sa.total_sales, 0) THEN 'Equal Returns and Sales'
+        ELSE 'Low Returns'
+    END AS return_ratio_category
+FROM 
+    customer_address ca
+LEFT JOIN 
+    CustomerReturns cr ON ca.ca_address_sk = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_current_addr_sk IS NOT NULL AND c.c_current_addr_sk = cr.c_customer_id)
+LEFT JOIN 
+    SalesAnalytics sa ON sa.ws_ship_customer_sk = (SELECT c.c_customer_sk FROM customer c WHERE c.c_customer_sk = cr.c_customer_id)
+WHERE 
+    ca.ca_state IN ('NY', 'CA')
+    AND (cr.total_orders IS NOT NULL OR sa.order_count IS NOT NULL)
+ORDER BY 
+    ca.ca_city, 
+    return_ratio_category DESC
+FETCH FIRST 50 ROWS ONLY;

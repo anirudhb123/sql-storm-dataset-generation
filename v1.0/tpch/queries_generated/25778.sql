@@ -1,0 +1,41 @@
+WITH StringBenchmark AS (
+    SELECT 
+        p.p_partkey,
+        CONCAT(SUBSTRING(p.p_name, 1, 10), '...', SUBSTRING(p.p_name, LEN(p.p_name) - 9, 10)) AS shortened_name,
+        UPPER(p.p_mfgr) AS manufacturer_upper,
+        LOWER(p.p_brand) AS brand_lower,
+        REPLACE(p.p_comment, 'parts', 'items') AS updated_comment,
+        LENGTH(p.p_type) AS type_length,
+        COUNT(DISTINCT ps.s_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_comment, p.p_type
+),
+FinalBenchmark AS (
+    SELECT 
+        sb.p_partkey,
+        sb.shortened_name,
+        sb.manufacturer_upper,
+        sb.brand_lower,
+        sb.updated_comment,
+        sb.type_length,
+        sb.supplier_count,
+        ROW_NUMBER() OVER (ORDER BY sb.type_length DESC, sb.supplier_count ASC) AS rank
+    FROM 
+        StringBenchmark sb
+)
+SELECT 
+    f.rank,
+    f.shortened_name,
+    f.manufacturer_upper,
+    f.brand_lower,
+    f.updated_comment,
+    f.type_length,
+    f.supplier_count
+FROM 
+    FinalBenchmark f
+WHERE 
+    f.rank <= 10;

@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.ANSWERCOUNT,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC, p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+        AND p.CreationDate >= (NOW() - INTERVAL '1 year')
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation >= 1000 THEN 'Expert'
+            WHEN u.Reputation >= 100 THEN 'Experienced'
+            ELSE 'Novice' 
+        END AS ReputationCategory
+    FROM 
+        Users u
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpvoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id
+),
+EngagementDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        ps.CommentCount,
+        ps.UpvoteCount,
+        ps.DownvoteCount,
+        ur.DisplayName AS PostOwner,
+        ur.ReputationCategory,
+        CASE 
+            WHEN ps.UpvoteCount - ps.DownvoteCount > 0 THEN 'Positive'
+            WHEN ps.UpvoteCount - ps.DownvoteCount < 0 THEN 'Negative'
+            ELSE 'Neutral'
+        END AS Sentiment
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostStatistics ps ON rp.PostId = ps.PostId
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    JOIN 
+        UserReputation ur ON u.Id = ur.UserId
+    WHERE 
+        rp.rn <= 5
+)
+SELECT 
+    ed.PostId,
+    ed.Title,
+    ed.CreationDate,
+    ed.CommentCount,
+    ed.UpvoteCount,
+    ed.DownvoteCount,
+    ed.PostOwner,
+    ed.ReputationCategory,
+    ed.Sentiment,
+    CASE 
+        WHEN ed.Sentiment = 'Positive' THEN '👍'
+        WHEN ed.Sentiment = 'Negative' THEN '👎'
+        ELSE '😐'
+    END AS Emoji,
+    CASE
+        WHEN ed.CommentCount IS NULL THEN 'No Comments'
+        WHEN ed.CommentCount = 0 THEN 'No Comments Yet'
+        ELSE 'Comments Available'
+    END AS CommentStatus
+FROM 
+    EngagementDetails ed
+ORDER BY 
+    ed.CommentCount DESC NULLS LAST,
+    ed.UpvoteCount DESC,
+    ed.CreationDate DESC;

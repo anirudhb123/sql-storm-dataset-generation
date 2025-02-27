@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        a.title,
+        a.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title a ON a.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id
+),
+cast_summary AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.depth,
+    ks.keywords,
+    cs.actor_count,
+    COALESCE(cs.actors, 'No Cast') AS actors
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_keywords ks ON mh.movie_id = ks.movie_id
+LEFT JOIN 
+    cast_summary cs ON mh.movie_id = cs.movie_id
+WHERE 
+    mh.production_year >= 2000
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title;
+
+This SQL query selects movie titles from the `aka_title` table released after the year 2000, including their hierarchy (based on linked movies), associated keywords, and a summary of the cast. It utilizes Common Table Expressions (CTEs) for recursive movie relationships, a summary of keywords, and a cast summary, while also implementing outer joins and aggregate functions to collate the relevant data. The end result is ordered by the production year in descending order and then by title.

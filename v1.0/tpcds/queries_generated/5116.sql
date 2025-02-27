@@ -1,0 +1,39 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws_sold_date_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        COUNT(ws.order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ext_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN web_site w ON ws.web_site_sk = w.web_site_sk
+    JOIN date_dim dd ON ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.web_site_id, ws_sold_date_sk
+),
+TopWebSites AS (
+    SELECT 
+        web_site_id,
+        total_sales,
+        order_count
+    FROM RankedSales
+    WHERE sales_rank <= 5
+),
+CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.return_amt_inc_tax) AS total_return,
+        COUNT(wr.return_order_number) AS return_count
+    FROM web_returns wr
+    GROUP BY wr.returning_customer_sk
+)
+SELECT 
+    tws.web_site_id,
+    tws.total_sales,
+    tws.order_count,
+    cr.total_return,
+    cr.return_count
+FROM TopWebSites tws
+LEFT JOIN CustomerReturns cr ON tws.web_site_id = cr.returning_customer_sk
+ORDER BY tws.total_sales DESC;

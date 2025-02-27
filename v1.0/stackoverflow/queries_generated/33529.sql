@@ -1,0 +1,61 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM Tags
+    LEFT JOIN Posts ON Posts.Tags LIKE '%' || Tags.TagName || '%'
+    GROUP BY Tags.TagName
+    UNION ALL
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) + rc.PostCount
+    FROM Tags
+    JOIN Posts ON Posts.Tags LIKE '%' || Tags.TagName || '%'
+    JOIN RecursiveTagCounts rc ON rc.TagName = Tags.TagName
+    WHERE rc.PostCount < 10
+),
+UserReputation AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        SUM(Votes.VoteTypeId = 2) AS UpVotesCount,
+        SUM(Votes.VoteTypeId = 3) AS DownVotesCount,
+        (SUM(Votes.VoteTypeId = 2) - SUM(Votes.VoteTypeId = 3)) AS NetVotes
+    FROM Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN Votes ON Votes.PostId = Posts.Id
+    GROUP BY Users.Id, Users.DisplayName
+),
+PostHistorySampling AS (
+    SELECT 
+        ph.UserId, 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(*) AS EditCount
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 24)  -- Edit Title, Edit Body, Suggested Edit Applied
+    GROUP BY ph.UserId, ph.PostId, ph.PostHistoryTypeId
+),
+MostEditedPosts AS (
+    SELECT 
+        PostId, 
+        SUM(EditCount) AS TotalEdits
+    FROM PostHistorySampling
+    GROUP BY PostId
+)
+SELECT 
+    ut.UserId,
+    ut.DisplayName,
+    ut.UpVotesCount,
+    ut.DownVotesCount,
+    ut.NetVotes,
+    COALESCE(pt.Title, 'No Title') AS PostTitle,
+    COALESCE(tt.PostCount, 0) AS TagContributions,
+    mpe.TotalEdits
+FROM UserReputation ut
+LEFT JOIN Posts pt ON ut.UserId = pt.OwnerUserId
+LEFT JOIN RecursiveTagCounts tt ON pt.Tags LIKE '%' || tt.TagName || '%'
+LEFT JOIN MostEditedPosts mpe ON pt.Id = mpe.PostId
+WHERE ut.NetVotes > 0
+ORDER BY ut.NetVotes DESC, TagContributions DESC, TotalEdits DESC;

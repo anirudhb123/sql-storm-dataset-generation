@@ -1,0 +1,79 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        CreationDate,
+        OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- only questions
+    UNION ALL
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursiveCTE R ON P.ParentId = R.PostId
+), UpvoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpvoteCount
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+), CombinedData AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        COALESCE(U.UpvoteCount, 0) AS UpvoteCount,
+        R.Level,
+        COALESCE(B.BadgeCount, 0) AS BadgeCount,
+        DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RankByDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        UpvoteCounts U ON P.Id = U.PostId
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) B ON P.OwnerUserId = B.UserId
+    LEFT JOIN 
+        RecursiveCTE R ON P.Id = R.PostId
+)
+SELECT 
+    C.PostId,
+    C.Title,
+    U.DisplayName AS OwnerDisplayName,
+    C.CreationDate,
+    C.UpvoteCount,
+    C.Level,
+    C.BadgeCount,
+    CASE 
+        WHEN C.RankByDate <= 3 THEN 'Top Contributor'
+        WHEN C.RankByDate BETWEEN 4 AND 10 THEN 'Frequent Contributor'
+        ELSE 'New Contributor'
+    END AS ContributionLevel
+FROM 
+    CombinedData C
+JOIN 
+    Users U ON C.OwnerUserId = U.Id
+WHERE 
+    C.UpvoteCount > 5 
+    AND C.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+ORDER BY 
+    C.UpvoteCount DESC, C.CreationDate DESC
+OPTION (MAXRECURSION 100);

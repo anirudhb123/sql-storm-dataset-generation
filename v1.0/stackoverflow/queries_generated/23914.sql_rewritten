@@ -1,0 +1,104 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation IS NOT NULL
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+PostScoreDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.Score,
+        COALESCE(PH.PostHistoryTypeId, 0) AS LastActionType,
+        P.CreationDate,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC NULLS LAST) AS ScoreRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.CreationDate = (SELECT MAX(CreationDate) FROM PostHistory WHERE PostId = P.Id)
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostsWithAnswers AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        COUNT(A.Id) AS AnswersCount,
+        SUM(A.Score) AS TotalAnswersScore
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts A ON P.Id = A.ParentId AND A.PostTypeId = 2
+    GROUP BY 
+        P.Id, P.OwnerUserId
+),
+FinalReport AS (
+    SELECT 
+        UR.UserId,
+        UR.DisplayName,
+        UR.Reputation,
+        COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+        COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+        COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+        COALESCE(Ps.PostCount, 0) AS TotalPosts,
+        COALESCE(Ps.AnswerCount, 0) AS TotalAnswers,
+        COALESCE(Ps.QuestionCount, 0) AS TotalQuestions,
+        COALESCE(PWA.AnswersCount, 0) AS AnswersCount,
+        COALESCE(PWA.TotalAnswersScore, 0) AS TotalAnswersScore,
+        SUM(CASE WHEN Ps.ScoreRank = 1 THEN 1 ELSE 0 END) AS TopScoredPosts,
+        COUNT(DISTINCT P.Title) AS DistinctPostTitles,
+        COUNT(DISTINCT CASE WHEN P.LastActionType = 10 THEN P.PostId END) AS ClosedPostsCount
+    FROM 
+        UserReputation UR
+    LEFT JOIN 
+        UserBadges UB ON UR.UserId = UB.UserId
+    LEFT JOIN 
+        PostScoreDetails P ON UR.UserId = P.OwnerUserId
+    LEFT JOIN 
+        PostsWithAnswers PWA ON UR.UserId = PWA.OwnerUserId
+    GROUP BY 
+        UR.UserId, UR.DisplayName, UR.Reputation, UB.GoldBadges, UB.SilverBadges, UB.BronzeBadges
+)
+SELECT 
+    *,
+    CASE 
+        WHEN Reputation > 1000 THEN 'High'
+        WHEN Reputation > 500 THEN 'Medium'
+        ELSE 'Low'
+    END AS ReputationCategory,
+    CASE 
+        WHEN TotalPosts = 0 THEN 'No Posts'
+        WHEN TotalPosts < 10 THEN 'Few Posts'
+        ELSE 'Many Posts'
+    END AS PostCountCategory
+FROM 
+    FinalReport
+WHERE 
+    (GoldBadges > 0 OR SilverBadges > 0) 
+    AND (TotalAnswers > 5 OR (TotalPosts > 10 AND DistinctPostTitles > 5))
+ORDER BY 
+    Reputation DESC, TotalPosts DESC
+LIMIT 100 OFFSET 0;

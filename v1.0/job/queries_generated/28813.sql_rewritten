@@ -1,0 +1,59 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY LENGTH(t.title) DESC) AS title_rank
+    FROM 
+        title t
+),
+
+joined_cast AS (
+    SELECT 
+        ct.kind AS company_type,
+        ak.name AS actor_name,
+        a.id AS actor_id,
+        mv.title AS movie_title,
+        mv.production_year,
+        c.nr_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        aka_title mv ON c.movie_id = mv.movie_id
+    JOIN 
+        movie_companies mc ON mc.movie_id = mv.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        mv.production_year BETWEEN 2000 AND 2023
+),
+
+final_output AS (
+    SELECT 
+        r.title_id,
+        r.title,
+        r.production_year,
+        j.actor_name,
+        j.company_type
+    FROM 
+        ranked_titles r
+    JOIN 
+        joined_cast j ON r.title = j.movie_title AND r.production_year = j.production_year
+    WHERE 
+        j.nr_order <= 3  
+)
+
+SELECT 
+    title_id,
+    title,
+    production_year,
+    STRING_AGG(actor_name, ', ') AS top_actors,
+    STRING_AGG(DISTINCT company_type, ', ') AS production_companies
+FROM 
+    final_output
+GROUP BY 
+    title_id, title, production_year
+ORDER BY 
+    production_year DESC, LENGTH(title) DESC;

@@ -1,0 +1,52 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.item_sk,
+        ws_quick.date AS sold_date,
+        SUM(ws.net_paid_inc_tax) AS total_net_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.net_paid_inc_tax) DESC) AS sales_rank,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.net_paid_inc_tax)) AS sales_density
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS ws_quick ON ws.ws_sold_date_sk = ws_quick.d_date_sk
+    WHERE 
+        ws.bill_customer_sk IS NOT NULL AND 
+        ws.ship_mode_sk IN (SELECT sm_ship_mode_sk FROM ship_mode WHERE sm_type LIKE 'Express%')
+    GROUP BY 
+        ws.bill_customer_sk, ws.item_sk, ws_quick.date
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        CASE 
+            WHEN cd.cd_marital_status IS NULL THEN 'Unknown'
+            ELSE cd.cd_marital_status
+        END AS marital_status,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rnk
+    FROM 
+        customer AS c
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+)
+SELECT 
+    ci.c_customer_id,
+    ci.marital_status,
+    COALESCE(rs.total_net_sales, 0) AS total_sales,
+    CASE 
+        WHEN ci.rnk <= 3 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status
+FROM 
+    CustomerInfo AS ci
+LEFT JOIN 
+    RankedSales AS rs ON ci.c_customer_id = CAST(rs.bill_customer_sk AS VARCHAR(16))
+WHERE 
+    ci.marital_status IN ('M', 'S') OR ci.marital_status IS NULL
+ORDER BY 
+    total_sales DESC, ci.c_customer_id
+FETCH FIRST 50 ROWS ONLY;

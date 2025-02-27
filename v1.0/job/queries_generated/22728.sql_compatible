@@ -1,0 +1,62 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS year_rank
+    FROM 
+        aka_title at
+),
+movie_cast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT n.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name n ON ci.person_id = n.person_id
+    GROUP BY 
+        ci.movie_id
+),
+detailed_movie_info AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(mc.total_cast, 0) AS total_cast,
+        mc.cast_names,
+        COALESCE((
+            SELECT 
+                STRING_AGG(DISTINCT mw.keyword, ', ')
+            FROM 
+                movie_keyword mw
+            WHERE 
+                mw.movie_id = rm.movie_id
+        ), 'No keywords') AS keywords
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_cast mc ON rm.movie_id = mc.movie_id
+)
+SELECT 
+    dmi.title,
+    dmi.production_year,
+    dmi.total_cast,
+    dmi.cast_names,
+    dmi.keywords,
+    CASE 
+        WHEN dmi.total_cast = 0 THEN 'No cast information'
+        ELSE 'Cast data available'
+    END AS cast_status,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = dmi.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'plot')) AS plot_count,
+    (SELECT STRING_AGG(DISTINCT ci.note) FROM cast_info ci WHERE ci.movie_id = dmi.movie_id) AS casting_notes
+FROM 
+    detailed_movie_info dmi
+WHERE 
+    dmi.production_year >= 2000
+ORDER BY 
+    dmi.production_year DESC, 
+    dmi.title
+LIMIT 100;

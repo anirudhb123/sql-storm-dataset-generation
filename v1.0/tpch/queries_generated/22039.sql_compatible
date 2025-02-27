@@ -1,0 +1,54 @@
+
+WITH RankedParts AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           p.p_retailprice,
+           RANK() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_size IN (SELECT DISTINCT p2.p_size FROM part p2 WHERE p2.p_retailprice > 50)
+),
+SupplierAvailability AS (
+    SELECT ps.ps_partkey,
+           SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING AVG(ps.ps_supplycost) < (SELECT AVG(ps2.ps_supplycost) FROM partsupp ps2)
+),
+CustomerOrders AS (
+    SELECT c.c_custkey,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey
+    HAVING COUNT(DISTINCT o.o_orderkey) > 5
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey,
+           l.l_partkey,
+           l.l_suppkey,
+           l.l_discount,
+           l.l_returnflag,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount
+    FROM lineitem l
+    WHERE l.l_shipmode IN ('TRUCK', 'SHIP')
+    GROUP BY l.l_orderkey, l.l_partkey, l.l_suppkey, l.l_discount, l.l_returnflag
+)
+SELECT DISTINCT n.n_name,
+                SUM(lp.total_price_after_discount) AS total_revenue,
+                COALESCE(sa.total_avail_qty, 0) AS available_quantity,
+                ARRAY_AGG(DISTINCT rp.p_name) AS popular_parts
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierAvailability sa ON sa.ps_partkey IN (
+    SELECT rp.p_partkey
+    FROM RankedParts rp
+    WHERE rp.price_rank = 1
+)
+LEFT JOIN FilteredLineItems lp ON lp.l_suppkey = s.s_suppkey
+WHERE n.n_nationkey IS NOT NULL
+GROUP BY n.n_name
+HAVING SUM(lp.total_price_after_discount) > (SELECT AVG(total_spent) FROM CustomerOrders)
+ORDER BY total_revenue DESC;

@@ -1,0 +1,72 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM Badges
+    GROUP BY UserId
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    GROUP BY v.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    COALESCE(u.DisplayName, 'Deleted User') AS OwnerDisplayName,
+    COALESCE(b.BadgeCount, 0) AS TotalBadges,
+    COALESCE(b.BadgeNames, 'None') AS BadgeNames,
+    r.Level AS PostLevel,
+    vs.UpVotes,
+    vs.DownVotes,
+    CASE 
+        WHEN vs.UpVotes > vs.DownVotes THEN 'Positive'
+        WHEN vs.UpVotes < vs.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM Posts p
+LEFT JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN UserBadges b ON u.Id = b.UserId
+LEFT JOIN RecursivePostHierarchy r ON p.Id = r.Id
+LEFT JOIN PostVoteSummary vs ON p.Id = vs.PostId
+WHERE p.ViewCount > 100
+  AND p.Score >= 10
+  AND (p.Tags LIKE '%SQL%' OR p.Title ILIKE '%performance%')
+ORDER BY p.CreationDate DESC
+LIMIT 50;

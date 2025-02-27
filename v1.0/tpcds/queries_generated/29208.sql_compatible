@@ -1,0 +1,58 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca.ca_address_sk,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, ' ', COALESCE(ca.ca_suite_number, '')) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country,
+        LENGTH(ca.ca_street_name) AS street_name_length,
+        (SELECT COUNT(*) FROM customer c WHERE c.c_current_addr_sk = ca.ca_address_sk) AS customer_count
+    FROM customer_address ca
+),
+DemographicDetails AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        cd.cd_dep_employed_count,
+        cd.cd_dep_college_count
+    FROM customer_demographics cd
+),
+SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales
+    FROM web_sales ws
+    GROUP BY ws.ws_sold_date_sk
+),
+FinalBenchmark AS (
+    SELECT 
+        ad.full_address,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_zip,
+        ad.ca_country,
+        dg.cd_gender,
+        dg.cd_marital_status,
+        sd.total_quantity,
+        sd.total_sales,
+        ad.customer_count
+    FROM AddressDetails ad
+    JOIN DemographicDetails dg ON ad.ca_address_sk = dg.cd_demo_sk
+    LEFT JOIN SalesData sd ON ad.ca_address_sk = sd.ws_sold_date_sk 
+    WHERE ad.customer_count > 0 AND (sd.total_sales IS NULL OR sd.total_sales > 1000)
+)
+SELECT 
+    COUNT(*) AS number_of_addresses,
+    AVG(street_name_length) AS avg_street_name_length,
+    SUM(total_quantity) AS total_items_sold,
+    SUM(total_sales) AS overall_sales
+FROM FinalBenchmark
+GROUP BY street_name_length;

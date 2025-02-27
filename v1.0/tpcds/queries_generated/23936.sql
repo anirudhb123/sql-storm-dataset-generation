@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+),
+RecentReturns AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returned_quantity,
+        SUM(cr.cr_return_amount) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.cr_order_number IN (
+            SELECT 
+                wr.wr_order_number 
+            FROM 
+                web_returns wr 
+            WHERE 
+                wr.wr_return_quantity > 0
+        )
+    GROUP BY 
+        cr.cr_item_sk
+),
+CustomerStatistics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+    HAVING 
+        SUM(ws.ws_net_profit) > 1000 OR COUNT(ws.ws_order_number) > 10
+)
+SELECT 
+    ca.ca_city,
+    SUM(rs.ws_net_profit) AS city_profit,
+    AVG(cs.total_orders) AS avg_orders_per_customer,
+    NULLIF(AVG(NULLIF(rs.total_returned_quantity, 0)), 0) AS avg_returns,
+    CASE WHEN COUNT(DISTINCT cs.c_customer_sk) > 0 THEN 'Active' ELSE 'Inactive' END AS customer_activity
+FROM 
+    customer_address ca
+LEFT JOIN 
+    RankedSales rs ON rs.ws_item_sk IN (
+        SELECT i.i_item_sk 
+        FROM item i 
+        WHERE i.i_current_price > 50 
+        AND (i.i_rec_start_date <= CURRENT_DATE AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date >= CURRENT_DATE))
+    )
+LEFT JOIN 
+    CustomerStatistics cs ON cs.c_customer_sk = ca.ca_address_sk
+LEFT JOIN 
+    RecentReturns rr ON rr.cr_item_sk = rs.ws_item_sk
+GROUP BY 
+    ca.ca_city
+HAVING 
+    SUM(rs.ws_net_profit) > 5000
+ORDER BY 
+    city_profit DESC;

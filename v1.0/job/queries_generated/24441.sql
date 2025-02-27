@@ -1,0 +1,51 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mcl.linked_movie_id
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link mcl ON mt.id = mcl.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mhl.linked_movie_id
+    FROM 
+        movie_hierarchy mhl
+    JOIN 
+        aka_title mt ON mhl.linked_movie_id = mt.id
+)
+SELECT 
+    ak.name AS actor_name,
+    ak.surname_pcode,
+    COUNT(DISTINCT mh.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT mh.title, ', ') AS movie_titles,
+    MAX(mh.production_year) AS latest_year,
+    AVG(CASE WHEN mh.kind_id IS NOT NULL THEN mh.production_year END) AS avg_years_of_production,
+    COUNT(DISTINCT mk.keyword) FILTER (WHERE mk.keyword IS NOT NULL) AS keyword_count
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+GROUP BY 
+    ak.id, ak.name, ak.surname_pcode
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 3 AND 
+    MAX(mh.production_year) < EXTRACT(YEAR FROM CURRENT_DATE) - 10 AND
+    COUNT(DISTINCT mk.keyword) > 2
+ORDER BY 
+    total_movies DESC, 
+    latest_year ASC
+LIMIT 10;

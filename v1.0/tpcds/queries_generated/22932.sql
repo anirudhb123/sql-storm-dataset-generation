@@ -1,0 +1,58 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(SUM(ws.ws_ext_sales_price), 0) AS total_web_sales,
+        COALESCE(SUM(cs.cs_ext_sales_price), 0) AS total_catalog_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+Promotions AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT ws.ws_order_number) AS promo_sales
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    WHERE 
+        p.p_discount_active = 'Y'
+    GROUP BY 
+        p.p_promo_id
+),
+HighValueCustomers AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_web_sales + cs.total_catalog_sales AS total_sales
+    FROM 
+        CustomerSales cs
+    WHERE 
+        (cs.total_web_sales + cs.total_catalog_sales) > 1000
+)
+SELECT 
+    c.c_customer_id,
+    CASE 
+        WHEN hvc.total_sales IS NOT NULL THEN 'High Value'
+        ELSE 'Regular'
+    END AS customer_type,
+    p.promo_sales,
+    hvc.total_sales
+FROM 
+    customer c
+LEFT JOIN 
+    HighValueCustomers hvc ON c.c_customer_id = hvc.c_customer_id
+LEFT JOIN 
+    Promotions p ON c.c_customer_id = p.promo_sales
+WHERE 
+    (hvc.total_sales IS NOT NULL OR p.promo_sales IS NOT NULL)
+ORDER BY 
+    COALESCE(hvc.total_sales, 0) DESC, 
+    COALESCE(p.promo_sales, 0) DESC
+LIMIT 100;
+

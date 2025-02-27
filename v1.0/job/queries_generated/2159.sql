@@ -1,0 +1,74 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS title_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY m.id) AS actor_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+),
+MostPopularMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        actor_count,
+        RANK() OVER (ORDER BY actor_count DESC) AS popularity_rank
+    FROM 
+        RankedMovies
+    WHERE 
+        production_year IS NOT NULL
+),
+UniqueTitleActors AS (
+    SELECT 
+        m.title,
+        COUNT(DISTINCT c.person_id) AS unique_actor_count
+    FROM 
+        aka_title m
+    JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        m.title
+    HAVING 
+        COUNT(DISTINCT c.person_id) > 10
+),
+AwardWinningMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year
+    FROM 
+        aka_title m
+    JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        it.info ILIKE 'award%'
+)
+SELECT 
+    mp.title,
+    mp.production_year,
+    mp.actor_count,
+    CASE 
+        WHEN aw.movie_id IS NOT NULL THEN 'Yes'
+        ELSE 'No'
+    END AS is_award_winning,
+    ua.unique_actor_count
+FROM 
+    MostPopularMovies mp
+LEFT JOIN 
+    AwardWinningMovies aw ON mp.movie_id = aw.movie_id
+LEFT JOIN 
+    UniqueTitleActors ua ON mp.title = ua.title
+WHERE 
+    mp.popularity_rank <= 10
+ORDER BY 
+    mp.actor_count DESC, mp.production_year DESC;

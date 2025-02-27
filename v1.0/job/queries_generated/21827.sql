@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.id DESC) AS rank,
+        COALESCE(ki.keyword, 'No Keywords') AS keyword_description
+    FROM 
+        aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword ki ON mk.keyword_id = ki.id
+    WHERE 
+        m.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        a.person_id,
+        a.note,
+        COUNT(c.role_id) AS role_count,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM 
+        cast_info c
+    INNER JOIN aka_name a ON c.person_id = a.person_id
+    LEFT JOIN role_type r ON c.role_id = r.id
+    GROUP BY 
+        a.person_id, a.note
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    ar.person_id,
+    ar.roles,
+    ar.role_count,
+    CASE 
+        WHEN ar.role_count > 0 THEN 'Has Roles'
+        ELSE 'No Roles'
+    END AS role_status,
+    STRING_AGG(DISTINCT ci.note, '; ') FILTER (WHERE ci.note IS NOT NULL) AS additional_notes
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    complete_cast cc ON rm.movie_id = cc.movie_id
+LEFT JOIN 
+    ActorRoles ar ON cc.subject_id = ar.person_id
+LEFT JOIN 
+    cast_info ci ON cc.movie_id = ci.movie_id AND ci.nr_order < 3  -- Get first two roles
+WHERE 
+    rm.rank <= 5  -- Consider only top 5 recent movies by year
+GROUP BY 
+    rm.title, rm.production_year, ar.person_id, ar.roles, ar.role_count
+ORDER BY 
+    rm.production_year DESC, rm.title;
+

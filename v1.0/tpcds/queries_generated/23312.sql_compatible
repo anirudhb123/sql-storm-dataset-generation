@@ -1,0 +1,74 @@
+
+WITH RecursivePromotionData AS (
+    SELECT 
+        p.p_promo_sk,
+        p.p_promo_name,
+        p.p_start_date_sk,
+        p.p_end_date_sk,
+        p.p_sales_count,
+        ROW_NUMBER() OVER (PARTITION BY p.p_promo_sk ORDER BY p.p_start_date_sk DESC) AS promo_rank
+    FROM 
+        promotion p
+    WHERE 
+        p.p_discount_active = 'Y'
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        ca.ca_city,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE
+            WHEN cd.cd_dep_count IS NULL THEN 'No Dependents'
+            ELSE CAST(cd.cd_dep_count AS VARCHAR) || ' Dependents'
+        END AS dependent_info
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ws.ws_bill_customer_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS item_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > (SELECT AVG(ws_sales_price) FROM web_sales)
+    GROUP BY 
+        ws.ws_item_sk, ws.ws_bill_customer_sk
+),
+AggregateSales AS (
+    SELECT 
+        sd.ws_bill_customer_sk,
+        SUM(sd.total_net_profit) AS total_customer_net_profit,
+        COUNT(DISTINCT sd.ws_item_sk) AS total_items_purchased
+    FROM 
+        SalesData sd
+    GROUP BY 
+        sd.ws_bill_customer_sk
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.ca_city,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    pd.p_promo_name,
+    asales.total_customer_net_profit,
+    asales.total_items_purchased
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    RecursivePromotionData pd ON pd.promo_rank = 1
+LEFT JOIN 
+    AggregateSales asales ON cd.c_customer_sk = asales.ws_bill_customer_sk
+WHERE 
+    (cd.cd_gender = 'F' AND asales.total_customer_net_profit > 1000) 
+    OR (cd.cd_marital_status = 'M' AND asales.total_items_purchased > 5) 
+    OR (cd.ca_city IS NULL AND asales.total_customer_net_profit IS NOT NULL)
+ORDER BY 
+    asales.total_customer_net_profit DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,82 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.returning_customer_sk,
+        SUM(sr.return_quantity) AS total_returned,
+        COUNT(DISTINCT sr_ticket_number) AS total_return_count,
+        ROW_NUMBER() OVER (PARTITION BY sr.returning_customer_sk ORDER BY SUM(sr.return_quantity) DESC) AS rnk
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.returned_date_sk IS NOT NULL 
+        AND sr.return_quantity > 0
+    GROUP BY 
+        sr.returning_customer_sk
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_marital_status,
+        cd.cd_gender,
+        cd.cd_purchase_estimate,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            WHEN cd.cd_purchase_estimate < 1000 THEN 'Low'
+            WHEN cd.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium'
+            ELSE 'High'
+        END AS purchase_status,
+        COALESCE(ra.total_returned, 0) AS total_returned 
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        RankedReturns ra ON c.c_customer_sk = ra.returning_customer_sk
+),
+FinalData AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        c.cd_marital_status,
+        c.cd_gender,
+        c.purchase_status,
+        c.total_returned,
+        (SELECT COUNT(*) FROM store s WHERE s.s_number_employees > 10) AS active_stores
+    FROM 
+        CustomerData c
+    WHERE 
+        (c.purchase_status = 'High' OR c.total_returned > 5)
+        AND (c.cd_marital_status IS NOT NULL OR c.cd_gender IS NOT NULL)
+),
+SalesData AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS average_profit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.bill_customer_sk
+)
+SELECT 
+    fd.c_customer_sk,
+    fd.c_first_name,
+    fd.c_last_name,
+    fd.purchase_status,
+    fd.total_returned,
+    COALESCE(sd.total_sales, 0) AS total_sales,
+    sd.average_profit,
+    CASE WHEN sd.total_sales IS NULL THEN 'No Sales' ELSE 'Sales Exist' END AS sales_status
+FROM 
+    FinalData fd
+LEFT JOIN 
+    SalesData sd ON fd.c_customer_sk = sd.bill_customer_sk
+WHERE 
+    fd.total_returned NOT BETWEEN 1 AND 10 
+    AND (SELECT COUNT(*) FROM customer c2 WHERE c2.c_birth_year BETWEEN 1970 AND 2000 AND c2.c_customer_sk <> fd.c_customer_sk) > 5
+ORDER BY 
+    fd.total_returned DESC, 
+    fd.c_customer_sk;

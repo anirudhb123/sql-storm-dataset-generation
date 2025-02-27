@@ -1,0 +1,29 @@
+-- Performance Benchmarking Query
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.Body,
+    p.CreationDate,
+    p.Score,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) AS VoteCount,
+    (SELECT COUNT(*) FROM Posts AS a WHERE a.ParentId = p.Id) AS AnswerCount,
+    t.TagName,
+    bh.CreationDate AS LastHistoryDate
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+LEFT JOIN 
+    PostHistory bh ON p.Id = bh.PostId
+GROUP BY 
+    p.Id, u.DisplayName, t.TagName, bh.CreationDate
+ORDER BY 
+    p.CreationDate DESC;

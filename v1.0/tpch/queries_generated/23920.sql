@@ -1,0 +1,82 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_name IN (SELECT DISTINCT n_name FROM nation WHERE n_comment IS NOT NULL) 
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_line_item_value
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey AND l.l_shipdate > CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate
+),
+FinalBenchmark AS (
+    SELECT 
+        h.p_partkey,
+        h.p_name,
+        COUNT(DISTINCT ro.o_orderkey) AS order_count,
+        AVG(s.s_acctbal) AS avg_supplier_acctbal,
+        MAX(r.rnk) AS max_rank
+    FROM 
+        HighValueParts h
+    LEFT JOIN 
+        lineitem li ON h.p_partkey = li.l_partkey
+    LEFT JOIN 
+        RecentOrders ro ON li.l_orderkey = ro.o_orderkey
+    LEFT JOIN 
+        RankedSuppliers s ON s.s_suppkey = li.l_suppkey
+    LEFT JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        h.p_retailprice > (SELECT AVG(p_retailprice) FROM part)
+    AND 
+        n.n_name IS NOT NULL
+    GROUP BY 
+        h.p_partkey, h.p_name
+    ORDER BY 
+        order_count DESC, avg_supplier_acctbal DESC
+)
+SELECT 
+    f.p_partkey,
+    f.p_name,
+    f.order_count,
+    f.avg_supplier_acctbal,
+    CASE 
+        WHEN f.max_rank IS NULL THEN 'No Suppliers'
+        ELSE 'Suppliers Exist'
+    END AS supplier_status
+FROM 
+    FinalBenchmark f
+WHERE 
+    f.order_count > 10 OR f.avg_supplier_acctbal IS NULL
+FETCH FIRST 50 ROWS ONLY;

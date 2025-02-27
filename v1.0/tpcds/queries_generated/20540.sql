@@ -1,0 +1,68 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS revenue_rank
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk BETWEEN 1 AND 1000
+    GROUP BY
+        ws_item_sk
+    HAVING
+        SUM(ws_quantity) > (SELECT AVG(ws_quantity) FROM web_sales WHERE ws_sold_date_sk BETWEEN 1 AND 1000)
+),
+Max_Sales AS (
+    SELECT
+        MAX(total_revenue) AS max_revenue,
+        ws_item_sk
+    FROM
+        Sales_CTE
+    GROUP BY
+        ws_item_sk
+),
+Filtered_Items AS (
+    SELECT 
+        i.i_item_id,
+        COALESCE(md.ib_upper_bound, 0) AS upper_bound,
+        COALESCE(md.ib_lower_bound, 0) AS lower_bound,
+        ROW_NUMBER() OVER (ORDER BY i.i_current_price DESC) AS price_rank
+    FROM 
+        item i
+    LEFT JOIN 
+        household_demographics hd ON hd.hd_income_band_sk IN (SELECT ib_income_band_sk FROM income_band WHERE ib_lower_bound < 50000)
+    LEFT JOIN 
+        income_band md ON md.ib_income_band_sk = hd.hd_income_band_sk
+    WHERE 
+        i.i_current_price IS NOT NULL AND
+        (md.ib_upper_bound IS NULL OR md.ib_upper_bound > 0)
+)
+SELECT 
+    a.ca_zip,
+    COUNT(DISTINCT s.ss_ticket_number) AS total_sales,
+    SUM(s.ss_net_profit) AS total_profit,
+    STRING_AGG(DISTINCT i.i_item_desc, ', ') AS item_descriptions,
+    SUM(CASE WHEN c.c_customer_id IS NULL THEN 1 ELSE 0 END) AS null_customers,
+    MAX(m.max_revenue) AS highest_revenue
+FROM 
+    store_sales s
+LEFT JOIN 
+    customer c ON s.ss_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+JOIN 
+    Max_Sales m ON s.ss_item_sk = m.ws_item_sk
+JOIN 
+    Filtered_Items i ON s.ss_item_sk = i.i_item_id
+WHERE 
+    s.ss_sold_date_sk IN (SELECT d_year FROM date_dim WHERE d_year IN (2021, 2022)) AND
+    a.ca_city IS NOT NULL
+GROUP BY 
+    a.ca_zip
+HAVING 
+    COUNT(DISTINCT s.ss_ticket_number) > 5 
+ORDER BY 
+    total_profit DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,88 @@
+
+WITH RECURSIVE customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        o.o_orderpriority
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        o.o_orderpriority
+    FROM 
+        customer_orders co
+    JOIN 
+        orders o ON co.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate > co.o_orderdate
+), 
+ranked_orders AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        co.o_orderkey,
+        co.o_orderdate,
+        co.o_totalprice,
+        co.o_orderstatus,
+        co.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY co.c_custkey ORDER BY co.o_orderdate DESC) AS rn
+    FROM 
+        customer_orders co
+),
+suppliers_summary AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    COALESCE(s.total_available, 0) AS total_available,
+    COALESCE(s.avg_supply_cost, 0) AS avg_supply_cost,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ' (', p.p_size, ')')) AS products
+FROM 
+    customer c
+JOIN 
+    ranked_orders o ON c.c_custkey = o.c_custkey
+LEFT JOIN 
+    lineitem l ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    suppliers_summary s ON ps.ps_partkey = s.ps_partkey AND ps.ps_suppkey = s.ps_suppkey
+LEFT JOIN 
+    part p ON l.l_partkey = p.p_partkey
+WHERE 
+    o.rn = 1 AND 
+    (o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL) AND 
+    (o.o_orderdate >= DATE '1998-10-01' - INTERVAL '30 days')
+GROUP BY 
+    c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, s.total_available, s.avg_supply_cost
+ORDER BY 
+    o.o_orderdate DESC, 
+    c.c_name;

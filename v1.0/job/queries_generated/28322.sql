@@ -1,0 +1,71 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title AS t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+consolidated_cast AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT c.person_id) AS unique_cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names
+    FROM 
+        complete_cast AS m
+    JOIN 
+        cast_info AS c ON m.movie_id = c.movie_id
+    JOIN 
+        aka_name AS a ON c.person_id = a.person_id
+    GROUP BY 
+        m.movie_id
+),
+movie_info_summary AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mt.info, '; ') AS movie_info,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_info AS mi
+    JOIN 
+        info_type AS it ON mi.info_type_id = it.id
+    LEFT JOIN 
+        movie_keyword AS mk ON mi.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        mi.movie_id
+),
+final_report AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        cc.unique_cast_count,
+        cc.cast_names,
+        mis.movie_info,
+        mis.keywords
+    FROM 
+        ranked_movies AS rm
+    LEFT JOIN 
+        consolidated_cast AS cc ON rm.movie_id = cc.movie_id
+    LEFT JOIN 
+        movie_info_summary AS mis ON rm.movie_id = mis.movie_id
+)
+SELECT 
+    *,
+    CONCAT(title, ' (', production_year, ')') AS full_title,
+    CASE 
+        WHEN unique_cast_count > 5 THEN 'Ensemble'
+        WHEN unique_cast_count > 0 THEN 'Few'
+        ELSE 'No Cast'
+    END AS cast_size
+FROM 
+    final_report
+WHERE 
+    production_year >= 2000
+ORDER BY 
+    production_year DESC, unique_cast_count DESC;

@@ -1,0 +1,44 @@
+WITH UserReputation AS (
+    SELECT Id, DisplayName, Reputation, CreationDate,
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PopularPosts AS (
+    SELECT P.Id, P.Title, P.Score, P.ViewCount, P.AnswerCount,
+           COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+           COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title, P.Score, P.ViewCount, P.AnswerCount
+),
+PostDetails AS (
+    SELECT PP.Id, PP.Title, PP.Score, PP.ViewCount,
+           PP.AnswerCount, U.DisplayName AS OwnerDisplayName,
+           U.Reputation AS OwnerReputation,
+           COALESCE(upp.UpVotes, 0) AS UpVotes,
+           COALESCE(dwn.DownVotes, 0) AS DownVotes
+    FROM PopularPosts PP
+    JOIN Posts P ON PP.Id = P.Id
+    JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN (SELECT PostId, SUM(Score) AS UpVotes
+               FROM Votes WHERE VoteTypeId = 2 GROUP BY PostId) AS upp
+    ON PP.Id = upp.PostId
+    LEFT JOIN (SELECT PostId, SUM(Score) AS DownVotes
+               FROM Votes WHERE VoteTypeId = 3 GROUP BY PostId) AS dwn
+    ON PP.Id = dwn.PostId
+)
+SELECT U.DisplayName, U.Reputation, P.Title, P.Score,
+       P.ViewCount, P.AnswerCount, P.UpVotes, P.DownVotes,
+       COUNT(C.comment) AS CommentCount,
+       (SELECT COUNT(*) 
+        FROM Comments C
+        WHERE C.PostId = P.Id) AS TotalComments
+FROM PostDetails P
+JOIN UserReputation U ON P.OwnerReputation = U.Reputation
+LEFT JOIN Comments C ON P.Id = C.PostId
+WHERE P.AnswerCount > 0 AND P.Score > 50
+GROUP BY U.DisplayName, U.Reputation, P.Title, P.Score,
+         P.ViewCount, P.AnswerCount, P.UpVotes, P.DownVotes
+ORDER BY U.Reputation DESC, P.Score DESC
+LIMIT 10;

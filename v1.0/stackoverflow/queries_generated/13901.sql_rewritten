@@ -1,0 +1,34 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tag_arr ON TRUE 
+    LEFT JOIN 
+        Tags t ON tag_arr = t.TagName
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    *,
+    EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - CreationDate)) AS AgeInSeconds 
+FROM 
+    PostDetails
+ORDER BY 
+    ViewCount DESC
+LIMIT 100;

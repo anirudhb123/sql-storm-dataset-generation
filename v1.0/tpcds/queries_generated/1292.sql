@@ -1,0 +1,61 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        COUNT(*) AS return_count,
+        SUM(cr_return_amt) AS total_return_amount,
+        SUM(cr_return_quantity) AS total_return_quantity
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+WebReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        COUNT(*) AS web_return_count,
+        SUM(wr_return_amt) AS total_web_return_amount,
+        SUM(wr_return_quantity) AS total_web_return_quantity
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+TotalReturns AS (
+    SELECT 
+        COALESCE(cu.c_customer_sk, 0) AS customer_sk,
+        COALESCE(cu.c_first_name, 'Unknown') AS first_name,
+        COALESCE(cu.c_last_name, 'Unknown') AS last_name,
+        COALESCE(cr.return_count, 0) AS catalog_return_count,
+        COALESCE(cr.total_return_amount, 0) AS total_catalog_return_amount,
+        COALESCE(wr.web_return_count, 0) AS web_return_count,
+        COALESCE(wr.total_web_return_amount, 0) AS total_web_return_amount,
+        (COALESCE(cr.total_return_amount, 0) + COALESCE(wr.total_web_return_amount, 0)) AS grand_total_return_amount,
+        (COALESCE(cr.return_count, 0) + COALESCE(wr.web_return_count, 0)) AS total_return_count
+    FROM 
+        customer cu
+    LEFT JOIN 
+        CustomerReturns cr ON cu.c_customer_sk = cr.cr_returning_customer_sk
+    LEFT JOIN 
+        WebReturns wr ON cu.c_customer_sk = wr.wr_returning_customer_sk
+)
+SELECT 
+    customer_sk,
+    first_name,
+    last_name,
+    total_return_count,
+    grand_total_return_amount,
+    CASE 
+        WHEN total_return_count = 0 THEN 'No Returns'
+        WHEN grand_total_return_amount < 50 THEN 'Low Return Value'
+        WHEN grand_total_return_amount BETWEEN 50 AND 200 THEN 'Moderate Return Value'
+        ELSE 'High Return Value'
+    END AS return_value_category,
+    ROW_NUMBER() OVER (ORDER BY grand_total_return_amount DESC) AS rank
+FROM 
+    TotalReturns
+WHERE 
+    grand_total_return_amount IS NOT NULL
+ORDER BY 
+    grand_total_return_amount DESC
+FETCH FIRST 50 ROWS ONLY;

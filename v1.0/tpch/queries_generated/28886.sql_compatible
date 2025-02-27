@@ -1,0 +1,59 @@
+
+WITH supplier_details AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        CONCAT(s.s_name, ' [', n.n_name, ', ', r.r_name, ']') AS supplier_info
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+detailed_orders AS (
+    SELECT 
+        o.o_orderkey,
+        os.line_count,
+        os.total_price,
+        sd.supplier_info
+    FROM 
+        order_summary os
+    JOIN 
+        orders o ON os.o_orderkey = o.o_orderkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        supplier_details sd ON ps.ps_suppkey = sd.s_suppkey
+)
+
+SELECT 
+    MAX(do.total_price) AS max_order_total,
+    MIN(do.line_count) AS min_line_items,
+    AVG(do.total_price) AS avg_order_value,
+    STRING_AGG(do.supplier_info, '; ') AS supplier_list
+FROM 
+    detailed_orders do
+WHERE 
+    do.total_price > 1000
+GROUP BY 
+    do.o_orderkey
+ORDER BY 
+    max_order_total DESC;

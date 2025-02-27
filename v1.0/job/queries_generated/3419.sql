@@ -1,0 +1,47 @@
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS rank
+    FROM title m
+    WHERE m.production_year IS NOT NULL
+),
+actors AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    GROUP BY a.person_id, a.name
+),
+movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mi.info, 'No Info') AS movie_info,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY m.id, m.title, mi.info
+)
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    m.movie_info,
+    COALESCE(ac.name, 'Unknown Actor') AS actor_name,
+    ac.movie_count,
+    CASE 
+        WHEN ac.movie_count > 5 THEN 'Prolific Actor' 
+        WHEN ac.movie_count IS NULL THEN 'No Movies'
+        ELSE 'Occasional Actor' 
+    END AS actor_status
+FROM ranked_movies r
+LEFT JOIN movie_details m ON r.movie_id = m.movie_id
+LEFT JOIN actors ac ON ac.movie_count > 3 AND ac.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = r.movie_id)
+WHERE r.rank <= 10 OR m.keywords LIKE '%Action%'
+ORDER BY r.production_year DESC, ac.movie_count DESC NULLS LAST;

@@ -1,0 +1,58 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM
+        store_returns sr
+    JOIN
+        customer c ON sr.sr_customer_sk = c.c_customer_sk
+    GROUP BY
+        c.c_customer_sk, c.c_customer_id
+),
+TopCustomers AS (
+    SELECT
+        c.customer_id,
+        c.total_returns,
+        c.total_return_amount,
+        DENSE_RANK() OVER (ORDER BY total_return_amount DESC) AS rank
+    FROM
+        CustomerReturns c
+),
+SalesData AS (
+    SELECT
+        ws.ws_ship_date_sk,
+        SUM(ws.ws_quantity) AS total_sales_quantity,
+        SUM(ws.ws_net_sales_price) AS total_net_sales
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_ship_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY
+        ws.ws_ship_date_sk
+),
+RankingSales AS (
+    SELECT
+        sd.ws_ship_date_sk,
+        sd.total_sales_quantity,
+        sd.total_net_sales,
+        DENSE_RANK() OVER (ORDER BY total_net_sales DESC) AS sales_rank
+    FROM
+        SalesData sd
+)
+SELECT
+    tc.customer_id,
+    tc.total_returns,
+    tc.total_return_amount,
+    rs.total_sales_quantity,
+    rs.total_net_sales,
+    rs.sales_rank
+FROM
+    TopCustomers tc
+JOIN
+    RankingSales rs ON rs.sales_rank <= 10
+ORDER BY
+    tc.total_return_amount DESC, rs.sales_rank;

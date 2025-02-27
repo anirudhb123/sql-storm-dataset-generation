@@ -1,0 +1,58 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ca.id AS actor_id,
+        ca.person_id,
+        1 AS level
+    FROM cast_info ca
+    JOIN aka_name an ON ca.person_id = an.person_id
+
+    UNION ALL
+
+    SELECT 
+        ca.id AS actor_id,
+        ca.person_id,
+        ah.level + 1
+    FROM cast_info ca
+    JOIN ActorHierarchy ah ON ca.movie_id IN (
+        SELECT coalesce(linked_movie_id,0)
+        FROM movie_link ml 
+        WHERE ml.movie_id = ah.actor_id
+    )
+)
+
+SELECT 
+    a.name AS actor_name,
+    GROUP_CONCAT(DISTINCT title.title) AS titles,
+    COUNT(DISTINCT title.production_year) AS unique_years,
+    AVG(mk.movie_rating) AS avg_rating,
+    (SELECT COUNT(DISTINCT c.id)
+     FROM complete_cast c 
+     WHERE c.movie_id IN (SELECT ca.movie_id FROM cast_info ca WHERE ca.person_id = a.person_id)) AS total_movies,
+    ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY COUNT(DISTINCT title.id) DESC) AS actor_rank
+FROM aka_name a
+LEFT JOIN cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN title ON ci.movie_id = title.id
+LEFT JOIN (
+    SELECT 
+        movie_id,
+        AVG(rating) AS movie_rating 
+    FROM movie_info 
+    WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    GROUP BY movie_id
+) mk ON title.id = mk.movie_id
+WHERE a.name IS NOT NULL
+GROUP BY a.name
+HAVING unique_years > 5 AND avg_rating IS NOT NULL
+ORDER BY avg_rating DESC, total_movies DESC
+LIMIT 10;
+
+This SQL query demonstrates various constructs, including:
+
+1. Recursive CTE (`ActorHierarchy`) to find actors based on their roles in linked movies.
+2. Outer joins to connect actors with their titles and movie ratings.
+3. A correlated subquery to determine the total number of movies an actor has appeared in.
+4. Window functions (`ROW_NUMBER()`) to rank actors based on the number of titles.
+5. Complicated predicates in the `HAVING` clause to filter results based on the number of unique years and average ratings.
+6. Use of `GROUP_CONCAT` to aggregate titles for each actor.
+
+The query is designed to showcase the hierarchy of actors, their associated movies, and ratings while leveraging various SQL capabilities.

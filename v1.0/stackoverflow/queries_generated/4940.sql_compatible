@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.OwnerUserId) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' AND 
+        p.ViewCount > 100
+),
+FilteredUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000 AND 
+        u.LastAccessDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '6 months'
+),
+TopPosts AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        f.UserId,
+        f.DisplayName AS UserName,
+        f.Reputation
+    FROM 
+        RankedPosts rp
+    JOIN 
+        FilteredUsers f ON f.UserId = rp.OwnerUserId
+    WHERE 
+        rp.Rank <= 5
+)
+SELECT 
+    t.UserId,
+    t.UserName,
+    t.Reputation,
+    COUNT(t.PostId) AS TotalPosts,
+    SUM(t.Score) AS TotalScore,
+    AVG(t.ViewCount) AS AvgViews,
+    MAX(t.CreationDate) AS LatestPostDate,
+    STRING_AGG(t.Title, '; ') AS PostTitles
+FROM 
+    TopPosts t
+GROUP BY 
+    t.UserId, t.UserName, t.Reputation
+HAVING 
+    COUNT(t.PostId) > 3 AND
+    SUM(t.UpVotes) - SUM(t.DownVotes) > 2
+ORDER BY 
+    TotalScore DESC;

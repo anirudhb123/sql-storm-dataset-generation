@@ -1,0 +1,60 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT Id, Reputation, CreationDate, Location,
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+),
+PostStats AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.Score, 
+           p.CreationDate,
+           u.DisplayName AS OwnerName,
+           COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+           COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes,
+           COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate > '2023-01-01' -- filter for recent posts
+    GROUP BY p.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT p.Id AS PostId, 
+           MAX(ph.CreationDate) AS LastClosedDate
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY p.Id
+),
+TopPosts AS (
+    SELECT ps.PostId,
+           ps.Title,
+           ps.Score,
+           ps.CreationDate,
+           ps.OwnerName,
+           ps.Upvotes,
+           ps.Downvotes,
+           ps.CommentCount,
+           COALESCE(cp.LastClosedDate, 'No closure') AS LastClosedDate
+    FROM PostStats ps
+    LEFT JOIN ClosedPosts cp ON ps.PostId = cp.PostId
+)
+SELECT u.DisplayName AS UserName,
+       COUNT(tp.PostId) AS TotalPosts,
+       AVG(tp.Score) AS AverageScore,
+       SUM(tp.Upvotes) AS TotalUpvotes,
+       SUM(tp.Downvotes) AS TotalDownvotes,
+       ARRAY_AGG(tp.Title) AS TopPostTitles
+FROM TopPosts tp
+JOIN Users u ON tp.OwnerName = u.DisplayName
+WHERE u.Location IS NOT NULL
+GROUP BY u.DisplayName
+HAVING COUNT(tp.PostId) > 0
+ORDER BY AverageScore DESC
+LIMIT 10;
+
+-- This query generates a report of users with their top posts statistics,
+-- the number of total posts they've made since the start of 2023,
+-- the average score of those posts, total upvotes, and total downvotes. 
+-- It also includes information on whether the posts were closed.

@@ -1,0 +1,38 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1970 AND 1990
+    GROUP BY 
+        c.c_customer_id
+),
+SalesByMonth AS (
+    SELECT 
+        DATE_TRUNC('month', d.d_date) AS sales_month,
+        SUM(cs.total_sales) AS monthly_sales,
+        SUM(cs.total_orders) AS monthly_orders
+    FROM 
+        CustomerSales cs
+    JOIN 
+        date_dim d ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        sales_month
+)
+SELECT 
+    sales_month,
+    monthly_sales,
+    monthly_orders,
+    RANK() OVER (ORDER BY monthly_sales DESC) AS sales_rank
+FROM 
+    SalesByMonth
+WHERE 
+    monthly_sales > 1000
+ORDER BY 
+    sales_month DESC;

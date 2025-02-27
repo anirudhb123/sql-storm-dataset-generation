@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate >= NOW() - INTERVAL '1 year' -- Last year
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.AnswerCount,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank <= 5 -- Top 5 posts per tag
+)
+SELECT 
+    t.Title,
+    t.OwnerDisplayName,
+    t.AnswerCount,
+    t.CommentCount,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    COUNT(DISTINCT b.Id) AS TotalBadges
+FROM 
+    TopPosts t
+LEFT JOIN 
+    Comments c ON c.PostId = t.PostId
+LEFT JOIN 
+    Badges b ON b.UserId = t.OwnerDisplayName
+GROUP BY 
+    t.PostId, t.Title, t.OwnerDisplayName, t.AnswerCount, t.CommentCount
+ORDER BY 
+    t.Score DESC, t.ViewCount DESC;

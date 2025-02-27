@@ -1,0 +1,46 @@
+
+WITH RECURSIVE CTE_Sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(*) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+Recent_Transactions AS (
+    SELECT 
+        cr.returning_customer_sk,
+        cr.return_quantity,
+        cr.return_amt,
+        cr.refunded_cash,
+        cr.returned_date_sk,
+        d.d_date AS return_date,
+        ROW_NUMBER() OVER (PARTITION BY cr.returning_customer_sk ORDER BY cr.returned_date_sk DESC) AS recent_rank
+    FROM catalog_returns cr
+    JOIN date_dim d ON cr.returned_date_sk = d.d_date_sk
+    WHERE d.d_date >= CURRENT_DATE - INTERVAL '30' DAY
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    SUM(COALESCE(sr.sr_return_quantity, 0)) AS total_returned,
+    SUM(COALESCE(ws.ws_ext_sales_price, 0)) AS total_sales,
+    AVG(ws.ws_net_profit) AS average_net_profit,
+    COUNT(DISTINCT ws.ws_order_number) AS order_count,
+    SUM(inv.inv_quantity_on_hand) AS total_inventory,
+    CASE 
+        WHEN SUM(ws.ws_ext_sales_price) > 0 
+        THEN (SUM(COALESCE(sr.sr_return_quantity, 0)) / SUM(ws.ws_quantity)) * 100 
+        ELSE 0 
+    END AS return_percentage
+FROM customer_address ca
+LEFT JOIN store_sales ws ON ca.ca_address_sk = ws.ss_addr_sk
+LEFT JOIN store_returns sr ON ws.ss_item_sk = sr.sr_item_sk AND sr.sr_returned_date_sk = ws.ss_sold_date_sk
+LEFT JOIN inventory inv ON ws.ss_item_sk = inv.inv_item_sk
+LEFT JOIN CTE_Sales cte ON ws.ss_item_sk = cte.ws_item_sk
+WHERE ca.ca_city IS NOT NULL 
+GROUP BY ca.ca_city, ca.ca_state
+HAVING total_sales > 10000
+ORDER BY return_percentage DESC, total_sales DESC
+LIMIT 50;

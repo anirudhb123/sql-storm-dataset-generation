@@ -1,0 +1,47 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RN,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS UserPostCount
+    FROM Posts p
+    WHERE p.CreationDate >= '2023-01-01'
+),
+Closures AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(c.CloseCount, 0) AS CloseCount,
+    COALESCE(c.CloseReasons, 'None') AS CloseReasons,
+    rp.ViewCount,
+    rp.Score,
+    ub.BadgeCount,
+    ub.Badges
+FROM RankedPosts rp
+LEFT JOIN Closures c ON rp.PostId = c.PostId
+LEFT JOIN UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE (rp.RN <= 5 OR rp.UserPostCount > 10)  
+AND (rp.Score > 0 OR rp.ViewCount > 100)      
+ORDER BY rp.CreationDate DESC, rp.Score DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

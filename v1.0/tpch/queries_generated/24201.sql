@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+FrequentOrders AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_custkey
+    HAVING COUNT(o.o_orderkey) > (
+        SELECT AVG(order_count) 
+        FROM (SELECT COUNT(o2.o_orderkey) AS order_count
+              FROM orders o2
+              GROUP BY o2.o_custkey) AS avg_orders
+    )
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+    HAVING total_sales > 10000
+),
+OrderAnalysis AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           CASE 
+               WHEN o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2) THEN 'High'
+               ELSE 'Low'
+           END AS price_category
+    FROM orders o
+),
+SupplierPartInfo AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty,
+           p.p_name, s.s_name, s.s_acctbal
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT r.r_name, COUNT(DISTINCT c.c_custkey) AS customer_count,
+       SUM(CASE WHEN o.o_orderstatus = 'O' THEN 1 ELSE 0 END) AS open_orders,
+       AVG(sp.total_sales) AS avg_high_value_sales
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey AND rs.rank <= 5
+LEFT JOIN FrequentOrders fo ON s.s_nationkey = fo.o_custkey
+LEFT JOIN OrderAnalysis o ON o.o_orderkey = fo.o_custkey
+LEFT JOIN SupplierPartInfo sp ON sp.ps_suppkey = s.s_suppkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+WHERE s.s_acctbal IS NOT NULL AND r.r_name IS NOT NULL
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY r.r_name;

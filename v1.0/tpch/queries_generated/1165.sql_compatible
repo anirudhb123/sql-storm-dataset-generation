@@ -1,0 +1,38 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation,
+        c.c_acctbal,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, n.n_name, c.c_acctbal
+)
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    c.nation AS customer_nation,
+    COUNT(DISTINCT cs.c_custkey) AS customer_count
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN CustomerDetails c ON o.o_custkey = c.c_custkey
+LEFT JOIN RankedOrders cs ON cs.o_orderkey = o.o_orderkey AND cs.rn <= 10
+WHERE p.p_retailprice > 50 AND l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+GROUP BY p.p_name, c.nation
+HAVING SUM(l.l_extendedprice) > 10000
+ORDER BY revenue DESC NULLS LAST;

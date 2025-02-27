@@ -1,0 +1,65 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT Id, Reputation, 1 AS Level
+    FROM Users
+    WHERE Reputation > 1000
+    UNION ALL
+    SELECT u.Id, u.Reputation, ur.Level + 1
+    FROM Users u
+    INNER JOIN UserReputation ur ON u.Reputation < ur.Reputation
+    WHERE ur.Level < 5
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PostVoteStats AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostComments AS (
+    SELECT 
+        pc.PostId,
+        COUNT(*) AS CommentCount
+    FROM Comments pc
+    GROUP BY pc.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS ClosedDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY ph.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    ur.Level AS ReputationLevel,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate AS RecentPostDate,
+    coalesce(pvs.UpVotes, 0) AS UpVoteCount,
+    coalesce(pvs.DownVotes, 0) AS DownVoteCount,
+    coalesce(pc.CommentCount, 0) AS TotalComments,
+    coalesce(cp.ClosedDate, 'Not Closed') AS ClosedStatus
+FROM Users u
+INNER JOIN UserReputation ur ON u.Id = ur.Id
+LEFT JOIN RecentPosts rp ON u.Id = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN PostVoteStats pvs ON rp.PostId = pvs.PostId
+LEFT JOIN PostComments pc ON rp.PostId = pc.PostId
+LEFT JOIN ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE u.Reputation > 5000
+ORDER BY u.Reputation DESC, RecentPostDate DESC;

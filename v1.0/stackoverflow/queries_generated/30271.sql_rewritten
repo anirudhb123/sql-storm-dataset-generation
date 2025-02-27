@@ -1,0 +1,77 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        CASE 
+            WHEN Reputation >= 1000 THEN 'Expert'
+            WHEN Reputation >= 500 THEN 'Advanced'
+            WHEN Reputation >= 100 THEN 'Intermediate'
+            ELSE 'Beginner'
+        END AS ReputationLevel
+    FROM Users
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges
+    GROUP BY UserId
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,  
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes, 
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPosts,
+        MAX(p.CreationDate) AS LastActivity
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'  
+    GROUP BY p.Id, p.OwnerUserId, p.PostTypeId
+),
+UserPostSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ur.ReputationLevel,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        COALESCE(SUM(pa.UpVotes), 0) AS TotalUpVotes,
+        COALESCE(SUM(pa.DownVotes), 0) AS TotalDownVotes,
+        COALESCE(SUM(pa.CommentCount), 0) AS TotalComments,
+        COALESCE(SUM(pa.RelatedPosts), 0) AS TotalRelatedPosts,
+        COUNT(DISTINCT pa.PostId) AS TotalPosts
+    FROM Users u
+    JOIN UserReputation ur ON u.Id = ur.Id
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN PostAnalytics pa ON u.Id = pa.OwnerUserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation, ur.ReputationLevel
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.ReputationLevel,
+    us.BadgeCount,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    us.TotalComments,
+    us.TotalRelatedPosts,
+    us.TotalPosts,
+    CASE 
+        WHEN us.TotalUpVotes > us.TotalDownVotes THEN 'More positive interactions'
+        WHEN us.TotalUpVotes < us.TotalDownVotes THEN 'More negative interactions'
+        ELSE 'Neutral'
+    END AS InteractionType
+FROM UserPostSummary us
+WHERE us.TotalPosts > 0
+ORDER BY us.Reputation DESC, us.TotalUpVotes DESC
+LIMIT 10;

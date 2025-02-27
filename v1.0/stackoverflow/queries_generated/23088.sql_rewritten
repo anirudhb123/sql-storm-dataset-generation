@@ -1,0 +1,81 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.DisplayName,
+        U.CreationDate,
+        U.LastAccessDate,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+), 
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.PostTypeId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        MAX(P.CreationDate) AS MaxCreationDate,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseOpenCount 
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.OwnerUserId, P.PostTypeId
+), 
+PostDetails AS (
+    SELECT 
+        PS.PostId,
+        PS.OwnerUserId,
+        PS.PostTypeId,
+        U.DisplayName AS OwnerDisplayName,
+        PS.UpVotes,
+        PS.DownVotes,
+        PS.CommentCount,
+        PS.CloseOpenCount,
+        CASE 
+            WHEN PS.PostTypeId = 1 THEN 'Question'
+            WHEN PS.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostType,
+        CASE 
+            WHEN PS.CloseOpenCount > 0 THEN 'Closed/Open'
+            ELSE 'Active'
+        END AS PostStatus,
+        COALESCE(U.UserRank, NULL) AS UserRank
+    FROM 
+        PostSummary PS
+    LEFT JOIN 
+        (SELECT UserId, UserRank FROM UserReputation) U ON PS.OwnerUserId = U.UserId
+)
+SELECT 
+    PD.PostId,
+    PD.OwnerDisplayName,
+    PD.UpVotes,
+    PD.DownVotes,
+    PD.CommentCount,
+    PD.PostType,
+    PD.PostStatus,
+    CASE 
+        WHEN PD.UserRank IS NULL THEN 'No Rank'
+        ELSE CAST(PD.UserRank AS VARCHAR)
+    END AS OwnerRank,
+    COUNT(PH.Id) AS TotalHistoryChanges,
+    STRING_AGG(PHT.Name, ', ') AS HistoryTypes
+FROM 
+    PostDetails PD
+LEFT JOIN 
+    PostHistory PH ON PD.PostId = PH.PostId
+LEFT JOIN 
+    PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+GROUP BY 
+    PD.PostId, PD.OwnerDisplayName, PD.UpVotes, PD.DownVotes, PD.CommentCount, PD.PostType, PD.PostStatus, PD.UserRank
+ORDER BY 
+    PD.UpVotes DESC NULLS LAST, PD.CommentCount DESC, PD.PostId;

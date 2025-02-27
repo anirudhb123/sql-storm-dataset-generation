@@ -1,0 +1,62 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    n.n_name,
+    r.r_name,
+    COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice END), 0) AS total_returned_price,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(c.total_spent) AS avg_customer_spent,
+    STRING_AGG(DISTINCT s.s_name ORDER BY s.s_suppkey) AS supplier_names,
+    COUNT(DISTINCT ps.ps_suppkey) FILTER (WHERE rs.supplier_rank = 1) AS top_supplier_count
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+WHERE 
+    l.l_discount BETWEEN 0.05 AND 0.20
+    AND s.s_comment IS NOT NULL AND LENGTH(s.s_comment) > 10
+    AND (l.l_tax IS NULL OR l.l_tax < 0.15)
+GROUP BY 
+    n.n_name, r.r_name
+ORDER BY 
+    total_orders DESC, avg_customer_spent DESC
+FETCH FIRST 10 ROWS ONLY;

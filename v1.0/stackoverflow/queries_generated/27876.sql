@@ -1,0 +1,64 @@
+WITH TagAggregated AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        AVG(u.Reputation) AS AverageReputation,
+        STRING_AGG(DISTINCT u.DisplayName, ', ') AS TopContributors
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>/%')
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.Id, t.TagName
+),
+PopularTags AS (
+    SELECT 
+        TagId,
+        TagName,
+        PostCount,
+        AverageReputation,
+        TopContributors,
+        RANK() OVER (ORDER BY PostCount DESC, AverageReputation DESC) AS Rank
+    FROM 
+        TagAggregated
+),
+TopTags AS (
+    SELECT 
+        TagId,
+        TagName,
+        PostCount,
+        AverageReputation,
+        TopContributors 
+    FROM 
+        PopularTags
+    WHERE 
+        Rank <= 10
+)
+SELECT 
+    tt.TagName,
+    tt.PostCount,
+    tt.AverageReputation,
+    tt.TopContributors,
+    ph.CreationDate AS LastPostDate,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+FROM 
+    TopTags tt
+LEFT JOIN 
+    Posts p ON p.Tags LIKE CONCAT('%<', tt.TagName, '>/%')
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = p.Id
+LEFT JOIN 
+    Comments c ON c.PostId = p.Id
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id
+WHERE 
+    p.LastActivityDate >= NOW() - INTERVAL '1 year'
+GROUP BY 
+    tt.TagName, tt.PostCount, tt.AverageReputation, tt.TopContributors, ph.CreationDate
+ORDER BY 
+    tt.PostCount DESC, tt.AverageReputation DESC;

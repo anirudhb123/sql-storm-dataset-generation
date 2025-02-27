@@ -1,0 +1,51 @@
+WITH processed_parts AS (
+    SELECT 
+        p.p_partkey,
+        UPPER(p.p_name) AS upper_name,
+        TRIM(REPLACE(p.p_comment, 'parts', 'components')) AS adjusted_comment,
+        LENGTH(p.p_comment) AS original_comment_length,
+        CHAR_LENGTH(p.p_name) AS name_length
+    FROM 
+        part p
+),
+supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        CONCAT('Supplier: ', s.s_name, ' [', s.s_phone, '] - Balance: ', FORMAT(s.s_acctbal, 2)) AS supplier_info,
+        LENGTH(s.s_comment) AS comment_length
+    FROM 
+        supplier s
+),
+aggregate_info AS (
+    SELECT 
+        p.upper_name,
+        s.supplier_info,
+        COUNT(ps.ps_partkey) AS supply_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        MAX(ps.ps_availqty) AS max_avail_qty
+    FROM 
+        processed_parts p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier_summary s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.upper_name, s.supplier_info
+)
+SELECT 
+    ai.upper_name,
+    ai.supplier_info,
+    ai.supply_count,
+    ai.avg_supply_cost,
+    ai.max_avail_qty,
+    CASE 
+        WHEN ai.avg_supply_cost < 50 THEN 'Low Cost'
+        WHEN ai.avg_supply_cost BETWEEN 50 AND 100 THEN 'Medium Cost'
+        ELSE 'High Cost' 
+    END AS cost_category
+FROM 
+    aggregate_info ai
+WHERE 
+    ai.max_avail_qty > 10
+ORDER BY 
+    ai.lower_name, ai.avg_supply_cost DESC;

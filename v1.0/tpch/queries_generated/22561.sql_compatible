@@ -1,0 +1,93 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+), 
+HighValueParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_supplycost) > 1000
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        c.c_custkey, 
+        c.c_mktsegment,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' 
+        AND (o.o_orderstatus = 'O' OR l.l_returnflag = 'R' OR l.l_shipmode IS NULL)
+    GROUP BY 
+        o.o_orderkey, c.c_custkey, c.c_mktsegment
+),
+UnionedData AS (
+    SELECT DISTINCT 
+        r.r_name, 
+        n.n_name, 
+        COUNT(DISTINCT p.p_partkey) AS part_count,
+        SUM(l.l_extendedprice) AS total_extended_price
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        part p ON p.p_brand = 'Brand#45'
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN 
+        CustomerOrders co ON s.s_nationkey = co.c_custkey
+    GROUP BY 
+        r.r_name, n.n_name
+    UNION ALL
+    SELECT 
+        'Other' AS r_name, 
+        NULL AS n_name, 
+        COUNT(p.p_partkey) AS part_count,
+        SUM(l.l_extendedprice) AS total_extended_price
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        p.p_size IS NULL
+    GROUP BY 
+        r_name, n_name
+)
+SELECT 
+    u.r_name, 
+    u.n_name, 
+    u.part_count, 
+    u.total_extended_price,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+    MAX(rs.s_acctbal) AS max_supplier_balance,
+    MIN(COALESCE(rs.s_acctbal, 0)) AS min_supplier_balance,
+    CASE WHEN MAX(u.total_extended_price) IS NULL THEN 'No sales' ELSE 'Sales present' END AS sales_status
+FROM 
+    UnionedData u 
+LEFT JOIN 
+    RankedSuppliers rs ON u.part_count > 0 AND rs.rank <= 10
+GROUP BY 
+    u.r_name, u.n_name
+HAVING 
+    SUM(CASE WHEN u.total_extended_price > 5000 THEN 1 ELSE 0 END) > 5
+ORDER BY 
+    u.r_name, u.n_name;

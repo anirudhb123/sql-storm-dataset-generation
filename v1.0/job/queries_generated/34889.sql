@@ -1,0 +1,64 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mo.linked_movie_id, -1) AS linked_movie_id,
+        1 AS level
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_link mo ON m.id = mo.movie_id
+    WHERE 
+        m.production_year >= 2000  -- Only consider movies from the year 2000 onwards
+
+    UNION ALL
+
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        mo.linked_movie_id,
+        mh.level + 1
+    FROM 
+        title t
+    INNER JOIN 
+        movie_link mo ON t.id = mo.linked_movie_id
+    INNER JOIN 
+        movie_hierarchy mh ON mh.movie_id = mo.movie_id
+    WHERE 
+        mh.level < 3  -- Limit the recursion depth to 3 levels
+)
+
+SELECT 
+    mv.title AS movie_title,
+    mv.production_year,
+    ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+    COUNT(DISTINCT c.person_id) AS cast_count,
+    AVG(W.id) AS avg_info_type 
+FROM 
+    movie_hierarchy mv
+LEFT JOIN 
+    cast_info c ON mv.movie_id = c.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = c.person_id
+LEFT JOIN (
+    SELECT 
+        movie_id, 
+        info_type_id,
+        COUNT(DISTINCT info) AS id_count
+    FROM 
+        movie_info
+    GROUP BY 
+        movie_id, 
+        info_type_id
+) W ON mv.movie_id = W.movie_id
+WHERE 
+    mv.linked_movie_id IS NOT NULL  -- Filter for movies that have linked movies
+GROUP BY 
+    mv.movie_id, mv.title, mv.production_year
+HAVING 
+    COUNT(DISTINCT c.person_id) > 0  -- Ensure there's at least one cast member
+ORDER BY 
+    mv.production_year DESC, 
+    mv.title;

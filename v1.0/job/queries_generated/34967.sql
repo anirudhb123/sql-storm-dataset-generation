@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year > 2000
+        
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE
+        at.production_year > 2000
+)
+
+SELECT 
+    na.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT cc.id) AS cast_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS also_known_as,
+    MAX(mt.producer_info) AS latest_producer_info,
+    ROW_NUMBER() OVER (PARTITION BY na.id ORDER BY mt.production_year DESC) AS rn
+FROM 
+    aka_name na
+JOIN 
+    cast_info ci ON na.person_id = ci.person_id
+JOIN 
+    title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    movie_info mi ON mt.id = mi.movie_id
+LEFT JOIN 
+    movie_info_idx mii ON mt.id = mii.movie_id AND mii.info_type_id = (SELECT id FROM info_type WHERE info = 'producer')
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id OR ak.id = na.id
+JOIN 
+    MovieHierarchy mh ON mt.id = mh.movie_id
+WHERE 
+    na.name IS NOT NULL
+    AND mt.production_year BETWEEN 2001 AND 2023
+    AND (mi.info IS NOT NULL OR mii.info IS NOT NULL)
+GROUP BY 
+    na.name, mt.title, mt.production_year
+HAVING 
+    COUNT(DISTINCT ci.id) > 1
+ORDER BY 
+    mt.production_year DESC, na.name;

@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.Reputation AS OwnerReputation,
+        COUNT(a.Id) AS AnswerCount,
+        COALESCE(MAX(v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(MAX(v.VoteTypeId = 3), 0) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.Reputation
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.OwnerReputation,
+        rp.AnswerCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank = 1 AND -- Only the latest version
+        rp.AnswerCount > 0 -- At least one answer
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(substring(t.TagName, 2, length(t.TagName) - 2), ', ') AS Tags -- formatted tags
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(p.Tags, '>')) -- Using string_to_array for tag processing
+    GROUP BY 
+        p.Id
+),
+FinalResults AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.Body,
+        fp.CreationDate,
+        fp.OwnerReputation,
+        fp.AnswerCount,
+        fp.UpVoteCount,
+        fp.DownVoteCount,
+        pt.Tags
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        PostTags pt ON fp.PostId = pt.PostId
+)
+SELECT 
+    PostId,
+    Title,
+    Body,
+    CreationDate,
+    OwnerReputation,
+    AnswerCount,
+    UpVoteCount,
+    DownVoteCount,
+    Tags
+FROM 
+    FinalResults
+ORDER BY 
+    UpVoteCount DESC, -- Highest upvotes first
+    CreationDate DESC; -- Then by latest posts

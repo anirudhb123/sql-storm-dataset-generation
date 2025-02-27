@@ -1,0 +1,81 @@
+
+WITH RECURSIVE rng AS (
+    SELECT 
+        1 AS level,
+        COALESCE(NULLIF(DATEADD(day, 1, '2000-01-01'), '2000-01-01'), '2000-01-01') AS generated_date
+    UNION ALL
+    SELECT 
+        level + 1,
+        DATEADD(day, 1, generated_date)
+    FROM 
+        rng
+    WHERE 
+        level < 365
+), demographic_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_purchase_estimate,
+        d.cd_credit_rating,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        SUM(d.cd_dep_count) FILTER (WHERE d.cd_gender = 'F') AS female_dependents,
+        SUM(d.cd_dep_count) FILTER (WHERE d.cd_gender = 'M') AS male_dependents
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    WHERE 
+        d.cd_purchase_estimate > (SELECT AVG(cd_purchase_estimate) FROM customer_demographics)
+    GROUP BY 
+        c.c_customer_sk, d.cd_gender, d.cd_marital_status, d.cd_purchase_estimate, d.cd_credit_rating
+), order_summaries AS (
+    SELECT 
+        ws_bill_customer_sk, 
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        MAX(ws_net_profit) OVER (PARTITION BY ws_bill_customer_sk) AS max_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY MAX(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+), combined_summary AS (
+    SELECT 
+        ds.c_customer_sk,
+        ds.cd_gender,
+        ds.cd_marital_status,
+        os.total_sales,
+        os.total_orders,
+        os.max_profit
+    FROM 
+        demographic_summary ds
+    LEFT JOIN 
+        order_summaries os ON ds.c_customer_sk = os.ws_bill_customer_sk
+    WHERE 
+        os.total_sales IS NOT NULL OR ds.cd_gender IS NULL
+)
+SELECT 
+    MAX(cs.ss_net_profit) AS max_store_profit,
+    SUM(CASE WHEN cs.ss_quantity > 10 THEN cs.ss_net_profit ELSE 0 END) AS large_order_profit,
+    c.c_first_name || ' ' || c.c_last_name AS full_name,
+    d.d_day_name,
+    COUNT(DISTINCT ws.web_page_sk) FILTER (WHERE ws.ws_sales_price > 100) AS high_value_page_count
+FROM 
+    combined_summary cs
+INNER JOIN 
+    customer c ON cs.c_customer_sk = c.c_customer_sk
+JOIN 
+    date_dim d ON d.d_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d.d_date = CURRENT_DATE)
+LEFT JOIN 
+    web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+WHERE 
+    cs.total_sales > ALL (SELECT total_sales FROM order_summaries)
+    AND cs.cd_marital_status IN ('M', 'S')
+GROUP BY 
+    c.c_first_name, c.c_last_name, d.d_day_name
+HAVING 
+    COUNT(*) IS NOT NULL
+    OR SUM(cs.total_orders) = 0
+ORDER BY 
+    max_store_profit DESC;

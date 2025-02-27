@@ -1,0 +1,53 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_totalprice > 100
+),
+LineItemStats AS (
+    SELECT l.l_orderkey, COUNT(*) AS item_count, SUM(l.l_extendedprice) AS total_price
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+),
+SupplierProducts AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > 50
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    s.s_name AS supplier,
+    c.c_name AS customer,
+    co.o_orderkey,
+    co.o_orderdate,
+    l.item_count,
+    l.total_price,
+    sp.p_name AS product_name,
+    CASE 
+        WHEN s.s_acctbal IS NULL THEN 'No Account' 
+        ELSE 'Account Balance: ' || CAST(s.s_acctbal AS VARCHAR)
+    END AS account_information,
+    SUM(COALESCE(sp.ps_supplycost, 0)) AS total_supply_cost
+FROM SupplierHierarchy s
+LEFT JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_suppkey)
+LEFT JOIN nation n ON n.n_nationkey = s.s_suppkey
+JOIN CustomerOrders co ON co.o_orderkey = (SELECT l.l_orderkey FROM lineitem l WHERE l.l_suppkey = s.s_suppkey LIMIT 1)
+JOIN LineItemStats l ON l.l_orderkey = co.o_orderkey
+LEFT JOIN SupplierProducts sp ON sp.ps_supplycost < l.total_price
+WHERE l.item_count > 5
+GROUP BY r.r_name, n.n_name, s.s_name, c.c_name, co.o_orderkey, co.o_orderdate, sp.p_name, s.s_acctbal
+HAVING SUM(sp.ps_supplycost) > 500
+ORDER BY total_supply_cost DESC, item_count ASC;

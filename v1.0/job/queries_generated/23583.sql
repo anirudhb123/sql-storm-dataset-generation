@@ -1,0 +1,71 @@
+WITH MovieCredits AS (
+    SELECT 
+        ct.movie_id,
+        at.title,
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        ROW_NUMBER() OVER (PARTITION BY ct.movie_id ORDER BY ak.name) AS actor_order
+    FROM 
+        cast_info ct
+    JOIN 
+        aka_name ak ON ct.person_id = ak.person_id
+    JOIN 
+        aka_title at ON ct.movie_id = at.movie_id
+    WHERE 
+        ak.name IS NOT NULL
+        AND ak.name <> ''
+        AND ct.nr_order < 10 -- Top 10 actors ordered by appearance
+),
+ActorMovies AS (
+    SELECT 
+        actor_id,
+        COUNT(DISTINCT movie_id) AS num_movies,
+        STRING_AGG(title, '; ') AS movie_titles
+    FROM 
+        MovieCredits
+    GROUP BY 
+        actor_id
+),
+HighlyRatedMovies AS (
+    SELECT 
+        m.id,
+        m.title,
+        COALESCE(mr.rating, 0) AS rating
+    FROM 
+        title m
+    LEFT JOIN 
+        (SELECT movie_id, AVG(rating) AS rating FROM movie_info WHERE info_type_id = 1 GROUP BY movie_id) mr ON m.id = mr.movie_id
+    WHERE 
+        m.production_year >= 2000
+)
+SELECT 
+    am.actor_name,
+    am.num_movies,
+    am.movie_titles,
+    hr.rating AS movie_rating
+FROM 
+    ActorMovies am
+LEFT JOIN 
+    MovieCredits mc ON am.actor_id = mc.actor_id
+LEFT JOIN 
+    HighlyRatedMovies hr ON mc.movie_id = hr.id
+WHERE 
+    hr.rating IS NOT NULL
+    AND hr.rating > 7.5 -- Only highly rated movies
+ORDER BY 
+    am.num_movies DESC,
+    hr.rating DESC;
+
+-- Adding complexity with NULL Logic and a bizarre case for movies with no credits
+UNION ALL
+SELECT 
+    'Unknown Actor' AS actor_name,
+    0 AS num_movies,
+    'No movies available' AS movie_titles,
+    COALESCE(hr.rating, 'No rating') AS movie_rating
+FROM 
+    HighlyRatedMovies hr
+WHERE 
+    NOT EXISTS (SELECT 1 FROM cast_info WHERE movie_id = hr.id)
+ORDER BY 
+    hr.rating DESC;

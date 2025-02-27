@@ -1,0 +1,56 @@
+WITH RankedSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(ps_supplycost * ps_availqty) FROM partsupp)
+),
+SalesByRegion AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(RANK() OVER (PARTITION BY n.n_nationkey ORDER BY rs.total_sales DESC)) AS total_sales
+    FROM 
+        RankedSales rs
+    JOIN 
+        supplier s ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = rs.p_partkey LIMIT 1)
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    sr.nation_name,
+    COALESCE(SUM(ts.total_supply_cost) FILTER (WHERE ts.total_supply_cost IS NOT NULL), 0) AS supply_cost,
+    SUM(sb.total_sales) AS sales
+FROM 
+    SalesByRegion sb
+FULL OUTER JOIN 
+    TopSuppliers ts ON sb.nation_name = ts.s_name
+JOIN 
+    region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_name = sb.nation_name)
+WHERE 
+    r.r_name LIKE '%East%'
+GROUP BY 
+    sr.nation_name
+ORDER BY 
+    sales DESC, supply_cost ASC;

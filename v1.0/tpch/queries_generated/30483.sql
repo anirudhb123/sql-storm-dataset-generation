@@ -1,0 +1,31 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CAST(s.s_name AS varchar(255)) AS path
+    FROM supplier s
+    WHERE s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT sup.s_suppkey, sup.s_name, sup.s_nationkey, sup.s_acctbal,
+           CONCAT(parent.path, ' > ', sup.s_name) AS path
+    FROM supplier sup
+    JOIN SupplierHierarchy parent ON sup.s_nationkey = parent.s_nationkey
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_returned,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(COALESCE(s.s_acctbal, 0)) AS avg_supplier_balance,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY l.l_discount) OVER (PARTITION BY n.n_name) AS median_discount,
+    STRING_AGG(DISTINCT su.path, ', ') AS supplier_hierarchy
+FROM region r
+JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+LEFT JOIN SupplierHierarchy su ON su.s_nationkey = n.n_nationkey
+WHERE o.o_orderstatus IN ('F', 'P')
+GROUP BY r.r_name, n.n_name
+HAVING SUM(l.l_quantity) > 100
+ORDER BY total_returned DESC, avg_supplier_balance DESC;

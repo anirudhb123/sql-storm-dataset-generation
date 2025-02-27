@@ -1,0 +1,60 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+), 
+customer_rank AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        DENSE_RANK() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer 
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+), 
+top_customers AS (
+    SELECT 
+        c.customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        SUM(ws_ext_sales_price) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.customer_sk, c.c_first_name, c.c_last_name
+    HAVING 
+        SUM(ws.ws_net_profit) > 500
+)
+SELECT 
+    c.full_name,
+    CASE 
+        WHEN cr.rank IS NOT NULL THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status,
+    SUM(s.total_quantity) AS total_quantity_sold,
+    SUM(s.total_sales) AS total_sales_value,
+    COALESCE(AVG(c.rank), 'No Rank Available') AS avg_customer_rank 
+FROM 
+    top_customers c
+LEFT JOIN 
+    sales_summary s ON c.customer_sk = s.ws_item_sk
+LEFT JOIN 
+    customer_rank cr ON c.customer_sk = cr.c_customer_sk
+GROUP BY 
+    c.full_name, cr.rank
+ORDER BY 
+    total_sales_value DESC
+LIMIT 10;

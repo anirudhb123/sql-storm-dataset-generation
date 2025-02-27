@@ -1,0 +1,54 @@
+
+WITH RECURSIVE cust_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= DATE '1997-01-01'
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN cust_orders co ON co.o_orderkey = o.o_orderkey - 1
+), 
+region_suppliers AS (
+    SELECT r.r_regionkey, r.r_name, COUNT(s.s_suppkey) AS supplier_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_regionkey, r.r_name
+), 
+order_summary AS (
+    SELECT co.c_custkey, SUM(co.o_totalprice) AS total_order_value
+    FROM cust_orders co
+    GROUP BY co.c_custkey
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    COALESCE(ps.ps_availqty - SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END), 0) AS available_quantity,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS returned_quantity,
+    AVG(ps.ps_supplycost) OVER (PARTITION BY p.p_partkey) AS avg_supply_cost,
+    r.supplier_count AS region_supplier_count,
+    o.total_order_value,
+    CASE 
+        WHEN o.total_order_value IS NULL THEN 'No Orders'
+        WHEN o.total_order_value > 1000 THEN 'High Value'
+        ELSE 'Low Value'
+    END AS order_value_category,
+    (SELECT COUNT(DISTINCT l_suppkey) 
+     FROM lineitem 
+     WHERE l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderdate < DATE '1997-03-01')) AS past_supp_count
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN lineitem l ON ps.ps_suppkey = l.l_suppkey
+LEFT JOIN region_suppliers r ON r.r_regionkey = (
+    SELECT n.n_regionkey FROM nation n JOIN supplier s ON n.n_nationkey = s.s_nationkey WHERE s.s_suppkey = ps.ps_suppkey LIMIT 1
+)
+LEFT JOIN order_summary o ON o.c_custkey = (
+    SELECT c.c_custkey FROM customer c WHERE c.c_custkey IN (
+        SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = l.l_orderkey LIMIT 1
+    )
+)
+GROUP BY p.p_partkey, p.p_name, r.supplier_count, o.total_order_value
+ORDER BY p.p_partkey
+LIMIT 100;

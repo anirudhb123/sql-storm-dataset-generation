@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) as rank,
+        COUNT(DISTINCT kc.keyword) OVER (PARTITION BY t.id) as keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    WHERE 
+        t.production_year IS NOT NULL AND 
+        t.production_year > 2000
+), 
+ActorCounts AS (
+    SELECT 
+        ci.movie_id, 
+        COUNT(DISTINCT a.id) AS actor_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+), 
+MoviesWithActors AS (
+    SELECT 
+        rm.title, 
+        rm.production_year, 
+        ac.actor_count,
+        COALESCE(rm.keyword_count, 0) AS keyword_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorCounts ac ON rm.id = ac.movie_id
+    WHERE 
+        rm.rank <= 5
+)
+SELECT 
+    mw.title, 
+    mw.production_year, 
+    mw.actor_count, 
+    mw.keyword_count, 
+    CASE 
+        WHEN mw.actor_count IS NULL THEN 'No actors'
+        WHEN mw.actor_count > 5 THEN 'Many actors'
+        ELSE 'Few actors'
+    END AS actor_description
+FROM 
+    MoviesWithActors mw
+WHERE 
+    mw.actor_count IS NOT NULL OR mw.keyword_count > 0
+ORDER BY 
+    mw.production_year DESC, mw.title;

@@ -1,0 +1,59 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        movie_title,
+        production_year
+    FROM 
+        RankedTitles
+    WHERE 
+        rn <= 5
+),
+ActorMovies AS (
+    SELECT 
+        actor_name,
+        STRING_AGG(movie_title, ', ') AS movies
+    FROM 
+        TopActors
+    GROUP BY 
+        actor_name
+),
+CompanyMovies AS (
+    SELECT 
+        c.name AS company_name,
+        t.title AS movie_title
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        title t ON mc.movie_id = t.id
+)
+SELECT 
+    am.actor_name,
+    COALESCE(am.movies, 'No Movies') AS movies,
+    cm.company_name,
+    COUNT(cm.movie_title) AS total_movies,
+    STRING_AGG(DISTINCT cm.movie_title, '; ') AS movies_by_company
+FROM 
+    ActorMovies am
+LEFT JOIN 
+    CompanyMovies cm ON am.movies LIKE '%' || cm.movie_title || '%'
+GROUP BY 
+    am.actor_name, cm.company_name
+ORDER BY 
+    am.actor_name, total_movies DESC;

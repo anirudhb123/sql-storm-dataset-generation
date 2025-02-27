@@ -1,0 +1,68 @@
+WITH
+    ranked_movies AS (
+        SELECT
+            t.id AS movie_id,
+            t.title,
+            t.production_year,
+            ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+        FROM
+            aka_title t
+        WHERE
+            t.production_year IS NOT NULL
+    ),
+    actor_titles AS (
+        SELECT
+            a.person_id,
+            a.name,
+            COUNT(DISTINCT ca.movie_id) AS movie_count,
+            STRING_AGG(DISTINCT at.title, ', ') AS titles,
+            AVG(CAST(CASE WHEN at.production_year BETWEEN 2000 AND 2010 THEN 1 ELSE NULL END AS float)) AS avg_movies_00s
+        FROM
+            aka_name a
+        JOIN
+            cast_info ca ON ca.person_id = a.person_id
+        JOIN
+            aka_title at ON ca.movie_id = at.movie_id
+        GROUP BY
+            a.person_id, a.name
+    ),
+    critical_info AS (
+        SELECT
+            c.movie_id,
+            STRING_AGG(DISTINCT ci.info, '; ') AS critical_notes,
+            COUNT(DISTINCT kc.keyword) AS keyword_count
+        FROM
+            complete_cast c
+        LEFT JOIN
+            movie_info mi ON c.movie_id = mi.movie_id
+        LEFT JOIN
+            movie_keyword mk ON c.movie_id = mk.movie_id
+        LEFT JOIN
+            keyword kc ON mk.keyword_id = kc.id
+        GROUP BY
+            c.movie_id
+    )
+SELECT
+    r.movie_id,
+    r.title,
+    r.production_year,
+    COALESCE(a.movie_count, 0) AS actor_movie_count,
+    a.titles AS actor_titles,
+    ci.critical_notes,
+    ci.keyword_count,
+    CASE 
+        WHEN a.avg_movies_00s IS NULL THEN 'No movies in the specified range'
+        ELSE '' || a.avg_movies_00s || ' movies in 2000s'
+    END AS avg_movies_00s_summary
+FROM
+    ranked_movies r
+LEFT JOIN
+    actor_titles a ON r.movie_id = a.person_id 
+LEFT JOIN
+    critical_info ci ON r.movie_id = ci.movie_id
+WHERE
+    r.title NOT LIKE '%Test%'
+    AND (ci.keyword_count > 2 OR ci.critical_notes IS NOT NULL)
+ORDER BY
+    r.production_year DESC,
+    r.title ASC;

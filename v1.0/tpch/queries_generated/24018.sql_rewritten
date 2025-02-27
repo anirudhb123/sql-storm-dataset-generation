@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) as rnk
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+TopSuppliers AS (
+    SELECT *
+    FROM RankedSuppliers
+    WHERE rnk <= 3
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus <> 'F' 
+      AND o.o_orderdate >= '1997-01-01'
+    GROUP BY c.c_custkey
+),
+PartStatistics AS (
+    SELECT 
+        p.p_partkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost,
+        SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(TopSuppliers.s_name, 'N/A') AS supplier_name,
+    ps.p_partkey,
+    ps.avg_supplycost,
+    co.order_count,
+    co.total_spent,
+    CASE 
+        WHEN co.total_spent IS NULL THEN 'No orders' 
+        WHEN co.total_spent > 10000 THEN 'High spender' 
+        ELSE 'Regular spender' 
+    END AS spender_category
+FROM CustomerOrderStats co
+FULL OUTER JOIN TopSuppliers ON co.c_custkey = TopSuppliers.s_suppkey
+JOIN PartStatistics ps ON TopSuppliers.s_suppkey = ps.p_partkey
+LEFT JOIN lineitem l ON l.l_orderkey = co.c_custkey AND l.l_quantity > 0
+WHERE 
+    (l.l_returnflag IS NULL OR l.l_returnflag <> 'R')
+    AND (ps.total_available IS NOT NULL OR ps.avg_supplycost < 100)
+ORDER BY co.total_spent DESC NULLS LAST, TopSuppliers.s_name, ps.p_partkey;

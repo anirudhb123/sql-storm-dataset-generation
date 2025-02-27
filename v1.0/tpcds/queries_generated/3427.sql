@@ -1,0 +1,80 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_order_number,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_rec_start_date <= CURRENT_DATE AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > CURRENT_DATE)
+    GROUP BY 
+        ws.web_site_sk, ws_order_number
+),
+average_sales AS (
+    SELECT
+        web_site_sk,
+        AVG(total_sales) AS avg_sales
+    FROM
+        ranked_sales
+    GROUP BY 
+        web_site_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        hd.hd_income_band_sk,
+        hd.hd_buy_potential,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_sales_price) AS customer_total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    INNER JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, hd.hd_income_band_sk, hd.hd_buy_potential
+),
+return_summary AS (
+    SELECT 
+        sr.refunded_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amt) AS total_returned_amount
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.refunded_customer_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.hd_income_band_sk,
+    ci.hd_buy_potential,
+    ci.total_orders,
+    COALESCE(rs.total_quantity, 0) AS total_websales_quantity,
+    COALESCE(rs.total_sales, 0) AS total_websales_amount,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    COALESCE(r.total_returned_amount, 0) AS total_returned_amount,
+    abs(AVG(ci.customer_total_spent)) OVER (PARTITION BY ci.hd_income_band_sk) AS avg_spending_by_income_band,
+    (SELECT COUNT(*) FROM customer WHERE c_current_cdemo_sk IS NOT NULL) AS total_active_customers
+FROM 
+    customer_info ci
+LEFT JOIN 
+    ranked_sales rs ON ci.c_customer_sk = rs.web_site_sk
+LEFT JOIN 
+    return_summary r ON ci.c_customer_sk = r.refunded_customer_sk
+WHERE 
+    (ci.total_orders > 5 OR ci.customer_total_spent > 1000)
+ORDER BY 
+    ci.total_orders DESC, ci.customer_total_spent DESC;

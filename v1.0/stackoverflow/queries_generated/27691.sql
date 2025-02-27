@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+    GROUP BY 
+        p.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.Tags,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.Tags, rp.OwnerDisplayName, rp.CommentCount
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        COUNT(*) AS ChangeCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) -- focusing on close, reopen and delete history
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId, ph.UserId, ph.CreationDate, ph.Comment
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.Tags,
+    ps.OwnerDisplayName,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    COALESCE(SUM(pHS.ChangeCount), 0) AS HistoryChangeCount
+FROM 
+    PostStats ps
+LEFT JOIN 
+    PostHistorySummary pHS ON ps.PostId = pHS.PostId
+GROUP BY 
+    ps.PostId, ps.Title, ps.CreationDate, ps.ViewCount, ps.Score, ps.Tags, ps.OwnerDisplayName, ps.CommentCount, ps.UpVotes, ps.DownVotes
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

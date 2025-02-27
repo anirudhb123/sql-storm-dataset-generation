@@ -1,0 +1,65 @@
+WITH SupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+RegionalSales AS (
+    SELECT 
+        n.n_name AS nation,
+        SUM(co.total_revenue) AS nation_revenue
+    FROM 
+        CustomerOrders co
+    JOIN 
+        customer c ON co.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_name
+),
+PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        pc.total_cost,
+        rs.nation_revenue
+    FROM 
+        part p
+    LEFT JOIN 
+        SupplierCost pc ON p.p_partkey = pc.ps_partkey
+    LEFT JOIN 
+        RegionalSales rs ON pc.s_nationkey = rs.nation
+    WHERE 
+        p.p_retailprice > 100
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(pc.total_cost, 0) AS total_supply_cost,
+    COALESCE(rs.nation_revenue, 0) AS revenue_by_nation
+FROM 
+    PartSupplierInfo p
+FULL OUTER JOIN 
+    RegionalSales rs ON p.nation_revenue = rs.nation_revenue
+ORDER BY 
+    p.p_partkey, total_supply_cost DESC;

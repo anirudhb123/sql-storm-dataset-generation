@@ -1,0 +1,93 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.id ASC) AS rn,
+        COALESCE(ki.kind, 'Unknown') AS movie_kind
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        kind_type ki ON mt.kind_id = ki.id
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+MovieActors AS (
+    SELECT 
+        ca.movie_id,
+        ak.name AS actor_name,
+        COUNT(*) OVER (PARTITION BY ca.movie_id) AS actor_count,
+        SUM(CASE WHEN ca.note IS NULL THEN 1 ELSE 0 END) OVER (PARTITION BY ca.movie_id) AS null_notes_count
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name ak ON ca.person_id = ak.person_id
+),
+HighActorMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ma.actor_count,
+        ma.null_notes_count,
+        ma.actor_name,
+        CASE
+            WHEN ma.actor_count > 5 THEN 'Ensemble Cast' 
+            WHEN ma.actor_count BETWEEN 3 AND 5 THEN 'Moderate Cast' 
+            ELSE 'Sparse Cast' 
+        END AS cast_density
+    FROM 
+        RankedMovies rm
+    JOIN 
+        MovieActors ma ON rm.movie_id = ma.movie_id
+    WHERE 
+        rm.rn <= 10
+    ORDER BY 
+        rm.production_year DESC, ma.actor_count DESC
+),
+FinalOutput AS (
+    SELECT 
+        h.movie_id,
+        h.title,
+        h.production_year,
+        h.actor_count,
+        h.null_notes_count,
+        h.cast_density,
+        COALESCE((
+            SELECT GROUP_CONCAT(DISTINCT co.name ORDER BY co.name)
+            FROM movie_companies mc
+            JOIN company_name co ON mc.company_id = co.id
+            WHERE mc.movie_id = h.movie_id
+        ), 'No Companies') AS companies
+    FROM 
+        HighActorMovies h
+)
+
+SELECT 
+    fo.movie_id,
+    fo.title,
+    fo.production_year,
+    fo.actor_count,
+    fo.null_notes_count,
+    fo.cast_density,
+    fo.companies
+FROM 
+    FinalOutput fo
+WHERE 
+    fo.null_notes_count = 0
+UNION ALL
+SELECT 
+    fo.movie_id,
+    fo.title,
+    fo.production_year,
+    fo.actor_count,
+    fo.null_notes_count,
+    fo.cast_density,
+    fo.companies
+FROM 
+    FinalOutput fo
+WHERE 
+    fo.null_notes_count > 0 AND fo.production_year IS NOT NULL
+ORDER BY 
+    production_year DESC, actor_count DESC;
+

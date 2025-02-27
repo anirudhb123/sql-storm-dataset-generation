@@ -1,0 +1,66 @@
+-- Performance Benchmarking Query
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        COUNT(DISTINCT PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.PostTypeId, P.Score, P.ViewCount, P.CreationDate
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+)
+
+SELECT 
+    PS.PostId,
+    PS.PostTypeId,
+    PS.Score,
+    PS.ViewCount,
+    PS.CreationDate,
+    PS.CommentCount,
+    PS.VoteCount,
+    PS.EditCount,
+    PS.LastEditDate,
+    US.UserId,
+    US.Reputation,
+    US.BadgeCount,
+    US.PostCount AS UserPostCount,
+    US.CommentCount AS UserCommentCount
+FROM 
+    PostStats PS
+JOIN 
+    Users U ON PS.PostId = U.Id  -- Assuming this was intended to correlate directly, adjust as necessary for your real relationships
+JOIN 
+    UserStats US ON U.Id = US.UserId
+ORDER BY 
+    PS.CreationDate DESC
+LIMIT 100;

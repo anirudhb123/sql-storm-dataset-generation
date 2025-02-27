@@ -1,0 +1,85 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk, 
+        s_store_name, 
+        s_number_employees, 
+        s_floor_space,
+        1 AS level
+    FROM 
+        store
+    WHERE 
+        s_number_employees IS NOT NULL
+    UNION ALL
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_number_employees,
+        s_floor_space,
+        level + 1
+    FROM 
+        sales_hierarchy 
+    WHERE 
+        level < 5
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_profit) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cs.total_sales,
+        DENSE_RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        customer_sales cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.total_sales IS NOT NULL
+),
+store_performance AS (
+    SELECT 
+        ss.s_store_sk,
+        SUM(ss.ss_net_profit) AS total_store_sales
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.ss_net_profit IS NOT NULL
+    GROUP BY 
+        ss.s_store_sk
+)
+SELECT 
+    sh.s_store_name,
+    COALESCE(tp.total_store_sales, 0) AS total_store_sales,
+    COALESCE(tc.total_sales, 0) AS total_customer_sales,
+    tc.c_first_name,
+    tc.c_last_name,
+    CASE 
+        WHEN tp.total_store_sales > 100000 THEN 'High Performance'
+        WHEN tp.total_store_sales BETWEEN 50000 AND 100000 THEN 'Moderate Performance'
+        ELSE 'Low Performance'
+    END AS performance_category
+FROM
+    store_performance tp
+LEFT JOIN 
+    sales_hierarchy sh ON tp.s_store_sk = sh.s_store_sk
+LEFT JOIN 
+    top_customers tc ON tc.sales_rank <= 10
+ORDER BY 
+    total_store_sales DESC, 
+    tc.total_sales DESC
+LIMIT 50;

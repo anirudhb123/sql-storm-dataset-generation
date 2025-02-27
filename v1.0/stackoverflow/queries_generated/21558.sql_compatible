@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+PostsSummary AS (
+    SELECT 
+        r.Id,
+        r.Title,
+        r.CreationDate,
+        r.Score,
+        r.ViewCount,
+        r.Reputation,
+        r.UpVoteCount,
+        r.DownVoteCount,
+        (CASE 
+            WHEN r.UpVoteCount > r.DownVoteCount THEN 'Positive'
+            WHEN r.UpVoteCount < r.DownVoteCount THEN 'Negative'
+            ELSE 'Neutral' 
+         END) AS VoteSentiment,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = r.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Badges b WHERE b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = r.Id)) AS BadgeCount,
+        (SELECT STRING_AGG(t.TagName, ', ') FROM Tags t 
+         WHERE t.Id IN (SELECT UNNEST(STRING_TO_ARRAY(p.Tags, '><'))) 
+         LIMIT 5) AS Top5Tags
+    FROM 
+        RankedPosts r
+    WHERE 
+        r.Rank <= 5 
+)
+SELECT 
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.Reputation,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    ps.VoteSentiment,
+    ps.CommentCount,
+    ps.BadgeCount,
+    ps.Top5Tags,
+    COALESCE((
+        SELECT STRING_AGG(DISTINCT c.UserDisplayName, ', ') 
+        FROM Comments c WHERE c.PostId = ps.Id AND c.CreationDate >= ps.CreationDate - INTERVAL '1 month'
+        HAVING COUNT(*) >= 1
+    ), 'No recent commenters') AS RecentCommenters
+FROM 
+    PostsSummary ps
+LEFT JOIN 
+    PostHistory ph ON ps.Id = ph.PostId AND ph.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+WHERE 
+    ph.PostHistoryTypeId IS NOT NULL OR ph.PostHistoryTypeId IS NULL
+ORDER BY 
+    ps.ViewCount DESC, ps.Score DESC
+LIMIT 50;

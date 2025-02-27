@@ -1,0 +1,74 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL -- Starting with top-level posts
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM Posts p
+    JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.Reputation
+),
+PopularTags AS (
+    SELECT 
+        TRIM(both '<>' FROM unnest(string_to_array(Tags, '>'))) AS TagName,
+        COUNT(*) AS TagCount
+    FROM Posts
+    WHERE Tags IS NOT NULL
+    GROUP BY TagName
+    HAVING COUNT(*) > 5
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM PostHistory ph
+    GROUP BY ph.PostId, ph.UserId
+),
+UserEditCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(re.EditCount), 0) AS TotalEdits,
+        COALESCE(MAX(re.LastEditDate), '1970-01-01'::timestamp) AS LastEditDate
+    FROM Users u
+    LEFT JOIN RecentEdits re ON u.Id = re.UserId
+    GROUP BY u.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.PostCount,
+    u.AcceptedAnswers,
+    ph.PostId,
+    ph.Title AS PostTitle,
+    pt.TagName,
+    ue.TotalEdits AS UserTotalEdits,
+    ue.LastEditDate AS UserLastEditDate,
+    CASE 
+        WHEN ue.LastEditDate > NOW() - INTERVAL '30 days' THEN 'Active'
+        ELSE 'Inactive'
+    END AS UserActivityStatus
+FROM UserReputation u
+JOIN RecursivePostHierarchy ph ON u.UserId = ph.Id
+LEFT JOIN PopularTags pt ON ph.Tags LIKE '%' || pt.TagName || '%'
+JOIN UserEditCounts ue ON u.UserId = ue.UserId
+WHERE u.Reputation >= 100 -- Only include users with reputation 100 and above
+ORDER BY u.Reputation DESC, ph.Level, pt.TagCount DESC;

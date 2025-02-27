@@ -1,0 +1,48 @@
+WITH part_stats AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        LENGTH(p.p_name) AS name_length, 
+        LEFT(p.p_comment, 10) AS short_comment
+    FROM part p
+),
+supplier_stats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        UPPER(s.s_name) AS upper_name, 
+        TRIM(s.s_comment) AS trimmed_comment
+    FROM supplier s
+),
+order_details AS (
+    SELECT 
+        o.o_orderkey, 
+        c.c_name, 
+        o.o_orderdate, 
+        CONCAT('Order ', o.o_orderkey, ' for customer ', c.c_name) AS order_description
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+),
+lineitem_summary AS (
+    SELECT 
+        l.l_orderkey, 
+        COUNT(*) AS total_items, 
+        SUM(l.l_extendedprice) AS total_price
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    ps.p_partkey, 
+    ps.name_length, 
+    ps.short_comment, 
+    ss.upper_name, 
+    ss.trimmed_comment, 
+    od.order_description, 
+    ls.total_items, 
+    ls.total_price
+FROM part_stats ps
+JOIN supplier_stats ss ON ps.p_partkey = CAST(SUBSTRING(ss.upper_name FROM '[0-9]+') AS INTEGER) % (SELECT COUNT(*) FROM part)
+JOIN order_details od ON od.o_orderkey = CAST(CONVERT(VARCHAR, RAND() * 10000) AS INT) % (SELECT COUNT(*) FROM orders)
+JOIN lineitem_summary ls ON ls.l_orderkey = od.o_orderkey
+WHERE ps.name_length > 10 
+ORDER BY ls.total_price DESC, ps.name_length ASC;

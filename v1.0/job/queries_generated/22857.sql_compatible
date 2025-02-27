@@ -1,0 +1,74 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+),
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rn
+    FROM 
+        MovieHierarchy mh
+)
+SELECT 
+    m.title AS movie_title,
+    a.name AS actor_name,
+    COALESCE(CAST(m.production_year AS VARCHAR), 'Not Produced') AS production_year,
+    CASE 
+        WHEN c.nt_order IS NULL THEN 'N/A'
+        ELSE CAST(c.nt_order AS VARCHAR)
+    END AS casting_order,
+    CASE 
+        WHEN COALESCE(m.production_year, 0) = 0 
+             THEN NULL 
+        ELSE (EXTRACT(YEAR FROM DATE '2024-10-01') - m.production_year)
+    END AS years_since_production,
+    ac.actor_count
+FROM 
+    aka_title m
+LEFT JOIN 
+    cast_info c ON m.id = c.movie_id
+LEFT JOIN 
+    aka_name a ON c.person_id = a.person_id
+LEFT JOIN 
+    (SELECT 
+        movie_id,
+        COUNT(DISTINCT person_id) AS actor_count
+     FROM 
+        cast_info
+     GROUP BY 
+        movie_id) ac ON m.id = ac.movie_id
+JOIN 
+    TopMovies tm ON m.id = tm.movie_id
+WHERE 
+    tm.rn <= 5
+    AND a.name IS NOT NULL
+    AND (m.production_year IS NOT NULL OR 
+         (a.md5sum IS NOT NULL AND LENGTH(a.name) < 10))
+ORDER BY 
+    m.production_year DESC NULLS LAST,
+    ac.actor_count DESC,
+    movie_title;

@@ -1,0 +1,56 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        c.c_email_address
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+ItemSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        is.item_sk,
+        is.total_sales,
+        is.total_profit,
+        is.order_count,
+        RANK() OVER (ORDER BY is.total_profit DESC) AS sales_rank
+    FROM 
+        ItemSales is
+)
+SELECT 
+    ci.full_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ti.total_sales,
+    ti.total_profit,
+    ti.order_count
+FROM 
+    CustomerInfo ci
+JOIN 
+    web_sales ws ON ci.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    TopItems ti ON ws.ws_item_sk = ti.item_sk
+WHERE 
+    ti.sales_rank <= 10
+ORDER BY 
+    ti.total_profit DESC;

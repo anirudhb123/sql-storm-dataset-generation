@@ -1,0 +1,77 @@
+WITH RecursiveUserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(VoteTypeId = 2) AS UpVotes,
+        SUM(VoteTypeId = 3) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        RANK() OVER (ORDER BY SUM(VoteTypeId = 2) - SUM(VoteTypeId = 3) DESC) AS ScoreRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id
+    WHERE 
+        U.Reputation > 0
+    GROUP BY 
+        U.Id
+),
+RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS Author,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Answered'
+            ELSE 'Unanswered'
+        END AS Status,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RN
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TagsStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+)
+SELECT 
+    R.UserId,
+    R.DisplayName,
+    R.UpVotes,
+    R.DownVotes,
+    R.PostsCount,
+    R.ScoreRank,
+    RP.Id AS RecentPostId,
+    RP.Title AS RecentPostTitle,
+    RP.CreationDate AS RecentPostDate,
+    RP.Author AS RecentPostAuthor,
+    RP.Status AS RecentPostStatus,
+    TS.TagName,
+    TS.PostCount AS TagPostCount,
+    TS.TotalViews AS TagTotalViews,
+    TS.AverageScore AS TagAverageScore
+FROM 
+    RecursiveUserScores R
+LEFT JOIN 
+    RecentPosts RP ON R.UserId = RP.Author -- Join to get the recent post for each user
+LEFT JOIN 
+    TagsStats TS ON TS.PostCount > 10 -- Filtering for tags with more than 10 posts
+WHERE 
+    (R.UpVotes - R.DownVotes) > 0 -- Only include users with a positive vote balance
+    AND RP.RN = 1 -- Only take the most recent post for each author
+ORDER BY 
+    R.ScoreRank, RP.CreationDate DESC;

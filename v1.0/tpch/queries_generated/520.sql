@@ -1,0 +1,66 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal > 10000 THEN 'High'
+            WHEN c.c_acctbal BETWEEN 5000 AND 10000 THEN 'Medium'
+            ELSE 'Low'
+        END AS value_segment
+    FROM 
+        customer c
+    WHERE 
+        c.c_mktsegment IN ('BUILDING', 'FURNITURE')
+),
+OrderStatistics AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    s.s_name AS supplier_name,
+    ps.ps_partkey,
+    p.p_name,
+    COALESCE(r_s.balance, 0) AS supplier_balance,
+    os.total_revenue,
+    os.line_item_count
+FROM 
+    HighValueCustomers c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    RankedSuppliers r_s ON ps.ps_suppkey = r_s.s_suppkey AND r_s.rank = 1
+JOIN 
+    OrderStatistics os ON o.o_orderkey = os.o_orderkey
+WHERE 
+    p.p_size > 10 
+    AND os.total_revenue > 5000
+    AND c.value_segment = 'High'
+ORDER BY 
+    customer_name, supplier_name;

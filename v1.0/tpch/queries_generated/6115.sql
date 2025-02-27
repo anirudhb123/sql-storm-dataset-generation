@@ -1,0 +1,33 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+NationDetails AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name AS region_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+CustomerOrders AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS TotalOrderValue
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+OrderDetails AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS NetRevenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT n.n_name AS NationName, 
+       n.region_name AS RegionName, 
+       s.s_name AS SupplierName, 
+       COALESCE(sd.TotalCost, 0) AS SupplierTotalCost, 
+       COALESCE(co.TotalOrderValue, 0) AS CustomerTotalOrderValue,
+       COALESCE(od.NetRevenue, 0) AS NetRevenueFromOrders
+FROM NationDetails n
+LEFT JOIN SupplierDetails sd ON n.n_nationkey = sd.s_nationkey
+LEFT JOIN CustomerOrders co ON co.o_custkey = n.n_nationkey
+LEFT JOIN OrderDetails od ON od.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = n.n_nationkey)
+WHERE sd.TotalCost > 10000 OR co.TotalOrderValue > 5000
+ORDER BY NationName, SupplierTotalCost DESC, CustomerTotalOrderValue DESC;

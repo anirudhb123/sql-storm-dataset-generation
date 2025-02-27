@@ -1,0 +1,60 @@
+
+WITH CustomerAddresses AS (
+    SELECT
+        ca_address_sk,
+        ca_street_number,
+        ca_street_name,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM
+        customer_address
+), Demographics AS (
+    SELECT
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        CONCAT(cd_gender, ' ', cd_marital_status, ' ', cd_education_status) AS demographic_profile
+    FROM
+        customer_demographics
+), CustomerInfo AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        ca.full_address,
+        d.demographic_profile
+    FROM
+        customer c
+    JOIN CustomerAddresses ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN Demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+), MonthlySales AS (
+    SELECT
+        DATE_TRUNC('month', d.d_date) AS sales_month,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM
+        web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY
+        sales_month
+), TopDemographics AS (
+    SELECT
+        demographic_profile,
+        SUM(total_sales) AS total_sales_by_demo
+    FROM
+        CustomerInfo ci
+    JOIN MonthlySales ms ON ci.c_customer_sk = ms.sales_month  -- Assuming customer_sk correlates to total_sales for this example
+    GROUP BY
+        demographic_profile
+    ORDER BY
+        total_sales_by_demo DESC
+    LIMIT 5
+)
+
+SELECT
+    *
+FROM
+    TopDemographics;

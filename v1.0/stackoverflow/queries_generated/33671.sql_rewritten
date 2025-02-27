@@ -1,0 +1,97 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        Posts a ON p.ParentId = a.Id
+    WHERE 
+        a.PostTypeId = 1  
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        COUNT(DISTINCT a.Id) AS AnswersGiven,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1  
+    LEFT JOIN 
+        Posts a ON u.Id = a.OwnerUserId AND a.PostTypeId = 2  
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id AND v.BountyAmount IS NOT NULL
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        tag.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags tag
+    INNER JOIN 
+        Posts p ON p.Tags LIKE '%' || tag.TagName || '%'
+    GROUP BY 
+        tag.TagName
+    HAVING 
+        COUNT(p.Id) > 10  
+),
+PostMetrics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBountyAmount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    ua.DisplayName,
+    ua.QuestionsAsked,
+    ua.AnswersGiven,
+    ua.TotalBounties,
+    COUNT(ph.PostId) AS TotalPostsInHierarchy,
+    SUM(pm.CommentCount) AS TotalComments,
+    SUM(pm.VoteCount) AS TotalVotes,
+    SUM(pm.TotalBountyAmount) AS TotalBountyReceived,
+    STRING_AGG(pt.TagName, ', ') AS PopularTags
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    RecursivePostHierarchy ph ON ua.UserId = ph.OwnerUserId
+LEFT JOIN 
+    PostMetrics pm ON pm.Id = ph.PostId
+LEFT JOIN 
+    PopularTags pt ON pt.PostCount > 10  
+GROUP BY 
+    ua.UserId, ua.DisplayName
+ORDER BY 
+    ua.TotalBounties DESC, ua.QuestionsAsked DESC;

@@ -1,0 +1,4 @@
+SELECT min(n.name) AS of_person, min(t.title) AS biography_movie
+FROM aka_name AS an, cast_info AS ci, info_type AS it, link_type AS lt, movie_link AS ml, name AS n, person_info AS pi, title AS t
+WHERE n.id = an.person_id AND n.id = pi.person_id AND ci.person_id = n.id AND t.id = ci.movie_id AND ml.linked_movie_id = t.id AND lt.id = ml.link_type_id AND it.id = pi.info_type_id AND pi.person_id = an.person_id AND pi.person_id = ci.person_id AND an.person_id = ci.person_id AND ci.movie_id = ml.linked_movie_id
+AND n.md5sum IN ('10b0f91bf7ad6979197abc10bcefda80', '4187077f55a4dd485baba767d83f2fa0', 'b98f7d39639dbf540fb58357dc51c683', 'badbde263b524c921d318e77d1794396', 'bafa29c8a65d0f22a1006dbf2a54fda5', 'd4aeab44a514a1bf6142a558ff454150', 'e441ad784785dc5d244c78545fe39dcd', 'fd1cfa0bea6b7a5cceb5fb26fe42fe74');

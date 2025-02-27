@@ -1,0 +1,21 @@
+SELECT 
+    pt.Name AS PostType,
+    AVG(vote_counts.VoteCount) AS AverageVoteCount,
+    COUNT(vote_counts.PostId) AS TotalPosts
+FROM 
+    PostTypes pt
+LEFT JOIN (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+) AS vote_counts ON vote_counts.PostId = p.Id
+JOIN Posts p ON p.PostTypeId = pt.Id
+GROUP BY 
+    pt.Name
+ORDER BY 
+    AverageVoteCount DESC;

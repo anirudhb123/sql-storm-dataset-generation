@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_aggregates AS (
+    SELECT
+        ws_ship_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM
+        web_sales
+    GROUP BY
+        ws_ship_date_sk, ws_item_sk
+),
+promotions AS (
+    SELECT
+        p.p_promo_id,
+        COUNT(ws_order_number) AS promo_count
+    FROM
+        promotion p
+    JOIN
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY
+        p.p_promo_id
+    HAVING
+        COUNT(ws_order_number) > 10
+),
+customer_info AS (
+    SELECT
+        c.c_customer_id,
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY c.c_customer_sk) AS gender_rank
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT
+    c.c_customer_id,
+    ci.cd_gender,
+    SUM(s.total_quantity) AS total_quantity,
+    SUM(s.total_profit) AS total_profit,
+    p.promo_count,
+    COALESCE(p.promo_count, 0) AS applied_promo_count,
+    CASE
+        WHEN ci.gender_rank = 1 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status
+FROM
+    customer c
+JOIN
+    customer_info ci ON c.c_customer_id = ci.c_customer_id
+LEFT JOIN
+    sales_aggregates s ON c.c_customer_sk = s.ws_item_sk
+LEFT JOIN
+    promotions p ON s.ws_item_sk = p.p_promo_id
+WHERE
+    (ci.cd_gender = 'F' AND total_profit IS NOT NULL)
+    OR (ci.cd_gender = 'M' AND total_quantity IS NOT NULL)
+GROUP BY
+    c.c_customer_id, ci.cd_gender, p.promo_count, ci.gender_rank
+HAVING
+    SUM(s.total_profit) > 1000
+ORDER BY
+    total_profit DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

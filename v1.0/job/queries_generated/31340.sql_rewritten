@@ -1,0 +1,54 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        1 AS level,
+        m.id AS movie_id,
+        ARRAY[m.title] AS movie_path
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        m.id AS movie_id,
+        mh.movie_path || m.title
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_hierarchy mh ON m.episode_of_id = mh.movie_id  
+)
+
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    mh.level,
+    string_agg(distinct ak.name, ', ') AS cast_names,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    CASE 
+        WHEN mh.level = 1 THEN 'Main Feature'
+        ELSE 'Episode'
+    END AS movie_type
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+GROUP BY 
+    mh.movie_title, mh.production_year, mh.level
+HAVING 
+    COUNT(DISTINCT ak.id) > 2  
+ORDER BY 
+    mh.production_year DESC, 
+    mh.level, 
+    movie_title;

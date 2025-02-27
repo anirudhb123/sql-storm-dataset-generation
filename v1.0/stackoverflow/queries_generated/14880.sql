@@ -1,0 +1,59 @@
+-- Performance Benchmarking Query
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(AC.AcceptedAnswerId, 0) AS HasAcceptedAnswer,
+        COUNT(C.ID) AS CommentCount,
+        SUM(V.VoteTypeId = 2) AS UpVotes,
+        SUM(V.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts AC ON P.Id = AC.AcceptedAnswerId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year' -- Filtering posts from the last year
+    GROUP BY 
+        P.Id, AC.AcceptedAnswerId
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.HasAcceptedAnswer,
+    PS.CommentCount,
+    PS.UpVotes,
+    PS.DownVotes,
+    US.DisplayName AS AuthorDisplayName,
+    US.Reputation AS AuthorReputation,
+    US.BadgeCount AS AuthorBadgeCount
+FROM 
+    PostStats PS
+JOIN 
+    Users U ON PS.HasAcceptedAnswer = U.Id
+JOIN 
+    UserStats US ON U.Id = US.UserId
+ORDER BY 
+    PS.Score DESC, PS.ViewCount DESC;

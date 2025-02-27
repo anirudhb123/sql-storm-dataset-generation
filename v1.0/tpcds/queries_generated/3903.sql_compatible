@@ -1,0 +1,81 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_web_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+HighSpendingCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_web_sales,
+        cs.order_count
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.sales_rank <= 10
+),
+WarehouseInventory AS (
+    SELECT 
+        inv.inv_warehouse_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_warehouse_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws.w_warehouse_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        ws.w_warehouse_sk
+)
+SELECT 
+    hsc.c_first_name,
+    hsc.c_last_name,
+    hsc.total_web_sales,
+    hsc.order_count,
+    wi.total_quantity AS warehouse_inventory,
+    ss.total_sales AS warehouse_sales,
+    ss.total_orders AS warehouse_order_count
+FROM 
+    HighSpendingCustomers hsc
+LEFT JOIN 
+    WarehouseInventory wi ON wi.inv_warehouse_sk = (
+        SELECT 
+            ws.ws_warehouse_sk 
+        FROM 
+            web_sales ws 
+        WHERE 
+            ws.ws_bill_customer_sk = hsc.c_customer_sk 
+        FETCH FIRST 1 ROWS ONLY
+    )
+LEFT JOIN 
+    SalesSummary ss ON ss.w_warehouse_sk = (
+        SELECT 
+            ws.ws_warehouse_sk 
+        FROM 
+            web_sales ws 
+        WHERE 
+            ws.ws_bill_customer_sk = hsc.c_customer_sk 
+        FETCH FIRST 1 ROWS ONLY
+    )
+ORDER BY 
+    hsc.total_web_sales DESC;

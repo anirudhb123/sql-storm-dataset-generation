@@ -1,0 +1,46 @@
+WITH MovieKeywords AS (
+    SELECT m.title, 
+           m.production_year, 
+           k.keyword 
+    FROM title m
+    JOIN movie_keyword mk ON m.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    WHERE m.production_year >= 2000
+),
+ActorRoles AS (
+    SELECT a.name AS actor_name, 
+           t.title, 
+           r.role 
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN title t ON ci.movie_id = t.id
+    JOIN role_type r ON ci.role_id = r.id
+    WHERE a.name IS NOT NULL
+),
+CompanyMovies AS (
+    SELECT c.name AS company_name, 
+           t.title AS movie_title, 
+           t.production_year 
+    FROM company_name c
+    JOIN movie_companies mc ON c.id = mc.company_id
+    JOIN title t ON mc.movie_id = t.id
+    WHERE c.country_code = 'USA'
+),
+CombinedResults AS (
+    SELECT mk.title AS movie_title, 
+           mk.production_year, 
+           ak.actor_name, 
+           ak.role, 
+           co.company_name 
+    FROM MovieKeywords mk
+    LEFT JOIN ActorRoles ak ON mk.title = ak.title AND mk.production_year = ak.production_year
+    LEFT JOIN CompanyMovies co ON mk.title = co.movie_title AND mk.production_year = co.production_year 
+)
+SELECT movie_title, 
+       production_year, 
+       string_agg(DISTINCT actor_name, ', ') AS actors, 
+       string_agg(DISTINCT role, ', ') AS roles, 
+       string_agg(DISTINCT company_name, ', ') AS production_companies 
+FROM CombinedResults
+GROUP BY movie_title, production_year
+ORDER BY production_year DESC, movie_title;

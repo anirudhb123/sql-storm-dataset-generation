@@ -1,0 +1,55 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(COALESCE(C.CommentCount, 0)) AS TotalComments,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounties
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate, U.LastAccessDate
+),
+Ranking AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        LastAccessDate,
+        PostCount,
+        AnswerCount,
+        QuestionCount,
+        TotalComments,
+        TotalBounties,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, PostCount DESC) AS Rank
+    FROM 
+        UserStats
+)
+SELECT 
+    R.Rank,
+    R.DisplayName,
+    R.Reputation,
+    R.PostCount,
+    R.AnswerCount,
+    R.QuestionCount,
+    R.TotalComments,
+    R.TotalBounties
+FROM 
+    Ranking R
+WHERE 
+    R.Rank <= 10
+ORDER BY 
+    R.Rank;

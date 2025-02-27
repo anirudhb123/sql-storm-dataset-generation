@@ -1,0 +1,60 @@
+
+WITH RecursivePostCTE AS (
+    
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.AcceptedAnswerId,
+        P.ParentId,
+        P.OwnerUserId,
+        CAST(0 AS INTEGER) AS Depth
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.AcceptedAnswerId,
+        P.ParentId,
+        P.OwnerUserId,
+        R.Depth + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostCTE R ON P.ParentId = R.PostId
+)
+
+SELECT 
+    U.DisplayName AS User,
+    COUNT(DISTINCT PP.Id) AS TotalPosts,
+    COUNT(DISTINCT CASE WHEN PP.AcceptedAnswerId IS NOT NULL THEN PP.Id END) AS AcceptedAnswers,
+    COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS TotalClosures,
+    COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 1 THEN 1 ELSE 0 END), 0) AS TotalTitleEdits,
+    RANK() OVER (ORDER BY COUNT(DISTINCT PP.Id) DESC) AS PostRank,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed,
+    MAX(COALESCE(PP.ViewCount, 0)) AS MaxViews,
+    AVG(PP.ViewCount) AS AvgViews
+FROM 
+    Users U
+JOIN 
+    Posts PP ON U.Id = PP.OwnerUserId
+LEFT JOIN 
+    PostHistory PH ON PP.Id = PH.PostId
+LEFT JOIN 
+    Tags T ON PP.Tags LIKE CONCAT('%', T.TagName, '%')
+LEFT JOIN 
+    RecursivePostCTE RPC ON PP.Id = RPC.ParentId
+WHERE 
+    U.Reputation > 1000
+GROUP BY 
+    U.Id, U.DisplayName
+HAVING 
+    SUM(CASE WHEN PP.PostTypeId = 1 THEN 1 ELSE 0 END) > 5
+ORDER BY 
+    TotalPosts DESC;

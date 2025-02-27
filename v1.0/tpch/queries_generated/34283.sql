@@ -1,0 +1,39 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name, 
+           CAST(s.s_name AS varchar(55)) AS full_name, 1 AS level
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > 
+        (SELECT AVG(s1.s_acctbal) FROM supplier s1 WHERE s1.s_nationkey = s.s_nationkey)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name, 
+           CONCAT(sh.full_name, ' -> ', s.s_name), sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE sh.level < 3
+),
+PurchaseInfo AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, 
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT p.p_partkey, p.p_name, 
+       COALESCE(SUM(CASE WHEN l.l_shipdate > l.l_commitdate THEN 1 ELSE 0 END), 0) AS late_shipments,
+       COUNT(DISTINCT ps.ps_suppkey) AS distinct_suppliers,
+       MAX(dense_rank) OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank_by_price,
+       s.nation_name, si.total_spent, si.order_count
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierHierarchy s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN PurchaseInfo si ON si.c_custkey = (SELECT TOP 1 o.o_custkey 
+                                               FROM orders o 
+                                               WHERE o.o_orderkey = l.l_orderkey)
+WHERE p.p_size >= 10 AND (p.p_comment IS NULL OR p.p_comment != '')
+GROUP BY p.p_partkey, p.p_name, s.nation_name, si.total_spent, si.order_count
+ORDER BY late_shipments DESC, p.p_partkey
+LIMIT 50;

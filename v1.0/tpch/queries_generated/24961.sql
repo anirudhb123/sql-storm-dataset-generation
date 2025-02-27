@@ -1,0 +1,49 @@
+WITH RECURSIVE CustomerCTE AS (
+    SELECT c_custkey, c_name, c_acctbal, 0 AS Level
+    FROM customer
+    WHERE c_acctbal IS NOT NULL AND c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, Level + 1
+    FROM customer c
+    JOIN CustomerCTE cc ON c.c_custkey = cc.c_custkey
+    WHERE c.c_acctbal < cc.c_acctbal
+), 
+PartSupplierCTE AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_availqty) AS TotalAvailable, 
+           ROUND(AVG(ps.ps_supplycost), 2) AS AvgSupplyCost,
+           MAX(ps.ps_supplycost) OVER (PARTITION BY ps.ps_partkey) AS MaxSupplyCost,
+           MIN(ps.ps_supplycost) OVER (PARTITION BY ps.ps_partkey) AS MinSupplyCost,
+           COUNT(DISTINCT ps.ps_suppkey) OVER (PARTITION BY ps.ps_partkey) AS SupplierCount
+    FROM partsupp ps
+    WHERE ps.ps_availqty IS NOT NULL
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+), 
+OrderStats AS (
+    SELECT o.o_orderkey, o.o_orderstatus,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+           COUNT(l.l_orderkey) AS LineItemCount,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS ReturnCount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus
+)
+SELECT p.p_name, 
+       r.r_name AS Region,
+       SUM(CASE WHEN cc.Level IS NOT NULL THEN cc.Level ELSE -1 END) AS CustomerLevel,
+       SUM(COALESCE(ps.TotalAvailable, 0)) AS TotalAvailableSupply,
+       MAX(os.TotalRevenue) AS MaxOrderRevenue,
+       CASE
+           WHEN MAX(os.LineItemCount) > 10 THEN 'High Volume'
+           ELSE 'Low Volume'
+       END AS OrderVolumeCategory
+FROM part p
+LEFT JOIN PartSupplierCTE ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN nation n ON n.n_nationkey = (SELECT MIN(s_nationkey) FROM supplier s WHERE s.s_suppkey = ps.ps_suppkey)
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN CustomerCTE cc ON cc.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey))
+LEFT JOIN OrderStats os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey = os.o_orderkey)
+WHERE p.p_retailprice BETWEEN 10.00 AND 1000.00
+GROUP BY p.p_name, r.r_name
+HAVING SUM(COALESCE(ps.TotalAvailable, 0)) > 500 OR MAX(os.TotalRevenue) IS NULL
+ORDER BY p.p_name, Region;

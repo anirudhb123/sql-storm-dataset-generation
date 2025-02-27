@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ss_item_sk,
+        ss_sales_price,
+        ss_quantity,
+        ss_net_profit,
+        1 AS RecursionLevel
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk = 2451545  -- Sample date SK for filtering
+    
+    UNION ALL
+    
+    SELECT 
+        ss.item_sk,
+        ss.ss_sales_price,
+        ss.ss_quantity,
+        ss.ss_net_profit,
+        RecursionLevel + 1
+    FROM 
+        store_sales ss
+    JOIN 
+        SalesCTE s ON ss.ss_item_sk = s.ss_item_sk
+    WHERE 
+        RecursionLevel < 5  -- Limit to 5 levels of recursion
+)
+SELECT 
+    ca.ca_state,
+    SUM(CASE WHEN cd.cd_gender = 'F' THEN ss_ext_sales_price ELSE 0 END) AS FemaleSales,
+    SUM(CASE WHEN cd.cd_gender = 'M' THEN ss_ext_sales_price ELSE 0 END) AS MaleSales,
+    MAX(ss_ext_sales_price) AS MaxSalePrice,
+    COUNT(DISTINCT c.c_customer_sk) AS UniqueCustomers,
+    AVG(ss_net_profit) OVER (PARTITION BY ca.ca_state) AS AvgProfitByState,
+    STRING_AGG(DISTINCT CONCAT(c.c_first_name, ' ', c.c_last_name), '; ') AS CustomerNames
+FROM 
+    SalesCTE s
+JOIN 
+    customer c ON c.c_customer_sk = s.ss_customer_sk
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+WHERE 
+    s.ss_quantity > 0
+GROUP BY 
+    ca.ca_state
+HAVING 
+    SUM(s.ss_net_profit) IS NOT NULL
+ORDER BY 
+    ca.ca_state;

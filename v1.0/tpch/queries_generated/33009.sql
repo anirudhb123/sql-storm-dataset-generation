@@ -1,0 +1,32 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+        CAST(s.s_name AS VARCHAR(100)) AS hierarchy_path,
+        1 AS level
+    FROM supplier s
+    WHERE s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+        CONCAT(sh.hierarchy_path, ' -> ', s.s_name),
+        sh.level + 1
+    FROM SupplierHierarchy sh
+    JOIN supplier s ON s.s_nationkey IN (
+        SELECT n.n_nationkey FROM nation n WHERE n.n_comment LIKE CONCAT('%', LEFT(sh.hierarchy_path, CHAR_LENGTH(sh.hierarchy_path) - CHAR_LENGTH(s.s_name)), '%')
+    )
+), 
+TopSuppliers AS (
+    SELECT ps.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.s_suppkey
+),
+RankedSuppliers AS (
+    SELECT sh.s_suppkey, sh.hierarchy_path, sh.level, ts.total_supply_cost,
+           ROW_NUMBER() OVER (PARTITION BY sh.level ORDER BY ts.total_supply_cost DESC) AS rank
+    FROM SupplierHierarchy sh
+    JOIN TopSuppliers ts ON sh.s_suppkey = ts.s_suppkey
+)
+SELECT r.s_suppkey, r.hierarchy_path, r.total_supply_cost, r.rank
+FROM RankedSuppliers r
+WHERE r.rank <= 5
+ORDER BY r.level, r.total_supply_cost DESC;

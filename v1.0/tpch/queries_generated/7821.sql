@@ -1,0 +1,27 @@
+WITH RECURSIVE SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, p.p_name, p.p_brand, p.p_type, ps.ps_availqty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+TopNations AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING COUNT(DISTINCT s.s_suppkey) > 5
+),
+HighlyAvailableParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(sp.ps_availqty) AS total_avail_qty, COUNT(DISTINCT sp.s_suppkey) AS unique_suppliers
+    FROM SupplierParts sp
+    JOIN TopNations tn ON sp.s_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = tn.n_nationkey)
+    JOIN part p ON sp.ps_partkey = p.p_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING total_avail_qty >= 100
+)
+SELECT p.p_name, p.p_brand, p.p_type, p.total_avail_qty, tn.n_name AS supplier_nation
+FROM HighlyAvailableParts p
+JOIN TopNations tn ON p.unique_suppliers > 3
+ORDER BY p.total_avail_qty DESC, p.p_name ASC
+LIMIT 10;

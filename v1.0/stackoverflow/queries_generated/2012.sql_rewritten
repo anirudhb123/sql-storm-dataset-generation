@@ -1,0 +1,60 @@
+WITH UserReputation AS (
+    SELECT Id, DisplayName, Reputation, 
+           RANK() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+),
+PostReputation AS (
+    SELECT p.OwnerUserId, 
+           COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+           COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+           SUM(p.Score) AS TotalScore,
+           SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9
+    GROUP BY p.OwnerUserId
+),
+UserActivity AS (
+    SELECT u.Id AS UserId,
+           AVG(p.ViewCount) AS AvgViewCount,
+           COUNT(DISTINCT p.Id) AS PostCount,
+           MAX(p.LastActivityDate) AS LastActive
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+RecentPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, 
+           STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    JOIN LATERAL (
+        SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName
+    ) t ON true
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY p.Id
+)
+SELECT u.DisplayName, 
+       u.Reputation, 
+       ur.Rank, 
+       p.QuestionCount, 
+       p.AnswerCount, 
+       p.TotalScore, 
+       ua.AvgViewCount, 
+       ua.PostCount, 
+       rp.Title AS RecentPostTitle, 
+       rp.CreationDate AS RecentPostDate, 
+       rp.Score AS RecentPostScore, 
+       rp.Tags
+FROM UserReputation ur
+LEFT JOIN PostReputation p ON ur.Id = p.OwnerUserId
+LEFT JOIN UserActivity ua ON ur.Id = ua.UserId
+LEFT JOIN RecentPosts rp ON ur.Id = (
+    SELECT OwnerUserId 
+    FROM Posts 
+    WHERE CreationDate = (
+        SELECT MAX(CreationDate) 
+        FROM Posts 
+        WHERE OwnerUserId = ur.Id
+    )
+)
+ORDER BY ur.Rank ASC, u.Reputation DESC
+LIMIT 50;

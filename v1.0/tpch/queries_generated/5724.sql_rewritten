@@ -1,0 +1,37 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate >= '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+top_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, r.total_revenue
+    FROM ranked_orders r
+    JOIN orders o ON r.o_orderkey = o.o_orderkey
+    WHERE r.revenue_rank <= 10
+),
+supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS number_of_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    t.o_orderkey,
+    t.o_orderdate,
+    t.total_revenue,
+    s.s_name AS supplier_name,
+    s.total_supply_cost,
+    s.number_of_parts
+FROM top_orders t
+JOIN supplier_summary s ON s.total_supply_cost < (SELECT AVG(total_supply_cost) FROM supplier_summary)
+ORDER BY t.total_revenue DESC, s.total_supply_cost ASC;

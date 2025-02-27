@@ -1,0 +1,64 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+),
+top_orders AS (
+    SELECT 
+        o.orderkey,
+        o.orderdate,
+        o.totalprice,
+        rn
+    FROM 
+        ranked_orders o
+    WHERE 
+        o.rn <= 5
+), 
+supplier_part_cost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+part_details AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        pc.total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        supplier_part_cost pc ON p.p_partkey = pc.ps_partkey
+)
+SELECT 
+    to.orderkey,
+    to.orderdate,
+    to.totalprice,
+    pd.p_name,
+    pd.p_brand,
+    pd.p_type,
+    pd.total_supply_cost
+FROM 
+    top_orders to
+JOIN 
+    lineitem li ON to.orderkey = li.l_orderkey
+JOIN 
+    part_details pd ON li.l_partkey = pd.p_partkey
+WHERE 
+    to.totalprice > 5000
+ORDER BY 
+    to.orderdate, pd.total_supply_cost DESC;

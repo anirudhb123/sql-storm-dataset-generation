@@ -1,0 +1,58 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        string_agg(DISTINCT a.name, ', ') AS cast_names,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        title t
+    JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'IMDb Rating')
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000 AND t.production_year <= 2023
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+
+top_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.total_cast,
+        rm.cast_names
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.rank <= 5
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.total_cast,
+    tm.cast_names,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        movie_keyword mk JOIN keyword k ON mk.keyword_id = k.id 
+     WHERE 
+        mk.movie_id = tm.movie_id) AS keyword_count,
+    (SELECT 
+        GROUP_CONCAT(c.name ORDER BY c.name) 
+     FROM 
+        movie_companies mc JOIN company_name c ON mc.company_id = c.id 
+     WHERE 
+        mc.movie_id = tm.movie_id
+    ) AS production_companies
+FROM 
+    top_movies tm
+ORDER BY 
+    tm.production_year DESC, 
+    tm.total_cast DESC;

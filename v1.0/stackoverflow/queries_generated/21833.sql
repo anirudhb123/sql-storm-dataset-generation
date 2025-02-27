@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(v.Id) AS TotalVotes,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        LATERAL string_to_array(p.Tags, ',') AS TagArr ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(BOTH '<>' FROM TagArr) 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        ARRAY_AGG(DISTINCT c.Name) AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes c ON ph.Comment::int = c.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        cp.CloseCount,
+        cp.CloseReasons
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.RankByScore <= 5
+        AND (cp.CloseCount IS NULL OR cp.CloseCount < 3)
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    COALESCE(fp.CloseCount, 0) AS TotalCloseVotes,
+    fp.TagsList,
+    CASE 
+        WHEN fp.CloseCount IS NULL THEN 'No close votes'
+        ELSE 'Closed ' || fp.CloseCount || ' times: ' || COALESCE(STRING_AGG(fp.CloseReasons, ', '), 'N/A')
+    END AS CloseStatus
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.Score DESC, 
+    fp.CreationDate ASC;
+

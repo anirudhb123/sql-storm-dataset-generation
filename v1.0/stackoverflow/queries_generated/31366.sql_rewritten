@@ -1,0 +1,99 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.AcceptedAnswerId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.PostId
+    WHERE 
+        p.PostTypeId = 2  
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(v.Count, 0)) AS TotalVotes,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        MAX(u.CreationDate) AS AccountCreationDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1  
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2  
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+VoteStats AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseChanges,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 24 THEN 1 END) AS EditsApplied
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    u.DisplayName AS Owner,
+    u.QuestionCount,
+    u.TotalVotes,
+    phs.CloseChanges,
+    phs.EditsApplied,
+    v.UpVoteCount,
+    v.DownVoteCount,
+    DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), rp.CreationDate) AS DaysSinceCreation,
+    CASE
+        WHEN rp.CreationDate < DATEADD(DAY, -365, cast('2024-10-01 12:34:56' as timestamp)) THEN 'Old'
+        ELSE 'Recent'
+    END AS PostAgeCategory
+FROM 
+    RecursivePosts rp
+JOIN 
+    UserEngagement u ON rp.OwnerUserId = u.UserId
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+LEFT JOIN 
+    VoteStats v ON rp.PostId = v.PostId
+ORDER BY 
+    u.TotalVotes DESC, 
+    rp.Score DESC
+LIMIT 100;

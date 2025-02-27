@@ -1,0 +1,64 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(SUM(sr_return_quantity), 0) AS total_store_returns,
+        COALESCE(SUM(wr_return_quantity), 0) AS total_web_returns,
+        COUNT(DISTINCT CASE WHEN sr_return_quantity IS NOT NULL THEN sr_ticket_number END) AS store_return_transactions,
+        COUNT(DISTINCT CASE WHEN wr_return_quantity IS NOT NULL THEN wr_order_number END) AS web_return_transactions
+    FROM 
+        customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY c.c_customer_id
+), 
+Promotions AS (
+    SELECT 
+        p.p_promo_id, 
+        AVG(w.ws_net_paid) AS avg_paid
+    FROM 
+        promotion p
+    JOIN web_sales w ON p.p_promo_sk = w.ws_promo_sk
+    WHERE 
+        p.p_discount_active = 'Y' AND 
+        w.ws_sales_price > 50
+    GROUP BY p.p_promo_id
+),
+CustomerDemographics AS (
+    SELECT 
+        d.cd_demo_sk,
+        CASE 
+            WHEN d.cd_gender = 'M' THEN 'Male' 
+            ELSE 'Female' 
+        END AS gender,
+        SUM(d.cd_purchase_estimate) AS total_spent
+    FROM 
+        customer_demographics d
+    GROUP BY d.cd_demo_sk, d.cd_gender
+),
+RankedPromotions AS (
+    SELECT 
+        p.*, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_promo_id ORDER BY p.avg_paid DESC) AS rank
+    FROM 
+        Promotions p
+)
+SELECT 
+    c.c_customer_id,
+    cr.total_store_returns,
+    cr.total_web_returns,
+    cd.gender,
+    cd.total_spent,
+    rp.p_promo_id,
+    rp.avg_paid
+FROM 
+    CustomerReturns cr
+JOIN CustomerDemographics cd ON cr.c_customer_id = cd.cd_demo_sk
+FULL OUTER JOIN RankedPromotions rp ON (cr.total_store_returns > 0 OR cr.total_web_returns > 0) AND (cd.total_spent > 1000 OR cd.gender = 'Female')
+WHERE 
+    (rp.rank IS NULL OR rp.avg_paid IS NOT NULL)
+ORDER BY 
+    cr.total_store_returns DESC, 
+    cr.total_web_returns ASC, 
+    cd.total_spent DESC
+LIMIT 100;

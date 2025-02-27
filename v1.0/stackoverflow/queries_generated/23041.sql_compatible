@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.IsDeleted = 0 
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+PostDetail AS (
+    SELECT 
+        rp.PostId,
+        rp.OwnerUserId,
+        ua.UserId,
+        ua.PostCount,
+        ua.TotalBounty,
+        ur.Reputation,
+        (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+         FROM Tags t
+         WHERE t.Id IN (SELECT unnest(string_to_array(p.Tags, '>')))) AS Tags
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserActivity ua ON rp.OwnerUserId = ua.UserId
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+)
+SELECT 
+    pd.PostId,
+    pd.Rank,
+    pd.PostCount,
+    pd.Reputation,
+    pd.TotalBounty,
+    CASE 
+        WHEN pd.Reputation IS NULL THEN 'Unknown User Reputation'
+        WHEN pd.Reputation > 1000 THEN 'Highly Respected User'
+        ELSE 'User Needs Recognition'
+    END AS ReputationCategory,
+    pd.Tags
+FROM 
+    PostDetail pd
+WHERE 
+    pd.Rank = 1
+ORDER BY 
+    pd.Reputation DESC;

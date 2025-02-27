@@ -1,0 +1,50 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_preferred_cust_flag,
+           c_current_cdemo_sk, 0 AS level
+    FROM customer
+    WHERE c_preferred_cust_flag = 'Y'
+    
+    UNION ALL
+
+    SELECT c.customer_sk, c.c_first_name, c.c_last_name, c.c_preferred_cust_flag,
+           c.c_current_cdemo_sk, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_current_cdemo_sk
+),
+AggregatedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    WHERE ws_sold_date_sk > 2450000 
+    GROUP BY ws_bill_customer_sk
+),
+RankedCustomers AS (
+    SELECT 
+        ch.c_customer_sk,
+        ch.c_first_name,
+        ch.c_last_name,
+        COALESCE(as.total_quantity, 0) AS total_quantity,
+        COALESCE(as.total_profit, 0) AS total_profit,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(as.total_profit, 0) DESC) AS customer_rank
+    FROM CustomerHierarchy ch
+    LEFT JOIN AggregatedSales as ON ch.c_customer_sk = as.ws_bill_customer_sk
+    WHERE ch.level <= 2
+)
+
+SELECT 
+    rc.c_customer_sk,
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.total_quantity,
+    rc.total_profit,
+    CASE 
+        WHEN rc.total_profit IS NULL THEN 'No sales'
+        WHEN rc.total_profit > 1000 THEN 'High value'
+        WHEN rc.total_profit BETWEEN 500 AND 1000 THEN 'Medium value'
+        ELSE 'Low value'
+    END AS value_category
+FROM RankedCustomers rc
+WHERE rc.customer_rank <= 10
+ORDER BY rc.total_profit DESC;

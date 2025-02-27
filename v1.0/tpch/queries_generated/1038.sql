@@ -1,0 +1,51 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS average_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty) DESC) AS rank_within_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND l.l_shipdate <= '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    COUNT(DISTINCT os.o_orderkey) AS total_orders,
+    SUM(os.total_order_value) AS total_sales_value,
+    COALESCE(SUM(ss.total_available_quantity), 0) AS total_available_parts,
+    AVG(ss.average_supply_cost) AS average_supply_cost
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    OrderSummary os ON c.c_custkey = os.o_custkey
+LEFT JOIN 
+    SupplierStats ss ON ss.rank_within_nation = 1 AND n.n_nationkey = ss.s_nationkey
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT os.o_orderkey) > 0
+ORDER BY 
+    total_sales_value DESC;

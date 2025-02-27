@@ -1,0 +1,82 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') AND
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mk.linked_movie_id,
+        mk.title,
+        mk.production_year,
+        mh.level + 1
+    FROM 
+        movie_link mk
+    INNER JOIN 
+        movie_hierarchy mh ON mk.movie_id = mh.id
+),
+cast_stats AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        COUNT(CASE WHEN ci.role_id IS NOT NULL THEN 1 END) AS roles_filled
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+keyword_count AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+avg_rating AS (
+    SELECT 
+        movie_id,
+        AVG(rating.rating) AS avg_movie_rating
+    FROM (
+        SELECT 
+            movie_id,
+            ROUND(RANDOM() * 10, 2) AS rating 
+        FROM 
+            generate_series(1, (SELECT COUNT(*) FROM aka_title)) AS movie_id
+    ) AS rating
+    GROUP BY 
+        movie_id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    cs.total_cast,
+    cs.roles_filled,
+    COALESCE(kc.keyword_count, 0) AS number_of_keywords,
+    COALESCE(ar.avg_movie_rating, 0) AS average_rating,
+    CASE 
+        WHEN cs.total_cast > 10 AND kc.keyword_count > 2 AND ar.avg_movie_rating > 5 THEN 'Blockbuster'
+        WHEN cs.total_cast BETWEEN 5 AND 10 AND (kc.keyword_count BETWEEN 1 AND 2) THEN 'Moderate Success'
+        ELSE 'Flop'
+    END AS movie_status
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_stats cs ON mh.id = cs.movie_id
+LEFT JOIN 
+    keyword_count kc ON mh.id = kc.movie_id
+LEFT JOIN 
+    avg_rating ar ON mh.id = ar.movie_id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    mh.production_year DESC,
+    movie_status;

@@ -1,0 +1,62 @@
+WITH RECURSIVE customer_orders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+avg_order_value AS (
+    SELECT c.c_custkey,
+           AVG(o.o_totalprice) AS avg_total_price
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+supplier_part AS (
+    SELECT ps.ps_partkey,
+           ps.ps_suppkey,
+           (ps.ps_availqty * ps.ps_supplycost) AS supplier_value,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM partsupp ps
+    WHERE ps.ps_availqty IS NOT NULL
+),
+max_supplier AS (
+    SELECT sp.ps_partkey,
+           MAX(sp.supplier_value) AS max_value
+    FROM supplier_part sp
+    GROUP BY sp.ps_partkey
+),
+critical_orders AS (
+    SELECT o.o_orderkey,
+           o.o_totalprice,
+           n.n_name,
+           RANK() OVER (ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE EXISTS (
+        SELECT 1
+        FROM lineitem l
+        WHERE l.l_orderkey = o.o_orderkey
+        AND l.l_returnflag = 'N'
+    )
+)
+SELECT c.c_name,
+       co.o_orderkey,
+       co.o_orderdate,
+       COALESCE(m.max_value, 0) AS max_supply_value,
+       CASE 
+           WHEN co.o_totalprice IS NULL THEN 'No Orders'
+           ELSE 'Orders Exist'
+       END AS order_status,
+       cv.avg_total_price,
+       co.price_rank
+FROM customer_orders co
+LEFT JOIN max_supplier m ON co.o_orderkey = m.ps_partkey
+LEFT JOIN avg_order_value cv ON co.c_custkey = cv.c_custkey
+WHERE co.rn = 1 OR co.o_orderdate > (CURRENT_DATE - INTERVAL '1 year')
+ORDER BY co.o_orderdate DESC NULLS LAST;

@@ -1,0 +1,74 @@
+WITH RECURSIVE TotalSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+
+    UNION ALL 
+
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        ts.total_sales + SUM(l.l_extendedprice * (1 - l.l_discount))
+    FROM 
+        TotalSales ts
+    JOIN 
+        orders o ON ts.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate > '2020-01-01' -- condition for recursion
+    GROUP BY 
+        c.c_custkey, c.c_name, ts.total_sales
+),
+RegionSales AS (
+    SELECT 
+        na.n_name AS nation_name,
+        SUM(ts.total_sales) AS total_sales
+    FROM 
+        TotalSales ts
+    JOIN 
+        supplier s ON ts.c_custkey = s.s_suppkey -- Join needs to be modified as per valid keys
+    JOIN 
+        nation na ON s.s_nationkey = na.n_nationkey
+    GROUP BY 
+        na.n_name
+),
+RankedSales AS (
+    SELECT 
+        rs.nation_name,
+        rs.total_sales,
+        RANK() OVER (ORDER BY rs.total_sales DESC) AS sales_rank
+    FROM 
+        RegionSales rs
+)
+SELECT 
+    ps.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    p.p_brand,
+    p.p_type,
+    COALESCE(rs.total_sales, 0) AS region_sales,
+    CASE 
+        WHEN rs.sales_rank IS NOT NULL THEN 'Ranked'
+        ELSE 'Not Ranked'
+    END AS rank_status
+FROM 
+    partsupp ps
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    RankedSales rs ON p.p_brand = rs.nation_name
+WHERE 
+    ps.ps_availqty > 0 
+    AND (p.p_retailprice - ps.ps_supplycost) / NULLIF(p.p_retailprice, 0) > 0.2
+ORDER BY 
+    region_sales DESC;

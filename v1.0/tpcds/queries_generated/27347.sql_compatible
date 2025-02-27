@@ -1,0 +1,31 @@
+
+SELECT 
+    c.c_customer_id, 
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+    ca.ca_city, 
+    ca.ca_state, 
+    COUNT(DISTINCT ws.ws_order_number) AS total_web_orders, 
+    COUNT(DISTINCT ss.ss_ticket_number) AS total_store_orders,
+    COALESCE(SUM(ws.ws_ext_sales_price), 0) AS total_web_sales, 
+    COALESCE(SUM(ss.ss_ext_sales_price), 0) AS total_store_sales,
+    STRING_AGG(DISTINCT p.p_promo_name, ', ') AS promo_names
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN 
+    promotion p ON p.p_item_sk IN (SELECT i.i_item_sk FROM item i WHERE i.i_rec_start_date <= DATE('2002-10-01') AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > DATE('2002-10-01')))
+WHERE 
+    c.c_birth_country = 'USA' 
+AND 
+    ca.ca_state IN ('CA', 'NY', 'TX')
+GROUP BY 
+    c.c_customer_id, c.c_first_name, c.c_last_name, ca.ca_city, ca.ca_state
+HAVING 
+    COUNT(DISTINCT ws.ws_order_number) + COUNT(DISTINCT ss.ss_ticket_number) > 0
+ORDER BY 
+    total_web_sales DESC, total_store_sales DESC;

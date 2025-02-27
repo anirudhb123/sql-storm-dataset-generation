@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 
+           CASE WHEN CHAR_LENGTH(s_name) % 2 = 0 THEN TRIM(s_name) ELSE CONCAT(s_name, ' (Odd)') END AS formatted_name
+    FROM Supplier
+    WHERE s_acctbal IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT ps.ps_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost) + sh.s_acctbal,
+           CASE WHEN LENGTH(s.s_name) % 2 = 0 THEN TRIM(s.s_name) ELSE CONCAT(s.s_name, ' (Odd)') END
+    FROM Partsupp ps
+    JOIN Supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN SupplierHierarchy sh ON sh.s_suppkey = ps.ps_suppkey
+    GROUP BY ps.ps_suppkey, s.s_name, s.s_nationkey
+),
+NationAggregates AS (
+    SELECT n.n_regionkey, COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(COALESCE(s.s_acctbal, 0)) AS total_acctbal
+    FROM Nation n
+    LEFT JOIN Supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_regionkey
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM Orders o
+    WHERE o.o_totalprice > (
+        SELECT AVG(o2.o_totalprice) FROM Orders o2 WHERE o2.o_orderdate < CURRENT_DATE
+    )
+    AND o.o_orderstatus IN ('O', 'F')
+)
+SELECT r.r_name,
+       SUM(COALESCE(la.l_extendedprice, 0)) AS total_extended_price,
+       AVG(n.supplier_count) AS avg_supplier_count,
+       MAX(sh.formatted_name) AS max_formatted_supplier_name
+FROM Region r
+LEFT JOIN Nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN Supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN (
+    SELECT li.l_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS l_extendedprice
+    FROM Lineitem li
+    JOIN FilteredOrders fo ON li.l_orderkey = fo.o_orderkey
+    WHERE li.l_returnflag = 'N'
+    GROUP BY li.l_orderkey
+) AS la ON la.l_orderkey IN (
+    SELECT o.o_orderkey FROM FilteredOrders o WHERE o.rn = 1
+)
+JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+GROUP BY r.r_name
+ORDER BY r.r_name ASC
+HAVING COUNT(DISTINCT n.n_nationkey) > 1;

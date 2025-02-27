@@ -1,0 +1,58 @@
+
+WITH RECURSIVE date_range AS (
+    SELECT d_date_sk, d_date FROM date_dim
+    WHERE d_date >= '2022-01-01' AND d_date <= '2022-12-31'
+    UNION ALL
+    SELECT d_date_sk, d_date + INTERVAL '1 DAY'
+    FROM date_range
+    WHERE d_date < (SELECT MAX(d_date) FROM date_dim)
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER(PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+    WHERE c.c_birth_country IS NOT NULL
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+address_info AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        COUNT(DISTINCT cs.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN customer_sales cs ON c.c_customer_sk = cs.c_customer_sk
+    GROUP BY ca.ca_address_sk, ca.ca_city, ca.ca_state, ca.ca_country
+)
+
+SELECT 
+    ai.ca_city,
+    ai.ca_state,
+    ai.ca_country,
+    COALESCE(ci.customer_count, 0) AS customers,
+    AVG(cs.total_sales) AS avg_sales,
+    MIN(cs.total_sales) AS min_sales,
+    MAX(cs.total_sales) AS max_sales
+FROM address_info ai
+LEFT JOIN customer_sales cs ON cs.c_customer_sk IN (
+    SELECT c.c_customer_sk
+    FROM customer c
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE ca.ca_city = ai.ca_city AND ca.ca_state = ai.ca_state
+)
+CROSS JOIN (
+    SELECT COUNT(DISTINCT c_customer_sk) AS customer_count
+    FROM customer
+) ci
+WHERE cs.sales_rank <= 10
+GROUP BY ai.ca_city, ai.ca_state, ai.ca_country
+ORDER BY avg_sales DESC, ai.ca_city ASC
+LIMIT 50;

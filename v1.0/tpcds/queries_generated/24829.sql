@@ -1,0 +1,79 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        RANK() OVER (PARTITION BY sr_customer_sk ORDER BY SUM(sr_return_quantity) DESC) AS rank_return
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(ib.ib_lower_bound, 0) AS income_lower_bound,
+        COALESCE(ib.ib_upper_bound, 1000000) AS income_upper_bound
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+SalesSummary AS (
+    SELECT 
+        w.ws_ship_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        MAX(ws_sales_price) AS max_single_order_value
+    FROM 
+        web_sales w
+    GROUP BY 
+        w.ws_ship_customer_sk
+),
+FinalAnalysis AS (
+    SELECT 
+        cd.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        rr.total_returned,
+        ss.total_sales,
+        ss.total_orders,
+        ss.max_single_order_value
+    FROM 
+        CustomerDetails cd
+    LEFT JOIN 
+        RankedReturns rr ON cd.c_customer_id = rr.sr_customer_sk
+    LEFT JOIN 
+        SalesSummary ss ON cd.c_customer_id = ss.ws_ship_customer_sk
+    WHERE 
+        (rr.rank_return <= 10 OR rr.rank_return IS NULL) -- Take top 10 returning customers or those without returns
+        AND (ss.total_sales IS NULL OR ss.total_sales > 1000) -- Filter customers with significant sales activity
+)
+SELECT 
+    fa.c_customer_id,
+    fa.cd_gender,
+    fa.cd_marital_status,
+    fa.total_returned,
+    fa.total_sales,
+    fa.total_orders,
+    fa.max_single_order_value,
+    CASE 
+        WHEN fa.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Has Sales'
+    END AS sales_status,
+    CASE 
+        WHEN fa.total_returned IS NULL THEN 'Nothing Returned'
+        ELSE 'Returns Exist'
+    END AS return_status
+FROM 
+    FinalAnalysis fa
+ORDER BY 
+    fa.total_sales DESC,
+    fa.total_returned DESC;

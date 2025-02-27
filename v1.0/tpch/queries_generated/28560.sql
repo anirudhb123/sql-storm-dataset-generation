@@ -1,0 +1,47 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_supplycost, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+TopBrands AS (
+    SELECT 
+        rp.p_brand, 
+        SUM(rp.ps_supplycost) AS total_supplycost
+    FROM 
+        RankedParts rp
+    WHERE 
+        rp.rank <= 5
+    GROUP BY 
+        rp.p_brand
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+)
+SELECT 
+    cb.c_custkey, 
+    cb.c_name, 
+    tp.p_brand, 
+    tp.total_supplycost
+FROM 
+    CustomerOrders cb
+JOIN 
+    (SELECT DISTINCT p_brand FROM TopBrands) tp ON cb.c_name LIKE '%' || tp.p_brand || '%'
+ORDER BY 
+    cb.total_spent DESC, tp.total_supplycost DESC;

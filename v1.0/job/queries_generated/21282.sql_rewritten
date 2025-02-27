@@ -1,0 +1,94 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000  
+
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        mti.title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title mti ON ml.linked_movie_id = mti.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+actor_stats AS (
+    SELECT 
+        ak.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(mt.production_year) FILTER (WHERE mt.production_year IS NOT NULL) AS avg_movie_year
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.movie_id
+    GROUP BY 
+        ak.name
+),
+keyword_stats AS (
+    SELECT 
+        k.keyword,
+        COUNT(DISTINCT mk.movie_id) AS movie_count
+    FROM 
+        keyword k
+    JOIN 
+        movie_keyword mk ON k.id = mk.keyword_id
+    GROUP BY 
+        k.keyword
+),
+character_aliases AS (
+    SELECT 
+        cn.name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies
+    FROM 
+        char_name cn
+    LEFT JOIN 
+        cast_info ci ON ci.person_id = (SELECT id FROM aka_name WHERE name = cn.name LIMIT 1)
+    GROUP BY 
+        cn.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 1
+),
+final_results AS (
+    SELECT 
+        mh.movie_title,
+        ak.name AS actor_name,
+        ak.movie_count AS actor_movie_count,
+        ak.avg_movie_year AS actor_avg_year,
+        ks.keyword,
+        ks.movie_count AS keyword_movie_count,
+        ca.total_movies AS alias_movie_count
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        actor_stats ak ON ak.movie_count > 5  
+    LEFT JOIN 
+        keyword_stats ks ON ks.movie_count > 10  
+    LEFT JOIN 
+        character_aliases ca ON ca.total_movies > 0
+)
+
+SELECT 
+    fr.movie_title,
+    fr.actor_name,
+    COALESCE(fr.actor_movie_count, 0) AS actor_movie_count,
+    COALESCE(fr.actor_avg_year, 0) AS actor_avg_year,
+    fr.keyword,
+    COALESCE(fr.keyword_movie_count, 0) AS keyword_movie_count,
+    COALESCE(fr.alias_movie_count, 0) AS alias_movie_count
+FROM 
+    final_results fr
+ORDER BY 
+    fr.actor_movie_count DESC,
+    fr.keyword ASC
+LIMIT 100;

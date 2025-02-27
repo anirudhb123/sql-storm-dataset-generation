@@ -1,0 +1,43 @@
+
+WITH RankedSales AS (
+    SELECT ws.web_site_id,
+           SUM(ws.ws_sales_price) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender IN ('M', 'F') 
+    GROUP BY ws.web_site_id
+),
+SalesWithReturns AS (
+    SELECT ws.web_site_id,
+           COALESCE(SUM(wr.wr_return_amt), 0) AS total_returns,
+           rs.total_sales
+    FROM RankedSales rs
+    LEFT JOIN web_returns wr ON rs.web_site_id = wr.wr_web_page_sk
+    GROUP BY ws.web_site_id, rs.total_sales
+),
+FinalSales AS (
+    SELECT swr.web_site_id,
+           swr.total_sales,
+           swr.total_returns,
+           CASE 
+               WHEN swr.total_sales > 0 THEN (swr.total_returns / swr.total_sales) * 100
+               ELSE NULL 
+           END AS return_percentage
+    FROM SalesWithReturns swr
+)
+SELECT fs.web_site_id,
+       fs.total_sales,
+       fs.total_returns,
+       fs.return_percentage,
+       CASE 
+           WHEN fs.return_percentage > 50 THEN 'High Return'
+           WHEN fs.return_percentage IS NULL OR fs.return_percentage <= 0 THEN 'No Returns'
+           ELSE 'Normal Return'
+       END AS return_category
+FROM FinalSales fs
+WHERE fs.total_sales IS NOT NULL OR fs.total_returns IS NOT NULL
+ORDER BY fs.return_percentage DESC, fs.total_sales DESC
+LIMIT 10;
+```

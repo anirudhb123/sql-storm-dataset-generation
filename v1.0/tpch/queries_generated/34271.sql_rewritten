@@ -1,0 +1,70 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        1 AS level
+    FROM
+        orders o
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    
+    UNION ALL
+
+    SELECT
+        oh.o_orderkey,
+        oh.o_orderdate,
+        oh.o_totalprice,
+        c.c_name,
+        level + 1
+    FROM
+        OrderHierarchy oh
+    JOIN
+        lineitem l ON oh.o_orderkey = l.l_orderkey
+    JOIN
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE
+        ps.ps_availqty < 500
+)
+
+SELECT
+    oh.o_orderkey,
+    oh.o_orderdate,
+    oh.o_totalprice,
+    oh.c_name,
+    ROW_NUMBER() OVER (PARTITION BY oh.c_name ORDER BY oh.o_totalprice DESC) AS order_rank,
+    (SELECT COUNT(*)
+     FROM lineitem l
+     WHERE l.l_orderkey = oh.o_orderkey AND l.l_discount > 0.1) AS discounted_items,
+    CASE 
+        WHEN oh.o_totalprice IS NULL THEN 'Price Unknown'
+        ELSE FORMAT(oh.o_totalprice, 'C')
+    END AS formatted_price,
+    r.r_name AS region_name,
+    COALESCE(n.n_comment, 'No Comment') AS nation_comment
+FROM
+    OrderHierarchy oh
+JOIN 
+    lineitem l ON oh.o_orderkey = l.l_orderkey
+JOIN
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE
+    (oh.o_totalprice > 1000 OR oh.o_orderdate < cast('1998-10-01' as date) - INTERVAL '30 days')
+    AND r.r_name NOT LIKE '%east%'
+ORDER BY
+    oh.o_orderdate DESC, oh.o_totalprice DESC;

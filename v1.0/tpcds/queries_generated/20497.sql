@@ -1,0 +1,71 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(sr_return_quantity, 0) + COALESCE(cr_return_quantity, 0) + COALESCE(wr_return_quantity, 0)) AS total_returns,
+        COUNT(DISTINCT(sr_ticket_number)) + COUNT(DISTINCT(cr_order_number)) + COUNT(DISTINCT(wr_order_number)) AS distinct_return_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.w_returning_customer_sk
+    GROUP BY 
+        c.c_customer_id
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'UNKNOWN' 
+            WHEN cd.cd_purchase_estimate > 10000 THEN 'HIGH'
+            ELSE 'LOW'
+        END AS purchase_estimate_category
+    FROM 
+        customer_demographics cd
+), 
+TopReturningCustomers AS (
+    SELECT 
+        cr.c_customer_id,
+        cr.total_returns,
+        cr.distinct_return_count,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.purchase_estimate_category,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cr.total_returns DESC) AS return_rank
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        customer c ON cr.c_customer_id = c.c_customer_id
+    JOIN 
+        CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT
+    c.c_customer_id,
+    cr.total_returns AS total_returns,
+    cr.distinct_return_count AS distinct_return_count,
+    cd.purchase_estimate_category AS purchase_estimate_category,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    CASE 
+        WHEN return_rank IS NULL THEN 'NOT RANKED'
+        ELSE CAST(return_rank AS VARCHAR)
+    END AS gender_based_return_rank
+FROM 
+    TopReturningCustomers cr
+JOIN 
+    customer c ON cr.c_customer_id = c.c_customer_id 
+WHERE 
+    (cr.distinct_return_count IS NOT NULL OR cr.total_returns <> 0) 
+    AND (cd_gender = 'F' OR cd_gender = 'M')
+ORDER BY 
+    cr.total_returns DESC,
+    c.c_customer_id
+LIMIT 10;
+

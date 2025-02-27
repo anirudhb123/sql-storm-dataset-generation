@@ -1,0 +1,28 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT ps.ps_partkey, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM RankedSuppliers s
+    WHERE s.rn <= 5
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           li.l_partkey, li.l_quantity, li.l_discount,
+           ts.s_name, ts.s_acctbal
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    JOIN TopSuppliers ts ON li.l_partkey = ts.ps_partkey
+    WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+)
+SELECT od.o_orderkey, od.o_orderdate, od.o_totalprice,
+       SUM(od.l_quantity * (1 - od.l_discount)) AS total_revenue,
+       COUNT(DISTINCT od.s_name) AS distinct_suppliers
+FROM OrderDetails od
+GROUP BY od.o_orderkey, od.o_orderdate, od.o_totalprice
+HAVING SUM(od.l_quantity * (1 - od.l_discount)) > 1000
+ORDER BY total_revenue DESC;

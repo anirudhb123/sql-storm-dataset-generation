@@ -1,0 +1,31 @@
+SELECT 
+    p.p_brand, 
+    SUBSTRING(p.p_name, 1, 20) AS short_name, 
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count, 
+    AVG(ps.ps_supplycost) AS avg_supply_cost,
+    SUM(l.l_quantity) AS total_quantity_sold,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    CUBE (p.p_type) AS product_type_cube,
+    ROLLUP (p.p_mfgr) AS manufacturer_rollup
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_retailprice > 100.00 
+    AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    AND c.c_mktsegment = 'BUILDING'
+GROUP BY 
+    ROLLUP (p.p_brand, short_name)
+HAVING 
+    total_revenue > 5000.00
+ORDER BY 
+    p.p_brand, total_revenue DESC;

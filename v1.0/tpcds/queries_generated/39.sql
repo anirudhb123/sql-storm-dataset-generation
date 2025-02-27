@@ -1,0 +1,69 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amount) AS total_return_amount,
+        COUNT(*) AS return_count
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk BETWEEN 20220101 AND 20221231
+    GROUP BY 
+        sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        dem.c_first_name,
+        dem.c_last_name,
+        dem.cd_gender,
+        dem.cd_marital_status,
+        dem.cd_income_band_sk,
+        cr.total_returned_quantity,
+        cr.total_return_amount
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        CustomerDemographics dem ON cr.sr_customer_sk = dem.c_customer_sk
+    WHERE 
+        cr.total_returned_quantity > 10 OR cr.total_return_amount > 1000
+),
+IncomeBandAnalysis AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        AVG(hr.total_return_quantity) AS avg_returned_quantity,
+        AVG(hr.total_return_amount) AS avg_returned_amount
+    FROM 
+        HighReturnCustomers hr
+    JOIN 
+        household_demographics hd ON hr.cd_income_band_sk = hd.hd_income_band_sk
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        ib.ib_income_band_sk
+)
+SELECT 
+    ib.ib_income_band_sk,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    ia.avg_returned_quantity,
+    ia.avg_returned_amount
+FROM 
+    IncomeBandAnalysis ia
+JOIN 
+    income_band ib ON ia.ib_income_band_sk = ib.ib_income_band_sk
+ORDER BY 
+    ib.ib_income_band_sk;

@@ -1,0 +1,47 @@
+WITH SupplierStats AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        COUNT(DISTINCT p.p_partkey) AS PartCount
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+)
+SELECT
+    ns.n_name AS Nation,
+    COALESCE(ss.s_name, 'No Supplier') AS SupplierName,
+    ss.TotalSupplyCost,
+    cs.TotalSpent AS CustomerTotalSpent,
+    DENSE_RANK() OVER (PARTITION BY ns.n_nationkey ORDER BY ss.TotalSupplyCost DESC) AS CostRank,
+    CASE 
+        WHEN cs.TotalSpent IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS OrderStatus
+FROM
+    nation ns
+LEFT JOIN
+    supplier ss ON ns.n_nationkey = ss.s_nationkey
+LEFT JOIN
+    CustomerOrders cs ON ns.n_nationkey = (SELECT n.n_nationkey FROM customer c JOIN nation n ON c.c_nationkey = n.n_nationkey WHERE c.c_custkey = cs.c_custkey)
+WHERE
+    (ss.s_suppkey IS NOT NULL OR cs.c_custkey IS NOT NULL)
+ORDER BY
+    ns.n_name, CostRank;

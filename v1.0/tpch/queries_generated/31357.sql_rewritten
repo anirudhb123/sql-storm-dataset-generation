@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+SalesData AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY c.custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY c.c_custkey
+),
+HighValueSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 50000
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    AVG(s.total_sales) AS avg_sales_per_customer,
+    COALESCE(SUM(h.total_supply_value), 0) AS total_value_of_high_value_suppliers,
+    MAX(CASE WHEN sh.level IS NOT NULL THEN sh.level ELSE 0 END) AS max_supplier_level
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN SalesData s ON c.c_custkey = s.c_custkey
+LEFT JOIN HighValueSuppliers h ON h.s_nationkey = n.n_nationkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+WHERE r.r_name LIKE '%East%' AND n.n_comment IS NOT NULL
+GROUP BY r.r_name, n.n_name
+ORDER BY avg_sales_per_customer DESC;

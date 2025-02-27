@@ -1,0 +1,60 @@
+WITH MovieTitles AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title AS movie_title, 
+        t.production_year, 
+        k.keyword AS movie_keyword,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword
+), ActorDetails AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        ARRAY_AGG(DISTINCT mt.movie_title) AS movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        MovieTitles mt ON ci.movie_id = mt.movie_id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.id, a.name
+), KeywordsSummary AS (
+    SELECT 
+        mt.movie_keyword,
+        COUNT(DISTINCT mt.movie_id) AS total_movies,
+        SUM(ad.movie_count) AS total_actors
+    FROM 
+        MovieTitles mt
+    LEFT JOIN 
+        ActorDetails ad ON mt.movie_keyword = ad.movies
+    GROUP BY 
+        mt.movie_keyword
+)
+SELECT 
+    kws.movie_keyword,
+    kws.total_movies,
+    kws.total_actors,
+    ROW_NUMBER() OVER (ORDER BY kws.total_movies DESC) AS rank
+FROM 
+    KeywordsSummary kws
+WHERE 
+    kws.total_movies > 1
+ORDER BY 
+    kws.total_movies DESC;
+
+This SQL query benchmarks string processing by extracting data from various tables related to movies and actors, focusing on titles produced after 2000. It aggregates information about the number of distinct movies associated with keywords and counts of actors per keyword, ranking the keywords based on movie counts.

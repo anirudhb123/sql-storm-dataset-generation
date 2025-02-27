@@ -1,0 +1,84 @@
+WITH UserScore AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        SUM(CASE WHEN v.VoteTypeId = 6 THEN 1 ELSE 0 END) AS TotalCloseVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(po.Title, 'N/A') AS AcceptedAnswerTitle,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts po ON p.AcceptedAnswerId = po.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName, po.Title
+),
+FinalReport AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.TotalUpvotes,
+        us.TotalDownvotes,
+        us.TotalCloseVotes,
+        us.TotalPosts,
+        us.TotalComments,
+        ps.PostId,
+        ps.Title AS PostTitle,
+        ps.CreationDate AS PostCreationDate,
+        ps.Score AS PostScore,
+        ps.ViewCount AS PostViewCount,
+        ps.AcceptedAnswerTitle,
+        ps.CommentCount AS PostCommentCount
+    FROM 
+        UserScore us
+    LEFT JOIN 
+        PostStatistics ps ON us.UserId = ps.OwnerUserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalUpvotes,
+    TotalDownvotes,
+    TotalCloseVotes,
+    TotalPosts,
+    TotalComments,
+    PostId,
+    PostTitle,
+    PostCreationDate,
+    PostScore,
+    PostViewCount,
+    AcceptedAnswerTitle,
+    PostCommentCount
+FROM 
+    FinalReport
+ORDER BY 
+    TotalUpvotes DESC, PostScore DESC
+LIMIT 100;

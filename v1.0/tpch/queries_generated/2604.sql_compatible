@@ -1,0 +1,75 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS total_supplycost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+),
+customer_summary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    SUM(cs.order_count) AS total_orders,
+    AVG(cs.total_spent) AS avg_spent_per_customer,
+    SUM(s.total_supplycost) AS total_supplycost,
+    MAX(rs.total_sales) AS highest_sales
+FROM 
+    region r
+JOIN 
+    nation n ON n.n_regionkey = r.r_regionkey
+JOIN 
+    supplier s ON s.s_nationkey = n.n_nationkey
+JOIN 
+    customer_summary cs ON cs.c_custkey IN (
+        SELECT c.c_custkey
+        FROM customer c
+        WHERE c.c_nationkey = n.n_nationkey
+    )
+LEFT JOIN 
+    ranked_sales rs ON rs.p_partkey IN (
+        SELECT ps.ps_partkey
+        FROM partsupp ps
+        WHERE ps.ps_suppkey = s.s_suppkey
+    )
+LEFT JOIN
+    customer c ON c.c_nationkey = n.n_nationkey
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY 
+    total_orders DESC;

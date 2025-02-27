@@ -1,0 +1,80 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL  
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id 
+),
+cast_summary AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+movie_years AS (
+    SELECT 
+        production_year,
+        COUNT(*) AS movie_count
+    FROM 
+        aka_title
+    GROUP BY 
+        production_year
+),
+ranked_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(c.cast_count, 0) AS cast_count,
+        RANK() OVER (PARTITION BY mh.production_year ORDER BY COALESCE(c.cast_count, 0) DESC) AS rank
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_summary c ON mh.movie_id = c.movie_id
+)
+SELECT 
+    r.title,
+    r.production_year,
+    r.cast_count,
+    r.rank,
+    mk.keyword AS relevant_keyword
+FROM 
+    ranked_movies r
+LEFT JOIN 
+    movie_keyword mk ON r.movie_id = mk.movie_id
+JOIN 
+    (SELECT 
+         production_year,
+         RANK() OVER (ORDER BY movie_count DESC) AS year_rank
+     FROM 
+         movie_years) yr ON r.production_year = yr.production_year
+WHERE 
+    yr.year_rank <= 10  
+ORDER BY 
+    r.production_year DESC,
+    r.rank;

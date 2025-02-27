@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(u.DisplayName, 'Anonymous') AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankByViews,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostsWithTags AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerDisplayName,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                STRING_AGG(t.TagName, ', ') AS TagName
+            FROM 
+                Posts p
+            JOIN 
+                Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+            WHERE 
+                p.Id = rp.PostId
+        ) t ON true 
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.OwnerDisplayName
+)
+SELECT 
+    pwt.PostId,
+    pwt.Title,
+    pwt.CreationDate,
+    pwt.ViewCount,
+    pwt.Score,
+    pwt.OwnerDisplayName,
+    pwt.Tags,
+    CASE 
+        WHEN rp.RankByViews <= 10 THEN 'Top Viewed'
+        WHEN rp.RankByScore <= 10 THEN 'Top Scored'
+        ELSE 'Regular Post'
+    END AS PostRank
+FROM 
+    PostsWithTags pwt
+JOIN 
+    RankedPosts rp ON pwt.PostId = rp.PostId
+WHERE 
+    pwt.ViewCount > 100
+ORDER BY 
+    pwt.Score DESC, pwt.ViewCount ASC;

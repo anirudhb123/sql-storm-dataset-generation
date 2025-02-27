@@ -1,0 +1,58 @@
+
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        m.imdb_index,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT c.name, ', ') AS companies,
+        STRING_AGG(DISTINCT CONCAT(a.person_id, ': ', a.name), '; ') AS actors
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        cast_info ca ON m.id = ca.movie_id
+    LEFT JOIN 
+        aka_name a ON ca.person_id = a.person_id
+    GROUP BY 
+        m.id, m.title, m.production_year, m.kind_id, m.imdb_index
+),
+detailed_info AS (
+    SELECT 
+        md.*,
+        JSON_AGG(DISTINCT JSON_BUILD_OBJECT('info_type', i.info_type_id, 'info', mi.info)) AS info_details
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        movie_info mi ON md.movie_id = mi.movie_id
+    LEFT JOIN 
+        info_type i ON mi.info_type_id = i.id
+    GROUP BY 
+        md.movie_id, md.title, md.production_year, md.kind_id, md.imdb_index
+)
+
+SELECT 
+    d.movie_id,
+    d.title,
+    d.production_year,
+    d.kind_id,
+    d.imdb_index,
+    d.keywords,
+    d.companies,
+    d.actors,
+    d.info_details
+FROM 
+    detailed_info d
+WHERE 
+    d.production_year >= 2000
+ORDER BY 
+    d.production_year DESC;

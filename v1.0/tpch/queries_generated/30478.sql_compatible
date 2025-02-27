@@ -1,0 +1,49 @@
+
+WITH RECURSIVE RegionSales AS (
+    SELECT 
+        r_name AS region_name,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+    FROM 
+        region
+    LEFT JOIN 
+        nation ON r_regionkey = n_regionkey
+    LEFT JOIN 
+        supplier ON n_nationkey = s_nationkey
+    LEFT JOIN 
+        partsupp ON s_suppkey = ps_suppkey
+    LEFT JOIN 
+        part ON ps_partkey = p_partkey
+    LEFT JOIN 
+        lineitem ON p_partkey = l_partkey
+    LEFT JOIN 
+        orders ON l_orderkey = o_orderkey
+    WHERE 
+        o_orderdate >= '1996-01-01' AND o_orderdate < '1997-01-01'
+    GROUP BY 
+        r_name
+    UNION ALL
+    SELECT 
+        region_name,
+        COALESCE(total_sales, 0) * 1.05 AS total_sales
+    FROM 
+        RegionSales
+)
+SELECT 
+    r.r_name AS region,
+    COALESCE(SUM(rs.total_sales), 0) AS total_sales,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    AVG(s.s_acctbal) AS average_supplier_balance,
+    (SELECT COUNT(DISTINCT c.c_custkey) 
+     FROM customer c 
+     WHERE c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)) AS customer_count
+FROM 
+    region r
+LEFT JOIN 
+    RegionSales rs ON r.r_name = rs.region_name
+LEFT JOIN 
+    supplier s ON s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)
+GROUP BY 
+    r.r_regionkey, r.r_name
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

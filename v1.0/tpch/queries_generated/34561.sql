@@ -1,0 +1,74 @@
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+    UNION ALL
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        SalesHierarchy sh
+    JOIN 
+        orders o ON sh.o_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+OrderSummary AS (
+    SELECT 
+        sh.c_custkey,
+        sh.c_name,
+        SUM(sh.o_totalprice) AS total_spent,
+        COUNT(sh.o_orderkey) AS order_count
+    FROM 
+        SalesHierarchy sh
+    WHERE 
+        sh.rn = 1
+    GROUP BY 
+        sh.c_custkey, sh.c_name
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(os.total_spent, 0) AS total_spent,
+    COALESCE(os.order_count, 0) AS order_count,
+    AVG(ps.ps_supplycost) AS average_supply_cost,
+    COUNT(DISTINCT ps.ps_partkey) AS distinct_parts_supplied
+FROM 
+    customer c
+LEFT JOIN 
+    OrderSummary os ON c.c_custkey = os.c_custkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_suppkey IN (
+        SELECT 
+            l.l_suppkey 
+        FROM 
+            lineitem l
+        INNER JOIN 
+            orders o ON l.l_orderkey = o.o_orderkey
+        WHERE 
+            o.o_custkey = c.c_custkey
+            AND l.l_returnflag = 'N'
+    )
+GROUP BY 
+    c.c_custkey, c.c_name
+HAVING 
+    AVG(ps.ps_supplycost) IS NOT NULL
+ORDER BY 
+    total_spent DESC, 
+    c.c_name ASC;

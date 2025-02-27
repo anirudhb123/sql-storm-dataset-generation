@@ -1,0 +1,41 @@
+WITH RECURSIVE top_regions AS (
+    SELECT r_regionkey, r_name, r_comment
+    FROM region
+    WHERE r_name LIKE '%West%'
+    UNION ALL
+    SELECT r.regionkey, r.r_name, r.r_comment
+    FROM region r
+    INNER JOIN top_regions tr ON r.r_regionkey = tr.r_regionkey + 1
+),
+avg_supplier_cost AS (
+    SELECT ps.s_suppkey, AVG(ps.ps_supplycost) AS avg_cost
+    FROM partsupp ps
+    GROUP BY ps.s_suppkey
+),
+order_summary AS (
+    SELECT o.o_orderkey, c.c_name, o.o_orderstatus, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, c.c_name, o.o_orderstatus
+)
+SELECT 
+    p.p_name,
+    ps.ps_availqty,
+    COALESCE(avg_cost, 0) AS avg_supply_cost,
+    os.total_revenue,
+    CASE 
+        WHEN os.total_revenue IS NULL THEN 'No Revenue' 
+        ELSE 'Revenue Present' 
+    END AS revenue_status,
+    RANK() OVER (PARTITION BY os.o_orderstatus ORDER BY os.total_revenue DESC) AS revenue_rank
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN avg_supplier_cost asc ON ps.ps_suppkey = asc.s_suppkey
+LEFT JOIN order_summary os ON ps.ps_partkey = (SELECT l.l_partkey FROM lineitem l WHERE l.l_returnflag = 'R' LIMIT 1)
+WHERE 
+    p.p_size >= 20 
+    AND ps.ps_availqty IS NOT NULL
+    AND (p.p_comment LIKE '%fragile%' OR p.p_comment IS NULL)
+ORDER BY 
+    revenue_rank, p.p_name;

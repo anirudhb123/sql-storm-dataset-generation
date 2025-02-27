@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_ship_date_sk,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_paid DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_profit > 0
+), 
+AggregateMetrics AS (
+    SELECT
+        ws.s_ship_mode_sk,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        COUNT(DISTINCT ws.ws_order_number) AS unique_orders,
+        AVG(ws.ws_ext_discount_amt) AS avg_discount
+    FROM 
+        RankedSales as rs
+    JOIN 
+        web_sales ws ON rs.ws_order_number = ws.ws_order_number
+    GROUP BY 
+        ws.s_ship_mode_sk
+),
+ItemSales AS (
+    SELECT 
+        i.i_item_id,
+        COUNT(cs.cs_item_sk) AS total_sales,
+        SUM(cs.cs_ext_sales_price) AS total_revenue
+    FROM 
+        item i
+    JOIN 
+        catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL AND 
+        (i.i_current_price < 50 OR i.i_current_price IS NULL)
+    GROUP BY 
+        i.i_item_id
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COALESCE(im.total_sales, 0) AS total_item_sales,
+    COALESCE(am.total_net_paid, 0) AS total_net_sales,
+    am.unique_orders,
+    am.avg_discount
+FROM 
+    customer_address ca
+LEFT JOIN 
+    AggregateMetrics am ON ca.ca_address_sk = am.s_ship_mode_sk
+LEFT JOIN 
+    ItemSales im ON am.total_net_paid = im.total_revenue
+WHERE 
+    (ca.ca_city IS NOT NULL OR ca.ca_state IS NOT NULL) AND 
+    (ca.ca_country IS NULL OR ca.ca_country = 'USA')
+ORDER BY 
+    total_item_sales DESC, total_net_sales DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,75 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+        AND o.o_orderdate <= DATE '1997-12-31'
+),
+supplier_part_summary AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+),
+lineitem_summary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_tax) AS avg_tax
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate > DATE '1998-10-01' - INTERVAL '1 year'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_totalprice,
+    r.o_orderdate,
+    r.o_orderstatus,
+    pp.p_name,
+    COALESCE(sp.total_available, 0) AS total_available_parts,
+    COALESCE(sp.avg_supply_cost, 0) AS avg_supply_cost,
+    ls.total_revenue,
+    ls.avg_tax
+FROM 
+    ranked_orders r
+LEFT JOIN 
+    lineitem_summary ls ON r.o_orderkey = ls.l_orderkey
+LEFT JOIN 
+    supplier_part_summary sp ON sp.ps_partkey = (
+        SELECT 
+            ps.ps_partkey
+        FROM 
+            partsupp ps
+        JOIN 
+            supplier s ON ps.ps_suppkey = s.s_suppkey
+        WHERE 
+            s.s_acctbal > 1000 
+            AND s.s_nationkey = (
+                SELECT n.n_nationkey
+                FROM nation n
+                WHERE n.n_name = 'USA'
+            )
+        ORDER BY 
+            ps.ps_availqty DESC
+        FETCH FIRST 1 ROW ONLY
+    )
+WHERE 
+    r.order_rank <= 10
+ORDER BY 
+    r.o_totalprice DESC;

@@ -1,0 +1,55 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ParentId,
+        P.Score,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT
+        P1.Id,
+        P1.Title,
+        P1.CreationDate,
+        P1.ParentId,
+        P1.Score,
+        PH.Level + 1
+    FROM 
+        Posts P1
+    INNER JOIN 
+        PostHierarchy PH ON P1.ParentId = PH.PostId
+)
+
+SELECT
+    U.DisplayName AS User,
+    COUNT(DISTINCT P.Id) AS TotalPosts,
+    COUNT(DISTINCT C.Id) AS TotalComments,
+    SUM(COALESCE(V.Score, 0)) AS TotalVoteScore,
+    AVG(PH.Level) AS AvgPostLevel,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+FROM
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+LEFT JOIN 
+    Tags T ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+LEFT JOIN 
+    PostHierarchy PH ON P.Id = PH.PostId
+WHERE
+    U.Reputation > 1000
+GROUP BY 
+    U.Id, U.DisplayName
+ORDER BY 
+    TotalPosts DESC
+LIMIT 10;

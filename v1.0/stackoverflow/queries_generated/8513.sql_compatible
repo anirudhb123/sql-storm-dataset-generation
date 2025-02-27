@@ -1,0 +1,61 @@
+
+WITH UserScoreSummary AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        COUNT(DISTINCT C.Id) AS CommentsCount,
+        RANK() OVER (ORDER BY SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) DESC) AS ReputationRank
+    FROM 
+        Users U 
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId 
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId 
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId 
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        UpVotes, 
+        DownVotes, 
+        PostsCount, 
+        CommentsCount,
+        ReputationRank
+    FROM 
+        UserScoreSummary 
+    WHERE 
+        ReputationRank <= 10
+),
+PostTags AS (
+    SELECT 
+        P.Id AS PostId, 
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM 
+        Posts P 
+    LEFT JOIN 
+        UNNEST(string_to_array(P.Tags, '><')) AS TagName ON TRUE
+    LEFT JOIN 
+        Tags T ON T.TagName = TagName
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    TU.DisplayName,
+    TU.UpVotes,
+    TU.DownVotes,
+    TU.PostsCount,
+    TU.CommentsCount,
+    PT.Tags
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    PostTags PT ON PT.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = TU.UserId)
+ORDER BY 
+    TU.ReputationRank;

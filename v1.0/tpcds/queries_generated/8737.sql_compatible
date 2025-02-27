@@ -1,0 +1,61 @@
+
+WITH SalesData AS (
+    SELECT 
+        w.warehouse_id,
+        s.store_id,
+        SUM(ws.sales_price * ws.quantity) AS total_sales,
+        AVG(ws.list_price) AS avg_list_price,
+        COUNT(DISTINCT ws.order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.warehouse_sk = w.warehouse_sk
+    JOIN 
+        store s ON ws.store_sk = s.s_store_sk
+    GROUP BY 
+        w.warehouse_id, s.store_id
+),
+CustomerData AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT ws.bill_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_income_band_sk
+),
+RankedSales AS (
+    SELECT 
+        sd.warehouse_id,
+        sd.store_id,
+        sd.total_sales,
+        sd.avg_list_price,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        ROW_NUMBER() OVER (PARTITION BY sd.store_id ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM 
+        SalesData sd
+    JOIN 
+        CustomerData cd ON sd.store_id = cd.cd_demo_sk 
+    WHERE 
+        sd.total_orders > 0
+)
+SELECT 
+    warehouse_id, 
+    store_id,
+    total_sales,
+    avg_list_price,
+    cd_gender,
+    cd_income_band_sk
+FROM 
+    RankedSales
+WHERE 
+    sales_rank <= 5
+ORDER BY 
+    store_id, total_sales DESC;

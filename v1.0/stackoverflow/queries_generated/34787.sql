@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.Score, 
+        P.ViewCount,
+        P.CreationDate,
+        P.Tags,
+        U.Reputation,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC, P.ViewCount DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+),
+CommentAggregation AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS CommentCount,
+        STRING_AGG(Text, '; ') AS Comments
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+CloseReasons AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(CAST(PH.Comment AS VARCHAR(max)), '; ') AS CloseReasons
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    GROUP BY 
+        PH.PostId
+),
+FinalResults AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Score,
+        RP.ViewCount,
+        RP.CreationDate,
+        RP.Tags,
+        COALESCE(CA.CommentCount, 0) AS TotalComments,
+        COALESCE(CA.Comments, 'No Comments') AS Comments,
+        COALESCE(CR.CloseCount, 0) AS CloseCount,
+        URL.UserDisplayName AS OwnerName,
+        URL.Reputation AS OwnerReputation
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        CommentAggregation CA ON RP.PostId = CA.PostId
+    LEFT JOIN 
+        CloseReasons CR ON RP.PostId = CR.PostId
+    LEFT JOIN 
+        Users URL ON RP.Reputation = URL.Reputation  -- Assuming we need some user information.
+    WHERE 
+        RP.PostRank <= 5 -- Get top 5 ranked posts per post type
+)
+SELECT 
+    FR.*,
+    (SELECT COUNT(*) FROM Votes V WHERE V.PostId = FR.PostId AND V.VoteTypeId = 2) AS UpVotes,
+    (SELECT COUNT(*) FROM Votes V WHERE V.PostId = FR.PostId AND V.VoteTypeId = 3) AS DownVotes,
+    CASE 
+        WHEN FR.CloseCount > 0 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    FinalResults FR
+ORDER BY 
+    FR.Score DESC, FR.ViewCount DESC;

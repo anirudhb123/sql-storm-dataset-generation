@@ -1,0 +1,83 @@
+WITH RankedMovies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        RANK() OVER (PARTITION BY title.production_year ORDER BY title.production_year DESC) AS rank_year
+    FROM 
+        title
+    WHERE 
+        title.production_year IS NOT NULL
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        ct.kind AS role_type,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type ct ON ci.role_id = ct.id
+),
+KeywordStats AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+MovieAndCompany AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ci.company_name,
+        ci.company_type,
+        kd.keyword_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyInfo ci ON rm.movie_id = ci.movie_id
+    LEFT JOIN 
+        KeywordStats kd ON rm.movie_id = kd.movie_id
+    WHERE 
+        rm.rank_year <= 5
+)
+SELECT 
+    mac.movie_id,
+    mac.title,
+    mac.production_year,
+    mac.company_name,
+    mac.company_type,
+    COALESCE(mac.keyword_count, 0) AS keyword_count,
+    STRING_AGG(cd.actor_name || ' (' || cd.role_type || ')', ', ' ORDER BY cd.actor_rank) AS cast_details
+FROM 
+    MovieAndCompany mac
+LEFT JOIN 
+    CastDetails cd ON mac.movie_id = cd.movie_id
+GROUP BY 
+    mac.movie_id,
+    mac.title,
+    mac.production_year,
+    mac.company_name,
+    mac.company_type
+ORDER BY 
+    mac.production_year DESC, 
+    mac.title;

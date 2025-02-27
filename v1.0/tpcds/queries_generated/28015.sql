@@ -1,0 +1,49 @@
+
+WITH processed_addresses AS (
+    SELECT 
+        ca_address_sk,
+        TRIM(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        LOWER(ca_country) AS country_lower
+    FROM 
+        customer_address
+),
+address_metrics AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS address_count,
+        AVG(LENGTH(full_address)) AS avg_address_length,
+        COUNT(DISTINCT ca_zip) AS distinct_zip_codes
+    FROM 
+        processed_addresses
+    GROUP BY 
+        ca_state
+),
+demographics_metrics AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS customer_count,
+        AVG(cd_income_band_sk) AS avg_income_band,
+        SUM(cd_dep_count) AS total_dependents
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+)
+SELECT 
+    a.ca_state,
+    a.address_count,
+    a.avg_address_length,
+    a.distinct_zip_codes,
+    d.customer_count,
+    d.avg_income_band,
+    d.total_dependents
+FROM 
+    address_metrics a
+JOIN 
+    demographics_metrics d ON a.ca_state = UPPER(d.cd_gender) -- artificial join for benchmarking
+ORDER BY 
+    a.address_count DESC, d.customer_count DESC
+LIMIT 100;

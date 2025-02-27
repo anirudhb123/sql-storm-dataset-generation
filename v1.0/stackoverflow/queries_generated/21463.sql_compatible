@@ -1,0 +1,82 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 YEAR'
+),
+
+BadgesCount AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        STRING_AGG(DISTINCT ph.UserDisplayName ORDER BY ph.CreationDate) AS Editors,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId
+),
+
+ClosedPostReasons AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    r.PostId,
+    r.Title,
+    r.CreationDate AS PostCreationDate,
+    r.Score AS PostScore,
+    COALESCE(bc.BadgeCount, 0) AS BadgeCount,
+    COALESCE(bc.BadgeNames, 'No Badges') AS Badges,
+    COALESCE(pHD.Editors, 'No Edits') AS Editors,
+    COALESCE(pHD.LastEditDate, 'Never Edited') AS LastEditDate,
+    COALESCE(cpr.CloseReason, 'Not Closed') AS CloseReason
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts r ON u.Id = r.OwnerUserId AND r.RN = 1 
+LEFT JOIN 
+    BadgesCount bc ON u.Id = bc.UserId
+LEFT JOIN 
+    PostHistoryDetails pHD ON r.PostId = pHD.PostId
+LEFT JOIN 
+    ClosedPostReasons cpr ON r.PostId = cpr.PostId
+WHERE 
+    u.Reputation > 50 
+ORDER BY 
+    u.Reputation DESC, r.PostCreationDate DESC;

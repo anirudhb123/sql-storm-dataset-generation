@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.CreationDate, 
+        p.OwnerUserId, 
+        p.AcceptedAnswerId, 
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+PostScores AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title,
+        rp.Score, 
+        rp.UserRank,
+        rp.TotalPosts,
+        CASE 
+            WHEN rp.Score IS NULL THEN 0
+            WHEN rp.Score BETWEEN 0 AND 10 THEN 'Low'
+            WHEN rp.Score BETWEEN 11 AND 50 THEN 'Medium'
+            ELSE 'High'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+),
+PopularPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title, 
+        ps.Score, 
+        ps.ScoreCategory,
+        ps.UserRank,
+        ps.TotalPosts,
+        COALESCE(upVotes.UpVotes, 0) AS UpVotesCount,
+        COALESCE(downVotes.DownVotes, 0) AS DownVotesCount,
+        ps.CreationDate
+    FROM 
+        PostScores ps
+    LEFT JOIN (
+        SELECT 
+            p.Id AS PostId,
+            COUNT(v.Id) AS UpVotes
+        FROM 
+            Posts p
+        LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2
+        GROUP BY 
+            p.Id
+    ) upVotes ON ps.PostId = upVotes.PostId
+    LEFT JOIN (
+        SELECT 
+            p.Id AS PostId,
+            COUNT(v.Id) AS DownVotes
+        FROM 
+            Posts p
+        LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 3
+        GROUP BY 
+            p.Id
+    ) downVotes ON ps.PostId = downVotes.PostId
+)
+SELECT 
+    pp.PostId, 
+    pp.Title, 
+    pp.Score, 
+    pp.ScoreCategory,
+    pp.UserRank,
+    pp.TotalPosts,
+    pp.UpVotesCount, 
+    pp.DownVotesCount,
+    pp.CreationDate,
+    CASE 
+        WHEN pp.TotalPosts > 10 THEN 'Frequent Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorType,
+    CASE 
+        WHEN pp.Score = 0 THEN 'No Interaction'
+        ELSE 'Interacted'
+    END AS InteractionStatus
+FROM 
+    PopularPosts pp
+WHERE 
+    pp.UpVotesCount > pp.DownVotesCount
+    AND pp.UserRank <= 5
+ORDER BY 
+    pp.Score DESC,
+    pp.CreationDate DESC
+LIMIT 50;

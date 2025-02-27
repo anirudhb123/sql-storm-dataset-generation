@@ -1,0 +1,60 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.OwnerUserId, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+QuestionTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.WikiPostId = p.Id
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    COALESCE(up.TotalBounty, 0) AS TotalBounty,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    qt.Tags
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+LEFT JOIN 
+    UserReputation ur ON ur.UserId = rp.OwnerUserId
+LEFT JOIN 
+    QuestionTags qt ON qt.PostId = rp.PostId 
+WHERE 
+    rp.Rank = 1
+    AND (up.Reputation >= 1000 OR qt.Tags IS NOT NULL)
+ORDER BY 
+    up.Reputation DESC, rp.Score DESC;

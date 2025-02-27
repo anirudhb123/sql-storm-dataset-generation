@@ -1,0 +1,32 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        U.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AnswerCount, 
+             p.CommentCount, p.FavoriteCount, U.Reputation
+)
+SELECT 
+    COUNT(*) AS TotalPosts,
+    AVG(ViewCount) AS AvgViewCount,
+    AVG(Score) AS AvgScore,
+    AVG(AnswerCount) AS AvgAnswerCount,
+    AVG(CommentCount) AS AvgCommentCount,
+    AVG(FavoriteCount) AS AvgFavoriteCount,
+    AVG(OwnerReputation) AS AvgOwnerReputation,
+    MAX(ViewCount) AS MaxViewCount,
+    MIN(ViewCount) AS MinViewCount
+FROM PostStats;

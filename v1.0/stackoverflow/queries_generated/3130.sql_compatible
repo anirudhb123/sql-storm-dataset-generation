@@ -1,0 +1,52 @@
+
+WITH UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpvoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownvoteCount,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Posts p ON v.PostId = p.Id
+    GROUP BY u.Id, u.DisplayName
+),
+ClosedPostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        STRING_AGG(ph.Comment, '; ') AS CloseComments
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY p.Id, ph.CreationDate, ph.PostHistoryTypeId
+),
+UsersWithTags AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT t.Id) AS TagCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Tags t ON t.WikiPostId = p.Id
+    GROUP BY u.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    uvs.UpvoteCount,
+    uvs.DownvoteCount,
+    uvs.TotalPosts,
+    uvs.TotalViews,
+    uvs.AverageScore,
+    COALESCE(cph.CloseComments, 'No closure history') AS ClosureHistory,
+    COALESCE(uwt.TagCount, 0) AS UniqueTagCount
+FROM Users u
+JOIN UserVoteSummary uvs ON u.Id = uvs.UserId
+LEFT JOIN ClosedPostHistory cph ON cph.PostId = (SELECT MAX(PostId) FROM Posts WHERE OwnerUserId = u.Id AND ClosedDate IS NOT NULL)
+LEFT JOIN UsersWithTags uwt ON u.Id = uwt.UserId
+WHERE u.Reputation > 100
+ORDER BY u.Reputation DESC, uvs.TotalViews DESC
+LIMIT 50;

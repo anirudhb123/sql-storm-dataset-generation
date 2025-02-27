@@ -1,0 +1,72 @@
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Users.Reputation) AS AverageUserReputation,
+        STRING_AGG(DISTINCT Users.DisplayName, ', ') AS ActiveUsers
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    WHERE 
+        Posts.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' 
+    GROUP BY 
+        Tags.TagName
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT PH.UserId) AS EditCount,
+        COUNT(DISTINCT V.UserId) AS VoteCount,
+        MAX(PH.CreationDate) AS LastEdited
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id
+),
+TopPostActivity AS (
+    SELECT 
+        PA.PostId,
+        PA.Title,
+        PA.CreationDate,
+        PA.CommentCount,
+        PA.EditCount,
+        PA.VoteCount,
+        PA.LastEdited,
+        RANK() OVER (ORDER BY PA.VoteCount DESC) AS VoteRank
+    FROM 
+        PostActivity PA
+    WHERE 
+        PA.VoteCount > 0
+)
+SELECT 
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews,
+    TS.AverageUserReputation,
+    TS.ActiveUsers,
+    TPA.Title,
+    TPA.CommentCount,
+    TPA.EditCount,
+    TPA.VoteCount,
+    TPA.LastEdited
+FROM 
+    TagStatistics TS
+JOIN 
+    TopPostActivity TPA ON TPA.VoteRank <= 10
+ORDER BY 
+    TS.PostCount DESC, TS.TotalViews DESC;

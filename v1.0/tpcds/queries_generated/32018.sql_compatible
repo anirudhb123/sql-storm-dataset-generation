@@ -1,0 +1,48 @@
+
+WITH RECURSIVE sales_path AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_ship_mode_sk, 
+        ws_net_profit,
+        1 AS level
+    FROM web_sales
+    WHERE ws_net_profit IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        cs.sold_date_sk, 
+        cs.cs_item_sk, 
+        cs.cs_order_number, 
+        cs.cs_ship_mode_sk,
+        cs.net_profit + sp.ws_net_profit
+    FROM catalog_sales cs
+    JOIN sales_path sp ON cs.cs_item_sk = sp.ws_item_sk AND cs.cs_order_number = sp.ws_order_number
+    WHERE cs.cs_net_profit IS NOT NULL AND sp.level < 3
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    SUM(sp.ws_net_profit) AS total_net_profit,
+    COUNT(DISTINCT sp.ws_order_number) AS total_orders,
+    AVG(sp.ws_net_profit) AS avg_profit_per_order,
+    MAX(sp.ws_net_profit) AS max_profit,
+    MIN(sp.ws_net_profit) AS min_profit
+FROM sales_path sp
+LEFT JOIN customer_address ca ON sp.ws_order_number = ca.ca_address_sk
+LEFT JOIN customer_demographics cd ON ca.ca_address_sk = cd.cd_demo_sk
+WHERE cd.cd_credit_rating IS NOT NULL
+  AND cd.cd_credit_rating <> 'bad'
+  AND EXISTS (
+      SELECT 1 
+      FROM store s 
+      WHERE s.s_store_sk = sp.ws_item_sk AND s.s_number_employees > 10
+  )
+  AND sp.level = 2
+GROUP BY 
+    ca.ca_city, 
+    ca.ca_state
+HAVING COUNT(DISTINCT sp.ws_order_number) > 5
+ORDER BY total_net_profit DESC;

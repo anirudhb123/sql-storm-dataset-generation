@@ -1,0 +1,84 @@
+
+WITH RECURSIVE sales_analysis AS (
+    SELECT 
+        w.warehouse_name,
+        s.s_store_name,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY w.warehouse_name ORDER BY SUM(ss.ss_net_profit) DESC) AS profit_rank
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.ss_store_sk = s.s_store_sk
+    JOIN 
+        warehouse w ON s.s_company_id = w.w_warehouse_sk
+    WHERE
+        ss.ss_sold_date_sk > 100000 
+    GROUP BY 
+        w.warehouse_name, s.s_store_name
+),
+filtered_sales AS (
+    SELECT 
+        warehouse_name,
+        s_store_name,
+        total_net_profit
+    FROM 
+        sales_analysis
+    WHERE 
+        profit_rank <= 10
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            WHEN cd.cd_purchase_estimate > 1000 THEN 'High Value'
+            ELSE 'Low Value'
+        END AS purchase_status
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_with_customer AS (
+    SELECT 
+        fs.warehouse_name,
+        fs.s_store_name,
+        cd.c_customer_id,
+        cd.purchase_status,
+        fs.total_net_profit
+    FROM 
+        filtered_sales fs
+    LEFT JOIN 
+        web_sales ws ON fs.s_store_name = CAST(ws.ws_order_number AS CHAR)
+    LEFT JOIN 
+        customer_data cd ON ws.ws_bill_customer_sk = cd.c_customer_id
+    WHERE 
+        cd.purchase_status = 'High Value' OR fs.total_net_profit > 5000
+),
+final_analysis AS (
+    SELECT 
+        warehouse_name,
+        s_store_name,
+        COUNT(DISTINCT c_customer_id) AS high_value_customers,
+        AVG(total_net_profit) AS average_profit
+    FROM 
+        sales_with_customer
+    GROUP BY 
+        warehouse_name, s_store_name
+)
+SELECT 
+    warehouse_name,
+    s_store_name,
+    high_value_customers,
+    average_profit,
+    CASE 
+        WHEN average_profit IS NULL THEN 'No Data'
+        WHEN average_profit > 10000 THEN 'Very Profitable'
+        ELSE 'Moderately Profitable' 
+    END AS profitability_status
+FROM 
+    final_analysis
+ORDER BY 
+    high_value_customers DESC, average_profit DESC;

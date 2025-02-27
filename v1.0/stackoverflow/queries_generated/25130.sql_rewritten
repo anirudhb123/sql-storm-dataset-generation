@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        LATERAL (
+            SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName
+        ) t ON true
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+UserBenchmark AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 0 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagUsage AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%' 
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        t.TagName
+),
+TopUserPosts AS (
+    SELECT 
+        rp.*,
+        ub.PostCount AS UserPostCount,
+        ub.TotalViews AS UserTotalViews,
+        ub.AverageScore AS UserAverageScore
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserBenchmark ub ON rp.OwnerUserId = ub.UserId
+    WHERE 
+        rp.UserPostRank <= 5 
+)
+SELECT 
+    tup.PostId,
+    tup.Title,
+    tup.Body,
+    tup.CreationDate,
+    tup.ViewCount,
+    tup.Score,
+    tup.OwnerDisplayName,
+    tup.Tags,
+    ub.PostCount AS UserPostCount,
+    ub.TotalViews AS UserTotalViews,
+    ub.AverageScore AS UserAverageScore,
+    t.TagName,
+    tagusage.PostCount AS TagPostCount,
+    tagusage.TotalViews AS TagTotalViews,
+    tagusage.AverageScore AS TagAverageScore
+FROM 
+    TopUserPosts tup
+LEFT JOIN 
+    UserBenchmark ub ON tup.OwnerUserId = ub.UserId
+LEFT JOIN 
+    TagUsage tagusage ON tup.Tags @> ARRAY[tagusage.TagName] 
+ORDER BY 
+    tup.CreationDate DESC, 
+    UserAverageScore DESC;

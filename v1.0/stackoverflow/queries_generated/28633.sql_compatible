@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpvoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2)  
+            AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.Tags,
+        rp.CommentCount,
+        rp.UpvoteCount,
+        p.OwnerUserId
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Posts p ON rp.PostId = p.Id
+    WHERE 
+        rp.RankByScore = 1
+),
+UserSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(CASE WHEN bp.PostId IS NOT NULL THEN 1 ELSE 0 END) AS PostsCreated,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgesEarned
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        TopPosts bp ON p.Id = bp.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.PostsCreated,
+    us.BadgesEarned,
+    COALESCE(SUM(tp.CommentCount), 0) AS TotalComments,
+    COALESCE(SUM(tp.UpvoteCount), 0) AS TotalUpvotes,
+    STRING_AGG(DISTINCT tp.Tags, ', ') AS DistinctTags
+FROM 
+    UserSummary us
+LEFT JOIN 
+    TopPosts tp ON us.UserId = tp.OwnerUserId
+GROUP BY 
+    us.UserId, us.DisplayName, us.Reputation
+ORDER BY 
+    us.Reputation DESC, us.PostsCreated DESC
+LIMIT 10;

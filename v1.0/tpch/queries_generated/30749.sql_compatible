@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_partkey,
+        ps.ps_supplycost,
+        CAST(NULL AS VARCHAR) AS Parent_Supplier
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+
+    UNION ALL
+
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_partkey,
+        ps.ps_supplycost,
+        sc.s_name AS Parent_Supplier
+    FROM 
+        SupplyChain sc
+    JOIN 
+        partsupp ps ON sc.ps_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+
+SELECT 
+    p.p_name,
+    p.p_mfgr,
+    SUM(COALESCE(l.l_extendedprice, 0) * (1 - l.l_discount)) AS Total_Sales,
+    AVG(s.s_acctbal) AS Average_Supplier_Balance,
+    COUNT(DISTINCT o.o_orderkey) AS Order_Count,
+    ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY SUM(COALESCE(l.l_extendedprice, 0) * (1 - l.l_discount)) DESC) AS Sales_Rank
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    SupplyChain sc ON sc.ps_partkey = p.p_partkey
+LEFT JOIN 
+    supplier s ON sc.s_suppkey = s.s_suppkey
+WHERE 
+    p.p_size BETWEEN 10 AND 50
+    AND (s.s_acctbal IS NOT NULL OR s.s_acctbal = 0)
+    AND (sc.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp))
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_mfgr, p.p_type
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    Total_Sales DESC;

@@ -1,0 +1,71 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Ranking
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON V.UserId = U.Id
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+HighReputationUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalBounty,
+        Ranking
+    FROM UserStats
+    WHERE Reputation > 1000
+    ORDER BY Reputation DESC
+    OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY
+),
+PostAggregates AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN PH.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS EditCount,
+        AVG(P.Score) AS AverageScore,
+        LAG(P.CreationDate) OVER (ORDER BY P.CreationDate) AS PreviousPostDate
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY P.Id, P.Title
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CommentCount,
+        EditCount,
+        AverageScore,
+        DATEDIFF(day, PreviousPostDate, CURRENT_TIMESTAMP) AS DaysSinceLastPost,
+        RANK() OVER (ORDER BY AverageScore DESC) AS PostRanking
+    FROM PostAggregates
+    WHERE DaysSinceLastPost IS NOT NULL
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    TP.Title,
+    TP.CommentCount,
+    TP.EditCount,
+    TP.AverageScore,
+    U.Ranking AS UserRanking,
+    TP.PostRanking
+FROM HighReputationUsers U
+JOIN TopPosts TP ON U.TotalPosts > 5
+WHERE TP.CommentCount > 10 OR TP.EditCount > 5
+ORDER BY U.Reputation DESC, TP.AverageScore DESC;
+

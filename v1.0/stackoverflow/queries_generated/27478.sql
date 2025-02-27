@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY pi.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pi ON p.PostTypeId = pi.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+TagStats AS (
+    SELECT 
+        UNNEST(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    GROUP BY 
+        TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        TagCount,
+        ROW_NUMBER() OVER (ORDER BY TagCount DESC) AS TagRank
+    FROM 
+        TagStats
+    WHERE 
+        TagCount > 10
+),
+PopularPosts AS (
+    SELECT 
+        rp.*,
+        STRING_AGG(tt.TagName, ', ') AS RelatedTags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(STRING_TO_ARRAY(rp.Tags, ',')::INT[])
+    LEFT JOIN 
+        TopTags tt ON tt.TagName = ANY(string_to_array(rp.Tags, ','))
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.CreationDate, rp.Score, rp.OwnerDisplayName, rp.OwnerReputation
+    HAVING 
+        COUNT(tt.TagName) > 0
+    ORDER BY 
+        rp.Score DESC
+    LIMIT 10
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.Body,
+    pp.Tags,
+    pp.CreationDate,
+    pp.Score,
+    pp.OwnerDisplayName,
+    pp.OwnerReputation,
+    pp.RelatedTags
+FROM 
+    PopularPosts pp
+ORDER BY 
+    pp.Score DESC;

@@ -1,0 +1,72 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Title,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS RankDate
+    FROM
+        Posts p
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        AVG(EXTRACT(EPOCH FROM (TIMESTAMP '2024-10-01 12:34:56' - u.LastAccessDate)) / 3600) AS AvgHoursSinceLastAccess
+    FROM
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY
+        u.Id, u.Reputation
+),
+TopPostWithUsers AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        ua.UserId,
+        ua.Reputation,
+        ua.VoteCount,
+        ua.UpVotes,
+        ua.DownVotes,
+        COALESCE(ua.AvgHoursSinceLastAccess, -1) AS AvgActivity
+    FROM
+        RankedPosts rp
+    LEFT JOIN 
+        UserActivity ua ON rp.OwnerUserId = ua.UserId
+    WHERE
+        rp.RankScore <= 5  
+)
+SELECT
+    pp.Title AS PostTitle,
+    pp.Score,
+    pp.Reputation,
+    pp.VoteCount,
+    pp.UpVotes - pp.DownVotes AS NetVotes,
+    CASE
+        WHEN pp.AvgActivity = -1 THEN 'User Not Found'
+        ELSE CAST(pp.AvgActivity AS VARCHAR) || ' hours since last active'
+    END AS UserActivityStatus,
+    COALESCE(pht.Comment, 'No edits recorded') AS LatestEditComment
+FROM
+    TopPostWithUsers pp
+LEFT JOIN 
+    PostHistory ph ON pp.PostId = ph.PostId AND ph.CreationDate = (
+        SELECT MAX(CreationDate)
+        FROM PostHistory
+        WHERE PostId = pp.PostId AND PostHistoryTypeId NOT IN (10, 11, 12)
+    )
+LEFT JOIN
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+WHERE
+    pp.NetVotes > 0
+ORDER BY
+    pp.Score DESC, pp.Reputation DESC;

@@ -1,0 +1,79 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank,
+        SUM(ps.ps_supplycost) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+), FilteredSuppliers AS (
+    SELECT * 
+    FROM RankedSuppliers
+    WHERE rank <= 3
+), OrdersWithDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        l.l_shipdate >= '1996-01-01' AND 
+        l.l_shipmode IN ('AIR', 'MAIL')
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+), CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.total_revenue,
+        COALESCE(o.item_count, 0) AS item_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        OrdersWithDetails o ON c.c_custkey = o.o_custkey
+), SupplierPreferences AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        FilteredSuppliers s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    c.c_name,
+    COALESCE(SUM(o.total_revenue), 0) AS total_revenue,
+    s.order_count,
+    CASE 
+        WHEN s.order_count IS NULL THEN 'No Orders'
+        WHEN s.order_count = 0 THEN 'No Orders'
+        ELSE 'Orders Exist'
+    END AS order_status
+FROM 
+    CustomerOrders c
+LEFT JOIN 
+    SupplierPreferences s ON c.o_orderkey IS NOT NULL
+GROUP BY 
+    c.c_name, s.order_count
+HAVING 
+    total_revenue > 1000 OR s.order_count IS NULL
+ORDER BY 
+    total_revenue DESC, c.c_name

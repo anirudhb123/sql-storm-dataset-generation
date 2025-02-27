@@ -1,0 +1,104 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViews,
+        SUM(COALESCE(p.ViewCount, 0)) / NULLIF(COUNT(DISTINCT p.Id), 0) AS ViewPerPost,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostCommentSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+CloseReasonStats AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons,
+        COUNT(DISTINCT ph.Id) AS TotalCloseEvents
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment = cr.Id::text
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+    GROUP BY 
+        ph.PostId
+),
+PostLinksSummary AS (
+    SELECT 
+        pl.PostId,
+        COUNT(DISTINCT pl.RelatedPostId) AS TotalLinks
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalScore,
+    ups.AvgViews,
+    ups.ViewPerPost,
+    ups.TotalBadges,
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.Score,
+    pcs.CommentCount,
+    pcs.LastCommentDate,
+    crs.CloseReasons,
+    pl.TotalLinks
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    RankedPosts pp ON ups.UserId = pp.OwnerUserId
+LEFT JOIN 
+    PostCommentSummary pcs ON pp.PostId = pcs.PostId
+LEFT JOIN 
+    CloseReasonStats crs ON pp.PostId = crs.PostId
+LEFT JOIN 
+    PostLinksSummary pl ON pp.PostId = pl.PostId 
+WHERE 
+    ups.TotalPosts > 0
+AND 
+    ups.TotalScore >= (SELECT AVG(TotalScore) FROM UserPostStats) 
+AND 
+    pp.PostRank = 1   
+ORDER BY 
+    ups.TotalPosts DESC,
+    ups.TotalScore DESC,
+    pp.CreationDate DESC;

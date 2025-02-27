@@ -1,0 +1,64 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2022) - 365 
+        AND (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_profit
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_id = c.c_customer_id
+    WHERE 
+        cs.profit_rank <= 10
+),
+WarehouseStats AS (
+    SELECT 
+        ws.w_warehouse_id,
+        SUM(ws.ws_net_profit) AS warehouse_profit,
+        AVG(ws.ws_net_paid_inc_tax) AS avg_order_value
+    FROM 
+        web_sales ws
+    JOIN
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2022) - 365 
+        AND (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        ws.w_warehouse_id
+)
+SELECT 
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_profit,
+    ws.warehouse_profit,
+    ws.avg_order_value,
+    CASE 
+        WHEN tc.total_profit IS NULL THEN 'No Sales'
+        ELSE 'Sales Present'
+    END AS sales_status
+FROM 
+    TopCustomers tc
+FULL OUTER JOIN 
+    WarehouseStats ws ON tc.total_profit IS NOT NULL AND ws.warehouse_profit IS NOT NULL
+ORDER BY 
+    tc.total_profit DESC NULLS LAST, 
+    ws.warehouse_profit DESC NULLS LAST;

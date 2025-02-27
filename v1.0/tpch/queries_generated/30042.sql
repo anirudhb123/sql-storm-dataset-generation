@@ -1,0 +1,50 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_clerk,
+        1 AS order_level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_clerk,
+        oh.order_level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    AVG(l.l_quantity) AS avg_quantity,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY l.l_extendedprice) AS median_price,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ' (', p.p_brand, ')'), ', ') AS products
+FROM 
+    shipping_lineitem l
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    customer c ON l.l_orderkey = c.c_custkey
+WHERE 
+    l.l_shipdate >= DATE '2023-01-01' AND l.l_shipdate < DATE '2023-12-31'
+    AND (l.l_returnflag = 'N' OR l.l_linestatus = 'F')
+    AND n.n_regionkey IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(CASE WHEN c.c_acctbal IS NOT NULL THEN c.c_acctbal ELSE 0 END) > 10000
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

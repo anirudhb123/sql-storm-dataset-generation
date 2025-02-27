@@ -1,0 +1,57 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- Bounty related votes
+    WHERE 
+        u.Reputation > 500
+    GROUP BY 
+        u.Id
+),
+TopUserActivity AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        QuestionCount,
+        AnswerCount,
+        TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY TotalPosts DESC, TotalBounty DESC) AS ActivityRank
+    FROM 
+        UserPostStats
+)
+SELECT 
+    tua.UserId,
+    tua.DisplayName,
+    tua.TotalPosts,
+    tua.QuestionCount,
+    tua.AnswerCount,
+    tua.TotalBounty,
+    COALESCE(ph.PHComments, 'No recent history') AS RecentPostHistory,
+    COUNT(cl.Id) AS ClosedPostsCount,
+    STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypes
+FROM 
+    TopUserActivity tua
+LEFT JOIN 
+    PostHistory ph ON tua.UserId = ph.UserId AND ph.CreationDate >= NOW() - INTERVAL '30 days'
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = tua.UserId AND p.ClosedDate IS NOT NULL
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    Comments cl ON cl.PostId = p.Id
+WHERE 
+    tua.ActivityRank <= 10
+GROUP BY 
+    tua.UserId, tua.DisplayName, tua.TotalPosts, tua.QuestionCount, tua.AnswerCount, tua.TotalBounty, ph.PHComments
+ORDER BY 
+    tua.TotalPosts DESC, tua.TotalBounty DESC;

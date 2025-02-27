@@ -1,0 +1,39 @@
+
+WITH NameCount AS (
+    SELECT 
+        s.n_nationkey, 
+        COUNT(DISTINCT s.s_name) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_available_quantity
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.n_nationkey
+),
+NameDetails AS (
+    SELECT 
+        n.n_name,
+        n.n_comment,
+        nc.supplier_count,
+        nc.total_available_quantity,
+        ROW_NUMBER() OVER (ORDER BY nc.total_available_quantity DESC) AS rn
+    FROM 
+        nation n
+    JOIN 
+        NameCount nc ON n.n_nationkey = nc.n_nationkey
+)
+SELECT 
+    n.n_name, 
+    n.n_comment,
+    n.supplier_count, 
+    n.total_available_quantity,
+    CONCAT('Total Suppliers: ', n.supplier_count, ', Available Quantity: ', n.total_available_quantity) AS summary
+FROM 
+    NameDetails n
+WHERE 
+    n.rn <= 5 
+ORDER BY 
+    n.total_available_quantity DESC;

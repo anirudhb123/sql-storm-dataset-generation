@@ -1,0 +1,71 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        ParentId, 
+        Title, 
+        CreationDate, 
+        Score,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id, 
+        p.ParentId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN VoteTypeId = 1 THEN 1 END) AS AcceptedVotes,
+        COUNT(*) AS TotalVotes
+    FROM Votes
+    GROUP BY PostId
+),
+ClosedPostHistory AS (
+    SELECT 
+        PostId, 
+        MAX(CreationDate) AS LastClosedDate
+    FROM PostHistory
+    WHERE PostHistoryTypeId = 10 -- Closed
+    GROUP BY PostId
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM Posts p
+    LEFT JOIN LATERAL (
+        SELECT UNNEST(string_to_array(Tags, '>')) AS TagName
+    ) t ON true
+    GROUP BY p.Id
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    ph.LastClosedDate,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    COALESCE(vs.AcceptedVotes, 0) AS AcceptedVotes,
+    COALESCE(vs.TotalVotes, 0) AS TotalVotes,
+    th.TagList,
+    CASE 
+        WHEN ph.Level IS NOT NULL THEN 'Nested' 
+        ELSE 'Root' 
+    END AS PostType,
+    CURRENT_TIMESTAMP - p.CreationDate AS AgeOfPost
+FROM Posts p
+LEFT JOIN RecursivePostHierarchy ph ON p.Id = ph.Id
+LEFT JOIN PostVoteSummary vs ON p.Id = vs.PostId
+LEFT JOIN ClosedPostHistory phy ON p.Id = phy.PostId
+LEFT JOIN PostTags th ON p.Id = th.PostId
+WHERE p.Score > 0
+ORDER BY p.CreationDate DESC;

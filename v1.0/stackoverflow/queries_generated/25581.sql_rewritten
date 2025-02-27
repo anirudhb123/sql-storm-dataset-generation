@@ -1,0 +1,86 @@
+WITH PostTagStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        p.CreationDate,
+        COUNT(t.TagName) AS TagCount,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+            t.Id, 
+            t.TagName, 
+            pt.PostId
+        FROM 
+            Tags t
+        JOIN 
+            (SELECT 
+                PostId, 
+                UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><')) AS TagName 
+            FROM 
+                Posts) pt ON t.TagName = pt.TagName) t ON p.Id = t.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN p.OwnerUserId = u.Id THEN 1 END) AS QuestionsAsked,
+        COUNT(c.Id) AS CommentsMade,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+PostHistoryChanges AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId AS EditorId,
+        ph.CreationDate AS EditDate,
+        p.Title,
+        p.Body,
+        p.Tags,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS ChangeRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.QuestionsAsked,
+    U.CommentsMade,
+    U.UpVotesReceived,
+    P.Title AS PostTitle,
+    P.TagCount,
+    P.TagsList,
+    PH.EditorId,
+    PH.EditDate,
+    PH.Comment 
+FROM 
+    UserActivity U
+JOIN 
+    PostTagStats P ON U.UserId = P.OwnerUserId
+LEFT JOIN 
+    PostHistoryChanges PH ON P.PostId = PH.PostId AND PH.ChangeRank = 1
+WHERE 
+    U.UpVotesReceived > 0
+ORDER BY 
+    U.UpVotesReceived DESC, P.TagCount DESC;

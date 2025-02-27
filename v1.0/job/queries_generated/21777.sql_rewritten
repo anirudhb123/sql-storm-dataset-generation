@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.kind_id ORDER BY a.production_year DESC) AS rn
+    FROM aka_title a
+    WHERE a.production_year IS NOT NULL
+),
+MovieActors AS (
+    SELECT 
+        m.id AS movie_id,
+        a.name AS actor_name,
+        a.id AS actor_id,
+        COALESCE(MAX(ci.nr_order), 0) AS highest_order
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN aka_title m ON ci.movie_id = m.id
+    GROUP BY m.id, a.name, a.id
+),
+MoviesWithActors AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        ma.actor_name,
+        ma.highest_order
+    FROM RankedMovies m
+    LEFT JOIN MovieActors ma ON m.id = ma.movie_id
+    WHERE m.rn <= 5 
+),
+FilteredMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        m.actor_name,
+        CASE 
+            WHEN m.highest_order IS NULL THEN 'No actors found'
+            ELSE m.highest_order::text 
+        END AS highest_order_str
+    FROM MoviesWithActors m
+    WHERE m.production_year BETWEEN 1990 AND 2023
+    AND UPPER(m.actor_name) LIKE 'A%'  
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.actor_name,
+    f.highest_order_str,
+    CASE 
+        WHEN f.highest_order_str = 'No actors found' THEN NULL
+        ELSE f.highest_order
+    END AS highest_order,
+    CASE 
+        WHEN COUNT(*) OVER (PARTITION BY f.production_year) > 1 THEN 'Multiple Actors'
+        ELSE 'Single Actor'
+    END AS actor_count_description
+FROM FilteredMovies f
+ORDER BY f.production_year, f.title
+FETCH FIRST 10 ROWS ONLY;

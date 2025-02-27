@@ -1,0 +1,41 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        rd.total_profit
+    FROM 
+        customer c
+    JOIN RankedSales rd ON c.c_customer_sk = rd.ws_bill_customer_sk
+    WHERE 
+        rd.total_profit > (SELECT AVG(total_profit) FROM RankedSales)
+)
+SELECT 
+    hvc.c_customer_id,
+    hvc.c_first_name,
+    hvc.c_last_name,
+    COALESCE(SUM(sr_returned_date_sk), 0) AS total_returns,
+    COALESCE(SUM(sr_return_amt), 0) AS total_return_amt,
+    COALESCE(COUNT(sr_ticket_number), 0) AS return_count   
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    store_returns sr ON hvc.c_customer_id = sr.sr_customer_sk
+GROUP BY 
+    hvc.c_customer_id, hvc.c_first_name, hvc.c_last_name
+HAVING 
+    total_return_amt > 1000
+ORDER BY 
+    total_return_amt DESC
+LIMIT 10;

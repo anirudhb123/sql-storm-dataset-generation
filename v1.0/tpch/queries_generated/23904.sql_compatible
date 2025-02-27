@@ -1,0 +1,77 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+), 
+PartSupplierInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_supplycost > 0 
+    GROUP BY 
+        ps.ps_partkey
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS acctbal_rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND LENGTH(s.s_name) > 5
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(r.region_name, 'UNKNOWN') AS region_name,
+    n.n_name AS nation_name,
+    ps.total_supply_value,
+    CASE 
+        WHEN ps.supplier_count > 5 THEN 'PLENTIFUL'
+        ELSE 'SCARCE'
+    END AS supplier_availability,
+    COUNT(DISTINCT o.o_orderkey) AS orders_count,
+    MAX(o.o_totalprice) AS max_order_value,
+    AVG(NULLIF(o.o_totalprice, 0)) AS avg_value_below_1000,
+    STRING_AGG(DISTINCT s.s_name, ', ') FILTER (WHERE fs.acctbal_rank <= 3) AS top_suppliers,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM customer c WHERE c.c_acctbal IS NULL AND c.c_nationkey = n.n_nationkey) 
+        THEN 'ISOLATED' 
+        ELSE 'CONNECTED' 
+    END AS customer_isolation_status
+FROM 
+    part p
+LEFT JOIN 
+    PartSupplierInfo ps ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_partkey = s.s_nationkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    RankedOrders o ON o.o_orderkey = (SELECT MAX(o2.o_orderkey) FROM orders o2 WHERE o2.o_orderkey <= o.o_orderkey)
+LEFT JOIN 
+    FilteredSuppliers fs ON fs.s_nationkey = n.n_nationkey
+WHERE 
+    p.p_retailprice > 50.00 AND
+    (ps.total_supply_value > 1000 OR ps.supplier_count < 3)
+GROUP BY 
+    p.p_partkey, p.p_name, r.region_name, n.n_name, ps.total_supply_value, ps.supplier_count
+HAVING 
+    MAX(o.o_totalprice) > 5000
+ORDER BY 
+    supplier_availability DESC, p.p_partkey ASC;

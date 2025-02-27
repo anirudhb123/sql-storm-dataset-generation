@@ -1,0 +1,88 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM
+        aka_title t
+    WHERE
+        t.production_year >= 2000
+        
+    UNION ALL
+
+    SELECT
+        t.id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM
+        aka_title t
+    JOIN
+        movie_link ml ON t.id = ml.linked_movie_id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+ActorData AS (
+    SELECT
+        ci.person_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        ARRAY_AGG(DISTINCT t.title) AS movies
+    FROM
+        cast_info ci
+    JOIN
+        aka_name a ON ci.person_id = a.person_id
+    JOIN
+        MovieHierarchy mh ON ci.movie_id = mh.movie_id
+    GROUP BY
+        ci.person_id, a.name
+),
+TopActors AS (
+    SELECT
+        actor_name,
+        movie_count,
+        movies,
+        ROW_NUMBER() OVER (ORDER BY movie_count DESC) AS rank
+    FROM
+        ActorData
+),
+FilteredTitles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        c.name AS company_name,
+        t.production_year,
+        ki.keyword
+    FROM
+        aka_title t
+    JOIN
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword ki ON mk.keyword_id = ki.id
+    WHERE
+        t.production_year > 2000 
+        AND (c.country_code IS NOT NULL OR ki.keyword IS NOT NULL)
+)
+SELECT
+    ta.actor_name,
+    ta.movie_count,
+    tt.title,
+    tt.production_year,
+    tt.company_name,
+    COUNT(DISTINCT tt.title_id) OVER (PARTITION BY ta.actor_name) AS titles_with_company_count,
+    ARRAY_AGG(DISTINCT tt.keyword) FILTER (WHERE tt.keyword IS NOT NULL) AS associated_keywords
+FROM
+    TopActors ta
+JOIN
+    FilteredTitles tt ON ta.movies @> ARRAY[tt.title]
+WHERE
+    ta.rank <= 10
+GROUP BY
+    ta.actor_name, ta.movie_count, tt.title, tt.production_year, tt.company_name
+ORDER BY
+    ta.movie_count DESC, tt.production_year DESC;

@@ -1,0 +1,91 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rnk_sales
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+), TotalSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        SUM(rs.ws_ext_sales_price) AS total_sales
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rnk_sales = 1
+    GROUP BY 
+        rs.ws_item_sk
+), CTE_Customer_Address AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY ca.ca_city) AS ca_rnk
+    FROM 
+        customer_address ca
+    WHERE 
+        ca.ca_city IS NOT NULL AND ca.ca_state IS NOT NULL
+), HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_credit_rating,
+        DENSE_RANK() OVER (ORDER BY cd.cd_purchase_estimate DESC) AS rnk_customer
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000
+), InventoryCheck AS (
+    SELECT 
+        SUM(inv.inv_quantity_on_hand) AS total_quantity,
+        i.i_item_sk
+    FROM 
+        inventory inv
+    JOIN 
+        item i ON inv.inv_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_sk
+), FinalSalesReport AS (
+    SELECT 
+        ts.ws_item_sk,
+        ts.total_sales,
+        COALESCE(SUM(ic.total_quantity), 0) AS total_inventory,
+        CASE 
+            WHEN ts.total_sales > (SELECT AVG(total_sales) FROM TotalSales) THEN 'High Sales'
+            ELSE 'Low Sales'
+        END AS sales_category,
+        c.ca_city,
+        c.ca_state
+    FROM 
+        TotalSales ts
+    LEFT JOIN 
+        InventoryCheck ic ON ts.ws_item_sk = ic.i_item_sk
+    LEFT JOIN 
+        CTE_Customer_Address c ON c.ca_rnk = 1
+    WHERE 
+        c.ca_city IS NOT NULL
+    GROUP BY 
+        ts.ws_item_sk, ts.total_sales, c.ca_city, c.ca_state
+)
+SELECT 
+    f.ws_item_sk,
+    f.total_sales,
+    f.total_inventory,
+    f.sales_category,
+    COALESCE(hvc.c_first_name, 'Unknown') AS customer_first_name,
+    COALESCE(hvc.c_last_name, 'Unknown') AS customer_last_name
+FROM 
+    FinalSalesReport f
+LEFT JOIN 
+    HighValueCustomers hvc ON f.total_sales > 5000
+ORDER BY 
+    f.total_sales DESC, f.ws_item_sk;

@@ -1,0 +1,26 @@
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS character_name,
+    r.role AS role_name,
+    mc.company_name AS production_company,
+    mk.keyword AS movie_keyword
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    char_name c ON ci.role_id = c.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name comp ON mc.company_id = comp.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+GROUP BY 
+    a.name, t.title, c.kind, r.role, mc.company_name, mk.keyword
+ORDER BY 
+    a.name, t.title;

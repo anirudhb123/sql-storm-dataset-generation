@@ -1,0 +1,57 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        group_concat(DISTINCT kw.keyword) AS keywords,
+        group_concat(DISTINCT py.kind) AS production_companies,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name py ON mc.company_id = py.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, t.title, t.production_year, a.name
+),
+ActorStatistics AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT title) AS movies_count,
+        MAX(production_year) AS latest_movie_year
+    FROM 
+        MovieDetails
+    GROUP BY 
+        actor_name
+)
+SELECT 
+    md.title, 
+    md.production_year, 
+    a.actor_name,
+    a.movies_count,
+    a.latest_movie_year,
+    md.keywords,
+    md.production_companies,
+    md.actor_count
+FROM 
+    MovieDetails md
+JOIN 
+    ActorStatistics a ON md.actor_name = a.actor_name
+ORDER BY 
+    md.production_year DESC, 
+    a.movies_count DESC, 
+    md.title ASC;
+

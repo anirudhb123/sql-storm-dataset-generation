@@ -1,0 +1,76 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id, 
+        Reputation,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+), 
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.PostTypeId
+), 
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        ph.UserDisplayName AS ClosedBy,
+        r.Name AS CloseReason
+    FROM PostHistory ph
+    JOIN CloseReasonTypes r ON CAST(ph.Comment AS INT) = r.Id 
+    WHERE ph.PostHistoryTypeId = 10
+), 
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostsCreated,
+        RANK() OVER (ORDER BY COUNT(p.Id) DESC) AS PostRank
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+    HAVING COUNT(p.Id) > 5
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName AS UserDisplayName,
+    up.Reputation,
+    ps.PostId,
+    ps.PostTypeId,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.TotalBounty,
+    ps.LastVoteDate,
+    cp.CloseDate AS PostClosedDate,
+    cp.ClosedBy AS ClosedByUser,
+    cp.CloseReason AS ClosureReason,
+    mau.PostsCreated AS ActiveUserPostCount,
+    CASE 
+        WHEN ps.UpVotes IS NULL THEN 'No Upvotes' 
+        WHEN ps.DownVotes IS NULL THEN 'No Downvotes' 
+        ELSE 'Votes Present'
+    END AS VoteStatus,
+    (SELECT MIN(CreationDate) 
+     FROM Comments c 
+     WHERE c.PostId = ps.PostId) AS FirstCommentDate,
+    (SELECT COUNT(*) 
+     FROM PostLinks pl 
+     WHERE pl.PostId = ps.PostId AND pl.LinkTypeId = 1) AS LinkedPostCount
+FROM UserReputation up
+JOIN PostStats ps ON up.Id = ps.PostId
+LEFT JOIN ClosedPosts cp ON ps.PostId = cp.PostId
+JOIN MostActiveUsers mau ON mau.UserId = up.Id
+WHERE up.Reputation > 1000
+  AND (cp.CloseDate IS NOT NULL OR ps.CommentCount > 3)
+ORDER BY up.Reputation DESC, ps.CommentCount DESC;

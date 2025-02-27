@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS Owner,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(p.Id) AS QuestionCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(COALESCE(b.Date IS NOT NULL, 0)) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LatestEditDate,
+        pt.Name AS PostType,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        ph.PostId, pt.Name
+)
+SELECT 
+    u.DisplayName AS User,
+    u.Reputation,
+    u.Location,
+    l.PostCount,
+    l.TotalScore,
+    l.BadgeCount,
+    rp.Title AS LatestPostTitle,
+    rp.CreationDate AS LatestPostDate,
+    rp.ViewCount AS LatestPostViews,
+    rph.PostType AS RecentPostType,
+    rph.LatestEditDate,
+    rph.HistoryTypes
+FROM 
+    Users u
+JOIN 
+    TopUsers l ON u.Id = l.Id
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.PostRank = 1  
+LEFT JOIN 
+    RecentPostHistory rph ON rph.PostId = rp.Id
+WHERE 
+    u.Reputation > 1000 
+ORDER BY 
+    l.TotalScore DESC, 
+    u.DisplayName;

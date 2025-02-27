@@ -1,0 +1,77 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01'
+        AND o.o_orderdate < DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS total_parts_supplied,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+FinalReport AS (
+    SELECT 
+        tc.c_custkey,
+        tc.c_name,
+        ro.total_revenue,
+        ss.total_parts_supplied,
+        ss.avg_supply_cost
+    FROM 
+        TopCustomers tc
+    JOIN 
+        RankedOrders ro ON tc.total_spent / 10 >= ro.total_revenue
+    LEFT JOIN 
+        SupplierStats ss ON ss.total_parts_supplied IS NOT NULL
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_revenue IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Exists'
+    END AS revenue_status
+FROM 
+    FinalReport
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM supplier s
+        WHERE s.s_name LIKE '%Supplier%' AND s.s_suppkey IN (
+            SELECT ps.ps_suppkey
+            FROM partsupp ps
+            WHERE ps.ps_availqty > 10
+        )
+    )
+ORDER BY 
+    total_revenue DESC NULLS LAST;

@@ -1,0 +1,79 @@
+WITH TagStatistics AS (
+    SELECT
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(Posts.Score, 0)) AS TotalScore,
+        AVG(Posts.Score) AS AverageScore,
+        COUNT(DISTINCT Posts.OwnerUserId) AS UniqueUsers,
+        COUNT(DISTINCT CASE WHEN Posts.PostTypeId = 1 THEN Posts.Id END) AS QuestionCount,
+        COUNT(DISTINCT CASE WHEN Posts.PostTypeId = 2 THEN Posts.Id END) AS AnswerCount
+    FROM
+        Tags
+    LEFT JOIN
+        Posts ON Tags.Id = ANY (string_to_array(Posts.Tags, '>')::int[])
+    GROUP BY
+        Tags.TagName
+),
+UserEngagement AS (
+    SELECT
+        Users.Id AS UserId,
+        Users.DisplayName,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesGiven,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesGiven,
+        COUNT(DISTINCT Votes.PostId) AS TotalVotedPosts
+    FROM
+        Users
+    LEFT JOIN
+        Votes ON Users.Id = Votes.UserId
+    GROUP BY
+        Users.Id
+),
+PostActivity AS (
+    SELECT
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.CreationDate,
+        COALESCE(PostHistory.UserId, Users.Id) AS LastEditorId,
+        COALESCE(PostHistory.UserDisplayName, Users.DisplayName) AS LastEditorName,
+        COUNT(Comments.Id) AS TotalComments,
+        COUNT(PostHistory.Id) AS EditCount
+    FROM
+        Posts
+    LEFT JOIN
+        PostHistory ON Posts.Id = PostHistory.PostId
+    LEFT JOIN
+        Users ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN
+        Comments ON Posts.Id = Comments.PostId
+    GROUP BY
+        Posts.Id, Users.Id, PostHistory.UserId
+)
+SELECT
+    t.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.TotalScore,
+    ts.AverageScore,
+    ts.UniqueUsers,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    u.DisplayName AS TopVoterName,
+    u.UpVotesGiven,
+    u.DownVotesGiven,
+    u.TotalVotedPosts,
+    p.Title AS PostTitle,
+    p.LastEditorName,
+    p.TotalComments,
+    p.EditCount,
+    p.CreationDate
+FROM
+    TagStatistics ts
+JOIN
+    Tags t ON ts.TagName = t.TagName
+JOIN
+    UserEngagement u ON u.UpVotesGiven = (SELECT MAX(UpVotesGiven) FROM UserEngagement)
+JOIN
+    PostActivity p ON p.PostId = (SELECT PostId FROM Posts ORDER BY p.EditCount DESC LIMIT 1)
+ORDER BY
+    ts.TotalViews DESC;

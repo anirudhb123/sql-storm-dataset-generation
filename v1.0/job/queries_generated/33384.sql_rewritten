@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mk.title,
+        mk.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mk ON ml.linked_movie_id = mk.id
+    WHERE 
+        mk.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT ml.linked_movie_id) AS linked_movies_count,
+    AVG(mo.info_length) AS average_length,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY mt.production_year DESC) AS rank,
+    COALESCE(cast_info.note, 'No Note') AS role_note
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword mkw ON mt.id = mkw.movie_id
+LEFT JOIN 
+    keyword kw ON mkw.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mo ON mt.id = mo.movie_id AND mo.info_type_id = (SELECT id FROM info_type WHERE info = 'length')
+LEFT JOIN 
+    MovieHierarchy mh ON mt.id = mh.movie_id
+LEFT JOIN 
+    movie_link ml ON mt.id = ml.movie_id
+LEFT JOIN 
+    complete_cast cc ON mt.id = cc.movie_id
+LEFT JOIN 
+    role_type rt ON ci.role_id = rt.id
+LEFT JOIN 
+    company_name cn ON ci.person_id = cn.imdb_id 
+WHERE 
+    mt.production_year BETWEEN 2010 AND 2020
+    AND ak.name IS NOT NULL
+GROUP BY 
+    ak.name, mt.title, mt.production_year, ci.note
+ORDER BY 
+    average_length DESC, linked_movies_count DESC;

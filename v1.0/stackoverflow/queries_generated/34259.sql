@@ -1,0 +1,104 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.CreationDate
+), UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+), RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS LastEditDate,
+        a.UserDisplayName AS LastEditor,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        Users a ON ph.UserId = a.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  -- Edit Title, Edit Body, Edit Tags
+), ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate AS ClosedDate,
+        cr.Name AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 -- Post Closed
+    LEFT JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id -- Assuming Comment contains the CloseReasonId
+), FinalOutput AS (
+    SELECT 
+        up.UserId,
+        up.DisplayName,
+        up.Reputation AS UserReputation,
+        rp.PostId,
+        rp.Title,
+        rp.AnswerCount,
+        ra.LastEditDate,
+        ra.LastEditor,
+        cp.ClosedDate,
+        cp.CloseReason,
+        us.TotalBounties,
+        us.TotalCommentScore,
+        us.BadgeCount
+    FROM 
+        UserStatistics us
+    JOIN 
+        RankedPosts rp ON us.UserId = rp.OwnerUserId
+    LEFT JOIN 
+        RecentActivity ra ON rp.PostId = ra.PostId AND ra.EditRank = 1
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        us.Reputation > 50 -- Filter for users with a reputation greater than 50
+)
+SELECT 
+    UserId,
+    DisplayName,
+    UserReputation,
+    PostId,
+    Title,
+    AnswerCount,
+    LastEditDate,
+    LastEditor,
+    ClosedDate,
+    CloseReason,
+    TotalBounties,
+    TotalCommentScore,
+    BadgeCount
+FROM 
+    FinalOutput
+ORDER BY 
+    UserReputation DESC, AnswerCount DESC;

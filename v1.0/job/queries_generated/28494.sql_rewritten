@@ -1,0 +1,44 @@
+WITH Name_Keywords AS (
+    SELECT 
+        ak.name AS aka_name, 
+        mk.keyword AS keyword,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        movie_keyword mk ON ci.movie_id = mk.movie_id
+    GROUP BY 
+        ak.name, mk.keyword
+),
+Top_AKA AS (
+    SELECT 
+        aka_name, 
+        keyword, 
+        movie_count,
+        ROW_NUMBER() OVER (PARTITION BY keyword ORDER BY movie_count DESC) AS rank
+    FROM 
+        Name_Keywords
+)
+SELECT 
+    ta.aka_name,
+    ta.keyword,
+    ta.movie_count,
+    tk.kind AS movie_kind,
+    ti.info AS movie_info
+FROM 
+    Top_AKA ta
+JOIN 
+    aka_title at ON at.title ILIKE '%' || ta.aka_name || '%'
+JOIN 
+    movie_keyword mk ON mk.keyword = ta.keyword
+JOIN 
+    title ti ON ti.id = mk.movie_id
+JOIN 
+    kind_type tk ON ti.kind_id = tk.id
+WHERE 
+    ta.rank <= 5 
+ORDER BY 
+    ta.keyword, 
+    ta.movie_count DESC;

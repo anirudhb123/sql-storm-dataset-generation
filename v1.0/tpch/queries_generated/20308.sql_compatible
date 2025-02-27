@@ -1,0 +1,61 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal)
+        FROM supplier s2
+        WHERE s2.s_nationkey = s.s_nationkey
+    )
+),
+RelevantOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+        o.o_orderdate,
+        o.o_custkey,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(li.l_extendedprice * (1 - li.l_discount)) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey 
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_custkey
+),
+FilteredOrders AS (
+    SELECT ro.o_orderkey, ro.total_revenue
+    FROM RelevantOrders ro
+    WHERE ro.total_revenue > (
+        SELECT AVG(total_revenue) 
+        FROM RelevantOrders
+    )
+),
+NationsWithComments AS (
+    SELECT 
+        n.n_name,
+        n.n_regionkey,
+        COUNT(n.n_comment) AS comment_count
+    FROM nation n
+    GROUP BY n.n_name, n.n_regionkey 
+    HAVING COUNT(n.n_comment) > 5
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    ns.n_name,
+    ns.comment_count,
+    COALESCE(rs.s_name, 'No Supplier') AS supplier_name,
+    fo.total_revenue AS high_revenue_order,
+    CASE 
+        WHEN fo.total_revenue IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+LEFT JOIN FilteredOrders fo ON rs.s_suppkey = fo.o_custkey
+JOIN NationsWithComments ns ON rs.s_nationkey = ns.n_regionkey
+WHERE p.p_size > 10
+ORDER BY p.p_retailprice DESC, ns.comment_count ASC;

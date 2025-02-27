@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        0 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+    UNION ALL
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        h.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy h ON ml.linked_movie_id = h.movie_id
+    JOIN 
+        title m ON m.id = ml.movie_id
+)
+SELECT 
+    t.title,
+    t.production_year,
+    COUNT(DISTINCT c.person_id) AS actor_count,
+    AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note_ratio,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+    SUM(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') THEN CAST(mi.info AS NUMERIC) ELSE 0 END) AS total_budget,
+    MAX(t.production_year) OVER (PARTITION BY t.id) AS max_year
+FROM 
+    MovieHierarchy t
+LEFT JOIN 
+    complete_cast cc ON t.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON c.movie_id = t.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = c.person_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = t.movie_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    t.movie_id, t.title, t.production_year
+HAVING 
+    COUNT(DISTINCT c.person_id) > 3 AND 
+    total_budget > 0
+ORDER BY 
+    max_year DESC, actor_count DESC;
+
+This query creates a recursive CTE `MovieHierarchy` to explore all related movies released since the year 2000. It combines various SQL constructs, including outer joins, aggregated functions, string aggregation, and correlated subqueries. The final selection retrieves movies with a significant cast count and a non-zero total budget while presenting insights on the actors and production years, enabling detailed benchmarking of movie performance from multiple angles.

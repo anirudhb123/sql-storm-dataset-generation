@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.LastActivityDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 YEAR'
+),
+TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+),
+PostsWithBadges AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.Score,
+        tp.CreationDate,
+        tp.ViewCount,
+        tp.OwnerDisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Badges b ON tp.OwnerDisplayName = b.UserId
+    GROUP BY 
+        tp.PostId, tp.Title, tp.Score, tp.CreationDate, tp.ViewCount, tp.OwnerDisplayName
+),
+FinalResults AS (
+    SELECT 
+        pwb.PostId,
+        pwb.Title,
+        pwb.Score,
+        pwb.ViewCount,
+        pwb.BadgeCount,
+        CASE 
+            WHEN pwb.BadgeCount > 0 THEN 'Has Badges'
+            ELSE 'No Badges'
+        END AS BadgeStatus
+    FROM 
+        PostsWithBadges pwb
+)
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.Score,
+    fr.ViewCount,
+    fr.BadgeCount,
+    fr.BadgeStatus,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = fr.PostId) AS CommentCount,
+    (SELECT AVG(v.BountyAmount) FROM Votes v WHERE v.PostId = fr.PostId AND v.VoteTypeId = 8) AS AverageBounty
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.Score DESC, fr.ViewCount DESC;

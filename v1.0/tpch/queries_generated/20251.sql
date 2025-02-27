@@ -1,0 +1,78 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) as price_rank
+    FROM 
+        part p
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'UNKNOWN'
+            WHEN s.s_acctbal < 0 THEN 'NEGATIVE'
+            ELSE 'POSITIVE'
+        END AS balance_status
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL OR s.s_acctbal < 0
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.balance_status
+    FROM 
+        FilteredSuppliers s
+    WHERE 
+        s.s_acctbal IN (SELECT MAX(s1.s_acctbal) FROM FilteredSuppliers s1 GROUP BY s1.balance_status)
+)
+SELECT 
+    np.n_name,
+    rp.p_name,
+    sa.total_avail_qty,
+    ts.balance_status,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_returns,
+    MAX(rp.p_retailprice) AS max_price,
+    MIN(rp.p_retailprice) AS min_price,
+    AVG(sp.ps_supplycost) FILTER (WHERE sp.ps_supplycost > 0) AS avg_positive_supply_cost
+FROM 
+    nation np
+LEFT JOIN 
+    supplier s ON s.s_nationkey = np.n_nationkey
+LEFT JOIN 
+    partsupp sa ON s.s_suppkey = sa.ps_suppkey
+JOIN 
+    RankedParts rp ON rp.p_partkey = sa.ps_partkey AND rp.price_rank <= 5
+LEFT JOIN 
+    orders o ON o.o_custkey = s.s_suppkey
+LEFT JOIN 
+    lineitem l ON l.l_orderkey = o.o_orderkey
+JOIN 
+    TopSuppliers ts ON ts.s_suppkey = s.s_suppkey
+WHERE 
+    np.n_name IS NOT NULL
+    AND (np.n_name LIKE 'A%' OR np.n_name LIKE 'B%')
+GROUP BY 
+    np.n_name, rp.p_name, ts.balance_status
+HAVING 
+    COUNT(o.o_orderkey) > 1
+ORDER BY 
+    np.n_name, total_avail_qty DESC, order_count DESC;

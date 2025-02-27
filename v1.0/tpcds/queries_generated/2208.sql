@@ -1,0 +1,79 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(ws.ws_order_number) AS total_orders,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1 AND 365  -- Assuming date range for analysis
+    GROUP BY 
+        ws.web_site_sk, ws.web_name
+),
+TopWebsites AS (
+    SELECT 
+        web_site_sk, 
+        web_name, 
+        total_net_profit, 
+        total_orders 
+    FROM 
+        RankedSales
+    WHERE 
+        profit_rank <= 10
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        SUM(ws.ws_net_profit) AS total_profit_by_gender
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender
+),
+AvgPriceByStore AS (
+    SELECT 
+        s.s_store_sk,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM 
+        store s
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    JOIN 
+        web_sales ws ON ss.ss_item_sk = ws.ws_item_sk
+    GROUP BY 
+        s.s_store_sk
+),
+FinalResults AS (
+    SELECT 
+        tw.web_name,
+        tw.total_net_profit,
+        tw.total_orders,
+        cd.cd_gender,
+        cd.total_profit_by_gender,
+        a.avg_sales_price
+    FROM 
+        TopWebsites tw
+    LEFT JOIN 
+        CustomerDemographics cd ON tw.web_site_sk = cd.cd_demo_sk
+    JOIN 
+        AvgPriceByStore a ON tw.web_site_sk = a.s_store_sk
+)
+SELECT 
+    web_name,
+    total_net_profit,
+    total_orders,
+    COALESCE(cd_gender, 'N/A') AS gender,
+    COALESCE(total_profit_by_gender, 0) AS gender_profit,
+    avg_sales_price
+FROM 
+    FinalResults
+ORDER BY 
+    total_net_profit DESC, total_orders DESC;

@@ -1,0 +1,37 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+), 
+CustomerDetails AS (
+    SELECT c.c_custkey, c.c_name, c.c_mktsegment, r.r_name AS region_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+), 
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_available_qty, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), 
+HighValueOrders AS (
+    SELECT ro.o_orderkey, ro.o_totalprice, cd.c_name, cd.region_name
+    FROM RankedOrders ro
+    JOIN CustomerDetails cd ON cd.c_custkey = (
+        SELECT o.o_custkey
+        FROM orders o
+        WHERE o.o_orderkey = ro.o_orderkey
+    )
+    WHERE ro.order_rank = 1 AND ro.o_totalprice > 1000
+)
+SELECT h.o_orderkey, h.o_totalprice, h.c_name, h.region_name, ss.s_name, ss.total_available_qty, ss.total_supply_cost
+FROM HighValueOrders h
+JOIN lineitem l ON l.l_orderkey = h.o_orderkey
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN supplier ss ON ps.ps_suppkey = ss.s_suppkey
+WHERE ss.total_available_qty > 20
+ORDER BY h.o_totalprice DESC, h.o_orderkey;

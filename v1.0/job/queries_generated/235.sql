@@ -1,0 +1,45 @@
+WITH RecursiveMovieStats AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ARRAY_AGG(DISTINCT ak.name) AS actor_names,
+        MAX(y.production_year) AS max_production_year
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN
+        aka_name ak ON ak.person_id = c.person_id
+    LEFT JOIN 
+        title y ON t.id = y.id
+    WHERE
+        t.production_year >= 2000
+    GROUP BY
+        t.id, t.title
+),
+TopMovies AS (
+    SELECT
+        movie_id,
+        title,
+        cast_count,
+        actor_names,
+        max_production_year,
+        RANK() OVER (ORDER BY cast_count DESC, max_production_year DESC) AS rank
+    FROM
+        RecursiveMovieStats
+    WHERE
+        cast_count > 0
+)
+SELECT
+    tm.title,
+    tm.cast_count,
+    tm.actor_names,
+    (SELECT AVG(max_production_year) FROM TopMovies) AS avg_max_production_year,
+    COALESCE(NULLIF(tm.max_production_year, 0), 'N/A') AS adjusted_max_year
+FROM
+    TopMovies tm
+WHERE
+    tm.rank <= 10
+ORDER BY
+    tm.rank;

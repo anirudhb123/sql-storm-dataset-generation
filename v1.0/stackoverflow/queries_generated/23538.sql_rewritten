@@ -1,0 +1,98 @@
+WITH UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId IN (2, 1) THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId 
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        COUNT(DISTINCT v.UserId) AS UniqueVoters,
+        DENSE_RANK() OVER (ORDER BY COUNT(DISTINCT v.UserId) DESC) AS VoteRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        CommentCount,
+        UpVotes - DownVotes AS NetVotes,
+        VoteRank
+    FROM 
+        PostStats
+    WHERE 
+        VoteRank <= 10
+),
+UserPostDetails AS (
+    SELECT 
+        um.UserId, 
+        um.DisplayName, 
+        pp.PostId,
+        pp.Title AS PostTitle,
+        pp.NetVotes,
+        pp.CommentCount,
+        pp.CreationDate AS PostCreationDate,
+        CASE 
+            WHEN pm.Reputation IS NULL THEN 'No Recent Posts'
+            ELSE 'Active User'
+        END AS ActivityStatus
+    FROM 
+        UserMetrics um
+    LEFT JOIN 
+        TopPosts pp ON um.PostCount > 0
+    LEFT JOIN 
+        (SELECT Id, Reputation FROM Users WHERE LastAccessDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months') pm ON um.UserId = pm.Id
+)
+SELECT 
+    u.DisplayName,
+    COALESCE(SUM(p.NetVotes), 0) AS TotalNetVotes,
+    COUNT(DISTINCT p.PostId) AS PostCount,
+    CASE 
+        WHEN COUNT(DISTINCT p.PostId) = 0 THEN 'Inactive'
+        WHEN SUM(p.NetVotes) > 0 THEN 'Positive'
+        WHEN SUM(p.NetVotes) < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS UserActivityStatus,
+    STRING_AGG(DISTINCT p.PostTitle, '; ') AS RecentPosts
+FROM 
+    UserPostDetails u
+LEFT JOIN 
+    TopPosts p ON u.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = p.PostId)
+GROUP BY 
+    u.UserId, u.DisplayName
+ORDER BY 
+    TotalNetVotes DESC NULLS LAST;

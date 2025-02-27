@@ -1,0 +1,62 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000
+),
+keyword_counts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+complex_info AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COUNT(mi.info) AS info_count,
+        kc.keyword_count,
+        ROW_NUMBER() OVER (ORDER BY m.production_year DESC, kc.keyword_count DESC) AS movie_rank
+    FROM 
+        ranked_movies m
+    LEFT JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id
+    LEFT JOIN 
+        keyword_counts kc ON m.movie_id = kc.movie_id
+    GROUP BY 
+        m.movie_id, m.title, m.production_year, kc.keyword_count
+)
+SELECT 
+    ci.movie_id,
+    ci.title,
+    ci.production_year,
+    TRIM(STRING_AGG(DISTINCT r.actor_name, ', ' ORDER BY r.actor_rank)) AS actors,
+    ci.info_count,
+    COALESCE(ci.keyword_count, 0) AS keyword_count
+FROM 
+    complex_info ci
+JOIN 
+    ranked_movies r ON ci.movie_id = r.movie_id
+WHERE 
+    ci.movie_rank <= 10 
+GROUP BY 
+    ci.movie_id,
+    ci.title,
+    ci.production_year,
+    ci.info_count
+ORDER BY 
+    ci.production_year DESC, ci.keyword_count DESC;

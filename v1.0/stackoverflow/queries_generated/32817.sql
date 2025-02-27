@@ -1,0 +1,76 @@
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(vote.Score, 0)) AS TotalScore,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(p.Id) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    LEFT JOIN 
+        Votes vote ON p.Id = vote.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        COALESCE(
+            (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0
+        ) AS CommentCount,
+        COALESCE(
+            (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0
+        ) AS UpvoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+RecentPostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        ph.CreationDate AS ChangeDate,
+        pht.Name AS ChangeType,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON p.Id = ph.PostId
+    JOIN 
+        PostHistoryTypes pht ON pht.Id = ph.PostHistoryTypeId
+    WHERE 
+        ph.CreationDate >= CURRENT_DATE - INTERVAL '1 month'
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.Reputation,
+    ua.PostCount,
+    ua.TotalScore,
+    ps.Title AS MostScoredPost,
+    ps.Score AS MostScoredPostScore,
+    ps.CommentCount AS MostScoredPostComments,
+    ps.UpvoteCount AS MostScoredPostUpvotes,
+    rph.ChangeDate AS RecentChangeDate,
+    rph.ChangeType AS RecentChangeType
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    PostStats ps ON ua.UserId = ps.OwnerUserId AND ps.PostRank = 1
+LEFT JOIN 
+    RecentPostHistory rph ON rph.PostId = ps.PostId AND rph.HistoryRank = 1
+WHERE 
+    ua.Reputation > 100
+ORDER BY 
+    ua.TotalScore DESC, 
+    ua.PostCount DESC;

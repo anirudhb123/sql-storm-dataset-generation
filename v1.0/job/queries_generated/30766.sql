@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- CTE to fetch all movies and their respective details
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IN (1, 2) -- Assuming 1 and 2 are movie and series kind IDs
+
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS movies_count,
+    AVG(mh.level) AS avg_movie_level,
+    STRING_AGG(DISTINCT kt.keyword, ', ') AS keywords,
+    CASE 
+        WHEN COUNT(DISTINCT c.movie_id) > 10 THEN 'A prolific actor'
+        ELSE 'An emerging star'
+    END AS actor_status
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    MovieHierarchy mh ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+GROUP BY 
+    a.name
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 0
+ORDER BY 
+    movies_count DESC
+LIMIT 10;
+
+-- Add additional performance benchmarks
+EXPLAIN ANALYZE
+WITH RECURSIVE MovieHierarchy AS (
+    -- similar structure as above for testing purpose
+)
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS movies_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+GROUP BY 
+    a.name
+ORDER BY 
+    movies_count DESC
+LIMIT 10;

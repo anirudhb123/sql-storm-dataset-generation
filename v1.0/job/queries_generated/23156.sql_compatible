@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id,
+           t.title,
+           1 AS level
+    FROM aka_title t
+    JOIN movie_link ml ON t.id = ml.movie_id
+    JOIN title m ON m.id = ml.linked_movie_id
+    WHERE t.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT m.id AS movie_id,
+           t.title,
+           mh.level + 1
+    FROM movie_hierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN title t ON t.id = ml.linked_movie_id
+    WHERE t.production_year IS NOT NULL AND mh.level < 5  
+),
+actor_roles AS (
+    SELECT a.name AS actor_name,
+           r.role AS role_name,
+           COUNT(*) AS role_count
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN role_type r ON r.id = ci.role_id
+    GROUP BY a.name, r.role
+    HAVING COUNT(*) < (SELECT AVG(role_count) 
+                       FROM (SELECT COUNT(*) AS role_count 
+                             FROM cast_info 
+                             GROUP BY role_id) AS avg_roles)
+),
+movie_infos AS (
+    SELECT m.id AS movie_id,
+           m.title,
+           ARRAY_AGG(DISTINCT mi.info) AS movie_info,
+           CASE WHEN MIN(CASE WHEN inf.info IS NOT NULL THEN 1 ELSE 0 END) = 1 
+                THEN 'Info Available' 
+                ELSE 'No Info' END AS info_status
+    FROM title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN info_type inf ON inf.id = mi.info_type_id
+    GROUP BY m.id, m.title
+)
+SELECT mh.movie_id,
+       mh.title,
+       mh.level AS movie_level,
+       ar.actor_name,
+       ar.role_name,
+       COALESCE(mi.movie_info, ARRAY[]::text[]) AS additional_info,
+       mi.info_status
+FROM movie_hierarchy mh
+LEFT JOIN actor_roles ar ON ar.role_count > 0
+LEFT JOIN movie_infos mi ON mi.movie_id = mh.movie_id
+WHERE mh.level BETWEEN 1 AND 5
+ORDER BY mh.level, ar.actor_name, mh.title;

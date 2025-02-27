@@ -1,0 +1,37 @@
+WITH RECURSIVE nation_tree AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 1 AS level
+    FROM nation n
+    WHERE n.n_regionkey = 1
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nt.level + 1
+    FROM nation n
+    JOIN nation_tree nt ON n.n_regionkey = nt.n_nationkey
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+),
+average_prices AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    COALESCE(NULLIF(SUM(l.l_extendedprice * (1 - l.l_discount)), 0), 'No Sales') AS total_sales,
+    r.r_name AS region_name,
+    nt.n_name AS nation_name,
+    AVG(ap.avg_supply_cost) AS avg_cost,
+    MAX(CASE WHEN ro.price_rank = 1 THEN ro.o_totalprice END) AS max_order_price
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN customer c ON s.s_nationkey = c.c_nationkey
+LEFT JOIN nation_tree nt ON c.c_nationkey = nt.n_nationkey
+LEFT JOIN region r ON nt.n_regionkey = r.r_regionkey
+LEFT JOIN average_prices ap ON p.p_partkey = ap.ps_partkey
+JOIN ranked_orders ro ON ro.o_orderkey = l.l_orderkey
+GROUP BY p.p_name, r.r_name, nt.n_name
+ORDER BY total_sales DESC, p.p_name
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,54 @@
+
+WITH AggregatedSales AS (
+    SELECT
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        lineitem l
+    JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE
+        l.l_shipdate >= DATE '1994-01-01' AND l.l_shipdate < DATE '1995-01-01'
+    GROUP BY
+        n.n_name
+),
+SupplierCosts AS (
+    SELECT
+        p.p_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM
+        partsupp ps
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY
+        p.p_partkey
+),
+PartSales AS (
+    SELECT
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        lineitem l
+    GROUP BY
+        l.l_partkey
+)
+SELECT
+    p.p_name,
+    agg.nation_name,
+    COALESCE(agg.total_sales, 0) AS total_sales,
+    COALESCE(sup.total_supply_cost, 0) AS total_supply_cost
+FROM
+    part p
+LEFT JOIN
+    AggregatedSales agg ON p.p_partkey = agg.nation_name
+LEFT JOIN
+    PartSales ps ON p.p_partkey = ps.l_partkey
+LEFT JOIN
+    SupplierCosts sup ON p.p_partkey = sup.p_partkey
+ORDER BY
+    total_sales DESC, total_supply_cost ASC
+FETCH FIRST 10 ROWS ONLY;

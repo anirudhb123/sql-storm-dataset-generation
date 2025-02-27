@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostMetrics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.Score) AS AverageScore,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+    FROM 
+        Posts p
+    JOIN 
+        UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS tag ON TRUE
+    JOIN 
+        Tags t ON t.TagName = TRIM(BOTH ' ' FROM tag)
+    GROUP BY 
+        p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    COALESCE(pm.TotalPosts, 0) AS TotalPosts,
+    COALESCE(pm.TotalScore, 0) AS TotalScore,
+    COALESCE(pm.AverageScore, 0) AS AverageScore,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(rp.PostId, 0) AS TopPostId,
+    rp.Title AS TopPostTitle,
+    COALESCE(rp.CreationDate, 'No Posts') AS TopPostCreationDate
+FROM 
+    Users u
+LEFT JOIN 
+    PostMetrics pm ON pm.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = u.Id
+LEFT JOIN 
+    RankedPosts rp ON rp.PostRank = 1 AND rp.OwnerUserId = u.Id
+ORDER BY 
+    TotalScore DESC, 
+    TotalPosts DESC;

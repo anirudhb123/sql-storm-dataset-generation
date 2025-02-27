@@ -1,0 +1,88 @@
+WITH UsersWithBadges AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        BadgeCount,
+        GoldBadges,
+        SilverBadges,
+        BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM UsersWithBadges
+    WHERE BadgeCount > 0
+),
+
+PostsWithTags AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.OwnerUserId,
+        STRING_AGG(TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(P.Tags, 2, LENGTH(P.TAGS) - 2), '><'))), ', ') AS Tags,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.Id
+),
+
+UserPosts AS (
+    SELECT 
+        U.DisplayName AS UserName,
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.CreationDate,
+        PT.Name AS PostType
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    JOIN PostTypes PT ON P.PostTypeId = PT.Id
+),
+
+BenchmarkResults AS (
+    SELECT 
+        U.UserName,
+        P.PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.CreationDate,
+        P.PostType,
+        U.BadgeCount,
+        U.GoldBadges,
+        U.SilverBadges,
+        U.BronzeBadges
+    FROM UserPosts P
+    JOIN TopUsers U ON P.OwnerUserId = U.UserId
+    WHERE P.PostType = 'Question'
+)
+
+SELECT 
+    BR.UserName,
+    BR.Title,
+    BR.ViewCount,
+    BR.Score,
+    BR.CreationDate,
+    BR.BadgeCount,
+    BR.GoldBadges,
+    BR.SilverBadges,
+    BR.BronzeBadges,
+    T.TAGS AS AssociatedTags
+FROM BenchmarkResults BR
+JOIN PostsWithTags T ON BR.PostId = T.PostId
+ORDER BY BR.Score DESC, BR.ViewCount DESC;

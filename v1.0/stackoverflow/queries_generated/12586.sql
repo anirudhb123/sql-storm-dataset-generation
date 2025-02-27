@@ -1,0 +1,69 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(V.BountyAmount) AS TotalBounties
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.OwnerUserId
+    FROM Posts P
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 YEAR'
+),
+TopPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.ViewCount,
+        PS.Score,
+        PS.AnswerCount,
+        PS.CommentCount,
+        PS.FavoriteCount,
+        PS.CreationDate,
+        PS.LastActivityDate,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation AS OwnerReputation
+    FROM PostStats PS
+    JOIN Users U ON PS.OwnerUserId = U.Id
+    WHERE PS.ViewCount > 1000
+    ORDER BY PS.Score DESC
+    LIMIT 10
+)
+SELECT 
+    US.UserId,
+    US.Reputation,
+    US.PostCount,
+    US.CommentCount,
+    US.BadgeCount,
+    US.TotalBounties,
+    TP.Title AS TopPostTitle,
+    TP.ViewCount AS TopPostViewCount,
+    TP.Score AS TopPostScore,
+    TP.AnswerCount AS TopPostAnswerCount,
+    TP.CommentCount AS TopPostCommentCount,
+    TP.FavoriteCount AS TopPostFavoriteCount,
+    TP.CreationDate AS TopPostCreationDate,
+    TP.LastActivityDate AS TopPostLastActivityDate,
+    TP.OwnerDisplayName AS TopPostOwnerDisplayName,
+    TP.OwnerReputation AS TopPostOwnerReputation
+FROM UserStats US
+LEFT JOIN TopPosts TP ON US.UserId = TP.OwnerUserId;

@@ -1,0 +1,64 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        COUNT(ps.ps_partkey) AS part_count, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent, 
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name 
+    FROM 
+        SupplierStats s
+    WHERE 
+        s.total_supply_value > (SELECT AVG(total_supply_value) FROM SupplierStats)
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name 
+    FROM 
+        CustomerStats c
+    WHERE 
+        c.total_spent > (SELECT AVG(total_spent) FROM CustomerStats)
+)
+SELECT 
+    ts.s_name AS Supplier_Name,
+    tc.c_name AS Customer_Name,
+    ps.p_name AS Part_Name,
+    ps.ps_supplycost AS Supply_Cost,
+    ls.l_quantity AS Quantity_Sold
+FROM 
+    TopSuppliers ts
+JOIN 
+    partsupp ps ON ts.s_suppkey = ps.ps_suppkey
+JOIN 
+    lineitem ls ON ps.ps_partkey = ls.l_partkey
+JOIN 
+    orders o ON ls.l_orderkey = o.o_orderkey
+JOIN 
+    TopCustomers tc ON o.o_custkey = tc.c_custkey
+WHERE 
+    ls.l_shipdate < cast('1998-10-01' as date)
+ORDER BY 
+    ts.s_name, tc.c_name;

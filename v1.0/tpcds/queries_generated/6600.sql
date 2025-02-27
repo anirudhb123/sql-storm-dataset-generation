@@ -1,0 +1,38 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sales_price, 
+        ws_quantity, 
+        DATE_PART('year', dd.d_date) AS sale_year,
+        d.d_month AS sale_month,
+        ROW_NUMBER() OVER (PARTITION BY DATE_PART('year', dd.d_date) ORDER BY ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        ws_sales_price IS NOT NULL
+),
+TopSales AS (
+    SELECT 
+        sale_year,
+        sale_month,
+        SUM(ws_sales_price * ws_quantity) AS total_revenue
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 10
+    GROUP BY 
+        sale_year, 
+        sale_month
+)
+SELECT 
+    ts.sale_year, 
+    ts.sale_month, 
+    ts.total_revenue,
+    SUM(ts.total_revenue) OVER (ORDER BY ts.sale_year, ts.sale_month) AS cumulative_revenue
+FROM 
+    TopSales ts
+ORDER BY 
+    ts.sale_year, 
+    ts.sale_month;

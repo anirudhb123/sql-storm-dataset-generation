@@ -1,0 +1,70 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+    HAVING
+        SUM(ws_net_profit) > 1000
+),
+TopSales AS (
+    SELECT
+        item.i_item_id,
+        item.i_product_name,
+        COALESCE(SUM(CASE WHEN ws.ws_sold_date_sk IS NOT NULL THEN ws.ws_net_profit END), 0) AS online_profit,
+        COALESCE(SUM(CASE WHEN cs.cs_sold_date_sk IS NOT NULL THEN cs.cs_net_profit END), 0) AS catalog_profit,
+        COALESCE(SUM(CASE WHEN ss.ss_sold_date_sk IS NOT NULL THEN ss.ss_net_profit END), 0) AS store_profit
+    FROM
+        item
+    LEFT JOIN web_sales ws ON item.i_item_sk = ws.ws_item_sk
+    LEFT JOIN catalog_sales cs ON item.i_item_sk = cs.cs_item_sk
+    LEFT JOIN store_sales ss ON item.i_item_sk = ss.ss_item_sk
+    WHERE
+        item.i_rec_start_date <= DATE '2002-10-01'
+        AND (item.i_rec_end_date IS NULL OR item.i_rec_end_date > DATE '2002-10-01')
+    GROUP BY
+        item.i_item_id, item.i_product_name
+),
+FinalResults AS (
+    SELECT
+        ts.i_item_id,
+        ts.i_product_name,
+        ts.online_profit,
+        ts.catalog_profit,
+        ts.store_profit,
+        ts.online_profit + ts.catalog_profit + ts.store_profit AS total_profit
+    FROM
+        TopSales ts
+),
+IncomeBands AS (
+    SELECT
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        hd.hd_buy_potential
+    FROM
+        household_demographics hd
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT
+    fr.i_item_id,
+    fr.i_product_name,
+    fr.online_profit,
+    fr.catalog_profit,
+    fr.store_profit,
+    fr.total_profit,
+    ib.hd_buy_potential
+FROM
+    FinalResults fr
+LEFT JOIN IncomeBands ib ON fr.total_profit BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound
+WHERE
+    fr.total_profit > (SELECT AVG(total_profit) FROM FinalResults) 
+    OR ib.hd_buy_potential IS NOT NULL
+ORDER BY
+    fr.total_profit DESC
+LIMIT 100;

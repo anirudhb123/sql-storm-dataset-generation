@@ -1,0 +1,58 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+HighlightedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        CASE 
+            WHEN COUNT(mk.keyword) > 3 THEN 'Noteworthy'
+            ELSE 'Regular'
+        END AS status
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    WHERE 
+        rm.rn <= 5
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+), 
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    hm.movie_id,
+    hm.title,
+    hm.production_year,
+    hm.status,
+    COALESCE(mc.companies, 'No Companies') AS companies
+FROM 
+    HighlightedMovies hm
+LEFT JOIN 
+    MovieCompanies mc ON hm.movie_id = mc.movie_id
+WHERE 
+    hm.production_year = (SELECT MAX(production_year) FROM aka_title)
+ORDER BY 
+    hm.production_year DESC, 
+    hm.status ASC;

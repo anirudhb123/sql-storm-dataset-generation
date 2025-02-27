@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS ScoreRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.*
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ScoreRank <= 10
+)
+SELECT 
+    t.PostId,
+    t.Title,
+    t.CreationDate,
+    t.Score,
+    t.OwnerDisplayName,
+    t.CommentCount,
+    t.UpVotes,
+    t.DownVotes,
+    pt.Name AS PostTypeName,
+    pht.Name AS PostHistoryTypeName
+FROM 
+    TopPosts t
+JOIN 
+    PostTypes pt ON t.PostTypeId = pt.Id
+LEFT JOIN 
+    PostHistory ph ON t.PostId = ph.PostId
+LEFT JOIN 
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+ORDER BY 
+    t.Score DESC, t.CreationDate DESC;

@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS ScoreRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '3 months' 
+        AND p.Score IS NOT NULL
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ScoreRank <= 10
+),
+TopPostsWithTags AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.CreationDate,
+        fp.Score,
+        fp.ViewCount,
+        fp.CommentCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                unnest(string_to_array(fp.Tags, '>')) AS TagName
+        ) t ON TRUE
+    GROUP BY 
+        fp.PostId, fp.Title, fp.CreationDate, fp.Score, fp.ViewCount, fp.CommentCount
+)
+SELECT 
+    tpt.PostId,
+    tpt.Title,
+    COALESCE(tpt.Tags, 'No Tags') AS Tags,
+    tpt.Score,
+    tpt.ViewCount,
+    CASE 
+        WHEN tpt.CommentCount IS NULL THEN 0 
+        ELSE tpt.CommentCount 
+    END AS CommentCount,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 FROM Votes v 
+            WHERE v.PostId = tpt.PostId AND v.VoteTypeId = 2 -- UpVote
+        ) THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS Popularity
+FROM 
+    TopPostsWithTags tpt
+ORDER BY 
+    tpt.Score DESC, tpt.ViewCount DESC;
+
+-- Additional test for edge cases
+SELECT 
+    COUNT(*) AS EdgeCases,
+    SUM(CASE WHEN p.Title IS NULL OR p.Title = '' THEN 1 ELSE 0 END) AS NullOrEmptyTitle,
+    SUM(CASE WHEN p.CreationDate < '1970-01-01' THEN 1 ELSE 0 END) AS InvalidCreationDate,
+    SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativeScores
+FROM 
+    Posts p
+WHERE 
+    p.OwnerUserId IS NULL OR 
+    p.OwnerDisplayName IS NULL;

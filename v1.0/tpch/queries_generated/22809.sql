@@ -1,0 +1,30 @@
+WITH RECURSIVE supplier_levels AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level 
+    FROM supplier s 
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT ps.ps_suppkey, s.s_name, s.s_nationkey, sl.level + 1
+    FROM partsupp ps
+    JOIN supplier_levels sl ON ps.ps_suppkey = sl.s_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > (SELECT SUM(ps.ps_availqty) FROM partsupp ps2 WHERE ps2.ps_partkey = ps.ps_partkey)
+)
+
+SELECT r.r_name, 
+       COUNT(DISTINCT n.n_name) AS nation_count, 
+       SUM(CASE WHEN c.c_custkey IS NULL THEN 1 ELSE 0 END) AS null_custs,
+       STRING_AGG(CASE WHEN l.l_discount >= 0.1 AND l.l_discount <= 0.3 THEN CONCAT(l.l_returnflag, '-', l.l_linestatus) END, ',') AS return_status,
+       ROUND(AVG(l.l_extendedprice * (1 - l.l_discount) + l.l_tax), 2) AS adjusted_avg_price,
+       ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY AVG(l.l_extendedprice) DESC) AS row_num
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN supplier_levels sl ON l.l_suppkey = sl.s_suppkey
+GROUP BY r.r_name
+HAVING COUNT(*) > (SELECT MAX(COUNT(*)) FROM lineitem GROUP BY l_suppkey)
+   AND EXISTS (SELECT 1 FROM supplier s WHERE s.s_suppkey = sl.s_suppkey AND s.s_nationkey = n.n_nationkey)
+ORDER BY r.r_name ASC;

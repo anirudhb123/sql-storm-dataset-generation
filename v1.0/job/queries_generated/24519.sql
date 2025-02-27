@@ -1,0 +1,75 @@
+WITH RankedTitles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+FilteredCompCast AS (
+    SELECT
+        cc.movie_id,
+        cc.person_id,
+        rc.role AS person_role,
+        COUNT(*) OVER (PARTITION BY cc.movie_id) AS role_count
+    FROM
+        cast_info cc
+    JOIN
+        role_type rc ON cc.role_id = rc.id
+    WHERE
+        rc.role LIKE '%Actor%' OR rc.role LIKE '%Actress%'
+),
+CompanyInfo AS (
+    SELECT
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        COUNT(DISTINCT cn.id) AS company_count
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    WHERE
+        cn.country_code IS NOT NULL
+    GROUP BY
+        mc.movie_id
+),
+TitleKeyWords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+)
+SELECT
+    tt.title_id,
+    tt.title,
+    tt.production_year,
+    COALESCE(fcc.person_role, 'No Role') AS actor_role,
+    COALESCE(ci.companies, 'No Companies') AS company_names,
+    COALESCE(tkw.keywords, 'No Keywords') AS associated_keywords,
+    rt.title_rank,
+    CASE 
+        WHEN tt.production_year IS NULL THEN 'Unknown Year'
+        ELSE 'Year ' || tt.production_year
+    END AS production_year_info
+FROM
+    RankedTitles tt
+LEFT JOIN
+    FilteredCompCast fcc ON tt.title_id = fcc.movie_id
+LEFT JOIN
+    CompanyInfo ci ON tt.title_id = ci.movie_id
+LEFT JOIN
+    TitleKeyWords tkw ON tt.title_id = tkw.movie_id
+WHERE
+    tt.title_rank <= 5
+    OR tt.title ILIKE '%King%'
+ORDER BY
+    tt.production_year DESC, 
+    tt.title ASC;

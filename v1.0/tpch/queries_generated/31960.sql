@@ -1,0 +1,35 @@
+WITH RECURSIVE RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           CASE WHEN c.c_acctbal > 10000 THEN 'High Value'
+                WHEN c.c_acctbal BETWEEN 5000 AND 10000 THEN 'Medium Value'
+                ELSE 'Low Value' END AS cust_value_segment
+    FROM customer c
+),
+PartPerformance AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           DENSE_RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderAnalysis AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus,
+           (SELECT COUNT(*) FROM lineitem li WHERE li.l_orderkey = o.o_orderkey) AS total_lines,
+           RANK() OVER (ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+)
+SELECT p.p_name, r.s_name, c.c_name, ha.total_revenue, ob.o_orderdate,
+       CASE WHEN p.p_size IS NULL THEN 'Unknown Size' ELSE p.p_size::varchar END AS part_size,
+       CASE WHEN ha.rank = 1 THEN 'Top Supplier' ELSE 'Other Supplier' END AS supplier_rank,
+       ha.cust_value_segment
+FROM PartPerformance ha
+JOIN RankedSuppliers r ON ha.total_revenue > 5000 AND r.rank <= 5
+JOIN HighValueCustomers c ON c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = ha.p_partkey LIMIT 1))
+LEFT JOIN orders ob ON ob.o_orderkey = (SELECT TOP 1 o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O' ORDER BY o.o_orderdate DESC)
+WHERE ha.revenue_rank <= 10 OR ha.p_name LIKE '%widget%'
+ORDER BY ha.total_revenue DESC, r.s_name ASC;

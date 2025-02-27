@@ -1,0 +1,63 @@
+
+WITH SalesData AS (
+    SELECT 
+        w.w_warehouse_name,
+        SUM(ws.net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        AVG(ws.ext_sales_price) AS average_sales_price,
+        RANK() OVER (PARTITION BY w.w_warehouse_name ORDER BY SUM(ws.net_profit) DESC) AS rank_by_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.w_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        date_dim d ON ws.sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023 AND 
+        ws.net_profit IS NOT NULL
+    GROUP BY 
+        w.warehouse_name
+),
+CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(sr.return_amt, 0) + COALESCE(wr.return_amt, 0)) AS total_return_amount,
+        COUNT(DISTINCT sr.ticket_number) + COUNT(DISTINCT wr.order_number) AS total_returns
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+ReturnMetrics AS (
+    SELECT
+        c.c_customer_id,
+        cr.total_return_amount,
+        cr.total_returns,
+        CASE 
+            WHEN cr.total_return_amount > 1000 THEN 'High Return'
+            WHEN cr.total_return_amount BETWEEN 500 AND 1000 THEN 'Medium Return'
+            ELSE 'Low Return'
+        END AS return_category
+    FROM 
+        CustomerReturns cr
+)
+SELECT
+    sd.warehouse_name,
+    sd.total_net_profit,
+    sd.total_orders,
+    rm.return_category,
+    COUNT(DISTINCT rm.c_customer_id) AS customer_count
+FROM 
+    SalesData sd
+LEFT JOIN 
+    ReturnMetrics rm ON sd.total_net_profit > 0
+GROUP BY 
+    sd.warehouse_name, sd.total_net_profit, sd.total_orders, rm.return_category
+HAVING 
+    sd.total_net_profit > 10000
+ORDER BY 
+    sd.total_net_profit DESC, customer_count ASC;

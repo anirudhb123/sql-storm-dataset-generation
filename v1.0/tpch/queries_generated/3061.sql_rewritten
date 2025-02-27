@@ -1,0 +1,70 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineitemWindowed AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_extendedprice,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS item_rank
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1996-01-01'
+)
+
+SELECT 
+    r.r_name AS region_name,
+    ns.n_name AS nation_name,
+    cs.c_name AS customer_name,
+    ss.s_name AS supplier_name,
+    cs.total_spent AS customer_spent,
+    ss.total_available AS supplier_availability,
+    lw.l_orderkey,
+    lw.l_partkey,
+    COALESCE(lw.l_extendedprice, 0) AS extended_price,
+    CASE 
+        WHEN ss.avg_supply_cost IS NULL THEN 'Cost Not Available'
+        ELSE CONCAT('Avg Cost: $', ROUND(ss.avg_supply_cost, 2))
+    END AS avg_cost_info
+FROM 
+    region r
+JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    customerorders cs ON ns.n_nationkey = cs.c_custkey
+LEFT JOIN 
+    supplierstats ss ON ns.n_nationkey = ss.s_suppkey
+LEFT JOIN 
+    lineitemwindowed lw ON cs.order_count > 0 AND lw.l_orderkey IN (
+        SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey = lw.l_orderkey
+    )
+WHERE 
+    cs.total_spent > 1000 OR ss.total_available > 50
+ORDER BY 
+    r.r_name, cs.total_spent DESC, extended_price DESC;

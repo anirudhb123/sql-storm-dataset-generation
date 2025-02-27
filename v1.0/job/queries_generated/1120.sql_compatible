@@ -1,0 +1,48 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS title_rank
+    FROM 
+        aka_title a
+    INNER JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword ILIKE '%Action%'
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS total_casts,
+        STRING_AGG(DISTINCT CONCAT(n.name, '(', ct.kind, ')'), ', ') AS cast_list
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        name n ON ci.person_id = n.imdb_id
+    INNER JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    cd.total_casts,
+    cd.cast_list,
+    COALESCE((SELECT AVG(CAST(mi.info AS numeric)) 
+              FROM movie_info mi 
+              WHERE mi.movie_id = rt.id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')), 0) AS average_rating
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    CastDetails cd ON rt.id = cd.movie_id
+WHERE 
+    rt.title_rank <= 5
+  AND 
+    cd.total_casts IS NOT NULL
+ORDER BY 
+    rt.production_year DESC, cd.total_casts DESC
+LIMIT 10;

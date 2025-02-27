@@ -1,0 +1,52 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_name, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_name ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.c_name, oh.o_totalprice
+    FROM OrderHierarchy oh
+    JOIN orders o ON oh.o_orderkey = o.o_orderkey 
+    WHERE o.o_orderdate < oh.o_orderdate
+),
+FilteredSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal > 1000
+    GROUP BY s.s_suppkey, s.s_name
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_container,
+           COUNT(DISTINCT ps.ps_suppkey) AS UniqueSuppliers, 
+           SUM(ps.ps_availqty) AS TotalAvailable
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_container
+),
+SalesSummary AS (
+    SELECT c.c_mktsegment, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY c.c_mktsegment
+)
+SELECT r.r_name, 
+       COALESCE(SUM(ss.TotalSales), 0) AS MarketSegmentSales,
+       COALESCE(pd.TotalAvailable, 0) AS TotalAvailableParts,
+       sf.TotalCost
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN salesSummary ss ON n.n_nationkey = ss.c_mktsegment
+LEFT JOIN PartDetails pd ON pd.p_partkey = (SELECT p.p_partkey
+                                             FROM part p
+                                             WHERE p.p_brand = (SELECT s.s_name FROM FilteredSuppliers s
+                                                                ORDER BY s.TotalCost DESC LIMIT 1)
+                                             LIMIT 1)
+LEFT JOIN FilteredSuppliers sf ON sf.s_suppkey IN (SELECT ps.ps_suppkey
+                                                    FROM partsupp ps
+                                                    WHERE ps.ps_partkey = pd.p_partkey)
+GROUP BY r.r_name, pd.TotalAvailable, sf.TotalCost
+ORDER BY MarketSegmentSales DESC, r.r_name;

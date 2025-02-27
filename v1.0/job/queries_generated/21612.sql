@@ -1,0 +1,74 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY at.id) AS num_cast,
+        ROW_NUMBER() OVER (ORDER BY at.production_year DESC, COUNT(DISTINCT ci.person_id) DESC) AS ranking
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+CompanyAppearances AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.name) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+ExtendedMovieInfo AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        rm.num_cast,
+        COALESCE(mk.keywords, 'No Keywords') AS movie_keywords,
+        COALESCE(ca.company_count, 0) AS company_count,
+        CASE 
+            WHEN rm.num_cast > 0 THEN 'Cast Present' 
+            ELSE 'No Cast' 
+        END AS casting_status
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON rm.title_id = mk.movie_id
+    LEFT JOIN 
+        CompanyAppearances ca ON rm.title_id = ca.movie_id
+)
+SELECT 
+    emi.title,
+    emi.production_year,
+    emi.num_cast,
+    emi.movie_keywords,
+    emi.company_count,
+    emi.casting_status,
+    CASE 
+        WHEN emi.company_count BETWEEN 1 AND 3 THEN 'Small Production'
+        WHEN emi.company_count BETWEEN 4 AND 10 THEN 'Medium Production'
+        ELSE 'Large Production'
+    END AS production_scale
+FROM 
+    ExtendedMovieInfo emi
+WHERE 
+    emi.ranking <= 50 -- Limiting to the top 50 based on ranking
+ORDER BY 
+    emi.production_year DESC, emi.num_cast DESC
+LIMIT 10;

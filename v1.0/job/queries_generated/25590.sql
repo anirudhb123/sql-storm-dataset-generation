@@ -1,0 +1,52 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        tk.keyword,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY m.production_year DESC) AS rank
+    FROM
+        title m
+    JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN
+        keyword tk ON mk.keyword_id = tk.id
+    JOIN
+        cast_info c ON m.id = c.movie_id
+    GROUP BY
+        m.id, m.title, m.production_year, tk.keyword
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.keyword,
+        rm.actor_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.actor_count > 5
+    ORDER BY 
+        rm.production_year DESC
+)
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.keyword,
+    p.name AS director_name,
+    p.info AS director_info
+FROM 
+    FilteredMovies fm
+JOIN 
+    complete_cast cc ON fm.movie_id = cc.movie_id
+JOIN 
+    person_info pi ON cc.subject_id = pi.person_id
+JOIN 
+    name p ON pi.person_id = p.imdb_id
+WHERE 
+    pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Director')
+ORDER BY 
+    fm.production_year DESC, fm.actor_count DESC;

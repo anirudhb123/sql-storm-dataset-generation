@@ -1,0 +1,71 @@
+WITH RECURSIVE TotalSales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate <= DATE '1996-12-31'
+    GROUP BY 
+        c.c_custkey
+    UNION ALL
+    SELECT 
+        ts.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) + ts.total_amount
+    FROM 
+        TotalSales ts
+    JOIN 
+        orders o ON ts.c_custkey = o.o_custkey AND o.o_orderdate < DATE '1996-01-01' 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        ts.c_custkey
+),
+SupplierRegions AS (
+    SELECT 
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        s.s_suppkey,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+TopSuppliers AS (
+    SELECT 
+        nation_name,
+        region_name,
+        s_suppkey,
+        s_acctbal
+    FROM 
+        SupplierRegions
+    WHERE 
+        rank <= 3
+)
+SELECT 
+    p.p_name,
+    ps.ps_availqty,
+    COALESCE(s.region_name, 'Unknown') AS region_name,
+    COALESCE(ts.total_amount, 0) AS customer_total
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    TopSuppliers s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    TotalSales ts ON p.p_partkey = ts.c_custkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p_retailprice) FROM part) 
+    AND ps.ps_availqty < (SELECT MAX(ps_availqty) FROM partsupp)
+ORDER BY 
+    customer_total DESC, region_name, p.p_name
+LIMIT 50;

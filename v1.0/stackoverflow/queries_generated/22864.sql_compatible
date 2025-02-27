@@ -1,0 +1,56 @@
+
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+                         SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes 
+         FROM Votes 
+         GROUP BY PostId) v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT Id, TagName, ExcerptPostId FROM Tags) t ON t.ExcerptPostId = p.Id
+    WHERE 
+        p.CreationDate >= DATEADD(DAY, -30, CAST('2024-10-01' AS DATE))
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.AnswerCount, c.CommentCount, v.UpVotes, v.DownVotes
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.CommentCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.Tags,
+    CASE 
+        WHEN pd.AnswerCount IS NULL THEN 'No Answers'
+        WHEN pd.AnswerCount > 0 THEN FORMAT('%d Answer(s)', pd.AnswerCount)
+        ELSE 'No Answers' 
+    END AS Answer_Status,
+    (SELECT COUNT(*) 
+     FROM PostHistory ph 
+     WHERE ph.PostId = pd.PostId AND ph.PostHistoryTypeId IN (10, 11)) AS CloseOpenCount,
+    (SELECT COUNT(*) 
+     FROM PostHistory ph 
+     WHERE ph.PostId = pd.PostId AND ph.PostHistoryTypeId IN (12, 13)) AS DeleteUndeleteCount
+FROM 
+    PostDetails pd
+WHERE 
+    pd.PostRank = 1                               
+    AND pd.Score > 0                               
+ORDER BY 
+    pd.Score DESC, pd.CreationDate ASC;

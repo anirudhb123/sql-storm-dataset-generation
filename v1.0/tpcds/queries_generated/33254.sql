@@ -1,0 +1,45 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws_item_sk, SUM(ws_quantity) AS total_quantity, 
+           SUM(ws_sales_price) AS total_sales
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2451914 AND 2451916
+    GROUP BY ws_item_sk
+    UNION ALL
+    SELECT cs_item_sk, SUM(cs_quantity), SUM(cs_sales_price)
+    FROM catalog_sales
+    WHERE cs_sold_date_sk BETWEEN 2451914 AND 2451916
+    GROUP BY cs_item_sk
+),
+AddressInfo AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country
+    FROM customer_address
+    WHERE ca_country IS NOT NULL
+),
+CustomerInfo AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_addr_sk
+    FROM customer
+),
+Demographics AS (
+    SELECT cd_demo_sk, cd_gender, cd_marital_status, cd_purchase_estimate
+    FROM customer_demographics
+    WHERE cd_purchase_estimate > 5000
+),
+SalesSummary AS (
+    SELECT S.ws_item_sk, S.total_quantity,
+           S.total_sales, COUNT(DISTINCT C.c_customer_sk) AS customer_count
+    FROM SalesCTE S
+    JOIN web_site W ON S.ws_item_sk = W.web_site_sk
+    JOIN CustomerInfo C ON C.c_current_addr_sk IN (
+        SELECT ca_address_sk FROM AddressInfo
+        WHERE ca_city = W.w_city AND ca_state = W.w_state
+    )
+    GROUP BY S.ws_item_sk, S.total_quantity, S.total_sales
+)
+SELECT SS.ws_item_sk, SS.total_quantity, SS.total_sales, 
+       D.cd_gender, D.cd_marital_status, D.cd_purchase_estimate
+FROM SalesSummary SS
+LEFT JOIN Demographics D ON SS.ws_item_sk = D.cd_demo_sk
+WHERE SS.total_sales > (SELECT AVG(total_sales) FROM SalesSummary)
+  AND D.cd_gender IS NOT NULL
+ORDER BY SS.total_sales DESC;

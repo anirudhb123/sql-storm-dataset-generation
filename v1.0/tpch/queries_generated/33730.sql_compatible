@@ -1,0 +1,69 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT 
+        ps_partkey,
+        ps_suppkey, 
+        ps_availqty, 
+        ps_supplycost,
+        1 AS depth
+    FROM 
+        partsupp
+    WHERE 
+        ps_availqty > 100
+    
+    UNION ALL
+    
+    SELECT 
+        ps.partkey,
+        ps.suppkey,
+        ps.availqty,
+        ps_supplycost,
+        depth + 1
+    FROM 
+        SupplyChain sc
+    JOIN 
+        partsupp ps ON sc.ps_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp) 
+        AND depth < 5 
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    o.o_orderstatus = 'O'
+    AND l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    AND s.s_acctbal IS NOT NULL
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY 
+    rank
+UNION ALL
+SELECT 
+    'Total' AS total_name,
+    NULL AS total_brand,
+    SUM(l.l_extendedprice * (1 - l.l_discount)),
+    NULL AS total_orders,
+    NULL AS total_rank
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    o.o_orderstatus = 'O'
+    AND l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31';

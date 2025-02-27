@@ -1,0 +1,97 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_profit IS NOT NULL
+),
+SalesSummary AS (
+    SELECT 
+        w.warehouse_name,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_sales,
+        AVG(ws.ws_net_profit) OVER (PARTITION BY w.warehouse_name) AS avg_net_profit
+    FROM 
+        store_sales ss
+    JOIN 
+        warehouse w ON ss.ss_store_sk = w.w_warehouse_sk
+    WHERE 
+        ss.ss_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        w.warehouse_name
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name || ' ' || c.c_last_name AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_buy_potential, 'UNKNOWN') AS purchase_potential,
+        DENSE_RANK() OVER (ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+CombinedReturns AS (
+    SELECT 
+        sr.reason_sk,
+        COUNT(sr.ticket_number) AS total_store_returns,
+        SUM(sr.return_quantity) AS total_return_quantity
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.reason_sk
+    UNION ALL
+    SELECT 
+        wr.reason_sk,
+        COUNT(wr.order_number) AS total_web_returns,
+        SUM(wr.return_quantity) AS total_return_quantity
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.reason_sk
+),
+OverallStats AS (
+    SELECT 
+        SUM(total_net_profit) AS grand_total_profit,
+        SUM(total_sales) AS grand_total_sales
+    FROM 
+        SalesSummary
+    GROUP BY 
+        warehouse_name
+)
+SELECT 
+    c.full_name,
+    c.cd_gender,
+    c.purchase_potential,
+    ss.warehouse_name,
+    ss.total_net_profit,
+    ss.total_sales,
+    CASE 
+        WHEN cs.total_store_returns IS NULL THEN 0 
+        ELSE cs.total_store_returns 
+    END AS total_store_returns,
+    COALESCE(cs.total_web_returns, 0) AS total_web_returns,
+    cs.total_return_quantity AS total_combined_return_quantity,
+    os.grand_total_profit,
+    os.grand_total_sales
+FROM 
+    CustomerDetails c 
+JOIN 
+    SalesSummary ss ON ss.total_net_profit > 1000
+LEFT JOIN 
+    CombinedReturns cs ON cs.reason_sk = (SELECT MIN(reason_sk) FROM CombinedReturns)
+JOIN 
+    OverallStats os ON 1=1
+WHERE 
+    c.purchase_rank < 5
+ORDER BY 
+    c.cd_gender, ss.total_net_profit DESC;

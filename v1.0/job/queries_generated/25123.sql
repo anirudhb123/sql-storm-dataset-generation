@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT an.name, ', ') AS actor_names,
+        mt.kind_id,
+        kt.kind AS kind_description
+    FROM 
+        aka_title mt
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    JOIN 
+        kind_type kt ON mt.kind_id = kt.id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year, mt.kind_id, kt.kind
+),
+MoviesWithKeywords AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        rm.cast_count,
+        rm.actor_names,
+        rm.kind_description,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    GROUP BY 
+        rm.movie_id, rm.movie_title, rm.production_year, rm.cast_count, rm.actor_names, rm.kind_description
+),
+FinalRanking AS (
+    SELECT 
+        mwk.movie_id,
+        mwk.movie_title,
+        mwk.production_year,
+        mwk.cast_count,
+        mwk.actor_names,
+        mwk.kind_description,
+        mwk.keywords,
+        ROW_NUMBER() OVER (ORDER BY mwk.production_year DESC, mwk.cast_count DESC) AS rank
+    FROM 
+        MoviesWithKeywords mwk
+)
+SELECT 
+    fr.rank,
+    fr.movie_id,
+    fr.movie_title,
+    fr.production_year,
+    fr.cast_count,
+    fr.actor_names,
+    fr.kind_description,
+    fr.keywords
+FROM 
+    FinalRanking fr
+WHERE 
+    fr.production_year >= 2000
+ORDER BY 
+    fr.rank;
+
+This SQL query performs the following actions:
+
+1. **RankedMovies CTE:** Aggregates movies along with their cast count and actor names from various tables. It counts unique actors for each movie and aggregates names of the actors.
+2. **MoviesWithKeywords CTE:** Joins the ranked movie data with movie keywords, aggregating keywords for each movie.
+3. **FinalRanking CTE:** Adds a rank column based on production year and the number of cast members.
+4. **Final Select:** Filters for movies produced after the year 2000 and orders the results by rank.

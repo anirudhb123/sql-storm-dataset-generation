@@ -1,0 +1,47 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount,
+        SUM(CASE WHEN p.UpVotes > p.DownVotes THEN 1 ELSE 0 END) AS UpscalePosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostUpdates AS (
+    SELECT 
+        ph.UserId,
+        ph.PostId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+)
+SELECT 
+    ua.DisplayName,
+    ua.PostCount,
+    ua.PositiveScoreCount,
+    COALESCE(ua.UpscalePosts, 0) AS UpscalePosts,
+    rp.PostId,
+    MAX(rp.CreationDate) AS LastUpdateDate,
+    COUNT(CASE WHEN rp.rn = 1 THEN 1 END) AS RecentUpdateFlag,
+    STRING_AGG(DISTINCT COALESCE(phc.Comment, 'No comment'), ', ') AS Comments
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    RecentPostUpdates rp ON ua.UserId = rp.UserId 
+LEFT JOIN 
+    PostHistory phc ON rp.PostId = phc.PostId AND phc.CreationDate = rp.CreationDate
+GROUP BY 
+    ua.UserId, ua.DisplayName, ua.PostCount, ua.PositiveScoreCount, ua.UpscalePosts, rp.PostId
+HAVING 
+    ua.PostCount > 5 AND ua.PositiveScoreCount > 2
+ORDER BY 
+    ua.PostCount DESC, LastUpdateDate DESC;

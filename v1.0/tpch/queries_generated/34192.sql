@@ -1,0 +1,49 @@
+WITH RECURSIVE Region_CTE AS (
+    SELECT r_regionkey, r_name, r_comment
+    FROM region
+    WHERE r_name LIKE 'A%'
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, r.r_comment
+    FROM region r
+    INNER JOIN Region_CTE rc ON r.r_regionkey = rc.r_regionkey + 1
+),
+Avg_Order_Value AS (
+    SELECT c.c_custkey, AVG(o.o_totalprice) AS avg_order
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+Qualified_Suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal)
+        FROM supplier s2
+        WHERE s2.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    )
+),
+Part_Supplier_Details AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost, ps.ps_comment
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+)
+SELECT 
+    p.p_name,
+    rs.r_name AS region,
+    cnt.cust_count,
+    AVG(a.avg_order) AS average_order_value,
+    ps.ps_supplycost * cnt.cust_count AS total_supply_value
+FROM Part_Supplier_Details ps
+JOIN Qualified_Suppliers s ON ps.ps_partkey = s.s_suppkey
+LEFT JOIN (
+    SELECT c.c_nationkey, COUNT(*) AS cust_count
+    FROM customer c
+    GROUP BY c.c_nationkey
+) cnt ON cnt.c_nationkey = s.s_nationkey
+JOIN nation n ON n.n_nationkey = s.s_nationkey
+CROSS JOIN Region_CTE rs
+WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM Region_CTE r)
+GROUP BY p.p_name, rs.r_name, cnt.cust_count
+HAVING total_supply_value > 10000
+ORDER BY total_supply_value DESC;

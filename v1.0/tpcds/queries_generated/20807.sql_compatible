@@ -1,0 +1,76 @@
+
+WITH RecursivePriceComparison AS (
+    SELECT 
+        i.i_item_id,
+        i.i_current_price,
+        ROW_NUMBER() OVER (PARTITION BY i.i_item_id ORDER BY i.i_current_price DESC) AS price_rank
+    FROM 
+        item i
+    WHERE 
+        i.i_rec_start_date <= CAST('2002-10-01' AS DATE) AND 
+        (i.i_rec_end_date IS NULL OR i.i_rec_end_date >= CAST('2002-10-01' AS DATE))
+),
+SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        d.d_date,
+        d.d_month_seq,
+        d.d_year,
+        sm.sm_type,
+        CASE 
+            WHEN ws.ws_sales_price < 50 THEN 'Low' 
+            WHEN ws.ws_sales_price BETWEEN 50 AND 150 THEN 'Medium' 
+            ELSE 'High' 
+        END AS price_category,
+        ws.i_item_id -- Added column for join
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    LEFT JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+),
+AdvancedComparison AS (
+    SELECT 
+        sd.d_date,
+        sd.price_category,
+        SUM(sd.ws_quantity) AS total_quantity,
+        AVG(sd.ws_sales_price) AS avg_sales_price,
+        SUM(sd.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT sd.ws_sold_date_sk) AS distinct_days
+    FROM 
+        SalesData sd
+    INNER JOIN 
+        RecursivePriceComparison rpc ON sd.i_item_id = rpc.i_item_id AND rpc.price_rank = 1
+    GROUP BY 
+        sd.d_date, sd.price_category
+)
+SELECT 
+    ac.d_date,
+    ac.price_category,
+    ac.total_quantity,
+    ac.avg_sales_price,
+    ac.total_profit,
+    ac.distinct_days,
+    COALESCE(SUM(CASE WHEN ac.total_profit IS NULL THEN 0 ELSE ac.total_profit END), 0) AS adjusted_profit
+FROM 
+    AdvancedComparison ac
+LEFT JOIN 
+    (SELECT 
+        d.d_year, 
+        COUNT(DISTINCT ac.d_date) AS total_dates_used
+     FROM 
+        AdvancedComparison ac
+     JOIN 
+        date_dim d ON ac.d_date = d.d_date
+     GROUP BY d.d_year) yearly_data ON EXTRACT(YEAR FROM ac.d_date) = yearly_data.d_year
+WHERE 
+    ac.total_quantity > 0
+HAVING 
+    SUM(ac.total_profit) > (SELECT AVG(total_profit) FROM AdvancedComparison) 
+ORDER BY 
+    ac.total_profit DESC, 
+    ac.price_category;

@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        u.Reputation,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.Reputation
+),
+
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS FirstClosedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        SUM(CASE WHEN ph.UserId IS NOT NULL THEN 1 ELSE 0 END) AS EditsCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+
+SelectedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.VoteCount,
+        COALESCE(p.FirstClosedDate, 'Never Closed') AS FirstClosedStatus,
+        p.CloseReopenCount,
+        p.EditsCount,
+        CASE 
+            WHEN rp.VoteCount >= 10 THEN 'Highly Voted'
+            WHEN rp.VoteCount BETWEEN 5 AND 9 THEN 'Moderately Voted'
+            ELSE 'Low Votes'
+        END AS VoteStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryStats p ON rp.PostId = p.PostId
+    WHERE 
+        rp.rn = 1
+)
+
+SELECT 
+    sp.PostId,
+    sp.Title,
+    sp.VoteCount,
+    sp.FirstClosedStatus,
+    sp.CloseReopenCount,
+    sp.EditsCount,
+    sp.VoteStatus,
+    CASE 
+        WHEN sp.CloseReopenCount = 0 AND sp.EditsCount > 5 THEN 'Stale and Edited'
+        WHEN sp.FirstClosedStatus = 'Never Closed' AND sp.VoteCount = 0 THEN 'New and Ignored'
+        WHEN sp.FirstClosedStatus <> 'Never Closed' AND sp.CloseReopenCount > 2 THEN 'Frequent Closure'
+        ELSE 'Normal Activity'
+    END AS PostActivityStatus
+FROM 
+    SelectedPosts sp
+ORDER BY 
+    sp.VoteCount DESC, 
+    sp.EditsCount DESC;

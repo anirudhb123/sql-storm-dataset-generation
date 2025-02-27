@@ -1,0 +1,59 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(
+            (SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = m.id AND cc.status_id IS NULL),
+            0
+        ) AS uncompleted_cast,
+        (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = m.id) AS info_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS year_row_num,
+        m.production_year
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+RankedMovies AS (
+    SELECT 
+        mh.*, 
+        CASE 
+            WHEN mh.uncompleted_cast > 0 THEN 'Incomplete'
+            WHEN mh.info_count = 0 THEN 'No Info'
+            ELSE 'Complete'
+        END AS status
+    FROM 
+        MovieHierarchy mh
+),
+TopMovies AS (
+    SELECT 
+        rm.*, 
+        RANK() OVER (PARTITION BY rm.status ORDER BY rm.year_row_num) AS status_rank
+    FROM 
+        RankedMovies rm
+)
+SELECT 
+    tm.title,
+    tm.year_row_num,
+    tm.status,
+    COALESCE(
+        (SELECT STRING_AGG(DISTINCT ak.name, ', ') 
+         FROM aka_name ak 
+         JOIN cast_info ci ON ci.movie_id = tm.movie_id 
+         WHERE ci.person_id = ak.person_id), 
+        'No Cast') AS cast_names
+FROM 
+    TopMovies tm
+WHERE 
+    (tm.status = 'Complete' OR tm.status = 'No Info')
+    AND tm.status_rank <= 5
+GROUP BY 
+    tm.title,
+    tm.year_row_num,
+    tm.status
+ORDER BY 
+    tm.production_year DESC, 
+    tm.title ASC
+OFFSET 3 ROWS
+FETCH NEXT 3 ROWS ONLY;

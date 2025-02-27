@@ -1,0 +1,64 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate <= cast('1998-10-01' as date)
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+RegionRanking AS (
+    SELECT 
+        n.n_nationkey,
+        r.r_regionkey,
+        RANK() OVER (PARTITION BY r.r_regionkey ORDER BY SUM(l.l_extendedprice) DESC) AS region_rank
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        n.n_nationkey, r.r_regionkey
+)
+SELECT 
+    ss.s_name,
+    ss.total_available_quantity,
+    ss.avg_supply_cost,
+    od.o_orderdate,
+    od.total_revenue,
+    rr.region_rank
+FROM 
+    SupplierStats ss
+LEFT JOIN 
+    OrderDetails od ON ss.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 20) LIMIT 1)
+LEFT JOIN 
+    RegionRanking rr ON ss.s_suppkey = (SELECT DISTINCT s2.s_suppkey FROM supplier s2 WHERE s2.s_nationkey = rr.n_nationkey)
+WHERE 
+    ss.total_available_quantity IS NOT NULL AND
+    od.total_revenue > (SELECT AVG(total_revenue) FROM OrderDetails) 
+ORDER BY 
+    ss.total_available_quantity DESC, od.total_revenue DESC
+LIMIT 100;

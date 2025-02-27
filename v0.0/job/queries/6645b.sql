@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS budget, min(t.title) AS unsuccsessful_movie
+FROM company_name AS cn, company_type AS ct, info_type AS it1, info_type AS it2, movie_companies AS mc, movie_info AS mi, movie_info_idx AS mi_idx, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND mi.info_type_id = it1.id AND mi_idx.info_type_id = it2.id AND t.id = mc.movie_id AND ct.id = mc.company_type_id AND cn.id = mc.company_id AND mc.movie_id = mi.movie_id AND mc.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id
+AND it1.info IN ('LD analog left', 'LD contrast', 'LD supplement', 'admissions', 'books', 'crazy credits', 'magazine cover photo', 'mpaa', 'printed media reviews', 'where now') AND it2.info < 'taglines' AND mi_idx.movie_id > 168014 AND t.imdb_index LIKE '%II%';

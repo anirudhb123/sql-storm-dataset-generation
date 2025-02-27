@@ -1,0 +1,67 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.CreationDate,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        Posts p ON p2.ParentId = p.Id
+    WHERE 
+        p2.PostTypeId = 2  
+)
+
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+    COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+    SUM(COALESCE(vt1.VoteCount, 0)) AS TotalUpvotes,
+    COUNT(DISTINCT b.Id) AS TotalBadges,
+    MAX(p.CreationDate) AS MostRecentPost,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed,
+    ph.Level AS PostHierarchyLevel
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    (SELECT 
+         PostId, 
+         COUNT(*) AS VoteCount 
+     FROM 
+         Votes 
+     WHERE 
+         VoteTypeId = 2  
+     GROUP BY 
+         PostId) vt1 ON p.Id = vt1.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT CAST(UNNEST(string_to_array(p.Tags, ',')) AS INT))
+LEFT JOIN 
+    RecursivePostHierarchy ph ON p.Id = ph.PostId
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation, ph.Level
+ORDER BY 
+    TotalAnswers DESC, TotalPosts DESC
+LIMIT 10;

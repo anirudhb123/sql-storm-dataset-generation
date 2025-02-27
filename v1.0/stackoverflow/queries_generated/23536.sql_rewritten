@@ -1,0 +1,98 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.Score,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        AVG(v.CreationDate) FILTER (WHERE v.VoteTypeId = 2) AS AvgUpvoteDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        COALESCE(c.Name, 'Unknown') AS CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes c ON ph.Comment::int = c.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+),
+AggregatedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        ur.Reputation,
+        ur.BadgeCount,
+        COALESCE(MAX(phd.HistoryRank), 0) AS MaxHistoryRank,
+        SUM(CASE WHEN phd.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosureCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+    LEFT JOIN 
+        PostHistoryDetails phd ON rp.PostId = phd.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, ur.Reputation, ur.BadgeCount
+),
+FinalResults AS (
+    SELECT 
+        ad.PostId,
+        ad.Title,
+        ad.CreationDate,
+        ad.Reputation,
+        ad.BadgeCount,
+        ad.MaxHistoryRank,
+        ad.ClosureCount,
+        ROW_NUMBER() OVER (ORDER BY ad.Reputation DESC, ad.CreationDate DESC) AS Rank
+    FROM 
+        AggregatedData ad
+)
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.CreationDate,
+    fr.Reputation,
+    fr.BadgeCount,
+    fr.MaxHistoryRank,
+    fr.ClosureCount,
+    CASE 
+        WHEN fr.ClosureCount > 0 THEN 'Closed posts accounted'
+        ELSE 'Active posts'
+    END AS PostStatus,
+    CASE 
+        WHEN fr.Reputation IS NULL THEN 'No Reputation'
+        WHEN fr.Reputation < 100 THEN 'Beginner'
+        WHEN fr.Reputation BETWEEN 100 AND 1000 THEN 'Intermediate'
+        ELSE 'Expert'
+    END AS UserClass
+FROM 
+    FinalResults fr
+WHERE 
+    fr.Rank <= 10 AND fr.MaxHistoryRank > 0
+ORDER BY 
+    fr.Reputation DESC, fr.CreationDate DESC;

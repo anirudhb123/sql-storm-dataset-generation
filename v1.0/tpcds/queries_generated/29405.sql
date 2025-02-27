@@ -1,0 +1,68 @@
+
+WITH processed_addresses AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(UPPER(ca_street_type), ' ', INITCAP(ca_street_name), ' ', ca_street_number) AS formatted_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+processed_customers AS (
+    SELECT 
+        c_customer_sk,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status
+    FROM 
+        customer 
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+),
+customer_address_summary AS (
+    SELECT 
+        p.c_customer_sk,
+        p.full_name,
+        p.cd_gender,
+        p.cd_marital_status,
+        p.cd_education_status,
+        a.formatted_address,
+        a.ca_city,
+        a.ca_state,
+        a.ca_zip,
+        COUNT(DISTINCT s.s_store_sk) AS store_count,
+        COUNT(DISTINCT ws.web_site_sk) AS website_count
+    FROM 
+        processed_customers p
+    LEFT JOIN 
+        customer_address a ON p.c_customer_sk = a.ca_address_sk
+    LEFT JOIN 
+        store s ON a.ca_address_sk = s.s_store_sk
+    LEFT JOIN 
+        web_site ws ON a.ca_address_sk = ws.web_site_sk
+    GROUP BY 
+        p.c_customer_sk, p.full_name, p.cd_gender, p.cd_marital_status, 
+        p.cd_education_status, a.formatted_address, a.ca_city, a.ca_state, a.ca_zip
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COUNT(DISTINCT cd.c_customer_sk) AS customer_count,
+    AVG(LENGTH(cd.full_name)) AS avg_name_length,
+    COUNT(DISTINCT ca.formatted_address) AS unique_addresses,
+    SUM(CASE WHEN s.store_count > 0 THEN 1 ELSE 0 END) AS active_store_customers,
+    SUM(CASE WHEN w.website_count > 0 THEN 1 ELSE 0 END) AS active_web_customers
+FROM 
+    customer_address_summary cd
+JOIN 
+    processed_addresses ca ON cd.formatted_address = ca.formatted_address
+LEFT JOIN 
+    customer_address_summary s ON cd.c_customer_sk = s.c_customer_sk
+LEFT JOIN 
+    customer_address_summary w ON cd.c_customer_sk = w.c_customer_sk
+GROUP BY 
+    cd.cd_gender, cd.cd_marital_status
+ORDER BY 
+    customer_count DESC;

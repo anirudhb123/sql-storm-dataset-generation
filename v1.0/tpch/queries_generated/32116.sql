@@ -1,0 +1,43 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_orderstatus, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c 
+    JOIN orders o ON c.c_custkey = o.o_custkey
+), RecentOrders AS (
+    SELECT c.custkey, c.c_name, co.o_orderkey, co.o_orderdate, co.o_orderstatus
+    FROM CustomerOrders co
+    JOIN customer c ON co.c_custkey = c.c_custkey
+    WHERE co.order_rank <= 5
+), OrderLineItems AS (
+    SELECT ro.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           COUNT(*) AS item_count, 
+           RANK() OVER (PARTITION BY ro.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS price_rank
+    FROM RecentOrders ro 
+    JOIN lineitem l ON ro.o_orderkey = l.l_orderkey
+    GROUP BY ro.o_orderkey
+), SupplierCosts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, pc.total_supplycost
+    FROM part p 
+    LEFT JOIN SupplierCosts pc ON p.p_partkey = pc.ps_partkey
+)
+SELECT DISTINCT ro.c_name, 
+                oi.o_orderkey, 
+                oi.total_price, 
+                pd.p_name, 
+                pd.p_retailprice, 
+                pd.total_supplycost, 
+                CASE 
+                    WHEN oi.total_price IS NULL THEN 'No Sales'
+                    ELSE 'Sales Exist' 
+                END AS sales_status,
+                DENSE_RANK() OVER (ORDER BY oi.total_price DESC) AS price_rank
+FROM RecentOrders ro
+JOIN OrderLineItems oi ON ro.o_orderkey = oi.o_orderkey
+LEFT JOIN PartDetails pd ON oi.o_orderkey = (SELECT l.l_orderkey FROM lineitem l WHERE l.l_orderkey = oi.o_orderkey LIMIT 1)
+WHERE pd.p_retailprice IS NOT NULL
+AND (ro.o_orderdate BETWEEN CURRENT_DATE - INTERVAL '30 DAY' AND CURRENT_DATE)
+ORDER BY price_rank, ro.c_name;

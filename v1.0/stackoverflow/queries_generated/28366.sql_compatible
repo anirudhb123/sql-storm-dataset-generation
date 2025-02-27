@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        t.TagName AS PostTag,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>'))::int)
+                           WHERE t.TagName IS NOT NULL)
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+),
+
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, ' | ' ORDER BY c.CreationDate) AS AllComments
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        COUNT(ph.Id) AS EditCount,
+        STRING_AGG(ph.Comment || ': ' || ph.Text, ' | ' ORDER BY ph.CreationDate) AS EditHistory
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 24) 
+    GROUP BY 
+        ph.PostId, ph.UserDisplayName
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CommentCount,
+    COALESCE(rc.CommentCount, 0) AS PostCommentCount,
+    COALESCE(rc.AllComments, '') AS AllComments,
+    COALESCE(phd.EditCount, 0) AS EditCount,
+    COALESCE(phd.EditHistory, '') AS EditHistory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostComments rc ON rp.PostId = rc.PostId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE 
+    rp.RankByScore <= 10
+ORDER BY 
+    rp.Score DESC;

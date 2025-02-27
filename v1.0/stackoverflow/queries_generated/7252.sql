@@ -1,0 +1,52 @@
+WITH UserScore AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 END), 0) AS Score,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE u.CreationDate < NOW() - INTERVAL '1 year'
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+), 
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        Score, 
+        PostCount,
+        RANK() OVER (ORDER BY Score DESC) AS Rank
+    FROM UserScore
+    WHERE PostCount > 5
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        COALESCE(ph.UserDisplayName, 'N/A') AS LastEditor,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.LastEditorUserId = ph.UserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, ph.UserDisplayName
+)
+SELECT 
+    tu.Rank, 
+    tu.DisplayName, 
+    tu.Reputation, 
+    pd.PostId, 
+    pd.Title, 
+    pd.CreationDate, 
+    pd.LastEditor, 
+    pd.CommentCount, 
+    pd.VoteCount
+FROM TopUsers tu
+JOIN PostDetails pd ON tu.UserId = pd.DistinctOwnerId
+ORDER BY tu.Rank, pd.VoteCount DESC
+LIMIT 10;

@@ -1,0 +1,32 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.movie_id, m.title, m.production_year, 
+           1 AS level,
+           COALESCE(m2.title, 'No Parent') AS parent_title
+    FROM aka_title m
+    LEFT JOIN movie_link ml ON m.id = ml.movie_id
+    LEFT JOIN aka_title m2 ON ml.linked_movie_id = m2.id
+    WHERE m.production_year >= 2000
+    UNION ALL
+    SELECT m.movie_id, m.title, m.production_year, 
+           mh.level + 1,
+           COALESCE(m2.title, 'No Parent')
+    FROM aka_title m
+    INNER JOIN movie_link ml ON m.id = ml.movie_id
+    INNER JOIN movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    mh.parent_title,
+    mh.level,
+    COUNT(DISTINCT c.person_id) AS cast_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+    MAX(CASE WHEN ci.note IS NOT NULL THEN ci.note ELSE 'No Note' END) AS notes
+FROM movie_hierarchy mh
+LEFT JOIN complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN aka_name a ON ci.person_id = a.person_id
+LEFT JOIN movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre')
+WHERE mh.production_year BETWEEN 2000 AND 2023
+GROUP BY mh.movie_id, mh.title, mh.production_year, mh.parent_title, mh.level
+ORDER BY mh.production_year DESC, mh.level, CAST(mh.title AS TEXT);

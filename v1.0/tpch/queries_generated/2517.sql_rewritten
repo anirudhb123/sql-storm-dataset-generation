@@ -1,0 +1,44 @@
+WITH SupplierPartCounts AS (
+    SELECT ps.s_suppkey, COUNT(*) AS part_count
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.s_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name
+    FROM CustomerOrderSummary cus
+    JOIN customer c ON cus.c_custkey = c.c_custkey
+    WHERE cus.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderSummary)
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, sp.part_count
+    FROM SupplierPartCounts sp
+    JOIN supplier s ON sp.s_suppkey = s.s_suppkey
+    WHERE sp.part_count > (
+        SELECT AVG(part_count) FROM SupplierPartCounts
+    )
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    c.c_name AS customer_name,
+    s.s_name AS supplier_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN TopSuppliers s ON ps.ps_suppkey = s.s_suppkey
+WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY r.r_name, n.n_name, c.c_name, s.s_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY total_revenue DESC;

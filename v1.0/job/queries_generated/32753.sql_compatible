@@ -1,0 +1,51 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        CAST(NULL AS VARCHAR(255)) AS parent_movie_title,
+        1 AS hierarchy_level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.episode_of_id IS NULL
+
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title AS movie_title,
+        p.movie_title AS parent_movie_title,
+        p.hierarchy_level + 1
+    FROM 
+        aka_title AS e
+    JOIN 
+        MovieHierarchy AS p ON e.episode_of_id = p.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    m.movie_title,
+    COUNT(DISTINCT m.movie_id) OVER (PARTITION BY a.name) AS total_movies_acted,
+    ROW_NUMBER() OVER (PARTITION BY a.name ORDER BY m.hierarchy_level) AS movie_rank,
+    COALESCE(k.keyword, 'No Keywords') AS movie_keyword,
+    CASE 
+        WHEN ci.note IS NOT NULL THEN 'Noteworthy'
+        ELSE 'Regular'
+    END AS role_type
+FROM 
+    aka_name AS a
+JOIN 
+    cast_info AS ci ON a.person_id = ci.person_id
+JOIN 
+    MovieHierarchy AS m ON ci.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword AS mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+WHERE 
+    a.name IS NOT NULL
+    AND m.hierarchy_level <= 3
+GROUP BY 
+    a.name, m.movie_title, m.hierarchy_level, k.keyword, ci.note
+ORDER BY 
+    a.name, m.hierarchy_level;

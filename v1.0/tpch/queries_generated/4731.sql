@@ -1,0 +1,61 @@
+WITH supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS orders_count,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+lineitem_analysis AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_partkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    COALESCE(SUM(cs.total_spent), 0) AS total_customer_spending,
+    ROUND(AVG(la.revenue), 2) AS avg_lineitem_revenue,
+    MAX(ss.total_available) AS max_available_parts
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    customer_orders cs ON cs.c_custkey = s.s_suppkey
+LEFT JOIN 
+    lineitem_analysis la ON la.l_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+LEFT JOIN 
+    supplier_summary ss ON ss.s_suppkey = s.s_suppkey
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT s.s_suppkey) > 0 AND SUM(cs.total_spent) IS NOT NULL
+ORDER BY 
+    total_customer_spending DESC, nation_name;

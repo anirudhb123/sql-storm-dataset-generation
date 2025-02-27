@@ -1,0 +1,47 @@
+WITH RECURSIVE PartHierarchy AS (
+    SELECT p_partkey, p_name, p_size, p_retailprice, NULL AS parent_partkey
+    FROM part
+    WHERE p_size = (SELECT MAX(p_size) FROM part)
+    
+    UNION ALL
+    
+    SELECT p.p_partkey, p.p_name, p.p_size, p.p_retailprice, ph.p_partkey
+    FROM part p
+    JOIN PartHierarchy ph ON p.p_size < ph.p_size
+    WHERE p.p_partkey > ph.p_partkey
+),
+
+AggregatedOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+),
+
+SupplierStats AS (
+    SELECT s.s_suppkey, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+)
+
+SELECT
+    r.r_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    SUM(CASE 
+        WHEN p.parent_partkey IS NULL THEN p.p_retailprice ELSE 0 
+    END) AS top_part_retail_price,
+    CAST(NULLIF(AVG(o.total_price), 0) AS decimal(12, 2)) AS avg_order_amount,
+    s.avg_supply_cost
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+FULL OUTER JOIN PartHierarchy p ON n.n_nationkey = p.p_partkey
+LEFT JOIN AggregatedOrders o ON p.p_partkey = o.o_orderkey
+LEFT JOIN SupplierStats s ON s.s_suppkey = (SELECT MAX(s_suppkey) FROM supplier)
+WHERE r.r_name IS NOT NULL AND n.n_name IS NOT NULL
+GROUP BY r.r_name, s.avg_supply_cost
+HAVING COUNT(n.n_nationkey) > 1 AND MAX(p.p_retailprice) IS NOT NULL
+ORDER BY r.r_name DESC, total_price DESC
+LIMIT 10
+OFFSET (SELECT COUNT(*) FROM customer WHERE c_acctbal IS NOT NULL) / 2;

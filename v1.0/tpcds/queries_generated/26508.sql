@@ -1,0 +1,49 @@
+
+WITH Address_City_State AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        COUNT(*) AS address_count
+    FROM customer_address
+    GROUP BY ca_city, ca_state
+),
+Demographics AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        COUNT(DISTINCT c_customer_id) AS customer_count
+    FROM customer_demographics
+    JOIN customer ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    GROUP BY cd_gender, cd_marital_status
+),
+Sales_Data AS (
+    SELECT 
+        ws_bill_cdemo_sk,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM web_sales 
+    GROUP BY ws_bill_cdemo_sk
+),
+Sales_Demographics AS (
+    SELECT 
+        D.cd_gender,
+        D.cd_marital_status,
+        COALESCE(SD.total_sales, 0) AS total_sales
+    FROM Demographics D
+    LEFT JOIN Sales_Data SD ON D.cd_demo_sk = SD.ws_bill_cdemo_sk
+)
+SELECT 
+    A.ca_city,
+    A.ca_state,
+    COALESCE(SUM(SD.total_sales), 0) AS aggregate_sales,
+    COUNT(DISTINCT C.c_customer_id) AS total_customers,
+    AVG(CD.customer_count) AS avg_customers_per_demo_category
+FROM Address_City_State A
+JOIN Sales_Demographics SD ON SD.cd_demo_sk IN (
+    SELECT c_current_cdemo_sk FROM customer WHERE c_current_addr_sk IN (
+        SELECT ca_address_sk FROM customer_address WHERE ca_city = A.ca_city AND ca_state = A.ca_state
+    )
+)
+JOIN customer C ON C.c_current_cdemo_sk = SD.cd_demo_sk
+LEFT JOIN Demographics CD ON CD.cd_gender = SD.cd_gender AND CD.cd_marital_status = SD.cd_marital_status
+GROUP BY A.ca_city, A.ca_state
+ORDER BY aggregate_sales DESC, total_customers DESC;

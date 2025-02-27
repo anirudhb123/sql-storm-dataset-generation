@@ -1,0 +1,88 @@
+WITH RecursivePostCTE AS (
+    -- Recursive CTE to find the hierarchy of posts
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.Id
+),
+UserPostStats AS (
+    -- Calculates user-specific post statistics
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryCounts AS (
+    -- Count the number of history actions for each post
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+CommentStats AS (
+    -- Statistics for comments on posts
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS TotalComments,
+        AVG(c.Score) AS AvgCommentScore
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+-- Final Query for Performance Benchmarking
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.AnswerCount,
+    COALESCE(phc.HistoryCount, 0) AS PostHistoryActions,
+    COALESCE(cs.TotalComments, 0) AS TotalComments,
+    COALESCE(cs.AvgCommentScore, 0) AS AvgCommentScore,
+    CASE 
+        WHEN COUNT(DISTINCT u.UserId) > 0 THEN 'Has Activity'
+        ELSE 'No Activity' 
+    END AS PostActivityStatus,
+    ROW_NUMBER() OVER (PARTITION BY COALESCE(phc.HistoryCount, 0) ORDER BY p.CreationDate DESC) AS Rank
+FROM 
+    Posts p
+LEFT JOIN 
+    PostHistoryCounts phc ON p.Id = phc.PostId
+LEFT JOIN 
+    CommentStats cs ON p.Id = cs.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+WHERE 
+    p.Score > 5
+    AND (p.ClosedDate IS NULL OR p.LastActivityDate > p.ClosedDate)
+ORDER BY 
+    p.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

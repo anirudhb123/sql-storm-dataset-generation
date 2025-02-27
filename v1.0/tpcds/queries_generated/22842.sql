@@ -1,0 +1,76 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        RANK() OVER (PARTITION BY sr_returning_customer_sk ORDER BY SUM(sr_return_quantity) DESC) AS rnk
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+),
+CustomerReturns AS (
+    SELECT 
+        r.returning_cust_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+        AVG(COALESCE(cd.cd_purchase_estimate, 0)) AS avg_purchase_estimate,
+        SUM(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_customers
+    FROM 
+        RankedReturns r
+    LEFT JOIN 
+        customer c ON r.returning_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        r.total_return_quantity > (
+            SELECT 
+                AVG(total_return_quantity)
+            FROM 
+                RankedReturns
+        )
+    GROUP BY 
+        r.returning_customer_sk
+),
+AggregateSales AS (
+    SELECT 
+        ws_ship_customer_sk,
+        SUM(ws_net_paid) AS total_net_paid,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > 0 AND ws_net_paid IS NOT NULL
+    GROUP BY 
+        ws_ship_customer_sk
+)
+
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    cr.unique_customers,
+    cr.avg_purchase_estimate,
+    cr.female_customers,
+    asales.total_net_paid,
+    asales.total_orders,
+    COALESCE(cat1.trip_count, 0) AS trip_count
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerReturns cr ON c.c_customer_sk = cr.returning_cust_sk
+LEFT JOIN 
+    AggregateSales asales ON c.c_customer_sk = asales.ws_ship_customer_sk
+LEFT JOIN (
+    SELECT 
+        sr.store_sk,
+        COUNT(DISTINCT sr.ticket_number) AS trip_count
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.store_sk
+) cat1 ON c.c_current_addr_sk = cat1.store_sk
+WHERE 
+    c.c_birth_year BETWEEN EXTRACT(YEAR FROM CURRENT_DATE) - 18 AND EXTRACT(YEAR FROM CURRENT_DATE) - 65
+ORDER BY 
+    cr.avg_purchase_estimate DESC, 
+    asales.total_net_paid DESC 
+LIMIT 50 OFFSET 10;

@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        r.ws_bill_customer_sk,
+        r.total_sales,
+        r.order_count,
+        RANK() OVER (ORDER BY r.total_sales DESC) AS sales_rank
+    FROM 
+        RankedSales r
+    WHERE 
+        r.total_sales > 5000
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        h.hd_vehicle_count,
+        h.hd_buy_potential
+    FROM 
+        customer c
+    JOIN 
+        household_demographics h ON c.c_current_hdemo_sk = h.hd_demo_sk
+)
+SELECT 
+    cd.c_customer_id,
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.c_email_address,
+    hvc.total_sales,
+    hvc.order_count,
+    cd.hd_vehicle_count,
+    cd.hd_buy_potential
+FROM 
+    HighValueCustomers hvc
+JOIN 
+    CustomerDetails cd ON hvc.ws_bill_customer_sk = cd.c_customer_id
+ORDER BY 
+    hvc.total_sales DESC
+LIMIT 10;

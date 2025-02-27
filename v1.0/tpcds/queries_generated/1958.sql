@@ -1,0 +1,68 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+RankedSales AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_spent,
+        cs.order_count,
+        RANK() OVER (PARTITION BY cs.order_count ORDER BY cs.total_spent DESC) AS rank
+    FROM 
+        CustomerSales cs
+),
+HighSpenders AS (
+    SELECT 
+        customer_sk,
+        c_first_name,
+        c_last_name,
+        total_spent,
+        order_count
+    FROM 
+        RankedSales
+    WHERE 
+        rank <= 10
+),
+ReturnDetails AS (
+    SELECT 
+        sr.sr_customer_sk,
+        SUM(sr.sr_return_amt) AS total_returned,
+        COUNT(sr.sr_ticket_number) AS return_count
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_customer_sk
+)
+SELECT 
+    hs.c_first_name,
+    hs.c_last_name,
+    hs.total_spent,
+    hs.order_count,
+    COALESCE(rd.total_returned, 0) AS total_returned,
+    COALESCE(rd.return_count, 0) AS return_count,
+    CASE 
+        WHEN COALESCE(rd.total_returned, 0) / hs.total_spent > 0.1 THEN 'High Return'
+        ELSE 'Low Return'
+    END AS return_category
+FROM 
+    HighSpenders hs
+LEFT JOIN 
+    ReturnDetails rd ON hs.customer_sk = rd.sr_customer_sk
+ORDER BY 
+    hs.total_spent DESC;

@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_sales_price,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) 
+        AND ws_sales_price IS NOT NULL
+),
+SaleReturnStats AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        AVG(sr_return_amt) AS avg_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+    HAVING 
+        SUM(sr_return_quantity) > 0
+),
+SaleInventory AS (
+    SELECT 
+        inv.inv_item_sk,
+        inv.inv_quantity_on_hand,
+        COALESCE(SUM(SR.total_returned), 0) AS total_returned,
+        CASE 
+            WHEN COALESCE(SR.total_returned, 0) > 0 THEN 'Returned'
+            ELSE 'Available'
+        END AS inventory_status
+    FROM 
+        inventory inv
+    LEFT JOIN 
+        SaleReturnStats SR ON inv.inv_item_sk = SR.sr_item_sk
+    GROUP BY 
+        inv.inv_item_sk, inv.inv_quantity_on_hand
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name || ' ' || c.c_last_name AS full_name,
+    COALESCE(SI.total_returned, 0) AS total_returned,
+    CASE 
+        WHEN SI.inv_quantity_on_hand < 10 THEN 'Low Stock'
+        WHEN SI.inv_quantity_on_hand BETWEEN 10 AND 50 THEN 'Moderate Stock'
+        ELSE 'High Stock'
+    END AS stock_category,
+    DS.d_date AS sale_date,
+    RS.ws_sales_price
+FROM 
+    customer c
+JOIN 
+    web_sales WS ON c.c_customer_sk = WS.ws_bill_customer_sk
+JOIN 
+    SaleInventory SI ON WS.ws_item_sk = SI.inv_item_sk
+JOIN 
+    date_dim DS ON WS.ws_sold_date_sk = DS.d_date_sk
+JOIN 
+    RankedSales RS ON WS.ws_item_sk = RS.ws_item_sk AND RS.price_rank = 1
+WHERE 
+    c.c_current_cdemo_sk = (SELECT cd_demo_sk FROM customer_demographics WHERE cd_gender = 'F' AND cd_marital_status = 'M')
+    AND DS.d_dow IN (1, 3, 5)
+    AND (SI.inv_quantity_on_hand IS NULL OR SI.inv_quantity_on_hand > 5)
+ORDER BY 
+    c.c_customer_id, sale_date DESC;

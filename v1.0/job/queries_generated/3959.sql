@@ -1,0 +1,58 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(DISTINCT k.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_role_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id, ci.person_role_id
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(cr.actor_count, 0) AS total_actors,
+        COALESCE(cr.actor_names, 'No Cast') AS cast_names,
+        rm.keyword_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CastRoles cr ON rm.movie_id = cr.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.total_actors,
+    md.cast_names,
+    md.keyword_count,
+    CASE
+        WHEN md.keyword_count > 5 THEN 'High'
+        WHEN md.keyword_count BETWEEN 1 AND 5 THEN 'Medium'
+        ELSE 'Low' 
+    END AS keyword_density
+FROM 
+    MovieDetails md
+WHERE 
+    md.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    md.production_year DESC, 
+    md.title_rank;

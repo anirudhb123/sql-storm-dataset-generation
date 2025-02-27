@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Body,
+        p.AcceptedAnswerId,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1  -- Question posts only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Body, p.AcceptedAnswerId, p.AnswerCount
+),
+
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountySpent,
+        COUNT(DISTINCT p.Id) AS TotalQuestionsAsked
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id 
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.Views
+)
+
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    up.Views,
+    up.TotalBountySpent,
+    COALESCE(rp.PostId, 0) AS LastPostId,
+    COALESCE(rp.Title, 'No Posts') AS LastPostTitle,
+    rp.CreationDate AS LastPostDate,
+    rp.ViewCount AS LastPostViewCount,
+    rp.Tags AS LastPostTags,
+    rp.AnswerCount AS LastPostAnswerCount,
+    rp.CommentCount AS LastPostCommentCount
+FROM 
+    UserActivity up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId AND rp.Rank = 1
+ORDER BY 
+    up.Reputation DESC, 
+    up.Views DESC;

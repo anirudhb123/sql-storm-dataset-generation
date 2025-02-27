@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.TotalBounty,
+    up.BadgeCount,
+    up.CommentCount,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount
+FROM 
+    UserStatistics up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId
+WHERE 
+    up.TotalBounty > 0
+ORDER BY 
+    up.TotalBounty DESC, rp.SumScore DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    u.Id,
+    u.DisplayName,
+    0 AS TotalBounty,
+    COUNT(DISTINCT b.Id) AS BadgeCount,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    NULL AS Title,
+    NULL AS CreationDate,
+    NULL AS Score,
+    NULL AS ViewCount,
+    NULL AS AnswerCount
+FROM 
+    Users u
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Comments c ON u.Id = c.UserId
+WHERE 
+    u.Reputation < 100
+GROUP BY 
+    u.Id
+ORDER BY 
+    BadgeCount DESC
+LIMIT 10;

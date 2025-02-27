@@ -1,0 +1,54 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        SUM(ws_quantity) AS total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+promotions_summary AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM promotion p
+    JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY p.p_promo_id
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(SUM(ws.ws_net_paid), 0) AS total_spent
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id
+    HAVING total_spent > (SELECT AVG(total_spent) FROM (
+        SELECT SUM(ws.net_paid) AS total_spent
+        FROM web_sales ws
+        GROUP BY ws_bill_customer_sk
+    ) AS avg_spending)
+),
+store_return_stats AS (
+    SELECT
+        sr_store_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_value
+    FROM store_returns
+    GROUP BY sr_store_sk
+)
+SELECT 
+    c.c_customer_id,
+    COALESCE(SUM(su.total_sales), 0) AS sales_sum,
+    p.total_orders,
+    p.total_profit,
+    sr.total_returns,
+    sr.total_return_value
+FROM customer c
+LEFT JOIN sales_data su ON c.c_customer_sk = su.ws_item_sk
+LEFT JOIN promotions_summary p ON c.c_customer_sk = p.p_promo_id
+LEFT JOIN store_return_stats sr ON sr.s_store_sk = c.c_current_addr_sk
+WHERE c.c_birth_year BETWEEN 1980 AND 1990
+GROUP BY c.c_customer_id, p.total_orders, p.total_profit, sr.total_returns, sr.total_return_value
+ORDER BY sales_sum DESC, p.total_profit DESC;

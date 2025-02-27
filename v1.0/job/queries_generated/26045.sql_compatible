@@ -1,0 +1,57 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        STRING_AGG(DISTINCT c.name, ', ') AS cast_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        co.name AS company_name,
+        ct.kind AS company_type,
+        STRING_AGG(DISTINCT i.info, ', ') AS additional_info
+    FROM 
+        title m
+    JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        info_type i ON mi.info_type_id = i.id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        m.id, m.title, m.production_year, co.name, ct.kind
+),
+StringMetrics AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        CHAR_LENGTH(movie_title) AS title_length,
+        CHAR_LENGTH(cast_names) AS cast_names_length,
+        CHAR_LENGTH(keywords) AS keywords_length,
+        CHAR_LENGTH(company_name) AS company_name_length,
+        CHAR_LENGTH(company_type) AS company_type_length,
+        CHAR_LENGTH(additional_info) AS additional_info_length
+    FROM 
+        MovieDetails
+)
+SELECT 
+    *,
+    title_length + cast_names_length + keywords_length + company_name_length + company_type_length + additional_info_length AS total_string_length
+FROM 
+    StringMetrics
+ORDER BY 
+    total_string_length DESC
+LIMIT 10;

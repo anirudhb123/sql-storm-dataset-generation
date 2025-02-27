@@ -1,0 +1,66 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpvoteCount,
+        SUM(v.VoteTypeId = 3) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.PostTypeId
+),
+AverageStats AS (
+    SELECT 
+        AVG(Reputation) AS AvgReputation,
+        AVG(PostCount) AS AvgPostCount,
+        AVG(BadgeCount) AS AvgBadgeCount,
+        AVG(TotalBounty) AS AvgTotalBounty
+    FROM 
+        UserStats
+)
+
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.PostCount,
+    us.BadgeCount,
+    us.TotalBounty,
+    ps.CommentCount,
+    ps.UpvoteCount,
+    ps.DownvoteCount,
+    avg.AvgReputation,
+    avg.AvgPostCount,
+    avg.AvgBadgeCount,
+    avg.AvgTotalBounty
+FROM 
+    UserStats us
+JOIN 
+    PostStats ps ON us.UserId = ps.OwnerUserId
+CROSS JOIN 
+    AverageStats avg
+ORDER BY 
+    us.Reputation DESC;

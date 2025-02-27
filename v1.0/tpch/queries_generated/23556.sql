@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHier sh ON s.s_nationkey = sh.s_nationkey AND s.s_suppkey <> sh.s_suppkey 
+    WHERE sh.hierarchy_level < 5
+),
+RegionAggregated AS (
+    SELECT r.r_name, COUNT(DISTINCT n.n_name) AS nation_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_name
+),
+OrderStats AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+           COUNT(l.l_orderkey) AS line_item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY o.o_orderkey
+),
+MaxRevenue AS (
+    SELECT MAX(revenue) AS max_revenue
+    FROM OrderStats
+),
+FilteredOrders AS (
+    SELECT os.o_orderkey, os.revenue, os.line_item_count
+    FROM OrderStats os
+    JOIN MaxRevenue mr ON os.revenue >= mr.max_revenue * 0.95
+)
+SELECT r.r_name,
+       COALESCE(sa.supplier_count, 0) AS supplier_count,
+       (SELECT AVG(line_item_count) 
+        FROM FilteredOrders fo 
+        WHERE fo.revenue > 0) AS avg_items_per_high_revenue_order
+FROM RegionAggregated r
+LEFT JOIN (
+    SELECT ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY COUNT(s.s_suppkey) DESC) as rank,
+           n.n_nationkey,
+           COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey
+) sa ON r.nation_count = sa.nation_count
+WHERE r.nation_count > 1 AND
+      (EXISTS (SELECT 1 FROM SupplierHier sh WHERE sh.s_nationkey = ANY(ARRAY[r.r_name])) OR 
+       NOT EXISTS (SELECT 1 FROM supplier s WHERE s.s_nationkey IS NULL))
+ORDER BY r.r_name;

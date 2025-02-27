@@ -1,0 +1,47 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+),
+HighProfitItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_net_profit
+    FROM item
+    LEFT JOIN web_sales ws ON item.i_item_sk = ws.ws_item_sk
+    GROUP BY item.i_item_id, item.i_product_name
+    HAVING COALESCE(SUM(ws.ws_net_profit), 0) > 1000
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_net_profit
+    FROM customer_demographics cd
+    LEFT JOIN web_sales ws ON cd.cd_demo_sk = ws.ws_bill_cdemo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender
+)
+SELECT 
+    ca.ca_city,
+    SUM(CASE WHEN cd.cd_gender = 'F' THEN cd.total_net_profit ELSE 0 END) AS female_net_profit,
+    SUM(CASE WHEN cd.cd_gender = 'M' THEN cd.total_net_profit ELSE 0 END) AS male_net_profit,
+    COUNT(DISTINCT ci.i_item_id) AS unique_items_sold,
+    CASE 
+        WHEN COUNT(DISTINCT ci.i_item_id) > 10 THEN 'High'
+        WHEN COUNT(DISTINCT ci.i_item_id) BETWEEN 5 AND 10 THEN 'Medium'
+        ELSE 'Low'
+    END AS item_selling_category
+FROM customer_address ca
+LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN RankedSales rs ON rs.ws_item_sk IN (SELECT hi.i_item_id FROM HighProfitItems hi)
+LEFT JOIN item ci ON ci.i_item_sk = rs.ws_item_sk
+GROUP BY ca.ca_city
+ORDER BY ca.ca_city;

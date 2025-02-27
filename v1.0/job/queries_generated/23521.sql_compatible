@@ -1,0 +1,53 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level,
+        m.title AS full_path
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year BETWEEN 1990 AND 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        ml.title,
+        ml.production_year,
+        mh.level + 1 AS level,
+        mh.full_path || ' -> ' || ml.title AS full_path
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    mh.full_path,
+    mh.production_year,
+    COUNT(DISTINCT ca.person_id) AS num_cast_members,
+    AVG(COALESCE(ca.nr_order, 0)) AS avg_order,
+    STRING_AGG(DISTINCT cm.name, ', ') AS company_names
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ca ON cc.subject_id = ca.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cm ON mc.company_id = cm.id
+WHERE 
+    mh.level < 3
+GROUP BY 
+    mh.full_path, mh.production_year
+HAVING 
+    COUNT(DISTINCT ca.person_id) > 5
+    AND MAX(mh.production_year) - MIN(mh.production_year) < 10
+ORDER BY 
+    mh.production_year DESC, num_cast_members DESC
+LIMIT 10;

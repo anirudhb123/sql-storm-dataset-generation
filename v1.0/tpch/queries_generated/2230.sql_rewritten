@@ -1,0 +1,67 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS unique_parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' 
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_totalprice
+),
+RegionRanked AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        ROW_NUMBER() OVER (ORDER BY r.r_name) AS region_rank
+    FROM 
+        region r
+)
+SELECT 
+    od.o_orderkey,
+    od.o_orderdate,
+    od.total_order_value,
+    ss.s_name,
+    ss.total_avail_qty,
+    ss.avg_supply_cost,
+    rr.r_name
+FROM 
+    OrderDetails od
+LEFT JOIN 
+    supplier s ON od.item_count > 5 AND s.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        JOIN part p ON ps.ps_partkey = p.p_partkey 
+        WHERE p.p_size > 1
+    )
+JOIN 
+    SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    RegionRanked rr ON n.n_regionkey = rr.r_regionkey
+WHERE 
+    od.total_order_value > 50000 AND (ss.total_avail_qty IS NULL OR ss.total_avail_qty > 100)
+ORDER BY 
+    rr.region_rank, od.o_orderdate DESC;

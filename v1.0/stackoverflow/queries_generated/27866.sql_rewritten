@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+PostsWithTags AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerUserId,
+        rp.OwnerDisplayName,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        string_to_array(substring(rp.Body, 2, length(rp.Body)-2), '><') AS tag
+        ON tag IS NOT NULL
+    JOIN 
+        Tags t ON t.TagName = tag
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.CreationDate, rp.ViewCount, rp.Score, rp.OwnerUserId, rp.OwnerDisplayName
+),
+TopPosts AS (
+    SELECT 
+        pwt.*,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(MAX(b.Date), 'No badge') AS LastBadgeDate,
+        u.Reputation
+    FROM 
+        PostsWithTags pwt
+    LEFT JOIN 
+        Comments c ON c.PostId = pwt.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = pwt.OwnerUserId
+    JOIN 
+        Users u ON u.Id = pwt.OwnerUserId
+    WHERE 
+        pwt.PostRank = 1 
+    GROUP BY 
+        pwt.PostId, pwt.Title, pwt.Body, pwt.CreationDate, pwt.ViewCount, pwt.Score, pwt.OwnerUserId, 
+        pwt.OwnerDisplayName, u.Reputation
+)
+SELECT 
+    PostId,
+    Title,
+    Body,
+    CreationDate,
+    ViewCount,
+    Score,
+    OwnerUserId,
+    OwnerDisplayName,
+    Tags,
+    CommentCount,
+    LastBadgeDate,
+    Reputation
+FROM 
+    TopPosts
+ORDER BY 
+    Score DESC, ViewCount DESC
+LIMIT 10;

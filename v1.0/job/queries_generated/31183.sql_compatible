@@ -1,0 +1,53 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.id AS movie_id,
+        1 AS level
+    FROM title mt
+    WHERE mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.id AS movie_id,
+        mh.level + 1
+    FROM title mt
+    JOIN movie_link ml ON mt.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+ActorDetails AS (
+    SELECT
+        ak.name AS actor_name,
+        ct.kind AS role,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    JOIN role_type ct ON ci.role_id = ct.id
+    GROUP BY ak.name, ct.kind
+),
+MovieRatings AS (
+    SELECT
+        movie_id,
+        AVG(rating) AS avg_rating
+    FROM movie_info
+    WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    GROUP BY movie_id
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    ad.actor_name,
+    ad.role,
+    COALESCE(mr.avg_rating, 0) AS average_rating,
+    COUNT(*) OVER (PARTITION BY mh.movie_id) AS total_cast_count
+FROM MovieHierarchy mh
+JOIN cast_info ci ON mh.movie_id = ci.movie_id
+JOIN ActorDetails ad ON ci.person_id = ad.person_id
+LEFT JOIN MovieRatings mr ON mh.movie_id = mr.movie_id
+WHERE mh.level <= 3
+AND ad.movie_count > 2
+ORDER BY mh.production_year DESC, average_rating DESC;

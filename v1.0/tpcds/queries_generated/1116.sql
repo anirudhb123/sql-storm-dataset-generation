@@ -1,0 +1,94 @@
+
+WITH customer_returns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returned_qty,
+        SUM(wr_return_amt_inc_tax) AS total_returned_amt,
+        COUNT(DISTINCT wr_order_number) AS return_count
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_quantity) AS total_sold_qty,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS sales_count
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+customer_analysis AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_purchase_estimate,
+        COALESCE(cr.total_returned_qty, 0) AS total_returned_qty,
+        COALESCE(cr.total_returned_amt, 0) AS total_returned_amt,
+        COALESCE(ss.total_sold_qty, 0) AS total_sold_qty,
+        COALESCE(ss.total_profit, 0) AS total_profit,
+        COALESCE(cr.return_count, 0) AS return_count,
+        CASE 
+            WHEN COALESCE(ss.total_sold_qty, 0) > 0 THEN 
+                ROUND(((COALESCE(cr.total_returned_qty, 0) * 100.0) / ss.total_sold_qty), 2) 
+            ELSE 0 END AS return_rate
+    FROM customer_info ci
+    LEFT JOIN customer_returns cr ON ci.c_customer_sk = cr.wr_returning_customer_sk
+    LEFT JOIN sales_summary ss ON ci.c_customer_sk = ss.ws_bill_customer_sk
+)
+SELECT 
+    c.c_customer_sk,
+    c.c_first_name,
+    c.c_last_name,
+    c.cd_gender,
+    c.cd_marital_status,
+    c.cd_purchase_estimate,
+    c.total_returned_qty,
+    c.total_returned_amt,
+    c.total_sold_qty,
+    c.total_profit,
+    c.return_count,
+    c.return_rate
+FROM customer_analysis c
+WHERE c.total_returned_qty > 0
+  AND c.cd_gender = 'F'
+  AND c.cd_marital_status = 'M'
+ORDER BY c.return_rate DESC
+LIMIT 100
+UNION
+SELECT 
+    ci.c_customer_sk,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_purchase_estimate,
+    COALESCE(cr.total_returned_qty, 0) AS total_returned_qty,
+    COALESCE(cr.total_returned_amt, 0) AS total_returned_amt,
+    COALESCE(ss.total_sold_qty, 0) AS total_sold_qty,
+    COALESCE(ss.total_profit, 0) AS total_profit,
+    COALESCE(cr.return_count, 0) AS return_count,
+    CASE 
+        WHEN COALESCE(ss.total_sold_qty, 0) > 0 THEN 
+            ROUND(((COALESCE(cr.total_returned_qty, 0) * 100.0) / ss.total_sold_qty), 2) 
+        ELSE 0 END AS return_rate
+FROM customer_info ci
+LEFT JOIN customer_returns cr ON ci.c_customer_sk = cr.wr_returning_customer_sk
+LEFT JOIN sales_summary ss ON ci.c_customer_sk = ss.ws_bill_customer_sk
+WHERE c.total_profit > 1000
+  AND ci.c_last_name LIKE '%son%'
+ORDER BY return_rate ASC
+LIMIT 50;

@@ -1,0 +1,66 @@
+WITH PartSupplier AS (
+    SELECT 
+        ps_partkey,
+        ps_suppkey,
+        ps_availqty,
+        ps_supplycost,
+        ROW_NUMBER() OVER(PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) AS rn
+    FROM 
+        partsupp
+),
+BestSuppliers AS (
+    SELECT 
+        ps.partkey,
+        s.s_name,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM 
+        PartSupplier ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.rn = 1
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_custkey
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+RegionSales AS (
+    SELECT 
+        n.n_regionkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS sales
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_regionkey
+)
+SELECT 
+    r.r_name AS region,
+    COALESCE(rs.sales, 0) AS total_sales,
+    COUNT(DISTINCT bs.s_name) AS best_suppliers_count,
+    SUM(cs.total_spent) AS high_spender_count
+FROM 
+    region r
+LEFT JOIN 
+    RegionSales rs ON r.r_regionkey = rs.n_regionkey
+LEFT JOIN 
+    BestSuppliers bs ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE bs.ps_suppkey = s.s_suppkey))
+LEFT JOIN 
+    CustomerOrders cs ON cs.o_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 20)))
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_sales DESC, best_suppliers_count ASC;

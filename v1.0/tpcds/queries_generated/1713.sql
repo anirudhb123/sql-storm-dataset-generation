@@ -1,0 +1,59 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_gender,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY c.c_gender ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_gender
+),
+top_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_sales,
+        cs.order_count,
+        cs.sales_rank,
+        cd.cd_marital_status
+    FROM 
+        customer_sales cs
+    JOIN customer_demographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+    WHERE 
+        cs.sales_rank <= 5
+),
+customers_with_addresses AS (
+    SELECT 
+        t.c_customer_sk,
+        t.total_sales,
+        t.order_count,
+        t.sales_rank,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        top_customers t
+    LEFT JOIN customer_address ca ON t.c_customer_sk = ca.ca_address_sk
+)
+SELECT 
+    ca.ca_city AS city,
+    ca.ca_state AS state,
+    SUM(t.total_sales) AS city_total_sales,
+    AVG(t.order_count) AS avg_order_count,
+    COUNT(DISTINCT t.c_customer_sk) AS unique_customers,
+    CASE 
+        WHEN AVG(t.total_sales) IS NOT NULL THEN 
+            ROUND(AVG(t.total_sales), 2) 
+        ELSE 
+            0 
+    END AS avg_sales_per_customer
+FROM 
+    customers_with_addresses t
+GROUP BY 
+    ca.ca_city, ca.ca_state
+HAVING 
+    SUM(t.total_sales) > 10000
+ORDER BY 
+    city_total_sales DESC;

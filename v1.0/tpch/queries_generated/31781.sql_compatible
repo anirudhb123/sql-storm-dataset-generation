@@ -1,0 +1,45 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, 0 AS level 
+    FROM customer c 
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+    
+    UNION ALL
+    
+    SELECT ch.c_custkey, ch.c_name, ch.c_nationkey, ch.c_acctbal, ch.level + 1 
+    FROM CustomerHierarchy ch 
+    JOIN orders o ON ch.c_custkey = o.o_custkey 
+    WHERE o.o_orderstatus = 'O'
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    SUM(COALESCE(ps.ps_availqty, 0)) AS total_available_qty,
+    AVG(l.l_discount) OVER(PARTITION BY p.p_partkey) AS avg_discount,
+    COUNT(DISTINCT ch.c_custkey) AS unique_customers,
+    r.r_name AS region_name
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    CustomerHierarchy ch ON s.s_nationkey = ch.c_nationkey
+WHERE 
+    p.p_retailprice > 50.00 
+    AND (r.r_name IS NULL OR r.r_name LIKE 'Asia%')
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, r.r_name
+HAVING 
+    SUM(COALESCE(ps.ps_availqty, 0)) > 100 
+ORDER BY 
+    unique_customers DESC, avg_discount ASC;

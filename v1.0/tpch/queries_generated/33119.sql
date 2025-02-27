@@ -1,0 +1,37 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+)
+, OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS line_item_order
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name
+)
+SELECT r.r_name,
+       COUNT(DISTINCT n.n_nationkey) AS nation_count,
+       AVG(ps.ps_supplycost) AS avg_supply_cost,
+       SUM(COALESCE(od.total_sales, 0)) AS total_order_value
+FROM region r
+LEFT JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN OrderDetails od ON od.o_orderkey = ps.ps_partkey
+GROUP BY r.r_name
+HAVING AVG(ps.ps_supplycost) > (
+    SELECT AVG(ps_supplycost)
+    FROM partsupp
+    WHERE ps_availqty > 0
+)
+ORDER BY nation_count DESC, total_order_value DESC;

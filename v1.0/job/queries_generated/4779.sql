@@ -1,0 +1,64 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) as rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CompanyMovieInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        COUNT(m.id) AS total_movies,
+        STRING_AGG(DISTINCT m.title, ', ') AS movie_titles
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_info m ON mc.movie_id = m.movie_id
+    GROUP BY 
+        mc.movie_id, c.name 
+),
+ActorRoles AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        ARRAY_AGG(DISTINCT r.role) AS roles,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        a.person_id, a.name
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    cm.company_name,
+    cm.total_movies,
+    ar.name AS actor_name,
+    ar.movie_count,
+    ar.roles,
+    CASE 
+        WHEN ar.movie_count > 5 THEN 'Prolific Actor'
+        WHEN ar.movie_count IS NULL THEN 'No Movies'
+        ELSE 'Regular Actor'
+    END AS actor_status
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    CompanyMovieInfo cm ON rt.production_year = cm.total_movies
+LEFT JOIN 
+    ActorRoles ar ON rt.title = ANY(ar.roles)
+WHERE 
+    rt.rank <= 10
+    AND (cm.total_movies IS NULL OR cm.total_movies > 1)
+ORDER BY 
+    rt.production_year DESC, ar.movie_count DESC;

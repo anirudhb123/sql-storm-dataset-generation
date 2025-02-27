@@ -1,0 +1,52 @@
+WITH actor_movie AS (
+    SELECT
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        c.nr_order,
+        c.note AS role_note
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    JOIN
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE
+        a.name IS NOT NULL
+    AND
+        t.production_year >= 2000
+),
+movie_keywords AS (
+    SELECT
+        m.movie_id,
+        k.keyword
+    FROM
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+),
+movie_details AS (
+    SELECT
+        am.actor_name,
+        am.movie_title,
+        am.production_year,
+        mk.keyword
+    FROM
+        actor_movie am
+    LEFT JOIN
+        movie_keywords mk ON am.movie_title = mk.movie_id
+)
+SELECT
+    actor_name,
+    movie_title,
+    production_year,
+    STRING_AGG(DISTINCT keyword, ', ') AS keywords
+FROM
+    movie_details
+GROUP BY
+    actor_name,
+    movie_title,
+    production_year
+ORDER BY
+    production_year DESC, actor_name;
+

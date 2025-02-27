@@ -1,0 +1,56 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        AVG(s.s_acctbal) AS avg_acct_bal
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemMetrics AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        SUM(l.l_discount * l.l_extendedprice) AS total_discounted_price,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS line_rank
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey, l.l_partkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    cs.total_spent,
+    ss.total_supply_cost,
+    lm.total_discounted_price,
+    lm.line_rank
+FROM 
+    CustomerOrders cs
+FULL OUTER JOIN 
+    SupplierStats ss ON cs.order_count > 0
+LEFT JOIN 
+    LineItemMetrics lm ON lm.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+WHERE 
+    cs.total_spent IS NOT NULL 
+    AND (ss.avg_acct_bal IS NULL OR ss.avg_acct_bal > 1000)
+ORDER BY 
+    cs.total_spent DESC, ss.total_supply_cost ASC;

@@ -1,0 +1,87 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, p.CreationDate, p.PostTypeId
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.RankScore,
+        rp.CommentCount,
+        (SELECT COUNT(*) 
+         FROM Votes v 
+         WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2) AS UpvoteCount,
+        (SELECT COUNT(*) 
+         FROM Votes v 
+         WHERE v.PostId = rp.PostId AND v.VoteTypeId = 3) AS DownvoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankScore <= 5
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name || ' on ' || CAST(ph.CreationDate AS DATE), ', ') AS History,
+        JSONB_AGG(DISTINCT jsonb_build_object('Type', pht.Name, 'User', ph.UserDisplayName)) AS HistoryDetails
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Score,
+    fp.ViewCount,
+    fp.UpvoteCount,
+    fp.DownvoteCount,
+    fp.CommentCount,
+    ub.BadgeCount,
+    COALESCE(pdh.History, 'No History') AS PostHistory,
+    COALESCE(pdh.HistoryDetails, '[]') AS DetailedHistory
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = fp.PostId)
+LEFT JOIN 
+    PostHistoryDetails pdh ON pdh.PostId = fp.PostId
+WHERE 
+    fp.Score > (SELECT AVG(Score) FROM Posts) 
+    AND fp.CommentCount <> 0
+ORDER BY 
+    fp.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY;

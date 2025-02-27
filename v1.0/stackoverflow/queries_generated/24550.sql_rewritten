@@ -1,0 +1,94 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        dense_rank() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > DATEADD(MONTH, -1, cast('2024-10-01 12:34:56' as timestamp))
+        AND p.Score IS NOT NULL
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentsCount,
+        DENSE_RANK() OVER (ORDER BY COUNT(c.Id) DESC) AS CommentRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    GROUP BY 
+        u.Id, u.Reputation
+),
+ClosedPostHistories AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+ActiveClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ch.LastClosedDate
+    FROM 
+        Posts p
+    JOIN 
+        ClosedPostHistories ch ON p.Id = ch.PostId
+    WHERE 
+        ch.LastClosedDate >= DATEADD(MONTH, -1, cast('2024-10-01 12:34:56' as timestamp))
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.Reputation,
+        r.PostId,
+        r.Title,
+        r.Score,
+        r.ViewCount
+    FROM 
+        UserActivity ua
+    JOIN 
+        RankedPosts r ON ua.UserId = r.OwnerUserId
+    WHERE 
+        ua.CommentRank < 5
+    ORDER BY 
+        ua.Reputation DESC
+)
+SELECT 
+    p.Title AS ClosedPostTitle,
+    p.ViewCount AS ClosedPostViews,
+    up.UserId AS TopUserId,
+    up.Reputation AS TopUserReputation,
+    up.Title AS TopUserPostTitle,
+    up.Score AS TopUserPostScore
+FROM 
+    ActiveClosedPosts p
+LEFT JOIN 
+    TopUsers up ON p.Id = up.PostId
+WHERE 
+    p.Score IS NOT NULL
+    AND (up.Reputation > 1000 OR up.Reputation IS NULL)
+ORDER BY 
+    p.ViewCount DESC, 
+    up.Score DESC
+OPTION (QUERYTRACEON 9481);

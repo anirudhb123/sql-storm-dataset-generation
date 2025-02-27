@@ -1,0 +1,79 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_net_paid) AS total_sales,
+        1 AS level
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+    UNION ALL
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_net_paid) + cte.total_sales AS total_sales,
+        cte.level + 1
+    FROM
+        web_sales AS ws
+    JOIN
+        sales_cte AS cte ON ws.ws_item_sk = cte.ws_item_sk
+    WHERE
+        cte.level < 10  -- limiting the recursion depth
+    GROUP BY
+        ws.ws_item_sk
+),
+customer_data AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name || ' ' || c.c_last_name AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_dependent_count,
+        cd.cd_credit_rating,
+        ca.ca_state,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, 
+        cd.cd_dependent_count, cd.cd_credit_rating, ca.ca_state
+),
+ranked_customers AS (
+    SELECT
+        cd.*,
+        RANK() OVER (PARTITION BY cd.ca_state ORDER BY cd.total_spent DESC) AS state_rank
+    FROM
+        customer_data cd
+)
+SELECT
+    rc.full_name,
+    rc.cd_gender,
+    rc.total_orders,
+    rc.total_spent,
+    i.i_item_desc,
+    COALESCE(SUM(ws.ws_quantity), 0) AS total_quantity_sold,
+    COALESCE(MAX(ws.ws_net_paid), 0) AS max_single_transaction,
+    CASE
+        WHEN rc.total_spent > 1000 THEN 'High Value'
+        WHEN rc.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM
+    ranked_customers rc
+LEFT JOIN
+    web_sales ws ON rc.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN
+    item i ON ws.ws_item_sk = i.i_item_sk
+WHERE 
+    rc.state_rank <= 10
+GROUP BY
+    rc.full_name, rc.cd_gender, rc.total_orders, rc.total_spent, i.i_item_desc
+ORDER BY
+    rc.total_spent DESC;

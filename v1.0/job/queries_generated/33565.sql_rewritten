@@ -1,0 +1,95 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL AS parent_movie_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL 
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.movie_id AS parent_movie_id,
+        mh.level + 1
+    FROM 
+        aka_title e
+    INNER JOIN 
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+), 
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        an.name AS actor_name,
+        ci.nr_order,
+        ct.kind as role
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    JOIN 
+        comp_cast_type ct ON ci.role_id = ct.id
+), 
+movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        mi.info,
+        it.info AS info_type
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+), 
+keyword_details AS (
+    SELECT 
+        mk.movie_id,
+        string_agg(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+), 
+movie_aggregates AS (
+    SELECT 
+        mh.movie_id, 
+        mh.title,
+        mh.production_year,
+        COALESCE(cd.actor_name, 'Unknown Actor') AS actor_name,
+        COALESCE(kd.keywords, 'No Keywords') AS keywords,
+        COUNT(DISTINCT cd.actor_name) OVER (PARTITION BY mh.movie_id) AS actor_count,
+        MAX(CASE WHEN mi.info_type = 'rating' THEN mi.info END) AS rating,
+        COUNT(DISTINCT mi.info_type) AS info_type_count
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_details cd ON mh.movie_id = cd.movie_id
+    LEFT JOIN 
+        movie_info_details mi ON mh.movie_id = mi.movie_id
+    LEFT JOIN 
+        keyword_details kd ON mh.movie_id = kd.movie_id
+)
+SELECT 
+    ma.movie_id,
+    ma.title,
+    ma.production_year,
+    ma.actor_name,
+    ma.keywords,
+    ma.actor_count,
+    ma.rating,
+    ma.info_type_count
+FROM 
+    movie_aggregates ma
+WHERE 
+    ma.production_year > 2000  
+ORDER BY 
+    ma.production_year DESC,
+    ma.actor_count DESC,
+    ma.title ASC;

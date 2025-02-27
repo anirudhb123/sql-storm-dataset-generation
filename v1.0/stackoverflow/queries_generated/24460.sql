@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate ASC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) AND 
+        p.Score > 0
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryWithComments AS (
+    SELECT 
+        ph.PostId,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT c.Text) AS Comments,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenedDate
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Comments c ON ph.PostId = c.PostId
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.UserId,
+    u.DisplayName AS UserName,
+    u.Reputation,
+    u.BadgeCount,
+    u.GoldBadges,
+    u.SilverBadges,
+    u.BronzeBadges,
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    ph.CommentCount,
+    ph.Comments,
+    ph.ClosedDate,
+    ph.ReopenedDate
+FROM 
+    UserReputation u
+JOIN 
+    RankedPosts rp ON u.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostHistoryWithComments ph ON rp.PostId = ph.PostId
+WHERE 
+    (u.Reputation > 1000 AND u.BadgeCount > 5)
+    OR (ph.ClosedDate IS NOT NULL AND ph.ReopenedDate IS NULL)
+ORDER BY 
+    u.Reputation DESC, 
+    rp.ViewCount DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;
+This query benchmarks performance by utilizing various SQL constructs, including Common Table Expressions (CTEs), window functions, outer joins, and complicated predicates. It evaluates and ranks users based on their reputation and badge counts while gathering relevant data regarding their posts, including views, scores, and any associated comments, closures, or reopened statuses. The result set is limited to users with certain conditions and ordered for performance analysis.

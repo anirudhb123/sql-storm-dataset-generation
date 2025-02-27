@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only considering Questions
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.Tags,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 3) AS DownVotes,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    WHERE 
+        rp.Rank = 1  -- Latest post per tag
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.CreationDate, rp.Score, rp.OwnerDisplayName, rp.Tags
+),
+TagSummary AS (
+    SELECT 
+        unnest(string_to_array(rp.Tags, '>')) AS TagName, 
+        COUNT(*) AS QuestionCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank = 1
+    GROUP BY 
+        unnest(string_to_array(rp.Tags, '>'))
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Body,
+    ps.CreationDate,
+    ps.Score,
+    ps.OwnerDisplayName,
+    ps.Tags,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    ts.TagName,
+    ts.QuestionCount
+FROM 
+    PostStatistics ps
+JOIN 
+    TagSummary ts ON (ts.TagName) = ANY(string_to_array(ps.Tags, '>'))
+ORDER BY 
+    ps.CreationDate DESC, 
+    ps.Score DESC;

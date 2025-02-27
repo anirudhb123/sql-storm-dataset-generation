@@ -1,0 +1,69 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(c.CommentCount, 0)) AS TotalComments,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON c.PostId = p.Id
+    WHERE 
+        t.TagName IS NOT NULL
+    GROUP BY 
+        t.TagName
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        ph.Text
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5) -- Edits to Title or Body
+        AND ph.CreationDate > NOW() - INTERVAL '30 days'
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalComments,
+    ts.TotalViews,
+    ts.AverageScore,
+    us.DisplayName AS UserName,
+    us.TotalPosts,
+    us.TotalViews AS UserTotalViews,
+    us.TotalScore,
+    rpe.UserDisplayName AS EditorName,
+    rpe.CreationDate AS EditDate,
+    rpe.Comment AS EditComment,
+    rpe.Text AS NewEditText
+FROM 
+    TagStats ts
+JOIN 
+    UserStats us ON ts.PostCount > 0
+LEFT JOIN 
+    RecentPostEdits rpe ON rpe.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE '%' || ts.TagName || '%')
+ORDER BY 
+    ts.TotalViews DESC, 
+    us.TotalScore DESC
+LIMIT 100;

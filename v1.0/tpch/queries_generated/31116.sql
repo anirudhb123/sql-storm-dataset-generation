@@ -1,0 +1,37 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000.00
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '2021-01-01' AND '2021-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+NationAvg AS (
+    SELECT n.n_nationkey, AVG(s.s_acctbal) AS avg_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey
+)
+SELECT 
+    sp.s_name,
+    r.r_name AS region_name,
+    ns.avg_acctbal,
+    os.total_revenue,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY os.total_revenue DESC) AS revenue_rank
+FROM SupplierHierarchy sp
+JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = sp.s_nationkey)
+LEFT JOIN NationAvg ns ON ns.n_nationkey = sp.s_nationkey
+LEFT JOIN OrderSummary os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = sp.s_nationkey))
+WHERE os.total_revenue IS NOT NULL
+ORDER BY r.r_name, revenue_rank;

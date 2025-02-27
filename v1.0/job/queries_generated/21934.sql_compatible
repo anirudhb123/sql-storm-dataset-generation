@@ -1,0 +1,78 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COALESCE(m.year, 0) AS movie_year,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_info m ON t.id = m.movie_id AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'year')
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        a.name AS actor_name,
+        r.role AS role_name,
+        COUNT(c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    JOIN 
+        role_type r ON r.id = c.role_id
+    GROUP BY 
+        a.name, r.role
+),
+GenreCount AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT k.keyword) AS genre_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title m ON mk.movie_id = m.id
+    WHERE 
+        k.keyword IS NOT NULL
+    GROUP BY 
+        m.movie_id
+),
+SelectedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.movie_year,
+        gc.genre_count,
+        ar.actor_name,
+        ar.role_name
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        GenreCount gc ON rm.movie_id = gc.movie_id
+    LEFT JOIN 
+        ActorRoles ar ON ar.movie_count > 2  
+    WHERE 
+        rm.year_rank <= 3 
+)
+SELECT 
+    sm.title,
+    sm.movie_year,
+    sm.genre_count,
+    sm.actor_name,
+    sm.role_name,
+    CASE 
+        WHEN sm.genre_count IS NULL THEN 'No Genres'
+        WHEN sm.genre_count > 5 THEN 'Blockbuster'
+        ELSE 'Indie Film'
+    END AS movie_type
+FROM 
+    SelectedMovies sm
+WHERE 
+    sm.movie_year IS NOT NULL
+ORDER BY 
+    sm.movie_year DESC, sm.genre_count DESC
+LIMIT 50;

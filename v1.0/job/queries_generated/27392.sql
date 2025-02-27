@@ -1,0 +1,48 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ak.name) AS aliases,
+        GROUP_CONCAT(DISTINCT cn.name) AS companies,
+        GROUP_CONCAT(DISTINCT kw.keyword) AS keywords,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM title t
+    LEFT JOIN aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN cast_info ci ON t.id = ci.movie_id
+    GROUP BY t.id
+),
+TitleSummary AS (
+    SELECT 
+        d.movie_title,
+        d.production_year,
+        d.aliases,
+        d.companies,
+        d.keywords,
+        d.cast_count,
+        CASE 
+            WHEN d.production_year < 2000 THEN 'Classic'
+            WHEN d.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+            ELSE 'Recent'
+        END AS era
+    FROM MovieDetails d
+),
+FinalReport AS (
+    SELECT 
+        title_summary.era,
+        COUNT(*) AS total_movies,
+        AVG(cast_count) AS avg_cast,
+        STRING_AGG(title_summary.movie_title, ', ') AS movie_list
+    FROM TitleSummary title_summary
+    GROUP BY title_summary.era
+)
+SELECT 
+    era,
+    total_movies,
+    avg_cast,
+    movie_list
+FROM FinalReport
+ORDER BY era;

@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.order_number,
+        ws.net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_paid DESC) AS rnk
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year IS NOT NULL 
+        AND c.c_birth_month BETWEEN 1 AND 6
+),
+HighValueReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        SUM(sr.return_amt) AS total_return_amt,
+        COUNT(sr.ticket_number) AS total_returns
+    FROM 
+        store_returns sr
+    JOIN 
+        customer c ON sr.customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_current_addr_sk IS NOT NULL
+    GROUP BY 
+        sr.returned_date_sk
+    HAVING 
+        SUM(sr.return_amt) > 1000
+),
+WebReturnStats AS (
+    SELECT 
+        wr.returning_customer_sk,
+        COUNT(*) AS return_count,
+        COALESCE(MAX(wr.return_amt_inc_tax), 0) AS max_return_amount
+    FROM 
+        web_returns wr
+    LEFT JOIN 
+        customer c ON wr.returning_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_preferred_cust_flag = 'Y' 
+        AND wr.returning_customer_sk IS NOT NULL
+    GROUP BY 
+        wr.returning_customer_sk
+),
+AggregatedReturns AS (
+    SELECT 
+        hvr.total_return_amt,
+        wrs.return_count,
+        wrs.max_return_amount
+    FROM 
+        HighValueReturns hvr
+    FULL OUTER JOIN 
+        WebReturnStats wrs ON hvr.returned_date_sk = wrs.returning_customer_sk
+)
+SELECT 
+    COALESCE(ars.total_return_amt, 0) AS total_return_amt,
+    COALESCE(ars.return_count, 0) AS total_web_returns,
+    (SELECT COUNT(*) FROM RankedSales WHERE rnk <= 5) AS top_5_sales_count,
+    (SELECT AVG(ns.net_paid) FROM RankedSales ns WHERE ns.order_number IS NOT NULL) AS average_top_sales_value
+FROM 
+    AggregatedReturns ars
+WHERE 
+    ars.total_return_amt > (SELECT AVG(total_return_amt) FROM AggregatedReturns)
+    OR ars.return_count > 10
+ORDER BY 
+    total_return_amt DESC NULLS LAST;

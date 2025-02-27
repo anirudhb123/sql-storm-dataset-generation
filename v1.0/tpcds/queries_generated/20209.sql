@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_paid DESC) as rank,
+        CASE
+            WHEN ws.ws_net_paid > 500 THEN 'High Value'
+            WHEN ws.ws_net_paid BETWEEN 200 AND 500 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS order_value_category
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN (SELECT max(d_date_sk) FROM date_dim WHERE d_year = 2023) AND (SELECT min(d_date_sk) FROM date_dim WHERE d_year = 2023)
+), CustomerReturnStats AS (
+    SELECT 
+        sr.s_store_sk,
+        SUM(sr.sr_return_quantity) AS total_returned,
+        COUNT(DISTINCT sr.sr_ticket_number) AS return_count
+    FROM store_returns sr
+    WHERE sr.sr_return_quantity IS NOT NULL
+    GROUP BY sr.s_store_sk
+), FinalReport AS (
+    SELECT 
+        ca.ca_city,
+        SUM(COALESCE(rws.ws_net_paid, 0)) AS total_sales,
+        COALESCE(crs.total_returned, 0) AS total_returns,
+        COALESCE(crs.return_count, 0) AS return_count,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MAX(CASE WHEN rws.rank = 1 THEN rws.ws_net_paid ELSE NULL END) AS highest_order_value,
+        COUNT(DISTINCT CASE WHEN rws.order_value_category = 'High Value' THEN rws.ws_order_number END) AS high_value_orders
+    FROM customer_address ca
+    LEFT JOIN RankedSales rws ON rws.web_site_sk = ca.ca_address_sk
+    LEFT JOIN CustomerReturnStats crs ON crs.s_store_sk = ca.ca_address_sk
+    GROUP BY ca.ca_city
+)
+SELECT 
+    city,
+    total_sales,
+    total_returns,
+    return_count,
+    order_count,
+    highest_order_value,
+    high_value_orders,
+    CASE 
+        WHEN total_sales > 10000 THEN 'Tier 1'
+        WHEN total_sales BETWEEN 5000 AND 10000 THEN 'Tier 2'
+        ELSE 'Tier 3'
+    END AS sales_tier
+FROM FinalReport
+WHERE total_sales > 0
+ORDER BY total_sales DESC, city ASC
+LIMIT 50;

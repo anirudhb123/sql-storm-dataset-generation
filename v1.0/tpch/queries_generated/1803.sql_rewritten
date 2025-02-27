@@ -1,0 +1,43 @@
+WITH SupplierCost AS (
+    SELECT ps.partkey, ps.suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.partkey, ps.suppkey
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSuppliers AS (
+    SELECT p.p_partkey, p.p_name, s.s_name
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    co.c_custkey,
+    co.c_name,
+    po.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    r.o_orderstatus,
+    r.price_rank,
+    CASE 
+        WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Generated'
+    END AS revenue_status
+FROM CustomerOrders co
+JOIN orders o ON co.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN RankedOrders r ON o.o_orderkey = r.o_orderkey
+JOIN PartSuppliers po ON l.l_partkey = po.p_partkey
+LEFT JOIN SupplierCost sc ON po.p_partkey = sc.partkey AND po.s_suppkey = sc.suppkey
+WHERE r.price_rank <= 10 AND co.order_count > 5
+GROUP BY co.c_custkey, co.c_name, po.p_name, r.o_orderstatus, r.price_rank
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY revenue_status, total_revenue DESC;

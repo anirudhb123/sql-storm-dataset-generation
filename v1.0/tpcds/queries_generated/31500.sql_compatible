@@ -1,0 +1,46 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws_item_sk, SUM(ws_quantity) AS total_sales, SUM(ws_net_profit) AS ws_net_profit
+    FROM web_sales
+    GROUP BY ws_item_sk
+    UNION ALL
+    SELECT cs_item_sk, SUM(cs_quantity) AS total_sales, SUM(cs_net_profit) AS cs_net_profit
+    FROM catalog_sales
+    JOIN SalesCTE ON SalesCTE.ws_item_sk = cs_item_sk
+    GROUP BY cs_item_sk
+),
+CustomerReturns AS (
+    SELECT
+        wr_refunded_customer_sk AS customer_id,
+        COUNT(wr_order_number) AS total_returns,
+        SUM(wr_net_loss) AS loss_summary
+    FROM web_returns
+    GROUP BY wr_refunded_customer_sk
+),
+TotalSales AS (
+    SELECT
+        item.i_item_sk,
+        item.i_product_name,
+        COALESCE(SalesCTE.total_sales, 0) AS total_sales,
+        COALESCE(SalesCTE.ws_net_profit, 0) AS total_profit,
+        COALESCE(CustomerReturns.total_returns, 0) AS total_returns,
+        COALESCE(CustomerReturns.loss_summary, 0) AS total_loss
+    FROM item
+    LEFT JOIN SalesCTE ON item.i_item_sk = SalesCTE.ws_item_sk
+    LEFT JOIN CustomerReturns ON CustomerReturns.customer_id = item.i_item_sk
+    WHERE item.i_current_price > 10.00
+)
+SELECT
+    total_sales,
+    total_profit,
+    total_returns,
+    total_loss,
+    CASE
+        WHEN total_loss > 0 THEN 'High Risk'
+        WHEN total_sales > 1000 THEN 'High Sales'
+        ELSE 'Average'
+    END AS performance_category
+FROM TotalSales
+WHERE total_sales > (SELECT AVG(total_sales) FROM TotalSales)
+ORDER BY total_profit DESC
+LIMIT 100;

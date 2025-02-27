@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+        AND p.Tags IS NOT NULL
+),
+TopQuestions AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CreationDate,
+        rp.Score
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank <= 5  
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostInteraction AS (
+    SELECT 
+        tq.PostId,
+        tq.Title,
+        tq.Tags,
+        u.UserId,
+        u.DisplayName,
+        COALESCE(SUM(c.Score), 0) AS TotalComments,
+        COALESCE(SUM(v.VoteTypeId = 2)::int, 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3)::int, 0) AS TotalDownVotes
+    FROM 
+        TopQuestions tq
+    JOIN 
+        Users u ON u.Id = tq.OwnerUserId
+    LEFT JOIN 
+        Comments c ON c.PostId = tq.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = tq.PostId
+    GROUP BY 
+        tq.PostId, tq.Title, tq.Tags, u.UserId, u.DisplayName
+)
+SELECT 
+    pi.Title,
+    pi.Tags,
+    pi.TotalComments,
+    pi.TotalUpVotes,
+    pi.TotalDownVotes,
+    ua.BadgeCount,
+    ua.VoteCount,
+    ua.CommentCount,
+    ua.TotalViews
+FROM 
+    PostInteraction pi
+JOIN 
+    UserActivity ua ON pi.UserId = ua.UserId
+ORDER BY 
+    pi.TotalUpVotes DESC, pi.TotalComments DESC;

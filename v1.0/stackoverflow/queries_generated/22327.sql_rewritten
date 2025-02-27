@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        MAX(v.VoteTypeId) AS LastVoteType
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+), 
+UsersWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(u.Reputation) AS MaxReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        uwb.BadgeCount,
+        uwb.MaxReputation,
+        CASE 
+            WHEN uwb.BadgeCount > 0 THEN 'Yes'
+            ELSE 'No' 
+        END AS HasBadges
+    FROM 
+        RankedPosts rp
+    INNER JOIN 
+        UsersWithBadges uwb ON rp.OwnerUserId = uwb.UserId
+    WHERE 
+        rp.ViewCount > 100
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.CommentCount,
+    tp.BadgeCount,
+    tp.MaxReputation,
+    tp.HasBadges
+FROM 
+    TopPosts tp
+WHERE 
+    tp.CommentCount = (SELECT MAX(CommentCount) FROM TopPosts)
+    OR (tp.Score > 10 AND tp.HasBadges = 'Yes')
+ORDER BY 
+    tp.ViewCount DESC
+LIMIT 10;

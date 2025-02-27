@@ -1,0 +1,66 @@
+WITH RecursiveActorMovie AS (
+    
+    SELECT
+        c.person_id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY t.production_year DESC) AS year_rank
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    JOIN
+        aka_title t ON c.movie_id = t.id
+    WHERE
+        t.production_year IS NOT NULL
+),
+GenreInfo AS (
+    
+    SELECT
+        m.movie_id,
+        STRING_AGG(DISTINCT g.keyword, ', ') AS genres
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword g ON mk.keyword_id = g.id
+    JOIN
+        aka_title m ON mk.movie_id = m.id
+    GROUP BY
+        m.movie_id
+),
+MovieCompanyInfo AS (
+    
+    SELECT
+        m.movie_id,
+        COALESCE(cn.name, 'Independent') AS company_name,
+        ct.kind AS company_type
+    FROM
+        movie_companies mc
+    LEFT JOIN
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT
+    ra.actor_id,
+    ra.actor_name,
+    ra.movie_title,
+    ra.production_year,
+    gi.genres,
+    mci.company_name,
+    mci.company_type
+FROM
+    RecursiveActorMovie ra
+LEFT JOIN
+    GenreInfo gi ON ra.movie_title = gi.movie_id
+LEFT JOIN
+    MovieCompanyInfo mci ON ra.movie_title = mci.movie_id
+WHERE
+    ra.year_rank <= 5
+    AND ra.production_year >= 2000
+    AND (mci.company_name IS NOT NULL OR mci.company_type IS NULL)
+ORDER BY
+    ra.actor_name ASC,
+    ra.production_year DESC
+LIMIT 100 OFFSET 10;

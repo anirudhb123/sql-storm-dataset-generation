@@ -1,0 +1,58 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        c.name AS company_name,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+        AND c.country_code = 'USA'
+    GROUP BY 
+        t.id, t.title, t.production_year, c.name
+), 
+detailed_movie_info AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.company_name,
+        md.actors,
+        md.keywords,
+        COUNT(DISTINCT ci.person_role_id) AS role_count,
+        AVG(COALESCE(m.info_type_id, 0)) AS avg_info_type
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        complete_cast cc ON md.movie_title = cc.subject_id
+    LEFT JOIN 
+        movie_info m ON md.production_year = m.movie_id
+    GROUP BY 
+        md.movie_title, md.production_year, md.company_name, md.actors, md.keywords
+)
+SELECT 
+    *,
+    CASE 
+        WHEN role_count > 10 THEN 'Large Cast' 
+        WHEN role_count BETWEEN 5 AND 10 THEN 'Medium Cast' 
+        ELSE 'Small Cast' 
+    END AS cast_size_category
+FROM 
+    detailed_movie_info
+ORDER BY 
+    production_year DESC, 
+    role_count DESC;

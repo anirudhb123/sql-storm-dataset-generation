@@ -1,0 +1,56 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000.00
+)
+SELECT 
+    rs.nation_name,
+    COUNT(DISTINCT hvo.o_orderkey) AS number_of_high_value_orders,
+    AVG(hvo.revenue) AS avg_revenue_per_order,
+    MAX(hvo.o_totalprice) AS max_order_price,
+    SUM(rs.total_supply_cost) AS total_supplier_cost
+FROM 
+    RankedSuppliers rs
+JOIN 
+    HighValueOrders hvo ON rs.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT l.l_partkey 
+            FROM lineitem l 
+            WHERE l.l_orderkey = hvo.o_orderkey
+        )
+    )
+JOIN 
+    nation n ON rs.nation_name = n.n_name
+GROUP BY 
+    rs.nation_name
+ORDER BY 
+    number_of_high_value_orders DESC, avg_revenue_per_order DESC;

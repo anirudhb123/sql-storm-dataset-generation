@@ -1,0 +1,57 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS year_rank
+    FROM aka_title mt
+    LEFT JOIN cast_info ci ON mt.id = ci.movie_id
+    GROUP BY mt.id, mt.title, mt.production_year
+), 
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    WHERE k.keyword IS NOT NULL
+    GROUP BY mk.movie_id
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    WHERE cn.country_code IS NOT NULL
+    GROUP BY mc.movie_id
+),
+FinalOutput AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        rk.keywords,
+        cm.companies,
+        CASE 
+            WHEN rm.cast_count IS NULL THEN 'No cast available'
+            WHEN rm.cast_count >= 10 THEN 'Crowded cast'
+            ELSE 'Regular cast' 
+        END AS cast_size_description
+    FROM RankedMovies rm
+    LEFT JOIN MovieKeywords rk ON rm.title = rk.movie_id
+    LEFT JOIN CompanyMovies cm ON rm.title = cm.movie_id
+    WHERE rm.year_rank <= 5 
+)
+
+SELECT 
+    title,
+    production_year,
+    cast_count,
+    keywords,
+    companies,
+    cast_size_description
+FROM FinalOutput
+WHERE production_year IS NOT NULL
+ORDER BY production_year DESC, cast_count DESC;

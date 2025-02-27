@@ -1,0 +1,63 @@
+
+WITH actor_movies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        m.title AS movie_title,
+        m.production_year,
+        r.role AS role_name,
+        COUNT(DISTINCT c.movie_id) AS total_movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        title m ON c.movie_id = m.id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        m.production_year > 2000 
+    GROUP BY 
+        a.id, a.name, m.title, m.production_year, r.role
+),
+actor_keyword AS (
+    SELECT 
+        am.actor_id,
+        am.actor_name,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        actor_movies am
+    LEFT JOIN 
+        movie_keyword mk ON am.movie_title = (SELECT title FROM title WHERE id = am.movie_id LIMIT 1)
+    GROUP BY 
+        am.actor_id, am.actor_name
+),
+top_actors AS (
+    SELECT 
+        am.actor_id,
+        am.actor_name,
+        SUM(am.total_movies) AS all_time_movie_count,
+        SUM(ak.keyword_count) AS total_keywords
+    FROM 
+        actor_movies am
+    JOIN 
+        actor_keyword ak ON am.actor_id = ak.actor_id
+    GROUP BY 
+        am.actor_id, am.actor_name
+    ORDER BY 
+        all_time_movie_count DESC
+    LIMIT 10
+)
+SELECT 
+    ta.actor_name,
+    ta.all_time_movie_count,
+    ta.total_keywords,
+    ak.keyword_count AS keywords_in_recent_movies
+FROM 
+    top_actors ta
+LEFT JOIN 
+    actor_keyword ak ON ta.actor_id = ak.actor_id
+WHERE 
+    ak.keyword_count > 5 
+ORDER BY 
+    ta.all_time_movie_count DESC;

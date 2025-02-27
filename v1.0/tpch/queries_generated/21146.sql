@@ -1,0 +1,84 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(o.o_orderkey) AS order_count,
+        RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_nationkey IS NOT NULL)
+),
+ComplexJoin AS (
+    SELECT 
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(CASE WHEN o.o_orderstatus = 'O' THEN 1 ELSE 0 END) AS open_orders
+    FROM 
+        nation n
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        orders o ON s.s_suppkey IN (SELECT DISTINCT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+    GROUP BY 
+        n.n_name, r.r_name
+)
+SELECT 
+    c.c_name,
+    SUM(COALESCE(os.total_revenue, 0)) AS total_revenue,
+    COUNT(DISTINCT cs.s_suppkey) AS unique_suppliers,
+    MAX(CASE WHEN rs.rank = 1 THEN rs.s_acctbal ELSE NULL END) AS top_supplier_acctbal,
+    COUNT(DISTINCT CASE WHEN cs.s_acctbal IS NULL THEN cs.c_custkey END) AS unique_null_customers,
+    MAX(COALESCE(c.c_acctbal, 0)) AS max_customer_acctbal
+FROM 
+    FilteredCustomers c
+LEFT JOIN 
+    OrderSummary os ON c.c_custkey = os.o_orderkey
+LEFT JOIN 
+    RankedSuppliers rs ON c.c_nationkey = rs.s_suppkey
+LEFT JOIN 
+    SupplierAvailability sa ON c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_totalprice > 1000)
+LEFT JOIN 
+    ComplexJoin cs ON cs.region_name IS NOT NULL
+WHERE 
+    c.c_mktsegment IS NULL OR c.c_mktsegment LIKE '%B%' 
+GROUP BY 
+    c.c_name
+HAVING 
+    COUNT(DISTINCT os.o_orderkey) > 5 AND SUM(COALESCE(os.total_revenue, 0)) > 10000
+ORDER BY 
+    total_revenue DESC, unique_suppliers DESC;

@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        wo.ws_order_number, 
+        wo.ws_item_sk, 
+        wo.ws_quantity, 
+        wo.ws_ext_sales_price,
+        RANK() OVER (PARTITION BY wo.ws_item_sk ORDER BY wo.ws_ext_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales wo 
+    WHERE 
+        wo.ws_ship_date_sk IS NOT NULL
+), 
+TotalReturns AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_return_quantity,
+        SUM(wr.wr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+), 
+SalesAndReturns AS (
+    SELECT 
+        rs.ws_order_number,
+        rs.ws_item_sk,
+        rs.ws_quantity,
+        rs.ws_ext_sales_price,
+        COALESCE(tr.total_return_quantity, 0) AS total_return_quantity,
+        COALESCE(tr.total_return_amt, 0) AS total_return_amt,
+        (rs.ws_ext_sales_price - COALESCE(tr.total_return_amt, 0)) AS net_amount
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        TotalReturns tr ON rs.ws_item_sk = tr.wr_item_sk
+)
+SELECT 
+    COALESCE(c.c_first_name, 'Unknown') AS customer_first_name,
+    COALESCE(c.c_last_name, 'Unknown') AS customer_last_name,
+    sa.ws_item_sk,
+    SUM(sa.ws_quantity) AS total_sales_quantity,
+    SUM(sa.net_amount) AS total_net_amount,
+    SUM(CASE WHEN sa.total_return_quantity > 0 THEN sa.total_return_quantity ELSE NULL END) AS total_returned_quantity,
+    COUNT(DISTINCT sa.ws_order_number) AS unique_orders,
+    AVG(sa.net_amount) AS avg_net_amount_per_order
+FROM 
+    SalesAndReturns sa
+JOIN 
+    customer c ON (c.c_customer_sk = sa.ws_order_number % 1000)
+WHERE 
+    sa.sales_rank = 1 
+    AND sa.ws_item_sk IS NOT NULL
+GROUP BY 
+    c.c_first_name, c.c_last_name, sa.ws_item_sk
+HAVING 
+    SUM(sa.ws_quantity) > 10
+ORDER BY 
+    total_net_amount DESC
+OFFSET 10 ROWS
+FETCH NEXT 5 ROWS ONLY;

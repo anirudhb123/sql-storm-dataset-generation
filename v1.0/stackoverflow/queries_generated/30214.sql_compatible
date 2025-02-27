@@ -1,0 +1,94 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        ParentId, 
+        Title, 
+        CreationDate, 
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id, 
+        p.ParentId, 
+        p.Title, 
+        p.CreationDate, 
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId
+),
+FilteredPostStats AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CommentCount,
+        ps.TotalBounty,
+        ps.BadgeCount,
+        COALESCE(u.Reputation, 0) AS UserReputation
+    FROM 
+        PostStats ps
+    LEFT JOIN 
+        Users u ON ps.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+    WHERE 
+        ps.CommentCount > 5
+),
+
+MaxBountyPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY TotalBounty DESC) AS BountyRank
+    FROM 
+        FilteredPostStats
+    WHERE 
+        TotalBounty > 0
+)
+
+SELECT 
+    rph.Id AS PostHierarchyId,
+    rph.Title AS HierarchicalPostTitle,
+    fps.Title AS PostTitle,
+    fps.CommentCount,
+    fps.UserReputation,
+    mbp.TotalBounty,
+    CASE 
+        WHEN mbp.TotalBounty IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS HasBounty
+FROM 
+    RecursivePostHierarchy rph
+LEFT JOIN 
+    FilteredPostStats fps ON rph.Id = fps.PostId
+LEFT JOIN 
+    MaxBountyPosts mbp ON mbp.PostId = fps.PostId
+WHERE 
+    rph.Level < 2 
+ORDER BY 
+    rph.Level, rph.CreationDate DESC;

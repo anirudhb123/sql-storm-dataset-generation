@@ -1,0 +1,81 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000  -- focusing on movies from the 2000s
+
+    UNION ALL 
+
+    SELECT 
+        ml.linked_movie_id, 
+        sub.title, 
+        sub.production_year, 
+        h.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title sub ON ml.movie_id = sub.id
+    JOIN 
+        movie_hierarchy h ON ml.movie_id = h.movie_id
+),
+movie_attr AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_hierarchy m
+    LEFT JOIN 
+        cast_info ci ON m.movie_id = ci.movie_id
+    LEFT JOIN 
+        movie_companies mc ON m.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword k ON m.movie_id = k.movie_id
+    GROUP BY 
+        m.movie_id
+),
+ranked_movies AS (
+    SELECT 
+        ma.movie_id, 
+        ma.actor_count, 
+        ma.company_count, 
+        ma.keywords, 
+        RANK() OVER (ORDER BY ma.actor_count DESC, ma.company_count DESC) AS rank
+    FROM 
+        movie_attr ma
+),
+selected_movies AS (
+    SELECT 
+        rm.movie_id, 
+        rm.actor_count, 
+        rm.company_count, 
+        rm.keywords
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.rank <= 10  -- limiting to top 10 movies
+)
+SELECT 
+    sm.movie_id,
+    at.title,
+    at.production_year,
+    sm.actor_count,
+    sm.company_count,
+    sm.keywords,
+    COALESCE(pi.info, 'No additional info') AS person_info
+FROM 
+    selected_movies sm
+JOIN 
+    aka_title at ON sm.movie_id = at.id
+LEFT JOIN 
+    person_info pi ON at.id = pi.person_id
+WHERE 
+    pi.info_type_id IS NULL OR pi.info_type_id IN (1, 2)  -- filtering by specific info types in person_info
+ORDER BY 
+    sm.actor_count DESC, sm.company_count DESC;

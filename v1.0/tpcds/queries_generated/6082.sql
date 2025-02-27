@@ -1,0 +1,54 @@
+
+WITH customer_analysis AS (
+    SELECT 
+        ca.ca_country,
+        cd.cd_gender,
+        SUM(CASE 
+            WHEN ws.ws_sales_price IS NOT NULL THEN ws.ws_sales_price * ws.ws_quantity 
+            ELSE cs.cs_sales_price * cs.cs_quantity 
+        END) AS total_sales,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        ca.ca_country IN ('USA', 'Canada')
+    GROUP BY 
+        ca.ca_country, cd.cd_gender
+),
+monthly_performance AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ca.total_sales) AS monthly_sales,
+        SUM(ca.customer_count) AS total_customers
+    FROM 
+        date_dim d
+    JOIN 
+        customer_analysis ca ON d.d_date_sk = ca.d_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq
+)
+SELECT 
+    mp.d_year,
+    mp.d_month_seq,
+    mp.monthly_sales,
+    mp.total_customers,
+    CASE 
+        WHEN mp.total_customers = 0 THEN 0 
+        ELSE mp.monthly_sales / mp.total_customers 
+    END AS avg_sale_per_customer
+FROM 
+    monthly_performance mp
+ORDER BY 
+    mp.d_year, mp.d_month_seq;

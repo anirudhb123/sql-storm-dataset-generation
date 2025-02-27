@@ -1,0 +1,51 @@
+
+WITH AddressCount AS (
+    SELECT 
+        ca_city,
+        COUNT(*) AS address_count
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city
+),
+EnhancedCustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ac.address_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        AddressCount ac ON c.c_current_addr_sk = ac.ca_city
+),
+RecentWebSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_spent
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_current_year = 'Y')
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    eci.full_name,
+    eci.cd_gender,
+    eci.cd_marital_status,
+    eci.cd_education_status,
+    COALESCE(ws.total_spent, 0) AS total_spent
+FROM 
+    EnhancedCustomerInfo eci
+LEFT JOIN 
+    RecentWebSales ws ON eci.c_customer_id = ws.ws_bill_customer_sk
+WHERE 
+    eci.address_count > 1
+ORDER BY 
+    total_spent DESC
+LIMIT 100;

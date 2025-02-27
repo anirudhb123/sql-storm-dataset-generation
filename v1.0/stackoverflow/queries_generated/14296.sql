@@ -1,0 +1,27 @@
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    COUNT(c.Id) AS CommentCount,
+    COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+    COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+    COUNT(DISTINCT b.Id) AS BadgeCount,
+    COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount,
+    SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseVotes
+FROM 
+    Posts p
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Badges b ON p.OwnerUserId = b.UserId
+LEFT JOIN 
+    PostLinks pl ON p.Id = pl.PostId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+GROUP BY 
+    p.Id, p.Title, p.CreationDate
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

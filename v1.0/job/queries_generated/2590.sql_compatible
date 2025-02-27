@@ -1,0 +1,43 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        RANK() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    GROUP BY 
+        mt.title, mt.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        total_companies
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.total_companies,
+    COALESCE(ci.note, 'No Role') AS role_description,
+    SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS cast_count,
+    MAX(pi.info) AS person_info
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    complete_cast cc ON tm.title = cc.subject_id
+LEFT JOIN 
+    cast_info ci ON cc.movie_id = ci.movie_id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birthdate')
+GROUP BY 
+    tm.title, tm.production_year, tm.total_companies, ci.note
+ORDER BY 
+    tm.total_companies DESC;

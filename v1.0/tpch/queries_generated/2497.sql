@@ -1,0 +1,68 @@
+WITH SupplierPerformance AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spending
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        DENSE_RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+),
+ActiveSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(sp.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(c.c_name, 'No Customer') AS customer_name,
+    COALESCE(co.total_orders, 0) AS total_orders,
+    COALESCE(co.total_spending, 0) AS total_spending,
+    sp.total_available_qty,
+    sp.total_cost
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    SupplierPerformance sp ON ps.ps_suppkey = sp.s_suppkey
+LEFT JOIN 
+    RecentOrders ro ON ro.o_orderkey = ps.ps_partkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_custkey = ro.o_orderkey)
+WHERE 
+    (sp.total_cost > 10000 OR co.total_spending > 5000)
+    AND (p.p_retailprice IS NOT NULL AND p.p_size BETWEEN 10 AND 20)
+ORDER BY 
+    total_spending DESC
+LIMIT 100;

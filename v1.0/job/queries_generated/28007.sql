@@ -1,0 +1,52 @@
+WITH movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        c.kind AS company_type,
+        a.name AS director_name,
+        STRING_AGG(DISTINCT mg.keyword, ', ') AS movie_keywords
+    FROM title t
+    JOIN movie_info mi ON t.id = mi.movie_id
+    JOIN movie_companies mc ON t.id = mc.movie_id
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN cast_info ci ON t.id = ci.movie_id
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN movie_keyword mg ON t.id = mg.movie_id
+    WHERE 
+        mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'overview')
+        AND ci.role_id = (SELECT id FROM role_type WHERE role = 'Director')
+    GROUP BY 
+        t.title, 
+        t.production_year, 
+        c.kind, 
+        a.name
+),
+keyword_count AS (
+    SELECT 
+        title,
+        COUNT(DISTINCT keyword) AS keyword_count
+    FROM movie_keyword
+    GROUP BY title
+),
+final_data AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.company_type,
+        md.director_name,
+        md.movie_keywords,
+        kc.keyword_count
+    FROM movie_details md
+    LEFT JOIN keyword_count kc ON md.title = kc.title
+)
+SELECT 
+    title,
+    production_year,
+    company_type,
+    director_name,
+    movie_keywords,
+    COALESCE(keyword_count, 0) AS total_keywords
+FROM final_data
+ORDER BY production_year DESC, total_keywords DESC
+LIMIT 100;
+

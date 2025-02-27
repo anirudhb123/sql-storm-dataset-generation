@@ -1,0 +1,25 @@
+WITH StringAggregation AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        GROUP_CONCAT(DISTINCT p.p_name ORDER BY p.p_name SEPARATOR ', ') AS parts_supplied,
+        COUNT(DISTINCT pid) AS total_parts,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        region.r_name AS region_name
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region ON n.n_regionkey = region.r_regionkey
+    GROUP BY s.s_suppkey, region.r_name
+)
+SELECT 
+    supplier_name,
+    total_parts,
+    total_supply_cost,
+    region_name,
+    CONCAT('Supplier: ', supplier_name, ' | Total Parts: ', total_parts, ' | Total Supply Cost: $', FORMAT(total_supply_cost, 2), ' | Region: ', region_name) AS summary
+FROM 
+    StringAggregation
+ORDER BY 
+    total_supply_cost DESC
+LIMIT 10;

@@ -1,0 +1,21 @@
+
+SELECT 
+    p.p_name, 
+    s.s_name, 
+    CONCAT('Supplier: ', s.s_name, ' provides ', p.p_name, ' with a retail price of $', CAST(p.p_retailprice AS CHAR(20)), ' and a comment: ', p.p_comment) AS full_description,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers,
+    SUBSTRING(p.p_comment, 1, instr(p.p_comment, ' ', instr(p.p_comment, ' ', instr(p.p_comment, ' ') + 1) + 1) - 1) AS short_comment
+FROM 
+    part p 
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey 
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey 
+GROUP BY 
+    p.p_name, s.s_name, p.p_retailprice, p.p_comment 
+HAVING 
+    SUM(ps.ps_availqty) > 100 
+ORDER BY 
+    total_available_quantity DESC, 
+    full_description ASC;

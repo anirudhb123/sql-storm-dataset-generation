@@ -1,0 +1,59 @@
+-- Performance Benchmarking Query
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        STRING_TO_ARRAY(p.Tags, ',') AS t ON true -- Assuming Tags are comma-separated in the original schema
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'  -- Only posts from the last year
+    GROUP BY 
+        p.Id
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(ps.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        PostStats ps ON u.Id = ps.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.BadgeCount,
+    us.TotalViews,
+    COUNT(ps.PostId) AS PostCount,
+    AVG(ps.ViewCount) AS AvgViewCount,
+    AVG(ps.Score) AS AvgScore,
+    SUM(ps.CommentCount) AS TotalComments,
+    SUM(ps.VoteCount) AS TotalVotes
+FROM 
+    UserStats us
+LEFT JOIN 
+    PostStats ps ON us.UserId = ps.OwnerUserId
+GROUP BY 
+    us.UserId, us.DisplayName, us.Reputation, us.BadgeCount, us.TotalViews
+ORDER BY 
+    us.Reputation DESC;  -- Sort by reputation for better insight

@@ -1,0 +1,66 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT Id AS PostId, 
+           ParentId, 
+           Title, 
+           CreationDate,
+           0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT p.Id, 
+           p.ParentId, 
+           p.Title, 
+           p.CreationDate,
+           r.Level + 1
+    FROM Posts p
+    JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserBadges AS (
+    SELECT b.UserId, 
+           COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+           COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+           COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges b
+    GROUP BY b.UserId
+),
+PostVotes AS (
+    SELECT v.PostId, 
+           COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+           COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY v.PostId
+),
+RecentPostEdits AS (
+    SELECT ph.PostId, 
+           COUNT(*) AS EditCount,
+           MAX(ph.CreationDate) AS LastEditDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6)
+    GROUP BY ph.PostId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    u.DisplayName AS OwnerDisplayName,
+    COALESCE(upvotes.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(downvotes.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(recentEdits.EditCount, 0) AS TotalEdits,
+    r.Level AS HierarchyLevel,
+    COALESCE(b.UserId, u.Id) AS UserIdWithBadges,
+    COALESCE(b.GoldBadges, 0) AS GoldBadges,
+    COALESCE(b.SilverBadges, 0) AS SilverBadges,
+    COALESCE(b.BronzeBadges, 0) AS BronzeBadges
+FROM RecursivePostHierarchy r
+JOIN Posts p ON r.PostId = p.Id
+JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN PostVotes upvotes ON p.Id = upvotes.PostId
+LEFT JOIN PostVotes downvotes ON p.Id = downvotes.PostId
+LEFT JOIN RecentPostEdits recentEdits ON p.Id = recentEdits.PostId
+LEFT JOIN UserBadges b ON u.Id = b.UserId
+WHERE p.CreationDate >= (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year')
+AND (p.Score > 0 OR p.AnswerCount > 0)
+ORDER BY r.Level, p.Title;

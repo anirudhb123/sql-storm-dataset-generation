@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostStatistics AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        ur.Reputation,
+        ur.DisplayName,
+        ur.TotalBadges,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users ur ON rp.OwnerUserId = ur.Id
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, ur.Reputation, ur.DisplayName, ur.TotalBadges
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.Reputation,
+    ps.DisplayName,
+    ps.TotalBadges,
+    ps.CommentCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    COALESCE((SELECT STRING_AGG(t.TagName, ', ') 
+              FROM Tags t 
+              JOIN LATERAL STRING_TO_ARRAY(p.Tags, ',') AS TagArray(tag) ON tag = t.TagName 
+              WHERE p.Id = ps.PostId), 'No Tags') AS TagsList
+FROM 
+    PostStatistics ps
+WHERE 
+    ps.Rank <= 5
+ORDER BY 
+    ps.Score DESC
+LIMIT 10;

@@ -1,0 +1,77 @@
+
+WITH Recursive_CTE AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM
+        part p
+    JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE
+        ps.ps_availqty > 10
+),
+Supplier_Data AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name
+    FROM
+        supplier s
+    INNER JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE
+        s.s_acctbal BETWEEN 1000 AND 5000
+),
+Qualified_Orders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate > DATE '1998-10-01' - INTERVAL '30 days'
+    GROUP BY
+        o.o_orderkey, o.o_orderdate
+)
+SELECT
+    r.region_name,
+    s.nation_name,
+    COUNT(DISTINCT q.o_orderkey) AS order_count,
+    SUM(q.total_revenue) AS total_revenue,
+    MAX(CASE 
+            WHEN q.total_revenue IS NULL THEN 'Unavailable'
+            ELSE 'Available' END) AS revenue_status,
+    COALESCE(AVG(CASE WHEN qc.rn = 1 THEN qc.ps_availqty END), 0) AS avg_top_supply_qty
+FROM
+    region r
+LEFT JOIN
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN
+    Supplier_Data s ON s.nation_name = n.n_name
+LEFT JOIN
+    Qualified_Orders q ON q.o_orderkey = (
+        SELECT MIN(o2.o_orderkey)
+        FROM Qualified_Orders o2
+        WHERE o2.o_orderdate = q.o_orderdate
+    )
+LEFT JOIN
+    Recursive_CTE qc ON qc.p_partkey = (
+        SELECT p2.p_partkey
+        FROM part p2
+        WHERE p2.p_name LIKE '%' || s.s_name || '%'
+        LIMIT 1
+    )
+WHERE
+    r.r_name IS NOT NULL 
+GROUP BY
+    r.region_name, s.nation_name
+HAVING
+    COUNT(DISTINCT q.o_orderkey) > 5 OR SUM(q.total_revenue) > 10000
+ORDER BY
+    r.region_name ASC, total_revenue DESC;

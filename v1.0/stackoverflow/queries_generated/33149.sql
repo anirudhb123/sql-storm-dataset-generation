@@ -1,0 +1,104 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+      AND p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP) -- In the last year
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId 
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopContributors AS (
+    SELECT 
+        ur.UserId, 
+        ur.Reputation,
+        ur.QuestionCount,
+        ur.BadgeCount,
+        ur.TotalBounties,
+        RANK() OVER (ORDER BY ur.Reputation DESC) AS ReputationRank
+    FROM 
+        UserReputation ur
+    WHERE 
+        ur.QuestionCount > 10 -- More than 10 questions asked
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Title, Body, Tags edited
+    GROUP BY 
+        ph.PostId, ph.UserId
+),
+PostViewStats AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(p.ViewCount) AS MaxViews,
+        AVG(p.ViewCount) AS AvgViews
+    FROM 
+        Posts p
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    COALESCE(
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.PostId), 0
+    ) AS CommentCount,
+    COALESCE(h.EditCount, 0) AS EditCount,
+    h.LastEditDate,
+    u.UserId,
+    u.Reputation,
+    u.QuestionCount,
+    u.BadgeCount,
+    u.TotalBounties,
+    CASE 
+        WHEN t.ReputationRank IS NOT NULL THEN 'Top Contributor'
+        ELSE 'Regular Contributor' 
+    END AS ContributorType,
+    pvs.MaxViews,
+    pvs.AvgViews
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    PostHistoryData h ON p.PostId = h.PostId 
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id 
+LEFT JOIN 
+    TopContributors t ON u.Id = t.UserId 
+LEFT JOIN 
+    PostViewStats pvs ON p.PostId = pvs.PostId
+WHERE 
+    p.UserPostRank = 1 -- Select only the most recent questions per user
+ORDER BY 
+    p.CreationDate DESC;

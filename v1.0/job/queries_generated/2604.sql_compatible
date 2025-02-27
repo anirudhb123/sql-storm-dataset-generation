@@ -1,0 +1,58 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank_by_cast <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        ARRAY_AGG(DISTINCT an.name) AS actors,
+        ARRAY_AGG(DISTINCT mn.name) AS companies,
+        (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = at.id) AS keyword_count
+    FROM 
+        TopMovies tm
+    JOIN 
+        aka_title at ON tm.title = at.title AND tm.production_year = at.production_year
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN 
+        movie_companies mc ON at.id = mc.movie_id
+    LEFT JOIN 
+        company_name mn ON mc.company_id = mn.id
+    GROUP BY 
+        tm.title, tm.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(array_to_string(md.actors, ', '), 'No Actors') AS actors_list,
+    COALESCE(array_to_string(md.companies, ', '), 'No Companies') AS companies_list,
+    md.keyword_count
+FROM 
+    MovieDetails md
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

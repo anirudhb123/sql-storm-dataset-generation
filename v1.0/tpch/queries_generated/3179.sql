@@ -1,0 +1,47 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (PARTITION BY pn.p_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part pn ON ps.ps_partkey = pn.p_partkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY s.s_suppkey, s.s_name, pn.p_nationkey
+),
+
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F' 
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_regionkey,
+        COALESCE(r.r_name, 'Unknown') AS region_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+
+SELECT 
+    cr.region_name,
+    cs.total_revenue,
+    rs.s_name AS best_supplier,
+    rs.total_cost
+FROM OrderStats cs
+JOIN CustomerRegion cr ON cs.o_custkey = cr.c_custkey
+LEFT JOIN RankedSuppliers rs ON cr.n_regionkey = rs.p_nationkey
+WHERE cs.order_count > (SELECT AVG(order_count) FROM OrderStats)
+ORDER BY cs.total_revenue DESC, rs.total_cost ASC
+LIMIT 10;

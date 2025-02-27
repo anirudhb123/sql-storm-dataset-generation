@@ -1,0 +1,44 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 1 AS depth
+    FROM aka_title m
+    WHERE m.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT m.id AS movie_id, m.title, m.production_year, mh.depth + 1
+    FROM aka_title m
+    JOIN movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN aka_title linked ON linked.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE mh.depth < 3
+), 
+CastRoles AS (
+    SELECT ci.movie_id, rt.role, COUNT(ci.person_id) AS num_of_actors
+    FROM cast_info ci
+    JOIN role_type rt ON ci.role_id = rt.id
+    GROUP BY ci.movie_id, rt.role
+),
+MoviesWithActors AS (
+    SELECT mh.movie_id, mh.title, mh.production_year, cr.role, cr.num_of_actors,
+           ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY cr.num_of_actors DESC) AS role_rank
+    FROM MovieHierarchy mh
+    LEFT JOIN CastRoles cr ON mh.movie_id = cr.movie_id
+)
+SELECT m.title,
+       m.production_year,
+       m.role,
+       COALESCE(m.num_of_actors, 0) AS actor_count,
+       CASE 
+           WHEN m.num_of_actors IS NULL THEN 'No actors'
+           WHEN m.num_of_actors <= 2 THEN 'Few actors'
+           ELSE 'Many actors'
+       END AS actor_description,
+       STRING_AGG(CASE WHEN m.num_of_actors IS NULL THEN 'Unknown' ELSE m.role END, ', ') AS roles_summary
+FROM MoviesWithActors m
+LEFT JOIN aka_name an ON an.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = m.movie_id)
+WHERE m.depth = 2
+GROUP BY m.title, m.production_year, m.role, m.num_of_actors
+HAVING COUNT(an.id) > 0
+ORDER BY m.production_year DESC, actor_count DESC
+LIMIT 100;

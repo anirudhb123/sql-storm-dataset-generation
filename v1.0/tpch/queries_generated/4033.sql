@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+), SupplierDetails AS (
+    SELECT 
+        r.r_name,
+        ns.n_name AS nation_name,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation ns ON rs.s_nationkey = ns.n_nationkey
+    JOIN 
+        region r ON ns.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rank <= 3
+), TotalSales AS (
+    SELECT 
+        l.l_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01'
+    GROUP BY 
+        l.l_suppkey
+)
+SELECT 
+    sd.nation_name,
+    sd.r_name,
+    sd.s_name,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    CASE 
+        WHEN ts.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Has Sales'
+    END AS sales_status
+FROM 
+    SupplierDetails sd
+LEFT JOIN 
+    TotalSales ts ON sd.s_suppkey = ts.l_suppkey
+WHERE 
+    sd.s_acctbal > (
+        SELECT AVG(s_acctbal) 
+        FROM supplier 
+        WHERE s_nationkey = sd.s_nationkey
+    )
+ORDER BY 
+    sd.nation_name, 
+    total_sales DESC;

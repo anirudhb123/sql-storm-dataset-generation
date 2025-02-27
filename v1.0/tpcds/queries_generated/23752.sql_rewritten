@@ -1,0 +1,54 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, NULL AS parent_customer
+    FROM customer c
+    WHERE c.c_customer_sk % 2 = 0  
+
+    UNION ALL
+
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, ch.c_customer_sk
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_customer_sk % 3 = 0 AND ch.c_customer_sk IS NOT NULL 
+),
+date_sales AS (
+    SELECT
+        d.d_date,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_date
+),
+top_reasons AS (
+    SELECT r.r_reason_desc, COUNT(sr.reason_sk) AS return_count
+    FROM reason r
+    JOIN store_returns sr ON r.r_reason_sk = sr.sr_reason_sk
+    GROUP BY r.r_reason_desc
+    ORDER BY return_count DESC
+    LIMIT 5
+),
+final_result AS (
+    SELECT 
+        c.c_first_name, 
+        c.c_last_name,
+        COALESCE(d.total_sales, 0) AS sales_per_day,
+        COALESCE(t.return_count, 0) AS top_reason_count,
+        ROW_NUMBER() OVER (PARTITION BY d.d_date ORDER BY d.total_sales DESC) AS sales_rank
+    FROM customer_hierarchy c
+    LEFT JOIN date_sales d ON d.d_date = cast('2002-10-01' as date)
+    LEFT JOIN (
+        SELECT DISTINCT r.r_reason_desc, t.return_count
+        FROM top_reasons t 
+        LEFT JOIN reason r ON t.r_reason_desc IS NOT NULL
+    ) t ON t.return_count > 0
+) 
+SELECT 
+    *,
+    CASE 
+        WHEN sales_per_day > 1000 THEN 'High Performer' 
+        WHEN sales_per_day BETWEEN 500 AND 1000 THEN 'Mid Performer' 
+        ELSE 'Low Performer' 
+    END AS performance_category
+FROM final_result
+WHERE sales_rank <= 5 
+ORDER BY performance_category, sales_per_day DESC
+LIMIT 10;

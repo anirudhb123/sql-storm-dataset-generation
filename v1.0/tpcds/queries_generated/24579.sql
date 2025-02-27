@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_ext_sales_price,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_ext_sales_price DESC) AS rank_sales,
+        CASE 
+            WHEN ws.ws_ext_discount_amt IS NULL THEN 0
+            ELSE ws.ws_ext_discount_amt
+        END AS effective_discount,
+        CASE 
+            WHEN ws.ws_net_paid_inc_tax IS NULL THEN 0
+            ELSE ws.ws_net_paid_inc_tax
+        END AS total_paid
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2450000 AND 2450005
+),
+TotalSales AS (
+    SELECT 
+        ws.ws_order_number,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_ext_discount_amt) AS total_discount
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_order_number
+),
+CustomerReturns AS (
+    SELECT 
+        sr_returning_customer_sk AS customer_id,
+        COUNT(sr_item_sk) AS return_count,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    COALESCE(tr.total_return_amount, 0) AS total_return_amount,
+    COALESCE(RS.effective_discount, 0) AS last_order_discount,
+    COALESCE(RS.total_paid, 0) AS last_order_total_paid,
+    CASE 
+        WHEN tr.return_count > 10 THEN 'High Return'
+        WHEN tr.return_count BETWEEN 5 AND 10 THEN 'Moderate Return'
+        ELSE 'Low Return'
+    END AS return_category
+FROM 
+    customer c
+LEFT JOIN 
+    TotalSales ts ON c.c_customer_sk = ts.ws_order_number
+LEFT JOIN 
+    CustomerReturns tr ON c.c_customer_sk = tr.customer_id
+LEFT JOIN 
+    RankedSales RS ON c.c_customer_sk = RS.ws_order_number 
+WHERE 
+    (c.c_birth_month BETWEEN 1 AND 6 AND c.c_birth_year IS NOT NULL)
+    OR (c.c_birth_month IS NULL AND c.c_birth_country = 'USA')
+ORDER BY 
+    COALESCE(ts.total_sales, 0) DESC,
+    COALESCE(tr.total_return_amount, 0) ASC;

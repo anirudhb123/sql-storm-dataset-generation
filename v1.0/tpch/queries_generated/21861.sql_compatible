@@ -1,0 +1,49 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON ps.ps_partkey = s.s_suppkey
+    WHERE sh.level < 5
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal BETWEEN 100.00 AND 5000.00
+    GROUP BY c.c_custkey, c.c_name
+),
+part_details AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_container, 
+           SUM(l.l_quantity * (1 - l.l_discount)) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY SUM(l.l_quantity * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_container
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    c.c_name,
+    COALESCE(pd.p_name, 'Unknown Part') AS part_name,
+    pd.total_sales,
+    so.total_spent,
+    CASE 
+       WHEN so.order_count IS NULL THEN 'No Orders'
+       WHEN so.total_spent > 1000 THEN 'High Value Customer'
+       ELSE 'Regular Customer' 
+    END AS customer_segment
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer_orders so ON n.n_nationkey = so.c_custkey
+LEFT JOIN part_details pd ON so.c_custkey = pd.p_partkey
+LEFT JOIN supplier_hierarchy sh ON n.n_nationkey = sh.s_nationkey
+WHERE r.r_name LIKE 'N%' 
+  AND (pd.total_sales IS NULL OR pd.total_sales > 100)
+ORDER BY r.r_name, n.n_name, customer_segment DESC, pd.total_sales DESC
+LIMIT 10 OFFSET 5;

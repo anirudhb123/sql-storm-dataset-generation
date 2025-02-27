@@ -1,0 +1,57 @@
+WITH UserVotes AS (
+    SELECT 
+        UserId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM Votes
+    GROUP BY UserId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) FROM Posts a WHERE a.AcceptedAnswerId = p.Id), 0) AS AcceptedAnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS ChangeTypes,
+        COUNT(*) AS ChangeCount,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.Score,
+    pd.CommentCount,
+    phd.ChangeTypes,
+    phd.ChangeCount,
+    phd.LastChangeDate,
+    uv.UpVotes,
+    uv.DownVotes,
+    CASE WHEN uv.TotalVotes = 0 THEN 'No Votes' ELSE 'Votes Recorded' END AS VoteStatus
+FROM Users u
+LEFT JOIN UserVotes uv ON u.Id = uv.UserId
+LEFT JOIN PostDetails pd ON u.Id = pd.OwnerUserId
+LEFT JOIN PostHistoryDetails phd ON pd.PostId = phd.PostId
+WHERE u.Reputation IS NOT NULL
+  AND (uv.UpVotes - uv.DownVotes) > 10
+  AND pd.RowNum = 1
+ORDER BY u.Reputation DESC, pd.ViewCount DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

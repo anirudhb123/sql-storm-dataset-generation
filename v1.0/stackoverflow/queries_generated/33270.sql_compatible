@@ -1,0 +1,67 @@
+
+WITH RecursiveTags AS (
+    SELECT Id,
+           TagName,
+           Count,
+           1 AS TagLevel
+    FROM Tags
+    WHERE IsModeratorOnly = 0
+
+    UNION ALL
+
+    SELECT t.Id,
+           t.TagName,
+           t.Count,
+           rt.TagLevel + 1
+    FROM Tags t
+    INNER JOIN RecursiveTags rt ON t.ExcerptPostId = rt.Id
+),
+UserBadges AS (
+    SELECT b.UserId,
+           COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+           COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+           COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges b
+    GROUP BY b.UserId
+),
+PostStats AS (
+    SELECT p.Id,
+           p.Title,
+           p.CreationDate,
+           p.OwnerUserId,
+           p.Score,
+           COALESCE(COUNT(DISTINCT c.Id), 0) AS TotalComments,
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.Score
+),
+RankedPosts AS (
+    SELECT ps.Id,
+           ps.Title,
+           ps.CreationDate,
+           ps.OwnerUserId,
+           ps.Score,
+           ps.TotalComments,
+           ps.TotalUpvotes,
+           ps.TotalDownvotes,
+           ROW_NUMBER() OVER (PARTITION BY ps.OwnerUserId ORDER BY ps.Score DESC) AS RankByScore
+    FROM PostStats ps
+)
+SELECT u.DisplayName,
+       u.Reputation,
+       MAX(rb.TotalComments) AS MaxCommentsPerPost,
+       SUM(COALESCE(ub.GoldBadges, 0)) AS TotalGoldBadges,
+       SUM(COALESCE(ub.SilverBadges, 0)) AS TotalSilverBadges,
+       SUM(COALESCE(ub.BronzeBadges, 0)) AS TotalBronzeBadges,
+       STRING_AGG(DISTINCT rt.TagName, ', ') AS AssociatedTags
+FROM Users u
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN RankedPosts rb ON u.Id = rb.OwnerUserId
+LEFT JOIN RecursiveTags rt ON rt.Id = ANY(STRING_TO_ARRAY((SELECT STRING_AGG(Tags, ',') FROM Posts WHERE OwnerUserId = u.Id), ','))
+WHERE u.Reputation > 0 
+  AND ub.GoldBadges > 0
+GROUP BY u.DisplayName, u.Reputation
+ORDER BY u.Reputation DESC;

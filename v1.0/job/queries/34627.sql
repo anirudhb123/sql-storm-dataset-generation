@@ -1,0 +1,68 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        NULL AS parent_movie_id,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.episode_of_id IS NULL
+    UNION ALL
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.episode_of_id AS parent_movie_id,
+        mh.level + 1
+    FROM 
+        aka_title t
+    JOIN 
+        MovieHierarchy mh ON t.episode_of_id = mh.movie_id
+),
+RoleCounts AS (
+    SELECT 
+        ci.movie_id,
+        rt.role,
+        COUNT(ci.person_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id, rt.role
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        COUNT(mi.id) AS info_count,
+        MAX(mi.info) AS latest_info,
+        STRING_AGG(mi.info, ', ') AS all_info 
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(rc.role, 'Unknown') AS role,
+    COALESCE(rc.role_count, 0) AS number_of_cast,
+    COALESCE(mi.info_count, 0) AS movie_info_count,
+    mi.latest_info,
+    mi.all_info
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    RoleCounts rc ON mh.movie_id = rc.movie_id
+LEFT JOIN 
+    MovieInfo mi ON mh.movie_id = mi.movie_id
+WHERE 
+    mh.production_year > 2000
+ORDER BY 
+    mh.level, mh.title;

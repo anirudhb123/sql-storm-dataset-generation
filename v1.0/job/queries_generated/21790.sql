@@ -1,0 +1,80 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        0 AS level,
+        mt.production_year,
+        mt.kind_id,
+        ARRAY[mt.id] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        mh.level + 1,
+        at.production_year,
+        at.kind_id,
+        path || ml.linked_movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        NOT ml.linked_movie_id = ANY(mh.path)  -- Avoid cycles
+),
+ranked_cast AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+),
+exemplary_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        STRING_AGG(DISTINCT rc.actor_name, ', ') AS actors,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        AVG(mv.rating) AS average_rating
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        ranked_cast rc ON mh.movie_id = rc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    LEFT JOIN 
+        (SELECT movie_id, AVG(rating) AS rating FROM movie_info WHERE info_type_id = 1 GROUP BY movie_id) mv ON mh.movie_id = mv.movie_id
+    WHERE 
+        mh.level = 0 AND (mh.production_year BETWEEN 1980 AND 2023 OR mh.production_year IS NULL) -- Consider movies in a specific range
+    GROUP BY 
+        mh.movie_id, mh.movie_title, mh.production_year
+    HAVING 
+        COUNT(DISTINCT rc.actor_name) > 1 AND 
+        (AVG(mv.rating) IS NULL OR AVG(mv.rating) >= 7.0) -- Ensuring relevant filtering for average rating
+)
+SELECT 
+    em.movie_title,
+    em.production_year,
+    COALESCE(em.actors, 'Unknown cast') AS actors,
+    em.keyword_count,
+    CASE 
+        WHEN em.average_rating IS NULL THEN 'No rating'
+        WHEN em.average_rating >= 9.0 THEN 'Masterpiece'
+        WHEN em.average_rating >= 7.0 THEN 'Worth watching'
+        ELSE 'Skip it'
+    END AS recommendation
+FROM 
+    exemplary_movies em
+ORDER BY 
+    em.production_year DESC, em.keyword_count DESC;

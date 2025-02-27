@@ -1,0 +1,86 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(SUM(CASE WHEN tc.kind = 'primary' THEN 1 ELSE 0 END), 0) AS primary_cast_count
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        movie_companies AS mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_info AS mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        complete_cast AS cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info AS ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        role_type AS rt ON ci.role_id = rt.id
+    LEFT JOIN 
+        comp_cast_type AS tc ON ci.person_role_id = tc.id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.title, t.id, t.production_year
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.primary_cast_count + COALESCE(SUM(CASE WHEN tc.kind = 'secondary' THEN 1 ELSE 0 END), 0)
+    FROM 
+        movie_hierarchy AS mh
+    LEFT JOIN 
+        complete_cast AS cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info AS ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        comp_cast_type AS tc ON ci.person_role_id = tc.id
+    WHERE 
+        ci.nationality IN (SELECT nationality FROM person_info WHERE info_type_id = 1) 
+        OR (ci.note IS NOT NULL AND ci.note NOT LIKE '%extras%')
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.primary_cast_count
+),
+casting_summary AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.primary_cast_count,
+        ROUND(AVG(CAST(mi.info AS numeric)), 2) AS avg_user_rating,
+        COUNT(DISTINCT mi.info) FILTER (WHERE mi.info_type_id = 2) AS user_review_count
+    FROM 
+        movie_hierarchy AS mh
+    JOIN 
+        movie_info AS mi ON mh.movie_id = mi.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.primary_cast_count
+)
+
+SELECT 
+    cs.title,
+    cs.production_year,
+    cs.primary_cast_count,
+    cs.avg_user_rating,
+    cs.user_review_count,
+    CASE 
+        WHEN cs.avg_user_rating >= 8 
+        THEN 'Highly Rated' 
+        WHEN cs.avg_user_rating IS NOT NULL 
+        AND cs.user_review_count > 100 
+        THEN 'Popular' 
+        ELSE 'No Rating' 
+    END AS rating_category
+FROM 
+    casting_summary AS cs
+WHERE 
+    cs.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    cs.avg_user_rating DESC NULLS LAST,
+    cs.primary_cast_count DESC;

@@ -1,0 +1,57 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_item_sk,
+        ss_sales_price,
+        ss_quantity,
+        ss_net_profit,
+        1 AS level,
+        CAST(ss_ticket_number AS VARCHAR(20)) AS path
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN 2450000 AND 2450590
+
+    UNION ALL
+
+    SELECT 
+        s_item_sk,
+        cs_sales_price,
+        cs_quantity,
+        cs_net_profit,
+        sh.level + 1,
+        CONCAT(sh.path, ' -> ', cs_order_number)::VARCHAR(20)
+    FROM 
+        catalog_sales AS cs
+    JOIN 
+        sales_hierarchy AS sh ON cs.cs_item_sk = sh.s_item_sk
+    WHERE 
+        cs.cs_sold_date_sk = sh.s_item_sk 
+        AND sh.level < 5
+)
+
+SELECT 
+    ca_city,
+    SUM(ss_net_profit) AS total_net_profit,
+    COUNT(DISTINCT ss_ticket_number) AS unique_sales_tickets,
+    AVG(ss_quantity) AS avg_quantity_sold,
+    COUNT(DISTINCT ss_item_sk) AS total_unique_items_sold,
+    STRING_AGG(DISTINCT safety_net, ', ') AS safety_net_sales
+FROM 
+    store_sales ss
+LEFT JOIN 
+    customer c ON ss.ss_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    sales_hierarchy sh ON ss.ss_item_sk = sh.s_item_sk
+WHERE 
+    c.c_birth_year >= 1980
+    AND (ca.ca_state = 'CA' OR ca.ca_state IS NULL)
+GROUP BY 
+    ca_city
+HAVING 
+    SUM(ss_net_profit) > 1000
+ORDER BY 
+    total_net_profit DESC
+LIMIT 10;

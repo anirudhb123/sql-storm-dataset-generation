@@ -1,0 +1,53 @@
+
+WITH UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS VoteCount, 
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        COALESCE(P.ClosedDate, 'Open') AS Status,
+        P.OwnerUserId
+    FROM 
+        Posts P
+)
+SELECT 
+    U.DisplayName,
+    U.PostCount,
+    U.CommentCount,
+    U.VoteCount,
+    U.BadgeCount,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.ViewCount,
+    P.AnswerCount,
+    P.Status
+FROM 
+    UserEngagement U
+JOIN 
+    PostStatistics P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.PostCount DESC, U.VoteCount DESC;

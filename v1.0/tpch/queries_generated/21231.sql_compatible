@@ -1,0 +1,54 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, CAST(NULL AS integer) AS parent_suppkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, sh.s_nationkey, sh.s_suppkey AS parent_suppkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON sh.level < 5 AND sh.s_suppkey <> s.s_suppkey
+    WHERE sh.s_nationkey = s.s_nationkey AND s.s_acctbal < sh.s_acctbal
+),
+
+part_supplier AS (
+    SELECT p.p_partkey, ps.ps_suppkey, ps.ps_availqty, 
+           CASE 
+               WHEN ps.ps_supplycost IS NULL THEN 0 
+               ELSE ps.ps_supplycost * ps.ps_availqty 
+           END AS total_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+
+customer_order_summary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_order_value,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+
+nation_with_orders AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY n.n_nationkey, n.n_name
+)
+
+SELECT n.n_name, SUM(ps.ps_availqty) AS total_available_quantity, 
+        SUM(ps.total_supply_cost) AS total_supply_cost,
+        COALESCE(cos.total_order_value, 0) AS customer_total_order_value, 
+        nh.order_count,
+        CASE WHEN SUM(ps.ps_availqty) IS NULL THEN 'No Inventory' ELSE 'Has Inventory' END AS inventory_status
+FROM nation n 
+LEFT JOIN part_supplier ps ON ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier_hierarchy sh WHERE sh.level = 1)
+LEFT JOIN customer_order_summary cos ON cos.total_order_value > 10000
+LEFT JOIN nation_with_orders nh ON n.n_nationkey = nh.n_nationkey
+GROUP BY n.n_name, nh.order_count, cos.total_order_value
+HAVING SUM(ps.ps_availqty) IS NOT NULL AND COUNT(n.n_nationkey) > 1
+ORDER BY total_available_quantity DESC NULLS LAST
+LIMIT 10;

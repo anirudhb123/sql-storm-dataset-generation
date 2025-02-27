@@ -1,0 +1,86 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswerCount,
+        SUM(CASE WHEN P.ViewCount IS NULL THEN 0 ELSE P.ViewCount END) AS TotalViews,
+        AVG(COALESCE(P.Score, 0)) AS AvgScore,
+        RANK() OVER (ORDER BY SUM(COALESCE(P.Score, 0)) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        P.Title,
+        COALESCE(PH.UserDisplayName, 'System') AS Editor,
+        PH.CreationDate,
+        CASE 
+            WHEN PH.PostHistoryTypeId IN (10, 11) THEN (SELECT C.Name FROM CloseReasonTypes C WHERE C.Id = CAST(PH.Comment AS int))
+            ELSE NULL 
+        END AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        TotalPosts,
+        QuestionCount,
+        AcceptedAnswerCount,
+        TotalViews,
+        AvgScore,
+        UserRank
+    FROM 
+        UserPostStats
+    WHERE 
+        UserRank <= 10
+),
+PostDetailsExpansion AS (
+    SELECT 
+        PH.PostId,
+        PD.Title,
+        PD.Editor,
+        PD.CreationDate,
+        PD.CloseReason,
+        U.DisplayName AS OwnerDisplayName,
+        P.ViewCount
+    FROM 
+        PostHistoryDetails PD
+    JOIN 
+        Posts P ON PD.PostId = P.Id
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+)
+SELECT 
+    TU.DisplayName AS TopUserDisplayName,
+    TUP.QuestionCount,
+    TUP.AcceptedAnswerCount,
+    (SELECT COUNT(DISTINCT PH.PostId) 
+     FROM PostHistory PH 
+     WHERE PH.UserId = TU.UserId AND PH.PostHistoryTypeId = 10) AS CloseVoteCount,
+    PD.Title,
+    PD.Editor,
+    PD.CreationDate,
+    PD.CloseReason,
+    PD.ViewCount
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    PostDetailsExpansion PD ON PD.ViewCount > 1000 -- Arbitrary filtering condition
+WHERE 
+    EXISTS (SELECT 1 FROM Votes V WHERE V.UserId = TU.UserId AND V.VoteTypeId IN (2, 3)) -- At least one upvote/downvote
+ORDER BY 
+    TUP.QuestionCount DESC, TUP.AcceptedAnswerCount DESC, PD.CreationDate DESC
+LIMIT 50;
+
+This query includes various advanced SQL constructs such as Common Table Expressions (CTEs), conditional aggregates, window functions, and correlated subqueries. It retrieves insights about top users in terms of their contributions while also providing details of posts edited by historical version modifications, filtering based on intricate conditions and relationships between tables.

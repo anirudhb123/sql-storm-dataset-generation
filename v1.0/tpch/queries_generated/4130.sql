@@ -1,0 +1,52 @@
+WITH SupplierAggregates AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS num_parts,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_partkey) AS part_count,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+
+SELECT 
+    r.r_name,
+    sa.s_name,
+    sa.total_cost,
+    od.total_price,
+    od.part_count,
+    CASE 
+        WHEN sa.total_cost > od.total_price THEN 'Supplier Wins'
+        ELSE 'Order Wins'
+    END AS comparison,
+    FIRST_VALUE(od.o_orderdate) OVER (PARTITION BY r.r_regionkey ORDER BY od.o_orderdate DESC) AS last_order_date
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SupplierAggregates sa ON n.n_nationkey = sa.s_nationkey AND sa.rn = 1
+LEFT JOIN 
+    OrderDetails od ON sa.s_suppkey = (SELECT ps_supkey FROM partsupp ps WHERE ps.ps_partkey = od.part_count LIMIT 1)
+WHERE 
+    sa.total_cost IS NOT NULL OR od.total_price IS NOT NULL
+ORDER BY 
+    r.r_name, sa.total_cost DESC;

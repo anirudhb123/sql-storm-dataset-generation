@@ -1,0 +1,106 @@
+WITH RECURSIVE MinMaxPrices AS (
+    SELECT
+        ps_partkey,
+        MIN(ps_supplycost) AS MinCost,
+        MAX(ps_supplycost) AS MaxCost
+    FROM
+        partsupp
+    GROUP BY
+        ps_partkey
+),
+RankedOrders AS (
+    SELECT
+        o_orderkey,
+        o_totalprice,
+        RANK() OVER (PARTITION BY o_orderstatus ORDER BY o_totalprice DESC) AS PriceRank,
+        o_orderdate
+    FROM
+        orders
+    WHERE
+        o_orderdate > cast('1998-10-01' as date) - INTERVAL '1 year'
+),
+CustomerAgg AS (
+    SELECT
+        c_nationkey,
+        COUNT(DISTINCT c_custkey) AS CustCount,
+        AVG(c_acctbal) AS AvgAcctBal
+    FROM
+        customer
+    WHERE
+        c_mktsegment IN ('BUILDING', 'AUTOMOBILE')
+    GROUP BY
+        c_nationkey
+),
+SupplierMax AS (
+    SELECT
+        n.n_name,
+        SUM(ps.ps_supplycost) AS TotalSupplyCost
+    FROM
+        nation n
+    INNER JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    INNER JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        n.n_name
+    HAVING
+        TotalSupplyCost > (SELECT AVG(TotalSupplyCost) FROM (
+            SELECT SUM(ps_supplycost) AS TotalSupplyCost
+            FROM supplier s2
+            JOIN partsupp ps2 ON s2.s_suppkey = ps2.ps_suppkey
+            GROUP BY s2.s_nationkey
+        ) AS Subquery)
+)
+SELECT
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_size,
+    COALESCE(SUM(l.l_extendedprice), 0) AS TotalExtendedPrice,
+    mp.MinCost,
+    mp.MaxCost,
+    ra.PriceRank,
+    ca.CustCount,
+    ca.AvgAcctBal,
+    sm.TotalSupplyCost
+FROM
+    part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN MinMaxPrices mp ON p.p_partkey = mp.ps_partkey
+LEFT JOIN RankedOrders ra ON ra.o_orderkey IN (
+    SELECT
+        l_orderkey
+    FROM
+        lineitem
+    WHERE
+        l_partkey = p.p_partkey
+) AND ra.PriceRank = 1
+LEFT JOIN CustomerAgg ca ON ca.c_nationkey IN (
+    SELECT
+        n.n_nationkey
+    FROM
+        nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE
+        s.s_suppkey = l.l_suppkey
+    GROUP BY
+        n.n_nationkey
+)
+LEFT JOIN SupplierMax sm ON sm.n_name IN (
+    SELECT DISTINCT n.n_name
+    FROM nation n
+    WHERE n.n_nationkey IN (
+        SELECT DISTINCT s.s_nationkey
+        FROM supplier s
+        WHERE s.s_suppkey IN (
+            SELECT l.l_suppkey
+            FROM lineitem l
+            WHERE l.l_partkey = p.p_partkey
+        )
+    )
+)
+WHERE
+    p.p_retailprice > 100.00
+    AND p.p_comment NOT LIKE '%special%'
+GROUP BY
+    p.p_partkey, p.p_name, p.p_brand, p.p_size, mp.MinCost, mp.MaxCost, ra.PriceRank, ca.CustCount, ca.AvgAcctBal, sm.TotalSupplyCost
+ORDER BY
+    TotalExtendedPrice DESC, p.p_partkey;

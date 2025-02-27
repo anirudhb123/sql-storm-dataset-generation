@@ -1,0 +1,4 @@
+SELECT min(cn.name) AS from_company, min(mc.note) AS production_note, min(t.title) AS movie_based_on_book
+FROM company_name AS cn, company_type AS ct, keyword AS k, link_type AS lt, movie_companies AS mc, movie_keyword AS mk, movie_link AS ml, title AS t
+WHERE lt.id = ml.link_type_id AND ml.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_type_id = ct.id AND mc.company_id = cn.id AND ml.movie_id = mk.movie_id AND ml.movie_id = mc.movie_id AND mk.movie_id = mc.movie_id
+AND cn.md5sum < '789e54a4a388984d24a266eb7cd172cf' AND ml.linked_movie_id IN (1554985, 2109153, 2378513, 690356, 906447) AND t.phonetic_code > 'C523';

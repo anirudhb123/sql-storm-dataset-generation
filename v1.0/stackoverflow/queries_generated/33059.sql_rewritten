@@ -1,0 +1,94 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        Id AS PostId, 
+        Title, 
+        ParentId, 
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ParentId, 
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2  
+),
+
+PostStats AS (
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(bb.Class), 0) AS TotalBadges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges bb ON p.OwnerUserId = bb.UserId AND bb.Date >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+
+CloseReasons AS (
+    
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+
+FinalReport AS (
+    SELECT 
+        rph.PostId,
+        rph.Title,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.CommentCount,
+        cr.CloseReasons,
+        rph.Level
+    FROM 
+        RecursivePostHierarchy rph
+    LEFT JOIN 
+        PostStats ps ON rph.PostId = ps.Id
+    LEFT JOIN 
+        CloseReasons cr ON rph.PostId = cr.PostId
+)
+
+
+SELECT 
+    PostId,
+    Title,
+    UpVotes,
+    DownVotes,
+    CommentCount,
+    COALESCE(CloseReasons, 'Not Closed') AS CloseReasons,
+    Level,
+    RANK() OVER (PARTITION BY Level ORDER BY UpVotes DESC) AS VoteRank
+FROM 
+    FinalReport
+ORDER BY 
+    Level, UpVotes DESC;

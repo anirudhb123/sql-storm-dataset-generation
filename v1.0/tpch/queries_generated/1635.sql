@@ -1,0 +1,64 @@
+WITH SupplierAggregate AS (
+    SELECT 
+        s.n_nationkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.n_nationkey
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) OVER (PARTITION BY o.o_orderkey) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY o.o_orderkey) AS net_order_value
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name,
+        COALESCE(SA.total_available_qty, 0) AS total_available,
+        COALESCE(SA.avg_supply_cost, 0) AS avg_cost
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        SupplierAggregate SA ON n.n_nationkey = SA.n_nationkey
+)
+SELECT 
+    NR.n_name,
+    NR.region_name,
+    COUNT(DISTINCT O.o_orderkey) AS total_orders,
+    SUM(O.line_item_count) AS total_line_items,
+    SUM(O.net_order_value) AS total_net_value,
+    AVG(NR.total_available) AS avg_available_qty,
+    SUM(NR.avg_cost) AS total_average_cost,
+    STRING_AGG(DISTINCT CONCAT(P.p_name, ' - ', NR.n_name), '; ') AS parts_info
+FROM 
+    NationRegion NR
+LEFT JOIN 
+    OrderStats O ON NR.n_nationkey = O.o_orderkey 
+LEFT JOIN 
+    partsupp PS ON NR.total_available = PS.ps_availqty
+LEFT JOIN 
+    part P ON PS.ps_partkey = P.p_partkey
+WHERE 
+    REGEXP_CONTAINS(NR.n_name, '.*[aeiou].*') 
+    AND NR.total_available > 100
+GROUP BY 
+    NR.n_name, NR.region_name
+ORDER BY 
+    total_net_value DESC
+LIMIT 50;

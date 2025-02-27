@@ -1,0 +1,91 @@
+WITH UserActivity AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM
+        Users U
+    LEFT JOIN
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN
+        Votes V ON V.UserId = U.Id
+    GROUP BY
+        U.Id, U.DisplayName, U.Reputation
+),
+TagStatistics AS (
+    SELECT
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore
+    FROM
+        Tags T
+    LEFT JOIN
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY
+        T.TagName
+),
+ClosedPosts AS (
+    SELECT
+        P.Id,
+        P.Title,
+        PH.UserDisplayName,
+        PH.CreationDate AS CloseDate
+    FROM
+        Posts P
+    JOIN
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE
+        PH.PostHistoryTypeId = 10
+),
+PostSummary AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Answered' 
+            ELSE 'Unanswered' 
+        END AS AnswerStatus,
+        COALESCE(CP.CloseDate, 'No Closure') AS ClosureStatus
+    FROM
+        Posts P
+    LEFT JOIN
+        ClosedPosts CP ON P.Id = CP.Id
+)
+SELECT
+    UA.UserId,
+    UA.DisplayName,
+    UA.Reputation,
+    UA.TotalPosts,
+    UA.TotalComments,
+    UA.TotalUpVotes,
+    UA.TotalDownVotes,
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews,
+    TS.AverageScore,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.AnswerStatus,
+    PS.ClosureStatus
+FROM
+    UserActivity UA
+LEFT JOIN
+    TagStatistics TS ON UA.TotalPosts > 0
+LEFT JOIN
+    PostSummary PS ON UA.TotalPosts > 0
+WHERE
+    UA.Reputation > 1000
+ORDER BY
+    UA.TotalUpVotes DESC,
+    TS.PostCount DESC,
+    UA.Reputation DESC
+LIMIT 100;

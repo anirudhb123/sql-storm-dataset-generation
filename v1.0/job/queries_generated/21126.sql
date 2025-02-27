@@ -1,0 +1,91 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+ActorRoles AS (
+    SELECT 
+        c.person_id,
+        COUNT(c.role_id) AS total_roles,
+        STRING_AGG(r.role, ', ') AS roles_list
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.person_id
+),
+
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+
+MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mc.company_id) AS number_of_companies,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        COALESCE(avg(ci.nr_order), 0) AS average_cast_position
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id
+)
+
+SELECT 
+    dt.title,
+    dt.production_year,
+    COALESCE(ak.total_roles, 0) AS total_actor_roles,
+    ak.roles_list,
+    ct.company_name,
+    ct.company_type,
+    dt.number_of_companies,
+    dt.keyword_count,
+    dt.average_cast_position
+FROM 
+    MovieDetails dt
+LEFT JOIN 
+    ActorRoles ak ON ak.person_id IN (SELECT c.person_id FROM cast_info c WHERE c.movie_id = dt.movie_id)
+LEFT JOIN 
+    CompanyMovies ct ON ct.movie_id = dt.movie_id
+WHERE 
+    (dt.production_year >= 2000 AND dt.number_of_companies > 1) 
+    OR (dt.production_year < 2000 AND dt.average_cast_position IS NULL)
+ORDER BY 
+    dt.production_year DESC, 
+    dt.title
+LIMIT 100;

@@ -1,0 +1,58 @@
+WITH SupplierTotals AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT c.c_custkey) AS num_customers
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+MaxSales AS (
+    SELECT 
+        o.o_orderdate,
+        MAX(total_sales) AS max_sales
+    FROM 
+        OrderDetails o
+    GROUP BY 
+        o.o_orderdate
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(st.total_avail_qty), 0) AS total_available_qty,
+    COALESCE(SUM(od.total_sales), 0) AS total_sales,
+    COUNT(DISTINCT nd.n_nationkey) AS distinct_nations
+FROM 
+    region r
+LEFT JOIN 
+    nation nd ON r.r_regionkey = nd.n_regionkey
+LEFT JOIN 
+    SupplierTotals st ON nd.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = st.s_suppkey LIMIT 1)
+LEFT JOIN 
+    OrderDetails od ON od.o_orderdate = (SELECT o_orderdate FROM OrderDetails WHERE total_sales = (SELECT max_sales FROM MaxSales WHERE o.o_orderdate = od.o_orderdate) LIMIT 1)
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(st.total_avail_qty) > 1000 OR COALESCE(SUM(od.total_sales), 0) > 5000
+ORDER BY 
+    total_sales DESC;

@@ -1,0 +1,55 @@
+
+WITH processed_addresses AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(TRIM(ca_street_number), ' ', TRIM(ca_street_name), ' ', TRIM(ca_street_type)) AS full_address,
+        TRIM(ca_city) AS city,
+        TRIM(ca_state) AS state,
+        TRIM(ca_zip) AS zip
+    FROM 
+        customer_address
+),
+demographics AS (
+    SELECT 
+        cd_demo_sk,
+        TRIM(cd_gender) AS gender,
+        TRIM(cd_marital_status) AS marital_status,
+        TRIM(cd_education_status) AS education,
+        cd_purchase_estimate,
+        TRIM(cd_credit_rating) AS credit_rating
+    FROM 
+        customer_demographics
+),
+joined_data AS (
+    SELECT 
+        a.ca_address_sk,
+        a.full_address,
+        a.city,
+        a.state,
+        a.zip,
+        d.cd_demo_sk,
+        d.gender,
+        d.marital_status,
+        d.education,
+        d.purchase_estimate,
+        d.credit_rating
+    FROM 
+        processed_addresses a
+    JOIN 
+        customer c ON a.ca_address_sk = c.c_current_addr_sk
+    JOIN 
+        demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+)
+SELECT 
+    full_address,
+    COUNT(*) AS customer_count,
+    STRING_AGG(gender, ', ') AS gender_distribution,
+    STRING_AGG(marital_status, ', ') AS marital_status_distribution,
+    AVG(purchase_estimate) AS avg_purchase_estimate
+FROM 
+    joined_data
+GROUP BY 
+    full_address
+ORDER BY 
+    customer_count DESC
+LIMIT 10;

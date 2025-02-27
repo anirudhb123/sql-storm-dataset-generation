@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score > 5
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        ViewCount,
+        OwnerDisplayName,
+        OwnerReputation
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(b.Id) > 0
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.CreationDate END) AS ClosureDate,
+        MIN(ph.CreationDate) AS FirstEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 24)  -- Close and edit actions
+    GROUP BY 
+        ph.PostId
+),
+FinalResults AS (
+    SELECT 
+        tp.*,
+        pc.CommentCount,
+        ub.BadgeCount,
+        phs.ClosureDate,
+        phs.FirstEditDate
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostComments pc ON tp.PostId = pc.PostId
+    LEFT JOIN 
+        UserBadges ub ON (SELECT OwnerUserId FROM Posts WHERE Id = tp.PostId) = ub.UserId
+    LEFT JOIN 
+        PostHistorySummary phs ON tp.PostId = phs.PostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN ClosureDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    COALESCE(OwnerReputation, 0) AS ReputationScore,
+    CONCAT(OwnerDisplayName, ' (Reputation: ', COALESCE(NULLIF(OwnerReputation, 0), 'No reputation'), ')') AS OwnerInfo
+FROM 
+    FinalResults
+WHERE 
+    CommentCount > 0
+ORDER BY 
+    Score DESC, ViewCount DESC;

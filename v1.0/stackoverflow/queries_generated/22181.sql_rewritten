@@ -1,0 +1,82 @@
+WITH PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 10 THEN 1 ELSE 0 END), 0) AS DeletionVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS HistoryCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) DESC) AS RankByUpVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND (p.Tags IS NOT NULL AND p.Tags <> '') 
+    GROUP BY 
+        p.Id
+), 
+
+FilteredPosts AS (
+    SELECT 
+        pvs.PostId,
+        pvs.Title,
+        pvs.UpVotes,
+        pvs.DownVotes,
+        pvs.DeletionVotes,
+        pvs.CommentCount,
+        pvs.HistoryCount,
+        pvs.RankByUpVotes,
+        CASE 
+            WHEN pvs.UpVotes - pvs.DownVotes > 0 THEN 'Positive' 
+            WHEN pvs.UpVotes - pvs.DownVotes < 0 THEN 'Negative' 
+            ELSE 'Neutral' 
+        END AS VoteSentiment,
+        CASE 
+            WHEN pvs.DeletionVotes > 0 THEN 'Possible Deletion' 
+            ELSE 'Active' 
+        END AS PostStatus
+    FROM 
+        PostVoteSummary pvs
+    WHERE 
+        pvs.RankByUpVotes <= 10
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.UpVotes,
+    fp.DownVotes,
+    fp.CommentCount,
+    fp.HistoryCount,
+    fp.VoteSentiment,
+    fp.PostStatus,
+    COALESCE(ph2.UserDisplayName, 'No Recent Edits') AS LastEditor,
+    COALESCE(ph2.LastEditDate, 'Never') AS LastEditDate
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    (SELECT 
+         PostId, 
+         UserDisplayName, 
+         LastEditDate
+     FROM 
+         Posts p2
+     LEFT JOIN 
+         PostHistory ph ON ph.PostId = p2.Id 
+     WHERE 
+         ph.PostHistoryTypeId IN (4, 5, 6, 11)  
+     ORDER BY 
+         ph.CreationDate DESC
+    ) ph2 ON fp.PostId = ph2.PostId
+WHERE 
+    fp.PostStatus = 'Active'
+ORDER BY 
+    fp.UpVotes DESC, 
+    fp.CommentCount DESC;

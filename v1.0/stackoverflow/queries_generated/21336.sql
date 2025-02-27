@@ -1,0 +1,78 @@
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId AND c.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 5
+),
+RelevantPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS UpVotes
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Only Questions and Answers
+)
+SELECT 
+    u.DisplayName,
+    ue.UpVotes,
+    ue.DownVotes,
+    ue.PostCount,
+    ue.CommentCount,
+    ue.BadgeCount,
+    tt.TagName,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate,
+    rp.UpVotes AS RecentPostUpVotes
+FROM 
+    UserEngagement ue
+JOIN 
+    Users u ON ue.UserId = u.Id
+LEFT JOIN 
+    TopTags tt ON tt.PostCount > (
+        SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = u.Id
+    ) 
+LEFT JOIN 
+    RelevantPosts rp ON rp.rn = 1 AND rp.PostId IN (
+        SELECT PostId FROM Posts WHERE OwnerUserId = u.Id ORDER BY CreationDate DESC LIMIT 1
+    )
+WHERE 
+    (ue.UpVotes - ue.DownVotes) > 10  -- More than 10 net positive votes
+    AND (SELECT COUNT(*) FROM Badges b WHERE b.UserId = u.Id AND b.Class = 1) > 0 -- Only Gold badge users
+    AND tt.TagName IS NOT NULL
+ORDER BY 
+    ue.BadgeCount DESC, 
+    u.Reputation DESC
+LIMIT 50;

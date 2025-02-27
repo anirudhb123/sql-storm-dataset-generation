@@ -1,0 +1,109 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        AVG(P.Score) AS AverageScore,
+        MAX(P.CreationDate) AS MostRecentPostDate
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+BadgeStats AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS TotalBadges,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+FinalStats AS (
+    SELECT 
+        UR.UserId,
+        UR.DisplayName,
+        UR.Reputation,
+        PS.TotalPosts,
+        PS.TotalViews,
+        PS.AverageScore,
+        B.TotalBadges,
+        B.GoldBadges,
+        B.SilverBadges,
+        B.BronzeBadges,
+        PD.PostId,
+        PD.Title,
+        PD.ViewCount,
+        PD.Score,
+        PD.CommentCount,
+        PD.UpVoteCount,
+        PD.DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY UR.UserId ORDER BY PD.ViewCount DESC) AS PostRank
+    FROM 
+        UserReputation UR
+    LEFT JOIN 
+        PostStats PS ON UR.UserId = PS.OwnerUserId
+    LEFT JOIN 
+        BadgeStats B ON UR.UserId = B.UserId
+    LEFT JOIN 
+        PostDetails PD ON UR.UserId = PD.OwnerUserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    TotalPosts,
+    TotalViews,
+    AverageScore,
+    TotalBadges,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    PostId,
+    Title,
+    ViewCount,
+    Score,
+    CommentCount,
+    UpVoteCount,
+    DownVoteCount
+FROM 
+    FinalStats
+WHERE 
+    ReputationRank <= 10
+ORDER BY 
+    Reputation DESC, PostRank
+OFFSET 5 ROWS
+FETCH NEXT 10 ROWS ONLY;

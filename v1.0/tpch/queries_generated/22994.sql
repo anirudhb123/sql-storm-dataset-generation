@@ -1,0 +1,82 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+),
+CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name AS nation_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'Unknown'
+            WHEN c.c_acctbal <= 0 THEN 'Zero or Negative'
+            ELSE 'Valid'
+        END AS acctbal_status
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE
+        n.n_regionkey IS NOT NULL
+),
+PartSupplier AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty * CASE WHEN ps.ps_supplycost IS NULL THEN 0 ELSE ps.ps_supplycost END) AS total_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+ComplexSelection AS (
+    SELECT 
+        p.p_name,
+        p.p_mfgr,
+        ps.total_supplycost,
+        COALESCE(p.p_retailprice, 0.00) AS retail_price,
+        RANK() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS mfgr_rank
+    FROM 
+        part p
+    LEFT JOIN 
+        PartSupplier ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_container = 'SM CASE')
+)
+SELECT 
+    cn.nation_name,
+    COUNT(DISTINCT co.trans_order) AS total_orders,
+    SUM(co.total_cost) AS aggregate_cost,
+    STRING_AGG(DISTINCT cl.l_shipmode, ', ') AS unique_shipmodes
+FROM 
+    (SELECT 
+        o.o_orderkey AS trans_order,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_cost
+    FROM 
+        RankedOrders ro
+    JOIN 
+        lineitem l ON l.l_orderkey = ro.o_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_discount) BETWEEN 0.1 AND 0.5
+    ) co
+INNER JOIN 
+    CustomerNation cn ON cn.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_phone = '1234567890' LIMIT 1) 
+LEFT JOIN 
+    ComplexSelection cs ON cs.p_name LIKE '%' || cn.nation_name || '%'
+WHERE 
+    co.total_cost > 1000.00
+GROUP BY 
+    cn.nation_name
+HAVING 
+    COUNT(DISTINCT co.trans_order) > 5 OR SUM(co.total_cost) IS NOT NULL
+ORDER BY 
+    aggregate_cost DESC;

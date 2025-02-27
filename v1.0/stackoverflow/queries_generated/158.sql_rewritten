@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 0
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, '; ') AS CommentTexts
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.Comment AS EditComment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) 
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        COALESCE(pc.CommentCount, 0) AS TotalComments,
+        COALESCE(pc.CommentTexts, 'No comments') AS CommentsSample,
+        phd.HistoryDate,
+        phd.EditComment
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostComments pc ON rp.PostId = pc.PostId
+    LEFT JOIN 
+        PostHistoryDetails phd ON rp.PostId = phd.PostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN TotalComments > 5 THEN 'Engaged'
+        ELSE 'Less Engaged'
+    END AS EngagementStatus
+FROM 
+    FinalResults
+WHERE 
+    HistoryDate IS NULL OR HistoryDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+ORDER BY 
+    Rank, Score DESC;

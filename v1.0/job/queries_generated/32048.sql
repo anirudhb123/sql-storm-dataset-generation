@@ -1,0 +1,81 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+    UNION ALL
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.linked_movie_id
+),
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        an.name AS actor_name,
+        cr.role AS role_name,
+        ci.nr_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON an.person_id = ci.person_id
+    JOIN 
+        role_type cr ON cr.id = ci.role_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id
+),
+production_companies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON cn.id = mc.company_id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    cd.actor_name,
+    cd.role_name,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    COALESCE(pc.companies, 'No Companies') AS companies,
+    ROW_NUMBER() OVER(PARTITION BY mh.movie_id ORDER BY cd.nr_order) AS actor_order
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_details cd ON cd.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keywords mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    production_companies pc ON pc.movie_id = mh.movie_id
+WHERE 
+    cd.actor_name IS NOT NULL -- Only include movies with cast details
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title;

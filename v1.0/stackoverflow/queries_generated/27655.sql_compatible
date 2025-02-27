@@ -1,0 +1,75 @@
+
+WITH TagFrequency AS (
+    SELECT 
+        UNNEST(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    GROUP BY 
+        Tag
+),
+
+HighestTag AS (
+    SELECT 
+        Tag,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagFrequency
+    WHERE 
+        PostCount > 10  
+),
+
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS QuestionCount,
+        SUM(COALESCE(CAST(v.VoteTypeId AS INTEGER), 0)) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1  
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(p.Id) > 5  
+),
+
+UserTagActivity AS (
+    SELECT 
+        ut.UserId,
+        ht.Tag,
+        COUNT(ut.PostId) AS TaggedPostCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        HighestTag ht ON ht.Tag = ANY(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><'))
+    JOIN 
+        Users ut ON p.OwnerUserId = ut.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ut.UserId, ht.Tag
+)
+
+SELECT 
+    u.DisplayName AS User,
+    ht.Tag,
+    ht.PostCount AS TotalPostsOnTag,
+    uqa.TaggedPostCount AS UserPostCount,
+    ROUND((uqa.TaggedPostCount::numeric / NULLIF(ht.PostCount, 0)) * 100, 2) AS UserContributionPercentage
+FROM 
+    HighestTag ht
+JOIN 
+    TopUsers u ON u.QuestionCount > 0
+LEFT JOIN 
+    UserTagActivity uqa ON u.UserId = uqa.UserId AND ht.Tag = uqa.Tag
+ORDER BY 
+    u.DisplayName, ht.Tag;

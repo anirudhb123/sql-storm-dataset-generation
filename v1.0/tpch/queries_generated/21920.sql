@@ -1,0 +1,81 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > 10000
+),
+DistinctParts AS (
+    SELECT DISTINCT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice
+    FROM 
+        part p
+    WHERE 
+        p.p_size IS NOT NULL
+        AND p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+),
+OrdersWithDiscount AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_discounted_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        COUNT(l.l_orderkey) > 5
+),
+SupplierPartInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_partkey,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+)
+SELECT 
+    o.o_orderkey,
+    o.total_discounted_price,
+    sp.s_name AS supplier_name,
+    dp.p_name AS part_name,
+    dp.p_retailprice
+FROM 
+    OrdersWithDiscount o
+LEFT JOIN 
+    SupplierPartInfo sp ON EXISTS (
+        SELECT 1 
+        FROM RankedSuppliers rs 
+        WHERE rs.s_suppkey = sp.s_suppkey AND rs.rank <= 3
+    )
+JOIN 
+    DistinctParts dp ON sp.ps_partkey = dp.p_partkey
+WHERE 
+    o.total_discounted_price IS NOT NULL
+    AND (o.total_discounted_price < 10000 OR dp.p_retailprice <= 500)
+UNION ALL
+SELECT 
+    NULL,
+    SUM(o.total_discounted_price) AS total_discounted_price,
+    NULL,
+    NULL,
+    NULL
+FROM 
+    OrdersWithDiscount o
+WHERE 
+    o.total_discounted_price IS NULL;

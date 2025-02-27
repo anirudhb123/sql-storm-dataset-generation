@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+
+TopQuestions AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerUserId,
+        rp.OwnerDisplayName,
+        rp.ViewCount,
+        rp.Score
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+
+QuestionsWithAnswers AS (
+    SELECT 
+        tq.PostId,
+        tq.Title,
+        tq.OwnerDisplayName,
+        tq.ViewCount,
+        tq.Score,
+        COUNT(a.Id) AS AnswerCount
+    FROM 
+        TopQuestions tq
+    LEFT JOIN 
+        Posts a ON tq.PostId = a.ParentId AND a.PostTypeId = 2 
+    GROUP BY 
+        tq.PostId, tq.Title, tq.OwnerDisplayName, tq.ViewCount, tq.Score
+)
+
+SELECT 
+    q.Title,
+    q.OwnerDisplayName,
+    q.ViewCount,
+    q.Score,
+    q.AnswerCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    QuestionsWithAnswers q 
+LEFT JOIN 
+    Posts p ON q.PostId = p.Id
+LEFT JOIN 
+    UNNEST(STRING_TO_ARRAY(p.Tags, ', ')) AS sp ON TRUE 
+LEFT JOIN 
+    Tags t ON t.TagName = TRIM(BOTH '>' FROM TRIM(BOTH '<' FROM sp))
+GROUP BY 
+    q.PostId, q.Title, q.OwnerDisplayName, q.ViewCount, q.Score
+ORDER BY 
+    q.Score DESC;

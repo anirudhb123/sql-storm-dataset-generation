@@ -1,0 +1,61 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, 
+           COUNT(ps.ps_availqty) AS total_parts, 
+           SUM(ps.ps_supplycost) AS total_supply_cost 
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    
+    UNION ALL
+    
+    SELECT s2.s_suppkey, s2.s_name, 
+           COUNT(ps2.ps_availqty) + SC.total_parts, 
+           SUM(ps2.ps_supplycost) + SC.total_supply_cost 
+    FROM supplier s2
+    JOIN partsupp ps2 ON s2.s_suppkey = ps2.ps_suppkey
+    JOIN SupplyChain SC ON s2.s_suppkey = SC.s_suppkey
+    GROUP BY s2.s_suppkey, s2.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, 
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PriceStats AS (
+    SELECT p.p_partkey, p.p_name, 
+           AVG(l.l_extendedprice) AS avg_price,
+           SUM(l.l_quantity) AS total_quantity,
+           SUM(l.l_discount) AS total_discounted_price
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CombinedData AS (
+    SELECT c.c_name, coalesce(s.total_parts, 0) AS total_parts_supplier,
+           coalesce(co.order_count, 0) AS order_count_customer,
+           coalesce(ps.avg_price, 0) AS avg_price_part,
+           coalesce(ps.total_quantity, 0) AS total_quantity_part
+    FROM CustomerOrders co
+    FULL OUTER JOIN SupplyChain s ON co.c_custkey = s.s_suppkey
+    FULL OUTER JOIN PriceStats ps ON s.total_parts = ps.total_quantity
+)
+SELECT c_name,
+       total_parts_supplier,
+       order_count_customer,
+       avg_price_part,
+       CASE 
+           WHEN total_parts_supplier > 100 THEN 'High Supplier'
+           WHEN total_parts_supplier BETWEEN 50 AND 100 THEN 'Medium Supplier'
+           ELSE 'Low Supplier'
+       END AS supplier_level,
+       CASE 
+           WHEN order_count_customer > 10 THEN 'Frequent Customer'
+           ELSE 'Occasional Customer'
+       END AS customer_type,
+       ROUND(avg_price_part * (1 - (total_parts_supplier * 0.01)), 2) AS adjusted_avg_price
+FROM CombinedData
+WHERE adjusted_avg_price IS NOT NULL
+ORDER BY adjusted_avg_price DESC;

@@ -1,0 +1,59 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM title m
+    WHERE m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN title t ON ml.linked_movie_id = t.id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE mh.level < 3 
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(*) OVER (PARTITION BY mh.production_year) AS title_count,
+        RANK() OVER (PARTITION BY mh.production_year ORDER BY mh.production_year DESC) AS rank_within_year
+    FROM MovieHierarchy mh
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        COALESCE(MIN(mk.keyword), 'No Keywords') AS keyword_summary
+    FROM title m
+    LEFT JOIN cast_info ci ON ci.movie_id = m.id
+    LEFT JOIN aka_name ak ON ak.person_id = ci.person_id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = m.id
+    WHERE m.production_year >= 2000
+    GROUP BY m.id, ak.name
+)
+
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_name,
+    COUNT(DISTINCT ci.id) AS cast_count,
+    SUM(CASE WHEN md.actor_name IS NOT NULL THEN 1 ELSE 0 END) AS actor_present,
+    RANK() OVER (PARTITION BY md.production_year ORDER BY md.production_year DESC, COUNT(DISTINCT ci.id) DESC) AS year_rank
+FROM MovieDetails md
+JOIN cast_info ci ON md.movie_id = ci.movie_id
+GROUP BY md.title, md.production_year, md.actor_name
+HAVING COUNT(DISTINCT ci.id) > 1
+ORDER BY md.production_year DESC, cast_count DESC;

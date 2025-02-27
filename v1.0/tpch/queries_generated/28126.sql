@@ -1,0 +1,65 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 10.00
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_phone,
+        s.s_acctbal,
+        SUBSTRING(s.s_comment, 1, 50) AS short_comment
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal >= 1000.00
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    rp.p_name,
+    rp.p_brand,
+    rp.p_type,
+    rp.p_retailprice,
+    sd.s_name AS supplier_name,
+    sd.short_comment AS supplier_comment,
+    co.c_name AS customer_name,
+    co.total_orders,
+    co.total_spent
+FROM 
+    RankedParts rp
+JOIN 
+    partsupp ps ON rp.p_partkey = ps.ps_partkey
+JOIN 
+    supplier sd ON ps.ps_suppkey = sd.s_suppkey
+JOIN 
+    CustomerOrders co ON co.total_orders > 5
+WHERE 
+    rp.price_rank <= 5
+ORDER BY 
+    rp.p_retailprice DESC, co.total_spent DESC;

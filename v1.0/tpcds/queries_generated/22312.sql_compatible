@@ -1,0 +1,98 @@
+
+WITH customer_summary AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        DENSE_RANK() OVER (PARTITION BY ca.ca_state ORDER BY cd.cd_purchase_estimate DESC) AS state_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+item_sales AS (
+    SELECT
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM
+        item i
+    JOIN
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY
+        i.i_item_id
+),
+high_value_items AS (
+    SELECT 
+        i_item_id,
+        total_net_profit
+    FROM 
+        item_sales
+    WHERE 
+        total_net_profit IS NOT NULL
+        AND total_net_profit > (
+            SELECT AVG(total_net_profit) FROM item_sales
+        )
+),
+sales_by_month AS (
+    SELECT 
+        d.d_month_seq,
+        SUM(ws.ws_net_paid) AS total_net_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_month_seq
+),
+top_sales_month AS (
+    SELECT 
+        *
+    FROM 
+        sales_by_month
+    ORDER BY 
+        total_net_sales DESC
+    LIMIT 5
+)
+SELECT 
+    cs.c_customer_id,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.ca_city,
+    cs.ca_state,
+    COALESCE(hvi.total_net_profit, 0) AS item_net_profit,
+    tsm.d_month_seq,
+    tsm.total_net_sales
+FROM 
+    customer_summary cs
+FULL OUTER JOIN 
+    high_value_items hvi ON cs.c_customer_id = (
+        SELECT 
+            c.c_customer_id 
+        FROM 
+            customer c
+        WHERE 
+            c.c_current_cdemo_sk IN (
+                SELECT 
+                    cd.cd_demo_sk 
+                FROM 
+                    customer_demographics cd 
+                WHERE 
+                    cd.cd_purchase_estimate >= 1000
+            )
+        LIMIT 1
+    )
+LEFT JOIN 
+    top_sales_month tsm ON 
+    tsm.d_month_seq = COALESCE(cs.state_rank, 0) % (SELECT COUNT(*) FROM top_sales_month) + 1
+WHERE 
+    (cs.ca_city IS NOT NULL OR hvi.i_item_id IS NOT NULL)
+ORDER BY 
+    cs.ca_state, tsm.total_net_sales DESC;

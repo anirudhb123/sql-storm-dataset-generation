@@ -1,0 +1,52 @@
+WITH RECURSIVE supplier_parts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    
+    UNION ALL
+    
+    SELECT 
+        sp.s_suppkey,
+        sp.s_name,
+        sp.s_acctbal + 1000 AS s_acctbal, 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice * 1.05 AS p_retailprice,
+        ps.ps_availqty,
+        ps.ps_supplycost * 0.95 AS ps_supplycost
+    FROM supplier_parts sp
+    JOIN partsupp ps ON sp.p_partkey = ps.ps_partkey
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    WHERE sp.s_acctbal < 50000
+),
+total_supplier_stats AS (
+    SELECT
+        s.s_nationkey,
+        SUM(sp.ps_supplycost) AS total_supply_cost,
+        AVG(sp.ps_availqty) AS avg_avail_qty,
+        COUNT(DISTINCT sp.p_partkey) AS unique_parts_count
+    FROM supplier s
+    JOIN supplier_parts sp ON s.s_suppkey = sp.s_suppkey
+    GROUP BY s.s_nationkey
+)
+SELECT 
+    n.n_name,
+    r.r_name,
+    t.total_supply_cost,
+    t.avg_avail_qty,
+    t.unique_parts_count,
+    ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY t.total_supply_cost DESC) AS rank
+FROM total_supplier_stats t
+JOIN nation n ON n.n_nationkey = t.s_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE t.total_supply_cost > 10000
+ORDER BY r.r_name, rank;

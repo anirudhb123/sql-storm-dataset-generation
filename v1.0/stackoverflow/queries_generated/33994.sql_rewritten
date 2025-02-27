@@ -1,0 +1,85 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy q ON a.ParentId = q.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCreated
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+RecentVotes AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS TotalVotes,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    WHERE 
+        CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        PostId
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, '<>')) AS tag ON true
+    JOIN 
+        Tags t ON t.TagName = tag
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    q.PostId,
+    q.Title,
+    q.CreationDate,
+    u.Reputation,
+    u.PostsCreated,
+    pt.Tags,
+    COALESCE(rv.TotalVotes, 0) AS TotalVotes,
+    COALESCE(rv.UpVotes, 0) AS UpVotes,
+    COALESCE(rv.DownVotes, 0) AS DownVotes
+FROM 
+    RecursivePostHierarchy q
+JOIN 
+    UserReputation u ON q.OwnerUserId = u.UserId
+LEFT JOIN 
+    RecentVotes rv ON q.PostId = rv.PostId
+LEFT JOIN 
+    PostTags pt ON q.PostId = pt.PostId
+WHERE 
+    u.Reputation > 1000 
+ORDER BY 
+    u.Reputation DESC, 
+    q.CreationDate DESC
+LIMIT 50;

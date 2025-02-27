@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(c.title, 'Unknown') AS parent_movie_title,
+        1 AS level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        aka_title c ON m.episode_of_id = c.id
+
+    UNION ALL 
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(c.title, 'Unknown') AS parent_movie_title,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        aka_title m ON mh.movie_id = m.episode_of_id
+    LEFT JOIN 
+        aka_title c ON m.episode_of_id = c.id
+)
+
+SELECT 
+    a.name AS actor_name,
+    a.id AS actor_id,
+    count(DISTINCT mh.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT mh.movie_title, ', ') AS movie_titles,
+    MAX(CASE WHEN m.production_year IS NOT NULL THEN m.production_year ELSE 0 END) AS max_production_year,
+    AVG(CASE WHEN m.production_year IS NOT NULL THEN m.production_year ELSE NULL END) AS avg_production_year,
+    SUM(CASE WHEN c.kind_id IN (SELECT id FROM kind_type WHERE kind ILIKE '%comedy%') THEN 1 ELSE 0 END) AS comedy_roles,
+    COUNT(DISTINCT CASE WHEN k.keyword ILIKE '%award%' THEN mk.movie_id END) AS award_movies,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM cast_info ci WHERE ci.person_id = a.person_id AND ci.nr_order IS NOT NULL) 
+        THEN 'Has roles with order' 
+        ELSE 'No roles with order' 
+    END AS role_order_status
+FROM 
+    aka_name a
+LEFT JOIN 
+    cast_info ci ON a.person_id = ci.person_id 
+LEFT JOIN 
+    aka_title m ON ci.movie_id = m.id
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_hierarchy mh ON m.id = mh.movie_id
+GROUP BY 
+    a.name, a.id
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 5
+ORDER BY 
+    total_movies DESC NULLS LAST;

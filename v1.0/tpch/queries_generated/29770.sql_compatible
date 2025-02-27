@@ -1,0 +1,51 @@
+
+WITH PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        SUM(CASE WHEN ps.ps_availqty > 0 THEN ps.ps_availqty ELSE 0 END) AS AvailableQty,
+        STRING_AGG(s.s_name || ' (' || s.s_acctbal || ')', ', ') AS Suppliers
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type, p.p_size, p.p_container, p.p_retailprice
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS OrderCount,
+        SUM(o.o_totalprice) AS TotalSpent,
+        STRING_AGG(DISTINCT o.o_orderstatus) AS UniqueOrderStatuses
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    pd.p_name,
+    pd.AvailableQty,
+    co.c_name,
+    co.OrderCount,
+    co.TotalSpent,
+    co.UniqueOrderStatuses
+FROM 
+    PartDetails pd
+JOIN 
+    CustomerOrders co ON pd.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps JOIN supplier s ON ps.ps_suppkey = s.s_suppkey WHERE s.s_name LIKE CONCAT('%', co.c_name, '%'))
+WHERE 
+    pd.AvailableQty > 100
+ORDER BY 
+    co.TotalSpent DESC, pd.p_retailprice ASC;

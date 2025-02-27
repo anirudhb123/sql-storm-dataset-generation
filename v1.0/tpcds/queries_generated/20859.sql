@@ -1,0 +1,86 @@
+
+WITH RECURSIVE address_data AS (
+    SELECT
+        ca_address_sk,
+        ca_city,
+        ca_state,
+        ca_country,
+        ROW_NUMBER() OVER (PARTITION BY ca_city, ca_state ORDER BY ca_address_sk) AS city_rank
+    FROM
+        customer_address
+    WHERE
+        ca_state IS NOT NULL
+), 
+customer_data AS (
+    SELECT
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        COUNT(*) OVER (PARTITION BY c_first_name) AS name_count
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    WHERE
+        cd_purchase_estimate > (SELECT AVG(cd_purchase_estimate) FROM customer_demographics) 
+        AND c_first_name IS NOT NULL
+),
+sales_data AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS orders_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+return_data AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        AVG(sr_return_amt) AS average_return_amount,
+        MIN(sr_ticket_number) AS first_return_ticket
+    FROM 
+        store_returns 
+    GROUP BY 
+        sr_item_sk
+)
+SELECT
+    c.c_first_name,
+    c.c_last_name,
+    a.ca_city,
+    a.ca_state,
+    a.ca_country,
+    COALESCE(sd.total_sales, 0) AS total_sales,
+    COALESCE(rd.total_returns, 0) AS total_returns,
+    c.name_count,
+    CASE 
+        WHEN c.cd_gender = 'F' THEN 'Female' 
+        WHEN c.cd_gender = 'M' THEN 'Male'
+        ELSE 'Unknown'
+    END AS gender_description,
+    CASE 
+        WHEN c.cd_marital_status = 'M' THEN 'Married'
+        WHEN c.cd_marital_status = 'S' THEN 'Single'
+        ELSE 'Other'
+    END AS marital_status_desc,
+    LEAD(s.total_profit) OVER (ORDER BY a.ca_city) AS next_item_profit,
+    SUM(rd.average_return_amount) OVER (PARTITION BY a.ca_city) AS city_average_return
+FROM 
+    customer_data c
+JOIN 
+    address_data a ON c.c_customer_sk = (SELECT c_current_addr_sk FROM customer WHERE c_customer_sk = c.c_customer_sk)
+LEFT JOIN 
+    sales_data sd ON sd.ws_item_sk = c.c_current_cdemo_sk
+LEFT JOIN 
+    return_data rd ON rd.sr_item_sk = c.c_current_cdemo_sk
+WHERE 
+    a.city_rank <= 5
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

@@ -1,0 +1,52 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk, 
+        SUM(ss_net_profit) AS total_profit,
+        COUNT(ss_ticket_number) AS sales_count,
+        1 AS level 
+    FROM 
+        store_sales 
+    WHERE 
+        ss_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ss_store_sk
+
+    UNION ALL
+
+    SELECT 
+        s.s_store_sk, 
+        sh.total_profit + SUM(ss.net_profit) AS total_profit,
+        sh.sales_count + COUNT(ss.ticket_number) AS sales_count,
+        level + 1 
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store s ON sh.ss_store_sk = s.s_store_sk
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    WHERE 
+        ss_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        s.s_store_sk, sh.total_profit, sh.sales_count, level
+)
+
+SELECT 
+    s.s_store_name,
+    sh.total_profit,
+    sh.sales_count,
+    ROUND((sh.total_profit / sh.sales_count), 2) AS average_profit_per_sale,
+    SUM(ws.net_profit) AS total_web_profit
+FROM 
+    sales_hierarchy sh
+JOIN 
+    store s ON sh.ss_store_sk = s.s_store_sk
+LEFT JOIN 
+    web_sales ws ON ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+GROUP BY 
+    s.s_store_name, sh.total_profit, sh.sales_count
+HAVING 
+    average_profit_per_sale IS NOT NULL
+ORDER BY 
+    total_profit DESC
+LIMIT 10;

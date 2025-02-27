@@ -1,0 +1,70 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn_per_year,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_titles
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopTitles AS (
+    SELECT 
+        title_id,
+        title,
+        production_year
+    FROM 
+        RankedTitles
+    WHERE 
+        rn_per_year <= 5
+),
+CastCount AS (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT person_id) AS num_cast
+    FROM 
+        cast_info
+    GROUP BY 
+        movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+        JOIN company_name c ON mc.company_id = c.id
+        JOIN company_type ct ON mc.company_type_id = ct.id
+),
+FinalResults AS (
+    SELECT 
+        tt.title,
+        tt.production_year,
+        COALESCE(cc.num_cast, 0) AS num_cast,
+        COUNT(DISTINCT mc.company_name) AS company_count,
+        ROUND(AVG(CASE WHEN mc.company_type IS NOT NULL THEN 1 ELSE 0 END), 2) AS average_company_type_used,
+        MAX(tt.total_titles) OVER () AS max_titles_per_year
+    FROM 
+        TopTitles tt
+        LEFT JOIN CastCount cc ON tt.title_id = cc.movie_id
+        LEFT JOIN MovieCompanies mc ON tt.title_id = mc.movie_id
+    GROUP BY 
+        tt.title, tt.production_year, cc.num_cast
+)
+SELECT 
+    title,
+    production_year,
+    num_cast,
+    company_count,
+    average_company_type_used,
+    max_titles_per_year
+FROM 
+    FinalResults
+WHERE 
+    company_count > 1 
+    AND (num_cast IS NULL OR num_cast > 0)
+ORDER BY 
+    production_year DESC, num_cast DESC;

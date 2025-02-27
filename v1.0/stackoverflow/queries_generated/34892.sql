@@ -1,0 +1,36 @@
+WITH RecursivePostHistory AS (
+    SELECT ph.PostId, ph.CreationDate, ph.PostHistoryTypeId, ph.UserDisplayName,
+           ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= '2020-01-01'
+),
+
+UserReputation AS (
+    SELECT u.Id AS UserId, SUM(u.Reputation) AS TotalReputation, MIN(u.CreationDate) AS FirstJoined
+    FROM Users u
+    GROUP BY u.Id
+),
+
+AveragePosts AS (
+    SELECT p.OwnerUserId, COUNT(p.Id) AS PostCount, AVG(p.Score) AS AvgScore
+    FROM Posts p
+    WHERE p.CreationDate >= '2021-01-01'
+    GROUP BY p.OwnerUserId
+)
+
+SELECT u.DisplayName, u.Location, u.AboutMe, 
+       COALESCE(up.TotalReputation, 0) AS TotalReputation,
+       COALESCE(ap.PostCount, 0) AS PostCount, 
+       COALESCE(ap.AvgScore, 0) AS AvgScore,
+       rph.PostHistoryTypeId, rph.CreationDate,
+       CASE 
+           WHEN rph.PostHistoryTypeId IN (10, 11) THEN 'Closed/Reopened'
+           ELSE 'Other Actions'
+       END AS HistoryAction
+FROM Users u
+LEFT JOIN UserReputation up ON u.Id = up.UserId
+LEFT JOIN AveragePosts ap ON u.Id = ap.OwnerUserId
+LEFT JOIN RecursivePostHistory rph ON u.Id = rph.UserDisplayName
+WHERE (u.Location IS NOT NULL OR u.AboutMe IS NOT NULL)
+  AND (rph.rn = 1 OR rph.rn IS NULL)
+ORDER BY u.Reputation DESC, up.TotalReputation DESC, rph.CreationDate DESC;

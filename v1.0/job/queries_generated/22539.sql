@@ -1,0 +1,67 @@
+WITH ranked_movies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS year_rank
+    FROM 
+        aka_title at
+    JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        at.production_year IS NOT NULL
+),
+keyword_movies AS (
+    SELECT 
+        at.id AS movie_id,
+        k.keyword
+    FROM 
+        aka_title at
+    JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword IS NOT NULL
+),
+companies_info AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    rm.title AS movie_title,
+    rm.production_year,
+    rm.actor_name,
+    ARRAY_AGG(DISTINCT km.keyword) AS keywords,
+    ci.company_name,
+    ci.company_type,
+    COALESCE(SUM(CASE WHEN rm.year_rank = 1 THEN 1 ELSE 0 END), 0) AS top_ranked,
+    CASE 
+        WHEN COUNT(DISTINCT rm.actor_name) = 1 THEN 'Solo Actor'
+        WHEN COUNT(DISTINCT rm.actor_name) > 1 AND COUNT(DISTINCT rm.actor_name) <= 3 THEN 'Ensemble Cast'
+        ELSE 'Large Cast'
+    END AS cast_size_category
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    keyword_movies km ON rm.title = km.movie_id
+FULL OUTER JOIN 
+    companies_info ci ON rm.title = ci.movie_id
+WHERE 
+    ci.company_name IS NULL -- To exclude movies without associated companies
+GROUP BY 
+    rm.title, rm.production_year, rm.actor_name, ci.company_name, ci.company_type
+HAVING 
+    COUNT(DISTINCT rm.actor_name) > 1
+ORDER BY 
+    rm.production_year DESC, movie_title;

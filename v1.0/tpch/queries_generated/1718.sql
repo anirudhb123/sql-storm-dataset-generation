@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name,
+    coalesce(cos.c_name, 'Unknown') AS customer_name,
+    r.total_available_quantity,
+    r.total_supply_cost,
+    ps.total_sales,
+    CASE 
+        WHEN ps.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Has Sales'
+    END AS sales_status,
+    RANK() OVER (PARTITION BY r.r_regionkey ORDER BY ps.total_sales DESC) AS sales_rank
+FROM 
+    region r
+LEFT JOIN 
+    SupplierParts r ON r.r_regionkey = s.nationkey
+LEFT JOIN 
+    CustomerOrderSummary cos ON r.r_regionkey = cos.c_custkey
+LEFT JOIN 
+    PartSales ps ON ps.p_partkey = s.ps_partkey
+WHERE 
+    r.r_name IS NOT NULL
+ORDER BY 
+    r.r_name, sales_rank;

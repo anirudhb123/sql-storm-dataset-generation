@@ -1,0 +1,83 @@
+
+WITH PostTagStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PT.Name AS PostType,
+        COUNT(DISTINCT T.Id) AS TagCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            UNNEST(SPLIT(TRIM(BOTH '{}' FROM Tags), '><')) AS TagName 
+         FROM 
+            Posts) AS TagList ON P.Id = TagList.PostId
+    LEFT JOIN 
+        Tags T ON T.TagName = TagList.TagName
+    GROUP BY 
+        P.Id, P.Title, PT.Name
+),
+
+UserPostInteraction AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+
+FinalBenchmark AS (
+    SELECT 
+        PTS.PostId,
+        PTS.Title,
+        PTS.PostType,
+        PTS.TagCount,
+        PTS.Tags,
+        UPI.UserId,
+        UPI.DisplayName,
+        UPI.CommentCount,
+        UPI.VoteCount,
+        UPI.UpVoteCount,
+        UPI.DownVoteCount
+    FROM 
+        PostTagStats PTS
+    JOIN 
+        UserPostInteraction UPI ON PTS.PostId = (SELECT PostId FROM Comments WHERE UserId = UPI.UserId LIMIT 1) 
+    ORDER BY 
+        PTS.TagCount DESC, 
+        UPI.UpVoteCount DESC
+)
+
+SELECT 
+    PostId,
+    Title,
+    PostType,
+    TagCount,
+    Tags,
+    UserId,
+    DisplayName,
+    CommentCount,
+    VoteCount,
+    UpVoteCount,
+    DownVoteCount
+FROM 
+    FinalBenchmark
+WHERE 
+    TagCount > 0
+ORDER BY 
+    TagCount DESC, UpVoteCount DESC
+LIMIT 100;

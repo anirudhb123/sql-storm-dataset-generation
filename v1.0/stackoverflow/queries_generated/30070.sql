@@ -1,0 +1,57 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= DATEADD(year, -2, GETDATE())
+),
+RecentPostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        MAX(COALESCE(v.CreationDate, '1900-01-01')) AS LastVoteDate,
+        COUNT(DISTINCT bp.UserId) AS BountyUsers
+    FROM Posts p
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN Votes v ON v.PostId = p.Id AND v.VoteTypeId IN (1, 2, 3, 5)  -- AcceptedByOriginator, UpMod, DownMod
+    LEFT JOIN Badges bp ON bp.UserId = p.OwnerUserId
+    WHERE p.CreationDate >= DATEADD(month, -6, GETDATE())
+    GROUP BY p.Id, p.Title
+),
+CombinedResults AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CommentCount,
+        ps.AnswerCount,
+        ps.TotalBounty,
+        ps.LastVoteDate,
+        ph.UserId AS HistoryUserId,
+        ph.PostHistoryTypeId
+    FROM RecentPostStats ps
+    LEFT JOIN RecursivePostHistory ph ON ps.PostId = ph.PostId AND ph.rn = 1  -- Get the latest post history entry
+)
+SELECT 
+    cr.PostId,
+    cr.Title,
+    cr.CommentCount,
+    cr.AnswerCount,
+    cr.TotalBounty,
+    cr.LastVoteDate,
+    u.DisplayName AS OwnerDisplayName,
+    pht.Name AS LastActionType,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = cr.OwnerUserId) AS BadgeCount
+FROM CombinedResults cr
+LEFT JOIN Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = cr.PostId)
+LEFT JOIN PostHistoryTypes pht ON pht.Id = cr.PostHistoryTypeId
+WHERE cr.AnswerCount > 1 
+  AND cr.TotalBounty > 50 
+  AND cr.LastVoteDate >= DATEADD(month, -3, GETDATE())
+ORDER BY cr.TotalBounty DESC, cr.CommentCount DESC;

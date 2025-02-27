@@ -1,0 +1,56 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(COALESCE(P.Score, 0)) AS AverageScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId,
+        P.Title,
+        P.CreationDate AS PostCreationDate,
+        PH.CreationDate AS HistoryCreationDate,
+        P.Body,
+        P.LastActivityDate
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 year'
+    ORDER BY 
+        PH.CreationDate DESC
+)
+SELECT 
+    U.DisplayName,
+    UPS.TotalPosts,
+    UPS.Questions,
+    UPS.Answers,
+    UPS.AverageScore,
+    RPH.Title,
+    RPH.Body,
+    RPH.PostCreationDate,
+    RPH.HistoryCreationDate,
+    RPH.LastActivityDate
+FROM 
+    UserPostStats UPS
+JOIN 
+    RecentPostHistory RPH ON UPS.UserId = RPH.UserId
+WHERE 
+    UPS.TotalPosts > 10
+ORDER BY 
+    UPS.AverageScore DESC,
+    UPS.TotalPosts DESC
+LIMIT 100;

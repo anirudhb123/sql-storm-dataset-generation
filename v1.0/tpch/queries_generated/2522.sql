@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+TopSellers AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_suppkey) AS supplier_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01'
+        AND l.l_shipdate < DATE '2023-12-31'
+    GROUP BY 
+        l.l_orderkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 100
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT cs.c_custkey) AS total_customers,
+    COALESCE(SUM(ts.total_sales), 0) AS total_sales,
+    COALESCE(AVG(cs.total_spent), 0) AS avg_spent_per_customer,
+    ARRAY_AGG(DISTINCT CONCAT(s.s_name, ' (Balance: ', s.s_acctbal, ')')) AS top_suppliers
+FROM 
+    nation n
+LEFT JOIN 
+    customerorders cs ON cs.c_custkey IN (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_nationkey = n.n_nationkey
+    )
+LEFT JOIN 
+    TopSellers ts ON ts.l_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey 
+        WHERE l.l_suppkey IN (
+            SELECT ps.ps_suppkey 
+            FROM partsupp ps 
+            JOIN part p ON ps.ps_partkey = p.p_partkey 
+            WHERE p.p_brand = 'BrandX'
+        )
+    )
+LEFT JOIN 
+    RankedSuppliers s ON s.s_nationkey = n.n_nationkey AND s.rn <= 3
+GROUP BY 
+    n.n_name
+ORDER BY 
+    total_sales DESC, 
+    nation_name;

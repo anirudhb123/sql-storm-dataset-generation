@@ -1,0 +1,62 @@
+
+WITH RecursivePostHistory AS (
+    SELECT Ph.PostId, Ph.CreationDate, Ph.UserId, Ph.Comment,
+           ROW_NUMBER() OVER (PARTITION BY Ph.PostId ORDER BY Ph.CreationDate DESC) AS RN
+    FROM PostHistory Ph
+    WHERE Ph.PostHistoryTypeId IN (10, 11) 
+),
+LatestVoteCounts AS (
+    SELECT PostId,
+           SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+FilteredPosts AS (
+    SELECT P.Id, P.Title, P.CreationDate, P.Score, P.OwnerUserId,
+           COALESCE(LV.UpVotes, 0) AS TotalUpVotes,
+           COALESCE(LV.DownVotes, 0) AS TotalDownVotes,
+           CASE 
+               WHEN P.LastActivityDate IS NULL THEN 'Inactive'
+               ELSE CASE 
+                   WHEN P.LastActivityDate > (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month') THEN 'Recently Active'
+                   ELSE 'Old'
+               END 
+           END AS ActivityStatus
+    FROM Posts P
+    LEFT JOIN LatestVoteCounts LV ON P.Id = LV.PostId
+    WHERE P.CreationDate >= (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year') 
+),
+TopPosts AS (
+    SELECT FP.Id, FP.Title, FP.CreationDate, FP.Score, 
+           ROW_NUMBER() OVER (ORDER BY FP.TotalUpVotes DESC, FP.Score DESC) AS Rank
+    FROM FilteredPosts FP
+),
+UserBadges AS (
+    SELECT U.Id AS UserId, COUNT(B.Id) AS BadgeCount, 
+           STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+JoinData AS (
+    SELECT TP.Title, TP.CreationDate, TP.Score, 
+           UP.BadgeCount, UP.BadgeNames,
+           PH.CreationDate AS HistoryCreationDate, PH.Comment
+    FROM TopPosts TP
+    LEFT JOIN UserBadges UP ON TP.OwnerUserId = UP.UserId
+    LEFT JOIN RecursivePostHistory PH ON TP.Id = PH.PostId AND PH.RN = 1
+)
+SELECT JD.Title, JD.CreationDate, JD.Score,
+       JD.BadgeCount, JD.BadgeNames,
+       CASE 
+           WHEN JD.HistoryCreationDate IS NOT NULL THEN 'Closed'
+           ELSE 'Open'
+       END AS PostStatus,
+       CASE 
+           WHEN JD.BadgeCount IS NULL THEN 'No Badges'
+           ELSE CAST(JD.BadgeCount AS TEXT) || ' Badges: ' || JD.BadgeNames
+       END AS UserBadgeInfo
+FROM JoinData JD
+ORDER BY JD.Score DESC, JD.CreationDate DESC
+LIMIT 50;

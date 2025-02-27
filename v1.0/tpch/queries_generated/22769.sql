@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal <= (SELECT AVG(s_acctbal) * 0.5 FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < (SELECT AVG(s_acctbal) FROM supplier WHERE s_nationkey = sh.s_nationkey)
+),
+PartWithComments AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank,
+           CASE 
+               WHEN p.p_retailprice IS NULL THEN 'Unknown price' 
+               ELSE CONCAT('Price: ', p.p_retailprice) 
+           END AS price_comment
+    FROM part p
+    WHERE p.p_size BETWEEN 1 AND 100 AND p.p_type NOT LIKE '%junk%'
+    AND EXISTS (SELECT 1 FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey AND ps.ps_availqty > 0)
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+    HAVING total > 10000
+),
+CustomerSummary AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT n.n_name, COUNT(DISTINCT sh.s_suppkey) AS suppliers_count,
+       SUM(CASE WHEN c.total_spent IS NOT NULL THEN c.total_spent ELSE 0 END) AS total_spent_by_nation,
+       STRING_AGG(DISTINCT CONCAT(p.p_name, ': ', p.price_comment), '; ') AS part_comments
+FROM nation n
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+FULL OUTER JOIN CustomerSummary c ON n.n_nationkey = (SELECT n2.n_regionkey FROM nation n2 WHERE n2.n_nationkey = c.c_custkey)
+LEFT JOIN PartWithComments p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sh.s_suppkey)
+WHERE n.n_comment IS NOT NULL AND n.n_comment <> ''
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT sh.s_suppkey) > 0 AND SUM(COALESCE(c.total_spent, 0)) < (SELECT AVG(total_spent) FROM CustomerSummary)
+ORDER BY total_spent_by_nation DESC, suppliers_count ASC;

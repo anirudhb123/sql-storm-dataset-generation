@@ -1,0 +1,46 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+), HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        total_value > 10000
+)
+SELECT 
+    rnk,
+    s.s_name,
+    h.o_orderkey,
+    h.total_value,
+    h.o_orderdate
+FROM 
+    RankedSuppliers s
+JOIN 
+    HighValueOrders h ON s.s_suppkey IN (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        JOIN part p ON ps.ps_partkey = p.p_partkey
+        WHERE p.p_retailprice > 100
+    )
+WHERE 
+    s.rnk <= 5
+ORDER BY 
+    h.total_value DESC, 
+    h.o_orderdate DESC;

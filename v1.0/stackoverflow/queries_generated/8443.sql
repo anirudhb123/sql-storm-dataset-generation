@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        ptt.Name AS PostTypeName,
+        ROW_NUMBER() OVER (ORDER BY rp.Score DESC) AS GlobalRank
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostTypes ptt ON rp.PostTypeId = ptt.Id
+    WHERE 
+        rp.Rank <= 10
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.CommentCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.PostTypeName,
+    pd.GlobalRank,
+    COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+    COALESCE(b.Name, 'No Badge') AS RecentBadge
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Users u ON pd.PostId = u.Id 
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId 
+WHERE 
+    b.Date >= NOW() - INTERVAL '1 month' 
+ORDER BY 
+    pd.Score DESC, pd.GlobalRank;

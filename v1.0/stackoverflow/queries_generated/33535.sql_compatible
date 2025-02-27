@@ -1,0 +1,51 @@
+
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        U.CreationDate, 
+        NULL AS ParentId
+    FROM Users U
+    WHERE U.Reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        U.Id, 
+        U.DisplayName, 
+        U.Reputation, 
+        U.CreationDate, 
+        UA.UserId
+    FROM Users U
+    JOIN Posts P ON P.OwnerUserId = U.Id
+    JOIN UserActivity UA ON P.OwnerUserId = UA.UserId
+    WHERE UA.UserId IS NOT NULL
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COUNT(DISTINCT P.Id) AS TotalPosts,
+    SUM(COALESCE(V.Score, 0)) AS TotalVotes,
+    COUNT(DISTINCT C.Id) AS TotalComments,
+    MAX(P.LastActivityDate) AS LastPostActivity,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed
+FROM Users U
+LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN Comments C ON P.Id = C.PostId
+LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (2, 3)  
+LEFT JOIN LATERAL (
+    SELECT 
+        T.TagName
+    FROM 
+        UNNEST(string_to_array(P.Tags, ',')) AS T(TagName)  
+) AS T ON TRUE
+WHERE U.Reputation > 1000
+GROUP BY 
+    U.Id, 
+    U.DisplayName, 
+    U.Reputation
+HAVING COUNT(DISTINCT P.Id) > 5
+ORDER BY U.Reputation DESC
+LIMIT 10;

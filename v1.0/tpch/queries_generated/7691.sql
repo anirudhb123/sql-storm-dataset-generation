@@ -1,0 +1,47 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        DENSE_RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_address, n.n_name, n.n_regionkey
+),
+AggregatedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        COUNT(l.l_orderkey) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    r.nation_name,
+    SUM(a.total_revenue) AS total_revenue_by_nation,
+    COUNT(DISTINCT a.o_custkey) AS unique_customers,
+    MIN(s.total_supply_cost) AS min_supply_cost,
+    MAX(s.total_supply_cost) AS max_supply_cost,
+    AVG(s.total_supply_cost) AS avg_supply_cost
+FROM 
+    RankedSuppliers s
+JOIN 
+    AggregatedOrders a ON a.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = s.s_nationkey)
+JOIN 
+    nation r ON s.nation_name = r.n_name
+GROUP BY 
+    r.nation_name
+ORDER BY 
+    total_revenue_by_nation DESC;

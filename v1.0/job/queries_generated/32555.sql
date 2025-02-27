@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 2 -- assuming 2 represents movies
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+SELECT 
+    a.name AS actor_name,
+    at.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    SUM(CASE WHEN mc.note LIKE '%producer%' THEN 1 ELSE 0 END) AS producer_count,
+    STRING_AGG(DISTINCT mt.keyword, ', ') AS keywords,
+    DENSE_RANK() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS ranking
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword mt ON mk.keyword_id = mt.id
+WHERE 
+    a.name IS NOT NULL
+    AND mh.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    a.name, at.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY 
+    mh.production_year, ranking;
+This query creates a recursive Common Table Expression (CTE) to gather a hierarchy of movies linked through the `movie_link` table. It then collects information about actors, the movies they acted in, the production companies involved, and any keywords associated with those movies. The use of window functions and aggregation alongside set operators helps provide a full picture of the actors' contributions across various movie productions over a defined time range.

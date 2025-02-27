@@ -1,0 +1,71 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.web_site_sk, 
+        ws.ws_order_number
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        ca.ca_country,
+        SUM(sd.total_net_paid) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN sales_data sd ON c.c_customer_sk = sd.ws_order_number 
+    GROUP BY 
+        c.c_customer_sk, 
+        cd.cd_gender, 
+        cd.cd_income_band_sk, 
+        ca.ca_country
+),
+ranked_customers AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.cd_gender,
+        ci.cd_income_band_sk,
+        ci.ca_country,
+        ci.total_spent,
+        RANK() OVER (PARTITION BY ci.cd_income_band_sk ORDER BY ci.total_spent DESC) AS spending_rank
+    FROM 
+        customer_info ci
+)
+SELECT 
+    rc.c_customer_sk,
+    rc.cd_gender,
+    rc.cd_income_band_sk,
+    rc.ca_country,
+    rc.total_spent,
+    rc.spending_rank
+FROM 
+    ranked_customers rc
+WHERE 
+    rc.spending_rank <= 10
+UNION ALL
+SELECT 
+    NULL AS c_customer_sk,
+    NULL AS cd_gender,
+    ib.ib_income_band_sk,
+    NULL AS ca_country,
+    SUM(COALESCE(rc.total_spent, 0)) AS total_spent,
+    NULL AS spending_rank
+FROM 
+    ranked_customers rc
+RIGHT JOIN income_band ib ON rc.cd_income_band_sk = ib.ib_income_band_sk
+GROUP BY 
+    ib.ib_income_band_sk
+ORDER BY 
+    cd_income_band_sk, total_spent DESC;

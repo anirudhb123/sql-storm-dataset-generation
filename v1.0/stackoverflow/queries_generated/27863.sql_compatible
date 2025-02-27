@@ -1,0 +1,102 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId IN (6, 10) THEN 1 ELSE 0 END) AS CloseVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostTagDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        T.TagName,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY T.Count DESC) AS TagRank
+    FROM 
+        Posts P
+    JOIN 
+        Tags T ON T.TagName = ANY (STRING_TO_ARRAY(P.Tags, '><'))
+),
+TopPosts AS (
+    SELECT 
+        PT.PostId,
+        PT.Title,
+        PT.CreationDate,
+        PT.Score,
+        PT.ViewCount,
+        PT.AnswerCount,
+        COUNT(PT.TagName) AS TotalTags,
+        PT.TagName
+    FROM 
+        PostTagDetails PT
+    WHERE 
+        PT.TagRank <= 5  
+    GROUP BY 
+        PT.PostId, PT.Title, PT.CreationDate, PT.Score, PT.ViewCount, PT.AnswerCount
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        SUM(COALESCE(P.AnswerCount, 0)) AS TotalAnswers,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        P.PostTypeId = 2  
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+BenchmarkResults AS (
+    SELECT 
+        UV.UserId,
+        UV.DisplayName,
+        UV.Reputation,
+        UV.TotalVotes,
+        UV.UpVotes,
+        UV.DownVotes,
+        UV.CloseVotes,
+        TA.TotalAnswers,
+        TA.TotalViews,
+        TP.TopPostTitle
+    FROM 
+        UserVoteStats UV
+    JOIN 
+        UserActivity TA ON UV.UserId = TA.UserId
+    LEFT JOIN 
+        (SELECT UserId, MIN(TopPostTitle) AS TopPostTitle 
+         FROM (SELECT UserId, Title AS TopPostTitle 
+               FROM TopPosts) AS TP 
+         GROUP BY UserId) TP ON UV.UserId = TP.UserId
+)
+SELECT 
+    BR.UserId,
+    BR.DisplayName,
+    BR.Reputation,
+    BR.TotalVotes,
+    BR.UpVotes,
+    BR.DownVotes,
+    BR.CloseVotes,
+    BR.TotalAnswers,
+    BR.TotalViews,
+    BR.TopPostTitle
+FROM 
+    BenchmarkResults BR
+ORDER BY 
+    BR.Reputation DESC, BR.TotalVotes DESC;

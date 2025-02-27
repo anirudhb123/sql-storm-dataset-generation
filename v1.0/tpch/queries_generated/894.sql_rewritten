@@ -1,0 +1,72 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 0
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        co.total_order_value,
+        ROW_NUMBER() OVER (ORDER BY co.total_order_value DESC) AS rank
+    FROM 
+        CustomerOrders co
+    JOIN 
+        customer c ON co.c_custkey = c.c_custkey
+    WHERE 
+        co.order_count > 5
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+),
+OrderLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate <= cast('1998-10-01' as date)
+    GROUP BY 
+        l.l_orderkey, l.l_partkey
+)
+SELECT 
+    tc.c_name,
+    tc.total_order_value,
+    sp.s_name,
+    sp.total_supply_cost,
+    oli.net_revenue,
+    CASE 
+        WHEN oli.net_revenue IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Generated'
+    END AS revenue_status
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    OrderLineItems oli ON oli.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = tc.c_custkey)
+LEFT JOIN 
+    SupplierParts sp ON sp.ps_partkey IN (SELECT p.p_partkey FROM part p JOIN partsupp ps ON p.p_partkey = ps.ps_partkey WHERE ps.ps_availqty > 0)
+WHERE 
+    tc.rank <= 10
+ORDER BY 
+    tc.total_order_value DESC, sp.total_supply_cost ASC;

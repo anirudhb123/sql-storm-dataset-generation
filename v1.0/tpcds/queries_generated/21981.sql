@@ -1,0 +1,56 @@
+
+WITH RECURSIVE income_calculation AS (
+    SELECT h.hd_demo_sk,
+           h.hd_income_band_sk,
+           h.hd_buy_potential,
+           h.hd_dep_count,
+           h.hd_vehicle_count,
+           COALESCE(i.ib_lower_bound, 0) AS income_lower,
+           COALESCE(i.ib_upper_bound, 9999999) AS income_upper,
+           (CASE 
+               WHEN h.hd_buy_potential IS NULL THEN 'UNKNOWN'
+               WHEN h.hd_buy_potential = 'High' AND h.hd_dep_count > 2 THEN 'VIP'
+               ELSE 'Regular'
+            END) AS customer_status
+    FROM household_demographics h
+    LEFT JOIN income_band i ON h.hd_income_band_sk = i.ib_income_band_sk
+),
+customer_stats AS (
+    SELECT c.c_customer_sk,
+           c.c_customer_id,
+           SUM(COALESCE(ws.ws_net_profit, 0)) AS total_net_profit,
+           COUNT(DISTINCT ws.ws_order_number) AS number_of_orders,
+           RANK() OVER (PARTITION BY CASE WHEN income_lower < 50000 THEN 'Low'
+                                          WHEN income_lower BETWEEN 50000 AND 100000 THEN 'Medium'
+                                          ELSE 'High' END ORDER BY SUM(ws.ws_net_profit) DESC) AS income_rank
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN income_calculation ic ON c.c_current_hdemo_sk = ic.hd_demo_sk
+    GROUP BY c.c_customer_sk, c.c_customer_id
+),
+store_sales_summary AS (
+    SELECT s.s_store_sk,
+           MAX(ss.ss_net_profit) AS max_store_profit,
+           AVG(ss.ss_net_paid_inc_tax) AS avg_store_sale,
+           SUM(ss.ss_quantity) AS total_items_sold,
+           COUNT(DISTINCT ss.ss_ticket_number) AS transaction_count
+    FROM store s
+    JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY s.s_store_sk
+)
+SELECT cs.c_customer_id,
+       cs.total_net_profit,
+       cs.number_of_orders,
+       sss.max_store_profit,
+       sss.avg_store_sale,
+       sss.total_items_sold,
+       sss.transaction_count,
+       CASE WHEN cs.income_rank <= 10 THEN 'Platinum Customer' 
+            WHEN cs.income_rank <= 50 THEN 'Gold Customer' 
+            ELSE 'Silver Customer' END AS loyalty_tier
+FROM customer_stats cs
+LEFT JOIN store_sales_summary sss ON cs.c_customer_sk = sss.s_store_sk
+WHERE cs.total_net_profit IS NOT NULL
+  AND sss.max_store_profit = (SELECT MAX(max_store_profit)
+                               FROM store_sales_summary)
+ORDER BY cs.total_net_profit DESC NULLS LAST;

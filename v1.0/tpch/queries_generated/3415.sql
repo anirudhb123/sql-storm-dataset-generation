@@ -1,0 +1,63 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_nationkey,
+        s.s_name,
+        ss.total_supplycost,
+        ss.total_parts
+    FROM 
+        SupplierStats ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+    WHERE 
+        ss.rank <= 3
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name AS region_name,
+    ts.s_name AS supplier_name,
+    os.total_revenue,
+    os.avg_quantity,
+    CASE 
+        WHEN os.total_revenue IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Generated'
+    END AS revenue_status
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    TopSuppliers ts ON n.n_nationkey = ts.s_nationkey
+LEFT JOIN 
+    OrderSummary os ON ts.s_supplierkey = os.o_orderkey
+WHERE 
+    r.r_name IS NOT NULL
+ORDER BY 
+    region_name, supplier_name;

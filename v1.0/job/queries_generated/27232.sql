@@ -1,0 +1,41 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    k.keyword AS movie_keyword,
+    GROUP_CONCAT(DISTINCT cn.name) AS company_names,
+    AVG(mr.rating) AS average_rating
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+LEFT JOIN 
+    (SELECT movie_id, AVG(rating) AS rating FROM movie_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'rating') GROUP BY movie_id) mr ON t.id = mr.movie_id
+WHERE 
+    a.name IS NOT NULL AND
+    t.production_year IS NOT NULL
+GROUP BY 
+    a.name, t.title, t.production_year, k.keyword
+ORDER BY 
+    average_rating DESC, movie_title ASC;
+
+### Explanation:
+- **Actors and Movies**: The query is designed to provide a benchmark for string processing by extracting names of actors (from `aka_name`), their movies (from `aka_title`), and associated keywords.
+- **JOIN operations**: Multiple joins connect related tables, linking actors to their movie roles, retrieving movie information, and expanding on keywords and production company details.
+- **Aggregation**: `GROUP_CONCAT` is utilized to gather all company names associated with each movie within a single string, and `AVG` computes the average movie rating.
+- **Filters**: Conditions ensure that only non-null actor names and production years are included in the results, promoting data integrity.
+- **Grouping and Sorting**: Finally, results are grouped by relevant attributes and ordered primarily by average rating, allowing for a clear view of top-rated movies featuring actors.
+  
+This query would be useful in situations requiring analysis of performance metrics in movie databases, as it intricately weaves together various aspects of the schema, showcasing advanced string processing and aggregations.

@@ -1,0 +1,113 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.CreationDate DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+
+PositivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        ph.UserDisplayName AS LastEditor,
+        ph.CreationDate AS LastEdited,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.LastEditorUserId = ph.UserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.Score > 0
+    GROUP BY 
+        p.Id, ph.UserDisplayName, ph.CreationDate
+),
+
+ClosePostReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN cr.Name 
+            ELSE 'Other' 
+          END, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::integer = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    ups.DisplayName AS UserName,
+    ups.Reputation,
+    pp.Title,
+    pp.ViewCount,
+    pp.Score,
+    pp.LastEditor,
+    pp.LastEdited,
+    COALESCE(cpr.CloseReasons, 'No close reasons') AS CloseReasons,
+    ups.UpVotesCount - ups.DownVotesCount AS VoteBalance
+FROM 
+    UserVoteStats ups
+JOIN 
+    PositivePosts pp ON ups.UserId = pp.LastEditorUserId
+LEFT JOIN 
+    ClosePostReasons cpr ON pp.PostId = cpr.PostId
+WHERE 
+    (ups.Reputation > 1000 OR pp.Score > 10) AND 
+    (pp.ViewCount > 100 OR pp.CommentCount > 5)
+ORDER BY 
+    VoteBalance DESC, pp.Score DESC
+LIMIT 100;
+
+WITH RECURSIVE TagHierarchy AS (
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        t.ExcerptPostId,
+        t.WikiPostId,
+        1 AS Level
+    FROM 
+        Tags t
+    WHERE 
+        t.IsRequired = 1
+    UNION ALL
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        t.ExcerptPostId,
+        t.WikiPostId,
+        th.Level + 1
+    FROM 
+        Tags t
+    JOIN 
+        TagHierarchy th ON t.WikiPostId = th.Id
+)
+SELECT 
+    th.TagName,
+    SUM(th.Count) AS TotalCount
+FROM 
+    TagHierarchy th
+GROUP BY 
+    th.TagName
+HAVING 
+    SUM(th.Count) > 50
+ORDER BY 
+    TotalCount DESC;

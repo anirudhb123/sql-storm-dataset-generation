@@ -1,0 +1,73 @@
+WITH RecursiveTitleHierarchy AS (
+    SELECT 
+        tt.id AS title_id,
+        tt.title,
+        tt.production_year,
+        tt.kind_id,
+        tt.episode_of_id,
+        0 AS hierarchy_level
+    FROM 
+        aka_title tt
+    WHERE 
+        tt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        t.id AS title_id,
+        tt.title,
+        tt.production_year,
+        tt.kind_id,
+        tt.episode_of_id,
+        rth.hierarchy_level + 1 
+    FROM 
+        aka_title t
+    JOIN 
+        RecursiveTitleHierarchy rth ON t.episode_of_id = rth.title_id
+)
+
+SELECT 
+    a.name AS Actor_Name,
+    title.title AS Movie_Title,
+    title.production_year AS Year_Released,
+    COUNT(DISTINCT mc.company_id) AS Company_Count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS Keywords,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY title.production_year DESC) AS Movie_Rank,
+    COALESCE(AVG(mr.info)::DECIMAL(10,2), 0) AS Average_Movie_Rating,
+    CASE 
+        WHEN t.production_year IS NOT NULL AND t.production_year > 2000 THEN 'Modern'
+        WHEN t.production_year IS NULL THEN 'Unknown Production Year'
+        ELSE 'Classic'
+    END AS Film_Era
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.id = c.person_id
+JOIN 
+    complete_cast cc ON c.movie_id = cc.movie_id
+JOIN 
+    RecursiveTitleHierarchy title ON cc.movie_id = title.title_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = title.title_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = title.title_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = title.title_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%rating%')
+LEFT JOIN 
+    movie_info_idx mr ON mr.movie_id = mi.movie_id AND mr.info_type_id = mi.info_type_id
+WHERE 
+    a.name IS NOT NULL
+    AND c.note IS NOT NULL
+    AND (title.production_year >= 1990 OR title.kind_id IS NULL)
+    AND NOT EXISTS (
+        SELECT 1 FROM movie_keyword mk2 WHERE mk2.movie_id = title.title_id AND mk2.keyword_id = k.id
+    )
+GROUP BY 
+    a.id, title.title, title.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY 
+    Film_Era, Year_Released DESC;
+

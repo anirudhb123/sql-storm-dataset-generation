@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(v.Id) OVER (PARTITION BY p.Id) AS VoteCount,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(MONTH, -6, GETDATE()) 
+        AND p.Score > 0
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        SUM(ph.PostHistoryTypeId IN (10, 11)) AS ClosedReopenedCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.LastEdited,
+        up.DisplayName AS AuthorName,
+        up.PostCount,
+        up.PositivePosts,
+        up.NegativePosts
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserPostStats up ON rp.PostId IN (
+            SELECT p.Id FROM Posts p WHERE p.OwnerUserId = up.UserId
+        )
+    WHERE 
+        rp.PostRank <= 10
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.LastEdited,
+    tp.AuthorName,
+    tp.PostCount,
+    tp.PositivePosts,
+    tp.NegativePosts
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;
+
+-- Additional Benchmark Queries
+SELECT 
+    pt.Name AS PostType,
+    COUNT(p.Id) AS PostCount,
+    AVG(p.Score) AS AverageScore,
+    SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePostCount
+FROM 
+    PostTypes pt
+LEFT JOIN 
+    Posts p ON p.PostTypeId = pt.Id
+GROUP BY 
+    pt.Name
+ORDER BY 
+    PostCount DESC;

@@ -1,0 +1,102 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- Base case: Select all titles as the starting point
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        0 AS level
+    FROM 
+        title t
+    
+    UNION ALL
+    
+    -- Recursive case: Join with movie_link to find related movies
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1 AS level
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+),
+AggregatedInfo AS (
+    -- Aggregate movie data along with associated keywords and info
+    SELECT 
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT mi.info, '; ') AS movie_infos,
+        COUNT(DISTINCT ci.person_id) AS total_cast
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+PersonRoleData AS (
+    -- Getting role-related data for people involved in the cast
+    SELECT 
+        p.id AS person_id,
+        a.name AS actor_name,
+        r.role AS role_type,
+        COUNT(ci.movie_id) AS movies_played
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    LEFT JOIN 
+        title t ON ci.movie_id = t.id
+    WHERE 
+        r.role NOT LIKE 'Crew%'
+    GROUP BY 
+        p.id, a.name, r.role
+),
+FinalBenchmark AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        a.keywords,
+        a.movie_infos,
+        a.total_cast,
+        pr.actor_name,
+        pr.role_type,
+        pr.movies_played,
+        ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY pr.movies_played DESC) AS actor_rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        AggregatedInfo a ON mh.movie_id = a.id
+    LEFT JOIN 
+        PersonRoleData pr ON mh.movie_id = pr.movies_played
+)
+SELECT 
+    fb.movie_id,
+    fb.title,
+    fb.production_year,
+    fb.keywords,
+    fb.movie_infos,
+    fb.total_cast,
+    fb.actor_name,
+    fb.role_type,
+    fb.actor_rank
+FROM 
+    FinalBenchmark fb
+WHERE 
+    fb.total_cast > 5 -- Filter to include only movies with more than 5 cast members
+ORDER BY 
+    fb.production_year DESC, 
+    fb.actor_rank;

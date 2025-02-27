@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id,
+           m.title AS movie_title,
+           m.production_year,
+           1 AS level
+    FROM aka_title m
+    WHERE m.episode_of_id IS NULL  
+
+    UNION ALL
+
+    SELECT e.id,
+           e.title,
+           e.production_year,
+           mh.level + 1
+    FROM aka_title e
+    JOIN movie_hierarchy mh ON e.episode_of_id = mh.movie_id  
+),
+movie_cast AS (
+    SELECT c.movie_id, 
+           m.title AS movie_title,
+           p.name AS actor_name,
+           COALESCE(mk.keyword, 'No Keyword') AS keyword,
+           rn.rank AS role_rank
+    FROM cast_info c
+    JOIN aka_title m ON c.movie_id = m.id
+    JOIN aka_name p ON c.person_id = p.person_id
+    LEFT JOIN movie_keyword mk ON c.movie_id = mk.movie_id
+    JOIN (
+        SELECT movie_id, 
+               ROW_NUMBER() OVER (PARTITION BY movie_id ORDER BY person_role_id DESC) AS rank
+        FROM cast_info
+    ) rn ON c.movie_id = rn.movie_id AND c.id = rn.rank
+),
+aggregated_cast AS (
+    SELECT mh.movie_id,
+           mh.movie_title,
+           mh.production_year,
+           COUNT(DISTINCT mc.actor_name) AS total_actors,
+           STRING_AGG(DISTINCT mc.keyword, ', ') AS keywords
+    FROM movie_hierarchy mh
+    LEFT JOIN movie_cast mc ON mh.movie_id = mc.movie_id
+    GROUP BY mh.movie_id, mh.movie_title, mh.production_year
+)
+SELECT a.movie_title,
+       a.production_year,
+       a.total_actors,
+       a.keywords,
+       CASE 
+           WHEN a.total_actors > 10 THEN 'Large Cast'
+           WHEN a.total_actors BETWEEN 5 AND 10 THEN 'Medium Cast'
+           ELSE 'Small Cast'
+       END AS cast_size_description,
+       mv.linked_movie_id
+FROM aggregated_cast a
+LEFT JOIN movie_link mv ON a.movie_id = mv.movie_id
+ORDER BY a.production_year DESC, a.total_actors DESC;

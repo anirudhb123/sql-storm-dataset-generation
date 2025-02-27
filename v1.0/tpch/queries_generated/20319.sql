@@ -1,0 +1,49 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS o_rnk
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice
+),
+SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY s.s_suppkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    s.s_name AS supplier_name,
+    s.total_orders,
+    COALESCE(s.avg_order_value, 0) AS avg_order_value,
+    COALESCE(r.rnk, 0) AS supplier_rank,
+    d.total_revenue
+FROM part p
+LEFT JOIN RankedSuppliers r ON p.p_partkey = r.p_partkey
+LEFT JOIN SupplierSales s ON r.s_suppkey = s.s_suppkey
+LEFT JOIN OrderDetails d ON d.o_rnk = 1 AND d.o_totalprice > 1000
+WHERE p.p_size BETWEEN 1 AND 10 
+  AND (r.s_suppkey IS NOT NULL OR s.total_orders IS NULL)
+  AND (d.total_revenue IS NOT NULL OR d.total_revenue < 50000)
+ORDER BY p.p_partkey, supplier_rank DESC NULLS LAST;

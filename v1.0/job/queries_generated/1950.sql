@@ -1,0 +1,58 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    GROUP BY 
+        a.title, a.production_year
+),
+ActorDetails AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count,
+        SUM(CASE WHEN a.production_year IS NOT NULL THEN 1 ELSE 0 END) AS acted_in_count
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        aka_title a ON ci.movie_id = a.id
+    GROUP BY 
+        ak.name
+),
+KeywordStats AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(mk.keyword_id::text, ', ') AS keywords,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.company_count,
+    ad.actor_name,
+    ad.movies_count,
+    ad.acted_in_count,
+    ks.keywords,
+    ks.keyword_count
+FROM 
+    RankedMovies rm
+JOIN 
+    ActorDetails ad ON rm.rank = 1
+LEFT JOIN 
+    KeywordStats ks ON rm.movie_title = (SELECT title FROM aka_title WHERE id = ks.movie_id LIMIT 1)
+WHERE 
+    rm.company_count > 2
+AND 
+    ad.acted_in_count > 5
+ORDER BY 
+    rm.production_year DESC, rm.company_count DESC;

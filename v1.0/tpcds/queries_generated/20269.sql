@@ -1,0 +1,75 @@
+
+WITH RecursiveAddress AS (
+    SELECT 
+        ca_address_sk, 
+        ca_city, 
+        ca_state, 
+        ca_country, 
+        ROW_NUMBER() OVER (PARTITION BY ca_city ORDER BY ca_address_sk) AS rn
+    FROM 
+        customer_address
+    WHERE 
+        ca_country IS NOT NULL
+),
+SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_preferred_cust_flag = 'Y'
+    GROUP BY 
+        ws.web_site_id
+),
+CurrentYearSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_paid_inc_tax) AS total_net_paid
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = EXTRACT(YEAR FROM CURRENT_DATE)
+    GROUP BY 
+        ws.web_site_sk
+),
+Comparison AS (
+    SELECT 
+        s.web_site_id,
+        COALESCE(c.total_net_paid, 0) AS current_year_net_paid,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        (COALESCE(c.total_net_paid, 0) - COALESCE(sd.total_sales, 0)) AS variance
+    FROM 
+        web_site s
+    LEFT JOIN 
+        CurrentYearSales c ON s.web_site_sk = c.web_site_sk
+    LEFT JOIN 
+        SalesData sd ON s.web_site_id = sd.web_site_id
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    ca.ca_country,
+    COALESCE(SUM(comp.current_year_net_paid), 0) AS total_current_year_net_paid,
+    COUNT(DISTINCT CASE WHEN comp.variance > 0 THEN comp.web_site_id END) AS positive_variance_sites,
+    AVG(comp.variance) AS average_variance
+FROM 
+    RecursiveAddress ca
+LEFT JOIN 
+    Comparison comp ON comp.web_site_id IN (
+        SELECT DISTINCT wp.web_site_id 
+        FROM web_page wp 
+        WHERE wp.wp_url LIKE '%/catalog/%' 
+        AND wp.wp_creation_date_sk = (SELECT MAX(wp2.wp_creation_date_sk) FROM web_page wp2)
+    )
+GROUP BY 
+    ca.ca_city, ca.ca_state, ca.ca_country
+HAVING 
+    COUNT(DISTINCT comp.web_site_id) > 3
+ORDER BY 
+    total_current_year_net_paid DESC, positive_variance_sites ASC;

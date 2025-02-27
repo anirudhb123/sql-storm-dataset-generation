@@ -1,0 +1,51 @@
+WITH RECURSIVE nation_ranks AS (
+    SELECT n.n_nationkey, n.n_name, ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY COUNT(DISTINCT s.s_suppkey) DESC) AS rank
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name, n.n_regionkey
+),
+high_value_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_retailprice, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_mfgr, p.p_retailprice
+    HAVING AVG(ps.ps_supplycost) < (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+order_totals AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+customer_with_order_totals AS (
+    SELECT c.c_custkey, c.c_name, COALESCE(ot.total_value, 0) AS total_order_value
+    FROM customer c
+    LEFT JOIN order_totals ot ON c.c_custkey = ot.o_orderkey
+),
+final_supplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           CASE WHEN s.s_acctbal IS NULL THEN 'Unknown' ELSE s.s_name END AS supplier_name_resolved
+    FROM supplier s
+    WHERE s.s_acctbal >= ALL (SELECT s_acctbal FROM supplier WHERE s_acctbal IS NOT NULL)
+),
+ranked_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           NTILE(4) OVER (ORDER BY p.p_retailprice DESC) AS retail_price_rank
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL
+)
+SELECT c.c_name, c.total_order_value, np.n_name, rp.retail_price_rank,
+       CONCAT('Supplier:', COALESCE(fs.supplier_name_resolved, 'None'), 
+              ' | Avg Supply Cost:', COALESCE(hvp.avg_supply_cost, 0)) AS supplier_info
+FROM customer_with_order_totals c
+JOIN nation_ranks nr ON nr.rank = 1
+LEFT JOIN ranked_parts rp ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+LEFT JOIN high_value_parts hvp ON hvp.p_partkey = rp.p_partkey
+LEFT JOIN final_supplier fs ON fs.s_suppkey = (SELECT ps.ps_suppkey 
+                                                FROM partsupp ps 
+                                                WHERE ps.ps_partkey = rp.p_partkey 
+                                                ORDER BY ps.ps_supplycost LIMIT 1)
+WHERE c.total_order_value > (SELECT AVG(total_order_value) FROM customer_with_order_totals)
+ORDER BY c.total_order_value DESC, rp.retail_price_rank
+LIMIT 10;

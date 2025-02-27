@@ -1,0 +1,106 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL  -- Start with top-level posts
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+), PostVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS TopBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), PostsWithVoteInfo AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVotes v ON p.Id = v.PostId
+), PostActivities AS (
+    SELECT 
+        ph.PostId, 
+        MAX(ph.CreationDate) AS LatestEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+), FinalPostSummary AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        UpVotes,
+        DownVotes,
+        CASE 
+            WHEN pa.LatestEditDate IS NOT NULL THEN 
+                CONCAT('Post was last edited on ', 
+                        TO_CHAR(pa.LatestEditDate, 'YYYY-MM-DD HH24:MI:SS'))
+            ELSE 
+                'No edits made'
+        END AS EditInfo,
+        CASE 
+            WHEN ub.BadgeCount > 0 THEN 
+                CONCAT(u.DisplayName, ' holds ', ub.BadgeCount, ' badges.')
+            ELSE 
+                'No badges held'
+        END AS UserBadgeInfo
+    FROM 
+        PostsWithVoteInfo p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostActivities pa ON p.Id = pa.PostId
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+) 
+SELECT 
+    fps.Title, 
+    fps.UpVotes - fps.DownVotes AS NetVotes,
+    fps.EditInfo,
+    fps.UserBadgeInfo,
+    rph.Level
+FROM 
+    FinalPostSummary fps
+JOIN 
+    RecursivePostHierarchy rph ON fps.Id = rph.PostId
+WHERE 
+    fps.Title ILIKE '%SQL%'  -- Example filter to include only SQL-related posts
+ORDER BY 
+    NetVotes DESC, 
+    rph.Level, 
+    fps.Title;

@@ -1,0 +1,71 @@
+WITH ranked_movies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.person_id) DESC) AS rn
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+recent_movies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = rm.movie_id
+    WHERE 
+        rm.production_year IS NOT NULL
+    AND 
+        rm.rn <= 5
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    r.title,
+    r.production_year,
+    r.cast_count,
+    r.keyword,
+    COALESCE(cd.company_name, 'Independent') AS production_company,
+    COUNT(DISTINCT ci.person_id) AS unique_actors,
+    ARRAY_AGG(DISTINCT CONCAT(ka.name, ' as ', rt.role)) FILTER (WHERE ka.name IS NOT NULL) AS actor_roles
+FROM 
+    recent_movies r
+LEFT JOIN 
+    complete_cast cc ON r.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = r.movie_id
+LEFT JOIN 
+    aka_name ka ON ci.person_id = ka.person_id
+LEFT JOIN 
+    role_type rt ON ci.role_id = rt.id
+LEFT JOIN 
+    company_details cd ON cd.movie_id = r.movie_id
+WHERE 
+    r.title IS NOT NULL
+AND 
+    r.cast_count > 0
+GROUP BY 
+    r.title, r.production_year, r.cast_count, r.keyword, cd.company_name
+ORDER BY 
+    r.production_year DESC, r.cast_count DESC
+LIMIT 10;
+
+This SQL query incorporates various complex elements such as CTEs, outer joins, window functions, string aggregate functions, and filtering based on NULL conditions. It aims to benchmark production movies by analyzing their cast and production companies while highlighting the most recent titles based on the specified criteria.

@@ -1,0 +1,30 @@
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    STRING_AGG(DISTINCT ct.kind, ', ') AS company_types,
+    COUNT(DISTINCT c.id) AS cast_count,
+    AVG(year(m.production_year)) AS avg_production_year
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    aka_title m ON c.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    a.name IS NOT NULL
+    AND m.production_year BETWEEN 2000 AND 2023
+    AND c.nr_order < 5
+GROUP BY 
+    a.name, m.title
+ORDER BY 
+    avg_production_year DESC, 
+    actor_name ASC;

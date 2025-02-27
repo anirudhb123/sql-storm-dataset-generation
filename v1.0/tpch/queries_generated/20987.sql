@@ -1,0 +1,90 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+FilteredRegions AS (
+    SELECT 
+        r.r_regionkey, 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+    HAVING 
+        COUNT(DISTINCT n.n_nationkey) > 1
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderpriority,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey, o.o_orderpriority
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_supplycost,
+        p.p_retailprice,
+        p.p_name,
+        p.p_type
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty < 50
+),
+FinalOutput AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        SUM(od.total_revenue) AS total_revenue_generated
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        FilteredRegions r ON r.r_regionkey = (SELECT DISTINCT n.n_regionkey FROM nation n WHERE n.n_nationkey = rs.s_nationkey)
+    LEFT JOIN 
+        customer c ON c.c_nationkey = rs.s_nationkey
+    LEFT JOIN 
+        OrderDetails od ON od.o_orderkey IN (
+            SELECT o.o_orderkey 
+            FROM orders o 
+            WHERE o.o_custkey = c.c_custkey AND 
+            o.o_orderdate < CURRENT_DATE - INTERVAL '30 days'
+        )
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    f.r_name,
+    f.customer_count,
+    f.total_revenue_generated,
+    CASE 
+        WHEN f.total_revenue_generated IS NULL THEN 'No revenue'
+        WHEN f.total_revenue_generated < 1000 THEN 'Low revenue'
+        ELSE 'High revenue'
+    END AS revenue_status
+FROM 
+    FinalOutput f
+WHERE 
+    f.customer_count > 5
+ORDER BY 
+    f.total_revenue_generated DESC
+LIMIT 10;

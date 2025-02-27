@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Considering only Questions
+        AND p.Score > 0
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionCount,
+        TotalBounty,
+        TotalUpvotes,
+        TotalDownvotes,
+        ROW_NUMBER() OVER (ORDER BY QuestionCount DESC, TotalBounty DESC) AS UserRank
+    FROM 
+        UserActivity
+    WHERE 
+        QuestionCount > 0
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass -- Considering the highest class of badge (1, 2, or 3)
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+FinalReport AS (
+    SELECT 
+        tu.UserId,
+        tu.DisplayName,
+        tu.QuestionCount,
+        tu.TotalBounty,
+        tu.TotalUpvotes,
+        tu.TotalDownvotes,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ub.HighestBadgeClass, 0) AS HighestBadgeClass
+    FROM 
+        TopUsers tu
+    LEFT JOIN 
+        UserBadges ub ON tu.UserId = ub.UserId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN QuestionCount > 10 AND BadgeCount > 5 THEN 'Expert'
+        WHEN QuestionCount > 5 THEN 'Intermediate'
+        ELSE 'Novice'
+    END AS UserCategory
+FROM 
+    FinalReport
+WHERE 
+    UserRank <= 10 -- Get top 10 users
+ORDER BY 
+    QuestionCount DESC, TotalBounty DESC;

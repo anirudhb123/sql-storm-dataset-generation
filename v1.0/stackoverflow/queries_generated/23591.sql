@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '2 years' -- filter for recent posts
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+),
+PostSummary AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.UserRank,
+        COALESCE(cp.CreationDate, 'No Closure') AS ClosureDate,
+        COALESCE(cp.Comment, 'N/A') AS ClosureComment,
+        rp.CommentCount,
+        rp.TotalBounty
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.UserRank,
+    ps.ClosureDate,
+    ps.ClosureComment,
+    ps.CommentCount,
+    CASE 
+        WHEN ps.TotalBounty IS NULL THEN 'No Bounty' 
+        ELSE CONCAT('Bounty Total: ', ps.TotalBounty) 
+    END AS BountyInfo
+FROM 
+    PostSummary ps
+WHERE 
+    (ps.UserRank <= 3 OR ps.ClosureDate = 'No Closure') -- Only top 3 ranked posts, or posts that are still open
+ORDER BY 
+    ps.Score DESC, 
+    ps.ViewCount DESC;

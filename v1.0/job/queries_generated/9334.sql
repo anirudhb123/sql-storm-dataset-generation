@@ -1,0 +1,41 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        GROUP_CONCAT(DISTINCT c.name) AS cast_names,
+        COALESCE(mk.keywords, 'N/A') AS keywords,
+        COUNT(DISTINCT m.id) AS company_count
+    FROM 
+        aka_title a
+    JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        a.production_year >= 2000 AND a.kind_id = 1
+    GROUP BY 
+        a.id, a.title, a.production_year
+    ORDER BY 
+        a.production_year DESC
+    LIMIT 100
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_names,
+    rm.keywords,
+    rm.company_count
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.company_count > 1
+ORDER BY 
+    rm.company_count DESC, rm.production_year ASC;

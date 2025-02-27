@@ -1,0 +1,83 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND l.l_shipdate >= DATE '1994-01-01'
+        AND l.l_quantity > 0
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+Nations AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        n.n_regionkey, 
+        COUNT(DISTINCT s.s_suppkey) AS SupplierCount
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name, n.n_regionkey
+)
+SELECT 
+    r.r_name, 
+    COALESCE(SUM(fo.TotalRevenue), 0) AS TotalRevenue, 
+    COUNT(DISTINCT ns.n_nationkey) AS NationCount,
+    strings.StringConcat AS SupplierList
+FROM 
+    region r
+LEFT JOIN 
+    Nations ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    FilteredOrders fo ON ns.n_nationkey IN (
+        SELECT DISTINCT c.c_nationkey 
+        FROM customer c 
+        WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+    )
+LEFT JOIN 
+    (SELECT 
+        p.p_partkey, 
+        STRING_AGG(s.s_name ORDER BY s.s_acctbal DESC) AS StringConcat 
+    FROM 
+        RankedSuppliers r 
+    JOIN 
+        part p ON r.s_suppkey = p.p_partkey
+    WHERE 
+        r.SupplierRank <= 3 
+    GROUP BY 
+        p.p_partkey) strings ON ns.n_nationkey IN (
+        SELECT s.s_nationkey 
+        FROM supplier s 
+        WHERE s.s_acctbal < 500 OR s.s_acctbal IS NULL
+    )
+GROUP BY 
+    r.r_name
+HAVING 
+    COALESCE(SUM(fo.TotalRevenue), 0) > (
+        SELECT AVG(TotalRevenue) 
+        FROM FilteredOrders
+    ) OR COUNT(DISTINCT ns.n_nationkey) > 1
+ORDER BY 
+    r.r_name DESC;

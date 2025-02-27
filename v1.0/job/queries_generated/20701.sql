@@ -1,0 +1,63 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.movie_id = at.id
+    JOIN
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT
+    ah.name AS actor_name,
+    mt.title AS movie_title,
+    mh.production_year,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS noteworthy_appearances,
+    STRING_AGG(DISTINCT kw.keyword, ', ') FILTER (WHERE kw.keyword IS NOT NULL) AS keywords,
+    COUNT(DISTINCT ch.name) AS unique_character_appearances,
+    RANK() OVER (PARTITION BY ah.id ORDER BY COUNT(mh.movie_id) DESC) AS rank_by_movie_count
+FROM
+    aka_name ah
+JOIN
+    cast_info ci ON ah.person_id = ci.person_id
+JOIN
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN
+    char_name ch ON ch.imdb_id = ci.role_id
+WHERE
+    mh.production_year >= 2000
+    AND (ah.name IS NOT NULL OR ah.name <> '')
+    AND EXISTS (
+        SELECT 1
+        FROM movie_info mi
+        WHERE mi.movie_id = mh.movie_id
+          AND mi.info LIKE '%Academy Award%'
+    )
+GROUP BY
+    ah.name, mt.title, mh.production_year
+HAVING
+    COUNT(DISTINCT mh.movie_id) > 2
+ORDER BY
+    rank_by_movie_count, noteworthy_appearances DESC;

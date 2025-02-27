@@ -1,0 +1,55 @@
+
+WITH CTE_Customer_Sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id
+), 
+CTE_Avg_Sales AS (
+    SELECT 
+        AVG(total_sales) AS avg_sales
+    FROM 
+        CTE_Customer_Sales
+),
+CTE_Demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        COUNT(c.c_customer_sk) AS customer_count,
+        SUM(CASE WHEN cd.cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+        SUM(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd.cd_demo_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    SUM(c.total_sales) AS total_sales,
+    SUM(d.customer_count) AS total_customers,
+    (SELECT COUNT(*) FROM CTE_Avg_Sales) AS avg_sales_count,
+    COALESCE(d.male_count, 0) AS males,
+    COALESCE(d.female_count, 0) AS females,
+    (SELECT avg_sales FROM CTE_Avg_Sales) AS avg_customer_sales
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    CTE_Customer_Sales sales ON c.c_customer_sk = sales.c_customer_sk
+LEFT JOIN 
+    CTE_Demographics d ON d.cd_demo_sk = c.c_current_cdemo_sk
+GROUP BY 
+    ca.ca_city, ca.ca_state
+ORDER BY 
+    total_sales DESC 
+LIMIT 10;

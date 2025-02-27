@@ -1,0 +1,76 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS aka_name,
+        t.id AS title_id,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS title_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL AND t.production_year BETWEEN 2000 AND 2023
+),
+FilteredActors AS (
+    SELECT 
+        DISTINCT a.person_id,
+        a.name,
+        COUNT(DISTINCT r.role_id) AS unique_roles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        role_type r ON c.person_role_id = r.id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.person_id, a.name
+    HAVING 
+        COUNT(DISTINCT r.role_id) > 2
+),
+MovieKeywordStats AS (
+    SELECT 
+        m.id AS movie_id,
+        COUNT(k.id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        movie_info m ON mk.movie_id = m.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        keyword_count
+    FROM 
+        MovieKeywordStats
+    ORDER BY 
+        keyword_count DESC
+    LIMIT 10
+)
+SELECT 
+    f.person_id AS actor_id,
+    f.name AS actor_name,
+    rt.movie_title AS latest_movie_title,
+    rt.production_year AS latest_movie_year,
+    ts.keyword_count AS movie_keyword_count
+FROM 
+    FilteredActors f
+JOIN 
+    RankedTitles rt ON f.person_id = rt.aka_id
+JOIN 
+    TopMovies ts ON rt.title_id = ts.movie_id
+WHERE 
+    rt.title_rank = 1 -- Only the latest movie
+ORDER BY 
+    movie_keyword_count DESC, latest_movie_year DESC;
+
+This SQL query involves multiple Common Table Expressions (CTEs) to benchmark string processing in a complex manner. It extracts actors with multiple roles, retrieves their latest movie, and counts the keywords associated with those movies, providing an elaborate and performance-intensive scenario to benchmark.

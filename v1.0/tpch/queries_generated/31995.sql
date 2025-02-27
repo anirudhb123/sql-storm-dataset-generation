@@ -1,0 +1,54 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           CAST(s.s_name AS VARCHAR(255)) AS FullName,
+           1 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           CONCAT(sh.FullName, ' -> ', s.s_name) AS FullName,
+           sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.Level < 5
+),
+PriceSummary AS (
+    SELECT p.p_partkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+           AVG(p.p_retailprice) AS AvgRetailPrice
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalAmount,
+           COUNT(l.l_orderkey) AS ItemCount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY o.o_orderkey
+),
+CustomerOrderCount AS (
+    SELECT c.c_custkey, 
+           COUNT(o.o_orderkey) AS TotalOrders,
+           SUM(COALESCE(ord.TotalAmount, 0)) AS TotalSpent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN OrderDetails ord ON o.o_orderkey = ord.o_orderkey
+    GROUP BY c.c_custkey
+)
+SELECT c.c_name AS CustomerName,
+       CAST(COALESCE(coc.TotalOrders, 0) AS VARCHAR) || ' Orders Placed' AS OrderInfo,
+       CH.FullName AS SupplierHierarchy,
+       PS.TotalSupplyCost,
+       PS.AvgRetailPrice
+FROM CustomerOrderCount coc
+JOIN customer c ON coc.c_custkey = c.c_custkey
+LEFT JOIN PriceSummary PS ON PS.TotalSupplyCost > (SELECT AVG(TotalSupplyCost) FROM PriceSummary)
+JOIN SupplierHierarchy CH ON CH.Level IN (1, 2)
+WHERE coc.TotalSpent IS NOT NULL 
+ORDER BY coc.TotalOrders DESC, c.c_name ASC
+LIMIT 10;

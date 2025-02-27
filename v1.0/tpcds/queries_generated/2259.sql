@@ -1,0 +1,61 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM web_sales ws
+    LEFT JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE w.web_country = 'USA'
+    GROUP BY ws.web_site_sk
+),
+TopSales AS (
+    SELECT 
+        web_site_sk,
+        total_sales,
+        total_orders,
+        unique_customers,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM SalesSummary
+),
+SalesDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cd.cd_gender, 'Unknown') AS gender,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band,
+        SUM(ws.ws_ext_sales_price) AS total_spent
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE ws.ws_sold_date_sk >= (
+        SELECT MAX(d.d_date_sk) 
+        FROM date_dim d 
+        WHERE d.d_year = 2023 AND d.d_month_seq IN (1, 2, 3)  -- first quarter of 2023
+    )
+    GROUP BY c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, hd.hd_income_band_sk
+)
+SELECT 
+    ts.web_site_sk,
+    ts.total_sales,
+    ts.total_orders,
+    ts.unique_customers,
+    sd.c_customer_id,
+    sd.c_first_name,
+    sd.c_last_name,
+    sd.gender,
+    sd.income_band,
+    sd.total_spent,
+    CASE 
+        WHEN ts.total_orders > 100 THEN 'High_Value'
+        WHEN ts.total_orders BETWEEN 50 AND 100 THEN 'Medium_Value'
+        ELSE 'Low_Value'
+    END AS customer_value_category
+FROM TopSales ts
+JOIN SalesDetails sd ON ts.web_site_sk = sd.income_band
+WHERE ts.sales_rank <= 10 
+  AND sd.total_spent IS NOT NULL
+ORDER BY ts.total_sales DESC, sd.total_spent DESC;

@@ -1,0 +1,73 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COALESCE(SUM(P.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(P.Score), 0) AS TotalScore,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId AND P.CreationDate >= '2020-01-01'
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    WHERE U.Reputation > 100 -- Only users with high reputation for filtering purposes
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+QuestionStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS QuestionCount,
+        AVG(P.Score) AS AverageScore,
+        MAX(P.ViewCount) AS MaxViewCount
+    FROM Posts P
+    WHERE P.PostTypeId = 1 -- Only Questions
+    GROUP BY P.OwnerUserId
+),
+TopVoters AS (
+    SELECT 
+        V.UserId,
+        COUNT(V.Id) AS VoteCount
+    FROM Votes V
+    JOIN Posts P ON V.PostId = P.Id
+    WHERE V.VoteTypeId = 2 -- Upvotes
+    GROUP BY V.UserId
+),
+CombinedStats AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.TotalViews,
+        UA.TotalScore,
+        COALESCE(QS.QuestionCount, 0) AS QuestionCount,
+        COALESCE(QS.AverageScore, 0) AS AverageQuestionScore,
+        COALESCE(QS.MaxViewCount, 0) AS MaxQuestionViewCount,
+        COALESCE(TV.VoteCount, 0) AS TotalUpvotes
+    FROM UserActivity UA
+    LEFT JOIN QuestionStatistics QS ON UA.UserId = QS.OwnerUserId
+    LEFT JOIN TopVoters TV ON UA.UserId = TV.UserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalViews,
+    TotalScore,
+    QuestionCount,
+    AverageQuestionScore,
+    MaxQuestionViewCount,
+    TotalUpvotes,
+    CASE 
+        WHEN TotalScore = 0 THEN 'No Posts Scored'
+        WHEN TotalUpvotes > 50 THEN 'Highly Active Voter'
+        ELSE 'Regular User'
+    END AS UserCategory
+FROM CombinedStats
+WHERE TotalPosts > 5
+ORDER BY TotalScore DESC, TotalViews DESC
+LIMIT 10;
+
+-- This query returns the top 10 users based on their activity in terms of post scores and views,
+-- categorizes them based on various criteria, including the number of questions they have asked,
+-- any badges they hold, and their voting activity specifically focusing on upvotes.

@@ -1,0 +1,103 @@
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        COALESCE(AVG(CASE WHEN C.Score IS NOT NULL THEN C.Score END), 0) AS AvgCommentScore,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        P.Id
+),
+PopularPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.ViewCount,
+        PS.Score,
+        PS.AvgCommentScore,
+        PS.CommentCount,
+        DENSE_RANK() OVER (ORDER BY PS.ViewCount DESC) AS ViewRank
+    FROM 
+        PostStats PS
+    WHERE 
+        PS.ViewCount > 100
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(COALESCE(B.Class, 0)) AS TotalBadges,
+        SUM(V.BountyAmount) AS TotalBounties
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId, PH.CreationDate
+),
+FinalResults AS (
+    SELECT 
+        PP.PostId,
+        PP.Title,
+        PP.ViewCount,
+        PP.Score,
+        PP.AvgCommentScore,
+        PP.CommentCount,
+        PU.UserId,
+        PU.DisplayName,
+        PU.TotalBadges,
+        PU.TotalBounties,
+        CP.CloseCount
+    FROM 
+        PopularPosts PP
+    JOIN 
+        TopUsers PU ON PP.PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = PU.UserId)
+    LEFT JOIN 
+        ClosedPosts CP ON PP.PostId = CP.PostId
+)
+SELECT 
+    FR.PostId,
+    FR.Title,
+    FR.ViewCount,
+    FR.Score,
+    FR.AvgCommentScore,
+    FR.CommentCount,
+    FR.UserId,
+    FR.DisplayName,
+    FR.TotalBadges,
+    FR.TotalBounties,
+    COALESCE(FR.CloseCount, 0) AS CloseCount,
+    CASE 
+        WHEN FR.CloseCount > 0 THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus,
+    CASE 
+        WHEN FR.Score >= 10 THEN 'High Score'
+        WHEN FR.Score BETWEEN 1 AND 9 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    FinalResults FR
+ORDER BY 
+    FR.ViewCount DESC, FR.Score DESC;

@@ -1,0 +1,41 @@
+
+WITH RECURSIVE SupplierTotals AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+RankedCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           RANK() OVER (ORDER BY c.c_acctbal DESC) AS acct_rank
+    FROM customer c
+    WHERE c.c_acctbal > 0
+),
+UpdatedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           COALESCE(line_items.total_items, 0) AS total_items,
+           o.o_orderstatus
+    FROM orders o
+    LEFT JOIN (
+        SELECT l.l_orderkey, COUNT(*) AS total_items
+        FROM lineitem l
+        GROUP BY l.l_orderkey
+    ) AS line_items ON o.o_orderkey = line_items.l_orderkey
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+)
+SELECT r.r_name, 
+       SUM(st.total_cost) AS total_supplier_cost, 
+       COUNT(DISTINCT uc.c_custkey) AS num_customers,
+       MAX(uc.acct_rank) AS highest_customer_rank
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN SupplierTotals st ON s.s_suppkey = st.s_suppkey
+LEFT JOIN RankedCustomers uc ON uc.c_custkey IN (
+    SELECT DISTINCT o.o_custkey
+    FROM UpdatedOrders o 
+    WHERE o.o_orderstatus = 'O'
+)
+WHERE st.total_cost > 1000.00
+GROUP BY r.r_name
+ORDER BY total_supplier_cost DESC;

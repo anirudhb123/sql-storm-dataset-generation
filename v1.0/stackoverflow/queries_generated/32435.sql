@@ -1,0 +1,76 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT Id, Reputation, CreationDate, DisplayName, LastAccessDate, Views,
+           RANK() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+    WHERE Reputation > 1000
+), 
+
+RecentPosts AS (
+    SELECT P.Id AS PostId, P.Title, P.CreationDate, P.Score, P.ViewCount,
+           U.DisplayName AS OwnerDisplayName, 
+           COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+           COUNT(A.Id) AS AnswerCount,
+           DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Posts A ON P.Id = A.ParentId
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY P.Id, U.DisplayName
+), 
+
+PopularTags AS (
+    SELECT T.TagName, COUNT(P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY T.TagName
+    HAVING COUNT(P.Id) > 5
+),
+    
+PostHistoryStats AS (
+    SELECT PostId, COUNT(*) AS EditCount, 
+           MAX(CASE WHEN PostHistoryTypeId = 10 THEN CreationDate END) AS LastClosedDate
+    FROM PostHistory
+    GROUP BY PostId
+)
+
+SELECT 
+    U.DisplayName AS UserDisplayName,
+    U.Reputation,
+    U.LastAccessDate,
+    P.Title AS PostTitle,
+    P.Score,
+    P.ViewCount,
+    P.CommentCount,
+    P.AnswerCount,
+    PH.EditCount AS TotalEdits,
+    PH.LastClosedDate,
+    T.TagName AS MostPopularTag
+FROM UserReputation U
+JOIN RecentPosts P ON U.Id = P.OwnerUserId
+LEFT JOIN PostHistoryStats PH ON P.PostId = PH.PostId
+LEFT JOIN (
+    SELECT TagName FROM PopularTags ORDER BY PostCount DESC LIMIT 1
+) T ON true
+WHERE U.LastAccessDate < CURRENT_TIMESTAMP - INTERVAL '1 month'
+ORDER BY U.Reputation DESC, P.Score DESC;
+
+-- Include a UNION of posts with a missing title or body to highlight lack of engagement
+UNION ALL
+SELECT 
+    U.DisplayName AS UserDisplayName,
+    U.Reputation,
+    U.LastAccessDate,
+    'Missing Title' AS PostTitle,
+    NULL AS Score,
+    NULL AS ViewCount,
+    0 AS CommentCount,
+    0 AS AnswerCount,
+    0 AS TotalEdits,
+    NULL AS LastClosedDate,
+    NULL AS MostPopularTag
+FROM Users U
+JOIN Posts P ON U.Id = P.OwnerUserId
+WHERE P.Title IS NULL OR P.Body IS NULL
+
+ORDER BY UserDisplayName;

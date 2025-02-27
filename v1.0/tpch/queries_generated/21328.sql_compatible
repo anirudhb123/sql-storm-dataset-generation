@@ -1,0 +1,55 @@
+
+WITH RECURSIVE Supp_CTE AS (
+    SELECT s_suppkey, s_name, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL AND s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sc.level + 1
+    FROM supplier s
+    JOIN Supp_CTE sc ON s.s_suppkey = sc.s_suppkey
+    WHERE sc.level < 5
+),
+Ranked_Orders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_price,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus
+),
+Filtered_Customer AS (
+    SELECT c.c_custkey, c.c_name, c.cmt_ship, 
+           COALESCE(c.c_acctbal, 0) AS adjusted_acctbal
+    FROM customer c
+    WHERE c.c_mktsegment = 'BUILDING' 
+      AND (c.c_acctbal IS NULL OR c.c_acctbal > 500)
+),
+Part_Suppliers AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, COUNT(s.s_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice) 
+        FROM part p2 
+        WHERE p2.p_size < p.p_size
+    )
+    GROUP BY p.p_partkey, p.p_name, ps.ps_availqty
+)
+SELECT f.c_name, r.o_orderkey, r.net_price, r.order_rank, 
+       p.p_name, p.supplier_count, 
+       (SELECT COUNT(*) 
+        FROM lineitem l 
+        WHERE l.l_tax > 0.1 AND l.l_returnflag = 'R') AS high_tax_returns,
+       COALESCE(s.s_name, 'No Supplier') AS supplier_name
+FROM Filtered_Customer f
+LEFT JOIN Ranked_Orders r ON f.c_custkey = r.o_orderkey
+LEFT JOIN Part_Suppliers p ON r.o_orderkey = p.p_partkey
+LEFT JOIN supplier s ON p.supplier_count = (SELECT COUNT(*) FROM supplier WHERE s.s_nationkey = f.c_nationkey)
+WHERE f.adjusted_acctbal > (SELECT AVG(c2.c_acctbal) 
+                              FROM customer c2 
+                              WHERE c2.c_mktsegment = f.c_mktsegment)
+  AND r.order_rank <= 10
+ORDER BY r.net_price DESC NULLS LAST;

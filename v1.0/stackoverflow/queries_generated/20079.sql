@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(a.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankByUser
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.AcceptedAnswerId
+    WHERE 
+        p.PostTypeId = 1
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    COALESCE(rv.VoteCount, 0) AS TotalVotes,
+    COALESCE(rv.UpVotes, 0) AS UpVotes,
+    COALESCE(rv.DownVotes, 0) AS DownVotes,
+    CASE
+        WHEN rp.RankByUser <= 3 THEN 'Top Recent Posts by User'
+        ELSE 'Other Posts'
+    END AS PostRankCategory,
+    (SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId = rp.PostId) AS EditHistoryCount,
+    (SELECT STRING_AGG(pt.Name, ', ') 
+     FROM PostHistoryTypes pt 
+     WHERE pt.Id IN 
+       (SELECT DISTINCT ph.PostHistoryTypeId 
+        FROM PostHistory ph 
+        WHERE ph.PostId = rp.PostId AND ph.PostHistoryTypeId IN (10, 12))) AS CloseOrDeleteReasons
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UsersBadges ub ON rp.AcceptedAnswerId = ub.UserId
+LEFT JOIN 
+    RecentVotes rv ON rp.PostId = rv.PostId
+WHERE 
+    rp.RankByUser = 1 
+    OR rp.Score > 5
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 50;

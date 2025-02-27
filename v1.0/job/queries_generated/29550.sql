@@ -1,0 +1,66 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        aka_title AS t
+    JOIN 
+        cast_info AS ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name AS a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.title, t.production_year, a.name
+),
+title_keyword AS (
+    SELECT 
+        t.id AS title_id,
+        t.title AS title,
+        k.keyword AS keyword
+    FROM 
+        title AS t
+    JOIN 
+        movie_keyword AS mk ON t.id = mk.movie_id
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+),
+movie_info_with_keywords AS (
+    SELECT 
+        mk.title_id,
+        mk.title,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        title_keyword AS mk
+    JOIN 
+        movie_info AS mi ON mk.title_id = mi.movie_id
+    GROUP BY 
+        mk.title_id, mk.title
+),
+actor_performance AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.actor_name,
+        COALESCE(mik.keyword_count, 0) AS keyword_count,
+        rm.actor_count
+    FROM 
+        ranked_movies AS rm
+    LEFT JOIN 
+        movie_info_with_keywords AS mik ON rm.movie_title = mik.title
+)
+
+SELECT 
+    ap.movie_title,
+    ap.production_year,
+    ap.actor_name,
+    ap.actor_count,
+    ap.keyword_count,
+    ROUND((ap.actor_count::FLOAT / NULLIF(ap.keyword_count, 0)), 2) AS actor_to_keyword_ratio
+FROM 
+    actor_performance AS ap
+ORDER BY 
+    ap.production_year DESC, 
+    ap.actor_to_keyword_ratio DESC;

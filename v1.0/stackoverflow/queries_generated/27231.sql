@@ -1,0 +1,69 @@
+WITH TagInsights AS (
+    SELECT
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag
+    FROM
+        Posts
+    WHERE
+        PostTypeId = 1
+),
+UserVoteSummary AS (
+    SELECT
+        UserId,
+        COUNT(*) FILTER (WHERE VoteTypeId = 2) AS UpVotes,
+        COUNT(*) FILTER (WHERE VoteTypeId = 3) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM
+        Votes
+    GROUP BY
+        UserId
+),
+PostStatistics AS (
+    SELECT
+        Posts.Id AS PostId,
+        Posts.Title,
+        COUNT(DISTINCT Comments.Id) AS TotalComments,
+        COUNT(DISTINCT Votes.Id) AS TotalVotes,
+        MAX(Votes.CreationDate) AS LastVoteDate
+    FROM
+        Posts
+    LEFT JOIN
+        Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN
+        Votes ON Posts.Id = Votes.PostId
+    WHERE
+        Posts.PostTypeId = 1
+    GROUP BY
+        Posts.Id
+),
+ActiveUserTags AS (
+    SELECT
+        Users.DisplayName,
+        COUNT(DISTINCT TagInsights.Tag) AS TagCount,
+        SUM(UserVoteSummary.UpVotes) AS TotalUpVotes
+    FROM
+        Users
+    JOIN
+        UserVoteSummary ON Users.Id = UserVoteSummary.UserId
+    JOIN
+        TagInsights ON Users.Id = Posts.OwnerUserId
+    JOIN
+        Posts ON TagInsights.Tag IN (SELECT Tag FROM TagInsights)
+    GROUP BY
+        Users.DisplayName
+)
+SELECT
+    AUS.DisplayName,
+    AUS.TagCount,
+    AUS.TotalUpVotes,
+    PS.Title,
+    PS.TotalComments,
+    PS.TotalVotes,
+    PS.LastVoteDate
+FROM
+    ActiveUserTags AUS
+JOIN
+    PostStatistics PS ON AUS.TagCount > 0
+ORDER BY
+    AUS.TotalUpVotes DESC,
+    PS.LastVoteDate DESC
+LIMIT 10;

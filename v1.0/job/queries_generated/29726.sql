@@ -1,0 +1,68 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        a.kind_id,
+        k.keyword AS movie_keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY a.production_year DESC) AS rank
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.production_year BETWEEN 1990 AND 2020
+),
+PopularKeywords AS (
+    SELECT 
+        movie_keyword, 
+        COUNT(*) AS keyword_count
+    FROM 
+        RankedMovies
+    GROUP BY 
+        movie_keyword
+    HAVING 
+        COUNT(*) > 5
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_title, 
+        rm.production_year, 
+        rm.movie_keyword
+    FROM 
+        RankedMovies rm
+    JOIN 
+        PopularKeywords pk ON rm.movie_keyword = pk.movie_keyword
+),
+ActorParticipation AS (
+    SELECT 
+        a.id AS actor_id,
+        an.name AS actor_name,
+        c.movie_id,
+        COUNT(*) AS movies_participated
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name an ON c.person_id = an.person_id
+    JOIN 
+        TopMovies tm ON c.movie_id = (SELECT m.id FROM aka_title m WHERE m.title = tm.movie_title LIMIT 1)
+    GROUP BY 
+        a.id, an.name, c.movie_id
+)
+SELECT 
+    a.actor_name,
+    COUNT(DISTINCT ap.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT tm.movie_title, ', ') AS movies_titles
+FROM 
+    ActorParticipation ap
+JOIN 
+    aka_name a ON ap.actor_id = a.id
+JOIN 
+    TopMovies tm ON ap.movie_id = (SELECT m.id FROM aka_title m WHERE m.title = tm.movie_title LIMIT 1)
+GROUP BY 
+    a.actor_name
+HAVING 
+    COUNT(DISTINCT ap.movie_id) > 2
+ORDER BY 
+    total_movies DESC;

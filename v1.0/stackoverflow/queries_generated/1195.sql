@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        (UpVotes - DownVotes) AS NetVotes,
+        CASE 
+            WHEN ViewCount > 1000 THEN 'High Traffic'
+            WHEN ViewCount BETWEEN 500 AND 1000 THEN 'Medium Traffic'
+            ELSE 'Low Traffic'
+        END AS TrafficCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        Rank <= 10
+)
+SELECT 
+    fp.PostId, 
+    fp.Title, 
+    fp.CreationDate, 
+    fp.Score, 
+    fp.ViewCount, 
+    fp.OwnerDisplayName, 
+    fp.NetVotes, 
+    fp.TrafficCategory,
+    STRING_AGG(t.TagName, ', ') AS TagsUsed
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    Posts p ON fp.PostId = p.Id
+LEFT JOIN 
+    LATERAL (SELECT unnest(string_to_array(p.Tags, ',')) AS TagName) AS t
+GROUP BY 
+    fp.PostId, fp.Title, fp.CreationDate, fp.Score, fp.ViewCount, fp.OwnerDisplayName, fp.NetVotes, fp.TrafficCategory
+ORDER BY 
+    fp.NetVotes DESC, fp.ViewCount DESC
+LIMIT 25;

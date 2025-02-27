@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        COALESCE(SUM(b.Class = 1), 0) AS GoldBadges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.OwnerUserId
+), PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN pht.Name = 'Post Closed' THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN pht.Name = 'Post Reopened' THEN ph.CreationDate END) AS LastReopenedDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+), UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS HistoryCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    CASE 
+        WHEN pd.LastClosedDate IS NOT NULL AND (pd.LastReopenedDate IS NULL OR pd.LastClosedDate > pd.LastReopenedDate) THEN 'Closed'
+        WHEN pd.LastReopenedDate IS NOT NULL THEN 'Reopened'
+        ELSE 'Active'
+    END AS PostStatus,
+    ua.PostCount AS UserPostCount,
+    ua.CommentCount AS UserCommentCount,
+    ua.TotalBounty AS UserTotalBounty,
+    rp.UpVotes - rp.DownVotes AS NetVotes,
+    (rp.UpVotes + rp.DownVotes) AS TotalVotes,
+    COALESCE(rp.GoldBadges, 0) AS GoldBadges
+FROM 
+    RankedPosts rp
+JOIN 
+    PostHistoryDetails pd ON rp.PostId = pd.PostId
+JOIN 
+    UserActivity ua ON rp.OwnerUserId = ua.UserId
+WHERE 
+    rp.ViewRank = 1
+    AND (ua.PostCount > 0 OR ua.CommentCount > 0)
+ORDER BY 
+    NetVotes DESC, rp.ViewCount DESC
+LIMIT 100;

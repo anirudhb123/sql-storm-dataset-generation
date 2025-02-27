@@ -1,0 +1,45 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT ss_item_sk,
+           SUM(ss_net_profit) AS total_net_profit,
+           COUNT(ss_ticket_number) AS total_sales,
+           DENSE_RANK() OVER (ORDER BY SUM(ss_net_profit) DESC) AS profit_rank
+    FROM store_sales
+    GROUP BY ss_item_sk
+),
+Customer_Segment AS (
+    SELECT c.c_customer_sk,
+           CASE 
+               WHEN d.cd_income_band_sk IS NULL THEN 'UNKNOWN'
+               WHEN d.cd_income_band_sk < 5 THEN 'LOW'
+               WHEN d.cd_income_band_sk BETWEEN 5 AND 10 THEN 'MEDIUM'
+               ELSE 'HIGH'
+           END AS income_segment, 
+           COUNT(DISTINCT ss.ss_customer_sk) AS purchase_count
+    FROM customer c
+    LEFT JOIN household_demographics d ON c.c_current_hdemo_sk = d.hd_demo_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk, d.cd_income_band_sk
+),
+Top_Customers AS (
+    SELECT cs.c_customer_sk,
+           COALESCE(ca.ca_city, 'UNKNOWN CITY') AS city,
+           SUM(ss.ss_net_paid_inc_tax) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY cs.income_segment ORDER BY SUM(ss.ss_net_paid_inc_tax) DESC) AS rank
+    FROM Customer_Segment cs
+    LEFT JOIN customer_address ca ON cs.c_customer_sk = ca.ca_address_sk
+    LEFT JOIN store_sales ss ON cs.c_customer_sk = ss.ss_customer_sk
+    GROUP BY cs.c_customer_sk, ca.ca_city, cs.income_segment
+    HAVING COUNT(ss.ss_ticket_number) > 1
+    ORDER BY income_segment, total_spent DESC
+)
+SELECT t.city, 
+       tc.income_segment,
+       tc.total_spent,
+       sc.total_net_profit,
+       sc.total_sales
+FROM Top_Customers tc
+JOIN Sales_CTE sc ON tc.c_customer_sk = sc.ss_item_sk
+LEFT JOIN customer_address ca ON tc.c_customer_sk = ca.ca_address_sk
+WHERE tc.rank <= 3
+ORDER BY tc.income_segment, tc.total_spent DESC;

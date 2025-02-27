@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > '2023-01-01' -- Filter for posts created this year
+), 
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.RankScore,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        (rp.UpVoteCount - rp.DownVoteCount) AS NetScore
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankScore <= 5  -- Top 5 per PostTypeId
+),
+UserPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS UserPostCount,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgeScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 100  -- Only users with a reputation greater than 100
+    GROUP BY 
+        u.Id
+),
+TopUserPosts AS (
+    SELECT 
+        up.UserId,
+        up.DisplayName,
+        up.UserPostCount,
+        up.TotalBadgeScore
+    FROM 
+        UserPosts up
+    WHERE 
+        up.UserPostCount > 10  -- Users with more than 10 posts
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    tp.NetScore,
+    tup.DisplayName AS UserDisplayName,
+    tup.UserPostCount,
+    tup.TotalBadgeScore
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Posts p ON tp.PostId = p.Id
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    TopUserPosts tup ON u.Id = tup.UserId
+WHERE 
+    (tp.NetScore > 0 OR tup.TotalBadgeScore > 0)
+ORDER BY 
+    tp.NetScore DESC,
+    tup.TotalBadgeScore DESC;
+
+-- Including Subqueries with NULL Logic
+SELECT 
+    p.Title,
+    COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id AND c.Text IS NOT NULL), 0) AS CommentCount,
+    COALESCE((SELECT AVG(TIMESTAMPDIFF(SECOND, c.CreationDate, p.CreationDate)) 
+               FROM Comments c WHERE c.PostId = p.Id AND c.UserId IS NOT NULL), -1) AS AvgCommentDelay
+FROM 
+    Posts p
+WHERE 
+    p.ViewCount > 1000
+HAVING 
+    CommentCount > CASE WHEN AvgCommentDelay < 30 THEN 5 ELSE 0 END;

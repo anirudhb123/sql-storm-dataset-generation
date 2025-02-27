@@ -1,0 +1,59 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_availability,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+HighValueOrders AS (
+    SELECT 
+        od.o_orderkey,
+        od.total_sales,
+        od.o_orderstatus
+    FROM 
+        OrderDetails od
+    WHERE 
+        od.sales_rank <= 5 
+        AND od.total_sales > (SELECT AVG(total_sales) FROM OrderDetails)
+)
+SELECT 
+    ps.p_partkey,
+    p.p_name,
+    COALESCE(ss.total_availability, 0) AS total_availability,
+    COALESCE(ss.avg_supply_cost, 0) AS avg_supply_cost,
+    SUM(hv.total_sales) AS total_sales_from_high_value_orders
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    SupplierStats ss ON ps.ps_suppkey = ss.s_suppkey
+LEFT JOIN 
+    HighValueOrders hv ON hv.o_orderkey IN (
+        SELECT DISTINCT l_orderkey
+        FROM lineitem 
+        WHERE l_partkey = p.p_partkey
+    )
+GROUP BY 
+    ps.p_partkey, p.p_name, ss.total_availability, ss.avg_supply_cost
+ORDER BY 
+    total_sales_from_high_value_orders DESC;

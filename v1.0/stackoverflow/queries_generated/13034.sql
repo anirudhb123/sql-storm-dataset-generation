@@ -1,0 +1,59 @@
+-- Performance Benchmarking Query Example
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(V.VoteTypeId = 2) AS UpVotes,
+        SUM(V.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+PostDetails AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(PH.Comment, '') AS LastEditComment,
+        PH.CreationDate AS LastEditDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.CreationDate = (
+            SELECT MAX(CreationDate) 
+            FROM PostHistory PH2 
+            WHERE PH2.PostId = P.Id
+        )
+    WHERE 
+        P.CreationDate >= '2023-01-01'
+)
+SELECT 
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    U.UpVotes,
+    U.DownVotes,
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    PD.ViewCount,
+    PD.LastEditComment,
+    PD.LastEditDate
+FROM 
+    UserStats U
+LEFT JOIN 
+    PostDetails PD ON U.UserId = PD.OwnerUserId
+ORDER BY 
+    U.TotalPosts DESC, PD.CreationDate DESC;

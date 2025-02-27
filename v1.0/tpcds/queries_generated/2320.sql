@@ -1,0 +1,87 @@
+
+WITH aggregated_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_sales_count
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site wd ON ws.ws_web_site_sk = wd.web_site_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 24000 AND 24010
+    GROUP BY 
+        ws.web_site_sk, ws.web_name
+),
+customer_data AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000
+),
+high_value_customers AS (
+    SELECT 
+        DISTINCT c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        customer_data cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_marital_status = 'M'
+    GROUP BY 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status
+    HAVING 
+        COUNT(ws.ws_order_number) > 5
+),
+final_report AS (
+    SELECT 
+        hvc.c_customer_id,
+        hvc.c_first_name,
+        hvc.c_last_name,
+        hvc.cd_gender,
+        hvc.cd_marital_status,
+        AS.total_net_profit,
+        AVG(ad.total_net_profit) AS avg_net_profit
+    FROM 
+        high_value_customers hvc
+    JOIN 
+        aggregated_sales ad ON hvc.rank <= 5
+    GROUP BY 
+        hvc.c_customer_id, 
+        hvc.c_first_name, 
+        hvc.c_last_name, 
+        hvc.cd_gender, 
+        hvc.cd_marital_status
+)
+SELECT 
+    x.c_customer_id,
+    x.c_first_name,
+    x.c_last_name,
+    x.cd_gender,
+    x.cd_marital_status,
+    x.total_net_profit,
+    x.avg_net_profit
+FROM 
+    final_report x
+ORDER BY 
+    x.total_net_profit DESC, x.cd_gender;

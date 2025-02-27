@@ -1,0 +1,75 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('F', 'P') 
+        AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = o.o_orderstatus)
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS TotalAvailable,
+        AVG(ps.ps_supplycost) AS AvgSupplyCost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 10000
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(su.TotalAvailable, 0) AS AvailableQuantity,
+    CASE 
+        WHEN so.o_orderstatus = 'F' THEN 'Finalized'
+        ELSE 'Pending'
+    END AS OrderStatus,
+    p.p_retailprice * (1 - COALESCE(MAX(l.l_discount), 0)) AS RetailPriceAfterDiscount,
+    RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS PriceRank
+FROM 
+    part p
+LEFT JOIN 
+    SupplierAvailability su ON p.p_partkey = su.ps_partkey
+LEFT JOIN 
+    RankedOrders so ON so.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)
+LEFT JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN 
+    TopSuppliers ts ON su.ps_suppkey = ts.s_suppkey 
+WHERE 
+    p.p_size IN (SELECT DISTINCT(p_size) FROM part WHERE p_container = 'SM BOX') 
+    OR (p.p_comment LIKE '%special%' AND p.p_retailprice < 50)
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_brand, 
+    so.o_orderstatus, 
+    p.p_retailprice,
+    ts.s_suppkey
+HAVING 
+    COUNT(DISTINCT l.l_orderkey) > 2
+ORDER BY 
+    PriceRank ASC, 
+    AvailableQuantity DESC;

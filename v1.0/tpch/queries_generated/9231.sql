@@ -1,0 +1,68 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        DENSE_RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 100000
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATEADD(month, -6, GETDATE())
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+FinalReport AS (
+    SELECT 
+        r.r_name AS region, 
+        h.c_custkey, 
+        h.c_name, 
+        s.s_suppkey, 
+        s.s_name, 
+        r.total_supply_cost, 
+        h.total_spent, 
+        r.total_supply_cost - h.total_spent AS balance
+    FROM 
+        RankedSuppliers r
+    JOIN 
+        HighValueCustomers h ON h.total_spent > 50000 
+    JOIN 
+        supplier s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size BETWEEN 10 AND 20))
+    ORDER BY 
+        r.total_supply_cost DESC, h.total_spent DESC
+)
+SELECT 
+    * 
+FROM 
+    FinalReport 
+WHERE 
+    balance > 0
+ORDER BY 
+    region, total_supply_cost DESC;

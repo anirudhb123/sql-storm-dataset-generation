@@ -1,0 +1,88 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        h.level + 1
+    FROM
+        aka_title m
+    INNER JOIN
+        movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN
+        MovieHierarchy h ON ml.movie_id = h.movie_id
+),
+MovieRoles AS (
+    SELECT
+        c.movie_id,
+        r.role,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM
+        cast_info c
+    INNER JOIN
+        role_type r ON c.role_id = r.id
+    LEFT JOIN
+        complete_cast ci ON c.movie_id = ci.movie_id
+    GROUP BY
+        c.movie_id, r.role
+),
+MovieKeywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    INNER JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+),
+MovieDetails AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(mr.actor_count, 0) AS total_actors,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords
+    FROM
+        MovieHierarchy mh
+    LEFT JOIN
+        MovieRoles mr ON mh.movie_id = mr.movie_id
+    LEFT JOIN
+        MovieKeywords mk ON mh.movie_id = mk.movie_id
+),
+Ranking AS (
+    SELECT
+        *,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY total_actors DESC) AS actor_rank
+    FROM
+        MovieDetails
+)
+SELECT
+    rd.title,
+    rd.production_year,
+    rd.total_actors,
+    rd.keywords,
+    CASE 
+        WHEN rd.total_actors IS NULL THEN 'No actors found'
+        WHEN rd.total_actors > 5 THEN 'Popular Movie'
+        ELSE 'Less Known Movie'
+    END AS popularity_category
+FROM
+    Ranking rd
+WHERE
+    rd.actor_rank <= 5
+ORDER BY
+    rd.production_year DESC, rd.total_actors DESC;

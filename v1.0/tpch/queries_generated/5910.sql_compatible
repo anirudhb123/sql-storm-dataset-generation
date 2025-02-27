@@ -1,0 +1,57 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS Rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name AS RegionName,
+        n.n_name AS NationName,
+        rs.s_name AS SupplierName,
+        rs.TotalCost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        supplier s ON rs.s_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.Rank <= 3
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= CURRENT_DATE - INTERVAL '3 MONTH'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    ts.RegionName,
+    ts.NationName,
+    ts.SupplierName,
+    os.TotalRevenue
+FROM 
+    TopSuppliers ts
+JOIN 
+    OrderSummary os ON ts.SupplierName = os.o_orderkey
+ORDER BY 
+    ts.RegionName, ts.NationName, ts.TotalCost DESC;

@@ -1,0 +1,90 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+release_details AS (
+    SELECT 
+        tc.title_id,
+        tc.title,
+        tc.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        AVG(CASE WHEN c.role_id IS NOT NULL THEN 1 ELSE 0 END) AS avg_role_presence 
+    FROM 
+        ranked_titles tc
+    LEFT JOIN 
+        complete_cast cc ON tc.title_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        role_type c ON ci.role_id = c.id
+    GROUP BY 
+        tc.title_id, tc.title, tc.production_year
+),
+company_movies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+keyword_movies AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rd.title,
+    rd.production_year,
+    rd.cast_count,
+    rd.avg_role_presence,
+    cm.company_count,
+    cm.company_names,
+    km.keywords
+FROM 
+    release_details rd
+LEFT JOIN 
+    company_movies cm ON rd.title_id = cm.movie_id
+LEFT JOIN 
+    keyword_movies km ON rd.title_id = km.movie_id
+WHERE 
+    (rd.cast_count > 0 OR cm.company_count IS NOT NULL)
+    AND rd.production_year > 2000
+ORDER BY 
+    rd.avg_role_presence DESC, rd.cast_count DESC
+LIMIT 50
+
+UNION ALL 
+
+SELECT 
+    'N/A' AS title,
+    NULL AS production_year,
+    0 AS cast_count,
+    NULL AS avg_role_presence,
+    0 AS company_count,
+    'No Companies' AS company_names,
+    'No Keywords' AS keywords
+WHERE 
+    NOT EXISTS (
+        SELECT 1 
+        FROM release_details
+    )
+ORDER BY 
+    production_year DESC NULLS LAST;

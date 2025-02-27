@@ -1,0 +1,61 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_customer_sk, c.c_customer_id, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk,
+           0 AS level
+    FROM customer c
+    WHERE c.c_preferred_cust_flag = 'Y'
+    UNION ALL
+    SELECT ch.c_customer_sk, ch.c_customer_id, ch.c_first_name, ch.c_last_name, ch.c_current_cdemo_sk,
+           level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_current_cdemo_sk
+    WHERE ch.level < 3
+),
+SalesData AS (
+    SELECT ws.ws_item_sk, SUM(ws.ws_sales_price) AS total_sales, COUNT(ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+ReturnData AS (
+    SELECT 
+        ir.wr_item_sk,
+        SUM(wr_return_quantity) AS total_returns,
+        SUM(wr_return_amt) AS total_return_amount,
+        COUNT(DISTINCT wr_order_number) AS return_order_count
+    FROM web_returns wr
+    GROUP BY wr_item_sk
+),
+CombinedSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_sales,
+        rd.total_returns,
+        rd.total_return_amount,
+        COALESCE(rd.return_order_count, 0) AS return_order_count
+    FROM SalesData sd
+    LEFT JOIN ReturnData rd ON sd.ws_item_sk = rd.wr_item_sk
+),
+FinalReport AS (
+    SELECT 
+        ch.c_customer_sk,
+        ch.c_customer_id,
+        ch.c_first_name,
+        ch.c_last_name,
+        cs.ws_item_sk,
+        cs.total_sales,
+        cs.total_returns,
+        cs.total_return_amount,
+        DENSE_RANK() OVER (PARTITION BY ch.c_customer_id ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM CustomerHierarchy ch
+    JOIN CombinedSales cs ON EXISTS (
+        SELECT 1
+        FROM web_sales ws
+        WHERE ws.ws_item_sk = cs.ws_item_sk AND 
+              ws.ws_ship_customer_sk = ch.c_customer_sk
+    )
+)
+SELECT * 
+FROM FinalReport 
+WHERE sales_rank <= 5
+AND (total_sales IS NOT NULL OR total_returns IS NOT NULL)
+ORDER BY c_customer_id, total_sales DESC, total_return_amount ASC;

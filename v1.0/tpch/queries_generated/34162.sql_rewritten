@@ -1,0 +1,38 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 1 AS level
+    FROM customer c
+    WHERE c.c_acctbal > 1000
+    UNION ALL
+    SELECT ch.c_custkey, c.c_name, c.c_nationkey, level + 1
+    FROM CustomerHierarchy ch
+    JOIN customer c ON ch.c_nationkey = c.c_nationkey
+    WHERE c.c_acctbal > 1000
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_shippriority,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(month, -6, cast('1998-10-01' as date))
+), SupplierPart AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty,
+           SUM(ps.ps_supplycost) OVER (PARTITION BY ps.ps_partkey) AS total_supply_cost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost) AS supplier_rank
+    FROM partsupp ps
+), RegionNation AS (
+    SELECT r.r_regionkey, r.r_name AS region_name, n.n_name AS nation_name,
+           COUNT(s.s_suppkey) AS supplier_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_regionkey, r.r_name, n.n_name
+    HAVING COUNT(s.s_suppkey) > 0
+)
+SELECT ch.c_name, ro.o_orderkey, ro.o_totalprice, 
+       sp.total_supply_cost, rn.region_name, rn.nation_name
+FROM CustomerHierarchy ch
+JOIN RankedOrders ro ON ch.c_custkey = ro.o_customerkey
+JOIN SupplierPart sp ON ro.o_orderkey = sp.ps_partkey
+JOIN RegionNation rn ON ch.c_nationkey = rn.n_nationkey
+WHERE ro.order_rank <= 10
+  AND (sp.ps_availqty IS NULL OR sp.ps_availqty > 0)
+  AND (ch.c_nationkey IS NOT NULL OR rn.nation_name IS NOT NULL)
+ORDER BY sp.total_supply_cost DESC, ro.o_totalprice ASC;

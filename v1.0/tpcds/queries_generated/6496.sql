@@ -1,0 +1,68 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+DemographicAnalysis AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        AVG(cs.total_web_sales) AS avg_web_sales,
+        COUNT(cs.c_customer_id) AS customer_count
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer_demographics cd ON cs.c_customer_id = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+),
+DateMetrics AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq
+),
+FinalBenchmark AS (
+    SELECT 
+        da.cd_gender,
+        da.cd_marital_status,
+        dm.d_year,
+        dm.d_month_seq,
+        da.avg_web_sales,
+        da.customer_count,
+        dm.total_sales,
+        (da.avg_web_sales / NULLIF(dm.total_sales, 0)) AS sales_ratio
+    FROM 
+        DemographicAnalysis da
+    JOIN 
+        DateMetrics dm ON dm.d_year = EXTRACT(YEAR FROM CURRENT_DATE)
+)
+SELECT 
+    fb.cd_gender,
+    fb.cd_marital_status,
+    fb.d_year,
+    fb.d_month_seq,
+    fb.avg_web_sales,
+    fb.customer_count,
+    fb.total_sales,
+    fb.sales_ratio
+FROM 
+    FinalBenchmark fb
+WHERE 
+    fb.sales_ratio > 0.1
+ORDER BY 
+    fb.sales_ratio DESC;

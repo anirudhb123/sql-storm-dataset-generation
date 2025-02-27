@@ -1,0 +1,35 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, c.c_nationkey, c.c_acctbal
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O' AND c.c_acctbal > 1000
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, c.c_nationkey, c.c_acctbal
+    FROM orders o
+    JOIN CustomerOrders co ON o.o_custkey = co.c_nationkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate > co.o_orderdate
+),
+SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, p.p_name, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+),
+HighValueLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY l.l_orderkey
+    HAVING total_revenue > 10000
+)
+SELECT co.c_name, s.s_name, pp.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+FROM CustomerOrders co
+JOIN HighValueLineItems hvl ON co.o_orderkey = hvl.l_orderkey
+JOIN lineitem l ON hvl.l_orderkey = l.l_orderkey
+JOIN SupplierParts sp ON l.l_suppkey = sp.s_suppkey
+JOIN part pp ON l.l_partkey = pp.p_partkey
+GROUP BY co.c_name, s.s_name, pp.p_name
+ORDER BY net_revenue DESC;

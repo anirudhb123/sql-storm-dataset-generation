@@ -1,0 +1,75 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId IN (4, 5) THEN 1 ELSE 0 END) AS TagWikiCount,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+TopQuestions AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY P.Score DESC, P.ViewCount DESC) AS Rank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1
+),
+TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+)
+SELECT 
+    UR.UserId,
+    UR.DisplayName,
+    UR.Reputation,
+    UR.PostCount,
+    UR.QuestionCount,
+    UR.AnswerCount,
+    UR.TagWikiCount,
+    UR.BadgeCount,
+    TQ.PostId AS TopQuestionId,
+    TQ.Title AS TopQuestionTitle,
+    TQ.Score AS TopQuestionScore,
+    TQ.ViewCount AS TopQuestionViewCount,
+    TQ.OwnerDisplayName AS TopQuestionOwner,
+    TQ.CreationDate AS TopQuestionCreationDate,
+    TS.TagName AS PopularTag,
+    TS.PostCount AS TagPostCount,
+    TS.TotalViews AS TagTotalViews
+FROM 
+    UserReputation UR
+LEFT JOIN 
+    TopQuestions TQ ON UR.QuestionCount > 0
+LEFT JOIN 
+    TagStats TS ON TS.PostCount > 100
+WHERE 
+    UR.Reputation > 1000
+ORDER BY 
+    UR.Reputation DESC;

@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_paid DESC) AS rnk
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        ws.ws_net_paid > 0 AND w.web_country = 'USA'
+),
+TotalSales AS (
+    SELECT 
+        web_site_sk,
+        SUM(ws_net_paid) AS total_net_paid
+    FROM 
+        RankedSales
+    GROUP BY 
+        web_site_sk
+),
+HighValueReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+    GROUP BY 
+        sr_customer_sk
+    HAVING 
+        total_return_amt > 1000
+),
+CustomerPerformance AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(ts.total_net_paid, 0) AS total_spent,
+        COALESCE(hvr.return_count, 0) AS total_returns,
+        ROUND(COALESCE(ts.total_net_paid, 0) / NULLIF(COALESCE(hvr.return_count, 0), 0), 2) AS spend_per_return
+    FROM 
+        customer c
+    LEFT JOIN 
+        TotalSales ts ON c.c_customer_sk = ts.web_site_sk
+    LEFT JOIN 
+        HighValueReturns hvr ON c.c_customer_sk = hvr.sr_customer_sk
+)
+SELECT 
+    cp.c_customer_id,
+    cp.total_spent,
+    cp.total_returns,
+    cp.spend_per_return,
+    CASE 
+        WHEN spend_per_return IS NULL THEN 'No Transactions'
+        WHEN spend_per_return < 50 THEN 'Low Value Customer'
+        WHEN spend_per_return BETWEEN 50 AND 200 THEN 'Medium Value Customer'
+        ELSE 'High Value Customer'
+    END AS customer_category
+FROM 
+    CustomerPerformance cp
+WHERE 
+    cp.total_spent > 0 
+ORDER BY 
+    cp.spend_per_return DESC
+FETCH FIRST 100 ROWS ONLY;

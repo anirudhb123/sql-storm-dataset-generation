@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+RegionalStats AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT sh.s_suppkey) AS unique_suppliers
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN partsupp ps ON ps.ps_partkey IN (
+        SELECT p.p_partkey
+        FROM part p
+        WHERE p.p_size >= 10
+    )
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    GROUP BY n.n_nationkey, n.n_name, r.r_name
+),
+FinalReport AS (
+    SELECT r.*, 
+           ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY r.total_supply_cost DESC) AS rank,
+           CASE WHEN r.unique_suppliers > 5 THEN 'Diverse' ELSE 'Limited' END AS supplier_diversity
+    FROM RegionalStats r
+)
+SELECT fr.*, 
+       (SELECT COUNT(*) 
+        FROM orders o 
+        WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31' 
+        AND o.o_totalprice > AVG(o.o_totalprice)) AS high_value_order_count
+FROM FinalReport fr
+WHERE fr.total_supply_cost IS NOT NULL
+ORDER BY fr.r_name, fr.rank;

@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ph.CreationDate AS LastEditDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        p.PostTypeId = 1 -- Looking for Questions
+),
+AggregatedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        MAX(rp.LastEditDate) AS LastEditDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    LEFT JOIN 
+        Posts a ON rp.PostId = a.ParentId
+    WHERE 
+        rp.EditRank = 1 -- Only take the most recent version of the post
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.Tags, rp.OwnerDisplayName, rp.CreationDate
+),
+FilteredData AS (
+    SELECT 
+        a.PostId,
+        a.Title,
+        a.Body,
+        a.Tags,
+        a.OwnerDisplayName,
+        a.CreationDate,
+        a.LastEditDate,
+        a.CommentCount,
+        a.VoteCount,
+        a.AnswerCount,
+        STRING_AGG(DISTINCT CONCAT('Tag: ', t.TagName), ', ') AS TagList
+    FROM 
+        AggregatedData a
+    LEFT JOIN 
+        Tags t ON t.Id IN (
+            SELECT unnest(string_to_array(substring(a.Tags, 2, length(a.Tags)-2), '><'))::int
+        )
+    GROUP BY 
+        a.PostId, a.Title, a.Body, a.Tags, a.OwnerDisplayName, a.CreationDate, a.LastEditDate, a.CommentCount, a.VoteCount, a.AnswerCount
+)
+SELECT 
+    fd.PostId,
+    fd.Title,
+    fd.Body,
+    fd.OwnerDisplayName,
+    fd.CreationDate,
+    fd.LastEditDate,
+    fd.CommentCount,
+    fd.VoteCount,
+    fd.AnswerCount,
+    COALESCE(fd.TagList, 'No Tags') AS Tags
+FROM 
+    FilteredData fd
+ORDER BY 
+    fd.VoteCount DESC, fd.AnswerCount DESC
+LIMIT 10;

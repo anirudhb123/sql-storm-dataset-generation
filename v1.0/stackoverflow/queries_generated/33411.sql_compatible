@@ -1,0 +1,74 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.PostTypeId,
+        p2.CreationDate,
+        p2.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN Posts p1 ON p2.ParentId = p1.Id
+    WHERE 
+        p1.PostTypeId = 1
+),
+AggregatedVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadge
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    ph.PostId,
+    ph.Title,
+    u.DisplayName AS OwnerDisplayName,
+    COALESCE(uv.UpVotes, 0) AS UpVotes,
+    COALESCE(uv.DownVotes, 0) AS DownVotes,
+    ub.BadgeCount,
+    ub.HighestBadge,
+    ph.CreationDate,
+    ph.Level
+FROM 
+    RecursivePostHierarchy ph
+JOIN 
+    Users u ON ph.OwnerUserId = u.Id
+LEFT JOIN 
+    AggregatedVotes uv ON ph.PostId = uv.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    ph.CreationDate > CURRENT_DATE - INTERVAL '6 months'
+ORDER BY 
+    UpVotes DESC, 
+    DownVotes ASC, 
+    ph.Level DESC;

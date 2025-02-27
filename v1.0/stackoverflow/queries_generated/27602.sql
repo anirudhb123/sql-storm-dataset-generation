@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Score,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.PostTypeId = 1 -- Only include questions
+),
+PostWithTags AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.Score,
+        UNNEST(string_to_array(substring(rp.Tags, 2, length(rp.Tags) - 2), '><')) AS Tag
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1
+),
+TagStatistics AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS TagCount,
+        AVG(ViewCount) AS AvgViews,
+        AVG(Score) AS AvgScore,
+        SUM(AnswerCount) AS TotalAnswers
+    FROM 
+        PostWithTags
+    GROUP BY 
+        Tag
+    ORDER BY 
+        TagCount DESC
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.AnswerCount, 0)) AS TotalAnswers,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(DISTINCT p.Id) > 0
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    us.TotalPosts,
+    us.TotalViews,
+    us.TotalAnswers,
+    us.TotalScore,
+    STRING_AGG(ts.Tag || ' (Questions: ' || ts.TagCount || ', Avg Views: ' || ts.AvgViews || ', Avg Score: ' || ts.AvgScore || ', Total Answers: ' || ts.TotalAnswers || ')', ', ') AS TagSummary
+FROM 
+    UserStatistics us
+JOIN 
+    Users u ON us.UserId = u.Id
+JOIN 
+    TagStatistics ts ON ts.Tag = ANY(STRING_TO_ARRAY((SELECT STRING_AGG(Tags, ',') FROM PostWithTags WHERE PostWithTags.PostId = u.Id), ','))
+GROUP BY 
+    u.Id
+ORDER BY 
+    us.TotalViews DESC
+LIMIT 10;

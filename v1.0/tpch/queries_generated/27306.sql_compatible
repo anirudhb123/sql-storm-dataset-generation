@@ -1,0 +1,42 @@
+
+WITH part_details AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        sub.n_name AS supplier_nation,
+        SUBSTRING(p.p_comment FROM 1 FOR 10) AS short_comment,
+        LENGTH(p.p_comment) AS comment_length
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN nation sub ON s.s_nationkey = sub.n_nationkey
+),
+region_summary AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(p.p_retailprice) AS total_retail_price,
+        ARRAY_AGG(DISTINCT pd.short_comment) AS unique_short_comments
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part pd ON ps.ps_partkey = pd.p_partkey
+    GROUP BY r.r_name
+)
+SELECT 
+    r.r_name,
+    r.nation_count,
+    r.total_retail_price,
+    CARDINALITY(r.unique_short_comments) AS unique_comment_count
+FROM region_summary r
+WHERE r.total_retail_price > (
+    SELECT AVG(total_retail_price) FROM region_summary
+)
+ORDER BY r.total_retail_price DESC;

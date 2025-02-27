@@ -1,0 +1,88 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.n_nationkey,
+        s.s_acctbal,
+        s.s_comment,
+        0 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+    
+    UNION ALL
+    
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.n_nationkey,
+        s.s_acctbal,
+        s.s_comment,
+        sh.level + 1
+    FROM 
+        supplier_hierarchy sh
+    JOIN 
+        supplier s ON s.n_nationkey = sh.n_nationkey AND s.s_suppkey <> sh.s_suppkey
+    WHERE 
+        sh.level < 5 
+),
+filtered_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_container,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_mfgr, p.p_container
+    HAVING 
+        SUM(ps.ps_supplycost) > 1000.00 
+),
+aggregated_data AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(c.c_acctbal) AS total_account_balance,
+        MAX(l.l_extendedprice) AS max_price
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.n_nationkey
+    JOIN 
+        customer c ON s.s_suppkey = c.c_nationkey 
+    LEFT JOIN 
+        lineitem l ON l.l_suppkey = s.s_suppkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    a.r_name,
+    a.nation_count,
+    a.total_account_balance,
+    a.max_price,
+    CASE 
+        WHEN a.total_account_balance IS NULL THEN 'NO DATA'
+        ELSE CAST(a.total_account_balance / NULLIF(a.nation_count, 0) AS DECIMAL(12, 2)) 
+    END AS avg_balance_per_nation,
+    EXISTS (
+        SELECT 1 FROM filtered_parts fp 
+        WHERE fp.p_partkey IN 
+            (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost < 50.00) 
+    ) AS low_cost_parts_exist
+FROM 
+    aggregated_data a
+LEFT JOIN 
+    supplier_hierarchy sh ON a.r_name = (SELECT r.r_name FROM region r WHERE r.r_regionkey = sh.n_nationkey) 
+ORDER BY 
+    a.max_price DESC
+LIMIT 10;

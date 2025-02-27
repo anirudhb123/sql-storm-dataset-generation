@@ -1,0 +1,63 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.UpVotes > 0 THEN p.UpVotes ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN p.DownVotes > 0 THEN p.DownVotes ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS TotalPosts
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    GROUP BY 
+        t.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS HistoryEntries,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalQuestions,
+    us.TotalAnswers,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    ts.TagId,
+    ts.TagName,
+    ts.TotalPosts AS PostsPerTag,
+    phs.HistoryEntries,
+    phs.LastEditDate
+FROM 
+    UserStats us
+LEFT JOIN 
+    TagStats ts ON true  
+LEFT JOIN 
+    PostHistoryStats phs ON us.TotalPosts > 0  
+ORDER BY 
+    us.Reputation DESC, 
+    us.TotalPosts DESC;

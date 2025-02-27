@@ -1,0 +1,56 @@
+
+WITH RECURSIVE regional_sales AS (
+    SELECT 
+        n.n_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(total_sales) FROM (
+            SELECT 
+                SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+            FROM 
+                lineitem l
+            JOIN 
+                orders o ON l.l_orderkey = o.o_orderkey
+            GROUP BY 
+                o.o_custkey
+        ) AS avg_sales)
+),
+top_sales AS (
+    SELECT 
+        r.n_name, 
+        r.total_sales 
+    FROM 
+        regional_sales r
+    WHERE 
+        r.sales_rank <= 5
+)
+SELECT 
+    r.n_name,
+    COALESCE(r.total_sales, 0) AS sales,
+    p.p_brand,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count
+FROM 
+    top_sales r
+LEFT JOIN 
+    supplier s ON r.n_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+GROUP BY 
+    r.n_name, p.p_brand
+ORDER BY 
+    r.total_sales DESC, p.p_brand;

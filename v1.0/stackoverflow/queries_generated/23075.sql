@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS RankScore,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(MAX(v.VoteTypeId) FILTER (WHERE v.VoteTypeId = 2), 0) AS TotalUpVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.PostTypeId IN (1, 2)  -- Only Questions and Answers
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerUserId,
+        rp.RankScore,
+        rp.CommentCount,
+        rp.TotalUpVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankScore <= 10     -- Top 10 posts per PostType
+        AND rp.Score > 5       -- Only for posts with Score > 5
+),
+PostDetails AS (
+    SELECT 
+        fp.*,
+        u.DisplayName AS OwnerDisplayName,
+        b.Name AS BadgeName,
+        b.Class AS BadgeClass
+    FROM 
+        FilteredPosts fp
+    JOIN 
+        Users u ON fp.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId AND b.Class = 1  -- Only Gold badges
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.OwnerDisplayName,
+    pd.CommentCount,
+    pd.TotalUpVotes,
+    COALESCE(pd.BadgeName, 'No Gold Badge') AS GoldBadge,
+    CASE 
+        WHEN pd.BadgeClass IS NOT NULL THEN 'Gold'
+        ELSE 'None'
+    END AS BadgeStatus,
+    JSON_AGG(DISTINCT pt.Name) AS PostTypeNames,
+    CASE 
+        WHEN pd.CommentCount > 0 THEN 'Active' 
+        ELSE 'Inactive' 
+    END AS ActivityStatus
+FROM 
+    PostDetails pd
+JOIN 
+    PostTypes pt ON pd.PostId = pt.Id
+GROUP BY 
+    pd.PostId, pd.Title, pd.CreationDate, pd.Score, pd.ViewCount, 
+    pd.OwnerDisplayName, pd.CommentCount, pd.TotalUpVotes,
+    pd.BadgeName, pd.BadgeClass
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC
+LIMIT 100;

@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+        AND p.Score IS NOT NULL
+),
+FilteredUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(u.Views, 0) AS NonNullViews
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+        AND u.LastAccessDate >= DATE_SUB('2024-10-01', INTERVAL 30 DAY)
+),
+PostHistoryWithReasons AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        COALESCE(cr.Name, 'Not Specified') AS CloseReason,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text AS RevisionText
+    FROM
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.CreationDate >= '2023-01-01'
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.Tags,
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.NonNullViews,
+    pwr.PostHistoryTypeId,
+    pwr.CloseReason,
+    pwr.CreationDate AS HistoryCreationDate,
+    ROW_NUMBER() OVER (PARTITION BY rp.PostId ORDER BY pwr.CreationDate DESC) AS HistoryRank
+FROM 
+    RankedPosts rp
+JOIN 
+    FilteredUsers u ON u.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+LEFT JOIN 
+    PostHistoryWithReasons pwr ON pwr.PostId = rp.PostId 
+WHERE 
+    rp.PostRank <= 5
+ORDER BY 
+    rp.Score DESC, 
+    u.Reputation DESC 
+LIMIT 100;

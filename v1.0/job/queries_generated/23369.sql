@@ -1,0 +1,112 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        0 AS level,
+        CAST(mt.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ep.id AS movie_id, 
+        ep.title, 
+        ep.production_year, 
+        mh.level + 1,
+        CAST(mh.path || ' > ' || ep.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title ep
+    JOIN 
+        movie_hierarchy mh ON ep.episode_of_id = mh.movie_id
+),
+
+top_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.path,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS rank
+    FROM 
+        movie_hierarchy mh
+),
+
+actors AS (
+    SELECT 
+        ka.person_id,
+        ka.name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    GROUP BY 
+        ka.person_id, ka.name
+),
+
+keyworded_movies AS (
+    SELECT 
+        mt.movie_id,
+        mg.keyword,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    JOIN 
+        keyword mg ON mk.keyword_id = mg.id
+    GROUP BY 
+        mt.movie_id, mg.keyword
+    HAVING 
+        COUNT(mk.keyword_id) > 2
+),
+
+final_selection AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.production_year,
+        a.name AS actor_name,
+        a.movie_count,
+        km.keyword,
+        km.keyword_count
+    FROM 
+        top_movies tm
+    LEFT JOIN 
+        actors a ON a.movie_count > 5 AND a.person_id IN (SELECT person_id FROM cast_info WHERE movie_id = tm.movie_id)
+    LEFT JOIN 
+        keyworded_movies km ON km.movie_id = tm.movie_id
+    WHERE 
+        tm.rank <= 5
+)
+
+SELECT 
+    fs.movie_id,
+    fs.title,
+    fs.production_year,
+    COALESCE(fs.actor_name, 'No actor data available') AS actor_name,
+    fs.movie_count,
+    COALESCE(fs.keyword, 'No keywords') AS keyword,
+    fs.keyword_count
+FROM 
+    final_selection fs
+ORDER BY 
+    fs.production_year DESC, 
+    fs.rank ASC, 
+    fs.movie_id;
+
+### Explanation of Query Constructs
+- **CTEs**: Multiple Common Table Expressions (CTEs) are used for organizational clarity, improving readability.
+- **Recursive CTE**: `movie_hierarchy` creates a hierarchy of movies and their episodes.
+- **Window Functions**: `ROW_NUMBER()` is employed to rank movies by their production years and hierarchy level.
+- **Joins**: Multiple joins allow for complex relationships, including outer joins to include actors even when there’s no match.
+- **Correlated Subquery**: Incorporates a subquery to filter actors who have participated in more than five movies.
+- **Aggregates**: Aggregate functions calculate counts of movies and keywords.
+- **HAVING clause**: Filters movies based on the count of associated keywords.
+- **COALESCE**: Handles NULLs gracefully, replacing them with custom messages.
+
+This query would allow performance benchmarking by evaluating how each SQL construct affects execution time and resource usage in retrieving complex relationships within the data.

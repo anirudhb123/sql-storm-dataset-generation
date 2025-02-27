@@ -1,0 +1,44 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        t.kind_id, 
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS actor_count,
+        DENSE_RANK() OVER (ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        title, 
+        production_year, 
+        actor_count 
+    FROM 
+        RankedMovies 
+    WHERE 
+        actor_count > 5
+)
+SELECT 
+    fm.title, 
+    fm.production_year, 
+    COALESCE(ci.role_id, 'N/A') AS role_id,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    cast_info ci ON ci.movie_id IN (SELECT id FROM aka_title WHERE title = fm.title)
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id AND ak.md5sum IS NOT NULL
+WHERE 
+    fm.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    fm.title, 
+    fm.production_year, 
+    ci.role_id
+ORDER BY 
+    fm.production_year DESC, 
+    fm.title;

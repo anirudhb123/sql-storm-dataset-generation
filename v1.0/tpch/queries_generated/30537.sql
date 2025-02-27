@@ -1,0 +1,49 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+part_supplier AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+ranked_parts AS (
+    SELECT p.p_name, p.total_cost,
+           RANK() OVER (ORDER BY p.total_cost DESC) AS part_rank
+    FROM part_supplier p
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    c.c_name AS customer_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(c.c_acctbal) OVER (PARTITION BY n.n_nationkey) AS avg_customer_bal,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COALESCE(MAX(rp.part_rank), 0) AS highest_ranked_part
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN ranked_parts rp ON l.l_partkey = rp.p_partkey
+WHERE l.l_shipdate >= '2023-01-01'
+  AND l.l_shipdate < '2023-10-01'
+  AND (l.l_returnflag IS NULL OR l.l_returnflag = 'N')
+GROUP BY r.r_name, n.n_name, c.c_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_revenue DESC;

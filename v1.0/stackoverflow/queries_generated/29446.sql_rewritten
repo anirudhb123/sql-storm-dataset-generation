@@ -1,0 +1,81 @@
+WITH TagCounts AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        TotalScore,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC, TotalViews DESC) AS Rank
+    FROM TagCounts
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCreated
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+UserPerformance AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.Reputation,
+        ur.PostsCreated,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownVotes
+    FROM UserReputation ur
+    LEFT JOIN Votes v ON v.UserId = ur.UserId AND v.PostId IN (SELECT Id FROM Posts)
+    GROUP BY ur.UserId, ur.DisplayName, ur.Reputation, ur.PostsCreated
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostsCreated,
+        TotalUpVotes - TotalDownVotes AS NetVotes,
+        RANK() OVER (ORDER BY TotalUpVotes DESC, NetVotes DESC) AS Rank
+    FROM UserPerformance
+),
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS AuthorName,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month' 
+    GROUP BY p.Id, p.Title, u.DisplayName, p.CreationDate, p.ViewCount, p.Score
+)
+SELECT 
+    pt.TagName,
+    pt.PostCount,
+    pt.TotalViews,
+    pt.TotalScore,
+    tu.DisplayName AS TopUser,
+    tu.Reputation AS TopUserReputation,
+    ap.Title AS ActivePostTitle,
+    ap.ViewCount AS ActivePostViews,
+    ap.CommentCount AS ActivePostComments
+FROM PopularTags pt
+JOIN TopUsers tu ON pt.PostCount > 10 
+JOIN ActivePosts ap ON pt.TagName IN (SELECT unnest(string_to_array(ap.Tags, '><'))) 
+ORDER BY pt.TotalScore DESC, ap.ViewCount DESC
+LIMIT 10;

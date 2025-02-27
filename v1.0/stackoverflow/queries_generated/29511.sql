@@ -1,0 +1,59 @@
+WITH TagSummary AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(Posts.AnswerCount, 0)) AS TotalAnswers,
+        AVG(COALESCE(Posts.Score, 0)) AS AverageScore
+    FROM Tags
+    LEFT JOIN Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    GROUP BY Tags.TagName
+),
+UserActivity AS (
+    SELECT 
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS PostsCreated,
+        COUNT(DISTINCT Comments.Id) AS CommentsMade,
+        COUNT(DISTINCT Badges.Id) AS BadgeCount,
+        SUM(COALESCE(Votes.Id, 0)) AS TotalVotes
+    FROM Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN Comments ON Users.Id = Comments.UserId
+    LEFT JOIN Badges ON Users.Id = Badges.UserId
+    LEFT JOIN Votes ON Users.Id = Votes.UserId
+    GROUP BY Users.DisplayName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        TotalViews,
+        TotalAnswers,
+        AverageScore,
+        ROW_NUMBER() OVER (ORDER BY TotalViews DESC) AS TagRank
+    FROM TagSummary
+    WHERE PostCount > 0
+),
+TopUsers AS (
+    SELECT 
+        DisplayName,
+        PostsCreated,
+        CommentsMade,
+        BadgeCount,
+        TotalVotes,
+        ROW_NUMBER() OVER (ORDER BY PostsCreated DESC, CommentsMade DESC) AS UserRank
+    FROM UserActivity
+)
+SELECT 
+    t.TagName,
+    t.TotalViews,
+    t.TotalAnswers,
+    t.AverageScore,
+    u.DisplayName AS TopUser,
+    u.PostsCreated,
+    u.CommentsMade,
+    u.BadgeCount,
+    u.TotalVotes
+FROM TopTags t
+JOIN TopUsers u ON t.TagRank = 1 AND u.UserRank = 1
+WHERE t.TotalViews > 1000
+ORDER BY t.TotalViews DESC, u.PostsCreated DESC;

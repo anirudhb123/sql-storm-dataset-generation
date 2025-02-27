@@ -1,0 +1,71 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(COALESCE(sr_return_quantity, 0)) AS total_returned_items,
+        SUM(COALESCE(sr_return_amt, 0)) AS total_returned_amount
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+),
+TopReturningCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cr.total_returned_items,
+        cr.total_returned_amount,
+        RANK() OVER (ORDER BY cr.total_returned_amount DESC) AS rnk
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        customer c ON c.c_customer_id = cr.c_customer_id
+    WHERE 
+        cr.total_returned_items > 0
+),
+PromotionalSales AS (
+    SELECT 
+        ws.ws_order_number,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_ext_discount_amt) AS total_discount
+    FROM 
+        web_sales ws
+    JOIN 
+        promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE 
+        p.p_discount_active = 'Y'
+    GROUP BY 
+        ws.ws_order_number
+),
+SalesSummary AS (
+    SELECT 
+        COALESCE(sp.ws_order_number, ss.ss_ticket_number) AS order_number,
+        SUM(sp.total_sales) AS total_sales,
+        SUM(sp.total_discount) AS total_discount
+    FROM 
+        PromotionalSales sp
+    FULL OUTER JOIN 
+        store_sales ss ON sp.ws_order_number = ss.ss_ticket_number
+    GROUP BY 
+        COALESCE(sp.ws_order_number, ss.ss_ticket_number)
+)
+
+SELECT 
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_returned_amount,
+    ss.total_sales,
+    ss.total_discount
+FROM 
+    TopReturningCustomers tc
+LEFT JOIN 
+    SalesSummary ss ON tc.c_customer_id = ss.order_number
+WHERE 
+    tc.rnk <= 10
+ORDER BY 
+    tc.total_returned_amount DESC;

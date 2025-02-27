@@ -1,0 +1,31 @@
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    CONCAT('Manufacturer: ', p.p_mfgr, ', Brand: ', p.p_brand, ', Type: ', p.p_type) AS part_info,
+    COALESCE(NULLIF(SUBSTRING_INDEX(p.p_comment, ' ', 5), ''), 'No additional comments') AS truncated_comment,
+    r.r_name AS region_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(s.s_acctbal) AS avg_supplier_balance
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size > 10 
+    AND p.p_retailprice BETWEEN 100 AND 500 
+    AND p.p_comment LIKE '%quality%'
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type, r.r_name
+HAVING 
+    COUNT(DISTINCT s.s_suppkey) > 3 
+    AND AVG(s.s_acctbal) > 1000
+ORDER BY 
+    total_available_quantity DESC;

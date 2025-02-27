@@ -1,0 +1,65 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(c.id) AS total_cast,
+        DENSE_RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.id) DESC) AS rank 
+    FROM 
+        aka_title a 
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id 
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+recent_movies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        ranked_movies 
+    WHERE 
+        rank <= 5
+),
+keyworded_movies AS (
+    SELECT 
+        m.title,
+        k.keyword
+    FROM 
+        title m 
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id 
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+company_info AS (
+    SELECT 
+        m.title,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc 
+    JOIN 
+        company_name c ON mc.company_id = c.id 
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    ARRAY_AGG(km.keyword) AS keywords,
+    ARRAY_AGG(DISTINCT ci.company_name) AS companies,
+    (CASE 
+        WHEN rm.production_year = (SELECT MAX(production_year) FROM ranked_movies) 
+        THEN 'Latest'
+        ELSE 'Older' 
+    END) AS year_category
+FROM 
+    recent_movies rm 
+LEFT JOIN 
+    keyworded_movies km ON rm.title = km.title 
+LEFT JOIN 
+    company_info ci ON rm.title = ci.title
+GROUP BY 
+    rm.title, rm.production_year
+ORDER BY 
+    rm.production_year DESC, rm.title;

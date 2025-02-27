@@ -1,0 +1,60 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ss_item_sk,
+        SUM(ss_net_profit) AS total_net_profit,
+        COUNT(ss_ticket_number) AS total_sales,
+        1 AS level
+    FROM store_sales
+    GROUP BY ss_item_sk
+    HAVING SUM(ss_net_profit) > 0
+    UNION ALL
+    SELECT 
+        sales.ss_item_sk,
+        SUM(sales.ss_net_profit) + cte.total_net_profit,
+        COUNT(sales.ss_ticket_number) + cte.total_sales,
+        cte.level + 1
+    FROM store_sales sales
+    JOIN sales_cte cte ON sales.ss_item_sk = cte.ss_item_sk
+    WHERE cte.level < 5
+    GROUP BY sales.ss_item_sk
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_country,
+        COALESCE(hd.hd_buy_potential, 'Unknown') AS buy_potential,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY c.c_birth_year) AS rank
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN household_demographics hd ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    WHERE ca.ca_country IS NOT NULL AND cd.cd_marital_status IS NOT NULL
+),
+sales_summary AS (
+    SELECT 
+        s.ss_item_sk,
+        SUM(s.ss_sales_price) AS total_sales_price,
+        AVG(s.ss_net_profit) AS avg_net_profit
+    FROM store_sales s
+    WHERE s.ss_sold_date_sk >= (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY s.ss_item_sk
+)
+SELECT 
+    c.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    SUM(ss.total_sales_price) AS total_sales,
+    SUM(cds.total_net_profit) AS total_net_profit,
+    COUNT(DISTINCT ss.ss_item_sk) AS unique_items_sold,
+    MAX(ss.avg_net_profit) AS max_avg_profit,
+    MIN(ss.avg_net_profit) AS min_avg_profit
+FROM customer_data cd
+JOIN sales_summary ss ON cd.c_customer_id = ss.ss_item_sk
+JOIN sales_cte cds ON ss.ss_item_sk = cds.ss_item_sk
+WHERE cd.rank <= 10
+GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+ORDER BY total_sales DESC
+LIMIT 100;

@@ -1,0 +1,67 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        mh.depth < 5  -- Limit recursion to 5 levels
+)
+SELECT 
+    mk.movie_id,
+    t.title AS linked_title,
+    t.production_year,
+    t.kind_id,
+    COALESCE(p.info, 'N/A') AS director_info,
+    COUNT(DISTINCT c.person_id) AS total_actors,
+    COUNT(DISTINCT CASE WHEN c.nr_order = 1 THEN c.person_id END) AS lead_actors,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    MAX(CASE WHEN k.keyword = 'Award' THEN 1 END) AS has_award
+FROM 
+    movie_hierarchy mk
+LEFT JOIN 
+    movie_companies mc ON mk.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id AND cn.country_code IS NOT NULL
+LEFT JOIN 
+    complete_cast cc ON mk.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    person_info p ON c.person_id = p.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'Director')
+LEFT JOIN 
+    movie_keyword mkd ON mk.movie_id = mkd.movie_id
+LEFT JOIN 
+    keyword k ON mkd.keyword_id = k.id
+JOIN 
+    aka_name ak ON ak.person_id = c.person_id
+JOIN 
+    title t ON mk.movie_id = t.id
+WHERE 
+    mk.production_year > 2000
+GROUP BY 
+    mk.movie_id, t.title, t.production_year, t.kind_id, p.info
+HAVING 
+    COUNT(DISTINCT c.person_id) > 5
+ORDER BY 
+    mk.production_year DESC, total_actors DESC;

@@ -1,0 +1,51 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS region_rank
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, n.n_name
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.total_value,
+        n.n_name
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.n_nationkey = n.n_nationkey
+    WHERE 
+        rs.region_rank <= 5
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    o.o_orderkey,
+    o.o_orderdate,
+    ts.s_name AS top_supplier,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_order_value
+FROM 
+    customer c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem li ON o.o_orderkey = li.l_orderkey
+JOIN 
+    TopSuppliers ts ON li.l_suppkey = ts.s_suppkey
+WHERE 
+    o.o_orderdate >= DATE '2023-01-01'
+GROUP BY 
+    c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, ts.s_name
+ORDER BY 
+    total_order_value DESC, o.o_orderdate ASC
+LIMIT 100;

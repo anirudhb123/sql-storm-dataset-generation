@@ -1,0 +1,90 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation IS NOT NULL
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(ph.Id) as HistoryCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+VotesSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        SUM(CASE WHEN VoteTypeId = 6 THEN 1 ELSE 0 END) AS CloseVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    tu.DisplayName AS OwnerDisplayName,
+    tu.Rank AS OwnerRank,
+    pha.HistoryCount,
+    COALESCE(vs.TotalUpVotes, 0) AS TotalUpVotes,
+    COALESCE(vs.TotalDownVotes, 0) AS TotalDownVotes,
+    COALESCE(vs.CloseVotes, 0) AS CloseVotes,
+    CASE 
+        WHEN rp.DowVotes IS NOT NULL AND rp.UpVotes > rp.DownVotes THEN 'Positive'
+        WHEN rp.UpVotes IS NOT NULL AND rp.DownVotes > rp.UpVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS PostSentiment,
+    CASE 
+        WHEN MIN(ph.CreationDate) IS NOT NULL THEN 'Has History'
+        ELSE 'No History'
+    END AS HistoryStatus
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    TopUsers tu ON rp.OwnerUserId = tu.UserId
+LEFT JOIN 
+    PostHistoryAggregates pha ON rp.PostId = pha.PostId
+LEFT JOIN 
+    VotesSummary vs ON rp.PostId = vs.PostId
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.CommentCount, 
+    rp.UpVotes, rp.DownVotes, tu.DisplayName, tu.Rank, pha.HistoryCount
+ORDER BY 
+    rp.CreationDate DESC;

@@ -1,0 +1,71 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca.ca_address_id,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country
+    FROM 
+        customer_address ca
+),
+DemographicDetails AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer_demographics cd
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ad.full_address,
+        dd.d_date AS birth_date,
+        dd.d_month_seq AS birth_month_seq,
+        dd.d_year AS birth_year,
+        dd.d_month_seq,
+        dd.d_year
+    FROM 
+        customer c
+    JOIN 
+        AddressDetails ad ON c.c_current_addr_sk = ad.ca_address_id
+    LEFT JOIN 
+        date_dim dd ON c.c_birth_day = dd.d_dom AND c.c_birth_month = dd.d_month_seq AND c.c_birth_year = dd.d_year
+),
+CustomerDemographics AS (
+    SELECT 
+        cu.c_customer_id,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_education_status
+    FROM 
+        CustomerDetails cu
+    JOIN 
+        DemographicDetails d ON cu.c_customer_id = d.cd_demo_sk
+)
+SELECT 
+    cd.c_customer_id,
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.full_address,
+    cd.birth_date,
+    cd.birth_month_seq,
+    cd.birth_year,
+    cdem.cd_gender,
+    cdem.cd_marital_status,
+    cdem.cd_education_status
+FROM 
+    CustomerDetails cd
+JOIN 
+    CustomerDemographics cdem ON cd.c_customer_id = cdem.c_customer_id
+WHERE 
+    cdem.cd_gender = 'F' AND
+    cdem.cd_marital_status IN ('S', 'M')
+ORDER BY 
+    cd.birth_month_seq DESC, 
+    cd.birth_year DESC;

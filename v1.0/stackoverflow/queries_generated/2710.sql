@@ -1,0 +1,83 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId, 
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount, 
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY ph.PostId
+),
+RankedPosts AS (
+    SELECT 
+        pa.PostId,
+        pa.OwnerUserId,
+        pa.CommentCount,
+        pa.UpVotes,
+        pa.DownVotes,
+        COALESCE(cp.LastClosedDate, '1970-01-01') AS LastClosedDate,
+        CASE 
+            WHEN cp.LastClosedDate IS NOT NULL AND pa.CommentCount > 0 THEN 'Closed with Comments'
+            WHEN cp.LastClosedDate IS NOT NULL THEN 'Closed no Comments'
+            ELSE 'Open'
+        END AS PostStatus,
+        ur.Reputation
+    FROM PostActivity pa
+    LEFT JOIN ClosedPosts cp ON pa.PostId = cp.PostId
+    JOIN UserReputation ur ON pa.OwnerUserId = ur.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.OwnerUserId,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.LastClosedDate,
+    rp.PostStatus,
+    rp.Reputation,
+    (rp.UpVotes - rp.DownVotes) AS VoteBalance,
+    CASE 
+        WHEN rp.Reputation > 1000 THEN 'Experienced User'
+        WHEN rp.Reputation BETWEEN 500 AND 1000 THEN 'Moderate User'
+        ELSE 'New User'
+    END AS UserType
+FROM RankedPosts rp
+WHERE rp.CommentCount > 0
+ORDER BY rp.VoteBalance DESC, rp.Reputation DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;
+
+-- Additional Analysis
+SELECT 
+    p.Title,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+    SUM(v.VoteTypeId = 3) AS TotalDownVotes,
+    p.LastActivityDate,
+    CASE 
+        WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Answered'
+        ELSE 'Unanswered'
+    END AS AnswerStatus
+FROM Posts p
+LEFT JOIN Comments c ON p.Id = c.PostId
+LEFT JOIN Votes v ON p.Id = v.PostId
+GROUP BY p.Title, p.LastActivityDate, p.AcceptedAnswerId
+HAVING COUNT(DISTINCT c.Id) > 5
+ORDER BY TotalUpVotes DESC
+LIMIT 10;

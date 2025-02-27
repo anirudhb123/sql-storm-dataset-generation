@@ -1,0 +1,72 @@
+
+WITH RankedReturns AS (
+    SELECT
+        sr.rs_returned_date_sk,
+        sr_item_sk,
+        sr_customer_sk,
+        sr_return_quantity,
+        RANK() OVER(PARTITION BY sr_item_sk ORDER BY sr_return_quantity DESC) AS rnk
+    FROM store_returns sr
+    WHERE sr_return_quantity > 0
+),
+CustomerStats AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT sr.rs_ticket_number) AS total_returns,
+        SUM(sr.rs_return_quantity) AS total_return_quantity
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+),
+PopularItems AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+IncomeDistribution AS (
+    SELECT
+        ib.ib_income_band_sk,
+        COUNT(hd.hd_demo_sk) AS customer_count,
+        SUM(hd.hd_vehicle_count) AS total_vehicles
+    FROM household_demographics hd
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY ib.ib_income_band_sk
+)
+SELECT
+    c.c_customer_id,
+    cs.total_returns,
+    cs.total_return_quantity,
+    pi.total_sold,
+    pi.total_profit,
+    CASE 
+        WHEN R.total_returns > 0 THEN 'Frequent Returner'
+        ELSE 'Rare Returner'
+    END AS returner_type,
+    ib.ib_income_band_sk,
+    id.customer_count,
+    id.total_vehicles
+FROM CustomerStats cs
+JOIN customer c ON cs.c_customer_id = c.c_customer_id
+LEFT JOIN PopularItems pi ON pi.ws_item_sk = (
+        SELECT ws_item_sk
+        FROM web_sales
+        WHERE ws_bill_customer_sk = c.c_customer_sk 
+        ORDER BY ws_sold_date_sk DESC
+        LIMIT 1
+    )
+LEFT JOIN IncomeDistribution id ON id.ib_income_band_sk = (
+        SELECT hd.hd_income_band_sk
+        FROM household_demographics hd
+        WHERE hd.hd_demo_sk = c.c_current_hdemo_sk
+    )
+LEFT JOIN RankedReturns R ON cs.total_returns = R.total_returns
+WHERE c.c_birth_year IS NOT NULL
+  AND c.c_preferred_cust_flag = 'Y'
+  AND c.c_email_address IS NOT NULL
+ORDER BY cs.total_return_quantity DESC, c.c_customer_id;

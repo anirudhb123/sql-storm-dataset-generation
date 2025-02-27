@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, u.DisplayName
+),
+TopQuestions AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Score, 
+        ViewCount, 
+        OwnerName 
+    FROM 
+        RankedPosts 
+    WHERE 
+        PostRank <= 10 AND 
+        PostTypeId = 1
+),
+TopAnswers AS (
+    SELECT 
+        p.AcceptedAnswerId AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerName 
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.AcceptedAnswerId IS NOT NULL AND 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+)
+SELECT 
+    'Top Questions' AS Category,
+    PostId,
+    Title,
+    Score,
+    ViewCount,
+    OwnerName 
+FROM 
+    TopQuestions
+UNION ALL
+SELECT 
+    'Top Answers' AS Category,
+    PostId,
+    Title,
+    Score,
+    ViewCount,
+    OwnerName 
+FROM 
+    TopAnswers
+ORDER BY 
+    Score DESC, 
+    ViewCount DESC;

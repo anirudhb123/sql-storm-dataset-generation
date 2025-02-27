@@ -1,0 +1,74 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ws_order_number,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_order_number) AS rn
+    FROM
+        web_sales
+    UNION ALL
+    SELECT
+        cs_order_number,
+        cs_item_sk,
+        cs_sales_price,
+        cs_quantity,
+        ROW_NUMBER() OVER (PARTITION BY cs_order_number ORDER BY cs_order_number) AS rn
+    FROM
+        catalog_sales
+    WHERE
+        cs_ext_discount_amt > 0
+),
+FilteredSales AS (
+    SELECT 
+        s.ws_order_number,
+        s.ws_item_sk,
+        SUM(s.ws_sales_price * s.ws_quantity) AS total_sales,
+        COUNT(*) AS sales_count
+    FROM
+        SalesCTE s
+    GROUP BY 
+        s.ws_order_number, s.ws_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_amt_inc_tax) as total_return,
+        COUNT(*) as return_count
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        sr_customer_sk
+),
+CombinedSales AS (
+    SELECT 
+        COALESCE(f.ws_order_number, r.sr_customer_sk) AS customer_identifier,
+        f.total_sales,
+        r.total_return,
+        COALESCE(f.sales_count, 0) AS sales_count,
+        COALESCE(r.return_count, 0) AS return_count
+    FROM 
+        FilteredSales f
+    FULL OUTER JOIN 
+        CustomerReturns r ON f.ws_order_number = r.sr_customer_sk
+)
+SELECT 
+    customer_identifier,
+    total_sales,
+    total_return,
+    sales_count,
+    return_count,
+    CASE 
+        WHEN total_sales > 0 THEN (total_return / total_sales) * 100
+        ELSE NULL 
+    END AS return_ratio
+FROM 
+    CombinedSales
+WHERE 
+    (sales_count > 5 OR return_count > 2)
+ORDER BY 
+    return_ratio DESC NULLS LAST
+LIMIT 50;

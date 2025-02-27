@@ -1,0 +1,75 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_sales
+    FROM 
+        SupplierSales ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+    ORDER BY 
+        ss.total_sales DESC
+    LIMIT 10
+),
+
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+),
+
+SalesSummary AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_spent
+    FROM 
+        CustomerOrders co
+    JOIN 
+        lineitem lo ON co.o_orderkey = lo.l_orderkey
+    GROUP BY 
+        co.c_custkey, co.c_name
+)
+
+SELECT 
+    ts.s_name AS supplier_name,
+    ss.c_name AS customer_name,
+    ss.total_spent AS customer_spending,
+    ts.total_sales AS supplier_sales,
+    (ss.total_spent / ts.total_sales) * 100 AS customer_percentage_of_supplier_sales
+FROM 
+    TopSuppliers ts
+JOIN 
+    SalesSummary ss ON ts.s_suppkey = (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+        WHERE li.l_orderkey IN (SELECT o.o_orderkey FROM CustomerOrders) 
+        LIMIT 1
+    )
+ORDER BY 
+    customer_percentage_of_supplier_sales DESC;

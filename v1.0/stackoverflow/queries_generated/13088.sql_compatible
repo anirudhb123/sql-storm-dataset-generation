@@ -1,0 +1,55 @@
+
+WITH PostCounts AS (
+    SELECT 
+        pt.Name AS PostType, 
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        pt.Name
+),
+VoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(bp.Id) AS BadgeCount,
+        SUM(bp.Class) AS TotalBadgeLevel
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges bp ON u.Id = bp.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    pc.PostType,
+    pc.TotalPosts,
+    pc.AcceptedAnswers,
+    SUM(vc.TotalVotes) AS TotalVotes,
+    u.DisplayName,
+    u.BadgeCount,
+    u.TotalBadgeLevel
+FROM 
+    PostCounts pc
+JOIN 
+    VoteCounts vc ON pc.PostType = vc.PostId
+JOIN 
+    UserStatistics u ON u.UserId = vc.UserId
+GROUP BY 
+    pc.PostType, pc.TotalPosts, pc.AcceptedAnswers, u.DisplayName, u.BadgeCount, u.TotalBadgeLevel
+ORDER BY 
+    pc.TotalPosts DESC;

@@ -1,0 +1,83 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COALESCE(mt.episode_of_id, mt.id) AS root_movie_id
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        ep.id,
+        ep.title,
+        ep.production_year,
+        mh.root_movie_id
+    FROM 
+        aka_title AS ep
+    JOIN 
+        movie_hierarchy AS mh ON ep.episode_of_id = mh.movie_id
+),
+actor_movie AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        mk.keyword AS movie_keyword,
+        ROW_NUMBER() OVER (PARTITION BY ci.person_id ORDER BY mt.production_year DESC) AS year_rank,
+        COUNT(*) OVER (PARTITION BY ci.person_id) AS total_movies
+    FROM 
+        cast_info AS ci
+    JOIN 
+        movie_keyword AS mk ON ci.movie_id = mk.movie_id
+    JOIN 
+        movie_hierarchy AS mt ON ci.movie_id = mt.movie_id
+    WHERE 
+        mk.keyword IS NOT NULL
+),
+top_actors AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        am.total_movies,
+        STRING_AGG(DISTINCT a2.name, ', ') AS co_actors,
+        SUM(CASE WHEN am.movie_keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_count
+    FROM 
+        aka_name AS a
+    JOIN 
+        actor_movie AS am ON a.person_id = am.person_id
+    LEFT JOIN 
+        actor_movie AS am2 ON am.movie_id = am2.movie_id AND a.person_id <> am2.person_id
+    JOIN 
+        cast_info AS ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.id, a.name, am.total_movies
+    ORDER BY 
+        total_movies DESC, keyword_count DESC
+)
+SELECT 
+    ta.actor_id,
+    ta.actor_name,
+    ta.total_movies,
+    COALESCE(NULLIF(ta.co_actors, ''), 'No Co-Actors') AS co_actors,
+    COUNT(DISTINCT mh.movie_id) AS total_root_movies,
+    SUM(CASE WHEN ta.total_movies > 1 THEN 1 ELSE 0 END) AS multiple_movies_flag
+FROM 
+    top_actors AS ta
+JOIN 
+    movie_hierarchy AS mh ON mh.root_movie_id IN (
+        SELECT DISTINCT 
+            movie_id 
+        FROM 
+            actor_movie 
+        WHERE 
+            person_id = ta.actor_id
+    )
+GROUP BY 
+    ta.actor_id, ta.actor_name, ta.total_movies, ta.co_actors
+HAVING 
+    ta.total_movies > 5
+ORDER BY 
+    total_root_movies DESC, ta.actor_name;

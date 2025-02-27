@@ -1,0 +1,63 @@
+
+WITH movie_summary AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT c.name, ', ') AS cast_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT mci.kind, ', ') AS company_types
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type mci ON mc.company_type_id = mci.id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+info_summary AS (
+    SELECT 
+        m.movie_id,
+        COALESCE(MAX(CASE WHEN it.info = 'rating' THEN mi.info END), 'N/A') AS rating,
+        COALESCE(MAX(CASE WHEN it.info = 'duration' THEN mi.info END), 'N/A') AS duration
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    JOIN 
+        movie_summary m ON mi.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    ms.movie_id,
+    ms.title,
+    ms.production_year,
+    ms.total_companies,
+    ms.total_cast,
+    ms.cast_names,
+    ms.keywords,
+    ms.company_types,
+    is.rating,
+    is.duration
+FROM 
+    movie_summary ms
+JOIN 
+    info_summary is ON ms.movie_id = is.movie_id
+ORDER BY 
+    ms.production_year DESC, 
+    ms.title ASC
+LIMIT 50;

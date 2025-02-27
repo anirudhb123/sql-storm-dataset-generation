@@ -1,0 +1,64 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk, 
+           0 AS hierarchy_level
+    FROM customer
+    WHERE c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT ch.c_customer_sk, ch.c_first_name, ch.c_last_name, ch.c_current_cdemo_sk, 
+           hierarchy_level + 1
+    FROM customer AS ch
+    INNER JOIN CustomerHierarchy AS ch2 ON ch.c_current_cdemo_sk = ch2.c_current_cdemo_sk
+    WHERE ch.c_customer_sk <> ch2.c_customer_sk
+),
+SalesData AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales AS ws
+    JOIN date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2022
+    GROUP BY ws.web_site_sk
+),
+HighSalesWebsites AS (
+    SELECT web_site_sk
+    FROM SalesData
+    WHERE sales_rank <= 5
+),
+CustomerReturnStatistics AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        AVG(sr_return_quantity) AS avg_return_quantity
+    FROM store_returns
+    GROUP BY sr_returning_customer_sk
+),
+AggregatedDemoStats AS (
+    SELECT 
+        hd.hd_demo_sk,
+        SUM(hd.dep_count) AS total_dependent_count,
+        COUNT(DISTINCT c.c_customer_sk) AS total_customers
+    FROM household_demographics AS hd
+    JOIN customer AS c ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    GROUP BY hd.hd_demo_sk
+)
+SELECT 
+    ch.c_customer_sk,
+    ch.c_first_name,
+    ch.c_last_name,
+    d.d_year,
+    COALESCE(rs.total_sales, 0) AS total_sales,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    COALESCE(rs.total_return_amount, 0) AS total_return_amount,
+    alg.total_dependent_count
+FROM CustomerHierarchy AS ch
+JOIN date_dim AS d ON d.d_date_sk = ch.c_first_sales_date_sk
+LEFT JOIN SalesData AS s ON s.web_site_sk IN (SELECT web_site_sk FROM HighSalesWebsites)
+LEFT JOIN CustomerReturnStatistics AS rs ON rs.sr_returning_customer_sk = ch.c_customer_sk
+LEFT JOIN AggregatedDemoStats AS alg ON alg.hd_demo_sk = ch.c_current_cdemo_sk
+WHERE ch.c_current_cdemo_sk IS NOT NULL
+AND d.d_year = 2023
+ORDER BY total_sales DESC, total_returns DESC;

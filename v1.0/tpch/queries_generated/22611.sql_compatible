@@ -1,0 +1,69 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank_brand,
+        ROW_NUMBER() OVER (PARTITION BY p.p_size ORDER BY p.p_retailprice ASC) AS row_size,
+        NTILE(5) OVER (ORDER BY p.p_retailprice) AS price_bucket
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > 0 
+        AND s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name LIKE 'A%')
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_orders,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey AND o.o_orderstatus = 'F'
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    COALESCE(fs.total_supply_cost, 0) AS supplier_sum,
+    COALESCE(co.order_count, 0) AS order_count,
+    COUNT(li.l_orderkey) AS total_lineitems,
+    STRING_AGG(DISTINCT c.c_name ORDER BY c.c_name) AS customer_list,
+    CASE 
+        WHEN p.rank_brand = 1 THEN 'Top Brand'
+        WHEN p.rank_brand > 1 AND p.row_size <= 10 THEN 'Mid Size Top'
+        ELSE 'Others'
+    END AS part_category
+FROM 
+    RankedParts p
+LEFT JOIN 
+    FilteredSuppliers fs ON p.p_partkey = fs.s_suppkey
+LEFT JOIN 
+    lineitem li ON p.p_partkey = li.l_partkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey IS NOT NULL
+GROUP BY 
+    p.p_partkey, p.p_name, fs.total_supply_cost, co.order_count, p.rank_brand, p.row_size
+HAVING 
+    SUM(li.l_quantity) > (SELECT AVG(l_quantity) FROM lineitem) OR
+    fs.total_supply_cost IS NULL
+ORDER BY 
+    part_category DESC, p.p_retailprice DESC;

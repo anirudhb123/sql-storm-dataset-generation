@@ -1,0 +1,50 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           o.o_totalprice, 
+           o.o_orderstatus, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1996-01-01' 
+    AND o.o_orderdate < DATE '1997-01-01'
+),
+SupplierParts AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           c.c_acctbal
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+)
+SELECT
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    COALESCE(p.p_name, 'Unknown Part') AS part_name,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    r.r_name AS region_name,
+    COALESCE(SUM(lp.l_extendedprice * (1 - lp.l_discount)), 0) AS total_extended_price,
+    COUNT(DISTINCT c.c_custkey) OVER (PARTITION BY o.o_orderkey) AS distinct_customers,
+    CASE 
+        WHEN o.o_orderstatus = 'F' THEN 'Finished'
+        WHEN o.o_orderstatus = 'P' THEN 'Pending'
+        ELSE 'Other'
+    END AS order_status_description
+FROM RankedOrders o
+LEFT JOIN lineitem lp ON o.o_orderkey = lp.l_orderkey
+LEFT JOIN part p ON lp.l_partkey = p.p_partkey
+LEFT JOIN supplier s ON lp.l_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN HighValueCustomers c ON o.o_custkey = c.c_custkey
+WHERE r.r_name IS NOT NULL
+GROUP BY o.o_orderkey, o.o_orderdate, o.o_totalprice, p.p_name, s.s_name, r.r_name, o.o_orderstatus, o.o_acctkey
+ORDER BY o.o_orderdate DESC, total_extended_price DESC
+FETCH FIRST 100 ROWS ONLY;

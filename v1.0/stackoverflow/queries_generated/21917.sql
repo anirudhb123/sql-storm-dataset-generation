@@ -1,0 +1,73 @@
+WITH UserVoteCounts AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId, 
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastHistoryDate,
+        ARRAY_AGG(DISTINCT pht.Name) AS HistoryTypes,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount -- Counting 'Post Closed' actions
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagNames
+    FROM Posts p
+    LEFT JOIN LATERAL (
+        SELECT 
+            unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName
+    ) t ON TRUE
+    GROUP BY p.Id
+)
+SELECT 
+    u.DisplayName AS UserName, 
+    u.Reputation, 
+    p.Title, 
+    p.CreationDate AS PostCreationDate, 
+    tags.TagNames,
+    COALESCE(ps.TotalVotes, 0) AS PostTotalVotes,
+    COALESCE(ps.UpVotes, 0) AS PostUpVotes,
+    COALESCE(ps.DownVotes, 0) AS PostDownVotes,
+    COALESCE(ph.LastHistoryDate, 'No History') AS LastHistoryChange,
+    CASE 
+        WHEN ph.CloseCount > 0 THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus
+FROM Users u
+JOIN UserVoteCounts uvc ON u.Id = uvc.UserId
+JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN PostVoteSummary ps ON p.Id = ps.PostId
+LEFT JOIN PostHistories ph ON p.Id = ph.PostId
+LEFT JOIN PostTags tags ON p.Id = tags.PostId
+WHERE 
+    (uvc.TotalVotes > 10 OR u.Reputation > 100) 
+    AND (p.CreationDate >= NOW() - INTERVAL '1 year')
+    AND (p.Body IS NOT NULL OR p.Title IS NOT NULL)
+ORDER BY 
+    CASE 
+        WHEN ph.CloseCount > 0 THEN 1 
+        ELSE 0 
+    END DESC,
+    p.Score DESC, 
+    u.Reputation DESC
+LIMIT 100;

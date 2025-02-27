@@ -1,0 +1,49 @@
+
+WITH CustomerLocations AS (
+    SELECT
+        c.c_customer_id,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        c.c_email_address
+    FROM
+        customer c
+    JOIN
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+), ProcessedEmails AS (
+    SELECT
+        clc.c_customer_id,
+        clc.full_name,
+        clc.ca_city,
+        clc.ca_state,
+        clc.ca_country,
+        REPLACE(REPLACE(REPLACE(clc.c_email_address, '.', ' '), '@', ' at '), 'com', 'com (commercial)') AS processed_email
+    FROM
+        CustomerLocations clc
+), EmailAnalytics AS (
+    SELECT
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        COUNT(*) AS total_customers,
+        STRING_AGG(DISTINCT processed_email, '; ') AS unique_emails
+    FROM
+        ProcessedEmails ca
+    GROUP BY
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+)
+SELECT
+    city,
+    state,
+    country,
+    total_customers,
+    unique_emails
+FROM
+    EmailAnalytics
+WHERE
+    total_customers > 10
+ORDER BY
+    total_customers DESC;

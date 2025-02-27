@@ -1,0 +1,84 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        AVG(v.BountyAmount) AS AverageBounty,
+        LEAD(p.Score) OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate) AS NextPostScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATE('2024-10-01') - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.PostTypeId, p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+CloseReason AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(crt.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON CAST(ph.Comment AS INTEGER) = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.OwnerDisplayName,
+    up.BadgeCount,
+    ps.CommentCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    ps.AverageBounty,
+    ps.NextPostScore,
+    cr.CloseReasons,
+    CASE 
+        WHEN cr.CloseReasons IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    CASE 
+        WHEN ps.NextPostScore > ps.UpVoteCount THEN 'Improving'
+        WHEN ps.NextPostScore < ps.UpVoteCount THEN 'Declining'
+        ELSE 'Stable'
+    END AS ScoreTrend,
+    CASE 
+        WHEN p.CreationDate IS NULL THEN 'Unknown'
+        ELSE TO_CHAR(p.CreationDate, 'YYYY-MM-DD HH24:MI:SS')
+    END AS CreationDateFormatted
+FROM 
+    Posts p
+LEFT JOIN 
+    PostStats ps ON p.Id = ps.PostId
+LEFT JOIN 
+    UserBadges up ON p.OwnerUserId = up.UserId
+LEFT JOIN 
+    CloseReason cr ON p.Id = cr.PostId
+WHERE 
+    ps.CommentCount > 1
+    OR up.BadgeCount > 0
+ORDER BY 
+    ps.UpVoteCount DESC, ps.DownVoteCount ASC
+LIMIT 100;

@@ -1,0 +1,67 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+income_brackets AS (
+    SELECT
+        cd_demo_sk,
+        CASE 
+            WHEN hd_income_band_sk IS NOT NULL THEN 'Income Banded'
+            ELSE 'Unbanded'
+        END AS income_status,
+        COUNT(*) AS demo_count
+    FROM 
+        household_demographics h
+    LEFT JOIN customer_demographics c ON h.hd_demo_sk = c.cd_demo_sk
+    GROUP BY 
+        hd_income_band_sk
+),
+returned_sales AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+total_sales AS (
+    SELECT 
+        item.i_item_sk,
+        COALESCE(ws.total_quantity, 0) AS total_web_quantity,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        (COALESCE(ws.total_quantity, 0) - COALESCE(rs.total_returns, 0)) AS net_sales
+    FROM 
+        item
+    LEFT JOIN ranked_sales ws ON item.i_item_sk = ws.ws_item_sk
+    LEFT JOIN returned_sales rs ON item.i_item_sk = rs.sr_item_sk
+)
+SELECT 
+    t.i_item_sk,
+    t.total_web_quantity,
+    t.total_returns,
+    t.net_sales,
+    ib.income_status,
+    RANK() OVER (ORDER BY t.net_sales DESC) AS sales_rank,
+    STRING_AGG(DISTINCT CONCAT('Item: ', t.i_item_sk, ' Sold: ', t.net_sales, ' Returns: ', t.total_returns)) AS sales_details
+FROM 
+    total_sales t
+JOIN 
+    income_brackets ib ON (SELECT COUNT(*) FROM customer c JOIN household_demographics h ON c.c_current_hdemo_sk = h.hd_demo_sk) > 1000
+WHERE 
+    t.net_sales IS NOT NULL 
+    AND (t.net_sales > 100 OR t.total_returns > 0)
+GROUP BY 
+    t.i_item_sk, t.total_web_quantity, t.total_returns, ib.income_status
+HAVING 
+    COUNT(*) > 3
+ORDER BY 
+    t.net_sales DESC NULLS LAST;

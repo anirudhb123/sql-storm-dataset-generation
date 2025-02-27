@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 1 -- Filter only questions
+    GROUP BY p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, p.Tags, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM Posts
+    WHERE PostTypeId = 1 -- Only questions
+    GROUP BY TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        TagCount,
+        ROW_NUMBER() OVER (ORDER BY TagCount DESC) AS TagRank
+    FROM PopularTags
+    WHERE TagCount > 10 -- Filters out less popular tags
+),
+PostsWithTopTags AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreatedDate,
+        rp.Tags,
+        tt.TagName
+    FROM RankedPosts rp
+    JOIN TopTags tt ON tt.TagName = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><'))
+)
+SELECT 
+    pt.PostId,
+    pt.Title,
+    pt.OwnerDisplayName,
+    pt.CreatedDate,
+    STRING_AGG(tt.TagName, ', ') AS Tags,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    COUNT(DISTINCT v.Id) AS TotalVotes,
+    CASE 
+        WHEN rp.PostRank = 1 THEN 'Latest Post'
+        ELSE 'Earlier Post' 
+    END AS PostStatus
+FROM PostsWithTopTags pt
+LEFT JOIN Comments c ON pt.PostId = c.PostId
+LEFT JOIN Votes v ON pt.PostId = v.PostId
+GROUP BY pt.PostId, pt.Title, pt.OwnerDisplayName, pt.CreatedDate, rp.PostRank
+ORDER BY TotalVotes DESC, TotalComments DESC;

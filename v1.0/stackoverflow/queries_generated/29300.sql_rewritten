@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.OwnerUserId,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.OwnerUserId, p.ViewCount
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Location,
+        u.Views,
+        SUM(CASE WHEN bp.PostId IS NOT NULL THEN 1 ELSE 0 END) AS PostsCreated,
+        SUM(CASE WHEN v.UserId IS NOT NULL THEN v.BountyAmount ELSE 0 END) AS TotalBountySpent,
+        COUNT(DISTINCT bh.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts bp ON u.Id = bp.OwnerUserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges bh ON u.Id = bh.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.Location, u.Views
+)
+
+SELECT 
+    ra.PostId,
+    ra.Title,
+    ra.ViewCount,
+    ua.DisplayName AS OwnerDisplayName,
+    ua.Reputation AS OwnerReputation,
+    ua.PostsCreated,
+    ua.TotalBountySpent,
+    ua.BadgeCount,
+    STRING_AGG(t.TagName, ', ') AS TagsList
+FROM 
+    RankedPosts ra
+JOIN 
+    UserActivity ua ON ra.OwnerUserId = ua.UserId
+LEFT JOIN 
+    Tags t ON t.TagName = ANY(string_to_array(ra.Tags, '><')) 
+WHERE 
+    ra.Rank <= 3 
+GROUP BY 
+    ra.PostId, ra.Title, ra.ViewCount, ua.DisplayName, ua.Reputation, ua.PostsCreated, ua.TotalBountySpent, ua.BadgeCount
+ORDER BY 
+    ra.ViewCount DESC;

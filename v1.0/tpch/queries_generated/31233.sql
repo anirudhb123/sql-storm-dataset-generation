@@ -1,0 +1,42 @@
+WITH RECURSIVE SuppliersHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)  -- Filter suppliers with above-average account balance
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, h.level + 1
+    FROM supplier s
+    JOIN SuppliersHierarchy h ON s.s_nationkey = h.s_nationkey
+    WHERE h.level < 3  -- Limit hierarchy depth to 3 levels
+)
+
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names,
+    CASE 
+        WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000000 THEN 'High Revenue'
+        ELSE 'Low Revenue' 
+    END AS revenue_category
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    SuppliersHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+WHERE 
+    o.o_orderstatus = 'F'  -- Filter for finished orders
+    AND p.p_retailprice > 20.00  -- Filter for retail price greater than 20
+GROUP BY 
+    p.p_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 10  -- Minimum orders limit
+ORDER BY 
+    total_revenue DESC 
+LIMIT 20;  -- Limit to top 20 results

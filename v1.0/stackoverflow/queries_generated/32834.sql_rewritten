@@ -1,0 +1,55 @@
+WITH RECURSIVE PopularPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        pp.Id,
+        pp.Title,
+        pp.Score,
+        pp.ViewCount,
+        pp.CreationDate,
+        Level + 1
+    FROM 
+        PopularPosts pp
+    JOIN 
+        Posts a ON a.ParentId = pp.Id
+    WHERE 
+        a.PostTypeId = 2 
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS NumberOfQuestions,
+    SUM(CASE WHEN p.Score IS NULL THEN 0 ELSE p.Score END) AS TotalScore,
+    SUM(CASE WHEN a.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalAnswers,
+    MAX(NULLIF(p.CreationDate, p.ClosedDate)) AS LastActiveDate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+LEFT JOIN 
+    Posts a ON p.Id = a.ParentId 
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT unnest(string_to_array(p.Tags, '<>'))::int) 
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+HAVING 
+    COUNT(DISTINCT p.Id) > 0
+ORDER BY 
+    TotalScore DESC, LastActiveDate DESC
+LIMIT 10;

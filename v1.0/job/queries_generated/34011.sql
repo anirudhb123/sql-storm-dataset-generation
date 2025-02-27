@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year = 2020
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    ci.role_id,
+    COUNT(DISTINCT ci.person_id) OVER (PARTITION BY ci.movie_id) AS total_cast,
+    MAX(pi.info) FILTER (WHERE it.info = 'Birthplace') AS actor_birthplace,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    movie_companies mc
+JOIN 
+    aka_title m ON mc.movie_id = m.id
+JOIN 
+    complete_cast cc ON m.id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id
+LEFT JOIN 
+    info_type it ON pi.info_type_id = it.id
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    m.production_year BETWEEN 2010 AND 2020
+    AND ci.role_id IN (SELECT role_id FROM role_type WHERE role ILIKE '%lead%')
+    AND a.name IS NOT NULL
+GROUP BY 
+    a.name, m.title, m.production_year, ci.role_id
+ORDER BY 
+    m.production_year DESC, total_cast DESC;

@@ -1,0 +1,65 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS RN
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11)
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 0
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.TotalUpvotes,
+    U.TotalDownvotes,
+    U.TotalPosts,
+    U.TotalBadges,
+    COALESCE(Ph.PostHistoryTypeId, 'No Actions') AS LastActionType,
+    COALESCE(PH.CreationDate, 'N/A') AS LastActionDate,
+    CASE 
+        WHEN U.TotalPosts = 0 THEN 'Inactive'
+        WHEN U.TotalUpvotes > U.TotalDownvotes THEN 'Active Contributor'
+        ELSE 'Needs Improvement'
+    END AS ContributionStatus
+FROM 
+    UserStatistics U
+LEFT JOIN 
+    PostHistoryDetails Ph ON U.UserId = Ph.PostId AND Ph.RN = 1
+JOIN 
+    TopUsers T ON U.UserId = T.Id
+WHERE 
+    T.ReputationRank <= 10
+ORDER BY 
+    U.TotalUpvotes DESC, U.TotalPosts DESC;

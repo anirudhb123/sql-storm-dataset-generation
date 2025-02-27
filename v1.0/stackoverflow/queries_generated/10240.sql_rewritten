@@ -1,0 +1,46 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(COALESCE(C.CommentCount, 0)) AS TotalComments,
+        SUM(COALESCE(V.Id, 0)) AS TotalVotes,
+        AVG(DATEDIFF(second, U.CreationDate, GETDATE())) AS AvgAccountAgeInSeconds
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        Reputation,
+        PostCount,
+        TotalViews,
+        TotalComments,
+        TotalVotes,
+        AvgAccountAgeInSeconds,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserStatistics
+)
+SELECT 
+    UserId,
+    Reputation,
+    PostCount,
+    TotalViews,
+    TotalComments,
+    TotalVotes,
+    AvgAccountAgeInSeconds,
+    ReputationRank
+FROM 
+    TopUsers
+WHERE 
+    ReputationRank <= 10;

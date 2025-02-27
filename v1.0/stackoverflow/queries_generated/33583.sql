@@ -1,0 +1,87 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        CAST(NULL AS INT) AS ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Top-level questions
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        ph.PostId AS ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+    WHERE 
+        p.PostTypeId = 2 -- Answers
+),
+VoteStats AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COALESCE(b.BadgeCount, 0) AS UserBadgeCount,
+        COALESCE(bp.BadgeNames, 'None') AS UserBadges,
+        ph.Level AS PostLevel
+    FROM 
+        Posts p
+    LEFT JOIN 
+        VoteStats v ON p.Id = v.PostId
+    LEFT JOIN 
+        UserBadges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        PostHierarchy ph ON p.Id = ph.PostId
+),
+AggregateStats AS (
+    SELECT 
+        PostLevel,
+        COUNT(*) AS TotalPosts,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes,
+        AVG(UserBadgeCount) AS AvgUserBadgeCount
+    FROM 
+        PostAnalytics
+    GROUP BY 
+        PostLevel
+)
+SELECT 
+    ps.PostLevel,
+    ps.TotalPosts,
+    ps.TotalUpVotes,
+    ps.TotalDownVotes,
+    ps.AvgUserBadgeCount
+FROM 
+    AggregateStats ps
+ORDER BY 
+    ps.PostLevel;

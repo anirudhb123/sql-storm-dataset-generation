@@ -1,0 +1,51 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) as rn
+    FROM
+        web_sales
+    WHERE
+        ws_sales_price IS NOT NULL
+),
+ItemSales AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        SUM(cs_ext_sales_price) AS total_catalog_sales,
+        COALESCE((SELECT SUM(ws_ext_sales_price) FROM web_sales WHERE ws_item_sk = i.i_item_sk), 0) AS total_web_sales,
+        COUNT(DISTINCT ss_ticket_number) AS total_store_sales
+    FROM 
+        item i
+    LEFT JOIN catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+    LEFT JOIN store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    GROUP BY i.i_item_sk, i.i_item_desc
+),
+AddressDetails AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_city, ', ', ca_state, ' ', ca_zip) AS full_address
+    FROM 
+        customer_address
+)
+SELECT 
+    i.i_item_desc,
+    COALESCE(s.total_catalog_sales, 0) AS total_catalog_sales,
+    COALESCE(s.total_web_sales, 0) AS total_web_sales,
+    COALESCE(s.total_store_sales, 0) AS total_store_sales,
+    ad.full_address,
+    MAX(CASE WHEN c.ws_quantity > 10 THEN c.ws_quantity END) OVER (PARTITION BY s.i_item_sk) AS max_quantity_over_10,
+    MIN(c.ws_sales_price) OVER (PARTITION BY s.i_item_sk) AS min_web_sale_price,
+    AVG(c.ws_sales_price) OVER (PARTITION BY s.i_item_sk) AS avg_web_sale_price,
+    COUNT(DISTINCT CASE WHEN c.rn = 1 THEN c.ws_item_sk END) OVER () AS unique_top_sales_items
+FROM 
+    ItemSales s
+JOIN 
+    AddressDetails ad ON s.i_item_sk = ad.ca_address_sk
+LEFT JOIN 
+    SalesCTE c ON s.i_item_sk = c.ws_item_sk
+ORDER BY 
+    total_catalog_sales DESC, 
+    total_web_sales DESC;

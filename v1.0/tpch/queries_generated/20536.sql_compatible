@@ -1,0 +1,82 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.p_brand) AS brand_count
+    FROM 
+        part p 
+    WHERE 
+        p.p_retailprice IS NOT NULL
+),
+SupplierStats AS (
+    SELECT 
+        s.s_nationkey,
+        SUM(s.s_acctbal) AS total_acctbal,
+        AVG(s.s_acctbal) AS avg_acctbal,
+        MAX(s.s_acctbal) AS max_acctbal,
+        MIN(s.s_acctbal) AS min_acctbal
+    FROM 
+        supplier s
+    GROUP BY 
+        s.s_nationkey
+),
+OrdersWithDiscount AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        CASE 
+            WHEN SUM(l.l_discount) > 0.1 THEN 'High Discount'
+            ELSE 'Low Discount'
+        END AS discount_category
+    FROM 
+        orders o 
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        MAX(o.o_totalprice) AS max_order_price,
+        SUM(o.o_totalprice) / NULLIF(COUNT(o.o_orderkey), 0) AS avg_order_price
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_brand,
+    COALESCE(cs.total_orders, 0) AS total_orders,
+    COALESCE(cs.max_order_price, 0) AS max_order_price,
+    s.total_acctbal,
+    ps.ps_supplycost,
+    ps.ps_availqty,
+    CASE 
+        WHEN ps.ps_supplycost IS NULL THEN 'Missing Supply Cost' 
+        ELSE 'Available'
+    END AS supply_cost_status
+FROM 
+    RankedParts p
+LEFT JOIN 
+    CustomerOrders cs ON cs.c_custkey = 
+    (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = p.p_partkey % 10 LIMIT 1)
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    SupplierStats s ON s.s_nationkey = p.p_partkey % 5
+WHERE 
+    p.rn = 1 
+    AND (p.brand_count > 1 OR p.p_retailprice BETWEEN 10 AND 100)
+ORDER BY 
+    p.p_brand, total_orders DESC, p.p_partkey;

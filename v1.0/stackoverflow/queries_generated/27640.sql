@@ -1,0 +1,74 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(CASE WHEN c.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN a.Id IS NOT NULL THEN 1 END) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tg(tag)
+    LEFT JOIN 
+        Tags t ON t.TagName = tg.tag
+    WHERE 
+        p.PostTypeId = 1  -- Considering only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        p.Title AS PostTitle,
+        p.Body AS PostBody,
+        ph.CreationDate AS HistoryCreationDate,
+        ph.UserDisplayName AS EditorDisplayName,
+        pht.Name AS ChangeType,
+        ph.Text AS ChangeDetails
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        pht.Id IN (4, 5, 6)  -- Considering title, body and tags edits
+)
+SELECT 
+    pd.PostId,
+    pd.Title AS PostTitle,
+    pd.Body AS PostBody,
+    pd.OwnerDisplayName,
+    pd.CommentCount,
+    pd.AnswerCount,
+    pd.TagsList,
+    pd.UpVoteCount,
+    pd.DownVoteCount,
+    json_agg(json_build_object(
+        'HistoryCreationDate', phd.HistoryCreationDate,
+        'EditorDisplayName', phd.EditorDisplayName,
+        'ChangeType', phd.ChangeType,
+        'ChangeDetails', phd.ChangeDetails
+    )) AS PostHistory
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    PostHistoryDetails phd ON pd.PostId = phd.PostId
+GROUP BY 
+    pd.PostId, pd.Title, pd.Body, pd.OwnerDisplayName, pd.CommentCount, pd.AnswerCount, pd.TagsList, pd.UpVoteCount, pd.DownVoteCount
+ORDER BY 
+    pd.CreationDate DESC
+LIMIT 50;  -- Benchmark with top 50 latest questions

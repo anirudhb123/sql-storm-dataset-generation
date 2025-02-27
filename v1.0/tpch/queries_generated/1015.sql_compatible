@@ -1,0 +1,36 @@
+
+WITH SupplierSummary AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+RegionNation AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_retailprice, ps.ps_availqty,
+           (ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+)
+SELECT rs.n_name AS nation,
+       rs.r_name AS region,
+       ss.s_name AS supplier,
+       ps.p_name AS part,
+       SUM(ls.l_quantity) AS total_quantity,
+       AVG(ls.l_extendedprice * (1 - ls.l_discount)) AS avg_price,
+       MIN(ss.s_acctbal) AS min_supplier_balance,
+       MAX(ps.total_cost) AS max_part_cost,
+       COUNT(DISTINCT o.o_orderkey) AS num_orders
+FROM lineitem ls
+JOIN orders o ON ls.l_orderkey = o.o_orderkey
+JOIN PartSupplier ps ON ls.l_partkey = ps.ps_partkey
+JOIN SupplierSummary ss ON ps.ps_suppkey = ss.s_suppkey AND ss.rank <= 5
+JOIN RegionNation rs ON ss.s_nationkey = rs.n_nationkey
+WHERE o.o_orderdate BETWEEN DATE '1995-01-01' AND DATE '1995-12-31'
+GROUP BY rs.n_name, rs.r_name, ss.s_name, ps.p_name, ss.s_suppkey, ps.ps_partkey
+HAVING SUM(ls.l_quantity) > 100
+ORDER BY total_quantity DESC, avg_price DESC;

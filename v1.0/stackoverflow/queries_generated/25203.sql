@@ -1,0 +1,46 @@
+WITH RankedPosts AS (
+    SELECT p.Id, 
+           p.Title, 
+           p.Body, 
+           p.Tags, 
+           p.CreationDate, 
+           u.DisplayName AS OwnerDisplayName,
+           COUNT(c.Id) AS CommentCount,
+           COUNT(a.Id) AS AnswerCount,
+           RANK() OVER (PARTITION BY 
+                         (SELECT COUNT(v.Id) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) 
+                         ORDER BY 
+                         (SELECT COUNT(v.Id) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) DESC
+                        ) AS Rank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE p.PostTypeId = 1
+    GROUP BY p.Id, p.Title, p.Body, p.Tags, p.CreationDate, u.DisplayName
+),
+TopPosts AS (
+    SELECT Id, Title, Body, Tags, CreationDate, OwnerDisplayName
+    FROM RankedPosts
+    WHERE Rank <= 10
+),
+PostDetails AS (
+    SELECT tp.Title, 
+           tp.Body, 
+           tp.CreationDate, 
+           tp.OwnerDisplayName, 
+           COALESCE (GROUP_CONCAT( DISTINCT t.TagName), 'No Tags') AS Tags,
+           COALESCE (SUM(b.Class), 0) AS TotalBadgePoints
+    FROM TopPosts tp
+    LEFT JOIN Tags t ON FIND_IN_SET(t.TagName, SUBSTRING(REPLACE(tp.Tags, '<', '>'), 2, LENGTH(tp.Tags) - 2)) > 0
+    LEFT JOIN Badges b ON b.UserId = (SELECT u.Id FROM Users u WHERE u.DisplayName = tp.OwnerDisplayName)
+    GROUP BY tp.Title, tp.Body, tp.CreationDate, tp.OwnerDisplayName
+)
+SELECT Title,
+       Body,
+       CreationDate,
+       OwnerDisplayName,
+       Tags,
+       TotalBadgePoints
+FROM PostDetails
+ORDER BY TotalBadgePoints DESC, CreationDate DESC;

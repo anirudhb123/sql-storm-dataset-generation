@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_net_profit) DESC) AS rn
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT max(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        s_store_sk, ss_sold_date_sk
+),
+top_stores AS (
+    SELECT 
+        s_store_sk,
+        total_profit
+    FROM 
+        sales_hierarchy
+    WHERE 
+        rn <= 5
+),
+customer_income AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON hd.hd_demo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        income_band ib ON ib.ib_income_band_sk = hd.hd_income_band_sk
+)
+SELECT 
+    t_store.s_store_name,
+    t_store.s_city,
+    SUM(t_sales.total_profit) AS total_store_profit,
+    COUNT(DISTINCT c.c_customer_id) AS unique_customers,
+    COALESCE(AVG(CASE WHEN income.ib_income_band_sk IS NOT NULL THEN (income.ib_lower_bound + income.ib_upper_bound) / 2 END), 0) AS avg_income,
+    DENSE_RANK() OVER (ORDER BY SUM(t_sales.total_profit) DESC) AS store_rank
+FROM 
+    top_stores t_sales
+JOIN 
+    store t_store ON t_sales.s_store_sk = t_store.s_store_sk
+JOIN 
+    web_sales ws ON ws.ws_warehouse_sk = t_store.s_store_sk
+JOIN 
+    customer_income income ON ws.ws_bill_customer_sk = income.c_customer_sk
+GROUP BY 
+    t_store.s_store_name, t_store.s_city
+HAVING 
+    total_store_profit > 10000
+ORDER BY 
+    total_store_profit DESC
+LIMIT 10;

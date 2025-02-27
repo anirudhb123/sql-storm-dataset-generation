@@ -1,0 +1,47 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_current_addr_sk IS NOT NULL
+    GROUP BY c.c_customer_id, c.c_first_name, c.c_last_name
+),
+SalesByGender AS (
+    SELECT 
+        cd.cd_gender,
+        SUM(cs.total_sales) AS gender_sales,
+        COUNT(cs.c_customer_id) AS customer_count
+    FROM CustomerSales cs
+    JOIN customer_demographics cd ON cs.c_customer_id = cd.cd_demo_sk
+    GROUP BY cd.cd_gender
+),
+SalesStatistics AS (
+    SELECT 
+        cd.cd_gender,
+        AVG(gender_sales) AS avg_sales,
+        MAX(gender_sales) AS max_sales,
+        MIN(gender_sales) AS min_sales
+    FROM SalesByGender sbg
+    GROUP BY sbg.cd_gender
+)
+SELECT 
+    s.cd_gender,
+    s.avg_sales,
+    s.max_sales,
+    s.min_sales,
+    COALESCE(i.ib_lower_bound, 0) AS income_lower,
+    COALESCE(i.ib_upper_bound, 0) AS income_upper
+FROM SalesStatistics s
+LEFT JOIN household_demographics hd ON s.cd_gender = CASE 
+                               WHEN hd.hd_income_band_sk IS NOT NULL THEN 'M'
+                               ELSE 'F' END
+LEFT JOIN income_band i ON hd.hd_income_band_sk = i.ib_income_band_sk
+WHERE s.avg_sales > (
+    SELECT AVG(avg_sales) FROM SalesStatistics
+)
+ORDER BY s.avg_sales DESC;

@@ -1,0 +1,42 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+order_summary AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_order_value
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    GROUP BY o.o_custkey
+),
+customer_ranked AS (
+    SELECT c.c_custkey, c.c_name, os.total_order_value,
+    RANK() OVER (ORDER BY os.total_order_value DESC) AS order_rank
+    FROM customer c
+    JOIN order_summary os ON c.c_custkey = os.o_custkey
+)
+SELECT 
+    p.p_name, 
+    COUNT(DISTINCT lp.l_orderkey) AS order_count, 
+    SUM(lp.l_extendedprice * (1 - lp.l_discount)) AS total_revenue,
+    r.r_name AS region_name,
+    sh.level AS supplier_level
+FROM part p
+JOIN lineitem lp ON p.p_partkey = lp.l_partkey
+JOIN orders o ON lp.l_orderkey = o.o_orderkey
+JOIN customer_ranked cr ON o.o_custkey = cr.c_custkey
+LEFT JOIN supplier_hierarchy sh ON cr.c_nationkey = sh.s_nationkey
+LEFT JOIN nation n ON sh.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE lp.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY p.p_name, r.r_name, sh.level
+HAVING SUM(lp.l_extendedprice * (1 - lp.l_discount)) > 10000
+ORDER BY total_revenue DESC;

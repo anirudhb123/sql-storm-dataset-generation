@@ -1,0 +1,80 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) as price_rank,
+        COALESCE(NULLIF(ws.ws_sales_price - ws.ws_ext_discount_amt, 0), NULL) AS effective_price
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+),
+SalesSummary AS (
+    SELECT 
+        r.ws_item_sk,
+        COUNT(r.ws_order_number) AS total_sales_count,
+        SUM(r.effective_price) AS total_sales_value,
+        AVG(r.effective_price) AS average_price,
+        MAX(r.effective_price) AS max_price,
+        MIN(r.effective_price) AS min_price
+    FROM 
+        RankedSales r
+    WHERE 
+        r.price_rank <= 5
+    GROUP BY 
+        r.ws_item_sk
+)
+SELECT 
+    s.s_store_sk,
+    s.s_store_name,
+    ss.total_sales_count,
+    ss.total_sales_value,
+    ss.average_price,
+    CASE 
+        WHEN ss.total_sales_value IS NULL THEN 'No Sales'
+        WHEN ss.average_price > 100 THEN 'High Value Item'
+        ELSE 'Regular Item'
+    END AS item_category,
+    COUNT(DISTINCT ws.ws_order_number) AS order_count
+FROM 
+    store s
+LEFT JOIN 
+    SalesSummary ss ON s.s_store_sk = ss.ws_item_sk
+LEFT JOIN 
+    web_sales ws ON ws.ws_item_sk = ss.ws_item_sk
+WHERE 
+    s.s_state = (SELECT MAX(w.w_state) FROM warehouse w WHERE w.w_country = 'USA')
+AND 
+    ss.total_sales_count IS NOT NULL
+GROUP BY 
+    s.s_store_sk, s.s_store_name, ss.total_sales_count, ss.total_sales_value, ss.average_price
+HAVING 
+    SUM(CASE WHEN ss.average_price IS NULL THEN 1 ELSE 0 END) < 2
+ORDER BY 
+    s.s_store_name ASC,
+    total_sales_value DESC
+LIMIT 20
+UNION ALL
+SELECT 
+    cc.cc_call_center_sk,
+    cc.cc_name,
+    COUNT(cr.cr_order_number) AS total_return_count,
+    SUM(cr.cr_return_amount) AS total_return_value,
+    AVG(cr.cr_return_amount) AS average_return,
+    'Returns' AS item_category,
+    COUNT(DISTINCT cr.cr_order_number) AS order_count
+FROM 
+    call_center cc
+LEFT JOIN 
+    catalog_returns cr ON cc.cc_call_center_sk = cr.cr_call_center_sk
+WHERE 
+    cc.cc_closed_date_sk IS NOT NULL
+GROUP BY 
+    cc.cc_call_center_sk, cc.cc_name
+HAVING 
+    total_return_count > 5 AND total_return_value IS NOT NULL
+ORDER BY 
+    total_return_value DESC;

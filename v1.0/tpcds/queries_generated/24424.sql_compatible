@@ -1,0 +1,86 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_profit
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.profit_rank <= 10
+),
+CustomerDemo AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+AddressInfo AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        CASE 
+            WHEN ca.ca_state IN ('CA', 'NY') THEN 'High'
+            ELSE 'Low'
+        END AS state_priority
+    FROM 
+        customer_address ca
+)
+SELECT 
+    tc.c_customer_id,
+    td.cd_gender,
+    td.cd_marital_status,
+    COALESCE(td.cd_purchase_estimate, 0) AS purchase_estimate,
+    ai.ca_city,
+    CASE 
+        WHEN ai.state_priority = 'High' AND td.cd_marital_status = 'M' THEN 'Targeted Promotion'
+        WHEN ai.state_priority = 'Low' AND td.cd_marital_status = 'S' THEN 'Generic Ads'
+        ELSE 'Standard'
+    END AS promotion_strategy,
+    COUNT(*) OVER (PARTITION BY ai.ca_state) AS customers_in_state
+FROM 
+    TopCustomers tc
+INNER JOIN 
+    CustomerDemo td ON tc.c_customer_id = td.cd_demo_sk
+LEFT JOIN 
+    AddressInfo ai ON ai.ca_address_sk = td.cd_demo_sk
+WHERE 
+    ai.ca_city IS NOT NULL
+UNION ALL
+SELECT 
+    'TOTAL' AS c_customer_id,
+    NULL AS cd_gender,
+    NULL AS cd_marital_status,
+    SUM(COALESCE(td.cd_purchase_estimate, 0)) AS purchase_estimate,
+    NULL AS ca_city,
+    'Total Sum' AS promotion_strategy,
+    COUNT(*) AS customers_in_state
+FROM 
+    CustomerDemo td
+WHERE 
+    td.cd_purchase_estimate IS NOT NULL
+GROUP BY 
+    'TOTAL', cd_gender, cd_marital_status
+ORDER BY 
+    CASE 
+        WHEN c_customer_id = 'TOTAL' THEN 1 
+        ELSE 0 
+    END, 
+    total_profit DESC;

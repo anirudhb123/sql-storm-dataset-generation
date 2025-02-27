@@ -1,0 +1,57 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_quantity,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_item_sk) AS rn
+    FROM web_sales
+    UNION ALL
+    SELECT 
+        cs_order_number,
+        cs_item_sk,
+        cs_quantity,
+        cs_ext_sales_price
+    FROM catalog_sales
+    WHERE cs_order_number IS NOT NULL
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        d.d_year,
+        SUM(sd.ws_quantity) AS total_quantity,
+        SUM(sd.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT sd.ws_order_number) AS order_count
+    FROM customer c
+    LEFT JOIN sales_data sd ON c.c_customer_sk = sd.ws_order_number -- assuming ws_order_number relates to customer
+    JOIN date_dim d ON sd.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year BETWEEN 2021 AND 2023
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, d.d_year
+),
+income_data AS (
+    SELECT 
+        hd.hd_demo_sk,
+        SUM(CASE 
+            WHEN hd.hd_income_band_sk IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS income_customers,
+        AVG(total_sales) AS avg_sales_per_customer
+    FROM household_demographics hd
+    JOIN customer_summary cs ON hd.hd_demo_sk = cs.c_customer_sk
+    GROUP BY hd.hd_demo_sk
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.total_quantity,
+    cs.total_sales,
+    id.income_customers,
+    id.avg_sales_per_customer
+FROM customer_summary cs
+JOIN income_data id ON cs.c_customer_sk = id.hd_demo_sk
+ORDER BY cs.total_sales DESC
+LIMIT 50
+OFFSET 10;

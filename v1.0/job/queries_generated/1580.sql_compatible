@@ -1,0 +1,53 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS actor_count,
+        AVG(mk.keyword_count) OVER (PARTITION BY t.id) AS avg_keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'duration') AND 
+        mi.info IS NOT NULL
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+filtered_movies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        COALESCE(rm.actor_count, 0) AS actor_count,
+        COALESCE(rm.avg_keyword_count, 0) AS avg_keyword_count
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_keywords mk ON rm.id = mk.movie_id
+    WHERE 
+        rm.actor_count > 5 AND 
+        rm.production_year IS NOT NULL
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.actor_count,
+    f.avg_keyword_count
+FROM 
+    filtered_movies f
+ORDER BY 
+    f.production_year DESC, 
+    f.actor_count DESC
+LIMIT 10;

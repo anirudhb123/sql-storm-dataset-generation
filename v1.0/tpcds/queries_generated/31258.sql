@@ -1,0 +1,37 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+HighValueItems AS (
+    SELECT 
+        s.i_item_id,
+        s.i_item_desc,
+        s.i_current_price,
+        COALESCE((
+            SELECT cd.cd_dependent_count 
+            FROM customer_demographics cd
+            WHERE cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_customer_sk = (SELECT MIN(c2.c_customer_sk) FROM customer c2)) 
+            LIMIT 1), 0) AS dependent_count
+    FROM item s
+    JOIN SalesCTE sc ON s.i_item_sk = sc.ws_item_sk
+    WHERE sc.rank <= 10
+)
+SELECT 
+    hi.i_item_id,
+    hi.i_item_desc,
+    hi.i_current_price,
+    hi.dependent_count,
+    CASE 
+        WHEN hi.dependent_count < 1 THEN 'No Dependents' 
+        ELSE 'Has Dependents' 
+    END AS dependent_status
+FROM HighValueItems hi
+WHERE hi.i_current_price > (SELECT AVG(i_current_price) FROM item) 
+OR hi.dependent_count IS NULL
+ORDER BY hi.i_current_price DESC;

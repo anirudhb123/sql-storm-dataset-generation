@@ -1,0 +1,72 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) AS total_lineitems
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+),
+AggregatedSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        part p ON l.l_partkey = p.p_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    c.c_name AS Customer_Name,
+    c.o_orderkey AS Order_Number,
+    s.s_name AS Supplier_Name,
+    r.r_name AS Region,
+    COALESCE(a.total_sales, 0) AS Total_Sales,
+    RANK() OVER (PARTITION BY c.c_custkey ORDER BY COALESCE(a.total_sales, 0) DESC) AS Sales_Rank,
+    CASE 
+        WHEN r.r_name IS NULL THEN 'No Region'
+        ELSE r.r_name
+    END AS Region_Name_Fallback
+FROM 
+    CustomerOrderDetails c
+LEFT JOIN 
+    RankedSuppliers s ON c.c_custkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    AggregatedSales a ON c.o_orderkey = a.p_partkey
+WHERE 
+    s.rn = 1
+ORDER BY 
+    c.c_name, Total_Sales DESC;

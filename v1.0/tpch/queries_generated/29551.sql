@@ -1,0 +1,58 @@
+WITH SuppDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_address, 
+        n.n_name AS nation_name, 
+        r.r_name AS region_name, 
+        CONCAT(s.s_name, ' (', n.n_name, ', ', r.r_name, ')') AS supplier_info
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_type, 
+        p.p_size, 
+        p.p_retailprice, 
+        LEFT(p.p_comment, 20) AS short_comment, 
+        REPLACE(p.p_comment, 'obsolete', 'outdated') AS updated_comment
+    FROM 
+        part p
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        COUNT(DISTINCT l.l_linenumber) AS items_count, 
+        SUM(l.l_extendedprice) AS total_price, 
+        SUM(l.l_discount) AS total_discounted
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    sd.supplier_info, 
+    pd.p_name, 
+    od.items_count, 
+    od.total_price, 
+    od.total_discounted, 
+    CONCAT(pd.p_name, ' is supplied by ', sd.supplier_info, ' with total orders: ', od.items_count, ' and total price: $', ROUND(od.total_price, 2)) AS detailed_info
+FROM 
+    SuppDetails sd
+JOIN 
+    PartDetails pd ON pd.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sd.s_suppkey)
+JOIN 
+    OrderDetails od ON od.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = sd.s_nationkey))
+WHERE 
+    pd.p_retailprice > 50.00
+ORDER BY 
+    od.total_price DESC;

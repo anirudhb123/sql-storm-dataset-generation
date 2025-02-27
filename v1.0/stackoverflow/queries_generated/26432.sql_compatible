@@ -1,0 +1,59 @@
+
+WITH UserTagStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsMentioned
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        (SELECT 
+            pt.PostId, 
+            unnest(string_to_array(substring(pt.Tags, 2, length(pt.Tags) - 2), '><')) AS TagName
+        FROM 
+            Posts pt 
+        WHERE 
+            pt.Tags IS NOT NULL) t ON p.Id = t.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopContributors AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        TotalPosts, 
+        TotalQuestions, 
+        TotalAnswers, 
+        TotalViews, 
+        TotalBadges,
+        TagsMentioned
+    FROM 
+        UserTagStatistics
+    ORDER BY 
+        TotalPosts DESC, TotalAnswers DESC
+    LIMIT 5
+)
+SELECT 
+    UTC.UserId,
+    UTC.DisplayName,
+    UTC.TotalPosts,
+    UTC.TotalQuestions,
+    UTC.TotalAnswers,
+    UTC.TotalViews,
+    UTC.TotalBadges,
+    UTC.TagsMentioned,
+    ROUND(CAST(UTC.TotalViews AS DECIMAL) / NULLIF(UTC.TotalPosts, 0), 2) AS AverageViewsPerPost,
+    ROUND(CAST(UTC.TotalAnswers AS DECIMAL) / NULLIF(UTC.TotalQuestions, 0), 2) AS AverageAnswersPerQuestion
+FROM 
+    TopContributors UTC
+ORDER BY 
+    UTC.TotalPosts DESC;

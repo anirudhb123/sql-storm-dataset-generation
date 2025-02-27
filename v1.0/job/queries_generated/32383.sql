@@ -1,0 +1,54 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_link ml ON m.id = ml.movie_id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ml.linked_movie_id,
+        mh.depth + 1
+    FROM 
+        title m
+    INNER JOIN 
+        movie_link ml ON m.id = ml.movie_id
+    INNER JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+)
+SELECT 
+    t.title AS main_title,
+    GROUP_CONCAT(DISTINCT t2.title) AS linked_titles,
+    t.production_year,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    ROUND(AVG(CASE WHEN pi.info_type_id IS NOT NULL THEN 1 ELSE 0 END), 2) AS avg_person_info,
+    COALESCE(SUM(CASE WHEN ci.note IS NULL THEN 1 ELSE 0 END), 0) AS null_notes_count
+FROM 
+    title t
+LEFT JOIN 
+    movie_link ml ON t.id = ml.movie_id
+LEFT JOIN 
+    title t2 ON ml.linked_movie_id = t2.id
+LEFT JOIN 
+    cast_info ci ON t.id = ci.movie_id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id
+LEFT JOIN 
+    movie_hierarchy mh ON t.id = mh.movie_id
+WHERE 
+    t.production_year > 2000 AND t.production_year <= 2023
+GROUP BY 
+    t.id, t.title, t.production_year
+ORDER BY 
+    t.production_year DESC, total_cast DESC;

@@ -1,0 +1,82 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank_within_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_shippriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN '1998-01-01' AND '1998-12-31'
+        AND o.o_orderstatus IN ('O', 'F')
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity_ordered,
+        AVG(p.p_retailprice) AS avg_price,
+        COUNT(l.l_orderkey) AS order_count
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+FinalResults AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        ps.total_supply_cost,
+        po.avg_price,
+        SUM(fd.total_quantity_ordered) AS total_ordered_quantity,
+        COUNT(DISTINCT fo.o_orderkey) AS unique_orders_count
+    FROM 
+        RankedSuppliers ps
+    FULL OUTER JOIN 
+        nation n ON ps.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    CROSS JOIN 
+        PartDetails po
+    JOIN 
+        FilteredOrders fo ON fo.o_orderkey = po.p_partkey 
+    GROUP BY 
+        r.r_name, n.n_name, ps.total_supply_cost, po.avg_price
+    HAVING 
+        ps.total_supply_cost > (
+            SELECT AVG(total_supply_cost)
+            FROM RankedSuppliers
+            WHERE rank_within_nation = 1
+        ) OR po.avg_price IS NULL
+)
+SELECT 
+    FR.region_name,
+    FR.nation_name,
+    COALESCE(FR.total_supply_cost, 0) AS total_supply_cost,
+    COALESCE(FR.avg_price, 0.00) AS average_price,
+    FR.total_ordered_quantity,
+    FR.unique_orders_count
+FROM 
+    FinalResults FR
+WHERE 
+    (FR.region_name IS NOT NULL AND FR.nation_name IS NOT NULL)
+    OR (FR.total_ordered_quantity IS NOT NULL AND FR.unique_orders_count > 5)
+ORDER BY 
+    FR.unique_orders_count DESC, FR.total_ordered_quantity ASC;

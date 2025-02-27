@@ -1,0 +1,94 @@
+WITH SupplierSummary AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+CustomerOrderSummary AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+ProductSales AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM
+        part p
+    JOIN
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY
+        p.p_partkey, p.p_name
+),
+TopProducts AS (
+    SELECT
+        *,
+        ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM
+        ProductSales
+),
+SalesByRegion AS (
+    SELECT
+        n.n_name AS nation_name,
+        SUM(pps.total_sales) AS region_sales
+    FROM
+        nation n
+    JOIN
+        partsupp ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_brand = 'Brand#23')
+    JOIN
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN (
+        SELECT p.p_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+        FROM part p
+        JOIN lineitem l ON p.p_partkey = l.l_partkey
+        GROUP BY p.p_partkey
+    ) pps ON l.l_partkey = pps.p_partkey
+    GROUP BY n.n_name
+)
+
+SELECT
+    c.customer_name,
+    COALESCE(cos.total_orders, 0) AS total_orders,
+    COALESCE(cos.total_spent, 0) AS total_spent,
+    ss.unique_parts,
+    ss.total_cost,
+    tp.p_name,
+    tp.total_sales,
+    sr.region_sales
+FROM
+    (
+        SELECT
+            c.c_name AS customer_name,
+            c.c_custkey
+        FROM
+            customer c
+        WHERE
+            c.c_acctbal IS NOT NULL
+    ) c
+LEFT JOIN
+    CustomerOrderSummary cos ON c.c_custkey = cos.c_custkey
+LEFT JOIN
+    SupplierSummary ss ON ss.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_brand = 'Brand#23'))
+LEFT JOIN
+    TopProducts tp ON tp.sales_rank <= 10
+LEFT JOIN
+    SalesByRegion sr ON sr.nation_name IN (SELECT n.n_name FROM nation n WHERE n.n_nationkey = c.c_nationkey)
+ORDER BY
+    total_spent DESC, customer_name;

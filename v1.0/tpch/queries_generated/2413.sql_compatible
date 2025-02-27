@@ -1,0 +1,68 @@
+
+WITH SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(LAG(ps.ps_supplycost) OVER (PARTITION BY s.s_suppkey ORDER BY p.p_retailprice DESC)) AS cost_difference
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+    HAVING
+        SUM(ps.ps_availqty) > 100
+)
+SELECT 
+    c.c_name AS CustomerName,
+    COALESCE(sp.s_name, 'No Supplier') AS SupplierName,
+    sp.p_name AS PartName,
+    sp.ps_availqty AS AvailableQty,
+    co.order_count AS TotalOrders,
+    co.total_spent AS TotalSpent,
+    ts.total_available AS TotalAvailableQty,
+    ts.cost_difference AS CostDifference
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    SupplierParts sp ON co.c_custkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = sp.s_suppkey)
+LEFT JOIN 
+    TopSuppliers ts ON sp.s_suppkey = ts.s_suppkey
+WHERE 
+    (co.total_spent IS NOT NULL AND co.total_spent > 5000)
+    OR (ts.total_available IS NOT NULL AND ts.total_available < 100)
+ORDER BY 
+    co.total_spent DESC, ts.cost_difference ASC
+LIMIT 50;

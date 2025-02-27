@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.Score, p.ViewCount, p.Tags
+), 
+TopPostsByTag AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.Tags,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank = 1
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvotesReceived,
+        COUNT(c.Id) AS CommentsGiven
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    p.Title AS QuestionTitle,
+    p.Body AS QuestionBody,
+    p.CreationDate AS QuestionDate,
+    p.Score AS QuestionScore,
+    p.ViewCount AS QuestionViews,
+    p.Tags AS QuestionTags,
+    ua.DisplayName AS UserDisplayName,
+    ua.UpvotesReceived,
+    ua.DownvotesReceived,
+    ua.CommentsGiven,
+    COUNT(DISTINCT ph.UserId) AS EditCount,
+    STRING_AGG(DISTINCT pt.Name, ', ') AS PostHistoryTypes
+FROM 
+    TopPostsByTag p
+JOIN 
+    PostHistory ph ON p.PostId = ph.PostId
+JOIN 
+    Users ua ON p.OwnerUserId = ua.Id
+JOIN 
+    PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+GROUP BY 
+    p.PostId, ua.DisplayName, p.Title, p.Body, p.CreationDate, p.Score, p.ViewCount, p.Tags, ua.UpvotesReceived, ua.DownvotesReceived, ua.CommentsGiven
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC
+LIMIT 100;

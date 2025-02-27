@@ -1,0 +1,33 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+    FROM supplier s
+    INNER JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal 
+), nation_supplier_count AS (
+    SELECT n.n_name, COUNT(DISTINCT sh.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier_hierarchy sh ON n.n_nationkey = sh.s_nationkey
+    GROUP BY n.n_name
+), part_price AS (
+    SELECT p.p_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_price
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+), order_analysis AS (
+    SELECT o.o_orderkey, AVG(li.l_extendedprice) AS avg_line_price, 
+           SUM(CASE WHEN li.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_count
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT ns.n_name, ns.supplier_count, pp.total_price, oa.avg_line_price, oa.return_count
+FROM nation_supplier_count ns
+FULL OUTER JOIN part_price pp ON pp.total_price > (SELECT AVG(total_price) FROM part_price) 
+FULL OUTER JOIN order_analysis oa ON oa.avg_line_price < 1000
+WHERE ns.supplier_count IS NOT NULL OR pp.total_price IS NULL
+ORDER BY ns.n_name ASC NULLS FIRST
+LIMIT 50;

@@ -1,0 +1,77 @@
+
+WITH RankedSupp AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS supply_rank
+    FROM 
+        partsupp ps
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        c.c_custkey, o.o_orderkey, o.o_orderdate
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        RankedSupp rs ON s.s_suppkey = rs.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        SUM(co.total_spent) AS customer_value,
+        DENSE_RANK() OVER (ORDER BY SUM(co.total_spent) DESC) AS customer_rank
+    FROM 
+        CustomerOrders co
+    JOIN 
+        customer c ON co.c_custkey = c.c_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_name,
+    np.n_name,
+    COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied,
+    AVG(sd.total_supplycost) AS avg_supply_cost,
+    SUM(TC.customer_value) AS total_top_customer_value
+FROM 
+    region r
+JOIN 
+    nation np ON r.r_regionkey = np.n_regionkey
+LEFT JOIN 
+    supplier s ON np.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierDetails sd ON s.s_suppkey = sd.s_suppkey
+LEFT JOIN 
+    TopCustomers TC ON TC.customer_value > 1000
+LEFT JOIN 
+    RankedSupp ps ON ps.ps_suppkey = s.s_suppkey  -- Added this join to include ps in the SELECT clause
+WHERE 
+    sd.part_count > 0 OR sd.part_count IS NULL
+GROUP BY 
+    r.r_name, np.n_name
+HAVING 
+    COUNT(DISTINCT ps.ps_partkey) > 5 OR COUNT(DISTINCT ps.ps_partkey) IS NULL
+ORDER BY 
+    r.r_name, np.n_name;

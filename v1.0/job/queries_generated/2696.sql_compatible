@@ -1,0 +1,45 @@
+
+WITH movie_ranks AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY mt.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank_by_cast
+    FROM aka_title mt
+    LEFT JOIN cast_info ci ON mt.id = ci.movie_id
+    GROUP BY mt.id, mt.title, mt.production_year
+),
+top_movies AS (
+    SELECT 
+        mr.movie_id,
+        mr.title,
+        mr.production_year,
+        mr.cast_count
+    FROM movie_ranks mr
+    WHERE mr.rank_by_cast <= 5
+),
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        ak.person_id,
+        ci.movie_id
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+)
+
+SELECT 
+    tm.title AS top_movie_title,
+    tm.production_year,
+    COALESCE(ARRAY_AGG(DISTINCT ai.actor_name), '{}') AS actors,
+    COALESCE(MIN(mk.keyword), 'No Keywords') AS keywords
+FROM top_movies tm
+LEFT JOIN actor_info ai ON tm.movie_id = ai.movie_id
+LEFT JOIN movie_keyword mk ON tm.movie_id = mk.movie_id
+GROUP BY 
+    tm.movie_id, tm.title, tm.production_year
+HAVING 
+    COUNT(ai.actor_name) > 0
+ORDER BY 
+    tm.production_year DESC,
+    tm.title;

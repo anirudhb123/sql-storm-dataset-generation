@@ -1,0 +1,94 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY mt.production_year) AS total_titles
+    FROM 
+        aka_title mt
+),
+MovieCast AS (
+    SELECT 
+        mc.movie_id,
+        mk.keyword,
+        ci.note AS role_note,
+        COALESCE(ci.nr_order, 0) AS order_nr,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY COALESCE(ci.nr_order, 0), mk.keyword) AS cast_rank
+    FROM 
+        movie_keyword mk
+    JOIN 
+        cast_info ci ON ci.movie_id = mk.movie_id
+    JOIN 
+        movie_companies mc ON mc.movie_id = mk.movie_id
+    WHERE 
+        mk.keyword IS NOT NULL AND
+        mk.keyword NOT LIKE '%documentary%'
+),
+CompanyStatistics AS (
+    SELECT
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS actors_with_notes
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON cn.id = mc.company_id
+    JOIN 
+        company_type ct ON ct.id = mc.company_type_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = mc.movie_id
+    GROUP BY 
+        mc.movie_id, cn.name, ct.kind
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 5
+),
+FinalReport AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        c.company_name,
+        c.company_type,
+        c.actor_count,
+        c.actors_with_notes,
+        CASE 
+            WHEN c.actor_count > 10 THEN 'Large Cast'
+            WHEN c.actor_count BETWEEN 6 AND 10 THEN 'Medium Cast'
+            ELSE 'Small Cast'
+        END AS cast_size,
+        SUM(mk.keyword IS NOT NULL) OVER (PARTITION BY rm.movie_id) AS keyword_count,
+        COALESCE(SUM(CASE WHEN mk.keyword LIKE 'action%' THEN 1 ELSE 0 END) OVER (PARTITION BY rm.movie_id), 0) AS action_keyword_count
+    FROM 
+        RankedMovies rm
+    JOIN 
+        CompanyStatistics c ON c.movie_id = rm.movie_id
+    LEFT JOIN 
+        MovieCast mk ON mk.movie_id = rm.movie_id
+    WHERE 
+        rm.title_rank <= 3 AND 
+        rm.total_titles > 5 AND
+        c.actor_count <= 20
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    company_name,
+    company_type,
+    actor_count,
+    actors_with_notes,
+    cast_size,
+    keyword_count,
+    action_keyword_count,
+    CASE 
+        WHEN production_year IS NULL THEN 'Unknown Year'
+        ELSE CAST(production_year AS TEXT)
+    END AS production_year_label
+FROM 
+    FinalReport
+ORDER BY
+    production_year DESC, 
+    title;

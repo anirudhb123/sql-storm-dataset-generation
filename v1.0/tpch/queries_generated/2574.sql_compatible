@@ -1,0 +1,88 @@
+
+WITH ranked_suppliers AS (
+    SELECT 
+        ps.partkey,
+        ps.suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.s_suppkey = s.s_suppkey
+),
+high_value_orders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+supplier_order_counts AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        supplier s
+    LEFT JOIN 
+        lineitem l ON s.s_suppkey = l.l_suppkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        s.s_suppkey
+),
+region_nation AS (
+    SELECT 
+        r.r_regionkey,
+        n.n_nationkey,
+        COUNT(*) AS nation_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey, n.n_nationkey
+),
+final_report AS (
+    SELECT 
+        rs.partkey,
+        rs.s_name,
+        SUM(hvo.total_order_value) AS total_value,
+        COUNT(DISTINCT s.o_orderkey) AS orders_placed,
+        rn.nation_count,
+        rs.s_acctbal
+    FROM 
+        ranked_suppliers rs
+    LEFT JOIN 
+        high_value_orders hvo ON rs.partkey = hvo.o_orderkey
+    LEFT JOIN 
+        supplier_order_counts s ON rs.suppkey = s.s_suppkey
+    LEFT JOIN 
+        region_nation rn ON rs.suppkey = rn.n_nationkey
+    WHERE 
+        rs.rank = 1
+    GROUP BY 
+        rs.partkey, rs.s_name, rn.nation_count, rs.s_acctbal
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_value IS NULL THEN 'No Orders'
+        ELSE 'Active'
+    END AS order_status,
+    CASE 
+        WHEN s_acctbal IS NOT NULL AND s_acctbal > 5000 THEN 'Premium Supplier'
+        ELSE 'Regular Supplier'
+    END AS supplier_type
+FROM 
+    final_report
+ORDER BY 
+    total_value DESC NULLS LAST;

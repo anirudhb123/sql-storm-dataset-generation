@@ -1,0 +1,51 @@
+
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT Id, Reputation, CreationDate, DisplayName, UpVotes, DownVotes, 
+           (UpVotes - DownVotes) AS NetVotes
+    FROM Users
+    WHERE Reputation > 0
+    UNION ALL
+    SELECT u.Id, u.Reputation, u.CreationDate, u.DisplayName, u.UpVotes, u.DownVotes, 
+           (u.UpVotes - u.DownVotes) AS NetVotes
+    FROM Users u
+    INNER JOIN UserReputationCTE ur ON ur.Id = u.Id
+    WHERE u.Reputation < ur.Reputation
+),
+PostStats AS (
+    SELECT p.Id AS PostId, p.Title, p.CreationDate, p.Score, p.ViewCount,
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS DownVotes,
+           COUNT(DISTINCT c.Id) AS CommentCount,
+           COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS CloseCount,
+           COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS ReopenCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+TopPostStats AS (
+    SELECT PostId, Title, CreationDate, Score, ViewCount, UpVotes, DownVotes, 
+           CommentCount, CloseCount, ReopenCount, 
+           RANK() OVER (ORDER BY Score DESC) AS RankScore
+    FROM PostStats
+)
+SELECT u.DisplayName, u.Reputation, 
+       'Total Posts' AS Metric, 
+       COUNT(DISTINCT p.Id) AS Quantity
+FROM Users u
+LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN TopPostStats tps ON p.Id = tps.PostId
+WHERE u.Id IN (SELECT Id FROM UserReputationCTE WHERE Reputation >= 1000)
+GROUP BY u.DisplayName, u.Reputation
+HAVING COUNT(DISTINCT p.Id) > 10
+UNION ALL
+SELECT u.DisplayName, u.Reputation,
+       'Top Scoring Post Title' AS Metric,
+       MAX(CASE WHEN RankScore = 1 THEN Title END)
+FROM Users u
+JOIN TopPostStats tps ON u.Id = tps.PostId
+WHERE u.Id IN (SELECT Id FROM UserReputationCTE WHERE Reputation >= 1000)
+GROUP BY u.DisplayName, u.Reputation
+ORDER BY u.Reputation DESC;

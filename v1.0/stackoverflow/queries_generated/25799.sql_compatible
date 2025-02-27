@@ -1,0 +1,86 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS Questions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS Answers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+), Ranking AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY UpVotes DESC, DownVotes ASC) AS VoteRank
+    FROM 
+        UserVoteStats
+), PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerDisplayName,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerDisplayName
+    HAVING 
+        COUNT(DISTINCT t.TagName) > 1
+), DetailedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        h.Name AS HistoryType,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes h ON ph.PostHistoryTypeId = h.Id
+    WHERE 
+        h.Id IN (10, 11, 12, 13) 
+)
+SELECT 
+    r.DisplayName AS UserDisplayName,
+    r.UpVotes,
+    r.DownVotes,
+    r.PostCount,
+    r.Questions,
+    r.Answers,
+    pp.PostId,
+    pp.Title AS PostTitle,
+    pp.CreationDate AS PostCreationDate,
+    pp.ViewCount AS PostViewCount,
+    pp.Score AS PostScore,
+    pp.OwnerDisplayName AS PostOwnerDisplayName,
+    ph.HistoryType AS PostHistoryType,
+    ph.CreationDate AS HistoryCreationDate,
+    ph.UserDisplayName AS HistoryUserDisplayName,
+    ph.Comment AS HistoryComment,
+    ph.Text AS HistoryText
+FROM 
+    Ranking r
+LEFT JOIN 
+    PopularPosts pp ON r.UserId = pp.OwnerDisplayName
+LEFT JOIN 
+    DetailedPostHistory ph ON pp.PostId = ph.PostId
+WHERE 
+    r.VoteRank <= 10 
+ORDER BY 
+    r.VoteRank, pp.PostScore DESC;

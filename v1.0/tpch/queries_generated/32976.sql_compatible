@@ -1,0 +1,59 @@
+
+WITH RECURSIVE cte_supplier AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal, 
+           s.n_nationkey
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal, 
+           s.n_nationkey
+    FROM supplier s
+    INNER JOIN cte_supplier c ON s.n_nationkey = c.n_nationkey
+    WHERE s.s_acctbal > c.s_acctbal
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, 
+           o.o_totalprice, 
+           o.o_orderdate, 
+           RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+part_sales AS (
+    SELECT p.p_partkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY p.p_partkey
+),
+filtered_parts AS (
+    SELECT p.*, 
+           ps.ps_supplycost, 
+           ps.ps_availqty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty IS NOT NULL AND ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+    ORDER BY p.p_size ASC
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    SUM(ps.ps_availqty) AS total_available,
+    AVG(COALESCE(l.l_discount, 0)) AS avg_discount,
+    SUM(w.total_sales) AS total_part_sales
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN filtered_parts ps ON n.n_nationkey = ps.p_partkey
+LEFT JOIN lineitem l ON ps.p_partkey = l.l_partkey
+JOIN part_sales w ON ps.p_partkey = w.p_partkey
+WHERE w.total_sales IS NOT NULL
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT n.n_nationkey) > 1
+ORDER BY total_available DESC, nation_count ASC;

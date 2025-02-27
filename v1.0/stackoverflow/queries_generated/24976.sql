@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankViews,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.PostTypeId, p.OwnerUserId, p.CreationDate, p.ViewCount
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges,
+        MAX(u.CreationDate) AS AccountCreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.PostId) AS EditedPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        PostHistory ph ON u.Id = ph.UserId AND ph.PostHistoryTypeId IN (4, 5) -- Edit Title, Edit Body
+    GROUP BY 
+        u.Id
+),
+InactiveUsers AS (
+    SELECT 
+        Id AS UserId
+    FROM 
+        Users
+    WHERE 
+        LastAccessDate < (CURRENT_DATE - INTERVAL '1 year')
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        ua.TotalBadges,
+        ua.CommentCount,
+        ua.EditedPosts
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserActivity ua ON u.Id = ua.UserId
+    WHERE 
+        u.Reputation > 1000 OR u.Id IN (SELECT UserId FROM InactiveUsers)
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    CASE 
+        WHEN fp.PostTypeId IN (1, 2) THEN 'Question/Answer'
+        ELSE 'Other'
+    END AS PostCategory,
+    fp.ViewCount,
+    fp.RankViews,
+    COALESCE(fp.TotalBadges, 0) AS TotalBadges,
+    fp.CommentCount,
+    fp.EditedPosts,
+    CASE 
+        WHEN fp.ViewCount IS NULL THEN 'No Views Recorded'
+        ELSE 'Views Present'
+    END AS ViewStatus,
+    COALESCE(fp.ViewCount / NULLIF(fp.UpVoteCount, 0), 0) AS ViewRatio,
+    (SELECT STRING_AGG(Name, ', ') FROM PostHistoryTypes WHERE Id IN (SELECT PostHistoryTypeId FROM PostHistory ph WHERE ph.PostId = fp.PostId)) AS PostHistoryTypes
+FROM 
+    FilteredPosts fp
+WHERE 
+    fp.RankViews <= 5
+ORDER BY 
+    fp.ViewCount DESC, fp.Title;

@@ -1,0 +1,53 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        mt.title AS full_title
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        et.id,
+        et.title,
+        et.production_year,
+        mh.level + 1,
+        mh.full_title || ' > ' || et.title AS full_title
+    FROM 
+        aka_title et
+    INNER JOIN 
+        MovieHierarchy mh ON et.episode_of_id = mh.id
+)
+
+SELECT 
+    mh.full_title,
+    mh.production_year,
+    COUNT(c.id) AS cast_count,
+    AVG(CASE WHEN p.gender IS NULL THEN 0 ELSE 1 END) AS gender_info,
+    STRING_AGG(DISTINCT nc.name, ', ') AS character_names,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    name nc ON c.person_id = nc.id
+LEFT JOIN 
+    movie_keyword mk ON mh.id = mk.movie_id
+LEFT JOIN 
+    person_info p ON c.person_id = p.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'gender')
+WHERE 
+    mh.production_year > 2000
+GROUP BY 
+    mh.full_title, mh.production_year
+ORDER BY 
+    mh.production_year DESC, cast_count DESC
+LIMIT 50;

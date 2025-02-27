@@ -1,0 +1,60 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) as title_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+ActorMovies AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name AS actor_name,
+        at.title AS movie_title,
+        at.production_year,
+        c.person_role_id,
+        RANK() OVER (PARTITION BY ak.id ORDER BY at.production_year DESC) as actor_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    JOIN 
+        aka_title at ON c.movie_id = at.movie_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+CompanyMovieCounts AS (
+    SELECT 
+        mc.company_id,
+        COUNT(DISTINCT mc.movie_id) AS movie_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        movie_info mi ON mc.movie_id = mi.movie_id
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Oscar')
+    GROUP BY 
+        mc.company_id
+)
+SELECT 
+    am.actor_name,
+    rt.title,
+    rt.production_year,
+    coalesce(cm.movie_count, 0) AS company_movie_count,
+    CASE 
+        WHEN rt.title_rank = 1 THEN 'Latest Title'
+        ELSE 'Earlier Title'
+    END AS title_status
+FROM 
+    ActorMovies am
+INNER JOIN 
+    RankedTitles rt ON am.movie_title = rt.title AND am.production_year = rt.production_year
+LEFT JOIN 
+    CompanyMovieCounts cm ON am.movie_title = (SELECT title FROM aka_title WHERE movie_id = am.movie_id LIMIT 1)
+WHERE 
+    am.actor_rank <= 5
+ORDER BY 
+    am.actor_name, rt.production_year DESC;

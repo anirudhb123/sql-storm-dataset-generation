@@ -1,0 +1,73 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(SUBSTRING(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 24) -- Title, Body, Tags edited, Suggested edits
+    GROUP BY 
+        ph.PostId
+),
+TopPosts AS (
+    SELECT 
+        pd.*,
+        COALESCE(ph.EditCount, 0) AS EditCount,
+        ph.LastEditDate
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        PostHistoryDetails ph ON pd.PostId = ph.PostId
+    ORDER BY 
+        pd.Score DESC,
+        pd.ViewCount DESC
+    LIMIT 10
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Body,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    p.CommentCount,
+    p.Tags,
+    p.OwnerDisplayName,
+    p.OwnerReputation,
+    p.EditCount,
+    p.LastEditDate,
+    CASE 
+        WHEN p.EditCount > 5 THEN 'Highly Edited'
+        WHEN p.EditCount BETWEEN 1 AND 5 THEN 'Moderately Edited'
+        ELSE 'Never Edited'
+    END AS EditStatus
+FROM 
+    TopPosts p
+ORDER BY 
+    p.CreationDate DESC;

@@ -1,0 +1,56 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1
+    FROM
+        movie_link ml
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+
+SELECT
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    SUM(mi.note IS NOT NULL)::int AS has_extra_info,
+    RANK() OVER (PARTITION BY ak.id ORDER BY mh.depth) AS movie_rank,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    MAX(CASE WHEN ci.note LIKE '%lead%' THEN 1 ELSE 0 END) AS is_lead_role
+FROM
+    aka_name ak
+JOIN
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN
+    keyword kw ON mk.keyword_id = kw.id
+JOIN
+    aka_title mt ON mh.movie_id = mt.id
+WHERE
+    ak.name IS NOT NULL
+    AND mh.production_year >= 2000
+GROUP BY
+    ak.id, mt.id, mh.production_year
+ORDER BY
+    actor_name, movie_rank;

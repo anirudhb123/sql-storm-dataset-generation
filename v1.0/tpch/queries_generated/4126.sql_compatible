@@ -1,0 +1,76 @@
+
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND l.l_shipdate >= DATE '1997-01-01' 
+        AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+RankedSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.total_sales,
+        s.order_count,
+        RANK() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM 
+        SupplierSales s
+),
+CustomerAggregates AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        ca.c_custkey,
+        ca.c_name,
+        ca.total_spent,
+        RANK() OVER (ORDER BY ca.total_spent DESC) AS spend_rank
+    FROM 
+        CustomerAggregates ca
+)
+
+SELECT 
+    r.s_name AS supplier_name,
+    r.total_sales AS supplier_sales,
+    t.c_name AS customer_name,
+    t.total_spent AS customer_spent,
+    CASE 
+        WHEN r.total_sales IS NULL THEN 'No Sales'
+        ELSE CAST(r.total_sales AS VARCHAR(255))
+    END AS sales_status,
+    COALESCE(t.total_orders, 0) AS customer_order_count
+FROM 
+    RankedSales r
+FULL OUTER JOIN 
+    TopCustomers t ON r.s_suppkey = t.c_custkey
+WHERE 
+    (r.sales_rank <= 10 OR r.sales_rank IS NULL)
+    AND (t.spend_rank <= 5 OR t.spend_rank IS NULL)
+ORDER BY 
+    r.total_sales DESC, t.total_spent DESC;

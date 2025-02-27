@@ -1,0 +1,41 @@
+WITH SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+PartSupplierStatistics AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, p.p_size
+    FROM part p
+    WHERE p.p_size BETWEEN 1 AND 10 AND p.p_retailprice > 100.00
+),
+OrderSums AS (
+    SELECT o.o_custkey, COUNT(*) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    GROUP BY o.o_custkey
+)
+SELECT 
+    n.n_name AS nation,
+    s.s_name AS supplier_name,
+    CONCAT('Part: ', p.p_name, ', Retail Price: $', CAST(p.p_retailprice AS CHAR)) AS part_details,
+    ps.total_available, 
+    ps.avg_supply_cost,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS returned_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COALESCE(ROUND(SUM(l.l_extendedprice * (1 - l.l_discount)), 2), 0) AS total_revenue
+FROM FilteredParts p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN SupplierInfo s ON ps.ps_suppkey = s.s_suppkey AND s.rank <= 5
+LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN orders o ON o.o_orderkey = l.l_orderkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')
+GROUP BY n.n_name, s.s_name, p.p_name, p.p_retailprice, ps.total_available, ps.avg_supply_cost
+HAVING total_orders > 10
+ORDER BY total_revenue DESC;

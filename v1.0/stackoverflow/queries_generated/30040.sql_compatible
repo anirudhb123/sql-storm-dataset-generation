@@ -1,0 +1,103 @@
+
+WITH RecursivePostChain AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        rpc.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostChain rpc ON p.ParentId = rpc.PostId
+),
+PostScore AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ROUND(CAST(p.Score AS NUMERIC) / NULLIF(p.ViewCount, 0), 2), 0) AS ScorePerView
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) b ON u.Id = b.UserId
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+AggregatedResults AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.UserId,
+        ps.DisplayName,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.BadgeCount,
+        ps.ScorePerView,
+        COALESCE(rpc.Level, 0) AS PostLevel,
+        COALESCE(rph.HistoryCount, 0) AS HistoryCount,
+        COALESCE(rph.HistoryTypes, 'None') AS HistoryTypes
+    FROM 
+        PostScore ps
+    LEFT JOIN 
+        RecursivePostChain rpc ON ps.PostId = rpc.PostId
+    LEFT JOIN 
+        RecentPostHistory rph ON ps.PostId = rph.PostId
+)
+SELECT 
+    a.*,
+    CASE 
+        WHEN a.ScorePerView > 0.5 THEN 'High Engagement'
+        WHEN a.ScorePerView BETWEEN 0.1 AND 0.5 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM 
+    AggregatedResults a
+WHERE 
+    a.BadgeCount > 0
+ORDER BY 
+    a.PostLevel DESC, a.ScorePerView DESC;

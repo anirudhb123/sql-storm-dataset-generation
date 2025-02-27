@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(NULLIF(l.l_extendedprice * (1 - l.l_discount), 0)) AS total_revenue,
+        COUNT(DISTINCT l.l_suppkey) AS supplier_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY o.o_orderkey
+),
+RegionNation AS (
+    SELECT r.r_name, n.n_name, COUNT(*) AS nation_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_name, n.n_name
+)
+SELECT 
+    ph.p_name,
+    ph.p_brand,
+    ph.p_mfgr,
+    ph.total_revenue,
+    rn.n_name AS region_nation,
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_with_high_acctbal,
+    MAX(ph.total_revenue) OVER (PARTITION BY ph.p_brand) AS brand_max_revenue
+FROM part ph
+LEFT JOIN OrderSummary os ON ph.p_partkey = os.o_orderkey
+LEFT JOIN RegionNation rn ON ph.p_brand = rn.n_name
+LEFT JOIN SupplierHierarchy sh ON sh.level = 0
+WHERE ph.p_size > 10 
+    AND ph.p_retailprice IS NOT NULL
+    AND EXISTS (
+        SELECT 1 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = ph.p_partkey 
+        AND ps.ps_availqty > 0
+    )
+GROUP BY ph.p_partkey, ph.p_name, ph.p_brand, ph.p_mfgr, rn.n_name
+HAVING COUNT(DISTINCT sh.s_suppkey) > 1
+    AND MAX(ph.total_revenue) > 100000
+ORDER BY ph.p_brand, total_revenue DESC;

@@ -1,0 +1,72 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.UserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId AND c.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT v.Id) AS TotalVotes,
+        p.CreationDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+),
+UserPostStats AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        ps.PostId,
+        ps.Title,
+        ps.TotalComments,
+        ps.TotalVotes,
+        us.Reputation
+    FROM 
+        UserStats us
+    JOIN 
+        PostEngagement ps ON us.UserId = p.OwnerUserId
+    ORDER BY 
+        us.Reputation DESC, ps.TotalVotes DESC
+)
+SELECT 
+    ups.DisplayName,
+    ups.Reputation,
+    ups.Title,
+    COALESCE(ups.TotalComments, 0) AS NumberOfComments,
+    COALESCE(ups.TotalVotes, 0) AS NumberOfVotes
+FROM 
+    UserPostStats ups
+JOIN 
+    UserStats us ON us.UserId = ups.UserId
+WHERE 
+    ups.TotalVotes > 0
+ORDER BY 
+    ups.Reputation DESC, ups.NumberOfVotes DESC
+LIMIT 10;

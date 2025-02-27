@@ -1,0 +1,37 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT ps.ps_suppkey, s.s_name, s.n_nationkey, s.s_acctbal, sc.level + 1
+    FROM SupplyChain sc
+    JOIN partsupp ps ON sc.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE sc.level < 3
+)
+
+SELECT
+    r.r_name AS region,
+    n.n_name AS nation,
+    c.c_name AS customer,
+    SUM(o.o_totalprice) AS total_order_value,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    CASE 
+        WHEN SUM(o.o_totalprice) IS NULL THEN 0
+        ELSE SUM(l.l_extendedprice * (1 - l.l_discount)) / NULLIF(COUNT(l.l_extendedprice), 0) OVER (PARTITION BY c.c_custkey)
+    END AS average_price_after_discount
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN SupplyChain sc ON c.c_nationkey = sc.s_nationkey
+WHERE o.o_orderstatus = 'O' 
+  AND sc.s_acctbal IS NOT NULL
+GROUP BY r.r_name, n.n_name, c.c_name, c.c_custkey
+HAVING SUM(o.o_totalprice) > 10000
+ORDER BY total_order_value DESC
+FETCH FIRST 10 ROWS ONLY;

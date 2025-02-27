@@ -1,0 +1,52 @@
+WITH RankedSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+RecentOrders AS (
+    SELECT 
+        o.o_custkey,
+        o.o_orderkey,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+SupplierAggregates AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    p.p_name,
+    COALESCE(RS.total_sales, 0) AS total_sales,
+    COALESCE(SA.total_supply_cost, 0) AS total_supply_cost,
+    COALESCE(RO.o_totalprice, 0) AS recent_order_price
+FROM 
+    part p
+LEFT JOIN 
+    RankedSales RS ON p.p_partkey = RS.p_partkey AND RS.sales_rank = 1
+LEFT JOIN 
+    SupplierAggregates SA ON p.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = (SELECT MAX(s.s_suppkey) FROM supplier s WHERE s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'GERMANY')))
+LEFT JOIN 
+    RecentOrders RO ON RO.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name LIKE '%Customer%')
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+ORDER BY 
+    total_sales DESC, recent_order_price DESC;

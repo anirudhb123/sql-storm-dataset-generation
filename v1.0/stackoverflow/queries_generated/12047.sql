@@ -1,0 +1,28 @@
+-- Performance Benchmarking Query
+WITH PostDetails AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.CreationDate, 
+           p.ViewCount, 
+           p.Score, 
+           u.DisplayName AS OwnerDisplayName,
+           COUNT(c.Id) AS CommentCount,
+           COUNT(v.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 1  -- Filter for Questions
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, u.DisplayName
+),
+PostsWithBadges AS (
+    SELECT pd.*,
+           COUNT(b.Id) AS BadgeCount
+    FROM PostDetails pd
+    LEFT JOIN Badges b ON pd.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = b.UserId)
+    GROUP BY pd.PostId, pd.Title, pd.CreationDate, pd.ViewCount, pd.Score, pd.OwnerDisplayName
+)
+SELECT *,
+       CAST((EXTRACT(EPOCH FROM NOW()) - EXTRACT(EPOCH FROM CreationDate)) AS INT) AS AgeInSeconds
+FROM PostsWithBadges
+ORDER BY Score DESC, ViewCount DESC;

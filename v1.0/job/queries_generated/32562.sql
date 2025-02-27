@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT id, title, production_year, episode_of_id, season_nr, episode_nr
+    FROM aka_title
+    WHERE episode_of_id IS NULL -- Base case: top-level titles (not episodes)
+
+    UNION ALL
+
+    SELECT a.id, a.title, a.production_year, a.episode_of_id, a.season_nr, a.episode_nr
+    FROM aka_title a
+    INNER JOIN movie_hierarchy mh ON a.episode_of_id = mh.id -- Recursive case: join episodes to their parent titles
+),
+cast_with_roles AS (
+    SELECT ci.movie_id, a.name AS actor_name, rt.role AS role
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN role_type rt ON ci.role_id = rt.id
+),
+company_details AS (
+    SELECT mc.movie_id, c.name AS company_name, ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+),
+extended_movie_info AS (
+    SELECT 
+        mh.title,
+        mh.production_year,
+        COALESCE(GROUP_CONCAT(DISTINCT cw.actor_name), 'No Cast') AS cast,
+        COALESCE(GROUP_CONCAT(DISTINCT cd.company_name), 'No Companies') AS companies,
+        COUNT(DISTINCT mw.keyword_id) AS keyword_count
+    FROM movie_hierarchy mh
+    LEFT JOIN cast_with_roles cw ON mh.id = cw.movie_id
+    LEFT JOIN company_details cd ON mh.id = cd.movie_id
+    LEFT JOIN movie_keyword mw ON mh.id = mw.movie_id
+    GROUP BY mh.id, mh.title, mh.production_year
+),
+final_movie_info AS (
+    SELECT
+        emi.title,
+        emi.production_year,
+        emi.cast,
+        emi.companies,
+        emi.keyword_count,
+        RANK() OVER (PARTITION BY emi.production_year ORDER BY emi.keyword_count DESC) AS rank
+    FROM extended_movie_info emi
+)
+
+SELECT 
+    fmi.title,
+    fmi.production_year,
+    fmi.cast,
+    fmi.companies,
+    fmi.keyword_count,
+    fmi.rank
+FROM final_movie_info fmi
+WHERE fmi.keyword_count > 0 -- Filter to include only movies with keywords
+  AND fmi.production_year >= 1990 -- Consider movies from 1990 onward
+ORDER BY fmi.production_year, fmi.rank;

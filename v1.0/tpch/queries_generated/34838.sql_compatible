@@ -1,0 +1,49 @@
+
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, oh.o_custkey, oh.level + 1
+    FROM orders oh
+    INNER JOIN order_hierarchy o ON oh.o_custkey = o.o_custkey
+    WHERE oh.o_orderdate > o.o_orderdate
+),
+part_supplier_info AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > 100.00
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 1000.00
+    GROUP BY c.c_custkey, c.c_name
+),
+ranked_supply AS (
+    SELECT ps.p_partkey, SUM(ps.ps_supplycost) AS total_cost, 
+           RANK() OVER (PARTITION BY ps.p_partkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM partsupp ps
+    GROUP BY ps.p_partkey
+)
+SELECT 
+    ch.c_name,
+    ch.total_spent,
+    p.p_name,
+    p.ps_availqty,
+    r.total_cost,
+    COALESCE(r.rank, 0) AS rank,
+    CASE 
+        WHEN ch.total_spent > 2000 THEN 'High Value'
+        WHEN ch.total_spent BETWEEN 1000 AND 2000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM customer_orders ch
+JOIN part_supplier_info p ON ch.c_custkey = p.p_partkey
+LEFT JOIN ranked_supply r ON p.p_partkey = r.p_partkey
+WHERE r.rank <= 5
+ORDER BY ch.total_spent DESC, r.total_cost ASC;

@@ -1,0 +1,43 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.nationkey = sh.nationkey AND s.s_suppkey <> sh.s_suppkey
+    WHERE sh.level < 5
+)
+SELECT
+    R.r_name,
+    SUM(CASE
+            WHEN L.l_discount > 0.1 THEN L.l_extendedprice * (1 - L.l_discount)
+            ELSE 0
+        END) AS total_discounted_revenue,
+    COUNT(DISTINCT C.c_custkey) AS unique_customers,
+    AVG(P.p_retailprice) AS avg_part_price,
+    COALESCE(MAX(SH.s_acctbal), 0) AS max_supplier_balance,
+    COUNT(DISTINCT 
+        CASE 
+            WHEN O.o_orderdate >= DATEADD(year, -1, '1998-10-01') THEN O.o_orderkey 
+        END) AS recent_orders
+FROM region R
+LEFT OUTER JOIN nation N ON R.r_regionkey = N.n_regionkey
+LEFT JOIN supplier S ON N.n_nationkey = S.n_nationkey
+LEFT JOIN partsupp PS ON S.s_suppkey = PS.ps_suppkey
+LEFT JOIN part P ON PS.ps_partkey = P.p_partkey
+LEFT JOIN lineitem L ON L.l_partkey = P.p_partkey
+LEFT JOIN orders O ON O.o_orderkey = L.l_orderkey
+LEFT JOIN customer C ON C.c_custkey = O.o_custkey
+LEFT JOIN supplier_hierarchy SH ON SH.s_suppkey = S.s_suppkey
+WHERE 
+    P.p_size BETWEEN 1 AND 5 AND 
+    (O.o_orderstatus IS NULL OR O.o_orderstatus <> 'C')
+GROUP BY R.r_name
+HAVING 
+    AVG(SH.s_acctbal) IS NOT NULL OR COUNT(C.c_custkey) > 10
+ORDER BY total_discounted_revenue DESC, unique_customers DESC
+FETCH NEXT 10 ROWS ONLY;

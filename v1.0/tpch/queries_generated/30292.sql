@@ -1,0 +1,44 @@
+WITH RECURSIVE supplier_ranking AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+nation_summary AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+part_supplier AS (
+    SELECT p.p_partkey, SUM(ps.ps_supplycost) AS total_supplycost,
+           AVG(ps.ps_availqty) AS avg_availqty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT ns.n_name, ns.supplier_count, ns.total_acctbal, ps.total_supplycost,
+       po.total_revenue, po.distinct_parts, 
+       CASE WHEN ns.supplier_count > 0 THEN ns.total_acctbal / ns.supplier_count ELSE NULL END AS avg_acctbal_per_supplier,
+       COALESCE(r.rank, 'N/A') AS supplier_rank
+FROM nation_summary ns
+LEFT JOIN part_supplier ps ON ps.p_partkey = (
+    SELECT p.p_partkey 
+    FROM part p 
+    WHERE p.p_brand = 'Brand#24'
+    ORDER BY p.p_retailprice DESC 
+    LIMIT 1
+)
+LEFT JOIN order_summary po ON po.total_revenue > (
+    SELECT AVG(total_revenue) FROM order_summary
+)
+LEFT JOIN supplier_ranking r ON ns.n_nationkey = r.s_suppkey
+WHERE ns.total_acctbal IS NOT NULL
+ORDER BY ns.n_name, avg_acctbal_per_supplier DESC;

@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+), 
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(NULLIF(p.p_comment, ''), 'No Comment') AS p_comment,
+        SUM(l.l_discount * l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_comment
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS TotalOrders,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ps.s_suppkey,
+    s.s_name,
+    COALESCE(MAX(cd.TotalRevenue), 0) AS MaxRevenue,
+    COUNT(DISTINCT co.c_custkey) AS OrdererCount,
+    AVG(co.TotalSpent) AS AvgSpentPerOrderer,
+    CASE 
+        WHEN LENGTH(s.s_name) > 10 THEN 'Long Name'
+        ELSE 'Short Name'
+    END AS SupplierNameLengthCategory
+FROM 
+    PartDetails p
+LEFT JOIN 
+    RankedSuppliers ps ON p.p_partkey = ps.ps_partkey AND ps.SupplierRank = 1
+LEFT JOIN 
+    supplier s ON ps.s_suppkey = s.s_suppkey
+LEFT JOIN 
+    CustomerOrders co ON co.TotalOrders > 5
+GROUP BY 
+    p.p_partkey, p.p_name, ps.s_suppkey, s.s_name
+HAVING 
+    (MAX(p.TotalRevenue) > 10000 OR COUNT(DISTINCT co.c_custkey) > 0)
+    AND SUM(CASE WHEN p.p_size IS NULL THEN 1 ELSE 0 END) < 5
+ORDER BY 
+    MaxRevenue DESC NULLS LAST, 
+    SupplierNameLengthCategory ASC;

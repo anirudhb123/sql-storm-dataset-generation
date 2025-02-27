@@ -1,0 +1,64 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        NULL AS parent_movie_id,
+        1 AS depth
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.movie_id,
+        mh.depth + 1
+    FROM
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT
+    h.movie_id,
+    h.title,
+    h.production_year,
+    h.parent_movie_id,
+    h.depth,
+    COALESCE(mk.keyword, 'No Keywords') AS keyword,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    AVG(CASE 
+            WHEN pi.info IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS has_person_info_ratio,
+    MAX(CASE 
+            WHEN pi.note IS NOT NULL THEN pi.note 
+            ELSE 'No Note' 
+        END) AS last_note,
+    STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+    COUNT(DISTINCT CASE WHEN cct.kind = 'Production' THEN mc.id END) AS production_companies
+FROM 
+    movie_hierarchy h
+LEFT JOIN 
+    movie_keyword mk ON h.movie_id = mk.movie_id
+LEFT JOIN 
+    cast_info ci ON h.movie_id = ci.movie_id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id
+LEFT JOIN 
+    movie_companies mc ON h.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type cct ON mc.company_type_id = cct.id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+GROUP BY 
+    h.movie_id, h.title, h.production_year, h.parent_movie_id, h.depth, mk.keyword
+ORDER BY 
+    h.depth DESC, h.production_year ASC;

@@ -1,0 +1,68 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        AnswerCount,
+        QuestionCount,
+        BadgeCount
+    FROM 
+        UserStats
+    WHERE 
+        Rank <= 10
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(PH.RevisionGUID, 'N/A') AS LatestRevisionGUID,
+        P.ViewCount,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        (SELECT STRING_AGG(T.TagName, ', ') FROM Tags T WHERE T.Id IN (SELECT tag_id FROM UNNEST(string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><')) AS tag_id)) AS TagList
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.CommentCount,
+    P.TagList,
+    CASE WHEN P.ViewCount IS NULL THEN 0 ELSE P.ViewCount END AS ViewCount,
+    CASE 
+        WHEN P.Score > 5 THEN 'Highly Rated'
+        WHEN P.Score BETWEEN 1 AND 5 THEN 'Moderately Rated'
+        ELSE 'Needs Attention'
+    END AS Rating
+FROM 
+    TopUsers U
+JOIN 
+    PostDetails P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, P.Score DESC;

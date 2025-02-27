@@ -1,0 +1,32 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.Score) AS AverageScore,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.UpVotes) AS TotalUpVotes,
+        SUM(p.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000 
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    UserId,
+    DisplayName,
+    PostCount,
+    AverageScore,
+    TotalViews,
+    TotalUpVotes,
+    TotalDownVotes,
+    (TotalUpVotes - TotalDownVotes) AS NetVotes 
+FROM 
+    UserPostStats
+ORDER BY 
+    PostCount DESC;

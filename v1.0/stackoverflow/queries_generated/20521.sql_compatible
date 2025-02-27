@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') OVER (PARTITION BY p.Id) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN 
+        Tags t ON t.Id = pl.TagId
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+        AND p.PostTypeId IN (1, 2)
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS MaxBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        v.VoteTypeId IN (2, 3)  
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    rp.OwnerReputation,
+    rp.CommentCount,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    COALESCE(ub.MaxBadgeClass, 0) AS MaxBadgeClass,
+    ra.VoteCount,
+    ra.LastVoteDate,
+    CASE 
+        WHEN rp.PostRank = 1 THEN 'Latest Post'
+        WHEN rp.CommentCount > 10 THEN 'Hot Post'
+        WHEN rp.Score >= 50 THEN 'Top Rated'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN 
+    RecentActivity ra ON rp.PostId = ra.PostId
+WHERE 
+    rp.Tags LIKE '%SQL%'
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 100
+OFFSET 0;

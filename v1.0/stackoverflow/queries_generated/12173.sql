@@ -1,0 +1,63 @@
+-- Performance Benchmarking Query
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 5 THEN 1 ELSE 0 END), 0) AS FavoriteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.PostTypeId, p.CreationDate, p.Score, p.ViewCount
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(u.Reputation) AS TotalReputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT ph.Id) AS PostHistoryCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON u.Id = ph.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.PostId,
+    ps.PostTypeId,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    ps.FavoriteCount,
+    us.UserId,
+    us.BadgeCount,
+    us.TotalReputation,
+    us.PostCount,
+    us.PostHistoryCount
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.PostTypeId = u.Id -- Example join condition; adjust as necessary
+JOIN 
+    UserStats us ON u.Id = us.UserId
+ORDER BY 
+    ps.ViewCount DESC, ps.Score DESC
+LIMIT 100;

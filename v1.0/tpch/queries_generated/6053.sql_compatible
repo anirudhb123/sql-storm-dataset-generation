@@ -1,0 +1,60 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+),
+TopSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > 10000
+    GROUP BY 
+        ps.ps_suppkey
+    ORDER BY 
+        total_supplycost DESC
+    LIMIT 10
+)
+SELECT 
+    r.n_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    AVG(cp.avg_order_value) AS average_order_value
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    (SELECT 
+        o_custkey, AVG(o_totalprice) AS avg_order_value
+     FROM 
+        orders
+     GROUP BY 
+        o_custkey) cp ON c.c_custkey = cp.o_custkey
+WHERE 
+    s.s_suppkey IN (SELECT ps_suppkey FROM TopSuppliers)
+GROUP BY 
+    r.n_name
+ORDER BY 
+    total_sales DESC;

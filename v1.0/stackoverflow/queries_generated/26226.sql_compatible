@@ -1,0 +1,76 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY U.Location ORDER BY p.ViewCount DESC) AS PostRank
+    FROM
+        Posts p
+    JOIN
+        Users U ON p.OwnerUserId = U.Id
+    WHERE
+        p.PostTypeId = 1 
+        AND U.Location IS NOT NULL 
+),
+TopUsers AS (
+    SELECT
+        U.Location,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(P.ViewCount) AS TotalViews
+    FROM
+        Users U
+    JOIN
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE
+        P.PostTypeId = 1
+    GROUP BY
+        U.Location
+    HAVING
+        COUNT(DISTINCT P.Id) > 5 
+),
+CombinedData AS (
+    SELECT
+        RP.PostId,
+        RP.Title,
+        RP.Body,
+        RP.CreationDate,
+        RP.ViewCount,
+        RP.Score,
+        RP.Tags,
+        RP.OwnerDisplayName,
+        TU.TotalPosts,
+        TU.TotalViews
+    FROM
+        RankedPosts RP
+    JOIN
+        TopUsers TU ON RP.OwnerDisplayName = TU.Location
+    WHERE
+        RP.PostRank <= 3 
+)
+SELECT
+    TU.Location,
+    JSON_AGG(
+        JSON_BUILD_OBJECT(
+            'PostId', CD.PostId,
+            'Title', CD.Title,
+            'ViewCount', CD.ViewCount,
+            'Score', CD.Score,
+            'Tags', CD.Tags
+        )
+    ) AS TopPosts,
+    COUNT(CD.PostId) AS NumOfTopPosts,
+    SUM(CD.ViewCount) AS TotalViews
+FROM
+    CombinedData CD
+JOIN
+    TopUsers TU ON CD.OwnerDisplayName = TU.Location
+GROUP BY
+    TU.Location
+ORDER BY
+    TotalViews DESC;

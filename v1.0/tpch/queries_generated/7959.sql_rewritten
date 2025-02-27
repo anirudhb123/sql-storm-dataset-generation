@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) as price_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1997-12-31'
+),
+HighValueOrders AS (
+    SELECT
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name,
+        ro.c_acctbal
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.price_rank <= 10
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        li.l_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_line_value,
+        SUM(li.l_quantity) AS total_quantity,
+        AVG(li.l_tax) AS average_tax_rate
+    FROM 
+        lineitem li
+    GROUP BY 
+        li.l_orderkey
+)
+SELECT 
+    hvo.o_orderkey,
+    hvo.o_orderdate,
+    hvo.o_totalprice,
+    hvo.c_name,
+    sp.s_name,
+    sp.total_supply_cost,
+    od.total_line_value,
+    od.total_quantity,
+    od.average_tax_rate
+FROM 
+    HighValueOrders hvo
+JOIN 
+    OrderDetails od ON hvo.o_orderkey = od.l_orderkey
+JOIN 
+    SupplierParts sp ON sp.ps_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_availqty > 100
+    )
+ORDER BY 
+    hvo.o_totalprice DESC, 
+    od.total_line_value DESC;

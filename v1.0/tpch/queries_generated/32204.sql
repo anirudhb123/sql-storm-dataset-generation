@@ -1,0 +1,64 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        l_orderkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY l_orderkey ORDER BY l_shipdate) AS rn
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate >= DATE '2021-01-01' AND l_shipdate < DATE '2022-01-01'
+    GROUP BY 
+        l_orderkey
+    HAVING 
+        SUM(l_extendedprice * (1 - l_discount)) > 1000
+),
+SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) < 50000
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'O')
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+)
+
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    s.s_name,
+    ss.supplier_total_cost,
+    ss.total_parts,
+    COALESCE(SUM(sc.total_sales), 0) AS total_sales
+FROM 
+    TopCustomers c
+LEFT JOIN 
+    SupplierSales ss ON ss.total_parts > 2
+LEFT JOIN 
+    SalesCTE sc ON sc.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+GROUP BY 
+    c.c_custkey, c.c_name, s.s_name, ss.supplier_total_cost, ss.total_parts
+ORDER BY 
+    total_sales DESC, c.c_name ASC;

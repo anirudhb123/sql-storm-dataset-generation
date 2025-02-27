@@ -1,0 +1,55 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_ship_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        dv.d_year,
+        dv.d_month_seq,
+        dv.d_dow,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rnk
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dv ON ws.ws_sold_date_sk = dv.d_date_sk
+    WHERE 
+        dv.d_year = 2023
+),
+top_sales AS (
+    SELECT 
+        sd.web_site_sk,
+        sd.ws_item_sk,
+        SUM(sd.ws_quantity) AS total_quantity_sold,
+        SUM(sd.ws_net_profit) AS total_net_profit
+    FROM 
+        sales_data sd
+    WHERE 
+        sd.rnk <= 10
+    GROUP BY 
+        sd.web_site_sk, sd.ws_item_sk
+),
+average_sales AS (
+    SELECT 
+        ts.web_site_sk,
+        AVG(ts.total_net_profit) AS avg_net_profit
+    FROM 
+        top_sales ts
+    GROUP BY 
+        ts.web_site_sk
+)
+SELECT 
+    w.w_warehouse_id,
+    w.w_warehouse_name,
+    COALESCE(avg.avg_net_profit, 0) AS avg_profit,
+    (SELECT COUNT(*) FROM store_sales ss 
+        WHERE ss.ss_item_sk IN (SELECT ws_item_sk FROM top_sales) 
+        AND ss.ss_sold_date_sk = (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_dow = 6)) AS weekend_sales_count
+FROM 
+    warehouse w
+LEFT JOIN 
+    average_sales avg ON w.w_warehouse_sk = avg.web_site_sk
+ORDER BY 
+    avg_profit DESC, w.w_warehouse_id;

@@ -1,0 +1,63 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank_year,
+        COUNT(DISTINCT mc.company_id) OVER (PARTITION BY a.id) AS company_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    WHERE 
+        a.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'feature%')
+),
+actor_movie_counts AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        c.person_id
+),
+top_actors AS (
+    SELECT 
+        ak.name,
+        ac.movie_count
+    FROM 
+        actor_movie_counts ac
+    JOIN 
+        aka_name ak ON ac.person_id = ak.person_id
+    WHERE 
+        ac.movie_count > 5
+),
+movies_with_info AS (
+    SELECT 
+        r.title,
+        r.production_year,
+        r.company_count,
+        COALESCE(mi.info, 'No Info Available') AS additional_info
+    FROM 
+        ranked_movies r
+    LEFT JOIN 
+        movie_info mi ON r.title = (SELECT title FROM title t WHERE t.id = r.title_id)
+    WHERE 
+        r.rank_year = 1
+)
+SELECT 
+    mwi.title,
+    mwi.production_year,
+    mwi.company_count,
+    ta.name AS lead_actor_name,
+    mwi.additional_info
+FROM 
+    movies_with_info mwi
+JOIN 
+    top_actors ta ON ta.movie_count = mwi.company_count
+WHERE 
+    mwi.company_count IS NOT NULL
+ORDER BY 
+    mwi.production_year DESC, 
+    mwi.title;

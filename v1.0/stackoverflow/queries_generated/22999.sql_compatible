@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COUNT(v.Id) OVER (PARTITION BY p.Id, v.VoteTypeId) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        pt.Name AS PostHistoryType,
+        CASE 
+            WHEN pt.Name = 'Post Closed' AND ph.Comment IS NOT NULL THEN ph.Comment
+            ELSE 'No reason provided'
+        END AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        pt.Name IN ('Post Closed', 'Post Reopened')
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        (SELECT COUNT(*) FROM Badges b WHERE b.UserId = u.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    ra.PostId,
+    ra.Title,
+    ra.CreationDate,
+    ra.ViewCount,
+    ra.Score,
+    ra.CommentCount,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation AS OwnerReputation,
+    COALESCE(cp.CloseReason, 'Active') AS PostStatus,
+    ua.PostsCreated,
+    ua.TotalViews,
+    ua.BadgeCount,
+    CASE 
+        WHEN ra.PostRank = 1 THEN 'Top Post'
+        WHEN ra.PostRank <= 5 THEN 'Top 5 Posts'
+        ELSE 'Other Posts'
+    END AS PostCategory
+FROM 
+    RankedPosts ra
+JOIN 
+    Users u ON ra.OwnerUserId = u.Id
+LEFT JOIN 
+    ClosedPosts cp ON ra.PostId = cp.PostId
+LEFT JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+WHERE 
+    ra.CommentCount > 0 OR ra.ViewCount > 100
+ORDER BY 
+    ra.Score DESC, ra.ViewCount DESC
+LIMIT 100;

@@ -1,0 +1,48 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+TopSuppliers AS (
+    SELECT s.s_nationkey, COUNT(s.s_suppkey) AS supplier_count, SUM(s.s_acctbal) AS total_acctbal
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_name IN ('USA', 'Canada')
+    GROUP BY s.s_nationkey
+    HAVING COUNT(s.s_suppkey) > 5
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate <= DATE '1997-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+FinalReport AS (
+    SELECT ps.ps_partkey, p.p_name, p.p_brand, SUM(l.l_quantity) AS total_quantity,
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY SUM(l.l_discount) DESC) AS discount_rank,
+           RANK() OVER (ORDER BY (SUM(l.l_quantity) * p.p_retailprice) DESC) AS revenue_rank
+    FROM lineitem l
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN OrderDetails o ON l.l_orderkey = o.o_orderkey
+    WHERE p.p_size > 10 AND (p.p_comment LIKE '%quality%' OR p.p_comment IS NULL)
+    GROUP BY ps.ps_partkey, p.p_name, p.p_brand
+)
+SELECT fh.level, tr.supplier_count, tr.total_acctbal,
+       fr.p_name, fr.total_quantity, fr.order_count, 
+       fr.discount_rank, fr.revenue_rank
+FROM SupplierHierarchy fh
+JOIN TopSuppliers tr ON fh.s_nationkey = tr.s_nationkey
+JOIN FinalReport fr ON fr.total_quantity > 1000
+WHERE tr.total_acctbal IS NOT NULL
+ORDER BY fh.level, fr.revenue_rank DESC;

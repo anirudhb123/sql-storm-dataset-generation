@@ -1,0 +1,73 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        DENSE_RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        rc.c_custkey,
+        rc.c_name,
+        rc.total_spent
+    FROM 
+        RankedCustomers rc
+    WHERE 
+        rc.rank <= 10
+),
+SupplierAverageCost AS (
+    SELECT 
+        ps.ps_suppkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_size,
+        pd.avg_supplycost
+    FROM 
+        part p
+    JOIN 
+        SupplierAverageCost pd ON p.p_partkey = pd.ps_partkey
+),
+FinalReport AS (
+    SELECT 
+        tc.c_name,
+        COUNT(DISTINCT l.l_orderkey) AS order_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(pd.p_retailprice) AS avg_part_price,
+        SUM(pd.avg_supplycost) AS total_supply_cost
+    FROM 
+        TopCustomers tc
+    JOIN 
+        orders o ON tc.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        PartDetails pd ON l.l_partkey = pd.p_partkey
+    GROUP BY 
+        tc.c_name
+)
+SELECT 
+    c_name,
+    order_count,
+    total_revenue,
+    avg_part_price,
+    total_supply_cost
+FROM 
+    FinalReport
+ORDER BY 
+    total_revenue DESC;

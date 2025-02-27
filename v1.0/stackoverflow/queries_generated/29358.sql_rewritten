@@ -1,0 +1,51 @@
+WITH PostTags AS (
+    SELECT 
+        p.Id AS PostId, 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+),
+RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY t.Tag ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+        JOIN PostTags t ON p.Id = t.PostId
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+TopPosts AS (
+    SELECT 
+        rp.*, 
+        t.Tag
+    FROM 
+        RankedPosts rp
+        JOIN PostTags t ON rp.PostId = t.PostId
+    WHERE 
+        rp.Rank <= 3  
+)
+
+SELECT 
+    tp.Tag,
+    ARRAY_AGG(tp.Title ORDER BY tp.Score DESC) AS TopPostTitles,
+    COUNT(tp.PostId) AS TotalPosts,
+    SUM(tp.UpVotes) AS TotalUpVotes,
+    SUM(tp.DownVotes) AS TotalDownVotes
+FROM 
+    TopPosts tp
+GROUP BY 
+    tp.Tag
+ORDER BY 
+    TotalPosts DESC, 
+    TotalUpVotes DESC;

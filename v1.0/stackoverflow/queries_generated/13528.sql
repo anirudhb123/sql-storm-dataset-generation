@@ -1,0 +1,67 @@
+-- Performance benchmark query to analyze post statistics and user activity
+
+WITH PostStats AS (
+    SELECT 
+        p.PostTypeId,
+        COUNT(*) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.ViewCount) AS AvgViews,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2023-01-01'   -- consider posts created in the year 2023
+    GROUP BY 
+        p.PostTypeId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(b.Reputation) AS TotalReputation,
+        COUNT(DISTINCT b.Id) AS BadgesCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.CreationDate >= '2023-01-01'  -- consider users created in 2023
+    GROUP BY 
+        u.Id
+),
+VoteStats AS (
+    SELECT 
+        v.VoteTypeId,
+        COUNT(*) AS VotesCount
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= '2023-01-01'    -- consider votes created in 2023
+    GROUP BY 
+        v.VoteTypeId
+)
+
+SELECT 
+    p.PostTypeId,
+    ps.PostCount,
+    ps.TotalScore,
+    ps.TotalViews,
+    ps.AvgViews,
+    ps.AvgScore,
+    ua.UserId,
+    ua.PostsCount,
+    ua.TotalReputation,
+    ua.BadgesCount,
+    vs.VoteTypeId,
+    vs.VotesCount
+FROM 
+    PostStats ps
+JOIN 
+    UserActivity ua ON ua.PostsCount > 0 
+JOIN 
+    VoteStats vs ON vs.VotesCount > 0
+ORDER BY 
+    ps.PostCount DESC;

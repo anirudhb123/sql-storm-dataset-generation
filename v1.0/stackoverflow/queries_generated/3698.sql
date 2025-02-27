@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score > 0
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 24) -- Edit Title, Edit Body, Suggested Edit Applied
+    GROUP BY 
+        ph.PostId
+),
+PostSummaries AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.Rank,
+        COALESCE(rph.LastEditDate, 'No Edits') AS LastEditDate,
+        COALESCE(rph.EditCount, 0) AS EditCount,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentPostHistory rph ON rp.Id = rph.PostId
+)
+SELECT 
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.Rank,
+    ps.LastEditDate,
+    ps.EditCount,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    CASE 
+        WHEN ps.Score > 100 THEN 'Popular Post'
+        WHEN ps.Score BETWEEN 50 AND 100 THEN 'Moderately Popular'
+        ELSE 'Less Popular'
+    END AS PopularityCategory
+FROM 
+    PostSummaries ps
+WHERE 
+    ps.Rank <= 3
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;
+

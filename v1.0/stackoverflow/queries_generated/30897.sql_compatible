@@ -1,0 +1,86 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.Score,
+        a.ViewCount,
+        r.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts q ON a.ParentId = q.Id  
+    INNER JOIN 
+        RecursivePostHierarchy r ON q.Id = r.PostId
+),
+PostStatistics AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.CreationDate,
+        ph.Score,
+        ph.ViewCount,
+        DENSE_RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.Score DESC) AS ScoreRank
+    FROM 
+        RecursivePostHierarchy ph
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(b.GoldBadges, 0) AS GoldBadges,
+        COALESCE(b.SilverBadges, 0) AS SilverBadges,
+        COALESCE(b.BronzeBadges, 0) AS BronzeBadges,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000  
+)
+SELECT 
+    p.Title AS PostTitle,
+    p.Score,
+    p.ViewCount,
+    u.DisplayName AS UserDisplayName,
+    u.Reputation,
+    CONCAT(u.GoldBadges, ' Gold ', u.SilverBadges, ' Silver ', u.BronzeBadges, ' Bronze') AS BadgeSummary,
+    (SELECT AVG(Score) FROM Posts WHERE PostTypeId = 1) AS AvgQuestionScore,
+    (SELECT COUNT(*) FROM Posts WHERE PostTypeId = 1 AND ViewCount > 1000) AS QuestionsWithHighViews
+FROM 
+    PostStatistics p
+JOIN 
+    Users u ON p.PostId IN (SELECT p2.Id FROM Posts p2 WHERE p2.OwnerUserId = u.Id)
+WHERE 
+    p.ScoreRank <= 10  
+ORDER BY 
+    p.Score DESC, 
+    u.Reputation DESC;

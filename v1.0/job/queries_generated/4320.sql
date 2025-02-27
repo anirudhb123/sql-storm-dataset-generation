@@ -1,0 +1,48 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(ci.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.id) DESC) AS rank_by_cast
+    FROM 
+        aka_title at 
+    JOIN 
+        cast_info ci ON at.id = ci.movie_id 
+    WHERE 
+        at.production_year IS NOT NULL 
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        RankedMovies rm 
+    WHERE 
+        rm.rank_by_cast <= 5
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.cast_count,
+    (SELECT COUNT(DISTINCT mk.keyword_id) 
+     FROM movie_keyword mk 
+     JOIN movie_info mi ON mk.movie_id = mi.movie_id 
+     WHERE mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'genre') 
+     AND mk.movie_id = fm.id) AS genre_count,
+    COALESCE((SELECT string_agg(DISTINCT cn.name, ', ') 
+              FROM company_name cn 
+              JOIN movie_companies mc ON cn.id = mc.company_id 
+              WHERE mc.movie_id = fm.id), 'No Companies') AS companies,
+    NULLIF(fm.cast_count, 0) AS safe_cast_count
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    complete_cast cc ON fm.title = cc.subject_id 
+WHERE 
+    fm.production_year > 2000 
+ORDER BY 
+    fm.production_year DESC, 
+    fm.cast_count DESC;

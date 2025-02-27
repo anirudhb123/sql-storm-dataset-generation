@@ -1,0 +1,33 @@
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+    AVG(p.Score) AS AveragePostScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags,
+    COALESCE(MIN(ph.CreationDate), 'No History') AS FirstPostHistoryDate,
+    COALESCE(MAX(ph.CreationDate), 'No History') AS LastPostHistoryDate
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    UNNEST(string_to_array(p.Tags, ',')) AS tag ON TRUE
+LEFT JOIN 
+    Tags t ON tag = t.TagName
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+WHERE 
+    u.Reputation >= 1000
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+ORDER BY 
+    TotalPosts DESC, u.Reputation DESC
+LIMIT 10;

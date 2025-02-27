@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(c.id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title m
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        m.production_year IS NOT NULL
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+RankedCompanies AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    rm.cast_names,
+    rc.company_names,
+    rc.company_types,
+    CASE 
+        WHEN rm.cast_count > 5 THEN 'Large Cast'
+        WHEN rm.cast_count BETWEEN 3 AND 5 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    RankedCompanies rc ON rm.movie_id = rc.movie_id
+ORDER BY 
+    rm.production_year DESC, 
+    rm.cast_count DESC;
+
+This query benchmarks string processing by aggregating cast names and keywords for movies while categorizing the movie casts by size and providing a succinct view of the associated companies.

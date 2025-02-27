@@ -1,0 +1,61 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' 
+        AND o.o_orderdate < '1997-12-31'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_nationkey,
+        COUNT(DISTINCT ps.ps_partkey) AS supplier_count,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_nationkey
+),
+CustomerSpend AS (
+    SELECT 
+        c.c_nationkey,
+        SUM(o.o_totalprice) AS total_spend
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_nationkey
+),
+JoinedData AS (
+    SELECT 
+        r.r_name,
+        COALESCE(cs.total_spend, 0) AS total_spend,
+        COALESCE(ss.supplier_count, 0) AS supplier_count,
+        COALESCE(ss.total_supply_cost, 0) AS total_supply_cost
+    FROM 
+        region r
+    LEFT JOIN 
+        CustomerSpend cs ON r.r_regionkey = cs.c_nationkey
+    LEFT JOIN 
+        SupplierStats ss ON r.r_regionkey = ss.s_nationkey
+)
+SELECT 
+    jd.r_name,
+    jd.total_spend,
+    jd.supplier_count,
+    jd.total_supply_cost,
+    ROUND((jd.total_spend / NULLIF(jd.supplier_count, 0)), 2) AS spend_per_supplier,
+    (SELECT COUNT(*) FROM RankedOrders ro WHERE ro.o_orderstatus = 'O') AS total_orders
+FROM 
+    JoinedData jd
+WHERE 
+    jd.total_spend > 10000
+ORDER BY 
+    jd.total_spend DESC;

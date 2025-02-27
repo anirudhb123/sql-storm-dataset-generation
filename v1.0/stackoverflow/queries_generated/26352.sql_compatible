@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(p.Tags, '><')) AS t(TagName)
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score
+),
+PostDetails AS (
+    SELECT 
+        rp.*,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.OwnerPostRank <= 3 
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostsPerTag,
+        SUM(pd.UpVoteCount) AS TotalUpVotes,
+        AVG(pd.Score) AS AverageScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = p.Id
+    JOIN 
+        PostDetails pd ON p.Id = pd.PostId
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    ts.TagName, 
+    ts.PostsPerTag, 
+    ts.TotalUpVotes, 
+    ts.AverageScore, 
+    STRING_AGG(pd.Title, ', ') AS RelatedPosts
+FROM 
+    TagStatistics ts
+JOIN 
+    PostDetails pd ON pd.PostId IN (SELECT UNNEST(ARRAY_AGG(p.Id)) FROM Posts p WHERE p.Id = pd.PostId)
+GROUP BY 
+    ts.TagName, ts.PostsPerTag, ts.TotalUpVotes, ts.AverageScore
+ORDER BY 
+    ts.PostsPerTag DESC, ts.AverageScore DESC;

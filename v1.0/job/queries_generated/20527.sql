@@ -1,0 +1,78 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER(PARTITION BY t.production_year ORDER BY t.id DESC) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+actor_role_summary AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT r.role ORDER BY r.role) AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        a.id, ak.name
+), 
+title_with_actor_info AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        CAST(actors AS VARCHAR) AS actor_details
+    FROM 
+        ranked_titles t
+    LEFT JOIN (
+        SELECT 
+            ci.movie_id,
+            STRING_AGG(DISTINCT ak.name, ', ') AS actors
+        FROM 
+            cast_info ci
+        JOIN 
+            aka_name ak ON ci.person_id = ak.person_id
+        GROUP BY 
+            ci.movie_id
+    ) AS actor_list ON actor_list.movie_id = t.title_id
+)
+SELECT 
+    twai.title,
+    twai.production_year,
+    COALESCE(twai.actor_details, 'No Actors') AS actor_details,
+    (SELECT 
+         AVG(movie_rating) 
+     FROM 
+         (SELECT 
+              mi.info AS movie_rating,
+              m.production_year
+          FROM 
+              movie_info mi
+          JOIN 
+              title m ON mi.movie_id = m.id
+          WHERE 
+              mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+              AND m.production_year = twai.production_year
+         ) AS ratings) AS average_rating,
+    COUNT(DISTINCT a.actor_id) AS distinct_actors_count
+FROM 
+    title_with_actor_info twai
+LEFT JOIN 
+    actor_role_summary a ON a.actor_name IN (SELECT unnest(string_to_array(twai.actor_details, ', ')))
+GROUP BY 
+    twai.title, twai.production_year, twai.actor_details
+HAVING 
+    COUNT(a.actor_id) < 5 AND
+    AVG(CAST((SELECT info FROM movie_info WHERE movie_id = twai.title_id AND info_type_id = (SELECT id FROM info_type WHERE info = 'rating')) AS FLOAT)) > 7 OR
+    (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = twai.title_id AND mk.keyword_id IN (SELECT id FROM keyword WHERE keyword LIKE '%action%')) > 0
+ORDER BY 
+    twai.production_year DESC, twai.title ASC;

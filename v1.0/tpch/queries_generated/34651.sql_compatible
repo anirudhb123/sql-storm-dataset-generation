@@ -1,0 +1,77 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_custkey,
+        c.c_name,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rnk
+    FROM
+        orders o
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE
+        o.o_orderdate >= DATE '1997-01-01'
+    UNION ALL
+    SELECT
+        COALESCE(o2.o_orderkey, co.o_orderkey) AS o_orderkey,
+        COALESCE(o2.o_orderdate, co.o_orderdate) AS o_orderdate,
+        co.c_custkey,
+        co.c_name,
+        COALESCE(o2.o_totalprice, co.o_totalprice) AS o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY co.c_custkey ORDER BY COALESCE(o2.o_orderdate, co.o_orderdate) DESC) AS rnk
+    FROM
+        CustomerOrders co
+    LEFT JOIN
+        orders o2 ON co.c_custkey = o2.o_custkey AND o2.o_orderdate < co.o_orderdate
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        DENSE_RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS price_rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(SUM(l.l_discount), 0) AS total_discount,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM 
+        supplier s
+    LEFT JOIN 
+        lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    co.c_name,
+    co.o_orderkey,
+    co.o_orderdate,
+    co.o_totalprice,
+    ps.p_name,
+    ps.ps_availqty,
+    ps.ps_supplycost,
+    si.total_discount,
+    si.order_count
+FROM 
+    CustomerOrders co
+JOIN 
+    PartSupplier ps ON ps.price_rank = 1
+LEFT JOIN 
+    SupplierInfo si ON si.order_count > 0
+WHERE 
+    co.rnk = 1 
+    AND co.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+    AND (si.total_discount IS NULL OR si.total_discount > 100)
+ORDER BY 
+    co.o_orderdate DESC, co.o_orderkey;

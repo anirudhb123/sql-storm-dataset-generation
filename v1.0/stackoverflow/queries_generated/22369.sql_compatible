@@ -1,0 +1,67 @@
+
+WITH RecursiveTagCTE AS (
+    SELECT Tags.TagName, Tags.Count, Posts.Id AS PostId
+    FROM Tags
+    JOIN Posts ON Tags.ExcerptPostId = Posts.Id
+    WHERE Tags.IsRequired = 1
+    UNION ALL
+    SELECT Tags.TagName, Tags.Count, PostLinks.RelatedPostId
+    FROM PostLinks
+    JOIN Tags ON PostLinks.RelatedPostId = Tags.WikiPostId
+    JOIN RecursiveTagCTE ON PostLinks.PostId = RecursiveTagCTE.PostId
+), 
+
+UserStats AS (
+    SELECT 
+        Users.DisplayName,
+        MAX(Users.Reputation) AS MaxReputation,
+        COUNT(DISTINCT Badges.Id) AS TotalBadges,
+        SUM(COALESCE(Votes.VoteTypeId, 0)) AS TotalVotes
+    FROM Users
+    LEFT JOIN Badges ON Users.Id = Badges.UserId
+    LEFT JOIN Votes ON Users.Id = Votes.UserId
+    GROUP BY Users.DisplayName
+),
+
+PostActivity AS (
+    SELECT 
+        Posts.Title, 
+        COUNT(Comments.Id) AS CommentCount,
+        SUM(CASE WHEN Posts.CreationDate < DATE_SUB('2024-10-01', INTERVAL 1 YEAR) THEN 1 ELSE 0 END) AS OldPosts,
+        SUM(CASE WHEN Posts.LastActivityDate >= DATE_SUB('2024-10-01', INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS RecentActivity
+    FROM Posts
+    LEFT JOIN Comments ON Posts.Id = Comments.PostId
+    WHERE Posts.OwnerUserId IS NOT NULL
+    GROUP BY Posts.Title
+),
+
+MeticulousPostInfo AS (
+    SELECT 
+        p.Title, 
+        COALESCE(pt.Name, 'Unknown') AS PostType,
+        pa.CommentCount,
+        v.TotalVotes,
+        JSON_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY pa.RecentActivity DESC) AS ActivityRank
+    FROM Posts p
+    LEFT JOIN PostActivity pa ON p.Title = pa.Title
+    LEFT JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN RecursiveTagCTE t ON t.PostId = p.Id
+    WHERE p.Score > 0 OR pa.OldPosts > 0
+    GROUP BY p.Id, pt.Name, pa.CommentCount, v.TotalVotes
+)
+
+SELECT 
+    mpi.Title,
+    mpi.PostType,
+    mpi.CommentCount,
+    mpi.Tags,
+    us.DisplayName,
+    us.MaxReputation,
+    us.TotalBadges
+FROM MeticulousPostInfo mpi
+JOIN UserStats us ON us.TotalVotes = (SELECT MAX(TotalVotes) FROM UserStats)
+WHERE mpi.ActivityRank = 1 
+ORDER BY us.MaxReputation DESC, mpi.CommentCount DESC
+LIMIT 10;

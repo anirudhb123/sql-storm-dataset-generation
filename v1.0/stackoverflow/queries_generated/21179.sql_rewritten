@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+        AND p.ViewCount > 10
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        ur.Reputation,
+        ur.TotalBounty,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount,
+        (SELECT SUM(v.BountyAmount) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 8) AS TotalBountyAwarded
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserReputation ur ON rp.PostId = ur.UserId
+)
+SELECT 
+    pd.Title,
+    pd.Score,
+    pd.Reputation,
+    pd.TotalBounty,
+    pd.CommentCount,
+    pd.TotalBountyAwarded,
+    CASE 
+        WHEN pd.TotalBountyAwarded IS NULL THEN 'No Bounty Awarded'
+        ELSE 'Bounty Awarded'
+    END AS BountyStatus,
+    (SELECT STRING_AGG(t.TagName, ', ') FROM Tags t JOIN Posts p ON t.Id = ANY(string_to_array(p.Tags, ', ')) WHERE p.Id = pd.PostId) AS Tags
+FROM 
+    PostDetails pd
+WHERE 
+    pd.Reputation >= 100
+ORDER BY 
+    pd.Score DESC,
+    pd.Reputation DESC
+LIMIT 10;

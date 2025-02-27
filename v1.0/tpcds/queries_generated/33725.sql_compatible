@@ -1,0 +1,68 @@
+
+WITH RECURSIVE sales_depth AS (
+    SELECT
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        1 AS depth
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk BETWEEN 20000101 AND 20001231
+    
+    UNION ALL
+    
+    SELECT
+        cs_item_sk,
+        cs_order_number,
+        cs_quantity,
+        cs_sales_price,
+        depth + 1
+    FROM
+        catalog_sales
+    WHERE
+        cs_sold_date_sk BETWEEN 20000101 AND 20001231
+        AND cs_item_sk IN (SELECT ws_item_sk FROM web_sales)
+    
+    UNION ALL
+    
+    SELECT
+        ss_item_sk,
+        ss_ticket_number AS ws_order_number,
+        ss_quantity,
+        ss_sales_price,
+        depth + 1
+    FROM
+        store_sales
+    WHERE
+        ss_sold_date_sk BETWEEN 20000101 AND 20001231
+        AND ss_item_sk IN (SELECT ws_item_sk FROM web_sales)
+)
+SELECT
+    s.item,
+    SUM(s.sales) AS total_sales,
+    AVG(s.sales) AS average_sales,
+    COUNT(DISTINCT s.order_number) AS order_count,
+    MAX(s.depth) AS max_depth,
+    CASE
+        WHEN AVG(s.sales) IS NULL THEN 'No Sales'
+        WHEN AVG(s.quantity) > 10 THEN 'High Volume'
+        ELSE 'Low Volume'
+    END AS sale_category
+FROM (
+    SELECT
+        sales_depth.ws_item_sk AS item,
+        sales_depth.ws_order_number AS order_number,
+        sales_depth.ws_quantity * sales_depth.ws_sales_price AS sales,
+        sales_depth.depth
+    FROM
+        sales_depth
+) AS s
+GROUP BY
+    s.item, s.depth
+HAVING
+    COUNT(DISTINCT s.order_number) > 2
+ORDER BY
+    total_sales DESC
+LIMIT 100;

@@ -1,0 +1,65 @@
+WITH UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges b
+    GROUP BY b.UserId
+),
+RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.OwnerUserId,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.PostTypeId = 1
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM Comments c
+    GROUP BY c.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 24)
+    GROUP BY ph.PostId
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(pp.PostCount, 0) AS PostCount,
+    COALESCE(pc.CommentCount, 0) AS TotalComments,
+    COALESCE(ped.EditCount, 0) AS TotalEdits,
+    COUNT(DISTINCT p.Id) AS ActivePostsWithAnswers
+FROM Users u
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN (
+    SELECT 
+        OwnerUserId,
+        COUNT(Id) AS PostCount
+    FROM Posts
+    WHERE PostTypeId IN (1, 2)
+    GROUP BY OwnerUserId
+) pp ON u.Id = pp.OwnerUserId
+LEFT JOIN PostComments pc ON pc.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+LEFT JOIN PostHistoryDetails ped ON ped.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+LEFT JOIN RankedPosts p ON u.Id = p.OwnerUserId AND p.PostRank = 1
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation, ub.GoldBadges, 
+    ub.SilverBadges, ub.BronzeBadges, pp.PostCount, 
+    pc.CommentCount, ped.EditCount;
+

@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND mc.note IN ('(1955) (Czechoslovakia) (theatrical)', '(1957-1958) (USA) (TV)', '(1963) (USA) (theatrical) (presents)', '(1984) (France) (VHS)', '(1999) (USA) (DVD) (pan and scan)', '(1999) (USA) (all media) (as Empire Interactive Entertainment)', '(2005) (USA) (DVD) (Included in "Inspector Alleyn Mysteries: Set 2")', '(2010) (Bosnia and Herzegovina) (DVD)', '(segment "Klondike Con")');

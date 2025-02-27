@@ -1,0 +1,55 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSales,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS SalesRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        n.n_name,
+        ss.s_suppkey,
+        ss.s_name,
+        ss.TotalSales
+    FROM 
+        SupplierSales ss
+    JOIN 
+        nation n ON ss.s_nationkey = n.n_nationkey
+    WHERE 
+        ss.SalesRank <= 3
+),
+AverageOrderValue AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        AVG(o.o_totalprice) OVER (PARTITION BY o.o_orderstatus) AS AvgOrderPrice
+    FROM 
+        orders o
+)
+SELECT 
+    t.n_name AS Nation,
+    t.s_name AS Supplier,
+    t.TotalSales,
+    a.o_orderkey,
+    a.o_totalprice,
+    a.AvgOrderPrice,
+    CASE 
+        WHEN t.TotalSales > a.AvgOrderPrice THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS SalesComparison
+FROM 
+    TopSuppliers t
+LEFT JOIN 
+    AverageOrderValue a ON t.s_suppkey = a.o_orderkey
+WHERE 
+    t.TotalSales IS NOT NULL
+ORDER BY 
+    t.n_name, t.TotalSales DESC;

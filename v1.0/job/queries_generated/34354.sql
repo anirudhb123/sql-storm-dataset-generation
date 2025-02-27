@@ -1,0 +1,67 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        1 AS level,
+        0 AS parent_id
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    WHERE a.name IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        c.person_id,
+        a.name,
+        level + 1,
+        ah.person_id
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN ActorHierarchy ah ON c.movie_id IN (
+        SELECT movie_id 
+        FROM complete_cast cc 
+        WHERE cc.subject_id = ah.person_id
+    )
+    WHERE a.name IS NOT NULL
+)
+
+SELECT 
+    t.title,
+    t.production_year,
+    COUNT(DISTINCT ah.person_id) AS num_actors,
+    STRING_AGG(DISTINCT ah.actor_name, ', ') AS actors,
+    COALESCE(tc.kind, 'Not Specified') AS title_kind,
+    AVG(COALESCE(mr.rating, 0)) AS average_rating
+FROM title t
+LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN company_name cn ON mc.company_id = cn.id
+LEFT JOIN comp_cast_type tc ON mc.company_type_id = tc.id
+LEFT JOIN movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (
+    SELECT id FROM info_type WHERE info = 'rating'
+)
+LEFT JOIN (
+    SELECT movie_id, AVG(rating) AS rating
+    FROM movie_info 
+    WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY movie_id
+) mr ON t.id = mr.movie_id
+JOIN ActorHierarchy ah ON ah.level = 1 
+WHERE 
+    t.production_year > 2000 
+    AND (tc.kind IS NOT NULL OR tc.kind IS NULL)
+GROUP BY 
+    t.title, t.production_year, tc.kind
+ORDER BY 
+    average_rating DESC, num_actors DESC
+LIMIT 20;
+
+This query demonstrates a combination of:
+
+1. **Recursive CTE** to build an actor hierarchy based on movie casts.
+2. **Complex Joins** including outer joins to incorporate various related tables for detailed movie and company info.
+3. **Aggregation** functions to count distinct actors and calculate the average rating.
+4. **String Aggregation** to list actor names in a single field for clarity.
+5. **Complicated predicates** to filter based on production years and include null logic for company kind.
+6. **Ordering** results based on average rating and the number of actors involved, providing a performance benchmark for higher-rated movies with robust cast.

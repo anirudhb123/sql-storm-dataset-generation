@@ -1,0 +1,64 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_shippriority,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_pr
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ns.total_available,
+        ns.avg_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        SupplierStats ns ON s.s_suppkey = ns.ps_partkey
+    WHERE 
+        s.s_acctbal > 50000
+)
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT lo.l_orderkey) AS order_count,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue,
+    COALESCE(SUM(fs.total_available), 0) AS available_qty,
+    COALESCE(fs.avg_supply_cost, 0) AS avg_cost
+FROM 
+    part p
+JOIN 
+    lineitem lo ON p.p_partkey = lo.l_partkey
+LEFT JOIN 
+    FilteredSuppliers fs ON lo.l_suppkey = fs.s_suppkey
+WHERE 
+    p.p_size > 10
+    AND (p.p_retailprice > 100 OR p.p_comment IS NULL)
+    AND EXISTS (
+        SELECT 1
+        FROM RankedOrders ro
+        WHERE ro.o_orderkey = lo.l_orderkey
+        AND ro.rank_pr <= 5
+    )
+GROUP BY 
+    p.p_name
+HAVING 
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) > 1000
+ORDER BY 
+    total_revenue DESC;

@@ -1,0 +1,97 @@
+
+WITH RECURSIVE UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS VoteCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+), RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+), TopPosters AS (
+    SELECT 
+        P.OwnerUserId AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostsCreated
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY 
+        P.OwnerUserId, U.DisplayName
+    ORDER BY 
+        PostsCreated DESC
+    LIMIT 10
+), PostCloseReasons AS (
+    SELECT 
+        PH.PostId,
+        STRING_AGG(CR.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CR ON PH.Comment::INTEGER = CR.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11)  
+    GROUP BY 
+        PH.PostId
+), UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(B.Class::INTEGER), 0) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.TotalBadges,
+    T.PostsCreated,
+    COALESCE(P.CloseReasons, 'No Close Reasons') AS CloseReasons,
+    R.VoteCount,
+    RP.PostCount,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.ViewCount,
+    RP.AnswerCount
+FROM 
+    UserReputation U
+LEFT JOIN 
+    TopPosters T ON U.UserId = T.UserId
+LEFT JOIN 
+    PostCloseReasons P ON U.UserId = P.PostId
+LEFT JOIN 
+    RecentPosts RP ON U.UserId = RP.OwnerUserId
+LEFT JOIN 
+    UserVoteCounts R ON U.UserId = R.UserId
+WHERE 
+    U.Reputation > 100 
+AND 
+    (R.VoteCount IS NULL OR R.VoteCount > 10)
+ORDER BY 
+    U.Reputation DESC, R.VoteCount DESC;

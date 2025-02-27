@@ -1,0 +1,64 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, c.c_name, c.c_nationkey
+),
+TopCustomers AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        ro.total_revenue,
+        ro.c_name
+    FROM 
+        RankedOrders ro
+    JOIN 
+        nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_name = ro.c_name) 
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        ro.revenue_rank = 1
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    tc.region_name,
+    tc.nation_name,
+    tc.c_name AS top_customer,
+    COALESCE(ss.part_count, 0) AS supplier_part_count,
+    (CASE 
+        WHEN ss.total_cost IS NULL THEN 'No Suppliers'
+        ELSE FORMAT(ss.total_cost, 'C')
+     END) AS supplier_total_cost,
+    CASE 
+        WHEN tc.total_revenue > (SELECT AVG(total_revenue) FROM RankedOrders) THEN 'Above Average Revenue'
+        ELSE 'Below Average Revenue'
+    END AS revenue_comparison
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    SupplierStats ss ON tc.nation_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = ss.s_suppkey)
+WHERE 
+    EXISTS (SELECT 1 FROM lineitem l WHERE l.l_discount = 0 AND l.l_returnflag IS NULL)
+ORDER BY 
+    tc.total_revenue DESC;

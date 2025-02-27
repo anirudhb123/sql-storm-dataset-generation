@@ -1,0 +1,68 @@
+
+WITH sales_analytics AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        SUM(ws_quantity) AS total_quantity,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        AVG(ws_net_paid) AS avg_net_paid,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 10000 AND 10050
+    GROUP BY ws_item_sk
+),
+top_items AS (
+    SELECT
+        sa.ws_item_sk,
+        i.i_item_desc,
+        i.i_brand,
+        i.i_category,
+        sa.total_sales,
+        sa.total_quantity,
+        sa.order_count,
+        sa.avg_net_paid,
+        sa.total_net_profit,
+        RANK() OVER (ORDER BY sa.total_sales DESC) AS sales_rank
+    FROM sales_analytics sa
+    JOIN item i ON sa.ws_item_sk = i.i_item_sk
+),
+demographics_analysis AS (
+    SELECT
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(sa.total_quantity) AS total_quantity,
+        SUM(sa.total_net_profit) AS total_net_profit
+    FROM top_items ti
+    JOIN web_sales ws ON ti.ws_item_sk = ws.ws_item_sk
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender, cd.cd_marital_status
+)
+SELECT
+    da.cd_gender,
+    da.cd_marital_status,
+    da.customer_count,
+    da.total_quantity,
+    da.total_net_profit,
+    T1.total_sales,
+    T1.total_quantity,
+    T1.order_count,
+    T1.avg_net_paid
+FROM demographics_analysis da
+JOIN (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(sa.total_sales) AS total_sales,
+        SUM(sa.total_quantity) AS total_quantity,
+        COUNT(DISTINCT sa.order_count) AS order_count,
+        AVG(sa.avg_net_paid) AS avg_net_paid
+    FROM sales_analytics sa
+    JOIN customer c ON sa.ws_item_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender, cd.cd_marital_status
+) T1 
+ON da.cd_gender = T1.cd_gender AND da.cd_marital_status = T1.cd_marital_status
+ORDER BY da.total_net_profit DESC, T1.total_sales DESC
+LIMIT 10;

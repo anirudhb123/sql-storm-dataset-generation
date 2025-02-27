@@ -1,0 +1,50 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        COALESCE((SELECT MIN(uh.RevisionGUID) FROM PostHistory uh WHERE uh.PostId = p.Id AND uh.PostHistoryTypeId IN (10, 11)), 'Not Closed') AS ClosableStatus
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS t ON t.TagName IS NOT NULL
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+TopPosts AS (
+    SELECT 
+        ps.*,
+        RANK() OVER (ORDER BY ps.Score DESC) AS RankScore,
+        RANK() OVER (ORDER BY ps.ViewCount DESC) AS RankViews
+    FROM 
+        PostStats ps
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    ViewCount,
+    Score,
+    CommentCount,
+    AnswerCount,
+    Tags,
+    ClosableStatus,
+    RankScore,
+    RankViews
+FROM 
+    TopPosts
+WHERE 
+    RankScore <= 10 OR RankViews <= 10
+ORDER BY 
+    ClosableStatus DESC, RankScore, RankViews;

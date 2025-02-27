@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS TagRank
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        Tags,
+        CreationDate,
+        Author,
+        AnswerCount,
+        CommentCount
+    FROM RankedPosts
+    WHERE TagRank <= 5
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS EditDate,
+        ph.Comment AS EditComment,
+        p.Title AS PostTitle,
+        up.DisplayName AS EditedBy
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    JOIN Users up ON ph.UserId = up.Id
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.Tags,
+    fp.CreationDate,
+    fp.Author,
+    fp.AnswerCount,
+    fp.CommentCount,
+    COALESCE(ph.EditDate, 'No Edits') AS LastEditDate,
+    COALESCE(ph.EditedBy, 'N/A') AS EditedBy,
+    COALESCE(ph.EditComment, 'No Comments') AS EditComment
+FROM FilteredPosts fp
+LEFT JOIN PostHistoryDetails ph ON fp.PostId = ph.PostId
+ORDER BY fp.CreationDate DESC;

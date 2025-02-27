@@ -1,0 +1,49 @@
+WITH TitleStats AS (
+    SELECT 
+        a.id AS title_id,
+        a.title,
+        a.production_year,
+        COUNT(c.id) AS cast_count,
+        AVG(CASE WHEN ai.info_type_id IS NOT NULL THEN LENGTH(ai.info) END) AS avg_info_length,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.id) DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        movie_info ai ON a.id = ai.movie_id AND ai.info_type_id IN (SELECT id FROM info_type WHERE info = 'summary')
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+FilteredTitles AS (
+    SELECT 
+        ts.title_id,
+        ts.title,
+        ts.production_year,
+        ts.cast_count,
+        ts.avg_info_length
+    FROM 
+        TitleStats ts
+    WHERE 
+        ts.rank <= 10 AND ts.production_year > 2000
+)
+SELECT 
+    ft.title,
+    ft.production_year,
+    COALESCE(SUM(mc.note IS NOT NULL), 0) AS movie_company_count,
+    COALESCE(SUM(mk.keyword IS NOT NULL), 0) AS keyword_count,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+FROM 
+    FilteredTitles ft
+LEFT JOIN 
+    movie_companies mc ON ft.title_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON ft.title_id = mk.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+GROUP BY 
+    ft.title, ft.production_year
+ORDER BY 
+    ft.production_year DESC, ft.cast_count DESC;

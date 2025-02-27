@@ -1,0 +1,40 @@
+WITH UserReputation AS (
+    SELECT Id, Reputation, DisplayName 
+    FROM Users 
+    WHERE Reputation > 1000
+),
+TopPosts AS (
+    SELECT Id, Title, Score, ViewCount, OwnerUserId 
+    FROM Posts 
+    WHERE PostTypeId = 1 AND Score > 5
+    ORDER BY Score DESC 
+    LIMIT 10
+),
+PostUserInteractions AS (
+    SELECT p.Id AS PostId, u.DisplayName AS UserDisplayName, COUNT(c.Id) AS CommentCount, SUM(v.VoteTypeId = 2) AS UpvoteCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2
+    WHERE p.PostTypeId = 1
+    GROUP BY p.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT ph.PostId, ph.UserDisplayName, ph.CreationDate, pht.Name AS HistoryTypeName
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE ph.CreationDate >= NOW() - INTERVAL '1 YEAR'
+)
+SELECT 
+    tr.Reputation AS UserReputation,
+    pp.Title AS PostTitle,
+    pp.Score AS PostScore,
+    pp.ViewCount AS PostViewCount,
+    phd.UserDisplayName AS LastUpdatedBy,
+    phd.CreationDate AS LastUpdateDate,
+    ppui.UpvoteCount AS PostUpvoteCount,
+    ppui.CommentCount AS PostCommentCount
+FROM TopPosts pp
+JOIN UserReputation tr ON pp.OwnerUserId = tr.Id
+LEFT JOIN PostUserInteractions ppui ON pp.Id = ppui.PostId
+LEFT JOIN PostHistoryDetails phd ON pp.Id = phd.PostId
+ORDER BY pp.Score DESC, tr.Reputation DESC;

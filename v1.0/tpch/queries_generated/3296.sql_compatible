@@ -1,0 +1,63 @@
+
+WITH CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierParts AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderstatus,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS line_number,
+        l.l_shipmode,
+        CASE 
+            WHEN l.l_discount > 0.1 THEN 'Discounted'
+            ELSE 'Standard'
+        END AS price_category
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS supplier_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    co.c_name AS customer_name,
+    co.total_spent,
+    co.order_count,
+    od.o_orderstatus,
+    od.l_partkey,
+    od.line_number,
+    od.price_category,
+    rs.s_name AS supplier_name,
+    rs.supplier_rank,
+    sp.total_supplycost
+FROM CustomerOrders co
+LEFT JOIN OrderDetails od ON co.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_name = co.c_name)
+LEFT JOIN SupplierParts sp ON od.l_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_name = sp.s_name))
+JOIN RankedSuppliers rs ON sp.total_supplycost > 1000
+WHERE co.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+ORDER BY co.total_spent DESC, rs.supplier_rank;

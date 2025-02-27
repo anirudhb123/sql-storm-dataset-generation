@@ -1,0 +1,75 @@
+WITH UserVotings AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.Reputation,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        COALESCE(SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COALESCE(SUM(PH.Id IS NOT NULL AND PH.PostHistoryTypeId = 10), 0) AS ClosedCount,
+        COALESCE(SUM(PH.Id IS NOT NULL AND PH.PostHistoryTypeId = 11), 0) AS ReopenedCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id
+),
+RankedPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.CommentCount,
+        PS.ClosedCount,
+        PS.ReopenedCount,
+        RANK() OVER (PARTITION BY PS.PostTypeId ORDER BY PS.CommentCount DESC) AS CommentRank
+    FROM 
+        PostStatistics PS
+)
+SELECT 
+    U.DisplayName AS UserDisplayName,
+    U.Reputation AS UserReputation,
+    P.Title AS PostTitle,
+    PS.CommentCount,
+    PS.ClosedCount,
+    PS.ReopenedCount,
+    R.CommentRank,
+    CASE 
+        WHEN R.CommentRank IS NULL THEN 'No Comments'
+        WHEN R.CommentRank > 10 THEN 'Low Engagement'
+        ELSE 'Highly Engaged'
+    END AS EngagementLevel,
+    CASE 
+        WHEN U.Reputation > 1000 THEN 'High Reputation'
+        ELSE 'Low Reputation'
+    END AS UserReputationLevel,
+    STRING_AGG(DISTINCT C.Text, '; ') AS CommentTexts
+FROM 
+    UserVotings U
+JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+JOIN 
+    PostStatistics PS ON P.Id = PS.PostId
+LEFT JOIN 
+    RankedPosts R ON PS.PostId = R.PostId
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+GROUP BY 
+    U.DisplayName, U.Reputation, P.Title, PS.CommentCount, PS.ClosedCount, PS.ReopenedCount, R.CommentRank
+ORDER BY 
+    U.Reputation DESC, PS.CommentCount DESC
+HAVING 
+    (SUM(PS.CommentCount) < 100 OR U.Reputation > 500) 
+    AND (P.PostTypeId = 1 OR P.PostTypeId = 2);

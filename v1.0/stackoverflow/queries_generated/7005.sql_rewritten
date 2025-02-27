@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+TopQuestions AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostTypeId = 1 
+        AND rp.ViewRank <= 10
+),
+TopAnswers AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostTypeId = 2 
+        AND rp.ViewRank <= 10
+),
+CombinedPosts AS (
+    SELECT 
+        'Question' AS PostType,
+        tq.PostId,
+        tq.Title,
+        tq.ViewCount,
+        tq.Score,
+        tq.OwnerDisplayName
+    FROM 
+        TopQuestions tq
+    UNION ALL 
+    SELECT 
+        'Answer' AS PostType,
+        ta.PostId,
+        ta.Title,
+        ta.ViewCount,
+        ta.Score,
+        ta.OwnerDisplayName
+    FROM 
+        TopAnswers ta
+)
+SELECT 
+    cp.PostType,
+    cp.Title,
+    cp.ViewCount,
+    cp.Score,
+    cp.OwnerDisplayName,
+    COALESCE(bp.BadgeCount, 0) AS BadgeCount
+FROM 
+    CombinedPosts cp
+LEFT JOIN (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    JOIN 
+        Users u ON b.UserId = u.Id
+    WHERE 
+        u.CreationDate < cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        b.UserId
+) bp ON cp.OwnerDisplayName = bp.UserId
+ORDER BY 
+    cp.ViewCount DESC, cp.Score DESC;

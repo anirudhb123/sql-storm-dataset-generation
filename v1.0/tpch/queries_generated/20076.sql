@@ -1,0 +1,52 @@
+WITH RecursiveSupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC)
+    FROM supplier s
+    JOIN RecursiveSupplierCTE r ON s.s_nationkey = r.s_nationkey
+    WHERE r.rank < 3
+),
+AggregatedSales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT l.l_orderkey) AS order_count,
+           MAX(l.l_discount) AS max_discount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('F', 'O') -- F for fulfilled, O for open
+    GROUP BY o.o_orderkey
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_brand,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           p.p_comment
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_brand, p.p_comment
+),
+FinalSelection AS (
+    SELECT DISTINCT p.p_partkey, p.p_name, p.p_brand, a.total_sales, p.price_check,
+           CASE
+               WHEN a.total_sales IS NULL THEN 'No Orders'
+               ELSE 'Orders Present'
+           END AS order_status,
+           s.s_name AS supplier_name
+    FROM part p
+    LEFT JOIN AggregatedSales a ON p.p_partkey = a.o_orderkey
+    LEFT JOIN RecursiveSupplierCTE s ON p.p_partkey = s.s_suppkey
+    WHERE (p.p_size BETWEEN 5 AND 20 OR p.p_comment LIKE '%cheap%')
+      AND (s.s_acctbal IS NOT NULL OR s.s_comment IS NULL)
+)
+SELECT r.r_name, COUNT(DISTINCT f.p_partkey) AS part_count,
+       AVG(f.total_sales) AS avg_sales,
+       SUM(CASE WHEN f.order_status = 'No Orders' THEN 1 ELSE 0 END) AS no_order_count
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN FinalSelection f ON n.n_nationkey = f.supplier_nationkey
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT f.p_partkey) > 5
+   AND SUM(f.total_sales) < (SELECT AVG(total_sales) FROM AggregatedSales)
+ORDER BY avg_sales DESC, part_count ASC;

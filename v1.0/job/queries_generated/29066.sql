@@ -1,0 +1,64 @@
+WITH movie_data AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword AS movie_keyword,
+        ct.kind AS comp_type,
+        c.name AS company_name,
+        a.name AS actor_name,
+        p.gender AS actor_gender,
+        GROUP_CONCAT(DISTINCT kw.keyword) AS all_keywords
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id AND cc.movie_id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        name p ON a.person_id = p.imdb_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword, ct.kind, c.name, a.name, p.gender
+),
+
+summary AS (
+    SELECT
+        production_year,
+        COUNT(DISTINCT movie_id) AS total_movies,
+        COUNT(DISTINCT actor_name) AS total_actors,
+        COUNT(DISTINCT comp_type) AS total_companies,
+        COUNT(DISTINCT all_keywords) AS total_keywords
+    FROM 
+        movie_data
+    GROUP BY 
+        production_year
+)
+
+SELECT
+    production_year,
+    total_movies,
+    total_actors,
+    total_companies,
+    total_keywords,
+    RANK() OVER (ORDER BY total_movies DESC) AS rank_by_movies,
+    RANK() OVER (ORDER BY total_actors DESC) AS rank_by_actors,
+    RANK() OVER (ORDER BY total_companies DESC) AS rank_by_companies,
+    RANK() OVER (ORDER BY total_keywords DESC) AS rank_by_keywords
+FROM 
+    summary
+ORDER BY 
+    production_year DESC;

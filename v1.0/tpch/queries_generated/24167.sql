@@ -1,0 +1,79 @@
+WITH RECURSIVE price_changes AS (
+    SELECT 
+        ps_partkey, 
+        ps_suppkey, 
+        ps_availqty, 
+        ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS rn
+    FROM 
+        partsupp
+    WHERE 
+        ps_supplycost IS NOT NULL
+),
+part_details AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON l.l_partkey = p.p_partkey
+    LEFT JOIN 
+        orders o ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+),
+supplier_details AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (ORDER BY s.s_acctbal DESC) AS ranking
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+region_supplier AS (
+    SELECT 
+        r.r_name,
+        s.s_name,
+        ps.ps_supplycost,
+        CASE 
+            WHEN ps.ps_availqty < 50 THEN 'Low Stock'
+            WHEN ps.ps_availqty BETWEEN 50 AND 200 THEN 'Moderate Stock'
+            ELSE 'High Stock'
+        END AS stock_status
+    FROM 
+        region r
+    JOIN 
+        nation n ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        supplier s ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        price_changes ps ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    pd.p_name, 
+    pd.p_retailprice,
+    COALESCE(SUM(ps.ps_availqty), 0) AS total_available_qty,
+    SUM(CASE WHEN ps.ps_supplycost < pd.p_retailprice THEN 1 ELSE 0 END) AS below_retail_count,
+    STRING_AGG(CONCAT(rs.r_name, ' - ', rs.stock_status), '; ') AS regional_stock_statuses
+FROM 
+    part_details pd
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey = pd.p_partkey
+LEFT JOIN 
+    region_supplier rs ON rs.s_suppkey = ps.ps_suppkey
+WHERE 
+    pd.total_quantity IS NULL OR pd.order_count < 5
+GROUP BY 
+    pd.p_name, pd.p_retailprice
+HAVING 
+    COUNT(DISTINCT rs.r_name) > 1 
+ORDER BY 
+    pd.p_retailprice DESC, below_retail_count DESC
+LIMIT 10 OFFSET 5;

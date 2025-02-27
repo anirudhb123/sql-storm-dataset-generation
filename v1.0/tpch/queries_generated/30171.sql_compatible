@@ -1,0 +1,39 @@
+
+WITH RECURSIVE part_hierarchy AS (
+    SELECT p_partkey, p_name, 1 AS level
+    FROM part
+    WHERE p_size > 20
+    
+    UNION ALL
+    
+    SELECT p.p_partkey, p.p_name, ph.level + 1
+    FROM part_hierarchy ph
+    JOIN part p ON ph.p_partkey = p.p_partkey 
+    WHERE p.p_size > ph.level * 10
+),
+supplier_profit AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * l.l_quantity) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey
+),
+high_value_orders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+)
+SELECT 
+    r.r_name AS region,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    AVG(sp.total_cost) AS avg_supplier_cost,
+    PERCENT_RANK() OVER (PARTITION BY r.r_name ORDER BY SUM(h.order_value) DESC) AS order_rank
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier_profit sp ON n.n_nationkey = sp.s_suppkey
+LEFT JOIN high_value_orders h ON h.o_orderkey IN (SELECT o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey))
+GROUP BY r.r_name, sp.total_cost
+HAVING COUNT(DISTINCT n.n_nationkey) > 1 AND AVG(sp.total_cost) IS NOT NULL;

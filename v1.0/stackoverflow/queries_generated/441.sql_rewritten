@@ -1,0 +1,79 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        COALESCE(COUNT(DISTINCT B.Id), 0) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(AC.AverageScore, 0) AS AverageCommentScore,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            AVG(Score) AS AverageScore 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) AC ON P.Id = AC.PostId
+    WHERE 
+        P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, AC.AverageScore
+),
+UserPostSummary AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT PS.PostId) AS PostCount,
+        SUM(PS.ViewCount) AS TotalViews,
+        SUM(PS.Score) AS TotalScore,
+        AVG(PS.AverageCommentScore) AS AvgCommentScore
+    FROM 
+        UserReputation U
+    LEFT JOIN 
+        Posts PS ON U.UserId = PS.OwnerUserId
+    GROUP BY 
+        U.UserId, U.DisplayName, U.Reputation
+)
+SELECT 
+    UPS.UserId,
+    UPS.DisplayName,
+    UPS.Reputation,
+    UPS.PostCount,
+    UPS.TotalViews,
+    UPS.TotalScore,
+    UPS.AvgCommentScore,
+    CASE 
+        WHEN UPS.Reputation > 1000 THEN 'Gold'
+        WHEN UPS.Reputation > 500 THEN 'Silver'
+        ELSE 'Bronze' 
+    END AS ReputationTier
+FROM 
+    UserPostSummary UPS
+WHERE 
+    UPS.PostCount > 5
+ORDER BY 
+    UPS.TotalScore DESC, UPS.Reputation DESC;

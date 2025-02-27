@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        JSON_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName) AS t ON TRUE
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '2 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.VoteCount,
+        rp.Tags,
+        mau.DisplayName AS MostActiveUser,
+        mau.QuestionsAsked,
+        mau.AnswersGiven
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        MostActiveUsers mau ON rp.PostRank = 1 AND mau.UserId = rp.OwnerUserId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Body,
+    ps.CreationDate,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.Tags,
+    ps.MostActiveUser,
+    ps.QuestionsAsked,
+    ps.AnswersGiven
+FROM 
+    PostStatistics ps
+ORDER BY 
+    ps.VoteCount DESC,
+    ps.CommentCount DESC
+LIMIT 50;

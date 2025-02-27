@@ -1,0 +1,51 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation_hierarchy nh
+    JOIN nation n ON nh.n_nationkey = n.n_nationkey
+    WHERE nh.level < 3
+),
+part_supplier AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 10 AND ps.ps_supplycost IS NOT NULL
+),
+filtered_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment,
+           SUM(l.l_quantity) AS total_quantity
+    FROM supplier s
+    JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    WHERE l.l_shipdate >= '1997-01-01' AND l.l_shipdate < (cast('1998-10-01' as date) - INTERVAL '1 DAY')
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment
+    HAVING SUM(l.l_quantity) > 100
+),
+ranked_customers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           RANK() OVER (ORDER BY c.c_acctbal DESC) AS rank_pos
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+merged_data AS (
+    SELECT p.name, s.total_quantity, c.c_name,
+           CASE 
+               WHEN s.total_quantity > 1000 THEN 'High'
+               WHEN s.total_quantity BETWEEN 500 AND 1000 THEN 'Medium'
+               ELSE 'Low'
+           END AS supplier_rating
+    FROM part_supplier p
+    LEFT JOIN filtered_suppliers s ON p.p_partkey = s.s_suppkey
+    INNER JOIN ranked_customers c ON c.rank_pos <= 10
+)
+SELECT m.name, m.total_quantity, m.c_name, m.supplier_rating,
+       n.n_name AS region_name, n.level
+FROM merged_data m
+LEFT JOIN nation_hierarchy n ON m.c_name = n.n_name
+WHERE m.supplier_rating = 'High' 
+  AND n.level IS NOT NULL
+  AND (m.total_quantity IS NOT NULL OR m.total_quantity <> 0)
+ORDER BY m.total_quantity DESC, m.name ASC;

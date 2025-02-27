@@ -1,0 +1,92 @@
+
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(sub.AnswerCount, 0) AS AnswerCount,
+        COALESCE(cmt.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            ParentId, 
+            COUNT(*) AS AnswerCount
+        FROM 
+            Posts 
+        WHERE 
+            PostTypeId = 2
+        GROUP BY ParentId
+    ) sub ON p.Id = sub.ParentId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments 
+        GROUP BY PostId
+    ) cmt ON p.Id = cmt.PostId
+    WHERE
+        p.CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 30 DAY)
+), 
+SelectedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        CASE 
+            WHEN rp.PostRank = 1 THEN 'Most Recent Post'
+            ELSE 'Older Post'
+        END AS PostCategory
+    FROM 
+        RecursivePosts rp
+    WHERE 
+        rp.AnswerCount > 0
+), 
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        GROUP_CONCAT(DISTINCT pht.Name ORDER BY ph.CreationDate DESC) AS Changes,
+        MIN(ph.CreationDate) AS FirstChangeDate,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    sp.Title,
+    sp.CreationDate,
+    sp.ViewCount,
+    sp.AnswerCount,
+    sp.CommentCount,
+    sp.PostCategory,
+    COALESCE(phi.Changes, 'No changes') AS HistoryChanges,
+    CASE 
+        WHEN phi.FirstChangeDate IS NULL THEN NULL
+        ELSE DATEDIFF(phi.LastChangeDate, phi.FirstChangeDate)
+    END AS DaysToLastChange
+FROM 
+    SelectedPosts sp
+LEFT JOIN 
+    PostHistoryInfo phi ON sp.PostId = phi.PostId
+WHERE 
+    sp.ViewCount > (
+        SELECT 
+            AVG(ViewCount) 
+        FROM 
+            Posts 
+        WHERE 
+            CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 30 DAY)
+    )
+ORDER BY 
+    sp.ViewCount DESC, 
+    sp.CreationDate DESC
+LIMIT 100;

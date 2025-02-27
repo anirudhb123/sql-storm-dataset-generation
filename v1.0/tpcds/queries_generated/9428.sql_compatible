@@ -1,0 +1,49 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY 
+        ws_sold_date_sk, 
+        ws_item_sk
+), 
+TopItems AS (
+    SELECT 
+        sd.ws_item_sk,
+        i.i_product_name,
+        i.i_brand,
+        sd.total_quantity,
+        sd.total_net_profit,
+        RANK() OVER (PARTITION BY sd.ws_sold_date_sk ORDER BY sd.total_net_profit DESC) AS rank
+    FROM 
+        SalesData sd
+    JOIN 
+        item i ON sd.ws_item_sk = i.i_item_sk
+), 
+BestSellingItems AS (
+    SELECT 
+        * 
+    FROM 
+        TopItems
+    WHERE 
+        rank <= 10
+)
+SELECT 
+    dd.d_date AS Sales_Date,
+    bsi.i_product_name,
+    bsi.i_brand,
+    bsi.total_quantity,
+    bsi.total_net_profit
+FROM 
+    BestSellingItems bsi
+JOIN 
+    date_dim dd ON bsi.ws_sold_date_sk = dd.d_date_sk
+ORDER BY 
+    dd.d_date, 
+    bsi.total_net_profit DESC;

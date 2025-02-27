@@ -1,0 +1,64 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY COUNT(DISTINCT v.Id) DESC) AS RankByTag
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName, p.Tags
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+TagStatistics AS (
+    SELECT 
+        pt.Tag,
+        COUNT(DISTINCT rp.PostId) AS PostCount,
+        AVG(rp.UpVotes - rp.DownVotes) AS AvgScore
+    FROM 
+        RankedPosts rp
+    INNER JOIN 
+        PopularTags pt ON pt.Tag = ANY(string_to_array(rp.Tags, ','))
+    GROUP BY 
+        pt.Tag
+)
+SELECT 
+    ts.Tag,
+    ts.PostCount,
+    ts.AvgScore,
+    COUNT(*) FILTER (WHERE rp.RankByTag <= 5) AS Top5PostsCount
+FROM 
+    TagStatistics ts
+LEFT JOIN 
+    RankedPosts rp ON ts.Tag = ANY(string_to_array(rp.Tags, ','))
+GROUP BY 
+    ts.Tag, ts.PostCount, ts.AvgScore
+HAVING 
+    ts.PostCount > 10
+ORDER BY 
+    ts.AvgScore DESC
+LIMIT 10;

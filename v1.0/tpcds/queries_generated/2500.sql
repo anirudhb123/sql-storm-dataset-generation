@@ -1,0 +1,64 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        COUNT(ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_item_sk) AS unique_items,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS rank_in_spending
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_current_addr_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+), HighSpenders AS (
+    SELECT 
+        s.c_customer_sk,
+        s.total_spent,
+        s.total_orders,
+        s.unique_items
+    FROM 
+        SalesSummary s
+    WHERE 
+        s.rank_in_spending <= 100
+), InventoryCheck AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        item i
+    JOIN 
+        inventory inv ON i.i_item_sk = inv.inv_item_sk
+    GROUP BY 
+        i.i_item_sk
+), ReturnData AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt) AS total_return_value
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    hs.c_customer_sk,
+    hs.total_spent,
+    hs.total_orders,
+    hs.unique_items,
+    COALESCE(ic.total_inventory, 0) AS total_inventory,
+    COALESCE(rd.total_returns, 0) AS total_returns,
+    COALESCE(rd.total_return_value, 0) AS total_return_value
+FROM 
+    HighSpenders hs
+LEFT JOIN 
+    InventoryCheck ic ON ic.i_item_sk IN (SELECT ws.ws_item_sk FROM web_sales ws WHERE ws.ws_bill_customer_sk = hs.c_customer_sk)
+LEFT JOIN 
+    ReturnData rd ON rd.sr_item_sk IN (SELECT ws.ws_item_sk FROM web_sales ws WHERE ws.ws_bill_customer_sk = hs.c_customer_sk)
+ORDER BY 
+    hs.total_spent DESC;

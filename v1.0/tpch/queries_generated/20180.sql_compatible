@@ -1,0 +1,61 @@
+
+WITH RECURSIVE region_expansion AS (
+    SELECT r_regionkey, r_name, r_comment
+    FROM region
+    WHERE r_name LIKE 'A%'
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, r.r_comment
+    FROM region r
+    JOIN region_expansion re ON r.r_regionkey = re.r_regionkey + 1
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+supplier_part_info AS (
+    SELECT s.s_suppkey, AVG(ps.ps_supplycost) AS avg_supply_cost,
+           SUM(ps.ps_availqty) AS total_available
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, 
+           COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS returns,
+           COUNT(CASE WHEN l.l_linestatus = 'F' THEN 1 END) AS fulfilled,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+ranked_nations AS (
+    SELECT n.n_nationkey, n.n_name,
+           DENSE_RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS nation_rank
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT DISTINCT
+    re.r_name AS region_name,
+    COALESCE(ROUND(SUM(co.total_spent), 2), 0) AS total_customer_spending,
+    p.p_name AS part_name,
+    s.s_name AS supplier_name,
+    COALESCE(ps.total_available, 0) AS available_quantity,
+    ns.n_name AS nation_name,
+    ns.nation_rank,
+    ls.total_line_value,
+    CASE
+        WHEN ls.returns > 0 THEN 'Returns Exist'
+        ELSE 'No Returns'
+    END AS return_status
+FROM region_expansion re
+LEFT JOIN customer_orders co ON re.r_regionkey = 1
+LEFT JOIN partsupp ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size >= 10)
+LEFT JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN lineitem_summary ls ON ls.l_orderkey = co.c_custkey
+LEFT JOIN ranked_nations ns ON ns.n_nationkey = s.s_nationkey
+WHERE ns.nation_rank IS NOT NULL AND re.r_comment IS NOT NULL
+GROUP BY re.r_name, co.total_spent, p.p_name, s.s_name, ps.total_available, ns.n_name, ns.nation_rank, ls.total_line_value
+ORDER BY total_customer_spending DESC, region_name;

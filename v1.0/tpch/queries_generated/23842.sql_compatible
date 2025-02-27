@@ -1,0 +1,65 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+        JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+        LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        (ps.ps_supplycost * (1 - l.l_discount)) AS effective_cost
+    FROM 
+        partsupp ps
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_returnflag = 'N' 
+        AND l.l_shipdate > DATE '1998-10-01' - INTERVAL '365 days'
+)
+SELECT 
+    c.c_name,
+    COALESCE(s.s_name, 'N/A') AS supplier_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(COALESCE(psd.effective_cost, 0)) AS avg_effective_cost,
+    cn.n_name AS customer_nation,
+    p.p_name AS part_name
+FROM 
+    customer c
+    LEFT JOIN CustomerOrderSummary co ON c.c_custkey = co.c_custkey
+    LEFT JOIN lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+    LEFT JOIN RankedSuppliers rs ON l.l_suppkey = rs.s_suppkey AND rs.rn = 1
+    LEFT JOIN PartSupplierDetails psd ON l.l_partkey = psd.ps_partkey
+    LEFT JOIN part p ON psd.ps_partkey = p.p_partkey
+    LEFT JOIN nation cn ON c.c_nationkey = cn.n_nationkey
+WHERE 
+    co.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderSummary)
+GROUP BY 
+    c.c_name, s.s_name, cn.n_name, p.p_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 0 
+    AND SUM(l.l_extendedprice * (1 - l.l_discount)) > 0
+ORDER BY 
+    total_revenue DESC;

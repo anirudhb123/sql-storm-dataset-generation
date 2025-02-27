@@ -1,0 +1,59 @@
+WITH title_data AS (
+    SELECT 
+        t.id AS title_id,
+        t.title AS title,
+        t.production_year,
+        k.keyword AS keyword,
+        n.name AS actor_name,
+        n.gender,
+        ci.note AS role_note
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name n ON ci.person_id = n.person_id
+    WHERE 
+        t.production_year >= 2000 AND 
+        (k.keyword LIKE '%Action%' OR k.keyword LIKE '%Comedy%')
+),
+actor_gender_count AS (
+    SELECT 
+        actor_name,
+        gender,
+        COUNT(*) AS appearance_count
+    FROM 
+        title_data
+    GROUP BY 
+        actor_name, gender
+),
+top_actors AS (
+    SELECT 
+        actor_name,
+        gender,
+        appearance_count,
+        RANK() OVER (PARTITION BY gender ORDER BY appearance_count DESC) AS rank
+    FROM 
+        actor_gender_count
+)
+
+SELECT 
+    t.title,
+    t.production_year,
+    a.actor_name,
+    a.gender,
+    a.appearance_count
+FROM 
+    title_data t
+JOIN 
+    top_actors a ON t.actor_name = a.actor_name
+WHERE 
+    a.rank <= 5
+ORDER BY 
+    t.production_year DESC, a.appearance_count DESC;

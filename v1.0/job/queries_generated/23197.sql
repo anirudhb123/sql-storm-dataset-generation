@@ -1,0 +1,76 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        AVG(COALESCE(ki.info, '0'))::numeric AS average_rating,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY AVG(COALESCE(ki.info::integer, 0)) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        movie_info_idx mii ON t.id = mii.movie_id
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            info
+         FROM 
+            movie_info 
+         WHERE 
+            info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+        ) ki ON t.id = ki.movie_id
+    GROUP BY 
+        t.id
+),
+MoviesWithCast AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.average_rating,
+        c.person_id AS actor_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT c.nr_order) AS cast_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        cast_info c ON rm.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = c.person_id
+    GROUP BY 
+        rm.movie_id, ak.name
+),
+QualifiedMovies AS (
+    SELECT 
+        mwc.movie_id,
+        mwc.title,
+        mwc.production_year,
+        mwc.average_rating,
+        mwc.actor_name,
+        mwc.cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mwc.production_year ORDER BY mwc.average_rating DESC, mwc.cast_count DESC) AS movie_rank
+    FROM 
+        MoviesWithCast mwc
+    WHERE 
+        mwc.average_rating > 0
+)
+SELECT 
+    qm.title,
+    qm.production_year,
+    qm.average_rating,
+    STRING_AGG(qm.actor_name, ', ') AS actor_list,
+    COUNT(DISTINCT qm.movie_id) FILTER (WHERE qm.cast_count >= 3) AS qualifying_movies
+FROM 
+    QualifiedMovies qm
+WHERE 
+    qm.movie_rank <= 10
+GROUP BY 
+    qm.production_year, qm.average_rating
+ORDER BY 
+    qm.production_year DESC, 
+    qm.average_rating DESC;

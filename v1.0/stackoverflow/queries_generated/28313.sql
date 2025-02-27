@@ -1,0 +1,89 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT 
+             UserId,
+             COUNT(*) AS BadgeCount
+         FROM 
+             Badges
+         GROUP BY 
+             UserId) b ON u.Id = b.UserId
+    LEFT JOIN 
+        (SELECT 
+             PostId,
+             string_agg(TagName, ', ') AS TagName
+         FROM 
+             PostTags pt
+         JOIN 
+             Tags t ON pt.TagId = t.Id
+         GROUP BY 
+             PostId) t ON p.Id = t.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.LastActivityDate, p.ViewCount, p.AnswerCount, u.DisplayName, b.BadgeCount
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS EditCount,
+        STRING_AGG(DISTINCT ph.UserDisplayName, ', ') AS Editors
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+PostActivity AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.Body,
+        pd.OwnerDisplayName,
+        pd.CreationDate,
+        pd.LastActivityDate,
+        pd.ViewCount,
+        pd.AnswerCount,
+        pd.BadgeCount,
+        COALESCE(SUM(CASE WHEN phd.EditCount > 0 THEN phd.EditCount END), 0) AS TotalEdits,
+        STRING_AGG(DISTINCT phd.Editors) AS Editors
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        PostHistoryDetails phd ON pd.PostId = phd.PostId
+    GROUP BY 
+        pd.PostId, pd.Title, pd.Body, pd.OwnerDisplayName, pd.CreationDate, pd.LastActivityDate, pd.ViewCount, pd.AnswerCount, pd.BadgeCount
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.Body,
+    pa.OwnerDisplayName,
+    pa.CreationDate,
+    pa.LastActivityDate,
+    pa.ViewCount,
+    pa.AnswerCount,
+    pa.BadgeCount,
+    pa.TotalEdits,
+    pa.Editors
+FROM 
+    PostActivity pa
+ORDER BY 
+    pa.LastActivityDate DESC,
+    pa.TotalEdits DESC,
+    pa.ViewCount DESC
+LIMIT 100;

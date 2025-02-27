@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+        AND p.Score > 0 -- Only Questions with a positive score
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount,
+        COUNT(DISTINCT pt.OwnerUserId) AS UserCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+CombiningData AS (
+    SELECT 
+        p.Title,
+        p.CreationDate,
+        COALESCE(u.DisplayName, 'Deleted User') AS UserDisplayName,
+        COALESCE(u.Reputation, 0) AS UserReputation,
+        COALESCE(ts.PostCount, 0) AS TagsPostCount,
+        COALESCE(ts.UserCount, 0) AS TagsUserCount,
+        RANK() OVER (ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        TagStatistics ts ON p.Tags LIKE '%' || ts.TagName || '%'
+    WHERE 
+        p.PostTypeId = 1 AND p.LastActivityDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+)
+SELECT 
+    Title,
+    UserDisplayName,
+    UserReputation,
+    COUNT(DISTINCT PostId) AS AnswerCount, -- Adjust as needed
+    AVG(UserReputation) AS AvgUserReputation,
+    MAX(CreationDate) AS LastPostDate,
+    SUM(TagsPostCount) AS TotalTagsUsed,
+    SUM(TagsUserCount) AS TotalUsersCount,
+    MAX(PostRank) AS HighestPostRank
+FROM 
+    CombiningData
+GROUP BY 
+    Title, UserDisplayName, UserReputation
+ORDER BY 
+    AvgUserReputation DESC, TotalTagsUsed DESC
+LIMIT 10;

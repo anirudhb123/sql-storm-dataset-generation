@@ -1,0 +1,47 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+), 
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_linenumber) AS item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ps.ps_availqty,
+    COALESCE(r.n_name, 'Unknown') AS nation_name,
+    os.item_count,
+    os.total_revenue,
+    CASE 
+        WHEN os.total_revenue IS NULL THEN 'No Revenue'
+        WHEN os.total_revenue < 1000 THEN 'Low Revenue'
+        ELSE 'High Revenue'
+    END AS revenue_category
+FROM 
+    part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation r ON s.s_nationkey = r.n_nationkey
+LEFT JOIN OrderStats os ON os.o_orderkey = (SELECT MIN(o.o_orderkey) FROM orders o WHERE o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = s.s_nationkey LIMIT 1))
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    OR (r.r_name IS NULL)
+ORDER BY 
+    p.p_partkey;

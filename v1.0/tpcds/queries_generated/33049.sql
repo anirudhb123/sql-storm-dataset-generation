@@ -1,0 +1,65 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        ws_bill_customer_sk,
+        total_sales,
+        order_count
+    FROM 
+        SalesCTE
+    WHERE 
+        rank <= 10
+),
+SalesDetail AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        t.total_sales,
+        t.order_count,
+        COALESCE(cc.cc_name, 'N/A') AS call_center_name,
+        COALESCE(s.s_store_name, 'N/A') AS store_name,
+        CASE 
+            WHEN t.total_sales > 10000 THEN 'High Value'
+            WHEN t.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value
+    FROM 
+        TopCustomers t
+    JOIN 
+        customer c ON c.c_customer_sk = t.ws_bill_customer_sk
+    LEFT JOIN 
+        call_center cc ON c.cc_call_center_sk = cc.cc_call_center_sk
+    LEFT JOIN 
+        store s ON c.c_current_addr_sk = s.s_store_sk
+)
+SELECT 
+    s.c_customer_id,
+    s.c_first_name,
+    s.c_last_name,
+    s.total_sales,
+    s.order_count,
+    NULLIF(s.store_name, 'N/A') AS effective_store,
+    s.call_center_name,
+    s.customer_value,
+    CASE 
+        WHEN s.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Has Sales'
+    END AS sales_status
+FROM 
+    SalesDetail s
+ORDER BY 
+    s.total_sales DESC
+LIMIT 50;

@@ -1,0 +1,75 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        DENSE_RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS year_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'Feature%')
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopCastMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_count,
+        year_rank
+    FROM 
+        RankedMovies
+    WHERE 
+        year_rank = 1
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        tc.movie_id,
+        tc.production_year,
+        STRING_AGG(CONCAT_WS(' ', a.name, n.name), ', ') AS cast_names,
+        string_agg(DISTINCT mk.keyword, ', ') AS movie_keywords,
+        string_agg(DISTINCT mi.info, '; ') AS movie_info
+    FROM 
+        TopCastMovies tc
+    LEFT JOIN 
+        movie_keyword mk ON tc.movie_id = mk.movie_id
+    LEFT JOIN 
+        cast_info ci ON tc.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        name n ON ci.person_id = n.imdb_id
+    LEFT JOIN 
+        movie_info mi ON tc.movie_id = mi.movie_id
+    GROUP BY 
+        tc.movie_id, tc.title, tc.production_year
+),
+FinalResults AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.cast_names,
+        md.movie_keywords,
+        COALESCE(mi.note, 'No additional info') AS additional_info
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        movie_info_idx mi ON md.movie_id = mi.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    cast_names,
+    movie_keywords,
+    additional_info
+FROM 
+    FinalResults
+ORDER BY 
+    production_year DESC, title;

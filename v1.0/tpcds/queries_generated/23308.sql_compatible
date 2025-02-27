@@ -1,0 +1,47 @@
+
+WITH RECURSIVE CustomerHier AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_addr_sk,
+           ROW_NUMBER() OVER (PARTITION BY c_current_addr_sk ORDER BY c_customer_sk) AS rn
+    FROM customer
+    WHERE c_birth_year IS NOT NULL
+    UNION ALL
+    SELECT ch.c_customer_sk, ch.c_first_name, ch.c_last_name, ch.c_current_addr_sk
+    FROM CustomerHier ch
+    JOIN customer c ON ch.c_current_addr_sk = c.c_current_addr_sk 
+    WHERE ch.rn < 5 AND c.c_birth_year > MOD(ch.c_customer_sk, 1000)
+),
+AggregateSales AS (
+    SELECT ws_bill_customer_sk AS customer_id, 
+           SUM(ws_net_paid_inc_tax) AS total_spent,
+           COUNT(ws_order_number) AS total_orders,
+           AVG(ws_net_paid_inc_tax) AS avg_order_value
+    FROM web_sales
+    WHERE ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_bill_customer_sk
+),
+AddressOverview AS (
+    SELECT ca_city, ca_state, COUNT(DISTINCT c_customer_sk) AS customer_count,
+           AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE ca.ca_state IS NOT NULL
+    GROUP BY ca_city, ca_state
+)
+SELECT a.ca_city, 
+       a.ca_state, 
+       a.customer_count, 
+       a.avg_purchase_estimate,
+       ag.total_spent,
+       ag.total_orders,
+       CASE 
+           WHEN ag.total_orders > 0 THEN ag.total_spent / ag.total_orders
+           ELSE NULL 
+       END AS spent_per_order,
+       ROW_NUMBER() OVER (PARTITION BY a.ca_state ORDER BY a.avg_purchase_estimate DESC) AS state_rank
+FROM AddressOverview a
+LEFT JOIN AggregateSales ag ON a.customer_count > 10
+WHERE a.avg_purchase_estimate IS NOT NULL 
+AND a.customer_count > (SELECT AVG(customer_count) FROM AddressOverview)
+ORDER BY a.ca_state ASC, a.customer_count DESC
+FETCH FIRST 100 ROWS ONLY;

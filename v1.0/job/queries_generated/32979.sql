@@ -1,0 +1,81 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        ma.title,
+        ma.production_year,
+        ma.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title ma ON ml.movie_id = ma.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE 
+        mh.level < 5  -- Limit hierarchy depth to prevent infinite recursion
+), film_cast AS (
+    SELECT 
+        cc.movie_id,
+        COUNT(DISTINCT ca.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM 
+        complete_cast cc
+    JOIN 
+        cast_info ca ON cc.subject_id = ca.id
+    LEFT JOIN 
+        aka_name ak ON ca.person_id = ak.person_id
+    GROUP BY 
+        cc.movie_id
+), movie_info_summary AS (
+    SELECT 
+        mf.movie_id,
+        MAX(mf.info) AS latest_info
+    FROM 
+        movie_info mf
+    GROUP BY 
+        mf.movie_id
+), keyword_summary AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords_list
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    fcs.actor_count,
+    COALESCE(fcs.actors, 'No actors listed') AS actors,
+    COALESCE(mis.latest_info, 'No additional info') AS additional_info,
+    COALESCE(ks.keywords_list, 'No keywords') AS keywords
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    film_cast fcs ON mh.movie_id = fcs.movie_id
+LEFT JOIN 
+    movie_info_summary mis ON mh.movie_id = mis.movie_id
+LEFT JOIN 
+    keyword_summary ks ON mh.movie_id = ks.movie_id
+WHERE 
+    mh.production_year >= 2000
+ORDER BY 
+    mh.production_year DESC,
+    mh.title;
+
+This SQL query performs various operations like creating a recursive CTE for retrieving a movie hierarchy, summarizing the cast information, movie additional information, and keywords associated with each movie. It employs outer joins, aggregates, string aggregations, and NULL logic to provide a comprehensive view of each movie in the hierarchy, along with its details.

@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(p.AcceptedAnswerId, -1) AS AnswerId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+        AND p.PostTypeId IN (1, 2)  
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        (SELECT DISTINCT UNNEST(SPLIT(rp.Tags, '><')) AS TagName) t ON TRUE
+    WHERE 
+        rp.rn <= 5  
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score
+),
+PostScoreSummary AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.CreationDate,
+        fp.ViewCount,
+        fp.Score,
+        COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0) AS NetVotes
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM 
+            Votes 
+         GROUP BY 
+            PostId) v ON v.PostId = fp.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.NetVotes,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = ps.PostId) AS CommentCount,
+    (SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId = ps.PostId AND ph.PostHistoryTypeId IN (10, 11)) AS ClosureHistory,
+    (SELECT MIN(CreationDate) 
+     FROM PostHistory ph 
+     WHERE ph.PostId = ps.PostId AND ph.PostHistoryTypeId = 1) AS FirstEditDate  
+FROM 
+    PostScoreSummary ps
+WHERE 
+    ps.NetVotes IS NOT NULL
+ORDER BY 
+    ps.NetVotes DESC,
+    ps.Score DESC
+LIMIT 50 OFFSET 10;

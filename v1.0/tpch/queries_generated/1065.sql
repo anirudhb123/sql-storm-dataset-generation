@@ -1,0 +1,89 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rank_order
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > 1000
+),
+SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        ss.s_suppkey,
+        ss.total_sales,
+        ss.order_count,
+        RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM 
+        SupplierSales ss
+),
+SalesAnalysis AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        COALESCE(ts.total_sales, 0) AS supplier_sales,
+        COUNT(DISTINCT li.l_orderkey) AS total_orders,
+        AVG(l.l_extendedprice) FILTER (WHERE l.l_discount > 0) AS avg_discounted_price
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        lineitem li ON ps.ps_partkey = li.l_partkey
+    LEFT JOIN 
+        TopSuppliers ts ON ps.ps_suppkey = ts.s_suppkey
+    GROUP BY 
+        p.p_partkey, ts.total_sales, ts.sales_rank
+),
+FinalReport AS (
+    SELECT 
+        sa.p_partkey,
+        sa.p_name,
+        sa.p_brand,
+        sa.supplier_sales,
+        sa.total_orders,
+        sa.avg_discounted_price,
+        CASE 
+            WHEN sa.total_orders = 0 THEN 'No Orders'
+            ELSE 'Has Orders'
+        END AS order_status,
+        CASE
+            WHEN sa.supplier_sales > 10000 THEN 'High'
+            WHEN sa.supplier_sales BETWEEN 5000 AND 10000 THEN 'Medium'
+            ELSE 'Low'
+        END AS sales_category
+    FROM 
+        SalesAnalysis sa
+)
+SELECT 
+    fr.*,
+    r.r_name AS region_name,
+    n.n_name AS nation_name
+FROM 
+    FinalReport fr
+LEFT JOIN 
+    supplier s ON fr.supplier_sales = (SELECT MAX(supplier_sales) FROM SalesAnalysis)
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    fr.order_status = 'Has Orders'
+ORDER BY 
+    fr.supplier_sales DESC, fr.total_orders ASC;

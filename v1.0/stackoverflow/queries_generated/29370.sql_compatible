@@ -1,0 +1,68 @@
+
+WITH TagCounts AS (
+    SELECT
+        unnest(string_to_array(substring(Tags FROM 2 FOR length(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM
+        Posts
+    WHERE
+        PostTypeId = 1  
+    GROUP BY
+        Tag
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(COALESCE(c.Score, 0)) AS AvgCommentScore
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    GROUP BY
+        u.Id, u.DisplayName, u.Reputation
+),
+TopTags AS (
+    SELECT
+        Tag,
+        TagCount,
+        ROW_NUMBER() OVER (ORDER BY TagCount DESC) AS Rank
+    FROM
+        TagCounts
+),
+UserTags AS (
+    SELECT
+        ut.UserId,
+        tt.Tag,
+        tt.TagCount,
+        ut.TotalPosts,
+        ut.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY ut.UserId ORDER BY tt.TagCount DESC) AS UserTagRank
+    FROM
+        UserReputation ut
+    JOIN
+        TopTags tt ON tt.Rank <= 5  
+)
+SELECT
+    ut.UserId,
+    u.DisplayName,
+    ut.Reputation,
+    SUM(ut.TagCount) AS TotalTagsCount,
+    AVG(ut.TagCount) AS AvgTagCount,
+    STRING_AGG(ut.Tag, ', ') AS TopTags
+FROM
+    UserTags ut
+JOIN
+    Users u ON ut.UserId = u.Id
+WHERE
+    ut.UserTagRank <= 5
+GROUP BY
+    ut.UserId, u.DisplayName, ut.Reputation
+ORDER BY
+    TotalTagsCount DESC, u.Reputation DESC;

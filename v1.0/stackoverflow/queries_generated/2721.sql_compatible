@@ -1,0 +1,67 @@
+
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        COALESCE(PA.CreationDate, P.CreationDate) AS PostDate,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT PH.UserId) AS EditCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5, 6)
+    LEFT JOIN 
+        Posts PA ON P.AcceptedAnswerId = PA.Id
+    WHERE 
+        P.CreationDate >= '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.Score, PA.CreationDate
+),
+AggregatedResults AS (
+    SELECT 
+        US.DisplayName,
+        SUM(PS.Score) AS TotalScore,
+        COUNT(DISTINCT PS.PostId) AS TotalPosts,
+        SUM(US.TotalUpvotes) AS TotalUpvotes,
+        SUM(US.TotalDownvotes) AS TotalDownvotes,
+        AVG(PS.CommentCount) AS AvgCommentsPerPost,
+        AVG(PS.EditCount) AS AvgEditsPerPost
+    FROM 
+        UserVoteSummary US
+    JOIN 
+        Posts P ON US.UserId = P.OwnerUserId
+    JOIN 
+        PostSummary PS ON P.Id = PS.PostId
+    GROUP BY 
+        US.DisplayName
+)
+
+SELECT 
+    COALESCE(A.DisplayName, 'Anonymous') AS User,
+    A.TotalScore,
+    A.TotalPosts,
+    A.TotalUpvotes,
+    A.TotalDownvotes,
+    A.AvgCommentsPerPost,
+    A.AvgEditsPerPost
+FROM 
+    AggregatedResults A
+ORDER BY 
+    A.TotalScore DESC
+LIMIT 10;

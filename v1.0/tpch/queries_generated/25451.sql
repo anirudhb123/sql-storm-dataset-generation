@@ -1,0 +1,28 @@
+SELECT 
+    p.p_name,
+    s.s_name,
+    SUM(ps.ps_availqty) AS total_available,
+    AVG(ps.ps_supplycost) AS avg_supply_cost,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    STRING_AGG(DISTINCT CONCAT(n.n_name, ':', r.r_name), '; ') AS nation_region_info
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size BETWEEN 10 AND 20
+    AND p.p_retailprice > 50.00
+GROUP BY 
+    p.p_name, s.s_name
+HAVING 
+    total_available > 100
+ORDER BY 
+    avg_supply_cost DESC;

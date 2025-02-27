@@ -1,0 +1,38 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT t.id AS movie_id, 
+           t.title,
+           t.production_year,
+           0 AS level
+    FROM aka_title t
+    WHERE t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT mk.linked_movie_id,
+           at.title,
+           at.production_year,
+           mh.level + 1
+    FROM movie_link mk
+    JOIN aka_title at ON mk.linked_movie_id = at.id
+    JOIN MovieHierarchy mh ON mk.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS num_actors,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS avg_has_note,
+    MAX(t.kind_id) AS max_kind_id,
+    MIN(CASE WHEN ci.nr_order IS NULL THEN 'No Order' ELSE CAST(ci.nr_order AS text) END) AS min_order_status
+FROM MovieHierarchy mh
+LEFT JOIN complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN aka_title t ON ci.movie_id = t.id
+GROUP BY mh.movie_id, mh.title, mh.production_year
+HAVING COUNT(DISTINCT ci.person_id) > 5
+ORDER BY mh.production_year DESC, num_actors DESC
+LIMIT 10;
+
+This query constructs a recursive Common Table Expression (CTE) to build a hierarchy of movies released since 2000, linking movies through their relations. It aggregates actors' names, counts unique actors per movie, and evaluates certain conditions such as the presence of notes in the casting information. The results are limited to movies with more than five distinct actors and ordered by production year and number of actors.

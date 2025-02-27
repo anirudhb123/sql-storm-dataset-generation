@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS RankByScore,
+        LAG(p.CreationDate) OVER (ORDER BY p.CreationDate) AS PreviousPostDate
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+        AND p.Score >= 0
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        COALESCE(DATEDIFF(DAY, rp.CreationDate, cast('2024-10-01 12:34:56' as timestamp)), 0) AS DaysSinceCreation,
+        CASE 
+            WHEN rp.RankByScore = 1 THEN 'Top Post'
+            WHEN rp.RankByScore <= 5 THEN 'Top 5 Post'
+            ELSE 'Others' 
+        END AS PostCategory,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId IN (2, 4)) AS UpvotesCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByScore <= 10
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostWithUserBadges AS (
+    SELECT 
+        pd.*,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        Users u ON pd.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+)
+SELECT 
+    PWM.PostId,
+    PWM.Title,
+    PWM.CreationDate,
+    PWM.Score,
+    PWM.ViewCount,
+    PWM.DaysSinceCreation,
+    PWM.PostCategory,
+    PWM.CommentCount,
+    PWM.UpvotesCount,
+    COALESCE(PWM.GoldBadges, 0) AS TotalGoldBadges,
+    COALESCE(PWM.SilverBadges, 0) AS TotalSilverBadges,
+    COALESCE(PWM.BronzeBadges, 0) AS TotalBronzeBadges,
+    CASE 
+        WHEN PWM.GoldBadges IS NULL THEN 'No Badges'
+        ELSE 'User has badges'
+    END AS BadgeStatus,
+    SUBSTRING_INDEX(Tags, ',', 5) AS TopTags
+FROM 
+    PostWithUserBadges PWM
+LEFT JOIN 
+    PostHistory PH ON PWM.PostId = PH.PostId AND PH.PostHistoryTypeId IN (10, 11)
+WHERE 
+    PH.Comment IS NOT NULL 
+    AND PWM.DaysSinceCreation > 30
+ORDER BY 
+    PWM.Score DESC, PWM.ViewCount DESC;

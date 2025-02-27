@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        u.DisplayName AS OwnerDisplayName,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Posts_tags pt ON p.Id = pt.PostId
+    LEFT JOIN
+        Tags t ON pt.TagId = t.Id
+    WHERE
+        p.PostTypeId = 1 -- only questions
+    GROUP BY
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, u.DisplayName
+),
+
+RecentEdits AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate AS EditDate,
+        ph.UserDisplayName AS EditorDisplayName,
+        ph.Comment,
+        ph.Text AS NewValue,
+        ph.PostHistoryTypeId
+    FROM
+        PostHistory ph
+    WHERE
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+),
+
+UserBadges AS (
+    SELECT
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        COUNT(b.Id) AS BadgeCount
+    FROM
+        Badges b
+    GROUP BY
+        b.UserId
+)
+
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.OwnerDisplayName,
+    rp.Tags,
+    re.EditDate,
+    re.EditorDisplayName,
+    re.NewValue,
+    re.Comment AS EditComment,
+    ub.BadgeNames,
+    ub.BadgeCount,
+    CASE 
+        WHEN rp.Rank = 1 THEN 'Latest Post by User' 
+        ELSE 'Earlier Posts' 
+    END AS PostRankDescription
+FROM
+    RankedPosts rp
+LEFT JOIN
+    RecentEdits re ON rp.PostId = re.PostId
+LEFT JOIN
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE
+    rp.Rank <= 3 -- Limit to top 3 ranked posts per user
+ORDER BY
+    rp.OwnerDisplayName, rp.CreationDate DESC;

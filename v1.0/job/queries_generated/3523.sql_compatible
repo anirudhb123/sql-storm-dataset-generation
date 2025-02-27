@@ -1,0 +1,80 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_movies
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        COALESCE(k.keyword, 'No Keyword') AS keyword,
+        c.name AS company_name,
+        ROW_NUMBER() OVER (PARTITION BY m.movie_id ORDER BY c.name) AS company_rank
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        c.country_code IS NOT NULL
+),
+ActorRoleCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        COUNT(DISTINCT ci.role_id) AS role_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+FinalReport AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.keyword,
+        md.company_name,
+        COALESCE(ac.actor_count, 0) AS actor_count,
+        COALESCE(ac.role_count, 0) AS role_count,
+        md.total_movies 
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        ActorRoleCounts ac ON md.movie_id = ac.movie_id
+)
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.keyword,
+    fr.company_name,
+    fr.actor_count,
+    fr.role_count,
+    fr.total_movies,
+    CASE 
+        WHEN fr.actor_count > 10 THEN 'Big Cast'
+        WHEN fr.actor_count BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast' 
+    END AS cast_size_category,
+    CASE 
+        WHEN fr.total_movies > 50 THEN 'Trending Year'
+        ELSE 'Classic Year'
+    END AS movie_trend
+FROM 
+    FinalReport fr
+WHERE 
+    fr.company_name IS NOT NULL
+ORDER BY 
+    fr.movie_id DESC, fr.title;

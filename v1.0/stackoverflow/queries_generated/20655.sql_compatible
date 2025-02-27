@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score IS NOT NULL
+),
+RecentChanges AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastChangeDate,
+        STRING_AGG(CONCAT_WS(': ', (SELECT Name FROM PostHistoryTypes pht WHERE pht.Id = ph.PostHistoryTypeId), ph.Comment), '; ') AS ChangeComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '30 days'
+    GROUP BY 
+        ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        RANK() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    tp.Id AS TopPostId,
+    tp.Title AS TopPostTitle,
+    tp.Score AS TopPostScore,
+    rc.LastChangeDate,
+    rc.ChangeComments,
+    CASE 
+        WHEN tp.ViewCount IS NULL THEN 'No Views' 
+        ELSE CONCAT(CAST(tp.ViewCount AS VARCHAR), ' Views') 
+    END AS ViewCountInfo,
+    COALESCE(badge_info.TotalBadges, 0) AS TotalBadges,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.Id AND v.VoteTypeId = 2) AS TotalUpVotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.Id AND v.VoteTypeId = 3) AS TotalDownVotes
+FROM 
+    TopUsers badge_info
+INNER JOIN 
+    RankedPosts tp ON badge_info.Id = tp.Id
+LEFT JOIN 
+    RecentChanges rc ON tp.Id = rc.PostId
+WHERE 
+    badge_info.UserRank <= 10 
+    AND tp.PostRank = 1
+ORDER BY 
+    badge_info.UserRank, tp.Score DESC, rc.LastChangeDate DESC;

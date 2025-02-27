@@ -1,0 +1,33 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) as OrderRank
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           SUM(o.o_totalprice) AS total_spent, 
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 1000
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 50000
+),
+FinalAnalysis AS (
+    SELECT ro.o_orderkey, ro.o_orderdate, co.c_name, co.total_spent, ts.s_name, ts.total_supply_value
+    FROM RankedOrders ro
+    JOIN CustomerOrders co ON ro.o_orderkey = ANY(SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey = ro.o_orderkey)
+    JOIN TopSuppliers ts ON ro.o_orderkey = ANY(SELECT l.l_orderkey FROM lineitem l WHERE l.l_orderkey = ro.o_orderkey)
+    WHERE ro.OrderRank <= 10
+)
+SELECT *
+FROM FinalAnalysis
+ORDER BY o_orderdate, total_spent DESC;

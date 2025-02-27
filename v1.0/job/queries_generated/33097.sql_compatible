@@ -1,0 +1,50 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 0 AS depth
+    FROM aka_title m
+    WHERE m.id IN (
+        SELECT DISTINCT movie_id 
+        FROM movie_link 
+        WHERE link_type_id IN (
+            SELECT id 
+            FROM link_type 
+            WHERE link = 'sequel'
+        )
+    )
+    
+    UNION ALL
+    
+    SELECT m.id AS movie_id, m.title, m.production_year, mh.depth + 1 AS depth
+    FROM aka_title m
+    INNER JOIN movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COUNT(mk.keyword) AS keyword_count,
+    CASE 
+        WHEN NULLIF(SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END), 0) IS NOT NULL THEN 'Yes'
+        ELSE 'No'
+    END AS has_roles_in_sequels,
+    ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(mk.keyword) DESC) AS rank
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    movie_hierarchy mh ON at.id = mh.movie_id
+WHERE 
+    at.production_year >= 2000
+    AND mh.depth <= 1
+GROUP BY 
+    a.name, at.title, at.production_year
+HAVING 
+    COUNT(mk.keyword) > 0
+ORDER BY 
+    at.production_year DESC, keyword_count DESC;

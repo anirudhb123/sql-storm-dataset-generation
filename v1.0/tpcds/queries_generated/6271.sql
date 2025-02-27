@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_sold_date_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk, ws_sold_date_sk
+),
+TopCustomers AS (
+    SELECT 
+        rs.ws_bill_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(rs.total_sales) AS total_sales
+    FROM 
+        RankedSales rs
+    JOIN 
+        customer c ON rs.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        rs.sales_rank <= 5
+    GROUP BY 
+        rs.ws_bill_customer_sk, c.c_first_name, c.c_last_name
+),
+SalesByDate AS (
+    SELECT 
+        d.d_date,
+        SUM(tc.total_sales) AS total_sales_by_day
+    FROM 
+        date_dim d
+    JOIN 
+        TopCustomers tc ON d.d_date_sk = tc.ws_sold_date_sk
+    GROUP BY 
+        d.d_date
+)
+SELECT 
+    d.d_date,
+    d.d_month_seq,
+    d.d_year,
+    s.total_sales_by_day,
+    AVG(s.total_sales_by_day) OVER (PARTITION BY d.d_month_seq ORDER BY d.d_date) AS avg_sales_month,
+    COUNT(DISTINCT tc.ws_bill_customer_sk) AS unique_customers
+FROM 
+    SalesByDate s
+JOIN 
+    date_dim d ON s.ws_sold_date_sk = d.d_date_sk
+ORDER BY 
+    d.d_date DESC;

@@ -1,0 +1,83 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, '><'))
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) >= 10
+),
+RecentPostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= CAST('2024-10-01' AS DATE) - INTERVAL '30 days'
+),
+UserEngagement AS (
+    SELECT 
+        RU.UserId,
+        RU.DisplayName,
+        COUNT(DISTINCT P.PostId) AS PostsCreated,
+        SUM(P.ViewCount) AS TotalViews,
+        COALESCE(SUM(UP.UpVoteCount), 0) AS TotalUpVotes,
+        COALESCE(SUM(DN.DownVoteCount), 0) AS TotalDownVotes
+    FROM 
+        RankedUsers RU
+    LEFT JOIN 
+        RecentPostDetails P ON RU.DisplayName = P.OwnerDisplayName
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS UpVoteCount 
+         FROM Votes 
+         WHERE VoteTypeId = 2 
+         GROUP BY PostId) UP ON P.PostId = UP.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS DownVoteCount 
+         FROM Votes 
+         WHERE VoteTypeId = 3 
+         GROUP BY PostId) DN ON P.PostId = DN.PostId
+    GROUP BY 
+        RU.UserId, RU.DisplayName
+)
+SELECT 
+    UE.UserId,
+    UE.DisplayName,
+    UE.PostsCreated,
+    UE.TotalViews,
+    UE.TotalUpVotes,
+    UE.TotalDownVotes,
+    PT.TagName
+FROM 
+    UserEngagement UE
+JOIN 
+    PopularTags PT ON UE.PostsCreated > 5
+WHERE 
+    UE.TotalViews > 100
+ORDER BY 
+    UE.TotalViews DESC, UE.UserId;

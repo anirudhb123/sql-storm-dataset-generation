@@ -1,0 +1,52 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) as title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tv series'))
+), 
+PopularMovies AS (
+    SELECT 
+        c.movie_id, 
+        COUNT(DISTINCT c.person_id) AS num_cast 
+    FROM 
+        cast_info c 
+    JOIN 
+        RankedTitles rt ON c.movie_id = (SELECT id FROM aka_title WHERE title = rt.title AND production_year = rt.production_year LIMIT 1)
+    GROUP BY 
+        c.movie_id
+), 
+FilmInfo AS (
+    SELECT 
+        m.title, 
+        mp.name AS production_company, 
+        pi.info AS person_info 
+    FROM 
+        movie_info mi 
+    JOIN 
+        title m ON mi.movie_id = m.id 
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id 
+    LEFT JOIN 
+        company_name mp ON mc.company_id = mp.id 
+    LEFT JOIN 
+        person_info pi ON pi.person_id IN (SELECT person_id FROM cast_info WHERE movie_id = m.id)
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'genre') AND 
+        mp.country_code IS NOT NULL
+)
+SELECT 
+    f.title, 
+    f.production_company, 
+    f.person_info,
+    COALESCE(pm.num_cast, 0) AS number_of_actors 
+FROM 
+    FilmInfo f 
+LEFT JOIN 
+    PopularMovies pm ON f.title = (SELECT title FROM RankedTitles WHERE production_year = 2020 LIMIT 1)
+ORDER BY 
+    f.production_company NULLS LAST, 
+    f.title;

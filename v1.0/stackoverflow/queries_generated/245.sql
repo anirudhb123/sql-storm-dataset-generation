@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges,
+        SUM(u.Reputation) AS TotalReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS ClosureCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    p.CommentCount,
+    ur.TotalBadges,
+    ur.TotalReputation,
+    COALESCE(phd.LastEditedDate, '1970-01-01'::timestamp) AS LastEditedDate,
+    phd.ClosureCount,
+    CASE 
+        WHEN ur.TotalReputation > 500 THEN 'High Reputation' 
+        ELSE 'Low Reputation' 
+    END AS ReputationCategory
+FROM 
+    RankedPosts p
+JOIN 
+    UserReputation ur ON p.OwnerUserId = ur.UserId
+LEFT JOIN 
+    PostHistoryDetails phd ON p.PostId = phd.PostId
+WHERE 
+    p.rn = 1
+ORDER BY 
+    p.Score DESC,
+    p.ViewCount DESC
+LIMIT 10;
+

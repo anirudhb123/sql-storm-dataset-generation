@@ -1,0 +1,70 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(V.VoteTypeId = 2, 0)) AS UpVotes,
+        SUM(COALESCE(V.VoteTypeId = 3, 0)) AS DownVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM Tags T
+    LEFT JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+    HAVING COUNT(P.Id) > 5
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COALESCE(A.UserId, -1) AS AcceptedAnswerUserId,
+        COALESCE(A.DisplayName, 'No accepted answer') AS AcceptedAnswerDisplayName
+    FROM Posts P
+    LEFT JOIN Posts A ON P.AcceptedAnswerId = A.Id
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+BenchmarkedPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CreationDate,
+        PS.ViewCount,
+        PS.Score,
+        COUNT(C.Id) AS CommentCount,
+        RANK() OVER (ORDER BY PS.Score DESC) AS ScoreRank
+    FROM PostSummary PS
+    LEFT JOIN Comments C ON PS.PostId = C.PostId
+    GROUP BY PS.PostId, PS.Title, PS.CreationDate, PS.ViewCount, PS.Score
+)
+
+SELECT 
+    US.DisplayName,
+    US.Reputation,
+    US.PostCount,
+    US.TotalViews,
+    US.UpVotes,
+    US.DownVotes,
+    PT.TagName,
+    BP.Title AS RecentPopularPostTitle,
+    BP.CreationDate AS RecentPopularPostDate,
+    BP.ViewCount AS RecentPopularPostViews,
+    BP.CommentCount AS RecentPopularPostComments,
+    BP.Score AS RecentPopularPostScore,
+    BP.ScoreRank
+FROM UserStats US
+JOIN PopularTags PT ON US.PostCount > 10
+JOIN BenchmarkedPosts BP ON US.UserId = BP.PostId
+WHERE US.Reputation > 1000
+ORDER BY US.Reputation DESC, BP.Score DESC
+LIMIT 100;

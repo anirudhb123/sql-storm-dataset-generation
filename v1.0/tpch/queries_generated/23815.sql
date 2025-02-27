@@ -1,0 +1,45 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           o.o_orderstatus,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_price,
+           CASE WHEN o.o_orderstatus IN ('O', 'F') THEN 'Active' ELSE 'Inactive' END AS order_state
+    FROM orders o
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+SupplierSummary AS (
+    SELECT s.s_suppkey,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count,
+           STRING_AGG(DISTINCT CONCAT(s.s_name, ':', s.s_acctbal), '; ') AS supplier_info
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+RegionNations AS (
+    SELECT r.r_name,
+           COUNT(n.n_nationkey) AS nation_count,
+           STRING_AGG(n.n_name, ', ') AS nation_names
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_name
+    HAVING COUNT(n.n_nationkey) > 1
+)
+SELECT 
+    R.o_orderkey,
+    R.o_orderdate,
+    R.o_totalprice,
+    R.order_state,
+    S.total_supply_cost,
+    S.part_count,
+    RN.r_name,
+    RN.nation_count,
+    RN.nation_names
+FROM RankedOrders R
+LEFT JOIN SupplierSummary S ON R.o_orderkey % 10 = S.s_suppkey % 10
+FULL OUTER JOIN RegionNations RN ON (RN.nation_count > 1 AND R.o_totalprice IS NOT NULL) OR (RN.nation_count IS NULL AND R.o_orderstatus = 'F')
+WHERE (R.rank_price <= 5 OR S.part_count > 5)
+  AND (R.o_orderdate BETWEEN '2022-01-01' AND CURRENT_DATE OR S.total_supply_cost IS NOT NULL)
+ORDER BY R.o_orderdate ASC, RN.r_name DESC
+LIMIT 100;

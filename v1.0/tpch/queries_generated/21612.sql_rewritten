@@ -1,0 +1,50 @@
+WITH RecursivePart AS (
+    SELECT p_partkey, p_name, p_mfgr, p_retailprice, ROW_NUMBER() OVER (PARTITION BY p_mfgr ORDER BY p_retailprice DESC) AS rn
+    FROM part
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 1000
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING AVG(o.o_totalprice) IS NOT NULL OR order_count > 0
+),
+OrderLineSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+),
+OrderedDate AS (
+    SELECT DISTINCT o.o_orderdate
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '1997-01-01'
+),
+FinalSummary AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, COALESCE(ol.net_sales, 0) AS net_sales,
+           CASE WHEN ol.net_sales IS NULL THEN 'No Sales' ELSE 'Has Sales' END AS sales_status,
+           SUM(CASE WHEN c.order_count > 0 THEN o.o_totalprice ELSE 0 END) AS total_customer_sales
+    FROM RecursivePart p
+    LEFT JOIN OrderLineSummary ol ON p.p_partkey = ol.l_orderkey
+    LEFT JOIN CustomerOrders c ON c.c_custkey = (SELECT c2.c_custkey FROM customer c2 WHERE c2.c_name LIKE '%' || p.p_name || '%')
+    LEFT JOIN orders o ON ol.l_orderkey = o.o_orderkey
+    GROUP BY p.p_partkey, p.p_name, p.p_mfgr, ol.net_sales
+    ORDER BY p.p_retailprice DESC
+)
+SELECT f.p_partkey, f.p_name, f.p_mfgr, f.net_sales, f.sales_status, COUNT(DISTINCT r.r_regionkey) AS region_count
+FROM FinalSummary f
+LEFT JOIN region r ON f.net_sales > 1000
+GROUP BY f.p_partkey, f.p_name, f.p_mfgr, f.net_sales, f.sales_status
+HAVING COUNT(DISTINCT r.r_regionkey) <= (SELECT COUNT(*) FROM nation WHERE n_nationkey IS NOT NULL)
+UNION ALL
+SELECT DISTINCT p.p_partkey, p.p_name, p.p_mfgr, NULL AS net_sales, 'Orphan' AS sales_status, NULL AS region_count
+FROM part p
+WHERE p.p_partkey NOT IN (SELECT DISTINCT p2.p_partkey FROM FinalSummary f WHERE f.net_sales IS NOT NULL)
+ORDER BY net_sales DESC NULLS LAST;

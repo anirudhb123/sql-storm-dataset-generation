@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COALESCE(CAST(ph.CreationDate AS TIMESTAMP), p.CreationDate) AS EffectiveCreationDate,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    WHERE
+        p.CreationDate > '2020-01-01' 
+        AND p.Score > 0
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, ph.CreationDate
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        COUNT(DISTINCT ph.Id) AS CloseCount
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        p.Id
+),
+FinalResults AS (
+    SELECT
+        rp.Id,
+        rp.Title,
+        rp.CommentCount,
+        rp.UpVotes - rp.DownVotes AS NetVotes,
+        cp.CloseCount,
+        CASE 
+            WHEN cp.CloseCount IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus
+    FROM
+        RankedPosts rp
+    LEFT JOIN
+        ClosedPosts cp ON rp.Id = cp.Id
+)
+SELECT
+    Title,
+    EffectiveCreationDate,
+    CommentCount,
+    NetVotes,
+    PostStatus
+FROM
+    FinalResults
+WHERE
+    NetVotes > 5
+ORDER BY
+    EffectiveCreationDate DESC
+LIMIT 10;

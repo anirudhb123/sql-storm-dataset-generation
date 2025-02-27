@@ -1,0 +1,56 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ss_store_sk,
+        COUNT(DISTINCT ss_ticket_number) AS total_sales,
+        SUM(ss_net_paid_inc_tax) AS total_revenue,
+        AVG(ss_net_paid_inc_tax) AS average_order_value
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') 
+                             AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    GROUP BY ss_store_sk
+),
+CustomerSegment AS (
+    SELECT 
+        cd_demo_sk,
+        MAX(cd_purchase_estimate) AS max_purchase_estimate,
+        AVG(hd_income_band_sk) AS avg_income_band
+    FROM customer_demographics
+    LEFT JOIN household_demographics ON customer_demographics.cd_demo_sk = household_demographics.hd_demo_sk
+    WHERE cd_gender = 'M' AND cd_marital_status = 'M'
+    GROUP BY cd_demo_sk
+),
+StorePerformance AS (
+    SELECT 
+        s_store_sk,
+        ss.total_sales,
+        ss.total_revenue,
+        ss.average_order_value,
+        CASE 
+            WHEN ss.total_revenue > 1000000 THEN 'High Performer'
+            WHEN ss.total_revenue BETWEEN 500000 AND 1000000 THEN 'Moderate Performer'
+            ELSE 'Low Performer'
+        END AS performance_category
+    FROM SalesSummary ss 
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+)
+SELECT 
+    sp.s_store_sk, 
+    sp.total_sales, 
+    sp.total_revenue, 
+    sp.average_order_value, 
+    sp.performance_category,
+    cs.max_purchase_estimate,
+    cs.avg_income_band
+FROM StorePerformance sp
+LEFT JOIN CustomerSegment cs ON sp.s_store_sk IN (
+    SELECT DISTINCT s_store_sk
+    FROM store_sales
+    WHERE ss_sold_date_sk IN (
+        SELECT d_date_sk 
+        FROM date_dim 
+        WHERE d_year = 2023
+    )
+)
+ORDER BY sp.total_revenue DESC, sp.total_sales DESC
+LIMIT 10;

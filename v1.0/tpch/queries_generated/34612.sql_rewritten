@@ -1,0 +1,46 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s_suppkey, s_name, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ts.level + 1
+    FROM supplier s
+    JOIN top_suppliers ts ON s.s_acctbal > ts.s_acctbal
+    WHERE ts.level < 5
+),
+customer_order_totals AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+nation_region AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+supplier_part AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_type, ps.ps_supplycost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size > 20
+),
+discount_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_discount) AS total_discount
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    n.n_name as nation,
+    SUM(CASE WHEN co.total_spent IS NOT NULL THEN co.total_spent ELSE 0 END) AS total_customer_spent,
+    COUNT(DISTINCT ts.s_suppkey) AS supplier_count,
+    AVG(sp.ps_supplycost) AS avg_supply_cost,
+    MAX(ds.total_discount) AS max_discount_per_order
+FROM nation_region n
+LEFT JOIN customer_order_totals co ON co.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+LEFT JOIN top_suppliers ts ON ts.s_suppkey IN (SELECT ps.ps_suppkey FROM supplier_part ps WHERE ps.ps_supplycost > 50)
+LEFT JOIN supplier_part sp ON sp.ps_suppkey IN (SELECT ps.ps_suppkey FROM supplier_part ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_shipdate < cast('1998-10-01' as date) - INTERVAL '30 days'))
+LEFT JOIN discount_summary ds ON ds.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderdate >= '1997-01-01')
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name
+ORDER BY total_customer_spent DESC;

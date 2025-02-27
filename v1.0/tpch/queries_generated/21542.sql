@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_container IS NULL THEN 'UNKNOWN' 
+            ELSE p.p_container 
+        END AS container_status
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(ps_supplycost) FROM partsupp) 
+        AND (p.p_size BETWEEN 1 AND 25 OR p.p_size IS NULL)
+),
+NationAggregates AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(s.s_acctbal) AS total_acctbal,
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name,
+    p.p_name,
+    COALESCE(ns.total_acctbal, 0) AS total_supplier_balance,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE NULL END) AS avg_returned_revenue,
+    MIN(l.l_shipdate) AS first_shipdate,
+    EXISTS (
+        SELECT 1 FROM RankedSuppliers rs WHERE rs.rank < 3 AND rs.s_suppkey = l.l_suppkey
+    ) AS top_supplier_flag
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    FilteredParts p ON l.l_partkey = p.p_partkey
+JOIN 
+    NationAggregates ns ON p.p_partkey % (ns.n_nationkey + 1) = 0
+JOIN 
+    region r ON ns.n_nationkey % (r.r_regionkey + 1) = 0
+GROUP BY 
+    r.r_name, p.p_name, ns.total_acctbal
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > NULLIF(MAX(l.l_extendedprice), 0)
+ORDER BY 
+    total_supplier_balance DESC
+LIMIT 10;

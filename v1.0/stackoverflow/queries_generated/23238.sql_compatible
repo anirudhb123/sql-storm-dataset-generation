@@ -1,0 +1,82 @@
+
+WITH UserReputationCTE AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Location,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE u.Reputation > (SELECT AVG(Reputation) FROM Users WHERE Reputation IS NOT NULL)
+    GROUP BY u.Id, u.DisplayName, u.Reputation, u.Location
+),
+PostsAnalysis AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5)
+    GROUP BY p.Id, p.OwnerUserId, p.PostTypeId, p.CreationDate
+),
+UserPostStats AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.Reputation,
+        up.PostId,
+        up.Upvotes,
+        up.Downvotes,
+        up.CommentCount,
+        up.EditCount,
+        (up.Upvotes - up.Downvotes) AS NetVotes,
+        ROW_NUMBER() OVER (PARTITION BY ur.UserId ORDER BY (up.Upvotes - up.Downvotes) DESC) AS VoteRank,
+        COUNT(up.PostId) OVER (PARTITION BY ur.UserId) AS TotalPosts
+    FROM UserReputationCTE ur
+    JOIN PostsAnalysis up ON ur.UserId = up.OwnerUserId
+    WHERE ur.BadgeCount > 0
+),
+FinalStats AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Location,
+        COUNT(u.PostId) AS TotalPosts,
+        SUM(CASE WHEN u.VoteRank = 1 THEN u.NetVotes ELSE 0 END) AS TopNetVotes,
+        SUM(CASE WHEN TotalPosts > 0 THEN u.NetVotes / NULLIF(TotalPosts, 0) ELSE 0 END) AS AverageNetVotes
+    FROM UserPostStats u
+    GROUP BY u.UserId, u.DisplayName, u.Reputation, u.Location
+)
+SELECT 
+    f.UserId,
+    f.DisplayName,
+    f.Reputation,
+    f.Location,
+    f.TotalPosts,
+    f.TopNetVotes,
+    f.AverageNetVotes,
+    CASE 
+        WHEN f.Reputation IS NULL THEN 'No Reputation'
+        WHEN f.Reputation < 100 THEN 'Low Reputation'
+        WHEN f.Reputation BETWEEN 100 AND 1000 THEN 'Moderate Reputation'
+        ELSE 'High Reputation'
+    END AS ReputationLevel,
+    (SELECT STRING_AGG(DISTINCT ph.Comment, '; ') 
+     FROM PostHistory ph 
+     WHERE ph.UserId = f.UserId) AS RecentComments
+FROM FinalStats f
+ORDER BY f.Reputation DESC, f.TotalPosts DESC
+LIMIT 100 OFFSET 0;

@@ -1,0 +1,55 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(voteCount, 0)) AS TotalVotes,
+        MAX(p.CreationDate) AS LastActiveDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS voteCount 
+        FROM Votes 
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+), RecentPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Tags,
+        CreationDate,
+        Score,
+        ROW_NUMBER() OVER (PARTITION BY OwnerUserId ORDER BY CreationDate DESC) AS rn
+    FROM Posts
+    WHERE CreationDate >= NOW() - INTERVAL '30 days'
+), TopTags AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS TagCount
+    FROM Tags
+    GROUP BY TagName
+    ORDER BY TagCount DESC
+    LIMIT 5
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.Reputation,
+    ua.PostCount,
+    ua.TotalVotes,
+    ua.LastActiveDate,
+    rp.Title AS RecentPostTitle,
+    rp.Tags AS RecentPostTags,
+    rp.CreationDate AS RecentPostDate,
+    t.TagName,
+    t.TagCount
+FROM UserActivity ua
+LEFT JOIN RecentPosts rp ON ua.UserId = rp.OwnerUserId AND rp.rn = 1
+CROSS JOIN TopTags t
+WHERE ua.Reputation > (SELECT AVG(Reputation) FROM Users) 
+AND ua.LastActiveDate IS NOT NULL
+ORDER BY ua.Reputation DESC, ua.LastActiveDate DESC;

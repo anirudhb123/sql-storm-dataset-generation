@@ -1,0 +1,61 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 100000.00
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_name AS customer_name,
+        c.c_acctbal AS customer_acctbal
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31' 
+        AND o.o_totalprice > 5000.00
+)
+SELECT 
+    r.r_name AS region,
+    COUNT(DISTINCT fo.o_orderkey) AS total_high_value_orders,
+    SUM(fo.o_totalprice) AS total_revenue,
+    SUM(CASE WHEN rs.rn <= 3 THEN rs.s_acctbal ELSE 0 END) AS top_supplier_acctbal_sum,
+    ARRAY_AGG(DISTINCT hp.p_name) AS high_value_parts
+FROM 
+    RankedSuppliers rs
+JOIN 
+    nation n ON rs.nation_name = n.n_name
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    FilteredOrders fo ON rs.s_suppkey = fo.o_custkey
+JOIN 
+    HighValueParts hp ON hp.p_partkey = fo.o_orderkey
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_revenue DESC;

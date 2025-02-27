@@ -1,0 +1,38 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        JSON_ARRAYAGG(CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, ', ', ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip)) AS addresses,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+), FilteredCustomers AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN cd_marital_status = 'M' THEN 'Married'
+            ELSE 'Single or Other'
+        END AS marital_status_label
+    FROM 
+        RankedCustomers
+)
+SELECT 
+    full_name,
+    cd_gender,
+    marital_status_label,
+    addresses
+FROM 
+    FilteredCustomers
+WHERE 
+    rn <= 10
+ORDER BY 
+    cd_gender, full_name;

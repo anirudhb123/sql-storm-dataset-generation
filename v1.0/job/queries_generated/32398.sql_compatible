@@ -1,0 +1,79 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL AS episode_title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mh.title AS episode_title,
+        mh.level + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        MovieHierarchy mh ON mt.episode_of_id = mh.movie_id
+), 
+
+MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        STRING_AGG(DISTINCT ca.name, ', ') AS cast_names,
+        COUNT(*) FILTER (WHERE ca.role_id IS NOT NULL) AS number_of_roles,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info ca ON mh.movie_id = ca.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+), 
+
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    COALESCE(md.cast_names, 'No Cast') AS cast_names,
+    md.number_of_roles,
+    COALESCE(ci.companies, 'No Companies') AS companies,
+    ci.company_count,
+    CASE 
+        WHEN md.keyword_count > 10 THEN 'Highly Tagged'
+        WHEN md.keyword_count BETWEEN 5 AND 10 THEN 'Moderately Tagged'
+        ELSE 'Not Tagged'
+    END AS tagging_status,
+    COUNT(*) OVER () AS total_movies
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    CompanyInfo ci ON md.movie_id = ci.movie_id
+ORDER BY 
+    md.production_year DESC,
+    md.title;

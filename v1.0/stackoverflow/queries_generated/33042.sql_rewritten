@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVoteCount,
+        (SELECT AVG(Score) FROM Posts WHERE OwnerUserId = p.OwnerUserId) AS AverageScore
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 1
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RecentEditRank
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5)  
+)
+
+SELECT 
+    up.DisplayName AS UserName,
+    up.Reputation,
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    ub.BadgeCount,
+    ub.HighestBadgeClass,
+    rph.Comment,
+    rph.CreationDate AS LastEditDate
+FROM RankedPosts rp
+INNER JOIN Users up ON up.Id = rp.OwnerUserId
+LEFT JOIN UserBadges ub ON ub.UserId = up.Id
+LEFT JOIN RecentPostHistory rph ON rph.PostId = rp.PostId AND rph.RecentEditRank = 1
+WHERE rp.Rank <= 5
+AND up.Reputation > 1000
+ORDER BY rp.Score DESC, rp.ViewCount DESC;

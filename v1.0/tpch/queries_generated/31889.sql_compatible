@@ -1,0 +1,42 @@
+
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate) AS order_rank
+    FROM orders
+    WHERE o_orderdate >= DATE '1995-01-01'
+), part_suppliers AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > 100
+    GROUP BY ps.ps_partkey
+), supplier_info AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name, 
+           CASE 
+               WHEN s.s_acctbal IS NULL THEN 'No Balance' 
+               ELSE CAST(s.s_acctbal AS VARCHAR(10)) 
+           END AS account_balance 
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_name IN (SELECT DISTINCT n_name FROM nation WHERE r_regionkey = 1)
+), ranked_orders AS (
+    SELECT oh.*, COUNT(*) OVER (PARTITION BY oh.o_custkey) AS total_orders
+    FROM order_hierarchy oh
+)
+SELECT r.order_rank, r.o_orderkey, r.o_totalprice, p.p_name,
+       COALESCE(si.s_name, 'Unknown') AS supplier_name,
+       COALESCE(ps.total_available, 0) AS available_quantity,
+       CASE 
+           WHEN ps.avg_supply_cost > 50 THEN 'High Cost'
+           ELSE 'Regular Cost'
+       END AS cost_category
+FROM ranked_orders r
+LEFT JOIN lineitem l ON r.o_orderkey = l.l_orderkey
+LEFT JOIN part p ON l.l_partkey = p.p_partkey
+LEFT JOIN part_suppliers ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier_info si ON l.l_suppkey = si.s_suppkey
+WHERE r.total_orders > 5 
+  AND r.o_totalprice BETWEEN 500 AND 5000
+GROUP BY r.order_rank, r.o_orderkey, r.o_totalprice, p.p_name, si.s_name, ps.total_available, ps.avg_supply_cost
+ORDER BY r.o_orderdate DESC, r.o_orderkey;

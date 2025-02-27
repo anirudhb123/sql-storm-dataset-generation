@@ -1,0 +1,76 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 3 THEN 1 ELSE 0 END) AS WikiCount,
+        SUM(CASE WHEN P.PostTypeId = 1 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswerCount,
+        SUM(UP.UpVotes) AS TotalUpVotes,
+        SUM(UP.DownVotes) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+            UserId, 
+            SUM(UpVotes) AS UpVotes, 
+            SUM(DownVotes) AS DownVotes 
+         FROM 
+            Users 
+         GROUP BY 
+            UserId) UP ON U.Id = UP.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+BadgeSummary AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.UserId,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (1, 4, 24) THEN 1 END) AS EditCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.UserId
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.PostCount,
+    US.QuestionCount,
+    US.AnswerCount,
+    US.WikiCount,
+    US.AcceptedAnswerCount,
+    COALESCE(BS.GoldBadges, 0) AS GoldBadges,
+    COALESCE(BS.SilverBadges, 0) AS SilverBadges,
+    COALESCE(BS.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(PHS.CloseCount, 0) AS CloseCount,
+    COALESCE(PHS.DeleteCount, 0) AS DeleteCount,
+    COALESCE(PHS.EditCount, 0) AS EditCount,
+    US.TotalUpVotes,
+    US.TotalDownVotes
+FROM 
+    UserStats US
+LEFT JOIN 
+    BadgeSummary BS ON US.UserId = BS.UserId
+LEFT JOIN 
+    PostHistorySummary PHS ON US.UserId = PHS.UserId
+ORDER BY 
+    US.Reputation DESC, US.PostCount DESC 
+LIMIT 50;

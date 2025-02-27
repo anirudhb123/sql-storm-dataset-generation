@@ -1,0 +1,60 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        rk.rank_value,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY rk.rank_value DESC) AS rank_position
+    FROM 
+        title t
+    JOIN (
+        SELECT 
+            mt.movie_id,
+            COUNT(DISTINCT mc.company_id) AS rank_value
+        FROM 
+            movie_companies mc
+        JOIN 
+            title mt ON mc.movie_id = mt.id
+        GROUP BY 
+            mt.movie_id
+    ) rk ON t.id = rk.movie_id
+),
+actor_movie_info AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        m.title,
+        m.production_year,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY m.production_year DESC) AS movie_position
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title m ON ci.movie_id = m.id
+)
+SELECT 
+    a.person_id,
+    a.name,
+    r.movie_id,
+    r.title,
+    r.production_year,
+    COALESCE(info.info, 'No Info') AS additional_info,
+    r.rank_value,
+    CASE 
+        WHEN r.rank_value > 5 THEN 'Top Rated'
+        WHEN r.rank_value BETWEEN 3 AND 5 THEN 'Average'
+        ELSE 'Flop'
+    END AS movie_rating,
+    a.movie_position
+FROM 
+    actor_movie_info a
+JOIN 
+    ranked_movies r ON a.title = r.title AND a.production_year = r.production_year
+LEFT JOIN 
+    movie_info info ON r.movie_id = info.movie_id AND info.info_type_id = (SELECT id FROM info_type WHERE info = 'Summary')
+WHERE 
+    a.movie_position <= 3
+ORDER BY 
+    a.person_id, r.production_year DESC;

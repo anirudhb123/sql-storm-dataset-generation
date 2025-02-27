@@ -1,0 +1,40 @@
+
+WITH RECURSIVE nation_supply AS (
+    SELECT n.n_nationkey, n.n_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_nationkey, n.n_name
+    UNION ALL
+    SELECT ns.n_nationkey, ns.n_name, ns.total_supplycost + ns2.total_supplycost
+    FROM nation_supply ns
+    JOIN nation_supply ns2 ON ns.n_nationkey = ns2.n_nationkey
+    WHERE ns.total_supplycost IS NOT NULL
+),
+customer_order AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderstatus, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+ranked_lineitems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, l.l_extendedprice, 
+           RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS item_rank
+    FROM lineitem l
+    WHERE l.l_shipdate >= '1996-01-01'
+)
+SELECT ns.n_name, COUNT(DISTINCT co.o_orderkey) AS order_count, 
+       AVG(co.o_totalprice) AS avg_order_price,
+       SUM(rl.l_extendedprice * (1 - rl.l_discount)) AS total_revenue,
+       CASE 
+           WHEN COUNT(DISTINCT co.o_orderkey) > 10 THEN 'High Demand'
+           ELSE 'Low Demand'
+       END AS demand_category
+FROM nation_supply ns
+JOIN customer_order co ON ns.n_nationkey = co.o_custkey
+LEFT JOIN ranked_lineitems rl ON co.o_orderkey = rl.l_orderkey 
+WHERE ns.total_supplycost IS NOT NULL 
+  AND rl.item_rank = 1
+GROUP BY ns.n_name
+ORDER BY total_revenue DESC
+LIMIT 10;

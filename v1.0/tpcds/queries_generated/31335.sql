@@ -1,0 +1,40 @@
+
+WITH RECURSIVE ProductHierarchy AS (
+    SELECT i_item_sk, i_item_desc, i_current_price, i_category, i_brand, 1 AS level
+    FROM item
+    WHERE i_category IS NOT NULL
+
+    UNION ALL
+
+    SELECT i.item_sk, i.i_item_desc, i.i_current_price, i.category, i.brand, ph.level + 1
+    FROM item AS i
+    INNER JOIN ProductHierarchy AS ph ON i.i_category = ph.i_category
+    WHERE ph.level < 5
+)
+SELECT ca.c_city, 
+       SUM(ws.ws_sales_price) AS total_sales,
+       AVG(ws.ws_sales_price) AS avg_sales,
+       COUNT(DISTINCT ws.ws_order_number) AS order_count,
+       CASE 
+           WHEN SUM(ws.ws_sales_price) IS NULL THEN 'No Sales' 
+           ELSE 'Sales Present' 
+       END AS sales_status,
+       MAX(CASE 
+           WHEN cd.cd_gender = 'M' THEN 'Male'
+           WHEN cd.cd_gender = 'F' THEN 'Female' 
+           ELSE 'Other' 
+       END) AS predominant_gender
+FROM customer_address ca
+LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE ws.ws_sold_date_sk IN (
+    SELECT d_date_sk 
+    FROM date_dim 
+    WHERE d_year = 2023 
+      AND d_moy BETWEEN 1 AND 6
+)
+GROUP BY ca.c_city
+HAVING SUM(ws.ws_sales_price) > 1000
+ORDER BY total_sales DESC
+LIMIT 10;

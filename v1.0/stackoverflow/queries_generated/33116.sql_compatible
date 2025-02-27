@@ -1,0 +1,82 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 0
+),
+PostScoreSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.OwnerUserId
+)
+
+SELECT 
+    ph.PostId,
+    ph.Title,
+    ph.Level,
+    ur.DisplayName AS OwnerName,
+    ur.Reputation AS OwnerReputation,
+    ur.ReputationRank,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    COUNT(pl.RelatedPostId) AS RelatedPostCount
+FROM 
+    RecursivePostHierarchy ph
+JOIN 
+    Users u ON ph.OwnerUserId = u.Id
+JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN 
+    PostScoreSummary ps ON ph.PostId = ps.PostId
+LEFT JOIN 
+    PostLinks pl ON ph.PostId = pl.PostId
+WHERE 
+    (COALESCE(ps.UpVotes, 0) - COALESCE(ps.DownVotes, 0)) > 0
+    AND ur.ReputationRank <= 100
+GROUP BY 
+    ph.PostId, ph.Title, ph.Level, ur.DisplayName, ur.Reputation, ur.ReputationRank, ps.UpVotes, ps.DownVotes, ps.CommentCount
+ORDER BY 
+    ur.Reputation DESC, ph.Level, ph.Title;

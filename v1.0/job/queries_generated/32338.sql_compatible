@@ -1,0 +1,72 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title,
+        mt.production_year,
+        COALESCE(NULLIF(mt.season_nr, 0), 'N/A') AS season,
+        COALESCE(NULLIF(mt.episode_nr, 0), 'N/A') AS episode,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title,
+        mt.production_year,
+        COALESCE(NULLIF(mt.season_nr, 0), 'N/A') AS season,
+        COALESCE(NULLIF(mt.episode_nr, 0), 'N/A') AS episode,
+        level + 1 AS level
+    FROM 
+        aka_title mt
+        INNER JOIN movie_hierarchy mh ON mh.movie_id = mt.episode_of_id
+),
+actor_movie AS (
+    SELECT 
+        ca.person_id,
+        mt.movie_id,
+        mt.title,
+        ROW_NUMBER() OVER(PARTITION BY ca.person_id ORDER BY mt.production_year DESC) AS rn
+    FROM 
+        cast_info ca
+    INNER JOIN aka_title mt ON ca.movie_id = mt.id 
+),
+top_actors AS (
+    SELECT 
+        am.person_id,
+        a.name,
+        COUNT(am.movie_id) AS total_movies
+    FROM 
+        actor_movie am
+    INNER JOIN aka_name a ON am.person_id = a.person_id
+    WHERE 
+        am.rn <= 5
+    GROUP BY 
+        am.person_id, a.name
+    HAVING 
+        COUNT(am.movie_id) >= 3
+)
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    h.season,
+    h.episode,
+    COALESCE(ta.total_movies, 0) AS total_movies_by_actor,
+    STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+FROM 
+    movie_hierarchy h
+LEFT JOIN 
+    actor_movie am ON h.movie_id = am.movie_id
+LEFT JOIN 
+    top_actors ta ON ta.person_id = am.person_id
+LEFT JOIN 
+    aka_name a ON a.person_id = ta.person_id
+GROUP BY 
+    h.movie_id, h.title, h.production_year, h.season, h.episode
+ORDER BY 
+    h.production_year DESC, total_movies_by_actor DESC;

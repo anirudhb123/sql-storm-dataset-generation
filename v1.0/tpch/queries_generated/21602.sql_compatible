@@ -1,0 +1,64 @@
+
+WITH RecursiveSupply AS (
+    SELECT ps.ps_partkey, 
+           ps.ps_suppkey, 
+           ps.ps_availqty, 
+           ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS row_num
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+),
+CustomerOrder AS (
+    SELECT c.c_custkey, 
+           c.c_name,
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN RecursiveSupply rs ON s.s_suppkey = rs.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (
+        SELECT AVG(sub.total_supply_cost)
+        FROM (
+            SELECT SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+            FROM supplier s
+            JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+            GROUP BY s.s_suppkey
+        ) AS sub
+    )
+),
+OrderStatistics AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           COUNT(l.l_orderkey) AS lineitem_count,
+           SUM(l.l_extendedprice) AS total_price,
+           ROUND(SUM(l.l_extendedprice * (1 - l.l_discount)), 2) AS net_sales,
+           AVG(l.l_quantity) OVER (PARTITION BY o.o_orderkey) AS avg_quantity
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT co.c_name,
+       COALESCE(os.total_spent, 0) AS total_spent,
+       ts.total_supply_cost,
+       ROUND(os.net_sales / NULLIF(ts.total_supply_cost, 0), 2) AS roi_ratio,
+       co.order_count,
+       CASE 
+           WHEN os.lineitem_count IS NULL THEN 'No Line Items'
+           ELSE 'Has Line Items'
+       END AS order_status,
+       RANK() OVER (ORDER BY COALESCE(os.total_spent, 0) DESC) AS customer_rank 
+FROM CustomerOrder co
+FULL OUTER JOIN TopSuppliers ts ON co.c_custkey = ts.s_suppkey 
+FULL OUTER JOIN OrderStatistics os ON os.o_orderkey = co.o_orderkey
+WHERE (co.order_count > 10 OR os.lineitem_count IS NOT NULL) 
+  AND (COALESCE(co.total_spent, 0) > 1000 OR ts.total_supply_cost IS NOT NULL)
+ORDER BY roi_ratio DESC, customer_rank;

@@ -1,0 +1,69 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid) AS avg_order_value
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2001
+    GROUP BY 
+        ws.web_site_id, ws.ws_sold_date_sk
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        hd.hd_buy_potential,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+InventoryData AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_stock
+    FROM 
+        inventory inv
+    INNER JOIN 
+        item i ON inv.inv_item_sk = i.i_item_sk
+    WHERE 
+        i.i_rec_start_date <= DATE '2002-10-01' AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > DATE '2002-10-01')
+    GROUP BY 
+        inv.inv_item_sk
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    sd.web_site_id,
+    sd.total_sales,
+    sd.total_orders,
+    id.total_stock,
+    CASE 
+        WHEN cd.purchase_rank = 1 THEN 'Top Buyer' 
+        ELSE 'Regular Buyer' 
+    END AS buyer_type
+FROM 
+    CustomerData cd
+JOIN 
+    SalesData sd ON cd.c_customer_sk = sd.ws_bill_customer_sk
+LEFT JOIN 
+    InventoryData id ON sd.ws_item_sk = id.inv_item_sk
+WHERE 
+    (cd.hd_buy_potential IS NULL OR cd.hd_buy_potential != 'Not Likely')
+    AND sd.total_sales > 1000
+ORDER BY 
+    sd.total_sales DESC, 
+    cd.c_last_name ASC;

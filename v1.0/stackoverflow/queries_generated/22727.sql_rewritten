@@ -1,0 +1,97 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.Score IS NOT NULL AND 
+        p.PostTypeId = 1 
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(b.Class, 3) AS BadgeClass,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId AND b.Class = 1 
+    GROUP BY 
+        u.Id, u.Reputation
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT crt.Name, ', ') AS CloseReasonNames
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON CAST(ph.Comment AS INT) = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName
+    FROM 
+        Users u
+    WHERE 
+        u.LastAccessDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostMetrics AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        COALESCE(cr.CloseReasonNames, 'No Close Reason') AS CloseReasons,
+        ur.Reputation AS UserReputation,
+        ur.BadgeClass,
+        ur.BadgeCount,
+        rp.Score,
+        rp.ViewCount,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserReputation ur ON u.Id = ur.UserId
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.Id
+    LEFT JOIN 
+        CloseReasons cr ON cr.PostId = rp.Id
+    WHERE 
+        rp.rn = 1
+    GROUP BY 
+        rp.Id, rp.Title, cr.CloseReasonNames, ur.Reputation, ur.BadgeClass, ur.BadgeCount
+)
+SELECT 
+    pm.Title,
+    pm.UserReputation,
+    pm.BadgeClass,
+    pm.BadgeCount,
+    pm.CloseReasons,
+    pm.Score,
+    pm.ViewCount,
+    COALESCE(NULLIF(pm.CommentCount, 0), NULL) AS TotalComments
+FROM 
+    PostMetrics pm
+WHERE 
+    pm.UserReputation > (
+        SELECT 
+            AVG(UserReputation)
+            FROM PostMetrics
+    )
+ORDER BY 
+    pm.Score DESC,
+    pm.ViewCount DESC
+LIMIT 10;

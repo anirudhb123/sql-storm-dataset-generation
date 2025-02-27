@@ -1,0 +1,93 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(cci.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(cci.id) DESC) AS rank_per_year
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info cci ON cci.movie_id = mt.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT co.name) AS company_count,
+        STRING_AGG(DISTINCT co.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+),
+
+DetailedCast AS (
+    SELECT
+        ak.name,
+        ct.kind AS role,
+        mt.title AS movie_title,
+        mt.production_year
+    FROM
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.movie_id
+    JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+),
+
+KeywordMovies AS (
+    SELECT 
+        mk.movie_id, 
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword LIKE '%action%' OR k.keyword LIKE '%drama%'
+),
+
+FinalResults AS (
+    SELECT 
+        rm.title AS movie_title,
+        rm.production_year,
+        rm.cast_count,
+        cm.company_count,
+        km.keyword,
+        dc.role,
+        dc.name AS actor_name
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyMovies cm ON rm.movie_id = cm.movie_id
+    LEFT JOIN 
+        DetailedCast dc ON rm.movie_id = dc.movie_title
+    LEFT JOIN 
+        KeywordMovies km ON rm.movie_id = km.movie_id
+    WHERE 
+        rm.rank_per_year <= 3 AND 
+        (cm.company_count IS NULL OR cm.company_count >= 1)
+)
+
+SELECT 
+    movie_title,
+    production_year,
+    cast_count,
+    company_count,
+    STRING_AGG(DISTINCT actor_name, ', ') AS actors,
+    STRING_AGG(DISTINCT keyword, ', ') AS keywords
+FROM 
+    FinalResults
+GROUP BY 
+    movie_title, production_year, cast_count, company_count
+ORDER BY 
+    production_year DESC, cast_count DESC
+LIMIT 50;

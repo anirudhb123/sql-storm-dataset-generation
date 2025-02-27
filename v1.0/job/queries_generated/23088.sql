@@ -1,0 +1,72 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level
+    FROM aka_title AS mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    UNION ALL
+    SELECT
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM aka_title AS m
+    JOIN movie_link AS ml ON m.id = ml.linked_movie_id
+    JOIN movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+),
+company_info_comp AS (
+    SELECT 
+        mc.movie_id,
+        ARRAY_AGG(DISTINCT cn.name ORDER BY cn.name) AS company_names,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM movie_companies AS mc
+    JOIN company_name AS cn ON mc.company_id = cn.id
+    WHERE cn.country_code IS NOT NULL
+    GROUP BY mc.movie_id
+),
+cast_extract AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ' ORDER BY ak.name) AS actors
+    FROM cast_info AS ci
+    JOIN aka_name AS ak ON ci.person_id = ak.person_id
+    GROUP BY ci.movie_id
+),
+keyword_summary AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ' ORDER BY k.keyword) AS keywords,
+        COUNT(DISTINCT k.id) AS keyword_count
+    FROM movie_keyword AS mk
+    JOIN keyword AS k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    COALESCE(cc.company_names, ARRAY[]::text[]) AS companies,
+    cc.company_count,
+    COALESCE(ce.actor_count, 0) AS actor_count,
+    COALESCE(ce.actors, '') AS actor_list,
+    ks.keywords,
+    ks.keyword_count,
+    COUNT(DISTINCT ml.linked_movie_id) AS linked_movies_count,
+    CASE 
+        WHEN COUNT(DISTINCT ml.linked_movie_id) > 0 THEN 'Has Links' 
+        ELSE 'No Links' 
+    END AS link_status
+FROM movie_hierarchy AS mh
+LEFT JOIN company_info_comp AS cc ON mh.movie_id = cc.movie_id
+LEFT JOIN cast_extract AS ce ON mh.movie_id = ce.movie_id
+LEFT JOIN keyword_summary AS ks ON mh.movie_id = ks.movie_id
+LEFT JOIN movie_link AS ml ON mh.movie_id = ml.movie_id
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year, cc.company_names, cc.company_count, 
+    ce.actor_count, ce.actors, ks.keywords, ks.keyword_count
+ORDER BY 
+    mh.production_year DESC, mh.movie_title ASC;
+

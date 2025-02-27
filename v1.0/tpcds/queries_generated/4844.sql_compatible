@@ -1,0 +1,60 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_amount) AS total_returned,
+        COUNT(DISTINCT cr_order_number) AS return_count,
+        AVG(cr_return_quantity) AS avg_return_quantity
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+WebSalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        MAX(ws_sales_price) AS max_sales_price,
+        CAST(d.d_date AS DATE) AS sale_date
+    FROM 
+        web_sales ws
+    JOIN
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws_bill_customer_sk, d.d_date
+),
+SalesAndReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(s.total_sales, 0) AS total_sales,
+        COALESCE(r.total_returned, 0) AS total_returned,
+        COALESCE(r.return_count, 0) AS return_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        WebSalesData s ON c.c_customer_sk = s.ws_bill_customer_sk
+    LEFT JOIN 
+        CustomerReturns r ON c.c_customer_sk = r.cr_returning_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    s.total_sales,
+    s.total_returned,
+    s.return_count,
+    (s.total_sales - s.total_returned) AS net_revenue,
+    CASE 
+        WHEN s.total_sales = 0 THEN NULL 
+        ELSE (s.total_returned / s.total_sales) * 100 
+    END AS return_percentage,
+    ROW_NUMBER() OVER (ORDER BY (s.total_sales - s.total_returned) DESC) AS revenue_rank
+FROM 
+    SalesAndReturns s
+JOIN 
+    customer c ON s.c_customer_sk = c.c_customer_sk
+WHERE 
+    ((s.total_sales > 0 AND s.total_returned > 0) OR (s.total_sales <> 0 AND return_percentage IS NOT NULL))
+ORDER BY 
+    net_revenue DESC;

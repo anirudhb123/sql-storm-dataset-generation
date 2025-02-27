@@ -1,0 +1,30 @@
+
+SELECT 
+    p.p_name, 
+    s.s_name, 
+    n.n_name, 
+    CONCAT(c.c_name, ' - Order Status: ', o.o_orderstatus) AS customer_order_status, 
+    COUNT(l.l_orderkey) AS total_lines,
+    SUM(l.l_extendedprice) AS total_revenue,
+    SUBSTRING_INDEX(p.p_comment, ' ', 5) AS short_comment 
+FROM 
+    part p 
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey 
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey 
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey 
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey 
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey 
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey 
+WHERE 
+    n.n_name LIKE 'N%' 
+    AND p.p_size BETWEEN 10 AND 20 
+GROUP BY 
+    p.p_name, s.s_name, n.n_name, c.c_name, o.o_orderstatus 
+ORDER BY 
+    total_revenue DESC, total_lines ASC;

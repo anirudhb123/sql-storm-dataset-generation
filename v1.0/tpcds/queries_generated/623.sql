@@ -1,0 +1,51 @@
+
+WITH SalesData AS (
+    SELECT 
+        w.w_warehouse_name,
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        AVG(ws.ws_net_paid) AS average_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY w.w_warehouse_name ORDER BY SUM(ws.ws_sales_price) DESC) AS rank_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2451545 AND 2451545 + 30  -- A date range
+    GROUP BY 
+        w.w_warehouse_name, i.i_item_id
+), 
+TopSales AS (
+    SELECT 
+        warehouse_name, 
+        item_id, 
+        total_quantity, 
+        total_sales, 
+        average_net_paid
+    FROM 
+        SalesData
+    WHERE 
+        rank_sales <= 5  -- Top 5 sales per warehouse
+)
+SELECT 
+    ts.warehouse_name,
+    ts.item_id,
+    COALESCE(ts.total_quantity, 0) AS total_quantity,
+    COALESCE(ts.total_sales, 0.00) AS total_sales,
+    COALESCE(ts.average_net_paid, 0.00) AS average_net_paid,
+    COALESCE(sr.phase, 'Not Returned') AS return_phase,
+    SUM(CASE 
+            WHEN sr.sr_return_quantity IS NOT NULL THEN sr.sr_return_quantity 
+            ELSE 0 
+        END) AS total_returns
+FROM 
+    TopSales ts
+LEFT JOIN 
+    store_returns sr ON ts.item_id = sr.sr_item_sk
+GROUP BY 
+    ts.warehouse_name, ts.item_id, sr.phase
+ORDER BY 
+    ts.warehouse_name, total_sales DESC;

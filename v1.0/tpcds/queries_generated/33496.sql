@@ -1,0 +1,45 @@
+
+WITH RECURSIVE inventory_summary AS (
+    SELECT inv_date_sk, inv_item_sk, inv_quantity_on_hand, 1 AS level
+    FROM inventory
+    WHERE inv_quantity_on_hand > 0
+
+    UNION ALL
+
+    SELECT i.inv_date_sk, i.inv_item_sk, i.inv_quantity_on_hand - 10 AS inv_quantity_on_hand, level + 1
+    FROM inventory_summary i
+    JOIN inventory inv ON i.inv_item_sk = inv.inv_item_sk
+    WHERE inv.inv_quantity_on_hand > i.inv_quantity_on_hand
+)
+
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    SUM(ws_ext_sales_price) AS total_sales,
+    COUNT(DISTINCT ws_order_number) AS order_count,
+    MAX(ws_sales_price) AS max_sale,
+    MIN(ws_sales_price) AS min_sale,
+    LAST_VALUE(ws_sales_price) OVER (PARTITION BY c.c_customer_id ORDER BY ws_sold_date_sk ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_sale,
+    CASE
+        WHEN COUNT(DISTINCT ws_order_number) > 5 THEN 'Frequent Buyer'
+        ELSE 'Occasional Buyer'
+    END AS buyer_category
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    inventory_summary is ON ws.ws_item_sk = is.inv_item_sk
+WHERE 
+    is.inv_quantity_on_hand IS NOT NULL
+    AND (c.c_first_name LIKE '%A%' OR c.c_last_name LIKE '%A%')
+GROUP BY 
+    c.c_customer_id, ca.ca_city
+HAVING 
+    SUM(ws_ext_sales_price) > 1000
+ORDER BY 
+    total_sales DESC
+LIMIT 10
+```

@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        DENSE_RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS year_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.title, t.production_year
+),
+HighestCast AS (
+    SELECT 
+        title,
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        year_rank = 1
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    h.title,
+    h.production_year,
+    COALESCE(ci.company_name, 'Unknown') AS production_company,
+    COUNT(DISTINCT kw.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    (SELECT COUNT(*) FROM aka_name an WHERE an.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = h.movie_id)) AS relevant_people_count
+FROM 
+    HighestCast h
+LEFT JOIN 
+    CompanyInfo ci ON h.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_keyword mk ON h.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+GROUP BY 
+    h.title, h.production_year, ci.company_name
+ORDER BY 
+    h.production_year DESC, h.title;

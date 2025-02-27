@@ -1,0 +1,68 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(SUBSTRING(mt.title FROM '[[:digit:]]+'), 'Unknown Season') AS season,
+        mt.kind_id
+    FROM
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(SUBSTRING(mt.title FROM '[[:digit:]]+'), 'Unknown Season') AS season,
+        mt.kind_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE 
+        mt.production_year IS NOT NULL
+)
+, cast_ranked AS (
+    SELECT 
+        ci.movie_id,
+        ka.name,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS rank
+    FROM
+        cast_info ci
+    JOIN 
+        aka_name ka ON ci.person_id = ka.person_id
+    WHERE 
+        ci.nr_order IS NOT NULL
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    mh.season,
+    STRING_AGG(DISTINCT cr.name, ', ' ORDER BY cr.rank) AS cast,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    AVG(CASE 
+        WHEN mi.info_type_id IS NOT NULL THEN 1
+        ELSE 0 END) AS info_type_ratio,
+    COUNT(DISTINCT CASE WHEN COALESCE(ci.note, '') <> '' THEN ci.note END) AS distinct_notes
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_ranked cr ON mh.movie_id = cr.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id 
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.season
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 0 
+    AND AVG(COALESCE(mi.info, '')) IS NOT NULL
+ORDER BY 
+    mh.production_year DESC, mh.title;

@@ -1,0 +1,55 @@
+-- Performance benchmarking query to evaluate the relationships and counts within posts, users, comments, and votes
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.PostTypeId, p.CreationDate
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentsCount,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    p.PostId,
+    p.PostTypeId,
+    p.CreationDate,
+    p.CommentCount,
+    p.VoteCount,
+    p.UpVoteCount,
+    p.DownVoteCount,
+    u.UserId,
+    u.PostCount AS UserPostCount,
+    u.CommentsCount AS UserCommentCount,
+    u.BadgeCount AS UserBadgeCount
+FROM 
+    PostStats p
+JOIN 
+    Users u ON p.PostTypeId = u.Id -- Example of filtering posts by the user's Id for relevance to benchmarking
+ORDER BY 
+    p.VoteCount DESC, p.CommentCount DESC;

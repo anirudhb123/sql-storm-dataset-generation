@@ -1,0 +1,71 @@
+
+WITH sales_summary AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        COUNT(ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS rank_spent
+    FROM
+        customer c
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+                                AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+high_value_customers AS (
+    SELECT
+        ss.c_customer_sk,
+        ss.c_first_name,
+        ss.c_last_name,
+        ss.total_spent,
+        ss.order_count,
+        ROW_NUMBER() OVER (ORDER BY ss.total_spent DESC) AS customer_rank
+    FROM
+        sales_summary ss
+    WHERE 
+        ss.rank_spent = 1 AND ss.order_count > 5
+),
+average_sales_per_category AS (
+    SELECT
+        it.i_category,
+        AVG(ws.ws_net_paid_inc_tax) AS avg_sales_per_item
+    FROM
+        item it
+    JOIN
+        web_sales ws ON it.i_item_sk = ws.ws_item_sk
+    GROUP BY
+        it.i_category
+),
+latest_returns AS (
+    SELECT
+        sr_reference_item.sk AS sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns
+    FROM
+        store_returns sr 
+    WHERE
+        sr_returned_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY
+        sr_reference_item.sk
+)
+SELECT
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.total_spent,
+    hvc.order_count,
+    avc.avg_sales_per_item,
+    lr.total_returns
+FROM
+    high_value_customers hvc
+LEFT JOIN
+    average_sales_per_category avc ON avc.avg_sales_per_item > 100
+LEFT JOIN
+    latest_returns lr ON lr.sr_item_sk = hvc.c_customer_sk
+WHERE
+    hvc.total_spent IS NOT NULL AND lr.total_returns IS NOT NULL
+ORDER BY
+    hvc.total_spent DESC;

@@ -1,0 +1,58 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredActors AS (
+    SELECT 
+        a.id AS actor_id, 
+        a.person_id, 
+        a.movie_id, 
+        c.role_id, 
+        a.nr_order,
+        COALESCE(CHAR_LENGTH(a.note), 0) AS note_length
+    FROM 
+        cast_info a
+    LEFT JOIN 
+        comp_cast_type c ON a.person_role_id = c.id
+    WHERE 
+        a.nr_order IS NOT NULL
+        AND a.note IS NOT NULL
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id, 
+        ARRAY_AGG(k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    COALESCE(fa.actor_id, -1) AS actor_id,
+    COALESCE(ARRAY_AGG(DISTINCT mk.keywords), '{}') AS keyword_list,
+    COUNT(fa.actor_id) FILTER (WHERE fa.note_length > 50) AS long_notes_count,
+    STRING_AGG(DISTINCT CASE WHEN fa.note_length > 0 THEN fa.note ELSE 'No Note' END, '; ') AS combined_notes
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    FilteredActors fa ON rm.movie_id = fa.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON rm.movie_id = mk.movie_id
+GROUP BY 
+    rm.movie_id, rm.title, rm.production_year
+HAVING 
+    COUNT(fa.actor_id) > 0
+ORDER BY 
+    rm.production_year DESC, rm.title ASC;

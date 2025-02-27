@@ -1,0 +1,62 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        c.c_name, 
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        ps.ps_availqty, 
+        p.p_name, 
+        s.s_name,
+        COALESCE(SUM(l.l_quantity), 0) AS total_quantity_ordered
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, p.p_name, s.s_name
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(CASE WHEN o.o_totalprice > 1000 THEN 1 ELSE 0 END) AS high_value_orders,
+    AVG(COALESCE(spd.total_quantity_ordered, 0)) AS avg_quantity_ordered,
+    MAX(spd.ps_availqty) AS max_available_quantity,
+    STRING_AGG(DISTINCT spd.p_name, ', ') AS part_names
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    RankedOrders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    SupplierPartDetails spd ON spd.ps_partkey IN (
+        SELECT ps_partkey 
+        FROM partsupp 
+        WHERE ps_availqty > 0
+    )
+WHERE 
+    n.n_name IS NOT NULL
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_customers DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,60 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca.ca_address_id,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, 
+               CASE WHEN ca.ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca.ca_suite_number) ELSE '' END) AS full_address,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        customer_address ca
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM 
+        web_sales ws
+),
+TopSales AS (
+    SELECT 
+        sd.ws_order_number,
+        sd.ws_item_sk,
+        sd.ws_sales_price
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.price_rank <= 5
+)
+SELECT 
+    ci.full_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_education_status,
+    ad.full_address,
+    ts.ws_item_sk,
+    ts.ws_sales_price
+FROM 
+    CustomerInfo ci
+JOIN 
+    customer_address ca ON ca.ca_address_sk = ci.c_current_addr_sk
+JOIN 
+    AddressDetails ad ON ad.ca_address_id = ca.ca_address_id
+JOIN 
+    TopSales ts ON ts.ws_sales_number = ci.c_customer_id
+ORDER BY 
+    ci.full_name, ts.ws_sales_price DESC;

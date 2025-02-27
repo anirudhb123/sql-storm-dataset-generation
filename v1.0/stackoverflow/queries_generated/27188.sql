@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        REGEXP_REPLACE(p.Body, '<[^>]*>', '') AS CleanedBody,  -- Remove HTML tags for analysis
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Considering only Questions
+        AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'  -- Posts from the last year
+),
+
+AggregatedTags AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag, -- Split and unnest tags
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN c.PostId IS NOT NULL THEN 1 ELSE 0 END) AS CommentsMade
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        u.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+TaggedPostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        at.Tag,
+        at.TagCount,
+        ua.UserId,
+        ua.DisplayName,
+        ua.QuestionCount,
+        ua.UpVotes,
+        ua.CommentsMade
+    FROM 
+        RankedPosts rp
+    JOIN 
+        AggregatedTags at ON at.Tag = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><'))
+    JOIN 
+        UserActivity ua ON rp.OwnerUserId = ua.UserId
+)
+
+SELECT 
+    tp.DisplayName,
+    tp.Title,
+    tp.Tag,
+    tp.TagCount,
+    tp.QuestionCount,
+    tp.UpVotes,
+    tp.CommentsMade,
+    CASE 
+        WHEN tp.TagCount > 100 THEN 'Popular'
+        WHEN tp.TagCount BETWEEN 50 AND 100 THEN 'Moderate'
+        ELSE 'Rare'
+    END AS TagPopularity,
+    tp.CreationDate
+FROM 
+    TaggedPostDetails tp
+WHERE 
+    tp.RecentPostRank <= 5 -- Top 5 most recent posts for users
+ORDER BY 
+    tp.TagPopularity DESC, tp.UpVotes DESC, tp.CreationDate DESC;

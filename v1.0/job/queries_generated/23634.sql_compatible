@@ -1,0 +1,72 @@
+
+WITH RECURSIVE MovieCastCTE AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        a.id AS actor_id,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+), 
+
+MovieDetails AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        k.keyword,
+        CASE 
+            WHEN m.production_year IS NULL THEN 'Unknown Year'
+            WHEN m.production_year < 2000 THEN 'Before 2000'
+            ELSE 'After 2000'
+        END AS production_period,
+        COUNT(DISTINCT c.actor_id) AS total_actors
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        MovieCastCTE c ON m.id = c.movie_id
+    GROUP BY 
+        m.title, m.production_year, k.keyword
+), 
+
+AggregatedMovies AS (
+    SELECT 
+        c.movie_id,
+        m.title, 
+        m.production_year, 
+        m.production_period,
+        STRING_AGG(CONCAT(c.actor_name, ' (Rank: ', c.actor_order, ')'), ', ') AS leading_actors
+    FROM 
+        MovieCastCTE c
+    JOIN 
+        MovieDetails m ON c.movie_id = m.movie_id
+    GROUP BY 
+        c.movie_id, m.title, m.production_year, m.production_period
+)
+
+SELECT 
+    md.title,
+    md.production_year,
+    md.production_period,
+    COALESCE(ag.leading_actors, 'No actors found') AS notable_actors,
+    COALESCE(mk.keyword, 'No keywords associated') AS movie_keyword
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    AggregatedMovies ag ON md.title = ag.title AND md.production_year = ag.production_year
+FULL OUTER JOIN 
+    movie_keyword mk ON md.keyword = mk.keyword AND md.production_year IS NOT NULL
+WHERE 
+    (md.total_actors IS NULL OR md.total_actors > 0)
+    AND (mk.keyword IS NOT NULL OR md.production_year > 2010)
+ORDER BY 
+    md.production_year DESC, 
+    md.title ASC
+LIMIT 100;

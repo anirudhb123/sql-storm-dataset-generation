@@ -1,0 +1,53 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_nationkey IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+TotalOrderValuePerNation AS (
+    SELECT n.n_nationkey, n.n_name, SUM(o.o_totalprice) AS total_value
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_brand, SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_brand
+),
+LineItemAnalytics AS (
+    SELECT l.l_orderkey, AVG(l.l_extendedprice) AS avg_price, 
+           COUNT(DISTINCT l.l_suppkey) AS unique_suppliers, 
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS returns_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+FilteredSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost) > (SELECT AVG(ps_supplycost) FROM partsupp)
+)
+SELECT n.n_name, 
+       COALESCE(SUM(t.total_value), 0) AS total_orders_value, 
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       AVG(ld.avg_price) AS average_lineitem_price,
+       MAX(pd.total_available) AS max_available_parts
+FROM nation n
+LEFT JOIN TotalOrderValuePerNation t ON n.n_nationkey = t.n_nationkey
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN LineItemAnalytics ld ON ld.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey))
+LEFT JOIN PartDetails pd ON pd.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM FilteredSuppliers s WHERE s.s_name IS NOT NULL LIMIT 1))
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT sh.s_suppkey) > 0 OR MAX(pd.total_available) IS NOT NULL
+ORDER BY n.n_name DESC;

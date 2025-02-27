@@ -1,0 +1,58 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.ParentId, 
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.ParentId, 
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId  
+)
+SELECT 
+    u.DisplayName AS UserName, 
+    COUNT(DISTINCT p.Id) AS TotalPosts, 
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+    MAX(ph.CreationDate) AS LastActiveDate,
+    AVG(EXTRACT(EPOCH FROM (TIMESTAMP '2024-10-01 12:34:56' - ph.CreationDate)) / 86400) AS AvgPostAge,
+    PERCENT_RANK() OVER (PARTITION BY u.Id ORDER BY COUNT(DISTINCT p.Id) DESC) AS PostRank
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 9)  
+LEFT JOIN 
+    PostLinks pl ON p.Id = pl.PostId
+LEFT JOIN 
+    Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::text[])  
+LEFT JOIN 
+    RecursivePostHierarchy rph ON rph.PostId = p.Id
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+WHERE 
+    u.Reputation > 1000 
+    AND (p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' OR rph.Level > 0) 
+GROUP BY 
+    u.Id, u.DisplayName
+ORDER BY 
+    TotalPosts DESC, TotalComments DESC;

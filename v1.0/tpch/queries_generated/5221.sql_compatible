@@ -1,0 +1,44 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, n.n_regionkey
+),
+TopRegionSuppliers AS (
+    SELECT 
+        r.r_name, 
+        rs.s_name, 
+        rs.total_value,
+        n.n_regionkey -- added to include the missing column
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rn <= 3
+)
+SELECT 
+    ts.r_name AS Region, 
+    COUNT(*) AS Supplier_Count,
+    SUM(ts.total_value) AS Total_Value
+FROM 
+    TopRegionSuppliers ts
+JOIN 
+    region r ON ts.n_regionkey = r.r_regionkey -- fixed column reference
+GROUP BY 
+    ts.r_name
+ORDER BY 
+    Total_Value DESC;

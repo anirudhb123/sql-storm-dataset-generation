@@ -1,0 +1,54 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(COALESCE(C.CommentCount, 0)) AS TotalComments,
+        SUM(COALESCE(V.Id, 0)) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostTypeStats AS (
+    SELECT 
+        PT.Name AS PostType,
+        COUNT(P.Id) AS PostCount,
+        AVG(P.Score) AS AvgScore,
+        MAX(P.ViewCount) AS MaxViews,
+        MIN(P.ViewCount) AS MinViews
+    FROM 
+        Posts P
+    INNER JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    GROUP BY 
+        PT.Name
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalPosts,
+    U.Questions,
+    U.Answers,
+    U.TotalComments,
+    U.TotalVotes,
+    PTS.PostType,
+    PTS.PostCount,
+    PTS.AvgScore,
+    PTS.MaxViews,
+    PTS.MinViews
+FROM 
+    UserStats U
+CROSS JOIN 
+    PostTypeStats PTS
+ORDER BY 
+    U.TotalPosts DESC, PTS.PostCount DESC;

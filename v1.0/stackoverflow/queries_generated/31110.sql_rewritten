@@ -1,0 +1,74 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+)
+, UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalPostScore,
+        AVG(COALESCE(p.Score, 0)) AS AveragePostScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+, RecentComments AS (
+    SELECT 
+        c.Id AS CommentId,
+        c.PostId,
+        c.Text,
+        c.CreationDate,
+        u.DisplayName AS Commenter
+    FROM 
+        Comments c
+    JOIN 
+        Users u ON c.UserId = u.Id
+    WHERE 
+        c.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    rph.Title AS QuestionTitle,
+    rph.Id AS QuestionId,
+    rph.Level,
+    ups.DisplayName AS UserDisplayName,
+    ups.PostCount,
+    ups.TotalPostScore,
+    ups.AveragePostScore,
+    COUNT(rc.CommentId) AS RecentCommentCount,
+    MAX(rc.CreationDate) AS LastCommentDate
+FROM 
+    RecursivePostHierarchy rph
+LEFT JOIN 
+    UserPostStats ups ON rph.OwnerUserId = ups.UserId
+LEFT JOIN 
+    RecentComments rc ON rph.Id = rc.PostId
+WHERE 
+    rph.Level = 1
+GROUP BY 
+    rph.Id, rph.Title, rph.Level, ups.DisplayName, ups.PostCount, ups.TotalPostScore, ups.AveragePostScore
+ORDER BY 
+    COUNT(rc.CommentId) DESC, ups.TotalPostScore DESC
+LIMIT 10;

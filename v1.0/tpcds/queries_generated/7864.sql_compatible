@@ -1,0 +1,57 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_store_sk,
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        ROW_NUMBER() OVER (PARTITION BY sr_store_sk ORDER BY SUM(sr_return_amt_inc_tax) DESC) AS rnk
+    FROM store_returns
+    GROUP BY sr_store_sk, sr_item_sk
+    HAVING SUM(sr_return_quantity) > 0
+),
+TopReturns AS (
+    SELECT 
+        rr.sr_store_sk,
+        rr.sr_item_sk,
+        rr.total_returned,
+        rr.total_return_amount,
+        st.s_store_name,
+        ct.c_first_name,
+        ct.c_last_name,
+        dt.d_date,
+        dt.d_week_seq
+    FROM RankedReturns rr
+    JOIN store st ON rr.sr_store_sk = st.s_store_sk
+    JOIN customer ct ON ct.c_customer_sk = (
+        SELECT sr_customer_sk 
+        FROM store_returns 
+        WHERE sr_store_sk = rr.sr_store_sk AND sr_item_sk = rr.sr_item_sk 
+        ORDER BY sr_returned_date_sk DESC LIMIT 1
+    )
+    JOIN date_dim dt ON dt.d_date_sk = (
+        SELECT sr_returned_date_sk 
+        FROM store_returns 
+        WHERE sr_store_sk = rr.sr_store_sk AND sr_item_sk = rr.sr_item_sk 
+        ORDER BY sr_returned_date_sk DESC LIMIT 1
+    )
+    WHERE rr.rnk <= 5
+)
+SELECT 
+    sr.sr_store_sk,
+    sr.total_returned,
+    sr.total_return_amount,
+    sr.s_store_name,
+    CONCAT(EXTRACT(QUARTER FROM dt.d_date), '/', dt.d_year) AS quarter,
+    COUNT(DISTINCT ct.c_customer_sk) AS unique_customers,
+    AVG(sr.total_return_amount) AS avg_return_per_customer
+FROM TopReturns sr
+JOIN customer ct ON ct.c_customer_sk = sr.c_customer_sk
+JOIN date_dim dt ON dt.d_date_sk = sr.d_date
+GROUP BY 
+    sr.sr_store_sk,
+    sr.total_returned,
+    sr.total_return_amount,
+    sr.s_store_name,
+    quarter
+ORDER BY sr.total_return_amount DESC;

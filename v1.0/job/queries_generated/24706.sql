@@ -1,0 +1,75 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS title_rank,
+        COUNT(DISTINCT ak.person_id) OVER (PARTITION BY mt.id) AS actor_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%movie%')
+        AND mt.production_year IS NOT NULL
+),
+MovieRatings AS (
+    SELECT 
+        m.movie_id,
+        AVG(r.rating) AS avg_rating
+    FROM 
+        (SELECT movie_id, rating FROM movie_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'rating')) r
+    INNER JOIN 
+        complete_cast m ON r.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(co.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+),
+CombinedResults AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.title_rank,
+        mr.avg_rating,
+        mc.companies,
+        COALESCE(rm.actor_count, 0) AS actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieRatings mr ON rm.movie_id = mr.movie_id
+    LEFT JOIN 
+        MovieCompanies mc ON rm.movie_id = mc.movie_id
+)
+SELECT 
+    cr.title,
+    cr.production_year,
+    cr.title_rank,
+    cr.avg_rating,
+    cr.companies,
+    cr.actor_count,
+    CASE 
+        WHEN cr.avg_rating IS NULL THEN 'No ratings'
+        WHEN cr.avg_rating < 5 THEN 'Low'
+        WHEN cr.avg_rating BETWEEN 5 AND 7 THEN 'Average'
+        ELSE 'High'
+    END AS rating_category
+FROM 
+    CombinedResults cr
+WHERE 
+    cr.actor_count > 2 
+    AND (cr.avg_rating IS NULL OR cr.avg_rating < 8)
+ORDER BY 
+    cr.production_year DESC, cr.title_rank ASC;

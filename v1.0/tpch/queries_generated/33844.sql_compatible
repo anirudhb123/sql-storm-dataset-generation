@@ -1,0 +1,40 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.n_nationkey = sh.n_nationkey
+    WHERE s.s_acctbal > 5000 AND sh.level < 5
+),
+OrderStats AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+LineitemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(*) AS item_count, AVG(l.l_tax) AS avg_tax
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT s.s_name, ns.r_name AS nation, COALESCE(l.total_sales, 0) AS total_sales, os.o_totalprice,
+       COALESCE(MAX(l.item_count), 0) AS max_items,
+       SUM(CASE WHEN os.rank <= 10 THEN os.o_totalprice ELSE 0 END) AS top_order_sales
+FROM SupplierHierarchy s
+JOIN nation ns ON s.n_nationkey = ns.n_nationkey
+LEFT JOIN LineitemSummary l ON l.l_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_totalprice > 1000
+)
+JOIN OrderStats os ON os.o_orderkey = l.l_orderkey
+WHERE s.s_acctbal IS NOT NULL
+GROUP BY s.s_name, ns.r_name, os.o_totalprice
+HAVING SUM(COALESCE(l.total_sales, 0)) > 50000
+ORDER BY top_order_sales DESC, max_items DESC;

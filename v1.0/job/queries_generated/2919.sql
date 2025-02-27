@@ -1,0 +1,39 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+recent_movies AS (
+    SELECT 
+        title,
+        production_year,
+        total_cast
+    FROM 
+        ranked_movies
+    WHERE 
+        production_year >= (SELECT MAX(production_year) - 5 FROM ranked_movies)
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.total_cast,
+    COALESCE((SELECT STRING_AGG(an.name, ', ') 
+              FROM aka_name an 
+              JOIN cast_info ci ON an.person_id = ci.person_id 
+              WHERE ci.movie_id = rm.id), 'Unknown Actors') AS actors
+FROM 
+    recent_movies rm
+JOIN 
+    title t ON rm.title = t.title
+WHERE 
+    rm.total_cast > 5
+ORDER BY 
+    rm.production_year DESC;

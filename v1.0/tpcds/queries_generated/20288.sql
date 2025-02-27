@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_ext_sales_price) AS total_sales, 
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), 
+HighValueItems AS (
+    SELECT 
+        i_item_sk, 
+        i_item_desc, 
+        i_current_price, 
+        i_brand
+    FROM 
+        item
+    WHERE 
+        i_current_price > (SELECT AVG(i_current_price) FROM item)
+),
+CustomerReturns AS (
+    SELECT 
+        cr_item_sk, 
+        COUNT(cr_order_number) AS return_count
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_item_sk
+    HAVING 
+        COUNT(cr_order_number) > 5
+)
+SELECT 
+    W.item_desc,
+    W.total_sales,
+    COALESCE(R.return_count, 0) AS return_count,
+    CASE 
+        WHEN R.return_count IS NULL THEN 'No Returns'
+        ELSE 'Returns Made' 
+    END AS return_status,
+    P.promo_id,
+    CASE 
+        WHEN P.promo_id IS NOT NULL THEN 'Promo Applied'
+        ELSE 'No Promo'
+    END AS promo_status
+FROM 
+    RankedSales AS RS
+JOIN 
+    HighValueItems AS W ON RS.ws_item_sk = W.i_item_sk
+LEFT JOIN 
+    CustomerReturns AS R ON W.i_item_sk = R.cr_item_sk
+LEFT JOIN 
+    promotion AS P ON P.p_item_sk = W.i_item_sk
+WHERE 
+    W.brand IN (SELECT DISTINCT i_brand FROM item WHERE i_category = 'Electronics')
+AND 
+    RS.rank = 1
+ORDER BY 
+    W.total_sales DESC
+LIMIT 50;

@@ -1,0 +1,50 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS DownVoteCount,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS RecentRank,
+        p.CreationDate
+    FROM
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE
+        p.PostTypeId = 1 
+),
+TagStats AS (
+    SELECT
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0)) AS TotalUpVotes,
+        SUM(COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0)) AS TotalDownVotes
+    FROM
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('<', t.TagName, '>') 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY
+        t.TagName
+)
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    ts.TagName AS AssociatedTag,
+    ts.PostCount AS TagPostCount,
+    ts.TotalUpVotes AS TagTotalUpVotes,
+    ts.TotalDownVotes AS TagTotalDownVotes
+FROM
+    RankedPosts rp
+JOIN 
+    TagStats ts ON rp.Title LIKE CONCAT('%', ts.TagName, '%') 
+WHERE
+    rp.RecentRank <= 10 
+ORDER BY
+    rp.CreationDate DESC;

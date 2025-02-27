@@ -1,0 +1,56 @@
+
+WITH part_supplier_info AS (
+    SELECT 
+        p.p_name AS part_name,
+        s.s_name AS supplier_name,
+        s.s_address AS supplier_address,
+        ps.ps_availqty AS available_quantity,
+        ps.ps_supplycost AS supply_cost,
+        CONCAT(s.s_name, ' - ', p.p_name) AS supplier_part_combo
+    FROM 
+        part AS p
+    JOIN 
+        partsupp AS ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier AS s ON ps.ps_suppkey = s.s_suppkey
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_name AS customer_name,
+        c.c_address AS customer_address,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS orders_count
+    FROM 
+        customer AS c
+    JOIN 
+        orders AS o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_name, c.c_address
+),
+final_benchmark AS (
+    SELECT 
+        CONCAT(p.part_name, ' - ', p.supplier_name) AS part_supplier,
+        ci.customer_name,
+        ci.customer_address,
+        co.total_spent,
+        p.available_quantity,
+        p.supply_cost,
+        CONCAT(ci.customer_name, ' spent $', TO_CHAR(co.total_spent, 'FM999999999.00')) AS customer_spending_summary
+    FROM 
+        part_supplier_info AS p
+    JOIN 
+        customer_order_summary AS co ON p.part_name LIKE '%' || co.customer_name || '%'
+    JOIN 
+        customer AS ci ON ci.c_name = co.customer_name
+    GROUP BY 
+        p.part_name, p.supplier_name, ci.customer_name, ci.customer_address, co.total_spent, p.available_quantity, p.supply_cost
+)
+
+SELECT 
+    *
+FROM 
+    final_benchmark
+WHERE 
+    available_quantity > 100
+ORDER BY 
+    total_spent DESC, part_supplier;

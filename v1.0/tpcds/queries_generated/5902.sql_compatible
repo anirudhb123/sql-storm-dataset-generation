@@ -1,0 +1,54 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rank
+    FROM 
+        web_sales
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    WHERE 
+        d_year = 2023
+        AND d_moy = 6
+    GROUP BY 
+        ws_item_sk
+),
+TopSellingItems AS (
+    SELECT 
+        ri.i_item_id,
+        ri.i_item_desc,
+        rs.total_quantity,
+        rs.total_sales,
+        rs.ws_item_sk
+    FROM 
+        RankedSales rs
+    JOIN 
+        item ri ON rs.ws_item_sk = ri.i_item_sk
+    WHERE 
+        rs.rank <= 10
+)
+SELECT 
+    tsi.i_item_id,
+    tsi.i_item_desc,
+    tsi.total_quantity,
+    tsi.total_sales,
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    cc.cc_name
+FROM 
+    TopSellingItems tsi
+JOIN 
+    store_sales ss ON ss.ss_item_sk = tsi.ws_item_sk
+JOIN 
+    customer c ON ss.ss_customer_sk = c.c_customer_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    call_center cc ON ss.ss_call_center_sk = cc.cc_call_center_sk
+WHERE 
+    cc.cc_state = 'CA'
+ORDER BY 
+    tsi.total_sales DESC;

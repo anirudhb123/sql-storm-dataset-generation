@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           CASE WHEN p.p_size IS NULL THEN 'UNKNOWN' ELSE CAST(p.p_size AS VARCHAR) END AS part_size
+    FROM part p
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+SupplierAvailability AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+FilteredOrders AS (
+    SELECT od.o_orderkey, od.o_custkey, od.total_revenue, 
+           RANK() OVER (ORDER BY od.total_revenue DESC) AS revenue_rank
+    FROM OrderDetails od
+    WHERE od.total_revenue > (SELECT AVG(total_revenue) FROM OrderDetails)
+),
+FinalResult AS (
+    SELECT DISTINCT p.p_name, s.s_name, c.c_name, od.total_revenue,
+           COALESCE(r.r_name, 'GLOBAL') AS region_name
+    FROM PartDetails p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey AND s.rnk <= 5
+    JOIN HighValueCustomers c ON c.c_custkey IN (
+        SELECT od.o_custkey 
+        FROM FilteredOrders od 
+        WHERE od.o_orderkey = (SELECT MAX(o_orderkey) FROM orders)
+    )
+    LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE p.p_retailprice < 500.00 AND (EXISTS (
+        SELECT 1 
+        FROM lineitem li 
+        WHERE li.l_partkey = p.p_partkey 
+        AND li.l_returnflag = 'R'
+    ) OR p.p_comment LIKE '%fragile%')
+)
+SELECT * FROM FinalResult
+ORDER BY total_revenue DESC, p_name ASC;

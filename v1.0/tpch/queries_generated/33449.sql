@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplyCostCTE AS (
+    SELECT ps_partkey, ps_suppkey, ps_availqty,
+           ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS rn
+    FROM partsupp
+    WHERE ps_availqty > 0
+),
+HighCostSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           s.s_comment, SUM(sc.ps_supplycost * sc.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN SupplyCostCTE sc ON s.s_suppkey = sc.ps_suppkey
+    WHERE sc.rn = 1
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment
+    HAVING SUM(sc.ps_supplycost * sc_availqty) > 10000
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATEADD(month, -6, CURRENT_DATE)
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+CustomerStats AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           SUM(r.order_total) AS total_spent
+    FROM customer c
+    LEFT JOIN RecentOrders r ON c.c_custkey = r.o_custkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+    HAVING COUNT(DISTINCT o.o_orderkey) > 5
+)
+SELECT r.r_name, COUNT(DISTINCT cs.c_custkey) AS customer_count,
+       SUM(cs.total_spent) AS total_spending,
+       AVG(cs.c_acctbal) AS average_account_balance,
+       MAX(h.total_cost) AS highest_supplier_cost
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN CustomerStats cs ON s.s_suppkey = cs.c_custkey
+LEFT JOIN HighCostSuppliers h ON s.s_suppkey = h.s_suppkey
+WHERE r.r_name IS NOT NULL
+GROUP BY r.r_name
+ORDER BY total_spending DESC, customer_count DESC;

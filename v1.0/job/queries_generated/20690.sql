@@ -1,0 +1,83 @@
+WITH RECURSIVE movie_relationships AS (
+    SELECT
+        m.id AS movie_id,
+        t.title,
+        COALESCE(cn.name, 'Unknown Company') AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY ct.kind) AS company_priority
+    FROM
+        aka_title t
+    JOIN
+        movie_companies mc ON mc.movie_id = t.movie_id
+    LEFT JOIN
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE
+        t.production_year IS NOT NULL
+),
+movie_keywords AS (
+    SELECT
+        mk.movie_id,
+        k.keyword
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        k.keyword IS NOT NULL
+),
+completed_cast AS (
+    SELECT
+        cc.movie_id,
+        COUNT(*) AS member_count
+    FROM
+        complete_cast cc
+    GROUP BY
+        cc.movie_id
+),
+ranked_movies AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        m.company_name,
+        m.company_type,
+        COALESCE(ck.member_count, 0) AS total_cast_members,
+        ROW_NUMBER() OVER (ORDER BY m.title) AS title_rank
+    FROM
+        movie_relationships m
+    LEFT JOIN
+        completed_cast ck ON m.movie_id = ck.movie_id
+)
+SELECT
+    rm.title AS movie_title,
+    rm.company_name,
+    rm.company_type,
+    rm.total_cast_members,
+    mk.keyword,
+    CASE
+        WHEN rm.total_cast_members > 0 THEN 'Cast Available'
+        WHEN rm.total_cast_members IS NULL THEN 'No Cast Information'
+        ELSE 'No Cast'
+    END AS cast_status
+FROM
+    ranked_movies rm
+LEFT JOIN
+    movie_keywords mk ON rm.movie_id = mk.movie_id
+WHERE
+    rm.company_type IS NOT NULL
+    AND rm.company_priority = 1
+UNION 
+SELECT
+    'No Movie' AS movie_title,
+    NULL AS company_name,
+    NULL AS company_type,
+    0 AS total_cast_members,
+    NULL AS keyword,
+    'No Cast' AS cast_status
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM ranked_movies 
+)
+ORDER BY
+    movie_title;

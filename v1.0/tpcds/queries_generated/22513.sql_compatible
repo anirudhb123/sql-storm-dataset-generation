@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+),
+SalesStats AS (
+    SELECT 
+        cs.cs_item_sk,
+        SUM(cs.cs_quantity) AS total_quantity_sold,
+        AVG(cs.cs_sales_price) AS avg_sales_price,
+        MAX(cs.cs_ext_sales_price) AS max_sales_price
+    FROM 
+        catalog_sales cs
+    GROUP BY 
+        cs.cs_item_sk
+),
+ReturnStats AS (
+    SELECT 
+        sr.sr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr.sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_item_sk
+),
+WarehouseInfo AS (
+    SELECT 
+        w.w_warehouse_sk,
+        w.w_warehouse_name,
+        COUNT(s.ss_item_sk) AS item_count
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        store_sales s ON w.w_warehouse_sk = s.ss_store_sk
+    GROUP BY 
+        w.w_warehouse_sk, w.w_warehouse_name
+)
+SELECT 
+    COALESCE(wsRank.ws_item_sk, csStats.cs_item_sk, rtStats.sr_item_sk) AS item_sk,
+    COALESCE(RANK() OVER (ORDER BY SUM(csStats.total_quantity_sold) DESC), 
+             RANK() OVER (ORDER BY SUM(rtStats.total_returns) DESC)) AS rank_metric,
+    COALESCE(ws.ws_sales_price, csStats.avg_sales_price, csStats.max_sales_price) AS sales_metric,
+    warehouse_info.w_warehouse_name
+FROM 
+    RankedSales wsRank
+FULL OUTER JOIN 
+    SalesStats csStats ON wsRank.ws_item_sk = csStats.cs_item_sk
+FULL OUTER JOIN 
+    ReturnStats rtStats ON wsRank.ws_item_sk = rtStats.sr_item_sk
+JOIN 
+    WarehouseInfo warehouse_info ON warehouse_info.item_count > 10
+WHERE 
+    (wsRank.sales_rank = 1 OR csStats.total_quantity_sold > 50) 
+    AND (rtStats.total_returns IS NULL OR rtStats.total_return_amount < 100)
+GROUP BY 
+    wsRank.ws_item_sk, csStats.cs_item_sk, rtStats.sr_item_sk, 
+    warehouse_info.w_warehouse_name, ws.ws_sales_price
+ORDER BY 
+    rank_metric, sales_metric DESC
+LIMIT 100;

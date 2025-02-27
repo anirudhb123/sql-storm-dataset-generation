@@ -1,0 +1,44 @@
+
+WITH TotalOrderAmounts AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY o.o_orderkey
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_name, s.s_acctbal
+),
+TopNation AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name,
+        ROW_NUMBER() OVER (ORDER BY SUM(c.c_acctbal) DESC) AS rn
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT 
+    p.p_name,
+    COALESCE(td.total_amount, 0) AS total_order_amount,
+    COALESCE(sp.total_available, 0) AS total_available_quantity,
+    tn.n_name AS top_nation
+FROM part p
+LEFT JOIN TotalOrderAmounts td ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)))
+LEFT JOIN SupplierPartDetails sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN TopNation tn ON tn.rn = 1
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) 
+    FROM part p2 
+    WHERE p2.p_container IS NOT NULL
+) AND p.p_size IS NOT NULL
+ORDER BY total_order_amount DESC, total_available_quantity DESC;

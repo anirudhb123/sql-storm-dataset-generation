@@ -1,0 +1,60 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        co.total_spent,
+        RANK() OVER (ORDER BY co.total_spent DESC) AS customer_rank
+    FROM 
+        customerOrders co
+    JOIN 
+        customer c ON co.c_custkey = c.c_custkey
+    WHERE 
+        co.total_spent > 10000
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    rs.s_name,
+    hvc.total_spent,
+    rs.rnk AS supplier_rank
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier rs ON ps.ps_suppkey = rs.s_suppkey
+LEFT JOIN 
+    HighValueCustomers hvc ON rs.s_nationkey = hvc.c_custkey
+WHERE 
+    p.p_retailprice IS NOT NULL 
+    AND (hvc.customer_rank IS NULL OR rs.rnk <= 3)
+ORDER BY 
+    p.p_partkey, hvc.total_spent DESC;

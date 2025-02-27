@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 0  
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 4 THEN 1 ELSE 0 END) AS OffensiveVoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryExtended AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        p.Title,
+        COALESCE(pr.Name, 'No History') AS HistoryType,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        PostHistoryTypes pr ON ph.PostHistoryTypeId = pr.Id
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    COUNT(DISTINCT rp.PostId) AS TotalQuestionsLogged,
+    SUM(ue.CommentCount) AS TotalUserComments,
+    SUM(ue.UpVoteCount) AS TotalUpVotes,
+    SUM(ue.DownVoteCount) AS TotalDownVotes,
+    SUM(ue.OffensiveVoteCount) AS TotalOffensiveVotes,
+    STRING_AGG(DISTINCT p.Title, '; ') AS TopQuestionTitles,
+    SUM(CASE 
+        WHEN phe.HistoryRank = 1 THEN 1 
+        ELSE 0 
+    END) AS RecentHistoryEntries,
+    MAX(phe.CreationDate) AS LastPostHistoryEntry
+FROM 
+    Users u
+JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+JOIN 
+    UserEngagement ue ON u.Id = ue.UserId
+LEFT JOIN 
+    PostHistoryExtended phe ON rp.PostId = phe.PostId
+WHERE 
+    u.Reputation > 100  
+GROUP BY 
+    u.UserId, u.DisplayName 
+ORDER BY 
+    TotalQuestionsLogged DESC,
+    TotalUserComments DESC;

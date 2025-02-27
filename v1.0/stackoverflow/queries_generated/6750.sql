@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.PostTypeId = 1 -- Questions only
+        AND p.CreationDate >= NOW() - INTERVAL '1 year' -- Last year
+),
+PopularTags AS (
+    SELECT
+        UNNEST(string_to_array(p.Tags, ',')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY
+        TagName
+    ORDER BY
+        TagCount DESC
+    LIMIT 10
+),
+VotesSummary AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    WHERE
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY
+        p.Id
+)
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.OwnerDisplayName,
+    pt.TagName,
+    vs.VoteCount,
+    vs.Upvotes,
+    vs.Downvotes,
+    rp.PostRank
+FROM
+    RankedPosts rp
+JOIN
+    PostLinks pl ON rp.PostId = pl.PostId
+JOIN
+    PopularTags pt ON pt.TagName = ANY(string_to_array(rp.Tags, ','))
+JOIN
+    VotesSummary vs ON rp.PostId = vs.PostId
+WHERE
+    rp.PostRank <= 5
+ORDER BY
+    rp.Score DESC, vs.VoteCount DESC;

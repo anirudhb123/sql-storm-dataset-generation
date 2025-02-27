@@ -1,0 +1,59 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS lvl
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, oh.lvl + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey AND o.o_orderdate > oh.o_orderdate
+    WHERE o.o_orderstatus = 'O' AND oh.lvl < 5
+),
+SupplierStats AS (
+    SELECT ps.ps_suppkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_orderkey) AS order_count,
+           AVG(l.l_quantity) AS avg_quantity
+    FROM lineitem l
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    GROUP BY ps.ps_suppkey
+),
+CustomerSegment AS (
+    SELECT c.c_mktsegment, COUNT(DISTINCT o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '1996-01-01' AND '1997-01-01'
+    GROUP BY c.c_mktsegment
+),
+RegionSupplier AS (
+    SELECT r.r_name, s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY r.r_name, s.s_name
+),
+FinalReport AS (
+    SELECT oh.o_orderkey, c.c_name, cs.c_mktsegment,
+           CASE WHEN ss.total_revenue IS NULL THEN 0 ELSE ss.total_revenue END AS supplier_revenue,
+           COALESCE(rs.total_supply_cost, 0) AS total_supply_cost
+    FROM OrderHierarchy oh
+    JOIN customer c ON oh.o_custkey = c.c_custkey
+    LEFT JOIN SupplierStats ss ON ss.ps_suppkey = (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+        WHERE l.l_orderkey = oh.o_orderkey
+        LIMIT 1
+    )
+    LEFT JOIN RegionSupplier rs ON c.c_nationkey = (
+        SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA'
+    )
+    JOIN CustomerSegment cs ON c.c_mktsegment = cs.c_mktsegment
+)
+SELECT DISTINCT fr.o_orderkey, fr.c_name, fr.c_mktsegment,
+       CONCAT('Total Revenue: ', CAST(fr.supplier_revenue AS VARCHAR), 
+              ' | Total Cost: ', CAST(fr.total_supply_cost AS VARCHAR)) AS revenue_info
+FROM FinalReport fr
+WHERE fr.supplier_revenue > (SELECT AVG(ss.total_revenue) FROM SupplierStats ss)
+ORDER BY fr.o_orderkey;

@@ -1,0 +1,79 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+), OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        o.o_orderstatus,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus, o.o_orderdate
+), TotalRevenue AS (
+    SELECT 
+        SUM(total_revenue) AS grand_total,
+        o_orderstatus
+    FROM 
+        OrderSummary
+    WHERE 
+        o_orderdate >= '1995-01-01'
+    GROUP BY 
+        o_orderstatus
+), NationSupplier AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        MAX(s.s_acctbal) AS max_acctbal
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+) 
+
+SELECT 
+    p.p_name,
+    r.r_name,
+    COALESCE(ns.supplier_count, 0) AS total_suppliers,
+    CASE 
+        WHEN tr.o_orderstatus IS NULL THEN 'UNKNOWN'
+        ELSE tr.o_orderstatus
+    END AS order_status,
+    RANK() OVER (PARTITION BY r.r_regionkey ORDER BY COALESCE(tr.grand_total, 0) DESC) AS revenue_rank,
+    ns.max_acctbal / NULLIF(ns.supplier_count, 0) AS avg_acctbal_per_supplier
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    TotalRevenue tr ON n.n_nationkey = tr.o_orderstatus
+LEFT JOIN 
+    NationSupplier ns ON n.n_nationkey = ns.n_nationkey
+WHERE 
+    (p.p_size = 0 OR p.p_size IS NULL)
+    AND (s.s_acctbal BETWEEN 1000 AND 5000 OR s.s_name LIKE '%Inc%')
+    AND EXISTS (
+        SELECT 1 
+        FROM lineitem l 
+        WHERE l.l_partkey = p.p_partkey 
+        AND l.l_quantity > 10
+    )
+ORDER BY 
+    revenue_rank, total_suppliers DESC, p.p_name;

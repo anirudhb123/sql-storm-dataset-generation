@@ -1,0 +1,59 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        1 AS Level
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11)  
+
+    UNION ALL
+
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        Level + 1
+    FROM PostHistory ph
+    INNER JOIN RecursivePostHistory rph ON ph.PostId = rph.PostId 
+    WHERE ph.CreationDate < rph.CreationDate
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    COALESCE(upv.UpVoteCount, 0) AS UpVoteCount,
+    COALESCE(dnv.DownVoteCount, 0) AS DownVoteCount,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    STRING_AGG(t.TagName, ', ') AS Tags,
+    SUM(CASE WHEN rph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+    SUM(CASE WHEN rph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenCount,
+    MAX(rph.CreationDate) AS LastActivityDate
+FROM Posts p
+LEFT JOIN (
+    SELECT PostId, COUNT(*) AS UpVoteCount
+    FROM Votes
+    WHERE VoteTypeId = 2  
+    GROUP BY PostId
+) upv ON upv.PostId = p.Id
+LEFT JOIN (
+    SELECT PostId, COUNT(*) AS DownVoteCount
+    FROM Votes
+    WHERE VoteTypeId = 3  
+    GROUP BY PostId
+) dnv ON dnv.PostId = p.Id
+LEFT JOIN Comments c ON c.PostId = p.Id
+LEFT JOIN Tags t ON t.Id IN (SELECT UNNEST(string_to_array(p.Tags, '><')))
+LEFT JOIN RecursivePostHistory rph ON rph.PostId = p.Id
+WHERE p.PostTypeId = 1  
+GROUP BY p.Id, p.Title, p.CreationDate, upv.UpVoteCount, dnv.DownVoteCount, rph.PostHistoryTypeId
+ORDER BY LastActivityDate DESC
+LIMIT 100;

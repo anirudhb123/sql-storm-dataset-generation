@@ -1,0 +1,42 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year DESC) AS rn
+    FROM 
+        customer c
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_email_address LIKE '%@example.com'
+),
+AddressCount AS (
+    SELECT 
+        ca.ca_city,
+        COUNT(*) AS address_count
+    FROM 
+        customer_address ca
+    GROUP BY 
+        ca.ca_city
+)
+SELECT 
+    rc.c_customer_sk,
+    CONCAT(rc.c_first_name, ' ', rc.c_last_name) AS full_name,
+    rc.cd_gender,
+    rc.cd_marital_status,
+    ac.address_count,
+    (SELECT COUNT(*) FROM address_count) AS total_cities
+FROM 
+    RankedCustomers rc
+    JOIN AddressCount ac ON ac.address_count = (
+        SELECT MAX(address_count) 
+        FROM AddressCount
+    )
+WHERE 
+    rc.rn <= 5
+ORDER BY 
+    rc.cd_gender, 
+    rc.rn;

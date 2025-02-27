@@ -1,0 +1,68 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        LastAccessDate,
+        CASE 
+            WHEN Reputation >= 1000 THEN 'High'
+            WHEN Reputation >= 100 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationLevel
+    FROM Users
+),
+
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(NULLIF(p.ViewCount, 0), 1) AS ViewCount,
+        COALESCE(SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id
+),
+
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.ReputationLevel,
+        COUNT(ps.PostId) AS PostCount
+    FROM UserReputation ur
+    JOIN PostStatistics ps ON ur.UserId = ps.PostId
+    WHERE ur.ReputationLevel = 'High'
+    GROUP BY ur.UserId, ur.ReputationLevel
+),
+
+ClosedPostReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT crt.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE ph.PostHistoryTypeId = 10 
+    GROUP BY ph.PostId
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.Location,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.CommentCount,
+    COALESCE(cpr.CloseReasons, 'No Close Reasons') AS CloseReasons,
+    CASE 
+        WHEN tu.PostCount IS NOT NULL THEN 'Top User'
+        ELSE 'Regular User'
+    END AS UserType
+FROM Users u
+JOIN PostStatistics ps ON u.Id = ps.OwnerUserId
+LEFT JOIN ClosedPostReasons cpr ON ps.PostId = cpr.PostId
+LEFT JOIN TopUsers tu ON u.Id = tu.UserId
+WHERE ps.PostRank <= 5
+ORDER BY u.Reputation DESC, ps.Score DESC;

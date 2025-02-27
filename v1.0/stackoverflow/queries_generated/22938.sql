@@ -1,0 +1,73 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        AVG(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - U.CreationDate)) / 86400) AS AvgDaysSinceCreation
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE U.Reputation > 0
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+), TagCounts AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM Tags T
+    LEFT JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+), RankedUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.Reputation,
+        RANK() OVER (ORDER BY UA.Reputation DESC) AS ReputationRank
+    FROM UserActivity UA
+), PostEditingHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.UserId,
+        PH.CreationDate,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS EditAttempt
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (4, 5, 6) -- Title, Body, Tags edits
+), CombinedStats AS (
+    SELECT 
+        RU.DisplayName,
+        RU.Reputation,
+        T.TagName,
+        TC.PostCount AS TagPostCount,
+        TC.TotalViews AS TagTotalViews,
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.UserId AS EditorId,
+        PH.CreationDate AS EditDate,
+        PH.Comment AS EditComment,
+        CASE WHEN PH.EditAttempt = 1 THEN 'Most Recent Edit' ELSE 'Earlier Edit' END AS EditStatus
+    FROM RankedUsers RU
+    JOIN TagCounts TC ON RU.Reputation BETWEEN 100 AND 1000 -- Filters specific reputation brackets
+    LEFT JOIN PostEditingHistory PH ON PH.UserId = RU.UserId
+    WHERE TC.PostCount > 0
+)
+SELECT 
+    C.DisplayName AS EditorName,
+    C.Reputation AS UserReputation,
+    TC.TagName AS AssociatedTag,
+    COUNT(DISTINCT C.PostId) AS EditedPostCount,
+    SUM(CASE WHEN C.EditStatus = 'Most Recent Edit' THEN 1 ELSE 0 END) AS MostRecentEdits,
+    SUM(COALESCE(C.TagTotalViews, 0)) AS TotalVisibilityGain,
+    STRING_AGG(C.EditComment, '; ') AS EditComments,
+    (SELECT COUNT(*) FROM Votes V WHERE V.UserId = C.EditorId AND V.VoteTypeId IN (2, 3)) AS TotalVotesByUser
+FROM CombinedStats C
+GROUP BY C.EditorName, C.UserReputation, C.AssociatedTag
+HAVING COUNT(DISTINCT C.PostId) > 5 
+   AND SUM(CASE WHEN C.EditDate IS NOT NULL THEN 1 ELSE 0 END) > 2
+ORDER BY C.UserReputation DESC, COUNT(DISTINCT C.PostId) DESC;

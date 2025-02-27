@@ -1,0 +1,93 @@
+
+WITH RecursiveMovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        NULL AS parent_movie_id
+    FROM
+        title m
+    WHERE
+        m.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        level + 1,
+        e.episode_of_id AS parent_movie_id
+    FROM
+        title e
+    JOIN
+        RecursiveMovieHierarchy rmh ON rmh.movie_id = e.episode_of_id
+),
+
+ActorRoles AS (
+    SELECT
+        ca.person_id,
+        ca.movie_id,
+        a.name,
+        COALESCE(rt.role, 'Unknown') AS role,
+        ROW_NUMBER() OVER (PARTITION BY ca.person_id, ca.movie_id ORDER BY ca.nr_order) AS rn
+    FROM
+        cast_info ca
+    JOIN
+        aka_name a ON ca.person_id = a.person_id
+    LEFT JOIN
+        role_type rt ON ca.role_id = rt.id
+),
+
+MoviesWithActorCount AS (
+    SELECT
+        r.movie_id,
+        COUNT(DISTINCT r.person_id) AS actor_count
+    FROM
+        ActorRoles r
+    GROUP BY
+        r.movie_id
+),
+
+HighActorMovies AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        m.production_year,
+        ma.actor_count,
+        RANK() OVER (ORDER BY ma.actor_count DESC) AS rank
+    FROM
+        MoviesWithActorCount ma
+    JOIN
+        RecursiveMovieHierarchy r ON r.movie_id = ma.movie_id
+    WHERE
+        ma.actor_count >= 10
+),
+
+FinalData AS (
+    SELECT
+        hm.title,
+        hm.production_year,
+        hm.actor_count,
+        COALESCE(NULLIF(hm.actor_count, 0), 1) AS non_zero_actor_count,
+        CASE 
+            WHEN hm.actor_count IS NULL THEN 'No Actors'
+            WHEN hm.actor_count < 15 THEN 'Few Actors'
+            ELSE 'Many Actors'
+        END AS actor_category
+    FROM
+        HighActorMovies hm
+)
+
+SELECT
+    title,
+    production_year,
+    actor_count,
+    non_zero_actor_count,
+    actor_category
+FROM
+    FinalData
+ORDER BY
+    production_year DESC,
+    actor_count DESC;

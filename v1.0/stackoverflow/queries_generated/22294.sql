@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS PostRank,
+        COUNT(v.Id) AS VoteCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsList
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                UNNEST(string_to_array(p.Tags, '>')) AS TagName
+        ) t ON TRUE
+    WHERE 
+        p.CreationDate >= '2023-01-01' 
+        AND p.Score IS NOT NULL
+    GROUP BY 
+        p.Id, pt.Name
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseVoteCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Considering only closed and reopened states
+    GROUP BY 
+        ph.PostId
+),
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    COALESCE(cph.LastClosedDate, 'Never Closed'::timestamp) AS LastClosedDate,
+    COALESCE(cph.CloseVoteCount, 0) AS CloseVoteCount,
+    ub.BadgeCount,
+    ub.HighestBadgeClass,
+    rp.TagsList,
+    CASE 
+        WHEN ub.BadgeCount > 5 THEN 'High Achiever'
+        WHEN ub.BadgeCount BETWEEN 3 AND 5 THEN 'Moderate Achiever'
+        ELSE 'Newcomer' 
+    END AS UserGroup,
+    CASE 
+        WHEN rp.Score IS NULL THEN 'No Score'
+        WHEN rp.Score > 0 THEN CONCAT(rp.Score, ' - Positive Score')
+        ELSE CONCAT(rp.Score, ' - Negative Score') 
+    END AS ScoreDescription,
+    (SELECT COUNT(*) FROM Comments cm WHERE cm.PostId = rp.PostId) AS CommentCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPostHistory cph ON rp.PostId = cph.PostId
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadgeCounts ub ON u.Id = ub.UserId
+WHERE 
+    rp.PostRank <= 5
+ORDER BY 
+    rp.Score DESC NULLS LAST;

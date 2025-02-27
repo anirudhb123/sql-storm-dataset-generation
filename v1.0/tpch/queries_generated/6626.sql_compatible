@@ -1,0 +1,70 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.n_nationkey,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS acctbal_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = rs.n_nationkey)
+    WHERE 
+        rs.acctbal_rank <= 5
+),
+SalesSummary AS (
+    SELECT 
+        p.p_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        TopSuppliers ts ON ps.ps_suppkey = ts.s_suppkey
+    GROUP BY 
+        p.p_partkey
+),
+FinalMetrics AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        COALESCE(ss.order_count, 0) AS order_count
+    FROM 
+        part p
+    LEFT JOIN 
+        SalesSummary ss ON p.p_partkey = ss.p_partkey
+)
+SELECT 
+    fm.p_partkey,
+    fm.p_name,
+    fm.total_sales,
+    fm.order_count,
+    CASE 
+        WHEN fm.order_count > 100 THEN 'High Demand'
+        WHEN fm.order_count BETWEEN 50 AND 100 THEN 'Moderate Demand'
+        ELSE 'Low Demand'
+    END AS demand_category
+FROM 
+    FinalMetrics fm
+ORDER BY 
+    fm.total_sales DESC, fm.order_count DESC
+LIMIT 100;

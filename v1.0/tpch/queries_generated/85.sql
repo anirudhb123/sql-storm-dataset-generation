@@ -1,0 +1,66 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+OrderLineDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS line_count,
+        AVG(l.l_tax) AS average_tax
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    cs.c_name,
+    cs.total_orders,
+    COALESCE(ss.total_available, 0) AS supplier_availability,
+    ol.total_revenue,
+    ol.line_count,
+    CASE 
+        WHEN cs.total_spent > 0 THEN (ol.total_revenue / cs.total_spent)
+        ELSE NULL 
+    END AS revenue_to_spending_ratio,
+    CASE 
+        WHEN ol.average_tax >= 0.1 THEN 'High Tax'
+        ELSE 'Low Tax' 
+    END AS tax_category
+FROM 
+    CustomerOrders cs
+LEFT JOIN 
+    SupplierStats ss ON cs.c_custkey = ss.s_suppkey
+LEFT JOIN 
+    OrderLineDetails ol ON cs.total_orders = ol.line_count
+WHERE 
+    cs.total_orders > 5
+ORDER BY 
+    revenue_to_spending_ratio DESC NULLS LAST;

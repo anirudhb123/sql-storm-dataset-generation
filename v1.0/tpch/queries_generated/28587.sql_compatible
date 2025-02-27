@@ -1,0 +1,56 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_phone,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_address, s.s_phone
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierCustomerBenchmark AS (
+    SELECT 
+        rs.s_name AS supplier_name,
+        cc.c_name AS customer_name,
+        cc.order_count,
+        cc.total_spent,
+        rs.total_supply_cost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        CustomerOrders cc ON cc.total_spent >= 10000  
+)
+SELECT 
+    supplier_name,
+    customer_name,
+    CONCAT('Customer: ', customer_name, ' | Supplier: ', supplier_name, 
+           ' | Total Orders: ', order_count, 
+           ' | Total Spent: $', FORMAT(total_spent, 2), 
+           ' | Total Supply Cost: $', FORMAT(total_supply_cost, 2)) AS benchmark_info
+FROM 
+    SupplierCustomerBenchmark
+WHERE 
+    supplier_rank <= 5  
+ORDER BY 
+    supplier_name, customer_name;

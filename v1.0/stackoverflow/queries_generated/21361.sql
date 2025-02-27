@@ -1,0 +1,62 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE 
+            WHEN v.VoteTypeId IN (2, 9) THEN 1 
+            ELSE 0 
+        END) AS Upvotes,
+        SUM(CASE 
+            WHEN v.VoteTypeId = 3 THEN 1 
+            ELSE 0 
+        END) AS Downvotes,
+        COUNT(v.Id) AS TotalVotes,
+        AVG(CASE 
+            WHEN v.VoteTypeId IN (2, 3) THEN CAST(v.CreationDate AS DATE)
+            ELSE NULL 
+        END) AS AvgVoteDate
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS UserPostOrder,
+        u.DisplayName AS PostOwner,
+        COALESCE(ph.Comment, 'No Change') AS LastChangeComment,
+        MAX(v.VoteTypeId) OVER (PARTITION BY p.Id) AS LastVoteType
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.CreationDate = (
+        SELECT MAX(CreationDate) 
+        FROM PostHistory 
+        WHERE PostId = p.Id
+    )
+)
+SELECT 
+    pts.PostId,
+    pts.Title,
+    pts.CreationDate,
+    COALESCE(up_s.Upvotes, 0) AS UpvoteCount,
+    COALESCE(up_s.Downvotes, 0) AS DownvoteCount,
+    pts.LastChangeComment,
+    CASE 
+        WHEN pts.LastVoteType = 2 THEN 'Last Vote: Upvote'
+        WHEN pts.LastVoteType = 3 THEN 'Last Vote: Downvote'
+        ELSE 'No Last Vote'
+    END AS VoteSummary,
+    ROW_NUMBER() OVER (PARTITION BY pts.PostOwner ORDER BY pts.CreationDate DESC) AS RecentPostRank
+FROM PostDetails pts
+LEFT JOIN UserVoteSummary up_s ON pts.PostOwner = up_s.DisplayName
+WHERE EXISTS (
+    SELECT 1 
+    FROM Votes v 
+    WHERE v.PostId = pts.PostId 
+    AND v.CreationDate < NOW() - INTERVAL '30 days'
+)
+ORDER BY pts.CreationDate DESC;

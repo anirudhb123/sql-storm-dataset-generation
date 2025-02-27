@@ -1,0 +1,65 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT m.movie_id) OVER (PARTITION BY a.name) AS movie_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Director') THEN mi.info END) AS director_name,
+    CASE 
+        WHEN AVG(m.production_year) IS NULL THEN 'No productions found'
+        ELSE CAST(AVG(m.production_year) AS VARCHAR) END AS avg_production_year,
+    ARRAY_AGG(DISTINCT c.kind ORDER BY c.kind) AS company_types,
+    COALESCE(MAX(CASE WHEN p.gender = 'F' THEN a.name END), 'No female actors') AS first_female_actor
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON ci.person_id = a.person_id
+JOIN 
+    MovieHierarchy m ON m.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = m.movie_id
+LEFT JOIN 
+    company_type c ON mc.company_type_id = c.id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = m.movie_id
+LEFT JOIN 
+    name p ON p.id = a.person_id
+WHERE 
+    m.production_year >= 2000
+GROUP BY 
+    a.name, m.title, m.production_year
+ORDER BY 
+    movie_count DESC, actor_name;

@@ -1,0 +1,55 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT Id, TagName, Count, ExcerptPostId, WikiPostId, IsModeratorOnly, IsRequired, 0 AS Level
+    FROM Tags
+    WHERE IsRequired = 1
+    
+    UNION ALL
+    
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, t.IsModeratorOnly, t.IsRequired, Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy rth ON t.Id = rth.ExcerptPostId
+),
+UserReputation AS (
+    SELECT Id, DisplayName, Reputation,
+           RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+           DENSE_RANK() OVER (PARTITION BY Location ORDER BY Reputation DESC) AS LocationRank
+    FROM Users
+    WHERE Reputation > 0
+),
+ClosedPostCounts AS (
+    SELECT OwnerUserId, COUNT(*) AS ClosedPostCount
+    FROM Posts
+    WHERE ClosedDate IS NOT NULL
+    GROUP BY OwnerUserId
+),
+PostDetails AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount,
+           u.DisplayName AS OwnerDisplayName, u.Reputation,
+           COALESCE(cpc.ClosedPostCount, 0) AS ClosedPostCount,
+           (SELECT COUNT(*) FROM Comments WHERE PostId = p.Id) AS CommentCount,
+           (SELECT COUNT(*) FROM Votes WHERE PostId = p.Id AND VoteTypeId = 2) AS UpVoteCount
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN ClosedPostCounts cpc ON p.OwnerUserId = cpc.OwnerUserId
+    WHERE p.PostTypeId = 1 AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+AverageScore AS (
+    SELECT AVG(Score) AS AvgScore
+    FROM PostDetails
+),
+TopPosts AS (
+    SELECT pd.Id, pd.Title, pd.OwnerDisplayName, pd.Score, pd.ViewCount,
+           pd.CommentCount, pd.UpVoteCount, pd.Reputation,
+           CASE 
+               WHEN pd.Score > (SELECT AvgScore FROM AverageScore) THEN 'Above Average'
+               ELSE 'Below Average'
+           END AS ScoreComparison
+    FROM PostDetails pd
+    ORDER BY pd.Score DESC
+    LIMIT 10
+)
+SELECT th.TagName, tp.*
+FROM RecursiveTagHierarchy th
+LEFT JOIN TopPosts tp ON tp.ViewCount > th.Count
+WHERE th.Level < 2
+ORDER BY th.TagName, tp.Score DESC;

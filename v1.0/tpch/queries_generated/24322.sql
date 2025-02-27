@@ -1,0 +1,39 @@
+WITH RECURSIVE nation_summary AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, COUNT(DISTINCT c.c_custkey) AS cust_count
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_nationkey, n.n_name, n.n_regionkey
+    UNION ALL
+    SELECT ns.n_nationkey, ns.n_name, ns.n_regionkey, SUM(ns.cust_count) AS cust_count
+    FROM nation_summary ns
+    JOIN nation n ON ns.n_regionkey = n.n_regionkey
+    WHERE ns.n_nationkey <> n.n_nationkey
+    GROUP BY ns.n_nationkey, ns.n_name, ns.n_regionkey
+),
+part_stats AS (
+    SELECT p.p_partkey, p.p_brand, SUM(ps.ps_availqty) AS total_available, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count, 
+           MAX(p.p_retailprice) AS max_price
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_brand
+),
+order_details AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate > (SELECT MAX(l2.l_shipdate) FROM lineitem l2 WHERE l2.l_shipmode = 'AIR')
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT ns.n_name AS nation_name, 
+       ps.p_brand AS part_brand, 
+       ps.total_available, 
+       ps.supplier_count,
+       od.order_total,
+       DENSE_RANK() OVER (PARTITION BY ns.n_name ORDER BY od.order_total DESC) AS rank_order
+FROM nation_summary ns
+JOIN part_stats ps ON ns.cust_count >= 5
+LEFT OUTER JOIN order_details od ON ns.c_nationkey = od.o_orderkey 
+WHERE (ps.max_price IS NULL OR ps.max_price > 100.00)
+  AND (od.order_total IS NOT NULL OR od.o_orderdate IS NOT NULL)
+ORDER BY ns.n_name, ps.p_brand;

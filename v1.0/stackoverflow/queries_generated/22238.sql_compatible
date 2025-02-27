@@ -1,0 +1,67 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId IN (2, 4) THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 4) THEN 1 ELSE 0 END) - 
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS NetVote
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        COALESCE(CAST(P.ViewCount AS DECIMAL) / NULLIF(P.AnswerCount, 0), 0) AS ViewsPerAnswer,
+        DENSE_RANK() OVER (ORDER BY P.Score DESC) AS ScoreRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= DATEADD(year, -1, CAST('2024-10-01' AS DATE))
+        AND P.AcceptedAnswerId IS NOT NULL
+),
+ClosedPostDetails AS (
+    SELECT 
+        PH.PostId, 
+        PH.CreationDate AS ClosedDate,
+        C.Name AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes C ON CAST(PH.Comment AS INTEGER) = C.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+)
+SELECT 
+    U.DisplayName AS User,
+    U.Upvotes,
+    U.Downvotes,
+    U.TotalVotes,
+    U.NetVote,
+    P.Title AS PostTitle,
+    P.Score AS PostScore,
+    P.ViewsPerAnswer,
+    C.ClosedDate,
+    C.CloseReason
+FROM 
+    UserVoteStats U
+JOIN 
+    Posts P ON P.OwnerUserId = U.UserId
+LEFT JOIN 
+    ClosedPostDetails C ON P.Id = C.PostId
+WHERE 
+    U.NetVote > 0 
+    AND P.Score > 0
+    AND (C.CloseReason IS NULL OR C.CloseReason <> 'Exact Duplicate') 
+ORDER BY 
+    U.NetVote DESC, 
+    P.Score DESC
+LIMIT 50;

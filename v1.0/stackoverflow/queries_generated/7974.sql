@@ -1,0 +1,59 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(V.VoteTypeId = 2) AS UpVotes,
+        SUM(V.VoteTypeId = 3) AS DownVotes,
+        SUM(B.Class = 1) AS GoldBadges,
+        SUM(B.Class = 2) AS SilverBadges,
+        SUM(B.Class = 3) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalComments,
+        UpVotes,
+        DownVotes,
+        GoldBadges,
+        SilverBadges,
+        BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, TotalPosts DESC) AS Rank
+    FROM 
+        UserActivity
+)
+SELECT 
+    TU.Rank,
+    TU.DisplayName,
+    TU.Reputation,
+    TU.TotalPosts,
+    TU.TotalComments,
+    TU.UpVotes,
+    TU.DownVotes,
+    TU.GoldBadges,
+    TU.SilverBadges,
+    TU.BronzeBadges,
+    (TU.UpVotes - TU.DownVotes) AS NetVotes
+FROM 
+    TopUsers TU
+WHERE 
+    TU.Rank <= 10
+ORDER BY 
+    TU.Rank;

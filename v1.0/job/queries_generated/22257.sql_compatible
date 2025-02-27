@@ -1,0 +1,62 @@
+
+WITH RECURSIVE cast_hierarchy AS (
+    SELECT c.id AS cast_id,
+           c.movie_id,
+           c.person_id,
+           c.person_role_id,
+           0 AS level
+    FROM cast_info c
+    WHERE c.person_role_id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT c.id AS cast_id,
+           c.movie_id,
+           c.person_id,
+           c.person_role_id,
+           ch.level + 1
+    FROM cast_info c
+    JOIN cast_hierarchy ch ON c.movie_id = ch.movie_id AND c.person_id <> ch.person_id
+    WHERE ch.level < 3
+),
+ranked_movies AS (
+    SELECT mt.movie_id,
+           mt.title,
+           mt.production_year,
+           ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS year_rank
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+),
+keyworded_titles AS (
+    SELECT kt.movie_id,
+           k.keyword,
+           COUNT(*) OVER (PARTITION BY kt.movie_id) AS keyword_count
+    FROM movie_keyword kt
+    JOIN keyword k ON kt.keyword_id = k.id
+    WHERE k.keyword IS NOT NULL
+)
+SELECT m.id AS movie_id,
+       m.title AS movie_title,
+       m.production_year AS year,
+       ch.level AS cast_level,
+       kt.keyword AS associated_keyword,
+       COALESCE(kd.keyword_count, 0) AS total_keywords,
+       CASE 
+           WHEN m.production_year < 2000 THEN 'Classic'
+           WHEN m.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+           ELSE 'Contemporary'
+       END AS era,
+       COUNT(DISTINCT ch.person_id) AS unique_cast_count
+FROM aka_title m
+LEFT JOIN cast_hierarchy ch ON m.id = ch.movie_id
+LEFT JOIN keyworded_titles kt ON m.id = kt.movie_id
+LEFT JOIN (
+    SELECT movie_id, 
+           SUM(keyword_count) AS keyword_count
+    FROM keyworded_titles
+    GROUP BY movie_id
+) kd ON m.id = kd.movie_id
+GROUP BY m.id, m.title, m.production_year, ch.level, kt.keyword
+HAVING COUNT(DISTINCT ch.person_id) > 2 
+   AND COALESCE(kd.keyword_count, 0) > 3
+ORDER BY m.production_year DESC, m.title ASC;

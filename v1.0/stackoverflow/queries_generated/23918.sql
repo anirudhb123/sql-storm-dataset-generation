@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerName,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankByScore
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '5 years' 
+        AND P.Score IS NOT NULL
+),
+TopRankedPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.OwnerName
+    FROM 
+        RankedPosts RP
+    WHERE 
+        RP.RankByScore <= 5
+),
+PostHistoryData AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate AS HistoryDate,
+        P.Title AS PostTitle,
+        COALESCE(PH.Comment, 'No comment') AS CommentText,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.CreationDate >= NOW() - INTERVAL '3 years'
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        P.Title,
+        MAX(PH.CreationDate) AS LastClosedDate,
+        COUNT(PH.Id) AS CloseCount
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) -- Closed or Reopened actions
+    GROUP BY 
+        PH.PostId, P.Title
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(C) AS CommentCount,
+        COUNT(V.Id) AS VoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    TRP.PostId,
+    TRP.Title AS PostTitle,
+    TRP.Score,
+    TRP.OwnerName,
+    PH.HistoryRank,
+    PH.CommentText,
+    COALESCE(CP.CloseCount, 0) AS TotalCloseCount,
+    COALESCE(PA.CommentCount, 0) AS TotalCommentCount,
+    COALESCE(PA.VoteCount, 0) AS TotalVoteCount
+FROM 
+    TopRankedPosts TRP
+LEFT JOIN 
+    PostHistoryData PH ON TRP.PostId = PH.PostId
+LEFT JOIN 
+    ClosedPosts CP ON TRP.PostId = CP.PostId
+LEFT JOIN 
+    PostActivity PA ON TRP.PostId = PA.PostId
+WHERE 
+    PH.HistoryRank = 1 OR PH.HistoryRank IS NULL
+ORDER BY 
+    TRP.Score DESC, 
+    TRP.PostTitle ASC;
+

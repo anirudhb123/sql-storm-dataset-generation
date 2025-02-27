@@ -1,0 +1,96 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        0 AS Level,
+        P.CreationDate
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        R.Level + 1 AS Level,
+        P.CreationDate
+    FROM 
+        Posts P
+    INNER JOIN 
+        Posts A ON P.ParentId = A.Id
+    INNER JOIN 
+        RecursivePostHierarchy R ON A.Id = R.PostId
+),
+
+PostVotes AS (
+    SELECT 
+        V.PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.PostId
+),
+
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(PH.UpVotes, 0) AS UpVotes,
+        COALESCE(PH.DownVotes, 0) AS DownVotes,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN B.UserId IS NOT NULL THEN 1 END) AS BadgeCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostVotes PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON P.OwnerUserId = B.UserId
+    WHERE 
+        P.CreationDate >= DATEADD(YEAR, -1, GETDATE())  
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, PH.UpVotes, PH.DownVotes
+),
+
+RankedPosts AS (
+    SELECT 
+        PD.*,
+        RANK() OVER (ORDER BY PD.UpVotes DESC, PD.DownVotes ASC) AS Rank,
+        DENSE_RANK() OVER (PARTITION BY PD.OwnerUserId ORDER BY PD.UpVotes DESC) AS UserRank
+    FROM 
+        PostDetails PD
+)
+
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.UpVotes,
+    RP.DownVotes,
+    RP.CommentCount,
+    RP.Rank,
+    RP.UserRank,
+    U.DisplayName AS OwnerDisplayName,
+    (SELECT COUNT(*) 
+     FROM Posts P
+     WHERE P.OwnerUserId = RP.OwnerUserId) AS TotalPostsByUser,
+    COALESCE(MAX(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END), 0) AS HasGoldBadge
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    Users U ON RP.OwnerUserId = U.Id
+LEFT JOIN 
+    Badges B ON U.Id = B.UserId
+GROUP BY 
+    RP.PostId, RP.Title, RP.CreationDate, RP.UpVotes, RP.DownVotes, 
+    RP.CommentCount, RP.Rank, RP.UserRank, U.DisplayName
+ORDER BY 
+    RP.Rank, RP.CreationDate DESC;

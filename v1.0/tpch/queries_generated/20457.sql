@@ -1,0 +1,79 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_orderstatus,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        s.s_name, 
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        MIN(ps.ps_supplycost) AS min_supply_cost,
+        MAX(ps.ps_supplycost) AS max_supply_cost,
+        COUNT(DISTINCT s.s_nationkey) AS distinct_nations
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 0 AND SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+)
+SELECT 
+    p.p_name,
+    s.s_name,
+    sp.total_avail_qty,
+    sp.min_supply_cost,
+    sp.max_supply_cost,
+    co.order_count,
+    co.total_spent,
+    r.r_name,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY sp.max_supply_cost DESC) AS rank_by_cost,
+    CASE 
+        WHEN co.total_spent IS NULL THEN 'No Orders'
+        WHEN co.total_spent > 1000 THEN 'High Value'
+        ELSE 'Regular'
+    END AS customer_value_category
+FROM 
+    part p
+JOIN 
+    SupplierParts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = (SELECT o_orderkey FROM RankedOrders WHERE order_rank = 1)))
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey) LIMIT 1)
+WHERE 
+    p.p_retailprice > (
+        SELECT 
+            AVG(p2.p_retailprice) 
+        FROM 
+            part p2 
+        WHERE 
+            p2.p_size IS NOT NULL
+    ) 
+    AND sp.distinct_nations IS NOT NULL
+ORDER BY 
+    r.r_name, sp.total_avail_qty DESC
+LIMIT 100
+OFFSET 10;

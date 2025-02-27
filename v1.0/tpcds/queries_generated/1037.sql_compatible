@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 90
+),
+CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.wr_return_quantity) AS total_returns
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        cr.returning_customer_sk
+    FROM 
+        CustomerReturns cr
+    WHERE 
+        cr.total_returns > 10
+)
+SELECT 
+    ca.ca_city,
+    SUM(CASE WHEN rs.sales_rank = 1 THEN rs.ws_sales_price * rs.ws_quantity ELSE 0 END) AS top_sales,
+    SUM(CASE WHEN hr.returning_customer_sk IS NOT NULL THEN 1 ELSE 0 END) AS high_return_count
+FROM 
+    customer_address ca
+LEFT JOIN 
+    RankedSales rs ON rs.ws_item_sk IN (
+        SELECT i.i_item_sk 
+        FROM item i 
+        WHERE i.i_category = 'Beverages'
+    )
+LEFT JOIN 
+    HighReturnCustomers hr ON ca.ca_address_sk = hr.returning_customer_sk
+GROUP BY 
+    ca.ca_city
+HAVING 
+    SUM(CASE WHEN rs.sales_rank = 1 THEN rs.ws_sales_price * rs.ws_quantity ELSE 0 END) > 5000
+ORDER BY 
+    top_sales DESC,
+    high_return_count ASC;

@@ -1,0 +1,62 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ship_date_sk,
+        w.w_warehouse_name,
+        d.d_date,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_order_number DESC) AS rn
+    FROM web_sales ws
+    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN date_dim d ON ws.ws_ship_date_sk = d.d_date_sk
+    WHERE d.d_year = 2023
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returned,
+        SUM(wr.wr_return_amt) AS total_return_amt
+    FROM web_returns wr
+    JOIN SalesData sd ON wr.wr_item_sk = sd.ws_item_sk
+    GROUP BY wr.wr_item_sk
+),
+AggregatedSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        SUM(sd.ws_quantity) AS total_sold,
+        SUM(sd.ws_sales_price * sd.ws_quantity) AS total_sales_amount,
+        COALESCE(cr.total_returned, 0) AS total_returned,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        SUM(sd.ws_quantity) - COALESCE(cr.total_returned, 0) AS net_sales
+    FROM SalesData sd
+    LEFT JOIN CustomerReturns cr ON sd.ws_item_sk = cr.wr_item_sk
+    GROUP BY sd.ws_item_sk
+)
+SELECT 
+    a.item_id,
+    a.total_sold,
+    a.total_sales_amount,
+    a.total_returned,
+    a.total_return_amt,
+    a.net_sales,
+    CASE 
+        WHEN a.net_sales > 1000 THEN 'High'
+        WHEN a.net_sales BETWEEN 500 AND 1000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM (
+    SELECT 
+        i.i_item_id,
+        s.total_sold,
+        s.total_sales_amount,
+        s.total_returned,
+        s.total_return_amt,
+        s.net_sales
+    FROM item i
+    JOIN AggregatedSales s ON i.i_item_sk = s.ws_item_sk
+) a
+ORDER BY a.net_sales DESC
+FETCH FIRST 10 ROWS ONLY;

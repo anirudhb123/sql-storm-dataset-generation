@@ -1,0 +1,55 @@
+WITH Eligible_Customers AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           cd.cd_gender, 
+           cd.cd_marital_status, 
+           cd.cd_education_status, 
+           cd.cd_purchase_estimate,
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate > (
+        SELECT AVG(cd_inner.cd_purchase_estimate) 
+        FROM customer_demographics cd_inner
+    )
+    AND cd.cd_gender IS NOT NULL
+),
+Top_Items AS (
+    SELECT i.i_item_sk, 
+           i.i_product_name, 
+           COUNT(ws.ws_order_number) AS total_sales,
+           SUM(ws.ws_net_profit) AS total_profit
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_product_name
+    HAVING COUNT(ws.ws_order_number) > 100
+),
+Selected_Items AS (
+    SELECT i.i_item_sk,
+           i.i_product_name,
+           RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
+    FROM Top_Items i
+    WHERE total_sales > (
+        SELECT MAX(total_sales) * 0.75 FROM Top_Items
+    )
+)
+SELECT ec.c_first_name, 
+       ec.c_last_name, 
+       ei.i_product_name, 
+       ei.total_sales,
+       ei.total_profit,
+       CASE 
+           WHEN ec.purchase_rank <= 5 THEN 'Top Buyer'
+           ELSE 'Regular Buyer'
+       END AS buyer_category
+FROM Eligible_Customers ec
+JOIN Selected_Items ei ON ec.c_customer_sk = (
+    SELECT ws.ws_bill_customer_sk 
+    FROM web_sales ws 
+    WHERE ws.ws_item_sk = ei.i_item_sk 
+    ORDER BY ws.ws_sold_date_sk DESC 
+    LIMIT 1
+)
+WHERE ec.c_customer_sk IS NOT NULL
+ORDER BY ec.c_last_name, ec.c_first_name;

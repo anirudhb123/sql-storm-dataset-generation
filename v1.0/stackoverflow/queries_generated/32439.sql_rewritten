@@ -1,0 +1,75 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        1 AS Level
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        U.Id,
+        U.Reputation,
+        UR.Level + 1
+    FROM 
+        Users U
+    INNER JOIN 
+        UserReputation UR ON U.Id = UR.UserId
+    WHERE 
+        U.Reputation > (UR.Reputation + 500) AND 
+        UR.Level < 5
+),
+TopQuestions AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (ORDER BY P.Score DESC, P.ViewCount DESC) AS RowNum
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.UserId,
+        PH.Comment 
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10 
+)
+SELECT 
+    U.DisplayName,
+    COALESCE(TQ.Title, 'No Title') AS QuestionTitle,
+    COALESCE(TQ.ViewCount, 0) AS QuestionViewCount,
+    COALESCE(CP.CreationDate, '1970-01-01') AS ClosedDate,
+    CASE 
+        WHEN CP.PostId IS NOT NULL THEN 'Closed'
+        ELSE 'Active'
+    END AS Status,
+    UR.Reputation,
+    CONCAT('User: ', U.DisplayName, ' - Reputation: ', UR.Reputation) AS UserInfo
+FROM 
+    Users U
+LEFT JOIN 
+    UserReputation UR ON U.Id = UR.UserId
+LEFT JOIN 
+    TopQuestions TQ ON U.Id = TQ.PostId
+LEFT JOIN 
+    ClosedPosts CP ON U.Id = CP.UserId
+WHERE 
+    UR.Reputation IS NOT NULL
+    AND (TQ.ViewCount > 100 OR TQ.ViewCount IS NULL)
+    AND U.EmailHash IS NULL 
+ORDER BY 
+    UR.Reputation DESC,
+    QuestionViewCount DESC
+LIMIT 50;

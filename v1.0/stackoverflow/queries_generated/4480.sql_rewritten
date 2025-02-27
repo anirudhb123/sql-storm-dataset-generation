@@ -1,0 +1,68 @@
+WITH UserScore AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(VB.BountyAmount), 0) AS TotalBounties,
+        COALESCE(SUM(CASE WHEN VT.Name = 'UpMod' THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN VT.Name = 'DownMod' THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN B.Class = 1 THEN 1 
+                          WHEN B.Class = 2 THEN 0.5 
+                          WHEN B.Class = 3 THEN 0.25 
+                     END), 0) AS BadgeScore,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT PH.Id) AS TotalHistoryRecords
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        VoteTypes VT ON V.VoteTypeId = VT.Id
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        PostHistory PH ON U.Id = PH.UserId
+    LEFT JOIN 
+        Votes VB ON P.Id = VB.PostId AND VB.VoteTypeId = 8 
+    GROUP BY 
+        U.Id
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalBounties,
+        UpVotes,
+        DownVotes,
+        BadgeScore,
+        TotalPosts,
+        TotalComments,
+        TotalHistoryRecords,
+        RANK() OVER (ORDER BY TotalBounties DESC, UpVotes - DownVotes DESC, BadgeScore DESC) AS UserRank
+    FROM 
+        UserScore
+)
+SELECT 
+    R.DisplayName,
+    R.TotalBounties,
+    R.UpVotes,
+    R.DownVotes,
+    R.BadgeScore,
+    R.TotalPosts,
+    R.TotalComments,
+    R.TotalHistoryRecords,
+    CASE 
+        WHEN R.UserRank <= 10 THEN 'Top Contributor'
+        WHEN R.UserRank <= 50 THEN 'Notable Contributor'
+        ELSE 'Active User'
+    END AS UserType
+FROM 
+    RankedUsers R
+WHERE 
+    R.TotalHistoryRecords > 5
+ORDER BY 
+    R.UserRank;

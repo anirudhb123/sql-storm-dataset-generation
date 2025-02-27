@@ -1,0 +1,63 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'feature')
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    a.name, 
+    a.id AS aka_name_id,
+    COUNT(DISTINCT c.movie_id) AS total_movies,
+    AVG(CASE WHEN pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birthdate') THEN CAST(pi.info AS DATE) END) AS avg_birthdate,
+    MAX(at.production_year) AS last_movie_year,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    SUM(CASE 
+            WHEN c.nr_order = 1 THEN 1 
+            ELSE 0 
+        END) AS lead_roles,
+    COALESCE(NULLIF(SUM(CASE WHEN ci.note IS NOT NULL THEN 1 END), 0), 'No roles noted') AS roles_noted
+FROM 
+    aka_name a
+LEFT JOIN 
+    cast_info c ON a.person_id = c.person_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = c.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = c.movie_id
+LEFT JOIN 
+    person_info pi ON pi.person_id = a.person_id
+LEFT JOIN 
+    aka_title at ON at.id = c.movie_id
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = c.movie_id
+WHERE 
+    (a.name LIKE '%John%' OR a.name LIKE '%Smith%')
+    AND (mi.info_type_id IS NULL OR pi.info_type_id IS NOT NULL)
+GROUP BY 
+    a.id
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 5
+ORDER BY 
+    total_movies DESC, 
+    avg_birthdate ASC
+LIMIT 10;

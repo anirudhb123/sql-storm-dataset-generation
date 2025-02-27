@@ -1,0 +1,53 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerAmounts AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_amount_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey
+),
+FinalResults AS (
+    SELECT 
+        r.n_name AS region_name,
+        s.s_name AS supplier_name,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        AVG(ca.total_amount_spent) AS avg_spent,
+        SUM(sd.total_supply_cost) AS total_supply_cost
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN SupplierDetails sd ON s.s_suppkey = sd.s_suppkey
+    LEFT JOIN CustomerAmounts ca ON s.s_nationkey = ca.c_custkey
+    WHERE sd.total_supply_cost IS NOT NULL OR ca.total_amount_spent IS NOT NULL
+    GROUP BY r.n_name, s.s_name
+)
+SELECT 
+    fr.region_name,
+    fr.supplier_name,
+    fr.customer_count,
+    fr.avg_spent,
+    fr.total_supply_cost,
+    COALESCE(fr.total_supply_cost / NULLIF(fr.customer_count, 0), 0) AS avg_supply_per_customer
+FROM FinalResults fr
+WHERE fr.customer_count > 10
+ORDER BY fr.region_name, fr.avg_spent DESC;

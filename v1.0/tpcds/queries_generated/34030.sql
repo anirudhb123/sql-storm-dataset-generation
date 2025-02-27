@@ -1,0 +1,65 @@
+
+WITH RECURSIVE revenue_per_customer AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid_inc_ship) AS total_revenue,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+    UNION ALL
+    SELECT 
+        c.c_customer_sk,
+        SUM(cs.cs_net_paid_inc_ship) + rp.total_revenue,
+        COUNT(DISTINCT cs.cs_order_number) + rp.order_count
+    FROM 
+        customer c
+    JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    JOIN 
+        revenue_per_customer rp ON c.c_customer_sk = rp.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_income_band_sk
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_income_band_sk IN (SELECT ib.ib_income_band_sk FROM income_band ib WHERE ib.ib_lower_bound < 50000)
+),
+final_report AS (
+    SELECT 
+        c.c_customer_id,
+        r.total_revenue,
+        d.cd_gender,
+        d.cd_marital_status,
+        RANK() OVER (PARTITION BY d.cd_gender ORDER BY r.total_revenue DESC) AS revenue_rank
+    FROM 
+        revenue_per_customer r
+    JOIN 
+        customer c ON r.c_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+)
+SELECT 
+    f.c_customer_id,
+    f.total_revenue,
+    f.cd_gender,
+    f.cd_marital_status,
+    CASE 
+        WHEN f.revenue_rank < 6 THEN 'Top 5%' 
+        ELSE 'Below Top 5%' 
+    END AS revenue_category
+FROM 
+    final_report f
+ORDER BY 
+    f.total_revenue DESC
+LIMIT 100;

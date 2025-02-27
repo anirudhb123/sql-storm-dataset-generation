@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ViewCount, 
+        p.Score, 
+        COUNT(c.Id) AS CommentCount, 
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 -- Upvotes
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        ViewCount, 
+        Score, 
+        CommentCount, 
+        VoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        UserRank <= 5
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        b.Name AS BadgeName, 
+        CASE 
+            WHEN b.Class = 1 THEN 'Gold'
+            WHEN b.Class = 2 THEN 'Silver'
+            WHEN b.Class = 3 THEN 'Bronze'
+        END AS BadgeClass
+    FROM 
+        Users u
+    JOIN 
+        Badges b ON u.Id = b.UserId
+)
+SELECT 
+    u.DisplayName, 
+    p.Title, 
+    p.Score, 
+    p.ViewCount, 
+    p.CommentCount, 
+    p.VoteCount, 
+    b.BadgeName, 
+    b.BadgeClass 
+FROM 
+    TopPosts p
+JOIN 
+    Users u ON p.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+LEFT JOIN 
+    UserBadges b ON u.Id = b.UserId
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC;

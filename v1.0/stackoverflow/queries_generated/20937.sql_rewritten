@@ -1,0 +1,80 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id,
+        U.Reputation,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank,
+        COALESCE(U.Location, 'Unknown') AS Location,
+        STRING_AGG(DISTINCT B.Name, ', ') AS BadgesEarned
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.Reputation, U.Location
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS TotalUpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS TotalDownVotes,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswer,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.Id, P.Title, P.CreationDate, P.AcceptedAnswerId
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastClosedDate,
+        COUNT(PH.Id) AS CloseReasonCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (10, 11) 
+    GROUP BY PH.PostId
+),
+ActivePosts AS (
+    SELECT 
+        PA.PostId,
+        PA.Title,
+        PA.TotalUpVotes,
+        PA.TotalDownVotes,
+        COALESCE(CP.LastClosedDate, 'No Closure') AS LastClosedDate,
+        CP.CloseReasonCount,
+        R.ReputationRank,
+        R.Location,
+        R.BadgesEarned
+    FROM PostAnalytics PA
+    LEFT JOIN ClosedPosts CP ON PA.PostId = CP.PostId
+    LEFT JOIN RankedUsers R ON PA.TotalUpVotes - PA.TotalDownVotes >= R.ReputationRank
+),
+FinalOutput AS (
+    SELECT 
+        AP.PostId,
+        AP.Title,
+        AP.TotalUpVotes,
+        AP.TotalDownVotes,
+        AP.LastClosedDate,
+        AP.CloseReasonCount,
+        AP.ReputationRank,
+        AP.Location,
+        AP.BadgesEarned,
+        CASE 
+            WHEN AP.LastClosedDate = 'No Closure' THEN 'Active Post'
+            ELSE 'Closed Post'
+        END AS PostStatus
+    FROM ActivePosts AP
+    WHERE AP.ReputationRank <= 10 OR (AP.TotalUpVotes > 50 AND AP.CloseReasonCount = 0)
+)
+SELECT 
+    FO.PostId,
+    FO.Title,
+    FO.TotalUpVotes,
+    FO.TotalDownVotes,
+    FO.LastClosedDate,
+    FO.CloseReasonCount,
+    FO.ReputationRank,
+    FO.Location,
+    FO.BadgesEarned,
+    FO.PostStatus
+FROM FinalOutput FO
+ORDER BY FO.TotalUpVotes DESC, FO.ReputationRank ASC;

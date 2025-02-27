@@ -1,0 +1,68 @@
+WITH movie_cast AS (
+    SELECT 
+        c.movie_id, 
+        a.name AS actor_name, 
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+),
+movie_details AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT mc.actor_name) AS actor_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_cast mc ON t.id = mc.movie_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.title, t.production_year
+),
+high_actor_movies AS (
+    SELECT 
+        title, 
+        production_year, 
+        actor_count,
+        DENSE_RANK() OVER (ORDER BY actor_count DESC) AS rank
+    FROM 
+        movie_details
+    WHERE 
+        actor_count > 5
+),
+actor_null_check AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        m.actor_count,
+        COALESCE(a.name, 'Unknown Actor') AS top_actor
+    FROM 
+        high_actor_movies m
+    LEFT JOIN 
+        movie_cast a ON m.title = a.actor_name 
+    WHERE 
+        m.rank <= 10
+)
+SELECT 
+    title,
+    production_year,
+    actor_count,
+    top_actor
+FROM 
+    actor_null_check
+UNION ALL
+SELECT 
+    'Total Movies' AS title,
+    NULL AS production_year,
+    SUM(actor_count) AS total_actor_count,
+    NULL AS top_actor
+FROM 
+    high_actor_movies
+WHERE 
+    actor_count IS NOT NULL
+ORDER BY 
+    production_year DESC NULLS LAST, 
+    actor_count DESC;

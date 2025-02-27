@@ -1,0 +1,58 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        MAX(P.CreationDate) AS LastPostDate,
+        AVG(COALESCE(H.CreationDate - P.CreationDate, interval '0 seconds')) AS AvgEditDuration
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN PostHistory H ON P.Id = H.PostId
+    GROUP BY U.Id
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Tags,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(C.ID) AS CommentCount,
+        COALESCE(PH.RevisionGUID, 'N/A') AS LastRevision,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY P.Id, U.DisplayName
+),
+ActiveUsers AS (
+    SELECT 
+        UR.UserId,
+        UR.Reputation,
+        UR.PostCount,
+        UR.QuestionCount,
+        UR.AnswerCount,
+        UR.LastPostDate,
+        SUM(CASE WHEN PS.ViewCount >= 1000 THEN 1 ELSE 0 END) AS HighTrafficPosts
+    FROM UserReputation UR
+    JOIN PostSummary PS ON UR.UserId = PS.OwnerUserId
+    WHERE UR.LastPostDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY UR.UserId, UR.Reputation, UR.PostCount, UR.QuestionCount, UR.AnswerCount, UR.LastPostDate
+)
+SELECT 
+    A.UserId,
+    A.Reputation,
+    A.PostCount,
+    A.QuestionCount,
+    A.AnswerCount,
+    A.LastPostDate,
+    A.HighTrafficPosts,
+    (A.Reputation / NULLIF(A.PostCount, 0)) AS ReputationPerPost,
+    (A.AnswerCount::float / NULLIF(A.QuestionCount, 0)) AS AnswersPerQuestion
+FROM ActiveUsers A
+ORDER BY A.Reputation DESC, A.PostCount DESC
+LIMIT 10;

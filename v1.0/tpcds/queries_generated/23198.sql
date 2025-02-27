@@ -1,0 +1,46 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_mode_sk IN (SELECT sm_ship_mode_sk FROM ship_mode WHERE sm_type LIKE 'Express%')
+        AND ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2021) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2021)
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    HAVING 
+        SUM(ws_quantity) > (SELECT AVG(ws_quantity) FROM web_sales WHERE ws_item_sk IS NOT NULL)
+)
+
+SELECT 
+    ci.c_item_id,
+    ci.i_item_desc,
+    COALESCE(cd.cd_gender, 'Unknown') AS customer_gender,
+    SUM(sd.total_quantity) AS total_units_sold,
+    SUM(sd.total_profit) AS total_revenue,
+    COUNT(DISTINCT CASE WHEN sd.rank <= 3 THEN sd.ws_sold_date_sk END) AS peak_sales_days
+FROM 
+    sales_data sd
+JOIN 
+    item ci ON sd.ws_item_sk = ci.i_item_sk
+LEFT JOIN 
+    customer cu ON cu.c_customer_sk = (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = sd.ws_item_sk LIMIT 1)
+LEFT JOIN 
+    customer_demographics cd ON cu.c_current_cdemo_sk = cd.cd_demo_sk
+INNER JOIN 
+    date_dim dd ON sd.ws_sold_date_sk = dd.d_date_sk
+WHERE 
+    dd.d_year = 2021 AND dd.d_month_seq BETWEEN 1 AND 6
+GROUP BY 
+    ci.c_item_id, ci.i_item_desc, cd.cd_gender
+HAVING 
+    SUM(sd.total_profit) > (SELECT AVG(total_profit) FROM sales_data)
+ORDER BY 
+    total_revenue DESC
+FETCH FIRST 5 ROWS ONLY;

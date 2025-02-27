@@ -1,0 +1,77 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        AVG(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders) 
+),
+ProductDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_size = 1 THEN 'Small'
+            WHEN p.p_size BETWEEN 2 AND 5 THEN 'Medium'
+            WHEN p.p_size > 5 THEN 'Large'
+            ELSE 'Undefined'
+        END AS size_category
+    FROM 
+        part p
+),
+TotalSalesByRegion AS (
+    SELECT 
+        n.n_regionkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_regionkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    COALESCE(SUM(HS.avg_order_value), 0) AS average_order_value_for_high_value_customers,
+    COUNT(DISTINCT PS.s_suppkey) AS supplier_count
+FROM 
+    region r
+LEFT JOIN 
+    TotalSalesByRegion ts ON r.r_regionkey = ts.n_regionkey
+LEFT JOIN 
+    HighValueCustomers HS ON HS.c_custkey IN (SELECT DISTINCT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT DISTINCT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey))
+LEFT JOIN 
+    RankedSuppliers PS ON PS.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)
+GROUP BY 
+    r.r_name
+HAVING 
+    COALESCE(SUM(ts.total_sales), 0) > 0 OR COUNT(DISTINCT PS.s_suppkey) > 0 
+ORDER BY 
+    total_sales DESC, r.r_name;

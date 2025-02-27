@@ -1,0 +1,69 @@
+
+WITH RECURSIVE customer_summary AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY cd.cd_purchase_estimate DESC) as rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+        AND cd.cd_marital_status IN ('M', 'S')
+),
+top_customers AS (
+    SELECT 
+        c_customer_id,
+        COUNT(*) AS total_purchases,
+        SUM(cd_purchase_estimate) AS total_estimate
+    FROM 
+        customer_summary
+    WHERE 
+        rank <= 3
+    GROUP BY 
+        c_customer_id
+),
+sales_summary AS (
+    SELECT 
+        ws_ws_bill_customer_sk AS customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+combined_summary AS (
+    SELECT 
+        tc.c_customer_id,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        tc.total_purchases,
+        tc.total_estimate
+    FROM 
+        top_customers tc
+    LEFT JOIN 
+        sales_summary ss ON tc.c_customer_id = ss.customer_sk
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_sales > 0 THEN total_estimate / total_sales
+        ELSE NULL
+    END AS estimate_ratio,
+    CASE 
+        WHEN total_estimate > 1000 THEN 'High Value'
+        WHEN total_estimate BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    combined_summary
+ORDER BY 
+    estimate_ratio DESC NULLS LAST
+LIMIT 10
+OFFSET (SELECT COUNT(*) FROM combined_summary) / 2;

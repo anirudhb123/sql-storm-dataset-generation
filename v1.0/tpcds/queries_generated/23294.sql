@@ -1,0 +1,51 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Estimation Not Available'
+            ELSE CAST(cd.cd_purchase_estimate AS VARCHAR)
+        END AS purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+top_customers AS (
+    SELECT ci.* 
+    FROM customer_info ci
+    WHERE ci.gender_rank <= 5
+),
+inventory_status AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity,
+        COUNT(DISTINCT inv.inv_warehouse_sk) AS warehouse_count
+    FROM inventory inv
+    GROUP BY inv.inv_item_sk
+)
+SELECT 
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.cd_gender,
+    is.total_quantity,
+    is.warehouse_count,
+    CASE 
+        WHEN is.total_quantity IS NULL THEN 'No Stock Available'
+        WHEN is.total_quantity < 100 THEN 'Low Stock Alert'
+        ELSE 'Sufficient Stock'
+    END AS stock_status,
+    CONCAT(tc.c_first_name, ' ', tc.c_last_name, ' - ', COALESCE(tc.purchase_estimate, 'Unknown')) AS customer_full_info
+FROM top_customers tc
+LEFT JOIN inventory_status is ON tc.c_customer_sk = is.inv_item_sk
+WHERE 
+    (tc.cd_gender = 'F' OR tc.cd_gender IS NULL)
+    AND (tc.cd_marital_status = 'M' OR (tc.cd_marital_status IS NULL AND tc.cd_credit_rating = 'Excellent'))
+ORDER BY 
+    tc.c_last_name,
+    tc.c_first_name DESC
+FETCH FIRST 100 ROWS ONLY;

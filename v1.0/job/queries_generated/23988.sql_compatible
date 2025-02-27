@@ -1,0 +1,63 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS aka_id, 
+        a.name AS actor_name, 
+        at.title AS movie_title,
+        at.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY at.production_year DESC) AS rank
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN aka_title at ON ci.movie_id = at.movie_id
+),
+ActorStatistics AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT movie_title) AS total_movies,
+        AVG(production_year) AS avg_production_year
+    FROM RankedMovies
+    WHERE rank <= 5
+    GROUP BY actor_name
+),
+DirectorStatistics AS (
+    SELECT 
+        cn.name AS company_name,
+        COUNT(DISTINCT mc.movie_id) AS total_movies_engaged,
+        STRING_AGG(DISTINCT at.title, ', ') AS movie_titles
+    FROM company_name cn
+    JOIN movie_companies mc ON cn.id = mc.company_id
+    JOIN aka_title at ON mc.movie_id = at.movie_id
+    WHERE cn.country_code IS NOT NULL
+    GROUP BY cn.name
+),
+MoviesWithKeywords AS (
+    SELECT 
+        at.title, 
+        k.keyword,
+        COUNT(mk.movie_id) AS keyword_count
+    FROM aka_title at
+    JOIN movie_keyword mk ON at.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY at.title, k.keyword
+)
+SELECT 
+    as.actor_name, 
+    as.total_movies,
+    as.avg_production_year, 
+    ds.company_name, 
+    ds.total_movies_engaged, 
+    kw.title AS movie_title,
+    kw.keyword,
+    CASE 
+        WHEN kw.keyword_count > 10 THEN 'High Impact'
+        WHEN kw.keyword_count BETWEEN 5 AND 10 THEN 'Medium Impact'
+        ELSE 'Low Impact' 
+    END AS keyword_impact
+FROM ActorStatistics as
+LEFT JOIN DirectorStatistics ds ON ds.total_movies_engaged > 0 
+FULL OUTER JOIN MoviesWithKeywords kw ON kw.title = as.actor_name 
+    AND (kw.keyword IS NOT NULL OR kw.keyword_count IS NULL)
+WHERE as.avg_production_year > 2000
+    AND (kw.keyword IS NOT NULL OR kw.keyword IS NULL)
+ORDER BY as.total_movies DESC, as.actor_name, ds.total_movies_engaged
+FETCH FIRST 50 ROWS ONLY;

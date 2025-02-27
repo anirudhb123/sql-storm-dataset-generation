@@ -1,0 +1,85 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM
+        Posts p
+    WHERE
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT
+        p.Id,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM
+        Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM
+        Users u
+),
+PostVoteSummary AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId = 8 THEN v.BountyAmount ELSE 0 END) AS TotalBounty
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    GROUP BY
+        p.Id
+),
+PostHistoryStats AS (
+    SELECT
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM
+        PostHistory ph
+    GROUP BY
+        ph.PostId
+)
+
+SELECT
+    p.Id AS PostId,
+    p.Title,
+    COALESCE(ph.LastClosedDate, 'Never Closed') AS LastClosedDate,
+    COALESCE(r.Level, 0) AS PostLevel,
+    u.DisplayName AS AuthorDisplayName,
+    u.Reputation,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.TotalBounty,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+    CASE
+        WHEN ps.TotalBounty > 0 THEN 'Has Bounty'
+        ELSE 'No Bounty'
+    END AS BountyStatus
+FROM
+    Posts p
+LEFT JOIN
+    RecursivePostHierarchy r ON p.Id = r.PostId
+JOIN
+    UserReputation u ON p.OwnerUserId = u.UserId
+LEFT JOIN
+    PostVoteSummary ps ON p.Id = ps.PostId
+LEFT JOIN
+    PostHistoryStats ph ON p.Id = ph.PostId
+WHERE
+    (ps.UpVotes - ps.DownVotes) >= 5
+ORDER BY
+    u.Reputation DESC, p.CreationDate DESC;
+

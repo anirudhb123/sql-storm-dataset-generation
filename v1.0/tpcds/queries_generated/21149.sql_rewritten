@@ -1,0 +1,54 @@
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rn
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+Promotions AS (
+    SELECT 
+        p.p_promo_sk,
+        p.p_promo_name,
+        CASE 
+            WHEN cast('2002-10-01' as date) BETWEEN d.d_date
+                AND (SELECT MAX(d2.d_date) FROM date_dim d2 WHERE d2.d_date_sk = p.p_end_date_sk)
+            THEN 'Active'
+            ELSE 'Inactive' 
+        END AS promo_status
+    FROM promotion p 
+    JOIN date_dim d ON d.d_date_sk = p.p_start_date_sk
+),
+Goods AS (
+    SELECT 
+        i.i_item_id, 
+        COALESCE(AVG(i.i_current_price), 0) AS avg_price,
+        COUNT(DISTINCT i.i_item_sk) AS item_count
+    FROM item i
+    WHERE i.i_current_price > 0
+    GROUP BY i.i_item_id
+)
+
+SELECT 
+    G.i_item_id,
+    S.total_sales,
+    S.order_count,
+    P.promo_name,
+    P.promo_status,
+    G.avg_price,
+    CASE 
+        WHEN S.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END AS sales_record_status,
+    CASE 
+        WHEN G.avg_price > 100 THEN 'Premium'
+        ELSE 'Standard'
+    END AS price_category
+FROM Sales_CTE S
+FULL OUTER JOIN Promotions P ON S.ws_item_sk = P.p_promo_sk
+JOIN Goods G ON S.ws_item_sk = G.i_item_id
+WHERE 
+    (P.promo_status = 'Active' OR S.total_sales IS NOT NULL)
+    AND (G.item_count > 0 OR G.avg_price IS NOT NULL)
+ORDER BY COALESCE(S.total_sales, 0) DESC, price_category ASC;

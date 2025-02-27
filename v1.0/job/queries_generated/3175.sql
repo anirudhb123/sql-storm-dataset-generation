@@ -1,0 +1,63 @@
+WITH ranked_titles AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY a.production_year) AS total_per_year
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+cast_details AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT CONCAT(ak.name, ' (', c.nr_order, ')') ORDER BY c.nr_order) AS cast_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        c.movie_id
+),
+info_details AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT mi.info) AS movie_info
+    FROM 
+        movie_info mi
+    JOIN 
+        complete_cast m ON mi.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id
+),
+movie_summary AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        COALESCE(cd.cast_count, 0) AS cast_count,
+        cd.cast_names,
+        id.movie_info
+    FROM 
+        ranked_titles rt
+    LEFT JOIN 
+        cast_details cd ON rt.title = cd.title
+    LEFT JOIN 
+        info_details id ON rt.production_year = id.production_year
+    WHERE 
+        rt.rn = 1
+)
+SELECT 
+    ms.title,
+    ms.production_year,
+    ms.cast_count,
+    ms.cast_names,
+    COALESCE(ms.movie_info, 'No additional info') AS movie_info
+FROM 
+    movie_summary ms
+WHERE 
+    ms.production_year >= 2000
+ORDER BY 
+    ms.production_year DESC, 
+    ms.cast_count DESC;

@@ -1,0 +1,86 @@
+
+WITH RECURSIVE SalesCTE (date_sk, total_sales, cumulative_sales) AS (
+    SELECT 
+        d.d_date_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(ws.ws_sales_price) AS cumulative_sales
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        d.d_date_sk
+    
+    UNION ALL
+    
+    SELECT 
+        d.d_date_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(SalesCTE.cumulative_sales + ws.ws_sales_price) AS cumulative_sales
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    JOIN 
+        SalesCTE ON d.d_date_sk = SalesCTE.date_sk + 1
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        d.d_date_sk, SalesCTE.cumulative_sales 
+),
+MaxSales AS (
+    SELECT 
+        MAX(total_sales) AS max_daily_sales,
+        MAX(cumulative_sales) AS max_cumulative_sales
+    FROM 
+        SalesCTE
+),
+CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT sr.ticket_number) AS total_returns
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cr.total_returns
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.c_customer_sk
+    WHERE 
+        cd.cd_marital_status = 'S' 
+        AND cd.cd_purchase_estimate > 10000
+)
+SELECT 
+    fc.c_customer_sk,
+    fc.cd_gender,
+    fd.total_sales AS total_sales,
+    ms.max_daily_sales,
+    ms.max_cumulative_sales
+FROM 
+    FilteredCustomers fc
+CROSS JOIN 
+    (SELECT 
+        SUM(total_sales) AS total_sales 
+    FROM 
+        SalesCTE) AS fd,
+    MaxSales AS ms
+WHERE 
+    (fc.cd_gender IS NOT NULL OR fc.cd_gender = 'M')
+ORDER BY 
+    fc.c_customer_sk DESC
+LIMIT 100;

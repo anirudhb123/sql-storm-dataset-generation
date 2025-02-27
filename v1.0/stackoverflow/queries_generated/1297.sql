@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount,
+        (SELECT STRING_AGG(t.TagName, ', ') FROM Tags t WHERE t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)) AS TagList
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserPostSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(p.Score) AS TotalScore,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(bp.Count, 0)) AS TotalBadges,
+        MAX(rp.ViewCount) AS MaxViewPost
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    LEFT JOIN 
+        Badges bp ON u.Id = bp.UserId
+    GROUP BY 
+        u.Id
+),
+PostCommentSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS TotalComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalScore,
+    ups.TotalViews,
+    ups.TotalBadges,
+    COALESCE(pc.TotalComments, 0) AS TotalComments,
+    ups.MaxViewPost,
+    COALESCE(rp.TagList, 'No Tags') AS Tags
+FROM 
+    UserPostSummary ups
+LEFT JOIN 
+    PostCommentSummary pc ON pc.PostId IN (SELECT Id FROM RankedPosts WHERE OwnerUserId = ups.UserId)
+LEFT JOIN 
+    RankedPosts rp ON rp.OwnerUserId = ups.UserId
+WHERE 
+    ups.TotalPosts > 5
+ORDER BY 
+    ups.TotalScore DESC
+LIMIT 100;

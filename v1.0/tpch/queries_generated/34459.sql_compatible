@@ -1,0 +1,61 @@
+
+WITH RECURSIVE cte_supplier_summary AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ps.ps_availqty, 
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty > 0 AND s.s_acctbal IS NOT NULL
+), aggregated_orders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'P') 
+        AND l.l_shipdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY 
+        o.o_orderkey
+), nation_supplier AS (
+    SELECT 
+        n.n_name, 
+        SUM(ss.ps_availqty) AS total_available_qty,
+        SUM(ss.ps_supplycost * ss.ps_availqty) AS total_supply_cost
+    FROM 
+        nation n
+    LEFT JOIN 
+        cte_supplier_summary ss ON n.n_nationkey = ss.s_nationkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    ns.n_name, 
+    ns.total_available_qty,
+    ns.total_supply_cost,
+    COALESCE(ag.total_revenue, 0) AS total_revenue,
+    (ns.total_available_qty * 0.1) AS estimated_supply_revenue
+FROM 
+    nation_supplier ns
+LEFT JOIN 
+    aggregated_orders ag ON ns.n_name = (
+        SELECT n.n_name
+        FROM nation n
+        JOIN supplier s ON n.n_nationkey = s.s_nationkey
+        WHERE s.s_suppkey = (
+            SELECT s_suppkey
+            FROM cte_supplier_summary 
+            WHERE rank = 1
+        )
+    )
+ORDER BY 
+    ns.total_supply_cost DESC;

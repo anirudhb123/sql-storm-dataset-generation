@@ -1,0 +1,77 @@
+WITH SupplierRegion AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        s.s_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.s_acctbal > 1000
+),
+PartCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderstatus,
+        o.o_orderpriority,
+        o.o_orderdate
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('F', 'P')
+        AND o.o_orderdate >= DATE '1997-01-01'
+)
+SELECT 
+    pr.p_partkey,
+    pr.p_name,
+    pr.p_mfgr,
+    pr.p_brand,
+    COALESCE(pc.total_cost, 0) AS total_supply_cost,
+    COUNT(DISTINCT lo.l_orderkey) AS total_orders,
+    avg_price.avg_discounted_price,
+    s_region.region_name
+FROM 
+    part pr
+LEFT JOIN 
+    PartCost pc ON pr.p_partkey = pc.ps_partkey
+LEFT JOIN 
+    lineitem lo ON pr.p_partkey = lo.l_partkey
+LEFT JOIN 
+    SupplierRegion s_region ON s_region.s_suppkey IN (
+        SELECT 
+            ps.ps_suppkey
+        FROM 
+            partsupp ps 
+        WHERE 
+            ps.ps_partkey = pr.p_partkey
+    )
+LEFT JOIN (
+    SELECT 
+        l.l_partkey,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_discounted_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate > cast('1998-10-01' as date) - INTERVAL '1 YEAR'
+    GROUP BY 
+        l.l_partkey
+) avg_price ON avg_price.l_partkey = pr.p_partkey
+GROUP BY 
+    pr.p_partkey, pr.p_name, pr.p_mfgr, pr.p_brand, avg_price.avg_discounted_price, s_region.region_name
+ORDER BY 
+    total_orders DESC, total_supply_cost DESC;

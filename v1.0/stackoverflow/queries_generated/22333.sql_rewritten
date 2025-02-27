@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount 
+         FROM 
+            Comments 
+         GROUP BY 
+            PostId) c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+MostCommentedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+HighScorePosts AS (
+    SELECT 
+        mp.PostId,
+        mp.Title,
+        mp.ViewCount,
+        mp.CreationDate,
+        mp.Score,
+        mp.CommentCount,
+        EXISTS (
+            SELECT 1 
+            FROM Votes v 
+            WHERE v.PostId = mp.PostId 
+              AND v.VoteTypeId = 2 
+              AND v.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+        ) AS HasRecentUpvote
+    FROM 
+        MostCommentedPosts mp
+)
+SELECT 
+    hp.PostId,
+    hp.Title,
+    hp.ViewCount,
+    hp.CreationDate,
+    hp.Score,
+    hp.CommentCount,
+    CASE 
+        WHEN hp.HasRecentUpvote = TRUE THEN 'Popular'
+        ELSE 'Needs Attention'
+    END AS PostStatus,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.WikiPostId = (SELECT WikiPostId FROM Tags WHERE Id IN (SELECT DISTINCT unnest(string_to_array(hp.Title, ' ')))) LIMIT 5) AS RelatedTags
+FROM 
+    HighScorePosts hp
+ORDER BY 
+    hp.Score DESC, hp.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY;

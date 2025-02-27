@@ -1,0 +1,63 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ARRAY_AGG(DISTINCT ak.name) AS aliases,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year, t.kind_id
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 1
+), 
+genre_statistics AS (
+    SELECT 
+        kt.kind AS genre,
+        COUNT(DISTINCT rm.movie_id) AS movie_count,
+        MAX(rm.production_year) AS latest_year
+    FROM 
+        kind_type kt
+    JOIN 
+        ranked_movies rm ON kt.id = rm.kind_id
+    GROUP BY 
+        kt.kind
+), 
+cast_info_details AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT p.info, ', ') AS person_info
+    FROM 
+        cast_info ci
+    JOIN 
+        person_info p ON ci.person_id = p.person_id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    gs.genre,
+    gs.movie_count,
+    gs.latest_year,
+    ci_details.total_cast,
+    ci_details.person_info,
+    rm.aliases
+FROM 
+    ranked_movies rm
+JOIN 
+    genre_statistics gs ON rm.kind_id = gs.kind
+JOIN 
+    cast_info_details ci_details ON rm.movie_id = ci_details.movie_id
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    gs.movie_count DESC, rm.production_year DESC;

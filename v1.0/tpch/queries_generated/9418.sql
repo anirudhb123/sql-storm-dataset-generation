@@ -1,0 +1,54 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_mktsegment,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_mktsegment
+),
+TopSegments AS (
+    SELECT 
+        c_mktsegment, 
+        SUM(total_revenue) AS segment_revenue
+    FROM 
+        RankedOrders
+    WHERE 
+        rank <= 10
+    GROUP BY 
+        c_mktsegment
+),
+RegionSummary AS (
+    SELECT 
+        n.n_name AS nation,
+        r.r_name AS region,
+        SUM(ts.segment_revenue) AS total_segment_revenue
+    FROM 
+        TopSegments ts
+    JOIN 
+        customer c ON ts.custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        n.n_name, r.r_name
+)
+SELECT 
+    r.region,
+    r.nation,
+    r.total_segment_revenue,
+    DENSE_RANK() OVER (ORDER BY r.total_segment_revenue DESC) AS revenue_rank
+FROM 
+    RegionSummary r
+ORDER BY 
+    r.total_segment_revenue DESC, r.region;

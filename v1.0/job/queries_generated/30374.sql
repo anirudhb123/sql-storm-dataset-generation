@@ -1,0 +1,78 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        ARRAY[mt.id] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1,
+        path || ml.linked_movie_id
+    FROM 
+        MovieHierarchy mh 
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id 
+    JOIN 
+        aka_title mt ON mt.id = ml.linked_movie_id
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+        AND NOT ml.linked_movie_id = ANY(mh.path)  -- to avoid cycles
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT m.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc 
+    JOIN 
+        company_name cn ON mc.company_id = cn.id 
+    GROUP BY 
+        mc.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        cs.company_count,
+        cs.companies,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY cs.company_count DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CompanyStats cs ON mh.movie_id = cs.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    COALESCE(rm.company_count, 0) AS company_count,
+    rm.companies,
+    CASE 
+        WHEN rm.rank <= 10 THEN 'Top 10'
+        WHEN rm.rank <= 20 THEN 'Top 20'
+        ELSE 'Below Top 20' 
+    END AS rank_category
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.company_count IS NOT NULL
+ORDER BY 
+    rm.production_year, rm.rank;
+
+This SQL query accomplishes several objectives:
+1. It constructs a recursive common table expression (`MovieHierarchy`) to build a hierarchy of movies originally produced after 2000, including their sequels.
+2. It uses another common table expression (`CompanyStats`) to aggregate the number of unique companies involved in the production of these movies and create a string list of company names.
+3. A ranking is implemented in `RankedMovies` based on the company count, grouped by production year.
+4. Finally, the main query selects relevant movie details, aggregating the company information while categorizing the movie based on its rank.

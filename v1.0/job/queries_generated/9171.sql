@@ -1,0 +1,34 @@
+SELECT
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS cast_type,
+    co.name AS company_name,
+    COUNT(DISTINCT m.keyword_id) AS keyword_count,
+    AVG(mi.info_length) AS avg_info_length,
+    p.gender AS actor_gender
+FROM
+    aka_name a
+JOIN
+    cast_info ci ON a.person_id = ci.person_id
+JOIN
+    title t ON ci.movie_id = t.id
+JOIN
+    movie_companies mc ON t.id = mc.movie_id
+JOIN
+    company_name co ON mc.company_id = co.id
+JOIN
+    movie_keyword m ON t.id = m.movie_id
+JOIN
+    keyword k ON m.keyword_id = k.id
+JOIN
+    movie_info mi ON t.id = mi.movie_id
+JOIN
+    person_info p ON a.person_id = p.person_id
+WHERE
+    t.production_year >= 2000
+    AND co.country_code = 'USA'
+GROUP BY
+    a.name, t.title, c.kind, co.name, p.gender
+ORDER BY
+    keyword_count DESC, avg_info_length DESC
+LIMIT 100;

@@ -1,0 +1,81 @@
+
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        U.Id, 
+        U.DisplayName, 
+        U.Reputation, 
+        U.CreationDate,
+        U.Views,
+        CAST(NULL AS INTEGER) AS ParentId
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        U.Id, 
+        U.DisplayName, 
+        U.Reputation, 
+        U.CreationDate,
+        U.Views,
+        C.Id AS ParentId
+    FROM 
+        Users U
+    JOIN 
+        Badges B ON U.Id = B.UserId
+    JOIN 
+        Users C ON B.UserId = C.Id
+    WHERE 
+        B.Class = 1 AND B.TagBased = 0 
+),
+PostStats AS (
+    SELECT
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(C.Id) AS TotalComments,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.OwnerUserId
+),
+UserPerformance AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName,
+        U.Reputation,
+        PS.TotalPosts,
+        PS.TotalComments,
+        PS.TotalViews,
+        PS.TotalScore,
+        RANK() OVER (ORDER BY PS.TotalScore DESC) AS ScoreRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostStats PS ON U.Id = PS.OwnerUserId
+    WHERE 
+        U.Reputation > 500 
+)
+SELECT 
+    UP.UserId,
+    UP.DisplayName,
+    UP.Reputation,
+    UP.TotalPosts,
+    UP.TotalComments,
+    UP.TotalViews,
+    UP.TotalScore,
+    UP.ScoreRank,
+    COALESCE(B.Name, 'No Badges') AS BadgeName
+FROM 
+    UserPerformance UP
+LEFT JOIN 
+    Badges B ON UP.UserId = B.UserId AND B.Class = 1 
+WHERE 
+    UP.TotalPosts > 10 
+ORDER BY 
+    UP.ScoreRank;

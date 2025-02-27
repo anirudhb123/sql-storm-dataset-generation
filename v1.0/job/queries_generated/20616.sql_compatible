@@ -1,0 +1,62 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS title_rank,
+        COUNT(ci.role_id) OVER (PARTITION BY mt.id) AS cast_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = mt.id
+    LEFT JOIN 
+        company_name cn ON cn.id = mc.company_id
+    WHERE 
+        mt.production_year IS NOT NULL
+        AND (cn.country_code IS NULL OR cn.country_code NOT LIKE '%USA%')
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(K.keyword, ', ') AS keywords_list
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        keyword K ON K.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id
+),
+ComprehensiveStats AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.title_rank,
+        COALESCE(mk.keywords_list, 'No Keywords') AS keywords,
+        COALESCE(rm.cast_count, 0) AS cast_count,
+        CASE 
+            WHEN rm.production_year < 2000 THEN 'Classic'
+            WHEN rm.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+            ELSE 'Recent'
+        END AS movie_era
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON mk.movie_id = rm.movie_title
+)
+SELECT 
+    movie_era,
+    COUNT(*) AS total_movies,
+    AVG(cast_count) AS avg_cast_count,
+    STRING_AGG(DISTINCT keywords, '; ') AS all_keywords
+FROM 
+    ComprehensiveStats
+WHERE 
+    title_rank <= 5
+GROUP BY 
+    movie_era
+ORDER BY 
+    CASE movie_era 
+        WHEN 'Classic' THEN 1 
+        WHEN 'Modern' THEN 2 
+        WHEN 'Recent' THEN 3 
+    END;

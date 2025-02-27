@@ -1,0 +1,100 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.PostTypeId IN (1, 2) -- Questions and Answers
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- Bounty Start and Close
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MIN(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.CreationDate END) AS FirstClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN ph.CreationDate END) AS FirstDeletedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13)
+    GROUP BY 
+        ph.PostId
+),
+AggregateData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rps.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.BadgeCount,
+        us.TotalBounty,
+        us.AvgViewCount,
+        phs.FirstClosedDate,
+        phs.FirstDeletedDate
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserStats us ON rp.OwnerUserId = us.UserId
+    LEFT JOIN 
+        PostHistorySummary phs ON rp.PostId = phs.PostId
+)
+SELECT 
+    ad.PostId,
+    ad.Title,
+    ad.CreationDate,
+    ad.Score,
+    ad.ViewCount,
+    ad.DisplayName,
+    ad.Reputation,
+    ad.BadgeCount,
+    ad.TotalBounty,
+    ad.AvgViewCount,
+    CASE 
+        WHEN ad.FirstClosedDate IS NOT NULL THEN 'Closed'
+        WHEN ad.FirstDeletedDate IS NOT NULL THEN 'Deleted'
+        ELSE 'Active'
+    END AS PostStatus,
+    CASE 
+        WHEN ad.Rank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    AggregateData ad
+WHERE 
+    ad.Reputation > (SELECT AVG(Reputation) FROM Users)
+    AND ad.ViewCount > (SELECT AVG(ViewCount) FROM Posts)
+ORDER BY 
+    ad.ViewCount DESC, ad.Score DESC
+LIMIT 100;

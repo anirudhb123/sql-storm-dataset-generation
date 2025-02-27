@@ -1,0 +1,54 @@
+
+WITH RankedParts AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_brand, 
+           p.p_retailprice, 
+           p.p_size,
+           RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank,
+           CASE WHEN p.p_size > 20 THEN 'Large' ELSE 'Small' END AS size_category
+    FROM part p
+), FilteredSuppliers AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal, 
+           n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > 500 AND n.n_name IS NOT NULL
+    ORDER BY s.s_acctbal DESC
+), CustomerOrderSummary AS (
+    SELECT c.c_custkey, 
+           COUNT(o.o_orderkey) AS total_orders, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+), TopCustomers AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           cos.total_orders, 
+           cos.total_spent,
+           RANK() OVER (ORDER BY cos.total_spent DESC) AS rank
+    FROM CustomerOrderSummary cos
+    JOIN customer c ON cos.c_custkey = c.c_custkey
+    WHERE cos.total_orders > 5
+)
+SELECT r.region_name, 
+       p.p_name, 
+       p.p_retailprice,
+       s.s_name, 
+       COALESCE(MAX(l.l_quantity), 0) AS max_quantity,
+       COALESCE(AVG(l.l_discount), 0) AS avg_discount,
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice ELSE 0 END) AS total_returns
+FROM RankedParts p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN FilteredSuppliers s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey AND ps.ps_suppkey = l.l_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE p.price_rank <= 10 AND
+      (p.size_category = 'Large' OR n.n_name LIKE 'C%')
+GROUP BY r.region_name, p.p_name, p.p_retailprice, s.s_name
+HAVING SUM(l.l_quantity) > 0 OR COUNT(s.s_suppkey) = 0
+ORDER BY r.region_name, avg_discount DESC;

@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_name IN ('USA', 'China', 'Germany')
+), 
+
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' 
+        AND o.o_orderdate < '2024-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+), 
+
+SupplierPartJoin AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        p.p_mfgr, 
+        SUM(ps.ps_availqty) AS total_available_quantity
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, p.p_mfgr
+)
+
+SELECT 
+    o.o_orderkey, 
+    h.total_revenue, 
+    s.s_name, 
+    s.s_acctbal, 
+    CASE 
+        WHEN s.rank IS NULL THEN 'Not Ranked'
+        ELSE 'Ranked ' || s.rank::text 
+    END AS supplier_rank,
+    CASE 
+        WHEN o.o_orderkey IS NOT NULL THEN 'Order Exists'
+        ELSE 'No Order'
+    END AS order_status
+FROM 
+    HighValueOrders h
+FULL OUTER JOIN 
+    RankedSuppliers s ON h.o_orderkey = s.s_suppkey
+LEFT JOIN 
+    SupplierPartJoin sp ON s.s_suppkey = sp.ps_suppkey
+WHERE 
+    (h.total_revenue IS NOT NULL AND s.s_acctbal >= 1000)
+    OR (sp.total_available_quantity < 50)
+ORDER BY 
+    h.total_revenue DESC NULLS LAST, 
+    s.s_acctbal DESC;

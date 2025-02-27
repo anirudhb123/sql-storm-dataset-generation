@@ -1,0 +1,64 @@
+WITH RECURSIVE title_hierarchy AS (
+    
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mt.linked_movie_id AS title_id,
+        lt.title,
+        lt.production_year,
+        th.level + 1
+    FROM movie_link mt
+    JOIN title lt ON mt.linked_movie_id = lt.id
+    JOIN title_hierarchy th ON mt.movie_id = th.title_id
+    WHERE th.level < 5 
+),
+critical_cast AS (
+    
+    SELECT 
+        ci.person_id,
+        a.name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    WHERE ci.role_id IS NOT NULL 
+    AND ci.note IS NULL
+    GROUP BY ci.person_id, a.name
+    HAVING COUNT(ci.movie_id) > 3
+),
+movie_details AS (
+    
+    SELECT 
+        mt.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count,
+        AVG(mi.info::numeric) AS average_info_value
+    FROM movie_keyword mk
+    JOIN movie_info mi ON mk.movie_id = mi.movie_id
+    JOIN movie_info_idx midi ON mi.movie_id = midi.movie_id
+    GROUP BY mt.movie_id
+    HAVING COUNT(mk.keyword_id) > 2 AND AVG(mi.info::numeric) IS NOT NULL
+)
+SELECT 
+    th.title,
+    th.production_year,
+    cc.name AS actor_name,
+    cc.movie_count,
+    md.keyword_count,
+    md.average_info_value,
+    COALESCE(NULLIF(md.average_info_value, 0), -1) AS adjusted_average 
+FROM title_hierarchy th
+JOIN critical_cast cc ON th.title_id = cc.movie_id
+JOIN movie_details md ON th.title_id = md.movie_id
+LEFT JOIN movie_companies mc ON th.title_id = mc.movie_id
+LEFT JOIN company_name cn ON mc.company_id = cn.id
+WHERE th.production_year BETWEEN 2000 AND 2023 
+AND (md.keyword_count > 3 OR th.title LIKE '%Adventure%')
+ORDER BY th.production_year DESC, cc.movie_count DESC
+LIMIT 100;

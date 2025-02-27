@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_quantity) AS total_quantity,
+        RANK() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_sales_price) DESC) AS sales_rank
+    FROM 
+        store_sales
+    GROUP BY 
+        s_store_sk, ss_sold_date_sk
+), 
+CustomerReturns AS (
+    SELECT 
+        sr_store_sk,
+        COUNT(DISTINCT sr_ticket_number) AS return_tickets,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_store_sk
+), 
+StoreRevenue AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_paid_inc_tax) AS net_revenue,
+        COUNT(ss_ticket_number) AS total_sales
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk
+), 
+TopStores AS (
+    SELECT 
+        s_store_sk, 
+        total_quantity, 
+        DENSE_RANK() OVER (ORDER BY total_quantity DESC) AS quantity_rank
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank = 1
+)
+SELECT 
+    w.w_warehouse_name,
+    COALESCE(sr.total_returns, 0) AS total_returns,
+    COALESCE(sr.total_return_amount, 0) AS total_return_amount,
+    COALESCE(tr.total_revenue, 0) AS total_revenue,
+    CASE 
+        WHEN COALESCE(sr.total_return_amount, 0) > 0 
+        THEN ROUND(COALESCE(tr.total_revenue, 0) / COALESCE(sr.total_return_amount, 0), 2) 
+        ELSE NULL 
+    END AS return_ratio
+FROM 
+    TopStores t
+LEFT JOIN 
+    StoreRevenue tr ON t.s_store_sk = tr.ss_store_sk
+LEFT JOIN 
+    CustomerReturns sr ON t.s_store_sk = sr.sr_store_sk
+JOIN 
+    warehouse w ON w.w_warehouse_sk = t.s_store_sk
+WHERE 
+    (COALESCE(sr.total_returns, 0) > 0 OR COALESCE(tr.total_revenue, 0) > 1000)
+ORDER BY 
+    w.w_warehouse_name ASC,
+    return_ratio DESC;

@@ -1,0 +1,76 @@
+WITH CustomerReturns AS (
+    SELECT 
+        sr_item_sk, 
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt_inc_tax
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+SalesData AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_sales_quantity,
+        SUM(ws_ext_sales_price) AS total_sales_amt
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+CombinedData AS (
+    SELECT 
+        COALESCE(cu.sr_item_sk, sd.ws_item_sk) AS item_sk,
+        COALESCE(total_return_quantity, 0) AS total_return_quantity,
+        COALESCE(total_return_amt_inc_tax, 0) AS total_return_amt_inc_tax,
+        COALESCE(total_sales_quantity, 0) AS total_sales_quantity,
+        COALESCE(total_sales_amt, 0) AS total_sales_amt
+    FROM 
+        CustomerReturns cu
+    FULL OUTER JOIN 
+        SalesData sd ON cu.sr_item_sk = sd.ws_item_sk
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_id, 
+        i.i_item_desc, 
+        c.customer_id,  
+        d.d_year, 
+        d.d_month_seq, 
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        item i
+    JOIN 
+        CombinedData cd ON i.i_item_sk = cd.item_sk
+    JOIN 
+        customer c ON cd.total_sales_quantity > 0 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim d ON 1 = 1 
+)
+SELECT 
+    id.i_item_id,
+    id.i_item_desc,
+    COUNT(DISTINCT id.customer_id) AS unique_customers,
+    SUM(id.total_return_quantity) AS total_returns,
+    SUM(id.total_sales_quantity) AS total_sales,
+    SUM(id.total_return_amt_inc_tax) AS total_return_value,
+    SUM(id.total_sales_amt) AS total_sales_value,
+    id.d_year,
+    id.d_month_seq,
+    id.cd_gender,
+    id.cd_marital_status
+FROM 
+    ItemDetails id
+GROUP BY 
+    id.i_item_id, 
+    id.i_item_desc, 
+    id.d_year, 
+    id.d_month_seq, 
+    id.cd_gender, 
+    id.cd_marital_status
+ORDER BY 
+    total_sales_value DESC
+LIMIT 100;

@@ -1,0 +1,91 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = o.o_orderstatus)
+),
+supplier_parts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps 
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+nation_supplier AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acct_balance
+    FROM 
+        nation n 
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name,
+    p.p_name,
+    COALESCE(SUM(s.total_supply_cost), 0) AS total_supply_cost,
+    SUM(co.total_spent) AS total_customer_spend,
+    COUNT(DISTINCT o.o_orderkey) AS order_quantity,
+    AVG(ro.o_totalprice) AS average_order_value,
+    MAX(ns.supplier_count) FILTER (WHERE ns.supplier_count > 1) AS diverse_supplier_count,
+    CASE 
+        WHEN SUM(s.total_available) IS NULL THEN 'No Inventory'
+        ELSE 'Available Inventory'
+    END AS inventory_status
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    supplier_parts sp ON s.s_suppkey = sp.ps_suppkey
+LEFT JOIN 
+    customer_order_summary co ON co.c_custkey IN (
+        SELECT DISTINCT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_nationkey = n.n_nationkey
+    )
+LEFT JOIN 
+    ranked_orders ro ON ro.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey = co.c_custkey
+    )
+LEFT JOIN 
+    nation_supplier ns ON ns.n_nationkey = n.n_nationkey
+LEFT JOIN 
+    part p ON p.p_partkey = sp.ps_partkey
+WHERE 
+    r.r_name LIKE 'A%' AND 
+    (ro.o_orderstatus IS NOT NULL OR sp.total_available > 0)
+GROUP BY 
+    r.r_name, p.p_name
+ORDER BY 
+    total_customer_spend DESC, inventory_status, diverse_supplier_count;

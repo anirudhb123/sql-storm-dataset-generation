@@ -1,0 +1,83 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        COALESCE(sr_customer_sk, wr_returned_customer_sk) AS customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_store_returns,
+        COUNT(DISTINCT wr_order_number) AS total_web_returns
+    FROM
+        store_returns
+    FULL OUTER JOIN web_returns ON sr_item_sk = wr_item_sk
+    GROUP BY
+        COALESCE(sr_customer_sk, wr_returned_customer_sk)
+),
+CustomerDemographics AS (
+    SELECT
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk,
+        RANK() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS income_rank
+    FROM
+        customer_demographics
+),
+IncomeBands AS (
+    SELECT
+        hd_demo_sk,
+        CASE
+            WHEN ib_upper_bound IS NULL THEN 'Unbounded'
+            ELSE CONCAT('$', ib_lower_bound, ' - $', ib_upper_bound)
+        END AS income_range
+    FROM
+        household_demographics hd
+    LEFT JOIN income_band ib ON hd_income_band_sk = ib_income_band_sk
+),
+ReturnStatistics AS (
+    SELECT
+        cd.gender,
+        SUM(COALESCE(cr_return_quantity, 0)) AS total_returned_items,
+        AVG(COALESCE(cr_return_amt, cr_return_amount, 0)) AS avg_return_value
+    FROM
+        CustomerDemographics cd
+    JOIN (
+        SELECT 
+            sr_customer_sk AS customer_sk,
+            sr_return_quantity,
+            sr_return_amt,
+            NULL AS cr_return_amt,
+            NULL AS cr_return_quantity
+        FROM 
+            store_returns
+        UNION ALL
+        SELECT 
+            wr_returning_customer_sk AS customer_sk,
+            NULL AS cr_return_quantity,
+            NULL AS cr_return_amt,
+            wr_return_amt AS cr_return_amt,
+            wr_return_quantity AS cr_return_quantity
+        FROM 
+            web_returns
+    ) cr ON cd.cd_demo_sk = cr.customer_sk
+    GROUP BY 
+        cd.gender
+)
+SELECT 
+    cd.gender,
+    SUM(COALESCE(cr.total_store_returns, 0)) AS total_store_returns,
+    SUM(COALESCE(cr.total_web_returns, 0)) AS total_web_returns,
+    (SELECT COUNT(*) FROM store s WHERE s.tax_percentage > 10) AS is_higher_tax,
+    ROW_NUMBER() OVER (ORDER BY SUM(COALESCE(cr.total_store_returns, 0)) DESC) AS rank_by_store_returns
+FROM 
+    CustomerReturns cr
+JOIN 
+    CustomerDemographics cd ON cr.customer_sk = cd.cd_demo_sk
+LEFT JOIN 
+    ReturnStatistics rs ON cd.gender = rs.gender
+GROUP BY 
+    cd.gender
+HAVING
+    SUM(COALESCE(cr.total_store_returns, 0)) > (SELECT AVG(total_store_returns) FROM CustomerReturns)
+    OR
+    SUM(COALESCE(cr.total_web_returns, 0)) > (SELECT AVG(total_web_returns) FROM CustomerReturns)
+ORDER BY 
+    rank_by_store_returns ASC
+FETCH FIRST 10 ROWS ONLY;

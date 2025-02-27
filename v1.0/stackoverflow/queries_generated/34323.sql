@@ -1,0 +1,73 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        Id, 
+        ParentId, 
+        Title, 
+        Score, 
+        CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ParentId ORDER BY Score DESC) AS RN
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 2  -- Answers
+), RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        A.Score AS AnswerScore,
+        CASE 
+            WHEN A.Score IS NULL THEN 'No Answers'
+            ELSE 'Has Answers'
+        END AS AnswerStatus
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        (SELECT PostId, MAX(Score) AS Score
+         FROM RecursiveCTE
+         GROUP BY PostId) A ON P.Id = A.PostId
+    WHERE 
+        P.PostTypeId = 1 -- Questions
+        AND (P.CreationDate >= NOW() - INTERVAL '1 year') -- Filter for the last year
+), TagStats AS (
+    SELECT 
+        T.TagName, 
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+),
+TopTags AS (
+    SELECT * 
+    FROM TagStats
+    ORDER BY PostCount DESC
+    LIMIT 5
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.OwnerDisplayName,
+    RP.AnswerScore,
+    RP.AnswerStatus,
+    TT.TagName,
+    TT.PostCount,
+    TT.TotalViews
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    TopTags TT ON TT.TagName IN (SELECT unnest(string_to_array(RP.Tags, ',')))
+WHERE 
+    RP.AnswerScore IS NOT NULL
+ORDER BY 
+    RP.Score DESC, 
+    RP.CreationDate DESC;

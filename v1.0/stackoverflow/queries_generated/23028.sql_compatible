@@ -1,0 +1,89 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank,
+        COALESCE(NULLIF(p.Body, ''), 'No Content') AS PostContent,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id AND c.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days') AS RecentCommentsCount
+    FROM 
+        Posts p
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.Rank,
+        rp.PostContent,
+        rp.RecentCommentsCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ViewCount IS NOT NULL AND
+        rp.Score IS NOT NULL AND
+        (rp.Rank <= 10 OR rp.RecentCommentsCount > 0)
+),
+PostVotes AS (
+    SELECT
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN v.VoteTypeId IN (10, 11, 12) THEN 1 ELSE 0 END) AS DeletedVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostHistoryRecords AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount,
+        STRING_AGG(CASE WHEN ph.Comment IS NOT NULL THEN ph.Comment ELSE 'No Comment' END, '; ') AS HistoryComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '365 days'
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+FinalResults AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.CreationDate,
+        fp.Score,
+        fp.ViewCount,
+        COALESCE(pv.Upvotes, 0) AS Upvotes,
+        COALESCE(pv.Downvotes, 0) AS Downvotes,
+        COALESCE(pv.DeletedVotes, 0) AS DeletedVotes,
+        COALESCE(ph.HistoryCount, 0) AS HistoryOccurrences,
+        ph.HistoryComments
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        PostVotes pv ON fp.PostId = pv.PostId
+    LEFT JOIN 
+        PostHistoryRecords ph ON fp.PostId = ph.PostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN Upvotes > Downvotes THEN 'Positive'
+        WHEN Upvotes < Downvotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS Sentiment,
+    ((Upvotes - Downvotes) + (Score / NULLIF(ViewCount, 0))) AS EngagementScore
+FROM 
+    FinalResults
+WHERE 
+    EngagementScore IS NOT NULL
+ORDER BY 
+    EngagementScore DESC, CreationDate DESC
+LIMIT 100;

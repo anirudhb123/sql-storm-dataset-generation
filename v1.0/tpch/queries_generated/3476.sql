@@ -1,0 +1,75 @@
+WITH SupplierCost AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+RisingStars AS (
+    SELECT 
+        cs.c_custkey,
+        cs.order_count,
+        cs.avg_order_value
+    FROM 
+        CustomerStats cs
+    WHERE 
+        cs.order_count > 10 AND cs.avg_order_value > 500
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT supp.s_suppkey) AS supplier_count,
+    SUM(hl.total_value) AS high_value_total,
+    AVG(s.total_supply_cost) AS avg_supplier_cost
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier supp ON n.n_nationkey = supp.s_nationkey
+LEFT JOIN 
+    SupplierCost s ON supp.s_suppkey = s.s_suppkey
+LEFT JOIN 
+    HighValueOrders hl ON supp.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 20))
+LEFT JOIN 
+    RisingStars rs ON supp.s_suppkey = rs.c_custkey
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name
+ORDER BY 
+    high_value_total DESC, supplier_count ASC;

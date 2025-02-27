@@ -1,0 +1,46 @@
+-- Performance Benchmarking Query
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON t.Id = ANY(string_to_array(pt.Tags, ','))
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalQuestions,
+    u.TotalAnswers,
+    u.TotalScore,
+    ARRAY_AGG(pt.TagName) AS PopularTags
+FROM 
+    UserPostStats u
+LEFT JOIN 
+    PopularTags pt ON u.TotalPosts > 0
+GROUP BY 
+    u.UserId, u.DisplayName, u.TotalPosts, u.TotalQuestions, u.TotalAnswers, u.TotalScore
+ORDER BY 
+    u.TotalScore DESC;

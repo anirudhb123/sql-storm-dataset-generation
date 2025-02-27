@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY COALESCE(p.Tags, '') ORDER BY p.Score DESC) AS RankByScore,
+        DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.AcceptedAnswerId,
+        COALESCE(ph.UserDisplayName, 'Unknown') AS LastEditor
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Posts ph ON rp.AcceptedAnswerId = ph.Id
+    WHERE 
+        rp.RankByScore <= 5
+),
+CommentInfo AS (
+    SELECT 
+        c.PostId, 
+        COUNT(c.Id) AS CommentCount, 
+        STRING_AGG(c.Text, ' | ') AS Comments
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+VotingStats AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 5) THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    COALESCE(ci.CommentCount, 0) AS TotalComments,
+    COALESCE(ci.Comments, 'No Comments') AS RecentComments,
+    COALESCE(vs.Upvotes, 0) AS TotalUpvotes,
+    COALESCE(vs.Downvotes, 0) AS TotalDownvotes,
+    fp.LastEditor,
+    CASE 
+        WHEN COALESCE(vs.TotalVotes, 0) = 0 THEN 'No Votes Yet'
+        ELSE 'Votes Casted'
+    END AS VoteStatus,
+    CASE 
+        WHEN fp.Score IS NULL THEN 'Score Not Available'
+        WHEN fp.Score > 0 THEN 'Positive Feedback'
+        ELSE 'Needs Attention'
+    END AS FeedbackStatus
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    CommentInfo ci ON fp.PostId = ci.PostId
+LEFT JOIN 
+    VotingStats vs ON fp.PostId = vs.PostId
+WHERE 
+    fp.LastEditor IS NOT NULL
+ORDER BY 
+    fp.CreationDate DESC
+LIMIT 10;

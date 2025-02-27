@@ -1,0 +1,73 @@
+
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        p.OwnerUserId,
+        0 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.AcceptedAnswerId,
+        a.OwnerUserId,
+        rp.Level + 1
+    FROM Posts a
+    INNER JOIN RecursivePosts rp ON a.ParentId = rp.PostId
+    WHERE a.PostTypeId = 2  
+), PostVoteStats AS (
+    SELECT 
+        PostId, 
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM Votes
+    GROUP BY PostId
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadge
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+), ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate,
+        ph.Comment,
+        pt.Name AS PostHistoryType
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE pt.Name = 'Post Closed'
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(pvs.UpVotes, 0) AS UpVotes,
+    COALESCE(pvs.DownVotes, 0) AS DownVotes,
+    COALESCE(pvs.TotalVotes, 0) AS TotalVotes,
+    ub.DisplayName AS UserName,
+    ub.BadgeCount,
+    ub.HighestBadge,
+    cp.CreationDate AS ClosedDate,
+    cp.Comment AS CloseComment
+FROM RecursivePosts rp
+LEFT JOIN PostVoteStats pvs ON rp.PostId = pvs.PostId
+LEFT JOIN Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE COALESCE(pvs.UpVotes, 0) > COALESCE(pvs.DownVotes, 0) 
+  AND rp.Level < 2 
+ORDER BY rp.CreationDate DESC;

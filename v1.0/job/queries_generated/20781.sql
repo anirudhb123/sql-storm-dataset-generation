@@ -1,0 +1,47 @@
+WITH movie_success AS (
+    SELECT mt.id AS movie_id,
+           mt.title,
+           COALESCE(SUM(mi.info IS NOT NULL AND mi.info ILIKE '%Oscar%'), 0) AS oscar_count,
+           COALESCE(AVG(mi.year), 0) AS avg_year_of_release,
+           COUNT(DISTINCT kc.keyword) AS keyword_count
+    FROM aka_title mt
+    LEFT JOIN movie_info mi ON mt.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'award')
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN keyword kc ON mk.keyword_id = kc.id
+    WHERE mt.production_year >= 2000
+    GROUP BY mt.id, mt.title
+),
+actor_performance AS (
+    SELECT ci.movie_id,
+           COUNT(DISTINCT ak.name) AS cast_count,
+           MAX(CASE WHEN ak.name ILIKE '%John%' THEN 1 ELSE 0 END) AS includes_john
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    WHERE ci.nr_order < 5
+    GROUP BY ci.movie_id
+),
+bizarre_movies AS (
+    SELECT ms.movie_id,
+           ms.title,
+           ms.oscar_count,
+           ms.avg_year_of_release,
+           ap.cast_count,
+           ap.includes_john,
+           CASE 
+               WHEN ms.oscar_count > 0 THEN 'Awarded'
+               WHEN ms.avg_year_of_release < 2010 THEN 'Old'
+               WHEN ap.includes_john = 1 THEN 'Includes John'
+               ELSE 'Other'
+           END AS movie_category
+    FROM movie_success ms
+    JOIN actor_performance ap ON ms.movie_id = ap.movie_id
+)
+SELECT bm.title,
+       bm.movie_category,
+       bm.oscar_count,
+       bm.avg_year_of_release,
+       bm.cast_count
+FROM bizarre_movies bm
+WHERE bm.movie_category <> 'Other'
+ORDER BY bm.oscar_count DESC, bm.avg_year_of_release ASC
+LIMIT 10;

@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY U.Reputation >= 1000 ORDER BY P.Score DESC, P.CreationDate ASC) AS RankForHighReputationUsers,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpvoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownvoteCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= DATEADD(MONTH, -6, GETDATE()) 
+        AND P.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.Score, U.DisplayName
+),
+BumpCounts AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS BumpCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 50 -- CommunityBumps
+    GROUP BY 
+        PostId
+),
+VoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+CloseReasons AS (
+    SELECT 
+        PH.PostId,
+        STRING_AGG(CT.Name, ', ') AS CloseReasonNames
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CT ON CT.Id = CAST(PH.Comment AS SMALLINT)
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.ViewCount,
+    RP.Score,
+    RP.OwnerDisplayName,
+    COALESCE(BC.BumpCount, 0) AS BumpCount,
+    RP.UpvoteCount,
+    RP.DownvoteCount,
+    VS.TotalUpVotes,
+    VS.TotalDownVotes,
+    CR.CloseReasonNames,
+    CASE 
+        WHEN RP.RankForHighReputationUsers = 1 THEN 'Top scorer'
+        WHEN RP.RankForHighReputationUsers IS NULL THEN 'No rank'
+        ELSE 'Regular score'
+    END AS UserReputationRank
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    BumpCounts BC ON RP.PostId = BC.PostId
+LEFT JOIN 
+    VoteSummary VS ON RP.PostId = VS.PostId
+LEFT JOIN 
+    CloseReasons CR ON RP.PostId = CR.PostId
+WHERE 
+    RP.Score IS NOT NULL
+    AND (RP.UpvoteCount - RP.DownvoteCount) > 0 -- Posts with positive net votes
+ORDER BY 
+    RP.Score DESC, RP.ViewCount DESC;

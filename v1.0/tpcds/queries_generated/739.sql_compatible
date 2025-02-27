@@ -1,0 +1,78 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.ws_item_sk
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(sd.total_sales) AS total_spent
+    FROM 
+        CustomerData c
+    JOIN 
+        SalesData sd ON c.c_customer_sk = sd.ws_item_sk
+    GROUP BY 
+        c.c_customer_sk
+    HAVING 
+        SUM(sd.total_sales) > 1000
+),
+TrendingProducts AS (
+    SELECT 
+        sd.ws_item_sk,
+        RANK() OVER (ORDER BY SUM(sd.total_sales) DESC) AS sales_rank
+    FROM 
+        SalesData sd
+    GROUP BY 
+        sd.ws_item_sk
+)
+SELECT 
+    cp.cp_catalog_page_id,
+    p.p_promo_name,
+    hp.hd_income_band_sk,
+    COUNT(DISTINCT c.c_customer_sk) AS high_value_count,
+    SUM(sd.total_sales) AS total_sales_profit
+FROM 
+    catalog_page cp
+JOIN 
+    promotion p ON cp.cp_catalog_page_sk = p.p_promo_sk
+LEFT JOIN 
+    HighValueCustomers c ON c.c_customer_sk IS NOT NULL
+LEFT JOIN 
+    CustomerData cd ON c.c_customer_sk = cd.c_customer_sk
+JOIN 
+    TrendingProducts tp ON tp.ws_item_sk = cp.cp_catalog_page_sk
+LEFT JOIN 
+    household_demographics hp ON cd.hd_income_band_sk = hp.hd_income_band_sk
+WHERE 
+    p.p_discount_active = 'Y'
+GROUP BY 
+    cp.cp_catalog_page_id, p.p_promo_name, hp.hd_income_band_sk
+HAVING 
+    COUNT(DISTINCT c.c_customer_sk) > 10
+ORDER BY 
+    total_sales_profit DESC;

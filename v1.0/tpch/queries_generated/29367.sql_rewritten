@@ -1,0 +1,29 @@
+WITH FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, p.p_comment
+    FROM part p
+    WHERE p.p_retailprice > 500
+), SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_name LIKE 'A%'
+), OrdersWithLineItems AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY o.o_orderkey
+), PartSupplierSales AS (
+    SELECT ps.ps_partkey, SUM(ol.total_sales) AS total_sales_for_part
+    FROM partsupp ps
+    JOIN FilteredParts fp ON ps.ps_partkey = fp.p_partkey
+    JOIN OrdersWithLineItems ol ON ol.total_sales IS NOT NULL
+    GROUP BY ps.ps_partkey
+)
+
+SELECT fp.p_name, COUNT(sd.s_suppkey) AS supplier_count, ps.total_sales_for_part
+FROM FilteredParts fp
+JOIN SupplierDetails sd ON sd.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = 1)
+JOIN PartSupplierSales ps ON fp.p_partkey = ps.ps_partkey
+GROUP BY fp.p_name, ps.total_sales_for_part
+ORDER BY ps.total_sales_for_part DESC, supplier_count DESC;

@@ -1,0 +1,70 @@
+
+WITH customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band,
+        COUNT(DISTINCT ws.ws_order_number) AS total_web_orders,
+        SUM(ws.ws_net_profit) AS total_web_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate, cd.cd_credit_rating, hd.hd_income_band_sk
+),
+promotion_summary AS (
+    SELECT 
+        p.p_promo_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_id
+),
+item_summary AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(ws.ws_order_number) AS web_order_count
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_desc
+)
+SELECT 
+    cs.full_name,
+    cs.cd_gender,
+    ps.total_sales AS total_promotion_sales,
+    is.avg_sales_price,
+    ISNULL(cs.total_web_orders, 0) AS web_orders,
+    ISNULL(cs.total_web_profit, 0) AS total_profit,
+    CASE 
+        WHEN cs.income_band IS NULL THEN 'Not provided'
+        ELSE CAST(cs.income_band AS VARCHAR)
+    END AS income_band
+FROM 
+    customer_summary cs
+LEFT JOIN 
+    promotion_summary ps ON cs.total_web_orders > 0
+LEFT JOIN 
+    item_summary is ON cs.total_web_orders = is.web_order_count
+WHERE 
+    cs.cd_gender = 'F'
+    AND cs.total_web_profit > (SELECT AVG(total_web_profit) FROM customer_summary)
+ORDER BY 
+    cs.total_web_profit DESC
+LIMIT 100;

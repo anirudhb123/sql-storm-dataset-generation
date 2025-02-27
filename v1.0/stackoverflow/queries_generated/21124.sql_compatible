@@ -1,0 +1,57 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+RankedPosts AS (
+    SELECT 
+        r.*, 
+        CASE 
+            WHEN r.RowNum = 1 THEN 'Latest'
+            ELSE 'Earlier'
+        END AS PostRank
+    FROM 
+        RecursiveCTE r
+)
+SELECT 
+    up.DisplayName AS Author, 
+    rp.Title, 
+    rp.CreationDate, 
+    rp.UpVotes, 
+    rp.DownVotes, 
+    rp.CommentCount, 
+    rp.PostRank,
+    (SELECT COUNT(*) 
+     FROM Posts p2 
+     WHERE p2.OwnerUserId = rp.OwnerUserId 
+     AND p2.CreationDate < rp.CreationDate) AS PreviousPostsCount,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     JOIN PostsTags pt ON t.Id = pt.TagId 
+     WHERE pt.PostId = rp.PostId) AS Tags
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+WHERE 
+    rp.UpVotes - rp.DownVotes > 5
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 100;

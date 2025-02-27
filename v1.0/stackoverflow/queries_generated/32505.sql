@@ -1,0 +1,74 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+        INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+        LEFT JOIN Comments c ON c.PostId = p.Id
+        LEFT JOIN Votes v ON v.PostId = p.Id
+    GROUP BY 
+        p.Id, p.OwnerUserId
+)
+SELECT 
+    rph.PostId,
+    rph.Title,
+    rph.OwnerUserId,
+    ur.Reputation,
+    ur.ReputationRank,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    (ps.UpVotes - ps.DownVotes) AS NetVotes,
+    CASE 
+        WHEN ps.CommentCount > 0 THEN 'Has Comments'
+        ELSE 'No Comments'
+    END AS CommentStatus
+FROM 
+    RecursivePostHierarchy rph
+    INNER JOIN UserReputation ur ON rph.OwnerUserId = ur.UserId
+    LEFT JOIN PostStats ps ON rph.PostId = ps.PostId
+WHERE 
+    ur.CreationDate < CURRENT_TIMESTAMP - INTERVAL '1 year'
+AND 
+    rph.Level = 1
+ORDER BY 
+    ur.Reputation DESC, 
+    rph.Title;

@@ -1,0 +1,56 @@
+
+WITH Address_Stats AS (
+    SELECT 
+        ca_city,
+        COUNT(*) AS city_count,
+        AVG(LENGTH(ca_street_name)) AS avg_street_length,
+        MIN(ca_zip) AS min_zip,
+        MAX(ca_zip) AS max_zip
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city
+), 
+Customer_Gender_Preference AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+), 
+Sales_Analysis AS (
+    SELECT 
+        DATE_FORMAT(STR_TO_DATE(CONCAT(d_year, '-', d_moy, '-', d_dom), '%Y-%m-%d'), '%Y-%m') AS sales_month,
+        COUNT(*) AS total_sales,
+        SUM(ws_ext_sales_price) AS total_sales_amount
+    FROM 
+        web_sales 
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    GROUP BY 
+        sales_month
+)
+SELECT 
+    a.ca_city,
+    a.city_count,
+    a.avg_street_length,
+    g.cd_gender,
+    g.customer_count,
+    g.avg_purchase_estimate,
+    s.sales_month,
+    s.total_sales,
+    s.total_sales_amount
+FROM 
+    Address_Stats a
+JOIN 
+    Customer_Gender_Preference g ON a.city_count > 50
+JOIN 
+    Sales_Analysis s ON s.total_sales > 1000
+ORDER BY 
+    a.city_count DESC, 
+    g.customer_count DESC, 
+    s.total_sales_amount DESC
+LIMIT 10;

@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.kind_id ORDER BY a.production_year DESC) AS rank_by_year,
+        COUNT(*) OVER (PARTITION BY a.kind_id) AS total_movies
+    FROM aka_title a
+    JOIN movie_keyword mk ON a.id = mk.movie_id
+    WHERE mk.keyword_id IN (SELECT id FROM keyword WHERE keyword LIKE 'Action%' OR keyword LIKE 'Drama%')
+),
+TopTenMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.kind_id,
+        CASE 
+            WHEN rm.rank_by_year <= 10 THEN 'Top 10'
+            ELSE 'Other'
+        END AS rank_category
+    FROM RankedMovies rm
+    WHERE rm.rank_by_year <= 10 OR rm.total_movies > 50
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        GROUP_CONCAT(DISTINCT n.name ORDER BY n.name SEPARATOR ', ') AS cast_names,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM cast_info ci
+    LEFT JOIN name n ON ci.person_id = n.imdb_id
+    GROUP BY ci.movie_id
+),
+MovieCompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name ORDER BY cn.name SEPARATOR ', ') AS company_names,
+        MAX(ct.kind) AS company_type
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id
+)
+SELECT 
+    t.title,
+    t.production_year,
+    cd.cast_names,
+    cd.cast_count,
+    mci.company_names,
+    mci.company_type,
+    COALESCE(ti.info, 'No additional info') AS movie_info
+FROM TopTenMovies t
+LEFT JOIN CastDetails cd ON t.movie_id = cd.movie_id
+LEFT JOIN MovieCompanyInfo mci ON t.movie_id = mci.movie_id
+LEFT JOIN movie_info ti ON t.id = ti.movie_id AND ti.info_type_id IN (SELECT id FROM info_type WHERE info = 'IMDb Rating')
+WHERE t.rank_category = 'Top 10'
+ORDER BY t.production_year DESC, t.title;

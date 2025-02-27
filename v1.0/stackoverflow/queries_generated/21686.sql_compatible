@@ -1,0 +1,76 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswerCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+HighReputationUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        QuestionCount,
+        AcceptedAnswerCount,
+        BadgeCount,
+        LastBadgeDate,
+        RANK() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM 
+        UserStats
+    WHERE 
+        Reputation > 1000 
+),
+ClosedPostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS HistoryRank,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.QuestionCount,
+    u.AcceptedAnswerCount,
+    COALESCE(AVG(d.ViewCount), 0) AS AvgViewCount,
+    COUNT(DISTINCT b.Id) AS TotalBadges,
+    STRING_AGG(DISTINCT CASE WHEN d.ClosedDate IS NOT NULL THEN d.Title END, ', ') AS ClosedPostTitles,
+    STRING_AGG(DISTINCT CASE WHEN d.ClosedDate IS NOT NULL THEN d.CloseReason END, ', ') AS CloseReasons
+FROM 
+    HighReputationUsers u
+LEFT JOIN 
+    Posts p ON u.UserId = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    ClosedPostDetails d ON p.Id = d.PostId AND d.HistoryRank = 1
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = p.Id
+LEFT JOIN 
+    Badges b ON u.UserId = b.UserId
+WHERE 
+    (c.CreationDate IS NULL OR c.CreationDate > p.CreationDate)
+GROUP BY 
+    u.UserId, u.DisplayName, u.Reputation, u.QuestionCount, u.AcceptedAnswerCount
+HAVING 
+    AVG(d.ViewCount) IS NOT NULL OR COUNT(DISTINCT p.Id) > 0
+ORDER BY 
+    u.Reputation DESC, u.DisplayName;

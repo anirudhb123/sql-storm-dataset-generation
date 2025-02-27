@@ -1,0 +1,76 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'feature')
+),
+
+TopActors AS (
+    SELECT 
+        a.person_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        a.person_id, ak.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+
+MovieCompaniesCTE AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS company_rank
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        c.country_code NOT IN ('USA', 'UK') 
+        AND ct.kind IS NOT NULL
+),
+
+FullInfo AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ra.actor_name,
+        mcc.company_name,
+        mcc.company_type
+    FROM 
+        RankedTitles t
+    LEFT JOIN 
+        TopActors ra ON ra.movie_count > 5 AND EXISTS (
+            SELECT 1 
+            FROM cast_info ci 
+            WHERE ci.movie_id = t.title_id AND ci.person_id = ra.person_id
+        )
+    LEFT JOIN 
+        MovieCompaniesCTE mcc ON t.title_id = mcc.movie_id
+)
+
+SELECT 
+    fi.title,
+    fi.production_year,
+    fi.actor_name,
+    fi.company_name,
+    fi.company_type
+FROM 
+    FullInfo fi
+WHERE 
+    fi.production_year IS NOT NULL
+    AND (fi.actor_name IS NOT NULL OR fi.company_name IS NOT NULL)
+ORDER BY 
+    fi.production_year DESC, fi.title;

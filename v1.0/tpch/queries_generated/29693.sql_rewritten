@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_name,
+        s.s_acctbal,
+        COUNT(ps.ps_partkey) AS part_count,
+        RANK() OVER (ORDER BY s.s_acctbal DESC) AS acctbal_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name, s.s_acctbal
+), FilteredCustomers AS (
+    SELECT 
+        c.c_name,
+        c.c_acctbal,
+        n.n_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal > 5000
+), AggregateData AS (
+    SELECT 
+        p.p_mfgr,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        p.p_mfgr
+)
+SELECT 
+    r.s_name, 
+    r.part_count, 
+    f.c_name, 
+    f.n_name, 
+    a.p_mfgr, 
+    a.total_revenue, 
+    a.order_count
+FROM 
+    RankedSuppliers r
+JOIN 
+    FilteredCustomers f ON r.acctbal_rank <= 10
+JOIN 
+    AggregateData a ON a.total_revenue > 10000
+ORDER BY 
+    r.s_name, a.total_revenue DESC;

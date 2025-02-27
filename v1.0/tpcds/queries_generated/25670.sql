@@ -1,0 +1,60 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        hd.hd_income_band_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, ca.ca_city, ca.ca_state, 
+        cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, hd.hd_income_band_sk
+), Benchmarking AS (
+    SELECT 
+        ci.c_customer_id,
+        CONCAT(ci.c_first_name, ' ', ci.c_last_name) AS full_name,
+        ci.total_orders,
+        ci.total_spent,
+        CASE 
+            WHEN ci.total_spent IS NULL THEN 'No Purchases'
+            WHEN ci.total_spent < 100 THEN 'Low Value Customer'
+            WHEN ci.total_spent BETWEEN 100 AND 500 THEN 'Medium Value Customer'
+            ELSE 'High Value Customer'
+        END AS customer_value_category,
+        ci.ca_city || ', ' || ci.ca_state AS location,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        (SELECT COUNT(*) FROM customer WHERE c_current_cdemo_sk = ci.cd_demo_sk) AS same_demo_group_count
+    FROM 
+        CustomerInfo ci
+)
+SELECT 
+    *,
+    LENGTH(full_name) AS full_name_length,
+    UPPER(full_name) AS full_name_upper,
+    LOWER(full_name) AS full_name_lower,
+    REPLACE(full_name, ' ', '-') AS full_name_dash
+FROM 
+    Benchmarking
+WHERE 
+    customer_value_category != 'No Purchases'
+ORDER BY 
+    total_spent DESC
+LIMIT 100;

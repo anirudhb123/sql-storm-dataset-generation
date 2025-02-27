@@ -1,0 +1,83 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS Rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+), FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_comment,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice, p.p_comment
+    HAVING 
+        SUM(ps.ps_availqty) > 0
+), PartOrders AS (
+    SELECT
+        li.l_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS Revenue,
+        COUNT(DISTINCT li.l_partkey) AS PartCount
+    FROM 
+        lineitem li
+    JOIN 
+        orders o ON li.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND o.o_orderstatus = 'F'
+    GROUP BY 
+        li.l_orderkey
+), CustomerInfo AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_mktsegment,
+        c.c_acctbal,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS SegmentRank
+    FROM 
+        customer c
+), OptionalOrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        COALESCE(po.Revenue, 0) AS Revenue,
+        COALESCE(po.PartCount, 0) AS PartsCount,
+        si.s_name AS SupplierName
+    FROM 
+        orders o
+    LEFT JOIN 
+        PartOrders po ON o.o_orderkey = po.l_orderkey
+    LEFT JOIN 
+        RankedSuppliers si ON si.Rank = 1
+)
+SELECT 
+    co.c_name AS CustomerName,
+    COALESCE(SUM(p.TotalCost), 0) AS PartsTotalCost,
+    COUNT(DISTINCT o.o_orderkey) AS OrdersCount,
+    COUNT(DISTINCT CASE 
+        WHEN o.o_orderstatus = 'F' AND oi.PartsCounts > 0 THEN o.o_orderkey 
+        END) AS CompletedOrdersWithParts,
+    SUM(COALESCE(od.Revenue, 0)) AS TotalRevenue
+FROM 
+    CustomerInfo co
+LEFT JOIN 
+    OptionalOrderDetails od ON co.c_custkey = od.o_orderkey
+LEFT JOIN 
+    FilteredParts p ON od.SupplierName IS NOT NULL
+GROUP BY 
+    co.c_name
+HAVING 
+    AVG(co.c_acctbal) IS NOT NULL AND 
+    COUNT(DISTINCT p.p_partkey) > 5
+ORDER BY 
+    TotalRevenue DESC
+FETCH FIRST 10 ROWS ONLY;

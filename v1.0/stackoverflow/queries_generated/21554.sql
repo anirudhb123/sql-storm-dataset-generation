@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS ScoreRank,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVoteCount,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) FILTER (WHERE ph.PostHistoryTypeId IN (1, 4, 10, 12)) OVER (PARTITION BY p.Id) AS EditHistoryCount,
+        MAX(CASE WHEN ph.CreationDate IS NOT NULL THEN ph.CreationDate ELSE NULL END) OVER (PARTITION BY p.Id) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+    AND 
+        p.Score > 0
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        (rp.UpVoteCount - rp.DownVoteCount) AS VoteNet
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ScoreRank <= 5 AND rp.ViewCount > 100
+),
+TopPosts AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.VoteNet,
+        fp.CommentCount,
+        fp.LastEditDate,
+        CASE 
+            WHEN fp.LastEditDate IS NOT NULL THEN 'Edited Recently'
+            ELSE 'Never Edited'
+        END AS EditStatus
+    FROM 
+        FilteredPosts fp
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.VoteNet,
+    tp.CommentCount,
+    tp.EditStatus,
+    pt.Name AS PostTypeName,
+    COALESCE(t.TagName, 'No Tags') AS Tag
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostTypes pt ON tp.PostTypeId = pt.Id
+LEFT JOIN 
+    LATERAL (SELECT 
+                  UNNEST(STRING_TO_ARRAY(p.Tags, '>')) AS TagName 
+              FROM 
+                 Posts p WHERE p.Id = tp.PostId) AS t ON TRUE
+WHERE 
+    tp.VoteNet > 0
+ORDER BY 
+    tp.VoteNet DESC, tp.CommentCount DESC;
+
+This SQL query performs several advanced operations:
+
+1. **Common Table Expressions (CTEs)** are used to break the query into manageable parts:
+   - `RankedPosts` retrieves post details while ranking them by score and view count.
+   - `FilteredPosts` filters down to the top-ranked posts based on specific conditions tying to user engagement.
+   - `TopPosts` determines additional information about edit status.
+
+2. **Window Functions** are applied to compute rankings, comment counts, and vote tallies across partitions of data.
+
+3. It utilizes **LEFT JOIN** to incorporate details from the `Votes`, `Comments`, `PostHistory`, and `PostTypes` tables, showcasing the depth of interaction while handling NULLs with `COALESCE`.
+
+4. **String manipulation** and **filtering logic** are included to manage how tags are represented even if there are none available.
+
+5. The conditional logic within the `CASE` statement identifies if a post has been edited recently.
+
+This query serves as a benchmark for testing complex SQL performance, handling significant data interaction while demonstrating the nuanced capabilities of SQL.

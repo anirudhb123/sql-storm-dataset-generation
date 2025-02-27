@@ -1,0 +1,49 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        CAST(NULL AS INTEGER) AS parent_movie_id,
+        1 AS level
+    FROM title m
+    WHERE m.episode_of_id IS NULL  
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title AS movie_title,
+        e.production_year,
+        m.id AS parent_movie_id,
+        h.level + 1 AS level
+    FROM title e
+    JOIN movie_hierarchy h ON e.episode_of_id = h.movie_id
+    JOIN title m ON m.id = h.movie_id  
+)
+
+SELECT 
+    m.movie_title,
+    m.production_year,
+    COALESCE(c.name, 'Unknown Actor') AS actor_name,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    string_agg(DISTINCT k.keyword, ', ') AS keywords,
+    COUNT(DISTINCT c.id) AS cast_count,
+    AVG(mi.production_year) OVER (PARTITION BY m.movie_id) AS avg_year,
+    COUNT(DISTINCT ci.person_role_id) FILTER (WHERE ci.note IS NOT NULL) AS valid_roles
+FROM movie_hierarchy m
+LEFT JOIN complete_cast cc ON cc.movie_id = m.movie_id
+LEFT JOIN cast_info ci ON ci.movie_id = cc.movie_id
+LEFT JOIN aka_name c ON c.person_id = ci.person_id
+LEFT JOIN movie_keyword mk ON mk.movie_id = m.movie_id
+LEFT JOIN keyword k ON k.id = mk.keyword_id
+LEFT JOIN movie_info mi ON mi.movie_id = m.movie_id
+WHERE 
+    m.level = 1  
+    AND m.production_year BETWEEN 1990 AND 2020
+GROUP BY 
+    m.movie_id, m.movie_title, m.production_year, c.name
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 3  
+ORDER BY 
+    m.production_year DESC, 
+    keyword_count DESC;

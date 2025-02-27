@@ -1,0 +1,50 @@
+WITH RECURSIVE CompanyHierarchy AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        1 AS depth
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    WHERE mc.note IS NULL  -- Only include companies with no additional notes
+
+    UNION ALL
+
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        depth + 1
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    JOIN CompanyHierarchy ch ON mc.movie_id = ch.movie_id AND depth < 3  -- Depth restriction
+)
+
+SELECT 
+    ak.name AS actor_name,
+    ak.id AS actor_id,
+    at.title AS movie_title,
+    at.production_year,
+    ch.company_name,
+    ch.company_type,
+    COUNT(*) OVER (PARTITION BY ak.id ORDER BY at.production_year DESC) AS movie_count,
+    COALESCE(SUM(CASE WHEN LOWER(mk.keyword) LIKE '%action%' THEN 1 ELSE 0 END), 0) AS action_movies_count,
+    LEAD(at.production_year) OVER (PARTITION BY ak.id ORDER BY at.production_year) AS next_movie_year
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.movie_id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    CompanyHierarchy ch ON at.id = ch.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND at.production_year BETWEEN 2000 AND 2023
+    AND (ci.note IS NULL OR ci.note NOT LIKE '%cameo%') -- Filter out cameo roles
+ORDER BY 
+    actor_name, production_year DESC;

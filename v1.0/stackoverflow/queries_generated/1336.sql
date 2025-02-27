@@ -1,0 +1,62 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(P.AnswerCount, 0) AS AnswerCount,
+        COALESCE(P.CommentCount, 0) AS CommentCount,
+        COALESCE(P.FavoriteCount, 0) AS FavoriteCount,
+        PT.Name AS PostTypeName,
+        COUNT(CMT.Id) AS CommentCount
+    FROM Posts P
+    LEFT JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN Comments CMT ON CMT.PostId = P.Id
+    GROUP BY P.Id, PT.Name
+),
+PostHistoryStats AS (
+    SELECT 
+        PH.PostId,
+        MAX(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS IsClosedOrReopened,
+        COUNT(PH.Id) AS HistoryCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+)
+SELECT 
+    UR.UserId,
+    UR.DisplayName,
+    UR.Reputation,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.FavoriteCount,
+    PHS.IsClosedOrReopened,
+    PHS.HistoryCount,
+    PHS.LastEditDate,
+    CASE 
+        WHEN UR.Reputation >= 1000 THEN 'High'
+        WHEN UR.Reputation >= 500 THEN 'Medium'
+        ELSE 'Low'
+    END AS ReputationCategory
+FROM UserReputation UR
+JOIN Posts P ON P.OwnerUserId = UR.UserId
+JOIN PostStats PS ON PS.PostId = P.Id
+LEFT JOIN PostHistoryStats PHS ON PHS.PostId = P.Id
+WHERE PS.Score > 10 
+    AND PS.ViewCount > (SELECT AVG(ViewCount) FROM Posts)
+    AND UR.ReputationRank <= 100 
+ORDER BY UR.Reputation DESC, PS.CreationDate DESC;

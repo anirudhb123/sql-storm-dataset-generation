@@ -1,0 +1,45 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        ak.name AS actor_name,
+        ak.md5sum AS actor_md5,
+        ct.kind AS company_type,
+        cn.name AS company_name,
+        MIN(ca.nr_order) AS role_order,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ca ON t.id = ca.movie_id
+    JOIN 
+        aka_name ak ON ca.person_id = ak.person_id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year >= 2000 AND 
+        ak.name IS NOT NULL
+    GROUP BY 
+        t.id, ak.name, ct.kind, cn.name, t.production_year
+)
+SELECT 
+    movie_title,
+    production_year,
+    actor_name,
+    actor_md5,
+    company_type,
+    company_name,
+    role_order,
+    keyword_count
+FROM 
+    MovieDetails
+ORDER BY 
+    production_year DESC, 
+    keyword_count DESC, 
+    actor_name;

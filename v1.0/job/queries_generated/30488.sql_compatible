@@ -1,0 +1,61 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    COUNT(DISTINCT mh.movie_id) AS linked_movies_count,
+    SUM(CASE 
+            WHEN (mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Revenue')) THEN CAST(mi.info AS NUMERIC)
+            ELSE 0 
+        END) AS total_revenue,
+    AVG(CASE 
+            WHEN (mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')) THEN CAST(mi.info AS NUMERIC)
+            ELSE NULL 
+        END) AS average_rating,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY COUNT(DISTINCT mh.movie_id) DESC) AS rn
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    MovieHierarchy mh ON at.id = mh.movie_id
+LEFT JOIN 
+    movie_info mi ON at.id = mi.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND ak.name <> ''
+    AND (mi.note IS NULL OR mi.note != 'Unreleased')
+GROUP BY 
+    ak.id, ak.name, at.title
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 3 
+ORDER BY 
+    average_rating DESC, linked_movies_count DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

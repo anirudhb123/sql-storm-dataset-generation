@@ -1,0 +1,42 @@
+WITH RECURSIVE RegionalSales AS (
+    SELECT 
+        r.r_regionkey, 
+        r.r_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY r.r_regionkey, r.r_name
+),
+TopSales AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COALESCE(rs.total_sales, 0) AS total_sales
+    FROM region r
+    LEFT JOIN RegionalSales rs ON r.r_regionkey = rs.r_regionkey
+    WHERE rs.rank = 1 OR rs.rank IS NULL
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(o.o_totalprice), 0) AS total_order_value,
+    COUNT(CASE WHEN c.c_acctbal IS NULL THEN 1 END) AS null_balance_customers,
+    COUNT(DISTINCT c.c_custkey) FILTER (WHERE c.c_mktsegment = 'BUILDING') AS building_customers,
+    AVG(l.l_quantity) FILTER (WHERE l.l_returnflag = 'R') AS avg_returned_quantity,
+    CASE 
+        WHEN MAX(o.o_totalprice) IS NULL THEN 'No Orders in Region'
+        ELSE 'Orders Exist'
+    END AS order_status
+FROM TopSales r
+LEFT JOIN customer c ON c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)
+LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+GROUP BY r.r_name
+HAVING COALESCE(SUM(o.o_totalprice), 0) > (SELECT AVG(o_totalprice) FROM orders)
+ORDER BY total_order_value DESC
+LIMIT 10;

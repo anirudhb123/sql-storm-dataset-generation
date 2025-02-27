@@ -1,0 +1,77 @@
+WITH RECURSIVE Customer_Summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders 
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+High_Spenders AS (
+    SELECT 
+        cs.c_custkey, 
+        cs.c_name, 
+        cs.total_spent
+    FROM 
+        Customer_Summary cs
+    WHERE 
+        cs.total_spent > (SELECT AVG(total_spent) FROM Customer_Summary)
+),
+Part_Suppliers AS (
+    SELECT 
+        ps.ps_partkey, 
+        p.p_name, 
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        partsupp ps 
+    INNER JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    INNER JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey 
+    GROUP BY 
+        ps.ps_partkey, p.p_name
+),
+Recent_Orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+)
+SELECT 
+    ps.p_name AS part_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COALESCE(SUM(l.l_tax), 0) AS total_tax,
+    COALESCE((
+        SELECT MAX(total_spent)
+        FROM High_Spenders
+    ), 0) AS max_customer_spending,
+    COUNT(DISTINCT cs.c_custkey) AS num_customers,
+    STRING_AGG(DISTINCT r.r_name || ' (' || r.r_regionkey || ')', ', ') AS regions_served
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    Recent_Orders ro ON o.o_orderkey = ro.o_orderkey AND ro.rn = 1
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate >= DATEADD(month, -6, CURRENT_DATE) 
+    AND (n.n_name IS NULL OR n.n_name LIKE 'A%' OR n.n_name IS NOT NULL)
+GROUP BY 
+    ps.p_name
+ORDER BY 
+    revenue DESC
+FETCH FIRST 10 ROWS ONLY;

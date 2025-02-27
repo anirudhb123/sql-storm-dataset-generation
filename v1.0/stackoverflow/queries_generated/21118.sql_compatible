@@ -1,0 +1,82 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserLatestActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LatestCloseDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteUndeleteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        PostHistory ph ON u.Id = ph.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+FlaggedUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation < 100 THEN 'Newbie' 
+            WHEN u.Reputation BETWEEN 100 AND 1000 THEN 'Intermediate' 
+            ELSE 'Expert' 
+        END AS UserLevel
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation IS NOT NULL
+),
+CommentsRanked AS (
+    SELECT 
+        c.PostId,
+        COUNT(*) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY c.PostId ORDER BY c.CreationDate DESC) AS LatestCommentRank
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    rp.PostId, 
+    rp.Title, 
+    rp.CreationDate, 
+    rp.Score, 
+    rp.ViewCount,
+    (SELECT STRING_AGG(tag.TagName, ', ') 
+     FROM Tags tag 
+     WHERE tag.Id IN (SELECT DISTINCT CAST(value AS INTEGER) FROM UNNEST(STRING_TO_ARRAY(rp.Tags, ',')) AS value)) AS TagList,
+    ula.DisplayName AS LastCloser,
+    ula.LatestCloseDate,
+    ula.DeleteUndeleteCount,
+    fu.UserLevel,
+    cr.CommentCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserLatestActivity ula ON rp.PostId = ula.UserId 
+LEFT JOIN 
+    FlaggedUsers fu ON rp.OwnerUserId = fu.UserId
+LEFT JOIN 
+    CommentsRanked cr ON rp.PostId = cr.PostId
+WHERE 
+    rp.UserPostRank = 1
+    AND (fu.UserLevel IS NULL OR fu.UserLevel = 'Intermediate')
+    AND (ula.LatestCloseDate IS NULL OR ula.LatestCloseDate < CURRENT_DATE - INTERVAL '1 month')
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC NULLS LAST;

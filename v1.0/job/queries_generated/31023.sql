@@ -1,0 +1,80 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- Base case: Selecting all movies
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS hierarchy_level
+    FROM 
+        title t
+    
+    UNION ALL
+    
+    -- Recursive case: Joining on linked movies
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.hierarchy_level + 1 AS hierarchy_level
+    FROM 
+        movie_link ml
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+TopMovies AS (
+    SELECT 
+        t.movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        t.movie_id, t.title, t.production_year
+    HAVING 
+        COUNT(DISTINCT c.person_id) > 10
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        COALESCE(mi.info, 'No Info') AS additional_info
+    FROM 
+        TopMovies tm
+    JOIN 
+        title t ON tm.movie_id = t.id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre')
+    GROUP BY 
+        t.title, t.production_year, mi.info
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actors,
+    md.keyword_count,
+    md.additional_info,
+    (CASE 
+        WHEN md.keyword_count > 5 THEN 'Highly Tagged'
+        WHEN md.keyword_count BETWEEN 2 AND 5 THEN 'Moderately Tagged'
+        ELSE 'Rarely Tagged' 
+    END) AS tagging_level
+FROM 
+    MovieDetails md
+ORDER BY 
+    md.production_year DESC, md.title;

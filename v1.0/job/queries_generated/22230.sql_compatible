@@ -1,0 +1,80 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS depth,
+        ARRAY[m.id] AS path
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        t.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1,
+        path || t.linked_movie_id
+    FROM
+        movie_link t
+    INNER JOIN
+        movie_hierarchy mh ON t.movie_id = mh.movie_id
+    INNER JOIN
+        aka_title m ON t.linked_movie_id = m.id
+    WHERE
+        NOT t.linked_movie_id = ANY(mh.path)  
+),
+ranked_movies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        RANK() OVER (PARTITION BY mh.production_year ORDER BY COUNT(c.id) DESC) AS rank_by_cast_count
+    FROM
+        movie_hierarchy mh
+    LEFT JOIN
+        cast_info c ON mh.movie_id = c.movie_id
+    GROUP BY
+        mh.movie_id, mh.title, mh.production_year
+),
+aggregated_info AS (
+    SELECT
+        r.movie_id,
+        r.title,
+        r.production_year,
+        COALESCE(COUNT(mk.id), 0) AS keyword_count,
+        COALESCE(SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS role_count,
+        r.rank_by_cast_count
+    FROM
+        ranked_movies r
+    LEFT JOIN
+        movie_keyword mk ON r.movie_id = mk.movie_id
+    LEFT JOIN
+        cast_info ci ON r.movie_id = ci.movie_id
+    GROUP BY
+        r.movie_id, r.title, r.production_year, r.rank_by_cast_count
+)
+SELECT
+    ai.movie_id,
+    ai.title,
+    ai.production_year,
+    ai.keyword_count,
+    ai.role_count,
+    ai.rank_by_cast_count,
+    CASE
+        WHEN ai.keyword_count > 10 THEN 'Highly tagged'
+        WHEN ai.role_count > 5 THEN 'Star-studded'
+        ELSE 'Moderately recognized'
+    END AS movie_category
+FROM
+    aggregated_info ai
+WHERE
+    ai.rank_by_cast_count <= 5
+ORDER BY
+    ai.production_year DESC,
+    ai.rank_by_cast_count ASC
+LIMIT 50;

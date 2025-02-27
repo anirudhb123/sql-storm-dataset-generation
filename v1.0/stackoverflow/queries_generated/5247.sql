@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1
+    ORDER BY 
+        rp.Score DESC, rp.ViewCount DESC
+    LIMIT 10
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     JOIN Posts p ON t.Id = ANY(substring(p.Tags, 2, length(p.Tags) - 2)::varchar[]) 
+     WHERE p.Id = tp.PostId) AS Tags
+FROM 
+    TopPosts tp
+JOIN 
+    Votes v ON tp.PostId = v.PostId AND v.VoteTypeId = 2
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, tp.Score, tp.ViewCount, tp.OwnerDisplayName, tp.CommentCount
+ORDER BY 
+    COUNT(v.Id) DESC
+LIMIT 5;

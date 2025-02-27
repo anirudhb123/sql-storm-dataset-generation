@@ -1,0 +1,58 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.Reputation, 
+        U.DisplayName, 
+        U.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY U.CreationDate DESC) AS rn
+    FROM Users U
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation
+    FROM UserReputation
+    WHERE rn = 1 AND Reputation > 1000
+),
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        AVG(P.Score) AS AvgScore
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+UserWithPosts AS (
+    SELECT 
+        U.DisplayName,
+        PU.TotalPosts,
+        PU.TotalViews,
+        PU.AvgScore,
+        RANK() OVER (ORDER BY PU.TotalViews DESC) AS ViewRank
+    FROM TopUsers U
+    LEFT JOIN PostStatistics PU ON U.UserId = PU.OwnerUserId
+)
+SELECT 
+    COALESCE(U.DisplayName, 'Unknown') AS UserName,
+    COALESCE(P.TotalPosts, 0) AS PostsCount,
+    COALESCE(P.TotalViews, 0) AS ViewsCount,
+    COALESCE(P.AvgScore, 0) AS AverageScore,
+    CASE 
+        WHEN P.TotalPosts IS NULL THEN 'No Posts'
+        WHEN P.TotalPosts > 10 THEN 'Active Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorStatus
+FROM TopUsers U
+FULL OUTER JOIN PostStatistics P ON U.UserId = P.OwnerUserId
+WHERE P.AvgScore IS NOT NULL 
+ORDER BY P.AvgScore DESC, U.DisplayName ASC
+LIMIT 50
+UNION ALL
+SELECT 
+    'Total' AS UserName,
+    SUM(COALESCE(TotalPosts, 0)),
+    SUM(COALESCE(TotalViews, 0)),
+    AVG(COALESCE(AverageScore, 0))
+FROM UserWithPosts;

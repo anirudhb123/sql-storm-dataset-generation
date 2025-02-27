@@ -1,0 +1,46 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        w.w_warehouse_id,
+        c.c_first_name,
+        c.c_last_name,
+        d.d_year,
+        d.d_month_seq
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws_item_sk, w.w_warehouse_id, c.c_first_name, c.c_last_name, d.d_year, d.d_month_seq
+),
+TopSales AS (
+    SELECT 
+        ws_item_sk, 
+        total_quantity, 
+        total_profit, 
+        ROW_NUMBER() OVER (PARTITION BY w_warehouse_id ORDER BY total_profit DESC) AS rn
+    FROM 
+        SalesData
+)
+SELECT 
+    ts.ws_item_sk,
+    ts.total_quantity,
+    ts.total_profit,
+    ts.w_warehouse_id,
+    ts.c_first_name,
+    ts.c_last_name,
+    ts.d_year,
+    ts.d_month_seq
+FROM 
+    TopSales ts
+WHERE 
+    ts.rn <= 5
+ORDER BY 
+    ts.w_warehouse_id, ts.total_profit DESC;

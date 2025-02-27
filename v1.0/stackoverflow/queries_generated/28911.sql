@@ -1,0 +1,82 @@
+WITH TagStats AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(substring(Tags, 2, LENGTH(Tags) - 2), '><'))) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        Tag
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.UpVotes, 0)) AS TotalUpVotes
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastEdited,
+        COUNT(PH.Id) AS EditCount,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.CreationDate END) AS ClosedDate,
+        COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END), 0) AS CloseReopenCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+),
+FinalStats AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.QuestionCount,
+        U.TotalViews,
+        U.TotalUpVotes,
+        PHA.EditCount,
+        PHA.LastEdited,
+        PHA.ClosedDate,
+        PHA.CloseReopenCount,
+        T.Tag,
+        TS.PostCount AS TagCount
+    FROM 
+        UserStats U
+    LEFT JOIN 
+        PostHistoryAnalysis PHA ON PHA.PostId IN (
+            SELECT P.Id 
+            FROM Posts P 
+            WHERE P.OwnerUserId = U.UserId
+        )
+    LEFT JOIN 
+        TagStats TS ON TS.PostCount > 10 -- Only include popular tags
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.UserId
+    LEFT JOIN 
+        string_to_array(substring(P.Tags, 2, LENGTH(P.Tags) - 2), '><') AS T(Tag) ON P.Id = T.Tag
+)
+SELECT 
+    UserId,
+    DisplayName,
+    QuestionCount,
+    TotalViews,
+    TotalUpVotes,
+    EditCount,
+    LastEdited,
+    ClosedDate,
+    CloseReopenCount,
+    Tag,
+    TagCount
+FROM 
+    FinalStats
+ORDER BY 
+    TotalUpVotes DESC, 
+    QuestionCount DESC;

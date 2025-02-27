@@ -1,0 +1,33 @@
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    GROUP_CONCAT(DISTINCT k.keyword SEPARATOR ', ') AS keywords,
+    GROUP_CONCAT(DISTINCT c.kind SEPARATOR ', ') AS company_types,
+    pi.info AS person_info
+FROM 
+    title t
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type c ON mc.company_type_id = c.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    aka_name a ON cc.subject_id = a.person_id
+JOIN 
+    person_info pi ON a.person_id = pi.person_id AND pi.info_type_id = 1 -- Assuming 1 is for general info
+WHERE 
+    t.production_year >= 2000
+    AND k.keyword LIKE '%action%' 
+GROUP BY 
+    t.title, a.name, pi.info
+HAVING 
+    COUNT(DISTINCT k.id) > 2
+ORDER BY 
+    t.production_year DESC, a.name;
+
+This SQL query benchmarks string processing by retrieving movie titles, actor names, keywords, company types, and actor information for movies produced from the year 2000 onwards that have an "action" keyword. The results are grouped by movie title, actor name, and additional personal information, ensuring that only movies with more than two distinct keywords are included. The output is ordered by production year in descending order and then by actor name.

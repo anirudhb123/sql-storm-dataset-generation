@@ -1,0 +1,34 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+), 
+TopRegions AS (
+    SELECT r.r_regionkey, r.r_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM region r
+    JOIN nation n ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY r.r_regionkey, r.r_name
+    ORDER BY total_cost DESC
+    LIMIT 5
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price, COUNT(DISTINCT l.l_partkey) AS item_count,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS price_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT tr.r_name, tr.total_cost, od.o_orderkey, od.total_price, od.item_count, od.price_rank, 
+       COALESCE(NULLIF(sh.level, 1), 'No hierarchy') AS supplier_level_description
+FROM TopRegions tr
+LEFT JOIN OrderDetails od ON od.total_price > (SELECT AVG(total_price) FROM OrderDetails)
+LEFT JOIN SupplierHierarchy sh ON sh.s_acctbal >= 5000
+WHERE tr.total_cost > 1000000
+ORDER BY tr.total_cost DESC, od.total_price DESC;

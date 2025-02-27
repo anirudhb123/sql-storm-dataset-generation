@@ -1,0 +1,42 @@
+
+WITH RegionalSupplier AS (
+    SELECT n.n_name, r.r_name, s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_available_qty,
+           AVG(s.s_acctbal) OVER (PARTITION BY r.r_name) AS avg_account_balance
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_name, r.r_name, s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent,
+           CASE WHEN SUM(o.o_totalprice) > 1000 THEN 'High Value' ELSE 'Low Value' END AS value_category
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+LineItemStats AS (
+    SELECT l.l_orderkey, COUNT(l.l_linenumber) AS line_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+ComplexJoin AS (
+    SELECT rs.n_name AS supplier_nation, co.c_name AS customer_name, 
+           ls.line_count, ls.total_line_value, rs.total_available_qty
+    FROM RegionalSupplier rs
+    FULL OUTER JOIN CustomerOrders co ON rs.s_suppkey = co.c_custkey 
+    FULL OUTER JOIN LineItemStats ls ON ls.l_orderkey = co.total_orders
+)
+SELECT *,
+       CASE 
+           WHEN total_line_value IS NULL THEN 'No Line Items' 
+           WHEN total_available_qty IS NULL THEN 'No Suppliers' 
+           ELSE 'Data Present' 
+       END AS data_status,
+       CONCAT(supplier_nation, ' <-> ', customer_name) AS relationship
+FROM ComplexJoin
+WHERE (total_available_qty IS NOT NULL AND total_line_value > 500) OR 
+      (supplier_nation IS NOT NULL AND data_status = 'No Line Items')
+ORDER BY supplier_name DESC, total_spent;

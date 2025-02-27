@@ -1,0 +1,43 @@
+WITH Ranked_Suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+High_Value_Customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+Product_Stats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    p.p_name,
+    ps.supplier_count,
+    ps.avg_supply_cost,
+    r.s_name AS top_supplier,
+    h.total_spent
+FROM Product_Stats ps
+LEFT OUTER JOIN Ranked_Suppliers r ON ps.supplier_count = r.rnk
+LEFT JOIN High_Value_Customers h ON h.total_spent > 15000
+WHERE ps.avg_supply_cost IS NOT NULL
+AND ps.supplier_count > 1
+ORDER BY ps.avg_supply_cost DESC, ps.p_name ASC
+LIMIT 10;

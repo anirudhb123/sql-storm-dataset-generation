@@ -1,0 +1,103 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal, o.o_orderkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        CustomerOrders c
+    WHERE 
+        c.total_price IS NOT NULL
+        AND c.total_price > (SELECT AVG(total_price) FROM CustomerOrders)
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+TopParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice
+    FROM 
+        part p
+    INNER JOIN 
+        SupplierAvailability sa ON p.p_partkey = sa.ps_partkey
+    WHERE 
+        sa.total_avail_qty >= (SELECT MAX(total_avail_qty) FROM SupplierAvailability) / 2
+),
+DetailedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        DENSE_RANK() OVER (ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+)
+SELECT 
+    rc.s_name,
+    SUM(co.total_price) AS total_spent,
+    COUNT(DISTINCT co.c_custkey) AS num_customers,
+    p.p_name,
+    CASE 
+        WHEN SUM(co.total_price) > 10000 THEN 'High Roller'
+        WHEN SUM(co.total_price) BETWEEN 5000 AND 10000 THEN 'Mid Roller'
+        ELSE 'Low Roller'
+    END AS customer_tier
+FROM 
+    RankedSuppliers rc
+LEFT JOIN 
+    HighValueCustomers hc ON rc.s_suppkey = hc.c_custkey
+LEFT JOIN 
+    CustomerOrders co ON hc.c_custkey = co.c_custkey
+JOIN 
+    TopParts p ON p.p_partkey = ANY(ARRAY(
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp) 
+        INTERSECT 
+        SELECT l.l_partkey FROM lineitem l
+    ))
+LEFT JOIN 
+    DetailedOrders od ON co.o_orderkey = od.o_orderkey
+WHERE 
+    rc.rank = 1
+GROUP BY 
+    rc.s_name, p.p_name
+HAVING 
+    SUM(co.total_price) IS NOT NULL
+ORDER BY 
+    customer_tier DESC, total_spent DESC;

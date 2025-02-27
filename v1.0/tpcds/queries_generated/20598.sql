@@ -1,0 +1,54 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, 0 AS level
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+    UNION ALL
+    SELECT ca.ca_address_sk, ca.ca_city, ca.ca_state, ca.ca_country, ah.level + 1
+    FROM customer_address ca
+    JOIN address_hierarchy ah ON ca.ca_state = ah.ca_state 
+    WHERE ah.level < 5
+),
+customer_info AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name,
+           cd.cd_gender, cd.cd_income_band_sk,
+           CASE 
+               WHEN cd.cd_marital_status IS NULL THEN 'Unknown'
+               ELSE cd.cd_marital_status
+           END AS marital_status
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+return_stats AS (
+    SELECT sr_customer_sk,
+           COUNT(sr_ticket_number) AS total_returns,
+           SUM(sr_return_qty) AS total_return_qty,
+           SUM(sr_return_amt) AS total_return_amt,
+           MAX(sr_return_amt) KEEP (DENSE_RANK FIRST ORDER BY sr_returned_date_sk DESC) AS last_return_amt
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+sales_data AS (
+    SELECT ws_bill_customer_sk,
+           SUM(ws_net_paid) AS total_spent,
+           COUNT(DISTINCT ws_order_number) AS order_count,
+           RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid) DESC) AS spend_rank
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+)
+SELECT ci.c_first_name, ci.c_last_name, ci.cd_gender, ah.ca_city, ah.ca_state, 
+       sd.total_spent, sd.order_count, 
+       COALESCE(rs.total_returns, 0) AS total_returns,
+       COALESCE(rs.total_return_qty, 0) AS total_return_qty, 
+       COALESCE(rs.last_return_amt, 0) AS last_return_amt,
+       CASE 
+           WHEN sd.spend_rank = 1 THEN 'Top Spender'
+           ELSE 'Regular'
+       END AS customer_category
+FROM customer_info ci
+JOIN address_hierarchy ah ON ci.c_current_addr_sk = ah.ca_address_sk
+LEFT JOIN return_stats rs ON ci.c_customer_sk = rs.sr_customer_sk
+LEFT JOIN sales_data sd ON ci.c_customer_sk = sd.ws_bill_customer_sk
+WHERE ah.level = (SELECT MAX(level) FROM address_hierarchy)
+AND (ci.cd_income_band_sk IS NULL OR ci.cd_income_band_sk <= 5)
+ORDER BY total_spent DESC NULLS LAST, ah.ca_city;

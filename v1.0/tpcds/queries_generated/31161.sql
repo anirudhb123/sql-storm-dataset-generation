@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws_bill_customer_sk, 
+           SUM(ws_net_profit) AS Total_Profit,
+           COUNT(ws_order_number) AS Total_Orders
+    FROM web_sales 
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY ws_bill_customer_sk
+    HAVING SUM(ws_net_profit) > 1000
+    
+    UNION ALL
+    
+    SELECT ss_bill_customer_sk,
+           SUM(ss_net_profit) AS Total_Profit,
+           COUNT(ss_ticket_number) AS Total_Orders
+    FROM store_sales ss
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    WHERE ss_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    AND c.c_birth_year > 1980
+    GROUP BY ss_bill_customer_sk
+)
+SELECT ca_state,
+       COUNT(DISTINCT customer_sk) AS Customer_Count,
+       AVG(Total_Profit) AS Avg_Profit,
+       SUM(Total_Orders) AS Orders_Made,
+       COUNT(DISTINCT CASE WHEN ss_coupon_amt IS NOT NULL THEN ss_coupon_amt END) AS Coupons_Used
+FROM (
+    SELECT c.c_customer_sk, 
+           c.c_current_addr_sk,
+           c.c_birth_year,
+           c.c_preferred_cust_flag,
+           ca.ca_state,
+           s.ss_net_profit,
+           s.ss_coupon_amt
+    FROM customer c
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN store_sales s ON c.c_customer_sk = s.ss_customer_sk
+    WHERE ca.ca_state IS NOT NULL
+) AS SubQuery
+JOIN SalesCTE ON SubQuery.c_customer_sk = SalesCTE.ws_bill_customer_sk 
+GROUP BY ca_state
+HAVING AVG(Total_Profit) > 500
+ORDER BY Customer_Count DESC;

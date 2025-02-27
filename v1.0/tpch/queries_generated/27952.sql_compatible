@@ -1,0 +1,39 @@
+
+WITH part_details AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_type, 
+        p.p_retailprice, 
+        p.p_comment, 
+        ps.ps_supplycost, 
+        s.s_name AS supplier_name, 
+        s.s_address AS supplier_address,
+        s.s_comment AS supplier_comment,
+        c.c_name AS customer_name,
+        o.o_orderdate,
+        l.l_quantity,
+        l.l_discount,
+        l.l_tax
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+)
+SELECT 
+    p_name, 
+    supplier_name, 
+    customer_name, 
+    SUM(l_quantity) AS total_quantity,
+    AVG(ps_supplycost) AS avg_supplycost,
+    SUM(l_discount) AS total_discount,
+    STRING_AGG(DISTINCT p_comment, '; ' ORDER BY p_comment) AS unique_comments,
+    COUNT(DISTINCT o_orderdate) AS order_count
+FROM part_details
+WHERE p_brand LIKE 'Brand%'
+GROUP BY p_name, supplier_name, customer_name
+HAVING SUM(l_quantity) > 100 AND AVG(ps_supplycost) < 50.00
+ORDER BY total_discount DESC, total_quantity ASC;

@@ -1,0 +1,76 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        AVG(EXTRACT(EPOCH FROM (p.LastActivityDate - u.CreationDate)) / 86400) AS AvgDaysActive,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND (v.VoteTypeId = 2 OR v.VoteTypeId = 3)
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS ClosureActions
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+RecentPostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        MAX(COALESCE(p.ComputedScore, 0)) OVER (PARTITION BY p.Id) AS MaximumScore,
+        COALESCE(st.HistoryTypes, 'No history') AS PostHistory,
+        COALESCE(st.ClosureActions, 0) AS ClosureCount,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistoryAggregates st ON p.Id = st.PostId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.UpVotes,
+    rps.PostId,
+    rps.Title,
+    rps.CreationDate,
+    rps.LastActivityDate,
+    rps.MaximumScore,
+    rps.PostHistory,
+    rps.ClosureCount,
+    CASE 
+        WHEN us.AvgDaysActive < 30 THEN 'New User'
+        WHEN us.AvgDaysActive BETWEEN 30 AND 365 THEN 'Regular User'
+        ELSE 'Veteran User'
+    END AS UserType
+FROM 
+    UserStats us
+JOIN 
+    RecentPostStats rps ON us.UserId = rps.OwnerUserId
+WHERE 
+    us.Reputation > 100
+    AND us.BadgeCount > 2
+    AND rps.ClosureCount = 0
+ORDER BY 
+    us.Reputation DESC, rps.MaximumScore DESC
+LIMIT 10;

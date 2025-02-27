@@ -1,0 +1,75 @@
+
+WITH EnhancedCustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        (SELECT COUNT(*) 
+         FROM store_sales ss 
+         WHERE ss.ss_customer_sk = c.c_customer_sk) AS total_store_purchases,
+        (CASE 
+            WHEN cd.cd_purchase_estimate IS NULL OR cd.cd_purchase_estimate <= 0 THEN 'Unknown'
+            WHEN cd.cd_purchase_estimate < 1000 THEN 'Low Value'
+            WHEN cd.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium Value'
+            ELSE 'High Value' 
+         END) AS customer_value_band
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+ShippingModes AS (
+    SELECT 
+        sm.sm_ship_mode_id,
+        MAX(CASE 
+            WHEN sm.sm_type LIKE '%Express%' THEN 'Express Shipping' 
+            ELSE 'Standard Shipping' 
+        END) AS shipping_category
+    FROM 
+        ship_mode sm
+    GROUP BY 
+        sm.sm_ship_mode_id
+),
+CustomerShipping AS (
+    SELECT 
+        e.c_customer_sk,
+        e.c_first_name,
+        e.c_last_name,
+        s.sm_ship_mode_id,
+        ss.ss_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY e.c_customer_sk ORDER BY ss.ss_sold_date_sk DESC) AS rnk
+    FROM 
+        EnhancedCustomerData e
+    JOIN store_sales ss ON e.c_customer_sk = ss.ss_customer_sk
+    JOIN ShippingModes s ON ss.ss_sold_date_sk = s.sm_ship_mode_id
+)
+SELECT 
+    c.c_customer_sk,
+    c.c_first_name,
+    c.c_last_name,
+    SUM(cs.cs_net_profit) AS total_catalog_profit,
+    COALESCE(MAX(wp.wp_creation_date_sk), 'No Page Views') AS last_web_page_view,
+    COUNT(DISTINCT cr.cr_order_number) AS total_catalog_returns,
+    (SELECT 
+         AVG(ss_ext_sales_price) 
+     FROM 
+         store_sales 
+     WHERE 
+         ss_customer_sk = c.c_customer_sk AND ss_sales_price IS NOT NULL) AS avg_sales_price,
+    CASE 
+        WHEN e.total_store_purchases IS NULL OR e.total_store_purchases = 0 THEN 'Never Purchased'
+        ELSE CONCAT('Purchased ', e.total_store_purchases, ' times')
+    END AS purchase_status
+FROM 
+    EnhancedCustomerData e
+LEFT JOIN catalog_sales cs ON e.c_customer_sk = cs.cs_bill_customer_sk
+LEFT JOIN web_page wp ON wp.wp_web_page_sk = e.c_customer_sk
+LEFT JOIN catalog_returns cr ON cr.cr_returned_date_sk = e.c_customer_sk
+WHERE 
+    (e.customer_value_band IN ('High Value', 'Medium Value') OR e.cd_marital_status = 'M')
+GROUP BY 
+    c.c_customer_sk, c.c_first_name, c.c_last_name, e.total_store_purchases
+ORDER BY 
+    total_catalog_profit DESC NULLS LAST;

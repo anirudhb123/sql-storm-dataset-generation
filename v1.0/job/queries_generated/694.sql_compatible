@@ -1,0 +1,49 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorMovies AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS titles
+    FROM 
+        cast_info c
+    JOIN 
+        RankedTitles rt ON rt.title_id = c.movie_id
+    GROUP BY 
+        c.person_id
+),
+MaxActors AS (
+    SELECT 
+        person_id,
+        movie_count,
+        titles,
+        MAX(movie_count) OVER () AS max_movie_count
+    FROM 
+        ActorMovies
+)
+SELECT 
+    na.name AS actor_name,
+    ma.titles,
+    ma.movie_count,
+    CASE 
+        WHEN ma.movie_count = ma.max_movie_count THEN 'Most prolific actor'
+        ELSE 'Less prolific actor'
+    END AS actor_status
+FROM 
+    MaxActors ma
+JOIN 
+    aka_name na ON na.person_id = ma.person_id
+WHERE 
+    na.name IS NOT NULL
+ORDER BY 
+    ma.movie_count DESC, actor_name ASC;

@@ -1,0 +1,48 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2020-01-01') 
+                                AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2020-12-31')
+),
+SalesSummary AS (
+    SELECT 
+        r.web_site_sk,
+        COUNT(r.ws_order_number) AS total_orders,
+        SUM(r.ws_sales_price) AS total_sales,
+        AVG(r.ws_net_profit) AS avg_net_profit
+    FROM 
+        RankedSales r
+    WHERE 
+        r.rn <= 10
+    GROUP BY 
+        r.web_site_sk
+)
+SELECT 
+    ws.web_site_id,
+    ss.total_orders,
+    ss.total_sales,
+    ss.avg_net_profit,
+    CASE 
+        WHEN ss.avg_net_profit IS NULL THEN 'No Data'
+        WHEN ss.avg_net_profit > 1000 THEN 'High Profit'
+        WHEN ss.avg_net_profit BETWEEN 500 AND 1000 THEN 'Moderate Profit'
+        ELSE 'Low Profit'
+    END AS profit_category
+FROM 
+    SalesSummary ss
+JOIN 
+    web_site ws ON ss.web_site_sk = ws.web_site_sk
+LEFT JOIN 
+    customer_address ca ON ca.ca_address_sk = (SELECT ca_address_sk FROM customer WHERE c_current_addr_sk = ca.ca_address_sk LIMIT 1)
+WHERE 
+    ca.ca_state = 'CA' OR ca.ca_state IS NULL
+ORDER BY 
+    ss.total_sales DESC;

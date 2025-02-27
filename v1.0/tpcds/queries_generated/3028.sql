@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > 0
+),
+CustomerCounts AS (
+    SELECT 
+        c_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        AVG(ws_net_profit) AS avg_net_profit
+    FROM 
+        web_sales
+    INNER JOIN 
+        customer ON ws_bill_customer_sk = c_customer_sk
+    GROUP BY 
+        c_customer_sk
+    HAVING 
+        COUNT(DISTINCT ws_order_number) > 5
+),
+CategorySales AS (
+    SELECT 
+        i_category,
+        SUM(ws_net_paid) AS total_net_paid,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales 
+    INNER JOIN 
+        item ON ws_item_sk = i_item_sk
+    GROUP BY 
+        i_category
+    HAVING 
+        SUM(ws_net_paid) > 10000
+)
+SELECT 
+    ca.city AS customer_city,
+    ca.state AS customer_state,
+    COUNT(DISTINCT c.c_customer_sk) AS num_customers,
+    SUM(COALESCE(rs.ws_quantity, 0)) AS total_quantity_sold,
+    SUM(COALESCE(cs.total_net_paid, 0)) AS total_sales,
+    AVG(cc.avg_net_profit) AS average_customer_profit
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    RankedSales rs ON ws.ws_item_sk = rs.ws_item_sk AND rs.price_rank = 1
+LEFT JOIN 
+    CustomerCounts cc ON cc.c_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    CategorySales cs ON cs.i_category = (SELECT i_category FROM item WHERE i_item_sk = ws.ws_item_sk)
+WHERE 
+    ca.ca_state IN ('NY', 'CA')
+GROUP BY 
+    ca.city, ca.state
+ORDER BY 
+    total_sales DESC, num_customers DESC
+FETCH FIRST 10 ROWS ONLY;

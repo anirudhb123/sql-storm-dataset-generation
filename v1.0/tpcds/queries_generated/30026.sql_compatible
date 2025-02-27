@@ -1,0 +1,60 @@
+
+WITH RECURSIVE sales_rank AS (
+    SELECT
+        ws.sold_date_sk,
+        ws.item_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.item_sk ORDER BY SUM(ws.ext_sales_price) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    GROUP BY
+        ws.sold_date_sk, ws.item_sk
+),
+top_sales AS (
+    SELECT
+        sr.sold_date_sk,
+        sr.item_sk,
+        sr.total_sales
+    FROM
+        sales_rank sr
+    WHERE
+        sr.sales_rank <= 5
+),
+customer_details AS (
+    SELECT
+        c.customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_state
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+sales_summary AS (
+    SELECT
+        cu.ca_state,
+        SUM(ts.total_sales) AS total_sales,
+        COUNT(DISTINCT cu.customer_sk) AS customer_count
+    FROM
+        customer_details cu
+    JOIN
+        top_sales ts ON cu.customer_sk = ts.item_sk
+    GROUP BY
+        cu.ca_state
+    ORDER BY
+        total_sales DESC
+    LIMIT 10
+)
+SELECT
+    ss.ca_state,
+    ss.total_sales,
+    ss.customer_count,
+    COALESCE(ROUND(ss.total_sales / NULLIF(ss.customer_count, 0), 2), 0) AS avg_sales_per_customer
+FROM
+    sales_summary ss
+ORDER BY
+    ss.total_sales DESC;

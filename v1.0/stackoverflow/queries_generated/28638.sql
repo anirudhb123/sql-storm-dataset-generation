@@ -1,0 +1,52 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        COALESCE(AVG(CAST(p.ViewCount AS FLOAT)), 0) AS AverageViewCount,
+        COALESCE(SUM(CAST(p.Score AS INT)), 0) AS TotalScore
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE CONCAT('>%s<', t.TagName, '>')  -- Match the tag using the string processing technique
+    GROUP BY t.TagName
+),
+UserContribution AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedCount
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    GROUP BY u.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        AverageViewCount,
+        TotalScore,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM TagStats
+)
+
+SELECT 
+    ut.UserId,
+    ut.DisplayName,
+    t.TagName,
+    t.PostCount,
+    t.QuestionCount,
+    t.AnswerCount,
+    t.AverageViewCount,
+    t.TotalScore,
+    uc.TotalQuestions,
+    uc.TotalAnswers,
+    uc.AcceptedCount
+FROM TopTags t
+JOIN UserContribution uc ON uc.TotalQuestions > 0  -- Filter to users who have contributed questions
+CROSS JOIN Users ut 
+WHERE t.TagRank <= 10  -- Taking only top 10 tags
+ORDER BY t.PostCount DESC, uc.TotalQuestions DESC;

@@ -1,0 +1,64 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 1000
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+OrderLineAggregation AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(DISTINCT l.l_suppkey) AS unique_suppliers,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01' 
+        AND l.l_shipdate <= DATE '2023-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    co.c_name,
+    co.o_orderkey,
+    co.o_orderdate,
+    ol.unique_suppliers,
+    ol.total_line_price,
+    p.p_name,
+    ps.total_available,
+    ps.avg_supply_cost,
+    CASE 
+        WHEN ps.total_available IS NULL THEN 'No Supply'
+        ELSE 'Available'
+    END AS supply_status
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    OrderLineAggregation ol ON co.o_orderkey = ol.l_orderkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_retailprice < 50.00)
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    co.OrderRank = 1
+    AND (co.o_totalprice IS NOT NULL OR ol.total_line_price > 0)
+ORDER BY 
+    co.o_orderdate DESC, co.c_name;

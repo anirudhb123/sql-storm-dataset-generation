@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        t.TagName,
+        ROW_NUMBER() OVER (PARTITION BY t.TagName ORDER BY p.Score DESC) AS Rank
+    FROM
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName) ON t.TagName IS NOT NULL
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+        AND p.Score > 0   -- Only considering questions with a score
+),
+TopPosts AS (
+    SELECT
+        rp.TagName,
+        ARRAY_AGG(rp.PostId ORDER BY rp.Score DESC) AS TopPostIds,
+        ARRAY_AGG(rp.Title ORDER BY rp.Score DESC) AS TopPostTitles
+    FROM
+        RankedPosts rp
+    WHERE
+        rp.Rank <= 5  -- Top 5 questions per tag
+    GROUP BY
+        rp.TagName
+),
+PostAggregates AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(Id) AS AnswerCount FROM Posts WHERE PostTypeId = 2 GROUP BY PostId) a ON p.Id = a.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ta.TagName,
+    ta.TopPostIds,
+    ta.TopPostTitles,
+    ARRAY_AGG(pa.Title ORDER BY pa.ViewCount DESC) AS MostViewedPostTitles,
+    COUNT(DISTINCT pa.PostId) AS TotalPosts,
+    SUM(pa.CommentCount) AS TotalComments,
+    SUM(pa.AnswerCount) AS TotalAnswers,
+    SUM(pa.Upvotes) AS TotalUpvotes,
+    SUM(pa.Downvotes) AS TotalDownvotes
+FROM 
+    TopPosts ta
+JOIN 
+    PostAggregates pa ON pa.PostId = ANY(ta.TopPostIds)
+GROUP BY 
+    ta.TagName
+ORDER BY 
+    ta.TagName;

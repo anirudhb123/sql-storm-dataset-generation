@@ -1,0 +1,54 @@
+
+WITH RankedPosts AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.Body,
+           p.CreationDate,
+           p.ViewCount,
+           p.Score,
+           p.AnswerCount,
+           p.CommentCount,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.PostTypeId = 1 AND p.OwnerUserId IS NOT NULL
+),
+UserBadgeCounts AS (
+    SELECT u.Id AS UserId,
+           COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+UserStatistics AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+           u.Reputation,
+           u.Views,
+           u.UpVotes,
+           u.DownVotes
+    FROM Users u
+    LEFT JOIN UserBadgeCounts ub ON u.Id = ub.UserId
+),
+TopPosts AS (
+    SELECT rp.PostId,
+           rp.Title,
+           rp.CreationDate,
+           rp.ViewCount,
+           rp.Score,
+           us.DisplayName,
+           us.BadgeCount,
+           RANK() OVER (ORDER BY rp.Score DESC, rp.ViewCount DESC) AS Rank
+    FROM RankedPosts rp
+    JOIN UserStatistics us ON rp.OwnerUserId = us.UserId
+)
+SELECT tp.PostId,
+       tp.Title,
+       tp.CreationDate,
+       tp.ViewCount,
+       tp.Score,
+       tp.DisplayName,
+       tp.BadgeCount
+FROM TopPosts tp
+WHERE tp.Rank <= 10
+ORDER BY tp.Rank;

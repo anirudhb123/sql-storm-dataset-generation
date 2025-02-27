@@ -1,0 +1,77 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+cast_with_rating AS (
+    SELECT 
+        c.id AS cast_id,
+        c.movie_id,
+        COUNT(DISTINCT r.role) AS role_count,
+        MAX(r.role) AS highest_role
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.id, c.movie_id
+),
+movie_statistics AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT mi.info_type_id) AS info_type_count,
+        ARRAY_AGG(DISTINCT mi.info ORDER BY mi.info) AS info_summary
+    FROM 
+        movie_info m
+    INNER JOIN 
+        movie_info_idx mi ON m.movie_id = mi.movie_id
+    GROUP BY 
+        m.movie_id
+),
+company_movie_info AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(c.name, ', ') AS companies_involved,
+        COUNT(*) AS total_companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rt.production_year,
+    rt.title,
+    cm.companies_involved,
+    cs.role_count,
+    cs.highest_role,
+    ms.info_type_count,
+    ms.info_summary,
+    CASE WHEN ms.total_companies IS NULL THEN 'No Companies' ELSE 'Companies Present' END AS company_status,
+    COUNT(DISTINCT c.notes) AS total_notes,
+    COALESCE(SUM(CASE WHEN c.note LIKE '%Bizarre%' THEN 1 ELSE 0 END), 0) AS bizarre_notes_count
+FROM 
+    ranked_titles rt
+LEFT JOIN 
+    company_movie_info cm ON rt.title_id = cm.movie_id
+LEFT JOIN 
+    cast_with_rating cs ON rt.title_id = cs.movie_id
+LEFT JOIN 
+    movie_statistics ms ON rt.title_id = ms.movie_id
+LEFT JOIN 
+    cast_info c ON rt.title_id = c.movie_id
+GROUP BY 
+    rt.production_year, rt.title, cm.companies_involved, cs.role_count, cs.highest_role, ms.info_type_count, ms.info_summary
+ORDER BY 
+    rt.production_year DESC, 
+    rt.title ASC
+LIMIT 100;
+
+This SQL query incorporates various advanced constructs including Common Table Expressions (CTEs), window functions, outer joins, and aggregation functions, alongside unusual predicates and NULL logic to provide a dense and nuanced analysis of movie titles, their associated companies, casting, and other statistics, while producing corner cases and handling potential NULL values.

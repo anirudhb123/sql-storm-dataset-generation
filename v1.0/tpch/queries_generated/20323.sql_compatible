@@ -1,0 +1,68 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_shippriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(month, -3, CAST('1998-10-01' AS DATE))
+),
+supply_info AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_name NOT IN ('USA', 'Canada')
+    GROUP BY ps.ps_partkey
+),
+order_details AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_net_price,
+        COUNT(l.l_orderkey) AS line_count,
+        MAX(l.l_receiptdate) AS latest_receipt_date
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COALESCE(s.total_avail_qty, 0) AS available_quantity,
+    COALESCE(o.total_net_price, 0) AS order_net_value,
+    CASE 
+        WHEN r.order_rank IS NULL THEN 'NO ORDERS'
+        WHEN r.order_rank <= 10 THEN 'TOP 10'
+        ELSE 'OTHER'
+    END AS order_category
+FROM part p
+LEFT JOIN supply_info s ON p.p_partkey = s.ps_partkey
+LEFT JOIN order_details o ON o.l_orderkey IN (
+    SELECT DISTINCT l.l_orderkey 
+    FROM lineitem l 
+    WHERE l.l_partkey = p.p_partkey
+) OR o.l_orderkey IS NULL
+LEFT JOIN ranked_orders r ON r.o_orderkey = o.l_orderkey
+WHERE p.p_retailprice >= (SELECT AVG(p2.p_retailprice) FROM part p2)
+AND (s.total_avail_qty IS NULL OR s.total_avail_qty > 0)
+AND NOT EXISTS (
+    SELECT 1 
+    FROM customer c 
+    WHERE c.c_acctbal < 0 AND c.c_custkey = o.l_orderkey
+)
+GROUP BY 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    s.total_avail_qty,
+    o.total_net_price,
+    r.order_rank
+ORDER BY p.p_partkey, order_category DESC
+LIMIT 100;

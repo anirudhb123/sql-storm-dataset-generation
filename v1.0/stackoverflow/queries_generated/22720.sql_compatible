@@ -1,0 +1,76 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.Id AS OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, u.Id, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        CASE 
+            WHEN rp.ViewCount > 100 THEN 'High'
+            WHEN rp.ViewCount BETWEEN 50 AND 100 THEN 'Medium'
+            ELSE 'Low'
+        END AS ViewRank,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount,
+        SUM(
+            CASE 
+                WHEN v.VoteTypeId IS NULL THEN 0
+                ELSE 1
+            END
+        ) AS TotalVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, 
+        rp.OwnerUserId, rp.OwnerDisplayName
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.OwnerUserId,
+    fp.OwnerDisplayName,
+    fp.CommentCount,
+    fp.ViewRank,
+    fp.UpVotesCount,
+    fp.DownVotesCount,
+    (SELECT MAX(b.Date) FROM Badges b WHERE b.UserId = fp.OwnerUserId) AS LastBadgeDate,
+    CASE
+        WHEN fp.Score < 0 AND fp.CommentCount = 0 THEN 'Unpopular Post'
+        WHEN fp.UpVotesCount > fp.DownVotesCount THEN 'Well-liked'
+        ELSE 'Needs Improvement'
+    END AS PostStatus
+FROM 
+    FilteredPosts fp
+WHERE 
+    NOT EXISTS (
+        SELECT 1 
+        FROM Posts p 
+        WHERE p.ParentId = fp.PostId AND p.PostTypeId = 2
+    )
+ORDER BY 
+    fp.ViewRank DESC, fp.Score DESC, LastBadgeDate DESC
+LIMIT 50 OFFSET 0;

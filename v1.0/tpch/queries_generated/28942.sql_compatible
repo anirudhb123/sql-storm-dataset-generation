@@ -1,0 +1,29 @@
+
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           CONCAT(s.s_name, ' (', s.s_phone, ')') AS supplier_info,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate,
+           CONCAT(c.c_name, ' - Order: ', o.o_orderkey) AS order_info
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT sd.supplier_info) AS unique_suppliers,
+       COUNT(DISTINCT co.order_info) AS unique_orders,
+       SUM(sd.part_count) AS total_parts_supplied
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN SupplierDetails sd ON n.n_nationkey = sd.s_nationkey
+JOIN CustomerOrders co ON co.c_custkey IN (
+    SELECT c.c_custkey 
+    FROM customer c 
+    WHERE c.c_nationkey = n.n_nationkey
+)
+GROUP BY r.r_name
+ORDER BY r.r_name;

@@ -1,0 +1,63 @@
+
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_phone,
+        CONCAT('Nation: ', n.n_name, ', Address: ', s.s_address) AS full_info,
+        r.r_name AS region_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PartAggregates AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS average_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+OrderSummaries AS (
+    SELECT 
+        o.o_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_custkey
+)
+SELECT 
+    sd.s_name,
+    sd.full_info,
+    pa.total_available,
+    pa.average_cost,
+    os.total_orders,
+    os.total_spent
+FROM 
+    SupplierDetails sd
+LEFT JOIN 
+    PartAggregates pa ON EXISTS (
+        SELECT 1 
+        FROM partsupp ps 
+        WHERE ps.ps_suppkey = sd.s_suppkey 
+        AND ps.ps_partkey IN (SELECT p.p_partkey 
+                              FROM part p)
+    )
+LEFT JOIN 
+    OrderSummaries os ON os.o_custkey IN (
+        SELECT o.o_custkey 
+        FROM orders o 
+        WHERE o.o_orderkey IN (SELECT l.l_orderkey 
+                               FROM lineitem l 
+                               WHERE l.l_suppkey = sd.s_suppkey)
+    )
+ORDER BY 
+    sd.region_name,
+    os.total_spent DESC;

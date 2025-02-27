@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        u.Reputation,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    WHERE
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+        AND p.PostTypeId = 1  
+    GROUP BY
+        p.Id, u.DisplayName, u.Reputation
+),
+RecentPostHistory AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        p.Title AS PostTitle,
+        ph.CreationDate AS ChangeDate,
+        p.OwnerDisplayName,
+        CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN cr.Name
+            ELSE NULL
+        END AS CloseReason
+    FROM
+        PostHistory ph
+    JOIN
+        Posts p ON ph.PostId = p.Id
+    LEFT JOIN
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id AND ph.PostHistoryTypeId IN (10, 11)
+    WHERE
+        ph.CreationDate >= cast('2024-10-01' as date) - INTERVAL '6 months'
+)
+SELECT
+    rp.Rank,
+    rp.Title AS RecentQuestion,
+    rp.OwnerName,
+    rp.Reputation,
+    rp.CommentCount,
+    rph.ChangeDate,
+    rph.CloseReason
+FROM
+    RankedPosts rp
+LEFT JOIN
+    RecentPostHistory rph ON rp.Id = rph.PostId
+WHERE
+    rp.Rank <= 5  
+ORDER BY
+    rp.Rank;

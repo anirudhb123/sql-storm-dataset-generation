@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        LEAD(p.Score) OVER (PARTITION BY p.PostTypeId ORDER BY p.Score) AS NextScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.RankScore,
+        CASE 
+            WHEN rp.NextScore IS NULL THEN 'No subsequent post' 
+            ELSE CASE 
+                WHEN rp.NextScore > rp.Score THEN 'Higher next score' 
+                ELSE 'Lower or equal next score' 
+            END 
+        END AS ScoreComparison,
+        COALESCE(SUBSTRING_INDEX(rp.Title, ' ', 3), 'No title') AS ShortTitle
+    FROM 
+        RankedPosts rp
+),
+VoteSummary AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostCommentSummary AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    pd.PostId,
+    pd.ShortTitle,
+    pd.Score,
+    pd.ScoreComparison,
+    COALESCE(vs.UpVoteCount, 0) AS TotalUpVotes,
+    COALESCE(vs.DownVoteCount, 0) AS TotalDownVotes,
+    COALESCE(cs.CommentCount, 0) AS TotalComments,
+    pd.LastCommentDate
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    VoteSummary vs ON pd.PostId = vs.PostId
+LEFT JOIN 
+    PostCommentSummary cs ON pd.PostId = cs.PostId
+WHERE 
+    pd.RankScore <= 5
+ORDER BY 
+    pd.Score DESC, pd.PostId
+LIMIT 10;

@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS UserName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.UserName,
+        rp.CommentCount 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1 AND
+        (rp.Score > 10 OR rp.CommentCount > 5)
+),
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.UserName,
+    COALESCE(pv.UpVotes, 0) AS UpVotes,
+    COALESCE(pv.DownVotes, 0) AS DownVotes,
+    CASE 
+        WHEN pv.UpVotes IS NULL AND pv.DownVotes IS NULL THEN 'No votes yet'
+        ELSE ROUND((COALESCE(pv.UpVotes, 0) * 1.0 / NULLIF((COALESCE(pv.UpVotes, 0) + COALESCE(pv.DownVotes, 0)), 0)) * 100, 2)
+    END AS VotePercentage
+FROM 
+    FilteredPosts fp
+    LEFT JOIN PostVotes pv ON fp.PostId = pv.PostId
+ORDER BY 
+    fp.Score DESC, 
+    fp.ViewCount DESC
+LIMIT 50;

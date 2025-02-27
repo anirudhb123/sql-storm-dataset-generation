@@ -1,0 +1,66 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        AVG(COALESCE(P.Score, 0)) AS AvgScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 
+            ELSE 0 
+        END AS IsAnswered,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON P.OwnerUserId = B.UserId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.AcceptedAnswerId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UVS.UpVotes,
+    UVS.DownVotes,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.IsAnswered,
+    PS.CommentCount,
+    PS.BadgeCount
+FROM 
+    UserVoteSummary UVS
+JOIN 
+    Users U ON U.Id = UVS.UserId
+LEFT JOIN 
+    PostSummary PS ON U.Id = PS.OwnerUserId
+WHERE 
+    U.Reputation > 100 AND 
+    (UPPER(U.Location) LIKE '%NEW YORK%' OR U.EmailHash IS NULL)
+ORDER BY 
+    U.Reputation DESC, 
+    PS.Score DESC NULLS LAST
+LIMIT 50;

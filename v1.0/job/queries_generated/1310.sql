@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT kc.keyword) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT kc.keyword) DESC) AS year_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+TopMovies AS (
+    SELECT 
+        title_id,
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        year_rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.title_id,
+        tm.title,
+        tm.production_year,
+        p.name AS actor_name,
+        p.id AS person_id,
+        CASE 
+            WHEN ca.note IS NULL THEN 'No role specified'
+            ELSE ca.note
+        END AS role_note
+    FROM 
+        TopMovies tm
+    JOIN 
+        complete_cast cc ON tm.title_id = cc.movie_id
+    JOIN 
+        cast_info ca ON cc.subject_id = ca.id
+    JOIN 
+        aka_name p ON ca.person_id = p.person_id
+    WHERE 
+        p.name IS NOT NULL
+)
+SELECT 
+    md.title,
+    md.production_year,
+    COUNT(DISTINCT md.person_id) AS actor_count,
+    STRING_AGG(md.actor_name, ', ') AS actors,
+    COALESCE(NULLIF(SUM(CASE WHEN md.role_note LIKE '%lead%' THEN 1 ELSE 0 END), 0), 'No leads') AS lead_count
+FROM 
+    MovieDetails md
+GROUP BY 
+    md.title, md.production_year
+ORDER BY 
+    md.production_year DESC, actor_count DESC;

@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id
+),
+UserScore AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.VoteTypeId IN (2, 1)) AS TotalUpVotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownVotes,
+        (SUM(v.VoteTypeId IN (2, 1)) - SUM(v.VoteTypeId = 3)) AS NetVotes
+    FROM 
+        Users u
+    JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS Count,
+        STRING_AGG(DISTINCT COALESCE(ph.Comment, 'No Comment') || ' | ' || ph.CreationDate::DATE) AS HistoryDetails
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId,
+        ph.PostHistoryTypeId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    us.DisplayName AS UserDisplayName,
+    us.NetVotes,
+    pha.PostHistoryTypeId,
+    pha.Count AS HistoryCount,
+    pha.HistoryDetails
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserScore us ON us.UserId = rp.PostId
+LEFT JOIN 
+    PostHistoryAnalysis pha ON pha.PostId = rp.PostId
+WHERE 
+    rp.RankScore = 1
+    AND COALESCE(us.NetVotes, 0) > 0
+ORDER BY 
+    rp.Score DESC, 
+    rp.CommentCount DESC
+OFFSET 5
+FETCH FIRST 10 ROWS ONLY;

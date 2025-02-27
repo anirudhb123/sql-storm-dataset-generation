@@ -1,0 +1,51 @@
+WITH FilteredPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.PostTypeId = 1   -- Only questions
+        AND p.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    STRING_AGG(DISTINCT TRIM(UNNEST(string_to_array(fp.Tags, '><'))), ', ') AS UniqueTags,
+    fp.CreationDate,
+    fp.OwnerDisplayName,
+    fp.CommentCount,
+    fp.AnswerCount,
+    fp.LastEditDate,
+    CASE 
+        WHEN fp.AnswerCount > 0 THEN 'Has Answers'
+        ELSE 'No Answers'
+    END AS AnswerStatus,
+    LEAST(NOW() - fp.CreationDate, '1 day'::interval) AS TimeSinceCreation
+FROM 
+    FilteredPosts fp
+WHERE 
+    LENGTH(fp.Body) > 100  -- Only posts with body length greater than 100 characters
+GROUP BY 
+    fp.PostId, fp.Title, fp.Body, fp.CreationDate, fp.OwnerDisplayName, fp.CommentCount, fp.AnswerCount, fp.LastEditDate
+ORDER BY 
+    fp.CommentCount DESC, fp.AnswerCount DESC, fp.LastEditDate DESC
+LIMIT 10;

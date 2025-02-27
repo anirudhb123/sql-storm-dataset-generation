@@ -1,0 +1,41 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT p.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM partsupp p
+    JOIN supplier s ON p.ps_suppkey = s.s_suppkey
+    JOIN supplier_hierarchy sh ON p.ps_partkey = sh.s_suppkey
+    WHERE p.ps_availqty > 50
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_revenue,
+    MAX(l.l_shipdate) AS last_ship_date,
+    MIN(l.l_shipdate) AS first_ship_date,
+    RANK() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_quantity) DESC) AS quantity_rank
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    supplier_hierarchy sh ON sh.s_nationkey = n.n_nationkey
+WHERE 
+    o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    AND (l.l_returnflag = 'N' OR l.l_linestatus IS NOT NULL)
+GROUP BY
+    n.n_name
+HAVING
+    COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY
+    total_quantity DESC
+LIMIT 10;

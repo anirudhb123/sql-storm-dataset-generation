@@ -1,0 +1,64 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8 
+    WHERE U.Reputation > 1000
+    GROUP BY U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalViews,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        TotalBounty,
+        RANK() OVER (ORDER BY TotalViews DESC) AS RankByViews,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS RankByPosts
+    FROM UserActivity
+),
+FilteredUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalViews,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        TotalBounty,
+        RankByViews,
+        RankByPosts
+    FROM TopUsers
+    WHERE TotalPosts >= 10 
+      AND TotalBadges > 0
+)
+SELECT 
+    U.UserId, 
+    U.DisplayName, 
+    U.TotalViews, 
+    U.TotalPosts, 
+    U.TotalComments, 
+    U.TotalBadges, 
+    U.TotalBounty,
+    CASE 
+        WHEN U.RankByViews <= 10 THEN 'Top Viewer'
+        WHEN U.RankByPosts <= 10 THEN 'Top Contributor'
+        ELSE 'Regular User'
+    END AS UserStatus,
+    STRING_AGG(DISTINCT B.Name, ', ') AS BadgeNames
+FROM FilteredUsers U
+LEFT JOIN Badges B ON U.UserId = B.UserId
+GROUP BY U.UserId, U.DisplayName, U.TotalViews, U.TotalPosts, U.TotalComments, U.TotalBadges, U.TotalBounty, U.RankByViews, U.RankByPosts
+ORDER BY U.TotalViews DESC, U.TotalPosts DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

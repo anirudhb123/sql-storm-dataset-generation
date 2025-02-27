@@ -1,0 +1,44 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid,
+        AVG(ws_sales_price) AS average_sales_price,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2450023 AND 2450689  
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+TopSellingItems AS (
+    SELECT 
+        ws_item_sk,
+        total_quantity,
+        total_net_paid,
+        average_sales_price,
+        ROW_NUMBER() OVER (ORDER BY total_quantity DESC) AS rank
+    FROM SalesData
+),
+CustomerInfo AS (
+    SELECT 
+        c_customer_sk,
+        c_email_address,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate
+    FROM customer
+    JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+)
+SELECT 
+    tsi.ws_item_sk,
+    tsi.total_quantity,
+    tsi.total_net_paid,
+    tsi.average_sales_price,
+    ci.c_email_address,
+    ci.cd_gender,
+    ci.cd_marital_status
+FROM TopSellingItems tsi
+JOIN CustomerInfo ci ON tsi.total_orders > 50  
+WHERE tsi.rank <= 10  
+ORDER BY tsi.total_net_paid DESC;

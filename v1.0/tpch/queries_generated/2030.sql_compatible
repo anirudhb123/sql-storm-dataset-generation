@@ -1,0 +1,71 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s 
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s1.s_acctbal) FROM supplier s1 WHERE s1.s_nationkey = s.s_nationkey)
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal, 
+        ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > 50000
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+        COUNT(*) AS line_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice,
+        pud.order_value,
+        pud.line_count,
+        CASE 
+            WHEN pud.order_value IS NULL THEN 'No Line Items'
+            ELSE 'Has Line Items'
+        END AS order_status
+    FROM 
+        orders o 
+    LEFT JOIN 
+        LineItemDetails pud ON o.o_orderkey = pud.l_orderkey
+)
+SELECT 
+    n.n_name, 
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    COUNT(DISTINCT r.s_suppkey) AS supplier_count,
+    SUM(COALESCE(os.o_totalprice, 0)) AS total_order_value,
+    AVG(COALESCE(os.o_totalprice, 0)) AS avg_order_value,
+    STRING_AGG(CASE WHEN os.order_status = 'Has Line Items' THEN 'Yes' END, ', ') AS line_item_summary
+FROM 
+    nation n 
+LEFT JOIN 
+    supplier r ON n.n_nationkey = r.s_nationkey 
+LEFT JOIN 
+    HighValueCustomers c ON n.n_nationkey = c.c_nationkey 
+LEFT JOIN 
+    OrderSummary os ON c.c_custkey = os.o_custkey
+WHERE 
+    n.n_regionkey IN (SELECT n_regionkey FROM region WHERE r_name LIKE 'North%')
+GROUP BY 
+    n.n_name
+ORDER BY 
+    customer_count DESC, total_order_value DESC;

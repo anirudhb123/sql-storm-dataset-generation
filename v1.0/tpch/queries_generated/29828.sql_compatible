@@ -1,0 +1,35 @@
+
+WITH RecursiveNations AS (
+    SELECT n_name, r_name, n_nationkey
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE n_name LIKE 'A%'
+
+    UNION ALL
+
+    SELECT n.n_name, r.r_name, n.n_nationkey
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN RecursiveNations rn ON n.n_name LIKE CONCAT(rn.n_name, '%')
+    WHERE LENGTH(n.n_name) > LENGTH(rn.n_name) AND LENGTH(n.n_name) < LENGTH(rn.n_name) + 3
+)
+SELECT DISTINCT
+    s.s_name AS supplier_name,
+    tp.word AS part_type,
+    COUNT(DISTINCT l.l_orderkey) AS order_count,
+    SUM(l.l_extendedprice) AS total_revenue,
+    MAX(c.c_acctbal) AS max_customer_balance
+FROM supplier s
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN (
+    SELECT DISTINCT SUBSTRING_INDEX(SUBSTRING_INDEX(p_type, ' ', n.n_nationkey), ' ', -1) AS word
+    FROM part p
+    CROSS JOIN RecursiveNations n
+) AS tp ON p.p_type LIKE CONCAT('%', tp.word, '%')
+WHERE s.s_comment NOT LIKE '%std%'
+GROUP BY s.s_name, tp.word
+ORDER BY total_revenue DESC, supplier_name ASC;

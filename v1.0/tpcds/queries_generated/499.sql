@@ -1,0 +1,59 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(COALESCE(sr_return_quantity, 0) + COALESCE(cr_return_quantity, 0) + COALESCE(wr_return_quantity, 0)) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS store_returns_count,
+        COUNT(DISTINCT cr_order_number) AS catalog_returns_count,
+        COUNT(DISTINCT wr_order_number) AS web_returns_count
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        store_returns AS sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        catalog_returns AS cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    LEFT JOIN 
+        web_returns AS wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        cd.cd_purchase_estimate
+    FROM 
+        customer_demographics AS cd
+    LEFT JOIN 
+        household_demographics AS hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band AS ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT 
+    cr.c_customer_id,
+    cr.c_first_name,
+    cr.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cd.ib_lower_bound,
+    cd.ib_upper_bound,
+    cr.total_returns,
+    cr.store_returns_count,
+    cr.catalog_returns_count,
+    cr.web_returns_count
+FROM 
+    CustomerReturns AS cr
+JOIN 
+    CustomerDemographics AS cd ON cr.c_customer_id = cd.cd_demo_sk
+WHERE 
+    (cr.total_returns > 0 OR cd.cd_purchase_estimate IS NULL)
+    AND (cd.cd_marital_status = 'M' OR cd.cd_gender = 'F')
+ORDER BY 
+    cr.total_returns DESC, cr.c_last_name ASC;

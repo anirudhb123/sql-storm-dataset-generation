@@ -1,0 +1,49 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > (sh.level * 500)
+),
+FrequentCustomers AS (
+    SELECT c.c_custkey, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING COUNT(DISTINCT o.o_orderkey) > 5
+),
+PartStats AS (
+    SELECT p.p_partkey,
+           SUM(ps.ps_availqty) AS total_avail,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+SELECT sh.s_name,
+       c.c_custkey,
+       COALESCE(l.ship_mode, 'Unknown') AS ship_mode,
+       COUNT(DISTINCT ho.o_orderkey) AS high_value_orders,
+       SUM(COALESCE(ps.total_cost, 0)) AS total_part_cost,
+       MAX(CASE WHEN r.r_name IS NULL THEN 'No Region' ELSE r.r_name END) AS region_name
+FROM SupplierHierarchy sh
+JOIN nation n ON sh.s_nationkey = n.n_nationkey
+JOIN FrequentCustomers c ON c.c_custkey = sh.s_nationkey
+LEFT JOIN lineitem l ON l.l_orderkey IN (SELECT ho.o_orderkey FROM HighValueOrders ho)
+LEFT JOIN PartStats ps ON sh.s_suppkey = ps.p_partkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+GROUP BY sh.s_name, c.c_custkey, l.ship_mode
+HAVING COUNT(DISTINCT ho.o_orderkey) > 2 OR MAX(ps.total_avail) IS NULL
+ORDER BY total_part_cost DESC, high_value_orders ASC;

@@ -1,0 +1,28 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_name, c.c_acctbal, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '2021-01-01' AND o.o_orderdate < DATE '2022-01-01'
+),
+HighValueLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM lineitem l
+    JOIN RankedOrders ro ON l.l_orderkey = ro.o_orderkey
+    GROUP BY l.l_orderkey
+    HAVING total_value > 10000
+),
+SupplierDetails AS (
+    SELECT s.s_name, n.n_name AS nation_name, COUNT(ps.ps_partkey) AS supply_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_name, n.n_name
+    HAVING AVG(ps.ps_supplycost) < (SELECT AVG(ps_supplycost) FROM partsupp)
+)
+SELECT o.o_orderkey, ro.o_orderdate, ro.c_name, ro.c_acctbal, h.total_value,
+       s.s_name, s.nation_name, s.supply_count
+FROM HighValueLineItems h
+JOIN RankedOrders ro ON h.l_orderkey = ro.o_orderkey
+JOIN SupplierDetails s ON s.supply_count > 5
+ORDER BY ro.o_orderdate DESC, h.total_value DESC;

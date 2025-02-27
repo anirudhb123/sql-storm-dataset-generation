@@ -1,0 +1,22 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+), RegionSuppliers AS (
+    SELECT r.r_name, ns.n_nationkey, SUM(rs.total_supply_value) AS total_region_supply
+    FROM RankedSuppliers rs
+    JOIN nation ns ON rs.s_nationkey = ns.n_nationkey
+    JOIN region r ON ns.n_regionkey = r.r_regionkey
+    GROUP BY r.r_name, ns.n_nationkey
+)
+SELECT r.r_name, SUM(o.o_totalprice) AS total_order_value, SUM(rs.total_region_supply) AS total_supplier_value
+FROM orders o
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN RankedSuppliers rs ON l.l_suppkey = rs.s_suppkey
+JOIN RegionSuppliers r ON rs.s_nationkey = r.n_nationkey
+WHERE o.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31'
+  AND l.l_shipdate >= DATEADD(DAY, -30, GETDATE())
+GROUP BY r.r_name
+ORDER BY total_order_value DESC, total_supplier_value DESC
+LIMIT 10;

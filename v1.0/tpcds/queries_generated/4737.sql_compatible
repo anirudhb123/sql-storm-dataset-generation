@@ -1,0 +1,68 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount,
+        AVG(sr_return_quantity) AS avg_return_quantity
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returned_date_sk, 
+        sr_item_sk
+),
+ItemSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold_quantity,
+        SUM(ws_sales_price) AS total_sales_amount
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, 
+        ws_item_sk
+),
+SalesPerformance AS (
+    SELECT 
+        is.ws_sold_date_sk,
+        is.ws_item_sk,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+        COALESCE(is.total_sold_quantity, 0) AS total_sold_quantity,
+        COALESCE(is.total_sales_amount, 0) AS total_sales_amount,
+        CASE 
+            WHEN COALESCE(is.total_sold_quantity, 0) = 0 THEN 0 
+            ELSE (COALESCE(cr.total_return_amount, 0) / NULLIF(is.total_sales_amount, 0)) * 100 
+        END AS return_rate
+    FROM 
+        ItemSales is
+    LEFT JOIN 
+        CustomerReturns cr ON is.ws_sold_date_sk = cr.sr_returned_date_sk AND is.ws_item_sk = cr.sr_item_sk
+),
+TopReturns AS (
+    SELECT 
+        sp.ws_item_sk,
+        sp.total_returns,
+        sp.return_rate,
+        RANK() OVER (ORDER BY sp.return_rate DESC) AS rank
+    FROM 
+        SalesPerformance sp
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    tr.total_returns,
+    tr.return_rate,
+    (SELECT COUNT(*) 
+     FROM TopReturns 
+     WHERE return_rate > tr.return_rate) AS higher_return_rate_count
+FROM 
+    TopReturns tr
+JOIN 
+    item i ON tr.ws_item_sk = i.i_item_sk
+WHERE 
+    tr.rank <= 10
+ORDER BY 
+    tr.rank;

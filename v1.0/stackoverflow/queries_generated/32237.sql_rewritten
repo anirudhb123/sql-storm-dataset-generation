@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(v.Score, 0)) AS TotalVotes,
+        COALESCE(SUM(b.Class = 1), 0) AS GoldBadges, 
+        COALESCE(SUM(b.Class = 2), 0) AS SilverBadges, 
+        COALESCE(SUM(b.Class = 3), 0) AS BronzeBadges 
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) 
+),
+FinalResults AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.QuestionCount,
+        us.TotalVotes,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges,
+        rp.Title AS RecentPostTitle,
+        rp.Score AS RecentPostScore,
+        rp.ViewCount AS RecentPostViewCount,
+        rph.UserDisplayName AS HistoryUserDisplayName,
+        rph.Comment AS HistoryComment,
+        rph.CreationDate AS HistoryDate
+    FROM 
+        UserStatistics us
+    LEFT JOIN 
+        RankedPosts rp ON us.UserId = rp.OwnerUserId AND rp.Rank = 1
+    LEFT JOIN 
+        RecentPostHistory rph ON rp.PostId = rph.PostId AND rph.HistoryRank = 1
+    WHERE 
+        us.QuestionCount > 0
+    ORDER BY 
+        us.TotalVotes DESC, us.QuestionCount DESC
+)
+SELECT 
+    *
+FROM 
+    FinalResults
+WHERE 
+    GoldBadges > 0 OR SilverBadges > 0
+ORDER BY 
+    QuestionCount DESC, RecentPostViewCount DESC;

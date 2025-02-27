@@ -1,0 +1,80 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+        AND ws.ws_net_profit > (SELECT AVG(ws_net_profit) FROM web_sales WHERE ws_sales_price IS NOT NULL)
+),
+FilteredSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        rs.ws_sales_price,
+        rs.ws_net_profit
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rank <= 5
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        COALESCE(NULLIF(cd.cd_purchase_estimate, 0), 1) AS purchase_factor
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender IN ('M', 'F') 
+        AND cd.cd_marital_status IS NOT NULL
+),
+SalesSummary AS (
+    SELECT 
+        ci.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        web_sales ws ON ci.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        ci.c_customer_sk
+)
+SELECT 
+    cs.c_customer_id,
+    cs.total_orders,
+    COALESCE(ROUND(cs.total_net_profit, 2), 0.00) AS total_net_profit,
+    CASE 
+        WHEN cs.total_net_profit IS NULL THEN 'No Sales'
+        WHEN cs.total_net_profit > 1000 THEN 'High Roller'
+        WHEN cs.total_net_profit BETWEEN 500 AND 1000 THEN 'Mid Tier'
+        ELSE 'Budget Buyer'
+    END AS customer_status,
+    (SELECT AVG(total_net_profit) FROM SalesSummary) AS avg_customer_profit,
+    (SELECT COUNT(DISTINCT ws_item_sk)
+     FROM FilteredSales
+     WHERE ws_item_sk IN (SELECT DISTINCT ws_item_sk FROM FilteredSales)) AS filtered_item_count,
+    CASE 
+        WHEN filtered_item_count = 0 THEN 'No Items'
+        WHEN filtered_item_count < 50 THEN 'Low Diversity'
+        WHEN filtered_item_count BETWEEN 50 AND 100 THEN 'Moderate Diversity'
+        ELSE 'High Diversity'
+    END AS item_diversity
+FROM 
+    SalesSummary cs
+JOIN 
+    CustomerInfo ci ON cs.c_customer_sk = ci.c_customer_sk
+ORDER BY 
+    cs.total_net_profit DESC
+LIMIT 10;

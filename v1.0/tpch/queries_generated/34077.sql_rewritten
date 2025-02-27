@@ -1,0 +1,32 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate,
+           o_orderpriority, o_clerk, o_shippriority, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate,
+           o.o_orderpriority, o.o_clerk, o.o_shippriority, oh.level + 1
+    FROM orders o
+    JOIN order_hierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > cast('1998-10-01' as date) - INTERVAL '1 year'
+)
+SELECT 
+    c.c_name AS customer_name,
+    COUNT(DISTINCT oh.o_orderkey) AS total_orders,
+    SUM(oh.o_totalprice) AS total_spent,
+    AVG(oh.o_totalprice) AS average_order_value,
+    MAX(oh.o_orderdate) AS last_order_date,
+    RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(oh.o_totalprice) DESC) AS rank_within_nation
+FROM customer c
+LEFT JOIN order_hierarchy oh ON c.c_custkey = oh.o_custkey
+LEFT JOIN lineitem l ON l.l_orderkey = oh.o_orderkey
+LEFT JOIN partsupp ps ON ps.ps_partkey = l.l_partkey
+LEFT JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+WHERE l.l_discount > 0 AND (s.s_acctbal IS NULL OR s.s_acctbal > 1000)
+GROUP BY c.c_custkey
+HAVING SUM(oh.o_totalprice) IS NOT NULL
+   AND COUNT(DISTINCT oh.o_orderkey) > 5
+ORDER BY total_spent DESC
+LIMIT 10;

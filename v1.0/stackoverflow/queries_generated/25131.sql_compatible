@@ -1,0 +1,59 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        UNNEST(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tag_names ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_names
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+    GROUP BY 
+        p.Id, pt.Name, p.Title, p.Body, p.CreationDate
+),
+FilteredPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+)
+
+SELECT 
+    f.PostId,
+    f.Title,
+    f.Body,
+    f.CreationDate,
+    f.CommentCount,
+    f.AnswerCount,
+    COALESCE(b.BadgeCount, 0) AS BadgeCount,
+    f.Tags
+FROM 
+    FilteredPosts f
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(Id) AS BadgeCount 
+    FROM 
+        Badges 
+    GROUP BY 
+        UserId
+) b ON f.OwnerUserId = b.UserId
+ORDER BY 
+    f.CreationDate DESC;

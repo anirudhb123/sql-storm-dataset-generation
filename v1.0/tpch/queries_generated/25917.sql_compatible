@@ -1,0 +1,36 @@
+
+SELECT 
+    p.p_name AS part_name,
+    s.s_name AS supplier_name,
+    CONCAT(s.s_address, ', ', n.n_name, ', ', r.r_name) AS full_address,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(l.l_discount) AS average_discount,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    MAX(o.o_orderdate) AS last_order_date,
+    STRING_AGG(DISTINCT p.p_type, ', ' ORDER BY p.p_type) AS part_types,
+    LENGTH(p.p_comment) AS comment_length
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    p.p_size > 10 AND 
+    s.s_acctbal > 5000 AND 
+    o.o_orderstatus = 'O'
+GROUP BY 
+    p.p_name, s.s_name, s.s_address, n.n_name, r.r_name, LENGTH(p.p_comment)
+HAVING 
+    total_quantity > 100
+ORDER BY 
+    total_quantity DESC, last_order_date DESC
+LIMIT 50;

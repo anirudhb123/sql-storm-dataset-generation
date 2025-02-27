@@ -1,0 +1,62 @@
+
+WITH RECURSIVE Date_Range AS (
+    SELECT MIN(d_date) AS start_date, MAX(d_date) AS end_date FROM date_dim
+    UNION ALL
+    SELECT DATEADD(DAY, 1, start_date), end_date FROM Date_Range WHERE start_date < end_date
+),
+Sales_Data AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        d.d_date AS sale_date
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY ws.ws_item_sk, d.d_date
+),
+Customer_Sales AS (
+    SELECT
+        c.c_customer_sk,
+        SUM(sd.total_sales) AS customer_total_sales,
+        COUNT(DISTINCT sd.sale_date) AS purchase_days
+    FROM customer c
+    JOIN Sales_Data sd ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+Ranked_Customers AS (
+    SELECT
+        cs.c_customer_sk,
+        cs.customer_total_sales,
+        cs.purchase_days,
+        DENSE_RANK() OVER (ORDER BY cs.customer_total_sales DESC) AS sales_rank
+    FROM Customer_Sales cs
+),
+Selected_Customers AS (
+    SELECT 
+        rc.c_customer_sk,
+        rc.customer_total_sales,
+        rc.purchase_days
+    FROM Ranked_Customers rc
+    WHERE rc.sales_rank <= 100
+)
+SELECT 
+    ca.ca_city,
+    SUM(SD.total_sales) AS total_sales,
+    AVG(SD.avg_sales_price) AS avg_sales_price,
+    COUNT(DISTINCT cs.ws_order_number) AS unique_order_count,
+    COALESCE(SUM(sr_return_quantity), 0) AS total_returns,
+    CASE 
+        WHEN SUM(SD.total_sales) IS NULL THEN 'No Sales'
+        ELSE CAST(SUM(SD.total_sales) AS VARCHAR) || ' Sales Recorded'
+    END AS sales_summary
+FROM Selected_Customers c
+JOIN web_sales cs ON c.c_customer_sk = cs.ws_bill_customer_sk
+LEFT JOIN store s ON cs.ws_store_sk = s.s_store_sk
+LEFT JOIN store_returns sr ON cs.ws_item_sk = sr.sr_item_sk
+JOIN customer_address ca ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN Sales_Data SD ON SD.ws_item_sk = cs.ws_item_sk
+WHERE ca.ca_city IS NOT NULL AND ca.ca_state = 'CA'
+GROUP BY ca.ca_city
+ORDER BY total_sales DESC
+WITH ROLLUP;

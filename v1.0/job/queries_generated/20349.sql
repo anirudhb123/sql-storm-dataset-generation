@@ -1,0 +1,48 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS actor_count_rank,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM aka_title a
+    JOIN cast_info c ON a.id = c.movie_id
+    GROUP BY a.id, a.title, a.production_year
+), 
+FilteredMovies AS (
+    SELECT 
+        rm.*,
+        COALESCE(NULLIF(rm.actor_count, 0), 1) AS adjusted_actor_count
+    FROM RankedMovies rm
+    WHERE rm.actor_count_rank <= 5
+), 
+MovieInfo AS (
+    SELECT 
+        f.title, 
+        f.production_year, 
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        f.adjusted_actor_count
+    FROM FilteredMovies f
+    LEFT JOIN movie_keyword mk ON mk.movie_id = f.id
+), 
+CompanyMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        ARRAY_AGG(DISTINCT cn.name) AS companies
+    FROM movie_companies m
+    JOIN company_name cn ON cn.id = m.company_id
+    GROUP BY m.movie_id
+)
+SELECT 
+    mi.title, 
+    mi.production_year, 
+    mi.keyword, 
+    cm.companies,
+    CASE 
+        WHEN mi.adjusted_actor_count > 10 THEN 'Blockbuster'
+        WHEN mi.adjusted_actor_count BETWEEN 5 AND 10 THEN 'Moderate Success'
+        ELSE 'Indie Flick'
+    END AS success_category,
+    COALESCE(NULLIF(ARRAY_LENGTH(cm.companies, 1), 0), 'No Companies') AS company_info
+FROM MovieInfo mi
+LEFT JOIN CompanyMovies cm ON mi.movie_id = cm.movie_id
+ORDER BY mi.production_year DESC, mi.adjusted_actor_count DESC;

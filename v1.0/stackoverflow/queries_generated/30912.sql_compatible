@@ -1,0 +1,66 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        Score,
+        CAST(Title AS VARCHAR(255)) AS FullTitle
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        CAST(r.FullTitle || ' -> ' || p.Title AS VARCHAR(255))
+    FROM 
+        Posts p 
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+
+RankedPosts AS (
+    SELECT 
+        p.*,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalUserPosts
+    FROM 
+        Posts p
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(rp.FullTitle, 'No Title') AS HierarchicalTitle,
+    rp.CreationDate,
+    rp.Score,
+    rp.UserPostRank,
+    rp.TotalUserPosts,
+    (SELECT COUNT(*) 
+     FROM Comments c 
+     WHERE c.PostId = rp.Id) AS CommentCount,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = rp.Id AND v.VoteTypeId = 2) AS UpVotes,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = rp.Id AND v.VoteTypeId = 3) AS DownVotes
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+WHERE 
+    rp.UserPostRank <= 5
+ORDER BY 
+    u.Reputation DESC, 
+    rp.Score DESC, 
+    HierarchicalTitle

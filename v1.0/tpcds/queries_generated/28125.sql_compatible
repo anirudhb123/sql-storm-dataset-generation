@@ -1,0 +1,58 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+), ProcessedOrders AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_bill_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        SUM(ws.ws_ext_sales_price) AS total_spent,
+        COUNT(ws.ws_item_sk) AS items_purchased
+    FROM 
+        web_sales ws
+    JOIN 
+        CustomerInfo c ON ws.ws_bill_customer_sk = c.c_customer_id
+    GROUP BY 
+        ws.ws_order_number, c.c_customer_id, c.c_first_name, c.c_last_name
+), Benchmark AS (
+    SELECT 
+        pi.ca_country AS c_country,
+        AVG(po.total_spent) AS avg_total_spent,
+        SUM(po.items_purchased) AS total_items_purchased,
+        COUNT(po.ws_order_number) AS number_of_orders
+    FROM 
+        ProcessedOrders po
+    JOIN 
+        CustomerInfo pi ON po.ws_bill_customer_sk = pi.c_customer_id
+    GROUP BY 
+        pi.ca_country
+)
+SELECT 
+    B.c_country,
+    B.avg_total_spent,
+    B.total_items_purchased,
+    B.number_of_orders,
+    CASE 
+        WHEN B.avg_total_spent > 1000 THEN 'High-Value Customers'
+        WHEN B.avg_total_spent BETWEEN 500 AND 1000 THEN 'Medium-Value Customers'
+        ELSE 'Low-Value Customers' 
+    END AS customer_value_segment
+FROM 
+    Benchmark B
+ORDER BY 
+    B.total_items_purchased DESC, 
+    B.avg_total_spent DESC;

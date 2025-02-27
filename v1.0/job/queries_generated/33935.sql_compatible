@@ -1,0 +1,88 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5  
+),
+actors_with_movies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        SUM(CASE WHEN ci.nr_order IS NOT NULL THEN 1 ELSE 0 END) AS movies_ordered
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN 
+        movie_companies mc ON ci.movie_id = mc.movie_id
+    LEFT JOIN 
+        aka_title at ON ci.movie_id = at.id
+    WHERE 
+        ci.role_id = (SELECT id FROM role_type WHERE role = 'actor')
+    GROUP BY 
+        a.id, a.name
+),
+ranked_actors AS (
+    SELECT 
+        actor_id, 
+        name, 
+        total_movies, 
+        movies_ordered,
+        ROW_NUMBER() OVER (ORDER BY total_movies DESC) AS ranking
+    FROM 
+        actors_with_movies
+),
+movie_keywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk 
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    aa.actor_id,
+    aa.name,
+    aa.total_movies,
+    aa.movies_ordered,
+    ra.ranking,
+    mh.title AS linked_movie_title,
+    mh.production_year AS linked_year,
+    mk.keywords
+FROM 
+    ranked_actors aa
+LEFT JOIN 
+    movie_hierarchy mh ON aa.total_movies > 0
+LEFT JOIN 
+    movie_keywords mk ON mh.movie_id = mk.movie_id
+WHERE 
+    aa.movies_ordered > 1
+    OR (mh.title IS NOT NULL AND mh.production_year >= 2000)
+ORDER BY 
+    ra.ranking, linked_year DESC;

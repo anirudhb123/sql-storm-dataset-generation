@@ -1,0 +1,72 @@
+WITH RECURSIVE CTE_UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        B.Name AS BadgeName,
+        B.Class,
+        B.Date,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY B.Date DESC) AS BadgeRank
+    FROM 
+        Users U
+    JOIN 
+        Badges B ON U.Id = B.UserId
+),
+CTE_PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        P.ViewCount,
+        MAX(P.CreationDate) AS RecentActivity
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= DATEADD(YEAR, -1, GETDATE()) -- Posts from the last year
+    GROUP BY 
+        P.Id, P.OwnerUserId, P.ViewCount
+),
+CTE_TransformTags AS (
+    SELECT 
+        P.Id AS PostId,
+        STRING_AGG(T.TagName, ', ') AS TagsList
+    FROM 
+        Posts P
+    CROSS APPLY 
+        STRING_SPLIT(SUBSTRING(P.Tags, 2, LEN(P.Tags) - 2), '><') AS T
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+    SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+    SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+    PS.CommentCount,
+    PS.UpVoteCount,
+    PS.DownVoteCount,
+    PS.ViewCount,
+    PS.RecentActivity,
+    TT.TagsList
+FROM 
+    Users U
+LEFT JOIN 
+    CTE_UserBadges B ON U.Id = B.UserId AND B.BadgeRank = 1
+LEFT JOIN 
+    CTE_PostStats PS ON U.Id = PS.OwnerUserId
+LEFT JOIN 
+    CTE_TransformTags TT ON PS.PostId = TT.PostId
+WHERE 
+    U.Reputation > 1000 -- User reputation filter
+GROUP BY 
+    U.Id, U.DisplayName, PS.CommentCount, PS.UpVoteCount, PS.DownVoteCount, PS.ViewCount, PS.RecentActivity, TT.TagsList
+ORDER BY 
+    U.DisplayName;

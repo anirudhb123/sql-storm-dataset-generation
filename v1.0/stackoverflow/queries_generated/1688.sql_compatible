@@ -1,0 +1,68 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.CreationDate, 
+        P.ViewCount, 
+        P.OwnerUserId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN V.Id IS NOT NULL THEN 1 END) AS UpVoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 2 
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, P.OwnerUserId
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId AS EditorUserId,
+        PH.CreationDate AS EditDate,
+        PH.Comment,
+        P.Title
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+)
+SELECT 
+    UR.DisplayName,
+    UR.Reputation,
+    RP.Title AS PostTitle,
+    RP.ViewCount AS TotalViews,
+    RP.CommentCount AS TotalComments,
+    RP.UpVoteCount AS TotalUpVotes,
+    (SELECT COUNT(*) FROM PostHistoryDetails PHD WHERE PHD.PostId = RP.PostId) AS TotalEdits,
+    PH.EditDate,
+    PH.Comment AS EditComment
+FROM 
+    UserReputation UR
+JOIN 
+    RecentPosts RP ON UR.UserId = RP.OwnerUserId
+LEFT JOIN 
+    PostHistoryDetails PH ON RP.PostId = PH.PostId
+WHERE 
+    UR.Reputation > 1000 
+AND 
+    (PH.EditComment LIKE '%helpful%' OR PH.Comment IS NULL)
+ORDER BY 
+    UR.Reputation DESC, 
+    RP.ViewCount DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

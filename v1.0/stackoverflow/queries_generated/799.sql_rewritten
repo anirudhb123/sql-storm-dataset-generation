@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS PostRank,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        COALESCE((SELECT MAX(B.Date) FROM Badges B WHERE B.UserId = P.OwnerUserId), '1970-01-01') AS LastBadgeDate
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+
+PostDetails AS (
+    SELECT 
+        RP.Id,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        RP.CommentCount,
+        RP.PostRank,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(Tg.TagName, 'Uncategorized') AS TagName
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        Users U ON RP.OwnerUserId = U.Id
+    LEFT JOIN 
+        (SELECT 
+            PostId,
+            STRING_AGG(TagName, ', ') AS TagName
+         FROM 
+            Tags T 
+         JOIN 
+            unnest(string_to_array((SELECT Tags FROM Posts WHERE Id = T.Id), ',')) AS TagName ON T.TagName = TagName
+         GROUP BY 
+            PostId) Tg ON RP.Id = Tg.PostId
+)
+
+SELECT 
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    PD.ViewCount,
+    PD.CommentCount,
+    PD.PostRank,
+    PD.DisplayName AS OwnerDisplayName,
+    PD.Reputation,
+    PD.LastBadgeDate,
+    PD.TagName
+FROM 
+    PostDetails PD
+WHERE 
+    PD.PostRank = 1
+    AND PD.Score > 0
+    AND (SELECT COUNT(*) FROM Votes V WHERE V.PostId = PD.Id AND V.VoteTypeId = 2) > 10
+UNION ALL
+SELECT 
+    'No Highly Rated Posts' AS Title,
+    cast('2024-10-01 12:34:56' as timestamp) AS CreationDate,
+    NULL AS Score,
+    NULL AS ViewCount,
+    NULL AS CommentCount,
+    NULL AS PostRank,
+    NULL AS OwnerDisplayName,
+    NULL AS Reputation,
+    NULL AS LastBadgeDate,
+    NULL AS TagName
+WHERE 
+    NOT EXISTS (SELECT 1 FROM PostDetails WHERE PostRank = 1 AND Score > 0)
+ORDER BY 
+    CreationDate DESC;

@@ -1,0 +1,59 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5  
+)
+SELECT 
+    m.title AS Movie_Title,
+    m.production_year AS Production_Year,
+    ak.name AS Actor_Name,
+    ak.id AS Actor_ID,
+    COUNT(DISTINCT mc.company_id) AS Production_Companies_Count,
+    SUM(CASE WHEN mk.keyword IS NOT NULL THEN 1 ELSE 0 END) AS Keywords_Count,
+    ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY ak.name) AS Actor_Rank,
+    COALESCE(SUM(mi.info IS NOT NULL AND mi.note IS NOT NULL), 0) AS Info_Notes_Count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS Keywords_List
+FROM 
+    movie_hierarchy m
+JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON m.movie_id = mi.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+GROUP BY 
+    m.id, m.title, m.production_year, ak.name, ak.id
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    m.production_year DESC, m.title;

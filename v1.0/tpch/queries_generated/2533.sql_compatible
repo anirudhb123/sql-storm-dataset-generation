@@ -1,0 +1,83 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderstatus IN ('O', 'F')
+), 
+
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > 1000
+    GROUP BY 
+        s.s_suppkey
+), 
+
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+)
+
+SELECT 
+    r.o_orderkey,
+    r.o_orderstatus,
+    r.o_totalprice,
+    c.c_name AS customer_name,
+    s.s_suppkey AS supplier_id,
+    ss.total_supply_cost,
+    cu.total_spent AS customer_spending,
+    CASE 
+        WHEN r.o_orderstatus = 'O' THEN 'Order Confirmed' 
+        ELSE 'Order Fulfilled' 
+    END AS order_status_message
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    CustomerOrders cu ON r.o_orderkey = (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey = cu.c_custkey 
+        ORDER BY o.o_orderdate DESC 
+        LIMIT 1
+    )
+LEFT JOIN 
+    SupplierSummary ss ON ss.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+        WHERE l.l_orderkey = r.o_orderkey 
+        LIMIT 1
+    )
+WHERE 
+    r.order_rank <= 10
+ORDER BY 
+    r.o_orderdate DESC, 
+    r.o_totalprice DESC;

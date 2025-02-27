@@ -1,0 +1,59 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        1 AS level
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_net_profit > 0
+
+    UNION ALL
+
+    SELECT
+        cs.cs_order_number,
+        cs.cs_sold_date_sk,
+        cs.cs_item_sk,
+        cs.cs_quantity,
+        cs.cs_net_profit,
+        sd.level + 1
+    FROM
+        catalog_sales cs
+    JOIN SalesData sd ON cs.cs_order_number = sd.ws_order_number
+    WHERE
+        cs.cs_net_profit > 0
+        AND sd.level < 5  
+),
+CustomerData AS (
+    SELECT
+        c.c_customer_id,
+        d.d_year,
+        SUM(sd.ws_net_profit) AS total_profit
+    FROM
+        SalesData sd
+    JOIN customer c ON c.c_customer_sk = sd.ws_item_sk
+    JOIN date_dim d ON d.d_date_sk = sd.ws_sold_date_sk
+    GROUP BY
+        c.c_customer_id,
+        d.d_year
+)
+SELECT
+    cd.c_customer_id,
+    cd.d_year,
+    cd.total_profit,
+    COALESCE(hd.hd_buy_potential, 'Unknown') AS buy_potential,
+    ROW_NUMBER() OVER (PARTITION BY cd.d_year ORDER BY cd.total_profit DESC) AS rank
+FROM
+    CustomerData cd
+LEFT JOIN household_demographics hd ON hd.hd_demo_sk = cd.c_customer_id
+WHERE
+    cd.total_profit > (
+        SELECT AVG(total_profit) FROM CustomerData
+    )
+ORDER BY
+    cd.d_year, rank
+FETCH FIRST 100 ROWS ONLY;

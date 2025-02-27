@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = p.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' 
+        AND p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId
+),
+UserEngagement AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+BadgedUsers AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        MAX(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        MAX(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+FinalReport AS (
+    SELECT 
+        ue.DisplayName,
+        ue.Reputation,
+        COALESCE(bu.BadgeCount, 0) AS TotalBadges,
+        bu.GoldBadges,
+        bu.SilverBadges,
+        bu.BronzeBadges,
+        COUNT(DISTINCT rp.PostId) AS PostCount,
+        SUM(rp.ViewCount) AS TotalViews,
+        SUM(rp.Score) AS TotalScore,
+        SUM(ue.UpVotes) - SUM(ue.DownVotes) AS NetVotes,
+        STRING_AGG(DISTINCT rp.Tags, '; ') AS AllTags
+    FROM 
+        UserEngagement ue
+    LEFT JOIN 
+        BadgedUsers bu ON ue.Id = bu.UserId
+    LEFT JOIN 
+        RankedPosts rp ON ue.Id = rp.OwnerUserId
+    GROUP BY 
+        ue.DisplayName, ue.Reputation, bu.BadgeCount, bu.GoldBadges, bu.SilverBadges, bu.BronzeBadges
+)
+SELECT 
+    f.DisplayName,
+    f.Reputation,
+    CASE 
+        WHEN f.TotalBadges > 0 THEN 'Has Badges'
+        ELSE 'No Badges'
+    END AS BadgesStatus,
+    f.PostCount,
+    f.TotalViews,
+    f.TotalScore,
+    f.NetVotes,
+    CASE 
+        WHEN f.TotalScore > 100 THEN 'High Scorer'
+        WHEN f.TotalScore BETWEEN 1 AND 100 THEN 'Moderate Scorer'
+        ELSE 'Low Scorer'
+    END AS ScoringCategory,
+    COALESCE(f.AllTags, 'No Tags') AS DistinctTags
+FROM 
+    FinalReport f
+ORDER BY 
+    f.Reputation DESC, 
+    f.PostCount DESC;

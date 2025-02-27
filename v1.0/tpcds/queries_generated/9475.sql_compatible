@@ -1,0 +1,42 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2451545 AND 2451879  
+    GROUP BY ws_item_sk
+),
+Top10Items AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        rs.total_sales,
+        rs.order_count
+    FROM RankedSales rs
+    JOIN item i ON rs.ws_item_sk = i.i_item_sk
+    WHERE rs.rank <= 10
+),
+SalesWithDemographics AS (
+    SELECT 
+        ti.i_item_id,
+        ti.i_item_desc,
+        td.cd_gender,
+        td.cd_marital_status,
+        SUM(ws.ws_ext_sales_price) AS demographic_sales
+    FROM Top10Items ti
+    JOIN web_sales ws ON ti.ws_item_sk = ws.ws_item_sk
+    JOIN customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    JOIN customer_demographics td ON c.c_current_cdemo_sk = td.cd_demo_sk
+    GROUP BY ti.i_item_id, ti.i_item_desc, td.cd_gender, td.cd_marital_status
+)
+SELECT 
+    i_item_id, 
+    i_item_desc, 
+    cd_gender, 
+    cd_marital_status, 
+    demographic_sales
+FROM SalesWithDemographics
+ORDER BY demographic_sales DESC;

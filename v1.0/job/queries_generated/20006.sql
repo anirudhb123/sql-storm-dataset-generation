@@ -1,0 +1,90 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        c.note AS cast_note,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS rn,
+        COALESCE(a.name, 'Unknown') AS actor_name
+    FROM 
+        cast_info c
+    LEFT JOIN aka_name a ON c.person_id = a.person_id
+),
+
+ComplicatedPredicates AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COALESCE(CAST(i.info AS VARCHAR), 'N/A') AS movie_info,
+        CASE 
+            WHEN k.keyword IS NOT NULL THEN 'Contains: ' || k.keyword 
+            ELSE 'No Keywords' 
+        END AS keyword_info
+    FROM 
+        aka_title m
+    LEFT JOIN movie_info i ON m.id = i.movie_id AND i.info_type_id = (SELECT id FROM info_type WHERE info = 'Director' LIMIT 1)
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id 
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE 
+        m.production_year IS NOT NULL AND m.kind_id = 1
+),
+
+OuterJoinExample AS (
+    SELECT 
+        cte.movie_id,
+        cte.actor_name,
+        cp.title,
+        cp.production_year,
+        cp.movie_info,
+        cp.keyword_info
+    FROM 
+        RecursiveCTE cte 
+    FULL OUTER JOIN ComplicatedPredicates cp ON cte.movie_id = cp.movie_id
+),
+
+FilteredResults AS (
+    SELECT 
+        movie_id,
+        actor_name,
+        title,
+        production_year,
+        movie_info,
+        keyword_info
+    FROM 
+        OuterJoinExample
+    WHERE 
+        production_year >= 2000 AND actor_name IS NOT NULL
+    ORDER BY 
+        production_year DESC, actor_name
+)
+
+SELECT 
+    movie_id,
+    actor_name,
+    title,
+    production_year,
+    movie_info,
+    keyword_info,
+    CASE 
+        WHEN movie_info LIKE '%Academy%' THEN 'Awarded'
+        WHEN keyword_info ILIKE '%action%' OR keyword_info ILIKE '%drama%' THEN 'Genre: Action/Drama'
+        ELSE 'Other'
+    END AS classification
+FROM 
+    FilteredResults
+WHERE 
+    NOT (actor_name IS NULL AND title IS NULL)
+UNION ALL
+SELECT 
+    movie_id,
+    actor_name,
+    title,
+    production_year,
+    movie_info,
+    keyword_info,
+    'No Data' AS classification
+FROM 
+    FilteredResults
+WHERE 
+    (movie_id IS NULL OR actor_name IS NULL OR title IS NULL)
+ORDER BY 
+    movie_id, actor_name;

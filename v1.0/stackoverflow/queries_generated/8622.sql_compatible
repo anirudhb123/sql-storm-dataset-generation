@@ -1,0 +1,56 @@
+
+WITH PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        P.CommentCount,
+        ROW_NUMBER() OVER (ORDER BY P.Score DESC, P.ViewCount DESC) AS Rank,
+        P.PostTypeId  -- Added PostTypeId to GROUP BY
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 AND P.Score > 0 AND P.ViewCount > 100
+),
+PostDetails AS (
+    SELECT 
+        PP.PostId,
+        PP.Title,
+        PP.OwnerDisplayName,
+        PP.ViewCount,
+        PP.Score,
+        PP.AnswerCount,
+        PP.CommentCount,
+        COALESCE(PT.Name, 'Unspecified') AS PostTypeName,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = PP.PostId AND V.VoteTypeId = 2) AS UpvoteCount,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = PP.PostId AND V.VoteTypeId = 3) AS DownvoteCount,
+        (SELECT STRING_AGG(T.TagName, ', ') FROM Tags T WHERE T.Id IN (SELECT CAST(UNNEST(string_to_array(P.Tags, ',')) AS INTEGER) FROM Posts P WHERE P.Id = PP.PostId)) AS TagList
+    FROM 
+        PopularPosts PP
+    LEFT JOIN 
+        PostTypes PT ON PP.PostTypeId = PT.Id
+)
+SELECT 
+    PD.PostId,
+    PD.Title,
+    PD.OwnerDisplayName,
+    PD.ViewCount,
+    PD.Score,
+    PD.AnswerCount,
+    PD.CommentCount,
+    PD.PostTypeName,
+    PD.UpvoteCount,
+    PD.DownvoteCount,
+    PD.TagList
+FROM 
+    PostDetails PD
+WHERE 
+    PD.Rank <= 50
+ORDER BY 
+    PD.Score DESC, PD.ViewCount DESC;

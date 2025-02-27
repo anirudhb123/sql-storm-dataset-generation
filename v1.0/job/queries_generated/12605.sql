@@ -1,0 +1,28 @@
+-- SQL Query for Performance Benchmarking using JOIN operations on multiple tables
+
+SELECT 
+    t.title AS movie_title,
+    ak.name AS actor_name,
+    ct.kind AS company_type,
+    mi.info AS movie_info,
+    k.keyword AS movie_keyword
+FROM 
+    title t
+JOIN 
+    aka_title ak_t ON t.id = ak_t.movie_id
+JOIN 
+    cast_info c ON t.id = c.movie_id
+JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+ORDER BY 
+    t.title, ak.name;

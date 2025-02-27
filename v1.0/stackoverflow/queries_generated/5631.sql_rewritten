@@ -1,0 +1,72 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN p.Score ELSE 0 END) AS TotalScore,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS HistoryCount,
+        MAX(u.LastAccessDate) AS LastActiveDate,
+        SUM(b.Class) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON u.Id = ph.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        pt.Name AS PostType,
+        COUNT(c.Id) AS Comments,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, pt.Name, p.Title, p.CreationDate, p.Score, p.ViewCount
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostCount,
+    ua.TotalScore,
+    ua.CommentCount,
+    ua.HistoryCount,
+    ua.LastActiveDate,
+    ua.TotalBadges,
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score AS PostScore,
+    pd.ViewCount,
+    pd.PostType,
+    pd.Comments AS CommentCount,
+    pd.VoteCount
+FROM 
+    UserActivity ua
+JOIN 
+    PostDetails pd ON ua.UserId = pd.PostId
+ORDER BY 
+    ua.TotalScore DESC, pd.Score DESC
+LIMIT 50;

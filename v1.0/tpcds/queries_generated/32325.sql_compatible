@@ -1,0 +1,76 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.sold_date_sk, 
+        ws.item_sk, 
+        ws.ws_quantity AS total_quantity, 
+        ws.ws_net_paid AS total_revenue, 
+        DENSE_RANK() OVER (PARTITION BY ws.item_sk ORDER BY ws.sold_date_sk) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    UNION ALL
+    SELECT 
+        ws.sold_date_sk, 
+        ws.item_sk, 
+        s.total_quantity + ws.ws_quantity, 
+        s.total_revenue + ws.ws_net_paid, 
+        s.sales_rank
+    FROM 
+        web_sales ws
+    JOIN SalesCTE s ON ws.item_sk = s.item_sk 
+    WHERE 
+        ws.sold_date_sk > s.sold_date_sk 
+        AND s.sales_rank < 3
+), 
+AddressSales AS (
+    SELECT 
+        ca.city, 
+        SUM(ws.ws_quantity) AS total_quantity, 
+        SUM(ws.ws_net_paid) AS total_revenue
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        ca.city
+),
+FilteredSales AS (
+    SELECT 
+        city, 
+        total_quantity, 
+        total_revenue
+    FROM 
+        AddressSales
+    WHERE 
+        total_revenue IS NOT NULL
+),
+TopCities AS (
+    SELECT 
+        city, 
+        total_quantity, 
+        total_revenue, 
+        ROW_NUMBER() OVER (ORDER BY total_revenue DESC) AS city_rank
+    FROM 
+        FilteredSales
+)
+SELECT 
+    tc.city, 
+    tc.total_quantity, 
+    tc.total_revenue,
+    COALESCE(SUM(s.total_quantity), 0) AS additional_sales
+FROM 
+    TopCities tc
+LEFT JOIN 
+    SalesCTE s ON s.item_sk IN (SELECT i_item_sk FROM item WHERE i_manufact = 'ACME')
+WHERE 
+    tc.city_rank <= 5
+GROUP BY 
+    tc.city, 
+    tc.total_quantity, 
+    tc.total_revenue
+ORDER BY 
+    tc.total_revenue DESC;

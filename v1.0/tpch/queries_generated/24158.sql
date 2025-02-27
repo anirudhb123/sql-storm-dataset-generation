@@ -1,0 +1,61 @@
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY s.s_acctbal DESC) AS rank
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE
+        s.s_acctbal IS NOT NULL AND ps.ps_availqty > 0
+),
+AggRes AS (
+    SELECT
+        n.n_name,
+        COUNT(DISTINCT c.c_custkey) AS num_customers,
+        SUM(o.o_totalprice) AS total_revenue
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE
+        o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY
+        n.n_name
+),
+MaxRevenue AS (
+    SELECT
+        MAX(total_revenue) AS max_revenue
+    FROM
+        AggRes
+)
+SELECT
+    n.n_name,
+    a.num_customers,
+    COALESCE(r.rank, 'Not Ranked') AS supplier_rank,
+    a.total_revenue,
+    (a.total_revenue - COALESCE(m.max_revenue, 0)) / NULLIF(a.total_revenue, 0) AS revenue_variation
+FROM
+    AggRes a
+JOIN
+    nation n ON n.n_name = a.n_name
+LEFT JOIN
+    RankedSuppliers r ON r.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps
+        JOIN part p ON ps.ps_partkey = p.p_partkey 
+        WHERE p.p_container = 'BOX' 
+        AND p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_type LIKE '%metal%')
+    )
+CROSS JOIN
+    MaxRevenue m
+WHERE
+    n.n_regionkey IS NOT NULL
+ORDER BY
+    n.n_name, supplier_rank DESC;

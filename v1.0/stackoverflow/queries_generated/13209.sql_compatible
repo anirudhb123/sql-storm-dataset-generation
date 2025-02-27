@@ -1,0 +1,59 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COALESCE(NULLIF(P.AcceptedAnswerId, -1), 0) AS AcceptedAnswerStatus,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount, P.AcceptedAnswerId
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.PostCount,
+    U.CommentCount,
+    U.LastPostDate,
+    P.PostId,
+    P.Title,
+    P.Score,
+    P.ViewCount,
+    P.AcceptedAnswerStatus,
+    P.VoteCount,
+    P.CommentCount,
+    P.LastEditDate
+FROM 
+    UserStats U
+JOIN 
+    PostStats P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, 
+    P.Score DESC;

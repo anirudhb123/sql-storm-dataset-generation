@@ -1,0 +1,58 @@
+
+WITH ranked_lineitems AS (
+    SELECT 
+        l.OrderKey,
+        l.PartKey,
+        l.SuppKey,
+        l.Linenumber,
+        l.Quantity,
+        l.ExtendedPrice,
+        l.Discount,
+        l.Tax,
+        l.ReturnFlag,
+        l.LineStatus,
+        l.ShipDate,
+        l.CommitDate,
+        l.ReceiptDate,
+        l.ShipInstruct,
+        l.ShipMode,
+        ROW_NUMBER() OVER (PARTITION BY l.OrderKey ORDER BY l.Linenumber) AS rn
+    FROM lineitem l
+    WHERE l.ReturnFlag = 'R'
+),
+total_order_amounts AS (
+    SELECT 
+        o.OrderKey,
+        SUM(l.ExtendedPrice * (1 - l.Discount)) AS TotalAmount
+    FROM orders o
+    JOIN lineitem l ON o.OrderKey = l.OrderKey
+    WHERE o.OrderStatus = 'O'
+    GROUP BY o.OrderKey
+),
+supplier_stats AS (
+    SELECT 
+        s.SuppKey,
+        COUNT(DISTINCT ps.PartKey) AS DistinctPartsSupplied,
+        AVG(ps.PS_SupplyCost) AS AvgSupplyCost
+    FROM supplier s
+    JOIN partsupp ps ON s.SuppKey = ps.SuppKey
+    GROUP BY s.SuppKey
+)
+SELECT 
+    n.Name AS NationName,
+    r.Name AS RegionName,
+    COUNT(DISTINCT c.CustKey) AS TotalCustomers,
+    SUM(ts.TotalAmount) AS TotalSales,
+    COALESCE(AVG(ss.AvgSupplyCost), 0) AS AverageSupplierCost,
+    STRING_AGG(DISTINCT p.Name, ', ') AS PartNames
+FROM nation n
+JOIN region r ON n.RegionKey = r.RegionKey
+LEFT JOIN customer c ON c.NationKey = n.NationKey
+LEFT JOIN total_order_amounts ts ON c.CustKey = ts.OrderKey
+LEFT JOIN ranked_lineitems rl ON rl.PartKey IN (SELECT ps.PartKey FROM partsupp ps WHERE ps.SuppKey IN (SELECT s.SuppKey FROM supplier s WHERE s.NationKey = n.NationKey))
+LEFT JOIN supplier_stats ss ON ss.SuppKey = rl.SuppKey
+JOIN part p ON rl.PartKey = p.PartKey
+WHERE r.Name LIKE '%East%'
+GROUP BY n.Name, r.Name
+HAVING COUNT(DISTINCT c.CustKey) > 10
+ORDER BY TotalSales DESC;

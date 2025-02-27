@@ -1,0 +1,49 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS level
+    FROM orders
+    WHERE o_orderdate >= '2022-01-01'
+    
+    UNION ALL
+    
+    SELECT o.orderkey, o.custkey, o.orderdate, o.totalprice, h.level + 1
+    FROM orders o
+    JOIN OrderHierarchy h ON o.custkey = h.o_custkey
+    WHERE o.orderdate > h.o_orderdate
+),
+SupplierSummary AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+CustomerRevenue AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_revenue
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+RankedProducts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, 
+           RANK() OVER (PARTITION BY p.p_brand ORDER BY SUM(l.l_extendedprice) DESC) AS product_rank
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+)
+SELECT 
+    ch.o_custkey,
+    SUM(ch.o_totalprice) AS total_order_value,
+    CASE
+        WHEN SUM(ch.o_totalprice) IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status,
+    rs.p_partkey,
+    rs.product_rank,
+    ss.total_supply_cost,
+    cr.total_revenue
+FROM OrderHierarchy ch
+JOIN RankedProducts rs ON rs.product_rank <= 5
+LEFT JOIN SupplierSummary ss ON ss.s_suppkey = (SELECT ps_suppkey FROM partsupp WHERE ps_partkey = rs.p_partkey LIMIT 1)
+LEFT JOIN CustomerRevenue cr ON cr.c_custkey = ch.o_custkey
+GROUP BY ch.o_custkey, rs.p_partkey, rs.product_rank, ss.total_supply_cost, cr.total_revenue
+HAVING SUM(ch.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders WHERE o_orderdate >= '2022-01-01')
+ORDER BY total_order_value DESC, rs.product_rank;

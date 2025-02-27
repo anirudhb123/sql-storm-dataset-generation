@@ -1,0 +1,60 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT Id, PostTypeId, ParentId, Title, Score, CreationDate,
+           1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.PostTypeId, p.ParentId, p.Title, p.Score, p.CreationDate,
+           h.Level + 1
+    FROM Posts p
+    INNER JOIN PostHierarchy h ON p.ParentId = h.Id
+),
+UserBadges AS (
+    SELECT UserId, COUNT(*) AS BadgeCount
+    FROM Badges
+    GROUP BY UserId
+),
+PostVoteSummary AS (
+    SELECT PostId, 
+           SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+           COUNT(*) AS TotalVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostClosureInfo AS (
+    SELECT ph.Id AS PostId, 
+           ph.Title, 
+           ph.CreationDate,
+           ph.Score,
+           p.IsClosed,
+           COALESCE(b.BadgeCount, 0) AS UserBadgeCount,
+           COALESCE(vs.UpVotes, 0) AS UpVotes,
+           COALESCE(vs.DownVotes, 0) AS DownVotes
+    FROM Posts ph
+    LEFT JOIN (
+        SELECT PostId, 
+               MAX(ClosedDate) IS NOT NULL AS IsClosed
+        FROM Posts
+        GROUP BY PostId
+    ) p ON ph.Id = p.PostId
+    LEFT JOIN UserBadges b ON ph.OwnerUserId = b.UserId
+    LEFT JOIN PostVoteSummary vs ON ph.Id = vs.PostId
+)
+SELECT p.Id, 
+       p.Title, 
+       p.Score, 
+       p.CreationDate,
+       ph.Level,
+       p.UserBadgeCount,
+       (p.UpVotes - p.DownVotes) AS NetVotes,
+       CASE 
+           WHEN p.IsClosed THEN 'Closed' 
+           ELSE 'Open' 
+       END AS PostStatus
+FROM PostClosureInfo p
+JOIN PostHierarchy h ON p.PostId = h.Id
+WHERE p.UserBadgeCount > 0 
+AND h.Level <= 3
+ORDER BY NetVotes DESC, p.CreationDate DESC
+FETCH FIRST 10 ROWS ONLY;

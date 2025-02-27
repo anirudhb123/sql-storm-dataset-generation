@@ -1,0 +1,51 @@
+
+WITH RecursiveSales AS (
+    SELECT ws_item_sk, 
+           SUM(ws_quantity) AS total_sales, 
+           RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price * ws_quantity) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+SalesAnalysis AS (
+    SELECT ws_ws_order_number, 
+           ws_ship_mode_sk, 
+           ws_item_sk, 
+           ws_net_profit, 
+           ws_net_paid_inc_tax,
+           COALESCE(sm_code, 'N/A') AS ship_mode,
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS profit_rank
+    FROM web_sales
+    LEFT JOIN ship_mode ON web_sales.ws_ship_mode_sk = ship_mode.sm_ship_mode_sk
+),
+SelectedSales AS (
+    SELECT sa.ws_ws_order_number, 
+           sa.shipping_mode, 
+           SUM(sa.ws_net_profit) AS total_profit, 
+           AVG(sa.ws_net_paid_inc_tax) AS average_net_paid
+    FROM SalesAnalysis sa
+    WHERE sa.profit_rank <= 10
+    GROUP BY sa.ws_ws_order_number, sa.ship_mode
+),
+HighestSale AS (
+    SELECT MAX(total_profit) AS max_profit, 
+           MIN(average_net_paid) AS min_average_net_paid
+    FROM SelectedSales
+),
+CustomerReturns AS (
+    SELECT cr_returning_customer_sk, 
+           COUNT(cr_returning_customer_sk) AS return_count,
+           SUM(cr_return_amt) AS total_returned_amount
+    FROM catalog_returns
+    GROUP BY cr_returning_customer_sk
+)
+SELECT ca.ca_city, 
+       ca.ca_state,
+       COALESCE(cr.return_count, 0) AS return_count,
+       COALESCE(cr.total_returned_amount, 0) AS total_returned_amount,
+       hs.max_profit,
+       hs.min_average_net_paid
+FROM customer_address ca
+LEFT JOIN CustomerReturns cr ON ca.ca_address_sk = cr.cr_returning_customer_sk
+JOIN HighestSale hs ON hs.max_profit IS NOT NULL
+WHERE ca.ca_state IS NOT NULL
+ORDER BY ca.ca_city, return_count DESC;

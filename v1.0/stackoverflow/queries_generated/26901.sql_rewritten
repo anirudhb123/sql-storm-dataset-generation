@@ -1,0 +1,62 @@
+WITH PostInfo AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        CASE
+            WHEN p.PostTypeId = 1 THEN 'Question'
+            WHEN p.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostType,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+),
+PostTags AS (
+    SELECT
+        PostId,
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><')) AS Tag
+    FROM
+        PostInfo
+),
+PostVoteCounts AS (
+    SELECT
+        PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM
+        Votes v
+    JOIN
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY
+        PostId
+)
+SELECT
+    pi.PostId,
+    pi.Title,
+    pi.OwnerDisplayName,
+    pi.OwnerReputation,
+    pi.CreationDate,
+    pi.PostType,
+    COALESCE(pt.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(pt.DownVotes, 0) AS TotalDownVotes,
+    STRING_AGG(DISTINCT pt.Tag, ', ') AS Tags
+FROM
+    PostInfo pi
+LEFT JOIN
+    PostVoteCounts pt ON pi.PostId = pt.PostId
+LEFT JOIN
+    PostTags tg ON pi.PostId = tg.PostId
+GROUP BY
+    pi.PostId, pi.Title, pi.OwnerDisplayName, pi.OwnerReputation, pi.CreationDate, pi.PostType, pt.UpVotes, pt.DownVotes
+ORDER BY
+    TotalUpVotes DESC, TotalDownVotes ASC
+LIMIT 100;

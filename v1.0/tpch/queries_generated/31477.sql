@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+),
+RegionNation AS (
+    SELECT n.n_nationkey, r.r_regionkey, r.r_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, r.r_regionkey, r.r_name
+)
+SELECT rh.r_name AS region_name,
+       SUM(os.total_revenue) AS total_revenue,
+       COUNT(os.o_orderkey) AS order_count,
+       AVG(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY os.total_revenue)) OVER() AS median_revenue,
+       COALESCE(MAX(sh.level), 0) AS supplier_hierarchy_level
+FROM OrderSummary os
+JOIN RegionNation rn ON os.o_orderkey = (SELECT MIN(o.o_orderkey)
+                                           FROM orders o
+                                           WHERE o.o_orderdate <= CURRENT_DATE - INTERVAL '30 days')
+LEFT JOIN SupplierHierarchy sh ON rn.supplier_count = sh.suppkey
+JOIN region rh ON rn.r_regionkey = rh.r_regionkey
+WHERE rh.r_name IS NOT NULL
+GROUP BY rh.r_name
+ORDER BY total_revenue DESC;

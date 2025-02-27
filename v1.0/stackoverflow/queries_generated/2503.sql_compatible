@@ -1,0 +1,70 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(u.Reputation) AS AvgReputation
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.Reputation > 100
+    GROUP BY u.Id, u.DisplayName
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AvgScore
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        p.Title,
+        ph.UserId AS CloserUserId,
+        ph.CreationDate AS CloseDate
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10 
+    AND ph.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+RecentActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS ActivePostCount,
+        MAX(p.LastActivityDate) AS LastActivity
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY u.Id
+)
+
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.AvgReputation,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AvgScore,
+    rp.UserId AS RecentActiveUserId,
+    rp.ActivePostCount,
+    rp.LastActivity,
+    cp.ClosedPostId,
+    cp.Title AS ClosedPostTitle,
+    cp.CloserUserId,
+    cp.CloseDate
+FROM UserPostStats ups
+FULL OUTER JOIN TagStatistics ts ON ups.TotalQuestions > 0
+FULL OUTER JOIN RecentActiveUsers rp ON ups.UserId = rp.UserId
+LEFT JOIN ClosedPosts cp ON ups.UserId = cp.CloserUserId
+WHERE ups.TotalPosts > 10
+ORDER BY ups.AvgReputation DESC, ts.PostCount DESC NULLS LAST;

@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT
+        a.title,
+        t.kind_id,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_within_year
+    FROM
+        aka_title t
+    LEFT JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY
+        t.title, t.kind_id, t.production_year
+),
+MoviesByKeyword AS (
+    SELECT
+        m.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM
+        movie_keyword mk
+    JOIN
+        aka_title m ON mk.movie_id = m.id
+    GROUP BY
+        m.movie_id
+),
+TopMovies AS (
+    SELECT
+        rm.title,
+        rm.production_year,
+        mv.keyword_count
+    FROM
+        RankedMovies rm
+    LEFT JOIN
+        MoviesByKeyword mv ON rm.title = (SELECT title FROM aka_title WHERE id = mv.movie_id)
+    WHERE
+        rm.rank_within_year <= 5 
+        AND (mv.keyword_count IS NULL OR mv.keyword_count > 2)
+)
+SELECT
+    tm.title,
+    tm.production_year,
+    COALESCE(NULLIF(m.title, ''), 'Unknown') AS movie_title,
+    COALESCE(NULLIF(c.name, ''), 'No Cast') AS cast_name
+FROM
+    TopMovies tm
+LEFT JOIN
+    aka_title m ON tm.title = m.title
+LEFT JOIN
+    cast_info c ON m.id = c.movie_id
+WHERE
+    m.production_year > 2000 
+    AND m.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Drama%' OR kind LIKE '%Comedy%')
+ORDER BY
+    tm.production_year DESC, tm.title;

@@ -1,0 +1,36 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT id AS movie_id, title, production_year, episode_of_id, season_nr, episode_nr, 1 AS level
+    FROM aka_title
+    WHERE episode_of_id IS NULL  
+    UNION ALL
+    SELECT a.id, a.title, a.production_year, a.episode_of_id, a.season_nr, a.episode_nr, mh.level + 1
+    FROM aka_title a
+    JOIN MovieHierarchy mh ON a.episode_of_id = mh.movie_id  
+),
+MovieKeywords AS (
+    SELECT m.movie_id, STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN aka_title m ON mk.movie_id = m.id
+    GROUP BY m.movie_id
+),
+TopRatedMovies AS (
+    SELECT m.movie_id, AVG(r.rating) AS avg_rating
+    FROM complete_cast cc
+    JOIN movie_info mi ON cc.movie_id = mi.movie_id
+    JOIN reviews r ON mi.movie_id = r.movie_id  
+    GROUP BY m.movie_id
+    HAVING AVG(r.rating) >= 8.0  
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    COALESCE(tr.avg_rating, 'Not Rated') AS avg_rating
+FROM MovieHierarchy mh
+LEFT JOIN MovieKeywords mk ON mh.movie_id = mk.movie_id
+LEFT JOIN TopRatedMovies tr ON mh.movie_id = tr.movie_id
+WHERE mh.production_year >= 2000  
+ORDER BY mh.production_year DESC, mh.level ASC, mh.title ASC;

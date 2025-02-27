@@ -1,0 +1,50 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        DATE(d.d_date) AS sale_date,
+        SUM(ws.ws_quantity) AS total_quantity,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY DATE(d.d_date) DESC) AS rn
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws.web_site_sk, d.d_date
+    HAVING 
+        SUM(ws.ws_quantity) > 0
+),
+aggregate_sales AS (
+    SELECT 
+        web_site_sk,
+        AVG(total_quantity) AS avg_quantity,
+        AVG(total_orders) AS avg_orders,
+        AVG(total_sales) AS avg_sales
+    FROM 
+        sales_summary
+    WHERE 
+        rn <= 10
+    GROUP BY 
+        web_site_sk
+)
+SELECT 
+    w.warehouse_name,
+    a.avg_quantity,
+    a.avg_orders,
+    a.avg_sales,
+    STRING_AGG(DISTINCT ws.sm_carrier, ', ') AS carriers
+FROM 
+    aggregate_sales a
+JOIN 
+    warehouse w ON a.web_site_sk = w.w_warehouse_sk
+LEFT JOIN 
+    web_sales ws ON ws.ws_warehouse_sk = w.w_warehouse_sk
+WHERE 
+    a.avg_sales > (SELECT AVG(avg_sales) FROM aggregate_sales)
+GROUP BY 
+    w.warehouse_name, a.avg_quantity, a.avg_orders, a.avg_sales
+ORDER BY 
+    a.avg_sales DESC
+LIMIT 20;

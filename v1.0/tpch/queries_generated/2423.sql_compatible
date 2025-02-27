@@ -1,0 +1,59 @@
+
+WITH TotalSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSpent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        RANK() OVER (ORDER BY ts.TotalSpent DESC) AS Rank
+    FROM 
+        customer c
+    JOIN 
+        TotalSales ts ON c.c_custkey = ts.c_custkey
+)
+SELECT 
+    rc.r_name AS Region,
+    nc.n_name AS Nation,
+    s.s_name AS Supplier,
+    p.p_name AS Part,
+    ts.TotalSpent AS TotalSpent,
+    CASE 
+        WHEN ts.TotalSpent IS NULL THEN 'No Purchases'
+        WHEN ts.TotalSpent > 5000 THEN 'High Value'
+        ELSE 'Regular Value'
+    END AS CustomerValueClassification
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    customer c ON tc.c_custkey = c.c_custkey
+JOIN 
+    nation nc ON c.c_nationkey = nc.n_nationkey
+JOIN 
+    region rc ON nc.n_regionkey = rc.r_regionkey
+JOIN 
+    partsupp ps ON ps.ps_suppkey = (SELECT ps2.ps_suppkey 
+                                      FROM partsupp ps2 
+                                      WHERE ps2.ps_partkey = ps.ps_partkey 
+                                      ORDER BY ps2.ps_supplycost 
+                                      LIMIT 1) 
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    tc.Rank <= 10
+    AND (s.s_acctbal >= 1000 OR s.s_comment LIKE '%good%')
+ORDER BY 
+    ts.TotalSpent DESC, s.s_name;

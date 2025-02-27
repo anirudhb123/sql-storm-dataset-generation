@@ -1,0 +1,66 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) as rank_within_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey
+),
+
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        DATE_TRUNC('month', o.o_orderdate) AS order_month
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (
+            SELECT AVG(o2.o_totalprice) 
+            FROM orders o2
+        )
+),
+
+CustomerDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_nationkey,
+        r.r_name AS region_name,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey, r.r_name
+)
+
+SELECT 
+    cds.c_custkey,
+    cds.c_name,
+    cds.total_spent,
+    s.s_name AS top_supplier_name,
+    s.total_supply_value
+FROM 
+    CustomerDetails cds
+LEFT JOIN 
+    RankedSuppliers s ON cds.c_nationkey = s.s_nationkey AND s.rank_within_nation = 1
+WHERE 
+    cds.total_spent > (SELECT AVG(total_spent) FROM CustomerDetails)
+ORDER BY 
+    cds.total_spent DESC
+LIMIT 10;

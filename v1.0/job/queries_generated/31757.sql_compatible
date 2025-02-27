@@ -1,0 +1,73 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title, 
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title, 
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+cast_details AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order ASC) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+movie_information AS (
+    SELECT 
+        m.title AS movie_title,
+        m.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT ci.actor_name || ' (' || ci.role_name || ')', ', ') AS cast_list
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_details ci ON m.id = ci.movie_id
+    GROUP BY 
+        m.title, m.production_year
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mi.production_year,
+    mi.keywords,
+    mi.cast_list,
+    COALESCE(mi.keywords, 'No keywords available') AS keyword_status,
+    CASE 
+        WHEN mi.production_year IS NULL THEN 'Unknown Year'
+        ELSE CAST(mi.production_year AS VARCHAR)
+    END AS production_year_str
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_information mi ON mh.movie_title = mi.movie_title
+WHERE 
+    mh.level = 0
+ORDER BY 
+    mh.movie_title ASC;

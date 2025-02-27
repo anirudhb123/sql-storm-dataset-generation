@@ -1,0 +1,79 @@
+WITH RankedParts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_container,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL
+),
+SupplierAggregates AS (
+    SELECT
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_nationkey
+),
+FilteredOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        o.o_shippriority,
+        CASE 
+            WHEN o.o_totalprice > 1000 THEN 'High'
+            WHEN o.o_totalprice BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS price_category
+    FROM orders o
+    WHERE o.o_orderstatus IN ('F', 'O')
+),
+LineItemsWithComments AS (
+    SELECT
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_discount,
+        l.l_tax,
+        l.l_shipdate,
+        COALESCE(NULLIF(l.l_comment, 'NULL'), 'No Comment') AS cleaned_comment
+    FROM lineitem l
+),
+CustomerPreferences AS (
+    SELECT
+        c.c_custkey,
+        c.c_mktsegment,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_mktsegment
+    HAVING COUNT(DISTINCT o.o_orderkey) > 5
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    s.s_name,
+    COALESCE(sa.total_supply_cost, 0) AS total_supply_cost,
+    SUM(l.l_discount * l.l_extendedprice) AS total_discounted_revenue,
+    CASE 
+        WHEN p.p_size IS NULL THEN 'Unknown Size'
+        ELSE CAST(p.p_size AS varchar)
+    END AS size_description,
+    cp.avg_order_value AS customer_avg_order_value,
+    RANK() OVER (PARTITION BY p.p_brand ORDER BY SUM(l.l_quantity) DESC) AS quantity_rank
+FROM RankedParts p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN SupplierAggregates sa ON s.s_nationkey = sa.s_nationkey
+LEFT JOIN CustomerPreferences cp ON cp.c_mktsegment = p.p_container
+WHERE p.price_rank <= 5
+    AND (l.l_shipdate BETWEEN '2023-01-01' AND CURRENT_DATE OR l.l_shipdate IS NULL)
+GROUP BY p.p_partkey, p.p_name, s.s_name, sa.total_supply_cost, p.p_size, cp.avg_order_value
+HAVING SUM(l.l_discount * l.l_extendedprice) > 1000
+ORDER BY quantity_rank ASC, total_discounted_revenue DESC NULLS LAST;

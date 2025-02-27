@@ -1,0 +1,95 @@
+
+WITH RECURSIVE PostScoreCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score + COALESCE(a.Score, 0) AS Score,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        Posts a ON p.Id = a.ParentId
+    JOIN 
+        PostScoreCTE cte ON a.Id = cte.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+EnhancedPostInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(pi.Score, 0) AS TotalScore,
+        COALESCE(u.DisplayName, 'Unknown') AS OwnerDisplayName,
+        COALESCE(a.UserId, -1) AS AcceptedAnswerUserId,
+        COUNT(DISTINCT c.Id) AS CommentsCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostScoreCTE pi ON p.Id = pi.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN 
+        Tags t ON t.Id = pl.RelatedPostId
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, u.DisplayName, a.UserId
+)
+SELECT 
+    e.PostId,
+    e.Title,
+    e.ViewCount,
+    e.TotalScore,
+    e.OwnerDisplayName,
+    u.UpVotes,
+    u.DownVotes,
+    e.CommentsCount,
+    e.Tags,
+    CASE 
+        WHEN e.AcceptedAnswerUserId IS NOT NULL THEN 'Accepted'
+        ELSE 'Not Accepted'
+    END AS AnswerStatus
+FROM 
+    EnhancedPostInfo e
+LEFT JOIN 
+    UserActivity u ON e.OwnerUserId = u.UserId
+WHERE 
+    e.TotalScore > (
+        SELECT AVG(TotalScore) 
+        FROM EnhancedPostInfo
+    )
+ORDER BY 
+    e.TotalScore DESC, e.ViewCount DESC
+LIMIT 10;

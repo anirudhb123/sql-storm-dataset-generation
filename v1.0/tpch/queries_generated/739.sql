@@ -1,0 +1,61 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+OrderTotals AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+FilteredOrders AS (
+    SELECT 
+        ot.o_orderkey,
+        ot.total_price
+    FROM 
+        OrderTotals ot
+    WHERE 
+        ot.total_price > (SELECT AVG(total_price) FROM OrderTotals)
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    s.s_name AS supplier_name,
+    s.s_acctbal,
+    fo.total_price,
+    COALESCE(r.r_name, 'Unknown Region') AS region_name,
+    CASE 
+        WHEN fo.total_price > 10000 THEN 'High Value'
+        WHEN fo.total_price BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS order_value_category
+FROM 
+    RankedSuppliers rs
+JOIN 
+    partsupp ps ON rs.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT fo.o_orderkey FROM FilteredOrders fo)))
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    FilteredOrders fo ON fo.o_orderkey IN (SELECT o.o_orderkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE l.l_partkey = p.p_partkey)
+WHERE 
+    rs.rank = 1
+ORDER BY 
+    p.p_partkey, fo.total_price DESC;

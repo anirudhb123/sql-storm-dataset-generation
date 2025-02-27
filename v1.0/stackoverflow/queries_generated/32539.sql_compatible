@@ -1,0 +1,55 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, PostTypeId, CreationDate
+    FROM Posts
+    WHERE PostTypeId = 1 
+    UNION ALL
+    SELECT p.Id, p.Title, p.ParentId, p.PostTypeId, p.CreationDate
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT v.Id) AS TotalVotes,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        RANK() OVER (PARTITION BY u.Id ORDER BY COUNT(DISTINCT p.Id) DESC) AS PostRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+BadgeSummary AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        COUNT(b.Id) AS BadgeCount
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    uas.UserId,
+    uas.DisplayName,
+    uas.TotalPosts,
+    uas.TotalComments,
+    uas.TotalVotes,
+    uas.TotalBounties,
+    bs.BadgeNames,
+    bs.BadgeCount,
+    (SELECT COUNT(*)
+     FROM Posts p
+     WHERE p.OwnerUserId = uas.UserId
+     AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days') AS RecentPostCount,
+    (SELECT AVG(ViewCount)
+     FROM Posts p
+     WHERE p.OwnerUserId = uas.UserId
+    ) AS AverageViews
+FROM UserActivity uas
+LEFT JOIN BadgeSummary bs ON uas.UserId = bs.UserId
+WHERE uas.TotalPosts > 0
+ORDER BY uas.TotalPosts DESC, uas.TotalVotes DESC
+LIMIT 10;

@@ -1,0 +1,42 @@
+WITH RECURSIVE top_customers AS (
+    SELECT c_custkey, c_name, c_acctbal, ROW_NUMBER() OVER (ORDER BY c_acctbal DESC) AS rank
+    FROM customer
+    WHERE c_acctbal IS NOT NULL
+), 
+order_summary AS (
+    SELECT o.custkey, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+supplier_products AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), 
+line_item_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_price
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    coalesce(o.total_spent, 0) AS total_spent,
+    COALESCE(sp.total_available, 0) AS total_available,
+    ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY coalesce(o.total_spent, 0) DESC) AS nation_rank,
+    CASE 
+        WHEN coalesce(o.total_spent, 0) > 1000 THEN 'High Value'
+        WHEN coalesce(o.total_spent, 0) BETWEEN 500 AND 1000 THEN 'Mid Value'
+        ELSE 'Low Value'
+    END AS customer_value
+FROM top_customers tc
+LEFT JOIN order_summary o ON tc.c_custkey = o.custkey
+LEFT JOIN customer c ON tc.c_custkey = c.c_custkey
+LEFT JOIN supplier_products sp ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = c.c_nationkey)
+WHERE c.c_name IS NOT NULL
+AND NOT EXISTS (
+    SELECT 1 
+    FROM orders o
+    WHERE o.o_custkey = c.c_custkey
+    AND o.o_orderstatus = 'F'
+)
+ORDER BY nation_rank, total_spent DESC;

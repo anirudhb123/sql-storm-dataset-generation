@@ -1,0 +1,72 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) as rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 20230101 AND 20231231
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_returning_customer_sk,
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returned
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.wr_returned_date_sk >= 20230101
+    GROUP BY 
+        wr.wr_returning_customer_sk, wr.wr_item_sk
+),
+ItemSales AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_brand,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_sales_price) AS total_revenue
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    WHERE 
+        ws.ws_sold_date_sk >= 20230101
+    GROUP BY 
+        i.i_item_sk, i.i_item_id, i.i_brand
+),
+Combined AS (
+    SELECT 
+        s.ws_order_number,
+        s.ws_item_sk,
+        s.total_sold,
+        s.total_revenue,
+        r.total_returned
+    FROM 
+        ItemSales s
+    LEFT JOIN 
+        CustomerReturns r ON s.i_item_sk = r.wr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    COALESCE(c.total_sold, 0) AS total_sold,
+    COALESCE(c.total_revenue, 0) AS total_revenue,
+    COALESCE(c.total_returned, 0) AS total_returned,
+    CASE 
+        WHEN COALESCE(c.total_sold, 0) > 0 THEN ROUND(COALESCE(c.total_returned, 0) * 100.0 / COALESCE(c.total_sold, 0), 2)
+        ELSE 0
+    END AS return_percentage
+FROM  
+    item i
+LEFT JOIN 
+    Combined c ON i.i_item_sk = c.ws_item_sk
+WHERE 
+    i.i_current_price > (
+        SELECT AVG(i2.i_current_price) FROM item i2
+    )
+ORDER BY 
+    return_percentage DESC
+LIMIT 100;

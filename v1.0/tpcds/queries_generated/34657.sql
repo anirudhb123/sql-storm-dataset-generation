@@ -1,0 +1,56 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk,
+           0 AS level
+    FROM customer
+    WHERE c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT c.customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk,
+           ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_current_cdemo_sk = ch.c_current_cdemo_sk
+),
+customer_info AS (
+    SELECT c.customer_sk, 
+           CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+           cd.cd_gender, 
+           cd.cd_marital_status, 
+           cd.cd_purchase_estimate, 
+           cd.cd_credit_rating, 
+           cd.cd_dep_count,
+           ca.ca_city,
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+sales_info AS (
+    SELECT ws_bill_customer_sk, SUM(ws_ext_sales_price) AS total_sales
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+final_report AS (
+    SELECT ci.full_name, 
+           ci.cd_gender,
+           ci.cd_marital_status,
+           ci.cd_purchase_estimate,
+           s.total_sales,
+           CASE 
+               WHEN s.total_sales IS NULL THEN 'No Sales'
+               WHEN ci.cd_purchase_estimate > 300000 THEN 'High Value'
+               ELSE 'Regular'
+           END AS customer_category
+    FROM customer_info ci
+    LEFT JOIN sales_info s ON ci.customer_sk = s.ws_bill_customer_sk
+    WHERE ci.rn <= 10  -- Select top 10 based on gender grouped
+)
+SELECT fr.full_name,
+       fr.cd_gender,
+       fr.cd_marital_status,
+       fr.total_sales,
+       fr.customer_category,
+       ch.level
+FROM final_report fr
+JOIN customer_hierarchy ch ON fr.full_name = CONCAT(ch.c_first_name, ' ', ch.c_last_name)
+WHERE fr.customer_category != 'No Sales'
+ORDER BY fr.cd_gender, fr.total_sales DESC;

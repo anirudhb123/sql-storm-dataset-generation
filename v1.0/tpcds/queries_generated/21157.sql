@@ -1,0 +1,89 @@
+
+WITH RECURSIVE SalesAnalysis AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sale_rank
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk BETWEEN (
+            SELECT MIN(d_date_sk) 
+            FROM date_dim 
+            WHERE d_year = 2023
+        ) AND (
+            SELECT MAX(d_date_sk) 
+            FROM date_dim 
+            WHERE d_year = 2023
+        )
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        sa.total_quantity,
+        sa.total_sales
+    FROM 
+        SalesAnalysis sa
+    JOIN 
+        item i ON sa.ws_item_sk = i.i_item_sk
+    WHERE 
+        sale_rank <= 10
+),
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr_ticket_number) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk IN (
+            SELECT d_date_sk 
+            FROM date_dim 
+            WHERE d_year = 2023 
+              AND d_month_seq IN (5, 6) -- May and June
+        )
+    GROUP BY 
+        sr_item_sk
+),
+ReturnImpact AS (
+    SELECT 
+        ti.i_item_id,
+        ti.i_item_desc,
+        ti.total_quantity,
+        ti.total_sales,
+        COALESCE(cr.return_count, 0) AS return_count,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        CASE 
+            WHEN COALESCE(cr.return_count, 0) > 0 
+            THEN (ti.total_sales - cr.total_return_amt) 
+            ELSE ti.total_sales 
+        END AS net_sales
+    FROM 
+        TopItems ti
+    LEFT JOIN 
+        CustomerReturns cr ON ti.i_item_sk = cr.sr_item_sk
+)
+SELECT 
+    r.i_item_id,
+    r.i_item_desc,
+    r.total_quantity,
+    r.total_sales,
+    r.return_count,
+    r.total_return_amt,
+    r.net_sales,
+    CASE 
+        WHEN r.net_sales >= 1000 THEN 'High Revenue'
+        WHEN r.net_sales BETWEEN 500 AND 1000 THEN 'Medium Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM 
+    ReturnImpact r
+ORDER BY 
+    r.net_sales DESC
+OFFSET 0 ROWS 
+FETCH NEXT 50 ROWS ONLY;

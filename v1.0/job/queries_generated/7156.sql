@@ -1,0 +1,48 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ARRAY_AGG(DISTINCT a.name) AS actors
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+AverageRatings AS (
+    SELECT 
+        m.movie_id,
+        AVG(mr.rating) AS average_rating
+    FROM 
+        RankedMovies m
+    JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id
+    JOIN 
+        movie_info_idx mi_idx ON mi.id = mi_idx.movie_id
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    JOIN 
+        (SELECT movie_id, rating FROM movie_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'rating')) mr ON m.movie_id = mr.movie_id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.cast_count,
+    ar.average_rating,
+    ar.actors
+FROM 
+    RankedMovies rm
+JOIN 
+    AverageRatings ar ON rm.movie_id = ar.movie_id
+ORDER BY 
+    ar.average_rating DESC, rm.cast_count DESC
+LIMIT 10;

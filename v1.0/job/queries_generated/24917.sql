@@ -1,0 +1,70 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(ci.person_id) DESC) AS rnk
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.movie_id = ci.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS all_keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+TopMoviesWithKeyword AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        mk.all_keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON rm.movie_id = mk.movie_id
+    WHERE 
+        rm.rnk <= 5  -- Top 5 movies per production year
+)
+SELECT 
+    tmw.title,
+    tmw.production_year,
+    tmw.cast_count,
+    COALESCE(tmw.all_keywords, 'No keywords') AS keywords,
+    (SELECT COUNT(*) FROM movie_companies mc WHERE mc.movie_id = tmw.movie_id AND mc.company_type_id IS NOT NULL) AS production_companies_count,
+    CASE 
+        WHEN tmw.production_year IS NOT NULL THEN 
+            NOW() - TO_TIMESTAMP(tmw.production_year::text || '0101', 'YYYYMMDD') 
+        ELSE 
+            NULL 
+    END AS age_of_movie,
+    (SELECT COUNT(*) 
+     FROM complete_cast cc 
+     WHERE cc.movie_id = tmw.movie_id AND cc.status_id IS NULL) AS unknown_status_count
+FROM 
+    TopMoviesWithKeyword tmw
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = tmw.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Synopsis')
+    )
+ORDER BY 
+    tmw.production_year DESC, tmw.cast_count DESC
+LIMIT 10;
+
+-- The resulting query aims to provide a list of the top 5 movies per year based on cast size,
+-- along with their associated keywords, the count of production companies,
+-- the age of the movie based on its production year, and 
+-- the count of complete casts with an unknown status (NULL).

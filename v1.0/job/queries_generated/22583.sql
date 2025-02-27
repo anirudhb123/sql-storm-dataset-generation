@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS rn
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+), 
+CompanyMovieInfo AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS num_companies,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+), 
+PersonInfo AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        SUM(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS female_cast,
+        SUM(CASE WHEN p.gender = 'M' THEN 1 ELSE 0 END) AS male_cast
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    cmi.num_companies,
+    COALESCE(cmi.company_names, 'No Companies') AS companies,
+    pi.total_cast,
+    pi.female_cast,
+    pi.male_cast
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CompanyMovieInfo cmi ON rm.movie_id = cmi.movie_id
+LEFT JOIN 
+    PersonInfo pi ON rm.movie_id = pi.movie_id
+WHERE 
+    rm.rn <= 5
+AND 
+    (cmi.num_companies > 2 OR pi.total_cast IS NULL)
+ORDER BY 
+    rm.production_year DESC,
+    rm.title ASC;
+
+-- Ensuring NULL handling for companies and cast information
+

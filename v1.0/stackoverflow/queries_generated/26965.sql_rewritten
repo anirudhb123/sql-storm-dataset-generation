@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id as PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.OwnerUserId,
+        U.DisplayName as OwnerDisplayName,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags,
+        COUNT(A.Id) AS AnswerCount,
+        COUNT(C.Id) AS CommentCount,
+        SUM(V.VoteTypeId = 2) AS UpVotes,
+        SUM(V.VoteTypeId = 3) AS DownVotes,
+        RANK() OVER (ORDER BY COUNT(A.Id) DESC) AS RankByAnswers
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Tags T ON T.Id = ANY(string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><')::int[])
+    LEFT JOIN 
+        Posts A ON A.ParentId = P.Id
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.UserDisplayName,
+        PH.Comment,
+        PH.CreationDate AS HistoryCreationDate,
+        PHT.Name AS HistoryType
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PHT.Id = PH.PostHistoryTypeId
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11, 12, 13) 
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.Body,
+    RP.OwnerDisplayName,
+    RP.Tags,
+    RP.AnswerCount,
+    RP.CommentCount,
+    RP.UpVotes,
+    RP.DownVotes,
+    RP.RankByAnswers,
+    COALESCE(STRING_AGG(CONCAT(PH.UserDisplayName, ': ', PH.Comment), '; '), 'No history') AS CloseReopenComments
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    PostHistoryDetails PH ON PH.PostId = RP.PostId
+GROUP BY 
+    RP.PostId, RP.Title, RP.Body, RP.OwnerDisplayName, RP.Tags, RP.AnswerCount, RP.CommentCount, RP.UpVotes, RP.DownVotes, RP.RankByAnswers
+ORDER BY 
+    RP.RankByAnswers ASC
+LIMIT 10;

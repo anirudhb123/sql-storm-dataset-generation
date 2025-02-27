@@ -1,0 +1,23 @@
+SELECT 
+    p.p_name,
+    s.s_name,
+    CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ', Price: $', FORMAT(ps.ps_supplycost, 2)) AS detailed_info,
+    REGEXP_REPLACE(p.p_comment, '[^a-zA-Z0-9 ]', '') AS sanitized_comment,
+    LENGTH(s.s_address) AS address_length,
+    SUBSTR(p.p_type, 1, 10) AS short_type,
+    CASE
+        WHEN LENGTH(s.s_comment) > 50 THEN 'Long Comment'
+        ELSE 'Short Comment'
+    END AS comment_length_category
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    AND s.s_acctbal > 1000
+ORDER BY 
+    sanitized_comment ASC, address_length DESC
+LIMIT 50;

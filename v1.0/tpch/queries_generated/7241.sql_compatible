@@ -1,0 +1,75 @@
+
+WITH CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND 
+        o.o_orderdate < DATE '1998-01-01' AND 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        cs.total_spent,
+        cs.order_count
+    FROM 
+        CustomerOrderSummary cs
+    JOIN 
+        (SELECT 
+            c.c_custkey,
+            c.c_name 
+         FROM 
+            customer c 
+         WHERE 
+            c.c_acctbal > 10000) AS c ON cs.c_custkey = c.c_custkey
+    WHERE 
+        cs.total_spent > 50000
+), 
+
+SupplierPartSummary AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > 5000
+    GROUP BY 
+        ps.ps_partkey
+)
+
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT hvc.c_custkey) AS high_value_customers,
+    SUM(hvc.total_spent) AS total_spending,
+    COUNT(DISTINCT p.ps_partkey) AS parts_supplied,
+    SUM(p.total_supply_cost) AS total_cost_of_supplies
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierPartSummary p ON s.s_suppkey = p.ps_suppkey
+LEFT JOIN 
+    HighValueCustomers hvc ON hvc.total_spent > 0
+GROUP BY 
+    r.r_regionkey, r.r_name
+ORDER BY 
+    total_spending DESC
+LIMIT 10;

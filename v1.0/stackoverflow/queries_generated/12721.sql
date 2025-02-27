@@ -1,0 +1,64 @@
+-- Performance Benchmarking Query
+-- This query retrieves statistics related to posts, users, and their activities
+-- to evaluate the performance of the schema and query execution times.
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        SUM(u.Views) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.CommentCount,
+    ps.AnswerCount,
+    ps.VoteCount,
+    us.UserId,
+    us.DisplayName,
+    us.PostsCount,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    us.TotalViews
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.UserId = u.Id
+JOIN 
+    UserStats us ON u.Id = us.UserId
+ORDER BY 
+    ps.CreationDate DESC;

@@ -1,0 +1,59 @@
+WITH PostTagCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(DISTINCT T.TagName) AS TagCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS TagsList
+    FROM 
+        Posts P
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '><')) AS T(TagName) ON TRUE
+    WHERE 
+        P.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        P.Id
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionsAsked,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 6) THEN 1 ELSE 0 END) AS UpvotesReceived,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvotesReceived
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+BadgeSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS TotalBadgesEarned,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.DisplayName,
+    PA.TagCount,
+    PA.TagsList,
+    UA.QuestionsAsked,
+    UA.UpvotesReceived,
+    UA.DownvotesReceived,
+    BA.TotalBadgesEarned,
+    BA.BadgeNames
+FROM 
+    UserActivity UA
+JOIN 
+    BadgeSummary BA ON UA.UserId = BA.UserId
+JOIN 
+    PostTagCounts PA ON UA.UserId =  (SELECT OwnerUserId FROM Posts ORDER BY CreationDate LIMIT 1)  -- Getting a sample user's tag count
+ORDER BY 
+    UA.QuestionsAsked DESC, UA.UpvotesReceived DESC;

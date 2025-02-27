@@ -1,0 +1,104 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 100 
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        STRING_TO_ARRAY(P.Tags, ',') AS TagsArray ON P.Id = ANY(TagsArray)
+    LEFT JOIN 
+        Tags T ON TRIM(TagsArray) = T.TagName
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+CombinedStats AS (
+    SELECT 
+        UA.DisplayName AS UserName,
+        UA.PostCount,
+        UA.QuestionCount,
+        UA.AnswerCount,
+        UA.UpVotes,
+        UA.DownVotes,
+        UA.CommentCount AS UserCommentCount,
+        UA.BadgeCount,
+        UA.TotalScore,
+        PS.PostId,
+        PS.Title,
+        PS.CreationDate,
+        PS.ViewCount,
+        PS.Score,
+        PS.OwnerDisplayName,
+        PS.CommentCount AS PostCommentCount,
+        PS.VoteCount,
+        PS.Tags
+    FROM 
+        UserActivity UA
+    FULL OUTER JOIN 
+        PostStats PS ON UA.UserId = PS.OwnerDisplayName
+)
+SELECT 
+    UserName,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    UpVotes,
+    DownVotes,
+    UserCommentCount,
+    BadgeCount,
+    TotalScore,
+    PostId,
+    Title,
+    CreationDate,
+    ViewCount,
+    Score,
+    OwnerDisplayName,
+    PostCommentCount,
+    VoteCount,
+    Tags
+FROM 
+    CombinedStats
+ORDER BY 
+    TotalScore DESC, CreationDate DESC
+LIMIT 50;

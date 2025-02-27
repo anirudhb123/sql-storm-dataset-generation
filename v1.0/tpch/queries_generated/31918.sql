@@ -1,0 +1,63 @@
+WITH RECURSIVE SupplyHierarchy AS (
+  SELECT 
+    s.s_suppkey,
+    s.s_name,
+    s.s_acctbal,
+    1 AS level
+  FROM supplier s
+  WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+  
+  UNION ALL
+  
+  SELECT 
+    ps.ps_suppkey,
+    s.s_name,
+    s.s_acctbal,
+    sh.level + 1
+  FROM SupplyHierarchy sh
+  JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+  JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+  WHERE sh.level < 5
+),
+
+OrderSummary AS (
+  SELECT 
+    o.o_orderkey,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+    COUNT(DISTINCT l.l_partkey) AS item_count
+  FROM orders o
+  JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+  WHERE o.o_orderstatus = 'F'
+  AND l.l_shipdate <= CURRENT_DATE - INTERVAL '30 days'
+  GROUP BY o.o_orderkey
+),
+
+NationAvg AS (
+  SELECT 
+    n.n_nationkey,
+    AVG(s.s_acctbal) AS average_balance
+  FROM nation n
+  JOIN supplier s ON n.n_nationkey = s.s_nationkey
+  GROUP BY n.n_nationkey
+)
+
+SELECT 
+  p.p_partkey,
+  p.p_name,
+  COALESCE(SUM(l.l_quantity), 0) AS total_quantity,
+  COALESCE(SUM(l.l_extendedprice), 0) AS total_revenue,
+  nh.av_balance AS nation_average_balance,
+  sh.s_name AS top_supplier,
+  os.total_price AS order_total
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN (
+  SELECT DISTINCT n.n_nationkey, avg.abalance AS av_balance
+  FROM nation n
+  JOIN NationAvg avg ON n.n_nationkey = avg.n_nationkey
+) nh ON l.l_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_acctbal > nh.av_balance)
+LEFT JOIN SupplyHierarchy sh ON l.l_suppkey = sh.s_suppkey
+LEFT JOIN OrderSummary os ON l.l_orderkey = os.o_orderkey
+GROUP BY p.p_partkey, p.p_name, nh.av_balance, sh.s_name, os.total_price
+HAVING COALESCE(SUM(l.l_quantity), 0) > 100
+ORDER BY total_revenue DESC, total_quantity DESC;

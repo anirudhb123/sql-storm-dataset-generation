@@ -1,0 +1,43 @@
+WITH RECURSIVE nation_sales AS (
+    SELECT n.n_nationkey, n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY n.n_nationkey, n.n_name
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) + ns.total_sales
+    FROM nation_sales ns
+    JOIN nation n ON n.n_nationkey = ns.n_nationkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN '2021-01-01' AND '2021-12-31'
+    GROUP BY n.n_nationkey, n.n_name
+),
+
+filtered_sales AS (
+    SELECT n.n_name, SUM(ns.total_sales) AS cumulative_sales
+    FROM nation n
+    JOIN nation_sales ns ON n.n_nationkey = ns.n_nationkey
+    WHERE ns.total_sales > (SELECT AVG(total_sales) FROM nation_sales)
+    GROUP BY n.n_name
+)
+
+SELECT n.r_name, f.cumulative_sales
+FROM region n
+LEFT OUTER JOIN (
+    SELECT r.r_regionkey, SUM(f.cumulative_sales) AS total_cumulative_sales
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN filtered_sales f ON n.n_name = f.n_name
+    GROUP BY r.r_regionkey
+) f ON n.r_regionkey = f.r_regionkey
+WHERE n.r_name IS NOT NULL OR f.total_cumulative_sales IS NOT NULL
+ORDER BY n.r_name, f.total_cumulative_sales DESC
+LIMIT 10;

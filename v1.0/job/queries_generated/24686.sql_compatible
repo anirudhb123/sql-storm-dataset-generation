@@ -1,0 +1,80 @@
+
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(SUM(CASE WHEN mc.company_type_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS company_count,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.movie_id = mc.movie_id
+    LEFT JOIN 
+        cast_info c ON mt.movie_id = c.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+CastRanking AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    WHERE 
+        c.nr_order IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        r.movie_id, 
+        r.title, 
+        r.production_year, 
+        r.company_count, 
+        r.cast_count,
+        CASE 
+            WHEN r.cast_count > 10 THEN 'Large Cast'
+            WHEN r.cast_count > 0 THEN 'Small Cast'
+            ELSE 'No Cast'
+        END AS cast_category
+    FROM 
+        RecursiveMovieCTE r
+    WHERE 
+        r.company_count > 1
+        AND r.production_year >= 2000
+),
+LinkedMovies AS (
+    SELECT 
+        ml.movie_id AS original_movie,
+        ml.linked_movie_id,
+        mt.title
+    FROM 
+        movie_link ml
+    JOIN 
+        title mt ON ml.linked_movie_id = mt.id
+)
+SELECT
+    tm.title AS Movie_Title,
+    tm.production_year AS Production_Year,
+    tm.company_count AS Company_Count,
+    tm.cast_category AS Cast_Category,
+    COUNT(l.linked_movie_id) AS Linked_Movies_Count,
+    STRING_AGG(DISTINCT l.title, ', ') AS Linked_Movie_Titles,
+    (SELECT COUNT(DISTINCT ci.person_id) 
+     FROM cast_info ci 
+     JOIN aka_name an ON ci.person_id = an.person_id 
+     WHERE ci.movie_id = tm.movie_id AND an.name IS NOT NULL) AS Unique_Cast_Count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    LinkedMovies l ON tm.movie_id = l.original_movie
+GROUP BY 
+    tm.movie_id, tm.title, tm.production_year, tm.company_count, tm.cast_category
+HAVING 
+    CAST(tm.production_year AS VARCHAR) LIKE '20%' 
+    AND COALESCE(tm.cast_count, 0) > 5
+ORDER BY 
+    tm.production_year DESC, 
+    tm.title ASC;

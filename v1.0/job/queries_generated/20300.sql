@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(DISTINCT cc.person_id) AS cast_count,
+        SUM(CASE WHEN cin.note IS NOT NULL THEN 1 ELSE 0 END) AS non_null_cast_notes,
+        ROW_NUMBER() OVER(PARTITION BY mt.id ORDER BY COUNT(cc.person_id) DESC) AS movie_rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast cct ON mt.id = cct.movie_id
+    LEFT JOIN 
+        cast_info cc ON cc.movie_id = mt.id
+    LEFT JOIN 
+        aka_name an ON an.person_id = cc.person_id
+    WHERE 
+        mt.production_year IS NOT NULL 
+        AND mt.production_year BETWEEN 2000 AND 2023
+        AND (cc.note IS NULL OR cc.note LIKE '%leading%')
+    GROUP BY 
+        mt.id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.cast_count,
+        rm.non_null_cast_notes
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.movie_rank <= 5 
+        AND rm.cast_count > 2
+)
+SELECT 
+    f.movie_title,
+    f.production_year,
+    f.cast_count,
+    f.non_null_cast_notes,
+    mt.info,
+    COALESCE(CAST(COUNT(DISTINCT mk.keyword) AS INTEGER), 0) AS keyword_count,
+    CASE 
+        WHEN f.cast_count > 5 THEN 'Large Cast'
+        WHEN f.cast_count BETWEEN 3 AND 5 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    movie_info mt ON mt.movie_id = (SELECT id FROM aka_title WHERE title = f.movie_title LIMIT 1)
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = (SELECT id FROM aka_title WHERE title = f.movie_title LIMIT 1)
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM movie_companies mc 
+        WHERE mc.movie_id = f.production_year -- meaningfully bizarre condition: using year as foreign key
+        AND mc.company_type_id IN (SELECT id FROM company_type WHERE kind ILIKE '%distributor%')
+    )
+GROUP BY 
+    f.movie_title, f.production_year, f.cast_count, f.non_null_cast_notes, mt.info
+ORDER BY 
+    f.production_year DESC, f.cast_count DESC;

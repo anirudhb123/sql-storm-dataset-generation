@@ -1,0 +1,72 @@
+
+WITH RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        RANK() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY 
+        r.r_name
+),
+FilteredSales AS (
+    SELECT 
+        region_name, 
+        total_sales, 
+        total_orders,
+        COALESCE(SUM(total_sales) OVER (ORDER BY total_sales DESC ROWS BETWEEN 1 PRECEDING AND CURRENT ROW), 0) AS cumulative_sales
+    FROM 
+        RegionalSales
+    WHERE 
+        sales_rank <= 5
+)
+SELECT 
+    fs.region_name,
+    fs.total_sales,
+    fs.total_orders,
+    fs.cumulative_sales,
+    STRING_AGG(DISTINCT p.p_name ORDER BY p.p_name) AS popular_products,
+    CASE 
+        WHEN fs.total_orders > 0 THEN (fs.total_sales / fs.total_orders)
+        ELSE NULL 
+    END AS average_order_value
+FROM 
+    FilteredSales fs
+LEFT JOIN 
+    partsupp ps ON fs.region_name = (
+        SELECT r.r_name 
+        FROM region r
+        JOIN nation n ON r.r_regionkey = n.n_regionkey
+        JOIN supplier s ON n.n_nationkey = s.s_nationkey
+        JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+        JOIN part p ON ps.ps_partkey = p.p_partkey
+        JOIN lineitem l ON p.p_partkey = l.l_partkey
+        JOIN orders o ON l.l_orderkey = o.o_orderkey
+        WHERE 
+            o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+        GROUP BY 
+            r.r_name
+        HAVING 
+            SUM(l.l_extendedprice * (1 - l.l_discount)) = fs.total_sales
+    )
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+GROUP BY 
+    fs.region_name, fs.total_sales, fs.total_orders, fs.cumulative_sales
+ORDER BY 
+    fs.total_sales DESC;

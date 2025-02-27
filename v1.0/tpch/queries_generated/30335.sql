@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier 
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 10
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, COUNT(o.o_orderkey) AS order_count,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS customer_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+TotalSales AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY p.p_partkey, p.p_name
+),
+TopProducts AS (
+    SELECT p.p_partkey, p.p_name, ts.total_sales
+    FROM TotalSales ts
+    JOIN part p ON ts.p_partkey = p.p_partkey
+    WHERE ts.total_sales > (SELECT AVG(total_sales) FROM TotalSales)
+),
+SupplierRevenue AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS revenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+AggregateData AS (
+    SELECT c.c_nationkey, SUM(co.total_spent) AS nation_spending,
+           COUNT(DISTINCT co.c_custkey) AS customer_count
+    FROM CustomerOrders co
+    JOIN nation n ON co.c_nationkey = n.n_nationkey
+    GROUP BY c.c_nationkey
+)
+SELECT r.r_name, SUM(ad.nation_spending) AS total_spending, AVG(sr.revenue) AS avg_supplier_revenue
+FROM region r
+LEFT JOIN AggregateData ad ON r.r_regionkey = ad.c_nationkey
+LEFT JOIN SupplierRevenue sr ON ad.c_nationkey = sr.s_nationkey
+GROUP BY r.r_name
+HAVING SUM(ad.nation_spending) > 1000000
+ORDER BY total_spending DESC;

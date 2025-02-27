@@ -1,0 +1,48 @@
+
+WITH AddressCombination AS (
+    SELECT 
+        CONCAT(ca.city, ', ', ca.state) AS full_address,
+        COUNT(*) AS address_count
+    FROM 
+        customer_address ca
+    GROUP BY 
+        ca.city, ca.state
+),
+Demographics AS (
+    SELECT 
+        cd.gender,
+        cd.education_status,
+        COUNT(*) AS demographic_count
+    FROM 
+        customer_demographics cd
+    GROUP BY 
+        cd.gender, cd.education_status
+),
+SalesDetails AS (
+    SELECT 
+        i.i_item_desc,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        AVG(ws.ws_sales_price) AS average_price
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_desc
+)
+SELECT 
+    ac.full_address,
+    d.gender,
+    d.education_status,
+    sd.i_item_desc,
+    sd.total_quantity_sold,
+    sd.average_price
+FROM 
+    AddressCombination ac
+JOIN 
+    Demographics d ON ac.address_count > 5 AND d.demographic_count > 10
+JOIN 
+    SalesDetails sd ON sd.total_quantity_sold IS NOT NULL
+ORDER BY 
+    ac.full_address, d.gender, sd.average_price DESC
+FETCH FIRST 100 ROWS ONLY;

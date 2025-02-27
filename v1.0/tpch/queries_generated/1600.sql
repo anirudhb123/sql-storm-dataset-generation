@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    l.total_line_price,
+    COALESCE(s.total_supplycost, 0) AS supplier_cost,
+    COALESCE(c.total_spent, 0) AS customer_spent
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    LineItemDetails l ON r.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierStats s ON s.total_parts > 5
+LEFT JOIN 
+    HighValueCustomers c ON c.c_custkey = (SELECT MIN(c2.c_custkey) 
+                                             FROM customer c2 
+                                             WHERE c2.c_name LIKE CONCAT('%', SUBSTRING(s.s_name, 1, 5), '%'))
+WHERE 
+    r.rn <= 10
+ORDER BY 
+    r.o_totalprice DESC, 
+    r.o_orderdate ASC;

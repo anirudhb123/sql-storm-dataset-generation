@@ -1,0 +1,39 @@
+
+WITH RECURSIVE CustomerOrderCounts AS (
+    SELECT
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count
+    FROM
+        customer c
+        LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+SupplierRanked AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS supply_rank
+    FROM
+        supplier s
+        JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+)
+SELECT
+    n.n_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(COALESCE(co.order_count, 0)) AS avg_orders_per_customer,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ' (Rank: ', sr.supply_rank, ')') ORDER BY sr.supply_rank) AS top_suppliers
+FROM
+    lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN CustomerOrderCounts co ON c.c_custkey = co.c_custkey
+    LEFT JOIN SupplierRanked sr ON l.l_suppkey = sr.s_suppkey
+WHERE
+    l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1997-01-01'
+GROUP BY n.n_name
+ORDER BY total_revenue DESC
+LIMIT 10;

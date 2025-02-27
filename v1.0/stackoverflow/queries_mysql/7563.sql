@@ -1,0 +1,38 @@
+
+WITH UserBadges AS (
+    SELECT UserId, COUNT(*) AS BadgeCount
+    FROM Badges
+    GROUP BY UserId
+), TopUsers AS (
+    SELECT U.Id, U.DisplayName, U.Reputation, UB.BadgeCount
+    FROM Users U
+    LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+    WHERE U.Reputation > 1000
+), PopularPosts AS (
+    SELECT P.Id, P.Title, P.Score, P.ViewCount, P.OwnerUserId, 
+           @row_number := @row_number + 1 AS Rank
+    FROM (SELECT @row_number := 0) AS rn, Posts P
+    WHERE P.CreationDate >= CAST('2024-10-01 12:34:56' AS DATETIME) - INTERVAL 1 YEAR
+    AND P.PostTypeId = 1
+), PostWithVoteCounts AS (
+    SELECT P.Id, P.Title, COALESCE(V.UpVotes, 0) AS UpVotes, COALESCE(V.DownVotes, 0) AS DownVotes
+    FROM Posts P
+    LEFT JOIN (
+        SELECT PostId, 
+               SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+               SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM Votes
+        GROUP BY PostId
+    ) V ON P.Id = V.PostId
+), CombinedData AS (
+    SELECT TU.DisplayName, TU.Reputation, TU.BadgeCount, PP.Title, 
+           PP.Score, PP.ViewCount, PV.UpVotes, PV.DownVotes
+    FROM TopUsers TU
+    JOIN PopularPosts PP ON TU.Id = PP.OwnerUserId
+    JOIN PostWithVoteCounts PV ON PP.Id = PV.Id
+)
+SELECT DisplayName, Reputation, BadgeCount, Title, Score, ViewCount, UpVotes, DownVotes
+FROM CombinedData
+WHERE BadgeCount >= 5
+ORDER BY Reputation DESC, Score DESC
+LIMIT 10;

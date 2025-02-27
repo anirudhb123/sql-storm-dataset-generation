@@ -1,0 +1,72 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN P.PostTypeId IN (4, 5) THEN 1 ELSE 0 END) AS WikiPosts,
+        AVG(V.Score) AS AvgScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 2  -- Upvotes
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        Questions,
+        Answers,
+        WikiPosts,
+        AvgScore,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, TotalPosts DESC) AS Rank
+    FROM 
+        UserActivity
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, U.DisplayName
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.TotalPosts,
+    TU.Questions,
+    TU.Answers,
+    TU.WikiPosts,
+    TU.AvgScore,
+    P.Title AS RecentPostTitle,
+    P.CreationDate AS RecentPostDate,
+    P.Score AS RecentPostScore,
+    P.CommentCount
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    RecentPosts P ON TU.UserId = (SELECT OwnerUserId FROM Posts ORDER BY CreationDate DESC LIMIT 1)
+WHERE 
+    TU.Rank <= 10
+ORDER BY 
+    TU.Reputation DESC, TU.TotalPosts DESC;

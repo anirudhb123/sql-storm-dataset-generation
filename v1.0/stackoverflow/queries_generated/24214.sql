@@ -1,0 +1,63 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS TotalScore,
+        AVG(COALESCE(vote.CreationDate, now())) AS AvgVoteDate,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes vote ON p.Id = vote.PostId
+    GROUP BY u.Id
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS CloseActionCount,
+        MAX(ph.CreationDate) AS LastCloseDate,
+        STRING_AGG(DISTINCT ct.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON pht.Id = ph.PostHistoryTypeId
+    JOIN CloseReasonTypes ct ON (ph.Comment::int = ct.Id OR ph.Comment IS NULL)
+    WHERE pht.Name IN ('Post Closed', 'Post Reopened')
+    GROUP BY ph.UserId
+),
+HighReputationUsers AS (
+    SELECT UserId
+    FROM UserStats
+    WHERE Reputation > (SELECT AVG(Reputation) FROM Users) 
+    AND PostCount > 10
+),
+TopClosedPosters AS (
+    SELECT 
+        ch.UserId,
+        ch.CloseActionCount,
+        RANK() OVER (ORDER BY ch.CloseActionCount DESC) AS CloseRank
+    FROM ClosedPostHistory ch
+    JOIN HighReputationUsers hur ON ch.UserId = hur.UserId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.PostCount,
+    us.TotalScore,
+    us.ReputationRank,
+    tc.CloseActionCount,
+    tc.CloseRank,
+    CASE 
+        WHEN tc.CloseActionCount IS NOT NULL THEN 'Frequent Closer'
+        ELSE 'Rare Closer'
+    END AS ClosingStyle,
+    CASE 
+        WHEN us.AvgVoteDate IS NOT NULL THEN EXTRACT(EPOCH FROM (NOW() - us.AvgVoteDate)) / 86400
+        ELSE NULL
+    END AS AvgDaySinceLastVote,
+    COALESCE(tc.CloseReasons, 'No close actions recorded') AS ReasonsForClosure
+FROM UserStats us
+LEFT JOIN TopClosedPosters tc ON us.UserId = tc.UserId
+WHERE us.Reputation > 1000
+ORDER BY us.Reputation DESC, COALESCE(tc.CloseActionCount, 0) DESC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

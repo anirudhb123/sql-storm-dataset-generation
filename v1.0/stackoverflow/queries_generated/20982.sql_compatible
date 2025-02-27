@@ -1,0 +1,64 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CASE 
+            WHEN Reputation IS NULL THEN 'Unknown'
+            WHEN Reputation < 1000 THEN 'Novice'
+            WHEN Reputation BETWEEN 1000 AND 5000 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS ReputationLevel
+    FROM Users
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days'
+    GROUP BY p.Id, p.Title, p.CreationDate
+),
+PostsWithBadges AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        r.ReputationLevel,
+        b.Name AS BadgeName
+    FROM RecentPosts p
+    LEFT JOIN UserReputation r ON p.OwnerUserId = r.UserId
+    LEFT JOIN Badges b ON r.UserId = b.UserId AND b.Date = (
+        SELECT MAX(Date) 
+        FROM Badges 
+        WHERE UserId = r.UserId AND b.Class = 1
+    )
+    WHERE p.rn <= 5
+),
+FinalResults AS (
+    SELECT 
+        p.Title,
+        p.ReputationLevel,
+        COALESCE(p.BadgeName, 'No Badge') AS Badge,
+        CASE 
+            WHEN p.CommentCount > 0 THEN 'Engaged'
+            ELSE 'Lurking'
+        END AS UserEngagement
+    FROM PostsWithBadges p
+)
+SELECT 
+    Title AS PostTitle,
+    ReputationLevel,
+    Badge,
+    UserEngagement,
+    ROW_NUMBER() OVER (ORDER BY ReputationLevel DESC) AS Rank
+FROM FinalResults
+WHERE ReputationLevel <> 'Unknown'
+ORDER BY ReputationLevel DESC, PostTitle ASC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

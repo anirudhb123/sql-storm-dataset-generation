@@ -1,0 +1,61 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        c_customer_sk, 
+        c_first_name, 
+        c_last_name, 
+        ws_order_number,
+        ws_sales_price,
+        ws_quantity,
+        RANK() OVER (PARTITION BY c_customer_sk ORDER BY ws_sales_price DESC) AS rank_sales
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+AggregatedData AS (
+    SELECT 
+        c_customer_sk,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_sales_price * ws_quantity) AS total_revenue
+    FROM 
+        SalesData
+    WHERE 
+        rank_sales <= 10
+    GROUP BY 
+        c_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        a.total_orders,
+        a.total_revenue,
+        DENSE_RANK() OVER (ORDER BY a.total_revenue DESC) AS rank_total_revenue
+    FROM 
+        AggregatedData a
+    JOIN 
+        customer c ON a.c_customer_sk = c.c_customer_sk
+)
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_orders,
+    tc.total_revenue,
+    CASE 
+        WHEN tc.rank_total_revenue <= 10 THEN 'Top 10 Customers'
+        ELSE 'Others'
+    END AS customer_category
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = c_current_cdemo_sk
+WHERE 
+    (cd.cd_marital_status = 'M' OR cd.cd_gender = 'F')
+    AND (cd.cd_purchase_estimate IS NOT NULL AND cd.cd_purchase_estimate > 500)
+ORDER BY 
+    tc.total_revenue DESC;

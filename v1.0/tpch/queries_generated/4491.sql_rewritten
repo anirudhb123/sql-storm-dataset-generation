@@ -1,0 +1,55 @@
+WITH RankedSales AS (
+    SELECT 
+        l.suppkey AS supplier_id,
+        SUM(l.extendedprice * (1 - l.discount)) AS total_sales,
+        RANK() OVER (PARTITION BY l.suppkey ORDER BY SUM(l.extendedprice * (1 - l.discount)) DESC) AS sales_rank
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.orderkey = o.orderkey
+    WHERE 
+        o.orderdate >= DATE '1996-01-01' AND o.orderdate < DATE '1997-01-01'
+    GROUP BY 
+        l.suppkey
+), 
+TopSuppliers AS (
+    SELECT 
+        s.suppkey, 
+        s.name,
+        COALESCE(rs.total_sales, 0) AS total_sales
+    FROM 
+        supplier s
+    LEFT JOIN 
+        RankedSales rs ON s.suppkey = rs.supplier_id
+    WHERE 
+        s.acctbal > 0
+),
+CustomerOrders AS (
+    SELECT 
+        c.custkey, 
+        COUNT(o.orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.custkey = o.custkey
+    GROUP BY 
+        c.custkey
+)
+
+SELECT 
+    ts.name AS supplier_name,
+    ts.total_sales,
+    COALESCE(co.order_count, 0) AS customer_order_count,
+    (CASE 
+        WHEN ts.total_sales = 0 THEN NULL 
+        ELSE ROUND((COALESCE(co.order_count, 0) * 1.0) / ts.total_sales, 5) 
+    END) AS sales_per_order_ratio
+FROM 
+    TopSuppliers ts
+LEFT JOIN 
+    CustomerOrders co ON ts.suppkey = co.custkey
+WHERE 
+    ts.total_sales > 10000
+ORDER BY 
+    ts.total_sales DESC, 
+    ts.supplier_name;

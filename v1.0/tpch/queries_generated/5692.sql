@@ -1,0 +1,53 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+RankedRegions AS (
+    SELECT 
+        r.r_regionkey, 
+        r.r_name, 
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01'
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    rp.p_name, 
+    rr.r_name, 
+    co.total_spent, 
+    rp.total_supply_cost
+FROM 
+    RankedParts rp
+JOIN 
+    RankedRegions rr ON rp.p_partkey % (SELECT COUNT(*) FROM RankedRegions) = rr.r_regionkey
+JOIN 
+    CustomerOrders co ON co.total_spent > 10000
+WHERE 
+    rp.total_supply_cost > (SELECT AVG(total_supply_cost) FROM RankedParts) 
+ORDER BY 
+    co.total_spent DESC, 
+    rr.nation_count ASC;

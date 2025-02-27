@@ -1,0 +1,49 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number) as rn
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_date = CURRENT_DATE - INTERVAL '1 month')
+),
+top_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity * ws_sales_price) AS total_sales
+    FROM sales_data
+    GROUP BY ws_item_sk
+    HAVING SUM(ws_quantity * ws_sales_price) > 1000
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name || ' ' || c.c_last_name AS customer_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_by_spending
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+recent_customers AS (
+    SELECT 
+        ci.customer_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY ci.cd_marital_status ORDER BY ci.cd_purchase_estimate DESC) AS rn
+    FROM customer_info ci
+    WHERE ci.cd_purchase_estimate IS NOT NULL
+)
+SELECT 
+    cu.customer_name,
+    cu.cd_gender,
+    cu.cd_marital_status,
+    ts.total_sales
+FROM recent_customers cu
+LEFT JOIN top_sales ts ON cu.rank_by_spending <= 10 AND ts.ws_item_sk = (SELECT i_item_sk FROM item WHERE i_item_desc ILIKE '%gadget%')
+WHERE cu.rn = 1
+ORDER BY ts.total_sales DESC NULLS LAST;

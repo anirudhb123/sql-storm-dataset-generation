@@ -1,0 +1,48 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_bill_customer_sk, 
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) 
+                            AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws_bill_customer_sk
+),
+Customer_Demographics AS (
+    SELECT 
+        c.c_customer_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    ca.ca_city,
+    SUM(total_sales) AS total_sales_per_city,
+    COUNT(DISTINCT sd.c_customer_sk) AS unique_customers
+FROM 
+    Sales_CTE sd
+JOIN 
+    customer c ON sd.ws_bill_customer_sk = c.c_customer_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    Customer_Demographics cd ON c.c_current_cdemo_sk = cd.c_customer_sk
+WHERE 
+    cd.gender_rank <= 5 
+    AND (cd.cd_marital_status = 'M' OR cd.cd_marital_status IS NULL)
+GROUP BY 
+    ca.ca_city
+HAVING 
+    SUM(total_sales) > 10000
+ORDER BY 
+    total_sales_per_city DESC
+LIMIT 10;

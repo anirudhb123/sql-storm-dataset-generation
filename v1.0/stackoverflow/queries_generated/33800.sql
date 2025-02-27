@@ -1,0 +1,86 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Questions
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.Questions,
+    u.Answers,
+    COALESCE(b.BadgeCount, 0) AS BadgeCount,
+    p.PostId,
+    p.Title AS QuestionTitle,
+    p.Level AS QuestionLevel,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    UserPostStats u
+LEFT JOIN 
+    UserBadges b ON u.UserId = b.UserId
+LEFT JOIN 
+    RecursivePostHierarchy p ON u.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = p.PostId)
+LEFT JOIN 
+    Posts ps ON ps.Id = p.PostId
+LEFT JOIN 
+    PopularTags t ON t.TagName = ANY(string_to_array(ps.Tags, '><'))
+GROUP BY 
+    u.UserId, b.BadgeCount, p.PostId
+ORDER BY 
+    u.TotalPosts DESC, BadgeCount DESC, QuestionLevel ASC;
+

@@ -1,0 +1,64 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT s_store_sk, s_store_name, 1 AS level
+    FROM store
+    WHERE s_store_sk IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT s.s_store_sk, s.s_store_name, sh.level + 1
+    FROM store s
+    JOIN sales_hierarchy sh ON s.s_manager_id = sh.s_store_sk
+),
+customer_dates AS (
+    SELECT c.c_customer_sk, MIN(d.d_date) AS first_purchase_date
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY c.c_customer_sk
+),
+customer_demographics AS (
+    SELECT cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, 
+           cd.cd_credit_rating, COUNT(c.c_customer_sk) AS total_customers
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, cd.cd_credit_rating
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        AVG(ws.ws_net_paid_inc_tax) AS average_price
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+store_sales_summary AS (
+    SELECT 
+        ss.ss_item_sk,
+        COUNT(ss.ss_ticket_number) AS total_transactions,
+        SUM(ss.ss_net_profit) AS store_net_profit
+    FROM store_sales ss
+    WHERE ss.ss_sold_date_sk >= (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY ss.ss_item_sk
+)
+SELECT 
+    c.first_purchase_date,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    COALESCE(ss.total_quantity, 0) AS web_sales_quantity,
+    COALESCE(ss.total_net_profit, 0) AS web_sales_profit,
+    COALESCE(s.total_transactions, 0) AS store_sales_count,
+    COALESCE(s.store_net_profit, 0) AS total_store_profit,
+    wh.w_warehouse_name,
+    sh.s_store_name AS parent_store_name,
+    ROW_NUMBER() OVER (PARTITION BY cd.cd_demo_sk ORDER BY cd.total_customers DESC) AS demo_rank
+FROM customer_dates c
+JOIN customer_demographics cd ON c.c_customer_sk = cd.cd_demo_sk
+LEFT JOIN sales_summary ss ON c.c_customer_sk = ss.ws_item_sk
+LEFT JOIN store_sales_summary s ON c.c_customer_sk = s.ss_item_sk
+LEFT JOIN warehouse wh ON wh.w_warehouse_sk = (SELECT ws.w_warehouse_sk FROM web_sales ws WHERE ws.ws_item_sk = ss.ss_item_sk LIMIT 1)
+LEFT JOIN sales_hierarchy sh ON sh.s_store_sk = (SELECT s.s_store_sk FROM store s WHERE s.s_store_sk = cd.cd_demo_sk LIMIT 1)
+WHERE cd.cd_marital_status IS NOT NULL
+ORDER BY c.first_purchase_date DESC, cd.cd_gender;

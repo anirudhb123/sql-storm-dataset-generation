@@ -1,0 +1,64 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(bp.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges bp ON u.Id = bp.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    up.UserId,
+    up.Reputation,
+    up.BadgeCount,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    pv.UpVotes,
+    pv.DownVotes,
+    COALESCE(NULLIF(pv.UpVotes, 0), NULL) AS ValidUpVotes,
+    COALESCE(NULLIF(pv.DownVotes, 0), NULL) AS ValidDownVotes
+FROM 
+    UserReputation up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId AND rp.PostRank = 1
+LEFT JOIN 
+    PostVotes pv ON rp.PostId = pv.PostId
+WHERE 
+    up.Reputation > 1000
+ORDER BY 
+    up.Reputation DESC, rp.CreationDate DESC
+OFFSET 0 ROWS 
+FETCH NEXT 50 ROWS ONLY;

@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM Posts p
+    WHERE p.CreationDate >= '2023-01-01' AND p.CreationDate < '2024-01-01'
+),
+PostWithBadges AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        COALESCE(b.Name, 'No Badge') AS BadgeName,
+        COUNT(b.Id) OVER (PARTITION BY rp.OwnerUserId) AS BadgeCount
+    FROM RankedPosts rp
+    LEFT JOIN Badges b ON b.UserId = rp.OwnerUserId
+    WHERE rp.RankByScore <= 3
+),
+CommentStats AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS TotalComments,
+        MAX(CreationDate) AS LastCommentDate
+    FROM Comments
+    GROUP BY PostId
+),
+PostSummary AS (
+    SELECT 
+        pwb.PostId,
+        pwb.Title,
+        pwb.Score,
+        pwb.ViewCount,
+        pwb.AnswerCount,
+        pwb.CommentCount,
+        pwb.BadgeName,
+        pwb.BadgeCount,
+        cs.TotalComments,
+        cs.LastCommentDate
+    FROM PostWithBadges pwb
+    LEFT JOIN CommentStats cs ON pwb.PostId = cs.PostId
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.BadgeName,
+    ps.BadgeCount,
+    COALESCE(ps.TotalComments, 0) AS TotalComments,
+    CASE 
+        WHEN ps.LastCommentDate IS NULL THEN 'No Comments'
+        ELSE 'Last Comment: ' || TO_CHAR(ps.LastCommentDate, 'YYYY-MM-DD HH24:MI:SS')
+    END AS LastCommentInfo,
+    CASE 
+        WHEN ps.Score IS NULL THEN 'No Score Yet'
+        WHEN ps.Score > 100 THEN 'High Scoring Post'
+        WHEN ps.Score BETWEEN 50 AND 100 THEN 'Moderate Post'
+        ELSE 'Low Scoring Post'
+    END AS ScoreCategory
+FROM PostSummary ps
+WHERE ps.ViewCount > 10
+ORDER BY ps.Score DESC, ps.ViewCount DESC
+FETCH FIRST 50 ROWS ONLY
+OPTION (RECOMPILE);
+
+This query combines a variety of SQL features including Common Table Expressions (CTEs), window functions, conditional logic (CASE statements), and outer joins to provide an insightful summary of popular posts created within the year 2023. It also involves intricate handling of NULL values and semantic categorization based on scores, and uses formatted string concatenation for displaying last comment details.

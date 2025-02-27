@@ -1,0 +1,91 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(DISTINCT CASE WHEN c.Id IS NOT NULL THEN c.Id END) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(COALESCE(p.Score, 0)) AS TotalPostScore,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.CommentCount,
+    us.DisplayName AS UserDisplayName,
+    us.Reputation AS UserReputation,
+    us.TotalPostScore,
+    us.TotalBadges AS UserBadgeCount,
+    (SELECT 
+        STRING_AGG(pt.Name, ', ') 
+     FROM 
+        PostHistoryTypes pt 
+     INNER JOIN 
+        PostHistory ph ON ph.PostHistoryTypeId = pt.Id 
+     WHERE 
+        ph.PostId = rp.PostId) AS PostHistoryTypes,
+    COALESCE((SELECT 
+        STRING_AGG(DISTINCT t.TagName, ', ') 
+    FROM 
+        Posts p 
+    INNER JOIN 
+        Tags t ON t.ExcerptPostId = p.Id 
+    WHERE 
+        p.Id = rp.PostId), 'No Tags') AS Tags,
+    COUNT(DISTINCT CASE WHEN p2.ParentId = rp.PostId THEN p2.Id END) AS RelatedPostsCount
+FROM 
+    RankedPosts rp
+JOIN 
+    UserStats us ON rp.OwnerUserId = us.UserId
+LEFT JOIN 
+    Posts p2 ON rp.PostId = p2.ParentId
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.CommentCount, 
+    us.DisplayName, us.Reputation, us.TotalPostScore, us.TotalBadges
+HAVING 
+    ((us.Reputation > 100 AND COUNT(DISTINCT p2.Id) > 5) OR (us.TotalPosts > 10))
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

@@ -1,0 +1,65 @@
+
+WITH RECURSIVE RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_availqty,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+PartSales AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales
+    FROM 
+        part p
+    JOIN 
+        lineitem li ON p.p_partkey = li.l_partkey
+    WHERE 
+        li.l_returnflag = 'N'
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    cs.c_custkey AS customer_id,
+    cs.total_orders,
+    cs.total_spent,
+    ps.p_name AS part_name,
+    ps.total_sales,
+    rs.s_name AS supplier_name,
+    rs.total_availqty
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    RankedSuppliers rs ON n.n_nationkey = rs.s_nationkey AND rs.rank <= 3
+JOIN 
+    CustomerOrders cs ON cs.total_orders >= 5
+LEFT JOIN 
+    PartSales ps ON ps.total_sales > 10000
+WHERE 
+    rs.total_availqty IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC, ps.total_sales DESC;

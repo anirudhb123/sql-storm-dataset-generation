@@ -1,0 +1,69 @@
+WITH movie_cast AS (
+    SELECT 
+        a.title AS movie_title,
+        c.person_id,
+        ak.name AS person_name,
+        r.role AS person_role
+    FROM 
+        aka_title a
+    JOIN 
+        cast_info c ON a.id = c.movie_id
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        a.production_year BETWEEN 2000 AND 2020
+),
+company_details AS (
+    SELECT 
+        m.id AS movie_id,
+        cm.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name cm ON m.company_id = cm.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+),
+movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mi.info, ', ') AS info_summary
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        it.info LIKE '%awards%'
+    GROUP BY 
+        mi.movie_id
+),
+final_output AS (
+    SELECT 
+        mc.movie_title,
+        mc.person_id,
+        mc.person_name,
+        mc.person_role,
+        cd.company_name,
+        cd.company_type,
+        mid.info_summary
+    FROM 
+        movie_cast mc
+    LEFT JOIN 
+        company_details cd ON mc.movie_id = cd.movie_id
+    LEFT JOIN 
+        movie_info_details mid ON mc.movie_id = mid.movie_id
+)
+SELECT 
+    movie_title,
+    STRING_AGG(DISTINCT person_name || ' (' || person_role || ')', '; ') AS cast_info,
+    STRING_AGG(DISTINCT company_name || ' [' || company_type || ']', ', ') AS companies_involved,
+    info_summary
+FROM 
+    final_output
+GROUP BY 
+    movie_title
+ORDER BY 
+    movie_title ASC;

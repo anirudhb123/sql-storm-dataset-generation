@@ -1,0 +1,58 @@
+WITH SupplierRank AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        STRING_AGG(o.o_orderstatus, ', ') AS order_statuses
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal) FROM supplier s2
+    )
+),
+PartSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    ps.p_partkey,
+    ps.p_name,
+    ps.total_sales,
+    sr.s_name AS top_supplier,
+    cus.c_name AS top_customer,
+    cus.order_count,
+    cus.total_spent
+FROM PartSales ps
+LEFT JOIN SupplierRank sr ON sr.s_suppkey = (
+    SELECT s_suppkey FROM SupplierRank WHERE ps.p_partkey = ps.p_partkey AND rank = 1
+)
+LEFT JOIN CustomerOrderSummary cus ON cus.total_spent = (
+    SELECT MAX(total_spent) FROM CustomerOrderSummary
+)
+WHERE ps.total_sales > (
+    SELECT AVG(total_sales) FROM PartSales
+)
+ORDER BY ps.total_sales DESC, cus.order_count DESC
+LIMIT 10;

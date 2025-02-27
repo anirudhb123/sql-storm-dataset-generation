@@ -1,0 +1,85 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS QuestionPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS AnswerPosts
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 100 -- Only consider users with reputation greater than 100
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS Author,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    JOIN 
+        TopTags TT ON P.Tags LIKE '%' || TT.TagName || '%'
+    LEFT JOIN 
+        (SELECT Id, TagName FROM Tags) T ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, U.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS EditCount,
+        MIN(PH.CreationDate) AS FirstEditDate,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    UD.UserId,
+    UD.DisplayName,
+    UD.Reputation,
+    UD.TotalPosts,
+    UD.QuestionPosts,
+    UD.AnswerPosts,
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.Author,
+    PD.Tags,
+    PA.EditCount,
+    PA.FirstEditDate,
+    PA.LastEditDate
+FROM 
+    UserReputation UD 
+JOIN 
+    PostDetails PD ON UD.UserId = PD.Author
+JOIN 
+    PostActivity PA ON PD.PostId = PA.PostId
+WHERE 
+    PA.EditCount > 0
+ORDER BY 
+    UD.Reputation DESC, PA.LastEditDate DESC;

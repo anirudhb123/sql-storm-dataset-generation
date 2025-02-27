@@ -1,0 +1,63 @@
+WITH RECURSIVE sales_totals AS (
+    SELECT 
+        ws_bill_customer_sk, 
+        SUM(ws_sales_price) AS total_sales
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_date = cast('2002-10-01' as date) - INTERVAL '30 days')
+    GROUP BY 
+        ws_bill_customer_sk
+),
+ranked_sales AS (
+    SELECT 
+        c.c_customer_id,
+        s.total_sales,
+        RANK() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        sales_totals s ON c.c_customer_sk = s.ws_bill_customer_sk
+),
+top_customers AS (
+    SELECT 
+        rc.c_customer_id,
+        rc.total_sales,
+        CASE 
+            WHEN rc.total_sales > 1000 THEN 'High'
+            WHEN rc.total_sales BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS sales_category
+    FROM 
+        ranked_sales rc
+    WHERE 
+        rc.sales_rank <= 10
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_sales,
+    tc.sales_category,
+    COALESCE(cd.gender, 'N/A') AS gender,
+    COALESCE(cd.marital_status, 'N/A') AS marital_status,
+    i.i_item_desc,
+    MAX(ws.ws_ship_date_sk) AS last_order_date
+FROM 
+    top_customers tc
+LEFT JOIN 
+    customer_demographics cd ON tc.c_customer_id = cd.cd_demo_sk
+LEFT JOIN 
+    web_sales ws ON tc.c_customer_id = ws.ws_bill_customer_sk
+LEFT JOIN 
+    item i ON ws.ws_item_sk = i.i_item_sk
+GROUP BY 
+    tc.c_customer_id, 
+    tc.total_sales, 
+    tc.sales_category, 
+    cd.gender, 
+    cd.marital_status, 
+    i.i_item_desc
+HAVING 
+    SUM(ws.ws_quantity) > 0
+ORDER BY 
+    tc.total_sales DESC, 
+    tc.c_customer_id;

@@ -1,0 +1,49 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM store_returns
+    WHERE sr_returned_date_sk >= 20210101
+    GROUP BY sr_customer_sk
+),
+Promotions AS (
+    SELECT 
+        p.promo_id, 
+        p.promo_name, 
+        COUNT(cs.order_number) AS promotion_usage_count
+    FROM promotion p
+    JOIN catalog_sales cs ON p.p_promo_sk = cs.cs_promo_sk
+    WHERE p.p_start_date_sk <= 20210101 AND p.p_end_date_sk >= 20210101
+    GROUP BY p.promo_id, p.promo_name
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(c.c_customer_sk) AS customer_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    ca.ca_city,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    COALESCE(SUM(cr.total_return_quantity), 0) AS total_returns,
+    COALESCE(SUM(cr.total_return_amt), 0) AS total_return_amt,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    SUM(pu.promotion_usage_count) AS total_promotions_used,
+    AVG(CASE WHEN cd.cd_gender = 'M' THEN 1 ELSE NULL END) AS male_percentage,
+    AVG(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE NULL END) AS female_percentage
+FROM customer_address ca
+LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+LEFT JOIN CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN Promotions pu ON pu.promotion_usage_count > 0
+WHERE ca.ca_city IS NOT NULL
+GROUP BY ca.ca_city, cd.cd_gender, cd.cd_marital_status
+ORDER BY total_customers DESC, total_returns DESC
+LIMIT 100;

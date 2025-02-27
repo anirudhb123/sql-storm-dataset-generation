@@ -1,0 +1,104 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON m.id = ml.movie_id
+    WHERE 
+        mh.level < 5  
+),
+actor_details AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        c.movie_id,
+        rn.rank,
+        x.company_name
+    FROM 
+        aka_name a 
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        movie_companies mc ON c.movie_id = mc.movie_id
+    JOIN 
+        company_name x ON mc.company_id = x.id
+    JOIN 
+        (
+            SELECT 
+                person_id,
+                movie_id,
+                ROW_NUMBER() OVER (PARTITION BY movie_id ORDER BY nr_order) AS rank
+            FROM 
+                cast_info
+        ) rn ON c.person_id = rn.person_id AND c.movie_id = rn.movie_id
+    WHERE 
+        a.name IS NOT NULL
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+final_report AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT ad.actor_id) AS actor_count,
+        COALESCE(mk.keywords, 'None') AS keywords,
+        AVG(ODD.rank) AS avg_actor_rank
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        actor_details ad ON mh.movie_id = ad.movie_id
+    LEFT JOIN
+        movie_keywords mk ON mh.movie_id = mk.movie_id
+    LEFT JOIN 
+        (SELECT 
+            movie_id, rank 
+         FROM 
+            actor_details
+         WHERE 
+            rank % 2 = 1) ODD ON mh.movie_id = ODD.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN actor_count >= 10 THEN 'High'
+        WHEN actor_count BETWEEN 5 AND 9 THEN 'Medium'
+        ELSE 'Low'
+    END AS actor_count_category
+FROM 
+    final_report
+ORDER BY 
+    production_year DESC,
+    actor_count DESC
+LIMIT 50;

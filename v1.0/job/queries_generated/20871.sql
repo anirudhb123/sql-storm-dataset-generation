@@ -1,0 +1,82 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_by_title,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_movies
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IS NOT NULL
+),
+
+popular_actors AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        ranked_movies rm ON c.movie_id = rm.movie_id
+    GROUP BY 
+        a.id, a.name
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 5
+),
+
+movies_with_company AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        ranked_movies m
+    LEFT JOIN 
+        movie_companies mc ON m.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        m.id, m.title
+),
+
+actors_with_movies AS (
+    SELECT 
+        a.actor_id,
+        a.name AS actor_name,
+        m.title AS movie_title,
+        m.production_year,
+        RANK() OVER (PARTITION BY a.actor_id ORDER BY m.production_year DESC) AS year_rank
+    FROM 
+        popular_actors a
+    JOIN 
+        cast_info c ON a.actor_id = c.person_id
+    JOIN 
+        ranked_movies m ON c.movie_id = m.movie_id
+)
+
+SELECT 
+    awm.actor_name,
+    awm.movie_title,
+    awm.production_year,
+    COALESCE(mwc.companies, 'No companies') AS companies,
+    CASE 
+        WHEN awm.year_rank = 1 THEN 'Most Recent Movie'
+        ELSE NULL 
+    END AS movie_status,
+    total_movies
+FROM 
+    actors_with_movies awm
+LEFT JOIN 
+    movies_with_company mwc ON awm.movie_title = mwc.title
+JOIN 
+    ranked_movies rm ON awm.movie_title = rm.title
+WHERE 
+    (awm.production_year >= 2000 AND awm.production_year <= 2023)
+    OR (mwc.companies IS NULL AND awm.year_rank = 1)
+ORDER BY 
+    awm.actor_name, awm.production_year DESC
+LIMIT 50;

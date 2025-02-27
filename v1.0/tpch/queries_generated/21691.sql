@@ -1,0 +1,72 @@
+WITH regional_avg AS (
+    SELECT
+        n.n_nationkey,
+        AVG(s.s_acctbal) AS avg_balance
+    FROM
+        nation n
+    JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY
+        n.n_nationkey
+),
+orders_stats AS (
+    SELECT
+        o.o_orderkey,
+        MAX(o.o_totalprice) AS max_price,
+        COUNT(DISTINCT l.l_orderkey) OVER (PARTITION BY o.o_orderkey) AS line_count
+    FROM
+        orders o
+    LEFT JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        o.o_orderkey
+),
+part_details AS (
+    SELECT
+        p.p_partkey,
+        STRING_AGG(DISTINCT ps.ps_supplycost::text, ', ') AS cost_list,
+        SUM(ps.ps_availqty) OVER (PARTITION BY p.p_partkey) AS total_avail_qty
+    FROM
+        part p
+    LEFT JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY
+        p.p_partkey
+)
+SELECT
+    r.r_name,
+    COALESCE(r_avg.avg_balance, 0) AS adjusted_avg_balance,
+    os.max_price,
+    pd.cost_list,
+    pd.total_avail_qty,
+    CASE
+        WHEN os.line_count IS NULL THEN 'No Lines' 
+        ELSE CAST(os.line_count AS VARCHAR)
+    END AS order_lines
+FROM
+    region r
+LEFT JOIN
+    regional_avg r_avg ON r.r_regionkey = r_avg.n_nationkey
+FULL OUTER JOIN
+    orders_stats os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O')
+JOIN
+    part_details pd ON pd.p_partkey = (
+        SELECT p2.p_partkey 
+        FROM part p2 
+        WHERE p2.p_retailprice = (
+            SELECT MAX(p3.p_retailprice) 
+            FROM part p3 
+            WHERE p3.p_size BETWEEN 1 AND 100 AND p3.p_comment IS NOT NULL
+        )
+        LIMIT 1
+    )
+WHERE
+    (r_avg.avg_balance IS NULL OR r_avg.avg_balance < 50) 
+    AND os.max_price >= (
+        SELECT AVG(o.o_totalprice)
+        FROM orders o
+        WHERE o.o_orderdate < current_date - interval '1 month'
+    )
+ORDER BY
+    r.r_name, os.max_price DESC, pd.total_avail_qty DESC
+LIMIT 100 OFFSET 25;

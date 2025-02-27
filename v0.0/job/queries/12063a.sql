@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS movie_budget, min(mi_idx.info) AS movie_votes, min(t.title) AS movie_title
+FROM cast_info AS ci, info_type AS it1, info_type AS it2, movie_info AS mi, movie_info_idx AS mi_idx, name AS n, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND t.id = ci.movie_id AND ci.movie_id = mi.movie_id AND ci.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id AND n.id = ci.person_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id
+AND ci.role_id IN (1, 10, 11, 2, 4, 5, 6, 7, 8, 9) AND mi.note IN ('(Biberacher Independent Film Festival)', '(Cines Reina, Negrete y Campoamor) (premiere)', '(Halloween Screening, Ipswich Film Theatre)', '(Lapdance Film Festival)', '(Vedere la Szienza Film Festival)', 'Andrew Migliore', 'Dan McNamara', 'Joshua Thomas') AND n.imdb_index LIKE '%I%';

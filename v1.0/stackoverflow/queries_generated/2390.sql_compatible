@@ -1,0 +1,58 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.PostTypeId = 2 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(ph.Comment, '; ') AS EditComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId, ph.UserDisplayName
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.Questions,
+    ups.Answers,
+    ups.AcceptedAnswers,
+    ups.AvgReputation,
+    rp.LastEditDate,
+    rp.EditComments,
+    COALESCE(COUNT(c.Id), 0) AS CommentCount,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    RecentPostEdits rp ON rp.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ups.UserId)
+LEFT JOIN 
+    Comments c ON c.UserId = ups.UserId
+LEFT JOIN 
+    Votes v ON v.UserId = ups.UserId
+GROUP BY 
+    ups.UserId, ups.DisplayName, ups.TotalPosts, ups.Questions, ups.Answers, ups.AcceptedAnswers, ups.AvgReputation, 
+    rp.LastEditDate, rp.EditComments
+HAVING 
+    ups.TotalPosts > 0 AND ups.AvgReputation IS NOT NULL
+ORDER BY 
+    ups.AvgReputation DESC, ups.TotalPosts DESC;

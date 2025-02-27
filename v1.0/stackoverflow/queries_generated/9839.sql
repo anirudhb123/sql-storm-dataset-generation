@@ -1,0 +1,83 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(CASE WHEN P.PostTypeId = 1 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id
+), TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        Views,
+        UpVotes,
+        DownVotes,
+        TotalPosts,
+        TotalComments,
+        QuestionsAsked,
+        AnswersGiven,
+        AcceptedAnswers,
+        ReputationRank
+    FROM 
+        UserStats
+    WHERE 
+        TotalPosts > 0
+    ORDER BY 
+        ReputationRank
+    LIMIT 10
+), PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS Author,
+        P.CreationDate,
+        P.LastActivityDate,
+        RANK() OVER (ORDER BY P.Score DESC) AS PostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId IN (1, 2) -- Questions and Answers
+    ORDER BY 
+        Score DESC
+    LIMIT 5
+)
+SELECT 
+    TU.DisplayName AS TopUser,
+    TU.Reputation,
+    TU.TotalPosts,
+    TU.QuestionsAsked,
+    TU.AnswersGiven,
+    PU.Title AS PopularPostTitle,
+    PU.Score AS PopularPostScore,
+    PU.ViewCount AS PopularPostViews,
+    PU.Author AS PostAuthor,
+    PU.CreationDate AS PostCreationDate,
+    PU.LastActivityDate AS PostLastActivity
+FROM 
+    TopUsers TU
+JOIN 
+    PopularPosts PU ON PU.PostRank <= 5
+ORDER BY 
+    TU.Reputation DESC, PU.PopularPostScore DESC;

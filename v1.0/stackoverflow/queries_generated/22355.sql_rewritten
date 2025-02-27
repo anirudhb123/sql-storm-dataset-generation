@@ -1,0 +1,75 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CASE 
+            WHEN Reputation >= 1000 THEN 'High-Reputation User'
+            WHEN Reputation >= 500  THEN 'Medium-Reputation User'
+            ELSE 'Low-Reputation User'
+        END AS ReputationCategory
+    FROM Users
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT ph.Id) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id
+),
+TagPopularity AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount,
+        AVG(u.Reputation) AS AvgUserReputation
+    FROM Tags t
+    LEFT JOIN Posts pt ON pt.Tags LIKE CONCAT('%<', t.TagName, '>') 
+    LEFT JOIN Users u ON pt.OwnerUserId = u.Id
+    GROUP BY t.TagName
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId, 
+        ur.Reputation,
+        RANK() OVER (ORDER BY ur.Reputation DESC) AS UserRank
+    FROM UserReputation ur
+    WHERE ur.Reputation IS NOT NULL
+)
+
+SELECT 
+    p.Title,
+    p.CreationDate,
+    pm.TotalBounties,
+    pm.TotalComments,
+    pm.CloseCount,
+    t.TagName,
+    tp.PostCount,
+    tp.AvgUserReputation,
+    tu.UserId,
+    tu.Reputation,
+    CASE 
+        WHEN pm.TotalComments = 0 THEN 'No Comments'
+        ELSE CONCAT(pm.TotalComments, ' Comments')
+    END AS CommentsSummary,
+    CASE 
+        WHEN pm.CloseCount > 0 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM Posts p
+JOIN PostMetrics pm ON p.Id = pm.PostId
+CROSS JOIN TagPopularity tp 
+JOIN TopUsers tu ON pm.TotalBounties > 0 AND tu.UserRank <= 10 
+WHERE 
+    (p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year') AND 
+    (p.ViewCount > 100 OR pm.TotalBounties > 0)
+ORDER BY 
+    p.ViewCount DESC, 
+    pm.CloseCount ASC, 
+    tp.PostCount DESC
+LIMIT 50;

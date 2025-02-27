@@ -1,0 +1,75 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS depth
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mh.depth + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS mt ON ml.movie_id = mt.id
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.depth < 5
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(SUM(mk.id), 0) AS total_keywords,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_order
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        movie_keyword AS mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        cast_info AS c ON m.id = c.movie_id
+    LEFT JOIN 
+        complete_cast AS cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        movie_info AS mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        movie_companies AS mc ON m.id = mc.movie_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id
+),
+FilteredMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.total_keywords,
+        md.total_cast,
+        md.avg_order,
+        ROW_NUMBER() OVER (PARTITION BY md.total_keywords ORDER BY md.avg_order DESC) AS rank
+    FROM 
+        MovieDetails AS md
+    WHERE 
+        md.total_cast > 5
+)
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.total_keywords,
+    fm.total_cast,
+    fm.avg_order,
+    mh.depth
+FROM 
+    FilteredMovies AS fm
+LEFT JOIN 
+    MovieHierarchy AS mh ON fm.movie_id = mh.movie_id
+WHERE 
+    fm.rank <= 3
+ORDER BY 
+    mh.depth, fm.avg_order DESC;

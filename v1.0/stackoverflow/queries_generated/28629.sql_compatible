@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS Author,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tagname ON TRUE
+    LEFT JOIN 
+        Tags t ON tagname = t.TagName
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2) AS UpVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10 
+),
+PostHistoryData AS (
+    SELECT 
+        php.PostId,
+        STRING_AGG(DISTINCT pht.Name || ': ' || php.Text, '; ') AS HistoryDetails
+    FROM 
+        PostHistory php
+    JOIN 
+        PostHistoryTypes pht ON php.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        php.PostId
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.Author,
+    tp.Tags,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.UpVotes,
+    ph.HistoryDetails
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistoryData ph ON tp.PostId = ph.PostId
+ORDER BY 
+    tp.Score DESC;

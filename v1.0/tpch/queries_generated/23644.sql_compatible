@@ -1,0 +1,48 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_custkey,
+           o.o_totalprice,
+           RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+),
+CustomerDetails AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           c.c_acctbal,
+           n.n_name AS nation_name,
+           ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS customer_rank
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE c.c_acctbal IS NOT NULL
+),
+SupplierSummary AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           COUNT(DISTINCT ps.ps_partkey) AS supply_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING COUNT(DISTINCT ps.ps_partkey) > 1
+)
+SELECT cd.c_name,
+       ro.o_orderkey,
+       ro.o_totalprice,
+       ss.s_name AS supplier_name,
+       LAG(ro.o_totalprice) OVER (PARTITION BY cd.c_custkey ORDER BY ro.o_orderkey) AS previous_order_price,
+       CASE 
+           WHEN ro.o_totalprice > (SELECT AVG(o_totalprice) FROM RankedOrders) THEN 'Above Average'
+           ELSE 'Below Average'
+       END AS price_comparison,
+       COALESCE(NULLIF(order_rank, 0), 'Not Ranked') AS dense_ranking,
+       COUNT(DISTINCT ss.s_suppkey) OVER (PARTITION BY cd.c_custkey) AS supplier_count
+FROM RankedOrders ro
+JOIN CustomerDetails cd ON ro.o_custkey = cd.c_custkey
+LEFT JOIN SupplierSummary ss ON EXISTS (
+    SELECT 1
+    FROM lineitem l
+    WHERE l.l_orderkey = ro.o_orderkey AND l.l_suppkey = ss.s_suppkey
+)
+WHERE cd.customer_rank <= 5
+GROUP BY cd.c_name, ro.o_orderkey, ro.o_totalprice, ss.s_name, cd.c_custkey, order_rank
+ORDER BY cd.c_name, ro.o_orderkey;

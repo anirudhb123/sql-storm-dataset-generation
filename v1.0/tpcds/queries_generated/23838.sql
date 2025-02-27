@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        SUM(ws.ws_sales_price) OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_order_number) AS cumulative_sales,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk 
+                                FROM date_dim d 
+                                WHERE d.d_year = 2022)
+),
+CustomerReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(sr_ticket_number) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+), 
+AggregatedSales AS (
+    SELECT 
+        item.i_item_id,
+        COUNT(ws.ws_order_number) AS number_of_sales,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COALESCE(MAX(cr.total_returned_amount), 0) AS total_returns
+    FROM 
+        item 
+    LEFT JOIN 
+        web_sales ws ON item.i_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        CustomerReturns cr ON ws.ws_bill_customer_sk = cr.sr_returning_customer_sk
+    WHERE 
+        item.i_current_price > (SELECT AVG(i_current_price) FROM item WHERE i_item_sk IS NOT NULL)
+    GROUP BY 
+        item.i_item_id
+)
+SELECT 
+    asales.i_item_id,
+    asales.number_of_sales,
+    asales.total_sales,
+    asales.total_sales - asales.total_returns AS net_sales,
+    CASE 
+        WHEN asales.total_sales > 10000 THEN 'High Performer'
+        WHEN asales.total_sales BETWEEN 5000 AND 10000 THEN 'Moderate Performer'
+        ELSE 'Low Performer'
+    END AS performance_category
+FROM 
+    AggregatedSales asales
+JOIN 
+    customer_demographics cd ON asales.number_of_sales < (SELECT AVG(return_count) FROM CustomerReturns)
+ORDER BY 
+    performance_category, net_sales DESC
+```

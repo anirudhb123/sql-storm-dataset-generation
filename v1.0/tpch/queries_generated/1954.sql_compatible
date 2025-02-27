@@ -1,0 +1,63 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+LineItemAnalysis AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_price,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '1996-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COALESCE(lp.net_price, 0) AS total_net_price,
+    COALESCE(sp.total_supply_cost, 0) AS total_supply_cost,
+    COUNT(DISTINCT CASE WHEN o.price_rank = 1 THEN o.o_orderkey END) AS top_orders_count,
+    MAX(r.r_name) AS region_name
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    SupplierParts sp ON ps.ps_suppkey = sp.s_suppkey
+LEFT JOIN 
+    LineItemAnalysis lp ON ps.ps_partkey = lp.l_orderkey
+LEFT JOIN 
+    nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = lp.l_orderkey LIMIT 1))
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    RankedOrders o ON lp.l_orderkey = o.o_orderkey
+WHERE 
+    p.p_size > 5 AND r.r_name IS NOT NULL
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, lp.net_price, sp.total_supply_cost
+ORDER BY 
+    total_net_price DESC, total_supply_cost ASC
+LIMIT 100;

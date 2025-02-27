@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS Author,
+        COUNT(a.Id) AS AnswerCount,
+        RANK() OVER (PARTITION BY EXTRACT(YEAR FROM p.CreationDate) ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+
+RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        p.Id
+),
+
+TopPosts AS (
+    SELECT 
+        rp.*, 
+        ra.LastEditDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentActivity ra ON rp.PostId = ra.PostId
+    WHERE 
+        RankByScore <= 10 -- Top 10 posts by score
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.Author,
+    COALESCE(tp.AnswerCount, 0) AS AnswerCount,
+    tp.LastEditDate,
+    (SELECT COUNT(c.Id) FROM Comments c WHERE c.PostId = tp.PostId) AS CommentCount,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Posts p 
+     JOIN UNNEST(string_to_array(p.Tags, '><')) AS t(Tag) ON TRUE 
+     WHERE p.Id = tp.PostId) AS Tags
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

@@ -1,0 +1,60 @@
+
+WITH AddressData AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        UPPER(TRIM(ca_country)) AS formatted_country
+    FROM 
+        customer_address
+),
+CustomerData AS (
+    SELECT 
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_birth_country,
+        ca_address_id
+    FROM 
+        customer 
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+),
+FormattedAddress AS (
+    SELECT 
+        ad.ca_address_id,
+        ad.full_address,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_zip,
+        ad.formatted_country,
+        cd.full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_birth_country
+    FROM 
+        AddressData ad
+    JOIN 
+        CustomerData cd ON ad.ca_address_id = cd.ca_address_id
+)
+SELECT 
+    full_name,
+    full_address,
+    ca_city,
+    ca_state,
+    ca_zip,
+    formatted_country,
+    COUNT(DISTINCT formatted_country) OVER () AS unique_countries
+FROM 
+    FormattedAddress
+WHERE 
+    ca_city ILIKE '%spring%'
+GROUP BY 
+    full_name, full_address, ca_city, ca_state, ca_zip, formatted_country
+ORDER BY 
+    ca_state, ca_city
+LIMIT 100;

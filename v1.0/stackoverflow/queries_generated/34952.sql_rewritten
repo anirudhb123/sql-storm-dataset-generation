@@ -1,0 +1,82 @@
+WITH RECURSIVE TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ARRAY_AGG(t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        unnest(string_to_array(p.Tags, '>')) AS t(TagName) ON p.Tags IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(COUNT(p.Id), 0) AS PostCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        um.UserId,
+        um.DisplayName,
+        um.Reputation,
+        um.PostCount,
+        um.TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY um.Reputation DESC) AS UserRank
+    FROM 
+        UserMetrics um
+    WHERE 
+        um.Reputation > 1000
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Tags,
+    tp.CreationDate AS PostCreationDate,
+    up.DisplayName AS Owner,
+    up.Reputation AS OwnerReputation,
+    rp.Score,
+    rp.ViewCount,
+    rp.CreationDate AS RecentPostCreationDate,
+    tu.UserRank
+FROM 
+    TaggedPosts tp
+LEFT JOIN 
+    TopUsers tu ON tp.PostId IN (SELECT PostId FROM RecentPosts rp WHERE rp.OwnerDisplayName = tu.DisplayName)
+LEFT JOIN 
+    RecentPosts rp ON tp.PostId = rp.PostId
+WHERE 
+    tu.UserRank IS NOT NULL OR rp.PostId IS NOT NULL
+ORDER BY 
+    tu.UserRank, tp.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,59 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Tags, p.ViewCount
+),
+TagStatistics AS (
+    SELECT 
+        tag.TagName,
+        COUNT(*) AS PostCount,
+        SUM(rp.Score) AS TotalScore,
+        AVG(rp.Score) AS AverageScore
+    FROM 
+        Tags tag
+    JOIN 
+        RankedPosts rp ON rp.Tags LIKE '%' || tag.TagName || '%'
+    GROUP BY 
+        tag.TagName
+),
+TopTags AS (
+    SELECT 
+        ts.TagName,
+        ts.PostCount,
+        ts.TotalScore,
+        ts.AverageScore,
+        RANK() OVER (ORDER BY ts.TotalScore DESC) AS TagRank
+    FROM 
+        TagStatistics ts
+)
+SELECT 
+    t.TagName,
+    t.PostCount,
+    t.TotalScore,
+    t.AverageScore,
+    t.TagRank,
+    STRING_AGG(DISTINCT rp.Title, ', ') AS TopPosts
+FROM 
+    TopTags t
+JOIN 
+    RankedPosts rp ON rp.Rank <= 5 AND rp.Tags LIKE '%' || t.TagName || '%'
+GROUP BY 
+    t.TagName, t.PostCount, t.TotalScore, t.AverageScore, t.TagRank
+ORDER BY 
+    t.TagRank;

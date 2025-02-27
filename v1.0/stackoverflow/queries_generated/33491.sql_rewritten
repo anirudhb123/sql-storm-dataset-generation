@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        AVG(vs.Score) AS AvgScore,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END), '1970-01-01') AS CloseDate
+    FROM Posts p
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN PostHistory ph ON ph.PostId = p.Id
+    WHERE p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY p.Id, pt.Name
+),
+UserEngagement AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews
+    FROM Users u
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id
+),
+TopPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.AvgScore,
+        ue.UserId AS OwnerUserId,
+        ue.BadgeCount,
+        ue.UpVotes,
+        ue.DownVotes,
+        ue.TotalViews,
+        CASE 
+            WHEN rp.CloseDate IS NOT NULL AND rp.CloseDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+            THEN 'Recently Closed'
+            ELSE 'Active'
+        END AS PostStatus
+    FROM RankedPosts rp
+    JOIN Users ue ON ue.Id IN (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+    WHERE rp.PostRank <= 5
+)
+SELECT
+    tp.Title,
+    tp.ViewCount,
+    tp.AvgScore,
+    tp.OwnerUserId,
+    tp.BadgeCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.TotalViews,
+    tp.PostStatus
+FROM TopPosts tp
+ORDER BY tp.ViewCount DESC, tp.AvgScore DESC;

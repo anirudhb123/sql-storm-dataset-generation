@@ -1,0 +1,75 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' 
+        AND o.o_orderdate < DATE '1997-01-01'
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerRegionInfo AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, n.n_name, r.r_name
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 100.00
+)
+SELECT 
+    cr.region_name,
+    cr.nation_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(CASE WHEN oi.rank = 1 THEN oi.o_totalprice ELSE 0 END) AS total_latest_orders,
+    SUM(fc.total_supply_cost) AS total_part_supply_cost,
+    (SELECT COUNT(*) FROM customer) AS total_customers,
+    STRING_AGG(DISTINCT fp.p_name, ', ') AS expensive_parts
+FROM 
+    CustomerRegionInfo cr
+JOIN 
+    RankedOrders oi ON cr.c_custkey = oi.o_orderkey
+LEFT JOIN 
+    SupplierCosts fc ON fc.ps_partkey IN (SELECT p.p_partkey FROM FilteredParts p WHERE p.price_rank <= 10)
+WHERE 
+    cr.total_spent > 500.00
+GROUP BY 
+    cr.region_name, cr.nation_name
+ORDER BY 
+    total_latest_orders DESC, order_count DESC;

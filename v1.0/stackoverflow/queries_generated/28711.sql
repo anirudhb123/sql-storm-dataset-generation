@@ -1,0 +1,66 @@
+WITH TagCount AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag, 
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only consider questions
+    GROUP BY 
+        Tag
+), 
+RankedTags AS (
+    SELECT 
+        Tag, 
+        PostCount, 
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagCount
+),
+UserActivity AS (
+    SELECT 
+        U.DisplayName AS UserName, 
+        COUNT(DISTINCT P.Id) AS QuestionsAsked,
+        COALESCE(SUM(P.ViewCount), 0) AS TotalViewCount,
+        COALESCE(SUM(P.Score), 0) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        U.Id
+),
+CommentsSummary AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(C.Id) AS TotalComments
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        P.OwnerUserId
+)
+SELECT 
+    U.DisplayName, 
+    U.Reputation, 
+    UA.QuestionsAsked,
+    UA.TotalViewCount,
+    UA.TotalScore,
+    COALESCE(CS.TotalComments, 0) AS TotalComments,
+    RT.Tag,
+    RT.PostCount
+FROM 
+    Users U
+LEFT JOIN 
+    UserActivity UA ON U.Id = UA.Id
+LEFT JOIN 
+    CommentsSummary CS ON U.Id = CS.OwnerUserId
+LEFT JOIN 
+    RankedTags RT ON RT.Rank <= 10 -- Top 10 tags
+WHERE 
+    U.Reputation > 1000 -- Only users with a certain reputation threshold
+ORDER BY 
+    U.Reputation DESC, RT.PostCount DESC;

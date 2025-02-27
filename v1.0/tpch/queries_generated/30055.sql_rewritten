@@ -1,0 +1,71 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderstatus = 'O'
+),
+top_orders AS (
+    SELECT
+        sh.c_custkey,
+        sh.c_name,
+        SUM(sh.o_totalprice) AS total_spent
+    FROM
+        sales_hierarchy sh
+    WHERE
+        sh.order_rank <= 3
+    GROUP BY
+        sh.c_custkey, sh.c_name
+),
+supplier_summary AS (
+    SELECT
+        ps.ps_partkey,
+        s.s_suppkey,
+        SUM(ps.ps_supplycost) AS total_cost
+    FROM
+        partsupp ps
+    JOIN
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY
+        ps.ps_partkey, s.s_suppkey
+),
+lineitem_summary AS (
+    SELECT
+        l.l_orderkey,
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS line_count
+    FROM
+        lineitem l
+    WHERE
+        l.l_returnflag = 'N' AND l.l_shipdate >= '1997-01-01'
+    GROUP BY
+        l.l_orderkey, l.l_partkey
+)
+SELECT
+    p.p_partkey,
+    p.p_name,
+    COALESCE(s.total_cost, 0) AS supplier_cost,
+    COALESCE(ls.total_revenue, 0) AS lineitem_revenue,
+    th.total_spent
+FROM
+    part p
+LEFT JOIN
+    supplier_summary s ON p.p_partkey = s.ps_partkey
+LEFT JOIN
+    lineitem_summary ls ON ls.l_partkey = p.p_partkey
+LEFT JOIN
+    top_orders th ON th.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name LIKE '%' || p.p_name || '%')
+ORDER BY
+    th.total_spent DESC,
+    supplier_cost DESC,
+    lineitem_revenue DESC
+LIMIT 100;

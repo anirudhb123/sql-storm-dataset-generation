@@ -1,0 +1,40 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_order_number,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_sales_price DESC) AS sales_rank,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_sales_price DESC) AS dense_sales_rank,
+        SUM(ws_sales_price) OVER (PARTITION BY ws.web_site_sk) AS total_sales,
+        (CASE WHEN SUM(ws_sales_price) OVER (PARTITION BY ws.web_site_sk) IS NULL THEN 'No Sales' ELSE 'Sales Present' END) AS sales_status
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year IS NOT NULL 
+        AND ws.ws_sales_price > (SELECT AVG(ws_sales_price) FROM web_sales)
+)
+SELECT 
+    ws.web_site_sk,
+    MAX(ws.sales_rank) AS max_rank,
+    MIN(ws.dense_sales_rank) AS min_dense_rank,
+    (COUNT(*) FILTER (WHERE ws.sales_status = 'Sales Present')) AS sales_present_count,
+    (COUNT(*) FILTER (WHERE ws.sales_status = 'No Sales')) AS no_sales_count,
+    STRING_AGG(CAST(ws_order_number AS VARCHAR), ', ' ORDER BY ws_order_number) AS order_numbers
+FROM
+    ranked_sales ws
+LEFT JOIN 
+    store s ON s.s_store_sk = (
+        SELECT ss_store_sk 
+        FROM store_sales
+        WHERE ss_ticket_number = ws.ws_order_number 
+        LIMIT 1
+    )
+GROUP BY 
+    ws.web_site_sk
+HAVING 
+    COUNT(*) > 5
+ORDER BY 
+    ws.web_site_sk;

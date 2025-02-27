@@ -1,0 +1,72 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT T.Id, T.TagName, T.Count, 1 AS Level
+    FROM Tags T
+    WHERE T.Count > 100 -- Start with popular tags
+
+    UNION ALL
+
+    SELECT T.Id, T.TagName, T.Count, RTH.Level + 1
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%' 
+    JOIN RecursiveTagHierarchy RTH ON RTH.Level < 5
+    WHERE T.Count <= RTH.Count * 2 -- Limit growth of hierarchy
+),
+UserReputation AS (
+    SELECT U.Id AS UserId, U.Reputation,
+           ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM Users U
+),
+PostStatistics AS (
+    SELECT P.Id AS PostId, 
+           P.Title, 
+           P.ViewCount, 
+           P.Score,
+           COALESCE(A.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+           SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+           COUNT(V.Id) AS VoteCount
+    FROM Posts P
+    LEFT JOIN Posts A ON P.Id = A.AcceptedAnswerId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= NOW() - INTERVAL '30 days' -- Recent posts
+    GROUP BY P.Id, P.Title, P.ViewCount, P.Score, A.AcceptedAnswerId
+),
+TopPosts AS (
+    SELECT PS.PostId, PS.Title, PS.ViewCount, PS.Score, PS.CommentCount,
+           RTH.TagName
+    FROM PostStatistics PS
+    LEFT JOIN RecursiveTagHierarchy RTH ON RTH.Id IN (SELECT UNNEST(string_to_array(P.Tags, '>'))::int [])
+    WHERE PS.VoteCount > 10 -- Filter for posts with at least 10 votes
+    ORDER BY PS.Score DESC, PS.ViewCount DESC
+    LIMIT 10
+),
+UserPostStats AS (
+    SELECT U.Id AS UserId, U.DisplayName, U.Reputation,
+           COUNT(P.Id) AS TotalPosts,
+           SUM(CASE WHEN PS.ViewCount > 100 THEN 1 ELSE 0 END) AS HighViewPosts
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN PostStatistics PS ON P.Id = PS.PostId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+)
+
+SELECT URS.UserId, URS.Rank, UPS.DisplayName, UPS.TotalPosts, 
+       UPS.HighViewPosts, T.TotalTags,
+       CASE
+           WHEN URS.Reputation > 1000 THEN 'Expert'
+           WHEN URS.Reputation <= 1000 AND URS.Reputation > 100 THEN 'Intermediate'
+           ELSE 'Beginner'
+       END AS UserLevel,
+       STRING_AGG(DISTINCT TH.TagName, ', ') AS RelatedTags
+FROM UserReputation URS
+LEFT JOIN UserPostStats UPS ON URS.UserId = UPS.UserId
+LEFT JOIN (SELECT PS.UserId, COUNT(DISTINCT RTH.Id) AS TotalTags
+            FROM PostStatistics PS
+            JOIN RecursiveTagHierarchy RTH ON RTH.TagName IN (SELECT UNNEST(string_to_array(PS.Title, ' ')))
+            GROUP BY PS.UserId) T ON T.UserId = UPS.UserId
+LEFT JOIN TopPosts TH ON TH.PostId IN (SELECT P.Id 
+                                       FROM Posts P 
+                                       WHERE P.OwnerUserId = UPS.UserId)
+GROUP BY URS.UserId, URS.Rank, UPS.DisplayName, UPS.TotalPosts, 
+         UPS.HighViewPosts, T.TotalTags
+ORDER BY URS.Rank;

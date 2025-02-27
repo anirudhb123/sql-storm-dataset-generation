@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank,
+        COUNT(*) OVER (PARTITION BY ws.ws_item_sk) AS sales_count,
+        COALESCE(SUM(ws.ws_sales_price) OVER (PARTITION BY ws.ws_item_sk), 0.00) AS total_sales
+    FROM
+        web_sales ws
+),
+CustomerReturns AS (
+    SELECT
+        cr.cr_item_sk,
+        cr.cr_return_quantity,
+        SUM(cr.cr_return_amt) AS total_return_amt
+    FROM
+        catalog_returns cr
+    GROUP BY
+        cr.cr_item_sk,
+        cr.cr_return_quantity
+),
+Combined AS (
+    SELECT
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        rs.ws_sales_price,
+        rs.sales_rank,
+        rs.sales_count,
+        rs.total_sales,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt
+    FROM
+        RankedSales rs
+    LEFT JOIN
+        CustomerReturns cr ON rs.ws_item_sk = cr.cr_item_sk
+),
+FinalResults AS (
+    SELECT
+        cb.ws_item_sk,
+        cb.ws_order_number,
+        cb.ws_sales_price,
+        cb.sales_rank,
+        cb.sales_count,
+        cb.total_sales,
+        cb.total_return_amt,
+        CASE
+            WHEN cb.total_return_amt > 0 THEN cb.sales_price - (cb.total_return_amt / cb.sales_count)
+            ELSE cb.sales_price
+        END AS adjusted_sales_price,
+        CASE
+            WHEN cb.sales_rank = 1 THEN 'Top Seller'
+            ELSE 'Regular'
+        END AS item_type
+    FROM
+        Combined cb
+)
+SELECT
+    fr.ws_item_sk,
+    fr.ws_order_number,
+    fr.sales_price,
+    fr.adjusted_sales_price,
+    fr.item_type,
+    DENSE_RANK() OVER (ORDER BY fr.adjusted_sales_price DESC) AS price_rank,
+    EXISTS (
+        SELECT 1 FROM customer c
+        WHERE c.c_customer_sk = (SELECT MAX(c_customer_sk) FROM customer)
+    ) AS has_max_customer
+FROM
+    FinalResults fr
+WHERE
+    fr.total_sales > (SELECT AVG(total_sales) FROM FinalResults)
+    OR fr.adjusted_sales_price IS NULL
+ORDER BY
+    fr.adjusted_sales_price DESC;

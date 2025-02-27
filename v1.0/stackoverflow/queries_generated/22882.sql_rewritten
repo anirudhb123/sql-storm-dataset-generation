@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpvoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(b.Class) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id
+),
+PopularCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment AS CloseReason,
+        COUNT(ph.Comment) AS ReasonCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId, ph.Comment
+),
+FinalOutput AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.AnswerCount,
+        rp.UpvoteCount,
+        rp.DownvoteCount,
+        CASE WHEN rp.PostRank <= 3 THEN 'Top Post' ELSE 'Regular Post' END AS PostCategory,
+        au.DisplayName,
+        au.PostCount AS UserPostCount,
+        au.BadgeCount AS UserBadgeCount,
+        pcr.CloseReason,
+        pcr.ReasonCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ActiveUsers au ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = au.UserId)
+    LEFT JOIN 
+        PopularCloseReasons pcr ON rp.PostId = pcr.PostId
+    WHERE 
+        rp.UpvoteCount > rp.DownvoteCount
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN UserPostCount IS NULL THEN 'New User'
+        ELSE 'Active User'
+    END AS UserActivityStatus,
+    COALESCE(CloseReason, 'No Close Reasons') AS EffectiveCloseReason
+FROM 
+    FinalOutput
+WHERE 
+    EffectiveCloseReason IS NOT NULL
+ORDER BY 
+    Score DESC, UserBadgeCount DESC;

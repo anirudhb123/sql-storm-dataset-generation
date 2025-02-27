@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        1 AS depth
+    FROM title t
+    WHERE t.season_nr IS NULL  -- Top-level movies
+
+    UNION ALL
+
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        mh.depth + 1
+    FROM title t
+    JOIN movie_link ml ON t.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+ActorCount AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM cast_info c
+    GROUP BY c.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COALESCE(ki.keyword, 'No Keyword') AS keyword,
+        ac.actor_count,
+        CASE 
+            WHEN t.production_year = 2023 THEN 'New Release'
+            WHEN t.production_year < 2000 THEN 'Classic'
+            ELSE 'Moderate Age'
+        END AS age_category
+    FROM title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword ki ON mk.keyword_id = ki.id
+    LEFT JOIN ActorCount ac ON t.id = ac.movie_id
+)
+SELECT 
+    mh.title AS related_movie,
+    COUNT(DISTINCT mi.movie_id) AS total_movies_related,
+    AVG(ac.actor_count) AS average_actors_per_movie,
+    STRING_AGG(DISTINCT mi.keyword, ', ') AS keywords,
+    SUM(CASE WHEN mi.age_category = 'New Release' THEN 1 ELSE 0 END) AS new_releases_count
+FROM MovieHierarchy mh
+JOIN MovieInfo mi ON mh.movie_id = mi.movie_id
+LEFT JOIN ActorCount ac ON mi.movie_id = ac.movie_id
+GROUP BY mh.title
+ORDER BY total_movies_related DESC
+LIMIT 10;
+
+This query performs a series of sophisticated operations:
+1. It uses a recursive CTE (`MovieHierarchy`) to establish a hierarchy of movies, including their relationships through the `movie_link` table.
+2. It calculates the count of actors per movie (`ActorCount`) using grouping operations.
+3. It then integrates various attributes of movies, including keywords, actor count, and categorizes movies based on their production year in the `MovieInfo` CTE.
+4. Finally, it selects the relevant data, aggregates counts, and provides a summary ordered by the number of total movies related, generating a result set that could be useful for performance benchmarking or analytical purposes in a movie database context.

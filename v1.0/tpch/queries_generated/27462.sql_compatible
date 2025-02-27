@@ -1,0 +1,52 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+        JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        SUBSTRING(p.p_comment FROM 1 FOR 20) AS short_comment
+    FROM 
+        part p
+    WHERE 
+        CHAR_LENGTH(p.p_name) > 5
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+        LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT cs.c_custkey) AS unique_customers,
+    SUM(fs.p_retailprice) AS total_part_value,
+    STRING_AGG(DISTINCT fs.p_partkey) AS supplier_parts,
+    STRING_AGG(DISTINCT fs.short_comment) AS part_comments
+FROM 
+    RankedSuppliers rs
+    JOIN FilteredParts fs ON rs.s_suppkey = fs.p_partkey
+    JOIN CustomerOrderSummary cs ON cs.c_custkey = rs.s_suppkey
+    JOIN nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    rs.rank <= 3
+GROUP BY 
+    r.r_regionkey, r.r_name
+ORDER BY 
+    unique_customers DESC, total_part_value DESC;

@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        COUNT(DISTINCT cast_info.person_id) AS cast_count,
+        ARRAY_AGG(DISTINCT aka_name.name ORDER BY aka_name.name) AS actor_names,
+        ARRAY_AGG(DISTINCT keyword.keyword ORDER BY keyword.keyword) AS keywords
+    FROM 
+        title
+    JOIN 
+        movie_info ON title.id = movie_info.movie_id
+    JOIN 
+        cast_info ON title.id = cast_info.movie_id
+    JOIN 
+        aka_name ON cast_info.person_id = aka_name.person_id
+    LEFT JOIN 
+        movie_keyword ON title.id = movie_keyword.movie_id
+    LEFT JOIN 
+        keyword ON movie_keyword.keyword_id = keyword.id
+    WHERE 
+        movie_info.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+        AND movie_info.info IS NOT NULL
+    GROUP BY 
+        title.id
+),
+PopularMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year, 
+        cast_count,
+        actor_names,
+        keywords,
+        RANK() OVER (ORDER BY cast_count DESC) AS rank
+    FROM 
+        RankedMovies
+)
+SELECT 
+    pm.movie_id,
+    pm.title,
+    pm.production_year,
+    pm.cast_count,
+    pm.actor_names,
+    pm.keywords
+FROM 
+    PopularMovies pm
+WHERE 
+    pm.rank <= 10
+ORDER BY 
+    pm.cast_count DESC;
+
+This query does the following:
+
+1. Creates a Common Table Expression (CTE) called `RankedMovies` that aggregates movie information, counting the distinct cast members and collecting actor names and keywords.
+  
+2. Filters for movies that have a rating in the `movie_info` table, ensuring that only movies with relevant information are included.
+
+3. Generates another CTE called `PopularMovies` which ranks these movies based on their cast count.
+
+4. Finally, it retrieves the top 10 movies with the most cast members, along with their titles, production years, cast counts, actor names, and associated keywords. The query is structured to benchmark string processing with various string manipulations and aggregations.

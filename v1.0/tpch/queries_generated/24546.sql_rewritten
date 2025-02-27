@@ -1,0 +1,98 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+), 
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        COUNT(DISTINCT p.p_partkey) AS parts_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+LateShippingItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        l.l_returnflag,
+        CASE 
+            WHEN l.l_commitdate > l.l_shipdate THEN 'Delayed'
+            ELSE 'On Time'
+        END AS shipping_status
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate < DATE '1997-06-01'
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS customer_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 50000
+), 
+FinalResults AS (
+    SELECT 
+        n.n_name AS nation_name,
+        ss.s_name AS supplier_name,
+        ord.o_orderkey,
+        ord.o_totalprice,
+        CASE 
+            WHEN ord.order_rank = 1 THEN 'Highest Order'
+            ELSE 'Regular Order'
+        END AS order_type,
+        hs.c_name AS high_value_customer,
+        l.shipping_status
+    FROM 
+        RankedOrders ord
+    LEFT JOIN 
+        supplier s ON s.s_suppkey IN (
+            SELECT ps.ps_suppkey FROM partsupp ps 
+            JOIN part p ON p.p_partkey = ps.ps_partkey 
+            WHERE p.p_retailprice > 1000
+        )
+    LEFT JOIN 
+        LateShippingItems l ON l.l_orderkey = ord.o_orderkey
+    LEFT JOIN 
+        HighValueCustomers hs ON hs.c_custkey = ord.o_custkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+)
+
+SELECT DISTINCT 
+    fr.nation_name,
+    fr.supplier_name,
+    fr.o_orderkey,
+    fr.o_totalprice,
+    fr.order_type,
+    fr.high_value_customer,
+    COUNT(fr.shipping_status) FILTER (WHERE fr.shipping_status = 'Delayed') AS delayed_shipments,
+    COUNT(fr.high_value_customer) AS high_value_count,
+    SUM(CASE WHEN fr.order_type = 'Highest Order' THEN fr.o_totalprice ELSE 0 END) AS total_highest_order_value
+FROM 
+    FinalResults fr
+GROUP BY 
+    fr.nation_name, fr.supplier_name, fr.o_orderkey, fr.o_totalprice, fr.order_type, fr.high_value_customer
+HAVING 
+    COUNT(fr.o_orderkey) > 1 
+ORDER BY 
+    fr.nation_name, SUM(fr.o_totalprice) DESC;

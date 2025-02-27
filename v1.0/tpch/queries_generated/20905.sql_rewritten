@@ -1,0 +1,94 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND 
+        o.o_orderstatus IN ('O', 'F', 'P')
+),
+NationSupplier AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name
+),
+PartSupplierInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+OrderItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(l.l_linenumber) AS items_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_item_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01' AND 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+),
+FinalSelection AS (
+    SELECT 
+        p.p_name,
+        p.p_retailprice,
+        os.o_orderkey,
+        os.total_item_price,
+        ns.supplier_count,
+        ROW_NUMBER() OVER (PARTITION BY ns.supplier_count ORDER BY os.total_item_price DESC) AS row_num
+    FROM 
+        part p
+    JOIN 
+        PartSupplierInfo psi ON p.p_partkey = psi.ps_partkey
+    JOIN 
+        OrderItemSummary os ON os.l_orderkey = (
+            SELECT 
+                o.o_orderkey 
+            FROM 
+                RankedOrders o 
+            WHERE 
+                o.order_rank = 1 AND 
+                o.o_totalprice > psi.avg_supplycost * psi.total_availqty
+            LIMIT 1
+        )
+    JOIN 
+        NationSupplier ns ON ns.n_name = (
+        SELECT 
+            n.n_name 
+        FROM 
+            supplier s
+        JOIN 
+            nation n ON s.s_nationkey = n.n_nationkey
+        WHERE 
+            s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+        LIMIT 1)
+)
+SELECT 
+    DISTINCT f.p_name,
+    f.p_retailprice,
+    f.o_orderkey,
+    f.total_item_price,
+    f.supplier_count
+FROM 
+    FinalSelection f
+WHERE 
+    f.row_num <= 5 
+    AND (f.total_item_price IS NOT NULL OR f.total_item_price IS NOT NULL) 
+ORDER BY 
+    f.total_item_price DESC, f.p_name ASC;

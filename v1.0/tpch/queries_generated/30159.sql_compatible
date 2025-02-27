@@ -1,0 +1,59 @@
+
+WITH RECURSIVE CTE_Supplier_Hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, ch.level + 1
+    FROM supplier s
+    JOIN CTE_Supplier_Hierarchy ch ON s.s_nationkey = ch.s_nationkey
+    WHERE ch.level < 3
+), 
+
+CTE_Orders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+), 
+
+CTE_Region_Nation AS (
+    SELECT r.r_name, n.n_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN partsupp ps ON n.n_nationkey = ps.ps_suppkey
+    GROUP BY r.r_name, n.n_name
+),
+
+CTE_Customer_Totals AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+
+SELECT 
+    s.s_name,
+    r.r_name,
+    n.n_name,
+    ct.total_spent,
+    CASE 
+        WHEN ct.total_spent IS NULL THEN 'No Orders'
+        WHEN ct.total_spent < 1000 THEN 'Low Spender'
+        WHEN ct.total_spent < 5000 THEN 'Medium Spender'
+        ELSE 'High Spender'
+    END AS spending_category,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY ct.total_spent DESC) AS rank_in_region,
+    SUM(ct.total_spent) OVER (PARTITION BY n.n_nationkey) AS nation_spending_total,
+    COALESCE(NULLIF(SUM(COALESCE(o.o_totalprice, 0)), 0), 0.00) AS total_purchase_value
+FROM CTE_Supplier_Hierarchy s
+JOIN CTE_Region_Nation r ON r.total_cost > 0
+JOIN CTE_Customer_Totals ct ON ct.total_spent IS NOT NULL
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN CTE_Orders o ON ct.total_spent = o.total_revenue
+WHERE n.n_name IS NOT NULL
+GROUP BY s.s_name, r.r_name, n.n_name, ct.total_spent
+ORDER BY r.r_name, rank_in_region;

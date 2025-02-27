@@ -1,0 +1,75 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '12 months'
+), 
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS TotalAvailable,
+        COUNT(DISTINCT ps.ps_supplycost) AS DistinctCosts
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    s.s_name,
+    COALESCE(sp.TotalAvailable, 0) AS AvailableQty,
+    CASE 
+        WHEN co.TotalSpent IS NULL THEN 'No Orders'
+        WHEN co.TotalSpent < 500 THEN 'Low Spender'
+        ELSE 'High Spender'
+    END AS CustomerCategory,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY l.l_shipmode) AS AvgShipPrice,
+    COUNT(DISTINCT r.r_regionkey) AS RegionCount,
+    COUNT(*) OVER() AS TotalParts
+FROM 
+    part p
+LEFT JOIN 
+    supplier s ON EXISTS (
+        SELECT 1 
+        FROM SupplierParts sp 
+        WHERE sp.ps_partkey = p.p_partkey AND s.s_suppkey = sp.ps_suppkey
+    )
+LEFT JOIN 
+    CustomerOrders co ON s.s_nationkey = co.c_custkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey AND l.l_shipdate > CURRENT_DATE - INTERVAL '6 months'
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    (p.p_brand LIKE 'Brand%' OR p.p_size IS NULL) 
+    AND (s.s_acctbal IS NOT NULL OR co.TotalSpent IS NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, s.s_name, co.TotalSpent
+HAVING 
+    COUNT(l.l_orderkey) > 2 AND MAX(p.p_retailprice) < (SELECT AVG(p2.p_retailprice) FROM part p2) * 1.2
+ORDER BY 
+    AvailableQty DESC, CustomerCategory;

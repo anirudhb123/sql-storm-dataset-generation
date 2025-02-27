@@ -1,0 +1,54 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY YEAR(o.o_orderdate) ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopRegions AS (
+    SELECT 
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS region_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_name
+    ORDER BY 
+        region_revenue DESC
+    LIMIT 5
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.total_revenue,
+    tr.n_name,
+    tr.region_revenue
+FROM 
+    RankedOrders ro
+JOIN 
+    TopRegions tr ON ro.o_orderkey IN (
+        SELECT l.l_orderkey 
+        FROM lineitem l 
+        JOIN partsupp ps ON l.l_partkey = ps.ps_partkey 
+        JOIN supplier s ON ps.ps_suppkey = s.s_suppkey 
+        JOIN nation n ON s.s_nationkey = n.n_nationkey 
+        WHERE n.n_name = tr.n_name
+    )
+WHERE 
+    ro.order_rank <= 10
+ORDER BY 
+    ro.total_revenue DESC, tr.region_revenue DESC;

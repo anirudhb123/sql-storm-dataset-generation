@@ -1,0 +1,81 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        COALESCE(SUM(sr_return_quantity), 0) AS total_store_returns,
+        COALESCE(SUM(wr_return_quantity), 0) AS total_web_returns,
+        COUNT(DISTINCT CASE WHEN wr_return_quantity IS NOT NULL THEN wr_order_number END) AS distinct_web_orders_returned,
+        COUNT(DISTINCT CASE WHEN sr_return_quantity IS NOT NULL THEN sr_ticket_number END) AS distinct_store_orders_returned
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'No Estimate' 
+            WHEN cd.cd_purchase_estimate < 1000 THEN 'Low'
+            WHEN cd.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium'
+            ELSE 'High' 
+        END AS purchase_estimate_band
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_gender IS NOT NULL
+),
+RevenueByMonth AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_net_paid) AS total_web_sales,
+        SUM(cs.cs_net_paid) AS total_catalog_sales
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON ws.ws_sold_date_sk = d.d_date_sk
+    LEFT JOIN 
+        catalog_sales cs ON cs.cs_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq
+),
+RankedReturns AS (
+    SELECT 
+        c.c_customer_id,
+        cr.total_store_returns,
+        cr.total_web_returns,
+        RANK() OVER (ORDER BY cr.total_store_returns + cr.total_web_returns DESC) AS return_rank
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        customer c ON cr.c_customer_sk = c.c_customer_sk
+)
+SELECT 
+    dem.cd_gender,
+    dem.purchase_estimate_band,
+    COALESCE(r.total_store_returns, 0) AS total_store_returns,
+    COALESCE(r.total_web_returns, 0) AS total_web_returns,
+    rev.total_web_sales,
+    rev.total_catalog_sales,
+    COALESCE(r.return_rank, 'N/A') AS return_rank
+FROM 
+    CustomerDemographics dem
+LEFT JOIN 
+    RankedReturns r ON dem.cd_demo_sk = r.c_customer_id
+LEFT JOIN 
+    RevenueByMonth rev ON rev.d_year = EXTRACT(YEAR FROM DATE '2002-10-01') AND rev.d_month_seq = EXTRACT(MONTH FROM DATE '2002-10-01')
+WHERE 
+    dem.cd_marital_status IN ('M', 'S')
+ORDER BY 
+    total_store_returns DESC,
+    dem.cd_gender NULLS LAST,
+    purchase_estimate_band ASC;

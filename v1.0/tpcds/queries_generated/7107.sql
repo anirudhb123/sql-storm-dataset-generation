@@ -1,0 +1,54 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_web_sales,
+        SUM(cs.cs_sales_price) AS total_catalog_sales,
+        SUM(ss.ss_sales_price) AS total_store_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_id
+),
+AverageSales AS (
+    SELECT 
+        AVG(total_web_sales) AS avg_web_sales,
+        AVG(total_catalog_sales) AS avg_catalog_sales,
+        AVG(total_store_sales) AS avg_store_sales
+    FROM 
+        CustomerSales
+),
+TopSales AS (
+    SELECT 
+        c.c_customer_id,
+        (COALESCE(total_web_sales, 0) + COALESCE(total_catalog_sales, 0) + COALESCE(total_store_sales, 0)) AS total_sales
+    FROM 
+        CustomerSales
+    ORDER BY 
+        total_sales DESC
+    LIMIT 10
+)
+SELECT 
+    cs.c_customer_id,
+    cs.total_web_sales,
+    cs.total_catalog_sales,
+    cs.total_store_sales,
+    as.avg_web_sales,
+    as.avg_catalog_sales,
+    as.avg_store_sales
+FROM 
+    CustomerSales cs
+CROSS JOIN 
+    AverageSales as
+WHERE 
+    cs.c_customer_id IN (SELECT customer_id FROM TopSales)
+ORDER BY 
+    total_web_sales DESC;

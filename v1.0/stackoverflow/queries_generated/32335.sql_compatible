@@ -1,0 +1,77 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS Rn
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+), 
+AggregatedUserData AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT ph.PostId) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.CreationDate < CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 YEAR' 
+    GROUP BY 
+        u.Id, u.Reputation
+), 
+HighScoringPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score IS NOT NULL
+), 
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+)
+SELECT 
+    up.UserId,
+    up.Reputation,
+    hp.Title AS HighScoringPost,
+    hp.Score AS HighScore,
+    ph.PostId AS RecentPostId,
+    ph.Comment AS RecentComment,
+    pt.TagName AS PopularTag,
+    pt.TotalViews
+FROM 
+    AggregatedUserData up
+LEFT JOIN 
+    HighScoringPosts hp ON up.TotalPosts > 10 AND hp.PostRank = 1
+LEFT JOIN 
+    RecursivePostHistory ph ON ph.Rn = 1 
+LEFT JOIN 
+    PopularTags pt ON pt.PostCount > 5
+WHERE 
+    up.Reputation > 1000
+    AND (up.TotalBadges > 3 OR pt.TotalViews IS NOT NULL)
+ORDER BY 
+    up.Reputation DESC, hp.Score DESC;

@@ -1,0 +1,36 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT p.p_partkey) AS total_parts,
+        STRING_AGG(DISTINCT p.p_type, ', ') AS part_types,
+        STRING_AGG(DISTINCT p.p_brand, ', ') AS part_brands
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        STRING_AGG(DISTINCT o.o_orderstatus, ', ') AS order_statuses
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    ss.s_name AS supplier_name,
+    ss.total_supply_value,
+    ss.total_parts,
+    ss.part_types,
+    cs.c_name AS customer_name,
+    cs.total_orders,
+    cs.total_spent,
+    cs.order_statuses
+FROM SupplierStats ss
+JOIN CustomerOrderStats cs ON ss.total_supply_value > cs.total_spent
+ORDER BY ss.total_supply_value DESC, cs.total_spent ASC;

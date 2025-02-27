@@ -1,0 +1,70 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        a.id AS movie_id,
+        t.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank,
+        COUNT(c.person_id) OVER (PARTITION BY a.id) AS cast_count
+    FROM 
+        aka_title a
+    JOIN 
+        title t ON a.id = t.id
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+
+high_rated_movies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        AVG(COALESCE(r.rating, 0)) AS avg_rating
+    FROM 
+        ranked_movies m
+    LEFT JOIN 
+        movie_info r ON m.movie_id = r.movie_id AND r.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        m.movie_id, m.title, m.production_year
+    HAVING 
+        AVG(COALESCE(r.rating, 0)) > 8
+),
+
+top_actor_info AS (
+    SELECT 
+        n.name,
+        c.person_id,
+        COUNT(c.movie_id) AS movie_count
+    FROM 
+        name n
+    JOIN 
+        cast_info c ON n.imdb_id = c.person_id
+    JOIN 
+        high_rated_movies m ON c.movie_id = m.movie_id
+    GROUP BY 
+        n.name, c.person_id
+    HAVING 
+        COUNT(c.movie_id) > 3
+)
+
+SELECT 
+    t.title,
+    t.production_year,
+    ra.name,
+    ra.movie_count,
+    t.year_rank,
+    CASE 
+        WHEN t.year_rank IS NOT NULL THEN 'In Top Movies'
+        ELSE 'Not in Top Movies' 
+    END AS movie_rank_status
+FROM 
+    high_rated_movies t
+JOIN 
+    top_actor_info ra ON ra.movie_count > 3
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    t.production_year DESC, 
+    ra.movie_count DESC;

@@ -1,0 +1,109 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), 
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+), 
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+), 
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(cp.CloseCount, 0) AS TotalCloseCount,
+        us.DisplayName AS OwnerDisplayName,
+        us.Reputation AS OwnerReputation,
+        CASE 
+            WHEN p.OwnerUserId IS NULL THEN 'Deleted User'
+            ELSE us.DisplayName 
+        END AS EffectiveOwner
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UserStats us ON p.OwnerUserId = us.UserId
+    LEFT JOIN 
+        ClosedPosts cp ON p.Id = cp.PostId
+    WHERE 
+        p.PostTypeId = 1 AND p.Score > 10
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Score,
+    pd.TotalCloseCount,
+    pd.OwnerDisplayName,
+    pd.OwnerReputation,
+    pd.EffectiveOwner
+FROM 
+    PostDetails pd
+WHERE 
+    pd.TotalCloseCount = 0
+ORDER BY 
+    pd.Score DESC, 
+    pd.Title ASC;
+
+SELECT 
+    u.UserId, 
+    u.DisplayName, 
+    u.Reputation
+FROM 
+    UserStats u
+WHERE 
+    u.UpvotesReceived > 10 
+    AND u.DownvotesReceived <= 5
+UNION ALL 
+SELECT 
+    -1 AS UserId, 
+    'Community User' AS DisplayName, 
+    0 AS Reputation
+WHERE 
+    NOT EXISTS (SELECT 1 FROM Users);
+
+SELECT DISTINCT 
+    p.Title, 
+    COUNT(DISTINCT c.Id) AS CommentCount
+FROM 
+    Posts p
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '3 months'
+GROUP BY 
+    p.Title
+HAVING 
+    COUNT(DISTINCT c.Id) > 5
+ORDER BY 
+    CommentCount DESC;

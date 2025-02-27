@@ -1,0 +1,78 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        U.Reputation AS OwnerReputation,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, U.Reputation
+), 
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId, 
+        COUNT(*) AS EditCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 ELSE 0 END) AS TitleOrBodyEdits,
+        ARRAY_AGG(DISTINCT 
+            CASE 
+                WHEN ph.PostHistoryTypeId = 10 THEN (SELECT Name FROM CloseReasonTypes WHERE Id = CAST(ph.Comment AS INT))
+                ELSE NULL 
+            END) AS CloseReasons
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.OwnerReputation,
+        rp.CommentCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        ph.EditCount,
+        ph.TitleOrBodyEdits,
+        CASE 
+            WHEN ph.CloseReasons IS NULL THEN 'Not Closed'
+            ELSE 'Closed: ' || array_to_string(ph.CloseReasons, ', ')
+        END AS ClosureStatus
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        PostHistoryCounts ph ON rp.PostId = ph.PostId
+)
+SELECT 
+    f.*,
+    NTILE(5) OVER (ORDER BY f.ViewCount DESC) AS PopularityRank,
+    CASE
+        WHEN f.ViewCount IS NULL THEN 'No Views Recorded'
+        WHEN f.ViewCount > 1000 THEN 'Very Popular'
+        WHEN f.ViewCount BETWEEN 500 AND 1000 THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS PopularityDescription,
+    NULLIF(f.ViewCount, 0) AS ValidViewCount 
+FROM 
+    FinalResults f
+WHERE 
+    f.OwnerReputation > (
+        SELECT AVG(Reputation) FROM Users
+    )
+ORDER BY 
+    f.OwnerReputation DESC, 
+    f.CreationDate DESC;

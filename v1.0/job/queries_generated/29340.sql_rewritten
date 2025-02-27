@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rank_year
+    FROM
+        aka_title t
+    JOIN
+        movie_info mi ON t.id = mi.movie_id
+    WHERE
+        mi.info LIKE '%Oscar%'
+),
+CombinedCast AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        LISTAGG(p.name, ', ') WITHIN GROUP (ORDER BY p.name) AS cast_names
+    FROM
+        cast_info c
+    JOIN
+        aka_name p ON c.person_id = p.person_id
+    GROUP BY
+        c.movie_id
+),
+KeywordStats AS (
+    SELECT
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS total_keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+)
+SELECT
+    rm.movie_id,
+    rm.movie_title,
+    rm.production_year,
+    cc.total_cast,
+    cc.cast_names,
+    ks.total_keywords
+FROM
+    RankedMovies rm
+LEFT JOIN
+    CombinedCast cc ON rm.movie_id = cc.movie_id
+LEFT JOIN
+    KeywordStats ks ON rm.movie_id = ks.movie_id
+WHERE
+    rm.rank_year <= 5 
+ORDER BY
+    rm.production_year DESC, cc.total_cast DESC, rm.movie_title;

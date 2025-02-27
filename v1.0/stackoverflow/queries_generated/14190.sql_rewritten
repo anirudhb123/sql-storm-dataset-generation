@@ -1,0 +1,13 @@
+SELECT 
+    Tags.TagName, 
+    AVG(Posts.Score) AS AverageScore
+FROM 
+    Posts
+JOIN 
+    Tags ON Tags.Id = (SELECT UNNEST(string_to_array(Posts.Tags, '>'))::int[])
+WHERE 
+    Posts.PostTypeId = 1 
+GROUP BY 
+    Tags.TagName
+ORDER BY 
+    AverageScore DESC;

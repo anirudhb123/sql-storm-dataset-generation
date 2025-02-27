@@ -1,0 +1,85 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(V.BountyAmount) AS TotalBounties,
+        AVG(CAST(REGEXP_REPLACE(P.Body, '<[^>]*>', '') AS TEXT) LIKE '%SQL%') * 100.0 AS SQLMentionsPercent,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        * 
+    FROM 
+        UserPostStats
+    WHERE 
+        UserRank <= 10
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.UserId,
+        PH.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS RevisionRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+PostAnalysis AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreatedDate,
+        COALESCE(MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END), 0) AS TotalCloseVotes,
+        COALESCE(MAX(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 END), 0) AS TotalReopenVotes,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags,
+        U.DisplayName AS PostOwner,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        RecentPostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        Tags T ON P.Tags LIKE CONCAT('%<', T.TagName, '>') 
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, U.DisplayName
+)
+SELECT 
+    TU.DisplayName,
+    PA.Title,
+    PA.CommentCount,
+    PA.Tags,
+    PA.TotalCloseVotes,
+    PA.TotalReopenVotes,
+    CASE 
+        WHEN PA.TotalCloseVotes > PA.TotalReopenVotes THEN 'More Closed'
+        ELSE 'More Open or Equal'
+    END AS VoteStatus,
+    CASE 
+        WHEN PA.Tags IS NOT NULL AND PA.Title ILIKE '%SQL%' THEN 'Loves SQL'
+        ELSE 'Neutral'
+    END AS Sensitivity
+FROM 
+    TopUsers TU
+JOIN 
+    PostAnalysis PA ON PA.PostOwner = TU.DisplayName
+WHERE 
+    PA.CommentCount >= 5
+ORDER BY 
+    TU.PostCount DESC;

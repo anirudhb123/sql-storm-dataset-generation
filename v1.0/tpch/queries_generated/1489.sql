@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank,
+        n.n_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = n.n_nationkey)
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal > 10000 THEN 'High'
+            WHEN c.c_acctbal > 5000 THEN 'Medium'
+            ELSE 'Low'
+        END AS value_segment
+    FROM 
+        customer c
+), 
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, CURRENT_DATE)
+        AND o.o_totalprice IS NOT NULL
+), 
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+
+SELECT 
+    c.c_name AS customer_name,
+    c.value_segment,
+    COUNT(DISTINCT fo.o_orderkey) AS total_orders,
+    COALESCE(SUM(ld.total_price), 0) AS total_revenue,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ': ', COALESCE(NULLIF(s.s_acctbal, 0), 'No balance'))) AS supplier_summary
+FROM 
+    HighValueCustomers c
+LEFT JOIN 
+    FilteredOrders fo ON c.c_custkey = fo.o_custkey
+LEFT JOIN 
+    LineItemDetails ld ON fo.o_orderkey = ld.l_orderkey
+LEFT JOIN 
+    RankedSuppliers s ON s.rank <= 3
+GROUP BY 
+    c.c_custkey, 
+    c.c_name, 
+    c.value_segment
+HAVING 
+    COUNT(DISTINCT fo.o_orderkey) > 0
+ORDER BY 
+    total_revenue DESC;

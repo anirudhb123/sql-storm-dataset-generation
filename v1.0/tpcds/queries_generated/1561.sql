@@ -1,0 +1,52 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.bill_cdemo_sk,
+        ws.bill_hdemo_sk,
+        SUM(ws.net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws 
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk 
+    GROUP BY 
+        ws.bill_customer_sk, ws.bill_cdemo_sk, ws.bill_hdemo_sk
+),
+CustomerDetails AS (
+    SELECT 
+        ca.city AS customer_city,
+        cd.gender,
+        cd.education_status,
+        cd.marital_status,
+        rs.total_profit
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        customer c ON rs.bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        rs.profit_rank <= 10
+)
+SELECT 
+    cd.customer_city,
+    cd.gender,
+    cd.education_status,
+    cd.marital_status,
+    COUNT(*) AS customer_count,
+    AVG(cd.total_profit) AS avg_profit,
+    SUM(cd.total_profit) AS total_profit_sum
+FROM 
+    CustomerDetails cd
+GROUP BY 
+    cd.customer_city, cd.gender, cd.education_status, cd.marital_status
+HAVING 
+    COUNT(*) > 1
+ORDER BY 
+    total_profit_sum DESC
+LIMIT 5;

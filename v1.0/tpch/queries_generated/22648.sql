@@ -1,0 +1,84 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > 0
+), FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_container,
+        COALESCE(NULLIF(p.p_comment, ''), 'No comment provided') AS adjusted_comment
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice BETWEEN 100 AND 500
+        AND p.p_type LIKE '%wood%'
+), OrdersWithLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_linenumber) AS total_lines
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, CURRENT_DATE) -- last 6 months
+    GROUP BY 
+        o.o_orderkey
+), SupplierPartPairs AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    WHERE 
+        EXISTS (
+            SELECT 1 
+            FROM FilteredParts fp 
+            WHERE fp.p_partkey = ps.ps_partkey
+        )
+    GROUP BY 
+        ps.ps_partkey, 
+        ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_availqty) > 0
+)
+SELECT 
+    p.p_name,
+    p.adjusted_comment,
+    rp.s_name AS supplier_name,
+    rp.s_acctbal,
+    COALESCE(NULLIF(SUM(sp.total_available), 0), -1) AS total_available_qty,
+    COUNT(DISTINCT ol.o_orderkey) AS total_orders_last_6_months,
+    AVG(ol.total_revenue) AS avg_revenue_per_order
+FROM 
+    FilteredParts p
+LEFT JOIN 
+    SupplierPartPairs sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rp ON sp.ps_suppkey = rp.s_suppkey AND rp.rnk = 1
+LEFT JOIN 
+    OrdersWithLineItems ol ON ol.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+        WHERE l.l_partkey = p.p_partkey
+    )
+GROUP BY 
+    p.p_name, p.adjusted_comment, rp.s_name, rp.s_acctbal
+HAVING 
+    COUNT(DISTINCT ol.o_orderkey) > 0
+ORDER BY 
+    total_orders_last_6_months DESC, avg_revenue_per_order DESC
+LIMIT 10;

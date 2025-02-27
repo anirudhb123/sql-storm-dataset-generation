@@ -1,0 +1,50 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore,
+        ARRAY_AGG(DISTINCT u.DisplayName) AS TopUsers
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%' 
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+), 
+TopTags AS (
+    SELECT 
+        TagName, 
+        PostCount, 
+        QuestionCount, 
+        AnswerCount, 
+        TotalViews, 
+        AverageScore,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStatistics
+)
+SELECT 
+    t.TagName AS "Tag",
+    t.PostCount AS "Total Posts",
+    t.QuestionCount AS "Total Questions",
+    t.AnswerCount AS "Total Answers",
+    t.TotalViews AS "Total Views",
+    t.AverageScore AS "Average Score",
+    t.TopUsers AS "Top Users",
+    CASE 
+        WHEN t.TagRank <= 5 THEN 'Top Tag'
+        WHEN t.TagRank BETWEEN 6 AND 10 THEN 'Trending Tag'
+        ELSE 'Emerging Tag'
+    END AS "Tag Status"
+FROM 
+    TopTags t
+WHERE 
+    t.PostCount > 0
+ORDER BY 
+    t.PostCount DESC, 
+    t.TagName;

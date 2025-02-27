@@ -1,0 +1,64 @@
+WITH RECURSIVE part_supplier_cost AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+national_supplier AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+)
+SELECT 
+    c.c_name AS customer_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(o.o_totalprice) AS total_spent,
+    psc.p_name AS high_cost_part,
+    psc.total_supply_cost AS high_cost,
+    ns.n_name AS supplier_nation,
+    ns.total_avail_qty AS total_supplier_qty
+FROM 
+    customer_orders o
+JOIN 
+    part_supplier_cost psc ON o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+JOIN 
+    national_supplier ns ON ns.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = psc.p_partkey)
+WHERE 
+    psc.total_supply_cost IS NOT NULL
+    AND ns.total_avail_qty > 100
+GROUP BY 
+    c.c_name, psc.p_name, psc.total_supply_cost, ns.n_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_spent DESC, high_cost DESC;

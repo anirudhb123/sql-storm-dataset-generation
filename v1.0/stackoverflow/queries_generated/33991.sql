@@ -1,0 +1,78 @@
+WITH RecursivePostTree AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.ParentId, 
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Start with questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.ParentId, 
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostTree rpt ON p.ParentId = rpt.PostId
+    WHERE 
+        p.PostTypeId = 2  -- Join with answers
+)
+
+, PostMetrics AS (
+    SELECT 
+        pt.PostId, 
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId IN (2, 3)) AS VoteCount, -- Upvotes and downvotes
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgeClass, 
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        RecursivePostTree pt
+    LEFT JOIN 
+        Comments c ON c.PostId = pt.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = pt.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = pt.OwnerUserId
+    GROUP BY 
+        pt.PostId
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    u.DisplayName AS Owner,
+    pm.CommentCount,
+    pm.VoteCount,
+    pm.BadgeCount,
+    pm.LastBadgeDate,
+    CASE 
+        WHEN pm.TotalBadgeClass IS NOT NULL THEN 
+            CASE 
+                WHEN pm.TotalBadgeClass >= 15 THEN 'Highly celebrated'
+                WHEN pm.TotalBadgeClass BETWEEN 5 AND 14 THEN 'Moderately celebrated'
+                ELSE 'Less celebrated'
+            END
+        ELSE 'No badges'
+    END AS BadgeRecognition,
+    COALESCE(DATE_PART('year', AGE(u.CreationDate)), 0) AS AccountAgeYears
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostMetrics pm ON p.Id = pm.PostId
+WHERE 
+    p.PostTypeId = 1   -- Only Questions
+    AND (pm.CommentCount > 10 OR pm.VoteCount > 20)  -- Filter for popular questions
+ORDER BY 
+    pm.VoteCount DESC, pm.CommentCount DESC
+LIMIT 50; 

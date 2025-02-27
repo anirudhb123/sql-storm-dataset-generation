@@ -1,0 +1,71 @@
+-- Performance Benchmarking Query
+-- This query retrieves metrics on post activity, user engagement, and relationships between posts, users, and tags.
+
+WITH PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        UNIX_TIMESTAMP(p.CreationDate) AS CreationEpoch,
+        EXTRACT(EPOCH FROM p.LastActivityDate) AS LastActivityEpoch,
+        ARRAY_LENGTH(string_to_array(p.Tags, '><'), 1) AS TagCount
+    FROM 
+        Posts p
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.UpVotes) AS UpVotesCount,
+        SUM(p.DownVotes) AS DownVotesCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id
+),
+PostHistoryMetrics AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.CreationDate,
+    pm.Score,
+    pm.ViewCount,
+    pm.AnswerCount,
+    pm.CommentCount,
+    pm.FavoriteCount,
+    um.UserId,
+    um.DisplayName AS OwnerDisplayName,
+    um.PostsCount AS OwnerPostsCount,
+    um.TotalScore AS OwnerTotalScore,
+    um.UpVotesCount AS OwnerUpVotesCount,
+    um.DownVotesCount AS OwnerDownVotesCount,
+    phm.EditCount AS TotalEdits,
+    phm.LastEditDate,
+    pm.TagCount
+FROM 
+    PostMetrics pm
+LEFT JOIN 
+    UserMetrics um ON pm.PostId = um.UserId
+LEFT JOIN 
+    PostHistoryMetrics phm ON pm.PostId = phm.PostId
+ORDER BY 
+    pm.CreationDate DESC
+LIMIT 100;

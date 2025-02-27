@@ -1,0 +1,72 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        Id, 
+        Reputation, 
+        CreationDate, 
+        DisplayName, 
+        1 AS Level,
+        CAST(DisplayName AS VARCHAR(1000)) AS Path
+    FROM Users
+    WHERE Reputation > 1000
+    UNION ALL
+    SELECT 
+        U.Id,
+        U.Reputation,
+        U.CreationDate,
+        U.DisplayName,
+        UR.Level + 1,
+        CAST(UR.Path || ' > ' || U.DisplayName AS VARCHAR(1000))
+    FROM Users U
+    JOIN UserReputationCTE UR ON U.Reputation < UR.Reputation
+    WHERE UR.Level < 5
+),
+PostWithComments AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS DownVoteCount
+    FROM Posts P
+    LEFT JOIN Comments C ON C.PostId = P.Id
+    LEFT JOIN Votes V ON V.PostId = P.Id
+    WHERE P.PostTypeId = 1 -- Only questions
+    GROUP BY P.Id
+),
+RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (ORDER BY P.CreationDate DESC) AS RN
+    FROM Posts P
+    WHERE P.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT 
+    UR.DisplayName AS UserDisplayName,
+    UR.Reputation AS UserReputation,
+    PP.Title AS RecentPostTitle,
+    PP.Score AS PostScore,
+    PP.CommentCount AS NumberOfComments,
+    (PP.UpVoteCount - PP.DownVoteCount) AS NetScore,
+    COUNT(B.Id) FILTER (WHERE B.Class = 1) AS GoldBadges,
+    COUNT(B.Id) FILTER (WHERE B.Class = 2) AS SilverBadges,
+    COUNT(B.Id) FILTER (WHERE B.Class = 3) AS BronzeBadges
+FROM UserReputationCTE UR
+JOIN PostWithComments PP ON PP.Score > 10 -- Only considering valuable posts
+LEFT JOIN Badges B ON B.UserId = UR.Id
+JOIN RecentPosts RP ON RP.Id = PP.PostId
+WHERE UR.Level < 3
+GROUP BY 
+    UR.DisplayName, 
+    UR.Reputation, 
+    PP.Title, 
+    PP.Score, 
+    PP.CommentCount
+ORDER BY 
+    UserReputation DESC, 
+    NetScore DESC
+LIMIT 100;

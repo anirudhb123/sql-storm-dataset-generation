@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+
+SELECT 
+    a.name AS actor_name,
+    th.title AS movie_title,
+    th.production_year,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    AVG(m.production_year) OVER (PARTITION BY a.name) AS avg_actor_movie_year,
+    ROW_NUMBER() OVER (PARTITION BY a.name ORDER BY th.production_year DESC) AS movie_rank,
+    CASE 
+        WHEN th.production_year IS NULL THEN 'Unknown Year'
+        ELSE th.production_year::TEXT
+    END AS production_year_display
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_title th ON mh.movie_id = th.id
+LEFT JOIN 
+    movie_keyword mk ON th.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    a.name IS NOT NULL 
+    AND th.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Movie%')
+GROUP BY 
+    a.name, th.title, th.production_year
+HAVING 
+    COUNT(DISTINCT k.id) > 0
+ORDER BY 
+    avg_actor_movie_year DESC, movie_rank ASC;

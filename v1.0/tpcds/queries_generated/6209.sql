@@ -1,0 +1,63 @@
+
+WITH sales_summary AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        AVG(ws.ws_sales_price) AS avg_item_price,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM
+        customer c
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE
+        d.d_year = 2023
+    GROUP BY
+        c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        ss.total_quantity,
+        ss.total_sales,
+        ss.avg_item_price,
+        ss.total_orders,
+        RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM 
+        sales_summary ss
+    JOIN 
+        customer c ON ss.c_customer_id = c.c_customer_id
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(tc.c_customer_id) AS customer_count,
+        AVG(tc.total_sales) AS avg_sales_per_customer,
+        AVG(tc.total_quantity) AS avg_quantity_per_customer
+    FROM 
+        top_customers tc
+    JOIN 
+        customer_demographics cd ON tc.c_customer_id = cd.cd_demo_sk
+    WHERE 
+        tc.sales_rank <= 100
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+)
+SELECT 
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    SUM(customer_count) AS total_customers,
+    AVG(avg_sales_per_customer) AS avg_sales,
+    AVG(avg_quantity_per_customer) AS avg_quantity
+FROM 
+    customer_demographics
+GROUP BY 
+    cd_gender, cd_marital_status, cd_education_status
+ORDER BY 
+    total_customers DESC;

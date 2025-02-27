@@ -1,0 +1,60 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS num_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+        COUNT(l.l_linenumber) AS item_count,
+        STRING_AGG(CONCAT(p.p_name, ' x ', l.l_quantity), ', ') AS items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        part p ON l.l_partkey = p.p_partkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    co.total_spent,
+    od.order_value,
+    od.item_count,
+    od.items
+FROM 
+    RankedSuppliers r
+FULL OUTER JOIN 
+    CustomerOrders co ON r.rnk = 1
+FULL OUTER JOIN 
+    OrderDetails od ON co.c_custkey = od.o_orderkey
+WHERE 
+    co.total_spent IS NOT NULL OR od.order_value IS NOT NULL
+ORDER BY 
+    COALESCE(co.total_spent, 0) DESC, 
+    r.s_name ASC;

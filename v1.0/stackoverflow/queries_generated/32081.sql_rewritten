@@ -1,0 +1,62 @@
+WITH RECURSIVE TagHierarchy AS (
+    SELECT Id, TagName, Count, ExcerptPostId
+    FROM Tags
+    WHERE IsRequired = 1
+  
+    UNION ALL
+  
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId
+    FROM Tags t
+    JOIN TagHierarchy th ON t.ExcerptPostId = th.Id
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(v.VoteTypeId = 2) AS Upvotes,
+        SUM(v.VoteTypeId = 3) AS Downvotes
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id
+),
+PostEditHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY ph.PostId, ph.UserId
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY t.TagName
+    ORDER BY PostCount DESC
+    LIMIT 5
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    ta.TagName AS TopTag,
+    COALESCE(p.EditCount, 0) AS TotalEdits,
+    COALESCE(p.LastEditDate, 'No Edits') AS LastEdit,
+    m.PostCount AS UserPostCount,
+    m.TotalViews,
+    m.Upvotes,
+    m.Downvotes
+FROM Users u
+LEFT JOIN MostActiveUsers m ON u.Id = m.Id
+LEFT JOIN PostEditHistory p ON u.Id = p.UserId
+CROSS JOIN TopTags ta
+WHERE m.PostCount IS NOT NULL
+ORDER BY m.TotalViews DESC, m.Upvotes DESC;

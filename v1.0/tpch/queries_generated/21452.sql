@@ -1,0 +1,53 @@
+WITH RECURSIVE HighVolumeSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, PARTITION BY n.n_regionkey
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > 100000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, PARTITION BY n.n_regionkey
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN HighVolumeSuppliers hv ON s.s_suppkey <> hv.s_suppkey
+    WHERE s.s_acctbal > hv.s_acctbal / 2
+    AND hv.s_acctbal IS NOT NULL
+),
+TopThreeParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL
+),
+OrderData AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           DENSE_RANK() OVER (ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+)
+SELECT 
+    s.s_suppkey,
+    s.s_name,
+    COALESCE(pa.p_name, 'UNKNOWN PART') AS part_name,
+    COALESCE(SUM(l.l_extendedprice), 0) AS total_value,
+    r.r_name AS region_name,
+    CASE 
+        WHEN s.s_acctbal IS NULL THEN 'NO BALANCE'
+        ELSE 'HAS BALANCE'
+    END AS balance_status,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    (SELECT COUNT(DISTINCT o.o_orderkey)
+     FROM orders o
+     WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = s.s_nationkey)
+     AND o.o_orderstatus = 'F') AS completed_orders_count
+FROM supplier s
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part pa ON ps.ps_partkey = pa.p_partkey
+LEFT JOIN lineitem l ON l.l_suppkey = ps.ps_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+WHERE s.s_suppkey IN (SELECT s_suppkey FROM HighVolumeSuppliers)
+AND pa.p_partkey IN (SELECT p.p_partkey FROM TopThreeParts WHERE rn <= 3)
+AND (l.l_discount IS NULL OR l.l_discount < 0.1)
+GROUP BY s.s_suppkey, s.s_name, r.r_name
+HAVING COUNT(l.l_orderkey) > 5
+ORDER BY total_value DESC, balance_status, region_name;

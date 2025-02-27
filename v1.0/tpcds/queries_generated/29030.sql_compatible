@@ -1,0 +1,60 @@
+
+WITH FilteredCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000 
+        AND ca.ca_state = 'CA'
+),
+AggregatedData AS (
+    SELECT 
+        ca.ca_city,
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        FilteredCustomers c
+    JOIN 
+        customer_demographics cd ON c.c_customer_id = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_city,
+        cd.cd_gender
+),
+RankedCities AS (
+    SELECT 
+        ca.ca_city,
+        cd.cd_gender,
+        customer_count,
+        avg_purchase_estimate,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY avg_purchase_estimate DESC) AS city_rank
+    FROM 
+        AggregatedData
+)
+SELECT 
+    rc.ca_city,
+    rc.cd_gender,
+    rc.customer_count,
+    rc.avg_purchase_estimate
+FROM 
+    RankedCities rc 
+WHERE 
+    rc.city_rank <= 5
+ORDER BY 
+    rc.cd_gender, 
+    rc.avg_purchase_estimate DESC;

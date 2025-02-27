@@ -1,0 +1,75 @@
+
+WITH RECURSIVE ranked_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Unknown'
+            WHEN s.s_acctbal < 1000 THEN 'Low'
+            WHEN s.s_acctbal BETWEEN 1000 AND 5000 THEN 'Medium'
+            ELSE 'High'
+        END AS acctbal_category,
+        ROW_NUMBER() OVER (PARTITION BY 
+            CASE 
+                WHEN s.s_acctbal IS NULL THEN 'Unknown'
+                WHEN s.s_acctbal < 1000 THEN 'Low'
+                WHEN s.s_acctbal BETWEEN 1000 AND 5000 THEN 'Medium'
+                ELSE 'High'
+            END 
+            ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+), 
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY c.c_custkey, c.c_name
+),
+expensive_items AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        (SELECT COUNT(*) FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey) AS supplier_count
+    FROM part p
+    WHERE p.p_retailprice > 100
+),
+ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        LAG(o.o_totalprice) OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate) AS prev_order_total,
+        o.o_totalprice,
+        CASE 
+            WHEN o.o_orderstatus = 'O' THEN 'Open'
+            WHEN o.o_orderstatus = 'F' THEN 'Filled'
+            ELSE 'Unknown'
+        END AS status
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE EXISTS (SELECT 1 FROM lineitem l WHERE l.l_orderkey = o.o_orderkey AND l.l_discount > 0)
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    o.total_orders,
+    o.total_spent,
+    ss.s_name,
+    ss.acctbal_category,
+    ss.rank,
+    ei.p_name,
+    ei.p_retailprice
+FROM customer_orders o
+JOIN ranked_suppliers ss ON o.total_orders = ss.rank
+FULL OUTER JOIN expensive_items ei ON ss.s_suppkey = ei.supplier_count
+WHERE (o.total_spent < (SELECT AVG(total_spent) FROM customer_orders) 
+       AND ss.acctbal_category = 'Low') 
+   OR (ei.p_retailprice BETWEEN 100 AND 500 AND ss.acctbal_category IS NOT NULL)
+ORDER BY 
+    c.c_custkey ASC,
+    ei.p_retailprice DESC
+LIMIT 100;

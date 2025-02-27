@@ -1,0 +1,75 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk BETWEEN 1000 AND 1100
+    GROUP BY
+        ws_item_sk
+    UNION ALL
+    SELECT
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_net_profit) AS total_net_profit
+    FROM
+        catalog_sales
+    WHERE
+        cs_sold_date_sk BETWEEN 1000 AND 1100
+    GROUP BY
+        cs_item_sk
+),
+Aggregated_Sales AS (
+    SELECT
+        item.i_item_id,
+        COALESCE(ws.total_quantity, 0) AS web_sales_quantity,
+        COALESCE(cs.total_quantity, 0) AS catalog_sales_quantity,
+        COALESCE(ws.total_net_profit, 0) AS web_net_profit,
+        COALESCE(cs.total_net_profit, 0) AS catalog_net_profit
+    FROM
+        item
+    LEFT JOIN (
+        SELECT *
+        FROM Sales_CTE
+        WHERE total_net_profit > 0
+    ) ws ON item.i_item_sk = ws.ws_item_sk
+    LEFT JOIN (
+        SELECT *
+        FROM Sales_CTE
+        WHERE total_net_profit > 0
+    ) cs ON item.i_item_sk = cs.cs_item_sk
+),
+Final_Sales AS (
+    SELECT
+        i_item_id,
+        web_sales_quantity,
+        catalog_sales_quantity,
+        web_net_profit,
+        catalog_net_profit,
+        RANK() OVER (ORDER BY (web_net_profit + catalog_net_profit) DESC) AS overall_rank
+    FROM
+        Aggregated_Sales
+    WHERE
+        (web_sales_quantity + catalog_sales_quantity) > 0
+)
+SELECT
+    fs.i_item_id,
+    fs.web_sales_quantity,
+    fs.catalog_sales_quantity,
+    fs.web_net_profit,
+    fs.catalog_net_profit,
+    (fs.web_net_profit + fs.catalog_net_profit) AS total_net_profit,
+    CASE 
+        WHEN fs.web_net_profit IS NULL THEN 'No Web Sales'
+        WHEN fs.catalog_net_profit IS NULL THEN 'No Catalog Sales'
+        ELSE 'Both Channels'
+    END AS sales_channel_status
+FROM
+    Final_Sales fs
+WHERE
+    fs.overall_rank <= 10
+ORDER BY
+    total_net_profit DESC;

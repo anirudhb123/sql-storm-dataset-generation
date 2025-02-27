@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.PostTypeId IN (1, 2) -- Only Questions and Answers
+    GROUP BY 
+        p.Id, p.Title, p.Score, u.DisplayName, p.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.Score,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+)
+SELECT 
+    t.*, 
+    CASE 
+        WHEN t.UpVotes > t.DownVotes THEN 'Positive' 
+        ELSE 'Negative' 
+    END AS Sentiment,
+    COALESCE(pt.Name, 'Unknown') AS PostTypeName
+FROM 
+    TopPosts t
+LEFT JOIN 
+    PostTypes pt ON (t.Rank % 2) + 1 = pt.Id -- Map rank to PostType for illustrative purposes
+ORDER BY 
+    t.Score DESC, t.CommentCount DESC;

@@ -1,0 +1,75 @@
+WITH RECURSIVE RevenueCTE AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierRevenue AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_revenue
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey
+),
+FilteredRevenue AS (
+    SELECT 
+        r.r_name,
+        SUM(RevenueCTE.total_revenue) AS total_order_revenue,
+        COUNT(DISTINCT RevenueCTE.o_orderkey) AS total_orders
+    FROM 
+        RevenueCTE
+    LEFT JOIN 
+        customer c ON EXISTS (
+            SELECT 1 
+            FROM nation n 
+            WHERE n.n_nationkey = c.c_nationkey 
+            AND n.n_regionkey = r.r_regionkey
+        )
+    JOIN 
+        region r ON r.r_regionkey = c.c_nationkey
+    GROUP BY 
+        r.r_name
+),
+SupplierAvg AS (
+    SELECT 
+        s.s_name,
+        AVG(supplier_revenue) AS avg_supplier_revenue
+    FROM 
+        SupplierRevenue s
+    WHERE 
+        s.supplier_revenue > (
+            SELECT 
+                AVG(supplier_revenue) 
+            FROM 
+                SupplierRevenue
+        )
+    GROUP BY 
+        s.s_name
+)
+SELECT 
+    r.r_name,
+    COALESCE(fr.total_order_revenue, 0) AS total_order_revenue,
+    COALESCE(sa.avg_supplier_revenue, 0) AS avg_supplier_revenue,
+    CASE 
+        WHEN fr.total_order_revenue IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sales_status
+FROM 
+    region r
+LEFT JOIN 
+    FilteredRevenue fr ON r.r_name = fr.r_name
+LEFT JOIN 
+    SupplierAvg sa ON sa.avg_supplier_revenue > 0
+ORDER BY 
+    r.r_name;

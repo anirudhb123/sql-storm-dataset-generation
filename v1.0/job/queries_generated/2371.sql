@@ -1,0 +1,48 @@
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COALESCE(COUNT(DISTINCT c.id), 0) AS cast_count
+    FROM title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN cast_info c ON cc.subject_id = c.person_id
+    GROUP BY m.id, m.title, m.production_year
+),
+actor_details AS (
+    SELECT 
+        p.id AS person_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count,
+        AVG(ci.nr_order) AS avg_role_order
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN person_info p ON a.person_id = p.person_id
+    WHERE p.info_type_id = (SELECT id FROM info_type WHERE info = 'birth_year') 
+    AND p.info::integer < 1970
+    GROUP BY p.id, a.name
+),
+top_movies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.keywords,
+        md.cast_count,
+        ROW_NUMBER() OVER (ORDER BY md.production_year DESC, md.cast_count DESC) AS rn
+    FROM movie_details md
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.keywords,
+    COALESCE(ad.actor_name, 'Unknown Actor') AS actor_name,
+    COALESCE(ad.movies_count, 0) AS actor_movies_count,
+    CASE WHEN ad.avg_role_order IS NULL THEN 'No Role' ELSE ad.avg_role_order END AS avg_role_order
+FROM top_movies tm
+LEFT JOIN actor_details ad ON tm.cast_count > 0
+WHERE tm.rn <= 10
+ORDER BY tm.production_year DESC, tm.title ASC;

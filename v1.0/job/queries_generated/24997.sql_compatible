@@ -1,0 +1,76 @@
+
+WITH actor_movies AS (
+    SELECT 
+        ak.name AS actor_name,
+        at.title AS movie_title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY at.production_year DESC) AS recent_rank,
+        COUNT(*) OVER (PARTITION BY ak.person_id) AS total_movies
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    WHERE 
+        ak.name IS NOT NULL AND 
+        ak.name <> ''
+),
+movies_with_keywords AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        mk.keyword
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+        AND mk.keyword IS NOT NULL
+),
+company_movie_info AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(*) OVER (PARTITION BY mc.movie_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+ranked_movies AS (
+    SELECT 
+        am.actor_name,
+        am.movie_title,
+        am.production_year,
+        mwk.keyword,
+        cm.company_name,
+        cm.company_type,
+        am.total_movies,
+        ROW_NUMBER() OVER (PARTITION BY am.actor_name ORDER BY am.production_year DESC) AS movie_rank
+    FROM 
+        actor_movies am
+    LEFT JOIN 
+        movies_with_keywords mwk ON am.movie_title = mwk.title
+    LEFT JOIN 
+        company_movie_info cm ON am.recent_rank = 1 AND mwk.movie_id = cm.movie_id
+)
+SELECT 
+    actor_name,
+    movie_title,
+    production_year,
+    keyword,
+    company_name,
+    company_type,
+    total_movies
+FROM 
+    ranked_movies
+WHERE 
+    (movie_rank = 1 OR keyword IS NOT NULL)
+    AND production_year >= COALESCE((SELECT MIN(production_year) FROM actor_movies) - 3, 1900)
+    AND (company_type IS NULL OR company_count > 1)
+ORDER BY 
+    actor_name,
+    production_year DESC;

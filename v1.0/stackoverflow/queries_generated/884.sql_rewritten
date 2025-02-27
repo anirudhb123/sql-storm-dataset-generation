@@ -1,0 +1,48 @@
+WITH UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RowNum
+    FROM Posts P
+    WHERE P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+ClosedPostDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS CloseDate,
+        PH.Comment AS CloseReason
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UVC.UpVotesCount,
+    UVC.DownVotesCount,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.ViewCount,
+    COALESCE(CPD.CloseDate, 'Not Closed') AS CloseDate,
+    COALESCE(CPD.CloseReason, 'N/A') AS CloseReason
+FROM Users U
+JOIN UserVoteCounts UVC ON U.Id = UVC.UserId
+JOIN RecentPosts RP ON U.Id = RP.OwnerUserId
+LEFT JOIN ClosedPostDetails CPD ON RP.PostId = CPD.PostId
+WHERE U.Reputation > 100
+    AND (U.LastAccessDate IS NOT NULL OR U.LastAccessDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month')
+    AND RP.RowNum <= 5
+ORDER BY U.Reputation DESC, RP.CreationDate DESC;

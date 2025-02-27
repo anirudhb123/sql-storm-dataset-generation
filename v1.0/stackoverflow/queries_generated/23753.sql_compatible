@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.AnswerCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, CAST('2024-10-01' AS DATE))
+), 
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(b.Id) AS TotalBadges,
+        COUNT(DISTINCT CASE WHEN b.Class = 1 THEN b.Id END) AS GoldBadges,
+        COUNT(DISTINCT CASE WHEN b.Class = 2 THEN b.Id END) AS SilverBadges,
+        COUNT(DISTINCT CASE WHEN b.Class = 3 THEN b.Id END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), 
+PostClosureHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseCount,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 11) AS ReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+), 
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(rp.UserRank, 0) AS HighestPostRank,
+        us.TotalBounties,
+        us.TotalBadges,
+        u.Reputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    LEFT JOIN 
+        UserScores us ON u.Id = us.UserId
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.HighestPostRank,
+    ua.TotalBounties,
+    ua.TotalBadges,
+    ua.Reputation,
+    COALESCE(pch.CloseCount, 0) AS CloseCount,
+    COALESCE(pch.ReopenCount, 0) AS ReopenCount
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    PostClosureHistory pch ON ua.UserId = pch.PostId
+WHERE 
+    ua.Reputation > 1000 
+    AND (ua.TotalBadges > 5 OR ua.TotalBounties > 100)
+ORDER BY 
+    ua.Reputation DESC, ua.TotalBounties DESC
+LIMIT 10 OFFSET 5;

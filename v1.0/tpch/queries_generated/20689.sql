@@ -1,0 +1,87 @@
+WITH RECURSIVE OrderDetail AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        CASE 
+            WHEN l.l_returnflag = 'R' THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' 
+        AND l.l_shipdate >= DATE '2022-01-01' 
+        AND l.l_shipdate < DATE '2023-01-01'
+    UNION ALL
+    SELECT 
+        od.o_orderkey,
+        od.o_orderdate,
+        od.l_quantity * 1.1 AS l_quantity,
+        od.l_extendedprice * 0.95 AS l_extendedprice,
+        od.l_discount * 1.1 AS l_discount,
+        od.l_tax * 0.9 AS l_tax,
+        od.return_status
+    FROM 
+        OrderDetail od
+    WHERE 
+        od.l_quantity > 10
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > 1000.00
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    cs.c_name,
+    cs.total_spent,
+    cs.order_count,
+    cs.last_order_date,
+    ss.total_available,
+    ss.avg_supply_cost,
+    ROW_NUMBER() OVER (PARTITION BY cs.c_custkey ORDER BY cs.total_spent DESC) AS rank,
+    CASE 
+        WHEN cs.total_spent > 10000 THEN 'High Value'
+        ELSE 'Regular'
+    END AS customer_type
+FROM 
+    CustomerStats cs
+LEFT JOIN 
+    SupplierStats ss ON cs.order_count = ss.total_available
+WHERE 
+    cs.total_spent IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC, ss.avg_supply_cost ASC
+FETCH FIRST 100 ROWS ONLY;

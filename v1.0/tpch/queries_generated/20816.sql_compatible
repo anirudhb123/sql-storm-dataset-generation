@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, CAST(s_name AS VARCHAR(100)) AS path
+    FROM supplier
+    WHERE s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, CONCAT(sh.path, ' -> ', s.s_name)
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.s_acctbal < s.s_acctbal
+),
+PartCost AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+EnhancedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS revenue,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+FinalReport AS (
+    SELECT ph.s_name, ph.path, pc.total_cost,
+           COUNT(DISTINCT eo.o_orderkey) AS total_orders,
+           SUM(eo.revenue) AS total_revenue,
+           AVG(eo.revenue) OVER (PARTITION BY ph.s_nationkey) AS avg_revenue_per_nation
+    FROM SupplierHierarchy ph
+    LEFT JOIN PartCost pc ON ph.s_suppkey = pc.ps_partkey
+    LEFT JOIN EnhancedOrders eo ON eo.o_orderkey IN (
+        SELECT o.o_orderkey
+        FROM orders o
+        WHERE o.o_orderstatus = 'O' AND o.o_totalprice > (
+            SELECT MAX(o2.o_totalprice)
+            FROM orders o2
+            WHERE o2.o_orderdate < '1997-01-01'
+        )
+    )
+    GROUP BY ph.s_name, ph.path, pc.total_cost, ph.s_nationkey
+)
+SELECT *,
+       CASE 
+           WHEN total_revenue IS NULL THEN 'No Revenue' 
+           WHEN total_revenue < 100000 THEN 'Low Revenue' 
+           ELSE 'High Revenue' 
+       END AS revenue_category
+FROM FinalReport
+ORDER BY avg_revenue_per_nation DESC, total_orders DESC
+LIMIT 100 OFFSET 10;

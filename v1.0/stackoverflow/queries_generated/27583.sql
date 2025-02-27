@@ -1,0 +1,70 @@
+WITH TagStats AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) as TagName,
+        COUNT(*) as PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only questions
+    GROUP BY 
+        TagName
+),
+UserActivity AS (
+    SELECT 
+        u.Id as UserId,
+        u.DisplayName,
+        COUNT(p.Id) as QuestionCount,
+        SUM(COALESCE(p.Score, 0)) as TotalScore,
+        SUM(COALESCE(c.Score, 0)) as CommentCount,
+        SUM(COALESCE(b.Class, 0)) as BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 -- Questions
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.QuestionCount,
+        ua.TotalScore,
+        ua.CommentCount,
+        ua.BadgeCount,
+        RANK() OVER (ORDER BY ua.TotalScore DESC, ua.QuestionCount DESC) as Rank
+    FROM 
+        UserActivity ua
+    WHERE 
+        ua.QuestionCount > 0
+),
+TopTags AS (
+    SELECT 
+        ts.TagName,
+        ts.PostCount,
+        RANK() OVER (ORDER BY ts.PostCount DESC) as TagRank
+    FROM 
+        TagStats ts
+    WHERE 
+        ts.PostCount > 1
+)
+SELECT 
+    t.TagName,
+    t.PostCount,
+    COALESCE(u.DisplayName, 'No Contributor') as Contributor,
+    COALESCE(u.QuestionCount, 0) as UserQuestions,
+    COALESCE(u.TotalScore, 0) as UserScore,
+    COALESCE(u.CommentCount, 0) as UserComments,
+    COALESCE(u.BadgeCount, 0) as UserBadges
+FROM 
+    TopTags t
+LEFT JOIN 
+    TopUsers u ON u.Rank = 1 -- Joining with top users
+WHERE 
+    t.TagRank <= 10 -- Only top 10 tags
+ORDER BY 
+    t.PostCount DESC;

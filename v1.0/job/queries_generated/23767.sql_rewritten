@@ -1,0 +1,71 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND t.title IS NOT NULL
+),
+ActorMovieCounts AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        ci.person_id
+),
+TopActors AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        amc.movie_count,
+        RANK() OVER (ORDER BY amc.movie_count DESC) AS actor_rank
+    FROM 
+        aka_name a
+    INNER JOIN 
+        ActorMovieCounts amc ON a.person_id = amc.person_id
+    WHERE 
+        a.name IS NOT NULL
+        AND a.name NOT LIKE '%[0-9]%'
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    t.title,
+    t.production_year,
+    ta.name AS leading_actor,
+    COALESCE(mw.keywords, 'No keywords') AS keywords,
+    CASE 
+        WHEN COALESCE(mw.keywords, '') = '' THEN 'None'
+        ELSE 'Available'
+    END AS keyword_status
+FROM 
+    RankedTitles t
+LEFT JOIN 
+    TopActors ta ON ta.actor_rank = 1 
+LEFT JOIN 
+    MoviesWithKeywords mw ON mw.movie_id = t.id
+WHERE 
+    t.production_year > 1990
+    AND (t.title LIKE '%Action%' OR t.title LIKE '%Drama%')
+ORDER BY 
+    t.production_year DESC, 
+    t.title
+FETCH FIRST 50 ROWS ONLY;

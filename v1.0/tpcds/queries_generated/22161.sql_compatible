@@ -1,0 +1,108 @@
+
+WITH RECURSIVE demographic_depth AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        1 AS depth
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_gender = 'F'
+    UNION ALL
+    SELECT 
+        d.cd_demo_sk,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_education_status,
+        dd.depth + 1
+    FROM 
+        customer_demographics d
+    JOIN 
+        demographic_depth dd ON d.cd_marital_status = 'S' AND d.cd_demo_sk = dd.cd_demo_sk
+),
+sales_data AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_revenue,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk IN (
+            SELECT d_date_sk 
+            FROM date_dim 
+            WHERE d_year = 2023 AND d_month_seq IN (5, 6)
+        )
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk
+),
+top_items AS (
+    SELECT 
+        si.i_item_id,
+        si.i_item_desc,
+        sd.total_quantity,
+        sd.total_revenue
+    FROM 
+        sales_data sd
+    JOIN 
+        item si ON sd.ws_item_sk = si.i_item_sk
+    WHERE 
+        sd.rank <= 10
+),
+location_details AS (
+    SELECT 
+        a.ca_address_id,
+        a.ca_city,
+        a.ca_state,
+        w.w_warehouse_id,
+        w.w_city AS warehouse_city,
+        w.w_state AS warehouse_state
+    FROM 
+        customer_address a
+    LEFT JOIN 
+        warehouse w ON a.ca_state = w.w_state
+    WHERE 
+        a.ca_city IS NOT NULL OR w.w_city IS NOT NULL
+),
+returns_summary AS (
+    SELECT 
+        wr.wr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(wr.wr_return_amt) AS total_return_amount
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+)
+SELECT 
+    ti.i_item_id,
+    ti.i_item_desc,
+    ti.total_quantity,
+    ti.total_revenue,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    COALESCE(rs.total_return_amount, 0) AS total_return_amount,
+    COUNT(DISTINCT ld.ca_address_id) AS unique_addresses,
+    STRING_AGG(DISTINCT CONCAT(ld.ca_city, ', ', ld.ca_state), '; ') AS locations
+FROM 
+    top_items ti
+LEFT JOIN 
+    returns_summary rs ON ti.i_item_id = rs.wr_item_sk
+LEFT JOIN 
+    location_details ld ON ld.warehouse_id IN (
+        SELECT w.w_warehouse_id 
+        FROM warehouse w 
+        WHERE w.w_state = 'CA'
+    )
+GROUP BY 
+    ti.i_item_id, ti.i_item_desc, ti.total_quantity, ti.total_revenue
+HAVING 
+    SUM(ti.total_revenue) > (
+        SELECT AVG(total_revenue) 
+        FROM top_items 
+    )
+ORDER BY 
+    ti.total_revenue DESC;

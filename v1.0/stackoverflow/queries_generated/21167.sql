@@ -1,0 +1,84 @@
+WITH UserVotes AS (
+    SELECT 
+        v.UserId,
+        SUM(CASE WHEN vt.Id = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN vt.Id = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        COUNT(DISTINCT p.Id) AS PostsVotedFor
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    JOIN Posts p ON v.PostId = p.Id
+    GROUP BY v.UserId
+),
+UserAggregates AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(uv.UpVotesCount, 0) AS UpVotesCount,
+        COALESCE(uv.DownVotesCount, 0) AS DownVotesCount,
+        COALESCE(uv.PostsVotedFor, 0) AS PostsVotedFor
+    FROM Users u
+    LEFT JOIN UserVotes uv ON u.Id = uv.UserId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Yes' 
+            ELSE 'No' 
+        END AS IsAccepted,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate) AS UserPostRank
+    FROM Posts p
+    WHERE p.ViewCount > 0 -- Filter for popular posts
+),
+PopularPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.ViewCount,
+        pd.IsAccepted,
+        ua.Reputation,
+        ua.UpVotesCount,
+        ua.DownVotesCount,
+        ua.PostsVotedFor
+    FROM PostDetails pd
+    INNER JOIN UserAggregates ua ON pd.Id IN (
+        SELECT DISTINCT v.PostId 
+        FROM Votes v 
+        WHERE v.UserId = ua.UserId
+    )
+    WHERE ua.Reputation > 100 -- Only include users with high reputation
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.ViewCount,
+    pp.IsAccepted,
+    pp.Reputation,
+    pp.UpVotesCount - pp.DownVotesCount AS VoteBalance,
+    pp.VotesVotedFor,
+    CASE 
+        WHEN pp.Reputation IS NULL THEN 'No Reputation' 
+        WHEN pp.Reputation > 1000 THEN 'Elite User' 
+        ELSE 'Regular User' 
+    END AS UserType,
+    STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypes
+FROM PopularPosts pp
+LEFT JOIN PostTypes pt ON EXISTS (
+    SELECT 1 
+    FROM Posts p 
+    WHERE p.Id = pp.PostId AND p.PostTypeId = pt.Id
+)
+GROUP BY 
+    pp.PostId, pp.Title, pp.CreationDate, pp.ViewCount, 
+    pp.IsAccepted, pp.Reputation, pp.UpVotesCount, pp.DownVotesCount
+HAVING 
+    COUNT(DISTINCT pt.Name) > 1 -- Posts associated with multiple types
+ORDER BY 
+    VoteBalance DESC, 
+    pp.ViewCount DESC
+LIMIT 100;

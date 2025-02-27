@@ -1,0 +1,66 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY LENGTH(t.title) DESC) AS title_rank
+    FROM 
+        aka_title t
+), MovieAwards AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT ma.id) AS award_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        movie_info mi ON mc.movie_id = mi.movie_id
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        LOWER(it.info) LIKE '%award%'
+    GROUP BY 
+        mc.movie_id
+), ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        SUM(CASE WHEN r.role = 'lead' THEN 1 ELSE 0 END) AS lead_roles
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id
+), NullsCheck AS (
+    SELECT 
+        movie_id,
+        COUNT(*) AS null_fields_count 
+    FROM 
+        complete_cast 
+    WHERE 
+        subject_id IS NULL OR status_id IS NULL 
+    GROUP BY 
+        movie_id
+)
+SELECT 
+    tt.title,
+    tt.production_year,
+    COALESCE(ma.award_count, 0) AS award_count,
+    COALESCE(ac.actor_count, 0) AS actor_count,
+    COALESCE(ac.lead_roles, 0) AS lead_roles,
+    COALESCE(nc.null_fields_count, 0) AS null_fields_count,
+    rn.title_rank
+FROM 
+    RankedTitles tt
+LEFT JOIN 
+    MovieAwards ma ON tt.title_id = ma.movie_id
+LEFT JOIN 
+    ActorRoles ac ON tt.title_id = ac.movie_id
+LEFT JOIN 
+    NullsCheck nc ON tt.title_id = nc.movie_id
+WHERE 
+    tt.title_rank = 1
+ORDER BY 
+    tt.production_year DESC,
+    award_count DESC,
+    actor_count DESC;

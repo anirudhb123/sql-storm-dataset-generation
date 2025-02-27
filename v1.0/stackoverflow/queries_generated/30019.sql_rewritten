@@ -1,0 +1,46 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT U.Id AS UserId, U.Reputation, 1 AS Level
+    FROM Users U
+    WHERE U.Reputation > 1000
+    UNION ALL
+    SELECT U.Id, U.Reputation + 100, UR.Level + 1
+    FROM Users U
+    JOIN UserReputation UR ON U.Reputation = UR.Reputation + 100
+    WHERE UR.Level < 10
+),
+ActivePosts AS (
+    SELECT P.Id, P.Title, P.ViewCount, P.Score, 
+           P.CreationDate, P.LastActivityDate, 
+           DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.LastActivityDate DESC) AS ActivityRank
+    FROM Posts P
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+),
+TopUsers AS (
+    SELECT U.Id, U.DisplayName, SUM(P.ViewCount) AS TotalViews, COUNT(P.Id) AS PostCount
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+    GROUP BY U.Id, U.DisplayName
+    HAVING COUNT(P.Id) > 5
+),
+TopPostLinks AS (
+    SELECT PL.PostId, COUNT(*) AS RelatedPostCount
+    FROM PostLinks PL
+    GROUP BY PL.PostId
+)
+SELECT 
+    U.DisplayName, 
+    T.TotalViews, 
+    T.PostCount, 
+    COALESCE(UP.Reputation, 0) AS Reputation,
+    A.Title AS ActivePostTitle, 
+    A.ViewCount AS ActivePostViewCount,
+    LP.RelatedPostCount AS RelatedPostCount
+FROM Users U
+JOIN TopUsers T ON U.Id = T.Id
+LEFT JOIN UserReputation UP ON U.Id = UP.UserId
+LEFT JOIN ActivePosts A ON A.ActivityRank = 1 AND A.Id IN (SELECT TOP 1 Id FROM ActivePosts B WHERE B.OwnerUserId = U.Id ORDER BY B.LastActivityDate DESC)
+LEFT JOIN TopPostLinks LP ON LP.PostId = A.Id
+WHERE U.Reputation IS NOT NULL 
+ORDER BY T.TotalViews DESC, A.ViewCount DESC
+FETCH FIRST 50 ROWS ONLY;

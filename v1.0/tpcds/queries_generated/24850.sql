@@ -1,0 +1,78 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) as profit_rank,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_quantity DESC) as quantity_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_profit IS NOT NULL
+),
+address_analytics AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        customer_address ca
+    JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        ca.ca_address_sk, ca.ca_city
+),
+high_profit_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        ws.ws_net_profit > 1000
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, ca.ca_city
+),
+return_modes AS (
+    SELECT 
+        cr.ship_mode_sk,
+        COUNT(*) AS return_count,
+        SUM(cr.return_quantity) AS total_returned
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.ship_mode_sk
+)
+SELECT 
+    ds.d_day_name,
+    aa.ca_city,
+    COALESCE(hpc.total_profit, 0) AS high_profit_customer_total,
+    COALESCE(SUM(rm.return_count), 0) AS total_returns,
+    AVG(rp.ws_net_profit) AS average_web_profit
+FROM 
+    date_dim ds
+LEFT JOIN 
+    address_analytics aa ON ds.d_date_sk = (SELECT d_date_sk FROM date_dim WHERE d_date = CURRENT_DATE)
+LEFT JOIN 
+    high_profit_customers hpc ON aa.customer_count > 100
+LEFT JOIN 
+    ranked_sales rp ON rp.profit_rank = 1
+LEFT JOIN 
+    return_modes rm ON 1 = CASE WHEN rm.return_count IS NULL THEN 1 ELSE 0 END
+WHERE 
+    ds.d_week_seq IN (SELECT d_week_seq FROM date_dim WHERE d_year = 2023 AND d_week_seq >= 10)
+GROUP BY 
+    ds.d_day_name, aa.ca_city, hpc.total_profit
+HAVING 
+    COALESCE(SUM(rp.ws_net_profit), 0) > 5000 
+    AND COUNT(DISTINCT hpc.c_customer_sk) > 10
+ORDER BY 
+    ds.d_day_name, aa.ca_city;

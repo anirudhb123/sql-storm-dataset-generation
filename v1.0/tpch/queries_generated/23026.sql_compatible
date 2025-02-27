@@ -1,0 +1,54 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON ps.ps_suppkey = sh.s_suppkey
+    JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+    WHERE sh.level < 5
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY o.o_orderkey
+),
+nation_ranked AS (
+    SELECT n.n_nationkey, n.n_name, RANK() OVER (PARTITION BY n.n_regionkey ORDER BY COUNT(c.c_custkey) DESC) AS cust_rank
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_nationkey, n.n_name, n.n_regionkey
+),
+joined_data AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, ps.ps_supkey, COALESCE(n.n_name, 'UNKNOWN') AS nation, 
+           COALESCE(SUM(ps.ps_supplycost), 0) AS total_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, ps.ps_supkey, n.n_name
+),
+final_selection AS (
+    SELECT j.p_partkey, j.p_name, j.p_brand, j.nation, j.total_supply_cost,
+           (SELECT AVG(jd.total_supply_cost) FROM joined_data jd WHERE jd.p_brand = j.p_brand) AS avg_cost_per_brand
+    FROM joined_data j
+    WHERE j.total_supply_cost > (SELECT AVG(total_supply_cost) FROM joined_data)
+)
+SELECT fs.p_partkey, fs.p_name, fs.p_brand, fs.nation,
+       fs.total_supply_cost, fs.avg_cost_per_brand,
+       (SELECT COUNT(*) FROM order_summary os WHERE os.net_revenue > 10000 AND os.o_orderkey IN 
+           (SELECT o.o_orderkey FROM orders o WHERE o.o_orderdate > '1997-01-01')) AS high_revenue_orders,
+       CASE 
+           WHEN fs.avg_cost_per_brand IS NULL THEN 'N/A'
+           ELSE ROUND((fs.total_supply_cost / fs.avg_cost_per_brand), 2)
+       END AS cost_ratio,
+       ARRAY_AGG(DISTINCT r.r_name) AS related_regions
+FROM final_selection fs
+LEFT JOIN region r ON fs.nation = r.r_name
+GROUP BY fs.p_partkey, fs.p_name, fs.p_brand, fs.nation, fs.total_supply_cost, fs.avg_cost_per_brand
+HAVING fs.total_supply_cost IS NOT NULL AND fs.total_supply_cost > 0
+ORDER BY fs.total_supply_cost DESC;

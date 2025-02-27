@@ -1,0 +1,70 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        sr_return_tax,
+        sr_return_ship_cost,
+        RANK() OVER (PARTITION BY sr_customer_sk ORDER BY sr_return_date_sk DESC) AS return_rank
+    FROM store_returns
+    WHERE sr_return_quantity > 0
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_dep_count,
+        COALESCE(cd.cd_purchase_estimate, 0) AS purchase_estimate,
+        COALESCE(cd.cd_credit_rating, 'Unknown') AS credit_rating,
+        COALESCE(oib.ib_lower_bound, 0) AS income_lower_bound,
+        COALESCE(oib.ib_upper_bound, 999999) AS income_upper_bound
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    LEFT JOIN income_band oib ON hd.hd_income_band_sk = oib.ib_income_band_sk
+    WHERE c.c_first_name ILIKE '%a%' OR cd.cd_gender IS NULL
+),
+RecentReturns AS (
+    SELECT 
+        cr.sr_customer_sk,
+        SUM(cr.sr_return_amt) AS total_return_amt,
+        COUNT(cr.sr_ticket_number) AS return_count
+    FROM CustomerReturns cr
+    WHERE cr.return_rank <= 5
+    GROUP BY cr.sr_customer_sk
+),
+JoinedData AS (
+    SELECT 
+        cd.c_customer_id,
+        cr.total_return_amt,
+        cr.return_count
+    FROM CustomerDetails cd
+    LEFT JOIN RecentReturns cr ON cd.c_customer_id = cr.sr_customer_sk
+)
+SELECT 
+    jd.c_customer_id,
+    COALESCE(jd.total_return_amt, 0) AS total_return_amt,
+    jd.return_count,
+    CASE 
+        WHEN jd.return_count IS NULL THEN 'No Returns'
+        WHEN jd.return_count > 10 THEN 'Frequent Returner'
+        ELSE 'Occasional Returner'
+    END AS return_category,
+    CASE 
+        WHEN jd.total_return_amt > 500 THEN 'High Returns'
+        ELSE 'Low Returns'
+    END AS return_volume,
+    CASE 
+        WHEN cd.cd_gender IS NOT NULL AND cd.cd_marital_status = 'M' THEN 'Married Male'
+        WHEN cd.cd_gender IS NOT NULL AND cd.cd_marital_status = 'S' THEN 'Single Male'
+        WHEN cd.cd_gender IS NULL THEN 'Gender Not Specified'
+        ELSE 'Other'
+    END AS customer_description,
+    'Total Return Value: ' || COALESCE(jd.total_return_amt::TEXT, '0') || 
+    ' | Returns: ' || COALESCE(jd.return_count::TEXT, '0') AS return_summary
+FROM JoinedData jd
+JOIN CustomerDetails cd ON cd.c_customer_id = jd.c_customer_id
+WHERE (jd.return_count IS NOT NULL AND jd.return_count > 3) 
+   OR (jd.total_return_amt > 1000;

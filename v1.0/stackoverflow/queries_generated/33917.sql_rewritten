@@ -1,0 +1,84 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        CreationDate,
+        LastAccessDate,
+        DisplayName,
+        WebsiteUrl,
+        Location,
+        AboutMe,
+        Views,
+        UpVotes,
+        DownVotes,
+        ProfileImageUrl,
+        EmailHash,
+        AccountId,
+        1 AS Level
+    FROM Users
+    WHERE Reputation > 1000 
+    
+    UNION ALL
+    
+    SELECT 
+        U.Id,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        U.DisplayName,
+        U.WebsiteUrl,
+        U.Location,
+        U.AboutMe,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        U.ProfileImageUrl,
+        U.EmailHash,
+        U.AccountId,
+        Level + 1
+    FROM Users U
+    INNER JOIN UserReputation UR ON U.AccountId = UR.AccountId
+    WHERE U.Reputation > 1000 AND UR.Level < 3 
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Badges B
+    GROUP BY B.UserId
+),
+PostVoteCounts AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(V.Id) AS VoteCount
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.OwnerUserId
+),
+RecentPostActivity AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        MAX(P.LastActivityDate) AS LatestPostActivity
+    FROM Posts P
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' 
+    GROUP BY P.OwnerUserId
+)
+SELECT 
+    UR.DisplayName,
+    UR.Reputation,
+    UB.BadgeCount,
+    UB.BadgeNames,
+    PVC.VoteCount,
+    RPA.PostCount,
+    RPA.LatestPostActivity
+FROM UserReputation UR
+LEFT JOIN UserBadges UB ON UR.Id = UB.UserId
+LEFT JOIN PostVoteCounts PVC ON UR.Id = PVC.OwnerUserId
+LEFT JOIN RecentPostActivity RPA ON UR.Id = RPA.OwnerUserId
+WHERE 
+    UR.Reputation IS NOT NULL
+    AND (UB.BadgeCount > 0 OR PVC.VoteCount > 10 OR RPA.PostCount > 5)
+ORDER BY UR.Reputation DESC
+LIMIT 50;

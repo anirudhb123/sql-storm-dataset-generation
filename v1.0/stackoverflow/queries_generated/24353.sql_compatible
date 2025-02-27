@@ -1,0 +1,71 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        RANK() OVER (ORDER BY COUNT(p.Id) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    WHERE 
+        u.Reputation > 50 AND
+        u.CreationDate < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN pht.Name = 'Post Closed' THEN ph.CreationDate END) AS LastCloseDate,
+        MAX(CASE WHEN pht.Name = 'Post Reopened' THEN ph.CreationDate END) AS LastReopenDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(STRING_TO_ARRAY(p.Tags, ','))
+    GROUP BY 
+        t.TagName
+)
+
+SELECT 
+    ups.DisplayName AS User,
+    ups.TotalPosts,
+    ups.QuestionCount,
+    ups.AnswerCount,
+    ups.TotalBounty,
+    COALESCE(p.LastCloseDate, p.LastReopenDate) AS RecentActivity,
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount AS TagQuestionCount,
+    ts.AnswerCount AS TagAnswerCount
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    PostHistorySummary p ON p.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ups.UserId)
+JOIN 
+    TagStats ts ON ups.UserRank = ts.PostCount
+WHERE 
+    ups.UserRank <= 10
+ORDER BY 
+    ups.TotalPosts DESC, ts.PostCount DESC;

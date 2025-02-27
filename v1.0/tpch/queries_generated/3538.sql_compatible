@@ -1,0 +1,33 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rk,
+           p.p_partkey
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+), 
+TotalSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY l.l_partkey
+),
+CustomerOrderCount AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM orders o
+    GROUP BY o.o_custkey
+)
+
+SELECT p.p_partkey, p.p_name, p.p_brand, 
+       COALESCE(ts.total_revenue, 0) AS total_revenue,
+       COUNT(DISTINCT CASE WHEN rs.rk = 1 THEN rs.s_suppkey END) AS top_supplier_count,
+       c.c_name, c.order_count
+FROM part p
+LEFT JOIN TotalSales ts ON p.p_partkey = ts.l_partkey
+LEFT JOIN RankedSuppliers rs ON p.p_partkey = rs.p_partkey AND rs.rk = 1
+LEFT JOIN CustomerOrderCount c ON p.p_partkey = c.o_custkey
+WHERE p.p_retailprice > 100.00
+  AND (p.p_comment NOT LIKE '%damaged%' OR p.p_comment IS NULL)
+GROUP BY p.p_partkey, p.p_name, p.p_brand, ts.total_revenue, c.c_name, c.order_count
+ORDER BY total_revenue DESC, p.p_name;

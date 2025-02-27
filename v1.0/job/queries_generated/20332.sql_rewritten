@@ -1,0 +1,70 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        r.title, 
+        r.production_year,
+        kg.keyword
+    FROM 
+        RankedMovies r
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = (SELECT id FROM aka_title a WHERE a.title = r.title LIMIT 1)
+    LEFT JOIN 
+        keyword kg ON mk.keyword_id = kg.id
+    WHERE 
+        r.rn <= 10
+),
+PersonRoles AS (
+    SELECT 
+        c.person_id,
+        c.role_id,
+        r.role as role_name,
+        COUNT(*) AS movies_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.person_id, c.role_id, r.role
+    HAVING 
+        COUNT(*) > 5
+),
+PersonDetails AS (
+    SELECT 
+        p.person_id,
+        p.name,
+        ROW_NUMBER() OVER (ORDER BY pr.movies_count DESC) AS role_rank
+    FROM 
+        aka_name p
+    JOIN 
+        PersonRoles pr ON p.person_id = pr.person_id
+)
+SELECT 
+    pm.title,
+    pm.production_year,
+    pd.name AS actor_name,
+    pd.role_rank,
+    COALESCE(kg.keyword, 'No Keyword') AS keyword
+FROM 
+    TopMovies pm
+JOIN 
+    PersonDetails pd ON pd.role_rank <= 5
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = (SELECT id FROM aka_title at WHERE at.title = pm.title LIMIT 1)
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    cn.country_code IS NOT NULL 
+    AND (pd.role_name IS NULL OR pd.role_name LIKE '%Director%')
+ORDER BY 
+    pm.production_year DESC, 
+    pm.title;

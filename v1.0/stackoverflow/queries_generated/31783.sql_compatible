@@ -1,0 +1,32 @@
+
+WITH RecursivePosts AS (
+    SELECT Id, Title, ViewCount, Score, CreationDate, OwnerUserId,
+           LAG(ViewCount) OVER (PARTITION BY OwnerUserId ORDER BY CreationDate) AS PreviousViewCount
+    FROM Posts
+    WHERE PostTypeId = 1  
+),
+TopUsers AS (
+    SELECT OwnerUserId, COUNT(*) AS TotalPosts, SUM(ViewCount) AS TotalViews,
+           AVG(Score) AS AverageScore
+    FROM RecursivePosts
+    GROUP BY OwnerUserId
+    HAVING COUNT(*) > 5  
+),
+UserBadges AS (
+    SELECT U.Id AS UserId, U.DisplayName,
+           COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT U.DisplayName, T.TotalPosts, T.TotalViews, T.AverageScore, 
+       COALESCE(B.BadgeCount, 0) AS BadgeCount,
+       COALESCE(SUM(CASE WHEN DATEDIFF(DAY, P.CreationDate, CURRENT_DATE) <= 30 THEN 1 ELSE 0 END), 0) AS RecentPosts,
+       COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 12) THEN 1 ELSE 0 END), 0) AS ClosedPosts
+FROM TopUsers T
+JOIN Users U ON T.OwnerUserId = U.Id
+LEFT JOIN UserBadges B ON U.Id = B.UserId
+LEFT JOIN Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+GROUP BY U.DisplayName, T.TotalPosts, T.TotalViews, T.AverageScore, B.BadgeCount
+ORDER BY T.TotalViews DESC, T.AverageScore DESC;

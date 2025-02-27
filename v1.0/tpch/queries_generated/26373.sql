@@ -1,0 +1,63 @@
+WITH SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        s.s_comment, 
+        n.n_name AS nation_name, 
+        r.r_name AS region_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_type, 
+        p.p_size, 
+        p.p_retailprice, 
+        p.p_comment
+    FROM 
+        part p
+    WHERE 
+        CHAR_LENGTH(p.p_comment) > 10
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '1995-01-01' AND l.l_shipdate < DATE '1996-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    si.s_name, 
+    si.nation_name, 
+    si.region_name, 
+    pd.p_name, 
+    pd.p_brand, 
+    os.total_revenue, 
+    pd.p_comment 
+FROM 
+    SupplierInfo si
+JOIN 
+    partsupp ps ON si.s_suppkey = ps.ps_suppkey
+JOIN 
+    PartDetails pd ON ps.ps_partkey = pd.p_partkey
+JOIN 
+    OrderSummary os ON os.total_revenue > 10000
+WHERE 
+    si.s_acctbal > 5000 AND 
+    pd.p_size BETWEEN 5 AND 10
+ORDER BY 
+    os.total_revenue DESC, si.s_name ASC;

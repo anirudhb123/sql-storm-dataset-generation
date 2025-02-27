@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(NULLIF(p.Body, ''), 'No Content') AS BodyContent,
+        LENGTH(COALESCE(NULLIF(p.Body, ''), 'No Content')) AS BodyLength
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, CAST('2024-10-01' AS DATE))
+),
+PostVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotesCount
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+PostsWithComments AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        MAX(b.Date) AS MostRecentBadgeDate
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    rp.Title,
+    rp.BodyContent,
+    rp.CreationDate,
+    rp.PostTypeId,
+    rp.Score,
+    rv.UpVotesCount,
+    rv.DownVotesCount,
+    pc.CommentCount,
+    CASE 
+        WHEN DATEDIFF(CAST('2024-10-01' AS DATE), rp.CreationDate) <= 30 THEN 'New'
+        WHEN DATEDIFF(CAST('2024-10-01' AS DATE), rp.CreationDate) > 30 AND DATEDIFF(CAST('2024-10-01' AS DATE), rp.CreationDate) <= 90 THEN 'Moderate'
+        ELSE 'Old'
+    END AS PostAgeCategory,
+    COALESCE(rb.UserId, -1) AS BadgeUserId,
+    CASE 
+        WHEN rb.UserId IS NOT NULL THEN 'Has Badge'
+        ELSE 'No Badge'
+    END AS BadgeStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVotes rv ON rp.PostId = rv.PostId
+LEFT JOIN 
+    PostsWithComments pc ON rp.PostId = pc.PostId
+LEFT JOIN 
+    RecentBadges rb ON rp.PostId = rb.UserId
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+FETCH FIRST 50 ROWS ONLY;

@@ -1,0 +1,68 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c_email_address,
+        d.cd_gender,
+        CASE 
+            WHEN d.cd_marital_status = 'M' THEN 'Married'
+            WHEN d.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Unknown'
+        END AS marital_status,
+        a.full_address,
+        a.ca_city,
+        a.ca_state
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    JOIN 
+        AddressDetails a ON c.c_current_addr_sk = a.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.email_address,
+    cd.marital_status,
+    cd.full_address,
+    cd.ca_city,
+    cd.ca_state,
+    s.total_sales,
+    s.order_count
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    SalesData s ON cd.c_customer_sk = s.ws_bill_customer_sk
+WHERE 
+    cd.marital_status = 'Married' AND 
+    cd.ca_state = 'CA'
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

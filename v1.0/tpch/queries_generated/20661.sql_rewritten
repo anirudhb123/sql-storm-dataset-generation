@@ -1,0 +1,68 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rnk
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 1 AND 20
+),
+SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * l.l_quantity) AS total_cost,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01'
+    GROUP BY 
+        s.s_suppkey
+),
+HighVolumeSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(ss.total_cost, 0) AS total_cost,
+        DENSE_RANK() OVER (ORDER BY COALESCE(ss.total_cost, 0) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    LEFT JOIN 
+        SupplierSales ss ON s.s_suppkey = ss.s_suppkey
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    CASE 
+        WHEN r.rnk <= 3 THEN 'Top 3'
+        ELSE 'Other'
+    END AS price_category,
+    hs.s_name,
+    hs.total_cost,
+    hs.supplier_rank
+FROM 
+    RankedParts r
+JOIN 
+    HighVolumeSuppliers hs ON r.p_partkey IN (
+        SELECT ps.ps_partkey
+        FROM partsupp ps
+        WHERE ps.ps_supplycost = (
+            SELECT MIN(ps2.ps_supplycost)
+            FROM partsupp ps2
+            WHERE ps2.ps_partkey = r.p_partkey
+        )
+    )
+WHERE 
+    r.rnk <= 10
+ORDER BY 
+    hs.total_cost DESC,
+    p.p_retailprice ASC;

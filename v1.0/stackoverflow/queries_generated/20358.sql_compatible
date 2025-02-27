@@ -1,0 +1,82 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.OwnerUserId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(DISTINCT p2.Id) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts,
+        (SELECT COUNT(1) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpvoteCount,
+        (SELECT COUNT(1) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownvoteCount
+    FROM 
+        Posts p
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        CASE 
+            WHEN rp.RankScore = 1 THEN 'Top Post'
+            WHEN rp.TotalPosts > 10 THEN 'Experienced User'
+            ELSE 'Regular User'
+        END AS UserType,
+        CASE 
+            WHEN rp.UpvoteCount > rp.DownvoteCount THEN 'Positive Sentiment'
+            WHEN rp.DownvoteCount > rp.UpvoteCount THEN 'Negative Sentiment'
+            ELSE 'Neutral Sentiment'
+        END AS PostSentiment
+    FROM 
+        RankedPosts rp
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+UserStats AS (
+    SELECT 
+        fr.OwnerUserId AS UserId,
+        fr.Title,
+        fr.Score,
+        fr.UserType,
+        fr.PostSentiment,
+        ur.Reputation,
+        ur.BadgeCount,
+        ur.LastBadgeDate
+    FROM 
+        FilteredPosts fr
+    JOIN 
+        UserReputation ur ON fr.OwnerUserId = ur.UserId
+)
+SELECT 
+    us.UserId,
+    us.Title,
+    us.Score,
+    us.UserType,
+    us.PostSentiment,
+    us.Reputation,
+    us.BadgeCount,
+    us.LastBadgeDate,
+    CASE 
+        WHEN us.Reputation IS NULL THEN 'Unknown Reputation'
+        WHEN us.Reputation > 1000 THEN 'Elite User'
+        ELSE 'Newbie'
+    END AS ReputationLevel
+FROM 
+    UserStats us
+WHERE 
+    us.PostSentiment = 'Positive Sentiment'
+    AND us.Reputation IS NOT NULL
+    AND us.LastBadgeDate > CURRENT_DATE - INTERVAL '1 year'
+ORDER BY 
+    us.Score DESC, 
+    us.Reputation DESC;

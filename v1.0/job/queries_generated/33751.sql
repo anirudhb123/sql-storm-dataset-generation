@@ -1,0 +1,54 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- Recursive CTE to find all linked movies based on link_type_id
+    SELECT ml.movie_id, ml.linked_movie_id, 1 as level
+    FROM movie_link ml
+    WHERE ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+
+    UNION ALL
+
+    SELECT ml.movie_id, ml.linked_movie_id, mh.level + 1
+    FROM movie_link ml
+    INNER JOIN MovieHierarchy mh ON ml.movie_id = mh.linked_movie_id
+    WHERE ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+),
+MovieDetails AS (
+    -- Get movie details including title and production year
+    SELECT t.title, t.production_year, t.id AS movie_id, 
+           ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM title t
+    JOIN aka_title at ON t.id = at.movie_id
+    WHERE at.production_year IS NOT NULL
+),
+ActorRoles AS (
+    -- Collect actors' roles and their corresponding movies
+    SELECT ak.name AS actor_name, at.title AS movie_title,
+           CASE WHEN ci.note IS NOT NULL THEN ci.note ELSE 'N/A' END AS role_note
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    JOIN aka_title at ON ci.movie_id = at.movie_id
+),
+MovieKeywords AS (
+    -- Get keywords associated with movies
+    SELECT mk.movie_id, STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+FinalResults AS (
+    -- Combine all results and apply filtering to get interesting movies
+    SELECT md.title, md.production_year, 
+           COALESCE(ar.actor_name, 'Unknown') AS main_actor,
+           mk.keywords,
+           mh.level AS sequel_level
+    FROM MovieDetails md
+    LEFT JOIN ActorRoles ar ON md.movie_id = ar.movie_title
+    LEFT JOIN MovieKeywords mk ON md.movie_id = mk.movie_id
+    LEFT JOIN MovieHierarchy mh ON md.movie_id = mh.movie_id
+    WHERE md.production_year >= 2000
+    AND (md.title LIKE '%Action%' OR md.title LIKE '%Adventure%')
+)
+SELECT * 
+FROM FinalResults
+WHERE sequel_level IS NULL
+ORDER BY production_year DESC, title_rank
+LIMIT 50;

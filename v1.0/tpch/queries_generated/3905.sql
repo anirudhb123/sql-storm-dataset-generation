@@ -1,0 +1,80 @@
+WITH supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+ranked_suppliers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY total_supply_cost DESC) AS rank
+    FROM 
+        supplier_summary
+),
+ranked_customers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY total_order_value DESC) AS rank
+    FROM 
+        customer_orders
+)
+SELECT 
+    r.n_name AS region_name,
+    c.c_name AS customer_name,
+    s.s_name AS supplier_name,
+    COALESCE(s.total_supply_cost, 0) AS total_supply_cost,
+    COALESCE(c.total_order_value, 0) AS total_order_value,
+    CASE 
+        WHEN s.rank <= 3 THEN 'Top Supplier'
+        ELSE 'Other Supplier'
+    END AS supplier_category,
+    CASE 
+        WHEN c.rank <= 3 THEN 'Top Customer'
+        ELSE 'Other Customer'
+    END AS customer_category
+FROM 
+    nation n
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    customer_orders c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    supplier_summary s ON n.n_nationkey = (
+        SELECT 
+            n2.n_nationkey 
+        FROM 
+            supplier s2 
+        JOIN 
+            partsupp ps2 ON s2.s_suppkey = ps2.ps_suppkey 
+        JOIN 
+            nation n2 ON s2.s_nationkey = n2.n_nationkey
+        WHERE 
+            s2.s_suppkey = s.s_suppkey 
+        LIMIT 1
+    )
+WHERE 
+    r.r_name IS NOT NULL
+ORDER BY 
+    r.r_name, c.total_order_value DESC, s.total_supply_cost DESC;

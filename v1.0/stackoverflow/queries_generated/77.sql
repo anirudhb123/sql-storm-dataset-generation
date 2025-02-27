@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount, 
+        p.Score, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score >= 5
+),
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+TopContributors AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(b.GoldBadges, 0) AS GoldBadges,
+        COALESCE(b.SilverBadges, 0) AS SilverBadges,
+        COALESCE(b.BronzeBadges, 0) AS BronzeBadges,
+        COUNT(rp.PostId) AS PostCount,
+        SUM(rp.UpVotes - rp.DownVotes) AS NetVotes,
+        SUM(rp.CommentCount) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadgeCounts b ON u.Id = b.UserId
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        u.Reputation >= 1000
+    GROUP BY 
+        u.Id, u.DisplayName, b.GoldBadges, b.SilverBadges, b.BronzeBadges
+)
+SELECT 
+    t.DisplayName,
+    t.PostCount,
+    t.NetVotes,
+    t.TotalComments,
+    t.GoldBadges,
+    t.SilverBadges,
+    t.BronzeBadges
+FROM 
+    TopContributors t
+WHERE 
+    t.PostCount > 5
+ORDER BY 
+    t.NetVotes DESC, 
+    t.PostCount DESC;

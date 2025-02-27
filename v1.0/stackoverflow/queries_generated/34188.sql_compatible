@@ -1,0 +1,57 @@
+
+WITH RecursivePostCTE AS (
+    SELECT p.Id, p.Title, p.Score, p.OwnerUserId, 1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+    UNION ALL
+    SELECT p2.Id, p2.Title, p2.Score, p2.OwnerUserId, rp.Level + 1
+    FROM Posts p2
+    JOIN RecursivePostCTE rp ON p2.ParentId = rp.Id
+),
+UserReputationCTE AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           u.Reputation,
+           COUNT(DISTINCT p.Id) AS PostCount,
+           SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+RankedPosts AS (
+    SELECT rp.Title,
+           rp.Score,
+           u.DisplayName,
+           u.Id AS UserId,
+           ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY rp.Score DESC) AS Rank
+    FROM RecursivePostCTE rp
+    JOIN Users u ON rp.OwnerUserId = u.Id
+),
+MaxScoreCTE AS (
+    SELECT UserId,
+           MAX(PostScore) AS MaxPostScore
+    FROM (
+        SELECT u.Id AS UserId, 
+               SUM(rp.Score) AS PostScore
+        FROM RecursivePostCTE rp
+        JOIN Users u ON rp.OwnerUserId = u.Id
+        GROUP BY u.Id
+    ) AS PostScores
+    GROUP BY UserId
+)
+SELECT up.UserId,
+       up.DisplayName,
+       up.Reputation,
+       up.PostCount,
+       up.TotalBounty,
+       rp.Title AS TopPostTitle,
+       rp.Score AS TopPostScore,
+       rp.Rank,
+       ms.MaxPostScore
+FROM UserReputationCTE up
+JOIN RankedPosts rp ON up.UserId = rp.UserId
+JOIN MaxScoreCTE ms ON up.UserId = ms.UserId
+WHERE rp.Rank = 1 
+  AND up.Reputation > 1000 
+ORDER BY up.TotalBounty DESC;

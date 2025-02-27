@@ -1,0 +1,33 @@
+SELECT 
+    p.p_name, 
+    s.s_name, 
+    c.c_name, 
+    SUBSTRING(s.s_address, 1, 20) AS short_address, 
+    CONCAT(n.n_name, ' - ', r.r_name) AS region_info,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size > 10 
+    AND s.s_acctbal > 1000
+    AND l.l_shipmode IN ('AIR', 'RAIL')
+GROUP BY 
+    p.p_name, s.s_name, c.c_name, region_info
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

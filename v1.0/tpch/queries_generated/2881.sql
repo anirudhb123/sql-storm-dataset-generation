@@ -1,0 +1,43 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        (ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+)
+SELECT 
+    coalesce(cs.c_name, 'Unknown Customer') AS customer_name,
+    coalesce(ro.o_orderdate, 'No Orders') AS last_order_date,
+    ro.o_totalprice AS order_total,
+    COALESCE(cs.total_spent, 0) AS customer_total_spent,
+    ps.p_name AS part_name,
+    ps.total_supply_cost
+FROM RankedOrders ro
+FULL OUTER JOIN CustomerSummary cs ON ro.o_orderkey = cs.order_count
+RIGHT JOIN PartSupplier ps ON ro.o_orderkey = ps.p_partkey
+WHERE (ro.rn <= 5 OR ro.rn IS NULL)
+  AND (cs.total_spent IS NOT NULL OR ps.total_supply_cost > 1000)
+ORDER BY customer_name, order_total DESC, part_name;

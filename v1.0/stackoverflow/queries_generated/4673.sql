@@ -1,0 +1,62 @@
+WITH UserVotes AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVoteCount,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenCount,
+        MAX(p.CreationDate) AS LatestActivity
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId
+),
+RankedPosts AS (
+    SELECT 
+        pa.PostId,
+        pa.Title,
+        pa.OwnerUserId,
+        pa.CommentCount,
+        pa.CloseCount,
+        pa.ReopenCount,
+        ROW_NUMBER() OVER (PARTITION BY pa.OwnerUserId ORDER BY pa.CommentCount DESC) AS OwnerPostRank
+    FROM 
+        PostAnalytics pa
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    COALESCE(rp.Title, 'No Posts') AS MostCommentedPost,
+    up.UpVoteCount - up.DownVoteCount AS NetVotes,
+    COUNT(rp.PostId) AS NumberOfPosts,
+    SUM(rp.CommentCount) AS TotalComments,
+    SUM(rp.CloseCount) AS TotalClosedPosts,
+    SUM(rp.ReopenCount) AS TotalReopenedPosts
+FROM 
+    UserVotes up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId AND rp.OwnerPostRank = 1
+GROUP BY 
+    up.UserId, up.DisplayName
+ORDER BY 
+    NetVotes DESC,
+    TotalComments DESC NULLS LAST;

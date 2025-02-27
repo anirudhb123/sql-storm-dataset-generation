@@ -1,0 +1,67 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT m.id) DESC) AS rank_by_cast,
+        COUNT(DISTINCT m.id) AS cast_count
+    FROM 
+        aka_title AS a
+    LEFT JOIN 
+        cast_info AS m ON a.movie_id = m.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.title, 
+        a.production_year
+),
+best_years AS (
+    SELECT 
+        production_year,
+        MAX(cast_count) AS max_cast_count
+    FROM 
+        ranked_movies
+    GROUP BY 
+        production_year
+),
+top_movies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        ranked_movies rm
+    JOIN 
+        best_years by ON rm.production_year = by.production_year AND rm.cast_count = by.max_cast_count
+),
+actors AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(ci.movie_id) AS movies_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.name
+    HAVING 
+        COUNT(ci.movie_id) > 5
+)
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    a.actor_name,
+    a.movies_count,
+    CASE 
+        WHEN tm.cast_count IS NULL THEN 'No cast information'
+        ELSE CAST(tm.cast_count AS VARCHAR)
+    END AS cast_information,
+    COALESCE(NULLIF(a.movies_count, 0), 'No movies') AS actor_movies_count
+FROM 
+    top_movies tm
+LEFT JOIN 
+    actors a ON a.movies_count > 0
+ORDER BY 
+    tm.production_year DESC, 
+    tm.cast_count DESC, 
+    a.actor_name;

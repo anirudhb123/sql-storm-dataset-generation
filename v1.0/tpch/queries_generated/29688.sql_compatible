@@ -1,0 +1,29 @@
+
+WITH RECURSIVE string_benchmark AS (
+    SELECT 
+        p_name, 
+        CONCAT(p_name, ' - ', p_comment) AS combined_string 
+    FROM part
+    WHERE LENGTH(p_name) > 10 AND LENGTH(p_comment) > 10
+
+    UNION ALL
+
+    SELECT 
+        p_name, 
+        CONCAT(combined_string, ' | ', SUBSTRING(p_type, 1, 5)) 
+    FROM string_benchmark
+    JOIN part ON LENGTH(p_type) > 5 AND p_partkey = (
+        SELECT MIN(p_partkey) 
+        FROM part 
+        WHERE LENGTH(p_type) > 5 AND p_partkey > string_benchmark.p_partkey
+    )
+)
+
+SELECT 
+    SUBSTRING_INDEX(combined_string, ' - ', 1) AS name_part,
+    LENGTH(combined_string) AS length_of_combined,
+    COUNT(*) OVER() AS total_records
+FROM string_benchmark
+GROUP BY name_part, length_of_combined
+ORDER BY length_of_combined DESC
+LIMIT 10;

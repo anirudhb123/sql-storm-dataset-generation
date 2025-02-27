@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.Tags ORDER BY P.Score DESC) AS RankByTag
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+),
+TagStatistics AS (
+    SELECT 
+        UNNEST(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')) AS TagName,
+        COUNT(P.Id) AS QuestionCount,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        UNNEST(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><'))
+),
+PostLinkStats AS (
+    SELECT 
+        PL.PostId,
+        COUNT(PL.RelatedPostId) AS RelatedPostCount
+    FROM 
+        PostLinks PL
+    GROUP BY 
+        PL.PostId
+),
+FinalResults AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Body,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        RP.AnswerCount,
+        RP.CommentCount,
+        RP.OwnerDisplayName,
+        TS.TagName,
+        TS.QuestionCount,
+        TS.TotalViews,
+        TS.TotalScore,
+        TS.AverageScore,
+        COALESCE(PL.RelatedPostCount, 0) AS RelatedPostCount
+    FROM 
+        RankedPosts RP
+    JOIN 
+        TagStatistics TS ON TS.TagName IN (SELECT UNNEST(string_to_array(substring(RP.Tags, 2, length(RP.Tags) - 2), '><')))
+    LEFT JOIN 
+        PostLinkStats PL ON PL.PostId = RP.PostId
+)
+SELECT 
+    *,
+    CONCAT('Post titled "', Title, '" has ', AnswerCount, ' answers and ', CommentCount, ' comments. It belongs to the tag "', TagName, '" with an average score of ', ROUND(AverageScore, 2), '.') AS PostSummary
+FROM 
+    FinalResults
+WHERE 
+    RankByTag <= 5  -- Show top 5 posts by tag
+ORDER BY 
+    TagName,
+    Score DESC;

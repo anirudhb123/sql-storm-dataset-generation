@@ -1,0 +1,110 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT B.Id) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(DISTINCT B.Id) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(DISTINCT B.Id) FILTER (WHERE B.Class = 3) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title, 
+        P.CreationDate, 
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        COUNT(*) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5) 
+    GROUP BY 
+        PH.PostId, PH.UserId
+),
+TopPosts AS (
+    SELECT
+        P.Id,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName,
+        PH.LastEditDate
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostHistorySummary PH ON P.Id = PH.PostId
+    WHERE 
+        P.PostTypeId IN (1, 2) 
+        AND P.Score > 10
+        AND P.ViewCount IS NOT NULL
+    ORDER BY 
+        P.Score DESC
+    LIMIT 10
+),
+PostLinksSummary AS (
+    SELECT 
+        PL.PostId,
+        COUNT(*) AS RelatedCount
+    FROM 
+        PostLinks PL
+    GROUP BY 
+        PL.PostId
+)
+
+SELECT 
+    U.DisplayName AS UserName,
+    UR.Reputation,
+    UR.PostCount,
+    UR.GoldBadges,
+    UR.SilverBadges,
+    UR.BronzeBadges,
+    RP.PostId,
+    RP.Title AS RecentPostTitle,
+    RP.CreationDate AS RecentPostDate,
+    T.Score AS TopPostScore,
+    T.ViewCount AS TopPostViews,
+    PLS.RelatedCount AS RelatedPostLinks,
+    COALESCE(MIN(PH.LastEditDate), 'Never Edited') AS LastEdited,
+    CASE 
+        WHEN U.Location IS NULL THEN 'Location not provided'
+        ELSE U.Location
+    END AS UserLocation
+FROM 
+    UserReputation UR
+JOIN 
+    Users U ON UR.UserId = U.Id
+LEFT JOIN 
+    RecentPosts RP ON U.Id = RP.OwnerUserId AND RP.rn = 1
+LEFT JOIN 
+    TopPosts T ON U.Id = T.OwnerUserId
+LEFT JOIN 
+    PostLinksSummary PLS ON T.Id = PLS.PostId
+LEFT JOIN 
+    PostHistorySummary PH ON U.Id = PH.UserId
+GROUP BY 
+    U.Id, UR.Reputation, UR.PostCount, UR.GoldBadges, UR.SilverBadges, UR.BronzeBadges, 
+    RP.PostId, RP.Title, RP.CreationDate, T.Score, T.ViewCount, PLS.RelatedCount
+ORDER BY 
+    UR.Reputation DESC, UR.PostCount DESC
+LIMIT 50;

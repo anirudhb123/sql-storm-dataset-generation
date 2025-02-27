@@ -1,0 +1,91 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS supplier_rank,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Unknown'
+            ELSE 'Known'
+        END AS acctbal_status
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        COUNT(*) AS lineitem_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+),
+PartSupplierSummary AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COALESCE(rss.supplier_info, 'No Supplier') AS supplier_info,
+    p_part_summary.total_available_qty,
+    p_part_summary.avg_supply_cost,
+    CASE 
+        WHEN p_part_summary.unique_suppliers = 0 THEN 'No Suppliers'
+        ELSE 'Available'
+    END AS supplier_availability,
+    MAX(hvo.lineitem_count) AS max_lineitems,
+    MIN(hvo.o_totalprice) AS min_high_value_order,
+    COUNT(DISTINCT CASE WHEN rss.acctbal_status = 'Known' THEN rss.s_suppkey END) AS known_supplier_count
+FROM 
+    part p
+LEFT JOIN 
+    (SELECT 
+        ps.ps_partkey,
+        STRING_AGG(CONCAT(s.s_name, ' (', s.s_acctbal, ')'), ', ') AS supplier_info
+     FROM 
+        partsupp ps
+     JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+     GROUP BY 
+        ps.ps_partkey
+    ) rss ON p.p_partkey = rss.ps_partkey
+JOIN 
+    PartSupplierSummary p_part_summary ON p.p_partkey = p_part_summary.ps_partkey
+LEFT JOIN 
+    HighValueOrders hvo ON EXISTS (
+        SELECT 1
+        FROM lineitem l
+        WHERE l.l_orderkey = hvo.o_orderkey AND l.l_partkey = p.p_partkey
+    )
+WHERE 
+    p.p_retailprice BETWEEN 100.00 AND 500.00
+    AND (EXISTS (
+        SELECT 1 
+        FROM partsupp ps
+        WHERE ps.ps_partkey = p.p_partkey AND ps.ps_supplycost < 20.00
+    ) OR NOT EXISTS (
+        SELECT 1 
+        FROM lineitem l 
+        WHERE l.l_partkey = p.p_partkey
+    ))
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p_part_summary.total_available_qty, p_part_summary.avg_supply_cost
+ORDER BY 
+    known_supplier_count DESC,
+    min_high_value_order ASC;

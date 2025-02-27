@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpvoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownvoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1 -- Only considering questions
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(p.Id) >= 5
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.UpvoteCount,
+        rp.DownvoteCount,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        tu.DisplayName AS TopUserName,
+        tu.TotalScore AS UserTotalScore,
+        tu.PostCount AS UserPostCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostComments pc ON rp.PostId = pc.PostId
+    LEFT JOIN 
+        TopUsers tu ON rp.PostRank = 1 AND rp.OwnerUserId = tu.UserId
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    UpvoteCount,
+    DownvoteCount,
+    CommentCount,
+    TopUserName,
+    UserTotalScore,
+    UserPostCount
+FROM 
+    FinalResults
+ORDER BY 
+    Score DESC, CreationDate DESC
+LIMIT 10;

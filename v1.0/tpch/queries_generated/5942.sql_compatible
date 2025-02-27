@@ -1,0 +1,34 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')
+)
+SELECT 
+    s.s_name,
+    s.nation_name,
+    SUM(ps.ps_availqty) AS total_avail_qty,
+    AVG(ps.ps_supplycost) AS avg_supply_cost
+FROM 
+    RankedSuppliers s
+WHERE 
+    s.rn = 1
+GROUP BY 
+    s.s_name, s.nation_name
+ORDER BY 
+    total_avail_qty DESC;

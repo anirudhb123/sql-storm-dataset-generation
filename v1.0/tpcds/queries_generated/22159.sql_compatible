@@ -1,0 +1,71 @@
+
+WITH RankedWebSales AS (
+    SELECT 
+        ws.web_site_sk, 
+        ws.ws_order_number, 
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+SalesAnalytics AS (
+    SELECT 
+        ca.ca_city,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        MAX(ws.ws_sales_price) AS max_sales_price
+    FROM 
+        RankedWebSales rws
+    LEFT JOIN 
+        web_site ws ON rws.web_site_sk = ws.web_site_sk
+    LEFT JOIN 
+        customer c ON c.c_customer_sk = (SELECT MAX(cu.c_customer_sk) FROM customer cu WHERE cu.c_current_addr_sk = ca.ca_address_sk)
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        rws.price_rank <= 5
+        AND rws.ws_sales_price IS NOT NULL
+    GROUP BY 
+        ca.ca_city
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status, 
+        SUM(sa.total_profit) AS demographic_profit
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    JOIN 
+        SalesAnalytics sa ON sa.ca_city = (SELECT ca.ca_city FROM customer_address ca WHERE ca.ca_address_sk = c.c_current_addr_sk)
+    GROUP BY 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status
+)
+SELECT 
+    cd_gender, 
+    cd_marital_status, 
+    cd_education_status,
+    demographic_profit,
+    CASE 
+        WHEN demographic_profit IS NULL THEN 'No data'
+        WHEN demographic_profit = 0 THEN 'Break even'
+        ELSE 'Profitable'
+    END AS profitability_status
+FROM 
+    CustomerDemographics
+ORDER BY 
+    demographic_profit DESC
+UNION ALL
+SELECT 
+    'TOTALS', 'N/A', 'N/A', SUM(demographic_profit), NULL
+FROM 
+    CustomerDemographics
+HAVING 
+    SUM(demographic_profit) IS NOT NULL;

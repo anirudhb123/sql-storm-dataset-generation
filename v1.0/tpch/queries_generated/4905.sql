@@ -1,0 +1,48 @@
+WITH RankedSupps AS (
+    SELECT 
+        ps.partkey,
+        ps.suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.partkey, ps.suppkey
+),
+TotalSales AS (
+    SELECT 
+        l.partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY 
+        l.partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(ts.total_revenue, 0) AS total_revenue,
+    COALESCE(ts.total_orders, 0) AS total_orders,
+    COALESCE(rs.total_supply_cost, 0) AS total_supply_cost,
+    CASE 
+        WHEN COALESCE(ts.total_revenue, 0) > 0 
+        THEN ROUND(COALESCE(rs.total_supply_cost, 0) / COALESCE(ts.total_revenue, 1), 2)
+        ELSE NULL 
+    END AS supply_revenue_ratio
+FROM 
+    part p
+LEFT JOIN 
+    TotalSales ts ON p.p_partkey = ts.partkey
+LEFT JOIN 
+    RankedSupps rs ON p.p_partkey = rs.partkey AND rs.rank = 1
+WHERE 
+    p.p_size BETWEEN 10 AND 50
+    AND p.p_container LIKE 'SMALL%'
+ORDER BY 
+    supply_revenue_ratio DESC NULLS LAST;

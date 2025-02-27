@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2  -- Upvotes
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1
+    GROUP BY 
+        b.UserId
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    COALESCE(pb.CommentCount, 0) AS TotalComments,
+    COALESCE(rb.BadgeCount, 0) AS TotalGoldBadges,
+    rb.LastBadgeDate,
+    CASE 
+        WHEN rp.Score > 100 THEN 'High Score'
+        WHEN rp.Score BETWEEN 50 AND 100 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    Users u
+JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    PostComments pb ON rp.PostId = pb.PostId
+LEFT JOIN 
+    RecentBadges rb ON u.Id = rb.UserId
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM Posts p 
+        WHERE p.OwnerUserId = u.Id 
+        AND p.CreationDate > NOW() - INTERVAL '30 days'
+    )
+    AND (rb.BadgeCount IS NULL OR rb.BadgeCount >= 1)
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate ASC
+OFFSET 10 LIMIT 10;

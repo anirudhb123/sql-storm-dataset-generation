@@ -1,0 +1,46 @@
+WITH Ranked_Customers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+),
+High_Value_Customers AS (
+    SELECT rc.c_custkey, rc.c_name, rc.c_acctbal, n.n_name AS nation_name
+    FROM Ranked_Customers rc
+    JOIN nation n ON rc.c_nationkey = n.n_nationkey
+    WHERE rc.rank <= 10
+),
+Top_Suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    ORDER BY s.s_acctbal DESC
+    LIMIT 5
+),
+Part_Supplier_Summary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_availqty, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+Customer_Orders AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_orders_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+Final_Report AS (
+    SELECT hvc.c_custkey, hvc.c_name, hvc.nation_name, 
+           to.total_orders_value, ps.total_availqty, ps.avg_supplycost,
+           ts.s_name AS top_supplier_name
+    FROM High_Value_Customers hvc
+    LEFT JOIN Customer_Orders to ON hvc.c_custkey = to.o_custkey
+    LEFT JOIN Part_Supplier_Summary ps ON ps.ps_partkey = (
+        SELECT ps_partkey FROM partsupp ps ORDER BY ps.ps_supplycost LIMIT 1
+    )
+    LEFT JOIN Top_Suppliers ts ON ts.s_suppkey = (
+        SELECT ps.ps_suppkey FROM part p 
+        JOIN partsupp ps ON p.p_partkey = ps.ps_partkey 
+        WHERE ps.ps_availqty > 0 ORDER BY ps.ps_supplycost LIMIT 1
+    )
+)
+SELECT * FROM Final_Report
+WHERE total_orders_value > 1000
+ORDER BY total_orders_value DESC, c_name ASC;

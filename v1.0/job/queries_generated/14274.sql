@@ -1,0 +1,25 @@
+-- This query benchmarks performance by retrieving a list of movies along with their cast and production companies. 
+-- It uses JOINs across multiple tables in the schema to measure query execution time.
+
+SELECT 
+    t.title AS movie_title,
+    t.production_year,
+    a.name AS actor_name,
+    cn.name AS company_name,
+    ct.kind AS company_type
+FROM 
+    title t
+JOIN 
+    cast_info ci ON t.id = ci.movie_id
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    t.production_year >= 2000  -- Filtering for movies produced from the year 2000 onwards
+ORDER BY 
+    t.production_year DESC;

@@ -1,0 +1,104 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RN,
+        COALESCE(NULLIF(p.Body, ''), 'No content') AS BodyContent,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::text[])
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.AnswerCount
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        COUNT(ph.Id) AS ClosureCount,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        p.Id, p.Title
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        CASE 
+            WHEN SUM(CASE WHEN v.CreationDate > u.LastAccessDate THEN 1 ELSE 0 END) > 0 THEN 1 
+            ELSE 0 
+        END AS RecentActivity,
+        AVG(v.BountyAmount) AS AvgBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+FinalResult AS (
+    SELECT 
+        u.DisplayName AS UserDisplayName,
+        rp.PostId,
+        rp.Title AS PostTitle,
+        rp.Score,
+        rp.AnswerCount,
+        COALESCE(cp.ClosureCount, 0) AS ClosureCount,
+        CASE 
+            WHEN ua.RecentActivity = 1 THEN 'Active Recently'
+            ELSE 'Inactive'
+        END AS ActivityStatus,
+        ARRAY_AGG(DISTINCT rp.TagsList) AS AssociatedTags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.Id
+    LEFT JOIN 
+        UserActivity ua ON rp.OwnerUserId = ua.UserId
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id 
+    WHERE 
+        rp.RN = 1 
+        AND rp.Score > (
+            SELECT AVG(Score) 
+            FROM Posts 
+            WHERE CreationDate < CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '6 months'
+        )
+    GROUP BY 
+        u.DisplayName, rp.PostId, rp.Title, rp.Score, rp.AnswerCount, cp.ClosureCount
+)
+SELECT 
+    UserDisplayName,
+    PostId,
+    PostTitle,
+    Score,
+    AnswerCount,
+    ClosureCount,
+    ActivityStatus,
+    ARRAY_LENGTH(AssociatedTags) AS TagCount,
+    CASE 
+        WHEN ClosureCount > 0 THEN CONCAT('Closed: ', ClosureCount)
+        ELSE 'Open'
+    END AS PostStatus,
+    CASE 
+        WHEN Score IS NULL THEN 'No Score Recorded'
+        WHEN Score > 100 THEN 'Highly Rated'
+        ELSE 'Moderate Rating'
+    END AS RatingDescription
+FROM 
+    FinalResult
+ORDER BY 
+    Score DESC, 
+    UserDisplayName ASC;

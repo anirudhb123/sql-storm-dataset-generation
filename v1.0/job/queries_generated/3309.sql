@@ -1,0 +1,40 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS actor_count_rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name ORDER BY cn.name SEPARATOR ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code IS NOT NULL
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    r.title,
+    r.production_year,
+    COALESCE(r.actor_count_rank, 'No actors') AS actor_count_rank,
+    COALESCE(cd.companies, 'No companies') AS companies_produced
+FROM 
+    ranked_movies r
+LEFT JOIN 
+    company_details cd ON r.movie_id = cd.movie_id
+WHERE 
+    (r.production_year IS NOT NULL AND r.production_year > 2000) 
+    OR (cd.companies IS NOT NULL AND cd.companies LIKE '%Warner%')
+ORDER BY 
+    r.production_year DESC, r.actor_count_rank ASC;

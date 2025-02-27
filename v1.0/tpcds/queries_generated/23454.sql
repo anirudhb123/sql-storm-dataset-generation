@@ -1,0 +1,79 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY ws.ws_net_profit DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1995
+        AND (c.c_preferred_cust_flag IS NULL OR c.c_preferred_cust_flag <> 'Y')
+), TotalReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.return_quantity) AS total_return_qty,
+        COUNT(DISTINCT wr.return_order_number) AS total_returns
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk
+), AddressShipCount AS (
+    SELECT 
+        c.c_current_addr_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_current_addr_sk
+), CombinedData AS (
+    SELECT 
+        r.c_customer_id,
+        r.c_first_name,
+        r.c_last_name,
+        COALESCE(tr.total_return_qty, 0) AS total_return_qty,
+        COALESCE(tr.total_returns, 0) AS total_returns,
+        ac.order_count,
+        r.ws_net_profit
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        TotalReturns tr ON r.c_customer_id = tr.returning_customer_sk
+    LEFT JOIN 
+        AddressShipCount ac ON r.c_customer_id = ac.c_current_addr_sk
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    c.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cd.cd_purchase_estimate,
+    cd.cd_credit_rating,
+    cd.cd_dep_count,
+    cd.cd_dep_employed_count,
+    cd.cd_dep_college_count,
+    cd.cd_demo_sk,
+    total_return_qty,
+    total_returns,
+    order_count
+FROM 
+    combineddata c
+JOIN 
+    customer_demographics cd ON c.c_customer_id = cd.cd_demo_sk
+WHERE 
+    total_return_qty > 0
+    AND (order_count IS NULL OR order_count > 5)
+    AND (c.ws_net_profit IS NULL OR c.ws_net_profit >= 100)
+    AND (c.ws_net_profit < (SELECT AVG(ws_net_profit) FROM RankedSales))
+ORDER BY 
+    c.ws_net_profit DESC
+LIMIT 100;

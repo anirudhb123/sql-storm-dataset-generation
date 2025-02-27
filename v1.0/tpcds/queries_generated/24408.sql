@@ -1,0 +1,88 @@
+
+WITH RECURSIVE temp_sales AS (
+    SELECT
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+item_stats AS (
+    SELECT
+        i.item_id,
+        i.i_item_desc,
+        COUNT(DISTINCT ws.order_number) AS total_sales,
+        SUM(ws.ws_ext_sales_price) AS total_revenue,
+        AVG(ws.ws_sales_price) AS average_price,
+        SUM(CASE WHEN ws.ws_quantity IS NULL THEN 1 ELSE 0 END) AS null_quantity_count,
+        SUM(CASE WHEN ws.ws_ext_discount_amt < 0 THEN 1 ELSE 0 END) AS negative_discount_count
+    FROM
+        item i
+    LEFT JOIN
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY
+        i.item_id, i.i_item_desc
+),
+filtered_items AS (
+    SELECT
+        item_id,
+        i_item_desc,
+        total_sales,
+        total_revenue,
+        average_price,
+        dense_rank() OVER (PARTITION BY NULL WHEN total_revenue = 0 THEN 1 ELSE 0 END ORDER BY total_revenue DESC) as revenue_rank
+    FROM
+        item_stats
+    WHERE
+        total_sales > 0
+),
+
+most_active_customers AS (
+    SELECT
+        c.c_customer_id,
+        COUNT(DISTINCT ws.order_number) AS purchases,
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM
+        customer c
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY
+        c.c_customer_id
+    HAVING
+        total_spent > 1000
+),
+
+final_report AS (
+    SELECT
+        f.item_id,
+        f.total_sales,
+        f.total_revenue,
+        f.average_price,
+        COALESCE(a.purchases, 0) AS customer_purchases,
+        COALESCE(a.total_spent, 0) AS customer_total_spent
+    FROM
+        filtered_items f
+    LEFT JOIN
+        most_active_customers a ON f.item_id = a.c_customer_id
+    WHERE
+        f.total_revenue IS NOT NULL
+)
+
+SELECT 
+    fr.item_id,
+    fr.total_sales,
+    fr.total_revenue,
+    ROUND(fr.average_price * (1 - NULLIF(SUM(sm.sm_ship_mode_sk) OVER (PARTITION BY fr.item_id), 0) / 100), 2) AS revised_average,
+    GREATEST(fr.customer_total_spent, 0) AS adjusted_customer_spent
+FROM 
+    final_report fr
+LEFT JOIN 
+    ship_mode sm ON fr.total_sales BETWEEN sm.sm_ship_mode_sk AND sm.sm_ship_mode_sk + 5
+ORDER BY 
+    fr.total_revenue DESC
+FETCH FIRST 50 ROWS ONLY;

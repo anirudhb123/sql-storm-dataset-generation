@@ -1,0 +1,69 @@
+WITH ProcessedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsArray,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        p.AcceptedAnswerId,
+        jsonb_agg(DISTINCT bh.Comment) AS PostHistoryComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        LATERAL string_to_array(p.Tags, ',') AS tag ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag
+    LEFT JOIN 
+        PostHistory bh ON p.Id = bh.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Considering only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+RankedPosts AS (
+    SELECT
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        OwnerDisplayName,
+        CommentCount,
+        TagsArray,
+        UpVotes,
+        DownVotes,
+        AcceptedAnswerId,
+        PostHistoryComments,
+        ROW_NUMBER() OVER (ORDER BY CreationDate DESC) AS Rank
+    FROM 
+        ProcessedPosts
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.TagsArray,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.AcceptedAnswerId,
+    rp.PostHistoryComments,
+    CASE 
+        WHEN rp.AcceptedAnswerId IS NOT NULL THEN 'Accepted Answer Available'
+        ELSE 'No Accepted Answer'
+    END AS AnswerStatus
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Rank <= 100; -- Top 100 recent questions

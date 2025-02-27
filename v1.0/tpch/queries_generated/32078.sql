@@ -1,0 +1,37 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 0 AS hierarchy_level
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.hierarchy_level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_custkey = ch.c_custkey
+    WHERE c.c_acctbal > (SELECT AVG(c3.c_acctbal) FROM customer c3 WHERE c3.c_custkey != ch.c_custkey)
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+SupplierDetails AS (
+    SELECT ps.ps_partkey, s.s_suppkey, s.s_acctbal, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_suppkey, s.s_acctbal
+)
+SELECT 
+    ch.c_name AS customer_name,
+    SUM(os.total_revenue) AS total_revenue,
+    AVG(sd.total_supply_cost) AS avg_supply_cost,
+    COUNT(*) FILTER (WHERE os.total_revenue IS NOT NULL) AS non_null_revenue_count,
+    COUNT(*) FILTER (WHERE sd.total_supply_cost IS NOT NULL) AS non_null_supply_count
+FROM CustomerHierarchy ch
+LEFT JOIN OrderSummary os ON ch.c_custkey = os.o_custkey
+LEFT JOIN SupplierDetails sd ON os.o_orderkey = sd.ps_partkey  -- Example of a potential join with SupplierDetails
+WHERE ch.hierarchy_level < 5
+GROUP BY ch.c_name
+ORDER BY total_revenue DESC
+LIMIT 10;

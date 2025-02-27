@@ -1,0 +1,44 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM CustomerOrders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderdate < cast('1998-10-01' as date)
+),
+PartSupp AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+RankedLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, l.l_quantity,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rank
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+),
+DetailedPurchases AS (
+    SELECT co.c_custkey, co.c_name, li.l_orderkey, li.l_partkey, li.l_suppkey,
+           li.l_quantity, ps.total_available,
+           CASE 
+               WHEN li.rank = 1 THEN 'Top Item'
+               ELSE 'Other Item'
+           END AS item_rank
+    FROM CustomerOrders co
+    JOIN RankedLineItems li ON co.o_orderkey = li.l_orderkey
+    LEFT JOIN PartSupp ps ON li.l_partkey = ps.ps_partkey AND li.l_suppkey = ps.ps_suppkey
+)
+SELECT d.c_custkey, d.c_name, COUNT(d.l_orderkey) AS num_orders, 
+       SUM(d.l_quantity) AS total_quantity, 
+       AVG(d.total_available) AS avg_available,
+       MAX(d.l_orderkey) AS last_orderkey
+FROM DetailedPurchases d
+GROUP BY d.c_custkey, d.c_name
+HAVING SUM(d.l_quantity) > (SELECT AVG(total) FROM (SELECT SUM(l_quantity) AS total FROM lineitem GROUP BY l_orderkey) AS subquery)
+ORDER BY total_quantity DESC
+LIMIT 10;

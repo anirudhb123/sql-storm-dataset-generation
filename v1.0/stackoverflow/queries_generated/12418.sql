@@ -1,0 +1,53 @@
+-- Performance benchmarking query for Stack Overflow schema
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        P.CommentCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) AS VoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.PostTypeId, P.CreationDate, P.ViewCount, P.Score, P.AnswerCount, U.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    PS.PostId,
+    PS.PostTypeId,
+    PS.CreationDate,
+    PS.ViewCount,
+    PS.Score,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.OwnerDisplayName,
+    COALESCE(PHS.EditCount, 0) AS EditCount,
+    COALESCE(PHS.LastEditDate, 'No Edits') AS LastEditDate,
+    PS.VoteCount
+FROM 
+    PostStats PS
+LEFT JOIN 
+    PostHistoryStats PHS ON PS.PostId = PHS.PostId
+ORDER BY 
+    PS.ViewCount DESC
+LIMIT 100;

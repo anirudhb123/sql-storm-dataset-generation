@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  -- Starting with Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId  -- Join to get Answers
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS QuestionsCount,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswersCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+RankedBadges AS (
+    SELECT 
+        b.UserId,
+        b.Name,
+        RANK() OVER (PARTITION BY b.UserId ORDER BY b.Date DESC) AS BadgeRank
+    FROM Badges b
+),
+CombinedPostData AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(ph.TagString, 'No Tags') AS Tags,
+        COALESCE(u.DisplayName, 'Deleted User') AS Owner,
+        u.Reputation AS OwnerReputation,
+        ph.VoteCount
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            STRING_AGG(TagName, ', ') AS TagString
+        FROM Tags t
+        JOIN Posts p ON p.Tags LIKE '%' + t.TagName + '%'
+        GROUP BY PostId
+    ) ph ON p.Id = ph.PostId
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+),
+RecentActivity AS (
+    SELECT 
+        PostId,
+        COUNT(Comment.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        MAX(p.CreationDate) AS LastActivityDate
+    FROM Posts p
+    LEFT JOIN Comments Comment ON p.Id = Comment.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY PostId
+)
+
+SELECT 
+    cp.PostId,
+    cp.Title,
+    cp.Tags,
+    cp.Owner,
+    cp.OwnerReputation,
+    COALESCE(ra.BadgeCount, 0) AS UserBadgeCount,
+    ra.BadgeRank,
+    ra.TotalScore,
+    ra.QuestionsCount,
+    ra.AnswersCount,
+    rph.Level AS PostHierarchyLevel,
+    rha.CommentCount,
+    rha.VoteCount,
+    rha.LastActivityDate
+FROM CombinedPostData cp
+LEFT JOIN UserPostStats ra ON cp.OwnerReputation = ra.Reputation
+LEFT JOIN RankedBadges rb ON cp.Owner = rb.UserId AND rb.BadgeRank = 1
+LEFT JOIN RecursivePostHierarchy rph ON cp.PostId = rph.PostId
+LEFT JOIN RecentActivity rha ON cp.PostId = rha.PostId
+WHERE 
+    cp.OwnerReputation > 500  -- Users with reputation > 500
+ORDER BY 
+    cp.OwnerReputation DESC, 
+    rha.LastActivityDate DESC;

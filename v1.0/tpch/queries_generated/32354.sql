@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS hierarchy_level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sp.s_acctbal, sh.hierarchy_level + 1
+    FROM supplier sp
+    JOIN SupplierHierarchy sh ON sp.s_nationkey = sh.s_nationkey AND sp.s_suppkey != sh.s_suppkey
+),
+RankedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+),
+CustomerStats AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent,
+           AVG(o.o_totalprice) AS average_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+SupplierPerformance AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost) AS total_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+FinalResults AS (
+    SELECT ns.n_name, SUM(ls.l_extendedprice * (1 - ls.l_discount)) AS total_revenue,
+           AVG(cs.total_spent) AS avg_customer_spent
+    FROM nation ns
+    LEFT JOIN supplier s ON s.s_nationkey = ns.n_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem ls ON ls.l_partkey = ps.ps_partkey
+    LEFT JOIN CustomerStats cs ON cs.total_orders > 0
+    WHERE ls.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY ns.n_name
+)
+SELECT f.n_name, f.total_revenue, f.avg_customer_spent,
+       sh.s_name AS high_account_supplier
+FROM FinalResults f
+LEFT JOIN SupplierHierarchy sh ON sh.hierarchy_level = 2
+ORDER BY f.total_revenue DESC, f.avg_customer_spent DESC
+LIMIT 10;

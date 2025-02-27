@@ -1,0 +1,78 @@
+
+WITH RECURSIVE IncomeRanges AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound, 
+           CASE 
+               WHEN ib_upper_bound IS NULL THEN 'High Income' 
+               WHEN ib_lower_bound IS NULL THEN 'Low Income' 
+               ELSE CONCAT('Income: ', ib_lower_bound, ' to ', COALESCE(CAST(ib_upper_bound AS VARCHAR), '∞')) 
+           END AS income_description
+    FROM income_band
+),
+DemographicStatistics AS (
+    SELECT 
+        cd_gender,
+        COUNT(DISTINCT c_customer_id) AS customer_count,
+        SUM(cd_purchase_estimate) AS total_purchase_estimate,
+        AVG(cd_dep_count + COALESCE(cd_dep_employed_count, 0)) AS avg_dependents,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY SUM(cd_purchase_estimate) DESC) AS rank_by_purchase
+    FROM customer_demographics
+    JOIN customer ON cd_demo_sk = c_current_cdemo_sk
+    WHERE cd_income_band_sk IS NOT NULL
+    GROUP BY cd_gender
+),
+ItemSales AS (
+    SELECT 
+        i_item_id,
+        SUM(ws_ext_sales_price) AS total_sales_value,
+        COUNT(*) AS sales_count
+    FROM item
+    JOIN web_sales ON i_item_sk = ws_item_sk
+    WHERE ws_sold_date_sk BETWEEN 20200101 AND 20231231
+    GROUP BY i_item_id
+),
+SalesInventory AS (
+    SELECT 
+        inv.warehouse_sk, 
+        inv.item_sk,
+        inv.inv_quantity_on_hand,
+        SUM(CASE WHEN ws.web_site_sk IS NOT NULL THEN inv.inv_quantity_on_hand ELSE 0 END) AS total_sales_quantity,
+        COUNT(DISTINCT ws.ws_order_number) AS distinct_order_count
+    FROM inventory inv
+    LEFT JOIN web_sales ws ON inv.item_sk = ws.ws_item_sk
+    GROUP BY inv.warehouse_sk, inv.item_sk
+),
+FinalReport AS (
+    SELECT 
+        r.income_description,
+        ds.cd_gender,
+        ds.customer_count,
+        ds.total_purchase_estimate,
+        SUM(COALESCE(isales.total_sales_value, 0)) AS total_sales,
+        SUM(si.total_sales_quantity) AS total_inventory_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM IncomeRanges r
+    LEFT JOIN DemographicStatistics ds ON r.ib_income_band_sk = ds.cd_gender
+    LEFT JOIN ItemSales isales ON isales.i_item_id = CAST(r.ib_income_band_sk AS VARCHAR)
+    LEFT JOIN SalesInventory si ON si.item_sk = CAST(isales.i_item_id AS VARCHAR)
+    LEFT JOIN web_sales ws ON ws.ws_item_sk = isales.i_item_id
+    WHERE ds.customer_count > 0
+    GROUP BY r.income_description, ds.cd_gender, ds.customer_count, ds.total_purchase_estimate
+    HAVING SUM(COALESCE(isales.total_sales_value, 0)) > 1000 OR COUNT(DISTINCT ws.ws_order_number) > 5
+)
+SELECT 
+    fr.income_description,
+    fr.cd_gender,
+    fr.customer_count,
+    fr.total_purchase_estimate,
+    fr.total_sales,
+    fr.total_inventory_sales,
+    fr.total_orders,
+    CASE 
+        WHEN fr.total_orders > 10 THEN 'High Order Volume'
+        WHEN fr.total_orders BETWEEN 5 AND 10 THEN 'Medium Order Volume'
+        ELSE 'Low Order Volume'
+    END AS order_volume_category
+FROM FinalReport fr
+WHERE fr.total_sales IS NOT NULL
+ORDER BY fr.customer_count DESC, fr.total_sales DESC
+LIMIT 100 OFFSET 0;

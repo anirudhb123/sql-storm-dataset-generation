@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankByViews,
+        COALESCE(COUNT(c.Id) FILTER (WHERE c.Score > 0), 0) AS PositiveCommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id AND v.VoteTypeId IN (8, 9)  -- BountyStart or BountyClose
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.OwnerUserId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS EditCount,
+        STRING_AGG(DISTINCT CONVERT(varchar, ph.CreationDate, 120), ', ' ORDER BY ph.CreationDate) AS EditTimestamps
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 10)  -- Edit Title, Edit Body, Edit Tags, Post Closed
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(* FILTER (WHERE ph.PostHistoryTypeId = 10)) AS CloseCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.RankByViews,
+    rp.PositiveCommentCount,
+    rp.TotalBounty,
+    ISNULL(hd.EditCount, 0) AS EditCount,
+    ISNULL(hd.EditTimestamps, 'No edits') AS EditTimestamps,
+    ISNULL(cp.CloseCount, 0) AS CloseCount,
+    CASE 
+        WHEN rp.RankByViews = 1 AND ISNULL(cp.CloseCount, 0) = 0 THEN 'Top viewed and active'
+        WHEN ISNULL(cp.CloseCount, 0) > 0 THEN 'Closed posts'
+        ELSE 'Other posts' 
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryDetails hd ON rp.PostId = hd.PostId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.ViewCount > 10 -- Filtering for posts with more than 10 views
+ORDER BY 
+    rp.RankByViews, rp.ViewCount DESC;

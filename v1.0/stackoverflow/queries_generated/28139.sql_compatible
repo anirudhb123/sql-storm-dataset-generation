@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(ah.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts ah ON p.AcceptedAnswerId = ah.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+TagCount AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT TRIM(UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')))) ) AS UniqueTagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+CommentStats AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS TotalComments,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostsWithStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        tp.UniqueTagCount,
+        cs.TotalComments,
+        cs.LastCommentDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        TagCount tp ON rp.PostId = tp.PostId
+    LEFT JOIN 
+        CommentStats cs ON rp.PostId = cs.PostId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.Body,
+    p.Tags,
+    p.CreationDate,
+    p.OwnerDisplayName,
+    p.UniqueTagCount,
+    p.TotalComments,
+    p.LastCommentDate,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.PostId AND v.VoteTypeId = 2) AS UpVotes, 
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.PostId AND v.VoteTypeId = 3) AS DownVotes 
+FROM 
+    PostsWithStats p
+WHERE 
+    p.PostId IN (SELECT DISTINCT c.PostId FROM Comments c) 
+ORDER BY 
+    p.CreationDate DESC, 
+    p.UniqueTagCount DESC;

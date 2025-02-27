@@ -1,0 +1,65 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        u.DisplayName AS OwnerName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+        LEFT JOIN LATERAL (
+            SELECT Unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName
+        ) t ON TRUE
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.ViewCount, p.AcceptedAnswerId, u.DisplayName
+),
+
+TopPostTypes AS (
+    SELECT 
+        pt.Id AS PostTypeId,
+        pt.Name AS PostTypeName,
+        COUNT(rp.PostId) AS PostCount
+    FROM 
+        PostTypes pt
+        LEFT JOIN RankedPosts rp ON pt.Id = rp.PostTypeId
+    GROUP BY 
+        pt.Id, pt.Name
+),
+
+TopPosts AS (
+    SELECT 
+        rp.*,
+        tpt.PostTypeName
+    FROM 
+        RankedPosts rp
+        JOIN TopPostTypes tpt ON rp.ViewRank <= 10
+)
+
+SELECT 
+    tp.Title,
+    tp.OwnerName,
+    tp.ViewCount,
+    tp.PostTypeName,
+    tp.CommentCount,
+    tp.VoteCount,
+    tp.Tags,
+    CASE 
+        WHEN tp.AcceptedAnswerId IS NOT NULL THEN 'Accepted Answer Available'
+        ELSE 'No Accepted Answer'
+    END AS AnswerStatus
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.ViewCount DESC, 
+    tp.PostId;

@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY ws_item_sk
+), 
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_product_name,
+        r.total_quantity,
+        r.total_sales
+    FROM RankedSales r
+    JOIN item i ON r.ws_item_sk = i.i_item_sk
+    WHERE r.sales_rank <= 10
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ti.i_product_name,
+    ti.total_quantity,
+    ti.total_sales,
+    CASE WHEN ci.income_band = 0 THEN 'Unknown' ELSE CAST(ci.income_band AS VARCHAR(255)) END AS income_band_status
+FROM CustomerInfo ci
+JOIN TopItems ti ON ci.c_customer_id IN (
+    SELECT DISTINCT ws_bill_customer_sk 
+    FROM web_sales 
+    WHERE ws_item_sk IN (SELECT ws_item_sk FROM RankedSales WHERE sales_rank <= 10)
+)
+ORDER BY ti.total_sales DESC, ci.c_customer_id
+LIMIT 100 OFFSET 0;

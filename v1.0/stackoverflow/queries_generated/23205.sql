@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS rn,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS NetVotes,  -- Upvotes - Downvotes
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate >= (CURRENT_TIMESTAMP - INTERVAL '1 year') AND
+        p.PostTypeId IN (1, 2)  -- Questions and Answers
+    GROUP BY 
+        p.Id, p.Title, p.PostTypeId, p.CreationDate, p.OwnerUserId
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        NetVotes,
+        CommentCount,
+        ROW_NUMBER() OVER (ORDER BY NetVotes DESC, CommentCount DESC) AS Ranking
+    FROM 
+        RankedPosts
+    WHERE 
+        rn = 1  -- Take only the latest post of each user
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        p.Title
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Looking for closed posts
+),
+FinalReport AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.NetVotes,
+        tp.CommentCount,
+        COALESCE(cp.CreationDate, 'No Date') AS ClosedDate,
+        COALESCE(cp.Comment, 'Not Applicable') AS CloseReason
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        ClosedPosts cp ON tp.PostId = cp.PostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN ClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Active'
+    END AS Status,
+    CASE 
+        WHEN NetVotes > 0 THEN 'Positive'
+        WHEN NetVotes < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteStatus
+FROM 
+    FinalReport
+WHERE 
+    CommentCount > 5 AND  -- Filter for posts with more than 5 comments
+    (ClosedDate IS NULL OR ClosedDate > (CURRENT_DATE - INTERVAL '30 days'))  -- Exclude posts closed over 30 days ago
+ORDER BY 
+    NetVotes DESC, CommentCount DESC;

@@ -1,0 +1,47 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+part_supplier_info AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+           (ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+avg_lineitem_sales AS (
+    SELECT l.l_partkey, AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_sales
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY l.l_partkey
+),
+final_results AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, 
+           p.p_partkey, p.p_name, psi.total_supply_value, als.avg_sales,
+           sh.level
+    FROM customer_orders o
+    JOIN part_supplier_info psi ON psi.total_supply_value > o.o_totalprice
+    JOIN avg_lineitem_sales als ON als.l_partkey = psi.p_partkey
+    JOIN supplier_hierarchy sh ON sh.s_nationkey = o.o_orderkey
+    WHERE sh.level < 5 AND o.order_rank = 1
+)
+SELECT fr.c_custkey, fr.c_name, fr.o_orderkey, fr.o_totalprice, 
+       fr.p_partkey, fr.p_name, fr.total_supply_value, fr.avg_sales
+FROM final_results fr
+ORDER BY fr.o_totalprice DESC, fr.total_supply_value ASC
+LIMIT 100;

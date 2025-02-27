@@ -1,0 +1,82 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND 
+        o.o_orderdate < '1998-01-01'
+), SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        COUNT(DISTINCT ps.ps_partkey) AS distinct_parts,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+), LineItemTotals AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        lt.total_price AS lineitem_total,
+        COALESCE(rn.order_rank, 0) AS rank
+    FROM 
+        RankedOrders rn
+    RIGHT JOIN 
+        orders o ON o.o_orderkey = rn.o_orderkey
+    LEFT JOIN 
+        LineItemTotals lt ON o.o_orderkey = lt.l_orderkey
+), TopSuppliers AS (
+    SELECT 
+        ss.s_suppkey,
+        AVG(ss.avg_supply_cost) AS avg_cost
+    FROM 
+        SupplierSummary ss
+    GROUP BY 
+        ss.s_suppkey
+    HAVING 
+        AVG(ss.avg_supply_cost) < (SELECT AVG(ps.ps_supplycost) FROM partsupp ps)
+)
+SELECT 
+    od.o_orderkey,
+    od.o_totalprice,
+    od.o_orderstatus,
+    od.lineitem_total,
+    ts.avg_cost AS supplier_avg_cost,
+    (CASE 
+        WHEN od.rank IS NULL THEN 'No Rank'
+        ELSE CAST(od.rank AS VARCHAR)
+     END) AS order_rank_status
+FROM 
+    OrderDetails od
+LEFT JOIN 
+    TopSuppliers ts ON od.o_orderkey IN (
+        SELECT DISTINCT l.l_orderkey 
+        FROM lineitem l 
+        WHERE l.l_suppkey IN (
+            SELECT ss.s_suppkey 
+            FROM SupplierSummary ss 
+            WHERE ss.total_available > 100
+        )
+    )
+WHERE 
+    od.o_orderstatus IN ('O', 'F') 
+ORDER BY 
+    od.o_orderkey;

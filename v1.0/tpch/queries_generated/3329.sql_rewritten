@@ -1,0 +1,86 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierParts AS (
+    SELECT
+        ps.ps_partkey,
+        p.p_name,
+        p.p_brand,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_value
+    FROM
+        partsupp ps
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY
+        ps.ps_partkey, p.p_name, p.p_brand
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+TopNations AS (
+    SELECT
+        n.n_nationkey,
+        n.n_name,
+        SUM(c.total_spent) AS total_spending
+    FROM
+        nation n
+    JOIN
+        CustomerOrders c ON n.n_nationkey = c.c_nationkey
+    GROUP BY
+        n.n_nationkey, n.n_name
+    HAVING
+        SUM(c.total_spent) > 100000
+)
+SELECT
+    r.r_name,
+    tn.n_name,
+    COUNT(DISTINCT ro.o_orderkey) AS completed_orders,
+    SUM(sp.total_value) AS total_part_value,
+    AVG(co.order_count) AS avg_orders_per_customer
+FROM
+    region r
+LEFT JOIN
+    nation tn ON r.r_regionkey = tn.n_regionkey
+LEFT JOIN
+    TopNations tnt ON tn.n_nationkey = tnt.n_nationkey
+LEFT JOIN
+    RankedOrders ro ON ro.o_orderstatus = 'F' AND ro.o_orderkey IN (
+        SELECT o_orderkey
+        FROM orders 
+        WHERE o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    )
+LEFT JOIN
+    SupplierParts sp ON sp.ps_partkey IN (
+        SELECT l_partkey
+        FROM lineitem
+        WHERE l_shipdate > l_commitdate
+    )
+LEFT JOIN
+    CustomerOrders co ON co.c_custkey IN (
+        SELECT c_custkey
+        FROM customer
+        WHERE c_acctbal IS NOT NULL
+    )
+GROUP BY
+    r.r_name, tn.n_name
+ORDER BY
+    total_part_value DESC, completed_orders DESC;

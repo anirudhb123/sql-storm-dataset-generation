@@ -1,0 +1,60 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rank_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+MaxSupplyCost AS (
+    SELECT 
+        p.p_partkey,
+        MAX(ps.ps_supplycost) AS max_supplycost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+),
+CompletedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        o.o_orderdate,
+        o.o_custkey
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate <= DATEADD(DAY, -30, '1998-10-01')
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_custkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT cs.c_custkey) AS num_customers,
+    SUM(co.revenue) AS total_revenue,
+    COUNT(DISTINCT rs.s_suppkey) AS num_suppliers,
+    AVG(cs.c_acctbal) AS avg_customer_acctbal
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    customer cs ON n.n_nationkey = cs.c_nationkey
+JOIN 
+    CompletedOrders co ON cs.c_custkey = co.o_custkey
+LEFT JOIN 
+    RankedSuppliers rs ON rs.rank_supplycost = 1
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_revenue DESC;

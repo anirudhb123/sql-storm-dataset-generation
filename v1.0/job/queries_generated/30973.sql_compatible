@@ -1,0 +1,67 @@
+
+WITH RECURSIVE movie_chain AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY[t.title] AS movie_path,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    WHERE 
+        mc.note ILIKE '%sequel%' 
+        AND t.production_year >= 2000
+    
+    UNION ALL
+
+    SELECT 
+        b.id AS movie_id,
+        b.title,
+        b.production_year,
+        mc.movie_path || b.title,
+        level + 1
+    FROM 
+        movie_chain mc
+    JOIN 
+        movie_link ml ON mc.movie_id = ml.movie_id
+    JOIN 
+        aka_title b ON ml.linked_movie_id = b.id
+    WHERE 
+        b.production_year >= 2000
+)
+
+SELECT 
+    ak.name AS actor_name,
+    m.production_year,
+    COUNT(DISTINCT c.movie_id) AS total_movies,
+    SUM(CASE 
+            WHEN m.production_year BETWEEN 2010 AND 2020 THEN 1 
+            ELSE 0 
+        END) AS movies_2010_2020,
+    STRING_AGG(DISTINCT CONCAT(m.title, ' - ', CAST(m.production_year AS TEXT)), ', ') AS movie_details,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY COUNT(DISTINCT c.movie_id) DESC) AS actor_rank
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    aka_title m ON c.movie_id = m.id
+LEFT JOIN 
+    movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'tagline')
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    ak.name IS NOT NULL
+    AND m.production_year IS NOT NULL
+    AND (k.keyword ILIKE '%action%' OR k.keyword ILIKE '%drama%')
+GROUP BY 
+    ak.name, m.production_year
+HAVING 
+    COUNT(DISTINCT c.movie_id) >= 5
+ORDER BY 
+    actor_rank
+LIMIT 10;

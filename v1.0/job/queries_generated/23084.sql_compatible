@@ -1,0 +1,84 @@
+
+WITH RECURSIVE Actor_Movies AS (
+    SELECT 
+        ca.person_id,
+        COUNT(DISTINCT c.movie_id) AS total_movies
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name an ON ca.person_id = an.person_id
+    JOIN 
+        aka_title at ON at.id = ca.movie_id
+    WHERE 
+        an.name IS NOT NULL
+    GROUP BY 
+        ca.person_id
+), 
+
+Movie_Details AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT mc.company_id) AS num_companies,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = at.id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        at.title, at.production_year
+), 
+
+Top_Actors AS (
+    SELECT 
+        am.person_id,
+        an.name,
+        am.total_movies,
+        DENSE_RANK() OVER (ORDER BY am.total_movies DESC) AS rank
+    FROM 
+        Actor_Movies am
+    JOIN 
+        aka_name an ON an.person_id = am.person_id
+    WHERE 
+        am.total_movies > 5
+), 
+
+Movies_Produced AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.num_companies,
+        COALESCE(md.company_names, 'No Companies') AS company_names,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.num_companies DESC) AS year_rank
+    FROM 
+        Movie_Details md
+)
+
+SELECT 
+    ta.name AS actor_name,
+    ta.total_movies,
+    mp.title AS movie_title,
+    mp.production_year,
+    mp.num_companies,
+    mp.company_names,
+    CASE 
+        WHEN ta.total_movies > 10 THEN 'High Output' 
+        ELSE 'Moderate Output' 
+    END AS output_category,
+    CASE 
+        WHEN mp.num_companies = 0 THEN 'Indie' 
+        ELSE 'Produced by ' || mp.num_companies || ' companies' 
+    END AS production_type
+FROM 
+    Top_Actors ta
+LEFT JOIN 
+    Movies_Produced mp ON ta.person_id IN (SELECT person_id FROM cast_info WHERE movie_id IN 
+        (SELECT id FROM aka_title WHERE production_year = mp.production_year))
+WHERE 
+    ta.rank <= 10 
+    AND (mp.num_companies IS NULL OR mp.num_companies < 5) 
+ORDER BY 
+    ta.total_movies DESC,
+    mp.production_year DESC;

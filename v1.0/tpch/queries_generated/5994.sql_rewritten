@@ -1,0 +1,54 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS Rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_partkey
+    FROM 
+        RankedSuppliers s
+    WHERE 
+        s.Rank <= 3
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS TotalOrders,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    c.c_name AS CustomerName,
+    cs.TotalOrders,
+    cs.TotalSpent,
+    ts.s_name AS SupplierName,
+    ts.TotalSupplyCost
+FROM 
+    CustomerOrderSummary cs
+JOIN 
+    TopSuppliers ts ON cs.TotalSpent > 10000
+JOIN 
+    lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+WHERE 
+    l.l_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ts.s_suppkey)
+ORDER BY 
+    cs.TotalSpent DESC, ts.TotalSupplyCost DESC;

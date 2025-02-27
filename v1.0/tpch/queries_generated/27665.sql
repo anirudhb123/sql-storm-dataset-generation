@@ -1,0 +1,22 @@
+WITH RECURSIVE part_hierarchy AS (
+    SELECT p_partkey, p_name, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, 1 AS level
+    FROM part
+    WHERE p_size < 20
+
+    UNION ALL
+
+    SELECT p.partkey, p.p_name, p.p_brand, p.p_type, p.p_size, p.p_container, p.p_retailprice, p.p_comment, ph.level + 1
+    FROM part_hierarchy ph
+    JOIN part p ON ph.p_brand = p.p_brand AND ph.level < 5
+)
+SELECT ph.p_name,
+       ph.level,
+       COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+       SUM(LENGTH(ph.p_comment)) AS total_comment_length,
+       STRING_AGG(DISTINCT n.n_name, ', ') AS nations_served
+FROM part_hierarchy ph
+JOIN partsupp ps ON ph.p_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+GROUP BY ph.p_name, ph.level
+ORDER BY ph.level, supplier_count DESC;

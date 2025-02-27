@@ -1,0 +1,67 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.ViewCount,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalComments,
+        MAX(P.CreationDate) AS LastActive
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.ViewCount, U.UpVotes, U.DownVotes
+), BadgeStats AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+), PostTypeCounts AS (
+    SELECT 
+        P.OwnerUserId,
+        SUM(CASE WHEN P.PostTypeId IN (1, 2) THEN 1 ELSE 0 END) AS QuestionsAndAnswers,
+        SUM(CASE WHEN P.PostTypeId IN (3, 4, 5) THEN 1 ELSE 0 END) AS WikisAndTagWikis
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.ViewCount,
+    U.TotalPosts,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    U.TotalComments,
+    COALESCE(B.GoldBadges, 0) AS GoldBadges,
+    COALESCE(B.SilverBadges, 0) AS SilverBadges,
+    COALESCE(B.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(P.QuestionsAndAnswers, 0) AS QuestionsAndAnswers,
+    COALESCE(P.WikisAndTagWikis, 0) AS WikisAndTagWikis,
+    U.LastActive
+FROM 
+    UserStats U
+LEFT JOIN 
+    BadgeStats B ON U.UserId = B.UserId
+LEFT JOIN 
+    PostTypeCounts P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, U.TotalPosts DESC
+LIMIT 100;

@@ -1,0 +1,64 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.Body,
+        p.CreationDate,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Tags, p.Body, p.CreationDate
+),
+TopPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.Body,
+        rp.CreationDate,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5 
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    ARRAY_AGG(DISTINCT tag) AS UniqueTags,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    EXTRACT(EPOCH FROM (TIMESTAMP '2024-10-01 12:34:56' - tp.CreationDate)) AS AgeInSeconds,
+    CASE 
+        WHEN tp.CommentCount >= 5 THEN 'Highly Engaged'
+        WHEN tp.UpVotes >= 10 THEN 'Popular'
+        ELSE 'Needs Attention' 
+    END AS EngagementStatus
+FROM 
+    TopPosts tp
+CROSS JOIN 
+    (SELECT DISTINCT UNNEST(STRING_TO_ARRAY(tp.Tags, ',')) AS tag FROM TopPosts) AS tag
+GROUP BY 
+    tp.PostId, tp.Title, tp.AnswerCount, tp.CommentCount, tp.UpVotes, tp.DownVotes, tp.CreationDate
+ORDER BY 
+    tp.UpVotes DESC, tp.CreationDate DESC;

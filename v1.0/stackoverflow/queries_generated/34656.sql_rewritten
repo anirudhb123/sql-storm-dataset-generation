@@ -1,0 +1,86 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT 
+        Id, 
+        DisplayName, 
+        Reputation, 
+        CreationDate, 
+        Location, 
+        0 AS Level
+    FROM 
+        Users
+    WHERE 
+        Id IN (SELECT DISTINCT OwnerUserId FROM Posts WHERE OwnerUserId IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.Location,
+        uh.Level + 1
+    FROM 
+        Users u
+    JOIN 
+        UserHierarchy uh ON u.Id = uh.Id
+    WHERE 
+        u.Reputation > 50
+),
+
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.Case WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(v.Case WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, u.DisplayName
+),
+
+PostStats AS (
+    SELECT 
+        PostId, 
+        Title,
+        CreationDate,
+        Score,
+        Author,
+        CommentCount,
+        UpVoteCount,
+        DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY Author ORDER BY Score DESC) AS Rank,
+        CASE
+            WHEN Score > 10 THEN 'Hot'
+            WHEN Score BETWEEN 5 AND 10 THEN 'Trending'
+            ELSE 'New' 
+        END AS PostCategory
+    FROM 
+        RecentPosts
+)
+
+SELECT 
+    p.*,
+    uh.DisplayName AS TopUser,
+    uh.Reputation AS TopUserReputation
+FROM 
+    PostStats p
+LEFT JOIN 
+    UserHierarchy uh ON p.Author = uh.DisplayName
+WHERE 
+    p.Rank <= 5
+ORDER BY 
+    p.CreationDate DESC;

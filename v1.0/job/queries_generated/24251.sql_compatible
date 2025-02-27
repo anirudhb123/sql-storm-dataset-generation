@@ -1,0 +1,65 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        t.title, 
+        COALESCE(t.production_year, 'Unknown') AS production_year, 
+        NULL AS parent_title
+    FROM aka_title t
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    WHERE cn.country_code IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id, 
+        CONCAT(mh.title, ' → ', t.title) AS title, 
+        mh.production_year, 
+        mh.title AS parent_title
+    FROM movie_hierarchy mh
+    JOIN aka_title t ON mh.movie_id = t.id
+    WHERE t.production_year IS NOT NULL
+),
+
+top_movies AS (
+    SELECT 
+        m.title, 
+        m.production_year, 
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM movie_hierarchy m
+    LEFT JOIN cast_info c ON m.movie_id = c.movie_id
+    LEFT JOIN movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE m.production_year IS NOT NULL
+    GROUP BY m.movie_id, m.title, m.production_year
+    HAVING COUNT(DISTINCT c.person_id) > 5
+)
+
+SELECT 
+    tm.title, 
+    tm.production_year,
+    COALESCE(a.actors, 'No actors found') AS actors,
+    COALESCE(k.keywords, 'No keywords found') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY tm.production_year ORDER BY tm.actor_count DESC) AS rating
+FROM top_movies tm
+LEFT JOIN (
+    SELECT 
+        m.title,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM movie_hierarchy m
+    JOIN cast_info c ON m.movie_id = c.movie_id
+    JOIN aka_name ak ON c.person_id = ak.person_id
+    GROUP BY m.title
+) a ON a.title = tm.title
+LEFT JOIN (
+    SELECT 
+        m.title,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords
+    FROM movie_hierarchy m
+    JOIN movie_keyword mk ON m.movie_id = mk.movie_id
+    GROUP BY m.title
+) k ON k.title = tm.title
+ORDER BY tm.production_year DESC, tm.actor_count DESC
+LIMIT 10;

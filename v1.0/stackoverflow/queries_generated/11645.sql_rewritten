@@ -1,0 +1,38 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(b.Class) AS TotalBadges,
+        SUM(v.VoteTypeId = 2) AS UpVotesCount,
+        SUM(v.VoteTypeId = 3) AS DownVotesCount,
+        SUM(v.VoteTypeId = 5) AS FavoritesCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        TotalBadges,
+        UpVotesCount,
+        DownVotesCount,
+        FavoritesCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Ranking
+    FROM UserStats
+)
+SELECT 
+    UserId,
+    DisplayName,
+    PostCount,
+    TotalBadges,
+    UpVotesCount,
+    DownVotesCount,
+    FavoritesCount
+FROM TopUsers
+WHERE Ranking <= 10
+ORDER BY PostCount DESC;

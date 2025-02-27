@@ -1,0 +1,29 @@
+
+WITH SalesSummary AS (
+    SELECT
+        COALESCE(ws.web_site_id, cs.cs_catalog_page_sk, ss.ss_sold_date_sk) AS source,
+        COALESCE(ws.ws_net_profit, cs.cs_net_profit, ss.ss_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY COALESCE(ws.web_site_id, cs.cs_catalog_page_sk) ORDER BY COALESCE(ws.ws_net_profit, cs.cs_net_profit, ss.ss_net_profit) DESC) AS rank
+    FROM web_sales ws
+    FULL OUTER JOIN catalog_sales cs ON ws.ws_order_number = cs.cs_order_number
+    FULL OUTER JOIN store_sales ss ON ws.ws_order_number = ss.ss_ticket_number
+    WHERE ws.ws_sold_date_sk = (SELECT d_date_sk FROM date_dim WHERE d_date = CURRENT_DATE)
+      OR cs.cs_sold_date_sk = (SELECT d_date_sk FROM date_dim WHERE d_date = CURRENT_DATE)
+      OR ss.ss_sold_date_sk = (SELECT d_date_sk FROM date_dim WHERE d_date = CURRENT_DATE)
+),
+TopSales AS (
+    SELECT
+        source,
+        total_net_profit
+    FROM SalesSummary
+    WHERE rank <= 10
+)
+SELECT 
+    COALESCE(ws.web_site_id, cs.cs_catalog_page_sk, ss.ss_sold_date_sk) AS identifier,
+    SUM(total_net_profit) AS cumulative_profit,
+    AVG(total_net_profit) AS average_profit,
+    COUNT(*) AS sales_count
+FROM TopSales
+GROUP BY identifier
+HAVING SUM(total_net_profit) > (SELECT AVG(total_net_profit) FROM SalesSummary WHERE total_net_profit IS NOT NULL)
+ORDER BY cumulative_profit DESC;

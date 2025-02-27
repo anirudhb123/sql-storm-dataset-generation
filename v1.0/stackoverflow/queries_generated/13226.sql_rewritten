@@ -1,0 +1,54 @@
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        pt.Name AS PostType,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(p.CreationDate) AS LastActivityDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        p.Id, pt.Name
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+SELECT 
+    ps.PostId,
+    ps.PostType,
+    ps.CommentCount,
+    ps.VoteCount,
+    us.PostCount AS UserPostCount,
+    us.BadgeCount AS UserBadgeCount,
+    us.Reputation,
+    ps.LastActivityDate
+FROM 
+    PostStatistics ps
+JOIN 
+    Users u ON ps.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+JOIN 
+    UserStatistics us ON u.Id = us.UserId
+ORDER BY 
+    ps.VoteCount DESC,
+    ps.CommentCount DESC;

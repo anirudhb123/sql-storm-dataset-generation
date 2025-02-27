@@ -1,0 +1,79 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        id AS PostId,
+        Title,
+        CreationDate,
+        Score,
+        OwnerUserId,
+        ParentId,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        p.ParentId,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE u.Reputation >= 1000 
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+PostDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.CreationDate,
+        ph.Score,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        p.Views,
+        ROW_NUMBER() OVER (PARTITION BY ph.OwnerUserId ORDER BY ph.CreationDate DESC) AS PostRank
+    FROM RecursivePostHierarchy ph
+    JOIN Users u ON ph.OwnerUserId = u.Id
+    JOIN Posts p ON ph.PostId = p.Id
+),
+AggregatePostStats AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        SUM(CASE WHEN pd.PostRank = 1 THEN 1 ELSE 0 END) AS MostRecentPostCount,
+        AVG(pd.Score) AS AverageScore,
+        SUM(pd.Views) AS TotalViews
+    FROM UserReputation u
+    LEFT JOIN PostDetails pd ON u.UserId = pd.OwnerDisplayName
+    GROUP BY u.UserId, u.DisplayName
+)
+SELECT 
+    aps.DisplayName,
+    aps.MostRecentPostCount,
+    aps.AverageScore,
+    aps.TotalViews,
+    CASE 
+        WHEN aps.TotalViews > 1000 THEN 'High Engagement'
+        WHEN aps.TotalViews BETWEEN 500 AND 1000 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel, 
+    COUNT(DISTINCT b.Id) AS BadgeCount
+FROM AggregatePostStats aps
+LEFT JOIN Badges b ON aps.UserId = b.UserId
+GROUP BY aps.DisplayName, aps.MostRecentPostCount, aps.AverageScore, aps.TotalViews
+ORDER BY aps.TotalViews DESC, aps.AverageScore DESC;

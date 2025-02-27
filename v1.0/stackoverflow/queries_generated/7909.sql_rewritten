@@ -1,0 +1,32 @@
+WITH UserBadgeCounts AS (
+    SELECT UserId, COUNT(*) AS BadgeCount
+    FROM Badges
+    GROUP BY UserId
+),
+TopBadgedUsers AS (
+    SELECT U.Id, U.DisplayName, U.Reputation, UB.BadgeCount
+    FROM Users U
+    JOIN UserBadgeCounts UB ON U.Id = UB.UserId
+    WHERE U.Reputation > 1000
+    ORDER BY UB.BadgeCount DESC
+    LIMIT 10
+),
+PostStats AS (
+    SELECT P.OwnerUserId, COUNT(*) AS TotalPosts, SUM(P.Score) AS TotalScore
+    FROM Posts P
+    WHERE P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY P.OwnerUserId
+),
+MergedStats AS (
+    SELECT U.Id, U.DisplayName, U.Reputation, COALESCE(PS.TotalPosts, 0) AS TotalPosts,
+            COALESCE(PS.TotalScore, 0) AS TotalScore
+    FROM TopBadgedUsers U
+    LEFT JOIN PostStats PS ON U.Id = PS.OwnerUserId
+)
+SELECT M.DisplayName, M.Reputation, M.BadgeCount, M.TotalPosts, M.TotalScore 
+FROM MergedStats M
+JOIN Votes V ON V.UserId = M.Id
+WHERE V.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+GROUP BY M.DisplayName, M.Reputation, M.BadgeCount, M.TotalPosts, M.TotalScore
+HAVING COUNT(V.Id) > 5
+ORDER BY M.TotalScore DESC;

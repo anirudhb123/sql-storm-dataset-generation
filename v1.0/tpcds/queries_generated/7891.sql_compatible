@@ -1,0 +1,48 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER(PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 AND 
+        dd.d_moy BETWEEN 1 AND 6
+    GROUP BY 
+        ws.ws_item_sk, ws.ws_order_number
+),
+TopSales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        RankedSales.total_quantity,
+        RankedSales.total_net_profit
+    FROM 
+        RankedSales
+    JOIN 
+        item ON RankedSales.ws_item_sk = item.i_item_sk
+    WHERE 
+        RankedSales.rank <= 10
+)
+SELECT 
+    ts.i_item_id,
+    ts.i_product_name,
+    ts.total_quantity,
+    ts.total_net_profit,
+    ca.ca_city,
+    ca.ca_state,
+    ce.cc_name,
+    ce.cc_class
+FROM 
+    TopSales ts
+JOIN 
+    customer ce ON ts.total_quantity > (SELECT AVG(total_quantity) FROM TopSales) 
+JOIN 
+    customer_address ca ON ce.c_current_addr_sk = ca.ca_address_sk
+ORDER BY 
+    ts.total_net_profit DESC;

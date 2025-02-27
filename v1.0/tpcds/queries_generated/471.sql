@@ -1,0 +1,70 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws_bill_customer_sk,
+        ws_item_sk,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_sales_price DESC) AS rank
+    FROM
+        web_sales
+    WHERE
+        ws_sales_price > 0
+),
+customer_info AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        c.c_birth_year BETWEEN 1980 AND 2000
+    GROUP BY
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status
+),
+sales_summary AS (
+    SELECT
+        ci.c_customer_id,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        COUNT(DISTINCT rst.ws_item_sk) AS total_items_purchased,
+        AVG(rst.ws_sales_price) AS avg_item_price,
+        SUM(rst.ws_sales_price) AS total_sales_value
+    FROM
+        customer_info ci
+    LEFT JOIN ranked_sales rst ON ci.c_customer_id = rst.ws_bill_customer_sk
+    GROUP BY
+        ci.c_customer_id,
+        ci.cd_gender,
+        ci.cd_marital_status
+)
+SELECT
+    ss.c_customer_id,
+    ss.cd_gender,
+    ss.cd_marital_status,
+    ss.total_items_purchased,
+    ss.avg_item_price,
+    ss.total_sales_value
+FROM
+    sales_summary ss
+WHERE
+    ss.total_sales_value IS NOT NULL
+    AND ss.total_items_purchased > 5
+    AND EXISTS (
+        SELECT 1
+        FROM customer_address ca
+        WHERE ca.ca_address_sk = (
+            SELECT c.c_current_addr_sk
+            FROM customer c
+            WHERE c.c_customer_id = ss.c_customer_id
+        ) 
+        AND ca.ca_city = 'San Francisco'
+    )
+ORDER BY
+    ss.total_sales_value DESC
+FETCH FIRST 10 ROWS ONLY;

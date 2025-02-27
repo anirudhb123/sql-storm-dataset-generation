@@ -1,0 +1,76 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '12 MONTH'
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COUNT(DISTINCT ps.ps_suppkey) AS SuppCount
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS TotalLineValue
+    FROM 
+        RankedOrders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+    HAVING 
+        SUM(li.l_extendedprice * (1 - li.l_discount)) > 10000
+)
+SELECT 
+    COALESCE(p.p_name, 'Unknown Part') AS PartName,
+    p.p_retailprice,
+    COALESCE(si.TotalSupplyCost, 0) AS TotalSupplierCost,
+    AVG(CASE WHEN ho.TotalLineValue IS NOT NULL THEN ho.TotalLineValue ELSE 0 END) AS AvgLineValue,
+    COUNT(DISTINCT ho.o_orderkey) AS OrderCount
+FROM 
+    PartDetails p
+LEFT JOIN 
+    SupplierInfo si ON p.SuppCount > 5
+LEFT JOIN 
+    HighValueOrders ho ON ho.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o WHERE o.o_orderstatus = 'O'
+    )
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_retailprice
+HAVING 
+    AVG(COALESCE(p.p_retailprice, 0)) IS NOT NULL
+ORDER BY 
+    AvgLineValue DESC, TotalSupplierCost DESC
+FETCH FIRST 50 ROWS ONLY;

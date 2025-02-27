@@ -1,0 +1,66 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(P.Id) AS TotalPosts, 
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions, 
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers, 
+        SUM(P.Score) AS TotalScore,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(P.DownVotes, 0)) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        TotalPosts, 
+        TotalQuestions, 
+        TotalAnswers, 
+        TotalScore, 
+        TotalViews, 
+        TotalUpVotes, 
+        TotalDownVotes,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM 
+        UserPostStats
+),
+TopTags AS (
+    SELECT 
+        T.TagName, 
+        COUNT(P.Id) AS PostCount, 
+        SUM(P.Score) AS TotalScore 
+    FROM 
+        Tags T 
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        TotalScore DESC
+    LIMIT 5
+)
+SELECT 
+    TU.DisplayName, 
+    TU.TotalPosts, 
+    TU.TotalQuestions, 
+    TU.TotalAnswers, 
+    TU.TotalScore, 
+    T.TagName, 
+    T.PostCount, 
+    T.TotalScore AS TagScore
+FROM 
+    TopUsers TU
+CROSS JOIN 
+    TopTags T
+WHERE 
+    TU.ScoreRank <= 10 
+ORDER BY 
+    TU.TotalScore DESC, 
+    T.TotalScore DESC;

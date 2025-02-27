@@ -1,0 +1,36 @@
+
+WITH RECURSIVE UserHierarchy AS (
+    SELECT U.Id, U.DisplayName, U.Reputation, U.CreationDate, 1 AS Level
+    FROM Users U
+    WHERE U.Reputation >= (SELECT AVG(Reputation) FROM Users)  
+
+    UNION ALL
+
+    SELECT U.Id, U.DisplayName, U.Reputation, U.CreationDate, UH.Level + 1
+    FROM Users U
+    JOIN UserHierarchy UH ON U.Id = UH.Id  
+    WHERE UH.Level < 5  
+)
+
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    COUNT(DISTINCT P.Id) AS PostCount,
+    COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+    AVG(COALESCE(C.Score, 0)) AS AvgCommentScore,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags,
+    ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY COALESCE(SUM(V.BountyAmount), 0) DESC) AS RankByBounty,
+    RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+FROM Users U
+LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN Votes V ON P.Id = V.PostId
+LEFT JOIN Comments C ON P.Id = C.PostId
+LEFT JOIN LATERAL (
+    SELECT string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><') AS TagName
+) AS T ON TRUE
+WHERE U.CreationDate > CURRENT_DATE - INTERVAL '5 years'  
+GROUP BY U.Id, U.DisplayName, U.Reputation
+HAVING COUNT(DISTINCT P.Id) > 0  
+ORDER BY U.Reputation DESC, TotalBounty DESC, PostCount DESC
+LIMIT 100;

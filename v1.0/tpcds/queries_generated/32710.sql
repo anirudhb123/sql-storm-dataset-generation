@@ -1,0 +1,85 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs_customer_sk,
+        cs_order_number,
+        cs_sales_price,
+        1 AS level
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sales_price > 100
+    UNION ALL
+    SELECT 
+        cs.cs_customer_sk,
+        cs.cs_order_number,
+        cs.cs_sales_price,
+        sh.level + 1
+    FROM 
+        catalog_sales cs
+    JOIN 
+        sales_hierarchy sh ON cs.cs_order_number = sh.cs_order_number
+    WHERE 
+        cs.cs_sales_price > 0
+),
+weekly_sales AS (
+    SELECT 
+        d.d_year,
+        d.d_week_seq,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_year, d.d_week_seq
+),
+customer_returns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+final_analysis AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        COALESCE(cr.total_returned, 0) AS total_returned,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales_value,
+        (SUM(ws.ws_sales_price * ws.ws_quantity) - COALESCE(cr.total_return_amt, 0)) AS net_sales_value,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_quantity) DESC) AS rn
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        customer_returns cr ON ws.ws_item_sk = cr.sr_item_sk
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    aa.ca_city,
+    aa.ca_state,
+    SUM(ta.total_sales) AS total_weekly_sales,
+    AVG(ta.total_orders) AS avg_orders_per_week,
+    SUM(fa.total_quantity_sold) AS total_quantity_sold,
+    SUM(fa.net_sales_value) AS total_net_sales,
+    COUNT(DISTINCT sh.cs_customer_sk) AS unique_customers,
+    MAX(sh.level) AS max_sales_hierarchy_level
+FROM 
+    customer_address aa
+JOIN 
+    final_analysis fa ON fa.ws_item_sk IN (SELECT i_item_sk FROM item WHERE i_current_price > 0)
+JOIN 
+    weekly_sales ta ON ta.d_year = 2023
+LEFT JOIN 
+    sales_hierarchy sh ON sh.cs_order_number = fa.ws_item_sk
+GROUP BY 
+    aa.ca_city, aa.ca_state
+HAVING 
+    total_net_sales > 50000
+ORDER BY 
+    total_net_sales DESC;

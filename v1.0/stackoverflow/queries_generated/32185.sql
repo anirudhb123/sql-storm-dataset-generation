@@ -1,0 +1,95 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        1 AS Level
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)  -- Filter for post closure and reopening history
+    UNION ALL
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        Level + 1
+    FROM 
+        PostHistory ph
+    INNER JOIN
+        RecursivePostHistory rph ON ph.PostId = rph.PostId AND ph.CreationDate < rph.CreationDate
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)  -- Recur on the same types
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        ISNULL(p.ClosedDate, 'No Closure') AS ClosureStatus,
+        MAX(ph.CreationDate) AS LastActivityDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        RecursivePostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, p.ClosedDate
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(DATEDIFF(second, p.CreationDate, COALESCE(u.LastAccessDate, GETDATE()))) AS AvgActiveDuration
+    FROM 
+        Users u
+    INNER JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        pd.*,
+        u.TotalUpVotes,
+        u.TotalDownVotes
+    FROM 
+        PostDetails pd
+    JOIN 
+        UserStats u ON pd.PostId = u.UserId -- Assuming we want to correlate users with their active posts
+    WHERE 
+        pd.CommentCount > 5  -- Filter for posts with significant comments
+    ORDER BY 
+        pd.CommentCount DESC
+),
+FinalResults AS (
+    SELECT 
+        pp.PostId,
+        pp.Title,
+        pp.CommentCount,
+        pp.ClosureStatus,
+        pp.LastActivityDate,
+        us.DisplayName,
+        us.TotalUpVotes,
+        us.TotalDownVotes
+    FROM 
+        PopularPosts pp
+    INNER JOIN 
+        Users us ON pp.UserId = us.Id
+)
+SELECT 
+    FR.* 
+FROM 
+    FinalResults FR
+WHERE 
+    FR.ClosureStatus = 'No Closure' 
+ORDER BY 
+    FR.LastActivityDate DESC;

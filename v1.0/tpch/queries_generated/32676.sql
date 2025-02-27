@@ -1,0 +1,49 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    INNER JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+SupplierRanked AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, 
+           DENSE_RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost) AS rank
+    FROM partsupp ps
+),
+CustomerStats AS (
+    SELECT c.c_custkey, 
+           COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartSupplierSummary AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, SUM(ps.ps_availqty) AS total_avail_qty,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN SupplierRanked ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.rank = 1
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+)
+SELECT r.r_name, ns.n_name, COUNT(DISTINCT oh.o_orderkey) AS order_count,
+       AVG(cs.total_spent) AS average_spent, 
+       CONCAT('Total Available Quantity: ', p.total_avail_qty) AS availability_info
+FROM region r
+JOIN nation ns ON r.r_regionkey = ns.n_regionkey
+JOIN supplier s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN PartSupplierSummary p ON ps.ps_partkey = p.p_partkey
+JOIN orders o ON s.s_suppkey = o.o_custkey
+LEFT JOIN CustomerStats cs ON o.o_custkey = cs.c_custkey
+LEFT JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+WHERE p.total_avail_qty IS NOT NULL
+AND o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY r.r_name, ns.n_name, p.total_avail_qty
+ORDER BY order_count DESC, average_spent DESC
+LIMIT 10;

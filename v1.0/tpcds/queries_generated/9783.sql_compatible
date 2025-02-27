@@ -1,0 +1,75 @@
+
+WITH sales_summary AS (
+    SELECT 
+        w.warehouse_id,
+        SUM(ws.net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        SUM(ws.quantity) AS total_quantity,
+        AVG(ws.sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws.bill_customer_sk) AS unique_customers,
+        d.year,
+        d.month
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.warehouse_sk = w.warehouse_sk
+    JOIN 
+        date_dim d ON ws.sold_date_sk = d.date_sk
+    WHERE 
+        d.year = 2023 AND d.month IN (1, 2, 3)
+    GROUP BY 
+        w.warehouse_id, d.year, d.month
+    ORDER BY 
+        total_net_profit DESC
+),
+customer_summary AS (
+    SELECT 
+        cd.gender,
+        cd.marital_status,
+        SUM(ws.net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.customer_sk
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.demo_sk
+    WHERE 
+        EXISTS (SELECT 1 FROM sales_summary ss WHERE ss.warehouse_id = ws.warehouse_sk)
+    GROUP BY 
+        cd.gender, cd.marital_status
+),
+income_distribution AS (
+    SELECT 
+        ib.income_band_sk,
+        SUM(ws.net_profit) AS total_net_profit,
+        COUNT(ws.order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        household_demographics hd ON ws.bill_cdemo_sk = hd.hd_demo_sk
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        ib.income_band_sk
+)
+SELECT 
+    ss.warehouse_id,
+    cs.gender,
+    cs.marital_status,
+    SUM(ss.total_net_profit) AS total_sales_profit,
+    COUNT(DISTINCT cs.total_orders) AS total_sales_orders,
+    MAX(id.total_net_profit) AS max_profit_by_income_band,
+    MIN(id.total_orders) AS min_orders_by_income_band
+FROM 
+    sales_summary ss
+JOIN 
+    customer_summary cs ON ss.total_net_profit = cs.total_net_profit
+JOIN 
+    income_distribution id ON id.total_net_profit = ss.total_net_profit
+GROUP BY 
+    ss.warehouse_id, cs.gender, cs.marital_status
+HAVING 
+    SUM(ss.total_net_profit) > 10000
+ORDER BY 
+    total_sales_profit DESC, ss.warehouse_id;

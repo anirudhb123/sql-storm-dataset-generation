@@ -1,0 +1,78 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_mfgr, 
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_size IS NOT NULL AND p.p_retailprice > 100
+),
+TotalCost AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_cost
+    FROM lineitem l
+    WHERE l.l_shipdate < cast('1998-10-01' as date)
+    GROUP BY l.l_orderkey
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        COUNT(DISTINCT ps.ps_partkey) AS parts_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+    HAVING COUNT(DISTINCT ps.ps_partkey) > 5
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal < 0 THEN 'Negative Balance'
+            ELSE 'Positive Balance'
+        END AS balance_status
+    FROM customer c
+    WHERE c.c_mktsegment = 'BUILDING' AND (c.c_acctbal IS NOT NULL OR c.c_acctbal = 0)
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        COALESCE(tc.total_cost, 0) AS order_total_cost,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_count
+    FROM orders o
+    LEFT JOIN TotalCost tc ON o.o_orderkey = tc.l_orderkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus, tc.total_cost
+)
+SELECT 
+    p.p_mfgr, 
+    COUNT(DISTINCT o.o_orderkey) AS order_count, 
+    AVG(osc.order_total_cost) AS avg_order_cost,
+    STRING_AGG(DISTINCT c.c_name) AS customer_names,
+    MAX(si.parts_count) AS supplier_parts_count,
+    MAX(CASE WHEN rd.price_rank <= 5 THEN rd.p_name END) AS top_part_name
+FROM RankedParts rd
+JOIN OrderSummary osc ON rd.p_partkey = ANY (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_availqty > 0
+)
+JOIN SupplierInfo si ON si.s_nationkey IN (
+    SELECT n.n_nationkey 
+    FROM nation n 
+    WHERE n.n_name IN ('FRANCE', 'GERMANY')
+)
+JOIN CustomerDetails c ON c.c_custkey = ANY (
+    SELECT o.o_custkey 
+    FROM orders o 
+    WHERE o.o_orderstatus = 'F'
+)
+GROUP BY p.p_mfgr
+HAVING AVG(osc.order_total_cost) > 500
+ORDER BY order_count DESC, avg_order_cost ASC;

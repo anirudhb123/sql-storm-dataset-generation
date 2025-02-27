@@ -1,0 +1,59 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        Score,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+)
+
+SELECT 
+    u.DisplayName AS Author,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.CommentCount,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+    COUNT(DISTINCT ph.Id) AS HistoryEntryCount
+FROM 
+    TopPosts tp
+JOIN 
+    Posts p ON tp.PostId = p.Id
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    UNNEST(string_to_array(p.Tags, '<>')) AS tag_id ON tag_id IS NOT NULL
+LEFT JOIN 
+    Tags t ON t.Id = CAST(tag_id AS INTEGER)
+GROUP BY 
+    u.DisplayName, tp.Title, tp.CreationDate, tp.ViewCount, tp.Score, tp.CommentCount
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

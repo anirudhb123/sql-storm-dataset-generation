@@ -1,0 +1,59 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users U
+        LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+        LEFT JOIN Comments C ON U.Id = C.UserId
+        LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(DISTINCT V.Id) AS VoteCount
+    FROM
+        Posts P
+        LEFT JOIN Comments C ON P.Id = C.PostId
+        LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.Score
+),
+TopUsers AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.TotalPosts,
+        U.TotalComments,
+        U.TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY U.TotalPosts DESC) AS Rank
+    FROM 
+        UserStats U
+)
+SELECT 
+    PU.PostId,
+    PU.Title,
+    PU.ViewCount,
+    PU.Score,
+    PU.CommentCount,
+    PU.VoteCount,
+    TU.DisplayName AS TopUser,
+    TU.TotalPosts AS UserPostCount,
+    TU.TotalBounty AS UserTotalBounty
+FROM 
+    PostStats PU
+    LEFT JOIN TopUsers TU ON PU.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = TU.UserId)
+WHERE 
+    PU.ViewCount > 100
+ORDER BY 
+    PU.Score DESC, PU.ViewCount DESC;

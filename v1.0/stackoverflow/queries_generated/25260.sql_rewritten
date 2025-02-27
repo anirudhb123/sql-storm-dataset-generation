@@ -1,0 +1,48 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName)
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.AnswerCount, p.OwnerUserId
+), 
+PostStatistics AS (
+    SELECT 
+        rp.OwnerUserId,
+        COUNT(rp.PostId) AS TotalPosts,
+        SUM(rp.ViewCount) AS TotalViews,
+        AVG(rp.ViewCount) AS AvgViews,
+        SUM(rp.AnswerCount) AS TotalAnswers,
+        STRING_AGG(rp.Tags, '; ') AS CombinedTags
+    FROM 
+        RankedPosts rp
+    GROUP BY 
+        rp.OwnerUserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    ps.TotalPosts,
+    ps.TotalViews,
+    ps.AvgViews,
+    ps.TotalAnswers,
+    ps.CombinedTags,
+    p.Title AS MostViewedPostTitle,
+    p.ViewCount AS MostViewedPostCount
+FROM 
+    Users u
+LEFT JOIN 
+    PostStatistics ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    RankedPosts p ON u.Id = p.OwnerUserId AND p.ViewRank = 1
+ORDER BY 
+    ps.TotalViews DESC NULLS LAST, 
+    ps.TotalPosts DESC NULLS LAST;

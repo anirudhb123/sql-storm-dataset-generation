@@ -1,0 +1,59 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 0 as level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL AND s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 5
+),
+part_stats AS (
+    SELECT p.p_partkey, COUNT(ps.ps_suppkey) AS supplier_count,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ps.ps_availqty) AS median_avail_qty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+nation_transactions AS (
+    SELECT n.n_name, SUM(o.o_totalprice) AS total_sales
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY n.n_name
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM orders o
+),
+string_metrics AS (
+    SELECT p_name, 
+           LENGTH(p_comment) AS comment_length,
+           UPPER(p_mfgr) AS mfgr_uppercase
+    FROM part
+    WHERE p_comment IS NOT NULL AND CHAR_LENGTH(p_comment) > 5
+)
+SELECT 
+    n.n_name AS nation, 
+    ps.p_partkey, 
+    ps.supplier_count, 
+    ps.avg_supply_cost, 
+    ps.median_avail_qty,
+    t.total_sales,
+    so.s_name AS supplier_name,
+    'Comment length: ' || sm.comment_length AS comment_info,
+    CASE 
+        WHEN sm.comment_length IS NULL THEN 'No Comment'
+        WHEN sm.comment_length < 10 THEN 'Brief Comment'
+        ELSE 'Detailed Comment'
+    END AS comment_category
+FROM part_stats ps
+JOIN nation_transactions t ON t.total_sales > ps.avg_supply_cost * 10
+LEFT JOIN supplier_hierarchy sh ON ps.supplier_count = sh.level
+JOIN string_metrics sm ON sm.p_name LIKE '%' || ps.p_partkey || '%' 
+LEFT JOIN supplier so ON so.s_suppkey = sh.s_suppkey
+ORDER BY n.n_name, ps.p_partkey
+LIMIT 100 OFFSET 10;

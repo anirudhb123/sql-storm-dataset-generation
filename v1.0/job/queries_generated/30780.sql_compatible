@@ -1,0 +1,71 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+),
+role_distribution AS (
+    SELECT 
+        ci.role_id,
+        rt.role,
+        COUNT(ci.id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.role_id, rt.role
+),
+cast_with_roles AS (
+    SELECT 
+        ak.name AS actor_name,
+        mt.title AS movie_title,
+        mh.production_year,
+        rt.role,
+        ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY mh.production_year DESC) AS rn
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        mh.level = 0
+)
+SELECT 
+    actor_name,
+    movie_title,
+    production_year,
+    role,
+    CASE 
+        WHEN production_year IS NULL THEN 'N/A'
+        ELSE CAST(production_year AS VARCHAR)
+    END AS production_year_text
+FROM 
+    cast_with_roles
+WHERE 
+    rn <= 5
+ORDER BY 
+    actor_name, production_year DESC;

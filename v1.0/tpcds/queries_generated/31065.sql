@@ -1,0 +1,52 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+high_performing_items AS (
+    SELECT 
+        ss.ws_item_sk,
+        i.i_product_name,
+        SUM(ss.total_quantity) AS quantity_sold,
+        AVG(ss.total_net_profit) AS avg_net_profit
+    FROM sales_summary ss
+    JOIN item i ON ss.ws_item_sk = i.i_item_sk
+    WHERE ss.rn <= 5  -- Limit to the top 5 sales dates per item
+    GROUP BY ss.ws_item_sk, i.i_product_name
+    HAVING AVG(ss.total_net_profit) > 100.00  -- Only high-performing items
+),
+store_performance AS (
+    SELECT 
+        s.s_store_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM store s
+    JOIN web_sales ws ON ws.ws_ship_addr_sk = s.s_address_sk
+    GROUP BY s.s_store_id
+),
+qualified_stores AS (
+    SELECT 
+        sp.s_store_id,
+        sp.total_orders,
+        sp.total_net_profit,
+        RANK() OVER (ORDER BY sp.total_net_profit DESC) AS store_rank
+    FROM store_performance sp
+    WHERE sp.total_orders > 50  -- Only stores with more than 50 orders
+)
+SELECT 
+    hi.i_product_name,
+    qs.s_store_id,
+    qs.total_orders,
+    qs.total_net_profit
+FROM high_performing_items hi
+JOIN qualified_stores qs ON hi.ws_item_sk IN (
+    SELECT DISTINCT ws_item_sk FROM web_sales WHERE ws_ship_addr_sk = qs.s_store_id
+)
+ORDER BY qs.total_net_profit DESC, hi.quantity_sold DESC
+LIMIT 10;

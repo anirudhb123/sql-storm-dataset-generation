@@ -1,0 +1,64 @@
+
+WITH UserSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(COALESCE(V.VoteCount, 0)) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+), PostDetail AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.CommentCount,
+        U.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Tags T ON T.Id = ANY(string_to_array(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '><'))
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, P.CommentCount, U.DisplayName
+)
+SELECT 
+    US.DisplayName,
+    US.Reputation,
+    US.PostCount,
+    US.AnswerCount,
+    US.QuestionCount,
+    US.TotalVotes,
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    PD.ViewCount,
+    PD.CommentCount,
+    PD.Tags
+FROM 
+    UserSummary US
+JOIN 
+    PostDetail PD ON US.UserId = PD.OwnerDisplayName
+ORDER BY 
+    US.Reputation DESC, PD.CreationDate ASC;

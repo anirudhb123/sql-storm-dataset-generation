@@ -1,0 +1,67 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionsAsked,
+        COUNT(DISTINCT A.Id) AS AnswersGiven,
+        SUM(COALESCE(V.Score, 0)) AS TotalVotes,
+        SUM(COALESCE(C.CommentCount, 0)) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    LEFT JOIN 
+        Posts A ON U.Id = A.OwnerUserId AND A.PostTypeId = 2
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) C ON C.PostId IN (P.Id, A.Id)
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionsAsked,
+        AnswersGiven,
+        TotalVotes,
+        TotalComments,
+        RANK() OVER (ORDER BY QuestionsAsked DESC, AnswersGiven DESC, TotalVotes DESC) AS ActivityRank
+    FROM 
+        UserActivity
+),
+TopActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionsAsked,
+        AnswersGiven,
+        TotalVotes,
+        TotalComments
+    FROM 
+        RankedUsers
+    WHERE 
+        ActivityRank <= 10
+)
+SELECT 
+    T.UserId,
+    T.DisplayName,
+    T.QuestionsAsked,
+    T.AnswersGiven,
+    T.TotalVotes,
+    T.TotalComments,
+    COALESCE(STRING_AGG(DISTINCT T_Comment.Text, ', '), 'No Comments') AS RecentComments,
+    COALESCE(NULLIF(MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.CreationDate END), 
+                             MAX(CASE WHEN PH.PostHistoryTypeId = 11 THEN PH.CreationDate END)), 
+                     NULL) AS LastCloseDate
+FROM 
+    TopActiveUsers T
+LEFT JOIN 
+    Comments C ON C.UserId = T.UserId
+LEFT JOIN 
+    PostHistory PH ON PH.UserId = T.UserId
+GROUP BY 
+    T.UserId, T.DisplayName, T.QuestionsAsked, T.AnswersGiven, T.TotalVotes, T.TotalComments
+ORDER BY 
+    T.TotalVotes DESC;

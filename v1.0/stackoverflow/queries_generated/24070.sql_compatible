@@ -1,0 +1,54 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATE('2024-10-01') - INTERVAL '1 year' 
+        AND p.Score > (SELECT AVG(Score) FROM Posts WHERE CreationDate >= DATE('2024-10-01') - INTERVAL '1 year')
+)
+SELECT 
+    up.DisplayName AS UserName,
+    up.Reputation,
+    vp.VoteCount AS TotalVotes,
+    COALESCE(ps.RankRowNumber, 0) AS RankPosition,
+    CASE 
+        WHEN ps.RankRowNumber IS NOT NULL AND ps.RankRowNumber <= 5 THEN 'Top 5 Posts'
+        ELSE 'Other Posts'
+    END AS PostCategory
+FROM 
+    Users up
+LEFT JOIN 
+    (
+        SELECT 
+            v.UserId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes v
+        JOIN 
+            RankedPosts rp ON v.PostId = rp.Id
+        GROUP BY 
+            v.UserId
+    ) vp ON up.Id = vp.UserId
+LEFT JOIN 
+    (
+        SELECT 
+            rp.Id,
+            rp.PostRank AS RankRowNumber
+        FROM 
+            RankedPosts rp
+    ) ps ON up.Id = ps.Id
+WHERE 
+    up.Reputation > 1000 OR up.Likes IS NULL
+ORDER BY 
+    up.Reputation DESC, 
+    TotalVotes DESC
+LIMIT 10;

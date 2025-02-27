@@ -1,0 +1,65 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+PopularTags AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, ',')::int[])
+    GROUP BY 
+        Tags.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+UserActivity AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS TotalPosts,
+        SUM(COALESCE(Votes.VoteTypeId = 2, 0)) AS TotalUpvotes,
+        COUNT(Comments.Id) AS TotalComments
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId AND Votes.VoteTypeId = 2
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    GROUP BY 
+        Users.Id
+)
+SELECT 
+    u.DisplayName,
+    ubc.BadgeCount,
+    ubc.GoldBadges,
+    ubc.SilverBadges,
+    ubc.BronzeBadges,
+    ua.TotalPosts,
+    ua.TotalUpvotes,
+    ua.TotalComments,
+    pt.TagName,
+    pt.PostCount
+FROM 
+    Users u
+LEFT JOIN 
+    UserBadgeCounts ubc ON u.Id = ubc.UserId
+LEFT JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+JOIN 
+    PopularTags pt ON TRUE
+ORDER BY 
+    u.DisplayName, pt.PostCount DESC;

@@ -1,0 +1,84 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        CAST(p.Title AS VARCHAR(255)) AS FullPath,
+        1 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL  
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        CAST(r.FullPath || ' -> ' || p.Title AS VARCHAR(255)),
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserAggregates AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN p.Score ELSE 0 END) AS TotalScore,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+), 
+PostStatistics AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+),
+CloseReasonCounts AS (
+    
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseReasonCount,
+        MAX(CASE WHEN ph.Comment IS NOT NULL THEN ph.Comment END) AS LastCloseReason,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10  
+    GROUP BY ph.PostId 
+)
+SELECT 
+    u.DisplayName,
+    ua.TotalPosts,
+    ua.TotalScore,
+    ua.GoldBadges,
+    ua.SilverBadges,
+    ua.BronzeBadges,
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.RecentPostRank,
+    COALESCE(cr.CloseReasonCount, 0) AS CloseReasonCount,
+    cr.LastCloseReason,
+    cr.LastCloseDate,
+    r.FullPath
+FROM UserAggregates ua
+JOIN Posts ps ON ua.UserId = ps.OwnerUserId
+LEFT JOIN CloseReasonCounts cr ON ps.Id = cr.PostId
+LEFT JOIN RecursivePostHierarchy r ON ps.Id = r.PostId
+WHERE ua.TotalScore > 100 
+ORDER BY ua.TotalPosts DESC, ps.ViewCount DESC;

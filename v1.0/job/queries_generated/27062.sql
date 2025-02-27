@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+CombinedData AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.actor_name,
+        CASE 
+            WHEN rm.actor_rank = 1 THEN 'Lead Actor'
+            ELSE 'Supporting Actor'
+        END AS role,
+        COALESCE(mk.keywords, 'None') AS keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON rm.title = mk.movie_id
+    WHERE 
+        rm.actor_rank <= 3
+)
+SELECT 
+    title,
+    production_year,
+    actor_name,
+    role,
+    keywords
+FROM 
+    CombinedData
+ORDER BY 
+    production_year DESC, title;

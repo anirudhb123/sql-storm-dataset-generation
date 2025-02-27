@@ -1,0 +1,73 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBountyAmount,
+        RANK() OVER (ORDER BY COUNT(DISTINCT P.Id) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    WHERE 
+        U.Reputation > 1000 
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalPosts,
+    UA.TotalComments,
+    UA.TotalUpVotes,
+    UA.TotalDownVotes,
+    UA.TotalBountyAmount,
+    COALESCE(NULLIF(UA.TotalPosts, 0) / NULLIF(UA.TotalComments, 0), 0) AS PostCommentRatio,
+    CASE 
+        WHEN UA.TotalUpVotes > UA.TotalDownVotes THEN 'Positive' 
+        WHEN UA.TotalUpVotes < UA.TotalDownVotes THEN 'Negative' 
+        ELSE 'Neutral'
+    END AS VoteSentiment,
+    SH.TagName AS MostUsedTag,
+    PHT.Name AS LastPostHistoryAction
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    (SELECT 
+        P.OwnerUserId,
+        T.TagName,
+        COUNT(*) AS TagCount
+     FROM 
+        Posts P
+     CROSS JOIN 
+        Tags T ON POSITION('|' || T.TagName || '|' IN '|' || P.Tags || '|') > 0
+     GROUP BY 
+        P.OwnerUserId, T.TagName
+     ORDER BY 
+        TagCount DESC 
+     LIMIT 1) SH ON UA.UserId = SH.OwnerUserId
+LEFT JOIN 
+    (SELECT 
+        PH.UserId,
+        PH.PostId,
+        PHT.Name
+     FROM 
+        PostHistory PH
+     JOIN 
+        PostHistoryTypes PHT ON PHT.Id = PH.PostHistoryTypeId
+     WHERE 
+        PH.CreationDate = (SELECT MAX(CreationDate) FROM PostHistory WHERE UserId = PH.UserId)
+    ) AS PH ON UA.UserId = PH.UserId
+WHERE 
+    UA.UserRank <= 10 
+ORDER BY 
+    UA.UserRank;

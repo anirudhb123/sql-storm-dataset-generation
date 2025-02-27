@@ -1,0 +1,51 @@
+WITH RecentPosts AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.CreationDate, 
+           u.DisplayName AS OwnerName, 
+           p.Score, 
+           p.ViewCount, 
+           COALESCE(ah.AnswerCount, 0) AS AnswerCount,
+           COUNT(c.Id) AS CommentCount,
+           ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY c.CreationDate DESC) AS LatestCommentRow
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT ParentId, COUNT(Id) AS AnswerCount
+        FROM Posts 
+        WHERE PostTypeId = 2 
+        GROUP BY ParentId
+    ) ah ON p.Id = ah.ParentId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY p.Id, u.DisplayName, ah.AnswerCount
+),
+FilteredPosts AS (
+    SELECT PostId, Title, OwnerName, CreationDate, Score, ViewCount, AnswerCount, 
+           CommentCount, 
+           CASE 
+               WHEN Score > 0 THEN 'Positive'
+               WHEN Score < 0 THEN 'Negative'
+               ELSE 'Neutral'
+           END AS ScoreCategory
+    FROM RecentPosts
+    WHERE AnswerCount > 0 AND ViewCount > 10
+)
+SELECT fp.PostId, 
+       fp.Title, 
+       fp.OwnerName, 
+       fp.CreationDate, 
+       fp.Score, 
+       fp.ViewCount, 
+       fp.AnswerCount, 
+       fp.CommentCount,
+       CASE WHEN fp.CommentCount > 10 THEN 'Highly Discussed'
+            WHEN fp.CommentCount BETWEEN 5 AND 10 THEN 'Moderately Discussed'
+            ELSE 'Less Discussed' END AS DiscussionLevel
+FROM FilteredPosts fp
+WHERE NOT EXISTS (
+    SELECT 1 
+    FROM Votes v 
+    WHERE v.PostId = fp.PostId AND v.VoteTypeId = 3 -- Downvotes
+)
+ORDER BY fp.Score DESC, fp.ViewCount DESC;

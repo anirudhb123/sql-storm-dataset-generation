@@ -1,0 +1,64 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_id,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_quantity) AS total_items,
+        DATE_FORMAT(date_dim.d_date, '%Y-%m') AS month_year
+    FROM 
+        web_sales ws 
+    JOIN 
+        date_dim ON ws.ws_sold_date_sk = date_dim.d_date_sk
+    WHERE 
+        date_dim.d_year = 2023
+    GROUP BY 
+        ws.web_site_id, month_year
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(ib.ib_upper_bound, 0) AS income_upper_bound
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+high_value_sales AS (
+    SELECT 
+        ss.web_site_id,
+        ss.total_sales,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        SUM(ss.total_items) AS high_value_items,
+        RANK() OVER (PARTITION BY ci.cd_gender ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM 
+        sales_summary ss
+    JOIN 
+        customer_info ci ON ss.web_site_id = ci.c_customer_id
+    GROUP BY 
+        ss.web_site_id, ci.cd_gender, ci.cd_marital_status
+    HAVING 
+        SUM(ss.total_items) > 100
+)
+SELECT 
+    hvs.web_site_id,
+    hvs.total_sales,
+    hvs.cd_gender,
+    hvs.cd_marital_status,
+    hvs.high_value_items,
+    hvs.sales_rank
+FROM 
+    high_value_sales hvs
+WHERE 
+    hvs.sales_rank = 1
+ORDER BY 
+    hvs.total_sales DESC
+LIMIT 10;

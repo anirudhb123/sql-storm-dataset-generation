@@ -1,0 +1,60 @@
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS distinct_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RegionNation AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name AS nation_name,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    rns.region_name,
+    rns.nation_name,
+    cs.c_name AS customer_name,
+    ss.s_name AS supplier_name,
+    ss.total_cost,
+    cs.total_spent,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No Orders'
+        ELSE (cs.total_spent / NULLIF(ss.total_cost, 0)) * 100
+    END AS spend_to_supply_ratio,
+    ROW_NUMBER() OVER (PARTITION BY rns.region_name ORDER BY cs.total_spent DESC) AS rank
+FROM 
+    RegionNation rns
+LEFT JOIN 
+    CustomerOrderSummary cs ON rns.n_nationkey = cs.c_custkey
+LEFT JOIN 
+    SupplierSummary ss ON rns.n_nationkey = ss.s_suppkey
+WHERE 
+    ss.total_cost > 0 OR cs.total_spent IS NOT NULL
+ORDER BY 
+    rns.region_name, rank;

@@ -1,0 +1,70 @@
+
+WITH RankedMovies AS (
+    SELECT
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        COALESCE(SUM(CASE WHEN ci.nr_order IS NOT NULL THEN 1 ELSE 0 END) * 1.0 / NULLIF(COUNT(ci.id), 0), 0) AS avg_cast_order,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC, COUNT(ci.id) DESC) AS year_rank
+    FROM
+        aka_title at
+    LEFT JOIN
+        cast_info ci ON at.id = ci.movie_id
+    WHERE
+        at.production_year IS NOT NULL
+    GROUP BY
+        at.id, at.title, at.production_year
+),
+NoteworthyMovies AS (
+    SELECT
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        rm.avg_cast_order
+    FROM
+        RankedMovies rm
+    WHERE
+        rm.year_rank <= 5
+        AND rm.avg_cast_order < 2 
+),
+RelatedMovies AS (
+    SELECT
+        ml.movie_id,
+        ml.linked_movie_id,
+        lt.link AS relationship
+    FROM
+        movie_link ml
+    JOIN
+        link_type lt ON ml.link_type_id = lt.id
+)
+SELECT
+    nm.title,
+    nm.production_year,
+    nm.avg_cast_order,
+    ARRAY_AGG(DISTINCT cn.name) AS character_names,
+    COUNT(DISTINCT cm.name) AS company_count,
+    STRING_AGG(DISTINCT lt.relationship, ', ') AS relationships
+FROM
+    NoteworthyMovies nm
+LEFT JOIN
+    complete_cast cc ON nm.title_id = cc.movie_id
+LEFT JOIN
+    char_name cn ON cc.subject_id = cn.imdb_id
+LEFT JOIN
+    movie_companies mc ON nm.title_id = mc.movie_id
+LEFT JOIN
+    company_name cm ON mc.company_id = cm.id
+LEFT JOIN
+    RelatedMovies rm ON nm.title_id = rm.movie_id
+LEFT JOIN
+    link_type lt ON rm.linked_movie_id = lt.id
+WHERE
+    nm.avg_cast_order IS NOT NULL
+GROUP BY
+    nm.title, nm.production_year, nm.avg_cast_order
+HAVING
+    COUNT(DISTINCT cm.name) > 1 
+    AND (nm.avg_cast_order BETWEEN 0 AND 1 OR nm.avg_cast_order IS NULL)
+ORDER BY
+    nm.production_year DESC, COUNT(DISTINCT cm.name) DESC
+LIMIT 10;

@@ -1,0 +1,79 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+TopSales AS (
+    SELECT 
+        item.i_item_id,
+        COALESCE(SD.total_quantity, 0) AS total_quantity,
+        COALESCE(SD.total_sales, 0) AS total_sales,
+        item.i_product_name,
+        item.i_category
+    FROM 
+        item
+    LEFT JOIN SalesData SD ON item.i_item_sk = SD.ws_item_sk
+    WHERE 
+        SD.rn = 1
+),
+CustomerReturns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returned,
+        SUM(wr_net_loss) AS total_losses
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_item_sk
+),
+ReturnsWithSales AS (
+    SELECT 
+        TS.i_item_id,
+        TS.total_quantity,
+        TS.total_sales,
+        COALESCE(CR.total_returned, 0) AS total_returned,
+        COALESCE(CR.total_losses, 0) AS total_losses,
+        (TS.total_sales - COALESCE(CR.total_losses, 0)) AS net_sales_after_returns
+    FROM 
+        TopSales TS
+    LEFT JOIN CustomerReturns CR ON TS.i_item_id = CR.wr_item_sk
+),
+FinalReport AS (
+    SELECT 
+        item_id,
+        total_quantity,
+        total_sales,
+        total_returned,
+        total_losses,
+        net_sales_after_returns,
+        CASE 
+            WHEN net_sales_after_returns > 1000 THEN 'High Revenue'
+            WHEN net_sales_after_returns BETWEEN 500 AND 1000 THEN 'Medium Revenue'
+            ELSE 'Low Revenue' 
+        END AS revenue_category
+    FROM 
+        ReturnsWithSales
+)
+SELECT 
+    FR.item_id,
+    FR.total_quantity,
+    FR.total_sales,
+    FR.total_returned,
+    FR.total_losses,
+    FR.net_sales_after_returns,
+    FR.revenue_category,
+    ROW_NUMBER() OVER (ORDER BY FR.net_sales_after_returns DESC) AS rank
+FROM 
+    FinalReport FR
+WHERE 
+    FR.net_sales_after_returns IS NOT NULL
+ORDER BY 
+    FR.rank
+LIMIT 20;

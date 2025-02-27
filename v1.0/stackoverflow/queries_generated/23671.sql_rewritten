@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        u.DisplayName AS Author,
+        p.CreationDate,
+        p.LastActivityDate,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS RevisionDate,
+        ph.UserId AS EditorId,
+        u.DisplayName AS EditorName,
+        ph.PostHistoryTypeId,
+        CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) 
+            THEN (SELECT Name FROM CloseReasonTypes WHERE Id = CAST(JSONB_PATH_QUERY(ph.Comment, '$.closeReasonId') AS BIGINT))
+            ELSE NULL
+        END AS CloseReason
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Users u ON ph.UserId = u.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+MaxHistoryDate AS (
+    SELECT 
+        PostId,
+        MAX(RevisionDate) AS LastRevision
+    FROM 
+        PostHistoryDetails
+    GROUP BY 
+        PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Author,
+    rp.CreationDate,
+    rb.GoldBadges,
+    rb.SilverBadges,
+    rb.BronzeBadges,
+    MAX(ph.RevisionDate) AS LastRevisionDate,
+    MAX(ph.CloseReason) AS LastCloseReason,
+    COUNT(DISTINCT ph.PostHistoryTypeId) AS RevisionCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges rb ON rp.OwnerUserId = rb.UserId
+LEFT JOIN 
+    PostHistoryDetails ph ON rp.PostId = ph.PostId 
+    LEFT JOIN MaxHistoryDate mhd ON rp.PostId = mhd.PostId
+WHERE 
+    rp.Rank = 1 
+    AND (ph.PostHistoryTypeId IS NULL OR ph.RevisionDate >= mhd.LastRevision) 
+GROUP BY 
+    rp.PostId, rp.Title, rp.Author, rp.CreationDate, rb.GoldBadges, rb.SilverBadges, rb.BronzeBadges
+ORDER BY 
+    rp.CreationDate DESC;

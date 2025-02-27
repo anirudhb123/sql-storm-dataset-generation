@@ -1,0 +1,49 @@
+WITH RECURSIVE OrderCTE AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice
+    FROM orders
+    WHERE o_orderdate >= DATE '2022-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice
+    FROM orders o
+    JOIN OrderCTE cte ON o.o_custkey = cte.o_custkey
+    WHERE o.o_orderdate > cte.o_orderdate
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost) AS total_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) as rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+ProductDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATE '2022-01-01'
+    GROUP BY p.p_partkey, p.p_name, p.p_mfgr, p.p_brand
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT OUTER JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.order_count, c.total_spent,
+           RANK() OVER (ORDER BY c.total_spent DESC) AS spend_rank
+    FROM CustomerOrders c
+)
+SELECT 
+    pd.p_name,
+    pd.total_revenue,
+    ts.c_name,
+    ts.total_spent,
+    rs.s_name AS top_supplier_name,
+    COALESCE(rs.total_supplycost, 0) AS top_supplier_cost,
+    ROW_NUMBER() OVER (PARTITION BY pd.p_partkey ORDER BY pd.total_revenue DESC) AS revenue_rank
+FROM ProductDetails pd
+LEFT JOIN TopCustomers ts ON pd.total_revenue > ts.total_spent
+LEFT JOIN RankedSuppliers rs ON ts.total_spent > rs.total_supplycost
+WHERE (ts.total_spent IS NOT NULL OR rs.total_supplycost IS NOT NULL)
+  AND pd.total_revenue IS NOT NULL
+ORDER BY pd.total_revenue DESC, ts.total_spent DESC;

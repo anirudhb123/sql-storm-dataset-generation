@@ -1,0 +1,85 @@
+WITH ranked_cast AS (
+    SELECT
+        ci.person_id,
+        ci.movie_id,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank,
+        c.kind_id
+    FROM
+        cast_info ci
+    INNER JOIN
+        aka_title at ON ci.movie_id = at.movie_id
+    LEFT JOIN
+        role_type rt ON ci.role_id = rt.id
+    WHERE
+        rt.role IS NOT NULL
+),
+movie_info_stats AS (
+    SELECT
+        mi.movie_id,
+        COUNT(DISTINCT mi.info_type_id) AS distinct_info_types,
+        STRING_AGG(DISTINCT it.info, ', ') AS info_details
+    FROM
+        movie_info mi
+    INNER JOIN
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY
+        mi.movie_id
+),
+movie_cast_with_rank AS (
+    SELECT
+        rc.person_id,
+        rc.movie_id,
+        rc.role_rank,
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT mci.company_id) AS company_count
+    FROM
+        ranked_cast rc
+    JOIN
+        aka_title mt ON rc.movie_id = mt.id
+    LEFT JOIN
+        movie_companies mci ON rc.movie_id = mci.movie_id
+    GROUP BY
+        rc.person_id,
+        rc.movie_id,
+        rc.role_rank,
+        mt.title,
+        mt.production_year
+),
+actor_complexity AS (
+    SELECT
+        mc.person_id,
+        COUNT(DISTINCT mki.keyword_id) AS keyword_count,
+        SUM(CASE WHEN mc.role_rank > 1 THEN 1 ELSE 0 END) AS non_lead_roles
+    FROM
+        movie_cast_with_rank mc
+    LEFT JOIN
+        movie_keyword mki ON mc.movie_id = mki.movie_id
+    GROUP BY
+        mc.person_id
+)
+SELECT
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mcs.distinct_info_types,
+    mcs.info_details,
+    ac.keyword_count,
+    ac.non_lead_roles
+FROM
+    aka_name ak
+JOIN
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN
+    movie_cast_with_rank mc ON ci.movie_id = mc.movie_id
+JOIN
+    movie_info_stats mcs ON mc.movie_id = mcs.movie_id
+JOIN
+    actor_complexity ac ON mc.person_id = ac.person_id
+WHERE
+    mcs.distinct_info_types > 2
+    AND ac.keyword_count > 5
+    AND (mc.role_rank = 1 OR ac.non_lead_roles > 0)
+ORDER BY
+    mt.production_year DESC,
+    actor_name ASC,
+    keyword_count DESC;

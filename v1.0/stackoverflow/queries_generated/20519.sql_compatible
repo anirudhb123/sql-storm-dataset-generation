@@ -1,0 +1,74 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Users U
+        LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+        LEFT JOIN Votes V ON P.Id = V.PostId
+        LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        P.OwnerUserId,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRowNumber
+    FROM 
+        Posts P
+        LEFT JOIN Votes V ON P.Id = V.PostId
+        LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, P.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        RANK() OVER (ORDER BY UA.Upvotes - UA.Downvotes DESC) AS UserRank,
+        UA.Upvotes,
+        UA.Downvotes,
+        UA.CommentCount,
+        UA.PostCount
+    FROM 
+        UserActivity UA
+    WHERE 
+        UA.PostCount > 0
+)
+SELECT 
+    TU.DisplayName,
+    TU.UserRank,
+    TU.Upvotes,
+    TU.Downvotes,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.ViewCount,
+    PS.CommentCount,
+    (SELECT STRING_AGG(DISTINCT T.TagName, ', ') 
+     FROM Posts P 
+     JOIN Tags T ON POSITION(T.TagName IN P.Tags) > 0 
+     WHERE P.Id = PS.PostId) AS Tags,
+    (SELECT JSON_AGG(PH.Comment) 
+     FROM PostHistory PH 
+     WHERE PH.PostId = PS.PostId 
+     AND PH.PostHistoryTypeId IN (10, 11)) AS CloseReasons
+FROM 
+    TopUsers TU
+    JOIN PostSummary PS ON TU.UserId = PS.OwnerUserId
+WHERE 
+    TU.UserRank <= 5
+ORDER BY 
+    TU.UserRank, PS.CreationDate DESC;

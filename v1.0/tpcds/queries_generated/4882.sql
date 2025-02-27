@@ -1,0 +1,43 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_paid DESC) AS OrderRank
+    FROM web_sales ws
+),
+TotalReturns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS Total_Returns,
+        SUM(wr_return_amt) AS Total_Return_Amount
+    FROM web_returns
+    GROUP BY wr_item_sk
+),
+InventoryDetails AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS Total_Stock
+    FROM inventory inv
+    GROUP BY inv.inv_item_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    ROUND(SUM(COALESCE(r.ws_net_paid, 0)), 2) AS Total_Sales,
+    COUNT(DISTINCT r.ws_order_number) AS Total_Orders,
+    COALESCE(tr.Total_Returns, 0) AS Total_Returns,
+    COALESCE(tr.Total_Return_Amount, 0) AS Total_Return_Amount,
+    COALESCE(id.Total_Stock, 0) AS Total_Stock_Available,
+    COUNT(DISTINCT r.ws_item_sk) AS Unique_Items_Sold
+FROM customer_address ca
+LEFT JOIN RankedSales r ON ca.ca_address_sk = r.ws_item_sk
+LEFT JOIN TotalReturns tr ON r.ws_item_sk = tr.wr_item_sk
+LEFT JOIN InventoryDetails id ON id.inv_item_sk = r.ws_item_sk
+WHERE ca.ca_state IS NOT NULL 
+  AND (TRIM(ca.ca_city) != '' OR tr.Total_Returns IS NOT NULL)
+GROUP BY ca.ca_city, ca.ca_state
+HAVING SUM(COALESCE(r.ws_net_paid, 0)) > 1000
+ORDER BY Total_Sales DESC;

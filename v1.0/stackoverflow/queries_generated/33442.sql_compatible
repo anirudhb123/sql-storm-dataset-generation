@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.ClosedDate,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+RecentUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        DATEDIFF(TIMESTAMP '2024-10-01 12:34:56', u.CreationDate) AS DaysSinceRegistration
+    FROM 
+        Users u
+    WHERE 
+        u.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+ActivePosts AS (
+    SELECT 
+        rp.PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN Comments c ON rp.PostId = c.PostId
+    LEFT JOIN Votes v ON rp.PostId = v.PostId
+    GROUP BY 
+        rp.PostId
+),
+TopPosts AS (
+    SELECT 
+        ap.PostId, 
+        ap.CommentCount, 
+        ap.UpVotes, 
+        ap.DownVotes,
+        (ap.UpVotes - ap.DownVotes) AS NetVotes
+    FROM 
+        ActivePosts ap
+    WHERE 
+        ap.CommentCount > 5 
+),
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    pu.UserId, 
+    pu.DisplayName, 
+    pp.PostId, 
+    pp.CommentCount, 
+    pp.NetVotes,
+    COALESCE(ph.EditCount, 0) AS EditCount,
+    CASE 
+        WHEN pp.NetVotes > 10 THEN 'Highly Engaging'
+        WHEN pp.NetVotes BETWEEN 1 AND 10 THEN 'Moderately Engaging'
+        ELSE 'Not Engaging'
+    END AS EngagementLevel
+FROM 
+    RecentUsers pu
+JOIN 
+    TopPosts pp ON pu.UserId = pp.PostId
+LEFT JOIN 
+    PostHistoryCounts ph ON pp.PostId = ph.PostId
+WHERE 
+    pu.DaysSinceRegistration <= 30 
+ORDER BY 
+    pp.NetVotes DESC, 
+    pp.CommentCount DESC;

@@ -1,0 +1,53 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_regionkey = 1
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, rh.level + 1
+    FROM region r
+    JOIN RegionHierarchy rh ON r.r_regionkey = rh.r_regionkey + 1
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+),
+SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, 
+           ps.ps_supplycost, p.p_name
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+MaxExtendedPrice AS (
+    SELECT l.l_orderkey, MAX(l.l_extendedprice) AS max_price
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+RankedOrders AS (
+    SELECT 
+        co.c_custkey,
+        co.o_orderkey,
+        co.o_orderdate,
+        co.o_totalprice,
+        RANK() OVER (PARTITION BY co.c_custkey ORDER BY co.o_totalprice DESC) AS price_rank
+    FROM CustomerOrders co
+)
+SELECT 
+    r.r_name,
+    r.level,
+    so.s_name,
+    pp.p_name,
+    SUM(lo.l_extendedprice) AS total_extended_price,
+    COUNT(DISTINCT ro.o_orderkey) AS order_count,
+    MAX(ro.o_totalprice) AS max_order_total,
+    STRING_AGG(DISTINCT cu.c_name, ', ') AS customer_names
+FROM RegionHierarchy r
+LEFT JOIN SupplierParts so ON so.ps_availqty > 0
+LEFT JOIN lineitem lo ON so.ps_partkey = lo.l_partkey
+LEFT JOIN RankedOrders ro ON lo.l_orderkey = ro.o_orderkey
+LEFT JOIN customer cu ON ro.c_custkey = cu.c_custkey
+WHERE ro.price_rank <= 5 AND r.level <= 1
+GROUP BY r.r_name, r.level, so.s_name, pp.p_name
+HAVING SUM(lo.l_extendedprice) IS NOT NULL OR MAX(ro.o_totalprice) IS NULL
+ORDER BY total_extended_price DESC;

@@ -1,0 +1,88 @@
+
+WITH RECURSIVE ActorMovieHierarchy AS (
+    SELECT 
+        ci.person_id,
+        t.title,
+        t.production_year,
+        1 AS level,
+        a.name AS actor_name
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        title t ON ci.movie_id = t.id
+    INNER JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ci.person_id,
+        t.title,
+        t.production_year,
+        amh.level + 1,
+        a.name AS actor_name
+    FROM 
+        ActorMovieHierarchy amh
+    INNER JOIN 
+        cast_info ci ON amh.person_id = ci.person_id
+    INNER JOIN 
+        title t ON ci.movie_id = t.id
+    INNER JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000 AND 
+        amh.level < 3
+),
+
+CoStars AS (
+    SELECT 
+        a1.actor_name AS main_actor,
+        STRING_AGG(DISTINCT a2.actor_name, ', ') AS co_stars,
+        COUNT(DISTINCT a2.actor_name) AS co_star_count,
+        COUNT(DISTINCT t.title) AS movie_count
+    FROM 
+        ActorMovieHierarchy amh
+    INNER JOIN 
+        cast_info ci1 ON amh.person_id = ci1.person_id
+    INNER JOIN 
+        cast_info ci2 ON ci1.movie_id = ci2.movie_id
+    INNER JOIN 
+        aka_name a1 ON ci1.person_id = a1.person_id
+    INNER JOIN 
+        aka_name a2 ON ci2.person_id = a2.person_id
+    INNER JOIN 
+        title t ON ci1.movie_id = t.id
+    WHERE 
+        a1.actor_name <> a2.actor_name
+    GROUP BY 
+        a1.actor_name
+)
+
+SELECT 
+    main_actor,
+    co_stars,
+    co_star_count,
+    movie_count,
+    STRING_AGG(DISTINCT COALESCE(kn.keyword, 'No Keyword'), ', ') AS keywords
+FROM 
+    CoStars cs
+LEFT JOIN 
+    movie_keyword mk ON cs.movie_count > 5 AND mk.movie_id IN (
+        SELECT movie_id FROM title WHERE title IN (
+            SELECT DISTINCT t.title
+            FROM title t
+            INNER JOIN cast_info ci ON t.id = ci.movie_id
+            WHERE ci.person_id = 
+                (SELECT person_id FROM aka_name WHERE name = cs.main_actor LIMIT 1)
+        )
+    )
+LEFT JOIN 
+    keyword kn ON mk.keyword_id = kn.id
+GROUP BY 
+    main_actor, co_star_count, movie_count
+HAVING 
+    movie_count > 3
+ORDER BY 
+    co_star_count DESC, movie_count DESC;

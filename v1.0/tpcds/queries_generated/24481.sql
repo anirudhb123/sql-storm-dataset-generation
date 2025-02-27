@@ -1,0 +1,61 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amts,
+        ROW_NUMBER() OVER (PARTITION BY sr_returning_customer_sk ORDER BY SUM(sr_return_amt) DESC) AS rnk
+    FROM 
+        store_returns 
+    GROUP BY 
+        sr_returning_customer_sk
+),
+CustomerTimeData AS (
+    SELECT 
+        c.c_customer_id,
+        d.d_date,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_id ORDER BY d.d_date DESC) AS recent_purchase_rank
+    FROM 
+        customer AS c
+    JOIN 
+        date_dim AS d ON c.c_first_sales_date_sk = d.d_date_sk
+),
+ReturnMetrics AS (
+    SELECT 
+        r.returning_customer_sk,
+        r.total_returns,
+        r.total_return_amts,
+        ctd.c_customer_id,
+        ctd.d_date,
+        ctd.recent_purchase_rank
+    FROM 
+        RankedReturns AS r
+    JOIN 
+        CustomerTimeData AS ctd ON r.returning_customer_sk = ctd.c_customer_id
+    WHERE 
+        ctd.recent_purchase_rank <= 5
+)
+SELECT 
+    r.customer_id,
+    COALESCE(r.total_returns, 0) AS total_returns_last_5_purchases,
+    COALESCE(DATE_PART('year', r.d_date), 0) AS purchase_year,
+    (CASE 
+        WHEN r.total_returns > 100 THEN 'High Returner'
+        WHEN r.total_returns BETWEEN 50 AND 100 THEN 'Medium Returner'
+        ELSE 'Low Returner' 
+    END) AS return_category,
+    (SELECT 
+        AVG(AVG_WS.net_paid_inc_ship)
+     FROM 
+        web_sales AS AVG_WS
+     WHERE 
+        AVG_WS.ws_ship_customer_sk = r.customer_id
+    ) AS avg_net_paid_from_web
+FROM 
+    ReturnMetrics AS r
+LEFT JOIN 
+    customer AS c ON r.returning_customer_sk = c.c_customer_sk
+ORDER BY 
+    r.total_returns DESC, 
+    r.purchase_year DESC 
+LIMIT 100;

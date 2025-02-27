@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level,
+        m.episode_of_id
+    FROM 
+        title m
+    WHERE 
+        m.episode_of_id IS NULL   -- Start with root movies (no episodes of)
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title AS movie_title,
+        e.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        title e
+    JOIN 
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    m.movie_title,
+    m.production_year,
+    COALESCE(cast.persons_count, 0) AS total_cast,
+    COALESCE(kw.keywords_count, 0) AS total_keywords,
+    COALESCE(info.info_count, 0) AS total_info
+FROM 
+    movie_hierarchy m
+LEFT JOIN (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS persons_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+) cast ON cast.movie_id = m.movie_id
+LEFT JOIN (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keywords_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+) kw ON kw.movie_id = m.movie_id
+LEFT JOIN (
+    SELECT 
+        mi.movie_id,
+        COUNT(DISTINCT mi.id) AS info_count
+    FROM 
+        movie_info mi
+    WHERE 
+        mi.note IS NOT NULL  -- Only count info if there's a note
+    GROUP BY 
+        mi.movie_id
+) info ON info.movie_id = m.movie_id
+WHERE 
+    m.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    m.production_year DESC, 
+    m.movie_title
+LIMIT 100;

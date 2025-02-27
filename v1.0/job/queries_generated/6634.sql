@@ -1,0 +1,31 @@
+SELECT 
+    ak.name AS aka_name,
+    t.title AS movie_title,
+    c.nm AS cast_member,
+    r.role AS role,
+    c2.name AS company_name,
+    k.keyword AS movie_keyword,
+    mi.info AS movie_info
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    role_type r ON c.role_id = r.id
+JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+JOIN 
+    company_name c2 ON mc.company_id = c2.id
+JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_info mi ON mi.movie_id = t.id
+WHERE 
+    ak.name LIKE '%Smith%'
+    AND t.production_year > 2000
+ORDER BY 
+    t.production_year DESC, ak.name ASC, c.nm ASC;

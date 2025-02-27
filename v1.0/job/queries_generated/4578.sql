@@ -1,0 +1,56 @@
+WITH MovieDetails AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        COUNT(DISTINCT c.id) AS cast_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        aka_title a
+    JOIN 
+        cast_info c ON a.id = c.movie_id
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    WHERE 
+        a.production_year >= 2000
+        AND ak.name IS NOT NULL
+    GROUP BY 
+        a.id
+),
+ActorDetails AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        COUNT(DISTINCT c.movie_id) AS movies_played,
+        AVG(COALESCE(ml.rating, 0)) AS average_rating
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    LEFT JOIN 
+        movie_link ml ON c.movie_id = ml.movie_id
+    WHERE 
+        ak.name ILIKE '%John%'
+    GROUP BY 
+        ak.person_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actors,
+    md.cast_count,
+    ad.name AS actor_name,
+    ad.movies_played,
+    ad.average_rating
+FROM 
+    MovieDetails md
+JOIN 
+    ActorDetails ad ON md.actors LIKE CONCAT('%', ad.name, '%')
+WHERE 
+    md.cast_count > 5
+ORDER BY 
+    md.production_year DESC, 
+    ad.average_rating DESC 
+LIMIT 10;

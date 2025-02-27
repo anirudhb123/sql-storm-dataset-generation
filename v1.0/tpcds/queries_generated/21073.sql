@@ -1,0 +1,58 @@
+
+WITH RECURSIVE date_series(d_date) AS (
+    SELECT MIN(d_date) 
+    FROM date_dim
+    UNION ALL
+    SELECT d_date + INTERVAL '1 DAY' 
+    FROM date_series
+    WHERE d_date + INTERVAL '1 DAY' < (SELECT MAX(d_date) FROM date_dim)
+),
+sales_data AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS site_profit_rank
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY ws.ws_sold_date_sk, ws.ws_web_site_sk
+),
+top_websites AS (
+    SELECT 
+        wd.ws_web_site_sk,
+        d.d_date,
+        COALESCE(sd.total_sold, 0) AS total_sold,
+        COALESCE(sd.total_profit, 0) AS total_profit
+    FROM date_series d
+    LEFT JOIN (
+        SELECT DISTINCT ws_web_site_sk FROM web_sales
+    ) wd ON TRUE
+    LEFT JOIN sales_data sd ON d.d_date = (SELECT MIN(dd.d_date) 
+                                            FROM date_dim dd 
+                                            WHERE dd.d_date = d.d_date) AND wd.ws_web_site_sk = sd.ws_web_site_sk
+)
+SELECT 
+    t.ws_web_site_sk,
+    t.d_date,
+    t.total_sold,
+    t.total_profit,
+    COUNT(DISTINCT c.c_customer_sk) FILTER (WHERE cd_cd_gender = 'F') AS female_customers,
+    COUNT(DISTINCT c.c_customer_sk) FILTER (WHERE cd_cd_gender = 'M') AS male_customers,
+    CASE 
+        WHEN SUM(t.total_profit) IS NULL THEN 'No Profit'
+        WHEN SUM(t.total_profit) < 1000 THEN 'Low Profit'
+        ELSE 'High Profit'
+    END AS profit_category
+FROM top_websites t
+JOIN customer c ON c.c_current_addr_sk = (SELECT ca_address_sk FROM customer_address WHERE ca_city = 'SOME_CITY' LIMIT 1)
+JOIN customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+GROUP BY t.ws_web_site_sk, t.d_date
+HAVING AVG(t.total_profit) > 500
+ORDER BY t.d_date DESC
+LIMIT 10
+OFFSET (SELECT COALESCE(NULLIF(MIN(t_rank), 0), 0)
+         FROM (
+             SELECT ROW_NUMBER() OVER (ORDER BY SUM(t.total_profit) DESC) AS t_rank 
+             FROM top_websites t
+             GROUP BY t.ws_web_site_sk
+         ) AS ranks);

@@ -1,0 +1,59 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        rt.role AS actor_role,
+        ci.person_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        rt.role AS actor_role,
+        ci.person_id,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        mh.level < 3 
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.actor_role,
+    COUNT(DISTINCT mh.person_id) OVER(PARTITION BY mh.movie_id) AS actor_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    COALESCE(MAX(CASE WHEN mi.info_type_id = 1 THEN mi.info END), 'No Rating') AS rating,
+    COALESCE(MAX(mi.production_year), 0) AS max_year
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    aka_name ak ON mh.person_id = ak.person_id
+WHERE 
+    mh.actor_role IS NOT NULL
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.actor_role
+ORDER BY 
+    actor_count DESC, mh.production_year DESC
+LIMIT 100;

@@ -1,0 +1,53 @@
+WITH movie_details AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ak.name AS actor_name,
+        pc.kind AS production_company_type,
+        SUM(CASE WHEN ci.note IS NULL THEN 1 ELSE 0 END) AS null_notes_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY at.id ORDER BY ak.name) AS actor_order
+    FROM
+        aka_title at
+    INNER JOIN
+        cast_info ci ON at.movie_id = ci.movie_id
+    INNER JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN
+        movie_companies mc ON mc.movie_id = at.movie_id
+    LEFT JOIN
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN
+        company_type pc ON mc.company_type_id = pc.id
+    LEFT JOIN
+        movie_keyword mk ON mk.movie_id = at.movie_id
+    GROUP BY
+        at.id, at.title, at.production_year, ak.name, pc.kind
+)
+SELECT
+    md.title,
+    md.production_year,
+    md.actor_name,
+    md.production_company_type,
+    md.null_notes_count,
+    md.keyword_count,
+    CASE 
+        WHEN md.actor_order = 1 AND md.null_notes_count > 0 THEN CONCAT('Starring: ', md.actor_name, ' - Note Count: ', md.null_notes_count)
+        ELSE md.actor_name 
+    END AS actor_info,
+    COALESCE(
+        (SELECT MAX(k.keyword) 
+         FROM movie_keyword mk
+         JOIN keyword k ON mk.keyword_id = k.id
+         WHERE mk.movie_id = md.id),
+         'No keywords'
+    ) AS max_keyword
+FROM
+    movie_details md
+WHERE
+    md.production_year IS NOT NULL
+    AND EXISTS (SELECT 1 FROM cast_info ci WHERE ci.movie_id = md.id AND ci.role_id IS NOT NULL)
+ORDER BY 
+    md.production_year DESC,
+    md.keyword_count DESC,
+    md.actor_name;

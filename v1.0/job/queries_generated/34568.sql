@@ -1,0 +1,65 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        0 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title m
+    INNER JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    LISTAGG(DISTINCT a.name, ', ') WITHIN GROUP (ORDER BY a.name) AS actors,
+    COALESCE(ROUND(AVG(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office') 
+                           THEN CAST(mi.info AS FLOAT) END), 2), 0) AS avg_box_office,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    COUNT(DISTINCT mc.company_id) AS production_companies
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+WHERE 
+    mh.level <= 2
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year
+ORDER BY 
+    avg_box_office DESC NULLS LAST
+LIMIT 50;
+
+This SQL query utilizes several advanced SQL features:
+
+1. **Recursive CTE** for generating a hierarchy of movies, fetching all episodes and series produced after the year 2000.
+2. **LEFT JOINs** to gather related data from different tables about cast members, movie info, keywords, and production companies while ensuring that all episodes and series data is preserved.
+3. **Aggregations** using `COUNT`, `LISTAGG`, `ROUND`, and `STRING_AGG` to compute the number of unique actors, a concatenated list of actor names, the average box office earnings (with handling NULLs), and a concatenated list of keywords associated with the movies.
+4. **Complex predicates** to filter the recursive results based on the hierarchy level.
+5. **Ordering** the results by average box office earnings while ensuring that NULL values are presented last and limiting the output to the top 50 entries.

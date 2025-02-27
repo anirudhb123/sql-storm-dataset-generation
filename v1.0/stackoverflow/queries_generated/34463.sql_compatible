@@ -1,0 +1,58 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT p.Id, p.Title, p.ParentId, r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 4 THEN ph.CreationDate END) AS FirstEditDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 12 THEN ph.UserId END) AS DeletionVotes
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    r.Title AS PostTitle,
+    CASE 
+        WHEN ph.FirstEditDate IS NOT NULL THEN 'Edited'
+        ELSE 'Not Edited'
+    END AS EditStatus,
+    ph.ClosedDate,
+    ph.CloseCount,
+    u.DisplayName AS UserName,
+    ua.PostCount,
+    ua.CommentCount,
+    ua.TotalBounty,
+    COALESCE(NULLIF(u.Location, ''), 'Location not provided') AS UserLocation
+FROM Posts p
+LEFT JOIN RecursivePostHierarchy r ON r.Id = p.Id
+LEFT JOIN PostHistorySummary ph ON ph.PostId = p.Id
+LEFT JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN UserActivity ua ON u.Id = ua.UserId
+WHERE (ph.CloseCount > 0 OR ph.FirstEditDate IS NOT NULL)
+  AND ua.PostCount > 5
+ORDER BY p.CreationDate DESC
+LIMIT 50;

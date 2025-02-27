@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+Actors AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COUNT(ci.movie_id) AS total_movies
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.id, a.name
+    HAVING 
+        COUNT(ci.movie_id) > 1
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        GROUP_CONCAT(DISTINCT a.name) AS actors,
+        MAX(i.info) AS keyword_info
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        cast_info ci ON m.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword i ON mk.keyword_id = i.id
+    GROUP BY 
+        m.id, m.title
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.actors,
+    md.keyword_info,
+    COALESCE(a.total_movies, 0) AS actor_movie_count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    Actors a ON md.actors LIKE CONCAT('%', a.name, '%')
+WHERE 
+    md.keyword_info IS NOT NULL
+ORDER BY 
+    md.production_year DESC NULLS LAST, 
+    md.title;

@@ -1,0 +1,46 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COUNT(DISTINCT wr.wr_return_number) AS web_returns_count,
+        COUNT(DISTINCT sr.sr_return_number) AS store_returns_count,
+        SUM(wr.wr_return_amt) AS total_web_return_amt,
+        SUM(sr.sr_return_amt) AS total_store_return_amt
+    FROM customer c
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+ReturnAggregate AS (
+    SELECT 
+        web_returns_count,
+        store_returns_count,
+        total_web_return_amt,
+        total_store_return_amt,
+        CASE 
+            WHEN web_returns_count > store_returns_count THEN 'More Web Returns'
+            WHEN store_returns_count > web_returns_count THEN 'More Store Returns'
+            ELSE 'Equal Returns'
+        END AS return_comparison
+    FROM CustomerReturns
+),
+
+RankedReturns AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY return_comparison ORDER BY total_web_return_amt DESC) AS rank_web,
+        RANK() OVER (PARTITION BY return_comparison ORDER BY total_store_return_amt DESC) AS rank_store
+    FROM ReturnAggregate
+)
+
+SELECT 
+    return_comparison,
+    web_returns_count,
+    store_returns_count,
+    total_web_return_amt,
+    total_store_return_amt
+FROM RankedReturns
+WHERE rank_web <= 5 OR rank_store <= 5
+ORDER BY return_comparison, total_web_return_amt DESC, total_store_return_amt DESC;

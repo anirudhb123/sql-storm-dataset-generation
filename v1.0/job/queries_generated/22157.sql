@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rn
+    FROM 
+        aka_title at
+    WHERE 
+        at.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+        AND at.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS total_roles,
+        STRING_AGG(DISTINCT cn.name, '; ') AS actor_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name cn ON ci.person_id = cn.person_id
+    GROUP BY 
+        ci.movie_id
+),
+MoviesWithInfo AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        COALESCE(ar.total_roles, 0) AS total_roles,
+        COALESCE(ar.actor_names, 'None') AS actor_names
+    FROM 
+        RankedMovies rt
+    LEFT JOIN 
+        ActorRoles ar ON rt.title_id = ar.movie_id
+)
+SELECT 
+    mwi.title,
+    mwi.production_year,
+    mwi.total_roles,
+    CASE 
+        WHEN mwi.total_roles > 0 THEN 'Has roles'
+        ELSE 'No roles assigned'
+    END AS role_status,
+    mwi.actor_names,
+    (
+        SELECT 
+            COUNT(DISTINCT mc.company_id)
+        FROM 
+            movie_companies mc
+        WHERE 
+            mc.movie_id = mwi.title_id
+            AND mc.company_type_id IN (SELECT id FROM company_type WHERE kind = 'Production')
+    ) AS production_companies,
+    (
+        SELECT 
+            STRING_AGG(DISTINCT mk.keyword, ', ')
+        FROM 
+            movie_keyword mk
+        WHERE 
+            mk.movie_id = mwi.title_id
+    ) AS keywords
+FROM 
+    MoviesWithInfo mwi
+WHERE 
+    mwi.production_year IS NOT NULL
+ORDER BY 
+    mwi.production_year DESC, 
+    mwi.total_roles DESC
+OFFSET 10 ROWS
+FETCH NEXT 10 ROWS ONLY;

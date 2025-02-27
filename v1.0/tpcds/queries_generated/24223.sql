@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_paid_inc_tax,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_paid_inc_tax DESC) AS rn
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+),
+CustomerMetrics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(cd.cd_dep_count, 0) AS num_dependents,
+        SUM(CASE WHEN ws.ws_quantity > 5 THEN ws.ws_quantity ELSE 0 END) AS total_large_purchases
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+),
+HighValueReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_amt) AS total_return_amount,
+        COUNT(sr_return_quantity) AS return_count
+    FROM store_returns
+    WHERE sr_return_amt > (
+        SELECT AVG(sr_return_amt) FROM store_returns WHERE sr_return_amt IS NOT NULL
+    )
+    GROUP BY sr_item_sk
+)
+SELECT 
+    ca.ca_address_id AS "Address ID",
+    c.c_customer_id AS "Customer ID",
+    cm.cd_gender AS "Gender",
+    COALESCE(hr.total_return_amount, 0) AS "High Value Returns",
+    COALESCE(hr.return_count, 0) AS "Return Count",
+    rs.ws_item_sk AS "Item SK",
+    rs.rn AS "Rank"
+FROM customer_address ca
+JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN CustomerMetrics cm ON c.c_customer_sk = cm.c_customer_sk
+LEFT JOIN HighValueReturns hr ON hr.sr_item_sk = ANY (SELECT ws_item_sk FROM RankedSales WHERE ws_order_number = (SELECT MAX(ws_order_number) FROM web_sales))
+LEFT JOIN RankedSales rs ON c.c_customer_sk = (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = rs.ws_item_sk LIMIT 1)
+WHERE cm.num_dependents > 0
+OR (cm.cd_gender = 'M' AND cm.total_large_purchases > 10)
+ORDER BY "Address ID", "Customer ID";

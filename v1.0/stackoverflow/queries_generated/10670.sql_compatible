@@ -1,0 +1,60 @@
+
+WITH UserStats AS (
+    SELECT 
+        Id AS UserId, 
+        COUNT(*) AS PostCount,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes,
+        SUM(Views) AS TotalViews,
+        MIN(CreationDate) AS AccountCreated,
+        MAX(LastAccessDate) AS LastVisited
+    FROM 
+        Users
+    JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId 
+    GROUP BY 
+        Users.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(ct.Name, 'N/A') AS ClosedReason,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 
+    LEFT JOIN 
+        CloseReasonTypes ct ON ph.Comment = ct.Id::text
+    GROUP BY 
+        p.Id, p.PostTypeId, p.Score, p.CreationDate, p.ViewCount, ct.Name
+),
+OverallStats AS (
+    SELECT 
+        COUNT(DISTINCT UserId) AS UniqueUsers,
+        COUNT(DISTINCT PostId) AS TotalPosts,
+        SUM(Score) AS TotalScore,
+        SUM(ViewCount) AS TotalPostViews,
+        SUM(CommentCount) AS TotalComments
+    FROM 
+        PostStats
+)
+
+SELECT 
+    (SELECT COUNT(*) FROM Users) AS TotalUsers,
+    (SELECT COUNT(*) FROM Posts) AS TotalPosts,
+    (SELECT COUNT(*) FROM Comments) AS TotalComments,
+    (SELECT COUNT(DISTINCT UserId) FROM UserStats) AS ActiveUsers,
+    (SELECT AVG(PostCount) FROM UserStats) AS AvgPostsPerUser,
+    (SELECT SUM(TotalUpVotes) FROM UserStats) AS OverallUpVotes,
+    (SELECT SUM(TotalDownVotes) FROM UserStats) AS OverallDownVotes,
+    (SELECT SUM(TotalViews) FROM UserStats) AS OverallViews,
+    (SELECT AVG(ViewCount) FROM PostStats) AS AvgViewsPerPost,
+    (SELECT AVG(CommentCount) FROM PostStats) AS AvgCommentsPerPost,
+    (SELECT COUNT(*) FROM OverallStats) AS TotalActiveUsers

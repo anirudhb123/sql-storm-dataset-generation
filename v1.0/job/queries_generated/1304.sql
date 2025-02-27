@@ -1,0 +1,77 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS rank_per_year
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+actor_movie_counts AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.person_id
+),
+actor_details AS (
+    SELECT 
+        p.name,
+        p.gender,
+        a.movie_count
+    FROM 
+        aka_name p
+    JOIN 
+        actor_movie_counts a ON p.person_id = a.person_id
+),
+movies_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        k.keyword
+    FROM 
+        aka_title m 
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+),
+movie_infos AS (
+    SELECT 
+        m.id AS movie_id,
+        info.info_type_id,
+        info.info,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY info_info_type_id) AS seq_num
+    FROM 
+        aka_title m
+    JOIN 
+        movie_info info ON m.id = info.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    a.gender,
+    m.title,
+    m.production_year,
+    mk.keyword,
+    mi.info,
+    COUNT(DISTINCT ma.movie_id) OVER (PARTITION BY a.person_id) AS total_movies,
+    COALESCE(NULLIF(a.movie_count, 0), 'No Movies') AS movies_count_info
+FROM 
+    actor_details a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    aka_title m ON c.movie_id = m.id
+LEFT JOIN 
+    movies_with_keywords mk ON m.id = mk.movie_id
+LEFT JOIN 
+    movie_infos mi ON mi.movie_id = m.id AND mi.seq_num = 1
+WHERE 
+    a.gender = 'F' 
+    AND m.production_year BETWEEN 2000 AND 2023
+    AND (mk.keyword IS NOT NULL OR mi.info IS NOT NULL)
+ORDER BY 
+    a.name, m.production_year DESC;

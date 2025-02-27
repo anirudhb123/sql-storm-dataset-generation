@@ -1,0 +1,31 @@
+WITH RECURSIVE CTE_Supplier_Sales AS (
+    SELECT ps.s_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.s_suppkey
+    UNION ALL
+    SELECT s.s_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) + c.total_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN CTE_Supplier_Sales c ON s.s_suppkey = c.s_suppkey
+    WHERE c.total_sales < 1000000
+    GROUP BY s.s_suppkey, c.total_sales
+),
+Ranked_Supplier AS (
+    SELECT s.s_suppkey, s.s_name, ss.total_sales,
+           RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM supplier s
+    JOIN CTE_Supplier_Sales ss ON s.s_suppkey = ss.s_suppkey
+)
+SELECT r.r_name, COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+       SUM(rs.total_sales) AS total_sales
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN Ranked_Supplier rs ON s.s_suppkey = rs.s_suppkey
+WHERE r.r_name IS NOT NULL AND rs.sales_rank <= 10
+GROUP BY r.r_name
+HAVING SUM(rs.total_sales) > 5000000
+ORDER BY total_sales DESC;

@@ -1,0 +1,45 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk 
+    WHERE c.c_current_cdemo_sk IS NOT NULL AND c.c_current_addr_sk IS NOT NULL
+    GROUP BY ws.web_site_sk, ws_sold_date_sk, ws_item_sk
+),
+HighProfitItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        COALESCE(RS.total_net_profit, 0) AS last_week_net_profit
+    FROM item
+    LEFT JOIN RankedSales RS ON item.i_item_sk = RS.ws_item_sk 
+    WHERE RS.profit_rank = 1 
+    OR RS.total_net_profit IS NULL
+),
+SalesSummary AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk 
+    WHERE d.d_date BETWEEN CURRENT_DATE - INTERVAL '30 days' AND CURRENT_DATE
+    GROUP BY d.d_date
+)
+SELECT 
+    sales.d_date,
+    sales.total_sales,
+    sales.total_net_profit,
+    items.i_item_id,
+    items.i_item_desc,
+    items.last_week_net_profit
+FROM SalesSummary sales
+FULL OUTER JOIN HighProfitItems items ON sales.d_date = CURRENT_DATE
+WHERE (sales.total_sales > 1000 OR items.last_week_net_profit > 500)
+ORDER BY sales.d_date ASC, items.last_week_net_profit DESC
+LIMIT 100;

@@ -1,0 +1,81 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        s.ss_sold_date_sk,
+        s.ss_item_sk,
+        s.ss_quantity,
+        s.ss_net_paid,
+        s.ss_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY s.ss_item_sk ORDER BY s.ss_sold_date_sk DESC) AS rn
+    FROM 
+        store_sales s
+    WHERE 
+        s.ss_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+),
+top_sales AS (
+    SELECT
+        sd.ss_item_sk,
+        SUM(sd.ss_quantity) AS total_quantity,
+        SUM(sd.ss_net_paid) AS total_net_paid,
+        SUM(sd.ss_net_profit) AS total_net_profit
+    FROM 
+        sales_data sd
+    WHERE 
+        sd.rn <= 10
+    GROUP BY 
+        sd.ss_item_sk
+),
+item_details AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        item i
+    LEFT JOIN 
+        income_band ib ON i.i_item_sk = ib.ib_income_band_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        COUNT(CASE WHEN wd.web_site_id IS NOT NULL THEN 1 END) AS web_orders,
+        COUNT(CASE WHEN sd.ss_item_sk IS NOT NULL THEN 1 END) AS store_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales wd ON wd.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        store_sales sd ON sd.ss_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_credit_rating,
+    id.i_item_id,
+    id.i_item_desc,
+    ts.total_quantity,
+    ts.total_net_paid,
+    ts.total_net_profit
+FROM 
+    customer_info ci
+JOIN 
+    top_sales ts ON ci.c_customer_sk = (SELECT MAX(cs.ss_customer_sk) 
+                                         FROM store_sales cs 
+                                         WHERE cs.ss_item_sk = ts.ss_item_sk)
+JOIN 
+    item_details id ON ts.ss_item_sk = id.i_item_sk
+WHERE 
+    ci.cd_gender IS NOT NULL 
+    AND ts.total_net_paid > (SELECT AVG(total_net_paid) FROM top_sales)
+ORDER BY 
+    ts.total_net_profit DESC;

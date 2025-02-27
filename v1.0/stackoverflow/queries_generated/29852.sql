@@ -1,0 +1,66 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ActiveUserStatistics AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.TotalPosts,
+        us.TotalQuestions,
+        us.TotalAnswers,
+        us.TotalScore,
+        us.TotalBadges,
+        ROW_NUMBER() OVER (ORDER BY us.TotalScore DESC) AS Rank
+    FROM 
+        UserStatistics us
+    WHERE 
+        us.TotalPosts > 0
+),
+RecentPostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS RecentPostsCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.CommentCount) AS TotalComments,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    aus.DisplayName,
+    aus.Reputation,
+    aus.TotalPosts,
+    aus.TotalQuestions,
+    aus.TotalAnswers,
+    aus.TotalScore,
+    aus.TotalBadges,
+    rps.RecentPostsCount,
+    rps.TotalViews,
+    rps.TotalComments,
+    rps.LastPostDate
+FROM 
+    ActiveUserStatistics aus
+LEFT JOIN 
+    RecentPostStatistics rps ON aus.UserId = rps.OwnerUserId
+ORDER BY 
+    aus.Rank;

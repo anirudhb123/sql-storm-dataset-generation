@@ -1,0 +1,31 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+), TopSuppliers AS (
+    SELECT rs.s_suppkey, rs.s_name, rs.total_avail_qty,
+           RANK() OVER (PARTITION BY rs.s_nationkey ORDER BY rs.total_avail_qty DESC) AS supplier_rank
+    FROM RankedSuppliers rs
+), CustomerOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+), NationalRegionSales AS (
+    SELECT n.n_nationkey, SUM(co.total_order_value) AS nation_total_sales
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN CustomerOrders co ON c.c_custkey = co.o_custkey
+    GROUP BY n.n_nationkey
+)
+SELECT r.r_name AS region, COUNT(ts.s_suppkey) AS number_of_suppliers, 
+       SUM(nrs.nation_total_sales) AS total_sales,
+       MAX(ts.total_avail_qty) AS max_avail_qty
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN TopSuppliers ts ON n.n_nationkey = ts.s_nationkey
+JOIN NationalRegionSales nrs ON n.n_nationkey = nrs.n_nationkey
+GROUP BY r.r_name
+ORDER BY total_sales DESC;

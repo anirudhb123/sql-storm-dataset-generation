@@ -1,0 +1,53 @@
+WITH RECURSIVE RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        r.r_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 0
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+)
+SELECT 
+    r.region_name,
+    COALESCE(SUM(cs.total_sales), 0) AS total_region_sales,
+    COALESCE(COUNT(co.o_orderkey), 0) AS total_orders,
+    COALESCE(AVG(co.o_totalprice), 0) AS avg_order_value
+FROM 
+    RegionalSales rs
+FULL OUTER JOIN 
+    CustomerOrders co ON rs.region_name = (SELECT r_name FROM region r JOIN nation n ON r.r_regionkey = n.n_regionkey WHERE n.n_nationkey = co.c_custkey LIMIT 1)
+RIGHT JOIN 
+    region r ON r.r_name = COALESCE(rs.region_name, r.r_name)
+GROUP BY 
+    r.region_name
+ORDER BY 
+    total_region_sales DESC, total_orders DESC
+LIMIT 10;

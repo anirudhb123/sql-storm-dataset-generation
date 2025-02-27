@@ -1,0 +1,56 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        m.episode_of_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        mk.title,
+        m.production_year,
+        mh.level + 1,
+        m.episode_of_id
+    FROM 
+        aka_title m
+    JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    co.name AS company_name,
+    ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+    COUNT(DISTINCT cc.person_id) AS total_cast,
+    ARRAY_AGG(DISTINCT mh.title) AS parent_titles,
+    SUM(mk.production_year) AS total_production_year_sum,
+    MAX(mk.production_year) AS max_production_year,
+    MIN(mk.production_year) AS min_production_year
+FROM 
+    movie_companies mc
+JOIN 
+    company_name co ON mc.company_id = co.id
+LEFT JOIN 
+    complete_cast cc ON mc.movie_id = cc.movie_id
+LEFT JOIN 
+    MovieHierarchy mh ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    aka_title mk ON mk.id = mc.movie_id
+JOIN 
+    aka_name ak ON ak.person_id = cc.person_id
+WHERE 
+    co.country_code IS NOT NULL
+    AND mk.production_year >= 2000
+GROUP BY 
+    co.name
+HAVING 
+    COUNT(DISTINCT cc.person_id) > 5 
+ORDER BY 
+    total_cast DESC;

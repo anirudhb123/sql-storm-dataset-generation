@@ -1,0 +1,52 @@
+WITH RECURSIVE supplier_rank AS (
+    SELECT s_suppkey, s_name, s_acctbal, ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rank
+    FROM supplier
+),
+max_supply_cost AS (
+    SELECT ps_partkey, MAX(ps_supplycost) AS max_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+nation_discount AS (
+    SELECT n.n_nationkey, AVG(CASE WHEN l_discount > 0 THEN l_discount ELSE NULL END) AS avg_discount
+    FROM lineitem l
+    JOIN supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE l.returnflag = 'N'
+    GROUP BY n.n_nationkey
+),
+customer_ranking AS (
+    SELECT c.c_custkey, c.c_name, RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS cust_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+part_details AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, pc.avg_discount
+    FROM part p
+    LEFT JOIN nation_discount pc ON p.p_partkey = pc.n_nationkey
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+    HAVING COUNT(DISTINCT ps.ps_partkey) > 5
+)
+SELECT
+    cs.cust_rank,
+    sr.rank AS supplier_rank,
+    pd.p_name,
+    pd.p_retailprice,
+    COALESCE(ms.max_cost, 0) AS max_supply_cost,
+    COALESCE(ns.avg_discount, 0) AS nation_avg_discount
+FROM customer_ranking cs
+JOIN supplier_rank sr ON cs.c_custkey = sr.s_suppkey
+JOIN part_details pd ON pd.p_partkey = sr.s_suppkey
+LEFT JOIN max_supply_cost ms ON ms.ps_partkey = pd.p_partkey
+LEFT JOIN nation_discount ns ON ns.n_nationkey = sr.rank
+WHERE sr.rank <= 10
+  AND sr.s_acctbal IS NOT NULL
+ORDER BY cs.cust_rank DESC, sr.rank ASC
+FETCH FIRST 50 ROWS ONLY;

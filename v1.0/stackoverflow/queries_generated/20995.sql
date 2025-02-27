@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(UPR.UpVotes, 0) AS UpVotes,
+        COALESCE(DOWN.DownVotes, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rnk
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS UpVotes
+        FROM Votes
+        WHERE VoteTypeId = 2
+        GROUP BY PostId
+    ) UPR ON p.Id = UPR.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS DownVotes
+        FROM Votes
+        WHERE VoteTypeId = 3
+        GROUP BY PostId
+    ) DOWN ON p.Id = DOWN.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 month' 
+        AND p.ViewCount > 10
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ARRAY_AGG(DISTINCT pht.Name) AS HistoryTypeNames
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId, ph.CreationDate, ph.UserDisplayName, ph.Comment, ph.PostHistoryTypeId
+)
+SELECT 
+    rp.Id,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.UpVotes,
+    rp.DownVotes,
+    PHD.HistoryDate,
+    PHD.UserDisplayName AS HistoryEditor,
+    PHD.Comment AS HistoryComment,
+    PHD.HistoryTypeNames,
+    CASE 
+        WHEN rp.Score > 10 AND rp.UpVotes > rp.DownVotes THEN 'Popular'
+        WHEN rp.Score <= 10 AND rp.UpVotes > 0 AND rp.DownVotes = 0 THEN 'Newbie Favorite'
+        ELSE 'Just Another Post'
+    END AS PostCategory,
+    (SELECT STRING_AGG(T.TagName, ', ' ORDER BY T.TagName)
+     FROM Tags T 
+     WHERE ',' || rp.Tags || ',' LIKE '%,' || T.TagName || ',%') AS PostTags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryDetails PHD ON rp.Id = PHD.PostId
+WHERE 
+    (SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId = rp.Id AND ph.PostHistoryTypeId IN (10, 12)) = 0
+ORDER BY 
+    rp.CreationDate DESC, 
+    rp.ViewCount DESC
+LIMIT 100;
+

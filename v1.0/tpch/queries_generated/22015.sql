@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+),
+FilteredItems AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ps.ps_availqty,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN NULL 
+            ELSE ROUND(p.p_retailprice * 1.1, 2) 
+        END AS adjusted_price
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_size BETWEEN 1 AND 20 AND 
+        p.p_comment NOT LIKE '%OLD%'
+),
+DistinctCustomers AS (
+    SELECT DISTINCT 
+        c.c_custkey,
+        c.c_name
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_mktsegment = 'BUILDING')
+),
+FinalResults AS (
+    SELECT 
+        d.c_custkey,
+        d.c_name,
+        COUNT(DISTINCT p.p_partkey) AS part_count,
+        SUM(COALESCE(fi.ps_availqty, 0)) AS total_avail_qty,
+        SUM(fi.adjusted_price) AS total_adjusted_price,
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM 
+        DistinctCustomers d
+    LEFT JOIN 
+        orders o ON d.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN 
+        FilteredItems fi ON l.l_partkey = fi.p_partkey
+    LEFT JOIN 
+        RankedSuppliers s ON s.s_suppkey = l.l_suppkey AND s.rnk <= 5
+    WHERE 
+        EXISTS (SELECT 1 FROM lineitem l2 WHERE l2.l_orderkey = o.o_orderkey AND l2.l_returnflag = 'R')
+    GROUP BY 
+        d.c_custkey, d.c_name
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(fr.part_count, 0) AS part_count,
+    COALESCE(fr.total_avail_qty, 0) AS total_avail_qty,
+    COALESCE(fr.total_adjusted_price, 0) AS total_adjusted_price,
+    COALESCE(fr.supplier_count, 0) AS supplier_count
+FROM 
+    DistinctCustomers c
+LEFT JOIN 
+    FinalResults fr ON c.c_custkey = fr.c_custkey
+ORDER BY 
+    fr.total_adjusted_price DESC, 
+    c.c_name ASC;

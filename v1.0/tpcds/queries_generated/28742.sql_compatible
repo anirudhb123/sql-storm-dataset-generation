@@ -1,0 +1,42 @@
+
+WITH AddressData AS (
+    SELECT 
+        ca_city, 
+        ca_state, 
+        COUNT(*) AS address_count,
+        STRING_AGG(CONCAT(ca_street_name, ' ', ca_street_number, ' ', ca_street_type), ', ') AS full_address
+    FROM customer_address
+    GROUP BY ca_city, ca_state
+),
+CustomerData AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        STRING_AGG(DISTINCT cd_education_status, ', ') AS unique_educations
+    FROM customer_demographics
+    GROUP BY cd_gender, cd_marital_status
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        SUM(ws_quantity) AS total_quantity
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+)
+SELECT 
+    a.ca_city,
+    a.ca_state,
+    a.address_count,
+    a.full_address,
+    c.cd_gender,
+    c.cd_marital_status,
+    c.avg_purchase_estimate,
+    c.unique_educations,
+    s.total_profit,
+    s.total_quantity
+FROM AddressData a
+JOIN CustomerData c ON a.address_count > 10 
+JOIN SalesData s ON s.ws_bill_customer_sk = c.c_customer_sk
+ORDER BY a.ca_state, a.ca_city;

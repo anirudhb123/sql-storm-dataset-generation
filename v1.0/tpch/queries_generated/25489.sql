@@ -1,0 +1,35 @@
+WITH String_Benchmark AS (
+    SELECT 
+        p.p_name,
+        s.s_name,
+        CONCAT('Part: ', p.p_name, ' | Supplier: ', s.s_name) AS combined_info,
+        UPPER(p.p_comment) AS upper_comment,
+        LOWER(s.s_address) AS lower_address,
+        LENGTH(s.s_name) AS supplier_name_length,
+        JSON_ARRAYAGG(DISTINCT p.p_type) AS part_types,
+        CASE 
+            WHEN p.p_retailprice > 50 THEN 'Expensive' 
+            ELSE 'Affordable' 
+        END AS price_category
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey, s.s_suppkey
+)
+SELECT 
+    combined_info,
+    upper_comment,
+    lower_address,
+    supplier_name_length,
+    part_types,
+    price_category
+FROM 
+    String_Benchmark
+WHERE 
+    char_length(combined_info) > 50
+ORDER BY 
+    supplier_name_length DESC, price_category ASC;

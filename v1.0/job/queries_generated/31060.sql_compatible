@@ -1,0 +1,86 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title, 
+        m.production_year, 
+        COALESCE(m2.title, 'N/A') AS linked_title,
+        1 AS level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_link ml ON m.id = ml.movie_id
+    LEFT JOIN 
+        aka_title m2 ON ml.linked_movie_id = m2.id
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title, 
+        m.production_year, 
+        COALESCE(m2.title, 'N/A') AS linked_title,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+),
+top_cast AS (
+    SELECT 
+        ci.movie_id, 
+        COUNT(*) AS cast_count,
+        STRING_AGG(CONCAT(a.name, ' as ', r.role) ORDER BY ci.nr_order) AS full_cast
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id
+),
+movie_info_summary AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT i.info, '; ') AS info_details
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type i ON mi.info_type_id = i.id
+    GROUP BY 
+        mi.movie_id
+),
+detailed_movie_info AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.linked_title,
+        COALESCE(tc.cast_count, 0) AS cast_count,
+        COALESCE(tc.full_cast, 'No cast information') AS full_cast,
+        COALESCE(mis.info_details, 'No additional info') AS additional_info
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        top_cast tc ON mh.movie_id = tc.movie_id
+    LEFT JOIN 
+        movie_info_summary mis ON mh.movie_id = mis.movie_id
+    WHERE 
+        mh.production_year >= 2000 
+)
+SELECT 
+    dmi.title AS movie_title,
+    dmi.production_year AS year,
+    dmi.linked_title AS related_movie,
+    dmi.cast_count AS number_of_cast,
+    dmi.full_cast AS complete_cast_list,
+    dmi.additional_info AS additional_information
+FROM 
+    detailed_movie_info dmi
+WHERE 
+    dmi.cast_count > 0 
+ORDER BY 
+    dmi.production_year DESC, 
+    dmi.title ASC
+FETCH FIRST 50 ROWS ONLY;

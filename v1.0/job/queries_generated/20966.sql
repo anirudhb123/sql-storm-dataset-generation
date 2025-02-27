@@ -1,0 +1,81 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title ASC) AS rank_by_title
+    FROM 
+        aka_title t
+),
+ExtendedCast AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        COALESCE(p.gender, 'U') AS gender,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order ASC) AS actor_order,
+        CASE 
+            WHEN cct.kind IS NOT NULL THEN cct.kind
+            ELSE 'Unknown Role'
+        END AS role
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        comp_cast_type cct ON ci.person_role_id = cct.id
+    LEFT JOIN 
+        aka_name p ON ci.person_id = p.person_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title m ON mk.movie_id = m.id
+    GROUP BY 
+        m.movie_id
+),
+FinalReport AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        COALESCE(ek.gender, 'N/A') AS gender_of_lead_actor,
+        rm.production_year,
+        rm.rank_by_title,
+        ek.role AS lead_actor_role,
+        COALESCE(mk.keywords, 'No Keywords') AS movie_keywords,
+        COUNT(ec.person_id) FILTER (WHERE ec.actor_order <= 2) AS top_actors_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ExtendedCast ec ON rm.movie_id = ec.movie_id AND ec.actor_order = 1
+    LEFT JOIN 
+        MoviesWithKeywords mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        (SELECT 
+            movie_id, gender 
+         FROM 
+            ExtendedCast 
+         WHERE 
+            actor_order = 1) ek ON rm.movie_id = ek.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title, ek.gender, rm.production_year, rm.rank_by_title, ek.role, mk.keywords
+)
+SELECT 
+    movie_id,
+    title,
+    gender_of_lead_actor,
+    production_year,
+    rank_by_title,
+    lead_actor_role,
+    movie_keywords,
+    top_actors_count
+FROM 
+    FinalReport
+WHERE 
+    (production_year >= 2000 AND rank_by_title <= 10) 
+    OR (lead_actor_role IS NOT NULL AND movie_keywords LIKE '%Action%')
+ORDER BY 
+    production_year DESC, rank_by_title ASC;

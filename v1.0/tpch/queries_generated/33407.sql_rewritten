@@ -1,0 +1,64 @@
+WITH RECURSIVE RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS unique_customers,
+        EXTRACT(YEAR FROM o.o_orderdate) AS order_year
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate <= cast('1998-10-01' as date)
+    GROUP BY 
+        o.o_orderkey, order_year
+),
+SupplierPerformance AS (
+    SELECT 
+        r.region_name,
+        SUM(os.total_revenue) AS total_revenue_by_region
+    FROM 
+        OrderSummary os
+    JOIN 
+        partsupp ps ON os.o_orderkey = ps.ps_partkey
+    LEFT JOIN 
+        RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+    LEFT JOIN 
+        (SELECT r.r_name AS region_name, n.n_nationkey 
+         FROM region r 
+         JOIN nation n ON r.r_regionkey = n.n_regionkey) AS r ON r.n_nationkey = rs.s_suppkey
+    GROUP BY 
+        r.region_name
+    ORDER BY 
+        total_revenue_by_region DESC
+)
+SELECT 
+    s.s_name AS supplier_name,
+    os.total_revenue,
+    rp.region_name,
+    COALESCE(sp.total_revenue_by_region, 0) AS total_revenue_region
+FROM 
+    RankedSuppliers s
+LEFT JOIN 
+    OrderSummary os ON s.s_suppkey = os.o_orderkey
+LEFT JOIN 
+    SupplierPerformance rp ON s.s_suppkey = rp.region_name
+WHERE 
+    s.rnk <= 5
+AND 
+    os.total_revenue > 10000
+ORDER BY 
+    total_revenue DESC;

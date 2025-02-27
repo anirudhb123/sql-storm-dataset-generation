@@ -1,0 +1,67 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey -- Adjust join condition for actual hierarchy
+
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('F', 'O')
+    GROUP BY c.c_custkey, c.c_name
+),
+PartStatistics AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+TopRegions AS (
+    SELECT 
+        rn.r_name, 
+        SUM(o.o_totalprice) AS region_total
+    FROM region rn
+    JOIN nation n ON rn.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY rn.r_name
+    ORDER BY region_total DESC
+    LIMIT 5
+)
+SELECT 
+    ch.c_custkey,
+    ch.c_name,
+    ch.total_spent,
+    ps.p_name,
+    ps.supplier_count,
+    ps.avg_supply_cost,
+    tr.r_name AS top_region
+FROM CustomerOrders ch
+JOIN PartStatistics ps ON ps.supplier_count > 2
+LEFT JOIN TopRegions tr ON tr.region_total > ch.total_spent
+WHERE (ch.order_count > 10 AND ch.total_spent IS NOT NULL)
+   OR (ch.total_spent IS NULL AND ch.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_acctbal < 500))
+ORDER BY ch.total_spent DESC, ps.avg_supply_cost ASC;

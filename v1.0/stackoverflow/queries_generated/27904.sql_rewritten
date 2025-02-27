@@ -1,0 +1,52 @@
+WITH TagsArray AS (
+    SELECT 
+        Id AS PostId,
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT A.Id) AS AnswerCount,
+        SUM(CASE WHEN A.Score > 0 THEN 1 ELSE 0 END) AS UpvotedAnswers
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts Q ON U.Id = Q.OwnerUserId AND Q.PostTypeId = 1
+    LEFT JOIN 
+        Posts A ON Q.Id = A.ParentId AND A.PostTypeId = 2
+    GROUP BY 
+        U.Id, U.Reputation
+),
+TagUsage AS (
+    SELECT 
+        TagName,
+        COUNT(DISTINCT PostId) AS PostCount,
+        COUNT(DISTINCT U.UserId) AS UserCount
+    FROM 
+        TagsArray T
+    JOIN 
+        UserReputation U ON U.UserId IN (
+            SELECT OwnerUserId FROM Posts WHERE Id = T.PostId
+        )
+    GROUP BY 
+        TagName
+)
+SELECT 
+    T.TagName,
+    T.PostCount,
+    T.UserCount,
+    R.Reputation,
+    R.AnswerCount,
+    R.UpvotedAnswers
+FROM 
+    TagUsage T
+JOIN 
+    UserReputation R ON R.UserCount > 0
+ORDER BY 
+    PostCount DESC, UserCount DESC, R.Reputation DESC
+LIMIT 10;

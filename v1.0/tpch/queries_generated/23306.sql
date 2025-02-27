@@ -1,0 +1,68 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+),
+suppliers_with_durations AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        AVG(DATEDIFF(l.l_shipdate, l.l_commitdate)) AS avg_ship_duration
+    FROM 
+        supplier s
+    JOIN 
+        lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+customer_spending AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey
+),
+combined_stats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        CASE 
+            WHEN cs.total_spent IS NULL THEN 0 
+            ELSE cs.total_spent 
+        END AS customer_spending,
+        COALESCE(swd.avg_ship_duration, 0) AS avg_ship_duration,
+        ro.order_rank
+    FROM 
+        ranked_orders ro
+    LEFT JOIN 
+        customer_spending cs ON ro.o_orderkey = cs.c_custkey
+    LEFT JOIN 
+        suppliers_with_durations swd ON swd.s_suppkey = ro.o_orderkey
+)
+SELECT 
+    cs.o_orderkey,
+    cs.o_orderdate,
+    cs.customer_spending,
+    cs.avg_ship_duration,
+    CASE 
+        WHEN cs.order_rank <= 10 AND cs.customer_spending > 1000 THEN 'High Value Order'
+        ELSE 'General Order'
+    END AS order_type
+FROM 
+    combined_stats cs
+WHERE 
+    cs.avg_ship_duration IS NOT NULL
+    AND cs.customer_spending > (SELECT AVG(total_spent) FROM customer_spending)
+ORDER BY 
+    cs.customer_spending DESC, 
+    cs.avg_ship_duration NULLS LAST;

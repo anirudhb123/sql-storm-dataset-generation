@@ -1,0 +1,85 @@
+
+WITH RankedMovies AS (
+    SELECT
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS title_rank,
+        COUNT(DISTINCT mc.company_id) OVER (PARTITION BY a.id) AS total_companies,
+        COALESCE(SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS cast_size,
+        CASE 
+            WHEN a.production_year >= 2000 THEN 'Modern Era'
+            WHEN a.production_year >= 1980 THEN 'Classic Era'
+            ELSE 'Golden Age'
+        END AS era
+    FROM
+        aka_title a
+    LEFT JOIN
+        movie_companies mc ON a.movie_id = mc.movie_id
+    LEFT JOIN
+        cast_info ci ON a.movie_id = ci.movie_id
+    WHERE
+        a.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%movie%')
+    GROUP BY
+        a.id, a.title, a.production_year
+),
+FeaturedMovies AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.title_rank,
+        rm.total_companies,
+        rm.cast_size,
+        rm.era,
+        CASE 
+            WHEN rm.total_companies > 3 THEN 'Big Gala'
+            ELSE 'Indie Flare'
+        END AS company_size_desc
+    FROM
+        RankedMovies rm
+    WHERE
+        rm.cast_size > 10
+),
+CriticalConnections AS (
+    SELECT
+        fm.title,
+        fm.production_year,
+        STRING_AGG(DISTINCT c.name, ', ') AS notable_cast,
+        STRING_AGG(DISTINCT cn.name, ', ') AS notable_companies,
+        fm.company_size_desc
+    FROM
+        FeaturedMovies fm
+    LEFT JOIN
+        cast_info ci ON fm.movie_id = ci.movie_id
+    LEFT JOIN
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN
+        movie_companies mc ON fm.movie_id = mc.movie_id
+    LEFT JOIN
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY
+        fm.title, fm.production_year, fm.company_size_desc
+)
+SELECT 
+    cc.title,
+    cc.production_year,
+    cc.notable_cast,
+    cc.notable_companies,
+    cc.company_size_desc,
+    CASE 
+        WHEN cc.production_year IS NULL THEN 'Unreleased'
+        WHEN cc.production_year < 1950 THEN 'Pre-War Cinema'
+        ELSE 'Modern Cinema'
+    END AS release_period,
+    CASE
+        WHEN cc.notable_cast IS NULL OR cc.notable_cast = '' THEN 'No cast info'
+        ELSE CONCAT('Cast details: ', cc.notable_cast)
+    END AS cast_details
+FROM
+    CriticalConnections cc
+WHERE
+    cc.company_size_desc = 'Big Gala'
+ORDER BY
+    cc.production_year DESC,
+    cc.title;

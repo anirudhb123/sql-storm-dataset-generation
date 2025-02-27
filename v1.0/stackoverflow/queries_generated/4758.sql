@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+ClosedPostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, '; ') AS CommentsText
+    FROM 
+        Comments c
+    INNER JOIN 
+        Posts p ON c.PostId = p.Id
+    WHERE 
+        p.ClosedDate IS NOT NULL
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    u.DisplayName,
+    us.Reputation,
+    COALESCE(rp.Title, 'No Recent Questions') AS RecentQuestionTitle,
+    rp.CreationDate AS RecentQuestionDate,
+    rp.Score AS RecentQuestionScore,
+    rp.ViewCount AS RecentQuestionViews,
+    rp.AnswerCount AS RecentQuestionAnswers,
+    COALESCE(cpc.CommentCount, 0) AS ClosedPostCommentCount,
+    COALESCE(cpc.CommentsText, '') AS ClosedPostComments,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges
+FROM 
+    Users u
+LEFT JOIN 
+    UserStats us ON u.Id = us.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN 
+    ClosedPostComments cpc ON rp.Id = cpc.PostId
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    u.Reputation DESC, 
+    rp.CreationDate DESC;

@@ -1,0 +1,40 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT p.id AS person_id, a.name AS actor_name, 1 AS depth
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN title t ON ci.movie_id = t.id
+    WHERE t.production_year = 2022
+
+    UNION ALL
+
+    SELECT ch.id AS person_id, a.name AS actor_name, h.depth + 1
+    FROM ActorHierarchy h
+    JOIN cast_info ci ON h.person_id = ci.person_id
+    JOIN title t ON ci.movie_id = t.id
+    JOIN aka_name a ON ci.person_id = a.person_id
+    WHERE h.depth < 5
+      AND t.production_year < 2022
+)
+
+SELECT 
+    a.actor_name,
+    COUNT(DISTINCT ci.movie_id) AS movies_count,
+    AVG(t.production_year) AS average_production_year,
+    STRING_AGG(DISTINCT t.title, ', ') AS movie_titles,
+    ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY COUNT(DISTINCT ci.movie_id) DESC) AS rank
+FROM ActorHierarchy a
+JOIN cast_info ci ON a.person_id = ci.person_id
+JOIN title t ON ci.movie_id = t.id
+LEFT JOIN movie_info mi ON t.id = mi.movie_id AND mi.info IS NOT NULL
+WHERE 
+    mi.note IS NULL 
+    OR EXISTS (
+        SELECT 1 
+        FROM movie_keyword mk 
+        WHERE mk.movie_id = t.id AND mk.keyword_id IN (SELECT id FROM keyword WHERE keyword LIKE '%thriller%')
+    )
+GROUP BY a.actor_name, a.person_id
+HAVING COUNT(DISTINCT ci.movie_id) > 5
+ORDER BY average_production_year DESC
+LIMIT 10;

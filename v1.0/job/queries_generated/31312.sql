@@ -1,0 +1,61 @@
+WITH RECURSIVE CastTree AS (
+    SELECT 
+        c.id,
+        c.movie_id,
+        c.person_id,
+        1 AS level,
+        a.name AS actor_name
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        c.id,
+        c.movie_id,
+        c.person_id,
+        ct.level + 1,
+        a.name AS actor_name
+    FROM 
+        cast_info c
+    JOIN 
+        CastTree ct ON c.movie_id = ct.movie_id 
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+)
+
+SELECT 
+    m.title,
+    m.production_year,
+    ct.actor_name,
+    COUNT(DISTINCT ct.person_id) OVER (PARTITION BY m.movie_id) AS total_actors,
+    COALESCE(SUM(mi.info LIKE '%Oscar%') OVER (PARTITION BY m.movie_id), 0) AS oscar_count,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    m.type,
+    CASE WHEN m.production_year < 2000 THEN 'Classic' ELSE 'Modern' END AS era,
+    ROW_NUMBER() OVER (ORDER BY m.production_year DESC) AS movie_rank
+FROM 
+    title m
+LEFT JOIN 
+    movie_info mi ON m.id = mi.movie_id 
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    CastTree ct ON m.id = ct.movie_id
+WHERE 
+    m.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'feature'))
+    AND (m.production_year IS NULL OR m.production_year >= 2000)
+GROUP BY 
+    m.id, m.title, m.production_year, ct.actor_name
+HAVING 
+    COUNT(DISTINCT ct.person_id) > 5
+ORDER BY 
+    m.production_year DESC, total_actors DESC;

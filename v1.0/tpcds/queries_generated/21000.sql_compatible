@@ -1,0 +1,55 @@
+
+WITH RECURSIVE recent_sales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS sale_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+), item_details AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        COALESCE(inv.inv_quantity_on_hand, 0) AS inv_quantity_on_hand,
+        (SELECT COUNT(DISTINCT wr_returning_customer_sk) 
+         FROM web_returns wr 
+         WHERE wr.wr_item_sk = i.i_item_sk) AS return_count
+    FROM item i
+    LEFT JOIN inventory inv ON i.i_item_sk = inv.inv_item_sk
+    GROUP BY i.i_item_sk, i.i_item_desc, i.i_current_price
+), sales_summary AS (
+    SELECT 
+        item.i_item_sk,
+        item.i_item_desc,
+        item.i_current_price,
+        MAX(sale.ws_sales_price) AS max_sales_price,
+        SUM(sale.ws_sales_price * sale.ws_quantity) AS total_revenue,
+        item.inv_quantity_on_hand,
+        item.return_count,
+        CASE WHEN item.return_count > 0 THEN 'Returned' ELSE 'Not Returned' END AS return_status
+    FROM item_details item
+    LEFT JOIN recent_sales sale ON item.i_item_sk = sale.ws_item_sk AND sale.sale_rank <= 5
+    GROUP BY item.i_item_sk, item.i_item_desc, item.i_current_price, item.inv_quantity_on_hand, item.return_count
+), final_result AS (
+    SELECT 
+        ss.i_item_sk,
+        ss.i_item_desc,
+        ss.i_current_price,
+        ss.max_sales_price,
+        ss.total_revenue,
+        ss.inv_quantity_on_hand,
+        ss.return_status,
+        RANK() OVER (ORDER BY ss.total_revenue DESC) AS revenue_rank
+    FROM sales_summary ss
+    WHERE ss.inv_quantity_on_hand > 10 
+    AND ss.return_status = 'Not Returned'
+)
+SELECT 
+    CONCAT('Item: ', fr.i_item_desc, ', Max Price: $', ROUND(fr.max_sales_price, 2), 
+           ', Total Revenue: $', ROUND(fr.total_revenue, 2), 
+           ', Inventory: ', fr.inv_quantity_on_hand, 
+           ', Rank: ', fr.revenue_rank) AS sales_info
+FROM final_result fr
+WHERE fr.revenue_rank <= 10
+ORDER BY fr.revenue_rank;

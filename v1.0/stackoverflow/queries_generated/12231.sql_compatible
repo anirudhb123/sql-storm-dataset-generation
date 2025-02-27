@@ -1,0 +1,58 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostID,
+        p.PostTypeId,
+        p.CreationDate,
+        COALESCE(p.Score, 0) AS Score,
+        COALESCE(p.ViewCount, 0) AS ViewCount,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(p.CommentCount, 0) AS CommentCount,
+        COALESCE(p.FavoriteCount, 0) AS FavoriteCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id, p.PostTypeId, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, p.FavoriteCount
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserID,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        SUM(u.Views) AS TotalViews
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostTypeCounts AS (
+    SELECT 
+        pt.Id AS PostTypeID,
+        pt.Name AS PostTypeName,
+        COUNT(p.Id) AS PostCount
+    FROM PostTypes pt
+    LEFT JOIN Posts p ON pt.Id = p.PostTypeId
+    GROUP BY pt.Id, pt.Name
+)
+
+SELECT 
+    ps.PostID,
+    ps.PostTypeId,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    u.Id AS UserID,
+    us.BadgeCount,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    us.TotalViews,
+    ptc.PostTypeName,
+    ptc.PostCount
+FROM PostStats ps
+JOIN Users u ON ps.OwnerUserId = u.Id
+JOIN UserStats us ON u.Id = us.UserID
+JOIN PostTypeCounts ptc ON ps.PostTypeId = ptc.PostTypeID
+ORDER BY ps.CreationDate DESC;

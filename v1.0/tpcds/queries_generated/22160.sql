@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number, 
+        ws.ws_sales_price * ws.ws_quantity AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rank_sales
+    FROM web_sales ws
+    WHERE ws.ws_sales_price IS NOT NULL
+), 
+TopSales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        COALESCE(RankedSales.total_sales, 0) AS sales_amount
+    FROM item
+    LEFT JOIN RankedSales ON item.i_item_sk = RankedSales.ws_item_sk
+    WHERE RankedSales.rank_sales = 1 OR RankedSales.rank_sales IS NULL
+), 
+CustomerStats AS (
+    SELECT 
+        c.c_customer_id, 
+        SUM(COALESCE(ws.ws_quantity, 0)) AS total_purchases,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        COUNT(DISTINCT CASE WHEN cd.cd_gender = 'F' THEN c.c_customer_id END) AS female_customers,
+        COUNT(DISTINCT CASE WHEN cd.cd_gender = 'M' THEN c.c_customer_id END) AS male_customers
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id
+),
+AggregatedData AS (
+    SELECT 
+        T.i_item_id,
+        T.i_product_name,
+        AVG(CS.total_purchases) AS avg_purchases,
+        SUM(CS.order_count) AS total_orders,
+        MAX(web.w_gmt_offset) AS max_gmt_offset,
+        MIN(web.w_gmt_offset) AS min_gmt_offset
+    FROM TopSales T
+    JOIN CustomerStats CS ON T.sales_amount > 1000
+    LEFT JOIN web_site web ON web.web_site_sk = T.sales_amount
+    GROUP BY T.i_item_id, T.i_product_name
+    HAVING AVG(CS.total_purchases) > 10
+        AND MAX(CS.total_orders) IS NOT NULL
+        AND SUM(CS.total_orders) > 5
+)
+SELECT 
+    A.i_item_id,
+    A.i_product_name,
+    A.avg_purchases,
+    A.total_orders,
+    CASE 
+        WHEN A.max_gmt_offset IS NOT NULL THEN 
+            CONCAT('GMT Offset Range: ', A.min_gmt_offset, ' to ', A.max_gmt_offset)
+        ELSE 'No GMT Offset Data'
+    END AS timezone_info
+FROM AggregatedData A
+ORDER BY A.avg_purchases DESC
+FETCH FIRST 10 ROWS ONLY;

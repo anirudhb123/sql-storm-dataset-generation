@@ -1,0 +1,65 @@
+
+WITH RECURSIVE RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        Posts a ON p.ParentId = a.Id
+    WHERE 
+        a.PostTypeId = 1  
+)
+
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+    COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+    SUM(COALESCE(p.Score, 0)) AS TotalScore,
+    SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    ROW_NUMBER() OVER (ORDER BY SUM(COALESCE(p.Score, 0)) DESC) AS Rank
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Tags t ON p.Tags LIKE '%' || t.TagName || '%' 
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11, 12) 
+JOIN 
+    (SELECT 
+        PostId, COUNT(*) AS RelatedPostCount
+     FROM 
+        PostLinks
+     GROUP BY 
+        PostId
+     HAVING 
+        COUNT(*) > 1) AS RelatedPosts ON p.Id = RelatedPosts.PostId
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 10 
+ORDER BY 
+    TotalScore DESC;

@@ -1,0 +1,61 @@
+WITH regional_sales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' 
+        AND l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        r.r_name
+), ranked_sales AS (
+    SELECT 
+        region_name,
+        total_sales,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        regional_sales
+)
+SELECT 
+    r.region_name,
+    COALESCE(r.total_sales, 0) AS total_sales,
+    COALESCE(rs.sales_rank, 'Not Ranked') AS sales_rank
+FROM 
+    (SELECT DISTINCT r.r_name AS region_name FROM region r) AS r
+LEFT JOIN 
+    regional_sales rs ON r.region_name = rs.region_name
+ORDER BY 
+    r.region_name;
+
+WITH total_sales_summary AS (
+    SELECT 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS grand_total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+)
+SELECT 
+    total_sales_summary.grand_total_sales,
+    total_sales_summary.total_orders,
+    (SELECT COUNT(*) FROM customer) AS total_customers
+FROM 
+    total_sales_summary
+WHERE 
+    grand_total_sales > (SELECT AVG(grand_total_sales) FROM total_sales_summary);

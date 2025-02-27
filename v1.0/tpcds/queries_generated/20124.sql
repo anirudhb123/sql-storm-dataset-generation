@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.order_number,
+        SUM(ws.ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ext_sales_price) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.web_site_sk = w.web_site_sk
+    WHERE 
+        ws.sold_date_sk BETWEEN 2000000 AND 2000500
+    GROUP BY 
+        ws.web_site_id, ws.order_number
+),
+TopSales AS (
+    SELECT 
+        web_site_id,
+        total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        rank <= 5
+),
+CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT sr.ticket_number) AS returns_count,
+        COALESCE(SUM(sr.return_amt), 0) AS total_returned
+    FROM 
+        customer c 
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.customer_sk
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    w.web_site_id,
+    ts.total_sales,
+    cr.c_customer_id,
+    cr.returns_count,
+    cr.total_returned,
+    CASE 
+        WHEN cr.returns_count > 0 THEN 'Has Returns'
+        ELSE 'No Returns'
+    END AS return_status,
+    NVL(ts.total_sales / NULLIF(cr.total_returned, 0), ts.total_sales) AS sales_to_return_ratio,
+    (SELECT AVG(total_sales) FROM TopSales) AS avg_top_sales
+FROM 
+    TopSales ts
+JOIN 
+    web_site w ON ts.web_site_id = w.web_site_id
+LEFT JOIN 
+    CustomerReturns cr ON cr.c_customer_id = (SELECT c.c_customer_id FROM customer c ORDER BY RANDOM() LIMIT 1)
+ORDER BY 
+    sales_to_return_ratio DESC
+LIMIT 10;

@@ -1,0 +1,48 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        COALESCE(aka.name, 'Unknown') AS director,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Director')
+    LEFT JOIN 
+        aka_name aka ON aka.id = mi.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        t.title, t.production_year, aka.name
+),
+CastDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        STRING_AGG(DISTINCT CONCAT(a.name, ' as ', r.role), ', ') AS cast_details
+    FROM 
+        title t
+    JOIN 
+        cast_info c ON c.movie_id = t.id
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    JOIN 
+        role_type r ON r.id = c.role_id
+    GROUP BY 
+        t.id
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.director,
+    md.keywords,
+    cd.cast_details
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    CastDetails cd ON md.movie_title = cd.movie_id
+WHERE 
+    md.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    md.production_year DESC;

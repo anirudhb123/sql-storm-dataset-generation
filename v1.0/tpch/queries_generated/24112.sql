@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_nationkey,
+        s.s_name,
+        s.s_acctbal
+    FROM RankedSuppliers s
+    WHERE s.rank <= 3
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY c.c_custkey, c.c_name
+),
+PartDimensions AS (
+    SELECT 
+        p.p_partkey,
+        p.p_type,
+        AVG(p.p_retailprice) AS avg_price,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size > 10
+    GROUP BY p.p_partkey, p.p_type
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_extendedprice * (1 - l.l_discount) AS net_price,
+        l.l_returnflag,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS line_order
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    AND l.l_quantity > 0
+)
+SELECT 
+    c.c_name,
+    SUM(coalesce(cli.net_price, 0)) AS total_net_price,
+    pd.p_type,
+    SUM(pd.avg_price) AS total_avg_price,
+    COUNT(DISTINCT ts.s_suppkey) AS distinct_supplier_count
+FROM CustomerOrders co
+JOIN FilteredLineItems cli ON co.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name LIKE '%' || cli.l_orderkey || '%')
+LEFT JOIN TopSuppliers ts ON co.c_custkey = ts.s_nationkey
+JOIN PartDimensions pd ON cli.l_partkey = pd.p_partkey
+WHERE co.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+AND pd.supplier_count > 5
+GROUP BY c.c_name, pd.p_type
+HAVING COUNT(cli.l_orderkey) > 2
+ORDER BY total_net_price DESC NULLS LAST;

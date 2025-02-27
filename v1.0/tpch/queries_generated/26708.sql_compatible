@@ -1,0 +1,27 @@
+
+SELECT 
+    CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ', Quantity Available: ', ps.ps_availqty, ', Total Cost: $', FORMAT(ps.ps_supplycost * ps.ps_availqty, 2)) AS supply_info,
+    SUBSTRING_INDEX(SUBSTRING_INDEX(s.s_comment, ' ', 5), ' ', -5) AS excerpt_comment,
+    CASE 
+        WHEN ps.ps_availqty < 100 THEN 'Low stock'
+        WHEN ps.ps_availqty BETWEEN 100 AND 500 THEN 'Moderate stock'
+        ELSE 'High stock'
+    END AS stock_level,
+    LEFT(p.p_comment, 10) AS short_comment
+FROM 
+    partsupp ps
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    s.s_acctbal > (
+        SELECT AVG(s_acctbal) 
+        FROM supplier
+    )
+GROUP BY 
+    s.s_name, p.p_name, ps.ps_availqty, ps.ps_supplycost, s.s_comment, p.p_comment
+ORDER BY 
+    stock_level DESC, 
+    p.p_partkey ASC
+LIMIT 50;

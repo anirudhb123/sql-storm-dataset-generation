@@ -1,0 +1,64 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderpriority, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o 
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        sd.s_suppkey, 
+        sd.s_name 
+    FROM 
+        SupplierDetails sd 
+    WHERE 
+        sd.total_available > (
+            SELECT AVG(total_available) FROM SupplierDetails
+        )
+),
+OrderLineSummary AS (
+    SELECT 
+        lo.l_orderkey, 
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_extended_price, 
+        COUNT(DISTINCT lo.l_suppkey) AS supply_count
+    FROM 
+        lineitem lo 
+    WHERE 
+        lo.l_shipdate > cast('1998-10-01' as date) - INTERVAL '30' DAY 
+    GROUP BY 
+        lo.l_orderkey
+)
+SELECT 
+    o.o_orderkey, 
+    o.o_orderdate, 
+    ol.total_extended_price, 
+    COALESCE(ts.s_name, 'No Supplier') AS supplier_name, 
+    ol.supply_count
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    OrderLineSummary ol ON o.o_orderkey = ol.l_orderkey
+LEFT JOIN 
+    TopSuppliers ts ON ol.supply_count > 0
+WHERE 
+    o.rn <= 10 AND 
+    (o.o_orderpriority LIKE 'high%' OR o.o_orderstatus = 'O')
+ORDER BY 
+    o.o_totalprice DESC;

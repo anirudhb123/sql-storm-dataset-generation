@@ -1,0 +1,77 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        c.movie_id,
+        t.title AS movie_title,
+        1 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL 
+
+    UNION ALL
+
+    SELECT 
+        c2.person_id,
+        a2.name AS actor_name,
+        c2.movie_id,
+        t2.title AS movie_title,
+        ah.level + 1
+    FROM 
+        cast_info c2
+    JOIN 
+        aka_name a2 ON c2.person_id = a2.person_id
+    JOIN 
+        aka_title t2 ON c2.movie_id = t2.movie_id
+    JOIN 
+        ActorHierarchy ah ON ah.movie_id = c2.movie_id 
+    WHERE 
+        a2.name IS NOT NULL
+        AND ah.person_id <> c2.person_id
+),
+CountMovies AS (
+    SELECT 
+        person_id,
+        COUNT(DISTINCT movie_id) AS movie_count
+    FROM 
+        ActorHierarchy
+    GROUP BY 
+        person_id
+),
+TopActors AS (
+    SELECT 
+        a.person_id,
+        ak.name AS actor_name,
+        cm.movie_count,
+        ROW_NUMBER() OVER (ORDER BY cm.movie_count DESC) AS actor_rank
+    FROM 
+        CountMovies cm
+    JOIN 
+        aka_name ak ON cm.person_id = ak.person_id
+    WHERE 
+        ak.name IS NOT NULL
+)
+SELECT 
+    ta.actor_rank,
+    ta.actor_name,
+    ta.movie_count,
+    STRING_AGG(th.movie_title, ', ') AS movies
+FROM 
+    TopActors ta
+LEFT JOIN 
+    ActorHierarchy ah ON ta.person_id = ah.person_id
+LEFT JOIN 
+    aka_title th ON ah.movie_id = th.movie_id
+WHERE 
+    ta.movie_count > 0
+GROUP BY 
+    ta.actor_rank, ta.actor_name, ta.movie_count
+ORDER BY 
+    ta.actor_rank
+LIMIT 10;

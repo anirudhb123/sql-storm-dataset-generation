@@ -1,0 +1,102 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.OwnerDisplayName,
+        1 AS Level,
+        p.Title,
+        p.CreationDate
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.OwnerDisplayName,
+        rph.Level + 1 AS Level,
+        p.Title,
+        p.CreationDate
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+UserPostStats AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(p.Score) AS AvgScorePerUser
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+LatestComments AS (
+    
+    SELECT 
+        c.PostId,
+        c.Text,
+        c.CreationDate,
+        RANK() OVER (PARTITION BY c.PostId ORDER BY c.CreationDate DESC) AS Rank
+    FROM 
+        Comments c
+),
+PostWithLatestComments AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(lc.Text, 'No comments') AS LatestComment,
+        lc.CreationDate AS CommentDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LatestComments lc ON p.Id = lc.PostId AND lc.Rank = 1
+),
+ClosedPostHistory AS (
+    
+    SELECT 
+        ph.PostId,
+        ph.Comment,
+        ph.CreationDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        pht.Name = 'Post Closed'
+)
+
+SELECT 
+    up.DisplayName,
+    up.TotalPosts,
+    up.TotalQuestions,
+    up.TotalAnswers,
+    up.AvgScorePerUser,
+    p.Title AS PostTitle,
+    COALESCE(p.LatestComment, 'No comments available') AS LatestComment,
+    p.CommentDate AS LatestCommentDate,
+    c.Comment AS CloseReason,
+    c.CreationDate AS CloseDate
+FROM 
+    UserPostStats up
+LEFT JOIN 
+    PostWithLatestComments p ON up.UserId = p.PostId
+LEFT JOIN 
+    ClosedPostHistory c ON p.PostId = c.PostId
+WHERE 
+    up.TotalPosts > 0
+ORDER BY 
+    up.TotalPosts DESC, up.DisplayName ASC;

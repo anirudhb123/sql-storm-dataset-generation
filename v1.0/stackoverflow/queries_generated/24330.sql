@@ -1,0 +1,84 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        MAX(U.CreationDate) AS AccountCreationDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 0
+    GROUP BY 
+        U.Id
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        STRING_AGG(B.Name, ', ') AS BadgeNames,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+CloseReasons AS (
+    SELECT 
+        Ph.PostId,
+        STRING_AGG(CASE WHEN Ph.PostHistoryTypeId = 10 THEN CR.Name END, ', ') AS CloseReasons,
+        MIN(Ph.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory Ph
+    LEFT JOIN 
+        CloseReasonTypes CR ON Ph.Comment::int = CR.Id
+    WHERE 
+        Ph.PostHistoryTypeId = 10
+    GROUP BY 
+        Ph.PostId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.AccountCreationDate,
+    Us.UpVotes,
+    Us.DownVotes,
+    Us.PostsCount,
+    COALESCE(RP.Title, 'No recent posts') AS RecentPostTitle,
+    COALESCE(RP.CreationDate, 'None') AS RecentPostDate,
+    COALESCE(UB.BadgeNames, 'No badges') AS UserBadges,
+    CR.CloseReasons,
+    CR.FirstClosedDate
+FROM 
+    UserStats Us
+JOIN 
+    Users U ON Us.UserId = U.Id
+LEFT JOIN 
+    RecentPosts RP ON U.Id = RP.OwnerUserId AND RP.rn = 1
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN 
+    CloseReasons CR ON CR.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = U.Id)
+WHERE 
+    (Us.UpVotes - Us.DownVotes) > 10
+    OR (U.Reputation BETWEEN 100 AND 1000 AND Us.PostsCount > 5)
+ORDER BY 
+    U.Reputation DESC, 
+    CR.FirstClosedDate ASC NULLS LAST;
+This SQL query retrieves user statistics while engaging several advanced SQL constructs. It uses Common Table Expressions (CTEs) for modularity, handles NULL logic with COALESCE, aggregates user badges with STRING_AGG, and incorporates user performance metrics that involve correlated subqueries as well as outer joins for capturing complex relationships through the schema. The order of results leverages both user reputation and the timing of posts closed for further contextual analysis.

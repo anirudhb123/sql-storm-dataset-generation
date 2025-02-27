@@ -1,0 +1,38 @@
+WITH StringProcessing AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(ARRAY_AGG(DISTINCT SUBSTRING(tags.TagName FROM 1 FOR 20) ORDER BY tags.TagName), '{}') AS ProcessedTags
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Tags tags ON tags.TagName = ANY(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))
+    WHERE p.CreationDate > NOW() - INTERVAL '1 year' 
+    GROUP BY p.Id, p.Title, p.Body, u.DisplayName
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) 
+            THEN ph.CreationDate END) AS LastEditDate,
+        STRING_AGG(DISTINCT ph.Comment, ', ') AS EditComments
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT 
+    sp.PostId,
+    sp.Title,
+    sp.Author,
+    sp.CommentCount,
+    ph.LastEditDate,
+    ph.EditCount,
+    sp.ProcessedTags,
+    ph.EditComments
+FROM StringProcessing sp
+JOIN PostHistoryAnalysis ph ON sp.PostId = ph.PostId
+ORDER BY sp.CommentCount DESC, ph.EditCount DESC;

@@ -1,0 +1,57 @@
+
+WITH SalesData AS (
+    SELECT
+        w.w_warehouse_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM
+        web_sales ws
+    JOIN
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY
+        w.w_warehouse_sk
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+        SUM(sd.total_sales) AS total_sales
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN
+        SalesData sd ON c.c_current_addr_sk = sd.w_warehouse_sk
+    GROUP BY
+        cd.cd_gender
+),
+IncomeSummary AS (
+    SELECT
+        ib.ib_income_band_sk,
+        SUM(sd.total_sales) AS total_income_sales
+    FROM
+        SalesData sd
+    JOIN
+        customer c ON sd.w_warehouse_sk = c.c_current_addr_sk
+    LEFT JOIN
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY
+        ib.ib_income_band_sk
+)
+SELECT
+    cd.cd_gender,
+    cd.total_customers,
+    cd.total_sales,
+    is.total_income_sales
+FROM
+    CustomerDemographics cd
+LEFT JOIN
+    IncomeSummary is ON cd.total_sales = is.total_income_sales
+ORDER BY
+    cd.total_sales DESC;

@@ -1,0 +1,72 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        'N/A' AS referrer
+    FROM 
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F'
+    
+    UNION ALL
+
+    SELECT 
+        r.c_customer_sk,
+        r.c_first_name,
+        r.c_last_name,
+        r.cd_demo_sk,
+        r.cd_gender,
+        r.cd_marital_status,
+        r.cd_purchase_estimate,
+        ch.c_last_name AS referrer
+    FROM 
+        customer r
+    JOIN customer_hierarchy ch ON r.c_current_cdemo_sk = ch.cd_demo_sk
+    WHERE 
+        ch.cd_purchase_estimate > 1000
+),
+total_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales_amount
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+cumulative_sales AS (
+    SELECT 
+        customer_hierarchy.c_customer_sk,
+        customer_hierarchy.c_first_name,
+        customer_hierarchy.c_last_name,
+        COALESCE(ts.total_sales_amount, 0) AS total_sales_amount,
+        SUM(COALESCE(ts.total_sales_amount, 0)) OVER (ORDER BY customer_hierarchy.c_customer_sk) AS cumulative_sales
+    FROM 
+        customer_hierarchy
+    LEFT JOIN total_sales ts ON customer_hierarchy.c_customer_sk = ts.ws_bill_customer_sk
+)
+SELECT 
+    ch.c_first_name,
+    ch.c_last_name,
+    ch.total_sales_amount,
+    ch.cumulative_sales,
+    CASE 
+        WHEN ch.total_sales_amount > 500 THEN 'High Value'
+        WHEN ch.total_sales_amount BETWEEN 100 AND 500 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value,
+    ROW_NUMBER() OVER (PARTITION BY ch.c_first_name, ch.c_last_name ORDER BY ch.cumulative_sales DESC) AS rn
+FROM 
+    cumulative_sales ch
+WHERE 
+    ch.total_sales_amount IS NOT NULL
+ORDER BY 
+    ch.cumulative_sales DESC
+FETCH FIRST 10 ROWS ONLY;

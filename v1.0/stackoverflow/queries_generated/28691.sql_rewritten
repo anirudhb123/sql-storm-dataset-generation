@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+), FilteredPosts AS (
+    SELECT *
+    FROM RankedPosts
+    WHERE TagRank <= 3 
+), TagStats AS (
+    SELECT 
+        unnest(string_to_array(Tags, ',')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        FilteredPosts
+    GROUP BY 
+        TagName
+), FinalResults AS (
+    SELECT 
+        SubPosts.PostId,
+        SubPosts.Title,
+        SubPosts.Author,
+        SubPosts.CommentCount,
+        ts.TagName,
+        ts.PostCount
+    FROM 
+        FilteredPosts SubPosts
+    JOIN 
+        TagStats ts ON SubPosts.Tags LIKE '%' || ts.TagName || '%'
+)
+
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.Author,
+    fr.CommentCount,
+    fr.TagName,
+    fr.PostCount
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.PostCount DESC, 
+    fr.CommentCount DESC
+LIMIT 50;

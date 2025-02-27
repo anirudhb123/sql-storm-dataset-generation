@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS Level 
+    FROM supplier s 
+    WHERE s.s_acctbal > 1000
+    UNION ALL 
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.Level + 1 
+    FROM supplier s 
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey 
+    WHERE s.s_acctbal > sh.s_acctbal
+), 
+CustomerStats AS (
+    SELECT c.c_custkey, c.c_name, 
+           COUNT(DISTINCT o.o_orderkey) AS OrderCount, 
+           SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c 
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey 
+    WHERE c.c_acctbal IS NOT NULL 
+    GROUP BY c.c_custkey, c.c_name
+),
+FilteredParts AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_availqty) AS TotalAvailable, 
+           AVG(p.p_retailprice) AS AveragePrice
+    FROM part p 
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey 
+    GROUP BY p.p_partkey, p.p_name 
+    HAVING SUM(ps.ps_availqty) > 50
+)
+SELECT c.c_name AS Customer, 
+       f.p_name AS Part, 
+       f.TotalAvailable AS AvailableQuantity, 
+       f.AveragePrice AS AvgPrice, 
+       s.s_name AS Supplier, 
+       cs.OrderCount, 
+       cs.TotalSpent
+FROM CustomerStats cs
+INNER JOIN FilteredParts f ON cs.OrderCount > 0 
+LEFT JOIN lineitem li ON li.l_orderkey IN (SELECT o.o_orderkey 
+                                            FROM orders o 
+                                            WHERE o.o_custkey = cs.c_custkey)
+LEFT JOIN supplier s ON s.s_suppkey = li.l_suppkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey 
+WHERE cs.TotalSpent IS NOT NULL 
+ORDER BY cs.TotalSpent DESC, f.AveragePrice ASC;

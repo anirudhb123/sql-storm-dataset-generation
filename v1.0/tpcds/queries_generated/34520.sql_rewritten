@@ -1,0 +1,66 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_ship_mode_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk BETWEEN 2451412 AND 2451418 
+    GROUP BY 
+        ws_sold_date_sk, ws_ship_mode_sk
+    
+    UNION ALL
+    
+    SELECT 
+        sc.ws_sold_date_sk,
+        sc.ws_ship_mode_sk,
+        SUM(sc.ws_quantity) + s.total_quantity,
+        SUM(sc.ws_net_paid) + s.total_sales
+    FROM 
+        web_sales sc
+    JOIN 
+        SalesCTE s ON sc.ws_sold_date_sk = s.ws_sold_date_sk + 1
+    WHERE 
+        sc.ws_ship_mode_sk IS NOT NULL
+    GROUP BY 
+        sc.ws_sold_date_sk, sc.ws_ship_mode_sk
+),
+SalesSummary AS (
+    SELECT 
+        sm.sm_ship_mode_id,
+        sm.sm_carrier,
+        SUM(s.total_quantity) AS total_quantity,
+        SUM(s.total_sales) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        SalesCTE s
+    JOIN 
+        ship_mode sm ON s.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY 
+        sm.sm_ship_mode_id, sm.sm_carrier
+),
+TopSales AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY sm_carrier ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        SalesSummary
+)
+SELECT 
+    ts.sm_ship_mode_id,
+    ts.sm_carrier,
+    ts.total_quantity,
+    ts.total_sales,
+    CASE 
+        WHEN ts.total_sales IS NULL THEN 'No Sales'
+        WHEN ts.total_sales > 10000 THEN 'High Sales'
+        ELSE 'Moderate Sales' 
+    END AS sales_category
+FROM 
+    TopSales ts
+WHERE 
+    ts.sales_rank <= 3
+ORDER BY 
+    ts.sm_carrier, ts.total_sales DESC;

@@ -1,0 +1,50 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           cd.cd_marital_status, cd.cd_gender, cd.cd_purchase_estimate,
+           0 AS lvl
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender = 'F'
+      AND cd.cd_purchase_estimate > 1000
+
+    UNION ALL
+    
+    SELECT ch.c_customer_sk, ch.c_first_name, ch.c_last_name, 
+           ch.cd_marital_status, ch.cd_gender, ch.cd_purchase_estimate,
+           ch.lvl + 1
+    FROM customer_hierarchy ch
+    JOIN customer c ON ch.c_customer_sk = c.c_current_cdemo_sk
+)
+, sales_data AS (
+    SELECT 
+        ws.ws_order_number, 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    JOIN customer_hierarchy ch ON ws.ws_bill_customer_sk = ch.c_customer_sk
+    GROUP BY ws.ws_order_number, ws.ws_item_sk
+)
+, date_range AS (
+    SELECT d.d_date_sk, d.d_date
+    FROM date_dim d
+    WHERE d.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+)
+SELECT 
+    ch.c_first_name, 
+    ch.c_last_name,
+    ch.cd_marital_status,
+    SUM(sd.total_sales) AS total_sales_qty,
+    SUM(sd.total_profit) AS total_profit_amt,
+    COUNT(dr.d_date_sk) AS active_days
+FROM customer_hierarchy ch
+LEFT JOIN sales_data sd ON ch.c_customer_sk = sd.ws_bill_customer_sk
+LEFT JOIN date_range dr ON dr.d_date_sk = sd.ws_order_number
+GROUP BY 
+    ch.c_first_name, 
+    ch.c_last_name,
+    ch.cd_marital_status
+HAVING SUM(sd.total_sales) > 100
+ORDER BY total_profit_amt DESC
+LIMIT 10;

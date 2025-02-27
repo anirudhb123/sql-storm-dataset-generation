@@ -1,0 +1,69 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        SupplierSales s
+),
+LowStockParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_availqty) < 50
+)
+SELECT 
+    ts.s_suppkey,
+    ts.s_name,
+    l.p_name,
+    l.l_quantity,
+    l.l_discount,
+    COALESCE(r.r_name, 'Unknown') AS region_name,
+    COALESCE(n.n_name, 'Unknown') AS nation_name,
+    CASE 
+        WHEN ts.sales_rank <= 5 THEN 'Top Supplier'
+        ELSE 'Other'
+    END AS supplier_category
+FROM 
+    TopSuppliers ts
+LEFT JOIN 
+    lineitem l ON l.l_suppkey = ts.s_suppkey
+LEFT JOIN 
+    supplier s ON s.s_suppkey = ts.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate >= DATE '2023-01-01' 
+    AND l.l_shipdate <= DATE '2023-12-31'
+    AND l.l_returnflag = 'N'
+    AND l.l_quantity > (
+        SELECT AVG(l2.l_quantity) 
+        FROM lineitem l2 
+        WHERE l2.l_suppkey = l.l_suppkey
+    )
+ORDER BY 
+    ts.total_sales DESC, ts.s_name;

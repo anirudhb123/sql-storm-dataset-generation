@@ -1,0 +1,87 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(V.BountyAmount) AS TotalBountyAmount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.Reputation, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserActivity
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    WHERE P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days' 
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        P.Title AS ClosedPostTitle,
+        H.HistoryType AS CloseReason
+    FROM PostHistory PH
+    JOIN PostHistoryTypes H ON PH.PostHistoryTypeId = H.Id
+    JOIN Posts P ON PH.PostId = P.Id
+    WHERE H.Name LIKE '%closed%'
+),
+
+CombinedData AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(RP.Title, 'No recent posts') AS RecentPostTitle,
+        COALESCE(RP.CreationDate, cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 hour') AS RecentPostDate,
+        COALESCE(CP.ClosedPostTitle, 'No closed posts') AS ClosedPostTitle,
+        COALESCE(CP.CreationDate, cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 hour') AS ClosedPostDate,
+        COALESCE(CP.CloseReason, 'No close reason') AS CloseReason,
+        U.TotalBountyAmount,
+        U.PostCount,
+        U.CommentCount,
+        U.ReputationRank
+    FROM TopUsers U
+    LEFT JOIN RecentPosts RP ON U.UserId = RP.OwnerUserId AND RP.PostRank = 1
+    LEFT JOIN ClosedPosts CP ON U.UserId = CP.PostId
+)
+
+SELECT
+    CD.UserId,
+    CD.DisplayName,
+    CD.Reputation,
+    CD.RecentPostTitle,
+    CD.RecentPostDate,
+    CD.ClosedPostTitle,
+    CD.ClosedPostDate,
+    CD.CloseReason,
+    CD.TotalBountyAmount,
+    CD.PostCount,
+    CD.CommentCount,
+    CASE 
+        WHEN CD.Reputation >= 1000 THEN 'High Reputation'
+        WHEN CD.Reputation >= 500 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationCategory,
+    CASE 
+        WHEN CD.ClosedPostTitle IS NOT NULL THEN 'Has recent closures'
+        ELSE 'No recent closures'
+    END AS ClosureStatus
+FROM CombinedData CD
+WHERE CD.ReputationRank <= 10
+ORDER BY CD.Reputation DESC, CD.UserId ASC;

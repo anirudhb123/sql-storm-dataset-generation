@@ -1,0 +1,33 @@
+SELECT 
+    p.p_name,
+    s.s_name,
+    STRING_AGG(DISTINCT CONCAT('Region: ', r.r_name, ', Nation: ', n.n_name, ', Address: ', s.s_address), '; ') AS supplier_info,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(l.l_extendedprice) AS avg_extended_price,
+    MAX(o.o_totalprice) AS max_order_price,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUBSTRING(p.p_comment, 1, 20) AS short_comment
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    p.p_size BETWEEN 10 AND 20
+AND 
+    o.o_orderdate >= DATE '2022-01-01'
+AND 
+    l.l_returnflag = 'N'
+GROUP BY 
+    p.p_name, s.s_name
+ORDER BY 
+    total_quantity DESC, avg_extended_price DESC;

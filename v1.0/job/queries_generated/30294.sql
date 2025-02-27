@@ -1,0 +1,79 @@
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+    
+    UNION ALL
+
+    SELECT 
+        tm.movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title t ON t.id = ml.linked_movie_id
+    JOIN 
+        RecursiveMovieCTE tm ON tm.movie_id = ml.movie_id
+    WHERE 
+        level < 5  -- Limiting to a depth of 5 to prevent performance issues
+),
+ActorMovieCounts AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movies
+    FROM 
+        cast_info c
+    JOIN 
+        title t ON c.movie_id = t.id
+    GROUP BY 
+        c.person_id
+),
+CompanyMovieCounts AS (
+    SELECT 
+        mc.company_id,
+        COUNT(DISTINCT m.movie_id) AS total_movies,
+        SUM(CASE WHEN m.production_year >= 2000 THEN 1 ELSE 0 END) AS recent_movies
+    FROM 
+        movie_companies mc
+    JOIN 
+        complete_cast m ON mc.movie_id = m.movie_id
+    GROUP BY 
+        mc.company_id
+)
+SELECT 
+    a.person_id,
+    a.movie_count,
+    a.movies,
+    cm.total_movies,
+    cm.recent_movies,
+    k.keyword,
+    ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY a.movie_count DESC) AS ranking,
+    COALESCE(k.keyword, 'No Keyword') AS keyword_used
+FROM 
+    ActorMovieCounts a
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id IN (SELECT DISTINCT tm.movie_id FROM RecursiveMovieCTE tm WHERE tm.level <= 1)
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+JOIN 
+    CompanyMovieCounts cm ON cm.company_id IN (
+        SELECT mc.company_id 
+        FROM movie_companies mc 
+        JOIN complete_cast mc1 ON mc1.movie_id = mc.movie_id 
+        WHERE mc1.subject_id = a.person_id
+    )
+WHERE 
+    a.movie_count > 3
+ORDER BY 
+    a.movie_count DESC, cm.recent_movies DESC;

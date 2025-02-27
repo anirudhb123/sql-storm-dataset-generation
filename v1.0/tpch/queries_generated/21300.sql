@@ -1,0 +1,54 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT sh.s_suppkey, sh.s_name, sh.s_acctbal, sh.level + 1
+    FROM SupplierHierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    WHERE sh.level < 5
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, l.l_quantity, l.l_extendedprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber DESC) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01'
+),
+RegionSummary AS (
+    SELECT r.r_regionkey, r.r_name,
+           COUNT(DISTINCT n.n_nationkey) AS nation_count,
+           SUM(CASE WHEN cs.cust_total > 1000 THEN 1 ELSE 0 END) AS high_value_customers
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN (
+        SELECT c.c_nationkey, SUM(o.o_totalprice) AS cust_total
+        FROM customer c
+        JOIN orders o ON c.c_custkey = o.o_custkey
+        GROUP BY c.c_nationkey
+    ) cs ON n.n_nationkey = cs.c_nationkey
+    GROUP BY r.r_regionkey, r.r_name
+)
+SELECT r.r_name,
+       s.s_name,
+       CASE 
+           WHEN SUM(od.l_extendedprice) IS NULL THEN 'No Sales'
+           ELSE 'Total Sales: ' || CAST(SUM(od.l_extendedprice) AS VARCHAR)
+       END AS sales_summary,
+       COUNT(DISTINCT sys.s_suppkey) AS active_suppliers,
+       COUNT(DISTINCT od.o_orderkey) AS total_orders,
+       COALESCE(MAX(rn), 0) AS max_line_item_rank
+FROM RegionSummary r
+JOIN SupplierHierarchy s ON r.nation_count > 2
+LEFT JOIN OrderDetails od ON s.s_suppkey = od.o_orderkey
+RIGHT JOIN (
+    SELECT DISTINCT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_availqty IS NOT NULL
+    ORDER BY ps.ps_partkey
+) ps ON od.l_orderkey = ps.ps_partkey
+WHERE r.nation_count > 1
+GROUP BY r.r_name, s.s_name
+HAVING COUNT(DISTINCT r.r_regionkey) > 0
+ORDER BY active_suppliers DESC, r.r_name ASC, sales_summary DESC
+LIMIT 100 OFFSET 10;

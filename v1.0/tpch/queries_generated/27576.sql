@@ -1,0 +1,30 @@
+SELECT 
+    CONCAT(s.s_name, ' - ', p.p_name) AS supplier_part,
+    SUBSTRING_INDEX(s.s_address, ',', 1) AS supplier_city,
+    COUNT(DISTINCT ps.ps_supplycost) AS unique_supply_costs,
+    MAX(CASE WHEN p.p_type LIKE '%plastic%' THEN p.p_retailprice ELSE NULL END) AS max_plastic_retailprice,
+    AVG(CASE WHEN c.c_mktsegment = 'BUILDING' THEN o.o_totalprice ELSE NULL END) AS avg_building_order_price,
+    GROUP_CONCAT(DISTINCT CONCAT(c.c_name, ' (', c.c_phone, ')') ORDER BY c.c_name SEPARATOR '; ') AS customers_info,
+    SUM(CASE WHEN l.l_discount > 0 THEN l.l_quantity ELSE 0 END) AS total_discounted_quantity,
+    DATE_FORMAT(o.o_orderdate, '%Y-%m') AS order_month
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN 
+    orders o ON o.o_orderkey = l.l_orderkey
+JOIN 
+    customer c ON c.c_custkey = o.o_custkey
+WHERE 
+    s.s_comment LIKE '%on%' 
+    AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    order_month, supplier_part, supplier_city
+HAVING 
+    unique_supply_costs > 2 
+ORDER BY 
+    order_month DESC, max_plastic_retailprice DESC;

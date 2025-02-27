@@ -1,0 +1,69 @@
+
+WITH part_supplier_stats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT s.s_suppkey) AS unique_suppliers
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+customer_order_totals AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1996-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+final_report AS (
+    SELECT 
+        ps.p_partkey,
+        ps.p_name,
+        ps.total_available_quantity,
+        ps.avg_supply_cost,
+        ps.unique_suppliers,
+        c.total_order_value,
+        c.total_orders
+    FROM 
+        part_supplier_stats ps
+    LEFT JOIN 
+        customer_order_totals c ON ps.p_partkey = (
+            SELECT ps_partkey 
+            FROM partsupp 
+            WHERE ps_suppkey IN (
+                SELECT s_suppkey 
+                FROM supplier 
+                WHERE s_nationkey = c.c_nationkey
+            )
+            LIMIT 1
+        )
+)
+SELECT 
+    fr.p_partkey,
+    fr.p_name,
+    fr.total_available_quantity,
+    fr.avg_supply_cost,
+    fr.unique_suppliers,
+    COALESCE(fr.total_order_value, 0) AS total_order_value,
+    COALESCE(fr.total_orders, 0) AS total_orders
+FROM 
+    final_report fr
+ORDER BY 
+    fr.total_available_quantity DESC,
+    fr.total_order_value DESC
+FETCH FIRST 100 ROWS ONLY;

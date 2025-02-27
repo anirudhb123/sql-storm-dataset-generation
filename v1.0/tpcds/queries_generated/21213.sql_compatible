@@ -1,0 +1,66 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_customer_sk,
+        sr_returned_date_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        ROW_NUMBER() OVER (PARTITION BY sr_customer_sk ORDER BY SUM(sr_return_quantity) DESC) AS rn
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk, sr_returned_date_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        CASE 
+            WHEN cd_purchase_estimate IS NULL THEN 'Unknown'
+            ELSE 
+                CASE 
+                    WHEN cd_purchase_estimate < 5000 THEN 'Low'
+                    WHEN cd_purchase_estimate BETWEEN 5000 AND 15000 THEN 'Medium'
+                    ELSE 'High'
+                END
+        END AS purchase_category
+    FROM 
+        customer_demographics
+),
+MaxReturn AS (
+    SELECT 
+        sr_customer_sk,
+        MAX(total_returned) AS max_return
+    FROM 
+        RankedReturns
+    WHERE 
+        rn = 1
+    GROUP BY 
+        sr_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    cd.cd_gender,
+    cd.purchase_category,
+    COALESCE(m.max_return, 0) AS max_return_amount,
+    SUM(wf.ws_net_paid) AS total_sales,
+    COUNT(DISTINCT wf.ws_order_number) AS unique_orders
+FROM 
+    customer AS c
+LEFT JOIN 
+    CustomerDemographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    web_sales AS wf ON c.c_customer_sk = wf.ws_bill_customer_sk
+LEFT JOIN 
+    MaxReturn AS m ON c.c_customer_sk = m.sr_customer_sk
+WHERE 
+    cd.cd_gender IN ('M', 'F')
+    AND (cd.cd_marital_status = 'S' OR cd.cd_marital_status IS NULL)
+GROUP BY 
+    c.c_customer_id, cd.cd_gender, cd.purchase_category, m.max_return
+HAVING 
+    total_sales > (SELECT AVG(ws_net_paid) FROM web_sales) 
+    OR max_return_amount > 5
+ORDER BY 
+    total_sales DESC;

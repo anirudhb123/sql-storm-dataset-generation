@@ -1,0 +1,59 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COALESCE(SUM(CASE WHEN pl.RelatedPostId IS NOT NULL THEN 1 ELSE 0 END), 0) AS TotalLinks,
+        AVG(TIMESTAMPDIFF(SECOND, p.CreationDate, COALESCE(p.ClosedDate, '2024-10-01 12:34:56'))) AS AvgTimeToClose
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopContributors AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        TotalPosts, 
+        TotalQuestions, 
+        TotalAnswers, 
+        Upvotes, 
+        Downvotes, 
+        TotalLinks, 
+        AvgTimeToClose,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS PostRank
+    FROM 
+        UserPostStats
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalQuestions,
+    TotalAnswers,
+    Upvotes,
+    Downvotes,
+    TotalLinks,
+    ROUND(AvgTimeToClose / 3600, 2) AS AvgTimeToCloseInHours,
+    CASE 
+        WHEN TotalPosts > 50 THEN 'Expert'
+        WHEN TotalPosts BETWEEN 20 AND 50 THEN 'Enthusiast'
+        ELSE 'Novice'
+    END AS UserLevel
+FROM 
+    TopContributors
+WHERE 
+    PostRank <= 10
+ORDER BY 
+    Upvotes DESC;

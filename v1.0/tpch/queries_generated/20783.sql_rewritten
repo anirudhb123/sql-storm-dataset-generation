@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM supplier s 
+    WHERE s.s_acctbal IS NOT NULL
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_mktsegment,
+           CASE WHEN LENGTH(c.c_comment) > 50 THEN 'Long Comment' ELSE 'Short Comment' END as comment_type
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+PartSupplierStats AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * l.l_quantity) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS distinct_suppliers,
+           STRING_AGG(DISTINCT s.s_name, '; ') AS supplier_names
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           DENSE_RANK() OVER (ORDER BY o.o_orderdate DESC) AS recent_rank
+    FROM orders o
+    WHERE o.o_orderdate > DATEADD(month, -6, cast('1998-10-01' as date))
+)
+SELECT DISTINCT p.p_name, 
+       COALESCE(SUM(hc.c_acctbal), 0) as total_high_value_cust_bal,
+       COALESCE(MAX(s.s_acctbal), 0) as max_supplier_acctbal,
+       ps.total_supply_cost,
+       ps.distinct_suppliers,
+       CASE 
+           WHEN ps.total_supply_cost IS NULL THEN 'No Data' 
+           WHEN ps.total_supply_cost > 10000 THEN 'High Cost' 
+           ELSE 'Moderate Cost' 
+       END AS cost_category,
+       rd.r_name
+FROM part p
+LEFT JOIN PartSupplierStats ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN HighValueCustomers hc ON hc.c_custkey = (SELECT MAX(c_custkey) FROM HighValueCustomers)
+LEFT JOIN region rd ON rd.r_regionkey = (SELECT DISTINCT n.n_regionkey FROM nation n WHERE n.n_nationkey IN (SELECT DISTINCT c.c_nationkey FROM customer c))
+LEFT JOIN SupplierDetails s ON s.s_suppkey = (SELECT MAX(sd.s_suppkey) FROM SupplierDetails sd WHERE sd.rank <= 5)
+GROUP BY p.p_name, rd.r_name
+HAVING COUNT(DISTINCT ps.distinct_suppliers) > 2 OR MAX(s.s_acctbal) < 5000
+ORDER BY p.p_name, cost_category DESC;

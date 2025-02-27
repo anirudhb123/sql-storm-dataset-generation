@@ -1,0 +1,83 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+), 
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.o_orderstatus
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.order_rank <= 10
+), 
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+), 
+CustomerSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+SalesWithRank AS (
+    SELECT 
+        cs.c_custkey,
+        cs.c_name,
+        cs.total_sales,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+) 
+SELECT 
+    r.r_name,
+    s.s_name,
+    COUNT(DISTINCT to.o_orderkey) AS orders_count,
+    SUM(sp.total_supply_cost) AS total_supply_cost,
+    SUM(cs.total_sales) AS total_sales,
+    MAX(cs.sales_rank) AS highest_rank
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierParts sp ON s.s_suppkey = sp.ps_suppkey
+LEFT JOIN 
+    TopOrders to ON to.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = sp.ps_partkey)
+LEFT JOIN 
+    SalesWithRank cs ON s.s_suppkey = cs.c_custkey
+WHERE 
+    sp.ps_availqty > 0
+GROUP BY 
+    r.r_name, s.s_name
+ORDER BY 
+    total_sales DESC, total_supply_cost DESC;

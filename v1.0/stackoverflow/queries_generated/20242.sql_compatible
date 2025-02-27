@@ -1,0 +1,73 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        COALESCE(U.DisplayName, 'Deleted User') AS OwnerDisplayName,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT P2.Id) AS RelatedPosts,
+        MAX(P.HistoryTypeId) AS MaxHistoryTypeId,
+        SUM(P.ViewCount) AS TotalViews
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostLinks PL ON P.Id = PL.PostId
+    LEFT JOIN Posts P2 ON PL.RelatedPostId = P2.Id
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    GROUP BY P.Id, P.Title, P.OwnerUserId, U.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS HistoryCount,
+        STRING_AGG(PH.Comment, ', ') AS HistoryComments
+    FROM PostHistory PH
+    WHERE PH.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY PH.PostId
+),
+AggregatedStats AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.OwnerDisplayName,
+        PS.CommentCount,
+        PS.TotalViews,
+        COALESCE(PHD.HistoryCount, 0) AS HistoryCount,
+        COALESCE(PHD.HistoryComments, 'No history records') AS HistoryComments,
+        U.TotalVotes,
+        U.UpVotes,
+        U.DownVotes
+    FROM PostStatistics PS
+    JOIN UserVoteStats U ON PS.OwnerUserId = U.UserId
+    LEFT JOIN PostHistoryDetails PHD ON PS.PostId = PHD.PostId
+)
+SELECT 
+    A.PostId,
+    A.Title,
+    A.OwnerDisplayName,
+    A.CommentCount,
+    A.TotalViews,
+    A.HistoryCount,
+    A.HistoryComments,
+    A.TotalVotes,
+    A.UpVotes,
+    A.DownVotes,
+    (CASE 
+        WHEN A.DownVotes IS NULL THEN 'No Down Votes' 
+        ELSE (A.DownVotes || ' downvotes') 
+    END) AS DownVoteComment,
+    (SELECT COUNT(*) FROM Tags T WHERE T.WikiPostId = A.PostId) AS RelatedTagCount
+FROM AggregatedStats A
+ORDER BY A.TotalViews DESC 
+LIMIT 10 OFFSET 5;

@@ -1,0 +1,115 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(CASE WHEN p.UpVotes > p.DownVotes THEN 1 ELSE 0 END) AS PositiveScorePosts,
+        AVG(EXTRACT(EPOCH FROM (p.LastActivityDate - p.CreationDate)) / 3600) AS AvgPostLifetimeHrs
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.LastAccessDate
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM 
+        UserStatistics
+),
+UserWithBadges AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.UserRank,
+        COUNT(b.Id) AS BadgesCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        TopUsers u
+    LEFT JOIN 
+        Badges b ON u.UserId = b.UserId
+    GROUP BY 
+        u.UserId, u.DisplayName, u.Reputation, u.UserRank
+),
+PostsWithVotes AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.OwnerUserId
+),
+DetailedPosts AS (
+    SELECT 
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        uv.UserRank,
+        uv.BadgesCount,
+        pv.VoteCount,
+        pv.UpVoteCount,
+        pv.DownVoteCount,
+        CASE 
+            WHEN pv.UpVoteCount > pv.DownVoteCount THEN 'Positive'
+            WHEN pv.UpVoteCount < pv.DownVoteCount THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteSentiment
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostsWithVotes pv ON p.Id = pv.PostId
+    LEFT JOIN 
+        UserWithBadges uv ON uv.UserId = p.OwnerUserId
+    WHERE 
+        p.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 month')
+),
+FinalReport AS (
+    SELECT 
+        dp.Title,
+        dp.Body,
+        dp.CreationDate,
+        dp.UserRank,
+        dp.BadgesCount,
+        dp.VoteCount,
+        dp.UpVoteCount,
+        dp.DownVoteCount,
+        dp.VoteSentiment
+    FROM 
+        DetailedPosts dp
+    WHERE 
+        dp.BadgesCount > 0
+    ORDER BY 
+        dp.VoteCount DESC
+)
+SELECT 
+    *,
+    CASE 
+        WHEN VoteSentiment = 'Positive' AND BadgesCount > 2 THEN 'Highly Recommended'
+        WHEN VoteSentiment = 'Neutral' AND UserRank < 10 THEN 'Moderate Attention'
+        ELSE 'Needs More Engagement'
+    END AS EngagementRecommendation
+FROM 
+    FinalReport
+WHERE 
+    VoteCount IS NOT NULL
+ORDER BY 
+    CreationDate DESC;

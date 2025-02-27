@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        mt.production_year,
+        NULL::integer AS parent_id,
+        0 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.season_nr IS NULL
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id, 
+        e.title AS movie_title, 
+        e.production_year,
+        m.movie_id AS parent_id,
+        m.depth + 1 AS depth
+    FROM 
+        aka_title e
+    JOIN 
+        movie_link ml ON e.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy m ON ml.movie_id = m.movie_id
+)
+
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT c.person_id) AS cast_count,
+    ARRAY_AGG(DISTINCT ak.name) FILTER (WHERE ak.name IS NOT NULL) AS aka_names,
+    MAX(ci.nr_order) AS max_order,
+    AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_order,
+    SUM(CASE WHEN c.role_id IS NULL THEN 1 ELSE 0 END) AS unnamed_cast_count,
+    STRING_AGG(DISTINCT ci.note, ', ') AS notes
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+WHERE 
+    mh.depth < 3
+GROUP BY 
+    mh.movie_title, mh.production_year
+ORDER BY 
+    mh.production_year DESC, cast_count DESC
+LIMIT 100;
+
+-- Performance Benchmarking SQL query demonstrating multiple constructs such as:
+-- CTEs for hierarchical queries, aggregation functions, outer joins, string manipulation 
+-- and filtering conditions while handling NULLs effectively.

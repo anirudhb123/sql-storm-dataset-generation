@@ -1,0 +1,35 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal <= 10000
+),
+AggregatedSales AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    p.p_name,
+    COUNT(DISTINCT l.l_orderkey) AS order_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(l.l_tax) AS average_tax,
+    MAX(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice ELSE NULL END) AS max_returned_price,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice) DESC) AS rank
+FROM lineitem l
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN AggregatedSales ag ON c.c_custkey = o.o_custkey
+WHERE l.l_shipdate >= '2022-01-01' 
+AND l.l_shipdate < '2023-01-01'
+AND (l.l_discount BETWEEN 0.05 AND 0.1 OR l.l_returnflag IS NULL)
+GROUP BY n.n_name, p.p_name
+HAVING COUNT(DISTINCT l.l_orderkey) > 5
+ORDER BY nation_name, total_revenue DESC;

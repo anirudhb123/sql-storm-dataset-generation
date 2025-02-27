@@ -1,0 +1,97 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        MAX(ph.UserDisplayName) AS ClosedBy,
+        STRING_AGG(DISTINCT ctr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes ctr ON ph.Comment::int = ctr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        T.TagName,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY T.Count DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Tags T ON POSITION(T.TagName IN p.Tags) > 0
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        COUNT(DISTINCT c.Id) AS CommentsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+FinalPostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        COALESCE(cp.ClosedBy, 'Not Closed') AS ClosedBy,
+        COALESCE(cp.ClosedDate, 'N/A') AS ClosedDate,
+        COALESCE(cp.CloseReasons, 'No Close Reasons') AS CloseReasons,
+        STRING_AGG(DISTINCT pt.TagName, ', ') AS Tags,
+        ua.UpVotesCount,
+        ua.DownVotesCount,
+        ua.CommentsCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    LEFT JOIN 
+        PostTags pt ON rp.PostId = pt.PostId AND pt.TagRank <= 3
+    LEFT JOIN 
+        UserActivity ua ON rp.PostId IN (SELECT AnswerId FROM Posts WHERE ParentId = rp.PostId) 
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score, rp.CreationDate, cp.ClosedBy, cp.ClosedDate, cp.CloseReasons, ua.UpVotesCount, ua.DownVotesCount, ua.CommentsCount
+)
+SELECT 
+    PostId,
+    Title,
+    Score,
+    CreationDate,
+    ClosedBy,
+    ClosedDate,
+    CloseReasons,
+    Tags,
+    UpVotesCount,
+    DownVotesCount,
+    CommentsCount
+FROM 
+    FinalPostStats
+WHERE 
+    Score > 10 
+ORDER BY 
+    Score DESC, CreationDate ASC;

@@ -1,0 +1,63 @@
+-- Performance Benchmarking Query
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY 
+        p.Id, p.PostTypeId, p.CreationDate, p.LastActivityDate, p.ViewCount, p.Score, v.UpVotes, v.DownVotes
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+SELECT 
+    ps.PostId,
+    ps.PostTypeId,
+    ps.CreationDate,
+    ps.LastActivityDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    us.UserId,
+    us.Reputation AS UserReputation,
+    us.BadgeCount AS UserBadgeCount,
+    us.PostCount AS UserPostCount,
+    us.TotalViews AS UserTotalViews
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.OwnerUserId = u.Id
+JOIN 
+    UserStats us ON u.Id = us.UserId
+ORDER BY 
+    ps.LastActivityDate DESC;

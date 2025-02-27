@@ -1,0 +1,121 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        Score,
+        OwnerUserId,
+        1 as Depth
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        r.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(b.BadgeNames, 'None') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    ORDER BY 
+        u.Reputation DESC
+    LIMIT 5
+),
+PopularPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= current_date - interval '1 month'
+),
+AggregatedPostData AS (
+    SELECT 
+        r.Id,
+        r.Title,
+        r.CreationDate,
+        r.Score,
+        u.Id AS OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        r.Depth,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        CASE 
+            WHEN v.UpVotes > v.DownVotes THEN 'Positive'
+            WHEN v.UpVotes < v.DownVotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteSentiment
+    FROM 
+        RecursivePostHierarchy r
+    JOIN 
+        Users u ON r.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+            COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON r.Id = v.PostId
+)
+SELECT 
+    a.Id,
+    a.Title,
+    a.CreationDate,
+    a.Score,
+    a.OwnerDisplayName,
+    a.Depth,
+    a.UpVotes,
+    a.DownVotes,
+    a.VoteSentiment,
+    u.Reputation,
+    u.BadgeCount,
+    u.BadgeNames
+FROM 
+    AggregatedPostData a
+JOIN 
+    TopUsers u ON a.OwnerUserId = u.Id
+WHERE 
+    a.Score > 0 OR 
+    a.Score IS NULL -- Filtering out posts with non-positive scores but allowing NULL
+ORDER BY 
+    a.Depth, a.Score DESC;

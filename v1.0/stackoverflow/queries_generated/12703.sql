@@ -1,0 +1,16 @@
+-- Performance Benchmarking Query
+-- Calculate average view count, average score, and total number of posts for each post type
+
+SELECT 
+    pt.Name AS PostType,
+    COUNT(p.Id) AS TotalPosts,
+    AVG(p.ViewCount) AS AverageViewCount,
+    AVG(p.Score) AS AverageScore
+FROM 
+    Posts p
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+GROUP BY 
+    pt.Name
+ORDER BY 
+    TotalPosts DESC;

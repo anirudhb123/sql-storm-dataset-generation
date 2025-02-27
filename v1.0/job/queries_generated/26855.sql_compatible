@@ -1,0 +1,50 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        ARRAY_AGG(DISTINCT a.name) AS actors_list,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+TopActors AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT c.movie_id) AS movies_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.person_id
+    HAVING 
+        COUNT(DISTINCT c.movie_id) >= 5
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    m.total_cast,
+    m.actors_list,
+    ta.movies_count AS actor_movies_count,
+    m.rank
+FROM 
+    RankedMovies m
+LEFT JOIN 
+    TopActors ta ON POSITION(CAST(ta.person_id AS TEXT) IN m.actors_list::TEXT) > 0
+WHERE 
+    m.rank <= 10
+ORDER BY 
+    m.production_year DESC, 
+    m.total_cast DESC;

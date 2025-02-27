@@ -1,0 +1,75 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.CreationDate,
+        u.DisplayName,
+        1 AS Level
+    FROM Users u
+    WHERE u.Reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.CreationDate,
+        u.DisplayName,
+        Level + 1
+    FROM Users u
+    JOIN UserReputation ur ON ur.UserId = u.Id
+    WHERE u.Reputation > ur.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    uco.UserId,
+    uco.DisplayName AS ContributorDisplayName,
+    pvs.VoteCount,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    u.Reputation AS UserReputation,
+    CASE 
+        WHEN pvs.UpVotes - pvs.DownVotes > 10 THEN 'Hot'
+        WHEN pvs.UpVotes - pvs.DownVotes BETWEEN 1 AND 10 THEN 'Moderate'
+        ELSE 'Cold'
+    END AS Popularity,
+    COALESCE((
+        SELECT STRING_AGG(t.TagName, ', ')
+        FROM Tags t
+        WHERE t.WikiPostId = rp.PostId
+    ), 'No Tags') AS AssociatedTags
+FROM RecentPosts rp
+LEFT JOIN PostVotes pvs ON rp.PostId = pvs.PostId
+LEFT JOIN Users uco ON uco.Id IN (
+    SELECT UserId 
+    FROM Badges b 
+    WHERE b.UserId = uco.Id AND b.Class = 1 /* Gold */
+)
+LEFT JOIN UserReputation u ON u.UserId = uco.Id
+WHERE rp.rn <= 5
+ORDER BY rp.CreationDate DESC, pvs.VoteCount DESC;

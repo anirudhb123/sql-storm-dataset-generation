@@ -1,0 +1,46 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ARRAY_AGG(DISTINCT c.name) AS cast_names,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        CASE 
+            WHEN COUNT(DISTINCT c.person_id) > 5 THEN 'Large Cast'
+            WHEN COUNT(DISTINCT c.person_id) BETWEEN 3 AND 5 THEN 'Medium Cast'
+            ELSE 'Small Cast'
+        END AS cast_size
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword
+), 
+FilteredMovies AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY cast_count DESC) AS rn
+    FROM 
+        MovieDetails
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.keyword,
+    f.cast_names,
+    f.cast_count,
+    f.cast_size
+FROM 
+    FilteredMovies f
+WHERE 
+    f.rn <= 5
+ORDER BY 
+    f.production_year DESC, 
+    f.cast_count DESC;

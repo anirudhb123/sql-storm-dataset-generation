@@ -1,0 +1,43 @@
+
+WITH RECURSIVE string_processing AS (
+    SELECT 
+        DISTINCT ca_city,
+        LENGTH(ca_city) AS city_length,
+        UPPER(ca_city) AS city_uppercase,
+        LOWER(ca_city) AS city_lowercase,
+        TRIM(ca_city) AS city_trimmed,
+        SUBSTRING(ca_city FROM 1 FOR 3) AS city_substring,
+        CHARINDEX('e', ca_city) AS city_charindex
+    FROM 
+        customer_address
+), 
+city_benchmarks AS (
+    SELECT 
+        city_length, 
+        COUNT(*) AS occurrences,
+        AVG(city_length) OVER() AS avg_length,
+        MIN(city_length) OVER() AS min_length,
+        MAX(city_length) OVER() AS max_length
+    FROM 
+        string_processing
+    GROUP BY 
+        city_length
+)
+SELECT 
+    city_length,
+    occurrences,
+    avg_length,
+    min_length,
+    max_length,
+    (occurrences::decimal / (SELECT COUNT(*) FROM customer_address)) * 100 AS percentage_of_total,
+    STRING_AGG(city_uppercase, ', ') AS uppercase_cities,
+    STRING_AGG(city_lowercase, ', ') AS lowercase_cities,
+    STRING_AGG(city_trimmed, ', ') AS trimmed_cities,
+    STRING_AGG(city_substring, ', ') AS city_substrings,
+    STRING_AGG(city_charindex::text, ', ') AS city_char_positions
+FROM 
+    city_benchmarks
+GROUP BY 
+    city_length, occurrences, avg_length, min_length, max_length
+ORDER BY 
+    city_length;

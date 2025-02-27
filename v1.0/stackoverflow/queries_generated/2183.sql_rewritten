@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+RecentVotes AS (
+    SELECT 
+        v.UserId,
+        v.PostId,
+        v.CreationDate,
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+    GROUP BY 
+        v.UserId, v.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.CommentCount,
+    tu.DisplayName AS TopUserDisplayName,
+    tu.UserRank,
+    CASE 
+        WHEN rp.Score > 100 THEN 'High Score'
+        WHEN rp.Score BETWEEN 50 AND 100 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1
+            FROM RecentVotes rv
+            WHERE rv.PostId = rp.PostId AND rv.UserId IN (SELECT UserId FROM TopUsers)
+        ) THEN 'Has Recent Top User Vote'
+        ELSE 'No Recent Top User Vote'
+    END AS UserVoteStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TopUsers tu ON rp.OwnerUserId = tu.UserId
+WHERE 
+    rp.RowNum = 1
+ORDER BY 
+    rp.Score DESC, rp.Title;

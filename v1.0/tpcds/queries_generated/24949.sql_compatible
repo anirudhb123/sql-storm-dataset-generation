@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rnk
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (
+            SELECT 
+                d_date_sk 
+            FROM 
+                date_dim 
+            WHERE 
+                d_year = 2023 AND d_month_seq BETWEEN 1 AND 3
+        )
+),
+AggregatedReturns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returned,
+        SUM(wr_return_amt) AS total_return_amt,
+        COUNT(DISTINCT wr_order_number) AS num_returns
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_item_sk
+)
+SELECT 
+    i.i_item_id, 
+    i.i_item_desc, 
+    SUM(rs.ws_quantity) AS quantity_sold,
+    COALESCE(SUM(ar.total_returned), 0) AS total_returned,
+    COALESCE(SUM(ar.total_return_amt), 0) AS total_return_amt,
+    SUM(rs.ws_net_profit) AS net_profit,
+    CASE 
+        WHEN SUM(ar.num_returns) > 0 THEN (SUM(rs.ws_net_profit) / SUM(ar.num_returns))
+        ELSE NULL 
+    END AS avg_profit_per_return,
+    COUNT(DISTINCT ca.ca_address_sk) FILTER (WHERE ca.ca_state NOT IN ('NY', 'CA')) AS customer_addresses_non_nyc_ca
+FROM 
+    RankedSales rs
+JOIN 
+    item i ON rs.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    AggregatedReturns ar ON i.i_item_sk = ar.wr_item_sk
+LEFT JOIN 
+    customer c ON c.c_customer_sk = (SELECT c_customer_sk FROM web_sales WHERE ws_item_sk = i.i_item_sk LIMIT 1)
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+GROUP BY 
+    i.i_item_id, i.i_item_desc
+HAVING 
+    (SUM(rs.ws_quantity) - COALESCE(SUM(ar.total_returned), 0)) > 10
+ORDER BY 
+    net_profit DESC
+LIMIT 100 OFFSET 10;

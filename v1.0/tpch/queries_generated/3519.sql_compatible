@@ -1,0 +1,66 @@
+
+WITH CTE_SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CTE_OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+CTE_CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+
+SELECT 
+    r.r_name,
+    n.n_name,
+    COALESCE(cs.total_available, 0) AS total_supply_available,
+    COALESCE(os.total_order_value, 0) AS total_order_value,
+    COALESCE(co.total_spent, 0) AS total_spent_by_customer,
+    CASE 
+        WHEN cs.avg_supply_cost IS NULL THEN 'N/A'
+        ELSE FORMAT(cs.avg_supply_cost, 'C')
+    END AS average_supply_cost
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    CTE_SupplierStats cs ON n.n_nationkey = cs.s_suppkey
+LEFT JOIN 
+    CTE_OrderStats os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderdate > '1997-01-01') 
+LEFT JOIN 
+    CTE_CustomerOrders co ON co.c_custkey IN (SELECT DISTINCT c.c_custkey FROM customer c WHERE c.c_acctbal IS NOT NULL)
+WHERE 
+    r.r_name LIKE 'N%'
+ORDER BY 
+    r.r_name, n.n_name;

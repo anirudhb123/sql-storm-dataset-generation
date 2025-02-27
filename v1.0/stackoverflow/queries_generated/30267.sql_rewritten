@@ -1,0 +1,93 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        PostTypeId,
+        ParentId,
+        0 AS Depth
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        r.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputationCTE AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  
+    GROUP BY 
+        u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(p.Score) AS AverageScore,
+        SUM(p.ViewCount) AS TotalViews,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+PostViewCounts AS (
+    SELECT 
+        p.Id,
+        p.ViewCount,
+        SUM(p.ViewCount) OVER (PARTITION BY p.OwnerUserId) AS TotalViewCount
+    FROM 
+        Posts p
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(up.TotalPosts, 0) AS TotalPosts,
+    COALESCE(up.AverageScore, 0) AS AverageScore,
+    COALESCE(up.TotalViews, 0) AS TotalViews,
+    COALESCE(br.TotalBounty, 0) AS TotalBounty,
+    COUNT(DISTINCT p.Id) AS AnswerCount,
+    MAX(post_h.CreationDate) AS LastActivePostDate,
+    STRING_AGG(DISTINCT p.Tags, ', ') AS Tags,
+    u.CreationDate AS UserCreationDate,
+    COUNT(pc.Id) AS ClosedPostCount
+FROM 
+    Users u
+LEFT JOIN 
+    UserReputationCTE br ON u.Id = br.UserId
+LEFT JOIN 
+    PostStatistics up ON u.Id = up.OwnerUserId
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 2  
+LEFT JOIN 
+    PostHistory post_h ON p.Id = post_h.PostId AND post_h.PostHistoryTypeId = 10  
+LEFT JOIN 
+    Posts pc ON pc.OwnerUserId = u.Id AND pc.PostTypeId = 1 AND pc.ClosedDate IS NOT NULL  
+WHERE 
+    u.Reputation > 1000  
+GROUP BY 
+    u.Id, br.TotalBounty, up.TotalPosts, up.AverageScore, up.TotalViews
+HAVING 
+    COUNT(DISTINCT p.Id) > 0  
+ORDER BY 
+    u.Reputation DESC;

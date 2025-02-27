@@ -1,0 +1,41 @@
+WITH UserReputation AS (
+    SELECT Id, Reputation, LastAccessDate,
+           DENSE_RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostAnalytics AS (
+    SELECT P.Id AS PostId, P.Title, P.PostTypeId, 
+           COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+           COUNT(CASE WHEN AC.Id IS NOT NULL THEN 1 END) AS AnswerCount,
+           SUM(V.BountyAmount) AS TotalBounties
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Posts AC ON P.Id = AC.ParentId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8 -- BountyStart
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY P.Id
+),
+ClosedPosts AS (
+    SELECT PostId, COUNT(USER_ID) AS CloseVoteCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PostId
+),
+PostDetails AS (
+    SELECT PA.PostId, PA.Title, PA.AnswerCount, PA.CommentCount, PA.TotalBounties,
+           COALESCE(CP.CloseVoteCount, 0) AS CloseVoteCount
+    FROM PostAnalytics PA
+    LEFT JOIN ClosedPosts CP ON PA.PostId = CP.PostId
+)
+SELECT U.Id AS UserId, U.DisplayName, U.Reputation, U.LastAccessDate,
+       PD.Title, PD.CommentCount, PD.AnswerCount, PD.TotalBounties,
+       PD.CloseVoteCount,
+       CASE 
+           WHEN PD.CloseVoteCount > 0 THEN 'Closed'
+           ELSE 'Open'
+       END AS PostStatus
+FROM UserReputation U
+JOIN PostDetails PD ON U.Id = P.OwnerUserId
+WHERE U.Reputation > 1000
+ORDER BY U.Reputation DESC, PD.TotalBounties DESC
+LIMIT 50;

@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rank
+    FROM 
+        web_sales
+),
+TopSellingItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_net_profit) AS average_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        item ON ws.ws_item_sk = item.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        item.i_item_id, item.i_product_name
+    HAVING 
+        SUM(ws.ws_quantity) > 0 
+)
+SELECT 
+    ca_city AS city,
+    SUM(CASE WHEN cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count,
+    SUM(CASE WHEN cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    SUM(COALESCE(rp.ws_net_profit, 0)) AS total_profit,
+    MAX(ts.total_quantity) AS most_sold_item_quantity,
+    MAX(ts.average_net_profit) AS most_profitable_item_average_profit
+FROM 
+    customer c
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    RankedSales rp ON c.c_customer_sk = rp.ws_bill_customer_sk
+LEFT JOIN 
+    TopSellingItems ts ON ts.i_item_id = rp.ws_item_sk
+WHERE 
+    ca.ca_state = 'CA' 
+    AND (cd.cd_marital_status = 'M' OR cd.cd_marital_status IS NULL) 
+GROUP BY 
+    ca_city
+ORDER BY 
+    total_profit DESC, city
+LIMIT 10;

@@ -1,0 +1,56 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName AS UserName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId IN (4, 5) THEN 1 ELSE 0 END) AS TotalTagWikis,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TagPostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = p.Tags::int
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagPostCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.UserId,
+    u.UserName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.TotalTagWikis,
+    ups.TotalUpVotes,
+    ups.TotalDownVotes,
+    pt.TagName AS PopularTag
+FROM 
+    UserPostStats ups
+JOIN 
+    Users u ON ups.UserId = u.Id
+JOIN 
+    PopularTags pt ON pt.TagPostCount > 0
+ORDER BY 
+    ups.TotalPosts DESC, ups.TotalUpVotes DESC
+LIMIT 50;

@@ -1,0 +1,79 @@
+
+WITH RecentUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(EXTRACT(EPOCH FROM (p.LastActivityDate - p.CreationDate))) AS AvgActivityDuration,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.LastAccessDate DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation >= 1000 AND 
+        u.LastAccessDate > CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUserPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.Score IS NOT NULL
+),
+ConsolidatedPostData AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(p.Body, 'No Content') AS PostBody,
+        COALESCE(h.Comment, 'No Comments') AS LastEditComment,
+        MAX(COALESCE(V.UserId, -1)) AS VoterId,
+        p.CreationDate,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory h ON p.Id = h.PostId AND h.PostHistoryTypeId IN (5, 6)  
+    LEFT JOIN 
+        Votes V ON p.Id = V.PostId AND V.VoteTypeId = 2 
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Body, h.Comment, p.CreationDate, p.AnswerCount, p.CommentCount
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    r.PostCount,
+    r.QuestionCount,
+    r.AnswerCount,
+    r.AvgActivityDuration,
+    pp.Title AS PopularPostTitle,
+    pp.Score AS PopularPostScore,
+    pp.PostBody,
+    pp.LastEditComment,
+    pp.ViewCount AS PostViewCount,
+    pp.CommentCount AS PostCommentCount
+FROM 
+    RecentUserActivity r
+JOIN 
+    TopUserPosts pp ON r.UserId = pp.OwnerDisplayName
+WHERE 
+    pp.PostRank < 6 AND  
+    r.UserRank = 1  
+ORDER BY 
+    r.Reputation DESC
+LIMIT 10 OFFSET 0;

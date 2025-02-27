@@ -1,0 +1,54 @@
+WITH RecursiveActorDetails AS (
+    SELECT 
+        ka.id AS actor_id,
+        ka.name AS actor_name,
+        kt.title AS movie_title,
+        kt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ka.id ORDER BY kt.production_year DESC) AS rn
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    JOIN 
+        aka_title kt ON ci.movie_id = kt.movie_id
+    WHERE 
+        kt.production_year IS NOT NULL
+        AND kt.production_year > (SELECT AVG(production_year) FROM aka_title) 
+),
+
+CompletedMovies AS (
+    SELECT 
+        c.movie_id,
+        COUNT(c.person_id) AS total_actors,
+        SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS actors_with_notes
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+)
+
+SELECT 
+    ad.actor_name,
+    ad.movie_title,
+    ad.production_year,
+    cm.total_actors,
+    cm.actors_with_notes,
+    CASE 
+        WHEN cm.actors_with_notes = 0 THEN 'No notes available'
+        WHEN cm.actors_with_notes < cm.total_actors THEN 'Some actors have notes'
+        ELSE 'All actors have notes'
+    END AS notes_summary,
+    CASE 
+        WHEN (SELECT COUNT(*) FROM cast_info ci WHERE ci.movie_id = cm.movie_id AND ci.note IS NULL) > 0 THEN 'Not all actors noted'
+        ELSE 'All actors noted'
+    END AS actor_notes_status
+FROM 
+    RecursiveActorDetails ad
+LEFT JOIN 
+    CompletedMovies cm ON ad.movie_title = cm.movie_id
+WHERE 
+    ad.rn = 1  
+    AND (ad.production_year IS NOT NULL AND ad.production_year <> 0)  
+ORDER BY 
+    ad.production_year DESC,
+    ad.actor_name;

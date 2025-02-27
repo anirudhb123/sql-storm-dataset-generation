@@ -1,0 +1,32 @@
+SELECT 
+    p.p_name, 
+    SUM(l.l_quantity) AS total_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    
+    UPPER(p.p_name) AS upper_name,
+    LOWER(p.p_name) AS lower_name,
+    CONCAT('Part: ', p.p_name) AS full_name,
+    LEFT(p.p_comment, 10) AS short_comment,
+    SUBSTRING_INDEX(p.p_comment, ' ', 3) AS comment_snippet
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal) 
+        FROM supplier s2 
+        WHERE s2.s_nationkey = s.s_nationkey
+    )
+GROUP BY 
+    p.p_partkey
+HAVING 
+    total_quantity > 100
+ORDER BY 
+    total_quantity DESC;

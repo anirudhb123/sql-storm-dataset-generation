@@ -1,0 +1,31 @@
+SELECT 
+    p.p_name AS Part_Name,
+    s.s_name AS Supplier_Name,
+    c.c_name AS Customer_Name,
+    COUNT(DISTINCT o.o_orderkey) AS Order_Count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS Total_Revenue,
+    MAX(l.l_shipdate) AS Last_Ship_Date,
+    SUBSTRING_INDEX(s.s_comment, ' ', 2) AS Supplier_Comment_Overview,
+    GROUP_CONCAT(DISTINCT CONCAT(l.l_returnflag, ': ', COUNT(l.l_returnflag)) ORDER BY l.l_returnflag ASC SEPARATOR ', ') AS Return_Flag_Distribution
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_name LIKE '%widget%'
+    AND o.o_orderdate BETWEEN '1996-01-01' AND '1997-01-01'
+    AND s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name IN ('USA', 'Canada'))
+GROUP BY 
+    p.p_name, s.s_name, c.c_name
+HAVING 
+    Total_Revenue > 10000
+ORDER BY 
+    Total_Revenue DESC;

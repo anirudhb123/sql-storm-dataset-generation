@@ -1,0 +1,87 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        PostTypeId, 
+        Title, 
+        ParentId, 
+        CreatedDate,
+        Score,
+        OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id, 
+        p.PostTypeId, 
+        p.Title, 
+        p.ParentId, 
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+TaggedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        STRING_AGG(T.TagName, ', ') AS Tags,
+        P.Score AS PostScore,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation AS OwnerReputation
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN LATERAL (
+        SELECT 
+            UNNEST(STRING_TO_ARRAY(P.Tags, ',')) AS TagName
+    ) T ON TRUE
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(V.BountyAmount) AS TotalBountyAmount
+    FROM 
+        Users U
+    INNER JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8 /* Bounty Start */
+    GROUP BY 
+        U.Id, U.DisplayName
+    ORDER BY 
+        PostCount DESC, TotalBountyAmount DESC
+    LIMIT 10
+)
+SELECT 
+    RPH.Title,
+    RPH.Score AS QuestionScore,
+    T.Tags,
+    U.DisplayName AS AnswerOwner,
+    U.Reputation AS AnswerOwnerReputation,
+    CASE 
+        WHEN A.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+        ELSE 'Unaccepted'
+    END AS AnswerStatus
+FROM 
+    RecursivePostHierarchy RPH
+LEFT JOIN Posts A ON RPH.Id = A.ParentId AND A.PostTypeId = 2 /* Answer */
+LEFT JOIN Users U ON A.OwnerUserId = U.Id
+JOIN TaggedPosts T ON RPH.Id = T.PostId
+WHERE 
+    RPH.PostTypeId = 1 /* Question */
+ORDER BY 
+    RPH.Score DESC, 
+    RPH.CreationDate DESC;
+This query utilizes recursive common table expressions (CTEs) to build a hierarchy of posts, aggregates tags with `STRING_AGG`, calculates user statistics, joins to find answers to questions while incorporating some intricate logic to differentiate between accepted and unaccepted answers. The data is organized based on post scores and creation dates, providing a comprehensive view that can be impactful for performance benchmarking.

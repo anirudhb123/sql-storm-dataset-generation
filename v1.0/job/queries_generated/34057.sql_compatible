@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        mt.title AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        CONCAT(mh.path, ' -> ', at.title)
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ah.name AS actor_name,
+    aht.title AS movie_title,
+    aht.production_year,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    AVG(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY aht.id) AS actor_has_note_frequency,
+    MAX(CASE WHEN c.note IS NOT NULL THEN c.note ELSE 'No Note' END) AS latest_actor_note
+FROM 
+    cast_info c
+JOIN 
+    aka_name ah ON c.person_id = ah.person_id
+JOIN 
+    aka_title aht ON c.movie_id = aht.id
+LEFT JOIN 
+    movie_keyword mk ON aht.id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON aht.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'tagline')
+
+WHERE 
+    aht.production_year >= 2000 
+    AND ah.name IS NOT NULL
+GROUP BY 
+    ah.name, aht.title, aht.production_year
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 0
+ORDER BY 
+    aht.production_year DESC, keyword_count DESC;

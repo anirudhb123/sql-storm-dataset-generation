@@ -1,0 +1,28 @@
+-- Performance benchmarking query to analyze post statistics
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    p.CommentCount,
+    p.FavoriteCount,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS TotalComments,
+    AVG(v.BountyAmount) AS AverageBounty
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+WHERE 
+    p.CreationDate >= '2023-01-01' -- Filter for posts created in the year 2023
+GROUP BY 
+    p.Id, u.DisplayName
+ORDER BY 
+    p.ViewCount DESC -- Order by the most viewed posts
+LIMIT 100; -- Limit to top 100 posts

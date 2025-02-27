@@ -1,0 +1,78 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title AS movie_title,
+        at.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.person_id) DESC) AS year_rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MoviesWithLinks AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        ml.linked_movie_id,
+        lt.link AS link_type
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_link ml ON at.id = ml.movie_id
+    LEFT JOIN 
+        link_type lt ON ml.link_type_id = lt.id
+),
+FilteredMovies AS (
+    SELECT 
+        m.movie_title,
+        m.production_year,
+        m.cast_count,
+        mk.keywords,
+        COALESCE(ml.link_type, 'No Links') AS link_info
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        MovieKeywords mk ON m.movie_title = (
+            SELECT MAX(at.title)
+            FROM RankedMovies
+            WHERE year_rank = 1 AND production_year = m.production_year
+        )
+    LEFT JOIN 
+        MoviesWithLinks ml ON ml.movie_id = (
+            SELECT MAX(mv.movie_id)
+            FROM MoviesWithLinks mv
+            WHERE mv.movie_id = m.movie_title
+        )
+    WHERE 
+        m.cast_count IS NOT NULL
+        AND m.cast_count > (
+            SELECT AVG(castCount) 
+            FROM (SELECT COUNT(ci.person_id) AS castCount 
+                  FROM cast_info ci 
+                  GROUP BY ci.movie_id) AS avgCount
+        )
+)
+SELECT 
+    f.movie_title,
+    f.production_year,
+    f.cast_count,
+    f.keywords,
+    f.link_info
+FROM 
+    FilteredMovies f
+ORDER BY 
+    f.production_year DESC, f.cast_count DESC;

@@ -1,0 +1,77 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey, 
+        rs.s_name, 
+        ps.ps_partkey, 
+        ps.ps_availqty, 
+        ps.ps_supplycost,
+        CASE 
+            WHEN rs.s_acctbal IS NULL THEN 0 
+            ELSE ROUND(rs.s_acctbal * 1.10, 2) 
+        END AS adjusted_acctbal
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        partsupp ps ON rs.s_suppkey = ps.ps_suppkey
+    WHERE 
+        rs.rn <= 3
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        o.o_orderkey
+),
+RegionStats AS (
+    SELECT 
+        r.r_regionkey, 
+        r.r_name, 
+        SUM(COALESCE(ts.ps_availqty, 0)) AS total_avail_qty,
+        COUNT(DISTINCT ts.s_suppkey) AS supplier_count
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        TopSuppliers ts ON s.s_suppkey = ts.s_suppkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+)
+SELECT 
+    r.r_regionkey,
+    r.r_name,
+    rs.total_avail_qty,
+    rs.supplier_count,
+    os.total_revenue,
+    os.customer_count,
+    CASE 
+        WHEN os.total_revenue IS NULL THEN 'No Revenue' 
+        ELSE CONCAT('Revenue: ', CAST(os.total_revenue AS VARCHAR))
+    END AS revenue_comment,
+    (SELECT COUNT(*) FROM lineitem l WHERE l.l_returnflag = 'R') AS total_returns
+FROM 
+    RegionStats rs
+LEFT JOIN 
+    OrderStats os ON rs.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT MIN(s.s_nationkey) FROM supplier s WHERE s.s_name LIKE 'Supplier%'))
+ORDER BY 
+    rs.total_avail_qty DESC, 
+    os.customer_count DESC;

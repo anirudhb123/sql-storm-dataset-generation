@@ -1,0 +1,17 @@
+SELECT 
+    p.Id AS PostId, 
+    p.Title, 
+    u.DisplayName AS OwnerDisplayName, 
+    u.Reputation AS OwnerReputation, 
+    p.CreationDate, 
+    p.Score, 
+    p.ViewCount
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+WHERE 
+    p.PostTypeId = 1 -- Only questions
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 10; -- Get the 10 most recent questions

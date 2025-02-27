@@ -1,0 +1,102 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.ViewCount IS NOT NULL
+),
+TopQuestions AS (
+    SELECT 
+        PostId,
+        Title,
+        ViewCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+),
+TagAnalytics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        STRING_AGG(DISTINCT u.DisplayName, ', ') AS ActiveUsers
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id AND v.VoteTypeId = 8  -- Only counting BountyStarts
+    LEFT JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    WHERE 
+        t.IsModeratorOnly = 0
+    GROUP BY 
+        t.TagName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ht.Name as HistoryTypeName,
+        COALESCE(ph.Comment, 'No comment provided') AS Comment
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes ht ON ht.Id = ph.PostHistoryTypeId
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '6 months'
+),
+MergedData AS (
+    SELECT 
+        tp.Title AS TopQuestionTitle,
+        ta.TagName,
+        ta.PostCount,
+        ta.TotalBounty,
+        pah.CreationDate AS LastModifiedDate,
+        pah.Comment
+    FROM 
+        TopQuestions tp
+    JOIN 
+        TagAnalytics ta ON tp.ViewCount > ta.PostCount * 10
+    LEFT JOIN 
+        PostHistoryDetails pah ON tp.PostId = pah.PostId
+),
+FinalOutput AS (
+    SELECT 
+        Title,
+        TagName,
+        PostCount,
+        TotalBounty,
+        LastModifiedDate,
+        COALESCE(Comment, 'No updates') AS UserComment,
+        CASE 
+            WHEN LastModifiedDate IS NULL THEN 'Not modified'
+            ELSE 'Modified recently'
+        END AS ModificationStatus
+    FROM 
+        MergedData
+)
+SELECT 
+    *,
+    COUNT(*) OVER () AS TotalRows,
+    CASE 
+        WHEN PostCount > 5 THEN 'Popular'
+        ELSE 'Less Active'
+    END AS ActivityLevel
+FROM 
+    FinalOutput
+WHERE 
+    TagName IS NOT NULL
+ORDER BY 
+    TotalBounty DESC NULLS LAST, 
+    PostCount DESC, 
+    LastModifiedDate DESC;

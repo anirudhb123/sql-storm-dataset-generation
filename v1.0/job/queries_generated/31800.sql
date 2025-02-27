@@ -1,0 +1,88 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1
+    FROM
+        movie_link ml
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN
+        aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE
+        mt.production_year IS NOT NULL
+),
+cast_details AS (
+    SELECT
+        c.movie_id,
+        c.person_id,
+        a.name AS actor_name,
+        r.role AS role_name
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    JOIN
+        role_type r ON c.role_id = r.id
+),
+movie_summary AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        STRING_AGG(DISTINCT cd.actor_name, ', ') AS actors,
+        COUNT(cd.person_id) AS actor_count,
+        MAX(mk.keyword) AS main_keyword,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM
+        movie_hierarchy mh
+    LEFT JOIN
+        cast_details cd ON mh.movie_id = cd.movie_id
+    LEFT JOIN
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    LEFT JOIN
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    GROUP BY
+        mh.movie_id, mh.title, mh.production_year
+),
+ranked_movies AS (
+    SELECT
+        ms.*,
+        DENSE_RANK() OVER (ORDER BY ms.actor_count DESC) AS actor_rank
+    FROM
+        movie_summary ms
+)
+SELECT
+    rm.title,
+    rm.production_year,
+    rm.actors,
+    rm.actor_count,
+    rm.main_keyword,
+    rm.company_count,
+    CASE
+        WHEN rm.actor_count IS NULL THEN 'No Actors'
+        WHEN rm.actor_count > 10 THEN 'Star-studded'
+        ELSE 'Moderate Cast'
+    END AS cast_quality,
+    mh.depth
+FROM
+    ranked_movies rm
+JOIN
+    movie_hierarchy mh ON rm.movie_id = mh.movie_id
+WHERE
+    mh.depth <= 2
+ORDER BY
+    rm.actor_rank, rm.production_year DESC;

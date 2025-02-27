@@ -1,0 +1,80 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+    HAVING 
+        SUM(ws.ws_net_paid_inc_tax) > 1000
+),
+TopStores AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        SUM(ss.ss_net_profit) AS total_profit
+    FROM 
+        store s
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.s_store_sk, s.s_store_name
+    HAVING 
+        SUM(ss.ss_net_profit) > 5000
+),
+RecentPromotions AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(ws.ws_order_number) AS promo_sales_count,
+        SUM(ws.ws_net_paid_inc_tax) AS promo_sales_amount
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    WHERE 
+        p.p_start_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023 - 1)
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    cc.total_returns,
+    cc.total_return_amount,
+    hvc.total_spent AS total_spent_by_customer,
+    ts.total_profit AS store_profit,
+    rp.promo_sales_amount
+FROM 
+    CustomerReturns cc
+JOIN 
+    HighValueCustomers hvc ON cc.sr_customer_sk = hvc.c_customer_sk
+LEFT JOIN 
+    TopStores ts ON hvc.c_customer_sk = ts.s_store_sk
+LEFT JOIN 
+    RecentPromotions rp ON rp.promo_sales_count > 0
+WHERE 
+    COALESCE(cc.total_returns, 0) > 0
+ORDER BY 
+    total_spent_by_customer DESC, 
+    total_return_amount DESC;

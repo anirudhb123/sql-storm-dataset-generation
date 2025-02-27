@@ -1,0 +1,82 @@
+WITH TagCounts AS (
+    SELECT 
+        TagName, 
+        COUNT(*) AS PostCount
+    FROM 
+        Tags
+    GROUP BY 
+        TagName
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 0 AND 
+        u.CreationDate < DATEADD(year, -1, CURRENT_TIMESTAMP) -- Only users created over a year ago
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')))
+    WHERE 
+        p.PostTypeId = 1 AND -- Only questions
+        p.ViewCount > 1000 -- Popular questions with more than 1000 views
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount
+),
+RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        MAX(h.CreationDate) AS LastEditDate,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory h ON h.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.LastActivityDate >= DATEADD(month, -6, CURRENT_TIMESTAMP) -- Posts active in the last 6 months
+    GROUP BY 
+        p.Id, p.OwnerUserId
+)
+SELECT 
+    u.DisplayName,
+    tc.TagName,
+    COALESCE(pc.PostCount, 0) AS TagPostCount,
+    COALESCE(ac.PostCount, 0) AS UserPostCount,
+    COALESCE(ac.TotalViews, 0) AS UserTotalViews,
+    rp.Title AS PopularPostTitle,
+    rp.ViewCount AS PopularPostViews,
+    rp.Score AS PopularPostScore,
+    ra.LastEditDate,
+    ra.CommentCount
+FROM 
+    TagCounts tc
+LEFT JOIN 
+    PopularPosts rp ON rp.Tags && ARRAY[tc.TagName] -- Join using array overlap for tags
+LEFT JOIN 
+    ActiveUsers ac ON ac.PostCount > 0
+LEFT JOIN 
+    RecentActivity ra ON ra.OwnerUserId = ac.UserId
+ORDER BY 
+    tc.PostCount DESC, ac.TotalViews DESC, rp.ViewCount DESC
+LIMIT 100; -- Limit the output for performance
+

@@ -1,0 +1,82 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        s.n_nationkey,
+        RANK() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        ps.ps_availqty, 
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS cost_rank
+    FROM 
+        partsupp ps
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation,
+        r.r_name AS region,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'No Balance'
+            WHEN c.c_acctbal <= 1000.00 THEN 'Low Balance'
+            WHEN c.c_acctbal BETWEEN 1000.01 AND 5000.00 THEN 'Medium Balance'
+            ELSE 'High Balance'
+        END AS balance_category
+    FROM 
+        customer c 
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_orderkey) AS lineitem_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+    HAVING 
+        COUNT(DISTINCT l.l_orderkey) > 1 AND SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000.00
+)
+SELECT 
+    cr.c_name,
+    cr.nation,
+    cr.region,
+    COUNT(DISTINCT fo.o_orderkey) AS order_count,
+    CAST(SUM(psd.ps_availqty) AS BIGINT) AS total_available_qty,
+    MAX(s.s_name) AS top_supplier,
+    SUM(CASE WHEN fs.supplier_rank IS NOT NULL THEN 1 ELSE 0 END) AS ranked_supplier_count,
+    STRING_AGG(CONCAT(psd.ps_partkey, ':', psd.ps_supplycost), ', ') AS part_supply_details
+FROM 
+    CustomerRegion cr
+LEFT JOIN 
+    FilteredOrders fo ON cr.c_custkey = fo.o_custkey
+LEFT JOIN 
+    RankedSuppliers fs ON cr.nation = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = fs.n_nationkey)
+LEFT JOIN 
+    PartSupplierDetails psd ON psd.ps_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost = psd.ps_supplycost AND ps.ps_partkey IS NOT NULL)
+LEFT JOIN 
+    supplier s ON s.s_suppkey = psd.ps_suppkey
+GROUP BY 
+    cr.c_name, cr.nation, cr.region
+HAVING 
+    COUNT(DISTINCT fo.o_orderkey) > 0 
+    AND MAX(s.s_acctbal) > 1000.00
+ORDER BY 
+    total_available_qty DESC,
+    cr.region ASC,
+    cr.nation DESC;

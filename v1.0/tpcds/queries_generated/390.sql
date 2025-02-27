@@ -1,0 +1,52 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_site_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk, ws.web_site_id
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON hd.hd_demo_sk = c.c_current_hdemo_sk
+)
+SELECT 
+    RANK() OVER (ORDER BY RS.total_sales DESC) AS rank,
+    RS.web_site_id,
+    CD.cd_gender,
+    CD.cd_marital_status,
+    COUNT(DISTINCT CD.c_customer_sk) AS customer_count,
+    SUM(RS.total_sales) AS total_web_sales,
+    CASE
+        WHEN SUM(RS.total_sales) > 10000 THEN 'High Sales'
+        WHEN SUM(RS.total_sales) BETWEEN 5000 AND 10000 THEN 'Medium Sales'
+        ELSE 'Low Sales'
+    END AS sales_category
+FROM 
+    RankedSales RS
+JOIN 
+    CustomerDetails CD ON RS.web_site_sk = CD.c_current_addr_sk
+GROUP BY 
+    RS.web_site_id, CD.cd_gender, CD.cd_marital_status
+HAVING 
+    COUNT(DISTINCT CD.c_customer_sk) > 10
+ORDER BY 
+    rank;

@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagList,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id
+), DetailedScores AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.TagList,
+        rp.CommentCount,
+        rp.BadgeCount,
+        (rp.Score * 0.6 + rp.CommentCount * 0.3 + rp.ViewCount * 0.1) AS CustomScore -- Custom scoring formula
+    FROM 
+        RankedPosts rp
+), RankedScores AS (
+    SELECT 
+        ds.*,
+        RANK() OVER (ORDER BY ds.CustomScore DESC) AS Rank
+    FROM 
+        DetailedScores ds
+)
+SELECT 
+    rs.PostId,
+    rs.Title,
+    rs.CreationDate,
+    rs.TagList,
+    rs.Score,
+    rs.ViewCount,
+    rs.CommentCount,
+    rs.BadgeCount,
+    rs.Rank
+FROM 
+    RankedScores rs
+WHERE 
+    rs.Rank <= 10 -- Get top 10 posts based on custom scoring
+ORDER BY 
+    rs.Rank;

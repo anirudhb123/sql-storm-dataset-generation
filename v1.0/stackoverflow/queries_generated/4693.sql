@@ -1,0 +1,73 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(DISTINCT p.Id) AS PostCount, 
+        SUM(v.BountyAmount) AS TotalBounties,
+        COALESCE(SUM(v.VoteTypeId = 2)::int, 0) AS Upvotes, 
+        COALESCE(SUM(v.VoteTypeId = 3)::int, 0) AS Downvotes, 
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        PostCount, 
+        TotalBounties, 
+        Upvotes, 
+        Downvotes, 
+        ClosedPosts,
+        RANK() OVER (ORDER BY TotalBounties DESC) AS RankByBounties
+    FROM 
+        UserActivity
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.PostCount,
+    u.TotalBounties,
+    u.Upvotes,
+    u.Downvotes,
+    u.ClosedPosts,
+    CASE 
+        WHEN u.ClosedPosts > 0 THEN 'Posts Closed' 
+        ELSE 'No Closed Posts' 
+    END AS PostStatus,
+    CASE 
+        WHEN u.Upvotes > u.Downvotes THEN 'More Upvotes' 
+        WHEN u.Upvotes < u.Downvotes THEN 'More Downvotes' 
+        ELSE 'Equal Votes' 
+    END AS VoteStatus
+FROM 
+    TopUsers u
+WHERE 
+    u.RankByBounties <= 10
+ORDER BY 
+    u.TotalBounties DESC
+UNION ALL
+SELECT 
+    NULL AS UserId,
+    'Aggregate Totals' AS DisplayName,
+    COUNT(*) AS PostCount,
+    SUM(TotalBounties) AS TotalBounties,
+    SUM(Upvotes) AS Upvotes,
+    SUM(Downvotes) AS Downvotes,
+    SUM(ClosedPosts) AS ClosedPosts,
+    NULL,
+    NULL
+FROM 
+    TopUsers
+ORDER BY 
+    UserId;

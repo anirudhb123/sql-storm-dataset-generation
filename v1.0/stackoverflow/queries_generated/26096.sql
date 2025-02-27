@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        Tags.tag_array,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRanking
+    FROM 
+        Posts p
+    JOIN 
+        (SELECT 
+            p.Id,
+            string_agg(t.TagName, ', ') AS tag_array
+         FROM 
+            Posts p
+         CROSS JOIN 
+            unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName) 
+         GROUP BY p.Id) AS Tags ON p.Id = Tags.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only considering Questions
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  -- BountyStart
+    GROUP BY 
+        u.Id
+    HAVING 
+        SUM(p.Score) > 0
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.tag_array,
+        tu.DisplayName AS TopUser
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TopUsers tu ON rp.UserRanking <= 3
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.TopUser,
+    tp.tag_array
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, 
+    tp.Title;

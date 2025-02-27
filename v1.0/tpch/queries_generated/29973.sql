@@ -1,0 +1,60 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        c.cust_id,
+        c.cust_name,
+        c.order_count,
+        c.total_spent,
+        c.last_order_date,
+        ROW_NUMBER() OVER (ORDER BY c.total_spent DESC) AS revenue_rank
+    FROM 
+        CustomerOrders c
+),
+PartSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CombinedData AS (
+    SELECT 
+        tc.c_name,
+        tc.order_count,
+        tc.total_spent,
+        ps.supplier_count,
+        RANK() OVER (ORDER BY tc.total_spent DESC) AS spent_rank
+    FROM 
+        TopCustomers tc
+    JOIN 
+        PartSuppliers ps ON tc.c_custkey = ps.ps_partkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    c.order_count AS total_orders,
+    c.total_spent AS total_spent,
+    COALESCE(p.supplier_count, 0) AS total_suppliers,
+    CONCAT('Rank: ', CAST(c.spent_rank AS CHAR)) AS spending_rank
+FROM 
+    CombinedData c
+LEFT JOIN 
+    part p ON p.p_partkey = c.cust_id
+WHERE 
+    c.total_spent > 1000
+ORDER BY 
+    c.total_spent DESC, c.customer_name ASC;

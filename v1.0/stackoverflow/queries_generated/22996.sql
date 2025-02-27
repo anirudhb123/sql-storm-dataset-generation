@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+
+UsersData AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(u.LastAccessDate) AS LastAccess,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        ph.UserDisplayName,
+        ph.Comment AS Reason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+        AND ph.CreationDate >= NOW() - INTERVAL '2 years'
+),
+
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        ud.UserId,
+        ud.Reputation,
+        ud.BadgeCount,
+        cp.ClosedPostId,
+        cp.ClosedDate,
+        cp.Reason
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UsersData ud ON rp.PostId = ud.UserId
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.ClosedPostId
+)
+
+SELECT 
+    *,
+    COALESCE(ClosedDate, 'No closure') AS ClosureStatus,
+    CASE 
+        WHEN Reputation > 1000 THEN 'High Reputation User'
+        WHEN Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation User'
+        ELSE 'Low Reputation User'
+    END AS UserLevel,
+    COUNT(*) OVER (PARTITION BY UserId) AS PostCountByUser
+FROM 
+    FinalResults
+WHERE 
+    Score <> 0
+    AND (ClosedPostId IS NOT NULL OR (ClosedPostId IS NULL AND rn <= 10))
+ORDER BY 
+    Score DESC, ViewCount DESC
+LIMIT 50;

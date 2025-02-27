@@ -1,0 +1,78 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM aka_title t
+    WHERE t.production_year IS NOT NULL
+),
+ActorParticipations AS (
+    SELECT 
+        ai.person_id,
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN RankedMovies rm ON ci.movie_id = rm.movie_id
+    WHERE a.name IS NOT NULL
+    GROUP BY ai.person_id, a.name
+    HAVING COUNT(DISTINCT ci.movie_id) > 2
+),
+MovieActors AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        STRING_AGG(DISTINCT ap.name, ', ') AS actors
+    FROM RankedMovies rm
+    LEFT JOIN ActorParticipations ap ON rm.movie_id IN (
+        SELECT ci.movie_id 
+        FROM cast_info ci 
+        WHERE ci.person_id = ap.person_id
+    )
+    GROUP BY rm.movie_id, rm.title
+),
+StudioMovies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS studios
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    WHERE mc.company_type_id IN (SELECT ct.id FROM company_type ct WHERE ct.kind = 'Production')
+    GROUP BY mc.movie_id
+),
+FinalReport AS (
+    SELECT 
+        ma.title,
+        ma.actors,
+        COALESCE(sm.studios, 'Unknown Studio') AS studios,
+        rm.production_year
+    FROM MovieActors ma
+    LEFT JOIN StudioMovies sm ON ma.movie_id = sm.movie_id
+    LEFT JOIN RankedMovies rm ON ma.movie_id = rm.movie_id
+)
+SELECT 
+    title,
+    actors,
+    studios,
+    production_year,
+    CASE 
+        WHEN production_year < 2000 THEN 'Classic'
+        WHEN production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era
+FROM FinalReport
+WHERE actors IS NOT NULL AND studios IS NOT NULL
+UNION
+SELECT 
+    title,
+    actors,
+    studios,
+    production_year,
+    'N/A' AS era 
+FROM FinalReport 
+WHERE actors IS NULL OR studios IS NULL
+ORDER BY 
+    production_year DESC,
+    title;

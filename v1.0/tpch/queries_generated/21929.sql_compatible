@@ -1,0 +1,83 @@
+
+WITH RECURSIVE region_nations AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(n.n_nationkey) AS nation_count
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+),
+top_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+average_price AS (
+    SELECT 
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price
+    FROM 
+        lineitem l
+),
+supply_stats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(ns.nation_count, 0) AS nation_count,
+    COALESCE(ts.rank_acctbal, 999) AS supplier_rank,
+    COALESCE(co.total_orders, 0) AS customer_orders,
+    COALESCE(co.total_spent, 0.00) AS total_spent,
+    sp.total_available,
+    sp.avg_supply_cost,
+    sp.max_supply_cost,
+    CASE 
+        WHEN sp.total_available IS NULL THEN 'Unavailable'
+        WHEN sp.total_available < 100 THEN 'Low Stock'
+        ELSE 'In Stock'
+    END AS stock_status
+FROM 
+    part p
+LEFT JOIN 
+    region_nations ns ON p.p_brand = ns.r_name
+LEFT JOIN 
+    top_suppliers ts ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_acctbal > ts.s_acctbal))
+LEFT JOIN 
+    customer_orders co ON p.p_partkey IN (SELECT l.l_partkey FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey WHERE o.o_orderstatus = 'F')
+LEFT JOIN 
+    supply_stats sp ON p.p_partkey = sp.ps_partkey
+WHERE 
+    p.p_size > 10 
+    OR (p.p_retailprice < (SELECT a.avg_price FROM average_price a) AND p.p_type LIKE 'Fragile%')
+ORDER BY 
+    p.p_partkey;

@@ -1,0 +1,57 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+
+TopOrders AS (
+    SELECT 
+        o_orderkey,
+        o_orderdate,
+        total_revenue
+    FROM 
+        RankedOrders
+    WHERE 
+        rn <= 10
+),
+
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.total_revenue,
+    si.s_name,
+    si.total_supply_cost,
+    CASE 
+        WHEN si.total_supply_cost IS NULL THEN 'No Supply Cost'
+        ELSE 'Has Supply Cost' 
+    END AS supply_cost_status
+FROM 
+    TopOrders to
+LEFT JOIN 
+    SupplierInfo si ON to.o_orderkey = si.s_suppkey
+ORDER BY 
+    to.total_revenue DESC, to.o_orderdate ASC;

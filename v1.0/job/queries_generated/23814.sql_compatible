@@ -1,0 +1,78 @@
+
+WITH RecursiveResults AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COUNT(DISTINCT ci.person_id) AS total_actors,
+        SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS total_roles,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS actor_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year, t.kind_id
+),
+FilteredTitles AS (
+    SELECT *
+    FROM RecursiveResults
+    WHERE total_actors > 1
+),
+TitleKeywords AS (
+    SELECT 
+        mt.movie_id,
+        ARRAY_AGG(mk.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        mt.movie_id
+),
+MaxKeywordTitle AS (
+    SELECT 
+        fk.title_id,
+        f.title,
+        f.total_actors,
+        fk.keywords,
+        ROW_NUMBER() OVER (ORDER BY CARDINALITY(fk.keywords)) AS keyword_rank
+    FROM 
+        FilteredTitles f
+    JOIN 
+        TitleKeywords fk ON f.title_id = fk.movie_id
+)
+SELECT 
+    m.title_id AS movie_id,
+    m.title,
+    COALESCE(k.keywords, ARRAY[]::text[]) AS keywords,
+    COALESCE(ct.kind, 'Unknown') AS company_type,
+    COALESCE(ci.total_actors, 0) AS actor_count,
+    COALESCE(a.id, -1) AS lead_actor_id,
+    COALESCE(c.note, 'Note not available') AS role_description,
+    (SELECT 
+        COUNT(DISTINCT p.info) 
+     FROM 
+        person_info p 
+     WHERE 
+        p.person_id = a.id 
+        AND p.info IS NOT NULL) AS non_null_info_count
+FROM 
+    MaxKeywordTitle m
+LEFT JOIN 
+    cast_info ci ON m.title_id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id AND ci.nr_order = 1
+LEFT JOIN 
+    movie_companies mc ON m.title_id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    complete_cast c ON c.movie_id = m.title_id
+WHERE 
+    m.actor_rank = 1 
+    AND m.production_year IS NOT NULL
+ORDER BY 
+    m.total_actors DESC, 
+    keyword_rank ASC;

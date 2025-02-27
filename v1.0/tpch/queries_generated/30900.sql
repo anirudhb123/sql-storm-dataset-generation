@@ -1,0 +1,52 @@
+WITH RECURSIVE supplier_sales AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+), top_suppliers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY total_sales DESC) AS rank
+    FROM 
+        supplier_sales
+    WHERE 
+        sales_rank = 1
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    cs.cust_name,
+    COALESCE(SUM(o.o_totalprice), 0) AS total_orders,
+    COUNT(DISTINCT l.l_orderkey) AS unique_order_count,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    customer cs ON cs.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    orders o ON cs.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    top_suppliers ts ON l.l_suppkey = ts.s_suppkey
+GROUP BY 
+    r.r_name, n.n_name, cs.c_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_orders DESC;

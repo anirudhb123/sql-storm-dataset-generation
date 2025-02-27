@@ -1,0 +1,80 @@
+WITH TagCount AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        PostId
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Only consider questions
+),
+TagUsage AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS UsageCount
+    FROM 
+        TagCount
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        UsageCount,
+        ROW_NUMBER() OVER (ORDER BY UsageCount DESC) AS Rank
+    FROM 
+        TagUsage
+    WHERE 
+        UsageCount > 1 -- Only include tags that are used more than once
+    LIMIT 10
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        ARRAY_AGG(DISTINCT T.Tag) AS UserTags
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    JOIN 
+        TagCount TC ON P.Id = TC.PostId
+    WHERE 
+        U.Reputation > 1000 -- Only include users with high reputation
+    GROUP BY 
+        U.Id
+),
+UserTagActivity AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        T.Tag,
+        T.UsageCount,
+        UA.PostCount,
+        UA.CommentCount,
+        UA.BadgeCount
+    FROM 
+        UserActivity UA
+    JOIN 
+        TopTags T ON T.Tag = ANY(UA.UserTags)
+)
+SELECT 
+    U.DisplayName,
+    T.Tag,
+    T.UsageCount,
+    U.PostCount,
+    U.CommentCount,
+    U.BadgeCount
+FROM 
+    UserTagActivity U
+JOIN 
+    TopTags T ON T.Tag = U.Tag
+ORDER BY 
+    T.UsageCount DESC, U.PostCount DESC;
+

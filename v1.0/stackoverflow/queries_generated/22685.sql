@@ -1,0 +1,70 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM Users U
+    LEFT JOIN Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN Votes V ON V.UserId = U.Id AND V.PostId = P.Id
+    GROUP BY U.Id
+),
+RecentPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentRank
+    FROM Posts P
+    WHERE P.CreationDate > NOW() - INTERVAL '30 days'
+),
+PostStatistics AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.Reputation,
+        UA.PostCount,
+        COALESCE(RP.Title, 'No Recent Post') AS RecentPostTitle,
+        COALESCE(RP.CreationDate, NULL::timestamp) AS RecentPostDate,
+        UA.Upvotes,
+        UA.Downvotes,
+        CASE 
+            WHEN UA.Reputation > 1000 THEN 'Active Contributor'
+            WHEN UA.Reputation > 0 THEN 'Newbie'
+            ELSE 'Silent Observer'
+        END AS UserStatus
+    FROM UserActivity UA
+    LEFT JOIN RecentPosts RP ON UA.UserId = RP.OwnerUserId AND RP.RecentRank = 1
+    WHERE UA.PostCount > 5  -- Only include users with more than 5 posts
+),
+PostHistoryDetail AS (
+    SELECT 
+        P.Id AS PostId,
+        PH.UserId AS EditorUserId,
+        PH.CreationDate AS EditDate,
+        PH.Comment AS EditComment,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM PostHistory PH
+    INNER JOIN Posts P ON PH.PostId = P.Id
+    WHERE PH.PostHistoryTypeId IN (4, 5)  -- Focus on title and body edits
+)
+SELECT 
+    PS.UserId,
+    PS.DisplayName,
+    PS.Reputation,
+    PS.RecentPostTitle,
+    PS.RecentPostDate,
+    PS.Upvotes,
+    PS.Downvotes,
+    PS.UserStatus,
+    COALESCE(PHD.EditorUserId, -1) AS LastEditedBy,
+    COALESCE(PHD.EditComment, 'No Edits') AS LastEditComment,
+    COALESCE(PHD.EditDate, NULL::timestamp) AS LastEditDate
+FROM PostStatistics PS
+LEFT JOIN PostHistoryDetail PHD ON PS.RecentPostTitle = PHD.PostId
+WHERE PS.UserStatus = 'Active Contributor' OR PS.Reputation IS NULL
+ORDER BY PS.Reputation DESC NULLS LAST, PS.DisplayName;

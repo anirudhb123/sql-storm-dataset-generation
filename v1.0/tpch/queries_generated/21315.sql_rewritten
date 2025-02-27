@@ -1,0 +1,74 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank_within_nation
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_mfgr,
+        CASE 
+            WHEN p.p_retailprice > 500 THEN 'High'
+            WHEN p.p_retailprice BETWEEN 250 AND 500 THEN 'Medium'
+            ELSE 'Low'
+        END AS price_category
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (10, 20, 30)
+),
+OrderSummaries AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    DISTINCT sd.nation_name,
+    hp.p_name,
+    os.total_price,
+    hp.price_category
+FROM 
+    SupplierDetails sd
+FULL OUTER JOIN 
+    HighValueParts hp ON sd.s_suppkey = (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+        WHERE ps.ps_partkey = hp.p_partkey
+        ORDER BY ps.ps_supplycost ASC
+        LIMIT 1
+    )
+LEFT JOIN 
+    OrderSummaries os ON os.unique_parts > 5 
+    AND EXISTS (
+        SELECT 1 
+        FROM lineitem l 
+        WHERE l.l_orderkey = os.o_orderkey 
+        AND l.l_partkey = hp.p_partkey
+    )
+WHERE 
+    sd.rank_within_nation <= 3 
+    OR hp.p_mfgr IN (SELECT DISTINCT p_mfgr FROM part WHERE p_brand LIKE '% special%')
+ORDER BY 
+    sd.nation_name, os.total_price DESC NULLS LAST;

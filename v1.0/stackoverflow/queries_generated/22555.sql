@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.PostTypeId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS Rank
+    FROM
+        Posts P
+    LEFT JOIN
+        Comments C ON P.Id = C.PostId
+    WHERE
+        P.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.PostTypeId
+),
+TopUsers AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        RANK() OVER (ORDER BY SUM(R.Score) DESC) AS UserRank
+    FROM
+        Users U
+    JOIN
+        Posts R ON U.Id = R.OwnerUserId
+    WHERE
+        U.Reputation > 100
+    GROUP BY
+        U.Id,
+        U.DisplayName
+    HAVING
+        COUNT(R.Id) > 5
+),
+PostHistoryAnalysis AS (
+    SELECT
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        COUNT(PH.Id) AS ChangeCount,
+        STRING_AGG(CASE 
+            WHEN PH.PostHistoryTypeId IN (10, 11, 12) THEN 'Modified' 
+            ELSE 'Unmodified' 
+        END, ', ') AS ChangeType
+    FROM
+        PostHistory PH
+    GROUP BY
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate
+)
+SELECT
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.CommentCount,
+    T.DisplayName AS TopUser,
+    PH.ChangeCount,
+    PH.ChangeType
+FROM
+    RankedPosts RP
+LEFT JOIN
+    TopUsers T ON RP.Rank = T.UserRank
+LEFT JOIN
+    PostHistoryAnalysis PH ON RP.PostId = PH.PostId
+WHERE
+    RP.PostTypeId = 1 
+    AND PH.ChangeCount > 0
+ORDER BY
+    RP.Score DESC, 
+    RP.CreationDate;
+
+-- This query provides a detailed performance benchmark by selecting posts from users, 
+-- using CTEs to create ranked posts, analyze user performance, and summarize post history edits.

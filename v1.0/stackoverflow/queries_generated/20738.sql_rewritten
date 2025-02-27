@@ -1,0 +1,90 @@
+WITH PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        COALESCE(ph.RevisionCount, 0) AS RevisionCount,
+        COALESCE(vp.VoteCount, 0) AS VoteCount,
+        COALESCE(comm.CommentCount, 0) AS CommentCount,
+        COALESCE(a.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+        LEFT JOIN (
+            SELECT PostId, COUNT(*) AS RevisionCount
+            FROM PostHistory
+            GROUP BY PostId
+        ) ph ON p.Id = ph.PostId
+        LEFT JOIN (
+            SELECT PostId, COUNT(*) AS VoteCount
+            FROM Votes
+            GROUP BY PostId
+        ) vp ON p.Id = vp.PostId
+        LEFT JOIN (
+            SELECT PostId, COUNT(*) AS CommentCount
+            FROM Comments
+            GROUP BY PostId
+        ) comm ON p.Id = comm.PostId
+        LEFT JOIN Posts a ON p.Id = a.AcceptedAnswerId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostDetailed AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.RevisionCount,
+        ps.VoteCount,
+        ps.CommentCount,
+        ps.AcceptedAnswerId,
+        CASE 
+            WHEN ps.RevisionCount = 0 AND ps.VoteCount = 0 THEN 'New Post' 
+            WHEN ps.VoteCount > 0 THEN 'Popular Post'
+            ELSE 'Regular Post'
+        END AS PostCategory,
+        (SELECT COALESCE(STRING_AGG(t.TagName, ', '), 'No Tags') 
+         FROM Tags t 
+         WHERE t.Id IN (
+             SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+             ) AND 
+             COALESCE(t.IsModeratorOnly, 0) = 0
+        ) AS Tags
+    FROM 
+        PostSummary ps
+)
+SELECT 
+    pd.*, 
+    u.DisplayName AS UserDisplayName,
+    CASE 
+        WHEN pd.AcceptedAnswerId IS NOT NULL THEN 
+            (SELECT Title FROM Posts WHERE Id = pd.AcceptedAnswerId)
+        ELSE 
+            'No Accepted Answer'
+    END AS AcceptedAnswerTitle
+FROM 
+    PostDetailed pd
+    LEFT JOIN Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = pd.PostId)
+WHERE 
+    pd.RevisionCount > 2
+ORDER BY 
+    pd.VoteCount DESC, 
+    pd.RevisionCount DESC
+LIMIT 50
+
+UNION ALL
+
+SELECT 
+    NULL AS PostId,
+    'Summary of Posts' AS Title,
+    NULL AS RevisionCount,
+    SUM(VoteCount) AS VoteCount,
+    SUM(CommentCount) AS CommentCount,
+    NULL AS AcceptedAnswerId,
+    'Total' AS PostCategory,
+    NULL AS Tags,
+    NULL AS UserDisplayName,
+    NULL AS AcceptedAnswerTitle
+FROM 
+    PostDetailed
+WHERE 
+    PostId IS NOT NULL;

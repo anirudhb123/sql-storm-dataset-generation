@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS Owner,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+TagsSummary AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 5
+),
+PostChanges AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        MIN(ph.CreationDate) AS FirstChangeDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+CommentsAggregation AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Owner,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    COALESCE(ca.CommentCount, 0) AS TotalComments,
+    COALESCE(ts.PostCount, 0) AS TotalTags,
+    pc.FirstChangeDate,
+    CASE 
+        WHEN pc.ChangeCount > 0 THEN 'Modified'
+        ELSE 'Not Modified'
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    CommentsAggregation ca ON rp.PostId = ca.PostId
+LEFT JOIN 
+    TagsSummary ts ON ts.PostCount > 0
+LEFT JOIN 
+    PostChanges pc ON rp.PostId = pc.PostId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;

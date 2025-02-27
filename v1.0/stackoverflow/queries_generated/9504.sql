@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+TopScoringPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp 
+    WHERE 
+        rp.Rank <= 5
+),
+PostDetails AS (
+    SELECT 
+        tsp.PostId,
+        tsp.Title,
+        tsp.CreationDate,
+        tsp.Score,
+        tsp.OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        TopScoringPosts tsp
+    LEFT JOIN 
+        Comments c ON tsp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON tsp.PostId = v.PostId
+    GROUP BY 
+        tsp.PostId, tsp.Title, tsp.CreationDate, tsp.Score, tsp.OwnerDisplayName
+)
+SELECT 
+    pd.PostId, 
+    pd.Title, 
+    pd.CreationDate, 
+    pd.Score, 
+    pd.OwnerDisplayName, 
+    pd.CommentCount, 
+    pd.VoteCount, 
+    COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseCount,
+    COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 ELSE 0 END), 0) AS DeleteCount
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    PostHistory ph ON pd.PostId = ph.PostId 
+GROUP BY 
+    pd.PostId, pd.Title, pd.CreationDate, pd.Score, pd.OwnerDisplayName
+ORDER BY 
+    pd.Score DESC, pd.CreationDate DESC;

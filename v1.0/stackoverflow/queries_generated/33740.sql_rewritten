@@ -1,0 +1,84 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.OwnerUserId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id,
+        a.Title,
+        a.Score,
+        a.OwnerUserId,
+        a.CreationDate,
+        rp.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts q ON a.ParentId = q.Id
+    INNER JOIN 
+        RecursivePostCTE rp ON q.Id = rp.PostId
+    WHERE 
+        a.PostTypeId = 2  
+)
+
+, UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    rp.Title AS QuestionTitle,
+    rp.Score AS QuestionScore,
+    rp.CreationDate AS QuestionCreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    us.VoteCount AS UserTotalVotes,
+    us.UpvoteCount,
+    us.DownvoteCount,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         Comments c 
+     WHERE 
+         c.PostId = rp.PostId) AS CommentCount,
+    (SELECT 
+         STRING_AGG(pt.Name, ', ') 
+     FROM 
+         Posts p
+     INNER JOIN 
+         PostTypes pt ON p.PostTypeId = pt.Id
+     WHERE 
+         p.ParentId = rp.PostId) AS RelatedPostTypes,
+    CASE 
+        WHEN rp.Level > 1 THEN 'Has Answers'
+        ELSE 'No Answers'
+    END AS AnswerStatus
+FROM 
+    RecursivePostCTE rp
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserVoteStats us ON u.Id = us.UserId
+WHERE 
+    rp.Score > 10  
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 100;

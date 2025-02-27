@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.Value, 0)) AS TotalVotes,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) -- upvotes and downvotes
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+MostActiveUsers AS (
+    SELECT 
+        us.UserId, 
+        us.DisplayName, 
+        us.TotalPosts, 
+        us.TotalVotes, 
+        us.TotalBadges,
+        RANK() OVER (ORDER BY us.TotalPosts DESC, us.TotalVotes DESC) AS ActivityRank
+    FROM 
+        UserStatistics us
+    WHERE 
+        us.TotalPosts > 0
+)
+SELECT 
+    mau.UserId,
+    mau.DisplayName,
+    mau.TotalPosts,
+    mau.TotalVotes,
+    mau.TotalBadges,
+    rp.Title AS LatestPostTitle,
+    rp.CreationDate AS LatestPostDate,
+    rp.Score AS LatestPostScore
+FROM 
+    MostActiveUsers mau
+LEFT JOIN 
+    RankedPosts rp ON mau.UserId = rp.OwnerUserId AND rp.rn = 1
+WHERE 
+    mau.ActivityRank <= 10 -- Top 10 users
+ORDER BY 
+    mau.ActivityRank;

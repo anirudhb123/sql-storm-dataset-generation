@@ -1,0 +1,42 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS Total_Sales,
+        COUNT(ws.ws_order_number) AS Order_Count,
+        RANK() OVER (PARTITION BY ca.ca_state ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS Sales_Rank,
+        COUNT(DISTINCT ws.ws_order_number) OVER (PARTITION BY ca.ca_state) AS Unique_Orders
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        ca.ca_state IN ('CA', 'TX', 'NY')
+    GROUP BY 
+        c.c_customer_id, ca.ca_state
+), TopSales AS (
+    SELECT 
+        Sales_Rank, 
+        COUNT(*) AS Customer_Count, 
+        AVG(Total_Sales) AS Average_Sales_Per_Customer
+    FROM 
+        RankedSales
+    WHERE 
+        Sales_Rank <= 10
+    GROUP BY 
+        Sales_Rank
+)
+SELECT 
+    ts.Sales_Rank,
+    ts.Customer_Count,
+    ts.Average_Sales_Per_Customer,
+    d.d_year,
+    d.d_month_seq
+FROM 
+    TopSales ts
+JOIN 
+    date_dim d ON d.d_date_sk = (SELECT MAX(ws.ws_sold_date_sk) FROM web_sales ws)
+ORDER BY 
+    ts.Sales_Rank;

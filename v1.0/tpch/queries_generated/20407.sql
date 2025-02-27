@@ -1,0 +1,48 @@
+WITH RECURSIVE part_chain AS (
+    SELECT p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, 1 AS level
+    FROM part
+    WHERE p_size = (SELECT MAX(p_size) FROM part)
+
+    UNION ALL
+
+    SELECT p.partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type, p.p_size, p.p_container, p.p_retailprice * 0.9, p.p_comment, pc.level + 1
+    FROM part p
+    JOIN part_chain pc ON p.p_size < pc.p_size
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_availability,
+    STRING_AGG(DISTINCT p.p_name, ', ') FILTER (WHERE p.p_retailprice > 100.00) AS expensive_parts,
+    MAX(o.o_totalprice) OVER (PARTITION BY n.n_nationkey) AS max_order_value,
+    CASE 
+        WHEN COUNT(DISTINCT s.s_suppkey) > 5 THEN 'Many Suppliers'
+        ELSE 'Few Suppliers'
+    END AS supplier_status
+FROM nation n
+LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN part p ON p.p_partkey = ps.ps_partkey
+LEFT JOIN orders o ON o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey LIMIT 1)
+WHERE p.p_comment IS NOT NULL 
+  AND s.s_acctbal IS NOT NULL 
+  AND ps.ps_availqty > (
+    SELECT AVG(ps_inner.ps_availqty) 
+    FROM partsupp ps_inner 
+    WHERE ps_inner.ps_supplycost > 0
+)
+GROUP BY n.n_nationkey
+HAVING SUM(ps.ps_availqty) > 100
+   OR n.n_name IS NOT NULL
+ORDER BY nation_name 
+FETCH FIRST 10 ROWS ONLY;
+
+SELECT 'Total Parts: ' || COUNT(DISTINCT p.p_partkey) AS total_parts
+FROM part p
+WHERE NOT EXISTS (
+    SELECT 1 
+    FROM partsupp ps
+    WHERE ps.ps_partkey = p.p_partkey
+) 
+OR p.p_container IS NULL;

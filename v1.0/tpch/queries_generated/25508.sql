@@ -1,0 +1,18 @@
+SELECT 
+    CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ', Comment: ', ps.ps_comment) AS benchmark_string,
+    LENGTH(CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ', Comment: ', ps.ps_comment)) AS string_length,
+    SUBSTRING_INDEX(ps.ps_comment, ' ', 5) AS first_five_words,
+    REPLACE(s.s_comment, 'bad', 'good') AS updated_comment,
+    (SELECT COUNT(*) FROM lineitem l WHERE l.l_partkey = p.p_partkey AND l.l_returnflag = 'R') AS return_count
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    s.s_acctbal > 10000 AND 
+    p.p_size BETWEEN 1 AND 50
+ORDER BY 
+    string_length DESC
+LIMIT 10;

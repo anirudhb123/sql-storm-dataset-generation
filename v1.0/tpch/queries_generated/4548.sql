@@ -1,0 +1,59 @@
+WITH TotalSales AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND 
+        o.o_orderdate < '2024-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierRank AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_revenue,
+        RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        ps.ps_suppkey
+)
+SELECT 
+    s.s_suppkey,
+    s.s_name,
+    COALESCE(ts.total_revenue, 0) AS order_revenue,
+    COALESCE(sr.supplier_revenue, 0) AS supplier_revenue,
+    CASE 
+        WHEN sr.rank <= 10 THEN 'Top Supplier'
+        ELSE 'Regular Supplier'
+    END AS supplier_status
+FROM 
+    supplier s
+LEFT JOIN 
+    TotalSales ts ON s.s_suppkey = (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        WHERE ps.ps_partkey IN (
+            SELECT l.l_partkey 
+            FROM lineitem l 
+            WHERE l.l_orderkey = (
+                SELECT o.o_orderkey 
+                FROM orders o 
+                WHERE o.o_orderkey = ts.o_orderkey
+            )
+        )
+        LIMIT 1
+    )
+LEFT JOIN 
+    SupplierRank sr ON s.s_suppkey = sr.ps_suppkey
+WHERE 
+    s.s_acctbal IS NOT NULL
+ORDER BY 
+    order_revenue DESC, 
+    supplier_revenue DESC;

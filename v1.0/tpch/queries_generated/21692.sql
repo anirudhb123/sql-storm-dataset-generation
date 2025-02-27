@@ -1,0 +1,67 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL
+), 
+NationSummary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(s.s_suppkey) AS supplier_count,
+        AVG(s.s_acctbal) AS avg_supplier_acctbal
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+), 
+PartCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), 
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    nc.n_name,
+    rc.c_name,
+    rc.c_acctbal,
+    ns.supplier_count, 
+    ns.avg_supplier_acctbal,
+    pc.total_supply_cost,
+    od.total_order_value,
+    od.last_ship_date
+FROM 
+    RankedCustomers rc
+JOIN 
+    NationSummary ns ON rc.c_nationkey = ns.n_nationkey
+LEFT JOIN 
+    PartCost pc ON rc.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_custkey = rc.c_custkey AND c.c_acctbal > 1000 LIMIT 1)
+JOIN 
+    OrderDetails od ON rc.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = od.o_orderkey AND rc.c_custkey IS NOT NULL ORDER BY o.o_orderkey DESC LIMIT 1)
+WHERE 
+    rc.rank_acctbal <= 5 AND 
+    (ns.avg_supplier_acctbal IS NULL OR ns.avg_supplier_acctbal < (SELECT AVG(s.s_acctbal) FROM supplier s WHERE s.s_acctbal IS NOT NULL))
+ORDER BY 
+    rc.c_acctbal DESC, nc.n_name;

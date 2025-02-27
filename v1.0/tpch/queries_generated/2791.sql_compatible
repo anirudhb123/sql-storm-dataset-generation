@@ -1,0 +1,63 @@
+
+WITH TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(day, -30, '1998-10-01')
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_custkey, 
+    c.c_name,
+    COALESCE(s.s_name, 'Unknown') AS supplier_name,
+    COALESCE(l.net_revenue, 0) AS net_revenue,
+    o.o_totalprice,
+    r.r_name,
+    CASE WHEN o.o_orderstatus = 'F' THEN 'Finalized' ELSE 'Pending' END AS order_status_description
+FROM 
+    customer c
+LEFT JOIN 
+    RecentOrders o ON c.c_custkey = o.o_custkey AND o.order_rank = 1
+LEFT JOIN 
+    LineItemSummary l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    supplier s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_supplycost > 20000)
+LEFT JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    c.c_acctbal IS NOT NULL AND c.c_acctbal > 5000
+ORDER BY 
+    c.c_custkey ASC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_nationkey, s_suppkey, s_name, s_comment, 1 AS hierarchy_level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+
+    SELECT s.n_nationkey, s.s_suppkey, s.s_name, s.s_comment, sh.hierarchy_level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.hierarchy_level < 10
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierStats AS (
+    SELECT p.p_name, SUM(ps.ps_availqty) AS total_available,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    c.c_name,
+    COALESCE(cs.order_count, 0) AS order_count,
+    COALESCE(cs.total_spent, 0) AS total_spent,
+    COALESCE(cs.avg_order_value, 0) AS avg_order_value,
+    p.p_name,
+    ps.total_available,
+    ps.total_value
+FROM CustomerOrderStats cs
+FULL OUTER JOIN SupplierHierarchy sh ON cs.c_custkey = sh.s_suppkey
+JOIN PartSupplierStats ps ON ps.rank = 1
+LEFT JOIN part p ON ps.p_name = p.p_name
+WHERE ps.total_value > 10000 AND sh.hierarchy_level IS NOT NULL
+ORDER BY cs.total_spent DESC, ps.total_value DESC;

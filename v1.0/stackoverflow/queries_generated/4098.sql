@@ -1,0 +1,39 @@
+WITH UserReputation AS (
+    SELECT Id, Reputation, CreationDate, 
+           DENSE_RANK() OVER(ORDER BY Reputation DESC) AS ReputationRank,
+           COUNT(DISTINCT Posts.Id) AS TotalPosts
+    FROM Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY Id, Reputation, CreationDate
+),
+PostStatistics AS (
+    SELECT P.OwnerUserId, 
+           COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionsCount,
+           COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswersCount,
+           AVG(P.Score) AS AverageScore,
+           MAX(P.CreationDate) AS LastPostDate
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT PostId, COUNT(*) AS CloseCount
+    FROM PostHistory
+    WHERE PostHistoryTypeId = 10
+    GROUP BY PostId
+),
+TopUsers AS (
+    SELECT UR.Id, UR.Reputation, UR.CreationDate, UR.ReputationRank,
+           PS.QuestionsCount, PS.AnswersCount, 
+           COALESCE(CP.CloseCount, 0) AS CloseCount
+    FROM UserReputation UR
+    LEFT JOIN PostStatistics PS ON UR.Id = PS.OwnerUserId
+    LEFT JOIN ClosedPosts CP ON PS.OwnerUserId = CP.PostId
+    WHERE UR.Reputation > 1000
+)
+SELECT T.Id, T.Reputation, T.CreationDate, T.ReputationRank,
+       T.QuestionsCount, T.AnswersCount, T.CloseCount,
+       CASE WHEN T.CloseCount > 5 THEN 'Frequent Closer' ELSE 'Infrequent Closer' END AS ClosingBehavior
+FROM TopUsers T
+WHERE T.QuestionsCount > 10
+ORDER BY T.Reputation DESC, T.CreationDate ASC
+FETCH FIRST 10 ROWS ONLY;

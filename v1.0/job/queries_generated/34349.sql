@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        m.id::text AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        mh.path || ' > ' || m.id::text
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    m.title AS movie_title,
+    COALESCE(cast_info.person_id, -1) AS person_id,
+    naam.name AS actor_name,
+    COUNT(DISTINCT mw.keyword_id) AS keyword_count,
+    AVG(mo.info_length) AS avg_info_length,
+    ROW_NUMBER() OVER(PARTITION BY m.production_year ORDER BY COUNT(DISTINCT mw.keyword_id) DESC) AS actor_rank
+FROM 
+    MovieHierarchy m
+LEFT JOIN 
+    cast_info ON m.movie_id = cast_info.movie_id
+LEFT JOIN 
+    aka_name naam ON cast_info.person_id = naam.person_id
+LEFT JOIN 
+    movie_keyword mw ON m.movie_id = mw.movie_id
+LEFT JOIN (
+    SELECT 
+        movie_id, 
+        LENGTH(info) AS info_length
+    FROM 
+        movie_info
+    WHERE 
+        info_type_id IN (SELECT id FROM info_type WHERE info ILIKE '%plot%')
+) mo ON m.movie_id = mo.movie_id
+GROUP BY 
+    m.title, cast_info.person_id, naam.name
+HAVING 
+    COUNT(DISTINCT mw.keyword_id) > 5
+ORDER BY 
+    avg_info_length DESC;

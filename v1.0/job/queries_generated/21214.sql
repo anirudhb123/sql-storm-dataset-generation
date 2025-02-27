@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        COALESCE(r.role, 'Unknown') AS role,
+        0 AS depth
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        (SELECT c.movie_id, rt.role
+         FROM cast_info c 
+         LEFT JOIN role_type rt ON c.role_id = rt.id) r ON m.id = r.movie_id
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        COALESCE(r.role, 'Unknown') AS role,
+        depth + 1 AS depth
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        aka_title m ON mh.movie_id = m.episode_of_id
+    LEFT JOIN 
+        (SELECT c.movie_id, rt.role
+         FROM cast_info c 
+         LEFT JOIN role_type rt ON c.role_id = rt.id) r ON m.id = r.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.kind_id,
+    mh.role,
+    ARRAY_AGG(DISTINCT cn.name) FILTER (WHERE cn.name IS NOT NULL) AS character_names,
+    COUNT(DISTINCT c.person_id) AS total_cast_members,
+    COALESCE(MAX(mk.keyword), 'No Keywords') AS main_keyword,
+    COUNT(DISTINCT mcc.company_id) AS total_companies,
+    SUM(CASE WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END) AS info_count,
+    MAX(mh.depth) AS max_depth,
+    MIN(mh.production_year) OVER (PARTITION BY mh.kind_id) AS earliest_production_year
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    company_name cn ON cn.imdb_id = mh.movie_id
+LEFT JOIN 
+    movie_companies mcc ON mh.movie_id = mcc.movie_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    aka_name an ON mh.movie_id = an.person_id
+WHERE 
+    (mh.production_year > 1990 OR mh.kind_id IS NOT NULL)
+    AND (mh.role IS NOT NULL OR mh.role != 'Unknown')
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.kind_id, mh.role
+HAVING 
+    COUNT(DISTINCT c.person_id) > 5
+ORDER BY 
+    total_cast_members DESC, earliest_production_year ASC
+LIMIT 100;

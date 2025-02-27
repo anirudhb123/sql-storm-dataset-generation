@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS rn
+    FROM web_sales
+    WHERE ws_sales_price > (
+        SELECT AVG(ws_sales_price) FROM web_sales
+        WHERE ws_sales_price IS NOT NULL
+    )
+),
+CustomerReturnStats AS (
+    SELECT
+        c.c_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_quantity) AS total_returned_items,
+        COUNT(DISTINCT COALESCE(sr_reason_sk, r.r_reason_sk)) AS unique_return_reasons
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    GROUP BY c.c_customer_sk
+),
+ItemPromotionData AS (
+    SELECT
+        i.i_item_sk,
+        p.p_promo_id,
+        p.p_cost,
+        COUNT(DISTINCT cs_order_number) AS total_promo_sales
+    FROM item i
+    LEFT JOIN catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+    LEFT JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
+        AND p.p_start_date_sk < (SELECT MAX(d_date_sk) FROM date_dim WHERE d_current_year = 'Y')
+        AND p.p_end_date_sk > (SELECT MIN(d_date_sk) FROM date_dim WHERE d_current_year = 'Y')
+    GROUP BY i.i_item_sk, p.p_promo_id, p.p_cost
+),
+FinalStats AS (
+    SELECT
+        cs.c_customer_sk,
+        COUNT(DISTINCT cs.ws_order_number) AS total_orders,
+        COALESCE(MAX(rs.ws_sales_price), 0) AS max_sales_price,
+        SUM(COALESCE(calculate_discount(rs.ws_sales_price), 0)) AS total_discounts,
+        SUM(CASE WHEN it.total_returned_items > 0 THEN 1 ELSE 0 END) AS returns_flag
+    FROM customer c
+    JOIN RankedSales rs ON c.c_customer_sk = rs.ws_item_sk
+    LEFT JOIN CustomerReturnStats it ON c.c_customer_sk = it.c_customer_sk
+    JOIN ItemPromotionData pd ON pd.i_item_sk = rs.ws_item_sk
+    GROUP BY cs.c_customer_sk
+)
+SELECT 
+    fs.c_customer_sk,
+    fs.total_orders,
+    fs.max_sales_price,
+    COALESCE(ROUND(fs.total_discounts, 2), 'No Discounts') AS total_discounts,
+    CASE WHEN fs.returns_flag > 0 THEN 'Yes' ELSE 'No' END AS had_returns
+FROM FinalStats fs
+WHERE fs.total_orders > (
+    SELECT AVG(total_orders) FROM FinalStats
+    WHERE total_orders IS NOT NULL
+)
+ORDER BY fs.total_orders DESC
+LIMIT 50;

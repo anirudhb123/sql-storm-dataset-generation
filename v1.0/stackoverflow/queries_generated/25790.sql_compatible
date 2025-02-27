@@ -1,0 +1,61 @@
+
+WITH TagCount AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(TRIM(BOTH '<>' FROM Tags), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagCount
+    WHERE 
+        PostCount > 5 
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+UserVotes AS (
+    SELECT 
+        V.UserId,
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes V
+    JOIN 
+        Posts P ON V.PostId = P.Id
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        V.UserId
+)
+SELECT 
+    T.Tag,
+    T.PostCount AS TotalQuestions,
+    UB.DisplayName AS UserWithBadges,
+    UB.BadgeCount,
+    COALESCE(UV.VoteCount, 0) AS VoteCount
+FROM 
+    TopTags T
+LEFT JOIN 
+    UserBadges UB ON UB.BadgeCount > 0
+LEFT JOIN 
+    UserVotes UV ON UV.UserId = UB.UserId
+ORDER BY 
+    T.TagRank, T.PostCount DESC;

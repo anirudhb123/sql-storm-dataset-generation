@@ -1,0 +1,40 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+), RegionalSupplier AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS nation_name, COUNT(ps.ps_partkey) AS available_parts
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+), RankedSales AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_sales
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT ph.o_orderkey, ph.o_orderdate, ph.o_totalprice, 
+       COALESCE(rs.total_sales, 0) AS total_sales,
+       rs.rank_sales,
+       CASE 
+           WHEN rs.rank_sales IS NULL THEN 'No Sales'
+           WHEN rs.rank_sales < 5 THEN 'Low'
+           WHEN rs.rank_sales BETWEEN 5 AND 10 THEN 'Medium'
+           ELSE 'High'
+       END AS sales_category,
+       COUNT(DISTINCT ps.ps_partkey) AS parts_count,
+       r.nation_name
+FROM OrderHierarchy ph
+LEFT JOIN RankedSales rs ON ph.o_orderkey = rs.l_orderkey
+LEFT JOIN RegionalSupplier r ON r.available_parts > 0
+LEFT JOIN partsupp ps ON r.s_suppkey = ps.ps_suppkey
+WHERE ph.o_orderdate >= '2023-01-01' 
+      AND (r.nation_name IS NULL OR r.nation_name LIKE 'U%')
+GROUP BY ph.o_orderkey, ph.o_orderdate, ph.o_totalprice, rs.total_sales, rs.rank_sales, r.nation_name
+HAVING SUM(ps.ps_availqty) IS NOT NULL
+ORDER BY ph.o_orderdate DESC, total_sales DESC;

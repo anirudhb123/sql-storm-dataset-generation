@@ -1,0 +1,89 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        customer c
+    INNER JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+    HAVING 
+        SUM(ws.ws_net_profit) > 0
+),
+TopCustomers AS (
+    SELECT 
+        sh.c_customer_sk,
+        sh.c_first_name,
+        sh.c_last_name,
+        sh.total_profit,
+        sh.rank,
+        (SELECT COUNT(DISTINCT ws.ws_order_number) 
+            FROM web_sales ws 
+            WHERE ws.ws_ship_customer_sk = sh.c_customer_sk) AS total_orders
+    FROM 
+        SalesHierarchy sh
+    WHERE 
+        sh.rank <= 10
+),
+AddressInfo AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON c.c_current_addr_sk = ca.ca_address_sk
+),
+FinalReport AS (
+    SELECT 
+        tc.c_customer_sk,
+        tc.c_first_name,
+        tc.c_last_name,
+        tc.total_profit,
+        tc.total_orders,
+        ai.ca_city,
+        ai.ca_state,
+        ai.ca_country,
+        CASE 
+            WHEN tc.total_profit >= 10000 THEN 'High Value'
+            WHEN tc.total_profit >= 5000 THEN 'Mid Value'
+            ELSE 'Low Value'
+        END AS customer_value_category
+    FROM 
+        TopCustomers tc
+    LEFT JOIN 
+        AddressInfo ai ON tc.c_customer_sk = c.c_customer_sk
+)
+
+SELECT 
+    fr.c_customer_sk,
+    fr.c_first_name,
+    fr.c_last_name,
+    fr.total_profit,
+    fr.total_orders,
+    fr.ca_city,
+    fr.ca_state,
+    fr.ca_country,
+    fr.customer_value_category,
+    COALESCE(SUM(CASE WHEN ws.ws_net_profit IS NULL THEN 0 ELSE ws.ws_net_profit END), 0) AS total_web_sales,
+    STRING_AGG(DISTINCT ws.ws_order_number::text, ', ') AS order_numbers
+FROM 
+    FinalReport fr
+LEFT JOIN 
+    web_sales ws ON fr.c_customer_sk = ws.ws_ship_customer_sk
+GROUP BY 
+    fr.c_customer_sk, fr.c_first_name, fr.c_last_name, fr.total_profit, fr.total_orders, 
+    fr.ca_city, fr.ca_state, fr.ca_country, fr.customer_value_category
+ORDER BY 
+    fr.total_profit DESC;

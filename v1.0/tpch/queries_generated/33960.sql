@@ -1,0 +1,50 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (
+        SELECT AVG(s_acctbal)
+        FROM supplier
+    )
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 5
+),
+orders_agg AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('F', 'O')
+    GROUP BY o.o_orderkey
+),
+nation_region AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(s.s_name, 'Unknown') AS supplier_name,
+    r.r_name AS region_name,
+    COUNT(o.o_orderkey) AS num_orders,
+    AVG(o.total_revenue) AS average_revenue,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS num_returns,
+    ROW_NUMBER() OVER(PARTITION BY r.r_name ORDER BY AVG(o.total_revenue) DESC) AS rank
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN orders_agg o ON o.o_orderkey IN (
+    SELECT DISTINCT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_partkey = p.p_partkey
+)
+LEFT JOIN nation_region nr ON s.s_nationkey = nr.n_nationkey
+LEFT JOIN region r ON nr.r_name = r.r_name
+WHERE p.p_size > 10
+GROUP BY p.p_partkey, p.p_name, s.s_name, r.r_name
+HAVING COUNT(o.o_orderkey) > 5
+ORDER BY region_name, average_revenue DESC;

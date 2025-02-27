@@ -1,0 +1,67 @@
+WITH MovieRoles AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        c.nr_order,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS actor_position
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        title t ON c.movie_id = t.id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        t.production_year >= 2000
+),
+CompanyMovies AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        complete_cast m ON mc.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id
+),
+TopMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COALESCE(c.company_count, 0) AS company_count,
+        COUNT(DISTINCT r.actor_name) AS actor_count
+    FROM 
+        title t
+    LEFT JOIN 
+        CompanyMovies c ON t.id = c.movie_id
+    LEFT JOIN 
+        MovieRoles r ON t.id = r.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year, c.company_count
+    HAVING 
+        actor_count > 5 AND company_count >= 2
+),
+RankedMovies AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY production_year DESC, actor_count DESC) AS movie_rank
+    FROM 
+        TopMovies
+)
+SELECT 
+    movie_title,
+    production_year,
+    company_count,
+    actor_count,
+    movie_rank
+FROM 
+    RankedMovies
+WHERE 
+    movie_rank <= 10
+ORDER BY 
+    production_year DESC, actor_count DESC;

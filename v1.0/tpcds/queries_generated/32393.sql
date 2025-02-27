@@ -1,0 +1,58 @@
+
+WITH RECURSIVE income_levels AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound
+    FROM income_band
+    WHERE ib_lower_bound IS NOT NULL
+    UNION ALL
+    SELECT ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+    FROM income_band ib
+    JOIN income_levels il ON il.ib_income_band_sk < ib.ib_income_band_sk
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        CASE 
+            WHEN COUNT(DISTINCT ws.ws_order_number) > 5 THEN 'Frequent'
+            WHEN COUNT(DISTINCT ws.ws_order_number) BETWEEN 2 AND 5 THEN 'Occasional'
+            ELSE 'Rare'
+        END AS purchase_frequency
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+discounted_sales AS (
+    SELECT 
+        cs.cs_sold_date_sk,
+        SUM(cs.cs_ext_sales_price) * 0.9 AS discounted_sales
+    FROM catalog_sales cs
+    JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    WHERE p.p_discount_active = 'Y'
+    GROUP BY cs.cs_sold_date_sk
+),
+sales_summary AS (
+    SELECT 
+        dd.d_date AS sales_date,
+        COALESCE(cs.total_sales, 0) AS total_web_sales,
+        COALESCE(ds.discounted_sales, 0) AS total_discounted_sales,
+        SUM(CASE WHEN cs.order_count > 0 THEN 1 ELSE 0 END) AS num_customers
+    FROM date_dim dd
+    LEFT JOIN customer_sales cs ON dd.d_date_sk = cs.c_customer_sk
+    LEFT JOIN discounted_sales ds ON dd.d_date_sk = ds.cs_sold_date_sk
+    GROUP BY dd.d_date
+)
+SELECT 
+    s.sales_date,
+    s.total_web_sales,
+    s.total_discounted_sales,
+    s.num_customers,
+    il.ib_income_band_sk,
+    il.ib_lower_bound,
+    il.ib_upper_bound
+FROM sales_summary s
+JOIN customer c ON c.c_customer_sk IN (SELECT c_customer_sk FROM customer_sales WHERE total_sales > 1000)
+LEFT JOIN income_levels il ON il.ib_income_band_sk = (SELECT hd.hd_income_band_sk FROM household_demographics hd WHERE hd.hd_demo_sk = c.c_current_cdemo_sk)
+WHERE s.total_web_sales IS NOT NULL
+ORDER BY s.sales_date DESC, s.total_web_sales DESC;

@@ -1,0 +1,81 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ss.ss_net_profit) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+), 
+best_customers AS (
+    SELECT 
+        c.c_customer_id,
+        s.s_store_name,
+        SUM(ss.ss_quantity) AS total_quantity_sold
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.ss_store_sk = s.s_store_sk
+    JOIN 
+        customer c ON ss.ss_customer_sk = c.c_customer_sk
+    WHERE 
+        ss.ss_sold_date_sk = (SELECT MAX(ss2.ss_sold_date_sk) FROM store_sales ss2)
+    GROUP BY 
+        c.c_customer_id, s.s_store_name
+    HAVING 
+        SUM(ss.ss_quantity) > 10
+), 
+high_value_customers AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_marital_status,
+        cd.cd_gender,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_buy_potential IS NOT NULL
+    GROUP BY 
+        c.c_customer_id, cd.cd_marital_status, cd.cd_gender, cd.cd_credit_rating, cd.cd_dep_count
+    HAVING 
+        SUM(ws.ws_net_profit) > 1000
+)
+SELECT 
+    b.c_customer_id,
+    b.s_store_name,
+    h.cd_marital_status,
+    h.cd_gender,
+    COALESCE(h.cd_dep_count, 0) AS dependent_count,
+    COALESCE(SUM(h.total_profit), 0) AS total_profit,
+    r.r_reason_desc
+FROM 
+    best_customers b
+LEFT JOIN 
+    high_value_customers h ON b.c_customer_id = h.c_customer_id
+LEFT JOIN 
+    reason r ON r.r_reason_sk = (
+        SELECT 
+            sr_reason_sk 
+        FROM 
+            store_returns sr 
+        WHERE 
+            sr.st_item_sk = (SELECT MAX(ss_item_sk) FROM store_sales)
+        ORDER BY 
+            sr_returned_date_sk DESC 
+        LIMIT 1
+    )
+GROUP BY 
+    b.c_customer_id, b.s_store_name, h.cd_marital_status, h.cd_gender, h.cd_dep_count, r.r_reason_desc
+ORDER BY 
+    total_profit DESC
+LIMIT 10;

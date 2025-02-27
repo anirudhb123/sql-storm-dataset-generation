@@ -1,0 +1,73 @@
+WITH UserScores AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+
+HighestScoringUsers AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        UpVotes - DownVotes AS Score,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, Score DESC) AS RN
+    FROM UserScores
+    WHERE Reputation > 1000
+),
+
+PopularPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        C.CommentCount,
+        RANK() OVER (ORDER BY P.ViewCount DESC) AS ViewRank
+    FROM Posts P
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) C ON P.Id = C.PostId
+    WHERE P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+),
+
+EngagementMetrics AS (
+    SELECT 
+        P.Title,
+        COALESCE(S.Score, 0) AS UserScore,
+        COALESCE(S.DisplayName, 'Anonymous') AS UserName,
+        P.ViewCount,
+        P.CommentCount,
+        P.CreationDate,
+        P.Score,
+        CASE 
+            WHEN P.Score > 10 THEN 'High'
+            WHEN P.Score BETWEEN 1 AND 10 THEN 'Medium'
+            ELSE 'Low'
+        END AS PopularityCategory
+    FROM PopularPosts P
+    LEFT JOIN HighestScoringUsers S ON P.Id IN (SELECT AcceptedAnswerId FROM Posts WHERE AcceptedAnswerId IS NOT NULL)
+)
+
+SELECT 
+    E.Title,
+    E.UserName,
+    E.UserScore,
+    E.PopularityCategory,
+    COUNT(DISTINCT C.Id) AS TotalComments,
+    AVG(U.Reputation) AS AvgUserReputation
+FROM EngagementMetrics E
+LEFT JOIN Comments C ON E.Title = C.Text 
+LEFT JOIN Users U ON U.DisplayName = E.UserName
+GROUP BY E.Title, E.UserName, E.UserScore, E.PopularityCategory
+HAVING COUNT(DISTINCT C.Id) > 5
+ORDER BY E.UserScore DESC, E.PopularityCategory;

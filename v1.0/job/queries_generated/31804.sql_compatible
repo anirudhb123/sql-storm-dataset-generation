@@ -1,0 +1,54 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        mt.production_year,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IN (1, 2)  
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.movie_id
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    COALESCE(mk.keywords, 'None') AS related_keywords,
+    COALESCE(pi.info, 'No Info') AS director_info
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id AND ci.person_role_id IN (SELECT id FROM role_type WHERE role = 'Director')
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    mk.keywords,
+    pi.info
+ORDER BY 
+    mh.production_year DESC, 
+    mh.movie_title ASC
+LIMIT 50;

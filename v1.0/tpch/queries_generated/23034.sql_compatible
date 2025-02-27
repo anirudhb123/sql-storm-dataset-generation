@@ -1,0 +1,66 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+), 
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+), 
+FrequentCustomers AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+)
+SELECT 
+    r.r_name,
+    SUM(COALESCE(l.l_extendedprice, 0) * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    AVG(CASE WHEN HVP.p_partkey IS NOT NULL THEN HVP.total_supply_value ELSE NULL END) AS avg_supply_value,
+    MAX(RS.s_acctbal) AS max_supplier_balance
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RankedSuppliers RS ON s.s_suppkey = RS.s_suppkey AND RS.rn = 1
+LEFT JOIN 
+    lineitem l ON l.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    HighValueParts HVP ON l.l_partkey = HVP.p_partkey
+LEFT JOIN 
+    FrequentCustomers FC ON FC.c_custkey = l.l_orderkey
+WHERE 
+    r.r_name LIKE '%Asia%' OR r.r_name IS NULL
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(COALESCE(l.l_extendedprice, 0) * (1 - l.l_discount)) > 10000
+ORDER BY 
+    total_revenue DESC;

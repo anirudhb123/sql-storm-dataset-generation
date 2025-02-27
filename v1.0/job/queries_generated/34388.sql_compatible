@@ -1,0 +1,58 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title AS movie_title,
+        title.production_year,
+        movie_link.linked_movie_id,
+        0 AS level
+    FROM 
+        title
+    LEFT JOIN 
+        movie_link ON title.id = movie_link.movie_id
+    WHERE 
+        title.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        mh.linked_movie_id,
+        level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        title t ON mh.linked_movie_id = t.id
+)
+
+SELECT 
+    t.id AS movie_id,
+    t.title AS movie_title,
+    t.production_year,
+    COALESCE(AVG(pi.info), 'No Info') AS avg_rating,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+    COUNT(DISTINCT c.id) AS number_of_cast,
+    MAX(EXTRACT(YEAR FROM DATE '2024-10-01') - t.production_year) AS years_since_release,
+    ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS release_rank
+FROM 
+    MovieHierarchy mh
+JOIN 
+    title t ON mh.movie_id = t.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+LEFT JOIN 
+    person_info pi ON mi.movie_id = pi.person_id
+LEFT JOIN 
+    cast_info c ON t.id = c.movie_id
+LEFT JOIN 
+    aka_title ak ON t.id = ak.movie_id
+WHERE 
+    t.production_year IS NOT NULL
+GROUP BY 
+    t.id, t.title, t.production_year
+HAVING 
+    COUNT(DISTINCT c.id) > 5
+ORDER BY 
+    years_since_release DESC, avg_rating DESC;

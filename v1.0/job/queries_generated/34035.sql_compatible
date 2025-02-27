@@ -1,0 +1,89 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.season_nr,
+        m.episode_nr,
+        m.episode_of_id,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.season_nr,
+        e.episode_nr,
+        e.episode_of_id,
+        mh.depth + 1
+    FROM 
+        aka_title e
+    INNER JOIN 
+        MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+),
+MovieInfo AS (
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+PersonDetails AS (
+    
+    SELECT 
+        p.id AS person_id,
+        p.name,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles,
+        COUNT(c.id) AS movie_count,
+        SUM(CASE WHEN r.role IN ('Director', 'Producer') THEN 1 ELSE 0 END) AS significant_roles
+    FROM 
+        name p
+    LEFT JOIN 
+        cast_info c ON p.id = c.person_id
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        p.id, p.name
+)
+SELECT 
+    mh.movie_id,
+    mh.title AS episode_title,
+    mh.season_nr,
+    mh.episode_nr,
+    mi.production_year,
+    pd.name AS person_name,
+    pd.roles,
+    pd.movie_count,
+    pd.significant_roles,
+    CASE 
+        WHEN pd.significant_roles > 0 THEN 'Yes' 
+        ELSE 'No' 
+    END AS has_significant_roles,
+    ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY pd.movie_count DESC) AS person_rank
+FROM 
+    MovieHierarchy mh
+JOIN 
+    MovieInfo mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    PersonDetails pd ON mh.movie_id IN (SELECT c.movie_id FROM cast_info c WHERE c.person_id = pd.person_id)
+WHERE 
+    mi.keywords IS NOT NULL
+ORDER BY 
+    mh.depth, 
+    mi.production_year, 
+    mh.title;

@@ -1,0 +1,73 @@
+WITH RECURSIVE UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS VoteCount 
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostTagCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(T.Id) AS TagCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Tags T ON POSITION(',' IN P.Tags) > 0 AND (SELECT TRUE FROM unnest(string_to_array(P.Tags, ',')) AS tag WHERE tag IS NOT NULL) IS NOT NULL
+    GROUP BY 
+        P.Id
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        MIN(PH.CreationDate) AS FirstEditDate,
+        MAX(PH.CreationDate) AS LastEditDate,
+        COUNT(PH.Id) AS EditCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5) 
+    GROUP BY 
+        PH.PostId
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+)
+SELECT 
+    U.DisplayName AS UserName,
+    PC.PostId,
+    P.Title,
+    PH.FirstEditDate,
+    PH.LastEditDate,
+    PH.EditCount,
+    TC.TagCount,
+    UC.VoteCount,
+    U.Rank AS UserRank
+FROM 
+    RecentPostHistory PH
+JOIN 
+    PostTagCounts TC ON PH.PostId = TC.PostId
+JOIN 
+    Votes V ON V.PostId = PH.PostId
+JOIN 
+    UserVoteCounts UC ON UC.UserId = V.UserId
+JOIN 
+    TopUsers U ON U.Id = V.UserId
+JOIN 
+    Posts P ON P.Id = PH.PostId
+WHERE 
+    PH.EditCount > 1 AND 
+    U.Reputation > 1000
+ORDER BY 
+    PH.LastEditDate DESC, U.Rank
+LIMIT 50;

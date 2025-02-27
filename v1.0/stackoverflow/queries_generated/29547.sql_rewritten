@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.ViewCount > 100 
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE 
+            WHEN b.Class = 1 THEN 1 
+            ELSE 0 
+        END) AS GoldBadges,
+        SUM(CASE 
+            WHEN b.Class = 2 THEN 1 
+            ELSE 0 
+        END) AS SilverBadges,
+        SUM(CASE 
+            WHEN b.Class = 3 THEN 1 
+            ELSE 0 
+        END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+HighScoringPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.CreationDate,
+        ub.BadgeCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+    WHERE 
+        rp.rn = 1 
+        AND rp.Score > 10 
+)
+SELECT 
+    hsp.PostId,
+    hsp.Title,
+    hsp.ViewCount,
+    hsp.Score,
+    hsp.BadgeCount,
+    hsp.GoldBadges,
+    hsp.SilverBadges,
+    hsp.BronzeBadges,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    HighScoringPosts hsp
+LEFT JOIN 
+    Tags t ON POSITION(t.TagName IN hsp.Tags) > 0 
+GROUP BY 
+    hsp.PostId, hsp.Title, hsp.ViewCount, hsp.Score, 
+    hsp.BadgeCount, hsp.GoldBadges, hsp.SilverBadges, 
+    hsp.BronzeBadges
+ORDER BY 
+    hsp.ViewCount DESC, hsp.Score DESC;

@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        COUNT(a.Id) AS AnswerCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND p.PostTypeId = 1
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName) ON TRUE
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Questions and Answers
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerUserId,
+        rp.AnswerCount,
+        rp.Tags,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users U ON rp.OwnerUserId = U.Id
+    WHERE 
+        rp.RN = 1
+    ORDER BY 
+        rp.Score DESC, rp.ViewCount DESC
+    LIMIT 10
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.OwnerDisplayName,
+    tp.Reputation,
+    tp.AnswerCount,
+    STRING_AGG(DISTINCT tp.Tags, ', ') AS AllTags,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) AS VoteCount
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Comments c ON tp.PostId = c.PostId
+LEFT JOIN 
+    Votes v ON tp.PostId = v.PostId
+GROUP BY 
+    tp.PostId, tp.Title, tp.Body, tp.CreationDate, tp.ViewCount, tp.Score, tp.OwnerDisplayName, tp.Reputation, tp.AnswerCount
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;
+

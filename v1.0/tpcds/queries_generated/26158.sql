@@ -1,0 +1,49 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM customer_address
+),
+CustomerInfo AS (
+    SELECT 
+        c_customer_id,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_quantity) AS total_quantity_sold,
+        SUM(ws_net_paid) AS total_sales_amount
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+)
+SELECT 
+    ci.full_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_education_status,
+    ad.full_address,
+    ad.ca_city,
+    ad.ca_state,
+    ad.ca_zip,
+    ad.ca_country,
+    ss.total_quantity_sold,
+    ss.total_sales_amount
+FROM CustomerInfo ci
+JOIN AddressDetails ad ON ci.c_customer_id = ad.ca_address_id
+LEFT JOIN SalesSummary ss ON ci.c_customer_id = ss.ws_bill_customer_sk
+WHERE ci.cd_gender = 'F' 
+  AND ci.cd_marital_status = 'M'
+  AND ss.total_sales_amount > 1000
+ORDER BY ss.total_sales_amount DESC
+LIMIT 50;

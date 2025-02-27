@@ -1,0 +1,81 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        1 AS level,
+        COUNT(ws_quantity) AS total_sales
+    FROM 
+        customer c
+        LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk IS NOT NULL
+    GROUP BY 
+        c_customer_sk, c_first_name, c_last_name
+    
+    UNION ALL
+    
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        sh.level + 1,
+        COUNT(ws.ws_quantity)
+    FROM 
+        customer c
+        JOIN SalesHierarchy sh ON c.c_current_cdemo_sk = sh.c_customer_sk
+        LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, sh.level
+),
+AggregatedSales AS (
+    SELECT 
+        c.c_customer_id, 
+        SUM(ws.ws_ext_sales_price) AS total_sales_price,
+        CASE 
+            WHEN SUM(ws.ws_ext_sales_price) IS NULL THEN 'No Sales'
+            WHEN SUM(ws.ws_ext_sales_price) > 10000 THEN 'High Roller'
+            ELSE 'Casual Shopper'
+        END AS customer_type,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_count
+    FROM 
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id
+),
+DailySales AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.ws_ext_sales_price) AS daily_total_sales,
+        COUNT(ws.ws_order_number) AS daily_orders
+    FROM 
+        date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_date
+),
+CustomerCounts AS (
+    SELECT 
+        customer_type,
+        COUNT(*) AS customer_count
+    FROM 
+        AggregatedSales
+    GROUP BY customer_type
+)
+SELECT 
+    d.d_date,
+    COALESCE(ds.daily_total_sales, 0) AS total_sales_today,
+    COALESCE(ds.daily_orders, 0) AS total_orders_today,
+    cc.customer_type,
+    cc.customer_count,
+    st.total_sales_price
+FROM 
+    DailySales ds
+CROSS JOIN CustomerCounts cc
+LEFT JOIN AggregatedSales st ON cc.customer_type = st.customer_type
+WHERE 
+    ds.daily_total_sales > (SELECT AVG(daily_total_sales) FROM DailySales)
+ORDER BY 
+    d.d_date DESC, cc.customer_type;

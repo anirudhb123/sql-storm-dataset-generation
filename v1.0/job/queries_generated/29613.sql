@@ -1,0 +1,34 @@
+WITH MovieTitles AS (
+    SELECT title.id AS title_id,
+           title.title,
+           title.production_year,
+           GROUP_CONCAT(DISTINCT keyword.keyword) AS keywords
+    FROM title
+    JOIN movie_keyword ON title.id = movie_keyword.movie_id
+    JOIN keyword ON movie_keyword.keyword_id = keyword.id
+    WHERE title.production_year BETWEEN 2000 AND 2023
+    GROUP BY title.id
+),
+ActorNames AS (
+    SELECT aka_name.person_id,
+           GROUP_CONCAT(DISTINCT aka_name.name) AS actor_names
+    FROM aka_name
+    JOIN cast_info ON aka_name.person_id = cast_info.person_id
+    GROUP BY aka_name.person_id
+),
+MovieActors AS (
+    SELECT title.title AS movie_title,
+           MovieTitles.production_year,
+           ActorNames.actor_names
+    FROM MovieTitles
+    JOIN complete_cast ON MovieTitles.title_id = complete_cast.movie_id
+    JOIN cast_info ON complete_cast.subject_id = cast_info.id
+    JOIN ActorNames ON cast_info.person_id = ActorNames.person_id
+)
+
+SELECT ma.movie_title,
+       ma.production_year,
+       ma.actor_names
+FROM MovieActors ma
+WHERE ma.production_year > 2010
+ORDER BY ma.production_year DESC, ma.movie_title;

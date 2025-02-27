@@ -1,0 +1,40 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS RankByBalance
+    FROM supplier s
+), FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_orderdate, 
+        o.o_totalprice
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-12-31'
+), LineItemSummary AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    c.c_name AS CustomerName,
+    r.r_name AS Region,
+    SUM(ls.TotalRevenue) AS TotalRevenue,
+    AVG(s.s_acctbal) AS AverageAccountBalance,
+    COUNT(DISTINCT o.o_orderkey) AS TotalOrders
+FROM customer c
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN FilteredOrders o ON c.c_custkey = o.o_custkey
+LEFT JOIN LineItemSummary ls ON o.o_orderkey = ls.l_orderkey
+LEFT JOIN RankedSuppliers s ON n.n_nationkey = s.s_nationkey AND s.RankByBalance <= 5
+WHERE o.o_totalprice > 1000
+GROUP BY c.c_name, r.r_name, s.s_acctbal
+HAVING SUM(ls.TotalRevenue) IS NOT NULL AND AVG(s.s_acctbal) IS NOT NULL
+ORDER BY TotalRevenue DESC;

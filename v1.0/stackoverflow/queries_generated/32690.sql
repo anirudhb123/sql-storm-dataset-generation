@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM
+        Posts p
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        LATERAL STRING_TO_ARRAY(p.Tags, ',') AS tag_array ON TRUE
+    LEFT JOIN
+        Tags t ON t.TagName = TRIM(both '<>' FROM tag_array)
+    WHERE
+        p.PostTypeId = 1 -- Only Questions
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND u.Reputation > 1000
+    GROUP BY
+        p.Id, p.Title, p.Score, p.CreationDate, u.DisplayName
+),
+
+HighScorePosts AS (
+    SELECT
+        p.PostId,
+        p.Title,
+        p.Score,
+        p.Author,
+        p.CommentCount,
+        CASE
+            WHEN p.Score > 50 THEN 'High Score'
+            WHEN p.Score > 20 THEN 'Medium Score'
+            ELSE 'Low Score'
+        END AS ScoreCategory
+    FROM
+        RankedPosts p
+)
+
+SELECT
+    hsp.PostId,
+    hsp.Title,
+    hsp.Score,
+    hsp.Author,
+    hsp.CommentCount,
+    hsp.ScoreCategory,
+    COUNT(DISTINCT v.UserId) AS VoteCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    AVG(b.Class) AS AverageBadgeClass
+FROM
+    HighScorePosts hsp
+LEFT JOIN
+    Votes v ON hsp.PostId = v.PostId
+LEFT JOIN
+    Badges b ON b.UserId = hsp.Author
+GROUP BY
+    hsp.PostId, hsp.Title, hsp.Score, hsp.Author, hsp.CommentCount, hsp.ScoreCategory
+ORDER BY
+    hsp.Score DESC, hsp.CommentCount DESC
+LIMIT 50;

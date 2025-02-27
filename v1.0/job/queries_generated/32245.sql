@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        c.country_code = 'USA' AND 
+        t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+)
+
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    COALESCE(MAX(ci.nr_order), 0) AS max_order,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+    COUNT(DISTINCT c.id) AS cast_count,
+    SUM(CASE WHEN pi.info IS NOT NULL THEN 1 ELSE 0 END) AS person_info_count
+FROM 
+    movie_hierarchy m
+LEFT JOIN 
+    cast_info ci ON m.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    aka_name ak ON m.movie_id = ak.person_id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id
+GROUP BY 
+    m.movie_id, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT ci.id) > 2 AND 
+    MAX(m.production_year) < 2023
+ORDER BY 
+    m.production_year DESC, 
+    max_order DESC 
+LIMIT 100;

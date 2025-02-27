@@ -1,0 +1,74 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieCast AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        COUNT(DISTINCT c.id) AS cast_count,
+        COALESCE(NULLIF(m.info_type_id, 0), NULL) AS valid_info_type_id
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON c.movie_id = m.movie_id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = c.person_id
+    GROUP BY 
+        m.id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, '; ') AS companies,
+        COUNT(DISTINCT mc.id) AS company_count
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        mt.movie_id,
+        mt.title,
+        mt.actors,
+        cd.companies,
+        cd.company_count,
+        COALESCE(mt.cast_count, 0) AS cast_count
+    FROM 
+        MovieCast mt
+    LEFT JOIN 
+        CompanyDetails cd ON mt.movie_id = cd.movie_id
+    WHERE 
+        mt.cast_count > 0 AND mt.actors IS NOT NULL
+)
+SELECT 
+    ft.title,
+    ft.cast_count,
+    ft.companies,
+    ft.company_count,
+    rt.production_year,
+    SUM(CASE WHEN ft.cast_count >= 5 THEN 1 ELSE 0 END) OVER (PARTITION BY rt.production_year) AS blockbuster_count,
+    CASE 
+        WHEN ft.company_count IS NULL THEN 'No Companies'
+        WHEN ft.company_count < 3 THEN 'Few Companies'
+        ELSE 'Many Companies' 
+    END AS company_status
+FROM 
+    FilteredMovies ft
+LEFT JOIN 
+    RankedTitles rt ON ft.movie_id = rt.title_id
+WHERE 
+    rt.title_rank < 10 
+ORDER BY 
+    rt.production_year DESC, ft.cast_count DESC;

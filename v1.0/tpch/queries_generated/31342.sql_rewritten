@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_suppkey, s.s_name, ps.ps_availqty, ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp WHERE ps_supplycost > 20.00)
+
+    UNION ALL
+
+    SELECT p.p_partkey, p.p_name, ps.ps_suppkey, s.s_name, ps.ps_availqty, ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN SupplyChain sc ON s.s_suppkey = sc.ps_suppkey
+    WHERE ps.ps_availqty > sc.ps_availqty
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND c.c_acctbal > 300.00
+),
+MaxTotalPrice AS (
+    SELECT o.o_orderkey, MAX(o.o_totalprice) AS max_price
+    FROM CustomerOrders o
+    GROUP BY o.o_orderkey
+),
+Aggregated AS (
+    SELECT c.c_name, COUNT(o.o_orderkey) as total_orders, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM CustomerOrders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.c_custkey = c.c_custkey
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY c.c_name
+)
+SELECT 
+    a.c_name, 
+    a.total_orders, 
+    a.total_revenue, 
+    COALESCE(s.sc_total_supplycost, 0) AS total_supplycost
+FROM Aggregated a
+LEFT JOIN (
+    SELECT DISTINCT s.s_name, SUM(ps.ps_supplycost) AS sc_total_supplycost
+    FROM SupplyChain sc
+    JOIN supplier s ON sc.s_suppkey = s.s_suppkey
+    GROUP BY s.s_name
+) s ON a.c_name = s.s_name
+WHERE a.total_orders > 0
+ORDER BY a.total_revenue DESC;

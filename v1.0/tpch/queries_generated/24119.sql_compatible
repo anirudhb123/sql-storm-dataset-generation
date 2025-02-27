@@ -1,0 +1,50 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate > DATE '1998-10-01' - INTERVAL '30 days'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    c.c_name,
+    c.c_acctbal,
+    COALESCE(SUM(CASE WHEN rs.rn = 1 THEN rs.total_supply_value END), 0) AS top_supplier_value,
+    COALESCE(SUM(CASE WHEN ro.rn = 1 THEN ro.total_order_value END), 0) AS recent_order_value
+FROM 
+    customer c
+LEFT JOIN 
+    RankedSuppliers rs ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+LEFT JOIN 
+    RecentOrders ro ON c.c_custkey = ro.o_custkey
+GROUP BY 
+    c.c_name, c.c_acctbal
+HAVING 
+    (top_supplier_value > 10000 OR recent_order_value > 5000) 
+    AND (c.c_acctbal IS NOT NULL OR c.c_name IS NOT NULL) 
+ORDER BY 
+    c.c_acctbal DESC NULLS LAST
+LIMIT 10;

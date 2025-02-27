@@ -1,0 +1,56 @@
+WITH RECURSIVE movie_years AS (
+    SELECT production_year, COUNT(*) AS movie_count
+    FROM aka_title
+    GROUP BY production_year
+),
+actors_with_roles AS (
+    SELECT a.person_id AS actor_id, ak.name AS actor_name, 
+           r.role AS role_name, COUNT(DISTINCT ci.movie_id) AS movies_played
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    JOIN role_type r ON ci.role_id = r.id
+    GROUP BY a.person_id, ak.name, r.role
+),
+movie_details AS (
+    SELECT at.title, at.production_year,
+           COUNT(DISTINCT mc.company_id) AS production_companies_count,
+           STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM aka_title at
+    LEFT JOIN movie_companies mc ON at.id = mc.movie_id
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY at.title, at.production_year
+),
+actor_movie_info AS (
+    SELECT awr.actor_id, MAX(awr.movies_played) AS max_movies_played, 
+           STRING_AGG(DISTINCT am.title, ', ') AS movies_list
+    FROM actors_with_roles awr
+    LEFT JOIN cast_info ci ON awr.actor_id = ci.person_id
+    LEFT JOIN aka_title am ON ci.movie_id = am.id
+    GROUP BY awr.actor_id
+),
+outer_join_movies AS (
+    SELECT 
+        md.title AS movie_title,
+        md.production_year,
+        COALESCE(ai.max_movies_played, 0) AS actor_max_movies_played,
+        md.production_companies_count,
+        md.company_names
+    FROM movie_details md
+    LEFT JOIN actor_movie_info ai ON md.production_year = 
+        (SELECT production_year FROM movie_years WHERE movie_count = 
+            (SELECT MAX(movie_count) FROM movie_years))
+)
+SELECT 
+    om.movie_title,
+    om.production_year,
+    om.actor_max_movies_played,
+    CASE 
+        WHEN om.actor_max_movies_played = 0 THEN 'No actors found'
+        ELSE 'Actors available'
+    END AS actor_status,
+    om.production_companies_count,
+    REGEXP_REPLACE(om.company_names, '([, ]+)', ' & ') AS formatted_companies_name
+FROM outer_join_movies om
+WHERE om.production_year IS NOT NULL
+ORDER BY om.production_year DESC, om.actor_max_movies_played DESC
+LIMIT 10;

@@ -1,0 +1,41 @@
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS character_role,
+    cc.note AS cast_note,
+    mp.name AS production_company,
+    k.keyword AS movie_keyword,
+    ti.info AS additional_info,
+    p.info AS person_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info cc ON a.person_id = cc.person_id
+JOIN 
+    title t ON cc.movie_id = t.id
+JOIN 
+    role_type c ON cc.role_id = c.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name mp ON mc.company_id = mp.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN 
+    info_type ti ON mi.info_type_id = ti.id
+LEFT JOIN 
+    person_info p ON a.person_id = p.person_id
+WHERE 
+    t.production_year >= 2000
+AND 
+    mp.country_code = 'USA'
+GROUP BY 
+    a.name, t.title, c.kind, cc.note, mp.name, k.keyword, ti.info, p.info
+ORDER BY 
+    t.production_year DESC, a.name ASC
+LIMIT 50;

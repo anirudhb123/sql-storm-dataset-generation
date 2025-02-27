@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVotes,
+        DENSE_RANK() OVER (ORDER BY p.Score DESC, p.CreationDate DESC) AS RankScore
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  
+        AND p.Score > 0   
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankScore <= 10  
+),
+PostTagCounts AS (
+    SELECT 
+        pt.PostId,
+        COUNT(t.Id) AS TagCount
+    FROM 
+        PostsTags pt
+    JOIN 
+        Tags t ON pt.TagId = t.Id
+    GROUP BY 
+        pt.PostId
+),
+PostsWithTags AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.ViewCount,
+        tp.UpVotes,
+        tp.DownVotes,
+        COALESCE(ptc.TagCount, 0) AS TagCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostTagCounts ptc ON tp.PostId = ptc.PostId
+)
+SELECT 
+    pw.Title,
+    pw.ViewCount,
+    pw.UpVotes,
+    pw.DownVotes,
+    pw.TagCount,
+    CASE 
+        WHEN pw.TagCount > 5 THEN 'Popular Tagger'
+        WHEN pw.UpVotes > 100 THEN 'High Upvoted'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    PostsWithTags pw
+ORDER BY 
+    pw.ViewCount DESC;

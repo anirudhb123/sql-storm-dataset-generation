@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+), PriceRank AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM partsupp ps
+), HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderstatus, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2023-10-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+    HAVING total_value > 10000
+), SupplierOrderSummary AS (
+    SELECT 
+        sh.s_name, 
+        COUNT(DISTINCT ho.o_orderkey) AS order_count, 
+        SUM(lo.l_extendedprice) AS total_sales
+    FROM SupplierHierarchy sh
+    LEFT JOIN lineitem lo ON sh.s_suppkey = lo.l_suppkey
+    JOIN HighValueOrders ho ON lo.l_orderkey = ho.o_orderkey
+    GROUP BY sh.s_name
+)
+SELECT 
+    p.p_name, 
+    s.s_name, 
+    COALESCE(ps.rank, 0) AS supplier_rank, 
+    sos.order_count, 
+    sos.total_sales
+FROM part p
+LEFT JOIN PriceRank ps ON p.p_partkey = ps.ps_partkey AND ps.rank = 1
+LEFT JOIN SupplierOrderSummary sos ON p.p_partkey IN (
+    SELECT ps_partkey FROM partsupp WHERE ps_suppkey = ps.ps_suppkey
+)
+JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = 1))
+WHERE p.p_size > 10
+ORDER BY supplier_rank DESC, total_sales DESC
+LIMIT 100;

@@ -1,0 +1,71 @@
+
+WITH RECURSIVE UserBadgesCTE AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        B.Name AS BadgeName,
+        B.Class,
+        B.Date AS BadgeDate,
+        1 AS BadgeCount
+    FROM Users U
+    JOIN Badges B ON U.Id = B.UserId
+    WHERE B.Class = 1  
+
+    UNION ALL
+
+    SELECT
+        U.Id,
+        U.DisplayName,
+        B.Name,
+        B.Class,
+        B.Date,
+        UB.BadgeCount + 1
+    FROM Users U
+    INNER JOIN Badges B ON U.Id = B.UserId
+    JOIN UserBadgesCTE UB ON U.Id = UB.UserId
+    WHERE B.Class IN (2, 3) 
+),
+
+PostMetrics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AvgViews,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+
+UserPerformance AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        PM.PostCount,
+        PM.TotalScore,
+        PM.AvgViews,
+        PM.LastPostDate,
+        COALESCE(SUM(UB.BadgeCount), 0) AS TotalBadges
+    FROM Users U
+    JOIN PostMetrics PM ON U.Id = PM.OwnerUserId
+    LEFT JOIN UserBadgesCTE UB ON U.Id = UB.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation, PM.PostCount, PM.TotalScore, PM.AvgViews, PM.LastPostDate
+)
+
+SELECT 
+    UP.*,
+    CASE
+        WHEN UP.Reputation > 1000 THEN 'High Reputation'
+        WHEN UP.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationCategory,
+    CASE 
+        WHEN UP.TotalScore > 500 THEN 'Experienced Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorStatus,
+    COALESCE(AVG(V.VoteTypeId), 0) AS AvgVoteType
+FROM UserPerformance UP
+LEFT JOIN Votes V ON UP.Id = V.UserId
+GROUP BY UP.Id, UP.DisplayName, UP.Reputation, UP.PostCount, UP.TotalScore, UP.AvgViews, UP.LastPostDate
+ORDER BY UP.Reputation DESC, UP.TotalScore DESC;

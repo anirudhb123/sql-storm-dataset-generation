@@ -1,0 +1,40 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid) AS avg_order_value,
+        d.d_year,
+        d.d_month_seq
+    FROM 
+        web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2022
+    GROUP BY 
+        ws.web_site_id, d.d_year, d.d_month_seq
+),
+SalesRanked AS (
+    SELECT 
+        web_site_id,
+        total_sales,
+        total_orders,
+        avg_order_value,
+        ROW_NUMBER() OVER (PARTITION BY d_month_seq ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        SalesData
+)
+SELECT 
+    s.web_site_id,
+    s.total_sales,
+    s.total_orders,
+    s.avg_order_value,
+    r.sales_rank
+FROM 
+    SalesData s
+JOIN SalesRanked r ON s.web_site_id = r.web_site_id
+WHERE 
+    r.sales_rank <= 5
+ORDER BY 
+    s.total_sales DESC;

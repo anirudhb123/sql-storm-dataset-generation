@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS LatestPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score IS NOT NULL AND 
+        p.ViewCount > 1000
+),
+
+PostCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        pr.Name AS CloseReason,
+        ph.CreationDate AS CloseDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes pr ON CAST(ph.Comment AS integer) = pr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+
+UserBadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    u.DisplayName,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    rb.GoldBadges,
+    rb.SilverBadges,
+    rb.BronzeBadges,
+    pc.CloseReason,
+    pc.CloseDate
+FROM 
+    RankedPosts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadgeStats rb ON u.Id = rb.UserId
+LEFT JOIN 
+    PostCloseReasons pc ON p.PostId = pc.PostId
+WHERE 
+    p.LatestPostRank = 1 
+    AND (pc.CloseReason IS NULL OR pc.CloseDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 year')
+ORDER BY 
+    p.Score DESC 
+LIMIT 100;

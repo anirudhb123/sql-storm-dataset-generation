@@ -1,0 +1,75 @@
+WITH supplier_details AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        COALESCE(NULLIF(s.s_comment, ''), 'No Comment') AS supplier_comment,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS acct_rank
+    FROM 
+        supplier s
+), 
+
+part_supplier AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+
+recent_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS order_count
+    FROM 
+        orders o 
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= (cast('1998-10-01' as date) - INTERVAL '1 year')
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    sd.s_name,
+    sd.s_acctbal,
+    sd.supplier_comment,
+    COALESCE(ps.total_avail_qty, 0) AS total_avail_qty,
+    ps.avg_supply_cost,
+    ro.order_count,
+    CASE 
+        WHEN sd.acct_rank = 1 THEN 'Highest Supplier'
+        ELSE 'Regular Supplier' 
+    END AS supplier_classification
+FROM 
+    part p
+LEFT JOIN 
+    part_supplier ps ON p.p_partkey = ps.ps_partkey
+OUTER JOIN 
+    supplier_details sd ON sd.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = p.p_partkey
+    )
+LEFT JOIN 
+    recent_orders ro ON ro.o_custkey IN (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_nationkey = (
+            SELECT n.n_nationkey 
+            FROM nation n 
+            WHERE n.n_name = (SELECT rn.r_name FROM region rn WHERE rn.r_regionkey = sd.supplier_nationkey)
+        )
+    )
+WHERE 
+    (p.p_size NOT IN (NULL, 0) AND p.p_retailprice > 100)
+    OR sd.s_acctbal IS NULL
+ORDER BY 
+    p.p_partkey, sd.s_acctbal DESC
+FETCH FIRST 100 ROWS ONLY;

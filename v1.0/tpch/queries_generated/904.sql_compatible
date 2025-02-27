@@ -1,0 +1,65 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '6 months'
+),
+SupplierPartInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name AS supplier_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' 
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    r.r_name AS region_name,
+    COALESCE(SUM(hvo.total_value), 0) AS total_order_value,
+    COALESCE(spi.total_available_quantity, 0) AS total_available_quantity,
+    COALESCE(spi.average_supply_cost, 0) AS average_supply_cost,
+    COUNT(CASE WHEN ro.order_rank <= 10 THEN 1 END) AS recent_high_value_order_count,
+    STRING_AGG(DISTINCT spi.supplier_name, ', ') AS supplier_names
+FROM 
+    part p
+LEFT JOIN 
+    SupplierPartInfo spi ON p.p_partkey = spi.ps_partkey
+LEFT JOIN 
+    nation n ON n.n_nationkey = p.p_partkey % (SELECT COUNT(*) FROM nation) 
+LEFT JOIN 
+    region r ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    HighValueOrders hvo ON hvo.o_orderkey = p.p_partkey % (SELECT COUNT(*) FROM orders)
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderkey = hvo.o_orderkey
+GROUP BY 
+    p.p_partkey, p.p_name, r.r_name
+HAVING 
+    COALESCE(SUM(hvo.total_value), 0) > 10000
+ORDER BY 
+    total_order_value DESC;

@@ -1,0 +1,73 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.id AS actor_id, 
+        a.name AS actor_name,
+        c.movie_id,
+        1 AS depth
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+    UNION ALL
+    SELECT 
+        c.id AS actor_id, 
+        a.name AS actor_name,
+        c.movie_id,
+        ah.depth + 1
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        ActorHierarchy ah ON c.movie_id = ah.movie_id
+    WHERE 
+        ah.depth < 4 AND 
+        a.name IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(DISTINCT k.keyword, ',') AS keywords,
+        m.kind_id
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title, m.production_year, m.kind_id
+),
+ActorMovies AS (
+    SELECT 
+        a.actor_id, 
+        a.actor_name,
+        md.movie_id,
+        md.title,
+        md.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.actor_id ORDER BY md.production_year DESC) AS rn
+    FROM 
+        ActorHierarchy a
+    JOIN 
+        MovieDetails md ON a.movie_id = md.movie_id
+)
+SELECT 
+    am.actor_id,
+    am.actor_name,
+    am.title AS movie_title,
+    am.production_year,
+    COALESCE(CAST(am.rn AS VARCHAR), 'N/A') AS movie_rank,
+    (SELECT COUNT(*) FROM ActorHierarchy) AS total_actors,
+    (SELECT COUNT(DISTINCT movie_id) FROM ActorHierarchy WHERE actor_id = am.actor_id) AS total_movies
+FROM 
+    ActorMovies am
+WHERE 
+    am.rn <= 3 
+ORDER BY 
+    am.actor_name, 
+    am.production_year DESC;

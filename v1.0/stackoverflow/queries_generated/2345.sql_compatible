@@ -1,0 +1,76 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS UpvotedPostCount,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS DownvotedPostCount,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, '><')) AS TagName
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+),
+TagStats AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS TagUsageCount
+    FROM 
+        PopularTags
+    GROUP BY 
+        TagName
+),
+RankedUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.PostCount,
+        us.UpvotedPostCount,
+        us.DownvotedPostCount,
+        us.TotalCommentScore,
+        DENSE_RANK() OVER (ORDER BY us.Reputation DESC) AS UserRank
+    FROM 
+        UserStats us
+    WHERE 
+        us.Reputation > 1000
+),
+FinalResults AS (
+    SELECT 
+        ru.DisplayName,
+        ru.Reputation,
+        ru.PostCount,
+        ru.UpvotedPostCount,
+        ru.DownvotedPostCount,
+        ru.TotalCommentScore,
+        (SELECT COUNT(*) FROM TagStats) AS TotalTagsUsed,
+        (SELECT AVG(TagUsageCount) FROM TagStats) AS AvgTagUsage
+    FROM 
+        RankedUsers ru
+    WHERE 
+        ru.UserRank <= 10
+)
+SELECT 
+    fr.*,
+    COALESCE(ROUND((fr.UpvotedPostCount / NULLIF(fr.PostCount, 0)::decimal) * 100, 2), 0) AS UpvotePercentage,
+    (SELECT COUNT(*) FROM Votes v WHERE v.UserId = fr.UserId AND v.VoteTypeId = 2) AS TotalUpvotesByUser,
+    CAST('2024-10-01 12:34:56' AS TIMESTAMP) AS QueryExecutionTime
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.Reputation DESC;

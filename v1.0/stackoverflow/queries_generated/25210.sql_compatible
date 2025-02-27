@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserRankedStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        SUM(CASE WHEN vt.Id = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,  
+        SUM(CASE WHEN vt.Id = 3 THEN 1 ELSE 0 END) AS TotalDownVotes 
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+QuestionTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        t.TagName,
+        COUNT(pt.TagName) AS TagCount
+    FROM 
+        Posts p
+    CROSS JOIN 
+        UNNEST(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS TagName
+    JOIN 
+        Tags t ON t.TagName = TagName
+    GROUP BY 
+        p.Id, t.TagName
+),
+FinalBenchmark AS (
+    SELECT 
+        ur.DisplayName,
+        ur.TotalQuestions,
+        ur.TotalUpVotes,
+        ur.TotalDownVotes,
+        p.Title AS RecentQuestionTitle,
+        p.CreationDate AS RecentQuestionDate,
+        COUNT(DISTINCT tc.TagName) AS DistinctTagsCount,
+        SUM(tc.TagCount) AS TotalTagsCount
+    FROM 
+        UserRankedStats ur
+    LEFT JOIN 
+        RankedPosts p ON p.OwnerUserId = ur.UserId AND p.PostRank = 1  
+    LEFT JOIN 
+        QuestionTagCounts tc ON tc.PostId = p.PostId
+    GROUP BY 
+        ur.UserId, ur.DisplayName, p.Title, p.CreationDate
+)
+SELECT 
+    *,
+    (TotalUpVotes - TotalDownVotes) AS NetVotes,
+    (SELECT COUNT(*) FROM Posts) AS TotalPostsCount
+FROM 
+    FinalBenchmark
+ORDER BY 
+    TotalQuestions DESC, NetVotes DESC;

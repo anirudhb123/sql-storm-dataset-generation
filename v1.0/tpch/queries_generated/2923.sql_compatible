@@ -1,0 +1,58 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+        JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+        LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 0
+),
+OrderLineDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        l.l_partkey, 
+        l.l_quantity, 
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS line_item_rank
+    FROM 
+        orders o
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    COALESCE(SUM(OLD.l_extendedprice * (1 - OLD.l_discount)), 0) AS total_value,
+    COALESCE(SUM(CASE WHEN OLD.l_returnflag = 'R' THEN 1 ELSE 0 END), 0) AS return_count,
+    SUM(CASE WHEN CS.total_spent > 1000 THEN 1 ELSE 0 END) AS high_value_customers,
+    rs.s_name AS top_supplier_name
+FROM 
+    CustomerOrders CS
+    JOIN OrderLineDetails OLD ON CS.order_count > 0
+    LEFT JOIN RankedSuppliers rs ON OLD.l_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = rs.s_suppkey)
+WHERE 
+    OLD.l_tax > 0.15
+GROUP BY 
+    c.c_name, rs.s_name
+HAVING 
+    COALESCE(SUM(OLD.l_extendedprice * (1 - OLD.l_discount)), 0) > 5000
+ORDER BY 
+    total_value DESC;

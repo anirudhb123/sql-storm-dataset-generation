@@ -1,0 +1,54 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_orderstatus, o.o_totalprice, 1 AS hierarchy_level
+    FROM orders o
+    WHERE o.o_orderdate >= '2022-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_orderstatus, o.o_totalprice, oh.hierarchy_level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.hierarchy_level < 3
+),
+SupplyCost AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+RankedLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, l.l_discount, l.l_extendedprice,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rank
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+),
+CustomerBalances AS (
+    SELECT c.c_custkey, 
+           SUM(o.o_totalprice) AS total_spent, 
+           COUNT(o.o_orderkey) AS orders_count,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_in_nation
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+FinalMetrics AS (
+    SELECT c.c_name, cb.total_spent, cb.orders_count, so.total_supplycost,
+           COUNT(DISTINCT li.l_partkey) AS distinct_parts_ordered,
+           MAX(li.l_extendedprice) AS max_price,
+           AVG(NULLIF(li.l_discount, 0)) AS avg_discount_nonzero
+    FROM CustomerBalances cb
+    JOIN customer c ON cb.c_custkey = c.c_custkey
+    LEFT JOIN RankedLineItems li ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+    LEFT JOIN SupplyCost so ON li.l_partkey = so.ps_partkey
+    WHERE cb.rank_in_nation <= 10
+    GROUP BY c.c_name, cb.total_spent, cb.orders_count, so.total_supplycost
+)
+SELECT fm.c_name, fm.total_spent, fm.orders_count, fm.total_supplycost, 
+       COALESCE(fm.distinct_parts_ordered, 0) AS distinct_parts_ordered,
+       CASE 
+           WHEN fm.max_price IS NULL THEN 'No Orders' 
+           ELSE CAST(fm.max_price AS VARCHAR)
+       END AS max_price,
+       ROUND(fm.avg_discount_nonzero, 4) AS avg_discount
+FROM FinalMetrics fm
+WHERE (fm.total_spent > 1000 OR fm.orders_count > 5)
+ORDER BY fm.total_spent DESC, fm.orders_count ASC;

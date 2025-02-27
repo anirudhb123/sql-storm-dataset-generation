@@ -1,0 +1,49 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT c_customer_sk, 
+           s_store_sk, 
+           SUM(ss_net_profit) AS total_profit,
+           ROW_NUMBER() OVER (PARTITION BY c_customer_sk ORDER BY SUM(ss_net_profit) DESC) AS rn
+    FROM customer AS c
+    JOIN store_sales AS ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c_customer_sk, s_store_sk
+    HAVING SUM(ss_net_profit) > 1000
+),
+high_value_customers AS (
+    SELECT c.c_customer_sk,
+           SUM(ss.ss_net_paid) AS total_spent,
+           COUNT(DISTINCT ss.ss_ticket_number) AS total_purchases
+    FROM customer AS c
+    JOIN store_sales AS ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE ss.ss_sold_date_sk >= (SELECT MAX(d.d_date_sk) 
+                                  FROM date_dim AS d 
+                                  WHERE d.d_year = 2023)
+    GROUP BY c.c_customer_sk
+    HAVING SUM(ss.ss_net_paid) > 5000
+),
+profit_analysis AS (
+    SELECT s.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           s.s_store_sk,
+           s.total_profit,
+           h.total_spent,
+           h.total_purchases,
+           (s.total_profit * 1.0 / NULLIF(h.total_spent, 0)) AS profit_margin
+    FROM sales_hierarchy AS s
+    JOIN high_value_customers AS h ON s.c_customer_sk = h.c_customer_sk
+    JOIN customer AS c ON s.c_customer_sk = c.c_customer_sk
+    WHERE s.rn <= 10
+)
+SELECT p.c_customer_sk, 
+       p.c_first_name, 
+       p.c_last_name, 
+       p.s_store_sk, 
+       p.total_profit, 
+       p.total_spent, 
+       p.total_purchases, 
+       p.profit_margin
+FROM profit_analysis AS p
+WHERE p.profit_margin IS NOT NULL
+ORDER BY p.profit_margin DESC
+LIMIT 20;

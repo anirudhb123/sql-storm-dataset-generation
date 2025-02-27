@@ -1,0 +1,63 @@
+
+WITH RECURSIVE potential_suppliers AS (
+    SELECT 
+        ps.suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_size > 10
+    GROUP BY 
+        ps.suppkey
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 100.00
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+max_orders AS (
+    SELECT 
+        c.c_custkey, 
+        MAX(co.order_count) AS max_order_count
+    FROM 
+        customer_orders co
+    JOIN 
+        customer c ON co.c_custkey = c.c_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_name,
+    SUM(ps.total_supply_cost) AS total_cost,
+    COALESCE(MAX(co.total_spent), 0) AS highest_spender
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    potential_suppliers ps ON s.s_suppkey = ps.suppkey
+LEFT JOIN 
+    customer_orders co ON s.s_nationkey = co.c_nationkey
+WHERE 
+    r.r_comment IS NULL
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(ps.total_supply_cost) > 10000
+ORDER BY 
+    highest_spender DESC
+LIMIT 10;

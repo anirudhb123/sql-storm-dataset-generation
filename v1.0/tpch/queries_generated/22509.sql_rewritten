@@ -1,0 +1,81 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+TopConsumers AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        total_spent > 10000
+),
+AggregateLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+    HAVING 
+        net_revenue > 5000
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_brand,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, p.p_brand
+)
+SELECT 
+    C.name,
+    COALESCE(S.SupplierName, 'No Suppliers') AS SupplierName,
+    L.l_orderkey,
+    RANK() OVER (PARTITION BY C.c_custkey ORDER BY SUM(AF.net_revenue) DESC) as cust_rank
+FROM 
+    TopConsumers C
+LEFT JOIN 
+    (SELECT 
+        S.s_name AS SupplierName, 
+        PS.ps_partkey, 
+        PS.ps_suppkey 
+     FROM 
+        RankedSuppliers S
+     JOIN 
+        SupplierParts PS ON S.s_suppkey = PS.ps_suppkey
+     WHERE 
+        S.rn <= 3
+    ) S ON C.c_custkey = S.ps_partkey
+JOIN 
+    AggregateLineItems AF ON AF.l_orderkey = S.ps_partkey
+JOIN 
+    orders O ON O.o_orderkey = AF.l_orderkey
+JOIN 
+    lineitem L ON L.l_orderkey = O.o_orderkey
+WHERE 
+    NULLIF(O.o_totalprice, 0) IS NOT NULL
+    AND LENGTH(C.c_name) IN (10, 15, 20)
+GROUP BY 
+    C.name, S.SupplierName, L.l_orderkey
+ORDER BY 
+    C.name, cust_rank DESC
+FETCH FIRST 10 ROWS ONLY;

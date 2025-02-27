@@ -1,0 +1,85 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'P') 
+        AND o.o_orderdate >= DATE '1995-01-01'
+),
+SuspiciousSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS TotalSupplyCost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost) > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS TotalOrders,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey
+),
+FinalResults AS (
+    SELECT 
+        r.region_name,
+        COUNT(DISTINCT o.o_orderkey) AS OrdersInRegion,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice ELSE 0 END) AS TotalReturns,
+        SUM(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice END) AS DiscountedSales
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN 
+        RankedOrders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderkey IS NOT NULL OR l.l_returnflag IS NULL
+    GROUP BY 
+        r.region_name
+)
+
+SELECT 
+    cs.c_custkey,
+    cs.TotalOrders,
+    cs.TotalSpent,
+    ss.s_suppkey,
+    ss.s_name,
+    fr.OrdersInRegion,
+    fr.TotalReturns,
+    fr.DiscountedSales
+FROM 
+    CustomerStats cs
+JOIN 
+    SuspiciousSuppliers ss ON cs.TotalSpent > 1000 AND ss.TotalSupplyCost IS NOT NULL
+JOIN 
+    FinalResults fr ON cs.TotalOrders >= fr.OrdersInRegion OR fr.TotalReturns IS NULL
+WHERE 
+    (cs.TotalSpent IS NULL OR cs.TotalOrders = 0 OR cs.TotalOrders > 5) AND 
+    (fr.DiscountedSales IS NOT NULL OR fr.TotalReturns < 0)
+ORDER BY 
+    cs.TotalSpent DESC, fr.OrdersInRegion ASC;

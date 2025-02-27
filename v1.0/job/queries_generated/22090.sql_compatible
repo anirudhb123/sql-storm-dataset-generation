@@ -1,0 +1,73 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank,
+        COUNT(mk.movie_id) OVER (PARTITION BY t.production_year) AS movie_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL AND t.production_year > 2000
+),
+PersonDetails AS (
+    SELECT 
+        a.name AS actor_name,
+        pi.info AS actor_info,
+        COUNT(ci.movie_id) AS roles_count
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN 
+        person_info pi ON a.person_id = pi.person_id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.name, pi.info
+    HAVING 
+        COUNT(ci.movie_id) > 3
+),
+CompanyStats AS (
+    SELECT 
+        c.name AS company_name,
+        COUNT(mc.movie_id) AS movies_produced
+    FROM 
+        company_name c
+    LEFT JOIN 
+        movie_companies mc ON c.id = mc.company_id
+    GROUP BY 
+        c.name 
+    HAVING 
+        COUNT(mc.movie_id) > 5
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.keyword,
+    pd.actor_name,
+    pd.actor_info,
+    cs.company_name,
+    cs.movies_produced,
+    CASE 
+        WHEN rm.rank = 1 THEN 'Top Movie of the Year'
+        ELSE 'Other Movies of the Year'
+    END AS movie_rank_description
+FROM 
+    RankedMovies rm
+CROSS JOIN 
+    PersonDetails pd
+FULL OUTER JOIN 
+    CompanyStats cs ON rm.production_year = 2023 AND cs.movies_produced > 10
+WHERE 
+    (rm.keyword LIKE '%action%' OR rm.keyword LIKE '%drama%')
+    AND (pd.actor_name IS NOT NULL OR cs.company_name IS NOT NULL)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.rank, 
+    pd.roles_count DESC NULLS LAST;

@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+        AND p.Score > 0
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MIN(c.CreationDate) AS FirstCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    r.PostId,
+    r.Title,
+    r.Rank,
+    r.TotalPosts,
+    COALESCE(b.TotalBadges, 0) AS TotalBadges,
+    COALESCE(b.GoldBadges, 0) AS GoldBadges,
+    COALESCE(b.SilverBadges, 0) AS SilverBadges,
+    COALESCE(b.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(pc.CommentCount, 0) AS CommentCount,
+    COALESCE(pc.FirstCommentDate, 'No Comments') AS FirstCommentDate
+FROM 
+    Users u
+JOIN 
+    RankedPosts r ON u.Id = r.OwnerUserId
+LEFT JOIN 
+    UserBadges b ON u.Id = b.UserId
+LEFT JOIN 
+    PostComments pc ON r.PostId = pc.PostId
+WHERE 
+    r.Rank <= 3
+ORDER BY 
+    u.Reputation DESC, r.CreationDate ASC
+LIMIT 50;
+
+-- Count downvotes where UserId is NULL & include outer join scenario
+SELECT 
+    Posts.Title, 
+    COUNT(Votes.Id) AS DownvoteCount 
+FROM 
+    Posts 
+LEFT JOIN 
+    Votes ON Posts.Id = Votes.PostId AND Votes.VoteTypeId = 3 
+WHERE 
+    Posts.OwnerUserId IS NULL 
+GROUP BY 
+    Posts.Title 
+HAVING 
+    COUNT(Votes.Id) > 0
+ORDER BY 
+    DownvoteCount DESC
+LIMIT 10;

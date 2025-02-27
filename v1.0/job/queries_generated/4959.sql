@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+CastSummary AS (
+    SELECT 
+        tm.id AS movie_id,
+        COUNT(DISTINCT ci.person_id) AS num_cast_members,
+        STRING_AGG(DISTINCT an.name, ', ') AS cast_names
+    FROM 
+        RankedMovies tm
+    LEFT JOIN 
+        cast_info ci ON tm.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        tm.id
+), 
+TitleInfo AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        ci.kind_id,
+        ki.keyword,
+        i.info
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword km ON m.id = km.movie_id
+    LEFT JOIN 
+        keyword ki ON km.keyword_id = ki.id
+    LEFT JOIN 
+        movie_info i ON m.id = i.movie_id
+)
+
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    cs.num_cast_members,
+    cs.cast_names,
+    ti.kind_id,
+    ti.keyword,
+    ti.info,
+    COALESCE((SELECT COUNT(mk.id)
+              FROM movie_keyword mk
+              WHERE mk.movie_id = rm.movie_id), 0) AS keyword_count
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastSummary cs ON rm.movie_id = cs.movie_id
+LEFT JOIN 
+    TitleInfo ti ON rm.movie_id = ti.movie_id
+WHERE 
+    rm.year_rank <= 5
+ORDER BY 
+    rm.production_year DESC, 
+    cs.num_cast_members DESC
+LIMIT 10;

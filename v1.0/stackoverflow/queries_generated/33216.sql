@@ -1,0 +1,91 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS HistoryEntries,
+        STRING_AGG(DISTINCT cht.Name, ', ') AS ClosedReasons
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes cht ON ph.Comment::integer = cht.Id
+    GROUP BY 
+        ph.PostId
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TagUsageCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName
+    ORDER BY 
+        TagUsageCount DESC
+    LIMIT 5
+)
+SELECT 
+    ua.DisplayName,
+    ua.PostCount,
+    ua.TotalViews,
+    ua.TotalUpvotes,
+    ua.TotalDownvotes,
+    ph.PostId,
+    ph.Title,
+    ph.Level,
+    COALESCE(phs.HistoryEntries, 0) AS HistoryEntries,
+    phs.ClosedReasons,
+    pt.TagName,
+    pt.TagUsageCount
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    PostHierarchy ph ON ph.PostId IN (SELECT DISTINCT Id FROM Posts WHERE OwnerUserId = ua.UserId)
+LEFT JOIN 
+    PostHistoryStats phs ON phs.PostId = ph.PostId
+LEFT JOIN 
+    PopularTags pt ON pt.TagName IN (SELECT UNNEST(STRING_TO_ARRAY(p.Tags, ',')) FROM Posts p WHERE p.Id = ph.PostId)
+WHERE 
+    ua.TotalViews > 1000
+ORDER BY 
+    ua.TotalUpvotes DESC, ua.TotalViews DESC;

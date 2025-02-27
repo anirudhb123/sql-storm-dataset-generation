@@ -1,0 +1,43 @@
+
+WITH RECURSIVE OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, c.c_acctbal, c.c_custkey,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierAggregate AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name AS rc_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+LineItemAnalysis AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales,
+           AVG(l.l_quantity) AS avg_quantity,
+           COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS returns_count
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT os.o_orderkey, os.o_orderdate, os.o_totalprice, os.c_name, os.c_acctbal, 
+       nr.rc_name AS region, la.net_sales, la.avg_quantity, la.returns_count,
+       COALESCE(sa.total_cost, 0) AS supplier_cost
+FROM OrderSummary os
+LEFT JOIN NationRegion nr ON os.c_custkey = nr.n_nationkey
+LEFT JOIN LineItemAnalysis la ON os.o_orderkey = la.l_orderkey
+LEFT JOIN SupplierAggregate sa ON sa.s_suppkey = (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    INNER JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+    WHERE li.l_orderkey = os.o_orderkey
+    LIMIT 1
+)
+WHERE os.rn = 1
+ORDER BY os.o_orderdate DESC, os.o_totalprice DESC;

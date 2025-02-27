@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS RankScore,
+        COUNT(*) OVER (PARTITION BY P.OwnerUserId) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY P.Id), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY P.Id), 0) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND P.Score IS NOT NULL
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseVoteCount,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    GROUP BY 
+        PH.PostId
+),
+PostSummary AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.ViewCount,
+        RP.Score,
+        RP.OwnerDisplayName,
+        RP.RankScore,
+        RP.TotalPosts,
+        RP.UpVotes,
+        RP.DownVotes,
+        COALESCE(CP.CloseVoteCount, 0) AS CloseVoteCount,
+        CP.LastClosedDate
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        ClosedPosts CP ON RP.PostId = CP.PostId
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.ViewCount,
+    PS.Score,
+    PS.OwnerDisplayName,
+    PS.RankScore,
+    PS.TotalPosts,
+    PS.UpVotes,
+    PS.DownVotes,
+    PS.CloseVoteCount,
+    CASE 
+        WHEN PS.CloseVoteCount > 0 THEN 'Closed'
+        WHEN PS.TotalPosts < 5 THEN 'Low Activity'
+        ELSE 'Active'
+    END AS ActivityStatus,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+FROM 
+    PostSummary PS
+LEFT JOIN 
+    Posts P ON PS.PostId = P.Id
+LEFT JOIN 
+    Tags T ON T.Id IN (SELECT UNNEST(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><'))::int)
+)
+GROUP BY 
+    PS.PostId, PS.Title, PS.CreationDate, PS.ViewCount, PS.Score, PS.OwnerDisplayName, 
+    PS.RankScore, PS.TotalPosts, PS.UpVotes, PS.DownVotes, PS.CloseVoteCount
+HAVING 
+    PS.Score > 0
+ORDER BY 
+    PS.Score DESC, PS.CloseVoteCount DESC
+LIMIT 100;

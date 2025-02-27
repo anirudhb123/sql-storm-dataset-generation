@@ -1,0 +1,42 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, oh.o_custkey, oh.o_orderdate, oh.o_totalprice, oh.level + 1
+    FROM orders oh
+    JOIN OrderHierarchy oh2 ON oh.o_custkey = oh2.o_custkey
+    WHERE oh.o_orderdate > oh2.o_orderdate
+),
+SupplierCosts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+CustomerRank AS (
+    SELECT c.c_custkey, c.c_name, RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS cust_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+    COALESCE(SUM(sc.total_supply_cost), 0) AS total_supply_cost,
+    r.r_name AS region,
+    cr.cust_rank
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN SupplierCosts sc ON p.p_partkey = sc.ps_partkey
+LEFT JOIN nation n ON n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = sc.ps_suppkey)
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN CustomerRank cr ON cr.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT DISTINCT l.l_orderkey FROM lineitem l))
+GROUP BY p.p_partkey, p.p_name, r.r_name, cr.cust_rank
+HAVING COUNT(DISTINCT l.l_orderkey) >= 1
+ORDER BY total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

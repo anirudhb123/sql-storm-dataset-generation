@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserContributions AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.ViewCount) AS AvgViews,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalQuestions,
+        TotalViews,
+        AvgViews,
+        AcceptedAnswers,
+        RANK() OVER (ORDER BY TotalViews DESC) AS UserRank
+    FROM 
+        UserContributions
+)
+SELECT 
+    u.DisplayName,
+    p.Title,
+    p.ViewCount,
+    p.Tags,
+    up.TotalQuestions,
+    up.TotalViews,
+    up.AvgViews,
+    up.AcceptedAnswers,
+    CASE 
+        WHEN up.UserRank <= 10 THEN 'Top Contributor'
+        ELSE 'Contributing'
+    END AS UserStatus
+FROM 
+    RankedPosts p
+JOIN 
+    TopUsers up ON p.OwnerUserId = up.UserId
+WHERE 
+    p.Rank <= 5 
+ORDER BY 
+    up.TotalViews DESC, p.ViewCount DESC;

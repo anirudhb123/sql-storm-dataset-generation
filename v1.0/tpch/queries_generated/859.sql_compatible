@@ -1,0 +1,57 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(DISTINCT l.l_partkey) AS unique_part_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    cs.total_orders,
+    cs.total_spent,
+    ss.total_available_quantity,
+    ss.avg_supply_cost,
+    li.revenue,
+    li.unique_part_count
+FROM 
+    CustomerOrderStats cs
+FULL OUTER JOIN 
+    SupplierStats ss ON cs.c_custkey = ss.s_suppkey
+JOIN 
+    LineItemDetails li ON li.l_orderkey = cs.total_orders
+WHERE 
+    cs.total_spent IS NOT NULL 
+    OR ss.total_available_quantity IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC NULLS LAST, 
+    li.unique_part_count DESC;

@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        GREATEST(COALESCE(k.keyword_count, 0), 0) AS keyword_count,
+        COALESCE(cast_count.cast_total, 0) AS cast_total
+    FROM 
+        aka_title m
+    LEFT JOIN (
+        SELECT 
+            movie_id, 
+            COUNT(*) AS cast_total 
+        FROM 
+            cast_info 
+        GROUP BY 
+            movie_id
+    ) cast_count ON m.id = cast_count.movie_id
+    LEFT JOIN (
+        SELECT 
+            mk.movie_id,
+            COUNT(k.id) AS keyword_count
+        FROM
+            movie_keyword mk
+        JOIN
+            keyword k ON mk.keyword_id = k.id
+        GROUP BY 
+            mk.movie_id
+    ) k ON m.id = k.movie_id
+),
+
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.keyword_count,
+        rm.cast_total,
+        ROW_NUMBER() OVER (ORDER BY rm.keyword_count DESC, rm.cast_total DESC) AS rank
+    FROM 
+        RankedMovies rm
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.keyword_count,
+    tm.cast_total,
+    p.name AS director_name,
+    GROUP_CONCAT(DISTINCT g.name) AS genre_names
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_companies mc ON tm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name p ON mc.company_id = p.id AND mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Director')
+LEFT JOIN 
+    movie_info mi ON tm.movie_id = mi.movie_id
+LEFT JOIN 
+    info_type it ON mi.info_type_id = it.id
+LEFT JOIN 
+    movie_keyword mk ON tm.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword g ON mk.keyword_id = g.id
+WHERE 
+    tm.rank <= 10
+GROUP BY 
+    tm.movie_id, tm.title, tm.production_year, tm.keyword_count, tm.cast_total, p.name
+ORDER BY 
+    tm.rank
+

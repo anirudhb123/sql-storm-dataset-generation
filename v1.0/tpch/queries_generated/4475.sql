@@ -1,0 +1,62 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+RecentLineItems AS (
+    SELECT 
+        l.l_partkey,
+        l.l_suppkey,
+        l.l_orderkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        RANK() OVER (PARTITION BY l.l_partkey ORDER BY l.l_shipdate DESC) AS recent_rank
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATEADD(year, -1, GETDATE())
+)
+SELECT 
+    p.p_name,
+    SUM(rl.l_extendedprice * (1 - rl.l_discount)) AS revenue,
+    COALESCE(c.total_spent, 0) AS customer_spending,
+    sp.total_supply_cost
+FROM 
+    part p
+LEFT JOIN 
+    RecentLineItems rl ON p.p_partkey = rl.l_partkey
+LEFT JOIN 
+    CustomerOrders c ON c.c_custkey = (SELECT TOP 1 o.o_custkey 
+                                          FROM orders o 
+                                          WHERE o.o_orderkey = rl.l_orderkey
+                                          ORDER BY o.o_orderdate DESC)
+LEFT JOIN 
+    SupplierParts sp ON rl.l_suppkey = sp.s_suppkey
+WHERE 
+    rl.recent_rank = 1
+GROUP BY 
+    p.p_name, c.total_spent, sp.total_supply_cost
+HAVING 
+    SUM(rl.l_extendedprice * (1 - rl.l_discount)) > 1000 
+ORDER BY 
+    revenue DESC;

@@ -1,0 +1,44 @@
+
+WITH RECURSIVE recent_orders AS (
+    SELECT o_orderkey, o_orderdate, o_totalprice, o_custkey
+    FROM orders
+    WHERE o_orderdate >= DATE '1997-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey
+    FROM orders o
+    JOIN recent_orders ro ON ro.o_orderkey < o.o_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+supplier_performance AS (
+    SELECT ps.s_suppkey, COUNT(*) AS supplier_count, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    GROUP BY ps.s_suppkey
+),
+order_details AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value, o.o_orderdate
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+nation_info AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name AS region_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    r.region_name,
+    AVG(sp.total_sales) AS avg_sales_per_supplier,
+    MAX(od.total_order_value) AS highest_order_value,
+    COUNT(DISTINCT od.o_orderkey) AS total_orders
+FROM supplier_performance sp
+JOIN supplier s ON sp.s_suppkey = s.s_suppkey
+JOIN customer c ON s.s_nationkey = c.c_nationkey
+JOIN order_details od ON c.c_custkey = od.o_orderkey
+JOIN nation_info n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_nationkey = r.n_nationkey
+WHERE od.o_orderdate >= DATE '1997-01-01'
+GROUP BY n.n_name, r.region_name
+ORDER BY avg_sales_per_supplier DESC
+LIMIT 10;

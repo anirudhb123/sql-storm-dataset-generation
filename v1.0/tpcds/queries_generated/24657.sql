@@ -1,0 +1,75 @@
+
+WITH Address AS (
+    SELECT 
+        ca_address_id, 
+        ca_city, 
+        ca_state, 
+        ca_country, 
+        COUNT(ca_address_id) AS address_count
+    FROM customer_address
+    GROUP BY ca_address_id, ca_city, ca_state, ca_country
+),
+Demographics AS (
+    SELECT 
+        cd_demo_sk, 
+        cd_gender, 
+        cd_marital_status, 
+        cd_purchase_estimate,
+        CASE 
+            WHEN cd_purchase_estimate > 1000 THEN 'High'
+            WHEN cd_purchase_estimate BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS purchase_category
+    FROM customer_demographics
+    WHERE cd_gender IS NOT NULL
+),
+Sales AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM web_sales 
+    WHERE ws_sales_price IS NOT NULL 
+    GROUP BY ws_bill_customer_sk
+),
+Returns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_amt) AS total_returns,
+        COUNT(sr_ticket_number) AS return_count
+    FROM store_returns
+    WHERE sr_return_amt IS NOT NULL
+    GROUP BY sr_customer_sk
+),
+Combined AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        a.ca_city,
+        a.ca_state,
+        a.address_count,
+        d.purchase_category,
+        s.total_sales,
+        COALESCE(r.total_returns, 0) AS total_returns,
+        COALESCE(r.return_count, 0) AS return_count
+    FROM customer c
+    LEFT JOIN Address a ON c.c_current_addr_sk = a.ca_address_id
+    LEFT JOIN Demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    LEFT JOIN Sales s ON c.c_customer_sk = s.customer_sk
+    LEFT JOIN Returns r ON c.c_customer_sk = r.sr_customer_sk
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_sales IS NULL AND total_returns > 0 THEN 'Returns Only'
+        WHEN total_sales IS NOT NULL AND total_returns = 0 THEN 'Sales Only'
+        ELSE 'Both Sales and Returns'
+    END AS sales_return_status
+FROM Combined
+WHERE 
+    (address_count IS NOT NULL AND address_count > 1)
+    OR (purchase_category = 'High')
+ORDER BY total_sales DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,54 @@
+WITH MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        k.keyword AS movie_keyword,
+        STRING_AGG(a.name, ', ') AS cast_names,
+        STRING_AGG(DISTINCT c.kind, ', ') AS companies
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_id, 
+        movie_title, 
+        production_year,
+        movie_keyword,
+        cast_names,
+        companies,
+        RANK() OVER (PARTITION BY movie_keyword ORDER BY production_year DESC) AS keyword_rank
+    FROM 
+        MovieDetails
+)
+SELECT 
+    movie_id,
+    movie_title,
+    production_year,
+    movie_keyword,
+    cast_names,
+    companies
+FROM 
+    TopMovies
+WHERE 
+    keyword_rank <= 3
+ORDER BY 
+    movie_keyword, production_year DESC;

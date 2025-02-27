@@ -1,0 +1,75 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+influential_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        SUM(ws.ws_ext_sales_price) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_marital_status = 'M' AND 
+        cd.cd_dep_count > 0
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+    HAVING 
+        SUM(ws.ws_ext_sales_price) > 1000
+),
+top_selling_items AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_product_name, 
+        SUM(ws.ws_quantity) AS total_sold,
+        RANK() OVER (ORDER BY SUM(ws.ws_quantity) DESC) AS rank
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_id, i.i_product_name
+)
+SELECT 
+    w.warehouse_name,
+    ts.i_item_id,
+    ts.total_sold,
+    ecs.total_customers AS customer_reached,
+    COALESCE(NULLIF(ts.total_sold - SUM(ss.total_quantity), 0), 'No Sales') AS stock_issues,
+    e_c.c_first_name || ' ' || e_c.c_last_name AS influential_customer,
+    CASE 
+        WHEN ecs.total_customers IS NULL THEN 'No influencing customer found' 
+        ELSE 'Influential Customer found!' 
+    END AS customer_influence_message
+FROM 
+    warehouse w
+LEFT JOIN 
+    store s ON w.warehouse_sk = s.store_sk
+LEFT JOIN 
+    top_selling_items ts ON ts.i_item_sk = s.store_sk
+LEFT JOIN 
+    (SELECT COUNT(DISTINCT ic.c_customer_sk) AS total_customers FROM influential_customers ic) ecs ON 1 = 1
+LEFT JOIN 
+    influential_customers e_c ON e_c.c_customer_sk = (SELECT c_customer_sk FROM influential_customers ORDER BY total_spent DESC LIMIT 1)
+LEFT JOIN 
+    sales_summary ss ON ts.i_item_sk = ss.ws_item_sk
+GROUP BY 
+    w.warehouse_name, ts.i_item_id, e_c.c_first_name, e_c.c_last_name, ecs.total_customers, ts.total_sold
+ORDER BY 
+    ts.total_sold DESC,
+    influential_customer;

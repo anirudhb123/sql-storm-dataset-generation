@@ -1,0 +1,39 @@
+WITH RECURSIVE CustAgg AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, ca.total_spent, ca.order_count
+    FROM CustAgg ca
+    JOIN customer c ON ca.c_custkey = c.c_custkey
+    WHERE ca.total_spent > (SELECT AVG(total_spent) FROM CustAgg)
+),
+RegionNation AS (
+    SELECT r.r_name, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name, n.n_name
+),
+FinalResult AS (
+    SELECT p.p_name, ps.total_available, r.r_name AS region_name, n.n_name AS nation_name,
+           ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY ps.total_available DESC) AS rank
+    FROM PartSupplier ps
+    JOIN RegionNation rn ON rn.supplier_count > 0
+    JOIN part p ON p.p_partkey = ps.p_partkey
+    JOIN nation n ON rn.n.n_name IN (SELECT DISTINCT n_name FROM nation WHERE n.n_nationkey IS NOT NULL)
+    CROSS JOIN region r
+)
+SELECT f.region_name, f.nation_name, f.p_name, f.total_available, hc.total_spent, hc.order_count
+FROM FinalResult f
+JOIN HighValueCustomers hc ON hc.total_spent IS NOT NULL
+WHERE f.total_available > 100
+ORDER BY f.region_name, f.nation_name, f.total_available DESC;

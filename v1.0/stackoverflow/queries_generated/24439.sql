@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(CASE WHEN C.UserId IS NOT NULL THEN 1 END) AS CommentCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank,
+        MAX(PH.CreationDate) FILTER (WHERE PH.PostHistoryTypeId IN (10, 11)) AS PostClosureDate,
+        ARRAY_AGG(DISTINCT T.TagName) AS TagsArray
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        Tags T ON T.ExcerptPostId = P.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, P.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        R.*,
+        CASE 
+            WHEN PostClosureDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus
+    FROM 
+        RankedPosts R
+),
+PopularUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(V.BountyAmount) AS TotalBounties,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        RANK() OVER (ORDER BY SUM(V.BountyAmount) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8 -- BountyStart
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+UserPostStats AS (
+    SELECT 
+        CU.UserId,
+        CU.DisplayName,
+        COUNT(DISTINCT CP.PostId) AS ClosedPostsCount,
+        COUNT(DISTINCT CP.CommentCount) AS TotalComments
+    FROM 
+        PopularUsers PU
+    JOIN 
+        ClosedPosts CP ON PU.UserId = CP.OwnerUserId
+    JOIN 
+        Users CU ON CP.OwnerUserId = CU.Id
+    GROUP BY 
+        CU.UserId, CU.DisplayName
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.ClosedPostsCount,
+    U.TotalComments,
+    P.Title,
+    P.CreationDate,
+    COALESCE(P.TagsArray, '{}') AS Tags,
+    CASE 
+        WHEN P.PostStatus = 'Closed' THEN 'This post is closed.'
+        ELSE 'This post is open for discussion.'
+    END AS StatusMessage
+FROM 
+    UserPostStats U
+JOIN 
+    ClosedPosts P ON U.UserId = P.OwnerUserId
+WHERE 
+    U.ClosedPostsCount > 0
+ORDER BY 
+    U.ClosedPostsCount DESC, U.TotalComments DESC
+LIMIT 10;

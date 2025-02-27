@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Score,
+        ARRAY_AGG(DISTINCT TRIM(BOTH ' ' FROM unnest(string_to_array(p.Tags, '>')))) AS TagList,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only interested in Questions
+        AND p.ViewCount > 100 -- Filtering for questions with more than 100 views
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.AnswerCount, p.Score
+),
+
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpvotesReceived,
+        SUM(v.VoteTypeId = 3) AS DownvotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    r.Title,
+    r.Body,
+    r.ViewCount,
+    r.AnswerCount,
+    r.Score,
+    r.TagList,
+    u.DisplayName AS QuestionOwner,
+    ue.CommentCount,
+    ue.UpvotesReceived,
+    ue.DownvotesReceived
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.PostId = u.Id
+JOIN 
+    UserEngagement ue ON u.Id = ue.UserId
+WHERE 
+    r.PostRank = 1 -- Selecting only the most recent post per user
+ORDER BY 
+    r.CreationDate DESC;

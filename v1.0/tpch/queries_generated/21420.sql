@@ -1,0 +1,56 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 1 AS level
+    FROM nation n
+    WHERE n.n_nationkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_regionkey
+), 
+HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+),
+PartLineItemDetails AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_returned_price,
+        COUNT(l.l_orderkey) AS total_orders,
+        COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+RankedParts AS (
+    SELECT p.p_partkey, p.p_name, p.total_returned_price, p.total_orders, p.unique_suppliers,
+           RANK() OVER (ORDER BY p.total_returned_price DESC) AS price_rank
+    FROM PartLineItemDetails p
+    WHERE p.total_orders > 5
+),
+SupplierPartDetails AS (
+    SELECT ps.ps_partkey, ps.ps_supplycost, ps.ps_availqty, s.s_name
+    FROM partsupp ps
+    JOIN HighValueSuppliers s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT
+    np.n_name AS Nation_Name,
+    rp.p_name AS Part_Name,
+    rp.total_returned_price,
+    rp.total_orders,
+    sp.ps_supplycost,
+    sp.ps_availqty,
+    CASE 
+        WHEN rp.total_orders > 10 THEN 'High Volume'
+        WHEN rp.total_orders BETWEEN 5 AND 10 THEN 'Medium Volume'
+        ELSE 'Low Volume'
+    END AS Order_Volume_Category
+FROM RankedParts rp
+INNER JOIN NationHierarchy nh ON nh.level IN (1, 2)
+LEFT JOIN SupplierPartDetails sp ON rp.p_partkey = sp.ps_partkey
+JOIN nation n ON nh.n_nationkey = n.n_nationkey
+WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE 'A%')
+AND (sp.ps_supplycost IS NULL OR sp.ps_supplycost > 500)
+ORDER BY rp.price_rank, rp.total_returned_price DESC
+LIMIT 100;

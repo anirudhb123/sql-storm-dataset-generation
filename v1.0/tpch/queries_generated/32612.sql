@@ -1,0 +1,54 @@
+WITH RECURSIVE RegionalSales AS (
+    SELECT 
+        r.r_name AS region, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        r.r_name
+    UNION ALL
+    SELECT 
+        rs.region, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY rs.region ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        RegionalSales rs
+    JOIN 
+        orders o ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        rs.region
+)
+SELECT 
+    r.region, 
+    COALESCE(SUM(rs.total_sales), 0) AS cumulative_sales,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    MAX(c.c_acctbal) AS max_account_balance
+FROM 
+    region r
+LEFT JOIN 
+    RegionalSales rs ON r.r_name = rs.region
+LEFT JOIN 
+    customer c ON c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = r.r_regionkey)
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.region
+HAVING 
+    cumulative_sales > 10000
+ORDER BY 
+    max_account_balance DESC, 
+    cumulative_sales DESC
+LIMIT 10;

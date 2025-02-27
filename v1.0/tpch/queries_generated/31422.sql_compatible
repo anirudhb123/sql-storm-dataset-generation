@@ -1,0 +1,70 @@
+
+WITH RECURSIVE price_summary AS (
+    SELECT 
+        ps_partkey,
+        COUNT(*) AS supplier_count,
+        SUM(ps_availqty) AS total_availqty,
+        SUM(ps_supplycost) AS total_supplycost,
+        SUM(ps_supplycost / NULLIF(ps_availqty, 0)) AS avg_supplycost
+    FROM 
+        partsupp
+    GROUP BY 
+        ps_partkey
+), 
+nation_summary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(s.s_acctbal) AS total_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(s.s_acctbal) DESC) AS rank
+    FROM 
+        nation n 
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name, n.n_regionkey
+), 
+order_details AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(DISTINCT l.l_partkey) AS part_count,
+        AVG(l.l_discount) AS avg_discount
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, c.c_name
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ps.supplier_count,
+    ps.total_availqty,
+    ps.total_supplycost,
+    ps.avg_supplycost,
+    n.n_name AS supplier_nation,
+    n.total_acctbal,
+    o.total_order_value,
+    o.part_count,
+    o.avg_discount
+FROM 
+    part p
+LEFT JOIN 
+    price_summary ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    nation_summary n ON n.n_nationkey = (SELECT DISTINCT s.s_nationkey 
+                                           FROM supplier s 
+                                           JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+                                           WHERE ps.ps_partkey = p.p_partkey LIMIT 1)
+LEFT JOIN 
+    order_details o ON (SELECT COUNT(*) FROM lineitem l WHERE l.l_partkey = p.p_partkey) > 0
+ORDER BY 
+    p.p_partkey;

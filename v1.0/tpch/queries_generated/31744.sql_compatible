@@ -1,0 +1,45 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+    UNION ALL
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN supplier sp ON sh.s_nationkey = sp.s_nationkey
+    WHERE sp.s_acctbal > (sh.level + 1) * 5000
+), 
+total_sales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+nation_totals AS (
+    SELECT n.n_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_nationkey
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+),
+ranked_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.n_name, s.revenue, 
+           RANK() OVER (PARTITION BY s.n_name ORDER BY s.revenue DESC) AS rank
+    FROM supplier_summary s
+    WHERE s.revenue IS NOT NULL
+)
+SELECT n.n_name AS r_name, sh.level, COUNT(DISTINCT r.s_suppkey) AS supplier_count, SUM(r.revenue) AS total_revenue
+FROM nation_totals n
+JOIN ranked_suppliers r ON n.n_nationkey = r.n_nationkey
+JOIN supplier_hierarchy sh ON r.s_suppkey = sh.s_suppkey
+WHERE n.total_cost > 100000
+GROUP BY n.n_name, sh.level
+ORDER BY n.n_name, sh.level;

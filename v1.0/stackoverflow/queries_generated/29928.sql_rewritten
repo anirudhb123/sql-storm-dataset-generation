@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+
+FilteredTags AS (
+    SELECT 
+        PostId,
+        STRING_AGG(DISTINCT TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><'))), ', ') AS TagsList
+    FROM 
+        Posts
+    GROUP BY 
+        PostId
+)
+
+SELECT 
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.CommentCount,
+    rp.VoteCount,
+    ft.TagsList
+FROM 
+    RankedPosts rp
+JOIN 
+    FilteredTags ft ON rp.PostId = ft.PostId
+WHERE 
+    rp.rn = 1 
+ORDER BY 
+    rp.CreationDate DESC
+FETCH FIRST 100 ROWS ONLY;

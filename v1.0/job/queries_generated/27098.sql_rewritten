@@ -1,0 +1,54 @@
+WITH movie_data AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        k.keyword AS movie_keyword,
+        c.name AS company_name,
+        ARRAY_AGG(DISTINCT CONCAT(a.name, ' as ', r.role)) AS cast_list
+    FROM 
+        aka_title AS m
+    JOIN 
+        movie_keyword AS mk ON m.id = mk.movie_id
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    JOIN 
+        movie_companies AS mc ON m.id = mc.movie_id
+    JOIN 
+        company_name AS c ON mc.company_id = c.id
+    JOIN 
+        cast_info AS ci ON m.id = ci.movie_id
+    JOIN 
+        role_type AS r ON ci.role_id = r.id
+    JOIN 
+        aka_name AS a ON ci.person_id = a.person_id
+    GROUP BY 
+        m.id, m.title, m.production_year, c.name
+),
+extended_movie_data AS (
+    SELECT 
+        md.movie_id,
+        md.movie_title,
+        md.production_year,
+        md.movie_keyword,
+        md.company_name,
+        md.cast_list,
+        COUNT(DISTINCT md.movie_keyword) OVER (PARTITION BY md.movie_id) AS keyword_count
+    FROM 
+        movie_data AS md
+)
+SELECT 
+    emd.movie_id,
+    emd.movie_title,
+    emd.production_year,
+    emd.movie_keyword,
+    emd.company_name,
+    emd.cast_list,
+    emd.keyword_count
+FROM 
+    extended_movie_data AS emd
+WHERE 
+    emd.production_year >= 2000
+ORDER BY 
+    emd.keyword_count DESC, emd.production_year DESC
+LIMIT 10;

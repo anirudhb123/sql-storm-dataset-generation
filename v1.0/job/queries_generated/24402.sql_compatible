@@ -1,0 +1,73 @@
+
+WITH RECURSIVE title_hierarchy AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        t.season_nr,
+        t.episode_nr,
+        t.episode_of_id,
+        0 AS level
+    FROM title t
+    WHERE t.episode_of_id IS NULL  
+    
+    UNION ALL
+
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        t.season_nr,
+        t.episode_nr,
+        t.episode_of_id,
+        th.level + 1
+    FROM title t
+    INNER JOIN title_hierarchy th ON t.episode_of_id = th.title_id  
+),
+
+actor_roles AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        ct.kind AS role_name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies
+    FROM cast_info ci
+    INNER JOIN aka_name ak ON ci.person_id = ak.person_id
+    INNER JOIN role_type ct ON ci.role_id = ct.id
+    GROUP BY a.id, ak.name, ct.kind
+),
+
+title_with_roles AS (
+    SELECT 
+        th.title,
+        th.production_year,
+        ARRAY_AGG(DISTINCT CONCAT(ar.actor_name, ' as ', ar.role_name)) AS cast_roles,
+        COUNT(ar.actor_id) AS total_cast
+    FROM title_hierarchy th
+    LEFT JOIN cast_info ci ON ci.movie_id = th.title_id
+    LEFT JOIN actor_roles ar ON ci.person_id = ar.actor_id
+    GROUP BY th.title, th.production_year
+)
+
+SELECT 
+    twr.title,
+    twr.production_year,
+    twr.total_cast,
+    CASE 
+        WHEN twr.total_cast > 10 THEN 'Ensemble Cast'
+        WHEN twr.total_cast BETWEEN 5 AND 10 THEN 'Moderate Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category,
+    COALESCE(STRING_AGG(DISTINCT ar.role_name ORDER BY ar.role_name), 'No roles') AS roles,
+    CASE 
+        WHEN twr.title ILIKE '%the%' THEN 'Themed Title'
+        ELSE 'Regular Title'
+    END AS title_category
+FROM title_with_roles twr
+LEFT JOIN cast_info ci ON ci.movie_id = twr.title_id
+LEFT JOIN actor_roles ar ON ci.person_id = ar.actor_id
+WHERE twr.production_year IS NOT NULL
+GROUP BY twr.title, twr.production_year, twr.total_cast
+ORDER BY twr.production_year DESC, twr.title;

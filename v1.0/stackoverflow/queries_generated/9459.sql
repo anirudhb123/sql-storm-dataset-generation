@@ -1,0 +1,74 @@
+WITH PopularPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(p.Tags, '><')) AS TagName) t ON TRUE
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(p.Score) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS PostsCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    GROUP BY 
+        u.Id
+    ORDER BY 
+        TotalScore DESC 
+    LIMIT 5
+),
+CommentsByTopUsers AS (
+    SELECT 
+        c.Id AS CommentId,
+        c.Text,
+        c.CreationDate,
+        u.DisplayName AS UserName,
+        p.Title AS PostTitle
+    FROM 
+        Comments c
+    JOIN 
+        TopUsers tu ON c.UserId = tu.UserId
+    JOIN 
+        Posts p ON c.PostId = p.Id
+)
+SELECT 
+    pp.Title AS PopularPostTitle,
+    pp.CreationDate AS PostCreated,
+    pp.Score AS PostScore,
+    pp.ViewCount AS PostViews,
+    pp.CommentCount AS TotalComments,
+    pp.VoteCount AS TotalVotes,
+    STRING_AGG(DISTINCT tu.DisplayName, ', ') AS EngagedUsers,
+    ARRAY_AGG(DISTINCT c.CommentId) AS UserCommentIds,
+    STRING_AGG(c.UserName || ': ' || c.Text, ' | ') AS Comments
+FROM 
+    PopularPosts pp
+LEFT JOIN 
+    CommentsByTopUsers c ON pp.Id = c.PostId
+LEFT JOIN 
+    TopUsers tu ON c.UserId = tu.UserId
+GROUP BY 
+    pp.Id
+ORDER BY 
+    pp.Score DESC, pp.ViewCount DESC 
+LIMIT 10;

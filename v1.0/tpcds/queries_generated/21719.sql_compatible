@@ -1,0 +1,48 @@
+
+WITH RECURSIVE purchase_history AS (
+    SELECT ws_ship_date_sk,
+           ws_item_sk,
+           SUM(ws_quantity) AS total_quantity,
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_ship_date_sk DESC) AS rn
+    FROM web_sales
+    WHERE ws_ship_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY ws_ship_date_sk, ws_item_sk
+),
+top_items AS (
+    SELECT i.i_item_sk,
+           i.i_item_desc,
+           i.i_current_price,
+           BOUNDS(p.total_quantity, 32) OVER (PARTITION BY p.ws_item_sk) AS price_band,
+           RANK() OVER (ORDER BY SUM(p.total_quantity) DESC) AS item_rank
+    FROM purchase_history p
+    JOIN item i ON p.ws_item_sk = i.i_item_sk
+    GROUP BY i.i_item_sk, i.i_item_desc, i.i_current_price, p.ws_item_sk
+    HAVING AVG(i.i_current_price) > 0
+),
+item_details AS (
+    SELECT t.ws_item_sk AS item_sk,
+           i.i_item_desc,
+           COALESCE(AVG(d.d_average_rating), 0) AS avg_rating,
+           SUM(t.total_quantity) AS total_sales,
+           CASE WHEN SUM(t.total_quantity) > 100 THEN 'High' 
+                WHEN SUM(t.total_quantity) BETWEEN 50 AND 100 THEN 'Medium'
+                ELSE 'Low' END AS sales_category
+    FROM purchase_history t
+    LEFT JOIN item i ON t.ws_item_sk = i.i_item_sk
+    LEFT JOIN (
+        SELECT i_item_sk,
+               AVG(i_current_price) AS d_average_rating
+        FROM item
+        GROUP BY i_item_sk
+    ) d ON d.i_item_sk = t.ws_item_sk
+    GROUP BY t.ws_item_sk, i.i_item_desc
+)
+SELECT i.i_item_desc,
+       i.total_sales,
+       i.avg_rating,
+       i.sales_category
+FROM item_details i
+JOIN top_items t ON i.item_sk = t.i_item_sk
+WHERE t.item_rank <= 5 AND (i.avg_rating IS NOT NULL OR i.total_sales > 0)
+ORDER BY i.sales_category DESC, i.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

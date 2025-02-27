@@ -1,0 +1,71 @@
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(C.Id) AS TotalComments,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+RecentEdits AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId,
+        PH.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY PH.UserId ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 24) -- Edit Title, Edit Body, Suggested Edit Applied
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = P.Tags::integer[] -- Assume Tags are set up to link to Tag IDs
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(*) > 10 -- Only tags with more than 10 posts
+),
+UserRanking AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.TotalPosts,
+        U.TotalComments,
+        U.TotalBounty,
+        RANK() OVER (ORDER BY U.TotalPosts DESC, U.TotalComments DESC) AS UserRank
+    FROM 
+        UserActivity U
+)
+SELECT 
+    UR.DisplayName,
+    UR.TotalPosts,
+    UR.TotalComments,
+    UR.TotalBounty,
+    COALESCE(RE.EditRank, 0) AS RecentEditRank,
+    TT.TagName,
+    TT.PostCount
+FROM 
+    UserRanking UR
+LEFT JOIN 
+    RecentEdits RE ON UR.UserId = RE.UserId AND RE.EditRank = 1
+LEFT JOIN 
+    TopTags TT ON TT.PostCount = (SELECT MAX(PostCount) FROM TopTags) 
+WHERE 
+    UR.TotalPosts > 0
+ORDER BY 
+    UR.UserRank, UR.DisplayName;

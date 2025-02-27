@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+), 
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+), 
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstCloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.DisplayName,
+    COUNT(rp.PostId) AS QuestionsRanked,
+    AVG(up.Reputation) AS AvgReputation,
+    COALESCE(cp.FirstCloseDate, 'No Close') AS FirstCloseDate,
+    STRING_AGG(DISTINCT p.Title, ', ') AS PostTitles
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation up ON rp.PostId = up.UserId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.Rank <= 5
+GROUP BY 
+    up.UserId, up.DisplayName
+HAVING 
+    COUNT(rp.PostId) > 0
+ORDER BY 
+    AvgReputation DESC
+LIMIT 10;

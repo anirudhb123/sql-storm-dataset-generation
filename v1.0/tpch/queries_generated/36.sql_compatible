@@ -1,0 +1,55 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierPartStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighRevenueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        RANK() OVER (ORDER BY ro.total_revenue DESC) AS revenue_rank
+    FROM 
+        RankedOrders ro
+    JOIN 
+        orders o ON ro.o_orderkey = o.o_orderkey
+)
+SELECT 
+    hro.o_orderkey,
+    hro.o_orderstatus,
+    sps.s_name,
+    sps.total_parts,
+    sps.total_cost,
+    COALESCE(NULLIF(sps.total_cost, 0), 'No Cost') AS supplier_cost_status,
+    CASE 
+        WHEN hro.revenue_rank <= 10 THEN 'Top 10 Revenue'
+        ELSE 'Other'
+    END AS revenue_category
+FROM 
+    HighRevenueOrders hro
+LEFT JOIN 
+    SupplierPartStats sps ON hro.o_orderkey = sps.s_suppkey
+WHERE 
+    hro.o_orderstatus IN ('F', 'O')
+ORDER BY 
+    hro.o_orderkey DESC;

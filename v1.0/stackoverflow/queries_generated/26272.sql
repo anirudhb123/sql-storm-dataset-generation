@@ -1,0 +1,76 @@
+WITH PostInsights AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS UniqueVoters,
+        COALESCE(SUM(CASE WHEN (ph.PostHistoryTypeId = 10) THEN 1 ELSE 0 END), 0) AS CloseVotes,
+        COALESCE(SUM(CASE WHEN (ph.PostHistoryTypeId = 11) THEN 1 ELSE 0 END), 0) AS ReopenVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01' -- Filter for posts created this year
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.ViewCount, p.Score
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TagPostCount,
+        SUM(p.ViewCount) AS TotalTagViews,
+        AVG(p.Score) AS AvgTagScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON POSITION(CONCAT('<', t.TagName, '>') IN p.Tags) > 0
+    GROUP BY 
+        t.TagName
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.OwnerUserId IS NOT NULL THEN 1 ELSE 0 END) AS PostsCreated,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    pi.PostId,
+    pi.Title,
+    pi.ViewCount,
+    pi.Score,
+    pi.CommentCount,
+    pi.UniqueVoters,
+    pi.CloseVotes,
+    pi.ReopenVotes,
+    ts.TagPostCount,
+    ts.TotalTagViews,
+    ts.AvgTagScore,
+    us.DisplayName AS CreatedByUser,
+    us.PostsCreated,
+    us.TotalUpVotes,
+    us.TotalDownVotes
+FROM 
+    PostInsights pi
+LEFT JOIN 
+    TagStatistics ts ON POSITION('<' IN pi.Tags) > 0
+LEFT JOIN 
+    UserStatistics us ON pi.PostId = us.UserId
+ORDER BY 
+    pi.ViewCount DESC, pi.Score DESC;

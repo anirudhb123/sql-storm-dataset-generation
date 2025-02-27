@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY COUNT(c.Id) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Tags, u.DisplayName, p.CreationDate
+),
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(Tags, '><'))::varchar AS Tag,
+        COUNT(*) AS PostCount,
+        SUM(CommentCount) AS TotalComments,
+        SUM(UpVoteCount) AS TotalUpVotes,
+        SUM(DownVoteCount) AS TotalDownVotes,
+        COUNT(DISTINCT OwnerDisplayName) AS UniqueOwners
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5  
+    GROUP BY 
+        Tag
+)
+SELECT 
+    ts.Tag,
+    ts.PostCount,
+    ts.TotalComments,
+    ts.TotalUpVotes,
+    ts.TotalDownVotes,
+    ts.UniqueOwners,
+    COALESCE(MAX(rp.Title), 'No Posts') AS TopPostTitle,
+    COALESCE(MAX(rp.CreationDate), 'N/A') AS LatestPostDate
+FROM 
+    TagStatistics ts
+LEFT JOIN 
+    RankedPosts rp ON ts.Tag = ANY(string_to_array(rp.Tags, '><'))
+GROUP BY 
+    ts.Tag, ts.PostCount, ts.TotalComments, ts.TotalUpVotes, ts.TotalDownVotes, ts.UniqueOwners
+ORDER BY 
+    ts.PostCount DESC, ts.TotalUpVotes DESC;

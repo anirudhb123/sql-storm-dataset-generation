@@ -1,0 +1,95 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM 
+        movie_link ml
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.linked_movie_id
+),
+
+cast_extended AS (
+    SELECT
+        ci.person_id,
+        ci.movie_id,
+        ct.kind AS role_kind,
+        ROW_NUMBER() OVER (PARTITION BY ci.person_id ORDER BY ci.nr_order) AS role_position,
+        COALESCE(a.name, n.name) AS actor_name,
+        COALESCE(mk.keyword, 'Unknown') AS keyword_used
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        name n ON ci.person_id = n.imdb_id
+    LEFT JOIN 
+        movie_keyword mk ON ci.movie_id = mk.movie_id
+    WHERE 
+        rt.role IS NOT NULL
+),
+
+movie_avg_rating AS (
+    SELECT 
+        mi.movie_id,
+        AVG(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating') THEN CAST(mi.info AS NUMERIC) ELSE NULL END) AS avg_rating
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+),
+
+final_benchmark AS (
+    SELECT 
+        t.title AS movie_title,
+        COALESCE(ma.avg_rating, 0) AS avg_rating,
+        COUNT(DISTINCT ce.person_id) AS total_actors,
+        MAX(ce.role_position) AS highest_role,
+        STRING_AGG(DISTINCT ce.keyword_used, ', ') AS keywords,
+        mh.depth AS sequel_depth
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_avg_rating ma ON t.id = ma.movie_id
+    LEFT JOIN 
+        cast_extended ce ON t.id = ce.movie_id
+    LEFT JOIN 
+        movie_hierarchy mh ON t.id = mh.movie_id
+    WHERE 
+        (mh.depth IS NULL OR mh.depth <= 3) -- limit to depth of 3 for benchmarking
+    GROUP BY 
+        t.title, ma.avg_rating, mh.depth
+    ORDER BY 
+        avg_rating DESC, total_actors DESC
+)
+
+SELECT 
+    f.movie_title,
+    f.avg_rating,
+    f.total_actors,
+    CASE 
+        WHEN f.avg_rating IS NULL THEN 'No Rating Available'
+        ELSE 'Rating Available'
+    END AS rating_status,
+    f.keywords
+FROM 
+    final_benchmark f
+WHERE 
+    (f.total_actors > 5 OR f.avg_rating > 7.0)
+    AND f.avg_rating NOT BETWEEN 4.0 AND 6.0 -- filter corner cases
+ORDER BY 
+    f.avg_rating DESC
+LIMIT 10;

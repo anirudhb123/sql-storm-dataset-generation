@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.PostTypeId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId IN (2, 6) THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TopRankedPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Score, 
+        CreationDate,
+        TotalUpVotes,
+        TotalDownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(CASE WHEN b.Class = 1 THEN 'Gold' WHEN b.Class = 2 THEN 'Silver' ELSE 'Bronze' END) AS TopBadge
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    trp.PostId, 
+    trp.Title, 
+    trp.Score,
+    trp.TotalUpVotes,
+    trp.TotalDownVotes,
+    ur.DisplayName AS Author,
+    ur.Reputation AS AuthorReputation,
+    ur.BadgeCount AS AuthorBadgeCount,
+    ur.TopBadge AS AuthorTopBadge,
+    CASE 
+        WHEN trp.TotalDownVotes > trp.TotalUpVotes THEN 'Negative Feedback'
+        WHEN trp.TotalUpVotes IS NOT NULL AND trp.TotalDownVotes IS NULL THEN 'Positive Feedback'
+        ELSE 'No Feedback'
+    END AS FeedbackStatus
+FROM 
+    TopRankedPosts trp
+
+LEFT JOIN 
+    Users u ON u.Id = trp.Id
+
+LEFT JOIN 
+    UserReputation ur ON ur.UserId = u.Id
+
+WHERE 
+    ur.Reputation > (SELECT AVG(Reputation) FROM Users WHERE Reputation IS NOT NULL) 
+    AND trp.Score > 5
+
+ORDER BY 
+    trp.CreationDate DESC;
+
+-- Additional insights with correlated subqueries
+SELECT 
+    p.Title,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+    (SELECT COUNT(B.Id) FROM Badges B WHERE B.UserId = p.OwnerUserId) AS OwnerBadgeCount
+FROM 
+    Posts p
+WHERE 
+    EXISTS (
+        SELECT 1 FROM Votes v 
+        WHERE v.PostId = p.Id AND v.VoteTypeId = 2 
+        HAVING COUNT(v.Id) > 5
+    )
+    AND p.AcceptedAnswerId IS NOT NULL
+    AND p.CreationDate >= NOW() - INTERVAL '1 year';

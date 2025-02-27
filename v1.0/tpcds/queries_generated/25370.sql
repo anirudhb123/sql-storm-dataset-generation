@@ -1,0 +1,55 @@
+
+WITH processed_items AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        CONCAT(i.i_brand, ' ', i.i_item_desc) AS combined_description,
+        LOWER(i.i_color) AS item_color,
+        TRIM(i.i_container) AS trimmed_container,
+        LENGTH(i.i_size) AS size_length
+    FROM 
+        item i
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        UPPER(c.c_first_name) AS first_name,
+        INITCAP(c.c_last_name) AS last_name,
+        CONCAT(c.c_email_address, '@example.com') AS full_email
+    FROM 
+        customer c
+),
+returns_summary AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount,
+        SUM(sr_return_tax) AS total_return_tax
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    pi.i_item_id,
+    pi.combined_description,
+    ci.first_name,
+    ci.last_name,
+    ci.full_email,
+    rs.total_returns,
+    rs.total_return_amount,
+    rs.total_return_tax,
+    pi.item_color,
+    pi.trimmed_container,
+    pi.size_length
+FROM 
+    processed_items pi
+JOIN 
+    customer_info ci ON ci.c_customer_sk = (SELECT c_customer_sk FROM customer ORDER BY RANDOM() LIMIT 1)
+LEFT JOIN 
+    returns_summary rs ON pi.i_item_sk = rs.sr_item_sk
+WHERE 
+    pi.size_length > 5
+ORDER BY 
+    pi.item_color ASC, rs.total_return_amount DESC
+LIMIT 100;

@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        m.title AS linked_title,
+        mt.season_nr,
+        mt.episode_nr
+    FROM 
+        aka_title AS mt
+    LEFT JOIN 
+        movie_link AS ml ON mt.id = ml.movie_id
+    LEFT JOIN 
+        aka_title AS m ON ml.linked_movie_id = m.id
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.linked_title,
+        mh.season_nr,
+        mh.episode_nr
+    FROM 
+        movie_hierarchy AS mh
+    JOIN 
+        movie_link AS ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title AS m ON ml.linked_movie_id = m.id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.linked_title,
+    mh.season_nr,
+    mh.episode_nr,
+    COUNT(ci.id) AS total_cast,
+    AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note_ratio,
+    STRING_AGG(DISTINCT an.name, ', ') AS alias_names,
+    COUNT(DISTINCT mk.keyword) AS total_keywords
+FROM 
+    movie_hierarchy AS mh
+LEFT JOIN 
+    complete_cast AS cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS ci ON cc.id = ci.movie_id
+LEFT JOIN 
+    aka_name AS an ON ci.person_id = an.person_id
+LEFT JOIN 
+    movie_keyword AS mk ON mh.movie_id = mk.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.linked_title, mh.season_nr, mh.episode_nr
+ORDER BY 
+    mh.production_year DESC, total_cast DESC;

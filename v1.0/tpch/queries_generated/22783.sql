@@ -1,0 +1,71 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL AND sh.level < 5
+),
+TopRegions AS (
+    SELECT r.r_regionkey, r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_regionkey, r.r_name
+    HAVING COUNT(DISTINCT n.n_nationkey) > 1
+),
+PartInfo AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2023-01-01' OR o.o_orderdate IS NULL
+    GROUP BY c.c_custkey
+),
+CombinedData AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        r.r_name AS region_name,
+        pi.p_name AS part_name,
+        co.total_orders AS customer_order_count,
+        sh.level AS supplier_level,
+        COALESCE(pi.total_supplycost, 0) AS total_supplycost
+    FROM SupplierHierarchy sh
+    LEFT JOIN supplier s ON sh.s_suppkey = s.s_suppkey
+    LEFT JOIN TopRegions r ON s.s_nationkey = r.r_regionkey
+    LEFT JOIN PartInfo pi ON s.s_suppkey = pi.p_partkey
+    LEFT JOIN CustomerOrders co ON s.s_nationkey = co.c_custkey
+)
+SELECT 
+    region_name,
+    supplier_name,
+    part_name,
+    total_orders,
+    total_supplycost,
+    CASE 
+        WHEN total_supplycost > 1000 THEN 'High Cost'
+        WHEN total_supplycost BETWEEN 500 AND 1000 THEN 'Medium Cost'
+        ELSE 'Low Cost'
+    END AS cost_category
+FROM CombinedData
+WHERE supplier_level < 3
+ORDER BY region_name, total_supplycost DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY
+UNION
+SELECT 
+    NULL AS region_name,
+    'Total' AS supplier_name,
+    NULL AS part_name,
+    SUM(total_orders) AS total_orders,
+    SUM(total_supplycost) AS total_supplycost,
+    NULL AS cost_category
+FROM CombinedData
+GROUP BY supplier_name
+HAVING SUM(total_supplycost) IS NOT NULL
+ORDER BY total_supplycost DESC;

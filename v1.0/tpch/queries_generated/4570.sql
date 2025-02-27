@@ -1,0 +1,51 @@
+WITH SupplierCost AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COALESCE(SUM(sc.total_cost), 0) AS supplier_cost,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(cs.avg_spent) AS avg_customer_spending
+FROM 
+    lineitem l
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    CustomerOrderSummary cs ON cs.c_custkey = l.l_orderkey
+LEFT JOIN 
+    SupplierCost sc ON sc.s_suppkey = s.s_suppkey
+WHERE 
+    l.l_shipdate >= DATE '2023-01-01'
+    AND l.l_shipdate < DATE '2024-01-01'
+GROUP BY 
+    n.n_name
+ORDER BY 
+    revenue DESC
+LIMIT 10;

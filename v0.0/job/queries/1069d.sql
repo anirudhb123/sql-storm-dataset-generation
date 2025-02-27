@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS release_date, min(miidx.info) AS rating, min(t.title) AS german_movie
+FROM company_name AS cn, company_type AS ct, info_type AS it, info_type AS it2, kind_type AS kt, movie_companies AS mc, movie_info AS mi, movie_info_idx AS miidx, title AS t
+WHERE mi.movie_id = t.id AND it2.id = mi.info_type_id AND kt.id = t.kind_id AND mc.movie_id = t.id AND cn.id = mc.company_id AND ct.id = mc.company_type_id AND miidx.movie_id = t.id AND it.id = miidx.info_type_id AND mi.movie_id = miidx.movie_id AND mi.movie_id = mc.movie_id AND miidx.movie_id = mc.movie_id
+AND ct.kind IN ('distributors', 'miscellaneous companies', 'production companies', 'special effects companies') AND it2.id IN (102, 16, 18, 23, 64, 72, 92) AND t.imdb_index IS NOT NULL AND mc.id > 640458 AND t.title LIKE '%and%' AND t.series_years IS NOT NULL AND cn.name_pcode_sf IS NOT NULL AND cn.md5sum IS NOT NULL;

@@ -1,0 +1,58 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 1 AS depth
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.depth + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) AND sh.depth < 5
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        MAX(ps.ps_availqty) AS max_avail_qty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+OrderSummary AS (
+    SELECT
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rn
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY c.c_custkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ss.total_spent AS customer_spending,
+    ps.supplier_count,
+    ps.avg_supply_cost,
+    ps.max_avail_qty,
+    COALESCE(n.n_name, 'Unknown') as nation_name,
+    CASE 
+        WHEN ss.total_spent IS NULL THEN 'No Orders'
+        WHEN ss.total_spent > 5000 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_category
+FROM part p
+LEFT JOIN PartStats ps ON p.p_partkey = ps.p_partkey
+LEFT JOIN OrderSummary ss ON ss.order_count > 1
+LEFT JOIN nation n ON p.p_partkey = n.n_nationkey
+WHERE EXISTS (
+    SELECT 1 
+    FROM SupplierHierarchy sh 
+    WHERE sh.s_nationkey = n.n_nationkey
+) OR ps.supplier_count IS NULL
+ORDER BY 
+    COALESCE(ss.total_spent, 0) DESC,
+    ps.avg_supply_cost ASC,
+    p.p_partkey DESC
+LIMIT 100;

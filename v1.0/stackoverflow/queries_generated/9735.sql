@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Score, 
+        CreationDate, 
+        OwnerDisplayName,
+        CommentCount,
+        VoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+),
+PostDetails AS (
+    SELECT 
+        tp.*, 
+        ARRAY_AGG(t.TagName) AS Tags
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Posts p ON tp.PostId = p.Id
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS t(TagName) ON TRUE
+    GROUP BY 
+        tp.PostId
+)
+SELECT 
+    pd.PostId, 
+    pd.Title, 
+    pd.OwnerDisplayName, 
+    pd.Score, 
+    pd.CommentCount, 
+    pd.VoteCount, 
+    pd.CreationDate, 
+    pd.Tags
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.Score DESC, 
+    pd.CreationDate DESC;

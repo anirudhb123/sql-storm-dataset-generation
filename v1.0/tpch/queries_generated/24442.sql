@@ -1,0 +1,57 @@
+WITH RECURSIVE part_hierarchy AS (
+    SELECT p_partkey, p_name, p_retailprice, 1 AS hierarchy_level
+    FROM part
+    WHERE p_size = (
+        SELECT MAX(p_size) FROM part
+        WHERE p_comment LIKE '%special%'
+    )
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ph.hierarchy_level + 1
+    FROM part p
+    JOIN part_hierarchy ph ON p.p_partkey = ph.p_partkey
+    WHERE ph.hierarchy_level < 5
+),
+supplier_evaluations AS (
+    SELECT s.s_suppkey, AVG(s.s_acctbal) AS avg_balance, COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, se.avg_balance
+    FROM supplier s
+    JOIN supplier_evaluations se ON s.s_suppkey = se.s_suppkey
+    WHERE se.avg_balance > (
+        SELECT AVG(avg_balance) FROM supplier_evaluations
+        WHERE total_parts > 10
+    )
+),
+region_summary AS (
+    SELECT r.r_name,
+           COUNT(DISTINCT n.n_nationkey) AS nation_count,
+           SUM(ps.ps_supplycost) AS total_supplycost
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY r.r_name
+    HAVING nation_count > 1 AND SUM(ps.ps_supplycost) < (
+        SELECT SUM(ps_supplycost) / COUNT(*)
+        FROM partsupp
+    )
+)
+SELECT COALESCE(rs.r_name, 'Unknown Region') AS region_name,
+       COALESCE(ts.s_name, 'Generic Supplier') AS supplier_name,
+       ph.p_name AS part_name,
+       ph.p_retailprice AS retail_price,
+       ROW_NUMBER() OVER (PARTITION BY rs.r_name ORDER BY ph.p_retailprice DESC) AS price_rank
+FROM region_summary rs
+FULL OUTER JOIN top_suppliers ts ON ts.s_suppkey = (
+    SELECT MIN(s_suppkey)
+    FROM top_suppliers
+    WHERE se.avg_balance < 1000
+)
+CROSS JOIN part_hierarchy ph
+WHERE (ph.p_retailprice > (SELECT AVG(p_retailprice) FROM part) OR ph.p_name IS NULL)
+  AND (rs.nation_count IS NOT NULL OR ts.s_name IS NOT NULL)
+ORDER BY region_name, price_rank;

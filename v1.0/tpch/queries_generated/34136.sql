@@ -1,0 +1,55 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT ps.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM partsupp ps
+    JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > 5000
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' 
+    GROUP BY c.c_custkey, c.c_name
+),
+PartStats AS (
+    SELECT p.p_partkey, p.p_name, COUNT(l.l_orderkey) AS total_orders,
+           AVG(l.l_extendedprice) AS avg_price
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+NationSupplierCounts AS (
+    SELECT n.n_nationkey, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey
+),
+RankedOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+)
+SELECT DISTINCT
+    r.r_name,
+    nsc.supplier_count,
+    COALESCE(cs.total_spent, 0) AS total_spent_by_customers,
+    ps.p_name,
+    ps.total_orders,
+    ps.avg_price,
+    sh.level AS supplier_level
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN NationSupplierCounts nsc ON n.n_nationkey = nsc.n_nationkey
+LEFT JOIN CustomerOrders cs ON cs.c_custkey = (SELECT MIN(c.c_custkey) FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+LEFT JOIN PartStats ps ON ps.total_orders > 10
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+WHERE r.r_name IS NOT NULL
+ORDER BY r.r_name, nsc.supplier_count DESC, total_spent_by_customers DESC;

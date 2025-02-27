@@ -1,0 +1,81 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        CAST(Title AS VARCHAR(300)) AS FullTitle,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        CAST(CONCAT(ph.FullTitle, ' -> ', p.Title) AS VARCHAR(300)) AS FullTitle,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.Id
+),
+RankedVotes AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS VoteCount,
+        DENSE_RANK() OVER (PARTITION BY PostId ORDER BY CreationDate DESC) AS VoteRank
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostWithVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(rv.VoteCount, 0) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RankedVotes rv ON p.Id = rv.PostId AND rv.VoteRank = 1
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+)
+SELECT 
+    ph.Id AS PostId,
+    ph.FullTitle,
+    ph.CreationDate,
+    w.Rank AS ScoreRank,
+    COALESCE(ub.BadgeCount, 0) AS UserBadgeCount,
+    NULLIF(ub.BadgeNames, '') AS UserBadges
+FROM 
+    PostHierarchy ph
+LEFT JOIN (
+    SELECT 
+        PostId,
+        RANK() OVER (ORDER BY SUM(Score) DESC) AS Rank
+    FROM 
+        Posts 
+    GROUP BY PostId
+) w ON ph.Id = w.PostId
+LEFT JOIN UserBadges ub ON ub.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = ph.Id)
+WHERE 
+    ph.Level <= 2 
+    AND ph.CreationDate >= NOW() - INTERVAL '1 year'
+ORDER BY 
+    ph.Level, ph.CreationDate DESC;

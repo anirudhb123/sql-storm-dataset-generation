@@ -1,0 +1,72 @@
+
+WITH RECURSIVE sales_analysis AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk) AS rn
+    FROM web_sales ws
+    WHERE ws.ws_sales_price IS NOT NULL
+        AND ws.ws_quantity > 0
+), ranked_sales AS (
+    SELECT 
+        sa.ws_item_sk,
+        sa.ws_order_number,
+        SUM(sa.ws_sales_price) AS total_sales,
+        COUNT(*) AS total_transactions,
+        SUM(sa.ws_net_profit) AS total_net_profit,
+        AVG(sa.ws_sales_price) AS avg_sales_price
+    FROM sales_analysis sa
+    GROUP BY sa.ws_item_sk, sa.ws_order_number
+), inventory_status AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity_in_stock
+    FROM inventory inv
+    GROUP BY inv.inv_item_sk
+), sales_summary AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.total_sales,
+        rs.total_transactions,
+        rs.total_net_profit,
+        rs.avg_sales_price,
+        COALESCE(is.total_quantity_in_stock, 0) AS total_quantity_in_stock
+    FROM ranked_sales rs
+    LEFT JOIN inventory_status is ON rs.ws_item_sk = is.inv_item_sk
+), customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT CASE WHEN cd.cd_gender = 'F' THEN c.c_customer_sk END) AS female_customers,
+        COUNT(DISTINCT CASE WHEN cd.cd_gender = 'M' THEN c.c_customer_sk END) AS male_customers,
+        COUNT(*) AS total_customers
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c.c_customer_sk
+    HAVING COUNT(DISTINCT c.c_customer_sk) > 0
+)
+SELECT 
+    ss.ws_item_sk,
+    ss.total_sales,
+    ss.total_transactions,
+    ss.total_net_profit,
+    ss.avg_sales_price,
+    ss.total_quantity_in_stock,
+    cs.female_customers,
+    cs.male_customers,
+    cs.total_customers,
+    CASE 
+        WHEN ss.avg_sales_price > 100 THEN 'High'
+        WHEN ss.avg_sales_price BETWEEN 50 AND 100 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM sales_summary ss
+JOIN customer_stats cs ON cs.total_customers > 0
+WHERE ss.total_net_profit IS NOT NULL
+    AND ss.total_quantity_in_stock IS NOT NULL
+    AND (ss.total_sales / NULLIF(ss.total_transactions, 0)) > 10
+ORDER BY ss.ws_item_sk ASC, ss.total_sales DESC
+LIMIT 100;

@@ -1,0 +1,46 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), RankedSupplierSales AS (
+    SELECT 
+        s.*, 
+        ROW_NUMBER() OVER (ORDER BY s.TotalSales DESC) AS SalesRank
+    FROM 
+        SupplierSales s
+), NationSummary AS (
+    SELECT 
+        n.n_name,
+        SUM(CASE WHEN c.c_acctbal IS NULL THEN 0 ELSE c.c_acctbal END) AS TotalAcctBal
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY 
+        n.n_name
+)
+
+SELECT 
+    ns.n_name AS Nation,
+    rss.s_name AS Supplier,
+    rss.TotalSales AS SupplierTotalSales,
+    ns.TotalAcctBal AS NationAccountBalance
+FROM 
+    RankedSupplierSales rss
+FULL OUTER JOIN 
+    NationSummary ns ON rss.s_suppkey IS NULL OR ns.TotalAcctBal > 100000
+WHERE 
+    rss.SalesRank <= 10
+ORDER BY 
+    ns.TotalAcctBal DESC, rss.SupplierTotalSales DESC;

@@ -1,0 +1,37 @@
+WITH UserReputation AS (
+    SELECT Id, Reputation, CAST((UpVotes - DownVotes) AS int) AS NetVotes
+    FROM Users
+), RecentPosts AS (
+    SELECT p.Id AS PostId, p.OwnerUserId, p.CreationDate, p.Score,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+), PostScoreHistory AS (
+    SELECT ph.PostId, ph.CreationDate AS HistoryDate, 
+           MAX(ph.Score) OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS MaxScore
+    FROM (
+        SELECT p.Id AS PostId, p.Score, p.CreationDate
+        FROM Posts p
+        JOIN PostHistory ph ON p.Id = ph.PostId
+        WHERE ph.PostHistoryTypeId IN (4, 5) AND p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    ) ph
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation AS UserReputation,
+    COALESCE(rp.PostId, 'No Posts') AS RecentPostId,
+    COALESCE(rp.CreationDate, 'N/A') AS RecentPostDate,
+    COALESCE(rp.Score, 0) AS RecentPostScore,
+    psh.MaxScore AS MaxScoreInHistory,
+    COUNT(b.Id) AS TotalBadges,
+    COUNT(DISTINCT v.Id) AS TotalVotes
+FROM Users u
+LEFT JOIN RecentPosts rp ON u.Id = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN Badges b ON u.Id = b.UserId
+LEFT JOIN Votes v ON v.UserId = u.Id
+LEFT JOIN PostScoreHistory psh ON psh.PostId = COALESCE(rp.PostId, 0)
+WHERE u.Reputation >= 100 AND (u.Location IS NOT NULL OR u.AboutMe IS NOT NULL)
+GROUP BY u.Id, u.DisplayName, u.Reputation, rp.PostId, rp.CreationDate, rp.Score, psh.MaxScore
+ORDER BY UserReputation DESC, RecentPostScore DESC
+FETCH FIRST 100 ROWS ONLY;

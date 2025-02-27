@@ -1,0 +1,79 @@
+WITH RankedCustomer AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_nationkey,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank_acctbal
+    FROM 
+        customer c
+),
+HighValueSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+    HAVING 
+        total_value > 100000
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_discount,
+        CASE 
+            WHEN l.l_shipdate IS NULL THEN 'N/A'
+            ELSE TO_CHAR(l.l_shipdate, 'YYYY-MM-DD')
+        END AS formatted_shipdate
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_discount > 0.1 AND (l.l_returnflag = 'R' OR l.l_linestatus = 'F')
+),
+RegionFilter AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name
+    FROM 
+        region r 
+    WHERE 
+        r.r_name LIKE 'E%'
+)
+SELECT 
+    DISTINCT p.p_name,
+    p.p_brand,
+    p.p_mfgr,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    STRING_AGG(DISTINCT rc.c_name, ', ') AS top_customers,
+    r.r_name AS region_name
+FROM 
+    part p
+LEFT JOIN 
+    HighValueSuppliers hvs ON p.p_partkey = hvs.ps_partkey
+JOIN 
+    supplier s ON hvs.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN 
+    orders o ON o.o_orderkey = l.l_orderkey
+JOIN 
+    RankedCustomer rc ON rc.c_custkey = o.o_custkey AND rc.rank_acctbal <= 3
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    RegionFilter r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_retailprice IS NOT NULL 
+    AND l.l_shipmode IN ('AIR', 'GROUND')
+    AND EXISTS (SELECT 1 FROM FilteredLineItems fli WHERE fli.l_orderkey = l.l_orderkey)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_mfgr, s.s_name, r.r_name
+ORDER BY 
+    total_revenue DESC, p.p_name ASC
+FETCH FIRST 100 ROWS ONLY;

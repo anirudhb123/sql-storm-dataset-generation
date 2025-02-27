@@ -1,0 +1,64 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_type, 
+        p.p_mfgr,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn_price
+    FROM 
+        part p 
+    WHERE 
+        p.p_retailprice IS NOT NULL
+), 
+SupplierPriceSummary AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), 
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_type,
+    COALESCE(s.total_supplycost, 0) AS total_supplycost,
+    rs.total_order_value,
+    rank.rn_price AS price_rank,
+    CASE 
+        WHEN rs.total_order_value IS NULL THEN 'No Orders'
+        WHEN s.unique_suppliers = 0 THEN 'No Suppliers'
+        ELSE 'Active Product'
+    END AS status
+FROM 
+    RankedParts p
+LEFT JOIN 
+    SupplierPriceSummary s ON p.p_partkey = s.ps_partkey
+LEFT JOIN 
+    RecentOrders rs ON p.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'))
+WHERE 
+    (p.p_size BETWEEN 10 AND 20 OR p.p_type LIKE '%steel%')
+AND 
+    p.p_mfgr IN (SELECT DISTINCT s.s_mfgr FROM supplier s WHERE s.s_acctbal > 5000)
+ORDER BY 
+    total_supplycost DESC, 
+    rs.total_order_value ASC NULLS LAST, 
+    p.p_name;

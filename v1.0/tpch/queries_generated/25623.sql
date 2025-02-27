@@ -1,0 +1,44 @@
+WITH RecursivePartNames AS (
+    SELECT DISTINCT SUBSTRING(p_name, 1, 10) AS short_name
+    FROM part
+    UNION ALL
+    SELECT DISTINCT SUBSTRING(p_name, 1, LENGTH(short_name) + 1) || SUBSTRING(p_name, LENGTH(short_name) + 1, 1) AS short_name
+    FROM RecursivePartNames
+    WHERE LENGTH(short_name) < 55
+),
+SupplierPerformance AS (
+    SELECT s.s_name, 
+           s.s_acctbal, 
+           COUNT(DISTINCT ps.ps_partkey) AS part_supply_count,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           SUM(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * l.l_discount END) AS total_discounted_price
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+CustomerOrderAnalysis AS (
+    SELECT c.c_name, 
+           COUNT(DISTINCT o.o_orderkey) AS total_orders, 
+           SUM(o.o_totalprice) AS total_spent 
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_mktsegment = 'BUILDING'
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT r.r_name, 
+       p.short_name AS processed_part_name, 
+       sp.s_name AS supplier_name, 
+       so.total_orders, 
+       so.total_spent, 
+       sp.part_supply_count, 
+       sp.avg_supply_cost, 
+       sp.total_discounted_price
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN customer c ON n.n_nationkey = c.c_nationkey
+JOIN CustomerOrderAnalysis so ON c.c_name = so.c_name
+JOIN SupplierPerformance sp ON sp.part_supply_count > 5
+CROSS JOIN RecursivePartNames p
+WHERE r.r_name LIKE 'A%' 
+ORDER BY r.r_name, processed_part_name, supplier_name;

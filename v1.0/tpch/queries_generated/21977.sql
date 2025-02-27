@@ -1,0 +1,85 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS PartRank,
+        SUM(ps.ps_availqty) OVER (PARTITION BY p.p_partkey) AS TotalAvailable,
+        CASE 
+            WHEN SUM(ps.ps_supplycost) IS NULL THEN 0 
+            ELSE SUM(ps.ps_supplycost) 
+        END AS TotalSupplyCost
+    FROM 
+        part p
+    LEFT OUTER JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS TotalSpent,
+        COUNT(DISTINCT o.o_orderkey) AS OrderCount
+    FROM 
+        customer c
+    LEFT OUTER JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT OUTER JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        COALESCE(co.TotalSpent, 0) AS TotalSpent
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE 
+        c.c_acctbal > 0
+),
+PartSupplies AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.TotalAvailable,
+        p.TotalSupplyCost,
+        fc.TotalSpent,
+        ROW_NUMBER() OVER (PARTITION BY fc.c_custkey ORDER BY p.TotalSupplyCost DESC) AS SupplyRank
+    FROM 
+        RankedParts p
+    CROSS JOIN 
+        FilteredCustomers fc
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.TotalAvailable,
+    p.TotalSupplyCost,
+    fc.c_custkey,
+    fc.c_name,
+    fc.TotalSpent,
+    CASE 
+        WHEN fc.TotalSpent > 1000 THEN 'High Value'
+        WHEN fc.TotalSpent BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS CustomerValue,
+    p.SupplyRank
+FROM 
+    PartSupplies p
+INNER JOIN 
+    FilteredCustomers fc ON p.TotalSpent < 1000
+WHERE 
+    (p.TotalAvailable IS NOT NULL OR p.TotalSupplyCost > 500) 
+    AND p.SupplyRank <= 3
+ORDER BY 
+    p.TotalAvailable DESC, fc.TotalSpent ASC;

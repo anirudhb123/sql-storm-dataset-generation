@@ -1,0 +1,65 @@
+WITH PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Filtering only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+
+TagAnalysis AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        PostId
+    FROM 
+        PostSummary
+),
+
+TopTags AS (
+    SELECT 
+        TagName,
+        COUNT(PostId) AS PostCount,
+        AVG(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - CreationDate))/3600) AS AvgAgeInHours
+    FROM 
+        TagAnalysis ta
+    JOIN 
+        PostSummary ps ON ta.PostId = ps.PostId
+    GROUP BY 
+        TagName
+    ORDER BY 
+        PostCount DESC,
+        AvgAgeInHours ASC
+    LIMIT 10
+)
+
+SELECT 
+    tt.TagName,
+    tt.PostCount,
+    tt.AvgAgeInHours,
+    ps.Title,
+    ps.OwnerDisplayName,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes
+FROM 
+    TopTags tt
+JOIN 
+    PostSummary ps ON ps.Tags LIKE '%' || tt.TagName || '%'
+ORDER BY 
+    tt.PostCount DESC;

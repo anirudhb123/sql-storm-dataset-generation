@@ -1,0 +1,52 @@
+-- Performance benchmarking SQL query for Stack Overflow schema
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+UserPerformance AS (
+    SELECT 
+        U.Id AS UserId,
+        COALESCE(P.TotalPosts, 0) AS TotalPosts,
+        COALESCE(V.TotalVotes, 0) AS TotalVotes,
+        COALESCE(V.UpVotes, 0) AS UpVotes,
+        COALESCE(V.DownVotes, 0) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostStatistics P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        UserVoteStats V ON U.Id = V.UserId
+)
+SELECT 
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalVotes,
+    U.UpVotes,
+    U.DownVotes
+FROM 
+    UserPerformance U
+ORDER BY 
+    U.TotalVotes DESC, U.TotalPosts DESC;

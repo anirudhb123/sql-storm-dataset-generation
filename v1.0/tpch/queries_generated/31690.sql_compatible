@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+), 
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM orders o
+    INNER JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE li.l_shipdate > '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+CustomerRevenue AS (
+    SELECT c.c_custkey, c.c_name, SUM(os.total_revenue) AS total_spent
+    FROM customer c
+    LEFT JOIN OrderSummary os ON c.c_custkey = os.o_orderkey
+    WHERE c.c_mktsegment = 'BUILDING'
+    GROUP BY c.c_custkey, c.c_name
+), 
+SupplierRevenue AS (
+    SELECT s.s_suppkey, s.s_name, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    c.c_name AS customer_name,
+    cr.total_spent AS total_customer_spent,
+    sr.total_supply_cost AS total_supplier_cost,
+    (cr.total_spent - COALESCE(sr.total_supply_cost, 0)) AS profit_margin,
+    CASE 
+        WHEN cr.total_spent IS NULL THEN 'No orders'
+        WHEN sr.total_supply_cost IS NULL THEN 'No supply cost'
+        ELSE 'Active'
+    END AS status,
+    ROW_NUMBER() OVER (ORDER BY cr.total_spent DESC) AS customer_rank,
+    RANK() OVER (PARTITION BY sr.s_suppkey ORDER BY sr.total_supply_cost DESC) AS supplier_rank
+FROM CustomerRevenue cr
+FULL OUTER JOIN SupplierRevenue sr ON cr.total_spent > (SELECT AVG(total_spent) FROM CustomerRevenue)
+ORDER BY profit_margin DESC, customer_name ASC;

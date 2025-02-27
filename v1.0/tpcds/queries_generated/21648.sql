@@ -1,0 +1,79 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(SUM(ws.ws_quantity), 0) AS total_web_sales,
+        COALESCE(SUM(cs.cs_quantity), 0) AS total_catalog_sales,
+        COALESCE(SUM(ss.ss_quantity), 0) AS total_store_sales
+    FROM 
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+income_groups AS (
+    SELECT 
+        h.hd_demo_sk,
+        CASE 
+            WHEN h.hd_income_band_sk IS NULL OR ib.ib_lower_bound IS NULL THEN 'Unknown Income Group'
+            WHEN ib.ib_lower_bound >= 0 AND ib.ib_upper_bound <= 20000 THEN 'Low Income'
+            WHEN ib.ib_lower_bound > 20000 AND ib.ib_upper_bound <= 50000 THEN 'Middle Income'
+            ELSE 'High Income'
+        END AS income_group
+    FROM 
+        household_demographics h
+    LEFT JOIN income_band ib ON h.hd_income_band_sk = ib.ib_income_band_sk
+),
+ranked_sales AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_web_sales,
+        cs.total_catalog_sales,
+        cs.total_store_sales,
+        cd.cd_gender,
+        ig.income_group,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY (cs.total_web_sales + cs.total_catalog_sales + cs.total_store_sales) DESC) AS rank
+    FROM 
+        customer_sales cs
+    LEFT JOIN customer_demographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+    LEFT JOIN income_groups ig ON cd.cd_demo_sk = ig.hd_demo_sk
+)
+SELECT 
+    r.c_customer_sk,
+    r.total_web_sales,
+    r.total_catalog_sales,
+    r.total_store_sales,
+    r.cd_gender,
+    r.income_group,
+    r.rank
+FROM 
+    ranked_sales r
+WHERE 
+    r.rank <= 10
+UNION
+SELECT 
+    'Aggregate Stats' AS c_customer_sk,
+    SUM(total_web_sales) AS total_web_sales,
+    SUM(total_catalog_sales) AS total_catalog_sales,
+    SUM(total_store_sales) AS total_store_sales,
+    NULL AS cd_gender,
+    NULL AS income_group,
+    NULL AS rank
+FROM 
+    ranked_sales
+GROUP BY 
+    ROLLUP(cd_gender);

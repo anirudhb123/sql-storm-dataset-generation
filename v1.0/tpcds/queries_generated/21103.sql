@@ -1,0 +1,63 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT ca_address_sk, ca_street_number, ca_street_name, ca_city, ca_state, ca_country,
+           0 as level
+    FROM customer_address
+    WHERE ca_country IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT a.ca_address_sk, a.ca_street_number, a.ca_street_name, a.ca_city, a.ca_state, a.ca_country,
+           h.level + 1
+    FROM customer_address a
+    JOIN address_hierarchy h ON a.ca_city = h.ca_city AND a.ca_state = h.ca_state
+    WHERE h.level < 3
+),
+filtered_customers AS (
+    SELECT c.c_customer_sk, c.c_customer_id, d.cd_gender, d.cd_marital_status, d.cd_purchase_estimate,
+           ca.ca_city, ca.ca_state, d.cd_dep_count, d.cd_dep_employed_count, 
+           d.cd_dep_college_count, address_hierarchy.level
+    FROM customer c
+    JOIN customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN address_hierarchy ON ca.ca_address_sk = address_hierarchy.ca_address_sk
+    WHERE d.cd_purchase_estimate > 1000
+    AND (d.cd_gender = 'F' OR d.cd_dep_count IS NULL)
+),
+sales_summary AS (
+    SELECT ws_bill_customer_sk,
+           SUM(ws_quantity) AS total_quantity,
+           SUM(ws_sales_price) AS total_sales,
+           AVG(ws_net_profit) AS avg_net_profit
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+customer_sales AS (
+    SELECT f.c_customer_sk, f.c_customer_id, f.ca_city, f.ca_state, f.cd_gender,
+           COALESCE(s.total_quantity, 0) AS total_quantity,
+           COALESCE(s.total_sales, 0) AS total_sales,
+           COALESCE(s.avg_net_profit, 0) AS avg_net_profit
+    FROM filtered_customers f
+    LEFT JOIN sales_summary s ON f.c_customer_sk = s.ws_bill_customer_sk
+),
+ranked_sales AS (
+    SELECT c.*, 
+           ROW_NUMBER() OVER (PARTITION BY c.ca_city ORDER BY c.total_sales DESC) AS city_rank,
+           RANK() OVER (ORDER BY c.total_sales DESC) AS overall_rank
+    FROM customer_sales c
+)
+SELECT c.customer_id, c.city, c.state, c.total_quantity, c.total_sales, c.avg_net_profit,
+       CASE 
+           WHEN c.avg_net_profit > 500 THEN 'High'
+           WHEN c.avg_net_profit BETWEEN 200 AND 500 THEN 'Medium'
+           ELSE 'Low'
+       END AS profitability_band,
+       CASE 
+           WHEN c.cd_gender = 'F' THEN 'Female'
+           ELSE 'Male'
+       END AS gender_label,
+       COALESCE(c.level, 0) AS address_level
+FROM ranked_sales c
+WHERE c.city_rank <= 5
+AND c.total_sales IS NOT NULL
+ORDER BY c.total_sales DESC, c.city;

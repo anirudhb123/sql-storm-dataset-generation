@@ -1,0 +1,79 @@
+WITH TagStats AS (
+    SELECT 
+        T.TagName,
+        P.Title AS PostTitle,
+        P.CreationDate,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        STRING_AGG(DISTINCT U.DisplayName, ', ') AS ActiveUsers
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%<' || T.TagName || '>%'
+    LEFT JOIN 
+        PostHistory PH ON PH.PostId = P.Id
+    LEFT JOIN 
+        Users U ON U.Id = P.OwnerUserId
+    WHERE 
+        P.CreationDate >= '2022-01-01'  -- Focus on more recent posts
+    GROUP BY 
+        T.TagName, P.Title, P.CreationDate, P.ViewCount, P.AnswerCount, P.CommentCount
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON B.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostInteractions AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+        MAX(CASE WHEN V.UserId IS NOT NULL THEN U.DisplayName END) AS LastVoter
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    LEFT JOIN 
+        Users U ON U.Id = V.UserId
+    GROUP BY 
+        P.Id, P.Title
+)
+SELECT 
+    TS.TagName,
+    TS.PostTitle,
+    TS.CreationDate,
+    TS.ViewCount,
+    TS.AnswerCount,
+    TS.CommentCount,
+    TS.CloseCount,
+    TS.ActiveUsers,
+    UI.DisplayName AS BadgeHolder,
+    UI.BadgeCount,
+    UI.BadgeNames,
+    PI.UpVotes,
+    PI.DownVotes,
+    PI.CommentCount AS InteractionComments,
+    PI.LastVoter
+FROM 
+    TagStats TS
+LEFT JOIN 
+    UserBadges UI ON UI.UserId IN (SELECT OwnerUserId FROM Posts WHERE Tags LIKE '%' || TS.TagName || '%')
+LEFT JOIN 
+    PostInteractions PI ON PI.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE '%' || TS.TagName || '%')
+ORDER BY 
+    TS.ViewCount DESC, TS.CloseCount ASC;

@@ -1,0 +1,49 @@
+WITH SalesData AS (
+    SELECT
+        w.w_warehouse_name,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY w.w_warehouse_name ORDER BY SUM(ws.ws_net_profit) DESC) AS rn
+    FROM
+        web_sales ws
+    JOIN
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY
+        w.w_warehouse_name
+),
+HighProfitStores AS (
+    SELECT
+        s.s_store_name,
+        SUM(ss.ss_net_profit) AS store_profit,
+        (SELECT COUNT(DISTINCT ss_ticket_number)
+         FROM store_sales
+         WHERE ss_store_sk = s.s_store_sk
+         AND ss_sold_date_sk IN (SELECT DISTINCT d.d_date_sk 
+                                 FROM date_dim d
+                                 WHERE d.d_year = EXTRACT(YEAR FROM cast('2002-10-01' as date))
+                                 AND d.d_month_seq = EXTRACT(MONTH FROM cast('2002-10-01' as date))) 
+         ) AS ticket_count
+    FROM
+        store s
+    JOIN
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    WHERE
+        ss.ss_sold_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY
+        s.s_store_name
+)
+SELECT
+    COALESCE(s.w_warehouse_name, 'Unknown Warehouse') AS warehouse,
+    COALESCE(s.total_profit, 0) AS web_total_profit,
+    COALESCE(st.store_profit, 0) AS store_total_profit,
+    COALESCE(s.order_count, 0) AS web_order_count,
+    COALESCE(st.ticket_count, 0) AS store_ticket_count
+FROM
+    SalesData s
+FULL OUTER JOIN
+    HighProfitStores st ON s.w_warehouse_name = st.s_store_name
+WHERE
+    (s.total_profit IS NOT NULL OR st.store_profit IS NOT NULL)
+    AND (s.order_count > 10 OR st.ticket_count > 5)
+ORDER BY
+    warehouse ASC, web_total_profit DESC NULLS LAST;

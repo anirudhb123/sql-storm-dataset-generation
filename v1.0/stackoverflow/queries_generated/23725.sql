@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.ClosedDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+CloseReasonCounts AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS CloseCounts,
+        ARRAY_AGG(DISTINCT cr.Name) AS CloseReasonNames
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id  -- assuming Comment contains the close reason ID
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.UserId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.Score,
+    u.DisplayName AS OwnerName,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    cc.CloseCounts,
+    cc.CloseReasonNames,
+    CASE 
+        WHEN cc.CloseCounts > 0 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    RankedPosts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    CloseReasonCounts cc ON u.Id = cc.UserId
+WHERE 
+    p.PostRank <= 5  -- fetch top 5 posts per user
+ORDER BY 
+    p.OwnerUserId, 
+    p.Score DESC;

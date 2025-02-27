@@ -1,0 +1,85 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COALESCE(p.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN Tags t ON t.Id = ANY (string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    WHERE p.CreationDate >= (cast('2024-10-01' as date) - INTERVAL '1 year')
+    GROUP BY p.Id
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounty,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        AVG(p.ViewCount) AS AvgPostViewCount,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.Id END) AS CloseReopenHistory,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    LEFT JOIN PostHistory ph ON ph.UserId = u.Id
+    GROUP BY u.Id
+),
+
+ActiveUsers AS (
+    SELECT 
+        ua.UserId,
+        u.DisplayName,
+        ua.TotalPosts,
+        ua.TotalUpVotes,
+        ua.TotalDownVotes,
+        ua.TotalBounty,
+        ua.AvgPostViewCount,
+        RANK() OVER (ORDER BY ua.TotalPosts DESC) AS PostRank
+    FROM UserActivity ua
+    JOIN Users u ON u.Id = ua.UserId
+    WHERE ua.TotalPosts > 0
+),
+
+RecentUserPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.Score,
+        ps.ViewCount,
+        ps.Tags,
+        au.DisplayName AS UserName,
+        au.PostRank
+    FROM PostStats ps 
+    JOIN ActiveUsers au ON au.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = ps.PostId)
+    WHERE ps.RecentPostRank <= 5
+)
+
+SELECT 
+    rup.PostId,
+    rup.Title,
+    rup.CreationDate,
+    rup.Score,
+    rup.ViewCount,
+    rup.Tags,
+    ru.DisplayName AS OwnerName,
+    CASE 
+        WHEN rup.Score <= 0 AND rup.ViewCount < 10 THEN 'Low Engagement'
+        WHEN rup.Score > 0 AND rup.ViewCount < 50 THEN 'Moderate Engagement'
+        ELSE 'High Engagement'
+    END AS EngagementLevel,
+    (SELECT STRING_AGG(CAST(b.Name AS VARCHAR), ', ')
+     FROM Badges b 
+     WHERE b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = rup.PostId)) AS UserBadges
+FROM RecentUserPosts rup
+JOIN Users ru ON ru.Id = (SELECT OwnerUserId FROM Posts WHERE Id = rup.PostId)
+ORDER BY rup.CreationDate DESC
+LIMIT 100;

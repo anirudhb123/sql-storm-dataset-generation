@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankByUser
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+TopQuestions AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        ViewCount,
+        Score,
+        OwnerDisplayName,
+        Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByUser = 1 
+),
+TagFrequency AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(Tags, ','))) AS TagName,
+        COUNT(*) AS Frequency
+    FROM 
+        TopQuestions
+    GROUP BY 
+        TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        Frequency,
+        ROW_NUMBER() OVER (ORDER BY Frequency DESC) AS Rank
+    FROM 
+        TagFrequency
+)
+
+SELECT 
+    tt.TagName,
+    tt.Frequency,
+    COUNT(DISTINCT tq.PostId) AS QuestionCount,
+    AVG(tq.ViewCount) AS AvgViewCount,
+    SUM(CASE WHEN tq.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount,
+    STRING_AGG(DISTINCT tq.OwnerDisplayName, ', ') AS QuestionOwners
+FROM 
+    TopTags tt
+JOIN 
+    TopQuestions tq ON tq.Tags LIKE '%' || tt.TagName || '%' 
+GROUP BY 
+    tt.TagName, tt.Frequency
+ORDER BY 
+    tt.Frequency DESC
+LIMIT 10;

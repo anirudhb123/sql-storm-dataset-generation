@@ -1,0 +1,54 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        mh.level + 1
+    FROM 
+        aka_title t
+    INNER JOIN 
+        MovieHierarchy mh ON t.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    m.level,
+    COUNT(c.person_id) AS cast_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+    COALESCE(mi.info, 'N/A') AS additional_info,
+    CASE 
+        WHEN m.production_year IS NULL THEN 'Unknown Year'
+        WHEN m.production_year < 2000 THEN 'Before the New Millennium'
+        ELSE 'After the New Millennium'
+    END AS era_description,
+    ROW_NUMBER() OVER (PARTITION BY m.kind_id ORDER BY m.production_year DESC) AS rn
+FROM 
+    MovieHierarchy m
+LEFT JOIN 
+    cast_info c ON m.movie_id = c.movie_id
+LEFT JOIN 
+    aka_name a ON c.person_id = a.person_id
+LEFT JOIN 
+    movie_info mi ON m.movie_id = mi.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'summary')
+GROUP BY 
+    m.movie_id, m.title, m.production_year, m.level, mi.info
+HAVING 
+    COUNT(c.person_id) > 0 AND m.level < 5
+ORDER BY 
+    m.production_year DESC, m.title;

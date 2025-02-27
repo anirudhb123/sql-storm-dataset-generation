@@ -1,0 +1,76 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS cast_with_notes
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+        MIN(mi.info) AS first_info
+    FROM 
+        movie_keyword mk
+    JOIN 
+        movie_info mi ON mk.movie_id = mi.movie_id
+    GROUP BY 
+        mk.movie_id
+),
+FinalMovieStats AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        COALESCE(cr.total_cast, 0) AS total_cast,
+        COALESCE(cr.cast_with_notes, 0) AS cast_with_notes,
+        COALESCE(mi.keywords, 'No Keywords') AS keywords,
+        COALESCE(mi.first_info, 'No Info') AS first_info,
+        mh.level
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CastRoles cr ON mh.movie_id = cr.movie_id
+    LEFT JOIN 
+        MovieInfo mi ON mh.movie_id = mi.movie_id
+)
+SELECT 
+    fs.movie_id,
+    fs.title,
+    fs.total_cast,
+    fs.cast_with_notes,
+    fs.keywords,
+    fs.first_info,
+    fs.level
+FROM 
+    FinalMovieStats fs
+WHERE 
+    fs.total_cast > 0
+ORDER BY 
+    fs.level, fs.total_cast DESC;

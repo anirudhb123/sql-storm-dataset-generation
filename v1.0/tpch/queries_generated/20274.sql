@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank,
+        s.s_acctbal * 1.1 AS adjusted_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+EligibleOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2) 
+    AND o.o_orderdate >= DATEADD(year, -1, CURRENT_DATE) 
+),
+SupplierPartInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        p.p_size,
+        CASE 
+            WHEN p.p_size BETWEEN 1 AND 10 THEN 'Small'
+            WHEN p.p_size BETWEEN 11 AND 20 THEN 'Medium'
+            ELSE 'Large'
+        END AS size_category
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+FilteredNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS suppliers_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING COUNT(s.s_suppkey) > 1
+)
+SELECT 
+    e.o_orderkey,
+    e.o_totalprice,
+    r.s_name,
+    r.adjusted_acctbal,
+    p.size_category,
+    n.n_name,
+    e.o_orderdate,
+    (SELECT COUNT(*) FROM lineitem l WHERE l.l_orderkey = e.o_orderkey) AS lineitem_count,
+    (SELECT SUM(l.l_extendedprice * (1 - l.l_discount)) 
+     FROM lineitem l WHERE l.l_orderkey = e.o_orderkey 
+     AND l.l_returnflag = 'R') AS total_returned_value
+FROM EligibleOrders e
+JOIN RankedSuppliers r ON e.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = r.s_nationkey)
+JOIN SupplierPartInfo p ON r.s_suppkey = p.ps_suppkey
+JOIN FilteredNations n ON r.s_nationkey = n.n_nationkey
+WHERE e.order_rank <= 5 
+AND e.o_orderstatus = 'O' 
+AND NOT EXISTS (
+    SELECT 1
+    FROM lineitem l
+    WHERE l.l_orderkey = e.o_orderkey
+    AND l.l_discount IS NULL
+)
+ORDER BY e.o_totalprice DESC, n.n_name;

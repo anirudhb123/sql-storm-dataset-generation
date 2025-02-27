@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0) AS DownVotes
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 month'
+    AND 
+        p.Score > 5
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    up.DisplayName, 
+    up.PostId, 
+    up.Title, 
+    up.Score,
+    up.ViewCount,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    (up.UpVotes - up.DownVotes) AS VoteBalance
+FROM 
+    RankedPosts up
+JOIN 
+    UserStats us ON up.OwnerUserId = us.UserId
+WHERE 
+    up.rn = 1
+ORDER BY 
+    VoteBalance DESC, 
+    up.ViewCount DESC
+LIMIT 10;

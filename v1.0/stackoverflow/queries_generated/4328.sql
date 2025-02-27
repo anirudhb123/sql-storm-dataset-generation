@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(rb.GoldBadges, 0) AS GoldBadges,
+    COALESCE(rb.SilverBadges, 0) AS SilverBadges,
+    COALESCE(rb.BronzeBadges, 0) AS BronzeBadges,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount
+FROM 
+    Users u
+LEFT JOIN 
+    UserBadges rb ON u.Id = rb.UserId
+INNER JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+WHERE 
+    rp.UserPostRank = 1 
+    AND (rp.Score > 0 OR rp.CommentCount > 5)
+ORDER BY 
+    u.Reputation DESC, 
+    rp.Score DESC;
+
+-- Further analysis for posts with no comments or negative scores
+SELECT 
+    COUNT(*) AS NonEngagingPosts
+FROM 
+    Posts p
+WHERE 
+    p.Score < 0 
+    OR (p.CommentCount IS NULL);

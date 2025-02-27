@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id, pt.Name, v.UpVotes, v.DownVotes, u.Reputation
+),
+FilteredPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.Reputation,
+        rp.Rank,
+        rp.CommentCount
+    FROM RankedPosts rp
+    WHERE rp.Rank <= 5
+),
+FinalOutput AS (
+    SELECT
+        fp.PostId,
+        fp.Title,
+        fp.CreationDate,
+        fp.Score,
+        fp.UpVotes,
+        fp.DownVotes,
+        fp.Reputation,
+        fp.CommentCount,
+        ROW_NUMBER() OVER (ORDER BY fp.Score DESC) AS FinalRank
+    FROM FilteredPosts fp
+)
+SELECT
+    f.PostId,
+    f.Title,
+    f.CreationDate,
+    f.Score,
+    f.UpVotes,
+    f.DownVotes,
+    f.Reputation,
+    f.CommentCount,
+    f.FinalRank
+FROM FinalOutput f
+ORDER BY f.FinalRank;

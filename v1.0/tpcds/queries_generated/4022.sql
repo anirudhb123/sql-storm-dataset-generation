@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_id
+),
+CustomerReturns AS (
+    SELECT 
+        wr_refunded_customer_sk AS customer_id,
+        COUNT(wr_return_number) AS total_returns
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_refunded_customer_sk
+),
+EnhancedCustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+)
+SELECT 
+    cs.c_customer_id,
+    cdem.cd_gender,
+    cdem.cd_marital_status,
+    COALESCE(cr.total_returns, 0) AS total_returns,
+    rs.total_sales,
+    rs.total_orders
+FROM 
+    customer cs
+JOIN 
+    EnhancedCustomerDemographics cdem ON cs.c_current_cdemo_sk = cdem.cd_demo_sk
+LEFT JOIN 
+    CustomerReturns cr ON cs.c_customer_sk = cr.customer_id
+LEFT JOIN 
+    RankedSales rs ON rs.web_site_id = (SELECT web_site_id FROM web_sales WHERE ws_bill_customer_sk = cs.c_customer_sk LIMIT 1)
+WHERE 
+    cdem.cd_purchase_estimate > 5000
+    AND (cdem.cd_gender = 'F' OR cdem.cd_gender IS NULL)
+    AND (cdem.income_band BETWEEN 1 AND 5 OR cdem.income_band IS NULL)
+ORDER BY 
+    rs.total_sales DESC
+LIMIT 100;

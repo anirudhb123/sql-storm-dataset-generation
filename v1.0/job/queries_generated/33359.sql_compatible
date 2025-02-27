@@ -1,0 +1,61 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    mh.title AS main_movie,
+    mh.production_year AS main_year,
+    COALESCE(NULLIF(aka.name, ''), '<Unknown>') AS cast_member_name,
+    ci.nr_order AS role_order,
+    ci.note AS role_note,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    AVG(mr.rank) AS average_rank
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    aka_name aka ON ci.person_id = aka.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    (
+        SELECT 
+            movie_id,
+            RANK() OVER (PARTITION BY movie_id ORDER BY production_year DESC) AS rank
+        FROM 
+            aka_title
+    ) AS mr ON mh.movie_id = mr.movie_id
+WHERE 
+    ci.note IS NOT NULL 
+    AND (ci.nr_order IS NULL OR ci.nr_order < 5)
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, aka.name, ci.nr_order, ci.note
+ORDER BY 
+    mh.production_year DESC, keyword_count DESC
+LIMIT 100;

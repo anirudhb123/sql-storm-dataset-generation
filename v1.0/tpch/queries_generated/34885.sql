@@ -1,0 +1,47 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT o.o_orderkey, c.c_custkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, co.c_custkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY co.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    JOIN CustomerOrders co ON o.o_custkey = co.c_custkey
+    WHERE co.order_rank < 5
+),
+SupplierPartInfo AS (
+    SELECT ps.ps_partkey, s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_availqty,
+           COUNT(DISTINCT s.s_nationkey) AS unique_nations
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_suppkey, s.s_name
+),
+OrderLineStats AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+           AVG(l.l_quantity) AS avg_quantity, COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT c.c_name, c.acctbal,
+       COALESCE(o.total_order_value, 0) AS last_order_value,
+       COALESCE(s.total_availqty, 0) AS parts_available,
+       COALESCE(s.unique_nations, 0) AS number_of_nations
+FROM customer c
+LEFT JOIN CustomerOrders co ON c.c_custkey = co.c_custkey AND co.order_rank = 1
+LEFT JOIN OrderLineStats o ON co.o_orderkey = o.o_orderkey
+LEFT JOIN (
+    SELECT ps_partkey, SUM(total_availqty) AS total_availqty, SUM(unique_nations) AS unique_nations
+    FROM SupplierPartInfo
+    GROUP BY ps_partkey
+) s ON s.ps_partkey = (
+    SELECT p.p_partkey
+    FROM part p
+    WHERE p.p_brand = 'Brand#23' AND p.p_size = 49
+    ORDER BY p.p_retailprice DESC
+    LIMIT 1
+)
+WHERE c.c_acctbal IS NOT NULL
+ORDER BY c.c_name;

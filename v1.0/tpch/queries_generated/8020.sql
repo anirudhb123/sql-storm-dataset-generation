@@ -1,0 +1,70 @@
+WITH regional_supplier_summary AS (
+    SELECT 
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acctbal,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        n.n_name, r.r_name
+),
+part_supply_summary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_availqty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+order_line_summary AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS lineitem_count,
+        SUM(l.l_extendedprice) AS total_extendedprice,
+        AVG(l.l_discount) AS avg_discount
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.nation_name,
+    r.region_name,
+    p.p_name,
+    p.total_availqty,
+    p.total_supplycost,
+    o.lineitem_count,
+    o.total_extendedprice,
+    o.avg_discount,
+    r.supplier_count,
+    r.total_acctbal,
+    r.avg_acctbal
+FROM 
+    regional_supplier_summary r
+JOIN 
+    part_supply_summary p ON r.region_name = (
+        SELECT r_name FROM region WHERE r_regionkey IN (
+            SELECT n_regionkey FROM nation WHERE n_name = r.nation_name
+        )
+    )
+JOIN 
+    order_line_summary o ON o.o_orderkey IN (
+        SELECT o_orderkey FROM orders WHERE o_orderkey % 10 = 0
+    )
+ORDER BY 
+    r.region_name, p.total_supplycost DESC;

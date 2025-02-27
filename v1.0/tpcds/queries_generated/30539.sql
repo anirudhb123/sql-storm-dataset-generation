@@ -1,0 +1,41 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT ws_sold_date_sk, ws_item_sk, SUM(ws_quantity) AS total_quantity, SUM(ws_net_paid) AS total_sales
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT cs_sold_date_sk, cs_item_sk, SUM(cs_quantity) AS total_quantity, SUM(cs_net_paid) AS total_sales
+    FROM catalog_sales
+    GROUP BY cs_sold_date_sk, cs_item_sk
+)
+, total_sales AS (
+    SELECT
+        d.d_year,
+        d.d_month_seq,
+        SUM(sd.total_quantity) AS total_quantity,
+        SUM(sd.total_sales) AS total_sales
+    FROM sales_data sd
+    JOIN date_dim d ON d.d_date_sk = sd.ws_sold_date_sk
+    GROUP BY d.d_year, d.d_month_seq
+)
+SELECT
+    t.d_year,
+    t.d_month_seq,
+    t.total_quantity,
+    t.total_sales,
+    RANK() OVER (PARTITION BY t.d_year ORDER BY t.total_sales DESC) AS sales_rank,
+    CASE
+        WHEN t.total_sales > 10000 THEN 'High Performer'
+        WHEN t.total_sales BETWEEN 5000 AND 10000 THEN 'Average Performer'
+        ELSE 'Low Performer'
+    END AS performance_category
+FROM total_sales t
+LEFT JOIN (
+    SELECT ib_income_band_sk, COUNT(*) AS customer_count
+    FROM household_demographics
+    WHERE hd_income_band_sk IS NOT NULL
+    GROUP BY ib_income_band_sk
+) h ON h.ib_income_band_sk = (SELECT MAX(ib_income_band_sk) FROM household_demographics)
+WHERE t.total_sales IS NOT NULL
+ORDER BY t.d_year, t.total_sales DESC
+LIMIT 100;

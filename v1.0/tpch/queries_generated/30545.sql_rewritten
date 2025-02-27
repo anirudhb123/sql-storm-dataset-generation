@@ -1,0 +1,52 @@
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate) AS row_num
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+),
+ranked_sales AS (
+    SELECT 
+        c.c_name,
+        SUM(sc.total_sales) AS total_sales_per_customer,
+        RANK() OVER (ORDER BY SUM(sc.total_sales) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        sales_cte sc ON c.c_custkey = sc.o_orderkey
+    WHERE 
+        c.c_acctbal IS NOT NULL 
+        AND c.c_mktsegment IN ('OFFICE', 'FURNITURE')
+    GROUP BY 
+        c.c_name
+)
+SELECT 
+    r.r_name,
+    COUNT(n.n_nationkey) AS nation_count,
+    COALESCE(MAX(rs.total_sales_per_customer), 0) AS max_sales,
+    COALESCE(MIN(rs.total_sales_per_customer), 0) AS min_sales,
+    AVG(rs.total_sales_per_customer) AS avg_sales,
+    STRING_AGG(rs.c_name, ', ') AS top_customers
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    ranked_sales rs ON n.n_nationkey = rs.c_custkey
+GROUP BY 
+    r.r_name
+ORDER BY 
+    r.r_name ASC
+HAVING 
+    COUNT(n.n_nationkey) > 1
+    AND AVG(rs.total_sales_per_customer) > 5000;

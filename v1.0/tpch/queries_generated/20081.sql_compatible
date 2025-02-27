@@ -1,0 +1,81 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderstatus, 
+        o.o_totalprice, 
+        o.o_orderdate, 
+        o.o_orderpriority, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1995-01-01' AND o.o_orderdate < '1996-01-01'
+), 
+SelectedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        COUNT(ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL 
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        COUNT(ps.ps_partkey) > 5
+), 
+RegionalOrders AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(o.o_totalprice) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        n.n_name NOT LIKE 'N.%' 
+    GROUP BY 
+        n.n_nationkey, n.n_name
+), 
+OrderDetails AS (
+    SELECT 
+        lo.l_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS revenue,
+        COUNT(DISTINCT lo.l_linenumber) AS item_count
+    FROM 
+        lineitem lo 
+    WHERE 
+        lo.l_shipdate >= '1995-01-01' AND lo.l_shipdate < '1996-01-01'
+        AND lo.l_returnflag = 'N'
+    GROUP BY 
+        lo.l_orderkey
+)
+SELECT 
+    RO.n_name AS region_name,
+    SUM(RO.total_sales) AS total_revenue,
+    COALESCE(SUM(OD.revenue), 0) AS total_revenue_from_orders,
+    COUNT(DISTINCT OA.o_orderkey) AS total_orders_processed,
+    AVG(CASE WHEN RS.total_parts IS NULL THEN 0 ELSE RS.total_parts END) AS avg_parts_per_supplier
+FROM 
+    RegionalOrders RO
+LEFT JOIN 
+    RankedOrders OA ON RO.total_sales > (SELECT SQ.total_sales FROM RegionalOrders SQ ORDER BY SQ.total_sales FETCH FIRST 1 ROW ONLY)
+LEFT JOIN 
+    SelectedSuppliers RS ON RS.total_supplycost > 5000
+LEFT JOIN 
+    OrderDetails OD ON OD.l_orderkey = OA.o_orderkey
+GROUP BY 
+    RO.n_name
+HAVING 
+    SUM(RO.total_sales) > (SELECT AVG(total_sales) FROM RegionalOrders)
+ORDER BY 
+    total_revenue DESC;

@@ -1,0 +1,73 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS total_lines,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    n.n_name AS nation,
+    p.p_mfgr AS manufacturer,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales,
+    AVG(li.l_quantity) AS avg_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    COALESCE(hs.total_spent, 0) AS high_value_customer_spent,
+    CASE 
+        WHEN r.r_name IS NULL THEN 'Unknown Region' 
+        ELSE r.r_name 
+    END AS region_name
+FROM 
+    lineitem li
+JOIN 
+    partsupp ps ON li.l_partkey = ps.ps_partkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    HighValueCustomers hs ON hs.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey ORDER BY c.c_acctbal DESC LIMIT 1)
+JOIN 
+    OrderStats o ON o.o_orderkey = li.l_orderkey
+WHERE 
+    p.p_retailprice > 100 AND 
+    li.l_shipdate >= DATE '1996-01-01' AND 
+    li.l_returnflag = 'N'
+GROUP BY 
+    n.n_name, p.p_mfgr, r.r_name, hs.total_spent
+ORDER BY 
+    total_sales DESC, n.n_name;

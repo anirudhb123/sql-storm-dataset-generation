@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY t.id) AS total_cast,
+        AVG(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY t.id) AS avg_role_present,
+        ROW_NUMBER() OVER (ORDER BY t.production_year DESC, t.title) AS rn
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info ci ON t.id = ci.movie_id
+    WHERE
+        t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT
+        rm.title,
+        rm.production_year,
+        rm.total_cast,
+        rm.avg_role_present
+    FROM
+        RankedMovies rm
+    WHERE
+        rm.total_cast > 0
+        AND rm.avg_role_present IS NOT NULL
+),
+MovieDetails AS (
+    SELECT
+        fm.title,
+        fm.production_year,
+        fm.total_cast,
+        CASE 
+            WHEN fm.avg_role_present > 0.5 THEN 'High' 
+            ELSE 'Low' 
+        END AS role_density,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        cm.name AS company_name,
+        ROW_NUMBER() OVER (PARTITION BY fm.production_year ORDER BY fm.total_cast DESC) AS ranking
+    FROM
+        FilteredMovies fm
+    LEFT JOIN
+        movie_keyword mk ON fm.title = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON fm.title = mc.movie_id
+    LEFT JOIN 
+        company_name cm ON mc.company_id = cm.id
+)
+SELECT
+    md.title,
+    md.production_year,
+    md.total_cast,
+    md.role_density,
+    md.keyword,
+    md.company_name,
+    COALESCE(NULLIF(md.company_name, 'Universal Pictures'), 'Independent') AS company_type,
+    CASE 
+        WHEN md.total_cast > 50 THEN 'Epic' 
+        WHEN md.total_cast BETWEEN 20 AND 50 THEN 'Moderate' 
+        ELSE 'Small' 
+    END AS cast_size_category
+FROM
+    MovieDetails md
+WHERE
+    md.rank < 10
+    OR (md.production_year > 2000 AND md.role_density = 'High')
+ORDER BY
+    md.production_year DESC;

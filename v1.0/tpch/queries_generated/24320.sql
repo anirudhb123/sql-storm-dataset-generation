@@ -1,0 +1,53 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, 
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+),
+CustomerBalances AS (
+    SELECT c.c_custkey, c.c_name, 
+           SUM(o.o_totalprice) OVER (PARTITION BY c.c_custkey) AS total_spent,
+           CASE 
+               WHEN SUM(o.o_totalprice) OVER (PARTITION BY c.custkey) IS NULL THEN 0 
+               ELSE SUM(o.o_totalprice) OVER (PARTITION BY c.custkey)
+           END AS adjusted_total
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+),
+SupplierProductDetails AS (
+    SELECT s.s_suppkey, s.s_name, 
+           COUNT(DISTINCT p.p_partkey) AS num_parts,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           MAX(ps.ps_availqty) AS max_avail_qty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+LineItemAnalysis AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, 
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_count,
+           SUM(l.l_discount * l.l_extendedprice) AS total_discounted
+    FROM lineitem l
+    GROUP BY l.l_orderkey, l.l_partkey, l.l_suppkey
+)
+SELECT 
+    r.o_orderkey AS order_id,
+    cb.c_name AS customer_name,
+    cb.total_spent,
+    spd.s_name AS supplier_name,
+    spd.num_parts,
+    la.return_count,
+    COALESCE(spd.avg_supply_cost, 0) AS avg_supply_cost,
+    la.total_discounted,
+    CASE 
+        WHEN r.o_orderstatus = 'F' THEN 'Finished' 
+        ELSE 'Pending' 
+    END AS order_status,
+    ROW_NUMBER() OVER (PARTITION BY r.o_orderstatus ORDER BY r.o_totalprice DESC) AS order_rank
+FROM RankedOrders r
+JOIN CustomerBalances cb ON r.o_orderkey = cb.c_custkey
+LEFT JOIN SupplierProductDetails spd ON r.o_orderkey = spd.s_suppkey
+LEFT JOIN LineItemAnalysis la ON r.o_orderkey = la.l_orderkey
+WHERE cb.adjusted_total > 1000
+AND spd.num_parts > 5
+ORDER BY order_rank, cb.total_spent DESC;

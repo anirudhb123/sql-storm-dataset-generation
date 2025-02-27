@@ -1,0 +1,60 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy AS mh ON mh.movie_id = ml.movie_id
+    WHERE 
+        (EXISTS (
+            SELECT 1
+            FROM movie_info mi
+            WHERE mi.movie_id = ml.linked_movie_id 
+            AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+            AND mi.info IS NOT NULL
+            LIMIT 1
+        )
+        OR 
+        NOT EXISTS (SELECT 1 FROM movie_info mi WHERE mi.movie_id = ml.linked_movie_id))
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    string_agg(aka.name, ', ') AS actors,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    MAX(CASE WHEN c.role_id IS NOT NULL THEN 'Involved' ELSE 'Not Involved' END) AS involvement
+FROM 
+    movie_hierarchy AS mh
+LEFT JOIN 
+    complete_cast AS cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    aka_name AS aka ON c.person_id = aka.person_id
+LEFT JOIN 
+    movie_keyword AS mk ON mh.movie_id = mk.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING
+    COUNT(DISTINCT cc.id) > 0
+ORDER BY 
+    mh.production_year DESC, mh.title;

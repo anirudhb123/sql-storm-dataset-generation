@@ -1,0 +1,53 @@
+WITH RECURSIVE RecursiveCTE AS (
+    SELECT ps_partkey, SUM(ps_availqty) AS total_availqty
+    FROM partsupp
+    GROUP BY ps_partkey
+    HAVING SUM(ps_availqty) > 0
+    UNION ALL
+    SELECT ps.partkey, r.total_availqty + ps.ps_availqty AS total_availqty
+    FROM partsupp ps
+    JOIN RecursiveCTE r ON ps.ps_partkey = r.ps_partkey
+    WHERE r.total_availqty < 1000
+),
+FilteredSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           CONCAT('Supplier:', s.s_name, '|AccountBalance:', CAST(s.s_acctbal AS VARCHAR)) AS supplier_info
+    FROM supplier s
+    WHERE s.s_acctbal > 50.00 AND s.s_comment LIKE '%excellent%'
+),
+OrderInfo AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+      AND EXISTS (SELECT 1 FROM lineitem l WHERE l.l_orderkey = o.o_orderkey AND l.l_discount > 0.05)
+),
+SupplierPart AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty,
+           CASE WHEN ps.ps_supplycost IS NULL THEN 0 ELSE ps.ps_supplycost END AS adjusted_supplycost,
+           RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY CASE WHEN ps.ps_supplycost IS NULL THEN 0 ELSE ps.ps_supplycost END ASC) AS supply_rank
+    FROM partsupp ps
+),
+FinalSelection AS (
+    SELECT DISTINCT ps.p_partkey, p.p_name, p.p_brand, p.p_container, p.p_retailprice, 
+           COALESCE(s.s_name, 'Unknown') AS supplier_name, fi.o_totalprice, 
+           CASE 
+               WHEN fi.o_totalprice >= 2000 THEN 'High Value' 
+               ELSE 'Standard' 
+           END AS order_value_category
+    FROM part p
+    LEFT JOIN SupplierPart ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN FilteredSupplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN OrderInfo fi ON s.s_suppkey = fi.o_custkey
+    WHERE p.p_retailprice BETWEEN 10 AND 100
+      AND (p.p_comment IS NULL OR p.p_comment NOT LIKE '%defective%')
+      AND (ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp) OR ps.ps_availqty IS NULL)
+)
+SELECT RANK() OVER (ORDER BY fs.o_totalprice DESC) AS rank_order, fs.*
+FROM FinalSelection fs
+WHERE EXISTS (
+    SELECT 1 FROM nation n
+    WHERE n.n_nationkey IN (SELECT c.c_nationkey FROM customer c WHERE c.custkey = fs.o_custkey)
+)
+AND fs.supplier_name IS NOT NULL
+ORDER BY fs.order_value_category, fs.o_totalprice DESC, fs.p_name;

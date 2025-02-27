@@ -1,0 +1,66 @@
+WITH MovieData AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+        COUNT(DISTINCT m.id) AS company_count,
+        AVG(COALESCE(mk.keyword::text, 'No Keyword'::text)) AS average_keyword
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name m ON mc.company_id = m.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+RoleInfo AS (
+    SELECT 
+        ci.movie_id, 
+        COUNT(DISTINCT ci.person_id) AS total_actors,
+        STRING_AGG(DISTINCT c.role_id::text, ', ') AS role_ids
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type c ON ci.person_role_id = c.id
+    GROUP BY 
+        ci.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        md.title_id,
+        md.title,
+        md.production_year,
+        md.aka_names,
+        ri.total_actors,
+        RANK() OVER (ORDER BY md.production_year DESC) AS year_rank
+    FROM 
+        MovieData md
+    JOIN 
+        RoleInfo ri ON md.title_id = ri.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.aka_names,
+    rm.total_actors,
+    rm.year_rank,
+    CASE 
+        WHEN rm.total_actors > 20 THEN 'Large Cast'
+        WHEN rm.total_actors IS NULL THEN 'No Actors'
+        ELSE 'Standard Cast' 
+    END AS actor_category,
+    COALESCE(NULLIF(md.average_keyword, 'No Keyword'::text), 'Missing Keywords') AS keyword_info
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieData md ON rm.title_id = md.title_id
+WHERE 
+    (rm.production_year IS NOT NULL AND rm.production_year >= 2000)
+ORDER BY 
+    rm.year_rank, rm.title;

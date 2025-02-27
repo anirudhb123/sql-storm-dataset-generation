@@ -1,0 +1,78 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        co.total_spent,
+        ROW_NUMBER() OVER (ORDER BY co.total_spent DESC) AS rank
+    FROM 
+        CustomerOrders co
+    WHERE 
+        co.total_spent > 10000
+), 
+PartSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+
+SELECT 
+    hvc.c_name AS high_value_customer,
+    ps.p_name AS part_name,
+    ps.total_sales,
+    s.total_avail_qty,
+    s.avg_supply_cost,
+    CASE 
+        WHEN ps.total_sales IS NOT NULL THEN ps.total_sales 
+        ELSE 0 
+    END AS total_sales_calculated,
+    CASE 
+        WHEN hvc.rank IS NULL THEN 'No'
+        ELSE 'Yes'
+    END AS is_high_value
+FROM 
+    HighValueCustomers hvc
+FULL OUTER JOIN 
+    PartSales ps ON hvc.c_custkey = ps.p_partkey
+JOIN 
+    SupplierParts s ON ps.p_partkey = s.s_suppkey
+WHERE 
+    (s.total_avail_qty IS NOT NULL AND s.total_avail_qty > 50) OR 
+    (hvc.rank IS NULL)
+ORDER BY 
+    high_value_customer, total_sales DESC;

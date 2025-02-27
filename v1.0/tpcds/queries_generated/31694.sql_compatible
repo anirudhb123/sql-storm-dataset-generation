@@ -1,0 +1,75 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk, ws_sold_date_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_income_band_sk
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+filtered_addresses AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer_address ca 
+    WHERE 
+        ca.ca_county LIKE 'CountyA%'
+),
+web_sales_totals AS (
+    SELECT 
+        ws.web_site_sk,
+        COUNT(DISTINCT ws_order_number) AS web_order_count,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    si.total_orders,
+    si.total_profit,
+    wt.web_order_count,
+    wt.total_sales,
+    COALESCE(fa.ca_city, 'Unknown') AS shipping_city,
+    CASE 
+        WHEN si.total_profit > 1000 THEN 'High Profit'
+        WHEN si.total_profit BETWEEN 500 AND 1000 THEN 'Medium Profit'
+        ELSE 'Low Profit'
+    END AS profit_category
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_summary si ON ci.c_customer_sk = si.web_site_sk
+LEFT JOIN 
+    web_sales_totals wt ON si.web_site_sk = wt.web_site_sk
+LEFT JOIN 
+    filtered_addresses fa ON ci.c_current_addr_sk = fa.ca_address_sk
+WHERE 
+    ci.cd_income_band_sk IN (SELECT ib_income_band_sk FROM income_band WHERE ib_lower_bound >= 30000)
+AND 
+    si.profit_rank <= 5
+ORDER BY 
+    si.total_profit DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,69 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_net_paid,
+        ws_sold_date_sk,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2451545 AND 2451878  
+),
+TopSales AS (
+    SELECT 
+        sc.ws_item_sk,
+        sc.ws_order_number,
+        sc.ws_net_paid,
+        ca.ca_city,
+        SUM(sc.ws_quantity) OVER (PARTITION BY sc.ws_item_sk) AS total_quantity,
+        DENSE_RANK() OVER (ORDER BY SUM(sc.ws_net_paid) DESC) AS item_rank
+    FROM 
+        SalesCTE sc
+    JOIN 
+        customer c ON sc.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        sc.rn = 1
+      AND 
+        ca.ca_city IS NOT NULL AND ca.ca_state IS NOT NULL
+),
+AggregatedSales AS (
+    SELECT 
+        ws_item_sk,
+        MAX(ws_net_paid) AS max_sales,
+        AVG(ws_net_paid) AS average_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        TopSales
+    GROUP BY 
+        ws_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_product_name,
+    a.max_sales,
+    a.average_sales,
+    a.total_orders,
+    CASE 
+        WHEN a.average_sales > 1000 THEN 'High'
+        WHEN a.average_sales BETWEEN 500 AND 1000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_credit_rating
+FROM 
+    AggregatedSales a
+JOIN 
+    item i ON a.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    customer_demographics ci ON i.i_item_sk = ci.cd_demo_sk 
+WHERE 
+    a.max_sales > (SELECT AVG(max_sales) FROM AggregatedSales)
+ORDER BY 
+    a.average_sales DESC
+OFFSET 50 ROWS FETCH NEXT 100 ROWS ONLY;

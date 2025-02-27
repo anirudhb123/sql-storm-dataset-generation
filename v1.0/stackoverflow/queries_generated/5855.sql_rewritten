@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC, p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score > 0
+),
+RecentActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS ActivePostCount,
+        SUM(CASE WHEN p.CreationDate > (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days') THEN 1 ELSE 0 END) AS RecentActivePosts
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate > (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '180 days') 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+TopVotedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        v.VoteTypeId IN (2, 3)
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.Score,
+    rp.ViewCount,
+    rau.ActivePostCount,
+    rau.RecentActivePosts,
+    tb.BadgeCount,
+    tvp.UpVotes,
+    tvp.DownVotes
+FROM 
+    RankedPosts rp
+JOIN 
+    RecentActiveUsers rau ON rp.Id = rau.UserId
+JOIN 
+    TopBadges tb ON rau.UserId = tb.UserId
+JOIN 
+    TopVotedPosts tvp ON rp.Id = tvp.Id
+WHERE 
+    rp.rn = 1 
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 50;

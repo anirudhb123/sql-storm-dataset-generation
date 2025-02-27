@@ -1,0 +1,52 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS title_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY a.id) AS cast_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+MoviesWithKeywords AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(k.keyword, 'No Keywords') AS keyword,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    mwk.title,
+    mwk.production_year,
+    mwk.keyword,
+    CASE 
+        WHEN mwk.cast_count > 10 THEN 'Large Cast'
+        WHEN mwk.cast_count IS NULL THEN 'No Cast'
+        ELSE 'Small Cast'
+    END AS cast_size
+FROM 
+    MoviesWithKeywords mwk
+WHERE 
+    mwk.production_year > 2000
+    AND (mwk.keyword LIKE '%Action%' OR mwk.keyword LIKE '%Comedy%')
+GROUP BY 
+    mwk.title,
+    mwk.production_year,
+    mwk.keyword,
+    cast_size
+ORDER BY 
+    mwk.production_year DESC,
+    mwk.title ASC
+LIMIT 100;

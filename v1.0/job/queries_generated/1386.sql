@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorSummary AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        AVG(COALESCE(ci.nr_order, 0)) AS avg_order
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info c ON a.person_id = c.person_id
+    LEFT JOIN 
+        complete_cast cc ON c.movie_id = cc.movie_id
+    LEFT JOIN 
+        role_type rt ON c.role_id = rt.id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.person_id, a.name
+),
+MovieKeyword AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    ASR.name AS actor_name,
+    ASR.movie_count,
+    ASR.avg_order,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorSummary ASR ON rm.movie_id IN (
+        SELECT 
+            movie_id 
+        FROM 
+            cast_info 
+        WHERE 
+            person_id = ASR.person_id
+    )
+LEFT JOIN 
+    MovieKeyword mk ON rm.movie_id = mk.movie_id
+WHERE 
+    rm.title_rank <= 5
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title ASC;

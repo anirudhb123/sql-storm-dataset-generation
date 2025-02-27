@@ -1,0 +1,80 @@
+WITH RecursiveActors AS (
+    SELECT
+        a.id AS actor_id,
+        a.person_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY a.id) AS rn
+    FROM
+        cast_info a
+    JOIN
+        aka_name ak ON a.person_id = ak.person_id
+),
+MovieDetails AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(kw.keyword, 'No Keyword') AS keyword,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(CASE WHEN c.nr_order IS NOT NULL THEN c.nr_order ELSE 0 END) AS avg_order
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_keyword mw ON m.id = mw.movie_id
+    LEFT JOIN
+        keyword kw ON mw.keyword_id = kw.id
+    LEFT JOIN
+        cast_info c ON m.id = c.movie_id
+    GROUP BY
+        m.id, m.title, m.production_year, kw.keyword
+),
+CompanyAssociations AS (
+    SELECT
+        mc.movie_id,
+        ARRAY_AGG(DISTINCT cn.name) AS company_names,
+        COUNT(DISTINCT mc.company_id) AS number_of_companies
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY
+        mc.movie_id
+),
+FinalBenchmark AS (
+    SELECT
+        md.movie_id,
+        md.title,
+        md.production_year,
+        COALESCE(ca.company_names, ARRAY[]::text[]) AS company_names,
+        md.total_cast,
+        md.avg_order,
+        aa.actor_name,
+        ra.actor_id
+    FROM
+        MovieDetails md
+    LEFT JOIN
+        CompanyAssociations ca ON md.movie_id = ca.movie_id
+    LEFT JOIN
+        RecursiveActors aa ON md.movie_id = (SELECT movie_id FROM cast_info WHERE person_id = aa.person_id LIMIT 1)
+    LEFT JOIN
+        RecursiveActors ra ON aa.rn = 1 AND ra.actor_id = aa.actor_id  -- Randomly selecting the first actor by rn
+    WHERE
+        md.production_year >= 2000 AND (md.total_cast > 5 OR ca.number_of_companies IS NOT NULL)
+)
+SELECT
+    fb.movie_id,
+    fb.title,
+    fb.production_year,
+    fb.company_names,
+    fb.total_cast,
+    fb.avg_order,
+    MAX(fb.actor_name) AS lead_actor -- collecting the maximum actor name lexicographically
+FROM
+    FinalBenchmark fb
+GROUP BY
+    fb.movie_id, fb.title, fb.production_year, fb.company_names, fb.total_cast, fb.avg_order
+HAVING
+    COUNT(fb.actor_name) > 1 -- filtering for movies that have more than one associated actor
+ORDER BY
+    fb.production_year DESC,
+    fb.total_cast DESC;

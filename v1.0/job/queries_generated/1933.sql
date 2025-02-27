@@ -1,0 +1,61 @@
+WITH MovieDetails AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS total_actors,
+        COUNT(DISTINCT m.company_id) AS total_companies,
+        AVG(CASE WHEN c.role_id IS NOT NULL THEN 1 ELSE 0 END) * 100 AS actor_percentage
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        movie_companies m ON a.id = m.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.id
+),
+ActorDetails AS (
+    SELECT 
+        c.person_id,
+        a.id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.production_year DESC) AS actor_rank,
+        p.info AS actor_info
+    FROM 
+        cast_info c
+    INNER JOIN 
+        aka_title a ON c.movie_id = a.id 
+    LEFT JOIN 
+        person_info p ON c.person_id = p.person_id
+    WHERE 
+        p.info_type_id IN (SELECT id FROM info_type WHERE info = 'Biography')
+),
+CompanyCounts AS (
+    SELECT 
+        movie_id,
+        COUNT(company_id) AS company_count
+    FROM 
+        movie_companies
+    GROUP BY 
+        movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.total_actors,
+    COALESCE(cc.company_count, 0) AS company_count,
+    ad.person_id,
+    ad.actor_rank,
+    ad.actor_info
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    CompanyCounts cc ON md.id = cc.movie_id
+LEFT JOIN 
+    ActorDetails ad ON md.title = ad.movie_id
+WHERE 
+    md.actor_percentage > 50
+ORDER BY 
+    md.production_year DESC, 
+    md.total_actors DESC;

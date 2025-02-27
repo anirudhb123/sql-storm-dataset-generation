@@ -1,0 +1,38 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_spending
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY total_spending DESC
+    LIMIT 10
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+), 
+order_details AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '2022-01-01' AND l.l_shipdate < DATE '2023-01-01'
+    GROUP BY o.o_orderkey
+),
+supplier_nation AS (
+    SELECT n.n_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplies_cost
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_name
+)
+SELECT c.c_name AS customer_name, co.order_count, co.total_spent, 
+       ts.s_name AS top_supplier, ts.total_spending, 
+       od.total_price_after_discount, 
+       sn.n_name AS supplier_nation, sn.total_supplies_cost
+FROM customer_orders co
+JOIN top_suppliers ts ON ts.total_spending > (SELECT AVG(total_spending) FROM top_suppliers)
+JOIN order_details od ON co.order_count > 5
+JOIN supplier_nation sn ON sn.total_supplies_cost > 100000
+ORDER BY co.total_spent DESC, ts.total_spending DESC
+LIMIT 50;

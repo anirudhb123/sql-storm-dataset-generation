@@ -1,0 +1,66 @@
+WITH RECURSIVE MovieNetwork AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        c.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY a.nr_order) AS role_order
+    FROM 
+        aka_title t
+        JOIN complete_cast cc ON cc.movie_id = t.id
+        JOIN cast_info a ON a.movie_id = cc.movie_id AND a.person_id = cc.subject_id
+        JOIN aka_name c ON c.person_id = a.person_id
+    WHERE 
+        t.production_year BETWEEN 1990 AND 2000
+),
+CommonKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+        JOIN keyword k ON k.id = mk.keyword_id
+    WHERE 
+        k.phonetic_code IS NOT NULL
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mn.movie_id,
+    mn.title,
+    mn.actor_name,
+    mn.role_order,
+    COALESCE(ck.keywords, 'No Keywords') AS keywords,
+    COUNT(DISTINCT a.person_id) OVER (PARTITION BY mn.movie_id) AS total_cast,
+    CASE 
+        WHEN COUNT(DISTINCT a.person_id) OVER (PARTITION BY mn.movie_id) > 5 THEN 'Feature Film'
+        ELSE 'Short Film'
+    END AS film_type
+FROM 
+    MovieNetwork mn
+LEFT JOIN 
+    CommonKeywords ck ON ck.movie_id = mn.movie_id
+LEFT JOIN 
+    cast_info a ON a.movie_id = mn.movie_id
+WHERE 
+    mn.role_order <= 3 
+    OR a.person_role_id IN (
+        SELECT 
+            rc.id
+        FROM 
+            role_type rc
+        WHERE 
+            rc.role LIKE '%lead%'
+            OR rc.role LIKE '%starring%'
+    )
+    OR EXISTS (
+        SELECT 1 
+        FROM movie_info mi
+        WHERE mi.movie_id = mn.movie_id 
+          AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Awards')
+          AND mi.info IS NOT NULL
+    )
+ORDER BY 
+    mn.movie_id ASC, 
+    mn.role_order DESC;
+
+This SQL query benchmarks the relationships and details of movies released between 1990 and 2000, focusing on the cast, their roles, and associated keywords. The complexities introduced include recursive CTEs to analyze relationships, string aggregation for keyword collation, the use of COALESCE to handle NULLs, and conditional logic to classify films. Additionally, it filters based on various conditions (including role types and existence checks for awards information), and makes use of window functions for aggregate calculations, offering a rich view of the movie data structure.

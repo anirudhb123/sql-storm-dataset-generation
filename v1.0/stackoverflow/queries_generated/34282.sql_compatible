@@ -1,0 +1,50 @@
+
+WITH RecursivePostHistory AS (
+    SELECT id, PostId, UserId, CreationDate, Comment, PostHistoryTypeId,
+           ROW_NUMBER() OVER (PARTITION BY PostId ORDER BY CreationDate DESC) AS RN
+    FROM PostHistory
+    WHERE PostHistoryTypeId IN (10, 11, 12, 13)
+),
+UserVotes AS (
+    SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+           SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM Votes
+    GROUP BY PostId
+),
+TagActivity AS (
+    SELECT p.Id AS PostId, t.TagName, COUNT(c.Id) AS CommentCount,
+           SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+           SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Tags t ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY p.Id, t.TagName
+),
+PostStatistics AS (
+    SELECT p.Id AS PostId, p.Title, p.CreationDate, u.DisplayName AS OwnerDisplayName,
+           COALESCE(uv.UpvoteCount, 0) AS TotalUpvotes,
+           COALESCE(uv.DownvoteCount, 0) AS TotalDownvotes,
+           COUNT(c.Id) AS TotalComments,
+           COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS TotalCloseVotes,
+           COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END), 0) AS TotalReopenVotes
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN UserVotes uv ON p.Id = uv.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, u.DisplayName
+)
+SELECT ps.PostId, ps.Title, ps.CreationDate, ps.OwnerDisplayName,
+       ps.TotalUpvotes, ps.TotalDownvotes, ps.TotalComments,
+       ps.TotalCloseVotes, ps.TotalReopenVotes,
+       STRING_AGG(DISTINCT ta.TagName, ', ') AS Tags
+FROM PostStatistics ps
+LEFT JOIN TagActivity ta ON ps.PostId = ta.PostId
+WHERE ps.TotalComments > 10 AND ps.TotalUpvotes > 5
+GROUP BY ps.PostId, ps.Title, ps.CreationDate, ps.OwnerDisplayName,
+         ps.TotalUpvotes, ps.TotalDownvotes, ps.TotalComments,
+         ps.TotalCloseVotes, ps.TotalReopenVotes
+ORDER BY ps.TotalUpvotes DESC, ps.TotalComments DESC
+LIMIT 50;

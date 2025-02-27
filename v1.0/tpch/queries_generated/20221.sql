@@ -1,0 +1,96 @@
+WITH ranked_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+),
+supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplier_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+high_value_customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        COALESCE(co.total_spent, 0) AS total_spent,
+        CASE 
+            WHEN COALESCE(co.total_spent, 0) > 10000 THEN 'VIP'
+            ELSE 'Regular'
+        END AS customer_type
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_orders co ON c.c_custkey = co.c_custkey
+),
+final_selection AS (
+    SELECT 
+        r.n_regionkey,
+        r.r_name,
+        hp.p_partkey,
+        hp.p_name,
+        hp.p_retailprice,
+        s.total_supplier_value,
+        hvc.total_spent,
+        hvc.customer_type
+    FROM 
+        ranked_parts hp
+    JOIN 
+        partsupp ps ON hp.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier_info s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        high_value_customers hvc ON s.s_nationkey = hvc.c_custkey
+    WHERE 
+        hp.price_rank <= 3 AND 
+        (hvc.total_spent IS NULL OR hvc.customer_type = 'VIP') AND
+        (s.total_supplier_value > 50000 OR s.s_acctbal < 100)
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT fs.p_partkey) AS part_count,
+    SUM(fs.p_retailprice * CASE WHEN fs.customer_type = 'VIP' THEN 1.2 ELSE 1 END) AS total_value,
+    ROUND(AVG(fs.total_supplier_value), 2) AS avg_supplier_value,
+    STRING_AGG(DISTINCT fs.customer_type, ', ') AS customer_categories
+FROM 
+    final_selection fs
+JOIN 
+    nation n ON fs.n_regionkey = n.n_nationkey
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT fs.p_partkey) > 5
+ORDER BY 
+    total_value DESC
+LIMIT 10;

@@ -1,0 +1,59 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey <> sh.s_suppkey AND sh.level < 10
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'P') OR o.o_orderdate > (DATE '1998-10-01' - INTERVAL '3 MONTH')
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers
+    FROM partsupp ps
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal >= 5000.00
+    GROUP BY ps.ps_partkey
+),
+LineItemAnalysis AS (
+    SELECT l.l_orderkey,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS returns_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber DESC) AS line_order
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+       ARRAY_AGG(DISTINCT n.n_name) AS supplier_nations,
+       COALESCE(c.total_spent, 0) AS customer_spending,
+       sha.level AS supplier_level,
+       la.returns_count,
+       la.total_price_after_discount
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN CustomerOrders c ON c.total_spent > 0
+LEFT JOIN SupplierHierarchy sha ON s.s_nationkey = sha.s_nationkey
+LEFT JOIN LineItemAnalysis la ON la.l_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_custkey = c.c_custkey
+    AND o.o_orderdate <= DATE '1998-10-01'
+)
+WHERE p.p_size BETWEEN 5 AND 10 
+  AND p.p_comment NOT LIKE '%defective%'
+  AND (s.s_acctbal IS NULL OR s.s_acctbal > 1000.00)
+GROUP BY p.p_partkey, p.p_name, p.p_retailprice, c.total_spent, sha.level, la.returns_count, la.total_price_after_discount
+HAVING COUNT(DISTINCT s.s_suppkey) > 3
+ORDER BY p.p_partkey DESC, customer_spending DESC;

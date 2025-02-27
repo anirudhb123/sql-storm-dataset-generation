@@ -1,0 +1,55 @@
+
+WITH RECURSIVE parts_with_suppliers AS (
+    SELECT ps.ps_partkey,
+           p.p_name,
+           s.s_name,
+           ps.ps_availqty,
+           ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rank
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > 0
+),
+customer_orders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           o.o_orderkey,
+           o.o_orderdate,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N' AND l.l_linestatus = 'F'
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+ranked_orders AS (
+    SELECT cust.c_custkey,
+           cust.c_name,
+           cust.o_orderkey,
+           cust.total_spent,
+           DENSE_RANK() OVER (PARTITION BY cust.c_custkey ORDER BY cust.total_spent DESC) AS order_rank
+    FROM customer_orders cust
+    WHERE cust.total_spent > (SELECT AVG(total_spent) FROM customer_orders)
+),
+filtered_parts AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           SUM(ps.ps_availqty) AS total_avail_qty
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size BETWEEN 10 AND 20
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_availqty) > 100
+)
+SELECT DISTINCT r.r_name,
+       SUM(COALESCE(pws.ps_supplycost, 0) * fo.total_spent) AS weighted_supply_cost
+FROM region r
+LEFT JOIN parts_with_suppliers pws ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT MIN(c.c_nationkey) FROM customer c))
+LEFT JOIN ranked_orders ro ON ro.c_custkey IS NOT NULL AND ro.total_spent > 50000
+LEFT JOIN filtered_parts fp ON pws.ps_partkey = fp.p_partkey
+WHERE ro.c_custkey IS NOT NULL
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT ro.o_orderkey) > 5
+ORDER BY weighted_supply_cost DESC
+LIMIT 10 OFFSET 5;

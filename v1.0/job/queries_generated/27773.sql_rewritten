@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND t.title IS NOT NULL
+),
+ActorDetails AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        COUNT(c.id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id, a.name
+),
+MovieRatings AS (
+    SELECT 
+        m.movie_id,
+        AVG(r.rating) AS average_rating
+    FROM 
+        movie_info m
+    JOIN 
+        info_type it ON m.info_type_id = it.id
+    JOIN 
+        (SELECT movie_id, rating FROM ratings) r ON m.movie_id = r.movie_id
+    WHERE
+        it.info = 'Rating'
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.keyword,
+    ad.actor_name,
+    ad.role_count,
+    mr.average_rating
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorDetails ad ON rm.movie_id = ad.movie_id
+LEFT JOIN 
+    MovieRatings mr ON rm.movie_id = mr.movie_id
+WHERE 
+    rm.year_rank = 1
+    AND (mr.average_rating IS NOT NULL OR ad.role_count > 0)
+ORDER BY 
+    rm.production_year DESC, 
+    ad.role_count DESC;

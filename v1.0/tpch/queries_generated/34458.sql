@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rank
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC)
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.rank <= 5
+),
+AvgOrderValue AS (
+    SELECT o.o_custkey, AVG(o.o_totalprice) AS avg_order_value
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+PartStats AS (
+    SELECT p.p_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           SUM(ps.ps_availqty) AS total_available,
+           MAX(ps.ps_supplycost) AS max_supply_cost,
+           MIN(ps.ps_supplycost) AS min_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT n.n_name, 
+       COALESCE(AVG(a.avg_order_value), 0) AS avg_order_value,
+       COALESCE(MAX(s.s_acctbal), 0) AS max_supplier_balance,
+       COUNT(DISTINCT p.p_partkey) AS part_count,
+       COALESCE(AVG(ps.max_supply_cost - ps.min_supply_cost), 0) AS avg_supply_cost_range
+FROM nation n
+LEFT JOIN AvgOrderValue a ON n.n_nationkey = a.o_custkey
+LEFT JOIN SupplierHierarchy s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN PartStats ps ON ps.supplier_count > 0
+WHERE n.r_regionkey IN (SELECT r.r_regionkey 
+                         FROM region r
+                         WHERE r.r_name LIKE 'A%')
+GROUP BY n.n_name
+ORDER BY avg_order_value DESC, max_supplier_balance DESC
+FETCH FIRST 10 ROWS ONLY;

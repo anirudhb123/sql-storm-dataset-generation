@@ -1,0 +1,64 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1  
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        aka_title m ON mh.movie_id = m.episode_of_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(cc.id) AS total_cast_members,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    AVG(CASE WHEN p.info IS NOT NULL THEN p.info ELSE DEFAULT_INFO END) AS average_info,
+    MAX(mci.note) AS company_note,
+    ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) AS rank_by_year
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    MovieHierarchy t ON ci.movie_id = t.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_companies mc ON t.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_info mi ON t.movie_id = mi.movie_id
+LEFT JOIN 
+    person_info p ON a.person_id = p.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'Notable Work') 
+LEFT JOIN 
+    complete_cast cc ON t.movie_id = cc.movie_id
+LEFT JOIN 
+    movie_info_idx mci ON t.movie_id = mci.movie_id
+WHERE 
+    t.production_year IS NOT NULL
+    AND a.name IS NOT NULL
+    AND t.title NOT LIKE '%(%'   
+GROUP BY 
+    a.name, t.title, t.production_year, t.movie_id
+ORDER BY 
+    average_info DESC, total_cast_members DESC;

@@ -1,0 +1,64 @@
+WITH supplier_part_stats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice) AS total_order_value,
+        COUNT(l.l_orderkey) AS total_line_items,
+        MAX(l.l_shipdate) AS latest_ship_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+customer_order_segment AS (
+    SELECT 
+        c.c_mktsegment,
+        COUNT(DISTINCT o.o_orderkey) AS num_orders,
+        AVG(os.total_order_value) AS avg_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        order_summary os ON o.o_orderkey = os.o_orderkey
+    GROUP BY 
+        c.c_mktsegment
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    sp.s_name AS supplier_name,
+    sp.total_avail_qty,
+    sp.total_supply_cost,
+    cos.c_mktsegment,
+    cos.num_orders,
+    cos.avg_order_value
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier_part_stats sp ON n.n_nationkey = sp.s_suppkey
+JOIN 
+    customer_order_segment cos ON n.n_regionkey = (SELECT n_regionkey FROM nation WHERE n_nationkey = cos.c_mktsegment)
+WHERE 
+    sp.total_avail_qty > 0 AND cos.num_orders > 10
+ORDER BY 
+    r.r_name, n.n_name, cos.c_mktsegment;

@@ -1,0 +1,18 @@
+
+SELECT 
+    c.c_customer_id, 
+    SUM(cs.cs_sales_price) AS total_sales, 
+    COUNT(DISTINCT cs.cs_order_number) AS total_orders
+FROM 
+    customer AS c
+JOIN 
+    store_sales AS cs ON c.c_customer_sk = cs.ss_customer_sk
+JOIN 
+    date_dim AS d ON cs.ss_sold_date_sk = d.d_date_sk
+WHERE 
+    d.d_year = 2023
+GROUP BY 
+    c.c_customer_id
+ORDER BY 
+    total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

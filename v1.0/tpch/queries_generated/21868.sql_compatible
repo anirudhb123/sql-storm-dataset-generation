@@ -1,0 +1,69 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01' 
+        AND o.o_orderdate < DATE '1996-01-01'
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+PartSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS supplier_rank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty >= 50
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    CASE 
+        WHEN l.l_discount IS NULL THEN 'No discount'
+        ELSE CONCAT('Discount: ', CAST(l.l_discount * 100 AS CHAR), '%')
+    END AS discount_info,
+    COALESCE(rn.o_orderdate, 'No Orders') AS last_order_date,
+    COUNT(DISTINCT ps.s_suppkey) AS num_suppliers
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedOrders rn ON l.l_orderkey = rn.o_orderkey
+LEFT JOIN 
+    PartSuppliers ps ON p.p_partkey = ps.ps_partkey AND ps.supplier_rank = 1
+WHERE 
+    (p.p_retailprice > 500 OR p.p_size < 10)
+    AND (p.p_comment LIKE '%high quality%' OR p.p_comment IS NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, discount_info, rn.o_orderdate
+HAVING 
+    COUNT(DISTINCT ps.s_suppkey) > 1
+ORDER BY 
+    p.p_retailprice DESC, last_order_date DESC;

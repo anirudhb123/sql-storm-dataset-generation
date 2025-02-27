@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC, P.ViewCount DESC) AS Rank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+        AND P.CreationDate >= NOW() - INTERVAL '1 year' -- Posts created in the last year
+),
+PostHistoryAggregates AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS EditCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (5, 24) THEN 1 END) AS BodyEditCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (4, 24) THEN 1 END) AS TitleEditCount,
+        ARRAY_AGG(DISTINCT PH.UserDisplayName) AS Editors
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+),
+TopEditedPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.ViewCount,
+        RP.Score,
+        PHA.EditCount,
+        PHA.BodyEditCount,
+        PHA.TitleEditCount,
+        PHA.Editors
+    FROM 
+        RankedPosts RP
+    JOIN 
+        PostHistoryAggregates PHA ON RP.PostId = PHA.PostId
+    WHERE 
+        RP.Rank <= 5 -- Top 5 posts per user
+)
+SELECT 
+    T.Title,
+    T.ViewCount,
+    T.Score,
+    T.EditCount,
+    T.BodyEditCount,
+    T.TitleEditCount,
+    T.Editors,
+    (SELECT STRING_AGG(Name, ', ')
+     FROM Tags
+     WHERE Id IN (SELECT unnest(string_to_array(T.Tags, '><')::int[]))) AS AssociatedTags
+FROM 
+    TopEditedPosts T
+ORDER BY 
+    T.Score DESC, T.ViewCount DESC;

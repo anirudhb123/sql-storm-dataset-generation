@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    AND 
+        p.Score > 0
+), RecentPostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER(PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+    AND 
+        ph.PostHistoryTypeId IN (10, 11) 
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS TotalQuestions,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalAnswers,
+        SUM(p.Score) AS TotalScore,
+        u.Reputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.UserId,
+    u.DisplayName,
+    CONCAT('Total Questions: ', up.TotalQuestions, ', Total Answers: ', up.TotalAnswers, ', Total Score: ', up.TotalScore, ', Reputation: ', up.Reputation) AS UserStats,
+    COUNT(DISTINCT ph.PostId) AS ClosedPostCount,
+    MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN 'Closed' ELSE 'Reopened' END) AS ClosureStatus,
+    COALESCE(SUM(CASE WHEN p.Rank <= 5 THEN 1 ELSE 0 END), 0) AS TopRankedPostCount,
+    COALESCE(SUM(b.TotalBadges), 0) AS BadgeCount,
+    COALESCE(MAX(b.HighestBadgeClass), 0) AS HighestBadgeClass,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS PopularTags
+FROM 
+    UserPostStats up
+JOIN 
+    Users u ON up.UserId = u.Id
+LEFT JOIN 
+    RecentPostHistories ph ON u.Id = ph.Comment
+LEFT JOIN 
+    Posts p ON up.UserId = p.OwnerUserId
+LEFT JOIN 
+    Tags t ON p.Tags ILIKE CONCAT('%', t.TagName, '%')
+LEFT JOIN 
+    UserBadges b ON u.Id = b.UserId
+WHERE 
+    up.Reputation > 1000 
+GROUP BY 
+    up.UserId, u.DisplayName
+HAVING 
+    COUNT(DISTINCT ph.PostId) > 2 
+ORDER BY 
+    up.TotalScore DESC, u.DisplayName ASC;

@@ -1,0 +1,74 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rn,
+        COUNT(ci.person_id) AS cast_count
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MovieDetails AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        COALESCE(m_company.name, 'Unknown') AS company_name,
+        COALESCE(m_keyword.keyword, 'No Keywords') AS keyword
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_companies mc ON rm.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name m_company ON mc.company_id = m_company.id
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword m_keyword ON mk.keyword_id = m_keyword.id
+    WHERE 
+        rm.cast_count > 5
+),
+FilteredMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.cast_count,
+        md.company_name,
+        md.keyword,
+        CASE 
+            WHEN md.cast_count BETWEEN 1 AND 10 THEN 'Low Cast'
+            WHEN md.cast_count BETWEEN 11 AND 20 THEN 'Medium Cast'
+            ELSE 'High Cast'
+        END AS cast_category
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.production_year >= 2000
+)
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.cast_category,
+    COUNT(DISTINCT ci.id) AS unique_roles,
+    STRING_AGG(DISTINCT ci.note, '; ') AS role_notes,
+    AVG(CASE WHEN pi.info IS NULL THEN 0 ELSE 1 END) AS info_present_ratio
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    complete_cast cc ON fm.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id
+GROUP BY 
+    fm.movie_id, fm.title, fm.production_year, fm.cast_category
+ORDER BY 
+    fm.production_year DESC, fm.cast_count DESC
+LIMIT 50;

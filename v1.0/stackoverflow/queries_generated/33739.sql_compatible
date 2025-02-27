@@ -1,0 +1,107 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(ph.Name, 'Unknown Type') AS PostType,
+        p.CreationDate,
+        COALESCE(p.ClosedDate, 'Open') AS PostStatus,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed' 
+            ELSE 'Open' 
+        END AS Status,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        RANK() OVER(ORDER BY p.Score DESC) AS PostRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostTypes ph ON p.PostTypeId = ph.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, ph.Name, p.CreationDate, p.ClosedDate, p.OwnerUserId
+),
+FinalResults AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostCount,
+        ua.UpVotes,
+        ua.DownVotes,
+        ua.RecentPosts,
+        ps.PostId,
+        ps.Title AS PostTitle,
+        ps.PostType,
+        ps.CreationDate AS PostCreationDate,
+        ps.PostStatus,
+        ps.CommentCount,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        ps.PostRank
+    FROM 
+        UserActivity ua
+    JOIN 
+        PostStatistics ps ON ua.UserId = ps.OwnerUserId
+)
+SELECT 
+    fr.UserId,
+    fr.DisplayName,
+    fr.PostCount,
+    fr.UpVotes,
+    fr.DownVotes,
+    fr.RecentPosts,
+    ARRAY_AGG(DISTINCT fr.PostId) AS RelatedPostIds,
+    COUNT(DISTINCT fr.PostId) AS TotalPostsEngaged
+FROM 
+    FinalResults fr
+WHERE 
+    fr.PostRank <= 10
+GROUP BY 
+    fr.UserId, fr.DisplayName, fr.PostCount, fr.UpVotes, fr.DownVotes, fr.RecentPosts
+ORDER BY 
+    TotalPostsEngaged DESC;

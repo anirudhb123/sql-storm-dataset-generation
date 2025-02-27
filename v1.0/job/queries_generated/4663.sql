@@ -1,0 +1,61 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY STRING_LENGTH(a.title) DESC) AS title_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+movie_casts AS (
+    SELECT 
+        c.movie_id,
+        COUNT(c.person_id) AS total_cast,
+        COUNT(DISTINCT c.role_id) AS distinct_roles
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+movies_info AS (
+    SELECT 
+        m.movie_id,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        COALESCE(mc.total_cast, 0) AS total_cast,
+        COALESCE(mc.distinct_roles, 0) AS distinct_roles
+    FROM 
+        ranked_movies m
+    LEFT JOIN 
+        movie_keywords mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_casts mc ON m.movie_id = mc.movie_id
+)
+SELECT 
+    mi.movie_id,
+    mi.title,
+    mi.production_year,
+    mi.keywords,
+    mi.total_cast,
+    mi.distinct_roles
+FROM 
+    movies_info mi
+WHERE 
+    (mi.total_cast >= 5 OR mi.keywords NOT LIKE '%Horror%')
+    AND mi.production_year >= 2000
+ORDER BY 
+    mi.production_year DESC, 
+    mi.total_cast DESC
+LIMIT 10;

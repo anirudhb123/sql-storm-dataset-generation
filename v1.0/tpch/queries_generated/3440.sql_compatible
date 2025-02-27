@@ -1,0 +1,38 @@
+
+WITH SupplierAverageCost AS (
+    SELECT ps_suppkey, AVG(ps_supplycost) AS avg_supply_cost
+    FROM partsupp
+    GROUP BY ps_suppkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sac.avg_supply_cost
+    FROM supplier s
+    JOIN SupplierAverageCost sac ON s.s_suppkey = sac.ps_suppkey
+    WHERE s.s_acctbal > (SELECT AVG(s.s_acctbal) FROM supplier)
+),
+CustomerOrderDetails AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(d.total_amount) AS total_spent
+    FROM CustomerOrderDetails d
+    JOIN customer c ON d.c_custkey = c.c_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(d.total_amount) > 10000
+)
+SELECT ns.n_name AS nation_name,
+       COUNT(DISTINCT t.s_suppkey) AS supplier_count,
+       SUM(t.avg_supply_cost) AS total_avg_supply_cost,
+       MAX(tc.total_spent) AS max_customer_spending
+FROM nation ns
+LEFT JOIN supplier s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN TopSuppliers t ON s.s_suppkey = t.s_suppkey
+LEFT JOIN TopCustomers tc ON ns.n_nationkey = tc.c_custkey
+WHERE ns.r_regionkey IS NOT NULL
+GROUP BY ns.n_name
+ORDER BY supplier_count DESC, total_avg_supply_cost DESC;

@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY COALESCE(t.TagName, 'No Tag') ORDER BY p.Score DESC) AS rn,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            UNNEST(string_to_array(Tags, '<>')) AS TagName 
+         FROM 
+            Posts) AS t ON p.Id = t.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopScoredPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        OwnerDisplayName, 
+        Score, 
+        TagsList 
+    FROM 
+        RankedPosts 
+    WHERE 
+        rn <= 5
+),
+RecentClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ClosedDate,
+        uh.DisplayName AS ClosedBy,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    JOIN 
+        Users uh ON ph.UserId = uh.Id
+    WHERE 
+        p.ClosedDate IS NOT NULL
+)
+SELECT 
+    tsp.PostId,
+    tsp.Title,
+    tsp.OwnerDisplayName,
+    tsp.Score,
+    tsp.TagsList,
+    rcp.ClosedDate,
+    rcp.ClosedBy,
+    rcp.CloseReason
+FROM 
+    TopScoredPosts tsp
+LEFT JOIN 
+    RecentClosedPosts rcp ON tsp.PostId = rcp.PostId
+ORDER BY 
+    tsp.Score DESC, 
+    rcp.ClosedDate DESC;

@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        pht.Name AS HistoryType,
+        ph.UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS history_rn
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT v.PostId) AS VotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (ORDER BY COUNT(DISTINCT v.PostId) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostStats AS (
+    SELECT 
+        rp.PostId,
+        MAX(rp.CreationDate) as LastActiveDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    GROUP BY 
+        rp.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    pht.HistoryType,
+    pht.HistoryDate,
+    u.DisplayName AS Editor,
+    rps.CommentCount,
+    rps.TotalUpVotes,
+    rps.TotalDownVotes,
+    CASE 
+        WHEN rps.TotalUpVotes > rps.TotalDownVotes THEN 'Positive'
+        WHEN rps.TotalUpVotes < rps.TotalDownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS PostSentiment,
+    CASE 
+        WHEN up.UserRank IS NOT NULL THEN up.UserRank
+        ELSE 'Not Ranked'
+    END AS UserRank
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryDetails pht ON rp.PostId = pht.PostId AND pht.history_rn = 1
+LEFT JOIN 
+    RecentPostStats rps ON rp.PostId = rps.PostId
+LEFT JOIN 
+    TopUsers up ON pht.UserDisplayName = up.DisplayName
+WHERE 
+    rp.rn = 1 
+    AND (rp.ViewCount > 100 OR rps.CommentCount > 5)
+ORDER BY 
+    rp.CreationDate DESC, rp.Score DESC;

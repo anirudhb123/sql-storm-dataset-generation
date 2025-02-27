@@ -1,0 +1,33 @@
+SELECT 
+    CONCAT_WS(' ', c_name, c_address) AS customer_info,
+    s_name AS supplier_name,
+    CONCAT(p_name, ' - ', p_brand) AS product_details,
+    SUM(l_quantity) AS total_quantity,
+    AVG(l_extendedprice) AS avg_price,
+    COUNT(DISTINCT o_orderkey) AS order_count,
+    r_name AS region_name
+FROM 
+    customer c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    part p ON l.l_partkey = p.p_partkey
+WHERE 
+    p.p_size > 10 AND 
+    o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    customer_info, supplier_name, product_details, r_name
+HAVING 
+    total_quantity > 100
+ORDER BY 
+    total_quantity DESC, avg_price ASC;

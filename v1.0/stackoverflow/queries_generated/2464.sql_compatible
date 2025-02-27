@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(a.Body, 'No Accepted Answer') AS AcceptedAnswerBody
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    WHERE 
+        p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+HeavyHitters AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        REPLACE(REPLACE(p.Body, '<p>', ''), '</p>', '') AS CleanBody
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostComments pc ON p.Id = pc.PostId
+    WHERE 
+        p.ViewCount > 1000
+)
+
+SELECT 
+    r.Title AS PostTitle,
+    u.DisplayName AS UserName,
+    r.AcceptedAnswerBody,
+    h.ViewCount,
+    h.CommentCount,
+    CASE WHEN u.Reputation > 1000 THEN 'High' ELSE 'Low' END AS UserReputationCategory
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    HeavyHitters h ON r.Id = h.PostId
+WHERE 
+    r.rn = 1
+    AND (h.CommentCount > 5 OR u.Reputation IS NOT NULL)
+UNION ALL
+SELECT 
+    'No Recently Active Post' AS PostTitle,
+    'N/A' AS UserName,
+    'N/A' AS AcceptedAnswerBody,
+    0 AS ViewCount,
+    0 AS CommentCount,
+    'No User' AS UserReputationCategory
+WHERE 
+    NOT EXISTS (SELECT 1 FROM RankedPosts);

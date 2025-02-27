@@ -1,0 +1,72 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+), 
+PostInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        CASE 
+            WHEN ph.PostHistoryTypeId IS NULL THEN 'No Close History'
+            ELSE STRING_AGG(DISTINCT cht.Name, ', ') 
+        END AS CloseHistory,
+        u.DisplayName AS OwnerName,
+        u.Reputation AS OwnerReputation,
+        COALESCE(b.Class, 0) AS BadgeClass
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHistory ph ON p.Id = ph.PostId AND ph.rn = 1 AND ph.PostHistoryTypeId IN (10, 11) -- Last close or reopen history
+    LEFT JOIN 
+        CloseReasonTypes cht ON ph.Comment::int = cht.Id 
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId AND b.Date >= NOW() - INTERVAL '1 year'
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '2 years'
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation, b.Class
+    HAVING 
+        COUNT(p.Id) > 5  -- More than 5 posts
+)
+SELECT 
+    pi.PostId,
+    pi.Title,
+    pi.Score,
+    pi.ViewCount,
+    pi.CloseHistory,
+    pi.OwnerName,
+    pi.OwnerReputation,
+    CASE 
+        WHEN pi.BadgeClass = 1 THEN 'Gold Badge Holder'
+        WHEN pi.BadgeClass = 2 THEN 'Silver Badge Holder'
+        WHEN pi.BadgeClass = 3 THEN 'Bronze Badge Holder'
+        ELSE 'No Badges'
+    END AS BadgeDescription,
+    COUNT(c.Id) AS CommentCount
+FROM 
+    PostInfo pi
+LEFT JOIN 
+    Comments c ON pi.PostId = c.PostId
+WHERE 
+    pi.OwnerReputation > 1000 AND 
+    (pi.CloseHistory IS NOT NULL OR pi.AnswerCount >= 3)
+GROUP BY 
+    pi.PostId, pi.Title, pi.Score, pi.ViewCount, pi.CloseHistory,
+    pi.OwnerName, pi.OwnerReputation, pi.BadgeClass
+ORDER BY 
+    pi.Score DESC, 
+    pi.ViewCount DESC;

@@ -1,0 +1,72 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_current_cdemo_sk IS NOT NULL
+),
+HighProfitSites AS (
+    SELECT
+        r.web_site_sk,
+        r.ws_order_number,
+        r.ws_net_profit
+    FROM RankedSales r
+    WHERE r.profit_rank <= 5
+),
+SalesStatistics AS (
+    SELECT
+        d.d_year AS year,
+        SUM(s.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT s.ws_order_number) AS total_orders,
+        AVG(s.ws_net_profit) AS avg_profit,
+        MAX(s.ws_net_profit) AS max_profit
+    FROM web_sales s
+    JOIN date_dim d ON s.ws_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_year
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_profit) AS demographic_profit
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender, cd.cd_marital_status
+),
+AggregateMetrics AS (
+    SELECT
+        year,
+        total_profit,
+        total_orders,
+        avg_profit,
+        max_profit,
+        DENSE_RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
+    FROM SalesStatistics
+)
+SELECT
+    a.year,
+    a.total_profit,
+    a.total_orders,
+    COALESCE(cd.demographic_profit, 0) AS demographic_profit,
+    CASE
+        WHEN a.avg_profit IS NULL THEN 'No Profit'
+        WHEN a.avg_profit < 0 THEN 'Loss'
+        ELSE 'Profit'
+    END AS profit_status,
+    HIGHEST_PROFIT.web_site_sk
+FROM AggregateMetrics a
+LEFT JOIN CustomerDemographics cd ON a.year = YEAR(DATE '2002-10-01')
+LEFT JOIN (
+    SELECT DISTINCT ws.web_site_sk
+    FROM HighProfitSites h
+    LEFT JOIN web_sales ws ON h.ws_order_number = ws.ws_order_number
+) AS HIGHEST_PROFIT ON 1=1
+WHERE (a.total_orders IS NULL OR a.total_orders > 10)
+AND (a.total_profit + COALESCE(cd.demographic_profit, 0)) > 1000
+ORDER BY a.total_profit DESC, a.year DESC
+LIMIT 50 OFFSET 5;

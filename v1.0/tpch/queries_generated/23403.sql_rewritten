@@ -1,0 +1,85 @@
+WITH RECURSIVE price_summary AS (
+    SELECT 
+        ps_partkey, 
+        SUM(ps_supplycost * ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp
+    GROUP BY 
+        ps_partkey
+    HAVING 
+        SUM(ps_supplycost * ps_availqty) > 5000
+), customer_details AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal, 
+        n.n_name AS nation_name 
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+), filtered_orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) as rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+    AND 
+        o.o_totalprice BETWEEN 100 AND 
+        (SELECT AVG(o_totalprice) FROM orders WHERE o_orderstatus = 'F')
+), lineitem_summary AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_name, 
+    ps.total_supply_cost, 
+    cd.c_name,
+    fo.o_orderkey,
+    ls.net_revenue,
+    CASE 
+        WHEN ls.last_ship_date > cast('1998-10-01' as date) - INTERVAL '30 days' THEN 'Recent'
+        ELSE 'Old'
+    END AS shipment_status
+FROM 
+    part p
+LEFT JOIN 
+    price_summary ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    filtered_orders fo ON fo.o_orderkey = (
+        SELECT 
+            l.l_orderkey
+        FROM 
+            lineitem l 
+        WHERE 
+            l.l_partkey = p.p_partkey 
+        ORDER BY 
+            l.l_extendedprice DESC 
+        LIMIT 1
+    )
+FULL OUTER JOIN 
+    lineitem_summary ls ON ls.l_orderkey = fo.o_orderkey
+JOIN 
+    customer_details cd ON cd.c_custkey = fo.o_custkey
+WHERE 
+    ps.total_supply_cost IS NOT NULL OR ls.net_revenue IS NOT NULL
+AND 
+    (cd.nation_name IN (SELECT r.r_name FROM region r WHERE r.r_regionkey IS NOT NULL)
+    OR p.p_container LIKE '%BOX%')
+ORDER BY 
+    ps.total_supply_cost DESC,
+    cd.c_acctbal ASC 
+LIMIT 50;

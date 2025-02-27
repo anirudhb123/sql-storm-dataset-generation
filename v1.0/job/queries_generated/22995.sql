@@ -1,0 +1,67 @@
+WITH MovieRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        ARRAY_AGG(DISTINCT coalesce(aka.name, 'Unknown')) AS actor_names,
+        MAX(m.production_year) AS latest_year
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        aka_name aka ON ci.person_id = aka.person_id
+    LEFT JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    LEFT JOIN 
+        title m ON m.id = ci.movie_id
+    WHERE 
+        ci.nr_order IS NOT NULL -- Exclude null order roles
+    GROUP BY 
+        ci.movie_id
+),
+MovieKeywordRank AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword,
+        RANK() OVER (PARTITION BY mk.movie_id ORDER BY COUNT(mk.keyword_id) DESC) AS keyword_rank
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id, k.keyword
+),
+FilteredMovies AS (
+    SELECT 
+        mr.movie_id,
+        mr.actor_count,
+        mr.actor_names,
+        mr.latest_year,
+        COALESCE(mkr.keyword, 'No Keywords') AS keyword,
+        mkr.keyword_rank
+    FROM 
+        MovieRoles mr
+    LEFT JOIN 
+        MovieKeywordRank mkr ON mr.movie_id = mkr.movie_id
+    WHERE 
+        mr.actor_count > 5
+        AND (mr.latest_year IS NULL OR mr.latest_year >= 2000) -- Consider movies from year 2000 or later
+)
+SELECT 
+    f.movie_id,
+    f.actor_count,
+    f.actor_names,
+    f.latest_year,
+    f.keyword,
+    CASE 
+        WHEN f.keyword_rank <= 3 THEN 'Top Keyword'
+        ELSE 'Other Keyword'
+    END AS keyword_category,
+    CASE 
+        WHEN f.latest_year IS NOT NULL THEN 'Recent'
+        ELSE 'Vintage'
+    END AS movie_age,
+    COUNT(DISTINCT f.keyword) OVER () AS total_keywords
+FROM 
+    FilteredMovies f
+ORDER BY 
+    f.latest_year DESC NULLS LAST, 
+    f.actor_count DESC;

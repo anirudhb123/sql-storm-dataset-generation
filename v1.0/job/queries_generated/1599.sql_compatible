@@ -1,0 +1,63 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ' ORDER BY k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+info_most_keywords AS (
+    SELECT 
+        m.movie_id,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        m.rank
+    FROM 
+        ranked_movies m
+    LEFT JOIN 
+        movie_keywords mk ON m.movie_id = mk.movie_id
+    WHERE 
+        m.rank <= 5
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    COALESCE(k.keywords, 'No Keywords') AS keywords,
+    COALESCE(c.cast_count, 0) AS cast_count,
+    CASE 
+        WHEN m.production_year IS NULL THEN 'Year Unknown'
+        ELSE CONCAT('Year: ', CAST(m.production_year AS VARCHAR))
+    END AS year_info,
+    COUNT(DISTINCT ci.person_id) FILTER (WHERE ci.person_role_id IS NOT NULL) AS distinct_roles
+FROM 
+    ranked_movies m
+LEFT JOIN 
+    cast_info ci ON m.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_keywords k ON m.movie_id = k.movie_id
+LEFT JOIN 
+    movie_info mi ON m.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'summary') 
+WHERE 
+    m.rank <= 3 OR k.keywords IS NOT NULL
+GROUP BY 
+    m.movie_id, m.title, m.production_year, k.keywords, m.rank, c.cast_count
+ORDER BY 
+    m.production_year DESC, cast_count DESC;

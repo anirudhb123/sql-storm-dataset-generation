@@ -1,0 +1,51 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, PostTypeId, Score, CreationDate, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.Title, p.ParentId, p.PostTypeId, p.Score, p.CreationDate, Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON rph.Id = p.ParentId
+),
+UserEngagement AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           COUNT(DISTINCT p.Id) AS TotalPosts, 
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes, 
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT UserId, DisplayName, TotalPosts, Upvotes, Downvotes,
+           RANK() OVER (ORDER BY TotalPosts DESC) AS PostRank, 
+           RANK() OVER (ORDER BY Upvotes DESC) AS UpvoteRank
+    FROM UserEngagement
+)
+SELECT p.Title AS PostTitle, 
+       p.CreationDate AS PostDate, 
+       u.DisplayName AS Author, 
+       u.Reputation,
+       rh.Level AS PostLevel,
+       COALESCE(ph.Revisions, 0) AS RevisionCount,
+       COALESCE(badge_count.Count, 0) AS BadgeCount
+FROM Posts p
+JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN RecursivePostHierarchy rh ON p.Id = rh.Id
+LEFT JOIN (
+    SELECT PostId, COUNT(*) AS Revisions
+    FROM PostHistory 
+    GROUP BY PostId
+) ph ON p.Id = ph.PostId
+LEFT JOIN (
+    SELECT UserId, COUNT(*) AS Count
+    FROM Badges 
+    GROUP BY UserId
+) badge_count ON u.Id = badge_count.UserId
+WHERE p.PostTypeId = 1
+AND (p.Score > 0 OR p.ViewCount > 100)
+ORDER BY p.CreationDate DESC
+LIMIT 100;
+

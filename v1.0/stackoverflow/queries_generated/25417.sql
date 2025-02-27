@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS Author,
+        ROW_NUMBER() OVER (PARTITION BY t.TagName ORDER BY p.CreationDate DESC) AS PostRank,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    CROSS JOIN 
+        LATERAL (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName) AS t
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, u.DisplayName
+), 
+PostAggregates AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.ViewCount,
+        r.Score,
+        r.Author,
+        r.TagsList,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        Comments c ON c.PostId = r.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = r.PostId)
+    WHERE 
+        r.PostRank <= 5
+    GROUP BY 
+        r.PostId, r.Title, r.CreationDate, r.ViewCount, r.Score, r.Author, r.TagsList
+), 
+TopPosts AS (
+    SELECT 
+        pa.*,
+        DENSE_RANK() OVER (ORDER BY pa.Score DESC) AS ScoreRank
+    FROM 
+        PostAggregates pa
+)
+
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    ViewCount,
+    Score,
+    Author,
+    TagsList,
+    CommentCount,
+    BadgeCount
+FROM 
+    TopPosts
+WHERE 
+    ScoreRank <= 10
+ORDER BY 
+    Score DESC, CreationDate DESC;

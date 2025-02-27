@@ -1,0 +1,65 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL AS parent_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000  
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.movie_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        at.production_year >= 2000
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    mh.level,
+    COUNT(mh.parent_id) AS num_links,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY mt.production_year DESC) AS recent_movie_rank,
+    CASE 
+        WHEN mt.production_year < 2010 THEN 'Older Movie'
+        ELSE 'Recent Movie'
+    END AS movie_age_category
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    movie_companies mc ON ci.movie_id = mc.movie_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mt.id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_hierarchy mh ON mt.id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.name, mt.title, mt.production_year, mh.level
+HAVING 
+    COUNT(mh.parent_id) > 0
+ORDER BY 
+    actor_name, recent_movie_rank;

@@ -1,0 +1,4 @@
+SELECT min(an.name) AS cool_actor_pseudonym, min(t.title) AS series_named_after_char
+FROM aka_name AS an, cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE an.person_id = n.id AND n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND an.person_id = ci.person_id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND t.md5sum IN ('088f894c1239bcff8c53bd7df9ac925b', '0915f9ef19379469b2cec20b2a1396f6', '8249535529c2556b5f88a387d3420ec5', '8904b30aea7dd511bbbdd3f838b8d291', '931f341cb687e28f37b3b73d1b5fd12d', 'c2f405e232ec09d76f8837f8040457b8', 'c326e6f9945ef76fea9b4a73f527cd52', 'dd1a7eba56e990503ace2c05067c04bb') AND an.id > 814888 AND n.name > 'Tittle, James Frank';

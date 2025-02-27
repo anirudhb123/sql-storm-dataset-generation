@@ -1,0 +1,54 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        DENSE_RANK() OVER (PARTITION BY wd.d_year ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim wd ON ws.ws_sold_date_sk = wd.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        wd.d_year = 2023 AND 
+        cd.cd_marital_status = 'M'
+    GROUP BY 
+        ws.ws_item_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+TopSellingItems AS (
+    SELECT 
+        item.m_item_id,
+        sd.total_sales,
+        sd.order_count,
+        sd.avg_net_profit,
+        sd.sales_rank,
+        sd.cd_gender,
+        sd.cd_marital_status,
+        sd.cd_education_status
+    FROM 
+        SalesData sd
+    JOIN 
+        item item ON sd.ws_item_sk = item.i_item_sk
+    WHERE 
+        sd.sales_rank <= 10
+)
+SELECT 
+    tsi.m_item_id,
+    tsi.total_sales,
+    tsi.order_count,
+    tsi.avg_net_profit,
+    tsi.cd_gender,
+    tsi.cd_marital_status,
+    tsi.cd_education_status
+FROM 
+    TopSellingItems tsi
+ORDER BY 
+    tsi.total_sales DESC;

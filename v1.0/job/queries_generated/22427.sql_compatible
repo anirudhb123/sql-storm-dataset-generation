@@ -1,0 +1,74 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_titles
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CompanyMovieInfo AS (
+    SELECT 
+        m.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(m.id) AS movie_count
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+    GROUP BY 
+        m.movie_id, c.name, ct.kind
+),
+SelectedMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        cm.company_name,
+        cm.company_type,
+        cm.movie_count,
+        COALESCE(NULLIF(cm.movie_count, 0), 1) AS adjusted_movie_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyMovieInfo cm ON rm.title_id = cm.movie_id
+    WHERE 
+        rm.title_rank <= 5  
+)
+SELECT 
+    sm.title,
+    sm.production_year,
+    sm.company_name,
+    sm.company_type,
+    sm.movie_count,
+    ROUND(AVG(w.ranking) OVER (PARTITION BY sm.production_year), 2) AS avg_company_movie_rank,
+    SUM(CASE WHEN sm.movie_count > 3 THEN 1 ELSE 0 END) OVER (PARTITION BY sm.production_year) AS high_grossing_companies,
+    CASE 
+        WHEN sm.company_type LIKE '%Distributor%' THEN 'Major Distributor'
+        ELSE 'Independent'
+    END AS company_category,
+    CONCAT(sm.title, ' - Year: ', sm.production_year) AS movie_overview
+FROM 
+    SelectedMovies sm
+LEFT JOIN 
+    (SELECT 
+        m.id AS movie_id,
+        m.production_year,
+        COUNT(DISTINCT c.id) AS ranking
+     FROM 
+        aka_title m
+     JOIN 
+        cast_info c ON c.movie_id = m.id
+     GROUP BY 
+        m.id, m.production_year
+    ) w ON sm.title_id = w.movie_id
+ORDER BY 
+    sm.production_year DESC,
+    sm.movie_count DESC NULLS LAST,
+    sm.title ASC;

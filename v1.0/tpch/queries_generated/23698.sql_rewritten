@@ -1,0 +1,86 @@
+WITH RECURSIVE recent_orders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_orderdate,
+        o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) as rn
+    FROM 
+        orders
+    WHERE 
+        o_orderstatus = 'O' AND 
+        o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+), 
+supplier_stats AS (
+    SELECT 
+        s_suppkey,
+        s_name,
+        SUM(ps_supplycost * ps_availqty) AS total_cost,
+        COUNT(*) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s_suppkey
+), 
+part_price AS (
+    SELECT 
+        p_partkey,
+        p_retailprice,
+        CASE 
+            WHEN p_retailprice IS NULL THEN 0 
+            ELSE p_retailprice * 1.1 
+        END AS adjusted_price
+    FROM 
+        part
+), 
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r_name AS region,
+    nation.n_name AS nation_name,
+    co.c_name AS customer_name,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue,
+    ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY SUM(lo.l_extendedprice * (1 - lo.l_discount)) DESC) AS revenue_rank,
+    ss.part_count AS supplier_part_count,
+    ps.adjusted_price AS part_adjusted_price
+FROM 
+    region r
+JOIN 
+    nation ON r.r_regionkey = nation.n_regionkey
+JOIN 
+    customer co ON co.c_nationkey = nation.n_nationkey
+JOIN 
+    orders o ON co.c_custkey = o.o_custkey
+JOIN 
+    lineitem lo ON o.o_orderkey = lo.l_orderkey
+JOIN 
+    partsupp ps ON lo.l_partkey = ps.ps_partkey
+JOIN 
+    supplier_stats ss ON ps.ps_suppkey = ss.s_suppkey
+JOIN 
+    part_price ps ON ps.p_partkey = lo.l_partkey
+WHERE 
+    (lo.l_returnflag = 'R' OR lo.l_linestatus = 'F') AND 
+    (lo.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31') AND 
+    (co.c_acctbal > 500 OR ss.total_cost < 10000)
+GROUP BY 
+    r.r_name, nation.n_name, co.c_name, ss.part_count, ps.adjusted_price
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 0 AND 
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) < 50000
+ORDER BY 
+    region, total_revenue DESC
+LIMIT 100;

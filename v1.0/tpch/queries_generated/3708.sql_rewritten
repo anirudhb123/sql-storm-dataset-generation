@@ -1,0 +1,46 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+),
+PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        s.s_name,
+        s.s_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > 0
+),
+TotalCosts AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_cost
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1995-01-01' AND '1995-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    TO_CHAR(o.o_totalprice, 'FM999,999,999.00') AS formatted_total_price,
+    COALESCE(p.p_name, 'N/A') AS part_name,
+    psi.s_name AS supplier_name,
+    tc.total_cost,
+    CASE 
+        WHEN tc.total_cost IS NULL THEN 'No cost associated'
+        ELSE 'Cost calculated'
+    END AS cost_status
+FROM RankedOrders o
+LEFT JOIN PartSupplierInfo psi ON o.o_orderkey = psi.p_partkey AND psi.rn = 1
+LEFT JOIN TotalCosts tc ON o.o_orderkey = tc.l_orderkey
+WHERE o.order_rank <= 5
+ORDER BY o.o_orderdate, o.o_orderkey;

@@ -1,0 +1,58 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost, 
+           (ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name
+),
+
+RankedCustomers AS (
+    SELECT c.*, 
+           RANK() OVER (ORDER BY total_spent DESC) AS rnk
+    FROM CustomerOrders c
+)
+
+SELECT 
+    r.r_name AS Region,
+    n.n_name AS Nation,
+    s.s_name AS Supplier,
+    p.p_name AS Part,
+    COALESCE(pd.total_value, 0) AS PartValue,
+    COUNT(DISTINCT co.o_orderkey) AS TotalOrders,
+    SUM(co.total_spent) AS TotalCustomerSpend,
+    CASE 
+        WHEN COUNT(DISTINCT co.o_orderkey) > 5 THEN 'Frequent'
+        ELSE 'Infrequent'
+    END AS OrderFrequency,
+    MAX(rc.rnk) AS HighestRankedCustomer
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN PartDetails pd ON s.s_suppkey = pd.ps_partkey
+LEFT JOIN orders o ON s.s_suppkey = o.o_orderkey
+LEFT JOIN RankedCustomers rc ON o.o_custkey = rc.c_custkey
+LEFT JOIN customer co ON o.o_custkey = co.c_custkey
+GROUP BY r.r_name, n.n_name, s.s_name, p.p_name
+HAVING SUM(co.total_spent) > 1000
+ORDER BY Region, Nation, Supplier;

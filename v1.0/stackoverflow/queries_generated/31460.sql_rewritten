@@ -1,0 +1,68 @@
+WITH RecursiveTagCounts AS (
+    
+    SELECT
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY t.Id, t.TagName
+    
+    UNION ALL
+    
+    SELECT
+        t.Id,
+        t.TagName,
+        COUNT(p.Id) + rc.PostCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    JOIN RecursiveTagCounts rc ON rc.TagId = t.Id
+    GROUP BY t.Id, t.TagName, rc.PostCount
+),
+TopUsers AS (
+    
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.Reputation) AS TotalReputation
+    FROM Users u
+    WHERE u.CreationDate <= cast('2024-10-01 12:34:56' as timestamp)
+    GROUP BY u.Id, u.DisplayName
+    HAVING SUM(u.Reputation) > 1000
+),
+RecentPostHistory AS (
+    
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RN
+    FROM PostHistory ph
+    WHERE ph.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+    AND ph.PostHistoryTypeId IN (4, 5, 6)  
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    t.TagName,
+    rc.PostCount AS NumberOfPosts,
+    COALESCE(rph.UserDisplayName, 'No Edits') AS LastEditor,
+    MAX(rph.CreationDate) AS LastEditDate
+FROM TopUsers u
+JOIN RecursiveTagCounts rc ON 1=1  
+LEFT JOIN RecentPostHistory rph ON rph.PostId = (
+    SELECT p.Id
+    FROM Posts p
+    WHERE p.OwnerUserId = u.UserId
+    ORDER BY p.CreationDate DESC
+    LIMIT 1
+)
+WHERE rc.PostCount > 5
+GROUP BY u.DisplayName, u.Reputation, t.TagName, rph.UserDisplayName
+HAVING MAX(rph.CreationDate) IS NOT NULL
+ORDER BY u.Reputation DESC, rc.PostCount DESC
+LIMIT 10;

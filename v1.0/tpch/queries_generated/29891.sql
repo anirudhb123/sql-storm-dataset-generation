@@ -1,0 +1,29 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation,
+        p.p_name AS part_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY ps.ps_supplycost ASC) AS rank
+    FROM 
+        supplier s 
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+)
+SELECT 
+    nation,
+    STRING_AGG(CONCAT(s_name, ' (', part_name, ') - Cost: $', FORMAT(ps_supplycost, 'N2')), '; ') AS supplier_part_info
+FROM 
+    RankedSuppliers
+WHERE 
+    rank <= 3
+GROUP BY 
+    nation
+ORDER BY 
+    nation;

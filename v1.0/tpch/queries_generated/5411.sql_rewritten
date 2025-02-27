@@ -1,0 +1,63 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rank_in_segment
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey, 
+        ro.o_orderdate,
+        ro.o_totalprice,
+        c.c_name,
+        c.c_address,
+        n.n_name AS nation_name,
+        r.r_name AS region_name
+    FROM 
+        RankedOrders ro
+    JOIN 
+        customer c ON ro.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        ro.rank_in_segment <= 5
+),
+DetailedLineItems AS (
+    SELECT 
+        li.l_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+        SUM(li.l_quantity) AS total_quantity,
+        COUNT(DISTINCT li.l_suppkey) AS unique_suppliers
+    FROM 
+        lineitem li
+    JOIN 
+        TopOrders to ON li.l_orderkey = to.o_orderkey
+    GROUP BY 
+        li.l_orderkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.o_totalprice,
+    to.c_name,
+    to.c_address,
+    to.nation_name,
+    to.region_name,
+    dli.total_revenue,
+    dli.total_quantity,
+    dli.unique_suppliers
+FROM 
+    TopOrders to
+JOIN 
+    DetailedLineItems dli ON to.o_orderkey = dli.l_orderkey
+ORDER BY 
+    to.o_orderdate DESC, to.o_totalprice DESC;

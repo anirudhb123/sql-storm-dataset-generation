@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+
+OrderStats AS (
+    SELECT o.o_orderkey, o.o_totalprice, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           RANK() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice
+),
+
+CustomerRevenue AS (
+    SELECT c.c_custkey, c.c_name, COALESCE(SUM(os.total_revenue), 0) AS total_revenue
+    FROM customer c
+    LEFT JOIN OrderStats os ON c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT os2.o_orderkey FROM OrderStats os2 WHERE os2.revenue_rank = 1))
+    GROUP BY c.c_custkey, c.c_name
+)
+
+SELECT DISTINCT p.p_name, p.p_mfgr, p.p_retailprice, s.s_name AS supplier_name, r.r_name AS region_name,
+       cr.total_revenue, 
+       CASE 
+           WHEN cr.total_revenue IS NOT NULL THEN cr.total_revenue
+           ELSE 'No Revenue' 
+       END AS revenue_status
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN CustomerRevenue cr ON s.s_nationkey = cr.c_custkey
+WHERE (p.p_retailprice > 100.00 OR p.p_size > 10) 
+  AND (s.s_acctbal IS NOT NULL OR s.s_comment LIKE '%important%')
+ORDER BY cr.total_revenue DESC NULLS LAST
+LIMIT 50;

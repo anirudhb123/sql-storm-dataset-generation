@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_clerk,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    r.o_clerk,
+    si.s_name AS supplier_name,
+    si.total_supply_cost,
+    co.order_count,
+    co.total_spent
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    lineitem l ON r.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierInfo si ON l.l_suppkey = si.s_suppkey
+LEFT JOIN 
+    CustomerOrderStats co ON r.o_orderkey IN (
+        SELECT 
+            o2.o_orderkey 
+        FROM 
+            orders o2 
+        WHERE 
+            o2.o_custkey = co.c_custkey
+    )
+WHERE 
+    r.rank_order <= 5 OR (r.o_orderstatus = 'F' AND co.total_spent IS NULL)
+ORDER BY 
+    r.o_orderdate DESC, r.o_totalprice DESC;

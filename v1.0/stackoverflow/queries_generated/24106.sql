@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankByViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankByUser
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+        AND p.Title NOT LIKE '%[closed]%' -- Exclude closed posts
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.Score,
+        COALESCE(v.VoteCount, 0) AS VoteCount,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        MAX(CASE WHEN pb.Class = 1 THEN 1 ELSE 0 END) AS HasGoldBadge,
+        MAX(CASE WHEN pb.Class = 2 THEN 1 ELSE 0 END) AS HasSilverBadge,
+        MAX(CASE WHEN pb.Class = 3 THEN 1 ELSE 0 END) AS HasBronzeBadge
+    FROM 
+        RankedPosts rp
+    LEFT JOIN (
+        SELECT 
+            p.Id,
+            COUNT(v.Id) AS VoteCount
+        FROM 
+            Posts p
+        LEFT JOIN Votes v ON p.Id = v.PostId
+        WHERE 
+            v.CreationDate >= NOW() - INTERVAL '1 month' 
+        GROUP BY 
+            p.Id
+    ) v ON rp.PostId = v.Id
+    LEFT JOIN (
+        SELECT 
+            b.UserId,
+            COUNT(b.Id) AS BadgeCount 
+        FROM 
+            Badges b 
+        GROUP BY 
+            b.UserId
+    ) b ON rp.PostId = b.UserId
+    LEFT JOIN Badges pb ON rp.PostId = pb.UserId
+    WHERE 
+        rp.RankByViewCount <= 10 AND 
+        rp.RankByUser <= 5
+    GROUP BY 
+        rp.PostId, rp.Title, rp.ViewCount, rp.CreationDate, rp.Score
+),
+FinalOutput AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.ViewCount,
+        tp.Score,
+        tp.VoteCount,
+        tp.BadgeCount,
+        (CASE 
+            WHEN tp.HasGoldBadge = 1 THEN 'Gold'
+            WHEN tp.HasSilverBadge = 1 THEN 'Silver'
+            WHEN tp.HasBronzeBadge = 1 THEN 'Bronze'
+            ELSE 'No Badge' 
+        END) AS UserBadgeStatus
+    FROM 
+        TopPosts tp
+)
+SELECT 
+    fo.*,
+    CASE 
+        WHEN fo.VoteCount > 100 THEN 'Highly Voted'
+        WHEN fo.VoteCount BETWEEN 50 AND 100 THEN 'Moderately Voted'
+        ELSE 'Low Votes' 
+    END AS VoteStatus,
+    (SELECT COUNT(DISTINCT c.Id) 
+     FROM Comments c 
+     WHERE c.PostId = fo.PostId) AS CommentCount
+FROM 
+    FinalOutput fo
+ORDER BY 
+    fo.Score DESC, fo.ViewCount DESC;

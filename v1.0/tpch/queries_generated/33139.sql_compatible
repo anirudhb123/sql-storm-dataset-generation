@@ -1,0 +1,39 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY c.c_custkey, c.c_name
+), SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS num_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), HighValueSuppliers AS (
+    SELECT 
+        s.s_name,
+        s.total_supply_cost
+    FROM SupplierSummary s
+    WHERE s.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierSummary)
+)
+SELECT 
+    c.c_name AS customer_name,
+    COALESCE(h.s_name, 'No High Value Supplier') AS high_value_supplier,
+    s.total_sales,
+    CASE 
+        WHEN s.total_sales > 10000 THEN 'High Volume'
+        ELSE 'Low Volume'
+    END AS volume_category
+FROM SalesCTE s
+LEFT JOIN HighValueSuppliers h ON s.total_sales > 10000
+ORDER BY s.total_sales DESC;

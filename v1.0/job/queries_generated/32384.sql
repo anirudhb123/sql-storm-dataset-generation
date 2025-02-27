@@ -1,0 +1,79 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL::integer AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year = (SELECT MAX(production_year) FROM aka_title)
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+),
+actor_movie_count AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name an ON c.person_id = an.person_id
+    GROUP BY 
+        c.person_id
+),
+movie_details AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(SUM(mk.keyword_count), 0) AS keyword_count,
+        COALESCE(STRING_AGG(DISTINCT co.name, ', '), 'No Companies') AS companies
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+)
+SELECT 
+    md.title AS movie_title,
+    md.production_year,
+    COUNT(DISTINCT c.id) AS distinct_actors,
+    md.keyword_count AS total_keywords,
+    md.companies AS associated_companies,
+    CASE 
+        WHEN ac.movie_count IS NULL THEN 'No films starring this actor'
+        ELSE CONCAT(ac.movie_count, ' films starring this actor')
+    END AS actor_filmography,
+    RANK() OVER (PARTITION BY md.production_year ORDER BY md.keyword_count DESC) AS rank_by_keywords
+FROM 
+    movie_details md
+LEFT JOIN 
+    actor_movie_count ac ON ac.person_id = (SELECT DISTINCT c.person_id FROM cast_info c WHERE c.movie_id = md.movie_id LIMIT 1)
+LEFT JOIN 
+    cast_info c ON md.movie_id = c.movie_id
+WHERE 
+    md.production_year >= 2000
+GROUP BY 
+    md.movie_id, md.title, md.production_year, md.keyword_count, md.companies, ac.movie_count
+ORDER BY 
+    md.production_year DESC, total_keywords DESC;

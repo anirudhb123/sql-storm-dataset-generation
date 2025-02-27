@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 1000
+),
+RankedOrders AS (
+    SELECT o_o.orderkey, o.o_custkey, o.o_totalprice, 
+           RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+),
+SupplierPartPrices AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ps.ps_supplycost) OVER (PARTITION BY ps.ps_partkey) AS median_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+)
+SELECT n.n_name, 
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       AVG(o.o_totalprice) AS avg_order_total,
+       SUM(sp.total_cost) AS total_supplier_cost,
+       COALESCE(MIN(rp.price_rank), 0) AS min_order_rank,
+       CONCAT('Total Suppliers: ', COUNT(DISTINCT sh.s_suppkey) + 1) AS supplier_summary
+FROM nation n
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN RankedOrders rp ON rp.o_custkey = sh.s_suppkey
+LEFT JOIN SupplierPartPrices sp ON sp.ps_suppkey = sh.s_suppkey
+WHERE (n.n_name IS NOT NULL OR n.n_name IS NULL) 
+      AND (sp.median_cost IS NULL OR sp.total_cost > 5000)
+GROUP BY n.n_name
+HAVING AVG(o.o_totalprice) > 10000
+ORDER BY supplier_count DESC, avg_order_total DESC;

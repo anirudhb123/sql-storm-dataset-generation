@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        IFNULL(ws.ws_net_profit, 0) AS total_net_profit,
+        1 AS level
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_first_shipto_date_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        sh.total_net_profit + IFNULL(ws.ws_net_profit, 0) AS total_net_profit,
+        level + 1
+    FROM SalesHierarchy sh
+    LEFT JOIN customer c ON sh.c_customer_sk = c.c_customer_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE level < 5
+), SalesSummary AS (
+    SELECT 
+        s.c_first_name,
+        s.c_last_name,
+        SUM(s.total_net_profit) AS aggregate_profit
+    FROM SalesHierarchy s
+    GROUP BY s.c_first_name, s.c_last_name
+), CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(sd.aggregate_profit, 0) AS total_profit
+    FROM customer_demographics cd
+    LEFT JOIN SalesSummary sd ON cd.cd_demo_sk = sd.c_customer_sk
+), ProfitBand AS (
+    SELECT 
+        cd.cd_gender,
+        SUM(cd.total_profit) AS profit_sum,
+        CASE 
+            WHEN SUM(cd.total_profit) < 2000 THEN 'Low'
+            WHEN SUM(cd.total_profit) BETWEEN 2000 AND 5000 THEN 'Medium'
+            ELSE 'High'
+        END AS income_band
+    FROM CustomerDemographics cd
+    GROUP BY cd.cd_gender
+)
+SELECT 
+    ib.ib_income_band_sk,
+    pb.profit_sum,
+    pb.income_band
+FROM ProfitBand pb
+JOIN income_band ib ON 
+    ( 
+        (pb.income_band = 'Low' AND ib.ib_upper_bound < 2000) OR 
+        (pb.income_band = 'Medium' AND ib.ib_lower_bound >= 2000 AND ib.ib_upper_bound <= 5000) OR 
+        (pb.income_band = 'High' AND ib.ib_lower_bound > 5000)
+    )
+ORDER BY pb.income_band DESC
+LIMIT 10;

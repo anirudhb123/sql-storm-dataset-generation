@@ -1,0 +1,82 @@
+
+WITH RecursiveActorMovies AS (
+    SELECT 
+        ca.person_id, 
+        ca.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY ca.person_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name an ON ca.person_id = an.person_id
+    JOIN 
+        aka_title at ON ca.movie_id = at.movie_id
+    JOIN 
+        title t ON at.movie_id = t.id
+    WHERE 
+        ca.note IS NULL 
+        AND t.production_year IS NOT NULL 
+        AND t.production_year > 2000
+),
+
+AggregatedData AS (
+    SELECT 
+        an.name, 
+        COUNT(DISTINCT ram.movie_id) AS movie_count, 
+        SUM(CASE WHEN ram.rn = 1 THEN 1 ELSE 0 END) AS most_recent_movies
+    FROM 
+        RecursiveActorMovies ram
+    JOIN 
+        aka_name an ON ram.person_id = an.person_id
+    GROUP BY 
+        an.name
+),
+
+GenreCounts AS (
+    SELECT 
+        k.keyword AS genre, 
+        COALESCE(COUNT(DISTINCT mk.movie_id), 0) AS genre_count  
+    FROM 
+        keyword k
+    LEFT JOIN 
+        movie_keyword mk ON k.id = mk.keyword_id
+    GROUP BY 
+        k.keyword
+),
+
+NullCheck AS (
+    SELECT 
+        ad.name,
+        ad.movie_count,
+        ad.most_recent_movies,
+        gc.genre,
+        CASE 
+            WHEN ad.movie_count IS NULL THEN 'No Movies'
+            WHEN ad.movie_count > 5 THEN 'Prolific Actor'
+            ELSE 'Newcomer'
+        END AS actor_status
+    FROM 
+        AggregatedData ad
+    JOIN 
+        GenreCounts gc ON ad.movie_count > gc.genre_count
+)
+
+SELECT 
+    n.name AS actor_name,
+    nc.genre AS movie_genre,
+    COALESCE(nc.actor_status, 'Unknown') AS actor_experience,
+    CASE 
+        WHEN n.movie_count IS NULL THEN 0
+        ELSE n.movie_count 
+    END AS total_movies,
+    RANK() OVER (ORDER BY n.movie_count DESC) AS rank_by_movies
+FROM 
+    NullCheck n
+INNER JOIN 
+    company_name cn ON n.actor_status <> 'No Movies'
+LEFT JOIN 
+    movie_info mi ON n.movie_count = mi.movie_id
+WHERE 
+    n.actor_status IS NOT NULL
+ORDER BY 
+    total_movies DESC, 
+    n.actor_name;

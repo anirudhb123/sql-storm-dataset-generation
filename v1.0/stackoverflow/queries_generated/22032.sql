@@ -1,0 +1,98 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Votes v
+            WHERE v.PostId = p.Id AND v.VoteTypeId = 2 -- Count Upvotes
+        ), 0) AS UpvoteCount,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Votes v
+            WHERE v.PostId = p.Id AND v.VoteTypeId = 3 -- Count Downvotes
+        ), 0) AS DownvoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+AggregatedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.UpvoteCount,
+        rp.DownvoteCount,
+        rp.Score - (rp.DownvoteCount * 2) AS AdjustedScore,
+        CASE 
+            WHEN rp.UpvoteCount > 0 THEN 'Popular'
+            WHEN rp.Score < 0 THEN 'Controversial'
+            ELSE 'Normal'
+        END AS PostType
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1
+),
+PostDetails AS (
+    SELECT 
+        ad.PostId,
+        ad.Title,
+        ad.CreationDate,
+        ad.ViewCount,
+        ad.Score,
+        ad.UpvoteCount,
+        ad.DownvoteCount,
+        ad.AdjustedScore,
+        ad.PostType,
+        ARRAY_AGG(t.TagName) AS Tags
+    FROM 
+        AggregatedData ad
+    LEFT JOIN 
+        (SELECT 
+            p.Id AS PostId,
+            unnest(string_to_array(p.Tags, '><')) AS TagName
+        FROM 
+            Posts p
+        WHERE 
+            p.Tags IS NOT NULL) t ON t.PostId = ad.PostId
+    GROUP BY 
+        ad.PostId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.Score,
+    pd.AdjustedScore,
+    pd.PostType,
+    pd.Tags,
+    JSON_BUILD_OBJECT(
+        'Upvotes', pd.UpvoteCount,
+        'Downvotes', pd.DownvoteCount,
+        'isPopular', CASE WHEN pd.UpvoteCount > 50 THEN TRUE ELSE FALSE END
+    ) AS InteractionStats,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1
+            FROM Comments c
+            WHERE c.PostId = pd.PostId AND c.CreationDate >= CURRENT_DATE - INTERVAL '7 days'
+        ) THEN 'Has Recent Comments'
+        ELSE 'No Recent Comments'
+    END AS CommentStatus
+FROM 
+    PostDetails pd
+WHERE 
+    pd.AdjustedScore > 0
+ORDER BY 
+    pd.AdjustedScore DESC,
+    pd.ViewCount DESC
+LIMIT 50;

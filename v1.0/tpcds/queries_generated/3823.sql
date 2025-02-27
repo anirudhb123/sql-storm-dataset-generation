@@ -1,0 +1,62 @@
+
+WITH SalesData AS (
+    SELECT
+        ws_bill_customer_sk,
+        ws_ship_mode_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk BETWEEN 10000 AND 20000
+    GROUP BY
+        ws_bill_customer_sk,
+        ws_ship_mode_sk
+), 
+CustomerDemographics AS (
+    SELECT
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        hd.hd_income_band_sk AS household_income_band
+    FROM
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+), 
+RankedSales AS (
+    SELECT
+        sd.ws_bill_customer_sk,
+        sd.ws_ship_mode_sk,
+        sd.total_sales,
+        sd.order_count,
+        ROW_NUMBER() OVER (PARTITION BY sd.ws_ship_mode_sk ORDER BY sd.total_sales DESC) AS rank
+    FROM
+        SalesData sd
+)
+SELECT
+    cd.c_customer_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cs.total_sales,
+    cs.order_count,
+    CASE
+        WHEN cs.total_sales IS NULL THEN 'No Sales'
+        ELSE CONCAT('Sales: ', cs.total_sales)
+    END AS sales_info,
+    CASE
+        WHEN cd.hd_income_band IS NULL THEN 'Unknown Income Band'
+        ELSE CONCAT('Income Band: ', cd.hd_income_band)
+    END AS income_info
+FROM
+    CustomerDemographics cd
+LEFT JOIN 
+    RankedSales cs ON cd.c_customer_sk = cs.ws_bill_customer_sk
+WHERE
+    cd.cd_gender = 'M' OR cd.cd_marital_status IS NOT NULL
+ORDER BY
+    cs.total_sales DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,66 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 5
+), ordered_data AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS distinct_parts_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY o.o_orderkey
+),
+nation_region AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+final_selection AS (
+    SELECT 
+        ad.o_orderkey,
+        ad.total_revenue,
+        CASE 
+            WHEN ad.total_revenue > 10000 THEN 'High Value'
+            WHEN ad.total_revenue BETWEEN 5000 AND 10000 THEN 'Medium Value'
+            ELSE 'Low Value' 
+        END AS order_value,
+        nr.region_name
+    FROM ordered_data ad
+    JOIN customer c ON c.c_custkey = ad.o_orderkey
+    LEFT JOIN nation_region nr ON c.c_nationkey = nr.n_nationkey
+)
+SELECT 
+    fs.order_value,
+    COUNT(fs.o_orderkey) AS order_count,
+    MAX(fs.total_revenue) AS max_revenue,
+    SUM(fs.total_revenue) AS total_revenue,
+    STRING_AGG(fs.region_name, '; ') AS regions_aggregated
+FROM final_selection fs
+GROUP BY fs.order_value
+HAVING COUNT(fs.o_orderkey) > 5
+ORDER BY total_revenue DESC
+LIMIT 10
+OFFSET (SELECT COUNT(*) FROM final_selection) / 10
+UNION ALL
+SELECT DISTINCT 
+    CASE WHEN NULLIF(fs.order_value, 'High Value') IS NULL THEN 'N/A' END AS order_value, 
+    NULL AS order_count, 
+    NULL AS max_revenue, 
+    SUM(l.l_extendedprice) AS total_revenue, 
+    'Obscure Value' AS regions_aggregated
+FROM lineitem l
+WHERE l.l_shipdate < CURRENT_DATE - INTERVAL '2 year'
+GROUP BY l.l_returnflag
+ORDER BY 1;

@@ -1,0 +1,69 @@
+WITH ActorRatings AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(c.movie_id) AS total_movies,
+        AVG(COALESCE(r.rating, 0)) AS average_rating
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info c ON a.person_id = c.person_id
+    LEFT JOIN 
+        title t ON c.movie_id = t.id
+    LEFT JOIN 
+        (SELECT movie_id, AVG(rating) AS rating FROM movie_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'rating') GROUP BY movie_id) r ON t.id = r.movie_id
+    GROUP BY 
+        a.id
+),
+
+GenreCounts AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT k.keyword) AS genre_count 
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        title m ON mk.movie_id = m.id
+    GROUP BY 
+        m.movie_id
+),
+
+TopActors AS (
+    SELECT 
+        ar.actor_id,
+        ar.actor_name,
+        ar.total_movies,
+        ar.average_rating
+    FROM 
+        ActorRatings ar
+    WHERE 
+        ar.total_movies > 5 
+    AND 
+        ar.average_rating > 7.0
+),
+
+ActorGenres AS (
+    SELECT 
+        ta.actor_id,
+        ta.actor_name,
+        gc.genre_count
+    FROM 
+        TopActors ta
+    JOIN 
+        cast_info c ON ta.actor_id = c.person_id
+    JOIN 
+        GenreCounts gc ON c.movie_id = gc.movie_id
+)
+
+SELECT 
+    ag.actor_name,
+    ag.total_movies,
+    ag.average_rating,
+    ag.genre_count
+FROM 
+    ActorGenres ag
+ORDER BY 
+    ag.average_rating DESC, 
+    ag.total_movies DESC;

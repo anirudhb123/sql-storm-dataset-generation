@@ -1,0 +1,37 @@
+WITH RegionSupplier AS (
+    SELECT n.n_name AS nation_name, r.r_name AS region_name, SUM(s.s_acctbal) AS total_account_balance
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name, r.r_name
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+QualifiedOrders AS (
+    SELECT od.o_orderkey, od.total_price, CASE 
+        WHEN od.total_price > (SELECT AVG(total_price) FROM OrderDetails) THEN 'Above Average' 
+        ELSE 'Below Average' 
+    END AS price_category
+    FROM OrderDetails od
+)
+SELECT 
+    r.nation_name,
+    r.region_name,
+    tc.c_name AS top_customer,
+    tc.c_acctbal AS top_customer_balance,
+    qo.total_price AS order_total,
+    qo.price_category
+FROM RegionSupplier r
+LEFT JOIN TopCustomers tc ON r.nation_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = tc.c_nationkey AND tc.rank = 1)
+LEFT JOIN QualifiedOrders qo ON tc.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = qo.o_orderkey LIMIT 1)
+WHERE r.total_account_balance IS NOT NULL
+ORDER BY r.region_name, r.nation_name, tc.c_acctbal DESC;

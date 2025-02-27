@@ -1,0 +1,88 @@
+
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        T.Id AS TagId, 
+        T.TagName, 
+        T.Count,
+        T.WikiPostId,
+        0 AS Depth
+    FROM Tags T
+    WHERE T.IsRequired = 1
+
+    UNION ALL
+
+    SELECT 
+        T.Id, 
+        T.TagName, 
+        T.Count,
+        T.WikiPostId,
+        RTH.Depth + 1
+    FROM Tags T
+    INNER JOIN RecursiveTagHierarchy RTH ON T.ExcerptPostId = RTH.TagId
+),
+PostVotingStats AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN V.PostId IS NOT NULL THEN 1 END) AS TotalVotes,
+        SUM(CASE WHEN V.CreationDate >= DATEADD(DAY, -30, '2024-10-01') THEN 1 ELSE 0 END) AS RecentVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        MAX(PH.CreationDate) AS LastEditDate,
+        COUNT(*) AS EditCount,
+        STRING_AGG(DISTINCT PH.Comment, '; ') AS EditComments
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY PH.PostId, PH.UserId
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(COALESCE(B.Class, 0)) AS TotalBadges,
+        COUNT(P.Id) AS PostsCount,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS TotalUpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS TotalDownVotes
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName
+    ORDER BY TotalBadges DESC, PostsCount DESC
+    LIMIT 10
+)
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    P.ViewCount,
+    P.CreatedDate,
+    P.AnswerCount,
+    COALESCE(PVS.UpVotes, 0) AS UpVotes,
+    COALESCE(PVS.DownVotes, 0) AS DownVotes,
+    PHD.LastEditDate,
+    PHD.EditCount,
+    PHD.EditComments,
+    TT.TagName AS TopTag,
+    U.DisplayName AS TopUser,
+    U.TotalBadges,
+    U.PostsCount
+FROM Posts P
+LEFT JOIN PostVotingStats PVS ON P.Id = PVS.PostId
+LEFT JOIN PostHistoryDetails PHD ON P.Id = PHD.PostId
+LEFT JOIN (
+    SELECT TagId, TagName FROM RecursiveTagHierarchy WHERE Depth = 1 ORDER BY Count DESC LIMIT 1
+) TT ON TRUE
+LEFT JOIN TopUsers U ON U.UserId = P.OwnerUserId
+WHERE P.CreationDate >= DATEADD(YEAR, -1, '2024-10-01') 
+  AND P.ViewCount IS NOT NULL
+  AND P.OwnerUserId IS NOT NULL
+ORDER BY P.ViewCount DESC
+LIMIT 20;

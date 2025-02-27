@@ -1,0 +1,81 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'feature')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+, ActorsWithRoles AS (
+    SELECT 
+        ak.name AS actor_name,
+        mt.title AS movie_title,
+        rt.role AS actor_role,
+        COUNT(ci.id) AS role_count,
+        ROW_NUMBER() OVER(PARTITION BY ak.id ORDER BY COUNT(ci.id) DESC) AS role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ak.id, ak.name, mt.title, rt.role
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title AS movie_title,
+    mh.production_year,
+    COALESCE(ARRAY_AGG(DISTINCT ak.name) FILTER (WHERE ak.name IS NOT NULL), '{}') AS actor_names,
+    COALESCE(SUM(role_count) FILTER (WHERE role_rank <= 3), 0) AS top_roles_count,
+    MAX(mk.keyword) AS primary_keyword,
+    (SELECT COUNT(DISTINCT movie_id) FROM complete_cast WHERE status_id = 1) AS total_complete_cast_movies
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    ActorsWithRoles ak ON ak.movie_title = mh.title
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+ORDER BY 
+    mh.production_year DESC, movie_title
+LIMIT 100;
+
+### Explanation:
+1. **Common Table Expressions (CTEs)**: Two recursive and grouping CTEs are used.
+   - **`MovieHierarchy`**: Builds a hierarchy of movies linked by shared attributes, starting with feature films.
+   - **`ActorsWithRoles`**: Aggregates actor roles with a count of appearances and ranks based on role counts.
+
+2. **Joins**: 
+   - `LEFT JOIN` is used to combine data from `ActorsWithRoles` and movie keywords based on movie titles to ensure all movies are included even if some have no actors associated.
+
+3. **Filtering and Aggregating**:
+   - The query computes a list of actor names, counts of top roles for the first three ranks, and retrieves a primary keyword for each movie.
+
+4. **NULL Handling with `COALESCE`**: Uses `COALESCE` to handle potential NULL values including rolled-up lists and counts.
+
+5. **Order and Limit**: Results are ordered by the production year and movie title, and limited to 100 records to focus the output.
+
+This SQL query tests various advanced SQL constructs while also benchmarking performance concerning joins, subqueries, and window functions.

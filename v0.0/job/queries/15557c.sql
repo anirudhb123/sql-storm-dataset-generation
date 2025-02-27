@@ -1,0 +1,4 @@
+SELECT min(mi_idx.info) AS rating, min(t.title) AS northern_dark_movie
+FROM info_type AS it1, info_type AS it2, keyword AS k, kind_type AS kt, movie_info AS mi, movie_info_idx AS mi_idx, movie_keyword AS mk, title AS t
+WHERE kt.id = t.kind_id AND t.id = mi.movie_id AND t.id = mk.movie_id AND t.id = mi_idx.movie_id AND mk.movie_id = mi.movie_id AND mk.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id AND k.id = mk.keyword_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id
+AND k.id < 76069 AND mi.info_type_id < 107 AND it1.id = 98 AND mi.info > 'Numérobis: Il est où le magneau ? Ils ont mangé le magneau ?' AND t.series_years LIKE '%2013%' AND k.phonetic_code > 'C2624';

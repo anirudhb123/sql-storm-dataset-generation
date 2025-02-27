@@ -1,0 +1,58 @@
+WITH PartSupplierStats AS (
+    SELECT 
+        ps.partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank
+    FROM 
+        part p
+)
+SELECT 
+    pd.p_partkey,
+    pd.p_name,
+    pd.p_mfgr,
+    pd.p_brand,
+    ps.total_supply_cost,
+    co.total_orders,
+    co.total_spent,
+    COALESCE(co.last_order_date, 'Never Ordered') AS last_order,
+    CASE 
+        WHEN ps.supplier_count > 5 THEN 'High Supply'
+        WHEN ps.supplier_count BETWEEN 3 AND 5 THEN 'Moderate Supply'
+        ELSE 'Low Supply'
+    END AS supply_category
+FROM 
+    PartDetails pd
+LEFT JOIN 
+    PartSupplierStats ps ON pd.p_partkey = ps.partkey
+LEFT JOIN 
+    CustomerOrders co ON co.total_spent > 10000
+WHERE 
+    pd.rank <= 5
+ORDER BY 
+    pd.p_brand, ps.total_supply_cost DESC, co.total_spent DESC;

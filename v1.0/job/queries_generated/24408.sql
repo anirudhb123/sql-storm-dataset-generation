@@ -1,0 +1,62 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC, t.title) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+GenreKeywordCount AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    COALESCE(gkc.keyword_count, 0) AS keyword_count,
+    CASE 
+        WHEN rm.rank <= 5 THEN 'Top 5 Movies of Year ' || rm.production_year 
+        ELSE 'Other Movies' 
+    END AS movie_category,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+    ARRAY_AGG(DISTINCT p.name) FILTER (WHERE p.gender IS NOT NULL) AS actor_names
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    GenreKeywordCount gkc ON rm.movie_id = gkc.movie_id
+LEFT JOIN 
+    movie_companies mc ON rm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    complete_cast cc ON rm.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name p ON ci.person_id = p.person_id 
+WHERE 
+    rm.production_year IS NOT NULL AND 
+    (p.id IS NOT NULL OR p.id IS NULL) -- this is a bizarre NULL logic case
+GROUP BY 
+    rm.movie_id, rm.title, rm.production_year, rm.rank
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY 
+    rm.production_year DESC, keyword_count DESC, rm.title;

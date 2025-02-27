@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM
+        aka_title t
+    WHERE
+        t.production_year BETWEEN 2000 AND 2010
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title t ON ml.linked_movie_id = t.id
+    WHERE
+        mh.level < 5
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    c.name AS cast_name,
+    ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+    COALESCE(AVG(pi.info::float), 0) AS average_rating,
+    COUNT(DISTINCT cc.movie_id) AS related_movie_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name c ON ci.person_id = c.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+WHERE 
+    mh.production_year IS NOT NULL
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, c.name
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 2
+ORDER BY 
+    average_rating DESC,
+    related_movie_count DESC;
+
+This SQL query performs several sophisticated operations leveraging recursive Common Table Expressions (CTEs), outer joins, aggregation functions, and filtering conditions. It showcases a hierarchical representation of movies, including their related movies, cast details, applicable keywords, and averages based on ratings while ensuring meaningful insights such as the number of involved cast members per movie.

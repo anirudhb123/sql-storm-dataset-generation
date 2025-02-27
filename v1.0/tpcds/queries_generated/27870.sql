@@ -1,0 +1,65 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        CONCAT( ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, ', ', ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip ) AS full_address,
+        ca.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+PurchaseSummary AS (
+    SELECT 
+        c.customer_id,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        CustomerInfo c
+    JOIN 
+        web_sales ws ON c.c_customer_id = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.customer_id
+),
+HighSpenders AS (
+    SELECT 
+        customer_id,
+        total_orders,
+        total_spent
+    FROM 
+        PurchaseSummary
+    WHERE 
+        total_spent > (SELECT AVG(total_spent) FROM PurchaseSummary)
+),
+AddressCount AS (
+    SELECT
+        ca.ca_country,
+        COUNT(DISTINCT ca.ca_address_sk) AS unique_addresses
+    FROM 
+        customer_address ca
+    GROUP BY 
+        ca.ca_country
+)
+SELECT 
+    ci.full_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_education_status,
+    hs.total_orders,
+    hs.total_spent,
+    ac.unique_addresses,
+    ci.full_address
+FROM 
+    CustomerInfo ci
+JOIN 
+    HighSpenders hs ON ci.c_customer_id = hs.customer_id
+JOIN 
+    AddressCount ac ON ci.ca_country = ac.ca_country
+ORDER BY 
+    hs.total_spent DESC;

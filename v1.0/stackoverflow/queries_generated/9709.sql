@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS Author,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+TopRankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        AnswerCount,
+        Author
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank = 1
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass -- Get highest badge class for the user
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    tr.PostId,
+    tr.Title,
+    tr.CreationDate,
+    tr.Score,
+    tr.ViewCount,
+    tr.AnswerCount,
+    tr.Author,
+    ub.BadgeCount,
+    ub.HighestBadgeClass
+FROM 
+    TopRankedPosts tr
+LEFT JOIN 
+    UserBadges ub ON tr.Author = ub.UserId
+ORDER BY 
+    tr.Score DESC, tr.ViewCount DESC;

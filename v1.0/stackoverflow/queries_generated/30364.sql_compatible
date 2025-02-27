@@ -1,0 +1,70 @@
+
+WITH RECURSIVE UserHierarchy AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        CAST(NULL AS INTEGER) AS ParentId
+    FROM Users U
+    WHERE U.Reputation > 1000  
+
+    UNION ALL
+
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        UH.UserId  
+    FROM Users U
+    INNER JOIN UserHierarchy UH ON U.Id = UH.UserId
+    WHERE U.Reputation < UH.Reputation  
+),
+
+
+ActivePosts AS (
+    SELECT 
+        P.OwnerUserId,
+        P.Id AS PostId,
+        COUNT(C) AS CommentCount,
+        P.CreationDate
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.OwnerUserId, P.Id, P.CreationDate
+),
+
+
+BadgeCounts AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS TotalBadges,
+        MAX(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        MAX(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        MAX(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges B
+    GROUP BY B.UserId
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(AP.CommentCount, 0) AS TotalComments,
+    COALESCE(BC.TotalBadges, 0) AS TotalBadges,
+    BC.GoldBadges,
+    BC.SilverBadges,
+    BC.BronzeBadges,
+    U.CreationDate AS UserCreationDate,
+    DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank,
+    (
+        SELECT STRING_AGG(DISTINCT T.TagName, ', ')
+        FROM Posts P
+        INNER JOIN UNNEST(SPLIT(P.Tags, ',')) AS T(TagName) ON TRUE
+        WHERE P.OwnerUserId = U.Id
+    ) AS UserTags
+FROM Users U
+LEFT JOIN ActivePosts AP ON U.Id = AP.OwnerUserId
+LEFT JOIN BadgeCounts BC ON U.Id = BC.UserId
+WHERE U.Reputation IS NOT NULL
+ORDER BY U.Reputation DESC
+LIMIT 50;

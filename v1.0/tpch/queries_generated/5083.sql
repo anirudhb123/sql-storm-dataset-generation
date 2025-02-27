@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.n_nationkey,
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.n_nationkey, s.s_suppkey, s.s_name
+), 
+TopSuppliersByNation AS (
+    SELECT 
+        n.n_name, 
+        rs.s_suppkey, 
+        rs.s_name, 
+        rs.total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY rs.total_supply_cost DESC) AS supplier_rank
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.n_nationkey = n.n_nationkey
+), 
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus,
+        COUNT(li.l_orderkey) AS line_item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus
+)
+SELECT 
+    tn.n_name AS nation_name,
+    ts.s_name AS supplier_name,
+    tso.o_orderkey,
+    tso.o_orderdate,
+    tso.o_totalprice,
+    tso.line_item_count
+FROM 
+    TopSuppliersByNation ts
+JOIN 
+    HighValueOrders tso ON ts.s_suppkey = tso.o_orderkey
+JOIN 
+    nation tn ON ts.n_nationkey = tn.n_nationkey
+WHERE 
+    ts.supplier_rank <= 3
+ORDER BY 
+    tn.n_name, ts.total_supply_cost DESC, tso.o_orderdate;

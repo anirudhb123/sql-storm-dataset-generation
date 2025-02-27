@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, CAST('2024-10-01' AS DATE)) 
+        AND p.ViewCount > (SELECT AVG(ViewCount) FROM Posts)  
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.PostTypeId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        pht.Name AS HistoryType,
+        ph.UserDisplayName,
+        ph.CreationDate AS HistoryDate,
+        ph.Comment,
+        CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN 
+                (SELECT Name FROM CloseReasonTypes WHERE Id = CAST(JSONB_EXTRACT_PATH_TEXT(ph.Comment, 'CloseReasonId') AS SMALLINT))
+            ELSE NULL
+        END AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= DATEADD(MONTH, -1, CAST('2024-10-01' AS DATE))
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.CommentCount,
+    phd.HistoryType,
+    phd.UserDisplayName,
+    phd.HistoryDate,
+    COALESCE(phd.CloseReason, 'N/A') AS CloseReason,
+    ARRAY_AGG(CONCAT(u.DisplayName, ': ', v.VoteTypeId)) AS UserVotes
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+LEFT JOIN 
+    Votes v ON rp.PostId = v.PostId
+LEFT JOIN 
+    Users u ON v.UserId = u.Id
+WHERE 
+    rp.RankScore <= 5  
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.CommentCount, 
+    phd.HistoryType, phd.UserDisplayName, phd.HistoryDate
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 100;

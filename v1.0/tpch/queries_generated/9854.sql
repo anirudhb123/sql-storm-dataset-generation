@@ -1,0 +1,56 @@
+WITH supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+final_summary AS (
+    SELECT 
+        ss.nation_name,
+        COUNT(DISTINCT os.o_orderkey) AS order_count,
+        SUM(os.total_revenue) AS total_revenue,
+        SUM(ss.total_available) AS total_parts_available,
+        SUM(ss.total_cost) AS total_parts_cost
+    FROM 
+        supplier_summary ss
+    LEFT JOIN 
+        order_summary os ON ss.nation_name = os.o_orderdate
+    GROUP BY 
+        ss.nation_name
+)
+SELECT 
+    nation_name,
+    order_count,
+    total_revenue,
+    total_parts_available,
+    total_parts_cost,
+    (total_revenue / NULLIF(order_count, 0)) AS avg_revenue_per_order,
+    (total_parts_cost / NULLIF(total_parts_available, 0)) AS avg_cost_per_part
+FROM 
+    final_summary
+ORDER BY 
+    total_revenue DESC, order_count DESC;

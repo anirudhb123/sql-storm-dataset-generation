@@ -1,0 +1,82 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS Rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+
+FilteredPartInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        LENGTH(p.p_name) AS NameLength,
+        CASE 
+            WHEN p.p_retailprice > 100 THEN 'Expensive' 
+            WHEN p.p_retailprice BETWEEN 50 AND 100 THEN 'Moderate'
+            ELSE 'Cheap'
+        END AS PriceCategory
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT SIZE FROM part WHERE p_retailprice > 50) 
+        OR p.p_comment IS NULL
+),
+
+OrderStats AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+        COUNT(DISTINCT l.l_linestatus) AS LineCount,
+        MAX(l.l_shipdate) AS LastShipDate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey
+)
+
+SELECT 
+    f.p_partkey,
+    f.p_name,
+    f.p_retailprice,
+    COALESCE(s.TotalSupplyCost, 0) AS SupplierCost,
+    o.TotalRevenue,
+    o.LineCount,
+    CASE 
+        WHEN o.LastShipDate < CURRENT_DATE - INTERVAL '30 days' THEN 'Stale'
+        ELSE 'Fresh'
+    END AS ShippingStatus
+FROM 
+    FilteredPartInfo f
+LEFT JOIN 
+    RankedSuppliers s ON f.p_partkey = (SELECT ps.ps_partkey 
+                                         FROM partsupp ps 
+                                         WHERE ps.ps_suppkey = s.s_suppkey 
+                                         ORDER BY ps.ps_availqty DESC LIMIT 1)
+FULL OUTER JOIN 
+    OrderStats o ON f.p_partkey = (SELECT l.l_partkey 
+                                     FROM lineitem l 
+                                     WHERE l.l_orderkey IN (SELECT o.o_orderkey 
+                                                            FROM orders o 
+                                                            WHERE o.o_orderstatus = 'F')
+                                     LIMIT 1) 
+WHERE 
+    (o.TotalRevenue IS NULL OR o.TotalRevenue > 5000) 
+    AND f.PriceCategory = 'Moderate'
+ORDER BY 
+    f.p_retailprice ASC, 
+    ShippingStatus DESC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY

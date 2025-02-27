@@ -1,0 +1,95 @@
+
+WITH UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        SUM(CASE WHEN v.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month' THEN 1 ELSE 0 END) AS RecentVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(p.ViewCount, 0) AS ViewCount,
+        COALESCE((SELECT STRING_AGG(t.TagName, ',') FROM Tags t WHERE t.Id IN (SELECT UNNEST(string_to_array(p.Tags, '><'))::int[])), '{}') AS Tags,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        (
+            SELECT 
+                c.Name 
+            FROM 
+                CloseReasonTypes c 
+            INNER JOIN 
+                PostHistory ph1 ON c.Id = ph1.Comment 
+            WHERE 
+                ph1.PostHistoryTypeId = 10 AND ph1.PostId = ph.PostId
+            ORDER BY 
+                ph1.CreationDate DESC
+            LIMIT 1
+        ) AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+BountySummary AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(v.UserId) AS TotalBounties
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName,
+    us.UpVotes,
+    us.DownVotes,
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.Tags,
+    cp.CreationDate AS ClosedDate,
+    cp.CloseReason,
+    bs.TotalBounties,
+    (CASE 
+        WHEN us.RecentVotes > 0 THEN 'Active Voter' 
+        ELSE 'Inactive' 
+     END) AS VoterStatus
+FROM 
+    UserVoteSummary us
+JOIN 
+    Posts ps ON ps.OwnerUserId = us.UserId 
+LEFT JOIN 
+    ClosedPosts cp ON ps.Id = cp.PostId 
+LEFT JOIN 
+    BountySummary bs ON ps.Id = bs.PostId 
+WHERE 
+    (us.UpVotes - us.DownVotes) > 0 
+    AND (SELECT COUNT(*) FROM Votes v WHERE v.PostId = ps.PostId) > 10 
+ORDER BY 
+    us.UpVotes DESC, ps.Score DESC
+LIMIT 100;

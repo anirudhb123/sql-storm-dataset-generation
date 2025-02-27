@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::integer AS parent_movie_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id,
+        a.title,
+        a.production_year,
+        mh.movie_id,
+        mh.level + 1
+    FROM 
+        movie_link mc
+    JOIN 
+        aka_title a ON mc.linked_movie_id = a.id
+    JOIN 
+        MovieHierarchy mh ON mc.movie_id = mh.movie_id
+)
+
+SELECT 
+    CONCAT(ak.name, ' (', mh.production_year, ')') AS movie_info,
+    ak.name AS actor_name,
+    COUNT(DISTINCT mw.keyword_id) AS keyword_count,
+    AVG(CASE 
+        WHEN ci.nr_order IS NULL THEN 0 
+        ELSE ci.nr_order 
+    END) AS average_order,
+    COUNT(DISTINCT m.*) AS movie_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mw ON mh.movie_id = mw.movie_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+WHERE 
+    mh.production_year >= 2000
+    AND ak.name IS NOT NULL
+GROUP BY 
+    mh.movie_id, ak.name
+HAVING 
+    COUNT(DISTINCT m.*) > 3
+ORDER BY 
+    average_order DESC, keyword_count DESC, movie_info;
+
+This SQL query constructs a recursive Common Table Expression (CTE) called `MovieHierarchy` to handle hierarchical relationships between movies linked through `movie_link`. Then, it aggregates data across various tables, including `cast_info`, `aka_name`, and `movie_keyword`, and applies complex predicates, including JOINs, NULL checks, and grouping with HAVING clauses to produce results that reflect actors' contributions to linked movies, with a focus on more recent productions. The result includes actor names, production year, keyword count, and average order of appearance in films, ordered by average appearance order and keyword relevance.

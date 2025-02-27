@@ -1,0 +1,79 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        r.role,
+        COUNT(cm.movie_id) OVER (PARTITION BY t.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rank_by_year
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    LEFT JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND cn.country_code IS DISTINCT FROM 'US' 
+),
+ActingCounts AS (
+    SELECT 
+        person_id,
+        COUNT(DISTINCT movie_id) AS acting_movie_count
+    FROM 
+        cast_info
+    GROUP BY 
+        person_id
+    HAVING 
+        COUNT(DISTINCT movie_id) > 5  
+),
+PopularMovies AS (
+    SELECT 
+        title_id,
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_by_year <= 3 
+        AND cast_count >= 2 
+),
+ActorNames AS (
+    SELECT 
+        ak.name AS aka_name,
+        n.name AS real_name,
+        ac.acting_movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        name n ON ak.person_id = n.imdb_id 
+    JOIN 
+        ActingCounts ac ON ak.person_id = ac.person_id
+)
+SELECT 
+    pm.title,
+    pm.production_year,
+    an.aka_name,
+    an.real_name,
+    an.acting_movie_count,
+    CASE 
+        WHEN pm.production_year < 2000 THEN 'Classic'
+        WHEN pm.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS movie_era,
+    COALESCE(NULLIF(an.acting_movie_count, 0), 'No movies') AS movie_participation
+FROM 
+    PopularMovies pm
+JOIN 
+    ActorNames an ON pm.title_id = any (
+        SELECT ci.movie_id 
+        FROM cast_info ci 
+        WHERE ci.person_id = (SELECT id FROM aka_name WHERE name = an.aka_name LIMIT 1)
+    )
+ORDER BY 
+    pm.production_year DESC, an.aka_name
+LIMIT 50;

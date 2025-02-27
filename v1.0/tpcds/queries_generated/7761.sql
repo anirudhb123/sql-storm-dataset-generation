@@ -1,0 +1,51 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ci.c_customer_id,
+        SUM(CASE WHEN w.ws_sold_date_sk BETWEEN DATEDIFF(DAY, 365, GETDATE()) AND GETDATE() THEN w.ws_sales_price ELSE 0 END) AS last_year_sales,
+        SUM(CASE WHEN w.ws_sold_date_sk BETWEEN DATEDIFF(DAY, 30, GETDATE()) AND GETDATE() THEN w.ws_sales_price ELSE 0 END) AS last_month_sales,
+        COUNT(DISTINCT w.ws_order_number) AS total_orders,
+        MAX(w.ws_sales_price) AS max_sale_value,
+        AVG(w.ws_sales_price) AS avg_sale_value,
+        COUNT(DISTINCT w.ws_web_page_sk) AS unique_web_pages
+    FROM 
+        web_sales w
+    JOIN 
+        customer ci ON w.ws_bill_customer_sk = ci.c_customer_sk
+    WHERE 
+        ci.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        ci.c_customer_id
+),
+demographics_summary AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT cs.cs_order_number) AS total_catalog_sales,
+        SUM(cs.cs_ext_sales_price) AS total_catalog_revenue
+    FROM 
+        customer_demographics cd
+    JOIN 
+        catalog_sales cs ON cd.cd_demo_sk = cs.cs_bill_cdemo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    ss.c_customer_id,
+    ss.last_year_sales,
+    ss.last_month_sales,
+    ss.total_orders,
+    ss.max_sale_value,
+    ss.avg_sale_value,
+    ss.unique_web_pages,
+    ds.cd_gender,
+    ds.cd_marital_status,
+    ds.total_catalog_sales,
+    ds.total_catalog_revenue
+FROM 
+    sales_summary ss
+JOIN 
+    demographics_summary ds ON ss.c_customer_id IN (SELECT c_current_hdemo_sk FROM customer WHERE c_current_cdemo_sk IS NOT NULL)
+ORDER BY 
+    ss.last_year_sales DESC, ds.total_catalog_revenue DESC
+LIMIT 100;

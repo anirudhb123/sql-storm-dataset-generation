@@ -1,0 +1,95 @@
+
+WITH RECURSIVE UserHierarchy AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        1 AS Level
+    FROM 
+        Users
+    WHERE 
+        Reputation >= 1000  
+
+    UNION ALL 
+
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        uh.Level + 1
+    FROM 
+        Users u
+    JOIN 
+        UserHierarchy uh ON u.Id IN (SELECT DISTINCT UserId FROM Votes WHERE PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = uh.Id))
+    WHERE 
+        uh.Level < 5 
+),
+
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.CommentCount,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        ps.TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY ps.UpVoteCount DESC) AS Rank
+    FROM 
+        PostStats ps
+),
+
+UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(bp.PostId) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts bp ON u.Id = bp.OwnerUserId
+    WHERE 
+        bp.PostTypeId = 1 
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    uh.DisplayName AS UserName,
+    uh.Reputation AS UserReputation,
+    tp.PostId,
+    tp.Rank,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    tp.TotalBounty,
+    upc.TotalPosts
+FROM 
+    UserHierarchy uh
+JOIN 
+    TopPosts tp ON uh.Id IN (SELECT DISTINCT OwnerUserId FROM Posts WHERE PostTypeId = 1)
+JOIN 
+    UserPostCounts upc ON uh.Id = upc.UserId
+WHERE 
+    tp.Rank <= 10 
+ORDER BY 
+    uh.Reputation DESC,
+    tp.UpVoteCount DESC;

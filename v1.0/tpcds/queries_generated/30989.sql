@@ -1,0 +1,47 @@
+
+WITH RECURSIVE CustomerCTE AS (
+    SELECT c_customer_sk,
+           c_first_name,
+           c_last_name,
+           c_birth_day,
+           c_birth_month,
+           c_birth_year,
+           COALESCE(c_login, 'N/A') AS login_info,
+           RANK() OVER (PARTITION BY c_country ORDER BY c_birth_year DESC) AS birth_rank
+    FROM customer
+    WHERE c_birth_year IS NOT NULL
+),
+CustomerDemographics AS (
+    SELECT cd.gender,
+           cd.marital_status,
+           cd.education_status,
+           SUM(c.c_birth_day) AS total_birth_days,
+           COUNT(c.c_customer_sk) AS customer_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender IS NOT NULL
+    GROUP BY cd.gender, cd.marital_status, cd.education_status
+),
+StoreSales AS (
+    SELECT ss_store_sk,
+           SUM(ss_net_profit) AS total_net_profit,
+           COUNT(ss_ticket_number) AS transaction_count
+    FROM store_sales
+    GROUP BY ss_store_sk
+)
+SELECT ccte.c_first_name,
+       ccte.c_last_name,
+       ccte.login_info,
+       cd.gender,
+       cd.marital_status,
+       cd.education_status,
+       cd.total_birth_days,
+       ss.total_net_profit,
+       ss.transaction_count
+FROM CustomerCTE ccte
+LEFT JOIN CustomerDemographics cd ON cd.total_birth_days > 100
+JOIN StoreSales ss ON ss.total_net_profit > 5000
+WHERE ccte.birth_rank <= 3
+  AND (ccte.c_birth_month BETWEEN 1 AND 6 OR ccte.c_birth_day IS NULL)
+ORDER BY ss.transaction_count DESC, ccte.c_last_name ASC
+LIMIT 100;

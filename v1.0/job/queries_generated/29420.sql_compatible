@@ -1,0 +1,52 @@
+
+WITH computed_ranks AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ci.nr_order) AS actor_rank,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        COALESCE(ct.kind, 'Unknown') AS company_type
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, t.title, a.name, ci.nr_order, ct.kind
+),
+ranked_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        actor_name,
+        actor_rank,
+        keyword_count,
+        company_type,
+        ROW_NUMBER() OVER (ORDER BY keyword_count DESC, actor_rank) AS overall_rank
+    FROM 
+        computed_ranks
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.actor_name,
+    rm.actor_rank,
+    rm.keyword_count,
+    rm.company_type,
+    rm.overall_rank
+FROM 
+    ranked_movies rm
+WHERE
+    rm.overall_rank <= 10
+ORDER BY 
+    rm.overall_rank;

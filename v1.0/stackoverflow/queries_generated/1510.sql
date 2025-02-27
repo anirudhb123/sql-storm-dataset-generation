@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 0 AND 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(ps.ViewCount) AS TotalViews,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts ps ON u.Id = ps.OwnerUserId
+    GROUP BY 
+        u.Id
+), CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph 
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id 
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.PostsCount,
+    us.TotalViews,
+    COALESCE(rp.PostId, 0) AS TopPostId,
+    COALESCE(rp.Title, 'No top post') AS TopPostTitle,
+    COALESCE(rp.Score, 0) AS TopPostScore,
+    COALESCE(cr.CloseReasons, 'No close reasons') AS CloseReasons
+FROM 
+    UserStats us
+LEFT JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId AND rp.Rank = 1
+LEFT JOIN 
+    CloseReasons cr ON rp.PostId = cr.PostId
+WHERE 
+    us.TotalViews > 100
+ORDER BY 
+    us.TotalViews DESC;

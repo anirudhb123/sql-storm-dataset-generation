@@ -1,0 +1,98 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        1 AS hierarchy_level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        mh.hierarchy_level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+),
+CTE_Aggregated_Cast AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        c.movie_id
+),
+CTE_Movie_Info AS (
+    SELECT 
+        m.id AS movie_id,
+        COALESCE(mi.info, 'No Information') AS movie_info
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id AND mi.note IS NULL
+),
+CTE_Movie_Keywords AS (
+    SELECT 
+        mk.movie_id,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+CTE_Company_Info AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        GROUP_CONCAT(DISTINCT ct.kind ORDER BY ct.kind) AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    m.id AS movie_id,
+    m.title AS movie_title,
+    m.production_year,
+    ch.hierarchy_level,
+    ac.total_cast AS cast_count,
+    ac.cast_names,
+    mi.movie_info,
+    mk.keywords,
+    ci.company_names,
+    ci.company_types
+FROM 
+    aka_title m
+LEFT JOIN 
+    MovieHierarchy ch ON m.id = ch.movie_id
+LEFT JOIN 
+    CTE_Aggregated_Cast ac ON m.id = ac.movie_id
+LEFT JOIN 
+    CTE_Movie_Info mi ON m.id = mi.movie_id
+LEFT JOIN 
+    CTE_Movie_Keywords mk ON m.id = mk.movie_id
+LEFT JOIN 
+    CTE_Company_Info ci ON m.id = ci.movie_id
+WHERE 
+    m.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'F%')
+    AND (m.production_year > 2000 OR m.production_year IS NULL)
+    AND NOT EXISTS (SELECT 1 FROM movie_info_idx WHERE movie_id = m.id AND info_type_id IS NULL)
+ORDER BY 
+    m.production_year DESC, 
+    cast_count DESC NULLS LAST;

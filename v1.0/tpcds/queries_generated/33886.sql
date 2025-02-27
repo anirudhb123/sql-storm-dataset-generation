@@ -1,0 +1,55 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws_ship_date_sk,
+        SUM(ws.net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year >= 2020
+    GROUP BY 
+        ws.bill_customer_sk, ws_ship_date_sk
+    UNION ALL
+    SELECT 
+        sr.customer_sk,
+        sr.returned_date_sk,
+        SUM(sr.net_loss) AS total_profit
+    FROM 
+        store_returns sr
+    JOIN 
+        date_dim dd ON sr.returned_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year >= 2020
+    GROUP BY 
+        sr.customer_sk, sr.returned_date_sk
+),
+AggregateSales AS (
+    SELECT 
+        COALESCE(c.c_customer_id, 'Unknown') AS customer_id,
+        SUM(total_profit) AS net_profit
+    FROM 
+        SalesCTE sc
+    LEFT JOIN 
+        customer c ON sc.bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        customer_id
+)
+SELECT 
+    customer_id,
+    net_profit,
+    RANK() OVER (ORDER BY net_profit DESC) AS profit_rank,
+    CASE 
+        WHEN net_profit IS NULL THEN 'No Profit'
+        WHEN net_profit < 0 THEN 'Loss'
+        ELSE 'Profit'
+    END AS profit_status
+FROM 
+    AggregateSales
+WHERE 
+    net_profit BETWEEN 1000 AND 100000 
+ORDER BY 
+    net_profit DESC
+FETCH FIRST 10 ROWS ONLY;

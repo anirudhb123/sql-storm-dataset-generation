@@ -1,0 +1,55 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_first_shipto_date_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_id
+),
+ReturnSummary AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returned_quantity,
+        COUNT(DISTINCT cr.cr_order_number) AS total_returned_orders
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+),
+SalesComparison AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_quantity,
+        COALESCE(rs.total_returned_quantity, 0) AS total_returned_quantity,
+        (cs.total_quantity - COALESCE(rs.total_returned_quantity, 0)) AS net_quantity
+    FROM 
+        CustomerSales cs
+    LEFT JOIN 
+        ReturnSummary rs ON cs.c_customer_id = rs.returning_customer_sk
+)
+SELECT 
+    sc.c_customer_id,
+    sc.total_quantity,
+    sc.total_returned_quantity,
+    sc.net_quantity,
+    CASE 
+        WHEN sc.net_quantity < 0 THEN 'Negative'
+        WHEN sc.net_quantity BETWEEN 1 AND 100 THEN 'Low'
+        WHEN sc.net_quantity BETWEEN 101 AND 500 THEN 'Medium'
+        ELSE 'High'
+    END AS sales_category
+FROM 
+    SalesComparison sc
+WHERE 
+    sc.total_sales IS NOT NULL
+ORDER BY 
+    sc.net_quantity DESC
+LIMIT 100;

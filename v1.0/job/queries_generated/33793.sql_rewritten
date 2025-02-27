@@ -1,0 +1,67 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        t.title,
+        t.production_year,
+        ci.role_id,
+        1 AS level
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_title t ON ci.movie_id = t.id
+    WHERE 
+        ci.nr_order = 1  
+    UNION ALL
+    SELECT 
+        ci.person_id,
+        t.title,
+        t.production_year,
+        ci.role_id,
+        ah.level + 1
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_title t ON ci.movie_id = t.id
+    JOIN 
+        ActorHierarchy ah ON ci.movie_id = ah.movie_id
+    WHERE 
+        ci.nr_order > 1  
+),
+ActorStats AS (
+    SELECT 
+        a.person_id,
+        a.title,
+        COUNT(a.role_id) AS role_count,
+        MIN(a.production_year) AS first_movie_year,
+        MAX(a.production_year) AS last_movie_year,
+        MAX(a.production_year) - MIN(a.production_year) AS career_span
+    FROM 
+        ActorHierarchy a
+    GROUP BY 
+        a.person_id, a.title
+),
+TopActors AS (
+    SELECT 
+        person_id,
+        SUM(role_count) AS total_roles,
+        AVG(career_span) AS avg_career_length
+    FROM 
+        ActorStats
+    GROUP BY 
+        person_id
+    HAVING 
+        SUM(role_count) > 3  
+)
+SELECT 
+    na.name, 
+    ta.total_roles,
+    ta.avg_career_length
+FROM 
+    TopActors ta
+JOIN 
+    aka_name na ON ta.person_id = na.person_id
+WHERE 
+    na.name IS NOT NULL
+ORDER BY 
+    ta.total_roles DESC
+LIMIT 10;

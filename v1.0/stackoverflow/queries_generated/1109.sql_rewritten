@@ -1,0 +1,78 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(P.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        P.ViewCount,
+        P.Score,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT PL.RelatedPostId) AS RelatedPosts,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostLinks PL ON P.Id = PL.PostId
+    LEFT JOIN 
+        PostsTags PT ON P.Id = PT.PostId
+    LEFT JOIN 
+        Tags T ON PT.TagId = T.Id
+    GROUP BY 
+        P.Id
+),
+PostHistoryOverview AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT PH.Comment, '; ') AS EditComments
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UR.ReputationRank,
+    P.Title,
+    P.CreationDate,
+    P.ViewCount,
+    COALESCE(PH.EditCount, 0) AS EditCount,
+    PH.LastEditDate,
+    P.Score,
+    P.CommentCount,
+    P.RelatedPosts,
+    PH.EditComments,
+    (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.PostId AND V.VoteTypeId = 2) AS Upvotes,
+    (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.PostId AND V.VoteTypeId = 3) AS Downvotes,
+    CASE 
+        WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS HasAcceptedAnswer
+FROM 
+    PostDetails P
+JOIN 
+    Users U ON P.OwnerUserId = U.Id
+JOIN 
+    UserReputation UR ON U.Id = UR.UserId
+LEFT JOIN 
+    PostHistoryOverview PH ON P.PostId = PH.PostId
+WHERE 
+    P.ViewCount > 100 AND 
+    (P.Score > 5 OR P.CommentCount > 3)
+ORDER BY 
+    U.Reputation DESC, P.ViewCount DESC
+LIMIT 50;

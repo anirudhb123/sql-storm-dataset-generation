@@ -1,0 +1,67 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank_year,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        SUM(CASE WHEN r.role IS NOT NULL THEN 1 ELSE 0 END) AS roles_with_names
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id
+),
+TitleKeywordCount AS (
+    SELECT 
+        t.id AS movie_id,
+        COALESCE(k.id, 0) AS keyword_id,
+        COUNT(k.id) AS count_keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, k.id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    ar.actor_count,
+    rm.keyword_count,
+    CASE 
+        WHEN ar.actor_count IS NULL THEN 'No actors'
+        WHEN ar.roles_with_names = 0 THEN 'No roles defined'
+        ELSE 'Roles available'
+    END AS role_status,
+    STRING_AGG(DISTINCT COALESCE(k.keyword, 'Unknown'), ', ') AS keywords_collected
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorRoles ar ON rm.movie_id = ar.movie_id
+LEFT JOIN 
+    TitleKeywordCount tk ON rm.movie_id = tk.movie_id
+LEFT JOIN 
+    keyword k ON tk.keyword_id = k.id
+WHERE 
+    rm.rank_year <= 5
+    AND (ar.actor_count > 0 OR rm.keyword_count > 0)
+    AND (rm.title LIKE '%(unrated)%' OR rm.title LIKE '%The%')
+GROUP BY 
+    rm.title, rm.production_year, ar.actor_count, ar.roles_with_names, rm.movie_id
+ORDER BY 
+    rm.production_year DESC, rm.keyword_count DESC;

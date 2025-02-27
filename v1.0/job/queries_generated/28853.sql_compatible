@@ -1,0 +1,62 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS title_rank
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+filtered_titles AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        rt.title_rank,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        ranked_titles rt
+    JOIN 
+        complete_cast cc ON rt.title_id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    WHERE 
+        rt.title_rank <= 5  
+    GROUP BY 
+        rt.title, rt.production_year, rt.title_rank
+),
+keyword_aggregation AS (
+    SELECT 
+        ft.title,
+        ft.production_year,
+        STRING_AGG(kw.keyword, ', ') AS keywords
+    FROM 
+        filtered_titles ft
+    JOIN 
+        movie_keyword mk ON ft.title = mk.movie_id
+    JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        ft.title, ft.production_year
+)
+SELECT 
+    fa.title,
+    fa.production_year,
+    fa.keywords,
+    ft.cast_count
+FROM 
+    keyword_aggregation fa
+JOIN 
+    filtered_titles ft ON fa.title = ft.title AND fa.production_year = ft.production_year
+ORDER BY 
+    fa.production_year DESC, ft.cast_count DESC;

@@ -1,0 +1,62 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierPartCompatibility AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+)
+SELECT DISTINCT
+    p.p_name,
+    r.r_name,
+    COALESCE(cos.total_orders, 0) AS customer_order_count,
+    RANK() OVER (PARTITION BY p.p_partkey ORDER BY p.p_retailprice DESC) AS price_rank,
+    ss.total_supply_cost,
+    CASE 
+        WHEN ss.total_supply_cost IS NULL THEN 'Unknown Supply Cost'
+        ELSE CONCAT('Total Cost: $', FORMAT(ss.total_supply_cost, 'N2'))  -- Changed TO_CHAR to FORMAT
+    END AS supply_cost_description
+FROM 
+    part p
+LEFT JOIN 
+    SupplierPartCompatibility ss ON ss.ps_partkey = p.p_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON ss.ps_suppkey = rs.s_suppkey AND rs.rn = 1
+LEFT JOIN 
+    nation n ON rs.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    CustomerOrderStats cos ON cos.c_custkey = (SELECT MAX(c.c_custkey) FROM customer c WHERE c.c_nationkey = rs.s_nationkey)
+WHERE 
+    (p.p_retailprice IS NOT NULL OR ss.total_supply_cost IS NULL)
+    AND r.r_name IS NOT NULL
+    AND (cos.last_order_date >= DATEADD(year, -1, '1998-10-01') OR cos.c_custkey IS NULL)  -- Changed cast(Date) - INTERVAL '1 year'
+ORDER BY 
+    p.p_partkey;

@@ -1,0 +1,46 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT ws_item_sk, 
+           SUM(ws_quantity) AS total_quantity,
+           SUM(ws_net_paid) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+customer_sales AS (
+    SELECT c.c_customer_sk, 
+           SUM(ws.ws_quantity) AS total_quantity,
+           SUM(ws.ws_net_paid) AS total_sales,
+           cd.cd_gender,
+           COALESCE(hd.hd_buy_potential, 'Unknown') AS buy_potential
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE c.c_first_shipto_date_sk IS NOT NULL
+    GROUP BY c.c_customer_sk, cd.cd_gender, hd.hd_buy_potential
+),
+top_items AS (
+    SELECT ws_item_sk,
+           SUM(ws_quantity) AS total_quantity,
+           SUM(ws_net_paid) AS total_sales
+    FROM web_sales
+    GROUP BY ws_item_sk
+    ORDER BY total_sales DESC
+    LIMIT 10
+)
+SELECT ca.ca_city,
+       COALESCE(sd.total_quantity, 0) AS web_sales_quantity,
+       COALESCE(cs.total_sales, 0) AS customer_total_sales,
+       COALESCE(ti.total_sales, 0) AS top_item_sales,
+       CASE 
+           WHEN cs.total_sales > 1000 THEN 'High spender' 
+           WHEN cs.total_sales > 500 THEN 'Medium spender' 
+           ELSE 'Low spender' 
+       END AS customer_spending_category
+FROM customer_address ca
+LEFT JOIN sales_data sd ON ca.ca_address_sk = sd.ws_item_sk
+LEFT JOIN customer_sales cs ON cs.c_customer_sk = ca.ca_address_sk
+LEFT JOIN top_items ti ON ti.ws_item_sk = sd.ws_item_sk
+WHERE ca.ca_city IS NOT NULL OR ca.ca_city != ''
+ORDER BY ca.ca_city;

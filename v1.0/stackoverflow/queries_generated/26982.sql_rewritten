@@ -1,0 +1,57 @@
+WITH RecentPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.LastActivityDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        p.ViewCount,
+        t.TagName
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE
+        p.CreationDate > cast('2024-10-01' as date) - interval '30 days'
+    GROUP BY
+        p.Id, u.DisplayName, t.TagName
+),
+PostInteractions AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS EditComments
+    FROM
+        RecentPosts rp
+    LEFT JOIN
+        PostHistory ph ON rp.PostId = ph.PostId
+    GROUP BY
+        rp.PostId, rp.Title, rp.OwnerDisplayName
+)
+SELECT
+    r.*, 
+    pi.EditCount, 
+    pi.LastEditDate, 
+    pi.EditComments
+FROM
+    RecentPosts r
+JOIN
+    PostInteractions pi ON r.PostId = pi.PostId
+ORDER BY
+    r.LastActivityDate DESC, 
+    r.UpVotes DESC, 
+    r.ViewCount DESC;

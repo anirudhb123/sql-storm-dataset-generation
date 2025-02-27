@@ -1,0 +1,55 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    WHERE U.Reputation > 1000
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank
+    FROM Posts P
+    INNER JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.Score > 0
+),
+ClosedPostCounts AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(*) AS ClosedPosts
+    FROM Posts P
+    WHERE P.ClosedDate IS NOT NULL
+    GROUP BY P.OwnerUserId
+)
+SELECT 
+    UR.UserId,
+    UR.DisplayName,
+    UR.Reputation,
+    UR.TotalBounty,
+    UR.TotalPosts,
+    UR.TotalComments,
+    COALESCE(CPC.ClosedPosts, 0) AS ClosedPosts,
+    TP.Title,
+    TP.CreationDate,
+    TP.Score,
+    TP.ViewCount
+FROM UserReputation UR
+LEFT JOIN ClosedPostCounts CPC ON UR.UserId = CPC.OwnerUserId
+LEFT JOIN TopPosts TP ON UR.UserId = TP.OwnerDisplayName
+WHERE UR.TotalPosts > 5
+AND (TP.Rank <= 3 OR TP.Rank IS NULL)
+ORDER BY UR.Reputation DESC, UR.TotalBounty DESC;

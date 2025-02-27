@@ -1,0 +1,95 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS year_rank
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+NotablePersons AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        a.surname_pcode
+    FROM 
+        aka_name AS a
+    WHERE 
+        a.md5sum IS NOT NULL
+        AND a.name NOT LIKE '%[0-9]%'
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count,
+        SUM(CASE WHEN ct.kind = 'Distributor' THEN 1 ELSE 0 END) AS distributor_count
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        company_name AS c ON mc.company_id = c.id
+    JOIN 
+        company_type AS ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title AS m
+    JOIN 
+        movie_keyword AS mk ON m.id = mk.movie_id
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+),
+CorrelatedSubquery AS (
+    SELECT 
+        person_id,
+        COUNT(DISTINCT movie_id) AS movie_count
+    FROM 
+        cast_info AS ci
+    WHERE 
+        EXISTS (
+            SELECT 1
+            FROM complete_cast AS cc
+            WHERE cc.movie_id = ci.movie_id
+            AND cc.status_id IS NOT NULL
+        )
+    GROUP BY 
+        person_id
+)
+
+SELECT 
+    r.title,
+    r.production_year,
+    np.name AS notable_actor,
+    np.surname_pcode,
+    cm.company_count,
+    cm.distributor_count,
+    mwk.keywords,
+    cs.movie_count AS correlated_movie_count
+FROM 
+    RankedMovies AS r
+LEFT JOIN 
+    NotablePersons AS np ON np.person_id IN (
+        SELECT ci.person_id
+        FROM cast_info AS ci
+        WHERE ci.movie_id = r.movie_id
+    )
+LEFT JOIN 
+    CompanyMovies AS cm ON cm.movie_id = r.movie_id
+LEFT JOIN 
+    MoviesWithKeywords AS mwk ON mwk.movie_id = r.movie_id
+LEFT JOIN 
+    CorrelatedSubquery AS cs ON cs.person_id = np.person_id
+WHERE 
+    r.year_rank <= 5 
+    AND (cm.company_count > 1 OR cm.distributor_count IS NULL)
+ORDER BY 
+    r.production_year DESC, 
+    r.title ASC;

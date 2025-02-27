@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = 1  
+
+    UNION ALL
+
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    m.title AS original_title,
+    m.production_year AS original_year,
+    mr.title AS related_title,
+    mr.production_year AS related_year,
+    COALESCE(mk.keyword, 'No Keyword') AS related_keyword,
+    COUNT(cc.id) AS cast_count,
+    STRING_AGG(DISTINCT p.name, ', ') AS cast_names,
+    CASE 
+        WHEN mr.production_year IS NULL THEN 'No Related Movie'
+        ELSE 'Related Movie Found'
+    END AS relation_status
+FROM 
+    movie_hierarchy m
+LEFT JOIN 
+    movie_link ml ON m.movie_id = ml.movie_id
+LEFT JOIN 
+    movie_keyword mk ON ml.linked_movie_id = mk.movie_id
+LEFT JOIN 
+    cast_info cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name p ON cc.person_id = p.person_id
+LEFT JOIN 
+    aka_title mr ON ml.linked_movie_id = mr.id
+WHERE 
+    m.production_year >= 2000 
+GROUP BY 
+    m.title, m.production_year, mr.title, mr.production_year, mk.keyword
+ORDER BY 
+    original_year DESC, cast_count DESC;

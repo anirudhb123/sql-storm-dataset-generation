@@ -1,0 +1,39 @@
+WITH RECURSIVE part_hierarchy AS (
+    SELECT p_partkey, p_name, p_mfgr, 1 AS level
+    FROM part
+    WHERE p_size > 10
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, ph.level + 1
+    FROM part_hierarchy ph
+    JOIN partsupp ps ON ph.p_partkey = ps.ps_partkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size <= 10 AND ps.ps_availqty > 0
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('F', 'O')
+),
+customer_summary AS (
+    SELECT c.c_nationkey, SUM(c.c_acctbal) AS total_acctbal
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_nationkey
+)
+SELECT n.n_name,
+       SUM(COALESCE(ps.ps_supplycost, 0)) AS total_supply_cost,
+       AVG(CASE WHEN lo.o_orderkey IS NOT NULL THEN lo.o_totalprice ELSE NULL END) AS avg_order_price,
+       COUNT(DISTINCT p.p_partkey) AS part_count,
+       ROUND(AVG(CASE WHEN lo.o_orderkey IS NOT NULL THEN lon.level ELSE 0 END), 2) AS avg_hierarchy_level
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN ranked_orders lo ON l.l_orderkey = lo.o_orderkey
+JOIN part_hierarchy lon ON ps.ps_partkey = lon.p_partkey
+WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE '%eu%')
+GROUP BY n.n_name
+HAVING SUM(COALESCE(ps.ps_availqty, 0)) > (SELECT AVG(cs.total_acctbal) FROM customer_summary cs WHERE cs.c_nationkey = n.n_nationkey)
+ORDER BY total_supply_cost DESC, n.n_name ASC
+LIMIT 50 OFFSET 10;

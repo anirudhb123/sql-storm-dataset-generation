@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days' 
+        AND p.Score > 0
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+HighScoringPosts AS (
+    SELECT 
+        rp.PostID,
+        rp.Title,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.RankScore,
+        CASE 
+            WHEN rp.TotalBounties > 0 THEN 'Yes' 
+            ELSE 'No' 
+        END AS HasBounty
+    FROM 
+        RankedPosts rp 
+    WHERE 
+        rp.RankScore <= 5
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS ChangeTypes,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    hsp.PostID,
+    hsp.Title,
+    hsp.Score,
+    hsp.OwnerDisplayName,
+    hsp.ViewCount,
+    hsp.CreationDate,
+    hsp.HasBounty,
+    pha.ChangeTypes,
+    pha.LastChangeDate
+FROM 
+    HighScoringPosts hsp
+LEFT JOIN 
+    PostHistoryAggregates pha ON hsp.PostID = pha.PostId
+ORDER BY 
+    hsp.Score DESC, hsp.CreationDate ASC;

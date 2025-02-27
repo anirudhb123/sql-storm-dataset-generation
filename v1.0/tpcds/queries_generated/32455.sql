@@ -1,0 +1,62 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+    UNION ALL 
+    SELECT 
+        sh.c_customer_sk,
+        sh.c_first_name,
+        sh.c_last_name,
+        sh.cd_gender,
+        sh.cd_marital_status,
+        sh.total_spent + COALESCE(ws.ws_net_paid, 0)
+    FROM 
+        SalesHierarchy sh
+    LEFT JOIN 
+        web_sales ws ON sh.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        sh.total_spent < (SELECT AVG(total_spent) FROM SalesHierarchy)
+),
+TotalSales AS (
+    SELECT
+        s.c_customer_sk,
+        s.c_first_name,
+        s.c_last_name,
+        s.cd_gender,
+        s.total_spent,
+        RANK() OVER (ORDER BY s.total_spent DESC) AS sales_rank
+    FROM 
+        SalesHierarchy s
+)
+SELECT 
+    t.c_customer_sk,
+    t.c_first_name,
+    t.c_last_name,
+    t.cd_gender,
+    COALESCE(t.total_spent, 0) AS total_sales,
+    CASE 
+        WHEN t.sales_rank <= 10 THEN 'Top 10 Customers'
+        ELSE 'Regular Customers'
+    END AS customer_category
+FROM 
+    TotalSales t
+LEFT JOIN 
+    customer_address ca ON ca.ca_address_sk = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_customer_sk = t.c_customer_sk)
+WHERE 
+    ca.ca_country IS NOT NULL
+ORDER BY 
+    t.total_sales DESC
+LIMIT 100;

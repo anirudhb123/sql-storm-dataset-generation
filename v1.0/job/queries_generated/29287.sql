@@ -1,0 +1,51 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        RANK() OVER (PARTITION BY at.production_year ORDER BY LENGTH(at.title) DESC) AS title_rank
+    FROM aka_title at
+    WHERE at.production_year >= 2000
+),
+TopRankedTitles AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year
+    FROM RankedTitles rt
+    WHERE rt.title_rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mc.name AS company_name,
+        array_agg(DISTINCT kw.keyword) AS keywords
+    FROM TopRankedTitles trt
+    JOIN movie_companies mc ON trt.title_id = mc.movie_id
+    JOIN movie_keyword mk ON mk.movie_id = trt.title_id
+    JOIN keyword kw ON mk.keyword_id = kw.id
+    JOIN aka_title at ON at.id = trt.title_id
+    JOIN complete_cast cc ON cc.movie_id = at.movie_id
+    GROUP BY mt.id, mt.title, mc.name
+),
+Popularity AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.company_name,
+        COUNT(cc.person_id) AS actor_count
+    FROM MovieDetails md
+    JOIN cast_info cc ON md.movie_id = cc.movie_id
+    GROUP BY md.movie_id, md.title, md.company_name
+)
+SELECT 
+    p.name AS actor_name,
+    m.title,
+    m.company_name,
+    m.actor_count
+FROM Popularity m
+JOIN cast_info c ON m.movie_id = c.movie_id
+JOIN aka_name p ON c.person_id = p.person_id
+WHERE c.nr_order IS NOT NULL
+ORDER BY m.actor_count DESC, m.title;

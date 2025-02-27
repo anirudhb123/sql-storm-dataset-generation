@@ -1,0 +1,65 @@
+WITH RecursiveMovieCTE AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(cast_x.role_id, 0) AS role_id,
+        COALESCE(cast_x.nr_order, 0) AS nr_order,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY COALESCE(cast_x.nr_order, 0)) AS order_sequence
+    FROM
+        aka_title AS t
+    LEFT JOIN
+        cast_info AS cast_x ON t.id = cast_x.movie_id
+    WHERE
+        t.production_year >= 2000
+), RankedMovies AS (
+    SELECT
+        movie_id,
+        title,
+        production_year,
+        role_id,
+        nr_order,
+        order_sequence,
+        COUNT(*) OVER (PARTITION BY production_year) AS production_count
+    FROM
+        RecursiveMovieCTE
+),
+MovieCompanyInfo AS (
+    SELECT
+        m.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY m.movie_id ORDER BY cn.name) AS company_order
+    FROM
+        movie_companies AS m
+    JOIN
+        company_name AS cn ON m.company_id = cn.id
+    JOIN
+        company_type AS ct ON m.company_type_id = ct.id
+)
+SELECT
+    r.movie_id,
+    r.title,
+    r.production_year,
+    r.role_id,
+    GROUP_CONCAT(DISTINCT mc.company_name ORDER BY mc.company_order) AS production_companies,
+    CASE
+        WHEN r.production_count > 1 THEN 'Multiple Productions'
+        ELSE 'Single Production'
+    END AS production_status,
+    AVG(r.nr_order) OVER (PARTITION BY r.role_id) AS avg_order_per_role,
+    MAX(r.order_sequence) OVER (PARTITION BY r.movie_id) AS max_order_sequence,
+    NULLIF(AVG(NULLIF(r.nr_order, 0)), 0) AS adjusted_avg_order
+FROM
+    RankedMovies AS r
+LEFT JOIN
+    MovieCompanyInfo AS mc ON r.movie_id = mc.movie_id
+WHERE
+    r.role_id IS NOT NULL OR mc.company_name IS NOT NULL
+GROUP BY
+    r.movie_id, r.title, r.production_year, r.role_id, r.production_count
+HAVING
+    COUNT(r.role_id) >= 1
+ORDER BY
+    r.production_year DESC,
+    r.title ASC;

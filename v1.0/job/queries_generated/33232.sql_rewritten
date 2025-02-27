@@ -1,0 +1,65 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    WHERE 
+        mt.production_year >= 2000  
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.linked_movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.depth,
+    COALESCE(cnt.actors_count, 0) AS total_actors,
+    CASE 
+        WHEN mh.production_year IS NULL THEN 'Unknown Year'
+        ELSE CAST(mh.production_year AS TEXT)
+    END AS formatted_year,
+    ARRAY_AGG(DISTINCT c.name) AS actor_names
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    aka_name c ON ci.person_id = c.person_id
+LEFT JOIN 
+    (SELECT 
+        movie_id, 
+        COUNT(DISTINCT person_id) AS actors_count
+     FROM 
+        cast_info
+     GROUP BY 
+        movie_id
+    ) AS cnt ON mh.movie_id = cnt.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.depth
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 2  
+ORDER BY 
+    mh.production_year DESC, 
+    mh.depth
+LIMIT 100;

@@ -1,0 +1,87 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') OVER (PARTITION BY p.Id) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    JOIN 
+        LATERAL (SELECT * FROM string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS t(TagName) ON TRUE
+    WHERE 
+        p.ViewCount IS NOT NULL 
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        b.Name AS BadgeName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, b.Name
+),
+PostCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+AggregatedPostData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        rp.RankScore,
+        COALESCE(pr.CloseReason, 'No close reason') AS CloseReason,
+        COUNT(b.UserId) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.UserId) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.UserId) FILTER (WHERE b.Class = 3) AS BronzeBadges      
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostCloseReasons pr ON rp.PostId = pr.PostId
+    LEFT JOIN 
+        UserBadges b ON rp.OwnerUserId = b.UserId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.ViewCount, rp.Score, rp.CommentCount, rp.RankScore, pr.CloseReason
+)
+SELECT 
+    apd.PostId,
+    apd.Title,
+    apd.ViewCount,
+    apd.Score,
+    apd.CommentCount,
+    apd.RankScore,
+    apd.CloseReason,
+    apd.GoldBadges,
+    apd.SilverBadges,
+    apd.BronzeBadges,
+    CASE 
+        WHEN apd.Score > 100 THEN 'High'
+        WHEN apd.Score BETWEEN 50 AND 100 THEN 'Medium'
+        ELSE 'Low' 
+    END AS ScoreCategory,
+    (SELECT COUNT(*) FROM Posts WHERE CreationDate >= DATE '2024-10-01' - INTERVAL '30 days') AS RecentPostCount,
+    (SELECT AVG(ViewCount) FROM Posts WHERE Tags LIKE '%SQL%') AS AvgSQLPostViewCount
+FROM 
+    AggregatedPostData apd
+WHERE 
+    apd.RankScore <= 5 
+ORDER BY 
+    apd.Score DESC, 
+    apd.ViewCount DESC;

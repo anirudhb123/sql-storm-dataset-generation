@@ -1,0 +1,52 @@
+WITH Recursive CompanyHierarchy AS (
+    SELECT c.id AS company_id, c.name AS company_name, 0 AS level 
+    FROM company_name c
+    WHERE c.country_code IS NOT NULL
+
+    UNION ALL
+
+    SELECT mc.company_id, cn.name, ch.level + 1
+    FROM movie_companies mc
+    JOIN CompanyHierarchy ch ON mc.movie_id = ch.company_id
+    JOIN company_name cn ON mc.company_id = cn.id
+)
+, MovieGenres AS (
+    SELECT mt.movie_id, kt.keyword AS genre
+    FROM movie_keyword mk
+    JOIN keyword kt ON mk.keyword_id = kt.id
+    JOIN aka_title mt ON mt.id = mk.movie_id
+    WHERE kt.keyword IS NOT NULL
+)
+, ActorMovieStats AS (
+    SELECT ci.person_id, 
+           COUNT(DISTINCT ci.movie_id) AS movie_count,
+           AVG(COALESCE(t.production_year, 0)) AS average_year,
+           COUNT(DISTINCT mk.keyword_id) AS genre_count,
+           ROW_NUMBER() OVER (PARTITION BY ci.person_id ORDER BY COUNT(DISTINCT ci.movie_id) DESC) AS ranking
+    FROM cast_info ci
+    LEFT JOIN aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN aka_title t ON ci.movie_id = t.id
+    LEFT JOIN movie_keyword mk ON ci.movie_id = mk.movie_id
+    GROUP BY ci.person_id
+)
+SELECT 
+    an.name, 
+    cs.company_name AS company, 
+    stats.movie_count, 
+    stats.average_year, 
+    stats.genre_count, 
+    COALESCE(ch.level, -1) AS hierarchy_level
+FROM ActorMovieStats stats
+JOIN aka_name an ON stats.person_id = an.person_id
+LEFT JOIN movie_companies mc ON mc.movie_id = (
+    SELECT movie_id 
+    FROM complete_cast cc 
+    WHERE cc.subject_id = stats.person_id 
+    LIMIT 1
+)
+LEFT JOIN CompanyHierarchy ch ON mc.company_id = ch.company_id
+LEFT JOIN company_name cs ON mc.company_id = cs.id
+WHERE stats.movie_count > 5 
+AND (stats.average_year < 2000 OR stats.genre_count > 3)
+ORDER BY hierarchy_level DESC, stats.movie_count DESC
+LIMIT 100;

@@ -1,0 +1,35 @@
+WITH RECURSIVE customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer_orders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate > co.o_orderdate
+),
+part_supplier_summary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT p.p_name, 
+       COALESCE(SUM(lo.l_extendedprice * (1 - lo.l_discount)), 0) AS total_revenue,
+       COALESCE(MAX(lo.l_tax), 0) AS max_tax,
+       COUNT(DISTINCT co.o_orderkey) AS total_orders,
+       CASE 
+           WHEN AVG(s.s_acctbal) IS NULL THEN 'No Suppliers'
+           ELSE CONCAT('Average Supplier Account Balance: $', ROUND(AVG(s.s_acctbal), 2))
+       END AS supplier_balance_info
+FROM part p
+LEFT JOIN lineitem lo ON p.p_partkey = lo.l_partkey
+LEFT JOIN customer_orders co ON lo.l_orderkey = co.o_orderkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+GROUP BY p.p_name
+HAVING total_revenue > 1000
+ORDER BY total_revenue DESC
+LIMIT 10;

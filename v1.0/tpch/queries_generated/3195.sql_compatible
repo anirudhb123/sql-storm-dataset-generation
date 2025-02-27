@@ -1,0 +1,54 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    rs.s_name AS supplier_name,
+    SUM(ps.ps_supplycost * l.l_quantity) AS total_supplycost,
+    COALESCE(co.order_count, 0) AS total_orders,
+    COALESCE(co.total_spent, 0.00) AS total_spent,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY n.n_name) AS avg_price_per_nation
+FROM 
+    partsupp ps
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey AND rs.rnk <= 3
+LEFT JOIN 
+    CustomerOrders co ON s.s_suppkey = co.c_custkey
+WHERE 
+    p.p_retailprice > 50.00
+GROUP BY 
+    r.r_name, n.n_name, rs.s_name, co.order_count, co.total_spent, rs.s_suppkey
+HAVING 
+    SUM(ps.ps_supplycost * l.l_quantity) > 10000
+ORDER BY 
+    region, nation, total_supplycost DESC;

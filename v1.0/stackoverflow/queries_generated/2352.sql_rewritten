@@ -1,0 +1,51 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Posts p ON v.PostId = p.Id
+    GROUP BY u.Id, u.DisplayName
+),
+PostPerformance AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank,
+        RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS UserRank
+    FROM UserVoteStats
+    WHERE PostCount > 5
+)
+SELECT 
+    u.DisplayName AS TopUser,
+    ups.UpVotes,
+    ups.DownVotes,
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.ViewCount,
+    pp.AnswerCount,
+    pp.ViewRank,
+    pp.ScoreRank
+FROM TopUsers ups
+JOIN UserVoteStats u ON ups.UserId = u.UserId
+JOIN PostPerformance pp ON u.UserId = pp.OwnerUserId
+WHERE ups.UserRank <= 10 
+ORDER BY ups.TotalScore DESC, pp.ViewCount DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

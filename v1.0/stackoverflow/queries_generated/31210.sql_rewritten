@@ -1,0 +1,66 @@
+WITH RecursivePostCTE AS (
+    SELECT Id, Title, Score, OwnerUserId, ParentId, CreationDate
+    FROM Posts
+    WHERE PostTypeId = 1 
+    UNION ALL
+    SELECT p.Id, p.Title, p.Score, p.OwnerUserId, p.ParentId, p.CreationDate
+    FROM Posts p
+    INNER JOIN RecursivePostCTE cte ON p.ParentId = cte.Id
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+PostScoreHistory AS (
+    SELECT
+        ph.UserId,
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11, 12, 13) 
+),
+FilteredPosts AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.Score,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation,
+        COUNT(c.Id) AS CommentCount,
+        MAX(ph.CreationDate) AS LastActivityDate,
+        MAX(CASE WHEN ph.UserId IS NOT NULL THEN ph.Comment END) AS LastComment
+    FROM RecursivePostCTE rp
+    LEFT JOIN Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON rp.Id = c.PostId
+    LEFT JOIN PostScoreHistory ph ON rp.Id = ph.PostId AND ph.rn = 1
+    GROUP BY rp.Id, rp.Title, rp.Score, u.DisplayName, u.Reputation
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.Score,
+    f.OwnerDisplayName,
+    f.Reputation,
+    f.CommentCount,
+    f.LastActivityDate,
+    COALESCE(f.LastComment, 'No comments') AS LastComment,
+    ur.PostsCreated,
+    ur.TotalBadges
+FROM FilteredPosts f
+JOIN UserReputation ur ON f.OwnerDisplayName = ur.DisplayName
+WHERE f.CommentCount > 0 AND f.Score > (
+    SELECT AVG(Score) FROM Posts WHERE PostTypeId = 1
+) 
+ORDER BY f.Score DESC, f.LastActivityDate DESC
+LIMIT 10;

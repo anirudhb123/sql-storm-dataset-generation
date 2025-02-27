@@ -1,0 +1,78 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rnk
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    AND 
+        ws.ws_quantity > 0
+),
+AggregateReturns AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returns,
+        COUNT(DISTINCT wr.wr_returning_customer_sk) AS return_customers
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.wr_returned_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        wr.wr_item_sk
+),
+UnionSales AS (
+    SELECT 
+        cs.cs_item_sk AS item,
+        SUM(cs.cs_net_profit) AS total_profit
+    FROM 
+        catalog_sales cs
+    WHERE 
+        cs.cs_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        cs.cs_item_sk
+
+    UNION ALL
+
+    SELECT 
+        ss.ss_item_sk AS item,
+        SUM(ss.ss_net_profit) AS total_profit
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.ss_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        ss.ss_item_sk
+),
+FinalReport AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_sales_price,
+        COALESCE(ar.total_returns, 0) AS total_returns,
+        COALESCE(ar.return_customers, 0) AS return_customers,
+        COALESCE(us.total_profit, 0) AS total_profit
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        AggregateReturns ar ON rs.ws_item_sk = ar.wr_item_sk
+    LEFT JOIN 
+        UnionSales us ON rs.ws_item_sk = us.item
+)
+SELECT 
+    fr.ws_item_sk,
+    COUNT(DISTINCT fr.return_customers) OVER (PARTITION BY fr.ws_item_sk) AS unique_return_customers,
+    CASE 
+        WHEN fr.total_profit > 0 THEN fr.total_profit
+        ELSE NULLIF(fr.total_profit, 0) 
+    END AS net_profit_indicator,
+    COUNT(*) FILTER (WHERE fr.total_returns > 0) OVER () AS return_count
+FROM 
+    FinalReport fr
+WHERE 
+    fr.total_profit > 0
+ORDER BY 
+    net_profit_indicator DESC
+FETCH FIRST 50 ROWS ONLY;

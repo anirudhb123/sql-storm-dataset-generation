@@ -1,0 +1,100 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS AnswerCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        SUM(COALESCE(v.UserId IS NOT NULL, 0)) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 2  
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes,
+        MAX(h.CreationDate) AS LastEdited
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory h ON p.Id = h.PostId
+    GROUP BY 
+        p.Id, p.Title
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        h.UserDisplayName AS ClosedBy,
+        h.CreationDate AS ClosedOn,
+        MAX(CASE WHEN h.PostHistoryTypeId = 10 THEN h.Comment END) AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory h ON p.Id = h.PostId
+    WHERE 
+        h.PostHistoryTypeId = 10
+    GROUP BY 
+        p.Id, p.Title, h.UserDisplayName, h.CreationDate
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    ps.UpVotes,
+    ps.DownVotes,
+    us.DisplayName AS UserName,
+    us.Reputation AS UserReputation,
+    r.PostId AS ParentPostId,
+    r.Level,
+    cp.ClosedOn,
+    cp.ClosedBy,
+    cp.CloseReason
+FROM 
+    Posts p
+LEFT JOIN 
+    PostVoteSummary ps ON p.Id = ps.Id
+LEFT JOIN 
+    UserStats us ON p.OwnerUserId = us.UserId
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.PostId
+LEFT JOIN 
+    ClosedPosts cp ON p.Id = cp.Id
+WHERE 
+    (p.Title LIKE '%SQL%' OR p.Body LIKE '%performance%')  
+    AND (us.Reputation > 100 OR us.Reputation IS NULL)  
+ORDER BY 
+    ps.UpVotes DESC, ps.TotalVotes DESC;

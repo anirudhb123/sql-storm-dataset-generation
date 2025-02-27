@@ -1,0 +1,112 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ParentId,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Questions
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ParentId,
+        Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy R ON P.ParentId = R.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN VoteTypeId = 4 THEN 1 END) AS OffensiveVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+FilteredPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(B.UserDisplayName, 'Community User') as OwnerDisplayName,
+        P.AnswerCount,
+        P.CommentCount,
+        ISNULL(PH.UpVotes, 0) AS UpVotes,
+        ISNULL(PH.DownVotes, 0) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostVoteSummary PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.ViewCount > 50
+        AND P.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP) -- Posts from the last year
+),
+FinalPostSummary AS (
+    SELECT 
+        FP.PostId,
+        FP.Title,
+        FP.CreationDate,
+        FP.Score,
+        FP.ViewCount,
+        FP.OwnerDisplayName,
+        FP.AnswerCount,
+        FP.CommentCount,
+        FP.UpVotes,
+        FP.DownVotes,
+        R.Level
+    FROM 
+        FilteredPosts FP
+    LEFT JOIN 
+        RecursivePostHierarchy R ON FP.PostId = R.PostId
+)
+SELECT 
+    FPS.PostId,
+    FPS.Title,
+    FPS.CreationDate,
+    FPS.Score,
+    FPS.ViewCount,
+    FPS.OwnerDisplayName,
+    FPS.AnswerCount,
+    FPS.CommentCount,
+    FPS.UpVotes,
+    FPS.DownVotes,
+    FPS.Level,
+    U.GoldBadges,
+    U.SilverBadges,
+    U.BronzeBadges
+FROM 
+    FinalPostSummary FPS
+LEFT JOIN 
+    UserBadges U ON FPS.OwnerDisplayName = U.UserId
+ORDER BY 
+    FPS.ViewCount DESC,
+    FPS.UpVotes DESC
+LIMIT 100;

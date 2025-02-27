@@ -1,0 +1,71 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        RANK() OVER (ORDER BY SUM(COALESCE(P.Score, 0)) DESC) AS ScoreRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RowNum
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '1 month'
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 5
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.TotalViews,
+    U.TotalScore,
+    U.BadgeCount,
+    U.ScoreRank,
+    COALESCE(RP.Title, 'No Posts') AS RecentPostTitle,
+    COALESCE(RP.CreationDate, 'N/A') AS RecentPostCreationDate,
+    PT.TagName AS PopularTag
+FROM 
+    UserStats U
+LEFT JOIN 
+    RecentPosts RP ON U.UserId = RP.OwnerDisplayName AND RP.RowNum = 1
+LEFT JOIN 
+    PopularTags PT ON U.ScoreRank <= 10
+WHERE 
+    U.Reputation >= 100
+ORDER BY 
+    U.ScoreRank, U.Reputation DESC;

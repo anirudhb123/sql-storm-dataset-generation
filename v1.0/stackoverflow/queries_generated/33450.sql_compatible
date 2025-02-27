@@ -1,0 +1,56 @@
+
+WITH RECURSIVE UserReputation AS (
+    SELECT U.Id, U.DisplayName, U.Reputation, U.CreationDate,
+           ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS RN
+    FROM Users U
+),
+PostsWithTags AS (
+    SELECT P.Id AS PostId, P.Title, P.Score, P.ViewCount, P.CreationDate, 
+           COUNT(CASE WHEN T.Id IS NOT NULL THEN 1 END) AS TagCount,
+           STRING_AGG(T.TagName, ', ') AS Tags
+    FROM Posts P
+    LEFT JOIN Tags T ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY P.Id, P.Title, P.Score, P.ViewCount, P.CreationDate
+),
+ClosedPosts AS (
+    SELECT PH.PostId, COUNT(*) AS CloseCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.PostId
+),
+TopTags AS (
+    SELECT T.Id, T.TagName, SUM(PH.PostHistoryTypeId = 52) AS HotCount
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    JOIN PostHistory PH ON PH.PostId = P.Id
+    WHERE PH.PostHistoryTypeId IN (52, 53)
+    GROUP BY T.Id, T.TagName
+),
+UserStats AS (
+    SELECT U.Id, U.DisplayName, U.Reputation, 
+           COALESCE(MAX(P.Score), 0) AS MaxPostScore,
+           COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS ClosedPosts
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+)
+
+SELECT U.Id AS UserId, U.DisplayName, 
+       U.Reputation, 
+       UP.MaxPostScore, 
+       UP.ClosedPosts, 
+       PT.PostId, PT.Title, PT.Score, 
+       PT.ViewCount, PT.CreationDate, 
+       PT.TagCount, PT.Tags,
+       CT.CloseCount, 
+       TT.TagName, TT.HotCount
+FROM UserStats UP
+INNER JOIN Users U ON U.Id = UP.Id
+LEFT JOIN PostsWithTags PT ON PT.PostId IS NOT NULL
+LEFT JOIN ClosedPosts CT ON CT.PostId = PT.PostId
+LEFT JOIN TopTags TT ON TT.HotCount > 0
+WHERE U.Reputation > 1000 
+AND (COALESCE(CT.CloseCount, 0) > 0 OR PT.TagCount > 2) 
+ORDER BY U.Reputation DESC, PT.ViewCount DESC
+LIMIT 50;

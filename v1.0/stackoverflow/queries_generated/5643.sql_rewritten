@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score > 0 
+),
+UserVoteCounts AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+PostAnalytics AS (
+    SELECT 
+        up.UserId,
+        COUNT(DISTINCT rp.PostId) AS QuestionCount,
+        COALESCE(SUM(uv.UpVotes), 0) AS TotalUpVotes,
+        COALESCE(SUM(uv.DownVotes), 0) AS TotalDownVotes,
+        MAX(rp.CreationDate) AS LastQuestionDate
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users up ON rp.OwnerUserId = up.Id
+    LEFT JOIN 
+        UserVoteCounts uv ON up.Id = uv.UserId
+    WHERE 
+        rp.Rank = 1 
+    GROUP BY 
+        up.UserId
+    HAVING 
+        COUNT(DISTINCT rp.PostId) > 1 
+)
+SELECT 
+    u.DisplayName,
+    pa.QuestionCount,
+    pa.TotalUpVotes,
+    pa.TotalDownVotes,
+    pa.LastQuestionDate,
+    u.Reputation
+FROM 
+    PostAnalytics pa
+JOIN 
+    Users u ON pa.UserId = u.Id
+ORDER BY 
+    pa.TotalUpVotes DESC,
+    pa.Reputation DESC
+LIMIT 10;

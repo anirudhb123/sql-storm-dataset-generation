@@ -1,0 +1,64 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS RankByScore,
+        COALESCE(p.ClosedDate, '9999-12-31 23:59:59') AS ClosedDate,
+        pt.Name AS PostTypeName
+    FROM 
+        Posts p
+        JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN Posts a ON p.Id = a.ParentId
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        pt.Name = 'Question' AND
+        p.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, u.DisplayName, pt.Name
+),
+ClosedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.Score,
+        rp.AnswerCount,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ClosedDate < '2024-10-01 12:34:56'::timestamp
+)
+
+SELECT 
+    cp.PostId,
+    cp.Title,
+    cp.OwnerDisplayName,
+    cp.CreationDate,
+    cp.Score,
+    cp.AnswerCount,
+    cp.CommentCount,
+    CASE 
+        WHEN cp.Score > 100 THEN 'High Score'
+        WHEN cp.Score BETWEEN 50 AND 100 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    pt.Name AS PostTypeName,
+    COUNT(DISTINCT bh.Id) AS BadgeCount
+FROM 
+    ClosedPosts cp
+    JOIN PostTypes pt ON cp.PostTypeId = pt.Id
+    LEFT JOIN Badges bh ON bh.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = cp.PostId)
+GROUP BY 
+    cp.PostId, cp.Title, cp.OwnerDisplayName, cp.CreationDate, cp.Score, cp.AnswerCount, cp.CommentCount, pt.Name
+ORDER BY 
+    cp.Score DESC, cp.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,66 @@
+
+WITH TagCount AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::text[])
+    GROUP BY 
+        Tags.TagName
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        U.DisplayName AS Author,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Author,
+        RP.CommentCount,
+        RP.UpVotes,
+        RP.DownVotes,
+        TC.PostCount
+    FROM 
+        RecentPosts RP
+    JOIN 
+        TagCount TC ON TC.TagName = ANY(string_to_array(substring(RP.Body, 2, length(RP.Body)-2), '><'))
+)
+SELECT 
+    PS.Title,
+    PS.Author,
+    PS.CommentCount,
+    PS.UpVotes,
+    PS.DownVotes,
+    PS.PostCount,
+    (PS.UpVotes - PS.DownVotes) AS NetVotes,
+    CASE 
+        WHEN PS.PostCount > 0 THEN 'Has Tags'
+        ELSE 'No Tags'
+    END AS TagStatus
+FROM 
+    PostSummary PS
+ORDER BY 
+    NetVotes DESC, PS.CommentCount DESC
+LIMIT 10;

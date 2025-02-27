@@ -1,0 +1,62 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalComments,
+        TotalBounty,
+        DENSE_RANK() OVER (ORDER BY TotalPosts DESC, Reputation DESC) AS PostRank
+    FROM UserStatistics
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalComments,
+        TotalBounty
+    FROM RankedUsers
+    WHERE PostRank <= 10
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        P.ViewCount,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    TU.DisplayName AS TopUser,
+    TU.Reputation,
+    TU.TotalPosts,
+    TU.TotalComments,
+    COALESCE(RP.Title, 'No Recent Posts') AS RecentPostTitle,
+    COALESCE(RP.CreationDate, 'N/A') AS RecentPostDate,
+    COALESCE(RP.ViewCount, 0) AS RecentPostViewCount,
+    COALESCE(RP.Score, 0) AS RecentPostScore
+FROM TopUsers TU
+LEFT JOIN RecentPosts RP ON TU.UserId = RP.OwnerUserId AND RP.RecentPostRank = 1
+ORDER BY TU.Reputation DESC, TU.TotalPosts DESC;

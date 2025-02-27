@@ -1,0 +1,61 @@
+WITH RECURSIVE order_totals AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+), 
+supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+nation_details AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name, r.r_name
+)
+
+SELECT 
+    n.n_name,
+    ns.region_name,
+    ns.supplier_count,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(ot.total_price) AS avg_order_total,
+    COALESCE(SS.total_supply_cost, 0) AS supplier_cost
+FROM 
+    nation_details ns
+LEFT JOIN 
+    nation n ON ns.n_nationkey = n.n_nationkey
+LEFT JOIN 
+    orders o ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey)
+LEFT JOIN 
+    order_totals ot ON o.o_orderkey = ot.o_orderkey
+LEFT JOIN 
+    supplier_summary SS ON n.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey = SS.s_suppkey)
+GROUP BY 
+    n.n_name, ns.region_name, ns.supplier_count
+ORDER BY 
+    n.n_name ASC, avg_order_total DESC
+LIMIT 10;

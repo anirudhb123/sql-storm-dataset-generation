@@ -1,0 +1,58 @@
+WITH actor_movie_stats AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS movies_count,
+        STRING_AGG(DISTINCT t.title, '; ') AS movie_titles,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        title t ON c.movie_id = t.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.name
+),
+company_stats AS (
+    SELECT 
+        cn.name AS company_name,
+        COUNT(DISTINCT mc.movie_id) AS movies_count,
+        STRING_AGG(DISTINCT t.title, '; ') AS movie_titles
+    FROM 
+        company_name cn
+    JOIN 
+        movie_companies mc ON cn.id = mc.company_id
+    JOIN 
+        title t ON mc.movie_id = t.id
+    GROUP BY 
+        cn.name
+),
+actor_vs_company AS (
+    SELECT 
+        a.actor_name,
+        a.movies_count AS actor_movies_count,
+        c.company_name,
+        c.movies_count AS company_movies_count
+    FROM 
+        actor_movie_stats a
+    JOIN 
+        movie_companies m ON a.movies_count = m.movie_id  
+    JOIN 
+        company_stats c ON m.company_id = c.company_name
+)
+SELECT 
+    actor_name,
+    actor_movies_count,
+    company_name,
+    company_movies_count,
+    (actor_movies_count * 1.0 / NULLIF(company_movies_count, 0)) AS actor_to_company_ratio
+FROM 
+    actor_vs_company
+ORDER BY 
+    actor_to_company_ratio DESC;

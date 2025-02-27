@@ -1,0 +1,67 @@
+WITH RecursiveTags AS (
+    SELECT 
+        p.Id AS PostId,
+        TRIM(T.value) AS TagValue,
+        1 AS TagLevel
+    FROM 
+        Posts p,
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS T(value)
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        TRIM(T.value) AS TagValue,
+        TagLevel + 1 AS TagLevel
+    FROM 
+        RecursiveTags rt
+    INNER JOIN 
+        Posts p ON p.Id = rt.PostId
+    INNER JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS T(value) ON true
+    WHERE 
+        TagLevel < 5  -- Limit to mimic depth
+),
+
+TagCounts AS (
+    SELECT 
+        TagValue,
+        COUNT(DISTINCT PostId) AS PostCount
+    FROM 
+        RecursiveTags
+    GROUP BY 
+        TagValue
+),
+
+HighVotedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2  -- Only UpVotes
+    WHERE 
+        p.ViewCount > 1000  -- Restrict to posts with significant views
+    GROUP BY 
+        p.Id, p.Title
+    HAVING 
+        COUNT(DISTINCT v.Id) > 10  -- Only consider posts with more than 10 upvotes
+)
+
+SELECT 
+    ht.TagValue,
+    ht.PostCount,
+    vp.PostCount AS HighVotedPostCount
+FROM 
+    TagCounts ht
+LEFT JOIN 
+    (SELECT COUNT(*) AS PostCount FROM HighVotedPosts) vp ON true
+ORDER BY 
+    ht.PostCount DESC, 
+    HighVotedPostCount DESC;
+
+This SQL query benchmarks string processing by leveraging recursive CTEs to dissect tags in questions, counting their occurrences. It compares these tag counts against the counts of highly voted posts (posts with significant views and upvotes), producing a summarized view on tag popularity and engagement metrics while handling string operations.

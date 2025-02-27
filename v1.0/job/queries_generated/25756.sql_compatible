@@ -1,0 +1,43 @@
+
+WITH RECURSIVE RecursiveActorTitles AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year AS year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS title_rank
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN aka_title t ON ci.movie_id = t.movie_id
+),
+FilteredActors AS (
+    SELECT 
+        actor_name,
+        STRING_AGG(movie_title, ', ') AS titles,
+        COUNT(*) AS title_count
+    FROM RecursiveActorTitles
+    WHERE title_rank <= 5
+    GROUP BY actor_name
+),
+ActorInfo AS (
+    SELECT 
+        fa.actor_name,
+        fa.titles,
+        fa.title_count,
+        pi.info AS person_info
+    FROM FilteredActors fa
+    LEFT JOIN person_info pi ON pi.person_id = (SELECT person_id FROM aka_name WHERE name = fa.actor_name LIMIT 1)
+)
+SELECT 
+    ai.actor_name,
+    ai.titles,
+    ai.title_count,
+    COALESCE(ai.person_info, 'No Additional Info') AS person_info,
+    kt.keyword AS movie_keyword
+FROM ActorInfo ai
+LEFT JOIN movie_keyword mk ON mk.movie_id IN (
+    SELECT movie_id FROM aka_title WHERE title IN (SELECT UNNEST(string_to_array(ai.titles, ', ')))
+)
+LEFT JOIN keyword kt ON mk.keyword_id = kt.id
+WHERE LENGTH(ai.actor_name) > 5
+ORDER BY ai.title_count DESC, ai.actor_name;

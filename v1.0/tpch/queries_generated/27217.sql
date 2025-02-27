@@ -1,0 +1,44 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        STRING_AGG(DISTINCT CONCAT(p.p_name, ' (', p.p_brand, ')'), ', ' ORDER BY p.p_name) AS part_names,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name AS region_name,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.part_names,
+        rs.total_available_quantity,
+        rs.total_supply_cost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rank <= 3
+)
+SELECT 
+    region_name,
+    COUNT(s_suppkey) AS supplier_count,
+    STRING_AGG(CONCAT(s_name, ': ', part_names, ' | Available: ', total_available_quantity, ' | Supply Cost: ', total_supply_cost), '; ') AS supplier_details
+FROM 
+    TopSuppliers
+GROUP BY 
+    region_name
+ORDER BY 
+    region_name;

@@ -1,0 +1,65 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        s.s_comment, 
+        NULL AS parent_suppkey
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)  
+    UNION ALL
+    SELECT 
+        ps.ps_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        s.s_comment, 
+        sh.s_suppkey AS parent_suppkey
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN SupplierHierarchy sh ON ps.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_brand = 'Brand#1' LIMIT 1)
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(l.l_orderkey) AS line_count,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F' 
+    GROUP BY o.o_orderkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000  
+),
+RevenueVsShipping AS (
+    SELECT 
+        os.o_orderkey, 
+        os.revenue, 
+        CASE 
+            WHEN os.last_ship_date > DATE '1998-10-01' - INTERVAL '30 DAY' THEN 'Recent'
+            ELSE 'Old'
+        END AS shipping_status
+    FROM OrderSummary os
+)
+SELECT 
+    R.n_name AS region_name,
+    COUNT(DISTINCT TOP.c_custkey) AS high_value_customers,
+    SUM(RV.revenue) AS total_revenue,
+    AVG(RV.revenue) AS avg_revenue_per_order
+FROM region R
+LEFT JOIN nation N ON R.r_regionkey = N.n_regionkey
+LEFT JOIN supplier S ON N.n_nationkey = S.nationkey
+LEFT JOIN SupplierHierarchy SH ON S.s_suppkey = SH.s_suppkey
+LEFT JOIN RevenueVsShipping RV ON SH.parent_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size < 20))
+LEFT JOIN TopCustomers TOP ON RV.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = TOP.c_custkey ORDER BY o.o_orderdate DESC LIMIT 1)
+GROUP BY R.n_name
+ORDER BY total_revenue DESC;

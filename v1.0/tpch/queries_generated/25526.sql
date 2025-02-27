@@ -1,0 +1,63 @@
+WITH SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        LENGTH(p.p_comment) AS comment_length,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+),
+CombinedInfo AS (
+    SELECT 
+        si.s_suppkey,
+        si.s_name,
+        si.nation_name,
+        si.part_count,
+        si.total_avail_qty,
+        pd.p_partkey,
+        pd.p_name,
+        pd.p_brand,
+        pd.comment_length,
+        pd.supplier_count
+    FROM 
+        SupplierInfo si
+    LEFT JOIN 
+        PartDetails pd ON si.part_count > 0
+)
+SELECT 
+    s.s_name,
+    s.nation_name,
+    STRING_AGG(p.p_name, ', ') AS part_names,
+    COUNT(DISTINCT p.p_partkey) AS unique_parts,
+    AVG(p.comment_length) AS avg_comment_length
+FROM 
+    CombinedInfo ci
+JOIN 
+    supplier s ON ci.s_suppkey = s.s_suppkey
+JOIN 
+    part p ON ci.p_partkey = p.p_partkey
+GROUP BY 
+    s.s_name, s.nation_name
+ORDER BY 
+    unique_parts DESC, avg_comment_length DESC;

@@ -1,0 +1,74 @@
+
+WITH MovieDetails AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        MAX(CASE WHEN ki.kind IS NOT NULL AND ki.kind <> '' THEN ki.kind END) AS movie_kind,
+        MIN(i.production_year) AS release_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        COUNT(DISTINCT km.keyword) AS total_keywords,
+        COALESCE(SUM(CASE WHEN mci.note IS NOT NULL THEN 1 ELSE 0 END), 0) AS companies_with_notes
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_keyword mk ON t.movie_id = mk.movie_id
+    LEFT JOIN
+        keyword km ON mk.keyword_id = km.id
+    LEFT JOIN
+        movie_info mi ON t.movie_id = mi.movie_id
+    LEFT JOIN
+        kind_type ki ON t.kind_id = ki.id
+    LEFT JOIN
+        complete_cast cc ON t.movie_id = cc.movie_id
+    LEFT JOIN
+        cast_info c ON cc.subject_id = c.movie_id
+    LEFT JOIN
+        movie_companies mci ON t.movie_id = mci.movie_id
+    GROUP BY
+        t.id, t.title
+),
+RankedMovies AS (
+    SELECT
+        md.*,
+        RANK() OVER (PARTITION BY md.release_year ORDER BY md.total_keywords DESC) AS keyword_rank,
+        ROW_NUMBER() OVER (ORDER BY md.total_cast DESC, md.release_year ASC) AS cast_order
+    FROM
+        MovieDetails md
+    WHERE
+        md.total_cast > 5
+),
+FilteredMovies AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.movie_kind,
+        rm.release_year,
+        rm.total_cast,
+        rm.total_keywords,
+        rm.companies_with_notes
+    FROM
+        RankedMovies rm
+    WHERE
+        rm.keyword_rank < 5 OR rm.total_keywords > 10
+)
+SELECT
+    fm.title,
+    fm.movie_kind,
+    COUNT(DISTINCT ca.person_id) AS unique_actors,
+    STRING_AGG(DISTINCT pn.info, ', ') AS person_info,
+    AVG(COALESCE(fm.total_keywords, 0)) AS avg_keywords_per_movie,
+    NULLIF(SUM(fm.companies_with_notes), 0) AS companies_with_notes_total
+FROM
+    FilteredMovies fm
+LEFT JOIN
+    cast_info ca ON fm.movie_id = ca.movie_id
+LEFT JOIN
+    person_info pn ON ca.person_id = pn.person_id AND pn.info_type_id = 1
+WHERE
+    fm.release_year >= 2000
+GROUP BY
+    fm.movie_id, fm.title, fm.movie_kind, fm.total_cast, fm.total_keywords, fm.companies_with_notes
+HAVING
+    AVG(COALESCE(fm.total_keywords, 0)) < 10
+ORDER BY
+    unique_actors DESC, fm.release_year DESC;

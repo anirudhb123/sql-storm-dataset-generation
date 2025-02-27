@@ -1,0 +1,76 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_order_number,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_order_number) as order_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ship_date_sk BETWEEN 20220101 AND 20220131
+    UNION ALL
+    SELECT 
+        ws.web_site_sk,
+        ws_order_number,
+        ws_item_sk,
+        ws_quantity * 1.1 AS adjusted_quantity,
+        ws_sales_price * 1.05 AS adjusted_sales_price,
+        order_rank + 1
+    FROM 
+        SalesCTE s
+    JOIN 
+        web_sales ws ON s.ws_item_sk = ws.ws_item_sk AND s.ws_order_number = ws.ws_order_number
+    WHERE 
+        s.order_rank < 5
+), ItemAggregates AS (
+    SELECT 
+        s.ws_item_sk,
+        SUM(s.ws_quantity) AS total_quantity,
+        SUM(s.ws_sales_price) AS total_sales
+    FROM 
+        SalesCTE s
+    GROUP BY 
+        s.ws_item_sk
+), PromotionStats AS (
+    SELECT 
+        p.p_promo_sk,
+        COUNT(cs.cs_order_number) AS promo_sales_count,
+        SUM(cs.cs_ext_sales_price) AS total_promo_sales
+    FROM 
+        promotion p
+    LEFT JOIN 
+        catalog_sales cs ON p.p_promo_sk = cs.cs_promo_sk
+    WHERE 
+        p.p_start_date_sk <= 20220131 AND p.p_end_date_sk >= 20220101
+    GROUP BY 
+        p.p_promo_sk
+), FinalStats AS (
+    SELECT 
+        i.i_item_id,
+        ia.total_quantity,
+        ia.total_sales,
+        ps.promo_sales_count,
+        ps.total_promo_sales
+    FROM 
+        ItemAggregates ia
+    LEFT JOIN 
+        item i ON ia.ws_item_sk = i.i_item_sk
+    LEFT JOIN 
+        PromotionStats ps ON ps.promo_sales_count IS NOT NULL
+)
+SELECT 
+    f.i_item_id,
+    f.total_quantity,
+    f.total_sales,
+    COALESCE(f.promo_sales_count, 0) AS promo_sales_count,
+    COALESCE(f.total_promo_sales, 0) AS total_promo_sales
+FROM 
+    FinalStats f
+WHERE 
+    f.total_sales > 1000
+ORDER BY 
+    f.total_sales DESC
+LIMIT 10;

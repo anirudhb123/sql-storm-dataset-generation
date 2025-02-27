@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) as order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+), 
+TopCustomers AS (
+    SELECT 
+        r.r_name, 
+        n.n_name, 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+    GROUP BY 
+        r.r_name, n.n_name, c.c_custkey, c.c_name
+), 
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    tc.r_name,
+    tc.n_name,
+    tc.c_name,
+    MAX(RO.o_orderdate) AS last_order_date,
+    MAX(RO.o_totalprice) AS highest_order_total,
+    SUM(sd.total_supply_cost) AS total_supplier_cost,
+    COUNT(DISTINCT RO.o_orderkey) AS order_count
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    RankedOrders RO ON tc.c_custkey = RO.o_orderkey 
+LEFT JOIN 
+    SupplierDetails sd ON sd.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        JOIN lineitem li ON ps.ps_partkey = li.l_partkey 
+        WHERE li.l_orderkey IN (
+            SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = tc.c_custkey
+        )
+    )
+GROUP BY 
+    tc.r_name, tc.n_name, tc.c_name
+HAVING 
+    SUM(sd.total_supply_cost) IS NOT NULL
+ORDER BY 
+    total_supplier_cost DESC, order_count DESC
+LIMIT 10;

@@ -1,0 +1,64 @@
+WITH MovieTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        kt.kind AS kind_type,
+        array_agg(DISTINCT k.keyword) AS keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        kind_type kt ON t.kind_id = kt.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title, t.production_year, kt.kind
+),
+
+PersonRoles AS (
+    SELECT 
+        c.movie_id,
+        p.name AS person_name,
+        r.role AS role_type,
+        c.nr_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+
+CompanyTitles AS (
+    SELECT 
+        m.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name co ON m.company_id = co.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+)
+
+SELECT 
+    mt.title_id,
+    mt.title,
+    mt.production_year,
+    mt.kind_type,
+    mt.keywords,
+    array_agg(DISTINCT pr.person_name || ' (' || pr.role_type || ')') AS cast_info,
+    array_agg(DISTINCT ct.company_name || ' (' || ct.company_type || ')') AS production_companies
+FROM 
+    MovieTitles mt
+LEFT JOIN 
+    PersonRoles pr ON mt.title_id = pr.movie_id
+LEFT JOIN 
+    CompanyTitles ct ON mt.title_id = ct.movie_id
+GROUP BY 
+    mt.title_id, mt.title, mt.production_year, mt.kind_type
+ORDER BY 
+    mt.production_year DESC, mt.title;

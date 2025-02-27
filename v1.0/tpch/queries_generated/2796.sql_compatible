@@ -1,0 +1,79 @@
+
+WITH TotalSales AS (
+    SELECT 
+        l_orderkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_price
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate >= DATE '1997-01-01' AND l_shipdate < DATE '1998-01-01'
+    GROUP BY 
+        l_orderkey
+),
+SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+RegionRanked AS (
+    SELECT 
+        n.n_name,
+        r.r_name,
+        DENSE_RANK() OVER (ORDER BY SUM(ts.total_price) DESC) AS sales_rank
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        TotalSales ts ON ts.l_orderkey IN (
+            SELECT o.o_orderkey 
+            FROM orders o 
+            JOIN customer c ON o.o_custkey = c.c_custkey 
+            WHERE c.c_nationkey = n.n_nationkey
+        )
+    GROUP BY 
+        n.n_name, r.r_name
+)
+SELECT 
+    COALESCE(c.c_name, 'Unknown') AS customer_name,
+    COALESCE(n.n_name, 'Unknown') AS nation_name,
+    COALESCE(r.r_name, 'Unknown') AS region_name,
+    ts.total_price,
+    ss.total_supply_cost,
+    cr.order_count,
+    cr.avg_order_value,
+    rr.sales_rank
+FROM 
+    TotalSales ts
+FULL OUTER JOIN 
+    SupplierSales ss ON ts.l_orderkey = ss.s_suppkey
+LEFT JOIN 
+    CustomerOrders cr ON cr.order_count > 0
+LEFT JOIN 
+    nation n ON cr.c_custkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    RegionRanked rr ON rr.n_name = n.n_name
+WHERE 
+    (ts.total_price IS NOT NULL OR ss.total_supply_cost IS NOT NULL)
+ORDER BY 
+    rr.sales_rank DESC, ts.total_price DESC;

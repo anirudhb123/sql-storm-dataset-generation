@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+), 
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Body,
+        rp.ViewCount,
+        rp.Score,
+        us.DisplayName,
+        us.BadgeCount,
+        us.UpVotes,
+        us.DownVotes,
+        us.TotalViews
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserStats us ON rp.OwnerUserId = us.UserId
+    WHERE 
+        rp.rn = 1  -- Get only the latest question per user
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Body,
+    pd.ViewCount,
+    pd.Score,
+    pd.DisplayName AS OwnerDisplayName,
+    pd.BadgeCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.TotalViews,
+    STRING_AGG(t.TagName, ', ') AS TagNames  -- Aggregate the tags
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Tags t ON pd.PostId = ANY(string_to_array(substring(pd.Tags, 2, length(pd.Tags)-2), '><'))  -- Split tags and join
+GROUP BY 
+    pd.PostId, pd.Title, pd.CreationDate, pd.Body,
+    pd.ViewCount, pd.Score, pd.DisplayName, pd.BadgeCount,
+    pd.UpVotes, pd.DownVotes, pd.TotalViews
+ORDER BY 
+    pd.Score DESC, pd.TotalViews DESC;  -- Sorting based on post score and views

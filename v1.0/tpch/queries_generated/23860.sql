@@ -1,0 +1,82 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_custkey,
+        COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2021-01-01' AND 
+        o.o_orderdate < DATE '2022-01-01' AND 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey
+),
+SupplierPartCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+NullComparison AS (
+    SELECT 
+        c.c_custkey,
+        SUM(COALESCE(o.o_totalprice, 0)) AS total_price,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) OVER () AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NULL OR 
+        c.c_acctbal < 1000
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(fp.total_price) AS total_filtered_order_value,
+    MAX(rnk) AS highest_supplier_rank
+FROM 
+    nation n
+JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    FilteredOrders fp ON c.c_custkey = fp.o_custkey
+LEFT JOIN 
+    RankedSuppliers rs ON rs.rnk = 1
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 0
+UNION ALL
+SELECT 
+    'NULL_COMPARISON' AS n_name,
+    COUNT(DISTINCT nc.c_custkey) AS customer_count,
+    SUM(nc.total_price) AS total_filtered_order_value,
+    NULL AS highest_supplier_rank
+FROM 
+    NullComparison nc
+WHERE 
+    nc.order_count > 0;

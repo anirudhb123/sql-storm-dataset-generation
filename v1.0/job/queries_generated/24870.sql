@@ -1,0 +1,130 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth,
+        CAST(m.title AS TEXT) AS full_title
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+    UNION ALL
+    SELECT
+        mh.movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1,
+        CAST(mh.full_title || ' -> ' || m.title AS TEXT)
+    FROM
+        MovieHierarchy mh
+    JOIN
+        aka_title m ON m.episode_of_id = mh.movie_id
+),
+AvgRatings AS (
+    SELECT
+        a.id AS movie_id,
+        AVG(r.rating) AS avg_rating
+    FROM
+        aka_title a
+    LEFT JOIN
+        ratings r ON a.id = r.movie_id
+    GROUP BY
+        a.id
+),
+CompanyCount AS (
+    SELECT
+        movie_id,
+        COUNT(DISTINCT company_id) AS company_count
+    FROM
+        movie_companies
+    GROUP BY
+        movie_id
+),
+KeywordCount AS (
+    SELECT
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+),
+PersonRoles AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.role_id) AS role_count,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM
+        cast_info c
+    JOIN
+        role_type r ON c.role_id = r.id
+    GROUP BY
+        c.movie_id
+)
+SELECT
+    mh.movie_id,
+    mh.full_title,
+    mh.production_year,
+    COALESCE(a.avg_rating, 0) AS average_rating,
+    COALESCE(cc.company_count, 0) AS total_companies,
+    COALESCE(kc.keyword_count, 0) AS total_keywords,
+    COALESCE(pr.role_count, 0) AS total_roles,
+    pr.roles,
+    CASE 
+        WHEN a.avg_rating IS NULL THEN 'No Rating'
+        WHEN a.avg_rating < 5 THEN 'Low Rating'
+        WHEN a.avg_rating BETWEEN 5 AND 7 THEN 'Average Rating'
+        ELSE 'High Rating'
+    END AS rating_category
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    AvgRatings a ON mh.movie_id = a.movie_id
+LEFT JOIN
+    CompanyCount cc ON mh.movie_id = cc.movie_id
+LEFT JOIN
+    KeywordCount kc ON mh.movie_id = kc.movie_id
+LEFT JOIN
+    PersonRoles pr ON mh.movie_id = pr.movie_id
+WHERE
+    mh.depth <= 3 
+    AND mh.production_year BETWEEN 1990 AND 2023
+ORDER BY
+    mh.production_year DESC,
+    a.avg_rating DESC NULLS LAST;
+
+-- Re-evaluating joined information with NULL checks to handle corner cases.
+WITH RECURSIVE DetailedMovies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(p.gender, 'Unknown') AS director_gender,
+        NULLIF(n.name, '') AS actor_name
+    FROM
+        aka_title m
+    LEFT JOIN
+        person_info p ON m.id = p.movie_id
+    LEFT JOIN
+        cast_info c ON c.movie_id = m.id
+    LEFT JOIN
+        name n ON n.id = c.person_id
+    WHERE
+        m.production_year IS NOT NULL
+)
+SELECT DISTINCT
+    dm.movie_id,
+    dm.title,
+    dm.production_year,
+    dm.director_gender,
+    dm.actor_name
+FROM
+    DetailedMovies dm
+WHERE
+    dm.actor_name IS NOT NULL 
+    OR dm.director_gender <> 'Unknown'
+ORDER BY
+    dm.production_year DESC;

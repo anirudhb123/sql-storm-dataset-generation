@@ -1,0 +1,40 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_premium_customer_flag, 
+           COALESCE(NULLIF(c.c_first_name, ''), 'Unknown') AS customer_name,
+           CASE WHEN cd.cd_gender = 'M' THEN 'Male'
+                WHEN cd.cd_gender = 'F' THEN 'Female'
+                ELSE 'Unspecified' END AS gender,
+           cd.cd_purchase_estimate, 
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+),
+recent_sales AS (
+    SELECT ws.ws_sold_date_sk, ws.ws_item_sk, ws.ws_quantity,
+           CAST(d.d_date AS DATE) AS sale_date, 
+           SUM(ws.ws_sales_price) AS total_sales
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_date >= (SELECT MAX(d2.d_date) - INTERVAL '30 days' FROM date_dim d2)
+    GROUP BY ws.ws_sold_date_sk, ws.ws_item_sk, CAST(d.d_date AS DATE)
+),
+customers_with_recent_sales AS (
+    SELECT sh.customer_name, sh.gender, sh.cd_purchase_estimate, 
+           rs.sale_date, SUM(rs.total_sales) AS total_sales_last_30_days
+    FROM sales_hierarchy sh
+    LEFT JOIN recent_sales rs ON sh.c_customer_sk = rs.ws_item_sk
+    GROUP BY sh.customer_name, sh.gender, sh.cd_purchase_estimate, rs.sale_date
+)
+SELECT c.customer_name, 
+       COALESCE(SUM(c.total_sales_last_30_days), 0) AS total_recent_sales,
+       c.gender,
+       CASE WHEN c.cd_purchase_estimate > 5000 THEN 'High Value'
+            WHEN c.cd_purchase_estimate > 1000 THEN 'Medium Value'
+            ELSE 'Low Value' END AS customer_value_category
+FROM customers_with_recent_sales c
+GROUP BY c.customer_name, c.gender, c.cd_purchase_estimate
+HAVING SUM(c.total_sales_last_30_days) > 0
+ORDER BY total_recent_sales DESC
+LIMIT 10;

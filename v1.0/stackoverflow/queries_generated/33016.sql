@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND -- Only Questions
+        p.CreationDate >= (CURRENT_DATE - INTERVAL '1 year') -- Within the past year
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS MostRecentBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopQuestions AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        ub.BadgeCount,
+        ub.MostRecentBadgeDate
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+    WHERE 
+        rp.ScoreRank <= 5 -- Top 5 questions per user
+)
+SELECT 
+    tq.Title,
+    tq.Score,
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(bn.BadgeCount, 0) AS UserBadgeCount,
+    tc.CommentCount,
+    tc.ViewCount,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = tq.PostId 
+     AND v.VoteTypeId = 2) AS UpVotes, -- Count of Upvotes
+    CASE 
+        WHEN tq.MostRecentBadgeDate IS NOT NULL THEN 
+            'Has Badge'
+        ELSE 
+            'No Badge'
+    END AS BadgeStatus
+FROM 
+    TopQuestions tq
+JOIN 
+    Users u ON tq.OwnerUserId = u.Id
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS CommentCount, SUM(ViewCount) AS ViewCount
+     FROM Comments c
+     GROUP BY PostId) tc ON tq.PostId = tc.PostId
+LEFT JOIN 
+    (SELECT UserId, COUNT(*) AS BadgeCount
+     FROM Badges
+     GROUP BY UserId) bn ON u.Id = bn.UserId
+WHERE 
+    tq.Score > 10
+ORDER BY 
+    tq.Score DESC, 
+    BadgeCount DESC;

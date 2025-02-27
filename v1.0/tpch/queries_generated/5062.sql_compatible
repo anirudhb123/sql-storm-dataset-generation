@@ -1,0 +1,50 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        s.s_name AS supplier_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, s.s_name, c.c_nationkey
+),
+TopNations AS (
+    SELECT 
+        n.n_name,
+        SUM(r.revenue) AS total_revenue
+    FROM 
+        nation n
+    JOIN 
+        RankedOrders r ON n.n_nationkey = r.c_nationkey
+    GROUP BY 
+        n.n_name
+    HAVING 
+        SUM(r.revenue) > 1000000
+)
+SELECT 
+    t.n_name,
+    t.total_revenue,
+    COUNT(DISTINCT r.o_orderkey) AS order_count
+FROM 
+    TopNations t
+JOIN 
+    RankedOrders r ON t.n_name = r.supplier_name
+GROUP BY 
+    t.n_name, t.total_revenue
+ORDER BY 
+    t.total_revenue DESC;

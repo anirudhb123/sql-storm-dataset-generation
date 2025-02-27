@@ -1,0 +1,71 @@
+WITH supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+high_value_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name
+    FROM 
+        supplier_summary s
+    WHERE 
+        s.total_cost > (SELECT AVG(total_cost) FROM supplier_summary)
+),
+filtered_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N' AND 
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    c.c_name,
+    fo.o_orderkey,
+    fo.net_price,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    CASE 
+        WHEN fo.net_price > 1000 THEN 'High Value Order'
+        ELSE 'Regular Order'
+    END AS order_category
+FROM 
+    customer_orders c
+LEFT JOIN 
+    filtered_orders fo ON c.c_custkey = fo.o_custkey
+LEFT JOIN 
+    high_value_suppliers s ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = fo.o_orderkey) LIMIT 1)
+WHERE 
+    c.order_count > 5
+ORDER BY 
+    net_price DESC, c.c_name;

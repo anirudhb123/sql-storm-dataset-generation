@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+        AND p.ViewCount > COALESCE(NULLIF(u.Views, 0), 1)
+),
+PostVotes AS (
+    SELECT 
+        v.PostId,
+        v.VoteTypeId,
+        COUNT(*) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.*,
+        pv.UpVotes,
+        pv.DownVotes,
+        COALESCE(pv.UpVotes - pv.DownVotes, 0) AS NetVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostVotes pv ON rp.PostId = pv.PostId
+    WHERE 
+        rp.Rank <= 5
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(ph.Comment, ', ') AS EditComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.NetVotes,
+    rph.LastEditDate,
+    CASE 
+        WHEN rph.LastEditDate IS NULL THEN 'No edits'
+        ELSE 'Edited'
+    END AS EditStatus,
+    rph.EditComments
+FROM 
+    TopRankedPosts tp
+LEFT JOIN 
+    RecentPostHistory rph ON tp.PostId = rph.PostId
+ORDER BY 
+    tp.NetVotes DESC, tp.CreationDate DESC;

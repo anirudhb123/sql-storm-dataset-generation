@@ -1,0 +1,98 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        P.Score,
+        P.OwnerUserId,
+        1 AS Level,
+        P.Tags,
+        CAST(NULL AS TEXT) AS ParentTitle
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        PA.Id AS PostId,
+        PA.Title,
+        PA.ViewCount,
+        PA.CreationDate,
+        PA.Score,
+        PA.OwnerUserId,
+        RPC.Level + 1 AS Level,
+        RPC.Tags,
+        RPC.Title AS ParentTitle
+    FROM 
+        Posts PA
+    INNER JOIN 
+        Posts P ON P.Id = PA.ParentId
+    INNER JOIN 
+        RecursivePostCTE RPC ON P.Id = RPC.PostId
+),
+UserAggregates AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastEditDate,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS WasClosed,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS WasReopened
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RPC.PostId,
+    RPC.Title,
+    RPC.ViewCount,
+    RPC.CreationDate,
+    RPC.Score,
+    RPC.Level,
+    UserAgg.DisplayName,
+    UserAgg.TotalPosts,
+    UserAgg.TotalBounty,
+    PH.LastEditDate,
+    PH.WasClosed,
+    PH.WasReopened,
+    COALESCE(PH.WasClosed, 0) AS IsClosed,
+    CASE 
+        WHEN RPC.Level > 1 THEN 'Sub-answer'
+        ELSE 'Question'
+    END AS PostType,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS RelatedTags
+FROM 
+    RecursivePostCTE RPC
+LEFT JOIN 
+    UserAggregates UserAgg ON RPC.OwnerUserId = UserAgg.UserId
+LEFT JOIN 
+    PostHistoryDetails PH ON RPC.PostId = PH.PostId
+LEFT JOIN 
+    LATERAL unnest(string_to_array(RPC.Tags, '><')) AS Tag(TagName) ON TRUE
+LEFT JOIN 
+    Tags T ON T.TagName = Tag.TagName
+WHERE 
+    RPC.ViewCount > 5 
+GROUP BY 
+    RPC.PostId, RPC.Title, RPC.ViewCount, RPC.CreationDate, RPC.Score, 
+    RPC.Level, UserAgg.DisplayName, UserAgg.TotalPosts, UserAgg.TotalBounty, 
+    PH.LastEditDate, PH.WasClosed, PH.WasReopened
+ORDER BY 
+    RPC.Score DESC, RPC.ViewCount DESC;

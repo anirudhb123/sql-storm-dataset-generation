@@ -1,0 +1,55 @@
+WITH RECURSIVE CustomerCTE AS (
+    SELECT c_custkey, c_name, c_acctbal, c_nationkey, 1 AS level
+    FROM customer
+    WHERE c_acctbal > 1000
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, cc.level + 1
+    FROM customer c
+    JOIN CustomerCTE cc ON c.c_nationkey = cc.c_nationkey
+    WHERE c.c_acctbal > cc.c_acctbal
+),
+
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           AVG(l.l_discount) AS avg_discount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_totalprice
+),
+
+RankedOrders AS (
+    SELECT os.*, 
+           RANK() OVER (ORDER BY os.total_sales DESC) AS sales_rank
+    FROM OrderSummary os
+),
+
+SupplierDetails AS (
+    SELECT ps.ps_partkey, s.s_suppkey, s.s_name, 
+           SUM(ps.ps_availqty) AS total_available, 
+           MAX(ps.ps_supplycost) AS highest_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_suppkey, s.s_name
+)
+
+SELECT c.c_name, 
+       coalesce(so.total_sales, 0) AS total_sales, 
+       so.avg_discount, 
+       sd.total_available, 
+       sd.highest_supply_cost
+FROM CustomerCTE c
+LEFT JOIN RankedOrders so ON c.c_custkey = so.o_orderkey
+LEFT JOIN SupplierDetails sd ON sd.ps_partkey = (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_nationkey = c.c_nationkey
+    ORDER BY ps.ps_availqty DESC
+    LIMIT 1
+)
+WHERE c.level <= 3
+ORDER BY c.c_name;

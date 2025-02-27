@@ -1,0 +1,71 @@
+
+WITH NameRoles AS (
+    SELECT 
+        ca.person_id,
+        ca.role_id,
+        COUNT(ca.movie_id) AS movie_count
+    FROM 
+        cast_info ca
+    JOIN 
+        role_type r ON ca.role_id = r.id
+    GROUP BY 
+        ca.person_id, ca.role_id
+),
+PopularNames AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        n.gender,
+        nr.movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        NameRoles nr ON ak.person_id = nr.person_id
+    JOIN 
+        name n ON ak.person_id = n.imdb_id
+    WHERE 
+        nr.movie_count > 5
+),
+TopMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(mc.movie_id) AS company_count
+    FROM 
+        title mt
+    JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    GROUP BY 
+        mt.title, mt.production_year
+    HAVING 
+        COUNT(mc.movie_id) > 3
+),
+ActorsInTopMovies AS (
+    SELECT
+        p.name,
+        tm.title,
+        tm.production_year,
+        COUNT(ca.movie_id) AS actor_count
+    FROM 
+        PopularNames p
+    JOIN 
+        cast_info ca ON p.person_id = ca.person_id
+    JOIN 
+        TopMovies tm ON ca.movie_id = tm.movie_id
+    GROUP BY 
+        p.name, tm.title, tm.production_year
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year AS release_year,
+    a.actor_count AS appearances_in_top_movies,
+    p.gender
+FROM 
+    ActorsInTopMovies a
+JOIN 
+    PopularNames p ON a.name = p.name
+JOIN 
+    TopMovies t ON a.title = t.title
+ORDER BY 
+    a.actor_count DESC, t.production_year DESC;

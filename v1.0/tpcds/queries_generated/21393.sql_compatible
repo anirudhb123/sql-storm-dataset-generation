@@ -1,0 +1,59 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk, 
+        sr_customer_sk, 
+        SUM(sr_return_quantity) AS total_returns,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_quantity) DESC) AS rn
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk, sr_customer_sk
+), 
+
+ItemSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales,
+        AVG(ws_net_paid) AS avg_net_paid,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim WHERE d_current_month = 'Y')
+    GROUP BY 
+        ws_item_sk
+),
+
+CombinedData AS (
+    SELECT 
+        ir.sr_item_sk,
+        COALESCE(ir.total_returns, 0) AS total_returns,
+        COALESCE(is.total_sales, 0) AS total_sales,
+        COALESCE(is.avg_net_paid, 0) AS avg_net_paid,
+        COALESCE(is.total_profit, 0) AS total_profit,
+        CASE 
+            WHEN is.total_sales > 0 THEN (COALESCE(ir.total_returns, 0) * 1.0 / is.total_sales) * 100
+            ELSE NULL 
+        END AS return_rate_percentage
+    FROM 
+        RankedReturns ir
+    FULL OUTER JOIN 
+        ItemSales is ON ir.sr_item_sk = is.ws_item_sk
+)
+
+SELECT 
+    i.i_item_id, 
+    i.i_item_desc, 
+    cd.total_returns, 
+    cd.total_sales, 
+    cd.avg_net_paid, 
+    cd.total_profit, 
+    cd.return_rate_percentage
+FROM 
+    CombinedData cd
+JOIN 
+    item i ON cd.sr_item_sk = i.i_item_sk
+ORDER BY 
+    cd.return_rate_percentage DESC
+LIMIT 10

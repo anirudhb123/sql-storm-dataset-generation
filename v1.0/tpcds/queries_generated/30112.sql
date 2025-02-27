@@ -1,0 +1,74 @@
+
+WITH RECURSIVE Customer_Income AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY c.c_last_name) AS rn
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        cd.cd_marital_status = 'M' AND ib.ib_lower_bound IS NOT NULL
+), Sales_Summary AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_quantity) AS total_quantity
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2458835 AND 2458850
+    GROUP BY 
+        ws.ws_item_sk
+), Shipping_Methods AS (
+    SELECT 
+        sm.sm_ship_mode_id,
+        COUNT(cr.cr_order_number) AS return_count,
+        SUM(cr.cr_return_amount) AS total_returns
+    FROM 
+        ship_mode sm
+    LEFT JOIN 
+        catalog_returns cr ON sm.sm_ship_mode_sk = cr.cr_ship_mode_sk
+    GROUP BY 
+        sm.sm_ship_mode_id
+), Rank_CTE AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        si.total_sales,
+        ROW_NUMBER() OVER (ORDER BY si.total_sales DESC) AS sales_rank
+    FROM 
+        Customer_Income ci
+    JOIN 
+        Sales_Summary si ON ci.c_customer_sk = si.ws_item_sk
+)
+SELECT 
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.total_sales,
+    sm.return_count,
+    sm.total_returns,
+    CASE 
+        WHEN rc.sales_rank <= 10 THEN 'Top Customer'
+        WHEN rc.sales_rank BETWEEN 11 AND 50 THEN 'Mid Customer'
+        ELSE 'Low Customer' 
+    END AS customer_tier
+FROM 
+    Rank_CTE rc
+LEFT JOIN 
+    Shipping_Methods sm ON rc.c_customer_sk = sm.return_count
+WHERE 
+    rc.total_sales > (SELECT AVG(total_sales) FROM Sales_Summary)
+ORDER BY 
+    rc.total_sales DESC;

@@ -1,0 +1,59 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, 0 AS level
+    FROM customer_address
+    WHERE ca_state IS NOT NULL
+    UNION ALL
+    SELECT ca.ca_address_sk, ca.ca_city, ca.ca_state, ca.ca_country, ah.level + 1
+    FROM customer_address ca
+    JOIN address_hierarchy ah ON ca.ca_address_sk = ah.ca_address_sk - (ah.level + 1)
+    WHERE ah.level < 5
+),
+income_groups AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        CASE 
+            WHEN hd.hd_income_band_sk IS NULL THEN 'Unknown'
+            WHEN hd.hd_income_band_sk BETWEEN 1 AND 3 THEN 'Low'
+            WHEN hd.hd_income_band_sk BETWEEN 4 AND 6 THEN 'Medium'
+            ELSE 'High'
+        END AS income_band
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_item_sk, 
+        SUM(ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+city_sales AS (
+    SELECT 
+        ah.ca_city, 
+        SUM(ss.ss_net_paid_inc_tax) AS total_net_paid
+    FROM store_sales ss
+    JOIN address_hierarchy ah ON ss.ss_store_sk = ah.ca_address_sk
+    GROUP BY ah.ca_city
+)
+SELECT 
+    ci.ca_city,
+    ci.total_net_paid,
+    ig.income_band,
+    ss.total_sales,
+    COALESCE(ss.order_count, 0) AS orders,
+    CASE 
+        WHEN ci.total_net_paid > 10000 THEN 'Premium'
+        ELSE 'Standard'
+    END AS category,
+    '2002-10-01 12:34:56' AS shipping_date,
+    TO_CHAR('2002-10-01 12:34:56'::timestamp, 'Mon DD, YYYY HH24:MI:SS') AS query_executed_at
+FROM city_sales ci
+JOIN income_groups ig ON ci.ca_city = ig.income_band
+LEFT JOIN sales_summary ss ON ci.total_net_paid = ss.total_sales
+FULL OUTER JOIN customer_address ca ON COALESCE(ci.total_net_paid, 0) = 0 AND ca.ca_state = 'CA'
+WHERE ci.total_net_paid IS NOT NULL OR (ci.total_net_paid IS NULL AND ig.income_band = 'High')
+ORDER BY ci.ca_city DESC, ss.total_sales DESC
+LIMIT 100 OFFSET 10;

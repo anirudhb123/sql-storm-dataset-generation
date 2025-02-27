@@ -1,0 +1,41 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS role,
+    COALESCE(MAX(m.production_year), 'N/A') AS last_movie_year,
+    COUNT(DISTINCT k.keyword) AS keyword_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    role_type c ON ci.role_id = c.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Description')
+LEFT JOIN 
+    aka_title at ON t.imdb_index = at.imdb_index
+LEFT JOIN 
+    movie_info_idx mii ON t.id = mii.movie_id AND at.id = mii.movie_id
+LEFT JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+LEFT JOIN 
+    cast_info ci2 ON ci2.movie_id = t.id
+LEFT JOIN 
+    char_name ch ON ci2.person_id = ch.imdb_id
+WHERE 
+    t.production_year >= 2000
+GROUP BY 
+    a.name, t.title, c.kind
+ORDER BY 
+    last_movie_year DESC, keyword_count DESC
+LIMIT 100;

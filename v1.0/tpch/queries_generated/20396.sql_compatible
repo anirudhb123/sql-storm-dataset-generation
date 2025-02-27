@@ -1,0 +1,67 @@
+
+WITH RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+        AND l.l_shipdate >= DATEADD(MONTH, -6, CURRENT_DATE)
+    GROUP BY 
+        r.r_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS rn
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+SalesRank AS (
+    SELECT 
+        r.region_name,
+        h.c_custkey,
+        h.c_name,
+        h.c_acctbal,
+        RANK() OVER (PARTITION BY r.region_name ORDER BY SUM(rs.total_sales) DESC) AS sales_rank
+    FROM 
+        HighValueCustomers h
+    JOIN 
+        RegionalSales rs ON rs.region_name = h.region_name
+    CROSS JOIN 
+        (SELECT DISTINCT r_name AS region_name FROM region) r
+    GROUP BY 
+        r.region_name, h.c_custkey, h.c_name, h.c_acctbal
+)
+SELECT 
+    sr.region_name,
+    sr.c_name, 
+    sr.c_acctbal, 
+    sr.sales_rank,
+    COALESCE(rs.total_sales, 0) AS region_total_sales
+FROM 
+    SalesRank sr
+LEFT JOIN 
+    RegionalSales rs ON sr.region_name = rs.region_name
+WHERE 
+    sr.sales_rank <= 5 
+ORDER BY 
+    sr.region_name, sr.sales_rank;

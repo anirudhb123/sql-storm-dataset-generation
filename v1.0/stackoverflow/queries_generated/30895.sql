@@ -1,0 +1,85 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        0 AS Level,
+        CAST(p.Title AS VARCHAR(255)) AS PostPath
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Starting from Questions
+
+    UNION ALL
+
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title AS PostTitle,
+        p2.OwnerUserId,
+        p2.PostTypeId,
+        p2.ParentId,
+        Level + 1 AS Level,
+        CONCAT(rph.PostPath, ' -> ', p2.Title) AS PostPath
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p2.ParentId = rph.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.PostTypeId = 2 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        AVG(v.BountyAmount) AS AverageBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    up.DisplayName,
+    ups.TotalPosts,
+    ups.Questions,
+    ups.Answers,
+    ups.AcceptedAnswers,
+    COUNT(DISTINCT rph.PostId) AS RelatedPosts,
+    SUM(COALESCE(pvs.TotalVotes, 0)) AS VoteCount,
+    SUM(COALESCE(pvs.UpVotes, 0)) AS UpVoteCount,
+    SUM(COALESCE(pvs.DownVotes, 0)) AS DownVoteCount,
+    AVG(COALESCE(pvs.AverageBounty, 0)) AS AvgBounty
+FROM 
+    UserPostStats ups
+JOIN 
+    Users up ON ups.UserId = up.Id
+LEFT JOIN 
+    RecursivePostHierarchy rph ON rph.OwnerUserId = up.Id
+LEFT JOIN 
+    PostVoteStats pvs ON pvs.PostId = rph.PostId
+WHERE 
+    up.Reputation > 1000 -- Filtering users with reputation over 1000
+GROUP BY 
+    up.Id, up.DisplayName, ups.TotalPosts, ups.Questions, ups.Answers, ups.AcceptedAnswers
+HAVING 
+    COUNT(DISTINCT rph.PostId) > 10 -- Only include users related to more than 10 posts
+ORDER BY 
+    VoteCount DESC, UpVoteCount DESC;

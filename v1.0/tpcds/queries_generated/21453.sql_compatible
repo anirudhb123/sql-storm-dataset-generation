@@ -1,0 +1,63 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_return_quantity) AS return_count,
+        SUM(sr_return_amt) AS total_return_amount,
+        ROW_NUMBER() OVER (PARTITION BY sr_customer_sk ORDER BY COUNT(sr_return_quantity) DESC) AS rnk
+    FROM store_returns
+    WHERE sr_return_quantity IS NOT NULL
+    GROUP BY sr_customer_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        rr.sr_customer_sk,
+        rr.return_count,
+        rr.total_return_amount,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        CASE 
+            WHEN rr.total_return_amount IS NULL THEN 'No Returns'
+            WHEN rr.total_return_amount > 1000 THEN 'High Risk'
+            ELSE 'Low Risk'
+        END AS return_risk
+    FROM RankedReturns rr
+    LEFT JOIN customer_demographics cd ON rr.sr_customer_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_income_band_sk = hd.hd_income_band_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE rr.rnk = 1
+),
+AggregateSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+CombinedResults AS (
+    SELECT 
+        hrc.sr_customer_sk,
+        hrc.return_count,
+        hrc.total_return_amount,
+        ags.total_sales,
+        ags.total_orders,
+        hrc.return_risk
+    FROM HighReturnCustomers hrc
+    LEFT JOIN AggregateSales ags ON hrc.sr_customer_sk = ags.ws_bill_customer_sk
+)
+SELECT 
+    cr.sr_customer_sk,
+    COALESCE(cr.total_sales, 0) AS effective_sales,
+    COALESCE(cr.return_count, 0) AS effective_return_count,
+    CASE
+        WHEN cr.return_risk = 'High Risk' AND COALESCE(cr.total_sales, 0) < 500 THEN 'Critical'
+        WHEN cr.return_risk = 'High Risk' AND COALESCE(cr.total_sales, 0) >= 500 THEN 'Watch'
+        ELSE 'Stable'
+    END AS customer_status
+FROM CombinedResults cr
+WHERE cr.total_orders IS NULL OR cr.total_orders > 5
+ORDER BY cr.return_count DESC, effective_sales DESC
+FETCH FIRST 100 ROWS ONLY;

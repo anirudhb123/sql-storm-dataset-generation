@@ -1,0 +1,73 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title, 
+        p.OwnerUserId, 
+        p.CreationDate, 
+        p.PostTypeId,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COALESCE(a.CommentCount, 0) AS CommentCount,
+        COALESCE(a.Score, 0) AS Score
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(*) AS AnswerCount,
+            SUM(CommentCount) AS CommentCount,
+            SUM(Score) AS Score
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 2
+        GROUP BY 
+            ParentId
+    ) a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 
+  
+    UNION ALL
+  
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId, 
+        p.CreationDate, 
+        p.PostTypeId,
+        COALESCE(rh.AnswerCount, 0) AS AnswerCount,
+        COALESCE(rh.CommentCount, 0) AS CommentCount,
+        COALESCE(rh.Score, 0) AS Score
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostHierarchy rh ON p.ParentId = rh.Id
+)
+SELECT 
+    u.DisplayName AS Author,
+    p.Title,
+    p.CreationDate,
+    p.AnswerCount,
+    p.CommentCount,
+    p.Score,
+    (SELECT COUNT(*) 
+     FROM Comments c 
+     WHERE c.PostId = p.Id) AS TotalComments,
+    (SELECT STRING_AGG(CONVERT(varchar, b.Name), ', ') 
+     FROM Badges b 
+     WHERE b.UserId = p.OwnerUserId) AS Awards,
+    p.Score * 1.0 / NULLIF(p.AnswerCount, 0) AS ScorePerAnswer,
+    (SELECT COUNT(DISTINCT v.UserId)
+     FROM Votes v 
+     WHERE v.PostId = p.Id 
+     AND v.VoteTypeId = 2) AS UpVotesCount 
+FROM 
+    RecursivePostHierarchy p
+JOIN 
+    Users u ON u.Id = p.OwnerUserId
+WHERE 
+    (p.CommentCount > 0 OR p.AnswerCount > 0) 
+AND 
+    p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+ORDER BY 
+    p.Score DESC
+OFFSET 0 ROWS
+FETCH NEXT 50 ROWS ONLY;

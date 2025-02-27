@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.phonetic_code,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        m.phonetic_code,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        mh.level < 5 
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    COALESCE(cn.name, 'Unknown Company') AS company_name,
+    mh.production_year,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    SUM(CASE WHEN mc.company_type_id IS NULL THEN 1 ELSE 0 END) AS unclassified_company_count,
+    RANK() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT mk.keyword) DESC) AS keyword_rank
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+JOIN 
+    MovieHierarchy mh ON at.id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND mh.level = 0
+GROUP BY 
+    ak.name, at.title, cn.name, mh.production_year
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 5
+ORDER BY 
+    mh.production_year DESC, 
+    keyword_count DESC;

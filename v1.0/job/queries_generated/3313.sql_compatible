@@ -1,0 +1,69 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        MAX(mi.info) AS note_info
+    FROM 
+        movie_info mi
+    JOIN 
+        movie_keyword mk ON mi.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mi.movie_id
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS roles_present
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+FinalResult AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        COALESCE(mc.cast_count, 0) AS cast_count,
+        COALESCE(mc.roles_present, 0) AS roles_present,
+        COALESCE(mi.keywords, 'No Keywords') AS keywords,
+        COALESCE(mi.note_info, 'No Info') AS note_info,
+        CASE 
+            WHEN rt.year_rank = 1 THEN 'Latest Movie'
+            ELSE 'Previous Movie'
+        END AS movie_status
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        CastRoles mc ON mc.movie_id = (SELECT t.movie_id FROM title t WHERE t.title = rt.title AND t.production_year = rt.production_year LIMIT 1)
+    LEFT JOIN 
+        MovieInfo mi ON mi.movie_id = (SELECT t.movie_id FROM title t WHERE t.title = rt.title LIMIT 1)
+)
+
+SELECT 
+    fr.title,
+    fr.production_year,
+    fr.cast_count,
+    fr.roles_present,
+    fr.keywords,
+    fr.note_info,
+    fr.movie_status
+FROM 
+    FinalResult fr
+WHERE 
+    fr.cast_count > 0
+ORDER BY 
+    fr.production_year DESC, fr.title;

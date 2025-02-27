@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    WHERE 
+        p.Score > 0 
+        AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, pt.Name, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        TRIM(UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))) ) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+)
+SELECT 
+    tp.Title,
+    tp.Body,
+    tp.Author,
+    tp.Score,
+    tp.CreationDate,
+    tp.CommentCount,
+    tp.ViewCount,
+    STRING_AGG(pt.Tag, ', ') AS Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostTags pt ON tp.PostId = pt.PostId
+GROUP BY 
+    tp.PostId, tp.Title, tp.Body, tp.Author, tp.Score, tp.CreationDate, tp.CommentCount, tp.ViewCount
+ORDER BY 
+    tp.Score DESC;

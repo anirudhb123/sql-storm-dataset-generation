@@ -1,0 +1,87 @@
+WITH ActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(COALESCE(CV.Score, 0)) AS UpVoteCount,
+        SUM(COALESCE(DV.Score, 0)) AS DownVoteCount,
+        AVG((EXTRACT(EPOCH FROM (PA.LastActivityDate - U.CreationDate)) / 86400)) AS AvgActivityDays
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes CV ON CV.PostId = P.Id AND CV.VoteTypeId = 2
+    LEFT JOIN 
+        Votes DV ON DV.PostId = P.Id AND DV.VoteTypeId = 3
+    WHERE 
+        U.Reputation >= 1000 
+    GROUP BY 
+        U.Id
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        SUM(P.ViewCount) AS TotalViews,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 10
+),
+UserPosts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Body,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '><')) AS TagName
+        ON TRUE
+    GROUP BY 
+        U.Id, P.Id
+)
+SELECT 
+    AU.DisplayName AS User,
+    AU.Reputation,
+    AU.PostCount,
+    AU.QuestionCount,
+    AU.AnswerCount,
+    AU.UpVoteCount,
+    AU.DownVoteCount,
+    AU.AvgActivityDays,
+    PT.TagName,
+    PT.TotalViews,
+    PT.PostCount AS RelatedTagPostCount,
+    UP.Title AS RecentPostTitle,
+    UP.CreationDate AS RecentPostDate,
+    UP.ViewCount AS RecentPostViews,
+    UP.Body AS RecentPostBody,
+    UP.Tags AS RecentPostTags
+FROM 
+    ActiveUsers AU
+JOIN 
+    PopularTags PT ON AU.PostCount > 0
+LEFT JOIN 
+    UserPosts UP ON AU.UserId = UP.UserId
+WHERE 
+    AU.QuestionCount > 5 
+ORDER BY 
+    AU.Reputation DESC,
+    PT.TotalViews DESC;

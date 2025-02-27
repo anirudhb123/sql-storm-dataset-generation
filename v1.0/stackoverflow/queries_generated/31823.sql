@@ -1,0 +1,101 @@
+WITH RecursivePostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  -- Only questions
+      
+    UNION ALL
+   
+    SELECT 
+        P.Id,
+        P.Title,
+        P.PostTypeId,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        R.Level + 1
+    FROM 
+        Posts P
+    JOIN 
+        Posts R ON P.ParentId = R.Id
+    WHERE 
+        P.PostTypeId = 2  -- Only answers
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users U 
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+UserBadgeStats AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        MAX(B.Class) AS HighestBadgeClass
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+FinalStats AS (
+    SELECT 
+        U.DisplayName,
+        U.TotalPosts,
+        U.TotalScore,
+        U.TotalViews,
+        B.TotalBadges,
+        B.HighestBadgeClass,
+        R.PostId,
+        R.Title,
+        R.Level
+    FROM 
+        UserPostStats U
+    LEFT JOIN 
+        UserBadgeStats B ON U.UserId = B.UserId
+    LEFT JOIN 
+        RecursivePostStats R ON U.UserId = R.OwnerUserId
+)
+SELECT 
+    F.DisplayName,
+    F.TotalPosts,
+    F.TotalScore,
+    F.TotalViews,
+    F.TotalBadges,
+    F.HighestBadgeClass,
+    F.PostId,
+    F.Title,
+    F.Level,
+    CASE 
+        WHEN F.Level = 1 THEN 'Question'
+        WHEN F.Level > 1 THEN 'Answer'
+        ELSE 'No Posts'
+    END AS PostType
+FROM 
+    FinalStats F
+WHERE 
+    (F.TotalScore > 10 OR F.TotalPosts > 5)
+    AND (F.TotalBadges > 1 OR F.TotalViews > 1000)
+ORDER BY 
+    F.TotalScore DESC, F.TotalPosts ASC
+FETCH FIRST 50 ROWS ONLY;

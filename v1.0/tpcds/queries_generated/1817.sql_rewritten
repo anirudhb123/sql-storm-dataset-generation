@@ -1,0 +1,39 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2451545 AND 2451910  
+),
+TotalReturns AS (
+    SELECT
+        wr_reference.web_site_sk,
+        SUM(wr_return_amt) AS total_return_amt
+    FROM 
+        web_returns wr
+        INNER JOIN RankedSales AS wr_reference ON wr_reference.ws_order_number = wr.wr_order_number
+    GROUP BY 
+        wr_reference.web_site_sk
+)
+SELECT
+    w.warehouse_name,
+    COALESCE(SUM(r.ws_sales_price), 0) AS total_sales,
+    COALESCE(t.total_return_amt, 0) AS total_returns,
+    COALESCE(SUM(r.ws_sales_price) - SUM(t.total_return_amt), 0) AS net_revenue
+FROM 
+    warehouse w
+LEFT JOIN 
+    RankedSales r ON w.warehouse_sk = r.web_site_sk
+LEFT JOIN 
+    TotalReturns t ON w.warehouse_sk = t.web_site_sk
+GROUP BY 
+    w.warehouse_name
+HAVING 
+    net_revenue > 10000
+ORDER BY 
+    net_revenue DESC;

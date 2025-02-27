@@ -1,0 +1,72 @@
+WITH 
+    RankedMovies AS (
+        SELECT 
+            t.id AS title_id,
+            t.title,
+            t.production_year,
+            ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+        FROM 
+            title AS t
+        WHERE 
+            t.production_year IS NOT NULL
+    ),
+    ActorsWithAwardCount AS (
+        SELECT 
+            ci.person_id,
+            COUNT(DISTINCT m.id) AS award_count
+        FROM 
+            cast_info AS ci
+        JOIN 
+            aka_name AS an ON ci.person_id = an.person_id
+        JOIN 
+            aka_title AS at ON ci.movie_id = at.movie_id
+        WHERE 
+            an.name LIKE '%*%'
+        GROUP BY 
+            ci.person_id
+    ),
+    MovieKeywordCount AS (
+        SELECT 
+            mk.movie_id,
+            COUNT(mk.keyword_id) AS keyword_count
+        FROM 
+            movie_keyword AS mk
+        GROUP BY 
+            mk.movie_id
+    ),
+    MoviesWithKeywords AS (
+        SELECT 
+            m.id AS movie_id,
+            COALESCE(mkc.keyword_count, 0) AS keyword_count,
+            CASE 
+                WHEN mkc.keyword_count = 0 THEN 'No Keywords'
+                WHEN mkc.keyword_count BETWEEN 1 AND 3 THEN 'Some Keywords'
+                ELSE 'Many Keywords'
+            END AS keyword_category
+        FROM 
+            aka_title AS m
+        LEFT JOIN 
+            MovieKeywordCount AS mkc ON m.id = mkc.movie_id
+    )
+SELECT 
+    r.title AS movie_title,
+    r.production_year,
+    m.keyword_category,
+    a.award_count,
+    COUNT(DISTINCT a.person_id) OVER (PARTITION BY r.production_year) AS total_actors,
+    CASE 
+        WHEN a.award_count IS NULL THEN 'No Awards'
+        ELSE CAST(a.award_count AS TEXT) || ' Awards'
+    END AS awards_info
+FROM 
+    RankedMovies AS r
+LEFT JOIN 
+    MoviesWithKeywords AS m ON r.title_id = m.movie_id
+LEFT JOIN 
+    ActorsWithAwardCount AS a ON r.title_id = a.person_id
+WHERE 
+    r.year_rank <= 10
+ORDER BY 
+    r.production_year DESC, 
+    m.keyword_count DESC NULLS LAST;
+

@@ -1,0 +1,99 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        1 AS level,
+        CAST(o.o_clerk AS CHAR(25)) AS clerk_path
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        oh.level + 1,
+        CONCAT(oh.clerk_path, ' -> ', o.o_clerk)
+    FROM 
+        orders o
+    JOIN 
+        OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND oh.level < 5
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemMetrics AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        AVG(l.l_tax) AS average_tax_rate
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+FinalMetrics AS (
+    SELECT 
+        ch.o_orderkey,
+        ch.o_orderstatus,
+        ch.o_totalprice,
+        ch.o_orderdate,
+        ch.level,
+        sp.total_available_quantity,
+        sp.avg_supply_cost,
+        cd.total_spent,
+        cd.order_count,
+        cd.last_order_date,
+        lm.net_revenue,
+        lm.average_tax_rate
+    FROM 
+        OrderHierarchy ch
+    LEFT JOIN 
+        SupplierPartDetails sp ON sp.total_available_quantity > 0
+    LEFT JOIN 
+        CustomerOrderDetails cd ON cd.order_count > 0
+    LEFT JOIN 
+        LineItemMetrics lm ON lm.l_orderkey = ch.o_orderkey
+)
+SELECT 
+    *
+FROM 
+    FinalMetrics
+WHERE 
+    net_revenue IS NOT NULL
+ORDER BY 
+    o_orderdate DESC, level ASC, total_available_quantity DESC
+FETCH FIRST 100 ROWS ONLY;

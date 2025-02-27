@@ -1,0 +1,67 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_hierarchy mh ON m.episode_of_id = mh.movie_id
+),
+actor_roles AS (
+    SELECT 
+        ca.person_id,
+        rk.role,
+        COUNT(DISTINCT c.id) AS num_movies
+    FROM 
+        cast_info c
+    JOIN 
+        role_type rk ON c.role_id = rk.id
+    GROUP BY 
+        ca.person_id, rk.role
+),
+ranked_actors AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name,
+        ar.role,
+        ar.num_movies,
+        RANK() OVER (PARTITION BY ar.role ORDER BY ar.num_movies DESC) AS rank
+    FROM 
+        aka_name ak
+    JOIN 
+        actor_roles ar ON ak.person_id = ar.person_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    ra.name AS actor_name,
+    ra.role,
+    ra.num_movies
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    ranked_actors ra ON cc.subject_id = ra.actor_id
+WHERE 
+    mh.production_year >= 2000
+    AND (ra.num_movies IS NULL OR ra.num_movies >= 5)
+ORDER BY 
+    mh.production_year DESC, 
+    ra.rank ASC NULLS LAST
+OFFSET 10 LIMIT 20;

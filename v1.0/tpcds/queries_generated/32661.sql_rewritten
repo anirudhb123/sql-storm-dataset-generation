@@ -1,0 +1,72 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+SalesInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(d.d_month_seq, 0) AS month_seq,
+        COALESCE(s.store_sales_total, 0) AS store_sales_total,
+        s.store_sales_quantity,
+        CASE 
+            WHEN d.d_year >= 1998 THEN 'Recent'
+            WHEN d.d_year >= 1998 THEN 'Past'
+            ELSE 'Old'
+        END AS sales_period
+    FROM 
+        customer c
+    LEFT JOIN 
+        (SELECT 
+            ss_customer_sk, 
+            SUM(ss_ext_sales_price) AS store_sales_total, 
+            SUM(ss_quantity) AS store_sales_quantity 
+         FROM 
+            store_sales 
+         GROUP BY 
+            ss_customer_sk) s ON c.c_customer_sk = s.ss_customer_sk
+    LEFT JOIN 
+        date_dim d ON d.d_date_sk = (SELECT MAX(d_date_sk) 
+                                      FROM date_dim 
+                                      WHERE d_date BETWEEN '2001-01-01' AND cast('2002-10-01' as date))
+),
+DistinctItems AS (
+    SELECT DISTINCT 
+        i_item_sk, 
+        CONCAT(i_product_name, ' - ', i_item_desc) AS item_full_desc 
+    FROM 
+        item
+)
+SELECT 
+    si.c_customer_id,
+    si.c_first_name,
+    si.c_last_name,
+    d.item_full_desc,
+    COALESCE(sc.total_profit, 0) AS total_profit,
+    CASE 
+        WHEN total_profit > 10000 THEN 'High Value'
+        WHEN total_profit BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value,
+    si.sales_period
+FROM 
+    SalesInfo si
+LEFT JOIN 
+    SalesCTE sc ON si.c_customer_id IN (SELECT c.c_customer_id FROM customer c WHERE c.c_current_cdemo_sk = sc.ws_item_sk)
+LEFT JOIN 
+    DistinctItems d ON d.i_item_sk = sc.ws_item_sk
+WHERE 
+    si.month_seq > 0 
+    AND (si.store_sales_total > 1000 OR si.store_sales_quantity > 10)
+ORDER BY 
+    si.c_customer_id, 
+    total_profit DESC
+LIMIT 100;

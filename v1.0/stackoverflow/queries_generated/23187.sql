@@ -1,0 +1,75 @@
+WITH UserReputationSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBountyAmount,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        AVG(U.Reputation) OVER (PARTITION BY U.Id) AS AvgReputation,
+        ROW_NUMBER() OVER (ORDER BY SUM(COALESCE(V.BountyAmount, 0)) DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        PH.CreationDate,
+        P.Title,
+        P.Body,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS PostHistoryRank
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.CreationDate > (CURRENT_TIMESTAMP - INTERVAL '30 days')
+)
+SELECT 
+    U.DisplayName,
+    COALESCE(UPS.TotalBountyAmount, 0) AS TotalBounty,
+    UPS.TotalPosts,
+    UPS.AvgReputation,
+    COALESCE(PC.Count, 0) AS RecentPostCount,
+    COALESCE(STRING_AGG(POST.TITLE, ', ' ORDER BY POST.CreationDate DESC), 'No Recent Posts') AS RecentPostTitles,
+    PH.RecentActivityDate
+FROM 
+    UserReputationSummary UPS
+LEFT JOIN 
+    (SELECT 
+        U.DisplayName,
+        COUNT(P.Id) AS Count
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        P.CreationDate >= (CURRENT_DATE - INTERVAL '1 month')
+    GROUP BY 
+        U.DisplayName
+    ) PC ON UPS.DisplayName = PC.DisplayName
+LEFT JOIN 
+    RecentPostHistory PH ON UPS.UserId = PH.UserId
+CROSS JOIN 
+    (SELECT 
+        P.Title,
+        P.CreationDate
+    FROM 
+        Posts P 
+    WHERE 
+        P.Tags LIKE '%SQL%'
+    ORDER BY 
+        P.CreationDate DESC
+    LIMIT 5
+    ) POST
+WHERE 
+    UPS.Rank <= 10 
+GROUP BY 
+    U.DisplayName, UPS.TotalBountyAmount, UPS.TotalPosts, UPS.AvgReputation, PH.RecentActivityDate
+ORDER BY 
+    UPS.TotalBountyAmount DESC;

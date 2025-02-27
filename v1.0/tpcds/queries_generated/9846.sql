@@ -1,0 +1,46 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.order_number,
+        SUM(ws.ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.bill_customer_sk) AS unique_customers,
+        COUNT(ws.item_sk) AS total_items,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ext_sales_price) DESC) AS revenue_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON d.d_date_sk = ws.sold_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk, ws.order_number
+), site_performance AS (
+    SELECT 
+        w.warehouse_id,
+        COUNT(DISTINCT rs.web_site_sk) AS total_websites,
+        SUM(rs.total_sales) AS total_sales,
+        AVG(rs.unique_customers::decimal) AS avg_unique_customers,
+        AVG(rs.total_items::decimal) AS avg_items_per_order
+    FROM 
+        ranked_sales rs
+    JOIN 
+        warehouse w ON w.warehouse_sk = rs.web_site_sk
+    GROUP BY 
+        w.warehouse_id
+)
+SELECT 
+    sp.warehouse_id,
+    sp.total_websites,
+    sp.total_sales,
+    sp.avg_unique_customers,
+    sp.avg_items_per_order,
+    COALESCE(ROUND(SUM(ws.net_profit), 2), 0) AS total_net_profit
+FROM 
+    site_performance sp
+LEFT JOIN 
+    web_sales ws ON ws.web_site_sk IN (SELECT web_site_sk FROM ranked_sales)
+GROUP BY 
+    sp.warehouse_id, sp.total_websites, sp.total_sales, sp.avg_unique_customers, sp.avg_items_per_order
+ORDER BY 
+    total_sales DESC;

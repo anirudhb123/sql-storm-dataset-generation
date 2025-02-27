@@ -1,0 +1,51 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country,
+        LENGTH(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS address_length
+    FROM customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ad.full_address,
+        ad.ca_city,
+        ad.ca_state
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN AddressDetails ad ON c.c_current_addr_sk = ad.ca_address_id
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        cd.c_first_name,
+        cd.c_last_name,
+        DATE(DATEADD(DAY, ws.ws_sold_date_sk, '1970-01-01')) AS sale_date
+    FROM web_sales ws
+    JOIN CustomerDetails cd ON ws.ws_bill_customer_sk = cd.c_customer_id
+)
+SELECT 
+    cd.c_gender,
+    cd.c_marital_status,
+    COUNT(sd.ws_order_number) AS total_orders,
+    SUM(sd.ws_sales_price) AS total_sales,
+    AVG(sd.ws_sales_price) AS avg_sales,
+    MIN(sd.sale_date) AS first_purchase_date,
+    MAX(sd.sale_date) AS last_purchase_date
+FROM SalesData sd
+JOIN CustomerDetails cd ON sd.c_first_name = cd.c_first_name AND sd.c_last_name = cd.c_last_name
+GROUP BY cd.c_gender, cd.c_marital_status
+HAVING COUNT(sd.ws_order_number) > 10
+ORDER BY total_sales DESC;

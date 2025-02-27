@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS year_rank
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id
+),
+MovieDetails AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        COALESCE(k.keyword, 'No Keywords') AS keyword,
+        COALESCE(an.name, 'Unknown') AS actor_name
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.title_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info ci ON rm.title_id = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.cast_count,
+    STRING_AGG(DISTINCT md.keyword, ', ') AS keywords,
+    COUNT(DISTINCT CASE WHEN an.surname_pcode IS NOT NULL THEN an.surname_pcode END) AS unique_surnames,
+    AVG(middle_year) AS avg_year
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    (SELECT 
+        production_year,
+        (MAX(production_year) + MIN(production_year)) / 2 AS middle_year
+     FROM 
+        title
+     GROUP BY 
+        production_year) AS avg_year_data ON md.production_year = avg_year_data.production_year
+WHERE 
+    md.cast_count > 5
+GROUP BY 
+    md.title, md.production_year, md.cast_count
+HAVING 
+    COUNT(DISTINCT md.actor_name) > 1
+ORDER BY 
+    md.production_year DESC, md.cast_count DESC;

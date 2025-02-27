@@ -1,0 +1,82 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        COALESCE(l.l_discount, 0) AS l_discount
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL
+),
+SupplierPart AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_brand,
+        p.p_type,
+        COUNT(DISTINCT p.p_partkey) OVER (PARTITION BY p.p_brand) AS brand_count
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+HighValueOrders AS (
+    SELECT 
+        co.c_custkey,
+        SUM(co.o_totalprice) AS total_value
+    FROM 
+        CustomerOrders co
+    GROUP BY 
+        co.c_custkey
+    HAVING 
+        SUM(co.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+),
+FinalSelection AS (
+    SELECT 
+        hs.s_name,
+        hs.s_nationkey,
+        COALESCE(hv.total_value, 0) AS customer_total_value,
+        COUNT(sp.ps_partkey) AS available_parts_count
+    FROM 
+        RankedSuppliers hs
+    LEFT JOIN 
+        HighValueOrders hv ON hs.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = hs.s_nationkey)
+    LEFT JOIN 
+        SupplierPart sp ON hs.s_suppkey = sp.ps_suppkey
+    WHERE 
+        hs.rnk = 1
+    GROUP BY 
+        hs.s_name, hs.s_nationkey, hv.total_value
+)
+SELECT 
+    f.s_name,
+    COUNT(DISTINCT f.customer_total_value) AS unique_customer_count,
+    SUM(f.available_parts_count) AS total_parts_available
+FROM 
+    FinalSelection f
+WHERE 
+    (f.customer_total_value IS NOT NULL AND f.customer_total_value > 0)
+    OR f.s_nationkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE 'E%')
+GROUP BY 
+    f.s_name
+ORDER BY 
+    total_parts_available DESC, unique_customer_count DESC;

@@ -1,0 +1,75 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+NationPerformance AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(COALESCE(cs.total_spent, 0)) AS total_customer_spending
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        CustomerOrders cs ON s.s_nationkey = cs.c_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+PartSupplyStatistics AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        MAX(ps.ps_availqty) AS max_available_qty
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    np.n_name,
+    st.unique_parts_supplied,
+    st.total_supply_cost,
+    cs.total_orders, 
+    cs.total_spent,
+    ps.avg_supply_cost,
+    ps.max_available_qty
+FROM 
+    NationPerformance np
+JOIN 
+    SupplierStats st ON np.supplier_count = st.unique_parts_supplied
+JOIN 
+    CustomerOrders cs ON np.total_customer_spending = cs.total_spent
+JOIN 
+    PartSupplyStatistics ps ON ps.p_partkey = st.unique_parts_supplied
+WHERE 
+    np.total_customer_spending > 10000
+ORDER BY 
+    np.n_name ASC, 
+    st.total_supply_cost DESC;

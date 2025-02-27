@@ -1,0 +1,54 @@
+WITH movie_with_keywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        array_agg(mk.keyword) AS keywords
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.id
+),
+top_cast AS (
+    SELECT 
+        ci.movie_id,
+        an.name AS actor_name,
+        ct.kind AS role_name
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    JOIN 
+        role_type ct ON ci.role_id = ct.id
+),
+movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS title,
+        m.production_year AS year,
+        COALESCE(k.keywords, ARRAY[]::text[]) AS keywords,
+        COALESCE(c.actor_name, 'No cast') AS top_actor
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_with_keywords k ON m.id = k.movie_id
+    LEFT JOIN 
+        (SELECT movie_id, actor_name 
+         FROM top_cast 
+         WHERE actor_name IS NOT NULL 
+         ORDER BY movie_id, actor_name) c ON m.id = c.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.year,
+    md.keywords,
+    md.top_actor
+FROM 
+    movie_details md
+WHERE 
+    md.year >= 2000
+ORDER BY 
+    md.year DESC, 
+    md.title;

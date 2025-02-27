@@ -1,0 +1,77 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 6 THEN 1 ELSE 0 END), 0) AS TotalCloseVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 7 THEN 1 ELSE 0 END), 0) AS TotalReopenVotes
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVoteCount,
+        COALESCE(MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END), '1970-01-01') AS ClosedDate,
+        COALESCE(MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END), '1970-01-01') AS ReopenedDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id, p.Title, p.PostTypeId
+),
+
+PostRankings AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ROW_NUMBER() OVER (PARTITION BY ps.PostTypeId ORDER BY ps.UpVoteCount DESC, ps.CommentCount DESC) AS Rank
+    FROM PostStatistics ps
+    WHERE ps.ClosedDate < ps.ReopenedDate OR ps.ClosedDate IS NULL
+),
+
+MostActiveUsers AS (
+    SELECT 
+        u.Id, 
+        u.DisplayName, 
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(SCORE, 0)) AS ScoreSum
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS SCORE
+        FROM Votes
+        GROUP BY PostId
+    ) AS v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+    HAVING COUNT(DISTINCT p.Id) > 5 
+)
+
+SELECT 
+    ur.UserId,
+    ur.DisplayName,
+    ps.Title AS PostTitle,
+    ps.UpVoteCount,
+    ps.CommentCount,
+    r.Rank,
+    ur.TotalPosts,
+    ur.ScoreSum,
+    ur.Reputation
+FROM MostActiveUsers ur
+JOIN PostRankings r ON ur.Reputation > 100 AND r.Rank <= 10
+JOIN PostStatistics ps ON ps.PostId = r.PostId
+WHERE 
+    (EXISTS (
+        SELECT 1 
+        FROM UserVoteStats uvs
+        WHERE uvs.UserId = ur.Id AND uvs.TotalCloseVotes > 2
+    ) OR ur.TotalPosts > 10)
+ORDER BY ur.TotalPosts DESC, ps.UpVoteCount DESC;

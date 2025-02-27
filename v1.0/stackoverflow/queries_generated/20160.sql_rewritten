@@ -1,0 +1,85 @@
+WITH UserVoteStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 8 THEN V.BountyAmount END), 0) AS TotalBounty,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        COUNT(DISTINCT C.Id) AS CommentsCount
+    FROM
+        Users U
+    LEFT JOIN
+        Votes V ON V.UserId = U.Id
+    LEFT JOIN
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN
+        Comments C ON C.UserId = U.Id
+    WHERE
+        U.Reputation > 100
+    GROUP BY
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        PS.UserId AS OwnerId,
+        PS.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT P2.Id) FILTER (WHERE PL.LinkTypeId = 1) AS LinkedPostsCount,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.CreationDate END) AS ClosedDate
+    FROM
+        Posts P
+    JOIN
+        Users PS ON P.OwnerUserId = PS.Id
+    LEFT JOIN
+        Votes V ON V.PostId = P.Id
+    LEFT JOIN
+        Comments C ON C.PostId = P.Id
+    LEFT JOIN
+        PostLinks PL ON PL.PostId = P.Id
+    LEFT JOIN
+        PostHistory PH ON PH.PostId = P.Id
+    WHERE
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY
+        P.Id, PS.Id, PS.DisplayName
+),
+PostOwnerBounties AS (
+    SELECT
+        PS.OwnerId,
+        SUM(PS.TotalBounty) AS TotalBounty
+    FROM
+        UserVoteStats U
+    JOIN
+        PostStatistics PS ON U.UserId = PS.OwnerId
+    GROUP BY
+        PS.OwnerId
+)
+SELECT
+    U.DisplayName,
+    U.PostsCount,
+    U.CommentsCount,
+    U.UpVotesCount,
+    U.DownVotesCount,
+    COALESCE(POB.TotalBounty, 0) AS Bounty,
+    AVG(PS.UpVotes - PS.DownVotes) AS AverageScore,
+    COUNT(DISTINCT CASE WHEN PS.ClosedDate IS NOT NULL THEN PS.PostId END) AS ClosedPosts
+FROM
+    UserVoteStats U
+LEFT JOIN
+    PostOwnerBounties POB ON U.UserId = POB.OwnerId
+LEFT JOIN
+    PostStatistics PS ON PS.OwnerId = U.UserId
+GROUP BY
+    U.UserId, U.DisplayName, POB.TotalBounty
+HAVING
+    AVG(PS.UpVotes - PS.DownVotes) > 0
+ORDER BY
+    U.UpVotesCount DESC,
+    U.CommentsCount DESC
+LIMIT 10;

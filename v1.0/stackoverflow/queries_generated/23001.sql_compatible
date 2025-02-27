@@ -1,0 +1,76 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(vs.UpVotes, 0) AS UserUpVotes,
+        COALESCE(vs.DownVotes, 0) AS UserDownVotes,
+        CASE WHEN p.Score IS NULL THEN 'No Score' ELSE 'Scored' END AS ScoreStatus,
+        CONCAT('Score: ', COALESCE(NULLIF(p.Score, 0), 'Zero'), 
+               ', Created: ', TO_CHAR(p.CreationDate, 'YYYY-MM-DD')) AS CustomDisplay
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) vs ON p.Id = vs.PostId
+    WHERE 
+        p.PostTypeId = 1 AND (p.Score IS NOT NULL OR p.ViewCount > 100)
+),
+CommentCounts AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS CommentCount,
+        CASE WHEN COUNT(*) = 0 THEN NULL ELSE ROUND(AVG(Score), 2) END AS AvgCommentScore
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.LastActivityDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.Rank,
+        cc.CommentCount,
+        cc.AvgCommentScore,
+        rp.CustomDisplay
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        CommentCounts cc ON rp.PostId = cc.PostId
+    WHERE 
+        rp.Rank <= 3 OR (cc.CommentCount IS NOT NULL AND cc.CommentCount > 5)
+)
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.CreationDate,
+    fr.LastActivityDate,
+    fr.Score,
+    fr.ViewCount,
+    COALESCE(fr.CommentCount, 0) AS TotalComments,
+    COALESCE(fr.AvgCommentScore, 0) AS AverageCommentScore,
+    fr.CustomDisplay
+FROM 
+    FinalResults fr
+WHERE 
+    fr.ScoreStatus = 'Scored' 
+    AND fr.ViewCount BETWEEN 100 AND 1000
+ORDER BY 
+    fr.ViewCount DESC, fr.LastActivityDate DESC;

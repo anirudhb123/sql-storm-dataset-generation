@@ -1,0 +1,54 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ct.kind AS company_type,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aliases,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title AS t
+    JOIN 
+        movie_companies AS mc ON t.id = mc.movie_id
+    JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    JOIN 
+        company_type AS ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_keyword AS mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        aka_name AS ak ON ak.person_id IN (
+            SELECT person_id
+            FROM cast_info
+            WHERE movie_id = t.id
+        )
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.title, t.production_year, ct.kind
+),
+TopMovies AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.company_type,
+        ROW_NUMBER() OVER (PARTITION BY md.company_type ORDER BY md.production_year DESC) AS rank
+    FROM 
+        MovieDetails AS md
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.company_type,
+    md.aliases,
+    md.keywords
+FROM 
+    TopMovies AS tm
+JOIN 
+    MovieDetails AS md ON tm.title = md.title AND tm.production_year = md.production_year
+WHERE 
+    tm.rank <= 5
+ORDER BY 
+    tm.company_type, tm.production_year DESC;

@@ -1,0 +1,84 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        pt.Name AS PostType,
+        u.DisplayName AS Owner,
+        p.AnswerCount,
+        p.ViewCount,
+        p.LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.PostType,
+        rp.Owner,
+        rp.AnswerCount,
+        rp.ViewCount,
+        rp.LastActivityDate
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10 
+),
+PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(t.Id) AS TagCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')::int[])
+    GROUP BY 
+        p.Id
+),
+CombinedData AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.Body,
+        fp.PostType,
+        fp.Owner,
+        fp.AnswerCount,
+        fp.ViewCount,
+        fp.LastActivityDate,
+        pt.TagCount
+    FROM 
+        FilteredPosts fp
+    JOIN 
+        PostTagCounts pt ON fp.PostId = pt.PostId
+)
+SELECT 
+    cd.PostId,
+    cd.Title,
+    cd.Body,
+    cd.PostType,
+    cd.Owner,
+    cd.AnswerCount,
+    cd.ViewCount,
+    cd.LastActivityDate,
+    cd.TagCount,
+    CASE 
+        WHEN cd.AnswerCount = 0 THEN 'No answers yet'
+        WHEN cd.AnswerCount > 0 AND cd.ViewCount > 100 THEN 'Popular question'
+        ELSE 'Moderately engaged'
+    END AS Engagement_Level
+FROM 
+    CombinedData cd
+WHERE 
+    cd.TagCount >= 3
+ORDER BY 
+    cd.LastActivityDate DESC;

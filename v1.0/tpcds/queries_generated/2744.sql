@@ -1,0 +1,59 @@
+
+WITH SalesData AS (
+    SELECT 
+        w.warehouse_name,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_ship_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        w.warehouse_name
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status = 'M'
+    GROUP BY 
+        cd.cd_gender
+),
+ReturnDetails AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt_inc_tax) AS total_returned_value
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    sd.warehouse_name,
+    sd.total_net_profit,
+    sd.total_orders,
+    cd.cd_gender,
+    cd.customer_count,
+    cd.avg_purchase_estimate,
+    rd.total_returned,
+    rd.total_returned_value
+FROM 
+    SalesData sd
+JOIN 
+    CustomerDemographics cd ON cd.customer_count > 100
+LEFT JOIN 
+    ReturnDetails rd ON sd.total_orders > 50
+ORDER BY 
+    sd.total_net_profit DESC, 
+    cd.avg_purchase_estimate DESC
+LIMIT 50;

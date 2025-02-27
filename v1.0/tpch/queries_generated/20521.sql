@@ -1,0 +1,76 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS BrandRank
+    FROM 
+        part p
+    WHERE 
+        p.p_size >= 10 AND 
+        p.p_retailprice BETWEEN 100.00 AND 500.00
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS TotalSupplyCost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        s.s_suppkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalOrderValue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal,
+        COALESCE(c.c_phone, 'UNKNOWN') AS CustPhone
+    FROM 
+        customer c 
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2) 
+        AND c.c_mktsegment IN ('BUILDING', 'FURNITURE')
+)
+SELECT 
+    f.cust_name, 
+    r.r_name AS Region, 
+    rp.p_name,
+    COUNT(DISTINCT o.o_orderkey) AS TotalOrders,
+    SUM(ods.TotalOrderValue) AS TotalSpent,
+    MAX(s.TotalSupplyCost) AS MaxSupplierCost
+FROM 
+    FilteredCustomers f
+LEFT JOIN 
+    nation n ON f.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    orders o ON f.c_custkey = o.o_custkey
+LEFT JOIN 
+    OrderDetails ods ON o.o_orderkey = ods.o_orderkey
+JOIN 
+    RankedParts rp ON rp.BrandRank = 1
+LEFT JOIN 
+    SupplierStats s ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = rp.p_partkey ORDER BY ps.ps_supplycost DESC LIMIT 1)
+GROUP BY 
+    f.cust_name, r.r_name, rp.p_name
+HAVING 
+    SUM(ods.TotalOrderValue) > (SELECT AVG(TotalSpent) FROM (SELECT SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSpent FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey GROUP BY o.o_orderkey) AS SubQuery)
+ORDER BY 
+    TotalSpent DESC, MaxSupplierCost DESC;

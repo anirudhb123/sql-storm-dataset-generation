@@ -1,0 +1,57 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        u.ib_income_band_sk
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        household_demographics u ON c.c_current_hdemo_sk = u.hd_demo_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 2000
+    GROUP BY 
+        c.c_customer_id, u.ib_income_band_sk
+),
+average_sales AS (
+    SELECT 
+        ib_income_band_sk,
+        AVG(total_sales) AS avg_sales,
+        AVG(total_orders) AS avg_orders
+    FROM 
+        customer_sales
+    GROUP BY 
+        ib_income_band_sk
+),
+top_income_bands AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        as.avg_sales,
+        as.avg_orders
+    FROM 
+        income_band ib
+    JOIN 
+        average_sales as ON ib.ib_income_band_sk = as.ib_income_band_sk
+    ORDER BY 
+        avg_sales DESC
+    LIMIT 5
+)
+SELECT 
+    t.ib_income_band_sk,
+    t.ib_lower_bound,
+    t.ib_upper_bound,
+    t.avg_sales,
+    t.avg_orders
+FROM 
+    top_income_bands t
+JOIN 
+    customer_demographics cd ON t.ib_income_band_sk = cd.hd_income_band_sk
+WHERE 
+    cd.cd_gender = 'F'
+ORDER BY 
+    t.avg_sales DESC;

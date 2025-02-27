@@ -1,0 +1,71 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+ActiveOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(a.total_sales) AS customer_spending
+    FROM 
+        customer c
+    JOIN 
+        ActiveOrders a ON c.c_custkey = a.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(a.total_sales) > 10000
+)
+
+SELECT 
+    n.n_name AS nation,
+    COUNT(DISTINCT c.c_custkey) AS num_customers,
+    AVG(ts.customer_spending) AS avg_spending,
+    STRING_AGG(DISTINCT ps.p_name, ', ') AS products_supplied
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+LEFT JOIN 
+    TopCustomers ts ON ts.c_custkey = (
+        SELECT 
+            c.c_custkey
+        FROM 
+            customer c
+        WHERE 
+            c.c_nationkey = n.n_nationkey
+        ORDER BY 
+            c.c_acctbal DESC
+        FETCH FIRST 1 ROW ONLY
+    )
+WHERE 
+    rs.rank <= 3
+GROUP BY 
+    n.n_name
+ORDER BY 
+    num_customers DESC, avg_spending DESC;

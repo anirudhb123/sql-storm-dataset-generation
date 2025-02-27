@@ -1,0 +1,79 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_net_paid) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE cd.cd_purchase_estimate > 1000
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+    HAVING SUM(ws_net_paid) > 5000
+),
+SalesByQuarter AS (
+    SELECT 
+        d.d_year,
+        d.d_quarter_seq,
+        SUM(ws.ext_sales_price) AS total_sales_quarter
+    FROM date_dim d
+    JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_year, d.d_quarter_seq
+),
+ReturnAnalysis AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr_return_quantity) AS return_count,
+        SUM(sr_return_amt) AS total_return_amt,
+        SUM(sr_return_tax) AS total_return_tax
+    FROM store_returns
+    GROUP BY sr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_product_name,
+    COALESCE(R.total_return_amt, 0) AS total_returned,
+    COALESCE(R.return_count, 0) AS total_returns,
+    COALESCE(Rank.total_quantity, 0) AS total_sold,
+    COALESCE(H.total_spent, 0) AS customer_spending,
+    Q.total_sales_quarter,
+    CASE 
+        WHEN Q.total_sales_quarter > 10000 THEN 'High Performer'
+        ELSE 'Needs Improvement'
+    END AS performance_category
+FROM item i
+LEFT JOIN RankedSales Rank ON i.i_item_sk = Rank.ws_item_sk AND Rank.sales_rank = 1
+LEFT JOIN ReturnAnalysis R ON i.i_item_sk = R.sr_item_sk
+LEFT JOIN (
+    SELECT 
+        year, 
+        quarter_seq, 
+        SUM(total_sales_quarter) AS total_sales_quarter 
+    FROM SalesByQuarter 
+    GROUP BY year, quarter_seq
+) Q ON Q.year = 2023 AND Q.quarter_seq IS NOT NULL
+LEFT JOIN HighValueCustomers H ON H.order_count > 5 AND H.order_count IS NOT NULL
+WHERE i.i_current_price IS NOT NULL
+AND EXISTS (
+    SELECT 1 
+    FROM inventory inv 
+    WHERE inv.inv_item_sk = i.i_item_sk 
+    AND inv.inv_quantity_on_hand > 0
+    AND inv.inv_date_sk IN (
+        SELECT d_date_sk 
+        FROM date_dim 
+        WHERE d_year = 2023
+    )
+)
+ORDER BY total_sold DESC, customer_spending DESC;

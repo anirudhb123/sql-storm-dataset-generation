@@ -1,0 +1,60 @@
+
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        c.name AS company_name,
+        k.keyword AS movie_keyword,
+        a_aka.name AS aka_name
+    FROM 
+        aka_title a_aka
+    JOIN 
+        title m ON a_aka.movie_id = m.id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = m.id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        m.production_year > 2000
+        AND a_aka.title IS NOT NULL
+),
+aggregated_keywords AS (
+    SELECT 
+        movie_id,
+        STRING_AGG(movie_keyword, ', ') AS keyword_list
+    FROM 
+        movie_details
+    GROUP BY 
+        movie_id
+),
+final_benchmark AS (
+    SELECT 
+        d.movie_id,
+        d.movie_title,
+        d.production_year,
+        d.company_name,
+        a.keyword_list,
+        d.aka_name
+    FROM 
+        movie_details d
+    JOIN 
+        aggregated_keywords a ON d.movie_id = a.movie_id
+)
+SELECT 
+    fb.movie_title,
+    fb.production_year,
+    fb.company_name,
+    fb.keyword_list,
+    fb.aka_name
+FROM 
+    final_benchmark fb
+WHERE 
+    fb.movie_title ILIKE '%action%'
+ORDER BY 
+    fb.production_year DESC,
+    fb.movie_title ASC;

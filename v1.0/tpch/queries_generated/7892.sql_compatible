@@ -1,0 +1,54 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY DATE_TRUNC('month', o.o_orderdate) ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o 
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+), 
+top_orders AS (
+    SELECT 
+        DATE_TRUNC('month', o.o_orderdate) AS order_date,
+        o.o_orderkey,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        ranked_orders o
+    WHERE 
+        o.order_rank <= 5
+), 
+order_details AS (
+    SELECT 
+        to.order_date,
+        to.o_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales,
+        SUM(li.l_quantity) AS total_quantity,
+        COUNT(DISTINCT li.l_suppkey) AS unique_suppliers
+    FROM 
+        top_orders to
+    JOIN 
+        lineitem li ON to.o_orderkey = li.l_orderkey
+    GROUP BY 
+        to.order_date, to.o_orderkey
+)
+SELECT 
+    od.order_date,
+    COUNT(od.o_orderkey) AS num_orders,
+    SUM(od.total_sales) AS total_revenue,
+    AVG(od.total_quantity) AS avg_quantity_per_order,
+    SUM(od.unique_suppliers) AS total_unique_suppliers
+FROM 
+    order_details od
+GROUP BY 
+    od.order_date
+ORDER BY 
+    od.order_date;

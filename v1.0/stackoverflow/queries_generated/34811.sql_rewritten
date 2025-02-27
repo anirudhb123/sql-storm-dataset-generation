@@ -1,0 +1,79 @@
+WITH RECURSIVE UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)
+    GROUP BY 
+        u.Id
+),
+
+UserRankedStats AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        TotalScore,
+        TotalBounty,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank,
+        RANK() OVER (ORDER BY PostCount DESC) AS ActivityRank
+    FROM 
+        UserPostStats
+),
+
+MostActiveUsers AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.PostCount,
+        u.QuestionCount,
+        u.AnswerCount,
+        u.TotalScore,
+        u.TotalBounty,
+        COALESCE(ph.ClosureTypeCount, 0) AS ClosedPostCount
+    FROM 
+        UserRankedStats u
+    LEFT JOIN (
+        SELECT 
+            ph.UserId,
+            COUNT(ph.Id) AS ClosureTypeCount
+        FROM 
+            PostHistory ph
+        WHERE 
+            ph.PostHistoryTypeId IN (10, 11) 
+        GROUP BY 
+            ph.UserId
+    ) ph ON u.UserId = ph.UserId
+    WHERE 
+        u.PostCount > 5  
+)
+
+SELECT 
+    mu.DisplayName,
+    mu.PostCount,
+    mu.QuestionCount,
+    mu.AnswerCount,
+    mu.TotalScore,
+    mu.TotalBounty,
+    mu.ClosedPostCount,
+    CASE 
+        WHEN mu.TotalScore > 100 THEN 'High Scorer'
+        WHEN mu.TotalScore BETWEEN 50 AND 100 THEN 'Moderate Scorer'
+        ELSE 'Low Scorer'
+    END AS ScoreCategory
+FROM 
+    MostActiveUsers mu
+ORDER BY 
+    mu.TotalScore DESC, mu.activityRank ASC
+LIMIT 10;

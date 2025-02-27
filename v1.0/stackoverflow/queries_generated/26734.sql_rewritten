@@ -1,0 +1,71 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+UsersWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LatestEditDate,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS EditTypes
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.TotalViews,
+    ts.AverageScore,
+    ub.UserId,
+    ub.DisplayName,
+    ub.BadgeCount,
+    ub.GoldBadgeCount,
+    ub.SilverBadgeCount,
+    ub.BronzeBadgeCount,
+    ph.PostId,
+    ph.EditCount,
+    ph.LatestEditDate,
+    ph.EditTypes
+FROM 
+    TagStatistics ts
+LEFT JOIN 
+    UsersWithBadges ub ON ub.BadgeCount > 0 
+ORDER BY 
+    ts.PostCount DESC, ts.AverageScore DESC;

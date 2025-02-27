@@ -1,0 +1,77 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    INNER JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND
+        n.n_name NOT LIKE '%land%'
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_comment,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 'Price Not Available'
+            ELSE CONCAT('Price is ', CAST(p.p_retailprice AS varchar(12)))
+        END AS price_info
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 10 AND 20
+)
+SELECT 
+    r.r_name,
+    p.p_name,
+    s.s_name,
+    c.c_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey AND l.l_suppkey = ps.ps_suppkey
+JOIN 
+    FilteredParts p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    s.s_suppkey IN (SELECT s_suppkey FROM RankedSuppliers WHERE rnk <= 3) AND
+    c.c_custkey IN (SELECT c_custkey FROM HighValueCustomers) AND
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    r.r_name, p.p_name, s.s_name, c.c_name
+HAVING 
+    net_revenue > 1000 OR 
+    (SELECT COUNT(*) FROM lineitem l2 WHERE l2.l_partkey = l.l_partkey AND l2.l_returnflag = 'R') > 0
+ORDER BY 
+    r.r_name, net_revenue DESC;

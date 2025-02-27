@@ -1,0 +1,90 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+),
+PostInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        p.CreationDate,
+        CASE 
+            WHEN p.PostTypeId = 1 AND p.AcceptedAnswerId IS NOT NULL THEN 1
+            ELSE 0 
+        END AS HasAcceptedAnswer
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+HighScoringPosts AS (
+    SELECT 
+        pi.PostId,
+        pi.Title,
+        pi.UpVotes,
+        pi.DownVotes,
+        pi.CreationDate,
+        pi.HasAcceptedAnswer
+    FROM 
+        PostInfo pi
+    WHERE 
+        pi.UpVotes - pi.DownVotes > 0
+        AND pi.HasAcceptedAnswer = 1
+        AND pi.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+AggregatedData AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        COUNT(DISTINCT hsp.PostId) AS PostCount,
+        SUM(hsp.UpVotes) AS TotalUpVotes,
+        SUM(hsp.DownVotes) AS TotalDownVotes
+    FROM 
+        UserReputation u
+    LEFT JOIN 
+        PostInfo p ON u.UserId = p.OwnerUserId
+    LEFT JOIN 
+        HighScoringPosts hsp ON p.Id = hsp.PostId
+    GROUP BY 
+        u.UserId, u.DisplayName
+)
+SELECT 
+    ad.UserId,
+    ad.DisplayName,
+    ad.PostCount,
+    ad.TotalUpVotes,
+    ad.TotalDownVotes,
+    CASE 
+        WHEN ad.PostCount > 10 THEN 'Expert'
+        WHEN ad.PostCount BETWEEN 5 AND 10 THEN 'Intermediate'
+        ELSE 'Novice'
+    END AS UserLevel
+FROM 
+    AggregatedData ad
+WHERE 
+    ad.TotalUpVotes > ad.TotalDownVotes
+ORDER BY 
+    ad.TotalUpVotes DESC, 
+    ad.PostCount DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY
+UNION ALL
+SELECT 
+    NULL AS UserId,
+    'Total' AS DisplayName,
+    COUNT(*) AS PostCount,
+    SUM(TotalUpVotes) AS TotalUpVotes,
+    SUM(TotalDownVotes) AS TotalDownVotes,
+    NULL AS UserLevel
+FROM 
+    AggregatedData
+WHERE 
+    TotalUpVotes > TotalDownVotes;

@@ -1,0 +1,63 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(cc.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(cc.person_id) DESC) AS rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast c ON mt.id = c.movie_id
+    LEFT JOIN 
+        cast_info cc ON c.subject_id = cc.id
+    GROUP BY 
+        mt.title, mt.production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.title, 
+        rm.production_year, 
+        rm.cast_count 
+    FROM 
+        RankedMovies rm 
+    WHERE 
+        rm.rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        COALESCE(GROUP_CONCAT(DISTINCT ct.kind ORDER BY ct.kind), 'No Types') AS company_types,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        movie_companies mc ON tm.title = (SELECT title FROM aka_title WHERE id = mc.movie_id LIMIT 1)
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_keyword mk ON tm.title = (SELECT title FROM aka_title WHERE id = mk.movie_id LIMIT 1)
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        tm.title, tm.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.company_types,
+    md.keywords,
+    (SELECT COUNT(*)
+     FROM movie_info mi 
+     WHERE mi.movie_id = (SELECT id FROM aka_title WHERE title = md.title LIMIT 1)
+       AND info_type_id = (SELECT id FROM info_type WHERE info = 'rating')) AS rating_count,
+    (CASE 
+        WHEN md.keywords IS NULL THEN 'No Keywords'
+        WHEN md.keywords LIKE '%thriller%' THEN 'Thrilling'
+        ELSE 'Other Genre'
+    END) AS genre_description
+FROM 
+    MovieDetails md
+ORDER BY 
+    md.production_year DESC, md.title;

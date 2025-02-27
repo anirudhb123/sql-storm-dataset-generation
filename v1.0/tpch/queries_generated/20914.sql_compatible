@@ -1,0 +1,84 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS account_rank,
+        n.n_regionkey,
+        r.r_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+TopSuppliers AS (
+    SELECT 
+        *
+    FROM 
+        RankedSuppliers
+    WHERE 
+        account_rank <= 3
+),
+SupplierPartCounts AS (
+    SELECT 
+        ps.ps_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey
+),
+OrdersWithNulls AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        COALESCE(NULLIF(o.o_orderstatus, 'O'), 'C') AS adjusted_status,
+        o.o_orderdate
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1995-01-01' 
+        AND o.o_totalprice IS NOT NULL
+),
+LineItemAggregates AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(l.l_discount) AS avg_discount,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate <= DATE '1998-10-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.r_name AS region,
+    s.s_name AS supplier_name,
+    COALESCE(sp.part_count, 0) AS part_supply_count,
+    ol.o_orderkey AS order_id,
+    la.total_quantity AS quantity,
+    la.avg_discount AS average_discount,
+    COALESCE(ol.adjusted_status, 'Unknown') AS final_status
+FROM 
+    TopSuppliers s
+LEFT JOIN 
+    SupplierPartCounts sp ON s.s_suppkey = sp.ps_suppkey
+JOIN 
+    OrdersWithNulls ol ON ol.o_orderkey IN (
+        SELECT o.o_orderkey
+        FROM orders o
+        JOIN lineitem li ON o.o_orderkey = li.l_orderkey 
+        WHERE li.l_suppkey = s.s_suppkey
+    )
+JOIN 
+    LineItemAggregates la ON ol.o_orderkey = la.l_orderkey
+JOIN 
+    region r ON s.n_regionkey = r.r_regionkey
+ORDER BY 
+    r.r_name, s.s_name, ol.o_orderkey DESC
+LIMIT 100;

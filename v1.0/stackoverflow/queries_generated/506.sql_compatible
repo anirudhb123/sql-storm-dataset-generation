@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        COUNT(DISTINCT v.Id) OVER (PARTITION BY p.Id) AS vote_count,
+        SUM(CASE WHEN vc.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS upvotes,
+        SUM(CASE WHEN vc.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS downvotes,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Votes vc ON p.Id = vc.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS post_count,
+        SUM(p.Score) AS total_score,
+        MAX(p.CreationDate) AS last_post_date
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(ph.Id) AS history_count
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.post_count,
+    up.total_score,
+    pp.Id AS PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.Score,
+    pp.ViewCount,
+    pp.rn,
+    phs.history_count,
+    pp.vote_count,
+    pp.upvotes,
+    pp.downvotes
+FROM 
+    UserStats up
+INNER JOIN 
+    RankedPosts pp ON up.UserId = pp.OwnerUserId
+LEFT JOIN 
+    PostHistorySummary phs ON pp.Id = phs.PostId
+WHERE 
+    up.post_count > 5
+    AND pp.rn = 1
+ORDER BY 
+    up.total_score DESC, 
+    pp.Score DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

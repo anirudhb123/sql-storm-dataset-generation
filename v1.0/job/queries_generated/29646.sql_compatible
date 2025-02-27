@@ -1,0 +1,61 @@
+
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT c.person_id) AS num_cast,
+        ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM
+        title t
+    LEFT JOIN
+        movie_info mi ON mi.movie_id = t.id
+    LEFT JOIN
+        cast_info c ON c.movie_id = t.id
+    LEFT JOIN
+        aka_title ak ON ak.movie_id = t.id
+    LEFT JOIN
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN
+        keyword k ON k.id = mk.keyword_id
+    WHERE
+        t.production_year >= 2000
+    GROUP BY
+        t.id, t.title
+),
+RankedMoviesWithNotes AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.num_cast,
+        rm.aka_names,
+        rm.keywords,
+        COALESCE(mn.note, 'No notes available') AS movie_note
+    FROM
+        RankedMovies rm
+    LEFT JOIN
+        movie_info mn ON mn.movie_id = rm.movie_id AND mn.info_type_id = (SELECT id FROM info_type WHERE info = 'Note')
+)
+SELECT
+    r.movie_id,
+    r.title,
+    r.num_cast,
+    r.aka_names,
+    r.keywords,
+    r.movie_note,
+    COUNT(DISTINCT mc.id) AS company_count,
+    STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+    STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+FROM
+    RankedMoviesWithNotes r
+LEFT JOIN
+    movie_companies mc ON mc.movie_id = r.movie_id
+LEFT JOIN
+    company_name cn ON cn.id = mc.company_id
+LEFT JOIN
+    company_type ct ON ct.id = mc.company_type_id
+GROUP BY
+    r.movie_id, r.title, r.num_cast, r.aka_names, r.keywords, r.movie_note
+ORDER BY
+    r.num_cast DESC, r.movie_id
+LIMIT 100;

@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) -- Starting from suppliers with above-average balance
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5 -- Limit to a certain hierarchy level
+),
+
+OrderStats AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01' -- Filter for this year
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+
+SupplierRevenue AS (
+    SELECT s.s_suppkey, sh.level, SUM(os.total_revenue) AS total_revenue
+    FROM SupplierHierarchy sh
+    LEFT JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN OrderStats os ON p.p_partkey = ps.ps_partkey
+    GROUP BY s.s_suppkey, sh.level
+),
+
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, sr.total_revenue,
+           RANK() OVER (PARTITION BY sr.level ORDER BY sr.total_revenue DESC) AS revenue_rank
+    FROM supplier s
+    JOIN SupplierRevenue sr ON s.s_suppkey = sr.s_suppkey
+)
+
+SELECT ns.n_name, COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+       AVG(rs.total_revenue) AS avg_supplier_revenue
+FROM nation ns
+LEFT JOIN RankedSuppliers rs ON ns.n_nationkey = rs.s_nationkey
+WHERE rs.revenue_rank <= 10 OR rs.total_revenue IS NULL
+GROUP BY ns.n_name
+ORDER BY supplier_count DESC, avg_supplier_revenue DESC;

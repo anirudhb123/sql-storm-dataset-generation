@@ -1,0 +1,77 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn,
+        COUNT(CASE WHEN k.keyword IS NOT NULL THEN 1 END) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+SelectedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        CASE 
+            WHEN rm.keyword_count > 3 THEN 'Highly Tagged'
+            WHEN rm.keyword_count BETWEEN 1 AND 3 THEN 'Moderately Tagged'
+            ELSE 'No Tags'
+        END AS tagging_category
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rn <= 10 
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        ARRAY_AGG(DISTINCT rt.role ORDER BY rt.role) AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id
+),
+MovieDetail AS (
+    SELECT 
+        sm.movie_id,
+        sm.movie_title,
+        sm.production_year,
+        sm.tagging_category,
+        COALESCE(ar.roles, '{}') AS roles
+    FROM 
+        SelectedMovies sm
+    LEFT JOIN 
+        ActorRoles ar ON sm.movie_id = ar.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.movie_title,
+    md.production_year,
+    md.tagging_category,
+    md.roles,
+    COALESCE(NULLIF(md.production_year::text, '')::text, 'Unknown Year') AS year_display,
+    CASE 
+        WHEN md.tagging_category = 'Highly Tagged' THEN ARRAY_LENGTH(md.roles, 1) * 2
+        WHEN md.tagging_category = 'Moderately Tagged' THEN ARRAY_LENGTH(md.roles, 1) * 1
+        ELSE 0
+    END AS role_importance_score
+FROM 
+    MovieDetail md
+WHERE 
+    (EXISTS (
+        SELECT 1 
+        FROM aka_name an 
+        WHERE an.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = md.movie_id)
+        AND an.name ILIKE '%Smith%'
+    ) OR md.tagging_category = 'No Tags')
+ORDER BY 
+    md.production_year DESC, 
+    md.tagging_category, 
+    role_importance_score DESC;

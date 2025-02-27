@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS year_rank
+    FROM 
+        aka_title at
+    JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+TopCastMovies AS (
+    SELECT 
+        title, 
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        year_rank <= 3
+),
+MovieKeywords AS (
+    SELECT 
+        at.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title at
+    JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        at.id
+)
+SELECT 
+    t.title,
+    COALESCE(t.production_year, 'Unknown') AS production_year,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    COALESCE(ci.cast_count, 0) AS cast_count
+FROM 
+    TopCastMovies t
+LEFT JOIN 
+    MovieKeywords mk ON t.title = mk.title
+LEFT JOIN 
+    (SELECT 
+         at.title,
+         COUNT(DISTINCT ci.person_id) AS cast_count
+     FROM 
+         aka_title at
+     LEFT JOIN 
+         cast_info ci ON at.id = ci.movie_id 
+     GROUP BY 
+         at.title) ci ON t.title = ci.title
+WHERE 
+    t.production_year IS NOT NULL
+ORDER BY 
+    t.production_year DESC, ci.cast_count DESC;
+
+SELECT 
+    DISTINCT c.id, 
+    c.name,
+    COALESCE(ci.note, 'No Info') AS person_note
+FROM 
+    cast_info ci
+JOIN 
+    aka_name c ON ci.person_id = c.person_id
+WHERE 
+    ci.movie_id IN (SELECT id FROM aka_title WHERE production_year = 2020)
+ORDER BY 
+    c.name;

@@ -1,0 +1,84 @@
+WITH ranked_part AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_size IS NOT NULL AND p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size IS NOT NULL)
+),
+supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Unknown'
+            WHEN s.s_acctbal < 1000 THEN 'Low Balance'
+            ELSE 'Sufficient Balance' 
+        END AS balance_status
+    FROM 
+        supplier s
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 50000
+),
+filtered_parts AS (
+    SELECT 
+        pp.p_partkey,
+        pp.p_name,
+        pp.p_retailprice
+    FROM 
+        ranked_part pp
+    WHERE 
+        pp.price_rank <= 5
+),
+outstanding_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_discount) AS total_discount
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')  
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+    HAVING 
+        SUM(l.l_discount) > 100
+)
+SELECT 
+    co.c_name AS customer_name,
+    co.order_count,
+    co.total_spent,
+    p.p_name AS top_part,
+    p.p_retailprice,
+    si.balance_status,
+    so.total_discount
+FROM 
+    customer_orders co
+JOIN 
+    supplier_info si ON co.c_custkey % 10 = si.s_suppkey % 10 
+LEFT JOIN 
+    filtered_parts p ON co.total_spent > (SELECT AVG(total_spent) FROM customer_orders)
+LEFT JOIN 
+    outstanding_orders so ON so.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O')
+ORDER BY 
+    co.total_spent DESC NULLS LAST, 
+    p.p_retailprice ASC;

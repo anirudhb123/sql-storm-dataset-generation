@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(c.Id) DESC) AS RankWithinUser
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 1 -- Only Questions
+    GROUP BY p.Id, p.Title, p.Tags, p.CreationDate, p.OwnerUserId
+),
+
+PostDetail AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        u.DisplayName AS OwnerDisplayName
+    FROM RankedPosts rp
+    JOIN Users u ON rp.OwnerUserId = u.Id
+    WHERE rp.RankWithinUser = 1 -- Get the most commented question per user
+),
+
+TopTags AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, ',')) AS Tag
+    FROM PostDetail 
+),
+
+TagPopularity AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS PopularityCount
+    FROM TopTags
+    GROUP BY Tag
+    ORDER BY PopularityCount DESC
+    LIMIT 10
+),
+
+FinalReport AS (
+    SELECT
+        pd.PostId,
+        pd.Title,
+        pd.CommentCount,
+        pd.UpVotes,
+        pd.DownVotes,
+        pd.OwnerDisplayName,
+        ARRAY_AGG(tp.Tag) AS PopularTags
+    FROM PostDetail pd
+    JOIN TagPopularity tp ON pd.Tags LIKE '%' || tp.Tag || '%'
+    GROUP BY pd.PostId, pd.Title, pd.CommentCount, pd.UpVotes, pd.DownVotes, pd.OwnerDisplayName
+)
+
+SELECT 
+    PostId,
+    Title,
+    CommentCount,
+    UpVotes,
+    DownVotes,
+    OwnerDisplayName,
+    PopularTags
+FROM FinalReport
+ORDER BY CommentCount DESC, UpVotes DESC;

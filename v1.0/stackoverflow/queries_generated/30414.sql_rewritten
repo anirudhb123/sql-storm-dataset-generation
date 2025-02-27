@@ -1,0 +1,90 @@
+WITH RecursiveTagStats AS (
+    SELECT 
+        T.Id AS TagId, 
+        T.TagName, 
+        COUNT(P.Id) AS QuestionCount,
+        COUNT(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 END) AS AcceptedAnswerCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%<', T.TagName, '>%') 
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        T.Id, T.TagName
+),
+UserReputationComments AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName, 
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        SUM(U.Reputation) AS TotalReputation
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id 
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        PH.UserId,
+        P.Title AS PostTitle,
+        U.DisplayName AS EditorDisplayName,
+        PH.Comment
+    FROM 
+        PostHistory PH
+    INNER JOIN 
+        Posts P ON PH.PostId = P.Id
+    INNER JOIN 
+        Users U ON PH.UserId = U.Id
+), 
+FilteredPosts AS (
+    SELECT 
+        P.*,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RankByCreationDate,
+        COALESCE(PH.Comment, 'No comments') AS LastHistoryComment
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistoryDetails PH ON P.Id = PH.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+AggregatedPostData AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(ViewCount) AS AvgViewCount
+    FROM 
+        FilteredPosts
+    GROUP BY 
+        OwnerUserId
+)
+SELECT 
+    U.DisplayName,
+    R.TagId,
+    R.TagName,
+    R.QuestionCount,
+    R.AcceptedAnswerCount,
+    APD.TotalPosts,
+    APD.TotalQuestions,
+    APD.TotalAnswers,
+    APD.AvgViewCount,
+    URC.CommentCount,
+    URC.TotalReputation
+FROM 
+    RecursiveTagStats R
+LEFT JOIN 
+    AggregatedPostData APD ON APD.OwnerUserId = R.TagId
+LEFT JOIN 
+    UserReputationComments URC ON URC.UserId = R.TagId
+WHERE 
+    (R.QuestionCount >= 10 AND R.AcceptedAnswerCount > 0)
+ORDER BY 
+    R.QuestionCount DESC, URC.TotalReputation DESC;

@@ -1,0 +1,39 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, c.c_name, c.c_mktsegment
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_totalprice > 10000
+),
+PopularParts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_availqty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_availqty) > 500
+),
+OrderDetail AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+FinalReport AS (
+    SELECT s.s_suppkey, s.s_name, o.o_orderkey, o.o_totalprice, c.c_name AS customer_name,
+           c.c_mktsegment, pp.total_availqty, od.revenue
+    FROM SupplierDetails s
+    JOIN HighValueOrders o ON o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_suppkey = s.s_suppkey)
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN PopularParts pp ON pp.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+    JOIN OrderDetail od ON od.l_orderkey = o.o_orderkey
+)
+SELECT f.s_suppkey, f.s_name, COUNT(DISTINCT f.o_orderkey) AS order_count, 
+       SUM(f.o_totalprice) AS total_sales, AVG(f.revenue) AS avg_revenue_per_order,
+       COUNT(DISTINCT f.customer_name) AS unique_customers
+FROM FinalReport f
+GROUP BY f.s_suppkey, f.s_name
+ORDER BY total_sales DESC
+LIMIT 10;

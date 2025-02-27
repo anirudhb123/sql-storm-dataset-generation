@@ -1,0 +1,44 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM web_sales ws
+),
+SalesAggregate AS (
+    SELECT 
+        i.i_item_id,
+        COALESCE(SUM(ws.ws_quantity), 0) AS total_web_quantity,
+        COALESCE(SUM(ss.ss_quantity), 0) AS total_store_quantity,
+        i.i_current_price,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    GROUP BY i.i_item_id, i.i_current_price
+),
+HighProfitItems AS (
+    SELECT 
+        item_id,
+        MAX(ws_net_profit) AS max_net_profit
+    FROM RankedSales
+    WHERE profit_rank = 1
+    GROUP BY item_id
+)
+
+SELECT 
+    sa.item_id,
+    sa.total_web_quantity,
+    sa.total_store_quantity,
+    sa.total_orders,
+    sa.i_current_price,
+    hp.max_net_profit
+FROM SalesAggregate sa
+LEFT JOIN HighProfitItems hp ON sa.item_id = hp.item_id
+WHERE (sa.total_web_quantity + sa.total_store_quantity) > 0
+  AND (hp.max_net_profit IS NOT NULL OR sa.total_orders > 1)
+ORDER BY sa.total_web_quantity DESC, hp.max_net_profit DESC
+LIMIT 100;

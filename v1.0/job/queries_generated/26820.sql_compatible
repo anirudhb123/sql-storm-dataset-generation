@@ -1,0 +1,72 @@
+
+WITH name_keyword AS (
+    SELECT 
+        n.id AS name_id,
+        n.name AS person_name,
+        k.keyword AS movie_keyword,
+        k.phonetic_code AS keyword_phonetic
+    FROM 
+        name n
+    JOIN 
+        movie_keyword mk ON mk.keyword_id = n.id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+), title_info AS (
+    SELECT 
+        t.id AS title_id,
+        t.title AS movie_title,
+        t.production_year,
+        t.imdb_index,
+        t.kind_id,
+        n.name AS actor_name
+    FROM 
+        title t
+    JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    JOIN 
+        aka_name an ON an.person_id = ci.person_id
+    JOIN 
+        name n ON an.person_id = n.id
+), company_details AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+), complete_info AS (
+    SELECT 
+        ti.movie_title,
+        ti.production_year,
+        tk.movie_keyword,
+        cd.company_name,
+        cd.company_type,
+        ARRAY_AGG(DISTINCT ni.info) AS additional_info
+    FROM 
+        title_info ti
+    LEFT JOIN 
+        name_keyword tk ON ti.actor_name ILIKE '%' || tk.person_name || '%'
+    LEFT JOIN 
+        movie_info mi ON ti.title_id = mi.movie_id
+    LEFT JOIN 
+        company_details cd ON ti.title_id = cd.movie_id
+    LEFT JOIN 
+        person_info pi ON ti.actor_name = pi.info
+    GROUP BY 
+        ti.movie_title, ti.production_year, tk.movie_keyword, cd.company_name, cd.company_type
+)
+SELECT 
+    movie_title,
+    production_year,
+    movie_keyword,
+    company_name,
+    company_type,
+    COALESCE(array_to_string(additional_info, ', '), 'No additional info') AS info_summary
+FROM 
+    complete_info
+ORDER BY 
+    production_year DESC, movie_title;

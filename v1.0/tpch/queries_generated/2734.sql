@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, GETDATE())
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+),
+CustomerAggregates AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_type,
+    COALESCE(sa.total_available, 0) AS available_qty,
+    ca.total_orders,
+    ca.total_spent,
+    CASE 
+        WHEN ca.total_spent IS NULL THEN 'No Orders'
+        WHEN ca.total_spent > 10000 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_type,
+    COUNT(DISTINCT o.o_orderkey) AS num_orders,
+    AVG(l.l_extendedprice) AS avg_price_per_order,
+    MAX(l.l_commitdate) AS latest_commit_date
+FROM 
+    part p
+LEFT JOIN 
+    SupplierParts sa ON p.p_partkey = sa.ps_partkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedOrders o ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    CustomerAggregates ca ON o.o_custkey = ca.c_custkey
+WHERE 
+    p.p_size BETWEEN 10 AND 20
+    AND (p.p_mfgr = 'Manufacturer#1' OR p.p_brand = 'Brand#2')
+GROUP BY 
+    p.p_name, p.p_brand, p.p_type, ca.total_orders, ca.total_spent
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    available_qty DESC, total_spent DESC;

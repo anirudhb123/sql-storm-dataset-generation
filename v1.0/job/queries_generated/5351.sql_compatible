@@ -1,0 +1,25 @@
+
+SELECT 
+    p.name AS actor_name, 
+    m.title AS movie_title, 
+    m.production_year, 
+    c.kind AS cast_role, 
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords 
+FROM 
+    cast_info c 
+JOIN 
+    aka_name p ON c.person_id = p.person_id 
+JOIN 
+    aka_title m ON c.movie_id = m.movie_id 
+JOIN 
+    movie_keyword mk ON mk.movie_id = m.id 
+JOIN 
+    keyword k ON mk.keyword_id = k.id 
+WHERE 
+    m.production_year BETWEEN 2000 AND 2023 
+    AND c.nr_order < 5 
+    AND p.name IS NOT NULL 
+GROUP BY 
+    p.name, m.title, m.production_year, c.kind 
+ORDER BY 
+    m.production_year DESC, actor_name ASC;

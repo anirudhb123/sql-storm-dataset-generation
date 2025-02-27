@@ -1,0 +1,60 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        Users.Id,
+        Users.DisplayName,
+        Users.Reputation,
+        Users.CreationDate,
+        RANK() OVER (ORDER BY Users.Reputation DESC) AS ReputationRank,
+        COUNT(Posts.PostId) AS PostCount
+    FROM Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY Users.Id, Users.DisplayName, Users.Reputation, Users.CreationDate
+), 
+UserBadges AS (
+    SELECT 
+        Badges.UserId,
+        COUNT(CASE WHEN Badges.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN Badges.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN Badges.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges
+    GROUP BY Badges.UserId
+), 
+PostsSummary AS (
+    SELECT 
+        Posts.OwnerUserId,
+        COUNT(Posts.Id) AS TotalPosts,
+        SUM(COALESCE(Posts.Score, 0)) AS TotalScore,
+        AVG(Posts.ViewCount) AS AvgViews,
+        SUM(CASE WHEN Posts.ClosedDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPosts,
+        COUNT(DISTINCT Posts.Tags) AS DistinctTags
+    FROM Posts
+    GROUP BY Posts.OwnerUserId
+), 
+TopUsers AS (
+    SELECT 
+        RankedUsers.Id AS UserId, 
+        RankedUsers.DisplayName,
+        RankedUsers.Reputation,
+        PostsSummary.TotalPosts,
+        PostsSummary.TotalScore,
+        PostsSummary.AvgViews,
+        UserBadges.GoldBadges,
+        UserBadges.SilverBadges,
+        UserBadges.BronzeBadges
+    FROM RankedUsers
+    JOIN PostsSummary ON RankedUsers.Id = PostsSummary.OwnerUserId
+    LEFT JOIN UserBadges ON RankedUsers.Id = UserBadges.UserId
+    WHERE RankedUsers.ReputationRank <= 10
+)
+SELECT 
+    TopUsers.DisplayName,
+    TopUsers.Reputation,
+    TopUsers.TotalPosts,
+    TopUsers.TotalScore,
+    TopUsers.AvgViews,
+    COALESCE(TopUsers.GoldBadges, 0) AS GoldBadges,
+    COALESCE(TopUsers.SilverBadges, 0) AS SilverBadges,
+    COALESCE(TopUsers.BronzeBadges, 0) AS BronzeBadges
+FROM TopUsers
+ORDER BY TopUsers.Reputation DESC;

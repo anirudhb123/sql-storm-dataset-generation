@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Unknown Balance'
+            WHEN s.s_acctbal > 1000 THEN 'High Balance'
+            ELSE 'Low Balance'
+        END AS balance_category
+    FROM 
+        supplier s
+    WHERE 
+        s.s_comment NOT LIKE '%problem%'
+),
+ComplexLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity * (1 - l.l_discount) AS adjusted_price,
+        l.l_returnflag,
+        l.l_linestatus,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS item_sequence
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_quantity IS NOT NULL 
+        OR l.l_returnflag = 'R'
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    r.r_name,
+    n.n_name,
+    AVG(cli.adjusted_price) AS avg_adjusted_price,
+    SUM(CASE WHEN cli.l_returnflag = 'R' THEN cli.adjusted_price ELSE 0 END) AS total_returns,
+    s.balance_category,
+    o.order_rank
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    ComplexLineItems cli ON cli.l_partkey = p.p_partkey
+LEFT JOIN 
+    RankedOrders o ON o.o_orderkey = cli.l_orderkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    (p.p_brand LIKE '%ブランド%' OR p.p_comment IS NULL)
+    AND cli.item_sequence <= 10
+    AND (cli.l_linestatus IS NULL OR cli.l_linestatus = 'O')
+GROUP BY 
+    p.p_name, p.p_brand, r.r_name, n.n_name, s.balance_category, o.order_rank
+HAVING 
+    AVG(cli.adjusted_price) > 5000 OR SUM(total_returns) > 1000
+ORDER BY 
+    avg_adjusted_price DESC, total_returns ASC;

@@ -1,0 +1,78 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(year, -1, GETDATE())
+), SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyValue,
+        COUNT(DISTINCT ps.ps_partkey) AS TotalPartsSupplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+), HighValueSuppliers AS (
+    SELECT 
+        ss.s_suppkey
+    FROM 
+        SupplierStats ss
+    WHERE 
+        ss.TotalSupplyValue > (
+            SELECT 
+                AVG(TotalSupplyValue) 
+            FROM 
+                SupplierStats
+        )
+), OrderDetails AS (
+    SELECT 
+        lo.l_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS TotalRevenue,
+        SUM(lo.l_quantity) AS TotalQuantity,
+        COUNT(DISTINCT lo.l_partkey) AS DistinctPartsCount
+    FROM 
+        lineitem lo
+    INNER JOIN 
+        RankedOrders ro ON lo.l_orderkey = ro.o_orderkey
+    WHERE 
+        lo.l_shipdate <= GETDATE() 
+        AND lo.l_returnflag = 'N'
+    GROUP BY 
+        lo.l_orderkey
+)
+
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    od.TotalRevenue,
+    od.TotalQuantity,
+    od.DistinctPartsCount,
+    COALESCE(ss.s_name, 'Unknown Supplier') AS SupplierName,
+    ro.o_orderstatus
+FROM 
+    RankedOrders ro
+LEFT JOIN 
+    OrderDetails od ON ro.o_orderkey = od.l_orderkey
+LEFT JOIN 
+    (SELECT ps.ps_partkey, s.s_name
+     FROM partsupp ps
+     JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+     WHERE ps.ps_suppkey IN (SELECT s_suppkey FROM HighValueSuppliers)
+    ) ss ON ss.ps_partkey = (
+        SELECT TOP 1 ps_partkey 
+        FROM partsupp 
+        WHERE ps_suppkey = ss.s_suppkey 
+        ORDER BY ps_supplycost DESC
+    )
+WHERE 
+    (ro.o_orderstatus IS NULL OR ro.o_orderstatus IN ('O', 'F'))
+ORDER BY 
+    ro.o_orderdate DESC, od.TotalRevenue DESC;

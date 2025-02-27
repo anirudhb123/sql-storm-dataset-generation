@@ -1,0 +1,49 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY v.CreationDate DESC) AS VoteRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        p.Id, u.Reputation
+), TopRankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerReputation,
+        rp.CommentCount,
+        ROW_NUMBER() OVER (ORDER BY rp.Score DESC, rp.ViewCount DESC) AS OverallRank
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    trp.PostId,
+    trp.Title,
+    trp.CreationDate,
+    trp.Score,
+    trp.ViewCount,
+    trp.OwnerReputation,
+    trp.CommentCount
+FROM 
+    TopRankedPosts trp
+WHERE 
+    trp.OverallRank <= 10  -- Top 10 Questions
+ORDER BY 
+    trp.Score DESC, trp.ViewCount DESC;

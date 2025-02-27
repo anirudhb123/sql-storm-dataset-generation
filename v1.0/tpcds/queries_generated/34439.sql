@@ -1,0 +1,92 @@
+
+WITH RECURSIVE item_sales AS (
+    SELECT 
+        ws.order_number,
+        ws.item_sk,
+        SUM(ws.net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.item_sk ORDER BY SUM(ws.net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.order_number, ws.item_sk
+),
+sales_summary AS (
+    SELECT 
+        item_sk,
+        SUM(total_net_profit) AS overall_profit,
+        COUNT(DISTINCT order_number) AS total_orders
+    FROM 
+        item_sales
+    WHERE 
+        rank <= 10
+    GROUP BY 
+        item_sk
+),
+top_items AS (
+    SELECT 
+        is.item_sk,
+        i.item_desc,
+        s.total_orders,
+        s.overall_profit,
+        MAX(i.current_price) AS max_price,
+        MIN(i.current_price) AS min_price,
+        AVG(i.current_price) AS avg_price
+    FROM 
+        sales_summary s
+    JOIN 
+        item i ON s.item_sk = i.item_sk
+    JOIN 
+        store_sales ss ON i.item_sk = ss.item_sk
+    WHERE 
+        ss.sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_year = 2022 AND d_moy = 1 LIMIT 1) 
+        AND (SELECT d_date_sk FROM date_dim WHERE d_year = 2022 AND d_moy = 12 LIMIT 1)
+    GROUP BY 
+        is.item_sk, i.item_desc, s.total_orders, s.overall_profit
+),
+customer_segment AS (
+    SELECT 
+        cd_demo_sk, 
+        cd_gender, 
+        COUNT(DISTINCT c.customer_sk) AS customer_count, 
+        AVG(cd.purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.education_status LIKE '%Master%' OR 
+        cd.marital_status = 'M'
+    GROUP BY 
+        cd_demo_sk, cd_gender
+),
+sales_with_segments AS (
+    SELECT 
+        ti.item_sk,
+        ti.item_desc,
+        ts.total_orders,
+        ts.overall_profit,
+        cs.cd_demo_sk,
+        cs.avg_purchase_estimate
+    FROM 
+        top_items ti
+    LEFT JOIN 
+        customer_segment cs ON cs.customer_count > 10
+    JOIN 
+        sales_summary ts ON ti.item_sk = ts.item_sk
+)
+SELECT 
+    sws.item_sk,
+    sws.item_desc,
+    sws.total_orders,
+    sws.overall_profit,
+    sws.avg_purchase_estimate,
+    COALESCE(cs.customer_count, 0) AS total_customers
+FROM 
+    sales_with_segments sws
+LEFT JOIN 
+    customer_demo cs ON sws.cd_demo_sk = cs.cd_demo_sk
+WHERE 
+    sws.overall_profit > 10000
+ORDER BY 
+    sws.overall_profit DESC
+LIMIT 20;

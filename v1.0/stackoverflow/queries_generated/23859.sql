@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        pt.Name AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseCount
+    FROM
+        Posts p
+    LEFT JOIN
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE
+        p.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY
+        p.Id, pt.Name
+),
+UserBadges AS (
+    SELECT
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS MaxBadgeClass
+    FROM
+        Badges b
+    GROUP BY
+        b.UserId
+),
+TopUsers AS (
+    SELECT
+        u.Id,
+        u.DisplayName,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(bp.UpVoteCount, 0) AS TotalUpVotes,
+        COALESCE(bp.CloseCount, 0) AS TotalCloseVotes,
+        CASE 
+            WHEN COALESCE(bp.UpVoteCount, 0) > COALESCE(bp.DownVoteCount, 0) THEN 'More Upvotes'
+            WHEN COALESCE(bp.UpVoteCount, 0) < COALESCE(bp.DownVoteCount, 0) THEN 'More Downvotes'
+            ELSE 'Equal Votes'
+        END AS VoteStatus
+    FROM
+        Users u
+    LEFT JOIN
+        UserBadges b ON u.Id = b.UserId
+    LEFT JOIN (
+        SELECT
+            OwnerUserId,
+            SUM(UpVoteCount) AS UpVoteCount,
+            SUM(CloseCount) AS CloseCount
+        FROM
+            RankedPosts
+        GROUP BY
+            OwnerUserId
+    ) bp ON u.Id = bp.OwnerUserId
+    WHERE
+        u.Reputation >= 1000
+),
+FinalMetrics AS (
+    SELECT
+        tu.DisplayName,
+        tu.BadgeCount,
+        tu.TotalUpVotes,
+        tu.TotalCloseVotes,
+        tu.VoteStatus,
+        COUNT(rp.PostId) AS PostCount,
+        AVG(COALESCE(rp.CommentCount, 0)) AS AvgCommentsPerPost,
+        AVG(COALESCE(rp.UserPostRank, 1)) AS AvgPostRank
+    FROM
+        TopUsers tu
+    LEFT JOIN
+        RankedPosts rp ON tu.Id = rp.OwnerUserId
+    GROUP BY
+        tu.DisplayName, tu.BadgeCount, tu.TotalUpVotes, tu.TotalCloseVotes, tu.VoteStatus
+)
+SELECT
+    *,
+    CASE
+        WHEN AvgCommentsPerPost IS NULL THEN 'No Comments'
+        WHEN AvgPostRank > 5 THEN 'Low Activity'
+        ELSE 'Active User'
+    END AS ActivityStatus
+FROM
+    FinalMetrics
+ORDER BY
+    TotalUpVotes DESC, BadgeCount DESC, PostCount DESC;

@@ -1,0 +1,89 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.movie_id
+    JOIN 
+        company_name cn ON cn.id = mc.company_id
+    WHERE 
+        cn.country_code IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    WHERE 
+        ml.linked_movie_id IS NOT NULL
+),
+
+ranked_movies AS (
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS cast_rank,
+        COUNT(c.id) AS total_cast
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.movie_id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+
+best_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        total_cast
+    FROM 
+        ranked_movies
+    WHERE 
+        cast_rank = 1
+),
+
+name_info AS (
+    SELECT 
+        a.name,
+        p.info
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        person_info p ON a.person_id = p.person_id
+    WHERE 
+        p.info IS NOT NULL
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    bm.total_cast,
+    ni.name,
+    ni.info
+FROM 
+    movie_hierarchy mh
+JOIN 
+    best_movies bm ON mh.movie_id = bm.movie_id
+LEFT JOIN 
+    name_info ni ON mh.movie_id = ni.name
+WHERE 
+    COALESCE(bm.total_cast, 0) > 5
+ORDER BY 
+    mh.production_year DESC, 
+    bm.total_cast DESC
+LIMIT 10;

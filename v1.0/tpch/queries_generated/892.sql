@@ -1,0 +1,63 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_name,
+        p.p_brand,
+        SUM(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS NetSales
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost, p.p_name, p.p_brand
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS TotalSpent,
+        COUNT(o.o_orderkey) AS OrderCount
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 1000
+),
+FinalResults AS (
+    SELECT 
+        r.r_name AS Region,
+        n.n_name AS Nation,
+        s.s_name AS SupplierName,
+        p.p_name AS PartName,
+        sp.NetSales,
+        cs.TotalSpent,
+        cs.OrderCount
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN SupplierParts sp ON s.s_suppkey = sp.ps_suppkey
+    JOIN CustomerStats cs ON cs.TotalSpent > sp.NetSales
+    WHERE r.r_name LIKE 'N%'
+)
+
+SELECT 
+    f.Region,
+    f.Nation,
+    f.SupplierName,
+    f.PartName,
+    COALESCE(f.NetSales, 0) AS NetSales,
+    COALESCE(f.TotalSpent, 0) AS TotalSpent,
+    COALESCE(f.OrderCount, 0) AS OrderCount
+FROM FinalResults f
+ORDER BY f.Region, f.Nation, f.SupplierName;

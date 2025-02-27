@@ -1,0 +1,56 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title a
+    JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.title, a.production_year
+),
+TopRatedTitles AS (
+    SELECT 
+        m.id AS movie_id,
+        AVG(CASE WHEN it.id IS NOT NULL THEN 1 ELSE 0 END) * 100 AS rating_percentage
+    FROM 
+        movie_info m
+    LEFT JOIN 
+        info_type it ON it.id = m.info_type_id AND it.info = 'rating'
+    GROUP BY 
+        m.id
+),
+PopularMovies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        t.rating_percentage
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        TopRatedTitles t ON rm.movie_title = t.movie_id
+    WHERE 
+        rm.rank_by_cast <= 10 AND (t.rating_percentage > 75 OR t.rating_percentage IS NULL)
+)
+SELECT 
+    p.company_name,
+    pm.movie_title,
+    pm.production_year,
+    pm.rating_percentage
+FROM 
+    PopularMovies pm
+JOIN 
+    movie_companies mc ON pm.movie_title = mc.movie_id
+LEFT JOIN 
+    company_name p ON mc.company_id = p.id
+WHERE 
+    p.country_code IS NOT NULL
+ORDER BY 
+    pm.production_year DESC, pm.rating_percentage DESC;

@@ -1,0 +1,62 @@
+WITH actor_titles AS (
+    SELECT 
+        ak.person_id,
+        ak.name AS actor_name,
+        at.title AS movie_title,
+        at.production_year,
+        ak.imdb_index AS actor_index
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+),
+keyword_movies AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+high_rated_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mi.info AS movie_info
+    FROM 
+        title m
+    JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    WHERE 
+        mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'rating')
+        AND mi.info::float > 8.0
+),
+aggregated_data AS (
+    SELECT 
+        at.actor_name,
+        COUNT(DISTINCT at.movie_title) AS total_movies,
+        COUNT(DISTINCT km.keyword) AS total_keywords,
+        SUM(CASE WHEN hr.movie_id IS NOT NULL THEN 1 ELSE 0 END) AS high_rated_movies_count
+    FROM 
+        actor_titles at
+    LEFT JOIN 
+        keyword_movies km ON at.movie_title = km.movie_id
+    LEFT JOIN 
+        high_rated_movies hr ON at.movie_title = hr.title
+    GROUP BY 
+        at.actor_name
+)
+SELECT 
+    actor_name,
+    total_movies,
+    total_keywords,
+    high_rated_movies_count
+FROM 
+    aggregated_data
+WHERE 
+    total_movies > 5
+ORDER BY 
+    high_rated_movies_count DESC, total_movies DESC;

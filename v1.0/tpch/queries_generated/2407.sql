@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        total_spent > 10000
+),
+SupplyDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        COALESCE(SUM(l.l_quantity), 0) AS total_quantity_sold
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, ps.ps_supplycost
+    HAVING 
+        total_quantity_sold > 0
+)
+SELECT 
+    r.r_name,
+    s.s_name,
+    s.s_acctbal,
+    h.c_name,
+    h.total_spent,
+    d.p_name,
+    d.total_quantity_sold,
+    d.ps_supplycost,
+    CASE 
+        WHEN h.total_spent >= 50000 THEN 'VIP'
+        ELSE 'Regular'
+    END AS customer_status
+FROM 
+    RankedSuppliers s
+JOIN 
+    nation r ON s.s_nationkey = r.n_nationkey
+JOIN 
+    HighValueCustomers h ON h.total_spent > 10000
+LEFT JOIN 
+    SupplyDetails d ON d.p_partkey = (SELECT ps.ps_partkey 
+                                       FROM partsupp ps 
+                                       WHERE ps.ps_suppkey = s.s_suppkey 
+                                       ORDER BY ps.ps_supplycost DESC 
+                                       LIMIT 1)
+WHERE 
+    s.rank <= 3
+ORDER BY 
+    r.r_name, s.s_acctbal DESC, h.total_spent DESC;

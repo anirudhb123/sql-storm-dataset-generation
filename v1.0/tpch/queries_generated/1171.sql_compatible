@@ -1,0 +1,42 @@
+
+WITH SupplierStats AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           COUNT(ps.ps_partkey) AS total_parts, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, 
+           c.c_custkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, c.c_custkey
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, 
+           OS.total_revenue,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY OS.total_revenue DESC) AS revenue_rank
+    FROM OrderSummary OS
+    JOIN customer c ON OS.c_custkey = c.c_custkey
+)
+SELECT R.r_name, 
+       SS.s_name, 
+       COALESCE(HVO.total_revenue, 0) AS total_order_value,
+       SS.total_parts, 
+       SS.total_cost
+FROM region R
+LEFT JOIN nation N ON R.r_regionkey = N.n_regionkey
+LEFT JOIN supplier S ON N.n_nationkey = S.s_nationkey
+LEFT JOIN SupplierStats SS ON S.s_suppkey = SS.s_suppkey
+LEFT JOIN HighValueOrders HVO ON HVO.o_orderkey IN (
+    SELECT HVO_inner.o_orderkey 
+    FROM HighValueOrders HVO_inner 
+    WHERE HVO_inner.revenue_rank <= 3
+)
+WHERE (SS.total_parts > 0 OR SS.total_cost IS NOT NULL)
+ORDER BY R.r_name, SS.s_name;

@@ -1,0 +1,46 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+        AND p.Score > 10
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName,
+    bp.PostId,
+    bp.Title,
+    bp.ViewCount,
+    bp.Score,
+    ub.BadgeCount
+FROM 
+    Users up
+JOIN 
+    RankedPosts bp ON up.Id = bp.OwnerUserId
+JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+WHERE 
+    bp.Rank <= 5 
+ORDER BY 
+    ub.BadgeCount DESC, bp.Score DESC
+LIMIT 100;

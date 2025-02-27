@@ -1,0 +1,78 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        wr.returned_date_sk,
+        wr.return_time_sk,
+        wr.item_sk,
+        wr.returning_customer_sk,
+        wr.return_quantity,
+        wr.return_amt,
+        wr.return_tax,
+        wr.return_amt_inc_tax,
+        wr.fee,
+        wr.return_ship_cost,
+        wr.refunded_cash,
+        wr.reversed_charge,
+        wr.account_credit,
+        wr.net_loss,
+        1 AS level
+    FROM web_returns wr
+    WHERE wr.returning_customer_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        wr.returned_date_sk,
+        wr.return_time_sk,
+        wr.item_sk,
+        wr.returning_customer_sk,
+        wr.return_quantity,
+        wr.return_amt,
+        wr.return_tax,
+        wr.return_amt_inc_tax,
+        wr.fee,
+        wr.return_ship_cost,
+        wr.refunded_cash,
+        wr.reversed_charge,
+        wr.account_credit,
+        wr.net_loss,
+        cr.level + 1
+    FROM web_returns wr
+    JOIN CustomerReturns cr ON wr.returning_customer_sk = cr.returning_customer_sk
+    WHERE cr.level < 3
+),
+SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders,
+        AVG(ws_net_profit) AS avg_profit
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+ReturnSummary AS (
+    SELECT 
+        returning_customer_sk,
+        SUM(return_quantity) AS total_returns,
+        SUM(return_amt) AS total_return_amount
+    FROM CustomerReturns
+    GROUP BY returning_customer_sk
+)
+SELECT 
+    cs.c_customer_id,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(ss.total_orders, 0) AS total_orders,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    COALESCE(rs.total_return_amount, 0) AS total_return_amount,
+    CASE 
+        WHEN COALESCE(ss.total_sales, 0) > 0 THEN
+            ROUND((COALESCE(rs.total_return_amount, 0) / COALESCE(ss.total_sales, 0)) * 100, 2)
+        ELSE 0
+    END AS return_rate_percentage
+FROM customer cs
+LEFT JOIN SalesSummary ss ON cs.c_customer_sk = ss.customer_sk
+LEFT JOIN ReturnSummary rs ON cs.c_customer_sk = rs.returning_customer_sk
+WHERE cs.c_birth_year BETWEEN 1980 AND 1990
+  AND COALESCE(ss.total_sales, 0) > 1000
+ORDER BY return_rate_percentage DESC
+LIMIT 10;

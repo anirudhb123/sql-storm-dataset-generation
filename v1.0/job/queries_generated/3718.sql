@@ -1,0 +1,55 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title ASC) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        mt.title,
+        mc.name AS company_name,
+        COUNT(ci.person_id) AS cast_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        aka_title mt ON mc.movie_id = mt.id
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    GROUP BY 
+        mt.title, mc.name
+),
+KeywordCount AS (
+    SELECT 
+        mt.id AS movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    md.company_name,
+    md.cast_count,
+    kc.keyword_count,
+    CASE 
+        WHEN kc.keyword_count IS NULL THEN 'No Keywords'
+        ELSE 'Has Keywords'
+    END AS keyword_status
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    MovieDetails md ON rt.title = md.title
+LEFT JOIN 
+    KeywordCount kc ON rt.title = (SELECT title FROM aka_title WHERE id = kc.movie_id)
+WHERE 
+    rt.rn <= 10
+ORDER BY 
+    rt.production_year DESC, md.cast_count DESC NULLS LAST;

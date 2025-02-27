@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        r.*,
+        (TotalUpVotes - TotalDownVotes) AS NetScore
+    FROM 
+        RankedPosts r
+    WHERE 
+        r.Rank <= 5
+)
+SELECT 
+    tp.Id,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.LastActivityDate,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.NetScore,
+    CASE 
+        WHEN tp.NetScore > 10 THEN 'Hot'
+        WHEN tp.NetScore BETWEEN 1 AND 10 THEN 'Moderate'
+        ELSE 'Cold' 
+    END AS Popularity,
+    (SELECT STRING_AGG(Tags.TagName, ', ') 
+     FROM Tags 
+     WHERE Tags.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)) 
+     LIMIT 3) AS TopTags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistory ph ON tp.Id = ph.PostId
+WHERE 
+    ph.CreationDate = (
+        SELECT MAX(p2.CreationDate) 
+        FROM PostHistory p2 
+        WHERE p2.PostId = tp.Id 
+        AND p2.PostHistoryTypeId IN (10, 11) 
+    )
+ORDER BY 
+    tp.NetScore DESC;

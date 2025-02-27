@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        0 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year BETWEEN 2000 AND 2020
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        sub.title,
+        mh.level + 1 AS level
+    FROM 
+        MovieHierarchy AS mh
+    JOIN 
+        movie_link AS ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title AS sub ON ml.linked_movie_id = sub.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    COUNT(DISTINCT rc.actor_id) OVER (PARTITION BY t.title) AS actor_count,
+    AVG(COALESCE(m.production_year, 0)) OVER (PARTITION BY t.title) AS avg_production_year,
+    STRING_AGG(DISTINCT k.keyword, ', ') FILTER (WHERE k.keyword IS NOT NULL) AS keywords,
+    CASE 
+        WHEN COUNT(m.movie_id) > 0 THEN 'Yes' 
+        ELSE 'No' 
+    END AS has_links
+FROM 
+    cast_info AS ci
+JOIN 
+    aka_name AS a ON ci.person_id = a.person_id
+JOIN 
+    aka_title AS t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_keyword AS mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info AS m ON t.id = m.movie_id
+AND 
+    m.info_type_id IN (SELECT id FROM info_type WHERE info = 'Box Office')
+LEFT JOIN 
+    MovieHierarchy AS mh ON t.id = mh.movie_id
+WHERE 
+    t.production_year IS NOT NULL
+GROUP BY 
+    a.name, t.title
+HAVING 
+    COUNT(DISTINCT rc.actor_id) > 1
+ORDER BY 
+    avg_production_year DESC;
+
+In this elaborate query, we utilize a recursive Common Table Expression (CTE) to traverse a hierarchy of movies linked to each other. The main query aggregates data from multiple tables, including calculating averages, counts, and string aggregations, while applying several outer joins to capture all relevant information. The `HAVING` clause filters out results based on the number of distinct actors associated with each movie, ensuring a return of only those with significant involvement. Additionally, the use of `COALESCE` and `STRING_AGG` caters to NULL values and produces a comprehensive, report-worthy output.

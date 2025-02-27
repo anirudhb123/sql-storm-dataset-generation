@@ -1,0 +1,76 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_ext_sales_price,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_ext_sales_price DESC) AS RankSales
+    FROM 
+        web_sales
+), 
+SalesSummary AS (
+    SELECT 
+        w.warehouse_name,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.warehouse_name
+), 
+TopCustomers AS (
+    SELECT 
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT R.ws_bill_customer_sk) AS unique_customers,
+        SUM(R.ws_ext_sales_price) AS total_sales
+    FROM 
+        customer_address ca
+    JOIN 
+        RankedSales R ON R.ws_bill_customer_sk = ca.ca_address_sk
+    WHERE 
+        R.RankSales <= 5
+    GROUP BY 
+        ca.ca_city, ca.ca_state
+), 
+IncomeBandStats AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        COUNT(hd.hd_demo_sk) AS customer_count,
+        SUM(ws.ws_quantity) AS total_items_sold,
+        AVG(ws.ws_net_profit) AS avg_profit
+    FROM 
+        household_demographics hd
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    LEFT JOIN 
+        web_sales ws ON hd.hd_demo_sk = ws.ws_bill_cdemo_sk
+    GROUP BY 
+        ib.ib_income_band_sk
+)
+SELECT 
+    T.ca_city,
+    T.ca_state,
+    T.unique_customers,
+    T.total_sales,
+    S.total_quantity,
+    S.total_sales AS warehouse_sales,
+    I.customer_count,
+    I.total_items_sold,
+    I.avg_profit
+FROM 
+    TopCustomers T
+JOIN 
+    SalesSummary S ON 1=1
+JOIN 
+    IncomeBandStats I ON 1=1
+WHERE 
+    T.total_sales > 10000 AND 
+    I.customer_count > 50
+ORDER BY 
+    T.total_sales DESC, 
+    S.total_sales DESC;

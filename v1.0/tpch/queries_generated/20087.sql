@@ -1,0 +1,73 @@
+WITH RankedSupplier AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s 
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+SalesData AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey
+),
+PromotionData AS (
+    SELECT 
+        p.p_partkey,
+        AVG(ps.ps_supplycost * 1.05) AS avg_cost_with_markup
+    FROM 
+        part p 
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey 
+    GROUP BY 
+        p.p_partkey
+),
+FinalData AS (
+    SELECT 
+        nd.n_name,
+        sd.total_sales,
+        sd.total_orders,
+        rs.s_name AS top_supplier
+    FROM 
+        SalesData sd
+    LEFT JOIN 
+        customer c ON sd.c_custkey = c.c_custkey
+    LEFT JOIN 
+        nation nd ON c.c_nationkey = nd.n_nationkey
+    LEFT JOIN 
+        RankedSupplier rs ON rs.rn = 1 AND rs.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps)
+    WHERE 
+        sd.total_sales IS NOT NULL 
+        AND sd.total_orders > (SELECT AVG(total_orders) FROM SalesData)
+)
+
+SELECT 
+    f.n_name, 
+    f.total_sales, 
+    f.total_orders, 
+    COALESCE(f.top_supplier, 'No Supplier') AS top_supplier, 
+    CASE 
+        WHEN f.total_sales > 10000 THEN 'High Value'
+        WHEN f.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS sales_category,
+    NULLIF(f.total_sales, 0) AS adjusted_sales
+FROM 
+    FinalData f
+ORDER BY 
+    f.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,78 @@
+
+WITH RECURSIVE MonthStats AS (
+    SELECT
+        DATE_TRUNC('month', o_orderdate) AS month,
+        SUM(o_totalprice) AS total_sales,
+        COUNT(DISTINCT o_orderkey) AS order_count
+    FROM
+        orders
+    WHERE
+        o_orderdate >= '1996-01-01'
+    GROUP BY
+        DATE_TRUNC('month', o_orderdate)
+        
+    UNION ALL
+    
+    SELECT 
+        DATE_TRUNC('month', month + INTERVAL '1 month') AS month,
+        SUM(o_totalprice) AS total_sales,
+        COUNT(DISTINCT o_orderkey) AS order_count
+    FROM 
+        orders
+    JOIN MonthStats ON DATE_TRUNC('month', o_orderdate) = month
+    GROUP BY
+        month
+),
+SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_supplier_sales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+NationStats AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_count,
+        AVG(l.l_extendedprice) AS avg_price_on_returns
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    p.p_name, 
+    p.p_brand,
+    COALESCE(ss.total_supplier_sales, 0) AS total_sales_by_supplier,
+    ns.return_count,
+    ns.avg_price_on_returns,
+    ms.month,
+    ms.total_sales AS monthly_sales,
+    LEAD(ms.total_sales) OVER (ORDER BY ms.month) - ms.total_sales AS sales_growth_next_month
+FROM 
+    part p
+LEFT JOIN 
+    SupplierSales ss ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ss.s_suppkey)
+LEFT JOIN 
+    NationStats ns ON ns.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey))
+LEFT JOIN 
+    MonthStats ms ON TRUE
+WHERE 
+    p.p_size IS NULL OR (p.p_size BETWEEN 1 AND 20)
+ORDER BY 
+    total_sales_by_supplier DESC, monthly_sales ASC
+FETCH FIRST 100 ROWS ONLY;

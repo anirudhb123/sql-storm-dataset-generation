@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts 
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.TotalPosts,
+        us.PositivePosts,
+        us.NegativePosts,
+        RANK() OVER (ORDER BY us.Reputation DESC) AS UserRank
+    FROM 
+        UserStatistics us
+    WHERE 
+        us.TotalPosts > 10
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.UserId,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 24) -- Edit Title, Edit Body, Suggested Edit Applied
+    GROUP BY 
+        ph.UserId, ph.PostId
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.TotalPosts,
+    COALESCE(rp.Title, 'No Post') AS TopPostTitle,
+    COALESCE(rp.Score, 0) AS TopPostScore,
+    COALESCE(rp.ViewCount, 0) AS TopPostViews,
+    COALESCE(phe.EditCount, 0) AS TotalEdits
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    RankedPosts rp ON tu.UserId = rp.OwnerUserId AND rp.PostRank = 1
+LEFT JOIN 
+    PostHistorySummary phe ON tu.UserId = phe.UserId
+WHERE 
+    tu.UserRank <= 10
+ORDER BY 
+    tu.Reputation DESC;

@@ -1,0 +1,52 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT i_item_sk, i_item_desc, i_category_id, 0 AS level
+    FROM item
+    WHERE i_rec_start_date <= DATE '2002-10-01' AND (i_rec_end_date IS NULL OR i_rec_end_date >= DATE '2002-10-01')
+    UNION ALL
+    SELECT i.i_item_sk, i.i_item_desc, i.i_category_id, ih.level + 1
+    FROM item_hierarchy ih
+    JOIN item i ON ih.i_category_id = i.i_category_id AND ih.level < 10
+),
+customer_orders AS (
+    SELECT c.c_customer_sk, c.c_customer_id, ws.ws_item_sk, 
+           COALESCE(SUM(ws.ws_quantity), 0) AS total_order_quantity,
+           COUNT(ws.ws_order_number) AS order_count
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN item_hierarchy ih ON ws.ws_item_sk = ih.i_item_sk
+    WHERE c.c_birth_year <= (EXTRACT(YEAR FROM DATE '2002-10-01') - 18)
+    GROUP BY c.c_customer_sk, c.c_customer_id, ws.ws_item_sk
+),
+order_summary AS (
+    SELECT c.c_customer_id,
+           SUM(COALESCE(o.total_order_quantity, 0)) AS total_quantity,
+           COUNT(o.order_count) AS total_orders
+    FROM customer_orders o
+    JOIN customer c ON o.c_customer_sk = c.c_customer_sk
+    GROUP BY c.c_customer_id
+)
+SELECT c.c_customer_id, cs.total_quantity, cs.total_orders,
+       (CASE
+           WHEN cs.total_orders = 0 THEN 'No Orders'
+           WHEN cs.total_quantity < 10 THEN 'Low Volume'
+           WHEN cs.total_quantity BETWEEN 10 AND 50 THEN 'Medium Volume'
+           ELSE 'High Volume'
+       END) AS order_category,
+       (SELECT SUM(sr_return_quantity)
+        FROM store_returns sr
+        WHERE sr.sr_customer_sk = c.c_customer_sk) AS total_returns,
+       (SELECT SUM(wr_return_quantity)
+        FROM web_returns wr
+        WHERE wr.wr_returning_customer_sk = c.c_customer_sk) AS total_web_returns
+FROM order_summary cs
+JOIN customer c ON cs.c_customer_id = c.c_customer_id
+WHERE EXISTS (
+    SELECT 1 FROM customer_demographics cd
+    WHERE cd.cd_demo_sk = c.c_current_cdemo_sk AND cd.cd_gender = 'F'
+    GROUP BY cd.cd_demo_sk, cd.cd_gender
+    HAVING COUNT(CASE WHEN cd.cd_marital_status = 'M' THEN 1 END) > 0
+)
+ORDER BY cs.total_quantity DESC
+OFFSET (SELECT COUNT(*) FROM customer) / 10 ROWS
+FETCH NEXT 10 ROWS ONLY;

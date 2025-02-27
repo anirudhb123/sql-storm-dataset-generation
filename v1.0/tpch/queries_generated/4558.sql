@@ -1,0 +1,63 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(s.total_available, 0) AS total_available,
+    s.avg_supply_cost,
+    COALESCE(c.order_count, 0) AS customer_order_count,
+    coalesce(c.total_spent, 0) AS customer_total_spent,
+    CASE 
+        WHEN r.order_rank <= 5 THEN 'Top Order'
+        WHEN r.order_rank > 5 AND r.order_rank <= 10 THEN 'Mid Order'
+        ELSE 'Low Order'
+    END AS order_category
+FROM 
+    part p
+LEFT JOIN 
+    SupplierStats s ON p.p_partkey = s.ps_partkey
+LEFT JOIN 
+    CustomerOrders c ON p.p_partkey = c.c_custkey
+LEFT JOIN 
+    RankedOrders r ON r.o_orderkey = (
+        SELECT MAX(o_orderkey) 
+        FROM orders 
+        WHERE o_orderkey < p.p_partkey
+    )
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    AND (s.total_available > 100 OR c.order_count IS NULL)
+ORDER BY 
+    p.p_partkey
+LIMIT 100;

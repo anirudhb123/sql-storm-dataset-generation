@@ -1,0 +1,55 @@
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MAX(ws.ws_sold_date_sk) AS last_purchase_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+),
+HighSpenders AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_spent,
+        cs.order_count,
+        cs.last_purchase_date,
+        DATEDIFF(cast('2002-10-01' as date), FROM_UNIXTIME(cs.last_purchase_date)) AS days_since_last_purchase
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.total_spent > (SELECT AVG(total_spent) FROM CustomerSales)
+),
+TopHighSpenders AS (
+    SELECT 
+        hs.c_customer_id,
+        hs.total_spent,
+        hs.order_count,
+        hs.last_purchase_date,
+        hs.days_since_last_purchase,
+        RANK() OVER (ORDER BY hs.total_spent DESC) AS spend_rank
+    FROM 
+        HighSpenders hs
+)
+SELECT 
+    t.c_customer_id,
+    CONCAT(t.c_first_name, ' ', t.c_last_name) AS full_name,
+    t.total_spent,
+    t.order_count,
+    t.last_purchase_date,
+    t.days_since_last_purchase
+FROM 
+    TopHighSpenders t
+JOIN 
+    customer_demographics cd ON t.c_customer_id = cd.cd_demo_sk
+WHERE 
+    cd.cd_gender = 'F' 
+    AND cd.cd_marital_status = 'M'
+ORDER BY 
+    t.total_spent DESC
+LIMIT 10;

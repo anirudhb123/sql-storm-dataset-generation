@@ -1,0 +1,94 @@
+
+WITH UserSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty,
+        AVG(COALESCE(C.ViewCount, 0)) AS AverageViewCount,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8 
+    LEFT JOIN 
+        (SELECT PostId, SUM(ViewCount) AS ViewCount
+         FROM Posts 
+         GROUP BY PostId) C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        * 
+    FROM 
+        UserSummary 
+    WHERE 
+        ReputationRank <= 10
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(C.Id) AS CommentCount,
+        MAX(PH.CreationDate) AS LastEdited,
+        P.Title,
+        P.CreationDate,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBountyOnPost
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 10) 
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate
+),
+UserPostInteraction AS (
+    SELECT 
+        U.UserId,
+        P.PostId,
+        CASE 
+            WHEN V.VoteTypeId IS NULL THEN 'No Vote' 
+            ELSE VT.Name 
+        END AS VoteType,
+        PP.Title AS PostTitle
+    FROM 
+        TopUsers U
+    LEFT JOIN 
+        Votes V ON U.UserId = V.UserId
+    LEFT JOIN 
+        Posts P ON V.PostId = P.Id
+    LEFT JOIN 
+        VoteTypes VT ON V.VoteTypeId = VT.Id
+    LEFT JOIN 
+        PostActivity PP ON P.Id = PP.PostId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COUNT(DISTINCT P.PostId) AS InteractedPostCount,
+    STRING_AGG(DISTINCT UI.PostTitle, '; ') AS InteractedPostTitles,
+    SUM(CASE WHEN UI.VoteType != 'No Vote' THEN 1 ELSE 0 END) AS TotalVotes,
+    MAX(P.LastEdited) AS LastPostEdited,
+    AVG(P.AverageViewCount) AS AverageViewsFromTopUsers
+FROM 
+    TopUsers U
+JOIN 
+    UserPostInteraction UI ON U.UserId = UI.UserId
+JOIN 
+    PostActivity P ON UI.PostId = P.PostId
+GROUP BY 
+    U.DisplayName, U.Reputation
+HAVING 
+    COUNT(DISTINCT P.PostId) > 5 
+    AND AVG(P.AverageViewCount) > (SELECT AVG(ViewCount) 
+                                     FROM Posts)
+ORDER BY 
+    U.Reputation DESC;

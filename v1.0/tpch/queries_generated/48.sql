@@ -1,0 +1,73 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(ps.ps_supplycost * l.l_quantity) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+NationSales AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        SUM(SupplierSales.total_cost) AS total_nation_sales
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        SupplierSales ON s.s_suppkey = SupplierSales.s_suppkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' OR o.o_orderkey IS NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RankedSales AS (
+    SELECT 
+        n.n_name,
+        ns.total_nation_sales,
+        RANK() OVER (ORDER BY ns.total_nation_sales DESC) AS nation_rank
+    FROM 
+        NationSales ns
+)
+
+SELECT 
+    cs.c_name, 
+    cs.order_count, 
+    cs.total_spent, 
+    rs.n_name AS top_nation,
+    rs.nation_rank,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No Orders'
+        WHEN cs.total_spent > 5000 THEN 'High Value Customer'
+        ELSE 'Standard Customer'
+    END AS customer_type
+FROM 
+    CustomerOrders cs
+FULL OUTER JOIN 
+    RankedSales rs ON cs.total_spent > rs.total_nation_sales
+WHERE 
+    rs.nation_rank <= 5 OR rs.nation_rank IS NULL
+ORDER BY 
+    cs.total_spent DESC NULLS LAST;

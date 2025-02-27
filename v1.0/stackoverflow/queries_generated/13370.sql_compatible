@@ -1,0 +1,45 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS Questions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS Answers,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.LikeScore) AS AvgScore
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    ur.UserId,
+    ur.Reputation,
+    ur.PostCount,
+    ur.BadgeCount,
+    ps.TotalPosts,
+    ps.Questions,
+    ps.Answers,
+    ps.TotalViews,
+    ps.AvgScore
+FROM 
+    UserReputation ur
+LEFT JOIN 
+    PostStatistics ps ON ur.UserId = ps.OwnerUserId
+ORDER BY 
+    ur.Reputation DESC;

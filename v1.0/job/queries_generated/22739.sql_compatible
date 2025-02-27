@@ -1,0 +1,99 @@
+
+WITH RecursiveActors AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ' ORDER BY t.production_year) AS movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        a.person_id, a.name
+), RecursiveRoles AS (
+    SELECT 
+        r.role,
+        COUNT(DISTINCT ci.movie_id) AS role_count
+    FROM 
+        role_type r
+    LEFT JOIN 
+        cast_info ci ON r.id = ci.role_id
+    GROUP BY 
+        r.role
+), ArtisticContributions AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT mc.company_id) AS production_companies,
+        COUNT(DISTINCT k.keyword) AS keyword_count,
+        AVG(m.production_year) AS avg_production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        complete_cast c
+    JOIN 
+        movie_companies mc ON c.movie_id = mc.movie_id
+    JOIN 
+        movie_keyword mk ON c.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title m ON c.movie_id = m.movie_id
+    GROUP BY 
+        c.movie_id
+), PerformanceBenchmark AS (
+    SELECT 
+        rec.person_id,
+        a.name,
+        r.role AS role_name,
+        r.role_count,
+        rec.movie_count,
+        rec.movies,
+        ac.production_companies,
+        ac.keyword_count,
+        ac.avg_production_year,
+        ac.keywords
+    FROM 
+        RecursiveActors rec
+    LEFT JOIN 
+        RecursiveRoles r ON r.role_count > 2 
+    JOIN 
+        ArtisticContributions ac ON ac.movie_id IN (
+            SELECT 
+                ci.movie_id 
+            FROM 
+                complete_cast ci 
+            WHERE 
+                ci.subject_id = r.role_count
+        )
+    LEFT JOIN 
+        aka_name a ON a.person_id = rec.person_id
+    WHERE 
+        r.role IS NOT NULL
+        AND rec.movie_count > 1
+        AND a.name NOT LIKE '%unknown%'
+)
+SELECT 
+    person_id,
+    name,
+    role_name,
+    role_count,
+    movie_count,
+    movies,
+    production_companies,
+    keyword_count,
+    avg_production_year,
+    keywords,
+    CASE 
+        WHEN role_count > 5 THEN 'Veteran Actor'
+        WHEN movie_count BETWEEN 1 AND 3 THEN 'Newcomer'
+        ELSE 'Regular Actor'
+    END AS actor_category
+FROM 
+    PerformanceBenchmark
+ORDER BY 
+    movie_count DESC, role_count DESC, name ASC
+FETCH FIRST 10 ROWS ONLY;

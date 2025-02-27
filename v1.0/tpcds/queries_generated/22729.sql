@@ -1,0 +1,56 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_ext_discount_amt) AS total_discount,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') 
+                                AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    GROUP BY ws_item_sk
+),
+TopSales AS (
+    SELECT * 
+    FROM SalesData
+    WHERE sales_rank <= 10
+),
+CustomerAnalysis AS (
+    SELECT 
+        c.c_customer_sk, 
+        cd.cd_gender,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_ext_sales_price) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender
+    HAVING SUM(ws_ext_sales_price) IS NOT NULL
+),
+AverageAge AS (
+    SELECT 
+        ROUND(AVG(d_birth_year), 0) AS avg_birth_year,
+        cd.cd_gender
+    FROM customer 
+    JOIN customer_demographics cd ON customer.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c_birth_country IS NOT NULL
+    GROUP BY cd.cd_gender
+)
+SELECT 
+    ta.cd_gender,
+    ta.total_orders,
+    ta.total_spent,
+    sa.total_quantity,
+    sa.total_sales,
+    avg.avg_birth_year,
+    CASE 
+        WHEN ta.total_spent > 1000 THEN 'High Value'
+        WHEN ta.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM CustomerAnalysis ta
+JOIN TopSales sa ON ta.total_orders = sa.total_quantity
+JOIN AverageAge avg ON ta.cd_gender = avg.cd_gender
+LEFT JOIN ship_mode sm ON sa.ws_item_sk IN (SELECT sr_item_sk FROM store_sales WHERE ss_sold_date_sk IS NULL)
+ORDER BY total_spent DESC;

@@ -1,0 +1,79 @@
+WITH RECURSIVE PostHierarchies AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchies ph ON p.ParentId = ph.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN v.VoteTypeId = 10 THEN 1 ELSE 0 END) AS Deletions
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    u.DisplayName AS User,
+    ua.PostCount,
+    ua.TotalBounties,
+    ua.Upvotes,
+    ua.Downvotes,
+    ua.Deletions,
+    ph.Depth,
+    rp.Title AS RecentPost,
+    rp.CreationDate AS RecentPostDate,
+    rp.ViewCount
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    PostHierarchies ph ON ph.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ua.UserId)
+LEFT JOIN 
+    RecentPosts rp ON rp.OwnerName = ua.DisplayName AND rp.rn = 1
+WHERE 
+    ua.PostCount > 0
+ORDER BY 
+    ua.TotalBounties DESC, 
+    ua.Upvotes - ua.Downvotes DESC, 
+    rp.ViewCount DESC;

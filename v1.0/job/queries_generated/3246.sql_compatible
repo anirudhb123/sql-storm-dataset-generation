@@ -1,0 +1,56 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.id DESC) AS rn
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+actor_movies AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        rm.movie_id,
+        rm.title AS movie_title,
+        rm.production_year
+    FROM 
+        aka_name a
+        JOIN cast_info c ON a.person_id = c.person_id
+        JOIN ranked_movies rm ON c.movie_id = rm.movie_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+        JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    am.name AS actor_name,
+    am.movie_title,
+    am.production_year,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    (SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = am.movie_id) AS total_cast,
+    (SELECT COUNT(DISTINCT ccp.person_id) 
+     FROM complete_cast ccp 
+     JOIN cast_info ci ON ccp.subject_id = ci.id 
+     WHERE ci.movie_id = am.movie_id) AS distinct_roles
+FROM 
+    actor_movies am
+LEFT JOIN
+    movie_keywords mk ON am.movie_id = mk.movie_id
+WHERE 
+    am.production_year >= 2000
+    AND (
+        am.name ILIKE '%Smith%' OR 
+        am.name ILIKE '%Johnson%'
+    )
+ORDER BY 
+    am.production_year DESC, am.actor_name;

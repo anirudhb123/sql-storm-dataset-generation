@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > (SELECT AVG(ws_inner.ws_sales_price) FROM web_sales ws_inner)
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_first_name IS NOT NULL AND c.c_last_name IS NOT NULL
+    GROUP BY 
+        c.c_customer_id
+    HAVING 
+        SUM(ws.ws_net_paid) > 10000
+),
+StoreSalesData AS (
+    SELECT 
+        ss.ss_sold_date_sk,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        s.s_store_name
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE 
+        s.s_state = 'CA'
+    GROUP BY 
+        ss.ss_sold_date_sk, s.s_store_name
+)
+SELECT 
+    HVC.c_customer_id,
+    COUNT(RS.ws_order_number) AS orders_ranked,
+    COALESCE(SSD.total_net_profit, 0) AS store_net_profit,
+    (SELECT COUNT(*) FROM RankedSales WHERE sales_rank = 1 AND web_site_sk = RS.web_site_sk) AS top_sales_count
+FROM 
+    HighValueCustomers HVC
+LEFT JOIN 
+    RankedSales RS ON HVC.c_customer_id = RS.ws_order_number
+LEFT JOIN 
+    StoreSalesData SSD ON SSD.ss_sold_date_sk = (SELECT MAX(ss_sold_date_sk) FROM store_sales)
+WHERE 
+    HVC.total_spent IS NOT NULL
+GROUP BY 
+    HVC.c_customer_id
+HAVING 
+    COUNT(RS.ws_order_number) > 0 OR SSD.total_net_profit > 1000
+ORDER BY 
+    HVC.c_customer_id ASC NULLS LAST;

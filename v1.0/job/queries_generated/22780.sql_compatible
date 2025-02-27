@@ -1,0 +1,74 @@
+
+WITH RECURSIVE movie_cast AS (
+    SELECT 
+        c.movie_id,
+        a.person_id,
+        a.name AS actor_name,
+        COALESCE(ct.kind, 'Unknown') AS role_kind,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        role_type rt ON c.role_id = rt.id
+    LEFT JOIN 
+        comp_cast_type ct ON c.person_role_id = ct.id
+),
+ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(mk.id) AS keyword_count,
+        STRING_AGG(mk.keyword, ', ') AS associated_keywords
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+movie_details AS (
+    SELECT 
+        mc.movie_id,
+        mt.title,
+        mt.production_year,
+        mc.actor_name,
+        mc.role_kind,
+        mt.keyword_count,
+        mt.associated_keywords,
+        CASE 
+            WHEN mt.production_year IS NULL THEN 'Year Unknown'
+            ELSE CAST(mt.production_year AS VARCHAR)
+        END AS year_status
+    FROM 
+        movie_cast mc
+    JOIN 
+        ranked_titles mt ON mc.movie_id = mt.title_id
+)
+SELECT 
+    md.actor_name,
+    md.title,
+    md.production_year,
+    md.role_kind,
+    md.keyword_count,
+    md.associated_keywords,
+    CASE 
+        WHEN md.actor_name IS NOT NULL AND md.role_kind = 'Lead' THEN 'Starring: ' || md.actor_name
+        WHEN md.role_kind IS NULL THEN 'Role type not defined for ' || md.actor_name
+        ELSE 'Supporting Actor: ' || md.actor_name
+    END AS role_description,
+    CASE 
+        WHEN md.year_status = 'Year Unknown' 
+            THEN 'Film Year Data Missing'
+        ELSE 'Production Year: ' || md.year_status
+    END AS production_note
+FROM 
+    movie_details md
+WHERE 
+    md.keyword_count > 0 
+    OR (md.actor_name IS NOT NULL AND md.role_kind IS NOT NULL AND md.role_kind != 'Unknown')
+ORDER BY 
+    md.production_year DESC, md.title ASC;

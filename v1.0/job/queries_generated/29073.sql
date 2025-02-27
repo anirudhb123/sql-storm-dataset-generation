@@ -1,0 +1,45 @@
+WITH MovieDetails AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS aka_name,
+        t.title AS movie_title,
+        t.production_year,
+        c.role_id,
+        p.info AS person_info,
+        k.keyword AS movie_keyword
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    LEFT JOIN 
+        person_info p ON a.person_id = p.person_id
+    LEFT JOIN 
+        movie_keyword k ON t.movie_id = k.movie_id
+    WHERE 
+        t.production_year >= 2000
+        AND (p.info_type_id IS NULL OR p.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%actor%'))
+),
+AggregatedResults AS (
+    SELECT 
+        aka_name,
+        COUNT(DISTINCT movie_title) AS movie_count,
+        STRING_AGG(DISTINCT movie_keyword, ', ') AS keywords,
+        ARRAY_AGG(DISTINCT production_year ORDER BY production_year) AS years
+    FROM 
+        MovieDetails
+    GROUP BY 
+        aka_name
+)
+SELECT 
+    aka_name,
+    movie_count,
+    keywords,
+    years
+FROM 
+    AggregatedResults
+WHERE 
+    movie_count > 5
+ORDER BY 
+    movie_count DESC;

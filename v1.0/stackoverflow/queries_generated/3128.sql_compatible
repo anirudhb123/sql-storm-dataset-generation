@@ -1,0 +1,62 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+UserPerformance AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.Reputation,
+        ps.TotalPosts,
+        ps.TotalQuestions,
+        ps.TotalAnswers,
+        ps.AverageScore,
+        COALESCE(b.Count, 0) AS TotalBadges
+    FROM UserReputation ur
+    LEFT JOIN PostStats ps ON ur.UserId = ps.OwnerUserId
+    LEFT JOIN (
+        SELECT UserId, COUNT(*) AS Count
+        FROM Badges
+        GROUP BY UserId
+    ) b ON ur.UserId = b.UserId
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.Reputation,
+    up.TotalPosts,
+    up.TotalQuestions,
+    up.TotalAnswers,
+    up.AverageScore,
+    up.TotalBadges,
+    CASE 
+        WHEN up.Reputation > 1000 THEN 'High'
+        WHEN up.Reputation BETWEEN 500 AND 1000 THEN 'Medium'
+        ELSE 'Low'
+    END AS ReputationCategory,
+    COALESCE((
+        SELECT STRING_AGG(DISTINCT t.TagName, ', ')
+        FROM Posts p
+        JOIN unnest(string_to_array(p.Tags, ',')) AS tag ON tag = t.Id::TEXT
+        JOIN Tags t ON t.Id = tag::INTEGER
+        WHERE p.OwnerUserId = up.UserId
+    ), 'No Tags') AS MostUsedTags
+FROM UserPerformance up
+WHERE up.TotalPosts > 0
+ORDER BY up.Reputation DESC
+LIMIT 10;

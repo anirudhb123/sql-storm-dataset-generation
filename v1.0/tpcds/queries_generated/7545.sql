@@ -1,0 +1,46 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        d.d_year,
+        d.d_month_seq
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2021 AND 2022
+    GROUP BY 
+        ws.web_site_id, d.d_year, d.d_month_seq
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        SUM(sd.total_sales) AS demographic_sales
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        SalesData sd ON c.c_customer_sk = sd.web_site_id
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cd.demographic_sales,
+    RANK() OVER (ORDER BY cd.demographic_sales DESC) AS sales_rank
+FROM 
+    CustomerDemographics cd
+WHERE 
+    cd.demographic_sales > 0
+ORDER BY 
+    cd.demographic_sales DESC
+LIMIT 10;

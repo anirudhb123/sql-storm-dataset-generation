@@ -1,0 +1,69 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS hierarchy_level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        CONCAT('Sequel: ', m.title) AS title,
+        m.production_year,
+        h.hierarchy_level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        MovieHierarchy h ON m.episode_of_id = h.movie_id
+),
+AggregateMovieData AS (
+    SELECT 
+        m.id,
+        m.title,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        STRING_AGG(DISTINCT p.info, ', ') AS person_details,
+        AVG(CASE WHEN mi.info_type_id = 1 THEN LENGTH(mi.info) END) AS avg_info_length,
+        SUM(CASE WHEN ci.role_id IS NULL THEN 1 ELSE 0 END) AS unclassified_roles
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.id
+    LEFT JOIN 
+        person_info p ON p.person_id = ci.person_id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = m.id
+    GROUP BY 
+        m.id
+),
+TopMovies AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY hierarchy_level ORDER BY actor_count DESC) AS rank
+    FROM 
+        AggregateMovieData
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(tm.actor_count, 0) AS total_actors,
+    COALESCE(tm.avg_info_length, 0) AS average_info_length,
+    tm.unclassified_roles,
+    CASE 
+        WHEN tm.actor_count IS NULL THEN 'No actors found'
+        WHEN tm.unclassified_roles > 0 THEN 'Some roles unclassified'
+        ELSE 'All roles classified'
+    END AS classification_status
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    TopMovies tm ON mh.movie_id = tm.id AND tm.rank = 1
+WHERE 
+    mh.hierarchy_level <= 3
+ORDER BY 
+    mh.hierarchy_level, total_actors DESC;

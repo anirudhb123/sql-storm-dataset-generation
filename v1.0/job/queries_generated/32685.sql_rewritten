@@ -1,0 +1,49 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        COALESCE(kt.kind, 'Unknown') AS kind,
+        1 AS level,
+        mt.id AS root_movie_id
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        kind_type kt ON mt.kind_id = kt.id
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        amt.title,
+        amt.production_year,
+        COALESCE(kt.kind, 'Unknown') AS kind,
+        mh.level + 1,
+        mh.root_movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.id
+    JOIN 
+        aka_title amt ON ml.linked_movie_id = amt.id
+    LEFT JOIN 
+        kind_type kt ON amt.kind_id = kt.id
+)
+
+SELECT 
+    mv.title AS root_movie_title,
+    mv.production_year AS root_movie_year,
+    mh.title AS linked_movie_title,
+    mh.production_year AS linked_movie_year,
+    mh.kind AS linked_movie_kind,
+    mh.level AS connection_level
+FROM 
+    movie_hierarchy mh
+JOIN 
+    aka_title mv ON mh.root_movie_id = mv.id
+WHERE 
+    mh.level <= 3
+ORDER BY 
+    mv.title, mh.level, mh.production_year DESC;

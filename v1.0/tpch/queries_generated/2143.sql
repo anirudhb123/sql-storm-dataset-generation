@@ -1,0 +1,74 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        SUM(ps.ps_availqty) AS total_available_quantity
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, n.n_name
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        COUNT(l.l_orderkey) AS lineitem_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS cust_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2021-01-01' AND o.o_orderdate < CURRENT_DATE
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.total_revenue) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        OrderSummary o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.total_revenue) > 10000
+),
+CriticalSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        sd.total_available_quantity,
+        ROW_NUMBER() OVER (ORDER BY sd.total_available_quantity DESC) AS supplier_rank
+    FROM 
+        SupplierDetails sd
+    WHERE 
+        sd.total_available_quantity < (
+            SELECT AVG(total_available_quantity) FROM SupplierDetails
+        )
+)
+SELECT 
+    tc.c_name AS top_customer,
+    cs.s_name AS critical_supplier,
+    cs.total_available_quantity,
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity_ordered
+FROM 
+    TopCustomers tc
+CROSS JOIN 
+    CriticalSuppliers cs
+LEFT JOIN 
+    lineitem l ON l.l_suppkey = cs.s_suppkey
+GROUP BY 
+    tc.c_name, cs.s_name, cs.total_available_quantity
+ORDER BY 
+    tc.total_spent DESC, cs.total_available_quantity DESC;

@@ -1,0 +1,82 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 DAY' 
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.PostHistoryTypeId
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+),
+TagViews AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        t.Count,
+        COUNT(DISTINCT p.Id) AS AssociatedPostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName, t.Count
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    ub.UserId AS PostOwnerId,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    ph.HistoryDate,
+    ph.UserDisplayName AS HistoryUser,
+    ph.Comment AS HistoryComment,
+    tv.TagId,
+    tv.TagName,
+    tv.AssociatedPostCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users ub ON rp.OwnerUserId = ub.Id
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostHistoryInfo ph ON ph.PostId = rp.PostId
+LEFT JOIN 
+    Tags tv ON tv.TagName IN (SELECT value FROM UNNEST(STRING_TO_ARRAY(rp.Tags, ',')))
+WHERE 
+    rp.Rank <= 10  
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC, rp.CreationDate DESC;

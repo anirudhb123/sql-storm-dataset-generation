@@ -1,0 +1,72 @@
+
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        c.c_name,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM
+        orders o
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE
+        o.o_orderstatus = 'O' AND o.o_totalprice > 1000
+),
+TopNations AS (
+    SELECT
+        n.n_nationkey,
+        n.n_name,
+        SUM(RankedOrders.o_totalprice) AS total_sales
+    FROM
+        nation n
+    LEFT JOIN
+        RankedOrders ON n.n_nationkey = RankedOrders.c_nationkey
+    GROUP BY
+        n.n_nationkey, n.n_name
+    HAVING
+        SUM(RankedOrders.o_totalprice) IS NOT NULL
+),
+PartSupplierStats AS (
+    SELECT
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM
+        partsupp ps
+    GROUP BY
+        ps.ps_partkey
+)
+SELECT
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COALESCE(ts.total_sales, 0) AS total_sales_by_nation,
+    COALESCE(ps.total_available, 0) AS total_available_parts,
+    ps.avg_supply_cost,
+    CASE 
+        WHEN ps.total_available IS NULL THEN 'No Supply'
+        WHEN ps.total_available < 100 THEN 'Low Supply'
+        ELSE 'Sufficient Supply'
+    END AS supply_status
+FROM
+    part p
+LEFT JOIN
+    TopNations ts ON ts.n_nationkey = (
+        SELECT 
+            c.c_nationkey 
+        FROM 
+            customer c 
+        WHERE 
+            c.c_custkey IN (SELECT o.o_custkey FROM RankedOrders)
+        FETCH FIRST 1 ROW ONLY
+    )
+LEFT JOIN
+    PartSupplierStats ps ON p.p_partkey = ps.ps_partkey
+WHERE
+    p.p_retailprice BETWEEN 10 AND 500
+ORDER BY
+    total_sales_by_nation DESC NULLS LAST, p.p_retailprice ASC;

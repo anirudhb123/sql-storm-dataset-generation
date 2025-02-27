@@ -1,0 +1,70 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_quantity DESC) AS quantity_rank
+    FROM web_sales ws
+    WHERE ws.ws_sales_price IS NOT NULL 
+    AND ws.ws_net_paid > 100 
+),
+high_value_customers AS (
+    SELECT 
+        DISTINCT c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+    HAVING total_spent > 5000
+),
+customer_locations AS (
+    SELECT 
+        c.c_customer_sk,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM customer c
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY c.c_customer_sk, ca.ca_city, ca.ca_state
+),
+top_customers AS (
+    SELECT
+        hvc.c_customer_id,
+        hvc.total_spent,
+        cl.ca_city,
+        cl.ca_state,
+        ROW_NUMBER() OVER (ORDER BY hvc.total_spent DESC) AS customer_rank
+    FROM high_value_customers hvc
+    JOIN customer_locations cl ON hvc.c_customer_id = cl.c_customer_sk
+    WHERE cl.customer_count > 1
+),
+final_results AS (
+    SELECT 
+        t.customers,
+        t.city,
+        t.state,
+        COALESCE(AVG(r.quantity_rank), 0) AS avg_quantity_rank,
+        COALESCE(AVG(r.price_rank), 0) AS avg_price_rank
+    FROM top_customers t
+    LEFT JOIN ranked_sales r ON t.c_customer_id = r.ws_item_sk
+    GROUP BY t.customers, t.city, t.state
+    HAVING SUM(r.ws_quantity) - SUM(r.ws_sales_price) NOT BETWEEN 100 AND 200 OR SUM(r.ws_quantity) IS NULL
+)
+SELECT 
+    f.customers,
+    f.city,
+    f.state,
+    CASE 
+        WHEN f.avg_quantity_rank IS NULL THEN 'No Sales'
+        WHEN f.avg_price_rank > 100 THEN 'Premium Buyer'
+        ELSE 'Standard Buyer'
+    END AS customer_type
+FROM final_results f
+ORDER BY f.state, f.city, f.avg_price_rank DESC NULLS LAST;

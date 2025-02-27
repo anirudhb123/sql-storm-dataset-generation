@@ -1,0 +1,82 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        0 AS Depth
+    FROM Posts p
+    WHERE p.ParentId IS NULL -- Start with top-level posts (questions)
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        r.Depth + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVoteStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+RecentUpdates AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= NOW() - INTERVAL '30 days'
+),
+TagAggregate AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+    HAVING COUNT(p.Id) > 10
+),
+CombinedStatistics AS (
+    SELECT 
+        ph.PostId,
+        COALESCE(pv.UpVotes, 0) AS UpVotes,
+        COALESCE(pv.DownVotes, 0) AS DownVotes,
+        COALESCE(pv.TotalVotes, 0) AS TotalVotes,
+        COALESCE(ru.CreationDate, 'No recent updates') AS LastUpdate,
+        COALESCE(ru.UserId, -1) AS LastUpdater,
+        COALESCE(ru.Comment, 'N/A') AS UpdateComment,
+        th.TagName,
+        th.PostCount,
+        th.TotalViews
+    FROM RecursivePostHierarchy ph
+    LEFT JOIN PostVoteStatistics pv ON ph.PostId = pv.PostId
+    LEFT JOIN RecentUpdates ru ON ph.PostId = ru.PostId
+    LEFT JOIN TagAggregate th ON ph.PostId = th.PostId
+)
+SELECT 
+    PostId,
+    UpVotes,
+    DownVotes,
+    TotalVotes,
+    LastUpdate,
+    LastUpdater,
+    UpdateComment,
+    TagName,
+    PostCount,
+    TotalViews
+FROM CombinedStatistics
+WHERE LastUpdater IS NOT NULL OR LastUpdater = -1
+ORDER BY UpVotes DESC, TotalViews DESC
+LIMIT 100;

@@ -1,0 +1,79 @@
+
+WITH TagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(
+            CASE 
+                WHEN pt.Name = 'Question' THEN 1 
+                ELSE 0 
+            END
+        ) AS QuestionCount,
+        SUM(
+            CASE 
+                WHEN pt.Name = 'Answer' THEN 1 
+                ELSE 0 
+            END
+        ) AS AnswerCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%') 
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        t.Id, t.TagName
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerPosts,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        TagId,
+        TagName,
+        PostCount
+    FROM 
+        TagStats
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalPosts,
+    us.QuestionPosts,
+    us.AnswerPosts,
+    pt.TagName AS PopularTag,
+    ts.PostCount AS TagPostCount,
+    us.BadgeCount
+FROM 
+    UserStats us
+JOIN 
+    PopularTags pt ON pt.TagId IN (
+        SELECT 
+            CAST(unnest(string_to_array(p.Tags, '><')) AS int)
+        FROM 
+            Posts p 
+        WHERE 
+            p.OwnerUserId = us.UserId
+    )
+JOIN 
+    TagStats ts ON ts.TagId = pt.TagId
+ORDER BY 
+    us.TotalPosts DESC, us.QuestionPosts DESC;

@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id
+AND t.phonetic_code IN ('B545', 'C2161', 'H4123', 'K6246', 'M6353', 'V4136', 'Y5652', 'Z5') AND t.md5sum IS NOT NULL AND mi.info > 'As depicted in the movie, the Tucker vehicle had rear-hinged coach doors, which would be known as "suicide doors" for their risk to rear passengers if they accidentally open while the car was in motion - ironic since the Tucker car had pioneered safety features.';

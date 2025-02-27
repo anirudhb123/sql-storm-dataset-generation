@@ -1,0 +1,60 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ci.person_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_title t ON ci.movie_id = t.id
+    WHERE 
+        ci.nr_order = 1
+),
+ActorDetails AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        h.movie_title,
+        h.production_year
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        ActorHierarchy h ON a.person_id = h.person_id
+    WHERE 
+        a.name IS NOT NULL
+),
+CoActors AS (
+    SELECT 
+        a.actor_id,
+        STRING_AGG(DISTINCT CAST(c.actor_id AS TEXT), ', ') AS co_actor_ids,
+        COUNT(DISTINCT c.actor_id) AS co_actor_count
+    FROM 
+        ActorDetails a
+    JOIN 
+        cast_info ci ON ci.movie_id IN (
+            SELECT movie_id 
+            FROM cast_info 
+            WHERE person_id = a.actor_id
+        )
+    JOIN 
+        ActorDetails c ON c.movie_title = a.movie_title AND c.actor_id != a.actor_id
+    GROUP BY 
+        a.actor_id
+)
+SELECT 
+    d.actor_name,
+    d.movie_title,
+    d.production_year,
+    COALESCE(co.co_actor_ids, 'No co-actors') AS co_actor_ids,
+    COALESCE(co.co_actor_count, 0) AS number_of_co_actors
+FROM 
+    ActorDetails d
+LEFT JOIN 
+    CoActors co ON d.actor_id = co.actor_id
+WHERE 
+    d.production_year IS NOT NULL
+ORDER BY 
+    d.production_year DESC, 
+    d.actor_name;

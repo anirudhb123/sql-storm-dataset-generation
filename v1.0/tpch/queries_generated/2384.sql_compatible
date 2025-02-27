@@ -1,0 +1,56 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS Rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice, 
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' 
+        AND o.o_orderdate < '1998-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+)
+SELECT 
+    r.r_name AS Region,
+    n.n_name AS Nation,
+    rs.s_name AS Supplier,
+    fo.o_orderkey,
+    fo.o_totalprice,
+    fo.lineitem_count,
+    CASE 
+        WHEN fo.lineitem_count > 5 THEN 'High Volume'
+        WHEN fo.lineitem_count IS NULL THEN 'No Line Items'
+        ELSE 'Regular Volume'
+    END AS OrderType,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+FROM 
+    RankedSuppliers rs
+JOIN 
+    nation n ON rs.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+RIGHT JOIN 
+    FilteredOrders fo ON fo.o_orderkey = rs.s_suppkey
+LEFT JOIN 
+    lineitem l ON fo.o_orderkey = l.l_orderkey
+WHERE 
+    rs.Rank <= 3
+GROUP BY 
+    r.r_name, n.n_name, rs.s_name, fo.o_orderkey, fo.o_totalprice, fo.lineitem_count;

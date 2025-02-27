@@ -1,0 +1,75 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_custkey,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate <= '1997-12-31'
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        SUM(o.o_totalprice) AS total_sales,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        RankedOrders ro ON c.c_custkey = ro.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+), 
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+OrderLineStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1997-01-01' AND l.l_shipdate <= '1997-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+
+SELECT 
+    co.c_custkey,
+    co.c_name,
+    co.total_sales,
+    co.order_count,
+    ss.total_parts,
+    ss.total_supply_cost,
+    ol.total_line_value,
+    ol.avg_quantity,
+    ol.unique_suppliers
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    SupplierStats ss ON co.c_custkey = ss.s_suppkey 
+LEFT JOIN 
+    OrderLineStats ol ON co.c_custkey = ol.l_orderkey
+WHERE 
+    co.total_sales > (SELECT AVG(total_sales) FROM CustomerOrders) 
+    AND co.c_acctbal IS NOT NULL
+ORDER BY 
+    co.total_sales DESC;

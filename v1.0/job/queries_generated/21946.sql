@@ -1,0 +1,97 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_movies
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ ActorDetails AS (
+    SELECT 
+        ka.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        MAX(ka.id) AS actor_id,
+        CASE 
+            WHEN COUNT(DISTINCT ci.movie_id) > 5 THEN 'Prolific Actor'
+            ELSE 'Emerging Actor'
+        END AS actor_category
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    WHERE 
+        ka.name IS NOT NULL
+    GROUP BY 
+        ka.name
+),
+ MovieGenres AS (
+    SELECT 
+        mt.movie_id,
+        GROUP_CONCAT(DISTINCT kt.keyword) AS genres
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword kt ON mk.keyword_id = kt.id
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY 
+        mt.movie_id
+),
+ ActorsAndRatings AS (
+    SELECT 
+        rd.actor_name,
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        mg.genres,
+        COALESCE(mr.rating, 'No Rating') AS rating
+    FROM 
+        ActorDetails rd
+    LEFT JOIN 
+        cast_info ci ON rd.actor_id = ci.person_role_id
+    INNER JOIN 
+        RankedMovies rm ON ci.movie_id = rm.movie_id
+    LEFT JOIN 
+        movie_info mi ON rm.movie_id = mi.movie_id 
+        AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    LEFT JOIN 
+        MovieGenres mg ON rm.movie_id = mg.movie_id
+    LEFT JOIN (
+        SELECT movie_id, 
+               MAX(info) AS rating
+        FROM movie_info
+        WHERE info_type_id IN (SELECT id FROM info_type WHERE info = 'rating')
+        GROUP BY movie_id
+    ) mr ON rm.movie_id = mr.movie_id
+),
+ FinalOutput AS (
+    SELECT 
+        aa.actor_name,
+        COUNT(DISTINCT aa.movie_id) AS films,
+        STRING_AGG(DISTINCT aa.genres) AS genres,
+        AVG(CASE WHEN aa.rating != 'No Rating' THEN CAST(aa.rating AS DECIMAL) ELSE NULL END) AS average_rating
+    FROM 
+        ActorsAndRatings aa
+    GROUP BY 
+        aa.actor_name
+)
+
+SELECT 
+    fo.actor_name,
+    fo.films,
+    fo.genres,
+    CASE 
+        WHEN fo.average_rating IS NOT NULL THEN fo.average_rating
+        ELSE 'No Ratings Available'
+    END AS average_rating
+FROM 
+    FinalOutput fo
+WHERE 
+    fo.films >= 1
+ORDER BY 
+    fo.average_rating DESC NULLS LAST 
+LIMIT 10;

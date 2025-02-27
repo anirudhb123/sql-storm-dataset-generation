@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><')) AS tagNames ON TRUE
+    JOIN 
+        Tags t ON t.TagName = tagNames
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, u.DisplayName, p.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.BadgeCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank = 1
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.Tags,
+    tp.CreationDate,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    COALESCE(badge_count_summary.BadgeCount, 0) AS BadgeCount,
+    COALESCE(vote_details.UpVotes, 0) AS UpVotes,
+    COALESCE(vote_details.DownVotes, 0) AS DownVotes,
+    COALESCE(vote_details.TotalVotes, 0) AS TotalVotes
+FROM 
+    TopPosts tp
+LEFT JOIN (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+) vote_details ON tp.PostId = vote_details.PostId
+LEFT JOIN (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+) badge_count_summary ON badge_count_summary.UserId = tp.OwnerDisplayName
+ORDER BY 
+    tp.CreationDate DESC
+LIMIT 10;

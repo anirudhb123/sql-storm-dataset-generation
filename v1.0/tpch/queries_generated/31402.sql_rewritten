@@ -1,0 +1,50 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+
+    UNION ALL
+
+    SELECT o.o_orderkey, oh.o_custkey, o.o_orderdate, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+AggregatedData AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY n.n_name
+),
+OrderInfo AS (
+    SELECT 
+        oh.o_orderkey,
+        oh.level,
+        n.n_name AS nation_name,
+        CASE 
+            WHEN o.o_orderpriority = '1-URGENT' THEN 'High Priority'
+            WHEN o.o_orderpriority = '2-HIGH' THEN 'Medium Priority'
+            ELSE 'Normal Priority'
+        END AS order_priority
+    FROM OrderHierarchy oh
+    JOIN orders o ON oh.o_orderkey = o.o_orderkey
+    JOIN nation n ON o.o_custkey = c.c_custkey
+)
+SELECT 
+    ad.nation_name,
+    ad.total_revenue,
+    ad.total_orders,
+    oi.order_priority,
+    COALESCE(oi.level, 0) AS order_level
+FROM AggregatedData ad
+LEFT JOIN OrderInfo oi ON ad.nation_name = oi.nation_name
+WHERE ad.total_revenue > 10000.00
+ORDER BY ad.total_revenue DESC, ad.nation_name;

@@ -1,0 +1,53 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        COUNT(DISTINCT CASE WHEN c.gender = 'F' THEN ws.order_number END) AS female_orders,
+        COUNT(DISTINCT CASE WHEN c.gender = 'M' THEN ws.order_number END) AS male_orders,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.customer_sk
+    JOIN 
+        item i ON ws.item_sk = i.item_sk
+    WHERE 
+        ws.sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) 
+                          AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND i.category_id IN (SELECT DISTINCT i_category_id FROM item WHERE i_price > 50)
+    GROUP BY 
+        ws.web_site_id
+), 
+ReturnsData AS (
+    SELECT 
+        wr.web_site_id,
+        SUM(wr.return_amt) AS total_return_amount,
+        COUNT(DISTINCT wr.order_number) AS total_returns
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.returned_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        wr.web_site_id
+)
+SELECT 
+    sd.web_site_id,
+    sd.total_net_profit,
+    sd.total_orders,
+    rd.total_return_amount,
+    rd.total_returns,
+    (sd.total_net_profit - COALESCE(rd.total_return_amount, 0)) AS net_profit_after_returns,
+    CASE 
+        WHEN sd.total_orders > 0 THEN ROUND((rd.total_returns::decimal / sd.total_orders) * 100, 2)
+        ELSE 0
+    END AS return_rate_percentage
+FROM 
+    SalesData sd
+LEFT JOIN 
+    ReturnsData rd ON sd.web_site_id = rd.web_site_id
+WHERE 
+    sd.profit_rank <= 10
+ORDER BY 
+    net_profit_after_returns DESC;

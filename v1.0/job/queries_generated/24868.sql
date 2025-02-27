@@ -1,0 +1,54 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    JOIN aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND a.name IS NOT NULL
+),
+MostAcclaimed AS (
+    SELECT 
+        rt.actor_name, 
+        COUNT(DISTINCT t.id) AS total_movies,
+        AVG(m.info) AS average_rating
+    FROM 
+        RankedTitles rt
+    LEFT JOIN movie_info m ON rt.movie_title = m.info
+    GROUP BY 
+        rt.actor_name
+    HAVING 
+        COUNT(DISTINCT rt.movie_title) > 5 
+        AND AVG(m.info) > 7
+),
+MoviesWithKeywords AS (
+    SELECT 
+        t.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title t
+    JOIN movie_keyword mk ON t.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id 
+    GROUP BY 
+        t.id
+)
+SELECT 
+    ma.actor_name,
+    mwk.movie_id,
+    mwk.keywords
+FROM 
+    MostAcclaimed ma
+LEFT JOIN MoviesWithKeywords mwk ON ma.total_movies = mwk.movie_id
+WHERE 
+    ma.average_rating IS NOT NULL 
+    AND mwk.keywords LIKE '%Drama%'
+    OR mwk.keywords IS NULL
+ORDER BY 
+    ma.actor_name, 
+    mwk.keywords;
+

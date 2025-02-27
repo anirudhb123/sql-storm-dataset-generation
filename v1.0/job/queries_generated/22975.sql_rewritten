@@ -1,0 +1,60 @@
+WITH movie_cast AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        c.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+), 
+movie_details AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(m.movie_id) AS total_companies,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies m ON t.id = m.movie_id
+    LEFT JOIN 
+        company_name cn ON m.company_id = cn.id
+    GROUP BY 
+        t.id
+),
+actor_movie_info AS (
+    SELECT 
+        mc.movie_id,
+        mc.actor_name,
+        md.title,
+        md.production_year,
+        CASE 
+            WHEN md.total_companies > 0 THEN md.company_names 
+            ELSE 'No Companies' 
+        END AS companies_info
+    FROM 
+        movie_cast mc
+    JOIN 
+        movie_details md ON mc.movie_id = md.title_id
+)
+
+SELECT 
+    ami.actor_name,
+    ami.title,
+    ami.production_year,
+    ami.companies_info,
+    MAX(CASE WHEN ami.production_year IS NOT NULL THEN 'Has Year' ELSE 'No Year' END) AS production_year_status,
+    COUNT(DISTINCT ami.movie_id) OVER (PARTITION BY ami.actor_name) AS movie_count
+FROM 
+    actor_movie_info ami
+WHERE 
+    ami.actor_name NOT LIKE '%[0-9]%'  
+    AND ami.actor_order <= 5           
+ORDER BY 
+    ami.actor_name, 
+    ami.production_year DESC NULLS LAST;

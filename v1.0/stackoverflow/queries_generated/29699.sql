@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tagArray ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tagArray
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, pt.Name, u.DisplayName
+),
+TagWeights AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = p.ExcerptPostId OR t.Id = p.WikiPostId
+    GROUP BY 
+        t.TagName
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.TagName,
+        tw.PostCount,
+        tw.AvgViewCount,
+        rp.Rank
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TagWeights tw ON rp.Tags LIKE '%' || tw.TagName || '%'
+    WHERE 
+        rp.Rank <= 10 
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    ViewCount,
+    AnswerCount,
+    CommentCount,
+    Score,
+    OwnerDisplayName,
+    Tags,
+    PostCount,
+    AvgViewCount
+FROM 
+    FinalResults
+ORDER BY 
+    Score DESC, ViewCount DESC;

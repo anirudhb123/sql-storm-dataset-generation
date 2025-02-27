@@ -1,0 +1,62 @@
+WITH 
+    movie_role_stats AS (
+        SELECT 
+            c.movie_id,
+            COUNT(DISTINCT c.person_id) AS unique_cast_count,
+            COUNT(c.id) AS total_roles,
+            AVG(CASE WHEN r.role IS NOT NULL THEN 1 ELSE 0 END) AS average_roles_per_cast,
+            STRING_AGG(DISTINCT r.role, ', ') AS roles_list
+        FROM 
+            cast_info c
+        LEFT JOIN 
+            role_type r ON c.role_id = r.id
+        GROUP BY 
+            c.movie_id
+    ),
+    movie_year_filtered AS (
+        SELECT 
+            a.production_year,
+            a.title,
+            a.id AS movie_id,
+            COALESCE(mrs.unique_cast_count, 0) AS unique_cast_count,
+            COALESCE(mrs.total_roles, 0) AS total_roles,
+            COALESCE(mrs.average_roles_per_cast, 0) AS average_roles_per_cast,
+            COALESCE(mrs.roles_list, 'None') AS roles_list
+        FROM 
+            aka_title a
+        LEFT JOIN 
+            movie_role_stats mrs ON a.id = mrs.movie_id
+        WHERE 
+            a.production_year IS NOT NULL
+            AND a.production_year > 2000
+    ),
+    movie_info_with_keywords AS (
+        SELECT 
+            m.movie_id,
+            STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+        FROM 
+            movie_keyword mk
+        JOIN 
+            keyword k ON mk.keyword_id = k.id
+        JOIN 
+            title m ON mk.movie_id = m.id
+        GROUP BY 
+            m.movie_id
+    )
+SELECT 
+    myf.title,
+    myf.production_year,
+    myf.unique_cast_count,
+    myf.total_roles,
+    ROUND(myf.average_roles_per_cast, 2) AS avg_roles_per_cast,
+    myf.roles_list,
+    COALESCE(mik.keywords, 'No Keywords') AS keywords
+FROM 
+    movie_year_filtered myf
+LEFT JOIN 
+    movie_info_with_keywords mik ON myf.movie_id = mik.movie_id
+ORDER BY 
+    myf.production_year DESC,
+    myf.unique_cast_count DESC,
+    myf.total_roles ASC
+LIMIT 100;

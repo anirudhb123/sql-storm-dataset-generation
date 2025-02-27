@@ -1,0 +1,74 @@
+WITH RECURSIVE monthly_sales AS (
+    SELECT 
+        d.d_year, 
+        d.d_month_seq, 
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq
+    UNION ALL
+    SELECT 
+        ms.d_year,
+        ms.d_month_seq, 
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM 
+        monthly_sales ms
+    JOIN 
+        date_dim d ON ms.d_year = d.d_year AND ms.d_month_seq = d.d_month_seq
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE 
+        d.d_month_seq > ms.d_month_seq
+    GROUP BY 
+        ms.d_year, ms.d_month_seq
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_id, 
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+high_spenders AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_spent,
+        RANK() OVER (ORDER BY cs.total_spent DESC) AS spending_rank
+    FROM 
+        customer_sales cs
+    WHERE 
+        cs.total_spent IS NOT NULL
+),
+address_details AS (
+    SELECT 
+        ca.ca_address_id, 
+        ca.ca_city, 
+        ca.ca_state
+    FROM 
+        customer_address ca
+    LEFT JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+)
+SELECT 
+    h.c_customer_id, 
+    h.total_spent, 
+    ad.ca_city, 
+    ad.ca_state, 
+    ms.total_sales
+FROM 
+    high_spenders h
+JOIN 
+    address_details ad ON h.c_customer_id = ad.ca_address_id
+LEFT JOIN 
+    monthly_sales ms ON ms.d_year = EXTRACT(YEAR FROM cast('2002-10-01' as date))
+WHERE 
+    h.spending_rank <= 10
+ORDER BY 
+    h.total_spent DESC;

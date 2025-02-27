@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9 -- BountyClose
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserAchievements AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(u.Reputation) AS MaxReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.Rank,
+    ua.BadgeCount,
+    ua.MaxReputation,
+    cp.CloseCount,
+    cp.LastClosedDate,
+    CASE 
+        WHEN cp.CloseCount IS NOT NULL THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus,
+    CASE 
+        WHEN rp.TotalBounties > 0 THEN 'Bountied'
+        ELSE 'Not Bountied'
+    END AS BountyStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserAchievements ua ON rp.OwnerUserId = ua.UserId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.Rank <= 3
+ORDER BY 
+    rp.Score DESC, ua.MaxReputation DESC;

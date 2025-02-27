@@ -1,0 +1,55 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_availqty, 
+        ps.ps_supplycost, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY ps.ps_availqty DESC, ps.ps_supplycost ASC) AS rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_size > 10 AND 
+        p.p_retailprice < (SELECT AVG(p_retailprice) FROM part) 
+),
+TopRankedParts AS (
+    SELECT 
+        rp.p_partkey, 
+        rp.p_name, 
+        rp.ps_availqty, 
+        rp.ps_supplycost 
+    FROM 
+        RankedParts rp 
+    WHERE 
+        rp.rank <= 5
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        c.c_custkey, 
+        c.c_name, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, c.c_custkey, c.c_name, o.o_orderdate
+)
+SELECT 
+    TOP 10 
+    co.o_orderkey, 
+    co.c_name, 
+    co.total_revenue, 
+    trp.p_name, 
+    trp.ps_availqty 
+FROM 
+    CustomerOrders co
+JOIN 
+    TopRankedParts trp ON co.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = trp.p_partkey)
+ORDER BY 
+    co.total_revenue DESC;

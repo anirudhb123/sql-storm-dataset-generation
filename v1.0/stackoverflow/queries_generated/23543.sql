@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.Score, 
+        P.CreationDate, 
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.Score IS NOT NULL 
+        AND P.ViewCount > 100
+),
+TopPosts AS (
+    SELECT 
+        RP.PostId, 
+        RP.Title, 
+        RP.Score,
+        U.DisplayName AS OwnerDisplayName,
+        PH.UserDisplayName AS LastEditorDisplayName
+    FROM 
+        RankedPosts RP
+    JOIN 
+        Users U ON RP.PostId IN (
+            SELECT 
+                P.Id 
+            FROM 
+                Posts P 
+            WHERE 
+                P.OwnerUserId = U.Id
+        )
+    LEFT JOIN 
+        Posts LastEdited ON RP.PostId = LastEdited.Id
+    LEFT JOIN 
+        PostHistory PH ON PH.PostId = RP.PostId AND PH.CreationDate = LastEdited.LastEditDate
+    WHERE 
+        RP.Rank = 1
+),
+VoteSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        P.Id
+),
+BadgedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        B.Name AS BadgeName,
+        B.Class
+    FROM 
+        Users U
+    JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        B.Class = 1 OR B.Class = 2 -- Gold or Silver
+)
+SELECT 
+    TP.PostId,
+    TP.Title,
+    TP.Score,
+    TP.OwnerDisplayName,
+    TP.LastEditorDisplayName,
+    COALESCE(VS.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(VS.DownVotes, 0) AS TotalDownVotes,
+    CASE 
+        WHEN BU.UserId IS NOT NULL THEN 'Has High Reputation User'
+        ELSE 'No High Reputation User Associated'
+    END AS HighReputationAssociation,
+    CASE 
+        WHEN P.ClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus
+FROM 
+    TopPosts TP
+LEFT JOIN 
+    VoteSummary VS ON TP.PostId = VS.PostId
+LEFT JOIN 
+    BadgedUsers BU ON TP.OwnerDisplayName = BU.UserId
+WHERE 
+    TP.Score > (SELECT AVG(Score) FROM Posts) -- Posts having above average scores
+ORDER BY 
+    TP.Score DESC
+LIMIT 50
+OFFSET 0;

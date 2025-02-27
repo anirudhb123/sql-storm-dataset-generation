@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(Tags, '>')) AS Tag, 
+        COUNT(*) AS TagCount
+    FROM 
+        Posts 
+    GROUP BY 
+        Tag
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.CommentCount,
+    rp.VoteCount,
+    pt.Tag,
+    pt.TagCount
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.UserPostRank = 1 AND u.Id = rp.OwnerUserId
+JOIN 
+    PopularTags pt ON pt.Tag = ANY(STRING_TO_ARRAY(rp.Tags, '>'))
+WHERE 
+    rp.VoteCount > 5
+ORDER BY 
+    rp.ViewCount DESC, rp.Score DESC
+LIMIT 25;

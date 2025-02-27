@@ -1,0 +1,63 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        cd.cd_dep_employed_count,
+        cd.cd_dep_college_count
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_sales_price,
+        DATE_FORMAT(DATE_ADD(DATE(d.d_date), INTERVAL 1 DAY), '%Y-%m-%d') AS next_day,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws.ws_sales_price, DATE_FORMAT(DATE_ADD(DATE(d.d_date), INTERVAL 1 DAY), '%Y-%m-%d')
+),
+Benchmark AS (
+    SELECT 
+        ci.full_name,
+        ci.ca_city,
+        ci.ca_state,
+        ci.ca_country,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        SUM(sd.total_orders) AS total_sales,
+        AVG(sd.ws_sales_price) AS avg_price
+    FROM 
+        CustomerInfo AS ci
+    JOIN 
+        SalesData AS sd ON ci.cd_purchase_estimate >= 1000 
+    GROUP BY 
+        ci.full_name, ci.ca_city, ci.ca_state, ci.ca_country, ci.cd_gender, ci.cd_marital_status
+)
+SELECT 
+    b.*,
+    CASE 
+        WHEN b.avg_price > 50 THEN 'High Value Customer'
+        WHEN b.avg_price BETWEEN 20 AND 50 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_segment
+FROM 
+    Benchmark AS b
+WHERE 
+    b.total_sales > 10
+ORDER BY 
+    b.total_sales DESC, b.full_name;

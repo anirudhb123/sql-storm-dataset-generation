@@ -1,0 +1,64 @@
+WITH RECURSIVE customer_purchasing AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_spent,
+           1 AS depth
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+    HAVING COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) > 0
+
+    UNION ALL
+
+    SELECT cp.c_custkey, cp.c_name, cp.c_acctbal,
+           cp.total_spent + COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0),
+           cp.depth + 1
+    FROM customer_purchasing cp 
+    JOIN orders o ON cp.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE cp.depth < 5
+    GROUP BY cp.c_custkey, cp.c_name, cp.c_acctbal, cp.total_spent, cp.depth
+),
+
+supplier_details AS (
+    SELECT s.s_suppkey, s.s_name, 
+           COUNT(DISTINCT ps.ps_partkey) AS parts_count,
+           SUM(ps.ps_supplycost) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING COUNT(DISTINCT ps.ps_partkey) > 10
+),
+
+nation_summary AS (
+    SELECT n.n_nationkey, n.n_name,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING supplier_count > 0
+    ORDER BY total_acctbal DESC
+)
+
+SELECT 
+    cp.c_name AS customer_name,
+    ns.n_name AS nation_name,
+    sd.s_name AS supplier_name,
+    cp.total_spent AS total_spent,
+    ns.total_acctbal AS total_nation_account_balance,
+    sd.parts_count AS parts_handled,
+    ROW_NUMBER() OVER (PARTITION BY ns.n_name ORDER BY cp.total_spent DESC) AS rank_within_nation
+FROM customer_purchasing cp
+JOIN nation_summary ns ON cp.c_acctbal > ns.total_acctbal / NULLIF(ns.supplier_count, 0)
+LEFT JOIN supplier_details sd ON sd.total_supplycost < cp.total_spent
+WHERE EXISTS (
+    SELECT 1 
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_custkey = cp.c_custkey 
+    AND l.l_shipdate < CURRENT_DATE - INTERVAL '1 year'
+    AND l.l_returnflag = 'R'
+)
+ORDER BY ns.n_name, cp.total_spent DESC
+FETCH FIRST 100 ROWS ONLY;

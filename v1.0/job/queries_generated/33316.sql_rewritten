@@ -1,0 +1,70 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        et.id AS movie_id,
+        et.title,
+        et.production_year,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_movie_id
+    FROM 
+        aka_title et
+    INNER JOIN 
+        movie_hierarchy mh ON et.episode_of_id = mh.movie_id
+),
+cast_count AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast 
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+actor_details AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name AS actor_name,
+        MAX(CASE WHEN pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birth date') THEN pi.info END) AS birth_date,
+        MAX(CASE WHEN pi.info_type_id = (SELECT id FROM info_type WHERE info = 'death date') THEN pi.info END) AS death_date
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        person_info pi ON ak.person_id = pi.person_id
+    GROUP BY 
+        ak.id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    COALESCE(cc.total_cast, 0) AS total_cast,
+    COUNT(DISTINCT ad.actor_id) AS unique_actors,
+    STRING_AGG(ad.actor_name, ', ') AS actor_list
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_count cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    actor_details ad ON ci.person_id = ad.actor_id
+WHERE 
+    mh.production_year >= 2000 
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level, cc.total_cast
+ORDER BY 
+    mh.production_year DESC, mh.title
+LIMIT 100;

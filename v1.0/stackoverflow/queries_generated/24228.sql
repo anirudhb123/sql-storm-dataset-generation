@@ -1,0 +1,92 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotesCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id, p.Title
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRowNum
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- 10: Post Closed, 11: Post Reopened
+),
+PostRanking AS (
+    SELECT 
+        pe.PostId,
+        pe.Title,
+        pe.CommentCount,
+        pe.UpVotes,
+        pe.DownVotes,
+        (pe.UpVotes - pe.DownVotes) AS Score,
+        RANK() OVER (ORDER BY (pe.UpVotes - pe.DownVotes) DESC, pe.CommentCount DESC) AS PostRank
+    FROM 
+        PostEngagement pe
+)
+
+SELECT 
+    uvs.UserId,
+    uvs.DisplayName,
+    COALESCE(p.Title, 'No Contributions') AS PostTitle,
+    COALESCE(pr.CommentCount, 0) AS TotalComments,
+    COALESCE(pr.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(pr.DownVotes, 0) AS TotalDownVotes,
+    pr.Score AS PostScore,
+    ph.Comment AS CloseReason,
+    CASE
+        WHEN ph.PostHistoryTypeId IS NOT NULL THEN
+            CASE
+                WHEN ph.PostHistoryTypeId = 10 THEN 'Closed'
+                WHEN ph.PostHistoryTypeId = 11 THEN 'Reopened'
+            END
+        ELSE 'N/A' 
+    END AS PostStatus,
+    CASE 
+        WHEN pr.PostRank <= 10 THEN 'Top Post' 
+        ELSE 'Regular Post' 
+    END AS PostCategory
+FROM 
+    UserVoteStats uvs
+LEFT JOIN 
+    PostRanking pr ON uvs.UserId = pr.PostId
+LEFT JOIN 
+    ClosedPostHistory ph ON pr.PostId = ph.PostId AND ph.HistoryRowNum = 1
+WHERE 
+    uvs.UpVotesCount > uvs.DownVotesCount
+ORDER BY 
+    uvs.Reputation DESC NULLS LAST,
+    pr.Score DESC NULLS LAST;
+
+This SQL query intricately combines multiple clauses and structures from the provided schema. It uses Common Table Expressions (CTEs) to summarize user voting behavior, post engagement metrics, and closed post history. Subsequently, it aggregates results based on several criteria, providing a comprehensive view of users along with insights into post activity and status. The query also employs window functions, conditional logic, and outer joins for maximum detail and performance benchmarking.

@@ -1,0 +1,68 @@
+
+WITH SalesCTE AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        ws.ws_item_sk
+),
+CustomerCTE AS (
+    SELECT 
+        cd.cd_demo_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' AND cd.cd_marital_status = 'M'
+    GROUP BY 
+        cd.cd_demo_sk
+),
+ReturningCustomers AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr_returning_customer_sk
+),
+AggregateReturns AS (
+    SELECT 
+        rc.returning_customer_sk,
+        rc.return_count,
+        rc.total_return_amount,
+        COALESCE(c.customer_count, 0) AS customer_count
+    FROM 
+        ReturningCustomers rc
+    LEFT JOIN 
+        CustomerCTE c ON rc.returning_customer_sk = c.cd_demo_sk
+)
+SELECT 
+    a.ws_item_sk,
+    a.total_quantity,
+    a.total_profit,
+    ar.return_count,
+    ar.total_return_amount,
+    ar.customer_count,
+    CASE 
+        WHEN ar.customer_count > 0 THEN ar.total_return_amount / ar.customer_count
+        ELSE NULL
+    END AS avg_return_per_customer
+FROM 
+    SalesCTE a
+LEFT JOIN 
+    AggregateReturns ar ON a.ws_item_sk = ar.returning_customer_sk
+WHERE 
+    a.profit_rank <= 10
+ORDER BY 
+    a.total_profit DESC;

@@ -1,0 +1,58 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM store_returns
+    GROUP BY sr_returning_customer_sk
+    HAVING SUM(sr_return_quantity) > 0
+), 
+CustomerDetails AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        ca.ca_city,
+        ca.ca_state,
+        COALESCE(cr.total_returned, 0) AS total_returned,
+        COALESCE(cr.return_count, 0) AS return_count
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.sr_returning_customer_sk
+), 
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk, 
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_bill_customer_sk
+), 
+FinalReport AS (
+    SELECT
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.ca_city,
+        cd.ca_state,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        sd.order_count,
+        cd.total_returned,
+        cd.return_count,
+        ROUND((COALESCE(sd.total_sales, 0) - cd.total_returned) / NULLIF(sd.total_sales, 0) * 100, 2) AS net_sales_percentage,
+        CASE 
+            WHEN cd.total_returned > 0 THEN 'High Return' 
+            ELSE 'Normal' 
+        END AS return_status
+    FROM CustomerDetails cd
+    LEFT JOIN SalesData sd ON cd.c_customer_sk = sd.ws_bill_customer_sk
+)
+SELECT 
+    *,
+    ROW_NUMBER() OVER (PARTITION BY return_status ORDER BY total_sales DESC) AS rank
+FROM FinalReport
+WHERE return_count > 0 OR total_sales > 0
+ORDER BY return_status, rank;

@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(c.Id) DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName) ON true
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body
+),
+TopPosts AS (
+    SELECT 
+        rp.*, 
+        CASE 
+            WHEN rp.UpVotes > 10 THEN 'Popular'
+            WHEN rp.CommentCount > 5 THEN 'Engaging'
+            ELSE 'Standard'
+        END AS EngagementLevel
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 3 -- Top 3 posts per user
+)
+SELECT 
+    u.DisplayName AS Author,
+    tp.Title,
+    tp.Body,
+    tp.CommentCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.Tags,
+    tp.EngagementLevel,
+    ARRAY_AGG(DISTINCT bh.Name) AS BadgesEarned
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON u.Id = tp.OwnerUserId
+LEFT JOIN 
+    Badges b ON b.UserId = u.Id
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = tp.PostId
+LEFT JOIN 
+    PostHistoryTypes bh ON bh.Id = ph.PostHistoryTypeId
+WHERE 
+    u.Reputation > 1000 -- Only reputable users
+GROUP BY 
+    u.DisplayName, tp.Title, tp.Body, tp.CommentCount, tp.UpVotes, tp.DownVotes, tp.Tags, tp.EngagementLevel
+ORDER BY 
+    tp.UpVotes DESC, tp.CommentCount DESC;

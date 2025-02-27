@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey -- simulate self-join for hierarchy
+),
+TotalSales AS (
+    SELECT
+        l.l_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    GROUP BY l.l_suppkey
+),
+NsWithCte AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        n.n_comment,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY n.n_nationkey) AS nation_rank
+    FROM nation n
+    WHERE n.n_comment IS NOT NULL
+),
+SalesBySupplier AS (
+    SELECT 
+        sh.s_name,
+        sh.s_acctbal,
+        ts.total_sales,
+        nwi.n_name AS nation_name,
+        ROW_NUMBER() OVER (PARTITION BY nwi.n_name ORDER BY ts.total_sales DESC) AS sales_rank
+    FROM SupplierHierarchy sh
+    LEFT JOIN TotalSales ts ON sh.s_suppkey = ts.l_suppkey
+    LEFT JOIN NsWithCte nwi ON nwi.n_nationkey = (SELECT n.n_nationkey FROM supplier s JOIN nation n ON s.s_nationkey = n.n_nationkey WHERE s.s_suppkey = sh.s_suppkey)
+    WHERE ts.total_sales IS NOT NULL
+)
+SELECT 
+    sbs.s_name,
+    sbs.s_acctbal,
+    sbs.total_sales,
+    sbs.nation_name,
+    CASE 
+        WHEN sbs.total_sales > 100000 THEN 'High'
+        WHEN sbs.total_sales BETWEEN 50000 AND 100000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM SalesBySupplier sbs
+WHERE sbs.sales_rank <= 5
+ORDER BY sbs.total_sales DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

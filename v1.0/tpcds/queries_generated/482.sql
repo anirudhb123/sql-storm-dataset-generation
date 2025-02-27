@@ -1,0 +1,47 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_sales_price) AS total_web_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_web_sales
+    FROM 
+        customer c
+    INNER JOIN 
+        CustomerSales cs ON c.c_customer_sk = cs.c_customer_sk
+    WHERE 
+        cs.total_web_sales > (SELECT AVG(total_web_sales) FROM CustomerSales)
+)
+SELECT 
+    c.c_first_name || ' ' || c.c_last_name AS full_name,
+    COALESCE(hvc.total_web_sales, 0) AS total_sales,
+    CASE 
+        WHEN hvc.total_web_sales IS NOT NULL THEN 'High Value'
+        ELSE 'Regular'
+    END AS customer_type,
+    COUNT(ret.wr_order_number) AS total_returns,
+    SUM(ret.wr_return_amt) AS total_returned_amount
+FROM 
+    customer c
+LEFT JOIN 
+    web_returns ret ON c.c_customer_sk = ret.w_returning_customer_sk
+LEFT JOIN 
+    HighValueCustomers hvc ON c.c_customer_sk = hvc.c_customer_sk
+GROUP BY 
+    c.c_customer_sk, c.c_first_name, c.c_last_name, hvc.total_web_sales
+ORDER BY 
+    total_sales DESC, c.c_last_name ASC;

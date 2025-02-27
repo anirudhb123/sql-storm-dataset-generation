@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(v.Id) OVER (PARTITION BY p.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+),
+PostHistoryAggregate AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11, 12) THEN 1 END) AS StatusChangeCount,
+        MAX(ph.CreationDate) AS LastStatusChangeDate
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON t.Id = COALESCE(p.ExcerptPostId, p.WikiPostId)
+    GROUP BY t.TagName
+    HAVING COUNT(p.Id) < (SELECT AVG(PostCount) FROM (SELECT COUNT(*) AS PostCount FROM Posts GROUP BY Tags) AS PostCounts)
+),
+ClosedPostAnalytics AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.UserId) AS UniqueEditors,
+        STRING_AGG(DISTINCT u.DisplayName, ', ') AS EditorNames
+    FROM PostHistory ph
+    JOIN Users u ON ph.UserId = u.Id
+    WHERE ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.ScoreRank,
+    pha.StatusChangeCount,
+    pha.LastStatusChangeDate,
+    pt.TagName,
+    pt.PostCount,
+    cpa.UniqueEditors,
+    cpa.EditorNames
+FROM RankedPosts rp
+LEFT JOIN PostHistoryAggregate pha ON rp.PostId = pha.PostId
+LEFT JOIN PopularTags pt ON pt.PostCount < 10 -- Only include under-utilized tags
+LEFT JOIN ClosedPostAnalytics cpa ON rp.PostId = cpa.PostId
+WHERE rp.Score > COALESCE((SELECT AVG(Score) FROM RankedPosts), 0)
+AND rp.ViewCount IS NOT NULL
+ORDER BY rp.Score DESC, rp.CreationDate DESC
+LIMIT 100;

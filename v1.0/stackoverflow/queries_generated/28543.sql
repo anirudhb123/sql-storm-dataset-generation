@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreatedAt,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        ARRAY_LENGTH(STRING_TO_ARRAY(p.Tags, '<>'), 1) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.ViewCount,
+    rp.Score,
+    rp.OwnerDisplayName,
+    rp.OwnerReputation,
+    rp.RankByScore,
+    ARRAY_AGG(DISTINCT t.TagName) AS AssociatedTags,
+    COALESCE((
+        SELECT STRING_AGG(DISTINCT c.Text, '; ')
+        FROM Comments c
+        WHERE c.PostId = rp.PostId
+    ), 'No comments') AS Comments,
+    COALESCE((
+        SELECT COUNT(*)
+        FROM Votes v
+        WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2 -- Upvotes
+    ), 0) AS UpvoteCount,
+    COALESCE((
+        SELECT COUNT(*)
+        FROM Votes v
+        WHERE v.PostId = rp.PostId AND v.VoteTypeId = 3 -- Downvotes
+    ), 0) AS DownvoteCount
+FROM
+    RankedPosts rp
+LEFT JOIN 
+    unnest(STRING_TO_ARRAY(rp.Tags, '<>')) AS tagID ON TRUE
+LEFT JOIN 
+    Tags t ON tagID = t.TagName
+WHERE 
+    rp.RankByScore <= 5 -- Get top 5 questions per user
+GROUP BY 
+    rp.PostId, rp.Title, rp.Body, rp.ViewCount, rp.Score, rp.OwnerDisplayName, 
+    rp.OwnerReputation, rp.RankByScore
+ORDER BY 
+    rp.OwnerReputation DESC, rp.Score DESC;

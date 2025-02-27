@@ -1,0 +1,55 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ss_item_sk, 
+        SUM(ss_quantity) AS total_quantity, 
+        SUM(ss_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ss_item_sk ORDER BY SUM(ss_quantity) DESC) as sales_rank
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_item_sk
+), 
+TopSales AS (
+    SELECT 
+        sd.ss_item_sk, 
+        sd.total_quantity, 
+        sd.total_sales,
+        i.i_item_desc,
+        i.i_current_price,
+        c.c_first_name,
+        c.c_last_name
+    FROM 
+        SalesData sd
+    JOIN 
+        item i ON sd.ss_item_sk = i.i_item_sk
+    JOIN 
+        customer c ON c.c_customer_sk = (SELECT ss_customer_sk FROM store_sales WHERE ss_item_sk = sd.ss_item_sk LIMIT 1)
+    WHERE 
+        sd.sales_rank <= 10
+),
+CustomerIncome AS (
+    SELECT 
+        cd.cd_income_band_sk, 
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer c
+        LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+        LEFT JOIN income_band cd ON hd.hd_income_band_sk = cd.ib_income_band_sk
+    GROUP BY 
+        cd.cd_income_band_sk
+)
+SELECT 
+    ts.i_item_desc,
+    ts.total_quantity,
+    ts.total_sales,
+    CASE 
+        WHEN ci.customer_count IS NULL THEN 'No customers'
+        ELSE CAST(ci.customer_count AS VARCHAR)
+    END AS total_customers,
+    'Item Sold' AS sales_status
+FROM 
+    TopSales ts
+LEFT JOIN 
+    CustomerIncome ci ON ts.ss_item_sk = ci.cd_income_band_sk;
+

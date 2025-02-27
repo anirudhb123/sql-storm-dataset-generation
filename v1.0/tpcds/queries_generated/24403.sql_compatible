@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price) AS sales_rank
+    FROM 
+        web_sales AS ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL 
+        AND ws.ws_net_profit > 0
+),
+FilteredSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        SUM(rs.ws_sales_price) AS total_sales,
+        SUM(rs.ws_net_profit) AS total_profit
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.profit_rank <= 5
+    GROUP BY 
+        rs.ws_item_sk
+),
+SalesComparison AS (
+    SELECT 
+        f.ws_item_sk,
+        f.total_sales,
+        f.total_profit,
+        CASE 
+            WHEN f.total_profit > 1000 THEN 'High Profit'
+            WHEN f.total_profit BETWEEN 500 AND 1000 THEN 'Moderate Profit'
+            ELSE 'Low Profit'
+        END AS profit_category
+    FROM 
+        FilteredSales f
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    sc.ws_item_sk,
+    sc.total_sales,
+    sc.total_profit,
+    sc.profit_category
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    SalesComparison sc ON sc.ws_item_sk IN (
+        SELECT ws_item_sk
+        FROM store_sales
+        WHERE ss_quantity > 10
+        EXCEPT
+        SELECT ws_item_sk
+        FROM catalog_sales
+        WHERE cs_quantity < 5
+    )
+WHERE 
+    c.c_customer_id IS NOT NULL
+    AND ca.ca_city IS NOT NULL
+ORDER BY 
+    ca.ca_state ASC, 
+    sc.total_profit DESC
+FETCH FIRST 100 ROWS ONLY;

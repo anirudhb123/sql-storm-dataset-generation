@@ -1,0 +1,66 @@
+
+WITH processed_addresses AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        UPPER(ca_city) AS city_upper,
+        LEFT(ca_zip, 5) AS zip_prefix
+    FROM 
+        customer_address
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name,
+        d.d_date AS first_purchase_date,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim d ON c.c_first_sales_date_sk = d.d_date_sk
+),
+inventory_summary AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 20000101 AND 20230101
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    ca.full_address,
+    ci.customer_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    is.total_quantity,
+    ss.total_sales,
+    ss.total_orders
+FROM 
+    processed_addresses ca
+JOIN 
+    customer_info ci ON ci.c_customer_sk IN (SELECT DISTINCT sr_customer_sk FROM store_returns)  
+LEFT JOIN 
+    inventory_summary is ON is.inv_item_sk IN (SELECT DISTINCT sr_item_sk FROM store_returns)
+LEFT JOIN 
+    sales_summary ss ON ss.ws_item_sk IN (SELECT DISTINCT sr_item_sk FROM store_returns)
+WHERE 
+    ca.zip_prefix = '90210'
+ORDER BY 
+    ss.total_sales DESC
+LIMIT 100;

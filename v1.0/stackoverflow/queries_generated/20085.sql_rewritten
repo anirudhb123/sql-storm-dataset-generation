@@ -1,0 +1,81 @@
+WITH UserVotingStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON V.PostId = P.Id
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id
+),
+PostEngagement AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        COALESCE(CAST((SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS INT), 0) AS CommentCount,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswer,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+ClosedPostReasons AS (
+    SELECT 
+        PH.PostId,
+        STRING_AGG(CAST(CR.Name AS varchar), ', ') AS CloseReasons
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CR ON PH.Comment::text::int = CR.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        PH.PostId
+),
+FinalReport AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        COUNT(E.PostId) AS EngagedPosts,
+        SUM(E.ViewCount) AS TotalViews,
+        SUM(E.CommentCount) AS TotalComments,
+        COALESCE(CR.CloseReasons, 'No Reasons') AS CloseReasonSummary,
+        ROW_NUMBER() OVER (ORDER BY COUNT(E.PostId) DESC, SUM(E.ViewCount) DESC) AS UserRank
+    FROM 
+        UserVotingStats U
+    LEFT JOIN 
+        PostEngagement E ON U.UserId = E.UserId
+    LEFT JOIN 
+        ClosedPostReasons CR ON E.PostId = CR.PostId
+    GROUP BY 
+        U.UserId, U.DisplayName, CR.CloseReasons
+)
+SELECT 
+    FR.UserId,
+    FR.DisplayName,
+    FR.EngagedPosts,
+    FR.TotalViews,
+    FR.TotalComments,
+    FR.CloseReasonSummary,
+    CASE 
+        WHEN FR.EngagedPosts > 10 THEN 'Highly Engaged'
+        WHEN FR.EngagedPosts BETWEEN 5 AND 10 THEN 'Moderately Engaged'
+        ELSE 'Less Engaged'
+    END AS EngagementLevel
+FROM 
+    FinalReport FR
+WHERE 
+    FR.UserRank <= 50
+ORDER BY 
+    FR.TotalViews DESC, FR.EngagedPosts DESC
+LIMIT 100;

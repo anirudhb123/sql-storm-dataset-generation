@@ -1,0 +1,67 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        COALESCE(cd.cd_gender, 'N/A') AS gender,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married' 
+            WHEN cd.cd_marital_status = 'S' THEN 'Single' 
+            ELSE 'Unknown' 
+        END AS marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        SUBSTRING(c.c_email_address FROM POSITION('@' IN c.c_email_address) + 1) AS domain
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesSummary AS (
+    SELECT
+        ws.bill_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MAX(ws.ws_sold_date_sk) AS last_purchase_date
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.bill_customer_sk
+),
+CombinedInfo AS (
+    SELECT 
+        ci.full_name,
+        ci.gender,
+        ci.marital_status,
+        ci.cd_purchase_estimate,
+        ci.cd_credit_rating,
+        ci.ca_city,
+        ci.ca_state,
+        ci.ca_country,
+        ci.domain,
+        ss.total_sales,
+        ss.order_count,
+        ss.last_purchase_date
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        SalesSummary ss ON ci.c_customer_id = ss.bill_customer_sk
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_sales > 10000 THEN 'High Value'
+        WHEN total_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    CombinedInfo
+WHERE 
+    ca_city LIKE '%York%'
+ORDER BY 
+    total_sales DESC, last_purchase_date DESC;

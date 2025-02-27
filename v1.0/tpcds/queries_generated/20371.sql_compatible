@@ -1,0 +1,60 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        SUM(ws.ext_discount_amt) AS total_discount,
+        COUNT(ws.order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        ws.bill_customer_sk
+),
+ReturnedSales AS (
+    SELECT 
+        wp.wp_web_page_id,
+        SUM(wr.return_amt) AS total_returned,
+        COUNT(DISTINCT wr.order_number) AS return_count
+    FROM 
+        web_returns wr 
+    JOIN 
+        web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    GROUP BY 
+        wp.wp_web_page_id
+),
+FilteredSales AS (
+    SELECT 
+        sd.bill_customer_sk,
+        sd.total_sales,
+        sd.total_discount,
+        sd.order_count,
+        rs.total_returned,
+        COALESCE(sd.total_sales - rs.total_returned, sd.total_sales) AS net_sales,
+        DENSE_RANK() OVER (ORDER BY COALESCE(sd.total_sales - rs.total_returned, sd.total_sales) DESC) AS net_sales_rank
+    FROM 
+        SalesData sd
+    LEFT JOIN 
+        ReturnedSales rs ON sd.bill_customer_sk = rs.wp_web_page_id
+)
+SELECT 
+    fs.bill_customer_sk,
+    fs.total_sales,
+    fs.total_discount,
+    fs.order_count,
+    fs.total_returned,
+    CASE 
+        WHEN fs.net_sales >= 10000 THEN 'High Value'
+        WHEN fs.net_sales BETWEEN 5000 AND 9999 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    FilteredSales fs
+WHERE 
+    fs.net_sales > 0
+    AND fs.total_discount IS NOT NULL
+ORDER BY 
+    fs.net_sales DESC
+LIMIT 10 OFFSET (SELECT COUNT(DISTINCT bill_customer_sk) / 10 FROM FilteredSales);

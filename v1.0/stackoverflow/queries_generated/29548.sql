@@ -1,0 +1,62 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostsCreated,
+        COUNT(DISTINCT C.Id) AS CommentsMade,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvotesReceived,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvotesReceived,
+        SUM(CASE WHEN B.UserId IS NOT NULL THEN 1 ELSE 0 END) AS BadgesEarned
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+ActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostsCreated,
+        CommentsMade,
+        UpvotesReceived,
+        DownvotesReceived,
+        BadgesEarned,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserActivity
+    WHERE PostsCreated > 5 OR CommentsMade > 10
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate > CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY P.Id, P.Title, P.ViewCount
+    ORDER BY Upvotes DESC, TotalComments DESC
+    LIMIT 10
+)
+SELECT 
+    AU.DisplayName AS UserName,
+    AU.Reputation,
+    AU.PostsCreated,
+    AU.CommentsMade,
+    AU.UpvotesReceived,
+    AU.DownvotesReceived,
+    AU.BadgesEarned,
+    PP.Title AS PopularPostTitle,
+    PP.ViewCount,
+    PP.Upvotes,
+    PP.TotalComments
+FROM ActiveUsers AU
+JOIN PopularPosts PP ON PP.Upvotes > 10
+ORDER BY AU.ReputationRank, PP.Upvotes DESC;

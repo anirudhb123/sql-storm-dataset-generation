@@ -1,0 +1,49 @@
+
+WITH UserPostCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS PostRank
+    FROM 
+        UserPostCounts
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.PostCount,
+    U.QuestionCount,
+    U.AnswerCount,
+    ROUND(AVG(V.BountyAmount)) AS AvgBountyAmount,
+    COUNT(DISTINCT C.Id) AS TotalComments,
+    COUNT(DISTINCT BA.Id) AS TotalBadges
+FROM 
+    TopUsers U
+LEFT JOIN 
+    Votes V ON U.UserId = V.UserId
+LEFT JOIN 
+    Comments C ON U.UserId = C.UserId
+LEFT JOIN 
+    Badges BA ON U.UserId = BA.UserId
+WHERE 
+    U.PostRank <= 10
+GROUP BY 
+    U.UserId, U.DisplayName, U.PostCount, U.QuestionCount, U.AnswerCount
+ORDER BY 
+    U.PostCount DESC;

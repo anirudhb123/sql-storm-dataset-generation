@@ -1,0 +1,25 @@
+SELECT 
+    CONCAT('Part Name: ', p_name, ', Brand: ', p_brand, ', Size: ', p_size) AS PartDetails,
+    REPLACE(p_comment, 'cheap', 'affordable') AS UpdatedComment,
+    SUBSTR(r_name, 1, 3) AS ShortRegionName,
+    COUNT(DISTINCT s_nationkey) OVER (PARTITION BY p_partkey) AS UniqueNationCount,
+    COUNT(DISTINCT c_custkey) OVER (PARTITION BY p_partkey) AS CustomerCount,
+    AVG(ps_supplycost) AS AverageSupplyCost
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p_p_retailprice > 50.00
+GROUP BY 
+    p.p_partkey, p_name, p_brand, p_size, r_name, p_comment
+ORDER BY 
+    AverageSupplyCost DESC, PartDetails ASC;

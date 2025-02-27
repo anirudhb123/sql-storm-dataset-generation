@@ -1,0 +1,46 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.nationkey = sh.nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) AND sh.level < 3
+),
+OrderAgg AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o 
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey 
+    WHERE o.o_orderdate >= DATE '1997-01-01' 
+      AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY o.o_custkey
+),
+CustomerRanked AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           RANK() OVER (ORDER BY COALESCE(SUM(oa.total_revenue), 0) DESC) AS revenue_rank
+    FROM customer c
+    LEFT JOIN OrderAgg oa ON c.c_custkey = oa.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, r.r_name,
+           COUNT(DISTINCT ps.ps_partkey) AS parts_supplied,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN nation n ON s.n_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey, s.s_name, r.r_name
+)
+SELECT DISTINCT c.c_name, c.c_acctbal, sh.level, sd.s_name, sd.parts_supplied, sd.total_supply_cost
+FROM CustomerRanked c
+JOIN SupplierHierarchy sh ON c.c_custkey = sh.nationkey
+JOIN SupplierDetails sd ON sh.s_suppkey = sd.s_suppkey 
+WHERE c.revenue_rank <= 10 
+   OR (sd.total_supply_cost > 100000 AND sd.parts_supplied > 5)
+ORDER BY c.c_acctbal DESC, sh.level;

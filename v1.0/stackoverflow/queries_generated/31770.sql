@@ -1,0 +1,95 @@
+WITH RECURSIVE UserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        U.CreationDate,
+        0 AS TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 0
+
+    UNION ALL
+
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        U.CreationDate,
+        COALESCE((SELECT SUM(B.BountyAmount) 
+                   FROM Votes V 
+                   WHERE V.UserId = U.Id 
+                   AND V.VoteTypeId = 8), 0) AS TotalBounty,
+        -- Recompute rank based on total bounty in recursive part
+        ROW_NUMBER() OVER (ORDER BY COALESCE((SELECT SUM(B.BountyAmount) 
+                                                FROM Votes V 
+                                                WHERE V.UserId = U.Id 
+                                                AND V.VoteTypeId = 8), 0) DESC) AS Rank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 0
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate AS PostCreationDate,
+        P.Score,
+        COUNT(C.ID) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        COUNT(PostId) AS PostCount,
+        SUM(Score) AS TotalScore,
+        AVG(ViewCount) AS AvgViewCount
+    FROM 
+        Posts
+    GROUP BY 
+        UserId
+    ORDER BY 
+        TotalScore DESC
+    LIMIT 10
+)
+
+SELECT 
+    U.DisplayName AS UserName,
+    Us.Reputation,
+    Us.TotalBounty,
+    PD.Title AS PostTitle,
+    PD.Score AS PostScore,
+    PD.CommentCount,
+    PD.UpVoteCount,
+    PD.DownVoteCount,
+    ROW_NUMBER() OVER (PARTITION BY PD.PostId ORDER BY PD.Score DESC) AS PostRank
+FROM 
+    UserScores Us
+JOIN 
+    TopUsers TU ON Us.UserId = TU.UserId
+JOIN 
+    PostDetails PD ON TU.UserId = PD.OwnerUserId
+WHERE 
+    Us.Reputation >= 1000
+ORDER BY 
+    Us.TotalBounty DESC, Us.Reputation DESC;

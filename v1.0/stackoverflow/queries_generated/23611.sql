@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpvotesCount,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownvotesCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+LatestPostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.RankByScore,
+        lp.CommentCount,
+        lp.LastCommentDate,
+        (rp.UpvotesCount - rp.DownvotesCount) AS NetVotes,
+        CASE 
+            WHEN lp.CommentCount IS NULL THEN 'No Comments'
+            ELSE 'Has Comments'
+        END AS CommentStatus,
+        CASE 
+            WHEN rp.CreationDate <= NOW() - INTERVAL '30 days' THEN 'Old'
+            ELSE 'Recent'
+        END AS PostAge
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        LatestPostComments lp ON rp.PostId = lp.PostId
+    WHERE 
+        rp.RankByScore <= 5
+)
+
+SELECT 
+    pd.P​ostId,
+    pd.Title,
+    pd.CommentCount,
+    pd.LastCommentDate,
+    pd.NetVotes,
+    pd.CommentStatus,
+    pd.PostAge,
+    CASE 
+        WHEN pd.NetVotes > 10 THEN 'Popular'
+        WHEN pd.NetVotes BETWEEN 1 AND 10 THEN 'Moderately Popular'
+        ELSE 'Unpopular'
+    END AS PopularityRanking,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Posts p ON pd.PostId = p.Id
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT unnest(string_to_array(p.Tags, '><'))::int)
+GROUP BY 
+    pd.PostId, pd.Title, pd.CommentCount, pd.LastCommentDate, pd.NetVotes, pd.CommentStatus, pd.PostAge
+ORDER BY 
+    pd.NetVotes DESC, pd.CommentCount DESC;

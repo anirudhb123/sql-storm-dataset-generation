@@ -1,0 +1,44 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS order_level
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, oh.order_level + 1
+    FROM orders oh
+    JOIN OrderHierarchy oh_h ON oh_h.o_orderkey = oh.o_orderkey
+),
+AggregatedCosts AS (
+    SELECT
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE l.l_shipdate >= DATE '2023-06-01'
+    GROUP BY n.n_name
+),
+TopRevenue AS (
+    SELECT n_name, total_revenue,
+           RANK() OVER (ORDER BY total_revenue DESC) AS revenue_rank
+    FROM AggregatedCosts
+)
+SELECT 
+    p.p_name,
+    ps.ps_supplycost,
+    COALESCE(SUM(oh.o_totalprice), 0) AS total_order_value,
+    COUNT(DISTINCT c.c_custkey) AS num_customers,
+    (SELECT COUNT(*) FROM nation) AS total_nations,
+    (SELECT COUNT(DISTINCT s.s_suppkey) FROM supplier s) AS total_suppliers
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN OrderHierarchy oh ON oh.o_orderkey = ps.ps_supkey
+LEFT JOIN customer c ON c.c_custkey = oh.o_orderkey
+WHERE p.p_size BETWEEN 10 AND 50
+AND (ps.ps_availqty IS NOT NULL OR ps.ps_supplycost < 100)
+GROUP BY p.p_name, ps.ps_supplycost
+HAVING COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY total_order_value DESC, p.p_name
+FETCH FIRST 10 ROWS ONLY;

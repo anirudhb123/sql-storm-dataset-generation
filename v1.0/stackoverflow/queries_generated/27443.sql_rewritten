@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY STRING_AGG(DISTINCT TRIM(tag.TagName), ', ') 
+                           ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(DISTINCT tag.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tag(tag) ON TRUE
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.LastActivityDate, u.DisplayName, p.ViewCount, p.Score
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.Rank,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5 AND 
+        rp.ViewCount > 100 
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.OwnerDisplayName,
+    fp.ViewCount,
+    fp.Score,
+    fp.Tags,
+    COALESCE(subquery.BadgeCount, 0) AS BadgeCount, 
+    CASE 
+        WHEN fp.Score > 10 THEN 'Highly Rated'
+        WHEN fp.Score BETWEEN 5 AND 10 THEN 'Moderately Rated'
+        ELSE 'Low Rated'
+    END AS RatingCategory
+FROM 
+    FilteredPosts fp
+LEFT JOIN (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount 
+    FROM 
+        Badges b
+    JOIN 
+        Users u ON b.UserId = u.Id
+    GROUP BY 
+        b.UserId
+) subquery ON subquery.UserId = fp.OwnerDisplayName
+ORDER BY 
+    fp.Score DESC, 
+    fp.ViewCount DESC;

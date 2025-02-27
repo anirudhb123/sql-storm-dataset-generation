@@ -1,0 +1,82 @@
+
+WITH RankedCustomerReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(sr_item_sk) AS total_returns,
+        SUM(sr_return_qty) AS total_return_quantity,
+        SUM(sr_return_amt) AS total_return_amount,
+        RANK() OVER (PARTITION BY sr_returning_customer_sk ORDER BY SUM(sr_return_amt) DESC) AS return_rank
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        sr_returning_customer_sk
+),
+CustomerDemographicsWithIncome AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        COALESCE(cd.cd_credit_rating, 'Unknown') AS credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+ExtensiveAnalysis AS (
+    SELECT 
+        dem.c_customer_sk,
+        dem.c_first_name,
+        dem.c_last_name,
+        dem.cd_gender,
+        dem.cd_marital_status,
+        dem.cd_purchase_estimate,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        CASE WHEN cr.total_returns IS NULL THEN 'No Returns' ELSE 'Returns Made' END AS return_status,
+        CASE 
+            WHEN cr.total_return_quantity IS NULL THEN 'Not Applicable' 
+            ELSE CASE 
+                WHEN cr.total_return_quantity > 5 THEN 'High' 
+                WHEN cr.total_return_quantity BETWEEN 1 AND 5 THEN 'Medium' 
+                ELSE 'Low' 
+            END 
+        END AS return_quality
+    FROM 
+        CustomerDemographicsWithIncome dem
+    LEFT JOIN 
+        RankedCustomerReturns cr ON dem.c_customer_sk = cr.sr_returning_customer_sk
+),
+FinalResults AS (
+    SELECT 
+        e.*,
+        ROW_NUMBER() OVER (ORDER BY e.total_returns DESC NULLS LAST) AS num_rank,
+        CONCAT(e.c_first_name, ' ', e.c_last_name) AS full_name
+    FROM 
+        ExtensiveAnalysis e
+)
+SELECT 
+    f.full_name,
+    f.cd_gender,
+    f.cd_marital_status,
+    f.cd_purchase_estimate,
+    f.return_status,
+    f.return_quality,
+    (SELECT AVG(total_return_amount) FROM RankedCustomerReturns) AS average_return_value,
+    (SELECT COUNT(DISTINCT c_customer_sk) FROM customer WHERE c_birth_year BETWEEN 1980 AND 2000) AS millennials_count
+FROM 
+    FinalResults f
+WHERE 
+    f.cd_gender = 'F' AND
+    (SELECT SUM(ss_net_profit) FROM store_sales WHERE ss_customer_sk = f.c_customer_sk) > 1000
+ORDER BY 
+    f.num_rank, f.cd_purchase_estimate DESC;

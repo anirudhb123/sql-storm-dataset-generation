@@ -1,0 +1,70 @@
+
+WITH supplier_summary AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+order_summary AS (
+    SELECT
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-02-01'
+    GROUP BY
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+customer_revenue AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(os.total_revenue), 0) AS total_revenue
+    FROM
+        customer c
+    LEFT JOIN
+        order_summary os ON c.c_custkey = os.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+region_stats AS (
+    SELECT
+        n.n_regionkey,
+        r.r_name,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers,
+        AVG(cs.total_revenue) AS avg_customer_revenue
+    FROM
+        nation n
+    JOIN
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN
+        customer_revenue cs ON n.n_nationkey = cs.c_custkey
+    GROUP BY
+        n.n_regionkey, r.r_name
+)
+SELECT
+    rs.r_name,
+    rs.unique_customers,
+    rs.avg_customer_revenue,
+    ss.s_name,
+    ss.total_available_quantity,
+    ss.avg_supply_cost
+FROM
+    region_stats rs
+JOIN
+    supplier_summary ss ON rs.unique_customers > 10
+ORDER BY
+    rs.avg_customer_revenue DESC,
+    ss.total_available_quantity DESC;

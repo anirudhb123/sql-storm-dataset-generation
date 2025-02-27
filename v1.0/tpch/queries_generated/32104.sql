@@ -1,0 +1,34 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS level
+    FROM orders
+    WHERE o_orderdate >= DATE '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT o.orderkey, o.custkey, o.orderdate, o.totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_customerkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    AVG(SUM(l.l_extendedprice * (1 - l.l_discount))) OVER (PARTITION BY p.p_partkey) AS avg_sales_per_part,
+    CASE 
+        WHEN s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000 THEN 'High Balance'
+        WHEN s.s_acctbal IS NULL THEN 'Unknown Balance'
+        ELSE 'Regular Balance'
+    END AS supplier_balance_category,
+    COALESCE(n.n_name, 'No Nation') AS nation_name,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey 
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+WHERE o.o_orderstatus IN ('O', 'F') 
+    AND l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+GROUP BY p.p_partkey, p.p_name, s.s_acctbal, n.n_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 0
+ORDER BY total_sales DESC, p.p_partkey;

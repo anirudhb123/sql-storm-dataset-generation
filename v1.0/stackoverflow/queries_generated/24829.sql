@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score IS NOT NULL 
+        AND p.CreationDate >= DATEADD(year, -1, GETDATE())
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+ClosedPosts AS (
+    SELECT 
+        PostId,
+        MIN(CreationDate) AS FirstCloseDate
+    FROM 
+        PostHistory
+    WHERE 
+        PostHistoryTypeId = 10
+    GROUP BY 
+        PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostLinkCounts AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS LinkCount
+    FROM 
+        PostLinks
+    GROUP BY 
+        PostId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.Score,
+    PV.UpVotes,
+    PV.DownVotes,
+    COALESCE(CP.FirstCloseDate, 'Not Closed') AS FirstCloseDate,
+    UB.BadgeCount,
+    UB.BadgeNames,
+    PLC.LinkCount,
+    CASE 
+        WHEN p.Rank = 1 THEN 'Top Post' 
+        ELSE 'Regular Post' 
+    END AS PostRankDescription
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    PostVoteCounts PV ON p.PostId = PV.PostId
+LEFT JOIN 
+    ClosedPosts CP ON p.PostId = CP.PostId
+LEFT JOIN 
+    UserBadges UB ON p.OwnerUserId = UB.UserId
+LEFT JOIN 
+    PostLinkCounts PLC ON p.PostId = PLC.PostId
+WHERE 
+    p.Rank <= 3
+ORDER BY 
+    p.FollowedDate DESC, p.Score DESC;

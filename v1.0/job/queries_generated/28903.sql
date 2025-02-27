@@ -1,0 +1,48 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        ak.name AS actor_name,
+        ct.kind AS company_type,
+        COUNT(mk.keyword) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY mt.production_year DESC) AS movie_rank
+    FROM 
+        aka_title mt
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    WHERE 
+        mt.production_year >= 2000
+    GROUP BY 
+        mt.id, mt.title, mt.production_year, ak.name, ct.kind
+),
+PopularMovies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        actor_name,
+        company_type,
+        keyword_count
+    FROM 
+        RankedMovies
+    WHERE 
+        movie_rank <= 5
+)
+SELECT 
+    pm.movie_title,
+    pm.production_year,
+    pm.actor_name,
+    pm.company_type,
+    pm.keyword_count
+FROM 
+    PopularMovies pm
+ORDER BY 
+    pm.production_year DESC,
+    pm.keyword_count DESC;

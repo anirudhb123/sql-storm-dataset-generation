@@ -1,0 +1,61 @@
+
+WITH actor_movie_info AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        a.imdb_index AS actor_imdb_index,
+        t.title AS movie_title,
+        t.production_year AS movie_year,
+        c.kind AS role_type,
+        STRING_AGG(DISTINCT k.keyword, ', ' ORDER BY k.keyword) AS keywords
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    JOIN 
+        role_type c ON ci.role_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        a.id, a.name, a.imdb_index, t.title, t.production_year, c.kind
+),
+company_movie_info AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year AS movie_year,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        title m
+    JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        ct.kind = 'Distributor'
+)
+SELECT 
+    ami.actor_id,
+    ami.actor_name,
+    ami.actor_imdb_index,
+    ami.movie_title,
+    ami.movie_year,
+    ami.role_type,
+    ami.keywords,
+    cmi.company_name,
+    cmi.company_type
+FROM 
+    actor_movie_info ami
+JOIN 
+    company_movie_info cmi ON ami.movie_title = cmi.movie_title AND ami.movie_year = cmi.movie_year
+ORDER BY 
+    ami.movie_year DESC, ami.actor_name;

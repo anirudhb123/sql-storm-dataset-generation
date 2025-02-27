@@ -1,0 +1,64 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.id) AS rank
+    FROM 
+        title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+actor_stats AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        AVG(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS average_with_notes
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.person_id, a.name
+),
+movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COALESCE(k.keyword, 'No Keyword') AS keyword,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        MAX(r.rank) AS highest_rank,
+        t.production_year
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword k ON t.id = k.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        ranked_movies r ON t.id = r.movie_id
+    GROUP BY 
+        t.id, t.title, k.keyword, t.production_year
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.keyword,
+    md.company_count,
+    COALESCE(as.person_id, 0) AS actor_id,
+    as.name AS actor_name,
+    as.movie_count,
+    as.average_with_notes
+FROM 
+    movie_details md
+LEFT JOIN 
+    actor_stats as ON md.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = as.person_id)
+WHERE 
+    md.company_count > 1 
+    AND (md.keyword IS NOT NULL AND md.keyword != 'No Keyword')
+ORDER BY 
+    md.production_year DESC,
+    md.company_count DESC
+LIMIT 50;

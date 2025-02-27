@@ -1,0 +1,87 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(*) > 10 
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserId,
+        (SELECT COUNT(*) FROM PostHistory ph2 WHERE ph2.PostId = ph.PostId AND ph2.PostHistoryTypeId = 11) AS ReopenCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+VoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    rp.Title,
+    rp.PostRank,
+    mu.TotalPosts,
+    mu.QuestionCount,
+    mu.AnswerCount,
+    cp.CreationDate AS CloseDate,
+    cp.Comment AS CloseComment,
+    cp.ReopenCount,
+    vs.UpVotes,
+    vs.DownVotes,
+    CASE 
+        WHEN cp.ReopenCount > 0 THEN 'Yes'
+        ELSE 'No'
+    END AS HasBeenReopened
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+JOIN 
+    MostActiveUsers mu ON up.Id = mu.UserId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    VoteSummary vs ON rp.PostId = vs.PostId
+WHERE 
+    rp.PostRank <= 3 
+ORDER BY 
+    up.Reputation DESC, 
+    rp.ViewCount DESC;

@@ -1,0 +1,57 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::text[])
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN pht.Name = 'Edit Title' THEN ph.CreationDate END) AS LastEditTitleDate,
+        MAX(CASE WHEN pht.Name = 'Edit Body' THEN ph.CreationDate END) AS LastEditBodyDate,
+        SUM(CASE WHEN pht.Name IN ('Post Closed', 'Post Reopened') THEN 1 ELSE 0 END) AS CloseReopenCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON pht.Id = ph.PostHistoryTypeId
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.Tags,
+    rp.CommentCount,
+    COALESCE(pht.LastEditTitleDate, 'Never Edited') AS LastEditTitleDate,
+    COALESCE(pht.LastEditBodyDate, 'Never Edited') AS LastEditBodyDate,
+    pht.CloseReopenCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryStats pht ON pht.PostId = rp.PostId
+WHERE 
+    rp.Rank = 1 
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC, rp.CreationDate DESC
+LIMIT 100;

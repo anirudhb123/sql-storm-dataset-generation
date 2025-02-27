@@ -1,0 +1,71 @@
+
+WITH SalesData AS (
+    SELECT 
+        cs.cs_item_sk, 
+        cs.cs_order_number, 
+        SUM(cs.cs_quantity) AS total_quantity, 
+        SUM(cs.cs_sales_price) AS total_sales_price,
+        SUM(cs.cs_ext_discount_amt) AS total_discount,
+        cs.cs_sold_date_sk
+    FROM 
+        catalog_sales cs
+    INNER JOIN 
+        date_dim dd ON cs.cs_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 
+        AND dd.d_month_seq BETWEEN 1 AND 6 
+    GROUP BY 
+        cs.cs_item_sk, 
+        cs.cs_order_number, 
+        cs.cs_sold_date_sk
+),
+
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE 
+            WHEN cd.cd_purchase_estimate < 10000 THEN 'Low' 
+            WHEN cd.cd_purchase_estimate BETWEEN 10000 AND 30000 THEN 'Medium' 
+            ELSE 'High' 
+        END AS purchase_category
+    FROM 
+        customer_demographics cd
+),
+
+ReturnAnalysis AS (
+    SELECT 
+        cr.cr_item_sk,
+        COUNT(cr.cr_order_number) AS total_returns,
+        SUM(cr.cr_return_amount) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.cr_item_sk
+)
+
+SELECT 
+    sd.cs_item_sk,
+    COUNT(DISTINCT sd.cs_order_number) AS total_orders,
+    SUM(sd.total_quantity) AS sold_quantity,
+    SUM(sd.total_sales_price) AS total_revenue,
+    SUM(COALESCE(ra.total_returns, 0)) AS total_returns,
+    SUM(COALESCE(ra.total_return_amount, 0)) AS total_return_amount,
+    cd.cd_gender,
+    cd.purchase_category
+FROM 
+    SalesData sd
+LEFT JOIN 
+    ReturnAnalysis ra ON sd.cs_item_sk = ra.cr_item_sk
+JOIN 
+    customer c ON sd.cs_bill_customer_sk = c.c_customer_sk
+JOIN 
+    CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+GROUP BY 
+    sd.cs_item_sk, 
+    cd.cd_gender, 
+    cd.purchase_category
+ORDER BY 
+    total_revenue DESC
+LIMIT 50;

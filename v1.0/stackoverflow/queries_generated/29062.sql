@@ -1,0 +1,45 @@
+WITH PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Score,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT v.Id) AS TotalVotes
+    FROM Posts p
+    LEFT JOIN Tags t ON t.Id = ANY(STRING_TO_ARRAY(substring(p.Tags, 2, LENGTH(p.Tags)-2), '><'))::int[]
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        pm.*,
+        ROW_NUMBER() OVER (ORDER BY pm.Score DESC, pm.ViewCount DESC) AS Rank
+    FROM PostMetrics pm
+)
+
+SELECT 
+    Rank,
+    PostId,
+    Title,
+    OwnerDisplayName,
+    CreationDate,
+    LastActivityDate,
+    ViewCount,
+    AnswerCount,
+    CommentCount,
+    Score,
+    Tags
+FROM TopPosts
+WHERE Rank <= 10
+ORDER BY Score DESC, ViewCount DESC;

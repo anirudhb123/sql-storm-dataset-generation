@@ -1,0 +1,69 @@
+WITH RECURSIVE Movie_Hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+        
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        Movie_Hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    a.id AS actor_id,
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT ak.id) OVER (PARTITION BY mh.production_year) AS total_actors_per_year,
+    SUM(CASE WHEN cmp.kind IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY mh.production_year) AS total_companies_per_year,
+    string_agg(DISTINCT k.keyword, ', ') AS keywords,
+    CASE 
+        WHEN mh.production_year IS NULL THEN 'Unknown Year' 
+        ELSE CAST(mh.production_year AS TEXT) 
+    END AS year_info
+FROM 
+    Movie_Hierarchy mh
+JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id
+JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id
+JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    movie_companies cmp ON cmp.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+GROUP BY 
+    ak.id, ak.name, mh.movie_id, mh.title, mh.production_year
+ORDER BY 
+    mh.production_year DESC, COUNT(DISTINCT ak.id) DESC;
+
+### Explanation:
+1. **Recursive CTE (`Movie_Hierarchy`)**: This CTE generates a hierarchy of movies based on episodes and series, if applicable. It starts with movies classified in the `aka_title` table and recursively fetches linked movies from the `movie_link` table.
+
+2. **Main Query**: 
+   - Joins various tables (`complete_cast`, `cast_info`, `aka_name`, `movie_companies`, `movie_keyword`, `keyword`) to fetch detailed casting information and associated companies and keywords.
+   - Uses window functions to calculate:
+     - `total_actors_per_year`: Number of distinct actors starring in movies released each year.
+     - `total_companies_per_year`: Number of companies associated with movies released each year.
+   - Utilizes `CASE` to categorize movies by production year, handling NULL cases with 'Unknown Year'.
+   - Aggregates keywords associated with each movie into a single, comma-separated string.
+
+3. **Final Output**: The query results in a detailed list of actors, their respective movies, the production year, keywords associated with movies, as well as counts of distinct actors and companies per production year, ordered by production year and actor count. This provides a rich dataset for performance benchmarking and analysis.

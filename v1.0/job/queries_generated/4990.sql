@@ -1,0 +1,40 @@
+WITH Ranked_Movies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT cc.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT cc.person_id) DESC) AS ranking
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        complete_cast cc ON at.id = cc.movie_id
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+Movie_Info AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(mi.info, '; ') AS all_info,
+        MAX(CASE WHEN it.info = 'summary' THEN mi.info END) AS summary_info
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    COALESCE(mi.all_info, 'No additional info') AS additional_info,
+    COALESCE(mi.summary_info, 'No summary available') AS summary
+FROM 
+    Ranked_Movies rm
+LEFT JOIN 
+    Movie_Info mi ON rm.title = (SELECT title FROM aka_title WHERE id = mi.movie_id LIMIT 1)
+WHERE
+    rm.ranking <= 10 AND 
+    rm.cast_count > 0
+ORDER BY 
+    rm.production_year DESC, rm.cast_count DESC;

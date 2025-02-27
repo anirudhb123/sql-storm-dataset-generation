@@ -1,0 +1,38 @@
+
+WITH CustomerSales AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(COALESCE(ws.ws_net_paid, 0) + COALESCE(cs.cs_net_paid, 0) + COALESCE(ss.ss_net_paid, 0)) AS total_sales
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_sales,
+        DENSE_RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM CustomerSales cs
+    JOIN customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE cs.total_sales > 0
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_sales,
+    d.d_year,
+    COUNT(DISTINCT wd.ws_order_number) AS total_orders,
+    SUM(COALESCE(wd.ws_ext_tax, 0)) AS total_taxes
+FROM TopCustomers tc
+JOIN web_sales wd ON tc.c_customer_sk = wd.ws_bill_customer_sk
+JOIN date_dim d ON wd.ws_sold_date_sk = d.d_date_sk
+WHERE tc.sales_rank <= 10
+GROUP BY tc.c_customer_sk, tc.c_first_name, tc.c_last_name, d.d_year
+ORDER BY total_sales DESC, d.d_year DESC;

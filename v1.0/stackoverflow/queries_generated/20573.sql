@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.CreationDate,
+           p.Score,
+           p.ViewCount,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= (CURRENT_DATE - INTERVAL '1 year')
+      AND p.Score IS NOT NULL
+      AND p.Title IS NOT NULL
+),
+UserReputation AS (
+    SELECT u.Id AS UserId,
+           u.Reputation,
+           COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.Reputation
+),
+TopTags AS (
+    SELECT TRIM(split_part(t.TagName, ' ', 1)) AS TagName,
+           COUNT(DISTINCT p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+    HAVING COUNT(DISTINCT p.Id) > 5
+),
+RecentVotes AS (
+    SELECT v.PostId,
+           v.VoteTypeId,
+           COUNT(*) AS VoteCount
+    FROM Votes v
+    WHERE v.CreationDate >= (CURRENT_DATE - INTERVAL '30 days')
+    GROUP BY v.PostId, v.VoteTypeId
+)
+SELECT p.PostId,
+       p.Title,
+       up.UserId,
+       up.Reputation,
+       COALESCE(bad.BadgeCount, 0) AS BadgeCount,
+       tt.PostCount AS TagCount,
+       SUM(rv.VoteCount) FILTER (WHERE rv.VoteTypeId = 2) AS UpVoteCount,
+       SUM(rv.VoteCount) FILTER (WHERE rv.VoteTypeId = 3) AS DownVoteCount,
+       COALESCE(rp.ViewCount, 0) AS ViewCount,
+       COALESCE(rp.Score, 0) AS Score
+FROM RankedPosts rp
+JOIN Users up ON rp.PostId IN (
+    SELECT p.Id
+    FROM Posts p
+    WHERE p.OwnerUserId = up.Id
+)
+LEFT JOIN UserReputation bad ON up.Id = bad.UserId
+LEFT JOIN TopTags tt ON rp.Title LIKE '%' || tt.TagName || '%'
+LEFT JOIN RecentVotes rv ON rp.PostId = rv.PostId
+GROUP BY p.PostId, up.UserId, up.Reputation, bad.BadgeCount, tt.PostCount
+HAVING SUM(rv.VoteCount) IS NOT NULL OR COALESCE(rp.Score, 0) > 0
+ORDER BY rp.CreationDate DESC, ViewCount DESC;

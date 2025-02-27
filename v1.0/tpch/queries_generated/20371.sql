@@ -1,0 +1,51 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS account_rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name AS region_name,
+        COUNT(*) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM RankedSuppliers s
+    JOIN nation n ON s.s_suppkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE s.account_rank <= 3
+    GROUP BY r.r_name
+),
+OrdersWithLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        COALESCE(o.o_orderstatus, 'U') AS order_status
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+)
+SELECT 
+    r.region_name,
+    o.o_orderdate, 
+    o.order_status,
+    SUM(o.l_extendedprice * (1 - o.l_discount)) AS total_revenue,
+    AVG(o.l_tax) AS average_tax,
+    COUNT(DISTINCT o.o_orderkey) AS distinct_orders,
+    (SELECT COUNT(DISTINCT c.c_custkey) 
+     FROM customer c 
+     WHERE c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)) AS customer_count,
+    CASE 
+        WHEN COUNT(DISTINCT o.o_orderkey) > 0 THEN SUM(o.l_extendedprice * (1 - o.l_discount)) / COUNT(DISTINCT o.o_orderkey)
+        ELSE NULL 
+    END AS avg_order_value
+FROM TopSuppliers r
+LEFT JOIN OrdersWithLineItems o ON r.region_name = (SELECT r2.r_name FROM region r2 WHERE r2.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = o.o_custkey))
+WHERE r.total_acctbal IS NOT NULL AND r.supplier_count > 0
+GROUP BY r.region_name, o.o_orderdate, o.order_status
+HAVING SUM(o.l_extendedprice * (1 - o.l_discount)) > 10000
+ORDER BY r.region_name, o.o_orderdate DESC;

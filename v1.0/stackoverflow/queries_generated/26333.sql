@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(A.AnswerCount, 0) AS AnswerCount,
+        COALESCE(V.VoteCount, 0) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY P.CreationDate DESC) AS RN
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            ParentId, 
+            COUNT(*) AS AnswerCount
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 2
+        GROUP BY 
+            ParentId
+    ) A ON P.Id = A.ParentId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId 
+    WHERE 
+        P.CreationDate >= DATEADD(MONTH, -6, GETDATE())  -- Last 6 months
+),
+
+TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.ViewCount) AS AvgViews
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' + T.TagName + '%'
+    WHERE 
+        P.CreationDate >= DATEADD(MONTH, -6, GETDATE())  -- Last 6 months
+    GROUP BY 
+        T.TagName
+),
+
+UserMetrics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN P.OwnerUserId = U.Id THEN 1 ELSE 0 END) AS PostsCreated,
+        SUM(CASE WHEN C.UserId = U.Id THEN 1 ELSE 0 END) AS CommentsMade,
+        SUM(CASE WHEN B.UserId = U.Id THEN 1 ELSE 0 END) AS BadgesEarned
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    LEFT JOIN 
+        Badges B ON B.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.ViewCount,
+    RP.AnswerCount,
+    RP.VoteCount,
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews,
+    TS.AvgViews,
+    UM.UserId,
+    UM.DisplayName,
+    UM.PostsCreated,
+    UM.CommentsMade,
+    UM.BadgesEarned
+FROM 
+    RankedPosts RP
+JOIN 
+    TagStats TS ON RP.PostId IN (SELECT PostId FROM Posts WHERE Tags LIKE '%' + TS.TagName + '%')
+JOIN 
+    UserMetrics UM ON RP.PostId = (SELECT TOP 1 Id FROM Posts WHERE OwnerUserId = UM.UserId ORDER BY CreationDate DESC)
+WHERE 
+    RP.RN = 1  -- Select only the latest post for each unique post identifier
+ORDER BY 
+    RP.ViewCount DESC, RP.CreationDate DESC;

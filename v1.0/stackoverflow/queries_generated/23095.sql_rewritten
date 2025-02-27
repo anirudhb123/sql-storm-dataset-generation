@@ -1,0 +1,50 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Posts P ON V.PostId = P.Id
+    WHERE U.Reputation >= 100
+    GROUP BY U.Id, U.DisplayName
+),
+PostWithBestDescription AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(P.Body, 'No content') AS Description,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY LENGTH(P.Body) DESC) AS Rank
+    FROM Posts P
+    WHERE P.Body IS NOT NULL
+),
+TagUsage AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        AVG(P.ViewCount) AS AverageViews
+    FROM Tags T
+    LEFT JOIN Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%') 
+    GROUP BY T.TagName
+)
+SELECT 
+    U.DisplayName,
+    U.UpVotes,
+    U.DownVotes,
+    T.TagName,
+    T.PostCount,
+    T.AverageViews,
+    CASE 
+        WHEN U.PostCount > 0 THEN 'Active User'
+        ELSE 'Inactive User'
+    END AS UserStatus,
+    P.Title AS BestPostTitle,
+    P.Description AS BestPostDescription
+FROM UserVoteSummary U
+FULL OUTER JOIN TagUsage T ON T.PostCount > 0
+LEFT JOIN PostWithBestDescription P ON U.UserId = P.OwnerUserId AND P.Rank = 1
+WHERE (U.UpVotes - U.DownVotes) > 10 OR (U.PostCount IS NULL AND T.PostCount > 5)
+ORDER BY U.DisplayName ASC NULLS LAST
+LIMIT 50;

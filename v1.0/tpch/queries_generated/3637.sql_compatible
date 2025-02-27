@@ -1,0 +1,74 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+        AND o.o_orderdate < DATE '1997-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_mktsegment,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_mktsegment
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(p.p_retailprice) AS avg_retailprice
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    COALESCE(r.o_orderkey, 'N/A') AS order_key,
+    cu.c_name AS customer_name,
+    cu.total_spent,
+    ps.p_name AS part_name,
+    ps.avg_retailprice,
+    sd.total_supply_cost,
+    r.o_orderdate
+FROM 
+    RankedOrders r
+FULL OUTER JOIN 
+    CustomerSummary cu ON r.o_orderkey = cu.c_custkey
+LEFT JOIN 
+    PartStats ps ON ps.supplier_count > 0
+LEFT JOIN 
+    SupplierDetails sd ON sd.total_supply_cost > 1000
+WHERE 
+    (r.o_orderstatus = 'O' OR r.o_orderstatus IS NULL)
+    AND (cu.total_spent IS NOT NULL AND cu.total_spent < 5000)
+    AND (ps.avg_retailprice IS NOT NULL AND sd.total_supply_cost IS NOT NULL)
+ORDER BY 
+    r.o_orderdate DESC, cu.total_spent ASC;

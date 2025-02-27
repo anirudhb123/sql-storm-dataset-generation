@@ -1,0 +1,68 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE
+        mt.production_year = 2023
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+RankedCast AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+),
+
+MoviesWithNulls AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        COALESCE(rc.actor_name, 'Unknown Actor') AS top_actor,
+        COUNT(rc.actor_name) AS total_cast,
+        MAX(rc.actor_rank) AS max_rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        RankedCast rc ON mh.movie_id = rc.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title
+)
+
+SELECT 
+    mw.movie_id,
+    mw.title,
+    mw.top_actor,
+    mw.total_cast,
+    mw.max_rank,
+    CASE 
+        WHEN mw.total_cast > 10 THEN 'Ensemble Cast'
+        WHEN mw.total_cast > 0 THEN 'Small Cast'
+        ELSE 'No Cast'
+    END AS cast_size_category
+FROM 
+    MoviesWithNulls mw
+WHERE 
+    mw.total_cast IS NOT NULL
+ORDER BY 
+    mw.title ASC;

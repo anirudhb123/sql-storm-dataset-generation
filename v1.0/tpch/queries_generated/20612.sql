@@ -1,0 +1,52 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER(PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+),
+OrderSummaries AS (
+    SELECT o.o_orderkey, o.o_custkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           COUNT(l.l_orderkey) AS item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2022-01-01' 
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+HighValueOrders AS (
+    SELECT os.o_orderkey, os.o_custkey, os.total_price, os.item_count
+    FROM OrderSummaries os
+    WHERE os.total_price > 10000
+      AND os.item_count > 5
+),
+SupplierPartDetails AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty,
+           (ps.ps_supplycost - (SELECT AVG(ps2.ps_supplycost)
+                               FROM partsupp ps2 
+                               WHERE ps2.ps_partkey = ps.ps_partkey)) AS cost_difference
+    FROM partsupp ps
+    WHERE ps.ps_availqty IS NOT NULL
+)
+SELECT p.p_partkey, p.p_name, p.p_brand, n.n_name AS nation,
+       rs.s_name AS supplier_name, 
+       COALESCE(hvo.total_price, 0) AS order_total_price,
+       CASE 
+           WHEN rs.rnk = 1 THEN 'Top Supplier'
+           ELSE 'Other Supplier'
+       END AS supplier_rank,
+       STRING_AGG(DISTINCT p.p_comment, ', ') AS comments,
+       COUNT(DISTINCT l.l_orderkey) FILTER (WHERE l.l_returnflag = 'R') AS return_count
+FROM part p
+LEFT JOIN SupplierPartDetails spd ON p.p_partkey = spd.ps_partkey
+JOIN RankedSuppliers rs ON spd.ps_suppkey = rs.s_suppkey
+JOIN nation n ON rs.n_nationkey = n.n_nationkey
+LEFT JOIN HighValueOrders hvo ON hvo.o_custkey = (
+    SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = rs.n_nationkey
+    ORDER BY c.c_acctbal DESC
+    LIMIT 1
+)
+LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+WHERE p.p_size > 10 
+  AND (spd.cost_difference IS NULL OR spd.cost_difference > 0)
+GROUP BY p.p_partkey, p.p_name, p.p_brand, n.n_name, rs.s_name, hvo.total_price, rs.rnk
+ORDER BY p.p_partkey DESC
+LIMIT 100;

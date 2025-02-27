@@ -1,0 +1,83 @@
+WITH RecursivePostHierarchy AS (
+    -- Create a recursive CTE to build the hierarchy of posts
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        CAST(p.Title AS VARCHAR(MAX)) AS FullPath,
+        1 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL  -- Start with top-level posts
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        CAST(r.FullPath + ' -> ' + p.Title AS VARCHAR(MAX)),
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserAggregates AS (
+    -- Aggregate user statistics
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN p.Score ELSE 0 END) AS TotalScore,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+), 
+PostStatistics AS (
+    -- Post statistics using window functions
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+),
+CloseReasonCounts AS (
+    -- Count close reasons for posts
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseReasonCount,
+        MAX(CASE WHEN ph.Comment IS NOT NULL THEN ph.Comment END) AS LastCloseReason,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10  -- Closed posts
+    GROUP BY ph.PostId 
+)
+SELECT 
+    u.DisplayName,
+    ua.TotalPosts,
+    ua.TotalScore,
+    ua.GoldBadges,
+    ua.SilverBadges,
+    ua.BronzeBadges,
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.RecentPostRank,
+    COALESCE(cr.CloseReasonCount, 0) AS CloseReasonCount,
+    cr.LastCloseReason,
+    cr.LastCloseDate,
+    r.FullPath
+FROM UserAggregates ua
+JOIN Posts ps ON ua.UserId = ps.OwnerUserId
+LEFT JOIN CloseReasonCounts cr ON ps.Id = cr.PostId
+LEFT JOIN RecursivePostHierarchy r ON ps.Id = r.PostId
+WHERE ua.TotalScore > 100 -- Filter users with a score greater than 100
+ORDER BY ua.TotalPosts DESC, ps.ViewCount DESC;

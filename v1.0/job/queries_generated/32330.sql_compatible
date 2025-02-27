@@ -1,0 +1,50 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        CAST(m.title AS VARCHAR(255)) AS hierarchy_path
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+    UNION ALL
+    SELECT
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        CONCAT(mh.hierarchy_path, ' -> ', m.title)
+    FROM
+        aka_title m
+        JOIN movie_link ml ON m.id = ml.linked_movie_id
+        JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT
+    mh.hierarchy_path,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) * 100 AS actor_note_percentage,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM
+    movie_hierarchy mh
+LEFT JOIN
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN
+    aka_name ak ON ci.person_id = ak.person_id
+WHERE
+    mh.level <= 2
+GROUP BY
+    mh.hierarchy_path, mh.production_year
+HAVING
+    COUNT(DISTINCT ci.person_id) > 5
+ORDER BY
+    mh.production_year DESC, actor_count DESC
+LIMIT 10;

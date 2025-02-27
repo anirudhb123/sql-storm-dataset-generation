@@ -1,0 +1,53 @@
+-- Performance Benchmarking Query
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS TotalHistoryChanges
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(t.Id) AS TotalTags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL unnest(string_to_array(p.Tags, '>')) AS t(Tag) ON TRUE
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.TotalScore,
+    COALESCE(ph.TotalHistoryChanges, 0) AS TotalHistoryChanges,
+    COALESCE(pt.TotalTags, 0) AS TotalTags
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    PostHistories ph ON ph.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ups.UserId)
+LEFT JOIN 
+    PostTags pt ON pt.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ups.UserId)
+ORDER BY 
+    ups.TotalScore DESC;

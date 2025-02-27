@@ -1,0 +1,34 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_partkey, ps.ps_availqty, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_partkey, ps.ps_availqty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN SupplyChain sc ON sc.ps_partkey = ps.ps_partkey
+    WHERE sc.rn < 5
+)
+
+SELECT 
+    c.c_name, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    r.r_name AS region_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    COALESCE(MAX(s.s_acctbal), 0) AS max_supplier_balance
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN SupplyChain sc ON sc.ps_partkey = l.l_partkey
+WHERE o.o_orderstatus IN ('O', 'F')
+AND l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY c.c_name, r.r_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY revenue DESC
+LIMIT 10;

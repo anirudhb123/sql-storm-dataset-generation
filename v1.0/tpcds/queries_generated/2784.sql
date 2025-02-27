@@ -1,0 +1,45 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank
+    FROM web_sales
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returned_quantity,
+        SUM(wr_return_amt) AS total_returned_amt
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+),
+ItemInventory AS (
+    SELECT 
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_inventory
+    FROM inventory
+    GROUP BY inv_item_sk
+)
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    SUM(coalesce(ws.ws_quantity, 0)) AS total_quantity_sold,
+    SUM(coalesce(ws.ws_net_profit, 0)) AS total_net_profit,
+    MAX(RS.price_rank) AS max_rank,
+    SUM(CASE WHEN cr.cr_return_quantity IS NOT NULL THEN cr.cr_return_quantity ELSE 0 END) AS total_catalog_returns,
+    COALESCE(IV.total_inventory, 0) AS current_inventory
+FROM customer c
+JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+LEFT JOIN ItemInventory IV ON ws.ws_item_sk = IV.inv_item_sk
+LEFT JOIN CustomerReturns CR ON c.c_customer_sk = CR.wr_returning_customer_sk
+JOIN RankedSales RS ON ws.ws_item_sk = RS.ws_item_sk AND RS.price_rank = 1
+WHERE ca.ca_state = 'CA' 
+AND (c.c_birth_year BETWEEN 1980 AND 1990 OR c.c_last_name LIKE 'S%')
+GROUP BY c.c_customer_id, ca.ca_city
+HAVING SUM(coalesce(ws.ws_quantity, 0)) > 10
+ORDER BY total_net_profit DESC
+LIMIT 100;

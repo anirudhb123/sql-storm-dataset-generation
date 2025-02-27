@@ -1,0 +1,61 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1 
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        ak.title,
+        ak.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title ak ON ak.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    akn.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    AVG(CASE WHEN mi.info_type_id = 1 THEN mi.production_year END) AS avg_movie_year,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY akn.id ORDER BY mt.production_year DESC) AS row_num
+FROM 
+    movie_hierarchy mh
+JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+JOIN 
+    aka_name akn ON cc.subject_id = akn.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+WHERE 
+    mh.production_year BETWEEN 1990 AND 2023 
+    AND akn.name IS NOT NULL
+    AND (cn.country_code = 'USA' OR cn.country_code IS NULL)
+GROUP BY 
+    akn.id, mt.title, mt.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY 
+    mt.production_year DESC,
+    company_count DESC;

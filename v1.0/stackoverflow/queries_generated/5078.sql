@@ -1,0 +1,66 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagPostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON t.Id = pt.Id
+    WHERE 
+        pt.PostTypeId = 1
+    GROUP BY 
+        t.TagName
+),
+RecentVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        v.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY 
+        v.UserId
+)
+SELECT 
+    us.DisplayName,
+    us.TotalPosts,
+    us.TotalQuestions,
+    us.TotalAnswers,
+    us.TotalScore,
+    us.AvgViewCount,
+    pt.TagName,
+    pt.TagPostCount,
+    rv.TotalVotes,
+    rv.UpVotes,
+    rv.DownVotes
+FROM 
+    UserStats us
+JOIN 
+    PopularTags pt ON us.TotalPosts > 5
+LEFT JOIN 
+    RecentVotes rv ON us.UserId = rv.UserId
+ORDER BY 
+    us.TotalScore DESC, 
+    pt.TagPostCount DESC
+LIMIT 100;

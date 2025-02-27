@@ -1,0 +1,78 @@
+
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        mt.movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mci.note, 'No special note') AS company_note
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mci ON mt.movie_id = mci.movie_id
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+    
+    SELECT 
+        mt.movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mci.note, 'No special note') AS company_note
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON mt.movie_id = ml.movie_id
+    JOIN 
+        movie_companies mci ON ml.linked_movie_id = mci.movie_id
+    WHERE 
+        mt.production_year < 2000 AND
+        mci.note IS NOT NULL
+),
+RankedMovies AS (
+    SELECT 
+        c.movie_id, 
+        c.title,
+        ROW_NUMBER() OVER (PARTITION BY c.production_year ORDER BY c.production_year DESC) AS year_rank,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY c.movie_id) AS has_company_note_avg
+    FROM 
+        MovieCTE c
+    LEFT JOIN 
+        movie_info mi ON c.movie_id = mi.movie_id
+    LEFT JOIN 
+        movie_info_idx mii ON mi.movie_id = mii.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON c.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        c.production_year IS NOT NULL
+)
+SELECT 
+    rk.movie_id,
+    rk.title,
+    rk.year_rank,
+    rk.has_company_note_avg,
+    COUNT(DISTINCT mk.keyword) AS unique_keywords,
+    STRING_AGG(DISTINCT mc.note, ', ') AS company_notes
+FROM 
+    RankedMovies rk
+LEFT JOIN 
+    movie_companies mc ON rk.movie_id = mc.movie_id
+LEFT JOIN 
+    character_name cn ON rk.movie_id = cn.imdb_id
+LEFT JOIN 
+    movie_keyword mk ON rk.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON rk.movie_id = mi.movie_id
+LEFT JOIN 
+    aka_name an ON rk.movie_id = an.movie_id
+LEFT JOIN 
+    cast_info c ON rk.movie_id = c.movie_id
+WHERE 
+    rk.has_company_note_avg > 0.5 AND
+    (mi.note IS NOT NULL OR cn.name IS NOT NULL)
+GROUP BY 
+    rk.movie_id, rk.title, rk.year_rank, rk.has_company_note_avg
+ORDER BY 
+    rk.year_rank DESC, unique_keywords DESC;

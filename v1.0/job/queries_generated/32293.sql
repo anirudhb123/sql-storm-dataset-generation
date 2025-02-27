@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000 -- Filter for recent movies
+    
+    UNION ALL
+    
+    SELECT 
+        mc.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link mc
+    JOIN 
+        aka_title m ON mc.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON mc.movie_id = mh.movie_id
+)
+SELECT 
+    ah.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT mt.id) OVER (PARTITION BY ah.id) AS total_movies,
+    ROW_NUMBER() OVER (PARTITION BY ah.id ORDER BY mt.production_year DESC) AS movie_rank,
+    COALESCE(ct.kind, 'Undefined') AS company_type,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    COUNT(DISTINCT c.person_id) AS total_cast members
+FROM 
+    aka_name ah
+JOIN 
+    cast_info c ON ah.person_id = c.person_id
+JOIN 
+    aka_title mt ON c.movie_id = mt.id
+LEFT JOIN 
+    movie_companies mc ON mt.id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+WHERE 
+    ah.name IS NOT NULL
+    AND mt.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    ah.id, mt.id, ct.kind
+HAVING 
+    COUNT(DISTINCT kw.id) > 0 -- Filter for movies with keywords
+ORDER BY 
+    actor_name, movie_rank;
+

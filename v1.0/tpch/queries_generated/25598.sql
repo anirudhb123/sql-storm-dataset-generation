@@ -1,0 +1,16 @@
+SELECT 
+    p.p_name AS part_name,
+    s.s_name AS supplier_name,
+    CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ', Price: ', FORMAT(ps.ps_supplycost, 2), ', Quantity Available: ', ps.ps_availqty, ', Comments: ', ps.ps_comment) AS detailed_info
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    LENGTH(p.p_name) > 10
+    AND s.s_acctbal > 1000
+    AND ps.ps_availqty < 100
+ORDER BY 
+    p.p_name DESC, s.s_name ASC;

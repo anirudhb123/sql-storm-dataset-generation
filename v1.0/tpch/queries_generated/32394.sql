@@ -1,0 +1,41 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 1 AS level
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_nationkey = c.c_nationkey)
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, l.l_extendedprice, l.l_discount,
+           (l.l_extendedprice * (1 - l.l_discount)) AS net_price
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '2023-01-01' AND l.l_shipdate < DATE '2024-01-01'
+      AND l.l_returnflag = 'N'
+)
+SELECT ch.c_name, ch.level, 
+       COUNT(DISTINCT ls.l_orderkey) AS total_orders,
+       SUM(ls.net_price) AS total_revenue,
+       STRING_AGG(DISTINCT ps.ps_comment) AS comments
+FROM CustomerHierarchy ch
+LEFT JOIN orders o ON ch.c_custkey = o.o_custkey
+LEFT JOIN FilteredLineItems ls ON o.o_orderkey = ls.l_orderkey
+LEFT JOIN partsupp ps ON ls.l_partkey = ps.ps_partkey AND ps.ps_supplycost IS NOT NULL
+JOIN RankedSuppliers rs ON ls.l_suppkey = rs.s_suppkey AND rs.rn <= 5
+WHERE EXISTS (
+    SELECT 1 
+    FROM nation n 
+    WHERE n.n_nationkey = ch.c_nationkey AND n.n_comment LIKE '%nations%'
+)
+GROUP BY ch.c_name, ch.level
+ORDER BY total_revenue DESC, ch.level;

@@ -1,0 +1,78 @@
+
+WITH UserBadgeCounts AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM
+        Users U
+    LEFT JOIN
+        Badges B ON U.Id = B.UserId
+    GROUP BY
+        U.Id, U.DisplayName
+),
+PopularTags AS (
+    SELECT
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM
+        Tags T
+    JOIN
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY
+        T.TagName
+    ORDER BY
+        PostCount DESC
+    LIMIT 10
+),
+PostStatistics AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(AVG(V.Score), 0) AS AverageVoteScore
+    FROM
+        Posts P
+    JOIN
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN
+        Votes V ON P.Id = V.PostId
+    WHERE
+        P.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY
+        P.Id, U.DisplayName
+),
+FinalResults AS (
+    SELECT
+        UBC.UserId,
+        UBC.DisplayName,
+        UBC.BadgeCount,
+        UBC.GoldBadgeCount,
+        UBC.SilverBadgeCount,
+        UBC.BronzeBadgeCount,
+        PT.TagName AS PopularTag,
+        PS.Title AS RecentPostTitle,
+        PS.CommentCount AS RecentPostCommentCount,
+        PS.AverageVoteScore AS RecentPostAverageVoteScore
+    FROM
+        UserBadgeCounts UBC
+    CROSS JOIN
+        PopularTags PT
+    LEFT JOIN
+        PostStatistics PS ON PS.OwnerDisplayName = UBC.DisplayName
+)
+SELECT
+    *
+FROM
+    FinalResults
+ORDER BY
+    BadgeCount DESC,
+    PopularTag,
+    RecentPostCommentCount DESC;

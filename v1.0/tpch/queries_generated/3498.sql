@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_value,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(li.l_extendedprice * (1 - li.l_discount)) > 10000
+),
+DistinctPartSuppliers AS (
+    SELECT DISTINCT 
+        ps.ps_partkey, 
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_availqty) > 500
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(D.total_available, 0) AS total_available_qty,
+    HS.s_name AS top_supplier_name,
+    HVO.total_value AS high_value_order_total,
+    CASE 
+        WHEN HVO.last_order_date IS NULL THEN 'No Orders'
+        ELSE TO_CHAR(HVO.last_order_date, 'YYYY-MM-DD')
+    END AS last_order_date
+FROM 
+    part p
+LEFT JOIN 
+    DistinctPartSuppliers D ON p.p_partkey = D.ps_partkey
+LEFT JOIN 
+    RankedSuppliers HS ON HS.rn = 1
+LEFT JOIN 
+    HighValueOrders HVO ON HVO.o_orderkey = (SELECT MAX(o.o_orderkey) FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey))
+ORDER BY 
+    p.p_partkey;

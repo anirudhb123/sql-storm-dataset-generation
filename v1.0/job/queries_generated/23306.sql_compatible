@@ -1,0 +1,86 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COALESCE(b.name, 'Unknown') AS director_name,
+        COUNT(DISTINCT c.person_id) AS num_actors,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    LEFT JOIN 
+        company_name b ON mc.company_id = b.id AND b.country_code IS NOT NULL
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year >= 2000
+        AND a.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Drama%')
+    GROUP BY 
+        a.id, a.title, a.production_year, b.name
+),
+MoviesWithMultipleActors AS (
+    SELECT 
+        title,
+        production_year,
+        director_name,
+        num_actors,
+        year_rank
+    FROM 
+        RankedMovies
+    WHERE 
+        num_actors > 5
+),
+MoviesNextYear AS (
+    SELECT 
+        title,
+        production_year,
+        director_name,
+        num_actors
+    FROM 
+        MoviesWithMultipleActors
+    WHERE 
+        year_rank = 2
+)
+SELECT 
+    m.title,
+    m.production_year,
+    m.director_name,
+    m.num_actors,
+    CASE 
+        WHEN m.num_actors IS NULL THEN 'No actors found'
+        WHEN m.num_actors < 10 THEN 'Few actors'
+        ELSE 'Many actors'
+    END AS actor_count_description,
+    STRING_AGG(DISTINCT CONCAT(c.name, ' (Role: ', r.role, ')'), ', ') AS actor_details
+FROM 
+    MoviesWithMultipleActors m
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = (SELECT id FROM aka_title WHERE title = m.title AND production_year = m.production_year LIMIT 1)
+LEFT JOIN 
+    name c ON ci.person_id = c.id
+LEFT JOIN 
+    role_type r ON ci.role_id = r.id
+GROUP BY 
+    m.title, m.production_year, m.director_name, m.num_actors
+HAVING 
+    COUNT(DISTINCT ci.person_id) >= 3
+ORDER BY 
+    m.production_year DESC,
+    m.num_actors DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    n.title,
+    n.production_year,
+    n.director_name,
+    NULL AS num_actors,
+    'No actors found' AS actor_count_description,
+    NULL AS actor_details
+FROM 
+    MoviesNextYear n
+WHERE 
+    NOT EXISTS (SELECT 1 FROM cast_info ci WHERE ci.movie_id = (SELECT id FROM aka_title WHERE title = n.title AND production_year = n.production_year LIMIT 1))
+ORDER BY 
+    n.production_year;

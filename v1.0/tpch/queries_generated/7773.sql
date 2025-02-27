@@ -1,0 +1,30 @@
+WITH SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, p.p_name, p.p_retailprice, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+LineItemDetails AS (
+    SELECT lo.l_orderkey, SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS revenue
+    FROM lineitem lo
+    GROUP BY lo.l_orderkey
+)
+SELECT sp.s_name, COUNT(DISTINCT co.o_orderkey) AS total_orders, AVG(sp.ps_availqty) AS avg_avail_qty,
+       SUM(sp.ps_supplycost) AS total_supply_cost, SUM(l.rev) AS total_revenue
+FROM SupplierParts sp
+JOIN CustomerOrders co ON sp.ps_partkey IN (
+        SELECT ps.ps_partkey
+        FROM partsupp ps
+        JOIN orders o ON ps.ps_partkey = o.o_orderkey
+    )
+JOIN LineItemDetails l ON co.o_orderkey = l.l_orderkey
+JOIN lineitem li ON co.o_orderkey = li.l_orderkey
+GROUP BY sp.s_name
+ORDER BY total_revenue DESC
+LIMIT 10;

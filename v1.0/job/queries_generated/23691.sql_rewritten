@@ -1,0 +1,52 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+
+    SELECT 
+        linked_movie.linked_movie_id AS movie_id,
+        lt.title AS movie_title,
+        lt.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link AS linked_movie
+    JOIN 
+        title AS lt ON lt.id = linked_movie.linked_movie_id
+    JOIN 
+        movie_hierarchy AS mh ON mh.movie_id = linked_movie.movie_id
+)
+SELECT 
+    m.title AS movie_title,
+    COUNT(DISTINCT ci.person_id) AS total_cast_members,
+    COUNT(DISTINCT kc.keyword) AS total_keywords,
+    MAX(mh.depth) AS max_link_depth
+FROM 
+    aka_title AS m
+LEFT JOIN 
+    cast_info AS ci ON ci.movie_id = m.id
+LEFT JOIN 
+    movie_keyword AS mk ON mk.movie_id = m.id
+LEFT JOIN 
+    keyword AS kc ON kc.id = mk.keyword_id
+LEFT JOIN 
+    movie_hierarchy AS mh ON mh.movie_id = m.id
+WHERE 
+    m.production_year BETWEEN 2000 AND 2023
+    AND (m.kind_id IS NOT NULL OR m.kind_id = -1)  
+GROUP BY 
+    m.title
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 10   
+    OR MAX(mh.depth) IS NULL               
+ORDER BY 
+    total_cast_members DESC,
+    max_link_depth ASC
+LIMIT 10;

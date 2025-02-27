@@ -1,0 +1,101 @@
+
+WITH item_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+store_sales_summary AS (
+    SELECT 
+        ss_item_sk,
+        SUM(ss_quantity) AS store_total_quantity,
+        SUM(ss_sales_price) AS store_total_sales
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_item_sk
+),
+combined_sales AS (
+    SELECT 
+        is.ws_item_sk,
+        is.total_quantity,
+        is.total_sales,
+        COALESCE(sss.store_total_quantity, 0) AS total_store_quantity,
+        COALESCE(sss.store_total_sales, 0) AS total_store_sales
+    FROM 
+        item_sales is
+    LEFT JOIN 
+        store_sales_summary sss ON is.ws_item_sk = sss.ss_item_sk
+),
+ranked_sales AS (
+    SELECT 
+        cs.ws_item_sk,
+        cs.total_quantity,
+        cs.total_sales,
+        cs.total_store_quantity,
+        cs.total_store_sales,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        combined_sales cs
+    WHERE 
+        (cs.total_sales + cs.total_store_sales) > 0
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+sales_by_customer AS (
+    SELECT 
+        ci.c_customer_id,
+        COUNT(DISTINCT ws.ws_order_number) AS orders,
+        SUM(ws.ws_sales_price) AS total_spent,
+        SUM(ws.ws_quantity) AS total_items
+    FROM 
+        web_sales ws
+    JOIN 
+        customer_info ci ON ws.ws_bill_customer_sk = ci.c_customer_sk
+    GROUP BY 
+        ci.c_customer_id
+)
+SELECT 
+    r.sales_rank,
+    r.ws_item_sk,
+    r.total_quantity,
+    r.total_sales,
+    r.total_store_quantity,
+    r.total_store_sales,
+    cb.c_customer_id,
+    cb.orders,
+    cb.total_spent,
+    cb.total_items
+FROM 
+    ranked_sales r
+JOIN 
+    sales_by_customer cb ON cb.total_spent IN (
+        SELECT MAX(total_spent)
+        FROM sales_by_customer
+        WHERE total_spent BETWEEN 100 AND 1000
+    )
+WHERE 
+    r.total_quantity > 10
+ORDER BY 
+    r.sales_rank,
+    r.total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

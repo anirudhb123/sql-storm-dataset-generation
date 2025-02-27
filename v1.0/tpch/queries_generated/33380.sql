@@ -1,0 +1,86 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS order_level,
+        C.c_name
+    FROM 
+        orders o
+    JOIN 
+        customer C ON o.o_custkey = C.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        oh.order_level + 1,
+        C.c_name
+    FROM 
+        orders o
+    JOIN 
+        OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    JOIN 
+        customer C ON o.o_custkey = C.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+PartSupplierSummary AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_availqty) > 1000
+),
+NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name,
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name, r.r_name
+)
+SELECT 
+    p.p_name,
+    COALESCE(N.region, 'Unknown') AS region_name,
+    oh.c_name AS customer_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    AVG(ps.avg_supplycost) AS average_cost,
+    COUNT(DISTINCT l.l_orderkey) AS order_count
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    PartSupplierSummary ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+LEFT JOIN 
+    NationRegion N ON oh.c_nationkey = N.n_nationkey
+JOIN 
+    part p ON l.l_partkey = p.p_partkey
+WHERE 
+    l.l_returnflag = 'R' 
+    AND l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+GROUP BY 
+    p.p_name, N.region, oh.c_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY 
+    revenue DESC, customer_name;

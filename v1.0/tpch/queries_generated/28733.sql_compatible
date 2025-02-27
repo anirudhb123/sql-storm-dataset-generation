@@ -1,0 +1,45 @@
+
+WITH SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_mfgr,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ps.ps_comment
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+), 
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_brand,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_value,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY SUM(ps.ps_availqty * ps.ps_supplycost) DESC) AS rank
+    FROM 
+        SupplierParts s
+    JOIN 
+        part p ON s.p_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_brand
+)
+SELECT 
+    s.s_suppkey,
+    s.s_name,
+    s.p_brand,
+    s.total_value,
+    (SELECT COUNT(*) FROM RankedSuppliers r WHERE r.p_brand = s.p_brand AND r.total_value > s.total_value) AS higher_rank_count
+FROM 
+    RankedSuppliers s
+WHERE 
+    s.rank <= 3
+ORDER BY 
+    s.p_brand, s.total_value DESC;

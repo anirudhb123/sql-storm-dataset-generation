@@ -1,0 +1,81 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+ActiveOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        SUM(a.total_revenue) AS total_spent,
+        COUNT(DISTINCT a.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        ActiveOrders a ON c.c_custkey = a.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(a.total_revenue) > 10000
+),
+RegionSummary AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(s.s_acctbal) AS total_accounts
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    rc.r_name,
+    COUNT(DISTINCT tc.c_custkey) AS customer_count,
+    MAX(tc.total_spent) AS max_spent,
+    AVG(tc.order_count) AS avg_orders,
+    GROUP_CONCAT(DISTINCT CONCAT(s.s_name, ' (', s.s_acctbal, ')') ORDER BY s.s_acctbal DESC) AS top_suppliers
+FROM 
+    RegionSummary rc
+LEFT JOIN 
+    TopCustomers tc ON rc.nation_count > 0
+JOIN 
+    RankedSuppliers s ON s.rn <= 3
+WHERE 
+    rc.total_accounts IS NOT NULL
+GROUP BY 
+    rc.r_name
+ORDER BY 
+    customer_count DESC, max_spent DESC;

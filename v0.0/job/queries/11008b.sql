@@ -1,0 +1,4 @@
+SELECT min(n.name) AS voicing_actress, min(t.title) AS jap_engl_voiced_movie
+FROM aka_name AS an, char_name AS chn, cast_info AS ci, company_name AS cn, info_type AS it, movie_companies AS mc, movie_info AS mi, name AS n, role_type AS rt, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND t.id = ci.movie_id AND mc.movie_id = ci.movie_id AND mc.movie_id = mi.movie_id AND mi.movie_id = ci.movie_id AND cn.id = mc.company_id AND it.id = mi.info_type_id AND n.id = ci.person_id AND rt.id = ci.role_id AND n.id = an.person_id AND ci.person_id = an.person_id AND chn.id = ci.person_role_id
+AND an.name_pcode_cf IS NOT NULL AND mi.info IN ('$157,552 (USA) (4 October 2009) (227 screens)', '$319,009,518 (USA) (11 April 2010)', 'After the end credits a squirrel and a tiger mascot shown hand in hand.', 'Dean: Cindy... come here... I may... or may not... have fallen down...', 'Let Janice be your guide in the act of Love.', 'Sweden:26 April 2005', 'USA:5 July 2007');

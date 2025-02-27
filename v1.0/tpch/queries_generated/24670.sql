@@ -1,0 +1,67 @@
+WITH RECURSIVE profit_margin AS (
+    SELECT 
+        ps_partkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_revenue,
+        SUM(l_supplycost * ps_availqty) AS total_cost,
+        (SUM(l_extendedprice * (1 - l_discount)) - SUM(l_supplycost * ps_availqty)) / NULLIF(SUM(l_extendedprice * (1 - l_discount)), 0) AS margin
+    FROM lineitem
+    JOIN partsupp ON l_partkey = ps_partkey
+    GROUP BY ps_partkey
+),
+ranked_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(pm.margin, 0) AS profit_margin,
+        RANK() OVER (PARTITION BY CASE 
+                    WHEN COALESCE(pm.margin, 0) > 0.3 THEN 'High'
+                    WHEN COALESCE(pm.margin, 0) BETWEEN 0.1 AND 0.3 THEN 'Medium'
+                    ELSE 'Low' END 
+                    ORDER BY COALESCE(pm.margin, 0) DESC) AS margin_rank
+    FROM part p
+    LEFT JOIN profit_margin pm ON p.p_partkey = pm.ps_partkey
+),
+top_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+filtered_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND CURRENT_DATE
+    AND o.o_orderstatus IN ('O', 'F') -- Open or part full
+)
+SELECT 
+    rp.p_name,
+    rp.margin_rank,
+    ts.s_name AS supplier_name,
+    ts.s_acctbal,
+    fo.o_orderkey,
+    fo.o_totalprice,
+    fo.o_orderdate,
+    CASE 
+        WHEN fo.o_totalprice IS NOT NULL THEN (fo.o_totalprice / NULLIF(ts.s_acctbal, 0)) * 100
+        ELSE 0
+    END AS order_to_supplier_ratio
+FROM ranked_parts rp
+JOIN partsupp ps ON rp.p_partkey = ps.ps_partkey
+JOIN top_suppliers ts ON ps.ps_suppkey = ts.s_suppkey
+JOIN filtered_orders fo ON fo.o_orderkey IN (
+    SELECT DISTINCT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_partkey = rp.p_partkey
+)
+WHERE rp.margin_rank = 1 -- Only high margin
+AND ts.rnk <= 5 -- Top 5 suppliers
+ORDER BY rp.p_name, ts.s_acctbal DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

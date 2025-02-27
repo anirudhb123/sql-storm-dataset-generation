@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.movie_id,
+           mt.linked_movie_id,
+           1 AS depth
+    FROM movie_link mt
+    WHERE mt.movie_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT ml.movie_id,
+           ml.linked_movie_id,
+           mh.depth + 1
+    FROM movie_link ml
+    INNER JOIN MovieHierarchy mh ON ml.movie_id = mh.linked_movie_id
+    WHERE mh.depth < 5
+), MovieWithKeywords AS (
+    SELECT m.id AS movie_id,
+           m.title,
+           COALESCE(k.keyword, 'None') AS keyword
+    FROM title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+), CompanyCounts AS (
+    SELECT mc.movie_id,
+           COUNT(DISTINCT c.id) AS company_count
+    FROM movie_companies mc
+    LEFT JOIN company_name c ON mc.company_id = c.id
+    GROUP BY mc.movie_id
+), PersonsWithRoles AS (
+    SELECT ai.id AS person_id,
+           a.name AS actor_name,
+           CAST(COUNT(DISTINCT ci.movie_id) AS INTEGER) AS role_count,
+           ROW_NUMBER() OVER (PARTITION BY ai.id ORDER BY COUNT(DISTINCT ci.movie_id) DESC) AS rn
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN aka_title at ON ci.movie_id = at.movie_id
+    JOIN person_info pi ON a.person_id = pi.person_id
+    WHERE pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birth year')
+    GROUP BY ai.id, a.name
+    HAVING COUNT(DISTINCT ci.movie_id) >= 1
+), KeywordsCTE AS (
+    SELECT movie_id,
+           STRING_AGG(keyword, ', ') AS keywords
+    FROM MovieWithKeywords
+    GROUP BY movie_id
+)
+SELECT mh.movie_id,
+       COALESCE(m.title, 'Unknown Title') AS movie_title,
+       kc.keywords,
+       COALESCE(cc.company_count, 0) AS total_companies,
+       COALESCE(pwr.actor_name, 'No Actors') AS top_actor,
+       CASE WHEN pwr.role_count IS NULL THEN 'No Roles' ELSE pwr.role_count END AS role_count
+FROM MovieHierarchy mh
+LEFT JOIN title m ON mh.movie_id = m.id
+LEFT JOIN KeywordsCTE kc ON m.id = kc.movie_id
+LEFT JOIN CompanyCounts cc ON mh.movie_id = cc.movie_id
+LEFT JOIN PersonsWithRoles pwr ON m.id = pwr.movie_id AND pwr.rn = 1
+WHERE m.production_year IS NOT NULL
+AND mh.depth < 5
+ORDER BY m.production_year DESC, total_companies DESC;

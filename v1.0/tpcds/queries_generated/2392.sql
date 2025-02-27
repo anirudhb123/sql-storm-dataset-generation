@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_ship_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS sale_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_ship_date_sk BETWEEN 20230101 AND 20231231
+),
+AggregateSales AS (
+    SELECT
+        i.i_item_id,
+        SUM(COALESCE(ws.ws_sales_price, 0)) AS total_sales,
+        AVG(NULLIF(ws.ws_sales_price, 0)) AS avg_sales_price,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM
+        item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY
+        i.i_item_id
+),
+HighDemandItems AS (
+    SELECT
+        item_id,
+        total_sales,
+        avg_sales_price,
+        order_count,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM
+        AggregateSales
+    WHERE
+        order_count > 10 -- Filtering for items with more than 10 orders
+)
+SELECT
+    h.item_id,
+    h.total_sales,
+    h.avg_sales_price,
+    h.order_count,
+    CASE 
+        WHEN h.avg_sales_price > 100 THEN 'Premium'
+        WHEN h.avg_sales_price BETWEEN 50 AND 100 THEN 'Standard'
+        ELSE 'Budget'
+    END AS price_category,
+    COALESCE(ca.ca_city, 'Unknown') AS warehouse_city,
+    COALESCE(sm.sm_type, 'Standard') AS shipping_method
+FROM
+    HighDemandItems h
+LEFT JOIN item i ON h.item_id = i.i_item_id
+LEFT JOIN catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+LEFT JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+LEFT JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+LEFT JOIN customer_address ca ON w.w_warehouse_sk = ca.ca_address_sk
+WHERE 
+    h.sales_rank <= 10 -- Top 10 items based on sales
+ORDER BY
+    h.total_sales DESC;

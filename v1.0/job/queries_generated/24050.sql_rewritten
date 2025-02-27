@@ -1,0 +1,81 @@
+WITH RECURSIVE MoviePaths AS (
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM 
+        movie_link ml
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        mp.depth + 1
+    FROM 
+        movie_link ml
+    INNER JOIN 
+        MoviePaths mp ON ml.movie_id = mp.linked_movie_id
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+),
+MovieCast AS (
+    SELECT 
+        c.movie_id,
+        COUNT(c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+),
+MoviesWithInfos AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mi.info, 'No additional info') AS additional_info,
+        COALESCE(k.keyword, 'Unclassified') AS keyword
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+MoviesWithPaths AS (
+    SELECT 
+        mw.title,
+        mw.additional_info,
+        mw.keyword,
+        mp.depth AS sequel_depth
+    FROM 
+        MoviesWithInfos mw
+    LEFT JOIN 
+        MoviePaths mp ON mw.movie_id = mp.movie_id
+)
+SELECT 
+    mwp.title,
+    mwp.additional_info,
+    mwp.keyword,
+    CASE 
+        WHEN mwp.sequel_depth IS NULL THEN 'Standalone'
+        ELSE CONCAT('Sequel depth: ', mwp.sequel_depth)
+    END AS sequel_status,
+    mc.cast_count,
+    mc.actor_names
+FROM 
+    MoviesWithPaths mwp
+LEFT JOIN 
+    MovieCast mc ON mwp.movie_id = mc.movie_id
+WHERE 
+    mwp.additional_info NOT LIKE '%null%'
+ORDER BY 
+    mwp.title, mwp.additional_info DESC NULLS LAST
+LIMIT 100
+OFFSET (SELECT FLOOR(RANDOM() * (SELECT COUNT(*) FROM title))) 

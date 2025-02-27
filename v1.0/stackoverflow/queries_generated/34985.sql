@@ -1,0 +1,49 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, CreationDate, Score, ViewCount, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT p.Id, p.Title, p.ParentId, p.CreationDate, p.Score, p.ViewCount, r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName AS UserName,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(b.Class) AS TotalBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.Id END) AS ClosureChanges
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT 
+    ph.Title AS PostTitle,
+    ph.CreationDate AS PostCreationDate,
+    up.UserName AS Author,
+    up.TotalScore AS AuthorReputation,
+    ph.Score AS PostScore,
+    ph.ViewCount AS PostViewCount,
+    r.Level AS HierarchyLevel,
+    COALESCE(pHD.LastClosedDate, 'Not Closed') AS LastClosedDate,
+    pHD.ClosureChanges AS NumberOfClosureChanges
+FROM RecursivePostHierarchy r
+JOIN Posts ph ON r.Id = ph.Id
+JOIN UserReputation up ON ph.OwnerUserId = up.UserId
+LEFT JOIN PostHistoryDetails pHD ON ph.Id = pHD.PostId
+WHERE ph.CreationDate >= NOW() - INTERVAL '1 year'
+ORDER BY r.Level, ph.Score DESC, ph.CreationDate ASC;

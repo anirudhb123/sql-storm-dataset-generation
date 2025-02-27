@@ -1,0 +1,51 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) as supplier_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           CASE 
+               WHEN c.c_acctbal IS NULL THEN 'Unknown Value'
+               WHEN c.c_acctbal > 100000 THEN 'High'
+               ELSE 'Regular'
+           END AS cust_value
+    FROM customer c
+    WHERE c.c_acctbal > 0
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey, l.l_partkey, l.l_quantity,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) as item_rank
+    FROM lineitem l
+    WHERE l.l_discount BETWEEN 0.05 AND 0.20 AND l.l_returnflag = 'N'
+),
+AggregateOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue, 
+           AVG(l.l_quantity) AS avg_quantity
+    FROM orders o 
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT DISTINCT 
+    r.r_name, 
+    COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+    COALESCE(SUM(a.total_revenue), 0) AS total_revenue,
+    COUNT(DISTINCT CASE WHEN c.cust_value = 'High' THEN c.c_custkey END) AS high_value_customers,
+    MAX(s.s_acctbal) AS max_supplier_acctbal,
+    AVG(NULLIF(c.c_acctbal, 0)) AS avg_non_zero_cust_acctbal,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ': ', p.p_retailprice), '; ') AS product_info
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN HighValueCustomers c ON s.s_nationkey = c.c_nationkey
+LEFT JOIN AggregateOrders a ON a.o_orderkey = ps.ps_partkey
+WHERE p.p_size > 10 AND s.s_acctbal IS NOT NULL 
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT s.s_suppkey) > 0 
+   AND MAX(s.s_acctbal) < 50000
+ORDER BY total_revenue DESC, r.r_name;

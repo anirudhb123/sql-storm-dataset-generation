@@ -1,0 +1,68 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+    HAVING 
+        order_value > 1000
+),
+SupplierOrderDetail AS (
+    SELECT 
+        r.r_name AS region_name,
+        ns.n_name AS nation_name,
+        rs.s_name AS supplier_name,
+        hov.o_orderkey,
+        hov.order_value
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        HighValueOrders hov ON rs.s_suppkey IN (
+            SELECT ps.ps_suppkey
+            FROM partsupp ps 
+            JOIN supplier s ON ps.ps_suppkey = s.s_suppkey 
+            WHERE s.s_nationkey = rs.s_nationkey
+        )
+    JOIN 
+        customer c ON hov.o_custkey = c.c_custkey
+    JOIN 
+        nation ns ON c.c_nationkey = ns.n_nationkey
+    JOIN 
+        region r ON ns.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rank = 1
+)
+SELECT 
+    region_name, 
+    nation_name, 
+    supplier_name, 
+    COUNT(o_orderkey) AS total_orders,
+    SUM(order_value) AS total_order_value
+FROM 
+    SupplierOrderDetail
+GROUP BY 
+    region_name, nation_name, supplier_name
+ORDER BY 
+    total_order_value DESC;

@@ -1,0 +1,108 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews,
+        SUM(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+EnhancedUserPostStats AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.TotalPosts,
+        u.TotalAnswers,
+        u.TotalViews,
+        u.TotalScore,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(pt.PostCount, 0) AS ParentPostCount
+    FROM 
+        UserPostStats u
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) b ON u.UserId = b.UserId
+    LEFT JOIN (
+        SELECT 
+            p.OwnerUserId,
+            COUNT(*) AS PostCount
+        FROM 
+            Posts p
+        WHERE 
+            p.ParentId IS NULL  
+        GROUP BY 
+            p.OwnerUserId
+    ) pt ON u.UserId = pt.OwnerUserId
+),
+ClosedPostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        COUNT(ph.Id) AS ClosureCount
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        p.Id, p.Title, ph.CreationDate
+)
+SELECT 
+    e.DisplayName,
+    e.TotalPosts,
+    e.TotalAnswers,
+    e.TotalViews,
+    e.TotalScore,
+    e.BadgeCount,
+    e.ParentPostCount,
+    c.PostId,
+    c.Title AS ClosedPostTitle,
+    c.ClosedDate,
+    c.ClosureCount
+FROM 
+    EnhancedUserPostStats e
+LEFT JOIN 
+    ClosedPostDetails c ON e.UserId = c.PostId
+ORDER BY 
+    e.TotalViews DESC,
+    e.TotalScore DESC,
+    c.ClosureCount DESC;

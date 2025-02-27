@@ -1,0 +1,63 @@
+
+WITH RECURSIVE DateCTE AS (
+    SELECT d_date_sk, d_date, d_month_seq, d_year
+    FROM date_dim
+    WHERE d_date < '2023-01-01'
+    UNION ALL
+    SELECT d.d_date_sk, d.d_date, d.d_month_seq, d.d_year
+    FROM date_dim d
+    JOIN DateCTE dc ON d.d_date_sk = dc.d_date_sk + 1
+),
+SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_sales_price) AS total_sales, 
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM DateCTE)
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+WarehouseSales AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws.ws_sales_price) AS warehouse_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    INNER JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE ws.ws_ship_date_sk IS NOT NULL
+    GROUP BY w.w_warehouse_id
+),
+Refunds AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_amt) AS total_refunds
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+FinalSales AS (
+    SELECT 
+        s.ws_item_sk,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        COALESCE(ws.warehouse_sales, 0) AS warehouse_sales,
+        COALESCE(r.total_refunds, 0) AS total_refunds,
+        (COALESCE(ss.total_sales, 0) - COALESCE(r.total_refunds, 0)) AS net_sales
+    FROM SalesCTE ss
+    FULL OUTER JOIN WarehouseSales ws ON ss.ws_item_sk = ws.warehouse_sales
+    LEFT JOIN Refunds r ON ss.ws_item_sk = r.sr_item_sk
+)
+SELECT 
+    fs.ws_item_sk,
+    fs.total_sales,
+    fs.warehouse_sales,
+    fs.total_refunds,
+    fs.net_sales,
+    ROW_NUMBER() OVER (PARTITION BY fs.ws_item_sk ORDER BY fs.net_sales DESC) AS sales_rank,
+    CASE 
+        WHEN fs.total_sales = 0 THEN 'No Sales'
+        WHEN fs.total_sales IS NULL THEN 'Unknown Sales'
+        ELSE 'Sales Available'
+    END AS sales_status
+FROM FinalSales fs
+WHERE fs.net_sales > 0 OR fs.total_refunds > 0
+ORDER BY fs.net_sales DESC;

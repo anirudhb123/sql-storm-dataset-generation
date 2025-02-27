@@ -1,0 +1,81 @@
+WITH SupplierTotalCost AS (
+    SELECT 
+        ps.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.s_suppkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+NationsWithHighSuppliers AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+    HAVING 
+        COUNT(DISTINCT s.s_suppkey) > 5
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_discount,
+        l.l_extendedprice,
+        l.l_returnflag,
+        l.l_linestatus,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS line_item_seq
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COALESCE(stc.total_cost, 0) AS supplier_total_cost,
+    hvc.total_spent AS customer_spending,
+    nw.supplier_count AS high_supplier_nations,
+    COUNT(lid.l_orderkey) AS total_line_items,
+    AVG(lid.l_discount) AS average_discount,
+    SUM(CASE WHEN lid.l_returnflag = 'R' THEN lid.l_quantity ELSE 0 END) AS returned_quantity,
+    MIN(lid.l_extendedprice) AS min_extended_price,
+    MAX(lid.l_extendedprice) AS max_extended_price
+FROM 
+    part p
+LEFT JOIN 
+    SupplierTotalCost stc ON p.p_partkey = stc.s_suppkey
+LEFT JOIN 
+    HighValueCustomers hvc ON hvc.total_spent IS NOT NULL
+LEFT JOIN 
+    NationsWithHighSuppliers nw ON nw.n_nationkey IS NOT NULL
+LEFT JOIN 
+    LineItemDetails lid ON lid.l_partkey = p.p_partkey
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, hvc.total_spent, nw.supplier_count, stc.total_cost
+ORDER BY 
+    p.p_partkey;

@@ -1,0 +1,67 @@
+WITH RankedProducts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank
+    FROM
+        part p
+    WHERE
+        p.p_retailprice IS NOT NULL
+        AND p.p_size BETWEEN 1 AND 100
+),
+HighValueOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_totalprice,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM
+        orders o
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+    GROUP BY
+        o.o_orderkey, c.c_name
+    HAVING
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SupplierInfo AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COUNT(ps.ps_partkey) AS part_count
+    FROM
+        supplier s
+    LEFT JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name, s.s_acctbal
+)
+SELECT
+    r.r_name,
+    COALESCE(SUM(sp.part_count), 0) AS total_parts,
+    COUNT(DISTINCT h.o_orderkey) AS total_high_value_orders,
+    MAX(rp.p_retailprice) AS max_retail_price,
+    AVG(h.total_revenue) AS avg_high_value_order_revenue
+FROM
+    region r
+LEFT JOIN
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN
+    supplierinfo sp ON n.n_nationkey = sp.s_name
+LEFT JOIN
+    highvalueorders h ON sp.s_name = h.c_name
+LEFT JOIN
+    rankedproducts rp ON rp.p_partkey = h.o_orderkey 
+GROUP BY
+    r.r_name
+HAVING
+    COUNT(DISTINCT h.o_orderkey) > (SELECT COUNT(*) FROM orders WHERE o_orderstatus = 'F') * 0.1
+    OR MAX(rp.p_retailprice) IS NULL
+ORDER BY
+    total_parts DESC, avg_high_value_order_revenue DESC;

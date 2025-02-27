@@ -1,0 +1,38 @@
+WITH RankedPurchases AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_purchase,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey AND s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1995-01-01' AND DATE '1995-12-31'
+    GROUP BY 
+        c.c_custkey, c.c_name, n.n_name
+)
+SELECT 
+    r.nation,
+    COUNT(DISTINCT r.c_custkey) AS num_customers,
+    MAX(r.total_purchase) AS max_purchase,
+    MIN(r.total_purchase) AS min_purchase,
+    AVG(r.total_purchase) AS avg_purchase
+FROM 
+    RankedPurchases r
+WHERE 
+    r.rank <= 10
+GROUP BY 
+    r.nation
+ORDER BY 
+    num_customers DESC, avg_purchase DESC;

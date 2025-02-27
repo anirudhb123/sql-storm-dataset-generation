@@ -1,0 +1,60 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        a.id AS movie_id, 
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS role_rank,
+        COALESCE(mk.keyword, 'No Keywords') AS movie_keyword
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    WHERE 
+        a.production_year >= 2000
+    GROUP BY 
+        a.title, a.production_year, a.id, mk.keyword
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year, 
+        movie_id 
+    FROM 
+        RankedMovies 
+    WHERE 
+        role_rank <= 5
+),
+MoviesWithCompany AS (
+    SELECT 
+        tm.title, 
+        tm.production_year, 
+        cmp.company_id, 
+        cmp.note AS company_note
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        movie_companies cmp ON tm.movie_id = cmp.movie_id
+)
+SELECT 
+    mwc.title,
+    mwc.production_year,
+    COALESCE(cn.name, 'Unknown Company') AS company_name,
+    COUNT(DISTINCT ci.person_id) AS unique_actors,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS notes_count
+FROM 
+    MoviesWithCompany mwc
+LEFT JOIN 
+    company_name cn ON mwc.company_id = cn.id
+LEFT JOIN 
+    cast_info ci ON mwc.movie_id = ci.movie_id
+LEFT JOIN 
+    complete_cast cc ON mwc.movie_id = cc.movie_id
+WHERE 
+    mwc.company_note IS NULL OR mwc.company_note LIKE '%production%'
+GROUP BY 
+    mwc.title, mwc.production_year, mwc.company_id, cn.name
+ORDER BY 
+    mwc.production_year DESC, unique_actors DESC;

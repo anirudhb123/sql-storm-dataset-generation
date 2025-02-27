@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM
+        supplier s
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL
+    GROUP BY
+        c.c_custkey
+),
+TopSpendingCustomers AS (
+    SELECT
+        c.c_custkey,
+        COALESCE(co.total_orders, 0) AS total_orders,
+        COALESCE(co.total_spent, 0.00) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE
+        c.c_acctbal > 1000.00
+),
+LineItemAggregates AS (
+    SELECT
+        l.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_item_value,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(*) AS line_item_count
+    FROM
+        lineitem l
+    GROUP BY
+        l.o_orderkey
+)
+SELECT
+    t.cust.c_custkey,
+    t.cust.total_orders,
+    t.cust.total_spent,
+    rs.s_name AS top_supplier_name,
+    la.total_line_item_value,
+    la.avg_quantity,
+    la.line_item_count
+FROM
+    TopSpendingCustomers AS t_cust
+LEFT JOIN RankedSuppliers AS rs ON rs.rn = 1
+LEFT JOIN lineitem AS li ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = t_cust.c_custkey)
+LEFT JOIN LineItemAggregates AS la ON li.l_orderkey = la.o_orderkey
+WHERE
+    t_cust.total_spent > 5000.00
+ORDER BY 
+    t_cust.total_spent DESC, 
+    rs.s_name;

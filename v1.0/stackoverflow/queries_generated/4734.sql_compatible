@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopContributors AS (
+    SELECT 
+        up.Id AS UserId,
+        u.DisplayName,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        COUNT(DISTINCT a.Id) AS TotalAnswers
+    FROM 
+        Users up
+    JOIN 
+        Posts p ON up.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        UserBadges ub ON up.Id = ub.UserId
+    WHERE 
+        up.Reputation > 1000
+    GROUP BY 
+        up.Id, u.DisplayName, ub.BadgeCount
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+FinalResults AS (
+    SELECT 
+        tc.UserId,
+        tc.DisplayName,
+        tc.BadgeCount,
+        tc.TotalViews,
+        tc.TotalQuestions,
+        tc.TotalAnswers,
+        ROW_NUMBER() OVER (ORDER BY tc.TotalAnswers DESC, tc.TotalViews DESC) AS UserRank
+    FROM 
+        TopContributors tc
+)
+SELECT 
+    fr.UserId,
+    fr.DisplayName,
+    fr.BadgeCount,
+    fr.TotalViews,
+    fr.TotalQuestions,
+    fr.TotalAnswers,
+    fr.UserRank,
+    COALESCE(p.Title, 'No Accepted Answer') AS AcceptedAnswer
+FROM 
+    FinalResults fr
+LEFT JOIN 
+    RankedPosts p ON fr.UserId = p.OwnerUserId AND p.Rank = 1
+WHERE 
+    fr.UserRank <= 10
+ORDER BY 
+    fr.UserRank;

@@ -1,0 +1,60 @@
+
+WITH CustomerAddressDetails AS (
+    SELECT 
+        ca.ca_address_sk,
+        CONCAT_WS(', ', 
+            TRIM(ca.ca_street_number), 
+            TRIM(ca.ca_street_name), 
+            TRIM(ca.ca_street_type), 
+            TRIM(ca.ca_suite_number), 
+            TRIM(ca.ca_city), 
+            TRIM(ca.ca_state), 
+            TRIM(ca.ca_zip), 
+            TRIM(ca.ca_country)) AS full_address,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+DateDetails AS (
+    SELECT 
+        d.d_date_sk,
+        FORMAT(d.d_date, 'yyyy-MM-dd') AS formatted_date,
+        d.d_day_name,
+        d.d_weekend
+    FROM 
+        date_dim d
+    WHERE 
+        d.d_year = 2023
+),
+WebSalesDetails AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    cad.full_address,
+    cad.cd_gender,
+    cad.cd_marital_status,
+    dd.formatted_date,
+    dd.d_day_name,
+    dd.d_weekend,
+    wd.total_quantity_sold,
+    wd.total_profit
+FROM 
+    CustomerAddressDetails cad
+JOIN 
+    DateDetails dd ON cad.ca_address_sk % (SELECT COUNT(*) FROM customer_address) = dd.d_date_sk % (SELECT COUNT(*) FROM date_dim)
+JOIN 
+    WebSalesDetails wd ON cad.ca_address_sk % (SELECT COUNT(*) FROM customer_address) = wd.ws_item_sk % (SELECT COUNT(*) FROM web_sales)
+ORDER BY 
+    cad.full_address, dd.formatted_date DESC;

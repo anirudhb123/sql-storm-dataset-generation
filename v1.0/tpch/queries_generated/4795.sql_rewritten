@@ -1,0 +1,55 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierPerformance AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 500
+    GROUP BY c.c_custkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    r.r_name,
+    COALESCE(cp.order_count, 0) AS customer_order_count,
+    COALESCE(sp.total_available, 0) AS supplier_total_available,
+    ROUND(sp.avg_supply_cost, 2) AS supplier_avg_cost,
+    DATE_PART('year', o.o_orderdate) AS order_year,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_lineitem_price
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN RankedOrders o ON l.l_orderkey = o.o_orderkey
+INNER JOIN nation n ON n.n_nationkey = (
+    SELECT np.n_nationkey 
+    FROM supplier s1 
+    JOIN nation np ON s1.s_nationkey = np.n_nationkey 
+    WHERE s1.s_suppkey = l.l_suppkey
+)
+INNER JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN CustomerOrders cp ON cp.c_custkey = o.o_custkey
+LEFT JOIN SupplierPerformance sp ON sp.s_suppkey = l.l_suppkey
+WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+AND l.l_shipdate <= o.o_orderdate
+GROUP BY p.p_partkey, p.p_name, r.r_name, cp.order_count, sp.total_available, sp.avg_supply_cost, o.o_orderdate
+HAVING COUNT(l.l_orderkey) > 5
+ORDER BY order_year, p.p_partkey;

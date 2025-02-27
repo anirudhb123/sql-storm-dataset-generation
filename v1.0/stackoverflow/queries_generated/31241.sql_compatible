@@ -1,0 +1,88 @@
+
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        t.Count,
+        t.ExcerptPostId,
+        t.WikiPostId,
+        t.IsModeratorOnly,
+        t.IsRequired,
+        1 AS Level
+    FROM Tags t
+    WHERE t.IsModeratorOnly = 0  
+    UNION ALL
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        t.ExcerptPostId,
+        t.WikiPostId,
+        t.IsModeratorOnly,
+        t.IsRequired,
+        rh.Level + 1
+    FROM Tags t
+    JOIN RecursiveTagHierarchy rh ON t.Count > rh.Count  
+    WHERE rh.Level < 5  
+),
+TagAnalytics AS (
+    SELECT 
+        r.TagId,
+        r.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePostCount,
+        AVG(COALESCE(p.Score, 0)) AS AveragePostScore,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore
+    FROM RecursiveTagHierarchy r
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || r.TagName || '%' 
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    GROUP BY r.TagId, r.TagName
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM Users u
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    WHERE u.Reputation > 100 
+    GROUP BY u.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.PostHistoryTypeId,
+        COUNT(ph.Id) AS HistoryActionCount,
+        MAX(ph.CreationDate) AS LastActionDate,
+        STRING_AGG(DISTINCT ph.UserDisplayName, ', ') AS ActedByUsers
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON ph.PostId = p.Id
+    GROUP BY p.Id, ph.PostHistoryTypeId
+)
+SELECT 
+    ta.TagId,
+    ta.TagName,
+    ta.PostCount,
+    ta.PositiveScorePostCount,
+    ta.AveragePostScore,
+    ue.UserId,
+    ue.DisplayName,
+    ue.VoteCount,
+    ue.UpVoteCount,
+    ue.DownVoteCount,
+    phs.PostId,
+    phs.PostHistoryTypeId,
+    phs.HistoryActionCount,
+    phs.LastActionDate,
+    phs.ActedByUsers
+FROM TagAnalytics ta
+JOIN UserEngagement ue ON ue.VoteCount > 10
+LEFT JOIN PostHistoryStats phs ON phs.PostId IN (
+    SELECT p.Id 
+    FROM Posts p 
+    WHERE p.Tags LIKE '%' || ta.TagName || '%'
+)
+WHERE ta.PostCount > 5
+ORDER BY ta.PostCount DESC, ue.VoteCount DESC;

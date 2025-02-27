@@ -1,0 +1,32 @@
+WITH supplier_stats AS (
+    SELECT s.n_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.n_nationkey
+),
+order_stats AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_revenue
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+customer_info AS (
+    SELECT c.c_custkey, c.c_nationkey, c.c_name, cs.order_count, cs.total_revenue
+    FROM customer c
+    LEFT JOIN order_stats cs ON c.c_custkey = cs.o_custkey
+),
+nation_summary AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(s.s_suppkey) AS supplier_count, SUM(ss.total_supply_value) AS total_supply_value
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN supplier_stats ss ON n.n_nationkey = ss.n_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT ns.n_name,
+       ns.supplier_count,
+       ns.total_supply_value,
+       ci.order_count,
+       ci.total_revenue
+FROM nation_summary ns
+LEFT JOIN customer_info ci ON ns.n_nationkey = ci.c_nationkey
+WHERE ns.total_supply_value > 100000
+ORDER BY ns.total_supply_value DESC, ci.total_revenue DESC;

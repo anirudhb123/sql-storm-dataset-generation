@@ -1,0 +1,72 @@
+
+WITH RECURSIVE Date_Hierarchy AS (
+    SELECT d_date_sk, d_date, d_year, d_month_seq, 1 AS level
+    FROM date_dim
+    WHERE d_year >= 2020
+    UNION ALL
+    SELECT d.d_date_sk, d.d_date, d.d_year, d.d_month_seq, level + 1
+    FROM date_dim d
+    JOIN Date_Hierarchy dh ON d.d_date_sk = dh.d_date_sk + 1
+    WHERE d.d_year >= 2020
+),
+Customer_Info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_first_name) AS rn
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+Sales_Summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        COUNT(DISTINCT ws_item_sk) AS unique_items_sold
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+Retail_Performance AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.ca_city,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        ss.order_count,
+        ss.unique_items_sold,
+        SUM(CASE WHEN dh.d_year = 2022 THEN ss.total_sales ELSE 0 END) AS total_sales_2022,
+        COUNT(DISTINCT CASE WHEN dh.d_year = 2022 THEN ss.ws_order_number ELSE NULL END) AS order_count_2022
+    FROM Customer_Info ci
+    LEFT JOIN Sales_Summary ss ON ci.c_customer_sk = ss.ws_bill_customer_sk
+    JOIN Date_Hierarchy dh ON dh.d_date_sk = ss.ws_sold_date_sk
+    WHERE ci.rn <= 10 
+    GROUP BY 
+        ci.c_customer_sk, 
+        ci.c_first_name, 
+        ci.c_last_name, 
+        ci.ca_city, 
+        ss.order_count, 
+        ss.unique_items_sold
+)
+SELECT 
+    rp.c_customer_sk,
+    rp.c_first_name,
+    rp.c_last_name,
+    rp.ca_city,
+    rp.total_sales,
+    rp.order_count,
+    rp.unique_items_sold,
+    CASE 
+        WHEN rp.total_sales_2022 > 1000 THEN 'High Value'
+        WHEN rp.total_sales_2022 BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM Retail_Performance rp
+ORDER BY rp.total_sales DESC
+FETCH FIRST 50 ROWS ONLY;

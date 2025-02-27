@@ -1,0 +1,4 @@
+SELECT min(k.keyword) AS movie_keyword, min(n.name) AS actor_name, min(t.title) AS hero_movie
+FROM cast_info AS ci, keyword AS k, movie_keyword AS mk, name AS n, title AS t
+WHERE k.id = mk.keyword_id AND t.id = mk.movie_id AND t.id = ci.movie_id AND ci.movie_id = mk.movie_id AND n.id = ci.person_id
+AND n.name > 'Graf, Steve' AND n.md5sum IN ('28b9a1223c0f5a2f8fd7bbcbabdb3e54', '49a33806f334e6874bc3ac346e20e018', '59c78b76825e159f1d250f25a0a5570d', '6839bb57bfc0e2c091c2d04c83ec4eba', '6c8a80f0aaefac620adcdda9d9b92056', 'd91c857886197119567b8c5e7ff3fda0', 'ef884c885838dd99eed78eb83fd8f2aa') AND n.gender < 'm';

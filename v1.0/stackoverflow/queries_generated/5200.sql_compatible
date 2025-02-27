@@ -1,0 +1,61 @@
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopPosts AS (
+    SELECT 
+        p.Id,
+        p.OwnerUserId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+PostWithBadges AS (
+    SELECT 
+        tp.Id AS PostId,
+        tp.OwnerUserId,
+        tp.Title,
+        tp.Score,
+        ub.BadgeCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges
+    FROM 
+        TopPosts tp
+    JOIN 
+        UserBadges ub ON tp.OwnerUserId = ub.UserId
+    WHERE 
+        tp.PostRank <= 3
+)
+SELECT 
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+FROM 
+    PostWithBadges p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+WHERE 
+    u.Reputation > 5000
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC;

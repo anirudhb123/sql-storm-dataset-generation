@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC, p.ViewCount DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) -- Posts from the last year
+), TagStats AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS TagName,
+        COUNT(*) AS TotalPosts,
+        SUM(ViewCount) AS TotalViews,
+        AVG(Score) AS AvgScore
+    FROM 
+        RankedPosts
+    GROUP BY 
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><'))
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), PostUserStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS TotalQuestions,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(p.Score) AS TotalScore,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Body,
+    ps.Tags,
+    ts.TagName,
+    ts.TotalPosts,
+    ts.TotalViews,
+    ts.AvgScore,
+    u.DisplayName AS UserDisplayName,
+    ub.TotalBadges,
+    pus.TotalQuestions,
+    pus.AcceptedAnswers,
+    pus.TotalScore,
+    pus.LastPostDate
+FROM 
+    RankedPosts ps
+JOIN 
+    TagStats ts ON ps.Tags LIKE CONCAT('%<', ts.TagName, '>%')
+JOIN 
+    Users u ON ps.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+JOIN 
+    PostUserStats pus ON ps.OwnerUserId = pus.OwnerUserId
+WHERE 
+    ps.rn = 1 -- Get the top post for each tag
+ORDER BY 
+    ts.TotalPosts DESC, 
+    ts.AvgScore DESC, 
+    pus.TotalScore DESC;

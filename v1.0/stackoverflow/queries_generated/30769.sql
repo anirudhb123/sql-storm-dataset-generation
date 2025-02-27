@@ -1,0 +1,96 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.LastActivityDate,
+        1 AS Level,
+        CAST(p.Title AS varchar(300)) AS Path
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    
+    UNION ALL
+    
+    SELECT 
+        a.Id,
+        a.Title,
+        a.OwnerUserId,
+        a.CreationDate,
+        a.LastActivityDate,
+        r.Level + 1,
+        CAST(r.Path + ' -> ' + a.Title AS varchar(300))
+    FROM 
+        Posts a
+    JOIN 
+        RecursiveCTE r ON a.ParentId = r.Id
+    WHERE 
+        a.PostTypeId = 2 -- Only answers
+),
+AggregatedStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS TotalScore,
+        COUNT(DISTINCT ph.Id) AS PostEditCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RankedStats AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalScore,
+        PostEditCount,
+        BadgeCount,
+        CommentCount,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC, PostEditCount DESC) AS UserRank
+    FROM 
+        AggregatedStats
+)
+SELECT 
+    r.UserId,
+    r.DisplayName,
+    r.TotalScore,
+    r.PostEditCount,
+    r.BadgeCount,
+    r.CommentCount,
+    r.UserRank,
+    COALESCE(NULLIF(r.PostEditCount, 0), 1) AS AdjustedPostEditCount,
+    CASE 
+        WHEN r.BadgeCount > 5 THEN 'Veteran' 
+        ELSE 'Novice' 
+    END AS UserLevel,
+    ARRAY_AGG(DISTINCT t.TagName) AS AssociatedTags
+FROM 
+    RankedStats r
+LEFT JOIN 
+    Posts p ON r.UserId = p.OwnerUserId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            TRIM(SUBSTRING(tag FROM '[^<>, ]+')) AS TagName
+        FROM 
+            unnest(string_to_array(p.Tags, '<>')) AS tag
+    ) t ON true
+GROUP BY 
+    r.UserId, r.DisplayName, r.TotalScore, r.PostEditCount, r.BadgeCount, r.CommentCount, r.UserRank
+HAVING 
+    r.UserRank <= 10
+ORDER BY 
+    r.UserRank;
+

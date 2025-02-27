@@ -1,0 +1,44 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey,
+           CAST(NULL AS DECIMAL(12, 2)) AS total_discount,
+           CAST(NULL AS DECIMAL(12, 2)) AS total_tax,
+           1 AS level
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    
+    UNION ALL 
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey,
+           l.l_discount AS total_discount,
+           l.l_tax AS total_tax,
+           h.level + 1
+    FROM lineitem l
+    JOIN OrderHierarchy h ON l.l_orderkey = h.o_orderkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    SUM(oh.o_totalprice) AS total_order_value,
+    COUNT(oh.o_orderkey) AS total_orders,
+    AVG(oh.total_discount) AS average_discount,
+    AVG(oh.total_tax) AS average_tax,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM 
+    OrderHierarchy oh
+JOIN 
+    customer c ON oh.o_custkey = c.c_custkey
+LEFT JOIN 
+    lineitem l ON l.l_orderkey = oh.o_orderkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey = l.l_partkey
+LEFT JOIN 
+    part p ON p.p_partkey = ps.ps_partkey
+WHERE 
+    c.c_acctbal > 1000.00
+    AND oh.o_orderdate IS NOT NULL
+    AND (oh.total_discount IS NOT NULL OR oh.total_tax IS NOT NULL)
+GROUP BY 
+    c.c_name
+HAVING 
+    COUNT(oh.o_orderkey) > 5
+ORDER BY 
+    total_order_value DESC;

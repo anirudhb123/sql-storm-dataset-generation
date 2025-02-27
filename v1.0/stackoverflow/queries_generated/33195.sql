@@ -1,0 +1,88 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        MAX(p.CreationDate) AS RecentActivity
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id AND v.VoteTypeId IN (8, 9) -- count only BountyStart and BountyClose
+    WHERE 
+        p.Score > 0 
+    GROUP BY 
+        p.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(b.Class) AS BadgeGrade
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+PostUserDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        u.Id AS UserId,
+        u.DisplayName,
+        ub.BadgeCount,
+        ub.BadgeGrade
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        UserBadges ub ON ub.UserId = u.Id
+)
+SELECT 
+    psh.PostId,
+    psh.Title,
+    ps.CommentCount,
+    ps.TotalBounty,
+    pu.DisplayName AS OwnerName,
+    pu.BadgeCount,
+    pu.BadgeGrade,
+    CASE 
+        WHEN ps.RecentActivity < NOW() - INTERVAL '1 MONTH' THEN 'Inactive' 
+        ELSE 'Active'
+    END AS ActivityStatus
+FROM 
+    RecursivePostHierarchy psh
+LEFT JOIN 
+    PostStats ps ON ps.Id = psh.PostId
+JOIN 
+    PostUserDetails pu ON pu.PostId = psh.PostId
+WHERE 
+    psh.Level = 0
+ORDER BY 
+    ps.TotalBounty DESC, ps.CommentCount DESC, psh.Title ASC
+LIMIT 100;

@@ -1,0 +1,87 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        a.title AS movie_title,
+        a.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        a.production_year >= 2000
+),
+
+CastInfoWithRoles AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.role_id) AS role_count,
+        ARRAY_AGG(DISTINCT rt.role) AS roles
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.person_id
+),
+
+MovieKeywordCount AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+
+TopMovies AS (
+    SELECT 
+        mh.movie_id, 
+        mh.movie_title,
+        mh.production_year,
+        COALESCE(mkc.keyword_count, 0) AS keyword_count,
+        COALESCE(cir.role_count, 0) AS role_count,
+        mh.depth,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COALESCE(mkc.keyword_count, 0) DESC, COALESCE(cir.role_count, 0) DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        MovieKeywordCount mkc ON mh.movie_id = mkc.movie_id
+    LEFT JOIN 
+        CastInfoWithRoles cir ON mh.movie_id = cir.person_id
+)
+
+SELECT 
+    tm.movie_id,
+    tm.movie_title,
+    tm.production_year,
+    ARRAY_TO_STRING(tm.roles, ', ') AS roles,
+    tm.keyword_count,
+    tm.role_count,
+    CASE 
+        WHEN tm.rank <= 10 THEN 'Top 10 Movie'
+        ELSE 'Below Top 10'
+    END AS rank_description
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.production_year DESC, 
+    tm.keyword_count DESC;

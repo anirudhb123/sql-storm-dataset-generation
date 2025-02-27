@@ -1,0 +1,50 @@
+WITH MovieRoles AS (
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+ActorTitles AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        rank() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+)
+SELECT 
+    m.actor_name,
+    m.movie_title,
+    m.production_year,
+    ARRAY_AGG(DISTINCT r.role) AS roles_per_movie,
+    MAX(m.title_rank) AS max_title_rank,
+    COUNT(DISTINCT ci.movie_id) AS total_movies,
+    CASE 
+        WHEN COUNT(DISTINCT ci.movie_id) > 5 THEN 'Prolific Actor'
+        ELSE 'Newcomer' 
+    END AS actor_status
+FROM 
+    ActorTitles m
+LEFT JOIN 
+    MovieRoles r ON m.movie_title = r.movie_id
+LEFT JOIN 
+    cast_info ci ON r.movie_id = ci.movie_id 
+WHERE 
+    m.production_year >= 2000
+    AND m.actor_name IS NOT NULL
+GROUP BY 
+    m.actor_name, m.movie_title, m.production_year
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 1
+ORDER BY 
+    m.production_year DESC, MAX(m.title_rank);

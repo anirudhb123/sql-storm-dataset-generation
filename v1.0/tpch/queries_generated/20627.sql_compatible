@@ -1,0 +1,49 @@
+
+WITH RECURSIVE OrderCounts AS (
+    SELECT o_custkey, COUNT(o_orderkey) AS total_orders
+    FROM orders
+    GROUP BY o_custkey
+),
+EligibleSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+DiscountedSales AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS discounted_price
+    FROM lineitem l
+    WHERE l.l_discount BETWEEN 0.1 AND 0.2
+    GROUP BY l.l_orderkey
+),
+OrderStatusSummary AS (
+    SELECT o.o_orderstatus, COUNT(*) AS order_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderstatus
+),
+RegionNation AS (
+    SELECT r.r_name AS region_name, n.n_name AS nation_name
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+)
+SELECT 
+    p.p_name, 
+    s.s_name AS supplier_name, 
+    rc.region_name, 
+    SUM(COALESCE(ds.discounted_price, 0)) AS total_discounted_sales,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders_count,
+    ROW_NUMBER() OVER (PARTITION BY rc.region_name ORDER BY SUM(COALESCE(ds.discounted_price, 0)) DESC) AS rn
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN DiscountedSales ds ON l.l_orderkey = ds.l_orderkey
+JOIN OrderCounts oc ON s.s_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = oc.o_custkey)
+LEFT JOIN RegionNation rc ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+WHERE p.p_retailprice IS NOT NULL AND p.p_size BETWEEN 20 AND 50
+GROUP BY p.p_name, s.s_name, rc.region_name
+HAVING SUM(COALESCE(ds.discounted_price, 0)) > 1000
+ORDER BY rc.region_name, total_discounted_sales DESC
+LIMIT 10;

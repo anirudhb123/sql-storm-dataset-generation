@@ -1,0 +1,56 @@
+
+WITH RECURSIVE AddressPaths AS (
+    SELECT ca_address_sk, ca_address_id, ca_street_name, ca_city, 1 AS Level
+    FROM customer_address
+    WHERE ca_state = 'CA'
+    UNION ALL
+    SELECT ca.ca_address_sk, ca.ca_address_id, ca.ca_street_name, ca.ca_city, ap.Level + 1
+    FROM customer_address ca
+    JOIN AddressPaths ap ON ca.ca_address_id = ap.ca_address_id
+    WHERE ap.Level < 5
+),
+SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_net_paid) AS TotalSales,
+        SUM(ws.ws_net_profit) AS TotalProfit
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.ws_sold_date_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        (CASE WHEN cd.cd_dep_count IS NULL THEN 0 ELSE cd.cd_dep_count END) AS total_dependents,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SummarySales AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.cd_gender,
+        ci.total_dependents,
+        sd.TotalSales,
+        sd.TotalProfit
+    FROM CustomerInfo ci
+    LEFT JOIN SalesData sd ON ci.c_customer_sk = sd.ws_bill_customer_sk
+    WHERE ci.rn <= 10
+)
+SELECT 
+    ap.ca_address_id,
+    ap.ca_street_name,
+    cs.cd_gender,
+    cs.total_dependents,
+    COALESCE(cs.TotalSales, 0) AS TotalSales,
+    COALESCE(cs.TotalProfit, 0) AS TotalProfit
+FROM AddressPaths ap
+LEFT JOIN SummarySales cs ON ap.ca_address_sk = cs.c_customer_sk
+WHERE ap.Level = 3
+ORDER BY TotalSales DESC, TotalProfit DESC
+LIMIT 100;

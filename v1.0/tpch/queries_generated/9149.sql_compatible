@@ -1,0 +1,45 @@
+
+WITH SupplierOrders AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+        AND l.l_shipdate < o.o_orderdate + INTERVAL '15 DAY'
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+), RankedSuppliers AS (
+    SELECT 
+        s.*,
+        RANK() OVER (PARTITION BY s.nation_name ORDER BY s.total_revenue DESC) AS rank_within_nation
+    FROM 
+        SupplierOrders s
+)
+SELECT 
+    r.nation_name,
+    rs.s_name,
+    rs.order_count,
+    rs.total_revenue
+FROM 
+    RankedSuppliers rs
+JOIN 
+    (SELECT DISTINCT n_name FROM nation) r ON rs.nation_name = r.n_name
+WHERE 
+    rs.rank_within_nation <= 3
+ORDER BY 
+    r.nation_name, rs.total_revenue DESC;

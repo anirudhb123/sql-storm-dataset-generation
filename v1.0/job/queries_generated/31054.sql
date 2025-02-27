@@ -1,0 +1,80 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1 AS level
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+ActorWithRole AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        ci.movie_id,
+        rt.role AS role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        rt.role IS NOT NULL
+),
+
+GenreCount AS (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT ki.id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    GROUP BY 
+        movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(ac.actor_name, 'No Cast') AS actor_name,
+    COALESCE(ac.role, 'No Role') AS role,
+    gc.keyword_count,
+    mh.level,
+    CASE 
+        WHEN gc.keyword_count > 5 THEN 'High'
+        WHEN gc.keyword_count BETWEEN 2 AND 5 THEN 'Medium'
+        ELSE 'Low'
+    END AS keyword_level
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    ActorWithRole ac ON mh.movie_id = ac.movie_id
+LEFT JOIN 
+    GenreCount gc ON mh.movie_id = gc.movie_id
+WHERE 
+    mh.production_year >= 2000
+ORDER BY 
+    mh.production_year DESC, mh.title ASC, ac.role_order
+LIMIT 
+    100;

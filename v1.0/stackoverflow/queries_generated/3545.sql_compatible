@@ -1,0 +1,82 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(DISTINCT p.Id) DESC) AS ActivityRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+), 
+BadgeCounts AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS TotalBadges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+), 
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(c.FavoriteCount, 0) AS FavoriteCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount,
+            SUM(COALESCE(FavoriteCount, 0)) AS FavoriteCount
+        FROM 
+            Comments c
+        LEFT JOIN 
+            (SELECT PostId, COUNT(*) AS FavoriteCount FROM Votes WHERE VoteTypeId = 5 GROUP BY PostId) AS f ON c.PostId = f.PostId
+        GROUP BY 
+            PostId
+    ) AS c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+)
+SELECT 
+    ua.DisplayName,
+    ua.PostCount,
+    ua.PositivePostCount,
+    ba.TotalBadges,
+    pd.Title,
+    pd.CreationDate,
+    pd.CommentCount,
+    pd.FavoriteCount,
+    pd.VoteCount,
+    CAST((ua.Upvotes - ua.Downvotes) AS VARCHAR) || ' (' || CAST(ua.Upvotes AS VARCHAR) || '/' || CAST(ua.Downvotes AS VARCHAR) || ')' AS VoteSummary
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    BadgeCounts ba ON ua.UserId = ba.UserId
+LEFT JOIN 
+    PostDetails pd ON ua.UserId = pd.OwnerUserId
+WHERE 
+    ua.ActivityRank = 1
+ORDER BY 
+    ua.Reputation DESC, ua.PostCount DESC
+FETCH FIRST 10 ROWS ONLY;

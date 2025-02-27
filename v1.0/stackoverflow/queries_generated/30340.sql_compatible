@@ -1,0 +1,74 @@
+
+WITH RecursiveUserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM Users u
+),
+PostMetrics AS (
+    SELECT
+        p.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AvgScore
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+ClosedPostReasons AS (
+    SELECT
+        ph.PostId,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes cr ON CAST(ph.Comment AS int) = cr.Id
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+),
+UserPostStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        us.TotalPosts,
+        us.TotalQuestions,
+        us.TotalAnswers,
+        COALESCE(cpr.CloseReasons, 'No close reasons') AS CloseReasons
+    FROM Users u
+    LEFT JOIN PostMetrics us ON u.Id = us.OwnerUserId
+    LEFT JOIN ClosedPostReasons cpr ON u.Id = cpr.PostId
+)
+SELECT
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.Views,
+    COALESCE(u.TotalPosts, 0) AS TotalPosts,
+    COALESCE(u.TotalQuestions, 0) AS TotalQuestions,
+    COALESCE(u.TotalAnswers, 0) AS TotalAnswers,
+    u.CloseReasons,
+    CASE 
+        WHEN u.Reputation > 1000 THEN 'High Reputation'
+        WHEN u.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationCategory,
+    ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+FROM UserPostStats u
+WHERE u.TotalPosts IS NOT NULL OR u.CloseReasons IS NOT NULL
+GROUP BY
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.Views,
+    u.TotalPosts,
+    u.TotalQuestions,
+    u.TotalAnswers,
+    u.CloseReasons
+ORDER BY UserRank
+FETCH FIRST 50 ROWS ONLY;

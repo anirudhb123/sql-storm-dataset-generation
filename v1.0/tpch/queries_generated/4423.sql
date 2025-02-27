@@ -1,0 +1,83 @@
+WITH SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(*) AS num_items
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2023-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    n.n_name,
+    COALESCE(cp.cust_orders, 0) AS customer_orders,
+    COALESCE(sp.unique_parts, 0) AS supplied_parts,
+    COALESCE(sp.total_avail_qty, 0) AS total_available_quantity,
+    COALESCE( ld.net_revenue, 0) AS total_revenue
+FROM 
+    nation n
+LEFT JOIN 
+    (SELECT 
+        c.c_nationkey, 
+        SUM(co.total_orders) AS cust_orders 
+     FROM 
+        CustomerOrders co 
+     JOIN 
+        customer c ON co.c_custkey = c.c_custkey 
+     GROUP BY 
+        c.c_nationkey) cp ON n.n_nationkey = cp.c_nationkey
+LEFT JOIN 
+    (SELECT 
+        ps.s_nationkey, 
+        SUM(sp.unique_parts) AS unique_parts, 
+        SUM(sp.total_avail_qty) AS total_avail_qty 
+     FROM 
+        SupplierParts sp 
+     JOIN 
+        supplier s ON sp.s_suppkey = s.s_suppkey 
+     GROUP BY 
+        s.s_nationkey) sp ON n.n_nationkey = sp.s_nationkey
+LEFT JOIN 
+    (SELECT 
+        l.l_orderkey, 
+        ld.net_revenue 
+     FROM 
+        LineItemDetails ld 
+     GROUP BY 
+        l.l_orderkey) ld ON ld.l_orderkey = any(SELECT l.l_orderkey FROM lineitem l)
+WHERE 
+    n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE '%Asia%')
+ORDER BY 
+    total_revenue DESC NULLS LAST;

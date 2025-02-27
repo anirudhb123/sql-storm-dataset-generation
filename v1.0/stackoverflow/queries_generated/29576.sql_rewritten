@@ -1,0 +1,59 @@
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostsCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Users.Reputation) AS AvgUserReputation
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    GROUP BY 
+        Tags.TagName
+), 
+UserBadges AS (
+    SELECT 
+        Users.Id AS UserId,
+        COUNT(Badges.Id) AS BadgesCount
+    FROM 
+        Users
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.Id
+), 
+PostHistories AS (
+    SELECT 
+        PostHistory.PostId,
+        COUNT(PostHistory.Id) AS EditCount,
+        MIN(PostHistory.CreationDate) AS FirstEditDate
+    FROM 
+        PostHistory
+    WHERE 
+        PostHistory.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        PostHistory.PostId
+)
+
+SELECT 
+    ts.TagName,
+    ts.PostsCount,
+    ts.QuestionsCount,
+    ts.AnswersCount,
+    ts.TotalViews,
+    ts.AvgUserReputation,
+    ub.BadgesCount,
+    ph.EditCount,
+    ph.FirstEditDate
+FROM 
+    TagStats ts
+JOIN 
+    PostHistories ph ON ph.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE '%' || ts.TagName || '%')
+JOIN 
+    Users ub ON ub.Reputation > ts.AvgUserReputation
+ORDER BY 
+    ts.PostsCount DESC, ts.TotalViews DESC;

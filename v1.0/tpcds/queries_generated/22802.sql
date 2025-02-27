@@ -1,0 +1,81 @@
+
+WITH CustomerRank AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+HighValueReturns AS (
+    SELECT 
+        sr.sr_customer_sk,
+        COUNT(sr.sr_ticket_number) AS total_returns,
+        SUM(sr.sr_return_amount) AS total_return_amount,
+        MAX(sr.sr_return_quantity) AS max_return_quantity
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_customer_sk
+    HAVING 
+        SUM(sr.sr_return_amount) > 1000
+),
+InferiorProducts AS (
+    SELECT 
+        ws.ws_item_sk,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price < (SELECT AVG(ws_sales_price) FROM web_sales)
+    GROUP BY 
+        ws.ws_item_sk
+),
+StateIncomeBand AS (
+    SELECT 
+        ca.ca_state,
+        ib.ib_income_band_sk,
+        MAX(ib.ib_upper_bound) AS max_income
+    FROM 
+        customer_address ca
+    JOIN 
+        household_demographics hd ON ca.ca_address_sk = hd.hd_demo_sk
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        ca.ca_country = 'USA'
+    GROUP BY 
+        ca.ca_state, ib.ib_income_band_sk
+)
+SELECT 
+    cr.c_first_name,
+    cr.c_last_name,
+    cr.cd_gender,
+    COUNT(DISTINCT hvr.sr_ticket_number) AS unique_returns,
+    ip.avg_sales_price,
+    sib.max_income
+FROM 
+    CustomerRank cr
+LEFT JOIN 
+    HighValueReturns hvr ON cr.c_customer_sk = hvr.sr_customer_sk
+LEFT JOIN 
+    InferiorProducts ip ON cr.c_customer_sk = ip.ws_item_sk
+INNER JOIN 
+    StateIncomeBand sib ON cr.c_current_addr_sk = sib.ib_income_band_sk
+WHERE 
+    cr.purchase_rank <= 10
+  AND 
+    (cr.cd_marital_status IS NOT NULL OR cr.cd_gender = 'F')
+  AND 
+    (hvr.total_returns IS NULL OR hvr.total_returns > 5)
+GROUP BY 
+    cr.c_first_name, cr.c_last_name, cr.cd_gender, ip.avg_sales_price, sib.max_income
+ORDER BY 
+    unique_returns DESC, max_income DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,93 @@
+
+WITH RecentActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000 
+        AND u.LastAccessDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY 
+        u.Id, 
+        u.DisplayName, 
+        u.Reputation
+),
+TopBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    JOIN 
+        RecentActiveUsers rau ON b.UserId = rau.UserId
+    GROUP BY 
+        b.UserId
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(STRING_TO_ARRAY(p.Tags, ',')::text[])
+    GROUP BY 
+        t.TagName
+),
+UserInteractions AS (
+    SELECT 
+        rau.UserId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS HistoryChangeCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS ClosureReopenCount
+    FROM 
+        RecentActiveUsers rau
+    LEFT JOIN 
+        Comments c ON rau.UserId = c.UserId
+    LEFT JOIN 
+        PostHistory ph ON rau.UserId = ph.UserId
+    GROUP BY 
+        rau.UserId
+)
+SELECT 
+    rau.UserId,
+    rau.DisplayName,
+    rau.Reputation,
+    rau.PostCount,
+    rau.QuestionCount,
+    rau.AnswerCount,
+    tb.BadgeCount,
+    tb.BadgeNames,
+    ui.CommentCount,
+    ui.HistoryChangeCount,
+    ui.ClosureReopenCount,
+    ts.TagName,
+    ts.TotalPosts,
+    ts.TotalQuestions,
+    ts.TotalAnswers
+FROM 
+    RecentActiveUsers rau
+JOIN 
+    TopBadges tb ON rau.UserId = tb.UserId
+JOIN 
+    UserInteractions ui ON rau.UserId = ui.UserId
+LEFT JOIN 
+    TagStatistics ts ON ts.TotalPosts > 0
+ORDER BY 
+    rau.Reputation DESC, 
+    rau.PostCount DESC, 
+    tb.BadgeCount DESC;

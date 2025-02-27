@@ -1,0 +1,76 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.ViewCount IS NULL THEN 0 ELSE P.ViewCount END) AS TotalViews,
+        AVG(CASE WHEN P.Score IS NULL THEN 0 ELSE P.Score END) AS AvgScore,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    WHERE U.Reputation > 1000
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+
+TagAnalytics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(C.commentCount, 0)) AS TotalComments,
+        MAX(CASE WHEN P.ClosedDate IS NOT NULL THEN 1 ELSE 0 END) AS HasClosedPosts,
+        COUNT(DISTINCT PH.UserId) AS EditorsCount
+    FROM Tags T
+    LEFT JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    LEFT JOIN Comments C ON C.PostId = P.Id
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId = 24 -- Suggested Edits
+    GROUP BY T.TagName
+),
+
+UserPostDetails AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY P.CreationDate DESC) AS PostRowNum
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    WHERE P.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+
+RankedUsers AS (
+    SELECT 
+        Us.UserId,
+        Us.DisplayName,
+        Us.Reputation,
+        Us.PostCount,
+        Us.TotalViews,
+        Us.AvgScore,
+        Us.LastPostDate,
+        RANK() OVER (ORDER BY Us.Reputation DESC, Us.PostCount DESC) AS ReputationRank
+    FROM UserStatistics Us
+)
+
+SELECT 
+    R.DisplayName,
+    R.Reputation,
+    R.PostCount,
+    R.TotalViews,
+    R.AvgScore,
+    R.LastPostDate,
+    T.TagName,
+    T.PostCount AS TagPostCount,
+    T.TotalComments,
+    T.HasClosedPosts,
+    T.EditorsCount,
+    UPD.PostId AS RecentPostId,
+    UPD.Title AS RecentPostTitle,
+    UPD.Body AS RecentPostBody
+FROM RankedUsers R
+LEFT JOIN TagAnalytics T ON R.PostCount > 0
+LEFT JOIN UserPostDetails UPD ON R.UserId = UPD.UserId AND UPD.PostRowNum = 1
+WHERE R.ReputationRank <= 50
+ORDER BY R.Reputation DESC, T.TagPostCount DESC, R.LastPostDate DESC;

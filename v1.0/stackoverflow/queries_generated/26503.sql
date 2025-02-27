@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId  -- for answers
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'  -- only consider posts from the last year
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, u.DisplayName, p.PostTypeId
+),
+PostTags AS (
+    SELECT 
+        p.PostId,
+        UNNEST(string_to_array(p.Tags, '><')) AS Tag
+    FROM 
+        RankedPosts p
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.AnswerCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    STRING_AGG(pt.Tag, ', ') AS Tags
+FROM 
+    RankedPosts rp
+JOIN 
+    PostTags pt ON rp.PostId = pt.PostId
+WHERE 
+    rp.Rank <= 5   -- include only top 5 posts per post type
+GROUP BY 
+    rp.PostId, rp.Title, rp.Body, rp.OwnerDisplayName, rp.CommentCount, rp.AnswerCount, rp.UpVotes, rp.DownVotes
+ORDER BY 
+    rp.CreationDate DESC;

@@ -1,0 +1,58 @@
+
+WITH AddressComponents AS (
+    SELECT 
+        ca_address_sk,
+        TRIM(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS full_address,
+        SUBSTRING_INDEX(ca_city, ' ', 1) AS city_prefix,
+        CONCAT(UPPER(LEFT(ca_state, 1)), LOWER(SUBSTRING(ca_state, 2))) AS formatted_state,
+        CONCAT(TRIM(ca_zip), '-', TRIM(ca_country)) AS zip_country
+    FROM customer_address
+),
+Demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        LOWER(cd_education_status) AS education
+    FROM customer_demographics
+),
+DateComponents AS (
+    SELECT 
+        d_date_sk,
+        DATE_FORMAT(d_date, '%Y-%m-%d') AS formatted_date,
+        d_day_name,
+        d_month_seq,
+        d_year
+    FROM date_dim
+),
+CustomerInfo AS (
+    SELECT 
+        c_customer_sk,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        c_email_address,
+        DENSE_RANK() OVER (PARTITION BY c_birth_year ORDER BY c_birth_month, c_birth_day) AS birth_rank
+    FROM customer
+)
+SELECT 
+    a.full_address,
+    a.city_prefix,
+    a.formatted_state,
+    a.zip_country,
+    d.education,
+    d.cd_gender,
+    d.cd_marital_status,
+    c.full_name,
+    c.c_email_address,
+    dc.formatted_date,
+    dc.d_day_name,
+    dc.d_month_seq,
+    dc.d_year,
+    c.birth_rank
+FROM AddressComponents a
+JOIN Demographics d ON d.cd_demo_sk = (SELECT c_current_hdemo_sk FROM customer WHERE c_customer_sk = a.ca_address_sk)
+JOIN CustomerInfo c ON c.c_customer_sk = a.ca_address_sk
+JOIN DateComponents dc ON dc.d_date_sk = (SELECT c_first_sales_date_sk FROM customer WHERE c_customer_sk = a.ca_address_sk)
+WHERE a.city_prefix LIKE 'A%' 
+      AND d.cd_gender = 'M' 
+      AND dc.d_year > 2020
+ORDER BY dc.d_year DESC, c.full_name ASC;

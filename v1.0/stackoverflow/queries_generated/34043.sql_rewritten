@@ -1,0 +1,80 @@
+WITH RecursivePostTree AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        0 AS Depth
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        rpt.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostTree rpt ON p.ParentId = rpt.PostId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5, 6, 24) 
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+RankedPosts AS (
+    SELECT 
+        ps.*,
+        RANK() OVER (ORDER BY UpVotes - DownVotes DESC, CreationDate ASC) AS PopularityRank
+    FROM 
+        PostStatistics ps
+)
+
+SELECT 
+    rpt.PostId,
+    rpt.Title AS PostTitle,
+    rpt.Depth,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.CommentCount,
+    rp.BadgeCount,
+    rp.EditCount,
+    rp.PopularityRank,
+    CASE 
+        WHEN rp.UpVotes > rp.DownVotes THEN 'Positive' 
+        WHEN rp.DownVotes > rp.UpVotes THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS VoteSentiment
+FROM 
+    RecursivePostTree rpt
+LEFT JOIN 
+    RankedPosts rp ON rpt.PostId = rp.PostId
+WHERE 
+    rpt.Depth <= 2 
+ORDER BY 
+    rpt.Depth, rp.PopularityRank;

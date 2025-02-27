@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        title.title AS movie_title,
+        title.production_year,
+        1 AS level
+    FROM 
+        aka_title AS title
+    JOIN 
+        movie_link AS ml ON title.id = ml.movie_id
+    WHERE 
+        ml.linked_movie_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mh.movie_title,
+        mh.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    p.name AS person_name,
+    GROUP_CONCAT(DISTINCT CONCAT(kar.name, ' (', kh.keyword, ')')) AS known_for,
+    COUNT(mh.movie_id) AS movie_count,
+    COALESCE(SUM(m_info.info LIKE '%Award%'), 0) AS awards_count,
+    AVG(CASE WHEN MONTHS_BETWEEN(CURRENT_DATE, title.production_year) < 120 THEN title.production_year END) AS avg_recent_movie_year,
+    STRING_AGG(DISTINCT co.name ORDER BY co.name) AS company_names
+FROM 
+    cast_info AS ci
+JOIN 
+    aka_name AS p ON ci.person_id = p.person_id
+JOIN 
+    aka_title AS title ON ci.movie_id = title.id
+LEFT JOIN 
+    movie_info AS m_info ON title.id = m_info.movie_id AND m_info.info_type_id = (SELECT id FROM info_type WHERE info = 'Award')
+LEFT JOIN 
+    movie_companies AS mc ON title.id = mc.movie_id
+LEFT JOIN 
+    company_name AS co ON mc.company_id = co.id
+LEFT JOIN 
+    movie_keyword AS mk ON title.id = mk.movie_id
+LEFT JOIN 
+    keyword AS kh ON mk.keyword_id = kh.id
+LEFT JOIN 
+    MovieHierarchy AS mh ON title.id = mh.movie_id
+WHERE 
+    title.production_year >= 2000 
+AND 
+    p.name IS NOT NULL
+GROUP BY 
+    p.name
+HAVING 
+    COUNT(mh.movie_id) > 2
+ORDER BY 
+    awards_count DESC, 
+    movie_count DESC, 
+    person_name;

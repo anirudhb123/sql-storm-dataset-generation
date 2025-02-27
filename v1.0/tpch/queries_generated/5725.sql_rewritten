@@ -1,0 +1,76 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' AND
+        o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SuppliersForParts AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_suppkey
+),
+PartRevenue AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY 
+        l.l_partkey
+),
+FinalReport AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        pr.l_partkey,
+        pr.total_revenue,
+        sf.total_available,
+        co.total_spent,
+        co.order_count
+    FROM 
+        CustomerOrders co
+    JOIN 
+        PartRevenue pr ON pr.l_partkey IN (
+            SELECT ps.ps_partkey
+            FROM SuppliersForParts sf
+            WHERE sf.total_available > 100
+        )
+    JOIN 
+        SuppliersForParts sf ON sf.ps_partkey = pr.l_partkey
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    SUM(f.total_revenue) AS total_revenue,
+    AVG(f.total_spent) AS avg_spent,
+    COUNT(DISTINCT f.l_partkey) AS unique_parts
+FROM 
+    FinalReport f
+JOIN 
+    customer c ON f.c_custkey = c.c_custkey
+GROUP BY 
+    c.c_custkey, c.c_name
+ORDER BY 
+    total_revenue DESC, avg_spent DESC
+LIMIT 10;

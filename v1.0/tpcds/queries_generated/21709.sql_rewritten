@@ -1,0 +1,70 @@
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_current_price,
+        1 AS hierarchy_level,
+        i.i_item_desc
+    FROM item i
+    WHERE i.i_rec_start_date <= cast('2002-10-01' as date) AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > cast('2002-10-01' as date))
+
+    UNION ALL
+
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_current_price * 0.9 AS i_current_price,  
+        h.hierarchy_level + 1,
+        CONCAT(h.i_item_desc, ' >> ', i.i_item_desc) 
+    FROM ItemHierarchy h
+    JOIN item i ON i.i_brand_id = h.i_item_sk  
+    WHERE i.i_rec_start_date <= cast('2002-10-01' as date) AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > cast('2002-10-01' as date))
+    AND h.hierarchy_level < 5  
+),
+
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk AS item_id,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales
+    FROM web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2001) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+    GROUP BY ws.ws_item_sk
+),
+
+CombinedData AS (
+    SELECT 
+        ih.i_item_id,
+        ih.i_item_desc,
+        ih.i_current_price,
+        sd.total_sold,
+        sd.total_sales,
+        COALESCE(sd.total_sold, 0) - LAG(COALESCE(sd.total_sold, 0), 1, 0) OVER (ORDER BY ih.i_item_id) AS sold_change
+    FROM ItemHierarchy ih
+    LEFT JOIN SalesData sd ON ih.i_item_sk = sd.item_id
+)
+
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    hd.hd_income_band_sk,
+    COUNT(DISTINCT cd.c_customer_id) AS customer_count,
+    SUM(CASE WHEN cd.c_birth_month = 12 THEN 1 ELSE 0 END) AS dec_birthdays,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+    SUM(CASE WHEN c.c_preferred_cust_flag = 'Y' THEN 1 ELSE 0 END) AS preferred_customer_count,
+    COUNT(DISTINCT CASE WHEN ch.hierarchy_level > 3 THEN ih.i_item_id END) AS complex_hierarchy_items
+FROM customer cd
+JOIN customer_demographics cdem ON cd.c_current_cdemo_sk = cdem.cd_demo_sk
+LEFT JOIN household_demographics hd ON hd.hd_demo_sk = cdem.cd_demo_sk
+LEFT JOIN CombinedData ih ON hd.hd_income_band_sk = (CASE 
+    WHEN ih.i_current_price < 50 THEN 1 
+    WHEN ih.i_current_price BETWEEN 50 AND 100 THEN 2 
+    ELSE 3 END)  
+WHERE cd.c_birth_year IS NOT NULL
+GROUP BY cd.c_first_name, cd.c_last_name, hd.hd_income_band_sk
+HAVING SUM(sd.total_sold) > 10 OR COUNT(DISTINCT cd.c_customer_id) > 5
+ORDER BY customer_count DESC
+LIMIT 10
+OFFSET 0;

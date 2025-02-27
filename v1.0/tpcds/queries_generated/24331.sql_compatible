@@ -1,0 +1,63 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ss_item_sk,
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_profit) DESC) AS sales_rank
+    FROM store_sales
+    WHERE ss_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ss_item_sk, ss_store_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        CASE 
+            WHEN cd.cd_credit_rating IS NULL THEN 'Unknown'
+            ELSE cd.cd_credit_rating 
+        END AS credit_status
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+TopStores AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM warehouse w
+    JOIN web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY w.w_warehouse_id
+    ORDER BY total_net_profit DESC
+    LIMIT 10
+)
+SELECT 
+    c.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ts.w_warehouse_id AS top_warehouse,
+    ROW_NUMBER() OVER (ORDER BY COALESCE(s.total_net_profit, 0) DESC) AS customer_rank,
+    COALESCE(s.total_net_profit, 0) AS store_profit,
+    CASE 
+        WHEN ts.total_net_profit <= 0 THEN 'No Profit'
+        ELSE 'Profitable'
+    END AS profit_status
+FROM CustomerDemographics cd
+JOIN customer c ON cd.c_customer_sk = c.c_customer_sk
+LEFT JOIN SalesCTE s ON c.c_customer_sk = s.ss_customer_sk 
+JOIN TopStores ts ON s.ss_store_sk = ts.w_warehouse_id
+WHERE cd.cd_purchase_estimate BETWEEN (SELECT MIN(ib_lower_bound) FROM income_band) AND (SELECT MAX(ib_upper_bound) FROM income_band)
+  AND EXISTS (
+    SELECT 1 
+    FROM store_returns sr 
+    WHERE sr.sr_customer_sk = c.c_customer_sk 
+      AND sr.sr_return_quantity > (
+          SELECT AVG(sr_return_quantity) FROM store_returns WHERE sr_returned_date_sk = sr.sr_returned_date_sk
+      )
+  )
+ORDER BY COALESCE(s.total_net_profit, 0) DESC NULLS LAST;

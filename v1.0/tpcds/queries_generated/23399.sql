@@ -1,0 +1,71 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk, 
+        sr_returned_date_sk, 
+        sr_return_quantity, 
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) as rn
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+),
+SalesSummary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales,
+        SUM(ws_sales_price) AS total_revenue
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+        AND ws_sold_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws_item_sk
+),
+CustomerActivity AS (
+    SELECT 
+        c_customer_id, 
+        COUNT(DISTINCT ws_order_number) AS num_orders,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_spent
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c_customer_id
+),
+TopItems AS (
+    SELECT 
+        i_item_id, 
+        i_product_name, 
+        i_current_price, 
+        COALESCE(total_sales, 0) AS total_sales,
+        COALESCE(total_revenue, 0) AS total_revenue,
+        RANK() OVER (ORDER BY COALESCE(total_revenue, 0) DESC) as revenue_rank
+    FROM 
+        item 
+    LEFT JOIN 
+        SalesSummary ON item.i_item_sk = SalesSummary.ws_item_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ti.i_item_id,
+    ti.i_product_name,
+    ti.total_sales,
+    ti.total_revenue,
+    ra.sr_returned_date_sk,
+    ra.sr_return_quantity
+FROM 
+    CustomerActivity ci
+CROSS JOIN 
+    TopItems ti
+LEFT JOIN 
+    RankedReturns ra ON ti.i_item_id = ra.sr_item_sk AND ra.rn = 1
+WHERE 
+    (ci.num_orders > 5 OR ci.total_spent > 500)
+    AND (ti.total_revenue > 1000 OR ti.total_sales > 50)
+    AND (ti.total_revenue IS NOT NULL)
+ORDER BY 
+    ci.total_quantity DESC, ti.total_revenue DESC;

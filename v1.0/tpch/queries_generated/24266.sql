@@ -1,0 +1,47 @@
+WITH RECURSIVE nation_data AS (
+    SELECT n_nationkey, n_name, n_regionkey, n_comment, 0 AS level
+    FROM nation
+    WHERE n_nationkey = (SELECT MIN(n_nationkey) FROM nation)
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, n.n_comment, nd.level + 1
+    FROM nation n
+    JOIN nation_data nd ON n.n_nationkey = (nd.n_nationkey + 1) % (SELECT COUNT(*) FROM nation)
+),
+part_supplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_availqty) AS total_availqty, 
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_revenue,
+           CASE WHEN SUM(o.o_totalprice) IS NULL THEN 'No Orders' 
+                WHEN SUM(o.o_totalprice) > 100000 THEN 'High Roller' 
+                ELSE 'Regular' END AS customer_status
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+lineitem_stats AS (
+    SELECT l.l_orderkey, COUNT(*) AS item_count, AVG(l.l_extendedprice) AS avg_price
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+final_data AS (
+    SELECT n.n_name, ps.total_availqty, co.total_revenue, ls.item_count,
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY co.total_revenue DESC) AS rank
+    FROM nation_data n
+    LEFT JOIN part_supplier ps ON ps.ps_partkey = (CAST(n.n_nationkey AS INTEGER) % (SELECT MAX(p_partkey) FROM part) + 1)
+    LEFT JOIN customer_orders co ON co.c_custkey = (SELECT MIN(c_custkey) FROM customer)
+    FULL OUTER JOIN lineitem_stats ls ON ls.l_orderkey = (SELECT MIN(l_orderkey) FROM lineitem WHERE l_orderkey IS NOT NULL)
+)
+SELECT DISTINCT n_name, total_availqty, COALESCE(total_revenue, 0) AS total_revenue, item_count,
+       CASE WHEN total_availqty IS NULL AND total_revenue IS NULL THEN 'Unattributed' 
+            ELSE 'Attributed' END AS attribution_status,
+       CASE WHEN rank = 1 THEN 'Top Nation' ELSE 'Other Nation' END AS national_status
+FROM final_data
+WHERE (total_availqty IS NOT NULL AND total_availqty > 0) 
+   OR (total_revenue IS NOT NULL AND total_revenue < 50000)
+   OR (item_count IS NOT NULL AND item_count > 5)
+ORDER BY total_revenue DESC NULLS LAST, n_name ASC;
